@@ -1,0 +1,86 @@
+(*** 顶层结构 ***)
+CompilationUnit = { ModuleDecl | ImportDecl } { TopLevelDecl } ;
+
+ModuleDecl = 'mod' Path ';' ;
+ImportDecl = 'import' Path [ 'as' IDENT ] ';' ;
+Path = IDENT { '::' IDENT } ;
+
+TopLevelDecl = FunctionDecl | StructDecl | EnumDecl | InterfaceDecl | ImplDecl | TypeAlias ;
+
+(*** 函数 ***)
+FunctionDecl = [ 'pub' ] 'fn' IDENT [ GenericParams ] '(' [ ParamList ] ')' '->' Type
+               ( FunctionBody | '=' Expr ';' ) ;
+
+GenericParams = '[' IDENT { ',' IDENT } ']' ;
+ParamList = Param { ',' Param } ;
+Param = IDENT ':' Type ;
+
+FunctionBody = Block ;
+
+(*** 类型 ***)
+Type = BaseType | PathType | RefType | OptionalType | TupleType | ArrayType | SliceType ;
+BaseType = 'int' | 'float' | 'bool' | 'string' | 'char' | 'unit' | 'never' | 'Self' ;
+PathType = Path ;
+RefType = '&' [ 'mut' ] Type ;
+OptionalType = Type '?' ;
+TupleType = '(' [ Type { ',' Type } ] ')' ;
+ArrayType = '[' Type ';' INT_LIT ']' ;
+SliceType = '[' Type ']' ;
+
+(*** 表达式 ***)
+Expr = Assignment | LogicalOr ;
+Assignment = [ Let | Move ] LogicalOr [ '=' LogicalOr ] ;
+Let = 'let' [ 'mut' ] IDENT [ ':' Type ] '=' ;
+Move = 'move' IDENT '=' ;
+
+LogicalOr = LogicalAnd { '||' LogicalAnd } ;
+LogicalAnd = Equality { '&&' Equality } ;
+Equality = Comparison { ('==' | '!=') Comparison } ;
+Comparison = Addition { ('<' | '>' | '<=' | '>=') Addition } ;
+Addition = Multiplication { ('+' | '-') Multiplication } ;
+Multiplication = Unary { ('*' | '/' | '%') Unary } ;
+Unary = ('-' | '!' | '&' | '&mut') Unary | CallOrField ;
+CallOrField = Primary { '(' [ ArgList ] ')' | '.' IDENT | '[' Expr ']' | '?' } ;
+Primary = Literal | IDENT | '(' Expr ')' | 'move' Primary | BlockExpr | IfExpr | MatchExpr | LoopExpr | ForExpr | GoExpr | AwaitExpr | UnsafeExpr ;
+
+ArgList = Expr { ',' Expr } ;
+
+Literal = INT_LIT | FLOAT_LIT | STRING_LIT | CHAR_LIT | BOOL_LIT | UNIT_LIT | 'None' | 'Some' '(' Expr ')' ;
+BlockExpr = Block ;
+IfExpr = 'if' Expr Block [ 'else' ( Block | IfExpr ) ] ;
+MatchExpr = 'match' Expr '{' MatchArm { ',' MatchArm } '}' ;
+MatchArm = Pattern '=>' Expr ;
+Pattern = Literal | IDENT | TuplePattern | StructPattern | EnumPattern | '_' ;
+TuplePattern = '(' [ Pattern { ',' Pattern } ] ')' ;
+StructPattern = Path '{' [ FieldPattern { ',' FieldPattern } ] '}' ;
+FieldPattern = IDENT '=' Pattern ;
+EnumPattern = Path '(' [ Pattern { ',' Pattern } ] ')' | Path ;
+
+LoopExpr = 'loop' Block ;
+ForExpr = 'for' IDENT 'in' Expr Block ;
+
+GoExpr = 'go' Expr ;
+AwaitExpr = 'await' Expr ;
+UnsafeExpr = 'unsafe' Block ;
+
+Block = '{' { Statement } '}' ;
+Statement = Expr ';' | LetStmt | ReturnStmt | BreakStmt | ContinueStmt ;
+
+LetStmt = 'let' [ 'mut' ] IDENT [ ':' Type ] '=' Expr ';' ;
+ReturnStmt = 'return' [ Expr ] ';' ;
+BreakStmt = 'break' ';' ;
+ContinueStmt = 'continue' ';' ;
+
+(*** 复合类型声明 ***)
+StructDecl = [ 'pub' ] 'struct' IDENT GenericParams? '{' { FieldDecl ',' } '}' ;
+FieldDecl = IDENT ':' Type ;
+
+EnumDecl = [ 'pub' ] 'enum' IDENT GenericParams? '{' Variant { ',' Variant } '}' ;
+Variant = IDENT [ '(' Type { ',' Type } ')' ] ;
+
+InterfaceDecl = [ 'pub' ] 'interface' IDENT GenericParams? '{' { InterfaceMethod ';' } '}' ;
+InterfaceMethod = 'fn' IDENT '(' [ ParamList ] ')' '->' Type ;
+
+ImplDecl = 'impl' [ GenericParams? ] Path [ 'for' Path ] '{' { FunctionDecl } '}' ;
+
+TypeAlias = 'type' IDENT '=' Type ';' ;

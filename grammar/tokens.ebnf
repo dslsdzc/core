@@ -1,0 +1,43 @@
+(* 空白与注释 *)
+WHITESPACE = { ' ' | '\t' | '\n' | '\r' | COMMENT | BLOCK_COMMENT } ;
+COMMENT = '//' { CHAR - '\n' } '\n' ;
+BLOCK_COMMENT = '/*' { CHAR | BLOCK_COMMENT } '*/' ;
+
+(* 标识符与关键字 *)
+IDENT = LETTER { LETTER | DIGIT | '_' | '\'' } ;
+LETTER = 'a'..'z' | 'A'..'Z' | '_' ;
+DIGIT = '0'..'9' ;
+
+KEYWORD =
+    'fn' | 'struct' | 'enum' | 'interface' | 'impl' | 'type' | 'let' | 'mut' | 'move' | 'go' | 'await' | 'flow' |
+    'if' | 'else' | 'match' | 'for' | 'loop' | 'return' | 'break' | 'continue' |
+    'pub' | 'mod' | 'import' | 'as' | 'unsafe' |
+    'requires' | 'ensures' | 'old' | 'result' | 'self' | 'Self' |
+    'true' | 'false' | 'unit' | 'None' | 'Some' ;
+
+(* 字面量 *)
+INT_LIT = DIGIT { DIGIT | '_' } [ INT_SUFFIX ] ;
+INT_SUFFIX = 'i8' | 'i16' | 'i32' | 'i64' | 'u8' | 'u16' | 'u32' | 'u64' ;
+FLOAT_LIT = DIGIT { DIGIT | '_' } '.' DIGIT { DIGIT | '_' } [ 'f32' | 'f64' ] ;
+STRING_LIT = '"' { ESCAPED_CHAR } '"' ;
+CHAR_LIT = '\'' ( ESCAPED_CHAR | CHAR - '\'' ) '\'' ;
+ESCAPED_CHAR = '\' ( 'n' | 't' | 'r' | '0' | '\' | '"' | '\'' ) | '\x' HEX HEX ;
+HEX = DIGIT | 'a'..'f' | 'A'..'F' ;
+
+BOOL_LIT = 'true' | 'false' ;
+UNIT_LIT = '()' ;
+
+(* 符号 *)
+OPERATOR = '+' | '-' | '*' | '/' | '%' | '==' | '!=' | '<' | '>' | '<=' | '>=' | '&&' | '||' | '!' ;
+ASSIGN = '=' ;
+ARROW = '->' ;
+PATH_SEP = '::' ;
+DOT = '.' ;
+COMMA = ',' ;
+SEMI = ';' ;
+COLON = ':' ;
+LPAREN = '(' ; RPAREN = ')' ;
+LBRACK = '[' ; RBRACK = ']' ;
+LBRACE = '{' ; RBRACE = '}' ;
+AMPERSAND = '&' ;
+QUESTION = '?' ;

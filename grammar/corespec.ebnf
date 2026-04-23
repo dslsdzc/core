@@ -1,0 +1,40 @@
+(*** 顶层 ***)
+SpecCompilationUnit = { ImportDecl } { SpecItem } ;
+
+SpecItem = FunctionSpec | TypeInvariant | AbstractContract | LoopInvariant | BoundsCondition ;
+
+(*** 函数规约 ***)
+FunctionSpec = 'fn' Path '(' [ ParamSpecList ] ')' '->' Type
+               [ RequiresClause ]
+               [ EnsuresClause ]
+               ';' ;
+
+ParamSpecList = ParamSpec { ',' ParamSpec } ;
+ParamSpec = IDENT ':' Type ;
+
+RequiresClause = 'requires' SpecExpr ';' ;
+EnsuresClause = 'ensures' SpecExpr ';' ;
+
+(*** 规约表达式 ***)
+SpecExpr = SpecLogicalOr ;
+SpecLogicalOr = SpecLogicalAnd { '||' SpecLogicalAnd } ;
+SpecLogicalAnd = SpecEquality { '&&' SpecEquality } ;
+SpecEquality = SpecComparison { ('==' | '!=') SpecComparison } ;
+SpecComparison = SpecAddition { ('<' | '>' | '<=' | '>=') SpecAddition } ;
+SpecAddition = SpecMultiplication { ('+' | '-') SpecMultiplication } ;
+SpecMultiplication = SpecUnary { ('*' | '/' | '%') SpecUnary } ;
+SpecUnary = ('-' | '!') SpecUnary | SpecCallOrField ;
+SpecCallOrField = SpecPrimary { '(' [ SpecArgList ] ')' | '.' IDENT | '?' } ;
+SpecPrimary = Literal | 'result' | 'old' '(' IDENT ')' | IDENT | '(' SpecExpr ')' | SpecQuantifier ;
+SpecArgList = SpecExpr { ',' SpecExpr } ;
+
+(* 量词 *)
+SpecQuantifier = 'forall' '(' QuantVar ':' Type ')' '=>' SpecExpr
+               | 'exists' '(' QuantVar ':' Type ')' '=>' SpecExpr ;
+QuantVar = IDENT ;
+
+(*** 类型规约 ***)
+TypeInvariant = 'type' Path 'invariant' SpecExpr ';' ;
+AbstractContract = 'interface' Path '{' { RequiresClause EnsuresClause } '}' ;
+LoopInvariant = 'loop' 'invariant' SpecExpr ';' ;
+BoundsCondition = 'loop' 'variant' SpecExpr ';' ;
