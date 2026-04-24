@@ -1,0 +1,73 @@
+{
+    name: ["Core", ".core", ".corespec"],
+
+    comment: {startsWith: "//"},
+    comment: {startsWith: "/*", endsWith: "*/"},
+
+    bracketPairs: ["{}", "[]", "()"],
+
+    styles: [
+        "funcname", #1E6F94, #FFCB6B,
+        "operator", #205060, #508090
+    ],
+
+    defines: [
+        "string-double": {
+            start: {match: /"/},
+            end: {match: /(?m)"|$/},
+            style: "string"
+        },
+
+        "numbers": {
+            number: "10|16|F|E|_",
+            iSuffixes: "i8|i16|i32|i64|u8|u16|u32|u64",
+            fSuffixes: "f32|f64"
+        },
+
+        "keywords": [
+            {match: keywordsToRegex(
+                "fn struct enum interface impl type"
+                "let mut move go await flow"
+                "if else match for loop return break continue"
+                "pub mod import as unsafe"
+                "requires ensures yield select recv in"
+            ), 0: "keyword"},
+            {match: keywordsToRegex("old result self Self true false unit None Some"), 0: "keyword"}
+        ],
+
+        "types": [
+            {match: keywordsToRegex("int float bool string char unit never"), 0: "type"},
+            {match: /\b[A-Z]\w*\b/, 0: "type"}
+        ],
+
+        "operators": [
+            {match: /->|=>|::|&&|\|\||==|!=|<=|>=|[+\-*\/%=<>!&|?]/, 0: "operator"}
+        ],
+
+        "funcdef": {
+            match: /\bfn\s+(\w+)/,
+            1: "funcname"
+        },
+
+        "method-call": {
+            match: /\.(\w+)/,
+            1: "funcname"
+        },
+
+        "ident-variable": {
+            match: /\b[a-z_]\w*\b/,
+            0: "variable"
+        }
+    ],
+
+    contains: [
+        {include: "string-double"},
+        {include: "numbers"},
+        {include: "keywords"},
+        {include: "types"},
+        {include: "funcdef"},
+        {include: "method-call"},
+        {include: "operators"},
+        {include: "ident-variable"}
+    ]
+}
