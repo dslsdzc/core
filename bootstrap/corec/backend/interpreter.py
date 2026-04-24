@@ -15,7 +15,10 @@ class Interpreter:
 
     def run_func(self, func):
         block = func.entry
-        while block is not None:
+        max_steps = 50000
+        step = 0
+        while block is not None and step < max_steps:
+            step += 1
             result = self.exec_block(block)
             if isinstance(result, tuple):
                 block_name, ret_val = result
@@ -26,6 +29,8 @@ class Interpreter:
                     raise RuntimeError(f"Block {block_name} not found")
             else:
                 break
+        if step >= max_steps:
+            raise RuntimeError("Maximum execution steps exceeded")
         return None
 
     def exec_block(self, block):
@@ -33,8 +38,7 @@ class Interpreter:
             if isinstance(instr, ConstInstr):
                 val = instr.value
                 if isinstance(val, str):
-                    if val.isdigit():
-                        val = int(val)
+                    if val.isdigit(): val = int(val)
                     else:
                         try: val = float(val)
                         except: pass
@@ -45,8 +49,7 @@ class Interpreter:
                 if instr.op == '+': res = left + right
                 elif instr.op == '-': res = left - right
                 elif instr.op == '*': res = left * right
-                elif instr.op == '/':
-                    res = left // right if isinstance(left, int) else left / right
+                elif instr.op == '/': res = left // right if isinstance(left, int) else left / right
                 elif instr.op == '>': res = left > right
                 elif instr.op == '<': res = left < right
                 elif instr.op == '>=': res = left >= right
@@ -66,12 +69,10 @@ class Interpreter:
                     self.vars[id(p)] = arg_vals[i]
                 result = self.run_func(func)
                 self.vars = old_vars
-                if instr.dest:
-                    self.vars[id(instr.dest)] = result
+                if instr.dest: self.vars[id(instr.dest)] = result
             elif isinstance(instr, AllocInstr):
-                self.vars[id(instr.dest)] = None  # 占位
+                self.vars[id(instr.dest)] = None
             elif isinstance(instr, AllocStructInstr):
-                # 创建字典表示结构体对象
                 self.vars[id(instr.dest)] = {}
             elif isinstance(instr, StoreInstr):
                 self.vars[id(instr.addr)] = self.vars[id(instr.value)]
@@ -80,37 +81,38 @@ class Interpreter:
             elif isinstance(instr, LoadFieldInstr):
                 obj = self.vars[id(instr.struct)]
                 if isinstance(obj, dict):
-                    self.vars[id(instr.dest)] = obj.get(instr.field, None)
+                    self.vars[id(instr.dest)] = obj.get(instr.field)
                 else:
-                    raise RuntimeError(f"LoadField on non-struct object")
+                    raise RuntimeError(f"LoadField on non-struct: {obj}")
             elif isinstance(instr, StoreFieldInstr):
                 obj = self.vars[id(instr.struct)]
                 if isinstance(obj, dict):
                     obj[instr.field] = self.vars[id(instr.value)]
                 else:
-                    raise RuntimeError(f"StoreField on non-struct object")
+                    raise RuntimeError(f"StoreField on non-struct")
+            elif isinstance(instr, MakeEnumInstr):
+                args = [self.vars[id(a)] for a in instr.args]
+                enum_obj = {'__variant': instr.variant}
+                for i, arg in enumerate(args):
+                    enum_obj[f'_field_{i}'] = arg
+                self.vars[id(instr.dest)] = enum_obj
             elif isinstance(instr, BranchInstr):
                 cond = self.vars[id(instr.cond)]
-                if cond:
-                    return (instr.true_label, None)
-                else:
-                    return (instr.false_label, None)
+                if cond: return (instr.true_label, None)
+                else: return (instr.false_label, None)
             elif isinstance(instr, JumpInstr):
                 return (instr.label, None)
             elif isinstance(instr, ReturnInstr):
-                if instr.value:
-                    return (None, self.vars[id(instr.value)])
+                if instr.value: return (None, self.vars[id(instr.value)])
                 return (None, None)
-            elif isinstance(instr, LabelInstr):
-                pass
+            elif isinstance(instr, LabelInstr): pass
             else:
                 raise NotImplementedError(f"instr {type(instr)}")
         return None
 
     def _to_value(self, v):
         if isinstance(v, str):
-            if v.isdigit():
-                return int(v)
+            if v.isdigit(): return int(v)
             try: return float(v)
             except: pass
         return v

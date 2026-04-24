@@ -1,263 +1,111 @@
 from dataclasses import dataclass, field
 from typing import Optional, List
 
-# ─── 类型 ───
 @dataclass
-class Type:
-    pass
-
+class Type: pass
 @dataclass
-class BaseType(Type):
-    name: str
-
+class BaseType(Type): name: str
 @dataclass
-class PathType(Type):
-    path: List[str]
-
+class PathType(Type): path: List[str]
 @dataclass
-class RefType(Type):
-    mutable: bool
-    inner: Type
-
+class RefType(Type): mutable: bool; inner: Type
 @dataclass
-class OptionalType(Type):
-    inner: Type
-
+class OptionalType(Type): inner: Type
 @dataclass
-class TupleType(Type):
-    types: List[Type]
-
+class TupleType(Type): types: List[Type]
 @dataclass
-class ArrayType(Type):
-    inner: Type
-    size: int
-
+class ArrayType(Type): inner: Type; size: int
 @dataclass
-class SliceType(Type):
-    inner: Type
-
-# ─── 表达式 ───
+class SliceType(Type): inner: Type
 @dataclass
-class Expr:
-    pass
-
+class Expr: pass
 @dataclass
-class Literal(Expr):
-    value: object
-    kind: str
-
+class Literal(Expr): value: object; kind: str
 @dataclass
-class Ident(Expr):
-    name: str
-
+class Ident(Expr): name: str
 @dataclass
-class BinaryOp(Expr):
-    left: Expr
-    op: str
-    right: Expr
-
+class BinaryOp(Expr): left: Expr; op: str; right: Expr
 @dataclass
-class UnaryOp(Expr):
-    op: str
-    operand: Expr
-
+class UnaryOp(Expr): op: str; operand: Expr
 @dataclass
-class Call(Expr):
-    func: Expr
-    args: List[Expr]
-
+class Call(Expr): func: Expr; args: List[Expr]
 @dataclass
-class FieldAccess(Expr):
-    object: Expr
-    field: str
-
+class FieldAccess(Expr): object: Expr; field: str
 @dataclass
-class Index(Expr):
-    object: Expr
-    index: Expr
-
+class Index(Expr): object: Expr; index: Expr
 @dataclass
-class Try(Expr):
-    expr: Expr
-
+class Try(Expr): expr: Expr
 @dataclass
-class StructLit(Expr):
-    path: List[str]
-    fields: List[tuple]  # (name, Expr)
-
+class StructLit(Expr): path: List[str]; fields: List[tuple]
 @dataclass
-class Block(Expr):
-    stmts: List['Stmt']
-    expr: Optional[Expr] = None
-
+class EnumConstructor(Expr): path: List[str]; args: List[Expr]
 @dataclass
-class If(Expr):
-    cond: Expr
-    then_branch: Block
-    else_branch: Optional[Expr] = None
-
+class Block(Expr): stmts: List['Stmt']; expr: Optional[Expr] = None
 @dataclass
-class Match(Expr):
-    expr: Expr
-    arms: List['MatchArm']
-
+class If(Expr): cond: Expr; then_branch: Block; else_branch: Optional[Expr] = None
 @dataclass
-class MatchArm:
-    pattern: 'Pattern'
-    body: Expr
-
+class Match(Expr): expr: Expr; arms: List['MatchArm']
 @dataclass
-class Loop(Expr):
-    block: Block
-
+class MatchArm: pattern: 'Pattern'; body: Expr
 @dataclass
-class For(Expr):
-    var: str
-    iter: Expr
-    block: Block
-
+class Loop(Expr): block: Block
 @dataclass
-class Go(Expr):
-    expr: Expr
-
+class For(Expr): var: str; iter: Expr; block: Block
 @dataclass
-class Await(Expr):
-    expr: Expr
-
+class Go(Expr): expr: Expr
 @dataclass
-class Unsafe(Expr):
-    block: Block
-
+class Await(Expr): expr: Expr
 @dataclass
-class Flow(Expr):
-    block: Block
-
+class Unsafe(Expr): block: Block
 @dataclass
-class Yield(Expr):
-    expr: Expr
-
+class Flow(Expr): block: Block
 @dataclass
-class Recv(Expr):
-    expr: Expr
-
-# ─── 模式 ───
+class Yield(Expr): expr: Expr
 @dataclass
-class Pattern:
-    pass
-
+class Recv(Expr): expr: Expr
 @dataclass
-class Wildcard(Pattern):
-    pass
-
+class Pattern: pass
 @dataclass
-class LiteralPattern(Pattern):
-    lit: Literal
-
+class Wildcard(Pattern): pass
 @dataclass
-class IdentPattern(Pattern):
-    name: str
-
+class LiteralPattern(Pattern): lit: Literal
 @dataclass
-class TuplePattern(Pattern):
-    patterns: List[Pattern]
-
+class IdentPattern(Pattern): name: str
 @dataclass
-class StructPattern(Pattern):
-    path: List[str]
-    fields: List[tuple]
-
+class TuplePattern(Pattern): patterns: List[Pattern]
 @dataclass
-class EnumPattern(Pattern):
-    path: List[str]
-    args: Optional[List[Pattern]] = None
-
-# ─── 语句 ───
+class StructPattern(Pattern): path: List[str]; fields: List[tuple]
 @dataclass
-class Stmt:
-    pass
-
+class EnumPattern(Pattern): path: List[str]; args: Optional[List[Pattern]] = None
 @dataclass
-class LetStmt(Stmt):
-    mutable: bool
-    name: str
-    type_: Optional[Type] = None
-    value: Optional[Expr] = None
-
+class Stmt: pass
 @dataclass
-class ExprStmt(Stmt):
-    expr: Expr
-
+class LetStmt(Stmt): mutable: bool; name: str; type_: Optional[Type] = None; value: Optional[Expr] = None
 @dataclass
-class ReturnStmt(Stmt):
-    value: Optional[Expr] = None
-
+class ExprStmt(Stmt): expr: Expr
 @dataclass
-class BreakStmt(Stmt):
-    pass
-
+class ReturnStmt(Stmt): value: Optional[Expr] = None
 @dataclass
-class ContinueStmt(Stmt):
-    pass
-
-# ─── 顶层声明 ───
+class BreakStmt(Stmt): pass
 @dataclass
-class Decl:
-    pass
-
+class ContinueStmt(Stmt): pass
 @dataclass
-class FunctionDecl(Decl):
-    public: bool
-    name: str
-    generics: List[str]
-    params: List[tuple]
-    return_type: Type
-    body: Optional[Expr] = None
-    specs: Optional[List] = None
-
+class Decl: pass
 @dataclass
-class StructDecl(Decl):
-    public: bool
-    name: str
-    generics: List[str]
-    fields: List[tuple]
-
+class FunctionDecl(Decl): public: bool; name: str; generics: List[str]; params: List[tuple]; return_type: Type; body: Optional[Expr] = None; specs: Optional[List] = None
 @dataclass
-class EnumDecl(Decl):
-    public: bool
-    name: str
-    generics: List[str]
-    variants: List[tuple]
-
+class StructDecl(Decl): public: bool; name: str; generics: List[str]; fields: List[tuple]
 @dataclass
-class InterfaceDecl(Decl):
-    public: bool
-    name: str
-    generics: List[str]
-    methods: List[tuple]
-
+class EnumDecl(Decl): public: bool; name: str; generics: List[str]; variants: List[tuple]
 @dataclass
-class ImplDecl(Decl):
-    generics: List[str]
-    trait: Optional[List[str]]
-    for_type: List[str]
-    methods: List[FunctionDecl]
-
+class InterfaceDecl(Decl): public: bool; name: str; generics: List[str]; methods: List[tuple]
 @dataclass
-class TypeAliasDecl(Decl):
-    name: str
-    type_: Type
-
+class ImplDecl(Decl): generics: List[str]; trait: Optional[List[str]]; for_type: List[str]; methods: List[FunctionDecl]
 @dataclass
-class ModuleDecl(Decl):
-    path: List[str]
-
+class TypeAliasDecl(Decl): name: str; type_: Type
 @dataclass
-class ImportDecl(Decl):
-    path: List[str]
-    alias: Optional[str] = None
-
+class ModuleDecl(Decl): path: List[str]
 @dataclass
-class CompilationUnit:
-    modules: List[ModuleDecl]
-    imports: List[ImportDecl]
-    declarations: List[Decl]
+class ImportDecl(Decl): path: List[str]; alias: Optional[str] = None
+@dataclass
+class CompilationUnit: modules: List[ModuleDecl]; imports: List[ImportDecl]; declarations: List[Decl]

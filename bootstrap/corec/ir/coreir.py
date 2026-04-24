@@ -44,6 +44,7 @@ class AllocInstr(Instr):
 class AllocStructInstr(Instr):
     struct_name: str
     dest: IRVar
+    field_count: int = 0    # 用于后端分配大小
 
 @dataclass
 class LoadInstr(Instr):
@@ -60,12 +61,20 @@ class LoadFieldInstr(Instr):
     struct: IRVar
     field: str
     dest: IRVar
+    field_index: int = -1    # 字段序号，-1 表示未设置
 
 @dataclass
 class StoreFieldInstr(Instr):
     struct: IRVar
     field: str
     value: IRVar
+    field_index: int = -1
+
+@dataclass
+class MakeEnumInstr(Instr):
+    variant: str
+    args: List[IRVar]
+    dest: IRVar
 
 @dataclass
 class BranchInstr(Instr):

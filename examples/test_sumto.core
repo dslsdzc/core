@@ -1,0 +1,11 @@
+fn sum_to(n: int) -> int {
+    let mut i = 1;
+    let mut s = 0;
+    loop {
+        if i > n { break; }
+        s = s + i;
+        i = i + 1;
+    }
+    return s;
+}
+fn main() -> int { return sum_to(5); }

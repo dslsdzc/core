@@ -146,6 +146,9 @@ class Lexer:
                 if self.current() == '=':
                     self.advance()
                     self.tokens.append(Token(TokenType.EQ_EQ, '==', start_line, start_col))
+                elif self.current() == '>':
+                    self.advance()
+                    self.tokens.append(Token(TokenType.FAT_ARROW, '=>', start_line, start_col))
                 else:
                     self.tokens.append(Token(TokenType.EQ, '=', start_line, start_col))
                 continue

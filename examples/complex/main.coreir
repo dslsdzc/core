@@ -1,0 +1,73 @@
+Function: Point.sum
+  Block: entry_1
+    LoadFieldInstr(struct=IRVar(name='self', kind=<VarKind.PARAM: 2>, type=PathType(path=['Point']), id=0), field='x', dest=IRVar(name='t1', kind=<VarKind.TEMP: 4>, type=None, id=0), field_index=0)
+    LoadFieldInstr(struct=IRVar(name='self', kind=<VarKind.PARAM: 2>, type=PathType(path=['Point']), id=0), field='y', dest=IRVar(name='t2', kind=<VarKind.TEMP: 4>, type=None, id=0), field_index=1)
+    BinaryInstr(op='+', left=IRVar(name='t1', kind=<VarKind.TEMP: 4>, type=None, id=0), right=IRVar(name='t2', kind=<VarKind.TEMP: 4>, type=None, id=0), dest=IRVar(name='t3', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    ReturnInstr(value=IRVar(name='t3', kind=<VarKind.TEMP: 4>, type=None, id=0))
+Function: Point.scale
+  Block: entry_2
+    LoadFieldInstr(struct=IRVar(name='self', kind=<VarKind.PARAM: 2>, type=PathType(path=['Point']), id=0), field='x', dest=IRVar(name='t4', kind=<VarKind.TEMP: 4>, type=None, id=0), field_index=0)
+    LoadFieldInstr(struct=IRVar(name='self', kind=<VarKind.PARAM: 2>, type=PathType(path=['Point']), id=0), field='y', dest=IRVar(name='t5', kind=<VarKind.TEMP: 4>, type=None, id=0), field_index=1)
+    BinaryInstr(op='+', left=IRVar(name='t4', kind=<VarKind.TEMP: 4>, type=None, id=0), right=IRVar(name='t5', kind=<VarKind.TEMP: 4>, type=None, id=0), dest=IRVar(name='t6', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    BinaryInstr(op='*', left=IRVar(name='t6', kind=<VarKind.TEMP: 4>, type=None, id=0), right=IRVar(name='factor', kind=<VarKind.PARAM: 2>, type=BaseType(name='int'), id=0), dest=IRVar(name='t7', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    ReturnInstr(value=IRVar(name='t7', kind=<VarKind.TEMP: 4>, type=None, id=0))
+Function: sum_to
+  Block: entry_3
+    ConstInstr(value=1, type='int', dest=IRVar(name='t8', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    AllocInstr(type=BaseType(name='int'), dest=IRVar(name='i', kind=<VarKind.LOCAL: 1>, type=BaseType(name='int'), id=0))
+    StoreInstr(addr=IRVar(name='i', kind=<VarKind.LOCAL: 1>, type=BaseType(name='int'), id=0), value=IRVar(name='t8', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    ConstInstr(value=0, type='int', dest=IRVar(name='t9', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    AllocInstr(type=BaseType(name='int'), dest=IRVar(name='s', kind=<VarKind.LOCAL: 1>, type=BaseType(name='int'), id=0))
+    StoreInstr(addr=IRVar(name='s', kind=<VarKind.LOCAL: 1>, type=BaseType(name='int'), id=0), value=IRVar(name='t9', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    JumpInstr(label='loop_header_4')
+  Block: loop_header_4
+    JumpInstr(label='loop_body_5')
+  Block: loop_body_5
+    BinaryInstr(op='>', left=IRVar(name='i', kind=<VarKind.LOCAL: 1>, type=BaseType(name='int'), id=0), right=IRVar(name='n', kind=<VarKind.PARAM: 2>, type=BaseType(name='int'), id=0), dest=IRVar(name='t10', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    BranchInstr(cond=IRVar(name='t10', kind=<VarKind.TEMP: 4>, type=None, id=0), true_label='then_7', false_label='if_merge_8')
+  Block: then_7
+    JumpInstr(label='loop_exit_6')
+  Block: if_merge_8
+    BinaryInstr(op='+', left=IRVar(name='s', kind=<VarKind.LOCAL: 1>, type=BaseType(name='int'), id=0), right=IRVar(name='i', kind=<VarKind.LOCAL: 1>, type=BaseType(name='int'), id=0), dest=IRVar(name='t11', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    StoreInstr(addr=IRVar(name='s', kind=<VarKind.LOCAL: 1>, type=BaseType(name='int'), id=0), value=IRVar(name='t11', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    ConstInstr(value=1, type='int', dest=IRVar(name='t12', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    BinaryInstr(op='+', left=IRVar(name='i', kind=<VarKind.LOCAL: 1>, type=BaseType(name='int'), id=0), right=IRVar(name='t12', kind=<VarKind.TEMP: 4>, type=None, id=0), dest=IRVar(name='t13', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    StoreInstr(addr=IRVar(name='i', kind=<VarKind.LOCAL: 1>, type=BaseType(name='int'), id=0), value=IRVar(name='t13', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    JumpInstr(label='loop_header_4')
+  Block: loop_exit_6
+    ReturnInstr(value=IRVar(name='s', kind=<VarKind.LOCAL: 1>, type=BaseType(name='int'), id=0))
+Function: max
+  Block: entry_9
+    BinaryInstr(op='>', left=IRVar(name='a', kind=<VarKind.PARAM: 2>, type=BaseType(name='int'), id=0), right=IRVar(name='b', kind=<VarKind.PARAM: 2>, type=BaseType(name='int'), id=0), dest=IRVar(name='t14', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    BranchInstr(cond=IRVar(name='t14', kind=<VarKind.TEMP: 4>, type=None, id=0), true_label='then_10', false_label='else_11')
+  Block: then_10
+    ReturnInstr(value=IRVar(name='a', kind=<VarKind.PARAM: 2>, type=BaseType(name='int'), id=0))
+  Block: else_11
+    ReturnInstr(value=IRVar(name='b', kind=<VarKind.PARAM: 2>, type=BaseType(name='int'), id=0))
+  Block: if_merge_12
+    ReturnInstr(value=None)
+Function: main
+  Block: entry_13
+    AllocStructInstr(struct_name='Point', dest=IRVar(name='t15', kind=<VarKind.TEMP: 4>, type=None, id=0), field_count=2)
+    ConstInstr(value=10, type='int', dest=IRVar(name='t16', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    StoreFieldInstr(struct=IRVar(name='t15', kind=<VarKind.TEMP: 4>, type=None, id=0), field='x', value=IRVar(name='t16', kind=<VarKind.TEMP: 4>, type=None, id=0), field_index=0)
+    ConstInstr(value=20, type='int', dest=IRVar(name='t17', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    StoreFieldInstr(struct=IRVar(name='t15', kind=<VarKind.TEMP: 4>, type=None, id=0), field='y', value=IRVar(name='t17', kind=<VarKind.TEMP: 4>, type=None, id=0), field_index=1)
+    AllocInstr(type=PathType(path=['Point']), dest=IRVar(name='p', kind=<VarKind.LOCAL: 1>, type=PathType(path=['Point']), id=0))
+    StoreInstr(addr=IRVar(name='p', kind=<VarKind.LOCAL: 1>, type=PathType(path=['Point']), id=0), value=IRVar(name='t15', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    CallInstr(func='Point.sum', args=[IRVar(name='p', kind=<VarKind.LOCAL: 1>, type=PathType(path=['Point']), id=0)], dest=IRVar(name='t18', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    AllocInstr(type=BaseType(name='unit'), dest=IRVar(name='s', kind=<VarKind.LOCAL: 1>, type=BaseType(name='unit'), id=0))
+    StoreInstr(addr=IRVar(name='s', kind=<VarKind.LOCAL: 1>, type=BaseType(name='unit'), id=0), value=IRVar(name='t18', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    ConstInstr(value=3, type='int', dest=IRVar(name='t19', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    CallInstr(func='Point.scale', args=[IRVar(name='p', kind=<VarKind.LOCAL: 1>, type=PathType(path=['Point']), id=0), IRVar(name='t19', kind=<VarKind.TEMP: 4>, type=None, id=0)], dest=IRVar(name='t20', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    AllocInstr(type=BaseType(name='unit'), dest=IRVar(name='scaled', kind=<VarKind.LOCAL: 1>, type=BaseType(name='unit'), id=0))
+    StoreInstr(addr=IRVar(name='scaled', kind=<VarKind.LOCAL: 1>, type=BaseType(name='unit'), id=0), value=IRVar(name='t20', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    ConstInstr(value=5, type='int', dest=IRVar(name='t21', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    CallInstr(func='sum_to', args=[IRVar(name='t21', kind=<VarKind.TEMP: 4>, type=None, id=0)], dest=IRVar(name='t22', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    AllocInstr(type=BaseType(name='unit'), dest=IRVar(name='loop_val', kind=<VarKind.LOCAL: 1>, type=BaseType(name='unit'), id=0))
+    StoreInstr(addr=IRVar(name='loop_val', kind=<VarKind.LOCAL: 1>, type=BaseType(name='unit'), id=0), value=IRVar(name='t22', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    CallInstr(func='max', args=[IRVar(name='s', kind=<VarKind.LOCAL: 1>, type=BaseType(name='unit'), id=0), IRVar(name='loop_val', kind=<VarKind.LOCAL: 1>, type=BaseType(name='unit'), id=0)], dest=IRVar(name='t23', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    AllocInstr(type=BaseType(name='unit'), dest=IRVar(name='biggest', kind=<VarKind.LOCAL: 1>, type=BaseType(name='unit'), id=0))
+    StoreInstr(addr=IRVar(name='biggest', kind=<VarKind.LOCAL: 1>, type=BaseType(name='unit'), id=0), value=IRVar(name='t23', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    BinaryInstr(op='+', left=IRVar(name='biggest', kind=<VarKind.LOCAL: 1>, type=BaseType(name='unit'), id=0), right=IRVar(name='scaled', kind=<VarKind.LOCAL: 1>, type=BaseType(name='unit'), id=0), dest=IRVar(name='t24', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    ReturnInstr(value=IRVar(name='t24', kind=<VarKind.TEMP: 4>, type=None, id=0))

@@ -52,6 +52,7 @@ class TokenType(Enum):
     SOME = auto()
 
     # 符号
+    FAT_ARROW = auto()
     PLUS = auto()
     MINUS = auto()
     STAR = auto()

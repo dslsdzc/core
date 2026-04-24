@@ -1,0 +1,16 @@
+Function: max
+  Block: entry_1
+    BinaryInstr(op='>', left=IRVar(name='a', kind=<VarKind.PARAM: 2>, type=BaseType(name='int'), id=0), right=IRVar(name='b', kind=<VarKind.PARAM: 2>, type=BaseType(name='int'), id=0), dest=IRVar(name='t1', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    BranchInstr(cond=IRVar(name='t1', kind=<VarKind.TEMP: 4>, type=None, id=0), true_label='then_2', false_label='else_3')
+  Block: then_2
+    ReturnInstr(value=IRVar(name='a', kind=<VarKind.PARAM: 2>, type=BaseType(name='int'), id=0))
+  Block: else_3
+    ReturnInstr(value=IRVar(name='b', kind=<VarKind.PARAM: 2>, type=BaseType(name='int'), id=0))
+  Block: if_merge_4
+    ReturnInstr(value=None)
+Function: main
+  Block: entry_5
+    ConstInstr(value=3, type='int', dest=IRVar(name='t2', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    ConstInstr(value=7, type='int', dest=IRVar(name='t3', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    CallInstr(func='max', args=[IRVar(name='t2', kind=<VarKind.TEMP: 4>, type=None, id=0), IRVar(name='t3', kind=<VarKind.TEMP: 4>, type=None, id=0)], dest=IRVar(name='t4', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    ReturnInstr(value=IRVar(name='t4', kind=<VarKind.TEMP: 4>, type=None, id=0))

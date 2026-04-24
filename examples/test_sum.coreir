@@ -1,0 +1,17 @@
+Function: Point.sum
+  Block: entry_1
+    LoadFieldInstr(struct=IRVar(name='self', kind=<VarKind.PARAM: 2>, type=PathType(path=['Point']), id=0), field='x', dest=IRVar(name='t1', kind=<VarKind.TEMP: 4>, type=None, id=0), field_index=0)
+    LoadFieldInstr(struct=IRVar(name='self', kind=<VarKind.PARAM: 2>, type=PathType(path=['Point']), id=0), field='y', dest=IRVar(name='t2', kind=<VarKind.TEMP: 4>, type=None, id=0), field_index=1)
+    BinaryInstr(op='+', left=IRVar(name='t1', kind=<VarKind.TEMP: 4>, type=None, id=0), right=IRVar(name='t2', kind=<VarKind.TEMP: 4>, type=None, id=0), dest=IRVar(name='t3', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    ReturnInstr(value=IRVar(name='t3', kind=<VarKind.TEMP: 4>, type=None, id=0))
+Function: main
+  Block: entry_2
+    AllocStructInstr(struct_name='Point', dest=IRVar(name='t4', kind=<VarKind.TEMP: 4>, type=None, id=0), field_count=2)
+    ConstInstr(value=10, type='int', dest=IRVar(name='t5', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    StoreFieldInstr(struct=IRVar(name='t4', kind=<VarKind.TEMP: 4>, type=None, id=0), field='x', value=IRVar(name='t5', kind=<VarKind.TEMP: 4>, type=None, id=0), field_index=0)
+    ConstInstr(value=20, type='int', dest=IRVar(name='t6', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    StoreFieldInstr(struct=IRVar(name='t4', kind=<VarKind.TEMP: 4>, type=None, id=0), field='y', value=IRVar(name='t6', kind=<VarKind.TEMP: 4>, type=None, id=0), field_index=1)
+    AllocInstr(type=PathType(path=['Point']), dest=IRVar(name='p', kind=<VarKind.LOCAL: 1>, type=PathType(path=['Point']), id=0))
+    StoreInstr(addr=IRVar(name='p', kind=<VarKind.LOCAL: 1>, type=PathType(path=['Point']), id=0), value=IRVar(name='t4', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    CallInstr(func='Point.sum', args=[IRVar(name='p', kind=<VarKind.LOCAL: 1>, type=PathType(path=['Point']), id=0)], dest=IRVar(name='t7', kind=<VarKind.TEMP: 4>, type=None, id=0))
+    ReturnInstr(value=IRVar(name='t7', kind=<VarKind.TEMP: 4>, type=None, id=0))
