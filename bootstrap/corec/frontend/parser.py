@@ -270,12 +270,11 @@ class Parser:
             return UnaryOp('&mut' if mut else '&', self.parse_unary())
         return self.parse_call_or_field()
 
-    def parse_call_or_field(self):
+    def parse_call_or_field(self) -> Expr:
         node = self.parse_primary()
         while True:
             if self.check(TokenType.LPAREN):
                 if isinstance(node, Ident) and node.name[0].isupper():
-                    # 枚举构造
                     self.advance()
                     args = []
                     if not self.check(TokenType.RPAREN):
@@ -301,9 +300,22 @@ class Parser:
                 node = FieldAccess(node, field)
             elif self.check(TokenType.LBRACK):
                 self.advance()
-                idx = self.parse_expr()
-                self.expect(TokenType.RBRACK)
-                node = Index(node, idx)
+                # Distinguish between index expression and array literal
+                if self.check(TokenType.RBRACK) or (self.cur().type in (TokenType.INT_LIT, TokenType.STRING_LIT, TokenType.IDENT, TokenType.LPAREN, TokenType.MINUS, TokenType.BANG)):
+                    # index expression: node[idx]
+                    idx = self.parse_expr()
+                    self.expect(TokenType.RBRACK)
+                    node = Index(node, idx)
+                else:
+                    # array literal [e1, e2, ...]
+                    elements = []
+                    if not self.check(TokenType.RBRACK):
+                        elements.append(self.parse_expr())
+                        while self.check(TokenType.COMMA):
+                            self.advance()
+                            elements.append(self.parse_expr())
+                    self.expect(TokenType.RBRACK)
+                    node = ArrayLit(elements)
             elif self.check(TokenType.QUESTION):
                 self.advance()
                 node = Try(node)
@@ -311,7 +323,7 @@ class Parser:
                 break
         return node
 
-    def parse_primary(self):
+    def parse_primary(self) -> Expr:
         if self.check(TokenType.SOME) or self.check(TokenType.NONE) or self.check(TokenType.SELF):
             return Ident(self.advance().lexeme)
         if self.check(TokenType.INT_LIT):
@@ -343,6 +355,18 @@ class Parser:
                 self.expect(TokenType.RBRACE)
                 return StructLit([ident_name], fields)
             return Ident(ident_name)
+        if self.check(TokenType.LBRACK):
+            self.advance()
+            if self.check(TokenType.RBRACK):
+                self.advance()
+                return ArrayLit([])
+            elements = []
+            elements.append(self.parse_expr())
+            while self.check(TokenType.COMMA):
+                self.advance()
+                elements.append(self.parse_expr())
+            self.expect(TokenType.RBRACK)
+            return ArrayLit(elements)
         if self.check(TokenType.LPAREN):
             self.advance()
             e = self.parse_expr()
@@ -366,7 +390,7 @@ class Parser:
             self.advance(); return Unsafe(self.parse_block())
         self.error(f"Unexpected token: {self.cur().lexeme}")
 
-    def parse_block(self):
+    def parse_block(self) -> Block:
         self.expect(TokenType.LBRACE)
         stmts = []
         while not self.check(TokenType.RBRACE) and not self.check(TokenType.EOF):

@@ -3,8 +3,7 @@ from typing import Optional, List, Any
 from corec.ir.base import IRNode, IRVar
 
 @dataclass
-class Instr(IRNode):
-    pass
+class Instr(IRNode): pass
 
 @dataclass
 class ConstInstr(Instr):
@@ -44,7 +43,12 @@ class AllocInstr(Instr):
 class AllocStructInstr(Instr):
     struct_name: str
     dest: IRVar
-    field_count: int = 0    # 用于后端分配大小
+    field_count: int = 0
+
+@dataclass
+class AllocArrayInstr(Instr):
+    size: int
+    dest: IRVar
 
 @dataclass
 class LoadInstr(Instr):
@@ -61,7 +65,7 @@ class LoadFieldInstr(Instr):
     struct: IRVar
     field: str
     dest: IRVar
-    field_index: int = -1    # 字段序号，-1 表示未设置
+    field_index: int = -1
 
 @dataclass
 class StoreFieldInstr(Instr):
@@ -69,6 +73,18 @@ class StoreFieldInstr(Instr):
     field: str
     value: IRVar
     field_index: int = -1
+
+@dataclass
+class LoadIndexInstr(Instr):
+    array: IRVar
+    index: int
+    dest: IRVar
+
+@dataclass
+class StoreIndexInstr(Instr):
+    array: IRVar
+    index: int
+    value: IRVar
 
 @dataclass
 class MakeEnumInstr(Instr):

@@ -30,7 +30,7 @@ class Interpreter:
             else:
                 break
         if step >= max_steps:
-            raise RuntimeError("Maximum execution steps exceeded")
+            raise RuntimeError("Max steps exceeded")
         return None
 
     def exec_block(self, block):
@@ -38,7 +38,8 @@ class Interpreter:
             if isinstance(instr, ConstInstr):
                 val = instr.value
                 if isinstance(val, str):
-                    if val.isdigit(): val = int(val)
+                    if val.isdigit():
+                        val = int(val)
                     else:
                         try: val = float(val)
                         except: pass
@@ -76,11 +77,14 @@ class Interpreter:
                     self.vars[id(p)] = arg_vals[i]
                 result = self.run_func(func)
                 self.vars = old_vars
-                if instr.dest: self.vars[id(instr.dest)] = result
+                if instr.dest:
+                    self.vars[id(instr.dest)] = result
             elif isinstance(instr, AllocInstr):
                 self.vars[id(instr.dest)] = None
             elif isinstance(instr, AllocStructInstr):
                 self.vars[id(instr.dest)] = {}
+            elif isinstance(instr, AllocArrayInstr):
+                self.vars[id(instr.dest)] = [None] * instr.size
             elif isinstance(instr, StoreInstr):
                 self.vars[id(instr.addr)] = self.vars[id(instr.value)]
             elif isinstance(instr, LoadInstr):
@@ -93,33 +97,45 @@ class Interpreter:
                     raise RuntimeError(f"LoadField on non-struct: {obj}")
             elif isinstance(instr, StoreFieldInstr):
                 obj = self.vars[id(instr.struct)]
+                val = self.vars[id(instr.value)]
                 if isinstance(obj, dict):
-                    obj[instr.field] = self.vars[id(instr.value)]
+                    obj[instr.field] = val
                 else:
-                    raise RuntimeError(f"StoreField on non-struct")
+                    raise RuntimeError("StoreField on non-struct")
+            elif isinstance(instr, StoreIndexInstr):
+                arr = self.vars[id(instr.array)]
+                arr[instr.index] = self.vars[id(instr.value)]
+            elif isinstance(instr, LoadIndexInstr):
+                arr = self.vars[id(instr.array)]
+                self.vars[id(instr.dest)] = arr[instr.index]
             elif isinstance(instr, MakeEnumInstr):
                 args = [self.vars[id(a)] for a in instr.args]
-                enum_obj = {'__variant': instr.variant}
+                obj = {'__variant': instr.variant}
                 for i, arg in enumerate(args):
-                    enum_obj[f'_field_{i}'] = arg
-                self.vars[id(instr.dest)] = enum_obj
+                    obj[f'_field_{i}'] = arg
+                self.vars[id(instr.dest)] = obj
             elif isinstance(instr, BranchInstr):
                 cond = self.vars[id(instr.cond)]
-                if cond: return (instr.true_label, None)
-                else: return (instr.false_label, None)
+                if cond:
+                    return (instr.true_label, None)
+                else:
+                    return (instr.false_label, None)
             elif isinstance(instr, JumpInstr):
                 return (instr.label, None)
             elif isinstance(instr, ReturnInstr):
-                if instr.value: return (None, self.vars[id(instr.value)])
+                if instr.value:
+                    return (None, self.vars[id(instr.value)])
                 return (None, None)
-            elif isinstance(instr, LabelInstr): pass
+            elif isinstance(instr, LabelInstr):
+                pass
             else:
                 raise NotImplementedError(f"instr {type(instr)}")
         return None
 
     def _to_value(self, v):
         if isinstance(v, str):
-            if v.isdigit(): return int(v)
+            if v.isdigit():
+                return int(v)
             try: return float(v)
             except: pass
         return v

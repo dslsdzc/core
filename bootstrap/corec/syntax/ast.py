@@ -36,6 +36,11 @@ class Index(Expr): object: Expr; index: Expr
 @dataclass
 class Try(Expr): expr: Expr
 @dataclass
+class ArrayLit(Expr):
+    elements: List[Expr]
+    element_type: Optional[Type] = None
+
+@dataclass
 class StructLit(Expr): path: List[str]; fields: List[tuple]
 @dataclass
 class EnumConstructor(Expr): path: List[str]; args: List[Expr]

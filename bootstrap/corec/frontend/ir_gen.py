@@ -67,6 +67,8 @@ class IRGen:
 
     def gen_expr(self, expr):
         if isinstance(expr, Literal): return self.gen_literal(expr)
+        if isinstance(expr, Index): return self.gen_index(expr)
+        if isinstance(expr, ArrayLit): return self.gen_array_lit(expr)
         if isinstance(expr, Ident): return self.gen_ident(expr)
         if isinstance(expr, BinaryOp): return self.gen_binary(expr)
         if isinstance(expr, UnaryOp): return self.gen_unary(expr)
@@ -87,6 +89,26 @@ class IRGen:
         raise NotImplementedError(type(expr))
 
     def gen_stmt(self, stmt): self.gen_expr(stmt)
+
+    def gen_array_lit(self, arr: ArrayLit):
+        # 为每个元素生成表达式，最后生成一个 AllocArrayInstr
+        elem_irs = [self.gen_expr(e) for e in arr.elements]
+        dest = self.new_temp()
+        self.add_instr(AllocArrayInstr(len(arr.elements), dest))
+        for i, elem_ir in enumerate(elem_irs):
+            self.add_instr(StoreIndexInstr(dest, i, elem_ir))
+        return dest
+
+    def gen_index(self, idx: Index):
+        arr = self.gen_expr(idx.object)
+        # 索引必须是常量整数（当前限制）
+        if isinstance(idx.index, Literal) and idx.index.kind == 'int':
+            index_val = int(idx.index.value)
+        else:
+            raise RuntimeError("Index must be a constant integer literal")
+        dest = self.new_temp()
+        self.add_instr(LoadIndexInstr(arr, index_val, dest))
+        return dest
 
     def gen_literal(self, lit):
         val = lit.value
@@ -126,6 +148,24 @@ class IRGen:
                             field_idx = i
                             break
                 self.add_instr(StoreFieldInstr(obj, binop.left.field, val, field_index=field_idx))
+                return val
+            elif isinstance(binop.left, Index):
+                arr = self.gen_expr(binop.left.object)
+                if isinstance(binop.left.index, Literal) and binop.left.index.kind == 'int':
+                    idx = int(binop.left.index.value)
+                else:
+                    raise RuntimeError("Index must be a constant integer literal")
+                self.add_instr(StoreIndexInstr(arr, idx, val))
+                return val
+                return val
+            elif isinstance(binop.left, Index):
+                # 数组索引赋值：arr[i] = val
+                arr = self.gen_expr(binop.left.object)
+                if isinstance(binop.left.index, Literal) and binop.left.index.kind == 'int':
+                    idx = int(binop.left.index.value)
+                else:
+                    raise RuntimeError("Index must be a constant integer literal for now")
+                self.add_instr(StoreIndexInstr(arr, idx, val))
                 return val
         left = self.gen_expr(binop.left)
         right = self.gen_expr(binop.right)
