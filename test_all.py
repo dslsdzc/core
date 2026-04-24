@@ -157,3 +157,49 @@ fn main() -> int {
 run_test('Enum Multi Args', src9, 3)
 
 print("\nAll tests completed.")
+
+# 测试10: 浮点数运算
+src10 = '''
+fn main() -> float {
+    let a = 3.14;
+    let b = 2.86;
+    return a + b;
+}
+'''
+run_test('Float Add', src10, 6.0)  # 3.14+2.86 = 6.0
+
+# 测试11: 混合 int/float
+src11 = '''
+fn main() -> float {
+    let a = 2;
+    let b = 3.5;
+    return a + b;
+}
+'''
+run_test('Int Float Mix', src11, 5.5)
+
+# 测试12: 字符串拼接
+src12 = '''
+fn main() -> string {
+    let a = "Hello, ";
+    let b = "World!";
+    return a + b;
+}
+'''
+# 字符串返回值无法用 echo $? 获取，解释器中直接比较
+lex = Lexer(src12)
+ast = Parser(lex.tokenize()).parse_compilation_unit()
+resolver = NameResolver()
+resolver.resolve(ast)
+desugarer = MatchDesugarer(resolver.symtab)
+ast = desugarer.desugar(ast)
+checker = TypeChecker(resolver.symtab)
+checker.check(ast)
+ir_gen = IRGen(resolver.symtab)
+mod = ir_gen.gen_module(ast)
+interp = Interpreter(mod)
+result = interp.run('main', [])
+if result == "Hello, World!":
+    print("[PASS] String Concat: got", result)
+else:
+    print("[FAIL] String Concat: expected 'Hello, World!', got", result)

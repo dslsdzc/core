@@ -46,10 +46,17 @@ class Interpreter:
             elif isinstance(instr, BinaryInstr):
                 left = self._to_value(self.vars[id(instr.left)])
                 right = self._to_value(self.vars[id(instr.right)])
-                if instr.op == '+': res = left + right
+                if instr.op == '+':
+                    if isinstance(left, str) or isinstance(right, str):
+                        res = str(left) + str(right)
+                    else:
+                        res = left + right
                 elif instr.op == '-': res = left - right
                 elif instr.op == '*': res = left * right
-                elif instr.op == '/': res = left // right if isinstance(left, int) else left / right
+                elif instr.op == '/':
+                    res = left / right
+                    if isinstance(res, float) and res.is_integer():
+                        res = int(res)
                 elif instr.op == '>': res = left > right
                 elif instr.op == '<': res = left < right
                 elif instr.op == '>=': res = left >= right

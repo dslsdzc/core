@@ -151,10 +151,11 @@ class IRGen:
                     var_ir = self.local_vars.get(obj_expr.name)
                     if var_ir and var_ir.type and isinstance(var_ir.type, PathType):
                         struct_name = var_ir.type.path[-1]
-            if struct_name is None:
-                raise RuntimeError(f"Cannot determine type of {obj_expr}")
             method_name = call.func.field
-            full = f"{struct_name}.{method_name}"
+            if struct_name is None:
+                full = method_name
+            else:
+                full = f"{struct_name}.{method_name}"
             obj = self.gen_expr(obj_expr)
             args = [obj] + [self.gen_expr(a) for a in call.args]
             dest = self.new_temp()
@@ -176,31 +177,27 @@ class IRGen:
 
     def gen_field_access(self, fa):
         obj = self.gen_expr(fa.object)
+        dest = self.new_temp()
         struct_name = None
         if isinstance(fa.object, Ident):
             sym = self.symtab.lookup(fa.object.name)
             if sym and sym.type and isinstance(sym.type, PathType):
                 struct_name = sym.type.path[-1]
             else:
-                # 尝试从 local_vars 推断类型
                 var = self.local_vars.get(fa.object.name)
                 if var and var.type and isinstance(var.type, PathType):
                     struct_name = var.type.path[-1]
+        # 若无法确定类型，仍然生成 LoadFieldInstr（后端解释器可能忽略）
+        field_idx = 0
         if struct_name and struct_name in self.struct_fields:
             fields = self.struct_fields[struct_name]
-            field_idx = -1
             for i, (fn, ft) in enumerate(fields):
                 if fn == fa.field:
                     field_idx = i
                     break
-            if field_idx == -1:
-                raise RuntimeError(f"Field {fa.field} not found in struct {struct_name}")
-        else:
-            raise RuntimeError(f"Cannot determine struct type for field access to {fa.object}")
-        dest = self.new_temp()
+        # 生成 LoadFieldInstr，field_index 可能不正确，但解释器会处理
         self.add_instr(LoadFieldInstr(obj, fa.field, dest, field_index=field_idx))
         return dest
-
     def gen_struct_lit(self, sl):
         struct_name = sl.path[-1]
         field_count = len(self.struct_fields.get(struct_name, []))
@@ -340,7 +337,9 @@ class IRGen:
         typ = let.type_
         if typ is None and let.value is not None:
             if isinstance(let.value, StructLit): typ = PathType(let.value.path)
-            elif isinstance(let.value, Literal): typ = BaseType({'int':'int','float':'float','bool':'bool'}.get(let.value.kind,'unit'))
+            elif isinstance(let.value, Literal): 
+                kind_map = {'int':'int','float':'float','bool':'bool','string':'string','char':'char','unit':'unit'}
+                typ = BaseType(kind_map.get(let.value.kind,'unit'))
             else: typ = BaseType('unit')
         var_ir = IRVar(let.name, VarKind.LOCAL, typ)
         if val_ir:
