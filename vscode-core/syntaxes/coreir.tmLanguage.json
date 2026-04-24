@@ -1,0 +1,66 @@
+{
+  "name": "Core IR",
+  "scopeName": "source.coreir",
+  "fileTypes": [
+    "coreir"
+  ],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#labels"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#strings"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.semicolon.ir",
+          "match": ";.*$"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.other.ir",
+          "match": "\\b(Function|Block)\\b"
+        },
+        {
+          "name": "support.function.ir",
+          "match": "\\b(ConstInstr|BinaryInstr|CallInstr|ReturnInstr|BranchInstr|JumpInstr|AllocInstr|StoreInstr|LoadInstr|LoadFieldInstr|StoreFieldInstr|MakeEnumInstr|AllocStructInstr|AllocArrayInstr|LoadIndexInstr|StoreIndexInstr|PhiInstr|LabelInstr)\\b"
+        }
+      ]
+    },
+    "labels": {
+      "name": "entity.name.label.ir",
+      "match": "^\\s*([a-zA-Z_][a-zA-Z0-9_]*):"
+    },
+    "numbers": {
+      "name": "constant.numeric.integer.ir",
+      "match": "\\b[0-9]+\\b"
+    },
+    "operators": {
+      "name": "keyword.operator.ir",
+      "match": "->|=>|::|&&|\\|\\||==|!=|<=|>=|[+\\-*/%=<>!&|?]"
+    },
+    "strings": {
+      "name": "string.quoted.double.ir",
+      "begin": "\"",
+      "end": "\""
+    }
+  }
+}

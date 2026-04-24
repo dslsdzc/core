@@ -178,6 +178,14 @@ class Parser:
         if self.check(TokenType.IDENT) and self.cur().lexeme in base_types:
             return BaseType(self.advance().lexeme)
         typ = PathType(self.parse_path())
+        if self.check(TokenType.LBRACK):
+            self.advance()
+            args = [self.parse_type()]
+            while self.check(TokenType.COMMA):
+                self.advance()
+                args.append(self.parse_type())
+            self.expect(TokenType.RBRACK)
+            return GenericApplyType(typ.path, args)
         if self.check(TokenType.QUESTION):
             self.advance()
             return OptionalType(typ)
@@ -185,7 +193,12 @@ class Parser:
 
     # ─── 表达式 ───
     def parse_expr(self):
-        return self.parse_assignment()
+        left = self.parse_assignment()
+        if self.check(TokenType.DOT_DOT):
+            self.advance()
+            right = self.parse_expr()
+            return RangeExpr(left, right)
+        return left
 
     def parse_assignment(self):
         if self.check(TokenType.LET):
@@ -258,7 +271,7 @@ class Parser:
         return left
 
     def parse_unary(self):
-        if self.check(TokenType.MINUS) or self.check(TokenType.BANG):
+        if self.check(TokenType.MINUS) or self.check(TokenType.BANG) or self.check(TokenType.STAR):
             op = self.advance().lexeme
             return UnaryOp(op, self.parse_unary())
         if self.check(TokenType.AMPERSAND):

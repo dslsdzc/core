@@ -18,6 +18,8 @@ class ArrayType(Type): inner: Type; size: int
 @dataclass
 class SliceType(Type): inner: Type
 @dataclass
+class GenericApplyType(Type): path: List[str]; args: List[Type]
+@dataclass
 class Expr: pass
 @dataclass
 class Literal(Expr): value: object; kind: str
@@ -52,6 +54,8 @@ class If(Expr): cond: Expr; then_branch: Block; else_branch: Optional[Expr] = No
 class Match(Expr): expr: Expr; arms: List['MatchArm']
 @dataclass
 class MatchArm: pattern: 'Pattern'; body: Expr
+@dataclass
+class RangeExpr(Expr): start: Expr; end: Expr
 @dataclass
 class Loop(Expr): block: Block
 @dataclass

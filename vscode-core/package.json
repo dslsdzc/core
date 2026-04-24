@@ -1,0 +1,41 @@
+{
+  "name": "core-lang",
+  "displayName": "Core Language Support",
+  "description": "Syntax highlighting for the Core programming language",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "core",
+        "aliases": [
+          "Core",
+          "core"
+        ],
+        "extensions": [
+          ".core",
+          ".corespec",
+          ".coreir"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "core",
+        "scopeName": "source.core",
+        "path": "./syntaxes/core.tmLanguage.json"
+      },
+      {
+        "language": "core",
+        "scopeName": "source.coreir",
+        "path": "./syntaxes/coreir.tmLanguage.json"
+      }
+    ]
+  }
+}

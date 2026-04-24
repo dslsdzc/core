@@ -30,6 +30,7 @@ class TokenType(Enum):
     ELSE = auto()
     MATCH = auto()
     FOR = auto()
+    IN = auto()
     LOOP = auto()
     RETURN = auto()
     BREAK = auto()
@@ -71,6 +72,7 @@ class TokenType(Enum):
     ARROW = auto()
     PATH_SEP = auto()
     DOT = auto()
+    DOT_DOT = auto()
     COMMA = auto()
     SEMI = auto()
     COLON = auto()
@@ -103,6 +105,7 @@ KEYWORDS = {
     "else": TokenType.ELSE,
     "match": TokenType.MATCH,
     "for": TokenType.FOR,
+    "in": TokenType.IN,
     "loop": TokenType.LOOP,
     "return": TokenType.RETURN,
     "break": TokenType.BREAK,

@@ -87,9 +87,26 @@ class StoreIndexInstr(Instr):
     value: IRVar
 
 @dataclass
+class LoadIndexVarInstr(Instr):
+    array: IRVar
+    index_var: IRVar
+    dest: IRVar
+
+@dataclass
+class StoreIndexVarInstr(Instr):
+    array: IRVar
+    index_var: IRVar
+    value: IRVar
+
+@dataclass
 class MakeEnumInstr(Instr):
     variant: str
     args: List[IRVar]
+    dest: IRVar
+
+@dataclass
+class RefInstr(Instr):
+    variable: IRVar
     dest: IRVar
 
 @dataclass

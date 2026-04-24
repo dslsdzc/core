@@ -209,7 +209,11 @@ class Lexer:
 
             if ch == '.':
                 self.advance()
-                self.tokens.append(Token(TokenType.DOT, '.', start_line, start_col))
+                if self.current() == '.':
+                    self.advance()
+                    self.tokens.append(Token(TokenType.DOT_DOT, '..', start_line, start_col))
+                else:
+                    self.tokens.append(Token(TokenType.DOT, '.', start_line, start_col))
                 continue
 
             if ch == '?':

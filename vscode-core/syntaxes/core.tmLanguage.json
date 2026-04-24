@@ -1,0 +1,125 @@
+{
+  "name": "Core",
+  "scopeName": "source.core",
+  "fileTypes": [
+    "core",
+    "corespec"
+  ],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#chars"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#identifiers"
+    },
+    {
+      "include": "#punctuation"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.core",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.core",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.core",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.core",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "chars": {
+      "name": "string.quoted.single.core",
+      "match": "'(?:\\\\.|[^'])'",
+      "patterns": [
+        {
+          "name": "constant.character.escape.core",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.core",
+          "match": "\\b[0-9_]+\\.[0-9_]+(?:f32|f64)?\\b"
+        },
+        {
+          "name": "constant.numeric.integer.core",
+          "match": "\\b[0-9_]+(?:i8|i16|i32|i64|u8|u16|u32|u64)?\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.core",
+          "match": "\\b(?:fn|struct|enum|interface|impl|type|let|mut|move|go|await|flow|if|else|match|for|loop|return|break|continue|pub|mod|import|as|unsafe|requires|ensures|yield|select|recv|in)\\b"
+        },
+        {
+          "name": "keyword.other.core",
+          "match": "\\b(?:old|result|self|Self|true|false|unit|None|Some)\\b"
+        }
+      ]
+    },
+    "types": {
+      "name": "storage.type.core",
+      "match": "\\b(?:int|float|bool|string|char|unit|never)\\b"
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.core",
+          "match": "->|=>|::|&&|\\|\\||==|!=|<=|>=|[+\\-*/%=<>!&|?]"
+        }
+      ]
+    },
+    "identifiers": {
+      "name": "entity.name.variable.core",
+      "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b"
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.core",
+          "match": "[.,;:]"
+        },
+        {
+          "name": "punctuation.bracket.core",
+          "match": "[(){}\\[\\]]"
+        }
+      ]
+    }
+  }
+}

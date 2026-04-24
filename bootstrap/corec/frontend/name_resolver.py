@@ -35,6 +35,9 @@ class NameResolver:
 
     def _resolve_function(self, decl: FunctionDecl):
         self.symtab.push_scope()
+        # 添加泛型参数到作用域（作为类型符号）
+        for g in decl.generics:
+            self.symtab.define(g, SymbolKind.TYPE, None)
         # 添加参数到作用域
         for param_name, param_type in decl.params:
             self.symtab.define(param_name, SymbolKind.PARAM, param_type)

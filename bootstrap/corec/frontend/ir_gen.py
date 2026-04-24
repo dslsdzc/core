@@ -80,6 +80,9 @@ class IRGen:
         if isinstance(expr, If): return self.gen_if(expr)
         if isinstance(expr, Loop): return self.gen_loop(expr)
         if isinstance(expr, For): return self.gen_for(expr)
+        if isinstance(expr, RangeExpr):
+            self.gen_expr(expr.start)
+            return self.gen_expr(expr.end)
         if isinstance(expr, Match): return self.gen_match(expr)
         if isinstance(expr, ReturnStmt): return self.gen_return(expr)
         if isinstance(expr, ExprStmt): return self.gen_expr(expr.expr)
@@ -157,15 +160,9 @@ class IRGen:
                     raise RuntimeError("Index must be a constant integer literal")
                 self.add_instr(StoreIndexInstr(arr, idx, val))
                 return val
-                return val
-            elif isinstance(binop.left, Index):
-                # 数组索引赋值：arr[i] = val
-                arr = self.gen_expr(binop.left.object)
-                if isinstance(binop.left.index, Literal) and binop.left.index.kind == 'int':
-                    idx = int(binop.left.index.value)
-                else:
-                    raise RuntimeError("Index must be a constant integer literal for now")
-                self.add_instr(StoreIndexInstr(arr, idx, val))
+            elif isinstance(binop.left, UnaryOp) and binop.left.op == '*':
+                ref = self.gen_expr(binop.left.operand)
+                self.add_instr(StoreInstr(ref, val))
                 return val
         left = self.gen_expr(binop.left)
         right = self.gen_expr(binop.right)
@@ -174,6 +171,21 @@ class IRGen:
         return dest
 
     def gen_unary(self, unop):
+        if unop.op in ('&', '&mut'):
+            # Borrow: emit RefInstr pointing to the operand's IRVar
+            if isinstance(unop.operand, Ident):
+                var = self.gen_ident(unop.operand)
+                dest = self.new_temp()
+                self.add_instr(RefInstr(var, dest))
+                return dest
+            else:
+                raise RuntimeError("Can only borrow a named variable")
+        if unop.op == '*':
+            # Dereference: load value through reference
+            ref = self.gen_expr(unop.operand)
+            dest = self.new_temp()
+            self.add_instr(LoadInstr(ref, dest))
+            return dest
         op = self.gen_expr(unop.operand)
         dest = self.new_temp()
         self.add_instr(UnaryInstr(unop.op, op, dest))
@@ -185,12 +197,18 @@ class IRGen:
             struct_name = None
             if isinstance(obj_expr, Ident):
                 sym = self.symtab.lookup(obj_expr.name)
-                if sym and sym.type and isinstance(sym.type, PathType):
-                    struct_name = sym.type.path[-1]
+                if sym and sym.type:
+                    typ = sym.type
+                    if isinstance(typ, RefType): typ = typ.inner
+                    if isinstance(typ, (PathType, GenericApplyType)):
+                        struct_name = typ.path[-1]
                 else:
                     var_ir = self.local_vars.get(obj_expr.name)
-                    if var_ir and var_ir.type and isinstance(var_ir.type, PathType):
-                        struct_name = var_ir.type.path[-1]
+                    if var_ir and var_ir.type:
+                        typ = var_ir.type
+                        if isinstance(typ, RefType): typ = typ.inner
+                        if isinstance(typ, (PathType, GenericApplyType)):
+                            struct_name = typ.path[-1]
             method_name = call.func.field
             if struct_name is None:
                 full = method_name
@@ -221,8 +239,12 @@ class IRGen:
         struct_name = None
         if isinstance(fa.object, Ident):
             sym = self.symtab.lookup(fa.object.name)
-            if sym and sym.type and isinstance(sym.type, PathType):
-                struct_name = sym.type.path[-1]
+            if sym and sym.type:
+                typ = sym.type
+                if isinstance(typ, RefType):
+                    typ = typ.inner
+                if isinstance(typ, (PathType, GenericApplyType)):
+                    struct_name = typ.path[-1]
             else:
                 var = self.local_vars.get(fa.object.name)
                 if var and var.type and isinstance(var.type, PathType):
@@ -299,22 +321,103 @@ class IRGen:
         return None
 
     def gen_for(self, for_expr):
-        header = self.new_block("for_header")
-        body = self.new_block("for_body")
-        exit_block = self.new_block("for_exit")
-        self.add_instr(JumpInstr(header.name))
-        self.current_func.blocks.append(header)
-        self.current_block = header
-        self.add_instr(JumpInstr(body.name))
-        self.current_func.blocks.append(body)
-        self.current_block = body
-        self.loop_stack.append((header, exit_block))
-        self.gen_expr(for_expr.block)
-        self.loop_stack.pop()
-        if not self.current_block.terminated(): self.add_instr(JumpInstr(header.name))
-        self.current_func.blocks.append(exit_block)
-        self.current_block = exit_block
-        return None
+        if isinstance(for_expr.iter, RangeExpr):
+            start = self.gen_expr(for_expr.iter.start)
+            end = self.gen_expr(for_expr.iter.end)
+            i_var = IRVar(for_expr.var, VarKind.LOCAL, BaseType('int'))
+            self.local_vars[for_expr.var] = i_var
+            self.add_instr(AllocInstr(BaseType('int'), i_var))
+            self.add_instr(StoreInstr(i_var, start))
+            header = self.new_block("for_header")
+            body = self.new_block("for_body")
+            exit_block = self.new_block("for_exit")
+            self.add_instr(JumpInstr(header.name))
+            self.current_func.blocks.append(header)
+            self.current_block = header
+            i_val = self.new_temp()
+            self.add_instr(LoadInstr(i_var, i_val))
+            cmp = self.new_temp()
+            self.add_instr(BinaryInstr('>=', i_val, end, cmp))
+            self.add_instr(BranchInstr(cmp, exit_block.name, body.name))
+            self.current_func.blocks.append(body)
+            self.current_block = body
+            self.loop_stack.append((header, exit_block))
+            self.gen_expr(for_expr.block)
+            self.loop_stack.pop()
+            i_val2 = self.new_temp()
+            self.add_instr(LoadInstr(i_var, i_val2))
+            one = self.new_temp()
+            self.add_instr(ConstInstr(1, 'int', one))
+            inc = self.new_temp()
+            self.add_instr(BinaryInstr('+', i_val2, one, inc))
+            self.add_instr(StoreInstr(i_var, inc))
+            if not self.current_block.terminated():
+                self.add_instr(JumpInstr(header.name))
+            self.current_func.blocks.append(exit_block)
+            self.current_block = exit_block
+            return None
+        elif isinstance(for_expr.iter, Ident):
+            arr_var = self.gen_ident(for_expr.iter)
+            arr_type = None
+            # Check type from local_vars first (IRGen's own tracking)
+            lv = self.local_vars.get(for_expr.iter.name)
+            if lv and lv.type and isinstance(lv.type, ArrayType):
+                arr_type = lv.type
+            # Fall back to symtab
+            if arr_type is None:
+                sym = self.symtab.lookup(for_expr.iter.name)
+                if sym and sym.type and isinstance(sym.type, ArrayType):
+                    arr_type = sym.type
+            if arr_type is None:
+                raise RuntimeError(f"Cannot determine array type for '{for_expr.iter.name}'")
+            size = arr_type.size
+            elem_type = arr_type.inner
+            idx_var = IRVar(f'__{for_expr.var}_idx', VarKind.LOCAL, BaseType('int'))
+            self.local_vars[f'__{for_expr.var}_idx'] = idx_var
+            self.add_instr(AllocInstr(BaseType('int'), idx_var))
+            zero = self.new_temp()
+            self.add_instr(ConstInstr(0, 'int', zero))
+            self.add_instr(StoreInstr(idx_var, zero))
+            val_var = IRVar(for_expr.var, VarKind.LOCAL, elem_type)
+            self.local_vars[for_expr.var] = val_var
+            self.add_instr(AllocInstr(elem_type, val_var))
+            header = self.new_block("for_header")
+            body = self.new_block("for_body")
+            exit_block = self.new_block("for_exit")
+            self.add_instr(JumpInstr(header.name))
+            self.current_func.blocks.append(header)
+            self.current_block = header
+            idx_val = self.new_temp()
+            self.add_instr(LoadInstr(idx_var, idx_val))
+            size_const = self.new_temp()
+            self.add_instr(ConstInstr(size, 'int', size_const))
+            cmp = self.new_temp()
+            self.add_instr(BinaryInstr('>=', idx_val, size_const, cmp))
+            self.add_instr(BranchInstr(cmp, exit_block.name, body.name))
+            self.current_func.blocks.append(body)
+            self.current_block = body
+            self.loop_stack.append((header, exit_block))
+            idx2 = self.new_temp()
+            self.add_instr(LoadInstr(idx_var, idx2))
+            elem = self.new_temp()
+            self.add_instr(LoadIndexVarInstr(arr_var, idx2, elem))
+            self.add_instr(StoreInstr(val_var, elem))
+            self.gen_expr(for_expr.block)
+            self.loop_stack.pop()
+            idx3 = self.new_temp()
+            self.add_instr(LoadInstr(idx_var, idx3))
+            one = self.new_temp()
+            self.add_instr(ConstInstr(1, 'int', one))
+            inc = self.new_temp()
+            self.add_instr(BinaryInstr('+', idx3, one, inc))
+            self.add_instr(StoreInstr(idx_var, inc))
+            if not self.current_block.terminated():
+                self.add_instr(JumpInstr(header.name))
+            self.current_func.blocks.append(exit_block)
+            self.current_block = exit_block
+            return None
+        else:
+            raise NotImplementedError(f"for over {type(for_expr.iter)}")
 
     def gen_match(self, match):
         val = self.gen_expr(match.expr)
@@ -377,7 +480,18 @@ class IRGen:
         typ = let.type_
         if typ is None and let.value is not None:
             if isinstance(let.value, StructLit): typ = PathType(let.value.path)
-            elif isinstance(let.value, Literal): 
+            elif isinstance(let.value, ArrayLit):
+                if let.value.elements:
+                    first = let.value.elements[0]
+                    if isinstance(first, Literal):
+                        kind_map = {'int':'int','float':'float','bool':'bool','string':'string','char':'char','unit':'unit'}
+                        elem_t = BaseType(kind_map.get(first.kind, 'unit'))
+                    else:
+                        elem_t = BaseType('unit')
+                else:
+                    elem_t = BaseType('unit')
+                typ = ArrayType(elem_t, len(let.value.elements))
+            elif isinstance(let.value, Literal):
                 kind_map = {'int':'int','float':'float','bool':'bool','string':'string','char':'char','unit':'unit'}
                 typ = BaseType(kind_map.get(let.value.kind,'unit'))
             else: typ = BaseType('unit')
