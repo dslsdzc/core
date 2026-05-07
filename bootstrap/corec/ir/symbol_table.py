@@ -8,6 +8,7 @@ class SymbolKind(Enum):
     LOCAL = auto()
     TYPE = auto()
     MODULE = auto()
+    GLOBAL = auto()
 
 @dataclass
 class Symbol:

@@ -1,0 +1,28 @@
+// === main.core ===
+// Compiler entry point: ties all stages together
+
+// Entry for build verification (no args)
+fn compiler_entry() -> string {
+    return "compiler_ok";
+}
+
+// Full compilation: source -> assembly
+fn compile_source(source: string) -> string {
+    g_source = source;
+    tokenize();
+    parse_all();
+    check_all();
+    if g_check_error_count > 0 {
+        let mut err_msg = "check errors:";
+        let mut ei = 0;
+        loop {
+            if ei >= g_check_error_count { break; }
+            err_msg = err_msg + " " + g_check_errors[ei];
+            ei = ei + 1;
+        }
+        err_msg = err_msg + " (funcs:" + __builtin_int_to_str(g_func_count) + " syms:" + __builtin_int_to_str(g_sym_count) + ")";
+        return err_msg;
+    }
+    ir_gen_all();
+    return x86_64_generate();
+}

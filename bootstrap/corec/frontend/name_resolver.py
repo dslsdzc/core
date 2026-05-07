@@ -6,7 +6,26 @@ class NameResolver:
         self.symtab = SymbolTable()
         self.errors = []
 
+    def _declare_builtins(self):
+        """Register built-in functions so the type checker can find them."""
+        from corec.syntax.ast import BaseType
+        # str_len(s: string) -> int
+        self.symtab.define('__builtin_str_len', SymbolKind.FUNCTION, BaseType('int'))
+        # str_get(s: string, index: int) -> string
+        self.symtab.define('__builtin_str_get', SymbolKind.FUNCTION, BaseType('string'))
+        # str_sub(s: string, start: int, len: int) -> string
+        self.symtab.define('__builtin_str_sub', SymbolKind.FUNCTION, BaseType('string'))
+        # int_to_str(i: int) -> string
+        self.symtab.define('__builtin_int_to_str', SymbolKind.FUNCTION, BaseType('string'))
+        # str_push(s: string, c: string) -> string
+        self.symtab.define('__builtin_str_push', SymbolKind.FUNCTION, BaseType('string'))
+        # str_from_int(i: int) -> string
+        self.symtab.define('__builtin_str_from_int', SymbolKind.FUNCTION, BaseType('string'))
+        # str_to_int(s: string) -> int
+        self.symtab.define('__builtin_str_to_int', SymbolKind.FUNCTION, BaseType('int'))
+
     def resolve(self, ast: CompilationUnit):
+        self._declare_builtins()
         # 第一遍：收集顶层声明（函数、类型等）
         for decl in ast.declarations:
             if isinstance(decl, FunctionDecl):
@@ -17,12 +36,16 @@ class NameResolver:
                 self._declare_type(decl)
             elif isinstance(decl, InterfaceDecl):
                 self._declare_type(decl)
+            elif isinstance(decl, LetDecl):
+                self._declare_let(decl)
             # ImplDecl 和 TypeAlias 稍后处理
 
         # 第二遍：处理函数体、impl 等
         for decl in ast.declarations:
             if isinstance(decl, FunctionDecl):
                 self._resolve_function(decl)
+            elif isinstance(decl, LetDecl):
+                self._resolve_let(decl)
             # 其他声明暂时不深入
 
         return len(self.errors) == 0
@@ -32,6 +55,13 @@ class NameResolver:
 
     def _declare_type(self, decl):
         self.symtab.define(decl.name, SymbolKind.TYPE, decl=decl)
+
+    def _declare_let(self, decl: LetDecl):
+        self.symtab.define(decl.name, SymbolKind.GLOBAL, decl.type_, decl)
+
+    def _resolve_let(self, decl: LetDecl):
+        if decl.value:
+            self._resolve_expr(decl.value)
 
     def _resolve_function(self, decl: FunctionDecl):
         self.symtab.push_scope()
@@ -62,10 +92,12 @@ class NameResolver:
             for arg in expr.args:
                 self._resolve_expr(arg)
         elif isinstance(expr, Block):
+            self.symtab.push_scope()
             for stmt in expr.stmts:
                 self._resolve_stmt(stmt)
             if expr.expr:
                 self._resolve_expr(expr.expr)
+            self.symtab.pop_scope()
         elif isinstance(expr, If):
             self._resolve_expr(expr.cond)
             self._resolve_expr(expr.then_branch)

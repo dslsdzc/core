@@ -1,0 +1,305 @@
+// Lexer: tokenizes Core source code using string built-ins
+
+// Global compiler state
+let mut g_source: string;
+let mut g_tokens: [Token; MAX_TOKENS];
+let mut g_token_count: int;
+let mut g_pos: int;
+let mut g_line: int;
+let mut g_col: int;
+let mut g_errors: [string; MAX_ERRS];
+let mut g_error_count: int;
+
+fn add_error(msg: string) {
+    if g_error_count < MAX_ERRS {
+        g_errors[g_error_count] = msg;
+        g_error_count = g_error_count + 1;
+    }
+}
+
+fn cur_char() -> string {
+    if g_pos >= __builtin_str_len(g_source) {
+        return "\0";
+    }
+    return __builtin_str_get(g_source, g_pos);
+}
+
+fn advance() {
+    let c = cur_char();
+    if c == "\n" {
+        g_line = g_line + 1;
+        g_col = 1;
+    } else {
+        g_col = g_col + 1;
+    }
+    g_pos = g_pos + 1;
+}
+
+fn peek() -> string {
+    if g_pos + 1 >= __builtin_str_len(g_source) {
+        return "\0";
+    }
+    return __builtin_str_get(g_source, g_pos + 1);
+}
+
+fn skip_whitespace() {
+    loop {
+        let c = cur_char();
+        if c == " " || c == "\t" || c == "\r" || c == "\n" {
+            advance();
+        } else {
+            break;
+        }
+    }
+}
+
+fn add_token(kind: int) {
+    if g_token_count >= MAX_TOKENS { return; }
+    g_tokens[g_token_count] = Token {
+        kind: kind,
+        lexeme: "",
+        int_val: 0,
+        line: g_line,
+        col: g_col,
+    };
+    g_token_count = g_token_count + 1;
+}
+
+fn add_token_str(kind: int, lexeme: string) {
+    if g_token_count >= MAX_TOKENS { return; }
+    g_tokens[g_token_count] = Token {
+        kind: kind,
+        lexeme: lexeme,
+        int_val: 0,
+        line: g_line,
+        col: g_col,
+    };
+    g_token_count = g_token_count + 1;
+}
+
+fn add_token_int(kind: int, val: int) {
+    if g_token_count >= MAX_TOKENS { return; }
+    g_tokens[g_token_count] = Token {
+        kind: kind,
+        lexeme: "",
+        int_val: val,
+        line: g_line,
+        col: g_col,
+    };
+    g_token_count = g_token_count + 1;
+}
+
+fn is_digit(c: string) -> bool {
+    c >= "0" && c <= "9"
+}
+
+fn is_alpha(c: string) -> bool {
+    (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c == "_"
+}
+
+fn is_ident_char(c: string) -> bool {
+    is_alpha(c) || is_digit(c)
+}
+
+fn lookup_keyword(ident: string) -> int {
+    if ident == "fn" { return T_FN; }
+    if ident == "let" { return T_LET; }
+    if ident == "mut" { return T_MUT; }
+    if ident == "if" { return T_IF; }
+    if ident == "else" { return T_ELSE; }
+    if ident == "loop" { return T_LOOP; }
+    if ident == "for" { return T_FOR; }
+    if ident == "in" { return T_IN; }
+    if ident == "return" { return T_RETURN; }
+    if ident == "break" { return T_BREAK; }
+    if ident == "continue" { return T_CONTINUE; }
+    if ident == "struct" { return T_STRUCT; }
+    if ident == "enum" { return T_ENUM; }
+    if ident == "impl" { return T_IMPL; }
+    if ident == "pub" { return T_PUB; }
+    if ident == "true" { return T_TRUE; }
+    if ident == "false" { return T_FALSE; }
+    if ident == "match" { return T_MATCH; }
+    if ident == "move" { return T_MOVE; }
+    if ident == "self" { return T_SELF; }
+    if ident == "unit" { return T_UNIT; }
+    if ident == "char" { return T_CHAR; }
+    if ident == "while" { return T_WHILE; }
+    if ident == "import" { return T_IMPORT; }
+    if ident == "mod" { return T_MOD; }
+    if ident == "type" { return T_TYPE; }
+    if ident == "as" { return T_AS; }
+    if ident == "go" { return T_GO; }
+    if ident == "await" { return T_AWAIT; }
+    if ident == "unsafe" { return T_UNSAFE; }
+    if ident == "interface" { return T_INTERFACE; }
+    return T_IDENT;
+}
+
+fn tokenize() {
+    g_token_count = 0;
+    g_pos = 0;
+    g_line = 1;
+    g_col = 1;
+    g_error_count = 0;
+
+    skip_whitespace();
+
+    loop {
+        if g_pos >= __builtin_str_len(g_source) { break; }
+        let c = cur_char();
+
+        // Single-line comment //
+        if c == "/" && peek() == "/" {
+            loop {
+                advance();
+                if g_pos >= __builtin_str_len(g_source) { break; }
+                if cur_char() == "\n" {
+                    advance();
+                    break;
+                }
+            }
+            skip_whitespace();
+            continue;
+        }
+
+        // Block comment /* */
+        if c == "/" && peek() == "*" {
+            advance(); advance();
+            loop {
+                if g_pos >= __builtin_str_len(g_source) { break; }
+                if cur_char() == "*" && peek() == "/" {
+                    advance(); advance();
+                    break;
+                }
+                advance();
+            }
+            skip_whitespace();
+            continue;
+        }
+
+        let start_line = g_line;
+        let start_col = g_col;
+
+        // Identifier or keyword
+        if is_alpha(c) {
+            let start = g_pos;
+            advance();
+            loop {
+                let c2 = cur_char();
+                if is_ident_char(c2) { advance(); } else { break; }
+            }
+            let ident = __builtin_str_sub(g_source, start, g_pos - start);
+            let kind = lookup_keyword(ident);
+            add_token_str(kind, ident);
+            skip_whitespace();
+            continue;
+        }
+
+        // Number literal
+        if is_digit(c) {
+            let start = g_pos;
+            advance();
+            let mut kind = T_INT;
+            loop {
+                let c2 = cur_char();
+                if is_digit(c2) { advance(); }
+                else if c2 == "." {
+                    kind = T_FLOAT;
+                    advance();
+                } else { break; }
+            }
+            let num_str = __builtin_str_sub(g_source, start, g_pos - start);
+            let val = __builtin_str_to_int(num_str);
+            add_token_int(kind, val);
+            skip_whitespace();
+            continue;
+        }
+
+        // String literal
+        if c == "\"" {
+            advance();
+            let start = g_pos;
+            loop {
+                if g_pos >= __builtin_str_len(g_source) { break; }
+                if cur_char() == "\"" { break; }
+                if cur_char() == "\\" {
+                    advance();
+                    if g_pos < __builtin_str_len(g_source) { advance(); }
+                } else {
+                    advance();
+                }
+            }
+            let str_val = __builtin_str_sub(g_source, start, g_pos - start);
+            advance();
+            add_token_str(T_STRING, str_val);
+            skip_whitespace();
+            continue;
+        }
+
+        // Char literal
+        if c == "'" {
+            advance();
+            let mut ch = "\0";
+            if cur_char() == "\\" {
+                advance();
+                let esc = cur_char();
+                if esc == "n" { ch = "\n"; }
+                else if esc == "t" { ch = "\t"; }
+                else if esc == "r" { ch = "\r"; }
+                else if esc == "'" { ch = "'"; }
+                else if esc == "\\" { ch = "\\"; }
+                else { ch = esc; }
+                advance();
+            } else {
+                ch = cur_char();
+                advance();
+            }
+            if cur_char() == "'" { advance(); }
+            add_token_str(T_CHAR, ch);
+            skip_whitespace();
+            continue;
+        }
+
+        // Multi-character operators
+        if c == "=" && peek() == "=" { advance(); advance(); add_token(T_EQEQ); skip_whitespace(); continue; }
+        if c == "!" && peek() == "=" { advance(); advance(); add_token(T_BANGEQ); skip_whitespace(); continue; }
+        if c == "<" && peek() == "=" { advance(); advance(); add_token(T_LTEQ); skip_whitespace(); continue; }
+        if c == ">" && peek() == "=" { advance(); advance(); add_token(T_GTEQ); skip_whitespace(); continue; }
+        if c == "&" && peek() == "&" { advance(); advance(); add_token(T_ANDAND); skip_whitespace(); continue; }
+        if c == "|" && peek() == "|" { advance(); advance(); add_token(T_PIPEPIPE); skip_whitespace(); continue; }
+        if c == "-" && peek() == ">" { advance(); advance(); add_token(T_ARROW); skip_whitespace(); continue; }
+        if c == "=" && peek() == ">" { advance(); advance(); add_token(T_FATARROW); skip_whitespace(); continue; }
+        if c == ":" && peek() == ":" { advance(); advance(); add_token(T_PATHSEP); skip_whitespace(); continue; }
+        if c == "." && peek() == "." { advance(); advance(); add_token(T_DOTDOT); skip_whitespace(); continue; }
+
+        // Single-character tokens
+        if c == "(" { advance(); add_token(T_LPAREN); skip_whitespace(); continue; }
+        if c == ")" { advance(); add_token(T_RPAREN); skip_whitespace(); continue; }
+        if c == "{" { advance(); add_token(T_LBRACE); skip_whitespace(); continue; }
+        if c == "}" { advance(); add_token(T_RBRACE); skip_whitespace(); continue; }
+        if c == "[" { advance(); add_token(T_LBRACKET); skip_whitespace(); continue; }
+        if c == "]" { advance(); add_token(T_RBRACKET); skip_whitespace(); continue; }
+        if c == "," { advance(); add_token(T_COMMA); skip_whitespace(); continue; }
+        if c == ";" { advance(); add_token(T_SEMI); skip_whitespace(); continue; }
+        if c == ":" { advance(); add_token(T_COLON); skip_whitespace(); continue; }
+        if c == "." { advance(); add_token(T_DOT); skip_whitespace(); continue; }
+        if c == "=" { advance(); add_token(T_EQ); skip_whitespace(); continue; }
+        if c == "!" { advance(); add_token(T_BANG); skip_whitespace(); continue; }
+        if c == "<" { advance(); add_token(T_LT); skip_whitespace(); continue; }
+        if c == ">" { advance(); add_token(T_GT); skip_whitespace(); continue; }
+        if c == "+" { advance(); add_token(T_PLUS); skip_whitespace(); continue; }
+        if c == "-" { advance(); add_token(T_MINUS); skip_whitespace(); continue; }
+        if c == "*" { advance(); add_token(T_STAR); skip_whitespace(); continue; }
+        if c == "/" { advance(); add_token(T_SLASH); skip_whitespace(); continue; }
+        if c == "%" { advance(); add_token(T_PERCENT); skip_whitespace(); continue; }
+        if c == "&" { advance(); add_token(T_AMPERSAND); skip_whitespace(); continue; }
+        if c == "_" { advance(); add_token(T_UNDERSCORE); skip_whitespace(); continue; }
+
+        // Unknown character
+        advance();
+        skip_whitespace();
+    }
+
+    add_token(T_EOF);
+}

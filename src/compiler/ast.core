@@ -1,0 +1,316 @@
+// === ast.core ===
+// Core compiler - shared type definitions and constants
+
+// Token kind constants
+let T_EOF: int = 0;
+let T_IDENT: int = 1;
+let T_INT: int = 2;
+let T_FLOAT: int = 3;
+let T_STRING: int = 4;
+let T_FN: int = 5;
+let T_LET: int = 6;
+let T_MUT: int = 7;
+let T_IF: int = 8;
+let T_ELSE: int = 9;
+let T_LOOP: int = 10;
+let T_FOR: int = 11;
+let T_IN: int = 12;
+let T_RETURN: int = 13;
+let T_BREAK: int = 14;
+let T_CONTINUE: int = 15;
+let T_STRUCT: int = 16;
+let T_ENUM: int = 17;
+let T_IMPL: int = 18;
+let T_PUB: int = 19;
+let T_TRUE: int = 20;
+let T_FALSE: int = 21;
+let T_MOVE: int = 22;
+let T_SELF: int = 23;
+let T_LPAREN: int = 24;
+let T_RPAREN: int = 25;
+let T_LBRACE: int = 26;
+let T_RBRACE: int = 27;
+let T_COMMA: int = 28;
+let T_SEMI: int = 29;
+let T_COLON: int = 30;
+let T_DOT: int = 31;
+let T_ARROW: int = 32;
+let T_EQ: int = 33;
+let T_EQEQ: int = 34;
+let T_BANG: int = 35;
+let T_BANGEQ: int = 36;
+let T_LT: int = 37;
+let T_GT: int = 38;
+let T_LTEQ: int = 39;
+let T_GTEQ: int = 40;
+let T_PLUS: int = 41;
+let T_MINUS: int = 42;
+let T_STAR: int = 43;
+let T_SLASH: int = 44;
+let T_ANDAND: int = 45;
+let T_PIPEPIPE: int = 46;
+let T_AMPERSAND: int = 47;
+let T_UNDERSCORE: int = 48;
+let T_UNIT: int = 49;
+let T_PATHSEP: int = 50;
+let T_LBRACKET: int = 51;
+let T_RBRACKET: int = 52;
+let T_MATCH: int = 53;
+let T_FATARROW: int = 54;
+let T_PERCENT: int = 55;
+let T_CHAR: int = 56;
+let T_WHILE: int = 57;
+let T_DOTDOT: int = 58;
+let T_TYPE: int = 59;
+let T_MOD: int = 60;
+let T_IMPORT: int = 61;
+let T_AS: int = 62;
+let T_GO: int = 63;
+let T_AWAIT: int = 64;
+let T_UNSAFE: int = 65;
+let T_INTERFACE: int = 66;
+
+// Type constants
+let TY_INT: int = 0;
+let TY_FLOAT: int = 1;
+let TY_BOOL: int = 2;
+let TY_STRING: int = 3;
+let TY_UNIT: int = 4;
+let TY_NEVER: int = 5;
+let TY_CHAR: int = 6;
+let TY_GENERIC_PARAM: int = 7;  // special sentinel for generic type params
+
+// Storage limits
+let MAX_FUNCS: int = 128;
+let MAX_STRUCTS: int = 64;
+let MAX_ENUMS: int = 32;
+let MAX_VARIANTS: int = 16;
+let MAX_FIELDS: int = 16;
+let MAX_PARAMS: int = 16;
+let MAX_LOOPS: int = 16;
+
+// Compiler buffer sizes
+let MAX_TOKENS: int = 8192;
+let MAX_AST: int = 16384;
+let MAX_STRS: int = 2048;
+let MAX_ERRS: int = 128;
+let MAX_ASM: int = 8192;
+let MAX_BLOCK_STMTS: int = 16384; // total statements across all blocks
+
+// Token struct
+struct Token {
+    kind: int,
+    lexeme: string,
+    int_val: int,
+    line: int,
+    col: int,
+}
+
+// Function signature (for call resolution)
+struct FuncInfo {
+    name: string,
+    param_count: int,
+    param_types: [int; 16],
+    return_type: int,
+    ast_node: int,  // index into ast array for the fn body
+    generic_names: [string; 4],
+    generic_count: int,
+}
+
+// Struct layout
+struct StructInfo {
+    name: string,
+    field_names: [string; 16],
+    field_types: [int; 16],
+    field_type_nodes: [int; 16],  // original type node indices (for generic resolution)
+    field_count: int,
+    generic_names: [string; 4],
+    generic_count: int,
+}
+
+// Enum variant description
+struct EnumVariant {
+    name: string,
+    types: [int; 16],  // TY_* for each field
+    type_count: int,
+}
+
+// Enum layout
+struct EnumInfo {
+    name: string,
+    variants: [EnumVariant; 16],
+    variant_count: int,
+    generic_names: [string; 4],
+    generic_count: int,
+}
+
+// Loop context (for break/continue)
+struct LoopInfo {
+    start_label: string,
+    end_label: string,
+}
+
+// Block statement index storage: sequential statement indices for each block
+// EXPR_BLOCK uses a=start_idx_into_g_block_stmts, b=stmt_count
+let mut g_block_stmts: [int; MAX_BLOCK_STMTS];
+let mut g_block_stmt_count: int;
+
+// Flat AST node - representation varies by kind
+struct ASTNode {
+    kind: int,
+    a: int,       // child/index slot 1
+    b: int,       // child/index slot 2
+    c: int,       // child/index slot 3
+    int_val: int, // integer literal or string table ref
+    type_val: int, // resolved type (TY_*)
+    data: int,     // extra data (mutable flag, etc.)
+    line: int,
+    col: int,
+}
+
+// AST node kind constants
+let EXPR_NONE: int = 0;
+let EXPR_INT: int = 1;      // int_val = value
+let EXPR_FLOAT: int = 27;   // int_val = value (as scaled int)
+let EXPR_STRING: int = 2;   // int_val = str table index
+let EXPR_BOOL: int = 3;     // int_val = 0/1
+let EXPR_IDENT: int = 4;    // int_val = name str table index
+let EXPR_BINARY: int = 5;   // a=left, b=right, c=opcode
+let EXPR_UNARY: int = 6;    // a=operand, c=opcode
+let EXPR_CALL: int = 7;     // a=func, b=first arg idx, c=arg count
+let EXPR_BLOCK: int = 8;    // a=g_block_stmts start, b=stmt count
+let EXPR_IF: int = 9;       // a=cond, b=then, c=else (-1 if none)
+let EXPR_LOOP: int = 10;    // a=body
+let EXPR_LET: int = 11;     // a=name idx, b=type, c=value, data=is_mut
+let EXPR_RETURN: int = 12;  // a=value expr (-1 if none)
+let EXPR_FIELD: int = 13;   // a=object, int_val=field name idx
+let EXPR_INDEX: int = 14;   // a=object, b=index
+let EXPR_ASSIGN: int = 15;  // a=target, b=value
+let EXPR_STRUCT: int = 16;  // a=type name idx, b=first field, c=field count
+let EXPR_FN: int = 17;      // a=name idx, b=first param, c=param count, d=body, data=return_type
+let EXPR_PARAM: int = 18;   // a=name idx, int_val=type
+let EXPR_ARRAY: int = 19;   // a=first elem, b=elem count
+let EXPR_BREAK: int = 20;
+let EXPR_CONTINUE: int = 21;
+let EXPR_FOR: int = 22;     // a=var name idx, b=iter, c=body
+let EXPR_MATCH: int = 23;   // a=expr, b=first arm, c=arm count
+let EXPR_ARM: int = 24;     // a=pattern, b=body
+let EXPR_WILDCARD: int = 25;
+let EXPR_ENUMPAT: int = 26; // a=name idx, b=first subpat, c=subpat count
+let EXPR_STMT: int = 28;   // a=inner expr; expression used as statement (with ;), returns unit
+let EXPR_CHAR: int = 29;   // int_val = codepoint
+let EXPR_WHILE: int = 30;  // a=cond, b=body
+let EXPR_RANGE: int = 31;  // a=start, b=end
+let EXPR_MOVE: int = 32;     // a=expr being moved
+let EXPR_ENUM_CONSTRUCTOR: int = 37; // a=name idx, b=first arg, c=arg count
+let EXPR_REFTYPE: int = 38;   // a=inner type node, data=mut flag (for &T / &mut T in type position)
+let EXPR_GENERIC_APPLY: int = 39; // a=base name idx, b=first arg type node, c=arg count
+
+// Field representation in struct literal: two consecutive AST nodes
+// (name_idx, value_idx, line=line, col=col)
+struct FieldPair {
+    name_idx: int,
+    value_idx: int,
+    line: int,
+    col: int,
+}
+
+// Binary operator codes
+let OP_ADD: int = 1;
+let OP_SUB: int = 2;
+let OP_MUL: int = 3;
+let OP_DIV: int = 4;
+let OP_MOD: int = 5;
+let OP_EQ: int = 6;
+let OP_NE: int = 7;
+let OP_LT: int = 8;
+let OP_GT: int = 9;
+let OP_LE: int = 10;
+let OP_GE: int = 11;
+let OP_AND: int = 12;
+let OP_OR: int = 13;
+let OP_ASSIGN: int = 14;
+
+// Unary operator codes
+let UOP_NEG: int = 1;
+let UOP_NOT: int = 2;
+let UOP_REF: int = 3;
+let UOP_DEREF: int = 4;
+
+// Type table pre-allocated indices (for checker type system)
+let TI_INT: int = 0;
+let TI_FLOAT: int = 1;
+let TI_BOOL: int = 2;
+let TI_STR: int = 3;
+let TI_UNIT: int = 4;
+let TI_NEVER: int = 5;
+let TI_CHAR: int = 6;
+
+// Type table entry kinds
+let TYP_BASE: int = 0;   // data = TY_* constant
+let TYP_NAMED: int = 1;  // data = name string index
+let TYP_ARRAY: int = 2;  // data = element type idx, extra = size
+let TYP_REF: int = 3;    // data = inner type idx, extra = mut flag
+let TYP_GENERIC_PARAM: int = 7;  // data = name string index (unresolved generic param)
+let TYP_GENERIC_APPLY: int = 8;  // data = base type idx, extra = arg list start in g_gen_apply_data
+
+// Symbol kinds for checker
+let SYM_FN: int = 0;
+let SYM_TYPE: int = 1;
+let SYM_LOCAL: int = 2;
+let SYM_PARAM: int = 3;
+let SYM_GLOBAL: int = 4;
+
+// Additional size limits
+let MAX_SYMS: int = 512;
+let MAX_TYPES: int = 128;
+let MAX_SCOPES: int = 32;
+let MAX_IREXPRS: int = 4096;
+let MAX_IRINSTRUCTIONS: int = 16384;
+let MAX_BLOCKS: int = 512;
+let MAX_LABELS: int = 512;
+let MAX_GENERICS: int = 4;        // max generic params per declaration
+let MAX_GEN_ARGS: int = 128;      // total storage for generic type args
+let mut g_gen_apply_data: [int; MAX_GEN_ARGS];  // flat: [count, arg1, arg2, ...] for each GENERIC_APPLY
+let mut g_gen_apply_data_count: int;
+// IR instruction opcodes
+let IR_NOP: int = 0;
+let IR_CONST: int = 1;
+let IR_BINARY: int = 2;
+let IR_UNARY: int = 3;
+let IR_CALL: int = 4;
+let IR_RETURN: int = 5;
+let IR_ALLOC: int = 6;
+let IR_ALLOC_STRUCT: int = 7;
+let IR_ALLOC_ARRAY: int = 8;
+let IR_STORE: int = 9;
+let IR_LOAD: int = 10;
+let IR_LOAD_FIELD: int = 11;
+let IR_STORE_FIELD: int = 12;
+let IR_LOAD_INDEX: int = 13;
+let IR_STORE_INDEX: int = 14;
+let IR_LOAD_INDEX_VAR: int = 15;
+let IR_STORE_INDEX_VAR: int = 16;
+let IR_MAKE_ENUM: int = 17;
+let IR_REF: int = 18;
+let IR_BRANCH: int = 19;
+let IR_JUMP: int = 20;
+let IR_LABEL: int = 21;
+let IR_PHI: int = 22;
+
+// IR variable
+struct IRVar {
+    name: string,
+    id: int,
+    type_kind: int,
+}
+
+// IR instruction (flat representation)
+struct IRInstr {
+    opcode: int,
+    dest: int,      // destination var index
+    src1: int,      // source var/val 1
+    src2: int,      // source var/val 2
+    src3: int,      // extra data (label, field name, etc.)
+    type_kind: int, // type info
+}

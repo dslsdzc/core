@@ -7,6 +7,36 @@ class Parser:
     def __init__(self, tokens: list):
         self.tokens = tokens
         self.pos = 0
+        self.const_values = {}
+
+    def _scan_constants(self):
+        """Pre-scan for 'let NAME: TYPE = VALUE;' declarations to resolve array sizes."""
+        save = self.pos
+        while not self.check(TokenType.EOF):
+            if (self.check(TokenType.LET) and
+                self._check_seq([TokenType.LET, TokenType.IDENT, TokenType.COLON,
+                                 TokenType.IDENT, TokenType.EQ, TokenType.INT_LIT,
+                                 TokenType.SEMI])):
+                self.advance()  # let
+                name = self.advance().lexeme  # NAME
+                self.advance()  # :
+                type_name = self.advance().lexeme  # int/float/bool
+                self.advance()  # =
+                val = int(self.advance().lexeme)  # VALUE
+                self.const_values[name] = val
+                self.advance()  # ; (skip to keep pos consistent)
+            else:
+                self.advance()
+        self.pos = save
+
+    def _check_seq(self, types):
+        """Check if the next tokens match the given type sequence."""
+        if self.pos + len(types) > len(self.tokens):
+            return False
+        for i, t in enumerate(types):
+            if self.tokens[self.pos + i].type != t:
+                return False
+        return True
 
     def cur(self) -> Token:
         return self.tokens[self.pos]
@@ -33,6 +63,7 @@ class Parser:
 
     # ─── 顶层 ───
     def parse_compilation_unit(self) -> CompilationUnit:
+        self._scan_constants()
         modules, imports = self._parse_module_and_imports()
         declarations = []
         while not self.check(TokenType.EOF):
@@ -89,6 +120,8 @@ class Parser:
             return self.parse_impl_decl()
         elif self.check(TokenType.TYPE):
             return self.parse_type_alias()
+        elif self.check(TokenType.LET):
+            return self.parse_let_decl()
         self.error(f"Unexpected '{self.cur().lexeme}' at top level")
 
     def parse_function_decl(self, is_pub):
@@ -98,8 +131,11 @@ class Parser:
         self.expect(TokenType.LPAREN)
         params = self._parse_param_list()
         self.expect(TokenType.RPAREN)
-        self.expect(TokenType.ARROW)
-        ret = self.parse_type()
+        if self.check(TokenType.ARROW):
+            self.advance()
+            ret = self.parse_type()
+        else:
+            ret = BaseType('unit')
         if self.check(TokenType.EQ):
             self.advance()
             body = self.parse_expr()
@@ -147,7 +183,18 @@ class Parser:
             inner = self.parse_type()
             if self.check(TokenType.SEMI):
                 self.advance()
-                sz = int(self.expect(TokenType.INT_LIT).lexeme)
+                if self.check(TokenType.INT_LIT):
+                    sz = int(self.expect(TokenType.INT_LIT).lexeme)
+                elif self.check(TokenType.IDENT):
+                    name = self.expect(TokenType.IDENT).lexeme
+                    sz = self.const_values.get(name, 0)
+                    # Handle CONST * N  (e.g. MAX_TYPES * 3)
+                    if self.check(TokenType.STAR):
+                        self.advance()
+                        rhs = int(self.expect(TokenType.INT_LIT).lexeme)
+                        sz = sz * rhs
+                else:
+                    self.error("Expected integer literal or constant name for array size")
                 self.expect(TokenType.RBRACK)
                 return ArrayType(inner, sz)
             self.expect(TokenType.RBRACK)
@@ -355,12 +402,17 @@ class Parser:
             self.advance(); return Literal(None, 'unit')
         if self.check(TokenType.IDENT):
             ident_name = self.advance().lexeme
-            if ident_name[0].isupper() and self.check(TokenType.LBRACE):
-                self.advance()
+            if ident_name[0].isupper() and self.check(TokenType.LBRACE) and self._is_struct_lit(self.pos):
+                self.advance()  # consume {
                 fields = []
                 while not self.check(TokenType.RBRACE):
                     fname = self.expect(TokenType.IDENT).lexeme
-                    self.expect(TokenType.EQ)
+                    if self.check(TokenType.EQ):
+                        self.advance()
+                    elif self.check(TokenType.COLON):
+                        self.advance()
+                    else:
+                        self.expect(TokenType.EQ)
                     val = self.parse_expr()
                     fields.append((fname, val))
                     if self.check(TokenType.COMMA):
@@ -373,8 +425,15 @@ class Parser:
             if self.check(TokenType.RBRACK):
                 self.advance()
                 return ArrayLit([])
-            elements = []
-            elements.append(self.parse_expr())
+            first = self.parse_expr()
+            if self.check(TokenType.SEMI):
+                # [value; count] — repeated array
+                self.advance()
+                count = self.expect(TokenType.INT_LIT)
+                elements = [first] * int(count.lexeme)
+                self.expect(TokenType.RBRACK)
+                return ArrayLit(elements)
+            elements = [first]
             while self.check(TokenType.COMMA):
                 self.advance()
                 elements.append(self.parse_expr())
@@ -403,13 +462,59 @@ class Parser:
             self.advance(); return Unsafe(self.parse_block())
         self.error(f"Unexpected token: {self.cur().lexeme}")
 
+    def _is_struct_lit(self, brace_pos):
+        """Check if at brace_pos we have a struct literal rather than a block.
+
+        Scans for ';' inside the braces — a semicolon at depth 1 means block,
+        not struct literal. Also requires first field to start with IDENT =/:."""
+        pos = brace_pos + 1
+        if pos >= len(self.tokens):
+            return False
+        # Empty braces {}
+        if self.tokens[pos].type == TokenType.RBRACE:
+            return True
+        # Must start with IDENT = or IDENT :
+        if self.tokens[pos].type != TokenType.IDENT:
+            return False
+        if pos + 1 >= len(self.tokens):
+            return False
+        nxt = self.tokens[pos + 1].type
+        if nxt != TokenType.EQ and nxt != TokenType.COLON:
+            return False
+        # Scan for ; at depth 1 (top level), tracking all bracket types
+        depth = 1
+        limit = min(brace_pos + 100, len(self.tokens))
+        for i in range(brace_pos + 1, limit):
+            tt = self.tokens[i].type
+            if tt in (TokenType.LBRACE,): depth += 1
+            elif tt in (TokenType.RBRACE,): depth -= 1
+            elif tt in (TokenType.LBRACK, TokenType.LPAREN): depth += 1
+            elif tt in (TokenType.RBRACK, TokenType.RPAREN): depth -= 1
+            if depth == 0:
+                break
+            if tt == TokenType.SEMI and depth == 1:
+                return False  # ; at top level -> block
+        return True
+
     def parse_block(self) -> Block:
         self.expect(TokenType.LBRACE)
         stmts = []
+        expr = None
         while not self.check(TokenType.RBRACE) and not self.check(TokenType.EOF):
-            stmts.append(self.parse_stmt())
+            item = self.parse_stmt()
+            if isinstance(item, Stmt):
+                if expr is not None:
+                    # previous bare expression wasn't last — push as stmt
+                    stmts.append(ExprStmt(expr))
+                    expr = None
+                stmts.append(item)
+            else:
+                # bare expression — tentatively the trailing expr
+                if expr is not None:
+                    stmts.append(ExprStmt(expr))
+                expr = item
         self.expect(TokenType.RBRACE)
-        return Block(stmts)
+        return Block(stmts, expr)
 
     def parse_stmt(self):
         if self.check(TokenType.LET):
@@ -423,8 +528,10 @@ class Parser:
             if self.check(TokenType.COLON):
                 self.advance()
                 typ = self.parse_type()
-            self.expect(TokenType.EQ)
-            val = self.parse_expr()
+            val = None
+            if self.check(TokenType.EQ):
+                self.advance()
+                val = self.parse_expr()
             self.expect(TokenType.SEMI)
             return LetStmt(mut, name, typ, val)
         elif self.check(TokenType.RETURN):
@@ -445,22 +552,12 @@ class Parser:
             if self.check(TokenType.SEMI):
                 self.advance()
             return ContinueStmt()
-        elif self.check(TokenType.IF):
-            e = self.parse_if_expr()
-            return ExprStmt(e)
-        elif self.check(TokenType.MATCH):
-            e = self.parse_match_expr()
-            return ExprStmt(e)
-        elif self.check(TokenType.LOOP):
-            e = self.parse_loop_expr()
-            return ExprStmt(e)
-        elif self.check(TokenType.FOR):
-            e = self.parse_for_expr()
-            return ExprStmt(e)
         else:
             e = self.parse_expr()
-            self.expect(TokenType.SEMI)
-            return ExprStmt(e)
+            if self.check(TokenType.SEMI):
+                self.advance()
+                return ExprStmt(e)
+            return e
 
     def parse_if_expr(self):
         self.expect(TokenType.IF)
@@ -635,3 +732,22 @@ class Parser:
         typ = self.parse_type()
         self.expect(TokenType.SEMI)
         return TypeAliasDecl(name, typ)
+
+    def parse_let_decl(self):
+        from corec.syntax.ast import LetDecl
+        self.expect(TokenType.LET)
+        mut = False
+        if self.check(TokenType.MUT):
+            mut = True
+            self.advance()
+        name = self.expect(TokenType.IDENT).lexeme
+        typ = None
+        if self.check(TokenType.COLON):
+            self.advance()
+            typ = self.parse_type()
+        val = None
+        if self.check(TokenType.EQ):
+            self.advance()
+            val = self.parse_expr()
+        self.expect(TokenType.SEMI)
+        return LetDecl(mut, name, typ, val)

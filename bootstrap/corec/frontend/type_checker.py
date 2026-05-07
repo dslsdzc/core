@@ -110,6 +110,8 @@ class TypeChecker:
         for decl in ast.declarations:
             if isinstance(decl, FunctionDecl):
                 self._check_function(decl)
+            elif isinstance(decl, LetDecl):
+                self._check_let_decl(decl)
         return len(self.errors) == 0
 
     def _declare_struct(self, decl: StructDecl):
@@ -141,6 +143,28 @@ class TypeChecker:
             if not self.symtab.lookup(full_name):
                 self.symtab.define(full_name, SymbolKind.FUNCTION,
                                    method.return_type, method)
+
+    def _check_let_decl(self, decl: LetDecl):
+        inferred = None
+        if decl.value:
+            inferred = self._infer_expr(decl.value)
+        typ = decl.type_
+        if typ is None:
+            if inferred is None:
+                self.errors.append(f"Cannot infer type of global {decl.name}")
+                return
+            typ = inferred
+        else:
+            if inferred and not self._type_equal(inferred, typ):
+                self.errors.append(f"Global {decl.name}: declared type {typ} but initialized with {inferred}")
+        # Update the symbol's type
+        sym = self.symtab.lookup(decl.name, recursive=False)
+        if sym:
+            sym.type = typ
+        if decl.value and isinstance(decl.value, UnaryOp) and decl.value.op in ('&', '&mut'):
+            borrowed_name = self._borrow_var_name(decl.value.operand)
+            if borrowed_name:
+                self._record_borrow_holder(decl.name, borrowed_name, decl.value.op == '&mut')
 
     def _check_function(self, decl: FunctionDecl):
         self.symtab.push_scope()
@@ -226,6 +250,11 @@ class TypeChecker:
                     return operand_type.inner
                 self.errors.append("Cannot dereference non-reference type")
                 return BaseType('never')
+            if expr.op == '!':
+                if operand_type.name != 'bool':
+                    self.errors.append("Unary ! requires bool")
+                    return BaseType('never')
+                return BaseType('bool')
             self.errors.append(f"Unary operator {expr.op} not supported")
             return BaseType('never')
         elif isinstance(expr, Call):
@@ -315,11 +344,12 @@ class TypeChecker:
                 if not self._type_equal(first_type, self._infer_expr(elem)):
                     self.errors.append("Array elements must have same type")
                     return BaseType('never')
-            return BaseType('array')
+            return ArrayType(first_type, len(expr.elements))
         elif isinstance(expr, Index):
             arr_t = self._infer_expr(expr.object)
-            # 数组的元素类型推断为 int (暂时)
-            if arr_t.name == 'array':
+            if isinstance(arr_t, ArrayType):
+                return arr_t.inner  # return actual element type
+            if hasattr(arr_t, 'name') and arr_t.name == 'array':
                 return BaseType('int')
             self.errors.append("Indexing non-array type")
             return BaseType('never')
@@ -402,7 +432,8 @@ class TypeChecker:
                 return self._infer_expr(expr.value)
             return BaseType('unit')
         elif isinstance(expr, ExprStmt):
-            return self._infer_expr(expr.expr)
+            self._infer_expr(expr.expr)  # check for side effects
+            return BaseType('unit')
         elif isinstance(expr, LetStmt):
             inferred = None
             if expr.value:
@@ -433,6 +464,12 @@ class TypeChecker:
     # _infer_call (方法体必须存在)
     # --------------------------------------------------------------
     def _infer_call(self, call: Call) -> Type:
+        # Handle built-in functions (no decl node)
+        if isinstance(call.func, Ident) and call.func.name.startswith('__builtin_'):
+            sym = self.symtab.lookup(call.func.name)
+            if sym and sym.type:
+                return sym.type
+            return BaseType('int')
         if isinstance(call.func, FieldAccess):
             obj_t = self._infer_expr(call.func.object)
             if isinstance(obj_t, RefType):
@@ -584,4 +621,6 @@ class TypeChecker:
             if len(t1.args) != len(t2.args):
                 return False
             return all(self._type_equal(a1, a2) for a1, a2 in zip(t1.args, t2.args))
+        if isinstance(t1, ArrayType):
+            return t1.size == t2.size and self._type_equal(t1.inner, t2.inner)
         return str(t1) == str(t2)

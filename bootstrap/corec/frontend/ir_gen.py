@@ -43,7 +43,21 @@ class IRGen:
                     if not self.symtab.lookup(full_name):
                         self.symtab.define(full_name, SymbolKind.FUNCTION, method.return_type, method)
                     self.gen_function(method)
+            elif isinstance(decl, LetDecl):
+                self.gen_let_decl(decl)
         return self.mod
+
+    def gen_let_decl(self, decl: LetDecl):
+        typ = decl.type_ if decl.type_ else BaseType('int')
+        var_ir = IRVar(decl.name, VarKind.GLOBAL, typ)
+        # Store constant value directly on the IRVar for interpreter initialization
+        if decl.value and isinstance(decl.value, Literal):
+            var_ir.constant_value = decl.value.value
+        sym = self.symtab.lookup(decl.name)
+        if sym:
+            sym.ir_var = var_ir
+        self.mod.globals.append(var_ir)
+        return None
 
     def gen_function(self, decl: FunctionDecl):
         params = [IRVar(name, VarKind.PARAM, typ) for name, typ in decl.params]
@@ -91,7 +105,7 @@ class IRGen:
         if isinstance(expr, ContinueStmt): return self.gen_continue()
         raise NotImplementedError(type(expr))
 
-    def gen_stmt(self, stmt): self.gen_expr(stmt)
+    def gen_stmt(self, stmt): return self.gen_expr(stmt)
 
     def gen_array_lit(self, arr: ArrayLit):
         # 为每个元素生成表达式，最后生成一个 AllocArrayInstr
@@ -104,13 +118,15 @@ class IRGen:
 
     def gen_index(self, idx: Index):
         arr = self.gen_expr(idx.object)
-        # 索引必须是常量整数（当前限制）
         if isinstance(idx.index, Literal) and idx.index.kind == 'int':
             index_val = int(idx.index.value)
-        else:
-            raise RuntimeError("Index must be a constant integer literal")
+            dest = self.new_temp()
+            self.add_instr(LoadIndexInstr(arr, index_val, dest))
+            return dest
+        # Variable index
+        idx_var = self.gen_expr(idx.index)
         dest = self.new_temp()
-        self.add_instr(LoadIndexInstr(arr, index_val, dest))
+        self.add_instr(LoadIndexVarInstr(arr, idx_var, dest))
         return dest
 
     def gen_literal(self, lit):
@@ -156,9 +172,10 @@ class IRGen:
                 arr = self.gen_expr(binop.left.object)
                 if isinstance(binop.left.index, Literal) and binop.left.index.kind == 'int':
                     idx = int(binop.left.index.value)
+                    self.add_instr(StoreIndexInstr(arr, idx, val))
                 else:
-                    raise RuntimeError("Index must be a constant integer literal")
-                self.add_instr(StoreIndexInstr(arr, idx, val))
+                    idx_var = self.gen_expr(binop.left.index)
+                    self.add_instr(StoreIndexVarInstr(arr, idx_var, val))
                 return val
             elif isinstance(binop.left, UnaryOp) and binop.left.op == '*':
                 ref = self.gen_expr(binop.left.operand)
@@ -495,9 +512,11 @@ class IRGen:
                 kind_map = {'int':'int','float':'float','bool':'bool','string':'string','char':'char','unit':'unit'}
                 typ = BaseType(kind_map.get(let.value.kind,'unit'))
             else: typ = BaseType('unit')
+        if typ is None:
+            typ = BaseType('unit')
         var_ir = IRVar(let.name, VarKind.LOCAL, typ)
+        self.add_instr(AllocInstr(typ, var_ir))
         if val_ir:
-            self.add_instr(AllocInstr(typ, var_ir))
             self.add_instr(StoreInstr(var_ir, val_ir))
         self.local_vars[let.name] = var_ir
         sym = self.symtab.lookup(let.name, recursive=False)

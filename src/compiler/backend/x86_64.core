@@ -1,0 +1,500 @@
+// === backend/x86_64.core ===
+// x86-64 assembly generation from flat IR (GAS .intel_syntax noprefix)
+
+// Stack frame management per function
+let mut g_x86_vars: [int; MAX_IREXPRS]; // var_idx -> stack offset from rbp (negative)
+let mut g_x86_var_count: int;
+let mut g_x86_stack_size: int; // total stack frame size for current function
+
+fn x86_init_frame() {
+    g_x86_var_count = 0;
+    g_x86_stack_size = 0;
+}
+
+fn x86_alloc_stack(var_idx: int) -> int {
+    let mut i = 0;
+    loop {
+        if i >= g_x86_var_count { break; }
+        if g_x86_vars[i] == var_idx {
+            return -(i + 1) * 8;
+        }
+        i = i + 1;
+    }
+    if g_x86_var_count < MAX_IREXPRS {
+        g_x86_vars[g_x86_var_count] = var_idx;
+        g_x86_var_count = g_x86_var_count + 1;
+        g_x86_stack_size = g_x86_var_count * 8;
+        return -(g_x86_var_count) * 8;
+    }
+    return -8;
+}
+
+fn x86_get_offset(var_idx: int) -> int {
+    let mut i = 0;
+    loop {
+        if i >= g_x86_var_count { break; }
+        if g_x86_vars[i] == var_idx {
+            return -(i + 1) * 8;
+        }
+        i = i + 1;
+    }
+    return x86_alloc_stack(var_idx);
+}
+
+fn x86_label(lbl: int) -> string {
+    let mut s = ".L";
+    s = s + __builtin_int_to_str(lbl);
+    s = s + ":";
+    return s;
+}
+
+fn x86_jump_label(lbl: int) -> string {
+    let mut s = ".L";
+    s = s + __builtin_int_to_str(lbl);
+    return s;
+}
+
+fn x86_gen_instr(instr_idx: int) -> string {
+    let inst = g_ir_instrs[instr_idx];
+    let op = inst.opcode;
+    let dest = inst.dest;
+    let s1 = inst.src1;
+    let s2 = inst.src2;
+    let s3 = inst.src3;
+    let mut asm = "";
+
+    if op == IR_NOP { return asm; }
+
+    if op == IR_CONST {
+        let off = x86_get_offset(dest);
+        let val = s1;
+        let ti = inst.type_kind;
+        if ti == TI_STR {
+            let mut lbl = ".LC";
+            lbl = lbl + __builtin_int_to_str(val);
+            asm = asm + "    lea r10, ";
+            asm = asm + lbl;
+            asm = asm + "[rip]\n";
+            asm = asm + "    mov [rbp";
+            if off >= 0 { asm = asm + "+"; }
+            asm = asm + __builtin_int_to_str(off);
+            asm = asm + "], r10\n";
+        } else {
+            asm = asm + "    mov qword ptr [rbp";
+            if off >= 0 { asm = asm + "+"; }
+            asm = asm + __builtin_int_to_str(off);
+            asm = asm + "], ";
+            asm = asm + __builtin_int_to_str(val);
+            asm = asm + "\n";
+        }
+        return asm;
+    }
+
+    if op == IR_BINARY {
+        let off_s1 = x86_get_offset(s1);
+        let off_s2 = x86_get_offset(s2);
+        let off_d = x86_get_offset(dest);
+        asm = asm + "    mov r10, [rbp";
+        if off_s1 >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_s1);
+        asm = asm + "]\n";
+        asm = asm + "    mov r11, [rbp";
+        if off_s2 >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_s2);
+        asm = asm + "]\n";
+        if s3 == OP_ADD { asm = asm + "    add r10, r11\n"; }
+        if s3 == OP_SUB { asm = asm + "    sub r10, r11\n"; }
+        if s3 == OP_MUL { asm = asm + "    imul r10, r11\n"; }
+        if s3 == OP_DIV {
+            asm = asm + "    mov rax, r10\n";
+            asm = asm + "    cqo\n";
+            asm = asm + "    idiv r11\n";
+            asm = asm + "    mov r10, rax\n";
+        }
+        if s3 == OP_MOD {
+            asm = asm + "    mov rax, r10\n";
+            asm = asm + "    cqo\n";
+            asm = asm + "    idiv r11\n";
+            asm = asm + "    mov r10, rdx\n";
+        }
+        if s3 == OP_EQ {
+            asm = asm + "    cmp r10, r11\n";
+            asm = asm + "    sete al\n    movzx r10, al\n";
+        }
+        if s3 == OP_NE {
+            asm = asm + "    cmp r10, r11\n";
+            asm = asm + "    setne al\n    movzx r10, al\n";
+        }
+        if s3 == OP_LT {
+            asm = asm + "    cmp r10, r11\n";
+            asm = asm + "    setl al\n    movzx r10, al\n";
+        }
+        if s3 == OP_GT {
+            asm = asm + "    cmp r10, r11\n";
+            asm = asm + "    setg al\n    movzx r10, al\n";
+        }
+        if s3 == OP_LE {
+            asm = asm + "    cmp r10, r11\n";
+            asm = asm + "    setle al\n    movzx r10, al\n";
+        }
+        if s3 == OP_GE {
+            asm = asm + "    cmp r10, r11\n";
+            asm = asm + "    setge al\n    movzx r10, al\n";
+        }
+        if s3 == OP_AND { asm = asm + "    and r10, r11\n"; }
+        if s3 == OP_OR { asm = asm + "    or r10, r11\n"; }
+        asm = asm + "    mov [rbp";
+        if off_d >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_d);
+        asm = asm + "], r10\n";
+        return asm;
+    }
+
+    if op == IR_UNARY {
+        let off_s1 = x86_get_offset(s1);
+        let off_d = x86_get_offset(dest);
+        asm = asm + "    mov r10, [rbp";
+        if off_s1 >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_s1);
+        asm = asm + "]\n";
+        if s3 == UOP_NEG { asm = asm + "    neg r10\n"; }
+        else if s3 == UOP_NOT {
+            asm = asm + "    cmp r10, 0\n";
+            asm = asm + "    sete al\n    movzx r10, al\n";
+        }
+        asm = asm + "    mov [rbp";
+        if off_d >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_d);
+        asm = asm + "], r10\n";
+        return asm;
+    }
+
+    if op == IR_CALL {
+        let func_ni = s3;
+        let func_name = "";
+        if func_ni >= 0 { func_name = g_strs[func_ni]; }
+        let first_arg = s1;
+        let arg_count = s2;
+        let arg_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"];
+        let mut ai = 0;
+        loop {
+            if ai >= arg_count { break; }
+            if ai >= 6 { break; }
+            let arg_var = first_arg + ai;
+            let aoff = x86_get_offset(arg_var);
+            asm = asm + "    mov ";
+            asm = asm + arg_regs[ai];
+            asm = asm + ", [rbp";
+            if aoff >= 0 { asm = asm + "+"; }
+            asm = asm + __builtin_int_to_str(aoff);
+            asm = asm + "]\n";
+            ai = ai + 1;
+        }
+        if func_name != "" && func_name != "__builtin_str_len" && func_name != "__builtin_str_get"
+            && func_name != "__builtin_str_sub" && func_name != "__builtin_int_to_str"
+            && func_name != "__builtin_str_to_int" && func_name != "__builtin_str_push"
+            && func_name != "__builtin_str_from_int" {
+            asm = asm + "    call ";
+            asm = asm + func_name;
+            asm = asm + "\n";
+        } else {
+            asm = asm + "    xor eax, eax\n";
+        }
+        if dest >= 0 {
+            let doff = x86_get_offset(dest);
+            asm = asm + "    mov [rbp";
+            if doff >= 0 { asm = asm + "+"; }
+            asm = asm + __builtin_int_to_str(doff);
+            asm = asm + "], rax\n";
+        }
+        return asm;
+    }
+
+    if op == IR_RETURN {
+        if s1 >= 0 {
+            let off = x86_get_offset(s1);
+            asm = asm + "    mov rax, [rbp";
+            if off >= 0 { asm = asm + "+"; }
+            asm = asm + __builtin_int_to_str(off);
+            asm = asm + "]\n";
+        }
+        return asm;
+    }
+
+    if op == IR_ALLOC {
+        x86_get_offset(dest);
+        return asm;
+    }
+
+    if op == IR_ALLOC_STRUCT {
+        x86_get_offset(dest);
+        return asm;
+    }
+
+    if op == IR_ALLOC_ARRAY {
+        x86_get_offset(dest);
+        return asm;
+    }
+
+    if op == IR_STORE {
+        let off_addr = x86_get_offset(s1);
+        let off_val = x86_get_offset(s2);
+        asm = asm + "    mov r10, [rbp";
+        if off_val >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_val);
+        asm = asm + "]\n";
+        asm = asm + "    mov [rbp";
+        if off_addr >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_addr);
+        asm = asm + "], r10\n";
+        return asm;
+    }
+
+    if op == IR_LOAD {
+        let off_src = x86_get_offset(s1);
+        let off_d = x86_get_offset(dest);
+        asm = asm + "    mov r10, [rbp";
+        if off_src >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_src);
+        asm = asm + "]\n";
+        asm = asm + "    mov [rbp";
+        if off_d >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_d);
+        asm = asm + "], r10\n";
+        return asm;
+    }
+
+    if op == IR_LOAD_FIELD {
+        let off_struct = x86_get_offset(s1);
+        let off_d = x86_get_offset(dest);
+        let field_idx = s3;
+        asm = asm + "    mov r10, [rbp";
+        if off_struct >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_struct);
+        asm = asm + "]\n";
+        asm = asm + "    mov r11, [r10 + ";
+        asm = asm + __builtin_int_to_str(field_idx * 8);
+        asm = asm + "]\n";
+        asm = asm + "    mov [rbp";
+        if off_d >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_d);
+        asm = asm + "], r11\n";
+        return asm;
+    }
+
+    if op == IR_STORE_FIELD {
+        let off_struct = x86_get_offset(s1);
+        let off_val = x86_get_offset(s2);
+        let field_idx = s3;
+        asm = asm + "    mov r10, [rbp";
+        if off_struct >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_struct);
+        asm = asm + "]\n";
+        asm = asm + "    mov r11, [rbp";
+        if off_val >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_val);
+        asm = asm + "]\n";
+        asm = asm + "    mov [r10 + ";
+        asm = asm + __builtin_int_to_str(field_idx * 8);
+        asm = asm + "], r11\n";
+        return asm;
+    }
+
+    if op == IR_LOAD_INDEX {
+        let off_arr = x86_get_offset(s1);
+        let off_d = x86_get_offset(dest);
+        let idx = s3;
+        asm = asm + "    mov r10, [rbp";
+        if off_arr >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_arr);
+        asm = asm + "]\n";
+        asm = asm + "    mov r11, [r10 + ";
+        asm = asm + __builtin_int_to_str(idx * 8);
+        asm = asm + "]\n";
+        asm = asm + "    mov [rbp";
+        if off_d >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_d);
+        asm = asm + "], r11\n";
+        return asm;
+    }
+
+    if op == IR_STORE_INDEX {
+        let off_arr = x86_get_offset(s1);
+        let off_val = x86_get_offset(s2);
+        let idx = s3;
+        asm = asm + "    mov r10, [rbp";
+        if off_arr >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_arr);
+        asm = asm + "]\n";
+        asm = asm + "    mov r11, [rbp";
+        if off_val >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_val);
+        asm = asm + "]\n";
+        asm = asm + "    mov [r10 + ";
+        asm = asm + __builtin_int_to_str(idx * 8);
+        asm = asm + "], r11\n";
+        return asm;
+    }
+
+    if op == IR_LOAD_INDEX_VAR {
+        let off_arr = x86_get_offset(s1);
+        let off_idx = x86_get_offset(s2);
+        let off_d = x86_get_offset(dest);
+        asm = asm + "    mov r10, [rbp";
+        if off_arr >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_arr);
+        asm = asm + "]\n";
+        asm = asm + "    mov r11, [rbp";
+        if off_idx >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_idx);
+        asm = asm + "]\n";
+        asm = asm + "    mov r12, [r10 + r11 * 8]\n";
+        asm = asm + "    mov [rbp";
+        if off_d >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_d);
+        asm = asm + "], r12\n";
+        return asm;
+    }
+
+    if op == IR_STORE_INDEX_VAR {
+        let off_arr = x86_get_offset(s1);
+        let off_idx = x86_get_offset(s2);
+        let off_val = x86_get_offset(dest);
+        asm = asm + "    mov r10, [rbp";
+        if off_arr >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_arr);
+        asm = asm + "]\n";
+        asm = asm + "    mov r11, [rbp";
+        if off_idx >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_idx);
+        asm = asm + "]\n";
+        asm = asm + "    mov r12, [rbp";
+        if off_val >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_val);
+        asm = asm + "]\n";
+        asm = asm + "    mov [r10 + r11 * 8], r12\n";
+        return asm;
+    }
+
+    if op == IR_MAKE_ENUM {
+        x86_get_offset(dest);
+        return asm;
+    }
+    if op == IR_REF { return asm; }
+
+    if op == IR_BRANCH {
+        let off_cond = x86_get_offset(s1);
+        let true_lbl = s2;
+        let false_lbl = s3;
+        asm = asm + "    mov r10, [rbp";
+        if off_cond >= 0 { asm = asm + "+"; }
+        asm = asm + __builtin_int_to_str(off_cond);
+        asm = asm + "]\n";
+        asm = asm + "    cmp r10, 1\n";
+        asm = asm + "    je  ";
+        asm = asm + x86_jump_label(true_lbl);
+        asm = asm + "\n    jmp ";
+        asm = asm + x86_jump_label(false_lbl);
+        asm = asm + "\n";
+        return asm;
+    }
+
+    if op == IR_JUMP {
+        asm = asm + "    jmp ";
+        asm = asm + x86_jump_label(s1);
+        asm = asm + "\n";
+        return asm;
+    }
+
+    if op == IR_LABEL {
+        asm = asm + x86_label(s1);
+        asm = asm + "\n";
+        return asm;
+    }
+
+    if op == IR_PHI { return asm; }
+    return asm;
+}
+
+fn x86_gen_function(func_idx: int) -> string {
+    let name_idx = g_ir_func_name_idx[func_idx];
+    let func_name = g_strs[name_idx];
+    let instr_start = g_ir_func_instr_start[func_idx];
+    let instr_count = g_ir_func_instr_count[func_idx];
+    let var_count = g_ir_func_var_count[func_idx];
+    let var_start = g_ir_func_var_start[func_idx];
+
+    let mut asm = "";
+
+    if func_name == "main" {
+        asm = asm + "_start:\n";
+    } else {
+        asm = asm + func_name;
+        asm = asm + ":\n";
+    }
+
+    asm = asm + "    push rbp\n    mov rbp, rsp\n";
+
+    x86_init_frame();
+    let mut vi = 0;
+    loop {
+        if vi >= var_count { break; }
+        x86_alloc_stack(var_start + vi);
+        vi = vi + 1;
+    }
+
+    if g_x86_stack_size > 0 {
+        asm = asm + "    sub rsp, ";
+        asm = asm + __builtin_int_to_str(g_x86_stack_size);
+        asm = asm + "\n";
+    }
+
+    let mut i = 0;
+    loop {
+        if i >= instr_count { break; }
+        let instr_asm = x86_gen_instr(instr_start + i);
+        asm = asm + instr_asm;
+        i = i + 1;
+    }
+
+    if func_name == "main" {
+        asm = asm + "    mov edi, eax\n    mov eax, 60\n    syscall\n";
+    } else {
+        if g_x86_stack_size > 0 {
+            asm = asm + "    add rsp, ";
+            asm = asm + __builtin_int_to_str(g_x86_stack_size);
+            asm = asm + "\n";
+        }
+        asm = asm + "    pop rbp\n    ret\n";
+    }
+    asm = asm + "\n";
+    return asm;
+}
+
+fn x86_64_generate() -> string {
+    let mut asm = "";
+    asm = asm + ".intel_syntax noprefix\n.text\n.globl _start\n\n";
+
+    let mut i = 0;
+    loop {
+        if i >= g_ir_func_count { break; }
+        asm = asm + x86_gen_function(i);
+        i = i + 1;
+    }
+
+    asm = asm + ".section .rodata\n";
+    let mut si = 0;
+    loop {
+        if si >= g_ir_str_const_count { break; }
+        let str_idx = g_ir_str_consts[si];
+        let mut lbl = ".LC";
+        lbl = lbl + __builtin_int_to_str(si);
+        lbl = lbl + ": .asciz \"";
+        lbl = lbl + g_strs[str_idx];
+        lbl = lbl + "\"\n";
+        asm = asm + lbl;
+        si = si + 1;
+    }
+
+    return asm;
+}

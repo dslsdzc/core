@@ -115,6 +115,13 @@ class TypeAliasDecl(Decl): name: str; type_: Type
 @dataclass
 class ModuleDecl(Decl): path: List[str]
 @dataclass
+class LetDecl(Decl):
+    mutable: bool
+    name: str
+    type_: Optional[Type] = None
+    value: Optional[Expr] = None
+@dataclass
 class ImportDecl(Decl): path: List[str]; alias: Optional[str] = None
+@dataclass
 @dataclass
 class CompilationUnit: modules: List[ModuleDecl]; imports: List[ImportDecl]; declarations: List[Decl]
