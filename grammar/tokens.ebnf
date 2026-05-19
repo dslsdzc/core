@@ -9,7 +9,7 @@ LETTER = 'a'..'z' | 'A'..'Z' | '_' ;
 DIGIT = '0'..'9' ;
 
 KEYWORD =
-    'fn' | 'struct' | 'enum' | 'interface' | 'impl' | 'type' | 'let' | 'mut' | 'move' | 'go' | 'await' | 'flow' |
+    'fn' | 'struct' | 'enum' | 'interface' | 'impl' | 'type' | 'mut' | 'move' | 'go' | 'await' | 'flow' | 'auto' | 'fileid' |
     'if' | 'else' | 'match' | 'for' | 'loop' | 'return' | 'break' | 'continue' |
     'pub' | 'mod' | 'import' | 'as' | 'unsafe' |
     'requires' | 'ensures' | 'old' | 'result' | 'self' | 'Self' |
@@ -36,8 +36,10 @@ DOT = '.' ;
 COMMA = ',' ;
 SEMI = ';' ;
 COLON = ':' ;
+COLON_EQ = ':=' ;
 LPAREN = '(' ; RPAREN = ')' ;
 LBRACK = '[' ; RBRACK = ']' ;
 LBRACE = '{' ; RBRACE = '}' ;
 AMPERSAND = '&' ;
+AT = '@' ;
 QUESTION = '?' ;

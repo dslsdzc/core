@@ -4,8 +4,8 @@ impl Point {
     fn scale(self: Point, factor: int) -> int { return (self.x + self.y) * factor; }
 }
 fn main() -> int {
-    let p = Point { x = 10, y = 20 };
-    let s = p.sum();
-    let scaled = p.scale(3);
+    p := = Point { x = 10, y = 20 };
+    s := = p.sum();
+    scaled := = p.scale(3);
     return s + scaled;
 }

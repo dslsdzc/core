@@ -122,7 +122,7 @@ class Lexer:
                 '+': TokenType.PLUS, '-': TokenType.MINUS,
                 '*': TokenType.STAR, '/': TokenType.SLASH,
                 '%': TokenType.PERCENT, ',': TokenType.COMMA,
-                ';': TokenType.SEMI, ':': TokenType.COLON,
+                ';': TokenType.SEMI,
                 '(': TokenType.LPAREN, ')': TokenType.RPAREN,
                 '[': TokenType.LBRACK, ']': TokenType.RBRACK,
                 '{': TokenType.LBRACE, '}': TokenType.RBRACE,
@@ -200,7 +200,10 @@ class Lexer:
 
             if ch == ':':
                 self.advance()
-                if self.current() == ':':
+                if self.current() == '=':
+                    self.advance()
+                    self.tokens.append(Token(TokenType.COLON_EQ, ':=', start_line, start_col))
+                elif self.current() == ':':
                     self.advance()
                     self.tokens.append(Token(TokenType.PATH_SEP, '::', start_line, start_col))
                 else:

@@ -89,7 +89,11 @@ class EnumPattern(Pattern): path: List[str]; args: Optional[List[Pattern]] = Non
 @dataclass
 class Stmt: pass
 @dataclass
-class LetStmt(Stmt): mutable: bool; name: str; type_: Optional[Type] = None; value: Optional[Expr] = None
+class LetStmt(Stmt):
+    names: List[str]
+    tags: List[str] = field(default_factory=list)
+    type_: Optional[Type] = None
+    values: List[Expr] = field(default_factory=list)
 @dataclass
 class ExprStmt(Stmt): expr: Expr
 @dataclass
@@ -116,10 +120,10 @@ class TypeAliasDecl(Decl): name: str; type_: Type
 class ModuleDecl(Decl): path: List[str]
 @dataclass
 class LetDecl(Decl):
-    mutable: bool
-    name: str
+    names: List[str]
+    tags: List[str] = field(default_factory=list)
     type_: Optional[Type] = None
-    value: Optional[Expr] = None
+    values: List[Expr] = field(default_factory=list)
 @dataclass
 class ImportDecl(Decl): path: List[str]; alias: Optional[str] = None
 @dataclass

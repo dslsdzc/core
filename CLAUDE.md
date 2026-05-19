@@ -9,27 +9,40 @@ Core is a new general-purpose programming language with a "semantic preservation
 ## Build & Test Commands
 
 ```bash
-python3 test_all.py              # Run all integration tests (requires Python 3.10+)
 python3 tools/corec build FILE.core -o OUTPUT   # Compile .core → ARM64 native executable
 python3 tools/corec ir FILE.core                 # Generate IR dump only
 ```
 
-The `tools/corec` CLI expects `as` and `ld` on PATH for ARM64 assembly/linking.
+The `tools/corec` CLI uses ARM64 `as` and `ld` for assembly/linking. The `build` command currently emits ARM64 only.
 
-Individual test files at repo root (each is standalone):
+### Test suites
+
+**Bootstrap pipeline tests** (`tests/bootstrap/`): Core source → Python pipeline → interpreter.
+
 ```bash
-python3 test_borrow.py           # Borrow checker tests
-python3 test_generics.py         # Generic function/struct tests
-python3 test_for.py              # For loop tests
-python3 test_references.py       # Reference semantics tests
-python3 test_array.py            # Array tests
-python3 test_array2.py           # Additional array tests
-python3 test_builtin_opt.py      # Built-in optimization tests
+python3 tests/bootstrap/test_pipeline.py   # ~19 tests: arithmetic, control flow, struct, enum, array, for, ref, float, string
+python3 tests/bootstrap/test_borrow.py     # Borrow checker error detection tests
+python3 tests/bootstrap/test_generics.py   # Generic function + generic struct tests
 ```
 
-Test pattern: each file imports compiler modules directly via `sys.path.insert(0, 'bootstrap')`, runs inline Core source through the full pipeline (lex → parse → resolve → desugar → typecheck → ir_gen → interpret), and prints `[PASS]`/`[FAIL]`.
+**Self-hosted compiler tests** (`tests/selfhost/`): load compiler src → compile via bootstrap → exercise via interpreter or native binary.
 
-Integration tests in `tests/` are `.core` source files — run through `tools/corec ir` or `tools/corec build`.
+```bash
+python3 tests/selfhost/test_compile.py     # Basic interpreter run, lexer compilation, full self-compilation
+python3 tests/selfhost/test_impl.py        # Impl/method tests (interpreter + native binary paths)
+python3 tests/selfhost/test_borrow.py      # Self-hosted borrow checker tests (7 rules)
+```
+
+Integration tests in `tests/suite/` are `.core` source files — run through `tools/corec ir` or `tools/corec build`.
+
+### Self-hosted compiler build
+
+```bash
+python3 build_selfhost.py              # Concatenate src/compiler/*.core → run via interpreter
+python3 build_selfhost_native.py       # Compile self-hosted compiler → native x86-64 binary at build/corec
+```
+
+`build_selfhost_native.py` uses the Python-speed `X86_64StackAsmGen` backend (not the interpreter) to produce a native `build/corec` binary. The binary links against `src/runtime/compiler_rt.c` (C runtime providing `__builtin_*` functions and a bump allocator). Usage: `./build/corec <input.core> → output.s`.
 
 ## Architecture
 
@@ -56,11 +69,11 @@ ir/graph.py            → CFG graph utilities (placeholder)
 ir/corespecir.py       → Spec-level IR definitions
 
 backend/interpreter.py → Executes IR directly (Python eval — main testing path)
-backend/arm64_asm.py   → ARM64 code generation (~224 lines, complete pipeline)
+backend/arm64_asm.py   → ARM64 code generation (complete pipeline)
 backend/arm64.py       → ARM64 ABI/helper utilities
-backend/x86_64_asm.py  → x86-64 code generation (partial)
+backend/x86_64_stack_asm.py → x86-64 stack-based codegen (used for native self-hosted build, runs at Python speed)
+backend/x86_64_asm.py  → x86-64 code generation (partial, being replaced by stack variant)
 backend/x86_64.py      → x86-64 helper utilities
-backend/c_backend.py   → C code generation backend
 backend/base.py        → Backend base class
 
 verifier/conditions.py → Formal verification conditions (placeholder)
@@ -71,7 +84,45 @@ utils/diagnostics.py   → Compiler diagnostics (placeholder)
 utils/span.py          → Source span tracking (placeholder)
 ```
 
-Pipeline flow: `Lexer → Parser → NameResolver → Desugarer → TypeChecker → IRGen → Interpreter/Backend`
+Pipeline flow: `Lexer → Parser → NameResolver → MatchDesugarer → TypeChecker → IRGen → Interpreter/Backend`
+
+For the self-hosted compiler pipeline, `compile_source()` in `main.core` adds an import resolution step after tokenization:
+`tokenize() → resolve_imports() → parse_all() → check_all() → ir_gen_all() → x86_64_generate()`
+
+### Module/Import System
+
+Core uses a flattening module system based on **file identifiers** and **project identifiers**, decoupling file paths from logical names.
+
+**File identifiers**: By default, a file's identifier is its filename without `.core` extension. Can be manually overridden with `fileid` at the top of the file:
+```core
+fileid "my_math"
+```
+Identifiers must be unique within a project.
+
+**Project identifiers**: Defined in `Core.toml` (`name = "acme"`). Referenced in code with `@` prefix: `@acme`.
+
+**Import syntax**:
+```core
+import math                // local file by identifier
+import math : m            // with alias (used as m.symbol)
+import @acme math          // external project
+import @acme math : m      // external project with alias
+```
+
+**Symbol access**: Use dot notation: `m.add(3, 5)`. Unqualified full paths (`math::add`) are also recognized but importing is preferred.
+
+**_import.core**: A special file at any directory level. Its imports apply to all `.core` files in that directory and subdirectories (unless overridden by a child `_import.core`). Merged from parent to child; conflicts are errors.
+
+**Dependency pruning**: At compile time, the linker traces referenced symbols starting from `main`, extracts only what's used, and merges them into a single binary — suitable for kernel/embedded targets.
+
+**Current implementation** (bootstrap):
+- `corec/utils/module_loader.py` — `resolve_imports(ast, search_paths)` flattens imports before name resolution.
+
+**Self-hosted compiler**: `main.core`'s `resolve_imports()` scans tokens for `T_IMPORT`, reads imported `.core` files, appends source to `g_source`, and re-tokenizes. Search order: `src/stdlib/` then current directory.
+
+The standard library is in `src/stdlib/`. Currently implemented:
+- `io.core` — `print()`, `println()`, `print_int()`, `println_int()` wrapping `__builtin_*`
+- `math.core`, `collections.core`, `chan.core` — stubs
 
 ### Key design points
 
@@ -83,6 +134,7 @@ Pipeline flow: `Lexer → Parser → NameResolver → Desugarer → TypeChecker 
 - Parser reports errors via `Parser.error(msg, token)` which sets a flag
 - Testing goes through the interpreter (not native execution), enabling fast iteration
 - Interpreter uses `id(var)`-based variable store with max-steps guard to prevent infinite loops
+- `MatchDesugarer` is always run between name resolution and type checking — it transforms `match` expressions into `if`-`else` chains
 
 ### Backend status
 
@@ -90,33 +142,96 @@ Pipeline flow: `Lexer → Parser → NameResolver → Desugarer → TypeChecker 
 |---------|--------|
 | Interpreter (Python eval) | Complete — primary test target |
 | ARM64 (aarch64) | Complete — generates `.s` → `as`/`ld` → native binary |
-| x86-64 | Partial |
-| C | Partial (c_backend.py) |
+| x86-64 (stack-based) | Active — used in `build_selfhost_native.py` for native compiler build |
+| x86-64 (register-based) | Partial |
 
 ## Self-Hosted Compiler (`src/`)
 
-The `src/` directory holds the planned self-hosted compiler written in Core source:
+The `src/` directory holds the self-hosted compiler written in Core source:
 
 ```
-src/compiler/          → Compiler modules in Core (lexer.core, parser.core, checker.core, ir_gen.core, etc.)
+src/compiler/          → Compiler modules in Core (ast.core, lexer.core, parser.core, checker.core, ir_gen.core, main.core)
+src/compiler/backend/  → Backend modules (x86_64.core)
+src/compiler/linker.core → Stub (0 bytes)
 src/stdlib/            → Standard library (io.core, math.core, collections.core, chan.core)
-src/runtime/           → Runtime support (rt.core, bootstrap.c)
+src/runtime/           → Runtime support (rt.core, compiler_rt.c — C runtime: bump allocator + __builtin_* functions)
 ```
 
-Not yet functional — the bootstrap Python compiler is the current active implementation.
+The self-hosted compiler can compile Core source to x86-64 assembly. Build it with `build_selfhost_native.py` which compiles all `src/compiler/*.core` files through the Python bootstrap pipeline and emits a native `build/corec` binary.
+
+### Self-hosted flat IR design
+
+Unlike the Python bootstrap (which uses Python objects), the self-hosted compiler packs everything into pre-allocated integer-indexed arrays. This avoids dynamic allocation — critical since the compiler runs on its own runtime with a bump allocator.
+
+**Data model**: everything is an integer index into a global array.
+
+| Array | Element type | Purpose |
+|-------|-------------|---------|
+| `g_ast[MAX_AST]` | `ASTNode { kind, a, b, c, int_val, type_val, data, line, col }` | Flat AST — fields `a`/`b`/`c` are child indices or opcodes |
+| `g_ir_instrs[MAX_IRINSTRUCTIONS]` | `IRInstr { opcode, dest, src1, src2, src3, type_kind }` | Flat IR — all operands packed into integer slots |
+| `g_ir_vars[MAX_IREXPRS]` | `IRVar { name, id, type_kind }` | IR variables |
+| `g_strs[MAX_STRS]` | `string` | String interning table |
+| `g_tokens[MAX_TOKENS]` | `Token { kind, lexeme, int_val, line, col }` | Token stream |
+| `g_syms[MAX_SYMS]` | `SymEntry { name_idx, kind, type_idx, node_idx }` | Symbol table (scoped) |
+| `g_types[MAX_TYPES*3]` | `int` triples of `(kind, data, extra)` | Type table |
+| `g_structs[MAX_STRUCTS]` | `StructInfo { name, field_names, field_types, field_count, ... }` | Struct definitions |
+| `g_enums[MAX_ENUMS]` | `EnumInfo { name, variants, variant_count, ... }` | Enum definitions |
+| `g_funcs[MAX_FUNCS]` | `FuncInfo { name, param_count, param_types, return_type, ast_node, ... }` | Function signatures |
+
+**IR opcodes** (defined in `ast.core`): `IR_CONST(1)`, `IR_BINARY(2)`, `IR_UNARY(3)`, `IR_CALL(4)`, `IR_RETURN(5)`, `IR_ALLOC(6)`, `IR_ALLOC_STRUCT(7)`, `IR_ALLOC_ARRAY(8)`, `IR_STORE(9)`, `IR_LOAD(10)`, `IR_LOAD_FIELD(11)`, `IR_STORE_FIELD(12)`, `IR_LOAD_INDEX(13)`, `IR_STORE_INDEX(14)`, `IR_LOAD_INDEX_VAR(15)`, `IR_STORE_INDEX_VAR(16)`, `IR_MAKE_ENUM(17)`, `IR_REF(18)`, `IR_BRANCH(19)`, `IR_JUMP(20)`, `IR_LABEL(21)`, `IR_PHI(22)`, `IR_LOAD_ENUM_TAG(23)`.
+
+**Assembly output**: `x86_64.core` emits GAS `.intel_syntax noprefix`. Functions get `.globl` for `compiler_main`/`main`. A `.weak _start` stub calls `main` and exits (overridden by `crt1.o` when linking with gcc). A `.weak _init_globals` satisfies `compiler_rt.c`.
+
+**Key invariants of the flat IR**:
+- `IR_MAKE_ENUM` stores variant tag at heap offset 0; `IR_STORE_FIELD`/`IR_LOAD_FIELD` auto-offset by +8 for enum targets (tracked via `g_x86_is_enum` array in the backend)
+- The checker runs two passes: first registers struct/enum/function declarations, then type-checks bodies
+- Parser creates `EXPR_ASSIGN` nodes for `=`, handled separately from `EXPR_BINARY`
+- Parameters arrive in registers (`rdi, rsi, rdx, rcx, r8, r9`) and must be saved to stack slots in function prologue
+- Builtin functions (`__builtin_*`) are called directly — the runtime (`compiler_rt.c` or `minimal_rt.s`) provides them
+
+### Variable declaration syntax
+
+Core uses `:=` / `: type` declarations (no `let` keyword). Variants:
+
+| Syntax | Meaning |
+|--------|---------|
+| `x := expr;` | Infer type, immutable |
+| `x : Type = expr;` | Explicit type, immutable |
+| `x : ., mut = expr;` | Mutable, type inferred (`.` = auto) |
+| `x : int, mut, pub = expr;` | Explicit type + tags |
+| `x : auto = 42;` | `auto` keyword, type inferred |
+| `a, b : int = 1, 2;` | Batch declaration |
+
+类型推断占位符有两种：`.`（点号）和 `auto` 关键字，均在类型位置上表示"让编译器推断类型"。`.` 更简洁，常用于 `: ., mut` 模式。
+
+推荐正式代码中使用 `auto` 提高可读性，个人脚本或快速原型可使用 `.` 简写。
+
+Tags are parsed as identifiers or keywords before the first `=`. Available tags: `mut` (mutable), `pub` (public).
+
+**Self-hosted parser** (`src/compiler/parser.core`):
+- `is_new_var_decl()` — lookahead function checking `tok_k(p+n)` for `:=` / `:` pattern
+- `parse_new_var_decl()` — handles all variants, stores names in `g_extra_lets[16]` buffer for batch overflow
+- Creates `EXPR_LET` nodes with `a=name_idx, b=type_node, c=value_node, data=is_mut`
 
 ## Language Grammar
 
 Formal EBNF definitions in `grammar/`:
-- `core.ebnf` — Full language grammar (Rust-adjacent: `fn`, `let`/`let mut`, `struct`, `enum`, `impl`, `match`, `loop`, `for`, `go`/`await`)
+- `core.ebnf` — Full language grammar (`fn`, `:=`/`: type` declarations, `struct`, `enum`, `impl`, `match`, `loop`, `for`, `go`/`await`)
 - `corespec.ebnf` — Specification/contract grammar
 - `tokens.ebnf` — Token definitions
+
+Design documents (Chinese):
+- `docs/project-book.md` — Philosophy, IR system, formal verification architecture
+- `docs/dataflow-design.md` — Dataflow execution model design
+- `docs/language-syntax.md` — Language syntax reference
+- `docs/execution-model.md` — Execution model: DAG, static cyclic graphs, dynamic graphs, deployment configs
 
 ## Key Conventions
 
 - File extensions: `.core` (source), `.coreir` (IR dump), `.corespec` (spec), `.s`/`.o` (generated asm/obj)
-- Tests in `test_*.py` define inline Core source strings and compare interpreter output
+- Tests in `tests/bootstrap/` and `tests/selfhost/` define inline Core source strings and compare output
 - Python bootstrap code uses `sys.path.insert(0, 'bootstrap')` to import compiler modules
 - VS Code extension in `vscode-core/` provides TextMate-based syntax highlighting for `.core`, `.corespec`, `.coreir`
 - Spec files in `spec/` (`.corespec`) for future formal verifier consumption
 - Examples in `examples/` with per-subdirectory projects
+- Native binary tests use `tests/selfhost/minimal_rt.s` (AT&T syntax bump allocator) when linking with bare `ld`

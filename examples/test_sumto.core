@@ -1,6 +1,6 @@
 fn sum_to(n: int) -> int {
-    let mut i = 1;
-    let mut s = 0;
+    i : ., mut = 1;
+    s : ., mut = 0;
     loop {
         if i > n { break; }
         s = s + i;

@@ -145,26 +145,33 @@ class TypeChecker:
                                    method.return_type, method)
 
     def _check_let_decl(self, decl: LetDecl):
-        inferred = None
-        if decl.value:
-            inferred = self._infer_expr(decl.value)
+        # Infer types from all initializer values
+        inferred_types = []
+        for val in decl.values:
+            if val:
+                inferred_types.append(self._infer_expr(val))
+            else:
+                inferred_types.append(None)
         typ = decl.type_
-        if typ is None:
-            if inferred is None:
-                self.errors.append(f"Cannot infer type of global {decl.name}")
-                return
-            typ = inferred
-        else:
-            if inferred and not self._type_equal(inferred, typ):
-                self.errors.append(f"Global {decl.name}: declared type {typ} but initialized with {inferred}")
-        # Update the symbol's type
-        sym = self.symtab.lookup(decl.name, recursive=False)
-        if sym:
-            sym.type = typ
-        if decl.value and isinstance(decl.value, UnaryOp) and decl.value.op in ('&', '&mut'):
-            borrowed_name = self._borrow_var_name(decl.value.operand)
-            if borrowed_name:
-                self._record_borrow_holder(decl.name, borrowed_name, decl.value.op == '&mut')
+        for i, name in enumerate(decl.names):
+            inferred = inferred_types[i] if i < len(inferred_types) else None
+            var_type = typ
+            if var_type is None:
+                if inferred is None:
+                    self.errors.append(f"Cannot infer type of global {name}")
+                    continue
+                var_type = inferred
+            else:
+                if inferred and not self._type_equal(inferred, var_type):
+                    self.errors.append(f"Global {name}: declared type {var_type} but initialized with {inferred}")
+            # Update the symbol's type
+            sym = self.symtab.lookup(name, recursive=False)
+            if sym:
+                sym.type = var_type
+            if i < len(decl.values) and decl.values[i] and isinstance(decl.values[i], UnaryOp) and decl.values[i].op in ('&', '&mut'):
+                borrowed_name = self._borrow_var_name(decl.values[i].operand)
+                if borrowed_name:
+                    self._record_borrow_holder(name, borrowed_name, decl.values[i].op == '&mut')
 
     def _check_function(self, decl: FunctionDecl):
         self.symtab.push_scope()
@@ -435,24 +442,30 @@ class TypeChecker:
             self._infer_expr(expr.expr)  # check for side effects
             return BaseType('unit')
         elif isinstance(expr, LetStmt):
-            inferred = None
-            if expr.value:
-                inferred = self._infer_expr(expr.value)
+            inferred_types = []
+            for val in expr.values:
+                if val:
+                    inferred_types.append(self._infer_expr(val))
+                else:
+                    inferred_types.append(None)
             typ = expr.type_
-            if typ is None:
-                if inferred is None:
-                    self.errors.append(f"Cannot infer type of variable {expr.name}")
-                    return BaseType('never')
-                typ = inferred
-            else:
-                if inferred and not self._type_equal(inferred, typ):
-                    self.errors.append(f"Variable {expr.name}: declared type {typ} but initialized with {inferred}")
-            self.symtab.define(expr.name, SymbolKind.LOCAL, typ)
-            # If the value is a borrow (&x or &mut x), record the holder
-            if isinstance(expr.value, UnaryOp) and expr.value.op in ('&', '&mut'):
-                borrowed_name = self._borrow_var_name(expr.value.operand)
-                if borrowed_name:
-                    self._record_borrow_holder(expr.name, borrowed_name, expr.value.op == '&mut')
+            for i, name in enumerate(expr.names):
+                inferred = inferred_types[i] if i < len(inferred_types) else None
+                var_type = typ
+                if var_type is None:
+                    if inferred is None:
+                        self.errors.append(f"Cannot infer type of variable {name}")
+                        continue
+                    var_type = inferred
+                else:
+                    if inferred and not self._type_equal(inferred, var_type):
+                        self.errors.append(f"Variable {name}: declared type {var_type} but initialized with {inferred}")
+                self.symtab.define(name, SymbolKind.LOCAL, var_type)
+                # If the value is a borrow (&x or &mut x), record the holder
+                if i < len(expr.values) and expr.values[i] and isinstance(expr.values[i], UnaryOp) and expr.values[i].op in ('&', '&mut'):
+                    borrowed_name = self._borrow_var_name(expr.values[i].operand)
+                    if borrowed_name:
+                        self._record_borrow_holder(name, borrowed_name, expr.values[i].op == '&mut')
             return BaseType('unit')
         elif isinstance(expr, BreakStmt) or isinstance(expr, ContinueStmt):
             return BaseType('unit')

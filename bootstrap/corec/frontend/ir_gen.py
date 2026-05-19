@@ -30,6 +30,10 @@ class IRGen:
         for decl in ast.declarations:
             if isinstance(decl, StructDecl): self.struct_fields[decl.name] = decl.fields
             elif isinstance(decl, EnumDecl): self.enum_variants[decl.name] = decl.variants
+        # Pre-compute struct sizes (each field = 8 bytes) for backend use
+        self.mod.struct_sizes = {}
+        for name, fields in self.struct_fields.items():
+            self.mod.struct_sizes[name] = len(fields) * 8
         for decl in ast.declarations:
             if isinstance(decl, FunctionDecl):
                 if not self.symtab.lookup(decl.name):
@@ -49,14 +53,15 @@ class IRGen:
 
     def gen_let_decl(self, decl: LetDecl):
         typ = decl.type_ if decl.type_ else BaseType('int')
-        var_ir = IRVar(decl.name, VarKind.GLOBAL, typ)
-        # Store constant value directly on the IRVar for interpreter initialization
-        if decl.value and isinstance(decl.value, Literal):
-            var_ir.constant_value = decl.value.value
-        sym = self.symtab.lookup(decl.name)
-        if sym:
-            sym.ir_var = var_ir
-        self.mod.globals.append(var_ir)
+        for i, name in enumerate(decl.names):
+            var_ir = IRVar(name, VarKind.GLOBAL, typ)
+            # Store constant value directly on the IRVar for interpreter initialization
+            if i < len(decl.values) and isinstance(decl.values[i], Literal):
+                var_ir.constant_value = decl.values[i].value
+            sym = self.symtab.lookup(name)
+            if sym:
+                sym.ir_var = var_ir
+            self.mod.globals.append(var_ir)
         return None
 
     def gen_function(self, decl: FunctionDecl):
@@ -69,6 +74,7 @@ class IRGen:
         self.current_func = func
         self.current_block = entry
         self.local_vars = {n: p for (n,_), p in zip(decl.params, params)}
+        self.symtab.push_scope()
         if decl.body:
             ret_var = self.gen_expr(decl.body)
             if not self.current_block.terminated():
@@ -78,6 +84,7 @@ class IRGen:
                     self.add_instr(ReturnInstr(None))
         else:
             self.add_instr(ReturnInstr(None))
+        self.symtab.pop_scope()
 
     def gen_expr(self, expr):
         if isinstance(expr, Literal): return self.gen_literal(expr)
@@ -154,11 +161,8 @@ class IRGen:
                 return val
             elif isinstance(binop.left, FieldAccess):
                 obj = self.gen_expr(binop.left.object)
-                # 获取字段索引
-                struct_name = None
-                sym = self.symtab.lookup(binop.left.object.name) if isinstance(binop.left.object, Ident) else None
-                if sym and sym.type and isinstance(sym.type, PathType):
-                    struct_name = sym.type.path[-1]
+                # Resolve field index via expression chain (supports chained access)
+                struct_name = self._resolve_struct_name(binop.left.object)
                 field_idx = 0
                 if struct_name and struct_name in self.struct_fields:
                     fields = self.struct_fields[struct_name]
@@ -226,6 +230,8 @@ class IRGen:
                         if isinstance(typ, RefType): typ = typ.inner
                         if isinstance(typ, (PathType, GenericApplyType)):
                             struct_name = typ.path[-1]
+            if struct_name is None:
+                struct_name = self._resolve_struct_name(obj_expr)
             method_name = call.func.field
             if struct_name is None:
                 full = method_name
@@ -250,23 +256,96 @@ class IRGen:
         self.add_instr(MakeEnumInstr(variant, args, dest))
         return dest
 
-    def gen_field_access(self, fa):
-        obj = self.gen_expr(fa.object)
-        dest = self.new_temp()
-        struct_name = None
-        if isinstance(fa.object, Ident):
-            sym = self.symtab.lookup(fa.object.name)
+    def _resolve_struct_name(self, expr, depth=0):
+        """Walk an expression chain to determine the struct name of its result type."""
+        if depth > 10:
+            return None
+        if isinstance(expr, Ident):
+            sym = self.symtab.lookup(expr.name)
             if sym and sym.type:
                 typ = sym.type
                 if isinstance(typ, RefType):
                     typ = typ.inner
                 if isinstance(typ, (PathType, GenericApplyType)):
-                    struct_name = typ.path[-1]
-            else:
-                var = self.local_vars.get(fa.object.name)
-                if var and var.type and isinstance(var.type, PathType):
-                    struct_name = var.type.path[-1]
-        # 若无法确定类型，仍然生成 LoadFieldInstr（后端解释器可能忽略）
+                    return typ.path[-1]
+            var = self.local_vars.get(expr.name)
+            if var and var.type and isinstance(var.type, PathType):
+                return var.type.path[-1]
+            return None
+        if isinstance(expr, Index):
+            arr_type = self._resolve_expr_type(expr.object)
+            if isinstance(arr_type, ArrayType) and isinstance(arr_type.inner, PathType):
+                return arr_type.inner.path[-1]
+            # Maybe the array variable directly holds a PathType
+            arr_sn = self._resolve_struct_name(expr.object, depth + 1)
+            if arr_sn and arr_sn in self.struct_fields:
+                for fn, ft in self.struct_fields[arr_sn]:
+                    if isinstance(ft, (PathType, ArrayType)):
+                        return ft.path[-1] if hasattr(ft, 'path') else ft.inner.path[-1]
+            return None
+        if isinstance(expr, FieldAccess):
+            obj_sn = self._resolve_struct_name(expr.object, depth + 1)
+            if obj_sn and obj_sn in self.struct_fields:
+                for fn, ft in self.struct_fields[obj_sn]:
+                    if fn == expr.field:
+                        if isinstance(ft, PathType):
+                            return ft.path[-1]
+                        if isinstance(ft, ArrayType) and isinstance(ft.inner, PathType):
+                            return ft.inner.path[-1]
+                        return None
+            return None
+        if isinstance(expr, Call):
+            # Resolve the function's return type to track struct returns in method chains
+            func_name = None
+            if isinstance(expr.func, Ident):
+                func_name = expr.func.name
+            elif isinstance(expr.func, FieldAccess):
+                func_name = expr.func.field
+                # Try resolve struct-qualified name
+                obj_sn = self._resolve_struct_name(expr.func.object, depth + 1)
+                if obj_sn:
+                    func_name = f"{obj_sn}.{func_name}"
+            if func_name:
+                sym = self.symtab.lookup(func_name)
+                if sym and sym.type and isinstance(sym.type, PathType):
+                    return sym.type.path[-1]
+                if sym and sym.return_type and isinstance(sym.return_type, PathType):
+                    return sym.return_type.path[-1]
+            return None
+        return None
+
+    def _resolve_expr_type(self, expr):
+        """Resolve the full Type object for an expression, for known cases."""
+        if isinstance(expr, Ident):
+            sym = self.symtab.lookup(expr.name)
+            if sym and sym.type:
+                typ = sym.type
+                if isinstance(typ, RefType):
+                    typ = typ.inner
+                return typ
+            var = self.local_vars.get(expr.name)
+            if var:
+                return var.type
+            return None
+        if isinstance(expr, Index):
+            arr_type = self._resolve_expr_type(expr.object)
+            if isinstance(arr_type, ArrayType):
+                return arr_type.inner
+            return None
+        if isinstance(expr, FieldAccess):
+            obj_sn = self._resolve_struct_name(expr.object)
+            if obj_sn and obj_sn in self.struct_fields:
+                for fn, ft in self.struct_fields[obj_sn]:
+                    if fn == expr.field:
+                        return ft
+            return None
+        return None
+
+    def gen_field_access(self, fa):
+        obj = self.gen_expr(fa.object)
+        dest = self.new_temp()
+        # For rvalue field access: try to resolve field index from expression chain
+        struct_name = self._resolve_struct_name(fa.object)
         field_idx = 0
         if struct_name and struct_name in self.struct_fields:
             fields = self.struct_fields[struct_name]
@@ -274,7 +353,6 @@ class IRGen:
                 if fn == fa.field:
                     field_idx = i
                     break
-        # 生成 LoadFieldInstr，field_index 可能不正确，但解释器会处理
         self.add_instr(LoadFieldInstr(obj, fa.field, dest, field_index=field_idx))
         return dest
     def gen_struct_lit(self, sl):
@@ -294,9 +372,11 @@ class IRGen:
         return alloc
 
     def gen_block(self, block):
+        self.symtab.push_scope()
         last_val = None
         for stmt in block.stmts: last_val = self.gen_stmt(stmt)
         if block.expr: last_val = self.gen_expr(block.expr)
+        self.symtab.pop_scope()
         return last_val
 
     def gen_if(self, ifexpr):
@@ -493,13 +573,24 @@ class IRGen:
         return None
 
     def gen_let(self, let):
-        val_ir = self.gen_expr(let.value) if let.value else None
+        # If batch declaration with multiple names, generate each
+        if len(let.names) > 1:
+            results = []
+            for i, name in enumerate(let.names):
+                val = let.values[i] if i < len(let.values) else None
+                sub_let = LetStmt(names=[name], tags=let.tags, type_=let.type_, values=[val] if val else [])
+                results.append(self.gen_let(sub_let))
+            return results[-1] if results else None
+
+        name = let.names[0]
+        val_expr = let.values[0] if let.values else None
+        val_ir = self.gen_expr(val_expr) if val_expr else None
         typ = let.type_
-        if typ is None and let.value is not None:
-            if isinstance(let.value, StructLit): typ = PathType(let.value.path)
-            elif isinstance(let.value, ArrayLit):
-                if let.value.elements:
-                    first = let.value.elements[0]
+        if typ is None and val_expr is not None:
+            if isinstance(val_expr, StructLit): typ = PathType(val_expr.path)
+            elif isinstance(val_expr, ArrayLit):
+                if val_expr.elements:
+                    first = val_expr.elements[0]
                     if isinstance(first, Literal):
                         kind_map = {'int':'int','float':'float','bool':'bool','string':'string','char':'char','unit':'unit'}
                         elem_t = BaseType(kind_map.get(first.kind, 'unit'))
@@ -507,22 +598,38 @@ class IRGen:
                         elem_t = BaseType('unit')
                 else:
                     elem_t = BaseType('unit')
-                typ = ArrayType(elem_t, len(let.value.elements))
-            elif isinstance(let.value, Literal):
+                typ = ArrayType(elem_t, len(val_expr.elements))
+            elif isinstance(val_expr, Literal):
                 kind_map = {'int':'int','float':'float','bool':'bool','string':'string','char':'char','unit':'unit'}
-                typ = BaseType(kind_map.get(let.value.kind,'unit'))
-            else: typ = BaseType('unit')
+                typ = BaseType(kind_map.get(val_expr.kind,'unit'))
+            elif isinstance(val_expr, Index):
+                # Infer type from array element type (e.g., g_ast[node] -> ASTNode)
+                arr_obj = val_expr.object
+                if isinstance(arr_obj, Ident):
+                    arr_sym = self.symtab.lookup(arr_obj.name)
+                    if arr_sym and isinstance(arr_sym.type, ArrayType):
+                        typ = arr_sym.type.inner
+                    elif arr_sym and arr_sym.ir_var and isinstance(arr_sym.ir_var.type, ArrayType):
+                        typ = arr_sym.ir_var.type.inner
+                if typ is None:
+                    typ = BaseType('unit')
+            elif isinstance(val_expr, Call):
+                # Infer return type from function symbol
+                if isinstance(val_expr.func, Ident):
+                    func_sym = self.symtab.lookup(val_expr.func.name)
+                    if func_sym and func_sym.type:
+                        typ = func_sym.type
+                if typ is None:
+                    typ = BaseType('int')
+            else:
+                typ = BaseType('unit')
         if typ is None:
             typ = BaseType('unit')
-        var_ir = IRVar(let.name, VarKind.LOCAL, typ)
+        var_ir = IRVar(name, VarKind.LOCAL, typ)
         self.add_instr(AllocInstr(typ, var_ir))
         if val_ir:
             self.add_instr(StoreInstr(var_ir, val_ir))
-        self.local_vars[let.name] = var_ir
-        sym = self.symtab.lookup(let.name, recursive=False)
-        if sym:
-            sym.type = typ
-            sym.ir_var = var_ir
+        self.local_vars[name] = var_ir
         return var_ir
 
     def gen_break(self):

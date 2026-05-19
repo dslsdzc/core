@@ -3,6 +3,6 @@ impl Point {
     fn sum(self: Point) -> int { return self.x + self.y; }
 }
 fn main() -> int {
-    let p = Point { x = 10, y = 20 };
+    p := = Point { x = 10, y = 20 };
     return p.sum();
 }

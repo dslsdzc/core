@@ -20,7 +20,6 @@ class TokenType(Enum):
     INTERFACE = auto()
     IMPL = auto()
     TYPE = auto()
-    LET = auto()
     MUT = auto()
     MOVE = auto()
     GO = auto()
@@ -39,6 +38,7 @@ class TokenType(Enum):
     MOD = auto()
     IMPORT = auto()
     AS = auto()
+    AUTO = auto()
     UNSAFE = auto()
     REQUIRES = auto()
     ENSURES = auto()
@@ -76,6 +76,7 @@ class TokenType(Enum):
     COMMA = auto()
     SEMI = auto()
     COLON = auto()
+    COLON_EQ = auto()
     LPAREN = auto()
     RPAREN = auto()
     LBRACK = auto()
@@ -95,7 +96,6 @@ KEYWORDS = {
     "interface": TokenType.INTERFACE,
     "impl": TokenType.IMPL,
     "type": TokenType.TYPE,
-    "let": TokenType.LET,
     "mut": TokenType.MUT,
     "move": TokenType.MOVE,
     "go": TokenType.GO,
@@ -121,6 +121,7 @@ KEYWORDS = {
     "result": TokenType.RESULT,
     "self": TokenType.SELF,
     "Self": TokenType.SELF_TYPE,
+    "auto": TokenType.AUTO,
     "true": TokenType.TRUE,
     "false": TokenType.FALSE,
     "unit": TokenType.UNIT,

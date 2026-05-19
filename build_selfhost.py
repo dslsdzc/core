@@ -29,7 +29,7 @@ def concat_sources():
                     parts.append(f"// === {f} ===\n{content}")
     return '\n\n'.join(parts)
 
-def compile_and_run(src, entry='main', args=None):
+def compile_and_run(src, entry='compiler_main', args=None):
     """Compile Core source and run via interpreter."""
     from corec.frontend.lexer import Lexer
     from corec.frontend.parser import Parser
@@ -63,7 +63,8 @@ def compile_and_run(src, entry='main', args=None):
     ir_gen = IRGen(resolver.symtab)
     mod = ir_gen.gen_module(ast)
     interp = Interpreter(mod)
-    return interp.run(entry, args)
+    interp._argv = ['corec'] + args
+    return interp.run(entry, [])
 
 if __name__ == '__main__':
     src = concat_sources()
@@ -73,11 +74,23 @@ if __name__ == '__main__':
         f.write(src)
     print(f"Concatenated source -> {out_path} ({len(src)} chars)")
 
-    # Test: basic entry point
-    result = compile_and_run(src, 'compiler_entry', [])
-    if result is not None:
-        print(f"compiler_entry() = {result!r}")
-        print("Self-hosted compiler build: SUCCESS")
+    # Write a test file for the self-hosted compiler to compile
+    test_src = "fn main() -> int { return 42; }\n"
+    test_path = 'build/test_return42.core'
+    with open(test_path, 'w') as f:
+        f.write(test_src)
+
+    result = compile_and_run(src, 'compiler_main', [test_path])
+    if result == 0:
+        if os.path.exists('output.s'):
+            with open('output.s') as f:
+                asm = f.read()
+            print(f"Generated output.s ({len(asm)} bytes)")
+            print("Self-hosted compiler build: SUCCESS")
+        else:
+            print("Self-hosted compiler build: no output.s generated")
+            sys.exit(1)
     else:
+        print(f"compiler_main() returned {result}")
         print("Self-hosted compiler build: FAILED")
         sys.exit(1)

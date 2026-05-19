@@ -1,39 +1,43 @@
 // Parser: recursive descent with flat AST output
 
 // Global state for parser
-let mut g_ast: [ASTNode; MAX_AST];
-let mut g_ast_count: int;
-let mut g_strs: [string; MAX_STRS];
-let mut g_str_count: int;
-let mut g_token_pos: int;
-let mut g_funcs: [FuncInfo; MAX_FUNCS];
-let mut g_func_count: int;
-let mut g_structs: [StructInfo; MAX_STRUCTS];
-let mut g_struct_count: int;
-let mut g_enums: [EnumInfo; MAX_ENUMS];
-let mut g_enum_count: int;
-let mut g_loop_stack: [LoopInfo; MAX_LOOPS];
-let mut g_loop_depth: int;
-let mut g_global_lets: [int; MAX_AST];
-let mut g_global_let_count: int;
+g_ast : [ASTNode; MAX_AST], mut;
+g_ast_count : int, mut;
+g_strs : [string; MAX_STRS], mut;
+g_str_count : int, mut;
+g_token_pos : int, mut;
+g_funcs : [FuncInfo; MAX_FUNCS], mut;
+g_func_count : int, mut;
+g_structs : [StructInfo; MAX_STRUCTS], mut;
+g_struct_count : int, mut;
+g_enums : [EnumInfo; MAX_ENUMS], mut;
+g_enum_count : int, mut;
+g_loop_stack : [LoopInfo; MAX_LOOPS], mut;
+g_loop_depth : int, mut;
+g_global_lets : [int; MAX_AST], mut;
+g_global_let_count : int, mut;
+
+// Buffer for batch declaration overflow (a, b : int = 1, 2)
+g_extra_lets : [int; 16], mut;
+g_extra_let_count : int, mut;
 
 struct TypeAlias {
     name_idx: int,
     type_node: int,
 }
-let mut g_type_aliases: [TypeAlias; MAX_TYPES];
-let mut g_type_alias_count: int;
+g_type_aliases : [TypeAlias; MAX_TYPES], mut;
+g_type_alias_count : int, mut;
 
 struct MethodEntry {
     struct_ni: int,  // struct name index
     method_ni: int,  // method name index
     mangled_ni: int, // mangled function name index ("Struct.method")
 }
-let mut g_methods: [MethodEntry; MAX_FUNCS];
-let mut g_method_count: int;
+g_methods : [MethodEntry; MAX_FUNCS], mut;
+g_method_count : int, mut;
 
 fn str_intern(s: string) -> int {
-    let mut i = 0;
+    i : ., mut = 0;
     loop {
         if i >= g_str_count { break; }
         if g_strs[i] == s { return i; }
@@ -47,7 +51,7 @@ fn str_intern(s: string) -> int {
 }
 
 fn alloc_node(kind: int, a: int, b: int, c: int, iv: int, tv: int, d: int, line: int, col: int) -> int {
-    let idx = g_ast_count;
+    idx := g_ast_count;
     if idx >= MAX_AST { return 0; }
     g_ast[idx] = ASTNode { kind = kind, a = a, b = b, c = c, int_val = iv, type_val = tv, data = d, line = line, col = col };
     g_ast_count = idx + 1;
@@ -62,7 +66,7 @@ fn tok_ln(p: int) -> int { return g_tokens[p].line; }
 fn tok_cl(p: int) -> int { return g_tokens[p].col; }
 
 fn advance_tok() -> int {
-    let t = cur_tok();
+    t := cur_tok();
     if tok_k(t) != T_EOF { g_token_pos = t + 1; }
     return t;
 }
@@ -72,20 +76,20 @@ fn check(k: int) -> bool {
 }
 
 fn expect(k: int) -> int {
-    let t = cur_tok();
+    t := cur_tok();
     if tok_k(t) == k { return advance_tok(); }
     return t;
 }
 
 // --- Type parsing ---
 fn parse_type() -> int {
-    let t = cur_tok();
+    t := cur_tok();
     if tok_k(t) == T_LBRACKET {
         advance_tok();
-        let inner = parse_type();
+        inner := parse_type();
         if check(T_SEMI) {
             advance_tok();
-            let sz = advance_tok();
+            sz := advance_tok();
             advance_tok();
             return alloc_node(EXPR_ARRAY, inner, 0, 0, tok_iv(sz), 0, 0, tok_ln(t), tok_cl(t));
         }
@@ -94,21 +98,21 @@ fn parse_type() -> int {
     }
     if tok_k(t) == T_LPAREN {
         advance_tok();
-        let typ = parse_type();
+        typ := parse_type();
         advance_tok();
         return typ;
     }
     if tok_k(t) == T_AMPERSAND {
         advance_tok();
-        let mut is_mut = 0;
+        is_mut : ., mut = 0;
         if tok_k(cur_tok()) == T_MUT {
             is_mut = 1;
             advance_tok();
         }
-        let inner = parse_type();
+        inner := parse_type();
         return alloc_node(EXPR_REFTYPE, inner, 0, 0, is_mut, 0, 0, tok_ln(t), tok_cl(t));
     }
-    let lex = tok_lx(t);
+    lex := tok_lx(t);
     advance_tok();
     if lex == "int" { return alloc_node(0, 0, 0, 0, 0, TY_INT, 0, tok_ln(t), tok_cl(t)); }
     if lex == "float" { return alloc_node(0, 0, 0, 0, 0, TY_FLOAT, 0, tok_ln(t), tok_cl(t)); }
@@ -117,12 +121,12 @@ fn parse_type() -> int {
     if lex == "unit" { return alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, tok_ln(t), tok_cl(t)); }
     if lex == "char" { return alloc_node(0, 0, 0, 0, 0, TY_CHAR, 0, tok_ln(t), tok_cl(t)); }
     if lex == "never" { return alloc_node(0, 0, 0, 0, 0, TY_NEVER, 0, tok_ln(t), tok_cl(t)); }
-    let ni = str_intern(lex);
+    ni := str_intern(lex);
     // Check for generic args: Box[int, ...]
     if check(T_LBRACKET) {
         advance_tok(); // [
-        let first_arg = parse_type();
-        let mut arg_count = 1;
+        first_arg := parse_type();
+        arg_count : ., mut = 1;
         loop {
             if check(T_RBRACKET) { break; }
             if !check(T_COMMA) { break; }
@@ -171,25 +175,25 @@ fn tok2op(k: int) -> int {
 }
 
 fn parse_expr() -> int {
-    let left = parse_binary(0);
+    left := parse_binary(0);
     if check(T_DOTDOT) {
-        let t = advance_tok();
-        let right = parse_expr();
+        t := advance_tok();
+        right := parse_expr();
         return alloc_node(EXPR_RANGE, left, right, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
     }
     return left;
 }
 
 fn parse_binary(mp: int) -> int {
-    let mut left = parse_unary();
+    left : ., mut = parse_unary();
     loop {
-        let t = cur_tok();
-        let k = tok_k(t);
-        let p = prec(k);
+        t := cur_tok();
+        k := tok_k(t);
+        p := prec(k);
         if p < mp { break; }
         advance_tok();
-        let right = parse_binary(p + 1);
-        let op = tok2op(k);
+        right := parse_binary(p + 1);
+        op := tok2op(k);
         // Convert assignment to EXPR_ASSIGN
         if k == T_EQ {
             left = alloc_node(EXPR_ASSIGN, left, right, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
@@ -201,43 +205,43 @@ fn parse_binary(mp: int) -> int {
 }
 
 fn parse_unary() -> int {
-    let t = cur_tok();
+    t := cur_tok();
     if tok_k(t) == T_MINUS {
         advance_tok();
-        let op = parse_unary();
+        op := parse_unary();
         return alloc_node(EXPR_UNARY, op, 0, UOP_NEG, 0, 0, 0, tok_ln(t), tok_cl(t));
     }
     if tok_k(t) == T_AMPERSAND {
         advance_tok();
-        let mut is_mut = 0;
+        is_mut : ., mut = 0;
         if tok_k(cur_tok()) == T_MUT {
             is_mut = 1;
             advance_tok();
         }
-        let op = parse_unary();
+        op := parse_unary();
         return alloc_node(EXPR_UNARY, op, 0, UOP_REF, is_mut, 0, 0, tok_ln(t), tok_cl(t));
     }
     if tok_k(t) == T_BANG {
         advance_tok();
-        let op = parse_unary();
+        op := parse_unary();
         return alloc_node(EXPR_UNARY, op, 0, UOP_NOT, 0, 0, 0, tok_ln(t), tok_cl(t));
     }
     if tok_k(t) == T_MOVE {
         advance_tok();
-        let op = parse_unary();
+        op := parse_unary();
         return alloc_node(EXPR_MOVE, op, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
     }
     return parse_postfix();
 }
 
 fn parse_postfix() -> int {
-    let mut node = parse_primary();
+    node : ., mut = parse_primary();
     loop {
-        let t = cur_tok();
+        t := cur_tok();
         if tok_k(t) == T_LPAREN {
             advance_tok();
-            let af = -1;
-            let mut ac = 0;
+            af := -1;
+            ac : ., mut = 0;
             if !check(T_RPAREN) {
                 af = parse_expr();
                 ac = 1;
@@ -250,17 +254,17 @@ fn parse_postfix() -> int {
             }
             advance_tok();
             // Check if this is an enum constructor (uppercase ident + parenthesized args)
-            let mut is_enum_con = 0;
+            is_enum_con : ., mut = 0;
             if g_ast[node].kind == EXPR_IDENT {
-                let name_idx = g_ast[node].int_val;
-                let name = g_strs[name_idx];
-                let c = __builtin_str_get(name, 0);
+                name_idx := g_ast[node].int_val;
+                name := g_strs[name_idx];
+                c := __builtin_str_get(name, 0);
                 if c >= "A" && c <= "Z" {
                     is_enum_con = 1;
                 }
             }
             if is_enum_con == 1 {
-                let name_idx = g_ast[node].int_val;
+                name_idx := g_ast[node].int_val;
                 node = alloc_node(EXPR_ENUM_CONSTRUCTOR, name_idx, af, ac, 0, 0, 0, tok_ln(t), tok_cl(t));
             } else {
                 node = alloc_node(EXPR_CALL, node, af, ac, 0, 0, 0, tok_ln(t), tok_cl(t));
@@ -269,14 +273,14 @@ fn parse_postfix() -> int {
         }
         if tok_k(t) == T_DOT {
             advance_tok();
-            let f = advance_tok();
-            let ni = str_intern(tok_lx(f));
+            f := advance_tok();
+            ni := str_intern(tok_lx(f));
             node = alloc_node(EXPR_FIELD, node, 0, 0, ni, 0, 0, tok_ln(t), tok_cl(t));
             continue;
         }
         if tok_k(t) == T_LBRACKET {
             advance_tok();
-            let idx = parse_expr();
+            idx := parse_expr();
             advance_tok();
             node = alloc_node(EXPR_INDEX, node, idx, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
             continue;
@@ -287,16 +291,20 @@ fn parse_postfix() -> int {
 }
 
 fn is_upper_first(s: string) -> bool {
-    let c = __builtin_str_get(s, 0);
+    c := __builtin_str_get(s, 0);
     if c >= "A" && c <= "Z" { return true; }
     return false;
 }
 
 fn parse_primary() -> int {
-    let t = cur_tok();
+    t := cur_tok();
     if tok_k(t) == T_INT {
         advance_tok();
         return alloc_node(EXPR_INT, 0, 0, 0, tok_iv(t), TY_INT, 0, tok_ln(t), tok_cl(t));
+    }
+    if tok_k(t) == T_FLOAT {
+        advance_tok();
+        return alloc_node(EXPR_FLOAT, 0, 0, 0, tok_iv(t), TY_FLOAT, 0, tok_ln(t), tok_cl(t));
     }
     if tok_k(t) == T_STRING {
         advance_tok();
@@ -306,18 +314,18 @@ fn parse_primary() -> int {
     if tok_k(t) == T_FALSE { advance_tok(); return alloc_node(EXPR_BOOL, 0, 0, 0, 0, TY_BOOL, 0, tok_ln(t), tok_cl(t)); }
     if tok_k(t) == T_IDENT || tok_k(t) == T_SELF || tok_k(t) == T_UNDERSCORE {
         advance_tok();
-        let name = tok_lx(t);
-        let ni = str_intern(name);
+        name := tok_lx(t);
+        ni := str_intern(name);
         if check(T_LBRACE) {
             advance_tok();
-            let ff = -1;
-            let mut fc = 0;
+            ff := -1;
+            fc : ., mut = 0;
             loop {
                 if check(T_RBRACE) { break; }
-                let ft = advance_tok();
-                let fni = str_intern(tok_lx(ft));
+                ft := advance_tok();
+                fni := str_intern(tok_lx(ft));
                 advance_tok();
-                let fv = parse_expr();
+                fv := parse_expr();
                 alloc_node(0, fv, 0, 0, 0, 0, 0, tok_ln(ft), tok_cl(ft));
                 if fc == 0 { ff = g_ast_count - 1; }
                 fc = fc + 1;
@@ -330,7 +338,7 @@ fn parse_primary() -> int {
     }
     if tok_k(t) == T_LPAREN {
         advance_tok();
-        let e = parse_expr();
+        e := parse_expr();
         advance_tok();
         return e;
     }
@@ -346,8 +354,8 @@ fn parse_primary() -> int {
     if tok_k(t) == T_MATCH { return parse_match_expr(); }
     if tok_k(t) == T_LBRACKET {
         advance_tok();
-        let ef = -1;
-        let mut ec = 0;
+        ef := -1;
+        ec : ., mut = 0;
         if !check(T_RBRACKET) {
             ef = parse_expr();
             ec = 1;
@@ -365,12 +373,12 @@ fn parse_primary() -> int {
 }
 
 fn parse_block() -> int {
-    let t = advance_tok();
-    let mut local_stmts: [int; 512];
-    let mut sc = 0;
+    t := advance_tok();
+    local_stmts : [int; 512], mut;
+    sc : ., mut = 0;
     loop {
         if check(T_RBRACE) || check(T_EOF) { break; }
-        let st = parse_stmt();
+        st := parse_stmt();
         if sc < 512 {
             local_stmts[sc] = st;
         }
@@ -378,8 +386,8 @@ fn parse_block() -> int {
     }
     advance_tok();
     // Flush to global block_stmts array (isolated from nested blocks)
-    let si = g_block_stmt_count;
-    let mut i = 0;
+    si := g_block_stmt_count;
+    i : ., mut = 0;
     loop {
         if i >= sc { break; }
         if g_block_stmt_count < MAX_BLOCK_STMTS {
@@ -391,24 +399,129 @@ fn parse_block() -> int {
     return alloc_node(EXPR_BLOCK, si, sc, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
 }
 
+fn is_new_var_decl() -> bool {
+    p := cur_tok();
+    if tok_k(p) != T_IDENT { return false; }
+    // x := expr
+    if tok_k(p + 1) == T_COLON_EQ { return true; }
+    // x : type ...
+    if tok_k(p + 1) == T_COLON { return true; }
+    // a, b : type ... (batch)
+    if tok_k(p + 1) == T_COMMA && tok_k(p + 2) == T_IDENT && tok_k(p + 3) == T_COLON { return true; }
+    return false;
+}
+
+fn parse_new_var_decl() -> int {
+    t := cur_tok();
+    names : [string; 4], mut;
+    nc : ., mut = 0;
+
+    // Parse name list
+    nt := advance_tok();
+    names[nc] = tok_lx(nt);
+    nc = nc + 1;
+    // Batch: a, b : type = ...
+    if check(T_COMMA) {
+        loop {
+            if !check(T_COMMA) { break; }
+            advance_tok(); // ,
+            nt2 := advance_tok();
+            names[nc] = tok_lx(nt2);
+            nc = nc + 1;
+        }
+    }
+
+    typ : ., mut = -1;
+    is_mut : ., mut = 0;
+
+    values : [int; 4], mut;
+    vc : ., mut = 0;
+
+    if check(T_COLON_EQ) {
+        advance_tok();
+        values[vc] = parse_expr();
+        vc = vc + 1;
+        loop {
+            if !check(T_COMMA) { break; }
+            advance_tok();
+            values[vc] = parse_expr();
+            vc = vc + 1;
+        }
+    } else {
+        // consume ':'
+        advance_tok();
+
+        if tok_k(cur_tok()) == T_AUTO || tok_k(cur_tok()) == T_DOT {
+            typ = -1;
+            advance_tok();
+        } else {
+            typ = parse_type();
+        }
+
+        // Optional tags
+        if check(T_COMMA) {
+            advance_tok();
+            loop {
+                if check(T_EQ) || check(T_SEMI) || check(T_EOF) { break; }
+                tag_t := advance_tok();
+                tag := tok_lx(tag_t);
+                if tag == "mut" { is_mut = 1; }
+                if !check(T_COMMA) { break; }
+                advance_tok();
+            }
+        }
+
+        // Parse values
+        if check(T_EQ) {
+            advance_tok();
+            values[vc] = parse_expr();
+            vc = vc + 1;
+            loop {
+                if !check(T_COMMA) { break; }
+                advance_tok();
+                values[vc] = parse_expr();
+                vc = vc + 1;
+            }
+        }
+    }
+
+    advance_tok(); // ;
+
+    // Emit LET nodes. First returned directly, extras go to g_extra_lets.
+    first_node : ., mut = -1;
+    i : ., mut = 0;
+    loop {
+        if i >= nc { break; }
+        ni := str_intern(names[i]);
+        nv := values[i];
+        node := alloc_node(EXPR_LET, ni, typ, nv, 0, 0, is_mut, tok_ln(t), tok_cl(t));
+        if i == 0 {
+            first_node = node;
+        } else if g_extra_let_count < 16 {
+            g_extra_lets[g_extra_let_count] = node;
+            g_extra_let_count = g_extra_let_count + 1;
+        }
+        i = i + 1;
+    }
+
+    return first_node;
+}
+
 fn parse_stmt() -> int {
-    let t = cur_tok();
-    if tok_k(t) == T_LET {
-        advance_tok();
-        let mut im = 0;
-        if check(T_MUT) { im = 1; advance_tok(); }
-        let nt = advance_tok();
-        let ni = str_intern(tok_lx(nt));
-        let mut tn = -1;
-        if check(T_COLON) { advance_tok(); tn = parse_type(); }
-        let mut val = -1;
-        if check(T_EQ) { advance_tok(); val = parse_expr(); }
-        advance_tok();
-        return alloc_node(EXPR_LET, ni, tn, val, 0, 0, im, tok_ln(t), tok_cl(t));
+    // Drain batch extras from previous call
+    if g_extra_let_count > 0 {
+        g_extra_let_count = g_extra_let_count - 1;
+        return g_extra_lets[g_extra_let_count];
+    }
+
+    t := cur_tok();
+    // New variable declaration syntax
+    if tok_k(t) == T_IDENT && is_new_var_decl() {
+        return parse_new_var_decl();
     }
     if tok_k(t) == T_RETURN {
         advance_tok();
-        let mut val = -1;
+        val : ., mut = -1;
         if !check(T_SEMI) && !check(T_RBRACE) { val = parse_expr(); }
         if check(T_SEMI) { advance_tok(); }
         return alloc_node(EXPR_RETURN, val, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
@@ -423,7 +536,7 @@ fn parse_stmt() -> int {
         if check(T_SEMI) { advance_tok(); }
         return alloc_node(EXPR_CONTINUE, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
     }
-    let e = parse_expr();
+    e := parse_expr();
     if check(T_SEMI) {
         advance_tok();
         return alloc_node(EXPR_STMT, e, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
@@ -432,10 +545,10 @@ fn parse_stmt() -> int {
 }
 
 fn parse_if_expr() -> int {
-    let t = advance_tok();
-    let cond = parse_expr();
-    let tb = parse_block();
-    let mut eb = -1;
+    t := advance_tok();
+    cond := parse_expr();
+    tb := parse_block();
+    eb : ., mut = -1;
     if check(T_ELSE) {
         advance_tok();
         if check(T_IF) { eb = parse_if_expr(); }
@@ -445,41 +558,41 @@ fn parse_if_expr() -> int {
 }
 
 fn parse_loop_expr() -> int {
-    let t = advance_tok();
-    let body = parse_block();
+    t := advance_tok();
+    body := parse_block();
     return alloc_node(EXPR_LOOP, body, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
 }
 
 fn parse_while_expr() -> int {
-    let t = advance_tok();
-    let cond = parse_expr();
-    let body = parse_block();
+    t := advance_tok();
+    cond := parse_expr();
+    body := parse_block();
     return alloc_node(EXPR_WHILE, cond, body, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
 }
 
 fn parse_for_expr() -> int {
-    let t = advance_tok();
-    let vt = advance_tok();
-    let vn = str_intern(tok_lx(vt));
+    t := advance_tok();
+    vt := advance_tok();
+    vn := str_intern(tok_lx(vt));
     advance_tok();
-    let iter = parse_expr();
-    let body = parse_block();
+    iter := parse_expr();
+    body := parse_block();
     return alloc_node(EXPR_FOR, vn, iter, body, 0, 0, 0, tok_ln(t), tok_cl(t));
 }
 
 fn parse_match_expr() -> int {
-    let t = advance_tok();
-    let expr = parse_expr();
+    t := advance_tok();
+    expr := parse_expr();
     advance_tok();
-    let af = -1;
-    let mut ac = 0;
+    af := -1;
+    ac : ., mut = 0;
     loop {
         if check(T_RBRACE) || check(T_EOF) { break; }
-        let pat = parse_pattern();
+        pat := parse_pattern();
         advance_tok();
-        let body = parse_expr();
+        body := parse_expr();
         if check(T_COMMA) { advance_tok(); }
-        let n = alloc_node(EXPR_ARM, pat, body, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
+        n := alloc_node(EXPR_ARM, pat, body, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
         if ac == 0 { af = n; }
         ac = ac + 1;
     }
@@ -488,18 +601,18 @@ fn parse_match_expr() -> int {
 }
 
 fn parse_pattern() -> int {
-    let t = cur_tok();
+    t := cur_tok();
     if tok_k(t) == T_UNDERSCORE {
         advance_tok();
         return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
     }
     if tok_k(t) == T_IDENT {
         advance_tok();
-        let name = tok_lx(t);
-        let ni = str_intern(name);
+        name := tok_lx(t);
+        ni := str_intern(name);
         if check(T_LPAREN) {
             advance_tok();
-            let mut ac = 0;
+            ac : ., mut = 0;
             if !check(T_RPAREN) {
                 ac = 1;
                 loop {
@@ -525,11 +638,11 @@ fn parse_pattern() -> int {
 fn parse_generics() -> int {
     if check(T_LBRACKET) {
         advance_tok(); // [
-        let gc = 0;
+        gc := 0;
         loop {
             if check(T_RBRACKET) { break; }
             if gc >= MAX_GENERICS { break; }
-            let gt = advance_tok();
+            gt := advance_tok();
             // Store generic param name — caller copies into its own array
             // We just consume and count; caller uses get_tok_text
             gc = gc + 1;
@@ -545,11 +658,11 @@ fn parse_generics() -> int {
 fn parse_generics_into(names: [string; 4]) -> int {
     if check(T_LBRACKET) {
         advance_tok(); // [
-        let mut gc = 0;
+        gc : ., mut = 0;
         loop {
             if check(T_RBRACKET) { break; }
             if gc >= MAX_GENERICS { break; }
-            let gt = advance_tok();
+            gt := advance_tok();
             names[gc] = tok_lx(gt);
             gc = gc + 1;
             if !check(T_COMMA) { break; }
@@ -563,7 +676,7 @@ fn parse_generics_into(names: [string; 4]) -> int {
 
 fn store_func_generics(fi: int, names: [string; 4], count: int) {
     g_funcs[fi].generic_count = count;
-    let mut gi = 0;
+    gi : ., mut = 0;
     loop {
         if gi >= count { break; }
         g_funcs[fi].generic_names[gi] = names[gi];
@@ -573,7 +686,7 @@ fn store_func_generics(fi: int, names: [string; 4], count: int) {
 
 fn add_func(name: string, pc: int, rt: int, an: int) -> int {
     if g_func_count >= MAX_FUNCS { return -1; }
-    let idx = g_func_count;
+    idx := g_func_count;
     g_funcs[idx] = FuncInfo { name = name, param_count = pc, param_types = [0;16], return_type = rt, ast_node = an, generic_names = ["";4], generic_count = 0 };
     g_func_count = idx + 1;
     return idx;
@@ -581,7 +694,7 @@ fn add_func(name: string, pc: int, rt: int, an: int) -> int {
 
 fn add_struct(name: string) -> int {
     if g_struct_count >= MAX_STRUCTS { return -1; }
-    let idx = g_struct_count;
+    idx := g_struct_count;
     g_structs[idx] = StructInfo { name = name, field_names = ["";16], field_types = [0;16], field_type_nodes = [0;16], field_count = 0, generic_names = ["";4], generic_count = 0 };
     g_struct_count = idx + 1;
     return idx;
@@ -589,24 +702,24 @@ fn add_struct(name: string) -> int {
 
 fn add_enum(name: string) -> int {
     if g_enum_count >= MAX_ENUMS { return -1; }
-    let idx = g_enum_count;
+    idx := g_enum_count;
     g_enums[idx] = EnumInfo { name = name, variants = [EnumVariant{name="",types=[0;16],type_count=0};16], variant_count = 0, generic_names = ["";4], generic_count = 0 };
     g_enum_count = idx + 1;
     return idx;
 }
 
 fn parse_fn_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int) {
-    let mut gnames: [string; 4] = ["";4];
-    let gc = parse_generics_into(gnames);
+    gnames : [string; 4], mut;
+    gc := parse_generics_into(gnames);
 
     advance_tok(); // (
-    let mut pf = -1;
-    let mut pc = 0;
+    pf : ., mut = -1;
+    pc : ., mut = 0;
     if !check(T_RPAREN) {
         loop {
             // Handle self/&self/&mut self params
             if tok_k(cur_tok()) == T_SELF {
-                let pt = advance_tok();
+                pt := advance_tok();
                 if pf < 0 { pf = g_ast_count; }
                 alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 1, 0, 0, tok_ln(pt), tok_cl(pt));
                 pc = pc + 1;
@@ -616,7 +729,7 @@ fn parse_fn_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int) {
                 continue;
             }
             if tok_k(cur_tok()) == T_AMPERSAND && tok_k(cur_tok()+1) == T_MUT && tok_k(cur_tok()+2) == T_SELF {
-                let pt = advance_tok();
+                pt := advance_tok();
                 advance_tok();
                 advance_tok();
                 if pf < 0 { pf = g_ast_count; }
@@ -628,7 +741,7 @@ fn parse_fn_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int) {
                 continue;
             }
             if tok_k(cur_tok()) == T_AMPERSAND && tok_k(cur_tok()+1) == T_SELF {
-                let pt = advance_tok();
+                pt := advance_tok();
                 advance_tok();
                 if pf < 0 { pf = g_ast_count; }
                 alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 2, 0, 0, tok_ln(pt), tok_cl(pt));
@@ -638,10 +751,10 @@ fn parse_fn_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int) {
                 advance_tok();
                 continue;
             }
-            let pt = advance_tok();
-            let pn = str_intern(tok_lx(pt));
+            pt := advance_tok();
+            pn := str_intern(tok_lx(pt));
             advance_tok();
-            let pty = parse_type();
+            pty := parse_type();
             if pf < 0 { pf = g_ast_count; }
             alloc_node(EXPR_PARAM, pn, 0, 0, 0, unpack_type(pty), pty, tok_ln(pt), tok_cl(pt));
             pc = pc + 1;
@@ -650,15 +763,15 @@ fn parse_fn_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int) {
         }
     }
     advance_tok(); // )
-    let mut rt = 0;
-    let mut rtv = TY_UNIT;
+    rt : ., mut = 0;
+    rtv : ., mut = TY_UNIT;
     if check(T_ARROW) {
         advance_tok(); // ->
         rt = parse_type();
         rtv = unpack_type(rt);
     }
 
-    let mut body = -1;
+    body : ., mut = -1;
     if check(T_LBRACE) {
         body = parse_block();
     } else {
@@ -667,53 +780,53 @@ fn parse_fn_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int) {
         advance_tok(); // ;
     }
 
-    let fn_node = alloc_node(EXPR_FN, fn_ni, pf, pc, rtv, rt, body, fn_line, fn_col);
-    let fi = add_func(fn_name, pc, rtv, fn_node);
+    fn_node := alloc_node(EXPR_FN, fn_ni, pf, pc, rtv, rt, body, fn_line, fn_col);
+    fi := add_func(fn_name, pc, rtv, fn_node);
     if fi >= 0 && gc > 0 { store_func_generics(fi, gnames, gc); }
 }
 
 fn parse_declaration() {
-    let mut ip = 0;
+    ip : ., mut = 0;
     if check(T_PUB) { ip = 1; advance_tok(); }
 
     // fn
     if check(T_FN) {
-        let t = advance_tok();
-        let nt = advance_tok();
-        let name = tok_lx(nt);
-        let ni = str_intern(name);
+        t := advance_tok();
+        nt := advance_tok();
+        name := tok_lx(nt);
+        ni := str_intern(name);
         parse_fn_body(name, ni, tok_ln(t), tok_cl(t));
         return;
     }
 
     // struct
     if check(T_STRUCT) {
-        let t = advance_tok();
-        let nt = advance_tok();
-        let name = tok_lx(nt);
-        let mut sg_names: [string; 4] = ["";4];
-        let sg_count = parse_generics_into(sg_names);
+        t := advance_tok();
+        nt := advance_tok();
+        name := tok_lx(nt);
+        sg_names : [string; 4], mut;
+        sg_count := parse_generics_into(sg_names);
         advance_tok(); // {
 
-        let si = add_struct(name);
+        si := add_struct(name);
         if si >= 0 {
             if sg_count > 0 {
                 g_structs[si].generic_count = sg_count;
-                let mut sgi = 0;
+                sgi : ., mut = 0;
                 loop {
                     if sgi >= sg_count { break; }
                     g_structs[si].generic_names[sgi] = sg_names[sgi];
                     sgi = sgi + 1;
                 }
             }
-            let mut fc = 0;
+            fc : ., mut = 0;
             loop {
                 if check(T_RBRACE) { break; }
-                let ft = advance_tok();
-                let fn2 = tok_lx(ft);
+                ft := advance_tok();
+                fn2 := tok_lx(ft);
                 g_structs[si].field_names[fc] = fn2;
                 advance_tok();
-                let fty = parse_type();
+                fty := parse_type();
                 g_structs[si].field_types[fc] = unpack_type(fty);
                 g_structs[si].field_type_nodes[fc] = fty;
                 fc = fc + 1;
@@ -727,36 +840,36 @@ fn parse_declaration() {
 
     // enum
     if check(T_ENUM) {
-        let t = advance_tok();
-        let nt = advance_tok();
-        let name = tok_lx(nt);
-        let mut eg_names: [string; 4] = ["";4];
-        let eg_count = parse_generics_into(eg_names);
+        t := advance_tok();
+        nt := advance_tok();
+        name := tok_lx(nt);
+        eg_names : [string; 4], mut;
+        eg_count := parse_generics_into(eg_names);
         advance_tok();
 
-        let ei = add_enum(name);
+        ei := add_enum(name);
         if ei >= 0 {
             if eg_count > 0 {
                 g_enums[ei].generic_count = eg_count;
-                let mut egi = 0;
+                egi : ., mut = 0;
                 loop {
                     if egi >= eg_count { break; }
                     g_enums[ei].generic_names[egi] = eg_names[egi];
                     egi = egi + 1;
                 }
             }
-            let mut vc = 0;
+            vc : ., mut = 0;
             loop {
                 if check(T_RBRACE) { break; }
-                let vt = advance_tok();
-                let vname = tok_lx(vt);
+                vt := advance_tok();
+                vname := tok_lx(vt);
                 g_enums[ei].variants[vc].name = vname;
-                let mut tc = 0;
+                tc : ., mut = 0;
                 if check(T_LPAREN) {
                     advance_tok();
                     loop {
                         if check(T_RPAREN) { break; }
-                        let fty = parse_type();
+                        fty := parse_type();
                         g_enums[ei].variants[vc].types[tc] = unpack_type(fty);
                         tc = tc + 1;
                         if !check(T_COMMA) { break; }
@@ -776,20 +889,20 @@ fn parse_declaration() {
 
     // impl block
     if check(T_IMPL) {
-        let t = advance_tok();
-        let type_nt = advance_tok();
-        let type_name = tok_lx(type_nt);
-        let type_ni = str_intern(type_name);
+        t := advance_tok();
+        type_nt := advance_tok();
+        type_name := tok_lx(type_nt);
+        type_ni := str_intern(type_name);
         advance_tok(); // {
         loop {
             if check(T_RBRACE) { break; }
             if check(T_FN) {
-                let ft = advance_tok();
-                let method_nt = advance_tok();
-                let method_name = tok_lx(method_nt);
-                let method_ni = str_intern(method_name);
-                let mangled = type_name + "." + method_name;
-                let mangled_ni = str_intern(mangled);
+                ft := advance_tok();
+                method_nt := advance_tok();
+                method_name := tok_lx(method_nt);
+                method_ni := str_intern(method_name);
+                mangled := type_name + "." + method_name;
+                mangled_ni := str_intern(mangled);
                 parse_fn_body(mangled, mangled_ni, tok_ln(ft), tok_cl(ft));
                 // Register in method lookup table
                 if g_method_count < MAX_FUNCS {
@@ -807,10 +920,10 @@ fn parse_declaration() {
     // type alias
     if check(T_TYPE) {
         advance_tok();
-        let nt = advance_tok();
-        let name_idx = str_intern(tok_lx(nt));
+        nt := advance_tok();
+        name_idx := str_intern(tok_lx(nt));
         advance_tok();
-        let type_node = parse_type();
+        type_node := parse_type();
         advance_tok(); // ;
         if g_type_alias_count < MAX_TYPES {
             g_type_aliases[g_type_alias_count] = TypeAlias { name_idx = name_idx, type_node = type_node };
@@ -819,23 +932,45 @@ fn parse_declaration() {
         return;
     }
 
-    // let (global)
-    if check(T_LET) {
-        advance_tok();
-        let mut im = 0;
-        if check(T_MUT) { im = 1; advance_tok(); }
-        let nt = advance_tok();
-        let ni = str_intern(tok_lx(nt));
-        let mut tn = -1;
-        if check(T_COLON) { advance_tok(); tn = parse_type(); }
-        let mut val = -1;
-        if check(T_EQ) { advance_tok(); val = parse_expr(); }
-        advance_tok();
-        let node = alloc_node(EXPR_LET, ni, tn, val, 0, 0, im, tok_ln(nt), tok_cl(nt));
+    // import declaration: consume tokens until ;
+    if check(T_IMPORT) {
+        advance_tok(); // import
+        loop {
+            if check(T_SEMI) || check(T_EOF) { break; }
+            advance_tok();
+        }
+        advance_tok(); // ;
+        return;
+    }
+
+    // mod declaration
+    if check(T_MOD) {
+        advance_tok(); // mod
+        loop {
+            if check(T_SEMI) || check(T_EOF) { break; }
+            advance_tok();
+        }
+        advance_tok(); // ;
+        return;
+    }
+
+    // New syntax global variable declaration
+    if check(T_IDENT) && is_new_var_decl() {
+        node := parse_new_var_decl();
         if g_global_let_count < MAX_AST {
             g_global_lets[g_global_let_count] = node;
             g_global_let_count = g_global_let_count + 1;
         }
+        // Drain any batch extras to globals
+        loop {
+            if g_extra_let_count <= 0 { break; }
+            g_extra_let_count = g_extra_let_count - 1;
+            if g_global_let_count < MAX_AST {
+                g_global_lets[g_global_let_count] = g_extra_lets[g_extra_let_count];
+                g_global_let_count = g_global_let_count + 1;
+            }
+        }
+        g_extra_let_count = 0;
         return;
     }
 
@@ -853,6 +988,7 @@ fn parse_all() {
     g_method_count = 0;
     g_loop_depth = 0;
     g_global_let_count = 0;
+    g_extra_let_count = 0;
     g_block_stmt_count = 0;
     g_error_count = 0;
 

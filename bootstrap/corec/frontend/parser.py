@@ -10,14 +10,15 @@ class Parser:
         self.const_values = {}
 
     def _scan_constants(self):
-        """Pre-scan for 'let NAME: TYPE = VALUE;' declarations to resolve array sizes."""
+        """Pre-scan for 'NAME: TYPE = VALUE;' declarations to resolve array sizes."""
         save = self.pos
         while not self.check(TokenType.EOF):
-            if (self.check(TokenType.LET) and
-                self._check_seq([TokenType.LET, TokenType.IDENT, TokenType.COLON,
-                                 TokenType.IDENT, TokenType.EQ, TokenType.INT_LIT,
-                                 TokenType.SEMI])):
-                self.advance()  # let
+            matched = False
+            # New syntax: NAME: TYPE = VALUE; (starts with IDENT)
+            if (self.check(TokenType.IDENT) and
+                  self._check_seq([TokenType.IDENT, TokenType.COLON,
+                                   TokenType.IDENT, TokenType.EQ, TokenType.INT_LIT,
+                                   TokenType.SEMI])):
                 name = self.advance().lexeme  # NAME
                 self.advance()  # :
                 type_name = self.advance().lexeme  # int/float/bool
@@ -25,7 +26,8 @@ class Parser:
                 val = int(self.advance().lexeme)  # VALUE
                 self.const_values[name] = val
                 self.advance()  # ; (skip to keep pos consistent)
-            else:
+                matched = True
+            if not matched:
                 self.advance()
         self.pos = save
 
@@ -60,6 +62,68 @@ class Parser:
 
     def check(self, typ: TokenType) -> bool:
         return self.cur().type == typ
+
+    def _is_var_decl_start(self):
+        """Check if current position starts a new-style variable declaration (no 'let' keyword)."""
+        if not self.check(TokenType.IDENT):
+            return False
+        save = self.pos
+        self.advance()  # consume first IDENT
+        result = False
+        if self.check(TokenType.COMMA):
+            # a, b : ... — batch declaration
+            self.advance()
+            if self.check(TokenType.IDENT):
+                self.advance()
+                if self.check(TokenType.COLON):
+                    result = True
+        elif self.check(TokenType.COLON_EQ):
+            result = True
+        elif self.check(TokenType.COLON):
+            result = True  # x : type ... — commit to declaration
+        self.pos = save
+        return result
+
+    def _parse_var_decl_names_tags_type(self):
+        """Parse common prefix of new var decl: names ':' type [',' tags] [= values]
+        Returns (names, tags, typ, values). Type is None for auto deduction."""
+        names = [self.expect(TokenType.IDENT).lexeme]
+        while self.check(TokenType.COMMA):
+            self.advance()
+            names.append(self.expect(TokenType.IDENT).lexeme)
+        tags = []
+        if self.check(TokenType.COLON_EQ):
+            # x := expr  →  x : auto = expr
+            self.advance()
+            values = [self.parse_expr()]
+            return names, tags, None, values
+        self.expect(TokenType.COLON)
+        if self.check(TokenType.AUTO) or self.check(TokenType.DOT):
+            typ = None  # auto-deduced
+            self.advance()
+        else:
+            typ = self.parse_type()
+        if self.check(TokenType.COMMA):
+            self.advance()
+            while not self.check(TokenType.EQ) and not self.check(TokenType.SEMI) and not self.check(TokenType.EOF):
+                # Accept IDENT or any keyword as a tag (anything that's not a structural token)
+                tt = self.cur().type
+                if tt not in (TokenType.EQ, TokenType.SEMI, TokenType.COMMA, TokenType.COLON, TokenType.EOF):
+                    tags.append(self.advance().lexeme)
+                else:
+                    break
+                if self.check(TokenType.COMMA):
+                    self.advance()
+                else:
+                    break
+        values = []
+        if self.check(TokenType.EQ):
+            self.advance()
+            values.append(self.parse_expr())
+            while self.check(TokenType.COMMA):
+                self.advance()
+                values.append(self.parse_expr())
+        return names, tags, typ, values
 
     # ─── 顶层 ───
     def parse_compilation_unit(self) -> CompilationUnit:
@@ -120,8 +184,8 @@ class Parser:
             return self.parse_impl_decl()
         elif self.check(TokenType.TYPE):
             return self.parse_type_alias()
-        elif self.check(TokenType.LET):
-            return self.parse_let_decl()
+        elif self.check(TokenType.IDENT) and self._is_var_decl_start():
+            return self._parse_new_let_decl()
         self.error(f"Unexpected '{self.cur().lexeme}' at top level")
 
     def parse_function_decl(self, is_pub):
@@ -224,6 +288,9 @@ class Parser:
             return BaseType('Self')
         if self.check(TokenType.IDENT) and self.cur().lexeme in base_types:
             return BaseType(self.advance().lexeme)
+        if self.check(TokenType.UNIT):
+            self.advance()
+            return BaseType('unit')
         typ = PathType(self.parse_path())
         if self.check(TokenType.LBRACK):
             self.advance()
@@ -248,20 +315,6 @@ class Parser:
         return left
 
     def parse_assignment(self):
-        if self.check(TokenType.LET):
-            self.advance()
-            mutable = False
-            if self.check(TokenType.MUT):
-                mutable = True
-                self.advance()
-            name = self.expect(TokenType.IDENT).lexeme
-            typ = None
-            if self.check(TokenType.COLON):
-                self.advance()
-                typ = self.parse_type()
-            self.expect(TokenType.EQ)
-            val = self.parse_expr()
-            return LetStmt(mutable, name, typ, val)
         if self.check(TokenType.MOVE):
             self.advance()
             name = self.expect(TokenType.IDENT).lexeme
@@ -517,23 +570,10 @@ class Parser:
         return Block(stmts, expr)
 
     def parse_stmt(self):
-        if self.check(TokenType.LET):
-            self.advance()
-            mut = False
-            if self.check(TokenType.MUT):
-                mut = True
-                self.advance()
-            name = self.expect(TokenType.IDENT).lexeme
-            typ = None
-            if self.check(TokenType.COLON):
-                self.advance()
-                typ = self.parse_type()
-            val = None
-            if self.check(TokenType.EQ):
-                self.advance()
-                val = self.parse_expr()
+        if self.check(TokenType.IDENT) and self._is_var_decl_start():
+            names, tags, typ, values = self._parse_var_decl_names_tags_type()
             self.expect(TokenType.SEMI)
-            return LetStmt(mut, name, typ, val)
+            return LetStmt(names=names, tags=tags, type_=typ, values=values)
         elif self.check(TokenType.RETURN):
             self.advance()
             val = None
@@ -733,21 +773,8 @@ class Parser:
         self.expect(TokenType.SEMI)
         return TypeAliasDecl(name, typ)
 
-    def parse_let_decl(self):
+    def _parse_new_let_decl(self):
         from corec.syntax.ast import LetDecl
-        self.expect(TokenType.LET)
-        mut = False
-        if self.check(TokenType.MUT):
-            mut = True
-            self.advance()
-        name = self.expect(TokenType.IDENT).lexeme
-        typ = None
-        if self.check(TokenType.COLON):
-            self.advance()
-            typ = self.parse_type()
-        val = None
-        if self.check(TokenType.EQ):
-            self.advance()
-            val = self.parse_expr()
+        names, tags, typ, values = self._parse_var_decl_names_tags_type()
         self.expect(TokenType.SEMI)
-        return LetDecl(mut, name, typ, val)
+        return LetDecl(names=names, tags=tags, type_=typ, values=values)

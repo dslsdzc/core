@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Build artifacts (everything in build/ is generated)
+build/*
+
+# Generated
+*.coreir

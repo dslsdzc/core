@@ -2,19 +2,63 @@
 // Compiler entry point: ties all stages together
 
 // Entry for build verification (no args)
-fn compiler_entry() -> string {
-    return "compiler_ok";
+fn compiler_main() -> int {
+    arg := __builtin_get_arg(1);
+    if __builtin_str_len(arg) == 0 {
+        __builtin_println("usage: corec <file.core>");
+        return 1;
+    }
+    __builtin_print("compiling ");
+    __builtin_println(arg);
+    source := __builtin_read_file(arg);
+    if __builtin_str_len(source) == 0 {
+        __builtin_println("error: could not read source file");
+        return 1;
+    }
+    __builtin_print("source: ");
+    __builtin_print(__builtin_int_to_str(__builtin_str_len(source)));
+    __builtin_println(" bytes");
+    asm := compile_source(source);
+    if __builtin_str_len(asm) == 0 {
+        __builtin_println("error: compilation produced empty output");
+        return 1;
+    }
+    // Check if result is an error message (starts with "check")
+    chk := __builtin_str_sub(asm, 0, 5);
+    if __builtin_str_eq(chk, "check") == 0 {
+        written := __builtin_write_file("output.s", asm);
+        if written < 0 {
+            __builtin_println("error: could not write output.s");
+            return 1;
+        }
+        __builtin_print("output: ");
+        __builtin_print(__builtin_int_to_str(__builtin_str_len(asm)));
+        __builtin_println(" bytes -> output.s");
+        return 0;
+    }
+    __builtin_print("error: ");
+    __builtin_println(asm);
+    return 1;
 }
 
 // Full compilation: source -> assembly
 fn compile_source(source: string) -> string {
     g_source = source;
     tokenize();
+    __builtin_print("  tokens: ");
+    __builtin_println(__builtin_int_to_str(g_token_count));
+    resolve_imports();
     parse_all();
+    __builtin_print("  funcs: ");
+    __builtin_print(__builtin_int_to_str(g_func_count));
+    __builtin_print(" structs: ");
+    __builtin_print(__builtin_int_to_str(g_struct_count));
+    __builtin_print(" enums: ");
+    __builtin_println(__builtin_int_to_str(g_enum_count));
     check_all();
     if g_check_error_count > 0 {
-        let mut err_msg = "check errors:";
-        let mut ei = 0;
+        err_msg : ., mut = "check errors:";
+        ei : ., mut = 0;
         loop {
             if ei >= g_check_error_count { break; }
             err_msg = err_msg + " " + g_check_errors[ei];
@@ -24,5 +68,62 @@ fn compile_source(source: string) -> string {
         return err_msg;
     }
     ir_gen_all();
+    __builtin_print("  ir: ");
+    __builtin_print(__builtin_int_to_str(g_ir_instr_count));
+    __builtin_print(" instrs, ");
+    __builtin_print(__builtin_int_to_str(g_ir_var_count));
+    __builtin_println(" vars");
     return x86_64_generate();
+}
+
+// Resolve imports: scan token stream for T_IMPORT, load imported files,
+// append their source to g_source, and re-tokenize.
+fn resolve_imports() {
+    extra_src : ., mut = "";
+    i : ., mut = 0;
+    loop {
+        if i >= g_token_count { break; }
+        if g_tokens[i].kind == T_IMPORT {
+            // Extract path tokens until ; or AS (for aliases)
+            path_parts : [string; 4], mut;
+            pc : ., mut = 0;
+            j : ., mut = i + 1;
+            loop {
+                if j >= g_token_count { break; }
+                k := g_tokens[j].kind;
+                if k == T_SEMI || k == T_EOF { break; }
+                if k == T_AS { break; }  // "import foo as bar;" — stop at "as"
+                if k == T_IDENT && pc < 4 {
+                    path_parts[pc] = g_tokens[j].lexeme;
+                    pc = pc + 1;
+                }
+                j = j + 1;
+            }
+            // Build relative path from parts: "io" -> "io.core", "std.io" -> "std/io.core"
+            rel_path : ., mut = "";
+            pi : ., mut = 0;
+            loop {
+                if pi >= pc { break; }
+                if pi > 0 { rel_path = rel_path + "/"; }
+                rel_path = rel_path + path_parts[pi];
+                pi = pi + 1;
+            }
+            rel_path = rel_path + ".core";
+            // Try src/stdlib/ first, then current directory
+            content := __builtin_read_file("src/stdlib/" + rel_path);
+            if __builtin_str_len(content) == 0 {
+                content2 := __builtin_read_file(rel_path);
+                if __builtin_str_len(content2) > 0 {
+                    extra_src = extra_src + "\n" + content2;
+                }
+            } else {
+                extra_src = extra_src + "\n" + content;
+            }
+        }
+        i = i + 1;
+    }
+    if __builtin_str_len(extra_src) > 0 {
+        g_source = g_source + "\n" + extra_src;
+        tokenize();
+    }
 }

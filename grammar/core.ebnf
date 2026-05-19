@@ -1,8 +1,9 @@
 (*** 顶层结构 ***)
-CompilationUnit = { ModuleDecl | ImportDecl } { TopLevelDecl } ;
+CompilationUnit = { FileIdDecl | ModuleDecl | ImportDecl } { TopLevelDecl } ;
 
+FileIdDecl = 'fileid' STRING_LIT ';' ;
 ModuleDecl = 'mod' Path ';' ;
-ImportDecl = 'import' Path [ 'as' IDENT ] ';' ;
+ImportDecl = 'import' [ '@' IDENT ] IDENT [ ':' IDENT ] ';' ;
 Path = IDENT { '::' IDENT } ;
 
 TopLevelDecl = FunctionDecl | StructDecl | EnumDecl | InterfaceDecl | ImplDecl | TypeAlias ;
@@ -30,7 +31,7 @@ SliceType = '[' Type ']' ;
 (*** 表达式 ***)
 Expr = Assignment | LogicalOr ;
 Assignment = [ Let | Move ] LogicalOr [ '=' LogicalOr ] ;
-Let = 'let' [ 'mut' ] IDENT [ ':' Type ] '=' ;
+Let = IDENT [ ':' ( Type | 'auto' | '.' ) [ ',' Tag { ',' Tag } ] ] ( ':=' | '=' ) ;
 Move = 'move' IDENT '=' ;
 
 LogicalOr = LogicalAnd { '||' LogicalAnd } ;
@@ -41,7 +42,8 @@ Addition = Multiplication { ('+' | '-') Multiplication } ;
 Multiplication = Unary { ('*' | '/' | '%') Unary } ;
 Unary = ('-' | '!' | '&' | '&mut') Unary | CallOrField ;
 CallOrField = Primary { '(' [ ArgList ] ')' | '.' IDENT | '[' Expr ']' | '?' } ;
-Primary = Literal | IDENT | '(' Expr ')' | 'move' Primary | BlockExpr | IfExpr | MatchExpr | LoopExpr | ForExpr | GoExpr | AwaitExpr | UnsafeExpr ;
+Primary = Literal | IDENT | ProjectAccess | '(' Expr ')' | 'move' Primary | BlockExpr | IfExpr | MatchExpr | LoopExpr | ForExpr | GoExpr | AwaitExpr | UnsafeExpr ;
+ProjectAccess = '@' IDENT IDENT '::' IDENT ;
 
 ArgList = Expr { ',' Expr } ;
 
@@ -66,7 +68,7 @@ UnsafeExpr = 'unsafe' Block ;
 Block = '{' { Statement } '}' ;
 Statement = Expr ';' | LetStmt | ReturnStmt | BreakStmt | ContinueStmt ;
 
-LetStmt = 'let' [ 'mut' ] IDENT [ ':' Type ] '=' Expr ';' ;
+LetStmt = IDENT [ ':' ( Type | 'auto' | '.' ) [ ',' Tag { ',' Tag } ] ] ( ':=' | '=' ) Expr ';' ;
 ReturnStmt = 'return' [ Expr ] ';' ;
 BreakStmt = 'break' ';' ;
 ContinueStmt = 'continue' ';' ;

@@ -5,11 +5,11 @@
 
 // --- Type table ---
 // Entries are 3 ints: kind, data, extra
-let mut g_types: [int; MAX_TYPES * 3];
-let mut g_type_count: int;
+g_types : [int; MAX_TYPES * 3], mut;
+g_type_count : int, mut;
 
 fn alloc_type(kind: int, data: int, extra: int) -> int {
-    let idx = g_type_count;
+    idx := g_type_count;
     if idx < MAX_TYPES {
         g_types[idx * 3] = kind;
         g_types[idx * 3 + 1] = data;
@@ -49,8 +49,8 @@ fn type_equal(t1: int, t2: int) -> bool {
     if t1 == t2 { return true; }
     // Compare structure for non-base types
     if t1 >= 0 && t2 >= 0 && t1 < g_type_count && t2 < g_type_count {
-        let k1 = get_type_kind(t1);
-        let k2 = get_type_kind(t2);
+        k1 := get_type_kind(t1);
+        k2 := get_type_kind(t2);
         if k1 == TYP_NAMED && k2 == TYP_NAMED {
             return get_type_data(t1) == get_type_data(t2);
         }
@@ -67,12 +67,12 @@ fn type_equal(t1: int, t2: int) -> bool {
         }
         if k1 == TYP_GENERIC_APPLY && k2 == TYP_GENERIC_APPLY {
             if get_type_data(t1) != get_type_data(t2) { return false; }
-            let start1 = get_type_extra(t1);
-            let start2 = get_type_extra(t2);
-            let count1 = g_gen_apply_data[start1];
-            let count2 = g_gen_apply_data[start2];
+            start1 := get_type_extra(t1);
+            start2 := get_type_extra(t2);
+            count1 := g_gen_apply_data[start1];
+            count2 := g_gen_apply_data[start2];
             if count1 != count2 { return false; }
-            let mut ai = 0;
+            ai : ., mut = 0;
             loop {
                 if ai >= count1 { break; }
                 if !type_equal(g_gen_apply_data[start1 + 1 + ai], g_gen_apply_data[start2 + 1 + ai]) { return false; }
@@ -95,10 +95,10 @@ struct SymEntry {
     node_idx: int,
 }
 
-let mut g_syms: [SymEntry; MAX_SYMS];
-let mut g_sym_count: int;
-let mut g_scope_bounds: [int; MAX_SCOPES];
-let mut g_scope_depth: int;
+g_syms : [SymEntry; MAX_SYMS], mut;
+g_sym_count : int, mut;
+g_scope_bounds : [int; MAX_SCOPES], mut;
+g_scope_depth : int, mut;
 
 fn push_scope() {
     if g_scope_depth < MAX_SCOPES {
@@ -122,7 +122,7 @@ fn define_sym(name_idx: int, kind: int, type_idx: int, node_idx: int) {
 }
 
 fn lookup_sym(name_idx: int) -> int {
-    let mut i = g_sym_count - 1;
+    i : ., mut = g_sym_count - 1;
     loop {
         if i < 0 { return -1; }
         if g_syms[i].name_idx == name_idx { return i; }
@@ -132,7 +132,7 @@ fn lookup_sym(name_idx: int) -> int {
 }
 
 fn lookup_sym_global(name_idx: int) -> int {
-    let mut i = g_sym_count - 1;
+    i : ., mut = g_sym_count - 1;
     loop {
         if i < 0 { return -1; }
         if g_syms[i].name_idx == name_idx && g_syms[i].kind >= SYM_FN && g_syms[i].kind <= SYM_GLOBAL { return i; }
@@ -142,8 +142,8 @@ fn lookup_sym_global(name_idx: int) -> int {
 }
 
 // --- Error tracking ---
-let mut g_check_errors: [string; MAX_ERRS];
-let mut g_check_error_count: int;
+g_check_errors : [string; MAX_ERRS], mut;
+g_check_error_count : int, mut;
 
 fn check_error(msg: string) {
     if g_check_error_count < MAX_ERRS {
@@ -156,10 +156,10 @@ fn check_error(msg: string) {
 
 fn resolve_type_node(node: int) -> int {
     if node < 0 { return TI_UNIT; }
-    let n = g_ast[node];
+    n := g_ast[node];
     if n.kind == 0 {
         // Base type node: type_val = TY_*
-        let tv = n.type_val;
+        tv := n.type_val;
         if tv == TY_INT { return TI_INT; }
         if tv == TY_FLOAT { return TI_FLOAT; }
         if tv == TY_BOOL { return TI_BOOL; }
@@ -171,8 +171,8 @@ fn resolve_type_node(node: int) -> int {
     }
     if n.kind == EXPR_IDENT {
         // Named type: int_val = name string index
-        let name_idx = n.int_val;
-        let si = lookup_sym_global(name_idx);
+        name_idx := n.int_val;
+        si := lookup_sym_global(name_idx);
         if si >= 0 && g_syms[si].kind == SYM_TYPE {
             return g_syms[si].type_idx;
         }
@@ -181,36 +181,36 @@ fn resolve_type_node(node: int) -> int {
     }
     if n.kind == EXPR_ARRAY {
         // Array type [T; N]
-        let elem = resolve_type_node(n.a);
-        let sz = n.int_val;
+        elem := resolve_type_node(n.a);
+        sz := n.int_val;
         return alloc_type(TYP_ARRAY, elem, sz);
     }
     if n.kind == EXPR_REFTYPE {
         // Reference type &T or &mut T
-        let inner = resolve_type_node(n.a);
-        let mut_flag = n.int_val;
+        inner := resolve_type_node(n.a);
+        mut_flag := n.int_val;
         return alloc_type(TYP_REF, inner, mut_flag);
     }
     if n.kind == EXPR_GENERIC_APPLY {
         // Generic application: Box[int]
-        let name_idx = n.a;
-        let first_arg_node = n.b;
-        let arg_count = n.c;
-        let si = lookup_sym_global(name_idx);
+        name_idx := n.a;
+        first_arg_node := n.b;
+        arg_count := n.c;
+        si := lookup_sym_global(name_idx);
         if si < 0 || g_syms[si].kind != SYM_TYPE {
             check_error("Undefined type in generic application");
             return TI_UNIT;
         }
-        let base_ti = g_syms[si].type_idx;
+        base_ti := g_syms[si].type_idx;
         // Store args in g_gen_apply_data: [count, arg1, arg2, ...]
-        let data_start = g_gen_apply_data_count;
+        data_start := g_gen_apply_data_count;
         g_gen_apply_data[data_start] = arg_count;
         g_gen_apply_data_count = data_start + 1;
-        let mut ai = 0;
-        let mut an = first_arg_node;
+        ai : ., mut = 0;
+        an : ., mut = first_arg_node;
         loop {
             if ai >= arg_count { break; }
-            let arg_ti = resolve_type_node(an);
+            arg_ti := resolve_type_node(an);
             g_gen_apply_data[data_start + 1 + ai] = arg_ti;
             ai = ai + 1;
             an = an + 1;
@@ -222,7 +222,7 @@ fn resolve_type_node(node: int) -> int {
 }
 
 fn find_struct(name_idx: int) -> int {
-    let mut i = 0;
+    i : ., mut = 0;
     loop {
         if i >= g_struct_count { return -1; }
         if str_intern(g_structs[i].name) == name_idx { return i; }
@@ -232,7 +232,7 @@ fn find_struct(name_idx: int) -> int {
 }
 
 fn find_enum(name_idx: int) -> int {
-    let mut i = 0;
+    i : ., mut = 0;
     loop {
         if i >= g_enum_count { return -1; }
         if str_intern(g_enums[i].name) == name_idx { return i; }
@@ -244,12 +244,12 @@ fn find_enum(name_idx: int) -> int {
 // --- First pass: collect all declarations ---
 
 fn collect_decls() {
-    let mut i = 0;
+    i : ., mut = 0;
     // First: register all struct types
     loop {
         if i >= g_struct_count { break; }
-        let name_idx = str_intern(g_structs[i].name);
-        let type_idx = alloc_type(TYP_NAMED, name_idx, 0);
+        name_idx := str_intern(g_structs[i].name);
+        type_idx := alloc_type(TYP_NAMED, name_idx, 0);
         define_sym(name_idx, SYM_TYPE, type_idx, -1);
         i = i + 1;
     }
@@ -257,7 +257,7 @@ fn collect_decls() {
     i = 0;
     loop {
         if i >= g_struct_count { break; }
-        let mut j = 0;
+        j : ., mut = 0;
         loop {
             if j >= g_structs[i].field_count { break; }
             // Field types were stored by parser as unpack_type() results (TY_* or 0)
@@ -271,14 +271,14 @@ fn collect_decls() {
     i = 0;
     loop {
         if i >= g_enum_count { break; }
-        let name_idx = str_intern(g_enums[i].name);
-        let type_idx = alloc_type(TYP_NAMED, name_idx, 0);
+        name_idx := str_intern(g_enums[i].name);
+        type_idx := alloc_type(TYP_NAMED, name_idx, 0);
         define_sym(name_idx, SYM_TYPE, type_idx, -1);
         // Register each variant as a function returning the enum type
-        let mut vi = 0;
+        vi : ., mut = 0;
         loop {
             if vi >= g_enums[i].variant_count { break; }
-            let vname_idx = str_intern(g_enums[i].variants[vi].name);
+            vname_idx := str_intern(g_enums[i].variants[vi].name);
             define_sym(vname_idx, SYM_FN, type_idx, -1);
             vi = vi + 1;
         }
@@ -289,9 +289,9 @@ fn collect_decls() {
     i = 0;
     loop {
         if i >= g_type_alias_count { break; }
-        let name_idx = g_type_aliases[i].name_idx;
-        let type_node = g_type_aliases[i].type_node;
-        let ti = resolve_type_node(type_node);
+        name_idx := g_type_aliases[i].name_idx;
+        type_node := g_type_aliases[i].type_node;
+        ti := resolve_type_node(type_node);
         define_sym(name_idx, SYM_TYPE, ti, -1);
         i = i + 1;
     }
@@ -300,15 +300,15 @@ fn collect_decls() {
     i = 0;
     loop {
         if i >= g_func_count { break; }
-        let name_idx = str_intern(g_funcs[i].name);
-        let fn_node = g_funcs[i].ast_node;
-        let rt = g_funcs[i].return_type;
-        let rt_ti = TI_UNIT;
+        name_idx := str_intern(g_funcs[i].name);
+        fn_node := g_funcs[i].ast_node;
+        rt := g_funcs[i].return_type;
+        rt_ti := TI_UNIT;
         // For generic functions, skip return type resolution (depends on call site)
         if g_funcs[i].generic_count > 0 {
             rt_ti = TI_UNIT;
         } else {
-            let type_node = g_ast[fn_node].type_val;
+            type_node := g_ast[fn_node].type_val;
             if type_node > 0 && g_ast[type_node].kind != 0 {
                 rt_ti = resolve_type_node(type_node);
             } else if rt == TY_INT { rt_ti = TI_INT; }
@@ -324,11 +324,11 @@ fn collect_decls() {
     i = 0;
     loop {
         if i >= g_global_let_count { break; }
-        let node = g_global_lets[i];
-        let n = g_ast[node];
-        let name_idx = n.a;  // EXPR_LET: a = name idx
-        let type_node = n.b; // EXPR_LET: b = type node (-1 if none)
-        let ti = TI_UNIT;
+        node := g_global_lets[i];
+        n := g_ast[node];
+        name_idx := n.a;  // EXPR_LET: a = name idx
+        type_node := n.b;  // EXPR_LET: b = type node (-1 if none)
+        ti := TI_UNIT;
         if type_node >= 0 { ti = resolve_type_node(type_node); }
         define_sym(name_idx, SYM_GLOBAL, ti, node);
         i = i + 1;
@@ -336,13 +336,13 @@ fn collect_decls() {
 }
 
 // --- Generic type inference helpers ---
-let mut g_gen_map_names: [int; 4];  // generic param name indices
-let mut g_gen_map_types: [int; 4];  // corresponding concrete type indices
-let mut g_gen_map_count: int;
+g_gen_map_names : [int; 4], mut;  // generic param name indices
+g_gen_map_types : [int; 4], mut;  // corresponding concrete type indices
+g_gen_map_count : int, mut;
 
 fn is_func_generic(fi: int, name_idx: int) -> bool {
     if fi < 0 || fi >= g_func_count { return false; }
-    let mut gi = 0;
+    gi : ., mut = 0;
     loop {
         if gi >= g_funcs[fi].generic_count { return false; }
         if str_intern(g_funcs[fi].generic_names[gi]) == name_idx { return true; }
@@ -352,8 +352,8 @@ fn is_func_generic(fi: int, name_idx: int) -> bool {
 }
 
 fn find_func(name_idx: int) -> int {
-    let s = g_strs[name_idx];
-    let mut i = 0;
+    s := g_strs[name_idx];
+    i : ., mut = 0;
     loop {
         if i >= g_func_count { return -1; }
         if g_funcs[i].name == s { return i; }
@@ -364,7 +364,7 @@ fn find_func(name_idx: int) -> int {
 
 fn is_struct_generic(si: int, name_idx: int) -> bool {
     if si < 0 || si >= g_struct_count { return false; }
-    let mut gi = 0;
+    gi : ., mut = 0;
     loop {
         if gi >= g_structs[si].generic_count { return false; }
         if str_intern(g_structs[si].generic_names[gi]) == name_idx { return true; }
@@ -374,7 +374,7 @@ fn is_struct_generic(si: int, name_idx: int) -> bool {
 }
 
 fn find_struct_by_name(name_idx: int) -> int {
-    let mut i = 0;
+    i : ., mut = 0;
     loop {
         if i >= g_struct_count { return -1; }
         if str_intern(g_structs[i].name) == name_idx { return i; }
@@ -386,9 +386,9 @@ fn find_struct_by_name(name_idx: int) -> int {
 fn resolve_call_type_node(node: int, func_fi: int) -> int {
     // Resolve a type node for call inference, treating generic params as TYP_GENERIC_PARAM
     if node < 0 { return TI_UNIT; }
-    let n = g_ast[node];
+    n := g_ast[node];
     if n.kind == 0 {
-        let tv = n.type_val;
+        tv := n.type_val;
         if tv == TY_INT { return TI_INT; }
         if tv == TY_FLOAT { return TI_FLOAT; }
         if tv == TY_BOOL { return TI_BOOL; }
@@ -398,30 +398,30 @@ fn resolve_call_type_node(node: int, func_fi: int) -> int {
         return TI_UNIT;
     }
     if n.kind == EXPR_IDENT {
-        let name_idx = n.int_val;
+        name_idx := n.int_val;
         if is_func_generic(func_fi, name_idx) {
             return alloc_type(TYP_GENERIC_PARAM, name_idx, 0);
         }
         // Regular named type
-        let si = lookup_sym_global(name_idx);
+        si := lookup_sym_global(name_idx);
         if si >= 0 && g_syms[si].kind == SYM_TYPE { return g_syms[si].type_idx; }
         return alloc_type(TYP_NAMED, name_idx, 0);
     }
     if n.kind == EXPR_GENERIC_APPLY {
-        let name_idx = n.a;
-        let first_an = n.b;
-        let ac = n.c;
-        let si = lookup_sym_global(name_idx);
+        name_idx := n.a;
+        first_an := n.b;
+        ac := n.c;
+        si := lookup_sym_global(name_idx);
         if si < 0 || g_syms[si].kind != SYM_TYPE { return TI_UNIT; }
-        let base_ti = g_syms[si].type_idx;
-        let ds = g_gen_apply_data_count;
+        base_ti := g_syms[si].type_idx;
+        ds := g_gen_apply_data_count;
         g_gen_apply_data[ds] = ac;
         g_gen_apply_data_count = ds + 1;
-        let mut ai = 0;
-        let mut an = first_an;
+        ai : ., mut = 0;
+        an : ., mut = first_an;
         loop {
             if ai >= ac { break; }
-            let at = resolve_call_type_node(an, func_fi);
+            at := resolve_call_type_node(an, func_fi);
             g_gen_apply_data[ds + 1 + ai] = at;
             ai = ai + 1;
             an = an + 1;
@@ -430,8 +430,8 @@ fn resolve_call_type_node(node: int, func_fi: int) -> int {
         return alloc_type(TYP_GENERIC_APPLY, base_ti, ds);
     }
     if n.kind == EXPR_REFTYPE {
-        let inner = resolve_call_type_node(n.a, func_fi);
-        let mf = n.int_val;
+        inner := resolve_call_type_node(n.a, func_fi);
+        mf := n.int_val;
         return alloc_type(TYP_REF, inner, mf);
     }
     return TI_UNIT;
@@ -439,12 +439,12 @@ fn resolve_call_type_node(node: int, func_fi: int) -> int {
 
 fn unify_types(pattern: int, concrete: int) -> bool {
     if pattern == concrete { return true; }
-    let pk = get_type_kind(pattern);
-    let ck = get_type_kind(concrete);
+    pk := get_type_kind(pattern);
+    ck := get_type_kind(concrete);
     if pk < 0 || ck < 0 { return false; }
     if pk == TYP_GENERIC_PARAM {
-        let name_idx = get_type_data(pattern);
-        let mut mi = 0;
+        name_idx := get_type_data(pattern);
+        mi : ., mut = 0;
         loop {
             if mi >= g_gen_map_count { break; }
             if g_gen_map_names[mi] == name_idx {
@@ -462,12 +462,12 @@ fn unify_types(pattern: int, concrete: int) -> bool {
     }
     if pk == TYP_GENERIC_APPLY && ck == TYP_GENERIC_APPLY {
         if !type_equal(get_type_data(pattern), get_type_data(concrete)) { return false; }
-        let ps = get_type_extra(pattern);
-        let cs = get_type_extra(concrete);
-        let pc = g_gen_apply_data[ps];
-        let cc = g_gen_apply_data[cs];
+        ps := get_type_extra(pattern);
+        cs := get_type_extra(concrete);
+        pc := g_gen_apply_data[ps];
+        cc := g_gen_apply_data[cs];
         if pc != cc { return false; }
-        let mut ai = 0;
+        ai : ., mut = 0;
         loop {
             if ai >= pc { break; }
             if !unify_types(g_gen_apply_data[ps + 1 + ai], g_gen_apply_data[cs + 1 + ai]) { return false; }
@@ -481,10 +481,10 @@ fn unify_types(pattern: int, concrete: int) -> bool {
 fn substitute_return_type(ti: int) -> int {
     // Substitute generic params using g_gen_map
     if g_gen_map_count == 0 { return ti; }
-    let k = get_type_kind(ti);
+    k := get_type_kind(ti);
     if k == TYP_GENERIC_PARAM {
-        let name_idx = get_type_data(ti);
-        let mut mi = 0;
+        name_idx := get_type_data(ti);
+        mi : ., mut = 0;
         loop {
             if mi >= g_gen_map_count { break; }
             if g_gen_map_names[mi] == name_idx { return g_gen_map_types[mi]; }
@@ -493,16 +493,16 @@ fn substitute_return_type(ti: int) -> int {
         return ti;
     }
     if k == TYP_GENERIC_APPLY {
-        let base = get_type_data(ti);
-        let start = get_type_extra(ti);
-        let count = g_gen_apply_data[start];
-        let new_start = g_gen_apply_data_count;
+        base := get_type_data(ti);
+        start := get_type_extra(ti);
+        count := g_gen_apply_data[start];
+        new_start := g_gen_apply_data_count;
         g_gen_apply_data[new_start] = count;
         g_gen_apply_data_count = new_start + 1;
-        let mut ai = 0;
+        ai : ., mut = 0;
         loop {
             if ai >= count { break; }
-            let sub = substitute_return_type(g_gen_apply_data[start + 1 + ai]);
+            sub := substitute_return_type(g_gen_apply_data[start + 1 + ai]);
             g_gen_apply_data[new_start + 1 + ai] = sub;
             ai = ai + 1;
         }
@@ -514,28 +514,28 @@ fn substitute_return_type(ti: int) -> int {
 
 fn infer_generic_call(fi: int, call_node: int, first_arg: int, arg_count: int) -> int {
     // Infer concrete types for a generic function call
-    let fn_node = g_funcs[fi].ast_node;
-    let f = g_ast[fn_node];
-    let first_param = f.b;
-    let param_count = f.c;
-    let ret_type_node = f.type_val;
+    fn_node := g_funcs[fi].ast_node;
+    f := g_ast[fn_node];
+    first_param := f.b;
+    param_count := f.c;
+    ret_type_node := f.type_val;
 
     g_gen_map_count = 0;
 
     // First pass: infer arg types and build mapping
-    let mut pi = 0;
-    let mut pn = first_param;
-    let mut an = first_arg;
+    pi : ., mut = 0;
+    pn : ., mut = first_param;
+    an : ., mut = first_arg;
     loop {
         if pi >= param_count || pi >= arg_count { break; }
         if pn < 0 || an < 0 { break; }
 
-        let p = g_ast[pn];
-        let orig_type_node = p.data;  // original param type node
+        p := g_ast[pn];
+        orig_type_node := p.data;  // original param type node
 
         if orig_type_node >= 0 {
-            let pattern_ti = resolve_call_type_node(orig_type_node, fi);
-            let concrete_ti = infer_expr(an);
+            pattern_ti := resolve_call_type_node(orig_type_node, fi);
+            concrete_ti := infer_expr(an);
             unify_types(pattern_ti, concrete_ti);
         } else {
             infer_expr(an);
@@ -548,13 +548,13 @@ fn infer_generic_call(fi: int, call_node: int, first_arg: int, arg_count: int) -
 
     // Substitute return type
     if g_gen_map_count > 0 && ret_type_node >= 0 {
-        let resolved_ret = resolve_call_type_node(ret_type_node, fi);
+        resolved_ret := resolve_call_type_node(ret_type_node, fi);
         return substitute_return_type(resolved_ret);
     }
 
     // Fallback: look up from symbol table
-    let mut func_ni = f.a;
-    let si = lookup_sym_global(func_ni);
+    func_ni : ., mut = f.a;
+    si := lookup_sym_global(func_ni);
     if si >= 0 && g_syms[si].kind == SYM_FN {
         return g_syms[si].type_idx;
     }
@@ -564,44 +564,44 @@ fn infer_generic_call(fi: int, call_node: int, first_arg: int, arg_count: int) -
 // --- check_func with generic param scope ---
 
 fn check_func(fi: int) {
-    let fn_node = g_funcs[fi].ast_node;
-    let f = g_ast[fn_node];
-    let name_idx = f.a;      // EXPR_FN: a = name idx
-    let first_param = f.b;   // EXPR_FN: b = first param node
-    let param_count = f.c;   // EXPR_FN: c = param count
-    let return_type = f.int_val;  // EXPR_FN: int_val = return TY_*
-    let body = f.data;       // EXPR_FN: data = body node
+    fn_node := g_funcs[fi].ast_node;
+    f := g_ast[fn_node];
+    name_idx := f.a;  // EXPR_FN: a = name idx
+    first_param := f.b;  // EXPR_FN: b = first param node
+    param_count := f.c;  // EXPR_FN: c = param count
+    return_type := f.int_val;  // EXPR_FN: int_val = return TY_*
+    body := f.data;  // EXPR_FN: data = body node
 
     push_scope();
     // Register generic params if any
     if g_funcs[fi].generic_count > 0 {
-        let mut gi = 0;
+        gi : ., mut = 0;
         loop {
             if gi >= g_funcs[fi].generic_count { break; }
-            let gname_idx = str_intern(g_funcs[fi].generic_names[gi]);
-            let g_ti = alloc_type(TYP_GENERIC_PARAM, gname_idx, 0);
+            gname_idx := str_intern(g_funcs[fi].generic_names[gi]);
+            g_ti := alloc_type(TYP_GENERIC_PARAM, gname_idx, 0);
             define_sym(gname_idx, SYM_TYPE, g_ti, -1);
             gi = gi + 1;
         }
     }
     // Add params to scope
-    let mut pi = 0;
-    let mut pn = first_param;
+    pi : ., mut = 0;
+    pn : ., mut = first_param;
     loop {
         if pi >= param_count { break; }
         if pn < 0 { break; }
-        let p = g_ast[pn];
-        let pname_idx = p.a;       // EXPR_PARAM: a = name idx
-        let self_mode = p.int_val; // EXPR_PARAM: int_val = self mode (0=normal, 1=self, 2=&self, 3=&mut self)
-        let mut ti = TI_UNIT;
+        p := g_ast[pn];
+        pname_idx := p.a;  // EXPR_PARAM: a = name idx
+        self_mode := p.int_val;  // EXPR_PARAM: int_val = self mode (0=normal, 1=self, 2=&self, 3=&mut self)
+        ti : ., mut = TI_UNIT;
         if self_mode == 0 {
             // Regular param: resolve using original type node if it's non-base (named/generic)
-            let orig_type_node = p.data;
+            orig_type_node := p.data;
             if orig_type_node >= 0 && g_ast[orig_type_node].kind != 0 {
                 ti = resolve_type_node(orig_type_node);
             } else {
                 // Base type: switch on type_val (TY_*)
-                let ptype = p.type_val;
+                ptype := p.type_val;
                 if ptype == TY_INT { ti = TI_INT; }
                 else if ptype == TY_FLOAT { ti = TI_FLOAT; }
                 else if ptype == TY_BOOL { ti = TI_BOOL; }
@@ -610,27 +610,27 @@ fn check_func(fi: int) {
             }
         } else {
             // Self param: derive struct type from mangled function name "Struct.method"
-            let fn_name = g_funcs[fi].name;
-            let fn_len = __builtin_str_len(fn_name);
-            let mut dot_pos = -1;
-            let mut di = 0;
+            fn_name := g_funcs[fi].name;
+            fn_len := __builtin_str_len(fn_name);
+            dot_pos : ., mut = -1;
+            di : ., mut = 0;
             loop {
                 if di >= fn_len { break; }
                 if __builtin_str_get(fn_name, di) == "." { dot_pos = di; break; }
                 di = di + 1;
             }
             if dot_pos > 0 {
-                let struct_name = __builtin_str_sub(fn_name, 0, dot_pos);
-                let struct_ni = str_intern(struct_name);
-                let si = lookup_sym_global(struct_ni);
+                struct_name := __builtin_str_sub(fn_name, 0, dot_pos);
+                struct_ni := str_intern(struct_name);
+                si := lookup_sym_global(struct_ni);
                 if si >= 0 && g_syms[si].kind == SYM_TYPE {
-                    let struct_ti = g_syms[si].type_idx;
+                    struct_ti := g_syms[si].type_idx;
                     if self_mode == 1 {
                         // self by value
                         ti = struct_ti;
                     } else {
                         // &self (mode 2) or &mut self (mode 3)
-                        let mut_flag = 0;
+                        mut_flag := 0;
                         if self_mode == 3 { mut_flag = 1; }
                         ti = alloc_type(TYP_REF, struct_ti, mut_flag);
                     }
@@ -643,10 +643,10 @@ fn check_func(fi: int) {
     }
     // Check body
     if body >= 0 {
-        let body_ti = infer_expr(body);
-        let mut ret_ti = TI_UNIT;
+        body_ti := infer_expr(body);
+        ret_ti : ., mut = TI_UNIT;
         // First check for named type via the stored type node (kind != 0)
-        let type_node = f.type_val;
+        type_node := f.type_val;
         if type_node > 0 && g_ast[type_node].kind != 0 {
             ret_ti = resolve_type_node(type_node);
         } else if return_type == TY_INT { ret_ti = TI_INT; }
@@ -667,8 +667,8 @@ fn check_func(fi: int) {
 }
 
 fn check_global_let(node: int) {
-    let n = g_ast[node];
-    let val_node = n.c;  // EXPR_LET: c = value
+    n := g_ast[node];
+    val_node := n.c;  // EXPR_LET: c = value
     if val_node >= 0 {
         infer_expr(val_node);
     }
@@ -678,7 +678,7 @@ fn check_global_let(node: int) {
 
 fn infer_expr(node: int) -> int {
     if node < 0 { return TI_UNIT; }
-    let n = g_ast[node];
+    n := g_ast[node];
 
     if n.kind == EXPR_INT { return TI_INT; }
     if n.kind == EXPR_NONE && n.a >= 0 { return infer_expr(n.a); }
@@ -688,10 +688,10 @@ fn infer_expr(node: int) -> int {
     if n.kind == EXPR_CHAR { return TI_CHAR; }
 
     if n.kind == EXPR_IDENT {
-        let name_idx = n.int_val;
-        let si = lookup_sym(name_idx);
+        name_idx := n.int_val;
+        si := lookup_sym(name_idx);
         if si >= 0 { return g_syms[si].type_idx; }
-        let name = g_strs[name_idx];
+        name := g_strs[name_idx];
         check_error("Undefined name '" + name + "'");
         return TI_NEVER;
     }
@@ -702,20 +702,20 @@ fn infer_expr(node: int) -> int {
     }
 
     if n.kind == EXPR_BINARY {
-        let left = n.a;
-        let right = n.b;
-        let op = n.c;
+        left := n.a;
+        right := n.b;
+        op := n.c;
         if op == OP_ASSIGN {
             // Assignment: left = right
-            let lt = infer_expr(left);
-            let rt = infer_expr(right);
+            lt := infer_expr(left);
+            rt := infer_expr(right);
             if !type_equal(lt, rt) {
                 check_error("Assignment type mismatch");
             }
             return rt;
         }
-        let lt = infer_expr(left);
-        let rt = infer_expr(right);
+        lt := infer_expr(left);
+        rt := infer_expr(right);
         if op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV || op == OP_MOD {
             if lt == TI_FLOAT || rt == TI_FLOAT { return TI_FLOAT; }
             return TI_INT;
@@ -730,38 +730,38 @@ fn infer_expr(node: int) -> int {
     }
 
     if n.kind == EXPR_UNARY {
-        let op = n.c;
+        op := n.c;
         if op == UOP_NEG || op == UOP_NOT {
             return infer_expr(n.a);
         }
         if op == UOP_REF {
-            let inner = infer_expr(n.a);
-            let mut_flag = n.int_val;
+            inner := infer_expr(n.a);
+            mut_flag := n.int_val;
             return alloc_type(TYP_REF, inner, mut_flag);
         }
         return infer_expr(n.a);
     }
 
     if n.kind == EXPR_CALL {
-        let func_node = n.a;
-        let first_arg = n.b;
-        let arg_count = n.c;
-        let mut func_ni = -1;
+        func_node := n.a;
+        first_arg := n.b;
+        arg_count := n.c;
+        func_ni : ., mut = -1;
 
         // Method call: obj.method(args)
         if g_ast[func_node].kind == EXPR_FIELD {
-            let obj = g_ast[func_node].a;
-            let method_ni = g_ast[func_node].int_val;
-            let obj_ti = infer_expr(obj);
-            let mut lookup_ti = obj_ti;
+            obj := g_ast[func_node].a;
+            method_ni := g_ast[func_node].int_val;
+            obj_ti := infer_expr(obj);
+            lookup_ti : ., mut = obj_ti;
             // Unwrap generic apply to base type
             if lookup_ti >= 0 && lookup_ti < g_type_count && get_type_kind(lookup_ti) == TYP_GENERIC_APPLY {
                 lookup_ti = get_type_data(lookup_ti);
             }
             if lookup_ti >= 0 && lookup_ti < g_type_count && get_type_kind(lookup_ti) == TYP_NAMED {
-                let struct_ni = get_type_data(lookup_ti);
+                struct_ni := get_type_data(lookup_ti);
                 // Look up method in method table
-                let mut mi = 0;
+                mi : ., mut = 0;
                 loop {
                     if mi >= g_method_count { break; }
                     if g_methods[mi].struct_ni == struct_ni && g_methods[mi].method_ni == method_ni {
@@ -773,15 +773,15 @@ fn infer_expr(node: int) -> int {
                 }
             }
             // Infer arg types
-            let mut ai = 0;
-            let mut an = first_arg;
+            ai : ., mut = 0;
+            an : ., mut = first_arg;
             loop {
                 if ai >= arg_count { break; }
                 if an >= 0 { infer_expr(an); an = an + 1; }
                 ai = ai + 1;
             }
             if func_ni >= 0 {
-                let si = lookup_sym_global(func_ni);
+                si := lookup_sym_global(func_ni);
                 if si >= 0 && g_syms[si].kind == SYM_FN {
                     return g_syms[si].type_idx;
                 }
@@ -795,7 +795,7 @@ fn infer_expr(node: int) -> int {
         }
         // Check builtins
         if func_ni >= 0 {
-            let s = g_strs[func_ni];
+            s := g_strs[func_ni];
             if s == "__builtin_str_len" { return TI_INT; }
             if s == "__builtin_str_get" { return TI_STR; }
             if s == "__builtin_str_sub" { return TI_STR; }
@@ -803,13 +803,18 @@ fn infer_expr(node: int) -> int {
             if s == "__builtin_str_push" { return TI_STR; }
             if s == "__builtin_str_from_int" { return TI_STR; }
             if s == "__builtin_str_to_int" { return TI_INT; }
+            if s == "__builtin_print" { return TI_UNIT; }
+            if s == "__builtin_println" { return TI_UNIT; }
+            if s == "__builtin_syscall3" { return TI_INT; }
+            if s == "__builtin_load8" { return TI_INT; }
+            if s == "__builtin_store8" { return TI_INT; }
         }
         // Look up function
         if func_ni >= 0 {
-            let si = lookup_sym_global(func_ni);
+            si := lookup_sym_global(func_ni);
             if si >= 0 && g_syms[si].kind == SYM_FN {
                 // Check if generic function
-                let fi = find_func(func_ni);
+                fi := find_func(func_ni);
                 if fi >= 0 && g_funcs[fi].generic_count > 0 {
                     return infer_generic_call(fi, node, first_arg, arg_count);
                 }
@@ -817,8 +822,8 @@ fn infer_expr(node: int) -> int {
             }
         }
         // Infer arg types (for side effects)
-        let mut ai = 0;
-        let mut an = first_arg;
+        ai : ., mut = 0;
+        an : ., mut = first_arg;
         loop {
             if ai >= arg_count { break; }
             if an >= 0 {
@@ -831,13 +836,13 @@ fn infer_expr(node: int) -> int {
     }
 
     if n.kind == EXPR_BLOCK {
-        let stmt_start = n.a;
-        let stmt_count = n.b;
-        let mut res = TI_UNIT;
-        let mut i = 0;
+        stmt_start := n.a;
+        stmt_count := n.b;
+        res : ., mut = TI_UNIT;
+        i : ., mut = 0;
         loop {
             if i >= stmt_count { break; }
-            let sn = g_block_stmts[stmt_start + i];
+            sn := g_block_stmts[stmt_start + i];
             res = infer_expr(sn);
             i = i + 1;
         }
@@ -845,16 +850,16 @@ fn infer_expr(node: int) -> int {
     }
 
     if n.kind == EXPR_IF {
-        let cond = n.a;
-        let then_node = n.b;
-        let else_node = n.c;
-        let cond_ti = infer_expr(cond);
+        cond := n.a;
+        then_node := n.b;
+        else_node := n.c;
+        cond_ti := infer_expr(cond);
         if cond_ti != TI_BOOL {
             check_error("If condition must be bool");
         }
-        let then_ti = infer_expr(then_node);
+        then_ti := infer_expr(then_node);
         if else_node >= 0 {
-            let else_ti = infer_expr(else_node);
+            else_ti := infer_expr(else_node);
             if !type_equal(then_ti, else_ti) {
                 check_error("If branches have different types");
             }
@@ -869,9 +874,9 @@ fn infer_expr(node: int) -> int {
     }
 
     if n.kind == EXPR_WHILE {
-        let cond = n.a;
-        let body = n.b;
-        let cond_ti = infer_expr(cond);
+        cond := n.a;
+        body := n.b;
+        cond_ti := infer_expr(cond);
         if cond_ti != TI_BOOL {
             check_error("While condition must be bool");
         }
@@ -880,9 +885,9 @@ fn infer_expr(node: int) -> int {
     }
 
     if n.kind == EXPR_FOR {
-        let var_ni = n.a;
-        let iter = n.b;
-        let body = n.c;
+        var_ni := n.a;
+        iter := n.b;
+        body := n.c;
         infer_expr(iter);
         push_scope();
         define_sym(var_ni, SYM_LOCAL, TI_INT, -1);
@@ -898,32 +903,32 @@ fn infer_expr(node: int) -> int {
     }
 
     if n.kind == EXPR_MATCH {
-        let match_expr = n.a;
-        let first_arm = n.b;
-        let arm_count = n.c;
+        match_expr := n.a;
+        first_arm := n.b;
+        arm_count := n.c;
         infer_expr(match_expr);
-        let mut res = TI_UNIT;
-        let mut ai = 0;
-        let mut an = first_arm;
+        res : ., mut = TI_UNIT;
+        ai : ., mut = 0;
+        an : ., mut = first_arm;
         loop {
             if ai >= arm_count { break; }
             if an >= 0 {
-                let arm_pat = g_ast[an].a;  // EXPR_ARM: a = pattern
-                let arm_body = g_ast[an].b;  // EXPR_ARM: b = body
+                arm_pat := g_ast[an].a;  // EXPR_ARM: a = pattern
+                arm_body := g_ast[an].b;  // EXPR_ARM: b = body
                 // Bind pattern variables in new scope
                 push_scope();
                 if arm_pat >= 0 {
-                    let pat = g_ast[arm_pat];
+                    pat := g_ast[arm_pat];
                     if pat.kind == EXPR_ENUMPAT {
                         // Bind sub-patterns
-                        let sub_pat = pat.b;
-                        let sub_count = pat.c;
-                        let mut spi = 0;
-                        let mut spn = sub_pat;
+                        sub_pat := pat.b;
+                        sub_count := pat.c;
+                        spi : ., mut = 0;
+                        spn : ., mut = sub_pat;
                         loop {
                             if spi >= sub_count { break; }
                             if spn >= 0 {
-                                let sp = g_ast[spn];
+                                sp := g_ast[spn];
                                 if sp.kind == EXPR_IDENT {
                                     define_sym(sp.int_val, SYM_LOCAL, TI_INT, -1);
                                 }
@@ -936,7 +941,7 @@ fn infer_expr(node: int) -> int {
                         define_sym(pat.int_val, SYM_LOCAL, TI_INT, -1);
                     }
                 }
-                let arm_ti = infer_expr(arm_body);
+                arm_ti := infer_expr(arm_body);
                 if ai == 0 { res = arm_ti; }
                 pop_scope();
                 an = an + 1;
@@ -947,13 +952,13 @@ fn infer_expr(node: int) -> int {
     }
 
     if n.kind == EXPR_LET {
-        let var_ni = n.a;
-        let type_node = n.b;
-        let val_node = n.c;
-        let is_mut = n.data;
-        let val_ti = TI_UNIT;
+        var_ni := n.a;
+        type_node := n.b;
+        val_node := n.c;
+        is_mut := n.data;
+        val_ti := TI_UNIT;
         if val_node >= 0 { val_ti = infer_expr(val_node); }
-        let ti = val_ti;
+        ti := val_ti;
         if type_node >= 0 { ti = resolve_type_node(type_node); }
         if g_strs[var_ni] != "_" {
             define_sym(var_ni, SYM_LOCAL, ti, -1);
@@ -969,14 +974,14 @@ fn infer_expr(node: int) -> int {
     }
 
     if n.kind == EXPR_ENUM_CONSTRUCTOR {
-        let name_idx = n.a;
-        let first_arg = n.b;
-        let arg_count = n.c;
-        let si = lookup_sym_global(name_idx);
+        name_idx := n.a;
+        first_arg := n.b;
+        arg_count := n.c;
+        si := lookup_sym_global(name_idx);
         if si >= 0 && g_syms[si].kind == SYM_FN {
             // Infer arg types
-            let mut ai = 0;
-            let mut an = first_arg;
+            ai : ., mut = 0;
+            an : ., mut = first_arg;
             loop {
                 if ai >= arg_count { break; }
                 if an >= 0 {
@@ -991,11 +996,11 @@ fn infer_expr(node: int) -> int {
     }
 
     if n.kind == EXPR_FIELD {
-        let obj = n.a;
-        let field_ni = n.int_val;
-        let obj_ti = infer_expr(obj);
+        obj := n.a;
+        field_ni := n.int_val;
+        obj_ti := infer_expr(obj);
         // Auto-deref: if obj is a reference type, unwrap to inner type
-        let mut actual_ti = obj_ti;
+        actual_ti : ., mut = obj_ti;
         if actual_ti >= 0 && actual_ti < g_type_count && get_type_kind(actual_ti) == TYP_REF {
             actual_ti = get_type_data(actual_ti);
         }
@@ -1004,26 +1009,26 @@ fn infer_expr(node: int) -> int {
             actual_ti = get_type_data(actual_ti);
         }
         if actual_ti >= 0 && actual_ti < g_type_count && get_type_kind(actual_ti) == TYP_NAMED {
-            let struct_ni = get_type_data(actual_ti);
-            let si = find_struct(struct_ni);
+            struct_ni := get_type_data(actual_ti);
+            si := find_struct(struct_ni);
             if si >= 0 {
-                let mut fi = 0;
+                fi : ., mut = 0;
                 loop {
                     if fi >= g_structs[si].field_count { break; }
                     if str_intern(g_structs[si].field_names[fi]) == field_ni {
                         // Resolve field type, substituting generic params if needed
-                        let ft_node = g_structs[si].field_type_nodes[fi];
+                        ft_node := g_structs[si].field_type_nodes[fi];
                         if ft_node >= 0 {
-                            let ftn = g_ast[ft_node];
+                            ftn := g_ast[ft_node];
                             if ftn.kind == EXPR_IDENT {
-                                let ft_name_idx = ftn.int_val;
+                                ft_name_idx := ftn.int_val;
                                 // Check if this field type is a generic param (substitute if we have a generic apply)
                                 if is_struct_generic(si, ft_name_idx) && get_type_kind(obj_ti) == TYP_GENERIC_APPLY {
-                                        let base_ti = get_type_data(obj_ti);
-                                        let ga_start = get_type_extra(obj_ti);
-                                        let ga_count = g_gen_apply_data[ga_start];
+                                        base_ti := get_type_data(obj_ti);
+                                        ga_start := get_type_extra(obj_ti);
+                                        ga_count := g_gen_apply_data[ga_start];
                                         // Find which generic param index
-                                        let mut gpi = 0;
+                                        gpi : ., mut = 0;
                                         loop {
                                             if gpi >= g_structs[si].generic_count { break; }
                                             if str_intern(g_structs[si].generic_names[gpi]) == ft_name_idx {
@@ -1049,7 +1054,7 @@ fn infer_expr(node: int) -> int {
     }
 
     if n.kind == EXPR_INDEX {
-        let arr_ti = infer_expr(n.a);
+        arr_ti := infer_expr(n.a);
         infer_expr(n.b);
         if get_type_kind(arr_ti) == TYP_ARRAY {
             return get_type_data(arr_ti);
@@ -1058,10 +1063,10 @@ fn infer_expr(node: int) -> int {
     }
 
     if n.kind == EXPR_ASSIGN {
-        let target = n.a;
-        let val = n.b;
-        let tt = infer_expr(target);
-        let vt = infer_expr(val);
+        target := n.a;
+        val := n.b;
+        tt := infer_expr(target);
+        vt := infer_expr(val);
         if !type_equal(tt, vt) {
             check_error("Assignment type mismatch");
         }
@@ -1070,24 +1075,24 @@ fn infer_expr(node: int) -> int {
 
     if n.kind == EXPR_STRUCT {
         // Struct literal: a = name idx, b = first field value (wrapper), c = field count
-        let name_ni = n.a;
+        name_ni := n.a;
         // Check if struct is generic
-        let si = find_struct_by_name(name_ni);
+        si := find_struct_by_name(name_ni);
         if si >= 0 && g_structs[si].generic_count > 0 {
             // Generic struct: infer concrete types from field values
             g_gen_map_count = 0;
-            let mut fi = 0;
-            let mut fn2 = n.b;
+            fi : ., mut = 0;
+            fn2 : ., mut = n.b;
             loop {
                 if fi >= n.c { break; }
                 if fi < g_structs[si].field_count && fn2 >= 0 {
-                    let field_val_ti = infer_expr(fn2);
-                    let orig_type_node = g_structs[si].field_type_nodes[fi];
+                    field_val_ti := infer_expr(fn2);
+                    orig_type_node := g_structs[si].field_type_nodes[fi];
                     if orig_type_node >= 0 {
-                        let pn = g_ast[orig_type_node];
+                        pn := g_ast[orig_type_node];
                         if pn.kind == EXPR_IDENT {
                             // Check if field type is a generic param
-                            let field_name_idx = pn.int_val;
+                            field_name_idx := pn.int_val;
                             if is_struct_generic(si, field_name_idx) && g_gen_map_count < MAX_GENERICS {
                                 g_gen_map_names[g_gen_map_count] = field_name_idx;
                                 g_gen_map_types[g_gen_map_count] = field_val_ti;
@@ -1100,11 +1105,11 @@ fn infer_expr(node: int) -> int {
                 fi = fi + 1;
             }
             // Create TYP_GENERIC_APPLY for this struct
-            let base_ti = alloc_type(TYP_NAMED, name_ni, 0);
-            let ds = g_gen_apply_data_count;
+            base_ti := alloc_type(TYP_NAMED, name_ni, 0);
+            ds := g_gen_apply_data_count;
             g_gen_apply_data[ds] = g_gen_map_count;
             g_gen_apply_data_count = ds + 1;
-            let mut mi = 0;
+            mi : ., mut = 0;
             loop {
                 if mi >= g_gen_map_count { break; }
                 g_gen_apply_data[ds + 1 + mi] = g_gen_map_types[mi];
@@ -1114,9 +1119,9 @@ fn infer_expr(node: int) -> int {
             return alloc_type(TYP_GENERIC_APPLY, base_ti, ds);
         }
         // Non-generic struct
-        let ti = alloc_type(TYP_NAMED, name_ni, 0);
-        let mut fi = 0;
-        let mut fn2 = n.b;
+        ti := alloc_type(TYP_NAMED, name_ni, 0);
+        fi : ., mut = 0;
+        fn2 : ., mut = n.b;
         loop {
             if fi >= n.c { break; }
             if fn2 >= 0 {
@@ -1130,9 +1135,9 @@ fn infer_expr(node: int) -> int {
 
     if n.kind == EXPR_ARRAY {
         // Array literal: a = first elem, b = elem count
-        let elem_ti = TI_INT;
-        let mut ei = 0;
-        let mut en = n.a;
+        elem_ti := TI_INT;
+        ei : ., mut = 0;
+        en : ., mut = n.a;
         loop {
             if ei >= n.b { break; }
             if en >= 0 {
@@ -1172,7 +1177,7 @@ fn check_all() {
     collect_decls();
 
     // Second pass: check function bodies
-    let mut i = 0;
+    i : ., mut = 0;
     loop {
         if i >= g_func_count { break; }
         check_func(i);

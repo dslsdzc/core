@@ -159,6 +159,80 @@ class Interpreter:
                     except:
                         self.vars[id(instr.dest)] = 0
                 return
+            if instr.func == '__builtin_str_eq':
+                a = self.vars.get(id(instr.args[0]), '')
+                b = self.vars.get(id(instr.args[1]), '')
+                if instr.dest:
+                    self.vars[id(instr.dest)] = 1 if a == b else 0
+                return
+            if instr.func == '__builtin_str_cmp':
+                a = self.vars.get(id(instr.args[0]), '')
+                b = self.vars.get(id(instr.args[1]), '')
+                if instr.dest:
+                    if a < b: self.vars[id(instr.dest)] = -1
+                    elif a > b: self.vars[id(instr.dest)] = 1
+                    else: self.vars[id(instr.dest)] = 0
+                return
+            if instr.func == '__builtin_print':
+                s = self.vars.get(id(instr.args[0]), '')
+                print(s, end='')
+                return
+            if instr.func == '__builtin_println':
+                s = self.vars.get(id(instr.args[0]), '')
+                print(s)
+                return
+            if instr.func == '__builtin_get_arg':
+                import os
+                n = self.vars.get(id(instr.args[0]), 0)
+                if instr.dest:
+                    argv = getattr(self, '_argv', [])
+                    self.vars[id(instr.dest)] = argv[n] if 0 <= n < len(argv) else ''
+                return
+            if instr.func == '__builtin_read_file':
+                path = self.vars.get(id(instr.args[0]), '')
+                if instr.dest:
+                    try:
+                        with open(path, 'r') as f:
+                            self.vars[id(instr.dest)] = f.read()
+                    except:
+                        self.vars[id(instr.dest)] = ''
+                return
+            if instr.func == '__builtin_write_file':
+                path = self.vars.get(id(instr.args[0]), '')
+                content = self.vars.get(id(instr.args[1]), '')
+                if instr.dest:
+                    try:
+                        with open(path, 'w') as f:
+                            self.vars[id(instr.dest)] = f.write(content)
+                    except:
+                        self.vars[id(instr.dest)] = -1
+                return
+            if instr.func == '__builtin_syscall3':
+                if instr.dest:
+                    self.vars[id(instr.dest)] = 0
+                return
+            if instr.func == '__builtin_load8':
+                s = self.vars.get(id(instr.args[0]))
+                idx = self.vars.get(id(instr.args[1]), 0)
+                if instr.dest and s is not None and idx >= 0 and idx < len(s):
+                    self.vars[id(instr.dest)] = ord(s[idx]) if isinstance(s, str) else (s[idx] & 0xFF)
+                elif instr.dest:
+                    self.vars[id(instr.dest)] = 0
+                return
+            if instr.func == '__builtin_store8':
+                s = self.vars.get(id(instr.args[0]))
+                idx = self.vars.get(id(instr.args[1]), 0)
+                val = self.vars.get(id(instr.args[2]), 0)
+                if s is not None and isinstance(s, bytearray) and idx >= 0 and idx < len(s):
+                    s[idx] = val & 0xFF
+                if instr.dest:
+                    self.vars[id(instr.dest)] = 0
+                return
+            if instr.func == '__builtin_alloc':
+                size = self.vars.get(id(instr.args[0]), 0)
+                if instr.dest:
+                    self.vars[id(instr.dest)] = [0] * ((size + 7) // 8)
+                return
             func = self.funcs[instr.func]
             arg_vals = [self.vars.get(id(a)) for a in instr.args]
             old_vars = self.vars
@@ -248,6 +322,15 @@ class Interpreter:
                 arr = self.vars.get(arr)
             idx = self.vars.get(id(instr.index_var))
             arr[idx] = self.vars.get(id(instr.value))
+        elif isinstance(instr, LoadEnumTagInstr):
+            obj = self.vars.get(id(instr.enum_var))
+            if isinstance(obj, int) and obj in self.vars:
+                obj = self.vars.get(obj)
+            if isinstance(obj, dict):
+                tag = obj.get('__variant', 0)
+                self.vars[id(instr.dest)] = tag
+            else:
+                self.vars[id(instr.dest)] = 0
         elif isinstance(instr, MakeEnumInstr):
             args = [self.vars.get(id(a)) for a in instr.args]
             obj = {'__variant': instr.variant}
@@ -266,7 +349,8 @@ class Interpreter:
             return (instr.label, None)
         elif isinstance(instr, ReturnInstr):
             if instr.value:
-                return (None, self.vars[id(instr.value)])
+                val = self.vars.get(id(instr.value))
+                return (None, val)
             return (None, None)
         elif isinstance(instr, LabelInstr):
             pass

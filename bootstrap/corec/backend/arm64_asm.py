@@ -161,7 +161,25 @@ class Arm64AsmGen:
                 if i >= len(arg_regs):
                     break
                 self.load_var_to_reg(arg, arg_regs[i])
-            self.emit(f"    bl {instr.func}")
+            if instr.func == '__builtin_syscall3':
+                # ARM64 syscall: x8=nr, x0=arg1, x1=arg2, x2=arg3
+                # After normal arg setup: x0=nr, x1=arg1, x2=arg2, x3=arg3
+                self.emit("    mov x8, x0")
+                self.emit("    mov x0, x1")
+                self.emit("    mov x1, x2")
+                self.emit("    mov x2, x3")
+                self.emit("    svc #0")
+            elif instr.func == '__builtin_load8':
+                # load8(ptr, idx) → w0 = byte at x0 + x1
+                self.emit("    add x9, x0, x1")
+                self.emit("    ldrb w0, [x9]")
+            elif instr.func == '__builtin_store8':
+                # store8(ptr, idx, val): x0=ptr, x1=idx, x2=val
+                self.emit("    add x9, x0, x1")
+                self.emit("    strb w2, [x9]")
+                self.emit("    mov w0, wzr")
+            else:
+                self.emit(f"    bl {instr.func}")
             if instr.dest:
                 dest_off = self.stack_offsets[id(instr.dest)]
                 self.emit(f"    str x0, [sp, #{dest_off}]")

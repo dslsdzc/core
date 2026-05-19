@@ -1,14 +1,14 @@
 // Lexer: tokenizes Core source code using string built-ins
 
 // Global compiler state
-let mut g_source: string;
-let mut g_tokens: [Token; MAX_TOKENS];
-let mut g_token_count: int;
-let mut g_pos: int;
-let mut g_line: int;
-let mut g_col: int;
-let mut g_errors: [string; MAX_ERRS];
-let mut g_error_count: int;
+g_source : string, mut;
+g_tokens : [Token; MAX_TOKENS], mut;
+g_token_count : int, mut;
+g_pos : int, mut;
+g_line : int, mut;
+g_col : int, mut;
+g_errors : [string; MAX_ERRS], mut;
+g_error_count : int, mut;
 
 fn add_error(msg: string) {
     if g_error_count < MAX_ERRS {
@@ -25,7 +25,7 @@ fn cur_char() -> string {
 }
 
 fn advance() {
-    let c = cur_char();
+    c := cur_char();
     if c == "\n" {
         g_line = g_line + 1;
         g_col = 1;
@@ -44,7 +44,7 @@ fn peek() -> string {
 
 fn skip_whitespace() {
     loop {
-        let c = cur_char();
+        c := cur_char();
         if c == " " || c == "\t" || c == "\r" || c == "\n" {
             advance();
         } else {
@@ -103,7 +103,6 @@ fn is_ident_char(c: string) -> bool {
 
 fn lookup_keyword(ident: string) -> int {
     if ident == "fn" { return T_FN; }
-    if ident == "let" { return T_LET; }
     if ident == "mut" { return T_MUT; }
     if ident == "if" { return T_IF; }
     if ident == "else" { return T_ELSE; }
@@ -133,6 +132,7 @@ fn lookup_keyword(ident: string) -> int {
     if ident == "await" { return T_AWAIT; }
     if ident == "unsafe" { return T_UNSAFE; }
     if ident == "interface" { return T_INTERFACE; }
+    if ident == "auto" { return T_AUTO; }
     return T_IDENT;
 }
 
@@ -147,7 +147,7 @@ fn tokenize() {
 
     loop {
         if g_pos >= __builtin_str_len(g_source) { break; }
-        let c = cur_char();
+        c := cur_char();
 
         // Single-line comment //
         if c == "/" && peek() == "/" {
@@ -178,19 +178,19 @@ fn tokenize() {
             continue;
         }
 
-        let start_line = g_line;
-        let start_col = g_col;
+        start_line := g_line;
+        start_col := g_col;
 
         // Identifier or keyword
         if is_alpha(c) {
-            let start = g_pos;
+            start := g_pos;
             advance();
             loop {
-                let c2 = cur_char();
+                c2 := cur_char();
                 if is_ident_char(c2) { advance(); } else { break; }
             }
-            let ident = __builtin_str_sub(g_source, start, g_pos - start);
-            let kind = lookup_keyword(ident);
+            ident := __builtin_str_sub(g_source, start, g_pos - start);
+            kind := lookup_keyword(ident);
             add_token_str(kind, ident);
             skip_whitespace();
             continue;
@@ -198,19 +198,19 @@ fn tokenize() {
 
         // Number literal
         if is_digit(c) {
-            let start = g_pos;
+            start := g_pos;
             advance();
-            let mut kind = T_INT;
+            kind : ., mut = T_INT;
             loop {
-                let c2 = cur_char();
+                c2 := cur_char();
                 if is_digit(c2) { advance(); }
                 else if c2 == "." {
                     kind = T_FLOAT;
                     advance();
                 } else { break; }
             }
-            let num_str = __builtin_str_sub(g_source, start, g_pos - start);
-            let val = __builtin_str_to_int(num_str);
+            num_str := __builtin_str_sub(g_source, start, g_pos - start);
+            val := __builtin_str_to_int(num_str);
             add_token_int(kind, val);
             skip_whitespace();
             continue;
@@ -219,7 +219,7 @@ fn tokenize() {
         // String literal
         if c == "\"" {
             advance();
-            let start = g_pos;
+            start := g_pos;
             loop {
                 if g_pos >= __builtin_str_len(g_source) { break; }
                 if cur_char() == "\"" { break; }
@@ -230,7 +230,7 @@ fn tokenize() {
                     advance();
                 }
             }
-            let str_val = __builtin_str_sub(g_source, start, g_pos - start);
+            str_val := __builtin_str_sub(g_source, start, g_pos - start);
             advance();
             add_token_str(T_STRING, str_val);
             skip_whitespace();
@@ -240,10 +240,10 @@ fn tokenize() {
         // Char literal
         if c == "'" {
             advance();
-            let mut ch = "\0";
+            ch : ., mut = "\0";
             if cur_char() == "\\" {
                 advance();
-                let esc = cur_char();
+                esc := cur_char();
                 if esc == "n" { ch = "\n"; }
                 else if esc == "t" { ch = "\t"; }
                 else if esc == "r" { ch = "\r"; }
@@ -270,6 +270,7 @@ fn tokenize() {
         if c == "|" && peek() == "|" { advance(); advance(); add_token(T_PIPEPIPE); skip_whitespace(); continue; }
         if c == "-" && peek() == ">" { advance(); advance(); add_token(T_ARROW); skip_whitespace(); continue; }
         if c == "=" && peek() == ">" { advance(); advance(); add_token(T_FATARROW); skip_whitespace(); continue; }
+        if c == ":" && peek() == "=" { advance(); advance(); add_token(T_COLON_EQ); skip_whitespace(); continue; }
         if c == ":" && peek() == ":" { advance(); advance(); add_token(T_PATHSEP); skip_whitespace(); continue; }
         if c == "." && peek() == "." { advance(); advance(); add_token(T_DOTDOT); skip_whitespace(); continue; }
 

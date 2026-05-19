@@ -99,6 +99,11 @@ class StoreIndexVarInstr(Instr):
     value: IRVar
 
 @dataclass
+class LoadEnumTagInstr(Instr):
+    enum_var: IRVar
+    dest: IRVar
+
+@dataclass
 class MakeEnumInstr(Instr):
     variant: str
     args: List[IRVar]

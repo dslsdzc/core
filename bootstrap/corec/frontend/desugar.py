@@ -41,8 +41,8 @@ class MatchDesugarer:
                 return ReturnStmt(self._desugar_expr(expr.value))
             return expr
         if isinstance(expr, LetStmt):
-            new_val = self._desugar_expr(expr.value) if expr.value else None
-            return LetStmt(expr.mutable, expr.name, expr.type_, new_val)
+            new_vals = [self._desugar_expr(v) if v else None for v in expr.values]
+            return LetStmt(names=expr.names, tags=expr.tags, type_=expr.type_, values=new_vals)
         if isinstance(expr, BinaryOp):
             return BinaryOp(self._desugar_expr(expr.left), expr.op, self._desugar_expr(expr.right))
         if isinstance(expr, Call):
@@ -61,8 +61,8 @@ class MatchDesugarer:
         if isinstance(stmt, ExprStmt):
             return ExprStmt(self._desugar_expr(stmt.expr))
         if isinstance(stmt, LetStmt):
-            new_val = self._desugar_expr(stmt.value) if stmt.value else None
-            return LetStmt(stmt.mutable, stmt.name, stmt.type_, new_val)
+            new_vals = [self._desugar_expr(v) if v else None for v in stmt.values]
+            return LetStmt(names=stmt.names, tags=stmt.tags, type_=stmt.type_, values=new_vals)
         if isinstance(stmt, ReturnStmt):
             if stmt.value:
                 return ReturnStmt(self._desugar_expr(stmt.value))
@@ -75,7 +75,7 @@ class MatchDesugarer:
         match_val_name = self.new_temp()
         result_name = self.new_temp()
 
-        let_match = LetStmt(False, match_val_name, None, match.expr)
+        let_match = LetStmt(names=[match_val_name], values=[match.expr])
 
         # 从后往前构建 if-else 链
         else_expr = None
@@ -101,7 +101,7 @@ class MatchDesugarer:
         if else_expr is None:
             else_expr = Block(stmts=[], expr=Literal(0, 'int'))
 
-        let_result = LetStmt(False, result_name, None, Literal(0, 'int'))
+        let_result = LetStmt(names=[result_name], values=[Literal(0, 'int')])
         # 关键：最终用 return 语句返回结果变量
         return_stmt = ReturnStmt(Ident(result_name))
         return Block(
@@ -120,7 +120,7 @@ class MatchDesugarer:
             for idx, subpat in enumerate(arm.pattern.args):
                 if isinstance(subpat, IdentPattern):
                     field_expr = FieldAccess(Ident(enum_var_name), f'_field_{idx}')
-                    bindings.append(LetStmt(False, subpat.name, None, field_expr))
+                    bindings.append(LetStmt(names=[subpat.name], values=[field_expr]))
                 elif isinstance(subpat, Wildcard):
                     pass
         body_expr = arm.body

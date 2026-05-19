@@ -23,6 +23,28 @@ class NameResolver:
         self.symtab.define('__builtin_str_from_int', SymbolKind.FUNCTION, BaseType('string'))
         # str_to_int(s: string) -> int
         self.symtab.define('__builtin_str_to_int', SymbolKind.FUNCTION, BaseType('int'))
+        # str_eq(a: string, b: string) -> int
+        self.symtab.define('__builtin_str_eq', SymbolKind.FUNCTION, BaseType('int'))
+        # str_cmp(a: string, b: string) -> int
+        self.symtab.define('__builtin_str_cmp', SymbolKind.FUNCTION, BaseType('int'))
+        # alloc(size: int) -> string (returns pointer to allocated memory)
+        self.symtab.define('__builtin_alloc', SymbolKind.FUNCTION, BaseType('string'))
+        # load8(ptr: string, idx: int) -> int  — byte load (inline)
+        self.symtab.define('__builtin_load8', SymbolKind.FUNCTION, BaseType('int'))
+        # store8(ptr: string, idx: int, val: int) -> int  — byte store (inline)
+        self.symtab.define('__builtin_store8', SymbolKind.FUNCTION, BaseType('int'))
+        # read_file(path: string) -> string
+        self.symtab.define('__builtin_read_file', SymbolKind.FUNCTION, BaseType('string'))
+        # write_file(path: string, content: string) -> int
+        self.symtab.define('__builtin_write_file', SymbolKind.FUNCTION, BaseType('int'))
+        # get_arg(n: int) -> string
+        self.symtab.define('__builtin_get_arg', SymbolKind.FUNCTION, BaseType('string'))
+        # print(s: string) -> unit
+        self.symtab.define('__builtin_print', SymbolKind.FUNCTION, BaseType('unit'))
+        # println(s: string) -> unit
+        self.symtab.define('__builtin_println', SymbolKind.FUNCTION, BaseType('unit'))
+        # syscall3(nr: int, arg1: int, arg2: int, arg3: int) -> int
+        self.symtab.define('__builtin_syscall3', SymbolKind.FUNCTION, BaseType('int'))
 
     def resolve(self, ast: CompilationUnit):
         self._declare_builtins()
@@ -51,17 +73,21 @@ class NameResolver:
         return len(self.errors) == 0
 
     def _declare_function(self, decl: FunctionDecl):
+        if self.symtab.lookup(decl.name):
+            return  # already declared (e.g. builtin)
         self.symtab.define(decl.name, SymbolKind.FUNCTION, decl.return_type, decl)
 
     def _declare_type(self, decl):
         self.symtab.define(decl.name, SymbolKind.TYPE, decl=decl)
 
     def _declare_let(self, decl: LetDecl):
-        self.symtab.define(decl.name, SymbolKind.GLOBAL, decl.type_, decl)
+        for name in decl.names:
+            self.symtab.define(name, SymbolKind.GLOBAL, decl.type_, decl)
 
     def _resolve_let(self, decl: LetDecl):
-        if decl.value:
-            self._resolve_expr(decl.value)
+        for val in decl.values:
+            if val:
+                self._resolve_expr(val)
 
     def _resolve_function(self, decl: FunctionDecl):
         self.symtab.push_scope()
@@ -111,17 +137,22 @@ class NameResolver:
         elif isinstance(expr, ExprStmt):
             self._resolve_expr(expr.expr)
         elif isinstance(expr, LetStmt):
-            self._resolve_expr(expr.value)
-            # 变量定义放到当前作用域
-            self.symtab.define(expr.name, SymbolKind.LOCAL, expr.type_)
+            for val in expr.values:
+                if val:
+                    self._resolve_expr(val)
+            for name in expr.names:
+                self.symtab.define(name, SymbolKind.LOCAL, expr.type_)
         elif isinstance(expr, Literal):
             pass
         # 其他表达式暂时忽略
 
     def _resolve_stmt(self, stmt: Stmt):
         if isinstance(stmt, LetStmt):
-            self._resolve_expr(stmt.value)
-            self.symtab.define(stmt.name, SymbolKind.LOCAL, stmt.type_)
+            for val in stmt.values:
+                if val:
+                    self._resolve_expr(val)
+            for name in stmt.names:
+                self.symtab.define(name, SymbolKind.LOCAL, stmt.type_)
         elif isinstance(stmt, ReturnStmt):
             if stmt.value:
                 self._resolve_expr(stmt.value)

@@ -9,6 +9,7 @@ from corec.frontend.desugar import MatchDesugarer
 from corec.frontend.type_checker import TypeChecker
 from corec.frontend.ir_gen import IRGen
 from corec.backend.arm64_asm import Arm64AsmGen
+from corec.utils.module_loader import resolve_imports
 
 def compile_core(src_path, out_path):
     with open(src_path) as f:
@@ -16,6 +17,7 @@ def compile_core(src_path, out_path):
     lex = Lexer(src)
     tokens = lex.tokenize()
     ast = Parser(tokens).parse_compilation_unit()
+    resolve_imports(ast)
     resolver = NameResolver()
     resolver.resolve(ast)
     desugarer = MatchDesugarer(resolver.symtab)
@@ -84,6 +86,7 @@ def main():
             src_code = f.read()
         lex = Lexer(src_code)
         ast = Parser(lex.tokenize()).parse_compilation_unit()
+        resolve_imports(ast)
         resolver = NameResolver()
         resolver.resolve(ast)
         desugarer = MatchDesugarer(resolver.symtab)

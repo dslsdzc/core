@@ -2,47 +2,47 @@
 // Flat AST to platform-independent IR instruction generation
 
 // --- Per-function metadata arrays ---
-let mut g_ir_func_name_idx: [int; MAX_FUNCS];
-let mut g_ir_func_ret_type: [int; MAX_FUNCS];
-let mut g_ir_func_instr_start: [int; MAX_FUNCS];
-let mut g_ir_func_instr_count: [int; MAX_FUNCS];
-let mut g_ir_func_var_start: [int; MAX_FUNCS];
-let mut g_ir_func_var_count: [int; MAX_FUNCS];
-let mut g_ir_func_param_count: [int; MAX_FUNCS];
-let mut g_ir_func_count: int;
+g_ir_func_name_idx : [int; MAX_FUNCS], mut;
+g_ir_func_ret_type : [int; MAX_FUNCS], mut;
+g_ir_func_instr_start : [int; MAX_FUNCS], mut;
+g_ir_func_instr_count : [int; MAX_FUNCS], mut;
+g_ir_func_var_start : [int; MAX_FUNCS], mut;
+g_ir_func_var_count : [int; MAX_FUNCS], mut;
+g_ir_func_param_count : [int; MAX_FUNCS], mut;
+g_ir_func_count : int, mut;
 
 // --- IR variables ---
-let mut g_ir_vars: [IRVar; MAX_IREXPRS];
-let mut g_ir_var_count: int;
+g_ir_vars : [IRVar; MAX_IREXPRS], mut;
+g_ir_var_count : int, mut;
 
 // --- IR instructions ---
-let mut g_ir_instrs: [IRInstr; MAX_IRINSTRUCTIONS];
-let mut g_ir_instr_count: int;
+g_ir_instrs : [IRInstr; MAX_IRINSTRUCTIONS], mut;
+g_ir_instr_count : int, mut;
 
 // --- Local variable mapping (name_idx -> ir_var_idx) ---
-let mut g_ir_locals: [int; MAX_IREXPRS * 2]; // pairs: [name_idx, var_idx]
-let mut g_ir_local_count: int;
-let mut g_ir_local_scopes: [int; MAX_SCOPES];
-let mut g_ir_local_depth: int;
+g_ir_locals : [int; MAX_IREXPRS * 2], mut;  // pairs: [name_idx, var_idx]
+g_ir_local_count : int, mut;
+g_ir_local_scopes : [int; MAX_SCOPES], mut;
+g_ir_local_depth : int, mut;
 
 // --- Global variable mapping ---
-let mut g_ir_globals: [int; MAX_SYMS * 2]; // pairs: [name_idx, var_idx]
-let mut g_ir_global_count: int;
+g_ir_globals : [int; MAX_SYMS * 2], mut;  // pairs: [name_idx, var_idx]
+g_ir_global_count : int, mut;
 
 // --- Labels ---
-let mut g_next_label: int;
+g_next_label : int, mut;
 
 // --- Loop stack for break/continue ---
-let mut g_ir_loop_header: [int; MAX_LOOPS];
-let mut g_ir_loop_exit: [int; MAX_LOOPS];
-let mut g_ir_loop_depth: int;
+g_ir_loop_header : [int; MAX_LOOPS], mut;
+g_ir_loop_exit : [int; MAX_LOOPS], mut;
+g_ir_loop_depth : int, mut;
 
 // --- String constants for .data section ---
-let mut g_ir_str_consts: [int; MAX_STRS]; // string table indices used as constants
-let mut g_ir_str_const_count: int;
+g_ir_str_consts : [int; MAX_STRS], mut;  // string table indices used as constants
+g_ir_str_const_count : int, mut;
 
 fn new_ir_var(name: string, type_idx: int) -> int {
-    let idx = g_ir_var_count;
+    idx := g_ir_var_count;
     if idx < MAX_IREXPRS {
         g_ir_vars[idx] = IRVar { name = name, id = idx, type_kind = type_idx };
         g_ir_var_count = idx + 1;
@@ -51,7 +51,7 @@ fn new_ir_var(name: string, type_idx: int) -> int {
 }
 
 fn emit(opcode: int, dest: int, src1: int, src2: int, src3: int, type_kind: int) {
-    let idx = g_ir_instr_count;
+    idx := g_ir_instr_count;
     if idx < MAX_IRINSTRUCTIONS {
         g_ir_instrs[idx] = IRInstr { opcode = opcode, dest = dest, src1 = src1, src2 = src2, src3 = src3, type_kind = type_kind };
         g_ir_instr_count = idx + 1;
@@ -59,7 +59,7 @@ fn emit(opcode: int, dest: int, src1: int, src2: int, src3: int, type_kind: int)
 }
 
 fn new_label() -> int {
-    let lbl = g_next_label;
+    lbl := g_next_label;
     g_next_label = g_next_label + 1;
     return lbl;
 }
@@ -73,7 +73,7 @@ fn bind_local(name_idx: int, var_idx: int) {
 }
 
 fn lookup_local(name_idx: int) -> int {
-    let mut i = g_ir_local_count - 1;
+    i : ., mut = g_ir_local_count - 1;
     loop {
         if i < 0 { return -1; }
         if g_ir_locals[i * 2] == name_idx { return g_ir_locals[i * 2 + 1]; }
@@ -83,7 +83,7 @@ fn lookup_local(name_idx: int) -> int {
 }
 
 fn lookup_global(name_idx: int) -> int {
-    let mut i = g_ir_global_count - 1;
+    i : ., mut = g_ir_global_count - 1;
     loop {
         if i < 0 { return -1; }
         if g_ir_globals[i * 2] == name_idx { return g_ir_globals[i * 2 + 1]; }
@@ -115,7 +115,7 @@ fn get_ir_var_name(var_idx: int) -> string {
 
 // --- Track string constants ---
 fn track_str_const(str_idx: int) {
-    let mut i = 0;
+    i : ., mut = 0;
     loop {
         if i >= g_ir_str_const_count { break; }
         if g_ir_str_consts[i] == str_idx { return; }
@@ -147,7 +147,7 @@ fn pop_loop_labels() {
 
 fn ir_gen_expr(node: int) -> int {
     if node < 0 { return -1; }
-    let n = g_ast[node];
+    n := g_ast[node];
 
     if n.kind == EXPR_NONE {
         // Wrapper node: forward to inner expression (used in struct literals)
@@ -157,30 +157,30 @@ fn ir_gen_expr(node: int) -> int {
 
     // Literals
     if n.kind == EXPR_INT {
-        let v = new_ir_var("int", TI_INT);
+        v := new_ir_var("int", TI_INT);
         emit(IR_CONST, v, n.int_val, 0, 0, TI_INT);
         return v;
     }
     if n.kind == EXPR_FLOAT {
-        let v = new_ir_var("float", TI_FLOAT);
+        v := new_ir_var("float", TI_FLOAT);
         emit(IR_CONST, v, n.int_val, 0, 0, TI_FLOAT);
         return v;
     }
     if n.kind == EXPR_BOOL {
-        let v = new_ir_var("bool", TI_BOOL);
+        v := new_ir_var("bool", TI_BOOL);
         emit(IR_CONST, v, n.int_val, 0, 0, TI_BOOL);
         return v;
     }
     if n.kind == EXPR_STRING {
-        let v = new_ir_var("str", TI_STR);
-        let str_idx = n.int_val;
+        v := new_ir_var("str", TI_STR);
+        str_idx := n.int_val;
         track_str_const(str_idx);
         emit(IR_CONST, v, str_idx, 0, 0, TI_STR);
         return v;
     }
     if n.kind == EXPR_CHAR {
-        let v = new_ir_var("char", TI_CHAR);
-        let str_idx = n.int_val;
+        v := new_ir_var("char", TI_CHAR);
+        str_idx := n.int_val;
         track_str_const(str_idx);
         emit(IR_CONST, v, str_idx, 0, 0, TI_CHAR);
         return v;
@@ -188,34 +188,34 @@ fn ir_gen_expr(node: int) -> int {
 
     // Identifier: local or global variable
     if n.kind == EXPR_IDENT {
-        let name_idx = n.int_val;
-        let lv = lookup_local(name_idx);
+        name_idx := n.int_val;
+        lv := lookup_local(name_idx);
         if lv >= 0 { return lv; }
-        let gv = lookup_global(name_idx);
+        gv := lookup_global(name_idx);
         if gv >= 0 { return gv; }
         // Could be a function name being used as a value - return dummy
-        let v = new_ir_var("unresolved", TI_UNIT);
+        v := new_ir_var("unresolved", TI_UNIT);
         return v;
     }
 
     // Binary operation
     if n.kind == EXPR_BINARY {
-        let left = n.a;
-        let right = n.b;
-        let op = n.c;
+        left := n.a;
+        right := n.b;
+        op := n.c;
 
         // Assignment
         if op == OP_ASSIGN {
-            let val_var = ir_gen_expr(right);
+            val_var := ir_gen_expr(right);
             // Determine lhs kind
-            let lhs = g_ast[left];
+            lhs := g_ast[left];
             if lhs.kind == EXPR_IDENT {
-                let name_idx = lhs.int_val;
-                let target = lookup_local(name_idx);
+                name_idx := lhs.int_val;
+                target := lookup_local(name_idx);
                 if target >= 0 {
                     emit(IR_STORE, -1, target, val_var, 0, 0);
                 } else {
-                    let gtarget = lookup_global(name_idx);
+                    gtarget := lookup_global(name_idx);
                     if gtarget >= 0 {
                         emit(IR_STORE, -1, gtarget, val_var, 0, 0);
                     }
@@ -223,20 +223,20 @@ fn ir_gen_expr(node: int) -> int {
                 return val_var;
             }
             if lhs.kind == EXPR_FIELD {
-                let obj_var = ir_gen_expr(lhs.a);
-                let field_ni = lhs.int_val;
-                let fi = g_ast[left].data; // field index stored by checker
+                obj_var := ir_gen_expr(lhs.a);
+                field_ni := lhs.int_val;
+                fi := g_ast[left].data;  // field index stored by checker
                 emit(IR_STORE_FIELD, -1, obj_var, val_var, fi, 0);
                 return val_var;
             }
             if lhs.kind == EXPR_INDEX {
-                let arr_var = ir_gen_expr(lhs.a);
-                let idx_node = lhs.b;
-                let idx_kind = g_ast[idx_node].kind;
+                arr_var := ir_gen_expr(lhs.a);
+                idx_node := lhs.b;
+                idx_kind := g_ast[idx_node].kind;
                 if idx_kind == EXPR_INT {
                     emit(IR_STORE_INDEX, -1, arr_var, val_var, g_ast[idx_node].int_val, 0);
                 } else {
-                    let idx_var = ir_gen_expr(idx_node);
+                    idx_var := ir_gen_expr(idx_node);
                     emit(IR_STORE_INDEX_VAR, val_var, arr_var, idx_var, 0, 0);
                 }
                 return val_var;
@@ -245,39 +245,76 @@ fn ir_gen_expr(node: int) -> int {
         }
 
         // Regular binary
-        let left_var = ir_gen_expr(left);
-        let right_var = ir_gen_expr(right);
-        let v = new_ir_var("bin", TI_INT);
+        left_var := ir_gen_expr(left);
+        right_var := ir_gen_expr(right);
+        v := new_ir_var("bin", TI_INT);
         emit(IR_BINARY, v, left_var, right_var, op, 0);
         return v;
     }
 
+    // Assignment
+    if n.kind == EXPR_ASSIGN {
+        target := n.a;
+        val_node := n.b;
+        val_var := ir_gen_expr(val_node);
+        lhs := g_ast[target];
+        if lhs.kind == EXPR_IDENT {
+            name_idx := lhs.int_val;
+            lv := lookup_local(name_idx);
+            if lv >= 0 {
+                emit(IR_STORE, -1, lv, val_var, 0, 0);
+            } else {
+                gv := lookup_global(name_idx);
+                if gv >= 0 { emit(IR_STORE, -1, gv, val_var, 0, 0); }
+            }
+            return val_var;
+        }
+        if lhs.kind == EXPR_FIELD {
+            obj_var := ir_gen_expr(lhs.a);
+            fi := g_ast[target].data;
+            emit(IR_STORE_FIELD, -1, obj_var, val_var, fi, 0);
+            return val_var;
+        }
+        if lhs.kind == EXPR_INDEX {
+            arr_var := ir_gen_expr(lhs.a);
+            idx_node := lhs.b;
+            if g_ast[idx_node].kind == EXPR_INT {
+                emit(IR_STORE_INDEX, -1, arr_var, val_var, g_ast[idx_node].int_val, 0);
+            } else {
+                idx_var := ir_gen_expr(idx_node);
+                emit(IR_STORE_INDEX_VAR, val_var, arr_var, idx_var, 0, 0);
+            }
+            return val_var;
+        }
+        return val_var;
+    }
+
     // Unary operation
     if n.kind == EXPR_UNARY {
-        let op = n.c;
-        let op_var = ir_gen_expr(n.a);
+        op := n.c;
+        op_var := ir_gen_expr(n.a);
         if op == UOP_REF {
-            let v = new_ir_var("ref", TI_UNIT);
+            v := new_ir_var("ref", TI_UNIT);
             emit(IR_REF, v, op_var, n.int_val, 0, 0);
             return v;
         }
-        let v = new_ir_var("un", TI_INT);
+        v := new_ir_var("un", TI_INT);
         emit(IR_UNARY, v, op_var, 0, op, 0);
         return v;
     }
 
     // Function call
     if n.kind == EXPR_CALL {
-        let func_node = n.a;
-        let first_arg = n.b;
-        let arg_count = n.c;
-        let mut arg_vars: [int; 16];
-        let mut ac = 0;
-        let mut func_ni = -1;
+        func_node := n.a;
+        first_arg := n.b;
+        arg_count := n.c;
+        arg_vars : [int; 16], mut;
+        ac : ., mut = 0;
+        func_ni : ., mut = -1;
 
         // Method call: obj.method(args)
         if g_ast[func_node].kind == EXPR_FIELD {
-            let obj_node = g_ast[func_node].a;
+            obj_node := g_ast[func_node].a;
             arg_vars[ac] = ir_gen_expr(obj_node); // self is first arg
             ac = ac + 1;
             func_ni = n.data; // mangled name stored by checker
@@ -286,8 +323,8 @@ fn ir_gen_expr(node: int) -> int {
         }
 
         // Generate remaining args
-        let mut an = first_arg;
-        let mut i = 0;
+        an : ., mut = first_arg;
+        i : ., mut = 0;
         loop {
             if i >= arg_count { break; }
             if an >= 0 {
@@ -297,8 +334,8 @@ fn ir_gen_expr(node: int) -> int {
             }
             i = i + 1;
         }
-        let dest = new_ir_var("call", TI_UNIT);
-        let first_arg_var = -1;
+        dest := new_ir_var("call", TI_UNIT);
+        first_arg_var := -1;
         if ac > 0 { first_arg_var = arg_vars[0]; }
         emit(IR_CALL, dest, first_arg_var, ac, func_ni, 0);
         return dest;
@@ -306,14 +343,14 @@ fn ir_gen_expr(node: int) -> int {
 
     // Block
     if n.kind == EXPR_BLOCK {
-        let stmt_start = n.a;
-        let stmt_count = n.b;
-        let mut last = -1;
+        stmt_start := n.a;
+        stmt_count := n.b;
+        last : ., mut = -1;
         push_ir_scope();
-        let mut i = 0;
+        i : ., mut = 0;
         loop {
             if i >= stmt_count { break; }
-            let sn = g_block_stmts[stmt_start + i];
+            sn := g_block_stmts[stmt_start + i];
             last = ir_gen_expr(sn);
             i = i + 1;
         }
@@ -323,13 +360,13 @@ fn ir_gen_expr(node: int) -> int {
 
     // If expression
     if n.kind == EXPR_IF {
-        let cond = n.a;
-        let then_node = n.b;
-        let else_node = n.c;
-        let cond_var = ir_gen_expr(cond);
-        let then_lbl = new_label();
-        let else_lbl = new_label();
-        let merge_lbl = new_label();
+        cond := n.a;
+        then_node := n.b;
+        else_node := n.c;
+        cond_var := ir_gen_expr(cond);
+        then_lbl := new_label();
+        else_lbl := new_label();
+        merge_lbl := new_label();
         if else_node >= 0 {
             emit(IR_BRANCH, -1, cond_var, then_lbl, else_lbl, 0);
         } else {
@@ -349,9 +386,9 @@ fn ir_gen_expr(node: int) -> int {
 
     // Loop
     if n.kind == EXPR_LOOP {
-        let header_lbl = new_label();
-        let body_lbl = new_label();
-        let exit_lbl = new_label();
+        header_lbl := new_label();
+        body_lbl := new_label();
+        exit_lbl := new_label();
         emit(IR_JUMP, -1, header_lbl, 0, 0, 0);
         emit(IR_LABEL, -1, header_lbl, 0, 0, 0);
         emit(IR_JUMP, -1, body_lbl, 0, 0, 0);
@@ -368,13 +405,13 @@ fn ir_gen_expr(node: int) -> int {
 
     // While loop
     if n.kind == EXPR_WHILE {
-        let cond = n.a;
-        let body = n.b;
-        let header_lbl = new_label();
-        let body_lbl = new_label();
-        let exit_lbl = new_label();
+        cond := n.a;
+        body := n.b;
+        header_lbl := new_label();
+        body_lbl := new_label();
+        exit_lbl := new_label();
         emit(IR_LABEL, -1, header_lbl, 0, 0, 0);
-        let cond_var = ir_gen_expr(cond);
+        cond_var := ir_gen_expr(cond);
         emit(IR_BRANCH, -1, cond_var, body_lbl, exit_lbl, 0);
         emit(IR_LABEL, -1, body_lbl, 0, 0, 0);
         push_ir_scope();
@@ -387,63 +424,116 @@ fn ir_gen_expr(node: int) -> int {
         return -1;
     }
 
-    // For loop
+    // For loop: for var in start..end { body }
     if n.kind == EXPR_FOR {
-        let var_ni = n.a;
-        let iter = n.b;
-        let body = n.c;
-        // For now, handle range iterators: for x in 0..10 { body }
-        // We iterate by evaluating iter (which should be a range expression)
-        let iter_var = ir_gen_expr(iter);
-        // Create loop variable
-        let ivar = new_ir_var("for_i", TI_INT);
+        var_ni := n.a;
+        iter := n.b;
+        body := n.c;
+        iter_node := g_ast[iter];
+        start_var := -1;
+        end_var := -1;
+        if iter_node.kind == EXPR_RANGE {
+            start_var = ir_gen_expr(iter_node.a);
+            end_var = ir_gen_expr(iter_node.b);
+        } else {
+            // Non-range iterable: evaluate and use 0..iter
+            s := new_ir_var("start", TI_INT);
+            emit(IR_CONST, s, 0, 0, 0, TI_INT);
+            start_var = s;
+            end_var = ir_gen_expr(iter);
+        }
+        // Create loop variable, init to start
+        ivar := new_ir_var("for_i", TI_INT);
         emit(IR_ALLOC, ivar, 0, 0, 0, TI_INT);
-        emit(IR_STORE, -1, ivar, iter_var, 0, 0);
+        emit(IR_STORE, -1, ivar, start_var, 0, 0);
         bind_local(var_ni, ivar);
-        let header_lbl = new_label();
-        let body_lbl = new_label();
-        let exit_lbl = new_label();
-        emit(IR_JUMP, -1, header_lbl, 0, 0, 0);
+        header_lbl := new_label();
+        body_lbl := new_label();
+        exit_lbl := new_label();
+        // Header: check ivar < end, branch to exit if false
         emit(IR_LABEL, -1, header_lbl, 0, 0, 0);
-        emit(IR_JUMP, -1, body_lbl, 0, 0, 0);
+        cond_var := new_ir_var("for_cond", TI_INT);
+        emit(IR_BINARY, cond_var, ivar, end_var, OP_LT, 0);
+        emit(IR_BRANCH, -1, cond_var, body_lbl, exit_lbl, 0);
+        // Body
         emit(IR_LABEL, -1, body_lbl, 0, 0, 0);
         push_ir_scope();
         push_loop_labels(header_lbl, exit_lbl);
         ir_gen_expr(body);
         pop_loop_labels();
         pop_ir_scope();
+        // Increment ivar and jump to header
+        one_var := new_ir_var("one", TI_INT);
+        emit(IR_CONST, one_var, 1, 0, 0, TI_INT);
+        inc_var := new_ir_var("inc", TI_INT);
+        emit(IR_BINARY, inc_var, ivar, one_var, OP_ADD, 0);
+        emit(IR_STORE, -1, ivar, inc_var, 0, 0);
         emit(IR_JUMP, -1, header_lbl, 0, 0, 0);
+        // Exit
         emit(IR_LABEL, -1, exit_lbl, 0, 0, 0);
         return -1;
     }
 
     // Match expression
     if n.kind == EXPR_MATCH {
-        let match_expr = n.a;
-        let first_arm = n.b;
-        let arm_count = n.c;
-        ir_gen_expr(match_expr);
-        let merge_lbl = new_label();
-        let mut ai = 0;
-        let mut an = first_arm;
+        match_expr := n.a;
+        first_arm := n.b;
+        arm_count := n.c;
+        enum_var := ir_gen_expr(match_expr);
+        // Load the variant tag from the enum (stored at heap offset 0)
+        tag_var := new_ir_var("tag", TI_INT);
+        emit(IR_LOAD_ENUM_TAG, tag_var, enum_var, 0, 0, 0);
+        merge_lbl := new_label();
+        ai : ., mut = 0;
+        an : ., mut = first_arm;
         loop {
             if ai >= arm_count { break; }
             if an >= 0 {
-                let arm_pat = g_ast[an].a;
-                let arm_body = g_ast[an].b;
-                let next_lbl = new_label();
-                if arm_pat >= 0 && g_ast[arm_pat].kind == EXPR_WILDCARD {
-                    // Wildcard arm: always match
-                    emit(IR_JUMP, -1, next_lbl, 0, 0, 0);
-                } else {
-                    // Non-wildcard: branch (simplified)
-                    emit(IR_JUMP, -1, next_lbl, 0, 0, 0);
+                arm_pat := g_ast[an].a;
+                arm_body := g_ast[an].b;
+                is_wildcard := 0;
+                if arm_pat >= 0 { if g_ast[arm_pat].kind == EXPR_WILDCARD { is_wildcard = 1; } }
+                body_lbl := new_label();
+                fall_lbl : ., mut = merge_lbl;
+                if is_wildcard == 1 {
+                    // Wildcard: always jump to body
+                    emit(IR_JUMP, -1, body_lbl, 0, 0, 0);
+                } else if arm_pat >= 0 && g_ast[arm_pat].kind == EXPR_ENUMPAT {
+                    variant_ni := g_ast[arm_pat].a;
+                    // Create constant for variant name index and compare with tag
+                    vtag := new_ir_var("vtag", TI_INT);
+                    emit(IR_CONST, vtag, variant_ni, 0, 0, TI_INT);
+                    cmp_var := new_ir_var("cmp", TI_INT);
+                    emit(IR_BINARY, cmp_var, tag_var, vtag, OP_EQ, 0);
+                    // If not last arm, emit branch to next check; else fall through to merge
+                    if ai + 1 < arm_count { fall_lbl = new_label(); }
+                    emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0);
                 }
-                emit(IR_LABEL, -1, next_lbl, 0, 0, 0);
+                emit(IR_LABEL, -1, body_lbl, 0, 0, 0);
                 push_ir_scope();
+                // Bind subpattern variables from enum fields
+                if arm_pat >= 0 && g_ast[arm_pat].kind == EXPR_ENUMPAT {
+                    sub_count := g_ast[arm_pat].c;
+                    fi : ., mut = 0;
+                    loop {
+                        if fi >= sub_count { break; }
+                        fv := new_ir_var("fld", TI_INT);
+                        emit(IR_LOAD_FIELD, fv, enum_var, 0, fi, 0);
+                        // Bind to subpattern variable if present
+                        spn := g_ast[arm_pat].b + fi;
+                        if spn >= 0 && g_ast[spn].kind == EXPR_IDENT {
+                            bind_local(g_ast[spn].int_val, fv);
+                        }
+                        fi = fi + 1;
+                    }
+                }
                 ir_gen_expr(arm_body);
                 pop_ir_scope();
                 emit(IR_JUMP, -1, merge_lbl, 0, 0, 0);
+                // Emit fallthrough label for non-last arms
+                if is_wildcard == 0 && ai + 1 < arm_count {
+                    emit(IR_LABEL, -1, fall_lbl, 0, 0, 0);
+                }
                 an = an + 1;
             }
             ai = ai + 1;
@@ -454,12 +544,12 @@ fn ir_gen_expr(node: int) -> int {
 
     // Let binding
     if n.kind == EXPR_LET {
-        let var_ni = n.a;
-        let val_node = n.c;
-        let var = new_ir_var(g_strs[var_ni], TI_UNIT);
+        var_ni := n.a;
+        val_node := n.c;
+        var := new_ir_var(g_strs[var_ni], TI_UNIT);
         emit(IR_ALLOC, var, 0, 0, 0, TI_UNIT);
         if val_node >= 0 {
-            let val_var = ir_gen_expr(val_node);
+            val_var := ir_gen_expr(val_node);
             emit(IR_STORE, -1, var, val_var, 0, 0);
         }
         bind_local(var_ni, var);
@@ -469,7 +559,7 @@ fn ir_gen_expr(node: int) -> int {
     // Return
     if n.kind == EXPR_RETURN {
         if n.a >= 0 {
-            let val_var = ir_gen_expr(n.a);
+            val_var := ir_gen_expr(n.a);
             emit(IR_RETURN, -1, val_var, 0, 0, 0);
         } else {
             emit(IR_RETURN, -1, -1, 0, 0, 0);
@@ -479,24 +569,24 @@ fn ir_gen_expr(node: int) -> int {
 
     // Field access
     if n.kind == EXPR_FIELD {
-        let obj_var = ir_gen_expr(n.a);
-        let field_ni = n.int_val;
-        let v = new_ir_var("field", TI_INT);
-        let fi = n.data; // field index stored by checker
+        obj_var := ir_gen_expr(n.a);
+        field_ni := n.int_val;
+        v := new_ir_var("field", TI_INT);
+        fi := n.data;  // field index stored by checker
         emit(IR_LOAD_FIELD, v, obj_var, 0, fi, 0);
         return v;
     }
 
     // Index
     if n.kind == EXPR_INDEX {
-        let arr_var = ir_gen_expr(n.a);
-        let idx_node = n.b;
-        let idx_kind = g_ast[idx_node].kind;
-        let v = new_ir_var("elem", TI_INT);
+        arr_var := ir_gen_expr(n.a);
+        idx_node := n.b;
+        idx_kind := g_ast[idx_node].kind;
+        v := new_ir_var("elem", TI_INT);
         if idx_kind == EXPR_INT {
             emit(IR_LOAD_INDEX, v, arr_var, 0, g_ast[idx_node].int_val, 0);
         } else {
-            let idx_var = ir_gen_expr(idx_node);
+            idx_var := ir_gen_expr(idx_node);
             emit(IR_LOAD_INDEX_VAR, v, arr_var, idx_var, 0, 0);
         }
         return v;
@@ -504,15 +594,15 @@ fn ir_gen_expr(node: int) -> int {
 
     // Enum constructor
     if n.kind == EXPR_ENUM_CONSTRUCTOR {
-        let name_idx = n.a;
-        let s = new_ir_var("enum", TI_UNIT);
+        name_idx := n.a;
+        s := new_ir_var("enum", TI_UNIT);
         emit(IR_MAKE_ENUM, s, name_idx, 0, 0, 0);
-        let mut ai = 0;
-        let mut an = n.b;
+        ai : ., mut = 0;
+        an : ., mut = n.b;
         loop {
             if ai >= n.c { break; }
             if an >= 0 {
-                let val_var = ir_gen_expr(an);
+                val_var := ir_gen_expr(an);
                 emit(IR_STORE_FIELD, -1, s, val_var, ai, 0);
                 an = an + 1;
             }
@@ -523,17 +613,17 @@ fn ir_gen_expr(node: int) -> int {
 
     // Struct literal
     if n.kind == EXPR_STRUCT {
-        let name_ni = n.a;
-        let s = new_ir_var("struct", TI_UNIT);
+        name_ni := n.a;
+        s := new_ir_var("struct", TI_UNIT);
         emit(IR_ALLOC_STRUCT, s, 0, 0, name_ni, 0);
-        let mut fi = 0;
-        let mut fn2 = n.b;
+        fi : ., mut = 0;
+        fn2 : ., mut = n.b;
         loop {
             if fi >= n.c { break; }
             if fn2 >= 0 {
                 // fn2 = wrapper node (kind=0, a=value expr)
-                let val_var = ir_gen_expr(fn2);
-                let field_idx = fi;
+                val_var := ir_gen_expr(fn2);
+                field_idx := fi;
                 emit(IR_STORE_FIELD, -1, s, val_var, field_idx, 0);
                 fn2 = fn2 + 1;
             }
@@ -544,14 +634,14 @@ fn ir_gen_expr(node: int) -> int {
 
     // Array literal
     if n.kind == EXPR_ARRAY {
-        let v = new_ir_var("arr", TI_UNIT);
+        v := new_ir_var("arr", TI_UNIT);
         emit(IR_ALLOC_ARRAY, v, n.b, 0, 0, 0);
-        let mut ei = 0;
-        let mut en = n.a;
+        ei : ., mut = 0;
+        en : ., mut = n.a;
         loop {
             if ei >= n.b { break; }
             if en >= 0 {
-                let e_var = ir_gen_expr(en);
+                e_var := ir_gen_expr(en);
                 emit(IR_STORE_INDEX, -1, v, e_var, ei, 0);
                 en = en + 1;
             }
@@ -562,8 +652,8 @@ fn ir_gen_expr(node: int) -> int {
 
     // Range expression (evaluates both ends, returns end)
     if n.kind == EXPR_RANGE {
-        ir_gen_expr(n.a);
-        let end_var = ir_gen_expr(n.b);
+        start_var := ir_gen_expr(n.a);
+        end_var := ir_gen_expr(n.b);
         return end_var;
     }
 
@@ -597,16 +687,16 @@ fn ir_gen_expr(node: int) -> int {
 // --- Generate IR for one function ---
 
 fn ir_gen_func(fi: int) {
-    let fn_node = g_funcs[fi].ast_node;
-    let f = g_ast[fn_node];
-    let name_idx = f.a;
-    let first_param = f.b;
-    let param_count = f.c;
-    let ret_ti = TI_UNIT;
-    let body = f.data;
+    fn_node := g_funcs[fi].ast_node;
+    f := g_ast[fn_node];
+    name_idx := f.a;
+    first_param := f.b;
+    param_count := f.c;
+    ret_ti := TI_UNIT;
+    body := f.data;
 
     // Record function metadata
-    let func_idx = g_ir_func_count;
+    func_idx := g_ir_func_count;
     g_ir_func_name_idx[func_idx] = name_idx;
     g_ir_func_ret_type[func_idx] = ret_ti;
     g_ir_func_instr_start[func_idx] = g_ir_instr_count;
@@ -614,15 +704,15 @@ fn ir_gen_func(fi: int) {
     g_ir_func_param_count[func_idx] = param_count;
 
     // Create IR vars for params
-    let mut pi = 0;
-    let mut pn = first_param;
+    pi : ., mut = 0;
+    pn : ., mut = first_param;
     loop {
         if pi >= param_count { break; }
         if pn < 0 { break; }
-        let p = g_ast[pn];
-        let pname_idx = p.a;
-        let pname = g_strs[pname_idx];
-        let pvar = new_ir_var(pname, TI_INT);
+        p := g_ast[pn];
+        pname_idx := p.a;
+        pname := g_strs[pname_idx];
+        pvar := new_ir_var(pname, TI_INT);
         // Bind param name
         bind_local(pname_idx, pvar);
         pi = pi + 1;
@@ -645,14 +735,14 @@ fn ir_gen_func(fi: int) {
 // --- Initialize global IR vars from global lets ---
 
 fn ir_gen_globals() {
-    let mut i = 0;
+    i : ., mut = 0;
     loop {
         if i >= g_global_let_count { break; }
-        let node = g_global_lets[i];
-        let n = g_ast[node];
-        let name_idx = n.a;
-        let name = g_strs[name_idx];
-        let gvar = new_ir_var(name, TI_INT);
+        node := g_global_lets[i];
+        n := g_ast[node];
+        name_idx := n.a;
+        name := g_strs[name_idx];
+        gvar := new_ir_var(name, TI_INT);
         g_ir_globals[g_ir_global_count * 2] = name_idx;
         g_ir_globals[g_ir_global_count * 2 + 1] = gvar;
         g_ir_global_count = g_ir_global_count + 1;
@@ -677,7 +767,7 @@ fn ir_gen_all() {
     ir_gen_globals();
 
     // Generate IR for each function
-    let mut i = 0;
+    i : ., mut = 0;
     loop {
         if i >= g_func_count { break; }
         ir_gen_func(i);
