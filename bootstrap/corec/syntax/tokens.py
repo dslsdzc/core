@@ -31,12 +31,14 @@ class TokenType(Enum):
     FOR = auto()
     IN = auto()
     LOOP = auto()
+    WHILE = auto()
     RETURN = auto()
     BREAK = auto()
     CONTINUE = auto()
     PUB = auto()
     MOD = auto()
     IMPORT = auto()
+    FILEID = auto()
     AS = auto()
     AUTO = auto()
     UNSAFE = auto()
@@ -84,6 +86,7 @@ class TokenType(Enum):
     LBRACE = auto()
     RBRACE = auto()
     AMPERSAND = auto()
+    AT = auto()
     QUESTION = auto()
     UNDERSCORE = auto()
 
@@ -107,12 +110,14 @@ KEYWORDS = {
     "for": TokenType.FOR,
     "in": TokenType.IN,
     "loop": TokenType.LOOP,
+    "while": TokenType.WHILE,
     "return": TokenType.RETURN,
     "break": TokenType.BREAK,
     "continue": TokenType.CONTINUE,
     "pub": TokenType.PUB,
     "mod": TokenType.MOD,
     "import": TokenType.IMPORT,
+    "fileid": TokenType.FILEID,
     "as": TokenType.AS,
     "unsafe": TokenType.UNSAFE,
     "requires": TokenType.REQUIRES,

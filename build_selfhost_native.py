@@ -72,6 +72,9 @@ def main():
     if resolver.errors:
         print("  Resolver errors:", resolver.errors)
         sys.exit(1)
+    if resolver.errors:
+        print("  Resolver errors:", resolver.errors)
+        sys.exit(1)
     if checker.errors:
         print("  Checker errors:", checker.errors)
         sys.exit(1)

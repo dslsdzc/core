@@ -125,7 +125,9 @@ class LetDecl(Decl):
     type_: Optional[Type] = None
     values: List[Expr] = field(default_factory=list)
 @dataclass
-class ImportDecl(Decl): path: List[str]; alias: Optional[str] = None
+class ImportDecl(Decl): path: List[str]; alias: Optional[str] = None; project: Optional[str] = None
+@dataclass
+class FileIdDecl(Decl): name: str
 @dataclass
 @dataclass
-class CompilationUnit: modules: List[ModuleDecl]; imports: List[ImportDecl]; declarations: List[Decl]
+class CompilationUnit: modules: List[ModuleDecl]; imports: List[ImportDecl]; declarations: List[Decl]; fileid: Optional[str] = None

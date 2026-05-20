@@ -128,11 +128,20 @@ class Parser:
     # ─── 顶层 ───
     def parse_compilation_unit(self) -> CompilationUnit:
         self._scan_constants()
+        fileid = self._parse_fileid()
         modules, imports = self._parse_module_and_imports()
         declarations = []
         while not self.check(TokenType.EOF):
             declarations.append(self.parse_top_level_decl())
-        return CompilationUnit(modules, imports, declarations)
+        return CompilationUnit(modules, imports, declarations, fileid)
+
+    def _parse_fileid(self):
+        if self.check(TokenType.FILEID):
+            self.advance()
+            name = self.expect(TokenType.STRING_LIT).lexeme
+            self.expect(TokenType.SEMI)
+            return name
+        return None
 
     def _parse_module_and_imports(self):
         modules, imports = [], []
@@ -151,13 +160,17 @@ class Parser:
 
     def parse_import_decl(self):
         self.expect(TokenType.IMPORT)
-        path = self.parse_path()
+        project = None
+        if self.check(TokenType.AT):
+            self.advance()
+            project = self.expect(TokenType.IDENT).lexeme
+        file_id = self.expect(TokenType.IDENT).lexeme
         alias = None
         if self.check(TokenType.AS):
             self.advance()
             alias = self.expect(TokenType.IDENT).lexeme
         self.expect(TokenType.SEMI)
-        return ImportDecl(path, alias)
+        return ImportDecl([file_id], alias, project)
 
     def parse_path(self):
         parts = [self.expect(TokenType.IDENT).lexeme]
@@ -437,6 +450,14 @@ class Parser:
         return node
 
     def parse_primary(self) -> Expr:
+        if self.check(TokenType.AT):
+            # ProjectAccess: @project file::symbol
+            self.advance()
+            project = self.expect(TokenType.IDENT).lexeme
+            file_id = self.expect(TokenType.IDENT).lexeme
+            self.expect(TokenType.PATH_SEP)
+            symbol = self.expect(TokenType.IDENT).lexeme
+            return Ident(f"@{project}.{file_id}::{symbol}")
         if self.check(TokenType.SOME) or self.check(TokenType.NONE) or self.check(TokenType.SELF):
             return Ident(self.advance().lexeme)
         if self.check(TokenType.INT_LIT):
@@ -505,6 +526,8 @@ class Parser:
             return self.parse_match_expr()
         if self.check(TokenType.LOOP):
             return self.parse_loop_expr()
+        if self.check(TokenType.WHILE):
+            return self.parse_while_expr()
         if self.check(TokenType.FOR):
             return self.parse_for_expr()
         if self.check(TokenType.GO):
@@ -679,6 +702,20 @@ class Parser:
     def parse_loop_expr(self):
         self.expect(TokenType.LOOP)
         return Loop(self.parse_block())
+
+    def parse_while_expr(self):
+        """Desugar: while cond { body } → loop { if !cond { break; } body }"""
+        self.expect(TokenType.WHILE)
+        cond = self.parse_expr()
+        body = self.parse_block()
+        # Build: if !cond { break; }
+        not_cond = UnaryOp("!", cond)
+        break_block = Block([BreakStmt()], None)
+        if_node = If(not_cond, break_block, None)
+        # Prepend to body statements
+        new_stmts = [ExprStmt(if_node)] + body.stmts
+        new_block = Block(new_stmts, body.expr)
+        return Loop(new_block)
 
     def parse_for_expr(self):
         self.expect(TokenType.FOR)

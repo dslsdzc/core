@@ -133,6 +133,7 @@ fn lookup_keyword(ident: string) -> int {
     if ident == "unsafe" { return T_UNSAFE; }
     if ident == "interface" { return T_INTERFACE; }
     if ident == "auto" { return T_AUTO; }
+    if ident == "fileid" { return T_FILEID; }
     return T_IDENT;
 }
 
@@ -203,14 +204,52 @@ fn tokenize() {
             kind : ., mut = T_INT;
             loop {
                 c2 := cur_char();
-                if is_digit(c2) { advance(); }
+                if is_digit(c2) || c2 == "_" { advance(); }
                 else if c2 == "." {
+                    // Peek ahead: if next char is not digit, don't treat as float
+                    nxt := peek();
+                    if !is_digit(nxt) && nxt != "_" { break; }
                     kind = T_FLOAT;
                     advance();
+                    // Accept more digits after decimal
+                    loop {
+                        c3 := cur_char();
+                        if is_digit(c3) || c3 == "_" { advance(); }
+                        else { break; }
+                    }
                 } else { break; }
             }
-            num_str := __builtin_str_sub(g_source, start, g_pos - start);
-            val := __builtin_str_to_int(num_str);
+            // Check for integer suffix (i8, i16, i32, i64, u8, u16, u32, u64)
+            // or float suffix (f32, f64)
+            suffix : ., mut = "";
+            if is_alpha(cur_char()) || cur_char() == "i" || cur_char() == "u" || cur_char() == "f" {
+                loop {
+                    c4 := cur_char();
+                    if is_alpha(c4) || is_digit(c4) { suffix = suffix + c4; advance(); }
+                    else { break; }
+                }
+                if suffix == "i8" { kind = T_INT_I8; }
+                else if suffix == "i16" { kind = T_INT_I16; }
+                else if suffix == "i32" { kind = T_INT_I32; }
+                else if suffix == "i64" { kind = T_INT_I64; }
+                else if suffix == "u8" { kind = T_INT_U8; }
+                else if suffix == "u16" { kind = T_INT_U16; }
+                else if suffix == "u32" { kind = T_INT_U32; }
+                else if suffix == "u64" { kind = T_INT_U64; }
+                else if suffix == "f32" { kind = T_FLOAT_F32; }
+                else if suffix == "f64" { kind = T_FLOAT_F64; }
+            }
+            num_str := __builtin_str_sub(g_source, start, g_pos - start - __builtin_str_len(suffix));
+            // Strip _ separators before conversion
+            clean : ., mut = "";
+            ni : ., mut = 0;
+            loop {
+                if ni >= __builtin_str_len(num_str) { break; }
+                nc := __builtin_str_get(num_str, ni);
+                if nc != "_" { clean = clean + nc; }
+                ni = ni + 1;
+            }
+            val := __builtin_str_to_int(clean);
             add_token_int(kind, val);
             skip_whitespace();
             continue;
@@ -219,18 +258,39 @@ fn tokenize() {
         // String literal
         if c == "\"" {
             advance();
-            start := g_pos;
+            str_val : ., mut = "";
             loop {
                 if g_pos >= __builtin_str_len(g_source) { break; }
                 if cur_char() == "\"" { break; }
                 if cur_char() == "\\" {
                     advance();
-                    if g_pos < __builtin_str_len(g_source) { advance(); }
+                    if g_pos < __builtin_str_len(g_source) {
+                        esc := cur_char();
+                        if esc == "n" { str_val = str_val + "\n"; }
+                        else if esc == "t" { str_val = str_val + "\t"; }
+                        else if esc == "r" { str_val = str_val + "\r"; }
+                        else if esc == "0" { str_val = str_val + "\0"; }
+                        else if esc == "\\" { str_val = str_val + "\\"; }
+                        else if esc == "\"" { str_val = str_val + "\""; }
+                        else if esc == "x" {
+                            advance();
+                            hi := cur_char();
+                            advance();
+                            lo := cur_char();
+                            hex_str := hi + lo;
+                            // Simple: convert known hex values
+                            if hex_str == "00" { str_val = str_val + "\0"; }
+                            else if hex_str == "0a" || hex_str == "0A" { str_val = str_val + "\n"; }
+                            else { str_val = str_val + "?"; }
+                        }
+                        else { str_val = str_val + esc; }
+                        advance();
+                    }
                 } else {
+                    str_val = str_val + cur_char();
                     advance();
                 }
             }
-            str_val := __builtin_str_sub(g_source, start, g_pos - start);
             advance();
             add_token_str(T_STRING, str_val);
             skip_whitespace();
@@ -247,8 +307,20 @@ fn tokenize() {
                 if esc == "n" { ch = "\n"; }
                 else if esc == "t" { ch = "\t"; }
                 else if esc == "r" { ch = "\r"; }
+                else if esc == "0" { ch = "\0"; }
                 else if esc == "'" { ch = "'"; }
                 else if esc == "\\" { ch = "\\"; }
+                else if esc == "\"" { ch = "\""; }
+                else if esc == "x" {
+                    advance();
+                    hi := cur_char();
+                    advance();
+                    lo := cur_char();
+                    hex_str := hi + lo;
+                    if hex_str == "00" { ch = "\0"; }
+                    else if hex_str == "0a" || hex_str == "0A" { ch = "\n"; }
+                    else { ch = "?"; }
+                }
                 else { ch = esc; }
                 advance();
             } else {
@@ -274,6 +346,12 @@ fn tokenize() {
         if c == ":" && peek() == ":" { advance(); advance(); add_token(T_PATHSEP); skip_whitespace(); continue; }
         if c == "." && peek() == "." { advance(); advance(); add_token(T_DOTDOT); skip_whitespace(); continue; }
 
+        // Compound assignment operators
+        if c == "+" && peek() == "=" { advance(); advance(); add_token(T_PLUS_EQ); skip_whitespace(); continue; }
+        if c == "-" && peek() == "=" { advance(); advance(); add_token(T_MINUS_EQ); skip_whitespace(); continue; }
+        if c == "*" && peek() == "=" { advance(); advance(); add_token(T_STAR_EQ); skip_whitespace(); continue; }
+        if c == "/" && peek() == "=" { advance(); advance(); add_token(T_SLASH_EQ); skip_whitespace(); continue; }
+
         // Single-character tokens
         if c == "(" { advance(); add_token(T_LPAREN); skip_whitespace(); continue; }
         if c == ")" { advance(); add_token(T_RPAREN); skip_whitespace(); continue; }
@@ -296,6 +374,8 @@ fn tokenize() {
         if c == "%" { advance(); add_token(T_PERCENT); skip_whitespace(); continue; }
         if c == "&" { advance(); add_token(T_AMPERSAND); skip_whitespace(); continue; }
         if c == "_" { advance(); add_token(T_UNDERSCORE); skip_whitespace(); continue; }
+        if c == "@" { advance(); add_token(T_AT); skip_whitespace(); continue; }
+        if c == "?" { advance(); add_token(T_QUESTION); skip_whitespace(); continue; }
 
         // Unknown character
         advance();

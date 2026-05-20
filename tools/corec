@@ -17,7 +17,7 @@ def compile_core(src_path, out_path):
     lex = Lexer(src)
     tokens = lex.tokenize()
     ast = Parser(tokens).parse_compilation_unit()
-    resolve_imports(ast)
+    resolve_imports(ast, source_path=src_path)
     resolver = NameResolver()
     resolver.resolve(ast)
     desugarer = MatchDesugarer(resolver.symtab)
@@ -62,6 +62,27 @@ def compile_core(src_path, out_path):
     # os.remove(obj_path)
     return True
 
+def compile_to_ir(src_path):
+    """Compile source to IR module. Returns IR module or None on error."""
+    with open(src_path) as f:
+        src = f.read()
+    lex = Lexer(src)
+    tokens = lex.tokenize()
+    ast = Parser(tokens).parse_compilation_unit()
+    resolve_imports(ast, source_path=src_path)
+    resolver = NameResolver()
+    resolver.resolve(ast)
+    desugarer = MatchDesugarer(resolver.symtab)
+    ast = desugarer.desugar(ast)
+    checker = TypeChecker(resolver.symtab)
+    checker.check(ast)
+    if resolver.errors or checker.errors:
+        print("Errors:", resolver.errors + checker.errors)
+        return None
+    ir_gen = IRGen(resolver.symtab)
+    return ir_gen.gen_module(ast)
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: corec <command> [args...]")
@@ -82,31 +103,17 @@ def main():
             print("Usage: corec ir <source.core>")
             sys.exit(1)
         src = sys.argv[2]
-        with open(src) as f:
-            src_code = f.read()
-        lex = Lexer(src_code)
-        ast = Parser(lex.tokenize()).parse_compilation_unit()
-        resolve_imports(ast)
-        resolver = NameResolver()
-        resolver.resolve(ast)
-        desugarer = MatchDesugarer(resolver.symtab)
-        ast = desugarer.desugar(ast)
-        checker = TypeChecker(resolver.symtab)
-        checker.check(ast)
-        if resolver.errors or checker.errors:
-            print("Errors:", resolver.errors + checker.errors)
-            sys.exit(1)
-        ir_gen = IRGen(resolver.symtab)
-        mod = ir_gen.gen_module(ast)
-        ir_path = src.replace('.core', '.coreir')
-        with open(ir_path, 'w') as f:
-            for func in mod.functions:
-                f.write(f"Function: {func.name}\n")
-                for blk in func.blocks:
-                    f.write(f"  Block: {blk.name}\n")
-                    for instr in blk.instrs:
-                        f.write(f"    {instr}\n")
-        print(f"IR -> {ir_path}")
+        mod = compile_to_ir(src)
+        if mod:
+            ir_path = src.replace('.core', '.coreir')
+            with open(ir_path, 'w') as f:
+                for func in mod.functions:
+                    f.write(f"Function: {func.name}\n")
+                    for blk in func.blocks:
+                        f.write(f"  Block: {blk.name}\n")
+                        for instr in blk.instrs:
+                            f.write(f"    {instr}\n")
+            print(f"IR -> {ir_path}")
     else:
         print(f"Unknown command: {cmd}")
 

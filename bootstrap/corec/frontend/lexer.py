@@ -122,7 +122,7 @@ class Lexer:
                 '+': TokenType.PLUS, '-': TokenType.MINUS,
                 '*': TokenType.STAR, '/': TokenType.SLASH,
                 '%': TokenType.PERCENT, ',': TokenType.COMMA,
-                ';': TokenType.SEMI,
+                ';': TokenType.SEMI, '@': TokenType.AT,
                 '(': TokenType.LPAREN, ')': TokenType.RPAREN,
                 '[': TokenType.LBRACK, ']': TokenType.RBRACK,
                 '{': TokenType.LBRACE, '}': TokenType.RBRACE,

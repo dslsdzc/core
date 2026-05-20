@@ -18,7 +18,18 @@ class Interpreter:
                 elif isinstance(typ, PathType):
                     self.vars[id(g)] = {}
                 else:
-                    self.vars[id(g)] = None
+                    self.vars[id(g)] = self._default_for_type(typ)
+
+    @staticmethod
+    def _default_for_type(typ):
+        from corec.syntax.ast import BaseType
+        if isinstance(typ, BaseType):
+            if typ.name == 'int': return 0
+            if typ.name == 'float': return 0.0
+            if typ.name == 'bool': return False
+            if typ.name == 'string': return ''
+            if typ.name == 'char': return '\x00'
+        return None
 
     # Built-in functions that are handled directly in Python
     builtins = {}
@@ -39,7 +50,7 @@ class Interpreter:
                 elif isinstance(typ, PathType):
                     self.vars[id(g)] = {}
                 else:
-                    self.vars[id(g)] = None
+                    self.vars[id(g)] = self._default_for_type(typ)
         for i, param in enumerate(func.params):
             self.vars[id(param)] = args[i]
         return self.run_func(func)

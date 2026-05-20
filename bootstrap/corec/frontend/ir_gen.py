@@ -188,6 +188,11 @@ class IRGen:
         left = self.gen_expr(binop.left)
         right = self.gen_expr(binop.right)
         dest = self.new_temp()
+        if binop.op == '+':
+            left_is_str = isinstance(left.type, BaseType) and left.type.name == 'string'
+            right_is_str = isinstance(right.type, BaseType) and right.type.name == 'string'
+            if left_is_str or right_is_str:
+                dest.type = BaseType('string')
         self.add_instr(BinaryInstr(binop.op, left, right, dest))
         return dest
 

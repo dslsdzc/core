@@ -27,7 +27,6 @@ fn init_types() {
     alloc_type(TYP_BASE, TY_STRING, 0);  // TI_STR = 3
     alloc_type(TYP_BASE, TY_UNIT, 0);    // TI_UNIT = 4
     alloc_type(TYP_BASE, TY_NEVER, 0);   // TI_NEVER = 5
-    alloc_type(TYP_BASE, TY_CHAR, 0);    // TI_CHAR = 6
 }
 
 fn get_type_kind(ti: int) -> int {
@@ -64,6 +63,9 @@ fn type_equal(t1: int, t2: int) -> bool {
         }
         if k1 == TYP_REF && k2 == TYP_REF {
             return get_type_extra(t1) == get_type_extra(t2) && type_equal(get_type_data(t1), get_type_data(t2));
+        }
+        if k1 == TYP_SLICE && k2 == TYP_SLICE {
+            return type_equal(get_type_data(t1), get_type_data(t2));
         }
         if k1 == TYP_GENERIC_APPLY && k2 == TYP_GENERIC_APPLY {
             if get_type_data(t1) != get_type_data(t2) { return false; }
@@ -180,9 +182,12 @@ fn resolve_type_node(node: int) -> int {
         return alloc_type(TYP_NAMED, name_idx, 0);
     }
     if n.kind == EXPR_ARRAY {
-        // Array type [T; N]
+        // Array type [T; N] or slice type [T] (size 0)
         elem := resolve_type_node(n.a);
         sz := n.int_val;
+        if sz == 0 {
+            return alloc_type(TYP_SLICE, elem, 0);
+        }
         return alloc_type(TYP_ARRAY, elem, sz);
     }
     if n.kind == EXPR_REFTYPE {
@@ -267,6 +272,21 @@ fn collect_decls() {
         }
         i = i + 1;
     }
+    // Register built-in Option type (for T? desugaring)
+    option_found : ., mut = 0;
+    i = 0;
+    loop {
+        if i >= g_enum_count { break; }
+        if str_intern(g_enums[i].name) == str_intern("Option") { option_found = 1; }
+        i = i + 1;
+    }
+    if option_found == 0 {
+        // Auto-register Option as a generic built-in type
+        option_name_idx := str_intern("Option");
+        option_ti := alloc_type(TYP_NAMED, option_name_idx, 0);
+        define_sym(option_name_idx, SYM_TYPE, option_ti, -1);
+    }
+
     // Register all enum types and their variant constructors
     i = 0;
     loop {
@@ -332,6 +352,45 @@ fn collect_decls() {
         if type_node >= 0 { ti = resolve_type_node(type_node); }
         define_sym(name_idx, SYM_GLOBAL, ti, node);
         i = i + 1;
+    }
+    // Register module aliases (from imports)
+    mi : ., mut = 0;
+    loop {
+        if mi >= g_mod_count { break; }
+        define_sym(g_mods[mi].alias_ni, SYM_MODULE, g_mods[mi].fileid_ni, -1);
+        mi = mi + 1;
+    }
+    // Register mod path declarations (mod foo::bar;)
+    pi : ., mut = 0;
+    loop {
+        if pi >= g_mod_path_count { break; }
+        define_sym(g_mod_path_names[pi], SYM_MODULE, g_mod_path_names[pi], -1);
+        pi = pi + 1;
+    }
+    // Build module function lookup table for qualified access (e.g., mymath.add)
+    main_fni : ., mut = 0;
+    if g_file_count > 0 { main_fni = g_files[0].fileid_ni; }
+    g_mod_func_count = 0;
+    fi : ., mut = 0;
+    loop {
+        if fi >= g_func_count { break; }
+        fn_node := g_funcs[fi].ast_node;
+        fn_line := g_ast[fn_node].line;
+        if fn_line > 0 && fn_line <= g_line_count {
+            fileid_ni := g_line_fileid[fn_line - 1];
+            if fileid_ni != main_fni && fileid_ni != 0 && g_line_count > 0 {
+                if g_mod_func_count < MAX_MOD_FUNCS {
+                    g_mod_func_fileids[g_mod_func_count] = fileid_ni;
+                    g_mod_func_names[g_mod_func_count] = str_intern(g_funcs[fi].name);
+                    fn_si := lookup_sym(str_intern(g_funcs[fi].name));
+                    if fn_si >= 0 {
+                        g_mod_func_tis[g_mod_func_count] = g_syms[fn_si].type_idx;
+                    }
+                    g_mod_func_count = g_mod_func_count + 1;
+                }
+            }
+        }
+        fi = fi + 1;
     }
 }
 
@@ -639,7 +698,13 @@ fn check_func(fi: int) {
         }
         define_sym(pname_idx, SYM_PARAM, ti, -1);
         pi = pi + 1;
-        pn = pn + 1; // params are sequential
+        // Params are not contiguous — type nodes are allocated between them
+        pn = pn + 1;
+        loop {
+            if pn >= g_ast_count { break; }
+            if g_ast[pn].kind == EXPR_PARAM { break; }
+            pn = pn + 1;
+        }
     }
     // Check body
     if body >= 0 {
@@ -680,6 +745,7 @@ fn infer_expr(node: int) -> int {
     if node < 0 { return TI_UNIT; }
     n := g_ast[node];
 
+
     if n.kind == EXPR_INT { return TI_INT; }
     if n.kind == EXPR_NONE && n.a >= 0 { return infer_expr(n.a); }
     if n.kind == EXPR_FLOAT { return TI_FLOAT; }
@@ -717,6 +783,8 @@ fn infer_expr(node: int) -> int {
         lt := infer_expr(left);
         rt := infer_expr(right);
         if op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV || op == OP_MOD {
+            // String concatenation for OP_ADD
+            if op == OP_ADD && (lt == TI_STR || rt == TI_STR) { return TI_STR; }
             if lt == TI_FLOAT || rt == TI_FLOAT { return TI_FLOAT; }
             return TI_INT;
         }
@@ -739,6 +807,16 @@ fn infer_expr(node: int) -> int {
             mut_flag := n.int_val;
             return alloc_type(TYP_REF, inner, mut_flag);
         }
+        if op == UOP_DEREF {
+            inner := infer_expr(n.a);
+            if get_type_kind(inner) == TYP_REF {
+                return get_type_data(inner);
+            }
+            if get_type_kind(inner) == TYP_GENERIC_PARAM {
+                return inner;
+            }
+            return inner;
+        }
         return infer_expr(n.a);
     }
 
@@ -748,10 +826,50 @@ fn infer_expr(node: int) -> int {
         arg_count := n.c;
         func_ni : ., mut = -1;
 
-        // Method call: obj.method(args)
+        // Method call: obj.method(args)  or  module.func(args)
         if g_ast[func_node].kind == EXPR_FIELD {
             obj := g_ast[func_node].a;
             method_ni := g_ast[func_node].int_val;
+
+            // Module-qualified call: module.func(args)
+            mod_call_done : ., mut = 0;
+            mod_found_mfi : ., mut = -1;
+            if g_ast[obj].kind == EXPR_IDENT {
+                mod_name_ni := g_ast[obj].int_val;
+                si := lookup_sym(mod_name_ni);
+                if si >= 0 && g_syms[si].kind == SYM_MODULE {
+                    fileid_ni := g_syms[si].type_idx;
+                    // Look up (fileid, method) in module function table
+                    mfi : ., mut = 0;
+                    loop {
+                        if mfi >= g_mod_func_count { break; }
+                        if g_mod_func_fileids[mfi] == fileid_ni && g_mod_func_names[mfi] == method_ni {
+                            func_ni = g_mod_func_names[mfi];
+                            g_ast[node].data = func_ni;
+                            g_ast[node].type_val = 1;  // mark as module call
+                            mod_call_done = 1;
+                            mod_found_mfi = mfi;
+                            break;
+                        }
+                        mfi = mfi + 1;
+                    }
+                }
+            }
+            if mod_call_done == 1 {
+                // Infer arg types
+                ai : ., mut = 0;
+                an : ., mut = first_arg;
+                loop {
+                    if ai >= arg_count { break; }
+                    if an >= 0 { infer_expr(an); an = an + 1; }
+                    ai = ai + 1;
+                }
+                if mod_found_mfi >= 0 {
+                    return g_mod_func_tis[mod_found_mfi];
+                }
+                return TI_UNIT;
+            }
+
             obj_ti := infer_expr(obj);
             lookup_ti : ., mut = obj_ti;
             // Unwrap generic apply to base type
@@ -905,47 +1023,44 @@ fn infer_expr(node: int) -> int {
     if n.kind == EXPR_MATCH {
         match_expr := n.a;
         first_arm := n.b;
-        arm_count := n.c;
         infer_expr(match_expr);
         res : ., mut = TI_UNIT;
         ai : ., mut = 0;
         an : ., mut = first_arm;
         loop {
-            if ai >= arm_count { break; }
-            if an >= 0 {
-                arm_pat := g_ast[an].a;  // EXPR_ARM: a = pattern
-                arm_body := g_ast[an].b;  // EXPR_ARM: b = body
-                // Bind pattern variables in new scope
-                push_scope();
-                if arm_pat >= 0 {
-                    pat := g_ast[arm_pat];
-                    if pat.kind == EXPR_ENUMPAT {
-                        // Bind sub-patterns
-                        sub_pat := pat.b;
-                        sub_count := pat.c;
-                        spi : ., mut = 0;
-                        spn : ., mut = sub_pat;
-                        loop {
-                            if spi >= sub_count { break; }
-                            if spn >= 0 {
-                                sp := g_ast[spn];
-                                if sp.kind == EXPR_IDENT {
-                                    define_sym(sp.int_val, SYM_LOCAL, TI_INT, -1);
-                                }
-                                spn = spn + 1;
+            if an < 0 { break; }
+            arm_pat := g_ast[an].a;  // EXPR_ARM: a = pattern
+            arm_body := g_ast[an].b;  // EXPR_ARM: b = body
+            // Bind pattern variables in new scope
+            push_scope();
+            if arm_pat >= 0 {
+                pat := g_ast[arm_pat];
+                if pat.kind == EXPR_ENUMPAT {
+                    // Bind sub-patterns
+                    sub_pat := pat.b;
+                    sub_count := pat.c;
+                    spi : ., mut = 0;
+                    spn : ., mut = sub_pat;
+                    loop {
+                        if spi >= sub_count { break; }
+                        if spn >= 0 {
+                            sp := g_ast[spn];
+                            if sp.kind == EXPR_IDENT {
+                                define_sym(sp.int_val, SYM_LOCAL, TI_INT, -1);
                             }
-                            spi = spi + 1;
+                            spn = spn + 1;
                         }
-                    }
-                    if pat.kind == EXPR_IDENT {
-                        define_sym(pat.int_val, SYM_LOCAL, TI_INT, -1);
+                        spi = spi + 1;
                     }
                 }
-                arm_ti := infer_expr(arm_body);
-                if ai == 0 { res = arm_ti; }
-                pop_scope();
-                an = an + 1;
+                if pat.kind == EXPR_IDENT {
+                    define_sym(pat.int_val, SYM_LOCAL, TI_INT, -1);
+                }
             }
+            arm_ti := infer_expr(arm_body);
+            if ai == 0 { res = arm_ti; }
+            pop_scope();
+            an = g_ast[an].c;  // next arm via linked list
             ai = ai + 1;
         }
         return res;
@@ -955,7 +1070,6 @@ fn infer_expr(node: int) -> int {
         var_ni := n.a;
         type_node := n.b;
         val_node := n.c;
-        is_mut := n.data;
         val_ti := TI_UNIT;
         if val_node >= 0 { val_ti = infer_expr(val_node); }
         ti := val_ti;
@@ -1055,9 +1169,21 @@ fn infer_expr(node: int) -> int {
 
     if n.kind == EXPR_INDEX {
         arr_ti := infer_expr(n.a);
-        infer_expr(n.b);
-        if get_type_kind(arr_ti) == TYP_ARRAY {
+        idx_ti := infer_expr(n.b);
+        arr_kind := get_type_kind(arr_ti);
+        // Range index: arr[low..high] → slice type
+        if g_ast[n.b].kind == EXPR_RANGE {
+            if arr_kind == TYP_ARRAY {
+                return alloc_type(TYP_SLICE, get_type_data(arr_ti), 0);
+            }
+            return TI_UNIT;
+        }
+        // Regular index: arr[i] or slice[i] → element type
+        if arr_kind == TYP_ARRAY {
             return get_type_data(arr_ti);
+        }
+        if arr_kind == TYP_SLICE {
+            return get_type_data(arr_ti);  // slice[i] → element type
         }
         return TI_INT;
     }
@@ -1154,6 +1280,36 @@ fn infer_expr(node: int) -> int {
     if n.kind == EXPR_WILDCARD { return TI_UNIT; }
     if n.kind == EXPR_MOVE {
         return infer_expr(n.a);
+    }
+    if n.kind == EXPR_UNSAFE {
+        return infer_expr(n.a);
+    }
+    if n.kind == EXPR_TRY {
+        // Try operator: unwrap Option[T] → T, Result[T,E] → T
+        inner_ti := infer_expr(n.a);
+        if get_type_kind(inner_ti) == TYP_GENERIC_APPLY {
+            base_ti := get_type_data(inner_ti);
+            if get_type_kind(base_ti) == TYP_NAMED {
+                base_ni := get_type_data(base_ti);
+                base_name := g_strs[base_ni];
+                if base_name == "Option" || base_name == "Result" {
+                    ga_start := get_type_extra(inner_ti);
+                    if g_gen_apply_data[ga_start] >= 1 {
+                        return g_gen_apply_data[ga_start + 1]; // first type arg
+                    }
+                }
+            }
+        }
+        return inner_ti;
+    }
+    if n.kind == EXPR_STRUCTPAT {
+        return TI_UNIT;
+    }
+    if n.kind == EXPR_AS {
+        // expr as Type — type cast
+        inner_ti := infer_expr(n.a);
+        type_node := n.b;
+        return resolve_type_node(type_node);
     }
     if n.kind == EXPR_STMT {
         infer_expr(n.a);

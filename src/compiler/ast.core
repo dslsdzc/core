@@ -70,6 +70,37 @@ T_UNSAFE : int = 65;
 T_INTERFACE : int = 66;
 T_COLON_EQ : int = 67;
 T_AUTO : int = 68;
+T_AT : int = 69;
+T_FILEID : int = 70;
+T_QUESTION : int = 71;
+T_PLUS_EQ : int = 72;
+T_MINUS_EQ : int = 73;
+T_STAR_EQ : int = 74;
+T_SLASH_EQ : int = 75;
+
+// Suffixed integer/float token kinds (lexer emits these when suffix like _i32, _u64, _f32 is found)
+T_INT_I8 : int = 76;
+T_INT_I16 : int = 77;
+T_INT_I32 : int = 78;
+T_INT_I64 : int = 79;
+T_INT_U8 : int = 80;
+T_INT_U16 : int = 81;
+T_INT_U32 : int = 82;
+T_INT_U64 : int = 83;
+T_FLOAT_F32 : int = 84;
+T_FLOAT_F64 : int = 85;
+
+// Width constants (stored in EXPR_INT/EXPR_FLOAT data field)
+W_I8 : int = 1;
+W_I16 : int = 2;
+W_I32 : int = 3;
+W_I64 : int = 4;
+W_U8 : int = 5;
+W_U16 : int = 6;
+W_U32 : int = 7;
+W_U64 : int = 8;
+W_F32 : int = 9;
+W_F64 : int = 10;
 
 // Type constants
 TY_INT : int = 0;
@@ -207,6 +238,12 @@ EXPR_ENUM_CONSTRUCTOR : int = 37; // a=name idx, b=first arg, c=arg count
 EXPR_REFTYPE : int = 38;   // a=inner type node, data=mut flag (for &T / &mut T in type position)
 EXPR_GENERIC_APPLY : int = 39; // a=base name idx, b=first arg type node, c=arg count
 
+// Desugared constructs
+EXPR_TRY : int = 33;      // a=expr being tried (? operator)
+EXPR_UNSAFE : int = 34;   // a=block body
+EXPR_STRUCTPAT : int = 35; // struct pattern: a=name ni, b=first field pat, c=field count
+EXPR_AS : int = 36;        // a=expr, b=type node (cast: expr as Type)
+
 // Field representation in struct literal: two consecutive AST nodes
 // (name_idx, value_idx, line=line, col=col)
 struct FieldPair {
@@ -254,6 +291,7 @@ TYP_ARRAY : int = 2;  // data = element type idx, extra = size
 TYP_REF : int = 3;    // data = inner type idx, extra = mut flag
 TYP_GENERIC_PARAM : int = 7;  // data = name string index (unresolved generic param)
 TYP_GENERIC_APPLY : int = 8;  // data = base type idx, extra = arg list start in g_gen_apply_data
+TYP_SLICE : int = 9;   // data = element type idx (dynamic-length view into array)
 
 // Symbol kinds for checker
 SYM_FN : int = 0;
@@ -261,11 +299,26 @@ SYM_TYPE : int = 1;
 SYM_LOCAL : int = 2;
 SYM_PARAM : int = 3;
 SYM_GLOBAL : int = 4;
+SYM_MODULE : int = 5;
 
+// Module system structures
+struct FileEntry {
+    fileid_ni: int,
+    path: string,
+}
+struct ModEntry {
+    alias_ni: int,    // name index of alias (e.g., "m" from "import math : m")
+    fileid_ni: int,   // name index of actual fileid
+    path: string,     // resolved file path
+}
 // Additional size limits
 MAX_SYMS : int = 512;
 MAX_TYPES : int = 128;
 MAX_SCOPES : int = 32;
+MAX_FILES : int = 64;
+MAX_MODS : int = 32;
+MAX_SEGS : int = 64;
+MAX_LINES : int = 5000;
 MAX_IREXPRS : int = 4096;
 MAX_IRINSTRUCTIONS : int = 16384;
 MAX_BLOCKS : int = 512;
@@ -274,6 +327,29 @@ MAX_GENERICS : int = 4;        // max generic params per declaration
 MAX_GEN_ARGS : int = 128;      // total storage for generic type args
 g_gen_apply_data : [int; MAX_GEN_ARGS];  // flat: [count, arg1, arg2, ...] for each GENERIC_APPLY
 g_gen_apply_data_count : int;
+
+// Module system globals
+g_files : [FileEntry; MAX_FILES], mut;
+g_file_count : int, mut;
+g_mods : [ModEntry; MAX_MODS], mut;
+g_mod_count : int, mut;
+g_seg_starts : [int; MAX_SEGS], mut;    // parallel arrays replacing SegBoundary struct
+g_seg_fileids : [int; MAX_SEGS], mut;   // (struct arrays don't work in interpreter)
+g_seg_count : int, mut;
+g_line_fileid : [int; MAX_LINES], mut;  // maps source line -> fileid_ni (0 = main)
+g_line_count : int, mut;
+g_source_dir : string, mut;  // directory of the main source file (for _import.core lookup)
+MAX_MOD_FUNCS : int = 128;
+g_mod_func_fileids : [int; MAX_MOD_FUNCS], mut;   // fileid name index
+g_mod_func_names : [int; MAX_MOD_FUNCS], mut;     // function name index
+g_mod_func_tis : [int; MAX_MOD_FUNCS], mut;       // type index
+g_mod_func_count : int, mut;
+
+// Mod path declarations (mod foo::bar;)
+MAX_MOD_PATHS : int = 32;
+g_mod_path_names : [int; MAX_MOD_PATHS], mut;  // name indices
+g_mod_path_count : int, mut;
+
 // IR instruction opcodes
 IR_NOP : int = 0;
 IR_CONST : int = 1;
@@ -299,6 +375,9 @@ IR_JUMP : int = 20;
 IR_LABEL : int = 21;
 IR_PHI : int = 22;
 IR_LOAD_ENUM_TAG : int = 23;
+IR_SLICE : int = 24;   // dest=slice_var, s1=arr_var, s2=low_var, src3=high_var — create slice ptr from range
+IR_DEREF : int = 25;   // dest=loaded_val, s1=ref_var — load value through pointer stored in ref_var
+IR_STORE_PTR : int = 26; // dest=val_var, s1=ptr_var, s2=val_var — store value through pointer
 
 // IR variable
 struct IRVar {
