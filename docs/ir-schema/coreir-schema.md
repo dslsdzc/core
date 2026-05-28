@@ -143,3 +143,30 @@
 | 4 | TI_UNIT | 空类型 |
 | 5 | TI_NEVER | 发散类型 |
 | 6 | TI_CHAR | 字符 |
+
+---
+
+## 数据流图 (.cir)
+
+`.cir`（Core IR Graphviz）是数据流图的 DOT 格式输出，用于可视化调试。
+
+### 格式
+
+Graphviz DOT 格式，每个函数一张子图。
+
+### 节点
+
+每条 IR 指令映射为一个 DOT 节点：
+
+```
+n0 [label="x:alloc", shape=box];
+```
+
+节点标签格式：`[变量名:]指令名`。
+
+`corec file.cr --cir` 输出包含所有函数的完整数据流图。用 Graphviz 渲染：
+
+```bash
+# 安装: apt install graphviz
+dot -Tpng -o output.png output.cir
+```
