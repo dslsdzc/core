@@ -9,11 +9,16 @@ Core is a new general-purpose programming language with a "semantic preservation
 ## Build & Test Commands
 
 ```bash
-python3 tools/corec build FILE.cr -o OUTPUT   # Compile .cr → ARM64 native executable
-python3 tools/corec ir FILE.cr                 # Generate linear IR (.ccr) dump
+python3 tools/corec build FILE.cr -o OUTPUT   # Compile .cr → ARM64 native executable (Python bootstrap)
+python3 tools/corec ir FILE.cr                 # Generate dataflow graph (.cir) dump (Python bootstrap)
+
+./build/corec FILE.cr                          # Compile .cr → .ccr (self-hosted frontend)
+./build/corearch FILE.ccr -S                   # Compile .ccr → assembly (self-hosted backend)
 ```
 
-The `tools/corec` CLI uses ARM64 `as` and `ld` for assembly/linking. The `build` command currently emits ARM64 only.
+- `tools/corec` (Python) — ARM64 build, `.cir`/`.ccr` dump
+- `build/corec` (self-hosted) — x86-64 frontend: `.cr` → `.ccr`/`.cir`
+- `build/corearch` (self-hosted) — x86-64 backend: `.ccr` → assembly/ELF
 
 ### Test suites
 
@@ -33,7 +38,7 @@ python3 tests/selfhost/test_impl.py        # Impl/method tests (interpreter + na
 python3 tests/selfhost/test_borrow.py      # Self-hosted borrow checker tests (7 rules)
 ```
 
-Integration tests in `tests/suite/` are `.cr` source files — run through `tools/corec ir` or `tools/corec build`.
+Integration tests in `tests/suite/` are `.cr` source files — run through `build/corec` or `tools/corec`.
 
 ### Self-hosted compiler build
 
@@ -42,7 +47,7 @@ python3 build_selfhost.py              # Concatenate src/compiler/*.cr → run v
 python3 build_selfhost_native.py       # Compile self-hosted compiler → native x86-64 binary at build/corec
 ```
 
-`build_selfhost_native.py` uses the Python-speed `X86_64StackAsmGen` backend (not the interpreter) to produce a native `build/corec` binary. The binary links against `src/runtime/compiler_rt.c` (C runtime providing `__builtin_*` functions and a bump allocator). Usage: `./build/corec <input.cr> → output.s`.
+`build_selfhost_native.py` uses the Python-speed `X86_64StackAsmGen` backend (not the interpreter) to produce two native binaries: `build/corec` (frontend) and `build/corearch` (backend). The runtime is `src/runtime/rt.s` (assembly: `_start`, bump allocator, `__builtin_get_arg`). Usage: `./build/corec file.cr → file.ccr`, then `./build/corearch file.ccr -S → file.s`.
 
 ## Architecture
 
@@ -87,8 +92,9 @@ utils/span.py          → Source span tracking (placeholder)
 
 Pipeline flow: `Lexer → Parser → NameResolver → MatchDesugarer → TypeChecker → IRGen → DataflowGraph → Linearize → Backend`
 
-For the self-hosted compiler pipeline, `compile_source()` in `main.cr` adds an import resolution step after tokenization:
-`tokenize() → resolve_imports() → parse_all() → check_all() → ir_gen_all() → lower_all() → x86_64_generate()`
+**Self-hosted frontend** (`corec`, entry in `main.cr`): `tokenize() → resolve_imports() → parse_all() → check_all() → ir_gen_all() → lower_to_ccr() → save_ccr()`
+
+**Self-hosted backend** (`corearch`, entry in `corearch.cr`): `load_ccr() → x86_64_generate()`
 
 ### Module/Import System
 
@@ -153,9 +159,11 @@ The `src/` directory holds the self-hosted compiler written in Core source:
 ```
 src/compiler/          → Compiler modules in Core (ast.cr, lexer.cr, parser.cr, checker.cr, ir_gen.cr, main.cr)
 src/compiler/backend/  → Backend modules (x86_64.cr)
-src/compiler/linker.cr → Stub (0 bytes)
-src/stdlib/            → Standard library (io.cr, math.cr, collections.cr, chan.cr)
-src/runtime/           → Runtime support (rt.cr, compiler_rt.c — C runtime: bump allocator + __builtin_* functions)
+src/compiler/ccr_io.cr → .ccr binary serialization/deserialization
+src/compiler/corearch.cr → Backend entry point (corearch binary)
+src/compiler/globals.cr → Shared global declarations
+src/stdlib/            → Standard library (cli.cr, io.cr, math.cr, collections.cr, chan.cr)
+src/runtime/           → Runtime support (rt.cr, rt.s — Core + assembly: bump allocator + __builtin_* functions)
 ```
 
 The self-hosted compiler can compile Core source to x86-64 assembly. Build it with `build_selfhost_native.py` which compiles all `src/compiler/*.cr` files through the Python bootstrap pipeline and emits a native `build/corec` binary.
@@ -179,16 +187,16 @@ Unlike the Python bootstrap (which uses Python objects), the self-hosted compile
 | `g_enums[MAX_ENUMS]` | `EnumInfo { name, variants, variant_count, ... }` | Enum definitions |
 | `g_funcs[MAX_FUNCS]` | `FuncInfo { name, param_count, param_types, return_type, ast_node, ... }` | Function signatures |
 
-**IR opcodes** (defined in `ast.cr`): `IR_CONST(1)`, `IR_BINARY(2)`, `IR_UNARY(3)`, `IR_CALL(4)`, `IR_RETURN(5)`, `IR_ALLOC(6)`, `IR_ALLOC_STRUCT(7)`, `IR_ALLOC_ARRAY(8)`, `IR_STORE(9)`, `IR_LOAD(10)`, `IR_LOAD_FIELD(11)`, `IR_STORE_FIELD(12)`, `IR_LOAD_INDEX(13)`, `IR_STORE_INDEX(14)`, `IR_LOAD_INDEX_VAR(15)`, `IR_STORE_INDEX_VAR(16)`, `IR_MAKE_ENUM(17)`, `IR_REF(18)`, `IR_BRANCH(19)`, `IR_JUMP(20)`, `IR_LABEL(21)`, `IR_PHI(22)`, `IR_LOAD_ENUM_TAG(23)`.
+**IR opcodes** (defined in `ast.cr`): `IR_CONST(1)`, `IR_BINARY(2)`, `IR_UNARY(3)`, `IR_CALL(4)`, `IR_RETURN(5)`, `IR_ALLOC(6)`, `IR_ALLOC_STRUCT(7)`, `IR_ALLOC_ARRAY(8)`, `IR_STORE(9)`, `IR_LOAD(10)`, `IR_LOAD_FIELD(11)`, `IR_STORE_FIELD(12)`, `IR_LOAD_INDEX(13)`, `IR_STORE_INDEX(14)`, `IR_LOAD_INDEX_VAR(15)`, `IR_STORE_INDEX_VAR(16)`, `IR_MAKE_ENUM(17)`, `IR_REF(18)`, `IR_BRANCH(19)`, `IR_JUMP(20)`, `IR_LABEL(21)`, `IR_PHI(22)`, `IR_LOAD_ENUM_TAG(23)`, `IR_SLICE(24)`, `IR_DEREF(25)`, `IR_STORE_PTR(26)`.
 
-**Assembly output**: `x86_64.cr` emits GAS `.intel_syntax noprefix`. Functions get `.globl` for `compiler_main`/`main`. A `.weak _start` stub calls `main` and exits (overridden by `crt1.o` when linking with gcc). A `.weak _init_globals` satisfies `compiler_rt.c`.
+**Assembly output**: `x86_64.cr` emits GAS `.intel_syntax noprefix`. Functions get `.globl` for function symbols. `_start` in `rt.s` calls `_init_globals` then `main`. The bump allocator (`__builtin_alloc`) and `__builtin_get_arg` are in `rt.s`.
 
 **Key invariants of the flat IR**:
 - `IR_MAKE_ENUM` stores variant tag at heap offset 0; `IR_STORE_FIELD`/`IR_LOAD_FIELD` auto-offset by +8 for enum targets (tracked via `g_x86_is_enum` array in the backend)
 - The checker runs two passes: first registers struct/enum/function declarations, then type-checks bodies
 - Parser creates `EXPR_ASSIGN` nodes for `=`, handled separately from `EXPR_BINARY`
 - Parameters arrive in registers (`rdi, rsi, rdx, rcx, r8, r9`) and must be saved to stack slots in function prologue
-- Builtin functions (`__builtin_*`) are called directly — the runtime (`compiler_rt.c` or `minimal_rt.s`) provides them
+- Builtin functions (`__builtin_*`) are either inlined by the backend or provided by `rt.s`/`rt.cr`
 
 ### Variable declaration syntax
 
@@ -235,4 +243,4 @@ Design documents (Chinese):
 - VS Code extension in `vscode-core/` provides TextMate-based syntax highlighting for `.cr`, `.corespec`, `.cir`, `.ccr`
 - Spec files in `spec/` (`.corespec`) for future formal verifier consumption
 - Examples in `examples/` with per-subdirectory projects
-- Native binary tests use `tests/selfhost/minimal_rt.s` (AT&T syntax bump allocator) when linking with bare `ld`
+- Native binary tests use `tests/selfhost/minimal_rt.s` (minimal bump allocator + `_start`) for test linking with `ld`
