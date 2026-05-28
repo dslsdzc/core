@@ -4,7 +4,7 @@ Resolves imports by file identifier (not file path), supports:
   - `import fileid [as alias]`
   - `import @project fileid [as alias]`
   - `fileid "name";` declarations
-  - `_import.core` directory-level batch imports
+  - `_import.cr` directory-level batch imports
   - Core.toml project name
 """
 
@@ -29,10 +29,10 @@ def _parse_coretoml(search_path):
 
 
 def _determine_fileid(filepath):
-    """Read a .core file and determine its file identifier.
+    """Read a .cr file and determine its file identifier.
 
     If the file starts with `fileid "name";`, use that.
-    Otherwise use the filename without .core extension.
+    Otherwise use the filename without .cr extension.
     """
     with open(filepath) as f:
         head = f.read(512)  # Only need first few hundred bytes
@@ -43,7 +43,7 @@ def _determine_fileid(filepath):
 
 
 def _collect_file_registry(search_paths):
-    """Build fileid → filepath mapping and collect _import.core data.
+    """Build fileid → filepath mapping and collect _import.cr data.
 
     Returns:
         (registry, dir_imports)
@@ -60,14 +60,14 @@ def _collect_file_registry(search_paths):
         project_name = _parse_coretoml(sp)
 
         for root, dirs, files in os.walk(sp):
-            # Check for _import.core in this directory
-            if '_import.core' in files:
-                imp_path = os.path.join(root, '_import.core')
+            # Check for _import.cr in this directory
+            if '_import.cr' in files:
+                imp_path = os.path.join(root, '_import.cr')
                 imports = _parse_imports_from_file(imp_path)
                 dir_imports[root] = imports
 
             for f in files:
-                if not f.endswith('.core') or f == '_import.core':
+                if not f.endswith('.cr') or f == '_import.cr':
                     continue
                 filepath = os.path.join(root, f)
                 fileid = _determine_fileid(filepath)
@@ -83,7 +83,7 @@ def _collect_file_registry(search_paths):
 
 
 def _parse_imports_from_file(filepath):
-    """Parse a .core file and return its import declarations.
+    """Parse a .cr file and return its import declarations.
 
     Returns list of (file_id, alias, project).
     """
@@ -99,13 +99,13 @@ def _parse_imports_from_file(filepath):
 def _apply_dir_imports(dir_path, dir_imports, registry):
     """Get all imports that apply to a file in dir_path, including inherited.
 
-    Walks up directory tree merging _import.core imports.
+    Walks up directory tree merging _import.cr imports.
     """
     merged = []
     seen = set()
-    # Walk from root down to dir_path, collecting _import.core imports
+    # Walk from root down to dir_path, collecting _import.cr imports
     # Actually walk all parent dirs from root, merging applicable ones
-    # Strategy: collect all _import.core dirs, then for a given file path,
+    # Strategy: collect all _import.cr dirs, then for a given file path,
     # include imports from any ancestor directory.
     dirs_to_check = []
     parent = dir_path
@@ -134,12 +134,12 @@ def resolve_imports(ast, source_path=None, search_paths=None, errors=None):
     parses the file, recursively resolves its imports, and prepends
     its declarations into the main compilation unit.
 
-    Supports _import.core directory-level imports.
+    Supports _import.cr directory-level imports.
 
     Args:
         ast: CompilationUnit with ImportDecls to resolve
-        source_path: Path to the source .core file (for dir-aware _import.core)
-        search_paths: Directories to search for .core files
+        source_path: Path to the source .cr file (for dir-aware _import.cr)
+        search_paths: Directories to search for .cr files
         errors: List to collect error messages
     """
     if search_paths is None:
@@ -163,7 +163,7 @@ def resolve_imports(ast, source_path=None, search_paths=None, errors=None):
     # Build file registry
     registry, dir_imports = _collect_file_registry(abs_search_paths)
 
-    # Determine current file's directory for _import.core lookup
+    # Determine current file's directory for _import.cr lookup
     current_dir = None
     if source_path:
         current_dir = os.path.dirname(os.path.abspath(source_path))
@@ -173,7 +173,7 @@ def resolve_imports(ast, source_path=None, search_paths=None, errors=None):
     while ast.imports:
         imp = ast.imports.pop(0)
 
-        # Check for _import.core inherited imports
+        # Check for _import.cr inherited imports
         if current_dir and current_dir in dir_imports:
             inherited = _apply_dir_imports(current_dir, dir_imports, registry)
             for file_id, alias, project in inherited:
@@ -195,7 +195,7 @@ def resolve_imports(ast, source_path=None, search_paths=None, errors=None):
             # Cross-project import — search each search path for the project
             filepath = None
             for sp in abs_search_paths:
-                candidate = os.path.join(sp, project, file_id + '.core')
+                candidate = os.path.join(sp, project, file_id + '.cr')
                 if os.path.exists(candidate):
                     filepath = candidate
                     break

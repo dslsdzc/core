@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Build the self-hosted Core compiler.
-Concatenates all src/compiler/*.core files in dependency order,
+Concatenates all src/compiler/*.cr files in dependency order,
 then compiles the result through the Python bootstrap compiler.
 """
 import sys, os
@@ -10,14 +10,15 @@ sys.path.insert(0, 'bootstrap')
 def concat_sources():
     """Concatenate all compiler source files in order."""
     files = [
-        'src/compiler/ast.core',
-        'src/compiler/ir/nodes.core',
-        'src/compiler/lexer.core',
-        'src/compiler/parser.core',
-        'src/compiler/checker.core',
-        'src/compiler/ir_gen.core',
-        'src/compiler/backend/x86_64.core',
-        'src/compiler/main.core',
+        'src/stdlib/cli.cr',
+        'src/compiler/ast.cr',
+        'src/compiler/lexer.cr',
+        'src/compiler/parser.cr',
+        'src/compiler/checker.cr',
+        'src/compiler/ir_gen.cr',
+        'src/compiler/dataflow.cr',
+        'src/compiler/backend/x86_64.cr',
+        'src/compiler/main.cr',
     ]
     parts = []
     for f in files:
@@ -68,7 +69,7 @@ def compile_and_run(src, entry='compiler_main', args=None):
 
 if __name__ == '__main__':
     src = concat_sources()
-    out_path = 'build/selfhost_compiler.core'
+    out_path = 'build/selfhost_compiler.cr'
     os.makedirs('build', exist_ok=True)
     with open(out_path, 'w') as f:
         f.write(src)
@@ -76,7 +77,7 @@ if __name__ == '__main__':
 
     # Write a test file for the self-hosted compiler to compile
     test_src = "fn main() -> int { return 42; }\n"
-    test_path = 'build/test_return42.core'
+    test_path = 'build/test_return42.cr'
     with open(test_path, 'w') as f:
         f.write(test_src)
 

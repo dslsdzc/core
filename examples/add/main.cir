@@ -1,0 +1,15 @@
+digraph G {
+    rankdir=TB;
+    n0 [label="bin:binary", shape=box];
+    n1 [label="return", shape=box];
+    n2 [label="return", shape=box];
+    n3 [label="int:const", shape=box];
+    n4 [label="int:const", shape=box];
+    n5 [label="call:call", shape=box];
+    n6 [label="return", shape=box];
+    n7 [label="return", shape=box];
+    n0 -> n1;
+    n3 -> n5;
+    n4 -> n5;
+    n5 -> n6;
+}

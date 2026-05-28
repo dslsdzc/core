@@ -16,9 +16,9 @@ BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 def concat_sources():
     files = [
-        'src/compiler/ast.core', 'src/compiler/lexer.core', 'src/compiler/parser.core',
-        'src/compiler/checker.core', 'src/compiler/ir_gen.core',
-        'src/compiler/backend/x86_64.core', 'src/compiler/main.core',
+        'src/stdlib/cli.cr', 'src/compiler/ast.cr', 'src/compiler/lexer.cr', 'src/compiler/parser.cr',
+        'src/compiler/checker.cr', 'src/compiler/ir_gen.cr', 'src/compiler/dataflow.cr',
+        'src/compiler/backend/x86_64.cr', 'src/compiler/main.cr',
     ]
     parts = []
     for f in files:
@@ -75,9 +75,9 @@ print("  PASS")
 
 # ── Test 2: Compile self-hosted compiler + test lexer source ──
 print("\n=== Test 2: Self-Hosted Compiler Lexer Source ===")
-with open(os.path.join(BASE, 'src/compiler/ast.core')) as f:
+with open(os.path.join(BASE, 'src/compiler/ast.cr')) as f:
     ast_src = f.read()
-print(f"  ast.core: {len(ast_src)} chars")
+print(f"  ast.cr: {len(ast_src)} chars")
 result = compile_selfhost()
 if result:
     interp2, tok_count = result

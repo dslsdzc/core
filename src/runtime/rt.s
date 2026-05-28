@@ -20,6 +20,7 @@ heap_end:
 
 .section .data
 heap_ptr: .quad heap_start
+empty_str: .byte 0
 
 .text
 
@@ -121,5 +122,5 @@ __builtin_get_arg:
     ret
 
 .Larg_oob:
-    xor eax, eax
+    lea rax, [rip + empty_str]
     ret

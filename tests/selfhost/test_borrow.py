@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Self-hosted borrow checker tests — runs checker.core borrow logic through the interpreter."""
+"""Self-hosted borrow checker tests — runs checker.cr borrow logic through the interpreter."""
 import sys, os
 sys.path.insert(0, 'bootstrap')
 
@@ -16,9 +16,9 @@ from corec.backend.interpreter import Interpreter
 
 def concat_sources():
     files = [
-        'src/compiler/ast.core', 'src/compiler/lexer.core', 'src/compiler/parser.core',
-        'src/compiler/checker.core', 'src/compiler/ir_gen.core',
-        'src/compiler/backend/x86_64.core', 'src/compiler/main.core',
+        'src/stdlib/cli.cr', 'src/compiler/ast.cr', 'src/compiler/lexer.cr', 'src/compiler/parser.cr',
+        'src/compiler/checker.cr', 'src/compiler/ir_gen.cr', 'src/compiler/dataflow.cr',
+        'src/compiler/backend/x86_64.cr', 'src/compiler/main.cr',
     ]
     parts = []
     for f in files:

@@ -395,3 +395,36 @@ struct IRInstr {
     src3: int,      // extra data (label, field name, etc.)
     type_kind: int, // type info
 }
+
+// === Dataflow Graph (.cir) structures ===
+
+struct DFNode {
+    opcode: int,
+    dest_var: int,   // IR var this node defines (-1 if none)
+    src1: int,       // original operands (same semantics as IRInstr)
+    src2: int,
+    src3: int,
+    type_kind: int,
+    first_edge: int, // index of first outgoing edge into g_df_edges (-1 = none)
+    edge_count: int, // number of outgoing edges
+}
+
+struct DFEdge {
+    from_node: int,
+    to_node: int,
+    next_out: int,   // next edge from same source (-1 = none)
+}
+
+// Max limits (literal values: bootstrap compiler doesn't constant-fold)
+MAX_DF_NODES : int = 16384;    // == MAX_IRINSTRUCTIONS
+MAX_DF_EDGES : int = 65536;    // == MAX_IRINSTRUCTIONS * 4
+
+// Dataflow graph arrays
+g_df_nodes : [DFNode; MAX_DF_NODES], mut;
+g_df_node_count : int, mut;
+g_df_edges : [DFEdge; MAX_DF_EDGES], mut;
+g_df_edge_count : int, mut;
+g_df_var_producer : [int; MAX_IREXPRS], mut;  // var_idx → node_id that produces it
+// Per-function metadata for lowering
+g_df_func_node_start : [int; MAX_FUNCS], mut;  // first node idx for each function
+g_df_func_node_count : [int; MAX_FUNCS], mut;  // node count per function

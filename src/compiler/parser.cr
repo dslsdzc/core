@@ -1,17 +1,9 @@
 // Parser: recursive descent with flat AST output
 
-// Global state for parser
+// Global state for parser (shared globals in globals.cr)
 g_ast : [ASTNode; MAX_AST], mut;
 g_ast_count : int, mut;
-g_strs : [string; MAX_STRS], mut;
-g_str_count : int, mut;
 g_token_pos : int, mut;
-g_funcs : [FuncInfo; MAX_FUNCS], mut;
-g_func_count : int, mut;
-g_structs : [StructInfo; MAX_STRUCTS], mut;
-g_struct_count : int, mut;
-g_enums : [EnumInfo; MAX_ENUMS], mut;
-g_enum_count : int, mut;
 g_loop_stack : [LoopInfo; MAX_LOOPS], mut;
 g_loop_depth : int, mut;
 g_global_lets : [int; MAX_AST], mut;

@@ -1,45 +1,8 @@
 // === ir_gen.core ===
 // Flat AST to platform-independent IR instruction generation
+// (shared IR globals declared in globals.cr)
 
-// --- Per-function metadata arrays ---
-g_ir_func_name_idx : [int; MAX_FUNCS], mut;
-g_ir_func_ret_type : [int; MAX_FUNCS], mut;
-g_ir_func_instr_start : [int; MAX_FUNCS], mut;
-g_ir_func_instr_count : [int; MAX_FUNCS], mut;
-g_ir_func_var_start : [int; MAX_FUNCS], mut;
-g_ir_func_var_count : [int; MAX_FUNCS], mut;
-g_ir_func_param_count : [int; MAX_FUNCS], mut;
-g_ir_func_count : int, mut;
-
-// --- IR variables ---
-g_ir_vars : [IRVar; MAX_IREXPRS], mut;
-g_ir_var_count : int, mut;
-
-// --- IR instructions ---
-g_ir_instrs : [IRInstr; MAX_IRINSTRUCTIONS], mut;
-g_ir_instr_count : int, mut;
-
-// --- Local variable mapping (name_idx -> ir_var_idx) ---
-g_ir_locals : [int; MAX_IREXPRS * 2], mut;  // pairs: [name_idx, var_idx]
-g_ir_local_count : int, mut;
-g_ir_local_scopes : [int; MAX_SCOPES], mut;
-g_ir_local_depth : int, mut;
-
-// --- Global variable mapping ---
-g_ir_globals : [int; MAX_SYMS * 2], mut;  // pairs: [name_idx, var_idx]
-g_ir_global_count : int, mut;
-
-// --- Labels ---
-g_next_label : int, mut;
-
-// --- Loop stack for break/continue ---
-g_ir_loop_header : [int; MAX_LOOPS], mut;
-g_ir_loop_exit : [int; MAX_LOOPS], mut;
-g_ir_loop_depth : int, mut;
-
-// --- String constants for .data section ---
-g_ir_str_consts : [int; MAX_STRS], mut;  // string table indices used as constants
-g_ir_str_const_count : int, mut;
+// (IR globals declared in globals.cr)
 
 fn new_ir_var(name: string, type_idx: int) -> int {
     idx := g_ir_var_count;
@@ -51,11 +14,14 @@ fn new_ir_var(name: string, type_idx: int) -> int {
 }
 
 fn emit(opcode: int, dest: int, src1: int, src2: int, src3: int, type_kind: int) {
+    // Build linear IR (.ccr) — consumed by x86-64 backend
     idx := g_ir_instr_count;
     if idx < MAX_IRINSTRUCTIONS {
         g_ir_instrs[idx] = IRInstr { opcode = opcode, dest = dest, src1 = src1, src2 = src2, src3 = src3, type_kind = type_kind };
         g_ir_instr_count = idx + 1;
     }
+    // Build dataflow graph (.cir) in parallel
+    df_create_node(opcode, dest, src1, src2, src3, type_kind);
 }
 
 fn new_label() -> int {
@@ -841,6 +807,9 @@ fn ir_gen_all() {
     g_ir_loop_depth = 0;
     g_ir_str_const_count = 0;
 
+    // Initialize dataflow graph
+    init_df();
+
     // Initialize globals
     ir_gen_globals();
 
@@ -848,7 +817,9 @@ fn ir_gen_all() {
     i : ., mut = 0;
     loop {
         if i >= g_func_count { break; }
+        df_begin_func(i);
         ir_gen_func(i);
+        df_end_func(i);
         i = i + 1;
     }
 }

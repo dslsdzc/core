@@ -174,6 +174,7 @@ class TypeChecker:
                     self._record_borrow_holder(name, borrowed_name, decl.values[i].op == '&mut')
 
     def _check_function(self, decl: FunctionDecl):
+        self._cur_fn = decl.name
         self.symtab.push_scope()
         self.generic_scopes.append(set(decl.generics))
         self.borrow_state.clear()
@@ -483,6 +484,8 @@ class TypeChecker:
             if sym and sym.type:
                 return sym.type
             return BaseType('int')
+        # Track which function we're checking (set by _check_function)
+        self._current_checking_func = getattr(self, '_current_checking_func', '?')
         if isinstance(call.func, FieldAccess):
             obj_t = self._infer_expr(call.func.object)
             if isinstance(obj_t, RefType):
@@ -537,10 +540,12 @@ class TypeChecker:
             if len(call.args) != len(func_decl.params):
                 self.errors.append(f"Function {func_name} argument count mismatch")
             else:
-                for arg, (_, pt) in zip(call.args, func_decl.params):
+                for i, (arg, (_, pt)) in enumerate(zip(call.args, func_decl.params)):
                     arg_t = self._infer_expr(arg)
                     if not self._type_equal(arg_t, pt):
-                        self.errors.append("Function argument type mismatch")
+                        cur_fn = getattr(self, '_cur_fn', '?')
+                        self.errors.append(f"Function {func_name} arg{i+1}: expected {pt}, got {arg_t} (in {cur_fn})")
+                        break
             return func_decl.return_type
 
     def _bind_match_pattern(self, pattern, variants):

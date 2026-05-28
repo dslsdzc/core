@@ -21,7 +21,7 @@
 - ✅ 多基本块 IR 与控制流图执行
 - ✅ 语义检查：名字解析 + 类型检查
 - ✅ 借用检查（borrow checker）
-- ✅ 模块系统：多文件编译、导入、`_import.core` 批量导入
+- ✅ 模块系统：多文件编译、导入、`_import.cr` 批量导入
 - ✅ 数组、字符串、引用、`Option`/`Result` 类型
 - ⬜ 规约层 IR 与形式化验证
 - ⬜ 自举编译器稳定产出原生二进制
@@ -47,7 +47,7 @@
 ├── tests/                           # 测试
 │   ├── bootstrap/                 # 引导编译器流水线测试
 │   ├── selfhost/                  # 自举编译器测试
-│   └── suite/                     # 集成测试（.core 源文件）
+│   └── suite/                     # 集成测试（.cr 源文件）
 ├── tools/
 │   └── corec                      # 命令行入口（编译/运行 Core 程序）
 ├── build/
@@ -90,11 +90,11 @@ python3 tests/selfhost/test_compile.py
 ### 使用命令行工具
 
 ```bash
-# Python 引导编译器：编译 .core → ARM64 原生可执行文件
-python3 tools/corec build FILE.core -o OUTPUT
+# Python 引导编译器：编译 .cr → ARM64 原生可执行文件
+python3 tools/corec build FILE.cr -o OUTPUT
 
-# 仅生成 IR 转储
-python3 tools/corec ir FILE.core
+# 生成线性 IR 转储（.ccr）
+python3 tools/corec ir FILE.cr
 ```
 
 ### 自举编译器原生二进制
@@ -104,7 +104,7 @@ python3 tools/corec ir FILE.core
 python3 build_selfhost_native.py
 
 # 使用原生二进制编译 Core 程序
-./build/corec input.core          # 输出 output.s
+./build/corec input.cr          # 输出 output.s
 ```
 
 `build/corec` 是 Core 自举编译器的 x86-64 原生可执行文件。由 `build_selfhost_native.py` 构建，经过 Python 引导编译器流水线，直接生成 x86-64 汇编并静态链接。无需解释器、无需 GCC。
