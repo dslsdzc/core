@@ -1,0 +1,65 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "core: compile",
+      "type": "shell",
+      "command": "${workspaceFolder}/build/corec",
+      "args": ["${file}"],
+      "group": "build",
+      "problemMatcher": {
+        "owner": "core",
+        "fileLocation": ["relative", "${workspaceFolder}"],
+        "pattern": [
+          {
+            "regexp": "^error (\\d+): (.+)$",
+            "severity": 1,
+            "message": 2
+          },
+          {
+            "regexp": "^\\s+-->\\s+(\\d+):(\\d+)$",
+            "line": 1,
+            "column": 2
+          }
+        ],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "."
+        }
+      }
+    },
+    {
+      "label": "core: type-check",
+      "type": "shell",
+      "command": "${workspaceFolder}/build/corec",
+      "args": ["--check", "${file}"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": "$core"
+    },
+    {
+      "label": "core: run (file)",
+      "type": "shell",
+      "command": "${workspaceFolder}/build/corec",
+      "args": ["-c", "fn main() -> int { return ${file}; }"],
+      "group": "none",
+      "problemMatcher": "$core"
+    },
+    {
+      "label": "core: run (interpreter)",
+      "type": "shell",
+      "command": "${workspaceFolder}/build/corec",
+      "args": ["-c", "${file}"],
+      "group": "none",
+      "problemMatcher": "$core",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "new"
+      }
+    }
+  ]
+}

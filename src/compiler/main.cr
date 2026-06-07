@@ -13,9 +13,6 @@ fn read_source_file(path: string) -> string {
     g_source_dir = dirname(path);
     source := __builtin_read_file(path);
     if __builtin_str_len(source) > 0 {
-        __builtin_print("source: ");
-        __builtin_print(__builtin_int_to_str(__builtin_str_len(source)));
-        __builtin_println(" bytes");
     }
     return source;
 }
@@ -31,61 +28,31 @@ fn read_project_dir(dir: string) -> string {
     return "";
 }
 
-fn read_source_line(line: int) -> string {
-    // Walk g_source to find the start of the Nth line (1-based)
-    slen := __builtin_str_len(g_source);
-    cur : ., mut = 1;
-    start : ., mut = 0;
+// Check if a source string starts with a variable declaration (ident followed by := or :)
+fn is_decl_stmt(s: string) -> int {
+    slen := __builtin_str_len(s);
     i : ., mut = 0;
     loop {
-        if i >= slen { break; }
-        if cur == line {
-            // Read until end of line
-            j : ., mut = i;
+        if i >= slen { return 0; }
+        cb := __builtin_load8(s, i);
+        if cb == 32 || cb == 9 || cb == 10 || cb == 13 { i = i + 1; }  // space, tab, newline, cr
+        else { break; }
+    }
+    if i < slen {
+        cb := __builtin_load8(s, i);
+        if (cb >= 97 && cb <= 122) || (cb >= 65 && cb <= 90) || cb == 95 {  // a-z, A-Z, _
+            j : ., mut = i + 1;
             loop {
-                if j >= slen { break; }
-                c := __builtin_str_get(g_source, j);
-                if c == "\n" { break; }
-                j = j + 1;
-            }
-            return __builtin_str_sub(g_source, i, j - i);
-        }
-        if __builtin_str_get(g_source, i) == "\n" {
-            cur = cur + 1;
-            start = i + 1;
-        }
-        i = i + 1;
-    }
-    return "";
-}
-
-fn print_diagnostics() {
-    if g_diag_count == 0 { return; }
-    di : ., mut = 0;
-    loop {
-        if di >= g_diag_count { break; }
-        d := g_diags[di];
-        __builtin_print("error ");
-        __builtin_print(__builtin_int_to_str(d.code));
-        __builtin_print(": ");
-        __builtin_println(d.msg);
-        __builtin_print("  --> ");
-        __builtin_print(__builtin_int_to_str(d.line));
-        __builtin_print(":");
-        __builtin_println(__builtin_int_to_str(d.col));
-        if d.line > 0 {
-            ltxt := read_source_line(d.line);
-            if __builtin_str_len(ltxt) > 0 {
-                __builtin_println("");
-                __builtin_print(" ");
-                __builtin_print(__builtin_int_to_str(d.line));
-                __builtin_print(" | ");
-                __builtin_println(ltxt);
+                if j >= slen { return 0; }
+                c2b := __builtin_load8(s, j);
+                if c2b == 32 || c2b == 9 || c2b == 10 || c2b == 13 { j = j + 1 }
+                else if c2b == 58 { return 1; }  // :
+                else if (c2b >= 97 && c2b <= 122) || (c2b >= 65 && c2b <= 90) || (c2b >= 48 && c2b <= 57) || c2b == 95 { j = j + 1 }  // a-z, A-Z, 0-9, _
+                else { return 0; }
             }
         }
-        __builtin_println("");
-        di = di + 1;
     }
+    return 0;
 }
 
 // Entry point
@@ -117,13 +84,67 @@ fn corec_main() -> int {
     if eval_mode != 0 {
         // -c mode: source is inline code
         g_source = src_path;
-        g_source_dir = "";
+        g_source_dir = dirname(src_path);
         // Auto-wrap in fn main() if not present
         has_main : ., mut = 0;
-        si : ., mut = 0;
-        sl := __builtin_str_len(g_source);
-        loop { if si >= sl { break; } if __builtin_str_get(g_source, si) == "f" { if si+6 < sl { if __builtin_str_eq(__builtin_str_sub(g_source, si, 6), "fn main") != 0 { has_main = 1; break; } } } si = si + 1; }
+        si2 : ., mut = 0;
+        sl2 := __builtin_str_len(g_source);
+        loop {
+            if si2 >= sl2 { break; }
+            c0 := __builtin_load8(g_source, si2);
+            if c0 == 102 {  // 'f'
+                if si2+6 < sl2 {
+                    if __builtin_load8(g_source, si2) == 102 &&
+                       __builtin_load8(g_source, si2+1) == 110 &&
+                       __builtin_load8(g_source, si2+2) == 32 &&
+                       __builtin_load8(g_source, si2+3) == 109 &&
+                       __builtin_load8(g_source, si2+4) == 97 &&
+                       __builtin_load8(g_source, si2+5) == 105 &&
+                       __builtin_load8(g_source, si2+6) == 110 {
+                        has_main = 1;
+                        break;
+                    }
+                }
+            }
+            si2 = si2 + 1;
+        }
         if has_main == 0 {
+            // Extract import statements (must be outside fn body)
+            imports : ., mut = "";
+            src2 : ., mut = "";
+            ii : ., mut = 0;
+            ilen := __builtin_str_len(g_source);
+            loop {
+                if ii >= ilen { break; }
+                // Check for "import" at start or after whitespace/semicolon
+                if ii + 6 < ilen {
+                    c := __builtin_load8(g_source, ii);
+                    c_prev : ., mut = 59;  // ';'
+                    if ii > 0 { c_prev = __builtin_load8(g_source, ii-1); }
+                    if (ii == 0 || c_prev == 59 || c_prev == 10) &&
+                       __builtin_load8(g_source, ii) == 105 &&     // 'i'
+                       __builtin_load8(g_source, ii+1) == 109 &&    // 'm'
+                       __builtin_load8(g_source, ii+2) == 112 &&    // 'p'
+                       __builtin_load8(g_source, ii+3) == 111 &&    // 'o'
+                       __builtin_load8(g_source, ii+4) == 114 &&    // 'r'
+                       __builtin_load8(g_source, ii+5) == 116 {    // 't'
+                        // Find end of import at semicolon
+                        ij : ., mut = ii;
+                        loop {
+                            if ij >= ilen { break; }
+                            if __builtin_load8(g_source, ij) == 59 { ij = ij + 1; break; }  // ';'
+                            ij = ij + 1;
+                        }
+                        imports = imports + __builtin_str_sub(g_source, ii, ij - ii);
+                        ii = ij;
+                        continue;
+                    }
+                }
+                src2 = src2 + __builtin_str_get(g_source, ii);
+                ii = ii + 1;
+            }
+            g_source = src2;
+
             // Check if code has semicolons (statements) or is a single expression
             has_semi : ., mut = 0;
             si2 : ., mut = 0;
@@ -137,12 +158,45 @@ fn corec_main() -> int {
                 if last_semi >= 0 {
                     last_expr := __builtin_str_sub(g_source, last_semi + 1, __builtin_str_len(g_source) - last_semi - 1);
                     body := __builtin_str_sub(g_source, 0, last_semi + 1);
-                    g_source = "fn main() -> int {\n" + body + "\nreturn " + last_expr + ";\n}\n";
+                    if is_decl_stmt(last_expr) != 0 {
+                        g_source = imports + "fn main() -> int {\n" + body + "\n" + last_expr + ";\nreturn 0;\n}\n";
+                    } else {
+                        // Check if last expression is a call (may return unit)
+                        has_lcall : ., mut = 0;
+                        lci : ., mut = 0;
+                        lclen := __builtin_str_len(last_expr);
+                        loop {
+                            if lci >= lclen { break; }
+                            if __builtin_load8(last_expr, lci) == 40 { has_lcall = 1; break; }
+                            lci = lci + 1;
+                        }
+                        if has_lcall != 0 {
+                            g_source = imports + "fn main() -> int {\n" + body + last_expr + ";\nreturn 0;\n}\n";
+                        } else {
+                            g_source = imports + "fn main() -> int {\n" + body + "\nreturn " + last_expr + ";\n}\n";
+                        }
+                    }
                 } else {
-                    g_source = "fn main() -> int {\n" + g_source + ";\nreturn 0;\n}\n";
+                    g_source = imports + "fn main() -> int {\n" + g_source + ";\nreturn 0;\n}\n";
                 }
             } else {
-                g_source = "fn main() -> int {\nreturn " + g_source + ";\n}\n";
+                if is_decl_stmt(g_source) != 0 {
+                    g_source = imports + "fn main() -> int {\n" + g_source + ";\nreturn 0;\n}\n";
+                } else {
+                    has_call : ., mut = 0;
+                    ci3 : ., mut = 0;
+                    clen := __builtin_str_len(g_source);
+                    loop {
+                        if ci3 >= clen { break; }
+                        if __builtin_load8(g_source, ci3) == 40 { has_call = 1; break; }
+                        ci3 = ci3 + 1;
+                    }
+                    if has_call != 0 {
+                        g_source = imports + "fn main() -> int {\n" + g_source + ";\nreturn 0;\n}\n";
+                    } else {
+                        g_source = imports + "fn main() -> int {\nreturn " + g_source + ";\n}\n";
+                    }
+                }
             }
         }
     } else {
@@ -160,6 +214,8 @@ fn corec_main() -> int {
     g_str_count = 0;
     resolve_imports();
     parse_all();
+    if g_diag_count > 0 { print_diagnostics(); return 1; }
+    if g_error_count > 0 { print_parse_errors(); return 1; }
     check_all();
     if g_diag_count > 0 { print_diagnostics(); return 1; }
 
@@ -171,9 +227,7 @@ fn corec_main() -> int {
     ir_gen_all();
 
     if eval_mode != 0 {
-        r := ir_interpret();
-        __builtin_println(__builtin_int_to_str(r));
-        return r;
+        return ir_interpret();
     }
 
     if emit_cir != 0 {
@@ -610,8 +664,6 @@ fn load_import_core(dir_path: string) -> string {
     imp_path : ., mut = dir_path + "_import.cr";
     content := __builtin_read_file(imp_path);
     if __builtin_str_len(content) > 0 {
-        __builtin_print("  _import.cr: ");
-        __builtin_println(imp_path);
     }
     return content;
 }
@@ -715,8 +767,6 @@ fn resolve_imports() {
     if __builtin_str_len(import_core_acc) > 0 {
         g_source = import_core_acc + "\n" + g_source;
         tokenize();
-        __builtin_print("  _import.cr tokens: ");
-        __builtin_println(__builtin_int_to_str(g_token_count));
     }
 
     // Determine main file's fileid from source (fileid "name;" or default "main")
@@ -835,8 +885,6 @@ fn resolve_imports() {
     if __builtin_str_len(extra_src) > 0 {
         g_source = g_source + extra_src;  // extra_src starts with \n
         tokenize();
-        __builtin_print("  re-tokenized: ");
-        __builtin_println(__builtin_int_to_str(g_token_count));
     }
     build_line_fileid();
 }

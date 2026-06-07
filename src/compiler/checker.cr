@@ -167,6 +167,126 @@ fn check_error(code: int, msg: string, line: int, col: int) {
     }
 }
 
+// --- Borrow checking ---
+MAX_BORROWS : int = 32;
+MAX_HOLDERS : int = 64;
+
+// Borrow state: tracks which variables are currently borrowed
+g_borrow_vars : [int; MAX_BORROWS], mut;
+g_borrow_refs : [int; MAX_BORROWS], mut;     // immutable ref count
+g_borrow_muts : [int; MAX_BORROWS], mut;     // mutable ref flag (0/1)
+g_borrow_count : int, mut;
+
+// Borrow holder tracking: who holds a borrow on which variable
+g_holder_borrowers : [int; MAX_HOLDERS], mut;  // name_idx of borrower
+g_holder_borrowed : [int; MAX_HOLDERS], mut;   // name_idx of borrowed
+g_holder_is_mut : [int; MAX_HOLDERS], mut;     // is mutable borrow?
+g_holder_count : int, mut;
+
+// Borrow scope markers: at scope entry, records current holder count
+g_borrow_scope_markers : [int; MAX_SCOPES], mut;
+g_borrow_scope_depth : int, mut;
+
+fn find_borrow_entry(var_ni: int) -> int {
+    i : ., mut = 0;
+    loop {
+        if i >= g_borrow_count { return -1; }
+        if g_borrow_vars[i] == var_ni { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn check_borrow(var_ni: int, is_mut: int) -> bool {
+    bi := find_borrow_entry(var_ni);
+    if bi >= 0 {
+        if is_mut != 0 {
+            // &mut x: fail if any borrow exists
+            if g_borrow_refs[bi] > 0 || g_borrow_muts[bi] != 0 { return false; }
+            g_borrow_muts[bi] = 1;
+            return true;
+        } else {
+            // &x: fail if mutable borrow exists
+            if g_borrow_muts[bi] != 0 { return false; }
+            g_borrow_refs[bi] = g_borrow_refs[bi] + 1;
+            return true;
+        }
+    }
+    // First borrow of this variable
+    if g_borrow_count < MAX_BORROWS {
+        g_borrow_vars[g_borrow_count] = var_ni;
+        g_borrow_refs[g_borrow_count] = 0;
+        g_borrow_muts[g_borrow_count] = 0;
+        if is_mut != 0 { g_borrow_muts[g_borrow_count] = 1; }
+        else { g_borrow_refs[g_borrow_count] = 1; }
+        g_borrow_count = g_borrow_count + 1;
+    }
+    return true;
+}
+
+fn check_use(var_ni: int) -> bool {
+    bi := find_borrow_entry(var_ni);
+    if bi >= 0 {
+        if g_borrow_refs[bi] > 0 || g_borrow_muts[bi] != 0 { return false; }
+    }
+    return true;
+}
+
+fn push_borrow_scope() {
+    if g_borrow_scope_depth < MAX_SCOPES {
+        g_borrow_scope_markers[g_borrow_scope_depth] = g_holder_count;
+        g_borrow_scope_depth = g_borrow_scope_depth + 1;
+    }
+}
+
+fn pop_borrow_scope() {
+    if g_borrow_scope_depth > 0 {
+        g_borrow_scope_depth = g_borrow_scope_depth - 1;
+        marker := g_borrow_scope_markers[g_borrow_scope_depth];
+        // Release all borrows held from marker to end
+        loop {
+            if g_holder_count <= marker { break; }
+            g_holder_count = g_holder_count - 1;
+            borrowed_ni := g_holder_borrowed[g_holder_count];
+            is_mut := g_holder_is_mut[g_holder_count];
+            bi := find_borrow_entry(borrowed_ni);
+            if bi >= 0 {
+                if is_mut != 0 { g_borrow_muts[bi] = 0; }
+                else {
+                    if g_borrow_refs[bi] > 0 { g_borrow_refs[bi] = g_borrow_refs[bi] - 1; }
+                }
+                // Clean up entry if no more borrows
+                if g_borrow_refs[bi] == 0 && g_borrow_muts[bi] == 0 {
+                    si : ., mut = bi;
+                    loop {
+                        if si + 1 >= g_borrow_count { break; }
+                        g_borrow_vars[si] = g_borrow_vars[si + 1];
+                        g_borrow_refs[si] = g_borrow_refs[si + 1];
+                        g_borrow_muts[si] = g_borrow_muts[si + 1];
+                        si = si + 1;
+                    }
+                    g_borrow_count = g_borrow_count - 1;
+                }
+            }
+        }
+    }
+}
+
+fn record_borrow_holder(borrower_ni: int, borrowed_ni: int, is_mut: int) {
+    if g_holder_count < MAX_HOLDERS {
+        g_holder_borrowers[g_holder_count] = borrower_ni;
+        g_holder_borrowed[g_holder_count] = borrowed_ni;
+        g_holder_is_mut[g_holder_count] = is_mut;
+        g_holder_count = g_holder_count + 1;
+    }
+}
+
+fn borrow_var_name(node: int) -> int {
+    if node < 0 { return -1; }
+    if g_ast[node].kind == EXPR_IDENT { return g_ast[node].int_val; }
+    return -1;
+}
+
 // --- Type resolution utilities ---
 
 fn resolve_type_node(node: int) -> int {
@@ -216,7 +336,7 @@ fn resolve_type_node(node: int) -> int {
         arg_count := n.c;
         si := lookup_sym_global(name_idx);
         if si < 0 || g_syms[si].kind != SYM_TYPE {
-            check_error(EC_GENERIC_TYPE, "Undefined type in generic application", n.line, n.col);
+            check_error(EC_N_GENERIC_TYPE, "Undefined type in generic application", n.line, n.col);
             return TI_UNIT;
         }
         base_ti := g_syms[si].type_idx;
@@ -636,6 +756,10 @@ fn infer_generic_call(fi: int, call_node: int, first_arg: int, arg_count: int) -
 // --- check_func with generic param scope ---
 
 fn check_func(fi: int) {
+    // Reset per-function borrow state
+    g_borrow_count = 0;
+    g_holder_count = 0;
+    g_borrow_scope_depth = 0;
     fn_node := g_funcs[fi].ast_node;
     f := g_ast[fn_node];
     name_idx := f.a;  // EXPR_FN: a = name idx
@@ -737,7 +861,7 @@ fn check_func(fi: int) {
         if !type_equal(body_ti, ret_ti) && body_ti != TI_NEVER {
             // Skip check if return type is generic param (can't verify at declaration)
             if get_type_kind(ret_ti) != TYP_GENERIC_PARAM {
-                check_error(EC_RETURN_TYPE_MISMATCH, "Function return type mismatch", f.line, f.col);
+                check_error(EC_TF_RETURN, "Function return type mismatch", f.line, f.col);
             }
         }
     }
@@ -768,10 +892,15 @@ fn infer_expr(node: int) -> int {
 
     if n.kind == EXPR_IDENT {
         name_idx := n.int_val;
+        // Borrow check: can't use variable while it's borrowed
+        if !check_use(name_idx) {
+            name := g_strs[name_idx];
+            check_error(EC_B_USE_WHILE_BORROWED, "Cannot use '" + name + "' while it is borrowed", n.line, n.col);
+        }
         si := lookup_sym(name_idx);
         if si >= 0 { return g_syms[si].type_idx; }
         name := g_strs[name_idx];
-        check_error(EC_UNDEFINED_NAME, "Undefined name '" + name + "'", n.line, n.col);
+        check_error(EC_N_UNDEFINED, "Undefined name '" + name + "'", n.line, n.col);
         return TI_NEVER;
     }
     if n.kind == EXPR_NONE {
@@ -789,7 +918,7 @@ fn infer_expr(node: int) -> int {
             lt := infer_expr(left);
             rt := infer_expr(right);
             if !type_equal(lt, rt) {
-                check_error(EC_ASSIGN_TYPE, "Assignment type mismatch", n.line, n.col);
+                check_error(EC_TA_ASSIGN, "Assignment type mismatch", n.line, n.col);
             }
             return rt;
         }
@@ -798,7 +927,7 @@ fn infer_expr(node: int) -> int {
         if op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV || op == OP_MOD {
             // Check: arithmetic ops require int or float
             if lt != TI_INT && lt != TI_FLOAT && rt != TI_INT && rt != TI_FLOAT {
-                check_error(EC_ASSIGN_TYPE, "Arithmetic operation requires int or float", n.line, n.col);
+                check_error(EC_TB_ADD, "Arithmetic operation requires int or float", n.line, n.col);
             }
             // String concatenation for OP_ADD
             if op == OP_ADD && (lt == TI_STR || rt == TI_STR) { return TI_STR; }
@@ -810,7 +939,7 @@ fn infer_expr(node: int) -> int {
         }
         if op == OP_AND || op == OP_OR {
             if lt != TI_BOOL || rt != TI_BOOL {
-                check_error(EC_IF_COND_BOOL, "Logical operator requires bool operands", n.line, n.col);
+                check_error(EC_TC_IF_COND, "Logical operator requires bool operands", n.line, n.col);
             }
             return TI_BOOL;
         }
@@ -823,8 +952,29 @@ fn infer_expr(node: int) -> int {
             return infer_expr(n.a);
         }
         if op == UOP_REF {
-            inner := infer_expr(n.a);
+            operand := n.a;
             mut_flag := n.int_val;
+            // Borrow check: can we borrow this variable?
+            var_ni := borrow_var_name(operand);
+            if var_ni >= 0 {
+                if !check_borrow(var_ni, mut_flag) {
+                    name := g_strs[var_ni];
+                    if mut_flag != 0 {
+                        check_error(EC_B_BORROW_MUT, "Cannot borrow '" + name + "' as mutable, already borrowed", n.line, n.col);
+                    } else {
+                        check_error(EC_B_BORROW_IMMUT, "Cannot borrow '" + name + "' as immutable, already mutably borrowed", n.line, n.col);
+                    }
+                }
+            }
+            // Get inner type without triggering check_use on the operand
+            inner : ., mut = TI_UNIT;
+            if g_ast[operand].kind == EXPR_IDENT {
+                vi := g_ast[operand].int_val;
+                si := lookup_sym(vi);
+                if si >= 0 { inner = g_syms[si].type_idx; }
+            } else {
+                inner = infer_expr(operand);
+            }
             return alloc_type(TYP_REF, inner, mut_flag);
         }
         if op == UOP_DEREF {
@@ -977,6 +1127,7 @@ fn infer_expr(node: int) -> int {
         stmt_start := n.a;
         stmt_count := n.b;
         res : ., mut = TI_UNIT;
+        push_borrow_scope();
         i : ., mut = 0;
         loop {
             if i >= stmt_count { break; }
@@ -984,6 +1135,7 @@ fn infer_expr(node: int) -> int {
             res = infer_expr(sn);
             i = i + 1;
         }
+        pop_borrow_scope();
         return res;
     }
 
@@ -993,13 +1145,17 @@ fn infer_expr(node: int) -> int {
         else_node := n.c;
         cond_ti := infer_expr(cond);
         if cond_ti != TI_BOOL {
-            check_error(EC_IF_COND_BOOL, "If condition must be bool", n.line, n.col);
+            check_error(EC_TC_IF_COND, "If condition must be bool", n.line, n.col);
         }
+        push_borrow_scope();
         then_ti := infer_expr(then_node);
+        pop_borrow_scope();
         if else_node >= 0 {
+            push_borrow_scope();
             else_ti := infer_expr(else_node);
+            pop_borrow_scope();
             if !type_equal(then_ti, else_ti) {
-                check_error(EC_IF_BRANCH_TYPE, "If branches have different types", n.line, n.col);
+                check_error(EC_TC_IF_BRANCH, "If branches have different types", n.line, n.col);
             }
             return then_ti;
         }
@@ -1007,7 +1163,9 @@ fn infer_expr(node: int) -> int {
     }
 
     if n.kind == EXPR_LOOP {
+        push_borrow_scope();
         infer_expr(n.a);
+        pop_borrow_scope();
         return TI_UNIT;
     }
 
@@ -1016,9 +1174,11 @@ fn infer_expr(node: int) -> int {
         body := n.b;
         cond_ti := infer_expr(cond);
         if cond_ti != TI_BOOL {
-            check_error(EC_WHILE_COND_BOOL, "While condition must be bool", n.line, n.col);
+            check_error(EC_TC_WHILE_COND, "While condition must be bool", n.line, n.col);
         }
+        push_borrow_scope();
         infer_expr(body);
+        pop_borrow_scope();
         return TI_UNIT;
     }
 
@@ -1028,8 +1188,10 @@ fn infer_expr(node: int) -> int {
         body := n.c;
         infer_expr(iter);
         push_scope();
+        push_borrow_scope();
         define_sym(var_ni, SYM_LOCAL, TI_INT, -1);
         infer_expr(body);
+        pop_borrow_scope();
         pop_scope();
         return TI_UNIT;
     }
@@ -1037,8 +1199,8 @@ fn infer_expr(node: int) -> int {
     if n.kind == EXPR_RANGE {
         st := infer_expr(n.a);
         et := infer_expr(n.b);
-        if st != TI_INT { check_error(EC_ASSIGN_TYPE, "Range start must be int", n.line, n.col); }
-        if et != TI_INT { check_error(EC_ASSIGN_TYPE, "Range end must be int", n.line, n.col); }
+        if st != TI_INT { check_error(EC_TB_ADD, "Range start must be int", n.line, n.col); }
+        if et != TI_INT { check_error(EC_TB_ADD, "Range end must be int", n.line, n.col); }
         return TI_INT;
     }
 
@@ -1079,7 +1241,9 @@ fn infer_expr(node: int) -> int {
                     define_sym(pat.int_val, SYM_LOCAL, TI_INT, -1);
                 }
             }
+            push_borrow_scope();
             arm_ti := infer_expr(arm_body);
+            pop_borrow_scope();
             if ai == 0 { res = arm_ti; }
             pop_scope();
             an = g_ast[an].c;  // next arm via linked list
@@ -1093,7 +1257,17 @@ fn infer_expr(node: int) -> int {
         type_node := n.b;
         val_node := n.c;
         val_ti := TI_UNIT;
-        if val_node >= 0 { val_ti = infer_expr(val_node); }
+        if val_node >= 0 {
+            val_ti = infer_expr(val_node);
+            // Check if value is a borrow (&x or &mut x), record the holder
+            if g_ast[val_node].kind == EXPR_UNARY && g_ast[val_node].c == UOP_REF {
+                borrowed_ni := borrow_var_name(g_ast[val_node].a);
+                if borrowed_ni >= 0 {
+                    mut_flag := g_ast[val_node].int_val;
+                    record_borrow_holder(var_ni, borrowed_ni, mut_flag);
+                }
+            }
+        }
         ti := val_ti;
         if type_node >= 0 { ti = resolve_type_node(type_node); }
         if g_strs[var_ni] != "_" {
@@ -1129,7 +1303,7 @@ fn infer_expr(node: int) -> int {
             return g_syms[si].type_idx; // enum type
         }
         name := g_strs[name_idx];
-        check_error(EC_UNDEFINED_NAME, "Undefined enum constructor '" + name + "'", n.line, n.col);
+        check_error(EC_N_UNDEFINED, "Undefined enum constructor '" + name + "'", n.line, n.col);
         return TI_UNIT;
     }
 
@@ -1223,7 +1397,7 @@ fn infer_expr(node: int) -> int {
         if arr_kind == TYP_SLICE {
             return get_type_data(arr_ti);  // slice[i] → element type
         }
-        check_error(EC_ASSIGN_TYPE, "Cannot index non-array type", n.line, n.col);
+        check_error(EC_TK_INDEX, "Cannot index non-array type", n.line, n.col);
         return TI_INT;
     }
 
@@ -1233,7 +1407,7 @@ fn infer_expr(node: int) -> int {
         tt := infer_expr(target);
         vt := infer_expr(val);
         if !type_equal(tt, vt) {
-            check_error(EC_ASSIGN_TYPE, "Assignment type mismatch", n.line, n.col);
+            check_error(EC_TA_ASSIGN, "Assignment type mismatch", n.line, n.col);
         }
         return vt;
     }
@@ -1321,7 +1495,10 @@ fn infer_expr(node: int) -> int {
         return infer_expr(n.a);
     }
     if n.kind == EXPR_UNSAFE {
-        return infer_expr(n.a);
+        push_borrow_scope();
+        ret := infer_expr(n.a);
+        pop_borrow_scope();
+        return ret;
     }
     if n.kind == EXPR_TRY {
         // Try operator: unwrap Option[T] → T, Result[T,E] → T

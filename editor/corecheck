@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""Syntax checker for Core language files.
+Reformats compiler errors into Vim/Nvim quickfix-friendly single-line format:
+  FILE:LINE:COL:error CODE: MESSAGE
+
+Usage: editor/corecheck FILE.cr
+"""
+
+import sys
+import os
+import subprocess
+import re
+
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def check_with_native(build_corec: str, filepath: str) -> list:
+    """Run native corec compiler and parse errors."""
+    if not os.path.exists(build_corec):
+        return []
+    try:
+        result = subprocess.run(
+            [build_corec, filepath],
+            capture_output=True, text=True, timeout=10,
+            cwd=BASE
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return []
+
+    output = result.stdout + result.stderr
+    errors = []
+    # Parse: error CODE: MSG
+    #          --> LINE:COL
+    lines = output.split('\n')
+    i = 0
+    while i < len(lines):
+        m = re.match(r'error (\d+): (.+)', lines[i])
+        if m:
+            code = m.group(1)
+            msg = m.group(2)
+            line_no = '0'
+            col_no = '0'
+            if i + 1 < len(lines):
+                loc = re.match(r'\s+-->\s+(\d+):(\d+)', lines[i + 1])
+                if loc:
+                    line_no = loc.group(1)
+                    col_no = loc.group(2)
+            errors.append(f"{filepath}:{line_no}:{col_no}:error[{code}]: {msg}")
+        i += 1
+    return errors
+
+
+def check_with_python(filepath: str) -> list:
+    """Run Python bootstrap corec and parse errors."""
+    tool = os.path.join(BASE, 'tools', 'corec')
+    try:
+        result = subprocess.run(
+            [sys.executable, tool, 'build', filepath, '-o', '/dev/null'],
+            capture_output=True, text=True, timeout=15,
+            cwd=BASE
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return []
+
+    output = result.stdout + result.stderr
+    # Python errors: LINE:COL: MESSAGE
+    errors = []
+    for line in output.split('\n'):
+        m = re.match(r'(\d+):(\d+): (.+)', line)
+        if m and 'error' in line.lower():
+            errors.append(f"{filepath}:{m.group(1)}:{m.group(2)}:error: {m.group(3)}")
+        elif line.startswith('Traceback') or 'Error' in line:
+            errors.append(f"{filepath}:0:0:error: {line.strip()}")
+    return errors
+
+
+def check_bootstrap_pipeline(filepath: str) -> list:
+    """Check using bootstrap test pipeline (most reliable)."""
+    sys.path.insert(0, os.path.join(BASE, 'bootstrap'))
+    try:
+        from corec.frontend.lexer import Lexer
+        from corec.frontend.parser import Parser
+        from corec.frontend.name_resolver import NameResolver
+        from corec.frontend.desugar import MatchDesugarer
+        from corec.frontend.type_checker import TypeChecker
+    except ImportError:
+        return [f"{filepath}:0:0:warning: Could not import bootstrap compiler modules"]
+
+    try:
+        with open(filepath) as f:
+            source = f.read()
+    except OSError as e:
+        return [f"{filepath}:0:0:error: Cannot read: {e}"]
+
+    errors = []
+    lexer = Lexer(source)
+    tokens = lexer.tokenize()
+    if lexer.errors:
+        for e in lexer.errors:
+            errors.append(f"{filepath}:{e.get('line', 0)}:{e.get('col', 0)}:error: Lexer: {e.get('msg', str(e))}")
+        return errors
+
+    parser = Parser(tokens)
+    ast = parser.parse_compilation_unit()
+    if parser.errors:
+        for e in parser.errors:
+            errors.append(f"{filepath}:{e.get('line', 0)}:{e.get('col', 0)}:error: Parser: {e.get('msg', str(e))}")
+        return errors
+
+    resolver = NameResolver()
+    resolver.resolve(ast)
+    if resolver.errors:
+        for e in resolver.errors:
+            errors.append(f"{filepath}:0:0:error: Resolver: {e}")
+        return errors
+
+    desugarer = MatchDesugarer(resolver.symtab)
+    ast = desugarer.desugar(ast)
+
+    checker = TypeChecker(resolver.symtab)
+    checker.check(ast)
+    if checker.errors:
+        for e in checker.errors:
+            errors.append(f"{filepath}:0:0:error: Checker: {e}")
+
+    return errors
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: editor/corecheck FILE.cr", file=sys.stderr)
+        sys.exit(1)
+
+    filepath = os.path.abspath(sys.argv[1])
+    if not filepath.endswith('.cr') and not filepath.endswith('.corespec'):
+        print(f"Skipping non-Core file: {filepath}", file=sys.stderr)
+        return
+
+    errors = []
+
+    # Try native compiler first (fast)
+    build_corec = os.path.join(BASE, 'build', 'corec')
+    if os.path.exists(build_corec):
+        errors = check_with_native(build_corec, filepath)
+        if not errors:
+            return  # clean compile
+    else:
+        # Fall back to Python bootstrap pipeline
+        errors = check_bootstrap_pipeline(filepath)
+
+    # Output errors in Vim-friendly format
+    for err in errors:
+        print(err)
+
+
+if __name__ == '__main__':
+    main()

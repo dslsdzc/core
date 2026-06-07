@@ -109,7 +109,7 @@ fn parse_type() -> int {
         }
         inner := parse_type();
         res = alloc_node(EXPR_REFTYPE, inner, 0, 0, is_mut, 0, 0, line, col);
-    } else {
+    } else if tok_k(t) == T_IDENT || tok_k(t) == T_SELF || tok_k(t) == T_UNDERSCORE {
         lex := tok_lx(t);
         advance_tok();
         if lex == "int" { res = alloc_node(0, 0, 0, 0, 0, TY_INT, 0, line, col); }
@@ -139,6 +139,18 @@ fn parse_type() -> int {
                 res = alloc_node(EXPR_IDENT, 0, 0, 0, ni, 0, 0, line, col);
             }
         }
+    } else if tok_k(t) == T_LBRACE {
+        if g_diag_count < MAX_ERRS {
+            g_diags[g_diag_count] = Diag { code = EC_P_EXPECTED, msg = "expected type after '->', got '{' — missing return type?", line = line, col = col };
+            g_diag_count = g_diag_count + 1;
+        }
+        res = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, line, col);
+    } else {
+        if g_diag_count < MAX_ERRS {
+            g_diags[g_diag_count] = Diag { code = EC_P_EXPECTED, msg = "expected type after '->'", line = line, col = col };
+            g_diag_count = g_diag_count + 1;
+        }
+        res = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, line, col);
     }
     // Handle T? desugaring → Option[T]
     if check(T_QUESTION) {
@@ -668,7 +680,7 @@ fn parse_new_var_decl() -> int {
         }
     }
 
-    advance_tok(); // ;
+    if check(T_SEMI) { advance_tok(); } // optional ;
 
     // Emit LET nodes. First returned directly, extras go to g_extra_lets.
     first_node : ., mut = -1;
@@ -1284,5 +1296,6 @@ fn parse_all() {
     loop {
         if tok_k(cur_tok()) == T_EOF { break; }
         parse_declaration();
+        if tok_k(cur_tok()) == T_EOF { break; }
     }
 }

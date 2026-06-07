@@ -18,7 +18,7 @@ def concat_sources():
     files = [
         'src/stdlib/cli.cr', 'src/stdlib/toml.cr', 'src/compiler/ast.cr', 'src/compiler/globals.cr',
         'src/compiler/lexer.cr', 'src/compiler/parser.cr',
-        'src/compiler/checker.cr', 'src/compiler/ir_gen.cr', 'src/compiler/dataflow.cr',
+        'src/compiler/checker.cr', 'src/compiler/diag.cr', 'src/compiler/ir_gen.cr', 'src/compiler/dataflow.cr',
         'src/compiler/backend/x86_64.cr', 'src/compiler/ccr_io.cr', 'src/compiler/project.cr', 'src/compiler/interp.cr', 'src/compiler/main.cr',
     ]
     parts = []
@@ -67,21 +67,17 @@ def compile_and_check(source, expect_error, description):
 
 
 tests = [
-    # Note: borrow checking is not yet active in the self-hosted checker.
-    # These tests validate current checker behavior; expected_error is False
-    # for all until borrow rules are enforced.
-
     ('''
 fn test() -> int {
     x := 42; r := &x; y := x; return y;
 }
-''', False, "immutable borrow then use original (not yet enforced)"),
+''', True, "immutable borrow then use original"),
 
     ('''
 fn test() -> int {
     x := 42; r := &mut x; y := x; return y;
 }
-''', False, "mut borrow then use original (not yet enforced)"),
+''', True, "mut borrow then use original"),
 
     ('''
 fn test() -> int {
@@ -95,7 +91,7 @@ fn test() -> int {
     x := 42; r1 := &x; r2 := &mut x;
     __builtin_str_len(""); return 0;
 }
-''', False, "immutable then mutable borrow (not yet enforced)"),
+''', True, "immutable then mutable borrow"),
 
     ('''
 fn test() -> int {
@@ -114,7 +110,7 @@ fn test() -> int {
     x : ., mut = 42; r1 := &mut x; r2 := &x;
     __builtin_str_len(""); return 0;
 }
-''', False, "mutable then immutable borrow (not yet enforced)"),
+''', True, "mutable then immutable borrow"),
 ]
 
 print("\nSelf-hosted Borrow Checker Tests")

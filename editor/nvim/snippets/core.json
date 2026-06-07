@@ -1,0 +1,92 @@
+{
+  "Function declaration": {
+    "prefix": "fn",
+    "body": "fn ${1:name}(${2:params}) -> ${3:int} {\n    ${0}\n}",
+    "description": "Function declaration"
+  },
+  "Main function": {
+    "prefix": "main",
+    "body": "fn main() -> int {\n    ${0}\n}",
+    "description": "Main entry point"
+  },
+  "Struct declaration": {
+    "prefix": "struct",
+    "body": "struct ${1:Name} {\n    ${2:field}: ${3:int},\n}",
+    "description": "Struct declaration"
+  },
+  "Enum declaration": {
+    "prefix": "enum",
+    "body": "enum ${1:Name} {\n    ${2:Variant},\n}",
+    "description": "Enum declaration"
+  },
+  "Enum with data": {
+    "prefix": "enumdata",
+    "body": "enum ${1:Name} {\n    ${2:Variant}(${3:int}),\n}",
+    "description": "Enum with variant data"
+  },
+  "Impl block": {
+    "prefix": "impl",
+    "body": "impl ${1:Type} {\n    fn ${2:method}(&self${3:, params}) -> ${4:int} {\n        ${0}\n    }\n}",
+    "description": "Impl block with method"
+  },
+  "If expression": {
+    "prefix": "if",
+    "body": "if ${1:cond} {\n    ${0}\n}",
+    "description": "If expression"
+  },
+  "If-else": {
+    "prefix": "ife",
+    "body": "if ${1:cond} {\n    ${2}\n} else {\n    ${0}\n}",
+    "description": "If-else expression"
+  },
+  "Match expression": {
+    "prefix": "match",
+    "body": "match ${1:expr} {\n    ${2:Variant} => ${0},\n}",
+    "description": "Match expression"
+  },
+  "For loop": {
+    "prefix": "for",
+    "body": "for ${1:var} in ${2:range} {\n    ${0}\n}",
+    "description": "For loop"
+  },
+  "While loop": {
+    "prefix": "while",
+    "body": "while ${1:cond} {\n    ${0}\n}",
+    "description": "While loop"
+  },
+  "Loop": {
+    "prefix": "loop",
+    "body": "loop {\n    ${0}\n}",
+    "description": "Infinite loop"
+  },
+  "Variable declaration": {
+    "prefix": "let",
+    "body": "${1:name} := ${2:expr}",
+    "description": "Variable declaration (infer type)"
+  },
+  "Mutable variable": {
+    "prefix": "letmut",
+    "body": "${1:name} : ., mut = ${2:expr}",
+    "description": "Mutable variable declaration"
+  },
+  "Struct literal": {
+    "prefix": "structlit",
+    "body": "${1:Type} { ${2:field} = ${3:val} }",
+    "description": "Struct literal"
+  },
+  "Return": {
+    "prefix": "ret",
+    "body": "return ${1:expr};",
+    "description": "Return statement"
+  },
+  "Import": {
+    "prefix": "import",
+    "body": "import ${1:module}",
+    "description": "Import module"
+  },
+  "Impl for trait": {
+    "prefix": "implfor",
+    "body": "impl ${1:Trait} for ${2:Type} {\n    ${0}\n}",
+    "description": "Impl block for trait"
+  }
+}

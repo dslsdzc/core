@@ -297,18 +297,188 @@ TYP_GENERIC_APPLY : int = 8;  // data = base type idx, extra = arg list start in
 TYP_SLICE : int = 9;   // data = element type idx (dynamic-length view into array)
 TYP_TUPLE : int = 10;  // data = element_count, extra = elem types start in g_gen_apply_data
 
-// Error codes
-EC_UNDEFINED_NAME : int = 1;
-EC_UNDEFINED_STRUCT : int = 2;
-EC_UNDEFINED_FIELD : int = 3;
-EC_UNDEFINED_FUNC : int = 4;
-EC_RETURN_TYPE_MISMATCH : int = 5;
-EC_IF_COND_BOOL : int = 6;
-EC_IF_BRANCH_TYPE : int = 7;
-EC_WHILE_COND_BOOL : int = 8;
-EC_ASSIGN_TYPE : int = 9;
-EC_GENERIC_TYPE : int = 10;
-EC_IF_BRANCH_UNIT : int = 11;
+// Error codes: category * 1000 + number, matching docs/error-codes.md
+// Category 0 = unclassified (000-)
+// Category 1 = P  (Parser)
+// Category 2 = N  (Name resolution)
+// Category 3 = I  (Type inference)
+// Category 4 = TA (Type: assignment)
+// Category 5 = TF (Type: function)
+// Category 6 = TB (Type: binary op)
+// Category 7 = TU (Type: unary)
+// Category 8 = TC (Type: control flow)
+// Category 9 = TM (Type: match)
+// Category 10= TK (Type: array/slice)
+// Category 11= TS (Type: struct)
+// Category 12= TG (Type: generic)
+// Category 13= B  (Borrow)
+// Category 14= R  (Runtime)
+// Category 15= E  (I/O)
+// Category 16= ICE (Internal compiler error)
+
+// P0xx — Syntax (Parser)
+EC_P_EXPECTED  : int = 1001;  // P001  Expected X, got Y
+EC_P_TOPLEVEL  : int = 1002;  // P002  Unexpected token at top level
+EC_P_EXPR      : int = 1003;  // P003  Unexpected token in expression
+EC_P_ARR_SIZE  : int = 1004;  // P004  Array size not constant
+EC_P_PATTERN   : int = 1005;  // P005  Unexpected token in pattern
+EC_P_BRACKET   : int = 1006;  // P006  Missing closing delimiter
+EC_P_SEMI      : int = 1007;  // P007  Expected semicolon
+EC_P_STRUCT_EMPTY : int = 1008; // P008  Empty struct body
+EC_P_ENUM_EMPTY   : int = 1009; // P009  Empty enum body
+EC_P_FN_EMPTY     : int = 1010; // P010  Empty function body
+EC_P_PARAM_TYPE   : int = 1011; // P011  Parameter needs type annotation
+EC_P_GENERIC_LIST : int = 1012; // P012  Invalid generic param list
+EC_P_FIELD_SYNTAX : int = 1013; // P013  Invalid field syntax
+EC_P_MATCH_EMPTY  : int = 1014; // P014  Match body empty
+EC_P_PAT_BIND     : int = 1015; // P015  Invalid pattern binding
+EC_P_IMPORT_PATH  : int = 1016; // P016  Invalid import path
+EC_P_FILEID       : int = 1017; // P017  Invalid fileid declaration
+EC_P_VAR_DECL     : int = 1018; // P018  Invalid var declaration
+EC_P_LIT_OVERFLOW : int = 1019; // P019  Numeric literal overflow
+
+// N0xx — Name Resolution
+EC_N_UNDEFINED     : int = 2001; // N001  Undefined name
+EC_N_STRUCT        : int = 2002; // N002  Undefined struct
+EC_N_FIELD         : int = 2003; // N003  Undefined field
+EC_N_ENUM_CON      : int = 2004; // N004  Undefined enum constructor
+EC_N_ENUM_VAR      : int = 2005; // N005  Undefined enum variant
+EC_N_FUNC          : int = 2006; // N006  Undefined function
+EC_N_TYPE          : int = 2007; // N007  Undefined type
+EC_N_METHOD        : int = 2008; // N008  Undefined method
+EC_N_GENERIC_TYPE  : int = 2009; // N009  Undefined type in generic apply
+EC_N_GENERIC_PARAM : int = 2010; // N010  Undefined generic param
+EC_N_DUPLICATE     : int = 2011; // N011  Duplicate definition
+EC_N_DUP_FIELD     : int = 2012; // N012  Duplicate field
+EC_N_DUP_VARIANT   : int = 2013; // N013  Duplicate variant
+EC_N_DUP_FUNC      : int = 2014; // N014  Duplicate function
+EC_N_FILEID_CONFLICT : int = 2015; // N015  Fileid conflict
+EC_N_MODULE        : int = 2016; // N016  Undefined module
+EC_N_PROJECT       : int = 2017; // N017  Undefined project
+EC_N_CYCLE         : int = 2018; // N018  Cyclic import
+EC_N_IMPORT_FILE   : int = 2019; // N019  Import file not found
+EC_N_IMPORT_READ   : int = 2020; // N020  Import read failure
+EC_N_REEXPORT      : int = 2021; // N021  Re-export conflict
+
+// I0xx — Type Inference
+EC_I_INFER      : int = 3001; // I001  Cannot infer type
+EC_I_INFER_GLOBAL : int = 3002; // I002  Cannot infer global type
+EC_I_INFER_RET   : int = 3003; // I003  Cannot infer return type
+EC_I_INFER_GENERIC : int = 3004; // I004  Cannot infer generic param
+EC_I_AMBIGUOUS   : int = 3005; // I005  Ambiguous type
+EC_I_INFINITE    : int = 3006; // I006  Infinite type
+
+// TA0xx — Type: Assignment
+EC_TA_ASSIGN     : int = 4001; // TA01  Cannot assign T2 to T1
+EC_TA_DECL       : int = 4002; // TA02  Declared vs init type mismatch
+EC_TA_BATCH      : int = 4003; // TA03  Batch declaration mixed types
+EC_TA_IMMUTABLE  : int = 4004; // TA04  Assign to immutable
+EC_TA_NOT_MUT    : int = 4005; // TA05  Variable not mutable
+EC_TA_GLOBAL_MUT : int = 4006; // TA06  Global not mutable
+EC_TA_TUPLE_ARITY : int = 4007; // TA07  Tuple destructuring arity
+
+// TF0xx — Type: Function
+EC_TF_RETURN     : int = 5001; // TF01  Return type mismatch
+EC_TF_MISSING_RET : int = 5002; // TF02  Missing return
+EC_TF_EXTRA_RET  : int = 5003; // TF03  Extra return in unit fn
+EC_TF_BRANCH_RET : int = 5004; // TF04  Branch return mismatch
+EC_TF_ARG_COUNT  : int = 5005; // TF05  Arg count mismatch
+EC_TF_ARG_TOO_MANY : int = 5006; // TF06  Too many args
+EC_TF_ARG_TYPE   : int = 5007; // TF07  Arg type mismatch
+EC_TF_METHOD_NOT_FOUND : int = 5008; // TF08  Method not found
+EC_TF_METHOD_ARG_CNT : int = 5009; // TF09  Method arg count mismatch
+EC_TF_METHOD_ARG_TYP : int = 5010; // TF10  Method arg type mismatch
+EC_TF_NON_STRUCT  : int = 5011; // TF11  Method call on non-struct
+EC_TF_NO_MAIN     : int = 5012; // TF12  No main function
+EC_TF_MAIN_SIG    : int = 5013; // TF13  Main signature wrong
+EC_TF_SELF_PARAM  : int = 5014; // TF14  Invalid self param
+EC_TF_SELF_REQUIRED : int = 5015; // TF15  Method needs self
+EC_TF_CALL_NOT_FOUND : int = 5016; // TF16  Function not in scope
+EC_TF_AMBIGUOUS   : int = 5017; // TF17  Ambiguous function call
+
+// TB0xx — Type: Binary ops
+EC_TB_ADD  : int = 6001; // TB01  Cannot add
+EC_TB_SUB  : int = 6002; // TB02  Cannot sub
+EC_TB_MUL  : int = 6003; // TB03  Cannot mul
+EC_TB_DIV  : int = 6004; // TB04  Cannot div
+EC_TB_MOD  : int = 6005; // TB05  Cannot mod
+EC_TB_CMP  : int = 6006; // TB06  Cannot compare ==/!=
+EC_TB_ORDER : int = 6007; // TB07  Cannot order </>/<=/>=
+EC_TB_AND_OR : int = 6008; // TB08  &&/|| need bool
+EC_TB_STR_CONCAT : int = 6009; // TB09  String + non-string
+
+// TU0xx — Type: Unary ops
+EC_TU_NEG : int = 7001; // TU01  Cannot negate
+EC_TU_NOT : int = 7002; // TU02  ! requires bool
+EC_TU_DEREF : int = 7003; // TU03  Cannot deref non-ref
+
+// TC0xx — Type: Control flow
+EC_TC_IF_COND : int = 8001; // TC01  If condition must be bool
+EC_TC_IF_BRANCH : int = 8002; // TC02  If branches have different types
+EC_TC_IF_NO_ELSE : int = 8003; // TC03  If without else returns unit
+EC_TC_WHILE_COND : int = 8004; // TC04  While condition must be bool
+EC_TC_BREAK_VAL : int = 8005; // TC05  Break value mismatch
+EC_TC_BREAK_OUT : int = 8006; // TC06  Break outside loop
+EC_TC_CONT_OUT  : int = 8007; // TC07  Continue outside loop
+
+// TM0xx — Type: Match
+EC_TM_ENUM     : int = 9001; // TM01  Match must be enum
+EC_TM_ARM_TYPE : int = 9002; // TM02  Arm type mismatch
+EC_TM_EXHAUST  : int = 9003; // TM03  Non-exhaustive
+EC_TM_REDUNDANT : int = 9004; // TM04  Redundant arm
+EC_TM_WILDCARD_ORDER : int = 9005; // TM05  Wildcard not last
+EC_TM_ARG_CNT  : int = 9006; // TM06  Constructor arg count
+EC_TM_ARG_TYPE : int = 9007; // TM07  Constructor arg type
+EC_TM_BIND_DUP : int = 9008; // TM08  Pattern binding dup
+EC_TM_NESTED   : int = 9009; // TM09  Nested pattern not allowed
+
+// TK0xx — Type: Array/Slice
+EC_TK_INDEX     : int = 10001; // TK01  Cannot index
+EC_TK_ELEM_TYPE : int = 10002; // TK02  Element type mismatch
+EC_TK_SIZE_TYPE : int = 10003; // TK03  Size must be int
+EC_TK_SIZE_NEG  : int = 10004; // TK04  Size must be positive
+EC_TK_SLICE_BOUNDS : int = 10005; // TK05  Slice out of bounds
+EC_TK_SLICE_LEN : int = 10006; // TK06  Slice length negative
+EC_TK_FOR_ITER  : int = 10007; // TK07  Cannot iterate
+EC_TK_FOR_TYPE  : int = 10008; // TK08  For var type mismatch
+
+// TS0xx — Type: Struct literal
+EC_TS_MISSING_FIELD : int = 11001; // TS01  Missing field
+EC_TS_UNKNOWN_FIELD : int = 11002; // TS02  Unknown field
+EC_TS_FIELD_TYPE    : int = 11003; // TS03  Field type mismatch
+EC_TS_FIELD_DUP     : int = 11004; // TS04  Field init twice
+
+// TG0xx — Type: Generic
+EC_TG_ARG_COUNT  : int = 12001; // TG01  Generic arg count mismatch
+EC_TG_BOUND      : int = 12002; // TG02  Generic bound unsatisfied
+
+// B0xx — Borrow
+EC_B_BORROW_MUT     : int = 13001; // B001  Mutable borrow on already-borrowed
+EC_B_BORROW_IMMUT   : int = 13002; // B002  Immutable borrow on mutable-borrowed
+EC_B_BORROW_MUT2    : int = 13003; // B003  Two mutable borrows
+EC_B_USE_WHILE_BORROWED : int = 13004; // B004  Use while borrowed
+EC_B_ESCAPE         : int = 13010; // B010  Reference escapes function
+EC_B_LIFETIME       : int = 13011; // B011  Lifetime too short
+EC_B_MOVE_USE       : int = 13020; // B020  Use of moved value
+EC_B_MOVE_AGAIN     : int = 13021; // B021  Move of already-moved
+EC_B_MOVE_BORROWED  : int = 13022; // B022  Move while borrowed
+
+// R0xx — Runtime
+EC_R_DIV_ZERO     : int = 14001; // R001  Division by zero
+EC_R_OOB          : int = 14002; // R002  Index out of bounds
+EC_R_OVERFLOW     : int = 14003; // R003  Integer overflow
+EC_R_LOSSY_CONVERT : int = 14004; // R004  Lossy conversion
+
+// E0xx — I/O
+EC_E_READ_FILE    : int = 15001; // E001  Cannot read source
+EC_E_WRITE_FILE   : int = 15002; // E002  Cannot write output
+EC_E_CCR_CORRUPT  : int = 15003; // E003  CCR file corrupt
+EC_E_CCR_OPEN     : int = 15004; // E004  Cannot open CCR
+
+// ICE — Internal
+EC_ICE_UNEXPECTED : int = 16001; // ICE01  Unexpected
+EC_ICE_OVERFLOW   : int = 16002; // ICE02  Buffer overflow
+EC_ICE_UNSUPPORTED : int = 16003; // ICE03  Unsupported
 
 // Diagnostic entry
 struct Diag {
