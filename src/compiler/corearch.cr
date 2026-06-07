@@ -46,87 +46,57 @@ fn init_backend_arrays() {
 
 fn corearch_main() -> int {
     cli_init("corearch", "Core architecture backend");
-    cli_flag_bool("S", "", "Output assembly text instead of binary");
+    cli_flag_bool("S", "", "Output assembly text");
+    cli_flag_bool("elf", "", "Output ELF binary (experimental)");
     cli_flag("output", "o", "Output path");
     cli_flag_bool("verbose", "v", "Verbose");
 
     if cli_parse() != 0 { return 1; }
     if cli_arg_count() < 1 {
-        __builtin_println("usage: corearch <file.ccr> [-S] [-o output]");
-        __builtin_println("  reads .ccr IR and generates binary");
+        __builtin_println("usage: corearch <file.ccr> [-S] [--elf] [-o output]");
+        __builtin_println("  reads .ccr IR and generates assembly/binary");
         __builtin_println("  -S    output assembly text (.s)");
-        __builtin_println("  -o    output path (default: a.out or a.s)");
+        __builtin_println("  --elf output ELF binary (experimental)");
+        __builtin_println("  -o    output path");
         return 1;
     }
 
     src_path := cli_arg(0);
 
-    // Read file via syscall (__builtin_read_file uses str_len internally)
-    fd := __builtin_syscall3(2, src_path, 0, 0);  // open read-only
-    if fd < 0 {
-        __builtin_print("error: cannot open ");
-        __builtin_println(src_path);
-        return 1;
-    }
-    fsize := __builtin_syscall3(8, fd, 0, 2);  // lseek to end
-    r1 := __builtin_syscall3(8, fd, 0, 0);  // lseek back to start
+    fd := __builtin_syscall3(2, src_path, 0, 0);
+    if fd < 0 { __builtin_print("error: cannot open "); __builtin_println(src_path); return 1; }
+    fsize := __builtin_syscall3(8, fd, 0, 2);
+    r1 := __builtin_syscall3(8, fd, 0, 0);
     buf := __builtin_alloc(fsize + 1);
-    nread := __builtin_syscall3(0, fd, buf, fsize);  // read
-    r2 := __builtin_syscall3(3, fd, 0, 0);  // close
-
-    if nread != fsize {
-        __builtin_print("error: cannot read ");
-        __builtin_println(src_path);
-        return 1;
-    }
-
-    __builtin_print("loading ");
-    __builtin_print(src_path);
-    __builtin_print(" (");
-    __builtin_print(__builtin_int_to_str(fsize));
-    __builtin_println(" bytes)");
+    nread := __builtin_syscall3(0, fd, buf, fsize);
+    r2 := __builtin_syscall3(3, fd, 0, 0);
+    if nread != fsize { __builtin_print("error: cannot read "); __builtin_println(src_path); return 1; }
 
     r := load_ccr(buf, fsize);
-    if r != 0 {
-        __builtin_println("error: invalid .ccr file");
-        return 1;
-    }
+    if r != 0 { __builtin_println("error: invalid .ccr file"); return 1; }
 
-    __builtin_print("  functions: ");
-    __builtin_println(__builtin_int_to_str(g_ir_func_count));
-    __builtin_print("  instrs: ");
-    __builtin_println(__builtin_int_to_str(g_ir_instr_count));
-
-    // Initialize backend state
     init_backend_arrays();
 
-    // Generate
-    emit_S := cli_has("S");
+    asm := x86_64_generate();
+
+    emit_elf := cli_has("elf");
     out_path := cli_get("output");
 
-    if emit_S != 0 {
-        // Assembly text output
-        if __builtin_str_len(out_path) == 0 { out_path = "a.s"; }
-        asm := x86_64_generate();
-        written := __builtin_write_file(out_path, asm);
-        if written < 0 {
-            __builtin_print("error: could not write ");
-            __builtin_println(out_path);
-            return 1;
-        }
+    if emit_elf != 0 {
+        if __builtin_str_len(out_path) == 0 { out_path = "a.out"; }
+        code := asm_to_bytes(asm);
+        layout : ., mut = MemLayout { stack_size = 0, heap_size = 0, text_base = 0, data_base = 0 };
+        ctx := elf_begin(layout);
+        ctx.code_start = 176;
+        total_size : ., mut = 176 + g_asm_code_size;
+        elf_write_header(ctx, layout, total_size);
+        elf_write_code(ctx, code);
+        written := elf_finish(ctx, out_path, total_size);
+        if written < 0 { __builtin_print("error: could not write "); __builtin_println(out_path); return 1; }
     } else {
-        // Binary output (future — for now output assembly)
-        if __builtin_str_len(out_path) == 0 { out_path = "a.out"; }
-        // TODO: direct ELF emission
-        // For now: fall through to assembly output
-        if __builtin_str_len(out_path) == 0 { out_path = "a.out"; }
-        asm := x86_64_generate();
+        if __builtin_str_len(out_path) == 0 { out_path = "output.s"; }
         written := __builtin_write_file(out_path, asm);
-        if written < 0 {
-            __builtin_print("error: could not write ");
-            __builtin_println(out_path);
-            return 1;
-        }
+        if written < 0 { __builtin_print("error: could not write "); __builtin_println(out_path); return 1; }
     }
 
     __builtin_print(" -> ");

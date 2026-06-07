@@ -584,9 +584,13 @@ fn ir_gen_expr(node: int) -> int {
     // Field access
     if n.kind == EXPR_FIELD {
         obj_var := ir_gen_expr(n.a);
-        field_ni := n.int_val;
         v := new_ir_var("field", TI_INT);
-        fi := n.data;  // field index stored by checker
+        fi : ., mut = n.type_val;
+        if fi > 0 {
+            fi = fi - 1;  // numeric tuple index (parser stored +1)
+        } else {
+            fi = n.data;   // struct field index (from checker)
+        }
         emit(IR_LOAD_FIELD, v, obj_var, 0, fi, 0);
         return v;
     }
@@ -717,6 +721,22 @@ fn ir_gen_expr(node: int) -> int {
     if n.kind == EXPR_STMT {
         ir_gen_expr(n.a);
         return -1;
+    }
+    if n.kind == EXPR_TUPLE {
+        // Tuple: allocate array for N elements, store each
+        elem_idx := n.a;
+        ec : ., mut = n.b;
+        tv := new_ir_var("tuple", TI_INT);
+        emit(IR_ALLOC_ARRAY, tv, ec, 0, 8, 0);  // alloc N * 8 bytes
+        // Store each element at its offset
+        e : ., mut = 0;
+        loop {
+            if e >= ec { break; }
+            elem_var := ir_gen_expr(elem_idx + e);
+            emit(IR_STORE_FIELD, -1, tv, elem_var, e, 0);
+            e = e + 1;
+        }
+        return tv;
     }
 
     return -1;

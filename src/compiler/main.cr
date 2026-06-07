@@ -21,33 +21,71 @@ fn read_source_file(path: string) -> string {
 }
 
 fn read_project_dir(dir: string) -> string {
-    g_source_dir = "";
-    toml_path : ., mut = dir;
-    if __builtin_str_eq(__builtin_str_get(dir, __builtin_str_len(dir) - 1), "/") != 0 {
-        g_source_dir = dir;
-        toml_path = dir + "Core.toml";
-    } else {
-        g_source_dir = dir + "/";
-        toml_path = dir + "/Core.toml";
+    cfg := load_project(dir);
+    g_source_dir = cfg.source_dir;
+    if __builtin_str_len(cfg.main_source) > 0 {
+        print_project_info(cfg);
+        return cfg.main_source;
     }
-    // Check Core.toml
-    tc := __builtin_read_file(toml_path);
-    if __builtin_str_len(tc) > 0 {
-        pn := extract_toml_name(tc);
-        if __builtin_str_len(pn) > 0 {
-            __builtin_print("  project: ");
-            __builtin_println(pn);
+    __builtin_println("error: no main.cr found in directory");
+    return "";
+}
+
+fn read_source_line(line: int) -> string {
+    // Walk g_source to find the start of the Nth line (1-based)
+    slen := __builtin_str_len(g_source);
+    cur : ., mut = 1;
+    start : ., mut = 0;
+    i : ., mut = 0;
+    loop {
+        if i >= slen { break; }
+        if cur == line {
+            // Read until end of line
+            j : ., mut = i;
+            loop {
+                if j >= slen { break; }
+                c := __builtin_str_get(g_source, j);
+                if c == "\n" { break; }
+                j = j + 1;
+            }
+            return __builtin_str_sub(g_source, i, j - i);
         }
+        if __builtin_str_get(g_source, i) == "\n" {
+            cur = cur + 1;
+            start = i + 1;
+        }
+        i = i + 1;
     }
-    main_path : ., mut = g_source_dir + "main.cr";
-    source := __builtin_read_file(main_path);
-    if __builtin_str_len(source) > 0 {
-        __builtin_print("  main.cr: ");
-        __builtin_println(main_path);
-    } else {
-        __builtin_println("error: no main.cr found in directory");
+    return "";
+}
+
+fn print_diagnostics() {
+    if g_diag_count == 0 { return; }
+    di : ., mut = 0;
+    loop {
+        if di >= g_diag_count { break; }
+        d := g_diags[di];
+        __builtin_print("error ");
+        __builtin_print(__builtin_int_to_str(d.code));
+        __builtin_print(": ");
+        __builtin_println(d.msg);
+        __builtin_print("  --> ");
+        __builtin_print(__builtin_int_to_str(d.line));
+        __builtin_print(":");
+        __builtin_println(__builtin_int_to_str(d.col));
+        if d.line > 0 {
+            ltxt := read_source_line(d.line);
+            if __builtin_str_len(ltxt) > 0 {
+                __builtin_println("");
+                __builtin_print(" ");
+                __builtin_print(__builtin_int_to_str(d.line));
+                __builtin_print(" | ");
+                __builtin_println(ltxt);
+            }
+        }
+        __builtin_println("");
+        di = di + 1;
     }
-    return source;
 }
 
 // Entry point
@@ -56,12 +94,14 @@ fn corec_main() -> int {
     cli_flag_bool("cir", "", "Output dataflow graph (.cir)");
     cli_flag_bool("ccr", "", "Output linear CFG (.ccr) [default]");
     cli_flag_bool("check", "", "Type-check only, no output");
+    cli_flag_bool("c", "", "Execute code directly (interpreter mode)");
     cli_flag("output", "o", "Output path");
 
     if cli_parse() != 0 { return 1; }
     if cli_arg_count() < 1 {
-        __builtin_println("usage: corec <file.cr> [options]");
-        __builtin_println("  compile Core source to .ccr (default) or .cir");
+        __builtin_println("usage: corec <file.cr | -c code> [options]");
+        __builtin_println("  compile Core source to .ccr or .cir, or run with -c");
+        __builtin_println("  -c CODE   execute code directly (interpreter)");
         __builtin_println("  --cir     output dataflow graph (.cir)");
         __builtin_println("  --ccr     output linear CFG (.ccr)");
         __builtin_println("  --check   type-check only");
@@ -69,18 +109,51 @@ fn corec_main() -> int {
         return 1;
     }
 
+    eval_mode := cli_has("c");
     src_path := cli_arg(0);
     emit_cir := cli_has("cir");
     check_only := cli_has("check");
 
-    // Read source
-    g_source = __builtin_read_file(src_path);
-    if __builtin_str_len(g_source) == 0 {
-        __builtin_print("error: cannot read ");
-        __builtin_println(src_path);
-        return 1;
+    if eval_mode != 0 {
+        // -c mode: source is inline code
+        g_source = src_path;
+        g_source_dir = "";
+        // Auto-wrap in fn main() if not present
+        has_main : ., mut = 0;
+        si : ., mut = 0;
+        sl := __builtin_str_len(g_source);
+        loop { if si >= sl { break; } if __builtin_str_get(g_source, si) == "f" { if si+6 < sl { if __builtin_str_eq(__builtin_str_sub(g_source, si, 6), "fn main") != 0 { has_main = 1; break; } } } si = si + 1; }
+        if has_main == 0 {
+            // Check if code has semicolons (statements) or is a single expression
+            has_semi : ., mut = 0;
+            si2 : ., mut = 0;
+            loop { if si2 >= __builtin_str_len(g_source) { break; } if __builtin_str_get(g_source, si2) == ";" { has_semi = 1; break; } si2 = si2 + 1; }
+            if has_semi != 0 {
+                // Multi-statement: split into body + return last expr
+                // Find last non-blank expression after last ;
+                last_semi : ., mut = -1;
+                ls : ., mut = 0;
+                loop { if ls >= __builtin_str_len(g_source) { break; } if __builtin_str_get(g_source, ls) == ";" { last_semi = ls; } ls = ls + 1; }
+                if last_semi >= 0 {
+                    last_expr := __builtin_str_sub(g_source, last_semi + 1, __builtin_str_len(g_source) - last_semi - 1);
+                    body := __builtin_str_sub(g_source, 0, last_semi + 1);
+                    g_source = "fn main() -> int {\n" + body + "\nreturn " + last_expr + ";\n}\n";
+                } else {
+                    g_source = "fn main() -> int {\n" + g_source + ";\nreturn 0;\n}\n";
+                }
+            } else {
+                g_source = "fn main() -> int {\nreturn " + g_source + ";\n}\n";
+            }
+        }
+    } else {
+        g_source = __builtin_read_file(src_path);
+        if __builtin_str_len(g_source) == 0 {
+            __builtin_print("error: cannot read ");
+            __builtin_println(src_path);
+            return 1;
+        }
+        g_source_dir = dirname(src_path);
     }
-    g_source_dir = dirname(src_path);
 
     // Frontend pipeline
     tokenize();
@@ -88,7 +161,7 @@ fn corec_main() -> int {
     resolve_imports();
     parse_all();
     check_all();
-    if g_check_error_count > 0 { return 1; }
+    if g_diag_count > 0 { print_diagnostics(); return 1; }
 
     if check_only != 0 {
         __builtin_println("ok");
@@ -96,6 +169,12 @@ fn corec_main() -> int {
     }
 
     ir_gen_all();
+
+    if eval_mode != 0 {
+        r := ir_interpret();
+        __builtin_println(__builtin_int_to_str(r));
+        return r;
+    }
 
     if emit_cir != 0 {
         // .cir output (dataflow graph)
@@ -342,7 +421,7 @@ fn cmd_ir(src_path: string) -> int {
     resolve_imports();
     parse_all();
     check_all();
-    if g_check_error_count > 0 { return 1; }
+    if g_diag_count > 0 { print_diagnostics(); return 1; }
     ir_gen_all();
     dot := df_graph_to_dot();
 
@@ -384,7 +463,7 @@ fn cmd_cir(src_path: string) -> int {
     resolve_imports();
     parse_all();
     check_all();
-    if g_check_error_count > 0 { return 1; }
+    if g_diag_count > 0 { print_diagnostics(); return 1; }
     ir_gen_all();
     lower_to_ccr();
 
@@ -439,6 +518,29 @@ fn cmd_cir(src_path: string) -> int {
     return 0;
 }
 
+// Full compilation: source -> assembly (used by tests and programmatic API)
+fn compile_source(source: string) -> string {
+    g_source = source;
+    tokenize();
+    g_str_count = 0;
+    resolve_imports();
+    parse_all();
+    check_all();
+    if g_diag_count > 0 {
+        err_msg : ., mut = "check errors:";
+        ei : ., mut = 0;
+        loop {
+            if ei >= g_diag_count { break; }
+            err_msg = err_msg + " [" + __builtin_int_to_str(g_diags[ei].code) + "] " + g_diags[ei].msg;
+            ei = ei + 1;
+        }
+        return err_msg;
+    }
+    ir_gen_all();
+    lower_to_ccr();
+    return x86_64_generate();
+}
+
 // Entry point
 fn compiler_main() -> int {
     return corec_main();
@@ -488,70 +590,6 @@ fn extract_fileid(s: string) -> string {
 }
 
 // Extract project name from Core.toml content: name = "..."
-fn extract_toml_name(content: string) -> string {
-    slen := __builtin_str_len(content);
-    i : ., mut = 0;
-    loop {
-        if i + 6 >= slen { return ""; }
-        // Check if we're at start of line (pos 0 or after \n)
-        at_line_start : ., mut = 0;
-        if i == 0 { at_line_start = 1; }
-        else {
-            prev := __builtin_str_get(content, i - 1);
-            if __builtin_str_eq(prev, "\n") != 0 { at_line_start = 1; }
-        }
-        if at_line_start == 0 {
-            // Not at line start, skip to next line
-            loop {
-                if i >= slen { return ""; }
-                if __builtin_str_eq(__builtin_str_get(content, i), "\n") != 0 { break; }
-                i = i + 1;
-            }
-            i = i + 1;
-            continue;
-        }
-        // At line start: skip leading whitespace, then check for "name"
-        ws_end : ., mut = i;
-        loop {
-            if ws_end >= slen { return ""; }
-            ch := __builtin_str_get(content, ws_end);
-            if __builtin_str_eq(ch, " ") != 0 || __builtin_str_eq(ch, "\t") != 0 {
-                ws_end = ws_end + 1;
-            } else { break; }
-        }
-        sub := __builtin_str_sub(content, ws_end, 4);
-        if __builtin_str_eq(sub, "name") != 0 {
-            j : ., mut = ws_end + 4;
-            loop {
-                if j >= slen { return ""; }
-                if __builtin_str_eq(__builtin_str_get(content, j), "=") != 0 {
-                    // Found =, scan for opening quote
-                    k : ., mut = j + 1;
-                    loop {
-                        if k >= slen { return ""; }
-                        if __builtin_str_eq(__builtin_str_get(content, k), "\"") != 0 {
-                            start := k + 1;
-                            end : ., mut = start;
-                            loop {
-                                if end >= slen { return ""; }
-                                if __builtin_str_eq(__builtin_str_get(content, end), "\"") != 0 {
-                                    return __builtin_str_sub(content, start, end - start);
-                                }
-                                end = end + 1;
-                            }
-                        }
-                        k = k + 1;
-                    }
-                }
-                j = j + 1;
-            }
-        }
-        i = i + 1;
-    }
-    return "";
-}
-
-// Get directory part of a file path (everything before last /)
 fn dirname(path: string) -> string {
     slen := __builtin_str_len(path);
     last_slash : ., mut = -1;

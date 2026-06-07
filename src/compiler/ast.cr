@@ -89,6 +89,8 @@ T_INT_U32 : int = 82;
 T_INT_U64 : int = 83;
 T_FLOAT_F32 : int = 84;
 T_FLOAT_F64 : int = 85;
+T_NONE : int = 86;
+T_SOME : int = 87;
 
 // Width constants (stored in EXPR_INT/EXPR_FLOAT data field)
 W_I8 : int = 1;
@@ -237,6 +239,7 @@ EXPR_MOVE : int = 32;     // a=expr being moved
 EXPR_ENUM_CONSTRUCTOR : int = 37; // a=name idx, b=first arg, c=arg count
 EXPR_REFTYPE : int = 38;   // a=inner type node, data=mut flag (for &T / &mut T in type position)
 EXPR_GENERIC_APPLY : int = 39; // a=base name idx, b=first arg type node, c=arg count
+EXPR_TUPLE : int = 40;         // a=first elem, b=elem count (tuple literal)
 
 // Desugared constructs
 EXPR_TRY : int = 33;      // a=expr being tried (? operator)
@@ -292,6 +295,31 @@ TYP_REF : int = 3;    // data = inner type idx, extra = mut flag
 TYP_GENERIC_PARAM : int = 7;  // data = name string index (unresolved generic param)
 TYP_GENERIC_APPLY : int = 8;  // data = base type idx, extra = arg list start in g_gen_apply_data
 TYP_SLICE : int = 9;   // data = element type idx (dynamic-length view into array)
+TYP_TUPLE : int = 10;  // data = element_count, extra = elem types start in g_gen_apply_data
+
+// Error codes
+EC_UNDEFINED_NAME : int = 1;
+EC_UNDEFINED_STRUCT : int = 2;
+EC_UNDEFINED_FIELD : int = 3;
+EC_UNDEFINED_FUNC : int = 4;
+EC_RETURN_TYPE_MISMATCH : int = 5;
+EC_IF_COND_BOOL : int = 6;
+EC_IF_BRANCH_TYPE : int = 7;
+EC_WHILE_COND_BOOL : int = 8;
+EC_ASSIGN_TYPE : int = 9;
+EC_GENERIC_TYPE : int = 10;
+EC_IF_BRANCH_UNIT : int = 11;
+
+// Diagnostic entry
+struct Diag {
+    code: int,
+    msg: string,
+    line: int,
+    col: int,
+}
+
+g_diags : [Diag; MAX_ERRS], mut;
+g_diag_count : int, mut;
 
 // Symbol kinds for checker
 SYM_FN : int = 0;

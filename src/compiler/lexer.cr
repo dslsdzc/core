@@ -134,6 +134,8 @@ fn lookup_keyword(ident: string) -> int {
     if ident == "interface" { return T_INTERFACE; }
     if ident == "auto" { return T_AUTO; }
     if ident == "fileid" { return T_FILEID; }
+    if ident == "None" { return T_NONE; }
+    if ident == "Some" { return T_SOME; }
     return T_IDENT;
 }
 

@@ -309,7 +309,12 @@ fn parse_postfix() -> int {
             advance_tok();
             f := advance_tok();
             ni := str_intern(tok_lx(f));
-            node = alloc_node(EXPR_FIELD, node, 0, 0, ni, 0, 0, tok_ln(t), tok_cl(t));
+            // type_val: for numeric field names, stores index+1 (0 means struct field)
+            tv : ., mut = 0;
+            if tok_k(f) == T_INT {
+                tv = tok_iv(f) + 1;  // +1 so default 0 means struct field
+            }
+            node = alloc_node(EXPR_FIELD, node, 0, 0, ni, tv, 0, tok_ln(t), tok_cl(t));
             continue;
         }
         if tok_k(t) == T_PATHSEP {
@@ -368,10 +373,90 @@ fn parse_primary() -> int {
     }
     if tok_k(t) == T_STRING {
         advance_tok();
-        return alloc_node(EXPR_STRING, 0, 0, 0, str_intern(tok_lx(t)), TY_STRING, 0, tok_ln(t), tok_cl(t));
+        s := tok_lx(t);
+        slen := __builtin_str_len(s);
+        // Check for string interpolation: "text { expr } text"
+        brace_pos : ., mut = -1;
+        i : ., mut = 0;
+        loop {
+            if i >= slen { break; }
+            c := __builtin_str_get(s, i);
+            if c == "{" { brace_pos = i; break; }
+            i = i + 1;
+        }
+        if brace_pos >= 0 {
+            // Interpolated string — desugar to concatenation chain
+            // "before {expr} after" → "before" + expr + "after"
+            acc : ., mut = -1;
+            pos : ., mut = 0;
+            loop {
+                // Find next { or end
+                start_pos : ., mut = pos;
+                end_pos : ., mut = -1;
+                expr_start : ., mut = -1;
+                j : ., mut = pos;
+                loop {
+                    if j >= slen { end_pos = j; break; }
+                    cj := __builtin_str_get(s, j);
+                    if cj == "{" { end_pos = j; expr_start = j + 1; break; }
+                    j = j + 1;
+                }
+                // Add string part before { as EXPR_STRING
+                if end_pos > start_pos {
+                    part := __builtin_str_sub(s, start_pos, end_pos - start_pos);
+                    ni := str_intern(part);
+                    sp := alloc_node(EXPR_STRING, 0, 0, 0, ni, TY_STRING, 0, tok_ln(t), tok_cl(t));
+                    if acc < 0 { acc = sp; }
+                    else { acc = alloc_node(EXPR_BINARY, acc, sp, OP_ADD, 0, 0, 0, tok_ln(t), tok_cl(t)); }
+                }
+                if expr_start < 0 { break; }
+                // Find closing }
+                close : ., mut = -1;
+                k : ., mut = expr_start;
+                loop {
+                    if k >= slen { break; }
+                    if __builtin_str_get(s, k) == "}" { close = k; break; }
+                    k = k + 1;
+                }
+                // Extract identifier name for now (simple case: {name})
+                if close > expr_start {
+                    id_name := __builtin_str_sub(s, expr_start, close - expr_start);
+                    // For now, only handle simple identifiers in interpolation
+                    id_ni := str_intern(id_name);
+                    id_node := alloc_node(EXPR_IDENT, 0, 0, 0, id_ni, 0, 0, tok_ln(t), tok_cl(t));
+                    if acc < 0 { acc = id_node; }
+                    else { acc = alloc_node(EXPR_BINARY, acc, id_node, OP_ADD, 0, 0, 0, tok_ln(t), tok_cl(t)); }
+                }
+                pos = close + 1;
+            }
+            if acc < 0 {
+                // Fallback: empty string
+                ni := str_intern("");
+                acc = alloc_node(EXPR_STRING, 0, 0, 0, ni, TY_STRING, 0, tok_ln(t), tok_cl(t));
+            }
+            return acc;
+        }
+        return alloc_node(EXPR_STRING, 0, 0, 0, str_intern(s), TY_STRING, 0, tok_ln(t), tok_cl(t));
     }
     if tok_k(t) == T_TRUE { advance_tok(); return alloc_node(EXPR_BOOL, 0, 0, 0, 1, TY_BOOL, 0, tok_ln(t), tok_cl(t)); }
     if tok_k(t) == T_FALSE { advance_tok(); return alloc_node(EXPR_BOOL, 0, 0, 0, 0, TY_BOOL, 0, tok_ln(t), tok_cl(t)); }
+    if tok_k(t) == T_NONE {
+        advance_tok();
+        return alloc_node(EXPR_ENUM_CONSTRUCTOR, str_intern("None"), -1, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
+    }
+    if tok_k(t) == T_SOME {
+        advance_tok();
+        ni := str_intern("Some");
+        if check(T_LPAREN) {
+            // Parse Some(expr)
+            advance_tok();
+            val := parse_expr();
+            advance_tok();  // consume )
+            return alloc_node(EXPR_ENUM_CONSTRUCTOR, ni, val, 1, 0, 0, 0, tok_ln(t), tok_cl(t));
+        }
+        // Some without parens → treat as identifier (will be resolved by uppercase → enum constructor)
+        return alloc_node(EXPR_IDENT, 0, 0, 0, ni, 0, 0, tok_ln(t), tok_cl(t));
+    }
     if tok_k(t) == T_IDENT || tok_k(t) == T_SELF || tok_k(t) == T_UNDERSCORE {
         advance_tok();
         name := tok_lx(t);
@@ -402,6 +487,19 @@ fn parse_primary() -> int {
         g_parse_no_struct_literal = 0;
         e := parse_expr();
         g_parse_no_struct_literal = saved_nsl;
+        if check(T_COMMA) {
+            // Tuple: (e1, e2, ...)
+            ef := e;
+            ec : ., mut = 1;
+            loop {
+                advance_tok();  // consume comma
+                parse_expr();   // next element (stored in consecutive g_ast slots)
+                ec = ec + 1;
+                if !check(T_COMMA) { break; }
+            }
+            advance_tok();  // consume )
+            return alloc_node(EXPR_TUPLE, ef, ec, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
+        }
         advance_tok();
         return e;
     }
@@ -726,7 +824,7 @@ fn parse_pattern() -> int {
         advance_tok();
         return alloc_node(EXPR_BOOL, 0, 0, 0, 0, TY_BOOL, 0, tok_ln(t), tok_cl(t));
     }
-    if tok_k(t) == T_IDENT {
+    if tok_k(t) == T_IDENT || tok_k(t) == T_NONE || tok_k(t) == T_SOME {
         advance_tok();
         name := tok_lx(t);
         ni := str_intern(name);

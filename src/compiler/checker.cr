@@ -61,6 +61,19 @@ fn type_equal(t1: int, t2: int) -> bool {
             }
             return false;
         }
+        if k1 == TYP_TUPLE && k2 == TYP_TUPLE {
+            if get_type_data(t1) != get_type_data(t2) { return false; }
+            start1 := get_type_extra(t1);
+            start2 := get_type_extra(t2);
+            cnt := get_type_data(t1);
+            i : ., mut = 0;
+            loop {
+                if i >= cnt { break; }
+                if !type_equal(g_gen_apply_data[start1 + i], g_gen_apply_data[start2 + i]) { return false; }
+                i = i + 1;
+            }
+            return true;
+        }
         if k1 == TYP_REF && k2 == TYP_REF {
             return get_type_extra(t1) == get_type_extra(t2) && type_equal(get_type_data(t1), get_type_data(t2));
         }
@@ -144,13 +157,13 @@ fn lookup_sym_global(name_idx: int) -> int {
 }
 
 // --- Error tracking ---
-g_check_errors : [string; MAX_ERRS], mut;
-g_check_error_count : int, mut;
+// Uses g_diags, g_diag_count from globals.cr (and ast.cr)
+// Old g_check_errors is replaced by structured g_diags.
 
-fn check_error(msg: string) {
-    if g_check_error_count < MAX_ERRS {
-        g_check_errors[g_check_error_count] = msg;
-        g_check_error_count = g_check_error_count + 1;
+fn check_error(code: int, msg: string, line: int, col: int) {
+    if g_diag_count < MAX_ERRS {
+        g_diags[g_diag_count] = Diag { code = code, msg = msg, line = line, col = col };
+        g_diag_count = g_diag_count + 1;
     }
 }
 
@@ -203,7 +216,7 @@ fn resolve_type_node(node: int) -> int {
         arg_count := n.c;
         si := lookup_sym_global(name_idx);
         if si < 0 || g_syms[si].kind != SYM_TYPE {
-            check_error("Undefined type in generic application");
+            check_error(EC_GENERIC_TYPE, "Undefined type in generic application", n.line, n.col);
             return TI_UNIT;
         }
         base_ti := g_syms[si].type_idx;
@@ -724,7 +737,7 @@ fn check_func(fi: int) {
         if !type_equal(body_ti, ret_ti) && body_ti != TI_NEVER {
             // Skip check if return type is generic param (can't verify at declaration)
             if get_type_kind(ret_ti) != TYP_GENERIC_PARAM {
-                check_error("Function return type mismatch");
+                check_error(EC_RETURN_TYPE_MISMATCH, "Function return type mismatch", f.line, f.col);
             }
         }
     }
@@ -758,7 +771,7 @@ fn infer_expr(node: int) -> int {
         si := lookup_sym(name_idx);
         if si >= 0 { return g_syms[si].type_idx; }
         name := g_strs[name_idx];
-        check_error("Undefined name '" + name + "'");
+        check_error(EC_UNDEFINED_NAME, "Undefined name '" + name + "'", n.line, n.col);
         return TI_NEVER;
     }
     if n.kind == EXPR_NONE {
@@ -776,13 +789,17 @@ fn infer_expr(node: int) -> int {
             lt := infer_expr(left);
             rt := infer_expr(right);
             if !type_equal(lt, rt) {
-                check_error("Assignment type mismatch");
+                check_error(EC_ASSIGN_TYPE, "Assignment type mismatch", n.line, n.col);
             }
             return rt;
         }
         lt := infer_expr(left);
         rt := infer_expr(right);
         if op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV || op == OP_MOD {
+            // Check: arithmetic ops require int or float
+            if lt != TI_INT && lt != TI_FLOAT && rt != TI_INT && rt != TI_FLOAT {
+                check_error(EC_ASSIGN_TYPE, "Arithmetic operation requires int or float", n.line, n.col);
+            }
             // String concatenation for OP_ADD
             if op == OP_ADD && (lt == TI_STR || rt == TI_STR) { return TI_STR; }
             if lt == TI_FLOAT || rt == TI_FLOAT { return TI_FLOAT; }
@@ -792,6 +809,9 @@ fn infer_expr(node: int) -> int {
             return TI_BOOL;
         }
         if op == OP_AND || op == OP_OR {
+            if lt != TI_BOOL || rt != TI_BOOL {
+                check_error(EC_IF_COND_BOOL, "Logical operator requires bool operands", n.line, n.col);
+            }
             return TI_BOOL;
         }
         return TI_INT;
@@ -973,13 +993,13 @@ fn infer_expr(node: int) -> int {
         else_node := n.c;
         cond_ti := infer_expr(cond);
         if cond_ti != TI_BOOL {
-            check_error("If condition must be bool");
+            check_error(EC_IF_COND_BOOL, "If condition must be bool", n.line, n.col);
         }
         then_ti := infer_expr(then_node);
         if else_node >= 0 {
             else_ti := infer_expr(else_node);
             if !type_equal(then_ti, else_ti) {
-                check_error("If branches have different types");
+                check_error(EC_IF_BRANCH_TYPE, "If branches have different types", n.line, n.col);
             }
             return then_ti;
         }
@@ -996,7 +1016,7 @@ fn infer_expr(node: int) -> int {
         body := n.b;
         cond_ti := infer_expr(cond);
         if cond_ti != TI_BOOL {
-            check_error("While condition must be bool");
+            check_error(EC_WHILE_COND_BOOL, "While condition must be bool", n.line, n.col);
         }
         infer_expr(body);
         return TI_UNIT;
@@ -1015,8 +1035,10 @@ fn infer_expr(node: int) -> int {
     }
 
     if n.kind == EXPR_RANGE {
-        infer_expr(n.a);
-        infer_expr(n.b);
+        st := infer_expr(n.a);
+        et := infer_expr(n.b);
+        if st != TI_INT { check_error(EC_ASSIGN_TYPE, "Range start must be int", n.line, n.col); }
+        if et != TI_INT { check_error(EC_ASSIGN_TYPE, "Range end must be int", n.line, n.col); }
         return TI_INT;
     }
 
@@ -1106,6 +1128,8 @@ fn infer_expr(node: int) -> int {
             }
             return g_syms[si].type_idx; // enum type
         }
+        name := g_strs[name_idx];
+        check_error(EC_UNDEFINED_NAME, "Undefined enum constructor '" + name + "'", n.line, n.col);
         return TI_UNIT;
     }
 
@@ -1130,6 +1154,7 @@ fn infer_expr(node: int) -> int {
                 loop {
                     if fi >= g_structs[si].field_count { break; }
                     if str_intern(g_structs[si].field_names[fi]) == field_ni {
+                        g_ast[node].data = fi;  // store field index for ir_gen
                         // Resolve field type, substituting generic params if needed
                         ft_node := g_structs[si].field_type_nodes[fi];
                         if ft_node >= 0 {
@@ -1164,6 +1189,19 @@ fn infer_expr(node: int) -> int {
                 }
             }
         }
+        // Tuple field access: t.0, t.1
+        if actual_ti >= 0 && actual_ti < g_type_count && get_type_kind(actual_ti) == TYP_TUPLE {
+            field_name := g_strs[field_ni];
+            idx := __builtin_str_to_int(field_name);
+            tc := get_type_data(actual_ti);
+            if idx >= 0 && idx < tc {
+                data_start := get_type_extra(actual_ti);
+                if g_ast[node].data != idx {
+                    g_ast[node].data = idx;
+                }
+                return g_gen_apply_data[data_start + idx];
+            }
+        }
         return TI_UNIT;
     }
 
@@ -1185,6 +1223,7 @@ fn infer_expr(node: int) -> int {
         if arr_kind == TYP_SLICE {
             return get_type_data(arr_ti);  // slice[i] → element type
         }
+        check_error(EC_ASSIGN_TYPE, "Cannot index non-array type", n.line, n.col);
         return TI_INT;
     }
 
@@ -1194,7 +1233,7 @@ fn infer_expr(node: int) -> int {
         tt := infer_expr(target);
         vt := infer_expr(val);
         if !type_equal(tt, vt) {
-            check_error("Assignment type mismatch");
+            check_error(EC_ASSIGN_TYPE, "Assignment type mismatch", n.line, n.col);
         }
         return vt;
     }
@@ -1315,6 +1354,21 @@ fn infer_expr(node: int) -> int {
         infer_expr(n.a);
         return TI_UNIT;
     }
+    if n.kind == EXPR_TUPLE {
+        // Tuple: create a TYP_TUPLE type with element types
+        elem_idx := n.a;
+        ec : ., mut = n.b;
+        data_start := g_gen_apply_data_count;
+        e : ., mut = 0;
+        loop {
+            if e >= ec { break; }
+            elem_ti := infer_expr(elem_idx + e);
+            g_gen_apply_data[g_gen_apply_data_count] = elem_ti;
+            g_gen_apply_data_count = g_gen_apply_data_count + 1;
+            e = e + 1;
+        }
+        return alloc_type(TYP_TUPLE, ec, data_start);
+    }
 
     return TI_UNIT;
 }
@@ -1325,7 +1379,7 @@ fn check_all() {
     init_types();
     g_sym_count = 0;
     g_scope_depth = 0;
-    g_check_error_count = 0;
+    g_diag_count = 0;
     g_gen_map_count = 0;
     g_gen_apply_data_count = 0;
 

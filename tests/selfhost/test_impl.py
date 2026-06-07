@@ -16,9 +16,10 @@ from corec.backend.interpreter import Interpreter
 
 def concat_sources():
     files = [
-        'src/stdlib/cli.cr', 'src/compiler/ast.cr', 'src/compiler/lexer.cr', 'src/compiler/parser.cr',
+        'src/stdlib/cli.cr', 'src/stdlib/toml.cr', 'src/compiler/ast.cr', 'src/compiler/globals.cr',
+        'src/compiler/lexer.cr', 'src/compiler/parser.cr',
         'src/compiler/checker.cr', 'src/compiler/ir_gen.cr', 'src/compiler/dataflow.cr',
-        'src/compiler/backend/x86_64.cr', 'src/compiler/main.cr',
+        'src/compiler/backend/x86_64.cr', 'src/compiler/ccr_io.cr', 'src/compiler/project.cr', 'src/compiler/interp.cr', 'src/compiler/main.cr',
     ]
     parts = []
     for f in files:
@@ -81,12 +82,12 @@ fn compile_and_check(source: string) -> string {
     tokenize();
     parse_all();
     check_all();
-    if g_check_error_count > 0 {
+    if g_diag_count > 0 {
         err_msg : ., mut = "check errors:";
         ei : ., mut = 0;
         loop {
-            if ei >= g_check_error_count { break; }
-            err_msg = err_msg + " " + g_check_errors[ei];
+            if ei >= g_diag_count { break; }
+            err_msg = err_msg + " " + g_diags[ei].msg;
             ei = ei + 1;
         }
         return err_msg;
@@ -99,12 +100,12 @@ fn compile_ir(source: string) -> string {
     tokenize();
     parse_all();
     check_all();
-    if g_check_error_count > 0 {
+    if g_diag_count > 0 {
         err_msg : ., mut = "check errors:";
         ei : ., mut = 0;
         loop {
-            if ei >= g_check_error_count { break; }
-            err_msg = err_msg + " " + g_check_errors[ei];
+            if ei >= g_diag_count { break; }
+            err_msg = err_msg + " " + g_diags[ei].msg;
             ei = ei + 1;
         }
         return err_msg;
@@ -117,12 +118,12 @@ fn test_check(src: string) -> string {
     tokenize();
     parse_all();
     check_all();
-    if g_check_error_count > 0 {
+    if g_diag_count > 0 {
         err_msg : ., mut = "error:";
         ei : ., mut = 0;
         loop {
-            if ei >= g_check_error_count { break; }
-            err_msg = err_msg + " [" + g_check_errors[ei] + "]";
+            if ei >= g_diag_count { break; }
+            err_msg = err_msg + " [" + g_diags[ei].msg + "]";
             ei = ei + 1;
         }
         return err_msg;
