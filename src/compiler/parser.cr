@@ -741,7 +741,11 @@ fn parse_stmt() -> int {
 
 fn parse_if_expr() -> int {
     t := advance_tok();
+    // Disable struct literal parsing in condition context
+    saved_nsl := g_parse_no_struct_literal;
+    g_parse_no_struct_literal = 1;
     cond := parse_expr();
+    g_parse_no_struct_literal = saved_nsl;
     tb := parse_block();
     eb : ., mut = -1;
     if check(T_ELSE) {
@@ -1293,9 +1297,12 @@ fn parse_all() {
     g_error_count = 0;
     g_mod_path_count = 0;
 
+    ci : ., mut = 0;
     loop {
         if tok_k(cur_tok()) == T_EOF { break; }
+        if ci > 5 { __builtin_print("parse_all loop\n"); ci = 0; }
         parse_declaration();
         if tok_k(cur_tok()) == T_EOF { break; }
+        ci = ci + 1;
     }
 }

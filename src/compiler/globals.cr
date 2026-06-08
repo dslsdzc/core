@@ -40,6 +40,6 @@ g_ir_loop_depth : int, mut;
 g_ir_str_consts : [int; MAX_STRS], mut;
 g_ir_str_const_count : int, mut;
 
-// Label tracking for jump offset calculation (shared by elf.cr and interp.cr)
+// Label tracking for jump offset calculation (shared by x86_64-elf.cr and interp.cr)
 g_label_poses : [int; 32], mut;
 g_label_count : int, mut;

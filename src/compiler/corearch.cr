@@ -77,24 +77,21 @@ fn corearch_main() -> int {
 
     init_backend_arrays();
 
-    asm := x86_64_generate();
-
     emit_elf := cli_has("elf");
     out_path := cli_get("output");
 
     if emit_elf != 0 {
         if __builtin_str_len(out_path) == 0 { out_path = "a.out"; }
-        code := asm_to_bytes(asm);
-        layout : ., mut = MemLayout { stack_size = 0, heap_size = 0, text_base = 0, data_base = 0 };
-        ctx := elf_begin(layout);
-        ctx.code_start = 176;
-        total_size : ., mut = 176 + g_asm_code_size;
-        elf_write_header(ctx, layout, total_size);
-        elf_write_code(ctx, code);
-        written := elf_finish(ctx, out_path, total_size);
-        if written < 0 { __builtin_print("error: could not write "); __builtin_println(out_path); return 1; }
+        g_elf_buf = __builtin_alloc(65536);
+        total_size := x86_64_elf_generate(g_elf_buf);
+        fd := __builtin_syscall3(2, out_path, 577, 420);
+        if fd < 0 { __builtin_print("error: could not write "); __builtin_println(out_path); return 1; }
+        nw := __builtin_syscall3(1, fd, g_elf_buf, total_size);
+        __builtin_syscall3(3, fd, 0, 0);
+        if nw < 0 { __builtin_print("error: write failed "); __builtin_println(out_path); return 1; }
     } else {
         if __builtin_str_len(out_path) == 0 { out_path = "output.s"; }
+        asm := x86_64_generate();
         written := __builtin_write_file(out_path, asm);
         if written < 0 { __builtin_print("error: could not write "); __builtin_println(out_path); return 1; }
     }

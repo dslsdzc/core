@@ -228,7 +228,16 @@ fn x86_gen_instr(instr_idx: int) -> string {
             asm = asm + "]\n";
             ai = ai + 1;
         }
-        if func_name != "" && func_name != "__builtin_str_len" && func_name != "__builtin_str_get"
+        if func_name == "__builtin_syscall3" {
+            // 内联 syscall：参数已在 rdi=nr, rsi=a1, rdx=a2, rcx=a3
+            // 需要映射为：rax=nr, rdi=a1, rsi=a2, rdx=a3, r10=0
+            asm = asm + "    mov rax, rdi\n";
+            asm = asm + "    mov rdi, rsi\n";
+            asm = asm + "    mov rsi, rdx\n";
+            asm = asm + "    mov rdx, rcx\n";
+            asm = asm + "    xor r10, r10\n";  // 清零第4个参数（wait4 的 rusage 等）
+            asm = asm + "    syscall\n";
+        } else if func_name != "" && func_name != "__builtin_str_len" && func_name != "__builtin_str_get"
             && func_name != "__builtin_str_sub" && func_name != "__builtin_int_to_str"
             && func_name != "__builtin_str_to_int" && func_name != "__builtin_str_push"
             && func_name != "__builtin_str_from_int" {

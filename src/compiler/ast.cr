@@ -577,6 +577,9 @@ IR_SLICE : int = 24;   // dest=slice_var, s1=arr_var, s2=low_var, src3=high_var 
 IR_DEREF : int = 25;   // dest=loaded_val, s1=ref_var — load value through pointer stored in ref_var
 IR_STORE_PTR : int = 26; // dest=val_var, s1=ptr_var, s2=val_var — store value through pointer
 
+// Resolution flag for BRANCH/JUMP (stored in type_kind field after label resolution)
+IR_RESOLVED : int = 1;
+
 // IR variable
 struct IRVar {
     name: string,

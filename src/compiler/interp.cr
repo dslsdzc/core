@@ -121,6 +121,10 @@ fn ir_interpret() -> int {
                __builtin_str_eq(fn_name, "println_int") != 0 {
                 if s2 >= 1 { __builtin_println(__builtin_int_to_str(g_ir_vals[s1])); }
             }
+            // __builtin_syscall3 — 解释器模式下返回 0（字符串常量在值存储中是指针还是索引不明确）
+            if __builtin_str_eq(fn_name, "__builtin_syscall3") != 0 {
+                if d >= 0 { g_ir_vals[d] = 0; }
+            }
         }
 
         ip = ip + 1;

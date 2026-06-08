@@ -6,6 +6,12 @@ __pycache__/
 # Build artifacts (everything in build/ is generated)
 build/*
 
+# Arch Linux package build artifacts
+pkg/
+
+# Self-hosted compiler build artifacts
+src/build/*
+
 # Generated
 *.coreir
 *.cir
