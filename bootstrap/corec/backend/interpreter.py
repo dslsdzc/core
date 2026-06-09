@@ -117,6 +117,7 @@ class Interpreter:
             elif instr.op == '!=': res = left != right
             elif instr.op == '&&': res = left and right
             elif instr.op == '||': res = left or right
+            elif instr.op == '%': res = left % right
             else: raise NotImplementedError(f"op {instr.op}")
             self.vars[id(instr.dest)] = res
         elif isinstance(instr, UnaryInstr):

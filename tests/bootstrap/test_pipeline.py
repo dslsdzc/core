@@ -265,6 +265,39 @@ fn main() -> int {
 }
 ''', 99)
 
+# ── If without else (regression: two-variable comparison) ──
+test('If No Else (gt, true)', '''
+fn main() -> int {
+    a := 10; b := 3;
+    if a > b { return 100; }
+    return 200;
+}
+''', 100)
+
+test('If No Else (gt, false)', '''
+fn main() -> int {
+    a := 3; b := 10;
+    if a > b { return 100; }
+    return 200;
+}
+''', 200)
+
+test('If No Else (eq, true)', '''
+fn main() -> int {
+    a := 5; b := 5;
+    if a == b { return 99; }
+    return 88;
+}
+''', 99)
+
+test('If No Else (ne, false)', '''
+fn main() -> int {
+    a := 5; b := 5;
+    if a != b { return 99; }
+    return 88;
+}
+''', 88)
+
 # ── Summary ──
 print(f"\n{passed}/{passed + failed} passed", end="")
 if failed > 0:

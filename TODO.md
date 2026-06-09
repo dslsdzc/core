@@ -2,31 +2,18 @@
 
 ## Pre-existing bugs (found but not yet fixed)
 
-### Parser: `if a > b { return 1; } return 0;` — codegen returns wrong result
+### ~~Parser: `if a > b { return 1; } return 0;` — codegen returns wrong result~~
 
-The parser correctly handles `if a > b { ... }` now (struct-literal false match fixed).
-But when the condition compares two variables (e.g. function parameters `a > b`),
-the generated code returns the wrong value when the `if` has no `else` clause.
+✅ **Fixed** (2025-06-09): Was caused by the parser struct-literal false match
+(parser consumed `{` in `if a > b { ... }`). The struct-literal guard
+(`g_parse_no_struct_literal = 1`) fixed both the hang and the wrong result.
+Confirmed with native binary tests for both `==`/`!=`/`>`/`<` comparisons with
+and without `else`, with local variables and function parameters.
 
-- ✅ `if a > b { return 1; } else { return 0; }` → correct (returns 1 for `gt(5,3)`)
-- ❌ `if a > b { return 1; } return 0;` → wrong (returns 0 for `gt(5,3)`)
+### ~~Python interpreter: `%` operator not supported~~
 
-Suspected root cause: checker or IR gen produces inverted branch logic for
-two-variable comparisons without an else path. The self-hosted checker
-(`src/compiler/checker.cr`) may handle the condition type (`TI_BOOL` vs `TI_INT`)
-inconsistently.
-
-### Python interpreter: `%` operator not supported
-
-`build_selfhost.py` uses the Python bootstrap interpreter which doesn't
-support the `%` (modulo) operator, raised as `NotImplementedError: op %`.
-This affects `elf.cr` (byte encoding: `val % 256`) and `diag.cr` (error code
-formatting: `ec % 1000`).
-
-- `build_selfhost.py` has been broken since `diag.cr` was added
-- The native build path (`build_selfhost_native.py`) is unaffected since
-  it goes through the Python bootstrap's `X86_64StackAsmGen`, not the interpreter
-- Fix: add `%` support to `bootstrap/corec/backend/interpreter.py`
+✅ **Fixed** (2025-06-09): Added `elif instr.op == '%': res = left % right` to
+`bootstrap/corec/backend/interpreter.py`.
 
 ### Self-hosted compiler: `let` keyword not supported in checker
 
