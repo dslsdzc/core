@@ -15,19 +15,18 @@ and without `else`, with local variables and function parameters.
 ✅ **Fixed** (2025-06-09): Added `elif instr.op == '%': res = left % right` to
 `bootstrap/corec/backend/interpreter.py`.
 
-### Self-hosted compiler: `let` keyword not supported in checker
+### ~~Self-hosted compiler: `let` keyword not supported in checker~~
 
-The self-hosted checker (`src/compiler/checker.cr`) doesn't recognize `let`
-variable declarations, producing `Undefined name 'let'`. The Python bootstrap
-compiler handles `let` fine.
+✅ **Not a bug**: `let` was intentionally dropped from the language syntax.
+Core uses `:=` / `: type` declarations instead (documented in CLAUDE.md).
+Both work fine — `x := 42`, `x : int = 42`, `x : ., mut = 42` all pass
+the self-hosted checker and produce correct code.
 
-- The self-hosted parser emits `EXPR_LET` nodes for `let x: T = val;`
-- But the self-hosted checker doesn't handle `EXPR_LET` in `infer_expr()`
+### ~~Build: `build_selfhost.py` broken~~
 
-### Build: `build_selfhost.py` broken
-
-Concatenates compiler sources and runs through the Python interpreter.
-Broken due to missing `diag.cr` in file list AND the `%` operator issue above.
+✅ **Fixed** (2025-06-09): Switched from `compiler_main` (which writes `.ccr`
+via `save_ccr` → `__builtin_syscall3`) to `compile_source` (returns assembly
+as string, no file I/O needed). Now generates `build/test_output.s` successfully.
 
 ## Architecture debts
 

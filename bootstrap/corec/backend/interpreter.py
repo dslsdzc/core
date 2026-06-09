@@ -220,8 +220,42 @@ class Interpreter:
                         self.vars[id(instr.dest)] = -1
                 return
             if instr.func == '__builtin_syscall3':
+                nr = self.vars.get(id(instr.args[0]), 0)
+                a1 = self.vars.get(id(instr.args[1]), 0)
+                a2 = self.vars.get(id(instr.args[2]), 0)
+                a3 = self.vars.get(id(instr.args[3])) if len(instr.args) > 3 else 0
+                import os
+                result = -1
+                if nr == 2:  # sys_open(path, flags, mode)
+                    # a1=path (string), a2=flags (int), a3=mode (int)
+                    try:
+                        result = os.open(a1, a2, a3)
+                    except OSError:
+                        result = -1
+                elif nr == 1:  # sys_write(fd, buf, count)
+                    # a1=fd (int), a2=buf (list of byte values), a3=count (int)
+                    fd = a1
+                    if isinstance(a2, list):
+                        buf_bytes = bytes(a2[:a3])
+                    elif isinstance(a2, str):
+                        buf_bytes = a2[:a3].encode()
+                    elif isinstance(a2, bytes):
+                        buf_bytes = a2[:a3]
+                    else:
+                        buf_bytes = bytes([a2 & 0xFF])[:a3]
+                    try:
+                        result = os.write(fd, buf_bytes)
+                    except OSError:
+                        result = -1
+                elif nr == 3:  # sys_close(fd)
+                    # a1=fd (int)
+                    try:
+                        os.close(a1)
+                        result = 0
+                    except OSError:
+                        result = -1
                 if instr.dest:
-                    self.vars[id(instr.dest)] = 0
+                    self.vars[id(instr.dest)] = result
                 return
             if instr.func == '__builtin_load8':
                 s = self.vars.get(id(instr.args[0]))

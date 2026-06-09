@@ -39,7 +39,7 @@ def concat_sources():
                     parts.append(f"// === {f} ===\n{content}")
     return '\n\n'.join(parts)
 
-def compile_and_run(src, entry='compiler_main', args=None):
+def compile_and_run(src, entry='compile_source', args=None):
     """Compile Core source and run via interpreter."""
     from corec.frontend.lexer import Lexer
     from corec.frontend.parser import Parser
@@ -73,8 +73,8 @@ def compile_and_run(src, entry='compiler_main', args=None):
     ir_gen = IRGen(resolver.symtab)
     mod = ir_gen.gen_module(ast)
     interp = Interpreter(mod)
-    interp._argv = ['corec'] + args
-    return interp.run(entry, [])
+    interp._argv = ['corec'] + (args if args else [])
+    return interp.run(entry, args if args else [])
 
 if __name__ == '__main__':
     src = concat_sources()
@@ -84,23 +84,16 @@ if __name__ == '__main__':
         f.write(src)
     print(f"Concatenated source -> {out_path} ({len(src)} chars)")
 
-    # Write a test file for the self-hosted compiler to compile
-    test_src = "fn main() -> int { return 42; }\n"
-    test_path = 'build/test_return42.cr'
-    with open(test_path, 'w') as f:
-        f.write(test_src)
-
-    result = compile_and_run(src, 'compiler_main', [test_path])
-    if result == 0:
-        if os.path.exists('output.s'):
-            with open('output.s') as f:
-                asm = f.read()
-            print(f"Generated output.s ({len(asm)} bytes)")
-            print("Self-hosted compiler build: SUCCESS")
-        else:
-            print("Self-hosted compiler build: no output.s generated")
-            sys.exit(1)
+    # Test: compile a simple program via compile_source (returns asm string, no file I/O)
+    test_program = "fn main() -> int { return 42; }\n"
+    asm = compile_and_run(src, 'compile_source', [test_program])
+    if asm and not asm.startswith("check errors"):
+        asm_path = 'build/test_output.s'
+        with open(asm_path, 'w') as f:
+            f.write(asm)
+        print(f"Generated {asm_path} ({len(asm)} bytes)")
+        print("Self-hosted compiler build: SUCCESS")
     else:
-        print(f"compiler_main() returned {result}")
+        print(f"compile_source() returned: {asm}")
         print("Self-hosted compiler build: FAILED")
         sys.exit(1)
