@@ -115,7 +115,7 @@ TY_CHAR : int = 6;
 TY_GENERIC_PARAM : int = 7;  // special sentinel for generic type params
 
 // Storage limits
-MAX_FUNCS : int = 128;
+MAX_FUNCS : int = 1024;
 MAX_STRUCTS : int = 64;
 MAX_ENUMS : int = 32;
 MAX_VARIANTS : int = 16;
@@ -124,9 +124,9 @@ MAX_PARAMS : int = 16;
 MAX_LOOPS : int = 16;
 
 // Compiler buffer sizes
-MAX_TOKENS : int = 8192;
-MAX_AST : int = 16384;
-MAX_STRS : int = 2048;
+MAX_TOKENS : int = 65536;
+MAX_AST : int = 131072;
+MAX_STRS : int = 16384;
 MAX_ERRS : int = 128;
 MAX_ASM : int = 8192;
 MAX_BLOCK_STMTS : int = 16384; // total statements across all blocks
@@ -510,17 +510,17 @@ struct ModEntry {
     path: string,     // resolved file path
 }
 // Additional size limits
-MAX_SYMS : int = 512;
-MAX_TYPES : int = 128;
-MAX_SCOPES : int = 32;
+MAX_SYMS : int = 4096;
+MAX_TYPES : int = 1024;
+MAX_SCOPES : int = 256;
 MAX_FILES : int = 64;
 MAX_MODS : int = 32;
 MAX_SEGS : int = 64;
 MAX_LINES : int = 5000;
-MAX_IREXPRS : int = 4096;
-MAX_IRINSTRUCTIONS : int = 16384;
-MAX_BLOCKS : int = 512;
-MAX_LABELS : int = 512;
+MAX_IREXPRS : int = 32768;
+MAX_IRINSTRUCTIONS : int = 65536;
+MAX_BLOCKS : int = 4096;
+MAX_LABELS : int = 4096;
 MAX_GENERICS : int = 4;        // max generic params per declaration
 MAX_GEN_ARGS : int = 128;      // total storage for generic type args
 g_gen_apply_data : [int; MAX_GEN_ARGS];  // flat: [count, arg1, arg2, ...] for each GENERIC_APPLY

@@ -244,3 +244,12 @@ Design documents (Chinese):
 - Spec files in `spec/` (`.corespec`) for future formal verifier consumption
 - Examples in `examples/` with per-subdirectory projects
 - Native binary tests use `tests/selfhost/minimal_rt.s` (minimal bump allocator + `_start`) for test linking with `ld`
+
+## Known Issues & TODO
+
+See [TODO.md](.claude/projects/-home-DslsDZC-core/memory/todo.md) (persistent memory) for:
+- Pre-existing bugs (variable decl `x : type;` crash, ELF builtins missing)
+- Performance/refactoring work (dynamic buffer allocation for all `MAX_*` tables)
+- Bootstrapping roadmap
+
+When starting work, always read the TODO first to check what's pending.

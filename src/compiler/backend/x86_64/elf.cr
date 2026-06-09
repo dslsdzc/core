@@ -12,6 +12,69 @@ PF_RW : int = 6;
 
 fn w8(buf: string, pos: int, val: int) { __builtin_store8(buf, pos, val % 256); }
 
+TEXT_BASE : int = 4194304;  // 0x400000 - base address of code segment
+
+fn w8_signed(buf: string, pos: int, val: int) {
+    uv : ., mut = val;
+    if uv < 0 { uv = uv + 4294967296; }
+    w8(buf, pos, uv % 256); w8(buf, pos+1, (uv/256) % 256);
+    w8(buf, pos+2, (uv/65536) % 256); w8(buf, pos+3, (uv/16777216) % 256);
+}
+
+// Emit __builtin_alloc bump allocator function body
+// Returns bytes written (always 65)
+fn emit_builtin_alloc_body(buf: string, pos: int, bss_va: int) -> int {
+    cp := 0;
+    fva := TEXT_BASE + pos;
+
+    // add rdi, 7     — align size to 8
+    w8(buf, pos+cp, 72); w8(buf, pos+cp+1, 131); w8(buf, pos+cp+2, 199); w8(buf, pos+cp+3, 7); cp = cp + 4;
+    // and rdi, -8
+    w8(buf, pos+cp, 72); w8(buf, pos+cp+1, 131); w8(buf, pos+cp+2, 231); w8(buf, pos+cp+3, 248); cp = cp + 4;
+
+    // mov r11, [rip + heap_ptr]
+    rel := bss_va - (fva + cp + 7);
+    w8(buf, pos+cp, 76); w8(buf, pos+cp+1, 139); w8(buf, pos+cp+2, 29); w8_signed(buf, pos+cp+3, rel); cp = cp + 7;
+    // test r11, r11
+    w8(buf, pos+cp, 77); w8(buf, pos+cp+1, 133); w8(buf, pos+cp+2, 219); cp = cp + 3;
+    // jne +14 (skip init if heap_ptr already set)
+    w8(buf, pos+cp, 117); w8(buf, pos+cp+1, 14); cp = cp + 2;
+
+    // lea r11, [rip + heap_start]
+    rel2 := (bss_va + 8) - (fva + cp + 7);
+    w8(buf, pos+cp, 76); w8(buf, pos+cp+1, 141); w8(buf, pos+cp+2, 29); w8_signed(buf, pos+cp+3, rel2); cp = cp + 7;
+    // mov [rip + heap_ptr], r11
+    rel3 := bss_va - (fva + cp + 7);
+    w8(buf, pos+cp, 76); w8(buf, pos+cp+1, 137); w8(buf, pos+cp+2, 29); w8_signed(buf, pos+cp+3, rel3); cp = cp + 7;
+
+    // mov r8, r11
+    w8(buf, pos+cp, 77); w8(buf, pos+cp+1, 137); w8(buf, pos+cp+2, 216); cp = cp + 3;
+    // add r11, rdi
+    w8(buf, pos+cp, 73); w8(buf, pos+cp+1, 1); w8(buf, pos+cp+2, 251); cp = cp + 3;
+    // mov [rip + heap_ptr], r11
+    rel4 := bss_va - (fva + cp + 7);
+    w8(buf, pos+cp, 76); w8(buf, pos+cp+1, 137); w8(buf, pos+cp+2, 29); w8_signed(buf, pos+cp+3, rel4); cp = cp + 7;
+
+    // mov rdi, r8
+    w8(buf, pos+cp, 76); w8(buf, pos+cp+1, 137); w8(buf, pos+cp+2, 199); cp = cp + 3;
+    // mov rcx, r11
+    w8(buf, pos+cp, 76); w8(buf, pos+cp+1, 137); w8(buf, pos+cp+2, 217); cp = cp + 3;
+    // sub rcx, rdi
+    w8(buf, pos+cp, 72); w8(buf, pos+cp+1, 41); w8(buf, pos+cp+2, 249); cp = cp + 3;
+    // xor eax, eax
+    w8(buf, pos+cp, 49); w8(buf, pos+cp+1, 192); cp = cp + 2;
+    // cld
+    w8(buf, pos+cp, 252); cp = cp + 1;
+    // rep stosb
+    w8(buf, pos+cp, 243); w8(buf, pos+cp+1, 170); cp = cp + 2;
+    // mov rax, r8
+    w8(buf, pos+cp, 76); w8(buf, pos+cp+1, 137); w8(buf, pos+cp+2, 192); cp = cp + 3;
+    // ret
+    w8(buf, pos+cp, 195); cp = cp + 1;
+
+    return cp;
+}
+
 fn w32(buf: string, pos: int, val: int) {
     w8(buf, pos, val % 256); w8(buf, pos+1, (val/256) % 256);
     w8(buf, pos+2, (val/65536) % 256); w8(buf, pos+3, (val/16777216) % 256);
@@ -97,6 +160,13 @@ fn x86_64_elf_generate(buf: string) -> int {
         total_code = total_code + 1 + 1;
     fi = fi + 1; }
 
+    // __builtin_alloc: bump allocator for heap allocation in ELF output
+    alloc_ni := str_intern("__builtin_alloc");
+    g_x86_func_offsets[g_x86_func_off_count * 2] = alloc_ni;
+    g_x86_func_offsets[g_x86_func_off_count * 2 + 1] = total_code;
+    g_x86_func_off_count = g_x86_func_off_count + 1;
+    total_code = total_code + 65;
+
     rd_sz := g2_rodata_sz();
     total_code = total_code + 6;  // _init_globals
     rodata_base := total_code;  // relative to code section start
@@ -173,6 +243,28 @@ fn x86_64_elf_generate(buf: string) -> int {
     w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 229); cp = cp + 3;
     w8(buf, cp, 93); cp = cp + 1;
     w8(buf, cp, 195); cp = cp + 1;
+
+    // ── __builtin_alloc (bump allocator) ──
+    // Compute BSS VA for heap_ptr placement
+    rodata_sz := g2_rodata_sz();
+    final_est := cp + 65 + rodata_sz;
+    bss_va := (TEXT_BASE + final_est + 4095) / 4096 * 4096;
+
+    alloc_sz := emit_builtin_alloc_body(buf, cp, bss_va);
+    alloc_start := cp;
+    cp = cp + alloc_sz;
+
+    // Patch all IR_ALLOC_STRUCT/ARRAY/MAKE_ENUM call sites to point to __builtin_alloc
+    // alloc_patch_pos entries are buffer positions of the 5-byte call instruction
+    // __builtin_alloc offset = alloc_start - 176 (relative to code section start)
+    alloc_code_off := alloc_start - 176;
+    api := 0;
+    loop { if api >= g_x86_alloc_patch_count { break; }
+        call_pos := g_x86_alloc_patch_pos[api];
+        rel := (176 + alloc_code_off) - (call_pos + 5);
+        w32(buf, call_pos + 1, rel);
+        api = api + 1; }
+    g_x86_alloc_patch_count = 0;
 
     // ── .rodata ──
     si = 0; loop { if si >= g_x86_str_count { break; }

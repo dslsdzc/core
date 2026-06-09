@@ -106,9 +106,10 @@ class Interpreter:
             elif instr.op == '-': res = left - right
             elif instr.op == '*': res = left * right
             elif instr.op == '/':
-                res = left / right
-                if isinstance(res, float) and res.is_integer():
-                    res = int(res)
+                if isinstance(left, int) and isinstance(right, int):
+                    res = left // right
+                else:
+                    res = left / right
             elif instr.op == '>': res = left > right
             elif instr.op == '<': res = left < right
             elif instr.op == '>=': res = left >= right
@@ -269,8 +270,9 @@ class Interpreter:
                 s = self.vars.get(id(instr.args[0]))
                 idx = self.vars.get(id(instr.args[1]), 0)
                 val = self.vars.get(id(instr.args[2]), 0)
-                if s is not None and isinstance(s, bytearray) and idx >= 0 and idx < len(s):
-                    s[idx] = val & 0xFF
+                if s is not None and idx >= 0 and idx < len(s):
+                    if isinstance(s, bytearray) or isinstance(s, list):
+                        s[idx] = val & 0xFF
                 if instr.dest:
                     self.vars[id(instr.dest)] = 0
                 return
