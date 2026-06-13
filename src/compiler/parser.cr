@@ -667,7 +667,8 @@ fn parse_new_var_decl() -> int {
         }
 
         // Parse values
-        if check(T_EQ) {
+        values[0] = -1;
+    if check(T_EQ) {
             advance_tok();
             values[vc] = parse_expr();
             vc = vc + 1;

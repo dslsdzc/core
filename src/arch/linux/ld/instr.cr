@@ -25,11 +25,29 @@ g_x86_alloc_patch_count : int, mut;
 g_x86_str_offs : [int; MAX_STRS], mut;
 g_x86_str_count : int, mut;
 
+g_x86_ext_rel_pos : [int; 64], mut;
+g_x86_ext_rel_name : [int; 64], mut;
+g_x86_ext_rel_count : int, mut;
+
+g_x86_rip_patch_pos : [int; 64], mut;
+g_x86_rip_patch_globals : [int; 64], mut;
+g_x86_rip_patch_count : int, mut;
+
+// Globals originally from x86_64.cr (text assembly backend, now removed)
+g_x86_vars : [int; 32768], mut;
+g_x86_var_count : int, mut;
+g_x86_stack_size : int, mut;
+g_x86_func_idx : int, mut;
+g_x86_is_enum : [int; 32768], mut;
+g_x86_is_enum_count : int, mut;
+
 fn g2_init() {
     g_x86_emit_var_count = 0;
     g_x86_emit_stack_size = 0;
     g_x86_ret_patch_count = 0;
     g_x86_alloc_patch_count = 0;
+    g_x86_ext_rel_count = 0;
+    g_x86_rip_patch_count = 0;
 }
 
 fn g2_slot(v: int) -> int {

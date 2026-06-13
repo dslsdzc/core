@@ -1093,7 +1093,19 @@ fn infer_expr(node: int) -> int {
             if s == "__builtin_str_to_int" { return TI_INT; }
             if s == "__builtin_print" { return TI_UNIT; }
             if s == "__builtin_println" { return TI_UNIT; }
+            
+            if s == "__builtin_print" { return TI_UNIT; }
+            if s == "__builtin_println" { return TI_UNIT; }
             if s == "__builtin_syscall3" { return TI_INT; }
+            if s == "__builtin_load8" { return TI_INT; }
+            if s == "__builtin_store8" { return TI_INT; }
+            if s == "__builtin_alloc" { return TI_STR; }
+            if s == "__builtin_read_file" { return TI_STR; }
+            if s == "__builtin_write_file" { return TI_INT; }
+            if s == "__builtin_str_eq" { return TI_INT; }
+            if s == "__builtin_str_cmp" { return TI_INT; }
+            if s == "__builtin_get_arg" { return TI_STR; }
+            if s == "__builtin_int_to_str" { return TI_STR; }
             if s == "__builtin_load8" { return TI_INT; }
             if s == "__builtin_store8" { return TI_INT; }
         }

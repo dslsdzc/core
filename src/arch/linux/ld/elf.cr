@@ -11,6 +11,10 @@ PF_RX : int = 5;
 PF_RW : int = 6;
 
 fn w8(buf: string, pos: int, val: int) { __builtin_store8(buf, pos, val % 256); }
+fn r8(buf: string, pos: int) -> int { return __builtin_load8(buf, pos) % 256; }
+fn r16(buf: string, pos: int) -> int { return r8(buf,pos) + r8(buf,pos+1)*256; }
+fn r32(buf: string, pos: int) -> int { return r8(buf,pos) + r8(buf,pos+1)*256 + r8(buf,pos+2)*65536 + r8(buf,pos+3)*16777216; }
+fn r64(buf: string, pos: int) -> int { lo := r32(buf,pos); hi := r32(buf,pos+4); if hi < 0 { hi = hi + 4294967296; } return lo + hi * 4294967296; }
 
 TEXT_BASE : int = 4194304;  // 0x400000 - base address of code segment
 

@@ -559,9 +559,18 @@ fn ir_gen_expr(node: int) -> int {
     // Let binding
     if n.kind == EXPR_LET {
         var_ni := n.a;
+        type_node := n.b;
         val_node := n.c;
         var := new_ir_var(g_strs[var_ni], TI_UNIT);
-        emit(IR_ALLOC, var, 0, 0, 0, TI_UNIT);
+        is_arr : ., mut = 0;
+        if type_node >= 0 && val_node < 0 {
+            tn := g_ast[type_node];
+            if tn.kind == 19 {
+                sz := tn.int_val;
+                if sz > 0 { emit(IR_ALLOC_ARRAY, var, sz, 8, 0, 0); is_arr = 1; }
+            }
+        }
+        if is_arr == 0 { emit(IR_ALLOC, var, 0, 0, 0, TI_UNIT); }
         if val_node >= 0 {
             val_var := ir_gen_expr(val_node);
             emit(IR_STORE, -1, var, val_var, 0, 0);
