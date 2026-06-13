@@ -119,6 +119,7 @@ def main():
             'src/stdlib/cli.cr',
             'src/compiler/ast.cr',
             'src/compiler/globals.cr',
+            'src/compiler/dyn_arr.cr',
             'src/compiler/lexer.cr',
             'src/compiler/parser.cr',
             'src/compiler/checker.cr',

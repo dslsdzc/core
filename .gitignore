@@ -18,3 +18,11 @@ src/build/*
 *.ccr
 *.s
 *.debug
+core_math.so
+libcore_qt6.c
+libcore_qt6.so
+qt6_launcher.cpp
+*.so
+*.o
+__pycache__/
+build/
