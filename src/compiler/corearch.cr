@@ -9,7 +9,7 @@ fn str_intern(s: string) -> int {
     return g_str_count - 1; }
 
 fn init_backend_arrays() {
-    vi : ., mut = 0; loop { if vi >= MAX_IREXPRS { break; } g_x86_vars[vi] = 0; g_x86_is_enum[vi] = 0; vi = vi + 1; }
+    vi : ., mut = 0; loop { if vi >= 32768 { break; } g_x86_vars[vi] = 0; g_x86_is_enum[vi] = 0; vi = vi + 1; }
     g_x86_var_count = 0; g_x86_stack_size = 0; g_x86_func_idx = 0; g_x86_is_enum_count = 0; }
 
 fn split_links(val: string) {

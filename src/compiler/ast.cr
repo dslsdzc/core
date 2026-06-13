@@ -114,22 +114,22 @@ TY_NEVER : int = 5;
 TY_CHAR : int = 6;
 TY_GENERIC_PARAM : int = 7;  // special sentinel for generic type params
 
-// Storage limits
-MAX_FUNCS : int = 1024;
-MAX_STRUCTS : int = 64;
-MAX_ENUMS : int = 32;
-MAX_VARIANTS : int = 16;
-MAX_FIELDS : int = 16;
-MAX_PARAMS : int = 16;
-MAX_LOOPS : int = 16;
+// Storage limits (large enough for self-compilation)
+MAX_FUNCS : int = 16384;
+MAX_STRUCTS : int = 1024;
+MAX_ENUMS : int = 256;
+MAX_VARIANTS : int = 64;
+MAX_FIELDS : int = 64;
+MAX_PARAMS : int = 64;
+MAX_LOOPS : int = 256;
 
 // Compiler buffer sizes
-MAX_TOKENS : int = 65536;
-MAX_AST : int = 131072;
-MAX_STRS : int = 16384;
-MAX_ERRS : int = 128;
-MAX_ASM : int = 8192;
-MAX_BLOCK_STMTS : int = 16384; // total statements across all blocks
+MAX_TOKENS : int = 524288;    // 512K tokens
+MAX_AST : int = 524288;       // 512K AST nodes
+MAX_STRS : int = 131072;      // 128K strings
+MAX_ERRS : int = 1024;
+MAX_ASM : int = 65536;
+MAX_BLOCK_STMTS : int = 131072;
 
 // Token struct
 struct Token {
@@ -510,19 +510,19 @@ struct ModEntry {
     path: string,     // resolved file path
 }
 // Additional size limits
-MAX_SYMS : int = 4096;
-MAX_TYPES : int = 1024;
-MAX_SCOPES : int = 256;
-MAX_FILES : int = 64;
-MAX_MODS : int = 32;
-MAX_SEGS : int = 64;
-MAX_LINES : int = 5000;
-MAX_IREXPRS : int = 32768;
-MAX_IRINSTRUCTIONS : int = 65536;
+MAX_SYMS : int = 65536;
+MAX_TYPES : int = 65536;
+MAX_SCOPES : int = 4096;
+MAX_FILES : int = 512;
+MAX_MODS : int = 256;
+MAX_SEGS : int = 512;
+MAX_LINES : int = 131072;
+MAX_IREXPRS : int = 262144;
+MAX_IRINSTRUCTIONS : int = 524288;
 MAX_BLOCKS : int = 4096;
 MAX_LABELS : int = 4096;
 MAX_GENERICS : int = 4;        // max generic params per declaration
-MAX_GEN_ARGS : int = 128;      // total storage for generic type args
+MAX_GEN_ARGS : int = 2048;      // total storage for generic type args
 g_gen_apply_data : [int; MAX_GEN_ARGS];  // flat: [count, arg1, arg2, ...] for each GENERIC_APPLY
 g_gen_apply_data_count : int;
 
@@ -537,14 +537,14 @@ g_seg_count : int, mut;
 g_line_fileid : [int; MAX_LINES], mut;  // maps source line -> fileid_ni (0 = main)
 g_line_count : int, mut;
 g_source_dir : string, mut;  // directory of the main source file (for _import.core lookup)
-MAX_MOD_FUNCS : int = 128;
+MAX_MOD_FUNCS : int = 2048;
 g_mod_func_fileids : [int; MAX_MOD_FUNCS], mut;   // fileid name index
 g_mod_func_names : [int; MAX_MOD_FUNCS], mut;     // function name index
 g_mod_func_tis : [int; MAX_MOD_FUNCS], mut;       // type index
 g_mod_func_count : int, mut;
 
 // Mod path declarations (mod foo::bar;)
-MAX_MOD_PATHS : int = 32;
+MAX_MOD_PATHS : int = 256;
 g_mod_path_names : [int; MAX_MOD_PATHS], mut;  // name indices
 g_mod_path_count : int, mut;
 
@@ -617,8 +617,8 @@ struct DFEdge {
 }
 
 // Max limits (literal values: bootstrap compiler doesn't constant-fold)
-MAX_DF_NODES : int = 16384;    // == MAX_IRINSTRUCTIONS
-MAX_DF_EDGES : int = 65536;    // == MAX_IRINSTRUCTIONS * 4
+MAX_DF_NODES : int = 262144;    // == MAX_IRINSTRUCTIONS
+MAX_DF_EDGES : int = 524288;    // == MAX_IRINSTRUCTIONS * 4
 
 // Dataflow graph arrays
 g_df_nodes : [DFNode; MAX_DF_NODES], mut;
