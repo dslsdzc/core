@@ -71,13 +71,14 @@ fn corearch_main() -> int {
         cs : ., mut = sz - 176;
         if cs <= 0 { __builtin_println("error: empty code"); return 1; }
         cd := __builtin_alloc(cs);
-        ci : ., mut = 0; loop { if ci >= cs { break; }
-            w8(cd, ci, bu8(g_elf_buf, 176+ci)); ci = ci + 1; }
-        ri : ., mut = 0; loop { if ri >= g_x86_ext_rel_count { break; }
+        // Copy user code from static ELF
+                ci : ., mut = 0; loop { if ci >= cs { break; }
+            __builtin_store8(cd, ci, __builtin_load8(g_elf_buf, 176+ci)); ci = ci + 1; }
+                ri : ., mut = 0; loop { if ri >= g_x86_ext_rel_count { break; }
             fn_name := str_get(g_x86_ext_rel_name[ri]);
             ctx_add_plt(fn_name, 0); ri = ri + 1; }
         ctx_set_user_code(cd, cs);
-        sz = ctx_emit_dyn(g_elf_buf, out_path);
+                sz = ctx_emit_dyn(g_elf_buf, out_path);
         if sz <= 0 { __builtin_println("error: linking failed"); return 1; }
     } else {
         sz := x86_64_elf_generate(g_elf_buf);

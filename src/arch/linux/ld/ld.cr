@@ -138,7 +138,7 @@ fn so_find_any(name: string) -> int {
 // ============================================================
 
 fn layout() {
-    va : ., mut = g_text_base;
+        va : ., mut = g_text_base;
     i : ., mut = 0; loop { if i >= g_ch_count { break; }
         sz : ., mut = 0;
         k := g_ch_kind[i];
@@ -158,7 +158,8 @@ fn layout() {
         g_ch_foff[i] = va - g_text_base;
         g_ch_size[i] = sz;
         va = va + sz;
-        i = i + 1; } }
+        i = i + 1; }
+     }
 
 // ============================================================
 // Emit — write chunk data to output buffer
@@ -172,6 +173,7 @@ fn emit(buf: string, total: int, is_so: int) {
     tb := g_text_base;
     i : ., mut = 0; loop { if i >= g_ch_count { break; }
         p : ., mut = g_ch_foff[i]; k := g_ch_kind[i];
+         __builtin_println(__builtin_int_to_str(k));
 
         // Ehdr: ELF header + 4 program headers
         if k == 0 {
@@ -213,21 +215,19 @@ fn emit(buf: string, total: int, is_so: int) {
 
         // PLT
         if k == 3 {
-            gv := g_ch_vaddr[cby(4)]; pv := g_ch_vaddr[i];
-            r1 := (gv+8)-(pv+6); w8(buf,p,255);w8(buf,p+1,53);w32s(buf,p+2,r1);
-            r2 := (gv+16)-(pv+12); w8(buf,p+6,255);w8(buf,p+7,37);w32s(buf,p+8,r2);
-            j : ., mut = 12; loop { if j < 32 { w8(buf,p+j,204); j=j+1; } }
+                        gv := g_ch_vaddr[cby(4)]; pv := g_ch_vaddr[i];
+                        r1 := (gv+8)-(pv+6); w8(buf,p,255);w8(buf,p+1,53);w32s(buf,p+2,r1);            r2 := (gv+16)-(pv+12); w8(buf,p+6,255);w8(buf,p+7,37);w32s(buf,p+8,r2);            jz : ., mut = 12; loop { if jz >= 32 { break; } w8(buf,p+jz,204); jz=jz+1; }
             pi : ., mut = 0; loop { if pi >= g_plt_count { break; }
                 eo := p+32+pi*16;
                 w8(buf,eo,243);w8(buf,eo+1,15);w8(buf,eo+2,30);w8(buf,eo+3,250);
                 w8(buf,eo+4,104);w8(buf,eo+5,pi%256);
                 w8(buf,eo+6,255);w8(buf,eo+7,37);
                 r3 := (gv+24+pi*8)-(eo+12); w32s(buf,eo+8,r3);
-                pi=pi+1; } }
+                pi=pi+1; }  }
 
         // GOT.PLT
         if k == 4 {
-            dv := g_ch_vaddr[cby(5)];
+                        dv := g_ch_vaddr[cby(5)];
             w64(buf,p,dv);w64(buf,p+8,0);w64(buf,p+16,0);
             pi : ., mut = 0; loop { if pi >= g_plt_count { break; }
                 pv2 := g_ch_vaddr[cby(3)];
@@ -265,8 +265,8 @@ fn emit(buf: string, total: int, is_so: int) {
             w64(buf,p+de*16,20);w64(buf,p+de*16+8,7);de=de+1;  // DT_PLTREL=RELA
             w64(buf,p+de*16,23);w64(buf,p+de*16+8,rv);de=de+1;  // DT_JMPREL
             w64(buf,p+de*16,1);w64(buf,p+de*16+8,so_off);de=de+1;  // DT_NEEDED
-            w64(buf,p+de*16,0);w64(buf,p+de*16+8,0); }  // DT_NULL
-
+            w64(buf,p+de*16,0);w64(buf,p+de*16+8,0); }
+        
         // .dynsym (already written by DynChunk for entries 1+, write null entry here)
         if k == 6 {
             pi : ., mut = 0; loop { if pi < 1+g_plt_count { break; }
@@ -326,12 +326,13 @@ fn ctx_add_plt(name: string, so_idx: int) {
 
 // Produce dynamically-linked ELF executable
 fn ctx_emit_dyn(buf: string, path: string) -> int {
-    cnew(0); cnew(1); cnew(2); cnew(3); cnew(4); cnew(5); cnew(6); cnew(7); cnew(8);
-    layout();
-    patch_relocs();
-    total := g_ch_vaddr[g_ch_count-1] + g_ch_size[g_ch_count-1] - g_text_base;
+        cnew(0); cnew(1); cnew(2); cnew(3); cnew(4); cnew(5); cnew(6); cnew(7); cnew(8);
+        layout();
+        patch_relocs();
+        total := g_ch_vaddr[g_ch_count-1] + g_ch_size[g_ch_count-1] - g_text_base;
+     __builtin_println(__builtin_int_to_str(total));
     emit(buf, total, 0);
-    fd := __builtin_syscall3(2, path, 577, 420);
+        fd := __builtin_syscall3(2, path, 577, 420);
     if fd < 0 { return -1; }
     nw := __builtin_syscall3(1, fd, buf, total);
     __builtin_syscall3(3, fd, 0, 0);

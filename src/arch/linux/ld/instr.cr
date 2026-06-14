@@ -27,6 +27,7 @@ fn g2_init() {
     g_x86_emit_stack_size = 0;
     g_x86_ret_patch_count = 0;
     g_x86_alloc_patch_count = 0;
+    g_x86_ext_rel_count = 0;
     g_x86_rip_patch_count = 0;
 }
 
