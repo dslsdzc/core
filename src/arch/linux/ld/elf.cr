@@ -114,6 +114,7 @@ fn elf2_hdr(buf: string, total_sz: int) {
 fn x86_64_elf_generate(buf: string) -> int {
     // Phase 0: resolve labels (uses arch_instr_size from instr.cr)
     resolve_labels();
+    g_x86_ext_rel_count = 0;  // reset external relocations
 
     // Phase 1: rodata layout — collect string constants
     g_x86_str_count = 0;

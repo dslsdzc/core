@@ -27,7 +27,6 @@ fn g2_init() {
     g_x86_emit_stack_size = 0;
     g_x86_ret_patch_count = 0;
     g_x86_alloc_patch_count = 0;
-    g_x86_ext_rel_count = 0;
     g_x86_rip_patch_count = 0;
 }
 
@@ -257,8 +256,14 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         } else if __builtin_str_len(fn2) > 0 {
             to := -1; tf := 0;
             loop { if tf >= g_x86_func_off_count { break; } if g_x86_func_offsets[tf*2] == s3 { to = g_x86_func_offsets[tf*2+1]; break; } tf = tf + 1; }
-            rel := 0; if to >= 0 { rel = (176 + to) - (pos + cp + 5); }
-            cp = cp + e2_call(buf, pos+cp, rel);
+            if to >= 0 {
+                cp = cp + e2_call(buf, pos+cp, (176 + to) - (pos + cp + 5));
+            } else {
+                g_x86_ext_rel_pos[g_x86_ext_rel_count] = pos + cp + 1;
+                g_x86_ext_rel_name[g_x86_ext_rel_count] = s3;
+                g_x86_ext_rel_count = g_x86_ext_rel_count + 1;
+                cp = cp + e2_call(buf, pos+cp, 0);
+            }
             if d >= 0 { cp = cp + e2_st(buf, pos+cp, 0, g2_slot(d)); }
         } else {
             e2_w8(buf, pos+cp, 49); e2_w8(buf, pos+cp+1, 192); cp = cp + 2;

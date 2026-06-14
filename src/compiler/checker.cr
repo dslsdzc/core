@@ -1120,7 +1120,7 @@ fn infer_expr(node: int) -> int {
             }
             ai = ai + 1;
         }
-        return TI_UNIT;
+        return TI_INT;  // external/unknown functions
     }
 
     if ast_kind(node) == EXPR_BLOCK {
