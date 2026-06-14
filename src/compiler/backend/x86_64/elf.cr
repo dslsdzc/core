@@ -115,7 +115,7 @@ fn x86_64_elf_generate(buf: string) -> int {
 
     // Phase 1: rodata layout — collect string constants
     g_x86_str_count = 0;
-    si := 0; loop { if si >= g_ir_str_const_count { break; } g2_str_off(g_ir_str_consts[si]); si = si + 1; }
+    si := 0; loop { if si >= g_ir_str_const_count { break; } g2_str_off(r64(g_ir_str_consts, si * 8)); si = si + 1; }
 
     // Phase 2: measure total code size and build function offset table
     g_x86_func_off_count = 0;

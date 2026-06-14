@@ -5,13 +5,13 @@
 // Byte helpers
 // ============================================================
 fn w8(buf: string, pos: int, val: int) { __builtin_store8(buf, pos, val % 256); }
-fn r8(buf: string, pos: int) -> int { return __builtin_load8(buf, pos) % 256; }
+fn bu8(buf: string, pos: int) -> int { return __builtin_load8(buf, pos) % 256; }
 fn w32(buf: string, pos: int, val: int) {
     uv : ., mut = val; if uv < 0 { uv = uv + 4294967296; }
     w8(buf,pos,uv%256); w8(buf,pos+1,(uv/256)%256);
     w8(buf,pos+2,(uv/65536)%256); w8(buf,pos+3,(uv/16777216)%256); }
 fn r32(buf: string, pos: int) -> int {
-    v := r8(buf,pos)+r8(buf,pos+1)*256+r8(buf,pos+2)*65536+r8(buf,pos+3)*16777216;
+    v := bu8(buf,pos)+bu8(buf,pos+1)*256+bu8(buf,pos+2)*65536+bu8(buf,pos+3)*16777216;
     if v >= 2147483648 { v = v - 4294967296; } return v; }
 fn w64(buf: string, pos: int, val: int) {
     lo : ., mut = val % 4294967296; hi : ., mut = val / 4294967296;
@@ -80,7 +80,7 @@ OFF_EV_SIZE : int = 144;
 // ============================================================
 fn _dyncpy(src: string, nbytes: int, dst: string) {
     ci : ., mut = 0;
-    loop { if ci >= nbytes { break; } w8(dst, ci, r8(src, ci)); ci = ci + 1; } }
+    loop { if ci >= nbytes { break; } w8(dst, ci, bu8(src, ci)); ci = ci + 1; } }
 
 // ============================================================
 // Grow helpers for ALL arrays
@@ -310,12 +310,12 @@ fn str_intern(s: string) -> int {
     loop {
         if i >= g_str_count { break; }
         pl : ., mut = 0;
-        loop { bc := r8(g_str_pool, pos + pl); if bc == 0 { break; } pl = pl + 1; }
+        loop { bc := bu8(g_str_pool, pos + pl); if bc == 0 { break; } pl = pl + 1; }
         if pl == sl {
             eq : ., mut = 1; j : ., mut = 0;
             loop {
                 if j >= sl { break; }
-                if r8(g_str_pool, pos + j) != __builtin_load8(s, j) { eq = 0; break; }
+                if bu8(g_str_pool, pos + j) != __builtin_load8(s, j) { eq = 0; break; }
                 j = j + 1; }
             if eq != 0 { return i; } }
         pos = pos + pl + 1;
@@ -338,20 +338,20 @@ fn str_get(idx: int) -> string {
     if idx < 0 || idx >= g_str_count { return ""; }
     off := r64(g_str_offsets, idx * 8);
     ln : ., mut = 0;
-    loop { if r8(g_str_pool, off + ln) == 0 { break; } ln = ln + 1; }
+    loop { if bu8(g_str_pool, off + ln) == 0 { break; } ln = ln + 1; }
     return __builtin_str_sub(g_str_pool, off, ln); }
 
 fn str_len(idx: int) -> int {
     if idx < 0 || idx >= g_str_count { return 0; }
     off := r64(g_str_offsets, idx * 8);
     ln : ., mut = 0;
-    loop { if r8(g_str_pool, off + ln) == 0 { break; } ln = ln + 1; }
+    loop { if bu8(g_str_pool, off + ln) == 0 { break; } ln = ln + 1; }
     return ln; }
 
 fn str_load8(idx: int, ci: int) -> int {
     if idx < 0 || idx >= g_str_count { return 0; }
     off := r64(g_str_offsets, idx * 8);
-    return r8(g_str_pool, off + ci); }
+    return bu8(g_str_pool, off + ci); }
 
 fn str_eq(idx: int, lit: string) -> int {
     if idx < 0 || idx >= g_str_count { return 0; }
@@ -359,7 +359,7 @@ fn str_eq(idx: int, lit: string) -> int {
     sl := __builtin_str_len(lit);
     j : ., mut = 0;
     loop {
-        pc := r8(g_str_pool, off + j);
+        pc := bu8(g_str_pool, off + j);
         if pc == 0 { if j == sl { return 1; } return 0; }
         if j >= sl { return 0; }
         if pc != __builtin_load8(lit, j) { return 0; }

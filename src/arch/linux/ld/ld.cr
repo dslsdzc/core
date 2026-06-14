@@ -110,11 +110,11 @@ fn so_find(buf: string, name: string) -> int {
     sc := ds / 24;
     i = 0; loop { if i >= sc { break; }
         sn := r32(buf, do+i*24); sv := r64(buf, do+i*24+8);
-        si := r8(buf, do+i*24+4); sx := r16(buf, do+i*24+6);
+        si := bu8(buf, do+i*24+4); sx := r16(buf, do+i*24+6);
         if si/16 == 1 && si%16 == 2 && sx != 0 {
             nm : ., mut = ""; k : ., mut = sn;
             loop { if k >= ss { break; }
-                c := r8(buf, so+k); if c == 0 { break; }
+                c := bu8(buf, so+k); if c == 0 { break; }
                 sc2 := __builtin_str_get(" ",0); __builtin_store8(sc2,0,c);
                 nm = nm + sc2; k = k + 1; }
             if __builtin_str_len(nm) > 0 && __builtin_str_eq(nm, name) != 0 { return sv; }
@@ -209,7 +209,7 @@ fn emit(buf: string, total: int, is_so: int) {
         // User code
         if k == 2 {
             j : ., mut = 0; loop { if j >= g_user_size { break; }
-                w8(buf,p+j,r8(g_user_code,j)); j = j + 1; } }
+                w8(buf,p+j,bu8(g_user_code,j)); j = j + 1; } }
 
         // PLT
         if k == 3 {
@@ -250,7 +250,7 @@ fn emit(buf: string, total: int, is_so: int) {
             // Write dynstr to its chunk
             dsc := cby(7);
             di2 : ., mut = 0; loop { if di2 >= __builtin_str_len(db) { break; }
-                w8(buf,g_ch_foff[dsc]+di2,r8(db,di2)); di2=di2+1; }
+                w8(buf,g_ch_foff[dsc]+di2,bu8(db,di2)); di2=di2+1; }
             // Write dynamic entries
             sv := g_ch_vaddr[cby(6)]; dv2 := g_ch_vaddr[dsc];
             gv2 := g_ch_vaddr[cby(4)]; rv := g_ch_vaddr[cby(8)];
