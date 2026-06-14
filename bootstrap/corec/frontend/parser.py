@@ -349,8 +349,22 @@ class Parser:
         return left
 
     def parse_logical_and(self):
-        left = self.parse_equality()
+        left = self.parse_bitwise_or()
         while self.check(TokenType.AND_AND):
+            op = self.advance().lexeme
+            left = BinaryOp(left, op, self.parse_bitwise_or())
+        return left
+
+    def parse_bitwise_or(self):
+        left = self.parse_bitwise_and()
+        while self.check(TokenType.PIPE):
+            op = self.advance().lexeme
+            left = BinaryOp(left, op, self.parse_bitwise_and())
+        return left
+
+    def parse_bitwise_and(self):
+        left = self.parse_equality()
+        while self.check(TokenType.AMPERSAND):
             op = self.advance().lexeme
             left = BinaryOp(left, op, self.parse_equality())
         return left
@@ -731,9 +745,27 @@ class Parser:
         self.expect(TokenType.LBRACE)
         fields = []
         while not self.check(TokenType.RBRACE):
-            fname = self.expect(TokenType.IDENT).lexeme
+            fname = None
+            if self.check(TokenType.IDENT):
+                fname = self.advance().lexeme
+            elif self.cur().type in (TokenType.TYPE, TokenType.MUT, TokenType.PUB, TokenType.MOD,
+                                     TokenType.STRUCT, TokenType.ENUM,
+                                     TokenType.IMPL, TokenType.SELF, TokenType.SELF_TYPE,
+                                     TokenType.MATCH, TokenType.FOR, TokenType.LOOP,
+                                     TokenType.WHILE, TokenType.IF, TokenType.ELSE,
+                                     TokenType.RETURN, TokenType.BREAK, TokenType.CONTINUE,
+                                     TokenType.GO, TokenType.AWAIT, TokenType.MOVE,
+                                     TokenType.TRUE, TokenType.FALSE, TokenType.UNIT,
+                                     TokenType.AUTO, TokenType.INTERFACE, TokenType.AS):
+                fname = self.advance().lexeme  # keyword as field name
+            else:
+                fname = self.expect(TokenType.IDENT).lexeme
             self.expect(TokenType.COLON)
             ftype = self.parse_type()
+            # field tags: consume optional tags like `, mut`, `, pub` after type
+            while self.check(TokenType.COMMA) and self.peek().type in (TokenType.MUT, TokenType.PUB):
+                self.advance()  # skip comma
+                self.advance()  # skip tag
             fields.append((fname, ftype))
             if self.check(TokenType.COMMA):
                 self.advance()

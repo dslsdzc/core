@@ -57,6 +57,30 @@ fn dirname(path: string) -> string {
     return "";
 }
 
+fn basename(path: string) -> string {
+    slen := __builtin_str_len(path);
+    if slen == 0 { return ""; }
+    end : ., mut = slen;
+    // 去掉末尾的 /
+    loop {
+        if end <= 0 { break; }
+        if __builtin_str_eq(__builtin_str_get(path, end - 1), "/") != 0 { end = end - 1; }
+        else { break; }
+    }
+    if end == 0 { return "/"; }
+    last_slash : ., mut = -1;
+    i : ., mut = 0;
+    loop {
+        if i >= end { break; }
+        if __builtin_str_eq(__builtin_str_get(path, i), "/") != 0 { last_slash = i; }
+        i = i + 1;
+    }
+    if last_slash >= 0 {
+        return __builtin_str_sub(path, last_slash + 1, end - last_slash - 1);
+    }
+    return __builtin_str_sub(path, 0, end);
+}
+
 fn parent_dir(dir: string) -> string {
     slen := __builtin_str_len(dir);
     if slen <= 1 { return ""; }

@@ -20,7 +20,7 @@ fn system(cmd: string) -> int {
         status_buf := __builtin_alloc(16);
         __builtin_syscall3(61, pid, status_buf, 0);  // wait4(pid, &status, 0, NULL)
         status := __builtin_load8(status_buf, 0);
-        return status & 255;  // WEXITSTATUS
+        return status % 256;  // WEXITSTATUS
     }
     // 子进程：执行命令
     // Argv4 结构体在堆上分配，字段连续存储：

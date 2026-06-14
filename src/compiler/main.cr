@@ -54,23 +54,40 @@ fn is_decl_stmt(s: string) -> int {
     return 0;
 }
 
+// Detect imports (uses resolve_imports which is already called before this point)
+fn detect_imports(src: string) -> int {
+    sl := __builtin_str_len(src); i : ., mut = 0; cnt : ., mut = 0;
+    loop { if i + 6 >= sl { break; }
+        if __builtin_load8(src,i) == 105 && __builtin_load8(src,i+1) == 109 &&
+           __builtin_load8(src,i+2) == 112 && __builtin_load8(src,i+3) == 111 &&
+           __builtin_load8(src,i+4) == 114 && __builtin_load8(src,i+5) == 116 {
+            cnt = cnt + 1;
+            i = i + 6; continue; }
+        i = i + 1; }
+    return cnt;
+}
+
 fn corec_main() -> int {
     cli_init("corec", "Core compiler frontend");
     cli_flag_bool("cir", "", "Output dataflow graph (.cir)");
     cli_flag_bool("ccr", "", "Output linear CFG (.ccr) [default]");
     cli_flag_bool("check", "", "Type-check only, no output");
     cli_flag_bool("c", "", "Execute code directly (interpreter mode)");
+    cli_flag_bool("build", "b", "Compile and link to ELF (auto-detect imports)");
     cli_flag("output", "o", "Output path");
 
     if cli_parse() != 0 { return 1; }
     if cli_arg_count() < 1 {
-        __builtin_println("usage: corec <file.cr | -c code> [options]");
+        __builtin_println("usage: corec <file.cr | project_dir/ | -c code> [options]");
         __builtin_println("  compile Core source to .ccr or .cir, or run with -c");
         __builtin_println("  -c CODE   execute code directly (interpreter)");
         __builtin_println("  --cir     output dataflow graph (.cir)");
-        __builtin_println("  --ccr     output linear CFG (.ccr)");
+        __builtin_println("  --ccr     output linear CFG (.ccr) [default]");
         __builtin_println("  --check   type-check only");
         __builtin_println("  -o FILE   output path");
+        __builtin_println("");
+        __builtin_println("project_dir/  point to a directory containing Core.toml + .cr files");
+        __builtin_println("              to build a multi-file project");
         return 1;
     }
 
@@ -189,13 +206,39 @@ fn corec_main() -> int {
             }
         }
     } else {
-        g_source = __builtin_read_file(src_path);
-        if __builtin_str_len(g_source) == 0 {
-            __builtin_print("error: cannot read ");
-            __builtin_println(src_path);
-            return 1;
+        // 检测是否为项目目录（路径不以 .cr 结尾 → 尝试项目构建）
+        sl := __builtin_str_len(src_path);
+        g_is_project_mode = 0;
+        if sl >= 4 {
+            ext := __builtin_str_sub(src_path, sl - 3, 3);
+            if __builtin_str_eq(ext, ".cr") == 0 { g_is_project_mode = 1; }
+        } else {
+            g_is_project_mode = 1;  // 没有 .cr 扩展名，可能是目录名
         }
-        g_source_dir = dirname(src_path);
+
+        if g_is_project_mode != 0 {
+            g_source = read_project_dir(src_path);
+            if __builtin_str_len(g_source) > 0 {
+            } else {
+                // 项目加载失败，回退到文件模式
+                g_is_project_mode = 0;
+                g_source = __builtin_read_file(src_path);
+                if __builtin_str_len(g_source) == 0 {
+                    __builtin_print("error: cannot read ");
+                    __builtin_println(src_path);
+                    return 1;
+                }
+                g_source_dir = dirname(src_path);
+            }
+        } else {
+            g_source = __builtin_read_file(src_path);
+            if __builtin_str_len(g_source) == 0 {
+                __builtin_print("error: cannot read ");
+                __builtin_println(src_path);
+                return 1;
+            }
+            g_source_dir = dirname(src_path);
+        }
     }
 
     // Frontend pipeline
@@ -216,6 +259,51 @@ fn corec_main() -> int {
         return 0;
     }
 
+    build_mode := cli_has("build");
+    if build_mode != 0 && check_only == 0 && eval_mode == 0 {
+        // --build: compile + link to ELF in one step
+        // Auto-detect imports for linking
+        links := detect_imports(g_source);
+        // Determine output path
+        out_path : ., mut = cli_get("output");
+        if __builtin_str_len(out_path) == 0 {
+            if g_is_project_mode != 0 { out_path = basename(src_path); }
+            else {
+                sp := src_path; slen := __builtin_str_len(sp);
+                if slen > 3 { ext := __builtin_str_sub(sp, slen-3, 3);
+                    if __builtin_str_eq(ext, ".cr") != 0 { out_path = __builtin_str_sub(sp, 0, slen-3); }
+                    else { out_path = sp; } }
+                else { out_path = sp; } }
+        }
+        // Save .ccr to temp file
+        tmp_path : ., mut = "/tmp/corec_build_";
+        tmp_path = tmp_path + __builtin_int_to_str(__builtin_syscall3(201, 0, 0, 0));  // getpid
+        tmp_path = tmp_path + ".ccr";
+        ir_gen_all();
+        lower_to_ccr();
+        r := save_ccr(tmp_path);
+        if r != 0 { __builtin_println("error: could not write temp .ccr"); return 1; }
+        // Build corearch command (static ELF — imports resolved at compile time)
+        cmd : ., mut = "corearch ";
+        cmd = cmd + tmp_path + " --elf -o " + out_path;
+        // Also try using the same directory as corec
+        self_path := __builtin_get_arg(0);
+        sl2 := __builtin_str_len(self_path);
+        if sl2 > 0 {
+            last_slash : ., mut = -1;
+            si : ., mut = 0; loop { if si >= sl2 { break; }
+                if __builtin_load8(self_path, si) == 47 { last_slash = si; } si = si + 1; }
+            if last_slash >= 0 {
+                dir2 := __builtin_str_sub(self_path, 0, last_slash + 1);
+                cmd = dir2 + cmd; }
+        }
+        // Execute!
+        exit_code := system(cmd);
+        // Cleanup
+        __builtin_syscall3(87, tmp_path, 0, 0);  // unlink temp .ccr
+        return exit_code;
+    }
+
     ir_gen_all();
 
     if eval_mode != 0 {
@@ -226,12 +314,16 @@ fn corec_main() -> int {
         dot := df_graph_to_dot();
         out := cli_get("output");
         if __builtin_str_len(out) == 0 {
-            out = src_path;
-            sl := __builtin_str_len(src_path);
-            if sl > 3 {
-                ext := __builtin_str_sub(src_path, sl - 3, 3);
-                if __builtin_str_eq(ext, ".cr") != 0 {
-                    out = __builtin_str_sub(src_path, 0, sl - 3) + ".cir";
+            if g_is_project_mode != 0 {
+                out = basename(src_path) + ".cir";
+            } else {
+                out = src_path;
+                sl := __builtin_str_len(src_path);
+                if sl > 3 {
+                    ext := __builtin_str_sub(src_path, sl - 3, 3);
+                    if __builtin_str_eq(ext, ".cr") != 0 {
+                        out = __builtin_str_sub(src_path, 0, sl - 3) + ".cir";
+                    }
                 }
             }
         }
@@ -247,12 +339,16 @@ fn corec_main() -> int {
         lower_to_ccr();
         out := cli_get("output");
         if __builtin_str_len(out) == 0 {
-            out = src_path;
-            sl := __builtin_str_len(src_path);
-            if sl > 3 {
-                ext := __builtin_str_sub(src_path, sl - 3, 3);
-                if __builtin_str_eq(ext, ".cr") != 0 {
-                    out = __builtin_str_sub(src_path, 0, sl - 3) + ".ccr";
+            if g_is_project_mode != 0 {
+                out = basename(src_path) + ".ccr";
+            } else {
+                out = src_path;
+                sl := __builtin_str_len(src_path);
+                if sl > 3 {
+                    ext := __builtin_str_sub(src_path, sl - 3, 3);
+                    if __builtin_str_eq(ext, ".cr") != 0 {
+                        out = __builtin_str_sub(src_path, 0, sl - 3) + ".ccr";
+                    }
                 }
             }
         }

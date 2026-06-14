@@ -77,20 +77,33 @@ class Lexer:
     def read_number(self, first: str) -> Token:
         start_line, start_col = self.line, self.col
         n = first
+        is_hex = (first == '0' and (self.current() == 'x' or self.current() == 'X'))
         is_float = False
-        while self.current().isdigit() or self.current() == '_':
-            n += self.advance()
-        if self.current() == '.' and self.peek().isdigit():
-            is_float = True
-            n += self.advance()
+        if is_hex:
+            n += self.advance()  # consume 'x'
+            while self.current().isalnum() or self.current() == '_':
+                c = self.current()
+                if c.isdigit() or ('a' <= c <= 'f') or ('A' <= c <= 'F') or c == '_':
+                    n += self.advance()
+                else:
+                    break
+        else:
             while self.current().isdigit() or self.current() == '_':
                 n += self.advance()
-        if self.current().isalpha():
-            suffix = ""
-            while self.current().isalpha() or self.current().isdigit():
-                suffix += self.advance()
-            n += suffix
+            if self.current() == '.' and self.peek().isdigit():
+                is_float = True
+                n += self.advance()
+                while self.current().isdigit() or self.current() == '_':
+                    n += self.advance()
+            if self.current().isalpha():
+                suffix = ""
+                while self.current().isalpha() or self.current().isdigit():
+                    suffix += self.advance()
+                n += suffix
         n = n.replace('_', '')
+        if is_hex:
+            val = str(int(n, 16))
+            return Token(TokenType.INT_LIT, val, start_line, start_col)
         if is_float:
             return Token(TokenType.FLOAT_LIT, n, start_line, start_col)
         return Token(TokenType.INT_LIT, n, start_line, start_col)
@@ -195,7 +208,7 @@ class Lexer:
                     self.advance()
                     self.tokens.append(Token(TokenType.PIPE_PIPE, '||', start_line, start_col))
                 else:
-                    self.error("Unexpected '|'")
+                    self.tokens.append(Token(TokenType.PIPE, '|', start_line, start_col))
                 continue
 
             if ch == ':':

@@ -68,6 +68,7 @@ class TokenType(Enum):
     LT_EQ = auto()
     GT_EQ = auto()
     AND_AND = auto()
+    PIPE = auto()
     PIPE_PIPE = auto()
     BANG = auto()
     EQ = auto()

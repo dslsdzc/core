@@ -102,8 +102,16 @@ fn x86_gen_instr(instr_idx: int) -> string {
         val := s1;
         ti := iri_tk(instr_idx);
         if ti == TI_STR {
+            //  str_idx (val)  g_ir_str_consts 
+            lbl_idx : ., mut = 0;
+            si2 : ., mut = 0;
+            loop {
+                if si2 >= g_ir_str_const_count { break; }
+                if g_ir_str_consts[si2] == val { lbl_idx = si2; break; }
+                si2 = si2 + 1;
+            }
             lbl : ., mut = ".LC";
-            lbl = lbl + __builtin_int_to_str(val);
+            lbl = lbl + __builtin_int_to_str(lbl_idx);
             asm = asm + "    lea r10, ";
             asm = asm + lbl;
             asm = asm + "[rip]\n";
@@ -223,23 +231,23 @@ fn x86_gen_instr(instr_idx: int) -> string {
             ai = ai + 1;
         }
         if func_name == "__builtin_syscall3" {
-            // 内联 syscall：参数已在 rdi=nr, rsi=a1, rdx=a2, rcx=a3
-            // 需要映射为：rax=nr, rdi=a1, rsi=a2, rdx=a3, r10=0
+            //  syscall rdi=nr, rsi=a1, rdx=a2, rcx=a3
+            // rax=nr, rdi=a1, rsi=a2, rdx=a3, r10=0
             asm = asm + "    mov rax, rdi\n";
             asm = asm + "    mov rdi, rsi\n";
             asm = asm + "    mov rsi, rdx\n";
             asm = asm + "    mov rdx, rcx\n";
-            asm = asm + "    xor r10, r10\n";  // 清零第4个参数（wait4 的 rusage 等）
+            asm = asm + "    xor r10, r10\n";
             asm = asm + "    syscall\n";
-        } else if func_name != "" && func_name != "__builtin_str_len" && func_name != "__builtin_str_get"
-            && func_name != "__builtin_str_sub" && func_name != "__builtin_int_to_str"
-            && func_name != "__builtin_str_to_int" && func_name != "__builtin_str_push"
-            && func_name != "__builtin_str_from_int" {
+        } else if __builtin_str_eq(func_name, "__builtin_load8") != 0 ||
+                  __builtin_str_eq(func_name, "__builtin_store8") != 0 {
+            // load8/store8  IR_STORE/IR_LOAD 
+            asm = asm + "    xor eax, eax\n";
+        } else if __builtin_str_len(func_name) > 0 {
+            //  __builtin_*   callrt_core.o
             asm = asm + "    call ";
             asm = asm + func_name;
             asm = asm + "\n";
-        } else {
-            asm = asm + "    xor eax, eax\n";
         }
         if dest >= 0 {
             doff := x86_get_offset(dest);

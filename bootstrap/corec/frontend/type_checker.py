@@ -230,6 +230,11 @@ class TypeChecker:
                 if left_t.name not in ('int','float','string') or right_t.name not in ('int','float','string'):
                     self.errors.append(f"Comparison not allowed")
                 return BaseType('bool')
+            elif expr.op in ('|', '&'):
+                if left_t.name == 'int' and right_t.name == 'int':
+                    return BaseType('int')
+                self.errors.append(f"Bitwise ops require int")
+                return BaseType('never')
             elif expr.op in ('&&','||'):
                 if left_t.name == 'bool' and right_t.name == 'bool':
                     return BaseType('bool')
