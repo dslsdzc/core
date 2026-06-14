@@ -97,6 +97,10 @@ fn e2_lr(b: string, p: int, rel: int) -> int {
     e2_w8(b, p, 76); e2_w8(b, p+1, 141); e2_w8(b, p+2, 21); e2_w32(b, p+3, rel); return 7;
 }
 
+fn e2_lrb(b: string, p: int, rel: int) -> int {
+    e2_w8(b, p, 73); e2_w8(b, p+1, 141); e2_w8(b, p+2, 29); e2_w32(b, p+3, rel); return 7;
+}
+
 fn e2_lb(b: string, p: int, o: int) -> int {
     e2_w8(b, p, 76); e2_w8(b, p+1, 141); e2_w8(b, p+2, 85); e2_w8(b, p+3, o); return 4;
 }
@@ -153,7 +157,13 @@ fn arch_instr_size(instr_idx: int) -> int {
     }
     if op == IR_ALLOC { return 0; }
     if op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY { return 14; }
-    if op == IR_LOAD || op == IR_STORE { return 8; }
+    if op == IR_LOAD || op == IR_STORE {
+        // Check if global: 3 + 7 + 3 = 13 bytes for lea+mov+st/ld, else 4+4=8
+        s3 := iri_s3(instr_idx);  // src3 is redundant, use s1 from earlier vars
+        // We don't have s1 at this scope, check directly
+        if iri_s1(instr_idx) >= 0 && iri_s1(instr_idx) < 32768 && g_x86_is_global[iri_s1(instr_idx)] != 0 { return 13; }
+        return 8;
+    }
     if op == IR_LOAD_FIELD { return 15; }
     if op == IR_STORE_FIELD { return 15; }
     if op == IR_REF { return 8; }
@@ -303,14 +313,35 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     }
 
     if op == IR_LOAD && d >= 0 {
-        do2 := g2_slot(d); o1 := g2_slot(s1);
-        cp = cp + e2_ld(buf, pos+cp, 10, o1); cp = cp + e2_st(buf, pos+cp, 10, do2);
+        do2 := g2_slot(d);
+        if s1 >= 0 && s1 < 32768 && g_x86_is_global[s1] != 0 {
+            g_x86_rip_patch_pos[g_x86_rip_patch_count] = pos + cp + 3;
+            g_x86_rip_patch_globals[g_x86_rip_patch_count] = s1;
+            g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
+            cp = cp + e2_lr(buf, pos+cp, 0);
+            e2_w8(buf, pos+cp, 77); e2_w8(buf, pos+cp+1, 139); e2_w8(buf, pos+cp+2, 18); cp = cp + 3;
+            cp = cp + e2_st(buf, pos+cp, 10, do2);
+        } else {
+            o1 := g2_slot(s1);
+            cp = cp + e2_ld(buf, pos+cp, 10, o1); cp = cp + e2_st(buf, pos+cp, 10, do2);
+        }
         return cp;
     }
 
     if op == IR_STORE {
-        o1 := g2_slot(s1); o2 := g2_slot(s2);
-        cp = cp + e2_ld(buf, pos+cp, 10, o2); cp = cp + e2_st(buf, pos+cp, 10, o1);
+        o1 := g2_slot(s1);
+        if s1 >= 0 && s1 < 32768 && g_x86_is_global[s1] != 0 {
+            o2 := g2_slot(s2);
+            cp = cp + e2_ld(buf, pos+cp, 10, o2);
+            g_x86_rip_patch_pos[g_x86_rip_patch_count] = pos + cp + 3;
+            g_x86_rip_patch_globals[g_x86_rip_patch_count] = s1;
+            g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
+            cp = cp + e2_lrb(buf, pos+cp, 0);
+            e2_w8(buf, pos+cp, 77); e2_w8(buf, pos+cp+1, 137); e2_w8(buf, pos+cp+2, 26); cp = cp + 3;
+        } else {
+            o2 := g2_slot(s2);
+            cp = cp + e2_ld(buf, pos+cp, 10, o2); cp = cp + e2_st(buf, pos+cp, 10, o1);
+        }
         return cp;
     }
 

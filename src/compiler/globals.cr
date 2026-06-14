@@ -40,12 +40,14 @@ g_label_poses : [int; 32], mut;
 g_label_count : int, mut;
 g_next_label : int, mut;
 
-// Backend arrays (still fixed size for now)
+// Backend arrays
 g_x86_str_offs : [int; MAX_STRS], mut;  g_x86_str_count : int, mut;
 g_x86_ext_rel_pos : [int; 64], mut;     g_x86_ext_rel_name : [int; 64], mut;
 g_x86_ext_rel_count : int, mut;
-g_x86_rip_patch_pos : [int; 64], mut;   g_x86_rip_patch_globals : [int; 64], mut;
+g_x86_rip_patch_pos : [int; 1024], mut;  g_x86_rip_patch_globals : [int; 1024], mut;
 g_x86_rip_patch_count : int, mut;
 g_x86_vars : [int; 32768], mut;         g_x86_var_count : int, mut;
 g_x86_stack_size : int, mut;            g_x86_func_idx : int, mut;
 g_x86_is_enum : [int; 32768], mut;      g_x86_is_enum_count : int, mut;
+g_x86_is_global : [int; 32768], mut;    // 1 if IR var is a BSS global
+g_x86_global_off : [int; 32768], mut;   // BSS byte offset for each global var
