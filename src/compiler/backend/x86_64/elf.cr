@@ -264,8 +264,9 @@ fn x86_64_elf_generate(buf: string) -> int {
     si = si + 1; }
 
     // ── Patch _start's call to main ──
+    main_ni := str_intern("main");
     mo := -1; fi = 0; loop { if fi >= g_ir_func_count { break; }
-        if __builtin_str_eq(str_get(r64(g_ir_func_name_idx, fi * 8)), "main") != 0 { mo = g_x86_func_offsets[fi*2+1]; break; }
+        if r64(g_ir_func_name_idx, fi * 8) == main_ni { mo = g_x86_func_offsets[fi*2+1]; break; }
     fi = fi + 1; }
     if mo >= 0 {
         rel := mo - 5;
