@@ -194,17 +194,14 @@ fn lower_to_ccr() {
         if ni >= g_df_node_count { break; }
         nd := g_df_nodes[ni];
         idx := g_ir_instr_count;
-        if idx < MAX_IRINSTRUCTIONS {
-            g_ir_instrs[idx] = IRInstr {
-                opcode = nd.opcode,
-                dest = nd.dest_var,
-                src1 = nd.src1,
-                src2 = nd.src2,
-                src3 = nd.src3,
-                type_kind = nd.type_kind,
-            };
-            g_ir_instr_count = idx + 1;
-        }
+        dyn_grow_ir_instrs(idx + 1);
+        iri_set_op(idx, nd.opcode);
+        iri_set_dest(idx, nd.dest_var);
+        iri_set_s1(idx, nd.src1);
+        iri_set_s2(idx, nd.src2);
+        iri_set_s3(idx, nd.src3);
+        iri_set_tk(idx, nd.type_kind);
+        g_ir_instr_count = idx + 1;
         ni = ni + 1;
     }
 }

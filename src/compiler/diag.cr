@@ -133,7 +133,7 @@ fn print_parse_errors() {
     ei2 : ., mut = 0;
     loop {
         if ei2 >= g_error_count { break; }
-        __builtin_println("error: " + g_errors[ei2]);
+        __builtin_println("error: " + str_get(r64(g_errors, ei2 * 8)));
         ei2 = ei2 + 1;
     }
 }

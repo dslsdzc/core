@@ -203,7 +203,7 @@ fn emit(buf: string, total: int, is_so: int) {
         if k == 1 {
             is := "/lib64/ld-linux-x86-64.so.2";
             j : ., mut = 0; loop { if j >= __builtin_str_len(is) { break; }
-                w8(buf,p+j,__builtin_load8(is,j)); j = j + 1; }
+                w8(buf,p+j, __builtin_load8(is,j)); j = j + 1; }
             w8(buf,p+__builtin_str_len(is),0); }
 
         // User code
@@ -239,12 +239,12 @@ fn emit(buf: string, total: int, is_so: int) {
             // Build dynstr
             db : ., mut = __builtin_alloc(1024); w8(db,0,0); so_off : ., mut = 1;
             j : ., mut = 0; loop { if j >= __builtin_str_len("core_librt.so") { break; }
-                w8(db,so_off+j,__builtin_load8("core_librt.so",j)); j=j+1; }
+                w8(db,so_off+j, __builtin_load8("core_librt.so",j)); j=j+1; }
             w8(db,so_off+__builtin_str_len("core_librt.so"),0);
             nxt : ., mut = so_off+__builtin_str_len("core_librt.so")+1;
             pi : ., mut = 0; loop { if pi >= g_plt_count { break; }
                 j=0; loop { if j >= __builtin_str_len(g_plts[pi].name) { break; }
-                    w8(db,nxt+j,__builtin_load8(g_plts[pi].name,j)); j=j+1; }
+                    w8(db,nxt+j, __builtin_load8(g_plts[pi].name,j)); j=j+1; }
                 w8(db,nxt+__builtin_str_len(g_plts[pi].name),0);
                 nxt=nxt+__builtin_str_len(g_plts[pi].name)+1; pi=pi+1; }
             // Write dynstr to its chunk
@@ -299,7 +299,7 @@ fn patch_relocs() {
         code_off : ., mut = abs_pos - 176;
         if code_off < 0 || code_off >= g_user_size { ri=ri+1; continue; }
         fn_name_ni := g_x86_ext_rel_name[ri]; fn_name : ., mut = "";
-        if fn_name_ni >= 0 { fn_name = g_strs[fn_name_ni]; }
+        if fn_name_ni >= 0 { fn_name = str_get(fn_name_ni); }
         plt_idx : ., mut = -1;
         si : ., mut = 0; loop { if si >= g_plt_count { break; }
             if __builtin_str_eq(g_plts[si].name, fn_name) != 0 { plt_idx = si; break; }

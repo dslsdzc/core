@@ -62,7 +62,7 @@ fn calc_ccr_size() -> int {
     si : ., mut = 0;
     loop {
         if si >= g_str_count { break; }
-        sl := __builtin_str_len(g_strs[si]);
+        sl := str_len(si);
         sz = sz + 4 + sl;
         si = si + 1;
     }
@@ -76,8 +76,8 @@ fn calc_ccr_size() -> int {
     sti : ., mut = 0;
     loop {
         if sti >= g_struct_count { break; }
-        s := g_structs[sti];
-        sz = sz + 8 + s.field_count * 8;
+        fc := si_field_count(sti);
+        sz = sz + 8 + fc * 8;
         sti = sti + 1;
     }
 
@@ -85,13 +85,14 @@ fn calc_ccr_size() -> int {
     ei : ., mut = 0;
     loop {
         if ei >= g_enum_count { break; }
-        e := g_enums[ei];
+        vc := ei_variant_count(ei);
         sz = sz + 8;  // name_idx + variant_count
         vi : ., mut = 0;
         loop {
-            if vi >= e.variant_count { break; }
+            if vi >= vc { break; }
+            tc := ei_variant_type_count(ei, vi);
             sz = sz + 8;  // variant_name_idx + field_count
-            sz = sz + e.variants[vi].type_count * 4;
+            sz = sz + tc * 4;
             vi = vi + 1;
         }
         ei = ei + 1;
@@ -124,12 +125,12 @@ fn save_ccr(path: string) -> int {
     si : ., mut = 0;
     loop {
         if si >= g_str_count { break; }
-        sl := __builtin_str_len(g_strs[si]);
+        sl := str_len(si);
         buf_write_u32(buf, pos, sl); pos = pos + 4;
         ci : ., mut = 0;
         loop {
             if ci >= sl { break; }
-            ch := __builtin_load8(g_strs[si], ci);
+            ch := str_load8(si, ci);
             __builtin_store8(buf, pos, ch);
             pos = pos + 1;
             ci = ci + 1;
@@ -141,13 +142,13 @@ fn save_ccr(path: string) -> int {
     fi : ., mut = 0;
     loop {
         if fi >= g_ir_func_count { break; }
-        buf_write_u32(buf, pos, g_ir_func_name_idx[fi]); pos = pos + 4;
-        buf_write_u32(buf, pos, g_ir_func_param_count[fi]); pos = pos + 4;
-        buf_write_u32(buf, pos, g_ir_func_ret_type[fi]); pos = pos + 4;
-        buf_write_u32(buf, pos, g_ir_func_instr_start[fi]); pos = pos + 4;
-        buf_write_u32(buf, pos, g_ir_func_instr_count[fi]); pos = pos + 4;
-        buf_write_u32(buf, pos, g_ir_func_var_start[fi]); pos = pos + 4;
-        buf_write_u32(buf, pos, g_ir_func_var_count[fi]); pos = pos + 4;
+        buf_write_u32(buf, pos, r64(g_ir_func_name_idx, fi * 8)); pos = pos + 4;
+        buf_write_u32(buf, pos, r64(g_ir_func_param_count, fi * 8)); pos = pos + 4;
+        buf_write_u32(buf, pos, r64(g_ir_func_ret_type, fi * 8)); pos = pos + 4;
+        buf_write_u32(buf, pos, r64(g_ir_func_instr_start, fi * 8)); pos = pos + 4;
+        buf_write_u32(buf, pos, r64(g_ir_func_instr_count, fi * 8)); pos = pos + 4;
+        buf_write_u32(buf, pos, r64(g_ir_func_var_start, fi * 8)); pos = pos + 4;
+        buf_write_u32(buf, pos, r64(g_ir_func_var_count, fi * 8)); pos = pos + 4;
         fi = fi + 1;
     }
 
@@ -155,13 +156,12 @@ fn save_ccr(path: string) -> int {
     ii : ., mut = 0;
     loop {
         if ii >= g_ir_instr_count { break; }
-        inst := g_ir_instrs[ii];
-        buf_write_u32(buf, pos, inst.opcode); pos = pos + 4;
-        buf_write_i32(buf, pos, inst.dest); pos = pos + 4;
-        buf_write_i32(buf, pos, inst.src1); pos = pos + 4;
-        buf_write_i32(buf, pos, inst.src2); pos = pos + 4;
-        buf_write_i32(buf, pos, inst.src3); pos = pos + 4;
-        buf_write_u32(buf, pos, inst.type_kind); pos = pos + 4;
+        buf_write_u32(buf, pos, iri_op(ii)); pos = pos + 4;
+        buf_write_i32(buf, pos, iri_dest(ii)); pos = pos + 4;
+        buf_write_i32(buf, pos, iri_s1(ii)); pos = pos + 4;
+        buf_write_i32(buf, pos, iri_s2(ii)); pos = pos + 4;
+        buf_write_i32(buf, pos, iri_s3(ii)); pos = pos + 4;
+        buf_write_u32(buf, pos, iri_tk(ii)); pos = pos + 4;
         ii = ii + 1;
     }
 
@@ -169,10 +169,9 @@ fn save_ccr(path: string) -> int {
     vi : ., mut = 0;
     loop {
         if vi >= g_ir_var_count { break; }
-        v := g_ir_vars[vi];
-        buf_write_u32(buf, pos, str_intern(v.name)); pos = pos + 4;
-        buf_write_u32(buf, pos, v.id); pos = pos + 4;
-        buf_write_u32(buf, pos, v.type_kind); pos = pos + 4;
+        buf_write_u32(buf, pos, irv_name(vi)); pos = pos + 4;
+        buf_write_u32(buf, pos, irv_id(vi)); pos = pos + 4;
+        buf_write_u32(buf, pos, irv_type(vi)); pos = pos + 4;
         vi = vi + 1;
     }
 
@@ -180,7 +179,7 @@ fn save_ccr(path: string) -> int {
     sci : ., mut = 0;
     loop {
         if sci >= g_ir_str_const_count { break; }
-        buf_write_u32(buf, pos, g_ir_str_consts[sci]); pos = pos + 4;
+        buf_write_u32(buf, pos, r64(g_ir_str_consts, sci * 8)); pos = pos + 4;
         sci = sci + 1;
     }
 
@@ -188,14 +187,14 @@ fn save_ccr(path: string) -> int {
     sti : ., mut = 0;
     loop {
         if sti >= g_struct_count { break; }
-        s := g_structs[sti];
-        buf_write_u32(buf, pos, str_intern(s.name)); pos = pos + 4;
-        buf_write_u32(buf, pos, s.field_count); pos = pos + 4;
+        fc := si_field_count(sti);
+        buf_write_u32(buf, pos, si_name(sti)); pos = pos + 4;
+        buf_write_u32(buf, pos, fc); pos = pos + 4;
         fii : ., mut = 0;
         loop {
-            if fii >= s.field_count { break; }
-            buf_write_u32(buf, pos, str_intern(s.field_names[fii])); pos = pos + 4;
-            buf_write_u32(buf, pos, s.field_types[fii]); pos = pos + 4;
+            if fii >= fc { break; }
+            buf_write_u32(buf, pos, si_field_name(sti, fii)); pos = pos + 4;
+            buf_write_u32(buf, pos, si_field_type(sti, fii)); pos = pos + 4;
             fii = fii + 1;
         }
         sti = sti + 1;
@@ -205,18 +204,19 @@ fn save_ccr(path: string) -> int {
     ei : ., mut = 0;
     loop {
         if ei >= g_enum_count { break; }
-        e := g_enums[ei];
-        buf_write_u32(buf, pos, str_intern(e.name)); pos = pos + 4;
-        buf_write_u32(buf, pos, e.variant_count); pos = pos + 4;
+        vc := ei_variant_count(ei);
+        buf_write_u32(buf, pos, ei_name(ei)); pos = pos + 4;
+        buf_write_u32(buf, pos, vc); pos = pos + 4;
         vi2 : ., mut = 0;
         loop {
-            if vi2 >= e.variant_count { break; }
-            buf_write_u32(buf, pos, str_intern(e.variants[vi2].name)); pos = pos + 4;
-            buf_write_u32(buf, pos, e.variants[vi2].type_count); pos = pos + 4;
+            if vi2 >= vc { break; }
+            tcnt := ei_variant_type_count(ei, vi2);
+            buf_write_u32(buf, pos, ei_variant_name(ei, vi2)); pos = pos + 4;
+            buf_write_u32(buf, pos, tcnt); pos = pos + 4;
             tf : ., mut = 0;
             loop {
-                if tf >= e.variants[vi2].type_count { break; }
-                buf_write_u32(buf, pos, e.variants[vi2].types[tf]); pos = pos + 4;
+                if tf >= tcnt { break; }
+                buf_write_u32(buf, pos, ei_variant_type(ei, vi2, tf)); pos = pos + 4;
                 tf = tf + 1;
             }
             vi2 = vi2 + 1;
@@ -258,13 +258,12 @@ fn load_ccr(data: string, fsize: int) -> int {
     struct_cnt := buf_read_u32(data, pos); pos = pos + 4;
     enum_cnt := buf_read_u32(data, pos); pos = pos + 4;
 
-    // Guard: stay within array bounds
-    if func_cnt > MAX_FUNCS { return -1; }
-    if instr_cnt > MAX_IRINSTRUCTIONS { return -1; }
-    if var_cnt > MAX_IREXPRS { return -1; }
-    if str_cnt > MAX_STRS { return -1; }
-    if struct_cnt > MAX_STRUCTS { return -1; }
-    if enum_cnt > MAX_ENUMS { return -1; }
+    // Grow dynamic arrays to needed capacity
+    dyn_grow_ir_vars(var_cnt);
+    dyn_grow_ir_instrs(instr_cnt);
+    dyn_grow_ir_func_meta(func_cnt);
+    dyn_grow_structs(struct_cnt);
+    dyn_grow_enums(enum_cnt);
 
     // Reset arrays
     g_str_count = 0;
@@ -291,8 +290,7 @@ fn load_ccr(data: string, fsize: int) -> int {
             ci = ci + 1;
         }
         __builtin_store8(s, sl, 0);
-        g_strs[g_str_count] = s;
-        g_str_count = g_str_count + 1;
+        str_intern(s);
         si = si + 1;
     }
 
@@ -300,13 +298,13 @@ fn load_ccr(data: string, fsize: int) -> int {
     fi : ., mut = 0;
     loop {
         if fi >= func_cnt { break; }
-        g_ir_func_name_idx[fi] = buf_read_u32(data, pos); pos = pos + 4;
-        g_ir_func_param_count[fi] = buf_read_u32(data, pos); pos = pos + 4;
-        g_ir_func_ret_type[fi] = buf_read_u32(data, pos); pos = pos + 4;
-        g_ir_func_instr_start[fi] = buf_read_u32(data, pos); pos = pos + 4;
-        g_ir_func_instr_count[fi] = buf_read_u32(data, pos); pos = pos + 4;
-        g_ir_func_var_start[fi] = buf_read_u32(data, pos); pos = pos + 4;
-        g_ir_func_var_count[fi] = buf_read_u32(data, pos); pos = pos + 4;
+        w64(g_ir_func_name_idx, fi * 8, buf_read_u32(data, pos)); pos = pos + 4;
+        w64(g_ir_func_param_count, fi * 8, buf_read_u32(data, pos)); pos = pos + 4;
+        w64(g_ir_func_ret_type, fi * 8, buf_read_u32(data, pos)); pos = pos + 4;
+        w64(g_ir_func_instr_start, fi * 8, buf_read_u32(data, pos)); pos = pos + 4;
+        w64(g_ir_func_instr_count, fi * 8, buf_read_u32(data, pos)); pos = pos + 4;
+        w64(g_ir_func_var_start, fi * 8, buf_read_u32(data, pos)); pos = pos + 4;
+        w64(g_ir_func_var_count, fi * 8, buf_read_u32(data, pos)); pos = pos + 4;
         g_ir_func_count = fi + 1;
         fi = fi + 1;
     }
@@ -321,7 +319,12 @@ fn load_ccr(data: string, fsize: int) -> int {
         s2 := buf_read_i32(data, pos); pos = pos + 4;
         s3 := buf_read_i32(data, pos); pos = pos + 4;
         tk := buf_read_u32(data, pos); pos = pos + 4;
-        g_ir_instrs[ii] = IRInstr { opcode = opcode, dest = dest, src1 = s1, src2 = s2, src3 = s3, type_kind = tk };
+        iri_set_op(ii, opcode);
+        iri_set_dest(ii, dest);
+        iri_set_s1(ii, s1);
+        iri_set_s2(ii, s2);
+        iri_set_s3(ii, s3);
+        iri_set_tk(ii, tk);
         g_ir_instr_count = ii + 1;
         ii = ii + 1;
     }
@@ -330,10 +333,12 @@ fn load_ccr(data: string, fsize: int) -> int {
     vi : ., mut = 0;
     loop {
         if vi >= var_cnt { break; }
-        name := buf_read_u32(data, pos); pos = pos + 4;
+        name_ni := buf_read_u32(data, pos); pos = pos + 4;
         id := buf_read_u32(data, pos); pos = pos + 4;
         tk := buf_read_u32(data, pos); pos = pos + 4;
-        g_ir_vars[vi] = IRVar { name = g_strs[name], id = id, type_kind = tk };
+        irv_set_name(vi, name_ni);
+        irv_set_id(vi, id);
+        irv_set_type(vi, tk);
         g_ir_var_count = vi + 1;
         vi = vi + 1;
     }
@@ -342,7 +347,7 @@ fn load_ccr(data: string, fsize: int) -> int {
     sci : ., mut = 0;
     loop {
         if sci >= str_const_cnt { break; }
-        g_ir_str_consts[sci] = buf_read_u32(data, pos); pos = pos + 4;
+        w64(g_ir_str_consts, sci * 8, buf_read_u32(data, pos)); pos = pos + 4;
         g_ir_str_const_count = sci + 1;
         sci = sci + 1;
     }
@@ -352,18 +357,32 @@ fn load_ccr(data: string, fsize: int) -> int {
     loop {
         if sti >= struct_cnt { break; }
         name_ni := buf_read_u32(data, pos); pos = pos + 4;
-        name_str := g_strs[name_ni];
         fc := buf_read_u32(data, pos); pos = pos + 4;
-        field_names : [string; 16] = [""; 16];
-        field_types : [int; 16] = [0; 16];
+        w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_NAME, name_ni);
+        w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, fc);
+        // Zero out all field slots and type nodes
+        zfi : ., mut = 0;
+        loop {
+            if zfi >= 16 { break; }
+            w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES + zfi * 8, 0);
+            w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES + zfi * 8, 0);
+            w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES + zfi * 8, 0);
+            zfi = zfi + 1;
+        }
+        // Zero generic slots
+        w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT, 0);
+        zgi : ., mut = 0;
+        loop { if zgi >= 4 { break; } w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + zgi * 8, 0); zgi = zgi + 1; }
+        // Write field data
         fi2 : ., mut = 0;
         loop {
             if fi2 >= fc { break; }
-            field_names[fi2] = g_strs[buf_read_u32(data, pos)]; pos = pos + 4;
-            field_types[fi2] = buf_read_u32(data, pos); pos = pos + 4;
+            fn_ni := buf_read_u32(data, pos); pos = pos + 4;
+            ft := buf_read_u32(data, pos); pos = pos + 4;
+            w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES + fi2 * 8, fn_ni);
+            w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES + fi2 * 8, ft);
             fi2 = fi2 + 1;
         }
-        g_structs[sti] = StructInfo { name = name_str, field_names = field_names, field_types = field_types, field_type_nodes = [0;16], field_count = fc, generic_names = ["";4], generic_count = 0 };
         sti = sti + 1;
     }
 
@@ -372,25 +391,39 @@ fn load_ccr(data: string, fsize: int) -> int {
     loop {
         if ei >= enum_cnt { break; }
         ename_ni := buf_read_u32(data, pos); pos = pos + 4;
-        ename_str := g_strs[ename_ni];
         vc := buf_read_u32(data, pos); pos = pos + 4;
-        variants : [EnumVariant; 16] = [EnumVariant { name = "", types = [0;16], type_count = 0 }; 16];
+        w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_NAME, ename_ni);
+        w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, vc);
+        // Zero all variant slots
+        zvi : ., mut = 0;
+        loop {
+            if zvi >= 16 { break; }
+            w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + zvi * OFF_EV_SIZE + OFF_EV_NAME, 0);
+            w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + zvi * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, 0);
+            ztj : ., mut = 0;
+            loop { if ztj >= 16 { break; } w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + zvi * OFF_EV_SIZE + OFF_EV_TYPES + ztj * 8, 0); ztj = ztj + 1; }
+            zvi = zvi + 1;
+        }
+        w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 0);
+        zgi2 : ., mut = 0;
+        loop { if zgi2 >= 4 { break; } w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + zgi2 * 8, 0); zgi2 = zgi2 + 1; }
+        // Write variant data
         vi3 : ., mut = 0;
         loop {
             if vi3 >= vc { break; }
-            vname := g_strs[buf_read_u32(data, pos)]; pos = pos + 4;
+            vni := buf_read_u32(data, pos); pos = pos + 4;
             tc := buf_read_u32(data, pos); pos = pos + 4;
-            vtypes : [int; 16] = [0; 16];
+            w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vi3 * OFF_EV_SIZE + OFF_EV_NAME, vni);
+            w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vi3 * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, tc);
             tf : ., mut = 0;
             loop {
                 if tf >= tc { break; }
-                vtypes[tf] = buf_read_u32(data, pos); pos = pos + 4;
+                tval := buf_read_u32(data, pos); pos = pos + 4;
+                w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vi3 * OFF_EV_SIZE + OFF_EV_TYPES + tf * 8, tval);
                 tf = tf + 1;
             }
-            variants[vi3] = EnumVariant { name = vname, types = vtypes, type_count = tc };
             vi3 = vi3 + 1;
         }
-        g_enums[ei] = EnumInfo { name = ename_str, variants = variants, variant_count = vc };
         ei = ei + 1;
     }
 

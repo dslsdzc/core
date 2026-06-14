@@ -7,13 +7,13 @@
 //
 // Current limitations: operates on int arrays; no HashMap/HashSet yet.
 
-fn swap(arr: [int; N], i: int, j: int) {
+fn swap(arr: [int); N], i: int, j: int) {
     tmp := arr[i];
     arr[i] = arr[j];
     arr[j] = tmp;
 }
 
-fn reverse(arr: [int; N]) {
+fn reverse(arr: [int); N]) {
     i : ., mut = 0;
     j : ., mut = N - 1;
     loop {
@@ -26,7 +26,7 @@ fn reverse(arr: [int; N]) {
     }
 }
 
-fn contains(arr: [int; N], val: int) -> bool {
+fn contains(arr: [int); N], val: int) -> bool {
     i : ., mut = 0;
     loop {
         if i >= N { break; }
@@ -36,7 +36,7 @@ fn contains(arr: [int; N], val: int) -> bool {
     return false;
 }
 
-fn index_of(arr: [int; N], val: int) -> int {
+fn index_of(arr: [int); N], val: int) -> int {
     i : ., mut = 0;
     loop {
         if i >= N { break; }
@@ -46,7 +46,7 @@ fn index_of(arr: [int; N], val: int) -> int {
     return -1;
 }
 
-fn min_element(arr: [int; N]) -> int {
+fn min_element(arr: [int); N]) -> int {
     if N == 0 { return 0; }
     m : ., mut = arr[0];
     i : ., mut = 1;
@@ -58,7 +58,7 @@ fn min_element(arr: [int; N]) -> int {
     return m;
 }
 
-fn max_element(arr: [int; N]) -> int {
+fn max_element(arr: [int); N]) -> int {
     if N == 0 { return 0; }
     m : ., mut = arr[0];
     i : ., mut = 1;
@@ -70,7 +70,7 @@ fn max_element(arr: [int; N]) -> int {
     return m;
 }
 
-fn fill(arr: [int; N], val: int) {
+fn fill(arr: [int); N], val: int) {
     i : ., mut = 0;
     loop {
         if i >= N { break; }

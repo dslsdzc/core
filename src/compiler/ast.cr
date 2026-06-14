@@ -186,8 +186,6 @@ struct LoopInfo {
 
 // Block statement index storage: sequential statement indices for each block
 // EXPR_BLOCK uses a=start_idx_into_g_block_stmts, b=stmt_count
-g_block_stmts : [int; MAX_BLOCK_STMTS];
-g_block_stmt_count : int;
 
 // Flat AST node - representation varies by kind
 struct ASTNode {

@@ -83,7 +83,7 @@ fn elf_write_header(ctx: ElfCtx, layout: MemLayout, code_size: int) {
 
 fn elf_write_code(ctx: ElfCtx, code: string) {
     i : ., mut = 0;
-    loop { if i >= g_asm_code_size { break; } __builtin_store8(ctx.buf, ctx.pos+i, __builtin_load8(code, i)); i = i + 1; }
+    loop { if i >= g_asm_code_size { break; } __builtin_store8(ctx.buf, ctx.pos+i, __builtin_load8(code, i); i = i + 1; }
     ctx.pos = ctx.pos + g_asm_code_size;
 }
 
@@ -558,7 +558,7 @@ fn asm_to_bytes(asm_text: string) -> string {
     __builtin_store8(res_buf, 13, 5);
 
     // Copy generated code after _start
-    ri : ., mut = 0; loop { if ri >= cpos { break; } __builtin_store8(res_buf, ri + 14, __builtin_load8(code, ri)); ri = ri + 1; }
+    ri : ., mut = 0; loop { if ri >= cpos { break; } __builtin_store8(res_buf, ri + 14, __builtin_load8(code, ri); ri = ri + 1; }
 
     __builtin_store8(res_buf, total, 0);
 

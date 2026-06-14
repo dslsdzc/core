@@ -11,8 +11,8 @@ fn ir_interpret() -> int {
     fi : ., mut = 0;
     loop {
         if fi >= g_ir_func_count { break; }
-        ni := g_ir_func_name_idx[fi];
-        if __builtin_str_eq(g_strs[ni], "main") != 0 { main_idx = fi; break; }
+        ni := r64(g_ir_func_name_idx, fi * 8);
+        if __builtin_str_eq(str_get(ni), "main") != 0 { main_idx = fi; break; }
         fi = fi + 1;
     }
     if main_idx < 0 { return -1; }
@@ -104,14 +104,14 @@ fn ir_interpret() -> int {
 
         if op == 4 {  // IR_CALL
             fn_ni := s3;
-            fn_name := g_strs[fn_ni];
+            fn_name := str_get(fn_ni);
             if __builtin_str_eq(fn_name, "__builtin_print") != 0 ||
                __builtin_str_eq(fn_name, "print") != 0 {
-                if s2 >= 1 { str_idx := g_ir_vals[s1]; sval := g_strs[str_idx]; __builtin_print(sval); }
+                if s2 >= 1 { str_idx := g_ir_vals[s1]; sval := str_get(str_idx); __builtin_print(sval); }
             }
             if __builtin_str_eq(fn_name, "__builtin_println") != 0 ||
                __builtin_str_eq(fn_name, "println") != 0 {
-                if s2 >= 1 { str_idx := g_ir_vals[s1]; sval := g_strs[str_idx]; __builtin_println(sval); }
+                if s2 >= 1 { str_idx := g_ir_vals[s1]; sval := str_get(str_idx); __builtin_println(sval); }
             }
             if __builtin_str_eq(fn_name, "__builtin_print_int") != 0 ||
                __builtin_str_eq(fn_name, "print_int") != 0 {

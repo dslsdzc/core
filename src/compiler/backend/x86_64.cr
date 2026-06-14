@@ -2,12 +2,7 @@
 // x86-64 assembly generation from flat IR (GAS .intel_syntax noprefix)
 
 // Stack frame management per function
-g_x86_vars : [int; MAX_IREXPRS], mut;  // var_idx -> stack offset from rbp (negative)
-g_x86_var_count : int, mut;
-g_x86_stack_size : int, mut;  // total stack frame size for current function
-g_x86_func_idx : int, mut;
-g_x86_is_enum : [int; MAX_IREXPRS], mut;  // 1 if var is an enum (affects field offset)
-g_x86_is_enum_count : int, mut;
+// g_x86 arrays declared in globals.cr
 
 fn x86_init_frame() {
     g_x86_var_count = 0;
@@ -73,7 +68,7 @@ fn x86_lookup_struct(name_ni: int) -> int {
     si : ., mut = 0;
     loop {
         if si >= g_struct_count { break; }
-        if str_intern(g_structs[si].name) == name_ni { return si; }
+        if si_name(si) == name_ni { return si; }
         si = si + 1;
     }
     return -1;
@@ -93,12 +88,11 @@ fn x86_jump_label(lbl: int) -> string {
 }
 
 fn x86_gen_instr(instr_idx: int) -> string {
-    inst := g_ir_instrs[instr_idx];
-    op := inst.opcode;
-    dest := inst.dest;
-    s1 := inst.src1;
-    s2 := inst.src2;
-    s3 := inst.src3;
+    op := iri_op(instr_idx);
+    dest := iri_dest(instr_idx);
+    s1 := iri_s1(instr_idx);
+    s2 := iri_s2(instr_idx);
+    s3 := iri_s3(instr_idx);
     asm : ., mut = "";
 
     if op == IR_NOP { return asm; }
@@ -106,7 +100,7 @@ fn x86_gen_instr(instr_idx: int) -> string {
     if op == IR_CONST {
         off := x86_get_offset(dest);
         val := s1;
-        ti := inst.type_kind;
+        ti := iri_tk(instr_idx);
         if ti == TI_STR {
             lbl : ., mut = ".LC";
             lbl = lbl + __builtin_int_to_str(val);
@@ -210,7 +204,7 @@ fn x86_gen_instr(instr_idx: int) -> string {
     if op == IR_CALL {
         func_ni := s3;
         func_name := "";
-        if func_ni >= 0 { func_name = g_strs[func_ni]; }
+        if func_ni >= 0 { func_name = str_get(func_ni); }
         first_arg := s1;
         arg_count := s2;
         arg_regs := ["rdi", "rsi", "rdx", "rcx", "r8", "r9"];
@@ -282,7 +276,7 @@ fn x86_gen_instr(instr_idx: int) -> string {
         if name_ni >= 0 {
             si := x86_lookup_struct(name_ni);
             if si >= 0 {
-                fc := g_structs[si].field_count;
+                fc := si_field_count(si);
                 if fc > 0 {
                     asm = asm + "    mov edi, ";
                     asm = asm + __builtin_int_to_str(fc * 8);
@@ -591,12 +585,12 @@ fn x86_gen_instr(instr_idx: int) -> string {
 }
 
 fn x86_gen_function(func_idx: int) -> string {
-    name_idx := g_ir_func_name_idx[func_idx];
-    func_name := g_strs[name_idx];
-    instr_start := g_ir_func_instr_start[func_idx];
-    instr_count := g_ir_func_instr_count[func_idx];
-    var_count := g_ir_func_var_count[func_idx];
-    var_start := g_ir_func_var_start[func_idx];
+    name_idx := r64(g_ir_func_name_idx, func_idx * 8);
+    func_name := str_get(name_idx);
+    instr_start := r64(g_ir_func_instr_start, func_idx * 8);
+    instr_count := r64(g_ir_func_instr_count, func_idx * 8);
+    var_count := r64(g_ir_func_var_count, func_idx * 8);
+    var_start := r64(g_ir_func_var_start, func_idx * 8);
 
     asm : ., mut = "";
 
@@ -625,7 +619,7 @@ fn x86_gen_function(func_idx: int) -> string {
 
     // Save incoming register params to stack slots (x86-64 ABI: rdi, rsi, rdx, rcx, r8, r9)
     regs := ["rdi", "rsi", "rdx", "rcx", "r8", "r9"];
-    param_count := g_ir_func_param_count[func_idx];
+    param_count := r64(g_ir_func_param_count, func_idx * 8);
     pi : ., mut = 0;
     loop {
         if pi >= param_count { break; }
@@ -682,11 +676,11 @@ fn x86_64_generate() -> string {
     si : ., mut = 0;
     loop {
         if si >= g_ir_str_const_count { break; }
-        str_idx := g_ir_str_consts[si];
+        str_idx := r64(g_ir_str_consts, si * 8);
         lbl : ., mut = ".LC";
         lbl = lbl + __builtin_int_to_str(si);
         lbl = lbl + ": .asciz \"";
-        lbl = lbl + g_strs[str_idx];
+        lbl = lbl + str_get(str_idx);
         lbl = lbl + "\"\n";
         asm = asm + lbl;
         si = si + 1;

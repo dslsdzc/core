@@ -2,12 +2,6 @@
 // Backend: .ccr → ELF/assembly/SO
 // Supports: --elf (static), --shared (DSO), --link (dynamic linking)
 
-fn str_intern(s: string) -> int {
-    i : ., mut = 0; loop { if i >= g_str_count { break; }
-        if __builtin_str_eq(g_strs[i], s) != 0 { return i; } i = i + 1; }
-    if g_str_count < MAX_STRS { g_strs[g_str_count] = s; g_str_count = g_str_count + 1; }
-    return g_str_count - 1; }
-
 fn init_backend_arrays() {
     vi : ., mut = 0; loop { if vi >= 32768 { break; } g_x86_vars[vi] = 0; g_x86_is_enum[vi] = 0; vi = vi + 1; }
     g_x86_var_count = 0; g_x86_stack_size = 0; g_x86_func_idx = 0; g_x86_is_enum_count = 0; }
@@ -80,7 +74,7 @@ fn corearch_main() -> int {
         ci : ., mut = 0; loop { if ci >= cs { break; }
             w8(cd, ci, r8(g_elf_buf, 176+ci)); ci = ci + 1; }
         ri : ., mut = 0; loop { if ri >= g_x86_ext_rel_count { break; }
-            fn_name := g_strs[g_x86_ext_rel_name[ri]];
+            fn_name := str_get(g_x86_ext_rel_name[ri]);
             ctx_add_plt(fn_name, 0); ri = ri + 1; }
         ctx_set_user_code(cd, cs);
         sz = ctx_emit_dyn(g_elf_buf, out_path);

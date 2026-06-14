@@ -21,25 +21,6 @@ g_x86_ret_patch_count : int, mut;
 g_x86_alloc_patch_pos : [int; 256], mut;
 g_x86_alloc_patch_count : int, mut;
 
-// String constant -> rodata offset mapping
-g_x86_str_offs : [int; MAX_STRS], mut;
-g_x86_str_count : int, mut;
-
-g_x86_ext_rel_pos : [int; 64], mut;
-g_x86_ext_rel_name : [int; 64], mut;
-g_x86_ext_rel_count : int, mut;
-
-g_x86_rip_patch_pos : [int; 64], mut;
-g_x86_rip_patch_globals : [int; 64], mut;
-g_x86_rip_patch_count : int, mut;
-
-// Globals originally from x86_64.cr (text assembly backend, now removed)
-g_x86_vars : [int; 32768], mut;
-g_x86_var_count : int, mut;
-g_x86_stack_size : int, mut;
-g_x86_func_idx : int, mut;
-g_x86_is_enum : [int; 32768], mut;
-g_x86_is_enum_count : int, mut;
 
 fn g2_init() {
     g_x86_emit_var_count = 0;
@@ -64,14 +45,14 @@ fn g2_slot(v: int) -> int {
 
 fn g2_str_off(si: int) -> int {
     o := 0; i := 0;
-    loop { if i >= g_x86_str_count { break; } if g_x86_str_offs[i] == si { return o; } o = o + __builtin_str_len(g_strs[g_x86_str_offs[i]]) + 1; i = i + 1; }
+    loop { if i >= g_x86_str_count { break; } if g_x86_str_offs[i] == si { return o; } o = o + str_len(g_x86_str_offs[i]) + 1; i = i + 1; }
     if g_x86_str_count < MAX_STRS { g_x86_str_offs[g_x86_str_count] = si; g_x86_str_count = g_x86_str_count + 1; }
     return o;
 }
 
 fn g2_rodata_sz() -> int {
     o := 0; i := 0;
-    loop { if i >= g_x86_str_count { break; } o = o + __builtin_str_len(g_strs[g_x86_str_offs[i]]) + 1; i = i + 1; }
+    loop { if i >= g_x86_str_count { break; } o = o + str_len(g_x86_str_offs[i]) + 1; i = i + 1; }
     return o;
 }
 
@@ -133,13 +114,12 @@ fn e2_je(b: string, p: int, rel: int) -> int {
 }
 
 fn e2_alu(b: string, p: int, op: int) -> int {
-    e2_w8(b, p, 77); e2_w8(b, p+1, op); e2_w8(b, p+2, 192 + (11%8)*8 + (10%8)); return 3;
+    e2_w8(b, p, 77); e2_w8(b, p+1, op); e2_w8(b, p+2, 192 + (11%8)*8 + (10%8); return 3;
 }
 
 // ── arch_instr_size: instruction byte count for resolve_labels ──
 fn arch_instr_size(instr_idx: int) -> int {
-    inst := g_ir_instrs[instr_idx];
-    op := inst.opcode; s3 := inst.src3; ti := inst.type_kind; d := inst.dest;
+    op := iri_op(instr_idx); s3 := iri_s3(instr_idx); ti := iri_tk(instr_idx); d := iri_dest(instr_idx);
 
     if op == IR_CONST {
         if ti == TI_STR { return 11; }
@@ -158,17 +138,17 @@ fn arch_instr_size(instr_idx: int) -> int {
         return sz;
     }
     if op == IR_CALL {
-        fn2 := ""; if s3 >= 0 { fn2 = g_strs[s3]; }
+        fn2 := ""; if s3 >= 0 { fn2 = str_get(s3); }
         if __builtin_str_eq(fn2, "__builtin_syscall3") != 0 {
-            sz := inst.src2 * 4 + 18; if d >= 0 { sz = sz + 4; } return sz;
+            sz := iri_s2(instr_idx) * 4 + 18; if d >= 0 { sz = sz + 4; } return sz;
         }
         if __builtin_str_len(fn2) > 0 {
-            sz := inst.src2 * 4 + 5; if d >= 0 { sz = sz + 4; } return sz;
+            sz := iri_s2(instr_idx) * 4 + 5; if d >= 0 { sz = sz + 4; } return sz;
         }
         sz := 2; if d >= 0 { sz = sz + 4; } return sz;
     }
     if op == IR_RETURN {
-        if inst.src1 >= 0 { return 9; }
+        if iri_s1(instr_idx) >= 0 { return 9; }
         return 5;
     }
     if op == IR_ALLOC { return 0; }
@@ -191,8 +171,7 @@ fn arch_instr_size(instr_idx: int) -> int {
 
 // ── x86_emit_instr: write one instruction to buffer, return bytes written ──
 fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
-    inst := g_ir_instrs[instr_idx];
-    op := inst.opcode; d := inst.dest; s1 := inst.src1; s2 := inst.src2; s3 := inst.src3; ti := inst.type_kind;
+    op := iri_op(instr_idx); d := iri_dest(instr_idx); s1 := iri_s1(instr_idx); s2 := iri_s2(instr_idx); s3 := iri_s3(instr_idx); ti := iri_tk(instr_idx);
     cp := 0;
 
     if op == IR_NOP { return 0; }
@@ -249,7 +228,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     }
 
     if op == IR_CALL {
-        fn2 := ""; if s3 >= 0 { fn2 = g_strs[s3]; }
+        fn2 := ""; if s3 >= 0 { fn2 = str_get(s3); }
         fa := s1; ac := s2;
         ai := 0;
         loop { if ai >= ac { break; } if ai >= 6 { break; }
@@ -296,9 +275,9 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         name_ni := s3;
         if name_ni >= 0 {
             si := -1; sfi := 0;
-            loop { if sfi >= g_struct_count { break; } if str_intern(g_structs[sfi].name) == name_ni { si = sfi; break; } sfi = sfi + 1; }
+            loop { if sfi >= g_struct_count { break; } if si_name(sfi) == name_ni { si = sfi; break; } sfi = sfi + 1; }
             if si >= 0 {
-                fc := g_structs[si].field_count;
+                fc := si_field_count(si);
                 if fc > 0 {
                     e2_w8(buf, pos+cp, 191); e2_w32(buf, pos+cp+1, fc * 8); cp = cp + 5;  // mov edi, size
                     g_x86_alloc_patch_pos[g_x86_alloc_patch_count] = pos + cp;

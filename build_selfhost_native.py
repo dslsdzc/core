@@ -149,6 +149,7 @@ def main():
             'src/stdlib/toml.cr',
             'src/compiler/ast.cr',
             'src/compiler/globals.cr',
+            'src/compiler/dyn_arr.cr',
             'src/arch/linux/ld/instr.cr',
             'src/arch/linux/ld/resolve.cr',
             'src/arch/linux/ld/elf.cr',

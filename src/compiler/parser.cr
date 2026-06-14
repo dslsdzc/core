@@ -1,8 +1,6 @@
 // Parser: recursive descent with flat AST output
 
 // Global state for parser (shared globals in globals.cr)
-g_ast : [ASTNode; MAX_AST], mut;
-g_ast_count : int, mut;
 g_token_pos : int, mut;
 g_loop_stack : [LoopInfo; MAX_LOOPS], mut;
 g_loop_depth : int, mut;
@@ -31,34 +29,16 @@ struct MethodEntry {
 g_methods : [MethodEntry; MAX_FUNCS], mut;
 g_method_count : int, mut;
 
-fn str_intern(s: string) -> int {
-    i : ., mut = 0;
-    loop {
-        if i >= g_str_count { break; }
-        if __builtin_str_eq(g_strs[i], s) != 0 { return i; }
-        i = i + 1;
-    }
-    if g_str_count < MAX_STRS {
-        g_strs[g_str_count] = s;
-        g_str_count = g_str_count + 1;
-    }
-    return g_str_count - 1;
-}
-
 fn alloc_node(kind: int, a: int, b: int, c: int, iv: int, tv: int, d: int, line: int, col: int) -> int {
-    idx := g_ast_count;
-    if idx >= MAX_AST { return 0; }
-    g_ast[idx] = ASTNode { kind = kind, a = a, b = b, c = c, int_val = iv, type_val = tv, data = d, line = line, col = col };
-    g_ast_count = idx + 1;
-    return idx;
+    return ast_alloc(kind, a, b, c, iv, tv, d, line, col);
 }
 
 fn cur_tok() -> int { return g_token_pos; }
-fn tok_k(p: int) -> int { return g_tokens[p].kind; }
-fn tok_lx(p: int) -> string { return g_tokens[p].lexeme; }
-fn tok_iv(p: int) -> int { return g_tokens[p].int_val; }
-fn tok_ln(p: int) -> int { return g_tokens[p].line; }
-fn tok_cl(p: int) -> int { return g_tokens[p].col; }
+fn tok_k(p: int) -> int { return r64(g_tokens, p * ESZ_TOKEN + OFF_TK_KIND); }
+fn tok_lx(p: int) -> string { return str_get(r64(g_tokens, p * ESZ_TOKEN + OFF_TK_LEXEME)); }
+fn tok_iv(p: int) -> int { return r64(g_tokens, p * ESZ_TOKEN + OFF_TK_INTVAL); }
+fn tok_ln(p: int) -> int { return r64(g_tokens, p * ESZ_TOKEN + OFF_TK_LINE); }
+fn tok_cl(p: int) -> int { return r64(g_tokens, p * ESZ_TOKEN + OFF_TK_COL); }
 
 fn advance_tok() -> int {
     t := cur_tok();
@@ -162,7 +142,7 @@ fn parse_type() -> int {
 }
 
 fn unpack_type(typ: int) -> int {
-    if g_ast[typ].kind == 0 { return g_ast[typ].type_val; }
+    if ast_kind(typ) == 0 { return ast_type_val(typ); }
     return 0;
 }
 
@@ -301,16 +281,16 @@ fn parse_postfix() -> int {
             advance_tok();
             // Check if this is an enum constructor (uppercase ident + parenthesized args)
             is_enum_con : ., mut = 0;
-            if g_ast[node].kind == EXPR_IDENT {
-                name_idx := g_ast[node].int_val;
-                name := g_strs[name_idx];
+            if ast_kind(node) == EXPR_IDENT {
+                name_idx := ast_int_val(node);
+                name := str_get(name_idx);
                 c := __builtin_str_get(name, 0);
                 if __builtin_str_cmp(c, "A") >= 0 && __builtin_str_cmp(c, "Z") <= 0 {
                     is_enum_con = 1;
                 }
             }
             if is_enum_con == 1 {
-                name_idx := g_ast[node].int_val;
+                name_idx := ast_int_val(node);
                 node = alloc_node(EXPR_ENUM_CONSTRUCTOR, name_idx, af, ac, 0, 0, 0, tok_ln(t), tok_cl(t));
             } else {
                 node = alloc_node(EXPR_CALL, node, af, ac, 0, 0, 0, tok_ln(t), tok_cl(t));
@@ -450,8 +430,8 @@ fn parse_primary() -> int {
         }
         return alloc_node(EXPR_STRING, 0, 0, 0, str_intern(s), TY_STRING, 0, tok_ln(t), tok_cl(t));
     }
-    if tok_k(t) == T_TRUE { advance_tok(); return alloc_node(EXPR_BOOL, 0, 0, 0, 1, TY_BOOL, 0, tok_ln(t), tok_cl(t)); }
-    if tok_k(t) == T_FALSE { advance_tok(); return alloc_node(EXPR_BOOL, 0, 0, 0, 0, TY_BOOL, 0, tok_ln(t), tok_cl(t)); }
+    if tok_k(t) == T_TRUE { advance_tok(); return alloc_node(EXPR_BOOL, 0, 0, 0, 1, TY_BOOL, 0, tok_ln(t), tok_cl(t); }
+    if tok_k(t) == T_FALSE { advance_tok(); return alloc_node(EXPR_BOOL, 0, 0, 0, 0, TY_BOOL, 0, tok_ln(t), tok_cl(t); }
     if tok_k(t) == T_NONE {
         advance_tok();
         return alloc_node(EXPR_ENUM_CONSTRUCTOR, str_intern("None"), -1, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
@@ -483,7 +463,7 @@ fn parse_primary() -> int {
                 fni := str_intern(tok_lx(ft));
                 advance_tok();
                 fv := parse_expr();
-                alloc_node(0, fv, 0, 0, 0, 0, 0, tok_ln(ft), tok_cl(ft));
+                ast_alloc(0, fv, 0, 0, 0, 0, 0, tok_ln(ft), tok_cl(ft));
                 if fc == 0 { ff = g_ast_count - 1; }
                 fc = fc + 1;
                 if check(T_COMMA) { advance_tok(); }
@@ -546,8 +526,7 @@ fn parse_primary() -> int {
                 ri : ., mut = 1;
                 loop {
                     if ri >= cnt { break; }
-                    src_node := g_ast[ef];
-                    alloc_node(src_node.kind, src_node.a, src_node.b, src_node.c, src_node.int_val, src_node.type_val, src_node.data, src_node.line, src_node.col);
+                    ast_alloc(ast_kind(ef), ast_a(ef), ast_b(ef), ast_c(ef), ast_int_val(ef), ast_type_val(ef), ast_data(ef), ast_line(ef), ast_col(ef));
                     ri = ri + 1;
                 }
                 ec = cnt;
@@ -585,10 +564,9 @@ fn parse_block() -> int {
     i : ., mut = 0;
     loop {
         if i >= sc { break; }
-        if g_block_stmt_count < MAX_BLOCK_STMTS {
-            g_block_stmts[g_block_stmt_count] = local_stmts[i];
-            g_block_stmt_count = g_block_stmt_count + 1;
-        }
+        dyn_grow_block_stmts(g_block_stmt_count + 1);
+        w64(g_block_stmts, g_block_stmt_count * 8, local_stmts[i]);
+        g_block_stmt_count = g_block_stmt_count + 1;
         i = i + 1;
     }
     return alloc_node(EXPR_BLOCK, si, sc, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
@@ -797,7 +775,7 @@ fn parse_match_expr() -> int {
         if check(T_COMMA) { advance_tok(); }
         n := alloc_node(EXPR_ARM, pat, body, -1, 0, 0, 0, tok_ln(t), tok_cl(t));
         if ac == 0 { af = n; }
-        if al >= 0 { g_ast[al].c = n; }  // link previous arm to this one
+        if al >= 0 { ast_set_c(al, n); }  // link previous arm to this one
         al = n;
         ac = ac + 1;
     }
@@ -893,7 +871,7 @@ fn parse_pattern() -> int {
                 fni := str_intern(tok_lx(ft));
                 advance_tok(); // =
                 fp := parse_pattern();
-                alloc_node(0, fp, 0, 0, 0, 0, 0, tok_ln(ft), tok_cl(ft));
+                ast_alloc(0, fp, 0, 0, 0, 0, 0, tok_ln(ft), tok_cl(ft));
                 if fc == 0 { ff = g_ast_count - 1; }
                 fc = fc + 1;
                 if check(T_COMMA) { advance_tok(); }
@@ -932,7 +910,7 @@ fn parse_generics() -> int {
     return 0;
 }
 
-fn parse_generics_into(names: [string; 4]) -> int {
+fn parse_generics_into(names: [string); 4]) -> int {
     if check(T_LBRACKET) {
         advance_tok(); // [
         gc : ., mut = 0;
@@ -951,36 +929,59 @@ fn parse_generics_into(names: [string; 4]) -> int {
     return 0;
 }
 
-fn store_func_generics(fi: int, names: [string; 4], count: int) {
-    g_funcs[fi].generic_count = count;
+fn store_func_generics(fi: int, names: [string); 4], count: int) {
+    fi_set_generic_count(fi, count);
     gi : ., mut = 0;
     loop {
         if gi >= count { break; }
-        g_funcs[fi].generic_names[gi] = names[gi];
+        ni := str_intern(names[gi]);
+        fi_set_generic_name(fi, gi, ni);
         gi = gi + 1;
     }
 }
 
 fn add_func(name: string, pc: int, rt: int, an: int) -> int {
-    if g_func_count >= MAX_FUNCS { return -1; }
     idx := g_func_count;
-    g_funcs[idx] = FuncInfo { name = name, param_count = pc, param_types = [0;16], return_type = rt, ast_node = an, generic_names = ["";4], generic_count = 0 };
+    dyn_grow_funcs(idx + 1);
+    ni := str_intern(name);
+    fi_set_name(idx, ni);
+    fi_set_param_count(idx, pc);
+    fi_set_return_type(idx, rt);
+    fi_set_ast_node(idx, an);
     g_func_count = idx + 1;
     return idx;
 }
 
 fn add_struct(name: string) -> int {
-    if g_struct_count >= MAX_STRUCTS { return -1; }
     idx := g_struct_count;
-    g_structs[idx] = StructInfo { name = name, field_names = ["";16], field_types = [0;16], field_type_nodes = [0;16], field_count = 0, generic_names = ["";4], generic_count = 0 };
+    dyn_grow_structs(idx + 1);
+    ni := str_intern(name);
+    base := idx * ESZ_STRUCTINFO;
+    // Zero the entire struct entry
+    zi : ., mut = 0;
+    loop {
+        if zi >= ESZ_STRUCTINFO { break; }
+        w8(g_structs, base + zi, 0);
+        zi = zi + 1;
+    }
+    w64(g_structs, base + OFF_SI_NAME, ni);
     g_struct_count = idx + 1;
     return idx;
 }
 
 fn add_enum(name: string) -> int {
-    if g_enum_count >= MAX_ENUMS { return -1; }
     idx := g_enum_count;
-    g_enums[idx] = EnumInfo { name = name, variants = [EnumVariant{name="",types=[0;16],type_count=0};16], variant_count = 0, generic_names = ["";4], generic_count = 0 };
+    dyn_grow_enums(idx + 1);
+    ni := str_intern(name);
+    base := idx * ESZ_ENUMINFO;
+    // Zero the entire enum entry
+    zi : ., mut = 0;
+    loop {
+        if zi >= ESZ_ENUMINFO { break; }
+        w8(g_enums, base + zi, 0);
+        zi = zi + 1;
+    }
+    w64(g_enums, base + OFF_EI_NAME, ni);
     g_enum_count = idx + 1;
     return idx;
 }
@@ -1088,11 +1089,11 @@ fn parse_declaration() {
         si := add_struct(name);
         if si >= 0 {
             if sg_count > 0 {
-                g_structs[si].generic_count = sg_count;
+                w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT, sg_count);
                 sgi : ., mut = 0;
                 loop {
                     if sgi >= sg_count { break; }
-                    g_structs[si].generic_names[sgi] = sg_names[sgi];
+                    w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + sgi * 8, str_intern(sg_names[sgi]));
                     sgi = sgi + 1;
                 }
             }
@@ -1101,15 +1102,15 @@ fn parse_declaration() {
                 if check(T_RBRACE) { break; }
                 ft := advance_tok();
                 fn2 := tok_lx(ft);
-                g_structs[si].field_names[fc] = fn2;
+                w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES + fc * 8, str_intern(fn2));
                 advance_tok();
                 fty := parse_type();
-                g_structs[si].field_types[fc] = unpack_type(fty);
-                g_structs[si].field_type_nodes[fc] = fty;
+                w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES + fc * 8, unpack_type(fty));
+                w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES + fc * 8, fty);
                 fc = fc + 1;
                 if check(T_COMMA) { advance_tok(); }
             }
-            g_structs[si].field_count = fc;
+            w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, fc);
         }
         advance_tok();
         return;
@@ -1127,11 +1128,11 @@ fn parse_declaration() {
         ei := add_enum(name);
         if ei >= 0 {
             if eg_count > 0 {
-                g_enums[ei].generic_count = eg_count;
+                w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, eg_count);
                 egi : ., mut = 0;
                 loop {
                     if egi >= eg_count { break; }
-                    g_enums[ei].generic_names[egi] = eg_names[egi];
+                    w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + egi * 8, str_intern(eg_names[egi]));
                     egi = egi + 1;
                 }
             }
@@ -1140,25 +1141,25 @@ fn parse_declaration() {
                 if check(T_RBRACE) { break; }
                 vt := advance_tok();
                 vname := tok_lx(vt);
-                g_enums[ei].variants[vc].name = vname;
+                w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vc * OFF_EV_SIZE + OFF_EV_NAME, str_intern(vname));
                 tc : ., mut = 0;
                 if check(T_LPAREN) {
                     advance_tok();
                     loop {
                         if check(T_RPAREN) { break; }
                         fty := parse_type();
-                        g_enums[ei].variants[vc].types[tc] = unpack_type(fty);
+                        w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vc * OFF_EV_SIZE + OFF_EV_TYPES + tc * 8, unpack_type(fty));
                         tc = tc + 1;
                         if !check(T_COMMA) { break; }
                         advance_tok();
                     }
                     advance_tok();
                 }
-                g_enums[ei].variants[vc].type_count = tc;
+                w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vc * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, tc);
                 vc = vc + 1;
                 if check(T_COMMA) { advance_tok(); }
             }
-            g_enums[ei].variant_count = vc;
+            w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, vc);
         }
         advance_tok();
         return;

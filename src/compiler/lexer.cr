@@ -2,17 +2,14 @@
 
 // Global compiler state
 g_source : string, mut;
-g_tokens : [Token; MAX_TOKENS], mut;
-g_token_count : int, mut;
 g_pos : int, mut;
 g_line : int, mut;
 g_col : int, mut;
-g_errors : [string; MAX_ERRS], mut;
-g_error_count : int, mut;
 
 fn add_error(msg: string) {
-    if g_error_count < MAX_ERRS {
-        g_errors[g_error_count] = msg;
+    mi := str_intern(msg);
+    dyn_grow_errors(g_error_count + 1); if 1 {
+        w64(g_errors, g_error_count * 8, mi);
         g_error_count = g_error_count + 1;
     }
 }
@@ -54,38 +51,36 @@ fn skip_whitespace() {
 }
 
 fn add_token(kind: int) {
-    if g_token_count >= MAX_TOKENS { return; }
-    g_tokens[g_token_count] = Token {
-        kind: kind,
-        lexeme: "",
-        int_val: 0,
-        line: g_line,
-        col: g_col,
-    };
+    dyn_grow_tokens(g_token_count + 1);
+    tp := g_token_count * ESZ_TOKEN;
+    w64(g_tokens, tp + OFF_TK_KIND, kind);
+    w64(g_tokens, tp + OFF_TK_LEXEME, -1);  // no lexeme
+    w64(g_tokens, tp + OFF_TK_INTVAL, 0);
+    w64(g_tokens, tp + OFF_TK_LINE, g_line);
+    w64(g_tokens, tp + OFF_TK_COL, g_col);
     g_token_count = g_token_count + 1;
 }
 
 fn add_token_str(kind: int, lexeme: string) {
-    if g_token_count >= MAX_TOKENS { return; }
-    g_tokens[g_token_count] = Token {
-        kind: kind,
-        lexeme: lexeme,
-        int_val: 0,
-        line: g_line,
-        col: g_col,
-    };
+    dyn_grow_tokens(g_token_count + 1);
+    tp := g_token_count * ESZ_TOKEN;
+    li := str_intern(lexeme);
+    w64(g_tokens, tp + OFF_TK_KIND, kind);
+    w64(g_tokens, tp + OFF_TK_LEXEME, li);
+    w64(g_tokens, tp + OFF_TK_INTVAL, 0);
+    w64(g_tokens, tp + OFF_TK_LINE, g_line);
+    w64(g_tokens, tp + OFF_TK_COL, g_col);
     g_token_count = g_token_count + 1;
 }
 
 fn add_token_int(kind: int, val: int) {
-    if g_token_count >= MAX_TOKENS { return; }
-    g_tokens[g_token_count] = Token {
-        kind: kind,
-        lexeme: "",
-        int_val: val,
-        line: g_line,
-        col: g_col,
-    };
+    dyn_grow_tokens(g_token_count + 1);
+    tp := g_token_count * ESZ_TOKEN;
+    w64(g_tokens, tp + OFF_TK_KIND, kind);
+    w64(g_tokens, tp + OFF_TK_LEXEME, -1);
+    w64(g_tokens, tp + OFF_TK_INTVAL, val);
+    w64(g_tokens, tp + OFF_TK_LINE, g_line);
+    w64(g_tokens, tp + OFF_TK_COL, g_col);
     g_token_count = g_token_count + 1;
 }
 
@@ -355,7 +350,7 @@ fn tokenize() {
         if c == "/" && peek() == "=" { advance(); advance(); add_token(T_SLASH_EQ); skip_whitespace(); continue; }
 
         // Single-character tokens
-        if c == "(" { advance(); add_token(T_LPAREN); skip_whitespace(); continue; }
+        if c == "(" { advance()); add_token(T_LPAREN); skip_whitespace(); continue; }
         if c == ")" { advance(); add_token(T_RPAREN); skip_whitespace(); continue; }
         if c == "{" { advance(); add_token(T_LBRACE); skip_whitespace(); continue; }
         if c == "}" { advance(); add_token(T_RBRACE); skip_whitespace(); continue; }

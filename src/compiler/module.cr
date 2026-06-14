@@ -171,30 +171,30 @@ fn resolve_imports() {
     i : ., mut = 0;
     loop {
         if i >= g_token_count { break; }
-        tk := g_tokens[i].kind;
+        tk := r64(g_tokens, i * ESZ_TOKEN + OFF_TK_KIND);
 
         if tk == T_IMPORT {
             pos : ., mut = i + 1;
             is_project : ., mut = false;
             project_name : ., mut = "";
-            if pos < g_token_count && g_tokens[pos].kind == T_AT {
+            if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_AT {
                 is_project = true;
                 pos = pos + 1;
-                if pos < g_token_count && g_tokens[pos].kind == T_IDENT {
-                    project_name = g_tokens[pos].lexeme;
+                if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT {
+                    project_name = str_get(r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME));
                     pos = pos + 1;
                 }
             }
             import_fileid : ., mut = "";
-            if pos < g_token_count && g_tokens[pos].kind == T_IDENT {
-                import_fileid = g_tokens[pos].lexeme;
+            if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT {
+                import_fileid = str_get(r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME));
                 pos = pos + 1;
             }
             alias_str : ., mut = "";
-            if pos < g_token_count && g_tokens[pos].kind == T_COLON {
+            if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_COLON {
                 pos = pos + 1;
-                if pos < g_token_count && g_tokens[pos].kind == T_IDENT {
-                    alias_str = g_tokens[pos].lexeme;
+                if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT {
+                    alias_str = str_get(r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME));
                     pos = pos + 1;
                 }
             }

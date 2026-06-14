@@ -185,6 +185,12 @@ class IRGen:
                 ref = self.gen_expr(binop.left.operand)
                 self.add_instr(StoreInstr(ref, val))
                 return val
+        # Fallback for =: emit debug and use StoreInstr
+        if binop.op == "=":
+            # Try treating left as a general expression and using StoreInstr
+            left_var = self.gen_expr(binop.left)
+            self.add_instr(StoreInstr(left_var, val))
+            return val
         left = self.gen_expr(binop.left)
         right = self.gen_expr(binop.right)
         dest = self.new_temp()

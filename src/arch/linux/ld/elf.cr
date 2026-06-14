@@ -10,11 +10,7 @@ PT_LOAD : int = 1;
 PF_RX : int = 5;
 PF_RW : int = 6;
 
-fn w8(buf: string, pos: int, val: int) { __builtin_store8(buf, pos, val % 256); }
-fn r8(buf: string, pos: int) -> int { return __builtin_load8(buf, pos) % 256; }
 fn r16(buf: string, pos: int) -> int { return r8(buf,pos) + r8(buf,pos+1)*256; }
-fn r32(buf: string, pos: int) -> int { return r8(buf,pos) + r8(buf,pos+1)*256 + r8(buf,pos+2)*65536 + r8(buf,pos+3)*16777216; }
-fn r64(buf: string, pos: int) -> int { lo := r32(buf,pos); hi := r32(buf,pos+4); if hi < 0 { hi = hi + 4294967296; } return lo + hi * 4294967296; }
 
 TEXT_BASE : int = 4194304;  // 0x400000 - base address of code segment
 
@@ -79,15 +75,6 @@ fn emit_builtin_alloc_body(buf: string, pos: int, bss_va: int) -> int {
     return cp;
 }
 
-fn w32(buf: string, pos: int, val: int) {
-    w8(buf, pos, val % 256); w8(buf, pos+1, (val/256) % 256);
-    w8(buf, pos+2, (val/65536) % 256); w8(buf, pos+3, (val/16777216) % 256);
-}
-
-fn w64(buf: string, pos: int, val: int) {
-    w32(buf, pos, val); w32(buf, pos+4, val/4294967296);
-}
-
 fn w16(buf: string, off: int, val: int) {
     w8(buf, off, val % 256); w8(buf, off+1, (val/256) % 256);
 }
@@ -137,14 +124,14 @@ fn x86_64_elf_generate(buf: string) -> int {
     total_code : ., mut = 14;  // _start stub
 
     fi := 0; loop { if fi >= g_ir_func_count { break; }
-        ni := g_ir_func_name_idx[fi];
+        ni := r64(g_ir_func_name_idx, fi * 8);
         g_x86_func_offsets[g_x86_func_off_count * 2] = ni;
         g_x86_func_offsets[g_x86_func_off_count * 2 + 1] = total_code;
         g_x86_func_off_count = g_x86_func_off_count + 1;
 
-        ic := g_ir_func_instr_count[fi];
+        ic := r64(g_ir_func_instr_count, fi * 8);
         vc := g_ir_var_count;
-        pc := g_ir_func_param_count[fi];
+        pc := r64(g_ir_func_param_count, fi * 8);
 
         // frame: push rbp(1) + mov rbp,rsp(3) + sub rsp(4) + params(pc*4)
         total_code = total_code + 1 + 3;
@@ -153,8 +140,8 @@ fn x86_64_elf_generate(buf: string) -> int {
 
         // instructions (skip NOPs = old LABELs)
         ii := 0; loop { if ii >= ic { break; }
-            inst_idx := g_ir_func_instr_start[fi] + ii;
-            if g_ir_instrs[inst_idx].opcode != IR_NOP {
+            inst_idx := r64(g_ir_func_instr_start, fi * 8)+ ii;
+            if iri_op(inst_idx) != IR_NOP {
                 total_code = total_code + arch_instr_size(inst_idx);
             }
         ii = ii + 1; }
@@ -189,12 +176,12 @@ fn x86_64_elf_generate(buf: string) -> int {
     // ── All functions ──
     g_x86_ret_patch_count = 0;
     fi = 0; loop { if fi >= g_ir_func_count { break; }
-        ni := g_ir_func_name_idx[fi];
-        ist := g_ir_func_instr_start[fi];
-        ic := g_ir_func_instr_count[fi];
+        ni := r64(g_ir_func_name_idx, fi * 8);
+        ist := r64(g_ir_func_instr_start, fi * 8);
+        ic := r64(g_ir_func_instr_count, fi * 8);
         vc := g_ir_var_count;
-        vs := g_ir_func_var_start[fi];
-        pc := g_ir_func_param_count[fi];
+        vs := r64(g_ir_func_var_start, fi * 8);
+        pc := r64(g_ir_func_param_count, fi * 8);
 
         g2_init();
         vi := 0; loop { if vi >= vc { break; } g2_slot(vs + vi); vi = vi + 1; }
@@ -272,7 +259,7 @@ fn x86_64_elf_generate(buf: string) -> int {
 
     // ── .rodata ──
     si = 0; loop { if si >= g_x86_str_count { break; }
-        s := g_strs[g_x86_str_offs[si]];
+        s := str_get(g_x86_str_offs[si]);
         sl := __builtin_str_len(s);
         ci := 0; loop { if ci >= sl { break; } w8(buf, cp, __builtin_load8(s, ci)); ci = ci + 1; cp = cp + 1; }
         w8(buf, cp, 0); cp = cp + 1;
@@ -280,7 +267,7 @@ fn x86_64_elf_generate(buf: string) -> int {
 
     // ── Patch _start's call to main ──
     mo := -1; fi = 0; loop { if fi >= g_ir_func_count { break; }
-        if __builtin_str_eq(g_strs[g_ir_func_name_idx[fi]], "main") != 0 { mo = g_x86_func_offsets[fi*2+1]; break; }
+        if __builtin_str_eq(str_get(r64(g_ir_func_name_idx, fi * 8)), "main") != 0 { mo = g_x86_func_offsets[fi*2+1]; break; }
     fi = fi + 1; }
     if mo >= 0 {
         rel := mo - 5;
