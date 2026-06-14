@@ -757,7 +757,7 @@ fn ir_gen_func(fi: int) {
     name_idx := ast_a(fn_node);
     first_param := ast_b(fn_node);
     param_count := ast_c(fn_node);
-    ret_ti := TI_UNIT;
+    ret_ti := ast_type_val(fn_node);
     body := ast_data(fn_node);
 
     // Record function metadata

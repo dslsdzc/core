@@ -210,6 +210,7 @@ fn x86_64_elf_generate(buf: string) -> int {
             cp = cp + sz;
         ii = ii + 1; }
 
+        save_ss := g_x86_emit_stack_size;  // save frame size
         // patch RETURNs to epilogue
         epi_pos := cp;
         rpi := 0; loop { if rpi >= g_x86_ret_patch_count { break; }
@@ -220,7 +221,7 @@ fn x86_64_elf_generate(buf: string) -> int {
         g_x86_ret_patch_count = 0;
 
         // epilogue
-        if g_x86_emit_stack_size > 0 {
+        if save_ss > 0 {
             w8(buf, cp, 72); w8(buf, cp+1, 131); w8(buf, cp+2, 196); w8(buf, cp+3, g_x86_emit_stack_size); cp = cp + 4;
         }
         w8(buf, cp, 93); cp = cp + 1;  // pop rbp

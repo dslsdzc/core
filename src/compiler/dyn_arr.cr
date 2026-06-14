@@ -293,75 +293,32 @@ fn ei_variant_type(n: int, vi: int, ti: int) -> int { return r64(g_enums, n*ESZ_
 fn ei_variant_type_count(n: int, vi: int) -> int { return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPE_COUNT); }
 
 // ============================================================
-// String pool helpers
+// String table helpers (simple g_strs array, no byte-buffer tricks)
 // ============================================================
-fn _grow_str_pool(needed: int) {
-    if needed < g_str_pool_cap { return; }
-    nc : ., mut = g_str_pool_cap * 2; if nc < 256 { nc = 256; } if nc < needed { nc = needed + 128; }
-    nb := __builtin_alloc(nc); _dyncpy(g_str_pool, g_str_pool_cap, nb);
-    g_str_pool = nb; g_str_pool_cap = nc;
-    noc := g_str_offsets_cap * 2; if noc < 64 { noc = 64; }
-    nob := __builtin_alloc(noc); _dyncpy(g_str_offsets, g_str_offsets_cap, nob);
-    g_str_offsets = nob; g_str_offsets_cap = noc; }
-
 fn str_intern(s: string) -> int {
-    sl := __builtin_str_len(s);
-    i : ., mut = 0; pos : ., mut = 0;
+    i : ., mut = 0;
     loop {
         if i >= g_str_count { break; }
-        pl : ., mut = 0;
-        loop { bc := bu8(g_str_pool, pos + pl); if bc == 0 { break; } pl = pl + 1; }
-        if pl == sl {
-            eq : ., mut = 1; j : ., mut = 0;
-            loop {
-                if j >= sl { break; }
-                if bu8(g_str_pool, pos + j) != __builtin_load8(s, j) { eq = 0; break; }
-                j = j + 1; }
-            if eq != 0 { return i; } }
-        pos = pos + pl + 1;
+        if __builtin_str_eq(g_strs[i], s) != 0 { return i; }
         i = i + 1; }
-    need := g_str_pool_len + sl + 1;
-    _grow_str_pool(need);
-    if g_str_count * 8 + 8 > g_str_offsets_cap {
-        noc2 := g_str_offsets_cap * 2; if noc2 < 64 { noc2 = 64; }
-        nob2 := __builtin_alloc(noc2); _dyncpy(g_str_offsets, g_str_offsets_cap, nob2);
-        g_str_offsets = nob2; g_str_offsets_cap = noc2; }
-    w64(g_str_offsets, g_str_count * 8, g_str_pool_len);
-    j : ., mut = 0;
-    loop { if j >= sl { break; } w8(g_str_pool, g_str_pool_len + j, __builtin_load8(s, j)); j = j + 1; }
-    w8(g_str_pool, g_str_pool_len + sl, 0);
-    g_str_pool_len = need;
-    g_str_count = g_str_count + 1;
+    if g_str_count < MAX_STRS {
+        g_strs[g_str_count] = s;
+        g_str_count = g_str_count + 1; }
     return g_str_count - 1; }
 
 fn str_get(idx: int) -> string {
     if idx < 0 || idx >= g_str_count { return ""; }
-    off := r64(g_str_offsets, idx * 8);
-    ln : ., mut = 0;
-    loop { if bu8(g_str_pool, off + ln) == 0 { break; } ln = ln + 1; }
-    return __builtin_str_sub(g_str_pool, off, ln); }
+    return g_strs[idx]; }
 
 fn str_len(idx: int) -> int {
     if idx < 0 || idx >= g_str_count { return 0; }
-    off := r64(g_str_offsets, idx * 8);
-    ln : ., mut = 0;
-    loop { if bu8(g_str_pool, off + ln) == 0 { break; } ln = ln + 1; }
-    return ln; }
+    return __builtin_str_len(g_strs[idx]); }
 
 fn str_load8(idx: int, ci: int) -> int {
     if idx < 0 || idx >= g_str_count { return 0; }
-    off := r64(g_str_offsets, idx * 8);
-    return bu8(g_str_pool, off + ci); }
+    return __builtin_load8(g_strs[idx], ci); }
 
 fn str_eq(idx: int, lit: string) -> int {
     if idx < 0 || idx >= g_str_count { return 0; }
-    off := r64(g_str_offsets, idx * 8);
-    sl := __builtin_str_len(lit);
-    j : ., mut = 0;
-    loop {
-        pc := bu8(g_str_pool, off + j);
-        if pc == 0 { if j == sl { return 1; } return 0; }
-        if j >= sl { return 0; }
-        if pc != __builtin_load8(lit, j) { return 0; }
-        j = j + 1; }
+    if __builtin_str_eq(g_strs[idx], lit) != 0 { return 1; }
     return 0; }

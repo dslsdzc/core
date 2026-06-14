@@ -205,6 +205,7 @@ fn x86_64_elf_generate(buf: string) -> int {
 
         // function body — emit instructions
         g_x86_func_frame_start = cp;  // absolute buffer pos of body start
+        save_ss := g_x86_emit_stack_size;  // save frame size before emission
 
         ii := 0; loop { if ii >= ic { break; }
             inst_idx := ist + ii;
@@ -221,9 +222,9 @@ fn x86_64_elf_generate(buf: string) -> int {
         rpi = rpi + 1; }
         g_x86_ret_patch_count = 0;
 
-        // epilogue
-        if g_x86_emit_stack_size > 0 {
-            w8(buf, cp, 72); w8(buf, cp+1, 131); w8(buf, cp+2, 196); w8(buf, cp+3, g_x86_emit_stack_size); cp = cp + 4;
+        // epilogue (use saved frame size, not post-emission value)
+        if save_ss > 0 {
+            w8(buf, cp, 72); w8(buf, cp+1, 131); w8(buf, cp+2, 196); w8(buf, cp+3, save_ss); cp = cp + 4;
         }
         w8(buf, cp, 93); cp = cp + 1;  // pop rbp
         w8(buf, cp, 195); cp = cp + 1;  // ret

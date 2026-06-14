@@ -200,7 +200,6 @@ fn corec_main() -> int {
 
     // Frontend pipeline
     tokenize();
-    g_str_count = 0;
     resolve_imports();
     parse_all();
     __builtin_print(__builtin_int_to_str(g_diag_count));
@@ -279,7 +278,6 @@ fn corec_main() -> int {
 fn compile_source(source: string) -> string {
     g_source = source;
     tokenize();
-    g_str_count = 0;
     resolve_imports();
     parse_all();
     check_all();

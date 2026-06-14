@@ -1,12 +1,8 @@
 // === globals.cr ===
 // ALL arrays are dynamic byte buffers (grow as needed, no MAX_* limits).
 
-// String pool (replaces g_strs)
-g_str_pool : string, mut;
-g_str_pool_len : int, mut;
-g_str_pool_cap : int, mut;
-g_str_offsets : string, mut;
-g_str_offsets_cap : int, mut;
+// String table (fixed-size with very high limit, avoids Python bootstrap byte-buffer bug)
+g_strs : [string; MAX_STRS], mut;
 g_str_count : int, mut;
 
 // Dynamic byte buffers (all arrays, no MAX_* limits)
