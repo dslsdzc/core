@@ -1,6 +1,12 @@
 // === main.cr ===
 // Compiler entry point: CLI, pipeline orchestration, and test API.
 
+// Global flags for project/directory mode
+g_is_project_mode : int, mut;
+g_ccr_out_path : string, mut;
+g_cir_out_path : string, mut;
+g_binary_out_path : string, mut;
+
 fn is_cr_file(path: string) -> int {
     slen := __builtin_str_len(path);
     if slen < 3 { return 0; }

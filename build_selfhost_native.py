@@ -133,6 +133,7 @@ def main():
             'src/compiler/backend/resolve.cr',
             'src/stdlib/toml.cr',
             'src/compiler/project.cr',
+            'src/stdlib/os.cr',
             'src/compiler/interp.cr',
             'src/compiler/dump.cr',
             'src/compiler/main.cr',
