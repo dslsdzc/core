@@ -350,7 +350,7 @@ fn tokenize() {
         if c == "/" && peek() == "=" { advance(); advance(); add_token(T_SLASH_EQ); skip_whitespace(); continue; }
 
         // Single-character tokens
-        if c == "(" { advance()); add_token(T_LPAREN); skip_whitespace(); continue; }
+        if c == "(" { advance(); add_token(T_LPAREN); skip_whitespace(); continue; }
         if c == ")" { advance(); add_token(T_RPAREN); skip_whitespace(); continue; }
         if c == "{" { advance(); add_token(T_LBRACE); skip_whitespace(); continue; }
         if c == "}" { advance(); add_token(T_RBRACE); skip_whitespace(); continue; }

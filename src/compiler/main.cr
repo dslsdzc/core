@@ -265,7 +265,7 @@ fn corec_main() -> int {
         }
         __builtin_print(" -> ");
         __builtin_print(out);
-        __builtin_print(" ("));
+        __builtin_print(" (");
         __builtin_print(__builtin_int_to_str(g_ir_func_count));
         __builtin_print(" funcs, ");
         __builtin_print(__builtin_int_to_str(g_ir_instr_count));

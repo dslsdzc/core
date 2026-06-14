@@ -430,8 +430,8 @@ fn parse_primary() -> int {
         }
         return alloc_node(EXPR_STRING, 0, 0, 0, str_intern(s), TY_STRING, 0, tok_ln(t), tok_cl(t));
     }
-    if tok_k(t) == T_TRUE { advance_tok(); return alloc_node(EXPR_BOOL, 0, 0, 0, 1, TY_BOOL, 0, tok_ln(t), tok_cl(t); }
-    if tok_k(t) == T_FALSE { advance_tok(); return alloc_node(EXPR_BOOL, 0, 0, 0, 0, TY_BOOL, 0, tok_ln(t), tok_cl(t); }
+    if tok_k(t) == T_TRUE { advance_tok(); return alloc_node(EXPR_BOOL, 0, 0, 0, 1, TY_BOOL, 0, tok_ln(t), tok_cl(t)); }
+    if tok_k(t) == T_FALSE { advance_tok(); return alloc_node(EXPR_BOOL, 0, 0, 0, 0, TY_BOOL, 0, tok_ln(t), tok_cl(t)); }
     if tok_k(t) == T_NONE {
         advance_tok();
         return alloc_node(EXPR_ENUM_CONSTRUCTOR, str_intern("None"), -1, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
@@ -910,7 +910,7 @@ fn parse_generics() -> int {
     return 0;
 }
 
-fn parse_generics_into(names: [string); 4]) -> int {
+fn parse_generics_into(names: [string; 4]) -> int {
     if check(T_LBRACKET) {
         advance_tok(); // [
         gc : ., mut = 0;
@@ -929,7 +929,7 @@ fn parse_generics_into(names: [string); 4]) -> int {
     return 0;
 }
 
-fn store_func_generics(fi: int, names: [string); 4], count: int) {
+fn store_func_generics(fi: int, names: [string; 4], count: int) {
     fi_set_generic_count(fi, count);
     gi : ., mut = 0;
     loop {

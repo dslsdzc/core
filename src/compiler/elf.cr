@@ -20,7 +20,7 @@ fn w32(buf: string, pos: int, val: int) {
 }
 
 fn w64(buf: string, pos: int, val: int) {
-    w32(buf, pos, val); w32(buf, pos+4, val/4294967296);
+    w32(buf, pos, val)); w32(buf, pos+4, val/4294967296));
 }
 
 // ── Global: code size (set by asm_to_bytes) ──
@@ -47,10 +47,10 @@ fn elf_begin(layout: MemLayout) -> ElfCtx {
 
 fn elf_write_header(ctx: ElfCtx, layout: MemLayout, code_size: int) {
     hoff : ., mut = 0;
-    w32(ctx.buf, hoff, 1179403647); hoff=hoff+4; // magic
+    w32(ctx.buf, hoff, 1179403647)); hoff=hoff+4; // magic
     w8(ctx.buf, hoff, 2); hoff=hoff+1; w8(ctx.buf, hoff, 1); hoff=hoff+1;
     w8(ctx.buf, hoff, 1); hoff=hoff+1; w8(ctx.buf, hoff, 0); hoff=hoff+1;
-    w64(ctx.buf, hoff, 0); hoff=hoff+8; w32(ctx.buf, hoff, 0); hoff=hoff+4;
+    w64(ctx.buf, hoff, 0); hoff=hoff+8; w32(ctx.buf, hoff, 0)); hoff=hoff+4;
     w8(ctx.buf, hoff, 0); hoff=hoff+1; hoff=16;
     text_base : ., mut = layout.text_base; data_base : ., mut = layout.data_base;
     if text_base == 0 { text_base = 4194304; }
@@ -58,22 +58,22 @@ fn elf_write_header(ctx: ElfCtx, layout: MemLayout, code_size: int) {
     heap_size : ., mut = layout.heap_size;
     if heap_size == 0 { heap_size = 268435456; }
     w16(ctx.buf, hoff, ET_EXEC); hoff=hoff+2; w16(ctx.buf, hoff, EM_X86_64); hoff=hoff+2;
-    w32(ctx.buf, hoff, 1); hoff=hoff+4;
+    w32(ctx.buf, hoff, 1)); hoff=hoff+4;
     w64(ctx.buf, hoff, text_base + ctx.code_start); hoff=hoff+8;
     w64(ctx.buf, hoff, 64); hoff=hoff+8; w64(ctx.buf, hoff, 0); hoff=hoff+8;
-    w32(ctx.buf, hoff, 0); hoff=hoff+4; w16(ctx.buf, hoff, 64); hoff=hoff+2;
+    w32(ctx.buf, hoff, 0)); hoff=hoff+4; w16(ctx.buf, hoff, 64); hoff=hoff+2;
     w16(ctx.buf, hoff, 56); hoff=hoff+2; w16(ctx.buf, hoff, 2); hoff=hoff+2;
     w16(ctx.buf, hoff, 0); hoff=hoff+2; w16(ctx.buf, hoff, 0); hoff=hoff+2;
     w16(ctx.buf, hoff, 0); hoff=hoff+2;
     // PHDR 1: code RX
     phoff := 64;
-    w32(ctx.buf, phoff, PT_LOAD); phoff=phoff+4; w32(ctx.buf, phoff, PF_RX); phoff=phoff+4;
+    w32(ctx.buf, phoff, PT_LOAD)); phoff=phoff+4; w32(ctx.buf, phoff, PF_RX)); phoff=phoff+4;
     w64(ctx.buf, phoff, 0); phoff=phoff+8;
     w64(ctx.buf, phoff, text_base); phoff=phoff+8; w64(ctx.buf, phoff, text_base); phoff=phoff+8;
     w64(ctx.buf, phoff, code_size); phoff=phoff+8; w64(ctx.buf, phoff, code_size); phoff=phoff+8;
     w64(ctx.buf, phoff, 4096); phoff=phoff+8;
     // PHDR 2: data BSS RW
-    w32(ctx.buf, phoff, PT_LOAD); phoff=phoff+4; w32(ctx.buf, phoff, PF_RW); phoff=phoff+4;
+    w32(ctx.buf, phoff, PT_LOAD)); phoff=phoff+4; w32(ctx.buf, phoff, PF_RW)); phoff=phoff+4;
     w64(ctx.buf, phoff, 0); phoff=phoff+8; w64(ctx.buf, phoff, data_base); phoff=phoff+8;
     w64(ctx.buf, phoff, data_base); phoff=phoff+8;
     w64(ctx.buf, phoff, 0); phoff=phoff+8; w64(ctx.buf, phoff, heap_size); phoff=phoff+8;
@@ -83,7 +83,7 @@ fn elf_write_header(ctx: ElfCtx, layout: MemLayout, code_size: int) {
 
 fn elf_write_code(ctx: ElfCtx, code: string) {
     i : ., mut = 0;
-    loop { if i >= g_asm_code_size { break; } __builtin_store8(ctx.buf, ctx.pos+i, __builtin_load8(code, i); i = i + 1; }
+    loop { if i >= g_asm_code_size { break; } __builtin_store8(ctx.buf, ctx.pos+i, __builtin_load8(code, i); i = i + 1); }
     ctx.pos = ctx.pos + g_asm_code_size;
 }
 
@@ -366,7 +366,7 @@ fn encode_instr(line: string, code: string, cpos: int) -> int {
             off := __builtin_str_to_int(off_str); val := __builtin_str_to_int(val_str);
             __builtin_store8(code, cpos, 72); __builtin_store8(code, cpos+1, 199);
             __builtin_store8(code, cpos+2, 69); __builtin_store8(code, cpos+3, off % 256);
-            w32(code, cpos+4, val); return 8;
+            w32(code, cpos+4, val)); return 8;
         }
     }
     // sub/add rsp, N
@@ -386,7 +386,7 @@ fn encode_instr(line: string, code: string, cpos: int) -> int {
     if __builtin_str_len(t) > 12 {
         if __builtin_str_eq(__builtin_str_sub(t, 0, 13), "    mov edi, ") != 0 {
             n := __builtin_str_to_int(__builtin_str_sub(t, 12, __builtin_str_len(t)-12));
-            __builtin_store8(code, cpos, 191); w32(code, cpos+1, n); return 5;
+            __builtin_store8(code, cpos, 191); w32(code, cpos+1, n)); return 5;
         }
     }
     // jmp/je .Lxxx — extract label number from line, look up position
@@ -558,7 +558,7 @@ fn asm_to_bytes(asm_text: string) -> string {
     __builtin_store8(res_buf, 13, 5);
 
     // Copy generated code after _start
-    ri : ., mut = 0; loop { if ri >= cpos { break; } __builtin_store8(res_buf, ri + 14, __builtin_load8(code, ri); ri = ri + 1; }
+    ri : ., mut = 0; loop { if ri >= cpos { break; } __builtin_store8(res_buf, ri + 14, __builtin_load8(code, ri); ri = ri + 1); }
 
     __builtin_store8(res_buf, total, 0);
 

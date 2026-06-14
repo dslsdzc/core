@@ -532,7 +532,7 @@ fn is_func_generic(fi: int, name_idx: int) -> bool {
     gi : ., mut = 0;
     loop {
         if gi >= fi_generic_count(fi) { return false; }
-        if r64(g_funcs, fi * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gi * 8)) == name_idx { return true; }
+        if r64(g_funcs, fi * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gi * 8) == name_idx { return true; }
         gi = gi + 1;
     }
     return false;
@@ -1381,7 +1381,7 @@ fn infer_expr(node: int) -> int {
         idx_ti := infer_expr(ast_b(node));
         arr_kind := get_type_kind(arr_ti);
         // Range index: arr[low..high] → slice type
-        if ast_kind(ast_b(node) == EXPR_RANGE {
+        if ast_kind(ast_b(node)) == EXPR_RANGE {
             if arr_kind == TYP_ARRAY {
                 return alloc_type(TYP_SLICE, get_type_data(arr_ti), 0);
             }

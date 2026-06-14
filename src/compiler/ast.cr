@@ -229,7 +229,7 @@ EXPR_MATCH : int = 23;   // a=expr, b=first arm, c=arm count
 EXPR_ARM : int = 24;     // a=pattern, b=body
 EXPR_WILDCARD : int = 25;
 EXPR_ENUMPAT : int = 26; // a=name idx, b=first subpat, c=subpat count
-EXPR_STMT : int = 28;   // a=inner expr; expression used as statement (with ;), returns unit
+EXPR_STMT : int = 28;   // a=inner expr; expression used as statement (with );), returns unit
 EXPR_CHAR : int = 29;   // int_val = codepoint
 EXPR_WHILE : int = 30;  // a=cond, b=body
 EXPR_RANGE : int = 31;  // a=start, b=end

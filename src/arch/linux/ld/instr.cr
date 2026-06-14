@@ -114,7 +114,7 @@ fn e2_je(b: string, p: int, rel: int) -> int {
 }
 
 fn e2_alu(b: string, p: int, op: int) -> int {
-    e2_w8(b, p, 77); e2_w8(b, p+1, op); e2_w8(b, p+2, 192 + (11%8)*8 + (10%8); return 3;
+    e2_w8(b, p, 77); e2_w8(b, p+1, op); e2_w8(b, p+2, 192 + (11%8)*8 + (10%8)); return 3;
 }
 
 // ── arch_instr_size: instruction byte count for resolve_labels ──

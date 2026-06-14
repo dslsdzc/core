@@ -48,19 +48,19 @@ fn ir_instr_str(instr_idx: int) -> string {
     }
 
     if iri_op(instr_idx) == IR_CONST {
-        s = s + ir_var_str(iri_dest(instr_idx) + " = " + __builtin_int_to_str(iri_s1(instr_idx)));
+        s = s + ir_var_str(iri_dest(instr_idx)) + " = " + __builtin_int_to_str(iri_s1(instr_idx));
         return s;
     }
     if iri_op(instr_idx) == IR_BINARY {
-        s = s + ir_var_str(iri_dest(instr_idx) + " = " + ir_var_str(iri_s1(instr_idx) + " " + binop_name(iri_s3(instr_idx) + " " + ir_var_str(iri_s2(instr_idx)))));
+        s = s + ir_var_str(iri_dest(instr_idx)) + " = " + ir_var_str(iri_s1(instr_idx)) + " " + binop_name(iri_s3(instr_idx)) + " " + ir_var_str(iri_s2(instr_idx));
         return s;
     }
     if iri_op(instr_idx) == IR_UNARY {
-        s = s + ir_var_str(iri_dest(instr_idx) + " = unary(" + ir_var_str(iri_s1(instr_idx) + ")"));
+        s = s + ir_var_str(iri_dest(instr_idx)) + " = unary(" + ir_var_str(iri_s1(instr_idx)) + ")";
         return s;
     }
     if iri_op(instr_idx) == IR_CALL {
-        s = s + ir_var_str(iri_dest(instr_idx) + " = call " + str_get(iri_s3(instr_idx) + "(")));
+        s = s + ir_var_str(iri_dest(instr_idx)) + " = call " + str_get(iri_s3(instr_idx)) + "(";
         ai : ., mut = 0;
         a_first : ., mut = 1;
         loop {
@@ -79,67 +79,67 @@ fn ir_instr_str(instr_idx: int) -> string {
         return s;
     }
     if iri_op(instr_idx) == IR_ALLOC {
-        s = s + ir_var_str(iri_dest(instr_idx) + " : " + type_kind_name(iri_tk(instr_idx)));
+        s = s + ir_var_str(iri_dest(instr_idx)) + " : " + type_kind_name(iri_tk(instr_idx));
         return s;
     }
     if iri_op(instr_idx) == IR_ALLOC_STRUCT {
-        s = s + ir_var_str(iri_dest(instr_idx) + " : struct " + str_get(iri_s3(instr_idx)));
+        s = s + ir_var_str(iri_dest(instr_idx)) + " : struct " + str_get(iri_s3(instr_idx));
         return s;
     }
     if iri_op(instr_idx) == IR_ALLOC_ARRAY {
-        s = s + ir_var_str(iri_dest(instr_idx) + "[" + __builtin_int_to_str(iri_s1(instr_idx) + "]"));
+        s = s + ir_var_str(iri_dest(instr_idx)) + "[" + __builtin_int_to_str(iri_s1(instr_idx)) + "]";
         return s;
     }
     if iri_op(instr_idx) == IR_STORE {
-        s = s + ir_var_str(iri_s1(instr_idx) + " <- " + ir_var_str(iri_s2(instr_idx)));
+        s = s + ir_var_str(iri_s1(instr_idx)) + " <- " + ir_var_str(iri_s2(instr_idx));
         return s;
     }
     if iri_op(instr_idx) == IR_LOAD {
-        s = s + ir_var_str(iri_dest(instr_idx) + " = " + ir_var_str(iri_s1(instr_idx)));
+        s = s + ir_var_str(iri_dest(instr_idx)) + " = " + ir_var_str(iri_s1(instr_idx));
         return s;
     }
     if iri_op(instr_idx) == IR_LOAD_FIELD {
-        s = s + ir_var_str(iri_dest(instr_idx) + " = " + ir_var_str(iri_s1(instr_idx) + "." + __builtin_int_to_str(iri_s3(instr_idx))));
+        s = s + ir_var_str(iri_dest(instr_idx)) + " = " + ir_var_str(iri_s1(instr_idx)) + "." + __builtin_int_to_str(iri_s3(instr_idx));
         return s;
     }
     if iri_op(instr_idx) == IR_STORE_FIELD {
-        s = s + ir_var_str(iri_s1(instr_idx) + "." + __builtin_int_to_str(iri_s3(instr_idx) + " <- " + ir_var_str(iri_s2(instr_idx))));
+        s = s + ir_var_str(iri_s1(instr_idx)) + "." + __builtin_int_to_str(iri_s3(instr_idx)) + " <- " + ir_var_str(iri_s2(instr_idx));
         return s;
     }
     if iri_op(instr_idx) == IR_LOAD_INDEX {
-        s = s + ir_var_str(iri_dest(instr_idx) + " = " + ir_var_str(iri_s1(instr_idx) + "[" + __builtin_int_to_str(iri_s3(instr_idx) + "]")));
+        s = s + ir_var_str(iri_dest(instr_idx)) + " = " + ir_var_str(iri_s1(instr_idx)) + "[" + __builtin_int_to_str(iri_s3(instr_idx)) + "]";
         return s;
     }
     if iri_op(instr_idx) == IR_STORE_INDEX {
-        s = s + ir_var_str(iri_s1(instr_idx) + "[" + __builtin_int_to_str(iri_s3(instr_idx) + "] <- " + ir_var_str(iri_s2(instr_idx))));
+        s = s + ir_var_str(iri_s1(instr_idx)) + "[" + __builtin_int_to_str(iri_s3(instr_idx)) + "] <- " + ir_var_str(iri_s2(instr_idx));
         return s;
     }
     if iri_op(instr_idx) == IR_LOAD_INDEX_VAR {
-        s = s + ir_var_str(iri_dest(instr_idx) + " = " + ir_var_str(iri_s1(instr_idx) + "[" + ir_var_str(iri_s2(instr_idx) + "]")));
+        s = s + ir_var_str(iri_dest(instr_idx)) + " = " + ir_var_str(iri_s1(instr_idx)) + "[" + ir_var_str(iri_s2(instr_idx)) + "]";
         return s;
     }
     if iri_op(instr_idx) == IR_STORE_INDEX_VAR {
-        s = s + ir_var_str(iri_s1(instr_idx) + "[" + ir_var_str(iri_s2(instr_idx) + "] <- " + ir_var_str(iri_dest(instr_idx))));
+        s = s + ir_var_str(iri_s1(instr_idx)) + "[" + ir_var_str(iri_s2(instr_idx)) + "] <- " + ir_var_str(iri_dest(instr_idx));
         return s;
     }
     if iri_op(instr_idx) == IR_MAKE_ENUM {
-        s = s + ir_var_str(iri_dest(instr_idx) + " = make_enum(" + str_get(iri_s1(instr_idx) + ")"));
+        s = s + ir_var_str(iri_dest(instr_idx)) + " = make_enum(" + str_get(iri_s1(instr_idx)) + ")";
         return s;
     }
     if iri_op(instr_idx) == IR_REF {
-        s = s + ir_var_str(iri_dest(instr_idx) + " = ref " + ir_var_str(iri_s1(instr_idx)));
+        s = s + ir_var_str(iri_dest(instr_idx)) + " = ref " + ir_var_str(iri_s1(instr_idx));
         return s;
     }
     if iri_op(instr_idx) == IR_DEREF {
-        s = s + ir_var_str(iri_dest(instr_idx) + " = deref " + ir_var_str(iri_s1(instr_idx)));
+        s = s + ir_var_str(iri_dest(instr_idx)) + " = deref " + ir_var_str(iri_s1(instr_idx));
         return s;
     }
     if iri_op(instr_idx) == IR_STORE_PTR {
-        s = s + ir_var_str(iri_s1(instr_idx) + " := " + ir_var_str(iri_s2(instr_idx)));
+        s = s + ir_var_str(iri_s1(instr_idx)) + " := " + ir_var_str(iri_s2(instr_idx));
         return s;
     }
     if iri_op(instr_idx) == IR_BRANCH {
-        s = s + "if " + ir_var_str(iri_s1(instr_idx) + " goto label" + __builtin_int_to_str(iri_s2(instr_idx) + " else label" + __builtin_int_to_str(iri_s3(instr_idx))));
+        s = s + "if " + ir_var_str(iri_s1(instr_idx)) + " goto label" + __builtin_int_to_str(iri_s2(instr_idx)) + " else label" + __builtin_int_to_str(iri_s3(instr_idx));
         return s;
     }
     if iri_op(instr_idx) == IR_JUMP {
@@ -147,11 +147,11 @@ fn ir_instr_str(instr_idx: int) -> string {
         return s;
     }
     if iri_op(instr_idx) == IR_LABEL {
-        s = s + "label" + __builtin_int_to_str(iri_s1(instr_idx) + ":");
+        s = s + "label" + __builtin_int_to_str(iri_s1(instr_idx)) + ":";
         return s;
     }
     if iri_op(instr_idx) == IR_PHI {
-        s = s + ir_var_str(iri_dest(instr_idx) + " = phi("));
+        s = s + ir_var_str(iri_dest(instr_idx)) + " = phi(";
         pi : ., mut = 0;
         p_first : ., mut = 1;
         loop {
@@ -165,15 +165,15 @@ fn ir_instr_str(instr_idx: int) -> string {
         return s;
     }
     if iri_op(instr_idx) == IR_LOAD_ENUM_TAG {
-        s = s + ir_var_str(iri_dest(instr_idx) + " = tag " + ir_var_str(iri_s1(instr_idx)));
+        s = s + ir_var_str(iri_dest(instr_idx)) + " = tag " + ir_var_str(iri_s1(instr_idx));
         return s;
     }
     if iri_op(instr_idx) == IR_SLICE {
-        s = s + ir_var_str(iri_dest(instr_idx) + " = slice " + ir_var_str(iri_s1(instr_idx) + "[" + ir_var_str(iri_s2(instr_idx) + ":" + ir_var_str(iri_s3(instr_idx) + "]"))));
+        s = s + ir_var_str(iri_dest(instr_idx)) + " = slice " + ir_var_str(iri_s1(instr_idx)) + "[" + ir_var_str(iri_s2(instr_idx)) + ":" + ir_var_str(iri_s3(instr_idx)) + "]";
         return s;
     }
 
-    s = s + "dest=" + ir_var_str(iri_dest(instr_idx) + " s1=" + __builtin_int_to_str(iri_s1(instr_idx) + " s2=" + __builtin_int_to_str(iri_s2(instr_idx) + " s3=" + __builtin_int_to_str(iri_s3(instr_idx)))));
+    s = s + "dest=" + ir_var_str(iri_dest(instr_idx)) + " s1=" + __builtin_int_to_str(iri_s1(instr_idx)) + " s2=" + __builtin_int_to_str(iri_s2(instr_idx)) + " s3=" + __builtin_int_to_str(iri_s3(instr_idx));
     return s;
 }
 
@@ -211,7 +211,7 @@ fn cmd_ir(src_path: string) -> int {
     }
     __builtin_print(" -> ");
     __builtin_print(cir_path);
-    __builtin_print(" ("));
+    __builtin_print(" (");
     __builtin_print(__builtin_int_to_str(g_df_node_count));
     __builtin_print(" nodes, ");
     __builtin_print(__builtin_int_to_str(g_df_edge_count));
@@ -278,7 +278,7 @@ fn cmd_cir(src_path: string) -> int {
     }
     __builtin_print(" -> ");
     __builtin_print(ccr_path);
-    __builtin_print(" ("));
+    __builtin_print(" (");
     __builtin_print(__builtin_int_to_str(g_ir_func_count));
     __builtin_print(" functions, ");
     __builtin_print(__builtin_int_to_str(g_ir_instr_count));
