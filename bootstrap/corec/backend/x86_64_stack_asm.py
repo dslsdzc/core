@@ -16,17 +16,6 @@ from corec.ir.base import IRVar, VarKind
 from corec.syntax.ast import ArrayType, BaseType, PathType
 
 
-class RegInfo:
-    """Track a physical register used for register allocation."""
-    __slots__ = ('name', 'var_key', 'dirty')
-    def __init__(self, name: str):
-        self.name = name        # e.g. 'r12'
-        self.var_key = None     # id(var) currently in this register, None=free
-        self.dirty = False      # True if register value is newer than stack
-
-# Callee-saved: preserved across calls (r12-r15). Caller-saved: clobbered (r8-r9).
-ALLOC_REGS = [RegInfo(n) for n in ['r12', 'r13', 'r14', 'r15', 'r8', 'r9']]
-
 class X86_64StackAsmGen:
     def __init__(self, module: Module):
         self.module = module
@@ -36,8 +25,6 @@ class X86_64StackAsmGen:
         # Per-function state
         self.var_offsets = {}     # var_id -> stack offset (negative from rbp)
         self.stack_size = 0
-        # Register allocation
-        self.regs = [RegInfo(r.name) for r in ALLOC_REGS]  # copy for per-function reset
 
     def _elem_size(self, typ) -> int:
         """Compute the element size (in bytes) for an array element type."""
@@ -78,13 +65,9 @@ class X86_64StackAsmGen:
         return f"_g_{name}"
 
     def _ref(self, var: IRVar) -> str:
-        """Return an x86-64 memory reference OR register name for a variable."""
+        """Return an x86-64 memory reference string for a variable."""
         if self.is_global(var):
             return f"[rip+{self._global_label(var.name)}]"
-        # Check if register-allocated
-        reg = self._reg_map.get(id(var))
-        if reg:
-            return reg  # e.g. 'r12' – used directly in instructions
         off = self._get_stack_off(var)
         if off >= 0:
             return f"[rbp+{off}]"
@@ -134,49 +117,15 @@ class X86_64StackAsmGen:
         """Call when r10 may have been modified by any operation."""
         self._cache_r10_var = None
 
-    def _spill_reg(self, reg_name: str):
-        """Spill a register-allocated var to its stack slot if dirty."""
-        vk = self._var_in_reg.get(reg_name)
-        if vk is None:
-            return
-        var = self._var_key_to_var.get(vk)
-        if var is None:
-            return
-        # Ensure stack slot exists for this var
-        off = self._get_stack_off(var)
-        if off >= 0: self.emit(f"    mov [rbp+{off}], {reg_name}")
-        else: self.emit(f"    mov [rbp{off}], {reg_name}")
-
-    def _flush_regs(self):
-        """Spill caller-saved register-allocated vars before a call.
-        r12-r15 are callee-saved (preserved by callee), no spilling needed."""
-        for r in ['r8', 'r9']:
-            if r in self._var_in_reg:
-                self._spill_reg(r)
-
     def load_to_r10(self, var: IRVar):
-        ref = self._ref(var)
-        if ref in ('r12', 'r13', 'r14', 'r15', 'r8', 'r9', 'rbx'):
-            # Var is in a register, move to r10
-            self.emit(f"    mov r10, {ref}")
-        else:
-            self.emit(f"    mov r10, {ref}")
+        self.emit(f"    mov r10, {self._ref(var)}")
 
     def load_to_r11(self, var: IRVar):
-        ref = self._ref(var)
-        if ref in ('r12', 'r13', 'r14', 'r15', 'r8', 'r9', 'rbx'):
-            self.emit(f"    mov r11, {ref}")
-        else:
-            self.emit(f"    mov r11, {ref}")
+        self.emit(f"    mov r11, {self._ref(var)}")
 
     def store_from_r10(self, var: IRVar):
         key = id(var)
-        ref = self._ref(var)
-        if ref in ('r12', 'r13', 'r14', 'r15', 'r8', 'r9', 'rbx'):
-            # Var is register-allocated, just track it (no move needed for reg-to-reg)
-            self._var_in_reg[ref] = key
-        else:
-            self.emit(f"    mov {ref}, r10")
+        self.emit(f"    mov {self._ref(var)}, r10")
         self._forward_key = None
 
     # ------------------------------------------------------------------
@@ -265,8 +214,6 @@ class X86_64StackAsmGen:
         self.store_from_r10(instr.dest)
 
     def gen_call(self, instr: CallInstr):
-        # Spill register-allocated vars before call (r8/r9 are caller-saved)
-        self._flush_regs()
         arg_regs = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9']
         stack_args = 0
         for i, arg in enumerate(instr.args):
@@ -470,80 +417,10 @@ class X86_64StackAsmGen:
                             loaded.add(id(a))
         return {vid for vid in defined if vid not in loaded}
 
-    def _alloc_regs(self, func: FunctionDef, local_vars: dict):
-        """Linear-scan: assign registers to short-lived temps (≤3 instr span)."""
-        # Collect all instructions in order
-        seq = []
-        for blk in func.blocks:
-            seq.extend(blk.instrs)
-
-        # Live ranges: var_key → (first_index, last_index)
-        first = {}
-        last = {}
-        src_fields = ['value', 'addr', 'left', 'right', 'operand',
-                       'cond', 'struct', 'array', 'index_var']
-        for i, instr in enumerate(seq):
-            for fn in src_fields:
-                val = getattr(instr, fn, None)
-                if isinstance(val, IRVar):
-                    k = id(val)
-                    if k not in first: first[k] = i
-                    last[k] = i
-            if hasattr(instr, 'args') and instr.args:
-                for a in instr.args:
-                    if isinstance(a, IRVar):
-                        k = id(a)
-                        if k not in first: first[k] = i
-                        last[k] = i
-            d = getattr(instr, 'dest', None)
-            if isinstance(d, IRVar):
-                k = id(d)
-                if k not in first: first[k] = i
-                last[k] = i
-
-        # Candidate vars: live range ≤ 3, not a param (params come from caller)
-        param_keys = {id(p) for p in func.params}
-        candidates = [(first[k], k) for k in first if k in last
-                      and last[k] - first[k] <= 5
-                      and k not in param_keys
-                      and k in {id(v) for v in local_vars.values()}]
-        candidates.sort()
-
-        # Available registers
-        reg_pool = ['r12', 'r13', 'r14', 'r15', 'r8', 'r9']
-        reg_assign = {}  # var_key → reg name
-        reg_var = {}     # reg name → var_key (for conflict check)
-        reg_end = {}     # reg name → last use index
-
-        for _, vk in candidates:
-            # Find a free register (not holding a live var)
-            chosen = None
-            for r in reg_pool:
-                if r not in reg_var:
-                    chosen = r
-                    break
-                # Check if the current occupant's live range ended before this starts
-                occupant_end = reg_end.get(r, 0)
-                if occupant_end < first.get(vk, 0):
-                    chosen = r
-                    break
-            if chosen:
-                reg_assign[vk] = chosen
-                reg_var[chosen] = vk
-                reg_end[chosen] = last.get(vk, 0)
-
-        self._reg_map = reg_assign
-
-        # Build var_key → IRVar lookup for spilling
-        self._var_key_to_var = {id(v): v for v in local_vars.values()}
-        # Initialize: register vars start empty (value will be computed into reg)
-        self._var_in_reg = {}  # reg_name → var_key (vars currently living in regs)
-
     def gen_function(self, func: FunctionDef):
         self.var_offsets = {}
         self.stack_size = 0
         self._clobber_regs()
-        self._var_in_reg = {}
 
         # Function label
         if func.name == 'main':
@@ -579,17 +456,12 @@ class X86_64StackAsmGen:
                         if isinstance(choice_val, IRVar) and not self.is_global(choice_val):
                             local_vars[id(choice_val)] = choice_val
 
-        # Register allocation: assign leaf temps to registers
-        self._reg_map = {}
-        self._alloc_regs(func, local_vars)
-
-        # Allocate stack slots for NON-register vars only
+        # Allocate params first, then remaining locals
         for p in func.params:
-            if not self.is_global(p) and id(p) not in self._reg_map:
+            if not self.is_global(p):
                 self._get_stack_off(p)
         for v in local_vars.values():
-            if id(v) not in self._reg_map:
-                self._get_stack_off(v)
+            self._get_stack_off(v)
 
         if self.stack_size > 0:
             self.emit(f"    sub rsp, {self.stack_size}")

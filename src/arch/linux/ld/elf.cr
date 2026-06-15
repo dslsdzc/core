@@ -187,6 +187,30 @@ fn x86_64_elf_generate(buf: string) -> int {
             }
         iie = iie + 1; }
     fie = fie + 1; }
+    // Propagate: LOAD from enum var → dest is also enum
+    fie2 := 0; loop { if fie2 >= g_ir_func_count { break; }
+        ice2 := r64(g_ir_func_instr_count, fie2 * 8);
+        iie2 := 0; loop { if iie2 >= ice2 { break; }
+            inst_idx2 := r64(g_ir_func_instr_start, fie2 * 8) + iie2;
+            op2 := r64(g_ir_instrs, inst_idx2 * ESZ_IRINSTR + OFF_IRI_OP);
+            if op2 == IR_LOAD || op2 == IR_LOAD_FIELD {
+                s1x := r64(g_ir_instrs, inst_idx2 * ESZ_IRINSTR + OFF_IRI_S1);
+                dx := r64(g_ir_instrs, inst_idx2 * ESZ_IRINSTR + OFF_IRI_DEST);
+                if s1x >= 0 {
+                    if s1x < g_x86_is_enum_cap {
+                        if r64(g_x86_is_enum, s1x * 8) != 0 {
+                            if dx >= 0 {
+                                if dx >= g_x86_is_enum_cap { dyn_grow_x86_is_enum(dx + 1); }
+                                if dx < g_x86_is_enum_cap {
+                                    if r64(g_x86_is_enum, dx * 8) == 0 { w64(g_x86_is_enum, dx * 8, 1); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        iie2 = iie2 + 1; }
+    fie2 = fie2 + 1; }
 
     // Phase 3: emit to buffer
     cp := 176;  // skip ELF header
