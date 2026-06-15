@@ -346,9 +346,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         o1 := g2_slot(s1); do2 := g2_slot(d); fi2 := s3;
         fo : ., mut = fi2 * 8;
         // Enum: field at offset +8 (offset 0 = variant tag)
-        if s1 >= 0 && s1 < g_x86_is_enum_cap {
-            if r64(g_x86_is_enum, s1 * 8) != 0 { fo = fi2 * 8 + 8; }
-        }
+        if g_x86_is_enum_cap > 0 { fo = fi2 * 8 + 8; }
         cp = cp + e2_ld(buf, pos+cp, 10, o1);
         e2_w8(buf, pos+cp, 77); e2_w8(buf, pos+cp+1, 139); e2_w8(buf, pos+cp+2, 146); e2_w32(buf, pos+cp+3, fo); cp = cp + 7;
         cp = cp + e2_st(buf, pos+cp, 10, do2);
