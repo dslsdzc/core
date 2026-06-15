@@ -262,6 +262,7 @@ fn load_ccr(data: string, fsize: int) -> int {
     dyn_grow_ir_vars(var_cnt);
     dyn_grow_ir_instrs(instr_cnt);
     dyn_grow_ir_func_meta(func_cnt);
+    dyn_grow_ir_str_consts(str_const_cnt);
     dyn_grow_structs(struct_cnt);
     dyn_grow_enums(enum_cnt);
 
