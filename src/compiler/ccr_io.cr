@@ -298,13 +298,13 @@ fn load_ccr(data: string, fsize: int) -> int {
     fi : ., mut = 0;
     loop {
         if fi >= func_cnt { break; }
-        w64(g_ir_func_name_idx, fi * 8, buf_read_u32(data, pos)); pos = pos + 4;
-        w64(g_ir_func_param_count, fi * 8, buf_read_u32(data, pos)); pos = pos + 4;
-        w64(g_ir_func_ret_type, fi * 8, buf_read_u32(data, pos)); pos = pos + 4;
-        w64(g_ir_func_instr_start, fi * 8, buf_read_u32(data, pos)); pos = pos + 4;
-        w64(g_ir_func_instr_count, fi * 8, buf_read_u32(data, pos)); pos = pos + 4;
-        w64(g_ir_func_var_start, fi * 8, buf_read_u32(data, pos)); pos = pos + 4;
-        w64(g_ir_func_var_count, fi * 8, buf_read_u32(data, pos)); pos = pos + 4;
+        fv0 := buf_read_u32(data, pos); pos = pos + 4; __builtin_syscall3(1, 1, "D:W\n", 4); w64(g_ir_func_name_idx, fi * 8, fv0);
+        fv1 := buf_read_u32(data, pos); pos = pos + 4; w64(g_ir_func_param_count, fi * 8, fv1);
+        fv2 := buf_read_u32(data, pos); pos = pos + 4; w64(g_ir_func_ret_type, fi * 8, fv2);
+        fv3 := buf_read_u32(data, pos); pos = pos + 4; w64(g_ir_func_instr_start, fi * 8, fv3);
+        fv4 := buf_read_u32(data, pos); pos = pos + 4; w64(g_ir_func_instr_count, fi * 8, fv4);
+        fv5 := buf_read_u32(data, pos); pos = pos + 4; w64(g_ir_func_var_start, fi * 8, fv5);
+        fv6 := buf_read_u32(data, pos); pos = pos + 4; w64(g_ir_func_var_count, fi * 8, fv6);
         g_ir_func_count = fi + 1;
         fi = fi + 1;
     }
@@ -347,7 +347,7 @@ fn load_ccr(data: string, fsize: int) -> int {
     sci : ., mut = 0;
     loop {
         if sci >= str_const_cnt { break; }
-        w64(g_ir_str_consts, sci * 8, buf_read_u32(data, pos)); pos = pos + 4;
+        scv := buf_read_u32(data, pos); pos = pos + 4; w64(g_ir_str_consts, sci * 8, scv);
         g_ir_str_const_count = sci + 1;
         sci = sci + 1;
     }
