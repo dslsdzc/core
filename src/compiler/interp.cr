@@ -17,8 +17,8 @@ fn ir_interpret() -> int {
     }
     if main_idx < 0 { return -1; }
 
-    node_start := g_df_func_node_start[main_idx];
-    node_count := g_df_func_node_count[main_idx];
+    node_start := r64(g_df_func_node_start, main_idx * 8);
+    node_count := r64(g_df_func_node_count, main_idx * 8);
     if node_start < 0 || node_count <= 0 { return -1; }
 
     // Initialize value store
@@ -34,11 +34,13 @@ fn ir_interpret() -> int {
     li : ., mut = 0;
     loop {
         if li >= node_count { break; }
-        nd := g_df_nodes[node_start + li];
-        if nd.opcode == 21 {  // IR_LABEL
-            ln := nd.src1;  // label number
-            if ln >= 0 && ln < 32 {
-                g_label_poses[ln] = li;
+        n_op := r64(g_df_nodes, (node_start + li) * ESZ_DFNODE + OFF_DF_OPCODE);
+        n_s1 := r64(g_df_nodes, (node_start + li) * ESZ_DFNODE + OFF_DF_S1);
+        if n_op == 21 {  // IR_LABEL
+            ln := n_s1;  // label number
+            if ln >= 0 {
+                dyn_grow_label_poses(ln + 1);
+                w64(g_label_poses, ln * 8, li);
                 if ln + 1 > g_label_count { g_label_count = ln + 1; }
             }
         }
@@ -49,9 +51,11 @@ fn ir_interpret() -> int {
     ip : ., mut = 0;
     loop {
         if ip >= node_count { break; }
-        nd := g_df_nodes[node_start + ip];
-        op := nd.opcode; d := nd.dest_var;
-        s1 := nd.src1; s2 := nd.src2; s3 := nd.src3;
+        op := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_OPCODE);
+        d := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_DEST);
+        s1 := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_S1);
+        s2 := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_S2);
+        s3 := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_S3);
 
         if op == 1  { if d >= 0 { g_ir_vals[d] = s1; } }  // IR_CONST
         if op == 5  { if s1 >= 0 { return g_ir_vals[s1]; } return 0; }  // IR_RETURN
@@ -91,12 +95,12 @@ fn ir_interpret() -> int {
         // Branch (node-index based)
         if op == 19 {
             cv := g_ir_vals[s1];
-            if cv != 0 { if s2 >= 0 && s2 < g_label_count { ip = g_label_poses[s2]; } }
-            else       { if s3 >= 0 && s3 < g_label_count { ip = g_label_poses[s3]; } }
+            if cv != 0 { if s2 >= 0 && s2 < g_label_count { ip = r64(g_label_poses, s2 * 8); } }
+            else       { if s3 >= 0 && s3 < g_label_count { ip = r64(g_label_poses, s3 * 8); } }
             if ip < node_count { continue; } else { break; }
         }
         if op == 20 {  // IR_JUMP
-            if s1 >= 0 && s1 < g_label_count { ip = g_label_poses[s1]; }
+            if s1 >= 0 && s1 < g_label_count { ip = r64(g_label_poses, s1 * 8); }
             else { ip = ip + 1; }
             if ip < node_count { continue; } else { break; }
         }
@@ -123,6 +127,31 @@ fn ir_interpret() -> int {
             }
             // __builtin_syscall3 — 解释器模式下返回 0（字符串常量在值存储中是指针还是索引不明确）
             if __builtin_str_eq(fn_name, "__builtin_syscall3") != 0 {
+                if d >= 0 { g_ir_vals[d] = 0; }
+            }
+            if __builtin_str_eq(fn_name, "__builtin_load_str_ptr") != 0 {
+                // Load string pointer from byte buffer at given offset
+                if d >= 0 && s2 >= 2 {
+                    b := g_ir_vals[s1]; p := g_ir_vals[s1 + 1];
+                    lo := __builtin_load8(b, p) + __builtin_load8(b, p+1)*256 +
+                          __builtin_load8(b, p+2)*65536 + __builtin_load8(b, p+3)*16777216;
+                    hi := __builtin_load8(b, p+4) + __builtin_load8(b, p+5)*256 +
+                          __builtin_load8(b, p+6)*65536 + __builtin_load8(b, p+7)*16777216;
+                    if hi < 0 { hi = hi + 4294967296; }
+                    g_ir_vals[d] = lo + hi * 4294967296;
+                }
+            }
+            if __builtin_str_eq(fn_name, "__builtin_store_str_ptr") != 0 {
+                // Store string pointer (as 8 bytes) into byte buffer at given offset
+                if s2 >= 3 {
+                    b := g_ir_vals[s1]; p := g_ir_vals[s1 + 1]; v := g_ir_vals[s1 + 2];
+                    lo : ., mut = v % 4294967296; hi : ., mut = v / 4294967296;
+                    if v < 0 { lo = v; hi = -1; }
+                    __builtin_store8(b, p, lo%256);     __builtin_store8(b, p+1, (lo/256)%256);
+                    __builtin_store8(b, p+2, (lo/65536)%256); __builtin_store8(b, p+3, (lo/16777216)%256);
+                    __builtin_store8(b, p+4, hi%256);   __builtin_store8(b, p+5, (hi/256)%256);
+                    __builtin_store8(b, p+6, (hi/65536)%256); __builtin_store8(b, p+7, (hi/16777216)%256);
+                }
                 if d >= 0 { g_ir_vals[d] = 0; }
             }
         }

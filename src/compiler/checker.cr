@@ -66,7 +66,7 @@ fn type_equal(t1: int, t2: int) -> bool {
             i : ., mut = 0;
             loop {
                 if i >= cnt { break; }
-                if !type_equal(g_gen_apply_data[start1 + i], g_gen_apply_data[start2 + i]) { return false; }
+                if !type_equal(r64(g_gen_apply_data, (start1 + i) * 8), r64(g_gen_apply_data, (start2 + i) * 8)) { return false; }
                 i = i + 1;
             }
             return true;
@@ -81,13 +81,13 @@ fn type_equal(t1: int, t2: int) -> bool {
             if get_type_data(t1) != get_type_data(t2) { return false; }
             start1 := get_type_extra(t1);
             start2 := get_type_extra(t2);
-            count1 := g_gen_apply_data[start1];
-            count2 := g_gen_apply_data[start2];
+            count1 := r64(g_gen_apply_data, start1 * 8);
+            count2 := r64(g_gen_apply_data, start2 * 8);
             if count1 != count2 { return false; }
             ai : ., mut = 0;
             loop {
                 if ai >= count1 { break; }
-                if !type_equal(g_gen_apply_data[start1 + 1 + ai], g_gen_apply_data[start2 + 1 + ai]) { return false; }
+                if !type_equal(r64(g_gen_apply_data, (start1 + 1 + ai) * 8), r64(g_gen_apply_data, (start2 + 1 + ai) * 8)) { return false; }
                 ai = ai + 1;
             }
             return true;
@@ -107,20 +107,16 @@ struct SymEntry {
     node_idx: int,
 }
 
-g_scope_bounds : [int; MAX_SCOPES], mut;
-g_scope_depth : int, mut;
-
 fn push_scope() {
-    if g_scope_depth < MAX_SCOPES {
-        g_scope_bounds[g_scope_depth] = g_sym_count;
-        g_scope_depth = g_scope_depth + 1;
-    }
+    dyn_grow_scope_bounds(g_scope_depth + 1);
+    w64(g_scope_bounds, g_scope_depth * 8, g_sym_count);
+    g_scope_depth = g_scope_depth + 1;
 }
 
 fn pop_scope() {
     if g_scope_depth > 0 {
         g_scope_depth = g_scope_depth - 1;
-        g_sym_count = g_scope_bounds[g_scope_depth];
+        g_sym_count = r64(g_scope_bounds, g_scope_depth * 8);
     }
 }
 
@@ -158,37 +154,22 @@ fn lookup_sym_global(name_idx: int) -> int {
 // Old g_check_errors is replaced by structured g_diags.
 
 fn check_error(code: int, msg: string, line: int, col: int) {
-    if g_diag_count < MAX_ERRS {
-        g_diags[g_diag_count] = Diag { code = code, msg = msg, line = line, col = col };
-        g_diag_count = g_diag_count + 1;
-    }
+    dyn_grow_diags(g_diag_count + 1);
+    w64(g_diags, g_diag_count * 32, code);
+    __builtin_store_str_ptr(g_diags, g_diag_count * 32 + 8, msg);
+    w64(g_diags, g_diag_count * 32 + 16, line);
+    w64(g_diags, g_diag_count * 32 + 24, col);
+    g_diag_count = g_diag_count + 1;
 }
 
 // --- Borrow checking ---
-MAX_BORROWS : int = 32;
-MAX_HOLDERS : int = 64;
 
-// Borrow state: tracks which variables are currently borrowed
-g_borrow_vars : [int; MAX_BORROWS], mut;
-g_borrow_refs : [int; MAX_BORROWS], mut;     // immutable ref count
-g_borrow_muts : [int; MAX_BORROWS], mut;     // mutable ref flag (0/1)
-g_borrow_count : int, mut;
-
-// Borrow holder tracking: who holds a borrow on which variable
-g_holder_borrowers : [int; MAX_HOLDERS], mut;  // name_idx of borrower
-g_holder_borrowed : [int; MAX_HOLDERS], mut;   // name_idx of borrowed
-g_holder_is_mut : [int; MAX_HOLDERS], mut;     // is mutable borrow?
-g_holder_count : int, mut;
-
-// Borrow scope markers: at scope entry, records current holder count
-g_borrow_scope_markers : [int; MAX_SCOPES], mut;
-g_borrow_scope_depth : int, mut;
 
 fn find_borrow_entry(var_ni: int) -> int {
     i : ., mut = 0;
     loop {
         if i >= g_borrow_count { return -1; }
-        if g_borrow_vars[i] == var_ni { return i; }
+        if r64(g_borrow_vars, i * 8) == var_ni { return i; }
         i = i + 1;
     }
     return -1;
@@ -199,67 +180,65 @@ fn check_borrow(var_ni: int, is_mut: int) -> bool {
     if bi >= 0 {
         if is_mut != 0 {
             // &mut x: fail if any borrow exists
-            if g_borrow_refs[bi] > 0 || g_borrow_muts[bi] != 0 { return false; }
-            g_borrow_muts[bi] = 1;
+            if r64(g_borrow_refs, bi * 8) > 0 || r64(g_borrow_muts, bi * 8) != 0 { return false; }
+            w64(g_borrow_muts, bi * 8, 1);
             return true;
         } else {
             // &x: fail if mutable borrow exists
-            if g_borrow_muts[bi] != 0 { return false; }
-            g_borrow_refs[bi] = g_borrow_refs[bi] + 1;
+            if r64(g_borrow_muts, bi * 8) != 0 { return false; }
+            w64(g_borrow_refs, bi * 8, r64(g_borrow_refs, bi * 8) + 1);
             return true;
         }
     }
     // First borrow of this variable
-    if g_borrow_count < MAX_BORROWS {
-        g_borrow_vars[g_borrow_count] = var_ni;
-        g_borrow_refs[g_borrow_count] = 0;
-        g_borrow_muts[g_borrow_count] = 0;
-        if is_mut != 0 { g_borrow_muts[g_borrow_count] = 1; }
-        else { g_borrow_refs[g_borrow_count] = 1; }
-        g_borrow_count = g_borrow_count + 1;
-    }
+    dyn_grow_borrow_vars(g_borrow_count + 1);
+    w64(g_borrow_vars, g_borrow_count * 8, var_ni);
+    w64(g_borrow_refs, g_borrow_count * 8, 0);
+    w64(g_borrow_muts, g_borrow_count * 8, 0);
+    if is_mut != 0 { w64(g_borrow_muts, g_borrow_count * 8, 1); }
+    else { w64(g_borrow_refs, g_borrow_count * 8, 1); }
+    g_borrow_count = g_borrow_count + 1;
     return true;
 }
 
 fn check_use(var_ni: int) -> bool {
     bi := find_borrow_entry(var_ni);
     if bi >= 0 {
-        if g_borrow_refs[bi] > 0 || g_borrow_muts[bi] != 0 { return false; }
+        if r64(g_borrow_refs, bi * 8) > 0 || r64(g_borrow_muts, bi * 8) != 0 { return false; }
     }
     return true;
 }
 
 fn push_borrow_scope() {
-    if g_borrow_scope_depth < MAX_SCOPES {
-        g_borrow_scope_markers[g_borrow_scope_depth] = g_holder_count;
-        g_borrow_scope_depth = g_borrow_scope_depth + 1;
-    }
+    dyn_grow_borrow_scope_markers(g_borrow_scope_depth + 1);
+    w64(g_borrow_scope_markers, g_borrow_scope_depth * 8, g_holder_count);
+    g_borrow_scope_depth = g_borrow_scope_depth + 1;
 }
 
 fn pop_borrow_scope() {
     if g_borrow_scope_depth > 0 {
         g_borrow_scope_depth = g_borrow_scope_depth - 1;
-        marker := g_borrow_scope_markers[g_borrow_scope_depth];
+        marker := r64(g_borrow_scope_markers, g_borrow_scope_depth * 8);
         // Release all borrows held from marker to end
         loop {
             if g_holder_count <= marker { break; }
             g_holder_count = g_holder_count - 1;
-            borrowed_ni := g_holder_borrowed[g_holder_count];
-            is_mut := g_holder_is_mut[g_holder_count];
+            borrowed_ni := r64(g_holder_borrowed, g_holder_count * 8);
+            is_mut := r64(g_holder_is_mut, g_holder_count * 8);
             bi := find_borrow_entry(borrowed_ni);
             if bi >= 0 {
-                if is_mut != 0 { g_borrow_muts[bi] = 0; }
+                if is_mut != 0 { w64(g_borrow_muts, bi * 8, 0); }
                 else {
-                    if g_borrow_refs[bi] > 0 { g_borrow_refs[bi] = g_borrow_refs[bi] - 1; }
+                    if r64(g_borrow_refs, bi * 8) > 0 { w64(g_borrow_refs, bi * 8, r64(g_borrow_refs, bi * 8) - 1); }
                 }
                 // Clean up entry if no more borrows
-                if g_borrow_refs[bi] == 0 && g_borrow_muts[bi] == 0 {
+                if r64(g_borrow_refs, bi * 8) == 0 && r64(g_borrow_muts, bi * 8) == 0 {
                     si : ., mut = bi;
                     loop {
                         if si + 1 >= g_borrow_count { break; }
-                        g_borrow_vars[si] = g_borrow_vars[si + 1];
-                        g_borrow_refs[si] = g_borrow_refs[si + 1];
-                        g_borrow_muts[si] = g_borrow_muts[si + 1];
+                        w64(g_borrow_vars, si * 8, r64(g_borrow_vars, (si + 1) * 8));
+                        w64(g_borrow_refs, si * 8, r64(g_borrow_refs, (si + 1) * 8));
+                        w64(g_borrow_muts, si * 8, r64(g_borrow_muts, (si + 1) * 8));
                         si = si + 1;
                     }
                     g_borrow_count = g_borrow_count - 1;
@@ -270,12 +249,11 @@ fn pop_borrow_scope() {
 }
 
 fn record_borrow_holder(borrower_ni: int, borrowed_ni: int, is_mut: int) {
-    if g_holder_count < MAX_HOLDERS {
-        g_holder_borrowers[g_holder_count] = borrower_ni;
-        g_holder_borrowed[g_holder_count] = borrowed_ni;
-        g_holder_is_mut[g_holder_count] = is_mut;
-        g_holder_count = g_holder_count + 1;
-    }
+    dyn_grow_holder(g_holder_count + 1);
+    w64(g_holder_borrowers, g_holder_count * 8, borrower_ni);
+    w64(g_holder_borrowed, g_holder_count * 8, borrowed_ni);
+    w64(g_holder_is_mut, g_holder_count * 8, is_mut);
+    g_holder_count = g_holder_count + 1;
 }
 
 fn borrow_var_name(node: int) -> int {
@@ -338,14 +316,15 @@ fn resolve_type_node(node: int) -> int {
         base_ti := sym_type(si);
         // Store args in g_gen_apply_data: [count, arg1, arg2, ...]
         data_start := g_gen_apply_data_count;
-        g_gen_apply_data[data_start] = arg_count;
+        dyn_grow_gen_apply_data(data_start + 1 + arg_count);
+        w64(g_gen_apply_data, data_start * 8, arg_count);
         g_gen_apply_data_count = data_start + 1;
         ai : ., mut = 0;
         an : ., mut = first_arg_node;
         loop {
             if ai >= arg_count { break; }
             arg_ti := resolve_type_node(an);
-            g_gen_apply_data[data_start + 1 + ai] = arg_ti;
+            w64(g_gen_apply_data, (data_start + 1 + ai) * 8, arg_ti);
             ai = ai + 1;
             an = an + 1;
         }
@@ -438,8 +417,8 @@ fn collect_decls() {
     i = 0;
     loop {
         if i >= g_type_alias_count { break; }
-        name_idx := g_type_aliases[i].name_idx;
-        type_node := g_type_aliases[i].type_node;
+        name_idx := r64(g_type_aliases, i * 16);
+        type_node := r64(g_type_aliases, i * 16 + 8);
         ti := resolve_type_node(type_node);
         define_sym(name_idx, SYM_TYPE, ti, -1);
         i = i + 1;
@@ -473,7 +452,7 @@ fn collect_decls() {
     i = 0;
     loop {
         if i >= g_global_let_count { break; }
-        node := g_global_lets[i];
+        node := r64(g_global_lets, i * 8);
         name_idx := ast_a(node);  // EXPR_LET: a = name idx
         type_node := ast_b(node);  // EXPR_LET: b = type node (-1 if none)
         ti := TI_UNIT;
@@ -485,37 +464,39 @@ fn collect_decls() {
     mi : ., mut = 0;
     loop {
         if mi >= g_mod_count { break; }
-        define_sym(g_mods[mi].alias_ni, SYM_MODULE, g_mods[mi].fileid_ni, -1);
+        alias_ni := r64(g_mods, mi * 24);
+        fileid_ni := r64(g_mods, mi * 24 + 8);
+        define_sym(alias_ni, SYM_MODULE, fileid_ni, -1);
         mi = mi + 1;
     }
     // Register mod path declarations (mod foo::bar;)
     pi : ., mut = 0;
     loop {
         if pi >= g_mod_path_count { break; }
-        define_sym(g_mod_path_names[pi], SYM_MODULE, g_mod_path_names[pi], -1);
+        mpn := r64(g_mod_path_names, pi * 8);
+        define_sym(mpn, SYM_MODULE, mpn, -1);
         pi = pi + 1;
     }
     // Build module function lookup table for qualified access (e.g., mymath.add)
     main_fni : ., mut = 0;
-    if g_file_count > 0 { main_fni = g_files[0].fileid_ni; }
-    g_mod_func_count = 0;
+    if g_file_count > 0 { main_fni = r64(g_files, 0); }
+    g_mod_func_count = 0; g_mod_func_cap = 0;
     fi : ., mut = 0;
     loop {
         if fi >= g_func_count { break; }
         fn_node := fi_ast_node(fi);
         fn_line := ast_line(fn_node);
         if fn_line > 0 && fn_line <= g_line_count {
-            fileid_ni := g_line_fileid[fn_line - 1];
+            fileid_ni := r64(g_line_fileid, (fn_line - 1) * 8);
             if fileid_ni != main_fni && fileid_ni != 0 && g_line_count > 0 {
-                if g_mod_func_count < MAX_MOD_FUNCS {
-                    g_mod_func_fileids[g_mod_func_count] = fileid_ni;
-                    g_mod_func_names[g_mod_func_count] = fi_name(fi);
-                    fn_si := lookup_sym(fi_name(fi));
-                    if fn_si >= 0 {
-                        g_mod_func_tis[g_mod_func_count] = sym_type(fn_si);
-                    }
-                    g_mod_func_count = g_mod_func_count + 1;
+                dyn_grow_mod_funcs(g_mod_func_count + 1);
+                w64(g_mod_func_fileids, g_mod_func_count * 8, fileid_ni);
+                w64(g_mod_func_names, g_mod_func_count * 8, fi_name(fi));
+                fn_si := lookup_sym(fi_name(fi));
+                if fn_si >= 0 {
+                    w64(g_mod_func_tis, g_mod_func_count * 8, sym_type(fn_si));
                 }
+                g_mod_func_count = g_mod_func_count + 1;
             }
         }
         fi = fi + 1;
@@ -523,9 +504,6 @@ fn collect_decls() {
 }
 
 // --- Generic type inference helpers ---
-g_gen_map_names : [int; 4], mut;  // generic param name indices
-g_gen_map_types : [int; 4], mut;  // corresponding concrete type indices
-g_gen_map_count : int, mut;
 
 fn is_func_generic(fi: int, name_idx: int) -> bool {
     if fi < 0 || fi >= g_func_count { return false; }
@@ -539,11 +517,10 @@ fn is_func_generic(fi: int, name_idx: int) -> bool {
 }
 
 fn find_func(name_idx: int) -> int {
-    s := str_get(name_idx);
     i : ., mut = 0;
     loop {
         if i >= g_func_count { return -1; }
-        if fi_name(i) == s { return i; }
+        if fi_name(i) == name_idx { return i; }
         i = i + 1;
     }
     return -1;
@@ -601,14 +578,15 @@ fn resolve_call_type_node(node: int, func_fi: int) -> int {
         if si < 0 || sym_kind(si) != SYM_TYPE { return TI_UNIT; }
         base_ti := sym_type(si);
         ds := g_gen_apply_data_count;
-        g_gen_apply_data[ds] = ac;
+        dyn_grow_gen_apply_data(ds + 1 + ac);
+        w64(g_gen_apply_data, ds * 8, ac);
         g_gen_apply_data_count = ds + 1;
         ai : ., mut = 0;
         an : ., mut = first_an;
         loop {
             if ai >= ac { break; }
             at := resolve_call_type_node(an, func_fi);
-            g_gen_apply_data[ds + 1 + ai] = at;
+            w64(g_gen_apply_data, (ds + 1 + ai) * 8, at);
             ai = ai + 1;
             an = an + 1;
         }
@@ -633,30 +611,29 @@ fn unify_types(pattern: int, concrete: int) -> bool {
         mi : ., mut = 0;
         loop {
             if mi >= g_gen_map_count { break; }
-            if g_gen_map_names[mi] == name_idx {
-                return type_equal(g_gen_map_types[mi], concrete);
+            if r64(g_gen_map_names, mi * 8) == name_idx {
+                return type_equal(r64(g_gen_map_types, mi * 8), concrete);
             }
             mi = mi + 1;
         }
-        if g_gen_map_count < MAX_GENERICS {
-            g_gen_map_names[g_gen_map_count] = name_idx;
-            g_gen_map_types[g_gen_map_count] = concrete;
-            g_gen_map_count = g_gen_map_count + 1;
-            return true;
-        }
+        dyn_grow_gen_map(g_gen_map_count + 1);
+        w64(g_gen_map_names, g_gen_map_count * 8, name_idx);
+        w64(g_gen_map_types, g_gen_map_count * 8, concrete);
+        g_gen_map_count = g_gen_map_count + 1;
+        return true;
         return false;
     }
     if pk == TYP_GENERIC_APPLY && ck == TYP_GENERIC_APPLY {
         if !type_equal(get_type_data(pattern), get_type_data(concrete)) { return false; }
         ps := get_type_extra(pattern);
         cs := get_type_extra(concrete);
-        pc := g_gen_apply_data[ps];
-        cc := g_gen_apply_data[cs];
+        pc := r64(g_gen_apply_data, ps * 8);
+        cc := r64(g_gen_apply_data, cs * 8);
         if pc != cc { return false; }
         ai : ., mut = 0;
         loop {
             if ai >= pc { break; }
-            if !unify_types(g_gen_apply_data[ps + 1 + ai], g_gen_apply_data[cs + 1 + ai]) { return false; }
+            if !unify_types(r64(g_gen_apply_data, (ps + 1 + ai) * 8), r64(g_gen_apply_data, (cs + 1 + ai) * 8)) { return false; }
             ai = ai + 1;
         }
         return true;
@@ -673,7 +650,7 @@ fn substitute_return_type(ti: int) -> int {
         mi : ., mut = 0;
         loop {
             if mi >= g_gen_map_count { break; }
-            if g_gen_map_names[mi] == name_idx { return g_gen_map_types[mi]; }
+            if r64(g_gen_map_names, mi * 8) == name_idx { return r64(g_gen_map_types, mi * 8); }
             mi = mi + 1;
         }
         return ti;
@@ -681,15 +658,16 @@ fn substitute_return_type(ti: int) -> int {
     if k == TYP_GENERIC_APPLY {
         base := get_type_data(ti);
         start := get_type_extra(ti);
-        count := g_gen_apply_data[start];
+        count := r64(g_gen_apply_data, start * 8);
         new_start := g_gen_apply_data_count;
-        g_gen_apply_data[new_start] = count;
+        dyn_grow_gen_apply_data(new_start + 1 + count);
+        w64(g_gen_apply_data, new_start * 8, count);
         g_gen_apply_data_count = new_start + 1;
         ai : ., mut = 0;
         loop {
             if ai >= count { break; }
-            sub := substitute_return_type(g_gen_apply_data[start + 1 + ai]);
-            g_gen_apply_data[new_start + 1 + ai] = sub;
+            sub := substitute_return_type(r64(g_gen_apply_data, (start + 1 + ai) * 8));
+            w64(g_gen_apply_data, (new_start + 1 + ai) * 8, sub);
             ai = ai + 1;
         }
         g_gen_apply_data_count = new_start + 1 + count;
@@ -705,7 +683,7 @@ fn infer_generic_call(fi: int, call_node: int, first_arg: int, arg_count: int) -
     param_count := ast_c(fn_node);
     ret_type_node := ast_type_val(fn_node);
 
-    g_gen_map_count = 0;
+    g_gen_map_count = 0; g_gen_map_cap = 0;
 
     // First pass: infer arg types and build mapping
     pi : ., mut = 0;
@@ -749,9 +727,9 @@ fn infer_generic_call(fi: int, call_node: int, first_arg: int, arg_count: int) -
 
 fn check_func(fi: int) {
     // Reset per-function borrow state
-    g_borrow_count = 0;
-    g_holder_count = 0;
-    g_borrow_scope_depth = 0;
+    g_borrow_count = 0; g_borrow_cap = 0;
+    g_holder_count = 0; g_holder_cap = 0;
+    g_borrow_scope_depth = 0; g_borrow_scope_markers_cap = 0;
     fn_node := fi_ast_node(fi);
     name_idx := ast_a(fn_node);  // EXPR_FN: a = name idx
     first_param := ast_b(fn_node);  // EXPR_FN: b = first param node
@@ -796,13 +774,13 @@ fn check_func(fi: int) {
             }
         } else {
             // Self param: derive struct type from mangled function name "Struct.method"
-            fn_name := fi_name(fi);
+            fn_name := str_get(fi_name(fi));
             fn_len := __builtin_str_len(fn_name);
             dot_pos : ., mut = -1;
             di : ., mut = 0;
             loop {
                 if di >= fn_len { break; }
-                if __builtin_str_get(fn_name, di) == "." { dot_pos = di; break; }
+                if __builtin_str_get(fn_name, di) == 46 { dot_pos = di; break; }  // '.' = 46
                 di = di + 1;
             }
             if dot_pos > 0 {
@@ -1001,8 +979,8 @@ fn infer_expr(node: int) -> int {
                     mfi : ., mut = 0;
                     loop {
                         if mfi >= g_mod_func_count { break; }
-                        if g_mod_func_fileids[mfi] == fileid_ni && g_mod_func_names[mfi] == method_ni {
-                            func_ni = g_mod_func_names[mfi];
+                        if r64(g_mod_func_fileids, mfi * 8) == fileid_ni && r64(g_mod_func_names, mfi * 8) == method_ni {
+                            func_ni = r64(g_mod_func_names, mfi * 8);
                             ast_set_data(node, func_ni);
                             ast_set_type_val(node, 1);  // mark as module call
                             mod_call_done = 1;
@@ -1023,7 +1001,7 @@ fn infer_expr(node: int) -> int {
                     ai = ai + 1;
                 }
                 if mod_found_mfi >= 0 {
-                    return g_mod_func_tis[mod_found_mfi];
+                    return r64(g_mod_func_tis, mod_found_mfi * 8);
                 }
                 return TI_UNIT;
             }
@@ -1040,8 +1018,8 @@ fn infer_expr(node: int) -> int {
                 mi : ., mut = 0;
                 loop {
                     if mi >= g_method_count { break; }
-                    if g_methods[mi].struct_ni == struct_ni && g_methods[mi].method_ni == method_ni {
-                        func_ni = g_methods[mi].mangled_ni;
+                    if r64(g_methods, mi * 24) == struct_ni && r64(g_methods, mi * 24 + 8) == method_ni {
+                        func_ni = r64(g_methods, mi * 24 + 16);
                         ast_set_data(node, func_ni);
                         break;
                     }
@@ -1096,6 +1074,8 @@ fn infer_expr(node: int) -> int {
             if s == "__builtin_int_to_str" { return TI_STR; }
             if s == "__builtin_load8" { return TI_INT; }
             if s == "__builtin_store8" { return TI_INT; }
+            if s == "__builtin_load_str_ptr" { return TI_STR; }
+            if s == "__builtin_store_str_ptr" { return TI_INT; }
         }
         // Look up function
         if func_ni >= 0 {
@@ -1131,7 +1111,7 @@ fn infer_expr(node: int) -> int {
         i : ., mut = 0;
         loop {
             if i >= stmt_count { break; }
-            sn := r64(g_block_stmts, stmt_start + i * 8);
+            sn := r64(g_block_stmts, (stmt_start + i) * 8);
             res = infer_expr(sn);
             i = i + 1;
         }
@@ -1336,7 +1316,7 @@ fn infer_expr(node: int) -> int {
                                 if is_struct_generic(si, ft_name_idx) && get_type_kind(obj_ti) == TYP_GENERIC_APPLY {
                                         base_ti := get_type_data(obj_ti);
                                         ga_start := get_type_extra(obj_ti);
-                                        ga_count := g_gen_apply_data[ga_start];
+                                        ga_count := r64(g_gen_apply_data, ga_start * 8);
                                         // Find which generic param index
                                         gpi : ., mut = 0;
                                         loop {
@@ -1344,7 +1324,7 @@ fn infer_expr(node: int) -> int {
                                             if si_generic_name(si, gpi) == ft_name_idx {
                                                 // Use the corresponding arg from the generic apply
                                                 if gpi < ga_count {
-                                                    return g_gen_apply_data[ga_start + 1 + gpi];
+                                                    return r64(g_gen_apply_data, (ga_start + 1 + gpi) * 8);
                                                 }
                                                 break;
                                             }
@@ -1370,7 +1350,7 @@ fn infer_expr(node: int) -> int {
                 if ast_data(node) != idx {
                     ast_set_data(node, idx);
                 }
-                return g_gen_apply_data[data_start + idx];
+                return r64(g_gen_apply_data, (data_start + idx) * 8);
             }
         }
         return TI_UNIT;
@@ -1416,7 +1396,7 @@ fn infer_expr(node: int) -> int {
         si := find_struct_by_name(name_ni);
         if si >= 0 && si_generic_count(si) > 0 {
             // Generic struct: infer concrete types from field values
-            g_gen_map_count = 0;
+            g_gen_map_count = 0; g_gen_map_cap = 0;
             fi : ., mut = 0;
             fn2 : ., mut = ast_b(node);
             loop {
@@ -1428,9 +1408,10 @@ fn infer_expr(node: int) -> int {
                         if ast_kind(orig_type_node) == EXPR_IDENT {
                             // Check if field type is a generic param
                             field_name_idx := ast_int_val(orig_type_node);
-                            if is_struct_generic(si, field_name_idx) && g_gen_map_count < MAX_GENERICS {
-                                g_gen_map_names[g_gen_map_count] = field_name_idx;
-                                g_gen_map_types[g_gen_map_count] = field_val_ti;
+                            if is_struct_generic(si, field_name_idx) {
+                                dyn_grow_gen_map(g_gen_map_count + 1);
+                                w64(g_gen_map_names, g_gen_map_count * 8, field_name_idx);
+                                w64(g_gen_map_types, g_gen_map_count * 8, field_val_ti);
                                 g_gen_map_count = g_gen_map_count + 1;
                             }
                         }
@@ -1442,12 +1423,13 @@ fn infer_expr(node: int) -> int {
             // Create TYP_GENERIC_APPLY for this struct
             base_ti := alloc_type(TYP_NAMED, name_ni, 0);
             ds := g_gen_apply_data_count;
-            g_gen_apply_data[ds] = g_gen_map_count;
+            dyn_grow_gen_apply_data(ds + 1 + g_gen_map_count);
+            w64(g_gen_apply_data, ds * 8, g_gen_map_count);
             g_gen_apply_data_count = ds + 1;
             mi : ., mut = 0;
             loop {
                 if mi >= g_gen_map_count { break; }
-                g_gen_apply_data[ds + 1 + mi] = g_gen_map_types[mi];
+                w64(g_gen_apply_data, (ds + 1 + mi) * 8, r64(g_gen_map_types, mi * 8));
                 mi = mi + 1;
             }
             g_gen_apply_data_count = ds + 1 + g_gen_map_count;
@@ -1506,8 +1488,8 @@ fn infer_expr(node: int) -> int {
                 base_name := str_get(base_ni);
                 if base_name == "Option" || base_name == "Result" {
                     ga_start := get_type_extra(inner_ti);
-                    if g_gen_apply_data[ga_start] >= 1 {
-                        return g_gen_apply_data[ga_start + 1]; // first type arg
+                    if r64(g_gen_apply_data, ga_start * 8) >= 1 {
+                        return r64(g_gen_apply_data, (ga_start + 1) * 8); // first type arg
                     }
                 }
             }
@@ -1536,7 +1518,8 @@ fn infer_expr(node: int) -> int {
         loop {
             if e >= ec { break; }
             elem_ti := infer_expr(elem_idx + e);
-            g_gen_apply_data[g_gen_apply_data_count] = elem_ti;
+            dyn_grow_gen_apply_data(g_gen_apply_data_count + 1);
+            w64(g_gen_apply_data, g_gen_apply_data_count * 8, elem_ti);
             g_gen_apply_data_count = g_gen_apply_data_count + 1;
             e = e + 1;
         }
@@ -1551,10 +1534,11 @@ fn infer_expr(node: int) -> int {
 fn check_all() {
     init_types();
     g_sym_count = 0;
-    g_scope_depth = 0;
-    g_diag_count = 0;
-    g_gen_map_count = 0;
+    g_scope_depth = 0; g_scope_bounds_cap = 0;
+    g_diag_count = 0; g_diag_cap = 0;
+    g_gen_map_count = 0; g_gen_map_cap = 0;
     g_gen_apply_data_count = 0;
+    g_gen_apply_data_cap = 0;
 
     // First pass: collect declarations
     collect_decls();
@@ -1571,7 +1555,7 @@ fn check_all() {
     i = 0;
     loop {
         if i >= g_global_let_count { break; }
-        check_global_let(g_global_lets[i]);
+        check_global_let(r64(g_global_lets, i * 8));
         i = i + 1;
     }
 }

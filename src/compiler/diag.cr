@@ -104,22 +104,24 @@ fn print_diagnostics() {
     di : ., mut = 0;
     loop {
         if di >= g_diag_count { break; }
-        d := g_diags[di];
-        ec := d.code;
+        ec := r64(g_diags, di * 32);
+        msg := __builtin_load_str_ptr(g_diags, di * 32 + 8);
+        ln := r64(g_diags, di * 32 + 16);
+        cl := r64(g_diags, di * 32 + 24);
         cat : ., mut = ec / 1000;
         num : ., mut = ec % 1000;
         __builtin_print("error[");
         __builtin_print(error_cat_prefix(cat));
         __builtin_print(pad_diag_num(num));
         __builtin_print("]: ");
-        __builtin_println(d.msg);
+        __builtin_println(msg);
         __builtin_print(" --> ");
-        __builtin_print(__builtin_int_to_str(d.line));
+        __builtin_print(__builtin_int_to_str(ln));
         __builtin_print(":");
-        __builtin_println(__builtin_int_to_str(d.col));
-        if d.line > 0 {
+        __builtin_println(__builtin_int_to_str(cl));
+        if ln > 0 {
             __builtin_println("   |");
-            print_source_line(d.line, d.col, d.msg);
+            print_source_line(ln, cl, msg);
         }
         __builtin_println("");
         di = di + 1;

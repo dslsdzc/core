@@ -388,7 +388,9 @@ fn compile_source(source: string) -> string {
         ei : ., mut = 0;
         loop {
             if ei >= g_diag_count { break; }
-            err_msg = err_msg + " [" + __builtin_int_to_str(g_diags[ei].code) + "] " + g_diags[ei].msg;
+            diag_code := r64(g_diags, ei * 32);
+            diag_msg := __builtin_load_str_ptr(g_diags, ei * 32 + 8);
+            err_msg = err_msg + " [" + __builtin_int_to_str(diag_code) + "] " + diag_msg;
             ei = ei + 1;
         }
         return err_msg;

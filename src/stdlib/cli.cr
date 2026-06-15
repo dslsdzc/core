@@ -20,9 +20,6 @@
 //   MAX_CLI_ARGS  = 32
 
 // --- Limits ---
-MAX_CLI_CMDS : int = 16;
-MAX_CLI_FLAGS : int = 32;
-MAX_CLI_ARGS : int = 32;
 CLI_LONG_NAME_SIZE : int = 32;
 
 // --- Internal structs ---
@@ -43,12 +40,22 @@ struct CliFlag {
 // --- Global state ---
 g_cli_prog : string, mut;
 g_cli_desc : string, mut;
-g_cli_cmds : [CliCmd; MAX_CLI_CMDS], mut;
-g_cli_cmd_count : int, mut;
-g_cli_flags : [CliFlag; MAX_CLI_FLAGS], mut;
-g_cli_flag_count : int, mut;
-g_cli_args : [string; MAX_CLI_ARGS], mut;
-g_cli_arg_count : int, mut;
+g_cli_cmds : string, mut;             g_cli_cmd_count : int, mut;     g_cli_cmd_cap : int, mut;
+g_cli_flags : string, mut;            g_cli_flag_count : int, mut;    g_cli_flag_cap : int, mut;
+g_cli_args : string, mut;             g_cli_arg_count : int, mut;    g_cli_arg_cap : int, mut;
+
+fn dyn_grow_cli_cmds(needed: int) {
+    if needed < g_cli_cmd_cap { return; }
+    nc : ., mut = g_cli_cmd_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
+    nb := __builtin_alloc(nc * 16); _dyncpy(g_cli_cmds, g_cli_cmd_cap * 16, nb); g_cli_cmds = nb; g_cli_cmd_cap = nc; }
+fn dyn_grow_cli_flags(needed: int) {
+    if needed < g_cli_flag_cap { return; }
+    nc : ., mut = g_cli_flag_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
+    nb := __builtin_alloc(nc * 48); _dyncpy(g_cli_flags, g_cli_flag_cap * 48, nb); g_cli_flags = nb; g_cli_flag_cap = nc; }
+fn dyn_grow_cli_args(needed: int) {
+    if needed < g_cli_arg_cap { return; }
+    nc : ., mut = g_cli_arg_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
+    nb := __builtin_alloc(nc * 8); _dyncpy(g_cli_args, g_cli_arg_cap * 8, nb); g_cli_args = nb; g_cli_arg_cap = nc; }
 g_cli_matched_cmd : string, mut;
 
 // --- Init ---
@@ -56,39 +63,41 @@ g_cli_matched_cmd : string, mut;
 fn cli_init(prog: string, desc: string) {
     g_cli_prog = prog;
     g_cli_desc = desc;
-    g_cli_cmd_count = 0;
-    g_cli_flag_count = 0;
-    g_cli_arg_count = 0;
+    g_cli_cmd_count = 0; g_cli_cmd_cap = 0;
+    g_cli_flag_count = 0; g_cli_flag_cap = 0;
+    g_cli_arg_count = 0; g_cli_arg_cap = 0;
     g_cli_matched_cmd = "";
 }
 
 // --- Registration ---
 
 fn cli_cmd(name: string, desc: string) {
-    if g_cli_cmd_count < MAX_CLI_CMDS {
-        g_cli_cmds[g_cli_cmd_count] = CliCmd { name = name, desc = desc };
-        g_cli_cmd_count = g_cli_cmd_count + 1;
-    }
+    dyn_grow_cli_cmds(g_cli_cmd_count + 1);
+    w64(g_cli_cmds, g_cli_cmd_count * 16, name);
+    w64(g_cli_cmds, g_cli_cmd_count * 16 + 8, desc);
+    g_cli_cmd_count = g_cli_cmd_count + 1;
 }
 
 fn cli_flag(long_name: string, short_name: string, desc: string) {
-    if g_cli_flag_count < MAX_CLI_FLAGS {
-        g_cli_flags[g_cli_flag_count] = CliFlag {
-            long_name = long_name, short_name = short_name, desc = desc,
-            value = "", has_value = 0, is_bool = 0
-        };
-        g_cli_flag_count = g_cli_flag_count + 1;
-    }
+    dyn_grow_cli_flags(g_cli_flag_count + 1);
+    w64(g_cli_flags, g_cli_flag_count * 48, long_name);
+    w64(g_cli_flags, g_cli_flag_count * 48 + 8, short_name);
+    w64(g_cli_flags, g_cli_flag_count * 48 + 16, desc);
+    w64(g_cli_flags, g_cli_flag_count * 48 + 24, "");       // value
+    w64(g_cli_flags, g_cli_flag_count * 48 + 32, 0);         // has_value
+    w64(g_cli_flags, g_cli_flag_count * 48 + 40, 0);         // is_bool
+    g_cli_flag_count = g_cli_flag_count + 1;
 }
 
 fn cli_flag_bool(long_name: string, short_name: string, desc: string) {
-    if g_cli_flag_count < MAX_CLI_FLAGS {
-        g_cli_flags[g_cli_flag_count] = CliFlag {
-            long_name = long_name, short_name = short_name, desc = desc,
-            value = "", has_value = 0, is_bool = 1
-        };
-        g_cli_flag_count = g_cli_flag_count + 1;
-    }
+    dyn_grow_cli_flags(g_cli_flag_count + 1);
+    w64(g_cli_flags, g_cli_flag_count * 48, long_name);
+    w64(g_cli_flags, g_cli_flag_count * 48 + 8, short_name);
+    w64(g_cli_flags, g_cli_flag_count * 48 + 16, desc);
+    w64(g_cli_flags, g_cli_flag_count * 48 + 24, "");       // value
+    w64(g_cli_flags, g_cli_flag_count * 48 + 32, 0);         // has_value
+    w64(g_cli_flags, g_cli_flag_count * 48 + 40, 1);         // is_bool
+    g_cli_flag_count = g_cli_flag_count + 1;
 }
 
 // --- Internal helpers ---
@@ -97,15 +106,10 @@ fn _cli_find_flag(name: string) -> int {
     i : ., mut = 0;
     loop {
         if i >= g_cli_flag_count { break; }
-        f := g_cli_flags[i];
-        // Try long name match: --name
-        if __builtin_str_len(f.long_name) > 0 && __builtin_str_eq(f.long_name, name) != 0 {
-            return i;
-        }
-        // Try short name match: -n
-        if __builtin_str_len(f.short_name) > 0 && __builtin_str_eq(f.short_name, name) != 0 {
-            return i;
-        }
+        ln := r64(g_cli_flags, i * 48);
+        sn := r64(g_cli_flags, i * 48 + 8);
+        if __builtin_str_len(ln) > 0 && __builtin_str_eq(ln, name) != 0 { return i; }
+        if __builtin_str_len(sn) > 0 && __builtin_str_eq(sn, name) != 0 { return i; }
         i = i + 1;
     }
     return -1;
@@ -153,7 +157,7 @@ fn cli_parse() -> int {
         found_cmd : ., mut = 0;
         loop {
             if ci >= g_cli_cmd_count { break; }
-            if __builtin_str_eq(g_cli_cmds[ci].name, first) != 0 {
+            if __builtin_str_eq(r64(g_cli_cmds, ci * 16), first) != 0 {
                 found_cmd = 1;
                 break;
             }
@@ -201,11 +205,10 @@ fn cli_parse() -> int {
                 cli_help();
                 return -1;
             }
-            if g_cli_flags[fi].is_bool != 0 {
-                g_cli_flags[fi].has_value = 1;
-                g_cli_flags[fi].value = "1";
+            if r64(g_cli_flags, fi * 48 + 40) != 0 {   // is_bool
+                w64(g_cli_flags, fi * 48 + 32, 1);       // has_value
+                w64(g_cli_flags, fi * 48 + 24, "1");     // value
             } else {
-                // Next arg is the value
                 ai = ai + 1;
                 if ai >= argc_int {
                     __builtin_print("flag ");
@@ -214,15 +217,14 @@ fn cli_parse() -> int {
                     return -1;
                 }
                 val := __builtin_get_arg(ai);
-                g_cli_flags[fi].value = val;
-                g_cli_flags[fi].has_value = 1;
+                w64(g_cli_flags, fi * 48 + 24, val);      // value
+                w64(g_cli_flags, fi * 48 + 32, 1);         // has_value
             }
         } else {
             // Positional argument
-            if g_cli_arg_count < MAX_CLI_ARGS {
-                g_cli_args[g_cli_arg_count] = arg;
-                g_cli_arg_count = g_cli_arg_count + 1;
-            }
+            dyn_grow_cli_args(g_cli_arg_count + 1);
+            w64(g_cli_args, g_cli_arg_count * 8, arg);
+            g_cli_arg_count = g_cli_arg_count + 1;
         }
         ai = ai + 1;
     }
@@ -242,8 +244,8 @@ fn cli_eq(cmd: string, expected: string) -> int {
 
 fn cli_get(name: string) -> string {
     fi := _cli_find_flag(name);
-    if fi >= 0 && g_cli_flags[fi].has_value != 0 {
-        return g_cli_flags[fi].value;
+    if fi >= 0 && r64(g_cli_flags, fi * 48 + 32) != 0 {  // has_value
+        return r64(g_cli_flags, fi * 48 + 24);             // value
     }
     return "";
 }
@@ -251,14 +253,14 @@ fn cli_get(name: string) -> string {
 fn cli_has(name: string) -> int {
     fi := _cli_find_flag(name);
     if fi >= 0 {
-        return g_cli_flags[fi].has_value;
+        return r64(g_cli_flags, fi * 48 + 32);  // has_value
     }
     return 0;
 }
 
 fn cli_arg(n: int) -> string {
     if n >= 0 && n < g_cli_arg_count {
-        return g_cli_args[n];
+        return r64(g_cli_args, n * 8);
     }
     return "";
 }
@@ -281,7 +283,7 @@ fn cli_help() {
         loop {
             if ci >= g_cli_cmd_count { break; }
             if first == 0 { __builtin_print(","); }
-            __builtin_print(g_cli_cmds[ci].name);
+            __builtin_print(r64(g_cli_cmds, ci * 16));
             first = 0;
             ci = ci + 1;
         }
@@ -304,7 +306,7 @@ fn cli_help() {
         loop {
             if ci >= g_cli_cmd_count { break; }
             if first == 0 { __builtin_print(","); }
-            __builtin_print(g_cli_cmds[ci].name);
+            __builtin_print(r64(g_cli_cmds, ci * 16));
             first = 0;
             ci = ci + 1;
         }

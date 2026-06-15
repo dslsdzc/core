@@ -30,8 +30,9 @@ fn resolve_labels() {
             inst_idx := ist + ii;
             if iri_op(inst_idx) == IR_LABEL {
                 ln := iri_s1(inst_idx);
-                if ln >= 0 && ln < 32 {
-                    g_label_poses[ln] = off;
+                if ln >= 0 {
+                    dyn_grow_label_poses(ln + 1);
+                    w64(g_label_poses, ln * 8, off);
                     if ln + 1 > g_label_count { g_label_count = ln + 1; }
                 }
             } else {
@@ -46,12 +47,12 @@ fn resolve_labels() {
             if ii >= ic { break; }
             inst_idx := ist + ii;
             if iri_op(inst_idx) == IR_BRANCH {
-                true_off := g_label_poses[iri_s2(inst_idx)];
-                false_off := g_label_poses[iri_s3(inst_idx)];
+                true_off := r64(g_label_poses, iri_s2(inst_idx) * 8);
+                false_off := r64(g_label_poses, iri_s3(inst_idx) * 8);
                 iri_set_op(inst_idx, IR_BRANCH); iri_set_s2(inst_idx, true_off); iri_set_s3(inst_idx, false_off); iri_set_tk(inst_idx, IR_RESOLVED);
             }
             if iri_op(inst_idx) == IR_JUMP {
-                tgt_off := g_label_poses[iri_s1(inst_idx)];
+                tgt_off := r64(g_label_poses, iri_s1(inst_idx) * 8);
                 iri_set_op(inst_idx, IR_JUMP); iri_set_s1(inst_idx, tgt_off); iri_set_tk(inst_idx, IR_RESOLVED);
             }
             ii = ii + 1;

@@ -113,23 +113,7 @@ TY_UNIT : int = 4;
 TY_NEVER : int = 5;
 TY_CHAR : int = 6;
 TY_GENERIC_PARAM : int = 7;  // special sentinel for generic type params
-
-// Storage limits (large enough for self-compilation)
-MAX_FUNCS : int = 16384;
-MAX_STRUCTS : int = 1024;
-MAX_ENUMS : int = 256;
-MAX_VARIANTS : int = 64;
-MAX_FIELDS : int = 64;
-MAX_PARAMS : int = 64;
-MAX_LOOPS : int = 256;
-
-// Compiler buffer sizes
-MAX_TOKENS : int = 524288;    // 512K tokens
-MAX_AST : int = 524288;       // 512K AST nodes
-MAX_STRS : int = 131072;     // 2M strings (16 MB, effectively unlimited)
-MAX_ERRS : int = 1024;
-MAX_ASM : int = 65536;
-MAX_BLOCK_STMTS : int = 131072;
+MAX_GENERICS : int = 4;      // max generic params per declaration (language limit)
 
 // Token struct
 struct Token {
@@ -486,9 +470,6 @@ struct Diag {
     col: int,
 }
 
-g_diags : [Diag; MAX_ERRS], mut;
-g_diag_count : int, mut;
-
 // Symbol kinds for checker
 SYM_FN : int = 0;
 SYM_TYPE : int = 1;
@@ -497,54 +478,12 @@ SYM_PARAM : int = 3;
 SYM_GLOBAL : int = 4;
 SYM_MODULE : int = 5;
 
-// Module system structures
-struct FileEntry {
-    fileid_ni: int,
-    path: string,
-}
-struct ModEntry {
-    alias_ni: int,    // name index of alias (e.g., "m" from "import math : m")
-    fileid_ni: int,   // name index of actual fileid
-    path: string,     // resolved file path
-}
-// Additional size limits
-MAX_SYMS : int = 65536;
-MAX_TYPES : int = 65536;
-MAX_SCOPES : int = 4096;
-MAX_FILES : int = 512;
-MAX_MODS : int = 256;
-MAX_SEGS : int = 512;
-MAX_LINES : int = 131072;
-MAX_IREXPRS : int = 262144;
-MAX_IRINSTRUCTIONS : int = 524288;
-MAX_BLOCKS : int = 4096;
-MAX_LABELS : int = 4096;
-MAX_GENERICS : int = 4;        // max generic params per declaration
-MAX_GEN_ARGS : int = 2048;      // total storage for generic type args
-g_gen_apply_data : [int; MAX_GEN_ARGS];  // flat: [count, arg1, arg2, ...] for each GENERIC_APPLY
-g_gen_apply_data_count : int;
+g_gen_apply_data : string, mut;         g_gen_apply_data_count : int, mut; g_gen_apply_data_cap : int, mut;
 
 // Module system globals
-g_files : [FileEntry; MAX_FILES], mut;
-g_file_count : int, mut;
-g_mods : [ModEntry; MAX_MODS], mut;
-g_mod_count : int, mut;
-g_seg_starts : [int; MAX_SEGS], mut;    // parallel arrays replacing SegBoundary struct
-g_seg_fileids : [int; MAX_SEGS], mut;   // (struct arrays don't work in interpreter)
-g_seg_count : int, mut;
-g_line_fileid : [int; MAX_LINES], mut;  // maps source line -> fileid_ni (0 = main)
-g_line_count : int, mut;
+g_seg_starts : string, mut;             g_seg_fileids : string, mut;        g_seg_count : int, mut; g_seg_cap : int, mut;
+g_line_fileid : string, mut;            g_line_count : int, mut;    g_line_cap : int, mut;
 g_source_dir : string, mut;  // directory of the main source file (for _import.core lookup)
-MAX_MOD_FUNCS : int = 2048;
-g_mod_func_fileids : [int; MAX_MOD_FUNCS], mut;   // fileid name index
-g_mod_func_names : [int; MAX_MOD_FUNCS], mut;     // function name index
-g_mod_func_tis : [int; MAX_MOD_FUNCS], mut;       // type index
-g_mod_func_count : int, mut;
-
-// Mod path declarations (mod foo::bar;)
-MAX_MOD_PATHS : int = 256;
-g_mod_path_names : [int; MAX_MOD_PATHS], mut;  // name indices
-g_mod_path_count : int, mut;
 
 // IR instruction opcodes
 IR_NOP : int = 0;
@@ -614,16 +553,8 @@ struct DFEdge {
     next_out: int,   // next edge from same source (-1 = none)
 }
 
-// Max limits (literal values: bootstrap compiler doesn't constant-fold)
-MAX_DF_NODES : int = 262144;    // == MAX_IRINSTRUCTIONS
-MAX_DF_EDGES : int = 524288;    // == MAX_IRINSTRUCTIONS * 4
-
 // Dataflow graph arrays
-g_df_nodes : [DFNode; MAX_DF_NODES], mut;
-g_df_node_count : int, mut;
-g_df_edges : [DFEdge; MAX_DF_EDGES], mut;
-g_df_edge_count : int, mut;
-g_df_var_producer : [int; MAX_IREXPRS], mut;  // var_idx → node_id that produces it
-// Per-function metadata for lowering
-g_df_func_node_start : [int; MAX_FUNCS], mut;  // first node idx for each function
-g_df_func_node_count : [int; MAX_FUNCS], mut;  // node count per function
+g_df_nodes : string, mut;               g_df_node_count : int, mut;     g_df_node_cap : int, mut;
+g_df_edges : string, mut;               g_df_edge_count : int, mut;     g_df_edge_cap : int, mut;
+g_df_var_producer : string, mut;        g_df_func_node_start : string, mut;  g_df_func_node_count : string, mut;
+g_df_cap : int, mut;

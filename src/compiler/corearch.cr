@@ -3,8 +3,8 @@
 // Supports: --elf (static), --shared (DSO), --link (dynamic linking)
 
 fn init_backend_arrays() {
-    vi : ., mut = 0; loop { if vi >= 32768 { break; } g_x86_vars[vi] = 0; g_x86_is_enum[vi] = 0; vi = vi + 1; }
-    g_x86_var_count = 0; g_x86_stack_size = 0; g_x86_func_idx = 0; g_x86_is_enum_count = 0; }
+    g_x86_var_count = 0; g_x86_stack_size = 0; g_x86_func_idx = 0; g_x86_is_enum_count = 0;
+    g_x86_var_cap = 0; g_x86_is_enum_cap = 0; }
 
 fn split_links(val: string) {
     sl := __builtin_str_len(val); start : ., mut = 0; i : ., mut = 0;
@@ -76,7 +76,7 @@ fn corearch_main() -> int {
                 ci : ., mut = 0; loop { if ci >= cs { break; }
             __builtin_store8(cd, ci, __builtin_load8(g_elf_buf, 176+ci)); ci = ci + 1; }
                 ri : ., mut = 0; loop { if ri >= g_x86_ext_rel_count { break; }
-            fn_name := str_get(g_x86_ext_rel_name[ri]);
+            fn_name := str_get(r64(g_x86_ext_rel_name, ri * 8));
             ctx_add_plt(fn_name, 0); ri = ri + 1; }
         ctx_set_user_code(cd, cs);
                 sz = ctx_emit_dyn(g_elf_buf, out_path);

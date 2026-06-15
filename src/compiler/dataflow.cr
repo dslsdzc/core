@@ -11,17 +11,22 @@
 fn init_df() {
     g_df_node_count = 0;
     g_df_edge_count = 0;
+    g_df_cap = 0;
+    g_df_node_cap = 0;
+    g_df_edge_cap = 0;
     fi : ., mut = 0;
     loop {
-        if fi >= MAX_FUNCS { break; }
-        g_df_func_node_start[fi] = -1;
-        g_df_func_node_count[fi] = 0;
+        if fi >= g_func_count { break; }
+        dyn_grow_df_arrays(fi + 1);
+        w64(g_df_func_node_start, fi * 8, -1);
+        w64(g_df_func_node_count, fi * 8, 0);
         fi = fi + 1;
     }
     vi : ., mut = 0;
     loop {
-        if vi >= MAX_IREXPRS { break; }
-        g_df_var_producer[vi] = -1;
+        if vi >= g_ir_var_count { break; }
+        dyn_grow_df_arrays(vi + 1);
+        w64(g_df_var_producer, vi * 8, -1);
         vi = vi + 1;
     }
 }
@@ -30,22 +35,21 @@ fn init_df() {
 
 fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, type_kind: int) -> int {
     nid := g_df_node_count;
-    if nid >= MAX_DF_NODES { return -1; }
-    g_df_nodes[nid] = DFNode {
-        opcode = opcode,
-        dest_var = dest,
-        src1 = src1,
-        src2 = src2,
-        src3 = src3,
-        type_kind = type_kind,
-        first_edge = -1,
-        edge_count = 0,
-    };
+    dyn_grow_df_nodes(nid + 1);
+    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_OPCODE, opcode);
+    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_DEST, dest);
+    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_S1, src1);
+    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_S2, src2);
+    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_S3, src3);
+    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_TK, type_kind);
+    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_FIRST_EDGE, -1);
+    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_EDGE_COUNT, 0);
     g_df_node_count = nid + 1;
 
     // Record that this node produces `dest`
-    if dest >= 0 && dest < MAX_IREXPRS {
-        g_df_var_producer[dest] = nid;
+    if dest >= 0 {
+        dyn_grow_df_arrays(dest + 1);
+        w64(g_df_var_producer, dest * 8, nid);
     }
 
     // Add edges for src fields that are IR variables (based on opcode)
@@ -59,20 +63,20 @@ fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, type_
 fn df_add_edge(from_id: int, to_id: int) {
     if from_id < 0 || to_id < 0 { return; }
     eid := g_df_edge_count;
-    if eid >= MAX_DF_EDGES { return; }
-    g_df_edges[eid] = DFEdge {
-        from_node = from_id,
-        to_node = to_id,
-        next_out = g_df_nodes[from_id].first_edge,
-    };
-    g_df_nodes[from_id].first_edge = eid;
-    g_df_nodes[from_id].edge_count = g_df_nodes[from_id].edge_count + 1;
+    dyn_grow_df_edges(eid + 1);
+    w64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_FROM, from_id);
+    w64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_TO, to_id);
+    old_first := r64(g_df_nodes, from_id * ESZ_DFNODE + OFF_DF_FIRST_EDGE);
+    w64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_NEXT, old_first);
+    w64(g_df_nodes, from_id * ESZ_DFNODE + OFF_DF_FIRST_EDGE, eid);
+    old_cnt := r64(g_df_nodes, from_id * ESZ_DFNODE + OFF_DF_EDGE_COUNT);
+    w64(g_df_nodes, from_id * ESZ_DFNODE + OFF_DF_EDGE_COUNT, old_cnt + 1);
     g_df_edge_count = eid + 1;
 }
 
 fn df_use_var(consumer_node: int, var_idx: int) {
-    if var_idx < 0 || var_idx >= MAX_IREXPRS { return; }
-    producer := g_df_var_producer[var_idx];
+    if var_idx < 0 { return; }
+    producer := r64(g_df_var_producer, var_idx * 8);
     if producer >= 0 {
         df_add_edge(producer, consumer_node);
     }
@@ -192,15 +196,14 @@ fn lower_to_ccr() {
     ni : ., mut = 0;
     loop {
         if ni >= g_df_node_count { break; }
-        nd := g_df_nodes[ni];
         idx := g_ir_instr_count;
         dyn_grow_ir_instrs(idx + 1);
-        iri_set_op(idx, nd.opcode);
-        iri_set_dest(idx, nd.dest_var);
-        iri_set_s1(idx, nd.src1);
-        iri_set_s2(idx, nd.src2);
-        iri_set_s3(idx, nd.src3);
-        iri_set_tk(idx, nd.type_kind);
+        iri_set_op(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE));
+        iri_set_dest(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST));
+        iri_set_s1(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1));
+        iri_set_s2(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2));
+        iri_set_s3(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3));
+        iri_set_tk(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_TK));
         g_ir_instr_count = idx + 1;
         ni = ni + 1;
     }
@@ -209,14 +212,16 @@ fn lower_to_ccr() {
 // --- Mark function boundary in graph ---
 
 fn df_begin_func(func_idx: int) {
-    if func_idx >= 0 && func_idx < MAX_FUNCS {
-        g_df_func_node_start[func_idx] = g_df_node_count;
+    if func_idx >= 0 {
+        dyn_grow_df_arrays(func_idx + 1);
+        w64(g_df_func_node_start, func_idx * 8, g_df_node_count);
     }
 }
 
 fn df_end_func(func_idx: int) {
-    if func_idx >= 0 && func_idx < MAX_FUNCS {
-        g_df_func_node_count[func_idx] = g_df_node_count - g_df_func_node_start[func_idx];
+    if func_idx >= 0 {
+        start := r64(g_df_func_node_start, func_idx * 8);
+        w64(g_df_func_node_count, func_idx * 8, g_df_node_count - start);
     }
 }
 
@@ -230,10 +235,11 @@ fn df_graph_to_dot() -> string {
     ni : ., mut = 0;
     loop {
         if ni >= g_df_node_count { break; }
-        nd := g_df_nodes[ni];
-        label : ., mut = df_opcode_name(nd.opcode);
-        if nd.dest_var >= 0 {
-            vname := get_ir_var_name(nd.dest_var);
+        n_op := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE);
+        n_dest := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST);
+        label : ., mut = df_opcode_name(n_op);
+        if n_dest >= 0 {
+            vname := get_ir_var_name(n_dest);
             if __builtin_str_len(vname) > 0 {
                 label = vname + ":" + label;
             }
@@ -246,8 +252,9 @@ fn df_graph_to_dot() -> string {
     ei : ., mut = 0;
     loop {
         if ei >= g_df_edge_count { break; }
-        e := g_df_edges[ei];
-        dot = dot + "    n" + __builtin_int_to_str(e.from_node) + " -> n" + __builtin_int_to_str(e.to_node) + ";\n";
+        e_from := r64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_FROM);
+        e_to := r64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_TO);
+        dot = dot + "    n" + __builtin_int_to_str(e_from) + " -> n" + __builtin_int_to_str(e_to) + ";\n";
         ei = ei + 1;
     }
 

@@ -408,7 +408,7 @@ fn encode_instr(line: string, code: string, cpos: int) -> int {
             num_str := __builtin_str_sub(t, digit_end + 1, tlen - digit_end - 1);
             ln := __builtin_str_to_int(num_str);
             target : ., mut = -1;
-            if ln >= 0 && ln < g_label_count { target = g_label_poses[ln]; }
+            if ln >= 0 && ln < g_label_count { target = r64(g_label_poses, ln * 8); }
             off : ., mut = 0;
             if target >= 0 { off = target - (cpos + 2); }
             if __builtin_str_eq(__builtin_str_sub(t, 4, 3), "jmp") != 0 { __builtin_store8(code, cpos, 235); }
@@ -503,7 +503,7 @@ fn asm_to_bytes(asm_text: string) -> string {
                 }
                 num_str := __builtin_str_sub(line, digit_start, llen - 1 - digit_start);
                 label_num := __builtin_str_to_int(num_str);
-                if label_num >= 0 && label_num < 32 { g_label_poses[label_num] = total_size; if label_num + 1 > g_label_count { g_label_count = label_num + 1; } }
+                if label_num >= 0 { dyn_grow_label_poses(label_num + 1); w64(g_label_poses, label_num * 8, total_size); if label_num + 1 > g_label_count { g_label_count = label_num + 1; } }
             }
         } else {
             if skip_dir(line) == 0 { total_size = total_size + measure_instr(line); }

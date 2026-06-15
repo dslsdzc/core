@@ -5,21 +5,6 @@
 // State globals (set by caller before emit phase)
 g_x86_rodata_base : int, mut;
 g_x86_func_frame_start : int, mut;  // abs buf pos of current function body (after frame)
-g_x86_func_offsets : [int; MAX_FUNCS * 2], mut;  // pairs: [name_idx, offset]
-g_x86_func_off_count : int, mut;
-
-// Stack slot tracking for emit (per function)
-g_x86_emit_vars : [int; MAX_IREXPRS], mut;
-g_x86_emit_var_count : int, mut;
-g_x86_emit_stack_size : int, mut;
-
-// Return-patch tracking (caller uses this to resolve IR_RETURN jmps)
-g_x86_ret_patch_pos : [int; 256], mut;
-g_x86_ret_patch_count : int, mut;
-
-// Alloc-call patch tracking (for __builtin_alloc in ELF output)
-g_x86_alloc_patch_pos : [int; 256], mut;
-g_x86_alloc_patch_count : int, mut;
 
 // String constant -> rodata offset mapping (declared in globals.cr)
 
@@ -32,26 +17,24 @@ fn g2_init() {
 
 fn g2_slot(v: int) -> int {
     i := 0;
-    loop { if i >= g_x86_emit_var_count { break; } if g_x86_emit_vars[i] == v { return -(i+1)*8; } i = i + 1; }
-    if g_x86_emit_var_count < MAX_IREXPRS {
-        g_x86_emit_vars[g_x86_emit_var_count] = v;
-        g_x86_emit_var_count = g_x86_emit_var_count + 1;
-        g_x86_emit_stack_size = g_x86_emit_var_count * 8;
-        return -g_x86_emit_var_count * 8;
-    }
-    return -8;
+    loop { if i >= g_x86_emit_var_count { break; } if r64(g_x86_emit_vars, i * 8) == v { return -(i+1)*8; } i = i + 1; }
+    dyn_grow_x86_emit_vars(g_x86_emit_var_count + 1);
+    w64(g_x86_emit_vars, g_x86_emit_var_count * 8, v);
+    g_x86_emit_var_count = g_x86_emit_var_count + 1;
+    g_x86_emit_stack_size = g_x86_emit_var_count * 8;
+    return -g_x86_emit_var_count * 8;
 }
 
 fn g2_str_off(si: int) -> int {
     o := 0; i := 0;
-    loop { if i >= g_x86_str_count { break; } if g_x86_str_offs[i] == si { return o; } o = o + str_len(g_x86_str_offs[i]) + 1; i = i + 1; }
-    if g_x86_str_count < MAX_STRS { g_x86_str_offs[g_x86_str_count] = si; g_x86_str_count = g_x86_str_count + 1; }
+    loop { if i >= g_x86_str_count { break; } if r64(g_x86_str_offs, i * 8) == si { return o; } o = o + str_len(r64(g_x86_str_offs, i * 8)) + 1; i = i + 1; }
+    dyn_grow_x86_str_offs(g_x86_str_count + 1); w64(g_x86_str_offs, g_x86_str_count * 8, si); g_x86_str_count = g_x86_str_count + 1;
     return o;
 }
 
 fn g2_rodata_sz() -> int {
     o := 0; i := 0;
-    loop { if i >= g_x86_str_count { break; } o = o + str_len(g_x86_str_offs[i]) + 1; i = i + 1; }
+    loop { if i >= g_x86_str_count { break; } o = o + str_len(r64(g_x86_str_offs, i * 8)) + 1; i = i + 1; }
     return o;
 }
 
@@ -247,7 +230,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
             if d >= 0 { cp = cp + e2_st(buf, pos+cp, 0, g2_slot(d)); }
         } else if __builtin_str_len(fn2) > 0 {
             to := -1; tf := 0;
-            loop { if tf >= g_x86_func_off_count { break; } if g_x86_func_offsets[tf*2] == s3 { to = g_x86_func_offsets[tf*2+1]; break; } tf = tf + 1; }
+            loop { if tf >= g_x86_func_off_count { break; } if r64(g_x86_func_offsets, tf*16) == s3 { to = r64(g_x86_func_offsets, tf*16+8); break; } tf = tf + 1; }
             rel := 0; if to >= 0 { rel = (176 + to) - (pos + cp + 5); }
             cp = cp + e2_call(buf, pos+cp, rel);
             if d >= 0 { cp = cp + e2_st(buf, pos+cp, 0, g2_slot(d)); }
@@ -261,7 +244,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     if op == IR_RETURN {
         if s1 >= 0 { cp = cp + e2_ld(buf, pos+cp, 0, g2_slot(s1)); }
         // record position for caller to patch jmp → epilogue
-        g_x86_ret_patch_pos[g_x86_ret_patch_count] = pos + cp;
+        dyn_grow_x86_ret_patch(g_x86_ret_patch_count + 1); w64(g_x86_ret_patch_pos, g_x86_ret_patch_count * 8, pos + cp);
         g_x86_ret_patch_count = g_x86_ret_patch_count + 1;
         cp = cp + e2_jmp(buf, pos+cp, 0);
         return cp;
@@ -281,7 +264,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
                 fc := si_field_count(si);
                 if fc > 0 {
                     e2_w8(buf, pos+cp, 191); e2_w32(buf, pos+cp+1, fc * 8); cp = cp + 5;  // mov edi, size
-                    g_x86_alloc_patch_pos[g_x86_alloc_patch_count] = pos + cp;
+                    dyn_grow_x86_alloc_patch(g_x86_alloc_patch_count + 1); w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp);
                     g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1;
                     e2_w8(buf, pos+cp, 232); e2_w32(buf, pos+cp+1, 0); cp = cp + 5;  // call placeholder
                     cp = cp + e2_st(buf, pos+cp, 0, do2);
@@ -295,7 +278,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         do2 := g2_slot(d); sz := s1 * 8;
         if sz > 0 {
             e2_w8(buf, pos+cp, 191); e2_w32(buf, pos+cp+1, sz); cp = cp + 5;  // mov edi, size
-            g_x86_alloc_patch_pos[g_x86_alloc_patch_count] = pos + cp;
+            dyn_grow_x86_alloc_patch(g_x86_alloc_patch_count + 1); w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp);
             g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1;
             e2_w8(buf, pos+cp, 232); e2_w32(buf, pos+cp+1, 0); cp = cp + 5;  // call placeholder
             cp = cp + e2_st(buf, pos+cp, 0, do2);
@@ -419,7 +402,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     if op == IR_MAKE_ENUM && d >= 0 {
         do2 := g2_slot(d); alloc_size := 8 + s2 * 8;
         e2_w8(buf, pos+cp, 191); e2_w32(buf, pos+cp+1, alloc_size); cp = cp + 5;  // mov edi, size
-        g_x86_alloc_patch_pos[g_x86_alloc_patch_count] = pos + cp;
+        dyn_grow_x86_alloc_patch(g_x86_alloc_patch_count + 1); w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp);
         g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1;
         e2_w8(buf, pos+cp, 232); e2_w32(buf, pos+cp+1, 0); cp = cp + 5;  // call placeholder
         cp = cp + e2_st(buf, pos+cp, 0, do2);

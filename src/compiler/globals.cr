@@ -1,9 +1,8 @@
 // === globals.cr ===
 // ALL arrays are dynamic byte buffers (grow as needed, no MAX_* limits).
 
-// String table (fixed-size with very high limit, avoids Python bootstrap byte-buffer bug)
-g_strs : [string; MAX_STRS], mut;
-g_str_count : int, mut;
+// String table (dynamic byte buffer containing `string` pointers)
+g_strs : string, mut;            g_str_count : int, mut;     g_str_cap : int, mut;
 
 // Dynamic byte buffers (all arrays, no MAX_* limits)
 g_funcs : string, mut;       g_func_count : int, mut;     g_func_cap : int, mut;
@@ -21,6 +20,20 @@ g_ir_locals : string, mut;   g_ir_local_count : int, mut; g_ir_local_cap : int, 
 g_ir_globals : string, mut;  g_ir_global_count : int, mut; g_ir_global_cap : int, mut;
 g_ir_str_consts : string, mut; g_ir_str_const_count : int, mut; g_ir_str_const_cap : int, mut;
 
+// Parser/checker dynamic arrays (shared between corec and corearch builds)
+g_global_lets : string, mut;         g_global_let_count : int, mut;     g_global_lets_cap : int, mut;
+g_loop_stack : string, mut;          g_loop_depth : int, mut;           g_loop_stack_cap : int, mut;
+g_type_aliases : string, mut;        g_type_alias_count : int, mut;     g_type_alias_cap : int, mut;
+g_methods : string, mut;             g_method_count : int, mut;         g_method_cap : int, mut;
+g_scope_bounds : string, mut;        g_scope_depth : int, mut;          g_scope_bounds_cap : int, mut;
+g_borrow_scope_markers : string, mut; g_borrow_scope_depth : int, mut;  g_borrow_scope_markers_cap : int, mut;
+g_borrow_vars : string, mut;          g_borrow_refs : string, mut;       g_borrow_muts : string, mut;
+g_borrow_count : int, mut;            g_borrow_cap : int, mut;
+g_holder_borrowers : string, mut;     g_holder_borrowed : string, mut;   g_holder_is_mut : string, mut;
+g_holder_count : int, mut;            g_holder_cap : int, mut;
+g_gen_map_names : string, mut;        g_gen_map_types : string, mut;
+g_gen_map_count : int, mut;           g_gen_map_cap : int, mut;
+
 g_ir_func_name_idx : string, mut;   g_ir_func_name_idx_cap : int, mut;
 g_ir_func_ret_type : string, mut;   g_ir_func_ret_type_cap : int, mut;
 g_ir_func_instr_start : string, mut; g_ir_func_instr_start_cap : int, mut;
@@ -30,24 +43,35 @@ g_ir_func_var_count : string, mut;  g_ir_func_var_count_cap : int, mut;
 g_ir_func_param_count : string, mut; g_ir_func_param_count_cap : int, mut;
 g_ir_func_count : int, mut;
 
-// Fixed-size stacks
-g_ir_local_scopes : [int; 256], mut;
+// Module system arrays (dynamic byte buffers)
+g_diags : string, mut;           g_diag_count : int, mut;     g_diag_cap : int, mut;
+g_files : string, mut;           g_file_count : int, mut;     g_file_cap : int, mut;
+g_mods : string, mut;            g_mod_count : int, mut;      g_mod_cap : int, mut;
+g_mod_func_fileids : string, mut; g_mod_func_names : string, mut;
+g_mod_func_tis : string, mut;    g_mod_func_count : int, mut; g_mod_func_cap : int, mut;
+g_mod_path_names : string, mut;  g_mod_path_count : int, mut; g_mod_path_cap : int, mut;
+
+// Dynamic stacks (byte buffers)
+g_ir_local_scopes : string, mut;    g_ir_local_scopes_cap : int, mut;
 g_ir_local_depth : int, mut;
-g_ir_loop_header : [int; 256], mut;
-g_ir_loop_exit : [int; 256], mut;
-g_ir_loop_depth : int, mut;
-g_label_poses : [int; 32], mut;
+g_ir_loop_header : string, mut;     g_ir_loop_exit : string, mut;
+g_ir_loop_depth : int, mut;         g_ir_loop_stacks_cap : int, mut;
+g_label_poses : string, mut;        g_label_cap : int, mut;
 g_label_count : int, mut;
 g_next_label : int, mut;
 
-// Backend arrays
-g_x86_str_offs : [int; MAX_STRS], mut;  g_x86_str_count : int, mut;
-g_x86_ext_rel_pos : [int; 64], mut;     g_x86_ext_rel_name : [int; 64], mut;
-g_x86_ext_rel_count : int, mut;
-g_x86_rip_patch_pos : [int; 1024], mut;  g_x86_rip_patch_globals : [int; 1024], mut;
-g_x86_rip_patch_count : int, mut;
-g_x86_vars : [int; 32768], mut;         g_x86_var_count : int, mut;
+// Backend arrays (all dynamic byte buffers)
+g_x86_str_offs : string, mut;           g_x86_str_count : int, mut;     g_x86_str_cap : int, mut;
+g_x86_ext_rel_pos : string, mut;        g_x86_ext_rel_name : string, mut;
+g_x86_ext_rel_count : int, mut;         g_x86_ext_rel_cap : int, mut;
+g_x86_rip_patch_pos : string, mut;      g_x86_rip_patch_globals : string, mut;
+g_x86_rip_patch_count : int, mut;       g_x86_rip_patch_cap : int, mut;
+g_x86_vars : string, mut;               g_x86_var_count : int, mut;     g_x86_var_cap : int, mut;
 g_x86_stack_size : int, mut;            g_x86_func_idx : int, mut;
-g_x86_is_enum : [int; 32768], mut;      g_x86_is_enum_count : int, mut;
-g_x86_is_global : [int; 32768], mut;    // 1 if IR var is a BSS global
-g_x86_global_off : [int; 32768], mut;   // BSS byte offset for each global var
+g_x86_is_enum : string, mut;            g_x86_is_enum_count : int, mut; g_x86_is_enum_cap : int, mut;
+g_x86_is_global : string, mut;          g_x86_global_cnt : int, mut;    g_x86_global_cap : int, mut;
+g_x86_global_off : string, mut;         g_x86_global_off_cnt : int, mut; g_x86_global_off_cap : int, mut;
+g_x86_func_offsets : string, mut;       g_x86_func_offsets_cap : int, mut; g_x86_func_off_count : int, mut;
+g_x86_emit_vars : string, mut;          g_x86_emit_vars_cap : int, mut; g_x86_emit_var_count : int, mut; g_x86_emit_stack_size : int, mut;
+g_x86_ret_patch_pos : string, mut;      g_x86_ret_patch_cap : int, mut; g_x86_ret_patch_count : int, mut;
+g_x86_alloc_patch_pos : string, mut;    g_x86_alloc_patch_cap : int, mut; g_x86_alloc_patch_count : int, mut;

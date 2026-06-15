@@ -26,3 +26,6 @@ qt6_launcher.cpp
 *.o
 __pycache__/
 build/
+a.out
+*.ccr
+*.cir

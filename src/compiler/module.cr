@@ -116,23 +116,23 @@ fn register_fileid(fileid_str: string, path: string) -> int {
     fi : ., mut = 0;
     loop {
         if fi >= g_file_count { break; }
-        if g_files[fi].fileid_ni == fni {
+        if r64(g_files, fi * 16) == fni {
             return fni;
         }
         fi = fi + 1;
     }
-    if g_file_count < MAX_FILES {
-        g_files[g_file_count] = FileEntry { fileid_ni = fni, path = path };
-        g_file_count = g_file_count + 1;
-    }
+    dyn_grow_files(g_file_count + 1);
+    w64(g_files, g_file_count * 16, fni);
+    __builtin_store_str_ptr(g_files, g_file_count * 16 + 8, path);
+    g_file_count = g_file_count + 1;
     return fni;
 }
 
 fn build_line_fileid() {
-    g_line_count = 0;
+    g_line_count = 0; g_line_cap = 0;
     slen := __builtin_str_len(g_source);
     seg_idx : ., mut = 0;
-    g_line_fileid[g_line_count] = g_seg_fileids[0];
+    dyn_grow_line_fileid(g_line_count + 1); w64(g_line_fileid, g_line_count * 8, r64(g_seg_fileids, 0));
     g_line_count = g_line_count + 1;
     pos : ., mut = 0;
     loop {
@@ -141,13 +141,13 @@ fn build_line_fileid() {
             next_start := 0;
             next_fileid := -1;
             if seg_idx + 1 < g_seg_count {
-                next_start = g_seg_starts[seg_idx + 1];
-                next_fileid = g_seg_fileids[seg_idx + 1];
+                next_start = r64(g_seg_starts, (seg_idx + 1) * 8);
+                next_fileid = r64(g_seg_fileids, (seg_idx + 1) * 8);
             }
             if next_fileid >= 0 && pos + 1 >= next_start {
                 seg_idx = seg_idx + 1;
             }
-            g_line_fileid[g_line_count] = g_seg_fileids[seg_idx];
+            dyn_grow_line_fileid(g_line_count + 1); w64(g_line_fileid, g_line_count * 8, r64(g_seg_fileids, seg_idx * 8));
             g_line_count = g_line_count + 1;
         }
         pos = pos + 1;
@@ -155,9 +155,9 @@ fn build_line_fileid() {
 }
 
 fn resolve_imports() {
-    g_file_count = 0;
-    g_mod_count = 0;
-    g_seg_count = 0;
+    g_file_count = 0; g_file_cap = 0;
+    g_mod_count = 0; g_mod_cap = 0;
+    g_seg_count = 0; g_seg_cap = 0;
 
     // Step 1: collect _import.cr from source directory and ancestors
     import_core_acc : ., mut = "";
@@ -184,8 +184,8 @@ fn resolve_imports() {
     main_len := __builtin_str_len(g_source);
 
     // First segment: main source
-    g_seg_starts[g_seg_count] = 0;
-    g_seg_fileids[g_seg_count] = main_fni;
+    dyn_grow_segs(g_seg_count + 1); w64(g_seg_starts, g_seg_count * 8, 0);
+    w64(g_seg_fileids, g_seg_count * 8, main_fni);
     g_seg_count = g_seg_count + 1;
 
     extra_src : ., mut = "";
@@ -241,14 +241,24 @@ fn resolve_imports() {
                     path = "src/" + project_name + "/" + import_fileid + ".cr";
                     content = __builtin_read_file(path);
                 } else {
-                    path = g_source_dir + import_fileid + ".cr";
+                    // Convert :: to / for subdirectory paths (e.g. backend::x86_64::instr → backend/x86_64/instr)
+                    fs_path : ., mut = import_fileid;
+                    pi : ., mut = 0;
+                    loop {
+                        if pi >= __builtin_str_len(fs_path) { break; }
+                        if __builtin_load8(fs_path, pi) == 58 && pi + 1 < __builtin_str_len(fs_path) && __builtin_load8(fs_path, pi+1) == 58 {
+                            fs_path = __builtin_str_sub(fs_path, 0, pi) + "/" + __builtin_str_sub(fs_path, pi+2, __builtin_str_len(fs_path)-pi-2);
+                        }
+                        pi = pi + 1;
+                    }
+                    path = g_source_dir + fs_path + ".cr";
                     content = __builtin_read_file(path);
                     if __builtin_str_len(content) == 0 {
-                        path = "src/stdlib/" + import_fileid + ".cr";
+                        path = "src/stdlib/" + fs_path + ".cr";
                         content = __builtin_read_file(path);
                     }
                     if __builtin_str_len(content) == 0 {
-                        path = import_fileid + ".cr";
+                        path = fs_path + ".cr";
                         content = __builtin_read_file(path);
                     }
                 }
@@ -259,8 +269,8 @@ fn resolve_imports() {
                 if __builtin_str_len(loaded_fid) == 0 { loaded_fid = import_fileid; }
                 loaded_fni := register_fileid(loaded_fid, path);
                 seg_byte := main_len + extra_bytes + 1;
-                g_seg_starts[g_seg_count] = seg_byte;
-                g_seg_fileids[g_seg_count] = loaded_fni;
+                dyn_grow_segs(g_seg_count + 1); w64(g_seg_starts, g_seg_count * 8, seg_byte);
+                w64(g_seg_fileids, g_seg_count * 8, loaded_fni);
                 g_seg_count = g_seg_count + 1;
                 extra_bytes = extra_bytes + 1 + content_len;
                 alias_ni : ., mut = -1;
@@ -269,10 +279,11 @@ fn resolve_imports() {
                 } else {
                     alias_ni = loaded_fni;
                 }
-                if g_mod_count < MAX_MODS {
-                    g_mods[g_mod_count] = ModEntry { alias_ni = alias_ni, fileid_ni = loaded_fni, path = path };
-                    g_mod_count = g_mod_count + 1;
-                }
+                dyn_grow_mods(g_mod_count + 1);
+                w64(g_mods, g_mod_count * 24, alias_ni);
+                w64(g_mods, g_mod_count * 24 + 8, loaded_fni);
+                __builtin_store_str_ptr(g_mods, g_mod_count * 24 + 16, path);
+                g_mod_count = g_mod_count + 1;
                 extra_src = extra_src + "\n" + content;
             }
         }

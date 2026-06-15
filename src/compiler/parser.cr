@@ -2,10 +2,6 @@
 
 // Global state for parser (shared globals in globals.cr)
 g_token_pos : int, mut;
-g_loop_stack : [LoopInfo; MAX_LOOPS], mut;
-g_loop_depth : int, mut;
-g_global_lets : [int; MAX_AST], mut;
-g_global_let_count : int, mut;
 
 // Buffer for batch declaration overflow (a, b : int = 1, 2)
 g_extra_lets : [int; 16], mut;
@@ -13,21 +9,6 @@ g_extra_let_count : int, mut;
 
 // Flag: when set, IDENT { is NOT parsed as struct literal
 g_parse_no_struct_literal : int, mut;
-
-struct TypeAlias {
-    name_idx: int,
-    type_node: int,
-}
-g_type_aliases : [TypeAlias; MAX_TYPES], mut;
-g_type_alias_count : int, mut;
-
-struct MethodEntry {
-    struct_ni: int,  // struct name index
-    method_ni: int,  // method name index
-    mangled_ni: int, // mangled function name index ("Struct.method")
-}
-g_methods : [MethodEntry; MAX_FUNCS], mut;
-g_method_count : int, mut;
 
 fn alloc_node(kind: int, a: int, b: int, c: int, iv: int, tv: int, d: int, line: int, col: int) -> int {
     return ast_alloc(kind, a, b, c, iv, tv, d, line, col);
@@ -120,16 +101,20 @@ fn parse_type() -> int {
             }
         }
     } else if tok_k(t) == T_LBRACE {
-        if g_diag_count < MAX_ERRS {
-            g_diags[g_diag_count] = Diag { code = EC_P_EXPECTED, msg = "expected type after '->', got '{' — missing return type?", line = line, col = col };
-            g_diag_count = g_diag_count + 1;
-        }
+        dyn_grow_diags(g_diag_count + 1);
+        w64(g_diags, g_diag_count * 32, EC_P_EXPECTED);
+        __builtin_store_str_ptr(g_diags, g_diag_count * 32 + 8, "expected type after '->', got '{' — missing return type?");
+        w64(g_diags, g_diag_count * 32 + 16, line);
+        w64(g_diags, g_diag_count * 32 + 24, col);
+        g_diag_count = g_diag_count + 1;
         res = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, line, col);
     } else {
-        if g_diag_count < MAX_ERRS {
-            g_diags[g_diag_count] = Diag { code = EC_P_EXPECTED, msg = "expected type after '->'", line = line, col = col };
-            g_diag_count = g_diag_count + 1;
-        }
+        dyn_grow_diags(g_diag_count + 1);
+        w64(g_diags, g_diag_count * 32, EC_P_EXPECTED);
+        __builtin_store_str_ptr(g_diags, g_diag_count * 32 + 8, "expected type after '->'");
+        w64(g_diags, g_diag_count * 32 + 16, line);
+        w64(g_diags, g_diag_count * 32 + 24, col);
+        g_diag_count = g_diag_count + 1;
         res = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, line, col);
     }
     // Handle T? desugaring → Option[T]
@@ -279,10 +264,17 @@ fn parse_postfix() -> int {
                 }
             }
             advance_tok();
-            // Check if this is an enum constructor (uppercase ident + parenthesized args)
+            // Check if this is an enum constructor
+            // Cases: Some(42) or Option::Some(42)
             is_enum_con : ., mut = 0;
+            name_idx : ., mut = -1;
             if ast_kind(node) == EXPR_IDENT {
-                name_idx := ast_int_val(node);
+                name_idx = ast_int_val(node);
+            } else if ast_kind(node) == EXPR_FIELD && ast_data(node) != 0 {
+                // Path access: Option::Some → EXPR_FIELD(Option, Some, data=1)
+                name_idx = ast_int_val(node);
+            }
+            if name_idx >= 0 {
                 name := str_get(name_idx);
                 c := __builtin_str_get(name, 0);
                 if __builtin_str_cmp(c, "A") >= 0 && __builtin_str_cmp(c, "Z") <= 0 {
@@ -290,7 +282,6 @@ fn parse_postfix() -> int {
                 }
             }
             if is_enum_con == 1 {
-                name_idx := ast_int_val(node);
                 node = alloc_node(EXPR_ENUM_CONSTRUCTOR, name_idx, af, ac, 0, 0, 0, tok_ln(t), tok_cl(t));
             } else {
                 node = alloc_node(EXPR_CALL, node, af, ac, 0, 0, 0, tok_ln(t), tok_cl(t));
@@ -832,33 +823,39 @@ fn parse_pattern() -> int {
             if check(T_LPAREN) {
                 // Enum.Variant(subpat, ...)
                 advance_tok();
+                sub_first : ., mut = -1;
                 ac : ., mut = 0;
                 if !check(T_RPAREN) {
+                    sub_first = parse_pattern();
                     ac = 1;
                     loop {
                         if !check(T_COMMA) { break; }
                         advance_tok();
+                        parse_pattern();
                         ac = ac + 1;
                     }
                 }
                 advance_tok();
-                return alloc_node(EXPR_ENUMPAT, ni, 0, ac, 0, 0, 0, tok_ln(t), tok_cl(t));
+                return alloc_node(EXPR_ENUMPAT, ni, sub_first, ac, 0, 0, 0, tok_ln(t), tok_cl(t));
             }
             return alloc_node(EXPR_ENUMPAT, ni, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
         }
         if check(T_LPAREN) {
             advance_tok();
+            sub_first : ., mut = -1;
             ac : ., mut = 0;
             if !check(T_RPAREN) {
+                sub_first = parse_pattern();
                 ac = 1;
                 loop {
                     if !check(T_COMMA) { break; }
                     advance_tok();
+                    parse_pattern();
                     ac = ac + 1;
                 }
             }
             advance_tok();
-            return alloc_node(EXPR_ENUMPAT, ni, 0, ac, 0, 0, 0, tok_ln(t), tok_cl(t));
+            return alloc_node(EXPR_ENUMPAT, ni, sub_first, ac, 0, 0, 0, tok_ln(t), tok_cl(t));
         }
         if check(T_LBRACE) {
             // Struct pattern: Name { field = pat, ... }
@@ -1183,10 +1180,11 @@ fn parse_declaration() {
                 mangled_ni := str_intern(mangled);
                 parse_fn_body(mangled, mangled_ni, tok_ln(ft), tok_cl(ft));
                 // Register in method lookup table
-                if g_method_count < MAX_FUNCS {
-                    g_methods[g_method_count] = MethodEntry { struct_ni = type_ni, method_ni = method_ni, mangled_ni = mangled_ni };
-                    g_method_count = g_method_count + 1;
-                }
+                dyn_grow_methods(g_method_count + 1);
+                w64(g_methods, g_method_count * 24, type_ni);
+                w64(g_methods, g_method_count * 24 + 8, method_ni);
+                w64(g_methods, g_method_count * 24 + 16, mangled_ni);
+                g_method_count = g_method_count + 1;
             } else {
                 advance_tok();
             }
@@ -1203,10 +1201,10 @@ fn parse_declaration() {
         advance_tok();
         type_node := parse_type();
         advance_tok(); // ;
-        if g_type_alias_count < MAX_TYPES {
-            g_type_aliases[g_type_alias_count] = TypeAlias { name_idx = name_idx, type_node = type_node };
-            g_type_alias_count = g_type_alias_count + 1;
-        }
+        dyn_grow_type_aliases(g_type_alias_count + 1);
+        w64(g_type_aliases, g_type_alias_count * 16, name_idx);
+        w64(g_type_aliases, g_type_alias_count * 16 + 8, type_node);
+        g_type_alias_count = g_type_alias_count + 1;
         return;
     }
 
@@ -1225,10 +1223,9 @@ fn parse_declaration() {
         }
         mod_ni := str_intern(path_name);
         // Store mod path for checker registration
-        if g_mod_path_count < MAX_MOD_PATHS {
-            g_mod_path_names[g_mod_path_count] = mod_ni;
-            g_mod_path_count = g_mod_path_count + 1;
-        }
+        dyn_grow_mod_paths(g_mod_path_count + 1);
+        w64(g_mod_path_names, g_mod_path_count * 8, mod_ni);
+        g_mod_path_count = g_mod_path_count + 1;
         if check(T_LBRACE) {
             // mod name { ... } — consume block contents
             push_scope();
@@ -1264,18 +1261,15 @@ fn parse_declaration() {
     // New syntax global variable declaration
     if check(T_IDENT) && is_new_var_decl() {
         node := parse_new_var_decl();
-        if g_global_let_count < MAX_AST {
-            g_global_lets[g_global_let_count] = node;
-            g_global_let_count = g_global_let_count + 1;
-        }
+        dyn_grow_global_lets(g_global_let_count + 1);
+        w64(g_global_lets, g_global_let_count * 8, node);
+        g_global_let_count = g_global_let_count + 1;
         // Drain any batch extras to globals
         loop {
             if g_extra_let_count <= 0 { break; }
             g_extra_let_count = g_extra_let_count - 1;
-            if g_global_let_count < MAX_AST {
-                g_global_lets[g_global_let_count] = g_extra_lets[g_extra_let_count];
-                g_global_let_count = g_global_let_count + 1;
-            }
+            dyn_grow_global_lets(g_global_let_count + 1);
+            w64(g_global_lets, g_global_let_count * 8, g_extra_lets[g_extra_let_count]);
         }
         g_extra_let_count = 0;
         return;
@@ -1290,14 +1284,14 @@ fn parse_all() {
     g_func_count = 0;
     g_struct_count = 0;
     g_enum_count = 0;
-    g_type_alias_count = 0;
-    g_method_count = 0;
-    g_loop_depth = 0;
-    g_global_let_count = 0;
+    g_type_alias_count = 0; g_type_alias_cap = 0;
+    g_method_count = 0; g_method_cap = 0;
+    g_loop_depth = 0; g_loop_stack_cap = 0;
+    g_global_let_count = 0; g_global_lets_cap = 0;
     g_extra_let_count = 0;
     g_block_stmt_count = 0;
     g_error_count = 0;
-    g_mod_path_count = 0;
+    g_mod_path_count = 0; g_mod_path_cap = 0;
 
     ci : ., mut = 0;
     loop {

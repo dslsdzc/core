@@ -63,17 +63,14 @@ fn lookup_global(name_idx: int) -> int {
 }
 
 fn push_ir_scope() {
-    if g_ir_local_depth < 256 {
-        g_ir_local_scopes[g_ir_local_depth] = g_ir_local_count;
-        g_ir_local_depth = g_ir_local_depth + 1;
-    }
+    dyn_grow_ir_local_scopes(g_ir_local_depth + 1);
+    w64(g_ir_local_scopes, g_ir_local_depth * 8, g_ir_local_count);
+    g_ir_local_depth = g_ir_local_depth + 1;
 }
 
 fn pop_ir_scope() {
-    if g_ir_local_depth > 0 {
-        g_ir_local_depth = g_ir_local_depth - 1;
-        g_ir_local_count = g_ir_local_scopes[g_ir_local_depth];
-    }
+    g_ir_local_depth = g_ir_local_depth - 1;
+    g_ir_local_count = r64(g_ir_local_scopes, g_ir_local_depth * 8);
 }
 
 fn get_ir_var_name(var_idx: int) -> string {
@@ -99,17 +96,14 @@ fn track_str_const(str_idx: int) {
 
 // --- Loop label stack ---
 fn push_loop_labels(header: int, exit: int) {
-    if g_ir_loop_depth < 256 {
-        g_ir_loop_header[g_ir_loop_depth] = header;
-        g_ir_loop_exit[g_ir_loop_depth] = exit;
-        g_ir_loop_depth = g_ir_loop_depth + 1;
-    }
+    dyn_grow_ir_loop_stacks(g_ir_loop_depth + 1);
+    w64(g_ir_loop_header, g_ir_loop_depth * 8, header);
+    w64(g_ir_loop_exit, g_ir_loop_depth * 8, exit);
+    g_ir_loop_depth = g_ir_loop_depth + 1;
 }
 
 fn pop_loop_labels() {
-    if g_ir_loop_depth > 0 {
-        g_ir_loop_depth = g_ir_loop_depth - 1;
-    }
+    g_ir_loop_depth = g_ir_loop_depth - 1;
 }
 
 fn get_variant_name_idx(qualified_ni: int) -> int {
@@ -349,7 +343,7 @@ fn ir_gen_expr(node: int) -> int {
         i : ., mut = 0;
         loop {
             if i >= stmt_count { break; }
-            sn := r64(g_block_stmts, stmt_start + i * 8);
+            sn := r64(g_block_stmts, (stmt_start + i) * 8);
             last = ir_gen_expr(sn);
             i = i + 1;
         }
@@ -696,13 +690,13 @@ fn ir_gen_expr(node: int) -> int {
     // Break / Continue
     if ast_kind(node) == EXPR_BREAK {
         if g_ir_loop_depth > 0 {
-            emit(IR_JUMP, -1, g_ir_loop_exit[g_ir_loop_depth - 1], 0, 0, 0);
+            emit(IR_JUMP, -1, r64(g_ir_loop_exit, (g_ir_loop_depth - 1) * 8), 0, 0, 0);
         }
         return -1;
     }
     if ast_kind(node) == EXPR_CONTINUE {
         if g_ir_loop_depth > 0 {
-            emit(IR_JUMP, -1, g_ir_loop_header[g_ir_loop_depth - 1], 0, 0, 0);
+            emit(IR_JUMP, -1, r64(g_ir_loop_header, (g_ir_loop_depth - 1) * 8), 0, 0, 0);
         }
         return -1;
     }
@@ -809,7 +803,7 @@ fn ir_gen_globals() {
     i : ., mut = 0;
     loop {
         if i >= g_global_let_count { break; }
-        node := g_global_lets[i];
+        node := r64(g_global_lets, i * 8);
         name_idx := ast_a(node);
         name := str_get(name_idx);
         gvar := new_ir_var(name, TI_INT);

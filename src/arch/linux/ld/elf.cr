@@ -128,8 +128,9 @@ fn x86_64_elf_generate(buf: string) -> int {
 
     fi := 0; loop { if fi >= g_ir_func_count { break; }
         ni := r64(g_ir_func_name_idx, fi * 8);
-        g_x86_func_offsets[g_x86_func_off_count * 2] = ni;
-        g_x86_func_offsets[g_x86_func_off_count * 2 + 1] = total_code;
+        dyn_grow_x86_func_offsets(g_x86_func_off_count * 2 + 2);
+        w64(g_x86_func_offsets, g_x86_func_off_count * 16, ni);
+        w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code);
         g_x86_func_off_count = g_x86_func_off_count + 1;
 
         ic := r64(g_ir_func_instr_count, fi * 8);
@@ -156,8 +157,9 @@ fn x86_64_elf_generate(buf: string) -> int {
 
     // __builtin_alloc: bump allocator for heap allocation in ELF output
     alloc_ni := str_intern("__builtin_alloc");
-    g_x86_func_offsets[g_x86_func_off_count * 2] = alloc_ni;
-    g_x86_func_offsets[g_x86_func_off_count * 2 + 1] = total_code;
+    dyn_grow_x86_func_offsets(g_x86_func_off_count * 2 + 2);
+    w64(g_x86_func_offsets, g_x86_func_off_count * 16, alloc_ni);
+    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code);
     g_x86_func_off_count = g_x86_func_off_count + 1;
     total_code = total_code + 65;
 
@@ -169,8 +171,22 @@ fn x86_64_elf_generate(buf: string) -> int {
     // Mark global variables for BSS allocation
     gi := 0; loop { if gi >= g_ir_global_count { break; }
         gv := r64(g_ir_globals, gi * 16 + 8);
-        if gv >= 0 && gv < 32768 { g_x86_is_global[gv] = 1; }
+        if gv >= 0 { dyn_grow_x86_is_global(gv + 1); w64(g_x86_is_global, gv * 8, 1); }
     gi = gi + 1; }
+
+    // Mark enum variables for +8 field offset
+    g_x86_is_enum_count = 0; g_x86_is_enum_cap = 0;
+    fie := 0; loop { if fie >= g_ir_func_count { break; }
+        ice := r64(g_ir_func_instr_count, fie * 8);
+        iie := 0; loop { if iie >= ice { break; }
+            inst_idxe := r64(g_ir_func_instr_start, fie * 8) + iie;
+            op := r64(g_ir_instrs, inst_idxe * ESZ_IRINSTR + OFF_IRI_OP);
+            if op == IR_MAKE_ENUM {
+                ed := r64(g_ir_instrs, inst_idxe * ESZ_IRINSTR + OFF_IRI_DEST);
+                if ed >= 0 { dyn_grow_x86_is_enum(ed + 1); w64(g_x86_is_enum, ed * 8, 1); }
+            }
+        iie = iie + 1; }
+    fie = fie + 1; }
 
     // Phase 3: emit to buffer
     cp := 176;  // skip ELF header
@@ -225,7 +241,7 @@ fn x86_64_elf_generate(buf: string) -> int {
         // patch RETURNs to epilogue
         epi_pos := cp;
         rpi := 0; loop { if rpi >= g_x86_ret_patch_count { break; }
-            jmp_pos := g_x86_ret_patch_pos[rpi];
+            jmp_pos := r64(g_x86_ret_patch_pos, rpi * 8);
             rel := epi_pos - (jmp_pos + 5);
             w32(buf, jmp_pos + 1, rel);
         rpi = rpi + 1; }
@@ -261,7 +277,7 @@ fn x86_64_elf_generate(buf: string) -> int {
     alloc_code_off := alloc_start - 176;
     api := 0;
     loop { if api >= g_x86_alloc_patch_count { break; }
-        call_pos := g_x86_alloc_patch_pos[api];
+        call_pos := r64(g_x86_alloc_patch_pos, api * 8);
         rel := (176 + alloc_code_off) - (call_pos + 5);
         w32(buf, call_pos + 1, rel);
         api = api + 1; }
@@ -269,7 +285,7 @@ fn x86_64_elf_generate(buf: string) -> int {
 
     // ── .rodata ──
     si = 0; loop { if si >= g_x86_str_count { break; }
-        s := str_get(g_x86_str_offs[si]);
+        s := str_get(r64(g_x86_str_offs, si * 8));
         sl := __builtin_str_len(s);
         ci := 0; loop { if ci >= sl { break; } w8(buf, cp, __builtin_load8(s, ci)); ci = ci + 1; cp = cp + 1; }
         w8(buf, cp, 0); cp = cp + 1;
@@ -279,17 +295,17 @@ fn x86_64_elf_generate(buf: string) -> int {
     gi2 := 0; goff : ., mut = 0;
     loop { if gi2 >= g_ir_global_count { break; }
         gv2 := r64(g_ir_globals, gi2 * 16 + 8);
-        if gv2 >= 0 && gv2 < 32768 { g_x86_global_off[gv2] = goff; goff = goff + 8; }
+        if gv2 >= 0 { dyn_grow_x86_global_off(gv2 + 1); w64(g_x86_global_off, gv2 * 8, goff); goff = goff + 8; }
     gi2 = gi2 + 1; }
 
     // ── Patch global variable RIP-relative references ──
     rpi2 := 0;
     loop { if rpi2 >= g_x86_rip_patch_count { break; }
-        ppos := g_x86_rip_patch_pos[rpi2];
-        gvi := g_x86_rip_patch_globals[rpi2];
-        if gvi >= 0 && gvi < 32768 {
+        ppos := r64(g_x86_rip_patch_pos, rpi2 * 8);
+        gvi := r64(g_x86_rip_patch_globals, rpi2 * 8);
+        if gvi >= 0 {
             lea_end_va := TEXT_BASE + ppos + 4 - 176;
-            target_va := bss_va + 16 + g_x86_global_off[gvi];  // +16 to skip heap_ptr(8) + heap_start(8)
+            target_va := bss_va + 16 + r64(g_x86_global_off, gvi * 8);  // +16 to skip heap_ptr(8) + heap_start(8)
             rel := target_va - lea_end_va;
             w32(buf, ppos, rel); }
     rpi2 = rpi2 + 1; }
@@ -298,7 +314,7 @@ fn x86_64_elf_generate(buf: string) -> int {
     // ── Patch _start's call to main ──
     main_ni := str_intern("main");
     mo := -1; fi = 0; loop { if fi >= g_ir_func_count { break; }
-        if r64(g_ir_func_name_idx, fi * 8) == main_ni { mo = g_x86_func_offsets[fi*2+1]; break; }
+        if r64(g_ir_func_name_idx, fi * 8) == main_ni { mo = r64(g_x86_func_offsets, fi*16+8); break; }
     fi = fi + 1; }
     if mo >= 0 {
         rel := mo - 5;

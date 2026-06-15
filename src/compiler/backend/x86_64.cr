@@ -15,20 +15,19 @@ fn x86_mark_enum(var_idx: int) {
     i : ., mut = 0;
     loop {
         if i >= g_x86_is_enum_count { break; }
-        if g_x86_vars[i] == var_idx { return; }
+        if r64(g_x86_vars, i * 8) == var_idx { return; }
         i = i + 1;
     }
-    if g_x86_is_enum_count < MAX_IREXPRS {
-        g_x86_is_enum[g_x86_is_enum_count] = var_idx;
-        g_x86_is_enum_count = g_x86_is_enum_count + 1;
-    }
+    dyn_grow_x86_is_enum(g_x86_is_enum_count + 1);
+    w64(g_x86_is_enum, g_x86_is_enum_count * 8, var_idx);
+    g_x86_is_enum_count = g_x86_is_enum_count + 1;
 }
 
 fn x86_is_enum_var(var_idx: int) -> int {
     i : ., mut = 0;
     loop {
         if i >= g_x86_is_enum_count { break; }
-        if g_x86_is_enum[i] == var_idx { return 1; }
+        if r64(g_x86_is_enum, i * 8) == var_idx { return 1; }
         i = i + 1;
     }
     return 0;
@@ -38,25 +37,23 @@ fn x86_alloc_stack(var_idx: int) -> int {
     i : ., mut = 0;
     loop {
         if i >= g_x86_var_count { break; }
-        if g_x86_vars[i] == var_idx {
+        if r64(g_x86_vars, i * 8) == var_idx {
             return -(i + 1) * 8;
         }
         i = i + 1;
     }
-    if g_x86_var_count < MAX_IREXPRS {
-        g_x86_vars[g_x86_var_count] = var_idx;
-        g_x86_var_count = g_x86_var_count + 1;
-        g_x86_stack_size = g_x86_var_count * 8;
-        return -(g_x86_var_count) * 8;
-    }
-    return -8;
+    dyn_grow_x86_vars(g_x86_var_count + 1);
+    w64(g_x86_vars, g_x86_var_count * 8, var_idx);
+    g_x86_var_count = g_x86_var_count + 1;
+    g_x86_stack_size = g_x86_var_count * 8;
+    return -(g_x86_var_count) * 8;
 }
 
 fn x86_get_offset(var_idx: int) -> int {
     i : ., mut = 0;
     loop {
         if i >= g_x86_var_count { break; }
-        if g_x86_vars[i] == var_idx {
+        if r64(g_x86_vars, i * 8) == var_idx {
             return -(i + 1) * 8;
         }
         i = i + 1;

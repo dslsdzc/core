@@ -23,8 +23,6 @@
 // Constants
 // ============================================================
 
-MAX_SO : int = 8;
-MAX_PLT : int = 128;
 
 SHT_DYNAMIC  : int = 6;
 SHT_DYNSYM   : int = 11;
@@ -46,16 +44,20 @@ DT_JMPREL    : int = 23;
 // .so tracking
 // ============================================================
 
-g_so_paths : [string; MAX_SO], mut;
-g_so_count : int, mut;
+g_so_paths : string, mut; g_so_count : int, mut; g_so_cap : int, mut;
 
-// ============================================================
-// PLT entries
-// ============================================================
+fn dyn_grow_so(needed: int) {
+    if needed < g_so_cap { return; }
+    nc : ., mut = g_so_cap * 2; if nc < 4 { nc = 4; } if nc < needed { nc = needed + 4; }
+    nb := __builtin_alloc(nc * 8); _dyncpy(g_so_paths, g_so_cap * 8, nb); g_so_paths = nb; g_so_cap = nc; }
 
 struct PltEntry { name: string, so_idx: int }
-g_plts : [PltEntry; MAX_PLT], mut;
-g_plt_count : int, mut;
+g_plts : string, mut; g_plt_count : int, mut; g_plt_cap : int, mut;
+
+fn dyn_grow_plts(needed: int) {
+    if needed < g_plt_cap { return; }
+    nc : ., mut = g_plt_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
+    nb := __builtin_alloc(nc * 16); _dyncpy(g_plts, g_plt_cap * 16, nb); g_plts = nb; g_plt_cap = nc; }
 
 // ============================================================
 // Linker state
@@ -124,8 +126,8 @@ fn so_find(buf: string, name: string) -> int {
 
 fn so_find_any(name: string) -> int {
     si : ., mut = 0; loop { if si >= g_so_count { break; }
-        if __builtin_str_len(g_so_paths[si]) > 0 {
-            b := __builtin_read_file(g_so_paths[si]);
+        if __builtin_str_len(r64(g_so_paths, si * 8)) > 0 {
+            b := __builtin_read_file(r64(g_so_paths, si * 8));
             if __builtin_str_len(b) > 0 {
                 a := so_find(b, name);
                 if a >= 0 { return a; } }
@@ -152,7 +154,7 @@ fn layout() {
         if k == 7 {
             sz = 1 + __builtin_str_len("core_librt.so") + 1;
             j : ., mut = 0; loop { if j >= g_plt_count { break; }
-                sz = sz + __builtin_str_len(g_plts[j].name) + 1; j = j + 1; } }
+                sz = sz + __builtin_str_len(r64(g_plts, j * 16)) + 1; j = j + 1; } }
         if k == 8 { sz = g_plt_count * 24; }
         g_ch_vaddr[i] = va;
         g_ch_foff[i] = va - g_text_base;
@@ -243,10 +245,10 @@ fn emit(buf: string, total: int, is_so: int) {
             w8(db,so_off+__builtin_str_len("core_librt.so"),0);
             nxt : ., mut = so_off+__builtin_str_len("core_librt.so")+1;
             pi : ., mut = 0; loop { if pi >= g_plt_count { break; }
-                j=0; loop { if j >= __builtin_str_len(g_plts[pi].name) { break; }
-                    w8(db,nxt+j, __builtin_load8(g_plts[pi].name,j)); j=j+1; }
-                w8(db,nxt+__builtin_str_len(g_plts[pi].name),0);
-                nxt=nxt+__builtin_str_len(g_plts[pi].name)+1; pi=pi+1; }
+                j=0; loop { if j >= __builtin_str_len(r64(g_plts, pi * 16)) { break; }
+                    w8(db,nxt+j, __builtin_load8(r64(g_plts, pi * 16),j)); j=j+1; }
+                w8(db,nxt+__builtin_str_len(r64(g_plts, pi * 16)),0);
+                nxt=nxt+__builtin_str_len(r64(g_plts, pi * 16))+1; pi=pi+1; }
             // Write dynstr to its chunk
             dsc := cby(7);
             di2 : ., mut = 0; loop { if di2 >= __builtin_str_len(db) { break; }
@@ -295,14 +297,14 @@ fn patch_relocs() {
     uc := cby(2); uv := g_ch_vaddr[uc];
     pv := g_ch_vaddr[cby(3)];
     ri : ., mut = 0; loop { if ri >= g_x86_ext_rel_count { break; }
-        abs_pos := g_x86_ext_rel_pos[ri];
+        abs_pos := r64(g_x86_ext_rel_pos, ri * 8);
         code_off : ., mut = abs_pos - 176;
         if code_off < 0 || code_off >= g_user_size { ri=ri+1; continue; }
-        fn_name_ni := g_x86_ext_rel_name[ri]; fn_name : ., mut = "";
+        fn_name_ni := r64(g_x86_ext_rel_name, ri * 8); fn_name : ., mut = "";
         if fn_name_ni >= 0 { fn_name = str_get(fn_name_ni); }
         plt_idx : ., mut = -1;
         si : ., mut = 0; loop { if si >= g_plt_count { break; }
-            if __builtin_str_eq(g_plts[si].name, fn_name) != 0 { plt_idx = si; break; }
+            if __builtin_str_eq(r64(g_plts, si * 16), fn_name) != 0 { plt_idx = si; break; }
             si = si + 1; }
         if plt_idx >= 0 {
             call_va := uv + code_off;
@@ -316,13 +318,13 @@ fn patch_relocs() {
 // ============================================================
 
 fn ctx_init() {
-    g_ch_count = 0; g_so_count = 0; g_plt_count = 0;
+    g_ch_count = 0; g_so_count = 0; g_plt_count = 0; g_so_cap = 0; g_plt_cap = 0;
     g_text_base = 4194304; g_user_code = ""; g_user_size = 0; }
 
 fn ctx_set_user_code(data: string, sz: int) { g_user_code = data; g_user_size = sz; }
-fn ctx_add_so(path: string) { if g_so_count < MAX_SO { g_so_paths[g_so_count] = path; g_so_count = g_so_count + 1; } }
+fn ctx_add_so(path: string) { dyn_grow_so(g_so_count + 1); w64(g_so_paths, g_so_count * 8, path); g_so_count = g_so_count + 1; }
 fn ctx_add_plt(name: string, so_idx: int) {
-    if g_plt_count < MAX_PLT { g_plts[g_plt_count] = PltEntry { name = name, so_idx = so_idx }; g_plt_count = g_plt_count + 1; } }
+    dyn_grow_plts(g_plt_count + 1); w64(g_plts, g_plt_count * 16, name); w64(g_plts, g_plt_count * 16 + 8, so_idx); g_plt_count = g_plt_count + 1; }
 
 // Produce dynamically-linked ELF executable
 fn ctx_emit_dyn(buf: string, path: string) -> int {
