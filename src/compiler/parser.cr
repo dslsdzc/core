@@ -1162,12 +1162,46 @@ fn parse_declaration() {
         return;
     }
 
-    // impl block
+    // interface declaration
+    if check(T_INTERFACE) {
+        t := advance_tok();
+        nt := advance_tok();
+        parse_generics();
+        advance_tok(); // {
+        loop {
+            if check(T_RBRACE) { break; }
+            if check(T_FN) {
+                advance_tok(); advance_tok(); advance_tok(); // fn name (
+                depth : ., mut = 1;
+                loop { if depth <= 0 { break; }
+                    tk := advance_tok();
+                    if tok_k(tk) == T_LPAREN { depth = depth + 1; }
+                    if tok_k(tk) == T_RPAREN { depth = depth - 1; }
+                }
+                if check(T_ARROW) { advance_tok(); parse_type(); }
+                advance_tok(); // ;
+            } else { advance_tok(); }
+        }
+        advance_tok(); // }
+        return;
+    }
+
+    // impl block (impl Type { ... } or impl Interface for Type { ... })
     if check(T_IMPL) {
         t := advance_tok();
-        type_nt := advance_tok();
-        type_name := tok_lx(type_nt);
-        type_ni := str_intern(type_name);
+        first_nt := advance_tok();
+        first_name := tok_lx(first_nt);
+        first_ni := str_intern(first_name);
+        trait_ni : ., mut = -1;
+        type_ni : ., mut = first_ni;
+        type_name : ., mut = first_name;
+        if check(T_FOR) {
+            advance_tok();
+            trait_ni = first_ni;
+            type_nt := advance_tok();
+            type_name = tok_lx(type_nt);
+            type_ni = str_intern(type_name);
+        }
         advance_tok(); // {
         loop {
             if check(T_RBRACE) { break; }
