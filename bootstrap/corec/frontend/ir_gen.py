@@ -34,6 +34,13 @@ class IRGen:
         self.mod.struct_sizes = {}
         for name, fields in self.struct_fields.items():
             self.mod.struct_sizes[name] = len(fields) * 8
+        # First pass: register global let declarations so ir_var is set
+        # before function bodies reference them (declaration order may place
+        # LetDecls after the functions that use them in concatenated source).
+        for decl in ast.declarations:
+            if isinstance(decl, LetDecl):
+                self.gen_let_decl(decl)
+        # Second pass: generate IR for functions
         for decl in ast.declarations:
             if isinstance(decl, FunctionDecl):
                 if not self.symtab.lookup(decl.name):
@@ -47,8 +54,6 @@ class IRGen:
                     if not self.symtab.lookup(full_name):
                         self.symtab.define(full_name, SymbolKind.FUNCTION, method.return_type, method)
                     self.gen_function(method)
-            elif isinstance(decl, LetDecl):
-                self.gen_let_decl(decl)
         return self.mod
 
     def gen_let_decl(self, decl: LetDecl):

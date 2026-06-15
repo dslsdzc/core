@@ -45,6 +45,10 @@ class NameResolver:
         self.symtab.define('__builtin_println', SymbolKind.FUNCTION, BaseType('unit'))
         # syscall3(nr: int, arg1: int, arg2: int, arg3: int) -> int
         self.symtab.define('__builtin_syscall3', SymbolKind.FUNCTION, BaseType('int'))
+        # load_str_ptr(buf: string, pos: int) -> string — load string pointer from byte buffer
+        self.symtab.define('__builtin_load_str_ptr', SymbolKind.FUNCTION, BaseType('string'))
+        # store_str_ptr(buf: string, pos: int, val: string) -> int — store string pointer into byte buffer
+        self.symtab.define('__builtin_store_str_ptr', SymbolKind.FUNCTION, BaseType('int'))
 
     def resolve(self, ast: CompilationUnit):
         self._declare_builtins()

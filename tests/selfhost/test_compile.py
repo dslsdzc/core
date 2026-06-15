@@ -17,7 +17,7 @@ BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 def concat_sources():
     files = [
         'src/stdlib/cli.cr', 'src/stdlib/toml.cr', 'src/compiler/ast.cr', 'src/compiler/globals.cr',
-        'src/compiler/lexer.cr', 'src/compiler/parser.cr',
+        'src/compiler/dyn_arr.cr', 'src/compiler/lexer.cr', 'src/compiler/parser.cr',
         'src/compiler/checker.cr', 'src/compiler/diag.cr', 'src/compiler/ir_gen.cr', 'src/compiler/dataflow.cr',
         'src/compiler/backend/x86_64.cr', 'src/compiler/module.cr', 'src/compiler/ccr_io.cr', 'src/compiler/dump.cr',
         'src/compiler/project.cr', 'src/compiler/interp.cr', 'src/compiler/main.cr',

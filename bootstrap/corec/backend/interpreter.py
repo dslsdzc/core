@@ -283,6 +283,24 @@ class Interpreter:
                 if instr.dest:
                     self.vars[id(instr.dest)] = [0] * ((size + 7) // 8)
                 return
+            if instr.func == '__builtin_load_str_ptr':
+                buf = self.vars.get(id(instr.args[0]))
+                pos = self.vars.get(id(instr.args[1]), 0)
+                if instr.dest:
+                    if isinstance(buf, list) and 0 <= pos // 8 < len(buf):
+                        self.vars[id(instr.dest)] = buf[pos // 8]
+                    else:
+                        self.vars[id(instr.dest)] = ''
+                return
+            if instr.func == '__builtin_store_str_ptr':
+                buf = self.vars.get(id(instr.args[0]))
+                pos = self.vars.get(id(instr.args[1]), 0)
+                val = self.vars.get(id(instr.args[2]))
+                if isinstance(buf, list) and 0 <= pos // 8 < len(buf):
+                    buf[pos // 8] = val
+                if instr.dest:
+                    self.vars[id(instr.dest)] = 0
+                return
             func = self.funcs[instr.func]
             arg_vals = [self.vars.get(id(a)) for a in instr.args]
             old_vars = self.vars
