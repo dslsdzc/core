@@ -124,3 +124,20 @@ __builtin_get_arg:
 .Larg_oob:
     lea rax, [rip + empty_str]
     ret
+
+# __builtin_load_str_ptr(buf: string, pos: int) -> string
+# Load 8-byte string pointer from byte buffer at given offset.
+.globl __builtin_load_str_ptr
+.type __builtin_load_str_ptr, @function
+__builtin_load_str_ptr:
+    mov rax, [rdi + rsi]
+    ret
+
+# __builtin_store_str_ptr(buf: string, pos: int, val: string) -> int
+# Store 8-byte string pointer into byte buffer at given offset.
+.globl __builtin_store_str_ptr
+.type __builtin_store_str_ptr, @function
+__builtin_store_str_ptr:
+    mov [rdi + rsi], rdx
+    xor eax, eax
+    ret

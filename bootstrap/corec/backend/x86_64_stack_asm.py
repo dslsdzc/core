@@ -84,11 +84,49 @@ class X86_64StackAsmGen:
     def emit(self, line: str = ""):
         self.lines.append(line)
 
+    def _clobber_regs(self):
+        """Call after any operation that destroys r10/r11 (calls, inline asm)."""
+        self._cache_r10_var = None
+        self._forward_key = None   # forwarding invalidated by call
+
+    def _clobber_r10(self):
+        """Call after r10 is modified by ALU op."""
+        self._clobber_cache()
+
+    def _peek_uses_var(self, var: IRVar) -> bool:
+        """Check if var is used by the next instruction via load_to_r10/r11.
+        Returns False for Call/Store/StoreField which use self._ref() (stack access)."""
+        nx = getattr(self, '_next_instr', None)
+        if nx is None:
+            return False
+        # These instruction types access vars via self._ref() (stack), not load_to_r10
+        if isinstance(nx, (CallInstr, StoreInstr, StoreFieldInstr, StoreIndexInstr, StoreIndexVarInstr)):
+            return False
+        vk = id(var)
+        for fn in ['dest', 'value', 'addr', 'left', 'right', 'operand', 'cond', 'struct', 'array', 'index_var']:
+            val = getattr(nx, fn, None)
+            if isinstance(val, IRVar) and id(val) == vk:
+                return True
+        if hasattr(nx, 'args') and nx.args:
+            for a in nx.args:
+                if isinstance(a, IRVar) and id(a) == vk:
+                    return True
+        return False
+
+    def _clobber_cache(self):
+        """Call when r10 may have been modified by any operation."""
+        self._cache_r10_var = None
+
     def load_to_r10(self, var: IRVar):
         self.emit(f"    mov r10, {self._ref(var)}")
 
+    def load_to_r11(self, var: IRVar):
+        self.emit(f"    mov r11, {self._ref(var)}")
+
     def store_from_r10(self, var: IRVar):
+        key = id(var)
         self.emit(f"    mov {self._ref(var)}, r10")
+        self._forward_key = None
 
     # ------------------------------------------------------------------
     # Instruction codegen
@@ -100,6 +138,7 @@ class X86_64StackAsmGen:
             instr.dest.type = BaseType('string')
             lid = self.track_str(instr.value)
             self.emit(f"    lea r10, .LC{lid}[rip]")
+            self._clobber_cache()
             self.emit(f"    mov {ref}, r10")
         else:
             val = instr.value
@@ -111,90 +150,67 @@ class X86_64StackAsmGen:
                 self.emit(f"    mov qword ptr {ref}, {val}")
             else:
                 self.emit(f"    mov r10, {val}")
+                self._clobber_cache()
                 self.emit(f"    mov {ref}, r10")
+
+    def _alu_clobber(self, asm: str):
+        self.emit(asm)
+        self._clobber_r10()
 
     def gen_binary(self, instr: BinaryInstr):
         self.load_to_r10(instr.left)
-        self.emit(f"    mov r11, {self._ref(instr.right)}")
+        self.load_to_r11(instr.right)
         op = instr.op
-        # String comparison: emit __builtin_str_eq or __builtin_str_cmp call
         if op in ('==', '!=', '<', '>', '<=', '>=') and (self._is_string_var(instr.left) or self._is_string_var(instr.right)):
             if op in ('==', '!='):
-                self.emit(f"    mov rdi, r10")
-                self.emit(f"    mov rsi, r11")
-                self.emit("    call __builtin_str_eq")
-                if op == '==':
-                    self.emit(f"    mov {self._ref(instr.dest)}, rax")
+                self.emit(f"    mov rdi, r10"); self.emit(f"    mov rsi, r11")
+                self.emit("    call __builtin_str_eq"); self._clobber_regs()
+                if op == '==': self.emit(f"    mov {self._ref(instr.dest)}, rax")
                 else:
                     self.emit("    cmp rax, 1")
-                    self.emit("    setne al\n    movzx r10, al")
+                    self._alu_clobber("    setne al\n    movzx r10, al")
                     self.store_from_r10(instr.dest)
             else:
-                # Ordering comparisons via strcmp
-                self.emit(f"    mov rdi, r10")
-                self.emit(f"    mov rsi, r11")
-                self.emit("    call __builtin_str_cmp")
+                self.emit(f"    mov rdi, r10"); self.emit(f"    mov rsi, r11")
+                self.emit("    call __builtin_str_cmp"); self._clobber_regs()
                 self.emit("    cmp rax, 0")
-                if op == '<': self.emit("    setl al\n    movzx r10, al")
-                elif op == '>': self.emit("    setg al\n    movzx r10, al")
-                elif op == '<=': self.emit("    setle al\n    movzx r10, al")
-                elif op == '>=': self.emit("    setge al\n    movzx r10, al")
+                asm = {"<":"    setl al\n    movzx r10, al",">":"    setg al\n    movzx r10, al","<=":"    setle al\n    movzx r10, al",">=":"    setge al\n    movzx r10, al"}
+                if op in asm: self._alu_clobber(asm[op])
                 self.store_from_r10(instr.dest)
             return
         elif op == '+':
             if self._is_string_var(instr.left) or self._is_string_var(instr.right):
-                self.emit(f"    mov rdi, r10")
-                self.emit(f"    mov rsi, r11")
-                self.emit("    call __builtin_str_push")
-                self.emit("    mov r10, rax")
+                self.emit(f"    mov rdi, r10"); self.emit(f"    mov rsi, r11")
+                self.emit("    call __builtin_str_push"); self._clobber_regs()
+                self._alu_clobber("    mov r10, rax")
                 self.store_from_r10(instr.dest)
-            else:
-                self.emit("    add r10, r11")
-        elif op == '-': self.emit("    sub r10, r11")
-        elif op == '*': self.emit("    imul r10, r11")
+            else: self._alu_clobber("    add r10, r11")
+        elif op == '-': self._alu_clobber("    sub r10, r11")
+        elif op == '*': self._alu_clobber("    imul r10, r11")
         elif op == '/':
-            self.emit("    mov rax, r10")
-            self.emit("    cqo")
-            self.emit("    idiv r11")
-            self.emit("    mov r10, rax")
+            self.emit("    mov rax, r10"); self.emit("    cqo"); self.emit("    idiv r11")
+            self._alu_clobber("    mov r10, rax")
         elif op == '%':
-            self.emit("    mov rax, r10")
-            self.emit("    cqo")
-            self.emit("    idiv r11")
-            self.emit("    mov r10, rdx")
-        elif op == '==':
-            self.emit("    cmp r10, r11")
-            self.emit("    sete al\n    movzx r10, al")
-        elif op == '!=':
-            self.emit("    cmp r10, r11")
-            self.emit("    setne al\n    movzx r10, al")
-        elif op == '<':
-            self.emit("    cmp r10, r11")
-            self.emit("    setl al\n    movzx r10, al")
-        elif op == '>':
-            self.emit("    cmp r10, r11")
-            self.emit("    setg al\n    movzx r10, al")
-        elif op == '<=':
-            self.emit("    cmp r10, r11")
-            self.emit("    setle al\n    movzx r10, al")
-        elif op == '>=':
-            self.emit("    cmp r10, r11")
-            self.emit("    setge al\n    movzx r10, al")
-        elif op == 'and' or op == '&&':
-            self.emit("    and r10, r11")
-        elif op == 'or' or op == '||':
-            self.emit("    or r10, r11")
-        else:
-            raise NotImplementedError(f"Binary op {op}")
+            self.emit("    mov rax, r10"); self.emit("    cqo"); self.emit("    idiv r11")
+            self._alu_clobber("    mov r10, rdx")
+        elif op == '==': self.emit("    cmp r10, r11"); self._alu_clobber("    sete al\n    movzx r10, al")
+        elif op == '!=': self.emit("    cmp r10, r11"); self._alu_clobber("    setne al\n    movzx r10, al")
+        elif op == '<': self.emit("    cmp r10, r11"); self._alu_clobber("    setl al\n    movzx r10, al")
+        elif op == '>': self.emit("    cmp r10, r11"); self._alu_clobber("    setg al\n    movzx r10, al")
+        elif op == '<=': self.emit("    cmp r10, r11"); self._alu_clobber("    setle al\n    movzx r10, al")
+        elif op == '>=': self.emit("    cmp r10, r11"); self._alu_clobber("    setge al\n    movzx r10, al")
+        elif op in ('and', '&&'): self._alu_clobber("    and r10, r11")
+        elif op in ('or', '||'): self._alu_clobber("    or r10, r11")
+        else: raise NotImplementedError(f"Binary op {op}")
         self.store_from_r10(instr.dest)
 
     def gen_unary(self, instr: UnaryInstr):
         self.load_to_r10(instr.operand)
         if instr.op == '-':
-            self.emit("    neg r10")
+            self._alu_clobber("    neg r10")
         elif instr.op == 'not' or instr.op == '!':
             self.emit("    cmp r10, 0")
-            self.emit("    sete al\n    movzx r10, al")
+            self._alu_clobber("    sete al\n    movzx r10, al")
         self.store_from_r10(instr.dest)
 
     def gen_call(self, instr: CallInstr):
@@ -208,7 +224,43 @@ class X86_64StackAsmGen:
         # Push 7th+ args on stack in reverse order (rightmost first)
         for i in reversed(range(6, len(instr.args))):
             self.emit(f"    push {self._ref(instr.args[i])}")
-        if instr.func == '__builtin_syscall3':
+        # ── Inline hot helper functions (avoids call overhead for millions of calls) ──
+        if instr.func == 'r64':
+            # r64(buf, pos) → read 8 bytes
+            self.emit("    mov rax, [rdi + rsi]")
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+            if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
+        elif instr.func == 'w64':
+            # w64(buf, pos, val) → write 8 bytes
+            self.emit("    mov [rdi + rsi], rdx")
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+        elif instr.func == 'r32':
+            # r32(buf, pos) → read 4 bytes (zero-extended)
+            self.emit("    mov eax, [rdi + rsi]")
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+            if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
+        elif instr.func == 'w32':
+            # w32(buf, pos, val) → write 4 bytes
+            self.emit("    mov [rdi + rsi], edx")
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+        elif instr.func == 'bu8':
+            # bu8(buf, pos) → read 1 byte (zero-extended)
+            self.emit("    movzx eax, BYTE PTR [rdi + rsi]")
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+            if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
+        elif instr.func == 'w8':
+            # w8(buf, pos, val) → write 1 byte
+            self.emit("    mov BYTE PTR [rdi + rsi], dl")
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+        elif instr.func == '_dyncpy':
+            # _dyncpy(src, nbytes, dst) → memcpy via rep movsb
+            self.emit("    mov rcx, rsi")    # rcx = byte count
+            self.emit("    mov rsi, rdi")    # rsi = source
+            self.emit("    mov rdi, rdx")    # rdi = dest
+            self.emit("    cld")
+            self.emit("    rep movsb")
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+        elif instr.func == '__builtin_syscall3':
             # Inline syscall: after arg setup rdi=nr, rsi=arg1, rdx=arg2, rcx=arg3
             # Need: rax=nr, rdi=arg1, rsi=arg2, rdx=arg3
             self.emit("    mov rax, rdi")
@@ -216,30 +268,23 @@ class X86_64StackAsmGen:
             self.emit("    mov rsi, rdx")
             self.emit("    mov rdx, rcx")
             self.emit("    syscall")
-            if stack_args > 0:
-                self.emit(f"    add rsp, {stack_args * 8}")
-            if instr.dest:
-                self.emit(f"    mov {self._ref(instr.dest)}, rax")
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+            if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
         elif instr.func == '__builtin_load8':
             # load8(string_ptr, idx) → byte at ptr+idx (zero-extended)
             self.emit("    movzx rax, BYTE PTR [rdi + rsi]")
-            if stack_args > 0:
-                self.emit(f"    add rsp, {stack_args * 8}")
-            if instr.dest:
-                self.emit(f"    mov qword ptr {self._ref(instr.dest)}, rax")
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+            if instr.dest: self.emit(f"    mov qword ptr {self._ref(instr.dest)}, rax")
         elif instr.func == '__builtin_store8':
             # store8(string_ptr, idx, val) → store low byte of val at ptr+idx
             self.emit("    mov BYTE PTR [rdi + rsi], dl")
-            if stack_args > 0:
-                self.emit(f"    add rsp, {stack_args * 8}")
-            if instr.dest:
-                self.emit(f"    mov qword ptr {self._ref(instr.dest)}, 0")
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+            if instr.dest: self.emit(f"    mov qword ptr {self._ref(instr.dest)}, 0")
         elif instr.func:
             self.emit(f"    call {instr.func}")
-            if stack_args > 0:
-                self.emit(f"    add rsp, {stack_args * 8}")
-            if instr.dest:
-                self.emit(f"    mov {self._ref(instr.dest)}, rax")
+            self._clobber_regs()
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+            if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
 
     def gen_return(self, instr: ReturnInstr):
         if instr.value:
@@ -351,9 +396,31 @@ class X86_64StackAsmGen:
     # Per-function codegen
     # ------------------------------------------------------------------
 
+    def _build_dead_store_set(self, func: FunctionDef) -> set:
+        """Return set of var IDs whose stored value is never loaded (dead stores)."""
+        loaded = set()
+        defined = set()
+        src_fields = {'args', 'value', 'addr', 'left', 'right', 'operand',
+                      'cond', 'struct', 'array', 'index_var'}
+        for blk in func.blocks:
+            for instr in blk.instrs:
+                d = getattr(instr, 'dest', None)
+                if isinstance(d, IRVar) and not self.is_global(d):
+                    defined.add(id(d))
+                for fn in src_fields:
+                    val = getattr(instr, fn, None)
+                    if isinstance(val, IRVar) and not self.is_global(val):
+                        loaded.add(id(val))
+                if hasattr(instr, 'args') and instr.args:
+                    for a in instr.args:
+                        if isinstance(a, IRVar) and not self.is_global(a):
+                            loaded.add(id(a))
+        return {vid for vid in defined if vid not in loaded}
+
     def gen_function(self, func: FunctionDef):
         self.var_offsets = {}
         self.stack_size = 0
+        self._clobber_regs()
 
         # Function label
         if func.name == 'main':
@@ -409,6 +476,7 @@ class X86_64StackAsmGen:
                 # System V AMD64: 7th+ args are at [rbp + 16 + (i-6)*8]
                 stack_off = 16 + (i - 6) * 8
                 self.emit(f"    mov r10, [rbp + {stack_off}]")
+                self._clobber_cache()
                 self.emit(f"    mov {self._ref(p)}, r10")
 
         # Generate code for all blocks (entry first, then others)
@@ -526,23 +594,23 @@ class X86_64StackAsmGen:
 
         # Global initialization function — allocate heap memory for global arrays
         # (g_tokens, g_ir_vars, etc.) so they're not NULL when code accesses them.
+        # Always emitted because rt.s's _start unconditionally calls _init_globals.
         global_arrays = [g for g in self.module.globals
                          if g.kind == VarKind.GLOBAL and isinstance(g.type, ArrayType) and g.type.size]
-        if global_arrays:
-            self.emit()
-            self.emit(".text")
-            self.emit(".globl _init_globals")
-            self.emit("_init_globals:")
-            self.emit("    push rbp")
-            self.emit("    mov rbp, rsp")
-            for g in global_arrays:
-                elem_size = self._elem_size(g.type.inner)
-                size = g.type.size * elem_size
-                self.emit(f"    mov edi, {size}")
-                self.emit("    call __builtin_alloc")
-                self.emit(f"    mov [rip+{self._global_label(g.name)}], rax")
-            self.emit("    pop rbp")
-            self.emit("    ret")
-            self.emit()
+        self.emit()
+        self.emit(".text")
+        self.emit(".globl _init_globals")
+        self.emit("_init_globals:")
+        self.emit("    push rbp")
+        self.emit("    mov rbp, rsp")
+        for g in global_arrays:
+            elem_size = self._elem_size(g.type.inner)
+            size = g.type.size * elem_size
+            self.emit(f"    mov edi, {size}")
+            self.emit("    call __builtin_alloc")
+            self.emit(f"    mov [rip+{self._global_label(g.name)}], rax")
+        self.emit("    pop rbp")
+        self.emit("    ret")
+        self.emit()
 
         return '\n'.join(self.lines)

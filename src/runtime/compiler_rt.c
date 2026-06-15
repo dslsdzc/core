@@ -45,6 +45,15 @@ void *__builtin_alloc(unsigned long size) {
     return bump_alloc(size);
 }
 
+char *__builtin_load_str_ptr(char *buf, int pos) {
+    return *(char **)(buf + pos);
+}
+
+int __builtin_store_str_ptr(char *buf, int pos, char *val) {
+    *(char **)(buf + pos) = val;
+    return 0;
+}
+
 // -------------------------------------------------------------------------
 // Runtime globals for argc/argv (set by main() before calling compiler_main)
 // -------------------------------------------------------------------------
