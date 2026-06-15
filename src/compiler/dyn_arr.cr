@@ -78,6 +78,17 @@ OFF_DF_FIRST_EDGE : int = 48; OFF_DF_EDGE_COUNT : int = 56;
 ESZ_DFEDGE : int = 24;   // from_node,to_node,next_out = 3x8
 OFF_DFE_FROM : int = 0;  OFF_DFE_TO : int = 8;  OFF_DFE_NEXT : int = 16;
 
+// InterfaceInfo: fixed-size entry per interface
+// Header(24) + methods[16] * method_entry(88) = 1432 total
+ESZ_IFACEINFO : int = 1432;
+OFF_IF_NAME : int = 0; OFF_IF_METHOD_COUNT : int = 8; OFF_IF_GENERIC_COUNT : int = 16;
+OFF_IF_METHODS : int = 24;  // first method entry
+// Each method entry: name_idx(8) + param_count(8) + ret_ti(8) + param_types[8](64) = 88 bytes
+ESZ_IFMETHOD : int = 88;
+OFF_IFM_NAME : int = 0; OFF_IFM_PARAM_COUNT : int = 8; OFF_IFM_RET_TI : int = 16;
+OFF_IFM_PARAM_TYPES : int = 24;  // first of up to 8 param types (each 8 bytes)
+MAX_IFACE_METHOD_PARAMS : int = 8;
+
 // EnumInfo offsets
 OFF_EI_NAME : int = 0; OFF_EI_VARIANTS : int = 8;
 OFF_EI_VARIANT_COUNT : int = 2312;
@@ -143,6 +154,12 @@ fn dyn_grow_enums(needed: int) {
     nc : ., mut = g_enum_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
     nb := __builtin_alloc(nc * ESZ_ENUMINFO); _dyncpy(g_enums, g_enum_cap * ESZ_ENUMINFO, nb);
     g_enums = nb; g_enum_cap = nc; }
+
+fn dyn_grow_ifaces(needed: int) {
+    if needed < g_iface_cap { return; }
+    nc : ., mut = g_iface_cap * 2; if nc < 4 { nc = 4; } if nc < needed { nc = needed + 4; }
+    nb := __builtin_alloc(nc * ESZ_IFACEINFO); _dyncpy(g_ifaces, g_iface_cap * ESZ_IFACEINFO, nb);
+    g_ifaces = nb; g_iface_cap = nc; }
 
 fn dyn_grow_ir_vars(needed: int) {
     if needed < g_ir_var_cap { return; }
@@ -564,3 +581,17 @@ fn dyn_grow_mod_paths(needed: int) {
     nc : ., mut = g_mod_path_cap * 2; if nc < 32 { nc = 32; } if nc < needed { nc = needed + 32; }
     nb := __builtin_alloc(nc * 8); _dyncpy(g_mod_path_names, g_mod_path_cap * 8, nb);
     g_mod_path_names = nb; g_mod_path_cap = nc; }
+
+// impl-for: pairs of (interface_ni, type_ni), 16 bytes per pair
+fn dyn_grow_impl_for(needed: int) {
+    if needed < g_impl_for_cap { return; }
+    nc : ., mut = g_impl_for_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
+    nb := __builtin_alloc(nc * 16); _dyncpy(g_impl_for, g_impl_for_cap * 16, nb);
+    g_impl_for = nb; g_impl_for_cap = nc; }
+
+// Generic constraints: for each (func_idx * MAX_GENERICS + param_idx), stores iface_ni or -1
+fn dyn_grow_generic_constr(needed: int) {
+    if needed < g_generic_constr_cap { return; }
+    nc : ., mut = g_generic_constr_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
+    nb := __builtin_alloc(nc * 8); _dyncpy(g_generic_constr, g_generic_constr_cap * 8, nb);
+    g_generic_constr = nb; g_generic_constr_cap = nc; }

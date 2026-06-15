@@ -146,7 +146,7 @@ fn x86_64_elf_generate(buf: string) -> int {
         ii := 0; loop { if ii >= ic { break; }
             inst_idx := r64(g_ir_func_instr_start, fi * 8)+ ii;
             if iri_op(inst_idx) != IR_NOP {
-                total_code = total_code + arch_instr_size(inst_idx);
+                total_code = total_code + arch_instr_size(inst_idx); }
         ii = ii + 1; }
 
         // epilogue: add rsp(4, if vc>0) + pop rbp(1) + ret(1)

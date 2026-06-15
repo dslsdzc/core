@@ -907,7 +907,10 @@ fn parse_generics() -> int {
     return 0;
 }
 
-fn parse_generics_into(names: [string; 4]) -> int {
+fn parse_generics_into(names: [string; 4], constrs: [int; 4]) -> int {
+    // Initialize constraints to -1 (no constraint)
+    ci : ., mut = 0;
+    loop { if ci >= 4 { break; } constrs[ci] = -1; ci = ci + 1; }
     if check(T_LBRACKET) {
         advance_tok(); // [
         gc : ., mut = 0;
@@ -916,6 +919,13 @@ fn parse_generics_into(names: [string; 4]) -> int {
             if gc >= MAX_GENERICS { break; }
             gt := advance_tok();
             names[gc] = tok_lx(gt);
+            // Check for constraint: T: Interface
+            constrs[gc] = -1;
+            if check(T_COLON) {
+                advance_tok();
+                ct := advance_tok();
+                constrs[gc] = str_intern(tok_lx(ct));
+            }
             gc = gc + 1;
             if !check(T_COMMA) { break; }
             advance_tok();
@@ -933,6 +943,20 @@ fn store_func_generics(fi: int, names: [string; 4], count: int) {
         if gi >= count { break; }
         ni := str_intern(names[gi]);
         fi_set_generic_name(fi, gi, ni);
+        gi = gi + 1;
+    }
+}
+
+fn store_func_generic_constrs(fi: int, constrs: [int; 4], count: int) {
+    gi : ., mut = 0;
+    loop {
+        if gi >= count { break; }
+        if constrs[gi] >= 0 {
+            idx := fi * MAX_GENERICS + gi;
+            dyn_grow_generic_constr(idx + 1);
+            w64(g_generic_constr, idx * 8, constrs[gi]);
+            if idx + 1 > g_generic_constr_count { g_generic_constr_count = idx + 1; }
+        }
         gi = gi + 1;
     }
 }
@@ -985,7 +1009,8 @@ fn add_enum(name: string) -> int {
 
 fn parse_fn_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int) {
     gnames : [string; 4], mut;
-    gc := parse_generics_into(gnames);
+    gconstrs : [int; 4], mut;
+    gc := parse_generics_into(gnames, gconstrs);
 
     advance_tok(); // (
     pf : ., mut = -1;
@@ -1057,7 +1082,14 @@ fn parse_fn_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int) {
 
     fn_node := alloc_node(EXPR_FN, fn_ni, pf, pc, rtv, rt, body, fn_line, fn_col);
     fi := add_func(fn_name, pc, rtv, fn_node);
-    if fi >= 0 && gc > 0 { store_func_generics(fi, gnames, gc); }
+    if fi >= 0 && gc > 0 { store_func_generics(fi, gnames, gc); store_func_generic_constrs(fi, gconstrs, gc); }
+    // Store param types in FuncInfo
+    if fi >= 0 { pstore_i : ., mut = 0; pstore_n : ., mut = pf;
+        loop { if pstore_i >= pc { break; } if pstore_n < 0 { break; }
+            if ast_kind(pstore_n) == EXPR_PARAM {
+                fi_set_param_type(fi, pstore_i, ast_type_val(pstore_n));
+                pstore_i = pstore_i + 1; }
+            pstore_n = pstore_n + 1; } }
 }
 
 fn parse_declaration() {
@@ -1080,7 +1112,8 @@ fn parse_declaration() {
         nt := advance_tok();
         name := tok_lx(nt);
         sg_names : [string; 4], mut;
-        sg_count := parse_generics_into(sg_names);
+        sg_dummy : [int; 4], mut;
+        sg_count := parse_generics_into(sg_names, sg_dummy);
         advance_tok(); // {
 
         si := add_struct(name);
@@ -1119,7 +1152,8 @@ fn parse_declaration() {
         nt := advance_tok();
         name := tok_lx(nt);
         eg_names : [string; 4], mut;
-        eg_count := parse_generics_into(eg_names);
+        eg_dummy : [int; 4], mut;
+        eg_count := parse_generics_into(eg_names, eg_dummy);
         advance_tok();
 
         ei := add_enum(name);
@@ -1166,22 +1200,99 @@ fn parse_declaration() {
     if check(T_INTERFACE) {
         t := advance_tok();
         nt := advance_tok();
-        parse_generics();
+        iface_name := tok_lx(nt);
+        iface_ni := str_intern(iface_name);
+        ig_names : [string; 4], mut;
+        ig_dummy : [int; 4], mut;
+        ig_count := parse_generics_into(ig_names, ig_dummy);
         advance_tok(); // {
+
+        // Allocate interface entry
+        dyn_grow_ifaces(g_iface_count + 1);
+        iface_base := g_iface_count * ESZ_IFACEINFO;
+        // Zero it out
+        zi : ., mut = 0;
+        loop { if zi >= ESZ_IFACEINFO { break; } w8(g_ifaces, iface_base + zi, 0); zi = zi + 1; }
+        w64(g_ifaces, iface_base + OFF_IF_NAME, iface_ni);
+        w64(g_ifaces, iface_base + OFF_IF_GENERIC_COUNT, ig_count);
+        method_count : ., mut = 0;
+
         loop {
             if check(T_RBRACE) { break; }
             if check(T_FN) {
-                advance_tok(); advance_tok(); advance_tok(); // fn name (
-                depth : ., mut = 1;
-                loop { if depth <= 0 { break; }
-                    tk := advance_tok();
-                    if tok_k(tk) == T_LPAREN { depth = depth + 1; }
-                    if tok_k(tk) == T_RPAREN { depth = depth - 1; }
+                advance_tok(); // fn
+                mt := advance_tok(); // method name
+                method_ni := str_intern(tok_lx(mt));
+                advance_tok(); // (
+
+                // Parse params with types (handle self, &self, &mut self, name: Type)
+                pc : ., mut = 0;
+                param_tis : [int; 8], mut;
+                pi2 : ., mut = 0;
+                loop { if pi2 >= 8 { break; } param_tis[pi2] = TY_UNIT; pi2 = pi2 + 1; }
+                if !check(T_RPAREN) {
+                    loop {
+                        fst := cur_tok();
+                        // Handle &self / &mut self / self
+                        if tok_k(fst) == T_AMPERSAND || tok_k(fst) == T_SELF {
+                            if tok_k(fst) == T_AMPERSAND {
+                                advance_tok(); // &
+                                if check(T_MUT) { advance_tok(); } // mut
+                            }
+                            nt2 := advance_tok(); // self
+                            if pc < 8 { param_tis[pc] = 0; }  // match function's default for &self
+                            pc = pc + 1;
+                        } else {
+                            advance_tok(); // param name
+                            advance_tok(); // :
+                            ptype := parse_type();
+                            if pc < 8 { param_tis[pc] = unpack_type(ptype); }
+                            pc = pc + 1;
+                        }
+                        if !check(T_COMMA) { break; }
+                        advance_tok();
+                    }
                 }
-                if check(T_ARROW) { advance_tok(); parse_type(); }
+                advance_tok(); // )
+
+                // Parse return type
+                ret_ti : ., mut = TY_UNIT;
+                if check(T_ARROW) {
+                    advance_tok();
+                    ret_node := parse_type();
+                    ret_ti = unpack_type(ret_node);
+                }
                 advance_tok(); // ;
+
+                // Store method in interface entry (with overflow checks)
+                if method_count >= 16 {
+                    dyn_grow_diags(g_diag_count + 1);
+                    w64(g_diags, g_diag_count * 32, EC_P_FIELD_SYNTAX);
+                    __builtin_store_str_ptr(g_diags, g_diag_count * 32 + 8, "interface '" + iface_name + "' exceeds max 16 methods");
+                    w64(g_diags, g_diag_count * 32 + 16, tok_ln(t)); w64(g_diags, g_diag_count * 32 + 24, tok_cl(t));
+                    g_diag_count = g_diag_count + 1;
+                } else {
+                    mbase := iface_base + OFF_IF_METHODS + method_count * ESZ_IFMETHOD;
+                    w64(g_ifaces, mbase + OFF_IFM_NAME, method_ni);
+                    w64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT, pc);
+                    w64(g_ifaces, mbase + OFF_IFM_RET_TI, ret_ti);
+                    pj : ., mut = 0;
+                    loop { if pj >= 8 || pj >= pc { break; }
+                        w64(g_ifaces, mbase + OFF_IFM_PARAM_TYPES + pj * 8, param_tis[pj]);
+                        pj = pj + 1; }
+                    if pc > 8 {
+                        dyn_grow_diags(g_diag_count + 1);
+                        w64(g_diags, g_diag_count * 32, EC_P_PARAM_TYPE);
+                        __builtin_store_str_ptr(g_diags, g_diag_count * 32 + 8, "method '" + str_get(method_ni) + "' in interface exceeds max 8 params");
+                        w64(g_diags, g_diag_count * 32 + 16, tok_ln(t)); w64(g_diags, g_diag_count * 32 + 24, tok_cl(t));
+                        g_diag_count = g_diag_count + 1;
+                    }
+                }
+                method_count = method_count + 1;
             } else { advance_tok(); }
         }
+        w64(g_ifaces, iface_base + OFF_IF_METHOD_COUNT, method_count);
+        g_iface_count = g_iface_count + 1;
         advance_tok(); // }
         return;
     }
@@ -1224,6 +1335,13 @@ fn parse_declaration() {
             }
         }
         advance_tok(); // }
+        // Store impl-for relationship after processing all methods
+        if trait_ni >= 0 {
+            dyn_grow_impl_for(g_impl_for_count + 1);
+            w64(g_impl_for, g_impl_for_count * 16, trait_ni);
+            w64(g_impl_for, g_impl_for_count * 16 + 8, type_ni);
+            g_impl_for_count = g_impl_for_count + 1;
+        }
         return;
     }
 
@@ -1284,7 +1402,7 @@ fn parse_declaration() {
         loop {
             if check(T_SEMI) || check(T_EOF) { break; }
             if check(T_FN) || check(T_STRUCT) || check(T_ENUM) || check(T_IMPL) || check(T_PUB) { break; }
-            if check(T_FILEID) || check(T_IMPORT) { break; }
+            if check(T_INTERFACE) || check(T_FILEID) || check(T_IMPORT) { break; }
             if check(T_MOD) { break; }
             advance_tok();
         }
@@ -1326,6 +1444,9 @@ fn parse_all() {
     g_block_stmt_count = 0;
     g_error_count = 0;
     g_mod_path_count = 0; g_mod_path_cap = 0;
+    g_iface_count = 0; g_iface_cap = 0;
+    g_impl_for_count = 0; g_impl_for_cap = 0;
+    g_generic_constr_count = 0; g_generic_constr_cap = 0;
 
     ci : ., mut = 0;
     loop {

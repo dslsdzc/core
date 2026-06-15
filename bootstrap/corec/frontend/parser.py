@@ -224,10 +224,16 @@ class Parser:
     def _parse_generics(self):
         if self.check(TokenType.LBRACK):
             self.advance()
-            names = [self.expect(TokenType.IDENT).lexeme]
-            while self.check(TokenType.COMMA):
-                self.advance()
+            names = []
+            first = True
+            while not self.check(TokenType.RBRACK):
+                if not first:
+                    self.expect(TokenType.COMMA)
+                first = False
                 names.append(self.expect(TokenType.IDENT).lexeme)
+                if self.check(TokenType.COLON):
+                    self.advance()  # :
+                    self.expect(TokenType.IDENT)  # constraint name (skip)
             self.expect(TokenType.RBRACK)
             return names
         return []
@@ -242,6 +248,16 @@ class Parser:
         return params
 
     def _parse_param(self):
+        # &self or &mut self
+        if self.check(TokenType.AMPERSAND):
+            self.advance()
+            is_mut = False
+            if self.check(TokenType.MUT):
+                self.advance()
+                is_mut = True
+            name = self.expect(TokenType.SELF).lexeme
+            typ = "&mut self" if is_mut else "&self"
+            return (name, typ)
         if self.check(TokenType.SELF):
             name = self.advance().lexeme
             typ = None

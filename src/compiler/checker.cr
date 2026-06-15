@@ -354,6 +354,68 @@ fn find_enum(name_idx: int) -> int {
     return -1;
 }
 
+fn find_iface(name_ni: int) -> int {
+    i : ., mut = 0;
+    loop {
+        if i >= g_iface_count { return -1; }
+        if r64(g_ifaces, i * ESZ_IFACEINFO + OFF_IF_NAME) == name_ni { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn get_type_name(ti: int) -> int {
+    k := get_type_kind(ti);
+    if k == TYP_NAMED { return get_type_data(ti); }
+    if k == TYP_BASE {
+        d := get_type_data(ti);
+        if d == TY_INT { return str_intern("int"); }
+        if d == TY_FLOAT { return str_intern("float"); }
+        if d == TY_BOOL { return str_intern("bool"); }
+        if d == TY_STRING { return str_intern("string"); }
+        if d == TY_UNIT { return str_intern("unit"); }
+        if d == TY_CHAR { return str_intern("char"); }
+    }
+    if k == TYP_GENERIC_APPLY {
+        base := get_type_data(ti);
+        if get_type_kind(base) == TYP_NAMED { return get_type_data(base); }
+    }
+    return -1;
+}
+
+fn type_has_method(type_ni: int, method_ni: int) -> bool {
+    tname := str_get(type_ni);
+    mname := str_get(method_ni);
+    mangled := tname + "." + mname;
+    mangled_ni := str_intern(mangled);
+    return find_func(mangled_ni) >= 0;
+}
+
+fn check_type_satisfies_iface(type_ni: int, iface_ii: int) -> bool {
+    method_count := r64(g_ifaces, iface_ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT);
+    mi : ., mut = 0;
+    loop {
+        if mi >= method_count { return true; }
+        mbase2 := iface_ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD;
+        method_ni := r64(g_ifaces, mbase2 + OFF_IFM_NAME);
+        if !type_has_method(type_ni, method_ni) { return false; }
+        // Also verify param count and return type match
+        tname2 := str_get(type_ni);
+        mname2 := str_get(method_ni);
+        mangled2 := tname2 + "." + mname2;
+        mangled_ni2 := str_intern(mangled2);
+        fi2 := find_func(mangled_ni2);
+        if fi2 >= 0 {
+            iface_pc := r64(g_ifaces, mbase2 + OFF_IFM_PARAM_COUNT);
+            if fi_param_count(fi2) != iface_pc { return false; }
+            iface_rt := r64(g_ifaces, mbase2 + OFF_IFM_RET_TI);
+            if fi_return_type(fi2) != iface_rt { return false; }
+        }
+        mi = mi + 1;
+    }
+    return true;
+}
+
 // --- First pass: collect all declarations ---
 
 fn collect_decls() {
@@ -378,6 +440,15 @@ fn collect_decls() {
             // For now, leave as-is; fields are resolved during type inference.
             j = j + 1;
         }
+        i = i + 1;
+    }
+    // Register all interface types
+    i = 0;
+    loop {
+        if i >= g_iface_count { break; }
+        name_idx := r64(g_ifaces, i * ESZ_IFACEINFO + OFF_IF_NAME);
+        type_idx := alloc_type(TYP_NAMED, name_idx, 0);
+        define_sym(name_idx, SYM_TYPE, type_idx, -1);
         i = i + 1;
     }
     // Register built-in Option type (for T? desugaring)
@@ -708,6 +779,53 @@ fn infer_generic_call(fi: int, call_node: int, first_arg: int, arg_count: int) -
         an = an + 1;
     }
 
+    // Check generic constraints (if any)
+    gc := fi_generic_count(fi);
+    if gc > 0 {
+        gci : ., mut = 0;
+        loop {
+            if gci >= gc { break; }
+            constr_idx := fi * MAX_GENERICS + gci;
+            if constr_idx < g_generic_constr_count {
+                iface_ni := r64(g_generic_constr, constr_idx * 8);
+                if iface_ni >= 0 {
+                    pname_ni := fi_generic_name(fi, gci);
+                    concrete_ti : ., mut = -1;
+                    hmi : ., mut = 0;
+                    loop {
+                        if hmi >= g_gen_map_count { break; }
+                        if r64(g_gen_map_names, hmi * 8) == pname_ni {
+                            concrete_ti = r64(g_gen_map_types, hmi * 8);
+                            break;
+                        }
+                        hmi = hmi + 1;
+                    }
+                    if concrete_ti >= 0 {
+                        type_ni := get_type_name(concrete_ti);
+                        if type_ni >= 0 {
+                            ii := find_iface(iface_ni);
+                            if ii >= 0 {
+                                if !check_type_satisfies_iface(type_ni, ii) {
+                                    check_error(EC_TG_BOUND, "Type '" + str_get(type_ni) + "' does not satisfy interface '" + str_get(iface_ni) + "'", ast_line(call_node), ast_col(call_node));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            gci = gci + 1;
+        }
+    }
+
+    // Store concrete type name on call node for backend monomorphization
+    if g_gen_map_count > 0 {
+        conc_type_ni := r64(g_gen_map_types, 0 * 8);
+        conc_name_ni := get_type_name(conc_type_ni);
+        if conc_name_ni >= 0 {
+            ast_set_int_val(call_node, conc_name_ni);
+        }
+    }
+
     // Substitute return type
     if g_gen_map_count > 0 && ret_type_node >= 0 {
         resolved_ret := resolve_call_type_node(ret_type_node, fi);
@@ -726,6 +844,7 @@ fn infer_generic_call(fi: int, call_node: int, first_arg: int, arg_count: int) -
 // --- check_func with generic param scope ---
 
 fn check_func(fi: int) {
+    g_checker_current_fi = fi;
     // Reset per-function borrow state
     g_borrow_count = 0; g_borrow_cap = 0;
     g_holder_count = 0; g_holder_cap = 0;
@@ -780,7 +899,7 @@ fn check_func(fi: int) {
             di : ., mut = 0;
             loop {
                 if di >= fn_len { break; }
-                if __builtin_str_get(fn_name, di) == 46 { dot_pos = di; break; }  // '.' = 46
+                if __builtin_load8(fn_name, di) == 46 { dot_pos = di; break; }  // '.' = 46
                 di = di + 1;
             }
             if dot_pos > 0 {
@@ -834,6 +953,69 @@ fn check_func(fi: int) {
         }
     }
     pop_scope();
+}
+
+fn check_impl_for() {
+    pi : ., mut = 0;
+    loop {
+        if pi >= g_impl_for_count { break; }
+        iface_ni := r64(g_impl_for, pi * 16);
+        type_ni := r64(g_impl_for, pi * 16 + 8);
+        // Find interface by name
+        ii := find_iface(iface_ni);
+        if ii < 0 {
+            iface_name := str_get(iface_ni);
+            check_error(EC_N_UNDEFINED, "Undefined interface '" + iface_name + "'", 0, 0);
+            pi = pi + 1;
+            continue;
+        }
+        method_count := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT);
+        mi : ., mut = 0;
+        loop {
+            if mi >= method_count { break; }
+            mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD;
+            method_ni := r64(g_ifaces, mbase + OFF_IFM_NAME);
+            method_pc := r64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT);
+            method_rt := r64(g_ifaces, mbase + OFF_IFM_RET_TI);
+
+            // Check if the implementing type has this method
+            type_name := str_get(type_ni);
+            method_name := str_get(method_ni);
+            mangled := type_name + "." + method_name;
+            mangled_ni := str_intern(mangled);
+
+            fi := find_func(mangled_ni);
+            if fi < 0 {
+                check_error(EC_TF_METHOD_NOT_FOUND, "Impl missing method '" + method_name + "' for interface '" + str_get(iface_ni) + "'", 0, 0);
+                mi = mi + 1;
+                continue;
+            }
+            // Check param count
+            actual_pc := fi_param_count(fi);
+            if actual_pc != method_pc {
+                check_error(EC_TF_METHOD_ARG_CNT, "Param count mismatch for method '" + method_name + "': expected " + __builtin_int_to_str(method_pc) + " got " + __builtin_int_to_str(actual_pc), 0, 0);
+            }
+            // Check each param type
+            pti : ., mut = 0;
+            loop {
+                if pti >= method_pc || pti >= 8 { break; }
+                expected_pt := r64(g_ifaces, mbase + OFF_IFM_PARAM_TYPES + pti * 8);
+                actual_pt := fi_param_type(fi, pti);
+                if expected_pt != actual_pt {
+                    pnum_str := __builtin_int_to_str(pti + 1);
+                    check_error(EC_TF_METHOD_ARG_TYP, "Param " + pnum_str + " type mismatch for method '" + method_name + "' in interface '" + str_get(iface_ni) + "'", 0, 0);
+                }
+                pti = pti + 1;
+            }
+            // Check return type
+            actual_rt := fi_return_type(fi);
+            if actual_rt != method_rt {
+                check_error(EC_TF_RETURN, "Return type mismatch for method '" + method_name + "' in interface '" + str_get(iface_ni) + "'", 0, 0);
+            }
+            mi = mi + 1;
+        }
+        pi = pi + 1;
+    }
 }
 
 fn check_global_let(node: int) {
@@ -891,12 +1073,12 @@ fn infer_expr(node: int) -> int {
         lt := infer_expr(left);
         rt := infer_expr(right);
         if op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV || op == OP_MOD {
+            // String concatenation for OP_ADD
+            if op == OP_ADD && (lt == TI_STR || rt == TI_STR) { return TI_STR; }
             // Check: arithmetic ops require int or float
             if lt != TI_INT && lt != TI_FLOAT && rt != TI_INT && rt != TI_FLOAT {
                 check_error(EC_TB_ADD, "Arithmetic operation requires int or float", ast_line(node), ast_col(node));
             }
-            // String concatenation for OP_ADD
-            if op == OP_ADD && (lt == TI_STR || rt == TI_STR) { return TI_STR; }
             if lt == TI_FLOAT || rt == TI_FLOAT { return TI_FLOAT; }
             return TI_INT;
         }
@@ -1024,6 +1206,51 @@ fn infer_expr(node: int) -> int {
                         break;
                     }
                     mi = mi + 1;
+                }
+            }
+            // Generic param method call resolution
+            if func_ni < 0 && get_type_kind(lookup_ti) == TYP_GENERIC_PARAM {
+                gen_ni := get_type_data(lookup_ti);
+                gc2 := fi_generic_count(g_checker_current_fi);
+                gci2 : ., mut = 0;
+                loop {
+                    if gci2 >= gc2 { break; }
+                    gname_idx2 := r64(g_funcs, g_checker_current_fi * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gci2 * 8);
+                    if gname_idx2 == gen_ni {
+                        constr_idx2 := g_checker_current_fi * MAX_GENERICS + gci2;
+                        if constr_idx2 < g_generic_constr_count {
+                            iface_ni2 := r64(g_generic_constr, constr_idx2 * 8);
+                            if iface_ni2 >= 0 {
+                                ii2 := find_iface(iface_ni2);
+                                if ii2 >= 0 {
+                                    imc2 := r64(g_ifaces, ii2 * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT);
+                                    imi2 : ., mut = 0;
+                                    loop {
+                                        if imi2 >= imc2 { break; }
+                                        imbase2 := ii2 * ESZ_IFACEINFO + OFF_IF_METHODS + imi2 * ESZ_IFMETHOD;
+                                        if r64(g_ifaces, imbase2 + OFF_IFM_NAME) == method_ni {
+                                            tname2 := str_get(gen_ni);
+                                            mname2 := str_get(method_ni);
+                                            mangled2 := tname2 + "." + mname2;
+                                            mangled_ni2 := str_intern(mangled2);
+                                            ast_set_data(node, mangled_ni2);
+                                            iface_ret2 := r64(g_ifaces, imbase2 + OFF_IFM_RET_TI);
+                                            if iface_ret2 == TY_INT { func_ni = mangled_ni2; return TI_INT; }
+                                            if iface_ret2 == TY_FLOAT { func_ni = mangled_ni2; return TI_FLOAT; }
+                                            if iface_ret2 == TY_BOOL { func_ni = mangled_ni2; return TI_BOOL; }
+                                            if iface_ret2 == TY_STRING { func_ni = mangled_ni2; return TI_STR; }
+                                            if iface_ret2 == TY_UNIT { func_ni = mangled_ni2; return TI_UNIT; }
+                                            if iface_ret2 == TY_CHAR { func_ni = mangled_ni2; return TI_CHAR; }
+                                            func_ni = mangled_ni2; return TI_UNIT;
+                                        }
+                                        imi2 = imi2 + 1;
+                                    }
+                                }
+                            }
+                        }
+                        break;
+                    }
+                    gci2 = gci2 + 1;
                 }
             }
             // Infer arg types
@@ -1558,4 +1785,7 @@ fn check_all() {
         check_global_let(r64(g_global_lets, i * 8));
         i = i + 1;
     }
+
+    // Check impl-for relationships
+    check_impl_for();
 }

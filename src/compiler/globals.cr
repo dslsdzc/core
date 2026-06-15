@@ -27,6 +27,12 @@ g_type_aliases : string, mut;        g_type_alias_count : int, mut;     g_type_a
 g_methods : string, mut;             g_method_count : int, mut;         g_method_cap : int, mut;
 g_scope_bounds : string, mut;        g_scope_depth : int, mut;          g_scope_bounds_cap : int, mut;
 g_borrow_scope_markers : string, mut; g_borrow_scope_depth : int, mut;  g_borrow_scope_markers_cap : int, mut;
+
+// Interface system
+g_ifaces : string, mut;          g_iface_count : int, mut;     g_iface_cap : int, mut;
+g_impl_for : string, mut;        g_impl_for_count : int, mut;  g_impl_for_cap : int, mut;
+g_generic_constr : string, mut;  g_generic_constr_count : int, mut; g_generic_constr_cap : int, mut;
+g_checker_current_fi : int, mut;
 g_borrow_vars : string, mut;          g_borrow_refs : string, mut;       g_borrow_muts : string, mut;
 g_borrow_count : int, mut;            g_borrow_cap : int, mut;
 g_holder_borrowers : string, mut;     g_holder_borrowed : string, mut;   g_holder_is_mut : string, mut;

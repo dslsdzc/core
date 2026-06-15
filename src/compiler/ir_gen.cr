@@ -327,6 +327,58 @@ fn ir_gen_expr(node: int) -> int {
             }
             i = i + 1;
         }
+        // Generic function: inline the body with concrete type substitution
+        if func_ni >= 0 && (ast_kind(func_node) == EXPR_IDENT) {
+            gen_fi := find_func(func_ni);
+            if gen_fi >= 0 && fi_generic_count(gen_fi) > 0 {
+                fn_node3 := fi_ast_node(gen_fi);
+                body3 := ast_data(fn_node3);
+                conc_type_ni3 := ast_int_val(node);
+                if conc_type_ni3 >= 0 && body3 >= 0 {
+                    gen_name3 := str_get(fi_generic_name(gen_fi, 0));
+                    conc_name3 := str_get(conc_type_ni3);
+                    ast_patch_node(body3, gen_name3, conc_name3);
+                    // Bind params to arg vars
+                    first_param3 := ast_b(fn_node3);
+                    param_count3 := ast_c(fn_node3);
+                    push_ir_scope();
+                    ppi3 : ., mut = 0;
+                    ppn3 : ., mut = first_param3;
+                    loop {
+                        if ppi3 >= param_count3 { break; }
+                        if ppi3 >= ac { break; }
+                        pname_ni3 := ast_a(ppn3);
+                        bind_local(pname_ni3, arg_vars[ppi3]);
+                        ppi3 = ppi3 + 1;
+                        ppn3 = ppn3 + 1;
+                        loop { if ppn3 >= g_ast_count { break; } if ast_kind(ppn3) == EXPR_PARAM { break; } ppn3 = ppn3 + 1; }
+                    }
+                    // Inline the body: for block, process each stmt, skip IR_RETURN
+                    inline_result : ., mut = -1;
+                    if ast_kind(body3) == EXPR_BLOCK {
+                        bstart := ast_a(body3); bcnt := ast_b(body3);
+                        bi : ., mut = 0;
+                        loop {
+                            if bi >= bcnt { break; }
+                            sn3 := r64(g_block_stmts, (bstart + bi) * 8);
+                            if bi + 1 == bcnt && ast_kind(sn3) == EXPR_RETURN && ast_a(sn3) >= 0 {
+                                // Last stmt is return: inline the inner expression only
+                                inline_result = ir_gen_expr(ast_a(sn3));
+                            } else {
+                                inline_result = ir_gen_expr(sn3);
+                            }
+                            bi = bi + 1;
+                        }
+                    } else {
+                        inline_result = ir_gen_expr(body3);
+                    }
+                    pop_ir_scope();
+                    return inline_result;
+                }
+            }
+        }
+        // For method calls (EXPR_FIELD), func_ni was set by checker
+        // Use it directly
         dest := new_ir_var("call", TI_UNIT);
         first_arg_var := -1;
         if ac > 0 { first_arg_var = arg_vars[0]; }
@@ -747,6 +799,8 @@ fn ir_gen_expr(node: int) -> int {
 // --- Generate IR for one function ---
 
 fn ir_gen_func(fi: int) {
+    // Skip generic functions — they will be monomorphized at call sites
+    if fi_generic_count(fi) > 0 { return; }
     fn_node := fi_ast_node(fi);
     name_idx := ast_a(fn_node);
     first_param := ast_b(fn_node);
@@ -815,6 +869,157 @@ fn ir_gen_globals() {
     }
 }
 
+// --- AST walk: patch method call names for monomorphization ---
+
+fn ast_patch_node(node: int, subst_from: string, subst_to: string) {
+    if node < 0 { return; }
+    k := ast_kind(node);
+    if k == EXPR_CALL {
+        func_node := ast_a(node);
+        if ast_kind(func_node) == EXPR_FIELD {
+            data_ni := ast_data(node);
+            if data_ni >= 0 {
+                data_str := str_get(data_ni);
+                dlen := __builtin_str_len(data_str);
+                flen := __builtin_str_len(subst_from);
+                if dlen >= flen {
+                    matches : ., mut = 1;
+                    dci : ., mut = 0;
+                    loop {
+                        if dci >= flen { break; }
+                        if __builtin_load8(data_str, dci) != __builtin_load8(subst_from, dci) { matches = 0; break; }
+                        dci = dci + 1;
+                    }
+                    if matches != 0 && (dlen == flen || __builtin_load8(data_str, flen) == 46) {
+                        rest := __builtin_str_sub(data_str, flen, dlen - flen);
+                        new_name := subst_to + rest;
+                        ast_set_data(node, str_intern(new_name));
+                    }
+                }
+            }
+        }
+    }
+    // Recurse into children based on node kind
+    if k == EXPR_BLOCK {
+        ss := ast_a(node); sc := ast_b(node);
+        i2 : ., mut = 0;
+        loop { if i2 >= sc { break; }
+            sn2 := r64(g_block_stmts, (ss + i2) * 8);
+            ast_patch_node(sn2, subst_from, subst_to);
+            i2 = i2 + 1; }
+    } else if k == EXPR_IF || k == EXPR_LOOP || k == EXPR_WHILE || k == EXPR_UNSAFE {
+        if ast_a(node) >= 0 { ast_patch_node(ast_a(node), subst_from, subst_to); }
+        if k == EXPR_IF {
+            if ast_b(node) >= 0 { ast_patch_node(ast_b(node), subst_from, subst_to); }
+            if ast_c(node) >= 0 { ast_patch_node(ast_c(node), subst_from, subst_to); }
+        }
+    } else if k == EXPR_BINARY || k == EXPR_ASSIGN || k == EXPR_RANGE || k == EXPR_AS {
+        if ast_a(node) >= 0 { ast_patch_node(ast_a(node), subst_from, subst_to); }
+        if ast_b(node) >= 0 { ast_patch_node(ast_b(node), subst_from, subst_to); }
+    } else if k == EXPR_CALL || k == EXPR_ENUM_CONSTRUCTOR {
+        if ast_a(node) >= 0 { ast_patch_node(ast_a(node), subst_from, subst_to); }
+        an3 := ast_b(node); ac3 := ast_c(node);
+        ai3 : ., mut = 0;
+        loop { if ai3 >= ac3 { break; } if an3 >= 0 { ast_patch_node(an3, subst_from, subst_to); an3 = an3 + 1; } ai3 = ai3 + 1; }
+    } else if k == EXPR_MATCH {
+        if ast_a(node) >= 0 { ast_patch_node(ast_a(node), subst_from, subst_to); }
+        an4 := ast_b(node);
+        loop { if an4 < 0 { break; }
+            if ast_a(an4) >= 0 { ast_patch_node(ast_a(an4), subst_from, subst_to); }
+            if ast_b(an4) >= 0 { ast_patch_node(ast_b(an4), subst_from, subst_to); }
+            an4 = ast_c(an4); }
+    } else if k == EXPR_FOR {
+        if ast_b(node) >= 0 { ast_patch_node(ast_b(node), subst_from, subst_to); }
+        if ast_c(node) >= 0 { ast_patch_node(ast_c(node), subst_from, subst_to); }
+    } else if k == EXPR_LET {
+        if ast_c(node) >= 0 { ast_patch_node(ast_c(node), subst_from, subst_to); }
+    } else if k == EXPR_STMT {
+        if ast_a(node) >= 0 { ast_patch_node(ast_a(node), subst_from, subst_to); }
+    } else if k == EXPR_STRUCT {
+        an5 := ast_b(node); ac5 := ast_c(node);
+        ai5 : ., mut = 0;
+        loop { if ai5 >= ac5 { break; } if an5 >= 0 { ast_patch_node(an5, subst_from, subst_to); an5 = an5 + 1; } ai5 = ai5 + 1; }
+    } else if k == EXPR_ARRAY || k == EXPR_TUPLE {
+        an6 := ast_b(node); ac6 := ast_c(node);
+        ai6 : ., mut = 0;
+        loop { if ai6 >= ac6 { break; } if an6 >= 0 { ast_patch_node(an6, subst_from, subst_to); an6 = an6 + 1; } ai6 = ai6 + 1; }
+    } else if k == EXPR_FIELD || k == EXPR_INDEX || k == EXPR_UNARY || k == EXPR_RETURN || k == EXPR_TRY || k == EXPR_MOVE {
+        if ast_a(node) >= 0 { ast_patch_node(ast_a(node), subst_from, subst_to); }
+    }
+}
+
+fn find_or_create_mono_func(fi: int, call_node: int) -> int {
+    // Create a monomorphized version of generic function fi for the given call site.
+    // Only creates the FuncInfo entry — IR generation happens in pass 2 of ir_gen_all.
+
+    fn_node := fi_ast_node(fi);
+    body := ast_data(fn_node);
+    first_param := ast_b(fn_node);
+    param_count := ast_c(fn_node);
+    orig_ret_type := ast_int_val(fn_node);
+    orig_ret_node := ast_type_val(fn_node);
+
+    gen_name_ni := fi_generic_name(fi, 0);
+    gen_name := str_get(gen_name_ni);
+
+    // Get concrete type name from call node (stored by checker)
+    concrete_type_ni : ., mut = ast_int_val(call_node);
+    concrete_type_name : ., mut = str_get(concrete_type_ni);
+
+    // Create mangled name: "funcname$genericname.concretetype"
+    orig_fn_name := str_get(fi_name(fi));
+    mangled_name : ., mut = orig_fn_name + "$";
+    mangled_name = mangled_name + gen_name + "." + concrete_type_name;
+    mangled_ni := str_intern(mangled_name);
+
+    // Check if already exists
+    existing := find_func(mangled_ni);
+    if existing >= 0 { return existing; }
+
+    // Create new EXPR_PARAM nodes with concrete param types
+    new_first_param : ., mut = -1;
+    ppi : ., mut = 0;
+    ppn : ., mut = first_param;
+    loop {
+        if ppi >= param_count { break; }
+        if ppn < 0 { break; }
+        pname_ni := ast_a(ppn);
+        self_mode := ast_int_val(ppn);
+        orig_type_val := ast_type_val(ppn);
+        orig_type_node := ast_data(ppn);
+
+        // Replace type node if it references the generic param
+        new_type_node : ., mut = orig_type_node;
+        if orig_type_node >= 0 && ast_kind(orig_type_node) == EXPR_IDENT && ast_int_val(orig_type_node) == gen_name_ni {
+            // Create new type node referencing concrete type name
+            new_type_node = alloc_node(EXPR_IDENT, 0, 0, 0, concrete_type_ni, 0, 0, 0, 0);
+        }
+
+        np := alloc_node(EXPR_PARAM, pname_ni, 0, 0, self_mode, orig_type_val, new_type_node, 0, 0);
+        if ppi == 0 { new_first_param = np; }
+        ppi = ppi + 1;
+        ppn = ppn + 1;
+        loop { if ppn >= g_ast_count { break; } if ast_kind(ppn) == EXPR_PARAM { break; } ppn = ppn + 1; }
+    }
+
+    // Create new EXPR_FN node
+    new_fn_node := alloc_node(EXPR_FN, mangled_ni, new_first_param, param_count, orig_ret_type, orig_ret_node, body, 0, 0);
+
+    // Patch body: replace "gen_name.method" → "concrete_type_name.method"
+    if body >= 0 {
+        ast_patch_node(body, gen_name, concrete_type_name);
+    }
+
+    // Register new function
+    new_fi := add_func(mangled_name, param_count, orig_ret_type, new_fn_node);
+    if new_fi >= 0 {
+        // Copy generic constraint info (non-generic now, but keep for reference)
+        fi_set_generic_count(new_fi, 0);
+    }
+
+    return new_fi;
+}
+
 // --- Main entry ---
 
 fn ir_gen_all() {
@@ -834,7 +1039,6 @@ fn ir_gen_all() {
     // Initialize globals
     ir_gen_globals();
 
-    // Generate IR for each function
     i : ., mut = 0;
     loop {
         if i >= g_func_count { break; }
