@@ -146,7 +146,7 @@ fn arch_instr_size(instr_idx: int) -> int {
         if __builtin_str_eq(fn2, "__builtin_syscall3") != 0 {
             sz := iri_s2(instr_idx) * 4 + 18; if d >= 0 { sz = sz + 4; } return sz;
         }
-        if __builtin_str_len(fn2) > 0 {
+        if s3 >= 0 {
             sz := iri_s2(instr_idx) * 4 + 5; if d >= 0 { sz = sz + 4; } return sz;
         }
         sz := 2; if d >= 0 { sz = sz + 4; } return sz;

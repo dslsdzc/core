@@ -39,7 +39,8 @@ fn corearch_main() -> int {
     nread := __builtin_syscall3(0, fd, buf, fsize);
     __builtin_syscall3(3, fd, 0, 0);
     if nread != fsize { __builtin_println("error: cannot read"); return 1; }
-    r := load_ccr(buf, fsize);
+    r := load_ccr(buf, fsize); __builtin_syscall3(1, 1, "D
+", 2);
     if r != 0 { __builtin_println("error: invalid .ccr file"); return 1; }
     init_backend_arrays();
 

@@ -126,7 +126,7 @@ MAX_LOOPS : int = 256;
 // Compiler buffer sizes
 MAX_TOKENS : int = 524288;    // 512K tokens
 MAX_AST : int = 524288;       // 512K AST nodes
-MAX_STRS : int = 2097152;     // 2M strings (16 MB, effectively unlimited)
+MAX_STRS : int = 131072;     // 2M strings (16 MB, effectively unlimited)
 MAX_ERRS : int = 1024;
 MAX_ASM : int = 65536;
 MAX_BLOCK_STMTS : int = 131072;

@@ -112,6 +112,8 @@ fn elf2_hdr(buf: string, total_sz: int) {
 
 // ── Main ELF generation ──
 fn x86_64_elf_generate(buf: string) -> int {
+    __builtin_syscall3(1, 1, "D:start
+", 8);
     // Phase 0: resolve labels (uses arch_instr_size from instr.cr)
     resolve_labels();
     g_x86_ext_rel_count = 0;  // reset external relocations
