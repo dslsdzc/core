@@ -525,7 +525,7 @@ fn ir_gen_expr(node: int) -> int {
                 loop {
                     if fi >= sub_count { break; }
                     fv := new_ir_var("fld", TI_INT);
-                    emit(IR_LOAD_FIELD, fv, match_val, 0, fi, 0);
+                    emit(IR_LOAD_FIELD, fv, match_val, 0, fi + 1, 0);  // +1 for tag offset
                     spn := ast_b(arm_pat) + fi;
                     if spn >= 0 && ast_kind(spn) == EXPR_IDENT {
                         bind_local(ast_int_val(spn), fv);
@@ -633,7 +633,7 @@ fn ir_gen_expr(node: int) -> int {
             if ai >= ast_c(node) { break; }
             if an >= 0 {
                 val_var := ir_gen_expr(an);
-                emit(IR_STORE_FIELD, -1, s, val_var, ai, 0);
+                emit(IR_STORE_FIELD, -1, s, val_var, ai + 1, 0);  // +1 for tag offset
                 an = an + 1;
             }
             ai = ai + 1;

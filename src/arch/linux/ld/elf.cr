@@ -196,13 +196,14 @@ fn x86_64_elf_generate(buf: string) -> int {
             if op2 == IR_LOAD || op2 == IR_LOAD_FIELD {
                 s1x := r64(g_ir_instrs, inst_idx2 * ESZ_IRINSTR + OFF_IRI_S1);
                 dx := r64(g_ir_instrs, inst_idx2 * ESZ_IRINSTR + OFF_IRI_DEST);
-                if s1x >= 0 {
-                    if s1x < g_x86_is_enum_cap {
-                        if r64(g_x86_is_enum, s1x * 8) != 0 {
-                            if dx >= 0 {
-                                if dx >= g_x86_is_enum_cap { dyn_grow_x86_is_enum(dx + 1); }
-                                if dx < g_x86_is_enum_cap {
-                                    if r64(g_x86_is_enum, dx * 8) == 0 { w64(g_x86_is_enum, dx * 8, 1); }
+                if s1x >= 0 && s1x < g_x86_is_enum_cap {
+                    if r64(g_x86_is_enum, s1x * 8) != 0 {
+                        if dx >= 0 {
+                            if dx >= g_x86_is_enum_cap { dyn_grow_x86_is_enum(dx + 1); }
+                            if dx < g_x86_is_enum_cap {
+                                if r64(g_x86_is_enum, dx * 8) == 0 {
+                                    w64(g_x86_is_enum, dx * 8, 1);
+                                    __builtin_syscall3(1, 1, "p:" + __builtin_int_to_str(dx) + ":" + __builtin_int_to_str(g_x86_is_enum_cap) + "\n", 30);
                                 }
                             }
                         }
