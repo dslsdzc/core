@@ -10,23 +10,27 @@ sys.path.insert(0, 'bootstrap')
 def concat_sources():
     """Concatenate all compiler source files in order."""
     files = [
+        'src/runtime/rt.cr',
         'src/stdlib/cli.cr',
         'src/compiler/ast.cr',
         'src/compiler/globals.cr',
+        'src/compiler/dyn_arr.cr',
         'src/compiler/lexer.cr',
         'src/compiler/parser.cr',
         'src/compiler/checker.cr',
         'src/compiler/diag.cr',
         'src/compiler/ir_gen.cr',
         'src/compiler/dataflow.cr',
-        'src/compiler/backend/x86_64.cr',
-        'src/compiler/module.cr',
         'src/compiler/ccr_io.cr',
+        'src/compiler/backend/x86_64.cr',
+        'src/compiler/backend/x86_64/instr.cr',
+        'src/compiler/module.cr',
+        'src/compiler/backend/resolve.cr',
         'src/stdlib/toml.cr',
-        'src/compiler/elf.cr',
-        'src/compiler/dump.cr',
         'src/compiler/project.cr',
+        'src/stdlib/os.cr',
         'src/compiler/interp.cr',
+        'src/compiler/dump.cr',
         'src/compiler/main.cr',
     ]
     parts = []

@@ -1,60 +1,59 @@
 # TODO
 
-## Pre-existing bugs (found but not yet fixed)
+## 2025-06-15 大重构：全部数组动态化 + 大量 Bug 修复
 
-### ~~Parser: `if a > b { return 1; } return 0;` — codegen returns wrong result~~
+### 已完成
 
-✅ **Fixed** (2025-06-09): Was caused by the parser struct-literal false match
-(parser consumed `{` in `if a > b { ... }`). The struct-literal guard
-(`g_parse_no_struct_literal = 1`) fixed both the hang and the wrong result.
-Confirmed with native binary tests for both `==`/`!=`/`>`/`<` comparisons with
-and without `else`, with local variables and function parameters.
+#### 全部 `[int; MAX_*]` → 动态 byte buffer
+- `globals.cr`: 所有 x86 后端数组 + IR 栈数组 + g_strs + g_diags + g_files/g_mods/g_mod_funcs
+- `parser.cr`: g_global_lets, g_loop_stack, g_type_aliases, g_methods, g_mod_paths
+- `checker.cr`: g_scope_bounds, g_borrow_scope_markers, g_gen_map_*, g_borrow_vars/g_holder_*
+- `dataflow.cr`: g_df_* + 移除 MAX_* 守卫
+- `instr.cr` (两个后端): g_x86_func_offsets, g_x86_emit_vars, g_x86_ret_patch_pos, g_x86_alloc_patch_pos
+- `ast.cr`: 清理所有无用的 MAX_* 常量定义
+- `cli.cr`: g_cli_cmds/flags/args
+- `ld.cr`: g_so_paths, g_plts
+- `module.cr`: g_seg_starts/fileids, g_line_fileid
 
-### ~~Python interpreter: `%` operator not supported~~
+#### Bug 修复
+- `checker.cr` & `ir_gen.cr`: g_block_stmts 字节偏移计算（`(stmt_start+i)*8`）
+- `checker.cr`: find_func 中 fi_name(i) 与 name_idx 的 int 与 string 类型混淆
+- `x86_64_stack_asm.py`: P2 \_init_globals 始终输出（无条件）
+- `arch/linux/ld/instr.cr`: g_x86_is_global 越界访问（Core 的 && 不短路，需嵌套 if）
+- `arch/linux/ld/elf.cr`: g_x86_is_global 标记 + enum 变量标记
+- `arch/linux/ld/instr.cr`: IR_LOAD/STORE 全局变量检测加 `g_x86_global_cap` 边界
 
-✅ **Fixed** (2025-06-09): Added `elif instr.op == '%': res = left % right` to
-`bootstrap/corec/backend/interpreter.py`.
+#### 优化
+- `x86_64_stack_asm.py`: 内联 r64/w64/r32/w32/bu8/w8/\_dyncpy（消除 92 个 `call`）
 
-### ~~Self-hosted compiler: `let` keyword not supported in checker~~
+#### 解析器
+- `parser.cr`: Option::Some(42) 路径式 enum 构造函数解析
+- `parser.cr`: match 模式 `Some(v)` 中子模式从"只数个数"改为递归解析
 
-✅ **Not a bug**: `let` was intentionally dropped from the language syntax.
-Core uses `:=` / `: type` declarations instead (documented in CLAUDE.md).
-Both work fine — `x := 42`, `x : int = 42`, `x : ., mut = 42` all pass
-the self-hosted checker and produce correct code.
+#### 基础设施
+- `build_selfhost.py`: 同步文件列表（添加 dyn_arr.cr 等缺失文件）
+- `Core.toml` + `_import.cr` + `entry.cr`: 项目模式支持
+- `tools/module_to_ccr.py`: Python Module → .ccr 桥接（实验性）
 
-### ~~Build: `build_selfhost.py` broken~~
+## 已知问题
 
-✅ **Fixed** (2025-06-09): Switched from `compiler_main` (which writes `.ccr`
-via `save_ccr` → `__builtin_syscall3`) to `compile_source` (returns assembly
-as string, no file I/O needed). Now generates `build/test_output.s` successfully.
+### ELF 后端 enum 字段偏移
+- MAKE_ENUM 存 tag 在 offset 0，字段在 offset 8
+- LOAD_FIELD/STORE_FIELD 需要 +8 偏移
+- g_x86_is_enum 检查需避免内联 r64（会导致 arch_instr_size 不匹配）
+- 方案: 在 resolve 阶段将偏移预计算到指令的 s3 中
 
-## Architecture debts
+### ELF 后端匹配/枚举
+- match 表达式编译通过但运行时 SIGSEGV（字段偏移错误）
+- 待 enum 偏移修复后验证
 
-### Text assembly path (`x86_64.cr`) to be removed
+### 自举性能
+- build/corec 编译 332KB 源码仍 >10 分钟
+- 栈式 x86 代码生成器是根本瓶颈
+- 当前状态：小文件正常，大文件极慢
+- 自举需要性能突破（ELF 后端直出或 .ccr 桥接）
 
-The `x86_64_generate()` function in `src/compiler/backend/x86_64.cr` generates
-GAS `.intel_syntax noprefix` text assembly. This path is superseded by the
-direct ELF output via `x86_64/elf.cr` + `x86_64/instr.cr`.
-
-Once the ELF path is fully validated (allocation, strings, all IR opcodes),
-the text assembly path can be removed.
-
-### ELF path: `__builtin_alloc` calls are placeholders
-
-In `x86_64/instr.cr`, `IR_ALLOC_STRUCT`, `IR_ALLOC_ARRAY`, and `IR_MAKE_ENUM`
-emit `call __builtin_alloc` with relative offset 0 (effectively a NOP).
-Heap allocation doesn't actually work in the ELF output.
-
-Fix options:
-1. Inline a bump allocator in the ELF output
-2. Link `src/runtime/rt.s` into the ELF binary
-3. Write a minimal `_start` that includes `__builtin_alloc`
-
-### Self-hosted compilation (self-bootstrapping)
-
-The compiler can compile simple programs to native ELF binaries, but cannot
-yet compile its own source code. The three missing pieces:
-
-1. Heap allocation in ELF path (see above)
-2. String constant support in ELF path (partially done: `g_x86_rodata_base`)
-3. Full IR opcode coverage in `x86_emit_instr`
+### Python bootstrap 与自宿主 parser 不同步
+- build_selfhost.py（解释器模式）已恢复工作
+- 但 Python 前端缺少自宿主 parser 的部分特性
+- 长期：完全迁移到自宿主编译器后弃用 Python 引导
