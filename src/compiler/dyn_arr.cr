@@ -175,11 +175,13 @@ fn dyn_grow_block_stmts(needed: int) {
     nb := __builtin_alloc(nc * 8); _dyncpy(g_block_stmts, g_block_stmt_cap * 8, nb);
     g_block_stmts = nb; g_block_stmt_cap = nc; }
 
-fn dyn_grow_ir_func_meta(needed: int) {
+fn dyn_grow_ir_func_meta(needed: int) { if needed < g_ir_func_name_idx_cap { return; } __builtin_syscall3(1, 1, "D:A
+", 4);
     if needed < g_ir_func_name_idx_cap { return; }
     nc : ., mut = g_ir_func_name_idx_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
     sz := nc * 8;
-    n1 := __builtin_alloc(sz); _dyncpy(g_ir_func_name_idx, g_ir_func_name_idx_cap*8, n1); g_ir_func_name_idx = n1;
+    n1 := __builtin_alloc(sz); _dyncpy(g_ir_func_name_idx, g_ir_func_name_idx_cap*8, n1); g_ir_func_name_idx = n1; __builtin_syscall3(1, 1, "D:n1=", 5); __builtin_syscall3(1, 1, __builtin_int_to_str(n1), __builtin_str_len(__builtin_int_to_str(n1))); __builtin_syscall3(1, 1, "
+", 1);
     n2 := __builtin_alloc(sz); _dyncpy(g_ir_func_ret_type, g_ir_func_ret_type_cap*8, n2); g_ir_func_ret_type = n2;
     n3 := __builtin_alloc(sz); _dyncpy(g_ir_func_instr_start, g_ir_func_instr_start_cap*8, n3); g_ir_func_instr_start = n3;
     n4 := __builtin_alloc(sz); _dyncpy(g_ir_func_instr_count, g_ir_func_instr_count_cap*8, n4); g_ir_func_instr_count = n4;
