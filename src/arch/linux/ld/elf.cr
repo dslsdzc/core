@@ -147,7 +147,6 @@ fn x86_64_elf_generate(buf: string) -> int {
             inst_idx := r64(g_ir_func_instr_start, fi * 8)+ ii;
             if iri_op(inst_idx) != IR_NOP {
                 total_code = total_code + arch_instr_size(inst_idx);
-            }
         ii = ii + 1; }
 
         // epilogue: add rsp(4, if vc>0) + pop rbp(1) + ret(1)
@@ -173,45 +172,6 @@ fn x86_64_elf_generate(buf: string) -> int {
         gv := r64(g_ir_globals, gi * 16 + 8);
         if gv >= 0 { dyn_grow_x86_is_global(gv + 1); w64(g_x86_is_global, gv * 8, 1); }
     gi = gi + 1; }
-
-    // Mark enum variables for +8 field offset
-    g_x86_is_enum_count = 0; g_x86_is_enum_cap = 0;
-    fie := 0; loop { if fie >= g_ir_func_count { break; }
-        ice := r64(g_ir_func_instr_count, fie * 8);
-        iie := 0; loop { if iie >= ice { break; }
-            inst_idxe := r64(g_ir_func_instr_start, fie * 8) + iie;
-            op := r64(g_ir_instrs, inst_idxe * ESZ_IRINSTR + OFF_IRI_OP);
-            if op == IR_MAKE_ENUM {
-                ed := r64(g_ir_instrs, inst_idxe * ESZ_IRINSTR + OFF_IRI_DEST);
-                if ed >= 0 { dyn_grow_x86_is_enum(ed + 1); w64(g_x86_is_enum, ed * 8, 1); }
-            }
-        iie = iie + 1; }
-    fie = fie + 1; }
-    // Propagate: LOAD from enum var → dest is also enum
-    fie2 := 0; loop { if fie2 >= g_ir_func_count { break; }
-        ice2 := r64(g_ir_func_instr_count, fie2 * 8);
-        iie2 := 0; loop { if iie2 >= ice2 { break; }
-            inst_idx2 := r64(g_ir_func_instr_start, fie2 * 8) + iie2;
-            op2 := r64(g_ir_instrs, inst_idx2 * ESZ_IRINSTR + OFF_IRI_OP);
-            if op2 == IR_LOAD || op2 == IR_LOAD_FIELD {
-                s1x := r64(g_ir_instrs, inst_idx2 * ESZ_IRINSTR + OFF_IRI_S1);
-                dx := r64(g_ir_instrs, inst_idx2 * ESZ_IRINSTR + OFF_IRI_DEST);
-                if s1x >= 0 && s1x < g_x86_is_enum_cap {
-                    if r64(g_x86_is_enum, s1x * 8) != 0 {
-                        if dx >= 0 {
-                            if dx >= g_x86_is_enum_cap { dyn_grow_x86_is_enum(dx + 1); }
-                            if dx < g_x86_is_enum_cap {
-                                if r64(g_x86_is_enum, dx * 8) == 0 {
-                                    w64(g_x86_is_enum, dx * 8, 1);
-                                    __builtin_syscall3(1, 1, "p:" + __builtin_int_to_str(dx) + ":" + __builtin_int_to_str(g_x86_is_enum_cap) + "\n", 30);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        iie2 = iie2 + 1; }
-    fie2 = fie2 + 1; }
 
     // Phase 3: emit to buffer
     cp := 176;  // skip ELF header

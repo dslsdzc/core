@@ -345,7 +345,6 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     if op == IR_LOAD_FIELD && d >= 0 {
         o1 := g2_slot(s1); do2 := g2_slot(d); fi2 := s3;
         fo : ., mut = fi2 * 8;
-        // Enum: field at offset +8 (offset 0 = variant tag). Per-var check.
         cp = cp + e2_ld(buf, pos+cp, 10, o1);
         e2_w8(buf, pos+cp, 77); e2_w8(buf, pos+cp+1, 139); e2_w8(buf, pos+cp+2, 146); e2_w32(buf, pos+cp+3, fo); cp = cp + 7;
         cp = cp + e2_st(buf, pos+cp, 10, do2);
