@@ -174,43 +174,16 @@ fn x86_64_elf_generate(buf: string) -> int {
         if gv >= 0 { dyn_grow_x86_is_global(gv + 1); w64(g_x86_is_global, gv * 8, 1); }
     gi = gi + 1; }
 
-    // Single pass: mark enum vars + propagate + adjust s3.
-    // Processed in instruction order so LOAD_FIELD sees propagated marks.
+    // Mark enum variables for +8 field offset
     g_x86_is_enum_count = 0; g_x86_is_enum_cap = 0;
     fie := 0; loop { if fie >= g_ir_func_count { break; }
         ice := r64(g_ir_func_instr_count, fie * 8);
         iie := 0; loop { if iie >= ice { break; }
             inst_idxe := r64(g_ir_func_instr_start, fie * 8) + iie;
-            opinst := r64(g_ir_instrs, inst_idxe * ESZ_IRINSTR + OFF_IRI_OP);
-            // Step 1: mark dest of MAKE_ENUM
-            if opinst == IR_MAKE_ENUM {
+            op := r64(g_ir_instrs, inst_idxe * ESZ_IRINSTR + OFF_IRI_OP);
+            if op == IR_MAKE_ENUM {
                 ed := r64(g_ir_instrs, inst_idxe * ESZ_IRINSTR + OFF_IRI_DEST);
                 if ed >= 0 { dyn_grow_x86_is_enum(ed + 1); w64(g_x86_is_enum, ed * 8, 1); }
-            }
-            // Step 2: propagate through LOAD/LOAD_FIELD (s1 marked → mark dest)
-            if opinst == IR_LOAD || opinst == IR_LOAD_FIELD {
-                s1x := r64(g_ir_instrs, inst_idxe * ESZ_IRINSTR + OFF_IRI_S1);
-                dx := r64(g_ir_instrs, inst_idxe * ESZ_IRINSTR + OFF_IRI_DEST);
-                if s1x >= 0 && s1x < g_x86_is_enum_cap {
-                    if r64(g_x86_is_enum, s1x * 8) != 0 {
-                        if dx >= 0 {
-                            if dx >= g_x86_is_enum_cap { dyn_grow_x86_is_enum(dx + 1); }
-                            if r64(g_x86_is_enum, dx * 8) == 0 { w64(g_x86_is_enum, dx * 8, 1); }
-                        }
-                    }
-                }
-            }
-            // Step 3: adjust s3 for LOAD_FIELD/STORE_FIELD on enum
-            // (field offset = (s3+1)*8 to skip tag at offset 0)
-            // Also emitted directly via emit-time g_x86_is_enum check
-            if opinst == IR_LOAD_FIELD || opinst == IR_STORE_FIELD {
-                s1y := r64(g_ir_instrs, inst_idxe * ESZ_IRINSTR + OFF_IRI_S1);
-                if s1y >= 0 && s1y < g_x86_is_enum_cap {
-                    if r64(g_x86_is_enum, s1y * 8) != 0 {
-                        s3old := r64(g_ir_instrs, inst_idxe * ESZ_IRINSTR + OFF_IRI_S3);
-                        w64(g_ir_instrs, inst_idxe * ESZ_IRINSTR + OFF_IRI_S3, s3old + 1);
-                    }
-                }
             }
         iie = iie + 1; }
     fie = fie + 1; }

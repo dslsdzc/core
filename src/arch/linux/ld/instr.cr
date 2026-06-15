@@ -158,7 +158,7 @@ fn arch_instr_size(instr_idx: int) -> int {
     if op == IR_LOAD_ENUM_TAG { return 15; }
     if op == IR_LOAD_INDEX || op == IR_STORE_INDEX { return 15; }
     if op == IR_LOAD_INDEX_VAR || op == IR_STORE_INDEX_VAR { return 16; }
-    if op == IR_MAKE_ENUM { return 26; }  // mov(5) + call(5) + e2_st(4) + e2_ld(4) + mov [r10+0],imm32(8) = 26
+    if op == IR_MAKE_ENUM { return 18; }
     if op == IR_SLICE { return 19; }
     return 0;
 }
@@ -345,10 +345,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     if op == IR_LOAD_FIELD && d >= 0 {
         o1 := g2_slot(s1); do2 := g2_slot(d); fi2 := s3;
         fo : ., mut = fi2 * 8;
-        // Enum: field offset +8 (offset 0 = variant tag)
-        if s1 >= 0 && s1 < g_x86_is_enum_cap {
-            if r64(g_x86_is_enum, s1 * 8) != 0 { fo = fi2 * 8 + 8; }
-        }
+        // TODO: add enum offset (+8) when g_x86_is_enum check doesn't emit extra code
         cp = cp + e2_ld(buf, pos+cp, 10, o1);
         e2_w8(buf, pos+cp, 77); e2_w8(buf, pos+cp+1, 139); e2_w8(buf, pos+cp+2, 146); e2_w32(buf, pos+cp+3, fo); cp = cp + 7;
         cp = cp + e2_st(buf, pos+cp, 10, do2);
@@ -358,9 +355,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     if op == IR_STORE_FIELD {
         o1 := g2_slot(s1); o2 := g2_slot(s2); fi2 := s3;
         fo : ., mut = fi2 * 8;
-        if s1 >= 0 && s1 < g_x86_is_enum_cap {
-            if r64(g_x86_is_enum, s1 * 8) != 0 { fo = fi2 * 8 + 8; }
-        }
+        // TODO: add enum offset (+8) when g_x86_is_enum check doesn't emit extra code
         cp = cp + e2_ld(buf, pos+cp, 10, o1); cp = cp + e2_ld(buf, pos+cp, 11, o2);
         e2_w8(buf, pos+cp, 77); e2_w8(buf, pos+cp+1, 137); e2_w8(buf, pos+cp+2, 154); e2_w32(buf, pos+cp+3, fo); cp = cp + 7;
         return cp;
