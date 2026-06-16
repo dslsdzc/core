@@ -23,10 +23,6 @@ syn keyword coreType Self int float bool string char unit never
 syn keyword coreBoolean true false
 syn keyword coreUnit _
 
-" Comments
-syn match coreComment "//.*$" contains=@Spell
-syn region coreComment start="/\*" end="\*/" contains=@Spell
-
 " Strings (double-quoted)
 syn region coreString start=+"+ skip=+\\\\\|\\"+ end=+"+ contains=coreEscape
 syn match coreEscape '\\[0nrt"\\]' contained
@@ -63,6 +59,10 @@ syn match coreIdentifier "\<[a-zA-Z_][a-zA-Z0-9_]*\>"
 " Function calls: identifier followed by (
 syn match coreFuncCall "\k\+\%((\)\@="
 
+" Comments (must be after operators to take priority)
+syn match coreComment "//.*$" contains=@Spell
+syn region coreComment start="/\*" end="\*/" contains=@Spell
+
 " Standard highlight links
 hi def link coreKeyword      Keyword
 hi def link coreSpecial      Special
@@ -77,7 +77,7 @@ hi def link coreInteger       Number
 hi def link coreFloat         Float
 hi def link coreProject       PreProc
 hi def link coreOperator      Operator
-hi def link coreIdentifier    Normal
+hi def link coreIdentifier    Identifier
 hi def link coreFuncCall      Function
 
 let b:current_syntax = "core"
