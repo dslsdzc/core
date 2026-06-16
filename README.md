@@ -133,13 +133,7 @@ core/
 
 ---
 
-## 快速开始
-
-### 环境要求
-- Python 3.10+（无需额外依赖）
-- ARM64 平台（原生编译需要 `as` / `ld`）
-
-### 运行测试
+## 运行测试
 
 ```bash
 # 引导编译器流水线测试（19 项）
@@ -154,28 +148,6 @@ python3 tests/bootstrap/test_borrow.py
 # 自举编译器测试
 python3 tests/selfhost/test_compile.py
 ```
-
-### 使用命令行工具
-
-```bash
-# Python 引导编译器：编译 .cr → ARM64 原生可执行文件
-python3 tools/corec build FILE.cr -o OUTPUT
-
-# 生成线性 IR 转储（.ccr）
-python3 tools/corec ir FILE.cr
-```
-
-### 自举编译器原生二进制
-
-```bash
-# 构建自举编译器（Core 写编译器，通过 Python 引导编译为 x86-64 原生二进制）
-python3 build_selfhost_native.py
-
-# 使用原生二进制编译 Core 程序
-./build/corec input.cr          # 输出 output.s
-```
-
-`build/corec` 是 Core 自举编译器的 x86-64 原生可执行文件。由 `build_selfhost_native.py` 构建，经过 Python 引导编译器流水线，直接生成 x86-64 汇编并静态链接。无需解释器、无需 GCC。
 
 ### 通过 Python 调用流水线
 
@@ -205,12 +177,13 @@ interp = Interpreter(mod); print(interp.run('main', []))   # 输出 7
 ```
 
 
-贡献
+## 贡献
 
 当前项目处于早期阶段，欢迎参与设计讨论和实验性实现。
 请参阅 docs/ 下的设计文档了解整体构想。
 
 ---
 
-许可
-GNU General Public License v3.0
+## 许可
+
+GNU General Public License v3.0（含 GPLv3 第 7 节附加许可）
