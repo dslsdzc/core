@@ -127,7 +127,7 @@ fn arch_instr_size(instr_idx: int) -> int {
     if op == IR_CALL {
         fn2 := ""; if s3 >= 0 { fn2 = str_get(s3); }
         if __builtin_str_eq(fn2, "__builtin_syscall3") != 0 {
-            sz := iri_s2(instr_idx) * 4 + 18; if d >= 0 { sz = sz + 4; } return sz;
+            sz := iri_s2(instr_idx) * 4 + 17; if d >= 0 { sz = sz + 4; } return sz;
         }
         if s3 >= 0 {
             sz := iri_s2(instr_idx) * 4 + 5; if d >= 0 { sz = sz + 4; } return sz;
@@ -244,17 +244,12 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
             if to >= 0 {
                 cp = cp + e2_call(buf, pos+cp, (176 + to) - (pos + cp + 5));
             } else {
-                // For unknown __builtin_* functions, just return 0 (no-op)
-                if __builtin_str_len(fn2) > 0 && __builtin_load8(fn2, 0) == 95 {
-                    // Function starts with __builtin_ - just xor eax,eax; no call
-                    e2_w8(buf, pos+cp, 49); e2_w8(buf, pos+cp+1, 192); cp = cp + 2;  // xor eax, eax
-                } else {
-                    dyn_grow_x86_ext_rel(g_x86_ext_rel_count + 1);
-                    w64(g_x86_ext_rel_pos, g_x86_ext_rel_count * 8, pos + cp + 1);
-                    w64(g_x86_ext_rel_name, g_x86_ext_rel_count * 8, s3);
-                    g_x86_ext_rel_count = g_x86_ext_rel_count + 1;
-                    cp = cp + e2_call(buf, pos+cp, 0);
-                }
+                // Unknown function: emit external relocation (for dynamic linking)
+                dyn_grow_x86_ext_rel(g_x86_ext_rel_count + 1);
+                w64(g_x86_ext_rel_pos, g_x86_ext_rel_count * 8, pos + cp + 1);
+                w64(g_x86_ext_rel_name, g_x86_ext_rel_count * 8, s3);
+                g_x86_ext_rel_count = g_x86_ext_rel_count + 1;
+                cp = cp + e2_call(buf, pos+cp, 0);
             }
             if d >= 0 { cp = cp + e2_st(buf, pos+cp, 0, g2_slot(d)); }
         } else {
