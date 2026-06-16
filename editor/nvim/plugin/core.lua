@@ -280,7 +280,7 @@ end
 
 -- ─── Setup ───────────────────────────────────────────────────────
 
-function M.setup(user_opts)
+local function setup(user_opts)
   options = vim.tbl_deep_extend("force", options, user_opts or {})
 
   local group = vim.api.nvim_create_augroup("core_language", { clear = true })
@@ -342,4 +342,23 @@ function M.setup(user_opts)
   vim.api.nvim_create_user_command("CoreCheck", run_diagnostics, { desc = "Run Core type checker" })
 end
 
-return M
+-- 延迟到 VimEnter 后执行 setup（autocmd + keymap + commands）
+vim.api.nvim_create_autocmd("VimEnter", {
+  once = true,
+  callback = function()
+    vim.defer_fn(function()
+      setup({})
+    end, 100)
+  end,
+})
+
+-- Fix syntax for core/coreir (overrides crystal from Treesitter/builtin)
+vim.api.nvim_create_autocmd("BufReadPost", {
+  pattern = { "*.cr", "*.corespec", "*.cir", "*.ccr" },
+  callback = function(ev)
+    local ft = vim.bo[ev.buf].filetype
+    if ft == "core" or ft == "coreir" then
+      vim.bo[ev.buf].syntax = ft
+    end
+  end,
+})
