@@ -314,16 +314,17 @@ fn cli_help() {
         ci = 0;
         loop {
             if ci >= g_cli_cmd_count { break; }
-            cmd := g_cli_cmds[ci];
+            cmd_name_ni := r64(g_cli_cmds, ci * 16);
+            cmd_desc_ni := r64(g_cli_cmds, ci * 16 + 8);
             __builtin_print("    ");
-            __builtin_print(cmd.name);
-            pad := __builtin_str_len(cmd.name);
+            __builtin_print(cmd_name_ni);
+            pad := __builtin_str_len(cmd_name_ni);
             loop {
                 if pad >= 12 { break; }
                 __builtin_print(" ");
                 pad = pad + 1;
             }
-            __builtin_println(cmd.desc);
+            __builtin_println(cmd_desc_ni);
             ci = ci + 1;
         }
         __builtin_println("");
@@ -332,33 +333,35 @@ fn cli_help() {
     // Flags / options
     __builtin_println("options:");
     // Built-in -h, --help
-    __builtin_println("  -h, --help            show this help message and exit");
+    __builtin_println("  -h, --help           show this help message and exit");
     fi : ., mut = 0;
     loop {
         if fi >= g_cli_flag_count { break; }
-        f := g_cli_flags[fi];
+        f_short_ni := r64(g_cli_flags, fi * 48 + 8);
+        f_long_ni := r64(g_cli_flags, fi * 48);
+        f_desc_ni := r64(g_cli_flags, fi * 48 + 16);
         __builtin_print("  ");
-        if __builtin_str_len(f.short_name) > 0 {
+        if __builtin_str_len(f_short_ni) > 0 {
             __builtin_print("-");
-            __builtin_print(f.short_name);
+            __builtin_print(f_short_ni);
             __builtin_print(", ");
         } else {
             __builtin_print("    ");
         }
         __builtin_print("--");
-        __builtin_print(f.long_name);
+        __builtin_print(f_long_ni);
         // Pad to 24 chars total
         total : ., mut = 4;
-        if __builtin_str_len(f.short_name) > 0 {
+        if __builtin_str_len(f_short_ni) > 0 {
             total = 8;
         }
-        total = total + __builtin_str_len(f.long_name);
+        total = total + __builtin_str_len(f_long_ni);
         loop {
             if total >= 24 { break; }
             __builtin_print(" ");
             total = total + 1;
         }
-        __builtin_println(f.desc);
+        __builtin_println(f_desc_ni);
         fi = fi + 1;
     }
 }
