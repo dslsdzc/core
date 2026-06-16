@@ -77,7 +77,6 @@ fn corearch_main() -> int {
     if __builtin_str_len(link_val) > 0 {
         ctx_init();
         if __builtin_str_eq(link_val, "auto") != 0 {
-            // Auto-detect .so files in standard lib paths
             so_paths : [string; 4], mut;
             so_paths[0] = "./core_rt.so";
             so_paths[1] = "/usr/local/lib/core/core_rt.so";
@@ -96,11 +95,19 @@ fn corearch_main() -> int {
         cd := __builtin_alloc(cs);
         ci : ., mut = 0; loop { if ci >= cs { break; }
             __builtin_store8(cd, ci, __builtin_load8(g_elf_buf, 176+ci)); ci = ci + 1; }
-        ri : ., mut = 0; loop { if ri >= g_x86_ext_rel_count { break; }
-            fn_name := str_get(r64(g_x86_ext_rel_name, ri * 8));
-            ctx_add_plt(fn_name, 0); ri = ri + 1; }
-        ctx_set_user_code(cd, cs);
-        sz = ctx_emit_dyn(g_elf_buf, out_path);
+
+        if is_static != 0 && g_so_count > 0 {
+            // Static linking: embed .so code directly
+            ctx_set_user_code(cd, cs);
+            sz = ctx_emit_static(g_elf_buf, out_path);
+        } else {
+            // Dynamic linking: PLT/GOT
+            ri : ., mut = 0; loop { if ri >= g_x86_ext_rel_count { break; }
+                fn_name := str_get(r64(g_x86_ext_rel_name, ri * 8));
+                ctx_add_plt(fn_name, 0); ri = ri + 1; }
+            ctx_set_user_code(cd, cs);
+            sz = ctx_emit_dyn(g_elf_buf, out_path);
+        }
         if sz <= 0 { __builtin_println("error: linking failed"); return 1; }
     } else {
         sz := x86_64_elf_generate(g_elf_buf);

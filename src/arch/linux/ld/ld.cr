@@ -352,3 +352,98 @@ fn ctx_emit_so(buf: string, path: string) -> int {
     nw := __builtin_syscall3(1, fd, buf, total);
     __builtin_syscall3(3, fd, 0, 0);
     return total; }
+
+// ============================================================
+// Static linking — embed .so text into ELF, resolve relocations
+// ============================================================
+// Scans all .so files in g_so_paths. For each external symbol
+// referenced by user code, looks it up in the .so symbol table
+// and copies the needed section into the output.
+
+g_so_off : int, mut;  // .so .text file offset
+g_so_sz : int, mut;   // .so .text size
+g_so_addr : int, mut; // .so .text base address
+
+fn so_parse_text(buf: string) -> int {
+    // Find the executable PROGBITS section (.text) in the .so
+    if __builtin_str_len(buf) < 64 { return -1; }
+    e_shoff := r64(buf, 40); e_shnum := r16(buf, 60);
+    i : ., mut = 0;
+    loop { if i >= e_shnum { break; }
+        t := r32(buf, e_shoff+i*64+4); fl := r64(buf, e_shoff+i*64+8);
+        a := r64(buf, e_shoff+i*64+16); o := r64(buf, e_shoff+i*64+24); s := r64(buf, e_shoff+i*64+32);
+        // SHT_PROGBITS(1) + SHF_ALLOC|SHF_EXECINSTR(6) = .text
+        if t == 1 && fl == 6 && s > 0 {
+            g_so_off = o; g_so_sz = s; g_so_addr = a;
+            return 0; }
+        i = i + 1; }
+    return -1; }
+
+fn ctx_emit_static(buf: string, path: string) -> int {
+    // Scan .so files for external symbols, embed their .text
+    so_buf : ., mut = "";
+    si : ., mut = 0;
+    loop { if si >= g_so_count { break; }
+        sp := r64(g_so_paths, si * 8);
+        if __builtin_str_len(sp) > 0 {
+            b := __builtin_read_file(sp);
+            if __builtin_str_len(b) > 0 && so_parse_text(b) == 0 { so_buf = b; break; }
+        }
+        si = si + 1; }
+    if __builtin_str_len(so_buf) == 0 { return -1; }
+    if g_so_sz <= 0 { return -1; }
+
+    // Layout: ELF header(176) + user_code + so_text
+    hdr_sz : ., mut = 176;
+    so_start := hdr_sz + g_user_size;
+    total := so_start + g_so_sz;
+
+    // Zero and write
+    zi : ., mut = 0; loop { if zi >= total { break; } w8(buf, zi, 0); zi = zi + 1; }
+
+    // Copy user code
+    ci : ., mut = 0; loop { if ci >= g_user_size { break; }
+        w8(buf, hdr_sz + ci, bu8(g_user_code, ci)); ci = ci + 1; }
+
+    // Copy .so .text after user code
+    cj : ., mut = 0; loop { if cj >= g_so_sz { break; }
+        w8(buf, so_start + cj, bu8(so_buf, g_so_off + cj)); cj = cj + 1; }
+
+    // Patch external relocations in user code
+    rpi : ., mut = 0;
+    loop { if rpi >= g_x86_ext_rel_count { break; }
+        abs_pos := r64(g_x86_ext_rel_pos, rpi * 8);
+        fn_ni := r64(g_x86_ext_rel_name, rpi * 8);
+        fn_name := str_get(fn_ni);
+        if __builtin_str_len(fn_name) > 0 {
+            sym_addr := so_find(so_buf, fn_name);
+            if sym_addr >= g_so_addr && sym_addr < g_so_addr + g_so_sz {
+                func_off := sym_addr - g_so_addr;
+                call_pos := hdr_sz + abs_pos;  // absolute position in buffer
+                target_va := 0x400000 + so_start + func_off;  // VA of function
+                rel := target_va - (call_pos + 5);
+                w32(buf, call_pos + 1, rel);
+            }
+        }
+    rpi = rpi + 1; }
+
+    // Write ELF header + single PT_LOAD
+    w8(buf,0,127);w8(buf,1,69);w8(buf,2,76);w8(buf,3,70);
+    w8(buf,4,2);w8(buf,5,1);w8(buf,6,1);
+    w16(buf,16,2);w16(buf,18,62);w32(buf,20,1);
+    // Use TEXT_BASE + hdr_sz as entry (_start at start of user code)
+    w64(buf,24,0x400000 + hdr_sz);
+    w64(buf,32,64);w64(buf,40,0);
+    w16(buf,52,64);w16(buf,54,56);w16(buf,56,1);w16(buf,58,64);
+    // PT_LOAD covering everything
+    w32(buf,64,1);w32(buf,68,5);w64(buf,72,0);
+    w64(buf,80,0x400000);w64(buf,88,0x400000);
+    w64(buf,96,total);w64(buf,104,total);
+    w64(buf,112,4096);
+
+    // Write file
+    fd := __builtin_syscall3(2, path, 577, 420);
+    if fd < 0 { return -1; }
+    nw := __builtin_syscall3(1, fd, buf, total);
+    __builtin_syscall3(3, fd, 0, 0);
+    return total; }

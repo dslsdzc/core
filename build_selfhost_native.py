@@ -123,6 +123,7 @@ def main():
             'src/compiler/lexer.cr',
             'src/compiler/parser.cr',
             'src/compiler/checker.cr',
+            'src/compiler/opt.cr',
             'src/compiler/diag.cr',
             'src/compiler/ir_gen.cr',
             'src/compiler/dataflow.cr',
