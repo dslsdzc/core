@@ -280,6 +280,84 @@ fn alloc_registers() {
     }
 }
 
+fn pass_stack_share() {
+    // For each function's stack vars, check if any have disjoint live ranges.
+    // If var A and var B never overlap, map B to use A's slot via g_stack_map.
+    // Runs after register allocation (only affects non-register vars).
+    if g_ir_func_count <= 0 { return; }
+
+    // Allocate g_stack_map with -1 for all IR vars
+    g_stack_map = __builtin_alloc(g_ir_var_count * 8);
+    svi : ., mut = 0;
+    loop { if svi >= g_ir_var_count { break; } w64(g_stack_map, svi * 8, -1); svi = svi + 1; }
+
+    fi : ., mut = 0;
+    loop {
+        if fi >= g_ir_func_count { break; }
+        ic := r64(g_ir_func_instr_count, fi * 8);
+        ist := r64(g_ir_func_instr_start, fi * 8);
+        vc := r64(g_ir_func_var_count, fi * 8);
+        vs := r64(g_ir_func_var_start, fi * 8);
+        if vc <= 0 || ic <= 0 { fi = fi + 1; continue; }
+
+        // Build intervals for all vars (as in reg alloc)
+        iv := __builtin_alloc(vc * 16);
+        zz : ., mut = 0;
+        loop { if zz >= vc { break; } w64(iv, zz*16, -1); w64(iv, zz*16+8, -1); zz = zz + 1; }
+        ii : ., mut = 0;
+        loop {
+            if ii >= ic { break; }
+            inst := ist + ii;
+            d := iri_dest(inst); s1 := iri_s1(inst); s2 := iri_s2(inst);
+            va : [int; 3], mut; vn : ., mut = 0;
+            if d >= vs && d < vs+vc { va[vn] = d-vs; vn=vn+1; }
+            if s1 >= vs && s1 < vs+vc { va[vn] = s1-vs; vn=vn+1; }
+            if s2 >= vs && s2 < vs+vc { va[vn] = s2-vs; vn=vn+1; }
+            vi2 : ., mut = 0;
+            loop { if vi2 >= vn { break; }
+                lv := va[vi2];
+                if r64(iv, lv*16) < 0 { w64(iv, lv*16, ii); }
+                w64(iv, lv*16+8, ii);
+                vi2 = vi2 + 1; }
+            ii = ii + 1; }
+
+        // For each stack var, try to find another to share with
+        vj1 : ., mut = 0;
+        loop { if vj1 >= vc { break; }
+            global_v1 := vs + vj1;
+            // Skip if this var is in a register (negative encoding in IR means register)
+            is_reg : ., mut = 0;
+            // Check first instruction that uses this var
+            first_ref := r64(iv, vj1*16);
+            if first_ref >= 0 {
+                inst_chk := ist + first_ref;
+                if iri_dest(inst_chk) == global_v1 {
+                    if iri_dest(inst_chk) < 0 { is_reg = 1; }
+                } else if iri_s1(inst_chk) == global_v1 {
+                    if iri_s1(inst_chk) < 0 { is_reg = 1; }
+                } else if iri_s2(inst_chk) == global_v1 {
+                    if iri_s2(inst_chk) < 0 { is_reg = 1; }
+                }
+            }
+            if is_reg != 0 { vj1 = vj1 + 1; continue; }
+
+            s1_start := r64(iv, vj1*16);
+            s1_end := r64(iv, vj1*16+8);
+            vj2 : ., mut = 0;
+            loop { if vj2 >= vj1 { break; }
+                s2_start := r64(iv, vj2*16);
+                s2_end := r64(iv, vj2*16+8);
+                // Check disjoint: s1 ends before s2 starts, or s2 ends before s1 starts
+                if (s1_end < s2_start || s2_end < s1_start) && s1_start >= 0 && s2_start >= 0 {
+                    // Map vj1 to use vj2's slot
+                    w64(g_stack_map, (vs+vj1)*8, vs+vj2);
+                    break;
+                }
+                vj2 = vj2 + 1; }
+        vj1 = vj1 + 1; }
+        fi = fi + 1; }
+}
+
 fn optimize_all() {
     if g_opt_level < 1 { return; }
     fi : ., mut = 0;
@@ -291,4 +369,7 @@ fn optimize_all() {
         fi = fi + 1;
     }
     alloc_registers();
+    if g_opt_level >= 2 {
+        pass_stack_share();
+    }
 }

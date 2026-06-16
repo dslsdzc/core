@@ -17,9 +17,13 @@ fn g2_init() {
 }
 
 fn g2_slot(v: int) -> int {
-    // Negative v = register (-1=rax, -2=rcx, -3=rdx, -4=rbx, -5=rsp, -6=rbp, -7=rsi, -8=rdi)
-    // Non-negative v = IR var index → stack slot
+    // Negative v = register encoding
     if v < 0 { return v; }
+    // Stack sharing: if this var maps to another, use that var's slot
+    if v >= 0 && __builtin_str_len(g_stack_map) > v * 8 {
+        mapped := r64(g_stack_map, v * 8);
+        if mapped >= 0 && mapped != v { v = mapped; }
+    }
     i := 0;
     loop { if i >= g_x86_emit_var_count { break; } if r64(g_x86_emit_vars, i * 8) == v { return -(i+1)*8; } i = i + 1; }
     dyn_grow_x86_emit_vars(g_x86_emit_var_count + 1);
