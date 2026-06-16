@@ -17,6 +17,9 @@ fn g2_init() {
 }
 
 fn g2_slot(v: int) -> int {
+    // Negative v = register (-1=rax, -2=rcx, -3=rdx, -4=rbx, -5=rsp, -6=rbp, -7=rsi, -8=rdi)
+    // Non-negative v = IR var index → stack slot
+    if v < 0 { return v; }
     i := 0;
     loop { if i >= g_x86_emit_var_count { break; } if r64(g_x86_emit_vars, i * 8) == v { return -(i+1)*8; } i = i + 1; }
     dyn_grow_x86_emit_vars(g_x86_emit_var_count + 1);
@@ -60,12 +63,22 @@ fn e2_mov(b: string, p: int, d: int, s: int) -> int {
 }
 
 fn e2_ld(b: string, p: int, r: int, o: int) -> int {
+    // o < 0 and |o| ≤ 17: load from register (value = -(o+1))
+    if o < 0 && o >= -18 {
+        src_reg := (-o) - 1;
+        return e2_mov(b, p, r, src_reg);
+    }
     h := 0; if r >= 8 { h = 1; }
     e2_w8(b, p, 72 + h*4); e2_w8(b, p+1, 139);
     e2_w8(b, p+2, 64 + (r%8)*8 + 5); e2_w8(b, p+3, o); return 4;
 }
 
 fn e2_st(b: string, p: int, r: int, o: int) -> int {
+    // o < 0 and |o| ≤ 17: store to register (value = -(o+1))
+    if o < 0 && o >= -18 {
+        dst_reg := (-o) - 1;
+        return e2_mov(b, p, dst_reg, r);
+    }
     h := 0; if r >= 8 { h = 1; }
     e2_w8(b, p, 72 + h*4); e2_w8(b, p+1, 137);
     e2_w8(b, p+2, 64 + (r%8)*8 + 5); e2_w8(b, p+3, o); return 4;
@@ -115,6 +128,7 @@ fn arch_instr_size(instr_idx: int) -> int {
     if op == IR_BINARY {
         sz := 4 + 4 + 3 + 4;
         if s3 == OP_MUL { sz = sz + 1; }
+        if s3 == OP_SHL || s3 == OP_SHR { sz = sz + 3; }
         if s3 == OP_DIV || s3 == OP_MOD { sz = sz + 3 + 2 + 3 + 3; }
         if s3 >= OP_EQ && s3 <= OP_GE { sz = sz + 3 + 4; }
         return sz;
@@ -190,6 +204,8 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         if s3 == OP_ADD         { cp = cp + e2_alu(buf, pos+cp, 1); }
         else if s3 == OP_SUB    { cp = cp + e2_alu(buf, pos+cp, 41); }
         else if s3 == OP_MUL    { e2_w8(buf, pos+cp, 77); e2_w8(buf, pos+cp+1, 15); e2_w8(buf, pos+cp+2, 175); e2_w8(buf, pos+cp+3, 211); cp = cp + 4; }
+        else if s3 == OP_SHL    { e2_w8(buf, pos+cp, 73); e2_w8(buf, pos+cp+1, 199); e2_w8(buf, pos+cp+2, 194); e2_w8(buf, pos+cp+3, 0); e2_w8(buf, pos+cp+4, 0); e2_w8(buf, pos+cp+5, 0); cp = cp + 6; }
+        else if s3 == OP_SHR    { e2_w8(buf, pos+cp, 73); e2_w8(buf, pos+cp+1, 199); e2_w8(buf, pos+cp+2, 232); e2_w8(buf, pos+cp+3, 0); e2_w8(buf, pos+cp+4, 0); e2_w8(buf, pos+cp+5, 0); cp = cp + 6; }
         else if s3 == OP_DIV || s3 == OP_MOD {
             cp = cp + e2_mov(buf, pos+cp, 0, 10);
             e2_w8(buf, pos+cp, 72); e2_w8(buf, pos+cp+1, 153); cp = cp + 2;

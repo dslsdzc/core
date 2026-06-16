@@ -1047,6 +1047,4 @@ fn ir_gen_all() {
         df_end_func(i);
         i = i + 1;
     }
-    // Run CFIR optimizations
-    optimize_ir();
 }

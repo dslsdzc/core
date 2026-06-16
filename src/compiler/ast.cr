@@ -253,6 +253,8 @@ OP_GE : int = 11;
 OP_AND : int = 12;
 OP_OR : int = 13;
 OP_ASSIGN : int = 14;
+OP_SHL : int = 15;  // strength reduction: x << n
+OP_SHR : int = 16;  // strength reduction: x >> n
 
 // Unary operator codes
 UOP_NEG : int = 1;
