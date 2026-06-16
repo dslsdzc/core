@@ -177,6 +177,40 @@ fn x86_64_elf_generate(buf: string) -> int {
     cp := 176;  // skip ELF header
 
     // ── _start ──
+    // Save argc/argv from stack to globals (patched after BSS layout)
+    // mov rdi, [rsp] — argc from stack
+    w8(buf, cp, 72); w8(buf, cp+1, 139); w8(buf, cp+2, 60); w8(buf, cp+3, 36); cp = cp + 4;
+    // lea rsi, [rsp + 8] — argv from stack
+    w8(buf, cp, 72); w8(buf, cp+1, 141); w8(buf, cp+2, 115); w8(buf, cp+3, 8); cp = cp + 4;
+    // Find global IR vars for argc/argv
+    gv_argc : ., mut = -1; gv_argv : ., mut = -1;
+    gvi_s : ., mut = 0;
+    loop { if gvi_s >= g_ir_global_count { break; }
+        gni := r64(g_ir_globals, gvi_s * 16);
+        gnm := str_get(gni);
+        if __builtin_str_eq(gnm, "g_rt_argc") != 0 { gv_argc = r64(g_ir_globals, gvi_s * 16 + 8); }
+        if __builtin_str_eq(gnm, "g_rt_argv_ptr") != 0 { gv_argv = r64(g_ir_globals, gvi_s * 16 + 8); }
+    gvi_s = gvi_s + 1; }
+    // Store argc: lea r10, [rip + g_rt_argc]; mov [r10], rdi
+    if gv_argc >= 0 {
+        w8(buf, cp, 76); w8(buf, cp+1, 141); w8(buf, cp+2, 21); cp = cp + 3;  // lea r10, [rip+?]
+        dyn_grow_x86_rip_patch(g_x86_rip_patch_count + 1);
+        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, cp);
+        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argc);
+        g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
+        w32(buf, cp, 0); cp = cp + 4;  // placeholder disp32
+        w8(buf, cp, 77); w8(buf, cp+1, 137); w8(buf, cp+2, 58); cp = cp + 3;  // mov [r10], rdi
+    }
+    // Store argv: lea r10, [rip + g_rt_argv_ptr]; mov [r10], rsi
+    if gv_argv >= 0 {
+        w8(buf, cp, 76); w8(buf, cp+1, 141); w8(buf, cp+2, 21); cp = cp + 3;  // lea r10, [rip+?]
+        dyn_grow_x86_rip_patch(g_x86_rip_patch_count + 1);
+        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, cp);
+        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argv);
+        g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
+        w32(buf, cp, 0); cp = cp + 4;  // placeholder disp32
+        w8(buf, cp, 77); w8(buf, cp+1, 137); w8(buf, cp+2, 58); cp = cp + 3;  // mov [r10], rsi
+    }
     call_main_pos := cp;
     cp = cp + e2_call(buf, cp, 0);  // call main (rel=0 placeholder, patched later)
     w8(buf, cp, 137); w8(buf, cp+1, 199); cp = cp + 2;  // mov edi, eax

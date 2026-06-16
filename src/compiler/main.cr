@@ -80,6 +80,7 @@ fn corec_main() -> int {
     cli_flag_bool("check", "", "Type-check only, no output");
     cli_flag_bool("c", "", "Execute code directly (interpreter mode)");
     cli_flag_bool("build", "b", "Compile and link to ELF (auto-detect imports)");
+    cli_flag_bool("static", "", "Static linking (embed runtime)");
     cli_flag("output", "o", "Output path");
 
     if cli_parse() != 0 { return 1; }
@@ -90,6 +91,7 @@ fn corec_main() -> int {
         __builtin_println("  --cir     output dataflow graph (.cir)");
         __builtin_println("  --ccr     output linear CFG (.ccr) [default]");
         __builtin_println("  --check   type-check only");
+        __builtin_println("  --static  static linking (default: dynamic)");
         __builtin_println("  -o FILE   output path");
         __builtin_println("");
         __builtin_println("project_dir/  point to a directory containing Core.toml + .cr files");
@@ -289,9 +291,15 @@ fn corec_main() -> int {
         lower_to_ccr();
         r := save_ccr(tmp_path);
         if r != 0 { __builtin_println("error: could not write temp .ccr"); return 1; }
-        // Build corearch command (static ELF — imports resolved at compile time)
+        // Build corearch command (dynamic by default, --static for static)
         cmd : ., mut = "corearch ";
-        cmd = cmd + tmp_path + " --elf -o " + out_path;
+        cmd = cmd + tmp_path + " --elf";
+        if cli_has("static") != 0 {
+            cmd = cmd + " --static";
+        } else {
+            cmd = cmd + " --link auto";
+        }
+        cmd = cmd + " -o " + out_path;
         // Also try using the same directory as corec
         self_path := __builtin_get_arg(0);
         sl2 := __builtin_str_len(self_path);

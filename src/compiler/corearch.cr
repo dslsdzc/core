@@ -18,15 +18,18 @@ fn corearch_main() -> int {
     cli_init("corearch", "Core architecture backend");
     cli_flag_bool("elf", "", "Output ELF binary (default)");
     cli_flag_bool("shared", "", "Output shared library (.so)");
-    cli_flag("link", "l", "Comma-sep .so files to link");
+    cli_flag_bool("static", "", "Static linking (embed runtime)");
+    cli_flag("link", "l", "Comma-sep .so files, or 'auto' for ~/.core/lib/");
     cli_flag("output", "o", "Output path");
 
     if cli_parse() != 0 { return 1; }
     if cli_arg_count() < 1 {
         __builtin_println("usage: corearch <file.ccr> [options]");
-        __builtin_println("  --elf           static ELF binary (default)");
+        __builtin_println("  --elf           ELF binary (default: dynamic)");
+        __builtin_println("  --static        static linking (embed runtime)");
         __builtin_println("  --shared        shared library (.so)");
-        __builtin_println("  --elf --link s  dynamically-linked ELF");
+        __builtin_println("  --link auto     link ~/.core/lib/*.so (default)");
+        __builtin_println("  --link s1,s2   link specific .so files");
         __builtin_println("  -o FILE         output path");
         return 1; }
 
@@ -65,21 +68,39 @@ fn corearch_main() -> int {
     if __builtin_str_len(out_path) == 0 { out_path = "a.out"; }
     g_elf_buf = __builtin_alloc(65536);
 
+    is_static := cli_has("static");
+    if is_static == 0 && __builtin_str_len(link_val) == 0 {
+        // Default: auto-detect dynamic linking
+        link_val = "auto";
+    }
+
     if __builtin_str_len(link_val) > 0 {
         ctx_init();
-        split_links(link_val);
+        if __builtin_str_eq(link_val, "auto") != 0 {
+            // Auto-detect .so files in standard lib paths
+            so_paths : [string; 4], mut;
+            so_paths[0] = "./core_rt.so";
+            so_paths[1] = "/usr/local/lib/core/core_rt.so";
+            sxi : ., mut = 0;
+            loop { if sxi >= 4 { break; }
+                if __builtin_str_len(so_paths[sxi]) == 0 { break; }
+                if __builtin_str_len(__builtin_read_file(so_paths[sxi])) > 0 {
+                    ctx_add_so(so_paths[sxi]); }
+                sxi = sxi + 1; }
+        } else {
+            split_links(link_val);
+        }
         sz := x86_64_elf_generate(g_elf_buf);
         cs : ., mut = sz - 176;
         if cs <= 0 { __builtin_println("error: empty code"); return 1; }
         cd := __builtin_alloc(cs);
-        // Copy user code from static ELF
-                ci : ., mut = 0; loop { if ci >= cs { break; }
+        ci : ., mut = 0; loop { if ci >= cs { break; }
             __builtin_store8(cd, ci, __builtin_load8(g_elf_buf, 176+ci)); ci = ci + 1; }
-                ri : ., mut = 0; loop { if ri >= g_x86_ext_rel_count { break; }
+        ri : ., mut = 0; loop { if ri >= g_x86_ext_rel_count { break; }
             fn_name := str_get(r64(g_x86_ext_rel_name, ri * 8));
             ctx_add_plt(fn_name, 0); ri = ri + 1; }
         ctx_set_user_code(cd, cs);
-                sz = ctx_emit_dyn(g_elf_buf, out_path);
+        sz = ctx_emit_dyn(g_elf_buf, out_path);
         if sz <= 0 { __builtin_println("error: linking failed"); return 1; }
     } else {
         sz := x86_64_elf_generate(g_elf_buf);

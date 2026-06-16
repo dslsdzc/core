@@ -333,7 +333,7 @@ fn cli_help() {
     // Flags / options
     __builtin_println("options:");
     // Built-in -h, --help
-    __builtin_println("  -h, --help           show this help message and exit");
+    __builtin_println("  -h, --help            show this help message and exit");
     fi : ., mut = 0;
     loop {
         if fi >= g_cli_flag_count { break; }
@@ -350,10 +350,10 @@ fn cli_help() {
         }
         __builtin_print("--");
         __builtin_print(f_long_ni);
-        // Pad to 24 chars total
-        total : ., mut = 4;
+        // Pad to 24 chars total (prefix = "  " + short/"    " + "--")
+        total : ., mut = 8;
         if __builtin_str_len(f_short_ni) > 0 {
-            total = 8;
+            total = 8;  // "  " + "-X, " + "--" = 2+4+2 = 8
         }
         total = total + __builtin_str_len(f_long_ni);
         loop {

@@ -7,6 +7,10 @@
 //   __builtin_store8(ptr: string, idx: int, val: int) -> int
 // Syscall (inlined by backends):
 //   __builtin_syscall3(nr: int, arg1: int, arg2: int, arg3: int) -> int
+// Globals (defined in rt.s, declared here for IR gen / ELF backend):
+g_rt_argc : int, mut;
+g_rt_argv_ptr : string, mut;
+
 // Provided by rt.s (assembly):
 //   __builtin_alloc(size: int) -> string
 //   __builtin_get_arg(n: int) -> string
