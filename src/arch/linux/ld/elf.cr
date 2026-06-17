@@ -110,6 +110,43 @@ fn elf2_hdr(buf: string, total_sz: int) {
     w64(buf, 152, 0); w64(buf, 160, 268435456); w64(buf, 168, 4096);
 }
 
+// ── Emit _start code, return total bytes ──
+g_call_main_pos : int, mut;  // set by emit_start, used for patching call main
+gv_argc : int, mut;   // IR var index for g_rt_argc (or -1)
+gv_argv : int, mut;   // IR var index for g_rt_argv_ptr (or -1)
+
+fn emit_start(buf: string, pos: int) -> int {
+    cp : ., mut = pos;
+    w8(buf, cp, 72); w8(buf, cp+1, 139); w8(buf, cp+2, 60); w8(buf, cp+3, 36); cp = cp + 4;  // mov rdi,[rsp]
+    w8(buf, cp, 72); w8(buf, cp+1, 141); w8(buf, cp+2, 115); w8(buf, cp+3, 8); cp = cp + 4;  // lea rsi,[rsp+8]
+    if gv_argc >= 0 { w8(buf, cp, 76); w8(buf, cp+1, 141); w8(buf, cp+2, 21); cp = cp + 3;
+        dyn_grow_x86_rip_patch(g_x86_rip_patch_count + 1);
+        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, cp);
+        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argc);
+        g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
+        w32(buf, cp, 0); cp = cp + 4; w8(buf, cp, 77); w8(buf, cp+1, 137); w8(buf, cp+2, 58); cp = cp + 3; }
+    if gv_argv >= 0 { w8(buf, cp, 76); w8(buf, cp+1, 141); w8(buf, cp+2, 21); cp = cp + 3;
+        dyn_grow_x86_rip_patch(g_x86_rip_patch_count + 1);
+        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, cp);
+        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argv);
+        g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
+        w32(buf, cp, 0); cp = cp + 4; w8(buf, cp, 77); w8(buf, cp+1, 137); w8(buf, cp+2, 58); cp = cp + 3; }
+    g_call_main_pos = cp;
+    cp = cp + e2_call(buf, cp, 0);  // call main
+    w8(buf, cp, 137); w8(buf, cp+1, 199); cp = cp + 2;  // mov edi, eax
+    w8(buf, cp, 184); w32(buf, cp+1, 60); cp = cp + 5;  // mov eax, 60
+    w8(buf, cp, 15); w8(buf, cp+1, 5); cp = cp + 2;     // syscall
+    return cp - pos;
+}
+
+fn emit_start_size() -> int {
+    sz : ., mut = 8;  // mov rdi,[rsp](4) + lea rsi,[rsp+8](4)
+    if gv_argc >= 0 { sz = sz + 10; }  // lea r10,[rip+?](7) + mov [r10],rdi(3)
+    if gv_argv >= 0 { sz = sz + 10; }
+    sz = sz + 14;  // call(5) + mov edi,eax(2) + mov eax,60(5) + syscall(2)
+    return sz;
+}
+
 // ── Main ELF generation ──
 fn x86_64_elf_generate(buf: string) -> int {
     __builtin_syscall3(1, 1, "D:start
@@ -122,18 +159,17 @@ fn x86_64_elf_generate(buf: string) -> int {
     g_x86_str_count = 0;
     si := 0; loop { if si >= g_ir_str_const_count { break; } g2_str_off(r64(g_ir_str_consts, si * 8)); si = si + 1; }
 
-    // Phase 2: measure total code size and build function offset table
-    g_x86_func_off_count = 0;
-    total_code : ., mut = 22;  // _start base (mov rdi,[rsp](4)+lea rsi,[rsp+8](4)+call(5)+mov edi,eax(2)+mov eax,60(5)+syscall(2))
-    // Check if g_rt_argc/g_rt_argv_ptr globals exist (adds 10 bytes each for stores)
-    gv_argc : ., mut = -1; gv_argv : ., mut = -1;
+    // Find g_rt_argc/g_rt_argv_ptr globals for _start emission
+    gv_argc = -1; gv_argv = -1;
     gvsi : ., mut = 0;
     loop { if gvsi >= g_ir_global_count { break; }
         gni := r64(g_ir_globals, gvsi * 16);
         gnm := str_get(gni);
-        if __builtin_str_eq(gnm, "g_rt_argc") != 0 { gv_argc = r64(g_ir_globals, gvsi * 16 + 8); total_code = total_code + 10; }
-        if __builtin_str_eq(gnm, "g_rt_argv_ptr") != 0 { gv_argv = r64(g_ir_globals, gvsi * 16 + 8); total_code = total_code + 10; }
+        if __builtin_str_eq(gnm, "g_rt_argc") != 0 { gv_argc = r64(g_ir_globals, gvsi * 16 + 8); }
+        if __builtin_str_eq(gnm, "g_rt_argv_ptr") != 0 { gv_argv = r64(g_ir_globals, gvsi * 16 + 8); }
     gvsi = gvsi + 1; }
+    // Phase 2: compute _start size using same constants as emit_start
+    total_code : ., mut = emit_start_size();
 
     fi := 0; loop { if fi >= g_ir_func_count { break; }
         ni := r64(g_ir_func_name_idx, fi * 8);
@@ -185,37 +221,8 @@ fn x86_64_elf_generate(buf: string) -> int {
     // Phase 3: emit to buffer
     cp := 176;  // skip ELF header
 
-    // ── _start ──
-    // Save argc/argv from stack to globals (patched after BSS layout)
-    // mov rdi, [rsp] — argc from stack
-    w8(buf, cp, 72); w8(buf, cp+1, 139); w8(buf, cp+2, 60); w8(buf, cp+3, 36); cp = cp + 4;
-    // lea rsi, [rsp + 8] — argv from stack
-    w8(buf, cp, 72); w8(buf, cp+1, 141); w8(buf, cp+2, 115); w8(buf, cp+3, 8); cp = cp + 4;
-    // Store argc: lea r10, [rip + g_rt_argc]; mov [r10], rdi
-    if gv_argc >= 0 {
-        w8(buf, cp, 76); w8(buf, cp+1, 141); w8(buf, cp+2, 21); cp = cp + 3;  // lea r10, [rip+?]
-        dyn_grow_x86_rip_patch(g_x86_rip_patch_count + 1);
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, cp);
-        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argc);
-        g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
-        w32(buf, cp, 0); cp = cp + 4;  // placeholder disp32
-        w8(buf, cp, 77); w8(buf, cp+1, 137); w8(buf, cp+2, 58); cp = cp + 3;  // mov [r10], rdi
-    }
-    // Store argv: lea r10, [rip + g_rt_argv_ptr]; mov [r10], rsi
-    if gv_argv >= 0 {
-        w8(buf, cp, 76); w8(buf, cp+1, 141); w8(buf, cp+2, 21); cp = cp + 3;  // lea r10, [rip+?]
-        dyn_grow_x86_rip_patch(g_x86_rip_patch_count + 1);
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, cp);
-        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argv);
-        g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
-        w32(buf, cp, 0); cp = cp + 4;  // placeholder disp32
-        w8(buf, cp, 77); w8(buf, cp+1, 137); w8(buf, cp+2, 58); cp = cp + 3;  // mov [r10], rsi
-    }
-    call_main_pos := cp;
-    cp = cp + e2_call(buf, cp, 0);  // call main (rel=0 placeholder, patched later)
-    w8(buf, cp, 137); w8(buf, cp+1, 199); cp = cp + 2;  // mov edi, eax
-    w8(buf, cp, 184); w32(buf, cp+1, 60); cp = cp + 5;  // mov eax, 60
-    w8(buf, cp, 15); w8(buf, cp+1, 5); cp = cp + 2;  // syscall
+    // ── _start (measured size from Phase 2) ──
+    cp = cp + emit_start(buf, cp);
 
     // ── All functions ──
     g_x86_ret_patch_count = 0;
@@ -336,11 +343,8 @@ fn x86_64_elf_generate(buf: string) -> int {
         if r64(g_ir_func_name_idx, fi * 8) == main_ni { mo = r64(g_x86_func_offsets, fi*16+8); break; }
     fi = fi + 1; }
     if mo >= 0 {
-        rel := mo + 176 - call_main_pos - 5;
-        __builtin_print("  patch_call mo="); __builtin_print(__builtin_int_to_str(mo));
-        __builtin_print(" call_pos="); __builtin_print(__builtin_int_to_str(call_main_pos));
-        __builtin_print(" rel="); __builtin_println(__builtin_int_to_str(rel));
-        w32(buf, call_main_pos + 1, rel);
+        rel := mo + 176 - g_call_main_pos - 5;
+        w32(buf, g_call_main_pos + 1, rel);
     }
 
     // ── Write ELF header ──
