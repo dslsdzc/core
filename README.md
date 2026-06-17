@@ -54,8 +54,8 @@
 | | `toml.cr` — TOML 配置解析 | ✅ |
 | **编译器基础设施** | 自举编译器（Core 写编译器） | ✅ |
 | | x86-64 原生二进制输出（ELF，无需 as/ld） | ✅ |
-| | `-c` 解释器模式（直接执行代码） | ✅ |
-| | `--elf` 直接输出 ELF 可执行文件 | ✅ |
+| | `run` 子命令（直接执行代码） | ✅ |
+| | `build`/`ccr`/`cir`/`run` 子命令 | ✅ |
 | | CIR 数据流图（带完整类型/语义信息） | ✅ |
 | | `.ccr` 线性 CFG 中间表示 | ✅ |
 | | 错误诊断系统（Rust 风格源码定位） | ✅ |
@@ -74,13 +74,13 @@
 python3 build_selfhost_native.py
 
 # -c 模式：直接执行代码（解释器）
-./build/corec -c '__builtin_println("hello"); 42'
+./build/corec run '__builtin_println("hello"); 42'
 
 # 编译文件
-./build/corec hello.cr              # → hello.ccr
-./build/corearch hello.ccr -S       # → hello.s（汇编）
-./build/corearch hello.ccr --elf     # → a.out（ELF，无需 as/ld）
-as -o hello.o hello.s && ld ...      # 或用传统路径
+./build/corec ccr hello.cr              # → hello.ccr
+./build/corec cir hello.cr              # → hello.cir（数据流图）
+./build/corec build hello.cr --static   # → a.out（ELF，无需 as/ld）
+as -o hello.o hello.s && ld ...          # 或用传统路径
 
 # 通过引导编译器（Python）编译
 python3 tools/corec ir hello.cr      # → .cir 数据流图

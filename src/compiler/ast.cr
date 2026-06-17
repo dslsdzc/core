@@ -114,6 +114,9 @@ TY_NEVER : int = 5;
 TY_CHAR : int = 6;
 TY_GENERIC_PARAM : int = 7;  // special sentinel for generic type params
 MAX_GENERICS : int = 4;      // max generic params per declaration (language limit)
+MAX_STRUCT_FIELDS : int = 16; // max fields per struct (struct info size limit)
+MAX_ENUM_VARIANTS : int = 16; // max variants per enum (enum info size limit)
+MAX_VARIANT_TYPES : int = 16; // max payload types per variant
 
 // Token struct
 struct Token {

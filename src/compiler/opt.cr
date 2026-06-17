@@ -202,9 +202,10 @@ fn alloc_registers() {
             inst := ist + ii;
             op := iri_op(inst); d := iri_dest(inst); s1 := iri_s1(inst); s2 := iri_s2(inst);
             vars : string, mut;    vars_cap : int, mut; vc2 : ., mut = 0;
-            if d >= vs && d < vs + vc { w64(vars, vc2 * 8, d - vs); vc2 = vc2 + 1; }
-            if s1 >= vs && s1 < vs + vc { w64(vars, vc2 * 8, s1 - vs); vc2 = vc2 + 1; }
-            if s2 >= vs && s2 < vs + vc { w64(vars, vc2 * 8, s2 - vs); vc2 = vc2 + 1; }
+            if vars_cap == 0 { vars = __builtin_alloc(24); vars_cap = 3; }
+            if d >= vs && d < vs + vc { if vc2 < vars_cap { w64(vars, vc2 * 8, d - vs); vc2 = vc2 + 1; } }
+            if s1 >= vs && s1 < vs + vc { if vc2 < vars_cap { w64(vars, vc2 * 8, s1 - vs); vc2 = vc2 + 1; } }
+            if s2 >= vs && s2 < vs + vc { if vc2 < vars_cap { w64(vars, vc2 * 8, s2 - vs); vc2 = vc2 + 1; } }
             vj : ., mut = 0;
             loop { if vj >= vc2 { break; }
                 lv := r64(vars, vj * 8);
@@ -220,6 +221,7 @@ fn alloc_registers() {
 
         // Map local var index → physical register (-1 = stack)
         var_reg : string, mut;    var_reg_cap : int, mut;
+        var_reg = __builtin_alloc(2048); var_reg_cap = 256;
         vr_clear : ., mut = 0;
         loop { if vr_clear >= 256 { break; } w64(var_reg, vr_clear * 8, -1); vr_clear = vr_clear + 1; }
 
@@ -310,9 +312,10 @@ fn pass_stack_share() {
             inst := ist + ii;
             d := iri_dest(inst); s1 := iri_s1(inst); s2 := iri_s2(inst);
             va : string, mut;    va_cap : int, mut; vn : ., mut = 0;
-            if d >= vs && d < vs+vc { w64(va, vn * 8, d-vs); vn=vn+1; }
-            if s1 >= vs && s1 < vs+vc { w64(va, vn * 8, s1-vs); vn=vn+1; }
-            if s2 >= vs && s2 < vs+vc { w64(va, vn * 8, s2-vs); vn=vn+1; }
+            if va_cap == 0 { va = __builtin_alloc(24); va_cap = 3; }
+            if d >= vs && d < vs+vc { if vn < va_cap { w64(va, vn * 8, d-vs); vn=vn+1; } }
+            if s1 >= vs && s1 < vs+vc { if vn < va_cap { w64(va, vn * 8, s1-vs); vn=vn+1; } }
+            if s2 >= vs && s2 < vs+vc { if vn < va_cap { w64(va, vn * 8, s2-vs); vn=vn+1; } }
             vi2 : ., mut = 0;
             loop { if vi2 >= vn { break; }
                 lv := r64(va, vi2 * 8);

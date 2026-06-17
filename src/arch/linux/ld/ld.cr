@@ -99,7 +99,7 @@ fn cby(k: int) -> int {
         if i >= g_ch_count { break; }
         if r64(g_ch_kind, i * 8) == k { return i; }
         i = i + 1; }
-    return 0; }
+    return -1; }  // -1 = not found (callers must guard)
 
 // ============================================================
 // .so symbol lookup
@@ -258,8 +258,12 @@ fn emit(buf: string, total: int, is_so: int) {
 
         // .dynamic (also writes .dynstr)
         if k == 5 {
+            // Compute dynstr size: null + "core_rt.so\0" + all plt names
+            dn : ., mut = 1 + __builtin_str_len("core_rt.so") + 1;
+            dnp : ., mut = 0; loop { if dnp >= g_plt_count { break; }
+                dn = dn + __builtin_str_len(r64(g_plts, dnp * 16)) + 1; dnp = dnp + 1; }
             // Build dynstr
-            db : ., mut = __builtin_alloc(1024); w8(db,0,0); so_off : ., mut = 1;
+            db : ., mut = __builtin_alloc(dn); w8(db,0,0); so_off : ., mut = 1;
             j : ., mut = 0; loop { if j >= __builtin_str_len("core_rt.so") { break; }
                 w8(db,so_off+j, __builtin_load8("core_rt.so",j)); j=j+1; }
             w8(db,so_off+__builtin_str_len("core_rt.so"),0);

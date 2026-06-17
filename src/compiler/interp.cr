@@ -21,10 +21,15 @@ fn ir_interpret() -> int {
     node_count := r64(g_df_func_node_count, main_idx * 8);
     if node_start < 0 || node_count <= 0 { return -1; }
 
-    // Initialize value store
+    // Initialize value store (size = node_count + padding for destinations)
+    need := node_count + 64;
+    if g_ir_vals_cap < need {
+        g_ir_vals = __builtin_alloc(need * 8);
+        g_ir_vals_cap = need;
+    }
     vi : ., mut = 0;
     loop {
-        if vi >= 1024 { break; }
+        if vi >= need { break; }
         w64(g_ir_vals, vi * 8, 0);
         vi = vi + 1;
     }

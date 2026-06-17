@@ -573,8 +573,15 @@ fn is_new_var_decl() -> bool {
     if tok_k(p + 1) == T_COLON_EQ { return true; }
     // x : type ...
     if tok_k(p + 1) == T_COLON { return true; }
-    // a, b : type ... (batch)
-    if tok_k(p + 1) == T_COMMA && tok_k(p + 2) == T_IDENT && tok_k(p + 3) == T_COLON { return true; }
+    // a, b, ... : type ... or a, b, ... := ... (batch, any count)
+    if tok_k(p + 1) == T_COMMA {
+        i : ., mut = 2;
+        loop {
+            if tok_k(p + i) == T_IDENT && tok_k(p + i + 1) == T_COMMA { i = i + 2; continue; }
+            if tok_k(p + i) == T_IDENT && (tok_k(p + i + 1) == T_COLON || tok_k(p + i + 1) == T_COLON_EQ) { return true; }
+            break;
+        }
+    }
     return false;
 }
 
@@ -668,9 +675,12 @@ fn parse_new_var_decl() -> int {
         node := alloc_node(EXPR_LET, ni, typ, nv, 0, 0, is_mut, tok_ln(t), tok_cl(t));
         if i == 0 {
             first_node = node;
-        } else if g_extra_let_count < 16 {
-            w64(g_extra_lets, g_extra_let_count * 8, node);
-            g_extra_let_count = g_extra_let_count + 1;
+        } else {
+            if g_extra_lets_cap == 0 { g_extra_lets = __builtin_alloc(128); g_extra_lets_cap = 16; }
+            if g_extra_let_count < g_extra_lets_cap {
+                w64(g_extra_lets, g_extra_let_count * 8, node);
+                g_extra_let_count = g_extra_let_count + 1;
+            }
         }
         i = i + 1;
     }

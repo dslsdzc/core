@@ -359,6 +359,7 @@ fn load_ccr(data: string, fsize: int) -> int {
         if sti >= struct_cnt { break; }
         name_ni := buf_read_u32(data, pos); pos = pos + 4;
         fc := buf_read_u32(data, pos); pos = pos + 4;
+        if fc > MAX_STRUCT_FIELDS { __builtin_println("error: .ccr struct field count exceeds max"); return 1; }
         w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_NAME, name_ni);
         w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, fc);
         // Zero out all field slots and type nodes
@@ -393,6 +394,7 @@ fn load_ccr(data: string, fsize: int) -> int {
         if ei >= enum_cnt { break; }
         ename_ni := buf_read_u32(data, pos); pos = pos + 4;
         vc := buf_read_u32(data, pos); pos = pos + 4;
+        if vc > MAX_ENUM_VARIANTS { __builtin_println("error: .ccr enum variant count exceeds max"); return 1; }
         w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_NAME, ename_ni);
         w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, vc);
         // Zero all variant slots
@@ -414,6 +416,7 @@ fn load_ccr(data: string, fsize: int) -> int {
             if vi3 >= vc { break; }
             vni := buf_read_u32(data, pos); pos = pos + 4;
             tc := buf_read_u32(data, pos); pos = pos + 4;
+            if tc > MAX_VARIANT_TYPES { __builtin_println("error: .ccr variant type count exceeds max"); return 1; }
             w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vi3 * OFF_EV_SIZE + OFF_EV_NAME, vni);
             w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vi3 * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, tc);
             tf : ., mut = 0;
