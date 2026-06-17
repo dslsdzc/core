@@ -20,6 +20,7 @@ fn g2_slot(v: int) -> int {
     // Negative v = register encoding
     if v < 0 { return v; }
     // Stack sharing: if this var maps to another, use that var's slot
+    // g_stack_map is "" (0-length) when not allocated, which is safe to str_len
     if v >= 0 && __builtin_str_len(g_stack_map) > v * 8 {
         mapped := r64(g_stack_map, v * 8);
         if mapped >= 0 && mapped != v { v = mapped; }

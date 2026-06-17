@@ -4,7 +4,7 @@
 
 fn init_backend_arrays() {
     g_x86_var_count = 0; g_x86_stack_size = 0; g_x86_func_idx = 0; g_x86_is_enum_count = 0;
-    g_x86_var_cap = 0; g_x86_is_enum_cap = 0; }
+    g_x86_var_cap = 0; g_x86_is_enum_cap = 0; g_stack_map = ""; }
 
 fn split_links(val: string) {
     sl := __builtin_str_len(val); start : ., mut = 0; i : ., mut = 0;
@@ -54,7 +54,7 @@ fn corearch_main() -> int {
     // --shared: emit as ET_DYN
     if emit_so != 0 {
         if __builtin_str_len(out_path) == 0 { out_path = "core_lib.so"; }
-        g_elf_buf = __builtin_alloc(65536);
+        g_elf_buf = __builtin_alloc(16777216);
         sz := x86_64_elf_generate(g_elf_buf);
         w16(g_elf_buf, 16, 3);
         fd := __builtin_syscall3(2, out_path, 577, 420);
@@ -66,7 +66,7 @@ fn corearch_main() -> int {
 
     // Default: ELF (static or dynamic)
     if __builtin_str_len(out_path) == 0 { out_path = "a.out"; }
-    g_elf_buf = __builtin_alloc(65536);
+    g_elf_buf = __builtin_alloc(16777216);
 
     is_static := cli_has("static");
     if is_static == 0 && __builtin_str_len(link_val) == 0 {

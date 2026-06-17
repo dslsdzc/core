@@ -70,6 +70,9 @@ fn parse_type() -> int {
         }
         inner := parse_type();
         res = alloc_node(EXPR_REFTYPE, inner, 0, 0, is_mut, 0, 0, line, col);
+    } else if tok_k(t) == T_UNIT {
+        advance_tok();
+        res = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, line, col);
     } else if tok_k(t) == T_IDENT || tok_k(t) == T_SELF || tok_k(t) == T_UNDERSCORE {
         lex := tok_lx(t);
         advance_tok();
@@ -77,7 +80,6 @@ fn parse_type() -> int {
         else if lex == "float" { res = alloc_node(0, 0, 0, 0, 0, TY_FLOAT, 0, line, col); }
         else if lex == "bool" { res = alloc_node(0, 0, 0, 0, 0, TY_BOOL, 0, line, col); }
         else if lex == "string" { res = alloc_node(0, 0, 0, 0, 0, TY_STRING, 0, line, col); }
-        else if lex == "unit" { res = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, line, col); }
         else if lex == "char" { res = alloc_node(0, 0, 0, 0, 0, TY_CHAR, 0, line, col); }
         else if lex == "never" { res = alloc_node(0, 0, 0, 0, 0, TY_NEVER, 0, line, col); }
         else {
