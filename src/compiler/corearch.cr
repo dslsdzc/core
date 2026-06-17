@@ -69,10 +69,6 @@ fn corearch_main() -> int {
     g_elf_buf = __builtin_alloc(16777216);
 
     is_static := cli_has("static");
-    if is_static == 0 && __builtin_str_len(link_val) == 0 {
-        // Default: auto-detect dynamic linking
-        link_val = "auto";
-    }
 
     if __builtin_str_len(link_val) > 0 {
         ctx_init();
@@ -105,10 +101,16 @@ fn corearch_main() -> int {
         ci : ., mut = 0; loop { if ci >= cs { break; }
             __builtin_store8(cd, ci, __builtin_load8(g_elf_buf, 176+ci)); ci = ci + 1; }
 
-        if is_static != 0 && g_so_count > 0 {
-            // Static linking: embed .so code directly
-            ctx_set_user_code(cd, cs);
-            sz = ctx_emit_static(g_elf_buf, out_path);
+        if is_static != 0 {
+            if g_so_count > 0 {
+                ctx_set_user_code(cd, cs);
+                sz = ctx_emit_static(g_elf_buf, out_path);
+            } else {
+                // Pure static: write directly (rt.cr prepended by frontend)
+                fd := __builtin_syscall3(2, out_path, 577, 420);
+                if fd < 0 { __builtin_print("error: cannot write "); __builtin_println(out_path); return 1; }
+                __builtin_syscall3(1, fd, g_elf_buf, sz);
+                __builtin_syscall3(3, fd, 0, 0); }
         } else {
             // Dynamic linking: PLT/GOT
             ri : ., mut = 0; loop { if ri >= g_x86_ext_rel_count { break; }

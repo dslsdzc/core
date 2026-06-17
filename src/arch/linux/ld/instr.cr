@@ -17,8 +17,8 @@ fn g2_init() {
 }
 
 fn g2_slot(v: int) -> int {
-    // Negative v = register encoding
-    if v < 0 { return v; }
+    // Register encoding: v < -500 means register, with reg = -(v+1000)-1
+    if v < -500 { return v; }
     // Stack sharing: if this var maps to another, use that var's slot
     // g_stack_map is "" (0-length) when not allocated, which is safe to str_len
     if v >= 0 && __builtin_str_len(g_stack_map) > v * 8 {
@@ -68,9 +68,9 @@ fn e2_mov(b: string, p: int, d: int, s: int) -> int {
 }
 
 fn e2_ld(b: string, p: int, r: int, o: int) -> int {
-    // o < 0 and |o| ≤ 17: load from register (value = -(o+1))
-    if o < 0 && o >= -18 {
-        src_reg := (-o) - 1;
+    // o < -500: load from register (reg = -(o+1000)-1)
+    if o < -500 {
+        src_reg := -(o + 1000) - 1;
         return e2_mov(b, p, r, src_reg);
     }
     h := 0; if r >= 8 { h = 1; }
@@ -79,9 +79,9 @@ fn e2_ld(b: string, p: int, r: int, o: int) -> int {
 }
 
 fn e2_st(b: string, p: int, r: int, o: int) -> int {
-    // o < 0 and |o| ≤ 17: store to register (value = -(o+1))
-    if o < 0 && o >= -18 {
-        dst_reg := (-o) - 1;
+    // o < -500: store to register (reg = -(o+1000)-1)
+    if o < -500 {
+        dst_reg := -(o + 1000) - 1;
         return e2_mov(b, p, dst_reg, r);
     }
     h := 0; if r >= 8 { h = 1; }

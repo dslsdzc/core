@@ -259,19 +259,19 @@ fn alloc_registers() {
             if d >= vs && d < vs + vc {
                 lvi := d - vs;
                 if var_reg[lvi] >= 0 {
-                    iri_set_dest(inst, -(var_reg[lvi] + 1));
+                    iri_set_dest(inst, -(var_reg[lvi] + 1) - 1000);
                 }
             }
             if s1 >= vs && s1 < vs + vc {
                 lvi := s1 - vs;
                 if var_reg[lvi] >= 0 {
-                    iri_set_s1(inst, -(var_reg[lvi] + 1));
+                    iri_set_s1(inst, -(var_reg[lvi] + 1) - 1000);
                 }
             }
             if s2 >= vs && s2 < vs + vc {
                 lvi := s2 - vs;
                 if var_reg[lvi] >= 0 {
-                    iri_set_s2(inst, -(var_reg[lvi] + 1));
+                    iri_set_s2(inst, -(var_reg[lvi] + 1) - 1000);
                 }
             }
             ii = ii + 1;

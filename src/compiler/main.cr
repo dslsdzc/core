@@ -250,6 +250,10 @@ fn corec_main() -> int {
     }
 
     // Frontend pipeline
+    // --static: prepend rt.cr so __builtin_* functions inline
+    if cli_has("static") != 0 {
+        rt_src := __builtin_read_file("src/runtime/rt.cr");
+        if __builtin_str_len(rt_src) > 0 { g_source = rt_src + "\n" + g_source; } }
     tokenize();
     resolve_imports();
     parse_all();

@@ -124,7 +124,16 @@ fn x86_64_elf_generate(buf: string) -> int {
 
     // Phase 2: measure total code size and build function offset table
     g_x86_func_off_count = 0;
-    total_code : ., mut = 14;  // _start stub
+    total_code : ., mut = 22;  // _start base (mov rdi,[rsp](4)+lea rsi,[rsp+8](4)+call(5)+mov edi,eax(2)+mov eax,60(5)+syscall(2))
+    // Check if g_rt_argc/g_rt_argv_ptr globals exist (adds 10 bytes each for stores)
+    gv_argc : ., mut = -1; gv_argv : ., mut = -1;
+    gvsi : ., mut = 0;
+    loop { if gvsi >= g_ir_global_count { break; }
+        gni := r64(g_ir_globals, gvsi * 16);
+        gnm := str_get(gni);
+        if __builtin_str_eq(gnm, "g_rt_argc") != 0 { gv_argc = r64(g_ir_globals, gvsi * 16 + 8); total_code = total_code + 10; }
+        if __builtin_str_eq(gnm, "g_rt_argv_ptr") != 0 { gv_argv = r64(g_ir_globals, gvsi * 16 + 8); total_code = total_code + 10; }
+    gvsi = gvsi + 1; }
 
     fi := 0; loop { if fi >= g_ir_func_count { break; }
         ni := r64(g_ir_func_name_idx, fi * 8);
@@ -182,15 +191,6 @@ fn x86_64_elf_generate(buf: string) -> int {
     w8(buf, cp, 72); w8(buf, cp+1, 139); w8(buf, cp+2, 60); w8(buf, cp+3, 36); cp = cp + 4;
     // lea rsi, [rsp + 8] — argv from stack
     w8(buf, cp, 72); w8(buf, cp+1, 141); w8(buf, cp+2, 115); w8(buf, cp+3, 8); cp = cp + 4;
-    // Find global IR vars for argc/argv
-    gv_argc : ., mut = -1; gv_argv : ., mut = -1;
-    gvi_s : ., mut = 0;
-    loop { if gvi_s >= g_ir_global_count { break; }
-        gni := r64(g_ir_globals, gvi_s * 16);
-        gnm := str_get(gni);
-        if __builtin_str_eq(gnm, "g_rt_argc") != 0 { gv_argc = r64(g_ir_globals, gvi_s * 16 + 8); }
-        if __builtin_str_eq(gnm, "g_rt_argv_ptr") != 0 { gv_argv = r64(g_ir_globals, gvi_s * 16 + 8); }
-    gvi_s = gvi_s + 1; }
     // Store argc: lea r10, [rip + g_rt_argc]; mov [r10], rdi
     if gv_argc >= 0 {
         w8(buf, cp, 76); w8(buf, cp+1, 141); w8(buf, cp+2, 21); cp = cp + 3;  // lea r10, [rip+?]
@@ -336,7 +336,10 @@ fn x86_64_elf_generate(buf: string) -> int {
         if r64(g_ir_func_name_idx, fi * 8) == main_ni { mo = r64(g_x86_func_offsets, fi*16+8); break; }
     fi = fi + 1; }
     if mo >= 0 {
-        rel := mo - 5;
+        rel := mo + 176 - call_main_pos - 5;
+        __builtin_print("  patch_call mo="); __builtin_print(__builtin_int_to_str(mo));
+        __builtin_print(" call_pos="); __builtin_print(__builtin_int_to_str(call_main_pos));
+        __builtin_print(" rel="); __builtin_println(__builtin_int_to_str(rel));
         w32(buf, call_main_pos + 1, rel);
     }
 
