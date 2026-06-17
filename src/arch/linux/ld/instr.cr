@@ -78,6 +78,18 @@ fn e2_ld(b: string, p: int, r: int, o: int) -> int {
     e2_w8(b, p+2, 64 + (r%8)*8 + 5); e2_w8(b, p+3, o); return 4;
 }
 
+fn e2_mov_size(d: int, s: int) -> int { return 3; }
+fn e2_ld_size(r: int, o: int) -> int { return 4; }
+fn e2_st_size(r: int, o: int) -> int { return 4; }
+fn e2_alu_size(op: int) -> int { return 3; }
+fn e2_li_size(v: int) -> int { return 8; }
+fn e2_lr_size(rel: int) -> int { return 7; }
+fn e2_lrb_size(rel: int) -> int { return 7; }
+fn e2_lb_size(r: int, o: int) -> int { return 4; }
+fn e2_call_size(rel: int) -> int { return 5; }
+fn e2_jmp_size(rel: int) -> int { return 5; }
+fn e2_je_size(rel: int) -> int { return 6; }
+
 fn e2_st(b: string, p: int, r: int, o: int) -> int {
     // o < -500: store to register (reg = -(o+1000)-1)
     if o < -500 {
@@ -131,7 +143,7 @@ fn arch_instr_size(instr_idx: int) -> int {
         return 8;
     }
     if op == IR_BINARY {
-        sz := 4 + 4 + 3 + 4;
+        sz := e2_ld_size(10, 0) + e2_ld_size(11, 0) + 3 + e2_st_size(10, 0);
         if s3 == OP_MUL { sz = sz + 1; }
         if s3 == OP_SHL || s3 == OP_SHR { sz = sz + 3; }
         if s3 == OP_DIV || s3 == OP_MOD { sz = sz + 3 + 2 + 3 + 3; }
@@ -139,7 +151,7 @@ fn arch_instr_size(instr_idx: int) -> int {
         return sz;
     }
     if op == IR_UNARY {
-        sz := 4 + 3 + 4;
+        sz := e2_ld_size(10, 0) + 3 + e2_st_size(10, 0);
         if s3 == UOP_NOT { sz = sz + 3 + 3 + 4; }
         return sz;
     }
