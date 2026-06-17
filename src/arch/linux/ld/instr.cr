@@ -143,22 +143,36 @@ fn arch_instr_size(instr_idx: int) -> int {
         return 8;
     }
     if op == IR_BINARY {
-        sz := e2_ld_size(10, 0) + e2_ld_size(11, 0) + 3 + e2_st_size(10, 0);
-        if s3 == OP_MUL { sz = sz + 1; }
-        if s3 == OP_SHL || s3 == OP_SHR { sz = sz + 3; }
-        if s3 == OP_DIV || s3 == OP_MOD { sz = sz + 3 + 2 + 3 + 3; }
-        if s3 >= OP_EQ && s3 <= OP_GE { sz = sz + 3 + 4; }
+        sz := e2_ld_size(10, 0) + e2_ld_size(11, 0) + e2_st_size(10, 0);
+        if s3 == OP_DIV || s3 == OP_MOD {
+            sz = sz + 3 + 2 + 3 + 3;
+        } else {
+            sz = sz + 3;
+            if s3 == OP_MUL { sz = sz + 1; }
+            if s3 == OP_SHL || s3 == OP_SHR { sz = sz + 3; }
+            if s3 >= OP_EQ && s3 <= OP_GE { sz = sz + 3 + 4; }
+        }
         return sz;
     }
     if op == IR_UNARY {
-        sz := e2_ld_size(10, 0) + 3 + e2_st_size(10, 0);
-        if s3 == UOP_NOT { sz = sz + 3 + 3 + 4; }
+        sz := e2_ld_size(10, 0) + e2_st_size(10, 0);
+        if s3 == UOP_NOT {
+            sz = sz + 3 + 3 + 4;
+        } else {
+            sz = sz + 3;
+        }
         return sz;
     }
     if op == IR_CALL {
         fn2 := ""; if s3 >= 0 { fn2 = str_get(s3); }
         if __builtin_str_eq(fn2, "__builtin_syscall3") != 0 {
-            sz := iri_s2(instr_idx) * 4 + 17; if d >= 0 { sz = sz + 4; } return sz;
+            sz := iri_s2(instr_idx) * 4 + 14; if d >= 0 { sz = sz + 4; } return sz;
+        }
+        if __builtin_str_eq(fn2, "__builtin_load8") != 0 {
+            sz := iri_s2(instr_idx) * 4 + 5; if d >= 0 { sz = sz + 4; } return sz;
+        }
+        if __builtin_str_eq(fn2, "__builtin_store8") != 0 {
+            sz := iri_s2(instr_idx) * 4 + 3; return sz;
         }
         if s3 >= 0 {
             sz := iri_s2(instr_idx) * 4 + 5; if d >= 0 { sz = sz + 4; } return sz;
@@ -221,8 +235,8 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         if s3 == OP_ADD         { cp = cp + e2_alu(buf, pos+cp, 1); }
         else if s3 == OP_SUB    { cp = cp + e2_alu(buf, pos+cp, 41); }
         else if s3 == OP_MUL    { e2_w8(buf, pos+cp, 77); e2_w8(buf, pos+cp+1, 15); e2_w8(buf, pos+cp+2, 175); e2_w8(buf, pos+cp+3, 211); cp = cp + 4; }
-        else if s3 == OP_SHL    { e2_w8(buf, pos+cp, 73); e2_w8(buf, pos+cp+1, 199); e2_w8(buf, pos+cp+2, 194); e2_w8(buf, pos+cp+3, 0); e2_w8(buf, pos+cp+4, 0); e2_w8(buf, pos+cp+5, 0); cp = cp + 6; }
-        else if s3 == OP_SHR    { e2_w8(buf, pos+cp, 73); e2_w8(buf, pos+cp+1, 199); e2_w8(buf, pos+cp+2, 232); e2_w8(buf, pos+cp+3, 0); e2_w8(buf, pos+cp+4, 0); e2_w8(buf, pos+cp+5, 0); cp = cp + 6; }
+        else if s3 == OP_SHL    { e2_w8(buf, pos+cp, 73); e2_w8(buf, pos+cp+1, 137); e2_w8(buf, pos+cp+2, 217); cp = cp + 3; e2_w8(buf, pos+cp, 73); e2_w8(buf, pos+cp+1, 211); e2_w8(buf, pos+cp+2, 226); cp = cp + 3; }
+        else if s3 == OP_SHR    { e2_w8(buf, pos+cp, 73); e2_w8(buf, pos+cp+1, 137); e2_w8(buf, pos+cp+2, 217); cp = cp + 3; e2_w8(buf, pos+cp, 73); e2_w8(buf, pos+cp+1, 211); e2_w8(buf, pos+cp+2, 234); cp = cp + 3; }
         else if s3 == OP_DIV || s3 == OP_MOD {
             cp = cp + e2_mov(buf, pos+cp, 0, 10);
             e2_w8(buf, pos+cp, 72); e2_w8(buf, pos+cp+1, 153); cp = cp + 2;
@@ -268,9 +282,13 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
             cp = cp + e2_mov(buf, pos+cp, 7, 6);
             cp = cp + e2_mov(buf, pos+cp, 6, 2);
             cp = cp + e2_mov(buf, pos+cp, 2, 1);
-            e2_w8(buf, pos+cp, 77); e2_w8(buf, pos+cp+1, 49); e2_w8(buf, pos+cp+2, 210); cp = cp + 3;
             e2_w8(buf, pos+cp, 15); e2_w8(buf, pos+cp+1, 5); cp = cp + 2;
             if d >= 0 { cp = cp + e2_st(buf, pos+cp, 0, g2_slot(d)); }
+        } else if __builtin_str_eq(fn2, "__builtin_load8") != 0 {
+            e2_w8(buf, pos+cp, 72); e2_w8(buf, pos+cp+1, 15); e2_w8(buf, pos+cp+2, 182); e2_w8(buf, pos+cp+3, 4); e2_w8(buf, pos+cp+4, 55); cp = cp + 5;
+            if d >= 0 { cp = cp + e2_st(buf, pos+cp, 0, g2_slot(d)); }
+        } else if __builtin_str_eq(fn2, "__builtin_store8") != 0 {
+            e2_w8(buf, pos+cp, 136); e2_w8(buf, pos+cp+1, 20); e2_w8(buf, pos+cp+2, 55); cp = cp + 3;
         } else if __builtin_str_len(fn2) > 0 {
             to := -1; tf := 0;
             loop { if tf >= g_x86_func_off_count { break; } if r64(g_x86_func_offsets, tf*16) == s3 { to = r64(g_x86_func_offsets, tf*16+8); break; } tf = tf + 1; }

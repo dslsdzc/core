@@ -68,28 +68,36 @@ g_user_size : int, mut;
 g_text_base : int, mut;
 
 // Flat chunk arrays (avoid struct array compiler limitation)
-g_ch_kind : [int; 10], mut;
-g_ch_vaddr : [int; 10], mut;
-g_ch_foff : [int; 10], mut;
-g_ch_size : [int; 10], mut;
+g_ch_kind : string, mut;                                    g_ch_kind_cap : int, mut;
+g_ch_vaddr : string, mut;   g_ch_vaddr_cap : int, mut;
+g_ch_foff : string, mut;   g_ch_foff_cap : int, mut;
+g_ch_size : string, mut;   g_ch_size_cap : int, mut;
 g_ch_count : int, mut;
 
 // ============================================================
 // Chunk helpers
 // ============================================================
 
+fn dyn_grow_chunks(needed: int) {
+    nc : ., mut = g_ch_kind_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
+    nb := __builtin_alloc(nc * 8); zi : ., mut = 0; loop { if zi >= nc * 8 { break; } __builtin_store8(nb, zi, 0); zi = zi + 1; } _dyncpy(g_ch_kind, g_ch_kind_cap * 8, nb); g_ch_kind = nb; g_ch_kind_cap = nc;
+    nb2 := __builtin_alloc(nc * 8); zi = 0; loop { if zi >= nc * 8 { break; } __builtin_store8(nb2, zi, 0); zi = zi + 1; } _dyncpy(g_ch_vaddr, g_ch_vaddr_cap * 8, nb2); g_ch_vaddr = nb2; g_ch_vaddr_cap = nc;
+    nb3 := __builtin_alloc(nc * 8); zi = 0; loop { if zi >= nc * 8 { break; } __builtin_store8(nb3, zi, 0); zi = zi + 1; } _dyncpy(g_ch_foff, g_ch_foff_cap * 8, nb3); g_ch_foff = nb3; g_ch_foff_cap = nc;
+    nb4 := __builtin_alloc(nc * 8); zi = 0; loop { if zi >= nc * 8 { break; } __builtin_store8(nb4, zi, 0); zi = zi + 1; } _dyncpy(g_ch_size, g_ch_size_cap * 8, nb4); g_ch_size = nb4; g_ch_size_cap = nc; }
+
 fn cnew(k: int) {
-    g_ch_kind[g_ch_count] = k;
-    g_ch_vaddr[g_ch_count] = 0;
-    g_ch_foff[g_ch_count] = 0;
-    g_ch_size[g_ch_count] = 0;
+    dyn_grow_chunks(g_ch_count + 1);
+    w64(g_ch_kind, g_ch_count * 8, k);
+    w64(g_ch_vaddr, g_ch_count * 8, 0);
+    w64(g_ch_foff, g_ch_count * 8, 0);
+    w64(g_ch_size, g_ch_count * 8, 0);
     g_ch_count = g_ch_count + 1; }
 
 fn cby(k: int) -> int {
     i : ., mut = 0;
     loop {
         if i >= g_ch_count { break; }
-        if g_ch_kind[i] == k { return i; }
+        if r64(g_ch_kind, i * 8) == k { return i; }
         i = i + 1; }
     return 0; }
 
@@ -143,8 +151,8 @@ fn layout() {
         va : ., mut = g_text_base;
     i : ., mut = 0; loop { if i >= g_ch_count { break; }
         sz : ., mut = 0;
-        k := g_ch_kind[i];
-        if k == 0 { sz = 288; }
+        k := r64(g_ch_kind, i * 8);
+        if k == 0 { sz = 344; }
         if k == 1 { sz = 29; }
         if k == 2 { sz = g_user_size; }
         if k == 3 { sz = 32 + g_plt_count * 16; }
@@ -156,9 +164,9 @@ fn layout() {
             j : ., mut = 0; loop { if j >= g_plt_count { break; }
                 sz = sz + __builtin_str_len(r64(g_plts, j * 16)) + 1; j = j + 1; } }
         if k == 8 { sz = g_plt_count * 24; }
-        g_ch_vaddr[i] = va;
-        g_ch_foff[i] = va - g_text_base;
-        g_ch_size[i] = sz;
+        w64(g_ch_vaddr, i * 8, va);
+        w64(g_ch_foff, i * 8, va - g_text_base);
+        w64(g_ch_size, i * 8, sz);
         va = va + sz;
         i = i + 1; }
      }
@@ -174,8 +182,8 @@ fn emit(buf: string, total: int, is_so: int) {
     zi : ., mut = 0; loop { if zi >= total { break; } w8(buf, zi, 0); zi = zi + 1; }
     tb := g_text_base;
     i : ., mut = 0; loop { if i >= g_ch_count { break; }
-        p : ., mut = g_ch_foff[i]; k := g_ch_kind[i];
-         __builtin_println(__builtin_int_to_str(k));
+        p : ., mut = r64(g_ch_foff, i * 8); k := r64(g_ch_kind, i * 8);
+
 
         // Ehdr: ELF header + 4 program headers
         if k == 0 {
@@ -183,25 +191,31 @@ fn emit(buf: string, total: int, is_so: int) {
             w8(buf,4,2);w8(buf,5,1);w8(buf,6,1);
             etype : ., mut = 2; if is_so != 0 { etype = 3; }
             w16(buf,16,etype);w16(buf,18,62);w32(buf,20,1);
-            uv := cby(2); ev := g_ch_vaddr[uv];
+            uv := cby(2); ev := r64(g_ch_vaddr, uv * 8);
             w64(buf,24,ev); w64(buf,32,64); w64(buf,40,0);
-            w16(buf,52,64);w16(buf,54,56);w16(buf,56,4);w16(buf,58,64);
-            pe := g_ch_size[i];  // size of this chunk (EHDR+PHDRs)
+            w16(buf,52,64);w16(buf,54,56);w16(buf,56,5);w16(buf,58,64);
+            pe := r64(g_ch_size, i * 8);  // size of this chunk (EHDR+PHDRs)
             // PT_PHDR
             w32(buf,64,6);w32(buf,68,4);w64(buf,72,64);w64(buf,80,tb+64);
             w64(buf,88,tb+64);w64(buf,96,pe-64);w64(buf,104,pe-64);w64(buf,112,8);
             // PT_INTERP
             ic := cby(1);
-            w32(buf,120,3);w32(buf,124,4);w64(buf,128,g_ch_foff[ic]);
-            w64(buf,136,g_ch_vaddr[ic]);w64(buf,144,g_ch_vaddr[ic]);
-            w64(buf,152,g_ch_size[ic]);w64(buf,160,g_ch_size[ic]);w64(buf,168,1);
+            w32(buf,120,3);w32(buf,124,4);w64(buf,128,r64(g_ch_foff, ic * 8));
+            w64(buf,136,r64(g_ch_vaddr, ic * 8));w64(buf,144,r64(g_ch_vaddr, ic * 8));
+            w64(buf,152,r64(g_ch_size, ic * 8));w64(buf,160,r64(g_ch_size, ic * 8));w64(buf,168,1);
             // PT_LOAD (RX)
-            fs := g_ch_vaddr[g_ch_count-1] + g_ch_size[g_ch_count-1] - tb;
-            w32(buf,176,1);w32(buf,180,5);w64(buf,184,0);
+            fs := r64(g_ch_vaddr, (g_ch_count - 1) * 8) + r64(g_ch_size, (g_ch_count - 1) * 8) - tb;
+            w32(buf,176,1);w32(buf,180,7);w64(buf,184,0);
             w64(buf,192,tb);w64(buf,200,tb);w64(buf,208,fs);w64(buf,216,fs);w64(buf,224,4096);
             // PT_GNU_STACK
             w32(buf,232,1685382481);w32(buf,236,6);w64(buf,240,0);
-            w64(buf,248,0);w64(buf,256,0);w64(buf,264,0);w64(buf,272,0);w64(buf,280,8); }
+            w64(buf,248,0);w64(buf,256,0);w64(buf,264,0);w64(buf,272,0);w64(buf,280,8);
+            // PT_DYNAMIC
+            dc := cby(5);
+            w32(buf,288,2);w32(buf,292,4);
+            w64(buf,296,r64(g_ch_foff, dc * 8));w64(buf,304,r64(g_ch_vaddr, dc * 8));
+            w64(buf,312,r64(g_ch_vaddr, dc * 8));
+            w64(buf,320,r64(g_ch_size, dc * 8));w64(buf,328,r64(g_ch_size, dc * 8));w64(buf,336,8); }
 
         // Interp
         if k == 1 {
@@ -217,23 +231,29 @@ fn emit(buf: string, total: int, is_so: int) {
 
         // PLT
         if k == 3 {
-                        gv := g_ch_vaddr[cby(4)]; pv := g_ch_vaddr[i];
-                        r1 := (gv+8)-(pv+6); w8(buf,p,255);w8(buf,p+1,53);w32s(buf,p+2,r1);            r2 := (gv+16)-(pv+12); w8(buf,p+6,255);w8(buf,p+7,37);w32s(buf,p+8,r2);            jz : ., mut = 12; loop { if jz >= 32 { break; } w8(buf,p+jz,204); jz=jz+1; }
+            gv := r64(g_ch_vaddr, cby(4) * 8); pv := r64(g_ch_vaddr, i * 8);
+            r1 := (gv+8)-(pv+6); w8(buf,p,255);w8(buf,p+1,53);w32s(buf,p+2,r1);
+            r2 := (gv+16)-(pv+12); w8(buf,p+6,255);w8(buf,p+7,37);w32s(buf,p+8,r2);
+            // 4-byte nop (not INT3)
+            w8(buf,p+12,15);w8(buf,p+13,31);w8(buf,p+14,64);w8(buf,p+15,0);
             pi : ., mut = 0; loop { if pi >= g_plt_count { break; }
-                eo := p+32+pi*16;
-                w8(buf,eo,243);w8(buf,eo+1,15);w8(buf,eo+2,30);w8(buf,eo+3,250);
-                w8(buf,eo+4,104);w8(buf,eo+5,pi%256);
-                w8(buf,eo+6,255);w8(buf,eo+7,37);
-                r3 := (gv+24+pi*8)-(eo+12); w32s(buf,eo+8,r3);
+                eo := p+16+pi*16;
+                ev := pv + 16 + pi*16;
+                // jmp [GOT[3+pi]]
+                rg := (gv+24+pi*8)-(ev+6); w8(buf,eo,255);w8(buf,eo+1,37);w32s(buf,eo+2,rg);
+                // push $pi (5 bytes)
+                w8(buf,eo+6,104); w32(buf,eo+7,pi);
+                // jmp PLT[0]
+                rp := pv - (ev + 16); w8(buf,eo+11,233); w32s(buf,eo+12,rp);
                 pi=pi+1; }  }
 
         // GOT.PLT
         if k == 4 {
-                        dv := g_ch_vaddr[cby(5)];
+                        dv := r64(g_ch_vaddr, cby(5) * 8);
             w64(buf,p,dv);w64(buf,p+8,0);w64(buf,p+16,0);
             pi : ., mut = 0; loop { if pi >= g_plt_count { break; }
-                pv2 := g_ch_vaddr[cby(3)];
-                w64(buf,p+24+pi*8,pv2+32+pi*16+4);
+                pv2 := r64(g_ch_vaddr, cby(3) * 8);
+                w64(buf,p+24+pi*8,pv2+16+pi*16+6);
                 pi=pi+1; } }
 
         // .dynamic (also writes .dynstr)
@@ -251,17 +271,17 @@ fn emit(buf: string, total: int, is_so: int) {
                 nxt=nxt+__builtin_str_len(r64(g_plts, pi * 16))+1; pi=pi+1; }
             // Write dynstr to its chunk
             dsc := cby(7);
-            di2 : ., mut = 0; loop { if di2 >= __builtin_str_len(db) { break; }
-                w8(buf,g_ch_foff[dsc]+di2,bu8(db,di2)); di2=di2+1; }
+            di2 : ., mut = 0; loop { if di2 >= nxt { break; }
+                w8(buf,r64(g_ch_foff, dsc * 8)+di2,bu8(db,di2)); di2=di2+1; }
             // Write dynamic entries
-            sv := g_ch_vaddr[cby(6)]; dv2 := g_ch_vaddr[dsc];
-            gv2 := g_ch_vaddr[cby(4)]; rv := g_ch_vaddr[cby(8)];
-            rs := g_ch_size[cby(8)];
+            sv := r64(g_ch_vaddr, cby(6) * 8); dv2 := r64(g_ch_vaddr, dsc * 8);
+            gv2 := r64(g_ch_vaddr, cby(4) * 8); rv := r64(g_ch_vaddr, cby(8) * 8);
+            rs := r64(g_ch_size, cby(8) * 8);
             de : ., mut = 0;
-            w64(buf,p+de*16,5);w64(buf,p+de*16+8,sv);de=de+1;  // DT_SYMTAB
+            w64(buf,p+de*16,5);w64(buf,p+de*16+8,dv2);de=de+1;  // DT_STRTAB
             w64(buf,p+de*16,11);w64(buf,p+de*16+8,24);de=de+1;
-            w64(buf,p+de*16,6);w64(buf,p+de*16+8,dv2);de=de+1;  // DT_STRTAB
-            w64(buf,p+de*16,10);w64(buf,p+de*16+8,g_ch_size[dsc]);de=de+1;
+            w64(buf,p+de*16,6);w64(buf,p+de*16+8,sv);de=de+1;  // DT_SYMTAB
+            w64(buf,p+de*16,10);w64(buf,p+de*16+8,r64(g_ch_size, dsc * 8));de=de+1;
             w64(buf,p+de*16,3);w64(buf,p+de*16+8,gv2);de=de+1;  // DT_PLTGOT
             w64(buf,p+de*16,2);w64(buf,p+de*16+8,rs);de=de+1;
             w64(buf,p+de*16,20);w64(buf,p+de*16+8,7);de=de+1;  // DT_PLTREL=RELA
@@ -269,17 +289,23 @@ fn emit(buf: string, total: int, is_so: int) {
             w64(buf,p+de*16,1);w64(buf,p+de*16+8,so_off);de=de+1;  // DT_NEEDED
             w64(buf,p+de*16,0);w64(buf,p+de*16+8,0); }
         
-        // .dynsym (already written by DynChunk for entries 1+, write null entry here)
+        // .dynsym
         if k == 6 {
-            pi : ., mut = 0; loop { if pi < 1+g_plt_count { break; }
-                so := p+pi*24;
-                w32(buf,so,0);w8(buf,so+4,0);w8(buf,so+5,0);
-                w16(buf,so+6,0);w64(buf,so+8,0);w64(buf,so+16,0);
+            w32(buf,p,0);w8(buf,p+4,0);w8(buf,p+5,0);w16(buf,p+6,0);
+            w64(buf,p+8,0);w64(buf,p+16,0);
+            so_off2 : ., mut = 1;
+            nxt2 : ., mut = 12;
+            pi : ., mut = 0; loop { if pi >= g_plt_count { break; }
+                so2 := p+(pi+1)*24;
+                w32(buf,so2,nxt2);
+                w8(buf,so2+4,18); w8(buf,so2+5,0);
+                w16(buf,so2+6,0); w64(buf,so2+8,0); w64(buf,so2+16,0);
+                nxt2 = nxt2 + __builtin_str_len(r64(g_plts, pi * 16)) + 1;
                 pi=pi+1; } }
 
         // .rela.plt
         if k == 8 {
-            gv3 := g_ch_vaddr[cby(4)];
+            gv3 := r64(g_ch_vaddr, cby(4) * 8);
             pi : ., mut = 0; loop { if pi >= g_plt_count { break; }
                 ro := p+pi*24;
                 w64(buf,ro,gv3+24+pi*8);
@@ -294,8 +320,8 @@ fn emit(buf: string, total: int, is_so: int) {
 
 fn patch_relocs() {
     if g_x86_ext_rel_count == 0 { return; }
-    uc := cby(2); uv := g_ch_vaddr[uc];
-    pv := g_ch_vaddr[cby(3)];
+    uc := cby(2); uv := r64(g_ch_vaddr, uc * 8);
+    pv := r64(g_ch_vaddr, cby(3) * 8);
     ri : ., mut = 0; loop { if ri >= g_x86_ext_rel_count { break; }
         abs_pos := r64(g_x86_ext_rel_pos, ri * 8);
         code_off : ., mut = abs_pos - 176;
@@ -308,9 +334,9 @@ fn patch_relocs() {
             si = si + 1; }
         if plt_idx >= 0 {
             call_va := uv + code_off;
-            plt_va2 := pv + 32 + plt_idx * 16;
+            plt_va2 := pv + 16 + plt_idx * 16;
             rel := plt_va2 - call_va - 5;
-            w32s(g_user_code, code_off + 1, rel); }
+            w32s(g_user_code, code_off, rel); }
         ri = ri + 1; } }
 
 // ============================================================
@@ -331,7 +357,7 @@ fn ctx_emit_dyn(buf: string, path: string) -> int {
         cnew(0); cnew(1); cnew(2); cnew(3); cnew(4); cnew(5); cnew(6); cnew(7); cnew(8);
         layout();
         patch_relocs();
-        total := g_ch_vaddr[g_ch_count-1] + g_ch_size[g_ch_count-1] - g_text_base;
+        total := r64(g_ch_vaddr, (g_ch_count - 1) * 8) + r64(g_ch_size, (g_ch_count - 1) * 8) - g_text_base;
      __builtin_println(__builtin_int_to_str(total));
     emit(buf, total, 0);
         fd := __builtin_syscall3(2, path, 577, 420);
@@ -345,7 +371,7 @@ fn ctx_emit_so(buf: string, path: string) -> int {
     cnew(0); cnew(2);
     g_ch_count = 2;
     layout();
-    total := g_ch_vaddr[g_ch_count-1] + g_ch_size[g_ch_count-1] - g_text_base;
+    total := r64(g_ch_vaddr, (g_ch_count - 1) * 8) + r64(g_ch_size, (g_ch_count - 1) * 8) - g_text_base;
     emit(buf, total, 1);
     fd := __builtin_syscall3(2, path, 577, 420);
     if fd < 0 { return -1; }

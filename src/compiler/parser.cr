@@ -4,7 +4,7 @@
 g_token_pos : int, mut;
 
 // Buffer for batch declaration overflow (a, b : int = 1, 2)
-g_extra_lets : [int; 16], mut;
+g_extra_lets : string, mut;    g_extra_lets_cap : int, mut;
 g_extra_let_count : int, mut;
 
 // Flag: when set, IDENT { is NOT parsed as struct literal
@@ -541,13 +541,14 @@ fn parse_primary() -> int {
 
 fn parse_block() -> int {
     t := advance_tok();
-    local_stmts : [int; 512], mut;
+    local_stmts : string, mut;    local_stmts_cap : int, mut;
+    local_stmts = __builtin_alloc(256 * 8); local_stmts_cap = 256;
     sc : ., mut = 0;
     loop {
         if check(T_RBRACE) || check(T_EOF) { break; }
         st := parse_stmt();
         if sc < 512 {
-            local_stmts[sc] = st;
+            w64(local_stmts, sc * 8, st);
         }
         sc = sc + 1;
     }
@@ -558,7 +559,7 @@ fn parse_block() -> int {
     loop {
         if i >= sc { break; }
         dyn_grow_block_stmts(g_block_stmt_count + 1);
-        w64(g_block_stmts, g_block_stmt_count * 8, local_stmts[i]);
+        w64(g_block_stmts, g_block_stmt_count * 8, r64(local_stmts, i * 8));
         g_block_stmt_count = g_block_stmt_count + 1;
         i = i + 1;
     }
@@ -579,12 +580,14 @@ fn is_new_var_decl() -> bool {
 
 fn parse_new_var_decl() -> int {
     t := cur_tok();
-    names : [string; 4], mut;
+    names : string, mut;    names_cap : int, mut;
+    names = __builtin_alloc(64 * 8);
+    names_cap = 64;
     nc : ., mut = 0;
 
     // Parse name list
     nt := advance_tok();
-    names[nc] = tok_lx(nt);
+    w64(names, nc * 8, tok_lx(nt));
     nc = nc + 1;
     // Batch: a, b : type = ...
     if check(T_COMMA) {
@@ -592,7 +595,7 @@ fn parse_new_var_decl() -> int {
             if !check(T_COMMA) { break; }
             advance_tok(); // ,
             nt2 := advance_tok();
-            names[nc] = tok_lx(nt2);
+            w64(names, nc * 8, tok_lx(nt2));
             nc = nc + 1;
         }
     }
@@ -600,17 +603,18 @@ fn parse_new_var_decl() -> int {
     typ : ., mut = -1;
     is_mut : ., mut = 0;
 
-    values : [int; 4], mut;
+    values : string, mut;    values_cap : int, mut;
+    values = __builtin_alloc(64 * 8); values_cap = 64;
     vc : ., mut = 0;
 
     if check(T_COLON_EQ) {
         advance_tok();
-        values[vc] = parse_expr();
+        w64(values, vc * 8, parse_expr());
         vc = vc + 1;
         loop {
             if !check(T_COMMA) { break; }
             advance_tok();
-            values[vc] = parse_expr();
+            w64(values, vc * 8, parse_expr());
             vc = vc + 1;
         }
     } else {
@@ -638,15 +642,15 @@ fn parse_new_var_decl() -> int {
         }
 
         // Parse values
-        values[0] = -1;
+        w64(values, 0 * 8, -1);
     if check(T_EQ) {
             advance_tok();
-            values[vc] = parse_expr();
+            w64(values, vc * 8, parse_expr());
             vc = vc + 1;
             loop {
                 if !check(T_COMMA) { break; }
                 advance_tok();
-                values[vc] = parse_expr();
+                w64(values, vc * 8, parse_expr());
                 vc = vc + 1;
             }
         }
@@ -659,13 +663,13 @@ fn parse_new_var_decl() -> int {
     i : ., mut = 0;
     loop {
         if i >= nc { break; }
-        ni := str_intern(names[i]);
-        nv := values[i];
+        ni := str_intern(r64(names, i * 8));
+        nv := r64(values, i * 8);
         node := alloc_node(EXPR_LET, ni, typ, nv, 0, 0, is_mut, tok_ln(t), tok_cl(t));
         if i == 0 {
             first_node = node;
         } else if g_extra_let_count < 16 {
-            g_extra_lets[g_extra_let_count] = node;
+            w64(g_extra_lets, g_extra_let_count * 8, node);
             g_extra_let_count = g_extra_let_count + 1;
         }
         i = i + 1;
@@ -678,7 +682,7 @@ fn parse_stmt() -> int {
     // Drain batch extras from previous call
     if g_extra_let_count > 0 {
         g_extra_let_count = g_extra_let_count - 1;
-        return g_extra_lets[g_extra_let_count];
+        return r64(g_extra_lets, g_extra_let_count * 8);
     }
 
     t := cur_tok();
@@ -909,10 +913,10 @@ fn parse_generics() -> int {
     return 0;
 }
 
-fn parse_generics_into(names: [string; 4], constrs: [int; 4]) -> int {
+fn parse_generics_into(names: string, constrs: string) -> int {
     // Initialize constraints to -1 (no constraint)
     ci : ., mut = 0;
-    loop { if ci >= 4 { break; } constrs[ci] = -1; ci = ci + 1; }
+    loop { if ci >= 4 { break; } w64(constrs, ci * 8, -1); ci = ci + 1; }
     if check(T_LBRACKET) {
         advance_tok(); // [
         gc : ., mut = 0;
@@ -920,13 +924,13 @@ fn parse_generics_into(names: [string; 4], constrs: [int; 4]) -> int {
             if check(T_RBRACKET) { break; }
             if gc >= MAX_GENERICS { break; }
             gt := advance_tok();
-            names[gc] = tok_lx(gt);
+            w64(names, gc * 8, tok_lx(gt));
             // Check for constraint: T: Interface
-            constrs[gc] = -1;
+            w64(constrs, gc * 8, -1);
             if check(T_COLON) {
                 advance_tok();
                 ct := advance_tok();
-                constrs[gc] = str_intern(tok_lx(ct));
+                w64(constrs, gc * 8, str_intern(tok_lx(ct)));
             }
             gc = gc + 1;
             if !check(T_COMMA) { break; }
@@ -938,25 +942,25 @@ fn parse_generics_into(names: [string; 4], constrs: [int; 4]) -> int {
     return 0;
 }
 
-fn store_func_generics(fi: int, names: [string; 4], count: int) {
+fn store_func_generics(fi: int, names: string, count: int) {
     fi_set_generic_count(fi, count);
     gi : ., mut = 0;
     loop {
         if gi >= count { break; }
-        ni := str_intern(names[gi]);
+        ni := str_intern(r64(names, gi * 8));
         fi_set_generic_name(fi, gi, ni);
         gi = gi + 1;
     }
 }
 
-fn store_func_generic_constrs(fi: int, constrs: [int; 4], count: int) {
+fn store_func_generic_constrs(fi: int, constrs: string, count: int) {
     gi : ., mut = 0;
     loop {
         if gi >= count { break; }
-        if constrs[gi] >= 0 {
+        if r64(constrs, gi * 8) >= 0 {
             idx := fi * MAX_GENERICS + gi;
             dyn_grow_generic_constr(idx + 1);
-            w64(g_generic_constr, idx * 8, constrs[gi]);
+            w64(g_generic_constr, idx * 8, r64(constrs, gi * 8));
             if idx + 1 > g_generic_constr_count { g_generic_constr_count = idx + 1; }
         }
         gi = gi + 1;
@@ -1010,8 +1014,9 @@ fn add_enum(name: string) -> int {
 }
 
 fn parse_fn_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int) {
-    gnames : [string; 4], mut;
-    gconstrs : [int; 4], mut;
+    gnames : string, mut;    gnames_cap : int, mut;
+    gconstrs : string, mut;    gconstrs_cap : int, mut;
+    gconstrs = __builtin_alloc(64 * 8); gconstrs_cap = 64;
     gc := parse_generics_into(gnames, gconstrs);
 
     advance_tok(); // (
@@ -1113,8 +1118,10 @@ fn parse_declaration() {
         t := advance_tok();
         nt := advance_tok();
         name := tok_lx(nt);
-        sg_names : [string; 4], mut;
-        sg_dummy : [int; 4], mut;
+        sg_names : string, mut;    sg_names_cap : int, mut;
+    sg_names = __builtin_alloc(64 * 8); sg_names_cap = 64;
+        sg_dummy : string, mut;    sg_dummy_cap : int, mut;
+    sg_dummy = __builtin_alloc(64 * 8); sg_dummy_cap = 64;
         sg_count := parse_generics_into(sg_names, sg_dummy);
         advance_tok(); // {
 
@@ -1125,7 +1132,7 @@ fn parse_declaration() {
                 sgi : ., mut = 0;
                 loop {
                     if sgi >= sg_count { break; }
-                    w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + sgi * 8, str_intern(sg_names[sgi]));
+                    w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + sgi * 8, str_intern(r64(sg_names, sgi * 8)));
                     sgi = sgi + 1;
                 }
             }
@@ -1153,8 +1160,10 @@ fn parse_declaration() {
         t := advance_tok();
         nt := advance_tok();
         name := tok_lx(nt);
-        eg_names : [string; 4], mut;
-        eg_dummy : [int; 4], mut;
+        eg_names : string, mut;    eg_names_cap : int, mut;
+    eg_names = __builtin_alloc(64 * 8); eg_names_cap = 64;
+        eg_dummy : string, mut;    eg_dummy_cap : int, mut;
+    eg_dummy = __builtin_alloc(64 * 8); eg_dummy_cap = 64;
         eg_count := parse_generics_into(eg_names, eg_dummy);
         advance_tok();
 
@@ -1165,7 +1174,7 @@ fn parse_declaration() {
                 egi : ., mut = 0;
                 loop {
                     if egi >= eg_count { break; }
-                    w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + egi * 8, str_intern(eg_names[egi]));
+                    w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + egi * 8, str_intern(r64(eg_names, egi * 8)));
                     egi = egi + 1;
                 }
             }
@@ -1204,8 +1213,10 @@ fn parse_declaration() {
         nt := advance_tok();
         iface_name := tok_lx(nt);
         iface_ni := str_intern(iface_name);
-        ig_names : [string; 4], mut;
-        ig_dummy : [int; 4], mut;
+        ig_names : string, mut;    ig_names_cap : int, mut;
+    ig_names = __builtin_alloc(64 * 8); ig_names_cap = 64;
+        ig_dummy : string, mut;    ig_dummy_cap : int, mut;
+    ig_dummy = __builtin_alloc(64 * 8); ig_dummy_cap = 64;
         ig_count := parse_generics_into(ig_names, ig_dummy);
         advance_tok(); // {
 
@@ -1229,9 +1240,10 @@ fn parse_declaration() {
 
                 // Parse params with types (handle self, &self, &mut self, name: Type)
                 pc : ., mut = 0;
-                param_tis : [int; 8], mut;
+                param_tis : string, mut;    param_tis_cap : int, mut;
+    param_tis = __builtin_alloc(128 * 8); param_tis_cap = 128;
                 pi2 : ., mut = 0;
-                loop { if pi2 >= 8 { break; } param_tis[pi2] = TY_UNIT; pi2 = pi2 + 1; }
+                loop { if pi2 >= 8 { break; } w64(param_tis, pi2 * 8, TY_UNIT); pi2 = pi2 + 1; }
                 if !check(T_RPAREN) {
                     loop {
                         fst := cur_tok();
@@ -1242,13 +1254,13 @@ fn parse_declaration() {
                                 if check(T_MUT) { advance_tok(); } // mut
                             }
                             nt2 := advance_tok(); // self
-                            if pc < 8 { param_tis[pc] = 0; }  // match function's default for &self
+                            if pc < 8 { w64(param_tis, pc * 8, 0); }  // match function's default for &self
                             pc = pc + 1;
                         } else {
                             advance_tok(); // param name
                             advance_tok(); // :
                             ptype := parse_type();
-                            if pc < 8 { param_tis[pc] = unpack_type(ptype); }
+                            if pc < 8 { w64(param_tis, pc * 8, unpack_type(ptype)); }
                             pc = pc + 1;
                         }
                         if !check(T_COMMA) { break; }
@@ -1280,7 +1292,7 @@ fn parse_declaration() {
                     w64(g_ifaces, mbase + OFF_IFM_RET_TI, ret_ti);
                     pj : ., mut = 0;
                     loop { if pj >= 8 || pj >= pc { break; }
-                        w64(g_ifaces, mbase + OFF_IFM_PARAM_TYPES + pj * 8, param_tis[pj]);
+                        w64(g_ifaces, mbase + OFF_IFM_PARAM_TYPES + pj * 8, r64(param_tis, pj * 8));
                         pj = pj + 1; }
                     if pc > 8 {
                         dyn_grow_diags(g_diag_count + 1);
@@ -1423,7 +1435,7 @@ fn parse_declaration() {
             if g_extra_let_count <= 0 { break; }
             g_extra_let_count = g_extra_let_count - 1;
             dyn_grow_global_lets(g_global_let_count + 1);
-            w64(g_global_lets, g_global_let_count * 8, g_extra_lets[g_extra_let_count]);
+            w64(g_global_lets, g_global_let_count * 8, r64(g_extra_lets, g_extra_let_count * 8));
         }
         g_extra_let_count = 0;
         return;

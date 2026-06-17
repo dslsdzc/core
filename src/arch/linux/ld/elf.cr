@@ -184,7 +184,9 @@ fn x86_64_elf_generate(buf: string) -> int {
 
         // frame: push rbp(1) + mov rbp,rsp(3) + sub rsp(4) + params(pc*4)
         total_code = total_code + 1 + 3;
-        if vc > 0 { total_code = total_code + 4; }
+        if vc > 0 {
+            stack_sz : ., mut = vc * 8; if stack_sz > 127 { total_code = total_code + 7; } else { total_code = total_code + 4; }
+        }
         total_code = total_code + pc * 4;
 
         // instructions (skip NOPs = old LABELs)
@@ -194,8 +196,10 @@ fn x86_64_elf_generate(buf: string) -> int {
                 total_code = total_code + arch_instr_size(inst_idx); }
         ii = ii + 1; }
 
-        // epilogue: add rsp(4, if vc>0) + pop rbp(1) + ret(1)
-        if vc > 0 { total_code = total_code + 4; }
+        // epilogue: add rsp(4/7) + pop rbp(1) + ret(1)
+        if vc > 0 {
+            stack_sz : ., mut = vc * 8; if stack_sz > 127 { total_code = total_code + 7; } else { total_code = total_code + 4; }
+        }
         total_code = total_code + 1 + 1;
     fi = fi + 1; }
 
@@ -209,8 +213,8 @@ fn x86_64_elf_generate(buf: string) -> int {
 
     rd_sz := g2_rodata_sz();
     total_code = total_code + 6;  // _init_globals
-    rodata_base := total_code;  // relative to code section start
-    g_x86_rodata_base = rodata_base;  // for x86_emit_instr string LEA
+    rodata_base := total_code;
+    g_x86_rodata_base = 176 + rodata_base;
 
     // Mark global variables for BSS allocation
     gi := 0; loop { if gi >= g_ir_global_count { break; }
@@ -241,7 +245,12 @@ fn x86_64_elf_generate(buf: string) -> int {
         w8(buf, cp, 85); cp = cp + 1;  // push rbp
         w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 229); cp = cp + 3;  // mov rbp, rsp
         if g_x86_emit_stack_size > 0 {
-            w8(buf, cp, 72); w8(buf, cp+1, 131); w8(buf, cp+2, 236); w8(buf, cp+3, g_x86_emit_stack_size); cp = cp + 4;
+            if g_x86_emit_stack_size > 127 {
+                w8(buf, cp, 72); w8(buf, cp+1, 129); w8(buf, cp+2, 236);
+                e2_w32(buf, cp+3, g_x86_emit_stack_size); cp = cp + 7;
+            } else {
+                w8(buf, cp, 72); w8(buf, cp+1, 131); w8(buf, cp+2, 236); w8(buf, cp+3, g_x86_emit_stack_size); cp = cp + 4;
+            }
         }
         // save register params to stack
         pi := 0; loop { if pi >= pc { break; } if pi >= 6 { break; }
@@ -275,7 +284,12 @@ fn x86_64_elf_generate(buf: string) -> int {
 
         // epilogue (use saved frame size, not post-emission value)
         if save_ss > 0 {
-            w8(buf, cp, 72); w8(buf, cp+1, 131); w8(buf, cp+2, 196); w8(buf, cp+3, save_ss); cp = cp + 4;
+            if save_ss > 127 {
+                w8(buf, cp, 72); w8(buf, cp+1, 129); w8(buf, cp+2, 196);
+                e2_w32(buf, cp+3, save_ss); cp = cp + 7;
+            } else {
+                w8(buf, cp, 72); w8(buf, cp+1, 131); w8(buf, cp+2, 196); w8(buf, cp+3, save_ss); cp = cp + 4;
+            }
         }
         w8(buf, cp, 93); cp = cp + 1;  // pop rbp
         w8(buf, cp, 195); cp = cp + 1;  // ret

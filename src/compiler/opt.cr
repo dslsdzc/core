@@ -201,13 +201,13 @@ fn alloc_registers() {
             if ii >= ic { break; }
             inst := ist + ii;
             op := iri_op(inst); d := iri_dest(inst); s1 := iri_s1(inst); s2 := iri_s2(inst);
-            vars : [int; 3], mut; vc2 : ., mut = 0;
-            if d >= vs && d < vs + vc { vars[vc2] = d - vs; vc2 = vc2 + 1; }
-            if s1 >= vs && s1 < vs + vc { vars[vc2] = s1 - vs; vc2 = vc2 + 1; }
-            if s2 >= vs && s2 < vs + vc { vars[vc2] = s2 - vs; vc2 = vc2 + 1; }
+            vars : string, mut;    vars_cap : int, mut; vc2 : ., mut = 0;
+            if d >= vs && d < vs + vc { w64(vars, vc2 * 8, d - vs); vc2 = vc2 + 1; }
+            if s1 >= vs && s1 < vs + vc { w64(vars, vc2 * 8, s1 - vs); vc2 = vc2 + 1; }
+            if s2 >= vs && s2 < vs + vc { w64(vars, vc2 * 8, s2 - vs); vc2 = vc2 + 1; }
             vj : ., mut = 0;
             loop { if vj >= vc2 { break; }
-                lv := vars[vj];
+                lv := r64(vars, vj * 8);
                 if r64(iv_buf, lv*16) < 0 { w64(iv_buf, lv*16, ii); }
                 w64(iv_buf, lv*16+8, ii);
                 vj = vj + 1; }
@@ -219,9 +219,9 @@ fn alloc_registers() {
         reg_idx : ., mut = 0;
 
         // Map local var index → physical register (-1 = stack)
-        var_reg : [int; 256], mut;
+        var_reg : string, mut;    var_reg_cap : int, mut;
         vr_clear : ., mut = 0;
-        loop { if vr_clear >= 256 { break; } var_reg[vr_clear] = -1; vr_clear = vr_clear + 1; }
+        loop { if vr_clear >= 256 { break; } w64(var_reg, vr_clear * 8, -1); vr_clear = vr_clear + 1; }
 
         // Simple linear scan: for each instruction, allocate regs for dest
         ii = 0;
@@ -233,11 +233,11 @@ fn alloc_registers() {
             // Free regs for vars that end before this instruction
             vi = 0;
             loop { if vi >= vc { break; }
-                if var_reg[vi] >= 0 {
+                if r64(var_reg, vi * 8) >= 0 {
                     last_ref := r64(iv_buf, vi*16+8);
                     if last_ref < ii {
                         // Return reg to pool
-                        var_reg[vi] = -1;
+                        w64(var_reg, vi * 8, -1);
                     }
                 }
                 vi = vi + 1; }
@@ -245,11 +245,11 @@ fn alloc_registers() {
             // Allocate reg for dest if it has a live range
             if d >= vs && d < vs + vc {
                 lvi := d - vs;
-                if var_reg[lvi] < 0 {
+                if r64(var_reg, lvi * 8) < 0 {
                     first_ref := r64(iv_buf, lvi*16);
                     last_ref := r64(iv_buf, lvi*16+8);
                     if first_ref >= 0 && last_ref >= 0 && reg_idx < MAX_REGS {
-                        var_reg[lvi] = reg_idx;
+                        w64(var_reg, lvi * 8, reg_idx);
                         reg_idx = reg_idx + 1;
                     }
                 }
@@ -258,20 +258,20 @@ fn alloc_registers() {
             // if the var has a register assigned
             if d >= vs && d < vs + vc {
                 lvi := d - vs;
-                if var_reg[lvi] >= 0 {
-                    iri_set_dest(inst, -(var_reg[lvi] + 1) - 1000);
+                if r64(var_reg, lvi * 8) >= 0 {
+                    iri_set_dest(inst, -(r64(var_reg, lvi * 8) + 1) - 1000);
                 }
             }
             if s1 >= vs && s1 < vs + vc {
                 lvi := s1 - vs;
-                if var_reg[lvi] >= 0 {
-                    iri_set_s1(inst, -(var_reg[lvi] + 1) - 1000);
+                if r64(var_reg, lvi * 8) >= 0 {
+                    iri_set_s1(inst, -(r64(var_reg, lvi * 8) + 1) - 1000);
                 }
             }
             if s2 >= vs && s2 < vs + vc {
                 lvi := s2 - vs;
-                if var_reg[lvi] >= 0 {
-                    iri_set_s2(inst, -(var_reg[lvi] + 1) - 1000);
+                if r64(var_reg, lvi * 8) >= 0 {
+                    iri_set_s2(inst, -(r64(var_reg, lvi * 8) + 1) - 1000);
                 }
             }
             ii = ii + 1;
@@ -309,13 +309,13 @@ fn pass_stack_share() {
             if ii >= ic { break; }
             inst := ist + ii;
             d := iri_dest(inst); s1 := iri_s1(inst); s2 := iri_s2(inst);
-            va : [int; 3], mut; vn : ., mut = 0;
-            if d >= vs && d < vs+vc { va[vn] = d-vs; vn=vn+1; }
-            if s1 >= vs && s1 < vs+vc { va[vn] = s1-vs; vn=vn+1; }
-            if s2 >= vs && s2 < vs+vc { va[vn] = s2-vs; vn=vn+1; }
+            va : string, mut;    va_cap : int, mut; vn : ., mut = 0;
+            if d >= vs && d < vs+vc { w64(va, vn * 8, d-vs); vn=vn+1; }
+            if s1 >= vs && s1 < vs+vc { w64(va, vn * 8, s1-vs); vn=vn+1; }
+            if s2 >= vs && s2 < vs+vc { w64(va, vn * 8, s2-vs); vn=vn+1; }
             vi2 : ., mut = 0;
             loop { if vi2 >= vn { break; }
-                lv := va[vi2];
+                lv := r64(va, vi2 * 8);
                 if r64(iv, lv*16) < 0 { w64(iv, lv*16, ii); }
                 w64(iv, lv*16+8, ii);
                 vi2 = vi2 + 1; }

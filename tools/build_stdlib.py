@@ -11,6 +11,41 @@ import sys, os, subprocess
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'bootstrap'))
 BASE = os.path.dirname(os.path.dirname(__file__))
 
+BUMP_ALLOC = """
+.intel_syntax noprefix
+.text
+.globl _start
+_start:
+    ret
+
+.globl __builtin_alloc
+.type __builtin_alloc, @function
+__builtin_alloc:
+    add rdi, 7
+    and rdi, -8
+    mov r11, [rip + heap_ptr]
+    test r11, r11
+    jne 1f
+    lea r11, [rip + heap_start]
+    mov [rip + heap_ptr], r11
+1:  mov r8, r11
+    add r11, rdi
+    mov [rip + heap_ptr], r11
+    mov rdi, r8
+    mov rcx, r11
+    sub rcx, rdi
+    xor eax, eax
+    cld
+    rep stosb
+    mov rax, r8
+    ret
+.bss
+.align 8
+heap_start: .skip 65536
+heap_ptr: .quad 0
+.text
+"""
+
 def concat_stdlib():
     """Concatenate runtime + stdlib into a single compilation unit."""
     parts = []
@@ -18,8 +53,6 @@ def concat_stdlib():
         'src/runtime/rt.cr',
         'src/stdlib/io.cr',
         'src/stdlib/math.cr',
-        'src/stdlib/collections.cr',
-        'src/runtime/rt.cr',  # dummy to keep concat_fast happy
     ]
     for f in files:
         path = os.path.join(BASE, f)
@@ -64,6 +97,9 @@ def main():
     asm_gen = X86_64StackAsmGen(mod)
     asm = asm_gen.generate()
     print(f"  assembly: {len(asm)} bytes")
+
+    # Prepend bump allocator so .so is self-contained
+    asm = BUMP_ALLOC + asm
 
     # Assemble .s → .o → .so
     os.makedirs(os.path.join(BASE, 'build'), exist_ok=True)

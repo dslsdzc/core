@@ -298,8 +298,9 @@ fn ir_gen_expr(node: int) -> int {
         func_node := ast_a(node);
         first_arg := ast_b(node);
         arg_count := ast_c(node);
-        arg_vars : [int; 16], mut;
+        arg_vars : string, mut;    arg_vars_cap : int, mut;
         ac : ., mut = 0;
+    arg_vars = __builtin_alloc(64 * 8); arg_vars_cap = 64;
         func_ni : ., mut = -1;
 
         // Module or method call: obj.method(args)
@@ -308,7 +309,7 @@ fn ir_gen_expr(node: int) -> int {
             if ast_type_val(node) != 1 {
                 // Method call: self is first arg
                 obj_node := ast_a(func_node);
-                arg_vars[ac] = ir_gen_expr(obj_node);
+                if ac >= arg_vars_cap { nc := arg_vars_cap * 2; nb := __builtin_alloc(nc * 8); _dyncpy(arg_vars, arg_vars_cap * 8, nb); arg_vars = nb; arg_vars_cap = nc; } w64(arg_vars, ac * 8, ir_gen_expr(obj_node));
                 ac = ac + 1;
             }
         } else if ast_kind(func_node) == EXPR_IDENT {
@@ -321,7 +322,7 @@ fn ir_gen_expr(node: int) -> int {
         loop {
             if i >= arg_count { break; }
             if an >= 0 {
-                arg_vars[ac] = ir_gen_expr(an);
+                if ac >= arg_vars_cap { nc := arg_vars_cap * 2; nb := __builtin_alloc(nc * 8); _dyncpy(arg_vars, arg_vars_cap * 8, nb); arg_vars = nb; arg_vars_cap = nc; } w64(arg_vars, ac * 8, ir_gen_expr(an));
                 ac = ac + 1;
                 an = an + 1;
             }
@@ -348,7 +349,7 @@ fn ir_gen_expr(node: int) -> int {
                         if ppi3 >= param_count3 { break; }
                         if ppi3 >= ac { break; }
                         pname_ni3 := ast_a(ppn3);
-                        bind_local(pname_ni3, arg_vars[ppi3]);
+                        bind_local(pname_ni3, r64(arg_vars, ppi3 * 8));
                         ppi3 = ppi3 + 1;
                         ppn3 = ppn3 + 1;
                         loop { if ppn3 >= g_ast_count { break; } if ast_kind(ppn3) == EXPR_PARAM { break; } ppn3 = ppn3 + 1; }
@@ -381,7 +382,18 @@ fn ir_gen_expr(node: int) -> int {
         // Use it directly
         dest := new_ir_var("call", TI_UNIT);
         first_arg_var := -1;
-        if ac > 0 { first_arg_var = arg_vars[0]; }
+        if ac > 0 { first_arg_var = r64(arg_vars, 0 * 8); }
+        if ac > 0 {
+            ai : ., mut = 0;
+            loop {
+                if ai >= ac { break; }
+                expected := first_arg_var + ai;
+                if r64(arg_vars, ai * 8) != expected {
+                    emit(IR_STORE, -1, expected, r64(arg_vars, ai * 8), 0, 0);
+                }
+                ai = ai + 1;
+            }
+        }
         emit(IR_CALL, dest, first_arg_var, ac, func_ni, 0);
         return dest;
     }

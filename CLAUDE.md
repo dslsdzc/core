@@ -2,6 +2,17 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 铁律（Hard Rules）
+
+这些规则不可违反，除非用户明确另有指示。
+
+1. **不许绕过问题** — 找到 root cause 直接修复。不允许删掉调试输出来掩盖 bug、不允许绕路走。
+2. **文件永久不允许还原（`git checkout`）** — 还原必须经过用户明确许可。任何时候都不允许自行 `git checkout` 还原文件。
+3. **直接解决问题** — 不允许变通方案、不允许绕过、不允许"先合并再修"。每个问题必须彻底修复。
+4. **除非彻底不可修复** — 只有在经过充分验证、确认修复不可能或不合理的情况下，才可以提出替代方案。
+
+违反这些规则的后果：用户会极度愤怒，信任归零。
+
 ## Project Overview
 
 Core is a new general-purpose programming language with a "semantic preservation" (语义保鲜) philosophy — its IR retains full type/semantic info throughout compilation for direct consumption by formal verification tools. Currently in bootstrap stage (compiler written in Python).

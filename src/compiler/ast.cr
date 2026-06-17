@@ -128,28 +128,28 @@ struct Token {
 struct FuncInfo {
     name: string,
     param_count: int,
-    param_types: [int; 16],
+    param_types: [int; 64],
     return_type: int,
     ast_node: int,  // index into ast array for the fn body
-    generic_names: [string; 4],
+    generic_names: [string; 16],
     generic_count: int,
 }
 
 // Struct layout
 struct StructInfo {
     name: string,
-    field_names: [string; 16],
-    field_types: [int; 16],
-    field_type_nodes: [int; 16],  // original type node indices (for generic resolution)
+    field_names: [string; 64],
+    field_types: [int; 64],
+    field_type_nodes: [int; 64],  // original type node indices (for generic resolution)
     field_count: int,
-    generic_names: [string; 4],
+    generic_names: [string; 16],
     generic_count: int,
 }
 
 // Enum variant description
 struct EnumVariant {
     name: string,
-    types: [int; 16],  // TY_* for each field
+    types: [int; 64],  // TY_* for each field
     type_count: int,
 }
 
@@ -158,7 +158,7 @@ struct EnumInfo {
     name: string,
     variants: [EnumVariant; 16],
     variant_count: int,
-    generic_names: [string; 4],
+    generic_names: [string; 16],
     generic_count: int,
 }
 
