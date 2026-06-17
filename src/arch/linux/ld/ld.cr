@@ -152,7 +152,7 @@ fn layout() {
         if k == 5 { sz = 10 * 16; }
         if k == 6 { sz = (1 + g_plt_count) * 24; }
         if k == 7 {
-            sz = 1 + __builtin_str_len("core_librt.so") + 1;
+            sz = 1 + __builtin_str_len("core_rt.so") + 1;
             j : ., mut = 0; loop { if j >= g_plt_count { break; }
                 sz = sz + __builtin_str_len(r64(g_plts, j * 16)) + 1; j = j + 1; } }
         if k == 8 { sz = g_plt_count * 24; }
@@ -240,10 +240,10 @@ fn emit(buf: string, total: int, is_so: int) {
         if k == 5 {
             // Build dynstr
             db : ., mut = __builtin_alloc(1024); w8(db,0,0); so_off : ., mut = 1;
-            j : ., mut = 0; loop { if j >= __builtin_str_len("core_librt.so") { break; }
-                w8(db,so_off+j, __builtin_load8("core_librt.so",j)); j=j+1; }
-            w8(db,so_off+__builtin_str_len("core_librt.so"),0);
-            nxt : ., mut = so_off+__builtin_str_len("core_librt.so")+1;
+            j : ., mut = 0; loop { if j >= __builtin_str_len("core_rt.so") { break; }
+                w8(db,so_off+j, __builtin_load8("core_rt.so",j)); j=j+1; }
+            w8(db,so_off+__builtin_str_len("core_rt.so"),0);
+            nxt : ., mut = so_off+__builtin_str_len("core_rt.so")+1;
             pi : ., mut = 0; loop { if pi >= g_plt_count { break; }
                 j=0; loop { if j >= __builtin_str_len(r64(g_plts, pi * 16)) { break; }
                     w8(db,nxt+j, __builtin_load8(r64(g_plts, pi * 16),j)); j=j+1; }
@@ -380,7 +380,6 @@ fn so_parse_text(buf: string) -> int {
     return -1; }
 
 fn ctx_emit_static(buf: string, path: string) -> int {
-    // Scan .so files for external symbols, embed their .text
     so_buf : ., mut = "";
     si : ., mut = 0;
     loop { if si >= g_so_count { break; }
@@ -393,23 +392,23 @@ fn ctx_emit_static(buf: string, path: string) -> int {
     if __builtin_str_len(so_buf) == 0 { return -1; }
     if g_so_sz <= 0 { return -1; }
 
-    // Layout: ELF header(176) + user_code + so_text
+    // Layout: 176 header + .so code + user code
     hdr_sz : ., mut = 176;
-    so_start := hdr_sz + g_user_size;
-    total := so_start + g_so_sz;
+    so_out := hdr_sz;                    // .so .text starts right after header
+    user_out := so_out + g_so_sz;        // user code after .so
+    total := user_out + g_user_size;
 
-    // Zero and write
     zi : ., mut = 0; loop { if zi >= total { break; } w8(buf, zi, 0); zi = zi + 1; }
 
-    // Copy user code
-    ci : ., mut = 0; loop { if ci >= g_user_size { break; }
-        w8(buf, hdr_sz + ci, bu8(g_user_code, ci)); ci = ci + 1; }
+    // Copy .so .text
+    ci : ., mut = 0; loop { if ci >= g_so_sz { break; }
+        w8(buf, so_out + ci, bu8(so_buf, g_so_off + ci)); ci = ci + 1; }
 
-    // Copy .so .text after user code
-    cj : ., mut = 0; loop { if cj >= g_so_sz { break; }
-        w8(buf, so_start + cj, bu8(so_buf, g_so_off + cj)); cj = cj + 1; }
+    // Copy user code (includes _start + all functions)
+    cj : ., mut = 0; loop { if cj >= g_user_size { break; }
+        w8(buf, user_out + cj, bu8(g_user_code, cj)); cj = cj + 1; }
 
-    // Patch external relocations in user code
+    // Patch external relocations: user code calls → .so functions
     rpi : ., mut = 0;
     loop { if rpi >= g_x86_ext_rel_count { break; }
         abs_pos := r64(g_x86_ext_rel_pos, rpi * 8);
@@ -419,29 +418,25 @@ fn ctx_emit_static(buf: string, path: string) -> int {
             sym_addr := so_find(so_buf, fn_name);
             if sym_addr >= g_so_addr && sym_addr < g_so_addr + g_so_sz {
                 func_off := sym_addr - g_so_addr;
-                call_pos := hdr_sz + abs_pos;  // absolute position in buffer
-                target_va := 0x400000 + so_start + func_off;  // VA of function
+                call_pos := user_out + abs_pos;
+                target_va := 0x400000 + so_out + func_off;
                 rel := target_va - (call_pos + 5);
-                w32(buf, call_pos + 1, rel);
-            }
+                w32(buf, call_pos + 1, rel); }
         }
     rpi = rpi + 1; }
 
-    // Write ELF header + single PT_LOAD
+    // ELF header: single PT_LOAD
     w8(buf,0,127);w8(buf,1,69);w8(buf,2,76);w8(buf,3,70);
     w8(buf,4,2);w8(buf,5,1);w8(buf,6,1);
     w16(buf,16,2);w16(buf,18,62);w32(buf,20,1);
-    // Use TEXT_BASE + hdr_sz as entry (_start at start of user code)
-    w64(buf,24,0x400000 + hdr_sz);
+    w64(buf,24,0x400000 + user_out);  // entry = user code's _start
     w64(buf,32,64);w64(buf,40,0);
     w16(buf,52,64);w16(buf,54,56);w16(buf,56,1);w16(buf,58,64);
-    // PT_LOAD covering everything
     w32(buf,64,1);w32(buf,68,5);w64(buf,72,0);
     w64(buf,80,0x400000);w64(buf,88,0x400000);
     w64(buf,96,total);w64(buf,104,total);
     w64(buf,112,4096);
 
-    // Write file
     fd := __builtin_syscall3(2, path, 577, 420);
     if fd < 0 { return -1; }
     nw := __builtin_syscall3(1, fd, buf, total);

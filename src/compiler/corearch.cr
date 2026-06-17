@@ -77,15 +77,24 @@ fn corearch_main() -> int {
     if __builtin_str_len(link_val) > 0 {
         ctx_init();
         if __builtin_str_eq(link_val, "auto") != 0 {
-            so_paths : [string; 4], mut;
-            so_paths[0] = "./core_rt.so";
-            so_paths[1] = "/usr/local/lib/core/core_rt.so";
-            sxi : ., mut = 0;
-            loop { if sxi >= 4 { break; }
-                if __builtin_str_len(so_paths[sxi]) == 0 { break; }
-                if __builtin_str_len(__builtin_read_file(so_paths[sxi])) > 0 {
-                    ctx_add_so(so_paths[sxi]); }
-                sxi = sxi + 1; }
+            // Look for core_rt.so relative to compiler binary
+            sp := __builtin_get_arg(0);
+            sllen := __builtin_str_len(sp);
+            last_sl : ., mut = -1;
+            sli : ., mut = 0;
+            loop { if sli >= sllen { break; }
+                if __builtin_load8(sp, sli) == 47 { last_sl = sli; }
+                sli = sli + 1; }
+            if last_sl >= 0 {
+                libp := __builtin_str_sub(sp, 0, last_sl + 1) + "core_rt.so";
+                if __builtin_str_len(__builtin_read_file(libp)) > 0 { ctx_add_so(libp); } }
+            // Also try ./build/, ./, and ~/.core/lib/
+            if __builtin_str_len(__builtin_read_file("./build/core_rt.so")) > 0 {
+                ctx_add_so("./build/core_rt.so"); }
+            else if __builtin_str_len(__builtin_read_file("./core_rt.so")) > 0 {
+                ctx_add_so("./core_rt.so"); }
+            if __builtin_str_len(__builtin_read_file("~/.core/lib/core_rt.so")) > 0 {
+                ctx_add_so("~/.core/lib/core_rt.so"); }
         } else {
             split_links(link_val);
         }
