@@ -175,7 +175,7 @@ fn x86_64_elf_generate(buf: string) -> int {
     // Phase 2: compute _start size using same constants as emit_start
     total_code : ., mut = emit_start_size();
 
-        fi := 0; loop { if fi >= g_ir_func_count { break; }
+        fi := 0; g2_init(); loop { if fi >= g_ir_func_count { break; }
         ni := r64(g_ir_func_name_idx, fi * 8);
         dyn_grow_x86_func_offsets(g_x86_func_off_count * 2 + 2);
         w64(g_x86_func_offsets, g_x86_func_off_count * 16, ni);
