@@ -412,6 +412,7 @@ fn parse_primary() -> int {
                     if acc < 0 { acc = id_node; }
                     else { acc = alloc_node(EXPR_BINARY, acc, id_node, OP_ADD, 0, 0, 0, tok_ln(t), tok_cl(t)); }
                 }
+                if close < 0 { break; }  // unterminated { → stop to avoid infinite loop
                 pos = close + 1;
             }
             if acc < 0 {
@@ -1491,8 +1492,17 @@ fn parse_all() {
     loop {
         if tok_k(cur_tok()) == T_EOF { break; }
         if ci > 5 { __builtin_print("parse_all loop\n"); ci = 0; }
+        prev_ast := g_ast_count;
         parse_declaration();
         if tok_k(cur_tok()) == T_EOF { break; }
+        // Detect rapid AST growth: if >10000 nodes added in one decl, it's a loop
+        ast_grown := g_ast_count - prev_ast;
+        if ast_grown > 10000 {
+            __builtin_print("BLOAT: ci="); __builtin_print(__builtin_int_to_str(ci));
+            __builtin_print(" ast_grown="); __builtin_println(__builtin_int_to_str(ast_grown));
+            __builtin_print("  total_ast="); __builtin_println(__builtin_int_to_str(g_ast_count));
+            break;
+        }
         ci = ci + 1;
     }
 }
