@@ -226,6 +226,7 @@ EXPR_ENUM_CONSTRUCTOR : int = 37; // a=name idx, b=first arg, c=arg count
 EXPR_REFTYPE : int = 38;   // a=inner type node, data=mut flag (for &T / &mut T in type position)
 EXPR_GENERIC_APPLY : int = 39; // a=base name idx, b=first arg type node, c=arg count
 EXPR_TUPLE : int = 40;         // a=first elem, b=elem count (tuple literal)
+EXPR_ARG : int = 41;            // a=expr, b=next arg node or -1 (argument linked list)
 
 // Desugared constructs
 EXPR_TRY : int = 33;      // a=expr being tried (? operator)

@@ -149,6 +149,19 @@ fn lookup_sym_global(name_idx: int) -> int {
     return -1;
 }
 
+fn lookup_so_fn(name_idx: int) -> int {
+    i : ., mut = 0;  // forward scan — SYM_SO_FN entries are before SYM_FN
+    loop {
+        if i >= g_sym_count { return -1; }
+        if sym_name(i) == name_idx && sym_kind(i) == SYM_SO_FN {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+
 // --- Error tracking ---
 // Uses g_diags, g_diag_count from globals.cr (and ast.cr)
 // Old g_check_errors is replaced by structured g_diags.
@@ -768,15 +781,15 @@ fn infer_generic_call(fi: int, call_node: int, first_arg: int, arg_count: int) -
 
         if orig_type_node >= 0 {
             pattern_ti := resolve_call_type_node(orig_type_node, fi);
-            concrete_ti := infer_expr(an);
+            concrete_ti := infer_expr(ast_a(an));
             unify_types(pattern_ti, concrete_ti);
         } else {
-            infer_expr(an);
+            infer_expr(ast_a(an));
         }
 
         pi = pi + 1;
         pn = pn + 1;
-        an = an + 1;
+        an = ast_b(an);  // next EXPR_ARG
     }
 
     // Check generic constraints (if any)
@@ -1176,12 +1189,11 @@ fn infer_expr(node: int) -> int {
             }
             if mod_call_done == 1 {
                 // Infer arg types
-                ai : ., mut = 0;
                 an : ., mut = first_arg;
                 loop {
-                    if ai >= arg_count { break; }
-                    if an >= 0 { infer_expr(an); an = an + 1; }
-                    ai = ai + 1;
+                    if an < 0 { break; }
+                    infer_expr(ast_a(an));
+                    an = ast_b(an);
                 }
                 if mod_found_mfi >= 0 {
                     return r64(g_mod_func_tis, mod_found_mfi * 8);
@@ -1254,13 +1266,12 @@ fn infer_expr(node: int) -> int {
                     gci2 = gci2 + 1;
                 }
             }
-            // Infer arg types
-            ai : ., mut = 0;
+            // Infer arg types (walk EXPR_ARG chain)
             an : ., mut = first_arg;
             loop {
-                if ai >= arg_count { break; }
-                if an >= 0 { infer_expr(an); an = an + 1; }
-                ai = ai + 1;
+                if an < 0 { break; }
+                infer_expr(ast_a(an));
+                an = ast_b(an);
             }
             if func_ni >= 0 {
                 si := lookup_sym_global(func_ni);
@@ -1306,13 +1317,12 @@ fn infer_expr(node: int) -> int {
                 tag_flags2 := sym_type(si);  // stores tag_flags
                 type_enc2 := sym_node(si);   // stores type encoding
 
-                // Infer arg types
-                ai : ., mut = 0;
+                // Infer arg types (walk EXPR_ARG chain)
                 an : ., mut = first_arg;
                 loop {
-                    if ai >= arg_count { break; }
-                    if an >= 0 { infer_expr(an); an = an + 1; }
-                    ai = ai + 1;
+                    if an < 0 { break; }
+                    infer_expr(ast_a(an));
+                    an = ast_b(an);
                 }
 
                 // Decode return type (type_enc2 % 100)
@@ -1340,15 +1350,11 @@ fn infer_expr(node: int) -> int {
             }
         }
         // Infer arg types (for side effects)
-        ai : ., mut = 0;
         an : ., mut = first_arg;
         loop {
-            if ai >= arg_count { break; }
-            if an >= 0 {
-                infer_expr(an);
-                an = an + 1;
-            }
-            ai = ai + 1;
+            if an < 0 { break; }
+            infer_expr(ast_a(an));
+            an = ast_b(an);
         }
         return TI_INT;  // external/unknown functions
     }
@@ -1517,16 +1523,12 @@ fn infer_expr(node: int) -> int {
         arg_count := ast_c(node);
         si := lookup_sym_global(name_idx);
         if si >= 0 && sym_kind(si) == SYM_FN {
-            // Infer arg types
-            ai : ., mut = 0;
+            // Infer arg types (walk EXPR_ARG chain)
             an : ., mut = first_arg;
             loop {
-                if ai >= arg_count { break; }
-                if an >= 0 {
-                    infer_expr(an);
-                    an = an + 1;
-                }
-                ai = ai + 1;
+                if an < 0 { break; }
+                infer_expr(ast_a(an));
+                an = ast_b(an);
             }
             return sym_type(si); // enum type
         }
@@ -1783,6 +1785,22 @@ fn infer_expr(node: int) -> int {
 
 fn check_all() {
     init_types();
+    // Save SYM_SO_FN entries before g_sym_count reset destroys them
+    so_count : ., mut = 0;
+    so_names : string, mut = alloc(128 * 8);
+    so_types : string, mut = alloc(128 * 8);
+    so_nodes : string, mut = alloc(128 * 8);
+    si_scan : ., mut = 0;
+    loop {
+        if si_scan >= g_sym_count { break; }
+        if sym_kind(si_scan) == SYM_SO_FN {
+            w64(so_names, so_count * 8, sym_name(si_scan));
+            w64(so_types, so_count * 8, sym_type(si_scan));
+            w64(so_nodes, so_count * 8, sym_node(si_scan));
+            so_count = so_count + 1;
+        }
+        si_scan = si_scan + 1;
+    }
     g_sym_count = 0;
     g_scope_depth = 0; g_scope_bounds_cap = 0;
     g_diag_count = 0; g_diag_cap = 0;
@@ -1792,6 +1810,20 @@ fn check_all() {
 
     // First pass: collect declarations
     collect_decls();
+
+    // Restore SYM_SO_FN entries lost by g_sym_count reset
+    ri : ., mut = 0;
+    loop {
+        if ri >= so_count { break; }
+        si := g_sym_count;
+        dyn_grow_syms(si + 1);
+        sym_set_name(si, r64(so_names, ri * 8));
+        sym_set_kind(si, SYM_SO_FN);
+        sym_set_type(si, r64(so_types, ri * 8));
+        sym_set_node(si, r64(so_nodes, ri * 8));
+        g_sym_count = si + 1;
+        ri = ri + 1;
+    }
 
     // Second pass: check function bodies
     i : ., mut = 0;

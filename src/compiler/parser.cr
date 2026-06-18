@@ -256,12 +256,18 @@ fn parse_postfix() -> int {
             af := -1;
             ac : ., mut = 0;
             if !check(T_RPAREN) {
-                af = parse_expr();
+                // Wrap each argument in EXPR_ARG(a=expr, b=next_arg) linked list
+                first_expr := parse_expr();
+                af = alloc_node(EXPR_ARG, first_expr, -1, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
                 ac = 1;
+                prev_arg := af;
                 loop {
                     if !check(T_COMMA) { break; }
                     advance_tok();
-                    parse_expr();
+                    next_expr := parse_expr();
+                    new_arg := alloc_node(EXPR_ARG, next_expr, -1, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
+                    ast_set_b(prev_arg, new_arg);
+                    prev_arg = new_arg;
                     ac = ac + 1;
                 }
             }

@@ -316,17 +316,13 @@ fn ir_gen_expr(node: int) -> int {
             func_ni = ast_int_val(func_node);
         }
 
-        // Generate remaining args
+        // Generate remaining args (walk EXPR_ARG chain)
         an : ., mut = first_arg;
-        i : ., mut = 0;
         loop {
-            if i >= arg_count { break; }
-            if an >= 0 {
-                if ac >= arg_vars_cap { nc := arg_vars_cap * 2; nb := alloc(nc * 8); _dyncpy(arg_vars, arg_vars_cap * 8, nb); arg_vars = nb; arg_vars_cap = nc; } w64(arg_vars, ac * 8, ir_gen_expr(an));
-                ac = ac + 1;
-                an = an + 1;
-            }
-            i = i + 1;
+            if an < 0 { break; }
+            if ac >= arg_vars_cap { nc := arg_vars_cap * 2; nb := alloc(nc * 8); _dyncpy(arg_vars, arg_vars_cap * 8, nb); arg_vars = nb; arg_vars_cap = nc; } w64(arg_vars, ac * 8, ir_gen_expr(ast_a(an)));
+            ac = ac + 1;
+            an = ast_b(an);
         }
         // Generic function: inline the body with concrete type substitution
         if func_ni >= 0 && (ast_kind(func_node) == EXPR_IDENT) {
@@ -380,11 +376,12 @@ fn ir_gen_expr(node: int) -> int {
         }
         // Variadic expansion: check SYM_SO_FN + TAG_VARIADIC
         so_variadic : ., mut = 0;
-        si_var := lookup_sym_global(func_ni);
-        if si_var >= 0 && sym_kind(si_var) == SYM_SO_FN && ac > 1 {
+        si_var := lookup_so_fn(func_ni);
+        if si_var >= 0 && ac > 1 {
             tf := sym_type(si_var);
-            if (tf & TAG_VARIADIC) != 0 { so_variadic = 1; }
+            if tf == 1 || tf == 3 { so_variadic = 1; }  // TAG_VARIADIC bit
         }
+        so_print_ni : ., mut = -1;
         if so_variadic != 0 {
             is_println : ., mut = 0;
             // Check if function name contains or ends with "ln" for newline
@@ -405,9 +402,10 @@ fn ir_gen_expr(node: int) -> int {
                 arg_v := r64(arg_vars, ai2 * 8);
                 // Auto-convert int args via int_str() if TAG_AUTO_STR
                 need_auto : ., mut = 0;
-                si2 := lookup_sym_global(func_ni);
-                if si2 >= 0 && sym_kind(si2) == SYM_SO_FN {
-                    if (sym_type(si2) & TAG_AUTO_STR) != 0 { need_auto = 1; }
+                sia := lookup_so_fn(func_ni);
+                if sia >= 0 {
+                    tfa := sym_type(sia);
+                    if tfa == 2 || tfa == 3 { need_auto = 1; }  // TAG_AUTO_STR bit
                 }
                 if need_auto != 0 {
                     arg_ti2 := irv_type(arg_v);
@@ -750,14 +748,12 @@ fn ir_gen_expr(node: int) -> int {
         s := new_ir_var("enum", TI_UNIT);
         emit(IR_MAKE_ENUM, s, name_idx, ast_c(node), 0, 0);
         ai : ., mut = 0;
-        an : ., mut = ast_b(node);
+        an : ., mut = ast_b(node);  // EXPR_ARG chain
         loop {
-            if ai >= ast_c(node) { break; }
-            if an >= 0 {
-                val_var := ir_gen_expr(an);
-                emit(IR_STORE_FIELD, -1, s, val_var, ai + 1, 0);  // +1 for tag offset
-                an = an + 1;
-            }
+            if an < 0 { break; }
+            val_var := ir_gen_expr(ast_a(an));
+            emit(IR_STORE_FIELD, -1, s, val_var, ai + 1, 0);  // +1 for tag offset
+            an = ast_b(an);
             ai = ai + 1;
         }
         return s;
