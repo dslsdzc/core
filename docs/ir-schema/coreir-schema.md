@@ -158,7 +158,7 @@ Graphviz DOT 格式，每个函数一张子图。
 
 每条 IR 指令映射为一个 DOT 节点：
 
-```
+```dot
 n0 [label="x:alloc", shape=box];
 ```
 
