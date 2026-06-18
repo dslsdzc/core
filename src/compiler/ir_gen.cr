@@ -76,7 +76,7 @@ fn pop_ir_scope() {
 fn get_ir_var_name(var_idx: int) -> string {
     if var_idx >= 0 && var_idx < g_ir_var_count {
         ni := irv_name(var_idx);
-        return get_char(ni);
+        return istr_get(ni);
     }
     return "";
 }
@@ -107,7 +107,7 @@ fn pop_loop_labels() {
 }
 
 fn get_variant_name_idx(qualified_ni: int) -> int {
-    s := get_char(qualified_ni);
+    s := istr_get(qualified_ni);
     slen := str_len(s);
     dot_pos : ., mut = -1;
     i : ., mut = 0;
@@ -337,7 +337,7 @@ fn ir_gen_expr(node: int) -> int {
                 conc_type_ni3 := ast_int_val(node);
                 if conc_type_ni3 >= 0 && body3 >= 0 {
                     gen_name3 := get_char(fi_generic_name(gen_fi, 0));
-                    conc_name3 := get_char(conc_type_ni3);
+                    conc_name3 := istr_get(conc_type_ni3);
                     ast_patch_node(body3, gen_name3, conc_name3);
                     // Bind params to arg vars
                     first_param3 := ast_b(fn_node3);
@@ -619,7 +619,7 @@ fn ir_gen_expr(node: int) -> int {
         var_ni := ast_a(node);
         type_node := ast_b(node);
         val_node := ast_c(node);
-        var := new_ir_var(get_char(var_ni), TI_UNIT);
+        var := new_ir_var(istr_get(var_ni), TI_UNIT);
         is_arr : ., mut = 0;
         if type_node >= 0 && val_node < 0 {
             if ast_kind(type_node) == 19 {
@@ -836,7 +836,7 @@ fn ir_gen_func(fi: int) {
         if pi >= param_count { break; }
         if pn < 0 { break; }
         pname_idx := ast_a(pn);
-        pname := get_char(pname_idx);
+        pname := istr_get(pname_idx);
         pvar := new_ir_var(pname, TI_INT);
         // Bind param name
         bind_local(pname_idx, pvar);
@@ -871,7 +871,7 @@ fn ir_gen_globals() {
         if i >= g_global_let_count { break; }
         node := r64(g_global_lets, i * 8);
         name_idx := ast_a(node);
-        name := get_char(name_idx);
+        name := istr_get(name_idx);
         gvar := new_ir_var(name, TI_INT);
         dyn_grow_ir_globals(g_ir_global_count + 1);
         w64(g_ir_globals, g_ir_global_count  * 16, name_idx);
@@ -891,7 +891,7 @@ fn ast_patch_node(node: int, subst_from: string, subst_to: string) {
         if ast_kind(func_node) == EXPR_FIELD {
             data_ni := ast_data(node);
             if data_ni >= 0 {
-                data_str := get_char(data_ni);
+                data_str := istr_get(data_ni);
                 dlen := str_len(data_str);
                 flen := str_len(subst_from);
                 if dlen >= flen {
@@ -972,14 +972,14 @@ fn find_or_create_mono_func(fi: int, call_node: int) -> int {
     orig_ret_node := ast_type_val(fn_node);
 
     gen_name_ni := fi_generic_name(fi, 0);
-    gen_name := get_char(gen_name_ni);
+    gen_name := istr_get(gen_name_ni);
 
     // Get concrete type name from call node (stored by checker)
     concrete_type_ni : ., mut = ast_int_val(call_node);
-    concrete_type_name : ., mut = get_char(concrete_type_ni);
+    concrete_type_name : ., mut = istr_get(concrete_type_ni);
 
     // Create mangled name: "funcname$genericname.concretetype"
-    orig_fn_name := get_char(fi_name(fi));
+    orig_fn_name := istr_get(fi_name(fi));
     mangled_name : ., mut = orig_fn_name + "$";
     mangled_name = mangled_name + gen_name + "." + concrete_type_name;
     mangled_ni := str_intern(mangled_name);

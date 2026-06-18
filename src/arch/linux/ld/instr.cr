@@ -164,7 +164,7 @@ fn arch_instr_size(instr_idx: int) -> int {
         return sz;
     }
     if op == IR_CALL {
-        fn2 := ""; if s3 >= 0 { fn2 = get_char(s3); }
+        fn2 := ""; if s3 >= 0 { fn2 = istr_get(s3); }
         if str_eq(fn2, "syscall3") != 0 {
             sz := iri_s2(instr_idx) * 4 + 14; if d >= 0 { sz = sz + 4; } return sz;
         }
@@ -269,7 +269,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     }
 
     if op == IR_CALL {
-        fn2 := ""; if s3 >= 0 { fn2 = get_char(s3); }
+        fn2 := ""; if s3 >= 0 { fn2 = istr_get(s3); }
         fa := s1; ac := s2;
         ai := 0;
         loop { if ai >= ac { break; } if ai >= 6 { break; }

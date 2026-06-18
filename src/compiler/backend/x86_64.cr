@@ -209,7 +209,7 @@ fn x86_gen_instr(instr_idx: int) -> string {
     if op == IR_CALL {
         func_ni := s3;
         func_name := "";
-        if func_ni >= 0 { func_name = get_char(func_ni); }
+        if func_ni >= 0 { func_name = istr_get(func_ni); }
         first_arg := s1;
         arg_count := s2;
         arg_regs := ["rdi", "rsi", "rdx", "rcx", "r8", "r9"];
@@ -591,7 +591,7 @@ fn x86_gen_instr(instr_idx: int) -> string {
 
 fn x86_gen_function(func_idx: int) -> string {
     name_idx := r64(g_ir_func_name_idx, func_idx * 8);
-    func_name := get_char(name_idx);
+    func_name := istr_get(name_idx);
     instr_start := r64(g_ir_func_instr_start, func_idx * 8);
     instr_count := r64(g_ir_func_instr_count, func_idx * 8);
     var_count := r64(g_ir_func_var_count, func_idx * 8);
@@ -685,7 +685,7 @@ fn x86_64_generate() -> string {
         lbl : ., mut = ".LC";
         lbl = lbl + int_str(si);
         lbl = lbl + ": .asciz \"";
-        lbl = lbl + get_char(str_idx);
+        lbl = lbl + istr_get(str_idx);
         lbl = lbl + "\"\n";
         asm = asm + lbl;
         si = si + 1;

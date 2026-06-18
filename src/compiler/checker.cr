@@ -384,8 +384,8 @@ fn get_type_name(ti: int) -> int {
 }
 
 fn type_has_method(type_ni: int, method_ni: int) -> bool {
-    tname := get_char(type_ni);
-    mname := get_char(method_ni);
+    tname := istr_get(type_ni);
+    mname := istr_get(method_ni);
     mangled := tname + "." + mname;
     mangled_ni := str_intern(mangled);
     return find_func(mangled_ni) >= 0;
@@ -400,8 +400,8 @@ fn check_type_satisfies_iface(type_ni: int, iface_ii: int) -> bool {
         method_ni := r64(g_ifaces, mbase2 + OFF_IFM_NAME);
         if !type_has_method(type_ni, method_ni) { return false; }
         // Also verify param count and return type match
-        tname2 := get_char(type_ni);
-        mname2 := get_char(method_ni);
+        tname2 := istr_get(type_ni);
+        mname2 := istr_get(method_ni);
         mangled2 := tname2 + "." + mname2;
         mangled_ni2 := str_intern(mangled2);
         fi2 := find_func(mangled_ni2);
@@ -806,7 +806,7 @@ fn infer_generic_call(fi: int, call_node: int, first_arg: int, arg_count: int) -
                             ii := find_iface(iface_ni);
                             if ii >= 0 {
                                 if !check_type_satisfies_iface(type_ni, ii) {
-                                    check_error(EC_TG_BOUND, "Type '" + get_char(type_ni) + "' does not satisfy interface '" + get_char(iface_ni) + "'", ast_line(call_node), ast_col(call_node));
+                                    check_error(EC_TG_BOUND, "Type '" + istr_get(type_ni) + "' does not satisfy interface '" + istr_get(iface_ni) + "'", ast_line(call_node), ast_col(call_node));
                                 }
                             }
                         }
@@ -893,7 +893,7 @@ fn check_func(fi: int) {
             }
         } else {
             // Self param: derive struct type from mangled function name "Struct.method"
-            fn_name := get_char(fi_name(fi));
+            fn_name := istr_get(fi_name(fi));
             fn_len := str_len(fn_name);
             dot_pos : ., mut = -1;
             di : ., mut = 0;
@@ -964,7 +964,7 @@ fn check_impl_for() {
         // Find interface by name
         ii := find_iface(iface_ni);
         if ii < 0 {
-            iface_name := get_char(iface_ni);
+            iface_name := istr_get(iface_ni);
             check_error(EC_N_UNDEFINED, "Undefined interface '" + iface_name + "'", 0, 0);
             pi = pi + 1;
             continue;
@@ -979,14 +979,14 @@ fn check_impl_for() {
             method_rt := r64(g_ifaces, mbase + OFF_IFM_RET_TI);
 
             // Check if the implementing type has this method
-            type_name := get_char(type_ni);
-            method_name := get_char(method_ni);
+            type_name := istr_get(type_ni);
+            method_name := istr_get(method_ni);
             mangled := type_name + "." + method_name;
             mangled_ni := str_intern(mangled);
 
             fi := find_func(mangled_ni);
             if fi < 0 {
-                check_error(EC_TF_METHOD_NOT_FOUND, "Impl missing method '" + method_name + "' for interface '" + get_char(iface_ni) + "'", 0, 0);
+                check_error(EC_TF_METHOD_NOT_FOUND, "Impl missing method '" + method_name + "' for interface '" + istr_get(iface_ni) + "'", 0, 0);
                 mi = mi + 1;
                 continue;
             }
@@ -1003,14 +1003,14 @@ fn check_impl_for() {
                 actual_pt := fi_param_type(fi, pti);
                 if expected_pt != actual_pt {
                     pnum_str := int_str(pti + 1);
-                    check_error(EC_TF_METHOD_ARG_TYP, "Param " + pnum_str + " type mismatch for method '" + method_name + "' in interface '" + get_char(iface_ni) + "'", 0, 0);
+                    check_error(EC_TF_METHOD_ARG_TYP, "Param " + pnum_str + " type mismatch for method '" + method_name + "' in interface '" + istr_get(iface_ni) + "'", 0, 0);
                 }
                 pti = pti + 1;
             }
             // Check return type
             actual_rt := fi_return_type(fi);
             if actual_rt != method_rt {
-                check_error(EC_TF_RETURN, "Return type mismatch for method '" + method_name + "' in interface '" + get_char(iface_ni) + "'", 0, 0);
+                check_error(EC_TF_RETURN, "Return type mismatch for method '" + method_name + "' in interface '" + istr_get(iface_ni) + "'", 0, 0);
             }
             mi = mi + 1;
         }
@@ -1042,12 +1042,12 @@ fn infer_expr(node: int) -> int {
         name_idx := ast_int_val(node);
         // Borrow check: can't use variable while it's borrowed
         if !check_use(name_idx) {
-            name := get_char(name_idx);
+            name := istr_get(name_idx);
             check_error(EC_B_USE_WHILE_BORROWED, "Cannot use '" + name + "' while it is borrowed", ast_line(node), ast_col(node));
         }
         si := lookup_sym(name_idx);
         if si >= 0 { return sym_type(si); }
-        name := get_char(name_idx);
+        name := istr_get(name_idx);
         check_error(EC_N_UNDEFINED, "Undefined name '" + name + "'", ast_line(node), ast_col(node));
         return TI_NEVER;
     }
@@ -1106,7 +1106,7 @@ fn infer_expr(node: int) -> int {
             var_ni := borrow_var_name(operand);
             if var_ni >= 0 {
                 if !check_borrow(var_ni, mut_flag) {
-                    name := get_char(var_ni);
+                    name := istr_get(var_ni);
                     if mut_flag != 0 {
                         check_error(EC_B_BORROW_MUT, "Cannot borrow '" + name + "' as mutable, already borrowed", ast_line(node), ast_col(node));
                     } else {
@@ -1229,8 +1229,8 @@ fn infer_expr(node: int) -> int {
                                         if imi2 >= imc2 { break; }
                                         imbase2 := ii2 * ESZ_IFACEINFO + OFF_IF_METHODS + imi2 * ESZ_IFMETHOD;
                                         if r64(g_ifaces, imbase2 + OFF_IFM_NAME) == method_ni {
-                                            tname2 := get_char(gen_ni);
-                                            mname2 := get_char(method_ni);
+                                            tname2 := istr_get(gen_ni);
+                                            mname2 := istr_get(method_ni);
                                             mangled2 := tname2 + "." + mname2;
                                             mangled_ni2 := str_intern(mangled2);
                                             ast_set_data(node, mangled_ni2);
@@ -1276,7 +1276,7 @@ fn infer_expr(node: int) -> int {
         }
         // Check builtins
         if func_ni >= 0 {
-            s := get_char(func_ni);
+            s := istr_get(func_ni);
             if s == "str_len" { return TI_INT; }
             if s == "str_get" { return TI_STR; }
             if s == "str_sub" { return TI_STR; }
@@ -1475,7 +1475,7 @@ fn infer_expr(node: int) -> int {
         }
         ti := val_ti;
         if type_node >= 0 { ti = resolve_type_node(type_node); }
-        if get_char(var_ni) != "_" {
+        if istr_get(var_ni) != "_" {
             define_sym(var_ni, SYM_LOCAL, ti, -1);
         }
         return TI_UNIT;
@@ -1507,7 +1507,7 @@ fn infer_expr(node: int) -> int {
             }
             return sym_type(si); // enum type
         }
-        name := get_char(name_idx);
+        name := istr_get(name_idx);
         check_error(EC_N_UNDEFINED, "Undefined enum constructor '" + name + "'", ast_line(node), ast_col(node));
         return TI_UNIT;
     }
@@ -1569,7 +1569,7 @@ fn infer_expr(node: int) -> int {
         }
         // Tuple field access: t.0, t.1
         if actual_ti >= 0 && actual_ti < g_type_count && get_type_kind(actual_ti) == TYP_TUPLE {
-            field_name := get_char(field_ni);
+            field_name := istr_get(field_ni);
             idx := str_int(field_name);
             tc := get_type_data(actual_ti);
             if idx >= 0 && idx < tc {
@@ -1712,7 +1712,7 @@ fn infer_expr(node: int) -> int {
             base_ti := get_type_data(inner_ti);
             if get_type_kind(base_ti) == TYP_NAMED {
                 base_ni := get_type_data(base_ti);
-                base_name := get_char(base_ni);
+                base_name := istr_get(base_ni);
                 if base_name == "Option" || base_name == "Result" {
                     ga_start := get_type_extra(inner_ti);
                     if r64(g_gen_apply_data, ga_start * 8) >= 1 {

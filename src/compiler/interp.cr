@@ -12,7 +12,7 @@ fn ir_interpret() -> int {
     loop {
         if fi >= g_ir_func_count { break; }
         ni := r64(g_ir_func_name_idx, fi * 8);
-        if str_eq(get_char(ni), "main") != 0 { main_idx = fi; break; }
+        if str_eq(istr_get(ni), "main") != 0 { main_idx = fi; break; }
         fi = fi + 1;
     }
     if main_idx < 0 { return -1; }
@@ -113,14 +113,14 @@ fn ir_interpret() -> int {
 
         if op == 4 {  // IR_CALL
             fn_ni := s3;
-            fn_name := get_char(fn_ni);
+            fn_name := istr_get(fn_ni);
             if str_eq(fn_name, "print") != 0 ||
                str_eq(fn_name, "print") != 0 {
-                if s2 >= 1 { str_idx := r64(g_ir_vals, s1 * 8); sval := get_char(str_idx); print(sval); }
+                if s2 >= 1 { str_idx := r64(g_ir_vals, s1 * 8); sval := istr_get(str_idx); print(sval); }
             }
             if str_eq(fn_name, "println") != 0 ||
                str_eq(fn_name, "println") != 0 {
-                if s2 >= 1 { str_idx := r64(g_ir_vals, s1 * 8); sval := get_char(str_idx); println(sval); }
+                if s2 >= 1 { str_idx := r64(g_ir_vals, s1 * 8); sval := istr_get(str_idx); println(sval); }
             }
             if str_eq(fn_name, "print_int") != 0 ||
                str_eq(fn_name, "print_int") != 0 {

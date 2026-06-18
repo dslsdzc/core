@@ -60,7 +60,7 @@ fn ir_instr_str(instr_idx: int) -> string {
         return s;
     }
     if iri_op(instr_idx) == IR_CALL {
-        s = s + ir_var_str(iri_dest(instr_idx)) + " = call " + get_char(iri_s3(instr_idx)) + "(";
+        s = s + ir_var_str(iri_dest(instr_idx)) + " = call " + istr_get(iri_s3(instr_idx)) + "(";
         ai : ., mut = 0;
         a_first : ., mut = 1;
         loop {
@@ -83,7 +83,7 @@ fn ir_instr_str(instr_idx: int) -> string {
         return s;
     }
     if iri_op(instr_idx) == IR_ALLOC_STRUCT {
-        s = s + ir_var_str(iri_dest(instr_idx)) + " : struct " + get_char(iri_s3(instr_idx));
+        s = s + ir_var_str(iri_dest(instr_idx)) + " : struct " + istr_get(iri_s3(instr_idx));
         return s;
     }
     if iri_op(instr_idx) == IR_ALLOC_ARRAY {
@@ -123,7 +123,7 @@ fn ir_instr_str(instr_idx: int) -> string {
         return s;
     }
     if iri_op(instr_idx) == IR_MAKE_ENUM {
-        s = s + ir_var_str(iri_dest(instr_idx)) + " = make_enum(" + get_char(iri_s1(instr_idx)) + ")";
+        s = s + ir_var_str(iri_dest(instr_idx)) + " = make_enum(" + istr_get(iri_s1(instr_idx)) + ")";
         return s;
     }
     if iri_op(instr_idx) == IR_REF {
@@ -241,7 +241,7 @@ fn cmd_cir(src_path: string) -> int {
     loop {
         if fi >= g_ir_func_count { break; }
         name_ni := r64(g_ir_func_name_idx, fi * 8);
-        ccr = ccr + "Function: " + get_char(name_ni) + "\n";
+        ccr = ccr + "Function: " + istr_get(name_ni) + "\n";
         start := r64(g_ir_func_instr_start, fi * 8);
         count := r64(g_ir_func_instr_count, fi * 8);
         in_block : ., mut = 0;

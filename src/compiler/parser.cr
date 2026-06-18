@@ -277,7 +277,7 @@ fn parse_postfix() -> int {
                 name_idx = ast_int_val(node);
             }
             if name_idx >= 0 {
-                name := get_char(name_idx);
+                name := istr_get(name_idx);
                 c := get_char(name, 0);
                 if str_cmp(c, "A") >= 0 && str_cmp(c, "Z") <= 0 {
                     is_enum_con = 1;
@@ -1259,7 +1259,7 @@ fn parse_declaration() {
                     if pc > 8 {
                         dyn_grow_diags(g_diag_count + 1);
                         w64(g_diags, g_diag_count * 32, EC_P_PARAM_TYPE);
-                        store_str_ptr(g_diags, g_diag_count * 32 + 8, "method '" + get_char(method_ni) + "' in interface exceeds max 8 params");
+                        store_str_ptr(g_diags, g_diag_count * 32 + 8, "method '" + istr_get(method_ni) + "' in interface exceeds max 8 params");
                         w64(g_diags, g_diag_count * 32 + 16, tok_ln(t)); w64(g_diags, g_diag_count * 32 + 24, tok_cl(t));
                         g_diag_count = g_diag_count + 1;
                     }

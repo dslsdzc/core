@@ -258,7 +258,7 @@ fn x86_64_elf_generate(buf: string) -> int {
 
     // ── .rodata ──
     si = 0; loop { if si >= g_x86_str_count { break; }
-        s := get_char(g_x86_str_offs[si)];
+        s := istr_get(g_x86_str_offs[si)];
         sl := str_len(s);
         ci := 0; loop { if ci >= sl { break; } w8(buf, cp, load8(s, ci)); ci = ci + 1; cp = cp + 1; }
         w8(buf, cp, 0); cp = cp + 1;

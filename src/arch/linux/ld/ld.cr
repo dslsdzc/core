@@ -331,7 +331,7 @@ fn patch_relocs() {
         code_off : ., mut = abs_pos - 176;
         if code_off < 0 || code_off >= g_user_size { ri=ri+1; continue; }
         fn_name_ni := r64(g_x86_ext_rel_name, ri * 8); fn_name : ., mut = "";
-        if fn_name_ni >= 0 { fn_name = get_char(fn_name_ni); }
+        if fn_name_ni >= 0 { fn_name = istr_get(fn_name_ni); }
         plt_idx : ., mut = -1;
         si : ., mut = 0; loop { if si >= g_plt_count { break; }
             if str_eq(r64(g_plts, si * 16), fn_name) != 0 { plt_idx = si; break; }
@@ -443,7 +443,7 @@ fn ctx_emit_static(buf: string, path: string) -> int {
     loop { if rpi >= g_x86_ext_rel_count { break; }
         abs_pos := r64(g_x86_ext_rel_pos, rpi * 8);
         fn_ni := r64(g_x86_ext_rel_name, rpi * 8);
-        fn_name := get_char(fn_ni);
+        fn_name := istr_get(fn_ni);
         if str_len(fn_name) > 0 {
             sym_addr := so_find(so_buf, fn_name);
             if sym_addr >= g_so_addr && sym_addr < g_so_addr + g_so_sz {

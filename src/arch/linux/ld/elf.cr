@@ -164,7 +164,7 @@ fn x86_64_elf_generate(buf: string) -> int {
     gvsi : ., mut = 0;
     loop { if gvsi >= g_ir_global_count { break; }
         gni := r64(g_ir_globals, gvsi * 16);
-        gnm := get_char(gni);
+        gnm := istr_get(gni);
         if str_eq(gnm, "g_rt_argc") != 0 { gv_argc = r64(g_ir_globals, gvsi * 16 + 8); }
         if str_eq(gnm, "g_rt_argv_ptr") != 0 { gv_argv = r64(g_ir_globals, gvsi * 16 + 8); }
     gvsi = gvsi + 1; }
