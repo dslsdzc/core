@@ -358,71 +358,7 @@ fn parse_primary() -> int {
     }
     if tok_k(t) == T_STRING {
         advance_tok();
-        s := tok_lx(t);
-        slen := __builtin_str_len(s);
-        // Check for string interpolation: "text { expr } text"
-        brace_pos : ., mut = -1;
-        i : ., mut = 0;
-        loop {
-            if i >= slen { break; }
-            c := __builtin_str_get(s, i);
-            if c == "{" { brace_pos = i; break; }
-            i = i + 1;
-        }
-        if brace_pos >= 0 {
-            // Interpolated string — desugar to concatenation chain
-            // "before {expr} after" → "before" + expr + "after"
-            acc : ., mut = -1;
-            pos : ., mut = 0;
-            loop {
-                // Find next { or end
-                start_pos : ., mut = pos;
-                end_pos : ., mut = -1;
-                expr_start : ., mut = -1;
-                j : ., mut = pos;
-                loop {
-                    if j >= slen { end_pos = j; break; }
-                    cj := __builtin_str_get(s, j);
-                    if cj == "{" { end_pos = j; expr_start = j + 1; break; }
-                    j = j + 1;
-                }
-                // Add string part before { as EXPR_STRING
-                if end_pos > start_pos {
-                    part := __builtin_str_sub(s, start_pos, end_pos - start_pos);
-                    ni := str_intern(part);
-                    sp := alloc_node(EXPR_STRING, 0, 0, 0, ni, TY_STRING, 0, tok_ln(t), tok_cl(t));
-                    if acc < 0 { acc = sp; }
-                    else { acc = alloc_node(EXPR_BINARY, acc, sp, OP_ADD, 0, 0, 0, tok_ln(t), tok_cl(t)); }
-                }
-                if expr_start < 0 { break; }
-                // Find closing }
-                close : ., mut = -1;
-                k : ., mut = expr_start;
-                loop {
-                    if k >= slen { break; }
-                    if __builtin_str_get(s, k) == "}" { close = k; break; }
-                    k = k + 1;
-                }
-                // Extract identifier name for now (simple case: {name})
-                if close > expr_start {
-                    id_name := __builtin_str_sub(s, expr_start, close - expr_start);
-                    // For now, only handle simple identifiers in interpolation
-                    id_ni := str_intern(id_name);
-                    id_node := alloc_node(EXPR_IDENT, 0, 0, 0, id_ni, 0, 0, tok_ln(t), tok_cl(t));
-                    if acc < 0 { acc = id_node; }
-                    else { acc = alloc_node(EXPR_BINARY, acc, id_node, OP_ADD, 0, 0, 0, tok_ln(t), tok_cl(t)); }
-                }
-                if close < 0 { break; }
-                pos = close + 1;
-            }
-            if acc < 0 {
-                // Fallback: empty string
-                ni := str_intern("");
-                acc = alloc_node(EXPR_STRING, 0, 0, 0, ni, TY_STRING, 0, tok_ln(t), tok_cl(t));
-            }
-            return acc;
-        }
-        return alloc_node(EXPR_STRING, 0, 0, 0, str_intern(s), TY_STRING, 0, tok_ln(t), tok_cl(t));
+        return alloc_node(EXPR_STRING, 0, 0, 0, str_intern(tok_lx(t)), TY_STRING, 0, tok_ln(t), tok_cl(t));
     }
     if tok_k(t) == T_TRUE { advance_tok(); return alloc_node(EXPR_BOOL, 0, 0, 0, 1, TY_BOOL, 0, tok_ln(t), tok_cl(t)); }
     if tok_k(t) == T_FALSE { advance_tok(); return alloc_node(EXPR_BOOL, 0, 0, 0, 0, TY_BOOL, 0, tok_ln(t), tok_cl(t)); }
