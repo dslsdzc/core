@@ -16,7 +16,7 @@ fn alloc_node(kind: int, a: int, b: int, c: int, iv: int, tv: int, d: int, line:
 
 fn cur_tok() -> int { return g_token_pos; }
 fn tok_k(p: int) -> int { return r64(g_tokens, p * ESZ_TOKEN + OFF_TK_KIND); }
-fn tok_lx(p: int) -> string { return get_char(r64(g_tokens, p * ESZ_TOKEN + OFF_TK_LEXEME)); }
+fn tok_lx(p: int) -> string { return istr_get(r64(g_tokens, p * ESZ_TOKEN + OFF_TK_LEXEME)); }
 fn tok_iv(p: int) -> int { return r64(g_tokens, p * ESZ_TOKEN + OFF_TK_INTVAL); }
 fn tok_ln(p: int) -> int { return r64(g_tokens, p * ESZ_TOKEN + OFF_TK_LINE); }
 fn tok_cl(p: int) -> int { return r64(g_tokens, p * ESZ_TOKEN + OFF_TK_COL); }
@@ -1426,7 +1426,9 @@ fn parse_all() {
 
     ci : ., mut = 0;
     loop {
-        if tok_k(cur_tok()) == T_EOF { break; }
+        t_cur := cur_tok();
+        t_kind := tok_k(t_cur);
+        if t_kind == T_EOF { break; }
         if ci > 5 { print("parse_all loop\n"); ci = 0; }
         prev_ast := g_ast_count;
         parse_declaration();

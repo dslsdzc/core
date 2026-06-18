@@ -308,6 +308,8 @@ fn corec_main() -> int {
     }
     src_path := cli_arg(0);
 
+    // Debug: print first 20 bytes of src_path using raw syscall
+
     if read_source_or_project(src_path) != 0 { return 1; }
 
     // --static: prepend rt.cr so * functions inline
