@@ -378,17 +378,13 @@ fn ir_gen_expr(node: int) -> int {
                 }
             }
         }
-        // Variadic expansion via name check (temporary: SYM_SO_FN lookup pending)
+        // Variadic expansion: check SYM_SO_FN + TAG_VARIADIC
         so_variadic : ., mut = 0;
-        so_print_ni : ., mut = -1;
-        if func_ni >= 0 && ac > 1 {
-            fn_name := istr_get(func_ni);
-            if fn_name == "print" || fn_name == "println" {
-                so_variadic = 1;
-                so_print_ni = func_ni;
-            }
+        si_var := lookup_sym_global(func_ni);
+        if si_var >= 0 && sym_kind(si_var) == SYM_SO_FN && ac > 1 {
+            tf := sym_type(si_var);
+            if (tf & TAG_VARIADIC) != 0 { so_variadic = 1; }
         }
-        // END SYM_SO_FN
         if so_variadic != 0 {
             is_println : ., mut = 0;
             // Check if function name contains or ends with "ln" for newline
@@ -410,13 +406,8 @@ fn ir_gen_expr(node: int) -> int {
                 // Auto-convert int args via int_str() if TAG_AUTO_STR
                 need_auto : ., mut = 0;
                 si2 := lookup_sym_global(func_ni);
-                if si2 >= 0 {
-                    tf2 := sym_type(si2);
-                    if tf2 == 2 || tf2 == 3 { need_auto = 1; }
-                } else {
-                    // Fallback: check by name for known functions
-                    fn_auto := istr_get(func_ni);
-                    if fn_auto == "print" || fn_auto == "println" { need_auto = 1; }
+                if si2 >= 0 && sym_kind(si2) == SYM_SO_FN {
+                    if (sym_type(si2) & TAG_AUTO_STR) != 0 { need_auto = 1; }
                 }
                 if need_auto != 0 {
                     arg_ti2 := irv_type(arg_v);
