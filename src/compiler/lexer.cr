@@ -341,7 +341,11 @@ fn tokenize() {
         if c == "=" && peek() == ">" { advance(); advance(); add_token(T_FATARROW); skip_whitespace(); continue; }
         if c == ":" && peek() == "=" { advance(); advance(); add_token(T_COLON_EQ); skip_whitespace(); continue; }
         if c == ":" && peek() == ":" { advance(); advance(); add_token(T_PATHSEP); skip_whitespace(); continue; }
-        if c == "." && peek() == "." { advance(); advance(); add_token(T_DOTDOT); skip_whitespace(); continue; }
+        if c == "." && peek() == "." {
+            advance(); advance();
+            if cur_char() == "." { advance(); add_token(T_DOTDOTDOT); }
+            else { add_token(T_DOTDOT); }
+            skip_whitespace(); continue; }
 
         // Compound assignment operators
         if c == "+" && peek() == "=" { advance(); advance(); add_token(T_PLUS_EQ); skip_whitespace(); continue; }

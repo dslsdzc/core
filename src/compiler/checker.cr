@@ -875,7 +875,8 @@ fn check_func(fi: int) {
         if pi >= param_count { break; }
         if pn < 0 { break; }
         pname_idx := ast_a(pn);  // EXPR_PARAM: a = name idx
-        self_mode := ast_int_val(pn);  // EXPR_PARAM: int_val = self mode (0=normal, 1=self, 2=&self, 3=&mut self)
+        self_mode := ast_int_val(pn);  // EXPR_PARAM: int_val = self mode (0=normal, 1=self, 2=&self, 3=&mut self, -1=variadic)
+        if self_mode == -1 { pi = pi + 1; pn = pn + 1; continue; }
         ti : ., mut = TI_UNIT;
         if self_mode == 0 {
             // Regular param: resolve using original type node if it's non-base (named/generic)

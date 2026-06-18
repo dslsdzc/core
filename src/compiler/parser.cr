@@ -1020,6 +1020,16 @@ fn parse_fn_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int) {
                 advance_tok();
                 continue;
             }
+            // Variadic: ...name:type
+            if check(T_DOTDOTDOT) {
+                advance_tok(); vt := advance_tok();
+                vn := str_intern(tok_lx(vt)); advance_tok();
+                vty := parse_type();
+                if pf < 0 { pf = g_ast_count; }
+                alloc_node(EXPR_PARAM, vn, 0, 0, -1, 0, vty, tok_ln(vt), tok_cl(vt));
+                pc = pc + 1;
+                if !check(T_COMMA) { break; } advance_tok(); continue;
+            }
             pt := advance_tok();
             pn := str_intern(tok_lx(pt));
             advance_tok();
