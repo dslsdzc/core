@@ -201,16 +201,23 @@ fn x86_64_elf_generate(buf: string) -> int {
         total_code = total_code + 1 + 1;
     fi = fi + 1; }
 
+    rd_sz := g2_rodata_sz();
+    total_code = total_code + 6;  // _init_globals
+
     // alloc: bump allocator for heap allocation in ELF output
-    alloc_ni := str_intern("alloc");
+    // Find alloc's name index in .ccr string table (not runtime str_intern)
+    alloc_ni : ., mut = -1;
+    asi : ., mut = 0;
+    loop { if asi >= g_str_count { break; }
+        if str_eq(istr_get(asi), "alloc") != 0 { alloc_ni = asi; break; }
+        asi = asi + 1; }
+    if alloc_ni < 0 { alloc_ni = str_intern("alloc"); }
     dyn_grow_x86_func_offsets(g_x86_func_off_count * 2 + 2);
     w64(g_x86_func_offsets, g_x86_func_off_count * 16, alloc_ni);
     w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code);
     g_x86_func_off_count = g_x86_func_off_count + 1;
     total_code = total_code + 65;
 
-    rd_sz := g2_rodata_sz();
-    total_code = total_code + 6;  // _init_globals
     rodata_base := total_code;
     g_x86_rodata_base = 176 + rodata_base;
 

@@ -679,6 +679,65 @@ fn x86_64_generate() -> string {
     asm = asm + "    push rbp\n    mov rbp, rsp\n";
     asm = asm + "    pop rbp\n    ret\n\n";
 
+    // Runtime: _start, alloc, get_arg
+    asm = asm + ".globl _start\n_start:\n";
+    asm = asm + "    mov rdi, [rsp]\n";
+    asm = asm + "    lea rsi, [rsp + 8]\n";
+    asm = asm + "    mov [rip + g_rt_argc], rdi\n";
+    asm = asm + "    mov [rip + g_rt_argv_ptr], rsi\n";
+    asm = asm + "    lea rax, [rip + _heap_start]\n";
+    asm = asm + "    mov [rip + _heap_ptr], rax\n";
+    asm = asm + "    call _init_globals\n";
+    asm = asm + "    call main\n";
+    asm = asm + "    mov edi, eax\n";
+    asm = asm + "    mov eax, 60\n";
+    asm = asm + "    syscall\n\n";
+
+    asm = asm + ".globl alloc\nalloc:\n";
+    asm = asm + "    add rdi, 7\n    and rdi, -8\n";
+    asm = asm + "    mov rax, [rip + _heap_ptr]\n";
+    asm = asm + "    lea rdx, [rax + rdi]\n";
+    asm = asm + "    lea rcx, [rip + _heap_end]\n";
+    asm = asm + "    cmp rdx, rcx\n    ja .Loom\n";
+    asm = asm + "    mov [rip + _heap_ptr], rdx\n";
+    asm = asm + "    push rax\n    push rdx\n";
+    asm = asm + "    mov rdi, rax\n    xor eax, eax\n";
+    asm = asm + "    sub rdx, rdi\n    mov rcx, rdx\n";
+    asm = asm + "    cld\n    rep stosb\n";
+    asm = asm + "    pop rdx\n    pop rax\n    ret\n";
+    asm = asm + ".Loom:\n    xor eax, eax\n    ret\n\n";
+
+    asm = asm + ".globl get_arg\nget_arg:\n";
+    asm = asm + "    mov rcx, [rip + g_rt_argc]\n";
+    asm = asm + "    cmp rdi, rcx\n    jge .Larg_oob\n";
+    asm = asm + "    cmp rdi, 0\n    jl .Larg_oob\n";
+    asm = asm + "    push r12\n";
+    asm = asm + "    mov rcx, [rip + g_rt_argv_ptr]\n";
+    asm = asm + "    mov r12, [rcx + rdi*8]\n";
+    asm = asm + "    mov rdi, r12\n    xor eax, eax\n";
+    asm = asm + "    mov rcx, -1\n    repne scasb\n";
+    asm = asm + "    not rcx\n    dec rcx\n";
+    asm = asm + "    lea rdi, [rcx + 1]\n    push rcx\n";
+    asm = asm + "    call alloc\n    pop rcx\n";
+    asm = asm + "    test rax, rax\n    jz .Larg_af\n";
+    asm = asm + "    mov rdi, rax\n    push rax\n";
+    asm = asm + "    mov rsi, r12\n    lea rcx, [rcx + 1]\n";
+    asm = asm + "    rep movsb\n    pop rax\n    pop r12\n    ret\n";
+    asm = asm + ".Larg_af:\n    xor eax, eax\n    pop r12\n    ret\n";
+    asm = asm + ".Larg_oob:\n    xor eax, eax\n    ret\n\n";
+
+    asm = asm + ".globl load_str_ptr\nload_str_ptr:\n";
+    asm = asm + "    mov rax, [rdi + rsi]\n    ret\n\n";
+    asm = asm + ".globl store_str_ptr\nstore_str_ptr:\n";
+    asm = asm + "    mov [rdi + rsi], rdx\n    xor eax, eax\n    ret\n\n";
+
+    asm = asm + ".bss\n.balign 4096\n";
+    asm = asm + "_heap_start:\n    .space 256 * 1024 * 1024\n";
+    asm = asm + "_heap_end:\n\n";
+    asm = asm + ".data\n";
+    asm = asm + "_heap_ptr: .quad 0\n";
+    asm = asm + "empty_str: .byte 0\n\n";
+
     asm = asm + ".section .rodata\n";
     si : ., mut = 0;
     loop {

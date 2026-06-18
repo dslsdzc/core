@@ -7,9 +7,7 @@
 .intel_syntax noprefix
 
 .section .data
-.globl rt_argc
 rt_argc: .quad 0
-.globl rt_argv
 rt_argv: .quad 0
 
 .section .bss
@@ -19,7 +17,7 @@ heap_start:
 heap_end:
 
 .section .data
-heap_ptr: .quad heap_start
+heap_ptr: .quad 0
 empty_str: .byte 0
 
 .text
@@ -31,9 +29,15 @@ _start:
     # Save argc/argv from stack (Linux process initialization)
     mov rdi, [rsp]
     lea rsi, [rsp + 8]
-    mov [rip + rt_argc], rdi
-    mov [rip + rt_argv], rsi
+    lea rax, [rip + rt_argc]
+    mov [rax], rdi
+    lea rax, [rip + rt_argv]
+    mov [rax], rsi
 
+    # Initialize bump allocator heap pointer
+    lea rax, [rip + heap_start]
+    lea r10, [rip + heap_ptr]
+    mov [r10], rax
     call _init_globals
     call main
 
@@ -48,14 +52,13 @@ _start:
 alloc:
     add rdi, 7
     and rdi, -8
-
-    mov rax, [rip + heap_ptr]
+    lea r10, [rip + heap_ptr]
+    mov rax, [r10]
     lea rdx, [rax + rdi]
     lea rcx, [rip + heap_end]
     cmp rdx, rcx
     ja .Lalloc_oom
-
-    mov [rip + heap_ptr], rdx
+    mov [r10], rdx
 
     # Zero-initialize
     push rax

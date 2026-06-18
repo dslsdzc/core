@@ -455,17 +455,23 @@ fn ctx_emit_static(buf: string, path: string) -> int {
         }
     rpi = rpi + 1; }
 
-    // ELF header: single PT_LOAD
+    // ELF header: PT_LOAD + BSS (256MB heap from rt.s)
+    HEAP_SZ : int = 256 * 1024 * 1024;
     w8(buf,0,127);w8(buf,1,69);w8(buf,2,76);w8(buf,3,70);
     w8(buf,4,2);w8(buf,5,1);w8(buf,6,1);
     w16(buf,16,2);w16(buf,18,62);w32(buf,20,1);
-    w64(buf,24,0x400000 + user_out);  // entry = user code's _start
+    w64(buf,24,0x400000 + user_out);
     w64(buf,32,64);w64(buf,40,0);
-    w16(buf,52,64);w16(buf,54,56);w16(buf,56,1);w16(buf,58,64);
+    w16(buf,52,64);w16(buf,54,56);w16(buf,56,2);w16(buf,58,64);
     w32(buf,64,1);w32(buf,68,5);w64(buf,72,0);
     w64(buf,80,0x400000);w64(buf,88,0x400000);
     w64(buf,96,total);w64(buf,104,total);
     w64(buf,112,4096);
+    // PT_LOAD: BSS (256MB heap)
+    w32(buf,120,1);w32(buf,124,6);w64(buf,128,0);
+    w64(buf,136,0x400000 + total);w64(buf,144,0x400000 + total);
+    w64(buf,152,0);w64(buf,160,HEAP_SZ);
+    w64(buf,168,4096);
 
     fd := syscall3(2, path, 577, 420);
     if fd < 0 { return -1; }
