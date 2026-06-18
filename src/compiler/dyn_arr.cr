@@ -521,6 +521,12 @@ fn dyn_grow_x86_call_patch(needed: int) {
     n2 := alloc(nc * 8); _dyncpy(g_x86_call_patch_name, g_x86_call_patch_cap * 8, n2); g_x86_call_patch_name = n2;
     g_x86_call_patch_cap = nc; }
 
+fn dyn_grow_x86_func_cp(needed: int) {
+    if needed < g_x86_func_cp_cap { return; }
+    nc : ., mut = g_x86_func_cp_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+    nb := alloc(nc * 8); _dyncpy(g_x86_func_cp, g_x86_func_cp_cap * 8, nb);
+    g_x86_func_cp = nb; g_x86_func_cp_cap = nc; }
+
 fn dyn_grow_x86_rodataref(needed: int) {
     if needed < g_x86_rodataref_cap { return; }
     nc : ., mut = g_x86_rodataref_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }

@@ -44,43 +44,15 @@ DT_JMPREL    : int = 23;
 // .so tracking
 // ============================================================
 
-    HEAP_SZ : int = 256 * 1024 * 1024;
-    rpi : ., mut = 0;
-    hdr_sz : ., mut = 176;
-    si : ., mut = 0;
-    so_buf : ., mut = "";
-    i : ., mut = 0;
-        plt_idx : ., mut = -1;
-        fn_name_ni := r64(g_x86_ext_rel_name, ri * 8); fn_name : ., mut = "";
-        code_off : ., mut = abs_pos - 176;
-            nxt2 : ., mut = 12;
-            so_off2 : ., mut = 1;
-            de : ., mut = 0;
-            nxt : ., mut = so_off+str_len("core_rt.so")+1;
-            db : ., mut = alloc(dn); w8(db,0,0); so_off : ., mut = 1;
-            dn : ., mut = 1 + str_len("core_rt.so") + 1;
-        p : ., mut = r64(g_ch_foff, i * 8); k := r64(g_ch_kind, i * 8);
-        sz : ., mut = 0;
-        va : ., mut = g_text_base;
-            nm : ., mut = ""; k : ., mut = sn;
-    do : ., mut = 0; ds : ., mut = 0; so : ., mut = 0; ss : ., mut = 0;
-    i : ., mut = 0;
-    nb := alloc(nc * 8); zi : ., mut = 0; loop { if zi >= nc * 8 { break; } store8(nb, zi, 0); zi = zi + 1; } _dyncpy(g_ch_kind, g_ch_kind_cap * 8, nb); g_ch_kind = nb; g_ch_kind_cap = nc;
-g_ch_count : int, mut;
-g_ch_size : string, mut;   g_ch_size_cap : int, mut;
-g_ch_foff : string, mut;   g_ch_foff_cap : int, mut;
-g_ch_vaddr : string, mut;   g_ch_vaddr_cap : int, mut;
-g_ch_kind : string, mut;                                    g_ch_kind_cap : int, mut;
-g_text_base : int, mut;
-g_user_size : int, mut;
-g_user_code : string, mut;
-g_plts : string, mut; g_plt_count : int, mut; g_plt_cap : int, mut;
+g_so_paths : string, mut; g_so_count : int, mut; g_so_cap : int, mut;
+
 fn dyn_grow_so(needed: int) {
     if needed < g_so_cap { return; }
     nc : ., mut = g_so_cap * 2; if nc < 4 { nc = 4; } if nc < needed { nc = needed + 4; }
     nb := alloc(nc * 8); _dyncpy(g_so_paths, g_so_cap * 8, nb); g_so_paths = nb; g_so_cap = nc; }
 
 struct PltEntry { name: string, so_idx: int }
+g_plts : string, mut; g_plt_count : int, mut; g_plt_cap : int, mut;
 
 fn dyn_grow_plts(needed: int) {
     if needed < g_plt_cap { return; }
@@ -91,8 +63,16 @@ fn dyn_grow_plts(needed: int) {
 // Linker state
 // ============================================================
 
+g_user_code : string, mut;
+g_user_size : int, mut;
+g_text_base : int, mut;
 
 // Flat chunk arrays (avoid struct array compiler limitation)
+g_ch_kind : string, mut;                                    g_ch_kind_cap : int, mut;
+g_ch_vaddr : string, mut;   g_ch_vaddr_cap : int, mut;
+g_ch_foff : string, mut;   g_ch_foff_cap : int, mut;
+g_ch_size : string, mut;   g_ch_size_cap : int, mut;
+g_ch_count : int, mut;
 
 // ============================================================
 // Chunk helpers
@@ -100,6 +80,7 @@ fn dyn_grow_plts(needed: int) {
 
 fn dyn_grow_chunks(needed: int) {
     nc : ., mut = g_ch_kind_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
+    nb := alloc(nc * 8); zi : ., mut = 0; loop { if zi >= nc * 8 { break; } store8(nb, zi, 0); zi = zi + 1; } _dyncpy(g_ch_kind, g_ch_kind_cap * 8, nb); g_ch_kind = nb; g_ch_kind_cap = nc;
     nb2 := alloc(nc * 8); zi = 0; loop { if zi >= nc * 8 { break; } store8(nb2, zi, 0); zi = zi + 1; } _dyncpy(g_ch_vaddr, g_ch_vaddr_cap * 8, nb2); g_ch_vaddr = nb2; g_ch_vaddr_cap = nc;
     nb3 := alloc(nc * 8); zi = 0; loop { if zi >= nc * 8 { break; } store8(nb3, zi, 0); zi = zi + 1; } _dyncpy(g_ch_foff, g_ch_foff_cap * 8, nb3); g_ch_foff = nb3; g_ch_foff_cap = nc;
     nb4 := alloc(nc * 8); zi = 0; loop { if zi >= nc * 8 { break; } store8(nb4, zi, 0); zi = zi + 1; } _dyncpy(g_ch_size, g_ch_size_cap * 8, nb4); g_ch_size = nb4; g_ch_size_cap = nc; }
@@ -113,6 +94,7 @@ fn cnew(k: int) {
     g_ch_count = g_ch_count + 1; }
 
 fn cby(k: int) -> int {
+    i : ., mut = 0;
     loop {
         if i >= g_ch_count { break; }
         if r64(g_ch_kind, i * 8) == k { return i; }
@@ -127,6 +109,7 @@ fn so_find(buf: string, name: string) -> int {
     if str_len(buf) < 64 { return -1; }
     if r16(buf, 16) != 3 { return -1; }
     e_shoff := r64(buf, 40); e_shnum := r16(buf, 60);
+    do : ., mut = 0; ds : ., mut = 0; so : ., mut = 0; ss : ., mut = 0;
     i : ., mut = 0; loop { if i >= e_shnum { break; }
         t := r32(buf, e_shoff+i*64+4); a := r64(buf, e_shoff+i*64+16);
         o := r64(buf, e_shoff+i*64+24); s := r64(buf, e_shoff+i*64+32);
@@ -139,6 +122,7 @@ fn so_find(buf: string, name: string) -> int {
         sn := r32(buf, do+i*24); sv := r64(buf, do+i*24+8);
         si := bu8(buf, do+i*24+4); sx := r16(buf, do+i*24+6);
         if si/16 == 1 && si%16 == 2 && sx != 0 {
+            nm : ., mut = ""; k : ., mut = sn;
             loop { if k >= ss { break; }
                 c := bu8(buf, so+k); if c == 0 { break; }
                 sc2 := get_char(" ",0); store8(sc2,0,c);
@@ -164,7 +148,9 @@ fn so_find_any(name: string) -> int {
 // ============================================================
 
 fn layout() {
+        va : ., mut = g_text_base;
     i : ., mut = 0; loop { if i >= g_ch_count { break; }
+        sz : ., mut = 0;
         k := r64(g_ch_kind, i * 8);
         if k == 0 { sz = 344; }
         if k == 1 { sz = 29; }
@@ -196,6 +182,7 @@ fn emit(buf: string, total: int, is_so: int) {
     zi : ., mut = 0; loop { if zi >= total { break; } w8(buf, zi, 0); zi = zi + 1; }
     tb := g_text_base;
     i : ., mut = 0; loop { if i >= g_ch_count { break; }
+        p : ., mut = r64(g_ch_foff, i * 8); k := r64(g_ch_kind, i * 8);
 
 
         // Ehdr: ELF header + 4 program headers
@@ -272,12 +259,15 @@ fn emit(buf: string, total: int, is_so: int) {
         // .dynamic (also writes .dynstr)
         if k == 5 {
             // Compute dynstr size: null + "core_rt.so\0" + all plt names
+            dn : ., mut = 1 + str_len("core_rt.so") + 1;
             dnp : ., mut = 0; loop { if dnp >= g_plt_count { break; }
                 dn = dn + istr_len(r64(g_plts, dnp * 16)) + 1; dnp = dnp + 1; }
             // Build dynstr
+            db : ., mut = alloc(dn); w8(db,0,0); so_off : ., mut = 1;
             j : ., mut = 0; loop { if j >= str_len("core_rt.so") { break; }
                 w8(db,so_off+j, load8("core_rt.so",j)); j=j+1; }
             w8(db,so_off+str_len("core_rt.so"),0);
+            nxt : ., mut = so_off+str_len("core_rt.so")+1;
             pi : ., mut = 0; loop { if pi >= g_plt_count { break; }
                 j=0; loop { if j >= istr_len(r64(g_plts, pi * 16)) { break; }
                     w8(db,nxt+j, load8(r64(g_plts, pi * 16),j)); j=j+1; }
@@ -291,6 +281,7 @@ fn emit(buf: string, total: int, is_so: int) {
             sv := r64(g_ch_vaddr, cby(6) * 8); dv2 := r64(g_ch_vaddr, dsc * 8);
             gv2 := r64(g_ch_vaddr, cby(4) * 8); rv := r64(g_ch_vaddr, cby(8) * 8);
             rs := r64(g_ch_size, cby(8) * 8);
+            de : ., mut = 0;
             w64(buf,p+de*16,5);w64(buf,p+de*16+8,dv2);de=de+1;  // DT_STRTAB
             w64(buf,p+de*16,11);w64(buf,p+de*16+8,24);de=de+1;
             w64(buf,p+de*16,6);w64(buf,p+de*16+8,sv);de=de+1;  // DT_SYMTAB
@@ -306,6 +297,8 @@ fn emit(buf: string, total: int, is_so: int) {
         if k == 6 {
             w32(buf,p,0);w8(buf,p+4,0);w8(buf,p+5,0);w16(buf,p+6,0);
             w64(buf,p+8,0);w64(buf,p+16,0);
+            so_off2 : ., mut = 1;
+            nxt2 : ., mut = 12;
             pi : ., mut = 0; loop { if pi >= g_plt_count { break; }
                 so2 := p+(pi+1)*24;
                 w32(buf,so2,nxt2);
@@ -335,8 +328,11 @@ fn patch_relocs() {
     pv := r64(g_ch_vaddr, cby(3) * 8);
     ri : ., mut = 0; loop { if ri >= g_x86_ext_rel_count { break; }
         abs_pos := r64(g_x86_ext_rel_pos, ri * 8);
+        code_off : ., mut = abs_pos - 176;
         if code_off < 0 || code_off >= g_user_size { ri=ri+1; continue; }
+        fn_name_ni := r64(g_x86_ext_rel_name, ri * 8); fn_name : ., mut = "";
         if fn_name_ni >= 0 { fn_name = istr_get(fn_name_ni); }
+        plt_idx : ., mut = -1;
         si : ., mut = 0; loop { if si >= g_plt_count { break; }
             if str_eq(r64(g_plts, si * 16), fn_name) != 0 { plt_idx = si; break; }
             si = si + 1; }
@@ -402,6 +398,7 @@ fn so_parse_text(buf: string) -> int {
     // Find the executable PROGBITS section (.text) in the .so
     if str_len(buf) < 64 { return -1; }
     e_shoff := r64(buf, 40); e_shnum := r16(buf, 60);
+    i : ., mut = 0;
     loop { if i >= e_shnum { break; }
         t := r32(buf, e_shoff+i*64+4); fl := r64(buf, e_shoff+i*64+8);
         a := r64(buf, e_shoff+i*64+16); o := r64(buf, e_shoff+i*64+24); s := r64(buf, e_shoff+i*64+32);
@@ -413,6 +410,8 @@ fn so_parse_text(buf: string) -> int {
     return -1; }
 
 fn ctx_emit_static(buf: string, path: string) -> int {
+    so_buf : ., mut = "";
+    si : ., mut = 0;
     loop { if si >= g_so_count { break; }
         sp := r64(g_so_paths, si * 8);
         if str_len(sp) > 0 {
@@ -424,6 +423,7 @@ fn ctx_emit_static(buf: string, path: string) -> int {
     if g_so_sz <= 0 { return -1; }
 
     // Layout: 176 header + .so code + user code
+    hdr_sz : ., mut = 176;
     so_out := hdr_sz;                    // .so .text starts right after header
     user_out := so_out + g_so_sz;        // user code after .so
     total := user_out + g_user_size;
@@ -439,6 +439,7 @@ fn ctx_emit_static(buf: string, path: string) -> int {
         w8(buf, user_out + cj, bu8(g_user_code, cj)); cj = cj + 1; }
 
     // Patch external relocations: user code calls → .so functions
+    rpi : ., mut = 0;
     loop { if rpi >= g_x86_ext_rel_count { break; }
         abs_pos := r64(g_x86_ext_rel_pos, rpi * 8);
         fn_ni := r64(g_x86_ext_rel_name, rpi * 8);
@@ -454,22 +455,17 @@ fn ctx_emit_static(buf: string, path: string) -> int {
         }
     rpi = rpi + 1; }
 
-    // ELF header: PT_LOAD + BSS (256MB heap from rt.s)
+    // ELF header: single PT_LOAD
     w8(buf,0,127);w8(buf,1,69);w8(buf,2,76);w8(buf,3,70);
     w8(buf,4,2);w8(buf,5,1);w8(buf,6,1);
     w16(buf,16,2);w16(buf,18,62);w32(buf,20,1);
-    w64(buf,24,0x400000 + user_out);
+    w64(buf,24,0x400000 + user_out);  // entry = user code's _start
     w64(buf,32,64);w64(buf,40,0);
-    w16(buf,52,64);w16(buf,54,56);w16(buf,56,2);w16(buf,58,64);
+    w16(buf,52,64);w16(buf,54,56);w16(buf,56,1);w16(buf,58,64);
     w32(buf,64,1);w32(buf,68,5);w64(buf,72,0);
     w64(buf,80,0x400000);w64(buf,88,0x400000);
     w64(buf,96,total);w64(buf,104,total);
     w64(buf,112,4096);
-    // PT_LOAD: BSS (256MB heap)
-    w32(buf,120,1);w32(buf,124,6);w64(buf,128,0);
-    w64(buf,136,0x400000 + total);w64(buf,144,0x400000 + total);
-    w64(buf,152,0);w64(buf,160,HEAP_SZ);
-    w64(buf,168,4096);
 
     fd := syscall3(2, path, 577, 420);
     if fd < 0 { return -1; }

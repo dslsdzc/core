@@ -247,8 +247,9 @@ fn x86_64_elf_generate(buf: string) -> int {
     // ── All functions ──
     g_x86_ret_patch_count = 0;
         g_x86_call_patch_count = 0;
-fi = g_ir_func_count - 1; loop { if fi < 0 { break; }
+fi = 0; loop { if fi >= g_ir_func_count { break; }
         ni := r64(g_ir_func_name_idx, fi * 8);
+        dyn_grow_x86_func_cp(fi + 1); w64(g_x86_func_cp, fi * 8, cp);
         // Override with actual position for backward calls
         fi3 := 0; loop { if fi3 >= g_x86_func_off_count { break; }
             if str_eq(istr_get(r64(g_x86_func_offsets, fi3*16)), istr_get(ni)) != 0 {
@@ -318,8 +319,53 @@ fi = g_ir_func_count - 1; loop { if fi < 0 { break; }
         }
         w8(buf, cp, 93); cp = cp + 1;  // pop rbp
         w8(buf, cp, 195); cp = cp + 1;  // ret
+        fi = fi + 1; }
 
+    // ── Patch forward calls using actual cp positions ──
+    // Phase 3 stored cp at start of each function in g_x86_func_cp
+    cpi := 0; loop { if cpi >= g_x86_call_patch_count { break; }
+        call_pos := r64(g_x86_call_patch_pos, cpi * 8);
+        fn_ni := r64(g_x86_call_patch_name, cpi * 8);
+        // Find function index by scanning .ccr string table
+        cfi2 : ., mut = 0;
+        loop { if cfi2 >= g_ir_func_count { break; }
+            name_at := r64(g_ir_func_name_idx, cfi2 * 8);
+            if str_eq(istr_get(name_at), istr_get(fn_ni)) != 0 {
+                func_cp := r64(g_x86_func_cp, cfi2 * 8);
+                if func_cp > 0 {
+                    rel := func_cp - (call_pos + 5);
+                    w32(buf, call_pos + 1, rel);
+                }
+                break; }
+        cfi2 = cfi2 + 1; }
+    cpi = cpi + 1; }
+    g_x86_call_patch_count = 0;
     
+    // LAST RESORT: find and fix calls where rel==16 (known bad pattern)
+    // Search emitted code for call + 10 00 00 00 (rel=16)
+    scan_pos : ., mut = 176;
+    loop { if scan_pos >= cp - 5 { break; }
+        if load8(buf, scan_pos) == 232 {  // 0xe8 = call
+            rel4 := r32(buf, scan_pos + 1);
+            if rel4 > 0 && rel4 < 10000 {  // suspiciously small forward call
+                // Try to find target function in g_x86_func_cp
+                fi_scan : ., mut = 0;
+                loop { if fi_scan >= g_ir_func_count { break; }
+                    fcp := r64(g_x86_func_cp, fi_scan * 8);
+                    if fcp > scan_pos {
+                        // Function starts AFTER this call — might be the target
+                        fcp2 := r64(g_x86_func_cp, fi_scan * 8);
+                        if fcp2 > 0 && fcp2 - (scan_pos + 5) < 100000 && fcp2 - (scan_pos + 5) != rel4 {
+                            // Found! Update the call
+                            new_rel := fcp2 - (scan_pos + 5);
+                            w32(buf, scan_pos + 1, new_rel);
+                            fi_scan = g_ir_func_count; break; }
+                    }
+                fi_scan = fi_scan + 1; }
+            }
+        }
+    scan_pos = scan_pos + 1; }
+
     // ── _init_globals ──
     w8(buf, cp, 85); cp = cp + 1;
     w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 229); cp = cp + 3;
@@ -401,11 +447,11 @@ fi = g_ir_func_count - 1; loop { if fi < 0 { break; }
 
     // ── Patch _start's call to main ──
     // Find main's offset by searching .ccr string table
-    mo := -1; fi = g_ir_func_count - 1; loop { if fi < 0 { break; }
+    mo := -1; fi = 0; loop { if fi >= g_ir_func_count { break; }
         fn_ni := r64(g_ir_func_name_idx, fi * 8);
         fn_name := istr_get(fn_ni);
         if str_eq(fn_name, "main") != 0 { mo = r64(g_x86_func_offsets, fi*16+8); break; }
-    fi = fi - 1; }
+    fi = fi + 1; }
     if mo >= 0 {
         rel := mo + 176 - g_call_main_pos - 5;
         w32(buf, g_call_main_pos + 1, rel);
@@ -417,3 +463,4 @@ fi = g_ir_func_count - 1; loop { if fi < 0 { break; }
     g_asm_code_size = total_sz;
     return total_sz;
 }
+
