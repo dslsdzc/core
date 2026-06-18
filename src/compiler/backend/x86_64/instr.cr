@@ -16,13 +16,8 @@ fn g2_init() {
 }
 
 fn g2_slot(v: int) -> int {
-    i := 0;
-    loop { if i >= g_x86_emit_var_count { break; } if r64(g_x86_emit_vars, i * 8) == v { return -(i+1)*8; } i = i + 1; }
-    dyn_grow_x86_emit_vars(g_x86_emit_var_count + 1);
-    w64(g_x86_emit_vars, g_x86_emit_var_count * 8, v);
-    g_x86_emit_var_count = g_x86_emit_var_count + 1;
-    g_x86_emit_stack_size = g_x86_emit_var_count * 8;
-    return -g_x86_emit_var_count * 8;
+    if v >= 0 { return -(v + 1) * 8; }
+    return 0;
 }
 
 fn g2_str_off(si: int) -> int {

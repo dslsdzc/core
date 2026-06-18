@@ -20,18 +20,13 @@ fn g2_slot(v: int) -> int {
     // Register encoding: v < -500 means register, with reg = -(v+1000)-1
     if v < -500 { return v; }
     // Stack sharing: if this var maps to another, use that var's slot
-    // g_stack_map is "" (0-length) when not allocated, which is safe to str_len
     if v >= 0 && str_len(g_stack_map) > v * 8 {
         mapped := r64(g_stack_map, v * 8);
         if mapped >= 0 && mapped != v { v = mapped; }
     }
-    i := 0;
-    loop { if i >= g_x86_emit_var_count { break; } if r64(g_x86_emit_vars, i * 8) == v { return -(i+1)*8; } i = i + 1; }
-    dyn_grow_x86_emit_vars(g_x86_emit_var_count + 1);
-    w64(g_x86_emit_vars, g_x86_emit_var_count * 8, v);
-    g_x86_emit_var_count = g_x86_emit_var_count + 1;
-    g_x86_emit_stack_size = g_x86_emit_var_count * 8;
-    return -g_x86_emit_var_count * 8;
+    // Stateless slot: offset based purely on IR variable index
+    if v >= 0 { return -(v + 1) * 8; }
+    return 0;
 }
 
 fn g2_str_off(si: int) -> int {

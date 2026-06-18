@@ -191,6 +191,7 @@ fn x86_64_elf_generate(buf: string) -> int {
         g2_init();
         vi3 := 0; loop { if vi3 >= g_ir_var_count { break; } g2_slot(vs2 + vi3); vi3 = vi3 + 1; }
         pi3 := 0; loop { if pi3 >= pc2 && pi3 < 6 { break; } g2_slot(vs2 + pi3); pi3 = pi3 + 1; }
+        g_x86_emit_stack_size = g_ir_var_count * 8;
 
         fsz := 0;
         ii := 0; loop { if ii >= ic { break; }
@@ -266,6 +267,7 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
 
         g2_init();
         vi := 0; loop { if vi >= vc { break; } g2_slot(vs + vi); vi = vi + 1; }
+        g_x86_emit_stack_size = g_ir_var_count * 8;
 
         // frame
         w8(buf, cp, 85); cp = cp + 1;  // push rbp
