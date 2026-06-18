@@ -74,13 +74,18 @@ fn e2_ld(b: string, p: int, r: int, o: int) -> int {
         return e2_mov(b, p, r, src_reg);
     }
     h := 0; if r >= 8 { h = 1; }
+    if o >= -128 && o <= 127 {
+        e2_w8(b, p, 72 + h*4); e2_w8(b, p+1, 139);
+        e2_w8(b, p+2, 64 + (r%8)*8 + 5); e2_w8(b, p+3, o); return 4;
+    }
+    // Large offset: use [rbp+disp32] (7 bytes)
     e2_w8(b, p, 72 + h*4); e2_w8(b, p+1, 139);
-    e2_w8(b, p+2, 64 + (r%8)*8 + 5); e2_w8(b, p+3, o); return 4;
+    e2_w8(b, p+2, 128 + (r%8)*8 + 5); e2_w32(b, p+3, o); return 7;
 }
 
 fn e2_mov_size(d: int, s: int) -> int { return 3; }
-fn e2_ld_size(r: int, o: int) -> int { return 4; }
-fn e2_st_size(r: int, o: int) -> int { return 4; }
+fn e2_ld_size(r: int, o: int) -> int { if o >= -128 && o <= 127 { return 4; } return 7; }
+fn e2_st_size(r: int, o: int) -> int { if o >= -128 && o <= 127 { return 4; } return 7; }
 fn e2_alu_size(op: int) -> int { return 3; }
 fn e2_li_size(v: int) -> int { return 8; }
 fn e2_lr_size(rel: int) -> int { return 7; }
@@ -97,8 +102,13 @@ fn e2_st(b: string, p: int, r: int, o: int) -> int {
         return e2_mov(b, p, dst_reg, r);
     }
     h := 0; if r >= 8 { h = 1; }
+    if o >= -128 && o <= 127 {
+        e2_w8(b, p, 72 + h*4); e2_w8(b, p+1, 137);
+        e2_w8(b, p+2, 64 + (r%8)*8 + 5); e2_w8(b, p+3, o); return 4;
+    }
+    // Large offset: use [rbp+disp32] (7 bytes)
     e2_w8(b, p, 72 + h*4); e2_w8(b, p+1, 137);
-    e2_w8(b, p+2, 64 + (r%8)*8 + 5); e2_w8(b, p+3, o); return 4;
+    e2_w8(b, p+2, 128 + (r%8)*8 + 5); e2_w32(b, p+3, o); return 7;
 }
 
 fn e2_li(b: string, p: int, o: int, v: int) -> int {
@@ -115,7 +125,10 @@ fn e2_lrb(b: string, p: int, rel: int) -> int {
 }
 
 fn e2_lb(b: string, p: int, o: int) -> int {
-    e2_w8(b, p, 76); e2_w8(b, p+1, 141); e2_w8(b, p+2, 85); e2_w8(b, p+3, o); return 4;
+    if o >= -128 && o <= 127 {
+        e2_w8(b, p, 76); e2_w8(b, p+1, 141); e2_w8(b, p+2, 85); e2_w8(b, p+3, o); return 4;
+    }
+    e2_w8(b, p, 76); e2_w8(b, p+1, 141); e2_w8(b, p+2, 133); e2_w32(b, p+3, o); return 7;
 }
 
 fn e2_call(b: string, p: int, rel: int) -> int {
@@ -291,7 +304,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
             e2_w8(buf, pos+cp, 136); e2_w8(buf, pos+cp+1, 20); e2_w8(buf, pos+cp+2, 55); cp = cp + 3;
         } else if str_len(fn2) > 0 {
             to := -1; tf := 0;
-            loop { if tf >= g_x86_func_off_count { break; } if r64(g_x86_func_offsets, tf*16) == s3 { to = r64(g_x86_func_offsets, tf*16+8); break; } tf = tf + 1; }
+            loop { if tf >= g_x86_func_off_count { break; } if str_eq(istr_get(r64(g_x86_func_offsets, tf*16)), fn2) != 0 { to = r64(g_x86_func_offsets, tf*16+8); break; } tf = tf + 1; }
             if to >= 0 {
                 cp = cp + e2_call(buf, pos+cp, (176 + to) - (pos + cp + 5));
             } else {
