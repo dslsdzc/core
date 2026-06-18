@@ -140,10 +140,9 @@ fn emit_start(buf: string, pos: int) -> int {
 }
 
 fn emit_start_size() -> int {
-    sz : ., mut = 9;  // mov rdi,[rsp](4) + lea rsi,[rsp+8](5)
-    if gv_argc >= 0 { sz = sz + 10; }  // lea r10,[rip+?](7) + mov [r10],rdi(3)
-    if gv_argv >= 0 { sz = sz + 10; }
-    sz = sz + 14;  // call(5) + mov edi,eax(2) + mov eax,60(5) + syscall(2)
+    sz : ., mut = sz_start_body();
+    if gv_argc >= 0 { sz = sz + sz_start_argv_save(); }
+    if gv_argv >= 0 { sz = sz + sz_start_argv_save(); }
     return sz;
 }
 
@@ -203,17 +202,12 @@ fn x86_64_elf_generate(buf: string) -> int {
 
         // Set stack size from per-function var_count
         g_x86_emit_stack_size = vc2 * 8;
-        total_code = total_code + 1 + 3;
+        total_code = total_code + sz_push_rbp() + sz_mov_rbp_rsp();
         ss_dry := g_x86_emit_stack_size;
-        if ss_dry > 0 {
-            if ss_dry > 127 { total_code = total_code + 7; } else { total_code = total_code + 4; }
-        }
-        total_code = total_code + pc2 * 4;
+        total_code = total_code + sz_sub_rsp(ss_dry);
+        total_code = total_code + pc2 * sz_save_param();
         total_code = total_code + fsz;
-        if ss_dry > 0 {
-            if ss_dry > 127 { total_code = total_code + 7; } else { total_code = total_code + 4; }
-        }
-        total_code = total_code + 1 + 1;
+        total_code = total_code + sz_add_rsp(ss_dry) + sz_pop_rbp() + sz_ret();
     fi = fi + 1; }
 
     rd_sz := g2_rodata_sz();

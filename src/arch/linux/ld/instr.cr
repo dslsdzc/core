@@ -80,17 +80,6 @@ fn e2_ld(b: string, p: int, r: int, o: int) -> int {
     e2_w8(b, p+2, 128 + (r%8)*8 + 5); e2_w32(b, p+3, o); return 7;
 }
 
-fn e2_mov_size(d: int, s: int) -> int { return 3; }
-fn e2_ld_size(r: int, o: int) -> int { if o >= -128 && o <= 127 { return 4; } return 7; }
-fn e2_st_size(r: int, o: int) -> int { if o >= -128 && o <= 127 { return 4; } return 7; }
-fn e2_alu_size(op: int) -> int { return 3; }
-fn e2_li_size(v: int) -> int { return 8; }
-fn e2_lr_size(rel: int) -> int { return 7; }
-fn e2_lrb_size(rel: int) -> int { return 7; }
-fn e2_lb_size(r: int, o: int) -> int { return 4; }
-fn e2_call_size(rel: int) -> int { return 5; }
-fn e2_jmp_size(rel: int) -> int { return 5; }
-fn e2_je_size(rel: int) -> int { return 6; }
 
 fn e2_st(b: string, p: int, r: int, o: int) -> int {
     // o < -500: store to register (reg = -(o+1000)-1)
@@ -150,33 +139,30 @@ fn e2_alu(b: string, p: int, op: int) -> int {
 }
 
 // ── arch_instr_size: instruction byte count for resolve_labels ──
+// All size constants come from sizes.cr — keep in sync with x86_emit_instr.
 fn arch_instr_size(instr_idx: int) -> int {
-    op := iri_op(instr_idx); s3 := iri_s3(instr_idx); ti := iri_tk(instr_idx); d := iri_dest(instr_idx);
+    op := iri_op(instr_idx); s3 := iri_s3(instr_idx); ti := iri_tk(instr_idx); d := iri_dest(instr_idx); s1 := iri_s1(instr_idx);
 
     if op == IR_CONST {
-        if ti == TI_STR { return 11; }
-        // Non-string const: 8 bytes for disp8, 11 for disp32
-        if d >= 0 {
-            os := g2_slot(d);
-            if os >= -128 && os <= 127 { return 8; }
-            return 11;
-        }
-        return 8;
+        if ti == TI_STR { return sz_lr() + sz_st(-8); }  // lea + store (approximate, offsets vary)
+        if d >= 0 { return sz_li(g2_slot(d)); }
+        return 0;
     }
     if op == IR_BINARY {
-        sz := e2_ld_size(10, 0) + e2_ld_size(11, 0) + e2_st_size(10, 0);
+        sz := sz_ld(0) + sz_ld(0) + sz_st(0);
         if s3 == OP_DIV || s3 == OP_MOD {
             sz = sz + 3 + 2 + 3 + 3;
         } else {
             sz = sz + 3;
             if s3 == OP_MUL { sz = sz + 1; }
-            if s3 == OP_SHL || s3 == OP_SHR { sz = sz + 3; }
+            if s3 == OP_SHL || s3 == OP_SHR { sz = sz + 3 + 3; }
             if s3 >= OP_EQ && s3 <= OP_GE { sz = sz + 3 + 4; }
+            if s3 == OP_DIV || s3 == OP_MOD { sz = sz + 3 + 2 + 3 + 3; }
         }
         return sz;
     }
     if op == IR_UNARY {
-        sz := e2_ld_size(10, 0) + e2_st_size(10, 0);
+        sz := sz_ld(0) + sz_st(0);
         if s3 == UOP_NOT {
             sz = sz + 3 + 3 + 4;
         } else {
@@ -187,45 +173,47 @@ fn arch_instr_size(instr_idx: int) -> int {
     if op == IR_CALL {
         fn2 := ""; if s3 >= 0 { fn2 = istr_get(s3); }
         if str_eq(fn2, "syscall3") != 0 {
-            sz := iri_s2(instr_idx) * 4 + 17; if d >= 0 { sz = sz + 4; } return sz;
+            sz := iri_s2(instr_idx) * 4 + 17; if d >= 0 { sz = sz + sz_st(g2_slot(d)); } return sz;
         }
         if str_eq(fn2, "load8") != 0 {
-            sz := 5; if d >= 0 { sz = sz + e2_st_size(0, g2_slot(d)); } return sz;
+            sz := 5; if d >= 0 { sz = sz + sz_st(g2_slot(d)); } return sz;
         }
         if str_eq(fn2, "store8") != 0 {
             sz := 3; return sz;
         }
         if s3 >= 0 {
-            sz := 5; if d >= 0 { sz = sz + e2_st_size(0, g2_slot(d)); } return sz;
+            sz := sz_call(); if d >= 0 { sz = sz + sz_st(g2_slot(d)); } return sz;
         }
-        sz := 2; if d >= 0 { sz = sz + e2_st_size(0, g2_slot(d)); } return sz;
+        sz := 2; if d >= 0 { sz = sz + sz_st(g2_slot(d)); } return sz;
     }
     if op == IR_RETURN {
-        if iri_s1(instr_idx) >= 0 { return 9; }
-        return 5;
+        if s1 >= 0 { return sz_ld(g2_slot(s1)) + sz_jmp(); }
+        return sz_jmp();
     }
     if op == IR_ALLOC { return 0; }
-    if op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY { return 14; }
-    if op == IR_LOAD || op == IR_STORE {
-        // Check if global: 13 bytes for lea+mov+st/ld, else 8 for local
-        s1v := iri_s1(instr_idx);
-        if s1v >= 0 && s1v < g_x86_global_cap {
-            if r64(g_x86_is_global, s1v * 8) != 0 { return 13; }
-        }
-        return 8;
+    if op == IR_ALLOC_STRUCT || op == IR_ALLOC_ARRAY {
+        do2 := -8; if d >= 0 { do2 = g2_slot(d); }
+        return 5 + 5 + sz_st(do2);  // mov edi + call alloc + store
     }
-    if op == IR_LOAD_FIELD { return 15; }
-    if op == IR_STORE_FIELD { return 15; }
-    if op == IR_REF { return 8; }
-    if op == IR_DEREF { return 11; }
-    if op == IR_STORE_PTR { return 11; }
-    if op == IR_BRANCH { return 18; }
-    if op == IR_JUMP { return 5; }
-    if op == IR_LOAD_ENUM_TAG { return 15; }
-    if op == IR_LOAD_INDEX || op == IR_STORE_INDEX { return 15; }
-    if op == IR_LOAD_INDEX_VAR || op == IR_STORE_INDEX_VAR { return 16; }
-    if op == IR_MAKE_ENUM { return 26; }
-    if op == IR_SLICE { return 19; }
+    if op == IR_LOAD || op == IR_STORE {
+        s1v := s1;
+        if s1v >= 0 && s1v < g_x86_global_cap {
+            if r64(g_x86_is_global, s1v * 8) != 0 { return sz_lr() + 3 + sz_st(0); }
+        }
+        return sz_ld(0) + sz_st(0);
+    }
+    if op == IR_LOAD_FIELD { return sz_ld(0) + 7 + sz_st(0); }
+    if op == IR_STORE_FIELD { return sz_ld(0) + sz_ld(0) + 7; }
+    if op == IR_REF { return sz_lb(0) + sz_st(0); }
+    if op == IR_DEREF { return sz_ld(0) + 3 + sz_st(0); }
+    if op == IR_STORE_PTR { return sz_ld(0) + sz_ld(0) + 3; }
+    if op == IR_BRANCH { return sz_ld(0) + 3 + sz_je() + sz_jmp(); }
+    if op == IR_JUMP { return sz_jmp(); }
+    if op == IR_LOAD_ENUM_TAG { return sz_ld(0) + 7 + sz_st(0); }
+    if op == IR_LOAD_INDEX || op == IR_STORE_INDEX { return sz_ld(0) + 7 + sz_st(0); }
+    if op == IR_LOAD_INDEX_VAR || op == IR_STORE_INDEX_VAR { return sz_ld(0) + sz_ld(0) + 4 + sz_st(0); }
+    if op == IR_MAKE_ENUM { return 5 + 5 + sz_st(0) + sz_ld(0) + 8; }
+    if op == IR_SLICE { return sz_ld(0) + sz_ld(0) + 4 + 3 + sz_st(0); }
     return 0;
 }
 
