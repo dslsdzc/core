@@ -161,15 +161,20 @@ fn x86_64_elf_generate(buf: string) -> int {
     gv_argc = -1; gv_argv = -1;
     gvsi : ., mut = 0;
     loop { if gvsi >= g_ir_global_count { break; }
-        gni := r64(g_ir_globals, gvsi * 16);
-        gnm := istr_get(gni);
-        if str_eq(gnm, "g_rt_argc") != 0 { gv_argc = r64(g_ir_globals, gvsi * 16 + 8); }
-        if str_eq(gnm, "g_rt_argv_ptr") != 0 { gv_argv = r64(g_ir_globals, gvsi * 16 + 8); }
+        gv_val := r64(g_ir_globals, gvsi * 16 + 8);
+        if gv_val >= 0 {
+            gni2 : ., mut = 0;
+            loop { if gni2 >= g_str_count { break; }
+                gn := istr_get(gni2);
+                if str_eq(gn, "g_rt_argc") != 0 { gv_argc = gv_val; break; }
+                if str_eq(gn, "g_rt_argv_ptr") != 0 { gv_argv = gv_val; break; }
+                gni2 = gni2 + 1; }
+        }
     gvsi = gvsi + 1; }
     // Phase 2: compute _start size using same constants as emit_start
     total_code : ., mut = emit_start_size();
 
-    fi := 0; loop { if fi >= g_ir_func_count { break; }
+        fi := 0; loop { if fi >= g_ir_func_count { break; }
         ni := r64(g_ir_func_name_idx, fi * 8);
         dyn_grow_x86_func_offsets(g_x86_func_off_count * 2 + 2);
         w64(g_x86_func_offsets, g_x86_func_off_count * 16, ni);
@@ -177,26 +182,30 @@ fn x86_64_elf_generate(buf: string) -> int {
         g_x86_func_off_count = g_x86_func_off_count + 1;
 
         ic := r64(g_ir_func_instr_count, fi * 8);
-        vc := g_ir_var_count;
-        pc := r64(g_ir_func_param_count, fi * 8);
+        vc2 := r64(g_ir_func_var_count, fi * 8);
+        vs2 := r64(g_ir_func_var_start, fi * 8);
+        pc2 := r64(g_ir_func_param_count, fi * 8);
 
-        // frame: push rbp(1) + mov rbp,rsp(3) + sub rsp(4) + params(pc*4)
-        total_code = total_code + 1 + 3;
-        if vc > 0 {
-            stack_sz : ., mut = vc * 8; if stack_sz > 127 { total_code = total_code + 7; } else { total_code = total_code + 4; }
-        }
-        total_code = total_code + pc * 4;
+        // Dry-run: pre-allocate + emit to measure exact size
+        g2_init();
+        vi3 := 0; loop { if vi3 >= vc2 { break; } g2_slot(vs2 + vi3); vi3 = vi3 + 1; }
+        pi3 := 0; loop { if pi3 >= pc2 && pi3 < 6 { break; } g2_slot(vs2 + pi3); pi3 = pi3 + 1; }
 
-        // instructions (skip NOPs = old LABELs)
+        fsz := 0;
         ii := 0; loop { if ii >= ic { break; }
-            inst_idx := r64(g_ir_func_instr_start, fi * 8)+ ii;
+            inst_idx := r64(g_ir_func_instr_start, fi * 8) + ii;
             if iri_op(inst_idx) != IR_NOP {
-                total_code = total_code + arch_instr_size(inst_idx); }
+                fsz = fsz + x86_emit_instr(inst_idx, alloc(512), fsz); }
         ii = ii + 1; }
 
-        // epilogue: add rsp(4/7) + pop rbp(1) + ret(1)
-        if vc > 0 {
-            stack_sz : ., mut = vc * 8; if stack_sz > 127 { total_code = total_code + 7; } else { total_code = total_code + 4; }
+        total_code = total_code + 1 + 3;
+        if vc2 > 0 {
+            css := vc2 * 8; if css > 127 { total_code = total_code + 7; } else { total_code = total_code + 4; }
+        }
+        total_code = total_code + pc2 * 4;
+        total_code = total_code + fsz;
+        if vc2 > 0 {
+            css2 := vc2 * 8; if css2 > 127 { total_code = total_code + 7; } else { total_code = total_code + 4; }
         }
         total_code = total_code + 1 + 1;
     fi = fi + 1; }
@@ -328,6 +337,19 @@ fn x86_64_elf_generate(buf: string) -> int {
         api = api + 1; }
     g_x86_alloc_patch_count = 0;
 
+    // Set rodata base from actual emission position
+    g_x86_rodata_base = cp;
+
+    // Patch LEA rodata references (recorded during instr emission)
+    rri : ., mut = 0;
+    loop { if rri >= g_x86_rodataref_count { break; }
+        lea_pos := r64(g_x86_rodataref_pos, rri * 8);
+        ro_off := r64(g_x86_rodataref_ro, rri * 8);
+        rel := g_x86_rodata_base + ro_off - (lea_pos + 7);
+        w32(buf, lea_pos + 3, rel);
+        rri = rri + 1; }
+    g_x86_rodataref_count = 0;
+
     // ── .rodata ──
     si = 0; loop { if si >= g_x86_str_count { break; }
         s := istr_get(r64(g_x86_str_offs, si * 8));
@@ -357,9 +379,11 @@ fn x86_64_elf_generate(buf: string) -> int {
     g_x86_rip_patch_count = 0;
 
     // ── Patch _start's call to main ──
-    main_ni := str_intern("main");
+    // Find main's offset by searching .ccr string table
     mo := -1; fi = 0; loop { if fi >= g_ir_func_count { break; }
-        if r64(g_ir_func_name_idx, fi * 8) == main_ni { mo = r64(g_x86_func_offsets, fi*16+8); break; }
+        fn_ni := r64(g_ir_func_name_idx, fi * 8);
+        fn_name := istr_get(fn_ni);
+        if str_eq(fn_name, "main") != 0 { mo = r64(g_x86_func_offsets, fi*16+8); break; }
     fi = fi + 1; }
     if mo >= 0 {
         rel := mo + 176 - g_call_main_pos - 5;

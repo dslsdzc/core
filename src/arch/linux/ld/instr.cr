@@ -179,18 +179,18 @@ fn arch_instr_size(instr_idx: int) -> int {
     if op == IR_CALL {
         fn2 := ""; if s3 >= 0 { fn2 = istr_get(s3); }
         if str_eq(fn2, "syscall3") != 0 {
-            sz := iri_s2(instr_idx) * 4 + 14; if d >= 0 { sz = sz + 4; } return sz;
+            sz := iri_s2(instr_idx) * 4 + 17; if d >= 0 { sz = sz + 4; } return sz;
         }
         if str_eq(fn2, "load8") != 0 {
-            sz := iri_s2(instr_idx) * 4 + 5; if d >= 0 { sz = sz + 4; } return sz;
+            sz := 5; if d >= 0 { sz = sz + e2_st_size(0, g2_slot(d)); } return sz;
         }
         if str_eq(fn2, "store8") != 0 {
-            sz := iri_s2(instr_idx) * 4 + 3; return sz;
+            sz := 3; return sz;
         }
         if s3 >= 0 {
-            sz := iri_s2(instr_idx) * 4 + 5; if d >= 0 { sz = sz + 4; } return sz;
+            sz := 5; if d >= 0 { sz = sz + e2_st_size(0, g2_slot(d)); } return sz;
         }
-        sz := 2; if d >= 0 { sz = sz + 4; } return sz;
+        sz := 2; if d >= 0 { sz = sz + e2_st_size(0, g2_slot(d)); } return sz;
     }
     if op == IR_RETURN {
         if iri_s1(instr_idx) >= 0 { return 9; }

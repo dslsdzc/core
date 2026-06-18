@@ -76,6 +76,8 @@ g_x86_rip_patch_count : int, mut;       g_x86_rip_patch_cap : int, mut;
 g_x86_vars : string, mut;               g_x86_var_count : int, mut;     g_x86_var_cap : int, mut;
 g_x86_stack_size : int, mut;            g_x86_func_idx : int, mut;
 g_x86_is_enum : string, mut;            g_x86_is_enum_count : int, mut; g_x86_is_enum_cap : int, mut;
+g_x86_rodataref_pos : string, mut;       g_x86_rodataref_ro : string, mut;
+g_x86_rodataref_count : int, mut;       g_x86_rodataref_cap : int, mut;
 g_x86_is_global : string, mut;          g_x86_global_cnt : int, mut;    g_x86_global_cap : int, mut;
 g_x86_global_off : string, mut;         g_x86_global_off_cnt : int, mut; g_x86_global_off_cap : int, mut;
 g_x86_func_offsets : string, mut;       g_x86_func_offsets_cap : int, mut; g_x86_func_off_count : int, mut;

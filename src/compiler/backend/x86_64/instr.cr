@@ -57,6 +57,8 @@ fn e2_mov(b: string, p: int, d: int, s: int) -> int {
     e2_w8(b, p+2, 192 + (s%8)*8 + (d%8));
     return 3;
 }
+fn e2_ld_size(r: int, o: int) -> int { if o >= -128 && o <= 127 { return 4; } return 7; }
+fn e2_st_size(r: int, o: int) -> int { if o >= -128 && o <= 127 { return 4; } return 7; }
 
 fn e2_ld(b: string, p: int, r: int, o: int) -> int {
     h := 0; if r >= 8 { h = 1; }
@@ -134,12 +136,12 @@ fn arch_instr_size(instr_idx: int) -> int {
     if op == IR_CALL {
         fn2 := ""; if s3 >= 0 { fn2 = istr_get(s3); }
         if str_eq(fn2, "syscall3") != 0 {
-            sz := inst.src2 * 4 + 18; if d >= 0 { sz = sz + 4; } return sz;
+            sz := inst.src2 * 4 + 17; if d >= 0 { sz = sz + 4; } return sz;
         }
         if str_len(fn2) > 0 {
-            sz := inst.src2 * 4 + 5; if d >= 0 { sz = sz + 4; } return sz;
+            sz := 5; if d >= 0 { sz = sz + e2_st_size(0, g2_slot(d)); } return sz;
         }
-        sz := 2; if d >= 0 { sz = sz + 4; } return sz;
+        sz := 2; if d >= 0 { sz = sz + e2_st_size(0, g2_slot(d)); } return sz;
     }
     if op == IR_RETURN {
         if inst.src1 >= 0 { return 9; }
