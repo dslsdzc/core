@@ -536,6 +536,7 @@ fn parse_primary() -> int {
         return alloc_node(EXPR_ARRAY, ef, ec, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
     }
     add_error("Unexpected token in expression");
+    advance_tok();  // consume the unexpected token to avoid infinite loop
     return 0;
 }
 
@@ -546,8 +547,9 @@ fn parse_block() -> int {
     sc : ., mut = 0;
     loop {
         if check(T_RBRACE) || check(T_EOF) { break; }
+        if sc > 1024 { add_error("block too deep"); break; }
         st := parse_stmt();
-        if sc < 512 {
+        if sc < 256 {
             w64(local_stmts, sc * 8, st);
         }
         sc = sc + 1;
@@ -761,7 +763,20 @@ fn parse_for_expr() -> int {
     vn := str_intern(tok_lx(vt));
     advance_tok();
     iter := parse_expr();
-    body := parse_block();
+    body : ., mut = -1;
+    // Core supports: for var := range_expr { body }
+    // C-style (for var := init ; cond ; post) is NOT supported;
+    // skip to the first '{' to avoid consuming subsequent statements.
+    if !check(T_LBRACE) {
+        loop {
+            if check(T_LBRACE) { break; }
+            if check(T_EOF) { break; }
+            advance_tok();
+        }
+    }
+    if check(T_LBRACE) {
+        body = parse_block();
+    }
     return alloc_node(EXPR_FOR, vn, iter, body, 0, 0, 0, tok_ln(t), tok_cl(t));
 }
 
