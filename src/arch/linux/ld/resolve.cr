@@ -20,8 +20,16 @@ fn resolve_labels() {
 
         ist := r64(g_ir_func_instr_start, fi * 8);
         ic := r64(g_ir_func_instr_count, fi * 8);
+        vs_r := r64(g_ir_func_var_start, fi * 8);
+        vc_r := r64(g_ir_func_var_count, fi * 8);
+        pc_r := r64(g_ir_func_param_count, fi * 8);
 
-        // ── Pass 1: measure instruction sizes, record label positions ──
+        // Init slot state for accurate sizing
+        g2_init();
+        vi4 := 0; loop { if vi4 >= g_ir_var_count { break; } g2_slot(vs_r + vi4); vi4 = vi4 + 1; }
+        pi4 := 0; loop { if pi4 >= pc_r && pi4 < 6 { break; } g2_slot(vs_r + pi4); pi4 = pi4 + 1; }
+
+        // ── Pass 1: measure instruction sizes via dry-run, record label positions ──
         g_label_count = 0;
         off : ., mut = 0;
         ii : ., mut = 0;
@@ -36,7 +44,7 @@ fn resolve_labels() {
                     if ln + 1 > g_label_count { g_label_count = ln + 1; }
                 }
             } else {
-                off = off + arch_instr_size(inst_idx);
+                off = off + x86_emit_instr(inst_idx, alloc(256), off);
             }
             ii = ii + 1;
         }

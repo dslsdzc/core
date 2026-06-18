@@ -158,6 +158,7 @@ fn x86_64_elf_generate(buf: string) -> int {
     si := 0; loop { if si >= g_ir_str_const_count { break; } g2_str_off(r64(g_ir_str_consts, si * 8)); si = si + 1; }
 
     // Find g_rt_argc/g_rt_argv_ptr globals for _start emission
+    g_x86_sub_rsp_pos = -1;
     gv_argc = -1; gv_argv = -1;
     gvsi : ., mut = 0;
     loop { if gvsi >= g_ir_global_count { break; }
@@ -188,7 +189,7 @@ fn x86_64_elf_generate(buf: string) -> int {
 
         // Dry-run: pre-allocate + emit to measure exact size
         g2_init();
-        vi3 := 0; loop { if vi3 >= vc2 { break; } g2_slot(vs2 + vi3); vi3 = vi3 + 1; }
+        vi3 := 0; loop { if vi3 >= g_ir_var_count { break; } g2_slot(vs2 + vi3); vi3 = vi3 + 1; }
         pi3 := 0; loop { if pi3 >= pc2 && pi3 < 6 { break; } g2_slot(vs2 + pi3); pi3 = pi3 + 1; }
 
         fsz := 0;
@@ -199,13 +200,14 @@ fn x86_64_elf_generate(buf: string) -> int {
         ii = ii + 1; }
 
         total_code = total_code + 1 + 3;
-        if vc2 > 0 {
-            css := vc2 * 8; if css > 127 { total_code = total_code + 7; } else { total_code = total_code + 4; }
+        ss_dry := g_x86_emit_stack_size;
+        if ss_dry > 0 {
+            if ss_dry > 127 { total_code = total_code + 7; } else { total_code = total_code + 4; }
         }
         total_code = total_code + pc2 * 4;
         total_code = total_code + fsz;
-        if vc2 > 0 {
-            css2 := vc2 * 8; if css2 > 127 { total_code = total_code + 7; } else { total_code = total_code + 4; }
+        if ss_dry > 0 {
+            if ss_dry > 127 { total_code = total_code + 7; } else { total_code = total_code + 4; }
         }
         total_code = total_code + 1 + 1;
     fi = fi + 1; }
@@ -258,12 +260,13 @@ fn x86_64_elf_generate(buf: string) -> int {
         // frame
         w8(buf, cp, 85); cp = cp + 1;  // push rbp
         w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 229); cp = cp + 3;  // mov rbp, rsp
+        g_x86_sub_rsp_pos = cp;
         if g_x86_emit_stack_size > 0 {
             if g_x86_emit_stack_size > 127 {
                 w8(buf, cp, 72); w8(buf, cp+1, 129); w8(buf, cp+2, 236);
-                e2_w32(buf, cp+3, g_x86_emit_stack_size); cp = cp + 7;
+                e2_w32(buf, cp+3, 0); cp = cp + 7;
             } else {
-                w8(buf, cp, 72); w8(buf, cp+1, 131); w8(buf, cp+2, 236); w8(buf, cp+3, g_x86_emit_stack_size); cp = cp + 4;
+                w8(buf, cp, 72); w8(buf, cp+1, 131); w8(buf, cp+2, 236); w8(buf, cp+3, 0); cp = cp + 4;
             }
         }
         // save register params to stack
@@ -296,13 +299,14 @@ fn x86_64_elf_generate(buf: string) -> int {
         rpi = rpi + 1; }
         g_x86_ret_patch_count = 0;
 
-        // epilogue (use saved frame size, not post-emission value)
+        // epilogue (patched after emission to use final stack size)
         if save_ss > 0 {
+            g_x86_sub_rsp_pos = g_x86_sub_rsp_pos + 1;  // marker: next patch is epilogue
             if save_ss > 127 {
                 w8(buf, cp, 72); w8(buf, cp+1, 129); w8(buf, cp+2, 196);
-                e2_w32(buf, cp+3, save_ss); cp = cp + 7;
+                e2_w32(buf, cp+3, 0); cp = cp + 7;
             } else {
-                w8(buf, cp, 72); w8(buf, cp+1, 131); w8(buf, cp+2, 196); w8(buf, cp+3, save_ss); cp = cp + 4;
+                w8(buf, cp, 72); w8(buf, cp+1, 131); w8(buf, cp+2, 196); w8(buf, cp+3, 0); cp = cp + 4;
             }
         }
         w8(buf, cp, 93); cp = cp + 1;  // pop rbp
@@ -336,6 +340,16 @@ fn x86_64_elf_generate(buf: string) -> int {
         w32(buf, call_pos + 1, rel);
         api = api + 1; }
     g_x86_alloc_patch_count = 0;
+
+    // Patch sub rsp with actual stack size
+    if g_x86_sub_rsp_pos >= 0 {
+        true_ss := g_x86_emit_stack_size;
+        if true_ss > 127 {
+            e2_w32(buf, g_x86_sub_rsp_pos + 3, true_ss);
+        } else {
+            w8(buf, g_x86_sub_rsp_pos + 3, true_ss);
+        }
+    }
 
     // Set rodata base from actual emission position
     g_x86_rodata_base = cp;
