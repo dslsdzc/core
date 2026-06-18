@@ -118,7 +118,7 @@ gv_argv : int, mut;   // IR var index for g_rt_argv_ptr (or -1)
 fn emit_start(buf: string, pos: int) -> int {
     cp : ., mut = pos;
     w8(buf, cp, 72); w8(buf, cp+1, 139); w8(buf, cp+2, 60); w8(buf, cp+3, 36); cp = cp + 4;  // mov rdi,[rsp]
-    w8(buf, cp, 72); w8(buf, cp+1, 141); w8(buf, cp+2, 115); w8(buf, cp+3, 8); cp = cp + 4;  // lea rsi,[rsp+8]
+    w8(buf, cp, 72); w8(buf, cp+1, 141); w8(buf, cp+2, 116); w8(buf, cp+3, 36); w8(buf, cp+4, 8); cp = cp + 5;  // lea rsi,[rsp+8]
     if gv_argc >= 0 { w8(buf, cp, 76); w8(buf, cp+1, 141); w8(buf, cp+2, 21); cp = cp + 3;
         dyn_grow_x86_rip_patch(g_x86_rip_patch_count + 1);
         w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, cp);
@@ -140,7 +140,7 @@ fn emit_start(buf: string, pos: int) -> int {
 }
 
 fn emit_start_size() -> int {
-    sz : ., mut = 8;  // mov rdi,[rsp](4) + lea rsi,[rsp+8](4)
+    sz : ., mut = 9;  // mov rdi,[rsp](4) + lea rsi,[rsp+8](5)
     if gv_argc >= 0 { sz = sz + 10; }  // lea r10,[rip+?](7) + mov [r10],rdi(3)
     if gv_argv >= 0 { sz = sz + 10; }
     sz = sz + 14;  // call(5) + mov edi,eax(2) + mov eax,60(5) + syscall(2)
@@ -189,9 +189,10 @@ fn x86_64_elf_generate(buf: string) -> int {
 
         // Dry-run: pre-allocate + emit to measure exact size
         g2_init();
-        vi3 := 0; loop { if vi3 >= g_ir_var_count { break; } g2_slot(vs2 + vi3); vi3 = vi3 + 1; }
+        g_current_func_var_start = vs2;
+        vi3 := 0; loop { if vi3 >= vc2 { break; } g2_slot(vs2 + vi3); vi3 = vi3 + 1; }
         pi3 := 0; loop { if pi3 >= pc2 && pi3 < 6 { break; } g2_slot(vs2 + pi3); pi3 = pi3 + 1; }
-        g_x86_emit_stack_size = g_ir_var_count * 8;
+        g_x86_emit_stack_size = vc2 * 8;
 
         fsz := 0;
         ii := 0; loop { if ii >= ic { break; }
@@ -200,8 +201,8 @@ fn x86_64_elf_generate(buf: string) -> int {
                 fsz = fsz + x86_emit_instr(inst_idx, alloc(512), fsz); }
         ii = ii + 1; }
 
-        // Set stack size from g_ir_var_count
-        g_x86_emit_stack_size = g_ir_var_count * 8;
+        // Set stack size from per-function var_count
+        g_x86_emit_stack_size = vc2 * 8;
         total_code = total_code + 1 + 3;
         ss_dry := g_x86_emit_stack_size;
         if ss_dry > 0 {
@@ -249,7 +250,10 @@ fn x86_64_elf_generate(buf: string) -> int {
 
     // ── All functions ──
     g_x86_ret_patch_count = 0;
-        g_x86_call_patch_count = 0;
+    g_x86_call_patch_count = 0;
+    g_x86_rodataref_count = 0;
+    g_x86_alloc_patch_count = 0;
+    g_x86_rip_patch_count = 0;
 fi = 0; loop { if fi >= g_ir_func_count { break; }
         ni := r64(g_ir_func_name_idx, fi * 8);
         dyn_grow_x86_func_cp(fi + 1); w64(g_x86_func_cp, fi * 8, cp);
@@ -261,13 +265,14 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         fi3 = fi3 + 1; }
         ist := r64(g_ir_func_instr_start, fi * 8);
         ic := r64(g_ir_func_instr_count, fi * 8);
-        vc := g_ir_var_count;
+        vc := r64(g_ir_func_var_count, fi * 8);
         vs := r64(g_ir_func_var_start, fi * 8);
         pc := r64(g_ir_func_param_count, fi * 8);
 
         g2_init();
+        g_current_func_var_start = vs;
         vi := 0; loop { if vi >= vc { break; } g2_slot(vs + vi); vi = vi + 1; }
-        g_x86_emit_stack_size = g_ir_var_count * 8;
+        g_x86_emit_stack_size = vc * 8;
 
         // frame
         w8(buf, cp, 85); cp = cp + 1;  // push rbp
@@ -311,14 +316,23 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         rpi = rpi + 1; }
         g_x86_ret_patch_count = 0;
 
-        // epilogue (patched after emission to use final stack size)
+        // Patch prologue sub rsp with actual stack size
         if save_ss > 0 {
-            g_x86_sub_rsp_pos = g_x86_sub_rsp_pos + 1;  // marker: next patch is epilogue
+            ss3 := save_ss;
+            if ss3 > 127 {
+                e2_w32(buf, g_x86_sub_rsp_pos + 3, ss3);
+            } else {
+                w8(buf, g_x86_sub_rsp_pos + 3, ss3);
+            }
+        }
+
+        // epilogue (emit with correct stack size, no placeholder)
+        if save_ss > 0 {
             if save_ss > 127 {
                 w8(buf, cp, 72); w8(buf, cp+1, 129); w8(buf, cp+2, 196);
-                e2_w32(buf, cp+3, 0); cp = cp + 7;
+                e2_w32(buf, cp+3, save_ss); cp = cp + 7;
             } else {
-                w8(buf, cp, 72); w8(buf, cp+1, 131); w8(buf, cp+2, 196); w8(buf, cp+3, 0); cp = cp + 4;
+                w8(buf, cp, 72); w8(buf, cp+1, 131); w8(buf, cp+2, 196); w8(buf, cp+3, save_ss); cp = cp + 4;
             }
         }
         w8(buf, cp, 93); cp = cp + 1;  // pop rbp
@@ -344,31 +358,6 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         cfi2 = cfi2 + 1; }
     cpi = cpi + 1; }
     g_x86_call_patch_count = 0;
-    
-    // LAST RESORT: find and fix calls where rel==16 (known bad pattern)
-    // Search emitted code for call + 10 00 00 00 (rel=16)
-    scan_pos : ., mut = 176;
-    loop { if scan_pos >= cp - 5 { break; }
-        if load8(buf, scan_pos) == 232 {  // 0xe8 = call
-            rel4 := r32(buf, scan_pos + 1);
-            if rel4 > 0 && rel4 < 10000 {  // suspiciously small forward call
-                // Try to find target function in g_x86_func_cp
-                fi_scan : ., mut = 0;
-                loop { if fi_scan >= g_ir_func_count { break; }
-                    fcp := r64(g_x86_func_cp, fi_scan * 8);
-                    if fcp > scan_pos {
-                        // Function starts AFTER this call — might be the target
-                        fcp2 := r64(g_x86_func_cp, fi_scan * 8);
-                        if fcp2 > 0 && fcp2 - (scan_pos + 5) < 100000 && fcp2 - (scan_pos + 5) != rel4 {
-                            // Found! Update the call
-                            new_rel := fcp2 - (scan_pos + 5);
-                            w32(buf, scan_pos + 1, new_rel);
-                            fi_scan = g_ir_func_count; break; }
-                    }
-                fi_scan = fi_scan + 1; }
-            }
-        }
-    scan_pos = scan_pos + 1; }
 
     // ── _init_globals ──
     w8(buf, cp, 85); cp = cp + 1;
@@ -398,15 +387,6 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         api = api + 1; }
     g_x86_alloc_patch_count = 0;
 
-    // Patch sub rsp with actual stack size
-    if g_x86_sub_rsp_pos >= 0 {
-        true_ss := g_x86_emit_stack_size;
-        if true_ss > 127 {
-            e2_w32(buf, g_x86_sub_rsp_pos + 3, true_ss);
-        } else {
-            w8(buf, g_x86_sub_rsp_pos + 3, true_ss);
-        }
-    }
 
     // Set rodata base from actual emission position
     g_x86_rodata_base = cp;

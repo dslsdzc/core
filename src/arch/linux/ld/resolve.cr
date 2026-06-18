@@ -26,7 +26,8 @@ fn resolve_labels() {
 
         // Init slot state for accurate sizing
         g2_init();
-        vi4 := 0; loop { if vi4 >= g_ir_var_count { break; } g2_slot(vs_r + vi4); vi4 = vi4 + 1; }
+        g_current_func_var_start = vs_r;
+        vi4 := 0; loop { if vi4 >= vc_r { break; } g2_slot(vs_r + vi4); vi4 = vi4 + 1; }
         pi4 := 0; loop { if pi4 >= pc_r && pi4 < 6 { break; } g2_slot(vs_r + pi4); pi4 = pi4 + 1; }
 
         // ── Pass 1: measure instruction sizes via dry-run, record label positions ──

@@ -5,6 +5,7 @@
 // State globals (set by caller before emit phase)
 g_x86_rodata_base : int, mut;
 g_x86_func_frame_start : int, mut;  // abs buf pos of current function body (after frame)
+g_current_func_var_start : int, mut;  // var_start of current function, set before emit
 
 
 fn g2_init() {
@@ -24,8 +25,9 @@ fn g2_slot(v: int) -> int {
         mapped := r64(g_stack_map, v * 8);
         if mapped >= 0 && mapped != v { v = mapped; }
     }
-    // Stateless slot: offset based purely on IR variable index
-    if v >= 0 { return -(v + 1) * 8; }
+    // Function-relative slot: offset within current function's stack frame
+    // Keeps offsets small (disp8 range) for large absolute var indices
+    if v >= 0 { return -(v + 1 - g_current_func_var_start) * 8; }
     return 0;
 }
 
@@ -107,8 +109,13 @@ fn e2_st(b: string, p: int, r: int, o: int) -> int {
 }
 
 fn e2_li(b: string, p: int, o: int, v: int) -> int {
-    e2_w8(b, p, 72); e2_w8(b, p+1, 199); e2_w8(b, p+2, 69); e2_w8(b, p+3, o);
-    e2_w32(b, p+4, v); return 8;
+    if o >= -128 && o <= 127 {
+        e2_w8(b, p, 72); e2_w8(b, p+1, 199); e2_w8(b, p+2, 69); e2_w8(b, p+3, o);
+        e2_w32(b, p+4, v); return 8;
+    }
+    // Large offset: use [rbp+disp32] (11 bytes)
+    e2_w8(b, p, 72); e2_w8(b, p+1, 199); e2_w8(b, p+2, 133); e2_w32(b, p+3, o);
+    e2_w32(b, p+7, v); return 11;
 }
 
 fn e2_lr(b: string, p: int, rel: int) -> int {
@@ -148,6 +155,12 @@ fn arch_instr_size(instr_idx: int) -> int {
 
     if op == IR_CONST {
         if ti == TI_STR { return 11; }
+        // Non-string const: 8 bytes for disp8, 11 for disp32
+        if d >= 0 {
+            os := g2_slot(d);
+            if os >= -128 && os <= 127 { return 8; }
+            return 11;
+        }
         return 8;
     }
     if op == IR_BINARY {
@@ -227,8 +240,12 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         do2 := g2_slot(d);
         if ti == TI_STR {
             ro := g2_str_off(s1);
-            rel := g_x86_rodata_base + ro - (pos + cp + 7);
-            cp = cp + e2_lr(buf, pos+cp, rel);
+            // Record for post-emission patching (rodata position from Phase 3)
+            dyn_grow_x86_rodataref(g_x86_rodataref_count + 1);
+            w64(g_x86_rodataref_pos, g_x86_rodataref_count * 8, pos + cp);
+            w64(g_x86_rodataref_ro, g_x86_rodataref_count * 8, ro);
+            g_x86_rodataref_count = g_x86_rodataref_count + 1;
+            cp = cp + e2_lr(buf, pos+cp, 0);  // placeholder, patched later
             cp = cp + e2_st(buf, pos+cp, 10, do2);
         } else {
             cp = cp + e2_li(buf, pos+cp, do2, s1);
