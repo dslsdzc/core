@@ -199,6 +199,8 @@ fn x86_64_elf_generate(buf: string) -> int {
                 fsz = fsz + x86_emit_instr(inst_idx, alloc(512), fsz); }
         ii = ii + 1; }
 
+        // Set stack size from g_ir_var_count
+        g_x86_emit_stack_size = g_ir_var_count * 8;
         total_code = total_code + 1 + 3;
         ss_dry := g_x86_emit_stack_size;
         if ss_dry > 0 {
