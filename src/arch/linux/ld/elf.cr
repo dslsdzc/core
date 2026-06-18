@@ -247,7 +247,7 @@ fn x86_64_elf_generate(buf: string) -> int {
     // ── All functions ──
     g_x86_ret_patch_count = 0;
         g_x86_call_patch_count = 0;
-fi = 0; loop { if fi >= g_ir_func_count { break; }
+fi = g_ir_func_count - 1; loop { if fi < 0 { break; }
         ni := r64(g_ir_func_name_idx, fi * 8);
         // Override with actual position for backward calls
         fi3 := 0; loop { if fi3 >= g_x86_func_off_count { break; }
@@ -401,11 +401,11 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
 
     // ── Patch _start's call to main ──
     // Find main's offset by searching .ccr string table
-    mo := -1; fi = 0; loop { if fi >= g_ir_func_count { break; }
+    mo := -1; fi = g_ir_func_count - 1; loop { if fi < 0 { break; }
         fn_ni := r64(g_ir_func_name_idx, fi * 8);
         fn_name := istr_get(fn_ni);
         if str_eq(fn_name, "main") != 0 { mo = r64(g_x86_func_offsets, fi*16+8); break; }
-    fi = fi + 1; }
+    fi = fi - 1; }
     if mo >= 0 {
         rel := mo + 176 - g_call_main_pos - 5;
         w32(buf, g_call_main_pos + 1, rel);
