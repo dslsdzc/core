@@ -1,0 +1,3 @@
+[submodule "zed"]
+	path = zed
+	url = https://github.com/dslsdzc/core-plugin-zed
