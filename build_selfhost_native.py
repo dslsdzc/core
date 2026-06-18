@@ -116,6 +116,8 @@ def main():
     compile_and_assemble(
         concat([
             'src/runtime/rt.cr',
+            'src/stdlib/io.cr',
+            'src/stdlib/fmt.cr',
             'src/stdlib/cli.cr',
             'src/compiler/ast.cr',
             'src/compiler/globals.cr',
@@ -147,6 +149,8 @@ def main():
     compile_and_assemble(
         concat([
             'src/runtime/rt.cr',
+            'src/stdlib/io.cr',
+            'src/stdlib/fmt.cr',
             'src/stdlib/cli.cr',
             'src/stdlib/toml.cr',
             'src/compiler/ast.cr',

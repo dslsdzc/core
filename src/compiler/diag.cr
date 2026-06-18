@@ -5,7 +5,7 @@
 // ─── helpers ────────────────────────────────────────────────────
 
 fn read_source_line(line: int) -> string {
-    slen := __builtin_str_len(g_source);
+    slen := str_len(g_source);
     cur : ., mut = 1;
     start : ., mut = 0;
     i : ., mut = 0;
@@ -15,13 +15,13 @@ fn read_source_line(line: int) -> string {
             j : ., mut = i;
             loop {
                 if j >= slen { break; }
-                c := __builtin_str_get(g_source, j);
+                c := get_char(g_source, j);
                 if c == "\n" { break; }
                 j = j + 1;
             }
-            return __builtin_str_sub(g_source, i, j - i);
+            return str_sub(g_source, i, j - i);
         }
-        if __builtin_str_get(g_source, i) == "\n" {
+        if get_char(g_source, i) == "\n" {
             cur = cur + 1;
             start = i + 1;
         }
@@ -33,31 +33,31 @@ fn read_source_line(line: int) -> string {
 fn print_source_line(line: int, col: int, annotation: string) {
     if line <= 0 { return; }
     ltxt := read_source_line(line);
-    if __builtin_str_len(ltxt) == 0 { return; }
-    ln_str := __builtin_int_to_str(line);
+    if str_len(ltxt) == 0 { return; }
+    ln_str := int_str(line);
     if line < 10 { ln_str = " " + ln_str; }
-    __builtin_print(ln_str);
-    __builtin_print(" | ");
-    __builtin_println(ltxt);
+    print(ln_str);
+    print(" | ");
+    println(ltxt);
     // underline: spaces + ^ under the column + annotation
-    __builtin_print("   | ");
+    print("   | ");
     ci : ., mut = 0;
     loop {
         if ci >= col - 1 { break; }
-        __builtin_print(" ");
+        print(" ");
         ci = ci + 1;
     }
-    __builtin_print("^");
-    if __builtin_str_len(annotation) > 0 {
-        __builtin_print(" ");
+    print("^");
+    if str_len(annotation) > 0 {
+        print(" ");
         // Short annotation: first line or up to first " — "
-        alen := __builtin_str_len(annotation);
+        alen := str_len(annotation);
         cutoff : ., mut = alen;
         // Truncate at ' — ' (3 bytes in UTF-8: em dash = 3 bytes)
         ci2 : ., mut = 0;
         loop {
             if ci2 + 3 > alen { break; }
-            c := __builtin_load8(annotation, ci2);
+            c := load8(annotation, ci2);
             if c == 226 {  // start of em dash (— = U+2014, 3 bytes)
                 cutoff = ci2;
                 break;
@@ -66,9 +66,9 @@ fn print_source_line(line: int, col: int, annotation: string) {
         }
         // Limit to 48 chars max
         if cutoff > 48 { cutoff = 48; }
-        __builtin_print(__builtin_str_sub(annotation, 0, cutoff));
+        print(str_sub(annotation, 0, cutoff));
     }
-    __builtin_println("");
+    println("");
 }
 
 fn error_cat_prefix(cat: int) -> string {
@@ -92,7 +92,7 @@ fn error_cat_prefix(cat: int) -> string {
 }
 
 fn pad_diag_num(num: int) -> string {
-    s := __builtin_int_to_str(num);
+    s := int_str(num);
     if num < 10 { s = "0" + s; }
     return s;
 }
@@ -105,25 +105,25 @@ fn print_diagnostics() {
     loop {
         if di >= g_diag_count { break; }
         ec := r64(g_diags, di * 32);
-        msg := __builtin_load_str_ptr(g_diags, di * 32 + 8);
+        msg := load_str_ptr(g_diags, di * 32 + 8);
         ln := r64(g_diags, di * 32 + 16);
         cl := r64(g_diags, di * 32 + 24);
         cat : ., mut = ec / 1000;
         num : ., mut = ec % 1000;
-        __builtin_print("error[");
-        __builtin_print(error_cat_prefix(cat));
-        __builtin_print(pad_diag_num(num));
-        __builtin_print("]: ");
-        __builtin_println(msg);
-        __builtin_print(" --> ");
-        __builtin_print(__builtin_int_to_str(ln));
-        __builtin_print(":");
-        __builtin_println(__builtin_int_to_str(cl));
+        print("error[");
+        print(error_cat_prefix(cat));
+        print(pad_diag_num(num));
+        print("]: ");
+        println(msg);
+        print(" --> ");
+        print(int_str(ln));
+        print(":");
+        println(int_str(cl));
         if ln > 0 {
-            __builtin_println("   |");
+            println("   |");
             print_source_line(ln, cl, msg);
         }
-        __builtin_println("");
+        println("");
         di = di + 1;
     }
 }
@@ -135,7 +135,7 @@ fn print_parse_errors() {
     ei2 : ., mut = 0;
     loop {
         if ei2 >= g_error_count { break; }
-        __builtin_println("error: " + str_get(r64(g_errors, ei2 * 8)));
+        println("error: " + get_char(r64(g_errors, ei2 * 8)));
         ei2 = ei2 + 1;
     }
 }

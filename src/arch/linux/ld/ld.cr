@@ -15,7 +15,7 @@
 // Pipeline:
 //   ctx_init()
 //   ctx_add_so("core_io.so")
-//   ctx_add_plt("__builtin_print", 0)
+//   ctx_add_plt("print", 0)
 //   ctx_set_user_code(code, size)
 //   ctx_emit_dyn(buf, "output")  // or ctx_emit_so for --shared
 
@@ -49,7 +49,7 @@ g_so_paths : string, mut; g_so_count : int, mut; g_so_cap : int, mut;
 fn dyn_grow_so(needed: int) {
     if needed < g_so_cap { return; }
     nc : ., mut = g_so_cap * 2; if nc < 4 { nc = 4; } if nc < needed { nc = needed + 4; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_so_paths, g_so_cap * 8, nb); g_so_paths = nb; g_so_cap = nc; }
+    nb := alloc(nc * 8); _dyncpy(g_so_paths, g_so_cap * 8, nb); g_so_paths = nb; g_so_cap = nc; }
 
 struct PltEntry { name: string, so_idx: int }
 g_plts : string, mut; g_plt_count : int, mut; g_plt_cap : int, mut;
@@ -57,7 +57,7 @@ g_plts : string, mut; g_plt_count : int, mut; g_plt_cap : int, mut;
 fn dyn_grow_plts(needed: int) {
     if needed < g_plt_cap { return; }
     nc : ., mut = g_plt_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
-    nb := __builtin_alloc(nc * 16); _dyncpy(g_plts, g_plt_cap * 16, nb); g_plts = nb; g_plt_cap = nc; }
+    nb := alloc(nc * 16); _dyncpy(g_plts, g_plt_cap * 16, nb); g_plts = nb; g_plt_cap = nc; }
 
 // ============================================================
 // Linker state
@@ -80,10 +80,10 @@ g_ch_count : int, mut;
 
 fn dyn_grow_chunks(needed: int) {
     nc : ., mut = g_ch_kind_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
-    nb := __builtin_alloc(nc * 8); zi : ., mut = 0; loop { if zi >= nc * 8 { break; } __builtin_store8(nb, zi, 0); zi = zi + 1; } _dyncpy(g_ch_kind, g_ch_kind_cap * 8, nb); g_ch_kind = nb; g_ch_kind_cap = nc;
-    nb2 := __builtin_alloc(nc * 8); zi = 0; loop { if zi >= nc * 8 { break; } __builtin_store8(nb2, zi, 0); zi = zi + 1; } _dyncpy(g_ch_vaddr, g_ch_vaddr_cap * 8, nb2); g_ch_vaddr = nb2; g_ch_vaddr_cap = nc;
-    nb3 := __builtin_alloc(nc * 8); zi = 0; loop { if zi >= nc * 8 { break; } __builtin_store8(nb3, zi, 0); zi = zi + 1; } _dyncpy(g_ch_foff, g_ch_foff_cap * 8, nb3); g_ch_foff = nb3; g_ch_foff_cap = nc;
-    nb4 := __builtin_alloc(nc * 8); zi = 0; loop { if zi >= nc * 8 { break; } __builtin_store8(nb4, zi, 0); zi = zi + 1; } _dyncpy(g_ch_size, g_ch_size_cap * 8, nb4); g_ch_size = nb4; g_ch_size_cap = nc; }
+    nb := alloc(nc * 8); zi : ., mut = 0; loop { if zi >= nc * 8 { break; } store8(nb, zi, 0); zi = zi + 1; } _dyncpy(g_ch_kind, g_ch_kind_cap * 8, nb); g_ch_kind = nb; g_ch_kind_cap = nc;
+    nb2 := alloc(nc * 8); zi = 0; loop { if zi >= nc * 8 { break; } store8(nb2, zi, 0); zi = zi + 1; } _dyncpy(g_ch_vaddr, g_ch_vaddr_cap * 8, nb2); g_ch_vaddr = nb2; g_ch_vaddr_cap = nc;
+    nb3 := alloc(nc * 8); zi = 0; loop { if zi >= nc * 8 { break; } store8(nb3, zi, 0); zi = zi + 1; } _dyncpy(g_ch_foff, g_ch_foff_cap * 8, nb3); g_ch_foff = nb3; g_ch_foff_cap = nc;
+    nb4 := alloc(nc * 8); zi = 0; loop { if zi >= nc * 8 { break; } store8(nb4, zi, 0); zi = zi + 1; } _dyncpy(g_ch_size, g_ch_size_cap * 8, nb4); g_ch_size = nb4; g_ch_size_cap = nc; }
 
 fn cnew(k: int) {
     dyn_grow_chunks(g_ch_count + 1);
@@ -106,7 +106,7 @@ fn cby(k: int) -> int {
 // ============================================================
 
 fn so_find(buf: string, name: string) -> int {
-    if __builtin_str_len(buf) < 64 { return -1; }
+    if str_len(buf) < 64 { return -1; }
     if r16(buf, 16) != 3 { return -1; }
     e_shoff := r64(buf, 40); e_shnum := r16(buf, 60);
     do : ., mut = 0; ds : ., mut = 0; so : ., mut = 0; ss : ., mut = 0;
@@ -125,18 +125,18 @@ fn so_find(buf: string, name: string) -> int {
             nm : ., mut = ""; k : ., mut = sn;
             loop { if k >= ss { break; }
                 c := bu8(buf, so+k); if c == 0 { break; }
-                sc2 := __builtin_str_get(" ",0); __builtin_store8(sc2,0,c);
+                sc2 := get_char(" ",0); store8(sc2,0,c);
                 nm = nm + sc2; k = k + 1; }
-            if __builtin_str_len(nm) > 0 && __builtin_str_eq(nm, name) != 0 { return sv; }
+            if str_len(nm) > 0 && str_eq(nm, name) != 0 { return sv; }
         }
         i = i + 1; }
     return -1; }
 
 fn so_find_any(name: string) -> int {
     si : ., mut = 0; loop { if si >= g_so_count { break; }
-        if __builtin_str_len(r64(g_so_paths, si * 8)) > 0 {
-            b := __builtin_read_file(r64(g_so_paths, si * 8));
-            if __builtin_str_len(b) > 0 {
+        if istr_len(r64(g_so_paths, si * 8)) > 0 {
+            b := read_file(r64(g_so_paths, si * 8));
+            if str_len(b) > 0 {
                 a := so_find(b, name);
                 if a >= 0 { return a; } }
         }
@@ -160,9 +160,9 @@ fn layout() {
         if k == 5 { sz = 10 * 16; }
         if k == 6 { sz = (1 + g_plt_count) * 24; }
         if k == 7 {
-            sz = 1 + __builtin_str_len("core_rt.so") + 1;
+            sz = 1 + str_len("core_rt.so") + 1;
             j : ., mut = 0; loop { if j >= g_plt_count { break; }
-                sz = sz + __builtin_str_len(r64(g_plts, j * 16)) + 1; j = j + 1; } }
+                sz = sz + istr_len(r64(g_plts, j * 16)) + 1; j = j + 1; } }
         if k == 8 { sz = g_plt_count * 24; }
         w64(g_ch_vaddr, i * 8, va);
         w64(g_ch_foff, i * 8, va - g_text_base);
@@ -220,9 +220,9 @@ fn emit(buf: string, total: int, is_so: int) {
         // Interp
         if k == 1 {
             is := "/lib64/ld-linux-x86-64.so.2";
-            j : ., mut = 0; loop { if j >= __builtin_str_len(is) { break; }
-                w8(buf,p+j, __builtin_load8(is,j)); j = j + 1; }
-            w8(buf,p+__builtin_str_len(is),0); }
+            j : ., mut = 0; loop { if j >= str_len(is) { break; }
+                w8(buf,p+j, load8(is,j)); j = j + 1; }
+            w8(buf,p+str_len(is),0); }
 
         // User code
         if k == 2 {
@@ -259,20 +259,20 @@ fn emit(buf: string, total: int, is_so: int) {
         // .dynamic (also writes .dynstr)
         if k == 5 {
             // Compute dynstr size: null + "core_rt.so\0" + all plt names
-            dn : ., mut = 1 + __builtin_str_len("core_rt.so") + 1;
+            dn : ., mut = 1 + str_len("core_rt.so") + 1;
             dnp : ., mut = 0; loop { if dnp >= g_plt_count { break; }
-                dn = dn + __builtin_str_len(r64(g_plts, dnp * 16)) + 1; dnp = dnp + 1; }
+                dn = dn + istr_len(r64(g_plts, dnp * 16)) + 1; dnp = dnp + 1; }
             // Build dynstr
-            db : ., mut = __builtin_alloc(dn); w8(db,0,0); so_off : ., mut = 1;
-            j : ., mut = 0; loop { if j >= __builtin_str_len("core_rt.so") { break; }
-                w8(db,so_off+j, __builtin_load8("core_rt.so",j)); j=j+1; }
-            w8(db,so_off+__builtin_str_len("core_rt.so"),0);
-            nxt : ., mut = so_off+__builtin_str_len("core_rt.so")+1;
+            db : ., mut = alloc(dn); w8(db,0,0); so_off : ., mut = 1;
+            j : ., mut = 0; loop { if j >= str_len("core_rt.so") { break; }
+                w8(db,so_off+j, load8("core_rt.so",j)); j=j+1; }
+            w8(db,so_off+str_len("core_rt.so"),0);
+            nxt : ., mut = so_off+str_len("core_rt.so")+1;
             pi : ., mut = 0; loop { if pi >= g_plt_count { break; }
-                j=0; loop { if j >= __builtin_str_len(r64(g_plts, pi * 16)) { break; }
-                    w8(db,nxt+j, __builtin_load8(r64(g_plts, pi * 16),j)); j=j+1; }
-                w8(db,nxt+__builtin_str_len(r64(g_plts, pi * 16)),0);
-                nxt=nxt+__builtin_str_len(r64(g_plts, pi * 16))+1; pi=pi+1; }
+                j=0; loop { if j >= istr_len(r64(g_plts, pi * 16)) { break; }
+                    w8(db,nxt+j, load8(r64(g_plts, pi * 16),j)); j=j+1; }
+                w8(db,nxt+istr_len(r64(g_plts, pi * 16)),0);
+                nxt=nxt+istr_len(r64(g_plts, pi * 16))+1; pi=pi+1; }
             // Write dynstr to its chunk
             dsc := cby(7);
             di2 : ., mut = 0; loop { if di2 >= nxt { break; }
@@ -304,7 +304,7 @@ fn emit(buf: string, total: int, is_so: int) {
                 w32(buf,so2,nxt2);
                 w8(buf,so2+4,18); w8(buf,so2+5,0);
                 w16(buf,so2+6,0); w64(buf,so2+8,0); w64(buf,so2+16,0);
-                nxt2 = nxt2 + __builtin_str_len(r64(g_plts, pi * 16)) + 1;
+                nxt2 = nxt2 + istr_len(r64(g_plts, pi * 16)) + 1;
                 pi=pi+1; } }
 
         // .rela.plt
@@ -331,10 +331,10 @@ fn patch_relocs() {
         code_off : ., mut = abs_pos - 176;
         if code_off < 0 || code_off >= g_user_size { ri=ri+1; continue; }
         fn_name_ni := r64(g_x86_ext_rel_name, ri * 8); fn_name : ., mut = "";
-        if fn_name_ni >= 0 { fn_name = str_get(fn_name_ni); }
+        if fn_name_ni >= 0 { fn_name = get_char(fn_name_ni); }
         plt_idx : ., mut = -1;
         si : ., mut = 0; loop { if si >= g_plt_count { break; }
-            if __builtin_str_eq(r64(g_plts, si * 16), fn_name) != 0 { plt_idx = si; break; }
+            if str_eq(r64(g_plts, si * 16), fn_name) != 0 { plt_idx = si; break; }
             si = si + 1; }
         if plt_idx >= 0 {
             call_va := uv + code_off;
@@ -362,12 +362,12 @@ fn ctx_emit_dyn(buf: string, path: string) -> int {
         layout();
         patch_relocs();
         total := r64(g_ch_vaddr, (g_ch_count - 1) * 8) + r64(g_ch_size, (g_ch_count - 1) * 8) - g_text_base;
-     __builtin_println(__builtin_int_to_str(total));
+     println(int_str(total));
     emit(buf, total, 0);
-        fd := __builtin_syscall3(2, path, 577, 420);
+        fd := syscall3(2, path, 577, 420);
     if fd < 0 { return -1; }
-    nw := __builtin_syscall3(1, fd, buf, total);
-    __builtin_syscall3(3, fd, 0, 0);
+    nw := syscall3(1, fd, buf, total);
+    syscall3(3, fd, 0, 0);
     return total; }
 
 // Produce shared library (--shared)
@@ -377,10 +377,10 @@ fn ctx_emit_so(buf: string, path: string) -> int {
     layout();
     total := r64(g_ch_vaddr, (g_ch_count - 1) * 8) + r64(g_ch_size, (g_ch_count - 1) * 8) - g_text_base;
     emit(buf, total, 1);
-    fd := __builtin_syscall3(2, path, 577, 420);
+    fd := syscall3(2, path, 577, 420);
     if fd < 0 { return -1; }
-    nw := __builtin_syscall3(1, fd, buf, total);
-    __builtin_syscall3(3, fd, 0, 0);
+    nw := syscall3(1, fd, buf, total);
+    syscall3(3, fd, 0, 0);
     return total; }
 
 // ============================================================
@@ -396,7 +396,7 @@ g_so_addr : int, mut; // .so .text base address
 
 fn so_parse_text(buf: string) -> int {
     // Find the executable PROGBITS section (.text) in the .so
-    if __builtin_str_len(buf) < 64 { return -1; }
+    if str_len(buf) < 64 { return -1; }
     e_shoff := r64(buf, 40); e_shnum := r16(buf, 60);
     i : ., mut = 0;
     loop { if i >= e_shnum { break; }
@@ -414,12 +414,12 @@ fn ctx_emit_static(buf: string, path: string) -> int {
     si : ., mut = 0;
     loop { if si >= g_so_count { break; }
         sp := r64(g_so_paths, si * 8);
-        if __builtin_str_len(sp) > 0 {
-            b := __builtin_read_file(sp);
-            if __builtin_str_len(b) > 0 && so_parse_text(b) == 0 { so_buf = b; break; }
+        if str_len(sp) > 0 {
+            b := read_file(sp);
+            if str_len(b) > 0 && so_parse_text(b) == 0 { so_buf = b; break; }
         }
         si = si + 1; }
-    if __builtin_str_len(so_buf) == 0 { return -1; }
+    if str_len(so_buf) == 0 { return -1; }
     if g_so_sz <= 0 { return -1; }
 
     // Layout: 176 header + .so code + user code
@@ -443,8 +443,8 @@ fn ctx_emit_static(buf: string, path: string) -> int {
     loop { if rpi >= g_x86_ext_rel_count { break; }
         abs_pos := r64(g_x86_ext_rel_pos, rpi * 8);
         fn_ni := r64(g_x86_ext_rel_name, rpi * 8);
-        fn_name := str_get(fn_ni);
-        if __builtin_str_len(fn_name) > 0 {
+        fn_name := get_char(fn_ni);
+        if str_len(fn_name) > 0 {
             sym_addr := so_find(so_buf, fn_name);
             if sym_addr >= g_so_addr && sym_addr < g_so_addr + g_so_sz {
                 func_off := sym_addr - g_so_addr;
@@ -467,8 +467,8 @@ fn ctx_emit_static(buf: string, path: string) -> int {
     w64(buf,96,total);w64(buf,104,total);
     w64(buf,112,4096);
 
-    fd := __builtin_syscall3(2, path, 577, 420);
+    fd := syscall3(2, path, 577, 420);
     if fd < 0 { return -1; }
-    nw := __builtin_syscall3(1, fd, buf, total);
-    __builtin_syscall3(3, fd, 0, 0);
+    nw := syscall3(1, fd, buf, total);
+    syscall3(3, fd, 0, 0);
     return total; }

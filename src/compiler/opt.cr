@@ -192,7 +192,7 @@ fn alloc_registers() {
         if vc <= 0 { fi = fi + 1; continue; }
 
         // Build live intervals: [first_ref, last_ref] per var
-        iv_buf := __builtin_alloc(vc * 16);
+        iv_buf := alloc(vc * 16);
         vi : ., mut = 0;
         loop { if vi >= vc { break; } w64(iv_buf, vi*16, -1); w64(iv_buf, vi*16+8, -1); vi = vi + 1; }
 
@@ -202,7 +202,7 @@ fn alloc_registers() {
             inst := ist + ii;
             op := iri_op(inst); d := iri_dest(inst); s1 := iri_s1(inst); s2 := iri_s2(inst);
             vars : string, mut;    vars_cap : int, mut; vc2 : ., mut = 0;
-            if vars_cap == 0 { vars = __builtin_alloc(24); vars_cap = 3; }
+            if vars_cap == 0 { vars = alloc(24); vars_cap = 3; }
             if d >= vs && d < vs + vc { if vc2 < vars_cap { w64(vars, vc2 * 8, d - vs); vc2 = vc2 + 1; } }
             if s1 >= vs && s1 < vs + vc { if vc2 < vars_cap { w64(vars, vc2 * 8, s1 - vs); vc2 = vc2 + 1; } }
             if s2 >= vs && s2 < vs + vc { if vc2 < vars_cap { w64(vars, vc2 * 8, s2 - vs); vc2 = vc2 + 1; } }
@@ -221,7 +221,7 @@ fn alloc_registers() {
 
         // Map local var index → physical register (-1 = stack)
         var_reg : string, mut;    var_reg_cap : int, mut;
-        var_reg = __builtin_alloc(2048); var_reg_cap = 256;
+        var_reg = alloc(2048); var_reg_cap = 256;
         vr_clear : ., mut = 0;
         loop { if vr_clear >= 256 { break; } w64(var_reg, vr_clear * 8, -1); vr_clear = vr_clear + 1; }
 
@@ -289,7 +289,7 @@ fn pass_stack_share() {
     if g_ir_func_count <= 0 { return; }
 
     // Allocate g_stack_map with -1 for all IR vars
-    g_stack_map = __builtin_alloc(g_ir_var_count * 8);
+    g_stack_map = alloc(g_ir_var_count * 8);
     svi : ., mut = 0;
     loop { if svi >= g_ir_var_count { break; } w64(g_stack_map, svi * 8, -1); svi = svi + 1; }
 
@@ -303,7 +303,7 @@ fn pass_stack_share() {
         if vc <= 0 || ic <= 0 { fi = fi + 1; continue; }
 
         // Build intervals for all vars (as in reg alloc)
-        iv := __builtin_alloc(vc * 16);
+        iv := alloc(vc * 16);
         zz : ., mut = 0;
         loop { if zz >= vc { break; } w64(iv, zz*16, -1); w64(iv, zz*16+8, -1); zz = zz + 1; }
         ii : ., mut = 0;
@@ -312,7 +312,7 @@ fn pass_stack_share() {
             inst := ist + ii;
             d := iri_dest(inst); s1 := iri_s1(inst); s2 := iri_s2(inst);
             va : string, mut;    va_cap : int, mut; vn : ., mut = 0;
-            if va_cap == 0 { va = __builtin_alloc(24); va_cap = 3; }
+            if va_cap == 0 { va = alloc(24); va_cap = 3; }
             if d >= vs && d < vs+vc { if vn < va_cap { w64(va, vn * 8, d-vs); vn=vn+1; } }
             if s1 >= vs && s1 < vs+vc { if vn < va_cap { w64(va, vn * 8, s1-vs); vn=vn+1; } }
             if s2 >= vs && s2 < vs+vc { if vn < va_cap { w64(va, vn * 8, s2-vs); vn=vn+1; } }
@@ -375,7 +375,7 @@ fn pass_cse() {
 
         // Simple local CSE: track seen (op, s1, s2) hashes
         // Use a flat array of seen expression records
-        seen_buf := __builtin_alloc(ic * 24);  // each record: op(8)+s1(8)+s2(8)
+        seen_buf := alloc(ic * 24);  // each record: op(8)+s1(8)+s2(8)
         seen_count : ., mut = 0;
 
         ii : ., mut = 0;

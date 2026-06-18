@@ -8,17 +8,17 @@ g_cir_out_path : string, mut;
 g_binary_out_path : string, mut;
 
 fn is_cr_file(path: string) -> int {
-    slen := __builtin_str_len(path);
+    slen := str_len(path);
     if slen < 3 { return 0; }
-    ext := __builtin_str_sub(path, slen - 3, 3);
-    if __builtin_str_eq(ext, ".cr") != 0 { return 1; }
+    ext := str_sub(path, slen - 3, 3);
+    if str_eq(ext, ".cr") != 0 { return 1; }
     return 0;
 }
 
 fn read_source_file(path: string) -> string {
     g_source_dir = dirname(path);
-    source := __builtin_read_file(path);
-    if __builtin_str_len(source) > 0 {
+    source := read_file(path);
+    if str_len(source) > 0 {
     }
     return source;
 }
@@ -26,30 +26,30 @@ fn read_source_file(path: string) -> string {
 fn read_project_dir(dir: string) -> string {
     cfg := load_project(dir);
     g_source_dir = cfg.source_dir;
-    if __builtin_str_len(cfg.main_source) > 0 {
+    if str_len(cfg.main_source) > 0 {
         print_project_info(cfg);
         return cfg.main_source;
     }
-    __builtin_println("error: no main.cr found in directory");
+    println("error: no main.cr found in directory");
     return "";
 }
 
 fn is_decl_stmt(s: string) -> int {
-    slen := __builtin_str_len(s);
+    slen := str_len(s);
     i : ., mut = 0;
     loop {
         if i >= slen { return 0; }
-        cb := __builtin_load8(s, i);
+        cb := load8(s, i);
         if cb == 32 || cb == 9 || cb == 10 || cb == 13 { i = i + 1; }
         else { break; }
     }
     if i < slen {
-        cb := __builtin_load8(s, i);
+        cb := load8(s, i);
         if (cb >= 97 && cb <= 122) || (cb >= 65 && cb <= 90) || cb == 95 {
             j : ., mut = i + 1;
             loop {
                 if j >= slen { return 0; }
-                c2b := __builtin_load8(s, j);
+                c2b := load8(s, j);
                 if c2b == 32 || c2b == 9 || c2b == 10 || c2b == 13 { j = j + 1 }
                 else if c2b == 58 { return 1; }
                 else if (c2b >= 97 && c2b <= 122) || (c2b >= 65 && c2b <= 90) || (c2b >= 48 && c2b <= 57) || c2b == 95 { j = j + 1 }
@@ -62,11 +62,11 @@ fn is_decl_stmt(s: string) -> int {
 
 // Detect imports (uses resolve_imports which is already called before this point)
 fn detect_imports(src: string) -> int {
-    sl := __builtin_str_len(src); i : ., mut = 0; cnt : ., mut = 0;
+    sl := str_len(src); i : ., mut = 0; cnt : ., mut = 0;
     loop { if i + 6 >= sl { break; }
-        if __builtin_load8(src,i) == 105 && __builtin_load8(src,i+1) == 109 &&
-           __builtin_load8(src,i+2) == 112 && __builtin_load8(src,i+3) == 111 &&
-           __builtin_load8(src,i+4) == 114 && __builtin_load8(src,i+5) == 116 {
+        if load8(src,i) == 105 && load8(src,i+1) == 109 &&
+           load8(src,i+2) == 112 && load8(src,i+3) == 111 &&
+           load8(src,i+4) == 114 && load8(src,i+5) == 116 {
             cnt = cnt + 1;
             i = i + 6; continue; }
         i = i + 1; }
@@ -75,35 +75,35 @@ fn detect_imports(src: string) -> int {
 
 // Read source from a file path or project directory; returns 0 on success
 fn read_source_or_project(src_path: string) -> int {
-    sl := __builtin_str_len(src_path);
+    sl := str_len(src_path);
     g_is_project_mode = 0;
     if sl >= 4 {
-        ext := __builtin_str_sub(src_path, sl - 3, 3);
-        if __builtin_str_eq(ext, ".cr") == 0 { g_is_project_mode = 1; }
+        ext := str_sub(src_path, sl - 3, 3);
+        if str_eq(ext, ".cr") == 0 { g_is_project_mode = 1; }
     } else {
         g_is_project_mode = 1;
     }
 
     if g_is_project_mode != 0 {
         g_source = read_project_dir(src_path);
-        if __builtin_str_len(g_source) > 0 {
+        if str_len(g_source) > 0 {
             return 0;
         }
         g_is_project_mode = 0;
-        g_source = __builtin_read_file(src_path);
-        if __builtin_str_len(g_source) == 0 {
-            __builtin_print("error: cannot read ");
-            __builtin_println(src_path);
+        g_source = read_file(src_path);
+        if str_len(g_source) == 0 {
+            print("error: cannot read ");
+            println(src_path);
             return 1;
         }
         g_source_dir = dirname(src_path);
         return 0;
     }
 
-    g_source = __builtin_read_file(src_path);
-    if __builtin_str_len(g_source) == 0 {
-        __builtin_print("error: cannot read ");
-        __builtin_println(src_path);
+    g_source = read_file(src_path);
+    if str_len(g_source) == 0 {
+        print("error: cannot read ");
+        println(src_path);
         return 1;
     }
     g_source_dir = dirname(src_path);
@@ -130,11 +130,11 @@ fn default_out_path(src_path: string, ext: string) -> string {
         out = basename(src_path) + ext;
     } else {
         out = src_path;
-        sl := __builtin_str_len(src_path);
+        sl := str_len(src_path);
         if sl > 3 {
-            e := __builtin_str_sub(src_path, sl - 3, 3);
-            if __builtin_str_eq(e, ".cr") != 0 {
-                out = __builtin_str_sub(src_path, 0, sl - 3) + ext;
+            e := str_sub(src_path, sl - 3, 3);
+            if str_eq(e, ".cr") != 0 {
+                out = str_sub(src_path, 0, sl - 3) + ext;
             }
         }
     }
@@ -154,23 +154,23 @@ fn corec_main() -> int {
     if cli_parse() != 0 { return 1; }
     cmd := cli_cmd_name();
 
-    if __builtin_str_len(cmd) == 0 {
+    if str_len(cmd) == 0 {
         cli_help();
-        __builtin_println("");
-        __builtin_println("examples:");
-        __builtin_println("  corec build file.cr          compile to ELF binary");
-        __builtin_println("  corec check file.cr          type-check only");
-        __builtin_println("  corec cir file.cr            dump dataflow graph");
-        __builtin_println("  corec ccr file.cr            dump linear CFG");
-        __builtin_println("  corec run 'code'             execute directly");
+        println("");
+        println("examples:");
+        println("  corec build file.cr          compile to ELF binary");
+        println("  corec check file.cr          type-check only");
+        println("  corec cir file.cr            dump dataflow graph");
+        println("  corec ccr file.cr            dump linear CFG");
+        println("  corec run 'code'             execute directly");
         return 1;
     }
 
     // === run subcommand — inline code, no file ===
     if cli_eq(cmd, "run") {
         if cli_arg_count() < 1 {
-            __builtin_println("error: run requires code to execute");
-            __builtin_println("usage: corec run '<code>'");
+            println("error: run requires code to execute");
+            println("usage: corec run '<code>'");
             return 1;
         }
         g_source = cli_arg(0);
@@ -179,19 +179,19 @@ fn corec_main() -> int {
         // Check if source already has 'fn main'
         has_main : ., mut = 0;
         si2 : ., mut = 0;
-        sl2 := __builtin_str_len(g_source);
+        sl2 := str_len(g_source);
         loop {
             if si2 >= sl2 { break; }
-            c0 := __builtin_load8(g_source, si2);
+            c0 := load8(g_source, si2);
             if c0 == 102 {
                 if si2 + 6 < sl2 {
-                    if __builtin_load8(g_source, si2)     == 102 &&
-                       __builtin_load8(g_source, si2 + 1) == 110 &&
-                       __builtin_load8(g_source, si2 + 2) == 32  &&
-                       __builtin_load8(g_source, si2 + 3) == 109 &&
-                       __builtin_load8(g_source, si2 + 4) == 97  &&
-                       __builtin_load8(g_source, si2 + 5) == 105 &&
-                       __builtin_load8(g_source, si2 + 6) == 110 {
+                    if load8(g_source, si2)     == 102 &&
+                       load8(g_source, si2 + 1) == 110 &&
+                       load8(g_source, si2 + 2) == 32  &&
+                       load8(g_source, si2 + 3) == 109 &&
+                       load8(g_source, si2 + 4) == 97  &&
+                       load8(g_source, si2 + 5) == 105 &&
+                       load8(g_source, si2 + 6) == 110 {
                         has_main = 1;
                         break;
                     }
@@ -204,32 +204,32 @@ fn corec_main() -> int {
             imports : ., mut = "";
             src2 : ., mut = "";
             ii : ., mut = 0;
-            ilen := __builtin_str_len(g_source);
+            ilen := str_len(g_source);
             loop {
                 if ii >= ilen { break; }
                 if ii + 6 < ilen {
-                    c := __builtin_load8(g_source, ii);
+                    c := load8(g_source, ii);
                     c_prev : ., mut = 59;
-                    if ii > 0 { c_prev = __builtin_load8(g_source, ii - 1); }
+                    if ii > 0 { c_prev = load8(g_source, ii - 1); }
                     if (ii == 0 || c_prev == 59 || c_prev == 10) &&
-                       __builtin_load8(g_source, ii)     == 105 &&
-                       __builtin_load8(g_source, ii + 1) == 109 &&
-                       __builtin_load8(g_source, ii + 2) == 112 &&
-                       __builtin_load8(g_source, ii + 3) == 111 &&
-                       __builtin_load8(g_source, ii + 4) == 114 &&
-                       __builtin_load8(g_source, ii + 5) == 116 {
+                       load8(g_source, ii)     == 105 &&
+                       load8(g_source, ii + 1) == 109 &&
+                       load8(g_source, ii + 2) == 112 &&
+                       load8(g_source, ii + 3) == 111 &&
+                       load8(g_source, ii + 4) == 114 &&
+                       load8(g_source, ii + 5) == 116 {
                         ij : ., mut = ii;
                         loop {
                             if ij >= ilen { break; }
-                            if __builtin_load8(g_source, ij) == 59 { ij = ij + 1; break; }
+                            if load8(g_source, ij) == 59 { ij = ij + 1; break; }
                             ij = ij + 1;
                         }
-                        imports = imports + __builtin_str_sub(g_source, ii, ij - ii);
+                        imports = imports + str_sub(g_source, ii, ij - ii);
                         ii = ij;
                         continue;
                     }
                 }
-                src2 = src2 + __builtin_str_get(g_source, ii);
+                src2 = src2 + get_char(g_source, ii);
                 ii = ii + 1;
             }
             g_source = src2;
@@ -237,31 +237,31 @@ fn corec_main() -> int {
             has_semi : ., mut = 0;
             si2 : ., mut = 0;
             loop {
-                if si2 >= __builtin_str_len(g_source) { break; }
-                if __builtin_str_get(g_source, si2) == ";" { has_semi = 1; break; }
+                if si2 >= str_len(g_source) { break; }
+                if get_char(g_source, si2) == ";" { has_semi = 1; break; }
                 si2 = si2 + 1;
             }
             if has_semi != 0 {
                 last_semi : ., mut = -1;
                 ls : ., mut = 0;
                 loop {
-                    if ls >= __builtin_str_len(g_source) { break; }
-                    if __builtin_str_get(g_source, ls) == ";" { last_semi = ls; }
+                    if ls >= str_len(g_source) { break; }
+                    if get_char(g_source, ls) == ";" { last_semi = ls; }
                     ls = ls + 1;
                 }
                 if last_semi >= 0 {
-                    last_expr := __builtin_str_sub(g_source, last_semi + 1,
-                        __builtin_str_len(g_source) - last_semi - 1);
-                    body := __builtin_str_sub(g_source, 0, last_semi + 1);
+                    last_expr := str_sub(g_source, last_semi + 1,
+                        str_len(g_source) - last_semi - 1);
+                    body := str_sub(g_source, 0, last_semi + 1);
                     if is_decl_stmt(last_expr) != 0 {
                         g_source = imports + "fn main() -> int {\n" + body + "\n" + last_expr + ";\nreturn 0;\n}\n";
                     } else {
                         has_lcall : ., mut = 0;
                         lci : ., mut = 0;
-                        lclen := __builtin_str_len(last_expr);
+                        lclen := str_len(last_expr);
                         loop {
                             if lci >= lclen { break; }
-                            if __builtin_load8(last_expr, lci) == 40 { has_lcall = 1; break; }
+                            if load8(last_expr, lci) == 40 { has_lcall = 1; break; }
                             lci = lci + 1;
                         }
                         if has_lcall != 0 {
@@ -279,10 +279,10 @@ fn corec_main() -> int {
                 } else {
                     has_call : ., mut = 0;
                     ci3 : ., mut = 0;
-                    clen := __builtin_str_len(g_source);
+                    clen := str_len(g_source);
                     loop {
                         if ci3 >= clen { break; }
-                        if __builtin_load8(g_source, ci3) == 40 { has_call = 1; break; }
+                        if load8(g_source, ci3) == 40 { has_call = 1; break; }
                         ci3 = ci3 + 1;
                     }
                     if has_call != 0 {
@@ -301,26 +301,26 @@ fn corec_main() -> int {
 
     // === File-based subcommands: build | check | cir | ccr ===
     if cli_arg_count() < 1 {
-        __builtin_print("error: ");
-        __builtin_print(cmd);
-        __builtin_println(" requires a source file or directory");
+        print("error: ");
+        print(cmd);
+        println(" requires a source file or directory");
         return 1;
     }
     src_path := cli_arg(0);
 
     if read_source_or_project(src_path) != 0 { return 1; }
 
-    // --static: prepend rt.cr so __builtin_* functions inline
+    // --static: prepend rt.cr so * functions inline
     if cli_has("static") != 0 {
-        rt_src := __builtin_read_file("src/runtime/rt.cr");
-        if __builtin_str_len(rt_src) > 0 { g_source = rt_src + "\n" + g_source; }
+        rt_src := read_file("src/runtime/rt.cr");
+        if str_len(rt_src) > 0 { g_source = rt_src + "\n" + g_source; }
     }
 
     if run_frontend() != 0 { return 1; }
 
     // === check: type-check only ===
     if cli_eq(cmd, "check") {
-        __builtin_println("ok");
+        println("ok");
         return 0;
     }
 
@@ -331,17 +331,17 @@ fn corec_main() -> int {
     if cli_eq(cmd, "cir") {
         dot := df_graph_to_dot();
         out := cli_get("output");
-        if __builtin_str_len(out) == 0 {
+        if str_len(out) == 0 {
             out = default_out_path(src_path, ".cir");
         }
-        written := __builtin_write_file(out, dot);
+        written := write_file(out, dot);
         if written < 0 {
-            __builtin_print("error: could not write ");
-            __builtin_println(out);
+            print("error: could not write ");
+            println(out);
             return 1;
         }
-        __builtin_print(" -> ");
-        __builtin_println(out);
+        print(" -> ");
+        println(out);
         return 0;
     }
 
@@ -351,35 +351,35 @@ fn corec_main() -> int {
     // === ccr: output linear CFG ===
     if cli_eq(cmd, "ccr") {
         out := cli_get("output");
-        if __builtin_str_len(out) == 0 {
+        if str_len(out) == 0 {
             out = default_out_path(src_path, ".ccr");
         }
         r := save_ccr(out);
         if r != 0 {
-            __builtin_print("error: could not write ");
-            __builtin_println(out);
+            print("error: could not write ");
+            println(out);
             return 1;
         }
-        __builtin_print(" -> ");
-        __builtin_print(out);
-        __builtin_print(" (");
-        __builtin_print(__builtin_int_to_str(g_ir_func_count));
-        __builtin_print(" funcs, ");
-        __builtin_print(__builtin_int_to_str(g_ir_instr_count));
-        __builtin_println(" instrs)");
+        print(" -> ");
+        print(out);
+        print(" (");
+        print(int_str(g_ir_func_count));
+        print(" funcs, ");
+        print(int_str(g_ir_instr_count));
+        println(" instrs)");
         return 0;
     }
 
     // === build: compile + link to ELF ===
     out_path : ., mut = cli_get("output");
-    if __builtin_str_len(out_path) == 0 {
+    if str_len(out_path) == 0 {
         if g_is_project_mode != 0 { out_path = basename(src_path); }
         else {
             sp := src_path;
-            slen := __builtin_str_len(sp);
+            slen := str_len(sp);
             if slen > 3 {
-                ext := __builtin_str_sub(sp, slen - 3, 3);
-                if __builtin_str_eq(ext, ".cr") != 0 { out_path = __builtin_str_sub(sp, 0, slen - 3); }
+                ext := str_sub(sp, slen - 3, 3);
+                if str_eq(ext, ".cr") != 0 { out_path = str_sub(sp, 0, slen - 3); }
                 else { out_path = sp; }
             } else { out_path = sp; }
         }
@@ -387,7 +387,7 @@ fn corec_main() -> int {
     // Save .ccr alongside output (real IR artifact)
     ccr_path : ., mut = out_path + ".ccr";
     r := save_ccr(ccr_path);
-    if r != 0 { __builtin_println("error: could not write .ccr"); return 1; }
+    if r != 0 { println("error: could not write .ccr"); return 1; }
     // Call corearch to produce ELF
     cmd2 : ., mut = "corearch ";
     cmd2 = cmd2 + ccr_path + " --elf";
@@ -397,14 +397,14 @@ fn corec_main() -> int {
         cmd2 = cmd2 + " --link auto";
     }
     cmd2 = cmd2 + " -o " + out_path;
-    self_path := __builtin_get_arg(0);
-    sl2 := __builtin_str_len(self_path);
+    self_path := get_arg(0);
+    sl2 := str_len(self_path);
     if sl2 > 0 {
         last_slash : ., mut = -1;
         si : ., mut = 0; loop { if si >= sl2 { break; }
-            if __builtin_load8(self_path, si) == 47 { last_slash = si; } si = si + 1; }
+            if load8(self_path, si) == 47 { last_slash = si; } si = si + 1; }
         if last_slash >= 0 {
-            dir2 := __builtin_str_sub(self_path, 0, last_slash + 1);
+            dir2 := str_sub(self_path, 0, last_slash + 1);
             cmd2 = dir2 + cmd2;
         }
     }
@@ -425,8 +425,8 @@ fn compile_source(source: string) -> string {
         loop {
             if ei >= g_diag_count { break; }
             diag_code := r64(g_diags, ei * 32);
-            diag_msg := __builtin_load_str_ptr(g_diags, ei * 32 + 8);
-            err_msg = err_msg + " [" + __builtin_int_to_str(diag_code) + "] " + diag_msg;
+            diag_msg := load_str_ptr(g_diags, ei * 32 + 8);
+            err_msg = err_msg + " [" + int_str(diag_code) + "] " + diag_msg;
             ei = ei + 1;
         }
         return err_msg;

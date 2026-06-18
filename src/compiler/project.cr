@@ -13,7 +13,7 @@ struct ProjectConfig {
 fn load_project(dir: string) -> ProjectConfig {
     sd : ., mut = "";
     toml_path : ., mut = dir;
-    if __builtin_str_eq(__builtin_str_get(dir, __builtin_str_len(dir) - 1), "/") != 0 {
+    if str_eq(get_char(dir, str_len(dir) - 1), "/") != 0 {
         sd = dir;
         toml_path = dir + "Core.toml";
     } else {
@@ -21,19 +21,19 @@ fn load_project(dir: string) -> ProjectConfig {
         toml_path = dir + "/Core.toml";
     }
 
-    tc := __builtin_read_file(toml_path);
+    tc := read_file(toml_path);
     pname : ., mut = "";
     ml : ., mut = MemLayout { stack_size = 0, heap_size = 0, text_base = 0, data_base = 0 };
-    if __builtin_str_len(tc) > 0 {
+    if str_len(tc) > 0 {
         pname = extract_toml_name(tc);
         ml = toml_read_memlayout(tc);
     }
 
     main_path : ., mut = sd + "main.cr";
-    source := __builtin_read_file(main_path);
-    if __builtin_str_len(source) == 0 {
+    source := read_file(main_path);
+    if str_len(source) == 0 {
         main_path = "main.cr";
-        source = __builtin_read_file(main_path);
+        source = read_file(main_path);
     }
 
     return ProjectConfig {
@@ -45,12 +45,12 @@ fn load_project(dir: string) -> ProjectConfig {
 }
 
 fn print_project_info(cfg: ProjectConfig) {
-    if __builtin_str_len(cfg.name) > 0 {
-        __builtin_print("  project: ");
-        __builtin_println(cfg.name);
+    if str_len(cfg.name) > 0 {
+        print("  project: ");
+        println(cfg.name);
     }
-    if __builtin_str_len(cfg.main_source) > 0 {
-        __builtin_print("  main.cr: ");
-        __builtin_println(cfg.source_dir + "main.cr");
+    if str_len(cfg.main_source) > 0 {
+        print("  main.cr: ");
+        println(cfg.source_dir + "main.cr");
     }
 }

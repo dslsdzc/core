@@ -28,10 +28,10 @@ fn bw_byte(val: int, shift: int) -> int {
 }
 
 fn buf_write_u32(buf: string, pos: int, val: int) {
-    __builtin_store8(buf, pos,     bw_byte(val, 0));
-    __builtin_store8(buf, pos + 1, bw_byte(val, 8));
-    __builtin_store8(buf, pos + 2, bw_byte(val, 16));
-    __builtin_store8(buf, pos + 3, bw_byte(val, 24));
+    store8(buf, pos,     bw_byte(val, 0));
+    store8(buf, pos + 1, bw_byte(val, 8));
+    store8(buf, pos + 2, bw_byte(val, 16));
+    store8(buf, pos + 3, bw_byte(val, 24));
 }
 
 fn buf_write_i32(buf: string, pos: int, val: int) {
@@ -40,10 +40,10 @@ fn buf_write_i32(buf: string, pos: int, val: int) {
 }
 
 fn buf_read_u32(buf: string, pos: int) -> int {
-    b0 := __builtin_load8(buf, pos);
-    b1 := __builtin_load8(buf, pos + 1);
-    b2 := __builtin_load8(buf, pos + 2);
-    b3 := __builtin_load8(buf, pos + 3);
+    b0 := load8(buf, pos);
+    b1 := load8(buf, pos + 1);
+    b2 := load8(buf, pos + 2);
+    b3 := load8(buf, pos + 3);
     return b0 + b1 * 256 + b2 * 65536 + b3 * 16777216;
 }
 
@@ -105,7 +105,7 @@ fn calc_ccr_size() -> int {
 
 fn save_ccr(path: string) -> int {
     tsz := calc_ccr_size();
-    buf := __builtin_alloc(tsz);
+    buf := alloc(tsz);
     pos : ., mut = 0;
 
     // Magic + version
@@ -131,7 +131,7 @@ fn save_ccr(path: string) -> int {
         loop {
             if ci >= sl { break; }
             ch := str_load8(si, ci);
-            __builtin_store8(buf, pos, ch);
+            store8(buf, pos, ch);
             pos = pos + 1;
             ci = ci + 1;
         }
@@ -224,12 +224,12 @@ fn save_ccr(path: string) -> int {
         ei = ei + 1;
     }
 
-    // Use syscall directly (__builtin_write_file uses str_len which stops at null)
-    fd := __builtin_syscall3(2, path, 577, 420);  // open(O_WRONLY|O_CREAT|O_TRUNC, 0644)
+    // Use syscall directly (write_file uses str_len which stops at null)
+    fd := syscall3(2, path, 577, 420);  // open(O_WRONLY|O_CREAT|O_TRUNC, 0644)
     if fd < 0 { return -1; }
     written : ., mut = 0;
-    written = __builtin_syscall3(1, fd, buf, tsz);  // write(fd, buf, tsz)
-    r2 := __builtin_syscall3(3, fd, 0, 0);  // close(fd)
+    written = syscall3(1, fd, buf, tsz);  // write(fd, buf, tsz)
+    r2 := syscall3(3, fd, 0, 0);  // close(fd)
     if written != tsz { return -1; }
     return 0;
 }
@@ -281,16 +281,16 @@ fn load_ccr(data: string, fsize: int) -> int {
         if si >= str_cnt { break; }
         sl := buf_read_u32(data, pos); pos = pos + 4;
         // Allocate buffer for string content
-        s := __builtin_alloc(sl + 1);
+        s := alloc(sl + 1);
         ci : ., mut = 0;
         loop {
             if ci >= sl { break; }
-            ch := __builtin_load8(data, pos);
-            __builtin_store8(s, ci, ch);
+            ch := load8(data, pos);
+            store8(s, ci, ch);
             pos = pos + 1;
             ci = ci + 1;
         }
-        __builtin_store8(s, sl, 0);
+        store8(s, sl, 0);
         str_intern(s);
         si = si + 1;
     }
@@ -299,7 +299,7 @@ fn load_ccr(data: string, fsize: int) -> int {
     fi : ., mut = 0;
     loop {
         if fi >= func_cnt { break; }
-        fv0 := buf_read_u32(data, pos); pos = pos + 4; __builtin_syscall3(1, 1, "D:W\n", 4); w64(g_ir_func_name_idx, fi * 8, fv0);
+        fv0 := buf_read_u32(data, pos); pos = pos + 4; syscall3(1, 1, "D:W\n", 4); w64(g_ir_func_name_idx, fi * 8, fv0);
         fv1 := buf_read_u32(data, pos); pos = pos + 4; w64(g_ir_func_param_count, fi * 8, fv1);
         fv2 := buf_read_u32(data, pos); pos = pos + 4; w64(g_ir_func_ret_type, fi * 8, fv2);
         fv3 := buf_read_u32(data, pos); pos = pos + 4; w64(g_ir_func_instr_start, fi * 8, fv3);
@@ -359,7 +359,7 @@ fn load_ccr(data: string, fsize: int) -> int {
         if sti >= struct_cnt { break; }
         name_ni := buf_read_u32(data, pos); pos = pos + 4;
         fc := buf_read_u32(data, pos); pos = pos + 4;
-        if fc > MAX_STRUCT_FIELDS { __builtin_println("error: .ccr struct field count exceeds max"); return 1; }
+        if fc > MAX_STRUCT_FIELDS { println("error: .ccr struct field count exceeds max"); return 1; }
         w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_NAME, name_ni);
         w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, fc);
         // Zero out all field slots and type nodes
@@ -394,7 +394,7 @@ fn load_ccr(data: string, fsize: int) -> int {
         if ei >= enum_cnt { break; }
         ename_ni := buf_read_u32(data, pos); pos = pos + 4;
         vc := buf_read_u32(data, pos); pos = pos + 4;
-        if vc > MAX_ENUM_VARIANTS { __builtin_println("error: .ccr enum variant count exceeds max"); return 1; }
+        if vc > MAX_ENUM_VARIANTS { println("error: .ccr enum variant count exceeds max"); return 1; }
         w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_NAME, ename_ni);
         w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, vc);
         // Zero all variant slots
@@ -416,7 +416,7 @@ fn load_ccr(data: string, fsize: int) -> int {
             if vi3 >= vc { break; }
             vni := buf_read_u32(data, pos); pos = pos + 4;
             tc := buf_read_u32(data, pos); pos = pos + 4;
-            if tc > MAX_VARIANT_TYPES { __builtin_println("error: .ccr variant type count exceeds max"); return 1; }
+            if tc > MAX_VARIANT_TYPES { println("error: .ccr variant type count exceeds max"); return 1; }
             w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vi3 * OFF_EV_SIZE + OFF_EV_NAME, vni);
             w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vi3 * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, tc);
             tf : ., mut = 0;

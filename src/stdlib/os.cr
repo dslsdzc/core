@@ -1,6 +1,6 @@
 // os.cr — 操作系统接口标准库
 // 提供系统命令调用等操作系统级功能
-// 纯 Core 实现，通过 __builtin_syscall3 直接使用 Linux 系统调用
+// 纯 Core 实现，通过 syscall3 直接使用 Linux 系统调用
 
 // 用于构造 execve argv 数组的结构体
 // 内存布局：4 个连续的 8 字节值（指针数组）
@@ -13,13 +13,13 @@ struct Argv4 { a: string, b: string, c: string, d: int }
 // 返回：子进程的退出码（0-255），失败返回 -1
 fn system(cmd: string) -> int {
     // fork()
-    pid := __builtin_syscall3(57, 0, 0, 0);
+    pid := syscall3(57, 0, 0, 0);
     if pid < 0 { return -1; }
     if pid > 0 {
         // 父进程：等待子进程结束
-        status_buf := __builtin_alloc(16);
-        __builtin_syscall3(61, pid, status_buf, 0);  // wait4(pid, &status, 0, NULL)
-        status := __builtin_load8(status_buf, 0);
+        status_buf := alloc(16);
+        syscall3(61, pid, status_buf, 0);  // wait4(pid, &status, 0, NULL)
+        status := load8(status_buf, 0);
         return status % 256;  // WEXITSTATUS
     }
     // 子进程：执行命令
@@ -29,7 +29,7 @@ fn system(cmd: string) -> int {
     //   offset+16: 指向 cmd 的指针
     //   offset+24: 0 (NULL 终止符)
     argv := Argv4 { a = "/bin/sh", b = "-c", c = cmd, d = 0 };
-    __builtin_syscall3(59, "/bin/sh", argv, 0);  // execve — 成功则不返回
-    __builtin_syscall3(60, 127, 0, 0);  // execve 失败时 _exit(127)
+    syscall3(59, "/bin/sh", argv, 0);  // execve — 成功则不返回
+    syscall3(60, 127, 0, 0);  // execve 失败时 _exit(127)
     return -1;
 }

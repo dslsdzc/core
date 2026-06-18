@@ -7,48 +7,23 @@ class NameResolver:
         self.errors = []
 
     def _declare_builtins(self):
-        """Register built-in functions so the type checker can find them."""
+        """Register all standard library functions for the type checker."""
         from corec.syntax.ast import BaseType
-        # str_len(s: string) -> int
-        self.symtab.define('__builtin_str_len', SymbolKind.FUNCTION, BaseType('int'))
-        # str_get(s: string, index: int) -> string
-        self.symtab.define('__builtin_str_get', SymbolKind.FUNCTION, BaseType('string'))
-        # str_sub(s: string, start: int, len: int) -> string
-        self.symtab.define('__builtin_str_sub', SymbolKind.FUNCTION, BaseType('string'))
-        # int_to_str(i: int) -> string
-        self.symtab.define('__builtin_int_to_str', SymbolKind.FUNCTION, BaseType('string'))
-        # str_push(s: string, c: string) -> string
-        self.symtab.define('__builtin_str_push', SymbolKind.FUNCTION, BaseType('string'))
-        # str_from_int(i: int) -> string
-        self.symtab.define('__builtin_str_from_int', SymbolKind.FUNCTION, BaseType('string'))
-        # str_to_int(s: string) -> int
-        self.symtab.define('__builtin_str_to_int', SymbolKind.FUNCTION, BaseType('int'))
-        # str_eq(a: string, b: string) -> int
-        self.symtab.define('__builtin_str_eq', SymbolKind.FUNCTION, BaseType('int'))
-        # str_cmp(a: string, b: string) -> int
-        self.symtab.define('__builtin_str_cmp', SymbolKind.FUNCTION, BaseType('int'))
-        # alloc(size: int) -> string (returns pointer to allocated memory)
-        self.symtab.define('__builtin_alloc', SymbolKind.FUNCTION, BaseType('string'))
-        # load8(ptr: string, idx: int) -> int  — byte load (inline)
-        self.symtab.define('__builtin_load8', SymbolKind.FUNCTION, BaseType('int'))
-        # store8(ptr: string, idx: int, val: int) -> int  — byte store (inline)
-        self.symtab.define('__builtin_store8', SymbolKind.FUNCTION, BaseType('int'))
-        # read_file(path: string) -> string
-        self.symtab.define('__builtin_read_file', SymbolKind.FUNCTION, BaseType('string'))
-        # write_file(path: string, content: string) -> int
-        self.symtab.define('__builtin_write_file', SymbolKind.FUNCTION, BaseType('int'))
-        # get_arg(n: int) -> string
-        self.symtab.define('__builtin_get_arg', SymbolKind.FUNCTION, BaseType('string'))
-        # print(s: string) -> unit
-        self.symtab.define('__builtin_print', SymbolKind.FUNCTION, BaseType('unit'))
-        # println(s: string) -> unit
-        self.symtab.define('__builtin_println', SymbolKind.FUNCTION, BaseType('unit'))
-        # syscall3(nr: int, arg1: int, arg2: int, arg3: int) -> int
-        self.symtab.define('__builtin_syscall3', SymbolKind.FUNCTION, BaseType('int'))
-        # load_str_ptr(buf: string, pos: int) -> string — load string pointer from byte buffer
-        self.symtab.define('__builtin_load_str_ptr', SymbolKind.FUNCTION, BaseType('string'))
-        # store_str_ptr(buf: string, pos: int, val: string) -> int — store string pointer into byte buffer
-        self.symtab.define('__builtin_store_str_ptr', SymbolKind.FUNCTION, BaseType('int'))
+        # rt.s primitives
+        rt_funcs = [
+            ('alloc', BaseType('string')),
+            ('get_arg', BaseType('string')),
+            ('load8', BaseType('int')),
+            ('store8', BaseType('int')),
+            ('syscall3', BaseType('int')),
+            ('load_str_ptr', BaseType('string')),
+            ('store_str_ptr', BaseType('int')),
+        ]
+        for name, typ in rt_funcs:
+            self.symtab.define(name, SymbolKind.FUNCTION, typ)
+        # dyn_arr.cr interned string functions (used before their definitions)
+        for name in ['istr_len', 'istr_get', 'istr_eq', 'str_intern', 'str_load8']:
+            self.symtab.define(name, SymbolKind.FUNCTION, BaseType('int') if name != 'istr_get' else BaseType('string'))
 
     def resolve(self, ast: CompilationUnit):
         self._declare_builtins()
@@ -78,7 +53,7 @@ class NameResolver:
 
     def _declare_function(self, decl: FunctionDecl):
         if self.symtab.lookup(decl.name):
-            return  # already declared (e.g. builtin)
+            return
         self.symtab.define(decl.name, SymbolKind.FUNCTION, decl.return_type, decl)
 
     def _declare_type(self, decl):

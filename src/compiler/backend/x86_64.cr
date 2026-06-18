@@ -73,14 +73,14 @@ fn x86_lookup_struct(name_ni: int) -> int {
 
 fn x86_label(lbl: int) -> string {
     s : ., mut = ".L";
-    s = s + __builtin_int_to_str(lbl);
+    s = s + int_str(lbl);
     s = s + ":";
     return s;
 }
 
 fn x86_jump_label(lbl: int) -> string {
     s : ., mut = ".L";
-    s = s + __builtin_int_to_str(lbl);
+    s = s + int_str(lbl);
     return s;
 }
 
@@ -108,20 +108,20 @@ fn x86_gen_instr(instr_idx: int) -> string {
                 si2 = si2 + 1;
             }
             lbl : ., mut = ".LC";
-            lbl = lbl + __builtin_int_to_str(lbl_idx);
+            lbl = lbl + int_str(lbl_idx);
             asm = asm + "    lea r10, ";
             asm = asm + lbl;
             asm = asm + "[rip]\n";
             asm = asm + "    mov [rbp";
             if off >= 0 { asm = asm + "+"; }
-            asm = asm + __builtin_int_to_str(off);
+            asm = asm + int_str(off);
             asm = asm + "], r10\n";
         } else {
             asm = asm + "    mov qword ptr [rbp";
             if off >= 0 { asm = asm + "+"; }
-            asm = asm + __builtin_int_to_str(off);
+            asm = asm + int_str(off);
             asm = asm + "], ";
-            asm = asm + __builtin_int_to_str(val);
+            asm = asm + int_str(val);
             asm = asm + "\n";
         }
         return asm;
@@ -133,11 +133,11 @@ fn x86_gen_instr(instr_idx: int) -> string {
         off_d := x86_get_offset(dest);
         asm = asm + "    mov r10, [rbp";
         if off_s1 >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_s1);
+        asm = asm + int_str(off_s1);
         asm = asm + "]\n";
         asm = asm + "    mov r11, [rbp";
         if off_s2 >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_s2);
+        asm = asm + int_str(off_s2);
         asm = asm + "]\n";
         if s3 == OP_ADD { asm = asm + "    add r10, r11\n"; }
         if s3 == OP_SUB { asm = asm + "    sub r10, r11\n"; }
@@ -182,7 +182,7 @@ fn x86_gen_instr(instr_idx: int) -> string {
         if s3 == OP_OR { asm = asm + "    or r10, r11\n"; }
         asm = asm + "    mov [rbp";
         if off_d >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_d);
+        asm = asm + int_str(off_d);
         asm = asm + "], r10\n";
         return asm;
     }
@@ -192,7 +192,7 @@ fn x86_gen_instr(instr_idx: int) -> string {
         off_d := x86_get_offset(dest);
         asm = asm + "    mov r10, [rbp";
         if off_s1 >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_s1);
+        asm = asm + int_str(off_s1);
         asm = asm + "]\n";
         if s3 == UOP_NEG { asm = asm + "    neg r10\n"; }
         else if s3 == UOP_NOT {
@@ -201,7 +201,7 @@ fn x86_gen_instr(instr_idx: int) -> string {
         }
         asm = asm + "    mov [rbp";
         if off_d >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_d);
+        asm = asm + int_str(off_d);
         asm = asm + "], r10\n";
         return asm;
     }
@@ -209,7 +209,7 @@ fn x86_gen_instr(instr_idx: int) -> string {
     if op == IR_CALL {
         func_ni := s3;
         func_name := "";
-        if func_ni >= 0 { func_name = str_get(func_ni); }
+        if func_ni >= 0 { func_name = get_char(func_ni); }
         first_arg := s1;
         arg_count := s2;
         arg_regs := ["rdi", "rsi", "rdx", "rcx", "r8", "r9"];
@@ -223,11 +223,11 @@ fn x86_gen_instr(instr_idx: int) -> string {
             asm = asm + arg_regs[ai];
             asm = asm + ", [rbp";
             if aoff >= 0 { asm = asm + "+"; }
-            asm = asm + __builtin_int_to_str(aoff);
+            asm = asm + int_str(aoff);
             asm = asm + "]\n";
             ai = ai + 1;
         }
-        if func_name == "__builtin_syscall3" {
+        if func_name == "syscall3" {
             //  syscall rdi=nr, rsi=a1, rdx=a2, rcx=a3
             // rax=nr, rdi=a1, rsi=a2, rdx=a3, r10=0
             asm = asm + "    mov rax, rdi\n";
@@ -236,11 +236,11 @@ fn x86_gen_instr(instr_idx: int) -> string {
             asm = asm + "    mov rdx, rcx\n";
             asm = asm + "    xor r10, r10\n";
             asm = asm + "    syscall\n";
-        } else if __builtin_str_eq(func_name, "__builtin_load8") != 0 ||
-                  __builtin_str_eq(func_name, "__builtin_store8") != 0 {
+        } else if str_eq(func_name, "load8") != 0 ||
+                  str_eq(func_name, "store8") != 0 {
             // load8/store8  IR_STORE/IR_LOAD 
             asm = asm + "    xor eax, eax\n";
-        } else if __builtin_str_len(func_name) > 0 {
+        } else if str_len(func_name) > 0 {
             //  __builtin_*   callrt_core.o
             asm = asm + "    call ";
             asm = asm + func_name;
@@ -250,7 +250,7 @@ fn x86_gen_instr(instr_idx: int) -> string {
             doff := x86_get_offset(dest);
             asm = asm + "    mov [rbp";
             if doff >= 0 { asm = asm + "+"; }
-            asm = asm + __builtin_int_to_str(doff);
+            asm = asm + int_str(doff);
             asm = asm + "], rax\n";
         }
         return asm;
@@ -261,11 +261,11 @@ fn x86_gen_instr(instr_idx: int) -> string {
             off := x86_get_offset(s1);
             asm = asm + "    mov rax, [rbp";
             if off >= 0 { asm = asm + "+"; }
-            asm = asm + __builtin_int_to_str(off);
+            asm = asm + int_str(off);
             asm = asm + "]\n";
         }
         asm = asm + "    jmp .Lret";
-        asm = asm + __builtin_int_to_str(g_x86_func_idx);
+        asm = asm + int_str(g_x86_func_idx);
         asm = asm + "\n";
         return asm;
     }
@@ -284,11 +284,11 @@ fn x86_gen_instr(instr_idx: int) -> string {
                 fc := si_field_count(si);
                 if fc > 0 {
                     asm = asm + "    mov edi, ";
-                    asm = asm + __builtin_int_to_str(fc * 8);
-                    asm = asm + "\n    call __builtin_alloc\n";
+                    asm = asm + int_str(fc * 8);
+                    asm = asm + "\n    call alloc\n";
                     asm = asm + "    mov [rbp";
                     if off >= 0 { asm = asm + "+"; }
-                    asm = asm + __builtin_int_to_str(off);
+                    asm = asm + int_str(off);
                     asm = asm + "], rax\n";
                 }
             }
@@ -301,11 +301,11 @@ fn x86_gen_instr(instr_idx: int) -> string {
         sz := s1 * 8;
         if sz > 0 {
             asm = asm + "    mov edi, ";
-            asm = asm + __builtin_int_to_str(sz);
-            asm = asm + "\n    call __builtin_alloc\n";
+            asm = asm + int_str(sz);
+            asm = asm + "\n    call alloc\n";
             asm = asm + "    mov [rbp";
             if off >= 0 { asm = asm + "+"; }
-            asm = asm + __builtin_int_to_str(off);
+            asm = asm + int_str(off);
             asm = asm + "], rax\n";
         }
         return asm;
@@ -316,11 +316,11 @@ fn x86_gen_instr(instr_idx: int) -> string {
         off_val := x86_get_offset(s2);
         asm = asm + "    mov r10, [rbp";
         if off_val >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_val);
+        asm = asm + int_str(off_val);
         asm = asm + "]\n";
         asm = asm + "    mov [rbp";
         if off_addr >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_addr);
+        asm = asm + int_str(off_addr);
         asm = asm + "], r10\n";
         return asm;
     }
@@ -330,11 +330,11 @@ fn x86_gen_instr(instr_idx: int) -> string {
         off_d := x86_get_offset(dest);
         asm = asm + "    mov r10, [rbp";
         if off_src >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_src);
+        asm = asm + int_str(off_src);
         asm = asm + "]\n";
         asm = asm + "    mov [rbp";
         if off_d >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_d);
+        asm = asm + int_str(off_d);
         asm = asm + "], r10\n";
         return asm;
     }
@@ -347,14 +347,14 @@ fn x86_gen_instr(instr_idx: int) -> string {
         if x86_is_enum_var(s1) == 1 { field_off = (field_idx + 1) * 8; }
         asm = asm + "    mov r10, [rbp";
         if off_struct >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_struct);
+        asm = asm + int_str(off_struct);
         asm = asm + "]\n";
         asm = asm + "    mov r11, [r10 + ";
-        asm = asm + __builtin_int_to_str(field_off);
+        asm = asm + int_str(field_off);
         asm = asm + "]\n";
         asm = asm + "    mov [rbp";
         if off_d >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_d);
+        asm = asm + int_str(off_d);
         asm = asm + "], r11\n";
         return asm;
     }
@@ -367,14 +367,14 @@ fn x86_gen_instr(instr_idx: int) -> string {
         if x86_is_enum_var(s1) == 1 { field_off = (field_idx + 1) * 8; }
         asm = asm + "    mov r10, [rbp";
         if off_struct >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_struct);
+        asm = asm + int_str(off_struct);
         asm = asm + "]\n";
         asm = asm + "    mov r11, [rbp";
         if off_val >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_val);
+        asm = asm + int_str(off_val);
         asm = asm + "]\n";
         asm = asm + "    mov [r10 + ";
-        asm = asm + __builtin_int_to_str(field_off);
+        asm = asm + int_str(field_off);
         asm = asm + "], r11\n";
         return asm;
     }
@@ -385,14 +385,14 @@ fn x86_gen_instr(instr_idx: int) -> string {
         idx := s3;
         asm = asm + "    mov r10, [rbp";
         if off_arr >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_arr);
+        asm = asm + int_str(off_arr);
         asm = asm + "]\n";
         asm = asm + "    mov r11, [r10 + ";
-        asm = asm + __builtin_int_to_str(idx * 8);
+        asm = asm + int_str(idx * 8);
         asm = asm + "]\n";
         asm = asm + "    mov [rbp";
         if off_d >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_d);
+        asm = asm + int_str(off_d);
         asm = asm + "], r11\n";
         return asm;
     }
@@ -403,14 +403,14 @@ fn x86_gen_instr(instr_idx: int) -> string {
         idx := s3;
         asm = asm + "    mov r10, [rbp";
         if off_arr >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_arr);
+        asm = asm + int_str(off_arr);
         asm = asm + "]\n";
         asm = asm + "    mov r11, [rbp";
         if off_val >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_val);
+        asm = asm + int_str(off_val);
         asm = asm + "]\n";
         asm = asm + "    mov [r10 + ";
-        asm = asm + __builtin_int_to_str(idx * 8);
+        asm = asm + int_str(idx * 8);
         asm = asm + "], r11\n";
         return asm;
     }
@@ -421,16 +421,16 @@ fn x86_gen_instr(instr_idx: int) -> string {
         off_d := x86_get_offset(dest);
         asm = asm + "    mov r10, [rbp";
         if off_arr >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_arr);
+        asm = asm + int_str(off_arr);
         asm = asm + "]\n";
         asm = asm + "    mov r11, [rbp";
         if off_idx >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_idx);
+        asm = asm + int_str(off_idx);
         asm = asm + "]\n";
         asm = asm + "    mov r12, [r10 + r11 * 8]\n";
         asm = asm + "    mov [rbp";
         if off_d >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_d);
+        asm = asm + int_str(off_d);
         asm = asm + "], r12\n";
         return asm;
     }
@@ -441,15 +441,15 @@ fn x86_gen_instr(instr_idx: int) -> string {
         off_val := x86_get_offset(dest);
         asm = asm + "    mov r10, [rbp";
         if off_arr >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_arr);
+        asm = asm + int_str(off_arr);
         asm = asm + "]\n";
         asm = asm + "    mov r11, [rbp";
         if off_idx >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_idx);
+        asm = asm + int_str(off_idx);
         asm = asm + "]\n";
         asm = asm + "    mov r12, [rbp";
         if off_val >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_val);
+        asm = asm + int_str(off_val);
         asm = asm + "]\n";
         asm = asm + "    mov [r10 + r11 * 8], r12\n";
         return asm;
@@ -461,19 +461,19 @@ fn x86_gen_instr(instr_idx: int) -> string {
         // s1 = variant name index, s2 = field_count
         alloc_size := 8 + s2 * 8;
         asm = asm + "    mov edi, ";
-        asm = asm + __builtin_int_to_str(alloc_size);
-        asm = asm + "\n    call __builtin_alloc\n";
+        asm = asm + int_str(alloc_size);
+        asm = asm + "\n    call alloc\n";
         asm = asm + "    mov [rbp";
         if off >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off);
+        asm = asm + int_str(off);
         asm = asm + "], rax\n";
         // Store tag (variant name index) at offset 0
         asm = asm + "    mov r10, [rbp";
         if off >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off);
+        asm = asm + int_str(off);
         asm = asm + "]\n";
         asm = asm + "    mov qword ptr [r10 + 0], ";
-        asm = asm + __builtin_int_to_str(s1);
+        asm = asm + int_str(s1);
         asm = asm + "\n";
         return asm;
     }
@@ -482,12 +482,12 @@ fn x86_gen_instr(instr_idx: int) -> string {
         off_d := x86_get_offset(dest);
         asm = asm + "    mov r10, [rbp";
         if off_enum >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_enum);
+        asm = asm + int_str(off_enum);
         asm = asm + "]\n";
         asm = asm + "    mov r11, [r10 + 0]\n";
         asm = asm + "    mov [rbp";
         if off_d >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_d);
+        asm = asm + int_str(off_d);
         asm = asm + "], r11\n";
         return asm;
     }
@@ -496,11 +496,11 @@ fn x86_gen_instr(instr_idx: int) -> string {
         off_d := x86_get_offset(dest);
         asm = asm + "    lea r10, [rbp";
         if off_src >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_src);
+        asm = asm + int_str(off_src);
         asm = asm + "]\n";
         asm = asm + "    mov [rbp";
         if off_d >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_d);
+        asm = asm + int_str(off_d);
         asm = asm + "], r10\n";
         return asm;
     }
@@ -509,12 +509,12 @@ fn x86_gen_instr(instr_idx: int) -> string {
         off_d := x86_get_offset(dest);
         asm = asm + "    mov r10, [rbp";
         if off_src >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_src);
+        asm = asm + int_str(off_src);
         asm = asm + "]\n";
         asm = asm + "    mov r11, [r10]\n";
         asm = asm + "    mov [rbp";
         if off_d >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_d);
+        asm = asm + int_str(off_d);
         asm = asm + "], r11\n";
         return asm;
     }
@@ -523,11 +523,11 @@ fn x86_gen_instr(instr_idx: int) -> string {
         off_val := x86_get_offset(s2);
         asm = asm + "    mov r10, [rbp";
         if off_ptr >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_ptr);
+        asm = asm + int_str(off_ptr);
         asm = asm + "]\n";
         asm = asm + "    mov r11, [rbp";
         if off_val >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_val);
+        asm = asm + int_str(off_val);
         asm = asm + "]\n";
         asm = asm + "    mov [r10], r11\n";
         return asm;
@@ -540,17 +540,17 @@ fn x86_gen_instr(instr_idx: int) -> string {
         off_d := x86_get_offset(dest);
         asm = asm + "    mov r10, [rbp";
         if off_arr >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_arr);
+        asm = asm + int_str(off_arr);
         asm = asm + "]\n";
         asm = asm + "    mov r11, [rbp";
         if off_low >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_low);
+        asm = asm + int_str(off_low);
         asm = asm + "]\n";
         asm = asm + "    shl r11, 3\n";
         asm = asm + "    add r10, r11\n";
         asm = asm + "    mov [rbp";
         if off_d >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_d);
+        asm = asm + int_str(off_d);
         asm = asm + "], r10\n";
         return asm;
     }
@@ -561,7 +561,7 @@ fn x86_gen_instr(instr_idx: int) -> string {
         false_lbl := s3;
         asm = asm + "    mov r10, [rbp";
         if off_cond >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(off_cond);
+        asm = asm + int_str(off_cond);
         asm = asm + "]\n";
         asm = asm + "    cmp r10, 1\n";
         asm = asm + "    je  ";
@@ -591,7 +591,7 @@ fn x86_gen_instr(instr_idx: int) -> string {
 
 fn x86_gen_function(func_idx: int) -> string {
     name_idx := r64(g_ir_func_name_idx, func_idx * 8);
-    func_name := str_get(name_idx);
+    func_name := get_char(name_idx);
     instr_start := r64(g_ir_func_instr_start, func_idx * 8);
     instr_count := r64(g_ir_func_instr_count, func_idx * 8);
     var_count := r64(g_ir_func_var_count, func_idx * 8);
@@ -618,7 +618,7 @@ fn x86_gen_function(func_idx: int) -> string {
 
     if g_x86_stack_size > 0 {
         asm = asm + "    sub rsp, ";
-        asm = asm + __builtin_int_to_str(g_x86_stack_size);
+        asm = asm + int_str(g_x86_stack_size);
         asm = asm + "\n";
     }
 
@@ -632,7 +632,7 @@ fn x86_gen_function(func_idx: int) -> string {
         poff := x86_get_offset(var_start + pi);
         asm = asm + "    mov [rbp";
         if poff >= 0 { asm = asm + "+"; }
-        asm = asm + __builtin_int_to_str(poff);
+        asm = asm + int_str(poff);
         asm = asm + "], ";
         asm = asm + regs[pi];
         asm = asm + "\n";
@@ -650,11 +650,11 @@ fn x86_gen_function(func_idx: int) -> string {
     }
 
     asm = asm + ".Lret";
-    asm = asm + __builtin_int_to_str(g_x86_func_idx);
+    asm = asm + int_str(g_x86_func_idx);
     asm = asm + ":\n";
     if g_x86_stack_size > 0 {
         asm = asm + "    add rsp, ";
-        asm = asm + __builtin_int_to_str(g_x86_stack_size);
+        asm = asm + int_str(g_x86_stack_size);
         asm = asm + "\n";
     }
     asm = asm + "    pop rbp\n    ret\n";
@@ -683,9 +683,9 @@ fn x86_64_generate() -> string {
         if si >= g_ir_str_const_count { break; }
         str_idx := r64(g_ir_str_consts, si * 8);
         lbl : ., mut = ".LC";
-        lbl = lbl + __builtin_int_to_str(si);
+        lbl = lbl + int_str(si);
         lbl = lbl + ": .asciz \"";
-        lbl = lbl + str_get(str_idx);
+        lbl = lbl + get_char(str_idx);
         lbl = lbl + "\"\n";
         asm = asm + lbl;
         si = si + 1;

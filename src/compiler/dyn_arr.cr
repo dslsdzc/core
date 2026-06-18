@@ -4,8 +4,8 @@
 // ============================================================
 // Byte helpers
 // ============================================================
-fn w8(buf: string, pos: int, val: int) { __builtin_store8(buf, pos, val % 256); }
-fn bu8(buf: string, pos: int) -> int { return __builtin_load8(buf, pos) % 256; }
+fn w8(buf: string, pos: int, val: int) { store8(buf, pos, val % 256); }
+fn bu8(buf: string, pos: int) -> int { return load8(buf, pos) % 256; }
 fn w32(buf: string, pos: int, val: int) {
     uv : ., mut = val; if uv < 0 { uv = uv + 4294967296; }
     w8(buf,pos,uv%256); w8(buf,pos+1,(uv/256)%256);
@@ -116,104 +116,104 @@ fn _grow(buf_name: string, cap_name: int, esz: int, min_init: int) {
 fn dyn_grow_tokens(needed: int) {
     if needed < g_tok_cap { return; }
     nc : ., mut = g_tok_cap * 2; if nc < 128 { nc = 128; } if nc < needed { nc = needed + 128; }
-    nb := __builtin_alloc(nc * ESZ_TOKEN); _dyncpy(g_tokens, g_tok_cap * ESZ_TOKEN, nb);
+    nb := alloc(nc * ESZ_TOKEN); _dyncpy(g_tokens, g_tok_cap * ESZ_TOKEN, nb);
     g_tokens = nb; g_tok_cap = nc; }
 
 fn dyn_grow_ast(needed: int) {
     if needed < g_ast_cap { return; }
     nc : ., mut = g_ast_cap * 2; if nc < 128 { nc = 128; } if nc < needed { nc = needed + 128; }
-    nb := __builtin_alloc(nc * ESZ_ASTNODE); _dyncpy(g_ast, g_ast_cap * ESZ_ASTNODE, nb);
+    nb := alloc(nc * ESZ_ASTNODE); _dyncpy(g_ast, g_ast_cap * ESZ_ASTNODE, nb);
     g_ast = nb; g_ast_cap = nc; }
 
 fn dyn_grow_syms(needed: int) {
     if needed < g_sym_cap { return; }
     nc : ., mut = g_sym_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := __builtin_alloc(nc * ESZ_SYMENTRY); _dyncpy(g_syms, g_sym_cap * ESZ_SYMENTRY, nb);
+    nb := alloc(nc * ESZ_SYMENTRY); _dyncpy(g_syms, g_sym_cap * ESZ_SYMENTRY, nb);
     g_syms = nb; g_sym_cap = nc; }
 
 fn dyn_grow_types(needed: int) {
     if needed < g_type_cap { return; }
     nc : ., mut = g_type_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := __builtin_alloc(nc * 24); _dyncpy(g_types, g_type_cap * 24, nb);
+    nb := alloc(nc * 24); _dyncpy(g_types, g_type_cap * 24, nb);
     g_types = nb; g_type_cap = nc; }
 
 fn dyn_grow_funcs(needed: int) {
     if needed < g_func_cap { return; }
     nc : ., mut = g_func_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := __builtin_alloc(nc * ESZ_FUNCINFO); _dyncpy(g_funcs, g_func_cap * ESZ_FUNCINFO, nb);
+    nb := alloc(nc * ESZ_FUNCINFO); _dyncpy(g_funcs, g_func_cap * ESZ_FUNCINFO, nb);
     g_funcs = nb; g_func_cap = nc; }
 
 fn dyn_grow_structs(needed: int) {
     if needed < g_struct_cap { return; }
     nc : ., mut = g_struct_cap * 2; if nc < 32 { nc = 32; } if nc < needed { nc = needed + 32; }
-    nb := __builtin_alloc(nc * ESZ_STRUCTINFO); _dyncpy(g_structs, g_struct_cap * ESZ_STRUCTINFO, nb);
+    nb := alloc(nc * ESZ_STRUCTINFO); _dyncpy(g_structs, g_struct_cap * ESZ_STRUCTINFO, nb);
     g_structs = nb; g_struct_cap = nc; }
 
 fn dyn_grow_enums(needed: int) {
     if needed < g_enum_cap { return; }
     nc : ., mut = g_enum_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
-    nb := __builtin_alloc(nc * ESZ_ENUMINFO); _dyncpy(g_enums, g_enum_cap * ESZ_ENUMINFO, nb);
+    nb := alloc(nc * ESZ_ENUMINFO); _dyncpy(g_enums, g_enum_cap * ESZ_ENUMINFO, nb);
     g_enums = nb; g_enum_cap = nc; }
 
 fn dyn_grow_ifaces(needed: int) {
     if needed < g_iface_cap { return; }
     nc : ., mut = g_iface_cap * 2; if nc < 4 { nc = 4; } if nc < needed { nc = needed + 4; }
-    nb := __builtin_alloc(nc * ESZ_IFACEINFO); _dyncpy(g_ifaces, g_iface_cap * ESZ_IFACEINFO, nb);
+    nb := alloc(nc * ESZ_IFACEINFO); _dyncpy(g_ifaces, g_iface_cap * ESZ_IFACEINFO, nb);
     g_ifaces = nb; g_iface_cap = nc; }
 
 fn dyn_grow_ir_vars(needed: int) {
     if needed < g_ir_var_cap { return; }
     nc : ., mut = g_ir_var_cap * 2; if nc < 128 { nc = 128; } if nc < needed { nc = needed + 128; }
-    nb := __builtin_alloc(nc * ESZ_IRVAR); _dyncpy(g_ir_vars, g_ir_var_cap * ESZ_IRVAR, nb);
+    nb := alloc(nc * ESZ_IRVAR); _dyncpy(g_ir_vars, g_ir_var_cap * ESZ_IRVAR, nb);
     g_ir_vars = nb; g_ir_var_cap = nc; }
 
 fn dyn_grow_ir_instrs(needed: int) {
     if needed < g_ir_instr_cap { return; }
     nc : ., mut = g_ir_instr_cap * 2; if nc < 128 { nc = 128; } if nc < needed { nc = needed + 128; }
-    nb := __builtin_alloc(nc * ESZ_IRINSTR); _dyncpy(g_ir_instrs, g_ir_instr_cap * ESZ_IRINSTR, nb);
+    nb := alloc(nc * ESZ_IRINSTR); _dyncpy(g_ir_instrs, g_ir_instr_cap * ESZ_IRINSTR, nb);
     g_ir_instrs = nb; g_ir_instr_cap = nc; }
 
 fn dyn_grow_ir_locals(needed: int) {
     if needed < g_ir_local_cap { return; }
     nc : ., mut = g_ir_local_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := __builtin_alloc(nc * 16); _dyncpy(g_ir_locals, g_ir_local_cap * 16, nb);
+    nb := alloc(nc * 16); _dyncpy(g_ir_locals, g_ir_local_cap * 16, nb);
     g_ir_locals = nb; g_ir_local_cap = nc; }
 
 fn dyn_grow_ir_globals(needed: int) {
     if needed < g_ir_global_cap { return; }
     nc : ., mut = g_ir_global_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
-    nb := __builtin_alloc(nc * 16); _dyncpy(g_ir_globals, g_ir_global_cap * 16, nb);
+    nb := alloc(nc * 16); _dyncpy(g_ir_globals, g_ir_global_cap * 16, nb);
     g_ir_globals = nb; g_ir_global_cap = nc; }
 
 fn dyn_grow_ir_str_consts(needed: int) {
     if needed < g_ir_str_const_cap { return; }
     nc : ., mut = g_ir_str_const_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_ir_str_consts, g_ir_str_const_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_ir_str_consts, g_ir_str_const_cap * 8, nb);
     g_ir_str_consts = nb; g_ir_str_const_cap = nc; }
 
 fn dyn_grow_errors(needed: int) {
     if needed < g_err_cap { return; }
     nc : ., mut = g_err_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_errors, g_err_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_errors, g_err_cap * 8, nb);
     g_errors = nb; g_err_cap = nc; }
 
 fn dyn_grow_block_stmts(needed: int) {
     if needed < g_block_stmt_cap { return; }
     nc : ., mut = g_block_stmt_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_block_stmts, g_block_stmt_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_block_stmts, g_block_stmt_cap * 8, nb);
     g_block_stmts = nb; g_block_stmt_cap = nc; }
 
 fn dyn_grow_ir_func_meta(needed: int) { if needed < g_ir_func_name_idx_cap { return; }
     if needed < g_ir_func_name_idx_cap { return; }
     nc : ., mut = g_ir_func_name_idx_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
     sz := nc * 8;
-    n1 := __builtin_alloc(sz); _dyncpy(g_ir_func_name_idx, g_ir_func_name_idx_cap*8, n1); g_ir_func_name_idx = n1; 
-    n2 := __builtin_alloc(sz); _dyncpy(g_ir_func_ret_type, g_ir_func_ret_type_cap*8, n2); g_ir_func_ret_type = n2;
-    n3 := __builtin_alloc(sz); _dyncpy(g_ir_func_instr_start, g_ir_func_instr_start_cap*8, n3); g_ir_func_instr_start = n3;
-    n4 := __builtin_alloc(sz); _dyncpy(g_ir_func_instr_count, g_ir_func_instr_count_cap*8, n4); g_ir_func_instr_count = n4;
-    n5 := __builtin_alloc(sz); _dyncpy(g_ir_func_var_start, g_ir_func_var_start_cap*8, n5); g_ir_func_var_start = n5;
-    n6 := __builtin_alloc(sz); _dyncpy(g_ir_func_var_count, g_ir_func_var_count_cap*8, n6); g_ir_func_var_count = n6;
-    n7 := __builtin_alloc(sz); _dyncpy(g_ir_func_param_count, g_ir_func_param_count_cap*8, n7); g_ir_func_param_count = n7;
+    n1 := alloc(sz); _dyncpy(g_ir_func_name_idx, g_ir_func_name_idx_cap*8, n1); g_ir_func_name_idx = n1; 
+    n2 := alloc(sz); _dyncpy(g_ir_func_ret_type, g_ir_func_ret_type_cap*8, n2); g_ir_func_ret_type = n2;
+    n3 := alloc(sz); _dyncpy(g_ir_func_instr_start, g_ir_func_instr_start_cap*8, n3); g_ir_func_instr_start = n3;
+    n4 := alloc(sz); _dyncpy(g_ir_func_instr_count, g_ir_func_instr_count_cap*8, n4); g_ir_func_instr_count = n4;
+    n5 := alloc(sz); _dyncpy(g_ir_func_var_start, g_ir_func_var_start_cap*8, n5); g_ir_func_var_start = n5;
+    n6 := alloc(sz); _dyncpy(g_ir_func_var_count, g_ir_func_var_count_cap*8, n6); g_ir_func_var_count = n6;
+    n7 := alloc(sz); _dyncpy(g_ir_func_param_count, g_ir_func_param_count_cap*8, n7); g_ir_func_param_count = n7;
     g_ir_func_name_idx_cap=nc; g_ir_func_ret_type_cap=nc; g_ir_func_instr_start_cap=nc;
     g_ir_func_instr_count_cap=nc; g_ir_func_var_start_cap=nc; g_ir_func_var_count_cap=nc; g_ir_func_param_count_cap=nc; }
 
@@ -326,126 +326,126 @@ fn ei_variant_type_count(n: int, vi: int) -> int { return r64(g_enums, n*ESZ_ENU
 fn dyn_grow_g_strs(needed: int) {
     if needed < g_str_cap { return; }
     nc : ., mut = g_str_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_strs, g_str_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_strs, g_str_cap * 8, nb);
     g_strs = nb; g_str_cap = nc; }
 
 fn str_intern(s: string) -> int {
     i : ., mut = 0;
     loop {
         if i >= g_str_count { break; }
-        if __builtin_str_eq(__builtin_load_str_ptr(g_strs, i * 8), s) != 0 { return i; }
+        if str_eq(load_str_ptr(g_strs, i * 8), s) != 0 { return i; }
         i = i + 1; }
     dyn_grow_g_strs(g_str_count + 1);
-    __builtin_store_str_ptr(g_strs, g_str_count * 8, s);
+    store_str_ptr(g_strs, g_str_count * 8, s);
     g_str_count = g_str_count + 1;
     return g_str_count - 1; }
 
-fn str_get(idx: int) -> string {
+fn istr_get(idx: int) -> string {
     if idx < 0 || idx >= g_str_count { return ""; }
-    return __builtin_load_str_ptr(g_strs, idx * 8); }
+    return load_str_ptr(g_strs, idx * 8); }
 
-fn str_len(idx: int) -> int {
+fn istr_len(idx: int) -> int {
     if idx < 0 || idx >= g_str_count { return 0; }
-    return __builtin_str_len(str_get(idx)); }
+    return str_len(istr_get(idx)); }
 
 fn str_load8(idx: int, ci: int) -> int {
     if idx < 0 || idx >= g_str_count { return 0; }
-    return __builtin_load8(str_get(idx), ci); }
+    return load8(istr_get(idx), ci); }
 
 fn dyn_grow_line_fileid(needed: int) {
     if needed < g_line_cap { return; }
     nc : ., mut = g_line_cap * 2; if nc < 128 { nc = 128; } if nc < needed { nc = needed + 128; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_line_fileid, g_line_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_line_fileid, g_line_cap * 8, nb);
     g_line_fileid = nb; g_line_cap = nc; }
 fn dyn_grow_segs(needed: int) {
     if needed < g_seg_cap { return; }
     nc : ., mut = g_seg_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
     sz := nc * 8;
-    n1 := __builtin_alloc(sz); _dyncpy(g_seg_starts, g_seg_cap * 8, n1); g_seg_starts = n1;
-    n2 := __builtin_alloc(sz); _dyncpy(g_seg_fileids, g_seg_cap * 8, n2); g_seg_fileids = n2;
+    n1 := alloc(sz); _dyncpy(g_seg_starts, g_seg_cap * 8, n1); g_seg_starts = n1;
+    n2 := alloc(sz); _dyncpy(g_seg_fileids, g_seg_cap * 8, n2); g_seg_fileids = n2;
     g_seg_cap = nc; }
 fn dyn_grow_gen_apply_data(needed: int) {
     if needed < g_gen_apply_data_cap { return; }
     nc : ., mut = g_gen_apply_data_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_gen_apply_data, g_gen_apply_data_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_gen_apply_data, g_gen_apply_data_cap * 8, nb);
     g_gen_apply_data = nb; g_gen_apply_data_cap = nc; }
 fn dyn_grow_df_nodes(needed: int) {
     if needed < g_df_node_cap { return; }
     nc : ., mut = g_df_node_cap * 2; if nc < 128 { nc = 128; } if nc < needed { nc = needed + 128; }
-    nb := __builtin_alloc(nc * ESZ_DFNODE); _dyncpy(g_df_nodes, g_df_node_cap * ESZ_DFNODE, nb);
+    nb := alloc(nc * ESZ_DFNODE); _dyncpy(g_df_nodes, g_df_node_cap * ESZ_DFNODE, nb);
     g_df_nodes = nb; g_df_node_cap = nc; }
 fn dyn_grow_df_edges(needed: int) {
     if needed < g_df_edge_cap { return; }
     nc : ., mut = g_df_edge_cap * 2; if nc < 128 { nc = 128; } if nc < needed { nc = needed + 128; }
-    nb := __builtin_alloc(nc * ESZ_DFEDGE); _dyncpy(g_df_edges, g_df_edge_cap * ESZ_DFEDGE, nb);
+    nb := alloc(nc * ESZ_DFEDGE); _dyncpy(g_df_edges, g_df_edge_cap * ESZ_DFEDGE, nb);
     g_df_edges = nb; g_df_edge_cap = nc; }
 fn dyn_grow_df_arrays(needed: int) {
     if needed < g_df_cap { return; }
     nc : ., mut = g_df_cap * 2; if nc < 128 { nc = 128; } if nc < needed { nc = needed + 128; }
     sz := nc * 8;
-    n1 := __builtin_alloc(sz); _dyncpy(g_df_var_producer, g_df_cap * 8, n1); g_df_var_producer = n1;
-    n2 := __builtin_alloc(sz); _dyncpy(g_df_func_node_start, g_df_cap * 8, n2); g_df_func_node_start = n2;
-    n3 := __builtin_alloc(sz); _dyncpy(g_df_func_node_count, g_df_cap * 8, n3); g_df_func_node_count = n3;
+    n1 := alloc(sz); _dyncpy(g_df_var_producer, g_df_cap * 8, n1); g_df_var_producer = n1;
+    n2 := alloc(sz); _dyncpy(g_df_func_node_start, g_df_cap * 8, n2); g_df_func_node_start = n2;
+    n3 := alloc(sz); _dyncpy(g_df_func_node_count, g_df_cap * 8, n3); g_df_func_node_count = n3;
     g_df_cap = nc; }
 
 fn dyn_grow_gen_map(needed: int) {
     if needed < g_gen_map_cap { return; }
     nc : ., mut = g_gen_map_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
     sz := nc * 8;
-    n1 := __builtin_alloc(sz); _dyncpy(g_gen_map_names, g_gen_map_cap*8, n1); g_gen_map_names = n1;
-    n2 := __builtin_alloc(sz); _dyncpy(g_gen_map_types, g_gen_map_cap*8, n2); g_gen_map_types = n2;
+    n1 := alloc(sz); _dyncpy(g_gen_map_names, g_gen_map_cap*8, n1); g_gen_map_names = n1;
+    n2 := alloc(sz); _dyncpy(g_gen_map_types, g_gen_map_cap*8, n2); g_gen_map_types = n2;
     g_gen_map_cap = nc; }
 fn dyn_grow_borrow_vars(needed: int) {
     if needed < g_borrow_cap { return; }
     nc : ., mut = g_borrow_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
     sz := nc * 8;
-    n1 := __builtin_alloc(sz); _dyncpy(g_borrow_vars, g_borrow_cap*8, n1); g_borrow_vars = n1;
-    n2 := __builtin_alloc(sz); _dyncpy(g_borrow_refs, g_borrow_cap*8, n2); g_borrow_refs = n2;
-    n3 := __builtin_alloc(sz); _dyncpy(g_borrow_muts, g_borrow_cap*8, n3); g_borrow_muts = n3;
+    n1 := alloc(sz); _dyncpy(g_borrow_vars, g_borrow_cap*8, n1); g_borrow_vars = n1;
+    n2 := alloc(sz); _dyncpy(g_borrow_refs, g_borrow_cap*8, n2); g_borrow_refs = n2;
+    n3 := alloc(sz); _dyncpy(g_borrow_muts, g_borrow_cap*8, n3); g_borrow_muts = n3;
     g_borrow_cap = nc; }
 fn dyn_grow_holder(needed: int) {
     if needed < g_holder_cap { return; }
     nc : ., mut = g_holder_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
     sz := nc * 8;
-    n1 := __builtin_alloc(sz); _dyncpy(g_holder_borrowers, g_holder_cap*8, n1); g_holder_borrowers = n1;
-    n2 := __builtin_alloc(sz); _dyncpy(g_holder_borrowed, g_holder_cap*8, n2); g_holder_borrowed = n2;
-    n3 := __builtin_alloc(sz); _dyncpy(g_holder_is_mut, g_holder_cap*8, n3); g_holder_is_mut = n3;
+    n1 := alloc(sz); _dyncpy(g_holder_borrowers, g_holder_cap*8, n1); g_holder_borrowers = n1;
+    n2 := alloc(sz); _dyncpy(g_holder_borrowed, g_holder_cap*8, n2); g_holder_borrowed = n2;
+    n3 := alloc(sz); _dyncpy(g_holder_is_mut, g_holder_cap*8, n3); g_holder_is_mut = n3;
     g_holder_cap = nc; }
 
 fn dyn_grow_global_lets(needed: int) {
     if needed < g_global_lets_cap { return; }
     nc : ., mut = g_global_lets_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_global_lets, g_global_lets_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_global_lets, g_global_lets_cap * 8, nb);
     g_global_lets = nb; g_global_lets_cap = nc; }
 fn dyn_grow_loop_stack(needed: int) {
     if needed < g_loop_stack_cap { return; }
     nc : ., mut = g_loop_stack_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := __builtin_alloc(nc * 24); _dyncpy(g_loop_stack, g_loop_stack_cap * 24, nb);
+    nb := alloc(nc * 24); _dyncpy(g_loop_stack, g_loop_stack_cap * 24, nb);
     g_loop_stack = nb; g_loop_stack_cap = nc; }
 fn dyn_grow_type_aliases(needed: int) {
     if needed < g_type_alias_cap { return; }
     nc : ., mut = g_type_alias_cap * 2; if nc < 32 { nc = 32; } if nc < needed { nc = needed + 32; }
-    nb := __builtin_alloc(nc * 16); _dyncpy(g_type_aliases, g_type_alias_cap * 16, nb);
+    nb := alloc(nc * 16); _dyncpy(g_type_aliases, g_type_alias_cap * 16, nb);
     g_type_aliases = nb; g_type_alias_cap = nc; }
 fn dyn_grow_scope_bounds(needed: int) {
     if needed < g_scope_bounds_cap { return; }
     nc : ., mut = g_scope_bounds_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_scope_bounds, g_scope_bounds_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_scope_bounds, g_scope_bounds_cap * 8, nb);
     g_scope_bounds = nb; g_scope_bounds_cap = nc; }
 fn dyn_grow_methods(needed: int) {
     if needed < g_method_cap { return; }
     nc : ., mut = g_method_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := __builtin_alloc(nc * 24); _dyncpy(g_methods, g_method_cap * 24, nb);
+    nb := alloc(nc * 24); _dyncpy(g_methods, g_method_cap * 24, nb);
     g_methods = nb; g_method_cap = nc; }
 fn dyn_grow_borrow_scope_markers(needed: int) {
     if needed < g_borrow_scope_markers_cap { return; }
     nc : ., mut = g_borrow_scope_markers_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_borrow_scope_markers, g_borrow_scope_markers_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_borrow_scope_markers, g_borrow_scope_markers_cap * 8, nb);
     g_borrow_scope_markers = nb; g_borrow_scope_markers_cap = nc; }
 
-fn str_eq(idx: int, lit: string) -> int {
+fn istr_eq(idx: int, lit: string) -> int {
     if idx < 0 || idx >= g_str_count { return 0; }
-    if __builtin_str_eq(str_get(idx), lit) != 0 { return 1; }
+    if str_eq(istr_get(idx), lit) != 0 { return 1; }
     return 0; }
 
 // ============================================================
@@ -455,89 +455,89 @@ fn str_eq(idx: int, lit: string) -> int {
 fn dyn_grow_x86_vars(needed: int) {
     if needed < g_x86_var_cap { return; }
     nc : ., mut = g_x86_var_cap * 2; if nc < 128 { nc = 128; } if nc < needed { nc = needed + 128; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_x86_vars, g_x86_var_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_x86_vars, g_x86_var_cap * 8, nb);
     g_x86_vars = nb; g_x86_var_cap = nc; }
 
 fn dyn_grow_x86_is_enum(needed: int) {
     if needed < g_x86_is_enum_cap { return; }
     nc : ., mut = g_x86_is_enum_cap * 2; if nc < 128 { nc = 128; } if nc < needed { nc = needed + 128; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_x86_is_enum, g_x86_is_enum_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_x86_is_enum, g_x86_is_enum_cap * 8, nb);
     g_x86_is_enum = nb; g_x86_is_enum_cap = nc; }
 
 fn dyn_grow_x86_is_global(needed: int) {
     if needed < g_x86_global_cap { return; }
     nc : ., mut = g_x86_global_cap * 2; if nc < 128 { nc = 128; } if nc < needed { nc = needed + 128; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_x86_is_global, g_x86_global_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_x86_is_global, g_x86_global_cap * 8, nb);
     g_x86_is_global = nb; g_x86_global_cap = nc; }
 
 fn dyn_grow_x86_global_off(needed: int) {
     if needed < g_x86_global_off_cap { return; }
     nc : ., mut = g_x86_global_off_cap * 2; if nc < 128 { nc = 128; } if nc < needed { nc = needed + 128; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_x86_global_off, g_x86_global_off_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_x86_global_off, g_x86_global_off_cap * 8, nb);
     g_x86_global_off = nb; g_x86_global_off_cap = nc; }
 
 fn dyn_grow_x86_str_offs(needed: int) {
     if needed < g_x86_str_cap { return; }
     nc : ., mut = g_x86_str_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_x86_str_offs, g_x86_str_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_x86_str_offs, g_x86_str_cap * 8, nb);
     g_x86_str_offs = nb; g_x86_str_cap = nc; }
 
 fn dyn_grow_x86_rip_patch(needed: int) {
     if needed < g_x86_rip_patch_cap { return; }
     nc : ., mut = g_x86_rip_patch_cap * 2; if nc < 128 { nc = 128; } if nc < needed { nc = needed + 128; }
-    nb1 := __builtin_alloc(nc * 8); _dyncpy(g_x86_rip_patch_pos, g_x86_rip_patch_cap * 8, nb1); g_x86_rip_patch_pos = nb1;
-    nb2 := __builtin_alloc(nc * 8); _dyncpy(g_x86_rip_patch_globals, g_x86_rip_patch_cap * 8, nb2); g_x86_rip_patch_globals = nb2;
+    nb1 := alloc(nc * 8); _dyncpy(g_x86_rip_patch_pos, g_x86_rip_patch_cap * 8, nb1); g_x86_rip_patch_pos = nb1;
+    nb2 := alloc(nc * 8); _dyncpy(g_x86_rip_patch_globals, g_x86_rip_patch_cap * 8, nb2); g_x86_rip_patch_globals = nb2;
     g_x86_rip_patch_cap = nc; }
 
 fn dyn_grow_x86_ext_rel(needed: int) {
     if needed < g_x86_ext_rel_cap { return; }
     nc : ., mut = g_x86_ext_rel_cap * 2; if nc < 32 { nc = 32; } if nc < needed { nc = needed + 32; }
     sz := nc * 8;
-    n1 := __builtin_alloc(sz); _dyncpy(g_x86_ext_rel_pos, g_x86_ext_rel_cap*8, n1); g_x86_ext_rel_pos = n1;
-    n2 := __builtin_alloc(sz); _dyncpy(g_x86_ext_rel_name, g_x86_ext_rel_cap*8, n2); g_x86_ext_rel_name = n2;
+    n1 := alloc(sz); _dyncpy(g_x86_ext_rel_pos, g_x86_ext_rel_cap*8, n1); g_x86_ext_rel_pos = n1;
+    n2 := alloc(sz); _dyncpy(g_x86_ext_rel_name, g_x86_ext_rel_cap*8, n2); g_x86_ext_rel_name = n2;
     g_x86_ext_rel_cap = nc; }
 
 fn dyn_grow_x86_func_offsets(needed: int) {
     if needed < g_x86_func_offsets_cap { return; }
     nc : ., mut = g_x86_func_offsets_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_x86_func_offsets, g_x86_func_offsets_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_x86_func_offsets, g_x86_func_offsets_cap * 8, nb);
     g_x86_func_offsets = nb; g_x86_func_offsets_cap = nc; }
 
 fn dyn_grow_x86_emit_vars(needed: int) {
     if needed < g_x86_emit_vars_cap { return; }
     nc : ., mut = g_x86_emit_vars_cap * 2; if nc < 128 { nc = 128; } if nc < needed { nc = needed + 128; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_x86_emit_vars, g_x86_emit_vars_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_x86_emit_vars, g_x86_emit_vars_cap * 8, nb);
     g_x86_emit_vars = nb; g_x86_emit_vars_cap = nc; }
 
 fn dyn_grow_x86_ret_patch(needed: int) {
     if needed < g_x86_ret_patch_cap { return; }
     nc : ., mut = g_x86_ret_patch_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_x86_ret_patch_pos, g_x86_ret_patch_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_x86_ret_patch_pos, g_x86_ret_patch_cap * 8, nb);
     g_x86_ret_patch_pos = nb; g_x86_ret_patch_cap = nc; }
 
 fn dyn_grow_x86_alloc_patch(needed: int) {
     if needed < g_x86_alloc_patch_cap { return; }
     nc : ., mut = g_x86_alloc_patch_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_x86_alloc_patch_pos, g_x86_alloc_patch_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_x86_alloc_patch_pos, g_x86_alloc_patch_cap * 8, nb);
     g_x86_alloc_patch_pos = nb; g_x86_alloc_patch_cap = nc; }
 
 fn dyn_grow_ir_local_scopes(needed: int) {
     if needed < g_ir_local_scopes_cap { return; }
     nc : ., mut = g_ir_local_scopes_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_ir_local_scopes, g_ir_local_scopes_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_ir_local_scopes, g_ir_local_scopes_cap * 8, nb);
     g_ir_local_scopes = nb; g_ir_local_scopes_cap = nc; }
 
 fn dyn_grow_ir_loop_stacks(needed: int) {
     if needed < g_ir_loop_stacks_cap { return; }
     nc : ., mut = g_ir_loop_stacks_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    n1 := __builtin_alloc(nc * 8); _dyncpy(g_ir_loop_header, g_ir_loop_stacks_cap * 8, n1); g_ir_loop_header = n1;
-    n2 := __builtin_alloc(nc * 8); _dyncpy(g_ir_loop_exit, g_ir_loop_stacks_cap * 8, n2); g_ir_loop_exit = n2;
+    n1 := alloc(nc * 8); _dyncpy(g_ir_loop_header, g_ir_loop_stacks_cap * 8, n1); g_ir_loop_header = n1;
+    n2 := alloc(nc * 8); _dyncpy(g_ir_loop_exit, g_ir_loop_stacks_cap * 8, n2); g_ir_loop_exit = n2;
     g_ir_loop_stacks_cap = nc; }
 
 fn dyn_grow_label_poses(needed: int) {
     if needed < g_label_cap { return; }
     nc : ., mut = g_label_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_label_poses, g_label_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_label_poses, g_label_cap * 8, nb);
     g_label_poses = nb; g_label_cap = nc; }
 
 // ============================================================
@@ -548,21 +548,21 @@ fn dyn_grow_label_poses(needed: int) {
 fn dyn_grow_diags(needed: int) {
     if needed < g_diag_cap { return; }
     nc : ., mut = g_diag_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
-    nb := __builtin_alloc(nc * 32); _dyncpy(g_diags, g_diag_cap * 32, nb);
+    nb := alloc(nc * 32); _dyncpy(g_diags, g_diag_cap * 32, nb);
     g_diags = nb; g_diag_cap = nc; }
 
 // FileEntry: fileid_ni(8) + path(8) = 16 bytes
 fn dyn_grow_files(needed: int) {
     if needed < g_file_cap { return; }
     nc : ., mut = g_file_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
-    nb := __builtin_alloc(nc * 16); _dyncpy(g_files, g_file_cap * 16, nb);
+    nb := alloc(nc * 16); _dyncpy(g_files, g_file_cap * 16, nb);
     g_files = nb; g_file_cap = nc; }
 
 // ModEntry: alias_ni(8) + fileid_ni(8) + path(8) = 24 bytes
 fn dyn_grow_mods(needed: int) {
     if needed < g_mod_cap { return; }
     nc : ., mut = g_mod_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
-    nb := __builtin_alloc(nc * 24); _dyncpy(g_mods, g_mod_cap * 24, nb);
+    nb := alloc(nc * 24); _dyncpy(g_mods, g_mod_cap * 24, nb);
     g_mods = nb; g_mod_cap = nc; }
 
 // g_mod_func_fileids/names/tis: 3 parallel int arrays, 8 bytes per element each
@@ -570,28 +570,28 @@ fn dyn_grow_mod_funcs(needed: int) {
     if needed < g_mod_func_cap { return; }
     nc : ., mut = g_mod_func_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
     sz := nc * 8;
-    n1 := __builtin_alloc(sz); _dyncpy(g_mod_func_fileids, g_mod_func_cap * 8, n1); g_mod_func_fileids = n1;
-    n2 := __builtin_alloc(sz); _dyncpy(g_mod_func_names, g_mod_func_cap * 8, n2); g_mod_func_names = n2;
-    n3 := __builtin_alloc(sz); _dyncpy(g_mod_func_tis, g_mod_func_cap * 8, n3); g_mod_func_tis = n3;
+    n1 := alloc(sz); _dyncpy(g_mod_func_fileids, g_mod_func_cap * 8, n1); g_mod_func_fileids = n1;
+    n2 := alloc(sz); _dyncpy(g_mod_func_names, g_mod_func_cap * 8, n2); g_mod_func_names = n2;
+    n3 := alloc(sz); _dyncpy(g_mod_func_tis, g_mod_func_cap * 8, n3); g_mod_func_tis = n3;
     g_mod_func_cap = nc; }
 
 // g_mod_path_names: int array, 8 bytes per element
 fn dyn_grow_mod_paths(needed: int) {
     if needed < g_mod_path_cap { return; }
     nc : ., mut = g_mod_path_cap * 2; if nc < 32 { nc = 32; } if nc < needed { nc = needed + 32; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_mod_path_names, g_mod_path_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_mod_path_names, g_mod_path_cap * 8, nb);
     g_mod_path_names = nb; g_mod_path_cap = nc; }
 
 // impl-for: pairs of (interface_ni, type_ni), 16 bytes per pair
 fn dyn_grow_impl_for(needed: int) {
     if needed < g_impl_for_cap { return; }
     nc : ., mut = g_impl_for_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
-    nb := __builtin_alloc(nc * 16); _dyncpy(g_impl_for, g_impl_for_cap * 16, nb);
+    nb := alloc(nc * 16); _dyncpy(g_impl_for, g_impl_for_cap * 16, nb);
     g_impl_for = nb; g_impl_for_cap = nc; }
 
 // Generic constraints: for each (func_idx * MAX_GENERICS + param_idx), stores iface_ni or -1
 fn dyn_grow_generic_constr(needed: int) {
     if needed < g_generic_constr_cap { return; }
     nc : ., mut = g_generic_constr_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_generic_constr, g_generic_constr_cap * 8, nb);
+    nb := alloc(nc * 8); _dyncpy(g_generic_constr, g_generic_constr_cap * 8, nb);
     g_generic_constr = nb; g_generic_constr_cap = nc; }

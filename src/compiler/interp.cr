@@ -12,7 +12,7 @@ fn ir_interpret() -> int {
     loop {
         if fi >= g_ir_func_count { break; }
         ni := r64(g_ir_func_name_idx, fi * 8);
-        if __builtin_str_eq(str_get(ni), "main") != 0 { main_idx = fi; break; }
+        if str_eq(get_char(ni), "main") != 0 { main_idx = fi; break; }
         fi = fi + 1;
     }
     if main_idx < 0 { return -1; }
@@ -24,7 +24,7 @@ fn ir_interpret() -> int {
     // Initialize value store (size = node_count + padding for destinations)
     need := node_count + 64;
     if g_ir_vals_cap < need {
-        g_ir_vals = __builtin_alloc(need * 8);
+        g_ir_vals = alloc(need * 8);
         g_ir_vals_cap = need;
     }
     vi : ., mut = 0;
@@ -113,49 +113,49 @@ fn ir_interpret() -> int {
 
         if op == 4 {  // IR_CALL
             fn_ni := s3;
-            fn_name := str_get(fn_ni);
-            if __builtin_str_eq(fn_name, "__builtin_print") != 0 ||
-               __builtin_str_eq(fn_name, "print") != 0 {
-                if s2 >= 1 { str_idx := r64(g_ir_vals, s1 * 8); sval := str_get(str_idx); __builtin_print(sval); }
+            fn_name := get_char(fn_ni);
+            if str_eq(fn_name, "print") != 0 ||
+               str_eq(fn_name, "print") != 0 {
+                if s2 >= 1 { str_idx := r64(g_ir_vals, s1 * 8); sval := get_char(str_idx); print(sval); }
             }
-            if __builtin_str_eq(fn_name, "__builtin_println") != 0 ||
-               __builtin_str_eq(fn_name, "println") != 0 {
-                if s2 >= 1 { str_idx := r64(g_ir_vals, s1 * 8); sval := str_get(str_idx); __builtin_println(sval); }
+            if str_eq(fn_name, "println") != 0 ||
+               str_eq(fn_name, "println") != 0 {
+                if s2 >= 1 { str_idx := r64(g_ir_vals, s1 * 8); sval := get_char(str_idx); println(sval); }
             }
-            if __builtin_str_eq(fn_name, "__builtin_print_int") != 0 ||
-               __builtin_str_eq(fn_name, "print_int") != 0 {
-                if s2 >= 1 { __builtin_print(__builtin_int_to_str(r64(g_ir_vals, s1 * 8))); }
+            if str_eq(fn_name, "print_int") != 0 ||
+               str_eq(fn_name, "print_int") != 0 {
+                if s2 >= 1 { print(int_str(r64(g_ir_vals, s1 * 8))); }
             }
-            if __builtin_str_eq(fn_name, "__builtin_println_int") != 0 ||
-               __builtin_str_eq(fn_name, "println_int") != 0 {
-                if s2 >= 1 { __builtin_println(__builtin_int_to_str(r64(g_ir_vals, s1 * 8))); }
+            if str_eq(fn_name, "println_int") != 0 ||
+               str_eq(fn_name, "println_int") != 0 {
+                if s2 >= 1 { println(int_str(r64(g_ir_vals, s1 * 8))); }
             }
-            // __builtin_syscall3 — 解释器模式下返回 0（字符串常量在值存储中是指针还是索引不明确）
-            if __builtin_str_eq(fn_name, "__builtin_syscall3") != 0 {
+            // syscall3 — 解释器模式下返回 0（字符串常量在值存储中是指针还是索引不明确）
+            if str_eq(fn_name, "syscall3") != 0 {
                 if d >= 0 { w64(g_ir_vals, d * 8, 0); }
             }
-            if __builtin_str_eq(fn_name, "__builtin_load_str_ptr") != 0 {
+            if str_eq(fn_name, "load_str_ptr") != 0 {
                 // Load string pointer from byte buffer at given offset
                 if d >= 0 && s2 >= 2 {
                     b := r64(g_ir_vals, s1 * 8); p := r64(g_ir_vals, s1 + 1 * 8);
-                    lo := __builtin_load8(b, p) + __builtin_load8(b, p+1)*256 +
-                          __builtin_load8(b, p+2)*65536 + __builtin_load8(b, p+3)*16777216;
-                    hi := __builtin_load8(b, p+4) + __builtin_load8(b, p+5)*256 +
-                          __builtin_load8(b, p+6)*65536 + __builtin_load8(b, p+7)*16777216;
+                    lo := load8(b, p) + load8(b, p+1)*256 +
+                          load8(b, p+2)*65536 + load8(b, p+3)*16777216;
+                    hi := load8(b, p+4) + load8(b, p+5)*256 +
+                          load8(b, p+6)*65536 + load8(b, p+7)*16777216;
                     if hi < 0 { hi = hi + 4294967296; }
                     w64(g_ir_vals, d * 8, lo + hi * 4294967296);
                 }
             }
-            if __builtin_str_eq(fn_name, "__builtin_store_str_ptr") != 0 {
+            if str_eq(fn_name, "store_str_ptr") != 0 {
                 // Store string pointer (as 8 bytes) into byte buffer at given offset
                 if s2 >= 3 {
                     b := r64(g_ir_vals, s1 * 8); p := r64(g_ir_vals, s1 + 1 * 8); v := r64(g_ir_vals, s1 + 2 * 8);
                     lo : ., mut = v % 4294967296; hi : ., mut = v / 4294967296;
                     if v < 0 { lo = v; hi = -1; }
-                    __builtin_store8(b, p, lo%256);     __builtin_store8(b, p+1, (lo/256)%256);
-                    __builtin_store8(b, p+2, (lo/65536)%256); __builtin_store8(b, p+3, (lo/16777216)%256);
-                    __builtin_store8(b, p+4, hi%256);   __builtin_store8(b, p+5, (hi/256)%256);
-                    __builtin_store8(b, p+6, (hi/65536)%256); __builtin_store8(b, p+7, (hi/16777216)%256);
+                    store8(b, p, lo%256);     store8(b, p+1, (lo/256)%256);
+                    store8(b, p+2, (lo/65536)%256); store8(b, p+3, (lo/16777216)%256);
+                    store8(b, p+4, hi%256);   store8(b, p+5, (hi/256)%256);
+                    store8(b, p+6, (hi/65536)%256); store8(b, p+7, (hi/16777216)%256);
                 }
                 if d >= 0 { w64(g_ir_vals, d * 8, 0); }
             }

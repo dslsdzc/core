@@ -15,10 +15,10 @@ fn add_error(msg: string) {
 }
 
 fn cur_char() -> string {
-    if g_pos >= __builtin_str_len(g_source) {
+    if g_pos >= str_len(g_source) {
         return "\0";
     }
-    return __builtin_str_get(g_source, g_pos);
+    return get_char(g_source, g_pos);
 }
 
 fn advance() {
@@ -33,10 +33,10 @@ fn advance() {
 }
 
 fn peek() -> string {
-    if g_pos + 1 >= __builtin_str_len(g_source) {
+    if g_pos + 1 >= str_len(g_source) {
         return "\0";
     }
-    return __builtin_str_get(g_source, g_pos + 1);
+    return get_char(g_source, g_pos + 1);
 }
 
 fn skip_whitespace() {
@@ -144,14 +144,14 @@ fn tokenize() {
     skip_whitespace();
 
     loop {
-        if g_pos >= __builtin_str_len(g_source) { break; }
+        if g_pos >= str_len(g_source) { break; }
         c := cur_char();
 
         // Single-line comment //
         if c == "/" && peek() == "/" {
             loop {
                 advance();
-                if g_pos >= __builtin_str_len(g_source) { break; }
+                if g_pos >= str_len(g_source) { break; }
                 if cur_char() == "\n" {
                     advance();
                     break;
@@ -165,7 +165,7 @@ fn tokenize() {
         if c == "/" && peek() == "*" {
             advance(); advance();
             loop {
-                if g_pos >= __builtin_str_len(g_source) { break; }
+                if g_pos >= str_len(g_source) { break; }
                 if cur_char() == "*" && peek() == "/" {
                     advance(); advance();
                     break;
@@ -187,7 +187,7 @@ fn tokenize() {
                 c2 := cur_char();
                 if is_ident_char(c2) { advance(); } else { break; }
             }
-            ident := __builtin_str_sub(g_source, start, g_pos - start);
+            ident := str_sub(g_source, start, g_pos - start);
             kind := lookup_keyword(ident);
             add_token_str(kind, ident);
             skip_whitespace();
@@ -236,17 +236,17 @@ fn tokenize() {
                 else if suffix == "f32" { kind = T_FLOAT_F32; }
                 else if suffix == "f64" { kind = T_FLOAT_F64; }
             }
-            num_str := __builtin_str_sub(g_source, start, g_pos - start - __builtin_str_len(suffix));
+            num_str := str_sub(g_source, start, g_pos - start - str_len(suffix));
             // Strip _ separators before conversion
             clean : ., mut = "";
             ni : ., mut = 0;
             loop {
-                if ni >= __builtin_str_len(num_str) { break; }
-                nc := __builtin_str_get(num_str, ni);
+                if ni >= str_len(num_str) { break; }
+                nc := get_char(num_str, ni);
                 if nc != "_" { clean = clean + nc; }
                 ni = ni + 1;
             }
-            val := __builtin_str_to_int(clean);
+            val := str_int(clean);
             add_token_int(kind, val);
             skip_whitespace();
             continue;
@@ -257,11 +257,11 @@ fn tokenize() {
             advance();
             str_val : ., mut = "";
             loop {
-                if g_pos >= __builtin_str_len(g_source) { break; }
+                if g_pos >= str_len(g_source) { break; }
                 if cur_char() == "\"" { break; }
                 if cur_char() == "\\" {
                     advance();
-                    if g_pos < __builtin_str_len(g_source) {
+                    if g_pos < str_len(g_source) {
                         esc := cur_char();
                         if esc == "n" { str_val = str_val + "\n"; }
                         else if esc == "t" { str_val = str_val + "\t"; }

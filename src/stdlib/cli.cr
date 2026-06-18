@@ -47,15 +47,15 @@ g_cli_args : string, mut;             g_cli_arg_count : int, mut;    g_cli_arg_c
 fn dyn_grow_cli_cmds(needed: int) {
     if needed < g_cli_cmd_cap { return; }
     nc : ., mut = g_cli_cmd_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
-    nb := __builtin_alloc(nc * 16); _dyncpy(g_cli_cmds, g_cli_cmd_cap * 16, nb); g_cli_cmds = nb; g_cli_cmd_cap = nc; }
+    nb := alloc(nc * 16); _dyncpy(g_cli_cmds, g_cli_cmd_cap * 16, nb); g_cli_cmds = nb; g_cli_cmd_cap = nc; }
 fn dyn_grow_cli_flags(needed: int) {
     if needed < g_cli_flag_cap { return; }
     nc : ., mut = g_cli_flag_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
-    nb := __builtin_alloc(nc * 48); _dyncpy(g_cli_flags, g_cli_flag_cap * 48, nb); g_cli_flags = nb; g_cli_flag_cap = nc; }
+    nb := alloc(nc * 48); _dyncpy(g_cli_flags, g_cli_flag_cap * 48, nb); g_cli_flags = nb; g_cli_flag_cap = nc; }
 fn dyn_grow_cli_args(needed: int) {
     if needed < g_cli_arg_cap { return; }
     nc : ., mut = g_cli_arg_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
-    nb := __builtin_alloc(nc * 8); _dyncpy(g_cli_args, g_cli_arg_cap * 8, nb); g_cli_args = nb; g_cli_arg_cap = nc; }
+    nb := alloc(nc * 8); _dyncpy(g_cli_args, g_cli_arg_cap * 8, nb); g_cli_args = nb; g_cli_arg_cap = nc; }
 g_cli_matched_cmd : string, mut;
 
 // --- Init ---
@@ -108,56 +108,56 @@ fn _cli_find_flag(name: string) -> int {
         if i >= g_cli_flag_count { break; }
         ln := r64(g_cli_flags, i * 48);
         sn := r64(g_cli_flags, i * 48 + 8);
-        if __builtin_str_len(ln) > 0 && __builtin_str_eq(ln, name) != 0 { return i; }
-        if __builtin_str_len(sn) > 0 && __builtin_str_eq(sn, name) != 0 { return i; }
+        if str_len(ln) > 0 && str_eq(ln, name) != 0 { return i; }
+        if str_len(sn) > 0 && str_eq(sn, name) != 0 { return i; }
         i = i + 1;
     }
     return -1;
 }
 
 fn _cli_is_flag(arg: string) -> int {
-    slen := __builtin_str_len(arg);
+    slen := str_len(arg);
     if slen < 2 { return 0; }
-    c0 := __builtin_str_get(arg, 0);
-    if __builtin_str_eq(c0, "-") != 0 { return 1; }
+    c0 := get_char(arg, 0);
+    if str_eq(c0, "-") != 0 { return 1; }
     return 0;
 }
 
 fn _cli_strip_dashes(arg: string) -> string {
-    slen := __builtin_str_len(arg);
+    slen := str_len(arg);
     if slen == 0 { return ""; }
     start : ., mut = 0;
-    if __builtin_str_get(arg, 0) == "-" {
+    if get_char(arg, 0) == "-" {
         start = 1;
-        if slen > 1 && __builtin_str_get(arg, 1) == "-" {
+        if slen > 1 && get_char(arg, 1) == "-" {
             start = 2;
         }
     }
-    return __builtin_str_sub(arg, start, slen - start);
+    return str_sub(arg, start, slen - start);
 }
 
 // --- Parse ---
 
 fn cli_parse() -> int {
-    argc := __builtin_get_arg(0);
+    argc := get_arg(0);
     argc_int : ., mut = 0;
     // Count args by scanning until we get empty string
     loop {
-        a := __builtin_get_arg(argc_int);
-        if __builtin_str_len(a) == 0 { break; }
+        a := get_arg(argc_int);
+        if str_len(a) == 0 { break; }
         argc_int = argc_int + 1;
     }
     if argc_int < 2 { return 0; }  // no subcommand
 
     // Determine subcommand from argv[1]
-    first := __builtin_get_arg(1);
+    first := get_arg(1);
     if _cli_is_flag(first) == 0 && g_cli_cmd_count > 0 {
         // First non-flag arg — check if it's a valid subcommand
         ci : ., mut = 0;
         found_cmd : ., mut = 0;
         loop {
             if ci >= g_cli_cmd_count { break; }
-            if __builtin_str_eq(r64(g_cli_cmds, ci * 16), first) != 0 {
+            if str_eq(r64(g_cli_cmds, ci * 16), first) != 0 {
                 found_cmd = 1;
                 break;
             }
@@ -175,10 +175,10 @@ fn cli_parse() -> int {
 
     // Parse remaining args (after command name)
     ai : ., mut = 2;  // start after prog + cmd
-    if __builtin_str_len(g_cli_matched_cmd) == 0 {
+    if str_len(g_cli_matched_cmd) == 0 {
         // No command, start from argv[1]
         // But also handle --help
-        if __builtin_str_eq(first, "--help") != 0 || __builtin_str_eq(first, "-h") != 0 {
+        if str_eq(first, "--help") != 0 || str_eq(first, "-h") != 0 {
             cli_help();
             return -1;
         }
@@ -187,11 +187,11 @@ fn cli_parse() -> int {
 
     loop {
         if ai >= argc_int { break; }
-        arg := __builtin_get_arg(ai);
-        if __builtin_str_len(arg) == 0 { break; }
+        arg := get_arg(ai);
+        if str_len(arg) == 0 { break; }
 
         // --help or -h anywhere
-        if __builtin_str_eq(arg, "--help") != 0 || __builtin_str_eq(arg, "-h") != 0 {
+        if str_eq(arg, "--help") != 0 || str_eq(arg, "-h") != 0 {
             cli_help();
             return -1;
         }
@@ -200,8 +200,8 @@ fn cli_parse() -> int {
             name := _cli_strip_dashes(arg);
             fi := _cli_find_flag(name);
             if fi < 0 {
-                __builtin_print("unknown flag: ");
-                __builtin_println(arg);
+                print("unknown flag: ");
+                println(arg);
                 cli_help();
                 return -1;
             }
@@ -211,12 +211,12 @@ fn cli_parse() -> int {
             } else {
                 ai = ai + 1;
                 if ai >= argc_int {
-                    __builtin_print("flag ");
-                    __builtin_print(arg);
-                    __builtin_println(" requires a value");
+                    print("flag ");
+                    print(arg);
+                    println(" requires a value");
                     return -1;
                 }
-                val := __builtin_get_arg(ai);
+                val := get_arg(ai);
                 w64(g_cli_flags, fi * 48 + 24, val);      // value
                 w64(g_cli_flags, fi * 48 + 32, 1);         // has_value
             }
@@ -239,7 +239,7 @@ fn cli_cmd_name() -> string {
 }
 
 fn cli_eq(cmd: string, expected: string) -> int {
-    return __builtin_str_eq(cmd, expected);
+    return str_eq(cmd, expected);
 }
 
 fn cli_get(name: string) -> string {
@@ -273,95 +273,95 @@ fn cli_arg_count() -> int {
 
 fn cli_help() {
     // usage: prog [-h] {cmd1,cmd2,...} [options]
-    __builtin_print("usage: ");
-    __builtin_print(g_cli_prog);
-    __builtin_print(" [-h]");
+    print("usage: ");
+    print(g_cli_prog);
+    print(" [-h]");
     if g_cli_cmd_count > 0 {
-        __builtin_print(" {");
+        print(" {");
         ci : ., mut = 0;
         first : ., mut = 1;
         loop {
             if ci >= g_cli_cmd_count { break; }
-            if first == 0 { __builtin_print(","); }
-            __builtin_print(r64(g_cli_cmds, ci * 16));
+            if first == 0 { print(","); }
+            print(r64(g_cli_cmds, ci * 16));
             first = 0;
             ci = ci + 1;
         }
-        __builtin_print("}");
+        print("}");
     }
-    __builtin_println(" [options]");
-    __builtin_println("");
+    println(" [options]");
+    println("");
 
-    if __builtin_str_len(g_cli_desc) > 0 {
-        __builtin_println(g_cli_desc);
-        __builtin_println("");
+    if str_len(g_cli_desc) > 0 {
+        println(g_cli_desc);
+        println("");
     }
 
     // Positional arguments (commands)
     if g_cli_cmd_count > 0 {
-        __builtin_println("positional arguments:");
-        __builtin_print("  {");
+        println("positional arguments:");
+        print("  {");
         ci : ., mut = 0;
         first : ., mut = 1;
         loop {
             if ci >= g_cli_cmd_count { break; }
-            if first == 0 { __builtin_print(","); }
-            __builtin_print(r64(g_cli_cmds, ci * 16));
+            if first == 0 { print(","); }
+            print(r64(g_cli_cmds, ci * 16));
             first = 0;
             ci = ci + 1;
         }
-        __builtin_println("}");
+        println("}");
         ci = 0;
         loop {
             if ci >= g_cli_cmd_count { break; }
             cmd_name_ni := r64(g_cli_cmds, ci * 16);
             cmd_desc_ni := r64(g_cli_cmds, ci * 16 + 8);
-            __builtin_print("    ");
-            __builtin_print(cmd_name_ni);
-            pad := __builtin_str_len(cmd_name_ni);
+            print("    ");
+            print(cmd_name_ni);
+            pad := str_len(cmd_name_ni);
             loop {
                 if pad >= 12 { break; }
-                __builtin_print(" ");
+                print(" ");
                 pad = pad + 1;
             }
-            __builtin_println(cmd_desc_ni);
+            println(cmd_desc_ni);
             ci = ci + 1;
         }
-        __builtin_println("");
+        println("");
     }
 
     // Flags / options
-    __builtin_println("options:");
+    println("options:");
     // Built-in -h, --help
-    __builtin_println("  -h, --help            show this help message and exit");
+    println("  -h, --help            show this help message and exit");
     fi : ., mut = 0;
     loop {
         if fi >= g_cli_flag_count { break; }
         f_short_ni := r64(g_cli_flags, fi * 48 + 8);
         f_long_ni := r64(g_cli_flags, fi * 48);
         f_desc_ni := r64(g_cli_flags, fi * 48 + 16);
-        __builtin_print("  ");
-        if __builtin_str_len(f_short_ni) > 0 {
-            __builtin_print("-");
-            __builtin_print(f_short_ni);
-            __builtin_print(", ");
+        print("  ");
+        if str_len(f_short_ni) > 0 {
+            print("-");
+            print(f_short_ni);
+            print(", ");
         } else {
-            __builtin_print("    ");
+            print("    ");
         }
-        __builtin_print("--");
-        __builtin_print(f_long_ni);
+        print("--");
+        print(f_long_ni);
         // Pad to 24 chars total (prefix = "  " + short/"    " + "--")
         total : ., mut = 8;
-        if __builtin_str_len(f_short_ni) > 0 {
+        if str_len(f_short_ni) > 0 {
             total = 8;  // "  " + "-X, " + "--" = 2+4+2 = 8
         }
-        total = total + __builtin_str_len(f_long_ni);
+        total = total + str_len(f_long_ni);
         loop {
             if total >= 24 { break; }
-            __builtin_print(" ");
+            print(" ");
             total = total + 1;
         }
-        __builtin_println(f_desc_ni);
+        println(f_desc_ni);
         fi = fi + 1;
     }
 }

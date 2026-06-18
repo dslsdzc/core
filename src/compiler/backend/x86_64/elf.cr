@@ -19,7 +19,7 @@ fn w8_signed(buf: string, pos: int, val: int) {
     w8(buf, pos+2, (uv/65536) % 256); w8(buf, pos+3, (uv/16777216) % 256);
 }
 
-// Emit __builtin_alloc bump allocator function body
+// Emit alloc bump allocator function body
 // Returns bytes written (always 65)
 fn emit_builtin_alloc_body(buf: string, pos: int, bss_va: int) -> int {
     cp := 0;
@@ -85,7 +85,7 @@ g_elf_buf : string, mut;
 
 // ── ELF header writer (x86-64) ──
 fn elf2_hdr(buf: string, total_sz: int) {
-    i := 0; loop { if i >= 176 { break; } __builtin_store8(buf, i, 0); i = i + 1; }
+    i := 0; loop { if i >= 176 { break; } store8(buf, i, 0); i = i + 1; }
     // e_ident
     w8(buf, 0, 127); w8(buf, 1, 69); w8(buf, 2, 76); w8(buf, 3, 70);  // \x7fELF
     w8(buf, 4, 2); w8(buf, 5, 1); w8(buf, 6, 1);  // 64-bit, LE, v1
@@ -149,8 +149,8 @@ fn x86_64_elf_generate(buf: string) -> int {
         total_code = total_code + 1 + 1;
     fi = fi + 1; }
 
-    // __builtin_alloc: bump allocator for heap allocation in ELF output
-    alloc_ni := str_intern("__builtin_alloc");
+    // alloc: bump allocator for heap allocation in ELF output
+    alloc_ni := str_intern("alloc");
     g_x86_func_offsets[g_x86_func_off_count * 2] = alloc_ni;
     g_x86_func_offsets[g_x86_func_off_count * 2 + 1] = total_code;
     g_x86_func_off_count = g_x86_func_off_count + 1;
@@ -234,7 +234,7 @@ fn x86_64_elf_generate(buf: string) -> int {
     w8(buf, cp, 93); cp = cp + 1;
     w8(buf, cp, 195); cp = cp + 1;
 
-    // ── __builtin_alloc (bump allocator) ──
+    // ── alloc (bump allocator) ──
     // Compute BSS VA for heap_ptr placement
     rodata_sz := g2_rodata_sz();
     final_est := cp + 65 + rodata_sz;
@@ -244,9 +244,9 @@ fn x86_64_elf_generate(buf: string) -> int {
     alloc_start := cp;
     cp = cp + alloc_sz;
 
-    // Patch all IR_ALLOC_STRUCT/ARRAY/MAKE_ENUM call sites to point to __builtin_alloc
+    // Patch all IR_ALLOC_STRUCT/ARRAY/MAKE_ENUM call sites to point to alloc
     // alloc_patch_pos entries are buffer positions of the 5-byte call instruction
-    // __builtin_alloc offset = alloc_start - 176 (relative to code section start)
+    // alloc offset = alloc_start - 176 (relative to code section start)
     alloc_code_off := alloc_start - 176;
     api := 0;
     loop { if api >= g_x86_alloc_patch_count { break; }
@@ -258,9 +258,9 @@ fn x86_64_elf_generate(buf: string) -> int {
 
     // ── .rodata ──
     si = 0; loop { if si >= g_x86_str_count { break; }
-        s := str_get(g_x86_str_offs[si)];
-        sl := __builtin_str_len(s);
-        ci := 0; loop { if ci >= sl { break; } w8(buf, cp, __builtin_load8(s, ci)); ci = ci + 1; cp = cp + 1; }
+        s := get_char(g_x86_str_offs[si)];
+        sl := str_len(s);
+        ci := 0; loop { if ci >= sl { break; } w8(buf, cp, load8(s, ci)); ci = ci + 1; cp = cp + 1; }
         w8(buf, cp, 0); cp = cp + 1;
     si = si + 1; }
 

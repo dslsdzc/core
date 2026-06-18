@@ -41,11 +41,11 @@ _start:
     mov eax, 60
     syscall
 
-# __builtin_alloc(size: int) -> string (pointer)
+# alloc(size: int) -> string (pointer)
 # Bump allocator, 8-byte aligned, never frees.
-.globl __builtin_alloc
-.type __builtin_alloc, @function
-__builtin_alloc:
+.globl alloc
+.type alloc, @function
+alloc:
     add rdi, 7
     and rdi, -8
 
@@ -75,11 +75,11 @@ __builtin_alloc:
     ret
 
 
-# __builtin_get_arg(n: int) -> string
+# get_arg(n: int) -> string
 # Returns a copy of the nth command-line argument (0 = program name).
-.globl __builtin_get_arg
-.type __builtin_get_arg, @function
-__builtin_get_arg:
+.globl get_arg
+.type get_arg, @function
+get_arg:
     mov rcx, [rip + rt_argc]
     cmp rdi, rcx
     jge .Larg_oob
@@ -101,7 +101,7 @@ __builtin_get_arg:
     # Allocate len + 1
     lea rdi, [rcx + 1]
     push rcx                    # save len
-    call __builtin_alloc
+    call alloc
     pop rcx                     # rcx = len
     test rax, rax
     jz .Larg_alloc_fail
@@ -125,19 +125,19 @@ __builtin_get_arg:
     lea rax, [rip + empty_str]
     ret
 
-# __builtin_load_str_ptr(buf: string, pos: int) -> string
+# load_str_ptr(buf: string, pos: int) -> string
 # Load 8-byte string pointer from byte buffer at given offset.
-.globl __builtin_load_str_ptr
-.type __builtin_load_str_ptr, @function
-__builtin_load_str_ptr:
+.globl load_str_ptr
+.type load_str_ptr, @function
+load_str_ptr:
     mov rax, [rdi + rsi]
     ret
 
-# __builtin_store_str_ptr(buf: string, pos: int, val: string) -> int
+# store_str_ptr(buf: string, pos: int, val: string) -> int
 # Store 8-byte string pointer into byte buffer at given offset.
-.globl __builtin_store_str_ptr
-.type __builtin_store_str_ptr, @function
-__builtin_store_str_ptr:
+.globl store_str_ptr
+.type store_str_ptr, @function
+store_str_ptr:
     mov [rdi + rsi], rdx
     xor eax, eax
     ret

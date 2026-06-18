@@ -17,11 +17,11 @@
 // --- low-level helpers ---
 
 fn _skip_whitespace(content: string, pos: int) -> int {
-    slen := __builtin_str_len(content);
+    slen := str_len(content);
     p : ., mut = pos;
     loop {
         if p >= slen { break; }
-        ch := __builtin_str_get(content, p);
+        ch := get_char(content, p);
         if ch != " " && ch != "\t" { break; }
         p = p + 1;
     }
@@ -30,27 +30,27 @@ fn _skip_whitespace(content: string, pos: int) -> int {
 
 fn _is_at_line_start(content: string, pos: int) -> bool {
     if pos == 0 { return true; }
-    prev := __builtin_str_get(content, pos - 1);
+    prev := get_char(content, pos - 1);
     return prev == "\n";
 }
 
 fn _skip_to_next_line(content: string, pos: int) -> int {
-    slen := __builtin_str_len(content);
+    slen := str_len(content);
     p : ., mut = pos;
     loop {
         if p >= slen { break; }
-        if __builtin_str_get(content, p) == "\n" { return p + 1; }
+        if get_char(content, p) == "\n" { return p + 1; }
         p = p + 1;
     }
     return slen;
 }
 
 fn _next_line_start(content: string, pos: int) -> int {
-    slen := __builtin_str_len(content);
+    slen := str_len(content);
     i : ., mut = pos;
     loop {
         if i >= slen { return slen; }
-        if __builtin_str_get(content, i) == "\n" { return i + 1; }
+        if get_char(content, i) == "\n" { return i + 1; }
         i = i + 1;
     }
     return slen;
@@ -61,8 +61,8 @@ fn _next_line_start(content: string, pos: int) -> int {
 // Extract a string value: name = "value"
 // Returns empty string if not found.
 fn toml_get_str(content: string, key: string) -> string {
-    slen := __builtin_str_len(content);
-    klen := __builtin_str_len(key);
+    slen := str_len(content);
+    klen := str_len(key);
     pos : ., mut = 0;
     loop {
         if pos >= slen { return ""; }
@@ -75,22 +75,22 @@ fn toml_get_str(content: string, key: string) -> string {
         tlen : ., mut = 0;
         // Check if this line starts with the key
         if spos + klen <= slen {
-            sub := __builtin_str_sub(content, spos, klen);
-            if __builtin_str_eq(sub, key) != 0 {
+            sub := str_sub(content, spos, klen);
+            if str_eq(sub, key) != 0 {
                 // Skip key and look for =
                 eq_pos := spos + klen;
                 // Skip whitespace before =
                 eq_pos = _skip_whitespace(content, eq_pos);
-                if __builtin_str_get(content, eq_pos) == "=" {
+                if get_char(content, eq_pos) == "=" {
                     // Skip whitespace after =
                     val_pos := _skip_whitespace(content, eq_pos + 1);
-                    if __builtin_str_get(content, val_pos) == "\"" {
+                    if get_char(content, val_pos) == "\"" {
                         start := val_pos + 1;
                         end : ., mut = start;
                         loop {
                             if end >= slen { return ""; }
-                            if __builtin_str_get(content, end) == "\"" {
-                                return __builtin_str_sub(content, start, end - start);
+                            if get_char(content, end) == "\"" {
+                                return str_sub(content, start, end - start);
                             }
                             end = end + 1;
                         }
@@ -106,8 +106,8 @@ fn toml_get_str(content: string, key: string) -> string {
 // Extract an integer value: key = 123
 // Returns 0 if not found or invalid.
 fn toml_get_int(content: string, key: string) -> int {
-    slen := __builtin_str_len(content);
-    klen := __builtin_str_len(key);
+    slen := str_len(content);
+    klen := str_len(key);
     pos : ., mut = 0;
     loop {
         if pos >= slen { return 0; }
@@ -117,19 +117,19 @@ fn toml_get_int(content: string, key: string) -> int {
         }
         spos := _skip_whitespace(content, pos);
         if spos + klen <= slen {
-            sub := __builtin_str_sub(content, spos, klen);
-            if __builtin_str_eq(sub, key) != 0 {
+            sub := str_sub(content, spos, klen);
+            if str_eq(sub, key) != 0 {
                 eq_pos := _skip_whitespace(content, spos + klen);
-                if __builtin_str_get(content, eq_pos) == "=" {
+                if get_char(content, eq_pos) == "=" {
                     val_pos := _skip_whitespace(content, eq_pos + 1);
                     // Read integer digits
                     val : ., mut = 0;
                     lp : ., mut = val_pos;
                     neg : ., mut = 0;
-                    if __builtin_str_get(content, lp) == "-" { neg = 1; lp = lp + 1; }
+                    if get_char(content, lp) == "-" { neg = 1; lp = lp + 1; }
                     loop {
                         if lp >= slen { break; }
-                        c := __builtin_load8(content, lp);
+                        c := load8(content, lp);
                         if c >= 48 && c <= 57 {
                             val = val * 10 + (c - 48);
                             lp = lp + 1;

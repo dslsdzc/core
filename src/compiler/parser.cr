@@ -16,7 +16,7 @@ fn alloc_node(kind: int, a: int, b: int, c: int, iv: int, tv: int, d: int, line:
 
 fn cur_tok() -> int { return g_token_pos; }
 fn tok_k(p: int) -> int { return r64(g_tokens, p * ESZ_TOKEN + OFF_TK_KIND); }
-fn tok_lx(p: int) -> string { return str_get(r64(g_tokens, p * ESZ_TOKEN + OFF_TK_LEXEME)); }
+fn tok_lx(p: int) -> string { return get_char(r64(g_tokens, p * ESZ_TOKEN + OFF_TK_LEXEME)); }
 fn tok_iv(p: int) -> int { return r64(g_tokens, p * ESZ_TOKEN + OFF_TK_INTVAL); }
 fn tok_ln(p: int) -> int { return r64(g_tokens, p * ESZ_TOKEN + OFF_TK_LINE); }
 fn tok_cl(p: int) -> int { return r64(g_tokens, p * ESZ_TOKEN + OFF_TK_COL); }
@@ -105,7 +105,7 @@ fn parse_type() -> int {
     } else if tok_k(t) == T_LBRACE {
         dyn_grow_diags(g_diag_count + 1);
         w64(g_diags, g_diag_count * 32, EC_P_EXPECTED);
-        __builtin_store_str_ptr(g_diags, g_diag_count * 32 + 8, "expected type after '->', got '{' — missing return type?");
+        store_str_ptr(g_diags, g_diag_count * 32 + 8, "expected type after '->', got '{' — missing return type?");
         w64(g_diags, g_diag_count * 32 + 16, line);
         w64(g_diags, g_diag_count * 32 + 24, col);
         g_diag_count = g_diag_count + 1;
@@ -113,7 +113,7 @@ fn parse_type() -> int {
     } else {
         dyn_grow_diags(g_diag_count + 1);
         w64(g_diags, g_diag_count * 32, EC_P_EXPECTED);
-        __builtin_store_str_ptr(g_diags, g_diag_count * 32 + 8, "expected type after '->'");
+        store_str_ptr(g_diags, g_diag_count * 32 + 8, "expected type after '->'");
         w64(g_diags, g_diag_count * 32 + 16, line);
         w64(g_diags, g_diag_count * 32 + 24, col);
         g_diag_count = g_diag_count + 1;
@@ -277,9 +277,9 @@ fn parse_postfix() -> int {
                 name_idx = ast_int_val(node);
             }
             if name_idx >= 0 {
-                name := str_get(name_idx);
-                c := __builtin_str_get(name, 0);
-                if __builtin_str_cmp(c, "A") >= 0 && __builtin_str_cmp(c, "Z") <= 0 {
+                name := get_char(name_idx);
+                c := get_char(name, 0);
+                if str_cmp(c, "A") >= 0 && str_cmp(c, "Z") <= 0 {
                     is_enum_con = 1;
                 }
             }
@@ -327,8 +327,8 @@ fn parse_postfix() -> int {
 }
 
 fn is_upper_first(s: string) -> bool {
-    c := __builtin_str_get(s, 0);
-    if __builtin_str_cmp(c, "A") >= 0 && __builtin_str_cmp(c, "Z") <= 0 { return true; }
+    c := get_char(s, 0);
+    if str_cmp(c, "A") >= 0 && str_cmp(c, "Z") <= 0 { return true; }
     return false;
 }
 
@@ -480,7 +480,7 @@ fn parse_primary() -> int {
 fn parse_block() -> int {
     t := advance_tok();
     local_stmts : string, mut;    local_stmts_cap : int, mut;
-    local_stmts = __builtin_alloc(256 * 8); local_stmts_cap = 256;
+    local_stmts = alloc(256 * 8); local_stmts_cap = 256;
     sc : ., mut = 0;
     loop {
         if check(T_RBRACE) || check(T_EOF) { break; }
@@ -527,7 +527,7 @@ fn is_new_var_decl() -> bool {
 fn parse_new_var_decl() -> int {
     t := cur_tok();
     names : string, mut;    names_cap : int, mut;
-    names = __builtin_alloc(64 * 8);
+    names = alloc(64 * 8);
     names_cap = 64;
     nc : ., mut = 0;
 
@@ -550,7 +550,7 @@ fn parse_new_var_decl() -> int {
     is_mut : ., mut = 0;
 
     values : string, mut;    values_cap : int, mut;
-    values = __builtin_alloc(64 * 8); values_cap = 64;
+    values = alloc(64 * 8); values_cap = 64;
     vc : ., mut = 0;
 
     if check(T_COLON_EQ) {
@@ -615,7 +615,7 @@ fn parse_new_var_decl() -> int {
         if i == 0 {
             first_node = node;
         } else {
-            if g_extra_lets_cap == 0 { g_extra_lets = __builtin_alloc(128); g_extra_lets_cap = 16; }
+            if g_extra_lets_cap == 0 { g_extra_lets = alloc(128); g_extra_lets_cap = 16; }
             if g_extra_let_count < g_extra_lets_cap {
                 w64(g_extra_lets, g_extra_let_count * 8, node);
                 g_extra_let_count = g_extra_let_count + 1;
@@ -978,7 +978,7 @@ fn add_enum(name: string) -> int {
 fn parse_fn_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int) {
     gnames : string, mut;    gnames_cap : int, mut;
     gconstrs : string, mut;    gconstrs_cap : int, mut;
-    gconstrs = __builtin_alloc(64 * 8); gconstrs_cap = 64;
+    gconstrs = alloc(64 * 8); gconstrs_cap = 64;
     gc := parse_generics_into(gnames, gconstrs);
 
     advance_tok(); // (
@@ -1081,9 +1081,9 @@ fn parse_declaration() {
         nt := advance_tok();
         name := tok_lx(nt);
         sg_names : string, mut;    sg_names_cap : int, mut;
-    sg_names = __builtin_alloc(64 * 8); sg_names_cap = 64;
+    sg_names = alloc(64 * 8); sg_names_cap = 64;
         sg_dummy : string, mut;    sg_dummy_cap : int, mut;
-    sg_dummy = __builtin_alloc(64 * 8); sg_dummy_cap = 64;
+    sg_dummy = alloc(64 * 8); sg_dummy_cap = 64;
         sg_count := parse_generics_into(sg_names, sg_dummy);
         advance_tok(); // {
 
@@ -1123,9 +1123,9 @@ fn parse_declaration() {
         nt := advance_tok();
         name := tok_lx(nt);
         eg_names : string, mut;    eg_names_cap : int, mut;
-    eg_names = __builtin_alloc(64 * 8); eg_names_cap = 64;
+    eg_names = alloc(64 * 8); eg_names_cap = 64;
         eg_dummy : string, mut;    eg_dummy_cap : int, mut;
-    eg_dummy = __builtin_alloc(64 * 8); eg_dummy_cap = 64;
+    eg_dummy = alloc(64 * 8); eg_dummy_cap = 64;
         eg_count := parse_generics_into(eg_names, eg_dummy);
         advance_tok();
 
@@ -1176,9 +1176,9 @@ fn parse_declaration() {
         iface_name := tok_lx(nt);
         iface_ni := str_intern(iface_name);
         ig_names : string, mut;    ig_names_cap : int, mut;
-    ig_names = __builtin_alloc(64 * 8); ig_names_cap = 64;
+    ig_names = alloc(64 * 8); ig_names_cap = 64;
         ig_dummy : string, mut;    ig_dummy_cap : int, mut;
-    ig_dummy = __builtin_alloc(64 * 8); ig_dummy_cap = 64;
+    ig_dummy = alloc(64 * 8); ig_dummy_cap = 64;
         ig_count := parse_generics_into(ig_names, ig_dummy);
         advance_tok(); // {
 
@@ -1203,7 +1203,7 @@ fn parse_declaration() {
                 // Parse params with types (handle self, &self, &mut self, name: Type)
                 pc : ., mut = 0;
                 param_tis : string, mut;    param_tis_cap : int, mut;
-    param_tis = __builtin_alloc(128 * 8); param_tis_cap = 128;
+    param_tis = alloc(128 * 8); param_tis_cap = 128;
                 pi2 : ., mut = 0;
                 loop { if pi2 >= 8 { break; } w64(param_tis, pi2 * 8, TY_UNIT); pi2 = pi2 + 1; }
                 if !check(T_RPAREN) {
@@ -1244,7 +1244,7 @@ fn parse_declaration() {
                 if method_count >= 16 {
                     dyn_grow_diags(g_diag_count + 1);
                     w64(g_diags, g_diag_count * 32, EC_P_FIELD_SYNTAX);
-                    __builtin_store_str_ptr(g_diags, g_diag_count * 32 + 8, "interface '" + iface_name + "' exceeds max 16 methods");
+                    store_str_ptr(g_diags, g_diag_count * 32 + 8, "interface '" + iface_name + "' exceeds max 16 methods");
                     w64(g_diags, g_diag_count * 32 + 16, tok_ln(t)); w64(g_diags, g_diag_count * 32 + 24, tok_cl(t));
                     g_diag_count = g_diag_count + 1;
                 } else {
@@ -1259,7 +1259,7 @@ fn parse_declaration() {
                     if pc > 8 {
                         dyn_grow_diags(g_diag_count + 1);
                         w64(g_diags, g_diag_count * 32, EC_P_PARAM_TYPE);
-                        __builtin_store_str_ptr(g_diags, g_diag_count * 32 + 8, "method '" + str_get(method_ni) + "' in interface exceeds max 8 params");
+                        store_str_ptr(g_diags, g_diag_count * 32 + 8, "method '" + get_char(method_ni) + "' in interface exceeds max 8 params");
                         w64(g_diags, g_diag_count * 32 + 16, tok_ln(t)); w64(g_diags, g_diag_count * 32 + 24, tok_cl(t));
                         g_diag_count = g_diag_count + 1;
                     }
@@ -1427,16 +1427,16 @@ fn parse_all() {
     ci : ., mut = 0;
     loop {
         if tok_k(cur_tok()) == T_EOF { break; }
-        if ci > 5 { __builtin_print("parse_all loop\n"); ci = 0; }
+        if ci > 5 { print("parse_all loop\n"); ci = 0; }
         prev_ast := g_ast_count;
         parse_declaration();
         if tok_k(cur_tok()) == T_EOF { break; }
         // Detect rapid AST growth: if >10000 nodes added in one decl, it's a loop
         ast_grown := g_ast_count - prev_ast;
         if ast_grown > 10000 {
-            __builtin_print("BLOAT: ci="); __builtin_print(__builtin_int_to_str(ci));
-            __builtin_print(" ast_grown="); __builtin_println(__builtin_int_to_str(ast_grown));
-            __builtin_print("  total_ast="); __builtin_println(__builtin_int_to_str(g_ast_count));
+            print("BLOAT: ci="); print(int_str(ci));
+            print(" ast_grown="); println(int_str(ast_grown));
+            print("  total_ast="); println(int_str(g_ast_count));
             break;
         }
         ci = ci + 1;

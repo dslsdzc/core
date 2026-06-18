@@ -131,42 +131,42 @@ class Interpreter:
             self.vars[id(instr.dest)] = res
         elif isinstance(instr, CallInstr):
             # Handle built-in functions
-            if instr.func == '__builtin_str_len':
+            if instr.func == 'str_len':
                 s = self.vars.get(id(instr.args[0]), '')
                 if instr.dest:
                     self.vars[id(instr.dest)] = len(s)
                 return
-            if instr.func == '__builtin_str_get':
+            if instr.func == 'str_get':
                 s = self.vars.get(id(instr.args[0]), '')
                 idx = self.vars.get(id(instr.args[1]), 0)
                 if instr.dest:
                     ch = s[idx] if 0 <= idx < len(s) else '\x00'
                     self.vars[id(instr.dest)] = ch
                 return
-            if instr.func == '__builtin_str_sub':
+            if instr.func == 'str_sub':
                 s = self.vars.get(id(instr.args[0]), '')
                 start = self.vars.get(id(instr.args[1]), 0)
                 length = self.vars.get(id(instr.args[2]), 0)
                 if instr.dest:
                     self.vars[id(instr.dest)] = s[start:start+length]
                 return
-            if instr.func == '__builtin_int_to_str':
+            if instr.func == 'int_str':
                 i = self.vars.get(id(instr.args[0]), 0)
                 if instr.dest:
                     self.vars[id(instr.dest)] = str(i)
                 return
-            if instr.func == '__builtin_str_push':
+            if instr.func == 'concat':
                 s = self.vars.get(id(instr.args[0]), '')
                 c = self.vars.get(id(instr.args[1]), '')
                 if instr.dest:
                     self.vars[id(instr.dest)] = s + c
                 return
-            if instr.func == '__builtin_str_from_int':
+            if instr.func == 'int_str':
                 i = self.vars.get(id(instr.args[0]), 0)
                 if instr.dest:
                     self.vars[id(instr.dest)] = str(i)
                 return
-            if instr.func == '__builtin_str_to_int':
+            if instr.func == 'str_int':
                 s = self.vars.get(id(instr.args[0]), '0')
                 if instr.dest:
                     try:
@@ -174,13 +174,13 @@ class Interpreter:
                     except:
                         self.vars[id(instr.dest)] = 0
                 return
-            if instr.func == '__builtin_str_eq':
+            if instr.func == 'str_eq':
                 a = self.vars.get(id(instr.args[0]), '')
                 b = self.vars.get(id(instr.args[1]), '')
                 if instr.dest:
                     self.vars[id(instr.dest)] = 1 if a == b else 0
                 return
-            if instr.func == '__builtin_str_cmp':
+            if instr.func == 'str_cmp':
                 a = self.vars.get(id(instr.args[0]), '')
                 b = self.vars.get(id(instr.args[1]), '')
                 if instr.dest:
@@ -188,22 +188,22 @@ class Interpreter:
                     elif a > b: self.vars[id(instr.dest)] = 1
                     else: self.vars[id(instr.dest)] = 0
                 return
-            if instr.func == '__builtin_print':
+            if instr.func == 'print':
                 s = self.vars.get(id(instr.args[0]), '')
                 print(s, end='')
                 return
-            if instr.func == '__builtin_println':
+            if instr.func == 'println':
                 s = self.vars.get(id(instr.args[0]), '')
                 print(s)
                 return
-            if instr.func == '__builtin_get_arg':
+            if instr.func == 'get_arg':
                 import os
                 n = self.vars.get(id(instr.args[0]), 0)
                 if instr.dest:
                     argv = getattr(self, '_argv', [])
                     self.vars[id(instr.dest)] = argv[n] if 0 <= n < len(argv) else ''
                 return
-            if instr.func == '__builtin_read_file':
+            if instr.func == 'read_file':
                 path = self.vars.get(id(instr.args[0]), '')
                 if instr.dest:
                     try:
@@ -212,7 +212,7 @@ class Interpreter:
                     except:
                         self.vars[id(instr.dest)] = ''
                 return
-            if instr.func == '__builtin_write_file':
+            if instr.func == 'write_file':
                 path = self.vars.get(id(instr.args[0]), '')
                 content = self.vars.get(id(instr.args[1]), '')
                 if instr.dest:
@@ -222,7 +222,7 @@ class Interpreter:
                     except:
                         self.vars[id(instr.dest)] = -1
                 return
-            if instr.func == '__builtin_syscall3':
+            if instr.func == 'syscall3':
                 nr = self.vars.get(id(instr.args[0]), 0)
                 a1 = self.vars.get(id(instr.args[1]), 0)
                 a2 = self.vars.get(id(instr.args[2]), 0)
@@ -260,7 +260,7 @@ class Interpreter:
                 if instr.dest:
                     self.vars[id(instr.dest)] = result
                 return
-            if instr.func == '__builtin_load8':
+            if instr.func == 'load8':
                 s = self.vars.get(id(instr.args[0]))
                 idx = self.vars.get(id(instr.args[1]), 0)
                 if instr.dest and s is not None and idx >= 0 and idx < len(s):
@@ -268,7 +268,7 @@ class Interpreter:
                 elif instr.dest:
                     self.vars[id(instr.dest)] = 0
                 return
-            if instr.func == '__builtin_store8':
+            if instr.func == 'store8':
                 s = self.vars.get(id(instr.args[0]))
                 idx = self.vars.get(id(instr.args[1]), 0)
                 val = self.vars.get(id(instr.args[2]), 0)
@@ -278,12 +278,12 @@ class Interpreter:
                 if instr.dest:
                     self.vars[id(instr.dest)] = 0
                 return
-            if instr.func == '__builtin_alloc':
+            if instr.func == 'alloc':
                 size = self.vars.get(id(instr.args[0]), 0)
                 if instr.dest:
                     self.vars[id(instr.dest)] = [0] * ((size + 7) // 8)
                 return
-            if instr.func == '__builtin_load_str_ptr':
+            if instr.func == 'load_str_ptr':
                 buf = self.vars.get(id(instr.args[0]))
                 pos = self.vars.get(id(instr.args[1]), 0)
                 if instr.dest:
@@ -292,7 +292,7 @@ class Interpreter:
                     else:
                         self.vars[id(instr.dest)] = ''
                 return
-            if instr.func == '__builtin_store_str_ptr':
+            if instr.func == 'store_str_ptr':
                 buf = self.vars.get(id(instr.args[0]))
                 pos = self.vars.get(id(instr.args[1]), 0)
                 val = self.vars.get(id(instr.args[2]))

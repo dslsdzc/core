@@ -164,7 +164,7 @@ class X86_64StackAsmGen:
         if op in ('==', '!=', '<', '>', '<=', '>=') and (self._is_string_var(instr.left) or self._is_string_var(instr.right)):
             if op in ('==', '!='):
                 self.emit(f"    mov rdi, r10"); self.emit(f"    mov rsi, r11")
-                self.emit("    call __builtin_str_eq"); self._clobber_regs()
+                self.emit("    call str_eq"); self._clobber_regs()
                 if op == '==': self.emit(f"    mov {self._ref(instr.dest)}, rax")
                 else:
                     self.emit("    cmp rax, 1")
@@ -172,7 +172,7 @@ class X86_64StackAsmGen:
                     self.store_from_r10(instr.dest)
             else:
                 self.emit(f"    mov rdi, r10"); self.emit(f"    mov rsi, r11")
-                self.emit("    call __builtin_str_cmp"); self._clobber_regs()
+                self.emit("    call str_cmp"); self._clobber_regs()
                 self.emit("    cmp rax, 0")
                 asm = {"<":"    setl al\n    movzx r10, al",">":"    setg al\n    movzx r10, al","<=":"    setle al\n    movzx r10, al",">=":"    setge al\n    movzx r10, al"}
                 if op in asm: self._alu_clobber(asm[op])
@@ -181,7 +181,7 @@ class X86_64StackAsmGen:
         elif op == '+':
             if self._is_string_var(instr.left) or self._is_string_var(instr.right):
                 self.emit(f"    mov rdi, r10"); self.emit(f"    mov rsi, r11")
-                self.emit("    call __builtin_str_push"); self._clobber_regs()
+                self.emit("    call concat"); self._clobber_regs()
                 self._alu_clobber("    mov r10, rax")
                 self.store_from_r10(instr.dest)
             else: self._alu_clobber("    add r10, r11")
@@ -260,7 +260,7 @@ class X86_64StackAsmGen:
             self.emit("    cld")
             self.emit("    rep movsb")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
-        elif instr.func == '__builtin_syscall3':
+        elif instr.func == 'syscall3':
             # Inline syscall: after arg setup rdi=nr, rsi=arg1, rdx=arg2, rcx=arg3
             # Need: rax=nr, rdi=arg1, rsi=arg2, rdx=arg3
             self.emit("    mov rax, rdi")
@@ -270,12 +270,12 @@ class X86_64StackAsmGen:
             self.emit("    syscall")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
             if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
-        elif instr.func == '__builtin_load8':
+        elif instr.func == 'load8':
             # load8(string_ptr, idx) → byte at ptr+idx (zero-extended)
             self.emit("    movzx rax, BYTE PTR [rdi + rsi]")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
             if instr.dest: self.emit(f"    mov qword ptr {self._ref(instr.dest)}, rax")
-        elif instr.func == '__builtin_store8':
+        elif instr.func == 'store8':
             # store8(string_ptr, idx, val) → store low byte of val at ptr+idx
             self.emit("    mov BYTE PTR [rdi + rsi], dl")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
@@ -297,7 +297,7 @@ class X86_64StackAsmGen:
         if isinstance(instr.type, ArrayType) and instr.type.size > 0:
             size = instr.type.size * 8
             self.emit(f"    mov edi, {size}")
-            self.emit("    call __builtin_alloc")
+            self.emit("    call alloc")
             self.emit(f"    mov {self._ref(instr.dest)}, rax")
 
     def gen_alloc_struct(self, instr: AllocStructInstr):
@@ -305,7 +305,7 @@ class X86_64StackAsmGen:
             self._get_stack_off(instr.dest)
         if instr.field_count > 0:
             self.emit(f"    mov edi, {instr.field_count * 8}")
-            self.emit("    call __builtin_alloc")
+            self.emit("    call alloc")
             self.emit(f"    mov {self._ref(instr.dest)}, rax")
 
     def gen_alloc_array(self, instr: AllocArrayInstr):
@@ -313,7 +313,7 @@ class X86_64StackAsmGen:
             self._get_stack_off(instr.dest)
         if instr.size > 0:
             self.emit(f"    mov edi, {instr.size * 8}")
-            self.emit("    call __builtin_alloc")
+            self.emit("    call alloc")
             self.emit(f"    mov {self._ref(instr.dest)}, rax")
 
     def gen_load(self, instr: LoadInstr):
@@ -607,7 +607,7 @@ class X86_64StackAsmGen:
             elem_size = self._elem_size(g.type.inner)
             size = g.type.size * elem_size
             self.emit(f"    mov edi, {size}")
-            self.emit("    call __builtin_alloc")
+            self.emit("    call alloc")
             self.emit(f"    mov [rip+{self._global_label(g.name)}], rax")
         self.emit("    pop rbp")
         self.emit("    ret")

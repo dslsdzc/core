@@ -483,8 +483,10 @@ class TypeChecker:
     # _infer_call (方法体必须存在)
     # --------------------------------------------------------------
     def _infer_call(self, call: Call) -> Type:
-        # Handle built-in functions (no decl node)
-        if isinstance(call.func, Ident) and call.func.name.startswith('__builtin_'):
+        # Handle runtime functions (defined in rt.s, no decl node)
+        rt_funcs = {'alloc', 'get_arg', 'syscall3', 'load8', 'store8',
+                    'load_str_ptr', 'store_str_ptr'}
+        if isinstance(call.func, Ident) and call.func.name in rt_funcs:
             sym = self.symtab.lookup(call.func.name)
             if sym and sym.type:
                 return sym.type
@@ -527,6 +529,9 @@ class TypeChecker:
                 self.errors.append(f"Undefined function {func_name}")
                 return BaseType('never')
             func_decl = func_sym.decl_node
+            # Pre-declared without full definition — return known type
+            if func_decl is None:
+                return func_sym.type if func_sym.type else BaseType('int')
             # Generic function: infer type args from arguments
             if func_decl.generics:
                 generic_names = set(func_decl.generics)

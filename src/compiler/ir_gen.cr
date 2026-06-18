@@ -76,7 +76,7 @@ fn pop_ir_scope() {
 fn get_ir_var_name(var_idx: int) -> string {
     if var_idx >= 0 && var_idx < g_ir_var_count {
         ni := irv_name(var_idx);
-        return str_get(ni);
+        return get_char(ni);
     }
     return "";
 }
@@ -107,18 +107,18 @@ fn pop_loop_labels() {
 }
 
 fn get_variant_name_idx(qualified_ni: int) -> int {
-    s := str_get(qualified_ni);
-    slen := __builtin_str_len(s);
+    s := get_char(qualified_ni);
+    slen := str_len(s);
     dot_pos : ., mut = -1;
     i : ., mut = 0;
     loop {
         if i >= slen { break; }
-        c := __builtin_str_get(s, i);
-        if __builtin_str_eq(c, ".") != 0 { dot_pos = i; }
+        c := get_char(s, i);
+        if str_eq(c, ".") != 0 { dot_pos = i; }
         i = i + 1;
     }
     if dot_pos >= 0 {
-        variant_name := __builtin_str_sub(s, dot_pos + 1, slen - dot_pos - 1);
+        variant_name := str_sub(s, dot_pos + 1, slen - dot_pos - 1);
         return str_intern(variant_name);
     }
     return qualified_ni;
@@ -300,7 +300,7 @@ fn ir_gen_expr(node: int) -> int {
         arg_count := ast_c(node);
         arg_vars : string, mut;    arg_vars_cap : int, mut;
         ac : ., mut = 0;
-    arg_vars = __builtin_alloc(64 * 8); arg_vars_cap = 64;
+    arg_vars = alloc(64 * 8); arg_vars_cap = 64;
         func_ni : ., mut = -1;
 
         // Module or method call: obj.method(args)
@@ -309,7 +309,7 @@ fn ir_gen_expr(node: int) -> int {
             if ast_type_val(node) != 1 {
                 // Method call: self is first arg
                 obj_node := ast_a(func_node);
-                if ac >= arg_vars_cap { nc := arg_vars_cap * 2; nb := __builtin_alloc(nc * 8); _dyncpy(arg_vars, arg_vars_cap * 8, nb); arg_vars = nb; arg_vars_cap = nc; } w64(arg_vars, ac * 8, ir_gen_expr(obj_node));
+                if ac >= arg_vars_cap { nc := arg_vars_cap * 2; nb := alloc(nc * 8); _dyncpy(arg_vars, arg_vars_cap * 8, nb); arg_vars = nb; arg_vars_cap = nc; } w64(arg_vars, ac * 8, ir_gen_expr(obj_node));
                 ac = ac + 1;
             }
         } else if ast_kind(func_node) == EXPR_IDENT {
@@ -322,7 +322,7 @@ fn ir_gen_expr(node: int) -> int {
         loop {
             if i >= arg_count { break; }
             if an >= 0 {
-                if ac >= arg_vars_cap { nc := arg_vars_cap * 2; nb := __builtin_alloc(nc * 8); _dyncpy(arg_vars, arg_vars_cap * 8, nb); arg_vars = nb; arg_vars_cap = nc; } w64(arg_vars, ac * 8, ir_gen_expr(an));
+                if ac >= arg_vars_cap { nc := arg_vars_cap * 2; nb := alloc(nc * 8); _dyncpy(arg_vars, arg_vars_cap * 8, nb); arg_vars = nb; arg_vars_cap = nc; } w64(arg_vars, ac * 8, ir_gen_expr(an));
                 ac = ac + 1;
                 an = an + 1;
             }
@@ -336,8 +336,8 @@ fn ir_gen_expr(node: int) -> int {
                 body3 := ast_data(fn_node3);
                 conc_type_ni3 := ast_int_val(node);
                 if conc_type_ni3 >= 0 && body3 >= 0 {
-                    gen_name3 := str_get(fi_generic_name(gen_fi, 0));
-                    conc_name3 := str_get(conc_type_ni3);
+                    gen_name3 := get_char(fi_generic_name(gen_fi, 0));
+                    conc_name3 := get_char(conc_type_ni3);
                     ast_patch_node(body3, gen_name3, conc_name3);
                     // Bind params to arg vars
                     first_param3 := ast_b(fn_node3);
@@ -619,7 +619,7 @@ fn ir_gen_expr(node: int) -> int {
         var_ni := ast_a(node);
         type_node := ast_b(node);
         val_node := ast_c(node);
-        var := new_ir_var(str_get(var_ni), TI_UNIT);
+        var := new_ir_var(get_char(var_ni), TI_UNIT);
         is_arr : ., mut = 0;
         if type_node >= 0 && val_node < 0 {
             if ast_kind(type_node) == 19 {
@@ -836,7 +836,7 @@ fn ir_gen_func(fi: int) {
         if pi >= param_count { break; }
         if pn < 0 { break; }
         pname_idx := ast_a(pn);
-        pname := str_get(pname_idx);
+        pname := get_char(pname_idx);
         pvar := new_ir_var(pname, TI_INT);
         // Bind param name
         bind_local(pname_idx, pvar);
@@ -871,7 +871,7 @@ fn ir_gen_globals() {
         if i >= g_global_let_count { break; }
         node := r64(g_global_lets, i * 8);
         name_idx := ast_a(node);
-        name := str_get(name_idx);
+        name := get_char(name_idx);
         gvar := new_ir_var(name, TI_INT);
         dyn_grow_ir_globals(g_ir_global_count + 1);
         w64(g_ir_globals, g_ir_global_count  * 16, name_idx);
@@ -891,19 +891,19 @@ fn ast_patch_node(node: int, subst_from: string, subst_to: string) {
         if ast_kind(func_node) == EXPR_FIELD {
             data_ni := ast_data(node);
             if data_ni >= 0 {
-                data_str := str_get(data_ni);
-                dlen := __builtin_str_len(data_str);
-                flen := __builtin_str_len(subst_from);
+                data_str := get_char(data_ni);
+                dlen := str_len(data_str);
+                flen := str_len(subst_from);
                 if dlen >= flen {
                     matches : ., mut = 1;
                     dci : ., mut = 0;
                     loop {
                         if dci >= flen { break; }
-                        if __builtin_load8(data_str, dci) != __builtin_load8(subst_from, dci) { matches = 0; break; }
+                        if load8(data_str, dci) != load8(subst_from, dci) { matches = 0; break; }
                         dci = dci + 1;
                     }
-                    if matches != 0 && (dlen == flen || __builtin_load8(data_str, flen) == 46) {
-                        rest := __builtin_str_sub(data_str, flen, dlen - flen);
+                    if matches != 0 && (dlen == flen || load8(data_str, flen) == 46) {
+                        rest := str_sub(data_str, flen, dlen - flen);
                         new_name := subst_to + rest;
                         ast_set_data(node, str_intern(new_name));
                     }
@@ -972,14 +972,14 @@ fn find_or_create_mono_func(fi: int, call_node: int) -> int {
     orig_ret_node := ast_type_val(fn_node);
 
     gen_name_ni := fi_generic_name(fi, 0);
-    gen_name := str_get(gen_name_ni);
+    gen_name := get_char(gen_name_ni);
 
     // Get concrete type name from call node (stored by checker)
     concrete_type_ni : ., mut = ast_int_val(call_node);
-    concrete_type_name : ., mut = str_get(concrete_type_ni);
+    concrete_type_name : ., mut = get_char(concrete_type_ni);
 
     // Create mangled name: "funcname$genericname.concretetype"
-    orig_fn_name := str_get(fi_name(fi));
+    orig_fn_name := get_char(fi_name(fi));
     mangled_name : ., mut = orig_fn_name + "$";
     mangled_name = mangled_name + gen_name + "." + concrete_type_name;
     mangled_ni := str_intern(mangled_name);

@@ -27,19 +27,19 @@ fn g2_slot(v: int) -> int {
 
 fn g2_str_off(si: int) -> int {
     o := 0; i := 0;
-    loop { if i >= g_x86_str_count { break; } if r64(g_x86_str_offs, i * 8) == si { return o; } o = o + str_len(r64(g_x86_str_offs, i * 8)) + 1; i = i + 1; }
+    loop { if i >= g_x86_str_count { break; } if r64(g_x86_str_offs, i * 8) == si { return o; } o = o + istr_len(r64(g_x86_str_offs, i * 8)) + 1; i = i + 1; }
     dyn_grow_x86_str_offs(g_x86_str_count + 1); w64(g_x86_str_offs, g_x86_str_count * 8, si); g_x86_str_count = g_x86_str_count + 1;
     return o;
 }
 
 fn g2_rodata_sz() -> int {
     o := 0; i := 0;
-    loop { if i >= g_x86_str_count { break; } o = o + str_len(r64(g_x86_str_offs, i * 8)) + 1; i = i + 1; }
+    loop { if i >= g_x86_str_count { break; } o = o + istr_len(r64(g_x86_str_offs, i * 8)) + 1; i = i + 1; }
     return o;
 }
 
 // ── Byte encoding helpers ──
-fn e2_w8(buf: string, pos: int, val: int) { __builtin_store8(buf, pos, val % 256); }
+fn e2_w8(buf: string, pos: int, val: int) { store8(buf, pos, val % 256); }
 fn e2_w16(buf: string, off: int, val: int) { e2_w8(buf, off, val % 256); e2_w8(buf, off+1, (val/256) % 256); }
 fn e2_w32(buf: string, pos: int, val: int) {
     uv : ., mut = val;
@@ -121,11 +121,11 @@ fn arch_instr_size(instr_idx: int) -> int {
         return sz;
     }
     if op == IR_CALL {
-        fn2 := ""; if s3 >= 0 { fn2 = str_get(s3); }
-        if __builtin_str_eq(fn2, "__builtin_syscall3") != 0 {
+        fn2 := ""; if s3 >= 0 { fn2 = get_char(s3); }
+        if str_eq(fn2, "syscall3") != 0 {
             sz := inst.src2 * 4 + 18; if d >= 0 { sz = sz + 4; } return sz;
         }
-        if __builtin_str_len(fn2) > 0 {
+        if str_len(fn2) > 0 {
             sz := inst.src2 * 4 + 5; if d >= 0 { sz = sz + 4; } return sz;
         }
         sz := 2; if d >= 0 { sz = sz + 4; } return sz;
@@ -212,7 +212,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     }
 
     if op == IR_CALL {
-        fn2 := ""; if s3 >= 0 { fn2 = str_get(s3); }
+        fn2 := ""; if s3 >= 0 { fn2 = get_char(s3); }
         fa := s1; ac := s2;
         ai := 0;
         loop { if ai >= ac { break; } if ai >= 6 { break; }
@@ -220,7 +220,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
             if ai == 0 { r = 7; } if ai == 1 { r = 6; } if ai == 2 { r = 2; } if ai == 3 { r = 1; } if ai == 4 { r = 8; } if ai == 5 { r = 9; }
             if r >= 0 { cp = cp + e2_ld(buf, pos+cp, r, ao); }
         ai = ai + 1; }
-        if __builtin_str_eq(fn2, "__builtin_syscall3") != 0 {
+        if str_eq(fn2, "syscall3") != 0 {
             cp = cp + e2_mov(buf, pos+cp, 0, 7);
             cp = cp + e2_mov(buf, pos+cp, 7, 6);
             cp = cp + e2_mov(buf, pos+cp, 6, 2);
@@ -228,7 +228,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
             e2_w8(buf, pos+cp, 77); e2_w8(buf, pos+cp+1, 49); e2_w8(buf, pos+cp+2, 210); cp = cp + 3;
             e2_w8(buf, pos+cp, 15); e2_w8(buf, pos+cp+1, 5); cp = cp + 2;
             if d >= 0 { cp = cp + e2_st(buf, pos+cp, 0, g2_slot(d)); }
-        } else if __builtin_str_len(fn2) > 0 {
+        } else if str_len(fn2) > 0 {
             to := -1; tf := 0;
             loop { if tf >= g_x86_func_off_count { break; } if r64(g_x86_func_offsets, tf*16) == s3 { to = r64(g_x86_func_offsets, tf*16+8); break; } tf = tf + 1; }
             rel := 0; if to >= 0 { rel = (176 + to) - (pos + cp + 5); }

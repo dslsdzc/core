@@ -240,11 +240,11 @@ fn df_graph_to_dot() -> string {
         label : ., mut = df_opcode_name(n_op);
         if n_dest >= 0 {
             vname := get_ir_var_name(n_dest);
-            if __builtin_str_len(vname) > 0 {
+            if str_len(vname) > 0 {
                 label = vname + ":" + label;
             }
         }
-        dot = dot + "    n" + __builtin_int_to_str(ni) + " [label=\"" + label + "\", shape=box];\n";
+        dot = dot + "    n" + int_str(ni) + " [label=\"" + label + "\", shape=box];\n";
         ni = ni + 1;
     }
 
@@ -254,7 +254,7 @@ fn df_graph_to_dot() -> string {
         if ei >= g_df_edge_count { break; }
         e_from := r64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_FROM);
         e_to := r64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_TO);
-        dot = dot + "    n" + __builtin_int_to_str(e_from) + " -> n" + __builtin_int_to_str(e_to) + ";\n";
+        dot = dot + "    n" + int_str(e_from) + " -> n" + int_str(e_to) + ";\n";
         ei = ei + 1;
     }
 
