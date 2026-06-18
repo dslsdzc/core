@@ -412,7 +412,7 @@ fn parse_primary() -> int {
                     if acc < 0 { acc = id_node; }
                     else { acc = alloc_node(EXPR_BINARY, acc, id_node, OP_ADD, 0, 0, 0, tok_ln(t), tok_cl(t)); }
                 }
-                if close < 0 { break; }  // unterminated { → stop to avoid infinite loop
+                if close < 0 { break; }
                 pos = close + 1;
             }
             if acc < 0 {
