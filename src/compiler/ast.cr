@@ -483,6 +483,11 @@ SYM_LOCAL : int = 2;
 SYM_PARAM : int = 3;
 SYM_GLOBAL : int = 4;
 SYM_MODULE : int = 5;
+SYM_SO_FN : int = 6;
+
+// Parameter/function tag flags (stored in sym_type for SYM_SO_FN)
+TAG_VARIADIC : int = 1;
+TAG_AUTO_STR  : int = 2;
 
 g_gen_apply_data : string, mut;         g_gen_apply_data_count : int, mut; g_gen_apply_data_cap : int, mut;
 

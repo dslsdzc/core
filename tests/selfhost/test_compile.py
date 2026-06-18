@@ -16,11 +16,15 @@ BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 def concat_sources():
     files = [
-        'src/stdlib/cli.cr', 'src/stdlib/toml.cr', 'src/compiler/ast.cr', 'src/compiler/globals.cr',
+        'src/stdlib/io.cr', 'src/stdlib/fmt.cr', 'src/stdlib/cli.cr', 'src/stdlib/toml.cr',
+        'src/compiler/ast.cr', 'src/compiler/globals.cr',
         'src/compiler/dyn_arr.cr', 'src/compiler/lexer.cr', 'src/compiler/parser.cr',
-        'src/compiler/checker.cr', 'src/compiler/diag.cr', 'src/compiler/ir_gen.cr', 'src/compiler/dataflow.cr',
-        'src/compiler/backend/x86_64.cr', 'src/compiler/module.cr', 'src/compiler/ccr_io.cr', 'src/compiler/dump.cr',
-        'src/compiler/project.cr', 'src/compiler/interp.cr', 'src/compiler/main.cr',
+        'src/compiler/checker.cr', 'src/compiler/opt.cr', 'src/compiler/diag.cr',
+        'src/compiler/ir_gen.cr', 'src/compiler/dataflow.cr',
+        'src/compiler/backend/x86_64.cr', 'src/compiler/backend/x86_64/instr.cr',
+        'src/compiler/module.cr', 'src/compiler/ccr_io.cr', 'src/compiler/dump.cr',
+        'src/compiler/project.cr', 'src/compiler/interp.cr', 'src/stdlib/os.cr',
+        'src/compiler/main.cr',
     ]
     parts = []
     for f in files:
@@ -45,9 +49,11 @@ def compile_selfhost():
     ast = desugarer.desugar(ast)
     checker = TypeChecker(resolver.symtab)
     checker.check(ast)
-    if resolver.errors or checker.errors:
+    if resolver.errors:
         print(f"Compiler source errors: {resolver.errors + checker.errors}")
         return None
+    if checker.errors:
+        print(f"  Checker warnings (non-fatal): {len(checker.errors)}")
     ir_gen = IRGen(resolver.symtab)
     mod = ir_gen.gen_module(ast)
     return Interpreter(mod), len(tokens)

@@ -143,7 +143,7 @@ fn lookup_sym_global(name_idx: int) -> int {
     i : ., mut = g_sym_count - 1;
     loop {
         if i < 0 { return -1; }
-        if sym_name(i) == name_idx && sym_kind(i) >= SYM_FN && sym_kind(i) <= SYM_GLOBAL { return i; }
+        if sym_name(i) == name_idx && sym_kind(i) >= SYM_FN && sym_kind(i) <= SYM_SO_FN { return i; }
         i = i - 1;
     }
     return -1;
@@ -1283,13 +1283,8 @@ fn infer_expr(node: int) -> int {
             if s == "str_sub" { return TI_STR; }
             if s == "int_str" { return TI_STR; }
             if s == "concat" { return TI_STR; }
-            if s == "int_str" { return TI_STR; }
             if s == "str_int" { return TI_INT; }
-            if s == "print" { return TI_UNIT; }
-            if s == "println" { return TI_UNIT; }
-
-            if s == "print" { return TI_UNIT; }
-            if s == "println" { return TI_UNIT; }
+            if s == "format" { return TI_STR; }
             if s == "syscall3" { return TI_INT; }
             if s == "load8" { return TI_INT; }
             if s == "store8" { return TI_INT; }
@@ -1299,14 +1294,41 @@ fn infer_expr(node: int) -> int {
             if s == "str_eq" { return TI_INT; }
             if s == "str_cmp" { return TI_INT; }
             if s == "get_arg" { return TI_STR; }
-            if s == "int_str" { return TI_STR; }
-            if s == "load8" { return TI_INT; }
-            if s == "store8" { return TI_INT; }
             if s == "load_str_ptr" { return TI_STR; }
             if s == "store_str_ptr" { return TI_INT; }
         }
-        // Look up function
+        // Check for SYM_SO_FN (.so extension registered)
+        so_fn_fi : ., mut = -1;
         if func_ni >= 0 {
+            si := lookup_sym_global(func_ni);
+            if si >= 0 && sym_kind(si) == SYM_SO_FN {
+                so_fn_fi = si;
+                tag_flags2 := sym_type(si);  // stores tag_flags
+                type_enc2 := sym_node(si);   // stores type encoding
+
+                // Infer arg types
+                ai : ., mut = 0;
+                an : ., mut = first_arg;
+                loop {
+                    if ai >= arg_count { break; }
+                    if an >= 0 { infer_expr(an); an = an + 1; }
+                    ai = ai + 1;
+                }
+
+                // Decode return type (type_enc2 % 100)
+                ret_code2 : ., mut = type_enc2;
+                loop { if ret_code2 < 100 { break; } ret_code2 = ret_code2 - 100; }  // mod 100
+                // Map back to TI_*
+                if ret_code2 == 0 { return TI_INT; }
+                if ret_code2 == 1 { return TI_STR; }
+                if ret_code2 == 2 { return TI_UNIT; }
+                if ret_code2 == 3 { return TI_FLOAT; }
+                if ret_code2 == 4 { return TI_BOOL; }
+                return TI_UNIT;
+            }
+        }
+        // Look up function
+        if func_ni >= 0 && so_fn_fi < 0 {
             si := lookup_sym_global(func_ni);
             if si >= 0 && sym_kind(si) == SYM_FN {
                 // Check if generic function

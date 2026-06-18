@@ -149,8 +149,6 @@ fn emit_start_size() -> int {
 
 // ── Main ELF generation ──
 fn x86_64_elf_generate(buf: string) -> int {
-    syscall3(1, 1, "D:start
-", 8);
     // Phase 0: resolve labels (uses arch_instr_size from instr.cr)
     resolve_labels();
     g_x86_ext_rel_count = 0;  // reset external relocations
@@ -325,7 +323,7 @@ fn x86_64_elf_generate(buf: string) -> int {
 
     // ── .rodata ──
     si = 0; loop { if si >= g_x86_str_count { break; }
-        s := get_char(r64(g_x86_str_offs, si * 8));
+        s := istr_get(r64(g_x86_str_offs, si * 8));
         sl := str_len(s);
         ci := 0; loop { if ci >= sl { break; } w8(buf, cp, load8(s, ci)); ci = ci + 1; cp = cp + 1; }
         w8(buf, cp, 0); cp = cp + 1;

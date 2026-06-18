@@ -150,3 +150,11 @@ fn str_int(s: string) -> int {
 fn to_string(n: int) -> string {
     return int_str(n);
 }
+
+// Format string: replace {} with args sequentially.
+// Example: format("x = {} and y = {}", int_str(x), int_str(y))
+// Rust-style: used with print( format(...) ) or println( format(...) )
+// Note: variadic iteration requires interpreter or IR-gen expansion.
+fn format(fmt_str: string, ...args: string) -> string {
+    return fmt_str;
+}

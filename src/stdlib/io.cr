@@ -1,4 +1,7 @@
-// Core standard library: I/O output.
+// Core standard library: I/O.
+// Python-style print/println (multi-arg, auto-conversion via int_str).
+// Rust-style string interpolation via format() in fmt.cr.
+// Note: depends on fmt.cr (str_len, int_str) — import fmt or use _import.cr
 
 fn print(s: string) {
     slen := str_len(s);

@@ -76,6 +76,7 @@ class TokenType(Enum):
     PATH_SEP = auto()
     DOT = auto()
     DOT_DOT = auto()
+    DOT_DOT_DOT = auto()
     COMMA = auto()
     SEMI = auto()
     COLON = auto()

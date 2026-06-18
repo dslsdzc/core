@@ -33,3 +33,51 @@ fn system(cmd: string) -> int {
     syscall3(60, 127, 0, 0);  // execve 失败时 _exit(127)
     return -1;
 }
+
+// get_env(name) — 读取环境变量
+// 从 /proc/self/environ 中读取指定环境变量的值
+// 返回：变量值字符串，未找到返回 ""
+fn get_env(name: string) -> string {
+    env := read_file("/proc/self/environ");
+    if str_len(env) == 0 { return ""; }
+    elen := str_len(env);
+    i : ., mut = 0;
+    loop {
+        if i >= elen { break; }
+        eq_pos : ., mut = -1;
+        j : ., mut = i;
+        loop {
+            if j >= elen { break; }
+            c := load8(env, j);
+            if c == 61 { eq_pos = j; break; }  // '='
+            if c == 0 { break; }  // null 分隔符
+            j = j + 1;
+        }
+        if eq_pos >= 0 {
+            key_len := eq_pos - i;
+            nlen := str_len(name);
+            if key_len == nlen {
+                is_match : ., mut = 1;
+                ki : ., mut = 0;
+                loop {
+                    if ki >= key_len { break; }
+                    if load8(env, i + ki) != load8(name, ki) { is_match = 0; break; }
+                    ki = ki + 1;
+                }
+                if is_match != 0 {
+                    val_start := eq_pos + 1;
+                    val_end : ., mut = val_start;
+                    loop {
+                        if val_end >= elen { break; }
+                        if load8(env, val_end) == 0 { break; }
+                        val_end = val_end + 1;
+                    }
+                    return str_sub(env, val_start, val_end - val_start);
+                }
+            }
+        }
+        while i < elen && load8(env, i) != 0 { i = i + 1; }
+        i = i + 1;
+    }
+    return "";
+}

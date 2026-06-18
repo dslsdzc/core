@@ -265,6 +265,13 @@ class Parser:
                 self.advance()
                 typ = self.parse_type()
             return (name, typ)
+        # Variadic parameter: ...name:type
+        if self.check(TokenType.DOT_DOT_DOT):
+            self.advance()
+            name = self.expect(TokenType.IDENT).lexeme
+            self.expect(TokenType.COLON)
+            typ = self.parse_type()
+            return (name, typ)
         name = self.expect(TokenType.IDENT).lexeme
         self.expect(TokenType.COLON)
         typ = self.parse_type()

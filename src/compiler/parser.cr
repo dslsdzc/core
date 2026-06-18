@@ -1439,7 +1439,7 @@ fn parse_all() {
         t_cur := cur_tok();
         t_kind := tok_k(t_cur);
         if t_kind == T_EOF { break; }
-        if ci > 5 { print("parse_all loop\n"); ci = 0; }
+        if ci > 5 { ci = 0; }
         prev_ast := g_ast_count;
         parse_declaration();
         if tok_k(cur_tok()) == T_EOF { break; }

@@ -188,13 +188,58 @@ class Interpreter:
                     elif a > b: self.vars[id(instr.dest)] = 1
                     else: self.vars[id(instr.dest)] = 0
                 return
-            if instr.func == 'print':
+            if instr.func == 'get_char':
                 s = self.vars.get(id(instr.args[0]), '')
-                print(s, end='')
+                idx = self.vars.get(id(instr.args[1]), 0)
+                if instr.dest:
+                    if isinstance(s, str) and 0 <= idx < len(s):
+                        self.vars[id(instr.dest)] = s[idx]
+                    elif isinstance(s, list) and 0 <= idx < len(s):
+                        self.vars[id(instr.dest)] = chr(s[idx] & 0xFF)
+                    else:
+                        self.vars[id(instr.dest)] = ''
                 return
-            if instr.func == 'println':
-                s = self.vars.get(id(instr.args[0]), '')
-                print(s)
+            if instr.func in ('print', 'println'):
+                is_println = instr.func == 'println'
+                for a in instr.args:
+                    s = self.vars.get(id(a), '')
+                    if isinstance(s, int):
+                        s = str(s)
+                    elif not isinstance(s, str):
+                        s = str(s)
+                    print(s, end='')
+                if is_println:
+                    print()
+                return
+            if instr.func == 'format':
+                fmt = self.vars.get(id(instr.args[0]), '')
+                parts = []
+                arg_idx = 1
+                i = 0
+                while i < len(fmt):
+                    if i + 1 < len(fmt) and fmt[i:i+2] == '{}':
+                        if arg_idx < len(instr.args):
+                            val = self.vars.get(id(instr.args[arg_idx]), '')
+                            if isinstance(val, int):
+                                val = str(val)
+                            parts.append(str(val))
+                            arg_idx += 1
+                        else:
+                            parts.append('{}')
+                        i += 2
+                    else:
+                        # Handle {name} style (Rust named placeholder) — skip unknown
+                        if fmt[i] == '{':
+                            close = fmt.find('}', i)
+                            if close >= 0:
+                                parts.append(fmt[i:close+1])
+                                i = close + 1
+                                continue
+                        parts.append(fmt[i])
+                        i += 1
+                result = ''.join(parts)
+                if instr.dest:
+                    self.vars[id(instr.dest)] = result
                 return
             if instr.func == 'get_arg':
                 import os
@@ -263,18 +308,44 @@ class Interpreter:
             if instr.func == 'load8':
                 s = self.vars.get(id(instr.args[0]))
                 idx = self.vars.get(id(instr.args[1]), 0)
-                if instr.dest and s is not None and idx >= 0 and idx < len(s):
-                    self.vars[id(instr.dest)] = ord(s[idx]) if isinstance(s, str) else (s[idx] & 0xFF)
-                elif instr.dest:
-                    self.vars[id(instr.dest)] = 0
+                if instr.dest:
+                    val = 0
+                    if s is not None and idx >= 0:
+                        if isinstance(s, str):
+                            if idx < len(s):
+                                val = ord(s[idx])
+                        elif isinstance(s, list):
+                            # Word-level list: extract byte from the correct 64-bit word
+                            word_idx = idx // 8
+                            byte_off = idx % 8
+                            if word_idx < len(s):
+                                entry = s[word_idx]
+                                if isinstance(entry, int):
+                                    val = (entry >> (byte_off * 8)) & 0xFF
+                                elif isinstance(entry, str):
+                                    val = ord(entry[0]) if len(entry) > 0 else 0
+                        elif isinstance(s, bytearray):
+                            if idx < len(s):
+                                val = s[idx]
+                    self.vars[id(instr.dest)] = val
                 return
             if instr.func == 'store8':
                 s = self.vars.get(id(instr.args[0]))
                 idx = self.vars.get(id(instr.args[1]), 0)
                 val = self.vars.get(id(instr.args[2]), 0)
-                if s is not None and idx >= 0 and idx < len(s):
-                    if isinstance(s, bytearray) or isinstance(s, list):
-                        s[idx] = val & 0xFF
+                if s is not None and idx >= 0:
+                    if isinstance(s, list):
+                        word_idx = idx // 8
+                        byte_off = idx % 8
+                        while len(s) <= word_idx:
+                            s.append(0)
+                        entry = s[word_idx]
+                        if isinstance(entry, int):
+                            mask = 0xFF << (byte_off * 8)
+                            s[word_idx] = (entry & ~mask) | ((val & 0xFF) << (byte_off * 8))
+                    elif isinstance(s, bytearray):
+                        if idx < len(s):
+                            s[idx] = val & 0xFF
                 if instr.dest:
                     self.vars[id(instr.dest)] = 0
                 return

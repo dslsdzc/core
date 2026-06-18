@@ -336,7 +336,7 @@ fn ir_gen_expr(node: int) -> int {
                 body3 := ast_data(fn_node3);
                 conc_type_ni3 := ast_int_val(node);
                 if conc_type_ni3 >= 0 && body3 >= 0 {
-                    gen_name3 := get_char(fi_generic_name(gen_fi, 0));
+                    gen_name3 := istr_get(fi_generic_name(gen_fi, 0));
                     conc_name3 := istr_get(conc_type_ni3);
                     ast_patch_node(body3, gen_name3, conc_name3);
                     // Bind params to arg vars
@@ -378,6 +378,73 @@ fn ir_gen_expr(node: int) -> int {
                 }
             }
         }
+        // Variadic expansion via name check (temporary: SYM_SO_FN lookup pending)
+        so_variadic : ., mut = 0;
+        so_print_ni : ., mut = -1;
+        if func_ni >= 0 && ac > 1 {
+            fn_name := istr_get(func_ni);
+            if fn_name == "print" || fn_name == "println" {
+                so_variadic = 1;
+                so_print_ni = func_ni;
+            }
+        }
+        // END SYM_SO_FN
+        if so_variadic != 0 {
+            is_println : ., mut = 0;
+            // Check if function name contains or ends with "ln" for newline
+            s := istr_get(func_ni);
+            sl := str_len(s);
+            if sl >= 4 {
+                c1 := load8(s, sl - 2);
+                if c1 == 108 {  // 'l'
+                    c2 := load8(s, sl - 1);
+                    if c2 == 110 { is_println = 1; }  // 'n'
+                }
+            }
+            print_ni2 : ., mut = str_intern("print");
+            last_v : ., mut = -1;
+            ai2 : ., mut = 0;
+            loop {
+                if ai2 >= ac { break; }
+                arg_v := r64(arg_vars, ai2 * 8);
+                // Auto-convert int args via int_str() if TAG_AUTO_STR
+                need_auto : ., mut = 0;
+                si2 := lookup_sym_global(func_ni);
+                if si2 >= 0 {
+                    tf2 := sym_type(si2);
+                    if tf2 == 2 || tf2 == 3 { need_auto = 1; }
+                } else {
+                    // Fallback: check by name for known functions
+                    fn_auto := istr_get(func_ni);
+                    if fn_auto == "print" || fn_auto == "println" { need_auto = 1; }
+                }
+                if need_auto != 0 {
+                    arg_ti2 := irv_type(arg_v);
+                    if arg_ti2 == TI_INT {
+                        cv := new_ir_var("conv", TI_STR);
+                        int_str_ni := str_intern("int_str");
+                        emit(IR_CALL, cv, arg_v, 1, int_str_ni, 0);
+                        arg_v = cv;
+                    }
+                }
+                pd := new_ir_var("p", TI_UNIT);
+                emit(IR_CALL, pd, arg_v, 1, print_ni2, 0);
+                last_v = pd;
+                ai2 = ai2 + 1;
+            }
+            // println: add trailing newline
+            if is_println != 0 {
+                nl_ni := str_intern("\n");
+                track_str_const(nl_ni);
+                nl_v := new_ir_var("nl", TI_STR);
+                emit(IR_CONST, nl_v, nl_ni, 0, 0, TI_STR);
+                pn := new_ir_var("pn", TI_UNIT);
+                emit(IR_CALL, pn, nl_v, 1, print_ni2, 0);
+                last_v = pn;
+            }
+            return last_v;
+        }
+
         // For method calls (EXPR_FIELD), func_ni was set by checker
         // Use it directly
         dest := new_ir_var("call", TI_UNIT);

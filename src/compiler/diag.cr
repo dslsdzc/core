@@ -135,7 +135,7 @@ fn print_parse_errors() {
     ei2 : ., mut = 0;
     loop {
         if ei2 >= g_error_count { break; }
-        println("error: " + get_char(r64(g_errors, ei2 * 8)));
+        println("error: " + istr_get(r64(g_errors, ei2 * 8)));
         ei2 = ei2 + 1;
     }
 }

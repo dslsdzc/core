@@ -42,8 +42,7 @@ fn corearch_main() -> int {
     nread := syscall3(0, fd, buf, fsize);
     syscall3(3, fd, 0, 0);
     if nread != fsize { println("error: cannot read"); return 1; }
-    r := load_ccr(buf, fsize); syscall3(1, 1, "D
-", 2);
+    r := load_ccr(buf, fsize);
     if r != 0 { println("error: invalid .ccr file"); return 1; }
     init_backend_arrays();
 
@@ -124,7 +123,7 @@ fn corearch_main() -> int {
         } else {
             // Dynamic linking: PLT/GOT
             ri : ., mut = 0; loop { if ri >= g_x86_ext_rel_count { break; }
-                fn_name := get_char(r64(g_x86_ext_rel_name, ri * 8));
+                fn_name := istr_get(r64(g_x86_ext_rel_name, ri * 8));
                 ctx_add_plt(fn_name, 0); ri = ri + 1; }
             ctx_set_user_code(cd, cs);
             sz = ctx_emit_dyn(g_elf_buf, out_path);

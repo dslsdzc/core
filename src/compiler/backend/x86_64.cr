@@ -616,9 +616,11 @@ fn x86_gen_function(func_idx: int) -> string {
         vi = vi + 1;
     }
 
-    if g_x86_stack_size > 0 {
+    stack_sz : ., mut = g_x86_stack_size;
+
+    if stack_sz > 0 {
         asm = asm + "    sub rsp, ";
-        asm = asm + int_str(g_x86_stack_size);
+        asm = asm + int_str(stack_sz);
         asm = asm + "\n";
     }
 
@@ -652,9 +654,9 @@ fn x86_gen_function(func_idx: int) -> string {
     asm = asm + ".Lret";
     asm = asm + int_str(g_x86_func_idx);
     asm = asm + ":\n";
-    if g_x86_stack_size > 0 {
+    if stack_sz > 0 {
         asm = asm + "    add rsp, ";
-        asm = asm + int_str(g_x86_stack_size);
+        asm = asm + int_str(stack_sz);
         asm = asm + "\n";
     }
     asm = asm + "    pop rbp\n    ret\n";

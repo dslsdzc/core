@@ -62,7 +62,7 @@ fn calc_ccr_size() -> int {
     si : ., mut = 0;
     loop {
         if si >= g_str_count { break; }
-        sl := str_len(si);
+        sl := istr_len(si);
         sz = sz + 4 + sl;
         si = si + 1;
     }
@@ -125,7 +125,7 @@ fn save_ccr(path: string) -> int {
     si : ., mut = 0;
     loop {
         if si >= g_str_count { break; }
-        sl := str_len(si);
+        sl := istr_len(si);
         buf_write_u32(buf, pos, sl); pos = pos + 4;
         ci : ., mut = 0;
         loop {
@@ -299,7 +299,7 @@ fn load_ccr(data: string, fsize: int) -> int {
     fi : ., mut = 0;
     loop {
         if fi >= func_cnt { break; }
-        fv0 := buf_read_u32(data, pos); pos = pos + 4; syscall3(1, 1, "D:W\n", 4); w64(g_ir_func_name_idx, fi * 8, fv0);
+        fv0 := buf_read_u32(data, pos); pos = pos + 4; w64(g_ir_func_name_idx, fi * 8, fv0);
         fv1 := buf_read_u32(data, pos); pos = pos + 4; w64(g_ir_func_param_count, fi * 8, fv1);
         fv2 := buf_read_u32(data, pos); pos = pos + 4; w64(g_ir_func_ret_type, fi * 8, fv2);
         fv3 := buf_read_u32(data, pos); pos = pos + 4; w64(g_ir_func_instr_start, fi * 8, fv3);
