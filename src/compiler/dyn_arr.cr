@@ -514,6 +514,13 @@ fn dyn_grow_x86_ret_patch(needed: int) {
     nc : ., mut = g_x86_ret_patch_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
     nb := alloc(nc * 8); _dyncpy(g_x86_ret_patch_pos, g_x86_ret_patch_cap * 8, nb);
     g_x86_ret_patch_pos = nb; g_x86_ret_patch_cap = nc; }
+fn dyn_grow_x86_call_patch(needed: int) {
+    if needed < g_x86_call_patch_cap { return; }
+    nc : ., mut = g_x86_call_patch_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+    n1 := alloc(nc * 8); _dyncpy(g_x86_call_patch_pos, g_x86_call_patch_cap * 8, n1); g_x86_call_patch_pos = n1;
+    n2 := alloc(nc * 8); _dyncpy(g_x86_call_patch_name, g_x86_call_patch_cap * 8, n2); g_x86_call_patch_name = n2;
+    g_x86_call_patch_cap = nc; }
+
 fn dyn_grow_x86_rodataref(needed: int) {
     if needed < g_x86_rodataref_cap { return; }
     nc : ., mut = g_x86_rodataref_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }

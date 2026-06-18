@@ -83,5 +83,7 @@ g_x86_global_off : string, mut;         g_x86_global_off_cnt : int, mut; g_x86_g
 g_x86_func_offsets : string, mut;       g_x86_func_offsets_cap : int, mut; g_x86_func_off_count : int, mut;
 g_x86_emit_vars : string, mut;          g_x86_emit_vars_cap : int, mut; g_x86_emit_var_count : int, mut; g_x86_emit_stack_size : int, mut;
 g_x86_ret_patch_pos : string, mut;      g_x86_ret_patch_cap : int, mut; g_x86_ret_patch_count : int, mut;
+g_x86_call_patch_pos : string, mut;     g_x86_call_patch_name : string, mut;
+g_x86_call_patch_count : int, mut;      g_x86_call_patch_cap : int, mut;
 g_x86_sub_rsp_pos : int, mut;
 g_x86_alloc_patch_pos : string, mut;    g_x86_alloc_patch_cap : int, mut; g_x86_alloc_patch_count : int, mut;

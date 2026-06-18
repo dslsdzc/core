@@ -305,6 +305,11 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         } else if str_len(fn2) > 0 {
             to := -1; tf := 0;
             loop { if tf >= g_x86_func_off_count { break; } if str_eq(istr_get(r64(g_x86_func_offsets, tf*16)), fn2) != 0 { to = r64(g_x86_func_offsets, tf*16+8); break; } tf = tf + 1; }
+                        // Record call position for post-emission patching
+            dyn_grow_x86_call_patch(g_x86_call_patch_count + 1);
+            w64(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp);
+            w64(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern(fn2));
+            g_x86_call_patch_count = g_x86_call_patch_count + 1;
             if to >= 0 {
                 cp = cp + e2_call(buf, pos+cp, (176 + to) - (pos + cp + 5));
             } else {

@@ -246,8 +246,15 @@ fn x86_64_elf_generate(buf: string) -> int {
 
     // ── All functions ──
     g_x86_ret_patch_count = 0;
-    fi = 0; loop { if fi >= g_ir_func_count { break; }
+        g_x86_call_patch_count = 0;
+fi = 0; loop { if fi >= g_ir_func_count { break; }
         ni := r64(g_ir_func_name_idx, fi * 8);
+        // Override with actual position for backward calls
+        fi3 := 0; loop { if fi3 >= g_x86_func_off_count { break; }
+            if str_eq(istr_get(r64(g_x86_func_offsets, fi3*16)), istr_get(ni)) != 0 {
+                w64(g_x86_func_offsets, fi3*16+8, cp - 176);
+                break; }
+        fi3 = fi3 + 1; }
         ist := r64(g_ir_func_instr_start, fi * 8);
         ic := r64(g_ir_func_instr_count, fi * 8);
         vc := g_ir_var_count;
@@ -311,8 +318,8 @@ fn x86_64_elf_generate(buf: string) -> int {
         }
         w8(buf, cp, 93); cp = cp + 1;  // pop rbp
         w8(buf, cp, 195); cp = cp + 1;  // ret
-    fi = fi + 1; }
 
+    
     // ── _init_globals ──
     w8(buf, cp, 85); cp = cp + 1;
     w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 229); cp = cp + 3;
