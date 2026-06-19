@@ -114,21 +114,25 @@ fn ir_interpret() -> int {
         if op == 4 {  // IR_CALL
             fn_ni := s3;
             fn_name := istr_get(fn_ni);
-            if str_eq(fn_name, "print") != 0 ||
-               str_eq(fn_name, "print") != 0 {
-                if s2 >= 1 { str_idx := r64(g_ir_vals, s1 * 8); sval := istr_get(str_idx); print(sval); }
-            }
-            if str_eq(fn_name, "println") != 0 ||
-               str_eq(fn_name, "println") != 0 {
-                if s2 >= 1 { str_idx := r64(g_ir_vals, s1 * 8); sval := istr_get(str_idx); println(sval); }
-            }
-            if str_eq(fn_name, "print_int") != 0 ||
-               str_eq(fn_name, "print_int") != 0 {
-                if s2 >= 1 { print(int_str(r64(g_ir_vals, s1 * 8))); }
-            }
-            if str_eq(fn_name, "println_int") != 0 ||
-               str_eq(fn_name, "println_int") != 0 {
-                if s2 >= 1 { println(int_str(r64(g_ir_vals, s1 * 8))); }
+            sfi := lookup_so_fn(fn_ni);
+            if sfi >= 0 && s2 >= 1 {
+                tf := sym_type(sfi);
+                if tf == 1 || tf == 3 {  // TAG_VARIADIC: print/println
+                    str_idx := r64(g_ir_vals, s1 * 8);
+                    sval := istr_get(str_idx);
+                    fn_name2 := istr_get(fn_ni);
+                    is_ln : ., mut = 0;
+                    fnl := str_len(fn_name2);
+                    if fnl >= 4 && load8(fn_name2, fnl-2) == 108 && load8(fn_name2, fnl-1) == 110 { is_ln = 1; }
+                    if is_ln != 0 { println(sval); } else { print(sval); }
+                } else if tf == 2 || tf == 3 {  // TAG_AUTO_STR: print_int/println_int
+                    val := r64(g_ir_vals, s1 * 8);
+                    fn_name2 := istr_get(fn_ni);
+                    is_ln : ., mut = 0;
+                    fnl := str_len(fn_name2);
+                    if fnl >= 4 && load8(fn_name2, fnl-2) == 108 && load8(fn_name2, fnl-1) == 110 { is_ln = 1; }
+                    if is_ln != 0 { println(int_str(val)); } else { print(int_str(val)); }
+                }
             }
             // syscall3 — 解释器模式下返回 0（字符串常量在值存储中是指针还是索引不明确）
             if str_eq(fn_name, "syscall3") != 0 {
