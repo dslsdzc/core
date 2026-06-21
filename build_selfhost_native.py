@@ -98,26 +98,13 @@ def compile_and_assemble(src, label, out_name):
 
 def build_runtime():
     """Build the shared runtime .o once."""
-    asm_files = ['src/runtime/rt.s', 'src/scheduler/sched.s']
-    objs = []
-    for af in asm_files:
-        label = os.path.basename(af)
-        print(f"--- Runtime ({label}) ---")
-        obj = f'build/{label.replace(".s", ".o")}'
-        result = subprocess.run(['as', '-o', obj, af],
-                                capture_output=True, text=True)
-        if result.returncode != 0:
-            print(f"  Assembly failed: {result.stderr}")
-            sys.exit(1)
-        objs.append(obj)
-        print(f"  -> {obj}")
-    # Merge all runtime objects into one
-    result = subprocess.run(['ld', '-r', '-o', 'build/runtime.o'] + objs,
+    print("--- Runtime (rt.s) ---")
+    result = subprocess.run(['as', '-o', 'build/runtime.o', 'src/runtime/rt.s'],
                             capture_output=True, text=True)
     if result.returncode != 0:
-        print(f"  Merge failed: {result.stderr}")
+        print(f"  Assembly failed: {result.stderr}")
         sys.exit(1)
-    print("  -> build/runtime.o (merged)\n")
+    print("  -> build/runtime.o\n")
 
 
 def main():
@@ -151,7 +138,6 @@ def main():
             'src/stdlib/toml.cr',
             'src/compiler/project.cr',
             'src/stdlib/os.cr',
-            'src/scheduler/sched.cr',
             'src/compiler/interp.cr',
             'src/compiler/dump.cr',
             'src/compiler/main.cr',
