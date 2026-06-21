@@ -78,7 +78,7 @@ g_ch_count : int, mut;
 // Chunk helpers
 // ============================================================
 
-fn dyn_grow_chunks(needed: int) {
+fn grow_chunks(needed: int) {
     nc : ., mut = g_ch_kind_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
     nb := alloc(nc * 8); zi : ., mut = 0; loop { if zi >= nc * 8 { break; } store8(nb, zi, 0); zi = zi + 1; } _dyncpy(g_ch_kind, g_ch_kind_cap * 8, nb); g_ch_kind = nb; g_ch_kind_cap = nc;
     nb2 := alloc(nc * 8); zi = 0; loop { if zi >= nc * 8 { break; } store8(nb2, zi, 0); zi = zi + 1; } _dyncpy(g_ch_vaddr, g_ch_vaddr_cap * 8, nb2); g_ch_vaddr = nb2; g_ch_vaddr_cap = nc;
@@ -86,7 +86,7 @@ fn dyn_grow_chunks(needed: int) {
     nb4 := alloc(nc * 8); zi = 0; loop { if zi >= nc * 8 { break; } store8(nb4, zi, 0); zi = zi + 1; } _dyncpy(g_ch_size, g_ch_size_cap * 8, nb4); g_ch_size = nb4; g_ch_size_cap = nc; }
 
 fn cnew(k: int) {
-    dyn_grow_chunks(g_ch_count + 1);
+    grow_chunks(g_ch_count + 1);
     w64(g_ch_kind, g_ch_count * 8, k);
     w64(g_ch_vaddr, g_ch_count * 8, 0);
     w64(g_ch_foff, g_ch_count * 8, 0);

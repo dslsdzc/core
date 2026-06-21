@@ -17,7 +17,7 @@ fn init_df() {
     fi : ., mut = 0;
     loop {
         if fi >= g_func_count { break; }
-        dyn_grow_df_arrays(fi + 1);
+        grow_df_arrays(fi + 1);
         w64(g_df_func_node_start, fi * 8, -1);
         w64(g_df_func_node_count, fi * 8, 0);
         fi = fi + 1;
@@ -25,7 +25,7 @@ fn init_df() {
     vi : ., mut = 0;
     loop {
         if vi >= g_ir_var_count { break; }
-        dyn_grow_df_arrays(vi + 1);
+        grow_df_arrays(vi + 1);
         w64(g_df_var_producer, vi * 8, -1);
         vi = vi + 1;
     }
@@ -35,7 +35,7 @@ fn init_df() {
 
 fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, type_kind: int) -> int {
     nid := g_df_node_count;
-    dyn_grow_df_nodes(nid + 1);
+    grow_df_nodes(nid + 1);
     w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_OPCODE, opcode);
     w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_DEST, dest);
     w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_S1, src1);
@@ -48,7 +48,7 @@ fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, type_
 
     // Record that this node produces `dest`
     if dest >= 0 {
-        dyn_grow_df_arrays(dest + 1);
+        grow_df_arrays(dest + 1);
         w64(g_df_var_producer, dest * 8, nid);
     }
 
@@ -63,7 +63,7 @@ fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, type_
 fn df_add_edge(from_id: int, to_id: int) {
     if from_id < 0 || to_id < 0 { return; }
     eid := g_df_edge_count;
-    dyn_grow_df_edges(eid + 1);
+    grow_df_edges(eid + 1);
     w64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_FROM, from_id);
     w64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_TO, to_id);
     old_first := r64(g_df_nodes, from_id * ESZ_DFNODE + OFF_DF_FIRST_EDGE);
@@ -197,7 +197,7 @@ fn lower_to_ccr() {
     loop {
         if ni >= g_df_node_count { break; }
         idx := g_ir_instr_count;
-        dyn_grow_ir_instrs(idx + 1);
+        grow_ir_instrs(idx + 1);
         iri_set_op(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE));
         iri_set_dest(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST));
         iri_set_s1(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1));
@@ -213,7 +213,7 @@ fn lower_to_ccr() {
 
 fn df_begin_func(func_idx: int) {
     if func_idx >= 0 {
-        dyn_grow_df_arrays(func_idx + 1);
+        grow_df_arrays(func_idx + 1);
         w64(g_df_func_node_start, func_idx * 8, g_df_node_count);
     }
 }

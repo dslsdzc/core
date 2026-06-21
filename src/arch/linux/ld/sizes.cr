@@ -2,9 +2,9 @@
 // Single source of truth for all x86-64 instruction byte sizes.
 //
 // Every instruction size in the backend comes from here:
-//   - arch_instr_size() calls these helpers
+//   - instr_size() calls these helpers
 //   - Phase 2 prologue/epilogue uses these helpers
-//   - x86_emit_instr() returns sizes via e2_* return values (must match)
+//   - emit_instr() returns sizes via e2_* return values (must match)
 //
 // NEVER hardcode byte counts in elf.cr, instr.cr, or resolve.cr.
 // Change a size here → all phases automatically agree.

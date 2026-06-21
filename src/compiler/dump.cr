@@ -187,7 +187,7 @@ fn cmd_ir(src_path: string) -> int {
     g_source_dir = dirname(src_path);
     tokenize();
     g_str_count = 0;
-    resolve_imports();
+    res_imports();
     parse_all();
     check_all();
     if g_diag_count > 0 { print_diagnostics(); return 1; }
@@ -229,7 +229,7 @@ fn cmd_cir(src_path: string) -> int {
     g_source_dir = dirname(src_path);
     tokenize();
     g_str_count = 0;
-    resolve_imports();
+    res_imports();
     parse_all();
     check_all();
     if g_diag_count > 0 { print_diagnostics(); return 1; }

@@ -16,11 +16,11 @@ fn println(s: string) {
     return;
 }
 
-fn print_int(n: int) {
+fn print_i(n: int) {
     print(int_str(n));
 }
 
-fn println_int(n: int) {
+fn println_i(n: int) {
     println(int_str(n));
 }
 

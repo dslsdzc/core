@@ -60,7 +60,7 @@ fn is_decl_stmt(s: string) -> int {
     return 0;
 }
 
-// Detect imports (uses resolve_imports which is already called before this point)
+// Detect imports (uses res_imports which is already called before this point)
 fn detect_imports(src: string) -> int {
     sl := str_len(src); i : ., mut = 0; cnt : ., mut = 0;
     loop { if i + 6 >= sl { break; }
@@ -114,7 +114,7 @@ fn read_source_or_project(src_path: string) -> int {
 // Returns 0 on success, 1 on error.
 fn run_frontend() -> int {
     tokenize();
-    resolve_imports();
+    res_imports();
     parse_all();
     if g_diag_count > 0 { print_diagnostics(); return 1; }
     if g_error_count > 0 { print_parse_errors(); return 1; }
@@ -418,7 +418,7 @@ fn corec_main() -> int {
 fn compile_source(source: string) -> string {
     g_source = source;
     tokenize();
-    resolve_imports();
+    res_imports();
     parse_all();
     check_all();
     if g_diag_count > 0 {

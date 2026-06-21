@@ -1,7 +1,7 @@
 // === resolve.cr ===
 // Generic label→offset resolution pass.
 //
-// Uses arch_instr_size() provided by the backend to lay out instruction
+// Uses instr_size() provided by the backend to lay out instruction
 // bytes, records label positions, then patches IR_BRANCH and IR_JUMP with
 // resolved byte offsets directly into src2/src3/src1.
 //
@@ -13,7 +13,7 @@
 // The backend's emit_instr() can then write branch instructions using
 // the pre-computed offsets, no label table lookup needed.
 
-fn resolve_labels() {
+fn res_labels() {
     fi : ., mut = 0;
     loop {
         if fi >= g_ir_func_count { break; }
@@ -40,12 +40,12 @@ fn resolve_labels() {
             if iri_op(inst_idx) == IR_LABEL {
                 ln := iri_s1(inst_idx);
                 if ln >= 0 {
-                    dyn_grow_label_poses(ln + 1);
+                    grow_label_poses(ln + 1);
                     w64(g_label_poses, ln * 8, off);
                     if ln + 1 > g_label_count { g_label_count = ln + 1; }
                 }
             } else {
-                off = off + x86_emit_instr(inst_idx, alloc(256), off);
+                off = off + emit_instr(inst_idx, alloc(256), off);
             }
             ii = ii + 1;
         }

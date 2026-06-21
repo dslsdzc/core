@@ -8,7 +8,7 @@ g_col : int, mut;
 
 fn add_error(msg: string) {
     mi := str_intern(msg);
-    dyn_grow_errors(g_error_count + 1); if 1 {
+    grow_errors(g_error_count + 1); if 1 {
         w64(g_errors, g_error_count * 8, mi);
         g_error_count = g_error_count + 1;
     }
@@ -51,7 +51,7 @@ fn skip_whitespace() {
 }
 
 fn add_token(kind: int) {
-    dyn_grow_tokens(g_token_count + 1);
+    grow_tokens(g_token_count + 1);
     tp := g_token_count * ESZ_TOKEN;
     w64(g_tokens, tp + OFF_TK_KIND, kind);
     w64(g_tokens, tp + OFF_TK_LEXEME, -1);  // no lexeme
@@ -62,7 +62,7 @@ fn add_token(kind: int) {
 }
 
 fn add_token_str(kind: int, lexeme: string) {
-    dyn_grow_tokens(g_token_count + 1);
+    grow_tokens(g_token_count + 1);
     tp := g_token_count * ESZ_TOKEN;
     li := str_intern(lexeme);
     w64(g_tokens, tp + OFF_TK_KIND, kind);
@@ -74,7 +74,7 @@ fn add_token_str(kind: int, lexeme: string) {
 }
 
 fn add_token_int(kind: int, val: int) {
-    dyn_grow_tokens(g_token_count + 1);
+    grow_tokens(g_token_count + 1);
     tp := g_token_count * ESZ_TOKEN;
     w64(g_tokens, tp + OFF_TK_KIND, kind);
     w64(g_tokens, tp + OFF_TK_LEXEME, -1);

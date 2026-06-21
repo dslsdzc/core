@@ -34,7 +34,7 @@ fn g2_slot(v: int) -> int {
 fn g2_str_off(si: int) -> int {
     o := 0; i := 0;
     loop { if i >= g_x86_str_count { break; } if r64(g_x86_str_offs, i * 8) == si { return o; } o = o + istr_len(r64(g_x86_str_offs, i * 8)) + 1; i = i + 1; }
-    dyn_grow_x86_str_offs(g_x86_str_count + 1); w64(g_x86_str_offs, g_x86_str_count * 8, si); g_x86_str_count = g_x86_str_count + 1;
+    grow_str_offs(g_x86_str_count + 1); w64(g_x86_str_offs, g_x86_str_count * 8, si); g_x86_str_count = g_x86_str_count + 1;
     return o;
 }
 
@@ -138,8 +138,8 @@ fn e2_alu(b: string, p: int, op: int) -> int {
     e2_w8(b, p, 77); e2_w8(b, p+1, op); e2_w8(b, p+2, 192 + (11%8)*8 + (10%8)); return 3;
 }
 
-// ── x86_emit_instr: write one instruction to buffer, return bytes written ──
-fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
+// ── emit_instr: write one instruction to buffer, return bytes written ──
+fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     op := iri_op(instr_idx); d := iri_dest(instr_idx); s1 := iri_s1(instr_idx); s2 := iri_s2(instr_idx); s3 := iri_s3(instr_idx); ti := iri_tk(instr_idx);
     cp := 0;
 
@@ -150,7 +150,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         if ti == TI_STR {
             ro := g2_str_off(s1);
             // Record for post-emission patching (rodata position from Phase 3)
-            dyn_grow_x86_rodataref(g_x86_rodataref_count + 1);
+            grow_rodataref(g_x86_rodataref_count + 1);
             w64(g_x86_rodataref_pos, g_x86_rodataref_count * 8, pos + cp);
             w64(g_x86_rodataref_ro, g_x86_rodataref_count * 8, ro);
             g_x86_rodataref_count = g_x86_rodataref_count + 1;
@@ -227,7 +227,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
             to := -1; tf := 0;
             loop { if tf >= g_x86_func_off_count { break; } if str_eq(istr_get(r64(g_x86_func_offsets, tf*16)), fn2) != 0 { to = r64(g_x86_func_offsets, tf*16+8); break; } tf = tf + 1; }
                         // Record call position for post-emission patching
-            dyn_grow_x86_call_patch(g_x86_call_patch_count + 1);
+            grow_call_patch(g_x86_call_patch_count + 1);
             w64(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp);
             w64(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern(fn2));
             g_x86_call_patch_count = g_x86_call_patch_count + 1;
@@ -235,7 +235,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
                 cp = cp + e2_call(buf, pos+cp, (176 + to) - (pos + cp + 5));
             } else {
                 // Unknown function: emit external relocation (for dynamic linking)
-                dyn_grow_x86_ext_rel(g_x86_ext_rel_count + 1);
+                grow_ext_rel(g_x86_ext_rel_count + 1);
                 w64(g_x86_ext_rel_pos, g_x86_ext_rel_count * 8, pos + cp + 1);
                 w64(g_x86_ext_rel_name, g_x86_ext_rel_count * 8, s3);
                 g_x86_ext_rel_count = g_x86_ext_rel_count + 1;
@@ -252,7 +252,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     if op == IR_RETURN {
         if s1 >= 0 { cp = cp + e2_ld(buf, pos+cp, 0, g2_slot(s1)); }
         // record position for caller to patch jmp → epilogue
-        dyn_grow_x86_ret_patch(g_x86_ret_patch_count + 1); w64(g_x86_ret_patch_pos, g_x86_ret_patch_count * 8, pos + cp);
+        grow_ret_patch(g_x86_ret_patch_count + 1); w64(g_x86_ret_patch_pos, g_x86_ret_patch_count * 8, pos + cp);
         g_x86_ret_patch_count = g_x86_ret_patch_count + 1;
         cp = cp + e2_jmp(buf, pos+cp, 0);
         return cp;
@@ -272,7 +272,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
                 fc := si_field_count(si);
                 if fc > 0 {
                     e2_w8(buf, pos+cp, 191); e2_w32(buf, pos+cp+1, fc * 8); cp = cp + 5;  // mov edi, size
-                    dyn_grow_x86_alloc_patch(g_x86_alloc_patch_count + 1); w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp);
+                    grow_alloc_patch(g_x86_alloc_patch_count + 1); w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp);
                     g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1;
                     e2_w8(buf, pos+cp, 232); e2_w32(buf, pos+cp+1, 0); cp = cp + 5;  // call placeholder
                     cp = cp + e2_st(buf, pos+cp, 0, do2);
@@ -286,7 +286,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         do2 := g2_slot(d); sz := s1 * 8;
         if sz > 0 {
             e2_w8(buf, pos+cp, 191); e2_w32(buf, pos+cp+1, sz); cp = cp + 5;  // mov edi, size
-            dyn_grow_x86_alloc_patch(g_x86_alloc_patch_count + 1); w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp);
+            grow_alloc_patch(g_x86_alloc_patch_count + 1); w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp);
             g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1;
             e2_w8(buf, pos+cp, 232); e2_w32(buf, pos+cp+1, 0); cp = cp + 5;  // call placeholder
             cp = cp + e2_st(buf, pos+cp, 0, do2);
@@ -298,7 +298,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         do2 := g2_slot(d);
         if s1 >= 0 && s1 < g_x86_global_cap {
             if r64(g_x86_is_global, s1 * 8) != 0 {
-                dyn_grow_x86_rip_patch(g_x86_rip_patch_count + 1);
+                grow_rip_patch(g_x86_rip_patch_count + 1);
                 w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3);
                 w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1);
                 g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
@@ -316,7 +316,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
             if r64(g_x86_is_global, s1 * 8) != 0 {
                 o2 := g2_slot(s2);
                 cp = cp + e2_ld(buf, pos+cp, 10, o2);
-                dyn_grow_x86_rip_patch(g_x86_rip_patch_count + 1);
+                grow_rip_patch(g_x86_rip_patch_count + 1);
                 w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3);
                 w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1);
                 g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
@@ -431,7 +431,7 @@ fn x86_emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     if op == IR_MAKE_ENUM && d >= 0 {
         do2 := g2_slot(d); alloc_size := 8 + s2 * 8;
         e2_w8(buf, pos+cp, 191); e2_w32(buf, pos+cp+1, alloc_size); cp = cp + 5;  // mov edi, size
-        dyn_grow_x86_alloc_patch(g_x86_alloc_patch_count + 1); w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp);
+        grow_alloc_patch(g_x86_alloc_patch_count + 1); w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp);
         g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1;
         e2_w8(buf, pos+cp, 232); e2_w32(buf, pos+cp+1, 0); cp = cp + 5;  // call placeholder
         cp = cp + e2_st(buf, pos+cp, 0, do2);

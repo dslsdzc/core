@@ -103,7 +103,7 @@ fn parse_type() -> int {
             }
         }
     } else if tok_k(t) == T_LBRACE {
-        dyn_grow_diags(g_diag_count + 1);
+        grow_diags(g_diag_count + 1);
         w64(g_diags, g_diag_count * 32, EC_P_EXPECTED);
         store_str_ptr(g_diags, g_diag_count * 32 + 8, "expected type after '->', got '{' — missing return type?");
         w64(g_diags, g_diag_count * 32 + 16, line);
@@ -111,7 +111,7 @@ fn parse_type() -> int {
         g_diag_count = g_diag_count + 1;
         res = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, line, col);
     } else {
-        dyn_grow_diags(g_diag_count + 1);
+        grow_diags(g_diag_count + 1);
         w64(g_diags, g_diag_count * 32, EC_P_EXPECTED);
         store_str_ptr(g_diags, g_diag_count * 32 + 8, "expected type after '->'");
         w64(g_diags, g_diag_count * 32 + 16, line);
@@ -503,7 +503,7 @@ fn parse_block() -> int {
     i : ., mut = 0;
     loop {
         if i >= sc { break; }
-        dyn_grow_block_stmts(g_block_stmt_count + 1);
+        grow_block_stmts(g_block_stmt_count + 1);
         w64(g_block_stmts, g_block_stmt_count * 8, r64(local_stmts, i * 8));
         g_block_stmt_count = g_block_stmt_count + 1;
         i = i + 1;
@@ -910,7 +910,7 @@ fn parse_generics_into(names: string, constrs: string) -> int {
     return 0;
 }
 
-fn store_func_generics(fi: int, names: string, count: int) {
+fn save_func_generics(fi: int, names: string, count: int) {
     fi_set_generic_count(fi, count);
     gi : ., mut = 0;
     loop {
@@ -921,13 +921,13 @@ fn store_func_generics(fi: int, names: string, count: int) {
     }
 }
 
-fn store_func_generic_constrs(fi: int, constrs: string, count: int) {
+fn save_func_gen_constrs(fi: int, constrs: string, count: int) {
     gi : ., mut = 0;
     loop {
         if gi >= count { break; }
         if r64(constrs, gi * 8) >= 0 {
             idx := fi * MAX_GENERICS + gi;
-            dyn_grow_generic_constr(idx + 1);
+            grow_gen_constr(idx + 1);
             w64(g_generic_constr, idx * 8, r64(constrs, gi * 8));
             if idx + 1 > g_generic_constr_count { g_generic_constr_count = idx + 1; }
         }
@@ -937,7 +937,7 @@ fn store_func_generic_constrs(fi: int, constrs: string, count: int) {
 
 fn add_func(name: string, pc: int, rt: int, an: int) -> int {
     idx := g_func_count;
-    dyn_grow_funcs(idx + 1);
+    grow_funcs(idx + 1);
     ni := str_intern(name);
     fi_set_name(idx, ni);
     fi_set_param_count(idx, pc);
@@ -949,7 +949,7 @@ fn add_func(name: string, pc: int, rt: int, an: int) -> int {
 
 fn add_struct(name: string) -> int {
     idx := g_struct_count;
-    dyn_grow_structs(idx + 1);
+    grow_structs(idx + 1);
     ni := str_intern(name);
     base := idx * ESZ_STRUCTINFO;
     // Zero the entire struct entry
@@ -966,7 +966,7 @@ fn add_struct(name: string) -> int {
 
 fn add_enum(name: string) -> int {
     idx := g_enum_count;
-    dyn_grow_enums(idx + 1);
+    grow_enums(idx + 1);
     ni := str_intern(name);
     base := idx * ESZ_ENUMINFO;
     // Zero the entire enum entry
@@ -981,7 +981,7 @@ fn add_enum(name: string) -> int {
     return idx;
 }
 
-fn parse_fn_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int) {
+fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int) {
     gnames : string, mut;    gnames_cap : int, mut;
     gconstrs : string, mut;    gconstrs_cap : int, mut;
     gconstrs = alloc(64 * 8); gconstrs_cap = 64;
@@ -1067,7 +1067,7 @@ fn parse_fn_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int) {
 
     fn_node := alloc_node(EXPR_FN, fn_ni, pf, pc, rtv, rt, body, fn_line, fn_col);
     fi := add_func(fn_name, pc, rtv, fn_node);
-    if fi >= 0 && gc > 0 { store_func_generics(fi, gnames, gc); store_func_generic_constrs(fi, gconstrs, gc); }
+    if fi >= 0 && gc > 0 { save_func_generics(fi, gnames, gc); save_func_gen_constrs(fi, gconstrs, gc); }
     // Store param types in FuncInfo
     if fi >= 0 { pstore_i : ., mut = 0; pstore_n : ., mut = pf;
         loop { if pstore_i >= pc { break; } if pstore_n < 0 { break; }
@@ -1087,7 +1087,7 @@ fn parse_declaration() {
         nt := advance_tok();
         name := tok_lx(nt);
         ni := str_intern(name);
-        parse_fn_body(name, ni, tok_ln(t), tok_cl(t));
+        parse_body(name, ni, tok_ln(t), tok_cl(t));
         return;
     }
 
@@ -1199,7 +1199,7 @@ fn parse_declaration() {
         advance_tok(); // {
 
         // Allocate interface entry
-        dyn_grow_ifaces(g_iface_count + 1);
+        grow_ifaces(g_iface_count + 1);
         iface_base := g_iface_count * ESZ_IFACEINFO;
         // Zero it out
         zi : ., mut = 0;
@@ -1258,7 +1258,7 @@ fn parse_declaration() {
 
                 // Store method in interface entry (with overflow checks)
                 if method_count >= 16 {
-                    dyn_grow_diags(g_diag_count + 1);
+                    grow_diags(g_diag_count + 1);
                     w64(g_diags, g_diag_count * 32, EC_P_FIELD_SYNTAX);
                     store_str_ptr(g_diags, g_diag_count * 32 + 8, "interface '" + iface_name + "' exceeds max 16 methods");
                     w64(g_diags, g_diag_count * 32 + 16, tok_ln(t)); w64(g_diags, g_diag_count * 32 + 24, tok_cl(t));
@@ -1273,7 +1273,7 @@ fn parse_declaration() {
                         w64(g_ifaces, mbase + OFF_IFM_PARAM_TYPES + pj * 8, r64(param_tis, pj * 8));
                         pj = pj + 1; }
                     if pc > 8 {
-                        dyn_grow_diags(g_diag_count + 1);
+                        grow_diags(g_diag_count + 1);
                         w64(g_diags, g_diag_count * 32, EC_P_PARAM_TYPE);
                         store_str_ptr(g_diags, g_diag_count * 32 + 8, "method '" + istr_get(method_ni) + "' in interface exceeds max 8 params");
                         w64(g_diags, g_diag_count * 32 + 16, tok_ln(t)); w64(g_diags, g_diag_count * 32 + 24, tok_cl(t));
@@ -1315,9 +1315,9 @@ fn parse_declaration() {
                 method_ni := str_intern(method_name);
                 mangled := type_name + "." + method_name;
                 mangled_ni := str_intern(mangled);
-                parse_fn_body(mangled, mangled_ni, tok_ln(ft), tok_cl(ft));
+                parse_body(mangled, mangled_ni, tok_ln(ft), tok_cl(ft));
                 // Register in method lookup table
-                dyn_grow_methods(g_method_count + 1);
+                grow_methods(g_method_count + 1);
                 w64(g_methods, g_method_count * 24, type_ni);
                 w64(g_methods, g_method_count * 24 + 8, method_ni);
                 w64(g_methods, g_method_count * 24 + 16, mangled_ni);
@@ -1329,7 +1329,7 @@ fn parse_declaration() {
         advance_tok(); // }
         // Store impl-for relationship after processing all methods
         if trait_ni >= 0 {
-            dyn_grow_impl_for(g_impl_for_count + 1);
+            grow_impl_for(g_impl_for_count + 1);
             w64(g_impl_for, g_impl_for_count * 16, trait_ni);
             w64(g_impl_for, g_impl_for_count * 16 + 8, type_ni);
             g_impl_for_count = g_impl_for_count + 1;
@@ -1345,7 +1345,7 @@ fn parse_declaration() {
         advance_tok();
         type_node := parse_type();
         advance_tok(); // ;
-        dyn_grow_type_aliases(g_type_alias_count + 1);
+        grow_type_aliases(g_type_alias_count + 1);
         w64(g_type_aliases, g_type_alias_count * 16, name_idx);
         w64(g_type_aliases, g_type_alias_count * 16 + 8, type_node);
         g_type_alias_count = g_type_alias_count + 1;
@@ -1367,7 +1367,7 @@ fn parse_declaration() {
         }
         mod_ni := str_intern(path_name);
         // Store mod path for checker registration
-        dyn_grow_mod_paths(g_mod_path_count + 1);
+        grow_mod_paths(g_mod_path_count + 1);
         w64(g_mod_path_names, g_mod_path_count * 8, mod_ni);
         g_mod_path_count = g_mod_path_count + 1;
         if check(T_LBRACE) {
@@ -1405,14 +1405,14 @@ fn parse_declaration() {
     // New syntax global variable declaration
     if check(T_IDENT) && is_new_var_decl() {
         node := parse_new_var_decl();
-        dyn_grow_global_lets(g_global_let_count + 1);
+        grow_global_lets(g_global_let_count + 1);
         w64(g_global_lets, g_global_let_count * 8, node);
         g_global_let_count = g_global_let_count + 1;
         // Drain any batch extras to globals
         loop {
             if g_extra_let_count <= 0 { break; }
             g_extra_let_count = g_extra_let_count - 1;
-            dyn_grow_global_lets(g_global_let_count + 1);
+            grow_global_lets(g_global_let_count + 1);
             w64(g_global_lets, g_global_let_count * 8, r64(g_extra_lets, g_extra_let_count * 8));
         }
         g_extra_let_count = 0;

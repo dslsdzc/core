@@ -259,12 +259,12 @@ fn load_ccr(data: string, fsize: int) -> int {
     enum_cnt := buf_read_u32(data, pos); pos = pos + 4;
 
     // Grow dynamic arrays to needed capacity
-    dyn_grow_ir_vars(var_cnt);
-    dyn_grow_ir_instrs(instr_cnt);
-    dyn_grow_ir_func_meta(func_cnt);
-    dyn_grow_ir_str_consts(str_const_cnt);
-    dyn_grow_structs(struct_cnt);
-    dyn_grow_enums(enum_cnt);
+    grow_ir_vars(var_cnt);
+    grow_ir_instrs(instr_cnt);
+    grow_ir_func_meta(func_cnt);
+    grow_ir_str_consts(str_const_cnt);
+    grow_structs(struct_cnt);
+    grow_enums(enum_cnt);
 
     // Reset arrays
     g_str_count = 0;

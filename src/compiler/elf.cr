@@ -503,7 +503,7 @@ fn asm_to_bytes(asm_text: string) -> string {
                 }
                 num_str := str_sub(line, digit_start, llen - 1 - digit_start);
                 label_num := str_int(num_str);
-                if label_num >= 0 { dyn_grow_label_poses(label_num + 1); w64(g_label_poses, label_num * 8, total_size); if label_num + 1 > g_label_count { g_label_count = label_num + 1; } }
+                if label_num >= 0 { grow_label_poses(label_num + 1); w64(g_label_poses, label_num * 8, total_size); if label_num + 1 > g_label_count { g_label_count = label_num + 1; } }
             }
         } else {
             if skip_dir(line) == 0 { total_size = total_size + measure_instr(line); }

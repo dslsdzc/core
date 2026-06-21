@@ -8,7 +8,7 @@
 
 fn alloc_type(kind: int, data: int, extra: int) -> int {
     idx := g_type_count;
-    dyn_grow_types(idx + 1);
+    grow_types(idx + 1);
     w64(g_types, idx * 24, kind);
     w64(g_types, idx * 24 + 8, data);
     w64(g_types, idx * 24 + 16, extra);
@@ -31,7 +31,7 @@ g_rt_builtin_count : int, mut;
 g_rt_builtin_names : string, mut;
 g_rt_builtin_ret_types : string, mut;
 
-fn init_rt_builtins() {
+fn init_builtins() {
     g_rt_builtin_count = 0; g_rt_builtin_names = alloc(8 * 8); g_rt_builtin_ret_types = alloc(8 * 8);
 
     bi_add("load8", TI_INT);
@@ -141,7 +141,7 @@ struct SymEntry {
 }
 
 fn push_scope() {
-    dyn_grow_scope_bounds(g_scope_depth + 1);
+    grow_scope_bounds(g_scope_depth + 1);
     w64(g_scope_bounds, g_scope_depth * 8, g_sym_count);
     g_scope_depth = g_scope_depth + 1;
 }
@@ -153,8 +153,8 @@ fn pop_scope() {
     }
 }
 
-fn define_sym(name_idx: int, kind: int, type_idx: int, node_idx: int) {
-    dyn_grow_syms(g_sym_count + 1);
+fn def_sym(name_idx: int, kind: int, type_idx: int, node_idx: int) {
+    grow_syms(g_sym_count + 1);
     sym_set_name(g_sym_count, name_idx);
     sym_set_kind(g_sym_count, kind);
     sym_set_type(g_sym_count, type_idx);
@@ -162,7 +162,7 @@ fn define_sym(name_idx: int, kind: int, type_idx: int, node_idx: int) {
     g_sym_count = g_sym_count + 1;
 }
 
-fn lookup_sym(name_idx: int) -> int {
+fn find_sym(name_idx: int) -> int {
     i : ., mut = g_sym_count - 1;
     loop {
         if i < 0 { return -1; }
@@ -172,7 +172,7 @@ fn lookup_sym(name_idx: int) -> int {
     return -1;
 }
 
-fn lookup_sym_global(name_idx: int) -> int {
+fn find_gsym(name_idx: int) -> int {
     i : ., mut = g_sym_count - 1;
     loop {
         if i < 0 { return -1; }
@@ -182,7 +182,7 @@ fn lookup_sym_global(name_idx: int) -> int {
     return -1;
 }
 
-fn lookup_so_fn(name_idx: int) -> int {
+fn find_so_fn(name_idx: int) -> int {
     i : ., mut = 0;  // forward scan — SYM_SO_FN entries are before SYM_FN
     loop {
         if i >= g_sym_count { return -1; }
@@ -200,7 +200,7 @@ fn lookup_so_fn(name_idx: int) -> int {
 // Old g_check_errors is replaced by structured g_diags.
 
 fn check_error(code: int, msg: string, line: int, col: int) {
-    dyn_grow_diags(g_diag_count + 1);
+    grow_diags(g_diag_count + 1);
     w64(g_diags, g_diag_count * 32, code);
     store_str_ptr(g_diags, g_diag_count * 32 + 8, msg);
     w64(g_diags, g_diag_count * 32 + 16, line);
@@ -237,7 +237,7 @@ fn check_borrow(var_ni: int, is_mut: int) -> bool {
         }
     }
     // First borrow of this variable
-    dyn_grow_borrow_vars(g_borrow_count + 1);
+    grow_borrow_vars(g_borrow_count + 1);
     w64(g_borrow_vars, g_borrow_count * 8, var_ni);
     w64(g_borrow_refs, g_borrow_count * 8, 0);
     w64(g_borrow_muts, g_borrow_count * 8, 0);
@@ -256,7 +256,7 @@ fn check_use(var_ni: int) -> bool {
 }
 
 fn push_borrow_scope() {
-    dyn_grow_borrow_scope_markers(g_borrow_scope_depth + 1);
+    grow_borrow_markers(g_borrow_scope_depth + 1);
     w64(g_borrow_scope_markers, g_borrow_scope_depth * 8, g_holder_count);
     g_borrow_scope_depth = g_borrow_scope_depth + 1;
 }
@@ -295,7 +295,7 @@ fn pop_borrow_scope() {
 }
 
 fn record_borrow_holder(borrower_ni: int, borrowed_ni: int, is_mut: int) {
-    dyn_grow_holder(g_holder_count + 1);
+    grow_holder(g_holder_count + 1);
     w64(g_holder_borrowers, g_holder_count * 8, borrower_ni);
     w64(g_holder_borrowed, g_holder_count * 8, borrowed_ni);
     w64(g_holder_is_mut, g_holder_count * 8, is_mut);
@@ -310,7 +310,7 @@ fn borrow_var_name(node: int) -> int {
 
 // --- Type resolution utilities ---
 
-fn resolve_type_node(node: int) -> int {
+fn res_type_node(node: int) -> int {
     if node < 0 { return TI_UNIT; }
     if ast_kind(node) == 0 {
         // Base type node: type_val = TY_*
@@ -327,7 +327,7 @@ fn resolve_type_node(node: int) -> int {
     if ast_kind(node) == EXPR_IDENT {
         // Named type: int_val = name string index
         name_idx := ast_int_val(node);
-        si := lookup_sym_global(name_idx);
+        si := find_gsym(name_idx);
         if si >= 0 && sym_kind(si) == SYM_TYPE {
             return sym_type(si);
         }
@@ -336,7 +336,7 @@ fn resolve_type_node(node: int) -> int {
     }
     if ast_kind(node) == EXPR_ARRAY {
         // Array type [T; N] or slice type [T] (size 0)
-        elem := resolve_type_node(ast_a(node));
+        elem := res_type_node(ast_a(node));
         sz := ast_int_val(node);
         if sz == 0 {
             return alloc_type(TYP_SLICE, elem, 0);
@@ -345,7 +345,7 @@ fn resolve_type_node(node: int) -> int {
     }
     if ast_kind(node) == EXPR_REFTYPE {
         // Reference type &T or &mut T
-        inner := resolve_type_node(ast_a(node));
+        inner := res_type_node(ast_a(node));
         mut_flag := ast_int_val(node);
         return alloc_type(TYP_REF, inner, mut_flag);
     }
@@ -354,7 +354,7 @@ fn resolve_type_node(node: int) -> int {
         name_idx := ast_a(node);
         first_arg_node := ast_b(node);
         arg_count := ast_c(node);
-        si := lookup_sym_global(name_idx);
+        si := find_gsym(name_idx);
         if si < 0 || sym_kind(si) != SYM_TYPE {
             check_error(EC_N_GENERIC_TYPE, "Undefined type in generic application", ast_line(node), ast_col(node));
             return TI_UNIT;
@@ -362,14 +362,14 @@ fn resolve_type_node(node: int) -> int {
         base_ti := sym_type(si);
         // Store args in g_gen_apply_data: [count, arg1, arg2, ...]
         data_start := g_gen_apply_data_count;
-        dyn_grow_gen_apply_data(data_start + 1 + arg_count);
+        grow_gen_apply_data(data_start + 1 + arg_count);
         w64(g_gen_apply_data, data_start * 8, arg_count);
         g_gen_apply_data_count = data_start + 1;
         ai : ., mut = 0;
         an : ., mut = first_arg_node;
         loop {
             if ai >= arg_count { break; }
-            arg_ti := resolve_type_node(an);
+            arg_ti := res_type_node(an);
             w64(g_gen_apply_data, (data_start + 1 + ai) * 8, arg_ti);
             ai = ai + 1;
             an = an + 1;
@@ -437,7 +437,7 @@ fn type_has_method(type_ni: int, method_ni: int) -> bool {
     return find_func(mangled_ni) >= 0;
 }
 
-fn check_type_satisfies_iface(type_ni: int, iface_ii: int) -> bool {
+fn check_iface(type_ni: int, iface_ii: int) -> bool {
     method_count := r64(g_ifaces, iface_ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT);
     mi : ., mut = 0;
     loop {
@@ -471,7 +471,7 @@ fn collect_decls() {
         if i >= g_struct_count { break; }
         name_idx := si_name(i);
         type_idx := alloc_type(TYP_NAMED, name_idx, 0);
-        define_sym(name_idx, SYM_TYPE, type_idx, -1);
+        def_sym(name_idx, SYM_TYPE, type_idx, -1);
         i = i + 1;
     }
     // Resolve struct field types now that all struct names are registered
@@ -494,7 +494,7 @@ fn collect_decls() {
         if i >= g_iface_count { break; }
         name_idx := r64(g_ifaces, i * ESZ_IFACEINFO + OFF_IF_NAME);
         type_idx := alloc_type(TYP_NAMED, name_idx, 0);
-        define_sym(name_idx, SYM_TYPE, type_idx, -1);
+        def_sym(name_idx, SYM_TYPE, type_idx, -1);
         i = i + 1;
     }
     // Register built-in Option type (for T? desugaring)
@@ -509,7 +509,7 @@ fn collect_decls() {
         // Auto-register Option as a generic built-in type
         option_name_idx := str_intern("Option");
         option_ti := alloc_type(TYP_NAMED, option_name_idx, 0);
-        define_sym(option_name_idx, SYM_TYPE, option_ti, -1);
+        def_sym(option_name_idx, SYM_TYPE, option_ti, -1);
     }
 
     // Register all enum types and their variant constructors
@@ -518,13 +518,13 @@ fn collect_decls() {
         if i >= g_enum_count { break; }
         name_idx := ei_name(i);
         type_idx := alloc_type(TYP_NAMED, name_idx, 0);
-        define_sym(name_idx, SYM_TYPE, type_idx, -1);
+        def_sym(name_idx, SYM_TYPE, type_idx, -1);
         // Register each variant as a function returning the enum type
         vi : ., mut = 0;
         loop {
             if vi >= ei_variant_count(i) { break; }
             vname_idx := ei_variant_name(i, vi);
-            define_sym(vname_idx, SYM_FN, type_idx, -1);
+            def_sym(vname_idx, SYM_FN, type_idx, -1);
             vi = vi + 1;
         }
         i = i + 1;
@@ -536,8 +536,8 @@ fn collect_decls() {
         if i >= g_type_alias_count { break; }
         name_idx := r64(g_type_aliases, i * 16);
         type_node := r64(g_type_aliases, i * 16 + 8);
-        ti := resolve_type_node(type_node);
-        define_sym(name_idx, SYM_TYPE, ti, -1);
+        ti := res_type_node(type_node);
+        def_sym(name_idx, SYM_TYPE, ti, -1);
         i = i + 1;
     }
 
@@ -555,14 +555,14 @@ fn collect_decls() {
         } else {
             type_node := ast_type_val(fn_node);
             if type_node > 0 && ast_kind(type_node) != 0 {
-                rt_ti = resolve_type_node(type_node);
+                rt_ti = res_type_node(type_node);
             } else if rt == TY_INT { rt_ti = TI_INT; }
             else if rt == TY_FLOAT { rt_ti = TI_FLOAT; }
             else if rt == TY_BOOL { rt_ti = TI_BOOL; }
             else if rt == TY_STRING { rt_ti = TI_STR; }
             else if rt == TY_UNIT { rt_ti = TI_UNIT; }
         }
-        define_sym(name_idx, SYM_FN, rt_ti, fn_node);
+        def_sym(name_idx, SYM_FN, rt_ti, fn_node);
         i = i + 1;
     }
     // Register all global variables
@@ -573,8 +573,8 @@ fn collect_decls() {
         name_idx := ast_a(node);  // EXPR_LET: a = name idx
         type_node := ast_b(node);  // EXPR_LET: b = type node (-1 if none)
         ti := TI_UNIT;
-        if type_node >= 0 { ti = resolve_type_node(type_node); }
-        define_sym(name_idx, SYM_GLOBAL, ti, node);
+        if type_node >= 0 { ti = res_type_node(type_node); }
+        def_sym(name_idx, SYM_GLOBAL, ti, node);
         i = i + 1;
     }
     // Register module aliases (from imports)
@@ -583,7 +583,7 @@ fn collect_decls() {
         if mi >= g_mod_count { break; }
         alias_ni := r64(g_mods, mi * 24);
         fileid_ni := r64(g_mods, mi * 24 + 8);
-        define_sym(alias_ni, SYM_MODULE, fileid_ni, -1);
+        def_sym(alias_ni, SYM_MODULE, fileid_ni, -1);
         mi = mi + 1;
     }
     // Register mod path declarations (mod foo::bar;)
@@ -591,7 +591,7 @@ fn collect_decls() {
     loop {
         if pi >= g_mod_path_count { break; }
         mpn := r64(g_mod_path_names, pi * 8);
-        define_sym(mpn, SYM_MODULE, mpn, -1);
+        def_sym(mpn, SYM_MODULE, mpn, -1);
         pi = pi + 1;
     }
     // Build module function lookup table for qualified access (e.g., mymath.add)
@@ -606,10 +606,10 @@ fn collect_decls() {
         if fn_line > 0 && fn_line <= g_line_count {
             fileid_ni := r64(g_line_fileid, (fn_line - 1) * 8);
             if fileid_ni != main_fni && fileid_ni != 0 && g_line_count > 0 {
-                dyn_grow_mod_funcs(g_mod_func_count + 1);
+                grow_mod_funcs(g_mod_func_count + 1);
                 w64(g_mod_func_fileids, g_mod_func_count * 8, fileid_ni);
                 w64(g_mod_func_names, g_mod_func_count * 8, fi_name(fi));
-                fn_si := lookup_sym(fi_name(fi));
+                fn_si := find_sym(fi_name(fi));
                 if fn_si >= 0 {
                     w64(g_mod_func_tis, g_mod_func_count * 8, sym_type(fn_si));
                 }
@@ -664,7 +664,7 @@ fn find_struct_by_name(name_idx: int) -> int {
     return -1;
 }
 
-fn resolve_call_type_node(node: int, func_fi: int) -> int {
+fn res_call_type(node: int, func_fi: int) -> int {
     // Resolve a type node for call inference, treating generic params as TYP_GENERIC_PARAM
     if node < 0 { return TI_UNIT; }
     if ast_kind(node) == 0 {
@@ -683,7 +683,7 @@ fn resolve_call_type_node(node: int, func_fi: int) -> int {
             return alloc_type(TYP_GENERIC_PARAM, name_idx, 0);
         }
         // Regular named type
-        si := lookup_sym_global(name_idx);
+        si := find_gsym(name_idx);
         if si >= 0 && sym_kind(si) == SYM_TYPE { return sym_type(si); }
         return alloc_type(TYP_NAMED, name_idx, 0);
     }
@@ -691,18 +691,18 @@ fn resolve_call_type_node(node: int, func_fi: int) -> int {
         name_idx := ast_a(node);
         first_an := ast_b(node);
         ac := ast_c(node);
-        si := lookup_sym_global(name_idx);
+        si := find_gsym(name_idx);
         if si < 0 || sym_kind(si) != SYM_TYPE { return TI_UNIT; }
         base_ti := sym_type(si);
         ds := g_gen_apply_data_count;
-        dyn_grow_gen_apply_data(ds + 1 + ac);
+        grow_gen_apply_data(ds + 1 + ac);
         w64(g_gen_apply_data, ds * 8, ac);
         g_gen_apply_data_count = ds + 1;
         ai : ., mut = 0;
         an : ., mut = first_an;
         loop {
             if ai >= ac { break; }
-            at := resolve_call_type_node(an, func_fi);
+            at := res_call_type(an, func_fi);
             w64(g_gen_apply_data, (ds + 1 + ai) * 8, at);
             ai = ai + 1;
             an = an + 1;
@@ -711,7 +711,7 @@ fn resolve_call_type_node(node: int, func_fi: int) -> int {
         return alloc_type(TYP_GENERIC_APPLY, base_ti, ds);
     }
     if ast_kind(node) == EXPR_REFTYPE {
-        inner := resolve_call_type_node(ast_a(node), func_fi);
+        inner := res_call_type(ast_a(node), func_fi);
         mf := ast_int_val(node);
         return alloc_type(TYP_REF, inner, mf);
     }
@@ -733,7 +733,7 @@ fn unify_types(pattern: int, concrete: int) -> bool {
             }
             mi = mi + 1;
         }
-        dyn_grow_gen_map(g_gen_map_count + 1);
+        grow_gen_map(g_gen_map_count + 1);
         w64(g_gen_map_names, g_gen_map_count * 8, name_idx);
         w64(g_gen_map_types, g_gen_map_count * 8, concrete);
         g_gen_map_count = g_gen_map_count + 1;
@@ -777,7 +777,7 @@ fn substitute_return_type(ti: int) -> int {
         start := get_type_extra(ti);
         count := r64(g_gen_apply_data, start * 8);
         new_start := g_gen_apply_data_count;
-        dyn_grow_gen_apply_data(new_start + 1 + count);
+        grow_gen_apply_data(new_start + 1 + count);
         w64(g_gen_apply_data, new_start * 8, count);
         g_gen_apply_data_count = new_start + 1;
         ai : ., mut = 0;
@@ -793,7 +793,7 @@ fn substitute_return_type(ti: int) -> int {
     return ti;
 }
 
-fn infer_generic_call(fi: int, call_node: int, first_arg: int, arg_count: int) -> int {
+fn infer_gen_call(fi: int, call_node: int, first_arg: int, arg_count: int) -> int {
     // Infer concrete types for a generic function call
     fn_node := fi_ast_node(fi);
     first_param := ast_b(fn_node);
@@ -813,7 +813,7 @@ fn infer_generic_call(fi: int, call_node: int, first_arg: int, arg_count: int) -
         orig_type_node := ast_data(pn);  // original param type node
 
         if orig_type_node >= 0 {
-            pattern_ti := resolve_call_type_node(orig_type_node, fi);
+            pattern_ti := res_call_type(orig_type_node, fi);
             concrete_ti := infer_expr(ast_a(an));
             unify_types(pattern_ti, concrete_ti);
         } else {
@@ -851,7 +851,7 @@ fn infer_generic_call(fi: int, call_node: int, first_arg: int, arg_count: int) -
                         if type_ni >= 0 {
                             ii := find_iface(iface_ni);
                             if ii >= 0 {
-                                if !check_type_satisfies_iface(type_ni, ii) {
+                                if !check_iface(type_ni, ii) {
                                     check_error(EC_TG_BOUND, "Type '" + istr_get(type_ni) + "' does not satisfy interface '" + istr_get(iface_ni) + "'", ast_line(call_node), ast_col(call_node));
                                 }
                             }
@@ -874,13 +874,13 @@ fn infer_generic_call(fi: int, call_node: int, first_arg: int, arg_count: int) -
 
     // Substitute return type
     if g_gen_map_count > 0 && ret_type_node >= 0 {
-        resolved_ret := resolve_call_type_node(ret_type_node, fi);
+        resolved_ret := res_call_type(ret_type_node, fi);
         return substitute_return_type(resolved_ret);
     }
 
     // Fallback: look up from symbol table
     func_ni : ., mut = ast_a(fn_node);
-    si := lookup_sym_global(func_ni);
+    si := find_gsym(func_ni);
     if si >= 0 && sym_kind(si) == SYM_FN {
         return sym_type(si);
     }
@@ -910,7 +910,7 @@ fn check_func(fi: int) {
             if gi >= fi_generic_count(fi) { break; }
             gname_idx := r64(g_funcs, fi * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gi * 8);
             g_ti := alloc_type(TYP_GENERIC_PARAM, gname_idx, 0);
-            define_sym(gname_idx, SYM_TYPE, g_ti, -1);
+            def_sym(gname_idx, SYM_TYPE, g_ti, -1);
             gi = gi + 1;
         }
     }
@@ -928,7 +928,7 @@ fn check_func(fi: int) {
             // Regular param: resolve using original type node if it's non-base (named/generic)
             orig_type_node := ast_data(pn);
             if orig_type_node >= 0 && ast_kind(orig_type_node) != 0 {
-                ti = resolve_type_node(orig_type_node);
+                ti = res_type_node(orig_type_node);
             } else {
                 // Base type: switch on type_val (TY_*)
                 ptype := ast_type_val(pn);
@@ -952,7 +952,7 @@ fn check_func(fi: int) {
             if dot_pos > 0 {
                 struct_name := str_sub(fn_name, 0, dot_pos);
                 struct_ni := str_intern(struct_name);
-                si := lookup_sym_global(struct_ni);
+                si := find_gsym(struct_ni);
                 if si >= 0 && sym_kind(si) == SYM_TYPE {
                     struct_ti := sym_type(si);
                     if self_mode == 1 {
@@ -967,7 +967,7 @@ fn check_func(fi: int) {
                 }
             }
         }
-        define_sym(pname_idx, SYM_PARAM, ti, -1);
+        def_sym(pname_idx, SYM_PARAM, ti, -1);
         pi = pi + 1;
         // Params are not contiguous — type nodes are allocated between them
         pn = pn + 1;
@@ -984,7 +984,7 @@ fn check_func(fi: int) {
         // First check for named type via the stored type node (kind != 0)
         type_node := ast_type_val(fn_node);
         if type_node > 0 && ast_kind(type_node) != 0 {
-            ret_ti = resolve_type_node(type_node);
+            ret_ti = res_type_node(type_node);
         } else if return_type == TY_INT { ret_ti = TI_INT; }
         else if return_type == TY_FLOAT { ret_ti = TI_FLOAT; }
         else if return_type == TY_BOOL { ret_ti = TI_BOOL; }
@@ -1092,7 +1092,7 @@ fn infer_expr(node: int) -> int {
             name := istr_get(name_idx);
             check_error(EC_B_USE_WHILE_BORROWED, "Cannot use '" + name + "' while it is borrowed", ast_line(node), ast_col(node));
         }
-        si := lookup_sym(name_idx);
+        si := find_sym(name_idx);
         if si >= 0 { return sym_type(si); }
         name := istr_get(name_idx);
         check_error(EC_N_UNDEFINED, "Undefined name '" + name + "'", ast_line(node), ast_col(node));
@@ -1165,7 +1165,7 @@ fn infer_expr(node: int) -> int {
             inner : ., mut = TI_UNIT;
             if ast_kind(operand) == EXPR_IDENT {
                 vi := ast_int_val(operand);
-                si := lookup_sym(vi);
+                si := find_sym(vi);
                 if si >= 0 { inner = sym_type(si); }
             } else {
                 inner = infer_expr(operand);
@@ -1201,7 +1201,7 @@ fn infer_expr(node: int) -> int {
             mod_found_mfi : ., mut = -1;
             if ast_kind(obj) == EXPR_IDENT {
                 mod_name_ni := ast_int_val(obj);
-                si := lookup_sym(mod_name_ni);
+                si := find_sym(mod_name_ni);
                 if si >= 0 && sym_kind(si) == SYM_MODULE {
                     fileid_ni := sym_type(si);
                     // Look up (fileid, method) in module function table
@@ -1307,7 +1307,7 @@ fn infer_expr(node: int) -> int {
                 an = ast_b(an);
             }
             if func_ni >= 0 {
-                si := lookup_sym_global(func_ni);
+                si := find_gsym(func_ni);
                 if si >= 0 && sym_kind(si) == SYM_FN {
                     return sym_type(si);
                 }
@@ -1327,7 +1327,7 @@ fn infer_expr(node: int) -> int {
         // Check for SYM_SO_FN (.so extension registered)
         so_fn_fi : ., mut = -1;
         if func_ni >= 0 {
-            si := lookup_sym_global(func_ni);
+            si := find_gsym(func_ni);
             if si >= 0 && sym_kind(si) == SYM_SO_FN {
                 so_fn_fi = si;
                 tag_flags2 := sym_type(si);  // stores tag_flags
@@ -1355,12 +1355,12 @@ fn infer_expr(node: int) -> int {
         }
         // Look up function
         if func_ni >= 0 && so_fn_fi < 0 {
-            si := lookup_sym_global(func_ni);
+            si := find_gsym(func_ni);
             if si >= 0 && sym_kind(si) == SYM_FN {
                 // Check if generic function
                 fi := find_func(func_ni);
                 if fi >= 0 && fi_generic_count(fi) > 0 {
-                    return infer_generic_call(fi, node, first_arg, arg_count);
+                    return infer_gen_call(fi, node, first_arg, arg_count);
                 }
                 return sym_type(si);  // return type
             }
@@ -1441,7 +1441,7 @@ fn infer_expr(node: int) -> int {
         infer_expr(iter);
         push_scope();
         push_borrow_scope();
-        define_sym(var_ni, SYM_LOCAL, TI_INT, -1);
+        def_sym(var_ni, SYM_LOCAL, TI_INT, -1);
         infer_expr(body);
         pop_borrow_scope();
         pop_scope();
@@ -1480,7 +1480,7 @@ fn infer_expr(node: int) -> int {
                         if spi >= sub_count { break; }
                         if spn >= 0 {
                             if ast_kind(spn) == EXPR_IDENT {
-                                define_sym(ast_int_val(spn), SYM_LOCAL, TI_INT, -1);
+                                def_sym(ast_int_val(spn), SYM_LOCAL, TI_INT, -1);
                             }
                             spn = spn + 1;
                         }
@@ -1488,7 +1488,7 @@ fn infer_expr(node: int) -> int {
                     }
                 }
                 if ast_kind(arm_pat) == EXPR_IDENT {
-                    define_sym(ast_int_val(arm_pat), SYM_LOCAL, TI_INT, -1);
+                    def_sym(ast_int_val(arm_pat), SYM_LOCAL, TI_INT, -1);
                 }
             }
             push_borrow_scope();
@@ -1519,9 +1519,9 @@ fn infer_expr(node: int) -> int {
             }
         }
         ti := val_ti;
-        if type_node >= 0 { ti = resolve_type_node(type_node); }
+        if type_node >= 0 { ti = res_type_node(type_node); }
         if istr_get(var_ni) != "_" {
-            define_sym(var_ni, SYM_LOCAL, ti, -1);
+            def_sym(var_ni, SYM_LOCAL, ti, -1);
         }
         return TI_UNIT;
     }
@@ -1537,7 +1537,7 @@ fn infer_expr(node: int) -> int {
         name_idx := ast_a(node);
         first_arg := ast_b(node);
         arg_count := ast_c(node);
-        si := lookup_sym_global(name_idx);
+        si := find_gsym(name_idx);
         if si >= 0 && sym_kind(si) == SYM_FN {
             // Infer arg types (walk EXPR_ARG chain)
             an : ., mut = first_arg;
@@ -1600,7 +1600,7 @@ fn infer_expr(node: int) -> int {
                                         }
                                 }
                             }
-                            return resolve_type_node(ft_node);
+                            return res_type_node(ft_node);
                         }
                         return si_field_type(si, fi);
                     }
@@ -1677,7 +1677,7 @@ fn infer_expr(node: int) -> int {
                             // Check if field type is a generic param
                             field_name_idx := ast_int_val(orig_type_node);
                             if is_struct_generic(si, field_name_idx) {
-                                dyn_grow_gen_map(g_gen_map_count + 1);
+                                grow_gen_map(g_gen_map_count + 1);
                                 w64(g_gen_map_names, g_gen_map_count * 8, field_name_idx);
                                 w64(g_gen_map_types, g_gen_map_count * 8, field_val_ti);
                                 g_gen_map_count = g_gen_map_count + 1;
@@ -1691,7 +1691,7 @@ fn infer_expr(node: int) -> int {
             // Create TYP_GENERIC_APPLY for this struct
             base_ti := alloc_type(TYP_NAMED, name_ni, 0);
             ds := g_gen_apply_data_count;
-            dyn_grow_gen_apply_data(ds + 1 + g_gen_map_count);
+            grow_gen_apply_data(ds + 1 + g_gen_map_count);
             w64(g_gen_apply_data, ds * 8, g_gen_map_count);
             g_gen_apply_data_count = ds + 1;
             mi : ., mut = 0;
@@ -1771,7 +1771,7 @@ fn infer_expr(node: int) -> int {
         // expr as Type — type cast
         inner_ti := infer_expr(ast_a(node));
         type_node := ast_b(node);
-        return resolve_type_node(type_node);
+        return res_type_node(type_node);
     }
     if ast_kind(node) == EXPR_STMT {
         infer_expr(ast_a(node));
@@ -1786,7 +1786,7 @@ fn infer_expr(node: int) -> int {
         loop {
             if e >= ec { break; }
             elem_ti := infer_expr(elem_idx + e);
-            dyn_grow_gen_apply_data(g_gen_apply_data_count + 1);
+            grow_gen_apply_data(g_gen_apply_data_count + 1);
             w64(g_gen_apply_data, g_gen_apply_data_count * 8, elem_ti);
             g_gen_apply_data_count = g_gen_apply_data_count + 1;
             e = e + 1;
@@ -1826,14 +1826,14 @@ fn check_all() {
 
     // First pass: collect declarations
     collect_decls();
-    init_rt_builtins();
+    init_builtins();
 
     // Restore SYM_SO_FN entries lost by g_sym_count reset
     ri : ., mut = 0;
     loop {
         if ri >= so_count { break; }
         si := g_sym_count;
-        dyn_grow_syms(si + 1);
+        grow_syms(si + 1);
         sym_set_name(si, r64(so_names, ri * 8));
         sym_set_kind(si, SYM_SO_FN);
         sym_set_type(si, r64(so_types, ri * 8));
@@ -1849,9 +1849,9 @@ fn check_all() {
         if ri2 >= g_rt_builtin_count { break; }
         ni2 := r64(g_rt_builtin_names, ri2 * 8);
         ti2 := r64(g_rt_builtin_ret_types, ri2 * 8);
-        if lookup_sym_global(ni2) < 0 {  // skip if already defined by user
+        if find_gsym(ni2) < 0 {  // skip if already defined by user
             si2 := g_sym_count;
-            dyn_grow_syms(si2 + 1);
+            grow_syms(si2 + 1);
             sym_set_name(si2, ni2);
             sym_set_kind(si2, SYM_FN);
             sym_set_type(si2, ti2);

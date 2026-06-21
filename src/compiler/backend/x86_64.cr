@@ -18,7 +18,7 @@ fn x86_mark_enum(var_idx: int) {
         if r64(g_x86_vars, i * 8) == var_idx { return; }
         i = i + 1;
     }
-    dyn_grow_x86_is_enum(g_x86_is_enum_count + 1);
+    grow_is_enum(g_x86_is_enum_count + 1);
     w64(g_x86_is_enum, g_x86_is_enum_count * 8, var_idx);
     g_x86_is_enum_count = g_x86_is_enum_count + 1;
 }
@@ -42,7 +42,7 @@ fn x86_alloc_stack(var_idx: int) -> int {
         }
         i = i + 1;
     }
-    dyn_grow_x86_vars(g_x86_var_count + 1);
+    grow_x86_vars(g_x86_var_count + 1);
     w64(g_x86_vars, g_x86_var_count * 8, var_idx);
     g_x86_var_count = g_x86_var_count + 1;
     g_x86_stack_size = g_x86_var_count * 8;

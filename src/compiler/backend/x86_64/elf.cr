@@ -1,7 +1,7 @@
 // === backend/x86_64/elf.cr ===
 // Direct ELF binary output for x86-64 using the new resolve+emit interface.
-// Depends on: x86_64/instr.cr (arch_instr_size, x86_emit_instr, g2_*)
-// Depends on: backend/resolve.cr (resolve_labels)
+// Depends on: x86_64/instr.cr (instr_size, emit_instr, g2_*)
+// Depends on: backend/resolve.cr (res_labels)
 
 // ── ELF constants (x86-64) ──
 ET_EXEC : int = 2;
@@ -21,7 +21,7 @@ fn w8_signed(buf: string, pos: int, val: int) {
 
 // Emit alloc bump allocator function body
 // Returns bytes written (always 65)
-fn emit_builtin_alloc_body(buf: string, pos: int, bss_va: int) -> int {
+fn emit_alloc_body(buf: string, pos: int, bss_va: int) -> int {
     cp := 0;
     fva := TEXT_BASE + pos;
 
@@ -109,9 +109,9 @@ fn elf2_hdr(buf: string, total_sz: int) {
 }
 
 // ── Main ELF generation ──
-fn x86_64_elf_generate(buf: string) -> int {
-    // Phase 0: resolve labels (uses arch_instr_size from instr.cr)
-    resolve_labels();
+fn elf_gen(buf: string) -> int {
+    // Phase 0: resolve labels (uses instr_size from instr.cr)
+    res_labels();
 
     // Phase 1: rodata layout — collect string constants
     g_x86_str_count = 0;
@@ -140,7 +140,7 @@ fn x86_64_elf_generate(buf: string) -> int {
         ii := 0; loop { if ii >= ic { break; }
             inst_idx := r64(g_ir_func_instr_start, fi * 8)+ ii;
             if g_ir_instrs[inst_idx].opcode != IR_NOP {
-                total_code = total_code + arch_instr_size(inst_idx);
+                total_code = total_code + instr_size(inst_idx);
             }
         ii = ii + 1; }
 
@@ -159,7 +159,7 @@ fn x86_64_elf_generate(buf: string) -> int {
     rd_sz := g2_rodata_sz();
     total_code = total_code + 6;  // _init_globals
     rodata_base := total_code;  // relative to code section start
-    g_x86_rodata_base = rodata_base;  // for x86_emit_instr string LEA
+    g_x86_rodata_base = rodata_base;  // for emit_instr string LEA
 
     // Phase 3: emit to buffer
     cp := 176;  // skip ELF header
@@ -206,7 +206,7 @@ fn x86_64_elf_generate(buf: string) -> int {
 
         ii := 0; loop { if ii >= ic { break; }
             inst_idx := ist + ii;
-            sz := x86_emit_instr(inst_idx, buf, cp);
+            sz := emit_instr(inst_idx, buf, cp);
             cp = cp + sz;
         ii = ii + 1; }
 
@@ -240,7 +240,7 @@ fn x86_64_elf_generate(buf: string) -> int {
     final_est := cp + 65 + rodata_sz;
     bss_va := (TEXT_BASE + final_est + 4095) / 4096 * 4096;
 
-    alloc_sz := emit_builtin_alloc_body(buf, cp, bss_va);
+    alloc_sz := emit_alloc_body(buf, cp, bss_va);
     alloc_start := cp;
     cp = cp + alloc_sz;
 

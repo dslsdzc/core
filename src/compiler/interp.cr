@@ -44,7 +44,7 @@ fn ir_interpret() -> int {
         if n_op == 21 {  // IR_LABEL
             ln := n_s1;  // label number
             if ln >= 0 {
-                dyn_grow_label_poses(ln + 1);
+                grow_label_poses(ln + 1);
                 w64(g_label_poses, ln * 8, li);
                 if ln + 1 > g_label_count { g_label_count = ln + 1; }
             }
@@ -114,7 +114,7 @@ fn ir_interpret() -> int {
         if op == 4 {  // IR_CALL
             fn_ni := s3;
             fn_name := istr_get(fn_ni);
-            sfi := lookup_so_fn(fn_ni);
+            sfi := find_so_fn(fn_ni);
             if sfi >= 0 && s2 >= 1 {
                 tf := sym_type(sfi);
                 if tf == 1 || tf == 3 {  // TAG_VARIADIC: print/println
@@ -125,7 +125,7 @@ fn ir_interpret() -> int {
                     fnl := str_len(fn_name2);
                     if fnl >= 4 && load8(fn_name2, fnl-2) == 108 && load8(fn_name2, fnl-1) == 110 { is_ln = 1; }
                     if is_ln != 0 { println(sval); } else { print(sval); }
-                } else if tf == 2 || tf == 3 {  // TAG_AUTO_STR: print_int/println_int
+                } else if tf == 2 || tf == 3 {  // TAG_AUTO_STR: print_i/println_i
                     val := r64(g_ir_vals, s1 * 8);
                     fn_name2 := istr_get(fn_ni);
                     is_ln : ., mut = 0;

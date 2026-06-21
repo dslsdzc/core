@@ -1,7 +1,7 @@
 // === backend/x86_64/elf.cr ===
 // Direct ELF binary output for x86-64 using the new resolve+emit interface.
-// Depends on: x86_64/instr.cr (arch_instr_size, x86_emit_instr, g2_*)
-// Depends on: backend/resolve.cr (resolve_labels)
+// Depends on: x86_64/instr.cr (instr_size, emit_instr, g2_*)
+// Depends on: backend/resolve.cr (res_labels)
 
 // ── ELF constants (x86-64) ──
 ET_EXEC : int = 2;
@@ -23,7 +23,7 @@ fn w8_signed(buf: string, pos: int, val: int) {
 
 // Emit alloc bump allocator function body
 // Returns bytes written (always 65)
-fn emit_builtin_alloc_body(buf: string, pos: int, bss_va: int) -> int {
+fn emit_alloc_body(buf: string, pos: int, bss_va: int) -> int {
     cp := 0;
     fva := TEXT_BASE + pos;
 
@@ -120,13 +120,13 @@ fn emit_start(buf: string, pos: int) -> int {
     w8(buf, cp, 72); w8(buf, cp+1, 139); w8(buf, cp+2, 60); w8(buf, cp+3, 36); cp = cp + 4;  // mov rdi,[rsp]
     w8(buf, cp, 72); w8(buf, cp+1, 141); w8(buf, cp+2, 116); w8(buf, cp+3, 36); w8(buf, cp+4, 8); cp = cp + 5;  // lea rsi,[rsp+8]
     if gv_argc >= 0 { w8(buf, cp, 76); w8(buf, cp+1, 141); w8(buf, cp+2, 21); cp = cp + 3;
-        dyn_grow_x86_rip_patch(g_x86_rip_patch_count + 1);
+        grow_rip_patch(g_x86_rip_patch_count + 1);
         w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, cp);
         w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argc);
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
         w32(buf, cp, 0); cp = cp + 4; w8(buf, cp, 77); w8(buf, cp+1, 137); w8(buf, cp+2, 58); cp = cp + 3; }
     if gv_argv >= 0 { w8(buf, cp, 76); w8(buf, cp+1, 141); w8(buf, cp+2, 21); cp = cp + 3;
-        dyn_grow_x86_rip_patch(g_x86_rip_patch_count + 1);
+        grow_rip_patch(g_x86_rip_patch_count + 1);
         w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, cp);
         w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argv);
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
@@ -147,9 +147,9 @@ fn emit_start_size() -> int {
 }
 
 // ── Main ELF generation ──
-fn x86_64_elf_generate(buf: string) -> int {
-    // Phase 0: resolve labels (uses arch_instr_size from instr.cr)
-    resolve_labels();
+fn elf_gen(buf: string) -> int {
+    // Phase 0: resolve labels (uses instr_size from instr.cr)
+    res_labels();
     g_x86_ext_rel_count = 0;  // reset external relocations
 
     // Phase 1: rodata layout — collect string constants
@@ -176,7 +176,7 @@ fn x86_64_elf_generate(buf: string) -> int {
 
         fi := 0; g2_init(); loop { if fi >= g_ir_func_count { break; }
         ni := r64(g_ir_func_name_idx, fi * 8);
-        dyn_grow_x86_func_offsets(g_x86_func_off_count * 2 + 2);
+        grow_func_offsets(g_x86_func_off_count * 2 + 2);
         w64(g_x86_func_offsets, g_x86_func_off_count * 16, ni);
         w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code);
         g_x86_func_off_count = g_x86_func_off_count + 1;
@@ -197,7 +197,7 @@ fn x86_64_elf_generate(buf: string) -> int {
         ii := 0; loop { if ii >= ic { break; }
             inst_idx := r64(g_ir_func_instr_start, fi * 8) + ii;
             if iri_op(inst_idx) != IR_NOP {
-                fsz = fsz + x86_emit_instr(inst_idx, alloc(512), fsz); }
+                fsz = fsz + emit_instr(inst_idx, alloc(512), fsz); }
         ii = ii + 1; }
 
         // Set stack size from per-function var_count
@@ -221,7 +221,7 @@ fn x86_64_elf_generate(buf: string) -> int {
         if str_eq(istr_get(asi), "alloc") != 0 { alloc_ni = asi; break; }
         asi = asi + 1; }
     if alloc_ni < 0 { alloc_ni = str_intern("alloc"); }
-    dyn_grow_x86_func_offsets(g_x86_func_off_count * 2 + 2);
+    grow_func_offsets(g_x86_func_off_count * 2 + 2);
     w64(g_x86_func_offsets, g_x86_func_off_count * 16, alloc_ni);
     w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code);
     g_x86_func_off_count = g_x86_func_off_count + 1;
@@ -233,7 +233,7 @@ fn x86_64_elf_generate(buf: string) -> int {
     // Mark global variables for BSS allocation
     gi := 0; loop { if gi >= g_ir_global_count { break; }
         gv := r64(g_ir_globals, gi * 16 + 8);
-        if gv >= 0 { dyn_grow_x86_is_global(gv + 1); w64(g_x86_is_global, gv * 8, 1); }
+        if gv >= 0 { grow_is_global(gv + 1); w64(g_x86_is_global, gv * 8, 1); }
     gi = gi + 1; }
 
     // Phase 3: emit to buffer
@@ -250,7 +250,7 @@ fn x86_64_elf_generate(buf: string) -> int {
     g_x86_rip_patch_count = 0;
 fi = 0; loop { if fi >= g_ir_func_count { break; }
         ni := r64(g_ir_func_name_idx, fi * 8);
-        dyn_grow_x86_func_cp(fi + 1); w64(g_x86_func_cp, fi * 8, cp);
+        grow_func_cp(fi + 1); w64(g_x86_func_cp, fi * 8, cp);
         // Override with actual position for backward calls
         fi3 := 0; loop { if fi3 >= g_x86_func_off_count { break; }
             if str_eq(istr_get(r64(g_x86_func_offsets, fi3*16)), istr_get(ni)) != 0 {
@@ -297,7 +297,7 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
 
         ii := 0; loop { if ii >= ic { break; }
             inst_idx := ist + ii;
-            sz := x86_emit_instr(inst_idx, buf, cp);
+            sz := emit_instr(inst_idx, buf, cp);
             cp = cp + sz;
         ii = ii + 1; }
 
@@ -365,7 +365,7 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
     final_est := cp + 65 + rodata_sz;
     bss_va := (TEXT_BASE + final_est + 4095) / 4096 * 4096;
 
-    alloc_sz := emit_builtin_alloc_body(buf, cp, bss_va);
+    alloc_sz := emit_alloc_body(buf, cp, bss_va);
     alloc_start := cp;
     cp = cp + alloc_sz;
 
@@ -407,7 +407,7 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
     gi2 := 0; goff : ., mut = 0;
     loop { if gi2 >= g_ir_global_count { break; }
         gv2 := r64(g_ir_globals, gi2 * 16 + 8);
-        if gv2 >= 0 { dyn_grow_x86_global_off(gv2 + 1); w64(g_x86_global_off, gv2 * 8, goff); goff = goff + 8; }
+        if gv2 >= 0 { grow_global_off(gv2 + 1); w64(g_x86_global_off, gv2 * 8, goff); goff = goff + 8; }
     gi2 = gi2 + 1; }
 
     // ── Patch global variable RIP-relative references ──

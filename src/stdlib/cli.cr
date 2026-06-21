@@ -44,15 +44,15 @@ g_cli_cmds : string, mut;             g_cli_cmd_count : int, mut;     g_cli_cmd_
 g_cli_flags : string, mut;            g_cli_flag_count : int, mut;    g_cli_flag_cap : int, mut;
 g_cli_args : string, mut;             g_cli_arg_count : int, mut;    g_cli_arg_cap : int, mut;
 
-fn dyn_grow_cli_cmds(needed: int) {
+fn grow_cli_cmds(needed: int) {
     if needed < g_cli_cmd_cap { return; }
     nc : ., mut = g_cli_cmd_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
     nb := alloc(nc * 16); _dyncpy(g_cli_cmds, g_cli_cmd_cap * 16, nb); g_cli_cmds = nb; g_cli_cmd_cap = nc; }
-fn dyn_grow_cli_flags(needed: int) {
+fn grow_cli_flags(needed: int) {
     if needed < g_cli_flag_cap { return; }
     nc : ., mut = g_cli_flag_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
     nb := alloc(nc * 48); _dyncpy(g_cli_flags, g_cli_flag_cap * 48, nb); g_cli_flags = nb; g_cli_flag_cap = nc; }
-fn dyn_grow_cli_args(needed: int) {
+fn grow_cli_args(needed: int) {
     if needed < g_cli_arg_cap { return; }
     nc : ., mut = g_cli_arg_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
     nb := alloc(nc * 8); _dyncpy(g_cli_args, g_cli_arg_cap * 8, nb); g_cli_args = nb; g_cli_arg_cap = nc; }
@@ -72,14 +72,14 @@ fn cli_init(prog: string, desc: string) {
 // --- Registration ---
 
 fn cli_cmd(name: string, desc: string) {
-    dyn_grow_cli_cmds(g_cli_cmd_count + 1);
+    grow_cli_cmds(g_cli_cmd_count + 1);
     w64(g_cli_cmds, g_cli_cmd_count * 16, name);
     w64(g_cli_cmds, g_cli_cmd_count * 16 + 8, desc);
     g_cli_cmd_count = g_cli_cmd_count + 1;
 }
 
 fn cli_flag(long_name: string, short_name: string, desc: string) {
-    dyn_grow_cli_flags(g_cli_flag_count + 1);
+    grow_cli_flags(g_cli_flag_count + 1);
     w64(g_cli_flags, g_cli_flag_count * 48, long_name);
     w64(g_cli_flags, g_cli_flag_count * 48 + 8, short_name);
     w64(g_cli_flags, g_cli_flag_count * 48 + 16, desc);
@@ -90,7 +90,7 @@ fn cli_flag(long_name: string, short_name: string, desc: string) {
 }
 
 fn cli_flag_bool(long_name: string, short_name: string, desc: string) {
-    dyn_grow_cli_flags(g_cli_flag_count + 1);
+    grow_cli_flags(g_cli_flag_count + 1);
     w64(g_cli_flags, g_cli_flag_count * 48, long_name);
     w64(g_cli_flags, g_cli_flag_count * 48 + 8, short_name);
     w64(g_cli_flags, g_cli_flag_count * 48 + 16, desc);
@@ -222,7 +222,7 @@ fn cli_parse() -> int {
             }
         } else {
             // Positional argument
-            dyn_grow_cli_args(g_cli_arg_count + 1);
+            grow_cli_args(g_cli_arg_count + 1);
             w64(g_cli_args, g_cli_arg_count * 8, arg);
             g_cli_arg_count = g_cli_arg_count + 1;
         }

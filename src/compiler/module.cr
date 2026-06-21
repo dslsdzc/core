@@ -13,7 +13,7 @@ fn count_newlines(s: string) -> int {
     return n;
 }
 
-fn extract_fileid(s: string) -> string {
+fn get_fileid(s: string) -> string {
     slen := str_len(s);
     i : ., mut = 0;
     loop {
@@ -103,7 +103,7 @@ fn parent_dir(dir: string) -> string {
     return "";
 }
 
-fn load_import_core(dir_path: string) -> string {
+fn load_imports(dir_path: string) -> string {
     imp_path : ., mut = dir_path + "_import.cr";
     content := read_file(imp_path);
     if str_len(content) > 0 {
@@ -111,7 +111,7 @@ fn load_import_core(dir_path: string) -> string {
     return content;
 }
 
-fn register_fileid(fileid_str: string, path: string) -> int {
+fn reg_fileid(fileid_str: string, path: string) -> int {
     fni := str_intern(fileid_str);
     fi : ., mut = 0;
     loop {
@@ -121,7 +121,7 @@ fn register_fileid(fileid_str: string, path: string) -> int {
         }
         fi = fi + 1;
     }
-    dyn_grow_files(g_file_count + 1);
+    grow_files(g_file_count + 1);
     w64(g_files, g_file_count * 16, fni);
     store_str_ptr(g_files, g_file_count * 16 + 8, path);
     g_file_count = g_file_count + 1;
@@ -132,7 +132,7 @@ fn build_line_fileid() {
     g_line_count = 0; g_line_cap = 0;
     slen := str_len(g_source);
     seg_idx : ., mut = 0;
-    dyn_grow_line_fileid(g_line_count + 1); w64(g_line_fileid, g_line_count * 8, r64(g_seg_fileids, 0));
+    grow_line_file(g_line_count + 1); w64(g_line_fileid, g_line_count * 8, r64(g_seg_fileids, 0));
     g_line_count = g_line_count + 1;
     pos : ., mut = 0;
     loop {
@@ -147,7 +147,7 @@ fn build_line_fileid() {
             if next_fileid >= 0 && pos + 1 >= next_start {
                 seg_idx = seg_idx + 1;
             }
-            dyn_grow_line_fileid(g_line_count + 1); w64(g_line_fileid, g_line_count * 8, r64(g_seg_fileids, seg_idx * 8));
+            grow_line_file(g_line_count + 1); w64(g_line_fileid, g_line_count * 8, r64(g_seg_fileids, seg_idx * 8));
             g_line_count = g_line_count + 1;
         }
         pos = pos + 1;
@@ -160,7 +160,7 @@ fn build_line_fileid() {
 // Examples:
 //   print: string, variadic, auto_str
 //   read_file: string -> string
-fn register_so_funcs(index_content: string, so_name: string) {
+fn reg_so_funcs(index_content: string, so_name: string) {
     sl := str_len(index_content);
     line_start : ., mut = 0;
     loop {
@@ -322,7 +322,7 @@ fn register_so_funcs(index_content: string, so_name: string) {
         fni := str_intern(func_name);
         // Manually set symbol entry
         si := g_sym_count;
-        dyn_grow_syms(si + 1);
+        grow_syms(si + 1);
         sym_set_name(si, fni);
         sym_set_kind(si, SYM_SO_FN);
         sym_set_type(si, tag_flags);
@@ -331,7 +331,7 @@ fn register_so_funcs(index_content: string, so_name: string) {
     }
 }
 
-fn resolve_imports() {
+fn res_imports() {
     g_file_count = 0; g_file_cap = 0;
     g_mod_count = 0; g_mod_cap = 0;
     g_seg_count = 0; g_seg_cap = 0;
@@ -339,11 +339,11 @@ fn resolve_imports() {
     // Step 1: collect _import.cr from source directory and ancestors
     import_core_acc : ., mut = "";
     // Also collect stdlib _import.cr (provides import fmt for stdlib files)
-    sic := load_import_core("src/stdlib/");
+    sic := load_imports("src/stdlib/");
     if str_len(sic) > 0 { import_core_acc = sic + "\n"; }
     search_dir : ., mut = g_source_dir;
     loop {
-        ic := load_import_core(search_dir);
+        ic := load_imports(search_dir);
         if str_len(ic) > 0 {
             import_core_acc = ic + "\n" + import_core_acc;
         }
@@ -358,13 +358,13 @@ fn resolve_imports() {
     }
 
     // Determine main file's fileid
-    main_fileid_str : ., mut = extract_fileid(g_source);
+    main_fileid_str : ., mut = get_fileid(g_source);
     if str_len(main_fileid_str) == 0 { main_fileid_str = "main"; }
-    main_fni := register_fileid(main_fileid_str, "");
+    main_fni := reg_fileid(main_fileid_str, "");
     main_len := str_len(g_source);
 
     // First segment: main source
-    dyn_grow_segs(g_seg_count + 1); w64(g_seg_starts, g_seg_count * 8, 0);
+    grow_segs(g_seg_count + 1); w64(g_seg_starts, g_seg_count * 8, 0);
     w64(g_seg_fileids, g_seg_count * 8, main_fni);
     g_seg_count = g_seg_count + 1;
 
@@ -442,7 +442,7 @@ fn resolve_imports() {
                     so_idx_path : ., mut = g_home_dir + "/.core/lib/" + fs_path + "/index";
                     so_idx := read_file(so_idx_path);
                     if str_len(so_idx) > 0 {
-                        register_so_funcs(so_idx, fs_path);
+                        reg_so_funcs(so_idx, fs_path);
                     }
                     // Always load .cr for runtime implementation
                     path = g_source_dir + fs_path + ".cr";
@@ -459,11 +459,11 @@ fn resolve_imports() {
             }
             if str_len(content) > 0 {
                 content_len := str_len(content);
-                loaded_fid : ., mut = extract_fileid(content);
+                loaded_fid : ., mut = get_fileid(content);
                 if str_len(loaded_fid) == 0 { loaded_fid = import_fileid; }
-                loaded_fni := register_fileid(loaded_fid, path);
+                loaded_fni := reg_fileid(loaded_fid, path);
                 seg_byte := main_len + extra_bytes + 1;
-                dyn_grow_segs(g_seg_count + 1); w64(g_seg_starts, g_seg_count * 8, seg_byte);
+                grow_segs(g_seg_count + 1); w64(g_seg_starts, g_seg_count * 8, seg_byte);
                 w64(g_seg_fileids, g_seg_count * 8, loaded_fni);
                 g_seg_count = g_seg_count + 1;
                 extra_bytes = extra_bytes + 1 + content_len;
@@ -473,7 +473,7 @@ fn resolve_imports() {
                 } else {
                     alias_ni = loaded_fni;
                 }
-                dyn_grow_mods(g_mod_count + 1);
+                grow_mods(g_mod_count + 1);
                 w64(g_mods, g_mod_count * 24, alias_ni);
                 w64(g_mods, g_mod_count * 24 + 8, loaded_fni);
                 store_str_ptr(g_mods, g_mod_count * 24 + 16, path);

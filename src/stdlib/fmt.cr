@@ -147,7 +147,7 @@ fn str_int(s: string) -> int {
     return res;
 }
 
-fn to_string(n: int) -> string {
+fn to_str(n: int) -> string {
     return int_str(n);
 }
 
