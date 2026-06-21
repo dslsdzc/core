@@ -299,6 +299,7 @@ fn elf_gen(buf: string) -> int {
     g_x86_rodataref_count = 0;
     g_x86_alloc_patch_count = 0;
     g_x86_rip_patch_count = 0;
+    g_x86_ext_rel_count = 0;
 fi = 0; loop { if fi >= g_ir_func_count { break; }
         ni := r64(g_ir_func_name_idx, fi * 8);
         grow_func_cp(fi + 1); w64(g_x86_func_cp, fi * 8, cp);

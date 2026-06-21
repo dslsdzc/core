@@ -221,3 +221,15 @@
 ### [docs] add CHANGELOG.md
 ### [docs] full CHANGELOG.md with all 123 commits
 ### [docs] comprehensive CHANGELOG.md with all 116 commits
+
+## 2026-06-21
+### [fix] ext_rel Phase 0/2 contamination in elf_gen
+  - external relocation entries from Phase 0 (res_labels) and Phase 2 (size
+    calculation) survived into Phase 3, because ext_rel was only reset at the
+    start of elf_gen (after Phase 0) but not before Phase 3 emission
+  - Phase 2 entries use dry-run buffer positions — when patch_relocs processes
+    them alongside Phase 3 entries, they patch wrong code locations and corrupt
+    the binary
+  - Fix: add `g_x86_ext_rel_count = 0;` to the Phase 3 reset block alongside
+    the existing ret/call/rodata/alloc/rip resets
+  - All 23/23 bootstrap tests pass, self-hosted compiler verified
