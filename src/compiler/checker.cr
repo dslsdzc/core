@@ -26,6 +26,39 @@ fn init_types() {
     alloc_type(TYP_BASE, TY_NEVER, 0);   // TI_NEVER = 5
 }
 
+// ── Runtime builtin declarations (no .cr body, implemented in rt.s) ──
+g_rt_builtin_count : int, mut;
+g_rt_builtin_names : string, mut;
+g_rt_builtin_ret_types : string, mut;
+
+fn init_rt_builtins() {
+    g_rt_builtin_count = 0; g_rt_builtin_names = alloc(8 * 8); g_rt_builtin_ret_types = alloc(8 * 8);
+
+    bi_add("load8", TI_INT);
+    bi_add("store8", TI_INT);
+    bi_add("alloc", TI_STR);
+    bi_add("get_arg", TI_STR);
+    bi_add("load_str_ptr", TI_STR);
+    bi_add("store_str_ptr", TI_INT);
+}
+
+fn bi_add(name: string, ret_ti: int) {
+    ni := str_intern(name);
+    if g_rt_builtin_count * 8 + 8 > str_len(g_rt_builtin_names) {
+        nc := g_rt_builtin_count * 2 + 16;
+        nb := alloc(nc * 8); _dyncpy(g_rt_builtin_names, g_rt_builtin_count * 8, nb);
+        g_rt_builtin_names = nb;
+    }
+    if g_rt_builtin_count * 8 + 8 > str_len(g_rt_builtin_ret_types) {
+        nc := g_rt_builtin_count * 2 + 16;
+        nb := alloc(nc * 8); _dyncpy(g_rt_builtin_ret_types, g_rt_builtin_count * 8, nb);
+        g_rt_builtin_ret_types = nb;
+    }
+    w64(g_rt_builtin_names, g_rt_builtin_count * 8, ni);
+    w64(g_rt_builtin_ret_types, g_rt_builtin_count * 8, ret_ti);
+    g_rt_builtin_count = g_rt_builtin_count + 1;
+}
+
 fn get_type_kind(ti: int) -> int {
     if ti >= 0 && ti < g_type_count { return r64(g_types, ti * 24); }
     return -1;
@@ -1286,16 +1319,10 @@ fn infer_expr(node: int) -> int {
         if ast_kind(func_node) == EXPR_IDENT {
             func_ni = ast_int_val(func_node);
         }
-        // Check builtins
+        // Check builtins (only syscall3 — OS communication, no .cr body)
         if func_ni >= 0 {
             s := istr_get(func_ni);
             if s == "syscall3" { return TI_INT; }
-            if s == "load8" { return TI_INT; }
-            if s == "store8" { return TI_INT; }
-            if s == "alloc" { return TI_STR; }
-            if s == "get_arg" { return TI_STR; }
-            if s == "load_str_ptr" { return TI_STR; }
-            if s == "store_str_ptr" { return TI_INT; }
         }
         // Check for SYM_SO_FN (.so extension registered)
         so_fn_fi : ., mut = -1;
@@ -1799,6 +1826,7 @@ fn check_all() {
 
     // First pass: collect declarations
     collect_decls();
+    init_rt_builtins();
 
     // Restore SYM_SO_FN entries lost by g_sym_count reset
     ri : ., mut = 0;
@@ -1812,6 +1840,25 @@ fn check_all() {
         sym_set_node(si, r64(so_nodes, ri * 8));
         g_sym_count = si + 1;
         ri = ri + 1;
+    }
+
+    // Register runtime builtins as proper SYM_FN (no .cr body, implemented in rt.s)
+    // These must come after collect_decls so user-defined funcs take priority.
+    ri2 : ., mut = 0;
+    loop {
+        if ri2 >= g_rt_builtin_count { break; }
+        ni2 := r64(g_rt_builtin_names, ri2 * 8);
+        ti2 := r64(g_rt_builtin_ret_types, ri2 * 8);
+        if lookup_sym_global(ni2) < 0 {  // skip if already defined by user
+            si2 := g_sym_count;
+            dyn_grow_syms(si2 + 1);
+            sym_set_name(si2, ni2);
+            sym_set_kind(si2, SYM_FN);
+            sym_set_type(si2, ti2);
+            sym_set_node(si2, -1);
+            g_sym_count = si2 + 1;
+        }
+        ri2 = ri2 + 1;
     }
 
     // Second pass: check function bodies
