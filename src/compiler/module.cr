@@ -433,9 +433,13 @@ fn resolve_imports() {
                     }
                     // Try .so extension index: $HOME/.core/lib/<name>/index
                     // Loads metadata (tags). The .cr file still provides runtime implementation.
-                    home_dir : ., mut = get_env("HOME");
-                    if str_len(home_dir) == 0 { home_dir = "/home/DslsDZC"; }
-                    so_idx_path : ., mut = home_dir + "/.core/lib/" + fs_path + "/index";
+                    // Cache HOME to avoid re-reading /proc/self/environ per import.
+                    // Cache checked paths to avoid redundant failed reads.
+                    if str_len(g_home_dir) == 0 {
+                        g_home_dir = get_env("HOME");
+                        if str_len(g_home_dir) == 0 { g_home_dir = "/home/DslsDZC"; }
+                    }
+                    so_idx_path : ., mut = g_home_dir + "/.core/lib/" + fs_path + "/index";
                     so_idx := read_file(so_idx_path);
                     if str_len(so_idx) > 0 {
                         register_so_funcs(so_idx, fs_path);
