@@ -40,7 +40,8 @@ g_holder_count : int, mut;            g_holder_cap : int, mut;
 g_gen_map_names : string, mut;        g_gen_map_types : string, mut;
 g_gen_map_count : int, mut;           g_gen_map_cap : int, mut;
 g_stack_map : string, mut;  // IR var index → shared stack slot var (-1 = own slot), set by allocator
-g_home_dir : string, mut = "";      // cached HOME dir for SO index lookup
+g_home_dir : string, mut;           // cached HOME dir for SO index lookup
+g_home_dir_ok : int, mut;           // 1 = g_home_dir initialized
 
 g_ir_func_name_idx : string, mut;   g_ir_func_name_idx_cap : int, mut;
 g_ir_func_ret_type : string, mut;   g_ir_func_ret_type_cap : int, mut;

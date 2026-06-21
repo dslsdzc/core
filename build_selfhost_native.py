@@ -128,6 +128,7 @@ def main():
             'src/compiler/opt.cr',
             'src/compiler/diag.cr',
             'src/compiler/ir_gen.cr',
+            'src/compiler/pass.cr',
             'src/compiler/dataflow.cr',
             'src/compiler/ccr_io.cr',
             'src/compiler/backend/x86_64.cr',

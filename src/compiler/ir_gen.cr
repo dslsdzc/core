@@ -374,65 +374,9 @@ fn gen_expr(node: int) -> int {
                 }
             }
         }
-        // Variadic expansion: check SYM_SO_FN + TAG_VARIADIC
-        so_variadic : ., mut = 0;
-        si_var := find_so_fn(func_ni);
-        if si_var >= 0 && ac > 1 {
-            tf := sym_type(si_var);
-            if tf == 1 || tf == 3 { so_variadic = 1; }  // TAG_VARIADIC bit
-        }
-        so_print_ni : ., mut = -1;
-        if so_variadic != 0 {
-            is_println : ., mut = 0;
-            // Check if function name contains or ends with "ln" for newline
-            s := istr_get(func_ni);
-            sl := str_len(s);
-            if sl >= 4 {
-                c1 := load8(s, sl - 2);
-                if c1 == 108 {  // 'l'
-                    c2 := load8(s, sl - 1);
-                    if c2 == 110 { is_println = 1; }  // 'n'
-                }
-            }
-            print_ni2 : ., mut = str_intern("print");
-            last_v : ., mut = -1;
-            ai2 : ., mut = 0;
-            loop {
-                if ai2 >= ac { break; }
-                arg_v := r64(arg_vars, ai2 * 8);
-                // Auto-convert int args via int_str() if TAG_AUTO_STR
-                need_auto : ., mut = 0;
-                sia := find_so_fn(func_ni);
-                if sia >= 0 {
-                    tfa := sym_type(sia);
-                    if tfa == 2 || tfa == 3 { need_auto = 1; }  // TAG_AUTO_STR bit
-                }
-                if need_auto != 0 {
-                    arg_ti2 := irv_type(arg_v);
-                    if arg_ti2 == TI_INT {
-                        cv := new_ir_var("conv", TI_STR);
-                        int_str_ni := str_intern("int_str");
-                        emit(IR_CALL, cv, arg_v, 1, int_str_ni, 0);
-                        arg_v = cv;
-                    }
-                }
-                pd := new_ir_var("p", TI_UNIT);
-                emit(IR_CALL, pd, arg_v, 1, print_ni2, 0);
-                last_v = pd;
-                ai2 = ai2 + 1;
-            }
-            // println: add trailing newline
-            if is_println != 0 {
-                nl_ni := str_intern("\n");
-                track_str(nl_ni);
-                nl_v := new_ir_var("nl", TI_STR);
-                emit(IR_CONST, nl_v, nl_ni, 0, 0, TI_STR);
-                pn := new_ir_var("pn", TI_UNIT);
-                emit(IR_CALL, pn, nl_v, 1, print_ni2, 0);
-                last_v = pn;
-            }
-            return last_v;
-        }
+        // Check SO function dispatch (variadic expansion, auto_str, etc.)
+        handled := dispatch_call(func_ni, ac, arg_vars);
+        if handled >= 0 { return handled; }
 
         // For method calls (EXPR_FIELD), func_ni was set by checker
         // Use it directly

@@ -1342,8 +1342,7 @@ fn infer_expr(node: int) -> int {
                 }
 
                 // Decode return type (type_enc2 % 100)
-                ret_code2 : ., mut = type_enc2;
-                loop { if ret_code2 < 100 { break; } ret_code2 = ret_code2 - 100; }  // mod 100
+                ret_code2 : ., mut = type_enc2 - (type_enc2 / 100) * 100;
                 // Map back to TI_*
                 if ret_code2 == 0 { return TI_INT; }
                 if ret_code2 == 1 { return TI_STR; }
