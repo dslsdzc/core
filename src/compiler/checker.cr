@@ -1289,21 +1289,10 @@ fn infer_expr(node: int) -> int {
         // Check builtins
         if func_ni >= 0 {
             s := istr_get(func_ni);
-            if s == "str_len" { return TI_INT; }
-            if s == "str_get" { return TI_STR; }
-            if s == "str_sub" { return TI_STR; }
-            if s == "int_str" { return TI_STR; }
-            if s == "concat" { return TI_STR; }
-            if s == "str_int" { return TI_INT; }
-            if s == "format" { return TI_STR; }
             if s == "syscall3" { return TI_INT; }
             if s == "load8" { return TI_INT; }
             if s == "store8" { return TI_INT; }
             if s == "alloc" { return TI_STR; }
-            if s == "read_file" { return TI_STR; }
-            if s == "write_file" { return TI_INT; }
-            if s == "str_eq" { return TI_INT; }
-            if s == "str_cmp" { return TI_INT; }
             if s == "get_arg" { return TI_STR; }
             if s == "load_str_ptr" { return TI_STR; }
             if s == "store_str_ptr" { return TI_INT; }
