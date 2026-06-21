@@ -40,6 +40,11 @@ fn init_builtins() {
     bi_add("get_arg", TI_STR);
     bi_add("load_str_ptr", TI_STR);
     bi_add("store_str_ptr", TI_INT);
+    bi_add("sched_call_0", TI_INT);
+    bi_add("sched_call_1", TI_INT);
+    bi_add("sched_call_2", TI_INT);
+    bi_add("sched_call_3", TI_INT);
+    bi_add("sched_call_4", TI_INT);
 }
 
 fn bi_add(name: string, ret_ti: int) {

@@ -75,6 +75,31 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int) -> int {
     return cp;
 }
 
+// ── Scheduler call trampolines ──
+// Emit sched_call_N(buf, p, n): mov rax,[rdi+rsi*8]; shift N args; jmp rax
+// Returns bytes written.
+fn emit_sched_call(buf: string, p: int, n: int) -> int {
+    w8(buf, p, 72); w8(buf, p+1, 139); w8(buf, p+2, 4); w8(buf, p+3, 240); off : ., mut = 4;
+    if n >= 1 { w8(buf, p+off, 72); w8(buf, p+off+1, 137); w8(buf, p+off+2, 215); off = off + 3; }
+    if n >= 2 { w8(buf, p+off, 72); w8(buf, p+off+1, 137); w8(buf, p+off+2, 206); off = off + 3; }
+    if n >= 3 { w8(buf, p+off, 76); w8(buf, p+off+1, 137); w8(buf, p+off+2, 194); off = off + 3; }
+    if n >= 4 { w8(buf, p+off, 76); w8(buf, p+off+1, 137); w8(buf, p+off+2, 201); off = off + 3; }
+    w8(buf, p+off, 255); w8(buf, p+off+1, 224); off = off + 2;
+    return off;
+}
+fn sched_tramp_sz(n: int) -> int {
+    sz : ., mut = 6;
+    if n >= 1 { sz = sz + 3; } if n >= 2 { sz = sz + 3; }
+    if n >= 3 { sz = sz + 3; } if n >= 4 { sz = sz + 3; }
+    return sz;
+}
+fn sched_reg_one(name: string, offset: int, cp: int) {
+    grow_func_offsets(g_x86_func_off_count * 2 + 2);
+    w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern(name));
+    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, cp - 176);
+    g_x86_func_off_count = g_x86_func_off_count + 1;
+}
+
 fn w16(buf: string, off: int, val: int) {
     w8(buf, off, val % 256); w8(buf, off+1, (val/256) % 256);
 }
@@ -226,6 +251,32 @@ fn elf_gen(buf: string) -> int {
     w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code);
     g_x86_func_off_count = g_x86_func_off_count + 1;
     total_code = total_code + 65;
+    // sched_call trampolines (0..4)
+    grow_func_offsets(g_x86_func_off_count * 2 + 2);
+    w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("sched_call_0"));
+    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code);
+    g_x86_func_off_count = g_x86_func_off_count + 1;
+    total_code = total_code + sched_tramp_sz(0);
+    grow_func_offsets(g_x86_func_off_count * 2 + 2);
+    w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("sched_call_1"));
+    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code);
+    g_x86_func_off_count = g_x86_func_off_count + 1;
+    total_code = total_code + sched_tramp_sz(1);
+    grow_func_offsets(g_x86_func_off_count * 2 + 2);
+    w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("sched_call_2"));
+    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code);
+    g_x86_func_off_count = g_x86_func_off_count + 1;
+    total_code = total_code + sched_tramp_sz(2);
+    grow_func_offsets(g_x86_func_off_count * 2 + 2);
+    w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("sched_call_3"));
+    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code);
+    g_x86_func_off_count = g_x86_func_off_count + 1;
+    total_code = total_code + sched_tramp_sz(3);
+    grow_func_offsets(g_x86_func_off_count * 2 + 2);
+    w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("sched_call_4"));
+    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code);
+    g_x86_func_off_count = g_x86_func_off_count + 1;
+    total_code = total_code + sched_tramp_sz(4);
 
     rodata_base := total_code;
     g_x86_rodata_base = 176 + rodata_base;
@@ -381,6 +432,17 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         api = api + 1; }
     g_x86_alloc_patch_count = 0;
 
+    // ── scheduler call trampolines ──
+    sched_reg_one("sched_call_0", 0, cp);
+    cp = cp + emit_sched_call(buf, cp, 0);
+    sched_reg_one("sched_call_1", 1, cp);
+    cp = cp + emit_sched_call(buf, cp, 1);
+    sched_reg_one("sched_call_2", 2, cp);
+    cp = cp + emit_sched_call(buf, cp, 2);
+    sched_reg_one("sched_call_3", 3, cp);
+    cp = cp + emit_sched_call(buf, cp, 3);
+    sched_reg_one("sched_call_4", 4, cp);
+    cp = cp + emit_sched_call(buf, cp, 4);
 
     // Set rodata base from actual emission position
     g_x86_rodata_base = cp;
