@@ -98,11 +98,24 @@ fn e2_st(b: string, p: int, r: int, o: int) -> int {
 }
 
 fn e2_li(b: string, p: int, o: int, v: int) -> int {
+    // 64-bit immediate: v may exceed 32-bit sign-extended range
+    if v < -2147483648 || v >= 2147483648 {
+        // mov rax, v (10 bytes)
+        e2_w8(b, p, 72); e2_w8(b, p+1, 184);
+        e2_w32(b, p+2, v % 4294967296); e2_w32(b, p+6, v / 4294967296);
+        p = p + 10;
+        // mov [rbp+offset], rax
+        if o >= -128 && o <= 127 {
+            e2_w8(b, p, 72); e2_w8(b, p+1, 137); e2_w8(b, p+2, 69); e2_w8(b, p+3, o); return 10 + 4;
+        }
+        e2_w8(b, p, 72); e2_w8(b, p+1, 137); e2_w8(b, p+2, 133); e2_w32(b, p+3, o); return 10 + 7;
+    }
+    // 32-bit sign-extended immediate: mov [rbp+offset], imm32
     if o >= -128 && o <= 127 {
         e2_w8(b, p, 72); e2_w8(b, p+1, 199); e2_w8(b, p+2, 69); e2_w8(b, p+3, o);
         e2_w32(b, p+4, v); return 8;
     }
-    // Large offset: use [rbp+disp32] (11 bytes)
+    // Large offset: [rbp+disp32], imm32
     e2_w8(b, p, 72); e2_w8(b, p+1, 199); e2_w8(b, p+2, 133); e2_w32(b, p+3, o);
     e2_w32(b, p+7, v); return 11;
 }
