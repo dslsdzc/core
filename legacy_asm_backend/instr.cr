@@ -2,6 +2,8 @@
 // Binary emit interface — state + helpers + instr_size + emit_instr
 // ══════════════════════════════════════════════════════════════
 
+fn align_up(val: int, align: int) -> int { return (val + align - 1) / align * align; }
+
 // State globals (set by caller before emit phase)
 g_x86_rodata_base : int, mut;
 g_x86_func_frame_start : int, mut;  // abs buf pos of current function body (after frame)
@@ -21,16 +23,35 @@ fn g2_slot(v: int) -> int {
 }
 
 fn g2_str_off(si: int) -> int {
-    o := 0; i := 0;
-    loop { if i >= g_x86_str_count { break; } if r64(g_x86_str_offs, i * 8) == si { return o; } o = o + istr_len(r64(g_x86_str_offs, i * 8)) + 1; i = i + 1; }
-    grow_str_offs(g_x86_str_count + 1); w64(g_x86_str_offs, g_x86_str_count * 8, si); g_x86_str_count = g_x86_str_count + 1;
-    return o;
+    // Each string: [.balign 8] .quad(N) .asciz "..." .balign 8
+    total : ., mut = 0;
+    i : ., mut = 0;
+    loop {
+        if i >= g_x86_str_count { break; }
+        cur_ni := r64(g_x86_str_offs, i * 8);
+        cur_len := istr_len(cur_ni);
+        data_off := align_up(total, 8) + 8;  // after header
+        if cur_ni == si { return data_off; }
+        total = data_off + cur_len + 1;  // data + null
+        i = i + 1;
+    }
+    // New string
+    data_off := align_up(total, 8) + 8;
+    grow_str_offs(g_x86_str_count + 1);
+    w64(g_x86_str_offs, g_x86_str_count * 8, si);
+    g_x86_str_count = g_x86_str_count + 1;
+    return data_off;
 }
 
 fn g2_rodata_sz() -> int {
     o := 0; i := 0;
-    loop { if i >= g_x86_str_count { break; } o = o + istr_len(r64(g_x86_str_offs, i * 8)) + 1; i = i + 1; }
-    return o;
+    loop {
+        if i >= g_x86_str_count { break; }
+        slen := istr_len(r64(g_x86_str_offs, i * 8));
+        o = align_up(o, 8) + 8 + slen + 1;
+        i = i + 1;
+    }
+    return align_up(o, 8);
 }
 
 // ── Byte encoding helpers ──

@@ -1,6 +1,5 @@
 // _import.cr — imports applied to all .cr files in src/compiler/
 // Backend files in subdirectories use :: as path separator.
-// Legacy ASM backend removed — ELF pipeline is the only path.
 import cli
 import ast
 import globals
@@ -12,7 +11,10 @@ import diag
 import ir_gen
 import dataflow
 import ccr_io
+import backend::x86_64
+import backend::x86_64::instr
 import module
+import backend::resolve
 import toml
 import project
 import os

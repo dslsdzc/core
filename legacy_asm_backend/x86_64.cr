@@ -694,17 +694,22 @@ fn x86_64_generate() -> string {
     asm = asm + "    syscall\n\n";
 
     asm = asm + ".globl alloc\nalloc:\n";
-    asm = asm + "    add rdi, 7\n    and rdi, -8\n";
+    asm = asm + "    mov r8, rdi\n";              // save requested size
+    asm = asm + "    add rdi, 15\n    and rdi, -8\n";  // size + header(8) + align
     asm = asm + "    mov rax, [rip + _heap_ptr]\n";
     asm = asm + "    lea rdx, [rax + rdi]\n";
     asm = asm + "    lea rcx, [rip + _heap_end]\n";
     asm = asm + "    cmp rdx, rcx\n    ja .Loom\n";
     asm = asm + "    mov [rip + _heap_ptr], rdx\n";
+    asm = asm + "    mov [rax], r8\n";             // write header: [header] = requested_size
     asm = asm + "    push rax\n    push rdx\n";
-    asm = asm + "    mov rdi, rax\n    xor eax, eax\n";
+    asm = asm + "    lea rdi, [rax + 8]\n";        // zero data portion (skip header)
+    asm = asm + "    xor eax, eax\n";
     asm = asm + "    sub rdx, rdi\n    mov rcx, rdx\n";
     asm = asm + "    cld\n    rep stosb\n";
-    asm = asm + "    pop rdx\n    pop rax\n    ret\n";
+    asm = asm + "    pop rdx\n    pop rax\n";
+    asm = asm + "    lea rax, [rax + 8]\n";        // return data pointer (after header)
+    asm = asm + "    ret\n";
     asm = asm + ".Loom:\n    xor eax, eax\n    ret\n\n";
 
     asm = asm + ".globl get_arg\nget_arg:\n";
@@ -736,19 +741,25 @@ fn x86_64_generate() -> string {
     asm = asm + "_heap_end:\n\n";
     asm = asm + ".data\n";
     asm = asm + "_heap_ptr: .quad 0\n";
-    asm = asm + "empty_str: .byte 0\n\n";
+    asm = asm + "empty_str_hdr: .quad 1\n";
+    asm = asm + "empty_str: .byte 0\n";
+    asm = asm + ".balign 8\n\n";
 
     asm = asm + ".section .rodata\n";
+    asm = asm + ".balign 8\n";
     si : ., mut = 0;
     loop {
         if si >= g_ir_str_const_count { break; }
         str_idx := r64(g_ir_str_consts, si * 8);
+        slen := str_len(istr_get(str_idx));
+        asm = asm + ".quad " + int_str(slen + 1) + "\n";
         lbl : ., mut = ".LC";
         lbl = lbl + int_str(si);
         lbl = lbl + ": .asciz \"";
         lbl = lbl + istr_get(str_idx);
         lbl = lbl + "\"\n";
         asm = asm + lbl;
+        asm = asm + ".balign 8\n";
         si = si + 1;
     }
 

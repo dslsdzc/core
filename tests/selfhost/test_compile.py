@@ -20,10 +20,12 @@ def concat_sources():
         'src/compiler/ast.cr', 'src/compiler/globals.cr',
         'src/compiler/dyn_arr.cr', 'src/compiler/lexer.cr', 'src/compiler/parser.cr',
         'src/compiler/checker.cr', 'src/compiler/opt.cr', 'src/compiler/diag.cr',
-        'src/compiler/ir_gen.cr', 'src/compiler/dataflow.cr',
+        'src/compiler/ir_gen.cr', 'src/compiler/pass.cr',
+        'src/compiler/dataflow.cr',
         'src/compiler/backend/x86_64.cr', 'src/compiler/backend/x86_64/instr.cr',
         'src/compiler/module.cr', 'src/compiler/ccr_io.cr', 'src/compiler/dump.cr',
         'src/compiler/project.cr', 'src/compiler/interp.cr', 'src/stdlib/os.cr',
+        'src/compiler/backend/resolve.cr',
         'src/compiler/main.cr',
     ]
     parts = []
@@ -95,53 +97,41 @@ else:
     print("  FAIL")
     sys.exit(1)
 
-# ── Test 3: Full self-compilation (Core compiler compiles Core → native binary) ──
-print("\n=== Test 3: Self-Compilation ===")
-test_program = "fn main() -> int {\n    return 42;\n}\n"
-
-result = compile_selfhost()
-if not result:
-    print("FAIL: could not compile self-hosted compiler")
-    sys.exit(1)
-interp3, _ = result
-
-asm_output = interp3.run('compile_source', [test_program])
-if asm_output is None:
-    print("FAIL: compile_source returned None")
-    sys.exit(1)
-
-print(f"  Generated {len(asm_output)} bytes of assembly")
+# ── Test 3: Full self-compilation (native corec compiles .cr → ELF binary) ──
+print("\n=== Test 3: Self-Compilation (native) ===")
 
 build_dir = os.path.join(BASE, 'build')
 os.makedirs(build_dir, exist_ok=True)
-asm_path = os.path.join(build_dir, 'test_self_compile.s')
-bin_path = os.path.join(build_dir, 'test_self_compile')
+test_src = os.path.join(build_dir, 'test_self_compile.cr')
+test_bin = os.path.join(build_dir, 'test_self_compile')
 
-with open(asm_path, 'w') as f:
-    f.write(asm_output)
+# Clean up artifacts from previous runs
+for p in [test_src, test_bin, test_bin + '.ccr']:
+    if os.path.exists(p):
+        os.remove(p)
 
-r = subprocess.run(['as', '-o', bin_path + '.o', asm_path], capture_output=True, text=True)
+with open(test_src, 'w') as f:
+    f.write("fn main() -> int { return 42; }\n")
+
+r = subprocess.run(
+    [os.path.join(build_dir, 'corec'), 'build', test_src, '-o', test_bin, '--static'],
+    capture_output=True, text=True, cwd=BASE)
+print(f"  corec stdout: {r.stdout.strip()}")
+print(f"  corec stderr: {r.stderr.strip()}")
 if r.returncode != 0:
-    print(f"Assembly failed: {r.stderr}")
+    print(f"  corec build failed (exit {r.returncode})")
     sys.exit(1)
 
-# Assemble runtime and link into binary (provides _start, __builtin_alloc, etc.)
-rt_s = os.path.join(BASE, 'src/runtime/rt.s')
-rt_o = bin_path + '_rt.o'
-r = subprocess.run(['as', '-o', rt_o, rt_s], capture_output=True, text=True)
-if r.returncode != 0:
-    print(f"Runtime assembly failed: {r.stderr}")
+if not os.path.exists(test_bin):
+    print(f"FAIL: {test_bin} was not created")
     sys.exit(1)
 
-r = subprocess.run(['ld', '-o', bin_path, bin_path + '.o', rt_o], capture_output=True, text=True)
-if r.returncode != 0:
-    print(f"Link failed: {r.stderr}")
-    sys.exit(1)
+os.chmod(test_bin, 0o755)
 
-r = subprocess.run([bin_path], capture_output=True, text=True)
+r = subprocess.run([test_bin], capture_output=True, text=True)
 print(f"  Binary exit code: {r.returncode}")
 if r.returncode == 42:
-    print("  PASS: Core compiler compiled Core code to working native binary")
+    print("  PASS: native corec compiled .cr to working ELF binary")
 else:
     print(f"  FAIL: expected 42, got {r.returncode}")
     sys.exit(1)

@@ -14,7 +14,7 @@ fn g2_init() {
     g_x86_ret_patch_count = 0;
     g_x86_alloc_patch_count = 0;
     g_x86_ext_rel_count = 0;
-    g_x86_rip_patch_count = 0;
+    // g_x86_rip_patch_count NOT reset
 }
 
 fn g2_slot(v: int) -> int {
@@ -33,14 +33,14 @@ fn g2_slot(v: int) -> int {
 
 fn g2_str_off(si: int) -> int {
     o := 0; i := 0;
-    loop { if i >= g_x86_str_count { break; } if r64(g_x86_str_offs, i * 8) == si { return o; } o = o + istr_len(r64(g_x86_str_offs, i * 8)) + 1; i = i + 1; }
+    loop { if i >= g_x86_str_count { break; } if r64(g_x86_str_offs, i * 8) == si { return o; } o = o + istr_len(r64(g_x86_str_offs, i * 8)) + 1; if o % 8 != 0 { o = o + 8 - (o % 8); } i = i + 1; }
     grow_str_offs(g_x86_str_count + 1); w64(g_x86_str_offs, g_x86_str_count * 8, si); g_x86_str_count = g_x86_str_count + 1;
     return o;
 }
 
 fn g2_rodata_sz() -> int {
     o := 0; i := 0;
-    loop { if i >= g_x86_str_count { break; } o = o + istr_len(r64(g_x86_str_offs, i * 8)) + 1; i = i + 1; }
+    loop { if i >= g_x86_str_count { break; } o = o + istr_len(r64(g_x86_str_offs, i * 8)) + 1; if o % 8 != 0 { o = o + 8 - (o % 8); } i = i + 1; }
     return o;
 }
 
@@ -152,6 +152,106 @@ fn e2_alu(b: string, p: int, op: int) -> int {
 }
 
 // ── emit_instr: write one instruction to buffer, return bytes written ──
+
+fn e2_load_var(buf: string, pos: int, reg: int, var_idx: int) -> int {
+    if var_idx >= 0 && r64(g_x86_is_global, var_idx * 8) != 0 {
+        grow_rip_patch(g_x86_rip_patch_count + 1);
+        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + 3);
+        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, var_idx);
+        g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
+        sz := e2_lr(buf, pos, 0);
+        if reg == 10 {
+            e2_w8(buf, pos+sz, 77); e2_w8(buf, pos+sz+1, 139); e2_w8(buf, pos+sz+2, 18); sz = sz + 3;
+        } else {
+            sz = sz + e2_ld(buf, pos+sz, reg, e2_rslot(10));
+        }
+        return sz;
+    }
+    return e2_ld(buf, pos, reg, g2_slot(var_idx));
+}
+
+fn e2_rslot(r: int) -> int { return -(r + 1000) - 1; }
+
+fn sz_ofs(o: int) -> int {
+    if o < -500 { return 3; }
+    if o >= -128 && o <= 127 { return 4; }
+    return 7;
+}
+fn instr_size(instr_idx: int, pos: int) -> int {
+    op := iri_op(instr_idx); d := iri_dest(instr_idx); s1 := iri_s1(instr_idx); s2 := iri_s2(instr_idx); s3 := iri_s3(instr_idx); ti := iri_tk(instr_idx);
+    if op == IR_NOP { return 0; }
+    ds : ., mut = 0; if d >= 0 { ds = sz_st(g2_slot(d)); }
+
+    if op == IR_CONST && d >= 0 {
+        if ti == TI_STR { return sz_lr() + sz_st(g2_slot(d)); }
+        return sz_li(g2_slot(d), s1);
+    }
+    if op == IR_BINARY && d >= 0 {
+        s := sz_load_var(s1) + sz_load_var(s2);
+        if s3 == OP_ADD || s3 == OP_SUB { s = s + sz_alu(); }
+        else if s3 == OP_MUL { s = s + 4; }
+        else if s3 == OP_SHL || s3 == OP_SHR { s = s + 12; }
+        else if s3 == OP_DIV || s3 == OP_MOD { s = s + 13; }
+        else if s3 >= OP_EQ && s3 <= OP_GE { s = s + sz_alu() + 3 + 4; }
+        else if s3 == OP_AND || s3 == OP_OR { s = s + sz_alu(); }
+        return s + ds;
+    }
+    if op == IR_UNARY && d >= 0 {
+        if s3 == UOP_NEG { return sz_load_var(s1) + 3 + ds; }
+        if s3 == UOP_NOT { return sz_load_var(s1) + 10 + ds; }
+        return ds;
+    }
+    if op == IR_CALL {
+        ac := s2; sz := 0;
+        ai := 0; loop { if ai >= ac || ai >= 6 { break; } sz = sz + sz_load_var(s1 + ai); ai = ai + 1; }
+        fn2 := ""; if s3 >= 0 { fn2 = istr_get(s3); }
+        if str_eq(fn2, "syscall3") != 0 { sz = sz + 4*sz_mov() + sz_syscall() + ds; }
+        else if str_len(fn2) > 0 { sz = sz + sz_call() + ds; }
+        else { sz = sz + 2 + ds; }
+        return sz;
+    }
+    if op == IR_RETURN {
+        if s1 >= 0 { return sz_load_var(s1) + sz_jmp(); }
+        return sz_jmp();
+    }
+    if op == IR_ALLOC { return 0; }
+    if op == IR_ALLOC_STRUCT { return ds + 10; }
+    if op == IR_ALLOC_ARRAY { return ds + 10; }
+    if op == IR_LOAD && d >= 0 { return sz_load_var(s1) + ds; }
+    if op == IR_STORE {
+        if s1 >= 0 && g_x86_global_cap > s1 && r64(g_x86_is_global, s1 * 8) != 0 {
+            return sz_load_var(s2) + sz_lrb() + 3;          // global target
+        }
+        return sz_load_var(s2) + sz_st(g2_slot(s1));        // local target
+    }
+    if op == IR_LOAD_FIELD && d >= 0 { return sz_load_var(s1) + 7 + ds; }
+    if op == IR_STORE_FIELD { return sz_load_var(s1) + sz_load_var(s2) + 7; }
+    if op == IR_REF && d >= 0 { return sz_lb(g2_slot(s1)) + ds; }
+    if op == IR_DEREF && d >= 0 { return sz_load_var(s1) + 3 + ds; }
+    if op == IR_STORE_PTR { return sz_load_var(s1) + sz_load_var(s2) + 3; }
+    if op == IR_BRANCH { return sz_load_var(s1) + 3 + sz_je() + sz_jmp(); }
+    if op == IR_JUMP { return sz_jmp(); }
+    if op == IR_LABEL { return 0; }
+    if op == IR_PHI { return 0; }
+    if op == IR_LOAD_ENUM_TAG && d >= 0 { return sz_load_var(s1) + 7 + ds; }
+    if op == IR_LOAD_INDEX && d >= 0 { return sz_load_var(s1) + 7 + ds; }
+    if op == IR_STORE_INDEX { return sz_load_var(s1) + sz_load_var(s2) + 7; }
+    if op == IR_LOAD_INDEX_VAR && d >= 0 { return sz_load_var(s1) + sz_load_var(s2) + 4 + ds; }
+    if op == IR_STORE_INDEX_VAR { return sz_load_var(s1) + sz_load_var(s2) + sz_load_var(d) + 4; }
+    if op == IR_MAKE_ENUM && d >= 0 { return ds + 10 + 15; }
+    if op == IR_SLICE && d >= 0 { return sz_load_var(s1) + sz_load_var(s2) + 7 + ds; }
+    return 8;
+}
+
+fn sz_load_var(v: int) -> int {
+    if v >= 0 {
+        if g_x86_global_cap > v {
+            if r64(g_x86_is_global, v * 8) != 0 { return sz_lr() + 3; }
+        }
+    }
+    return sz_ld(g2_slot(v));
+}
+
 fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     op := iri_op(instr_idx); d := iri_dest(instr_idx); s1 := iri_s1(instr_idx); s2 := iri_s2(instr_idx); s3 := iri_s3(instr_idx); ti := iri_tk(instr_idx);
     cp := 0;
@@ -176,9 +276,9 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     }
 
     if op == IR_BINARY {
-        do2 := g2_slot(d); o1 := g2_slot(s1); o2 := g2_slot(s2);
-        cp = cp + e2_ld(buf, pos+cp, 10, o1);
-        cp = cp + e2_ld(buf, pos+cp, 11, o2);
+        do2 := g2_slot(d);
+        cp = cp + e2_load_var(buf, pos+cp, 10, s1);
+        cp = cp + e2_load_var(buf, pos+cp, 11, s2);
         if s3 == OP_ADD         { cp = cp + e2_alu(buf, pos+cp, 1); }
         else if s3 == OP_SUB    { cp = cp + e2_alu(buf, pos+cp, 41); }
         else if s3 == OP_MUL    { e2_w8(buf, pos+cp, 77); e2_w8(buf, pos+cp+1, 15); e2_w8(buf, pos+cp+2, 175); e2_w8(buf, pos+cp+3, 211); cp = cp + 4; }
@@ -203,8 +303,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     }
 
     if op == IR_UNARY && d >= 0 {
-        do2 := g2_slot(d); o1 := g2_slot(s1);
-        cp = cp + e2_ld(buf, pos+cp, 10, o1);
+        do2 := g2_slot(d);
+        cp = cp + e2_load_var(buf, pos+cp, 10, s1);
         if s3 == UOP_NEG { e2_w8(buf, pos+cp, 73); e2_w8(buf, pos+cp+1, 247); e2_w8(buf, pos+cp+2, 218); cp = cp + 3; }
         else if s3 == UOP_NOT {
             e2_w8(buf, pos+cp, 77); e2_w8(buf, pos+cp+1, 133); e2_w8(buf, pos+cp+2, 210); cp = cp + 3;
@@ -220,9 +320,9 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         fa := s1; ac := s2;
         ai := 0;
         loop { if ai >= ac { break; } if ai >= 6 { break; }
-            ao := g2_slot(fa + ai); r := -1;
+            r := -1;
             if ai == 0 { r = 7; } if ai == 1 { r = 6; } if ai == 2 { r = 2; } if ai == 3 { r = 1; } if ai == 4 { r = 8; } if ai == 5 { r = 9; }
-            if r >= 0 { cp = cp + e2_ld(buf, pos+cp, r, ao); }
+            if r >= 0 { cp = cp + e2_load_var(buf, pos+cp, r, fa + ai); }
         ai = ai + 1; }
         if str_eq(fn2, "syscall3") != 0 {
             cp = cp + e2_mov(buf, pos+cp, 0, 7);
@@ -263,7 +363,17 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     }
 
     if op == IR_RETURN {
-        if s1 >= 0 { cp = cp + e2_ld(buf, pos+cp, 0, g2_slot(s1)); }
+        if s1 >= 0 {
+            if r64(g_x86_is_global, s1 * 8) != 0 {
+                // Global: load via RIP-relative into rax
+                grow_rip_patch(g_x86_rip_patch_count + 1);
+                w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3);
+                w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1);
+                g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
+                cp = cp + e2_lr(buf, pos+cp, 0);       // lea r10, [rip+0]
+                e2_w8(buf, pos+cp, 65); e2_w8(buf, pos+cp+1, 139); e2_w8(buf, pos+cp+2, 2); cp = cp + 3;  // mov rax, [r10]
+            } else { cp = cp + e2_ld(buf, pos+cp, 0, g2_slot(s1)); }
+        }
         // record position for caller to patch jmp → epilogue
         grow_ret_patch(g_x86_ret_patch_count + 1); w64(g_x86_ret_patch_pos, g_x86_ret_patch_count * 8, pos + cp);
         g_x86_ret_patch_count = g_x86_ret_patch_count + 1;
@@ -309,7 +419,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
 
     if op == IR_LOAD && d >= 0 {
         do2 := g2_slot(d);
-        if s1 >= 0 && s1 < g_x86_global_cap {
+        if s1 >= 0 {
             if r64(g_x86_is_global, s1 * 8) != 0 {
                 grow_rip_patch(g_x86_rip_patch_count + 1);
                 w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3);
@@ -318,25 +428,24 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
                 cp = cp + e2_lr(buf, pos+cp, 0);
                 e2_w8(buf, pos+cp, 77); e2_w8(buf, pos+cp+1, 139); e2_w8(buf, pos+cp+2, 18); cp = cp + 3;
                 cp = cp + e2_st(buf, pos+cp, 10, do2);
-            } else { o1 := g2_slot(s1); cp = cp + e2_ld(buf, pos+cp, 10, o1); cp = cp + e2_st(buf, pos+cp, 10, do2); }
-        } else { o1 := g2_slot(s1); cp = cp + e2_ld(buf, pos+cp, 10, o1); cp = cp + e2_st(buf, pos+cp, 10, do2); }
+            } else { cp = cp + e2_load_var(buf, pos+cp, 10, s1); cp = cp + e2_st(buf, pos+cp, 10, do2); }
+        } else { cp = cp + e2_load_var(buf, pos+cp, 10, s1); cp = cp + e2_st(buf, pos+cp, 10, do2); }
         return cp;
     }
 
     if op == IR_STORE {
         o1 := g2_slot(s1);
-        if s1 >= 0 && s1 < g_x86_global_cap {
+        if s1 >= 0 {
             if r64(g_x86_is_global, s1 * 8) != 0 {
-                o2 := g2_slot(s2);
-                cp = cp + e2_ld(buf, pos+cp, 10, o2);
+                cp = cp + e2_load_var(buf, pos+cp, 10, s2);
                 grow_rip_patch(g_x86_rip_patch_count + 1);
                 w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3);
                 w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1);
                 g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
                 cp = cp + e2_lrb(buf, pos+cp, 0);
-                e2_w8(buf, pos+cp, 77); e2_w8(buf, pos+cp+1, 137); e2_w8(buf, pos+cp+2, 26); cp = cp + 3;
-            } else { o2 := g2_slot(s2); cp = cp + e2_ld(buf, pos+cp, 10, o2); cp = cp + e2_st(buf, pos+cp, 10, o1); }
-        } else { o2 := g2_slot(s2); cp = cp + e2_ld(buf, pos+cp, 10, o2); cp = cp + e2_st(buf, pos+cp, 10, o1); }
+                e2_w8(buf, pos+cp, 76); e2_w8(buf, pos+cp+1, 137); e2_w8(buf, pos+cp+2, 19); cp = cp + 3;
+            } else { cp = cp + e2_load_var(buf, pos+cp, 10, s2); cp = cp + e2_st(buf, pos+cp, 10, o1); }
+        } else { cp = cp + e2_load_var(buf, pos+cp, 10, s2); cp = cp + e2_st(buf, pos+cp, 10, o1); }
         return cp;
     }
 
@@ -374,13 +483,12 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     if op == IR_STORE_PTR {
         o1 := g2_slot(s1); o2 := g2_slot(s2);
         cp = cp + e2_ld(buf, pos+cp, 10, o1); cp = cp + e2_ld(buf, pos+cp, 11, o2);
-        e2_w8(buf, pos+cp, 77); e2_w8(buf, pos+cp+1, 137); e2_w8(buf, pos+cp+2, 26); cp = cp + 3;
+        e2_w8(buf, pos+cp, 79); e2_w8(buf, pos+cp+1, 137); e2_w8(buf, pos+cp+2, 26); cp = cp + 3;
         return cp;
     }
 
     if op == IR_BRANCH {
-        co := g2_slot(s1);
-        cp = cp + e2_ld(buf, pos+cp, 10, co);
+        cp = cp + e2_load_var(buf, pos+cp, 10, s1);
         e2_w8(buf, pos+cp, 77); e2_w8(buf, pos+cp+1, 133); e2_w8(buf, pos+cp+2, 210); cp = cp + 3;  // test r10, r10
         // IR_BRANCH: s2=true_offset, s3=false_offset
         // je → false (when condition==0), jmp → true (when condition!=0)

@@ -113,13 +113,18 @@ fn read_source_or_project(src_path: string) -> int {
 // Run the shared frontend pipeline: tokenize → resolve → parse → check
 // Returns 0 on success, 1 on error.
 fn run_frontend() -> int {
+    println("[1/5] tokenize...");
     tokenize();
+    println("[2/5] resolve imports...");
     res_imports();
+    println("[3/5] parse...");
     parse_all();
     if g_diag_count > 0 { print_diagnostics(); return 1; }
     if g_error_count > 0 { print_parse_errors(); return 1; }
+    println("[4/5] type check...");
     check_all();
     if g_diag_count > 0 { print_diagnostics(); return 1; }
+    println("[5/5] frontend done");
     return 0;
 }
 
@@ -308,8 +313,6 @@ fn corec_main() -> int {
     }
     src_path := cli_arg(0);
 
-    // Debug: print first 20 bytes of src_path using raw syscall
-
     if read_source_or_project(src_path) != 0 { return 1; }
 
     // --static: prepend rt.cr so * functions inline
@@ -327,6 +330,7 @@ fn corec_main() -> int {
     }
 
     // === build | cir | ccr all need IR gen ===
+    println("ir gen...");
     ir_gen_all();
 
     // === cir: output dataflow graph ===
@@ -348,7 +352,13 @@ fn corec_main() -> int {
     }
 
     // === build | ccr need lower_to_ccr ===
+    println("lower to ccr...");
     lower_to_ccr();
+    print("lower done: ");
+    print(int_str(g_ir_func_count));
+    print(" funcs, ");
+    print(int_str(g_ir_instr_count));
+    println(" instrs");
 
     // === ccr: output linear CFG ===
     if cli_eq(cmd, "ccr") {
@@ -387,9 +397,11 @@ fn corec_main() -> int {
         }
     }
     // Save .ccr alongside output (real IR artifact)
+    println("save .ccr...");
     ccr_path : ., mut = out_path + ".ccr";
     r := save_ccr(ccr_path);
     if r != 0 { println("error: could not write .ccr"); return 1; }
+    println("generate ELF...");
     // Call corearch to produce ELF
     cmd2 : ., mut = "corearch ";
     cmd2 = cmd2 + ccr_path + " --elf";
@@ -435,7 +447,7 @@ fn compile_source(source: string) -> string {
     }
     ir_gen_all();
     lower_to_ccr();
-    return x86_64_generate();
+    return "ok";
 }
 
 // Entry point

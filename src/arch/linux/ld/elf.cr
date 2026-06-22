@@ -111,7 +111,7 @@ g_asm_code_size : int, mut;
 g_elf_buf : string, mut;
 
 // ── ELF header writer (x86-64) ──
-fn elf2_hdr(buf: string, total_sz: int) {
+fn elf2_hdr(buf: string, code_end: int, total_sz: int) {
     i := 0; loop { if i >= 176 { break; } store8(buf, i, 0); i = i + 1; }
     // e_ident
     w8(buf, 0, 127); w8(buf, 1, 69); w8(buf, 2, 76); w8(buf, 3, 70);  // \x7fELF
@@ -124,15 +124,16 @@ fn elf2_hdr(buf: string, total_sz: int) {
     w64(buf, 32, 64); w64(buf, 40, 0);
     w32(buf, 48, 0); w16(buf, 52, 64);
     w16(buf, 54, 56); w16(buf, 56, 2);  // e_phentsize=56, e_phnum=2
-    // PHDR[0]: code segment RX
+    // PHDR[0]: code segment (RX)
     w32(buf, 64, 1); w32(buf, 68, 5);
     w64(buf, 72, 0); w64(buf, 80, 4194304); w64(buf, 88, 4194304);
-    w64(buf, 96, total_sz); w64(buf, 104, total_sz); w64(buf, 112, 4096);
-    // PHDR[1]: data BSS RW
-    db := (4194304 + total_sz + 4095) / 4096 * 4096;
+    w64(buf, 96, code_end); w64(buf, 104, code_end); w64(buf, 112, 4096);
+    // PHDR[1]: rodata+BSS (RW)
+    rodata_va := 4194304 + code_end;
+    data_sz := total_sz - code_end;
     w32(buf, 120, 1); w32(buf, 124, 6);
-    w64(buf, 128, 0); w64(buf, 136, db); w64(buf, 144, db);
-    w64(buf, 152, 0); w64(buf, 160, 268435456); w64(buf, 168, 4096);
+    w64(buf, 128, code_end); w64(buf, 136, rodata_va); w64(buf, 144, rodata_va);
+    w64(buf, 152, data_sz); w64(buf, 160, 268435456); w64(buf, 168, 4096);
 }
 
 // ── Emit _start code, return total bytes ──
@@ -149,13 +150,13 @@ fn emit_start(buf: string, pos: int) -> int {
         w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, cp);
         w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argc);
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
-        w32(buf, cp, 0); cp = cp + 4; w8(buf, cp, 77); w8(buf, cp+1, 137); w8(buf, cp+2, 58); cp = cp + 3; }
+        w32(buf, cp, 0); cp = cp + 4; w8(buf, cp, 73); w8(buf, cp+1, 137); w8(buf, cp+2, 58); cp = cp + 3; }
     if gv_argv >= 0 { w8(buf, cp, 76); w8(buf, cp+1, 141); w8(buf, cp+2, 21); cp = cp + 3;
         grow_rip_patch(g_x86_rip_patch_count + 1);
         w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, cp);
         w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argv);
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
-        w32(buf, cp, 0); cp = cp + 4; w8(buf, cp, 77); w8(buf, cp+1, 137); w8(buf, cp+2, 58); cp = cp + 3; }
+        w32(buf, cp, 0); cp = cp + 4; w8(buf, cp, 73); w8(buf, cp+1, 137); w8(buf, cp+2, 50); cp = cp + 3; }
     g_call_main_pos = cp;
     cp = cp + e2_call(buf, cp, 0);  // call main
     w8(buf, cp, 137); w8(buf, cp+1, 199); cp = cp + 2;  // mov edi, eax
@@ -173,59 +174,50 @@ fn emit_start_size() -> int {
 
 // ── Main ELF generation ──
 fn elf_gen(buf: string) -> int {
+    // Mark global variables BEFORE res_labels (instr_size needs g_x86_is_global)
+    gi := 0; loop { if gi >= g_ir_global_count { break; }
+        gv := r64(g_ir_globals, gi * 16 + 8);
+        if gv >= 0 { grow_is_global(gv + 1); w64(g_x86_is_global, gv * 8, 1); }
+    gi = gi + 1; }
+    grow_is_global(g_ir_var_count);
+
+    println("  elf: Phase 0 (res_labels)...");
     // Phase 0: resolve labels (uses instr_size from instr.cr)
     res_labels();
     g_x86_ext_rel_count = 0;  // reset external relocations
 
+    println("  elf: Phase 1 (rodata layout)...");
     // Phase 1: rodata layout — collect string constants
     g_x86_str_count = 0;
     si := 0; loop { if si >= g_ir_str_const_count { break; } g2_str_off(r64(g_ir_str_consts, si * 8)); si = si + 1; }
 
-    // Find g_rt_argc/g_rt_argv_ptr globals for _start emission
-    g_x86_sub_rsp_pos = -1;
+    // Find g_rt_argc/g_rt_argv_ptr via name_idx (no str_eq loop)
     gv_argc = -1; gv_argv = -1;
+    argc_ni := str_intern("g_rt_argc"); argv_ni := str_intern("g_rt_argv_ptr");
     gvsi : ., mut = 0;
     loop { if gvsi >= g_ir_global_count { break; }
-        gv_val := r64(g_ir_globals, gvsi * 16 + 8);
-        if gv_val >= 0 {
-            gni2 : ., mut = 0;
-            loop { if gni2 >= g_str_count { break; }
-                gn := istr_get(gni2);
-                if str_eq(gn, "g_rt_argc") != 0 { gv_argc = gv_val; break; }
-                if str_eq(gn, "g_rt_argv_ptr") != 0 { gv_argv = gv_val; break; }
-                gni2 = gni2 + 1; }
-        }
+        ni := r64(g_ir_globals, gvsi * 16);
+        if ni == argc_ni { gv_argc = r64(g_ir_globals, gvsi * 16 + 8); }
+        if ni == argv_ni { gv_argv = r64(g_ir_globals, gvsi * 16 + 8); }
     gvsi = gvsi + 1; }
-    // Phase 2: compute _start size using same constants as emit_start
+
+    // Phase 2: compute sizes for all functions
+    println("  elf: Phase 2 (size calc)...");
     total_code : ., mut = emit_start_size();
 
         fi := 0; g2_init(); loop { if fi >= g_ir_func_count { break; }
+        if fi % 50 == 0 { print("    func "); print(int_str(fi)); print("/"); println(int_str(g_ir_func_count)); }
         ni := r64(g_ir_func_name_idx, fi * 8);
         grow_func_offsets(g_x86_func_off_count * 2 + 2);
         w64(g_x86_func_offsets, g_x86_func_off_count * 16, ni);
         w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code);
         g_x86_func_off_count = g_x86_func_off_count + 1;
 
-        ic := r64(g_ir_func_instr_count, fi * 8);
         vc2 := r64(g_ir_func_var_count, fi * 8);
-        vs2 := r64(g_ir_func_var_start, fi * 8);
         pc2 := r64(g_ir_func_param_count, fi * 8);
 
-        // Dry-run: pre-allocate + emit to measure exact size
-        g2_init();
-        g_current_func_var_start = vs2;
-        vi3 := 0; loop { if vi3 >= vc2 { break; } g2_slot(vs2 + vi3); vi3 = vi3 + 1; }
-        pi3 := 0; loop { if pi3 >= pc2 && pi3 < 6 { break; } g2_slot(vs2 + pi3); pi3 = pi3 + 1; }
-        g_x86_emit_stack_size = vc2 * 8;
-
-        fsz := 0;
-        ii := 0; loop { if ii >= ic { break; }
-            inst_idx := r64(g_ir_func_instr_start, fi * 8) + ii;
-            if iri_op(inst_idx) != IR_NOP {
-                fsz = fsz + emit_instr(inst_idx, alloc(512), fsz); }
-        ii = ii + 1; }
-
-        // Set stack size from per-function var_count
+        // Use pre-computed code size from res_labels (no g2_slot needed — just constants)
+        fsz := r64(g_x86_func_code_sz, fi * 8);
         g_x86_emit_stack_size = vc2 * 8;
         total_code = total_code + sz_push_rbp() + sz_mov_rbp_rsp();
         ss_dry := g_x86_emit_stack_size;
@@ -281,14 +273,11 @@ fn elf_gen(buf: string) -> int {
     rodata_base := total_code;
     g_x86_rodata_base = 176 + rodata_base;
 
-    // Mark global variables for BSS allocation
-    gi := 0; loop { if gi >= g_ir_global_count { break; }
-        gv := r64(g_ir_globals, gi * 16 + 8);
-        if gv >= 0 { grow_is_global(gv + 1); w64(g_x86_is_global, gv * 8, 1); }
-    gi = gi + 1; }
-
+    println("  elf: Phase 3 (emit)...");
     // Phase 3: emit to buffer
     cp := 176;  // skip ELF header
+
+    // NB: g_x86_is_global already marked before Phase 0 — no need to redo
 
     // ── _start (measured size from Phase 2) ──
     cp = cp + emit_start(buf, cp);
@@ -298,9 +287,9 @@ fn elf_gen(buf: string) -> int {
     g_x86_call_patch_count = 0;
     g_x86_rodataref_count = 0;
     g_x86_alloc_patch_count = 0;
-    g_x86_rip_patch_count = 0;
     g_x86_ext_rel_count = 0;
 fi = 0; loop { if fi >= g_ir_func_count { break; }
+        if fi % 50 == 0 { print("    emit func "); print(int_str(fi)); print("/"); println(int_str(g_ir_func_count)); }
         ni := r64(g_ir_func_name_idx, fi * 8);
         grow_func_cp(fi + 1); w64(g_x86_func_cp, fi * 8, cp);
         // Override with actual position for backward calls
@@ -413,8 +402,9 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
 
     // ── alloc (bump allocator) ──
     // Compute BSS VA for heap_ptr placement
+    // Total pending code after this point: 65 (alloc) + 6+9+12+15+18 (sched tramps) = 125
     rodata_sz := g2_rodata_sz();
-    final_est := cp + 65 + rodata_sz;
+    final_est := cp + 125 + rodata_sz;
     bss_va := (TEXT_BASE + final_est + 4095) / 4096 * 4096;
 
     alloc_sz := emit_alloc_body(buf, cp, bss_va);
@@ -479,7 +469,7 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         ppos := r64(g_x86_rip_patch_pos, rpi2 * 8);
         gvi := r64(g_x86_rip_patch_globals, rpi2 * 8);
         if gvi >= 0 {
-            lea_end_va := TEXT_BASE + ppos + 4 - 176;
+            lea_end_va := TEXT_BASE + ppos + 4;
             target_va := bss_va + 16 + r64(g_x86_global_off, gvi * 8);  // +16 to skip heap_ptr(8) + heap_start(8)
             rel := target_va - lea_end_va;
             w32(buf, ppos, rel); }
@@ -500,7 +490,7 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
 
     // ── Write ELF header ──
     total_sz := cp;
-    elf2_hdr(buf, total_sz);
+    elf2_hdr(buf, g_x86_rodata_base, total_sz);
     g_asm_code_size = total_sz;
     return total_sz;
 }

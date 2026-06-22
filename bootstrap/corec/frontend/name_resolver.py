@@ -15,6 +15,7 @@ class NameResolver:
             ('get_arg', BaseType('string')),
             ('load8', BaseType('int')),
             ('store8', BaseType('int')),
+            ('load64', BaseType('int')),
             ('syscall3', BaseType('int')),
             ('load_str_ptr', BaseType('string')),
             ('store_str_ptr', BaseType('int')),

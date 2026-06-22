@@ -18,7 +18,9 @@ heap_end:
 
 .section .data
 heap_ptr: .quad 0
+empty_str_hdr: .quad 1
 empty_str: .byte 0
+.balign 8
 
 .text
 
@@ -46,12 +48,17 @@ _start:
     syscall
 
 # alloc(size: int) -> string (pointer)
-# Bump allocator, 8-byte aligned, never frees.
+# Allocate size bytes + 8-byte length header.
+# Layout: [8-byte size][data...]
+# Returns pointer to data (after the header).
+# str_len(returned_ptr) = read_header(returned_ptr - 8) - 1 (minus null byte)
 .globl alloc
 .type alloc, @function
 alloc:
-    add rdi, 7
-    and rdi, -8
+    # rdi = requested_size (caller wants rdi usable bytes)
+    mov r8, rdi          # save requested size in r8
+    add rdi, 15          # size + 8(header) + 7(align)
+    and rdi, -8          # align to 8
     lea r10, [rip + heap_ptr]
     mov rax, [r10]
     lea rdx, [rax + rdi]
@@ -60,10 +67,13 @@ alloc:
     ja .Lalloc_oom
     mov [r10], rdx
 
-    # Zero-initialize
+    # Write requested size at header (before data ptr)
+    mov [rax], r8
+
+    # Zero-initialize the data portion only (skip header)
     push rax
     push rdx
-    mov rdi, rax
+    lea rdi, [rax + 8]
     xor eax, eax
     sub rdx, rdi
     mov rcx, rdx
@@ -71,6 +81,8 @@ alloc:
     rep stosb
     pop rdx
     pop rax
+
+    lea rax, [rax + 8]    # return ptr to data (after header)
     ret
 
 .Lalloc_oom:
@@ -143,4 +155,12 @@ load_str_ptr:
 store_str_ptr:
     mov [rdi + rsi], rdx
     xor eax, eax
+    ret
+
+# load64(buf: string, pos: int) -> int
+# Load 8-byte integer from byte buffer at given offset.
+.globl load64
+.type load64, @function
+load64:
+    mov rax, [rdi + rsi]
     ret

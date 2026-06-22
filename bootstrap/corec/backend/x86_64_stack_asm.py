@@ -564,8 +564,12 @@ class X86_64StackAsmGen:
             self.gen_function(func)
 
         # String constants
+        # Each string has an 8-byte length header before it.
+        # Layout: .quad (len+1), label → .asciz "data"
+        # str_len(label) reads label[-8], subtracts 1 for null terminator.
         if self.str_labels:
             self.emit(".section .rodata")
+            self.emit(".balign 8")
             for lid, sval in self.str_labels:
                 escaped = (sval
                            .replace('\\', '\\\\')
@@ -573,7 +577,9 @@ class X86_64StackAsmGen:
                            .replace('\n', '\\n')
                            .replace('\t', '\\t')
                            .replace('\0', '\\0'))
-                self.emit(f'.LC{lid}: .asciz "{escaped}"')
+                self.emit(f".quad {len(sval) + 1}")
+                self.emit(f".LC{lid}: .asciz \"{escaped}\"")
+                self.emit(".balign 8")
 
         # Global variables in .data section
         # Collect unique global IRVars from the module

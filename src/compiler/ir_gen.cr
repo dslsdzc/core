@@ -227,6 +227,17 @@ fn gen_expr(node: int) -> int {
         // Regular binary
         left_var := gen_expr(left);
         right_var := gen_expr(right);
+        // String concatenation — call concat() instead of IR_BINARY
+        if op == OP_ADD {
+            lt := irv_type(left_var);
+            rt := irv_type(right_var);
+            if lt == TI_STR || rt == TI_STR {
+                concat_ni := str_intern("concat");
+                v := new_ir_var("str", TI_STR);
+                emit(IR_CALL, v, left_var, right_var, concat_ni, TI_STR);
+                return v;
+            }
+        }
         v := new_ir_var("bin", TI_INT);
         emit(IR_BINARY, v, left_var, right_var, op, 0);
         return v;

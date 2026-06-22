@@ -13,6 +13,7 @@
 //   [str_consts: str_const_count × [str_idx: u32]]
 //   [structs: struct_count × [name_idx: u32] [field_count: u32] fields[field_count]×[name_idx, type: u32 ×2]]
 //   [enums: enum_count × [name_idx: u32] [variant_count: u32] variants[variant_count]×[name_idx: u32] [field_count: u32] fields[field_count]×[type: u32]]
+//   [globals: global_count × [name_idx: u32] [var_idx: u32]]
 
 // --- Byte buffer helpers ---
 // No bitwise ops in Core — use arithmetic instead.
@@ -98,6 +99,9 @@ fn calc_ccr_size() -> int {
         ei = ei + 1;
     }
 
+    // globals: count + pairs of (name_idx, var_idx) = 8 bytes each
+    sz = sz + 4 + g_ir_global_count * 8;
+
     return sz;
 }
 
@@ -110,7 +114,7 @@ fn save_ccr(path: string) -> int {
 
     // Magic + version
     buf_write_u32(buf, pos, CCR_MAGIC); pos = pos + 4;
-    buf_write_u32(buf, pos, 1); pos = pos + 4;
+    buf_write_u32(buf, pos, 2); pos = pos + 4;
 
     // Counts
     buf_write_u32(buf, pos, g_ir_func_count); pos = pos + 4;
@@ -224,6 +228,16 @@ fn save_ccr(path: string) -> int {
         ei = ei + 1;
     }
 
+    // Globals
+    buf_write_u32(buf, pos, g_ir_global_count); pos = pos + 4;
+    gi : ., mut = 0;
+    loop {
+        if gi >= g_ir_global_count { break; }
+        buf_write_u32(buf, pos, r64(g_ir_globals, gi * 16)); pos = pos + 4;     // name_idx
+        buf_write_u32(buf, pos, r64(g_ir_globals, gi * 16 + 8)); pos = pos + 4; // var_idx
+        gi = gi + 1;
+    }
+
     // Use syscall directly (write_file uses str_len which stops at null)
     fd := syscall3(2, path, 577, 420);  // open(O_WRONLY|O_CREAT|O_TRUNC, 0644)
     if fd < 0 { return -1; }
@@ -247,7 +261,7 @@ fn load_ccr(data: string, fsize: int) -> int {
 
     // Version
     ver := buf_read_u32(data, pos); pos = pos + 4;
-    if ver != 1 { return -1; }
+    if ver != 1 && ver != 2 { return -1; }
 
     // Counts
     func_cnt := buf_read_u32(data, pos); pos = pos + 4;
@@ -429,6 +443,23 @@ fn load_ccr(data: string, fsize: int) -> int {
             vi3 = vi3 + 1;
         }
         ei = ei + 1;
+    }
+
+    // Globals (version >= 2)
+    if ver >= 2 {
+        gc := buf_read_u32(data, pos); pos = pos + 4;
+        grow_ir_globals(gc);
+        g_ir_global_count = 0;
+        gi : ., mut = 0;
+        loop {
+            if gi >= gc { break; }
+            name_ni := buf_read_u32(data, pos); pos = pos + 4;
+            var_idx := buf_read_u32(data, pos); pos = pos + 4;
+            w64(g_ir_globals, gi * 16, name_ni);
+            w64(g_ir_globals, gi * 16 + 8, var_idx);
+            g_ir_global_count = gi + 1;
+            gi = gi + 1;
+        }
     }
 
     return 0;

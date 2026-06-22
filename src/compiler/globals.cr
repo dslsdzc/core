@@ -4,6 +4,10 @@
 // String table (dynamic byte buffer containing `string` pointers)
 g_strs : string, mut;            g_str_count : int, mut;     g_str_cap : int, mut;
 
+// String interning hash table: maps hash → g_strs index (-1 = empty slot)
+// Open addressing with linear probing.
+g_str_hash : string, mut;        g_str_hash_cap : int, mut;
+
 // Dynamic byte buffers (all arrays, no MAX_* limits)
 g_funcs : string, mut;       g_func_count : int, mut;     g_func_cap : int, mut;
 g_structs : string, mut;     g_struct_count : int, mut;   g_struct_cap : int, mut;
@@ -80,6 +84,7 @@ g_x86_stack_size : int, mut;            g_x86_func_idx : int, mut;
 g_x86_is_enum : string, mut;            g_x86_is_enum_count : int, mut; g_x86_is_enum_cap : int, mut;
 g_x86_rodataref_pos : string, mut;       g_x86_rodataref_ro : string, mut;
 g_x86_func_cp : string, mut;            g_x86_func_cp_cap : int, mut;
+g_x86_func_code_sz : string, mut;       g_x86_func_code_sz_cap : int, mut;
 g_x86_rodataref_count : int, mut;       g_x86_rodataref_cap : int, mut;
 g_x86_is_global : string, mut;          g_x86_global_cnt : int, mut;    g_x86_global_cap : int, mut;
 g_x86_global_off : string, mut;         g_x86_global_off_cnt : int, mut; g_x86_global_off_cap : int, mut;

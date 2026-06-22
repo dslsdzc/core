@@ -329,15 +329,63 @@ fn grow_g_strs(needed: int) {
     nb := alloc(nc * 8); _dyncpy(g_strs, g_str_cap * 8, nb);
     g_strs = nb; g_str_cap = nc; }
 
-fn str_intern(s: string) -> int {
+fn str_hash(s: string) -> int {
+    h : ., mut = 5381;
     i : ., mut = 0;
     loop {
-        if i >= g_str_count { break; }
-        if str_eq(load_str_ptr(g_strs, i * 8), s) != 0 { return i; }
+        c := load8(s, i);
+        if c == 0 { break; }
+        h = h * 33 + c;
         i = i + 1; }
+    return h; }
+
+fn _grow_str_hash(ncap: int) {
+    // Allocate new table filled with -1, rehash all existing strings
+    nb := alloc(ncap * 8);
+    i : ., mut = 0;
+    loop { if i >= ncap { break; } w64(nb, i * 8, -1); i = i + 1; }
+
+    // Rehash all strings already in g_strs into new table
+    si : ., mut = 0;
+    loop {
+        if si >= g_str_count { break; }
+        s := load_str_ptr(g_strs, si * 8);
+        h := str_hash(s);
+        pos := h % ncap;
+        if pos < 0 { pos = -pos; }
+        loop {
+            if r64(nb, pos * 8) < 0 { w64(nb, pos * 8, si); break; }
+            pos = (pos + 1) % ncap; }
+        si = si + 1; }
+    g_str_hash = nb;
+    g_str_hash_cap = ncap; }
+
+fn str_intern(s: string) -> int {
+    // Lazy init hash table
+    if g_str_hash_cap == 0 { _grow_str_hash(64); }
+
+    // Hash lookup
+    h := str_hash(s);
+    cap := g_str_hash_cap;
+    pos := h % cap;
+    if pos < 0 { pos = -pos; }
+    loop {
+        si := r64(g_str_hash, pos * 8);
+        if si < 0 { break; }  // empty slot → not found
+        if str_eq(load_str_ptr(g_strs, si * 8), s) != 0 { return si; }
+        pos = (pos + 1) % cap; }
+
+    // Not found: insert
     grow_g_strs(g_str_count + 1);
     store_str_ptr(g_strs, g_str_count * 8, s);
     g_str_count = g_str_count + 1;
+
+    // Insert into hash table (pos is the empty slot we found)
+    w64(g_str_hash, pos * 8, g_str_count - 1);
+
+    // Auto-rehash if load > 70%
+    if g_str_count * 10 > g_str_hash_cap * 7 {
+        _grow_str_hash(g_str_hash_cap * 2); }
     return g_str_count - 1; }
 
 fn istr_get(idx: int) -> string {
@@ -526,6 +574,12 @@ fn grow_func_cp(needed: int) {
     nc : ., mut = g_x86_func_cp_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
     nb := alloc(nc * 8); _dyncpy(g_x86_func_cp, g_x86_func_cp_cap * 8, nb);
     g_x86_func_cp = nb; g_x86_func_cp_cap = nc; }
+
+fn grow_func_code_sz(needed: int) {
+    if needed < g_x86_func_code_sz_cap { return; }
+    nc : ., mut = g_x86_func_code_sz_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+    nb := alloc(nc * 8); _dyncpy(g_x86_func_code_sz, g_x86_func_code_sz_cap * 8, nb);
+    g_x86_func_code_sz = nb; g_x86_func_code_sz_cap = nc; }
 
 fn grow_rodataref(needed: int) {
     if needed < g_x86_rodataref_cap { return; }
