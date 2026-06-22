@@ -14,6 +14,11 @@
 // the pre-computed offsets, no label table lookup needed.
 
 fn res_labels() {
+    print("    res_labels: ");
+    print(int_str(g_ir_func_count));
+    print(" funcs, ");
+    print(int_str(g_ir_instr_count));
+    println(" instrs");
     fi : ., mut = 0;
     loop {
         if fi >= g_ir_func_count { break; }
@@ -28,7 +33,7 @@ fn res_labels() {
         g2_init();
         g_current_func_var_start = vs_r;
         vi4 := 0; loop { if vi4 >= vc_r { break; } g2_slot(vs_r + vi4); vi4 = vi4 + 1; }
-        pi4 := 0; loop { if pi4 >= pc_r && pi4 < 6 { break; } g2_slot(vs_r + pi4); pi4 = pi4 + 1; }
+        pi4 := 0; loop { if pi4 >= pc_r || pi4 >= 6 { break; } g2_slot(vs_r + pi4); pi4 = pi4 + 1; }
 
         // ── Pass 1: measure instruction sizes via dry-run, record label positions ──
         g_label_count = 0;
@@ -45,10 +50,12 @@ fn res_labels() {
                     if ln + 1 > g_label_count { g_label_count = ln + 1; }
                 }
             } else {
-                off = off + emit_instr(inst_idx, alloc(256), off);
+                off = off + instr_size(inst_idx, off);
             }
             ii = ii + 1;
         }
+        // Save per-function code size for Phase 2 reuse
+        grow_func_code_sz(fi + 1); w64(g_x86_func_code_sz, fi * 8, off);
 
         // ── Pass 2: patch BRANCH/JUMP with resolved offsets ──
         ii = 0;

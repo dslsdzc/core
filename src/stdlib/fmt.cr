@@ -2,13 +2,16 @@
 // All functions are pure (no side effects).
 
 fn str_len(s: string) -> int {
-    i : ., mut = 0;
-    loop {
-        c := load8(s, i);
-        if c == 0 { return i; }
-        i = i + 1;
-    }
-    return 0;
+    hdr := load64(s, -8);  // total bytes allocated (includes null)
+    if hdr <= 0 { return 0; }
+    return hdr - 1;        // exclude null terminator
+}
+
+fn chr(c: int) -> string {
+    res := alloc(2);
+    store8(res, 0, c);
+    store8(res, 1, 0);
+    return res;
 }
 
 fn get_char(s: string, idx: int) -> string {
@@ -40,12 +43,12 @@ fn str_sub(s: string, start: int, len: int) -> string {
 }
 
 fn str_eq(a: string, b: string) -> int {
+    la := str_len(a); lb := str_len(b);
+    if la != lb { return 0; }
     i : ., mut = 0;
     loop {
-        ca := load8(a, i);
-        cb := load8(b, i);
-        if ca != cb { return 0; }
-        if ca == 0 { return 1; }
+        if i >= la { return 1; }
+        if load8(a, i) != load8(b, i) { return 0; }
         i = i + 1;
     }
     return 0;
