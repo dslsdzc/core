@@ -382,15 +382,29 @@ fn gen_expr(node: int) -> int {
         // Use it directly
         dest := new_ir_var("call", TI_UNIT);
         first_arg_var := -1;
-        if ac > 0 { first_arg_var = r64(arg_vars, 0 * 8); }
+        need_pack : ., mut = 0;
         if ac > 0 {
+            prev := r64(arg_vars, 0 * 8);
+            first_arg_var = prev;
+            ai : ., mut = 1;
+            loop {
+                if ai >= ac { break; }
+                cur := r64(arg_vars, ai * 8);
+                if cur != prev + 1 { need_pack = 1; break; }
+                prev = cur;
+                ai = ai + 1;
+            }
+        }
+        if need_pack != 0 {
             ai : ., mut = 0;
             loop {
                 if ai >= ac { break; }
-                expected := first_arg_var + ai;
-                if r64(arg_vars, ai * 8) != expected {
-                    emit(IR_STORE, -1, expected, r64(arg_vars, ai * 8), 0, 0);
-                }
+                av := r64(arg_vars, ai * 8);
+                at := TI_INT;
+                if av >= 0 { at = irv_type(av); }
+                packed := new_ir_var("_arg", at);
+                if ai == 0 { first_arg_var = packed; }
+                emit(IR_STORE, -1, packed, av, 0, 0);
                 ai = ai + 1;
             }
         }

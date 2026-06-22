@@ -113,13 +113,30 @@ fn read_source_or_project(src_path: string) -> int {
 // Run the shared frontend pipeline: tokenize → resolve → parse → check
 // Returns 0 on success, 1 on error.
 fn run_frontend() -> int {
+    println("[1/5] tokenize...");
     tokenize();
+    println("[2/5] resolve imports...");
     res_imports();
+    println("[3/5] parse...");
     parse_all();
     if g_diag_count > 0 { print_diagnostics(); return 1; }
     if g_error_count > 0 { print_parse_errors(); return 1; }
+    println("[4/5] type check...");
     check_all();
     if g_diag_count > 0 { print_diagnostics(); return 1; }
+    // AST-level optimization disabled — causes ir_gen crashes with folded constants
+    // TODO: fix ast_fold_binary → ir_gen EXPR_INT handling mismatch
+    /*
+    if g_opt_level >= 1 && g_func_count > 0 {
+        fi : ., mut = 0;
+        loop { if fi >= g_func_count { break; }
+            fn_node := fi_ast_node(fi);
+            body := ast_data(fn_node);
+            ast_optimize_body(body);
+        fi = fi + 1; }
+    }
+    */
+    println("[5/5] frontend done");
     return 0;
 }
 
@@ -150,8 +167,13 @@ fn corec_main() -> int {
     cli_cmd("run",   "Execute code directly (interpreter mode)");
     cli_flag("output", "o", "Output path");
     cli_flag_bool("static", "", "Static linking (embed runtime)");
+    cli_flag("opt-level", "O", "Optimization level (0,1,2,3; default=1)");
 
     if cli_parse() != 0 { return 1; }
+    // Parse -O flag (default O1)
+    g_opt_level = 1;
+    ol : ., mut = cli_get("opt-level");
+    if str_len(ol) > 0 { g_opt_level = str_int(ol); if g_opt_level > 3 { g_opt_level = 3; } if g_opt_level < 0 { g_opt_level = 0; } }
     cmd := cli_cmd_name();
 
     if str_len(cmd) == 0 {
@@ -308,8 +330,6 @@ fn corec_main() -> int {
     }
     src_path := cli_arg(0);
 
-    // Debug: print first 20 bytes of src_path using raw syscall
-
     if read_source_or_project(src_path) != 0 { return 1; }
 
     // --static: prepend rt.cr so * functions inline
@@ -327,6 +347,7 @@ fn corec_main() -> int {
     }
 
     // === build | cir | ccr all need IR gen ===
+    println("ir gen...");
     ir_gen_all();
 
     // === cir: output dataflow graph ===
@@ -348,7 +369,18 @@ fn corec_main() -> int {
     }
 
     // === build | ccr need lower_to_ccr ===
+    if g_opt_level >= 1 {
+        pass_cse();
+        alloc_registers();
+        if g_opt_level >= 2 { pass_stack_share(); }
+    }
+    println("lower to ccr...");
     lower_to_ccr();
+    print("lower done: ");
+    print(int_str(g_ir_func_count));
+    print(" funcs, ");
+    print(int_str(g_ir_instr_count));
+    println(" instrs");
 
     // === ccr: output linear CFG ===
     if cli_eq(cmd, "ccr") {
@@ -387,12 +419,15 @@ fn corec_main() -> int {
         }
     }
     // Save .ccr alongside output (real IR artifact)
+    println("save .ccr...");
     ccr_path : ., mut = out_path + ".ccr";
     r := save_ccr(ccr_path);
     if r != 0 { println("error: could not write .ccr"); return 1; }
+    println("generate ELF...");
     // Call corearch to produce ELF
     cmd2 : ., mut = "corearch ";
     cmd2 = cmd2 + ccr_path + " --elf";
+    if g_opt_level > 0 { cmd2 = cmd2 + " --opt-level " + int_str(g_opt_level); }
     if cli_has("static") != 0 {
         cmd2 = cmd2 + " --static";
     } else {
@@ -435,7 +470,7 @@ fn compile_source(source: string) -> string {
     }
     ir_gen_all();
     lower_to_ccr();
-    return x86_64_generate();
+    return "ok";
 }
 
 // Entry point

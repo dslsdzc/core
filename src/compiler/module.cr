@@ -18,17 +18,18 @@ fn get_fileid(s: string) -> string {
     i : ., mut = 0;
     loop {
         if i + 6 >= slen { return ""; }
-        sub := str_sub(s, i, 6);
-        if str_eq(sub, "fileid") != 0 {
+        // Inline "fileid" check — int-based, no str_sub/str_eq
+        if load8(s, i) == 102 && load8(s, i+1) == 105 && load8(s, i+2) == 108 &&
+           load8(s, i+3) == 101 && load8(s, i+4) == 105 && load8(s, i+5) == 100 {
             j : ., mut = i + 6;
             loop {
                 if j >= slen { return ""; }
-                if str_eq(get_char(s, j), "\"") != 0 {
+                if load8(s, j) == 34 {  // '"'
                     start := j + 1;
                     k : ., mut = start;
                     loop {
                         if k >= slen { return ""; }
-                        if str_eq(get_char(s, k), "\"") != 0 {
+                        if load8(s, k) == 34 {  // '"'
                             return str_sub(s, start, k - start);
                         }
                         k = k + 1;
@@ -393,6 +394,15 @@ fn res_imports() {
             if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT {
                 import_fileid = istr_get(r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME));
                 pos = pos + 1;
+                // Handle :: segments: backend::x86_64 → backend::x86_64
+                loop {
+                    if pos + 1 < g_token_count &&
+                       r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_PATHSEP &&
+                       r64(g_tokens, (pos + 1) * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT {
+                        import_fileid = import_fileid + "::" + istr_get(r64(g_tokens, (pos + 1) * ESZ_TOKEN + OFF_TK_LEXEME));
+                        pos = pos + 2;
+                    } else { break; }
+                }
             }
             alias_str : ., mut = "";
             if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_COLON {
@@ -451,9 +461,13 @@ fn res_imports() {
                         path = fs_path + ".cr";
                         content = read_file(path);
                     }
+                    if str_len(content) == 0 {
+                        print("!! import fail: "); println(import_fileid);
+                    }
                 }
             }
             if str_len(content) > 0 {
+                print("  -> "); println(path);
                 content_len := str_len(content);
                 loaded_fid : ., mut = get_fileid(content);
                 if str_len(loaded_fid) == 0 { loaded_fid = import_fileid; }

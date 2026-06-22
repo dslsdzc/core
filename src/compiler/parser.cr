@@ -1388,19 +1388,8 @@ fn parse_declaration() {
         return;
     }
 
-    // import/fileid declaration: consume tokens until ; or next declaration
-    if check(T_IMPORT) || check(T_FILEID) {
-        advance_tok();
-        loop {
-            if check(T_SEMI) || check(T_EOF) { break; }
-            if check(T_FN) || check(T_STRUCT) || check(T_ENUM) || check(T_IMPL) || check(T_PUB) { break; }
-            if check(T_INTERFACE) || check(T_FILEID) || check(T_IMPORT) { break; }
-            if check(T_MOD) { break; }
-            advance_tok();
-        }
-        if check(T_SEMI) { advance_tok(); }
-        return;
-    }
+    // import/fileid declarations are already skipped in parse_all() loop.
+    // If we reach here, the token was NOT T_IMPORT/T_FILEID.
 
     // New syntax global variable declaration
     if check(T_IDENT) && is_new_var_decl() {
@@ -1442,6 +1431,13 @@ fn parse_all() {
 
     ci : ., mut = 0;
     loop {
+        // Skip import/fileid tokens — already processed by res_imports()
+        loop {
+            tk := tok_k(cur_tok());
+            if tk == T_EOF { return; }
+            if tk != T_IMPORT && tk != T_FILEID { break; }
+            advance_tok();
+        }
         t_cur := cur_tok();
         t_kind := tok_k(t_cur);
         if t_kind == T_EOF { break; }

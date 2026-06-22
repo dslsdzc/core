@@ -23,12 +23,21 @@ fn w8_signed(buf: string, pos: int, val: int) {
 
 // Emit alloc bump allocator function body
 // Returns bytes written (always 65)
-fn emit_alloc_body(buf: string, pos: int, bss_va: int) -> int {
+fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int {
     cp := 0;
     fva := TEXT_BASE + pos;
 
-    // add rdi, 7     — align size to 8
-    w8(buf, pos+cp, 72); w8(buf, pos+cp+1, 131); w8(buf, pos+cp+2, 199); w8(buf, pos+cp+3, 7); cp = cp + 4;
+    // Sanity check: if size > 64MB, return 0 to prevent runaway alloc
+    // (catches count*element_size cascade before it corrupts BSS)
+    w8(buf, pos+cp, 72); w8(buf, pos+cp+1, 129); w8(buf, pos+cp+2, 255);
+    e2_w32(buf, pos+cp+3, 67108864); cp = cp + 7;  // cmp rdi, 64MB
+    w8(buf, pos+cp, 118); w8(buf, pos+cp+1, 3); cp = cp + 2;  // jbe +3 (skip xor+ret if <= 64MB)
+    w8(buf, pos+cp, 49); w8(buf, pos+cp+1, 192); cp = cp + 2;  // xor eax, eax (return 0)
+    w8(buf, pos+cp, 195); cp = cp + 1;  // ret (abort alloc)
+    // Save requested size for the hidden Core object length header.
+    w8(buf, pos+cp, 73); w8(buf, pos+cp+1, 137); w8(buf, pos+cp+2, 249); cp = cp + 3;  // mov r9, rdi
+    // add rdi, 15    — requested size + 8-byte header, then align to 8
+    w8(buf, pos+cp, 72); w8(buf, pos+cp+1, 131); w8(buf, pos+cp+2, 199); w8(buf, pos+cp+3, 15); cp = cp + 4;
     // and rdi, -8
     w8(buf, pos+cp, 72); w8(buf, pos+cp+1, 131); w8(buf, pos+cp+2, 231); w8(buf, pos+cp+3, 248); cp = cp + 4;
 
@@ -40,8 +49,9 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int) -> int {
     // jne +14 (skip init if heap_ptr already set)
     w8(buf, pos+cp, 117); w8(buf, pos+cp+1, 14); cp = cp + 2;
 
-    // lea r11, [rip + heap_start]
-    rel2 := (bss_va + 8) - (fva + cp + 7);
+    // lea r11, [rip + heap_start] — start AFTER globals so rep stosb doesn't zero them
+    heap_start_va : ., mut = bss_va + 16 + globals_size;
+    rel2 := heap_start_va - (fva + cp + 7);
     w8(buf, pos+cp, 76); w8(buf, pos+cp+1, 141); w8(buf, pos+cp+2, 29); w8_signed(buf, pos+cp+3, rel2); cp = cp + 7;
     // mov [rip + heap_ptr], r11
     rel3 := bss_va - (fva + cp + 7);
@@ -67,8 +77,9 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int) -> int {
     w8(buf, pos+cp, 252); cp = cp + 1;
     // rep stosb
     w8(buf, pos+cp, 243); w8(buf, pos+cp+1, 170); cp = cp + 2;
-    // mov rax, r8
-    w8(buf, pos+cp, 76); w8(buf, pos+cp+1, 137); w8(buf, pos+cp+2, 192); cp = cp + 3;
+    // Store hidden length header and return the data pointer after it.
+    w8(buf, pos+cp, 77); w8(buf, pos+cp+1, 137); w8(buf, pos+cp+2, 8); cp = cp + 3;  // mov [r8], r9
+    w8(buf, pos+cp, 73); w8(buf, pos+cp+1, 141); w8(buf, pos+cp+2, 64); w8(buf, pos+cp+3, 8); cp = cp + 4;  // lea rax, [r8+8]
     // ret
     w8(buf, pos+cp, 195); cp = cp + 1;
 
@@ -110,29 +121,93 @@ fn align_up(val: int, align: int) -> int { return (val + align - 1) / align * al
 g_asm_code_size : int, mut;
 g_elf_buf : string, mut;
 
+// ── ELF64 struct layout offsets (used by elf2_hdr) ──
+// ELF64 Ehdr
+E_EHDR_MAGIC : int = 0;    // 4B: \x7fELF
+E_CLASS : int = 4;          // 1B: 2=64-bit
+E_DATA : int = 5;           // 1B: 1=LE
+E_VER : int = 6;            // 1B: 1=current
+E_OSABI : int = 7;          // 1B: 0=UNIX System V
+E_PAD : int = 8;            // 8B padding
+E_TYPE : int = 16;          // 2B: 2=ET_EXEC
+E_MACH : int = 18;          // 2B: 62=EM_X86_64
+E_VERSION : int = 20;       // 4B: 1
+E_ENTRY : int = 24;         // 8B: entry point VA
+E_PHOFF : int = 32;         // 8B: program header offset
+E_SHOFF : int = 40;         // 8B: section header offset
+E_FLAGS : int = 48;         // 4B
+E_EHSIZE : int = 52;        // 2B: sizeof(Elf64_Ehdr)=64
+E_PHENTSIZE : int = 54;     // 2B: sizeof(Elf64_Phdr)=56
+E_PHNUM : int = 56;         // 2B: number of phdrs
+E_SHENTSIZE : int = 58;     // 2B
+E_SHNUM : int = 60;         // 2B
+E_SHSTRNDX : int = 62;      // 2B
+EHDR_SIZE : int = 64;       // sizeof(Elf64_Ehdr)
+
+// ELF64 Phdr (per-entry offsets, base = 64 + entry_idx * 56)
+P_TYPE : int = 0;           // 4B: 1=PT_LOAD
+P_FLAGS : int = 4;          // 4B: PF_{R,W,X}
+P_OFFSET : int = 8;         // 8B: file offset
+P_VADDR : int = 16;         // 8B: virtual address
+P_PADDR : int = 24;         // 8B: physical address
+P_FILESZ : int = 32;        // 8B: size in file
+P_MEMSZ : int = 40;         // 8B: size in memory
+P_ALIGN : int = 48;         // 8B: alignment
+PHDR_SIZE : int = 56;       // sizeof(Elf64_Phdr)
+
+// Write one ELF64 program header entry
+fn write_phdr(buf: string, idx: int, p_type: int, p_flags: int,
+    p_offset: int, p_vaddr: int, p_paddr: int,
+    p_filesz: int, p_memsz: int, p_align: int) {
+    base : ., mut = EHDR_SIZE + idx * PHDR_SIZE;
+    w32(buf, base + P_TYPE, p_type);
+    w32(buf, base + P_FLAGS, p_flags);
+    w64(buf, base + P_OFFSET, p_offset);
+    w64(buf, base + P_VADDR, p_vaddr);
+    w64(buf, base + P_PADDR, p_paddr);
+    w64(buf, base + P_FILESZ, p_filesz);
+    w64(buf, base + P_MEMSZ, p_memsz);
+    w64(buf, base + P_ALIGN, p_align);
+}
+
 // ── ELF header writer (x86-64) ──
-fn elf2_hdr(buf: string, total_sz: int) {
-    i := 0; loop { if i >= 176 { break; } store8(buf, i, 0); i = i + 1; }
+fn elf2_hdr(buf: string, code_end: int, total_sz: int) {
+    hdr_sz : ., mut = EHDR_SIZE + 2 * PHDR_SIZE;  // 64+112=176
+    i := 0; loop { if i >= hdr_sz { break; } store8(buf, i, 0); i = i + 1; }
     // e_ident
-    w8(buf, 0, 127); w8(buf, 1, 69); w8(buf, 2, 76); w8(buf, 3, 70);  // \x7fELF
-    w8(buf, 4, 2); w8(buf, 5, 1); w8(buf, 6, 1);  // 64-bit, LE, v1
+    w8(buf, E_EHDR_MAGIC, 127); w8(buf, E_EHDR_MAGIC+1, 69);
+    w8(buf, E_EHDR_MAGIC+2, 76); w8(buf, E_EHDR_MAGIC+3, 70);  // \x7fELF
+    w8(buf, E_CLASS, 2);   // EI_CLASS = ELFCLASS64
+    w8(buf, E_DATA, 1);    // EI_DATA = ELFDATA2LSB
+    w8(buf, E_VER, 1);     // EI_VERSION = EV_CURRENT
     // e_type, e_machine, e_version
-    w16(buf, 16, 2); w16(buf, 18, 62); w32(buf, 20, 1);
-    // e_entry = 0x4000B0  (text_base=0x400000 + header_size=176)
-    w64(buf, 24, 4194480);
-    // e_phoff = 64, e_shoff = 0
-    w64(buf, 32, 64); w64(buf, 40, 0);
-    w32(buf, 48, 0); w16(buf, 52, 64);
-    w16(buf, 54, 56); w16(buf, 56, 2);  // e_phentsize=56, e_phnum=2
-    // PHDR[0]: code segment RX
-    w32(buf, 64, 1); w32(buf, 68, 5);
-    w64(buf, 72, 0); w64(buf, 80, 4194304); w64(buf, 88, 4194304);
-    w64(buf, 96, total_sz); w64(buf, 104, total_sz); w64(buf, 112, 4096);
-    // PHDR[1]: data BSS RW
-    db := (4194304 + total_sz + 4095) / 4096 * 4096;
-    w32(buf, 120, 1); w32(buf, 124, 6);
-    w64(buf, 128, 0); w64(buf, 136, db); w64(buf, 144, db);
-    w64(buf, 152, 0); w64(buf, 160, 268435456); w64(buf, 168, 4096);
+    w16(buf, E_TYPE, 2);    // ET_EXEC
+    w16(buf, E_MACH, 62);   // EM_X86_64
+    w32(buf, E_VERSION, 1); // EV_CURRENT
+    w64(buf, E_ENTRY, 0x400000 + EHDR_SIZE + 2 * PHDR_SIZE);  // entry = text_base + 176
+    w64(buf, E_PHOFF, EHDR_SIZE);              // phdrs start right after ehdr
+    w16(buf, E_EHSIZE, EHDR_SIZE);             // sizeof(Elf64_Ehdr) = 64
+    w16(buf, E_PHENTSIZE, PHDR_SIZE);          // sizeof(Elf64_Phdr) = 56
+    w16(buf, E_PHNUM, 2);                      // 2 program headers
+
+    // PHDR[0]: code segment (RX, file offset 0, VA = TEXT_BASE)
+    write_phdr(buf, 0,
+        1,     // PT_LOAD
+        5,     // PF_R | PF_X
+        0,                               // file offset
+        4194304,                         // TEXT_BASE
+        4194304,                         // phys addr = TEXT_BASE
+        code_end, code_end, 4096);
+
+    // PHDR[1]: rodata+BSS (RW, starts at page after code)
+    rodata_va : ., mut = 4194304 + code_end;
+    data_sz : ., mut = total_sz - code_end;
+    write_phdr(buf, 1,
+        1,     // PT_LOAD
+        6,     // PF_R | PF_W
+        code_end,
+        rodata_va, rodata_va,
+        data_sz, 268435456, 4096);  // memsz = 256MB heap
 }
 
 // ── Emit _start code, return total bytes ──
@@ -142,25 +217,61 @@ gv_argv : int, mut;   // IR var index for g_rt_argv_ptr (or -1)
 
 fn emit_start(buf: string, pos: int) -> int {
     cp : ., mut = pos;
-    w8(buf, cp, 72); w8(buf, cp+1, 139); w8(buf, cp+2, 60); w8(buf, cp+3, 36); cp = cp + 4;  // mov rdi,[rsp]
-    w8(buf, cp, 72); w8(buf, cp+1, 141); w8(buf, cp+2, 116); w8(buf, cp+3, 36); w8(buf, cp+4, 8); cp = cp + 5;  // lea rsi,[rsp+8]
-    if gv_argc >= 0 { w8(buf, cp, 76); w8(buf, cp+1, 141); w8(buf, cp+2, 21); cp = cp + 3;
+    // mov rdi, [rsp]  — load argc (rdi=7)
+    cp = cp + emit_rex(buf, cp, 1, 0, 0, 0);
+    e2_w8(buf, cp, 139); cp = cp + 1;
+    cp = cp + emit_modrm(buf, cp, 0, 7, 4);  // [rsp] via SIB
+    cp = cp + emit_sib(buf, cp, 0, 4, 4);
+
+    // lea rsi, [rsp+8]  — pointer to argv (rsi=6, no REX extension)
+    cp = cp + emit_rex(buf, cp, 1, 0, 0, 0);
+    e2_w8(buf, cp, 141); cp = cp + 1;
+    cp = cp + emit_modrm(buf, cp, 1, 6, 4);  // [rsp+disp8]
+    cp = cp + emit_sib(buf, cp, 0, 4, 4);
+    e2_w8(buf, cp, 8); cp = cp + 1;
+
+    if gv_argc >= 0 {
+        // lea r10, [rip + 0]  (placeholder, patched in Phase 3)
+        rip_pos := cp + 3;
+        cp = cp + e2_lr(buf, cp, 0);
         grow_rip_patch(g_x86_rip_patch_count + 1);
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, cp);
+        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos);
         w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argc);
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
-        w32(buf, cp, 0); cp = cp + 4; w8(buf, cp, 77); w8(buf, cp+1, 137); w8(buf, cp+2, 58); cp = cp + 3; }
-    if gv_argv >= 0 { w8(buf, cp, 76); w8(buf, cp+1, 141); w8(buf, cp+2, 21); cp = cp + 3;
+        // mov [r10], rdi — store argc
+        cp = cp + emit_rex(buf, cp, 1, 0, 0, 10/8);
+        e2_w8(buf, cp, 137); cp = cp + 1;
+        cp = cp + emit_modrm(buf, cp, 0, 7, 10%8);
+    }
+
+    if gv_argv >= 0 {
+        rip_pos2 := cp + 3;
+        cp = cp + e2_lr(buf, cp, 0);
         grow_rip_patch(g_x86_rip_patch_count + 1);
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, cp);
+        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos2);
         w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argv);
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
-        w32(buf, cp, 0); cp = cp + 4; w8(buf, cp, 77); w8(buf, cp+1, 137); w8(buf, cp+2, 58); cp = cp + 3; }
+        // mov [r10], rsi — store argv
+        cp = cp + emit_rex(buf, cp, 1, 0, 0, 10/8);
+        e2_w8(buf, cp, 137); cp = cp + 1;
+        cp = cp + emit_modrm(buf, cp, 0, 6, 10%8);
+    }
+
     g_call_main_pos = cp;
     cp = cp + e2_call(buf, cp, 0);  // call main
-    w8(buf, cp, 137); w8(buf, cp+1, 199); cp = cp + 2;  // mov edi, eax
-    w8(buf, cp, 184); w32(buf, cp+1, 60); cp = cp + 5;  // mov eax, 60
-    w8(buf, cp, 15); w8(buf, cp+1, 5); cp = cp + 2;     // syscall
+
+    // mov edi, eax
+    e2_w8(buf, cp, 137); cp = cp + 1;
+    cp = cp + emit_modrm(buf, cp, 3, 0, 7);
+
+    // mov eax, 60  (sys_exit)
+    e2_w8(buf, cp, 184); cp = cp + 1;  // 0xB8 MOV r, imm32 (rax)
+    cp = cp + e2_w32(buf, cp, 60);
+
+    // syscall
+    e2_w8(buf, cp, 15); cp = cp + 1;
+    e2_w8(buf, cp, 5); cp = cp + 1;
+
     return cp - pos;
 }
 
@@ -173,61 +284,90 @@ fn emit_start_size() -> int {
 
 // ── Main ELF generation ──
 fn elf_gen(buf: string) -> int {
-    // Phase 0: resolve labels (uses instr_size from instr.cr)
-    res_labels();
-    g_x86_ext_rel_count = 0;  // reset external relocations
+    // Mark global variables for RIP-relative addressing
+    gi := 0; loop { if gi >= g_ir_global_count { break; }
+        gv := r64(g_ir_globals, gi * 16 + 8);
+        if gv >= 0 { grow_is_global(gv + 1); w64(g_x86_is_global, gv * 8, 1); }
+    gi = gi + 1; }
+    grow_is_global(g_ir_var_count);
 
+    g_ni_syscall3 = -1; g_ni_load8 = -1; g_ni_store8 = -1; g_ni_load64 = -1;
+    g_ni_load_str_ptr = -1; g_ni_store_str_ptr = -1; g_ni_get_arg = -1;
+    g_ni_w64 = -1; g_ni_dyncpy = -1;
+    ni_i : ., mut = 0;
+    loop { if ni_i >= g_str_count { break; }
+        ns := istr_get(ni_i);
+        if str_eq(ns, "syscall3") != 0 { g_ni_syscall3 = ni_i; }
+        if str_eq(ns, "load8") != 0 { g_ni_load8 = ni_i; }
+        if str_eq(ns, "store8") != 0 { g_ni_store8 = ni_i; }
+        if str_eq(ns, "load64") != 0 { g_ni_load64 = ni_i; }
+        if str_eq(ns, "load_str_ptr") != 0 { g_ni_load_str_ptr = ni_i; }
+        if str_eq(ns, "store_str_ptr") != 0 { g_ni_store_str_ptr = ni_i; }
+        if str_eq(ns, "get_arg") != 0 { g_ni_get_arg = ni_i; }
+        if str_eq(ns, "w64") != 0 { g_ni_w64 = ni_i; }
+        if str_eq(ns, "_dyncpy") != 0 { g_ni_dyncpy = ni_i; }
+    ni_i = ni_i + 1; }
+
+    print("  ni: syscall3="); print(int_str(g_ni_syscall3));
+    print(" load8="); print(int_str(g_ni_load8));
+    print(" w64="); print(int_str(g_ni_w64));
+    print(" dyncpy="); println(int_str(g_ni_dyncpy));
+
+    println("  elf: Phase 1 (rodata layout)...");
     // Phase 1: rodata layout — collect string constants
     g_x86_str_count = 0;
     si := 0; loop { if si >= g_ir_str_const_count { break; } g2_str_off(r64(g_ir_str_consts, si * 8)); si = si + 1; }
 
-    // Find g_rt_argc/g_rt_argv_ptr globals for _start emission
-    g_x86_sub_rsp_pos = -1;
+    // Find g_rt_argc/g_rt_argv_ptr via name_idx (no str_eq loop)
     gv_argc = -1; gv_argv = -1;
+    argc_ni := str_intern("g_rt_argc"); argv_ni := str_intern("g_rt_argv_ptr");
     gvsi : ., mut = 0;
     loop { if gvsi >= g_ir_global_count { break; }
-        gv_val := r64(g_ir_globals, gvsi * 16 + 8);
-        if gv_val >= 0 {
-            gni2 : ., mut = 0;
-            loop { if gni2 >= g_str_count { break; }
-                gn := istr_get(gni2);
-                if str_eq(gn, "g_rt_argc") != 0 { gv_argc = gv_val; break; }
-                if str_eq(gn, "g_rt_argv_ptr") != 0 { gv_argv = gv_val; break; }
-                gni2 = gni2 + 1; }
-        }
+        ni := r64(g_ir_globals, gvsi * 16);
+        if ni == argc_ni { gv_argc = r64(g_ir_globals, gvsi * 16 + 8); }
+        if ni == argv_ni { gv_argv = r64(g_ir_globals, gvsi * 16 + 8); }
     gvsi = gvsi + 1; }
-    // Phase 2: compute _start size using same constants as emit_start
-    total_code : ., mut = emit_start_size();
 
-        fi := 0; g2_init(); loop { if fi >= g_ir_func_count { break; }
+    // Phase 2: compute sizes for all functions
+    println("  elf: Phase 2 (size calc)...");
+    // Estimate function code sizes (~8B/inst average). Correct BSS position
+    // computed after Phase 3 emit (see rip_patch fixup below).
+    max_labels : ., mut = 0;
+    sfi : ., mut = 0;
+    loop { if sfi >= g_ir_func_count { break; }
+        ist2 := r64(g_ir_func_instr_start, sfi * 8);
+        ic2 := r64(g_ir_func_instr_count, sfi * 8);
+        // Count label indices for g_label_poses allocation
+        cur_labels : ., mut = 0;
+        ii2 : ., mut = 0;
+        loop { if ii2 >= ic2 { break; }
+            op := iri_op(ist2 + ii2);
+            if op == IR_LABEL { lx := iri_s1(ist2 + ii2); if lx >= 0 && lx + 1 > cur_labels { cur_labels = lx + 1; } }
+            if op == IR_BRANCH { lx := iri_s2(ist2 + ii2); if lx + 1 > cur_labels { cur_labels = lx + 1; }
+                                 ly := iri_s3(ist2 + ii2); if ly + 1 > cur_labels { cur_labels = ly + 1; } }
+            if op == IR_JUMP { lz := iri_s1(ist2 + ii2); if lz + 1 > cur_labels { cur_labels = lz + 1; } }
+        ii2 = ii2 + 1; }
+        if cur_labels > max_labels { max_labels = cur_labels; }
+        grow_func_code_sz(sfi + 1); w64(g_x86_func_code_sz, sfi * 8, ic2 * 5);
+    sfi = sfi + 1; }
+    g_label_count = max_labels;
+
+    total_code : ., mut = emit_start_size();
+    fi := 0; g2_init(); loop { if fi >= g_ir_func_count { break; }
+        if fi % 50 == 0 { print("    func "); print(int_str(fi)); print("/"); println(int_str(g_ir_func_count)); }
         ni := r64(g_ir_func_name_idx, fi * 8);
         grow_func_offsets(g_x86_func_off_count * 2 + 2);
         w64(g_x86_func_offsets, g_x86_func_off_count * 16, ni);
         w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code);
         g_x86_func_off_count = g_x86_func_off_count + 1;
 
-        ic := r64(g_ir_func_instr_count, fi * 8);
         vc2 := r64(g_ir_func_var_count, fi * 8);
-        vs2 := r64(g_ir_func_var_start, fi * 8);
         pc2 := r64(g_ir_func_param_count, fi * 8);
 
-        // Dry-run: pre-allocate + emit to measure exact size
-        g2_init();
-        g_current_func_var_start = vs2;
-        vi3 := 0; loop { if vi3 >= vc2 { break; } g2_slot(vs2 + vi3); vi3 = vi3 + 1; }
-        pi3 := 0; loop { if pi3 >= pc2 && pi3 < 6 { break; } g2_slot(vs2 + pi3); pi3 = pi3 + 1; }
-        g_x86_emit_stack_size = vc2 * 8;
-
-        fsz := 0;
-        ii := 0; loop { if ii >= ic { break; }
-            inst_idx := r64(g_ir_func_instr_start, fi * 8) + ii;
-            if iri_op(inst_idx) != IR_NOP {
-                fsz = fsz + emit_instr(inst_idx, alloc(512), fsz); }
-        ii = ii + 1; }
-
-        // Set stack size from per-function var_count
+        fsz := r64(g_x86_func_code_sz, fi * 8);
         g_x86_emit_stack_size = vc2 * 8;
         total_code = total_code + sz_push_rbp() + sz_mov_rbp_rsp();
+        if g_opt_level >= 1 { total_code = total_code + 9; }  // push rbx, r12-r15
         ss_dry := g_x86_emit_stack_size;
         total_code = total_code + sz_sub_rsp(ss_dry);
         total_code = total_code + pc2 * sz_save_param();
@@ -250,7 +390,7 @@ fn elf_gen(buf: string) -> int {
     w64(g_x86_func_offsets, g_x86_func_off_count * 16, alloc_ni);
     w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code);
     g_x86_func_off_count = g_x86_func_off_count + 1;
-    total_code = total_code + 65;
+    total_code = total_code + 84;  // alloc body with bounds check and hidden length header
     // sched_call trampolines (0..4)
     grow_func_offsets(g_x86_func_off_count * 2 + 2);
     w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("sched_call_0"));
@@ -278,17 +418,15 @@ fn elf_gen(buf: string) -> int {
     g_x86_func_off_count = g_x86_func_off_count + 1;
     total_code = total_code + sched_tramp_sz(4);
 
+    hdr_total : ., mut = EHDR_SIZE + 2 * PHDR_SIZE;
     rodata_base := total_code;
-    g_x86_rodata_base = 176 + rodata_base;
+    g_x86_rodata_base = hdr_total + rodata_base;
 
-    // Mark global variables for BSS allocation
-    gi := 0; loop { if gi >= g_ir_global_count { break; }
-        gv := r64(g_ir_globals, gi * 16 + 8);
-        if gv >= 0 { grow_is_global(gv + 1); w64(g_x86_is_global, gv * 8, 1); }
-    gi = gi + 1; }
-
+    println("  elf: Phase 3 (emit)...");
     // Phase 3: emit to buffer
-    cp := 176;  // skip ELF header
+    cp := hdr_total;  // skip ELF header + program headers
+
+    // NB: g_x86_is_global already marked before Phase 0 — no need to redo
 
     // ── _start (measured size from Phase 2) ──
     cp = cp + emit_start(buf, cp);
@@ -298,9 +436,9 @@ fn elf_gen(buf: string) -> int {
     g_x86_call_patch_count = 0;
     g_x86_rodataref_count = 0;
     g_x86_alloc_patch_count = 0;
-    g_x86_rip_patch_count = 0;
     g_x86_ext_rel_count = 0;
 fi = 0; loop { if fi >= g_ir_func_count { break; }
+        if fi % 50 == 0 { print("    emit func "); print(int_str(fi)); print("/"); println(int_str(g_ir_func_count)); }
         ni := r64(g_ir_func_name_idx, fi * 8);
         grow_func_cp(fi + 1); w64(g_x86_func_cp, fi * 8, cp);
         // Override with actual position for backward calls
@@ -320,6 +458,19 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         vi := 0; loop { if vi >= vc { break; } g2_slot(vs + vi); vi = vi + 1; }
         g_x86_emit_stack_size = vc * 8;
 
+        // Init label state for single-pass backpatching (-1 = not yet seen)
+        li2 : ., mut = 0;
+        loop { if li2 >= g_label_count { break; } grow_label_poses(li2 + 1); w64(g_label_poses, li2*8, -1); li2 = li2 + 1; }
+        g_pending_count = 0;
+
+        // Save callee-saved registers (pushed before rbp setup → at [rbp+8..48], no overlap with locals)
+        if g_opt_level >= 1 {
+            w8(buf, cp, 83); cp = cp + 1;  // push rbx
+            w8(buf, cp, 65); w8(buf, cp+1, 84); cp = cp + 2;  // push r12
+            w8(buf, cp, 65); w8(buf, cp+1, 85); cp = cp + 2;  // push r13
+            w8(buf, cp, 65); w8(buf, cp+1, 86); cp = cp + 2;  // push r14
+            w8(buf, cp, 65); w8(buf, cp+1, 87); cp = cp + 2;  // push r15
+        }
         // frame
         w8(buf, cp, 85); cp = cp + 1;  // push rbp
         w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 229); cp = cp + 3;  // mov rbp, rsp
@@ -343,6 +494,22 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
             if pi == 5 { w8(buf, cp, 76); w8(buf, cp+1, 137); w8(buf, cp+2, 77); w8(buf, cp+3, po); cp = cp + 4; }
         pi = pi + 1; }
 
+        // Load register-allocated parameters from stack to callee-saved regs
+        if g_opt_level >= 1 {
+            pi2 : ., mut = 0;
+            loop { if pi2 >= pc || pi2 >= 6 { break; }
+                pri := get_reg_for_var(vs + pi2);
+                if pri >= 0 {
+                    pso := g2_slot(vs + pi2);
+                    // mov reg, [rbp+offset] — load from stack to allocated register
+                    cp = cp + emit_rex(buf, cp, 1, pri/8, 0, 0);
+                    e2_w8(buf, cp, 139); cp = cp + 1;  // 0x8B MOV r64, r/m64
+                    cp = cp + emit_modrm(buf, cp, 1, pri%8, 5);  // [rbp+disp8]
+                    e2_w8(buf, cp, pso); cp = cp + 1;
+                }
+            pi2 = pi2 + 1; }
+        }
+
         // function body — emit instructions
         g_x86_func_frame_start = cp;  // absolute buffer pos of body start
         save_ss := g_x86_emit_stack_size;  // save frame size before emission
@@ -355,6 +522,7 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
 
         // patch RETURNs to epilogue
         epi_pos := cp;
+        print("  rets: "); print(int_str(g_x86_ret_patch_count)); println("");
         rpi := 0; loop { if rpi >= g_x86_ret_patch_count { break; }
             jmp_pos := r64(g_x86_ret_patch_pos, rpi * 8);
             rel := epi_pos - (jmp_pos + 5);
@@ -381,29 +549,16 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
                 w8(buf, cp, 72); w8(buf, cp+1, 131); w8(buf, cp+2, 196); w8(buf, cp+3, save_ss); cp = cp + 4;
             }
         }
+        if g_opt_level >= 1 {
+            w8(buf, cp, 65); w8(buf, cp+1, 95); cp = cp + 2;  // pop r15
+            w8(buf, cp, 65); w8(buf, cp+1, 94); cp = cp + 2;  // pop r14
+            w8(buf, cp, 65); w8(buf, cp+1, 93); cp = cp + 2;  // pop r13
+            w8(buf, cp, 65); w8(buf, cp+1, 92); cp = cp + 2;  // pop r12
+            w8(buf, cp, 91); cp = cp + 1;  // pop rbx
+        }
         w8(buf, cp, 93); cp = cp + 1;  // pop rbp
         w8(buf, cp, 195); cp = cp + 1;  // ret
         fi = fi + 1; }
-
-    // ── Patch forward calls using actual cp positions ──
-    // Phase 3 stored cp at start of each function in g_x86_func_cp
-    cpi := 0; loop { if cpi >= g_x86_call_patch_count { break; }
-        call_pos := r64(g_x86_call_patch_pos, cpi * 8);
-        fn_ni := r64(g_x86_call_patch_name, cpi * 8);
-        // Find function index by scanning .ccr string table
-        cfi2 : ., mut = 0;
-        loop { if cfi2 >= g_ir_func_count { break; }
-            name_at := r64(g_ir_func_name_idx, cfi2 * 8);
-            if str_eq(istr_get(name_at), istr_get(fn_ni)) != 0 {
-                func_cp := r64(g_x86_func_cp, cfi2 * 8);
-                if func_cp > 0 {
-                    rel := func_cp - (call_pos + 5);
-                    w32(buf, call_pos + 1, rel);
-                }
-                break; }
-        cfi2 = cfi2 + 1; }
-    cpi = cpi + 1; }
-    g_x86_call_patch_count = 0;
 
     // ── _init_globals ──
     w8(buf, cp, 85); cp = cp + 1;
@@ -413,13 +568,29 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
 
     // ── alloc (bump allocator) ──
     // Compute BSS VA for heap_ptr placement
+    // Total pending code: 84 (alloc + bounds + header) + 6+9+12+15+18 (sched tramps) = 144
     rodata_sz := g2_rodata_sz();
-    final_est := cp + 65 + rodata_sz;
-    bss_va := (TEXT_BASE + final_est + 4095) / 4096 * 4096;
+    // rodata starts at page-aligned cp (after alloc + sched_tramps + page padding)
+    rodata_base_va := (TEXT_BASE + cp + 144 + 4095) / 4096 * 4096;
+    bss_va := (rodata_base_va + rodata_sz + 4095) / 4096 * 4096;
 
-    alloc_sz := emit_alloc_body(buf, cp, bss_va);
+    global_slots : ., mut = 0;
+    gsi : ., mut = 0;
+    loop { if gsi >= g_ir_global_count { break; }
+        gvv := r64(g_ir_globals, gsi * 16 + 8);
+        if gvv >= 0 { global_slots = global_slots + 1; }
+    gsi = gsi + 1; }
+    alloc_sz := emit_alloc_body(buf, cp, bss_va, global_slots * 8);
     alloc_start := cp;
     cp = cp + alloc_sz;
+
+    // Update alloc's offset in func_offsets to real position (Phase 3 value)
+    afi2 := 0;
+    loop { if afi2 >= g_x86_func_off_count { break; }
+        if str_eq(istr_get(r64(g_x86_func_offsets, afi2*16)), istr_get(alloc_ni)) != 0 {
+            w64(g_x86_func_offsets, afi2*16+8, alloc_start - 176);
+            break; }
+    afi2 = afi2 + 1; }
 
     // Patch all IR_ALLOC_STRUCT/ARRAY/MAKE_ENUM call sites to point to alloc
     // alloc_patch_pos entries are buffer positions of the 5-byte call instruction
@@ -445,6 +616,42 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
     sched_reg_one("sched_call_4", 4, cp);
     cp = cp + emit_sched_call(buf, cp, 4);
 
+    // ── Patch forward calls using actual cp positions ──
+    // Phase 3 stored cp at start of each function in g_x86_func_cp
+    // Must run after ALL code emitted (incl alloc + sched_call) so func_offsets are final
+    cpi := 0; loop { if cpi >= g_x86_call_patch_count { break; }
+        call_pos := r64(g_x86_call_patch_pos, cpi * 8);
+        fn_ni := r64(g_x86_call_patch_name, cpi * 8);
+        cfi2 : ., mut = 0;
+        loop { if cfi2 >= g_ir_func_count { break; }
+            name_at := r64(g_ir_func_name_idx, cfi2 * 8);
+            if str_eq(istr_get(name_at), istr_get(fn_ni)) != 0 {
+                func_cp := r64(g_x86_func_cp, cfi2 * 8);
+                if func_cp > 0 {
+                    rel := func_cp - (call_pos + 5);
+                    w32(buf, call_pos + 1, rel);
+                }
+                break; }
+        cfi2 = cfi2 + 1; }
+        // If not found in user functions, search builtins in g_x86_func_offsets
+        if cfi2 >= g_ir_func_count {
+            bfi2 : ., mut = 0;
+            loop { if bfi2 >= g_x86_func_off_count { break; }
+                if str_eq(istr_get(r64(g_x86_func_offsets, bfi2*16)), istr_get(fn_ni)) != 0 {
+                    func_off := r64(g_x86_func_offsets, bfi2*16+8);
+                    rel := (176 + func_off) - (call_pos + 5);
+                    w32(buf, call_pos + 1, rel);
+                    break; }
+            bfi2 = bfi2 + 1; }
+        }
+    cpi = cpi + 1; }
+    g_x86_call_patch_count = 0;
+
+    // Pad code to page boundary so RW segment doesn't share a page with RX
+    // (kernel maps shared page with RW permissions → code becomes non-executable)
+    code_pad_end := (cp + 4095) / 4096 * 4096;
+    loop { if cp >= code_pad_end { break; } w8(buf, cp, 0); cp = cp + 1; }
+
     // Set rodata base from actual emission position
     g_x86_rodata_base = cp;
 
@@ -462,8 +669,11 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
     si = 0; loop { if si >= g_x86_str_count { break; }
         s := istr_get(r64(g_x86_str_offs, si * 8));
         sl := str_len(s);
+        // Write 8-byte length header (sl + null) so str_len via load64(s,-8) works
+        w64(buf, cp, sl + 1); cp = cp + 8;
         ci := 0; loop { if ci >= sl { break; } w8(buf, cp, load8(s, ci)); ci = ci + 1; cp = cp + 1; }
         w8(buf, cp, 0); cp = cp + 1;
+        loop { if cp % 8 == 0 { break; } w8(buf, cp, 0); cp = cp + 1; }
     si = si + 1; }
 
     // ── Allocate BSS for globals ──
@@ -479,7 +689,7 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         ppos := r64(g_x86_rip_patch_pos, rpi2 * 8);
         gvi := r64(g_x86_rip_patch_globals, rpi2 * 8);
         if gvi >= 0 {
-            lea_end_va := TEXT_BASE + ppos + 4 - 176;
+            lea_end_va := TEXT_BASE + ppos + 4;
             target_va := bss_va + 16 + r64(g_x86_global_off, gvi * 8);  // +16 to skip heap_ptr(8) + heap_start(8)
             rel := target_va - lea_end_va;
             w32(buf, ppos, rel); }
@@ -500,7 +710,7 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
 
     // ── Write ELF header ──
     total_sz := cp;
-    elf2_hdr(buf, total_sz);
+    elf2_hdr(buf, g_x86_rodata_base, total_sz);
     g_asm_code_size = total_sz;
     return total_sz;
 }

@@ -11,6 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3. **文件永久不允许还原** — 还原必须经过用户明确许可。
 4. **直接解决问题** — 不变通、不绕过、不掩盖。
 5. **除非彻底不可修复** — 充分验证后才可提替代方案。
+6. **编译任务限制 CPU** — 任何长时间编译/测试任务必须用 `cpulimit -l 10` 或 `nice -n 19` 限制 CPU 占用不超过 10%，避免风扇噪音影响用户体验。
 
 违反这些规则的后果：用户会极度愤怒，信任归零。
 
@@ -246,6 +247,34 @@ Design documents (Chinese):
 - `docs/dataflow-design.md` — Dataflow execution model design
 - `docs/language-syntax.md` — Language syntax reference
 - `docs/execution-model.md` — Execution model: DAG, static cyclic graphs, dynamic graphs, deployment configs
+
+## 已知问题
+
+### ELF 后端生成的代码性能极差（自举关键阻塞项）
+
+`build/corec`（Python StackAsmGen）正常速度，但 `corec2`（ELF 后端自编译版本）的前端（tokenize/parse/check）**慢 24× 以上**：
+
+```
+10 行程序（10 vars）:  build/corec 0.02s  →  corec2 8.0s
+100 行程序（100 vars）: build/corec 0.14s  →  corec2 22s+
+```
+
+**根因**：`store8` 内联代码用错了寄存器——`store8(buf, pos, val)` 第三个参数在 `rdx`，但内联编码用了 `reg=0(al)` 而非 `reg=2(dl)`。这导致所有通过 `store8` 写入的数据都是垃圾（写入 `rax` 的内容而非 `rdx` 中的值）。影响范围极广：`str_sub`、`int_str`、数组写入、变量赋值等。
+
+**已修复**（`store8` 从 `al` 改为 `dl`）后 `int_str(42)` 正确输出 `"42"`。但性能仍然极差：`corec2 check` 一个 32 字节文件需要 **9 秒**（`build/corec` 仅需 0.02s → 450× 慢）。根因为 ELF 后端生成代码无寄存器分配，变量全部走栈操作。
+
+**优化管线（2025-06-27 接入）**：
+- `.ccr v3` 格式：可扩展 key-value 元数据段（key:u32 + data_len:u32 + data）
+- `-O0`/`-O1`/`-O2` CLI 等级，默认 O1
+- `ast_optimize_body()`：AST 常量折叠
+- `pass_cse()`：IR 公共子表达式消除（单函数基础版）
+- `alloc_registers()`：线性扫描寄存器分配（14 regs，元数据存 g_opt_meta）
+- `O1` 通过 `v42.cr` 测试，corec2 自举 O1 待修（`pass_cse` 在大函数上崩溃）
+- 后端 `g2_slot()` 按 `g_opt_level` 选择性读取寄存器元数据
+
+**性能瓶颈**：corec2 自身前端慢 450×，因为 corearch 生成编译器自身代码时全栈操作。寄存器分配器只作用于用户程序的 IR，不影响编译器自身速度。需要后端代码生成质量提升（寄存器分配 + 指令选择）。
+
+**当前状态**：自举管线（Stage 0→1→2）已通，但 `corec2` 因前端性能问题无法实用。此问题必须在继续开发前解决。
 
 ## Key Conventions
 

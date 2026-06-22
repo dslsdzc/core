@@ -329,6 +329,31 @@ class Interpreter:
                                 val = s[idx]
                     self.vars[id(instr.dest)] = val
                 return
+            if instr.func == 'load64':
+                s = self.vars.get(id(instr.args[0]))
+                idx = self.vars.get(id(instr.args[1]), 0)
+                if instr.dest:
+                    val = 0
+                    if s is not None:
+                        if isinstance(s, list):
+                            # Word-level list: the offset is in bytes, load the 64-bit word
+                            word_idx = idx // 8
+                            if word_idx >= 0 and word_idx < len(s):
+                                entry = s[word_idx]
+                                if isinstance(entry, int):
+                                    val = entry
+                        elif isinstance(s, str):
+                            # For strings, compute virtual header: len + 1
+                            if idx == -8:
+                                val = len(s) + 1
+                            else:
+                                val = 0
+                        elif isinstance(s, bytearray):
+                            if idx >= 0 and idx <= len(s) - 8:
+                                import struct
+                                val = struct.unpack('<Q', s[idx:idx+8])[0]
+                    self.vars[id(instr.dest)] = val
+                return
             if instr.func == 'store8':
                 s = self.vars.get(id(instr.args[0]))
                 idx = self.vars.get(id(instr.args[1]), 0)

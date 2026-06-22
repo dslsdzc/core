@@ -1,8 +1,9 @@
 // === resolve.cr ===
 // Generic label→offset resolution pass.
 //
-// Uses instr_size() provided by the backend to lay out instruction
-// bytes, records label positions, then patches IR_BRANCH and IR_JUMP with
+// Uses emit_instr() (the real encoder) for sizing — no duplicate size logic.
+// A reusable scratch buffer avoids per-instruction allocation.
+// Records label positions, then patches IR_BRANCH and IR_JUMP with
 // resolved byte offsets directly into src2/src3/src1.
 //
 // After resolution:
@@ -14,6 +15,11 @@
 // the pre-computed offsets, no label table lookup needed.
 
 fn res_labels() {
+    print("    res_labels: ");
+    print(int_str(g_ir_func_count));
+    print(" funcs, ");
+    print(int_str(g_ir_instr_count));
+    println(" instrs");
     fi : ., mut = 0;
     loop {
         if fi >= g_ir_func_count { break; }
@@ -28,12 +34,13 @@ fn res_labels() {
         g2_init();
         g_current_func_var_start = vs_r;
         vi4 := 0; loop { if vi4 >= vc_r { break; } g2_slot(vs_r + vi4); vi4 = vi4 + 1; }
-        pi4 := 0; loop { if pi4 >= pc_r && pi4 < 6 { break; } g2_slot(vs_r + pi4); pi4 = pi4 + 1; }
+        pi4 := 0; loop { if pi4 >= pc_r || pi4 >= 6 { break; } g2_slot(vs_r + pi4); pi4 = pi4 + 1; }
 
-        // ── Pass 1: measure instruction sizes via dry-run, record label positions ──
+        // ── Pass 1: measure instruction sizes via emit_instr (real encoder) ──
         g_label_count = 0;
         off : ., mut = 0;
         ii : ., mut = 0;
+        scratch := alloc(64);
         loop {
             if ii >= ic { break; }
             inst_idx := ist + ii;
@@ -45,10 +52,12 @@ fn res_labels() {
                     if ln + 1 > g_label_count { g_label_count = ln + 1; }
                 }
             } else {
-                off = off + emit_instr(inst_idx, alloc(256), off);
+                off = off + emit_instr(inst_idx, scratch, 0);
             }
             ii = ii + 1;
         }
+        // Save per-function code size for Phase 2 reuse
+        grow_func_code_sz(fi + 1); w64(g_x86_func_code_sz, fi * 8, off);
 
         // ── Pass 2: patch BRANCH/JUMP with resolved offsets ──
         ii = 0;

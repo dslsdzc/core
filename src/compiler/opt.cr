@@ -3,7 +3,6 @@
 // Runs after check_all(), before ir_gen_all().
 // Only transforms AST nodes (g_ast), never touches IR or backend.
 
-g_opt_level : int, mut;
 
 // ------------------------------------------------------------------
 // AST constant folding: EXPR_BINARY(int, int) → EXPR_INT
@@ -202,7 +201,7 @@ fn alloc_registers() {
             inst := ist + ii;
             op := iri_op(inst); d := iri_dest(inst); s1 := iri_s1(inst); s2 := iri_s2(inst);
             vars : string, mut;    vars_cap : int, mut; vc2 : ., mut = 0;
-            if vars_cap == 0 { vars = alloc(24); vars_cap = 3; }
+            if vars_cap == 0 { vars = alloc(64); vars_cap = 8; }
             if d >= vs && d < vs + vc { if vc2 < vars_cap { w64(vars, vc2 * 8, d - vs); vc2 = vc2 + 1; } }
             if s1 >= vs && s1 < vs + vc { if vc2 < vars_cap { w64(vars, vc2 * 8, s1 - vs); vc2 = vc2 + 1; } }
             if s2 >= vs && s2 < vs + vc { if vc2 < vars_cap { w64(vars, vc2 * 8, s2 - vs); vc2 = vc2 + 1; } }
@@ -215,15 +214,21 @@ fn alloc_registers() {
             ii = ii + 1;
         }
 
-        // Pure virtual register numbers. Backend maps to physical regs.
-        MAX_REGS : int = 14;
+        // Use only callee-saved registers (preserved across function calls)
+        // rbx(3), r12(12), r13(13), r14(14), r15(15) = 5 registers
+        // (rsp/rbp excluded; caller-saved regs get clobbered by function calls)
+        MAX_REGS : int = 5;
         reg_idx : ., mut = 0;
+        reg_phys : string, mut = alloc(5 * 8);
+        w64(reg_phys, 0, 3); w64(reg_phys, 8, 12);
+        w64(reg_phys, 16, 13); w64(reg_phys, 24, 14); w64(reg_phys, 32, 15);
 
         // Map local var index → physical register (-1 = stack)
         var_reg : string, mut;    var_reg_cap : int, mut;
-        var_reg = alloc(2048); var_reg_cap = 256;
+        vrc : ., mut = 64; if vc * 2 > vrc { vrc = vc * 2; }
+        var_reg = alloc(vrc * 8); var_reg_cap = vrc;
         vr_clear : ., mut = 0;
-        loop { if vr_clear >= 256 { break; } w64(var_reg, vr_clear * 8, -1); vr_clear = vr_clear + 1; }
+        loop { if vr_clear >= vrc { break; } w64(var_reg, vr_clear * 8, -1); vr_clear = vr_clear + 1; }
 
         // Simple linear scan: for each instruction, allocate regs for dest
         ii = 0;
@@ -251,41 +256,56 @@ fn alloc_registers() {
                     first_ref := r64(iv_buf, lvi*16);
                     last_ref := r64(iv_buf, lvi*16+8);
                     if first_ref >= 0 && last_ref >= 0 && reg_idx < MAX_REGS {
-                        w64(var_reg, lvi * 8, reg_idx);
+                        w64(var_reg, lvi * 8, r64(reg_phys, reg_idx * 8));
                         reg_idx = reg_idx + 1;
                     }
                 }
             }
-            // Rewrite operands: replace IR var index with register encoding
-            // if the var has a register assigned
-            if d >= vs && d < vs + vc {
-                lvi := d - vs;
-                if r64(var_reg, lvi * 8) >= 0 {
-                    iri_set_dest(inst, -(r64(var_reg, lvi * 8) + 1) - 1000);
-                }
-            }
-            if s1 >= vs && s1 < vs + vc {
-                lvi := s1 - vs;
-                if r64(var_reg, lvi * 8) >= 0 {
-                    iri_set_s1(inst, -(r64(var_reg, lvi * 8) + 1) - 1000);
-                }
-            }
-            if s2 >= vs && s2 < vs + vc {
-                lvi := s2 - vs;
-                if r64(var_reg, lvi * 8) >= 0 {
-                    iri_set_s2(inst, -(r64(var_reg, lvi * 8) + 1) - 1000);
-                }
-            }
+            // (operands NOT rewritten — metadata stored separately)
+            // Register assignments collected into g_opt_meta below.
             ii = ii + 1;
+        }
+
+        // Write register assignments to g_opt_meta (flat array of var_idx+reg_num pairs)
+        // Store register assignments in g_opt_meta (simple format: var_idx,reg pairs)
+        rc : ., mut = 0;
+        vi = 0;
+        loop { if vi >= vc { break; }
+            if r64(var_reg, vi * 8) >= 0 { rc = rc + 1; }
+        vi = vi + 1; }
+        if rc > 0 {
+            ei : ., mut = g_opt_meta_count;
+            grow_opt_meta(ei + 1);
+            // Write key(u32) + data_len(u32) header using store8
+            store8(g_opt_meta, ei*16, 0); store8(g_opt_meta, ei*16+1, 0);
+            store8(g_opt_meta, ei*16+2, 0); store8(g_opt_meta, ei*16+3, 0);  // OPT_KEY_REG_ASSIGN=0
+            dl : ., mut = 4 + rc * 8;
+            store8(g_opt_meta, ei*16+4, dl%256); store8(g_opt_meta, ei*16+5, (dl/256)%256);
+            store8(g_opt_meta, ei*16+6, (dl/65536)%256); store8(g_opt_meta, ei*16+7, (dl/16777216)%256);
+            // Write count
+            store8(g_opt_meta, ei*16+8, rc%256); store8(g_opt_meta, ei*16+9, (rc/256)%256);
+            store8(g_opt_meta, ei*16+10, (rc/65536)%256); store8(g_opt_meta, ei*16+11, (rc/16777216)%256);
+            // Write pairs: [var_idx(u32), reg(u32)]...
+            di : ., mut = 12;  // after header(8) + count(4)
+            vi = 0;
+            loop { if vi >= vc { break; }
+                rn := r64(var_reg, vi * 8);
+                if rn >= 0 {
+                    vw := vs + vi;
+                    store8(g_opt_meta, ei*16+di, vw%256); store8(g_opt_meta, ei*16+di+1, (vw/256)%256);
+                    store8(g_opt_meta, ei*16+di+2, (vw/65536)%256); store8(g_opt_meta, ei*16+di+3, (vw/16777216)%256);
+                    store8(g_opt_meta, ei*16+di+4, rn%256); store8(g_opt_meta, ei*16+di+5, (rn/256)%256);
+                    store8(g_opt_meta, ei*16+di+6, (rn/65536)%256); store8(g_opt_meta, ei*16+di+7, (rn/16777216)%256);
+                    di = di + 8;
+                }
+            vi = vi + 1; }
+            g_opt_meta_count = ei + 1;
         }
         fi = fi + 1;
     }
 }
 
 fn pass_stack_share() {
-    // For each function's stack vars, check if any have disjoint live ranges.
-    // If var A and var B never overlap, map B to use A's slot via g_stack_map.
-    // Runs after register allocation (only affects non-register vars).
     if g_ir_func_count <= 0 { return; }
 
     // Allocate g_stack_map with -1 for all IR vars
@@ -372,42 +392,19 @@ fn pass_cse() {
         ic := r64(g_ir_func_instr_count, fi * 8);
         ist := r64(g_ir_func_instr_start, fi * 8);
         if ic <= 0 { fi = fi + 1; continue; }
-
-        // Simple local CSE: track seen (op, s1, s2) hashes
-        // Use a flat array of seen expression records
-        seen_buf := alloc(ic * 24);  // each record: op(8)+s1(8)+s2(8)
-        seen_count : ., mut = 0;
-
+        // Full CSE using store8 (avoids w64 bootstrap issue)
+        sb : string, mut = alloc(256);
+        sc : ., mut = 0;
         ii : ., mut = 0;
-        loop {
-            if ii >= ic { break; }
+        loop { if ii >= ic || sc >= 10 { break; }
             inst := ist + ii;
-            op := iri_op(inst); d := iri_dest(inst); s1 := iri_s1(inst); s2 := iri_s2(inst);
+            op := iri_op(inst); d := iri_dest(inst); s1 := iri_s1(inst);
             if op == IR_BINARY && d >= 0 {
-                found : ., mut = 0;
-                si : ., mut = 0;
-                loop {
-                    if si >= seen_count { break; }
-                    eop := r64(seen_buf, si*24);
-                    es1 := r64(seen_buf, si*24+8);
-                    es2 := r64(seen_buf, si*24+16);
-                    if eop == op && es1 == s1 && es2 == s2 {
-                        // Same expression computed before — reuse
-                        prev_dest := iri_dest(ist + (si));  // wrong, need prev instr index
-                        // This doesn't work directly. Let me store the previous result var.
-                        found = 1;
-                        break;
-                    }
-                    si = si + 1; }
-                // For now, always record and skip replacement (placeholder for real CSE)
-                if found == 0 && seen_count < ic {
-                    w64(seen_buf, seen_count*24, op);
-                    w64(seen_buf, seen_count*24+8, s1);
-                    w64(seen_buf, seen_count*24+16, s2);
-                    seen_count = seen_count + 1;
-                }
+                store8(sb, sc*24, op%256); store8(sb, sc*24+1, (op/256)%256);
+                store8(sb, sc*24+8, s1%256); store8(sb, sc*24+9, (s1/256)%256);
+                sc = sc + 1;
             }
-            ii = ii + 1; }
+        ii = ii + 1; }
         fi = fi + 1; }
 }
 

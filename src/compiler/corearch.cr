@@ -21,8 +21,12 @@ fn corearch_main() -> int {
     cli_flag_bool("static", "", "Static linking (embed runtime)");
     cli_flag("link", "l", "Comma-sep .so files, or 'auto' for ~/.core/lib/");
     cli_flag("output", "o", "Output path");
+    cli_flag("opt-level", "O", "Optimization level (0-3, default=0)");
 
     if cli_parse() != 0 { return 1; }
+    g_opt_level = 0;
+    ol : ., mut = cli_get("opt-level");
+    if str_len(ol) > 0 { g_opt_level = str_int(ol); if g_opt_level > 3 { g_opt_level = 3; } if g_opt_level < 0 { g_opt_level = 0; } }
     if cli_arg_count() < 1 {
         println("usage: corearch <file.ccr> [options]");
         println("  --elf           ELF binary (default: dynamic)");

@@ -4,6 +4,10 @@
 // String table (dynamic byte buffer containing `string` pointers)
 g_strs : string, mut;            g_str_count : int, mut;     g_str_cap : int, mut;
 
+// String interning hash table: maps hash → g_strs index (-1 = empty slot)
+// Open addressing with linear probing.
+g_str_hash : string, mut;        g_str_hash_cap : int, mut;
+
 // Dynamic byte buffers (all arrays, no MAX_* limits)
 g_funcs : string, mut;       g_func_count : int, mut;     g_func_cap : int, mut;
 g_structs : string, mut;     g_struct_count : int, mut;   g_struct_cap : int, mut;
@@ -67,6 +71,15 @@ g_ir_loop_header : string, mut;     g_ir_loop_exit : string, mut;
 g_ir_loop_depth : int, mut;         g_ir_loop_stacks_cap : int, mut;
 g_label_poses : string, mut;        g_label_cap : int, mut;
 g_label_count : int, mut;
+// Pre-computed interned string indices for builtin function name matching
+g_ni_syscall3 : int, mut;  g_ni_load8 : int, mut;  g_ni_store8 : int, mut;
+g_ni_load64 : int, mut;    g_ni_load_str_ptr : int, mut;
+g_ni_store_str_ptr : int, mut;  g_ni_get_arg : int, mut;
+g_ni_w64 : int, mut;  g_ni_dyncpy : int, mut;
+// Single-pass backpatching: pending forward jumps
+g_pending_pos : string, mut;        // rel32 buffer positions to patch
+g_pending_label : string, mut;      // target label indices
+g_pending_count : int, mut;         g_pending_cap : int, mut;
 g_next_label : int, mut;
 
 // Backend arrays (all dynamic byte buffers)
@@ -80,6 +93,7 @@ g_x86_stack_size : int, mut;            g_x86_func_idx : int, mut;
 g_x86_is_enum : string, mut;            g_x86_is_enum_count : int, mut; g_x86_is_enum_cap : int, mut;
 g_x86_rodataref_pos : string, mut;       g_x86_rodataref_ro : string, mut;
 g_x86_func_cp : string, mut;            g_x86_func_cp_cap : int, mut;
+g_x86_func_code_sz : string, mut;       g_x86_func_code_sz_cap : int, mut;
 g_x86_rodataref_count : int, mut;       g_x86_rodataref_cap : int, mut;
 g_x86_is_global : string, mut;          g_x86_global_cnt : int, mut;    g_x86_global_cap : int, mut;
 g_x86_global_off : string, mut;         g_x86_global_off_cnt : int, mut; g_x86_global_off_cap : int, mut;
@@ -90,3 +104,7 @@ g_x86_call_patch_pos : string, mut;     g_x86_call_patch_name : string, mut;
 g_x86_call_patch_count : int, mut;      g_x86_call_patch_cap : int, mut;
 g_x86_sub_rsp_pos : int, mut;
 g_x86_alloc_patch_pos : string, mut;    g_x86_alloc_patch_cap : int, mut; g_x86_alloc_patch_count : int, mut;
+// Optimization levels and metadata (extensible key-value store)
+g_opt_level : int, mut;     // 0=none, 1=regalloc, 2=stackshare, 3=cse
+g_opt_meta : string, mut;   // metadata buffer for .ccr v3+
+g_opt_meta_count : int, mut;

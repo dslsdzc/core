@@ -36,8 +36,12 @@ fn init_builtins() {
 
     bi_add("load8", TI_INT);
     bi_add("store8", TI_INT);
+    bi_add("load64", TI_INT);
     bi_add("alloc", TI_STR);
     bi_add("get_arg", TI_STR);
+    bi_add("w32", TI_UNIT);
+    bi_add("w64", TI_UNIT);
+    bi_add("_dyncpy", TI_UNIT);
     bi_add("load_str_ptr", TI_STR);
     bi_add("store_str_ptr", TI_INT);
     bi_add("sched_call_0", TI_INT);
@@ -1138,8 +1142,8 @@ fn infer_expr(node: int) -> int {
             return TI_BOOL;
         }
         if op == OP_AND || op == OP_OR {
-            if lt != TI_BOOL || rt != TI_BOOL {
-                check_error(EC_TC_IF_COND, "Logical operator requires bool operands", ast_line(node), ast_col(node));
+            if lt != TI_BOOL && lt != TI_INT || rt != TI_BOOL && rt != TI_INT {
+                check_error(EC_TC_IF_COND, "Logical operator requires bool or int operands", ast_line(node), ast_col(node));
             }
             return TI_BOOL;
         }
@@ -1391,6 +1395,8 @@ fn infer_expr(node: int) -> int {
             res = infer_expr(sn);
             i = i + 1;
         }
+        // Track the last-statement type for debugging
+        // (no operation needed — res is already the last type)
         pop_borrow_scope();
         return res;
     }
@@ -1400,8 +1406,9 @@ fn infer_expr(node: int) -> int {
         then_node := ast_b(node);
         else_node := ast_c(node);
         cond_ti := infer_expr(cond);
-        if cond_ti != TI_BOOL {
-            check_error(EC_TC_IF_COND, "If condition must be bool", ast_line(node), ast_col(node));
+        // Accept int as truthy/falsy in conditions (not just strict bool)
+        if cond_ti != TI_BOOL && cond_ti != TI_INT {
+            check_error(EC_TC_IF_COND, "If condition must be bool or int", ast_line(node), ast_col(node));
         }
         push_borrow_scope();
         then_ti := infer_expr(then_node);
@@ -1410,7 +1417,7 @@ fn infer_expr(node: int) -> int {
             push_borrow_scope();
             else_ti := infer_expr(else_node);
             pop_borrow_scope();
-            if !type_equal(then_ti, else_ti) {
+            if !type_equal(then_ti, else_ti) && then_ti != TI_NEVER && else_ti != TI_NEVER {
                 check_error(EC_TC_IF_BRANCH, "If branches have different types", ast_line(node), ast_col(node));
             }
             return then_ti;
@@ -1645,6 +1652,9 @@ fn infer_expr(node: int) -> int {
         }
         if arr_kind == TYP_SLICE {
             return get_type_data(arr_ti);  // slice[i] → element type
+        }
+        if arr_ti == TI_STR {
+            return TI_INT;  // string[i] → byte value
         }
         check_error(EC_TK_INDEX, "Cannot index non-array type", ast_line(node), ast_col(node));
         return TI_INT;

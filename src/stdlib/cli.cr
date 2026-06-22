@@ -45,17 +45,20 @@ g_cli_flags : string, mut;            g_cli_flag_count : int, mut;    g_cli_flag
 g_cli_args : string, mut;             g_cli_arg_count : int, mut;    g_cli_arg_cap : int, mut;
 
 fn grow_cli_cmds(needed: int) {
-    if needed < g_cli_cmd_cap { return; }
-    nc : ., mut = g_cli_cmd_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
-    nb := alloc(nc * 16); _dyncpy(g_cli_cmds, g_cli_cmd_cap * 16, nb); g_cli_cmds = nb; g_cli_cmd_cap = nc; }
+    cur_cap : ., mut = g_cli_cmd_cap;
+    if needed < cur_cap { return; }
+    nc : ., mut = cur_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
+    nb := alloc(nc * 16); _dyncpy(g_cli_cmds, cur_cap * 16, nb); g_cli_cmds = nb; g_cli_cmd_cap = nc; }
 fn grow_cli_flags(needed: int) {
-    if needed < g_cli_flag_cap { return; }
-    nc : ., mut = g_cli_flag_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
-    nb := alloc(nc * 48); _dyncpy(g_cli_flags, g_cli_flag_cap * 48, nb); g_cli_flags = nb; g_cli_flag_cap = nc; }
+    cur_cap : ., mut = g_cli_flag_cap;
+    if needed < cur_cap { return; }
+    nc : ., mut = cur_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
+    nb := alloc(nc * 48); _dyncpy(g_cli_flags, cur_cap * 48, nb); g_cli_flags = nb; g_cli_flag_cap = nc; }
 fn grow_cli_args(needed: int) {
-    if needed < g_cli_arg_cap { return; }
-    nc : ., mut = g_cli_arg_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
-    nb := alloc(nc * 8); _dyncpy(g_cli_args, g_cli_arg_cap * 8, nb); g_cli_args = nb; g_cli_arg_cap = nc; }
+    cur_cap : ., mut = g_cli_arg_cap;
+    if needed < cur_cap { return; }
+    nc : ., mut = cur_cap * 2; if nc < 8 { nc = 8; } if nc < needed { nc = needed + 8; }
+    nb := alloc(nc * 8); _dyncpy(g_cli_args, cur_cap * 8, nb); g_cli_args = nb; g_cli_arg_cap = nc; }
 g_cli_matched_cmd : string, mut;
 
 // --- Init ---
@@ -73,30 +76,33 @@ fn cli_init(prog: string, desc: string) {
 
 fn cli_cmd(name: string, desc: string) {
     grow_cli_cmds(g_cli_cmd_count + 1);
-    w64(g_cli_cmds, g_cli_cmd_count * 16, name);
-    w64(g_cli_cmds, g_cli_cmd_count * 16 + 8, desc);
+    off : ., mut = g_cli_cmd_count * 16;
+    w64(g_cli_cmds, off, name);
+    w64(g_cli_cmds, off + 8, desc);
     g_cli_cmd_count = g_cli_cmd_count + 1;
 }
 
 fn cli_flag(long_name: string, short_name: string, desc: string) {
     grow_cli_flags(g_cli_flag_count + 1);
-    w64(g_cli_flags, g_cli_flag_count * 48, long_name);
-    w64(g_cli_flags, g_cli_flag_count * 48 + 8, short_name);
-    w64(g_cli_flags, g_cli_flag_count * 48 + 16, desc);
-    w64(g_cli_flags, g_cli_flag_count * 48 + 24, "");       // value
-    w64(g_cli_flags, g_cli_flag_count * 48 + 32, 0);         // has_value
-    w64(g_cli_flags, g_cli_flag_count * 48 + 40, 0);         // is_bool
+    off : ., mut = g_cli_flag_count * 48;
+    w64(g_cli_flags, off, long_name);
+    w64(g_cli_flags, off + 8, short_name);
+    w64(g_cli_flags, off + 16, desc);
+    w64(g_cli_flags, off + 24, "");       // value
+    w64(g_cli_flags, off + 32, 0);         // has_value
+    w64(g_cli_flags, off + 40, 0);         // is_bool
     g_cli_flag_count = g_cli_flag_count + 1;
 }
 
 fn cli_flag_bool(long_name: string, short_name: string, desc: string) {
     grow_cli_flags(g_cli_flag_count + 1);
-    w64(g_cli_flags, g_cli_flag_count * 48, long_name);
-    w64(g_cli_flags, g_cli_flag_count * 48 + 8, short_name);
-    w64(g_cli_flags, g_cli_flag_count * 48 + 16, desc);
-    w64(g_cli_flags, g_cli_flag_count * 48 + 24, "");       // value
-    w64(g_cli_flags, g_cli_flag_count * 48 + 32, 0);         // has_value
-    w64(g_cli_flags, g_cli_flag_count * 48 + 40, 1);         // is_bool
+    off : ., mut = g_cli_flag_count * 48;
+    w64(g_cli_flags, off, long_name);
+    w64(g_cli_flags, off + 8, short_name);
+    w64(g_cli_flags, off + 16, desc);
+    w64(g_cli_flags, off + 24, "");       // value
+    w64(g_cli_flags, off + 32, 0);         // has_value
+    w64(g_cli_flags, off + 40, 1);         // is_bool
     g_cli_flag_count = g_cli_flag_count + 1;
 }
 
@@ -127,9 +133,9 @@ fn _cli_strip_dashes(arg: string) -> string {
     slen := str_len(arg);
     if slen == 0 { return ""; }
     start : ., mut = 0;
-    if get_char(arg, 0) == "-" {
+    if str_eq(get_char(arg, 0), "-") != 0 {
         start = 1;
-        if slen > 1 && get_char(arg, 1) == "-" {
+        if slen > 1 && str_eq(get_char(arg, 1), "-") != 0 {
             start = 2;
         }
     }

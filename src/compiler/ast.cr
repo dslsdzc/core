@@ -570,3 +570,9 @@ g_df_nodes : string, mut;               g_df_node_count : int, mut;     g_df_nod
 g_df_edges : string, mut;               g_df_edge_count : int, mut;     g_df_edge_cap : int, mut;
 g_df_var_producer : string, mut;        g_df_func_node_start : string, mut;  g_df_func_node_count : string, mut;
 g_df_cap : int, mut;
+
+
+// ── Optimization metadata keys (.ccr v3+ extensible section) ──
+OPT_KEY_REG_ASSIGN  : int = 0;  // [var_idx:u32, reg_num:u8]...
+OPT_KEY_STACK_SHARE : int = 1;  // [var_idx:u32, mapped_to:u32]...
+OPT_KEY_CSE         : int = 2;  // [op:u32, s1:u32, s2:u32, res:u32]...
