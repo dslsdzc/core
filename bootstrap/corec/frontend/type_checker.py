@@ -478,6 +478,12 @@ class TypeChecker:
         elif isinstance(expr, Go):
             self._infer_expr(expr.expr)
             return BaseType('unit')
+        elif isinstance(expr, Flow):
+            self._infer_expr(expr.block)
+            return BaseType('unit')
+        elif isinstance(expr, Yield):
+            self._infer_expr(expr.expr)
+            return BaseType('unit')
         elif isinstance(expr, Await):
             return self._infer_expr(expr.expr)
         else:

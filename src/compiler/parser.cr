@@ -446,7 +446,34 @@ fn parse_primary() -> int {
             add_error("Expected expression after `go`");
             return 0;
         }
+        // go [N] expr  or  go var start end expr → desugared to for loop
         count : ., mut = -1;
+        iter_var_ni : ., mut = -1;
+        range_start : ., mut = -1;
+        range_end : ., mut = -1;
+        // Check for range syntax: go IDENT INT expr  (IDENT followed by INT → range mode)
+        saved_pos : ., mut = g_tok_pos;
+        if tok_k(cur_tok()) == T_IDENT {
+            vn := str_intern(tok_lx(cur_tok()));
+            advance_tok();
+            if tok_k(cur_tok()) == T_INT {
+                // go var start end expr
+                iter_var_ni = vn;
+                range_start = tok_iv(cur_tok());
+                advance_tok();
+                if tok_k(cur_tok()) == T_INT {
+                    range_end = tok_iv(cur_tok());
+                    advance_tok();
+                }
+                body := parse_expr();
+                // Desugar: go i 1 8 f(i) → for i in 1..8 { go f(i); }
+                range_node := alloc_node(EXPR_RANGE, range_start, range_end, 0, 0, 0, 0, tok_ln(t2), tok_cl(t2));
+                go_body := alloc_node(EXPR_GO, -1, body, 0, 0, 0, 0, tok_ln(t2), tok_cl(t2));
+                return alloc_node(EXPR_FOR, iter_var_ni, range_node, go_body, 0, 0, 0, tok_ln(t2), tok_cl(t2));
+            }
+            // Not range mode — backtrack: just a regular go with ident as body
+            g_tok_pos = saved_pos;
+        }
         if tok_k(cur_tok()) == T_INT {
             count = tok_iv(cur_tok());
             advance_tok();
@@ -665,6 +692,12 @@ fn parse_stmt() -> int {
         if !check(T_SEMI) && !check(T_RBRACE) { val = parse_expr(); }
         if check(T_SEMI) { advance_tok(); }
         return alloc_node(EXPR_RETURN, val, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
+    }
+    if tok_k(t) == T_YIELD {
+        advance_tok();
+        val := parse_expr();
+        if check(T_SEMI) { advance_tok(); }
+        return alloc_node(EXPR_YIELD, val, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
     }
     if tok_k(t) == T_BREAK {
         advance_tok();
@@ -1095,13 +1128,19 @@ fn parse_declaration() {
     ip : ., mut = 0;
     if check(T_PUB) { ip = 1; advance_tok(); }
 
-    // fn
-    if check(T_FN) {
+    // fn / flow
+    if check(T_FN) || check(T_FLOW) {
+        is_flow : ., mut = 0;
+        if check(T_FLOW) { is_flow = 1; }
         t := advance_tok();
         nt := advance_tok();
         name := tok_lx(nt);
         ni := str_intern(name);
         parse_body(name, ni, tok_ln(t), tok_cl(t));
+        if is_flow != 0 {
+            // Mark the function body as a flow (set type_val flag on the fn node)
+            // The fn node was added by parse_body; find and tag it
+        }
         return;
     }
 

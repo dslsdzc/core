@@ -133,6 +133,8 @@ fn lookup_keyword(ident: string) -> int {
     if ident == "as" { return T_AS; }
     if ident == "go" { return T_GO; }
     if ident == "await" { return T_AWAIT; }
+    if ident == "flow" { return T_FLOW; }
+    if ident == "yield" { return T_YIELD; }
     if ident == "unsafe" { return T_UNSAFE; }
     if ident == "interface" { return T_INTERFACE; }
     if ident == "auto" { return T_AUTO; }

@@ -67,7 +67,9 @@ T_IMPORT : int = 62;
 T_AS : int = 63;
 T_GO : int = 64;
 T_AWAIT : int = 65;
-T_UNSAFE : int = 66;
+T_FLOW : int = 66;
+T_YIELD : int = 67;
+T_UNSAFE : int = 68;
 T_INTERFACE : int = 67;
 T_COLON_EQ : int = 68;
 T_AUTO : int = 69;
@@ -228,6 +230,8 @@ EXPR_GENERIC_APPLY : int = 39; // a=base name idx, b=first arg type node, c=arg 
 EXPR_TUPLE : int = 40;         // a=first elem, b=elem count (tuple literal)
 EXPR_ARG : int = 41;            // a=expr, b=next arg node or -1 (argument linked list)
 EXPR_GO : int = 42;             // go [N] expr — concurrent spawn: a=count (-1=dynamic), b=body expr
+EXPR_FLOW : int = 43;           // flow fn — a=fn_name_ni, b=param_count, c=first_param, data=body
+EXPR_YIELD : int = 44;          // yield expr — a=value expr
 
 // Desugared constructs
 EXPR_TRY : int = 33;      // a=expr being tried (? operator)
@@ -527,6 +531,7 @@ IR_SLICE : int = 24;   // dest=slice_var, s1=arr_var, s2=low_var, src3=high_var 
 IR_DEREF : int = 25;   // dest=loaded_val, s1=ref_var — load value through pointer stored in ref_var
 IR_STORE_PTR : int = 26; // dest=val_var, s1=ptr_var, s2=val_var — store value through pointer
 IR_SPAWN : int = 27;     // dest=result_var, s1=fn_name_ni, s2=first_arg, src3=arg_count, type_kind=spawn_count (-1=dynamic)
+IR_YIELD : int = 28;     // s1=value_var — emit value from flow to consumer channel
 
 // Resolution flag for BRANCH/JUMP (stored in type_kind field after label resolution)
 IR_RESOLVED : int = 1;
