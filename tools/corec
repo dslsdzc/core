@@ -20,7 +20,7 @@ def compile_pipeline(src_path):
 
     Returns (Module, errors) or raises on unrecoverable errors.
     """
-    with open(src_path) as f:
+    with open(src_path, encoding='utf-8') as f:
         src = f.read()
     lex = Lexer(src)
     tokens = lex.tokenize()

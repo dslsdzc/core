@@ -96,7 +96,7 @@ fn df_connect_srcs(node_id: int, opcode: int, s1: int, s2: int, s3: int) {
         df_use_var(node_id, s1);
         return;
     }
-    if opcode == IR_CALL {
+    if opcode == IR_CALL || opcode == IR_SPAWN {
         // s1 = first argument var index, s2 = arg count (int), s3 = func name idx (int)
         // All args are contiguous vars starting at s1
         ac : ., mut = 0;
@@ -289,5 +289,6 @@ fn df_opcode_name(opcode: int) -> string {
     if opcode == IR_SLICE { return "slice"; }
     if opcode == IR_DEREF { return "deref"; }
     if opcode == IR_STORE_PTR { return "store_ptr"; }
+    if opcode == IR_SPAWN { return "spawn"; }
     return "?";
 }

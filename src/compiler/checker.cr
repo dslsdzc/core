@@ -1425,6 +1425,15 @@ fn infer_expr(node: int) -> int {
         return TI_UNIT;
     }
 
+    if ast_kind(node) == EXPR_GO {
+        // ast_a = spawn count (-1=dynamic, N=static batch), ast_b = body
+        body := ast_b(node);
+        push_borrow_scope();
+        infer_expr(body);
+        pop_borrow_scope();
+        return TI_UNIT;  // fire-and-forget: caller gets unit
+    }
+
     if ast_kind(node) == EXPR_LOOP {
         push_borrow_scope();
         infer_expr(ast_a(node));

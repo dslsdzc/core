@@ -475,6 +475,11 @@ class TypeChecker:
             return BaseType('unit')
         elif isinstance(expr, BreakStmt) or isinstance(expr, ContinueStmt):
             return BaseType('unit')
+        elif isinstance(expr, Go):
+            self._infer_expr(expr.expr)
+            return BaseType('unit')
+        elif isinstance(expr, Await):
+            return self._infer_expr(expr.expr)
         else:
             self.errors.append(f"Unsupported expression: {type(expr)}")
             return BaseType('never')

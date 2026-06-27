@@ -440,6 +440,20 @@ fn parse_primary() -> int {
     if tok_k(t) == T_WHILE { return parse_while_expr(); }
     if tok_k(t) == T_LOOP { return parse_loop_expr(); }
     if tok_k(t) == T_FOR { return parse_for_expr(); }
+    if tok_k(t) == T_GO {
+        t2 := advance_tok();
+        if check(T_SEMI) || check(T_RBRACE) || check(T_EOF) {
+            add_error("Expected expression after `go`");
+            return 0;
+        }
+        count : ., mut = -1;
+        if tok_k(cur_tok()) == T_INT {
+            count = tok_iv(cur_tok());
+            advance_tok();
+        }
+        body := parse_expr();
+        return alloc_node(EXPR_GO, count, body, 0, 0, 0, 0, tok_ln(t2), tok_cl(t2));
+    }
     if tok_k(t) == T_MATCH { return parse_match_expr(); }
     if tok_k(t) == T_UNSAFE {
         t2 := advance_tok();

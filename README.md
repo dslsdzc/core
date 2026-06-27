@@ -39,6 +39,11 @@
 | **控制流** | `if` / `else` / `elif` | ✅ |
 | | `while`、`loop` + `break` / `continue` | ✅ |
 | | `for` 区间和数组迭代 | ✅ |
+| **并发** | `go [N] expr` 协程生成（单/批量） | ⚡ 新 |
+| | `await expr` 异步等待 | ⬜ 解析已就绪 |
+| | 协作式 Fiber 调度器（round-robin） | ⚡ 新 |
+| | 缓冲通道 `chan_send` / `chan_recv`（阻塞） | ⚡ 新 |
+| | Arena 分配器（per-goroutine bump alloc + free-list） | ⚡ 新 |
 | **复合类型** | 结构体定义、字段访问、嵌套结构体 | ✅ |
 | | 枚举与模式匹配（`match`） | ✅ |
 | | 元组字面量 `(1, 2)` + 字段访问 `t.0` | ✅ |
@@ -99,6 +104,24 @@ python3 tools/corec ir hello.cr      # → .cir 数据流图
 python3 tools/corec cir hello.cr     # → .ccr 线性 IR
 ```
 
+### 并发示例
+
+```core
+import io;
+
+fn worker(id: int) {
+    io.println_int(id);
+}
+
+fn main() {
+    // 批量生成 8 个 worker 协程
+    go 8 worker(1);
+
+    // 单个协程
+    go worker(2);
+}
+```
+
 ---
 
 ## 项目结构
@@ -128,6 +151,9 @@ core/
 │   ├── stdlib/              # 标准库
 │   │   ├── io.cr, cli.cr     # I/O、命令行
 │   │   ├── math.cr, toml.cr  # 数学、TOML 解析
+│   │   ├── arena.cr          # Arena 分配器
+│   │   ├── scheduler.cr      # Fiber 调度器
+│   │   ├── chan.cr           # 缓冲通道
 │   │   └── collections.cr    # 集合操作
 │   └── runtime/             # 运行时（rt.s  bump allocator + 系统调用）
 ├── tests/                    # 测试
