@@ -451,27 +451,29 @@ fn parse_primary() -> int {
         iter_var_ni : ., mut = -1;
         range_start : ., mut = -1;
         range_end : ., mut = -1;
-        // Check for range syntax: go IDENT INT expr  (IDENT followed by INT → range mode)
+        // Check for range syntax: go var start..end expr
         saved_pos : ., mut = g_tok_pos;
         if tok_k(cur_tok()) == T_IDENT {
             vn := str_intern(tok_lx(cur_tok()));
             advance_tok();
             if tok_k(cur_tok()) == T_INT {
-                // go var start end expr
                 iter_var_ni = vn;
                 range_start = tok_iv(cur_tok());
                 advance_tok();
-                if tok_k(cur_tok()) == T_INT {
-                    range_end = tok_iv(cur_tok());
+                if tok_k(cur_tok()) == T_DOTDOT {
                     advance_tok();
+                    if tok_k(cur_tok()) == T_INT {
+                        range_end = tok_iv(cur_tok());
+                        advance_tok();
+                    }
+                    body := parse_expr();
+                    // Desugar: go f 1..8 expr → for f in 1..8 { go expr; }
+                    range_node := alloc_node(EXPR_RANGE, range_start, range_end, 0, 0, 0, 0, tok_ln(t2), tok_cl(t2));
+                    go_body := alloc_node(EXPR_GO, -1, body, 0, 0, 0, 0, tok_ln(t2), tok_cl(t2));
+                    return alloc_node(EXPR_FOR, iter_var_ni, range_node, go_body, 0, 0, 0, tok_ln(t2), tok_cl(t2));
                 }
-                body := parse_expr();
-                // Desugar: go i 1 8 f(i) → for i in 1..8 { go f(i); }
-                range_node := alloc_node(EXPR_RANGE, range_start, range_end, 0, 0, 0, 0, tok_ln(t2), tok_cl(t2));
-                go_body := alloc_node(EXPR_GO, -1, body, 0, 0, 0, 0, tok_ln(t2), tok_cl(t2));
-                return alloc_node(EXPR_FOR, iter_var_ni, range_node, go_body, 0, 0, 0, tok_ln(t2), tok_cl(t2));
             }
-            // Not range mode — backtrack: just a regular go with ident as body
+            // Not range mode — backtrack: regular go
             g_tok_pos = saved_pos;
         }
         if tok_k(cur_tok()) == T_INT {

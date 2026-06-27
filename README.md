@@ -40,7 +40,7 @@
 | | `while`、`loop` + `break` / `continue` | ✅ |
 | | `for` 区间和数组迭代 | ✅ |
 | **并发** | `go [N] expr` 协程生成（单/批量） | ⚡ 新 |
-| | `await expr` 异步等待 | ⬜ 解析已就绪 |
+| | `await expr` 异步等待 | ⬜ 待实现 |
 | | 协作式 Fiber 调度器（round-robin） | ⚡ 新 |
 | | 缓冲通道 `chan_send` / `chan_recv`（阻塞） | ⚡ 新 |
 | | Arena 分配器（per-goroutine bump alloc + free-list） | ⚡ 新 |
@@ -109,16 +109,16 @@ python3 tools/corec cir hello.cr     # → .ccr 线性 IR
 ```core
 import io;
 
-fn worker(id: int) {
-    io.println_int(id);
+fn worker(id: int, base: int) {
+    io.println_int(id + base);
 }
 
 fn main() {
-    // 批量生成 8 个 worker 协程
-    go 8 worker(1);
+    // 批量生成 8 个 worker 协程，每个传入不同 ID
+    go f 1..8 worker(f * 10000, 10000);
 
     // 单个协程
-    go worker(2);
+    go worker(1, 0);
 }
 ```
 
