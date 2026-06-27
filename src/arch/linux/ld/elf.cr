@@ -633,14 +633,18 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
                 }
                 break; }
         cfi2 = cfi2 + 1; }
-        // If not found in user functions, search builtins in g_x86_func_offsets
+        // Fallback: search g_x86_func_offsets for builtins
         if cfi2 >= g_ir_func_count {
             bfi2 : ., mut = 0;
             loop { if bfi2 >= g_x86_func_off_count { break; }
                 if str_eq(istr_get(r64(g_x86_func_offsets, bfi2*16)), istr_get(fn_ni)) != 0 {
                     func_off := r64(g_x86_func_offsets, bfi2*16+8);
-                    rel := (176 + func_off) - (call_pos + 5);
-                    w32(buf, call_pos + 1, rel);
+                    // Safety check: target must be within emitted code
+                    target_pos := 176 + func_off;
+                    if target_pos > 0 && target_pos < cp {
+                        rel := target_pos - (call_pos + 5);
+                        w32(buf, call_pos + 1, rel);
+                    }
                     break; }
             bfi2 = bfi2 + 1; }
         }
@@ -697,12 +701,19 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
     g_x86_rip_patch_count = 0;
 
     // ── Patch _start's call to main ──
-    // Find main's offset by searching .ccr string table
-    mo := -1; fi = 0; loop { if fi >= g_ir_func_count { break; }
-        fn_ni := r64(g_ir_func_name_idx, fi * 8);
-        fn_name := istr_get(fn_ni);
-        if str_eq(fn_name, "main") != 0 { mo = r64(g_x86_func_offsets, fi*16+8); break; }
-    fi = fi + 1; }
+    // Search g_x86_func_offsets by name (indices differ from g_ir_func_name_idx)
+    mo := -1; bfi3 := 0; loop { if bfi3 >= g_x86_func_off_count { break; }
+        if str_eq(istr_get(r64(g_x86_func_offsets, bfi3*16)), "main") != 0 {
+            mo = r64(g_x86_func_offsets, bfi3*16+8); break; }
+    bfi3 = bfi3 + 1; }
+    // Debug: find ALL entries named "main"
+    bfi4 := 0; loop { if bfi4 >= g_x86_func_off_count { break; }
+        nm := istr_get(r64(g_x86_func_offsets, bfi4*16));
+        if str_eq(nm, "main") != 0 {
+            off := r64(g_x86_func_offsets, bfi4*16+8);
+            print("  main at ["); print(int_str(bfi4)); print("] off="); print(int_str(off)); print(" cp="); println(int_str(off + 176));
+        }
+    bfi4 = bfi4 + 1; }
     if mo >= 0 {
         rel := mo + 176 - g_call_main_pos - 5;
         w32(buf, g_call_main_pos + 1, rel);
@@ -710,7 +721,13 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
 
     // ── Write ELF header ──
     total_sz := cp;
-    elf2_hdr(buf, g_x86_rodata_base, total_sz);
+    // Use actual total_sz as code_end so code segment covers all emitted content
+    elf2_hdr(buf, total_sz, total_sz);
+    // Patch data segment VA to match bss_va (page after code+rodata)
+    data_phdr_base := EHDR_SIZE + PHDR_SIZE;
+    w64(buf, data_phdr_base + P_OFFSET, bss_va - TEXT_BASE);
+    w64(buf, data_phdr_base + P_VADDR, bss_va);
+    w64(buf, data_phdr_base + P_PADDR, bss_va);
     g_asm_code_size = total_sz;
     return total_sz;
 }
