@@ -78,3 +78,49 @@ fn fill(arr: [int; N], val: int) {
         i = i + 1;
     }
 }
+
+fn sum(arr: [int; N]) -> int {
+    s : ., mut = 0;
+    i : ., mut = 0;
+    loop { if i >= N { break; } s = s + arr[i]; i = i + 1; }
+    return s;
+}
+
+fn product(arr: [int; N]) -> int {
+    p : ., mut = 1;
+    i : ., mut = 0;
+    loop { if i >= N { break; } p = p * arr[i]; i = i + 1; }
+    return p;
+}
+
+fn count(arr: [int; N], val: int) -> int {
+    c : ., mut = 0;
+    i : ., mut = 0;
+    loop { if i >= N { break; } if arr[i] == val { c = c + 1; } i = i + 1; }
+    return c;
+}
+
+fn find(arr: [int; N], val: int) -> int {
+    i : ., mut = 0;
+    loop { if i >= N { break; } if arr[i] == val { return i; } i = i + 1; }
+    return -1;
+}
+
+fn copy(src: [int; N], dst: [int; N]) {
+    i : ., mut = 0;
+    loop { if i >= N { break; } dst[i] = src[i]; i = i + 1; }
+}
+
+fn equals(a: [int; N], b: [int; M]) -> bool {
+    if N != M { return false; }
+    i : ., mut = 0;
+    loop { if i >= N { break; } if a[i] != b[i] { return false; } i = i + 1; }
+    return true;
+}
+
+fn slice_sum(arr: [int; N], start: int, end: int) -> int {
+    s : ., mut = 0;
+    i : ., mut = start;
+    loop { if i >= end || i >= N { break; } s = s + arr[i]; i = i + 1; }
+    return s;
+}

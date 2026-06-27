@@ -290,5 +290,6 @@ fn df_opcode_name(opcode: int) -> string {
     if opcode == IR_DEREF { return "deref"; }
     if opcode == IR_STORE_PTR { return "store_ptr"; }
     if opcode == IR_SPAWN { return "spawn"; }
+    if opcode == IR_YIELD { return "yield"; }
     return "?";
 }

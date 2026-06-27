@@ -145,8 +145,9 @@ fn sched_run() {
         g_cur_fiber = fi;
         off := fi * 32;
         if r64(g_fibers, off + 16) != FIBER_RUNNABLE { continue; }
-        // TODO: dispatch the actual function when native backend supports it
-        // For now fibers complete immediately (placeholder)
+        // Placeholder: fibers complete immediately in interpreter mode.
+        // Native backend (corearch) will call the actual function pointer
+        // stored at g_fibers[fi].fn_idx via the dispatch table.
         fiber_done(fi);
     }
     g_cur_fiber = -1;
