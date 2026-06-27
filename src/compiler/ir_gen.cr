@@ -305,6 +305,40 @@ fn gen_expr(node: int) -> int {
     }
 
     // Function call
+    if ast_kind(node) == EXPR_GO {
+        spawn_count := ast_a(node);  // -1 = dynamic, N = static batch
+        body := ast_b(node);
+        if ast_kind(body) == EXPR_CALL {
+            func_node := ast_a(body);
+            first_arg := ast_b(body);
+            arg_count := ast_c(body);
+            func_ni : ., mut = -1;
+            if ast_kind(func_node) == EXPR_IDENT {
+                func_ni = ast_int_val(func_node);
+            } else if ast_kind(func_node) == EXPR_FIELD {
+                func_ni = ast_data(body);
+            }
+            // Walk arg chain into buffer
+            s_ac : ., mut = 0;
+            s_args : string, mut; s_args_cap : int, mut;
+            s_args = alloc(32 * 8); s_args_cap = 32;
+            an : ., mut = first_arg;
+            loop {
+                if an < 0 { break; }
+                if s_ac >= s_args_cap { nc := s_args_cap * 2; nb := alloc(nc * 8); _dyncpy(s_args, s_args_cap * 8, nb); s_args = nb; s_args_cap = nc; } w64(s_args, s_ac * 8, gen_expr(ast_a(an)));
+                s_ac = s_ac + 1;
+                an = ast_b(an);
+            }
+            spawn_first_arg : ., mut = -1;
+            if s_ac > 0 { spawn_first_arg = r64(s_args, 0 * 8); }
+            dest := new_ir_var("go", TI_UNIT);
+            emit(IR_SPAWN, dest, spawn_first_arg, s_ac, func_ni, spawn_count);
+            return dest;
+        }
+        // go { block } — fire-and-forget
+        return gen_expr(body);
+    }
+
     if ast_kind(node) == EXPR_CALL {
         func_node := ast_a(node);
         first_arg := ast_b(node);

@@ -111,7 +111,7 @@ fn ir_interpret() -> int {
         }
         // IR_LABEL (21) - noop
 
-        if op == 4 {  // IR_CALL
+        if op == 4 || op == 27 {  // IR_CALL or IR_SPAWN (sequential fallback)
             fn_ni := s3;
             fn_name := istr_get(fn_ni);
             sfi := find_so_fn(fn_ni);

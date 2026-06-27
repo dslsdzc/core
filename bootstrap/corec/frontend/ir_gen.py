@@ -115,6 +115,15 @@ class IRGen:
         if isinstance(expr, LetStmt): return self.gen_let(expr)
         if isinstance(expr, BreakStmt): return self.gen_break()
         if isinstance(expr, ContinueStmt): return self.gen_continue()
+        if isinstance(expr, Go):
+            # Fire-and-forget: generate body
+            self.gen_expr(expr.expr)
+            # Return unit (represented as int 0 in interpreter)
+            v = self.new_temp()
+            self.add_instr(ConstInstr(0, 'int', v))
+            return v
+        if isinstance(expr, Await):
+            return self.gen_expr(expr.expr)
         raise NotImplementedError(type(expr))
 
     def gen_stmt(self, stmt): return self.gen_expr(stmt)
