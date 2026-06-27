@@ -1434,6 +1434,12 @@ fn infer_expr(node: int) -> int {
         return TI_UNIT;  // fire-and-forget: caller gets unit
     }
 
+    if ast_kind(node) == EXPR_YIELD {
+        val := ast_a(node);
+        if val >= 0 { infer_expr(val); }
+        return TI_UNIT;  // yield suspends, returns unit to caller context
+    }
+
     if ast_kind(node) == EXPR_LOOP {
         push_borrow_scope();
         infer_expr(ast_a(node));

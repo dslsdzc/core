@@ -94,6 +94,15 @@ fn ir_interpret() -> int {
         if op == 10 || op == 11 { if d >= 0 { w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8)); } }
         if op == 17 || op == 18 || op == 25 || op == 23 { if d >= 0 { w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8)); } }
 
+        // IR_YIELD — suspend current fiber with output value
+        if op == 28 {
+            // Store yield value in fiber output slot
+            if s1 >= 0 {
+                w64(g_ir_vals, 0, r64(g_ir_vals, s1 * 8));  // stash in slot 0
+            }
+            // Sequential fallback: continue to next instruction
+        }
+
         // IR_STORE_PTR
         if op == 26 { if d >= 0 && s1 >= 0 { w64(g_ir_vals, s1 * 8, r64(g_ir_vals, d * 8)); } }
 

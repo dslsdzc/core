@@ -25,6 +25,7 @@ class TokenType(Enum):
     GO = auto()
     AWAIT = auto()
     FLOW = auto()
+    YIELD = auto()
     IF = auto()
     ELSE = auto()
     MATCH = auto()
@@ -106,6 +107,7 @@ KEYWORDS = {
     "go": TokenType.GO,
     "await": TokenType.AWAIT,
     "flow": TokenType.FLOW,
+    "yield": TokenType.YIELD,
     "if": TokenType.IF,
     "else": TokenType.ELSE,
     "match": TokenType.MATCH,

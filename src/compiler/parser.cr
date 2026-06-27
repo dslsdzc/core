@@ -666,6 +666,12 @@ fn parse_stmt() -> int {
         if check(T_SEMI) { advance_tok(); }
         return alloc_node(EXPR_RETURN, val, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
     }
+    if tok_k(t) == T_YIELD {
+        advance_tok();
+        val := parse_expr();
+        if check(T_SEMI) { advance_tok(); }
+        return alloc_node(EXPR_YIELD, val, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
+    }
     if tok_k(t) == T_BREAK {
         advance_tok();
         if check(T_SEMI) { advance_tok(); }
@@ -1095,13 +1101,19 @@ fn parse_declaration() {
     ip : ., mut = 0;
     if check(T_PUB) { ip = 1; advance_tok(); }
 
-    // fn
-    if check(T_FN) {
+    // fn / flow
+    if check(T_FN) || check(T_FLOW) {
+        is_flow : ., mut = 0;
+        if check(T_FLOW) { is_flow = 1; }
         t := advance_tok();
         nt := advance_tok();
         name := tok_lx(nt);
         ni := str_intern(name);
         parse_body(name, ni, tok_ln(t), tok_cl(t));
+        if is_flow != 0 {
+            // Mark the function body as a flow (set type_val flag on the fn node)
+            // The fn node was added by parse_body; find and tag it
+        }
         return;
     }
 

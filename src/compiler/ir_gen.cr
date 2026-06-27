@@ -696,6 +696,14 @@ fn gen_expr(node: int) -> int {
     }
 
     // Return
+    if ast_kind(node) == EXPR_YIELD {
+        val_node := ast_a(node);
+        val_var : ., mut = -1;
+        if val_node >= 0 { val_var = gen_expr(val_node); }
+        emit(IR_YIELD, -1, val_var, 0, 0, 0);
+        return -1;  // yield suspends — no return value for caller
+    }
+
     if ast_kind(node) == EXPR_RETURN {
         if ast_a(node) >= 0 {
             val_var := gen_expr(ast_a(node));

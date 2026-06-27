@@ -134,6 +134,10 @@ fn ast_optimize_body(body: int) {
         if ast_b(body) >= 0 { ast_optimize_body(ast_b(body)); }
         return;
     }
+    if bk == EXPR_YIELD {
+        if ast_a(body) >= 0 { ast_optimize_body(ast_a(body)); }
+        return;
+    }
     // EXPR_LOOP, EXPR_WHILE: optimize body
     if bk == EXPR_LOOP || bk == EXPR_WHILE {
         if ast_a(body) >= 0 { ast_optimize_body(ast_a(body)); }

@@ -187,6 +187,9 @@ class Parser:
             self.advance()
         if self.check(TokenType.FN):
             return self.parse_function_decl(is_pub)
+        elif self.check(TokenType.FLOW):
+            self.advance()
+            return self.parse_function_decl(is_pub, is_flow=True)
         elif self.check(TokenType.STRUCT):
             return self.parse_struct_decl(is_pub)
         elif self.check(TokenType.ENUM):
@@ -201,8 +204,9 @@ class Parser:
             return self._parse_new_let_decl()
         self.error(f"Unexpected '{self.cur().lexeme}' at top level")
 
-    def parse_function_decl(self, is_pub):
-        self.expect(TokenType.FN)
+    def parse_function_decl(self, is_pub, is_flow=False):
+        if not is_flow:
+            self.expect(TokenType.FN)
         name = self.expect(TokenType.IDENT).lexeme
         generics = self._parse_generics()
         self.expect(TokenType.LPAREN)
@@ -219,6 +223,8 @@ class Parser:
             self.expect(TokenType.SEMI)
             return FunctionDecl(is_pub, name, generics, params, ret, body)
         body = self.parse_block()
+        if is_flow:
+            body = Flow(body)
         return FunctionDecl(is_pub, name, generics, params, ret, body)
 
     def _parse_generics(self):
@@ -571,6 +577,10 @@ class Parser:
             self.advance(); return Go(self.parse_expr())
         if self.check(TokenType.AWAIT):
             self.advance(); return Await(self.parse_expr())
+        if self.check(TokenType.FLOW):
+            self.advance(); return Flow(self.parse_block())
+        if self.check(TokenType.YIELD):
+            self.advance(); return Yield(self.parse_expr())
         if self.check(TokenType.UNSAFE):
             self.advance(); return Unsafe(self.parse_block())
         self.error(f"Unexpected token: {self.cur().lexeme}")

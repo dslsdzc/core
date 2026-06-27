@@ -118,10 +118,19 @@ class IRGen:
         if isinstance(expr, Go):
             # Fire-and-forget: generate body
             self.gen_expr(expr.expr)
-            # Return unit (represented as int 0 in interpreter)
             v = self.new_temp()
             self.add_instr(ConstInstr(0, 'int', v))
             return v
+        if isinstance(expr, Flow):
+            # Producer: generate block body, return unit
+            self.gen_block(expr.block)
+            v = self.new_temp()
+            self.add_instr(ConstInstr(0, 'int', v))
+            return v
+        if isinstance(expr, Yield):
+            val_var = self.gen_expr(expr.expr) if expr.expr else self.new_temp()
+            # Emit yield instruction — sequential fallback: continue
+            return val_var
         if isinstance(expr, Await):
             return self.gen_expr(expr.expr)
         raise NotImplementedError(type(expr))
