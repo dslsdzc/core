@@ -574,7 +574,24 @@ class Parser:
         if self.check(TokenType.FOR):
             return self.parse_for_expr()
         if self.check(TokenType.GO):
-            self.advance(); return Go(self.parse_expr())
+            self.advance()
+            # go [N] expr  or  go var start end expr
+            save = self.pos
+            if self.check(TokenType.IDENT):
+                var_tok = self.advance()
+                if self.check(TokenType.INT_LIT):
+                    start_tok = self.advance()
+                    if self.check(TokenType.INT_LIT):
+                        end_tok = self.advance()
+                        body = Go(self.parse_expr())
+                        # Desugar: go i 1 8 f(i) → for i in 1..8 { go f(i); }
+                        range_node = RangeExpr(
+                            Literal(int(start_tok.lexeme), 'int'),
+                            Literal(int(end_tok.lexeme), 'int'))
+                        return For(var_tok.lexeme, range_node, Block([body]))
+            # Not range mode — backtrack
+            self.pos = save
+            return Go(self.parse_expr())
         if self.check(TokenType.AWAIT):
             self.advance(); return Await(self.parse_expr())
         if self.check(TokenType.FLOW):
