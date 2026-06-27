@@ -124,9 +124,7 @@ fn run_frontend() -> int {
     println("[4/5] type check...");
     check_all();
     if g_diag_count > 0 { print_diagnostics(); return 1; }
-    // AST-level optimization disabled — ir_gen can't handle folding yet
-    // TODO: fix ir_gen EXPR_INT type handling for folded constants
-    /*
+    // AST-level constant folding and optimization (O1+)
     if g_opt_level >= 1 && g_func_count > 0 {
         fi : ., mut = 0;
         loop { if fi >= g_func_count { break; }
@@ -135,7 +133,6 @@ fn run_frontend() -> int {
             ast_optimize_body(body);
         fi = fi + 1; }
     }
-    */
     println("[5/5] frontend done");
     return 0;
 }

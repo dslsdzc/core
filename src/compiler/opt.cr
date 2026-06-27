@@ -401,20 +401,75 @@ fn pass_cse() {
         ic := r64(g_ir_func_instr_count, fi * 8);
         ist := r64(g_ir_func_instr_start, fi * 8);
         if ic <= 0 { fi = fi + 1; continue; }
-        // Full CSE using store8 (avoids w64 bootstrap issue)
-        sb : string, mut = alloc(256);
-        sc : ., mut = 0;
+
+        // CSE: track seen (op, s1, s2) → dest_var mapping
+        // Simple linear scan — sufficient for O1
+        seen_count : ., mut = 0;
+        // Flat array: each entry = (op:8, s1:8, s2:8, dest:8) = 32 bytes
+        seen : string, mut = alloc(ic * 32);
+        // Replacement map: var → canonical var (8 bytes each)
+        replace_map : string, mut = alloc(ic * 8);
+        replace_count : ., mut = 0;
+
         ii : ., mut = 0;
-        loop { if ii >= ic || sc >= 10 { break; }
+        loop {
+            if ii >= ic { break; }
             inst := ist + ii;
-            op := iri_op(inst); d := iri_dest(inst); s1 := iri_s1(inst);
-            if op == IR_BINARY && d >= 0 {
-                store8(sb, sc*24, op%256); store8(sb, sc*24+1, (op/256)%256);
-                store8(sb, sc*24+8, s1%256); store8(sb, sc*24+9, (s1/256)%256);
-                sc = sc + 1;
+            op := iri_op(inst);
+            d := iri_dest(inst);
+            s1 := iri_s1(inst);
+            s2 := iri_s2(inst);
+
+            // Only CSE for pure computations: BINARY, UNARY
+            if (op == IR_BINARY || op == IR_UNARY) && d >= 0 {
+                // Check if we've seen this expression
+                found : ., mut = -1;
+                sj : ., mut = 0;
+                loop {
+                    if sj >= seen_count { break; }
+                    so := sj * 32;
+                    if r64(seen, so) == op && r64(seen, so+8) == s1 && r64(seen, so+16) == s2 {
+                        found = sj; break;
+                    }
+                    sj = sj + 1;
+                }
+                if found >= 0 {
+                    // Duplicate — record replacement: d → canonical dest
+                    canonical := r64(seen, found * 32 + 24);
+                    w64(replace_map, replace_count * 8, d);
+                    w64(replace_map, replace_count * 8 + 8, canonical);
+                    replace_count = replace_count + 1;
+                    // NOP this instruction
+                    iri_set_op(inst, IR_NOP);
+                } else {
+                    // New expression — record it
+                    so := seen_count * 32;
+                    w64(seen, so, op);
+                    w64(seen, so+8, s1);
+                    w64(seen, so+16, s2);
+                    w64(seen, so+24, d);
+                    seen_count = seen_count + 1;
+                }
             }
-        ii = ii + 1; }
-        fi = fi + 1; }
+
+            // Apply replacements to operands of ALL instructions
+            if replace_count > 0 {
+                rj : ., mut = 0;
+                loop {
+                    if rj >= replace_count { break; }
+                    old_v := r64(replace_map, rj * 8);
+                    new_v := r64(replace_map, rj * 8 + 8);
+                    if iri_s1(inst) == old_v { iri_set_s1(inst, new_v); }
+                    if iri_s2(inst) == old_v { iri_set_s2(inst, new_v); }
+                    if iri_s3(inst) == old_v { iri_set_s3(inst, new_v); }
+                    rj = rj + 1;
+                }
+            }
+
+            ii = ii + 1;
+        }
+        fi = fi + 1;
+    }
 }
 
 fn optimize_all() {

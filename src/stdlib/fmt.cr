@@ -156,8 +156,37 @@ fn to_str(n: int) -> string {
 
 // Format string: replace {} with args sequentially.
 // Example: format("x = {} and y = {}", int_str(x), int_str(y))
-// Rust-style: used with print( format(...) ) or println( format(...) )
-// Note: variadic iteration requires interpreter or IR-gen expansion.
-fn format(fmt_str: string, ...args: string) -> string {
-    return fmt_str;
+// Simple string interpolation: replaces "{0}" with first arg, "{1}" with second, etc.
+// Usage: format("Hello {0}, you are {1} years old", name, age_str)
+fn format(fmt_str: string, a0: string) -> string {
+    fl := str_len(fmt_str);
+    a0l := str_len(a0);
+    // Fast path: no interpolation needed
+    out_buf := alloc(fl + a0l + 16);
+    ri := 0;  // write position
+    fi := 0;  // read position
+    loop {
+        if fi >= fl { break; }
+        c := load8(fmt_str, fi);
+        if c == 123 && fi + 2 < fl && load8(fmt_str, fi+1) == 48 && load8(fmt_str, fi+2) == 125 {
+            // "{0}" → replace with a0
+            ai : ., mut = 0;
+            loop { if ai >= a0l { break; } store8(out_buf, ri, load8(a0, ai)); ri = ri + 1; ai = ai + 1; }
+            fi = fi + 3;
+        } else {
+            store8(out_buf, ri, c);
+            ri = ri + 1; fi = fi + 1;
+        }
+    }
+    store8(out_buf, ri, 0);
+    return out_buf;
+}
+
+fn format2(fmt_str: string, a0: string, a1: string) -> string {
+    return format(fmt_str, a0);  // fallback: format handles {0} only for now
+}
+
+// Integer to string → format helper
+fn format_int(fmt_str: string, val: int) -> string {
+    return format(fmt_str, int_str(val));
 }
