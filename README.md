@@ -10,6 +10,18 @@
 当前处于 **自举编译器阶段**：编译器自身使用 Core 语言编写，可通过引导编译器（Python）编译为原生 x86-64 二进制。  
 `build/corec` 是自举编译器前端，`build/corearch` 是后端。
 
+### 自举里程碑：corec2 自我编译
+
+**已实现三级自举管线：**
+
+| 阶段 | 编译方式 | 产物 | 状态 |
+|------|---------|------|------|
+| Stage 0 | Python 引导编译器 | `build/corec`（前端）+ `build/corearch`（后端） | ✅ 正常 |
+| Stage 1 | `build/corec` + `build/corearch` 编译自举编译器源码 | `build/corec2`（自编译前端） | ✅ 可运行 |
+| Stage 2 | `build/corec2` + `build/corearch` 再次编译 | `build/corec3`（二次自编译） | ✅ 可运行 |
+
+**当前限制：** corec2 自我编译虽可运行，但速度远慢于 build/corec（约 1000×），主要因为 ELF 后端代码生成尚无条件寄存器分配，所有变量走栈操作。优化方向包括寄存器分配、AST 折叠、公共子表达式消除等。
+
 ### 已实现的核心特性
 
 | 类别 | 特性 | 状态 |
