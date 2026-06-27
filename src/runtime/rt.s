@@ -13,7 +13,7 @@ rt_argv: .quad 0
 .section .bss
 .balign 4096
 heap_start:
-    .space 256 * 1024 * 1024
+    .space 1024 * 1024 * 1024
 heap_end:
 
 .section .data

@@ -129,6 +129,11 @@ fn ast_optimize_body(body: int) {
         if ast_c(body) >= 0 { ast_optimize_body(ast_c(body)); }
         return;
     }
+    // EXPR_GO: optimize spawned body
+    if bk == EXPR_GO {
+        if ast_b(body) >= 0 { ast_optimize_body(ast_b(body)); }
+        return;
+    }
     // EXPR_LOOP, EXPR_WHILE: optimize body
     if bk == EXPR_LOOP || bk == EXPR_WHILE {
         if ast_a(body) >= 0 { ast_optimize_body(ast_a(body)); }

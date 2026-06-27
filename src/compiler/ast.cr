@@ -227,6 +227,7 @@ EXPR_REFTYPE : int = 38;   // a=inner type node, data=mut flag (for &T / &mut T 
 EXPR_GENERIC_APPLY : int = 39; // a=base name idx, b=first arg type node, c=arg count
 EXPR_TUPLE : int = 40;         // a=first elem, b=elem count (tuple literal)
 EXPR_ARG : int = 41;            // a=expr, b=next arg node or -1 (argument linked list)
+EXPR_GO : int = 42;             // go [N] expr — concurrent spawn: a=count (-1=dynamic), b=body expr
 
 // Desugared constructs
 EXPR_TRY : int = 33;      // a=expr being tried (? operator)
@@ -525,6 +526,7 @@ IR_LOAD_ENUM_TAG : int = 23;
 IR_SLICE : int = 24;   // dest=slice_var, s1=arr_var, s2=low_var, src3=high_var — create slice ptr from range
 IR_DEREF : int = 25;   // dest=loaded_val, s1=ref_var — load value through pointer stored in ref_var
 IR_STORE_PTR : int = 26; // dest=val_var, s1=ptr_var, s2=val_var — store value through pointer
+IR_SPAWN : int = 27;     // dest=result_var, s1=fn_name_ni, s2=first_arg, src3=arg_count, type_kind=spawn_count (-1=dynamic)
 
 // Resolution flag for BRANCH/JUMP (stored in type_kind field after label resolution)
 IR_RESOLVED : int = 1;

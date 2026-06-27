@@ -85,7 +85,7 @@ print("  PASS")
 
 # ── Test 2: Compile self-hosted compiler + test lexer source ──
 print("\n=== Test 2: Self-Hosted Compiler Lexer Source ===")
-with open(os.path.join(BASE, 'src/compiler/ast.cr')) as f:
+with open(os.path.join(BASE, 'src/compiler/ast.cr'), encoding='utf-8') as f:
     ast_src = f.read()
 print(f"  ast.cr: {len(ast_src)} chars")
 result = compile_selfhost()
