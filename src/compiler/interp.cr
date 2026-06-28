@@ -120,6 +120,7 @@ fn ir_interpret() -> int {
         }
         // IR_LABEL (21) - noop
 
+        if op == 29 { if d >= 0 { w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8)); } }  // IR_AWAIT
         if op == 4 || op == 27 {  // IR_CALL or IR_SPAWN (sequential fallback)
             fn_ni := s3;
             fn_name := istr_get(fn_ni);

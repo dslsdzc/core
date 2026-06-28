@@ -704,6 +704,14 @@ fn gen_expr(node: int) -> int {
         return -1;  // yield suspends — no return value for caller
     }
 
+    if ast_kind(node) == EXPR_AWAIT {
+        val_node := ast_a(node);
+        val_var := gen_expr(val_node);
+        dest := new_ir_var("await", TI_UNIT);
+        emit(IR_AWAIT, dest, val_var, 0, 0, 0);
+        return dest;
+    }
+
     if ast_kind(node) == EXPR_RETURN {
         if ast_a(node) >= 0 {
             val_var := gen_expr(ast_a(node));

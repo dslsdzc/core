@@ -232,6 +232,7 @@ EXPR_ARG : int = 41;            // a=expr, b=next arg node or -1 (argument linke
 EXPR_GO : int = 42;             // go [N] expr — concurrent spawn: a=count (-1=dynamic), b=body expr
 EXPR_FLOW : int = 43;           // flow fn — a=fn_name_ni, b=param_count, c=first_param, data=body
 EXPR_YIELD : int = 44;          // yield expr — a=value expr
+EXPR_AWAIT : int = 45;          // await expr — a=value expr (future/flow to wait on)
 
 // Desugared constructs
 EXPR_TRY : int = 33;      // a=expr being tried (? operator)
@@ -532,6 +533,7 @@ IR_DEREF : int = 25;   // dest=loaded_val, s1=ref_var — load value through poi
 IR_STORE_PTR : int = 26; // dest=val_var, s1=ptr_var, s2=val_var — store value through pointer
 IR_SPAWN : int = 27;     // dest=result_var, s1=fn_name_ni, s2=first_arg, src3=arg_count, type_kind=spawn_count (-1=dynamic)
 IR_YIELD : int = 28;     // s1=value_var — emit value from flow to consumer channel
+IR_AWAIT : int = 29;     // dest=value_var, s1=future_var — block until future ready, get value
 
 // Resolution flag for BRANCH/JUMP (stored in type_kind field after label resolution)
 IR_RESOLVED : int = 1;

@@ -480,6 +480,11 @@ fn parse_primary() -> int {
         body := parse_expr();
         return alloc_node(EXPR_GO, count, body, 0, 0, 0, 0, tok_ln(t2), tok_cl(t2));
     }
+    if tok_k(t) == T_AWAIT {
+        t2 := advance_tok();
+        val := parse_expr();
+        return alloc_node(EXPR_AWAIT, val, 0, 0, 0, 0, 0, tok_ln(t2), tok_cl(t2));
+    }
     if tok_k(t) == T_MATCH { return parse_match_expr(); }
     if tok_k(t) == T_UNSAFE {
         t2 := advance_tok();

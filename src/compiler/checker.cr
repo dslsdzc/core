@@ -1429,15 +1429,21 @@ fn infer_expr(node: int) -> int {
         // ast_a = spawn count (-1=dynamic, N=static batch), ast_b = body
         body := ast_b(node);
         push_borrow_scope();
-        infer_expr(body);
+        body_ti := infer_expr(body);
         pop_borrow_scope();
-        return TI_UNIT;  // fire-and-forget: caller gets unit
+        return body_ti;  // future of the body's type
     }
 
     if ast_kind(node) == EXPR_YIELD {
         val := ast_a(node);
         if val >= 0 { infer_expr(val); }
         return TI_UNIT;  // yield suspends, returns unit to caller context
+    }
+
+    if ast_kind(node) == EXPR_AWAIT {
+        val := ast_a(node);
+        ti := infer_expr(val);
+        return ti;  // await yields the future's value type
     }
 
     if ast_kind(node) == EXPR_LOOP {

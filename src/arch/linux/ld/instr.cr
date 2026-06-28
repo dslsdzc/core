@@ -805,6 +805,12 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         cp = cp + e2_st(buf, pos+cp, 10, do2);
         return cp;
     }
+    if op == IR_AWAIT && d >= 0 && s1 >= 0 {
+        cp = cp + e2_ld(buf, pos+cp, 10, g2_slot(s1));
+        cp = cp + e2_st(buf, pos+cp, 10, g2_slot(d));
+        return cp;
+    }
+
 
     return 0;
 }
