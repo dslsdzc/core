@@ -16,13 +16,12 @@ fn ir_interpret() -> int {
         fi = fi + 1;
     }
     if main_idx < 0 { return -1; }
-
     node_start := r64(g_df_func_node_start, main_idx * 8);
     node_count := r64(g_df_func_node_count, main_idx * 8);
     if node_start < 0 || node_count <= 0 { return -1; }
 
     // Initialize value store (size = node_count + padding for destinations)
-    need := node_count + 64;
+    need := g_ir_var_count + 64;
     if g_ir_vals_cap < need {
         g_ir_vals = alloc(need * 8);
         g_ir_vals_cap = need;
@@ -120,7 +119,13 @@ fn ir_interpret() -> int {
         }
         // IR_LABEL (21) - noop
 
-        if op == 29 { if d >= 0 { w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8)); } }  // IR_AWAIT
+        if op == 29 { if d >= 0 { 
+            // IR_AWAIT: check if the awaited value is a go-spawned call (stored as func name)
+            aw := r64(g_ir_vals, s1 * 8);
+            // If > 0 and no go value set yet, try to execute as function call
+            // Since go in sequential mode just calls the function directly:
+            w64(g_ir_vals, d * 8, aw);
+        } }  // IR_AWAIT
         if op == 4 || op == 27 {  // IR_CALL or IR_SPAWN (sequential fallback)
             fn_ni := s3;
             fn_name := istr_get(fn_ni);
@@ -182,23 +187,12 @@ fn ir_interpret() -> int {
                         f_start := r64(g_df_func_node_start, cfi * 8);
                         f_count := r64(g_df_func_node_count, cfi * 8);
                         if f_start >= 0 && f_count > 0 {
-                            // Allocate separate value store for the call
-                            need2 := f_count + 64;
-                            old_vals := g_ir_vals;
-                            old_cap := g_ir_vals_cap;
-                            g_ir_vals = alloc(need2 * 8);
-                            g_ir_vals_cap = need2;
-                            zi : ., mut = 0;
-                            loop { if zi >= need2 { break; } w64(g_ir_vals, zi * 8, 0); zi = zi + 1; }
-                            // Set up args (args start at ir_var_start of callee)
-                            ai : ., mut = 0;
-                            loop {
-                                if ai >= s2 { break; }
-                                w64(g_ir_vals, ai * 8, r64(old_vals, (s1 + ai) * 8));
-                                ai = ai + 1;
-                            }
-                            // Build label map for callee
+                            // Save label state
                             old_lc := g_label_count;
+                            old_poses := g_label_poses;
+                            old_poses_cap := g_label_cap;
+                            g_label_poses = alloc(64 * 8); g_label_cap = 64;
+                            // Build label map for callee
                             li2 : ., mut = 0;
                             loop { if li2 >= f_count { break; }
                                 n_op := r64(g_df_nodes, (f_start + li2) * ESZ_DFNODE + OFF_DF_OPCODE);
@@ -209,7 +203,13 @@ fn ir_interpret() -> int {
                                     if n_s1 + 1 > g_label_count { g_label_count = n_s1 + 1; }
                                 }}
                             li2 = li2 + 1; }
-                            // Execute callee graph
+                            // Copy args from caller positions (s1..s1+s2-1) to callee param vars (var_start..var_start+s2-1)
+                            pstart := r64(g_ir_func_var_start, cfi * 8);
+                            pai : ., mut = 0;
+                            loop { if pai >= s2 { break; }
+                                w64(g_ir_vals, (pstart + pai) * 8, r64(g_ir_vals, (s1 + pai) * 8));
+                            pai = pai + 1; }
+                            // Execute callee graph (in global store, callee vars already allocated)
                             ip2 : ., mut = 0;
                             loop {
                                 if ip2 >= f_count { break; }
@@ -247,12 +247,12 @@ fn ir_interpret() -> int {
                                 if op2 == 20 { if t1 >= 0 && t1 < g_label_count { ip2 = r64(g_label_poses, t1 * 8); } }
                                 ip2 = ip2 + 1;
                             }
-                            // Read return value (last IR_RETURN stores at node 0)
+                            // Read return value (stored at slot 0 by IR_RETURN)
                             rval := r64(g_ir_vals, 0 * 8);
-                            // Restore value store
-                            g_ir_vals = old_vals;
-                            g_ir_vals_cap = old_cap;
+                            // Restore label state
                             g_label_count = old_lc;
+                            g_label_poses = old_poses;
+                            g_label_cap = old_poses_cap;
                             w64(g_ir_vals, d * 8, rval);
                         }
                         break;

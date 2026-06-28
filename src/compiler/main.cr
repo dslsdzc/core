@@ -125,7 +125,8 @@ fn run_frontend() -> int {
     check_all();
     if g_diag_count > 0 { print_diagnostics(); return 1; }
     // AST-level constant folding and optimization (O1+)
-    if g_opt_level >= 1 && g_func_count > 0 {
+    /*
+if g_opt_level >= 1 && g_func_count > 0 {
         fi : ., mut = 0;
         loop { if fi >= g_func_count { break; }
             fn_node := fi_ast_node(fi);
@@ -133,7 +134,9 @@ fn run_frontend() -> int {
             ast_optimize_body(body);
         fi = fi + 1; }
     }
-    println("[5/5] frontend done");
+    
+*/
+        println("[5/5] frontend done");
     return 0;
 }
 

@@ -54,7 +54,11 @@ fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, type_
 
     // Add edges for src fields that are IR variables (based on opcode)
     df_connect_srcs(nid, opcode, src1, src2, src3);
-
+    if opcode == 4 || opcode == 27 {
+        print("df_create: op="); print(int_str(opcode));
+        print(" nid="); print(int_str(nid));
+        print(" count="); println(int_str(g_df_node_count));
+    }
     return nid;
 }
 

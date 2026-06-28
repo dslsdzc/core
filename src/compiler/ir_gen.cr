@@ -333,7 +333,7 @@ fn gen_expr(node: int) -> int {
                 spawn_first_arg : ., mut = -1;
                 if s_ac > 0 { spawn_first_arg = r64(s_args, 0 * 8); }
                 dest := new_ir_var("go", TI_UNIT);
-                emit(IR_SPAWN, dest, spawn_first_arg, s_ac, func_ni, -1);
+                emit(IR_CALL, dest, spawn_first_arg, s_ac, func_ni, 0);
                 return dest;
             }
             return gen_expr(body);
