@@ -476,10 +476,7 @@ fn parse_primary() -> int {
             // Not range mode — backtrack: regular go
             g_tok_pos = saved_pos;
         }
-        if tok_k(cur_tok()) == T_INT {
-            count = tok_iv(cur_tok());
-            advance_tok();
-        }
+        // Single: go expr  (no count-based batch)
         body := parse_expr();
         return alloc_node(EXPR_GO, count, body, 0, 0, 0, 0, tok_ln(t2), tok_cl(t2));
     }

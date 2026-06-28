@@ -39,7 +39,7 @@
 | **控制流** | `if` / `else` / `elif` | ✅ |
 | | `while`、`loop` + `break` / `continue` | ✅ |
 | | `for` 区间和数组迭代 | ✅ |
-| **并发** | `go [N] expr` 协程生成（单/批量） | ⚡ 新 |
+| **并发** | `go expr` / `go var start..end expr` 协程生成 | ⚡ 新 |
 | | `await expr` 异步等待 | ⬜ 待实现 |
 | | 协作式 Fiber 调度器（round-robin） | ⚡ 新 |
 | | 缓冲通道 `chan_send` / `chan_recv`（阻塞） | ⚡ 新 |
