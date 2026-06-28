@@ -1426,12 +1426,18 @@ fn infer_expr(node: int) -> int {
     }
 
     if ast_kind(node) == EXPR_GO {
-        // ast_a = spawn count (-1=dynamic, N=static batch), ast_b = body
+        // a=-1, b=body;  c=iter_ni, data=range_node (range mode)
         body := ast_b(node);
         push_borrow_scope();
         body_ti := infer_expr(body);
         pop_borrow_scope();
-        return body_ti;  // future of the body's type
+        range_node := ast_data(node);
+        if range_node < 0 {
+            return body_ti;  // single go: future of body type
+        }
+        // Range go: returns array of body type (size = end - start)
+        rng_count := ast_b(range_node) - ast_a(range_node);
+        return alloc_type(TYP_ARRAY, body_ti, rng_count);
     }
 
     if ast_kind(node) == EXPR_YIELD {
@@ -1442,8 +1448,13 @@ fn infer_expr(node: int) -> int {
 
     if ast_kind(node) == EXPR_AWAIT {
         val := ast_a(node);
-        ti := infer_expr(val);
-        return ti;  // await yields the future's value type
+        val_ti := infer_expr(val);
+        // If awaiting an array of T, return array element type T
+        // If awaiting a single future, return the type directly
+        if get_type_kind(val_ti) == TYP_ARRAY {
+            return get_type_data(val_ti);  // await [Future<T>] → T
+        }
+        return val_ti;
     }
 
     if ast_kind(node) == EXPR_LOOP {

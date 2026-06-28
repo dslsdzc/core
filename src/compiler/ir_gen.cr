@@ -306,37 +306,62 @@ fn gen_expr(node: int) -> int {
 
     // Function call
     if ast_kind(node) == EXPR_GO {
-        spawn_count := ast_a(node);  // -1 = dynamic, N = static batch
         body := ast_b(node);
+        range_node := ast_data(node);  // -1 = single, EXPR_RANGE = range go
+        if range_node < 0 {
+            // Single go: spawn one goroutine
+            if ast_kind(body) == EXPR_CALL {
+                func_node := ast_a(body);
+                first_arg := ast_b(body);
+                arg_count := ast_c(body);
+                func_ni : ., mut = -1;
+                if ast_kind(func_node) == EXPR_IDENT {
+                    func_ni = ast_int_val(func_node);
+                } else if ast_kind(func_node) == EXPR_FIELD {
+                    func_ni = ast_data(body);
+                }
+                s_ac : ., mut = 0;
+                s_args : string, mut; s_args_cap : int, mut;
+                s_args = alloc(32 * 8); s_args_cap = 32;
+                an : ., mut = first_arg;
+                loop {
+                    if an < 0 { break; }
+                    if s_ac >= s_args_cap { nc := s_args_cap * 2; nb := alloc(nc * 8); _dyncpy(s_args, s_args_cap * 8, nb); s_args = nb; s_args_cap = nc; } w64(s_args, s_ac * 8, gen_expr(ast_a(an)));
+                    s_ac = s_ac + 1;
+                    an = ast_b(an);
+                }
+                spawn_first_arg : ., mut = -1;
+                if s_ac > 0 { spawn_first_arg = r64(s_args, 0 * 8); }
+                dest := new_ir_var("go", TI_UNIT);
+                emit(IR_SPAWN, dest, spawn_first_arg, s_ac, func_ni, -1);
+                return dest;
+            }
+            return gen_expr(body);
+        }
+        // Range go: go var start..end expr → collect results into array
+        iter_ni := ast_c(node);  // loop variable name
+        range_count := ast_b(range_node) - ast_a(range_node);
+        if range_count <= 0 { return -1; }
+        // Allocate results array
+        arr_var := new_ir_var("go_arr", TI_UNIT);
+        emit(IR_ALLOC_ARRAY, arr_var, range_count, 0, 0, 0);
+        // Spawn each iteration
         if ast_kind(body) == EXPR_CALL {
             func_node := ast_a(body);
-            first_arg := ast_b(body);
-            arg_count := ast_c(body);
             func_ni : ., mut = -1;
-            if ast_kind(func_node) == EXPR_IDENT {
-                func_ni = ast_int_val(func_node);
-            } else if ast_kind(func_node) == EXPR_FIELD {
-                func_ni = ast_data(body);
-            }
-            // Walk arg chain into buffer
-            s_ac : ., mut = 0;
-            s_args : string, mut; s_args_cap : int, mut;
-            s_args = alloc(32 * 8); s_args_cap = 32;
-            an : ., mut = first_arg;
-            loop {
-                if an < 0 { break; }
-                if s_ac >= s_args_cap { nc := s_args_cap * 2; nb := alloc(nc * 8); _dyncpy(s_args, s_args_cap * 8, nb); s_args = nb; s_args_cap = nc; } w64(s_args, s_ac * 8, gen_expr(ast_a(an)));
-                s_ac = s_ac + 1;
-                an = ast_b(an);
-            }
-            spawn_first_arg : ., mut = -1;
-            if s_ac > 0 { spawn_first_arg = r64(s_args, 0 * 8); }
-            dest := new_ir_var("go", TI_UNIT);
-            emit(IR_SPAWN, dest, spawn_first_arg, s_ac, func_ni, spawn_count);
-            return dest;
+            if ast_kind(func_node) == EXPR_IDENT { func_ni = ast_int_val(func_node); }
+            // Extract the call arg that uses the iter variable
+            fi : ., mut = 0;
+            loop { if fi >= range_count { break; }
+                // For each i, spawn with i as the iter var's value
+                val_var := new_ir_var("go_val", TI_UNIT);
+                emit(IR_CONST, val_var, ast_a(range_node) + fi, 0, 0, TI_INT);
+                dest2 := new_ir_var("go_fut", TI_UNIT);
+                emit(IR_SPAWN, dest2, val_var, 1, func_ni, -1);
+                emit(IR_STORE_INDEX, -1, arr_var, dest2, fi, 0);
+            fi = fi + 1; }
         }
-        // go { block } — fire-and-forget
-        return gen_expr(body);
+        return arr_var;
     }
 
     if ast_kind(node) == EXPR_CALL {

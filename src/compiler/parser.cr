@@ -467,10 +467,9 @@ fn parse_primary() -> int {
                         advance_tok();
                     }
                     body := parse_expr();
-                    // Desugar: go f 1..8 expr → for f in 1..8 { go expr; }
+                    // Range go: keep range info in EXPR_GO for IR gen result collection
                     range_node := alloc_node(EXPR_RANGE, range_start, range_end, 0, 0, 0, 0, tok_ln(t2), tok_cl(t2));
-                    go_body := alloc_node(EXPR_GO, -1, body, 0, 0, 0, 0, tok_ln(t2), tok_cl(t2));
-                    return alloc_node(EXPR_FOR, iter_var_ni, range_node, go_body, 0, 0, 0, tok_ln(t2), tok_cl(t2));
+                    return alloc_node(EXPR_GO, -1, body, iter_var_ni, 0, 0, range_node, tok_ln(t2), tok_cl(t2));
                 }
             }
             // Not range mode — backtrack: regular go
