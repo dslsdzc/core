@@ -1150,8 +1150,8 @@ fn parse_declaration() {
         ni := str_intern(name);
         parse_body(name, ni, tok_ln(t), tok_cl(t));
         if is_flow != 0 {
-            // Mark the function body as a flow (set type_val flag on the fn node)
-            // The fn node was added by parse_body; find and tag it
+            // Flow function — checker detects yield statements in body
+            // to skip return type check (yield != return)
         }
         return;
     }

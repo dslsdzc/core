@@ -92,6 +92,7 @@ fn type_equal(t1: int, t2: int) -> bool {
         if k1 == TYP_NAMED && k2 == TYP_NAMED {
             return get_type_data(t1) == get_type_data(t2);
         }
+
         if k1 == TYP_ARRAY && k2 == TYP_ARRAY {
             if type_equal(get_type_data(t1), get_type_data(t2)) {
                 if get_type_extra(t1) == get_type_extra(t2) {
@@ -139,6 +140,29 @@ fn type_equal(t1: int, t2: int) -> bool {
         }
     }
     return false;
+}
+
+fn scan_for_yield(node: int) -> int {
+    if node < 0 { return 0; }
+    k := ast_kind(node);
+    if k == EXPR_YIELD { return 1; }
+    if k == EXPR_BLOCK {
+        ss := ast_a(node); sc := ast_b(node);
+        i : ., mut = 0;
+        loop { if i >= sc { break; }
+            sn := r64(g_block_stmts, (ss + i) * 8);
+            if scan_for_yield(sn) != 0 { return 1; }
+            i = i + 1; }
+        return 0; }
+    if k == EXPR_LOOP || k == EXPR_WHILE {
+        return scan_for_yield(ast_a(node)); }
+    if k == EXPR_IF {
+        if scan_for_yield(ast_a(node)) != 0 { return 1; }
+        if scan_for_yield(ast_b(node)) != 0 { return 1; }
+        if ast_c(node) >= 0 && scan_for_yield(ast_c(node)) != 0 { return 1; }
+        return 0; }
+    if k == EXPR_FOR { return scan_for_yield(ast_c(node)); }
+    return 0;
 }
 
 // --- Symbol table ---
@@ -1003,7 +1027,10 @@ fn check_func(fi: int) {
         else if return_type == TY_NEVER { ret_ti = TI_NEVER; }
         if !type_equal(body_ti, ret_ti) && body_ti != TI_NEVER {
             // Skip check if return type is generic param (can't verify at declaration)
-            if get_type_kind(ret_ti) != TYP_GENERIC_PARAM {
+            // Skip check for flow functions (yield instead of return)
+            is_flow_fn : ., mut = 0;
+            if body >= 0 && scan_for_yield(body) != 0 { is_flow_fn = 1; }
+            if !is_flow_fn && get_type_kind(ret_ti) != TYP_GENERIC_PARAM {
                 check_error(EC_TF_RETURN, "Function return type mismatch", ast_line(fn_node), ast_col(fn_node));
             }
         }
@@ -1442,8 +1469,10 @@ fn infer_expr(node: int) -> int {
 
     if ast_kind(node) == EXPR_YIELD {
         val := ast_a(node);
-        if val >= 0 { infer_expr(val); }
-        return TI_UNIT;  // yield suspends, returns unit to caller context
+        val_ti : ., mut = TI_UNIT;
+        if val >= 0 { val_ti = infer_expr(val); }
+        // In a flow, the yield type is the flow's result type; return the value type
+        return val_ti;  // yield's type is the yielded value's type
     }
 
     if ast_kind(node) == EXPR_AWAIT {
