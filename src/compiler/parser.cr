@@ -452,7 +452,7 @@ fn parse_primary() -> int {
         range_start : ., mut = -1;
         range_end : ., mut = -1;
         // Check for range syntax: go var start..end expr
-        saved_pos : ., mut = g_tok_pos;
+        saved_pos : ., mut = g_token_pos;
         if tok_k(cur_tok()) == T_IDENT {
             vn := str_intern(tok_lx(cur_tok()));
             advance_tok();
@@ -473,7 +473,7 @@ fn parse_primary() -> int {
                 }
             }
             // Not range mode — backtrack: regular go
-            g_tok_pos = saved_pos;
+            g_token_pos = saved_pos;
         }
         // Single: go expr  (no count-based batch)
         body := parse_expr();

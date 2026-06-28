@@ -15,7 +15,7 @@ g_enums : string, mut;       g_enum_count : int, mut;     g_enum_cap : int, mut;
 g_syms : string, mut;        g_sym_count : int, mut;     g_sym_cap : int, mut;
 g_types : string, mut;       g_type_count : int, mut;     g_type_cap : int, mut;
 g_ast : string, mut;         g_ast_count : int, mut;     g_ast_cap : int, mut;
-g_tokens : string, mut;      g_token_count : int, mut;   g_tok_cap : int, mut;   g_tok_pos : int, mut;
+g_tokens : string, mut;      g_token_count : int, mut;   g_tok_cap : int, mut;
 g_errors : string, mut;      g_error_count : int, mut;   g_err_cap : int, mut;
 g_block_stmts : string, mut; g_block_stmt_count : int, mut; g_block_stmt_cap : int, mut;
 g_ir_vars : string, mut;     g_ir_var_count : int, mut;  g_ir_var_cap : int, mut;

@@ -1453,16 +1453,17 @@ fn infer_expr(node: int) -> int {
     }
 
     if ast_kind(node) == EXPR_GO {
-        // a=-1, b=body;  c=iter_ni, data=range_node (range mode)
+        // a=-1, b=body;  c=iter_ni (>=0 for range mode)
         body := ast_b(node);
         push_borrow_scope();
         body_ti := infer_expr(body);
         pop_borrow_scope();
-        range_node := ast_data(node);
-        if range_node < 0 {
+        rn := ast_data(node);
+        if rn <= 0 {
             return body_ti;  // single go: future of body type
         }
-        // Range go: returns array of body type (size = end - start)
+        // Range go: returns array of body type (size from data=range_node)
+        range_node := ast_data(node);
         rng_count := ast_b(range_node) - ast_a(range_node);
         return alloc_type(TYP_ARRAY, body_ti, rng_count);
     }
