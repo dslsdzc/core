@@ -48,6 +48,12 @@
 
 ## 剩余工作
 
+### go 并发（go + await + flow + yield）
+- 解析器/检查器/IR 生成已全部完成
+- 解释器（run）数据流图不包含 IR_SPAWN/CALL 节点，导致 `go expr` 无法执行
+- ELF 后端（build）ir_gen 有 SIGSEGV（预先存在，与并发无关）
+- 需要修 `dataflow.cr` 的 `df_connect_srcs` 或彻底改用线性 IR 执行
+
 ### 1. corec2 O1 SIGSEGV（高优先级）
 corec2 编译自身时 O1 可能 SIGSEGV。需要在真实自举场景下验证当前状态。
 
