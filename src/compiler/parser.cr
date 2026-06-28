@@ -596,7 +596,7 @@ fn parse_new_var_decl() -> int {
     }
 
     typ : ., mut = -1;
-    is_mut : ., mut = 0;
+    is_mut : ., mut = 0;   is_pub : ., mut = 0;
 
     values : string, mut;    values_cap : int, mut;
     values = alloc(64 * 8); values_cap = 64;
@@ -623,7 +623,7 @@ fn parse_new_var_decl() -> int {
             typ = parse_type();
         }
 
-        // Optional tags
+        // Optional tags (built-in + plugin-extensible)
         if check(T_COMMA) {
             advance_tok();
             loop {
@@ -631,6 +631,15 @@ fn parse_new_var_decl() -> int {
                 tag_t := advance_tok();
                 tag := tok_lx(tag_t);
                 if tag == "mut" { is_mut = 1; }
+                else if tag == "pub" { is_pub = 1; }
+                else {
+                    tni := str_intern(tag);
+                    ei := find_plugin_entry(g_plugin_tags, g_plugin_tag_count, tni, -1);
+                    if ei >= 0 {
+                        pd := r64(g_plugin_tags, ei*24+16);
+                        if pd != 0 { is_mut = 1; }
+                    }
+                }
                 if !check(T_COMMA) { break; }
                 advance_tok();
             }

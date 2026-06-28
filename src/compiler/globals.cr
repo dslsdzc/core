@@ -15,7 +15,7 @@ g_enums : string, mut;       g_enum_count : int, mut;     g_enum_cap : int, mut;
 g_syms : string, mut;        g_sym_count : int, mut;     g_sym_cap : int, mut;
 g_types : string, mut;       g_type_count : int, mut;     g_type_cap : int, mut;
 g_ast : string, mut;         g_ast_count : int, mut;     g_ast_cap : int, mut;
-g_tokens : string, mut;      g_token_count : int, mut;   g_tok_cap : int, mut;
+g_tokens : string, mut;      g_token_count : int, mut;   g_tok_cap : int, mut;   g_tok_pos : int, mut;
 g_errors : string, mut;      g_error_count : int, mut;   g_err_cap : int, mut;
 g_block_stmts : string, mut; g_block_stmt_count : int, mut; g_block_stmt_cap : int, mut;
 g_ir_vars : string, mut;     g_ir_var_count : int, mut;  g_ir_var_cap : int, mut;
@@ -108,3 +108,50 @@ g_x86_alloc_patch_pos : string, mut;    g_x86_alloc_patch_cap : int, mut; g_x86_
 g_opt_level : int, mut;     // 0=none, 1=regalloc, 2=stackshare, 3=cse
 g_opt_meta : string, mut;   // metadata buffer for .ccr v3+
 g_opt_meta_count : int, mut;
+
+// Plugin extension registry: tags and return types from .so/stdlib plugins
+// Each entry: 24 bytes = [ns_ni, name_ni, data_ni]
+g_plugin_tags : string, mut;   g_plugin_tag_count : int, mut;   g_plugin_tag_cap : int, mut;
+g_plugin_rtypes : string, mut; g_plugin_rtype_count : int, mut; g_plugin_rtype_cap : int, mut;
+
+fn grow_plugin_tags(needed: int) {
+    if needed < g_plugin_tag_cap { return; }
+    ncap : ., mut = g_plugin_tag_cap * 2; if ncap < 8 { ncap = 8; } if ncap < needed { ncap = needed + 8; }
+    nb := alloc(ncap * 24); _dyncpy(g_plugin_tags, g_plugin_tag_cap * 24, nb); g_plugin_tags = nb; g_plugin_tag_cap = ncap; }
+
+fn grow_plugin_rtypes(needed: int) {
+    if needed < g_plugin_rtype_cap { return; }
+    ncap : ., mut = g_plugin_rtype_cap * 2; if ncap < 8 { ncap = 8; } if ncap < needed { ncap = needed + 8; }
+    nb := alloc(ncap * 24); _dyncpy(g_plugin_rtypes, g_plugin_rtype_cap * 24, nb); g_plugin_rtypes = nb; g_plugin_rtype_cap = ncap; }
+
+fn find_plugin_entry(table: string, count: int, name_ni: int, ns_ni: int) -> int {
+    if count <= 0 { return -1; }
+    // Linear scan: match (ns, name) pair
+    i : ., mut = 0;
+    loop { if i >= count { break; }
+        if r64(table, i*24+8) == name_ni && r64(table, i*24) == ns_ni { return i; }
+        if r64(table, i*24+8) == name_ni && ns_ni < 0 && r64(table, i*24) < 0 { return i; }
+    i = i + 1; }
+    return -1; }
+
+fn register_plugin_tag(ns_ni: int, name_ni: int, data: int) -> int {
+    // Conflict: same (ns, name) can't be registered twice
+    if find_plugin_entry(g_plugin_tags, g_plugin_tag_count, name_ni, ns_ni) >= 0 { return -2; }
+    // Plugin with namespace can't shadow an unqualified entry
+    if ns_ni >= 0 && find_plugin_entry(g_plugin_tags, g_plugin_tag_count, name_ni, -1) >= 0 { return -3; }
+    grow_plugin_tags(g_plugin_tag_count + 1);
+    w64(g_plugin_tags, g_plugin_tag_count*24, ns_ni);
+    w64(g_plugin_tags, g_plugin_tag_count*24+8, name_ni);
+    w64(g_plugin_tags, g_plugin_tag_count*24+16, data);
+    g_plugin_tag_count = g_plugin_tag_count + 1;
+    return 0; }
+
+fn register_plugin_rtype(ns_ni: int, name_ni: int, data: int) -> int {
+    if find_plugin_entry(g_plugin_rtypes, g_plugin_rtype_count, name_ni, ns_ni) >= 0 { return -2; }
+    if ns_ni >= 0 && find_plugin_entry(g_plugin_rtypes, g_plugin_rtype_count, name_ni, -1) >= 0 { return -3; }
+    grow_plugin_rtypes(g_plugin_rtype_count + 1);
+    w64(g_plugin_rtypes, g_plugin_rtype_count*24, ns_ni);
+    w64(g_plugin_rtypes, g_plugin_rtype_count*24+8, name_ni);
+    w64(g_plugin_rtypes, g_plugin_rtype_count*24+16, data);
+    g_plugin_rtype_count = g_plugin_rtype_count + 1;
+    return 0; }
