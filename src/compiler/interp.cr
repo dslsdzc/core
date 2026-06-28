@@ -173,6 +173,92 @@ fn ir_interpret() -> int {
                 }
                 if d >= 0 { w64(g_ir_vals, d * 8, 0); }
             }
+            // Regular function call (not a builtin)
+            if d >= 0 {
+                cfi : ., mut = 0;
+                loop {
+                    if cfi >= g_ir_func_count { break; }
+                    if r64(g_ir_func_name_idx, cfi * 8) == fn_ni {
+                        f_start := r64(g_df_func_node_start, cfi * 8);
+                        f_count := r64(g_df_func_node_count, cfi * 8);
+                        if f_start >= 0 && f_count > 0 {
+                            // Allocate separate value store for the call
+                            need2 := f_count + 64;
+                            old_vals := g_ir_vals;
+                            old_cap := g_ir_vals_cap;
+                            g_ir_vals = alloc(need2 * 8);
+                            g_ir_vals_cap = need2;
+                            zi : ., mut = 0;
+                            loop { if zi >= need2 { break; } w64(g_ir_vals, zi * 8, 0); zi = zi + 1; }
+                            // Set up args (args start at ir_var_start of callee)
+                            ai : ., mut = 0;
+                            loop {
+                                if ai >= s2 { break; }
+                                w64(g_ir_vals, ai * 8, r64(old_vals, (s1 + ai) * 8));
+                                ai = ai + 1;
+                            }
+                            // Build label map for callee
+                            old_lc := g_label_count;
+                            li2 : ., mut = 0;
+                            loop { if li2 >= f_count { break; }
+                                n_op := r64(g_df_nodes, (f_start + li2) * ESZ_DFNODE + OFF_DF_OPCODE);
+                                n_s1 := r64(g_df_nodes, (f_start + li2) * ESZ_DFNODE + OFF_DF_S1);
+                                if n_op == 21 { if n_s1 >= 0 {
+                                    grow_label_poses(n_s1 + 1);
+                                    w64(g_label_poses, n_s1 * 8, li2);
+                                    if n_s1 + 1 > g_label_count { g_label_count = n_s1 + 1; }
+                                }}
+                            li2 = li2 + 1; }
+                            // Execute callee graph
+                            ip2 : ., mut = 0;
+                            loop {
+                                if ip2 >= f_count { break; }
+                                // Inline node execution for callee
+                                op2 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_OPCODE);
+                                d2 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_DEST);
+                                t1 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S1);
+                                t2 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S2);
+                                t3 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S3);
+                                if op2 == 1 && d2 >= 0 { w64(g_ir_vals, d2 * 8, t1); }
+                                if op2 == 2 && t1 >= 0 && t2 >= 0 {
+                                    lv2 := r64(g_ir_vals, t1 * 8); rv2 := r64(g_ir_vals, t2 * 8);
+                                    if t3 == 1  { w64(g_ir_vals, d2 * 8, lv2 + rv2); }
+                                    else if t3 == 2  { w64(g_ir_vals, d2 * 8, lv2 - rv2); }
+                                    else if t3 == 3  { w64(g_ir_vals, d2 * 8, lv2 * rv2); }
+                                    else if t3 == 4  { w64(g_ir_vals, d2 * 8, lv2 / rv2); }
+                                    else if t3 == 5  { w64(g_ir_vals, d2 * 8, lv2 % rv2); }
+                                    else if t3 == 6  { if lv2 == rv2 { w64(g_ir_vals, d2 * 8, 1); } else { w64(g_ir_vals, d2 * 8, 0); } }
+                                    else if t3 == 7  { if lv2 != rv2 { w64(g_ir_vals, d2 * 8, 1); } else { w64(g_ir_vals, d2 * 8, 0); } }
+                                    else if t3 == 8  { if lv2 < rv2  { w64(g_ir_vals, d2 * 8, 1); } else { w64(g_ir_vals, d2 * 8, 0); } }
+                                    else if t3 == 9  { if lv2 > rv2  { w64(g_ir_vals, d2 * 8, 1); } else { w64(g_ir_vals, d2 * 8, 0); } }
+                                    else if t3 == 10 { if lv2 <= rv2 { w64(g_ir_vals, d2 * 8, 1); } else { w64(g_ir_vals, d2 * 8, 0); } }
+                                    else if t3 == 11 { if lv2 >= rv2 { w64(g_ir_vals, d2 * 8, 1); } else { w64(g_ir_vals, d2 * 8, 0); } }
+                                    else if t3 == 12 { if lv2 != 0 && rv2 != 0 { w64(g_ir_vals, d2 * 8, 1); } else { w64(g_ir_vals, d2 * 8, 0); } }
+                                    else if t3 == 13 { if lv2 != 0 || rv2 != 0 { w64(g_ir_vals, d2 * 8, 1); } else { w64(g_ir_vals, d2 * 8, 0); } } }
+                                if op2 == 3 && t1 >= 0 {
+                                    ov2 := r64(g_ir_vals, t1 * 8);
+                                    if t3 == 1 { w64(g_ir_vals, d2 * 8, -ov2); }
+                                    else if t3 == 2 { if ov2 == 0 { w64(g_ir_vals, d2 * 8, 1); } else { w64(g_ir_vals, d2 * 8, 0); } } }
+                                if op2 == 5 { if t1 >= 0 { w64(g_ir_vals, 0, r64(g_ir_vals, t1 * 8)); } }  // IR_RETURN
+                                if op2 == 19 && t1 >= 0 {
+                                    cv2 := r64(g_ir_vals, t1 * 8);
+                                    if cv2 != 0 { if t2 >= 0 && t2 < g_label_count { ip2 = r64(g_label_poses, t2 * 8); } }
+                                    else { if t3 >= 0 && t3 < g_label_count { ip2 = r64(g_label_poses, t3 * 8); } } }
+                                if op2 == 20 { if t1 >= 0 && t1 < g_label_count { ip2 = r64(g_label_poses, t1 * 8); } }
+                                ip2 = ip2 + 1;
+                            }
+                            // Read return value (last IR_RETURN stores at node 0)
+                            rval := r64(g_ir_vals, 0 * 8);
+                            // Restore value store
+                            g_ir_vals = old_vals;
+                            g_ir_vals_cap = old_cap;
+                            g_label_count = old_lc;
+                            w64(g_ir_vals, d * 8, rval);
+                        }
+                        break;
+                    }
+                cfi = cfi + 1; }
+            }
         }
 
         ip = ip + 1;
