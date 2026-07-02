@@ -48,6 +48,12 @@
 
 ## 剩余工作
 
+### 内置版本控制（编译器全自动管理，代替 git/jj）
+- `build` 命令自动快照源码 AST 快照（非行级 diff，AST 级）
+- `--undo` 回滚、`log` 查看历史、`push` 推远程
+- 编译器理解 AST，可以做语义级 diff/merge（例如"仅重命名变量"不冲突）
+- 设计待定，自举完成后优先考虑
+
 ### go 并发（go + await + flow + yield）
 - 解析器/检查器/IR 生成已全部完成
 - 解释器（run）数据流图不包含 IR_SPAWN/CALL 节点，导致 `go expr` 无法执行
