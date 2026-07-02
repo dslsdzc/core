@@ -209,7 +209,8 @@ fn alloc_registers() {
             if ii >= ic { break; }
             inst := ist + ii;
             op := iri_op(inst); d := iri_dest(inst); s1 := iri_s1(inst); s2 := iri_s2(inst);
-            vars : string, mut;    vars_cap : int, mut; vc2 : ., mut = 0;
+            vc2 : ., mut = 0;
+            vars : string, mut = alloc(64 * 8);    vars_cap : int, mut = 64;
             if vars_cap == 0 { vars = alloc(64); vars_cap = 8; }
             if d >= vs && d < vs + vc { if vc2 < vars_cap { w64(vars, vc2 * 8, d - vs); vc2 = vc2 + 1; } }
             if s1 >= vs && s1 < vs + vc { if vc2 < vars_cap { w64(vars, vc2 * 8, s1 - vs); vc2 = vc2 + 1; } }
@@ -340,7 +341,8 @@ fn pass_stack_share() {
             if ii >= ic { break; }
             inst := ist + ii;
             d := iri_dest(inst); s1 := iri_s1(inst); s2 := iri_s2(inst);
-            va : string, mut;    va_cap : int, mut; vn : ., mut = 0;
+            vn : ., mut = 0;
+            va : string, mut = alloc(24);    va_cap : int, mut = 3;
             if va_cap == 0 { va = alloc(24); va_cap = 3; }
             if d >= vs && d < vs+vc { if vn < va_cap { w64(va, vn * 8, d-vs); vn=vn+1; } }
             if s1 >= vs && s1 < vs+vc { if vn < va_cap { w64(va, vn * 8, s1-vs); vn=vn+1; } }
