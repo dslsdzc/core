@@ -233,8 +233,13 @@ fn gen_expr(node: int) -> int {
             rt := irv_type(right_var);
             if lt == TI_STR || rt == TI_STR {
                 concat_ni := str_intern("concat");
+                // Pack both args into consecutive vars so ELF backend finds them
+                packed0 := new_ir_var("_cat0", lt);
+                packed1 := new_ir_var("_cat1", rt);
+                emit(IR_STORE, -1, packed0, left_var, 0, 0);
+                emit(IR_STORE, -1, packed1, right_var, 0, 0);
                 v := new_ir_var("str", TI_STR);
-                emit(IR_CALL, v, left_var, right_var, concat_ni, TI_STR);
+                emit(IR_CALL, v, packed0, 2, concat_ni, TI_STR);
                 return v;
             }
         }
