@@ -60,6 +60,13 @@
 - ELF 后端（build）ir_gen 有 SIGSEGV（预先存在，与并发无关）
 - 需要修 `dataflow.cr` 的 `df_connect_srcs` 或彻底改用线性 IR 执行
 
+### ELF 后端运行时崩溃
+- `build` 命令生成 ELF 二进制但运行时 SIGSEGV
+- `_start` 的 `call main` 定位已修复（基于名称查找 g_x86_func_offsets）
+- `main` 内部的 `call double` 位置偏移读取错误，rel32 指向随机地址
+- 疑似 `mcount` 偏移计算或指令编码阶段的问题
+- 需要系统性的 ELF 后端调试
+
 ### 1. corec2 O1 SIGSEGV（高优先级）
 corec2 编译自身时 O1 可能 SIGSEGV。需要在真实自举场景下验证当前状态。
 
