@@ -103,6 +103,7 @@ ELF 布局正确（segment VA、rip_patch、BSS 全一致），但程序在 `cli
 ## 架构规划
 
 ### Arena 内存模型（统一内存管理方案）
+设计文档见 [`docs/memory-model.md`](docs/memory-model.md)。
 将堆内存划分为与数据流子图绑定的独立 Arena。分配线性指针碰撞（ptr += size），
 回收直接将整个 Arena 游标重置回起始地址（格式化清空），所有权系统静态保证区域内
 无活跃引用逃逸。长期运行服务内存占用上限由并发区域数量决定，天然无 GC 停顿。
