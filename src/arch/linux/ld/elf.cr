@@ -367,12 +367,13 @@ fn elf_gen(buf: string) -> int {
         fsz := r64(g_x86_func_code_sz, fi * 8);
         g_x86_emit_stack_size = vc2 * 8;
         total_code = total_code + sz_push_rbp() + sz_mov_rbp_rsp();
-        if g_opt_level >= 1 { total_code = total_code + 9; }  // push rbx, r12-r15
+        if g_opt_level >= 1 { total_code = total_code + 18; }  // push rbx,r12-r15(9) + pop r15-r12,rbx(9)
         ss_dry := g_x86_emit_stack_size;
         total_code = total_code + sz_sub_rsp(ss_dry);
         total_code = total_code + pc2 * sz_save_param();
         total_code = total_code + fsz;
         total_code = total_code + sz_add_rsp(ss_dry) + sz_pop_rbp() + sz_ret();
+        if g_opt_level >= 1 { total_code = total_code + 9; }  // pop r15,r14,r13,r12,rbx
     fi = fi + 1; }
 
     rd_sz := g2_rodata_sz();
@@ -463,7 +464,7 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         loop { if li2 >= g_label_count { break; } grow_label_poses(li2 + 1); w64(g_label_poses, li2*8, -1); li2 = li2 + 1; }
         g_pending_count = 0;
 
-        // Save callee-saved registers (pushed before rbp setup → at [rbp+8..48], no overlap with locals)
+        // Save callee-saved registers (pushed before rbp setup → at [rbp+8..48])
         if g_opt_level >= 1 {
             w8(buf, cp, 83); cp = cp + 1;  // push rbx
             w8(buf, cp, 65); w8(buf, cp+1, 84); cp = cp + 2;  // push r12
@@ -485,13 +486,13 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         }
         // save register params to stack
         pi := 0; loop { if pi >= pc { break; } if pi >= 6 { break; }
-            po := g2_slot(vs + pi);
-            if pi == 0 { cp = cp + e2_st(buf, cp, 7, po); }
-            if pi == 1 { w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 117); w8(buf, cp+3, po); cp = cp + 4; }
-            if pi == 2 { w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 85); w8(buf, cp+3, po); cp = cp + 4; }
-            if pi == 3 { w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 77); w8(buf, cp+3, po); cp = cp + 4; }
-            if pi == 4 { w8(buf, cp, 76); w8(buf, cp+1, 137); w8(buf, cp+2, 69); w8(buf, cp+3, po); cp = cp + 4; }
-            if pi == 5 { w8(buf, cp, 76); w8(buf, cp+1, 137); w8(buf, cp+2, 77); w8(buf, cp+3, po); cp = cp + 4; }
+            po2 := -(vs + pi + 1 - g_current_func_var_start) * 8;  // force stack slot, ignore reg alloc
+            if pi == 0 { cp = cp + e2_st(buf, cp, 7, po2); }
+            if pi == 1 { w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 117); w8(buf, cp+3, po2); cp = cp + 4; }
+            if pi == 2 { w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 85); w8(buf, cp+3, po2); cp = cp + 4; }
+            if pi == 3 { w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 77); w8(buf, cp+3, po2); cp = cp + 4; }
+            if pi == 4 { w8(buf, cp, 76); w8(buf, cp+1, 137); w8(buf, cp+2, 69); w8(buf, cp+3, po2); cp = cp + 4; }
+            if pi == 5 { w8(buf, cp, 76); w8(buf, cp+1, 137); w8(buf, cp+2, 77); w8(buf, cp+3, po2); cp = cp + 4; }
         pi = pi + 1; }
 
         // Load register-allocated parameters from stack to callee-saved regs
@@ -500,12 +501,12 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
             loop { if pi2 >= pc || pi2 >= 6 { break; }
                 pri := get_reg_for_var(vs + pi2);
                 if pri >= 0 {
-                    pso := g2_slot(vs + pi2);
+                    pso2 := -(vs + pi2 + 1 - g_current_func_var_start) * 8;  // force stack slot
                     // mov reg, [rbp+offset] — load from stack to allocated register
                     cp = cp + emit_rex(buf, cp, 1, pri/8, 0, 0);
                     e2_w8(buf, cp, 139); cp = cp + 1;  // 0x8B MOV r64, r/m64
                     cp = cp + emit_modrm(buf, cp, 1, pri%8, 5);  // [rbp+disp8]
-                    e2_w8(buf, cp, pso); cp = cp + 1;
+                    e2_w8(buf, cp, pso2); cp = cp + 1;
                 }
             pi2 = pi2 + 1; }
         }
@@ -550,13 +551,16 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
             }
         }
         if g_opt_level >= 1 {
+            // Pops in REVERSE order: rbp, r15, r14, r13, r12, rbx
+            w8(buf, cp, 93); cp = cp + 1;  // pop rbp
             w8(buf, cp, 65); w8(buf, cp+1, 95); cp = cp + 2;  // pop r15
             w8(buf, cp, 65); w8(buf, cp+1, 94); cp = cp + 2;  // pop r14
             w8(buf, cp, 65); w8(buf, cp+1, 93); cp = cp + 2;  // pop r13
             w8(buf, cp, 65); w8(buf, cp+1, 92); cp = cp + 2;  // pop r12
             w8(buf, cp, 91); cp = cp + 1;  // pop rbx
+        } else {
+            w8(buf, cp, 93); cp = cp + 1;  // pop rbp
         }
-        w8(buf, cp, 93); cp = cp + 1;  // pop rbp
         w8(buf, cp, 195); cp = cp + 1;  // ret
         fi = fi + 1; }
 
