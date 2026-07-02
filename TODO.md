@@ -2,7 +2,13 @@
 
 ## ✅ 已完成
 
-### ✅ 本次 Session（2025-06-27）：ELF 后端重构 + 寄存器分配
+### ✅ 本次 Session（2025-07-02）：Stage 1 修复
+| 改进 | 文件 | 说明 |
+|------|------|------|
+| `g_global_let_count` 不再重置 | `parser.cr` | 保留 count 使 `ir_gen_globals()` 注册所有全局变量 |
+| `e2_load_var` 全局加载 | `instr.cr` | `mov r, [r11]` 替代 `mov r, r11`（传值而非地址） |
+| `io.cr` 自动导入 | `_import.cr` | 加 `import io` 使 `print` 等函数可用 |
+| 3 个 call_patch 调试打印移除 | `elf.cr` | 清理
 | 改进 | 文件 | 说明 |
 |------|------|------|
 | 指令编码去魔数化 | `instr.cr` | 新增 `emit_rex`/`emit_modrm`/`emit_sib` 原语，所有编码全计算 |
@@ -66,8 +72,20 @@
 - 需要排查寄存器分配元数据与 ELF 后端的交互问题
 - `call_patch` 双通路（`g_x86_func_cp` + `g_x86_func_offsets`）工作正常
 
-### 1. corec2 O1 SIGSEGV（高优先级）
-corec2 编译自身时 O1 可能 SIGSEGV。需要在真实自举场景下验证当前状态。
+### 1. corec2 O0 仍崩溃（自举阻塞项）
+corec2 运行任何命令（除 `--help` 外）都会立即 SIGSEGV（`si_addr=-8`）。
+ELF 布局正确（segment VA、rip_patch、BSS 全一致），但程序在 `cli_arg(0)` 或
+`str_len(g_source)` 处崩溃。
+
+**已排除的原因：**
+- `g_global_let_count` 重置 → `gv_argv=-1` → `get_arg` rip_patch 未应用 ✓（已修复）
+- `e2_load_var` 全局变量加载传地址而非值 ✓（已修复）
+- `_import.cr` 缺少 `io` → `print` 未定义 ✓（已修复）
+- ELF/BSS 布局不一致 （PHDR vaddr vs rip_patch 目标一致） ✓
+- `_start` argc/argv 保存或 `get_arg` 读取地址不一致 ✓
+
+**需要进一步排查：** `cli_arg(0)` 返回的字符串指针在 `g_source` 全局变量 STORE/LOAD 过程中
+是否被损坏，或 heap 初始化是否有隐藏 bug。
 
 ### 2. corec2 前端性能（~1000x 慢于 build/corec）
 10 行程序 build/corec 0.02s -> corec2 8.0s。ELF 后端全栈操作无寄存器分配是直接原因。

@@ -269,7 +269,12 @@ fn e2_load_var(buf: string, pos: int, reg: int, var_idx: int) -> int {
         w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, var_idx);
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
         sz := e2_lrb(buf, pos, 0);
-        sz = sz + e2_ld(buf, pos+sz, reg, e2_rslot(11));
+        // mov reg, [r11] — memory load (NOT register copy; e2_ld + e2_rslot would misinterpret)
+        cp2 := pos + sz;
+        cp2 = cp2 + emit_rex(buf, cp2, 1, reg/8, 0, 11/8);
+        e2_w8(buf, cp2, 139); cp2 = cp2 + 1;  // 0x8B MOV r, r/m
+        cp2 = cp2 + emit_modrm(buf, cp2, 0, reg%8, 11%8);
+        sz = cp2 - pos;
         return sz;
     }
     return e2_ld(buf, pos, reg, g2_slot(var_idx));

@@ -1485,7 +1485,7 @@ fn parse_all() {
     g_type_alias_count = 0; g_type_alias_cap = 0;
     g_method_count = 0; g_method_cap = 0;
     g_loop_depth = 0; g_loop_stack_cap = 0;
-    g_global_let_count = 0; g_global_lets_cap = 0;
+    // Keep g_global_let_count for ir_gen_globals
     g_extra_let_count = 0;
     g_block_stmt_count = 0;
     g_error_count = 0;
