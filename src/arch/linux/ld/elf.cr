@@ -578,13 +578,16 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
     rodata_base_va := (TEXT_BASE + cp + 144 + 4095) / 4096 * 4096;
     bss_va := (rodata_base_va + rodata_sz + 4095) / 4096 * 4096;
 
-    global_slots : ., mut = 0;
+    max_gv : ., mut = 0;
     gsi : ., mut = 0;
     loop { if gsi >= g_ir_global_count { break; }
         gvv := r64(g_ir_globals, gsi * 16 + 8);
-        if gvv >= 0 { global_slots = global_slots + 1; }
+        if gvv >= 0 && gvv > max_gv { max_gv = gvv; }
     gsi = gsi + 1; }
-    alloc_sz := emit_alloc_body(buf, cp, bss_va, global_slots * 8);
+    // globals_size = (max_var_idx + 1) * 8 ensures BSS covers all globals
+    globals_size : ., mut = (max_gv + 1) * 8;
+    if globals_size < 256 { globals_size = 256; }
+    alloc_sz := emit_alloc_body(buf, cp, bss_va, globals_size);
     alloc_start := cp;
     cp = cp + alloc_sz;
 
