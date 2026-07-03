@@ -2,13 +2,15 @@
 
 ## ✅ 已完成
 
-### ✅ 本次 Session（2025-07-02）：Stage 1 修复
+### ✅ 本次 Session（2025-07-02/03）：5 个自举阻塞 bug 修复
 | 改进 | 文件 | 说明 |
 |------|------|------|
-| `g_global_let_count` 不再重置 | `parser.cr` | 保留 count 使 `ir_gen_globals()` 注册所有全局变量 |
+| `g_global_let_count` 不再重置 | `parser.cr` | 保留 count 使 `ir_gen_globals()` 注册所有 752 个全局变量 |
 | `e2_load_var` 全局加载 | `instr.cr` | `mov r, [r11]` 替代 `mov r, r11`（传值而非地址） |
 | `io.cr` 自动导入 | `_import.cr` | 加 `import io` 使 `print` 等函数可用 |
-| 3 个 call_patch 调试打印移除 | `elf.cr` | 清理
+| `concat` IR_CALL arg count | `ir_gen.cr` | s2=right_var → s2=2，参数显式打包 |
+| globals_size 用 max var_idx | `elf.cr` | 防止 heap 覆盖 BSS 全局变量 |
+| Arena 内存模型文档 | `docs/memory-model.md` | 设计文档
 | 改进 | 文件 | 说明 |
 |------|------|------|
 | 指令编码去魔数化 | `instr.cr` | 新增 `emit_rex`/`emit_modrm`/`emit_sib` 原语，所有编码全计算 |
@@ -72,20 +74,26 @@
 - 需要排查寄存器分配元数据与 ELF 后端的交互问题
 - `call_patch` 双通路（`g_x86_func_cp` + `g_x86_func_offsets`）工作正常
 
-### 1. corec2 O0 仍崩溃（自举阻塞项）
-corec2 运行任何命令（除 `--help` 外）都会立即 SIGSEGV（`si_addr=-8`）。
-ELF 布局正确（segment VA、rip_patch、BSS 全一致），但程序在 `cli_arg(0)` 或
-`str_len(g_source)` 处崩溃。
+### 1. corec2 tokenizer 循环不退出（自举阻塞项，待接手）
+corec2 `run '1+1'` 卡在 tokenizer：30 个字符全处理完毕、g_pos 正确递增到 30、g_source_len=30，
+但 `loop { if g_pos >= g_source_len { break; } }` 的 `break` 不触发（循环尾的 `IR_JUMP header_lbl` 缺失）。
 
-**已排除的原因：**
-- `g_global_let_count` 重置 → `gv_argv=-1` → `get_arg` rip_patch 未应用 ✓（已修复）
-- `e2_load_var` 全局变量加载传地址而非值 ✓（已修复）
-- `_import.cr` 缺少 `io` → `print` 未定义 ✓（已修复）
-- ELF/BSS 布局不一致 （PHDR vaddr vs rip_patch 目标一致） ✓
-- `_start` argc/argv 保存或 `get_arg` 读取地址不一致 ✓
+**已修复（5 个 bug，全部推送）：**
+- `g_global_let_count` 重置 → 752 个全局变量全注册 ✓
+- `e2_load_var` 传地址而非值 ✓
+- `_import.cr` 缺 `io` → print 未定义 ✓
+- `concat` IR_CALL arg count 错 ✓
+- `globals_size` 太小 → heap 覆盖 BSS ✓
 
-**需要进一步排查：** `cli_arg(0)` 返回的字符串指针在 `g_source` 全局变量 STORE/LOAD 过程中
-是否被损坏，或 heap 初始化是否有隐藏 bug。
+**未解决核心问题（需 GDB 单步追踪）：**
+tokenizer 循环尾的 `IR_JUMP header_lbl`（回跳）没有被执行。
+可能根因：`lower_to_ccr()` 重建 `g_ir_instrs` 后 `g_ir_func_instr_count` 未更新，
+导致 ELF 后端的 Phase 2 和 Phase 3 使用的函数指令范围不一致，漏掉了循环尾的跳转指令。
+
+**调试方法：**
+1. `gdb -ex "break emit_instr" --args ./build/corec2 run '1+1'`
+2. 在 `emit_instr` 里查 tokenizer 函数最后几条指令是否有 `IR_JUMP (opcode=20)`
+3. 如果没有 → 问题在 IR 生成或 `lower_to_ccr()` 阶段
 
 ### 2. corec2 前端性能（~1000x 慢于 build/corec）
 10 行程序 build/corec 0.02s -> corec2 8.0s。ELF 后端全栈操作无寄存器分配是直接原因。
