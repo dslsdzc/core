@@ -485,8 +485,8 @@ fn optimize_all() {
         fi = fi + 1;
     }
     pass_cse();
-    alloc_registers();
     if g_opt_level >= 2 {
+        alloc_registers();  // TODO: fix g_opt_meta corruption in ELF backend
         pass_stack_share();
     }
 }
