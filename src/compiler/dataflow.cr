@@ -211,6 +211,18 @@ fn lower_to_ccr() {
         g_ir_instr_count = idx + 1;
         ni = ni + 1;
     }
+
+    // Rebuilt g_ir_instrs means g_ir_func_instr_start/count are stale.
+    // Node i → instruction i, so df boundaries = ir boundaries.
+    fi : ., mut = 0;
+    loop {
+        if fi >= g_ir_func_count { break; }
+        w64(g_ir_func_instr_start, fi * 8,
+            r64(g_df_func_node_start, fi * 8));
+        w64(g_ir_func_instr_count, fi * 8,
+            r64(g_df_func_node_count, fi * 8));
+        fi = fi + 1;
+    }
 }
 
 // --- Mark function boundary in graph ---
