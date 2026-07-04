@@ -185,7 +185,7 @@ fn elf2_hdr(buf: string, code_end: int, total_sz: int) {
     w16(buf, E_TYPE, 2);    // ET_EXEC
     w16(buf, E_MACH, 62);   // EM_X86_64
     w32(buf, E_VERSION, 1); // EV_CURRENT
-    w64(buf, E_ENTRY, 0x400000 + code_start);  // entry = text_base + code_start
+    w64(buf, E_ENTRY, 0x4000e8);  // entry = 0x400000 + 232 (hdr_total)
     w64(buf, E_PHOFF, EHDR_SIZE);              // phdrs start right after ehdr
     w16(buf, E_EHSIZE, EHDR_SIZE);             // sizeof(Elf64_Ehdr) = 64
     w16(buf, E_PHENTSIZE, PHDR_SIZE);          // sizeof(Elf64_Phdr) = 56
@@ -438,7 +438,7 @@ fn elf_gen(buf: string) -> int {
     g_x86_func_off_count = g_x86_func_off_count + 1;
     total_code = total_code + sched_tramp_sz(4);
 
-    hdr_total : ., mut = 176;  // cp starts here (original value, avoids local var bug)
+    hdr_total : ., mut = 232;  // EHDR_SIZE + 3*PHDR_SIZE = 64+168
     g_code_start = 4096;       // separate global for ELF post-patching
     rodata_base := total_code;
     g_x86_rodata_base = hdr_total + rodata_base;
@@ -762,9 +762,9 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
     // PHDR[0]: change to RX (_start stub needs execute permission)
     w32(buf, 68, 5);
     patch_phdr(buf, 1, g_code_start, 4194304+g_code_start, total_sz - g_code_start);
-    w64(buf, 24, 4194304 + 176);  // entry = _start position
+    w64(buf, 24, 4194304 + hdr_total);  // entry = _start position
 
-    g_asm_code_size = cp;
-    return cp;
+    g_asm_code_size = total_sz;
+    return total_sz;
 }
 
