@@ -107,7 +107,7 @@ fn sched_tramp_sz(n: int) -> int {
 fn sched_reg_one(name: string, offset: int, cp: int) {
     grow_func_offsets(g_x86_func_off_count * 2 + 2);
     w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern(name));
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, cp - g_code_start);
+    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, cp - 176);
     g_x86_func_off_count = g_x86_func_off_count + 1;
 }
 
@@ -170,7 +170,7 @@ fn write_phdr(buf: string, idx: int, p_type: int, p_flags: int,
     w64(buf, base + P_ALIGN, p_align);
 }
 
-// ── ELF header writer (x86-64, original 2-segment layout) ──
+// ── ELF header writer (x86-64) ──
 fn elf2_hdr(buf: string, code_end: int, total_sz: int) {
     hdr_sz : ., mut = EHDR_SIZE + 2 * PHDR_SIZE;  // 64+112=176
     i := 0; loop { if i >= hdr_sz { break; } store8(buf, i, 0); i = i + 1; }
@@ -210,19 +210,8 @@ fn elf2_hdr(buf: string, code_end: int, total_sz: int) {
         data_sz, 268435456, 4096);  // memsz = 256MB heap
 }
 
-// ── Helper: patch PHDR fields (works around cp local var bug) ──
-fn patch_phdr(buf: string, idx: int, off: int, vaddr: int, filesz: int) {
-    base := 64 + idx * 56;
-    w64(buf, base + 8, off);
-    w64(buf, base + 16, vaddr);
-    w64(buf, base + 24, vaddr);
-    w64(buf, base + 32, filesz);
-    w64(buf, base + 40, filesz);
-}
-
 // ── Emit _start code, return total bytes ──
 g_call_main_pos : int, mut;  // set by emit_start, used for patching call main
-g_code_start : int, mut;      // file offset where code segment begins (page-aligned)
 gv_argc : int, mut;   // IR var index for g_rt_argc (or -1)
 gv_argv : int, mut;   // IR var index for g_rt_argv_ptr (or -1)
 
@@ -430,8 +419,7 @@ fn elf_gen(buf: string) -> int {
     g_x86_func_off_count = g_x86_func_off_count + 1;
     total_code = total_code + sched_tramp_sz(4);
 
-    hdr_total : ., mut = 176;  // EHDR_SIZE + 2*PHDR_SIZE = 64+112
-    g_code_start = 176;        // match hdr_total
+    hdr_total : ., mut = EHDR_SIZE + 2 * PHDR_SIZE;
     rodata_base := total_code;
     g_x86_rodata_base = hdr_total + rodata_base;
 
@@ -457,7 +445,7 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         // Override with actual position for backward calls
         fi3 := 0; loop { if fi3 >= g_x86_func_off_count { break; }
             if str_eq(istr_get(r64(g_x86_func_offsets, fi3*16)), istr_get(ni)) != 0 {
-                w64(g_x86_func_offsets, fi3*16+8, cp - g_code_start);
+                w64(g_x86_func_offsets, fi3*16+8, cp - 176);
                 break; }
         fi3 = fi3 + 1; }
         ist := r64(g_ir_func_instr_start, fi * 8);
@@ -607,14 +595,14 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
     afi2 := 0;
     loop { if afi2 >= g_x86_func_off_count { break; }
         if str_eq(istr_get(r64(g_x86_func_offsets, afi2*16)), istr_get(alloc_ni)) != 0 {
-            w64(g_x86_func_offsets, afi2*16+8, alloc_start - g_code_start);
+            w64(g_x86_func_offsets, afi2*16+8, alloc_start - 176);
             break; }
     afi2 = afi2 + 1; }
 
     // Patch all IR_ALLOC_STRUCT/ARRAY/MAKE_ENUM call sites to point to alloc
     // alloc_patch_pos entries are buffer positions of the 5-byte call instruction
-    // alloc offset = alloc_start - g_code_start (relative to code section start)
-    alloc_code_off := alloc_start - g_code_start;
+    // alloc offset = alloc_start - 176 (relative to code section start)
+    alloc_code_off := alloc_start - 176;
     api := 0;
     loop { if api >= g_x86_alloc_patch_count { break; }
         call_pos := r64(g_x86_alloc_patch_pos, api * 8);
@@ -659,7 +647,7 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
                 if str_eq(istr_get(r64(g_x86_func_offsets, bfi2*16)), istr_get(fn_ni)) != 0 {
                     func_off := r64(g_x86_func_offsets, bfi2*16+8);
                     // Safety check: target must be within emitted code
-                    target_pos := g_code_start + func_off;
+                    target_pos := 176 + func_off;
                     if target_pos > 0 && target_pos < cp {
                         rel := target_pos - (call_pos + 5);
                         w32(buf, call_pos + 1, rel);
@@ -670,19 +658,13 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
     cpi = cpi + 1; }
     g_x86_call_patch_count = 0;
 
-    // Compute actual end of code from global table (cp local var is corrupted)
-    max_pos : ., mut = 0;
-    mxfi := 0;
-    loop { if mxfi >= g_ir_func_count { break; }
-        fcp := r64(g_x86_func_cp, mxfi * 8);
-        if fcp > max_pos { max_pos = fcp; }
-        mxfi = mxfi + 1;
-    }
-    g_x86_rodata_base = max_pos + 12288;
-
     // Pad code to page boundary so RW segment doesn't share a page with RX
-    code_pad_end := (g_x86_rodata_base + 4095) / 4096 * 4096;
+    // (kernel maps shared page with RW permissions → code becomes non-executable)
+    code_pad_end := (cp + 4095) / 4096 * 4096;
     loop { if cp >= code_pad_end { break; } w8(buf, cp, 0); cp = cp + 1; }
+
+    // Set rodata base from actual emission position
+    g_x86_rodata_base = cp;
 
     // Patch LEA rodata references (recorded during instr emission)
     rri : ., mut = 0;
@@ -736,18 +718,23 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         nm := istr_get(r64(g_x86_func_offsets, bfi4*16));
         if str_eq(nm, "main") != 0 {
             off := r64(g_x86_func_offsets, bfi4*16+8);
-            print("  main at ["); print(int_str(bfi4)); print("] off="); print(int_str(off)); print(" cp="); println(int_str(off + g_code_start));
+            print("  main at ["); print(int_str(bfi4)); print("] off="); print(int_str(off)); print(" cp="); println(int_str(off + 176));
         }
     bfi4 = bfi4 + 1; }
     if mo >= 0 {
-        rel := mo + g_code_start - g_call_main_pos - 5;
+        rel := mo + 176 - g_call_main_pos - 5;
         w32(buf, g_call_main_pos + 1, rel);
     }
 
     // ── Write ELF header ──
-    total_sz := max_pos + 12288;
+    total_sz := cp;
+    // Use actual total_sz as code_end so code segment covers all emitted content
     elf2_hdr(buf, total_sz, total_sz);
-
+    // Patch data segment VA to match bss_va (page after code+rodata)
+    data_phdr_base := EHDR_SIZE + PHDR_SIZE;
+    w64(buf, data_phdr_base + P_OFFSET, bss_va - TEXT_BASE);
+    w64(buf, data_phdr_base + P_VADDR, bss_va);
+    w64(buf, data_phdr_base + P_PADDR, bss_va);
     g_asm_code_size = total_sz;
     return total_sz;
 }

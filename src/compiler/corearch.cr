@@ -103,10 +103,14 @@ fn corearch_main() -> int {
         cd := alloc(cs);
         ci : ., mut = 0; loop { if ci >= cs { break; }
             store8(cd, ci, load8(g_elf_buf, 176+ci)); ci = ci + 1; }
-        // Skip clearing rip patches — let elf_gen's rodata patching survive
-        // (Previously zeroed all LEA displacements, destroying rodata references)
+        // Clear rip-relative patches in user code (they point to original BSS)
+        // NOP the mov [r10],rXX that follows each lea r10,[rip+...]
         rpi : ., mut = 0;
         loop { if rpi >= g_x86_rip_patch_count { break; }
+            ppos := r64(g_x86_rip_patch_pos, rpi * 8);
+            if ppos >= 176 && ppos - 176 + 4 <= cs {
+                w32(cd, ppos - 176, 0);
+                w8(cd, ppos + 4 - 176, 144); w8(cd, ppos + 5 - 176, 144); w8(cd, ppos + 6 - 176, 144); }
             rpi = rpi + 1; }
 
 
