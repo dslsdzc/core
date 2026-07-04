@@ -172,8 +172,8 @@ fn write_phdr(buf: string, idx: int, p_type: int, p_flags: int,
 
 // ── ELF header writer (x86-64, Rust-style 3-segment layout) ──
 fn elf2_hdr(buf: string, code_end: int, total_sz: int) {
-    hdr_end : ., mut = EHDR_SIZE + 3 * PHDR_SIZE;  // 64+168=232
-    code_start : ., mut = align_up(hdr_end, 4096);  // page-align code segment
+    hdr_end : ., mut = 232;
+    code_start : ., mut = 4096;
     i := 0; loop { if i >= hdr_end { break; } store8(buf, i, 0); i = i + 1; }
     // e_ident
     w8(buf, E_EHDR_MAGIC, 127); w8(buf, E_EHDR_MAGIC+1, 69);
@@ -426,7 +426,7 @@ fn elf_gen(buf: string) -> int {
     g_x86_func_off_count = g_x86_func_off_count + 1;
     total_code = total_code + sched_tramp_sz(4);
 
-    code_start : ., mut = align_up(EHDR_SIZE + 3 * PHDR_SIZE, 4096);
+    code_start : ., mut = 4096;  // page-aligned: align_up(64 + 3*56, 4096)
     g_code_start = code_start;
     hdr_total : ., mut = code_start;
     rodata_base := total_code;
@@ -737,13 +737,9 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
 
     // ── Write ELF header ──
     total_sz := cp;
-    // Use actual total_sz as code_end so code segment covers all emitted content
-    elf2_hdr(buf, total_sz, total_sz);
-    // Patch data segment VA to match bss_va (page after code+rodata)
-    data_phdr_base := EHDR_SIZE + PHDR_SIZE;
-    w64(buf, data_phdr_base + P_OFFSET, bss_va - TEXT_BASE);
-    w64(buf, data_phdr_base + P_VADDR, bss_va);
-    w64(buf, data_phdr_base + P_PADDR, bss_va);
+    // code_size = total_code (from Phase 2, NOT including headers/padding)
+    elf2_hdr(buf, total_code, total_sz);
+    // 3-segment layout: PHDR[2] already set by elf2_hdr, no post-patch needed
     g_asm_code_size = total_sz;
     return total_sz;
 }
