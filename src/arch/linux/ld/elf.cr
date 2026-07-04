@@ -170,11 +170,10 @@ fn write_phdr(buf: string, idx: int, p_type: int, p_flags: int,
     w64(buf, base + P_ALIGN, p_align);
 }
 
-// ── ELF header writer (x86-64, Rust-style 3-segment layout) ──
+// ── ELF header writer (x86-64, original 2-segment layout) ──
 fn elf2_hdr(buf: string, code_end: int, total_sz: int) {
-    hdr_end : ., mut = 232;
-    code_start : ., mut = 4096;
-    i := 0; loop { if i >= hdr_end { break; } store8(buf, i, 0); i = i + 1; }
+    hdr_sz : ., mut = EHDR_SIZE + 2 * PHDR_SIZE;  // 64+112=176
+    i := 0; loop { if i >= hdr_sz { break; } store8(buf, i, 0); i = i + 1; }
     // e_ident
     w8(buf, E_EHDR_MAGIC, 127); w8(buf, E_EHDR_MAGIC+1, 69);
     w8(buf, E_EHDR_MAGIC+2, 76); w8(buf, E_EHDR_MAGIC+3, 70);  // \x7fELF
@@ -185,37 +184,30 @@ fn elf2_hdr(buf: string, code_end: int, total_sz: int) {
     w16(buf, E_TYPE, 2);    // ET_EXEC
     w16(buf, E_MACH, 62);   // EM_X86_64
     w32(buf, E_VERSION, 1); // EV_CURRENT
-    w64(buf, E_ENTRY, 0x4000e8);  // entry = 0x400000 + 232 (hdr_total)
+    w64(buf, E_ENTRY, 0x400000 + EHDR_SIZE + 2 * PHDR_SIZE);  // entry = text_base + 176
     w64(buf, E_PHOFF, EHDR_SIZE);              // phdrs start right after ehdr
     w16(buf, E_EHSIZE, EHDR_SIZE);             // sizeof(Elf64_Ehdr) = 64
     w16(buf, E_PHENTSIZE, PHDR_SIZE);          // sizeof(Elf64_Phdr) = 56
-    w16(buf, E_PHNUM, 3);                      // 3 program headers
+    w16(buf, E_PHNUM, 2);                      // 2 program headers
 
-    // PHDR[0]: RO — ELF headers only (PF_R, p_offset=0)
+    // PHDR[0]: code segment (RX, file offset 0, VA = TEXT_BASE)
     write_phdr(buf, 0,
         1,     // PT_LOAD
-        4,     // PF_R
-        0, 4194304, 4194304,
-        code_start, code_start, 4096);
+        5,     // PF_R | PF_X
+        0,                               // file offset
+        4194304,                         // TEXT_BASE
+        4194304,                         // phys addr = TEXT_BASE
+        code_end, code_end, 4096);
 
-    // PHDR[1]: RX — code segment (page-aligned)
-    // code_end is total file size; subtract code_start (4096) for pure code size
-    code_sz : ., mut = code_end - 4096;
-    code_va : ., mut = 4194304 + code_start;
+    // PHDR[1]: rodata+BSS (RW, starts at page after code)
+    rodata_va : ., mut = 4194304 + code_end;
+    data_sz : ., mut = total_sz - code_end;
     write_phdr(buf, 1,
         1,     // PT_LOAD
-        5,     // PF_R | PF_X
-        code_start, code_va, code_va,
-        code_sz, code_sz, 4096);
-
-    // PHDR[2]: RW — data + BSS (starts at page after code)
-    data_off : ., mut = align_up(code_start + code_end, 4096);
-    data_va : ., mut = 4194304 + data_off;
-    write_phdr(buf, 2,
-        1,     // PT_LOAD
         6,     // PF_R | PF_W
-        data_off, data_va, data_va,
-        0, 268435456, 4096);  // memsz = 256MB heap
+        code_end,
+        rodata_va, rodata_va,
+        data_sz, 268435456, 4096);  // memsz = 256MB heap
 }
 
 // ── Helper: patch PHDR fields (works around cp local var bug) ──
@@ -438,8 +430,8 @@ fn elf_gen(buf: string) -> int {
     g_x86_func_off_count = g_x86_func_off_count + 1;
     total_code = total_code + sched_tramp_sz(4);
 
-    hdr_total : ., mut = 232;  // EHDR_SIZE + 3*PHDR_SIZE = 64+168
-    g_code_start = 4096;       // separate global for ELF post-patching
+    hdr_total : ., mut = 176;  // EHDR_SIZE + 2*PHDR_SIZE = 64+112
+    g_code_start = 176;        // match hdr_total
     rodata_base := total_code;
     g_x86_rodata_base = hdr_total + rodata_base;
 
@@ -678,13 +670,19 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
     cpi = cpi + 1; }
     g_x86_call_patch_count = 0;
 
-    // Pad code to page boundary so RW segment doesn't share a page with RX
-    // (kernel maps shared page with RW permissions → code becomes non-executable)
-    code_pad_end := (cp + 4095) / 4096 * 4096;
-    loop { if cp >= code_pad_end { break; } w8(buf, cp, 0); cp = cp + 1; }
+    // Compute actual end of code from global table (cp local var is corrupted)
+    max_pos : ., mut = 0;
+    mxfi := 0;
+    loop { if mxfi >= g_ir_func_count { break; }
+        fcp := r64(g_x86_func_cp, mxfi * 8);
+        if fcp > max_pos { max_pos = fcp; }
+        mxfi = mxfi + 1;
+    }
+    g_x86_rodata_base = max_pos + 12288;
 
-    // Set rodata base from actual emission position
-    g_x86_rodata_base = cp;
+    // Pad code to page boundary so RW segment doesn't share a page with RX
+    code_pad_end := (g_x86_rodata_base + 4095) / 4096 * 4096;
+    loop { if cp >= code_pad_end { break; } w8(buf, cp, 0); cp = cp + 1; }
 
     // Patch LEA rodata references (recorded during instr emission)
     rri : ., mut = 0;
@@ -747,22 +745,8 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
     }
 
     // ── Write ELF header ──
-    // Find max cp from global table (bypasses corrupted local cp)
-    max_pos : ., mut = 0;
-    mxfi := 0;
-    loop { if mxfi >= g_ir_func_count { break; }
-        fcp := r64(g_x86_func_cp, mxfi * 8);
-        if fcp > max_pos { max_pos = fcp; }
-        mxfi = mxfi + 1;
-    }
-    // Add safety margin for alloc body, rodata, trampolines
     total_sz := max_pos + 12288;
     elf2_hdr(buf, total_sz, total_sz);
-    // Post-patch for 3-segment layout
-    // PHDR[0]: change to RX (_start stub needs execute permission)
-    w32(buf, 68, 5);
-    patch_phdr(buf, 1, g_code_start, 4194304+g_code_start, total_sz - g_code_start);
-    w64(buf, 24, 4194304 + hdr_total);  // entry = _start position
 
     g_asm_code_size = total_sz;
     return total_sz;
