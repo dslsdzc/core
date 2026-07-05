@@ -699,6 +699,12 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
     loop { if rpi2 >= g_x86_rip_patch_count { break; }
         ppos := r64(g_x86_rip_patch_pos, rpi2 * 8);
         gvi := r64(g_x86_rip_patch_globals, rpi2 * 8);
+        // Debug: print patches near the known-bad offset 0x6ccc
+        if ppos >= 27800 && ppos <= 28000 {
+            print("  rip_patch["); print(int_str(rpi2)); print("] ppos="); print(int_str(ppos));
+            print(" gvi="); print(int_str(gvi)); print(" skipped=");
+            if gvi >= 0 { println("no"); } else { println("yes"); }
+        }
         if gvi >= 0 {
             lea_end_va := TEXT_BASE + ppos + 4;
             target_va := bss_va + 16 + r64(g_x86_global_off, gvi * 8);  // +16 to skip heap_ptr(8) + heap_start(8)

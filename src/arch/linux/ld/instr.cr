@@ -427,8 +427,12 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
             // mov [rdi+rsi], rdx — REX.W + 0x89 + SIB
             cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 0); e2_w8(buf, pos+cp, 137); cp = cp + 1;
             cp = cp + emit_modrm(buf, pos+cp, 0, 2, 4); cp = cp + emit_sib(buf, pos+cp, 0, 6, 7);
-        } else if s3 == g_ni_get_arg {
+        } else if s3 == g_ni_get_arg && gv_argv >= 0 {
             // Convert C argv[n] into a Core string with the hidden length header.
+            // NB: gv_argv must be >= 0 (g_rt_argv_ptr registered as a global).
+            // If it's -1, fall through to regular call path — the LEA displacement
+            // would be registered as a rip_patch with gvi=-1 and SKIPPED by the
+            // patch loop, leaving displacement=0 and causing GPF on dereference.
             grow_rip_patch(g_x86_rip_patch_count + 1);
             w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3);
             w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argv);
