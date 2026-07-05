@@ -49,10 +49,10 @@ class X86_64StackAsmGen:
     def _get_stack_off(self, var: IRVar) -> int:
         """Get or allocate a stack offset for a local variable.
 
-        Uses (name, id) tuple as key: id alone reuses freed Python objects,
-        causing different variables to share the same stack slot.
+        Uses Python's id() as the dict key because IRVar.id is always 0
+        (the bootstrap IRGen never sets it, so all IRVars share id=0).
         """
-        key = (var.name, id(var))
+        key = id(var)
         if key not in self.var_offsets:
             idx = len(self.var_offsets)
             off = -(idx + 1) * 8
