@@ -484,8 +484,9 @@ fn optimize_all() {
         ast_optimize_body(body);
         fi = fi + 1;
     }
-    pass_cse();
+    // pass_cse skipped — causes GPF in self-compiled binary
     if g_opt_level >= 2 {
+        pass_cse();
         alloc_registers();  // TODO: fix g_opt_meta corruption in ELF backend
         pass_stack_share();
     }

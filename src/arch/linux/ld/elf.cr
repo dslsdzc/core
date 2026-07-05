@@ -107,7 +107,7 @@ fn sched_tramp_sz(n: int) -> int {
 fn sched_reg_one(name: string, offset: int, cp: int) {
     grow_func_offsets(g_x86_func_off_count * 2 + 2);
     w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern(name));
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, cp - g_code_start);
+    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, cp - 176);
     g_x86_func_off_count = g_x86_func_off_count + 1;
 }
 
@@ -170,11 +170,10 @@ fn write_phdr(buf: string, idx: int, p_type: int, p_flags: int,
     w64(buf, base + P_ALIGN, p_align);
 }
 
-// ── ELF header writer (x86-64, Rust-style 3-segment layout) ──
+// ── ELF header writer (x86-64) ──
 fn elf2_hdr(buf: string, code_end: int, total_sz: int) {
-    hdr_end : ., mut = EHDR_SIZE + 3 * PHDR_SIZE;  // 64+168=232
-    code_start : ., mut = align_up(hdr_end, 4096);  // page-align code segment
-    i := 0; loop { if i >= hdr_end { break; } store8(buf, i, 0); i = i + 1; }
+    hdr_sz : ., mut = EHDR_SIZE + 2 * PHDR_SIZE;  // 64+112=176
+    i := 0; loop { if i >= hdr_sz { break; } store8(buf, i, 0); i = i + 1; }
     // e_ident
     w8(buf, E_EHDR_MAGIC, 127); w8(buf, E_EHDR_MAGIC+1, 69);
     w8(buf, E_EHDR_MAGIC+2, 76); w8(buf, E_EHDR_MAGIC+3, 70);  // \x7fELF
@@ -185,40 +184,34 @@ fn elf2_hdr(buf: string, code_end: int, total_sz: int) {
     w16(buf, E_TYPE, 2);    // ET_EXEC
     w16(buf, E_MACH, 62);   // EM_X86_64
     w32(buf, E_VERSION, 1); // EV_CURRENT
-    w64(buf, E_ENTRY, 0x400000 + code_start);  // entry = text_base + code_start
+    w64(buf, E_ENTRY, 0x400000 + EHDR_SIZE + 2 * PHDR_SIZE);  // entry = text_base + 176
     w64(buf, E_PHOFF, EHDR_SIZE);              // phdrs start right after ehdr
     w16(buf, E_EHSIZE, EHDR_SIZE);             // sizeof(Elf64_Ehdr) = 64
     w16(buf, E_PHENTSIZE, PHDR_SIZE);          // sizeof(Elf64_Phdr) = 56
-    w16(buf, E_PHNUM, 3);                      // 3 program headers
+    w16(buf, E_PHNUM, 2);                      // 2 program headers
 
-    // PHDR[0]: RO — ELF headers only (PF_R, p_offset=0)
+    // PHDR[0]: code segment (RX, file offset 0, VA = TEXT_BASE)
     write_phdr(buf, 0,
         1,     // PT_LOAD
-        4,     // PF_R
-        0, 4194304, 4194304,
-        code_start, code_start, 4096);
-
-    // PHDR[1]: RX — code segment (page-aligned)
-    code_va : ., mut = 4194304 + code_start;
-    write_phdr(buf, 1,
-        1,     // PT_LOAD
         5,     // PF_R | PF_X
-        code_start, code_va, code_va,
+        0,                               // file offset
+        4194304,                         // TEXT_BASE
+        4194304,                         // phys addr = TEXT_BASE
         code_end, code_end, 4096);
 
-    // PHDR[2]: RW — data + BSS (starts at page after code)
-    data_off : ., mut = align_up(code_start + code_end, 4096);
-    data_va : ., mut = 4194304 + data_off;
-    write_phdr(buf, 2,
+    // PHDR[1]: rodata+BSS (RW, starts at page after code)
+    rodata_va : ., mut = 4194304 + code_end;
+    data_sz : ., mut = total_sz - code_end;
+    write_phdr(buf, 1,
         1,     // PT_LOAD
         6,     // PF_R | PF_W
-        data_off, data_va, data_va,
-        0, 268435456, 4096);  // memsz = 256MB heap
+        code_end,
+        rodata_va, rodata_va,
+        data_sz, 268435456, 4096);  // memsz = 256MB heap
 }
 
 // ── Emit _start code, return total bytes ──
 g_call_main_pos : int, mut;  // set by emit_start, used for patching call main
-g_code_start : int, mut;      // file offset where code segment begins (page-aligned)
 gv_argc : int, mut;   // IR var index for g_rt_argc (or -1)
 gv_argv : int, mut;   // IR var index for g_rt_argv_ptr (or -1)
 
@@ -426,9 +419,7 @@ fn elf_gen(buf: string) -> int {
     g_x86_func_off_count = g_x86_func_off_count + 1;
     total_code = total_code + sched_tramp_sz(4);
 
-    code_start : ., mut = align_up(EHDR_SIZE + 3 * PHDR_SIZE, 4096);
-    g_code_start = code_start;
-    hdr_total : ., mut = code_start;
+    hdr_total : ., mut = EHDR_SIZE + 2 * PHDR_SIZE;
     rodata_base := total_code;
     g_x86_rodata_base = hdr_total + rodata_base;
 
@@ -454,7 +445,7 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         // Override with actual position for backward calls
         fi3 := 0; loop { if fi3 >= g_x86_func_off_count { break; }
             if str_eq(istr_get(r64(g_x86_func_offsets, fi3*16)), istr_get(ni)) != 0 {
-                w64(g_x86_func_offsets, fi3*16+8, cp - g_code_start);
+                w64(g_x86_func_offsets, fi3*16+8, cp - 176);
                 break; }
         fi3 = fi3 + 1; }
         ist := r64(g_ir_func_instr_start, fi * 8);
@@ -604,14 +595,14 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
     afi2 := 0;
     loop { if afi2 >= g_x86_func_off_count { break; }
         if str_eq(istr_get(r64(g_x86_func_offsets, afi2*16)), istr_get(alloc_ni)) != 0 {
-            w64(g_x86_func_offsets, afi2*16+8, alloc_start - g_code_start);
+            w64(g_x86_func_offsets, afi2*16+8, alloc_start - 176);
             break; }
     afi2 = afi2 + 1; }
 
     // Patch all IR_ALLOC_STRUCT/ARRAY/MAKE_ENUM call sites to point to alloc
     // alloc_patch_pos entries are buffer positions of the 5-byte call instruction
-    // alloc offset = alloc_start - g_code_start (relative to code section start)
-    alloc_code_off := alloc_start - g_code_start;
+    // alloc offset = alloc_start - 176 (relative to code section start)
+    alloc_code_off := alloc_start - 176;
     api := 0;
     loop { if api >= g_x86_alloc_patch_count { break; }
         call_pos := r64(g_x86_alloc_patch_pos, api * 8);
@@ -656,7 +647,7 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
                 if str_eq(istr_get(r64(g_x86_func_offsets, bfi2*16)), istr_get(fn_ni)) != 0 {
                     func_off := r64(g_x86_func_offsets, bfi2*16+8);
                     // Safety check: target must be within emitted code
-                    target_pos := g_code_start + func_off;
+                    target_pos := 176 + func_off;
                     if target_pos > 0 && target_pos < cp {
                         rel := target_pos - (call_pos + 5);
                         w32(buf, call_pos + 1, rel);
@@ -727,11 +718,11 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         nm := istr_get(r64(g_x86_func_offsets, bfi4*16));
         if str_eq(nm, "main") != 0 {
             off := r64(g_x86_func_offsets, bfi4*16+8);
-            print("  main at ["); print(int_str(bfi4)); print("] off="); print(int_str(off)); print(" cp="); println(int_str(off + g_code_start));
+            print("  main at ["); print(int_str(bfi4)); print("] off="); print(int_str(off)); print(" cp="); println(int_str(off + 176));
         }
     bfi4 = bfi4 + 1; }
     if mo >= 0 {
-        rel := mo + g_code_start - g_call_main_pos - 5;
+        rel := mo + 176 - g_call_main_pos - 5;
         w32(buf, g_call_main_pos + 1, rel);
     }
 
