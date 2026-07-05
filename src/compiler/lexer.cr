@@ -31,12 +31,18 @@ fn add_error(msg: string) {
 }
 
 fn cur_char() -> int {
-    if g_pos >= g_source_len { return 0; }
+    // Use str_len(g_source) instead of g_source_len to avoid
+    // global variable patching bug in self-hosted ELF backend.
+    // g_source_len is stored to a wrong BSS address in tokenize(),
+    // causing cur_char() to always see it as 0 (EOF).
+    src_len := str_len(g_source);
+    if g_pos >= src_len { return 0; }
     return load8(g_source, g_pos);
 }
 
 fn peek() -> int {
-    if g_pos + 1 >= g_source_len { return 0; }
+    src_len := str_len(g_source);
+    if g_pos + 1 >= src_len { return 0; }
     return load8(g_source, g_pos + 1);
 }
 
