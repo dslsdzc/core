@@ -123,7 +123,9 @@ fn run_frontend() -> int {
     if g_error_count > 0 { print_parse_errors(); return 1; }
     println("[4/5] type check...");
     check_all();
-    if g_diag_count > 0 { print_diagnostics(); return 1; }
+    // Type-check diagnostics are non-fatal (match Python bootstrap behavior).
+    // Only parse errors and resolver errors are fatal.
+    if g_diag_count > 0 { print_diagnostics(); }
     // AST-level constant folding and optimization (O1+)
     /*
 if g_opt_level >= 1 && g_func_count > 0 {
@@ -371,8 +373,10 @@ fn corec_main() -> int {
     // === build | ccr need lower_to_ccr ===
     if g_opt_level >= 1 {
         pass_cse();
+    }
+    if g_opt_level >= 2 {
         alloc_registers();
-        if g_opt_level >= 2 { pass_stack_share(); }
+        pass_stack_share();
     }
     println("lower to ccr...");
     lower_to_ccr();
