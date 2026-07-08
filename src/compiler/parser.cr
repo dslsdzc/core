@@ -663,7 +663,7 @@ fn parse_new_var_decl() -> int {
 
     if check(T_SEMI) { advance_tok(); } // optional ;
 
-    // Emit LET nodes. First returned directly, extras go to g_extra_lets.
+    // Emit LET nodes. First returned directly, extras go to g_extra_lets (dynamic grow).
     first_node : ., mut = -1;
     i : ., mut = 0;
     loop {
@@ -1462,14 +1462,16 @@ fn parse_declaration() {
         grow_global_lets(g_global_let_count + 1);
         w64(g_global_lets, g_global_let_count * 8, node);
         g_global_let_count = g_global_let_count + 1;
-        // Drain any batch extras to globals
+        // Drain batch extras to globals
+        _drained : ., mut = 0;
         loop {
             if g_extra_let_count <= 0 { break; }
             g_extra_let_count = g_extra_let_count - 1;
             grow_global_lets(g_global_let_count + 1);
             w64(g_global_lets, g_global_let_count * 8, r64(g_extra_lets, g_extra_let_count * 8));
+            g_global_let_count = g_global_let_count + 1;
+            _drained = _drained + 1;
         }
-        g_extra_let_count = 0;
         return;
     }
 

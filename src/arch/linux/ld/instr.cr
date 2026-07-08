@@ -288,10 +288,8 @@ fn sz_ofs(o: int) -> int {
     return 7;
 }
 fn sz_load_var(v: int) -> int {
-    if v >= 0 {
-        if g_x86_global_cap > v {
-            if r64(g_x86_is_global, v * 8) != 0 { return sz_lr() + 3; }
-        }
+    if v >= 0 && v < g_ir_var_count && g_str_count > 0 {
+        if r64(g_x86_is_global, v * 8) != 0 { return sz_lr() + 3; }
     }
     return sz_ld(g2_slot(v));
 }
@@ -598,7 +596,14 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     if op == IR_LOAD && d >= 0 {
         do2 := g2_slot(d);
         if s1 >= 0 {
-            if r64(g_x86_is_global, s1 * 8) != 0 {
+            isg : ., mut = r64(g_x86_is_global, s1 * 8);
+            if s1 >= 690 && s1 <= 710 {
+                print("  DBG LOAD s1="); print(int_str(s1));
+                print(" cap="); print(int_str(g_x86_global_cap));
+                print(" isg="); print_i(isg);
+                println("");
+            }
+            if isg != 0 {
                 grow_rip_patch(g_x86_rip_patch_count + 1);
                 w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3);
                 w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1);

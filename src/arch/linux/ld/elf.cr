@@ -313,6 +313,11 @@ fn elf_gen(buf: string) -> int {
     print(" w64="); print(int_str(g_ni_w64));
     print(" dyncpy="); println(int_str(g_ni_dyncpy));
 
+    // Reset scratch-emission garbage (res_labels -> emit_instr -> pollutes rip_patch arrays)
+    g_x86_rip_patch_count = 0;
+    g_x86_rodataref_count = 0;
+    g_x86_alloc_patch_count = 0;
+
     println("  elf: Phase 1 (rodata layout)...");
     // Phase 1: rodata layout — collect string constants
     g_x86_str_count = 0;
@@ -699,11 +704,12 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
     loop { if rpi2 >= g_x86_rip_patch_count { break; }
         ppos := r64(g_x86_rip_patch_pos, rpi2 * 8);
         gvi := r64(g_x86_rip_patch_globals, rpi2 * 8);
-        // Debug: print patches near the known-bad offset 0x6ccc
-        if ppos >= 27800 && ppos <= 28000 {
-            print("  rip_patch["); print(int_str(rpi2)); print("] ppos="); print(int_str(ppos));
-            print(" gvi="); print(int_str(gvi)); print(" skipped=");
-            if gvi >= 0 { println("no"); } else { println("yes"); }
+        // Verify: buffer at ppos-3 should contain LEA prefix (0x4C or 0x4D for REX.WR/WRB)
+        lea_check := bu8(buf, ppos - 3);
+        if lea_check != 76 && lea_check != 77 && lea_check != 73 && lea_check != 79 {
+            print("  BAD rip["); print(int_str(rpi2)); print("] ppos="); print(int_str(ppos));
+            print(" gvi="); print(int_str(gvi));
+            print(" byte="); println(int_str(lea_check));
         }
         if gvi >= 0 {
             lea_end_va := TEXT_BASE + ppos + 4;

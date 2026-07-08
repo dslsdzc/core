@@ -8,378 +8,346 @@ g_pos : int, mut;
 g_line : int, mut;
 g_col : int, mut;
 
-// ── ASCII character constants (for int-based comparisons) ──
-C_NL : int = 10;    C_SP : int = 32;    C_TB : int = 9;     C_CR : int = 13;
-C_0 : int = 48;     C_9 : int = 57;
-C_a : int = 97;     C_z : int = 122;    C_A : int = 65;     C_Z : int = 90;
-C_SLASH : int = 47; C_STAR : int = 42;  C_DOT : int = 46;
-C_DQUOTE : int = 34; C_SQUOTE : int = 39; C_BSLASH : int = 92;
-C_EQ : int = 61;    C_BANG : int = 33;  C_LT : int = 60;    C_GT : int = 62;
-C_AMP : int = 38;   C_PIPE : int = 124; C_DASH : int = 45;  C_PLUS : int = 43;
-C_COLON : int = 58; C_SEMI : int = 59;  C_UNDER : int = 95; C_AT : int = 64;
-C_LPAREN : int = 40; C_RPAREN : int = 41; C_HASH : int = 35;
+// Character constants
+C_SP : int = 32; C_TB : int = 9; C_LF : int = 10; C_CR : int = 13;
+C_NL : int = 10;
+C_SLASH : int = 47; C_STAR : int = 42;
+C_BSLASH : int = 92; C_SQUOTE : int = 39; C_DQUOTE : int = 34;
+C_LPAREN : int = 40; C_RPAREN : int = 41;
 C_LBRACE : int = 123; C_RBRACE : int = 125;
-C_LBRACK : int = 91;  C_RBRACK : int = 93;
-C_COMMA : int = 44;  C_PERCENT : int = 37; C_QUES : int = 63;
-
-fn add_error(msg: string) {
-    mi := str_intern(msg);
-    grow_errors(g_error_count + 1); if 1 {
-        w64(g_errors, g_error_count * 8, mi);
-        g_error_count = g_error_count + 1;
-    }
-}
-
-fn cur_char() -> int {
-    if g_pos >= g_source_len { return 0; }
-    return load8(g_source, g_pos);
-}
-
-fn peek() -> int {
-    if g_pos + 1 >= g_source_len { return 0; }
-    return load8(g_source, g_pos + 1);
-}
-
-fn advance() {
-    c := cur_char();
-    if c == C_NL { g_line = g_line + 1; g_col = 1; }
-    else { g_col = g_col + 1; }
-    g_pos = g_pos + 1;
-}
-
-fn skip_whitespace() {
-    loop {
-        c := cur_char();
-        if c == C_SP || c == C_TB || c == C_CR || c == C_NL { advance(); }
-        else { break; }
-    }
-}
-
-fn add_token(kind: int) {
-    grow_tokens(g_token_count + 1);
-    tp := g_token_count * ESZ_TOKEN;
-    w64(g_tokens, tp + OFF_TK_KIND, kind);
-    w64(g_tokens, tp + OFF_TK_LEXEME, -1);
-    w64(g_tokens, tp + OFF_TK_INTVAL, 0);
-    w64(g_tokens, tp + OFF_TK_LINE, g_line);
-    w64(g_tokens, tp + OFF_TK_COL, g_col);
-    g_token_count = g_token_count + 1;
-}
-
-fn add_token_str(kind: int, lexeme: string) {
-    grow_tokens(g_token_count + 1);
-    tp := g_token_count * ESZ_TOKEN;
-    li := str_intern(lexeme);
-    w64(g_tokens, tp + OFF_TK_KIND, kind);
-    w64(g_tokens, tp + OFF_TK_LEXEME, li);
-    w64(g_tokens, tp + OFF_TK_INTVAL, 0);
-    w64(g_tokens, tp + OFF_TK_LINE, g_line);
-    w64(g_tokens, tp + OFF_TK_COL, g_col);
-    g_token_count = g_token_count + 1;
-}
-
-fn add_token_int(kind: int, val: int) {
-    grow_tokens(g_token_count + 1);
-    tp := g_token_count * ESZ_TOKEN;
-    w64(g_tokens, tp + OFF_TK_KIND, kind);
-    w64(g_tokens, tp + OFF_TK_LEXEME, -1);
-    w64(g_tokens, tp + OFF_TK_INTVAL, val);
-    w64(g_tokens, tp + OFF_TK_LINE, g_line);
-    w64(g_tokens, tp + OFF_TK_COL, g_col);
-    g_token_count = g_token_count + 1;
-}
-
-fn is_digit(c: int) -> int {
-    if c >= C_0 && c <= C_9 { return 1; }
-    return 0;
-}
+C_LBRACK : int = 91; C_RBRACK : int = 93;
+C_COMMA : int = 44; C_SEMI : int = 59; C_COLON : int = 58;
+C_DOT : int = 46; C_EQ : int = 61; C_BANG : int = 33;
+C_LT : int = 60; C_GT : int = 62; C_PLUS : int = 43;
+C_DASH : int = 45; C_PERCENT : int = 37; C_AMP : int = 38;
+C_PIPE : int = 124; C_UNDER : int = 95; C_AT : int = 64;
+C_QUES : int = 63;
 
 fn is_alpha(c: int) -> int {
-    if (c >= C_a && c <= C_z) || (c >= C_A && c <= C_Z) || c == C_UNDER { return 1; }
+    if c >= 65 && c <= 90 { return 1; }
+    if c >= 97 && c <= 122 { return 1; }
+    if c == 95 { return 1; }
     return 0;
 }
-
+fn is_digit(c: int) -> int {
+    if c >= 48 && c <= 57 { return 1; }
+    return 0;
+}
 fn is_ident_char(c: int) -> int {
-    if is_alpha(c) != 0 || is_digit(c) != 0 { return 1; }
+    if is_alpha(c) != 0 { return 1; }
+    if is_digit(c) != 0 { return 1; }
     return 0;
 }
 
-fn lookup_keyword(ident: string) -> int {
-    if ident == "fn" { return T_FN; }
-    if ident == "mut" { return T_MUT; }
-    if ident == "if" { return T_IF; }
-    if ident == "else" { return T_ELSE; }
-    if ident == "loop" { return T_LOOP; }
-    if ident == "for" { return T_FOR; }
-    if ident == "in" { return T_IN; }
-    if ident == "return" { return T_RETURN; }
-    if ident == "break" { return T_BREAK; }
-    if ident == "continue" { return T_CONTINUE; }
-    if ident == "struct" { return T_STRUCT; }
-    if ident == "enum" { return T_ENUM; }
-    if ident == "impl" { return T_IMPL; }
-    if ident == "pub" { return T_PUB; }
-    if ident == "true" { return T_TRUE; }
-    if ident == "false" { return T_FALSE; }
-    if ident == "match" { return T_MATCH; }
-    if ident == "move" { return T_MOVE; }
-    if ident == "self" { return T_SELF; }
-    if ident == "unit" { return T_UNIT; }
-    if ident == "char" { return T_CHAR; }
-    if ident == "while" { return T_WHILE; }
-    if ident == "import" { return T_IMPORT; }
-    if ident == "mod" { return T_MOD; }
-    if ident == "type" { return T_TYPE; }
-    if ident == "as" { return T_AS; }
-    if ident == "go" { return T_GO; }
-    if ident == "await" { return T_AWAIT; }
-    if ident == "flow" { return T_FLOW; }
-    if ident == "yield" { return T_YIELD; }
-    if ident == "unsafe" { return T_UNSAFE; }
-    if ident == "interface" { return T_INTERFACE; }
-    if ident == "auto" { return T_AUTO; }
-    if ident == "fileid" { return T_FILEID; }
-    if ident == "None" { return T_NONE; }
-    if ident == "Some" { return T_SOME; }
+fn cur_char_at(pos: int) -> int {
+    if pos >= str_len(g_source) { return 0; }
+    return load8(g_source, pos);
+}
+fn peek_at(pos: int) -> int {
+    if pos + 1 >= str_len(g_source) { return 0; }
+    return load8(g_source, pos + 1);
+}
+
+fn lookup_keyword(s: string) -> int {
+    if s == "fn" { return T_FN; }
+    if s == "let" { return T_LET; }
+    if s == "mut" { return T_MUT; }
+    if s == "return" { return T_RETURN; }
+    if s == "if" { return T_IF; }
+    if s == "else" { return T_ELSE; }
+    if s == "loop" { return T_LOOP; }
+    if s == "while" { return T_WHILE; }
+    if s == "for" { return T_FOR; }
+    if s == "break" { return T_BREAK; }
+    if s == "continue" { return T_CONTINUE; }
+    if s == "true" { return T_TRUE; }
+    if s == "false" { return T_FALSE; }
+    if s == "struct" { return T_STRUCT; }
+    if s == "enum" { return T_ENUM; }
+    if s == "impl" { return T_IMPL; }
+    if s == "match" { return T_MATCH; }
+    if s == "import" { return T_IMPORT; }
+    if s == "pub" { return T_PUB; }
+    if s == "int" || s == "i8" || s == "i16" || s == "i32" || s == "i64" { return T_INT_TYPE; }
+    if s == "u8" || s == "u16" || s == "u32" || s == "u64" { return T_INT_TYPE; }
+    if s == "float" || s == "f32" || s == "f64" { return T_FLOAT_TYPE; }
+    if s == "bool" { return T_BOOL_TYPE; }
+    if s == "unit" { return T_UNIT_TYPE; }
+    if s == "string" || s == "str" { return T_STR_TYPE; }
+    if s == "auto" { return T_AUTO_TYPE; }
+    if s == "go" { return T_GO; }
+    if s == "await" { return T_AWAIT; }
+    if s == "ref" { return T_REF; }
+    if s == "unsafe" { return T_UNSAFE; }
     return T_IDENT;
 }
 
-fn tokenize() {
-    g_source_len = str_len(g_source);
-    g_token_count = 0;
-    g_pos = 0;
-    g_line = 1;
-    g_col = 1;
-    g_error_count = 0;
+fn add_tok(kind: int, lex: int, start_line: int, start_col: int) {
+    grow_tokens(g_token_count + 1);
+    tp := g_token_count * ESZ_TOKEN;
+    w64(g_tokens, tp + OFF_TK_KIND, kind);
+    w64(g_tokens, tp + OFF_TK_LEXEME, lex);
+    w64(g_tokens, tp + OFF_TK_INTVAL, 0);
+    w64(g_tokens, tp + OFF_TK_LINE, start_line);
+    w64(g_tokens, tp + OFF_TK_COL, start_col);
+    g_token_count = g_token_count + 1;
+}
 
-    skip_whitespace();
+fn add_tok_int(kind: int, ival: int, start_line: int, start_col: int) {
+    grow_tokens(g_token_count + 1);
+    tp := g_token_count * ESZ_TOKEN;
+    w64(g_tokens, tp + OFF_TK_KIND, kind);
+    w64(g_tokens, tp + OFF_TK_LEXEME, -1);
+    w64(g_tokens, tp + OFF_TK_INTVAL, ival);
+    w64(g_tokens, tp + OFF_TK_LINE, start_line);
+    w64(g_tokens, tp + OFF_TK_COL, start_col);
+    g_token_count = g_token_count + 1;
+}
+
+fn add_tok_str(kind: int, s: string, start_line: int, start_col: int) {
+    grow_tokens(g_token_count + 1);
+    tp := g_token_count * ESZ_TOKEN;
+    w64(g_tokens, tp + OFF_TK_KIND, kind);
+    si := str_intern(s);
+    w64(g_tokens, tp + OFF_TK_LEXEME, si);
+    w64(g_tokens, tp + OFF_TK_INTVAL, 0);
+    w64(g_tokens, tp + OFF_TK_LINE, start_line);
+    w64(g_tokens, tp + OFF_TK_COL, start_col);
+    g_token_count = g_token_count + 1;
+}
+
+fn skip_ws(pos: int) -> int {
+    loop {
+        c := cur_char_at(pos);
+        if c == C_SP || c == C_TB || c == C_CR || c == C_NL { pos = pos + 1; }
+        else { break; }
+    }
+    return pos;
+}
+
+fn tokenize() {
+    g_token_count = 0;
+    g_error_count = 0;
+    _pos : ., mut = 0;
+    _line : ., mut = 1;
+    _col : ., mut = 1;
+    _slen : ., mut = str_len(g_source);
+
+    _pos = skip_ws(_pos);
 
     loop {
-        if g_pos >= g_source_len { break; }
-        c := cur_char();
+        if _pos >= _slen { break; }
+        c := cur_char_at(_pos);
+        start_line : ., mut = _line;
+        start_col : ., mut = _col;
 
-        // Single-line comment //
-        if c == C_SLASH && peek() == C_SLASH {
+        // Comments
+        if c == C_SLASH && peek_at(_pos) == C_SLASH {
+            _pos = _pos + 2;
             loop {
-                advance();
-                if g_pos >= g_source_len { break; }
-                if cur_char() == C_NL { advance(); break; }
+                if _pos >= _slen { break; }
+                if cur_char_at(_pos) == C_NL { _pos = _pos + 1; break; }
+                _pos = _pos + 1;
             }
-            skip_whitespace();
+            _pos = skip_ws(_pos);
+            continue;
+        }
+        if c == C_SLASH && peek_at(_pos) == C_STAR {
+            _pos = _pos + 2;
+            loop {
+                if _pos >= _slen { break; }
+                if cur_char_at(_pos) == C_STAR && peek_at(_pos) == C_SLASH { _pos = _pos + 2; break; }
+                _pos = _pos + 1;
+            }
+            _pos = skip_ws(_pos);
             continue;
         }
 
-        // Block comment /* */
-        if c == C_SLASH && peek() == C_STAR {
-            advance(); advance();
-            loop {
-                if g_pos >= g_source_len { break; }
-                if cur_char() == C_STAR && peek() == C_SLASH { advance(); advance(); break; }
-                advance();
-            }
-            skip_whitespace();
-            continue;
-        }
-
-        start_line := g_line;
-        start_col := g_col;
-
-        // Identifier or keyword
+        // Identifier
         if is_alpha(c) != 0 {
-            start := g_pos;
-            advance();
+            start := _pos;
+            _pos = _pos + 1;
             loop {
-                c2 := cur_char();
-                if is_ident_char(c2) != 0 { advance(); } else { break; }
+                c2 := cur_char_at(_pos);
+                if is_ident_char(c2) != 0 { _pos = _pos + 1; } else { break; }
             }
-            ident := str_sub(g_source, start, g_pos - start);
+            ident := str_sub(g_source, start, _pos - start);
             kind := lookup_keyword(ident);
-            add_token_str(kind, ident);
-            skip_whitespace();
+            add_tok_str(kind, ident, start_line, start_col);
+            _pos = skip_ws(_pos);
             continue;
         }
 
-        // Number literal
-        if is_digit(c) != 0 {
-            start := g_pos;
-            advance();
-            kind : ., mut = T_INT;
+        // Number
+        if is_digit(c) != 0 || (c == C_DOT && is_digit(peek_at(_pos)) != 0) {
+            start := _pos;
+            if c == C_DOT { _pos = _pos + 1; c = cur_char_at(_pos); }
             loop {
-                c2 := cur_char();
-                if is_digit(c2) != 0 || c2 == C_UNDER { advance(); }
-                else if c2 == C_DOT {
-                    nxt := peek();
-                    if is_digit(nxt) == 0 && nxt != C_UNDER { break; }
-                    kind = T_FLOAT;
-                    advance();
-                    loop {
-                        c3 := cur_char();
-                        if is_digit(c3) != 0 || c3 == C_UNDER { advance(); }
-                        else { break; }
-                    }
-                } else { break; }
+                if is_digit(cur_char_at(_pos)) != 0 { _pos = _pos + 1; }
+                else { break; }
             }
-            // Check for integer/float suffix
+            // Hex/octal/binary prefix
+            if c == 48 && _pos - start == 1 {
+                nx := cur_char_at(_pos);
+                if nx == 120 || nx == 88 { _pos = _pos + 1; loop { hc := cur_char_at(_pos); if is_digit(hc) != 0 || (hc >= 65 && hc <= 70) || (hc >= 97 && hc <= 102) { _pos = _pos + 1; } else { break; } } }
+                else if nx == 111 || nx == 79 { _pos = _pos + 1; loop { oc := cur_char_at(_pos); if oc >= 48 && oc <= 55 { _pos = _pos + 1; } else { break; } } }
+                else if nx == 98 || nx == 66 { _pos = _pos + 1; loop { bc := cur_char_at(_pos); if bc == 48 || bc == 49 { _pos = _pos + 1; } else { break; } } }
+            }
+            // Float
+            if cur_char_at(_pos) == C_DOT {
+                _pos = _pos + 1;
+                loop { if is_digit(cur_char_at(_pos)) != 0 { _pos = _pos + 1; } else { break; } }
+            }
+            // Suffix
             suffix : ., mut = "";
-            if is_alpha(cur_char()) != 0 || cur_char() == 105/*i*/ || cur_char() == 117/*u*/ || cur_char() == 102/*f*/ {
+            sx := cur_char_at(_pos);
+            if is_alpha(sx) != 0 {
+                ss := _pos;
                 loop {
-                    c4 := cur_char();
-                    if is_alpha(c4) != 0 || is_digit(c4) != 0 {
-                        suffix = suffix + chr(c4);
-                        advance();
-                    } else { break; }
+                    if is_alpha(cur_char_at(_pos)) != 0 { _pos = _pos + 1; } else { break; }
                 }
-                if suffix == "i8" { kind = T_INT_I8; }
-                else if suffix == "i16" { kind = T_INT_I16; }
-                else if suffix == "i32" { kind = T_INT_I32; }
-                else if suffix == "i64" { kind = T_INT_I64; }
-                else if suffix == "u8" { kind = T_INT_U8; }
-                else if suffix == "u16" { kind = T_INT_U16; }
-                else if suffix == "u32" { kind = T_INT_U32; }
-                else if suffix == "u64" { kind = T_INT_U64; }
-                else if suffix == "f32" { kind = T_FLOAT_F32; }
-                else if suffix == "f64" { kind = T_FLOAT_F64; }
+                suffix = str_sub(g_source, ss, _pos - ss);
             }
-            num_str := str_sub(g_source, start, g_pos - start - str_len(suffix));
-            // Strip _ separators before conversion
-            clean : ., mut = "";
-            ni : ., mut = 0;
-            nsl := str_len(num_str);
-            loop {
-                if ni >= nsl { break; }
-                nc := load8(num_str, ni);
-                if nc != C_UNDER { clean = clean + chr(nc); }
-                ni = ni + 1;
-            }
-            val := str_int(clean);
-            add_token_int(kind, val);
-            skip_whitespace();
+            num_str := str_sub(g_source, start, _pos - start - str_len(suffix));
+            ival : ., mut = str_int(num_str);
+            if suffix == "u8" || suffix == "u16" || suffix == "u32" || suffix == "u64" { }
+            else if suffix == "i8" || suffix == "i16" || suffix == "i32" || suffix == "i64" { }
+            else if suffix == "f32" || suffix == "f64" { }
+            else if str_len(suffix) > 0 { }
+            if str_len(suffix) > 0 { add_tok(T_INT, -1, start_line, start_col); }
+            else { add_tok_int(T_INT, ival, start_line, start_col); }
+            _pos = skip_ws(_pos);
             continue;
         }
 
-        // String literal
+        // String interpolation
         if c == C_DQUOTE {
-            advance();
+            _pos = _pos + 1;
             str_val : ., mut = "";
             loop {
-                if g_pos >= g_source_len { break; }
-                cc := cur_char(); if cc == C_DQUOTE { break; }
+                cc := cur_char_at(_pos);
+                if cc == 0 || cc == C_NL { break; }
+                if cc == C_DQUOTE { _pos = _pos + 1; break; }
                 if cc == C_BSLASH {
-                    advance();
-                    if g_pos < g_source_len {
-                        esc := cur_char();
-                        if esc == 110/*n*/ { str_val = str_val + "\n"; }
-                        else if esc == 116/*t*/ { str_val = str_val + "\t"; }
-                        else if esc == 114/*r*/ { str_val = str_val + "\r"; }
-                        else if esc == 48/*0*/ { str_val = str_val + "\0"; }
-                        else if esc == C_BSLASH { str_val = str_val + "\\"; }
-                        else if esc == C_DQUOTE { str_val = str_val + "\""; }
-                        else if esc == 120/*x*/ {
-                            advance(); hi := cur_char(); advance(); lo := cur_char();
-                            hex_str := chr(hi) + chr(lo);
-                            if hex_str == "00" { str_val = str_val + "\0"; }
-                            else if hex_str == "0a" || hex_str == "0A" { str_val = str_val + "\n"; }
-                            else { str_val = str_val + "?"; }
-                        }
-                        else { str_val = str_val + chr(esc); }
-                        advance();
+                    _pos = _pos + 1;
+                    esc := cur_char_at(_pos);
+                    if esc == 110 { str_val = str_val + chr(10); }
+                    else if esc == 116 { str_val = str_val + chr(9); }
+                    else if esc == 114 { str_val = str_val + chr(13); }
+                    else if esc == 48 { str_val = str_val + chr(0); }
+                    else if esc == C_SQUOTE { str_val = str_val + "'"; }
+                    else if esc == C_BSLASH { str_val = str_val + chr(92); }
+                    else if esc == C_DQUOTE { str_val = str_val + chr(34); }
+                    else if esc == 120 {
+                        _pos = _pos + 1; hi := cur_char_at(_pos); _pos = _pos + 1; lo := cur_char_at(_pos);
+                        hex_str := chr(hi) + chr(lo);
+                        if hex_str == "00" { str_val = str_val + chr(0); }
+                        else if hex_str == "0a" || hex_str == "0A" { str_val = str_val + chr(10); }
+                        else { str_val = str_val + "?"; }
                     }
+                    else { str_val = str_val + chr(esc); }
+                } else if cc == 36 && peek_at(_pos) == C_LBRACE {
+                    // Interpolation: skip for now
+                    _pos = _pos + 2;
+                    loop { if cur_char_at(_pos) == C_RBRACE { _pos = _pos + 1; break; } _pos = _pos + 1; }
                 } else {
                     str_val = str_val + chr(cc);
-                    advance();
                 }
+                _pos = _pos + 1;
             }
-            advance();
-            add_token_str(T_STRING, str_val);
-            skip_whitespace();
+            add_tok_str(T_STRING, str_val, start_line, start_col);
+            _pos = skip_ws(_pos);
             continue;
         }
 
         // Char literal
         if c == C_SQUOTE {
-            advance();
-            ch : ., mut = "\0";
-            if cur_char() == C_BSLASH {
-                advance();
-                esc := cur_char();
-                if esc == 110/*n*/ { ch = "\n"; }
-                else if esc == 116/*t*/ { ch = "\t"; }
-                else if esc == 114/*r*/ { ch = "\r"; }
-                else if esc == 48/*0*/ { ch = "\0"; }
-                else if esc == C_SQUOTE { ch = "'"; }
-                else if esc == C_BSLASH { ch = "\\"; }
-                else if esc == C_DQUOTE { ch = "\""; }
-                else if esc == 120/*x*/ {
-                    advance(); hi := cur_char(); advance(); lo := cur_char();
-                    hex_str := chr(hi) + chr(lo);
-                    if hex_str == "00" { ch = "\0"; }
-                    else if hex_str == "0a" || hex_str == "0A" { ch = "\n"; }
+            _pos = _pos + 1;
+            ch : ., mut = chr(0);
+            if cur_char_at(_pos) == C_BSLASH {
+                _pos = _pos + 1;
+                esc2 := cur_char_at(_pos);
+                if esc2 == 110 { ch = chr(10); }
+                else if esc2 == 116 { ch = chr(9); }
+                else if esc2 == 114 { ch = chr(13); }
+                else if esc2 == 48 { ch = chr(0); }
+                else if esc2 == C_SQUOTE { ch = "'"; }
+                else if esc2 == C_BSLASH { ch = chr(92); }
+                else if esc2 == C_DQUOTE { ch = chr(34); }
+                else if esc2 == 120 {
+                    _pos = _pos + 1; hi2 := cur_char_at(_pos); _pos = _pos + 1; lo2 := cur_char_at(_pos);
+                    if chr(hi2) + chr(lo2) == "00" { ch = chr(0); }
                     else { ch = "?"; }
                 }
-                else { ch = chr(esc); }
-                advance();
+                else { ch = chr(esc2); }
+                _pos = _pos + 1;
             } else {
-                ch = chr(cur_char());
-                advance();
+                ch = chr(cur_char_at(_pos));
+                _pos = _pos + 1;
             }
-            if cur_char() == C_SQUOTE { advance(); }
-            add_token_str(T_CHAR, ch);
-            skip_whitespace();
+            if cur_char_at(_pos) == C_SQUOTE { _pos = _pos + 1; }
+            add_tok_str(T_CHAR, ch, start_line, start_col);
+            _pos = skip_ws(_pos);
             continue;
         }
 
-        // Multi-character operators
-        if c == C_EQ    && peek() == C_EQ   { advance(); advance(); add_token(T_EQEQ); skip_whitespace(); continue; }
-        if c == C_BANG  && peek() == C_EQ   { advance(); advance(); add_token(T_BANGEQ); skip_whitespace(); continue; }
-        if c == C_LT    && peek() == C_EQ   { advance(); advance(); add_token(T_LTEQ); skip_whitespace(); continue; }
-        if c == C_GT    && peek() == C_EQ   { advance(); advance(); add_token(T_GTEQ); skip_whitespace(); continue; }
-        if c == C_AMP   && peek() == C_AMP  { advance(); advance(); add_token(T_ANDAND); skip_whitespace(); continue; }
-        if c == C_PIPE  && peek() == C_PIPE { advance(); advance(); add_token(T_PIPEPIPE); skip_whitespace(); continue; }
-        if c == C_DASH  && peek() == C_GT   { advance(); advance(); add_token(T_ARROW); skip_whitespace(); continue; }
-        if c == C_EQ    && peek() == C_GT   { advance(); advance(); add_token(T_FATARROW); skip_whitespace(); continue; }
-        if c == C_COLON && peek() == C_EQ   { advance(); advance(); add_token(T_COLON_EQ); skip_whitespace(); continue; }
-        if c == C_COLON && peek() == C_COLON{ advance(); advance(); add_token(T_PATHSEP); skip_whitespace(); continue; }
-        if c == C_DOT   && peek() == C_DOT {
-            advance(); advance();
-            if cur_char() == C_DOT { advance(); add_token(T_DOTDOTDOT); }
-            else { add_token(T_DOTDOT); }
-            skip_whitespace(); continue; }
+        // Multi-char operators
+        if c == C_EQ    && peek_at(_pos) == C_EQ   { _pos = _pos + 2; add_tok(T_EQEQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_BANG  && peek_at(_pos) == C_EQ   { _pos = _pos + 2; add_tok(T_BANGEQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_LT    && peek_at(_pos) == C_EQ   { _pos = _pos + 2; add_tok(T_LTEQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_GT    && peek_at(_pos) == C_EQ   { _pos = _pos + 2; add_tok(T_GTEQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_AMP   && peek_at(_pos) == C_AMP  { _pos = _pos + 2; add_tok(T_ANDAND, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_PIPE  && peek_at(_pos) == C_PIPE { _pos = _pos + 2; add_tok(T_PIPEPIPE, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_DASH  && peek_at(_pos) == C_GT   { _pos = _pos + 2; add_tok(T_ARROW, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_EQ    && peek_at(_pos) == C_GT   { _pos = _pos + 2; add_tok(T_FATARROW, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_COLON && peek_at(_pos) == C_EQ   { _pos = _pos + 2; add_tok(T_COLON_EQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_COLON && peek_at(_pos) == C_COLON{ _pos = _pos + 2; add_tok(T_PATHSEP, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_DOT   && peek_at(_pos) == C_DOT {
+            _pos = _pos + 2;
+            if cur_char_at(_pos) == C_DOT { _pos = _pos + 1; add_tok(T_DOTDOTDOT, -1, start_line, start_col); }
+            else { add_tok(T_DOTDOT, -1, start_line, start_col); }
+            _pos = skip_ws(_pos); continue; }
 
         // Compound assignment operators
-        if c == C_PLUS  && peek() == C_EQ { advance(); advance(); add_token(T_PLUS_EQ); skip_whitespace(); continue; }
-        if c == C_DASH  && peek() == C_EQ { advance(); advance(); add_token(T_MINUS_EQ); skip_whitespace(); continue; }
-        if c == C_STAR  && peek() == C_EQ { advance(); advance(); add_token(T_STAR_EQ); skip_whitespace(); continue; }
-        if c == C_SLASH && peek() == C_EQ { advance(); advance(); add_token(T_SLASH_EQ); skip_whitespace(); continue; }
+        if c == C_PLUS  && peek_at(_pos) == C_EQ { _pos = _pos + 2; add_tok(T_PLUS_EQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_DASH  && peek_at(_pos) == C_EQ { _pos = _pos + 2; add_tok(T_MINUS_EQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_STAR  && peek_at(_pos) == C_EQ { _pos = _pos + 2; add_tok(T_STAR_EQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_SLASH && peek_at(_pos) == C_EQ { _pos = _pos + 2; add_tok(T_SLASH_EQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
 
-        // Single-character tokens
-        if c == C_LPAREN  { advance(); add_token(T_LPAREN); skip_whitespace(); continue; }
-        if c == C_RPAREN  { advance(); add_token(T_RPAREN); skip_whitespace(); continue; }
-        if c == C_LBRACE  { advance(); add_token(T_LBRACE); skip_whitespace(); continue; }
-        if c == C_RBRACE  { advance(); add_token(T_RBRACE); skip_whitespace(); continue; }
-        if c == C_LBRACK  { advance(); add_token(T_LBRACKET); skip_whitespace(); continue; }
-        if c == C_RBRACK  { advance(); add_token(T_RBRACKET); skip_whitespace(); continue; }
-        if c == C_COMMA   { advance(); add_token(T_COMMA); skip_whitespace(); continue; }
-        if c == C_SEMI    { advance(); add_token(T_SEMI); skip_whitespace(); continue; }
-        if c == C_COLON   { advance(); add_token(T_COLON); skip_whitespace(); continue; }
-        if c == C_DOT     { advance(); add_token(T_DOT); skip_whitespace(); continue; }
-        if c == C_EQ      { advance(); add_token(T_EQ); skip_whitespace(); continue; }
-        if c == C_BANG    { advance(); add_token(T_BANG); skip_whitespace(); continue; }
-        if c == C_LT      { advance(); add_token(T_LT); skip_whitespace(); continue; }
-        if c == C_GT      { advance(); add_token(T_GT); skip_whitespace(); continue; }
-        if c == C_PLUS    { advance(); add_token(T_PLUS); skip_whitespace(); continue; }
-        if c == C_DASH    { advance(); add_token(T_MINUS); skip_whitespace(); continue; }
-        if c == C_STAR    { advance(); add_token(T_STAR); skip_whitespace(); continue; }
-        if c == C_SLASH   { advance(); add_token(T_SLASH); skip_whitespace(); continue; }
-        if c == C_PERCENT { advance(); add_token(T_PERCENT); skip_whitespace(); continue; }
-        if c == C_AMP     { advance(); add_token(T_AMPERSAND); skip_whitespace(); continue; }
-        if c == C_UNDER   { advance(); add_token(T_UNDERSCORE); skip_whitespace(); continue; }
-        if c == C_AT      { advance(); add_token(T_AT); skip_whitespace(); continue; }
-        if c == C_QUES    { advance(); add_token(T_QUESTION); skip_whitespace(); continue; }
+        // Single-char tokens
+        if c == C_LPAREN  { _pos = _pos + 1; add_tok(T_LPAREN, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_RPAREN  { _pos = _pos + 1; add_tok(T_RPAREN, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_LBRACE  { _pos = _pos + 1; add_tok(T_LBRACE, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_RBRACE  { _pos = _pos + 1; add_tok(T_RBRACE, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_LBRACK  { _pos = _pos + 1; add_tok(T_LBRACKET, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_RBRACK  { _pos = _pos + 1; add_tok(T_RBRACKET, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_COMMA   { _pos = _pos + 1; add_tok(T_COMMA, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_SEMI    { _pos = _pos + 1; add_tok(T_SEMI, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_COLON   { _pos = _pos + 1; add_tok(T_COLON, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_DOT     { _pos = _pos + 1; add_tok(T_DOT, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_EQ      { _pos = _pos + 1; add_tok(T_EQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_BANG    { _pos = _pos + 1; add_tok(T_BANG, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_LT      { _pos = _pos + 1; add_tok(T_LT, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_GT      { _pos = _pos + 1; add_tok(T_GT, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_PLUS    { _pos = _pos + 1; add_tok(T_PLUS, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_DASH    { _pos = _pos + 1; add_tok(T_MINUS, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_STAR    { _pos = _pos + 1; add_tok(T_STAR, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_SLASH   { _pos = _pos + 1; add_tok(T_SLASH, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_PERCENT { _pos = _pos + 1; add_tok(T_PERCENT, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_AMP     { _pos = _pos + 1; add_tok(T_AMPERSAND, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_UNDER   { _pos = _pos + 1; add_tok(T_UNDERSCORE, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_AT      { _pos = _pos + 1; add_tok(T_AT, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_QUES    { _pos = _pos + 1; add_tok(T_QUESTION, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
 
-        // Unknown character
-        advance();
-        skip_whitespace();
+        // Unknown
+        _pos = _pos + 1;
+        _pos = skip_ws(_pos);
     }
 
-    add_token(T_EOF);
+    add_tok(T_EOF, -1, _line, _col);
+    // Sync back globals
+    g_pos = _pos;
+    g_line = _line;
+    g_col = _col;
+    g_source_len = _slen;
 }
