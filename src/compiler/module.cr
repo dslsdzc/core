@@ -355,7 +355,7 @@ fn res_imports() {
     }
     if str_len(import_core_acc) > 0 {
         g_source = import_core_acc + "\n" + g_source;
-        tokenize();
+        tokenize(g_source);
     }
 
     // Determine main file's fileid
@@ -495,7 +495,7 @@ fn res_imports() {
     }
     if str_len(extra_src) > 0 {
         g_source = g_source + extra_src;
-        tokenize();
+        tokenize(g_source);
     }
     build_line_fileid();
 }

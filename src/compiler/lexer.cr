@@ -23,6 +23,13 @@ C_DASH : int = 45; C_PERCENT : int = 37; C_AMP : int = 38;
 C_PIPE : int = 124; C_UNDER : int = 95; C_AT : int = 64;
 C_QUES : int = 63;
 
+fn add_error(msg: string) {
+    mi := str_intern(msg);
+    grow_errors(g_error_count + 1);
+    w64(g_errors, g_error_count * 8, mi);
+    g_error_count = g_error_count + 1;
+}
+
 fn is_alpha(c: int) -> int {
     if c >= 65 && c <= 90 { return 1; }
     if c >= 97 && c <= 122 { return 1; }
@@ -39,18 +46,17 @@ fn is_ident_char(c: int) -> int {
     return 0;
 }
 
-fn cur_char_at(pos: int) -> int {
-    if pos >= str_len(g_source) { return 0; }
-    return load8(g_source, pos);
+fn cur_char_at(src: string, pos: int, max_len: int) -> int {
+    if pos >= max_len { return 0; }
+    return load8(src, pos);
 }
-fn peek_at(pos: int) -> int {
-    if pos + 1 >= str_len(g_source) { return 0; }
-    return load8(g_source, pos + 1);
+fn peek_at(src: string, pos: int, max_len: int) -> int {
+    if pos + 1 >= max_len { return 0; }
+    return load8(src, pos + 1);
 }
 
 fn lookup_keyword(s: string) -> int {
     if s == "fn" { return T_FN; }
-    if s == "let" { return T_LET; }
     if s == "mut" { return T_MUT; }
     if s == "return" { return T_RETURN; }
     if s == "if" { return T_IF; }
@@ -68,16 +74,8 @@ fn lookup_keyword(s: string) -> int {
     if s == "match" { return T_MATCH; }
     if s == "import" { return T_IMPORT; }
     if s == "pub" { return T_PUB; }
-    if s == "int" || s == "i8" || s == "i16" || s == "i32" || s == "i64" { return T_INT_TYPE; }
-    if s == "u8" || s == "u16" || s == "u32" || s == "u64" { return T_INT_TYPE; }
-    if s == "float" || s == "f32" || s == "f64" { return T_FLOAT_TYPE; }
-    if s == "bool" { return T_BOOL_TYPE; }
-    if s == "unit" { return T_UNIT_TYPE; }
-    if s == "string" || s == "str" { return T_STR_TYPE; }
-    if s == "auto" { return T_AUTO_TYPE; }
     if s == "go" { return T_GO; }
     if s == "await" { return T_AWAIT; }
-    if s == "ref" { return T_REF; }
     if s == "unsafe" { return T_UNSAFE; }
     return T_IDENT;
 }
@@ -116,50 +114,55 @@ fn add_tok_str(kind: int, s: string, start_line: int, start_col: int) {
     g_token_count = g_token_count + 1;
 }
 
-fn skip_ws(pos: int) -> int {
+fn skip_ws(src: string, pos: int, max_len: int) -> int {
     loop {
-        c := cur_char_at(pos);
+        c := cur_char_at(src, pos, max_len);
         if c == C_SP || c == C_TB || c == C_CR || c == C_NL { pos = pos + 1; }
         else { break; }
     }
     return pos;
 }
 
-fn tokenize() {
+fn tokenize(_src: string) {
+    println("TA");
     g_token_count = 0;
     g_error_count = 0;
     _pos : ., mut = 0;
     _line : ., mut = 1;
     _col : ., mut = 1;
-    _slen : ., mut = str_len(g_source);
+    _slen : ., mut = str_len(_src);
+    println("TB");
+    _pos = skip_ws(_src, _pos, _slen);
+    println("TC");
 
-    _pos = skip_ws(_pos);
-
+    _cnt : ., mut = 0;
     loop {
-        if _pos >= _slen { break; }
-        c := cur_char_at(_pos);
+        if _pos >= _slen { println("BR"); break; }
+        _cnt = _cnt + 1;
+        if _cnt >= 100 { println("L100"); return; }
+        c := cur_char_at(_src, _pos, _slen);
         start_line : ., mut = _line;
         start_col : ., mut = _col;
 
         // Comments
-        if c == C_SLASH && peek_at(_pos) == C_SLASH {
+        if c == C_SLASH && peek_at(_src, _pos, _slen) == C_SLASH {
             _pos = _pos + 2;
             loop {
                 if _pos >= _slen { break; }
-                if cur_char_at(_pos) == C_NL { _pos = _pos + 1; break; }
+                if cur_char_at(_src, _pos, _slen) == C_NL { _pos = _pos + 1; break; }
                 _pos = _pos + 1;
             }
-            _pos = skip_ws(_pos);
+            _pos = skip_ws(_src, _pos, _slen);
             continue;
         }
-        if c == C_SLASH && peek_at(_pos) == C_STAR {
+        if c == C_SLASH && peek_at(_src, _pos, _slen) == C_STAR {
             _pos = _pos + 2;
             loop {
                 if _pos >= _slen { break; }
-                if cur_char_at(_pos) == C_STAR && peek_at(_pos) == C_SLASH { _pos = _pos + 2; break; }
+                if cur_char_at(_src, _pos, _slen) == C_STAR && peek_at(_src, _pos, _slen) == C_SLASH { _pos = _pos + 2; break; }
                 _pos = _pos + 1;
             }
-            _pos = skip_ws(_pos);
+            _pos = skip_ws(_src, _pos, _slen);
             continue;
         }
 
@@ -168,47 +171,47 @@ fn tokenize() {
             start := _pos;
             _pos = _pos + 1;
             loop {
-                c2 := cur_char_at(_pos);
+                c2 := cur_char_at(_src, _pos, _slen);
                 if is_ident_char(c2) != 0 { _pos = _pos + 1; } else { break; }
             }
-            ident := str_sub(g_source, start, _pos - start);
+            ident := str_sub(_src, start, _pos - start);
             kind := lookup_keyword(ident);
             add_tok_str(kind, ident, start_line, start_col);
-            _pos = skip_ws(_pos);
+            _pos = skip_ws(_src, _pos, _slen);
             continue;
         }
 
         // Number
-        if is_digit(c) != 0 || (c == C_DOT && is_digit(peek_at(_pos)) != 0) {
+        if is_digit(c) != 0 || (c == C_DOT && is_digit(peek_at(_src, _pos, _slen)) != 0) {
             start := _pos;
-            if c == C_DOT { _pos = _pos + 1; c = cur_char_at(_pos); }
+            if c == C_DOT { _pos = _pos + 1; c = cur_char_at(_src, _pos, _slen); }
             loop {
-                if is_digit(cur_char_at(_pos)) != 0 { _pos = _pos + 1; }
+                if is_digit(cur_char_at(_src, _pos, _slen)) != 0 { _pos = _pos + 1; }
                 else { break; }
             }
             // Hex/octal/binary prefix
             if c == 48 && _pos - start == 1 {
-                nx := cur_char_at(_pos);
-                if nx == 120 || nx == 88 { _pos = _pos + 1; loop { hc := cur_char_at(_pos); if is_digit(hc) != 0 || (hc >= 65 && hc <= 70) || (hc >= 97 && hc <= 102) { _pos = _pos + 1; } else { break; } } }
-                else if nx == 111 || nx == 79 { _pos = _pos + 1; loop { oc := cur_char_at(_pos); if oc >= 48 && oc <= 55 { _pos = _pos + 1; } else { break; } } }
-                else if nx == 98 || nx == 66 { _pos = _pos + 1; loop { bc := cur_char_at(_pos); if bc == 48 || bc == 49 { _pos = _pos + 1; } else { break; } } }
+                nx := cur_char_at(_src, _pos, _slen);
+                if nx == 120 || nx == 88 { _pos = _pos + 1; loop { hc := cur_char_at(_src, _pos, _slen); if is_digit(hc) != 0 || (hc >= 65 && hc <= 70) || (hc >= 97 && hc <= 102) { _pos = _pos + 1; } else { break; } } }
+                else if nx == 111 || nx == 79 { _pos = _pos + 1; loop { oc := cur_char_at(_src, _pos, _slen); if oc >= 48 && oc <= 55 { _pos = _pos + 1; } else { break; } } }
+                else if nx == 98 || nx == 66 { _pos = _pos + 1; loop { bc := cur_char_at(_src, _pos, _slen); if bc == 48 || bc == 49 { _pos = _pos + 1; } else { break; } } }
             }
             // Float
-            if cur_char_at(_pos) == C_DOT {
+            if cur_char_at(_src, _pos, _slen) == C_DOT {
                 _pos = _pos + 1;
-                loop { if is_digit(cur_char_at(_pos)) != 0 { _pos = _pos + 1; } else { break; } }
+                loop { if is_digit(cur_char_at(_src, _pos, _slen)) != 0 { _pos = _pos + 1; } else { break; } }
             }
             // Suffix
             suffix : ., mut = "";
-            sx := cur_char_at(_pos);
+            sx := cur_char_at(_src, _pos, _slen);
             if is_alpha(sx) != 0 {
                 ss := _pos;
                 loop {
-                    if is_alpha(cur_char_at(_pos)) != 0 { _pos = _pos + 1; } else { break; }
+                    if is_alpha(cur_char_at(_src, _pos, _slen)) != 0 { _pos = _pos + 1; } else { break; }
                 }
-                suffix = str_sub(g_source, ss, _pos - ss);
+                suffix = str_sub(_src, ss, _pos - ss);
             }
-            num_str := str_sub(g_source, start, _pos - start - str_len(suffix));
+            num_str := str_sub(_src, start, _pos - start - str_len(suffix));
             ival : ., mut = str_int(num_str);
             if suffix == "u8" || suffix == "u16" || suffix == "u32" || suffix == "u64" { }
             else if suffix == "i8" || suffix == "i16" || suffix == "i32" || suffix == "i64" { }
@@ -216,7 +219,7 @@ fn tokenize() {
             else if str_len(suffix) > 0 { }
             if str_len(suffix) > 0 { add_tok(T_INT, -1, start_line, start_col); }
             else { add_tok_int(T_INT, ival, start_line, start_col); }
-            _pos = skip_ws(_pos);
+            _pos = skip_ws(_src, _pos, _slen);
             continue;
         }
 
@@ -225,12 +228,12 @@ fn tokenize() {
             _pos = _pos + 1;
             str_val : ., mut = "";
             loop {
-                cc := cur_char_at(_pos);
+                cc := cur_char_at(_src, _pos, _slen);
                 if cc == 0 || cc == C_NL { break; }
                 if cc == C_DQUOTE { _pos = _pos + 1; break; }
                 if cc == C_BSLASH {
                     _pos = _pos + 1;
-                    esc := cur_char_at(_pos);
+                    esc := cur_char_at(_src, _pos, _slen);
                     if esc == 110 { str_val = str_val + chr(10); }
                     else if esc == 116 { str_val = str_val + chr(9); }
                     else if esc == 114 { str_val = str_val + chr(13); }
@@ -239,24 +242,24 @@ fn tokenize() {
                     else if esc == C_BSLASH { str_val = str_val + chr(92); }
                     else if esc == C_DQUOTE { str_val = str_val + chr(34); }
                     else if esc == 120 {
-                        _pos = _pos + 1; hi := cur_char_at(_pos); _pos = _pos + 1; lo := cur_char_at(_pos);
+                        _pos = _pos + 1; hi := cur_char_at(_src, _pos, _slen); _pos = _pos + 1; lo := cur_char_at(_src, _pos, _slen);
                         hex_str := chr(hi) + chr(lo);
                         if hex_str == "00" { str_val = str_val + chr(0); }
                         else if hex_str == "0a" || hex_str == "0A" { str_val = str_val + chr(10); }
                         else { str_val = str_val + "?"; }
                     }
                     else { str_val = str_val + chr(esc); }
-                } else if cc == 36 && peek_at(_pos) == C_LBRACE {
+                } else if cc == 36 && peek_at(_src, _pos, _slen) == C_LBRACE {
                     // Interpolation: skip for now
                     _pos = _pos + 2;
-                    loop { if cur_char_at(_pos) == C_RBRACE { _pos = _pos + 1; break; } _pos = _pos + 1; }
+                    loop { if cur_char_at(_src, _pos, _slen) == C_RBRACE { _pos = _pos + 1; break; } _pos = _pos + 1; }
                 } else {
                     str_val = str_val + chr(cc);
                 }
                 _pos = _pos + 1;
             }
             add_tok_str(T_STRING, str_val, start_line, start_col);
-            _pos = skip_ws(_pos);
+            _pos = skip_ws(_src, _pos, _slen);
             continue;
         }
 
@@ -264,9 +267,9 @@ fn tokenize() {
         if c == C_SQUOTE {
             _pos = _pos + 1;
             ch : ., mut = chr(0);
-            if cur_char_at(_pos) == C_BSLASH {
+            if cur_char_at(_src, _pos, _slen) == C_BSLASH {
                 _pos = _pos + 1;
-                esc2 := cur_char_at(_pos);
+                esc2 := cur_char_at(_src, _pos, _slen);
                 if esc2 == 110 { ch = chr(10); }
                 else if esc2 == 116 { ch = chr(9); }
                 else if esc2 == 114 { ch = chr(13); }
@@ -275,73 +278,73 @@ fn tokenize() {
                 else if esc2 == C_BSLASH { ch = chr(92); }
                 else if esc2 == C_DQUOTE { ch = chr(34); }
                 else if esc2 == 120 {
-                    _pos = _pos + 1; hi2 := cur_char_at(_pos); _pos = _pos + 1; lo2 := cur_char_at(_pos);
+                    _pos = _pos + 1; hi2 := cur_char_at(_src, _pos, _slen); _pos = _pos + 1; lo2 := cur_char_at(_src, _pos, _slen);
                     if chr(hi2) + chr(lo2) == "00" { ch = chr(0); }
                     else { ch = "?"; }
                 }
                 else { ch = chr(esc2); }
                 _pos = _pos + 1;
             } else {
-                ch = chr(cur_char_at(_pos));
+                ch = chr(cur_char_at(_src, _pos, _slen));
                 _pos = _pos + 1;
             }
-            if cur_char_at(_pos) == C_SQUOTE { _pos = _pos + 1; }
+            if cur_char_at(_src, _pos, _slen) == C_SQUOTE { _pos = _pos + 1; }
             add_tok_str(T_CHAR, ch, start_line, start_col);
-            _pos = skip_ws(_pos);
+            _pos = skip_ws(_src, _pos, _slen);
             continue;
         }
 
         // Multi-char operators
-        if c == C_EQ    && peek_at(_pos) == C_EQ   { _pos = _pos + 2; add_tok(T_EQEQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_BANG  && peek_at(_pos) == C_EQ   { _pos = _pos + 2; add_tok(T_BANGEQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_LT    && peek_at(_pos) == C_EQ   { _pos = _pos + 2; add_tok(T_LTEQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_GT    && peek_at(_pos) == C_EQ   { _pos = _pos + 2; add_tok(T_GTEQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_AMP   && peek_at(_pos) == C_AMP  { _pos = _pos + 2; add_tok(T_ANDAND, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_PIPE  && peek_at(_pos) == C_PIPE { _pos = _pos + 2; add_tok(T_PIPEPIPE, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_DASH  && peek_at(_pos) == C_GT   { _pos = _pos + 2; add_tok(T_ARROW, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_EQ    && peek_at(_pos) == C_GT   { _pos = _pos + 2; add_tok(T_FATARROW, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_COLON && peek_at(_pos) == C_EQ   { _pos = _pos + 2; add_tok(T_COLON_EQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_COLON && peek_at(_pos) == C_COLON{ _pos = _pos + 2; add_tok(T_PATHSEP, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_DOT   && peek_at(_pos) == C_DOT {
+        if c == C_EQ    && peek_at(_src, _pos, _slen) == C_EQ   { _pos = _pos + 2; add_tok(T_EQEQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_BANG  && peek_at(_src, _pos, _slen) == C_EQ   { _pos = _pos + 2; add_tok(T_BANGEQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_LT    && peek_at(_src, _pos, _slen) == C_EQ   { _pos = _pos + 2; add_tok(T_LTEQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_GT    && peek_at(_src, _pos, _slen) == C_EQ   { _pos = _pos + 2; add_tok(T_GTEQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_AMP   && peek_at(_src, _pos, _slen) == C_AMP  { _pos = _pos + 2; add_tok(T_ANDAND, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_PIPE  && peek_at(_src, _pos, _slen) == C_PIPE { _pos = _pos + 2; add_tok(T_PIPEPIPE, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_DASH  && peek_at(_src, _pos, _slen) == C_GT   { _pos = _pos + 2; add_tok(T_ARROW, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_EQ    && peek_at(_src, _pos, _slen) == C_GT   { _pos = _pos + 2; add_tok(T_FATARROW, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_COLON && peek_at(_src, _pos, _slen) == C_EQ   { _pos = _pos + 2; add_tok(T_COLON_EQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_COLON && peek_at(_src, _pos, _slen) == C_COLON{ _pos = _pos + 2; add_tok(T_PATHSEP, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_DOT   && peek_at(_src, _pos, _slen) == C_DOT {
             _pos = _pos + 2;
-            if cur_char_at(_pos) == C_DOT { _pos = _pos + 1; add_tok(T_DOTDOTDOT, -1, start_line, start_col); }
+            if cur_char_at(_src, _pos, _slen) == C_DOT { _pos = _pos + 1; add_tok(T_DOTDOTDOT, -1, start_line, start_col); }
             else { add_tok(T_DOTDOT, -1, start_line, start_col); }
-            _pos = skip_ws(_pos); continue; }
+            _pos = skip_ws(_src, _pos, _slen); continue; }
 
         // Compound assignment operators
-        if c == C_PLUS  && peek_at(_pos) == C_EQ { _pos = _pos + 2; add_tok(T_PLUS_EQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_DASH  && peek_at(_pos) == C_EQ { _pos = _pos + 2; add_tok(T_MINUS_EQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_STAR  && peek_at(_pos) == C_EQ { _pos = _pos + 2; add_tok(T_STAR_EQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_SLASH && peek_at(_pos) == C_EQ { _pos = _pos + 2; add_tok(T_SLASH_EQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_PLUS  && peek_at(_src, _pos, _slen) == C_EQ { _pos = _pos + 2; add_tok(T_PLUS_EQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_DASH  && peek_at(_src, _pos, _slen) == C_EQ { _pos = _pos + 2; add_tok(T_MINUS_EQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_STAR  && peek_at(_src, _pos, _slen) == C_EQ { _pos = _pos + 2; add_tok(T_STAR_EQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_SLASH && peek_at(_src, _pos, _slen) == C_EQ { _pos = _pos + 2; add_tok(T_SLASH_EQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
 
         // Single-char tokens
-        if c == C_LPAREN  { _pos = _pos + 1; add_tok(T_LPAREN, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_RPAREN  { _pos = _pos + 1; add_tok(T_RPAREN, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_LBRACE  { _pos = _pos + 1; add_tok(T_LBRACE, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_RBRACE  { _pos = _pos + 1; add_tok(T_RBRACE, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_LBRACK  { _pos = _pos + 1; add_tok(T_LBRACKET, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_RBRACK  { _pos = _pos + 1; add_tok(T_RBRACKET, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_COMMA   { _pos = _pos + 1; add_tok(T_COMMA, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_SEMI    { _pos = _pos + 1; add_tok(T_SEMI, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_COLON   { _pos = _pos + 1; add_tok(T_COLON, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_DOT     { _pos = _pos + 1; add_tok(T_DOT, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_EQ      { _pos = _pos + 1; add_tok(T_EQ, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_BANG    { _pos = _pos + 1; add_tok(T_BANG, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_LT      { _pos = _pos + 1; add_tok(T_LT, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_GT      { _pos = _pos + 1; add_tok(T_GT, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_PLUS    { _pos = _pos + 1; add_tok(T_PLUS, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_DASH    { _pos = _pos + 1; add_tok(T_MINUS, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_STAR    { _pos = _pos + 1; add_tok(T_STAR, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_SLASH   { _pos = _pos + 1; add_tok(T_SLASH, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_PERCENT { _pos = _pos + 1; add_tok(T_PERCENT, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_AMP     { _pos = _pos + 1; add_tok(T_AMPERSAND, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_UNDER   { _pos = _pos + 1; add_tok(T_UNDERSCORE, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_AT      { _pos = _pos + 1; add_tok(T_AT, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
-        if c == C_QUES    { _pos = _pos + 1; add_tok(T_QUESTION, -1, start_line, start_col); _pos = skip_ws(_pos); continue; }
+        if c == C_LPAREN  { _pos = _pos + 1; add_tok(T_LPAREN, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_RPAREN  { _pos = _pos + 1; add_tok(T_RPAREN, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_LBRACE  { _pos = _pos + 1; add_tok(T_LBRACE, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_RBRACE  { _pos = _pos + 1; add_tok(T_RBRACE, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_LBRACK  { _pos = _pos + 1; add_tok(T_LBRACKET, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_RBRACK  { _pos = _pos + 1; add_tok(T_RBRACKET, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_COMMA   { _pos = _pos + 1; add_tok(T_COMMA, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_SEMI    { _pos = _pos + 1; add_tok(T_SEMI, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_COLON   { _pos = _pos + 1; add_tok(T_COLON, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_DOT     { _pos = _pos + 1; add_tok(T_DOT, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_EQ      { _pos = _pos + 1; add_tok(T_EQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_BANG    { _pos = _pos + 1; add_tok(T_BANG, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_LT      { _pos = _pos + 1; add_tok(T_LT, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_GT      { _pos = _pos + 1; add_tok(T_GT, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_PLUS    { _pos = _pos + 1; add_tok(T_PLUS, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_DASH    { _pos = _pos + 1; add_tok(T_MINUS, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_STAR    { _pos = _pos + 1; add_tok(T_STAR, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_SLASH   { _pos = _pos + 1; add_tok(T_SLASH, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_PERCENT { _pos = _pos + 1; add_tok(T_PERCENT, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_AMP     { _pos = _pos + 1; add_tok(T_AMPERSAND, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_UNDER   { _pos = _pos + 1; add_tok(T_UNDERSCORE, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_AT      { _pos = _pos + 1; add_tok(T_AT, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == C_QUES    { _pos = _pos + 1; add_tok(T_QUESTION, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
 
         // Unknown
         _pos = _pos + 1;
-        _pos = skip_ws(_pos);
+        _pos = skip_ws(_src, _pos, _slen);
     }
 
     add_tok(T_EOF, -1, _line, _col);

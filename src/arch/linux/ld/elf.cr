@@ -713,9 +713,19 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         }
         if gvi >= 0 {
             lea_end_va := TEXT_BASE + ppos + 4;
-            target_va := bss_va + 16 + r64(g_x86_global_off, gvi * 8);  // +16 to skip heap_ptr(8) + heap_start(8)
+            off := r64(g_x86_global_off, gvi * 8);
+            target_va := bss_va + 16 + off;
             rel := target_va - lea_end_va;
-            w32(buf, ppos, rel); }
+            w32(buf, ppos, rel);
+            // Verify write: read back and check
+            rbv := bu8(buf,ppos) + bu8(buf,ppos+1)*256 + bu8(buf,ppos+2)*65536 + bu8(buf,ppos+3)*16777216;
+            if rbv >= 2147483648 { rbv = rbv - 4294967296; }
+            if rbv != rel && gvi >= 0 && gvi < 10 {
+                print("  MISMATCH ppos="); print(int_str(ppos));
+                print(" rel="); print(int_str(rel));
+                print(" rbv="); println(int_str(rbv));
+            }
+            }
     rpi2 = rpi2 + 1; }
     g_x86_rip_patch_count = 0;
 

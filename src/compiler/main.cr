@@ -114,7 +114,7 @@ fn read_source_or_project(src_path: string) -> int {
 // Returns 0 on success, 1 on error.
 fn run_frontend() -> int {
     println("[1/5] tokenize...");
-    tokenize();
+    tokenize(g_source);
     println("[2/5] resolve imports...");
     res_imports();
     println("[3/5] parse...");
@@ -453,7 +453,7 @@ fn corec_main() -> int {
 // Full compilation: source -> assembly (used by tests and programmatic API)
 fn compile_source(source: string) -> string {
     g_source = source;
-    tokenize();
+    tokenize(g_source);
     res_imports();
     parse_all();
     check_all();
