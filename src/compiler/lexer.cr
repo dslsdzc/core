@@ -30,20 +30,20 @@ fn add_error(msg: string) {
     g_error_count = g_error_count + 1;
 }
 
-fn is_alpha(c: int) -> int {
-    if c >= 65 && c <= 90 { return 1; }
-    if c >= 97 && c <= 122 { return 1; }
-    if c == 95 { return 1; }
-    return 0;
+fn cur_char() -> int {
+    // Use str_len(g_source) instead of g_source_len to avoid
+    // global variable patching bug in self-hosted ELF backend.
+    // g_source_len is stored to a wrong BSS address in tokenize(),
+    // causing cur_char() to always see it as 0 (EOF).
+    src_len := str_len(g_source);
+    if g_pos >= src_len { return 0; }
+    return load8(g_source, g_pos);
 }
-fn is_digit(c: int) -> int {
-    if c >= 48 && c <= 57 { return 1; }
-    return 0;
-}
-fn is_ident_char(c: int) -> int {
-    if is_alpha(c) != 0 { return 1; }
-    if is_digit(c) != 0 { return 1; }
-    return 0;
+
+fn peek() -> int {
+    src_len := str_len(g_source);
+    if g_pos + 1 >= src_len { return 0; }
+    return load8(g_source, g_pos + 1);
 }
 
 fn cur_char_at(src: string, pos: int, max_len: int) -> int {
