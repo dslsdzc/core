@@ -2,122 +2,59 @@
 
 ## ✅ 已完成
 
-### ✅ 本次 Session（2025-07-02/03）：5 个自举阻塞 bug 修复
-| 改进 | 文件 | 说明 |
+### 本阶段（2025-07-08/09）：自举阻塞——ELF 后端修复 + tokenizer 全本地化
+
+| 修复 | 文件 | 说明 |
 |------|------|------|
-| `g_global_let_count` 不再重置 | `parser.cr` | 保留 count 使 `ir_gen_globals()` 注册所有 752 个全局变量 |
-| `e2_load_var` 全局加载 | `instr.cr` | `mov r, [r11]` 替代 `mov r, r11`（传值而非地址） |
-| `io.cr` 自动导入 | `_import.cr` | 加 `import io` 使 `print` 等函数可用 |
-| `concat` IR_CALL arg count | `ir_gen.cr` | s2=right_var → s2=2，参数显式打包 |
-| globals_size 用 max var_idx | `elf.cr` | 防止 heap 覆盖 BSS 全局变量 |
-| Arena 内存模型文档 | `docs/memory-model.md` | 设计文档
-| 改进 | 文件 | 说明 |
-|------|------|------|
-| 指令编码去魔数化 | `instr.cr` | 新增 `emit_rex`/`emit_modrm`/`emit_sib` 原语，所有编码全计算 |
-| 单遍 backpatching | `instr.cr`, `elf.cr` | 删除 `res_labels()` Phase 0，新增 `g_label_poses`/`g_pending_pos`/`g_pending_label` |
-| `.ccr v3` 格式 | `ccr_io.cr` | 可扩展 key-value 元数据段 |
-| 寄存器分配（线性扫描） | `opt.cr` | 5 被调用者保存寄存器（rbx, r12-r15），元数据走 `g_opt_meta` |
-| 调用者保存寄存器 prologue/epilogue | `elf.cr` | push/pop rbx, r12-r15，参数从栈加载到寄存器 |
-| 参数打包优化 | `ir_gen.cr` | CALL 连续参数跳过打包，减少 28KB IR 体积 |
-| 编码修复（store8 al->dl 等） | `instr.cr`, `elf.cr` | 8+ 个指令编码 bug 修复，详见 session 记录 |
-| ELF entry + Phdr 偏移修复 | `elf.cr` | `e_entry = 0x400000 + EHDR_SIZE + 2*PHDR_SIZE` |
-| 删除 `resolve.cr` | -- | 单遍 backpatching 不再需要 |
+| `res_labels` 后 rip_patch 复位 | `elf.cr` | scratch 发射不污染 patching |
+| `cur_char()`/`peek()` `str_len(g_source)` | `lexer.cr` | 绕过 BSS 读取问题 |
+| tokenizer 全本地变量（`_pos`/`_line`/`_col`） | `lexer.cr` | 不依赖 `g_pos`/`g_source_len` 等全局变量 |
+| 诊断非致命 | `main.cr` | checker warning 不阻断编译 |
+| `ir_gen_globals()` 全局去重 | `ir_gen.cr` | 防止 BSS 偏移覆盖 |
+| `g_extra_lets` 修复 `g_global_let_count++` | `parser.cr` | drain 循环漏了递增导致批量声明的非首变量丢失 |
+| 编码去魔数化 + `emit_rex`/`emit_modrm`/`emit_sib` | `instr.cr` | |
+| 单遍 backpatching | `instr.cr`, `elf.cr` | |
+| `.ccr v3` 格式 + key-value 元数据段 | `ccr_io.cr` | |
+| 寄存器分配（线性扫描） | `opt.cr` | |
+| 多轮 bug 修复（store8 al→dl, argv 寄存器, REX 编码等） | 多处 | |
 
-### ✅ ELF 后端全面修复 Phase 2（2025-06-23）
-自举 pipeline 完整走通：`build/corec` -> `build/corec2`（376KB ELF），`--help` 正常。
+### Panic handler
+- `src/stdlib/panic.cr` — Rust 风格，写 stderr + exit(1)
 
-| Bug | 文件 | 影响 |
-|-----|------|------|
-| `emit_start` argv 用错寄存器（`rdi`->`rsi`） | `elf.cr` | argv 不保存 |
-| IR_STORE/IR_STORE_PTR REX 编码 `73`->`76`/`79` | `instr.cr` | `mov [r11],rdx`->写空指针崩 |
-| `g_x86_rip_patch_count = 0` 重置在 emit_start 之后 | `elf.cr` | 清掉 argc/argv 的 rip patch |
-| `.ccr` 无全局变量段（v2 格式） | `ccr_io.cr` | `g_x86_is_global` 全 0->全局走栈偏移 |
-| `bss_va` 公式漏 60B sched_call | `elf.cr` | BSS 偏移一页->全局变量错位 |
-| IR_RETURN 不检查全局变量 | `instr.cr` | `return g_var` 读返回地址 |
-| `g2_str_off` 多算 8B header | `instr.cr` | 字符串常量 LEA 偏移 8 字节 |
-| `instr_size` 固定返回 8 | `instr.cr` | 所有偏移量计算错误 |
-| `instr_size` IR_STORE 全局/局部路径不匹配 | `instr.cr` | size 算错->跳转目标偏移 |
-| `&&` 无短路求值用在 `g_x86_global_cap` 检查 | `instr.cr` | `r64(null, ...)` 崩 |
-| 全局标记在 Phase 3 才做（Phase 0 res_labels 用不到） | `elf.cr` | instr_size 无法判断全局变量 |
-| `read_file` 字符串常量 LEA 偏移 8 字节 | `instr.cr` | open("/tmp/t.cr") 传垃圾指针->崩 |
-
-### ✅ Panic handler
-- `src/stdlib/panic.cr` -- Rust 风格，写 stderr + exit(1)，`import panic` 使用
-- 开发调试用
-
-### ✅ 之前完成
-- 全部 `[int; MAX_*]` -> 动态 byte buffer
-- `instr_size` + Phase 2 干运行消除
-- 全局搜索 O(n?)->O(n)（str_intern 哈希）
+### 之前完成
+- 全部 `[int; MAX_*]` → 动态 byte buffer
 - 字符串长度 header、lexer int-based char
-- EXPR_ARG 链表、SYM_SO_FN 生存期、硬编码函数名清理、函数名精简（358 处）
-- 自举推进（0.4s 关键字检查）
+- EXPR_ARG 链表、SYM_SO_FN 生存期、函数名精简
 - RawRef\<T\> 方案定稿、Zed 扩展
 
 ## 剩余工作
 
-### 内置版本控制（编译器全自动管理，代替 git/jj）
-- `build` 命令自动快照源码 AST 快照（非行级 diff，AST 级）
-- `--undo` 回滚、`log` 查看历史、`push` 推远程
-- 编译器理解 AST，可以做语义级 diff/merge（例如"仅重命名变量"不冲突）
-- 设计待定，自举完成后优先考虑
+### 1️⃣ corec2 tokenizer 死循环（自举阻塞项）
 
-### go 并发（go + await + flow + yield）
-- 解析器/检查器/IR 生成已全部完成
-- 解释器（run）数据流图不包含 IR_SPAWN/CALL 节点，导致 `go expr` 无法执行
-- ELF 后端（build）ir_gen 有 SIGSEGV（预先存在，与并发无关）
-- 需要修 `dataflow.cr` 的 `df_connect_srcs` 或彻底改用线性 IR 执行
+`build/corec2` `check`/`build`/`run` 任何源文件都卡在 tokenizer。
 
-### ELF 后端 O0 可用，O1 仍崩溃
-- `--opt-level 0` 全管线通过，生成正确的 ELF 二进制并正确执行
-- `--opt-level 1`（默认）崩溃：O1 的 `alloc_registers()` 写入的元数据在 `g_opt_meta` 中可能导致后端代码生成异常
-- 需要排查寄存器分配元数据与 ELF 后端的交互问题
-- `call_patch` 双通路（`g_x86_func_cp` + `g_x86_func_offsets`）工作正常
+**已修复：** 所有 ELF 后端 rip_patch/bss/instr_size 问题、parser drain 漏递增 `g_global_let_count`。
 
-### 1. corec2 tokenizer 循环不退出（自举阻塞项，待接手）
-corec2 `run '1+1'` 卡在 tokenizer：30 个字符全处理完毕、g_pos 正确递增到 30、g_source_len=30，
-但 `loop { if g_pos >= g_source_len { break; } }` 的 `break` 不触发（循环尾的 `IR_JUMP header_lbl` 缺失）。
+**仍缺失：** 约 9 个全局变量（`g_tok_cap`, `g_tokens`, `g_str_count`, `g_line`, `g_source_len`, `g_x86_is_global`, `g_x86_global_cap`, `g_str_hash`, `g_error_count`）未注册到 `g_ir_globals`。`check(T_IDENT) && is_new_var_decl()` 不命中它们，但独立测试文件相同模式可正常工作。编译器源码特有的某个 `parse_declaration()` 前置检查可能误吞了这些标识符。需用 GDB 或 syscall 断点追踪 `parse_all()` 中 token 位置跳转。
 
-**已修复（5 个 bug，全部推送）：**
-- `g_global_let_count` 重置 → 752 个全局变量全注册 ✓
-- `e2_load_var` 传地址而非值 ✓
-- `_import.cr` 缺 `io` → print 未定义 ✓
-- `concat` IR_CALL arg count 错 ✓
-- `globals_size` 太小 → heap 覆盖 BSS ✓
+**修复路线（推荐）：** 用 AST 扫描替代 `g_global_lets` 脆弱机制——`ir_gen_globals()` 遍历 `g_ast` 全量搜集 `EXPR_LET` 节点。
 
-**未解决核心问题（需 GDB 单步追踪）：**
-tokenizer 循环尾的 `IR_JUMP header_lbl`（回跳）没有被执行。
-可能根因：`lower_to_ccr()` 重建 `g_ir_instrs` 后 `g_ir_func_instr_count` 未更新，
-导致 ELF 后端的 Phase 2 和 Phase 3 使用的函数指令范围不一致，漏掉了循环尾的跳转指令。
+### 2️⃣ corec2 前端性能（~1000x 慢于 build/corec）
+ELF 后端全栈操作无寄存器分配。
 
-**调试方法：**
-1. `gdb -ex "break emit_instr" --args ./build/corec2 run '1+1'`
-2. 在 `emit_instr` 里查 tokenizer 函数最后几条指令是否有 `IR_JUMP (opcode=20)`
-3. 如果没有 → 问题在 IR 生成或 `lower_to_ccr()` 阶段
+### 3️⃣ go 并发 + flow + yield
+解释器数据流图不包含 IR_SPAWN/CALL 节点。
 
-### 2. corec2 前端性能（~1000x 慢于 build/corec）
-10 行程序 build/corec 0.02s -> corec2 8.0s。ELF 后端全栈操作无寄存器分配是直接原因。
+### 4️⃣ 标准库补全（collections、字符串插值）
 
-### 3. pass_cse 占位实现
-当前 `pass_cse` 只遍历前 10 条 IR_BINARY 指令但不做任何消除。需要实现真正的公共子表达式消除。
-
-### 4. 标准库补全
-- collections.cr 泛型数组、字符串插值
-
-### 5. ARM64 后端移植
-
-### 6. .so 编译器插件系统
+### 5️⃣ ARM64 后端移植
 
 ## 架构规划
 
-### Arena 内存模型（统一内存管理方案）
+### Arena 内存模型
 设计文档见 [`docs/memory-model.md`](docs/memory-model.md)。
-将堆内存划分为与数据流子图绑定的独立 Arena。分配线性指针碰撞（ptr += size），
-回收直接将整个 Arena 游标重置回起始地址（格式化清空），所有权系统静态保证区域内
-无活跃引用逃逸。长期运行服务内存占用上限由并发区域数量决定，天然无 GC 停顿。
+堆内存按数据流子图（flow/go/loop）划分独立 Arena，指针碰撞分配，
+Arena 游标重置回收，所有权系统防止引用逃逸。
 
-**前提：** 数据流图为 IR 一等公民，每个 flow/go/loop 映射到 DFNode 子图，
-Arena 生命周期绑定到子图执行周期。
-
-### RawRef\<T\>（内核路线前置）
+### RawRef\<T\>
 unsafe fn 域内可用，方法式读写/算术，null 允许（UB），TOML 控制 volatile。

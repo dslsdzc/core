@@ -974,12 +974,19 @@ fn ir_gen_globals() {
         if i >= g_global_let_count { break; }
         node := r64(g_global_lets, i * 8);
         name_idx := ast_a(node);
-        name := istr_get(name_idx);
-        gvar := new_ir_var(name, TI_INT);
-        grow_ir_globals(g_ir_global_count + 1);
-        w64(g_ir_globals, g_ir_global_count  * 16, name_idx);
-        w64(g_ir_globals, g_ir_global_count  * 16 + 8, gvar);
-        g_ir_global_count = g_ir_global_count + 1;
+        found : ., mut = 0;
+        gi : ., mut = 0;
+        loop { if gi >= g_ir_global_count { break; }
+            if r64(g_ir_globals, gi * 16) == name_idx { found = 1; break; }
+        gi = gi + 1; }
+        if found == 0 {
+            name := istr_get(name_idx);
+            gvar := new_ir_var(name, TI_INT);
+            grow_ir_globals(g_ir_global_count + 1);
+            w64(g_ir_globals, g_ir_global_count * 16, name_idx);
+            w64(g_ir_globals, g_ir_global_count * 16 + 8, gvar);
+            g_ir_global_count = g_ir_global_count + 1;
+        }
         i = i + 1;
     }
 }

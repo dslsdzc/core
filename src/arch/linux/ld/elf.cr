@@ -313,6 +313,11 @@ fn elf_gen(buf: string) -> int {
     print(" w64="); print(int_str(g_ni_w64));
     print(" dyncpy="); println(int_str(g_ni_dyncpy));
 
+    // Reset scratch-emission garbage (res_labels -> emit_instr -> pollutes rip_patch arrays)
+    g_x86_rip_patch_count = 0;
+    g_x86_rodataref_count = 0;
+    g_x86_alloc_patch_count = 0;
+
     println("  elf: Phase 1 (rodata layout)...");
     // Phase 1: rodata layout — collect string constants
     g_x86_str_count = 0;
@@ -699,17 +704,28 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
     loop { if rpi2 >= g_x86_rip_patch_count { break; }
         ppos := r64(g_x86_rip_patch_pos, rpi2 * 8);
         gvi := r64(g_x86_rip_patch_globals, rpi2 * 8);
-        // Debug: print patches near the known-bad offset 0x6ccc
-        if ppos >= 27800 && ppos <= 28000 {
-            print("  rip_patch["); print(int_str(rpi2)); print("] ppos="); print(int_str(ppos));
-            print(" gvi="); print(int_str(gvi)); print(" skipped=");
-            if gvi >= 0 { println("no"); } else { println("yes"); }
+        // Verify: buffer at ppos-3 should contain LEA prefix (0x4C or 0x4D for REX.WR/WRB)
+        lea_check := bu8(buf, ppos - 3);
+        if lea_check != 76 && lea_check != 77 && lea_check != 73 && lea_check != 79 {
+            print("  BAD rip["); print(int_str(rpi2)); print("] ppos="); print(int_str(ppos));
+            print(" gvi="); print(int_str(gvi));
+            print(" byte="); println(int_str(lea_check));
         }
         if gvi >= 0 {
             lea_end_va := TEXT_BASE + ppos + 4;
-            target_va := bss_va + 16 + r64(g_x86_global_off, gvi * 8);  // +16 to skip heap_ptr(8) + heap_start(8)
+            off := r64(g_x86_global_off, gvi * 8);
+            target_va := bss_va + 16 + off;
             rel := target_va - lea_end_va;
-            w32(buf, ppos, rel); }
+            w32(buf, ppos, rel);
+            // Verify write: read back and check
+            rbv := bu8(buf,ppos) + bu8(buf,ppos+1)*256 + bu8(buf,ppos+2)*65536 + bu8(buf,ppos+3)*16777216;
+            if rbv >= 2147483648 { rbv = rbv - 4294967296; }
+            if rbv != rel && gvi >= 0 && gvi < 10 {
+                print("  MISMATCH ppos="); print(int_str(ppos));
+                print(" rel="); print(int_str(rel));
+                print(" rbv="); println(int_str(rbv));
+            }
+            }
     rpi2 = rpi2 + 1; }
     g_x86_rip_patch_count = 0;
 

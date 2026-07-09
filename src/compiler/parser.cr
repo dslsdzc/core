@@ -663,7 +663,7 @@ fn parse_new_var_decl() -> int {
 
     if check(T_SEMI) { advance_tok(); } // optional ;
 
-    // Emit LET nodes. First returned directly, extras go to g_extra_lets.
+    // Emit LET nodes. First returned directly, extras go to g_extra_lets (dynamic grow).
     first_node : ., mut = -1;
     i : ., mut = 0;
     loop {
@@ -1462,14 +1462,16 @@ fn parse_declaration() {
         grow_global_lets(g_global_let_count + 1);
         w64(g_global_lets, g_global_let_count * 8, node);
         g_global_let_count = g_global_let_count + 1;
-        // Drain any batch extras to globals
+        // Drain batch extras to globals
+        _drained : ., mut = 0;
         loop {
             if g_extra_let_count <= 0 { break; }
             g_extra_let_count = g_extra_let_count - 1;
             grow_global_lets(g_global_let_count + 1);
             w64(g_global_lets, g_global_let_count * 8, r64(g_extra_lets, g_extra_let_count * 8));
+            g_global_let_count = g_global_let_count + 1;
+            _drained = _drained + 1;
         }
-        g_extra_let_count = 0;
         return;
     }
 
@@ -1477,15 +1479,16 @@ fn parse_declaration() {
 }
 
 fn parse_all() {
+    println("PA");
     g_ast_count = 0;
     g_token_pos = 0;
+    println("PB");
     g_func_count = 0;
     g_struct_count = 0;
     g_enum_count = 0;
     g_type_alias_count = 0; g_type_alias_cap = 0;
     g_method_count = 0; g_method_cap = 0;
     g_loop_depth = 0; g_loop_stack_cap = 0;
-    // Keep g_global_let_count for ir_gen_globals
     g_extra_let_count = 0;
     g_block_stmt_count = 0;
     g_error_count = 0;
@@ -1496,7 +1499,7 @@ fn parse_all() {
 
     ci : ., mut = 0;
     loop {
-        // Skip import/fileid tokens — already processed by res_imports()
+        // Skip import/fileid tokens
         loop {
             tk := tok_k(cur_tok());
             if tk == T_EOF { return; }
@@ -1510,14 +1513,8 @@ fn parse_all() {
         prev_ast := g_ast_count;
         parse_declaration();
         if tok_k(cur_tok()) == T_EOF { break; }
-        // Detect rapid AST growth: if >10000 nodes added in one decl, it's a loop
         ast_grown := g_ast_count - prev_ast;
-        if ast_grown > 10000 {
-            print("BLOAT: ci="); print(int_str(ci));
-            print(" ast_grown="); println(int_str(ast_grown));
-            print("  total_ast="); println(int_str(g_ast_count));
-            break;
-        }
+        if ast_grown > 10000 { break; }
         ci = ci + 1;
     }
 }
