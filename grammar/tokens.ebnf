@@ -9,7 +9,7 @@ LETTER = 'a'..'z' | 'A'..'Z' | '_' ;
 DIGIT = '0'..'9' ;
 
 KEYWORD =
-    'fn' | 'struct' | 'enum' | 'interface' | 'impl' | 'type' | 'mut' | 'move' | 'go' | 'await' | 'flow' | 'auto' | 'fileid' |
+    'fn' | 'struct' | 'enum' | 'interface' | 'impl' | 'type' | 'mut' | 'move' | 'go' | 'await' | 'flow' | 'yield' | 'auto' | 'fileid' |
     'if' | 'else' | 'match' | 'for' | 'loop' | 'return' | 'break' | 'continue' |
     'pub' | 'mod' | 'import' | 'as' | 'unsafe' |
     'requires' | 'ensures' | 'old' | 'result' | 'self' | 'Self' |

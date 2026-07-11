@@ -6,7 +6,7 @@ ModuleDecl = 'mod' Path ';' ;
 ImportDecl = 'import' [ '@' IDENT ] IDENT [ ':' IDENT ] ';' ;
 Path = IDENT { '::' IDENT } ;
 
-TopLevelDecl = FunctionDecl | StructDecl | EnumDecl | InterfaceDecl | ImplDecl | TypeAlias ;
+TopLevelDecl = FunctionDecl | FlowDecl | StructDecl | EnumDecl | InterfaceDecl | ImplDecl | TypeAlias ;
 
 (*** 函数 ***)
 FunctionDecl = [ 'pub' ] 'fn' IDENT [ GenericParams ] '(' [ ParamList ] ')' '->' Type
@@ -17,6 +17,9 @@ ParamList = Param { ',' Param } ;
 Param = IDENT ':' Type ;
 
 FunctionBody = Block ;
+
+FlowDecl = 'flow' IDENT [ GenericParams ] '(' [ ParamList ] ')' '->' Type
+            ( FunctionBody | '=' Expr ';' ) ;
 
 (*** 类型 ***)
 Type = BaseType | PathType | RefType | OptionalType | TupleType | ArrayType | SliceType ;
@@ -66,10 +69,11 @@ AwaitExpr = 'await' Expr ;
 UnsafeExpr = 'unsafe' Block ;
 
 Block = '{' { Statement } '}' ;
-Statement = Expr ';' | LetStmt | ReturnStmt | BreakStmt | ContinueStmt ;
+Statement = Expr ';' | LetStmt | ReturnStmt | YieldStmt | BreakStmt | ContinueStmt ;
 
 LetStmt = IDENT [ ':' ( Type | 'auto' | '.' ) [ ',' Tag { ',' Tag } ] ] ( ':=' | '=' ) Expr ';' ;
 ReturnStmt = 'return' [ Expr ] ';' ;
+YieldStmt = 'yield' Expr ';' ;
 BreakStmt = 'break' ';' ;
 ContinueStmt = 'continue' ';' ;
 
