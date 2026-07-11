@@ -94,6 +94,14 @@ T_FLOAT_F32 : int = 85;
 T_FLOAT_F64 : int = 86;
 T_NONE : int = 87;
 T_SOME : int = 88;
+T_LET : int = 89;
+T_INT_TYPE : int = 90;
+T_FLOAT_TYPE : int = 91;
+T_BOOL_TYPE : int = 92;
+T_UNIT_TYPE : int = 93;
+T_STR_TYPE : int = 94;
+T_AUTO_TYPE : int = 95;
+T_REF : int = 96;
 
 // Width constants (stored in EXPR_INT/EXPR_FLOAT data field)
 W_I8 : int = 1;

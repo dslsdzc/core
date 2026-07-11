@@ -185,7 +185,7 @@ fn cmd_ir(src_path: string) -> int {
         return 1;
     }
     g_source_dir = dirname(src_path);
-    tokenize();
+    tokenize(g_source);
     g_str_count = 0;
     res_imports();
     parse_all();
@@ -227,7 +227,7 @@ fn cmd_cir(src_path: string) -> int {
         return 1;
     }
     g_source_dir = dirname(src_path);
-    tokenize();
+    tokenize(g_source);
     g_str_count = 0;
     res_imports();
     parse_all();
