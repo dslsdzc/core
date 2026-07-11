@@ -1479,10 +1479,8 @@ fn parse_declaration() {
 }
 
 fn parse_all() {
-    println("PA");
     g_ast_count = 0;
     g_token_pos = 0;
-    println("PB");
     g_func_count = 0;
     g_struct_count = 0;
     g_enum_count = 0;
