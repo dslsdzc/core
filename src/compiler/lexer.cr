@@ -23,6 +23,10 @@ C_DASH : int = 45; C_PERCENT : int = 37; C_AMP : int = 38;
 C_PIPE : int = 124; C_UNDER : int = 95; C_AT : int = 64;
 C_QUES : int = 63;
 
+fn is_digit(c: int) -> int { return (c >= 48 && c <= 57); }
+fn is_alpha(c: int) -> int { return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95; }
+fn is_ident_char(c: int) -> int { return is_alpha(c) != 0 || is_digit(c) != 0; }
+
 fn add_error(msg: string) {
     mi := str_intern(msg);
     grow_errors(g_error_count + 1);
@@ -124,22 +128,16 @@ fn skip_ws(src: string, pos: int, max_len: int) -> int {
 }
 
 fn tokenize(_src: string) {
-    println("TA");
     g_token_count = 0;
     g_error_count = 0;
     _pos : ., mut = 0;
     _line : ., mut = 1;
     _col : ., mut = 1;
     _slen : ., mut = str_len(_src);
-    println("TB");
     _pos = skip_ws(_src, _pos, _slen);
-    println("TC");
 
-    _cnt : ., mut = 0;
     loop {
-        if _pos >= _slen { println("BR"); break; }
-        _cnt = _cnt + 1;
-        if _cnt >= 100 { println("L100"); return; }
+        if _pos >= _slen { break; }
         c := cur_char_at(_src, _pos, _slen);
         start_line : ., mut = _line;
         start_col : ., mut = _col;

@@ -748,10 +748,37 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         w32(buf, g_call_main_pos + 1, rel);
     }
 
+    // ── bss_init: zero heap management area before _start ──
+    // WSL2 (and possibly other kernels) do not reliably zero BSS,
+    // so we explicitly clear the heap_ptr / heap_start fields.
+    // This stub becomes the new entry point; it zeroes [bss_va+0]
+    // and [bss_va+8], then jumps to the real _start.
+    bss_init_cp := cp;
+
+    // xor eax, eax
+    w8(buf, cp, 49); w8(buf, cp+1, 192); cp = cp + 2;
+
+    // mov [rip + rel], rax  → zero heap_ptr at bss_va + 0
+    // (REX.W + 0x89 + ModRM + rel32 = 7 bytes, rip points to cp+7)
+    rel_hp := bss_va + 0 - (TEXT_BASE + cp + 7);
+    w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 5);
+    w8_signed(buf, cp+3, rel_hp); cp = cp + 7;
+
+    // mov [rip + rel], rax  → zero heap_start at bss_va + 8
+    rel_hs := bss_va + 8 - (TEXT_BASE + cp + 7);
+    w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 5);
+    w8_signed(buf, cp+3, rel_hs); cp = cp + 7;
+
+    // jmp _start  (TEXT_BASE + 176)
+    jmp_rel := TEXT_BASE + 176 - (TEXT_BASE + cp + 5);
+    w8(buf, cp, 233); e2_w32(buf, cp+1, jmp_rel); cp = cp + 5;
+
     // ── Write ELF header ──
     total_sz := cp;
     // Use actual total_sz as code_end so code segment covers all emitted content
     elf2_hdr(buf, total_sz, total_sz);
+    // Override entry point to bss_init (which zeroes heap then jumps to _start)
+    w64(buf, E_ENTRY, TEXT_BASE + bss_init_cp);
     // Patch data segment VA to match bss_va (page after code+rodata)
     data_phdr_base := EHDR_SIZE + PHDR_SIZE;
     w64(buf, data_phdr_base + P_OFFSET, bss_va - TEXT_BASE);
