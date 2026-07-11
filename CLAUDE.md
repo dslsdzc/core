@@ -17,203 +17,176 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Core is a new general-purpose programming language with a "semantic preservation" (语义保鲜) philosophy — its IR retains full type/semantic info throughout compilation for direct consumption by formal verification tools. Currently in bootstrap stage (compiler written in Python).
+Core is a new general-purpose programming language with a "semantic preservation" (语义保鲜) philosophy — its IR retains full type/semantic info throughout compilation for direct consumption by formal verification tools.
+
+There are two compilers:
+- **Python bootstrap** (`bootstrap/corec/`) — the initial compiler, written in Python, used to build the self-hosted compiler
+- **Self-hosted compiler** (`src/compiler/`) — the Core compiler written in Core itself, built by the Python bootstrap
 
 ## Build & Test Commands
 
 ```bash
-python3 tools/corec build FILE.cr -o OUTPUT   # Compile .cr → ARM64 native executable (Python bootstrap)
-python3 tools/corec ir FILE.cr                 # Generate dataflow graph (.cir) dump (Python bootstrap)
+# Build self-hosted compiler (Python bootstrap → native binary)
+python3 build_selfhost_native.py       # Produces build/corec + build/corearch
 
-./build/corec FILE.cr                          # Compile .cr → .ccr (self-hosted frontend)
-./build/corearch FILE.ccr -S                   # Compile .ccr → assembly (self-hosted backend)
+# Self-hosted frontend: .cr → .ccr/.cir
+./build/corec build FILE.cr -o OUTPUT --static
+
+# Self-hosted backend: .ccr → ELF binary (called by corec automatically)
+./build/corearch FILE.ccr --elf --static -o OUTPUT
+
+# Type-check only
+./build/corec check FILE.cr
+
+# Interpreter execution (inline code)
+./build/corec run 'fn main()->int{return 42;}'
+
+# Dataflow graph dump
+./build/corec cir FILE.cr
+
+# Linear CFG dump
+./build/corec ccr FILE.cr
 ```
-
-- `tools/corec` (Python) — ARM64 build, `.cir`/`.ccr` dump
-- `build/corec` (self-hosted) — x86-64 frontend: `.cr` → `.ccr`/`.cir`
-- `build/corearch` (self-hosted) — x86-64 backend: `.ccr` → assembly/ELF
 
 ### Test suites
 
-**Bootstrap pipeline tests** (`tests/bootstrap/`): Core source → Python pipeline → interpreter.
-
+**Bootstrap pipeline tests** (`tests/bootstrap/`):
 ```bash
-python3 tests/bootstrap/test_pipeline.py   # ~19 tests: arithmetic, control flow, struct, enum, array, for, ref, float, string
-python3 tests/bootstrap/test_borrow.py     # Borrow checker error detection tests
-python3 tests/bootstrap/test_generics.py   # Generic function + generic struct tests
+python3 tests/bootstrap/test_pipeline.py   # core pipeline: lex → parse → check → ir → interp
+python3 tests/bootstrap/test_borrow.py     # Borrow checker error detection
+python3 tests/bootstrap/test_generics.py   # Generic function + generic struct
 ```
 
-**Self-hosted compiler tests** (`tests/selfhost/`): load compiler src → compile via bootstrap → exercise via interpreter or native binary.
-
+**Self-hosted compiler tests** (`tests/selfhost/`):
 ```bash
-python3 tests/selfhost/test_compile.py     # Basic interpreter run, lexer compilation, full self-compilation
-python3 tests/selfhost/test_impl.py        # Impl/method tests (interpreter + native binary paths)
-python3 tests/selfhost/test_borrow.py      # Self-hosted borrow checker tests (7 rules)
+python3 tests/selfhost/test_compile.py     # Self-compilation pipeline test
+python3 tests/selfhost/test_impl.py        # Impl/method tests
+python3 tests/selfhost/test_borrow.py      # Self-hosted borrow checker (7 rules)
 ```
 
-Integration tests in `tests/suite/` are `.cr` source files — run through `build/corec` or `tools/corec`.
-
-### Self-hosted compiler build
-
-```bash
-python3 build_selfhost.py              # Concatenate src/compiler/*.cr → run via interpreter
-python3 build_selfhost_native.py       # Compile self-hosted compiler → native x86-64 binary at build/corec
-```
-
-`build_selfhost_native.py` uses the Python-speed `X86_64StackAsmGen` backend (not the interpreter) to produce two native binaries: `build/corec` (frontend) and `build/corearch` (backend). The runtime is `src/runtime/rt.s` (assembly: `_start`, bump allocator, `__builtin_get_arg`). Usage: `./build/corec file.cr → file.ccr`, then `./build/corearch file.ccr -S → file.s`.
+Integration tests in `tests/suite/` are `.cr` source files — run through `./build/corec`.
 
 ## Architecture
 
-The bootstrap compiler is a pure-Python, single-pass pipeline (no external dependencies). Each stage is in `bootstrap/corec/`:
+### Python Bootstrap Compiler
+
+The bootstrap is a pure-Python, single-pass pipeline in `bootstrap/corec/` (no external dependencies):
 
 ```
-syntax/ast.py          → AST node dataclasses (~120 lines, 20+ Expr/Decl/Type variants)
-syntax/tokens.py       → Token + TokenKind definitions
-syntax/keywords.py     → Keyword list
+bootstrap/corec/syntax/ast.py          → AST node dataclasses
+bootstrap/corec/syntax/tokens.py       → Token + TokenKind definitions
+bootstrap/corec/syntax/keywords.py     → Keyword list
 
-frontend/lexer.py      → Tokenizes .cr source
-frontend/parser.py     → Recursive-descent parser → AST
-frontend/name_resolver.py → First pass: collects declarations, resolves names
-frontend/desugar.py    → Desugars match → if-else chains
-frontend/type_checker.py → Second pass: type inference + checking (also handles borrow checking)
-frontend/ir_gen.py     → AST → Core IR (.cir dataflow graph → .ccr linear CFG)
-frontend/control_flow.py → Control flow graph utilities
-frontend/spec_checker.py → Contract/spec specification checker
+bootstrap/corec/frontend/lexer.py      → Tokenizes .cr source
+bootstrap/corec/frontend/parser.py     → Recursive-descent parser → AST
+bootstrap/corec/frontend/name_resolver.py → Declaration collection + name resolution
+bootstrap/corec/frontend/desugar.py    → Desugars match → if-else chains
+bootstrap/corec/frontend/type_checker.py → Type inference + checking + borrow checking
+bootstrap/corec/frontend/ir_gen.py     → AST → Core IR
 
-ir/cir.py              → Dataflow graph IR definitions (DataflowNode, DataflowEdge, DataflowGraph)
-ir/ccr.py              → Linear CFG IR instruction definitions (20+ instr types: ConstInstr, BinaryInstr, BranchInstr, PhiInstr, etc.)
-ir/base.py             → IRNode base class, IRVar, VarKind enum
-ir/symbol_table.py     → Scoped symbol table (Scope/Symbol/SymbolTable) shared across passes
-ir/graph.py            → Dataflow graph utilities (placeholder)
-ir/corespecir.py       → Spec-level IR definitions
+bootstrap/corec/ir/cir.py              → Dataflow graph IR definitions
+bootstrap/corec/ir/ccr.py              → Linear CFG IR instruction definitions
+bootstrap/corec/ir/base.py             → IRNode base class, IRVar, VarKind
+bootstrap/corec/ir/symbol_table.py     → Scoped symbol table
 
-backend/interpreter.py → Executes IR directly (Python eval — main testing path)
-backend/arm64_asm.py   → ARM64 code generation (complete pipeline)
-backend/arm64.py       → ARM64 ABI/helper utilities
-backend/x86_64_stack_asm.py → x86-64 stack-based codegen (used for native self-hosted build, runs at Python speed)
-backend/x86_64_asm.py  → x86-64 code generation (partial, being replaced by stack variant)
-backend/x86_64.py      → x86-64 helper utilities
-backend/base.py        → Backend base class
-
-verifier/conditions.py → Formal verification conditions (placeholder)
-verifier/prover.py     → Theorem prover (placeholder)
-verifier/smt.py        → SMT solver interface (placeholder)
-
-utils/diagnostics.py   → Compiler diagnostics (placeholder)
-utils/span.py          → Source span tracking (placeholder)
+bootstrap/corec/backend/interpreter.py → Executes IR directly (Python eval)
+bootstrap/corec/backend/x86_64_stack_asm.py → x86-64 stack-based codegen
+bootstrap/corec/backend/arm64_asm.py   → ARM64 code generation
+bootstrap/corec/utils/module_loader.py → Import resolution
 ```
 
-Pipeline flow: `Lexer → Parser → NameResolver → MatchDesugarer → TypeChecker → IRGen → DataflowGraph → Linearize → Backend`
-
-**Self-hosted frontend** (`corec`, entry in `main.cr`): `tokenize() → resolve_imports() → parse_all() → check_all() → ir_gen_all() → lower_to_ccr() → save_ccr()`
-
-**Self-hosted backend** (`corearch`, entry in `corearch.cr`): `load_ccr() → x86_64_generate()`
-
-### Module/Import System
-
-Core uses a flattening module system based on **file identifiers** and **project identifiers**, decoupling file paths from logical names.
-
-**File identifiers**: By default, a file's identifier is its filename without `.cr` extension. Can be manually overridden with `fileid` at the top of the file:
-```core
-fileid "my_math"
+Pipeline flow:
 ```
-Identifiers must be unique within a project.
-
-**Project identifiers**: Defined in `Core.toml` (`name = "acme"`). Referenced in code with `@` prefix: `@acme`.
-
-**Import syntax**:
-```core
-import math                // local file by identifier
-import math : m            // with alias (used as m.symbol)
-import @acme math          // external project
-import @acme math : m      // external project with alias
+Lexer → Parser → NameResolver → MatchDesugarer → TypeChecker → IRGen → Backend
 ```
 
-**Symbol access**: Use dot notation: `m.add(3, 5)`. Unqualified full paths (`math::add`) are also recognized but importing is preferred.
+### Self-Hosted Compiler
 
-**_import.cr**: A special file at any directory level. Its imports apply to all `.cr` files in that directory and subdirectories (unless overridden by a child `_import.cr`). Merged from parent to child; conflicts are errors.
+The self-hosted compiler is written in Core and lives in `src/compiler/`. Built by `build_selfhost_native.py` which runs the Python bootstrap on all `src/compiler/*.cr` files.
 
-**Dependency pruning**: At compile time, the linker traces referenced symbols starting from `main`, extracts only what's used, and merges them into a single binary — suitable for kernel/embedded targets.
+```
+src/compiler/
+├── ast.cr          → AST node kinds, IR opcodes, type constants
+├── lexer.cr        → Tokenizer (int-based char access, no string allocs)
+├── parser.cr       → Recursive-descent parser → flat AST
+├── checker.cr      → Type checker, borrow checker, declaration collector
+├── ir_gen.cr       → AST → IR instruction generation
+├── dataflow.cr     → Dataflow graph construction (.cir)
+├── ccr_io.cr       → .ccr binary serialization/deserialization
+├── opt.cr          → Optimization passes (CSE, register allocation, stack sharing)
+├── pass.cr         → AST-level optimization (constant folding)
+├── diag.cr         → Compiler diagnostics
+├── module.cr       → Import resolution, file ID management
+├── project.cr      → Core.toml project config loading
+├── interp.cr       → IR interpreter (for `run` command)
+├── dump.cr         → Debug dump utilities
+├── dyn_arr.cr      → Dynamic array grow helpers + string interning
+├── globals.cr      → All global variable declarations
+├── entry.cr        → Entry point wrapper
+├── main.cr         → CLI + pipeline orchestration (corec binary)
+├── corearch.cr     → Backend entry point (corearch binary)
+└── _import.cr      → Shared imports for all compiler modules
+```
 
-**Current implementation** (bootstrap):
-- `corec/utils/module_loader.py` — `resolve_imports(ast, search_paths)` flattens imports before name resolution.
+### ELF Backend (`src/arch/linux/ld/`)
 
-**Self-hosted compiler**: `main.cr`'s `resolve_imports()` scans tokens for `T_IMPORT`, reads imported `.cr` files, appends source to `g_source`, and re-tokenizes. Search order: `src/stdlib/` then current directory.
+Direct ELF binary output for x86-64, used by `corearch`:
 
-The standard library is in `src/stdlib/`. Currently implemented:
-- `io.cr` — `print()`, `println()`, `print_int()`, `println_int()` wrapping `__builtin_*`
-- `math.cr`, `collections.cr`, `chan.cr` — stubs
+```
+src/arch/linux/ld/
+├── elf.cr      → ELF header + program header generation, _start emission
+├── instr.cr    → Instruction encoding: REX, ModRM, SIB, all IR opcode emitters
+├── sizes.cr    → Instruction byte size helpers (sz_* functions)
+├── resolve.cr  → Label resolution pass (res_labels)
+└── ld.cr       → Dynamic linking (PLT/GOT, .so loading)
+```
 
-### Key design points
+### Standard Library (`src/stdlib/`)
 
-- All IR instructions carry destination variables (`dest: IRVar`) and full type info
-- IR uses basic blocks with explicit `BranchInstr`/`JumpInstr` — forms a CFG
-- `PhiInstr` for SSA-form φ-nodes at block joins
-- The type checker is a second pass (not interleaved with parsing), also handles borrow checking
-- Errors are accumulated in `resolver.errors` / `checker.errors` (not exceptions)
-- Parser reports errors via `Parser.error(msg, token)` which sets a flag
-- Testing goes through the interpreter (not native execution), enabling fast iteration
-- Interpreter uses `id(var)`-based variable store with max-steps guard to prevent infinite loops
-- `MatchDesugarer` is always run between name resolution and type checking — it transforms `match` expressions into `if`-`else` chains
+```
+src/stdlib/
+├── cli.cr      → CLI argument parsing
+├── fmt.cr      → String formatting (int_str, chr, str_eq, str_hash, etc.)
+├── io.cr       → I/O (print, println, read_file, write_file)
+├── os.cr       → OS utilities (get_env)
+├── toml.cr     → TOML config parsing
+├── panic.cr    → Rust-style panic handler (dev only)
+├── math.cr     → Math functions (stub)
+├── collections.cr → Collections (stub)
+└── _import.cr  → Shared imports for stdlib modules
+```
+
+### Runtime (`src/runtime/`)
+
+```
+src/runtime/
+├── rt.s    → Assembly: _start, bump allocator, __builtin_* functions
+└── rt.cr   → Core runtime globals (g_rt_argc, g_rt_argv_ptr)
+```
+
+### Key design points (self-hosted)
+
+- All arrays are **dynamic byte buffers** (`string` + grow functions), no `MAX_*` limits
+- Flat AST: every node is `{kind, a, b, c, int_val, type_val, data, line, col}` in `g_ast`
+- Flat IR: every instruction is `{opcode, dest, src1, src2, src3, type_kind}` in `g_ir_instrs`
+- The checker runs two passes: first registers struct/enum/function declarations, then type-checks bodies
+- Tokenizer uses integer character codes (no `get_char` string allocs in hot path)
+- Global variables are IR variables with indices tracked in `g_ir_globals` + `g_x86_is_global` for the ELF backend
+- The ELF backend uses RIP-relative addressing for globals, stack offsets for locals
 
 ### Backend status
 
 | Backend | Status |
 |---------|--------|
 | Interpreter (Python eval) | Complete — primary test target |
-| ARM64 (aarch64) | Complete — generates `.s` → `as`/`ld` → native binary |
-| x86-64 (stack-based) | Active — used in `build_selfhost_native.py` for native compiler build |
-| x86-64 (register-based) | Partial |
-
-## Self-Hosted Compiler (`src/`)
-
-The `src/` directory holds the self-hosted compiler written in Core source:
-
-```
-src/compiler/          → Compiler modules in Core (ast.cr, lexer.cr, parser.cr, checker.cr, ir_gen.cr, main.cr)
-src/compiler/backend/  → Backend modules (x86_64.cr)
-src/compiler/ccr_io.cr → .ccr binary serialization/deserialization
-src/compiler/corearch.cr → Backend entry point (corearch binary)
-src/compiler/globals.cr → Shared global declarations
-src/stdlib/            → Standard library (cli.cr, io.cr, math.cr, collections.cr, chan.cr)
-src/runtime/           → Runtime support (rt.cr, rt.s — Core + assembly: bump allocator + __builtin_* functions)
-```
-
-The self-hosted compiler can compile Core source to x86-64 assembly. Build it with `build_selfhost_native.py` which compiles all `src/compiler/*.cr` files through the Python bootstrap pipeline and emits a native `build/corec` binary.
-
-### Self-hosted flat IR design
-
-Unlike the Python bootstrap (which uses Python objects), the self-hosted compiler packs everything into pre-allocated integer-indexed arrays. This avoids dynamic allocation — critical since the compiler runs on its own runtime with a bump allocator.
-
-**Data model**: everything is an integer index into a global array.
-
-| Array | Element type | Purpose |
-|-------|-------------|---------|
-| `g_ast[MAX_AST]` | `ASTNode { kind, a, b, c, int_val, type_val, data, line, col }` | Flat AST — fields `a`/`b`/`c` are child indices or opcodes |
-| `g_ir_instrs[MAX_IRINSTRUCTIONS]` | `IRInstr { opcode, dest, src1, src2, src3, type_kind }` | Flat IR — all operands packed into integer slots |
-| `g_ir_vars[MAX_IREXPRS]` | `IRVar { name, id, type_kind }` | IR variables |
-| `g_strs[MAX_STRS]` | `string` | String interning table |
-| `g_tokens[MAX_TOKENS]` | `Token { kind, lexeme, int_val, line, col }` | Token stream |
-| `g_syms[MAX_SYMS]` | `SymEntry { name_idx, kind, type_idx, node_idx }` | Symbol table (scoped) |
-| `g_types[MAX_TYPES*3]` | `int` triples of `(kind, data, extra)` | Type table |
-| `g_structs[MAX_STRUCTS]` | `StructInfo { name, field_names, field_types, field_count, ... }` | Struct definitions |
-| `g_enums[MAX_ENUMS]` | `EnumInfo { name, variants, variant_count, ... }` | Enum definitions |
-| `g_funcs[MAX_FUNCS]` | `FuncInfo { name, param_count, param_types, return_type, ast_node, ... }` | Function signatures |
-
-**IR opcodes** (defined in `ast.cr`): `IR_CONST(1)`, `IR_BINARY(2)`, `IR_UNARY(3)`, `IR_CALL(4)`, `IR_RETURN(5)`, `IR_ALLOC(6)`, `IR_ALLOC_STRUCT(7)`, `IR_ALLOC_ARRAY(8)`, `IR_STORE(9)`, `IR_LOAD(10)`, `IR_LOAD_FIELD(11)`, `IR_STORE_FIELD(12)`, `IR_LOAD_INDEX(13)`, `IR_STORE_INDEX(14)`, `IR_LOAD_INDEX_VAR(15)`, `IR_STORE_INDEX_VAR(16)`, `IR_MAKE_ENUM(17)`, `IR_REF(18)`, `IR_BRANCH(19)`, `IR_JUMP(20)`, `IR_LABEL(21)`, `IR_PHI(22)`, `IR_LOAD_ENUM_TAG(23)`, `IR_SLICE(24)`, `IR_DEREF(25)`, `IR_STORE_PTR(26)`.
-
-**Assembly output**: `x86_64.cr` emits GAS `.intel_syntax noprefix`. Functions get `.globl` for function symbols. `_start` in `rt.s` calls `_init_globals` then `main`. The bump allocator (`__builtin_alloc`) and `__builtin_get_arg` are in `rt.s`.
-
-**Key invariants of the flat IR**:
-- `IR_MAKE_ENUM` stores variant tag at heap offset 0; `IR_STORE_FIELD`/`IR_LOAD_FIELD` auto-offset by +8 for enum targets (tracked via `g_x86_is_enum` array in the backend)
-- The checker runs two passes: first registers struct/enum/function declarations, then type-checks bodies
-- Parser creates `EXPR_ASSIGN` nodes for `=`, handled separately from `EXPR_BINARY`
-- Parameters arrive in registers (`rdi, rsi, rdx, rcx, r8, r9`) and must be saved to stack slots in function prologue
-- Builtin functions (`__builtin_*`) are either inlined by the backend or provided by `rt.s`/`rt.cr`
+| x86-64 ELF (self-hosted) | Active — `./build/corec build` pipeline |
+| x86-64 StackAsmGen (Python) | Used only for bootstrap build (`build_selfhost_native.py`) |
+| ARM64 (Python) | Complete — generates `.s` → `as`/`ld` |
+| Legacy ASM backend | Moved to `legacy_asm_backend/` (replaced by ELF backend) |
 
 ### Variable declaration syntax
 
-Core uses `:=` / `: type` declarations (no `let` keyword). Variants:
+Core uses `:=` / `: type` declarations (no `let` keyword):
 
 | Syntax | Meaning |
 |--------|---------|
@@ -224,21 +197,21 @@ Core uses `:=` / `: type` declarations (no `let` keyword). Variants:
 | `x : auto = 42;` | `auto` keyword, type inferred |
 | `a, b : int = 1, 2;` | Batch declaration |
 
-类型推断占位符有两种：`.`（点号）和 `auto` 关键字，均在类型位置上表示"让编译器推断类型"。`.` 更简洁，常用于 `: ., mut` 模式。
+Tags: `mut` (mutable), `pub` (public).
 
-推荐正式代码中使用 `auto` 提高可读性，个人脚本或快速原型可使用 `.` 简写。
+### Module/Import System
 
-Tags are parsed as identifiers or keywords before the first `=`. Available tags: `mut` (mutable), `pub` (public).
-
-**Self-hosted parser** (`src/compiler/parser.cr`):
-- `is_new_var_decl()` — lookahead function checking `tok_k(p+n)` for `:=` / `:` pattern
-- `parse_new_var_decl()` — handles all variants, stores names in `g_extra_lets[16]` buffer for batch overflow
-- Creates `EXPR_LET` nodes with `a=name_idx, b=type_node, c=value_node, data=is_mut`
+- Import by file identifier: `import math`
+- With alias: `import math : m`
+- External project: `import @acme math`
+- `_import.cr` — shared imports for all `.cr` files in a directory
+- Import resolution (`res_imports()` in `module.cr`) scans tokens for `T_IMPORT`, loads files, re-tokenizes
+- Search order: `g_source_dir` → `src/stdlib/` → current directory
 
 ## Language Grammar
 
 Formal EBNF definitions in `grammar/`:
-- `core.ebnf` — Full language grammar (`fn`, `:=`/`: type` declarations, `struct`, `enum`, `impl`, `match`, `loop`, `for`, `go`/`await`)
+- `core.ebnf` — Full language grammar
 - `corespec.ebnf` — Specification/contract grammar
 - `tokens.ebnf` — Token definitions
 
@@ -246,51 +219,30 @@ Design documents (Chinese):
 - `docs/project-book.md` — Philosophy, IR system, formal verification architecture
 - `docs/dataflow-design.md` — Dataflow execution model design
 - `docs/language-syntax.md` — Language syntax reference
-- `docs/execution-model.md` — Execution model: DAG, static cyclic graphs, dynamic graphs, deployment configs
+- `docs/execution-model.md` — Execution model
+- `docs/memory-model.md` — Arena memory model design
+- `docs/error-codes.md` — Compiler error code reference
 
-## 已知问题
+## Known Issues
 
-### ELF 后端生成的代码性能极差（自举关键阻塞项）
+### corec2 tokenizer 死循环（自举阻塞项）
+`./build/corec2 check FILE.cr` 卡在 tokenizer。根因：约 9 个全局变量（`g_tok_cap`, `g_tokens`, `g_str_count`, `g_line`, `g_source_len`, `g_x86_is_global`, `g_x86_global_cap`, `g_str_hash`, `g_error_count`）未被 parser 注册到 `g_ir_globals`，赋值语句静默丢弃。已在 PR #9（RhineIris）中通过 tokenizer 参数化（`tokenize(_src: string)`）规避了 `g_source` 全局变量依赖，但其他未注册全局变量问题仍待解决。
 
-`build/corec`（Python StackAsmGen）正常速度，但 `corec2`（ELF 后端自编译版本）的前端（tokenize/parse/check）**慢 24× 以上**：
+### corec2 前端性能（~1000x 慢于 build/corec）
+ELF 后端全栈操作无寄存器分配是直接原因。寄存器分配器只作用于用户程序 IR，不影响编译器自身代码。
 
-```
-10 行程序（10 vars）:  build/corec 0.02s  →  corec2 8.0s
-100 行程序（100 vars）: build/corec 0.14s  →  corec2 22s+
-```
-
-**根因**：`store8` 内联代码用错了寄存器——`store8(buf, pos, val)` 第三个参数在 `rdx`，但内联编码用了 `reg=0(al)` 而非 `reg=2(dl)`。这导致所有通过 `store8` 写入的数据都是垃圾（写入 `rax` 的内容而非 `rdx` 中的值）。影响范围极广：`str_sub`、`int_str`、数组写入、变量赋值等。
-
-**已修复**（`store8` 从 `al` 改为 `dl`）后 `int_str(42)` 正确输出 `"42"`。但性能仍然极差：`corec2 check` 一个 32 字节文件需要 **9 秒**（`build/corec` 仅需 0.02s → 450× 慢）。根因为 ELF 后端生成代码无寄存器分配，变量全部走栈操作。
-
-**优化管线（2025-06-27 接入）**：
-- `.ccr v3` 格式：可扩展 key-value 元数据段（key:u32 + data_len:u32 + data）
-- `-O0`/`-O1`/`-O2` CLI 等级，默认 O1
-- `ast_optimize_body()`：AST 常量折叠
-- `pass_cse()`：IR 公共子表达式消除（单函数基础版）
-- `alloc_registers()`：线性扫描寄存器分配（14 regs，元数据存 g_opt_meta）
-- `O1` 通过 `v42.cr` 测试，corec2 自举 O1 待修（`pass_cse` 在大函数上崩溃）
-- 后端 `g2_slot()` 按 `g_opt_level` 选择性读取寄存器元数据
-
-**性能瓶颈**：corec2 自身前端慢 450×，因为 corearch 生成编译器自身代码时全栈操作。寄存器分配器只作用于用户程序的 IR，不影响编译器自身速度。需要后端代码生成质量提升（寄存器分配 + 指令选择）。
-
-**当前状态**：自举管线（Stage 0→1→2）已通，但 `corec2` 因前端性能问题无法实用。此问题必须在继续开发前解决。
+### pass_cse / O1 稳定性
+`--opt-level 1` 在自举编译时可能崩溃（`pass_cse` 大函数问题，`alloc_registers` 元数据交互异常）。
 
 ## Key Conventions
 
-- File extensions: `.cr` (source), `.cir` (dataflow graph IR), `.ccr` (linear CFG IR), `.corespec` (spec), `.s`/`.o` (generated asm/obj)
+- File extensions: `.cr` (source), `.cir` (dataflow graph IR), `.ccr` (linear CFG IR), `.corespec` (spec)
 - Tests in `tests/bootstrap/` and `tests/selfhost/` define inline Core source strings and compare output
-- Python bootstrap code uses `sys.path.insert(0, 'bootstrap')` to import compiler modules
-- VS Code extension in `vscode-core/` provides TextMate-based syntax highlighting for `.cr`, `.corespec`, `.cir`, `.ccr`
-- Spec files in `spec/` (`.corespec`) for future formal verifier consumption
-- Examples in `examples/` with per-subdirectory projects
-- Native binary tests use `tests/selfhost/minimal_rt.s` (minimal bump allocator + `_start`) for test linking with `ld`
+- Python bootstrap: `sys.path.insert(0, 'bootstrap')` to import compiler modules
+- VS Code extension in `vscode-core/`
+- Spec files in `spec/` (`.corespec`) for formal verifier
+- Examples in `examples/`
 
 ## Known Issues & TODO
 
-See [TODO.md](.claude/projects/-home-DslsDZC-core/memory/todo.md) (persistent memory) for:
-- Pre-existing bugs (variable decl `x : type;` crash, ELF builtins missing)
-- Performance/refactoring work (dynamic buffer allocation for all `MAX_*` tables)
-- Bootstrapping roadmap
-
-When starting work, always read the TODO first to check what's pending.
+See [TODO.md](TODO.md) for current status.
