@@ -121,7 +121,7 @@ fn add_tok_str(kind: int, s: string, start_line: int, start_col: int) {
 fn skip_ws(src: string, pos: int, max_len: int) -> int {
     loop {
         c := cur_char_at(src, pos, max_len);
-        if c == C_SP || c == C_TB || c == C_CR || c == C_NL { pos = pos + 1; }
+        if c == 32 || c == 9 || c == 13 || c == 10 { pos = pos + 1; }
         else { break; }
     }
     return pos;
@@ -143,21 +143,21 @@ fn tokenize(_src: string) {
         start_col : ., mut = _col;
 
         // Comments
-        if c == C_SLASH && peek_at(_src, _pos, _slen) == C_SLASH {
+        if c == 47 && peek_at(_src, _pos, _slen) == 47 {
             _pos = _pos + 2;
             loop {
                 if _pos >= _slen { break; }
-                if cur_char_at(_src, _pos, _slen) == C_NL { _pos = _pos + 1; break; }
+                if cur_char_at(_src, _pos, _slen) == 10 { _pos = _pos + 1; break; }
                 _pos = _pos + 1;
             }
             _pos = skip_ws(_src, _pos, _slen);
             continue;
         }
-        if c == C_SLASH && peek_at(_src, _pos, _slen) == C_STAR {
+        if c == 47 && peek_at(_src, _pos, _slen) == 42 {
             _pos = _pos + 2;
             loop {
                 if _pos >= _slen { break; }
-                if cur_char_at(_src, _pos, _slen) == C_STAR && peek_at(_src, _pos, _slen) == C_SLASH { _pos = _pos + 2; break; }
+                if cur_char_at(_src, _pos, _slen) == 42 && peek_at(_src, _pos, _slen) == 47 { _pos = _pos + 2; break; }
                 _pos = _pos + 1;
             }
             _pos = skip_ws(_src, _pos, _slen);
@@ -180,9 +180,9 @@ fn tokenize(_src: string) {
         }
 
         // Number
-        if is_digit(c) != 0 || (c == C_DOT && is_digit(peek_at(_src, _pos, _slen)) != 0) {
+        if is_digit(c) != 0 || (c == 46 && is_digit(peek_at(_src, _pos, _slen)) != 0) {
             start := _pos;
-            if c == C_DOT { _pos = _pos + 1; c = cur_char_at(_src, _pos, _slen); }
+            if c == 46 { _pos = _pos + 1; c = cur_char_at(_src, _pos, _slen); }
             loop {
                 if is_digit(cur_char_at(_src, _pos, _slen)) != 0 { _pos = _pos + 1; }
                 else { break; }
@@ -195,7 +195,7 @@ fn tokenize(_src: string) {
                 else if nx == 98 || nx == 66 { _pos = _pos + 1; loop { bc := cur_char_at(_src, _pos, _slen); if bc == 48 || bc == 49 { _pos = _pos + 1; } else { break; } } }
             }
             // Float
-            if cur_char_at(_src, _pos, _slen) == C_DOT {
+            if cur_char_at(_src, _pos, _slen) == 46 {
                 _pos = _pos + 1;
                 loop { if is_digit(cur_char_at(_src, _pos, _slen)) != 0 { _pos = _pos + 1; } else { break; } }
             }
@@ -222,23 +222,23 @@ fn tokenize(_src: string) {
         }
 
         // String interpolation
-        if c == C_DQUOTE {
+        if c == 34 {
             _pos = _pos + 1;
             str_val : ., mut = "";
             loop {
                 cc := cur_char_at(_src, _pos, _slen);
-                if cc == 0 || cc == C_NL { break; }
-                if cc == C_DQUOTE { _pos = _pos + 1; break; }
-                if cc == C_BSLASH {
+                if cc == 0 || cc == 10 { break; }
+                if cc == 34 { _pos = _pos + 1; break; }
+                if cc == 92 {
                     _pos = _pos + 1;
                     esc := cur_char_at(_src, _pos, _slen);
                     if esc == 110 { str_val = str_val + chr(10); }
                     else if esc == 116 { str_val = str_val + chr(9); }
                     else if esc == 114 { str_val = str_val + chr(13); }
                     else if esc == 48 { str_val = str_val + chr(0); }
-                    else if esc == C_SQUOTE { str_val = str_val + "'"; }
-                    else if esc == C_BSLASH { str_val = str_val + chr(92); }
-                    else if esc == C_DQUOTE { str_val = str_val + chr(34); }
+                    else if esc == 39 { str_val = str_val + "'"; }
+                    else if esc == 92 { str_val = str_val + chr(92); }
+                    else if esc == 34 { str_val = str_val + chr(34); }
                     else if esc == 120 {
                         _pos = _pos + 1; hi := cur_char_at(_src, _pos, _slen); _pos = _pos + 1; lo := cur_char_at(_src, _pos, _slen);
                         hex_str := chr(hi) + chr(lo);
@@ -247,10 +247,10 @@ fn tokenize(_src: string) {
                         else { str_val = str_val + "?"; }
                     }
                     else { str_val = str_val + chr(esc); }
-                } else if cc == 36 && peek_at(_src, _pos, _slen) == C_LBRACE {
+                } else if cc == 36 && peek_at(_src, _pos, _slen) == 123 {
                     // Interpolation: skip for now
                     _pos = _pos + 2;
-                    loop { if cur_char_at(_src, _pos, _slen) == C_RBRACE { _pos = _pos + 1; break; } _pos = _pos + 1; }
+                    loop { if cur_char_at(_src, _pos, _slen) == 125 { _pos = _pos + 1; break; } _pos = _pos + 1; }
                 } else {
                     str_val = str_val + chr(cc);
                 }
@@ -262,19 +262,19 @@ fn tokenize(_src: string) {
         }
 
         // Char literal
-        if c == C_SQUOTE {
+        if c == 39 {
             _pos = _pos + 1;
             ch : ., mut = chr(0);
-            if cur_char_at(_src, _pos, _slen) == C_BSLASH {
+            if cur_char_at(_src, _pos, _slen) == 92 {
                 _pos = _pos + 1;
                 esc2 := cur_char_at(_src, _pos, _slen);
                 if esc2 == 110 { ch = chr(10); }
                 else if esc2 == 116 { ch = chr(9); }
                 else if esc2 == 114 { ch = chr(13); }
                 else if esc2 == 48 { ch = chr(0); }
-                else if esc2 == C_SQUOTE { ch = "'"; }
-                else if esc2 == C_BSLASH { ch = chr(92); }
-                else if esc2 == C_DQUOTE { ch = chr(34); }
+                else if esc2 == 39 { ch = "'"; }
+                else if esc2 == 92 { ch = chr(92); }
+                else if esc2 == 34 { ch = chr(34); }
                 else if esc2 == 120 {
                     _pos = _pos + 1; hi2 := cur_char_at(_src, _pos, _slen); _pos = _pos + 1; lo2 := cur_char_at(_src, _pos, _slen);
                     if chr(hi2) + chr(lo2) == "00" { ch = chr(0); }
@@ -286,59 +286,59 @@ fn tokenize(_src: string) {
                 ch = chr(cur_char_at(_src, _pos, _slen));
                 _pos = _pos + 1;
             }
-            if cur_char_at(_src, _pos, _slen) == C_SQUOTE { _pos = _pos + 1; }
+            if cur_char_at(_src, _pos, _slen) == 39 { _pos = _pos + 1; }
             add_tok_str(T_CHAR, ch, start_line, start_col);
             _pos = skip_ws(_src, _pos, _slen);
             continue;
         }
 
         // Multi-char operators
-        if c == C_EQ    && peek_at(_src, _pos, _slen) == C_EQ   { _pos = _pos + 2; add_tok(T_EQEQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_BANG  && peek_at(_src, _pos, _slen) == C_EQ   { _pos = _pos + 2; add_tok(T_BANGEQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_LT    && peek_at(_src, _pos, _slen) == C_EQ   { _pos = _pos + 2; add_tok(T_LTEQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_GT    && peek_at(_src, _pos, _slen) == C_EQ   { _pos = _pos + 2; add_tok(T_GTEQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_AMP   && peek_at(_src, _pos, _slen) == C_AMP  { _pos = _pos + 2; add_tok(T_ANDAND, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_PIPE  && peek_at(_src, _pos, _slen) == C_PIPE { _pos = _pos + 2; add_tok(T_PIPEPIPE, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_DASH  && peek_at(_src, _pos, _slen) == C_GT   { _pos = _pos + 2; add_tok(T_ARROW, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_EQ    && peek_at(_src, _pos, _slen) == C_GT   { _pos = _pos + 2; add_tok(T_FATARROW, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_COLON && peek_at(_src, _pos, _slen) == C_EQ   { _pos = _pos + 2; add_tok(T_COLON_EQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_COLON && peek_at(_src, _pos, _slen) == C_COLON{ _pos = _pos + 2; add_tok(T_PATHSEP, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_DOT   && peek_at(_src, _pos, _slen) == C_DOT {
+        if c == 61    && peek_at(_src, _pos, _slen) == 61   { _pos = _pos + 2; add_tok(T_EQEQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 33  && peek_at(_src, _pos, _slen) == 61   { _pos = _pos + 2; add_tok(T_BANGEQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 60    && peek_at(_src, _pos, _slen) == 61   { _pos = _pos + 2; add_tok(T_LTEQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 62    && peek_at(_src, _pos, _slen) == 61   { _pos = _pos + 2; add_tok(T_GTEQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 38   && peek_at(_src, _pos, _slen) == 38  { _pos = _pos + 2; add_tok(T_ANDAND, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 124  && peek_at(_src, _pos, _slen) == 124 { _pos = _pos + 2; add_tok(T_PIPEPIPE, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 45  && peek_at(_src, _pos, _slen) == 62   { _pos = _pos + 2; add_tok(T_ARROW, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 61    && peek_at(_src, _pos, _slen) == 62   { _pos = _pos + 2; add_tok(T_FATARROW, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 58 && peek_at(_src, _pos, _slen) == 61   { _pos = _pos + 2; add_tok(T_COLON_EQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 58 && peek_at(_src, _pos, _slen) == 58{ _pos = _pos + 2; add_tok(T_PATHSEP, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 46   && peek_at(_src, _pos, _slen) == 46 {
             _pos = _pos + 2;
-            if cur_char_at(_src, _pos, _slen) == C_DOT { _pos = _pos + 1; add_tok(T_DOTDOTDOT, -1, start_line, start_col); }
+            if cur_char_at(_src, _pos, _slen) == 46 { _pos = _pos + 1; add_tok(T_DOTDOTDOT, -1, start_line, start_col); }
             else { add_tok(T_DOTDOT, -1, start_line, start_col); }
             _pos = skip_ws(_src, _pos, _slen); continue; }
 
         // Compound assignment operators
-        if c == C_PLUS  && peek_at(_src, _pos, _slen) == C_EQ { _pos = _pos + 2; add_tok(T_PLUS_EQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_DASH  && peek_at(_src, _pos, _slen) == C_EQ { _pos = _pos + 2; add_tok(T_MINUS_EQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_STAR  && peek_at(_src, _pos, _slen) == C_EQ { _pos = _pos + 2; add_tok(T_STAR_EQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_SLASH && peek_at(_src, _pos, _slen) == C_EQ { _pos = _pos + 2; add_tok(T_SLASH_EQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 43  && peek_at(_src, _pos, _slen) == 61 { _pos = _pos + 2; add_tok(T_PLUS_EQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 45  && peek_at(_src, _pos, _slen) == 61 { _pos = _pos + 2; add_tok(T_MINUS_EQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 42  && peek_at(_src, _pos, _slen) == 61 { _pos = _pos + 2; add_tok(T_STAR_EQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 47 && peek_at(_src, _pos, _slen) == 61 { _pos = _pos + 2; add_tok(T_SLASH_EQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
 
         // Single-char tokens
-        if c == C_LPAREN  { _pos = _pos + 1; add_tok(T_LPAREN, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_RPAREN  { _pos = _pos + 1; add_tok(T_RPAREN, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_LBRACE  { _pos = _pos + 1; add_tok(T_LBRACE, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_RBRACE  { _pos = _pos + 1; add_tok(T_RBRACE, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_LBRACK  { _pos = _pos + 1; add_tok(T_LBRACKET, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_RBRACK  { _pos = _pos + 1; add_tok(T_RBRACKET, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_COMMA   { _pos = _pos + 1; add_tok(T_COMMA, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_SEMI    { _pos = _pos + 1; add_tok(T_SEMI, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_COLON   { _pos = _pos + 1; add_tok(T_COLON, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_DOT     { _pos = _pos + 1; add_tok(T_DOT, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_EQ      { _pos = _pos + 1; add_tok(T_EQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_BANG    { _pos = _pos + 1; add_tok(T_BANG, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_LT      { _pos = _pos + 1; add_tok(T_LT, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_GT      { _pos = _pos + 1; add_tok(T_GT, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_PLUS    { _pos = _pos + 1; add_tok(T_PLUS, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_DASH    { _pos = _pos + 1; add_tok(T_MINUS, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_STAR    { _pos = _pos + 1; add_tok(T_STAR, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_SLASH   { _pos = _pos + 1; add_tok(T_SLASH, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_PERCENT { _pos = _pos + 1; add_tok(T_PERCENT, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_AMP     { _pos = _pos + 1; add_tok(T_AMPERSAND, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_UNDER   { _pos = _pos + 1; add_tok(T_UNDERSCORE, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_AT      { _pos = _pos + 1; add_tok(T_AT, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
-        if c == C_QUES    { _pos = _pos + 1; add_tok(T_QUESTION, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 40  { _pos = _pos + 1; add_tok(T_LPAREN, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 41  { _pos = _pos + 1; add_tok(T_RPAREN, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 123  { _pos = _pos + 1; add_tok(T_LBRACE, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 125  { _pos = _pos + 1; add_tok(T_RBRACE, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 91  { _pos = _pos + 1; add_tok(T_LBRACKET, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 93  { _pos = _pos + 1; add_tok(T_RBRACKET, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 44   { _pos = _pos + 1; add_tok(T_COMMA, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 59    { _pos = _pos + 1; add_tok(T_SEMI, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 58   { _pos = _pos + 1; add_tok(T_COLON, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 46     { _pos = _pos + 1; add_tok(T_DOT, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 61      { _pos = _pos + 1; add_tok(T_EQ, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 33    { _pos = _pos + 1; add_tok(T_BANG, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 60      { _pos = _pos + 1; add_tok(T_LT, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 62      { _pos = _pos + 1; add_tok(T_GT, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 43    { _pos = _pos + 1; add_tok(T_PLUS, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 45    { _pos = _pos + 1; add_tok(T_MINUS, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 42    { _pos = _pos + 1; add_tok(T_STAR, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 47   { _pos = _pos + 1; add_tok(T_SLASH, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 37 { _pos = _pos + 1; add_tok(T_PERCENT, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 38     { _pos = _pos + 1; add_tok(T_AMPERSAND, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 95   { _pos = _pos + 1; add_tok(T_UNDERSCORE, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 64      { _pos = _pos + 1; add_tok(T_AT, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        if c == 63    { _pos = _pos + 1; add_tok(T_QUESTION, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
 
         // Unknown
         _pos = _pos + 1;
