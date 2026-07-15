@@ -748,26 +748,26 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         w32(buf, g_call_main_pos + 1, rel);
     }
 
-    // ── bss_init: zero heap management area before _start ──
+    // ── bss_init: zero BSS globals area before _start ──
     // WSL2 (and possibly other kernels) do not reliably zero BSS,
-    // so we explicitly clear the heap_ptr / heap_start fields.
-    // This stub becomes the new entry point; it zeroes [bss_va+0]
-    // and [bss_va+8], then jumps to the real _start.
+    // so we explicitly clear the first BSS_ZERO_SIZE bytes with
+    // rep stosb. This stub becomes the new entry point; after
+    // zeroing it jumps to the real _start.
     bss_init_cp := cp;
+    BSS_ZERO_SIZE : int = 131072;  // 128 KB — covers all globals
 
-    // xor eax, eax
+    // lea rdi, [rip + rel]  → rdi = bss_va
+    rel_di := bss_va - (TEXT_BASE + cp + 7);
+    w8(buf, cp, 72); w8(buf, cp+1, 141); w8(buf, cp+2, 61);
+    w8_signed(buf, cp+3, rel_di); cp = cp + 7;
+
+    // mov ecx, BSS_ZERO_SIZE
+    w8(buf, cp, 185); e2_w32(buf, cp+1, BSS_ZERO_SIZE); cp = cp + 5;
+
+    // xor eax, eax; cld; rep stosb
     w8(buf, cp, 49); w8(buf, cp+1, 192); cp = cp + 2;
-
-    // mov [rip + rel], rax  → zero heap_ptr at bss_va + 0
-    // (REX.W + 0x89 + ModRM + rel32 = 7 bytes, rip points to cp+7)
-    rel_hp := bss_va + 0 - (TEXT_BASE + cp + 7);
-    w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 5);
-    w8_signed(buf, cp+3, rel_hp); cp = cp + 7;
-
-    // mov [rip + rel], rax  → zero heap_start at bss_va + 8
-    rel_hs := bss_va + 8 - (TEXT_BASE + cp + 7);
-    w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 5);
-    w8_signed(buf, cp+3, rel_hs); cp = cp + 7;
+    w8(buf, cp, 252); cp = cp + 1;
+    w8(buf, cp, 243); w8(buf, cp+1, 170); cp = cp + 2;
 
     // jmp _start  (TEXT_BASE + 176)
     jmp_rel := TEXT_BASE + 176 - (TEXT_BASE + cp + 5);
