@@ -19,5 +19,7 @@ import os
 import io
 import interp
 import dump
+import ext_mgr
+import ext_safety
 import pass
 import entry

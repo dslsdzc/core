@@ -783,10 +783,14 @@ fn gen_expr(node: int) -> int {
         }
         v := new_ir_var("elem", TI_INT);
         if idx_kind == EXPR_INT {
-            emit(IR_LOAD_INDEX, v, arr_var, 0, ast_int_val(idx_node), 0);
+            if pass_before_array_access(arr_var, -1, ast_int_val(idx_node), -1) == 0 {
+                emit(IR_LOAD_INDEX, v, arr_var, 0, ast_int_val(idx_node), 0);
+            }
         } else {
             idx_var := gen_expr(idx_node);
-            emit(IR_LOAD_INDEX_VAR, v, arr_var, idx_var, 0, 0);
+            if pass_before_array_access(arr_var, idx_var, -1, -1) == 0 {
+                emit(IR_LOAD_INDEX_VAR, v, arr_var, idx_var, 0, 0);
+            }
         }
         return v;
     }

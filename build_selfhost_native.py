@@ -127,6 +127,8 @@ def main():
             'src/compiler/checker.cr',
             'src/compiler/opt.cr',
             'src/compiler/diag.cr',
+            'src/compiler/ext_mgr.cr',
+            'src/compiler/ext_safety.cr',
             'src/compiler/ir_gen.cr',
             'src/compiler/pass.cr',
             'src/compiler/dataflow.cr',
