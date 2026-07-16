@@ -576,12 +576,8 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
     w8(buf, cp, 195); cp = cp + 1;
 
     // ── alloc (bump allocator) ──
-    // Compute BSS VA for heap_ptr placement
-    // Total pending code: 84 (alloc + bounds + header) + 6+9+12+15+18 (sched tramps) = 144
-    rodata_sz := g2_rodata_sz();
-    // rodata starts at page-aligned cp (after alloc + sched_tramps + page padding)
-    rodata_base_va := (TEXT_BASE + cp + 144 + 4095) / 4096 * 4096;
-    bss_va := (rodata_base_va + rodata_sz + 4095) / 4096 * 4096;
+    // BSS VA will be computed after all code emitted — placeholder for now
+    bss_va := ((TEXT_BASE + cp + 4096 + 4095) / 4096) * 4096;
 
     max_gv : ., mut = 0;
     gsi : ., mut = 0;
@@ -692,9 +688,10 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         loop { if cp % 8 == 0 { break; } w8(buf, cp, 0); cp = cp + 1; }
     si = si + 1; }
 
-    // Recompute bss_va based on actual cp (all code emitted)
-    // Must happen before rip_patch so global VA calculations use correct BSS address.
-    bss_va = (TEXT_BASE + cp + 256 + 4095) / 4096 * 4096;
+    // ── Recompute bss_va after all code emitted ──
+    // total_code from Phase 2 underestimates; use actual cp for precise calculation.
+    // +1 ensures BSS is on a different page from code.
+bss_va = ((TEXT_BASE + cp + 4096 + 4095) / 4096) * 4096;
 
     // ── Allocate BSS for globals ──
     gi2 := 0; goff : ., mut = 0;
