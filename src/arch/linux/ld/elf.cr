@@ -692,6 +692,10 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         loop { if cp % 8 == 0 { break; } w8(buf, cp, 0); cp = cp + 1; }
     si = si + 1; }
 
+    // Recompute bss_va based on actual cp (all code emitted)
+    // Must happen before rip_patch so global VA calculations use correct BSS address.
+    bss_va = (TEXT_BASE + cp + 256 + 4095) / 4096 * 4096;
+
     // ── Allocate BSS for globals ──
     gi2 := 0; goff : ., mut = 0;
     loop { if gi2 >= g_ir_global_count { break; }
