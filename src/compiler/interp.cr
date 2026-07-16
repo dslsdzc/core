@@ -122,13 +122,15 @@ fn ir_interpret() -> int {
         if op == 11 {  // IR_LOAD_FIELD: s1=struct_var, s3=field_idx
             if d >= 0 && s1 >= 0 {
                 ptr := r64(g_ir_vals, s1 * 8);
-                w64(g_ir_vals, d * 8, r64(ptr, s3 * 8));
+                if ptr != 0 { w64(g_ir_vals, d * 8, r64(ptr, s3 * 8)); }
+                else { w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8)); }
             }
         }
         if op == 12 {  // IR_STORE_FIELD: s1=struct_var, s2=val_var, s3=field_idx
             if s1 >= 0 && s2 >= 0 {
                 ptr := r64(g_ir_vals, s1 * 8);
-                w64(ptr, s3 * 8, r64(g_ir_vals, s2 * 8));
+                if ptr != 0 { w64(ptr, s3 * 8, r64(g_ir_vals, s2 * 8)); }
+                else { w64(g_ir_vals, s1 * 8, r64(g_ir_vals, s2 * 8)); }
             }
         }
         if op == 13 {  // IR_LOAD_INDEX: s1=arr_var, s3=literal_idx
