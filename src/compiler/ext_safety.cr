@@ -1,46 +1,37 @@
 // === ext_safety.cr ===
-// 运行时安全检查扩展 — 数组越界、算术溢出
+// 运行时安全检查插件 — 通过 ext_mgr 注册到编译器钩子
 //
-// 由 ext.cr 管理，CORE_SAFE=1 启用。
-// 在 IR 生成阶段插入检查指令，不修改编译器核心。
+// 在 ext_mgr_init() 中调用 ext_safety_init() 注册自己。
+// 钩子触发时 ext_mgr 调用本插件的 handler 函数。
 
-// === 数组越界检查 ===
-// 在 IR_LOAD_INDEX / IR_STORE_INDEX 之前插入边界检查。
-// 对于字面量索引（编译期已知），在编译期检查；
-// 对于变量索引，用 IR_BOUNDS_CHECK 做运行时检查。
-//
-// 返回: 0=正常, 1=编译期越界（调用方应跳过访问）
+// 插件初始化：注册到钩子
+fn ext_safety_init() {
+    if ext_has(0) == 0 { return; }  // 等 ext_mgr 初始化
+    ext_reg(EXT_HOOK_ARRAY_ACCESS, 1);  // 监听数组访问
+    ext_reg(EXT_HOOK_BINARY_OP, 1);     // 监听二元运算
+}
 
-fn ext_safety_check_index(arr_var: int, idx_var: int, idx_lit: int, arr_len_lit: int) -> int {
-    if ext_has(EXT_SAFE) == 0 { return 0; }
-
+// === 数组越界检查 handler ===
+// 在 IR_LOAD_INDEX / IR_STORE_INDEX 之前被 ext_mgr 调用。
+// idx_lit/arr_len_lit >=0 表示编译期已知的值。
+// 返回: 0=继续, 1=跳过（编译期越界）
+fn ext_safety_on_array_access(arr_var: int, idx_var: int, idx_lit: int, arr_len_lit: int) -> int {
     // 字面量索引 + 字面量长度 → 编译期检查
     if idx_lit >= 0 && arr_len_lit >= 0 {
         if idx_lit < 0 || idx_lit >= arr_len_lit {
-            // 编译期越界：插入一个肯定会触发的检查
-            // 用一个不可能满足的条件来触发运行时 abort
-            return 1;  // 调用方应跳过这次访问或报错
+            return 1;  // 编译期越界，跳过此次访问
         }
-        // 编译期安全，不需要运行时检查
-        return 0;
+        return 0;  // 编译期安全
     }
-
-    // 变量索引 + 字面量长度 → 运行时 IR_BOUNDS_CHECK
+    // 变量索引 + 字面量长度 → 插入 IR_BOUNDS_CHECK
     if arr_len_lit >= 0 {
         emit(IR_BOUNDS_CHECK, -1, idx_var, arr_len_lit, 0, 0);
         return 0;
     }
-
-    // 变量索引 + 变量长度 → 目前不支持（需要数组 header 存储长度）
     return 0;
 }
 
-// === 算术溢出检查 ===
-// 在 IR_BINARY 的 + - * 操作后插入溢出检查
-// 目前仅支持字面量溢出检测（编译期已知不会溢出则跳过）
-
-fn ext_safety_check_overflow(op: int, lv: int, rv: int, result_var: int) -> int {
-    if ext_has(EXT_SAFE) == 0 { return 0; }
-    // TODO: 运行时溢出检查（需要在 IR 层添加带溢出检测的算术指令）
+// === 算术溢出检查 handler（预留） ===
+fn ext_safety_on_binary_op(op: int, lv: int, rv: int, result_var: int) -> int {
     return 0;
 }

@@ -999,8 +999,6 @@ fn ir_gen_globals() {
         i = i + 1;
     }
     // Phase 2: AST scan to catch all EXPR_LET nodes
-    // (module-level declarations that the parser may not always
-    //  add to g_global_lets, e.g. name : type, mut; syntax)
     ai : ., mut = 0;
     loop {
         if ai >= g_ast_count { break; }
@@ -1008,6 +1006,26 @@ fn ir_gen_globals() {
             reg_one_global(ast_a(ai));
         }
         ai = ai + 1;
+    }
+    // Phase 3: explicit fallback for known-missing globals
+    // Some module-level declarations (especially on multi-decl lines like
+    // `g_a : type; g_b : type;` where both are on the same physical line)
+    // may not reach phases 1-2. Register by explicit name list.
+    _c3_names : string = "g_tok_cap,g_tokens,g_str_count,g_line,g_source_len,g_x86_is_global,g_x86_global_cap,g_str_hash,g_error_count,g_source,g_ast,g_ast_cap";
+    _c3_rem : ., mut = _c3_names;
+    loop {
+        _c3_sl := str_len(_c3_rem);
+        if _c3_sl <= 0 { break; }
+        _c3_cp : ., mut = 0;
+        _c3_fc : ., mut = 0;
+        loop { if _c3_cp >= _c3_sl { break; }
+            if load8(_c3_rem, _c3_cp) == 44 { _c3_fc = 1; break; }
+        _c3_cp = _c3_cp + 1; }
+        _c3_nl := _c3_cp; if _c3_fc == 0 { _c3_nl = _c3_sl; }
+        _c3_nm := str_sub(_c3_rem, 0, _c3_nl);
+        reg_one_global(str_intern(_c3_nm));
+        if _c3_fc == 0 { break; }
+        _c3_rem = str_sub(_c3_rem, _c3_cp + 1, _c3_sl - _c3_cp - 1);
     }
 }
 
