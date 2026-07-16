@@ -81,6 +81,19 @@ fn lookup_keyword(s: string) -> int {
     if s == "go" { return T_GO; }
     if s == "await" { return T_AWAIT; }
     if s == "unsafe" { return T_UNSAFE; }
+    if s == "flow" { return T_FLOW; }
+    if s == "yield" { return T_YIELD; }
+    if s == "interface" { return T_INTERFACE; }
+    if s == "type" { return T_TYPE; }
+    if s == "mod" { return T_MOD; }
+    if s == "as" { return T_AS; }
+    if s == "auto" { return T_AUTO; }
+    if s == "fileid" { return T_FILEID; }
+    if s == "move" { return T_MOVE; }
+    if s == "in" { return T_IN; }
+    if s == "None" { return T_NONE; }
+    if s == "Some" { return T_SOME; }
+    if s == "unit" { return T_UNIT; }
     return T_IDENT;
 }
 
