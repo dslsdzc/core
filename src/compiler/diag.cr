@@ -21,13 +21,25 @@ fn read_source_line(line: int) -> string {
             }
             return str_sub(g_source, i, j - i);
         }
-        if get_char(g_source, i) == "\n" {
+        if load8(g_source, i) == 10 {
             cur = cur + 1;
             start = i + 1;
         }
         i = i + 1;
     }
     return "";
+}
+
+fn source_line_count() -> int {
+    count : ., mut = 1;
+    i : ., mut = 0;
+    slen := str_len(g_source);
+    loop {
+        if i >= slen { break; }
+        if load8(g_source, i) == 10 { count = count + 1; }
+        i = i + 1;
+    }
+    return count;
 }
 
 fn print_source_line(line: int, col: int, annotation: string) {
@@ -101,6 +113,7 @@ fn pad_diag_num(num: int) -> string {
 
 fn print_diagnostics() {
     if g_diag_count == 0 { return; }
+    source_lines := source_line_count();
     di : ., mut = 0;
     loop {
         if di >= g_diag_count { break; }
@@ -119,7 +132,7 @@ fn print_diagnostics() {
         print(int_str(ln));
         print(":");
         println(int_str(cl));
-        if ln > 0 {
+        if ln > 0 && ln <= source_lines {
             println("   |");
             print_source_line(ln, cl, msg);
         }

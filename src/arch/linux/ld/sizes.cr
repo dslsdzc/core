@@ -45,6 +45,8 @@ fn sz_ret() -> int { return 1; }
 
 // Each register param save uses func-relative offsets (always disp8)
 fn sz_save_param() -> int { return 4; }
+// Stack params need one load from the caller frame and one local store.
+fn sz_save_stack_param() -> int { return 8; }
 
 // ── _start size (simple case, no argc/argv globals) ──
 fn sz_start_body() -> int { return 4 + 5 + sz_call() + 2 + 5 + sz_syscall(); }

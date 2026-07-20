@@ -1115,7 +1115,7 @@ fn infer_expr(node: int) -> int {
 
 
     if ast_kind(node) == EXPR_INT { return TI_INT; }
-    if ast_kind(node) == EXPR_NONE && ast_a(node) >= 0 { return infer_expr(ast_a(node)); }
+    if ast_kind(node) == EXPR_NONE && ast_a(node) >= 0 && ast_a(node) != node { return infer_expr(ast_a(node)); }
     if ast_kind(node) == EXPR_FLOAT { return TI_FLOAT; }
     if ast_kind(node) == EXPR_STRING { return TI_STR; }
     if ast_kind(node) == EXPR_BOOL { return TI_BOOL; }
@@ -1136,7 +1136,7 @@ fn infer_expr(node: int) -> int {
     }
     if ast_kind(node) == EXPR_NONE {
         // Wrapper node in struct literal: forward to inner expression
-        if ast_a(node) >= 0 { return infer_expr(ast_a(node)); }
+        if ast_a(node) >= 0 && ast_a(node) != node { return infer_expr(ast_a(node)); }
         return TI_UNIT;
     }
 

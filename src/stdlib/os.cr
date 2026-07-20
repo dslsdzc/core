@@ -19,16 +19,21 @@ fn system(cmd: string) -> int {
         // 父进程：等待子进程结束
         status_buf := alloc(16);
         syscall3(61, pid, status_buf, 0);  // wait4(pid, &status, 0, NULL)
-        status := load8(status_buf, 0);
-        return status % 256;  // WEXITSTATUS
+        // Linux wait status stores a normal exit code in bits 8..15.
+        return load8(status_buf, 1) % 256;
     }
     // 子进程：执行命令
-    // Argv4 结构体在堆上分配，字段连续存储：
-    //   offset+0: 指向 "/bin/sh" 的指针
-    //   offset+8: 指向 "-c" 的指针
-    //   offset+16: 指向 cmd 的指针
-    //   offset+24: 0 (NULL 终止符)
-    argv := Argv4 { a = "/bin/sh", b = "-c", c = cmd, d = 0 };
+    // Build argv explicitly so execve receives a raw pointer array.
+    argv := alloc(32);
+    store_str_ptr(argv, 0, "/bin/sh");
+    store_str_ptr(argv, 8, "-c");
+    store_str_ptr(argv, 16, cmd);
+    zi : ., mut = 0;
+    loop {
+        if zi >= 8 { break; }
+        store8(argv, 24 + zi, 0);
+        zi = zi + 1;
+    }
     syscall3(59, "/bin/sh", argv, 0);  // execve — 成功则不返回
     syscall3(60, 127, 0, 0);  // execve 失败时 _exit(127)
     return -1;
