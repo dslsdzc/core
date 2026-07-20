@@ -82,22 +82,6 @@ fn find_global_const_node(name_idx: int) -> int {
         i = i - 1;
     }
 
-    // g_global_lets is known to miss some module-level declarations.  Match
-    // ir_gen_globals()'s AST fallback so those constants are inlined too.
-    ai : ., mut = 0;
-    loop {
-        if ai >= g_ast_count { break; }
-        if ast_kind(ai) == EXPR_LET && ast_a(ai) == name_idx && ast_data(ai) == 0 {
-            value_node2 := ast_c(ai);
-            if value_node2 >= 0 {
-                value_kind2 := ast_kind(value_node2);
-                if value_kind2 == EXPR_INT || value_kind2 == EXPR_BOOL {
-                    return value_node2;
-                }
-            }
-        }
-        ai = ai + 1;
-    }
     return -1;
 }
 
@@ -1087,42 +1071,14 @@ fn reg_one_global(name_idx: int) {
 }
 
 fn ir_gen_globals() {
-    // Phase 1: g_global_lets (primary source)
+    // The parser records only file-scope declarations in g_global_lets.
+    // Do not scan every EXPR_LET here: that also includes function locals.
     i : ., mut = 0;
     loop {
         if i >= g_global_let_count { break; }
         node := r64(g_global_lets, i * 8);
         reg_one_global(ast_a(node));
         i = i + 1;
-    }
-    // Phase 2: AST scan to catch all EXPR_LET nodes
-    ai : ., mut = 0;
-    loop {
-        if ai >= g_ast_count { break; }
-        if ast_kind(ai) == EXPR_LET {
-            reg_one_global(ast_a(ai));
-        }
-        ai = ai + 1;
-    }
-    // Phase 3: explicit fallback for known-missing globals
-    // Some module-level declarations (especially on multi-decl lines like
-    // `g_a : type; g_b : type;` where both are on the same physical line)
-    // may not reach phases 1-2. Register by explicit name list.
-    _c3_names : string = "g_tok_cap,g_tokens,g_str_count,g_line,g_source_len,g_x86_is_global,g_x86_global_cap,g_str_hash,g_error_count,g_source,g_ast,g_ast_cap";
-    _c3_rem : ., mut = _c3_names;
-    loop {
-        _c3_sl := str_len(_c3_rem);
-        if _c3_sl <= 0 { break; }
-        _c3_cp : ., mut = 0;
-        _c3_fc : ., mut = 0;
-        loop { if _c3_cp >= _c3_sl { break; }
-            if load8(_c3_rem, _c3_cp) == 44 { _c3_fc = 1; break; }
-        _c3_cp = _c3_cp + 1; }
-        _c3_nl := _c3_cp; if _c3_fc == 0 { _c3_nl = _c3_sl; }
-        _c3_nm := str_sub(_c3_rem, 0, _c3_nl);
-        reg_one_global(str_intern(_c3_nm));
-        if _c3_fc == 0 { break; }
-        _c3_rem = str_sub(_c3_rem, _c3_cp + 1, _c3_sl - _c3_cp - 1);
     }
 }
 
