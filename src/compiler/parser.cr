@@ -1481,6 +1481,8 @@ fn parse_declaration() {
 fn parse_all() {
     g_ast_count = 0;
     g_token_pos = 0;
+    g_global_let_count = 0;
+    g_global_lets_cap = 0;
     g_func_count = 0;
     g_struct_count = 0;
     g_enum_count = 0;
