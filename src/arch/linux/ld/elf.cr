@@ -207,7 +207,7 @@ fn elf2_hdr(buf: string, code_end: int, total_sz: int) {
         6,     // PF_R | PF_W
         code_end,
         rodata_va, rodata_va,
-        data_sz, 268435456, 4096);  // memsz = 256MB heap
+        data_sz, 1073741824, 4096);  // memsz = 1 GiB virtual bump heap
 }
 
 // ── Emit _start code, return total bytes ──
@@ -375,7 +375,12 @@ fn elf_gen(buf: string) -> int {
         if g_opt_level >= 1 { total_code = total_code + 18; }  // push rbx,r12-r15(9) + pop r15-r12,rbx(9)
         ss_dry := g_x86_emit_stack_size;
         total_code = total_code + sz_sub_rsp(ss_dry);
-        total_code = total_code + pc2 * sz_save_param();
+        reg_pc2 : ., mut = pc2;
+        if reg_pc2 > 6 { reg_pc2 = 6; }
+        stack_pc2 : ., mut = pc2 - 6;
+        if stack_pc2 < 0 { stack_pc2 = 0; }
+        total_code = total_code + reg_pc2 * sz_save_param();
+        total_code = total_code + stack_pc2 * sz_save_stack_param();
         total_code = total_code + fsz;
         total_code = total_code + sz_add_rsp(ss_dry) + sz_pop_rbp() + sz_ret();
         if g_opt_level >= 1 { total_code = total_code + 9; }  // pop r15,r14,r13,r12,rbx
@@ -489,8 +494,8 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
                 w8(buf, cp, 72); w8(buf, cp+1, 131); w8(buf, cp+2, 236); w8(buf, cp+3, 0); cp = cp + 4;
             }
         }
-        // save register params to stack
-        pi := 0; loop { if pi >= pc { break; } if pi >= 6 { break; }
+        // Save register and caller-stack params into this function's slots.
+        pi := 0; loop { if pi >= pc { break; }
             po2 := -(vs + pi + 1 - g_current_func_var_start) * 8;  // force stack slot, ignore reg alloc
             if pi == 0 { cp = cp + e2_st(buf, cp, 7, po2); }
             if pi == 1 { w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 117); w8(buf, cp+3, po2); cp = cp + 4; }
@@ -498,6 +503,12 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
             if pi == 3 { w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 77); w8(buf, cp+3, po2); cp = cp + 4; }
             if pi == 4 { w8(buf, cp, 76); w8(buf, cp+1, 137); w8(buf, cp+2, 69); w8(buf, cp+3, po2); cp = cp + 4; }
             if pi == 5 { w8(buf, cp, 76); w8(buf, cp+1, 137); w8(buf, cp+2, 77); w8(buf, cp+3, po2); cp = cp + 4; }
+            if pi >= 6 {
+                caller_off := 16 + (pi - 6) * 8;
+                if g_opt_level >= 1 { caller_off = caller_off + 40; }
+                cp = cp + e2_ld(buf, cp, 10, caller_off);
+                cp = cp + e2_st(buf, cp, 10, po2);
+            }
         pi = pi + 1; }
 
         // Load register-allocated parameters from stack to callee-saved regs
@@ -691,7 +702,11 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
     // ── Recompute bss_va after all code emitted ──
     // total_code from Phase 2 underestimates; use actual cp for precise calculation.
     // +1 ensures BSS is on a different page from code.
-bss_va = ((TEXT_BASE + cp + 4096 + 4095) / 4096) * 4096;
+    bss_va = ((TEXT_BASE + cp + 4096 + 4095) / 4096) * 4096;
+
+    // The allocator was emitted earlier with a provisional BSS address.
+    // Re-emit it in place now that the final data-segment VA is known.
+    emit_alloc_body(buf, alloc_start, bss_va, globals_size);
 
     // ── Allocate BSS for globals ──
     gi2 := 0; goff : ., mut = 0;
@@ -788,4 +803,3 @@ bss_va = ((TEXT_BASE + cp + 4096 + 4095) / 4096) * 4096;
     g_asm_code_size = total_sz;
     return total_sz;
 }
-

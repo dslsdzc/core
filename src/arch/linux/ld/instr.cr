@@ -397,6 +397,15 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
             if ai == 0 { r = 7; } if ai == 1 { r = 6; } if ai == 2 { r = 2; } if ai == 3 { r = 1; } if ai == 4 { r = 8; } if ai == 5 { r = 9; }
             if r >= 0 { cp = cp + e2_load_var(buf, pos+cp, r, fa + ai); }
         ai = ai + 1; }
+        // System V AMD64 passes the 7th and later arguments on the stack,
+        // rightmost first, so argument 7 is closest to the return address.
+        stack_ai : ., mut = ac - 1;
+        loop {
+            if stack_ai < 6 { break; }
+            cp = cp + e2_load_var(buf, pos+cp, 10, fa + stack_ai);
+            e2_w8(buf, pos+cp, 65); e2_w8(buf, pos+cp+1, 82); cp = cp + 2;  // push r10
+            stack_ai = stack_ai - 1;
+        }
         // Match builtins by interned string index (integer compare, no str_eq)
         if s3 == g_ni_syscall3 {
             cp = cp + e2_mov(buf, pos+cp, 0, 7);
@@ -533,6 +542,17 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
             // xor eax, eax
             e2_w8(buf, pos+cp, 49); e2_w8(buf, pos+cp+1, 192); cp = cp + 2;
             if d >= 0 { cp = cp + e2_st(buf, pos+cp, 0, g2_slot(d)); }
+        }
+        stack_count := ac - 6;
+        if stack_count > 0 {
+            stack_bytes := stack_count * 8;
+            if stack_bytes <= 127 {
+                e2_w8(buf, pos+cp, 72); e2_w8(buf, pos+cp+1, 131);
+                e2_w8(buf, pos+cp+2, 196); e2_w8(buf, pos+cp+3, stack_bytes); cp = cp + 4;
+            } else {
+                e2_w8(buf, pos+cp, 72); e2_w8(buf, pos+cp+1, 129); e2_w8(buf, pos+cp+2, 196);
+                e2_w32(buf, pos+cp+3, stack_bytes); cp = cp + 7;
+            }
         }
         return cp;
     }

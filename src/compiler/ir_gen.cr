@@ -62,6 +62,45 @@ fn find_global(name_idx: int) -> int {
     return -1;
 }
 
+// Return the literal initializer AST node for an immutable module-level
+// constant.  The ELF backend has no data initializers, so leaving these as
+// BSS globals turns values such as T_FN and ESZ_TOKEN into zero at runtime.
+fn find_global_const_node(name_idx: int) -> int {
+    i : ., mut = g_global_let_count - 1;
+    loop {
+        if i < 0 { break; }
+        node := r64(g_global_lets, i * 8);
+        if ast_a(node) == name_idx && ast_data(node) == 0 {
+            value_node := ast_c(node);
+            if value_node >= 0 {
+                value_kind := ast_kind(value_node);
+                if value_kind == EXPR_INT || value_kind == EXPR_BOOL {
+                    return value_node;
+                }
+            }
+        }
+        i = i - 1;
+    }
+
+    // g_global_lets is known to miss some module-level declarations.  Match
+    // ir_gen_globals()'s AST fallback so those constants are inlined too.
+    ai : ., mut = 0;
+    loop {
+        if ai >= g_ast_count { break; }
+        if ast_kind(ai) == EXPR_LET && ast_a(ai) == name_idx && ast_data(ai) == 0 {
+            value_node2 := ast_c(ai);
+            if value_node2 >= 0 {
+                value_kind2 := ast_kind(value_node2);
+                if value_kind2 == EXPR_INT || value_kind2 == EXPR_BOOL {
+                    return value_node2;
+                }
+            }
+        }
+        ai = ai + 1;
+    }
+    return -1;
+}
+
 fn push_ir_scope() {
     grow_ir_local_scopes(g_ir_local_depth + 1);
     w64(g_ir_local_scopes, g_ir_local_depth * 8, g_ir_local_count);
@@ -132,7 +171,7 @@ fn gen_expr(node: int) -> int {
 
     if ast_kind(node) == EXPR_NONE {
         // Wrapper node: forward to inner expression (used in struct literals)
-        if ast_a(node) >= 0 { return gen_expr(ast_a(node)); }
+        if ast_a(node) >= 0 && ast_a(node) != node { return gen_expr(ast_a(node)); }
         return -1;
     }
 
@@ -172,6 +211,14 @@ fn gen_expr(node: int) -> int {
         name_idx := ast_int_val(node);
         lv := find_local(name_idx);
         if lv >= 0 { return lv; }
+        const_node := find_global_const_node(name_idx);
+        if const_node >= 0 {
+            const_type : ., mut = TI_INT;
+            if ast_kind(const_node) == EXPR_BOOL { const_type = TI_BOOL; }
+            cv := new_ir_var("const", const_type);
+            emit(IR_CONST, cv, ast_int_val(const_node), 0, 0, const_type);
+            return cv;
+        }
         gv := find_global(name_idx);
         if gv >= 0 { return gv; }
         // Could be a function name being used as a value - return dummy
@@ -226,11 +273,56 @@ fn gen_expr(node: int) -> int {
 
         // Regular binary
         left_var := gen_expr(left);
+        // Logical operators must short-circuit.  Eagerly generating the
+        // right side breaks guard expressions such as
+        // `fi >= 0 && fi_generic_count(fi) > 0`.
+        if op == OP_AND || op == OP_OR {
+            right_lbl := new_label();
+            short_lbl := new_label();
+            merge_lbl := new_label();
+            logic_result := new_ir_var("logic", TI_BOOL);
+            if op == OP_AND {
+                emit(IR_BRANCH, -1, left_var, right_lbl, short_lbl, 0);
+            } else {
+                emit(IR_BRANCH, -1, left_var, short_lbl, right_lbl, 0);
+            }
+
+            emit(IR_LABEL, -1, short_lbl, 0, 0, 0);
+            short_value := new_ir_var("logic_short", TI_BOOL);
+            if op == OP_AND { emit(IR_CONST, short_value, 0, 0, 0, TI_BOOL); }
+            else { emit(IR_CONST, short_value, 1, 0, 0, TI_BOOL); }
+            emit(IR_STORE, -1, logic_result, short_value, 0, 0);
+            emit(IR_JUMP, -1, merge_lbl, 0, 0, 0);
+
+            emit(IR_LABEL, -1, right_lbl, 0, 0, 0);
+            right_value := gen_expr(right);
+            emit(IR_STORE, -1, logic_result, right_value, 0, 0);
+            emit(IR_JUMP, -1, merge_lbl, 0, 0, 0);
+
+            emit(IR_LABEL, -1, merge_lbl, 0, 0, 0);
+            return logic_result;
+        }
         right_var := gen_expr(right);
+        lt := irv_type(left_var);
+        rt := irv_type(right_var);
+        // String equality compares contents, not pointer values.
+        if (op == OP_EQ || op == OP_NE) && (lt == TI_STR || rt == TI_STR) {
+            eq_ni := str_intern("str_eq");
+            eq_arg0 := new_ir_var("_eq0", lt);
+            eq_arg1 := new_ir_var("_eq1", rt);
+            emit(IR_STORE, -1, eq_arg0, left_var, 0, 0);
+            emit(IR_STORE, -1, eq_arg1, right_var, 0, 0);
+            eq_value := new_ir_var("str_eq", TI_BOOL);
+            emit(IR_CALL, eq_value, eq_arg0, 2, eq_ni, TI_BOOL);
+            if op == OP_EQ { return eq_value; }
+            zero_value := new_ir_var("zero", TI_INT);
+            emit(IR_CONST, zero_value, 0, 0, 0, TI_INT);
+            ne_value := new_ir_var("str_ne", TI_BOOL);
+            emit(IR_BINARY, ne_value, eq_value, zero_value, OP_EQ, TI_BOOL);
+            return ne_value;
+        }
         // String concatenation — call concat() instead of IR_BINARY
         if op == OP_ADD {
-            lt := irv_type(left_var);
-            rt := irv_type(right_var);
             if lt == TI_STR || rt == TI_STR {
                 concat_ni := str_intern("concat");
                 // Pack both args into consecutive vars so ELF backend finds them
@@ -719,6 +811,9 @@ fn gen_expr(node: int) -> int {
         if is_arr == 0 { emit(IR_ALLOC, var, 0, 0, 0, TI_UNIT); }
         if val_node >= 0 {
             val_var := gen_expr(val_node);
+            // Preserve the initializer type so later operations can select
+            // type-specific lowering (notably string + -> concat()).
+            irv_set_type(var, irv_type(val_var));
             emit(IR_STORE, -1, var, val_var, 0, 0);
         }
         bind_local(var_ni, var);
@@ -944,7 +1039,9 @@ fn ir_gen_func(fi: int) {
         if pn < 0 { break; }
         pname_idx := ast_a(pn);
         pname := istr_get(pname_idx);
-        pvar := new_ir_var(pname, TI_INT);
+        param_type : ., mut = ast_type_val(pn);
+        if param_type < 0 { param_type = TI_INT; }
+        pvar := new_ir_var(pname, param_type);
         // Bind param name
         bind_local(pname_idx, pvar);
         pi = pi + 1;

@@ -123,7 +123,6 @@ fn run_frontend() -> int {
     if g_error_count > 0 { print_parse_errors(); return 1; }
     println("[4/5] type check...");
     check_all();
-    // Diagnostics are non-fatal (match Python bootstrap behavior)
     // Type-check diagnostics are non-fatal (match Python bootstrap behavior).
     // Only parse errors and resolver errors are fatal.
     if g_diag_count > 0 { print_diagnostics(); }
