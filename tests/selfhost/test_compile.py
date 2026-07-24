@@ -20,6 +20,7 @@ def concat_sources():
         'src/compiler/ast.cr', 'src/compiler/globals.cr',
         'src/compiler/dyn_arr.cr', 'src/compiler/lexer.cr', 'src/compiler/parser.cr',
         'src/compiler/checker.cr', 'src/compiler/opt.cr', 'src/compiler/diag.cr',
+        'src/compiler/ext_mgr.cr', 'src/compiler/ext_safety.cr',
         'src/compiler/ir_gen.cr', 'src/compiler/pass.cr',
         'src/compiler/dataflow.cr',
         'src/compiler/backend/x86_64.cr', 'src/compiler/backend/x86_64/instr.cr',

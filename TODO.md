@@ -2,6 +2,13 @@
 
 ## 已完成
 
+### P0（2026-07-23）
+- **ELF struct/array/enum 寻址修复**：`emit_instr()` 的 disp32 写入补上当前指令基址 `pos`，修复字段、常量索引和 enum tag 位移写到 ELF 缓冲区错误位置的问题。
+- **变量数组索引修复**：修正 `IR_LOAD_INDEX_VAR` 的 REX.X，以及 `IR_STORE_INDEX_VAR` 的 REX/ModRM/SIB 寄存器角色。
+- **corec2 自举阻塞解除**：全新构建验证 `corec2 --help`、tokenizer/check 和 `corec2 -> corec3` 均正常。
+- **O1 自举稳定性验证**：完整 `corec -> corec2 -> corec3` 在 O0/O1 下均成功，产物可继续 check/build。
+- **原生回归测试**：新增 struct 读写、array 常量/变量索引读写、enum tag 与 O1 aggregate ELF 运行测试。
+
 ### 本阶段（2025-07-17 大规模修复）
 - **Token 冲突修复**: T_YIELD/T_INTERFACE(67→97), T_UNSAFE/T_COLON_EQ(68→98)
 - **Lexer 关键字补全**: 补充 flow, yield, interface, type, mod, as, auto, fileid, move, in, None, Some, unit 共 14 个
@@ -49,30 +56,16 @@
 
 ## 剩余工作
 
-### 1. ELF 后端 struct/array 指令编码错误
-- struct 字段访问返回 20（应为 10），字段 0 和 1 都读到字段 1 的值
-- 数组索引返回 20（应为 30），类似偏移问题
-- **怀疑**: ALLOC/LOAD/STORE 指令发射层的偏移计算 bug，非 BSS 问题
-
-### 2. corec2 tokenizer / 自举阻塞
-`build/corec2` 在任何模式（run/build/check）下立即 SIGSEGV。
-- 约 9 个全局变量未注册到 `g_ir_globals`，导致 tokenizer 访问空指针
-- `ir_gen_globals()` Phase 3 已尝试显式注册但不足
-- **根因**: ELF 后端地址计算 + 全局变量初始化顺序问题
-
-### 3. 解释器局限
+### 1. 解释器局限
 - **for 循环**: label/branch 与 dataflow 顺序执行不兼容
 - **递归/跨函数调用**: inline 执行不支持 IR_CALL（仅 main→callee 单层可用）
 - **字符串**: syscall3 在解释器返回 0，print/str_len 等不可用
 - **泛型函数**: 类型检查通过但解释器返回 255
 
-### 4. ELF 后端 O1 稳定性
-`--opt-level 1` 自举编译可能崩溃（`pass_cse` 大函数/`alloc_registers` 元数据交互）。
-
-### 5. go 并发 + flow + yield
+### 2. go 并发 + flow + yield
 解释器数据流图不包含 IR_SPAWN/CALL 节点。
 
-### 6. 标准库补全
+### 3. 标准库补全
 - 字符串操作（split/join/replace）
 - JSON 序列化
 - 集合类完整实现

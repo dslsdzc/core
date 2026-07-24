@@ -660,7 +660,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         cp = cp + e2_ld(buf, pos+cp, 10, o1);
         // mov r10, [r10 + disp32] — REX.WRB + 0x8B
             cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 10/8); e2_w8(buf, pos+cp, 139); cp = cp + 1;
-            cp = cp + emit_modrm(buf, pos+cp, 2, 10%8, 10%8); cp = cp + e2_w32(buf, cp, fo);
+            cp = cp + emit_modrm(buf, pos+cp, 2, 10%8, 10%8); cp = cp + e2_w32(buf, pos+cp, fo);
         cp = cp + e2_st(buf, pos+cp, 10, do2);
         return cp;
     }
@@ -671,7 +671,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         cp = cp + e2_ld(buf, pos+cp, 10, o1); cp = cp + e2_ld(buf, pos+cp, 11, o2);
         // mov [r10 + disp32], r11 — REX.WRB + 0x89
             cp = cp + emit_rex(buf, pos+cp, 1, 11/8, 0, 10/8); e2_w8(buf, pos+cp, 137); cp = cp + 1;
-            cp = cp + emit_modrm(buf, pos+cp, 2, 11%8, 10%8); cp = cp + e2_w32(buf, cp, fo);
+            cp = cp + emit_modrm(buf, pos+cp, 2, 11%8, 10%8); cp = cp + e2_w32(buf, pos+cp, fo);
         return cp;
     }
 
@@ -769,7 +769,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         // mov r10, [r10 + disp32] — tag at offset 0
         // mov r10, [r10 + 0] (enum tag)
             cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 10/8); e2_w8(buf, pos+cp, 139); cp = cp + 1;
-            cp = cp + emit_modrm(buf, pos+cp, 2, 10%8, 10%8); cp = cp + e2_w32(buf, cp, 0);
+            cp = cp + emit_modrm(buf, pos+cp, 2, 10%8, 10%8); cp = cp + e2_w32(buf, pos+cp, 0);
         cp = cp + e2_st(buf, pos+cp, 10, do2);
         return cp;
     }
@@ -780,7 +780,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         // mov r10, [r10 + disp32]
         // mov r10, [r10 + idx*8]
             cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 10/8); e2_w8(buf, pos+cp, 139); cp = cp + 1;
-            cp = cp + emit_modrm(buf, pos+cp, 2, 10%8, 10%8); cp = cp + e2_w32(buf, cp, idx * 8);
+            cp = cp + emit_modrm(buf, pos+cp, 2, 10%8, 10%8); cp = cp + e2_w32(buf, pos+cp, idx * 8);
         cp = cp + e2_st(buf, pos+cp, 10, do2);
         return cp;
     }
@@ -791,7 +791,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         // mov [r10 + disp32], r11
         // mov [r10 + idx*8], r11
             cp = cp + emit_rex(buf, pos+cp, 1, 11/8, 0, 10/8); e2_w8(buf, pos+cp, 137); cp = cp + 1;
-            cp = cp + emit_modrm(buf, pos+cp, 2, 11%8, 10%8); cp = cp + e2_w32(buf, cp, idx * 8);
+            cp = cp + emit_modrm(buf, pos+cp, 2, 11%8, 10%8); cp = cp + e2_w32(buf, pos+cp, idx * 8);
         return cp;
     }
 
@@ -799,7 +799,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         do2 := g2_slot(d); o1 := g2_slot(s1); oi := g2_slot(s2);
         cp = cp + e2_ld(buf, pos+cp, 10, o1); cp = cp + e2_ld(buf, pos+cp, 11, oi);
         // mov r10, [r10 + r11*8] — SIB(scale=3, index=r11%8, base=r10%8)
-            cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 10/8); e2_w8(buf, pos+cp, 139); cp = cp + 1;
+            cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 11/8, 10/8); e2_w8(buf, pos+cp, 139); cp = cp + 1;
             cp = cp + emit_modrm(buf, pos+cp, 0, 10%8, 4); cp = cp + emit_sib(buf, pos+cp, 3, 11%8, 10%8);
         cp = cp + e2_st(buf, pos+cp, 10, do2);
         return cp;
@@ -808,9 +808,9 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     if op == IR_STORE_INDEX_VAR && d >= 0 {
         o1 := g2_slot(s1); oi := g2_slot(s2); ov := g2_slot(d);
         cp = cp + e2_ld(buf, pos+cp, 10, o1); cp = cp + e2_ld(buf, pos+cp, 11, oi); cp = cp + e2_ld(buf, pos+cp, 12, ov);
-        // mov [r12 + r11*8], r10 — SIB(scale=3, index=r11%8, base=r12%8)
-            cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 12/8); e2_w8(buf, pos+cp, 137); cp = cp + 1;
-            cp = cp + emit_modrm(buf, pos+cp, 0, 10%8, 4); cp = cp + emit_sib(buf, pos+cp, 3, 11%8, 12%8);
+        // mov [r10 + r11*8], r12 — SIB(scale=3, index=r11%8, base=r10%8)
+            cp = cp + emit_rex(buf, pos+cp, 1, 12/8, 11/8, 10/8); e2_w8(buf, pos+cp, 137); cp = cp + 1;
+            cp = cp + emit_modrm(buf, pos+cp, 0, 12%8, 4); cp = cp + emit_sib(buf, pos+cp, 3, 11%8, 10%8);
         return cp;
     }
 
@@ -824,7 +824,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         cp = cp + e2_ld(buf, pos+cp, 10, do2);
         // mov qword [r10 + 0], s1 — 0xC7 + REX.WB
             cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 10/8); e2_w8(buf, pos+cp, 199); cp = cp + 1;
-            cp = cp + emit_modrm(buf, pos+cp, 0, 0, 10%8); cp = cp + e2_w32(buf, cp, s1);
+            cp = cp + emit_modrm(buf, pos+cp, 0, 0, 10%8); cp = cp + e2_w32(buf, pos+cp, s1);
         return cp;
     }
 
