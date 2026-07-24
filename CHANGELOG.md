@@ -1,5 +1,12 @@
 # 更新日志
 
+## 2026-07-23
+### [fix] complete P0 native aggregate and self-host regressions
+- Fix disp32 emission to use the current instruction base for struct fields, constant array indices, enum tags, and enum construction.
+- Fix REX/ModRM/SIB encoding for variable array index loads and stores.
+- Add native ELF regression coverage for aggregate access at O0/O1.
+- Verify clean corec -> corec2 -> corec3 bootstrap at O0 and O1.
+
 ## 2026-04-24
 ### init
 ### [feat] ARM64 native backend & full pipeline
