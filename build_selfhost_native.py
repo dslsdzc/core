@@ -117,6 +117,7 @@ def build_runtime():
 def main():
     print("=== Building Core native binaries ===\n")
 
+    os.makedirs('build', exist_ok=True)
     build_runtime()
 
     # corec — frontend: .cr → .ccr/.cir

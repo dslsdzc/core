@@ -576,11 +576,15 @@ fn parse_block() -> int {
     sc : ., mut = 0;
     loop {
         if check(T_RBRACE) || check(T_EOF) { break; }
-        if sc > 1024 { add_error("block too deep"); break; }
         st := parse_stmt();
-        if sc < 256 {
-            w64(local_stmts, sc * 8, st);
+        if sc >= local_stmts_cap {
+            new_cap := local_stmts_cap * 2;
+            new_stmts := alloc(new_cap * 8);
+            _dyncpy(local_stmts, local_stmts_cap * 8, new_stmts);
+            local_stmts = new_stmts;
+            local_stmts_cap = new_cap;
         }
+        w64(local_stmts, sc * 8, st);
         sc = sc + 1;
     }
     advance_tok();
@@ -1678,11 +1682,8 @@ fn parse_all() {
         t_kind := tok_k(t_cur);
         if t_kind == T_EOF { break; }
         if ci > 5 { ci = 0; }
-        prev_ast := g_ast_count;
         parse_declaration();
         if tok_k(cur_tok()) == T_EOF { break; }
-        ast_grown := g_ast_count - prev_ast;
-        if ast_grown > 10000 { break; }
         ci = ci + 1;
     }
 }

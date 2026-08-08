@@ -38,7 +38,10 @@ fn w64(buf: string, pos: int, val: int) {
     }
 }
 fn r64(buf: string, pos: int) -> int {
-    lo := r32(buf,pos); hi := r32(buf,pos+4);
+    // The low dword is unsigned. Reading it through r32 double-subtracts
+    // 2^32 for negative values, e.g. -1 becomes -1 + (-1 * 2^32).
+    lo := bu8(buf,pos) + bu8(buf,pos+1)*256 + bu8(buf,pos+2)*65536 + bu8(buf,pos+3)*16777216;
+    hi := r32(buf,pos+4);
     hi_part := hi * 65536; hi_part = hi_part * 65536;
     return lo + hi_part; }
 
@@ -754,6 +757,7 @@ fn grow_gen_constr(needed: int) {
     g_generic_constr = nb; g_generic_constr_cap = nc; }
 
 fn grow_sg(n: int) {
+    if n < g_sg_cap { return; }
     nc := g_sg_cap;
     if nc == 0 { nc = 16; }
     loop { if nc > n { break; } nc = nc * 2; }
@@ -763,6 +767,7 @@ fn grow_sg(n: int) {
     g_sg_cap = nc; }
 
 fn grow_pts(n: int) {
+    if n < g_pts_cap { return; }
     nc := g_pts_cap;
     if nc == 0 { nc = 16; }
     loop { if nc > n { break; } nc = nc * 2; }
@@ -771,6 +776,7 @@ fn grow_pts(n: int) {
     g_pts = nb; g_pts_cap = nc; }
 
 fn grow_offsets(n: int) {
+    if n < g_offsets_cap { return; }
     nc := g_offsets_cap;
     if nc == 0 { nc = 16; }
     loop { if nc > n { break; } nc = nc * 2; }

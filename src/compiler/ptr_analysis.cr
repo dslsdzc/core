@@ -31,6 +31,7 @@ fn pa_in_unsafe(node_seq: int) -> int {
 // via IR_STORE_PTR. Read via IR_DEREF.
 
 fn grow_alloc_pts(n: int) {
+    if n < g_alloc_pts_cap { return; }
     nc := g_alloc_pts_cap;
     if nc == 0 { nc = 16; }
     loop { if nc > n { break; } nc = nc * 2; }

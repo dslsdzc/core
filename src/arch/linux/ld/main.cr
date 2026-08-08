@@ -54,6 +54,12 @@ fn corearch_main() -> int {
     link_val := cli_get("link");
     out_path := cli_get("output");
 
+    // Pure-static output does not link rt.s, so emit the current-g bridge
+    // stubs directly. Keep this in sync with the legacy corearch entrypoint
+    // so self-hosted backend stages generate identical binaries.
+    g_x86_emit_rt_stubs = 0;
+    if str_len(link_val) == 0 && emit_so == 0 { g_x86_emit_rt_stubs = 1; }
+
     if emit_so != 0 {
         if str_len(out_path) == 0 { out_path = "core_lib.so"; }
         g_elf_buf = alloc(16777216);

@@ -489,7 +489,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
             e2_w8(buf, pos+cp, 232); e2_w32(buf, pos+cp+1, 0); cp = cp + 5;  // call alloc
             // mov byte [rax], 0 — 0xC6 /0
             e2_w8(buf, pos+cp, 198); cp = cp + 1; cp = cp + emit_modrm(buf, pos+cp, 0, 0, 0); e2_w8(buf, pos+cp, 0); cp = cp + 1;
-            cp = cp + e2_jmp(buf, pos+cp, 43);
+            cp = cp + e2_jmp(buf, pos+cp, 47);
 
             // xor edi, edi
             e2_w8(buf, pos+cp, 49); e2_w8(buf, pos+cp+1, 255); cp = cp + 2;
@@ -502,9 +502,12 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
             cp = cp + e2_jmp(buf, pos+cp, -15);
             // inc rdi (null terminator) — REX.W + 0xFF /0
             cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 0); e2_w8(buf, pos+cp, 255); cp = cp + 1; cp = cp + emit_modrm(buf, pos+cp, 3, 0, 7);
+            // alloc clobbers caller-saved r10; preserve the argv[n] source pointer.
+            e2_w8(buf, pos+cp, 65); e2_w8(buf, pos+cp+1, 82); cp = cp + 2;  // push r10
             grow_alloc_patch(g_x86_alloc_patch_count + 1); w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp);
             g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1;
             e2_w8(buf, pos+cp, 232); e2_w32(buf, pos+cp+1, 0); cp = cp + 5;  // call alloc
+            e2_w8(buf, pos+cp, 65); e2_w8(buf, pos+cp+1, 90); cp = cp + 2;  // pop r10
             // xor r11d, r11d — REX.RB + 0x31
             cp = cp + emit_rex(buf, pos+cp, 0, 11/8, 0, 11/8); e2_w8(buf, pos+cp, 49); cp = cp + 1; cp = cp + emit_modrm(buf, pos+cp, 3, 11%8, 11%8);
             // mov dl, [r10+r11] — 0x8A + SIB (REX.X=1 for r11 index)

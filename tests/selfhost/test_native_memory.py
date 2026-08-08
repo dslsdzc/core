@@ -13,6 +13,18 @@ COREC = BUILD / "corec"
 
 CASES = [
     (
+        "negative_global_initializer",
+        """
+g_negative : int, mut = -1;
+fn main() -> int {
+    if g_negative < 0 { return 77; }
+    return 1;
+}
+""",
+        77,
+        0,
+    ),
+    (
         "struct_fields",
         """
 struct Pair { x: int, y: int }

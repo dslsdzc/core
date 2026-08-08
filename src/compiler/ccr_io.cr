@@ -69,7 +69,10 @@ fn buf_read_i64(buf: string, pos: int) -> int {
     h3 := load8(buf, pos + 7);
     hi : ., mut = h0 + h1 * 256 + h2 * 65536;
     if h3 >= 128 { hi = hi + (h3 - 256) * 16777216; }
-    return lo + hi * 4294967296;
+    // Keep the factor within the parser's supported integer-literal range.
+    hi_part := hi * 65536;
+    hi_part = hi_part * 65536;
+    return lo + hi_part;
 }
 
 // --- Size calculation ---
