@@ -1,6 +1,6 @@
 # Core @ 内建原语
 
-> 定位：受众 = 维护者；状态 = active
+> 定位:受众 = 开发者;状态 = active(12 个内建已实现,2026-07-28 完整落地;语义契约见 docs/maintainer/design/ir-op-semantics.md §2.8/§4)。
 
 `@` 是编译器提供的能力入口，不通过标准库实现。分三类：
 
@@ -53,7 +53,7 @@ fn serialize(buf: &[u8], obj: any) {
 
 ```core
 @no_bounds_check      // 跳过边界检查
-@fast                 // 允许精度换速度
+@fast                 // 优化性能提示(行为零变化;精度换速度 = apx 语义级授权,见 syntax.md dex/apx 节)
 ```
 
 ## 与其他语言的对比
