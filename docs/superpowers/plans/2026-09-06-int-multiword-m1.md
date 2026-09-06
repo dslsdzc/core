@@ -4,7 +4,7 @@
 
 **Goal:** 后端表示策略 B 的 M1：int 算术 add/sub 在 64 位快路径零开销直算，溢出时自动提升到固定 2-limb（128 位）多字表示——语义层（前端/图/格）零改动，纯编码层投影。
 
-**Architecture:** 语义 int 无上限（`specs/2026-09-06-int-unbounded-semantics.md` 定稿）→ 编码层投影（本计划）：D1a tagged 值槽（快值 64 位 / 多字对象指针 + 旁路 tag）；D2b 纯后端溢出检测发射（add/sub + jo → 慢路径）；D3 固定 2-limb 128 位（超 128 报编码层错）；D4 超 64 字面量 = 词素重建进 rodata 2-limb + IR 常量池引用（复用 IR_LOAD 常量地址机制——HIT 常量池先例）；D5 分期 add/sub；D6 多字变量只栈不寄存器。
+**Architecture:** 语义 int 无上限（`specs/2026-09-06-int-unbounded-semantics.md` 定稿）→ 编码层投影（本计划）：D1a tagged 值槽（快值 64 位 / 多字对象指针 + 旁路 tag）；D2b 纯后端溢出检测发射（add/sub + jo → 慢路径）；D3 固定 2-limb 128 位（超 128 报编码层错）；D4 超 64 字面量 = 词素重建进 rodata 2-limb + IR 常量池引用（复用 IR_LOAD 常量地址机制——HIT 常量池先例）；D5 分期 add/sub；D6 寄存器分配形态（Task 5 定案：tagged 变量可驻寄存器——指针 + 帧 tag 自洽，见 Task 5 节）。
 
 **Tech Stack:** Core 自举编译器后端（src/compiler/opt.cr、src/arch/linux/ld/instr.cr/elf.cr、src/runtime/rt.s）、Python bootstrap（构建）。参考：HIT 常量池（src/arch/hit/lower_to_core.cr——rodata 2-limb 槽与引用先例）、CAG 分配器（opt.cr——D6 多字只栈接入点）。
 
@@ -36,7 +36,7 @@
 - **D3**：2-limb 128 位固定（低 limb = 快值、高 limb = 符号扩展）；超 128 溢出 → 运行时错误（编码层 128 限制，M1）
 - **D4**：超 64 字面量 = 词素（.ccr 已存？——查：NOD src1 i64 装不下——**ccr_io 常量扩展**？最小：lexer 不再拒但 IR_CONST 无法承载 → **M1 决策：超 64 字面量仍前端拒绝（编码层错误消息保留）**——常量多字 = M2（D4 推迟，因 IR_CONST 64 位槽是格层表示，扩展需 v6 常量段——与 dex 精度同族待 v6）——**M1 只做运行时溢出（运行时值运算结果超 64）**，编译期超 64 常量 M2
 - **D5**：add/sub
-- **D6**：可能溢出变量（慢路径可达）不进寄存器——分配器静态标记：函数含可能大值运算的变量 = 只栈（保守 M1：**含 add/sub 结果的所有 int 变量 = 潜在多字 = 只栈？太宽**——M1 精化：慢路径输出变量 tagged——分配器对 tagged 槽变量不分配寄存器（保守可接受 M1 性能）
+- **D6**：可能溢出变量（慢路径可达）不进寄存器——分配器静态标记：函数含可能大值运算的变量 = 只栈（保守 M1：**含 add/sub 结果的所有 int 变量 = 潜在多字 = 只栈？太宽**——M1 精化：慢路径输出变量 tagged——分配器对 tagged 槽变量不分配寄存器（保守可接受 M1 性能）——**Task 5 定案修订：不排除（实证见 Task 5 节）**
 
 ## 慢路径形态（M1 设计）
 
@@ -61,7 +61,7 @@ M1 完整性边界（实现者执行时若超界披露）：add/sub 结果超 64
 
 ### Task 1: tagged 槽框架（潜在多字变量识别 + tag 区 + 栈布局）
 
-**Files:** opt.cr（识别 + tag 区布局）、instr.cr/elf.cr（槽偏移）、测试
+**Files:** opt.cr（识别 + tag 区布局）、instr.cr/elf.cr（槽偏移）、测试（**执行偏差**：识别 + 布局实现在 corearch 侧 instr.cr（mw_setup_tags）/elf.cr——opt.cr 不在 corearch 构建闭包；论证见 Task 1 报告 §2 与 Task 5 节执行注记）
 
 - 识别：函数内 add/sub 的 dest 变量链 = 潜在多字（保守：所有 add/sub dest + 传播到使用它的变量？——M1 保守 = 函数内有 add/sub 则哪些变量 tagged——实现者定最小正确集并论证）
 - tag 区：栈帧附加（每 tagged 变量 1 字节）——g2_slot 布局扩展
@@ -90,9 +90,27 @@ M1 完整性边界（实现者执行时若超界披露）：add/sub 结果超 64
 
 ### Task 5: 分配器适配（D6：tagged 变量只栈）
 
-**Files:** opt.cr alloc_registers
+**Files:** opt.cr alloc_registers（执行注记：plan 此节沿 Task 1 的偏差——识别实现于
+corearch 侧 instr.cr（opt.cr 不在 corearch 构建闭包，跨进程需 .ccr 通道），
+Task 5 消费点 = 发射侧 g2_slot/get_reg_for_var，非 opt.cr——见 Task 1 报告 §2）
 - tagged（潜在多字）变量排除寄存器分配（只栈）——CAG 分配器加标记输入
 - 测试：O2 自举 byte-identical + 溢出程序 O2 正确
+
+**执行记录（Task 5 完成，2026-09-07）——定案：不改，D6 排除不实施**
+- 现状核实（实证）：O2 下 tagged 变量**确实**被 CAG 分配寄存器——含运行时 2L
+  态（循环携带值、参数行、双 2L 对象，驻 rbx/r12-15）；O1 无寄存器分配
+  （alloc_registers 门 = opt_level≥2，opt.cr optimize_all）→ O1 tagged 恒只栈。
+- 裁决依据：D6 原始动机（多字值不可驻单寄存器）被最终 D1a 表示消解（槽/寄存
+  器驻留 = 快值或 2-limb 堆指针，128 位载荷在堆对象，tag 在帧字节）；值读写
+  单 seam g2_slot + tag 单 seam g2_tag_off，reg 形态状态完整（jo 慢路径回存
+  e2_mov(dst_reg,rax) / 2L 块装载 / return 解指针全经 g2_slot）；表路径 preflight
+  已拒 reg 形态变量。排除零收益（无独立发射路径可删）有代价（tagged = 最常见
+  add 循环行）。
+- 测试加固：test_mw_task5.py——O2 元断言（oracle tagged ∩ REG_ASSIGN ≠ ∅ 于
+  运行时 2L 溢出函数 + 16B 通道行为同用例链接）+ O1 元断言（REG_ASSIGN = 0）+
+  三类用例 O0/O1/O2 全绿。将来翻案改只栈 → O2 元断言红（须同步更新并附新证据）。
+- 注记同步：spec int-multiword-backend-design §6（D6 条目）+ instr.cr mw_setup_tags
+  消费方接口注释（D6 定案）。
 
 ### Task 6: 验证 + 回归 + 文档
 

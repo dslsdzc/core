@@ -127,8 +127,17 @@ fn g2_rodata_sz() -> int {
 //   - mw_setup_tags(fi, vs, vc)：per 函数识别 + 填表（elf.cr 两阶段各一次）；
 //   - g_x86_mw_tag_count：tagged 数 = tag 区字节数；
 //   - g2_tag_off(var_idx)：var 的 tag 字节偏移（-1 = 非 tagged）——慢路径写
-//     tag（Task 3）、消费者读 tag（Task 4）、D6 寄存器排除（Task 5）均走它；
+//     tag（Task 3）、消费者读 tag（Task 4）均走它；
 //   - mw_frame_size(vc)：含 tag 区的帧总字节（已按 SysV 16 对齐规则取整）。
+// Task 5（D6「tagged 只栈」）定案：**不排除寄存器分配**——plan 原案的排除
+// 动机（多字值不可驻单寄存器）被本表示消解：槽/寄存器驻留的是 64 位快值或
+// 2-limb 堆对象指针，128 位载荷在堆上，tag 在帧字节——reg 形态状态完整。
+// 全部值读写单 seam g2_slot（含 jo 慢路径回存 e2_mov(dst_reg,rax) 与 2L 块
+// 装载），tag 读写单 seam g2_tag_off，与值形态无关；O2 下 tagged 变量确实
+// 被 CAG 分配寄存器（含运行时 2L 态）且行为全绿——test_mw_task5.py 元断言
+// （oracle tagged ∩ REG_ASSIGN ≠ ∅ @O2 + O1 全栈）+ 16B 通道 = 裁决的实证
+// 形态。排除零收益（无独立 reg/栈发射路径可删）有代价（tagged = 最常见 add
+// 循环行，O2 性能）。若将来引入 reg 形态不完整的机制（动态 spill 等）再议。
 // ══════════════════════════════════════════════════════════════
 
 fn mw_setup_tags(fi: int, vs: int, vc: int) {
