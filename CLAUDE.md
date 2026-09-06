@@ -245,15 +245,13 @@ Formal EBNF definitions in `grammar/`:
 - `corespec.ebnf` — Specification/contract grammar
 - `tokens.ebnf` — Token definitions
 
-Design documents (Chinese):
-- `docs/design/project-book.md` — Philosophy, IR system, formal verification architecture
-- `docs/design/dataflow-design.md` — Dataflow execution model design
-- `docs/language/syntax.md` — Language syntax reference
-- `docs/design/execution-model.md` — Execution model
-- `docs/design/memory-model.md` — Arena memory model design
-- `docs/language/error-codes.md` — Compiler error code reference
+Design documents (Chinese), by audience:
+- developer/（面向语言开发者）: `docs/developer/syntax.md` 语法参考、`docs/developer/tutorial.md` 渐进路径、`quickstart.md` 快速开始、`concepts.md` 概念导览、`examples.md` 示例、`faq.md`、`errors.md` 错误码、`editors.md`、`at-intrinsics.md`
+- maintainer/（面向编译器维护者）: `docs/maintainer/onboarding.md` 上手、`docs/maintainer/testing.md` 回归、`docs/maintainer/design/`(execution-model 执行模型、memory-model 存储总览、pointer-model 指针三 pass、regalloc-cache-mapping、spec-design 规约系统、ir-op-semantics IR 契约、existence-structure v6 承载、region-model、dataflow-design 留档、corelsp、crasm 废弃)、`docs/maintainer/adr/` 决策记录(ADR-0001 起 20 份)、`docs/maintainer/proposals/` 特性设计
+- academic/（验证/理论）: `docs/academic/cache-semantics.md` 缓存语义七条、`docs/academic/lattice-theory.md` 三层映射、`docs/academic/verifier-kernel.md` 验证内核
+- 顶层: `docs/project-book.md` 项目定位、`docs/glossary.md` 术语表、`docs/z-vision.md` 愿景
 
-docs/ 按「主题 × 读者 × 状态」分类：`language/` 用户向、`design/` 定稿参考（维护者向）、`proposals/` 讨论中特性、`archive/` 任务产物、`maintainer/` 维护者手册、`adr/` 决策记录、`pseudocode/ superpowers/ coq/ ir-schema/ verifier/` 工具链目录不动；导航索引见 `docs/README.md`。
+docs/ 一级 = 受众(developer/maintainer/academic),二级 = 主题;`archive/` 任务产物、`pseudocode/ superpowers/ coq/ ir-schema/ verifier/` 工具链/档案目录不动;导航索引 = `docs/README.md`。
 
 ## Known Issues
 
@@ -265,11 +263,11 @@ docs/ 按「主题 × 读者 × 状态」分类：`language/` 用户向、`desig
 
 ## Key Conventions
 
-- File extensions: `.cr` (source), `.cir` (dataflow graph IR / 图形态), `.ccr` (格形态 IR，现 v5 = 格层线性投影，v6 演进中), `.corespec` (spec)
+- File extensions: `.cr` (source), `.cir` (dataflow graph IR / 图形态), `.ccr` (格形态 IR,v6 = 段表 + 存在结构段 ENT,v6-only), `.corespec`(已退役 2026-09-06——规约并入 .cr 语法)
 - Tests in `tests/bootstrap/` and `tests/selfhost/` define inline Core source strings and compare output
 - Python bootstrap: `sys.path.insert(0, 'bootstrap')` to import compiler modules
 - VS Code extension in `vscode-core/`
-- Spec files in `spec/` (`.corespec`) for formal verifier
+- spec/ 目录残留 .corespec 占位(退役,待清);规约语法设计定稿 = .cr 内联 #check/#ensure(见 maintainer/adr/adr-0001)
 - Examples in `examples/`
 
 ## Known Issues & TODO
