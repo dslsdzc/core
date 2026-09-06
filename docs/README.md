@@ -6,8 +6,12 @@
 
 ## 开发者(developer/)——用 Core 写程序
 
+- [quickstart.md](developer/quickstart.md)— 快速开始(构建/第一个程序)
 - [tutorial.md](developer/tutorial.md)— 渐进学习路径
+- [concepts.md](developer/concepts.md)— 核心概念导览(图模型/内存/部署/规约)
 - [syntax.md](developer/syntax.md)— 语言语法参考
+- [examples.md](developer/examples.md)— 示例集
+- [faq.md](developer/faq.md)— 常见问题
 - [errors.md](developer/errors.md)— 错误码参考
 - [editors.md](developer/editors.md)— 编辑器与 LSP 配置
 - [at-intrinsics.md](developer/at-intrinsics.md)— @ 内建原语
