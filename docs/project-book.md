@@ -10,14 +10,14 @@ Core 是一门全新、完全自主设计的编程语言与编译工具链,围�
 而是把隐式行为、语法糖、类型推导、符号解析全部摊平、归一化、显式化,形成一份「语义源代码」。
 
 在此之上,Core 原生支持完全形式化验证:验证器消费 IR 即可获得完整语义模型与证明义务,
-无需自行重建语义(验证机制见 [spec-design.md](docs/maintainer/design/spec-design.md))。
+无需自行重建语义(验证机制见 [spec-design.md](maintainer/design/spec-design.md))。
 
 Core 的目标是证明:一门现代语言可以同时获得快速编译、轻松跨平台、完全形式化验证,
 并且在设计上不互相妥协。
 
 ## 二、背景与问题
 
-传统生态的四重割裂(详见 `docs/language/learning-path.md` 的设计动机叙述):
+传统生态的四重割裂(详见 `docs/developer/tutorial.md` 的设计动机叙述):
 
 1. **编译时间膨胀**——大型项目反复重做语义解析(头文件/泛型实例化/重载决议)
 2. **跨平台代价**——运行时虚拟机臃肿;静态交叉编译仍需每平台全套前端
@@ -30,10 +30,10 @@ Core 的目标是证明:一门现代语言可以同时获得快速编译、轻�
 
 | 原则 | 一句话 | 细节 |
 |---|---|---|
-| 语义保鲜 | 语义信息在 IR 中全量保留,不逐级丢弃 | [execution-model.md](docs/maintainer/design/execution-model.md) |
-| 单一执行模型 | 全部代码 = HDFG(全息数据流图),执行方式由部署配置决定 | [execution-model.md](docs/maintainer/design/execution-model.md)、[dataflow-design.md](docs/maintainer/design/dataflow-design.md)(早期稿,已被前者取代) |
-| 规约即语法 | 规约 = .cr 语法内的约束表达(2026-09 起 .corespec 独立格式退役,见 [adr/../adr/adr-0001-corespec-crasm-retired.md](docs/maintainer/adr/adr-0001-corespec-crasm-retired.md)) | [spec-design.md](docs/maintainer/design/spec-design.md) |
-| 三层映射 | 语义 → 图 → 格 → 编码;图表达计算,格承载计算,编码实现计算 | [memory-model.md](docs/maintainer/design/memory-model.md)、[regalloc-cache-mapping.md](docs/maintainer/design/regalloc-cache-mapping.md) |
+| 语义保鲜 | 语义信息在 IR 中全量保留,不逐级丢弃 | [execution-model.md](maintainer/design/execution-model.md) |
+| 单一执行模型 | 全部代码 = HDFG(全息数据流图),执行方式由部署配置决定 | [execution-model.md](maintainer/design/execution-model.md)、[dataflow-design.md](maintainer/design/dataflow-design.md)(早期稿,已被前者取代) |
+| 规约即语法 | 规约 = .cr 语法内的约束表达(2026-09 起 .corespec 独立格式退役,见 [adr/../maintainer/adr/adr-0001-corespec-crasm-retired.md](maintainer/adr/adr-0001-corespec-crasm-retired.md)) | [spec-design.md](maintainer/design/spec-design.md) |
+| 三层映射 | 语义 → 图 → 格 → 编码;图表达计算,格承载计算,编码实现计算 | [memory-model.md](maintainer/design/memory-model.md)、[regalloc-cache-mapping.md](maintainer/design/regalloc-cache-mapping.md) |
 
 ## 四、系统骨架
 
@@ -45,9 +45,9 @@ Core 的目标是证明:一门现代语言可以同时获得快速编译、轻�
                                 └──► 形式化验证工具(消费 IR + 规约,独立组件)
 ```
 
-- 前端/后端拆分为两个二进制,`.ccr` 为接口契约 —— [adr/adr-0004-corec-corearch-split.md](docs/maintainer/adr/adr-0004-corec-corearch-split.md)
+- 前端/后端拆分为两个二进制,`.ccr` 为接口契约 —— [maintainer/adr/adr-0004-corec-corearch-split.md](maintainer/adr/adr-0004-corec-corearch-split.md)
 - 模块级地图(每个 .cr 文件职责)见 `docs/maintainer/onboarding.md`
-- 实现层 IR 形态演进:图形态 CIR / 格形态 CCR v6 段表 + ENT —— [lattice-ir-v6 格式 spec](docs/superpowers/specs/2026-09-05-lattice-ir-v6-format.md(v6 格式 spec,develop 合入前为前向链接))
+- 实现层 IR 形态演进:图形态 CIR / 格形态 CCR v6 段表 + ENT —— lattice-ir-v6 格式 spec(docs/superpowers/specs/2026-09-05-lattice-ir-v6-format.md;develop 合入前为前向链接)
 
 ## 五、状态速览
 

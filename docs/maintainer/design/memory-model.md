@@ -10,7 +10,7 @@
 
 | 文档 | 内容 | 谁读 |
 |---|---|---|
-| [cache-semantics.md](docs/academic/cache-semantics.md) | 缓存语义七条(权威条款)+ 细读 + 范式映射表推论 | 验证器实现者、所有内存讨论的起点 |
+| [cache-semantics.md](../../academic/cache-semantics.md) | 缓存语义七条(权威条款)+ 细读 + 范式映射表推论 | 验证器实现者、所有内存讨论的起点 |
 | [existence-structure.md](existence-structure.md) | v6 存在结构:ENT/NOD/REG 如何承载七条(语义视角) | ccr_io/分配器/验证器实现者 |
 | [region-model.md](region-model.md) | 经典映射:图锚定区域/Arena/字节权限/逃逸规则 | 内存管理实现者 |
 | 本文件 | 三层关系、阅读路径、关联 | 所有读者(入口) |

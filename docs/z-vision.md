@@ -10,9 +10,9 @@
 
 **Core 的路径**：语义保鲜——IR（HDFG）保留全部语义信息，与执行硬件解耦。范式迁移时**语义不动，只换后端映射**；验证器、优化器、未来后端都从同一张图读取完整语义。
 
-**状态**：语义保鲜已实现（HDFG + region/state edge/provenance）；范式映射表——**存储半边已定稿**（语义本体 = 缓存语义，字节内存 = 经典映射实例，见 `docs/memory-model.md` §一），执行半边设计态（每范式一张表）。
+**状态**：语义保鲜已实现（HDFG + region/state edge/provenance）；范式映射表——**存储半边已定稿**（语义本体 = 缓存语义，字节内存 = 经典映射实例，见 `docs/maintainer/design/memory-model.md` §一），执行半边设计态（每范式一张表）。
 
-**三层映射链（2026-08-27 正式晋升）**：范式 → 图 → 格 → 编码——**图 = 关系空间**（跨范式统一中轴：非因果、模糊分支、超图灵标注，见 `docs/dataflow-design.md` §8），**格 = 状态/存储空间**（内存模型 = 中间存在空间，见 `docs/memory-model.md` 与 `docs/memory-model-capability-lattice.md` §四），**编码 = 物理编码空间**（把格编码到具体实现；2026-08-27 更名：原「二进制」硬编码经典惯例，违反零硬件惯例——量子/模拟/光学皆非二进制）。跨范式发生在图层；**超图灵性属于图，不属于格**；格的价值 = 表达空间未被有限范式封顶——不同范式各找自己的格映射，格本身不需要知道范式是什么。v4 定稿原则（`docs/memory-model-capability-lattice.md`）：**规则封闭对象开放**（层规则零签名）、**无格承诺**（格代数 = 映射参数）、**能力不提升一等公民**（语义还原图上，授权归治理层）、**寄存器分配 = 缓存语义映射实例**（`docs/regalloc-cache-mapping.md`）。
+**三层映射链（2026-08-27 正式晋升）**：范式 → 图 → 格 → 编码——**图 = 关系空间**（跨范式统一中轴：非因果、模糊分支、超图灵标注，见 `docs/maintainer/design/dataflow-design.md` §8），**格 = 状态/存储空间**（内存模型 = 中间存在空间，见 `docs/maintainer/design/memory-model.md` 与 `docs/archive/memory-model-capability-lattice.md` §四），**编码 = 物理编码空间**（把格编码到具体实现；2026-08-27 更名：原「二进制」硬编码经典惯例，违反零硬件惯例——量子/模拟/光学皆非二进制）。跨范式发生在图层；**超图灵性属于图，不属于格**；格的价值 = 表达空间未被有限范式封顶——不同范式各找自己的格映射，格本身不需要知道范式是什么。v4 定稿原则（`docs/archive/memory-model-capability-lattice.md`）：**规则封闭对象开放**（层规则零签名）、**无格承诺**（格代数 = 映射参数）、**能力不提升一等公民**（语义还原图上，授权归治理层）、**寄存器分配 = 缓存语义映射实例**（`docs/maintainer/design/regalloc-cache-mapping.md`）。
 
 ## 目标二：形式化验证门槛降到普通程序员可用
 
@@ -20,13 +20,13 @@
 
 **Core 的路径**：规约用 Core 语言本身书写（`#check`/`#ensure`/`spec fn`，不需要学数理逻辑），编译器经翻译桥自动编译进 CIC 项，健全性由 CIC 内核 + SMT 证书保证。用户写意图，编译器管证明。
 
-**状态**：设计完成（spec-design v2），**0 实现**——requires/ensures 语法已入 .cr（独立 .corespec 格式 2026-09 退役，见 adr/adr-0001），.csr、翻译桥、内核绑定待推进。
+**状态**：设计完成（spec-design v2），**0 实现**——requires/ensures 语法已入 .cr（独立 .corespec 格式 2026-09 退役，见 maintainer/adr/adr-0001），.csr、翻译桥、内核绑定待推进。
 
 ## 目标三：一门语言覆盖从零基础到系统编程的完整路径
 
 **现状问题**：教学语言与生产语言是两套（学了要重学）；系统编程语言（C/Rust）学习曲线陡峭，与教学语言脱节。
 
-**Core 的路径**：渐进式学习路径——同一门语言从基础（DAG）到系统编程（字节级 + 并发 + 规约），概念只增不减，无模式切换（见 `docs/learning-path.md`）。
+**Core 的路径**：渐进式学习路径——同一门语言从基础（DAG）到系统编程（字节级 + 并发 + 规约），概念只增不减，无模式切换（见 `docs/developer/tutorial.md`）。
 
 **状态**：语言本体已实现（自举成功、ELF 后端、apx 后端快路径（binary64）、并发、指针三 pass）。
 
@@ -50,7 +50,7 @@
 ## 关联
 
 - 哲学与技术总纲：`docs/project-book.md`
-- 执行模型：`docs/execution-model.md`
-- 验证体系：`docs/spec-design.md`
-- 学习路径：`docs/learning-path.md`
+- 执行模型：`docs/maintainer/design/execution-model.md`
+- 验证体系：`docs/maintainer/design/spec-design.md`
+- 学习路径：`docs/developer/tutorial.md`
 - 进度：`TODO.md`

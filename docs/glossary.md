@@ -16,7 +16,7 @@
 
 | 术语 | 含义 | 出处 |
 |---|---|---|
-| 图(HDFG) | 关系空间:发生什么——节点/边/region/state edges;超图灵性属于图 | design/execution-model.md |
+| 图(HDFG) | 关系空间:发生什么——节点/边/region/state edges;超图灵性属于图 | maintainer/design/execution-model.md |
 | 格(层) | 存在空间:如何存在——条目、配方、驱逐、再生 | design/memory-model.md |
 | 编码(层) | 物理编码空间:如何实现(2026-08-27 更名,原「二进制」) | design/memory-model.md |
 | 格(Lattice) | 层内组织代数成分——映射参数,非层本体承诺(无格承诺) | design/memory-model.md |
@@ -27,13 +27,13 @@
 | 术语 | 含义 | 出处 |
 |---|---|---|
 | `.cr` / `.cir` / `.ccr` | 源码 / 图形态(HDFG + 规约约束)/ 格形态(v6 = 段表 + ENT 存在结构段,v6-only) | specs/2026-09-05-lattice-ir-v6-format.md |
-| HDFG | 全息数据流图——Core 唯一执行语义 | design/execution-model.md |
-| region(SG 段) | 图锚定存在结构(kind/enter/exit/parent/nstart/ncount) | design/execution-model.md |
-| state edges | 顺序约束(副作用链 + 循环终止依赖) | design/execution-model.md |
+| HDFG | 全息数据流图——Core 唯一执行语义 | maintainer/design/execution-model.md |
+| region(SG 段) | 图锚定存在结构(kind/enter/exit/parent/nstart/ncount) | maintainer/design/execution-model.md |
+| state edges | 顺序约束(副作用链 + 循环终止依赖) | maintainer/design/execution-model.md |
 | 线性投影 | v5 格形态 = 从图线性化的投影;v6 升级为存在结构本体 | specs/lattice-ir-v6-format |
-| 部署配置 | 执行方式由部署配置声明决定,图语义不变 | design/execution-model.md |
+| 部署配置 | 执行方式由部署配置声明决定,图语义不变 | maintainer/design/execution-model.md |
 
-> 注:.corespec/.csr 独立规约形态已退役(2026-09-06)——规约 = .cr 语法内约束,见 adr/adr-0001。
+> 注:.corespec/.csr 独立规约形态已退役(2026-09-06)——规约 = .cr 语法内约束,见 maintainer/adr/adr-0001。
 
 ## 四、缓存语义(核心七条 + 边界)
 
@@ -67,7 +67,7 @@ design/regalloc-cache-mapping.md(正式参考),本表不重复。
 
 | 术语 | 含义 | 出处 |
 |---|---|---|
-| corec / corearch | 前端(lex→check→ir→ccr)/ 后端(.ccr→ELF),.ccr 为接口契约 | adr/adr-0004 |
+| corec / corearch | 前端(lex→check→ir→ccr)/ 后端(.ccr→ELF),.ccr 为接口契约 | maintainer/adr/adr-0004 |
 | 三级自举 | Stage 0(Python)→ Stage 1(corec)→ Stage 2(corec2);三阶段字节一致 | maintainer/onboarding.md |
 | 自举阻塞项 | corec2 tokenizer 死循环(9 全局变量未注册 g_ir_globals) | TODO.md |
 
@@ -75,9 +75,9 @@ design/regalloc-cache-mapping.md(正式参考),本表不重复。
 
 | 术语 | 含义 | 出处 |
 |---|---|---|
-| 规约层 | 程序"应该做什么"的约束——2026-09 起并入 .cr 语法(独立格式退役) | adr/adr-0001、design/spec-design.md |
+| 规约层 | 程序"应该做什么"的约束——2026-09 起并入 .cr 语法(独立格式退役) | maintainer/adr/adr-0001、maintainer/design/spec-design.md |
 | CIC 内核 / SMT 证书 | 信任根 = CIC;自动化 = 证书外包(计算在外、健全性在内) | design/verifier-kernel.md |
-| 证明驱动优化 | 已证性质回流入优化器 | design/spec-design.md |
+| 证明驱动优化 | 已证性质回流入优化器 | maintainer/design/spec-design.md |
 
 ## 九、讨论判据与术语演进
 
