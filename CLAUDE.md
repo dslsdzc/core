@@ -246,12 +246,14 @@ Formal EBNF definitions in `grammar/`:
 - `tokens.ebnf` — Token definitions
 
 Design documents (Chinese):
-- `docs/project-book.md` — Philosophy, IR system, formal verification architecture
-- `docs/dataflow-design.md` — Dataflow execution model design
-- `docs/language-syntax.md` — Language syntax reference
-- `docs/execution-model.md` — Execution model
-- `docs/memory-model.md` — Arena memory model design
-- `docs/error-codes.md` — Compiler error code reference
+- `docs/design/project-book.md` — Philosophy, IR system, formal verification architecture
+- `docs/design/dataflow-design.md` — Dataflow execution model design
+- `docs/language/syntax.md` — Language syntax reference
+- `docs/design/execution-model.md` — Execution model
+- `docs/design/memory-model.md` — Arena memory model design
+- `docs/language/error-codes.md` — Compiler error code reference
+
+docs/ 按「主题 × 读者 × 状态」分类：`language/` 用户向、`design/` 定稿参考（维护者向）、`proposals/` 讨论中特性、`archive/` 任务产物、`maintainer/` 维护者手册、`adr/` 决策记录、`pseudocode/ superpowers/ coq/ ir-schema/ verifier/` 工具链目录不动；导航索引见 `docs/README.md`。
 
 ## Known Issues
 

@@ -47,7 +47,7 @@
 | | `@hotpatch` 滚动更新（IR_HOTPATCH_ROUTE + SIGHUP 热加载） | 完成 |
 | | 惰性求值（IR_LAZY_THUNK/FORCE，调用级） | 部分（thunk/force 为值搬运，无实际延迟） |
 | | 控制流自动惰性（编译期指令下沉路线） | 设计定案，待实现 |
-| **汇编层** | `.crasm` 统一汇编抽象层（虚拟寄存器 + 平台映射表） | 设计完成（docs/crasm.md） |
+| **汇编层** | `.crasm` 统一汇编抽象层（虚拟寄存器 + 平台映射表） | 设计完成（docs/design/crasm.md） |
 | **语义检查** | 名字解析 + 类型检查、结构化错误码 + 源码定位 | 完成 |
 | **模块系统** | `import`、`fileid`、`@project`、`_import.cr`、依赖裁剪 | 完成 |
 | **标准库** | `io.cr` / `cli.cr` / `toml.cr` | 完成 |

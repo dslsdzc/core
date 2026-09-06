@@ -114,7 +114,7 @@
 
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
-来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：
+来源：`docs/archive/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：
 
 - ~~**M-2**：字符串索引 `s[5]` 静默 OOB（TI_STR 无检查）~~（2026-08-29 修变量下标路径 + 字符串读写按字节处理；2026-09-05 #61 收尾补全：常量下标路径 `emit_string_lit_bounds` 覆盖读/写/复合赋值三处——修复前 `s[9]` 常量越界静默；同时修复词法错误被 `parse_all()`/多轮 `tokenize()` 清零吞没的机制，溢出守卫等词法错误现正确上报）
 - ~~**I-3**：模块别名导入断裂（`import fmt : f` / 模块限定调用生成对伪函数 "import" 的调用）~~（2026-08-29 已修：bootstrap 保留导入元数据并按 alias 解析限定调用；`tests/bootstrap/test_modules.py` 覆盖）
@@ -128,18 +128,18 @@
 ## 架构规划
 
 ### 指针安全模型
-见 `docs/pointer-model.md`。裸指针 + HDFG provenance 推导，编译器自动验证，退路 `unsafe`。
+见 `docs/design/pointer-model.md`。裸指针 + HDFG provenance 推导，编译器自动验证，退路 `unsafe`。
 三 pass：PointerAnalysis、RegionCheck、ProvenanceVerify — 全部实现。
 
 ### Arena 内存模型
-见 `docs/memory-model.md`。已完整实现。堆按 HDFG 子图划分独立 Arena，指针碰撞分配，
+见 `docs/design/memory-model.md`。已完整实现。堆按 HDFG 子图划分独立 Arena，指针碰撞分配，
 游标重置回收。Arena 边界对应 HDFG 子图边界。
 
 ### 文档更新
-- `docs/memory-model.md` — 设计文档（待同步实现细节）
-- `docs/pointer-model.md` — 指针安全完整设计
-- `docs/language-syntax.md` — 指针、@ 内建语法已更新
-- `docs/at-intrinsics.md` — @ 内建原语完整规格
+- `docs/design/memory-model.md` — 设计文档（待同步实现细节）
+- `docs/design/pointer-model.md` — 指针安全完整设计
+- `docs/language/syntax.md` — 指针、@ 内建语法已更新
+- `docs/design/at-intrinsics.md` — @ 内建原语完整规格
 
 ### 6. 同步源码修改到伪代码文档（2026-08-09 记）
 - 背景：伪代码（docs/pseudocode/）基于源码快照翻译；以下源码变更后对应文档未同步
@@ -161,8 +161,8 @@
 - 回归见 `tests/selfhost/test_pointer_safety.py`
 
 ### 内存模型方向：能力 + 格（v4 发布，2026-08-27）
-- 备忘：`docs/memory-model-capability-lattice.md`（v1 2026-08-16 → v2 2026-08-20 → v3 2026-08-26 → **v4 发布**；上下文包已删并入）
-- **v4 定稿**：**规则封闭对象开放**（层规则零签名 = 缓存七条；对象无界；新范式三件事 = 图标注 / CIC 内部定义 / 硬件映射，无枚举）；**无格承诺**（格代数 = 映射参数，判定/定理只在关系层面）；**M1 定论：能力不提升一等公民**（语义还原图上：身份 = 图节点 / 无配方 = 标注 / 授权归治理层；可逆、暂不执行）；**M4 输入：图内不可重算条款**（已并入 memory-model.md 条款 4b）；**寄存器分配 = 缓存语义映射实例**（`docs/regalloc-cache-mapping.md` 正式参考 + `docs/superpowers/specs/2026-08-27-regalloc-cache-mapping-design.md` 设计记录）
+- 备忘：`docs/archive/memory-model-capability-lattice.md`（v1 2026-08-16 → v2 2026-08-20 → v3 2026-08-26 → **v4 发布**；上下文包已删并入）
+- **v4 定稿**：**规则封闭对象开放**（层规则零签名 = 缓存七条；对象无界；新范式三件事 = 图标注 / CIC 内部定义 / 硬件映射，无枚举）；**无格承诺**（格代数 = 映射参数，判定/定理只在关系层面）；**M1 定论：能力不提升一等公民**（语义还原图上：身份 = 图节点 / 无配方 = 标注 / 授权归治理层；可逆、暂不执行）；**M4 输入：图内不可重算条款**（已并入 memory-model.md 条款 4b）；**寄存器分配 = 缓存语义映射实例**（`docs/design/regalloc-cache-mapping.md` 正式参考 + `docs/superpowers/specs/2026-08-27-regalloc-cache-mapping-design.md` 设计记录）
 - **三层映射正式晋升：图 → 格 → 编码**（2026-08-27 更名：原「二进制」硬编码经典惯例，零硬件惯例；编码 = 物理编码空间）
 - 能力形态（v2/v3 保留，重定位治理层）：能力 = ⟨身份符号, 授权集, 域约束, 派生源⟩；结构 = 能力树（编译期兑现，运行期经典路径零新增）；代数 = PCM × 布尔格（经典行组织参数，非层本体承诺）
 - **验证主线**：Graph → Lattice 映射通用性 8 项清单（备忘 §十二）——因果 / 非因果 / 模糊 / 非确定 / 并发异步 / 反馈 / 超图灵 / 格层不重引入顺序执行；v4 实证 = 寄存器分配判定以纯格对象写出（无路径结构）
@@ -185,10 +185,10 @@
   - 自举管线（build_selfhost_native.py、bootstrap/corec/ir/ccr.py）
   - 测试迁移（tests/selfhost/、tests/bootstrap/）
   - 文档复核（coreir-schema / CLAUDE.md / project-book / compcert-reference——描述已先行更新）
-  - 寄存器分配判定接入格形态（存在区间/共存消费 + 贪心放置，docs/regalloc-cache-mapping.md §4）
+  - 寄存器分配判定接入格形态（存在区间/共存消费 + 贪心放置，docs/design/regalloc-cache-mapping.md §4）
 
 ### 寄存器分配 = 缓存语义映射实例（落地，2026-08-27 记）
-- 设计：`docs/regalloc-cache-mapping.md`（正式参考）+ `docs/superpowers/specs/2026-08-27-regalloc-cache-mapping-design.md`（设计记录）——分配 = 格 → 编码的映射实例（条款 7）；驱逐不变量 = order-free 语义保持；判定单层、分配算法定案 = 上下文贪心（零证明）
+- 设计：`docs/design/regalloc-cache-mapping.md`（正式参考）+ `docs/superpowers/specs/2026-08-27-regalloc-cache-mapping-design.md`（设计记录）——分配 = 格 → 编码的映射实例（条款 7）；驱逐不变量 = order-free 语义保持；判定单层、分配算法定案 = 上下文贪心（零证明）
 - 执行人：第二维护者（TODO 横向扩展）；验证闭环：DslsDZC
 - 事项：
   - 共存关系落定：图活性存活区间相交（复用 RegionCheck cur_seq/exit_seq 机制）；条目版本（IR_STORE 切分）的图表示确认
@@ -224,7 +224,7 @@
   - VS Code 客户端（协议层已编辑器无关）
 
 ### 设计定稿待实现（补挂账，2026-08-28 审计）
-- **概率性 pass**（probabilistic-pass，2026-07-30 已批准）：src/ 零实现，仅文档（`docs/probabilistic.md`）——范式相关，优先级低，待排期
+- **概率性 pass**（probabilistic-pass，2026-07-30 已批准）：src/ 零实现，仅文档（`docs/proposals/probabilistic.md`）——范式相关，优先级低，待排期
 - **硬件映射表**（hw-map，2026-08-23 已批准）：无实现——**依赖 crasm 的映射表**（crasm 未实现则链式阻塞）。关联 `docs/superpowers/specs/2026-08-23-hw-map-design.md`
 - **平台桥抽象**（platform-abstract，2026-08-16 定案）：设计定案待实现——语义接口 + 后端实现原则；程序 IO = 流转导器。关联 `docs/superpowers/specs/2026-08-16-platform-abstract-design.md`
 - ~~**错误码体系**（error-codes，2026-08-08 已批准）~~（2026-09-05 复核：体系完整——ast.cr 定义 `EC_R_*`，checker.cr:2080/2095 发射 R002（编译期越界），main.cr:148 硬错误路径（R002/TK05/TK06 拦编译），diag.cr `error_cat_prefix`/`pad_diag_num` 完整打印 R001-R004；BC17「全仓库无引用」为历史旧况，已过时）
@@ -237,15 +237,15 @@
 ## 待实现特性
 
 ### 控制流自动惰性（2026-08-09 记）
-- 目标：控制流结构（if / while / for 等）的分支表达式自动惰性求值——未被执行的路径不产生求值开销。判定表见 `docs/lazy.md`：结果只用一个分支 → 延迟；有副作用（IO/FFI/unsafe/volatile）→ 永远 eager；循环体内每次都用 → eager；循环体内条件性用 → 惰性
+- 目标：控制流结构（if / while / for 等）的分支表达式自动惰性求值——未被执行的路径不产生求值开销。判定表见 `docs/proposals/lazy.md`：结果只用一个分支 → 延迟；有副作用（IO/FFI/unsafe/volatile）→ 永远 eager；循环体内每次都用 → eager；循环体内条件性用 → 惰性
 - 现状（源码核实，2026-08-09）：
   - IR_LAZY_THUNK(46)/IR_LAZY_FORCE(47) 已存在（ast.cr:571）；ir_gen 在纯函数调用后包 THUNK（ir_gen.cr:1106），`force_if_thunk()` 在所有操作数位置发 FORCE
   - **但当前 thunk 不产生实际延迟**：IR_CALL 在 THUNK 之前已急切发射，ELF 后端（instr.cr:1091，注释明言 "Calls are currently emitted eagerly… typed value transfer"）和解释器（interp.cr:194）都按纯值搬运降级——语义上是 no-op，只保证输出不变
   - **use_count 时序问题**：`compute_usage_counts()`（dataflow.cr:325）在全部 ir_gen 之后才运行（dataflow.cr:381），而 THUNK 判定在 ir_gen 当时读 `g_var_use_count`（ir_gen.cr:1108）→ 判定时恒 0/未初始化，`use_count <= 1` 恒真，实际每个纯调用都被包——"单次使用"条件名存实亡
-  - 无 `lazy()` 显式惰性内建（旧条目"共存策略"为过时信息；docs/lazy.md 明确"无关键字"）
+  - 无 `lazy()` 显式惰性内建（旧条目"共存策略"为过时信息；docs/proposals/lazy.md 明确"无关键字"）
   - 控制流级惰性（if/while/for 分支表达式）与循环体内条件性惰性均未实现——即本条目
 - 方向（2026-08-09 定为编译期指令下沉路线，不做运行时实现）：
-  - 原理：惰性 = 指令放置问题（docs/lazy.md:5 "图本来就是惰性的"）。纯函数调用无副作用 → 把 IR_CALL 从分支前下沉到唯一消费点，执行恰好一次且只在被执行的路径上；不需要运行时 thunk/flag/9 字节结构
+  - 原理：惰性 = 指令放置问题（docs/proposals/lazy.md:5 "图本来就是惰性的"）。纯函数调用无副作用 → 把 IR_CALL 从分支前下沉到唯一消费点，执行恰好一次且只在被执行的路径上；不需要运行时 thunk/flag/9 字节结构
   - 实现：ir_gen 之后的 CFG 后置 pass（`compute_usage_counts()` 正好提供 sink 所需输入）：纯 + 单次使用 → 把 CALL 移到唯一消费点之前
     - if 分支惰性：下沉进分支块（phi 输入仍合法——值定义在各路径上）
     - 循环体内条件性用：下沉进循环内条件块；参数 loop-invariant 时先 hoist 出循环再下沉（顺带 LICM）
@@ -253,7 +253,7 @@
   - 约束：alloc 类下沉须检查 arena 归属——不能把分配下沉到会在使用点之前 reset 的 arena（SG_LOOP 每次迭代 reset）；纯函数陷阱（div0 等）时机会移到执行点，按"惰性不改变语义"接受
   - 现有 IR_LAZY_THUNK/IR_LAZY_FORCE（no-op 值搬运）可退役或保留兼容；**interp / ELF 后端零改动**
   - 循环体内"条件性用"与 if 分支惰性并列但需分开验证
-- 参考：`docs/lazy.md`、`docs/superpowers/specs/2026-07-30-lazy-eval-design.md`、`src/compiler/ir_gen.cr`、`src/compiler/dataflow.cr`、`tests/suite/lazy_test.cr`（当前仅验证"包装后输出不变"）
+- 参考：`docs/proposals/lazy.md`、`docs/superpowers/specs/2026-07-30-lazy-eval-design.md`、`src/compiler/ir_gen.cr`、`src/compiler/dataflow.cr`、`tests/suite/lazy_test.cr`（当前仅验证"包装后输出不变"）
 
 ### 性能自动化（2026-08-30 记）
 
@@ -274,8 +274,8 @@
 - **序列化/打印自动**（serialize-auto，2026-08-30）：从接口声明自动生成序列化代码与打印格式（serde 式派生；`dex_str` 已是雏形）——类型驱动代码生成家族
 
 ### .crasm 统一汇编抽象层（2026-08-09 记）
-- 目标：内核路线（project-book 第五阶段）的汇编级能力——MMIO、特权指令、中断。跨平台统一指令集 + 无限虚拟寄存器 + 平台映射表，寄存器分配按 v4 方向（缓存语义映射实例，`docs/regalloc-cache-mapping.md`——无限虚拟寄存器 + 平台映射表正是映射实例形态；现 `alloc_registers` 线性扫描器为升级起点）
-- 现状：设计已批准（2026-08-08 brainstorming 逐节确认），2026-08-09 整理为正式文档 `docs/crasm.md`；**尚未实现**——lexer/parser 无 asm 语法，汇编仅存在于 rt.s 手工汇编与 ELF 后端机器码发射
+- 目标：内核路线（project-book 第五阶段）的汇编级能力——MMIO、特权指令、中断。跨平台统一指令集 + 无限虚拟寄存器 + 平台映射表，寄存器分配按 v4 方向（缓存语义映射实例，`docs/design/regalloc-cache-mapping.md`——无限虚拟寄存器 + 平台映射表正是映射实例形态；现 `alloc_registers` 线性扫描器为升级起点）
+- 现状：设计已批准（2026-08-08 brainstorming 逐节确认），2026-08-09 整理为正式文档 `docs/design/crasm.md`；**尚未实现**——lexer/parser 无 asm 语法，汇编仅存在于 rt.s 手工汇编与 ELF 后端机器码发射
 - 方向（按里程碑顺序）：
   1. `.crasm` 词法/解析（结构化指令 → AST 复用）
   2. 寄存器生命周期 pass + 测试（未初始化读/重复写/生命周期逃逸/宽度一致/分支一致性）
@@ -284,9 +284,9 @@
   5. .cr extern 接口接线 + 端到端
   6. （后补）ARM64/RISC-V 映射表
 - 明确不做（YAGNI）：模拟器/调试器、C 生态兼容、指令级时序验证、特权副作用验证（隔离，人工保证）
-- 参考：`docs/crasm.md`（正式文档）、`docs/superpowers/specs/2026-08-08-crasm-design.md`（批准记录）
+- 参考：`docs/design/crasm.md`（正式文档）、`docs/superpowers/specs/2026-08-08-crasm-design.md`（批准记录）
 
-### 对照 CompCert 审查发现的未修复 bug（2026-08-11 记，详见 docs/compcert-reference.md）
+### 对照 CompCert 审查发现的未修复 bug（2026-08-11 记，详见 docs/archive/compcert-reference.md）
 
 - ~~**region_check 误报（B11）**：deref 读出的 int 值被当作指针做区域逃逸检查——`v := *p; return v;` 被拦（预先存在，pts 语义需按类型过滤）~~（2026-08-29 已修：deref/return/store 仅对指针类型执行 provenance/区域逃逸检查；`test_deref_loaded_int_is_not_pointer_escape` 覆盖原始误报）
 
