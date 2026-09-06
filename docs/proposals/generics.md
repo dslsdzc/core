@@ -1,6 +1,6 @@
 # Core 泛型
 
-> 定位：受众 = 贡献者；状态 = proposal(讨论中)
+> 定位:受众 = 维护者/贡献者;状态 = **active(已实现)**——泛型函数/struct + 跨模块实例化(monomorph.cr)已纳入自举;本设计文档留作机制参考,细节见 checker.cr/monomorph.cr/tests/suite/generics_test.cr
 
 ## 设计原则
 

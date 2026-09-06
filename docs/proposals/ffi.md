@@ -1,6 +1,6 @@
 # Core FFI
 
-> 定位：受众 = 贡献者；状态 = proposal(讨论中)
+> 定位:受众 = 维护者/贡献者;状态 = **partial(仅 extern fn)**——@ffi 统一入口为设计态未实现;当前 C ABI 走 extern fn(IR_CALL/syscall);细节见 src/stdlib/io.cr extern 声明
 
 ## 设计原则
 

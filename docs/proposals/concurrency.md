@@ -1,6 +1,6 @@
 # Core 并发原语
 
-> 定位：受众 = 贡献者；状态 = proposal(讨论中)
+> 定位:受众 = 维护者/贡献者;状态 = **active(已实现)**——go/chan 端到端可用(2026-07-31);细节见 src/stdlib/goroutine.cr、chan.cr、src/scheduler/;本设计文档的 flow/yield/await 扩展为演进方向
 
 ## 设计原则
 
