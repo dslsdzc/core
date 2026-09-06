@@ -28,7 +28,7 @@ Rust 用借用检查在类型层保证内存安全,代价是学习曲线与表�
 先确认用了标准库的 print/println(实现在 src/stdlib/io.cr;模块导入与目录级批量导入规则见 syntax.md 模块章)。注意:裸 `fn main()->int{return 42;}` 没有输出是**正常的**——main 返回值 = 进程退出码,不是打印。
 
 **编译很慢/风扇很响?**
-自举编译是 CPU 密集任务;开发机器上可用 `nice -n 19` 或 `cpulimit -l 10` 限速(仓库铁律)。
+自举编译是 CPU 密集任务;长时间构建(无人值守)建议 `nice -n 19` 或 `cpulimit -l 10` 限速——交互式短任务不必。
 
 **corec2 是什么?为什么我 check 会卡住?**
 corec2 = 自举的第二代前端产物(自编译验证用)。它曾有 tokenizer 死循环已知问题(全局变量注册缺陷,见 TODO)——日常开发请用 `./build/corec`,不要用 corec2。

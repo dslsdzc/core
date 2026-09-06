@@ -98,7 +98,7 @@ cmp /tmp/corec2 /tmp/corec3                                             # 判据
 | suite | 构建 + run_suite（逐 .cr 编译运行） |
 | full-bootstrap | 三阶段自举 + cmp 字节一致 |
 
-**CPU 限制（铁律 #6，CLAUDE.md）**：长时间构建/测试任务必须限 CPU ≤ 10%，防风扇噪音：
+**CPU 限制**:长时间构建/测试任务(无人值守/共享机器)建议 `cpulimit -l 10` 或 `nice -n 19`,防风扇噪音与卡顿(注:CLAUDE.md 铁律 #6 约束的是 AI 会话;人类交互式短任务不必限):
 
 ```bash
 nice -n 19 python3 build_selfhost_native.py

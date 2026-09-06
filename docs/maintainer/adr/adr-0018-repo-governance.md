@@ -10,7 +10,7 @@
 ## 决策
 - **分支模型 feature → develop → main**:main = 正式版线(仅维护者可合入,update 规则 + 无管理员绕过);develop = 集成分支(PR + 审批 + merge queue + CI 门槛);feature 分支每改动独立
 - 仓库治理四件套:CODE_OF_CONDUCT/CONTRIBUTING/SECURITY/PR 模板 + CI(core-ci.yml)
-- 版本控制工具 = jj(禁 git 写操作,铁律);合并 = 手动 squash 合入 develop(merge queue 因免费计划降级)
+- 版本控制工具 = jj(禁 git 写操作,仓库约定);合并 = 手动 squash 合入 develop(merge queue 因免费计划降级)
 
 ## 后果
 - 正面:合入门槛(审批 + CI 绿)防回归;main 稳定线;协作并行(PR 通道)
