@@ -1,5 +1,7 @@
 # int 多字表示 M1 实施计划（add/sub 全链：64 快路径 + 溢出 2-limb 扩展）
 
+> **状态：M1 六任务全部完成（2026-09-07，Task 6 收官）**——Task 2-6 各自回归 + 收官全量回归绿（快路径 64 位内程序逐字节零变化，task2 z 用例 + backend_bootstrap stage1→3 byte-identical 为证）；M2 挂账清单见 Task 6 执行记录与 spec §8。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 后端表示策略 B 的 M1：int 算术 add/sub 在 64 位快路径零开销直算，溢出时自动提升到固定 2-limb（128 位）多字表示——语义层（前端/图/格）零改动，纯编码层投影。
@@ -118,11 +120,50 @@ Task 5 消费点 = 发射侧 g2_slot/get_reg_for_var，非 opt.cr——见 Task 
 - 快路径零变化回归全套 + O2 自举
 - TODO/spec 状态更新（M1 完成、M2 挂账：mul/div/比较多字、打印、D4 常量多字、动态增长、D1c 静态免 tag）
 
+**执行记录（Task 6 收官，2026-09-07）——M1 完成**
+- **边界套件** `tests/selfhost/test_mw_task6.py`（8 用例 × O0/O1/O2 = 24 组全绿）：
+  task3/4 已覆盖 CF/op 判别矩阵与消费者判别，本套件补**边界值组合**——e1 i64max+1
+  恰好一步越界；e2 上边界三步越界链 + 降级回 i64max + 再越界（fits 判据 lo 符号位
+  往返）；e3 下边界邻域（−(2^63−1)+−1 = −2^63 **快值不溢出**——负 OF 只发生在 < −2^63，
+  字面量 −2^63 被 lexer 拒故须此构造）+ add/sub 连续越界 + 回升降级；e4 sub 形式
+  （i64max − −1）；e5 上下边界同函数双站 + 2L vs 2L 高 limb 判别；e6 i64max 边界
+  fast↔2L 比较真值表（LT/GT 双分派 + EQ/GE 假性 −10 哨兵）；e7 −2^63 快 vs
+  −2^63−1 2L 同 hi 低 limb 无符号判别；e8 循环携带越上边界。期望值 = Python 独立
+  计算（limb_bytes），16B 通道验全 128 + exit 数学低字节。
+- **收官全量回归**（本任务一次性全套）：mw task1-6 + hit_table + compile +
+  backend_bootstrap（stage1→3 byte-identical——快路径零变化最强确定性证明）+
+  ccr_v6 + region_cfg + slice_bounds + `corec check src/compiler`——全绿
+  （各任务期间各自回归绿之外，收官全量在案）。
+- **文档同步**：本 plan（状态行 + 本执行记录）、spec（§8 M2 挂账 + 状态行）、
+  TODO.md（新节「int 多字 M1（2026-09-07 M1 完成 → M2 挂账）」）。
+- **验收报告**：`.superpowers/sdd/mw-m1-task-6-report.md`（M1 六任务全链证据）。
+
+**M2 挂账（M1 边界外清单——详见 spec §8）**：mul/div 溢出链与 2L 参与；2L 值打印
+（int_str 超 64）；D4 超 64 编译期常量（IR_CONST 64 位槽 = 格层表示，需 v6 常量段
+——与 dex 精度同族）；超 128 码域动态增长（现报编码层错）；D1c 静态区间免 tag
+（保守 tagged 集每变量行 1 字节栈开销 + jo/块字节的静态代价）；共享块/模板压缩
+（jo/2L 块 ~45-160B/站点函数尾冷区线性增长）；表（HIT）模式 × 运行时 2L 组合验证
+（现 tagged 路径整条落旧路径——语义正确、组合未验）；arena 生命周期债（2L 对象
+跨 arena_reset）；return 全 128 内部传递（现确定性截断低 64）；UOP_NEG −2^63
+环绕链；出逃写/跨函数 2L（全局/堆/数组/调用实参返回值）。
+
 ---
 
 ## 已知偏差/风险（评审注意）
 
 - jo 慢路径的数学修正（环绕 + ±2^64）正确性是核心——评审重点
+  → **已验**（Task 3）：sbb 推演闭式（add hi=CF?−1:0 / sub hi=CF?0:−1）+ 8 万+
+  随机样本零偏差 + CF/op 判别矩阵（m1-m6）+ 边界对 brute-force；编码级经
+  task2 jo rel32/task3 块发射逐字节核对。
 - M1 保守 tagged 集可能宽（性能）——静态精化 = M2（D1c）
+  → **代价已记录**（Task 1/3/4）：tag = 每 tagged 变量行 1 字节栈开销（帧公式
+  无 tag 程序逐字节不变）+ 每站点 jo 6B + 函数尾块 ~45-160B 冷区线性增长；
+  精化（区间证明免 tag 免检测）= M2（D1c）。
 - 2-limb 堆对象 arena 归属（函数 arena reset 时机——慢路径分配的生命周期）
+  → **已核**（Task 3/4）：慢路径经标准 alloc 双路——无激活 arena（纯算术作用域，
+  sg_alloc_total=0 → arena 不建）落全局 bump = 进程生命期；arena 激活时与周围
+  分配同 chunk 同生命周期。含分配作用域 + 2L 跨 reset = M2 债（spec §8）。
 - return 大值验证只能低 8 位（exit 码）——全 128 验证需测试钩子（扩展 dump 或专用断言通道）
+  → **已解**（Task 3）：测试钩子 = syscall3(1,1,x,16) 原始 16B 通道（x 槽 = 2L
+  对象指针的直接可观测面，零 runtime 改动）+ spec §5 return 出逃边界句（M1 内
+  return-2L 到内部调用方 = 确定性截断低 64；全 128 return = M2）。

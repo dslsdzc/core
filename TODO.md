@@ -245,6 +245,20 @@
 - corec build 透传 `--table`；事件流/表数据入 v6 段（NOD op ↔ HIT event_id 对齐）
 - M2 挂账细节（2026-09-06 已清 3/4）：~~hit_w32 负值哨兵~~（存 0）、~~add 反减 dest-fresh 前提~~（d==s1 落 0 事件防御）、~~'events emitted' 计数改名~~；**负值/宽常量池载体**（仍待——M1 冒烟无负常量形态）
 
+## int 多字 M1（2026-09-07 M1 完成 → M2 挂账）
+
+int 无上限语义（`docs/superpowers/specs/2026-09-06-int-unbounded-semantics.md`）的编码层投影 M1 已完成：add/sub 溢出全链——64 位快路径零开销直算 + jo 溢出检测 → 自动提升固定 2-limb（128 位）多字表示（tagged 槽：快值/堆对象指针 + 帧 tag 字节；tag 卫生四类定值点；128 位混合算术/比较；return 确定性截断语义）。实施 plan `docs/superpowers/plans/2026-09-06-int-multiword-m1.md` 六任务收官，设计定稿 `docs/superpowers/specs/2026-09-06-int-multiword-backend-design.md`（§8 M2 挂账全文）；快路径零变化：64 位内程序逐字节不变（test_mw_task2 z 用例 + backend_bootstrap stage1→3 byte-identical）；测试 `tests/selfhost/test_mw_task{1..6}.py`（含 i64max±1 边界套件）全绿。
+
+**M2 挂账**（摘要——细节见 spec §8）：
+- mul/div 溢出链与 2L 参与（M1 只 add/sub）；UOP_NEG −2^63 环绕链
+- 2L 值打印（int_str 超 64）
+- D4：超 64 编译期常量（IR_CONST 64 位槽 = 格层表示，需 v6 常量段——与 dex 精度同族）；超 128 码域动态增长（现编码层限制错）
+- return 全 128 内部传递（现确定性截断低 64）；出逃写/跨函数 2L（全局/堆/数组）
+- D1c 静态区间证明免 tag（保守 tagged 集：每变量行 1B tag + 每站 jo 6B + 块 ~45-160B）
+- 共享块/模板压缩（函数尾冷区线性增长，非正确性项）
+- 表（HIT）模式 × 运行时 2L 组合验证（tagged 路径整条落旧路径——语义正确未验组合）
+- arena 生命周期债（2L 对象跨 arena_reset 悬挂；正确方向 = 永久 bump 或跨 reset 复制）
+
 ## 规约语法并入 .cr（2026-09-06 .corespec 退役挂账）
 
 独立 .corespec 格式/语言退役（crasm 同构：规约只有一种表达 = Core 语言，无第二套文件/语言）：
