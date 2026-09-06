@@ -22,6 +22,21 @@
 
 > 注:examples/hello/ 目前是空骨架(未填 main)——忽略或用 add/ 起步。
 
+## 更多示例:测试套件(tests/suite/)
+
+仓库测试套件的 .cr 文件是按主题组织的可跑示例(覆盖更广):
+
+| 主题 | 文件 |
+|---|---|
+| 基础/控制流 | test_control_flow.cr、generics_test.cr |
+| 结构体/枚举 | at_test_struct.cr 等 at_test*.cr(@ 内建 + 结构) |
+| 并发 | go_test.cr、chan_test.cr、conc_test.cr |
+| 动态类型 | dyn_test.cr、dex_test.cr |
+| 内存/指针 | ptr_arith.cr、ptr_ref_first.cr、arena_test.cr |
+| FFI/热补丁/惰性 | ffi_test.cr、hotpatch_test.cr、lazy_test.cr |
+
+> 注:套件文件可能依赖测试驱动(检查点/期望输出)——作示例阅读时关注语言用法,运行请走测试入口(见 `../maintainer/testing.md`)。
+
 ## 配套
 
 - 每个示例目录可能带 `.cir`/`.ccr`/`.s`/`prog`——构建副产物,手工分步调试时对照用
