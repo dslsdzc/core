@@ -39,7 +39,7 @@ fn sum(a: [int]) -> int {
 }
 ```
 
-**关联**：`docs/developer/syntax.md`、`docs/maintainer/design/execution-model.md` §5.1
+**关联**：`docs/developer/syntax.md`、`docs/maintainer/design/execution-model.md` §一(唯一执行模型:HDFG)
 
 ---
 
@@ -152,7 +152,7 @@ fn main() -> int {
 }
 ```
 
-**关联**：`docs/maintainer/proposals/concurrency.md`、`docs/maintainer/design/execution-model.md` §5.3
+**关联**：`docs/maintainer/proposals/concurrency.md`、`docs/maintainer/design/execution-model.md` §三(并发 GMP)
 
 ---
 

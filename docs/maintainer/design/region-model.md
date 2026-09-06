@@ -156,6 +156,6 @@ mmio := alloc_at(0x7fff0000, 4096, align(4096));
 - 语义本体:docs/design/cache-semantics.md(七条,条款 7 = 本方案正确性标准)
 - IR 锚点:docs/design/existence-structure.md(REG first_ent/last_ent)
 - 指针模型:docs/design/pointer-model.md(provenance 三 pass、RegionCheck)
-- 并发衔接:docs/design/execution-model.md §四(每 G arena 生命周期)
+- 并发衔接:execution-model.md §四(每 G arena 生命周期)
 - 设计依据:docs/superpowers/specs/2026-08-13-graph-anchored-regions-design.md、2026-07-28-arena-model-design.md
 - 术语索引:docs/design/glossary.md

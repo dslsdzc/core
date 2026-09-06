@@ -64,7 +64,7 @@ ENT flags bit0 = 无配方(图内不可重算)——必须有 home。匿名常�
 
 - NOD 的 dest/srcs 语义与 v5 instrs 相同(引用 vars 表变量 id)——corearch 指令发射逻辑最小改动
 - v6 新增**显式边表**(from_nod/to_nod/kind):kind = 数据/state 边(.cir 语义落盘;v5 边不落盘)
-  - state 边(kind=1)两条来源:副作用链(STORE 族/非纯 CALL 按序连边)+ 循环终止依赖(见 docs/design/execution-model.md §二)
+  - state 边(kind=1)两条来源:副作用链(STORE 族/非纯 CALL 按序连边)+ 循环终止依赖(见 execution-model.md §二)
 - 坐标约定:NOD id = 文件序索引——图节点坐标,存在区间端点直接引用
 
 ---

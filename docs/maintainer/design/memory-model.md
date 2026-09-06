@@ -43,6 +43,6 @@
 
 - 寄存器分配 = 缓存语义的映射实例:docs/design/regalloc-cache-mapping.md(判定四条)
 - 指针模型(provenance 三 pass):docs/design/pointer-model.md
-- 控制流 region(与内存"区域"区分):docs/design/execution-model.md §二、existence-structure.md REG
+- 控制流 region(与内存"区域"区分):execution-model.md §二、existence-structure.md REG
 - 术语表:docs/design/glossary.md §二(三层映射)/§四(缓存语义术语)
 - 归档讨论:docs/archive/memory-model-capability-lattice.md(v1-v4 备忘)
