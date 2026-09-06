@@ -31,6 +31,12 @@
 
 ## 表文件格式（本计划定稿，toml）
 
+> 数值真源警示（2026-09-06 M2 收尾修正）：下方示例仅为计划期快照——**字节值与
+> 角色以 `src/arch/hit/core-x86.toml` 为唯一真源**（表驱动编码器直读该文件）。
+> 快照与真源已同步：M1 寄存器惯例 r10（累加/结果，rm 字段）+ r11（reg 字段）为
+> 8 号以上寄存器对 → 投影字节需 **REX.W+R+B**（sub = `4D 29`，非早期草案的
+> `48 29`）；sub 事件 reg 字段角色 = `src2`（非 src1）。
+
 `src/arch/hit/core-x86.toml`（M1 第一份投影表）：
 
 ```toml
@@ -46,11 +52,11 @@ inputs = 2
 outputs = 1
 side_effect = "pure"
 
-[[event.proj]]        # x86 投影：sub r/m64, r64（REX.W + 29 /r）
+[[event.proj]]        # x86 投影：sub r/m64, r64 = r/m ← r/m − r（REX.W+R+B + 29 /r）
 isa = "x86-64"
-opcode = [0x48, 0x29]        # REX.W + sub r/m64,r64
-modrm_reg_role = "src1"      # reg 字段 = 源 1（寄存器）
-modrm_rm_role = "dst"        # rm 字段 = 目标
+opcode = [0x4D, 0x29]        # REX.W+R+B + sub r/m64,r64（r10/r11 对需 R/B 扩展位）
+modrm_reg_role = "src2"      # reg 字段 = 第二输入（被减数，驻 r11）
+modrm_rm_role = "dst"        # rm 字段 = 目标/结果寄存器（r10，运算前驻第一输入）
 rm_mode = 0                  # 0 = rm 为寄存器（加载到 r10）；1 = rm 为 rbp+disp32（槽/常量池寻址）
 # 操作数解析规则：dst/src 均为「值槽」——由调用方传 var 索引，编码器用 g2_slot/e2_load_var 解析
 # 模板解释器规则见 Task 2：M1 支持 [opcode...] + modrm 两角色 + rm_mode 两种形态
@@ -64,11 +70,13 @@ side_effect = "pure"
 
 [[event.proj]]
 isa = "x86-64"
-# M1 占位：x86 无 nand 指令——单步 and（opcode 48 21 /r: and r/m64,r64）
-# 投影到语义 nand 的完整序列（and+not 两步）+ 事件流语义闭合 = M2
-opcode = [0x48, 0x21]
-modrm_reg_role = "src1"
+# M1 占位：x86 无 nand 指令——单步 and（opcode 4D 21 /r: and r/m64,r64，
+# 同 sub 的 r10/r11 双寄存器形态）。投影到语义 nand 的完整序列（and+not 两步）
+# + 事件流语义闭合 = M2
+opcode = [0x4D, 0x21]
+modrm_reg_role = "src2"
 modrm_rm_role = "dst"
+rm_mode = 0
 
 [[event]]
 id = 3
@@ -79,9 +87,11 @@ side_effect = "effect"
 
 [[event.proj]]
 isa = "x86-64"
-opcode = [0x48, 0x8B]        # mov r64, r/m64（读）
+# rm_mode=1：rm = rbp+disp32（槽/常量池寻址）。reg 字段寄存器 = dst（r10 → REX.W+R = 0x4C）
+opcode = [0x4C, 0x8B]        # REX.W+R + mov r64, r/m64（读：dst ← [rbp+disp32]）
 modrm_reg_role = "dst"
 modrm_rm_role = "addr"
+rm_mode = 1
 
 [[event]]
 id = 4
@@ -92,9 +102,11 @@ side_effect = "effect"
 
 [[event.proj]]
 isa = "x86-64"
-opcode = [0x48, 0x89]        # mov r/m64, r64（写）
+# rm_mode=1：rm = rbp+disp32（槽寻址）。reg 字段寄存器 = val（r10 → REX.W+R = 0x4C）
+opcode = [0x4C, 0x89]        # REX.W+R + mov r/m64, r64（写：[rbp+disp32] ← val）
 modrm_reg_role = "val"
 modrm_rm_role = "addr"
+rm_mode = 1
 ```
 
 M1 模板解释器形态 = 每事件单投影步 `{opcode 字节(≤2), reg 角色, rm 角色, rm_mode}`，无 imm/REX 变体（超出报错 = 该事件形态未实现）。多步序列投影（如 nand = and+not）留 M2（nand 事件 M1 以单步 and 占位）。

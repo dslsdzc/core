@@ -6,13 +6,16 @@
 // 事件流记录（g_hit_ev_stream，每条 20B = 5 × i32）：
 //   [ev_id i32, dst i32, src1 i32, src2 i32, flags i32]
 //   ev_id    最小核事件号（sub=1 nand=2 load=3 store=4——语义锚，表加载侧校验存在）
-//   dst     结果变量（store = -1 不用）；src1/src2 = 变量或常量池槽（flags 区分）
+//   dst     结果变量（store = 0 未用）；src1/src2 = 变量或常量池槽（flags 区分）
 //   flags    bit0 = src1 为常量池槽（否则变量），bit1 = src2 为常量池槽
+// 未用操作数字段恒存 0（勿存 -1：hit_w32 字节拆取仅定义非负值——自持 x86 截断
+// 除法与 Python 解释地板除读回分裂（255 vs 0xFFFFFFFF），M2-2a 改存 0）。
 // 降低规则（M1 直线子集：const/store/load/add/sub）：
 //   IR_CONST n        → load 事件（addr = 池槽；池值发射时写 ELF rodata）
 //   IR_BINARY OP_SUB  → sub 事件直通
 //   IR_BINARY OP_ADD  → sub 反减 sub(a, sub(0, b))：事件 E1 sub(d, 池0, b)、
-//                       E2 sub(d, a, d)——中间值驻 d（编码器先读后写，读先于写）
+//                       E2 sub(d, a, d)——中间值驻 d（编码器先读后写，读先于写）；
+//                       dest-fresh 前提 d != a（违反 → 0 事件落旧路径，M2-2c 防御）
 //   IR_LOAD/IR_STORE  → load/store 事件直通（槽寻址；全局/形态不符由编码器预检落旧路径）
 //   超子集 IR_BINARY 子操作 → 报错「needs more events」（exit 1）
 // 未映射指令（RET/ALLOC/ARENA_*/…）→ 无事件 → 旧路径（M1 混合模式）。
@@ -130,7 +133,7 @@ fn hit_ev_map_start(i: int) -> int {
     if i < 0 || i >= g_hit_ev_map_size { return 0; }
     return r32(g_hit_ev_map, i * 8); }
 
-// 追加一条事件（20B）；操作数负值 = 不用（-1）
+// 追加一条事件（20B）；未用操作数 = 0（勿存 -1：hit_w32 非负约定——M2-2a）
 fn hit_ev_append(ev_id: int, d: int, s1: int, s2: int, flags: int) {
     hit_grow_ev(g_hit_ev_count + 1);
     slot : ., mut = g_hit_ev_count;
@@ -192,7 +195,7 @@ fn hit_lower_instr(j: int) -> int {
         if ti == TI_STR { return 0; }
         if d < 0 { return 0; }
         k := hit_pool_intern(s1);
-        hit_ev_append(HIT_EV_LOAD, d, k, -1, HIT_ES_S1_POOL);   // load 事件：addr = 池槽
+        hit_ev_append(HIT_EV_LOAD, d, k, 0, HIT_ES_S1_POOL);   // load 事件：addr = 池槽（s2 = 0 未用）
         return 0; }
     if op == IR_BINARY {
         if ti == TI_DEX { return 0; }   // binary64 运算走旧 SSE 路径（M1 不移表）
@@ -202,6 +205,10 @@ fn hit_lower_instr(j: int) -> int {
             return 0; }
         if s3 == OP_ADD {
             if d < 0 || s1 < 0 || s2 < 0 { return 0; }
+            // dest-fresh 前提（M2-2c 防御）：E1 先把中间值 (0−b) 写入 d 槽；
+            // d == a 时 E2 读 src1(a) 读到的已是中间值 → a − (0−b) 语义崩。
+            // 落 0 事件 = 旧路径（旧路径编码器逐事件先读后写，无此前提）。
+            if d == s1 { return 0; }
             k0 := hit_pool_intern(0);   // 合成 0（最小核无 const 事件）
             // sub 反减 add(a,b) := sub(a, sub(0,b))——中间值驻 d：
             // E1: d ← 0 − b；E2: d ← a − d（编码器先读后写，读先于写）
@@ -215,14 +222,15 @@ fn hit_lower_instr(j: int) -> int {
         return 1; }
     if op == IR_LOAD {
         if d >= 0 && s1 >= 0 {
-            // 槽读 → 槽写（全局/形态不符由编码器预检 → 整条落旧路径）
-            hit_ev_append(HIT_EV_LOAD, d, s1, -1, 0);
+            // 槽读 → 槽写（全局/形态不符由编码器预检 → 整条落旧路径）；
+            // s2 = 0 未用（勿存 -1：hit_w32 非负约定，M2-2a）
+            hit_ev_append(HIT_EV_LOAD, d, s1, 0, 0);
         }
         return 0; }
     if op == IR_STORE {
         if s1 >= 0 && s2 >= 0 {
-            // 槽写：addr = s1 槽、val = s2
-            hit_ev_append(HIT_EV_STORE, -1, s1, s2, 0);
+            // 槽写：addr = s1 槽、val = s2；dst = 0 未用（M2-2a）
+            hit_ev_append(HIT_EV_STORE, 0, s1, s2, 0);
         }
         return 0; }
     return 0; }

@@ -1702,7 +1702,8 @@ fn hit_ev_emit_one(ev_i: int, buf: string, pos: int) -> int {
         else {
             cp = cp + e2_load_var(buf, pos+cp, r_acc, s1); }
         cp = cp + e2_load_var(buf, pos+cp, r_sec, s2);
-        // 指令字节：opcode ≤2 字节逐字发射（REX 位含在表数据：r10/r11 对 = W+R）
+        // 指令字节：opcode ≤2 字节逐字发射（REX 位含在表数据：r10/r11 对需
+        // W+R+B——reg 字段 r11 用 R 位、rm 字段 r10 用 B 位；如 sub = 4D 29）
         e2_w8(buf, pos+cp, hit_r32(st, HIT_ST_OFF_OP0)); cp = cp + 1;
         op1 := hit_r32(st, HIT_ST_OFF_OP1);
         if op1 != 0 { e2_w8(buf, pos+cp, op1); cp = cp + 1; }

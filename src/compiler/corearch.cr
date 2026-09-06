@@ -26,6 +26,15 @@ fn corearch_main() -> int {
     cli_flag_bool("dump-events", "", "Dump lowered HIT event stream + const pool");
 
     if cli_parse() != 0 { return 1; }
+    // M2-1：--table × --link/--shared 显式拒绝——表模式池 mov [rip+disp] 的 disp
+    // 由 elf.cr 按池槽回填，链接路径（ctx 重布局重定位用户代码段）下指向未经
+    // 测试（M1 计划偏差 #2）。显式拒绝（stderr + exit 1）优于未测组合。
+    // 测试断言见 tests/selfhost/test_hit_table.py:test_reject_table_with_link_shared。
+    if str_len(cli_get("table")) > 0 {
+        if cli_has("shared") != 0 || cli_has("link") != 0 || str_len(cli_get("link")) > 0 {
+            em := "error: --table cannot be combined with --link/--shared (pool mov rip disp untested under ctx relayout)\n";
+            syscall3(1, 2, em, str_len(em));
+            return 1; } }
     g_opt_level = 0;
     ol : ., mut = cli_get("opt-level");
     if str_len(ol) > 0 { g_opt_level = str_int(ol); if g_opt_level > 3 { g_opt_level = 3; } if g_opt_level < 0 { g_opt_level = 0; } }
@@ -203,7 +212,9 @@ fn corearch_main() -> int {
         syscall3(1, fd, g_elf_buf, sz);
         syscall3(3, fd, 0, 0); }
     print(" -> "); println(out_path);
+    // 表模式总结：g_hit_tabled_count = 表驱动实际发射事件条数（instr.cr 计数——
+    // add 反减 = 2 事件/指令）——「events emitted」语义准确（M2-2b 改名）。
     if str_len(tbl) > 0 {
-        print("hit table: "); print_i(g_hit_tabled_count); println(" tabled instrs emitted");
+        print("hit table: "); print_i(g_hit_tabled_count); println(" events emitted");
     }
     return 0; }

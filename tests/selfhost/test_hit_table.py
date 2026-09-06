@@ -117,14 +117,14 @@ def test_run_closure(tmp: Path, name: str, src: str, expected_rc: int, need_lowe
         print(out)
         return False
     if need_lowered:
-        m = out.find(" tabled instrs emitted")
+        m = out.find(" events emitted")
         if m < 0:
-            print(f"[FAIL] {name}: missing 'tabled instrs emitted' summary in --table output")
+            print(f"[FAIL] {name}: missing 'events emitted' summary in --table output")
             print(out)
             return False
         cnt_txt = out[:m].rsplit("hit table: ", 1)[-1].strip()
         if not cnt_txt.isdigit() or int(cnt_txt) < 1:
-            print(f"[FAIL] {name}: tabled (event) count invalid: '{cnt_txt}'")
+            print(f"[FAIL] {name}: events-emitted count invalid: '{cnt_txt}'")
             print(out)
             return False
     old_rc = run_elf(tmp / f"{name}_old")
@@ -233,6 +233,59 @@ def test_table_load_missing_file(tmp: Path) -> bool:
     return True
 
 
+def test_reject_table_with_link_shared(tmp: Path) -> bool:
+    """M2-1: --table × --link/--shared 显式拒绝（池 mov rip disp 链接路径未测试）。"""
+    try:
+        ccr = compile_ccr(tmp, "rej_tab_link", SUB_SRC)
+    except RuntimeError as e:
+        print(f"[FAIL] reject-combo: {e}")
+        return False
+    ok = True
+    for extra in (["--link", "auto"], ["--link", "x.so"], ["--shared"]):
+        out_p = tmp / "rej_combo.out"
+        r = run_bin(COREARCH, [str(ccr), "--elf", "--table", str(TABLE)] + extra
+                    + ["-o", str(out_p)])
+        if r.returncode == 0:
+            print(f"[FAIL] --table with {' '.join(extra)} should exit 1 (explicit reject)")
+            print(r.stdout + r.stderr)
+            ok = False
+            continue
+        if "cannot be combined with --link/--shared" not in r.stderr:
+            print(f"[FAIL] --table with {' '.join(extra)}: expected rejection msg on stderr")
+            print("stderr:", r.stderr)
+            print("stdout:", r.stdout)
+            ok = False
+            continue
+        print(f"[PASS] --table with {' '.join(extra)} -> exit 1 (stderr reject)")
+    return ok
+
+
+def test_dump_sentinel_clean(tmp: Path) -> bool:
+    """M2-2a: 未用哨兵字段（store dst / load s2）= 0——dump 不得出现 255/−1 读回伪影。
+
+    旧实现存 −1：自持 x86 截断除法写回单字节 0xFF → 读回 255；Python 解释地板
+    除四字节全 0xFF → 读回 0xFFFFFFFF——实现分裂，未用字段应恒存 0。
+    """
+    try:
+        ccr = compile_ccr(tmp, "dump_sentinel", MEM_SRC)
+        dump_out = tmp / "dump_sentinel_out"
+        r = emit_bin(ccr, dump_out, table=True, dump=True)
+    except RuntimeError as e:
+        print(f"[FAIL] dump/sentinel: {e}")
+        return False
+    out = r.stdout + r.stderr
+    if "hit pool entries: " not in out:
+        print("[FAIL] dump/sentinel: missing pool summary")
+        return False
+    bad = [s for s in ("dst=255", "s2=255", "dst=-1", "s2=-1") if s in out]
+    if bad:
+        print(f"[FAIL] dump/sentinel: unused-field readback artifacts {bad} in dump")
+        print(out)
+        return False
+    print("[PASS] dump/sentinel: unused fields (store dst / load s2) = 0, no 255/-1 artifacts")
+    return True
+
+
 def test_table_bad_opcode_range(tmp: Path) -> bool:
     """评审项：opcode >255 不得静默截断——表数据值域校验拒绝（exit 1）。"""
     ccr = compile_ccr(tmp, "bad_opcode_tbl", SUB_SRC)
@@ -286,6 +339,8 @@ def main():
             test_smoke_files(),
             test_table_load_missing_file(tmp),
             test_table_bad_opcode_range(tmp),
+            test_reject_table_with_link_shared(tmp),
+            test_dump_sentinel_clean(tmp),
             test_hit_lower_sources_check_clean(),
         ]
     passed = sum(results)

@@ -11,7 +11,8 @@
 #   inputs/outputs      事件签名（无宽度/寄存器/寻址——最小核抽象）
 #   side_effect "pure"/"effect"——内存效应标记
 # [[event.proj]] 投影条目（每事件一个或多个；M1 每事件恰一个单步投影）：
-#   opcode            指令字节序列（M1 ≤2 字节 = 前缀+opcode；[0x48,0x29] = REX.W + 29 /r）
+#   opcode            指令字节序列（M1 ≤2 字节 = 前缀+opcode；行内数值即真源——
+#                     sub = [0x4D,0x29]（REX.W+R+B：r10/r11 对需 R/B 位），非草案 0x48）
 #   modrm_reg_role    modrm.reg 字段操作数角色（dst/src1/src2/addr/val）
 #   modrm_rm_role     modrm.rm  字段操作数角色
 #   rm_mode           0 = rm 为寄存器（地址先加载进寄存器）；1 = rm 为 rbp+disp32（槽/常量池寻址）
