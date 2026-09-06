@@ -5,7 +5,12 @@
 
 ## 一、仓库地图
 
-**铁律先读**（违反后果 = 信任归零）：只用 jj 禁 git（#2）；文件永久不允许还原（#3）；直接修 root cause 不绕过（#1）；长时间编译/测试必须 `cpulimit -l 10` 或 `nice -n 19`（#6）。
+**仓库协作约定**(人类维护者视角;CLAUDE.md 的"铁律"是面向 AI 助手的会话规则,不直接约束人——但下述约定人机一致):
+
+- **版本控制只用 jj,不用 git 写操作**——仓库工具链统一(jj 分支模型见 §四)
+- **不随意还原/回滚文件**——改坏了向前修,不回头抹历史(有争议先讨论)
+- **修问题找 root cause**,不绕过、不掩盖、不加临时开关了事
+- **长构建/测试注意机器负载**:无人值守或共享机器上建议 `cpulimit -l 10` / `nice -n 19`(减风扇噪音与卡顿;交互式短任务不必)
 
 ```
 src/compiler/         → 自举编译器主体（corec 前端 + corearch 后端共用）
@@ -70,7 +75,7 @@ python3 build_selfhost_native.py       # Stage 0：Python bootstrap → build/co
 - **Stage 1** — corec 编译 `src/compiler/*.cr` → corec2
 - **Stage 2** — corec2 编译 `src/compiler/*.cr` → corec3；闭环判据 = corec2/corec3 输出逐字节一致（可加 O1，历史 O0/O1 均已贯通）
 
-任何长时间构建/测试任务一律 `cpulimit -l 10` 或 `nice -n 19`（铁律 #6）。
+任何长时间构建/测试任务建议 `cpulimit -l 10` 或 `nice -n 19`(机器负载与噪音考虑;交互式短任务不必)。
 
 ## 三、分支模型与 jj 速查
 
@@ -108,7 +113,7 @@ jj git fetch && jj bookmark move develop -r develop@origin   # 同步远端 deve
 - [ ] 从 [TODO.md](../../TODO.md) 挑一个明确任务；不启动归属验证闭环主线的改动
 - [ ] `jj bookmark create feature/xxx`（base = develop）；全程只用 jj
 - [ ] 开发；改动只限目标文件；提交前 `jj st` 复查无意外文件
-- [ ] 构建 + 测试：`python3 build_selfhost_native.py` 后跑相关套件（长任务 `cpulimit -l 10` / `nice -n 19`）
+- [ ] 构建 + 测试:`python3 build_selfhost_native.py` 后跑相关套件(长任务建议 `cpulimit -l 10` / `nice -n 19`)
 - [ ] 若动文档：头部定位声明、链接指向真实新路径、不复制职责重叠内容
 - [ ] `jj git push -b feature/xxx` → `gh pr create --base develop --fill`
 - [ ] 审查意见闭环（审批 + CI 绿）后手动 squash 合入 develop；不自行合入 main
