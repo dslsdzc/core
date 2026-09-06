@@ -69,7 +69,7 @@ auto fileid move self in None Some unit
 - `self` 是词法关键字，用于方法接收者（`self` / `&self` / `&mut self`）。
 - `Self` 不是词法关键字——它是接口/方法签名中的上下文类型名，按标识符解析，由 checker 按上下文处理。
 - `comptime` 不是关键字（`@comptime` 是 @ 内建原语）。
-- `requires` / `ensures` / `old` / `result` 不是词法关键字——它们是规约层的语法（见第 10 章与 `grammar/corespec.ebnf`）。
+- `requires` / `ensures` / `old` / `result` 不是词法关键字——它们是规约层语法（见第 10 章;语法归口 `grammar/core.ebnf`,2026-09 起 .corespec 独立格式退役）。
 
 ### 2.4 字面量
 
@@ -505,7 +505,7 @@ type Point3 = (dex, dex, dex);
 
 ## 十、规约
 
-规约（requires / ensures）与函数体并列，可选编写，参与静态检查，不影响运行时性能。规约语法详见 `docs/design/spec-design.md` 与 `grammar/corespec.ebnf`。
+规约（requires / ensures）与函数体并列，可选编写，参与静态检查，不影响运行时性能。规约语法详见 `docs/design/spec-design.md`;语法位置自 2026-09 起并入 `grammar/core.ebnf`(`.corespec` 独立格式退役,见 `docs/adr/adr-0001-corespec-crasm-retired.md`;`grammar/corespec.ebnf` 为迁移期残留)。
 
 ### 10.1 requires / ensures
 
@@ -542,7 +542,7 @@ fn sqrt(x: dex) -> dex where x >= 0 {
 | 符号约束 | 生成 VC（验证义务），由验证管线消费 |
 | 动态约束 | 运行时检查——「证明不了也不静默」 |
 
-与 `.corespec` 前置条件互相映射。
+与规约前置条件互相映射(规约 = .cr 语法内约束,独立 .corespec 格式已退役,见 ADR-0001)。
 
 ---
 

@@ -158,7 +158,7 @@ fn main() -> int {
 
 ## 形式规约（横切能力）
 
-> ⚠️ **未完成**：本节为设计预览。规约体系当前为**设计态**——语法与 EBNF 已定（`grammar/corespec.ebnf`），但 `.corespec` 编译、`.csr` 序列化、翻译桥、CIC 内核均**未实现**，当前编译器不支持本节内容。实现推进见 `docs/design/spec-design.md` 与 `TODO.md`。
+> ⚠️ **未完成**：本节为设计预览。规约体系当前为**部分落地**——`requires`/`ensures` 已入 .cr 语法参与静态检查（见 `docs/language/syntax.md` 第十章；2026-09 起独立 `.corespec` 格式退役，语法归口 `grammar/core.ebnf`），但验证管线（翻译桥、CIC 内核、证书）均**未实现**，当前编译器不消费规约。实现推进见 `docs/design/spec-design.md` 与 `TODO.md`。
 
 **目标**：理解"行为契约"——程序 = 实现 + 保证。
 
@@ -168,9 +168,9 @@ fn main() -> int {
 - `#check(...)`：前置条件
 - `#ensure(...)`：后置条件（可引用 `result`、`old(x)`）
 - `spec fn`：检查函数（用 Core 写的纯逻辑函数）
-- `.corespec` 规约文件（`requires`/`ensures`/`invariant`/`variant`，见 `grammar/corespec.ebnf`）
+- 函数内规约（`requires`/`ensures`，.cr 语法内表达——独立规约格式已退役）
 
-**图结构**：图上的约束——规约编译为 .csr 的 TagNode，通过符号引用精确关联 HDFG 节点。
+**图结构**：图上的约束——规约约束挂载为图的标注（TagNode/.csr 方向，设计态），通过符号引用精确关联 HDFG 节点。
 
 **心智模型**：函数不只"做什么"，还"保证什么"——意图成为代码的一等公民，验证器可消费。
 
@@ -185,7 +185,7 @@ fn divide(a: int, b: int) -> int
 }
 ```
 
-**关联**：`docs/design/spec-design.md`、`docs/ir-schema/corespecir-schema.md`、`grammar/corespec.ebnf`
+**关联**：`docs/design/spec-design.md`、`docs/language/syntax.md` 第十章、`docs/adr/adr-0001-corespec-crasm-retired.md`(格式退役决策)、`docs/superpowers/specs/`(验证管线设计稿)
 
 ---
 

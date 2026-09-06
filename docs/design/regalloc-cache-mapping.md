@@ -66,7 +66,7 @@
 
 **算法零证明**：正确性由判定保证，与分配算法选择无关（生成器 + 验证器分离；2025 年 VeriLocc 同构先例）。分配算法 = 上下文贪心（§五，定案）。
 
-**落点**：判定写成 `.corespec` 契约（`spec-design.md` §2.7 体系：翻译桥 → CIC 内核，健全性由内核保证）+ 编译器内 checker 实现期自检，双层消费同一规约。
+**落点**：判定写成规约契约（`.cr` 内联，`spec-design.md` §2.7 体系：翻译桥 → CIC 内核，健全性由内核保证；独立 `.corespec` 格式已退役，见 ADR-0001）+ 编译器内 checker 实现期自检，双层消费同一规约。
 
 ## 五、分配器（定案）：上下文贪心（Context-Aware Greedy, CAG）
 
@@ -129,4 +129,4 @@
 - `docs/design/memory-model.md` §一 — 缓存语义七条（待并入「图内不可重算」条款）
 - `docs/design/dataflow-design.md` §8 — 执行标注空间（无配方条目的来源）
 - `docs/design/pointer-model.md` — RegionCheck：存在区间的现有实现
-- `docs/design/spec-design.md` — .corespec 规约体系
+- `docs/design/spec-design.md` — 规约体系(.cr 内联,格式退役见 ADR-0001)

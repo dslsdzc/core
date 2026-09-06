@@ -23,7 +23,7 @@ corec build file.cr -s      → .cir + .ccr + 自动生成 file.csp → .csr
 规约语言（一套 Core 语法）编译为 **CIC 项**（归纳构造演算），验证走双通道：
 
 ```
-Core 规约语言（.corespec / .csp / .cr 内联）
+Core 规约语言（.cr 内联——2026-09 起独立 .corespec/.csp 源格式退役，见 ADR-0001）
    ↓ 编译（翻译桥：命令式 → 函数式）
 CIC 项（归纳构造演算——一切表达力：量词/归纳/依赖类型/递归性质）
    ├─ 目标一阶可表达 → SMT 通道（自动求解 + 用户可选 #smt）
@@ -65,6 +65,8 @@ CIC 提供 Coq 级别的全部表达力，逐项对应：
 
 ## 四、文件格式
 
+> **退役同步注记(2026-09-06,ADR-0001)**:独立规约源码格式 `.corespec` 已退役——规约源 = `.cr` 内联(requires/ensures/标签),下方 `.csp` 段落为编译器生成物方向的设计稿,落地时以"规约 = .cr 语法唯一表达"为准则重新定案;`.csr`(约束二进制序列化)与图标注机制不受影响。
+
 ### `.cr` — 实现源码（也可内联规约）
 
 ```core
@@ -85,9 +87,11 @@ fn sort(a: [int]) -> [int]
 }
 ```
 
-### `.csp` — 编译器自动生成的规约文件
+### `.csp` — 规约源(设计稿,见上方退役同步注记)
 
-`corec build file.cr -s` 自动生成 `file.csp`：
+> 注:本节原为"编译器自动生成的独立规约文件"。ADR-0001 退役后方向改为 **.cr 内联书写**——本节保留为设计历史与"自动推导骨架"机制参考,文件级形态以退役决策为准。
+
+`corec build file.cr -s` 自动生成 `file.csp`(设计态):
 
 ```core
 // file: sort.csp
@@ -252,7 +256,7 @@ spec fn all_nonneg(arr: [int]) -> bool
 `forall x: int => P(x)` 必须是规约语言的一等构造（**不是** for 循环的翻译）——int 域无限，遍历不了；for 循环只是有限域的便利糖（§7 纯公式支持的 `forall x in arr` 是有限域情形）。
 
 ```core
-// EBNF 已定义（grammar/corespec.ebnf）
+// EBNF 已定义（2026-09 起归口 grammar/core.ebnf；corespec.ebnf 为迁移期残留）
 forall (x: int) => x >= 0
 exists (i: int) => a[i] == target
 ```
@@ -338,7 +342,7 @@ Core 的 `int` 是无上限数学整数（2026-08-23 修订：i64 快路径 + �
 | 机制 | 箭头类型 `int -> int` → CIC 原生 | TYP_FN + 闭包/捕获/调用约定 |
 | 需求 | 高阶量词 `forall f: int -> int => P(f)` | 函数值编程（map/filter 传函数、回调表） |
 
-**决策：规约专属函数类型。** `int -> int` 只存在于规约语言（`.corespec` 类型宇宙的一部分），直接映射 CIC 箭头；量化的是数学函数，不需要实现层有函数值。零污染 Core 语言（checker/ir_gen/后端/内存模型不动），符合"规约是独立源文件"的哲学。
+**决策：规约专属函数类型。** `int -> int` 只存在于规约语言（规约类型宇宙的一部分——独立源格式已退役，类型机制不受影响），直接映射 CIC 箭头；量化的是数学函数，不需要实现层有函数值。零污染 Core 语言（checker/ir_gen/后端/内存模型不动）。
 
 **实现层函数值（TYP_FN/闭包）按 YAGNI 挂起**：现状 `@addr(f)` + int 能表达函数地址（内核函数表、中断向量表）；闭包与 arena 内存模型（捕获变量归属）交互复杂，无真实用例不做。
 
@@ -518,7 +522,7 @@ fn map_page(pt: &mut PageTable, virt: Addr, phys: Addr, flags: u64)
 
 ## 十七、实现里程碑（建议）
 
-1. `.corespec` 解析（量词/函数类型/变体）+ 规约类型检查
+1. `.cr` 内联规约解析（量词/函数类型/变体）+ 规约类型检查
 2. 翻译桥：spec fn → CIC 项（循环→递归、数组→归纳列表）
 3. SMT 通道：目标翻译 + 证书校验 + 内核验证（绑定内核起步）
 4. 用户入口：`#induct` → `#lemma` → 逃逸
