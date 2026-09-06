@@ -41,3 +41,6 @@
 | ADR-0013 | 类型系统方向 14 条(自动推导/借用收缩/声明式边界) | accepted | 2026-08-30 |
 | ADR-0014 | 惰性求值——编译期下沉路线 | accepted | 2026-08-09 |
 | ADR-0015 | HIT 硬件接口表(取代 .crasm 汇编层) | accepted | 2026-09-05 |
+| ADR-0016 | 多 Arena 内存模型(取代全局 bump) | accepted | 2026-07-28 |
+| ADR-0017 | 并发模型 = Go 风格 GMP 简化 | accepted | 2026-07-30/31 |
+| ADR-0018 | 仓库治理——GitFlow + 双 ruleset + CI | accepted | 2026-08-09 |
