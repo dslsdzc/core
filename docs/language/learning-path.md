@@ -158,7 +158,7 @@ fn main() -> int {
 
 ## 形式规约（横切能力）
 
-> ⚠️ **未完成**：本节为设计预览。规约体系当前为**部分落地**——`requires`/`ensures` 已入 .cr 语法参与静态检查（见 `docs/language/syntax.md` 第十章；2026-09 起独立 `.corespec` 格式退役，语法归口 `grammar/core.ebnf`），但验证管线（翻译桥、CIC 内核、证书）均**未实现**，当前编译器不消费规约。实现推进见 `docs/design/spec-design.md` 与 `TODO.md`。
+> [注意] **未完成**：本节为设计预览。规约体系当前为**部分落地**——`requires`/`ensures` 已入 .cr 语法参与静态检查（见 `docs/language/syntax.md` 第十章；2026-09 起独立 `.corespec` 格式退役，语法归口 `grammar/core.ebnf`），但验证管线（翻译桥、CIC 内核、证书）均**未实现**，当前编译器不消费规约。实现推进见 `docs/design/spec-design.md` 与 `TODO.md`。
 
 **目标**：理解"行为契约"——程序 = 实现 + 保证。
 

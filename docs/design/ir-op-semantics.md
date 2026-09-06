@@ -7,7 +7,7 @@
 > 本任务纯只读：**不修改任何 Core 代码**；`~/compcert/` 为只读真源，绝不修改。
 > 差异标注约定：**D** = Core 有意不同于 CompCert（附设计理由）；**BC** = 可疑/bug 候选（Task 2 核实对象）。
 > **状态（2026-08-17）**：第四轮修复已完成并合入（F1-F20，维护者授权全修）——本表已同步修复后状态
-> （「✅ 已修复」标记），BC 表转为修复记录参考；D 表为设计差异，不受修复影响。
+> （「[ok] 已修复」标记），BC 表转为修复记录参考；D 表为设计差异，不受修复影响。
 > 修复记录见 `docs/archive/compcert-reference.md`「第四轮修复记录（2026-08-17）」；本表末尾「修复记录」小节汇总。
 
 ## 0. 真源与引用
@@ -97,7 +97,7 @@ Core 侧只读来源：`src/compiler/ast.cr`（opcode 常量，L527-580）、`sr
 | 46 | IR_LAZY_THUNK | 惰性 | ir_gen | ✓（eager） | ✓（eager） | 2.7 |
 | 47 | IR_LAZY_FORCE | 惰性 | ir_gen | ✓（eager） | ✓（eager） | 2.7 |
 | 48 | IR_FNADDR | 地址 | ir_gen | ✓ | ✓（d=0） | 2.5 |
-| 49 | IR_I2F | 转换 | ir_gen | ✓（⚠️ 见 BC-I2F） | ✗ | 2.3 |
+| 49 | IR_I2F | 转换 | ir_gen | ✓（[注意] 见 BC-I2F） | ✗ | 2.3 |
 | 50 | IR_F2I | 转换 | ir_gen | ✓ | ✗ | 2.3 |
 | 51 | IR_APPROX | 注解（规划） | —（迁移时加入） | — | — | 2.9 |
 
@@ -156,10 +156,10 @@ Core 侧只读来源：`src/compiler/ast.cr`（opcode 常量，L527-580）、`sr
 
 - OP_ADD..OP_DIV：`d := a ⊕ b`（IEEE 754 `addsd/subsd/mulsd/divsd`）。对照 `Oaddf..Odivf`（Op.v:L419-422）→ `Val.addf`（Values.v:L538,556）→ IEEE binary64（`Bplus/Bminus/Bmult/Bdiv`，mode_NE 就近舍入）；Asm 层 `Paddd_ff` 等（Asm.v:L865-872）。
 - OP_EQ..OP_GE：`comisd` + 无符号 setcc（`sete/setne/setb/seta/setbe/setae`）。对照 Asm.v `compare_floats`（L453-463）：ZF = (x=y ∨ 无序)，CF = ¬(x≥y)（= x<y ∨ 无序），PF = 无序。
-  - `OP_EQ → sete(ZF)`：NaN 时得 **1**。CompCert `Ccompf Ceq`（Op.v:L49, 285）：Op.v 层 `Val.cmpf_bool` 对 NaN 返回 **`Some false`**（IEEE 语义，Values.v L928-931）而非 `None`（`None` 仅出现在非 float 值输入）；机器层分歧在 `compare_floats` 无序时 ZF=1，Asmgen 用 `Cond_and Cond_np Cond_e`（Asmgen.v L260 = `setnp` ∧ `sete`）落地 IEEE 语义——**NaN 时 == 为 false**。**BC-FCMP ✅ 已修复（2026-08-17，第四轮 F8）：ELF 的 `==`/`!=` 已改 `setnp+sete` / `setp+setne` 组合（instr.cr L495-503，对照 Asmgen.v L260）**。dex 无 NaN（全序），不受影响。
+  - `OP_EQ → sete(ZF)`：NaN 时得 **1**。CompCert `Ccompf Ceq`（Op.v:L49, 285）：Op.v 层 `Val.cmpf_bool` 对 NaN 返回 **`Some false`**（IEEE 语义，Values.v L928-931）而非 `None`（`None` 仅出现在非 float 值输入）；机器层分歧在 `compare_floats` 无序时 ZF=1，Asmgen 用 `Cond_and Cond_np Cond_e`（Asmgen.v L260 = `setnp` ∧ `sete`）落地 IEEE 语义——**NaN 时 == 为 false**。**BC-FCMP [ok] 已修复（2026-08-17，第四轮 F8）：ELF 的 `==`/`!=` 已改 `setnp+sete` / `setp+setne` 组合（instr.cr L495-503，对照 Asmgen.v L260）**。dex 无 NaN（全序），不受影响。
   - `OP_LT → setb(CF)` / `OP_GE → setae(CF=0)` / `OP_LE → setbe(CF∨ZF)` / `OP_GT → seta(CF=0∧ZF=0)` 与 CompCert `Cond_b/ae/be/a`（Asm.v:L491-510）一致（含无序时 LT/LE 为真——与 CompCert 相同的硬件语义）。
 
-**BC2 ✅ 已修复（2026-08-17，第四轮 F10）——整数除/模截断方向三方已统一为向零截断**：
+**BC2 [ok] 已修复（2026-08-17，第四轮 F10）——整数除/模截断方向三方已统一为向零截断**：
 - ELF 后端：`idiv` → 向零截断（与 CompCert `Z.quot` 一致）✓
 - Python bootstrap 解释器（`bootstrap/corec/backend/interpreter.py`）：**已修**——`//` 改 abs+符号向零截断、`%` 余数符号随被除数（修复前 Python `//` = 向下取整（-7/3 = -3，C 为 -2）、`%` 余数符号随除数——与 Core 的 C 语义不一致）；`tests/bootstrap/test_pipeline.py` 补四组负操作数回归用例（-7/3、7/-3、-7%3、7%-3）
 - 自托管 interp.cr 的 `lv / rv` 行为取决于承载二进制：经 ELF 构建 → 向零；经 Python bootstrap 跑测试 → 向下（修复后一致）。
@@ -167,7 +167,7 @@ Core 侧只读来源：`src/compiler/ast.cr`（opcode 常量，L527-580）、`sr
 
 ### 2.3 转换（对照 Op.v 转换族）
 
-- **IR_I2F**（49）：`d := float(int64(a))`。对照 `Ofloatoflong`（Op.v:L169, L438）→ `Val.floatoflong` = `Float.of_long`（Floats.v:L318-320：`BofZ` 53 位二进制浮点，就近舍入）。ELF 编码现状：`F2 48 0F 2A`（`cvtsi2sd`，**REX.W 已补——BC-I2F ✅ 已修复（2026-08-17，第四轮 F7）**，`e2_sd_cvt` instr.cr L378-389）。修复前为 `F2 0F 2A`（32 位操作数）只转换低 32 位符号扩展，`|a| ≥ 2³¹` 时结果错误（如 `2⁴⁰ → 0.0`），与 `IR_F2I` 的 `cvttsd2si` `F2 48 0F 2C`（REX.W ✓）不对称。迁移后语义：int→dex = `d := a·10⁶`（精确，无舍入）。
+- **IR_I2F**（49）：`d := float(int64(a))`。对照 `Ofloatoflong`（Op.v:L169, L438）→ `Val.floatoflong` = `Float.of_long`（Floats.v:L318-320：`BofZ` 53 位二进制浮点，就近舍入）。ELF 编码现状：`F2 48 0F 2A`（`cvtsi2sd`，**REX.W 已补——BC-I2F [ok] 已修复（2026-08-17，第四轮 F7）**，`e2_sd_cvt` instr.cr L378-389）。修复前为 `F2 0F 2A`（32 位操作数）只转换低 32 位符号扩展，`|a| ≥ 2³¹` 时结果错误（如 `2⁴⁰ → 0.0`），与 `IR_F2I` 的 `cvttsd2si` `F2 48 0F 2C`（REX.W ✓）不对称。迁移后语义：int→dex = `d := a·10⁶`（精确，无舍入）。
 - **IR_F2I**（50）：`d := trunc(f)`（向零截断）。对照 `Olongoffloat`（Op.v:L167, L437）→ `Val.longoffloat` = `Float.to_long`（Floats.v:L308-309：`ZofB_range` 向零截断，**越界 → None**）。当前 ELF 用 `cvttsd2si`：向零截断 ✓，但**越界结果是硬件哨兵 0x8000000000000000**（Intel SDM：异常掩码默认下越界 `cvttsd2si` 返回不定值 INT64_MIN——文档化行为）——CompCert 定义为 `None`（Stuck）。**BC-F2I（死路径已确认，第四轮 §2）：IR_F2I 无发射方（语言级 float→int 转换不存在），当前不可触发**；若将来启用需定越界语义。迁移后语义：dex→int = `d := trunc(a/10⁶)`（有损转换，`EC_R_LOSSY_CONVERT` R004 检查点）。
 - interp：op 49/50 **已实现**（`i64_to_f64`/`f64_to_i64`，f64.cr 软件路径，BC11 已修）——原「静默跳过」见 BC11（已修复）。
 
@@ -177,25 +177,25 @@ Core 侧只读来源：`src/compiler/ast.cr`（opcode 常量，L527-580）、`sr
 
 - **IR_ALLOC**（6）：标量变量槽标记——后端不发射代码（栈槽由帧布局分配）；interp 置 `d := 0`。CompCert 无对照（帧是伪指令级概念）。
 - **IR_ALLOC_STRUCT**（7）：`d := alloc(fc·8)`——`fc` = 结构体字段数（`s3` = 结构体名 ni）；返回零初始化堆块（rt.s L72-103：8 字节长度头 + 数据区 `rep stosb` 清零；OOM → **null**）。对照 `Mem.alloc m 0 sz`（总是成功、零初始化、有界块）——**D：Core bump 分配器 OOM 返回 null（后续 deref 由边界检查捕获），CompCert 分配总是成功**。
-- **IR_ALLOC_ARRAY**（8）：`d := alloc(cnt·esz)`——`s1`=元素数，`s2`=元素大小（≤0 → 8）；ELF 固定 `sz = s1·8`（忽略 `s2`≠8；当前发射均 `s2∈{0,8}` 一致）。**BC14 ✅ 已修复（2026-08-17，第四轮 F14）**：分配尺寸已改 `movabs rdi, imm64`（64 位立即数，≥2³² 不再回绕，`sz` 溢出为负按 OOM 处理）——修复前 `mov edi, imm32`（0xBF 零扩展）对 [2³¹, 2³²) **编码本就正确**（原「高 32 位丢失」表述不准确，F14 实测证伪），仅 ≥2³² 按 mod 2³² 回绕。同族一并修复：DEREF 边界比较改 `movabs rcx, imm64` + `cmp rax, rcx`（F17，alloc_sz ≥ 2³¹ 不再符号扩展失效）、ud2 写位置修正（F1c，pos+cp）。interp：`cnt·esz+8` 字节（含头）——注意 interp 多分配 8 字节头（与 ELF 布局不完全一致，仅解释器内部自洽）。
+- **IR_ALLOC_ARRAY**（8）：`d := alloc(cnt·esz)`——`s1`=元素数，`s2`=元素大小（≤0 → 8）；ELF 固定 `sz = s1·8`（忽略 `s2`≠8；当前发射均 `s2∈{0,8}` 一致）。**BC14 [ok] 已修复（2026-08-17，第四轮 F14）**：分配尺寸已改 `movabs rdi, imm64`（64 位立即数，≥2³² 不再回绕，`sz` 溢出为负按 OOM 处理）——修复前 `mov edi, imm32`（0xBF 零扩展）对 [2³¹, 2³²) **编码本就正确**（原「高 32 位丢失」表述不准确，F14 实测证伪），仅 ≥2³² 按 mod 2³² 回绕。同族一并修复：DEREF 边界比较改 `movabs rcx, imm64` + `cmp rax, rcx`（F17，alloc_sz ≥ 2³¹ 不再符号扩展失效）、ud2 写位置修正（F1c，pos+cp）。interp：`cnt·esz+8` 字节（含头）——注意 interp 多分配 8 字节头（与 ELF 布局不完全一致，仅解释器内部自洽）。
 
 load/store（对照 `Mem.load`/`Mem.store` Memory.v:L428/L531 + `valid_access` L220：
 要求 `[ofs, ofs+size_chunk) ⊆ block` 且对齐；Core 无权限/对齐概念——**D：Core 内存模型 = 分配块 + 边界检查，无权限/对齐维度**）：
 
 - **IR_LOAD_FIELD**（11）：`d := M[ρ(s1) + 8·s3]`（字段偏移 = 字段号×8）。对照 `Pmovq_rm` + `Aindexed`（Asm.v:L623-624; Op.v:L322-323）。interp：`ptr≠0` 时 `r64(ptr, s3·8)`，`ptr=0` 时退回槽值（近似）。
 - **IR_STORE_FIELD**（12）：`M[ρ(s1) + 8·s3] := ρ(s2)`。对照 `Pmovq_mr`（Asm.v:L627-628）。
-- **IR_LOAD_INDEX**（13）：`d := M[ρ(s1) + 8·s3]`（常量索引 `s3`）。**BC16 ✅ 已修复（2026-08-17，第四轮 F2）**：checker 已补编译期常量界检查（R002/TK05/TK06 硬错误门）——修复前常量索引的编译期越界检查缺失（checker 只查「非数组类型」；ext_safety 的编译期检查同死于 BC6 门控）。
+- **IR_LOAD_INDEX**（13）：`d := M[ρ(s1) + 8·s3]`（常量索引 `s3`）。**BC16 [ok] 已修复（2026-08-17，第四轮 F2）**：checker 已补编译期常量界检查（R002/TK05/TK06 硬错误门）——修复前常量索引的编译期越界检查缺失（checker 只查「非数组类型」；ext_safety 的编译期检查同死于 BC6 门控）。
 - **IR_STORE_INDEX**（14）：`M[ρ(s1) + 8·s3] := ρ(s2)`。
-- **IR_LOAD_INDEX_VAR**（15）：`d := M[ρ(s1) + 8·ρ(s2)]`。**BC6 ✅ 已修复（2026-08-17，第四轮 F1）**：运行时索引越界守卫已启用——`CORE_SAFE` 默认开启、ext 注册表 16 字节记录布局修复（w64 偏移重叠致插件永不匹配）、ir_gen 传真实数组长度并补**写路径**钩子，`IR_BOUNDS_CHECK` 正常发射。修复前插入路径**双重死亡**：① 插件注册被 `CORE_SAFE=1` 环境变量门控；② ir_gen 两个调用点恒传 `arr_len_lit = -1` → `IR_BOUNDS_CHECK` **永不发射**——直接 `arr[i]`（非指针路径）的越界读写**无任何运行时检查**（与 `&arr[i]` 解引用的 provenance 检查链不对称——后者已在第一轮修复）。对照 CompCert：越界 load/store → `None`（Stuck）——Core 修复后前置硬陷阱。
+- **IR_LOAD_INDEX_VAR**（15）：`d := M[ρ(s1) + 8·ρ(s2)]`。**BC6 [ok] 已修复（2026-08-17，第四轮 F1）**：运行时索引越界守卫已启用——`CORE_SAFE` 默认开启、ext 注册表 16 字节记录布局修复（w64 偏移重叠致插件永不匹配）、ir_gen 传真实数组长度并补**写路径**钩子，`IR_BOUNDS_CHECK` 正常发射。修复前插入路径**双重死亡**：① 插件注册被 `CORE_SAFE=1` 环境变量门控；② ir_gen 两个调用点恒传 `arr_len_lit = -1` → `IR_BOUNDS_CHECK` **永不发射**——直接 `arr[i]`（非指针路径）的越界读写**无任何运行时检查**（与 `&arr[i]` 解引用的 provenance 检查链不对称——后者已在第一轮修复）。对照 CompCert：越界 load/store → `None`（Stuck）——Core 修复后前置硬陷阱。
 - **IR_STORE_INDEX_VAR**（16）：`M[ρ(s1) + 8·ρ(s2)] := ρ(d)`——**注意值在 dest 槽**（ELF：`mov [r10+r11·8], r12`，instr.cr L1175-1186；interp 同用 `d`）。操作数约定与 IR_STORE 不同（D：历史约定，契约按发射/后端一致为准）。越界守卫同 BC6（**已修复** 2026-08-17，F1 补写路径钩子）。
 - **IR_DEREF**（25）：`d := M[ρ(s1)]`；运行时边界检查（provenance_verify 后置填充 `s2`=分配基址变量、`s3`=分配大小、`ti`=访问宽度；instr.cr L256-287 `e2_ptr_bounds_check`）：
   `⊥` iff `ρ(s1) = 0`（null）∨ `ρ(s1) − base ≥ᵤ (alloc_sz − width + 1)`（无符号）。
   安全条件等价于「访问末字节 ∈ [base, base+alloc_sz)」，与 CompCert `Mem.load` 的 `ofs+size ≤ blocksize` 一致（负偏移在无符号下恒越界）✓。`s3 = 0` → 无检查（快速路径，unsafe 场景）。对照 `Pmovq_rm`；**BC-DEREF**：无检查路径仅当 provenance 未填充时出现（unsafe 块显式跳过）——第四轮核实完成：未发现绕过链（findings §3 证伪 off-by-one，i=7/8/-1 边界精确）。
-- **IR_STORE_PTR**（26）：`M[ρ(s1)] := ρ(s2)`；边界检查同 DEREF（`d`=基址变量、`s3`=大小）。**BC10 ✅ 已修复（2026-08-17，第四轮 F6）**：`s3=0` 发射态**保留 null 陷阱**（拆出 `e2_ptr_null_check`，修复前连 null 陷阱都没有，检查序列整体跳过）；provenance_verify 后置改写依赖已不再关键。**BC12 ✅ 已修复（F12）**：interp 的 STORE_PTR 已改 `M[ρ(s1)] := ρ(s2)`（`ir_interp_deref_write`，与 ELF 操作数一致）——修复前为槽拷贝（`w64(slot[s1], slot[d])`，d=-1 时恒 no-op）。
+- **IR_STORE_PTR**（26）：`M[ρ(s1)] := ρ(s2)`；边界检查同 DEREF（`d`=基址变量、`s3`=大小）。**BC10 [ok] 已修复（2026-08-17，第四轮 F6）**：`s3=0` 发射态**保留 null 陷阱**（拆出 `e2_ptr_null_check`，修复前连 null 陷阱都没有，检查序列整体跳过）；provenance_verify 后置改写依赖已不再关键。**BC12 [ok] 已修复（F12）**：interp 的 STORE_PTR 已改 `M[ρ(s1)] := ρ(s2)`（`ir_interp_deref_write`，与 ELF 操作数一致）——修复前为槽拷贝（`w64(slot[s1], slot[d])`，d=-1 时恒 no-op）。
 - **IR_ADDR_INDEX**（31）：`d := ρ(s1) + 8·ρ(s2)`（`&arr[i]`，`s3`=scale，当前恒 3；ELF 硬编码 scale=3 忽略 s3）。对照 `Oleal` + `Aindexed2scaled`。无边界检查（由后续 DEREF 的 provenance 承担；常量索引编译期拦截）。interp 已实现（BC11 已修，2026-08-17）。
-- **IR_SLICE**（24）：`d := ρ(s1) + 8·ρ(s2)`（`&arr[low]`；`s3` = high 变量）。**BC7 ✅ 部分修复（2026-08-17，第四轮 F11）**：切片字面量界已建长度侧表 + 创建期检查 + slice provenance 传播（interp 同步补 SLICE）；**运行时 high 界仍不进入值**——slice 解引用无长度信息，完整修复需 IR 形态演进（slice 类型），已标注设计项（见 TODO）。对照 CompCert：slice 无对照（C 无 slice）。
+- **IR_SLICE**（24）：`d := ρ(s1) + 8·ρ(s2)`（`&arr[low]`；`s3` = high 变量）。**BC7 [ok] 部分修复（2026-08-17，第四轮 F11）**：切片字面量界已建长度侧表 + 创建期检查 + slice provenance 传播（interp 同步补 SLICE）；**运行时 high 界仍不进入值**——slice 解引用无长度信息，完整修复需 IR 形态演进（slice 类型），已标注设计项（见 TODO）。对照 CompCert：slice 无对照（C 无 slice）。
 - **IR_REF**（18）：`d := &ρ(s1)`（栈帧内地址，ELF `lea r10,[rbp+disp]`；interp：值复制近似）。对照 `Oleal`/`Aindexed`（Asm.v:L701-702）。
-- **IR_BOUNDS_CHECK**（30）：`if ρ(s1) ≥ᵤ s2 → ud2`（SIGILL ⊥）；`s2 < 0` → no-op。无符号比较对负索引正确捕获（负 → 无符号巨大 ≥ᵤ 正界）✓；且能同时覆盖 `index ≥ max_len` 与 `index < 0`。对照：CompCert 越界在 load/store 返回 `None` → `Stuck`；Core 前置显式检查 + 硬陷阱——**D：中止而非未定义值（安全优先）**。ELF 编码现状（F1c 修复后，instr.cr L1373-1392）：`s1`（index）按变量槽加载（`e2_load_var` r10），**`s2`（max_len）按字面量加载**（`movabs r11, imm64` + `cmp r10, r11` + `jb +2` 跳过 ud2）——修复前两个操作数**均按变量槽加载**（`e2_load_var`），与发射约定「s2 = 字面量长度」冲突，编码会把字面量当变量索引加载。**BC6 ✅ 已修复（2026-08-17，第四轮 F1）**：发射路径已启用（见 IR_LOAD_INDEX_VAR）。interp 已实现（BC11 已修）——越界返回中止，解释器内 OOB 不再静默。
+- **IR_BOUNDS_CHECK**（30）：`if ρ(s1) ≥ᵤ s2 → ud2`（SIGILL ⊥）；`s2 < 0` → no-op。无符号比较对负索引正确捕获（负 → 无符号巨大 ≥ᵤ 正界）✓；且能同时覆盖 `index ≥ max_len` 与 `index < 0`。对照：CompCert 越界在 load/store 返回 `None` → `Stuck`；Core 前置显式检查 + 硬陷阱——**D：中止而非未定义值（安全优先）**。ELF 编码现状（F1c 修复后，instr.cr L1373-1392）：`s1`（index）按变量槽加载（`e2_load_var` r10），**`s2`（max_len）按字面量加载**（`movabs r11, imm64` + `cmp r10, r11` + `jb +2` 跳过 ud2）——修复前两个操作数**均按变量槽加载**（`e2_load_var`），与发射约定「s2 = 字面量长度」冲突，编码会把字面量当变量索引加载。**BC6 [ok] 已修复（2026-08-17，第四轮 F1）**：发射路径已启用（见 IR_LOAD_INDEX_VAR）。interp 已实现（BC11 已修）——越界返回中止，解释器内 OOB 不再静默。
 - **IR_ARENA_NEW**（32）：`d := arena_new(s1)`（新 arena 句柄；`s1`=大小估计）。对照：CompCert 无 arena 概念（每函数 `Pallocframe` 一帧）——**D：Core arena 内存模型（docs/design/memory-model.md），无 CompCert 对照**。interp：no-op 近似（置 0，BC11 已修）。
 - **IR_ARENA_RESET**（33）：`arena_reset(ρ(s1))`；`s1 < 0` → no-op（ELF 带 `jl` 保护防递归）。interp：no-op 近似（BC11 已修）。
 
@@ -211,21 +211,21 @@ load/store（对照 `Mem.load`/`Mem.store` Memory.v:L428/L531 + `valid_access` L
 - **IR_CALL_EXTERN**（45）：外部符号调用——`s1`=函数名 ni、`s2`=首参、`s3`=参数个数（**注意：约定与 IR_CALL 不同，名字在 s1**）。ELF：外部重定位 `call rel32`。对照 CompCert `exec_step_external`（Asm.v:L1120-1127）。
 - **IR_HOTPATCH_ROUTE**（39）：热补丁路由调用（s1=名字、s2=首参、s3=参数数，同 CALL_EXTERN 约定）。ELF：call patch 同 CALL。对照无（CompCert 无热补丁）——D。
 - **IR_FNADDR**（48）：`d := &f`（`s1`=函数名 ni；`movabs` imm64 + 链接期补丁）。对照 `Oindirectsymbol`（Op.v:L79, L352）→ `Genv.symbol_address`。interp：`d := 0`（无地址概念，已知局限）。
-- **IR_SPAWN**（27）：创建并发执行单元——`d`=future/结果、`s1`=首参、`s2`=参数个数、`s3`=函数名 ni（**按 ir_gen.cr L871 实际发射**）。**BC1 ✅ 已修复（2026-08-17，第四轮 F4）**：操作数约定统一为 s3=函数名，并补 SysV 参数装载（修复前 ast.cr 注释/instr.cr（`name_ni := s1`）与发射方/interp 四方错位——ELF 拿参数变量索引当函数名查表、且从不装载参数 → SIGSEGV）。ELF 现为单线程近似（直接 call 存结果）；interp 单层内联。对照：CompCert 无并发——D。
+- **IR_SPAWN**（27）：创建并发执行单元——`d`=future/结果、`s1`=首参、`s2`=参数个数、`s3`=函数名 ni（**按 ir_gen.cr L871 实际发射**）。**BC1 [ok] 已修复（2026-08-17，第四轮 F4）**：操作数约定统一为 s3=函数名，并补 SysV 参数装载（修复前 ast.cr 注释/instr.cr（`name_ni := s1`）与发射方/interp 四方错位——ELF 拿参数变量索引当函数名查表、且从不装载参数 → SIGSEGV）。ELF 现为单线程近似（直接 call 存结果）；interp 单层内联。对照：CompCert 无并发——D。
 
 ### 2.6 枚举与动态类型
 
 - **IR_MAKE_ENUM**（17）：`d := alloc(8·(1+s2))`；`M[d+0] := s1`（tag）；payload 由后续 `IR_STORE_FIELD(ai+1)` 填充。**tag = 变体名驻留字符串索引**（match 生成也按名字索引比较——ir_gen L1382-1396）。对照：CompCert 无运行时枚举（C 枚举 = 编译期常量）——**D：Core 枚举有运行时 tag 布局 `[tag(8B), payload...]`**；依赖跨模块稳定的字符串驻留。ELF 用 `mov qword [r10+0], imm32`（tag 为符号扩展 imm32，变体数 ≤ 16 无影响）。
 - **IR_LOAD_ENUM_TAG**（23）：`d := M[ρ(s1)+0]`（读 tag）。对照同上。
-- interp：MAKE_ENUM/LOAD_ENUM_TAG 均为**值复制**（枚举值 = 名字索引，无堆布局）——解释器内部自洽的近似表示；**BC13 ✅ 已修复（2026-08-17，第四轮 F13）**：interp 已按堆布局实现 MAKE_ENUM/STORE_FIELD（带 payload 枚举不再把名字索引当地址写）——修复前带 payload 枚举在 interp 中损坏（仅 tag 枚举可工作）。
+- interp：MAKE_ENUM/LOAD_ENUM_TAG 均为**值复制**（枚举值 = 名字索引，无堆布局）——解释器内部自洽的近似表示；**BC13 [ok] 已修复（2026-08-17，第四轮 F13）**：interp 已按堆布局实现 MAKE_ENUM/STORE_FIELD（带 payload 枚举不再把名字索引当地址写）——修复前带 payload 枚举在 interp 中损坏（仅 tag 枚举可工作）。
 - **IR_DYN_PACK**（43）：`M[d+0] := ρ(s1)`；`M[d+8] := s2`（tag = 类型索引）——dyn 变量占 16 字节双槽。
 - **IR_DYN_TAG**（41）：`d := M[ρ(s1)+8]`。**IR_DYN_VAL**（42）：`d := M[ρ(s1)+0]`。
-- **IR_DYN_DISPATCH**（44）：按 dyn tag 分发到已知类型处理器，未知 tag → 错误。ELF 现为占位实现：int/bool/str 三档 compare-chain，未知 tag 落入 `xor eax,eax; ret`（**在函数体中间发射 `ret`——语义 = 当前函数返回 0**）；`s2`（方法/函数名）未使用。**BC9 ✅ 已修复（2026-08-17，第四轮 F3）**：rel8 补丁写入加 `pos` 基——修复前补丁写错地址（三个 `je` 的 rel8 全为 0）→ 已知 tag 也坠错误路径 → 函数体中间 ret → 任何 dispatch 都 SIGSEGV（比占位语义更严重）；修复后已知 tag 正确分发，未知 tag 静默 0 为既定占位语义。对照：CompCert 无动态类型——D。
+- **IR_DYN_DISPATCH**（44）：按 dyn tag 分发到已知类型处理器，未知 tag → 错误。ELF 现为占位实现：int/bool/str 三档 compare-chain，未知 tag 落入 `xor eax,eax; ret`（**在函数体中间发射 `ret`——语义 = 当前函数返回 0**）；`s2`（方法/函数名）未使用。**BC9 [ok] 已修复（2026-08-17，第四轮 F3）**：rel8 补丁写入加 `pos` 基——修复前补丁写错地址（三个 `je` 的 rel8 全为 0）→ 已知 tag 也坠错误路径 → 函数体中间 ret → 任何 dispatch 都 SIGSEGV（比占位语义更严重）；修复后已知 tag 正确分发，未知 tag 静默 0 为既定占位语义。对照：CompCert 无动态类型——D。
 
 ### 2.7 并发 / 流 / 惰性（对照：CompCert 无，全部为 D 设计差异）
 
 - **IR_SPAWN**：见 2.5。
-- **IR_YIELD**（28）：语义 = **向 flow 消费者通道发射 `ρ(s1)`**（ast.cr L557）。**BC8 ✅ 已修复（2026-08-17，第四轮 F5）**：ELF 改 **eager 值传递近似**（`d := ρ(s1)`，不再 `call sched_yield()`——修复前实现与定义语义不符且未导入符号 rel32=0 崩溃）；interp 补 `d >= 0` 守卫（修复前发射恒 dest=-1 → `g_ir_vals[-8]` 堆下溢写，静默 UB）。三方一致为 eager 近似（D：单线程模式的既定近似）；flow fn 语法已修（parser 不再把 T_FN 当函数名）。
+- **IR_YIELD**（28）：语义 = **向 flow 消费者通道发射 `ρ(s1)`**（ast.cr L557）。**BC8 [ok] 已修复（2026-08-17，第四轮 F5）**：ELF 改 **eager 值传递近似**（`d := ρ(s1)`，不再 `call sched_yield()`——修复前实现与定义语义不符且未导入符号 rel32=0 崩溃）；interp 补 `d >= 0` 守卫（修复前发射恒 dest=-1 → `g_ir_vals[-8]` 堆下溢写，静默 UB）。三方一致为 eager 近似（D：单线程模式的既定近似）；flow fn 语法已修（parser 不再把 T_FN 当函数名）。
 - **IR_AWAIT**（29）：语义 = 阻塞直到 future 就绪，`d` = 结果。ELF/interp 均为值复制（eager 近似，已文档化）——D：单线程模式的既定近似。
 - **IR_LAZY_THUNK**（46）：`d` = 惰性包装（s1 = 表达式求值）。**IR_LAZY_FORCE**（47）：`d` = 强求结果。两者当前均 eager 近似（值传递，ELF/interp 一致）——D：惰性求值尚未落地（lazy 设计文档），IR 保留显式 thunk 形态以便迁移。
 
@@ -277,23 +277,23 @@ load/store（对照 `Mem.load`/`Mem.store` Memory.v:L428/L531 + `valid_access` L
 
 | # | 位置 | 现象 | 依据 | 状态（2026-08-17） |
 |---|---|---|---|---|
-| **BC-I2F** | instr.cr L352-363 | **IR_I2F 的 `cvtsi2sd` 缺 REX.W**：`F2 0F 2A`（32 位操作数）→ `\|a\|≥2³¹` 的 int64→float 截断为低 32 位符号扩展（如 2⁴⁰ → 0.0）。IR_F2I 有 `F2 48 0F 2C` 对照可见遗漏 | 本表 2.3；CompCert `Ofloatoflong`（Op.v:L438）语义对照 | ✅ 已修复（2026-08-17，第四轮 F7：`e2_sd_cvt` 补 REX.W） |
-| BC1 | instr.cr L825-836（IR_SPAWN `name_ni := s1`） | SPAWN 操作数约定错位：发射方/interp 用 `s3`=函数名、`s1`=首参；ELF 拿 `s1`（参数变量索引）当函数名查表；ast.cr L556 注释与二者皆不同 | 本表 2.5；ir_gen.cr L871 vs instr.cr L828 | ✅ 已修复（2026-08-17，第四轮 F4：统一 s3=函数名 + SysV 参数装载） |
-| BC2 | bootstrap/corec/backend/interpreter.py L108 | 整数除/模截断方向：Python `//` 向下取整 vs 契约向零截断（ELF `idiv` ✓，CompCert `Z.quot` ✓）——负除数程序在 bootstrap 与 ELF 下结果不同 | 本表 2.2；Values.v L727 / Integers.v L193 | ✅ 已修复（2026-08-17，第四轮 F10：abs+符号向零截断，补四组负操作数回归） |
+| **BC-I2F** | instr.cr L352-363 | **IR_I2F 的 `cvtsi2sd` 缺 REX.W**：`F2 0F 2A`（32 位操作数）→ `\|a\|≥2³¹` 的 int64→float 截断为低 32 位符号扩展（如 2⁴⁰ → 0.0）。IR_F2I 有 `F2 48 0F 2C` 对照可见遗漏 | 本表 2.3；CompCert `Ofloatoflong`（Op.v:L438）语义对照 | [ok] 已修复（2026-08-17，第四轮 F7：`e2_sd_cvt` 补 REX.W） |
+| BC1 | instr.cr L825-836（IR_SPAWN `name_ni := s1`） | SPAWN 操作数约定错位：发射方/interp 用 `s3`=函数名、`s1`=首参；ELF 拿 `s1`（参数变量索引）当函数名查表；ast.cr L556 注释与二者皆不同 | 本表 2.5；ir_gen.cr L871 vs instr.cr L828 | [ok] 已修复（2026-08-17，第四轮 F4：统一 s3=函数名 + SysV 参数装载） |
+| BC2 | bootstrap/corec/backend/interpreter.py L108 | 整数除/模截断方向：Python `//` 向下取整 vs 契约向零截断（ELF `idiv` ✓，CompCert `Z.quot` ✓）——负除数程序在 bootstrap 与 ELF 下结果不同 | 本表 2.2；Values.v L727 / Integers.v L193 | [ok] 已修复（2026-08-17，第四轮 F10：abs+符号向零截断，补四组负操作数回归） |
 | BC3 | ast.cr L282-283 + instr.cr L495-512 | OP_SHL/OP_SHR 无发射方（死路径）；若启用，OP_SHR 用 `shr`（逻辑）而契约方向未定（CompCert `Oshrl` 为算术） | 本表 2.2 | 死路径已确认（第四轮 §2）——启用时按契约补语义 |
-| BC4 | interp.cr L96-123 | 解释器对 TI_FLOAT 无分支：float 算术按整数位模式运算（结果错误）；op 24/30/31/32/33/41-45/49/50 未实现（静默跳过）；`IR_STORE_PTR` 槽拷贝错位（BC12 细化） | 本表 2.2/2.3/2.4 | ✅ 已修复（2026-08-17，第四轮 F9：TI_FLOAT 走 f64.cr 软件实现；其余 opcode 随 BC11 补齐） |
-| BC5 | instr.cr L460-481 | apx 路径 `==`/`!=` 对 NaN：`sete`/`setne` 直接读 ZF——NaN==NaN 得 1（IEEE/CompCert 为 false） | 本表 2.2 浮点路径；Asm.v compare_floats L453-463 | ✅ 已修复（2026-08-17，第四轮 F8：`setnp+sete`/`setp+setne`，对照 Asmgen.v L260） |
-| **BC6** | ext_safety.cr L8-31 + ir_gen.cr L1551/L1557 + instr.cr L1219-1230 | **直接数组索引的运行时越界守卫双重死亡**：①插件注册被 `CORE_SAFE=1` 门控；②ir_gen 恒传 `arr_len_lit=-1` → `IR_BOUNDS_CHECK` 永不发射。`arr[i]`（非指针路径）越界读写无任何检查（与 `&arr[i]` 的 provenance 检查链不对称）。另外 ELF 编码按变量槽加载 s2，与「字面量长度」发射约定冲突（若修复发射方需同步修编码）。**安全检查类，高优先级** | 本表 2.4 | ✅ 已修复（2026-08-17，第四轮 F1：CORE_SAFE 默认开 + 注册表布局修复 + 真实长度 + 写路径钩子 + s2 字面量加载） |
-| BC7 | ir_gen.cr L1546 + instr.cr L1202-1212 | IR_SLICE 只算指针；high 界（s3）不进入运行时值——slice 解引用无长度守卫 | 本表 2.4 | ✅ 部分修复（2026-08-17，第四轮 F11：切片字面量界侧表 + 创建期检查 + provenance 传播）；运行时 high 界需 slice 类型（IR 形态演进，设计项，见 TODO） |
-| BC8 | instr.cr L1265-1274 | IR_YIELD 实现为 `call sched_yield()` 且忽略 s1——与定义语义「向消费者通道发射值」不符；interp 复制、ELF 让出 CPU，三方不一致 | 本表 2.7 | ✅ 已修复（2026-08-17，第四轮 F5：ELF 改 eager 值传递近似，interp 补 d≥0 守卫，三方一致） |
-| BC9 | instr.cr L1304-1364 | IR_DYN_DISPATCH 未知 tag → `xor eax,eax; ret`（函数体中间 ret，语义 = 整个函数返回 0）；`s2` 未用 | 本表 2.6 | ✅ 已修复（2026-08-17，第四轮 F3：rel8 补丁加 pos 基——修复前已知 tag 也崩溃（SIGSEGV），现已知 tag 正确分发） |
-| BC10 | ir_gen.cr L758 + instr.cr L1048-1059 | IR_STORE_PTR 发射时 dest=-1/s3=0 → ELF 边界检查恒跳过；仅 provenance_verify 后置改写才启用——非 build 流程/多目标时无检查 | 本表 2.4 | ✅ 已修复（2026-08-17，第四轮 F6：s3=0 保留 null 陷阱（拆出 `e2_ptr_null_check`），修复前连 null 陷阱都没有） |
-| BC11 | interp.cr | 解释器未实现 12 个 opcode（24/30/31/32/33/41/42/43/44/45/49/50）——`run` 模式静默错值 | 本表 2.4-2.7 | ✅ 已修复（2026-08-17，第四轮波 2：12 个 opcode 全部补齐——SLICE/BOUNDS_CHECK/ADDR_INDEX/ARENA no-op/DYN 双槽/DISPATCH 与 CALL_EXTERN 显式报错/I2F/F2I f64 路径） |
-| BC12 | interp.cr L211 | IR_STORE_PTR 解释为 `w64(slot[s1], slot[d])`（槽拷贝、源在 d），与 ELF `M[ρ(s1)] := ρ(s2)` 不一致；d=-1 时恒 no-op | 本表 2.4 | ✅ 已修复（2026-08-17，第四轮 F12：改 `ir_interp_deref_write`，与 ELF 操作数一致） |
-| BC13 | interp.cr L192 | 枚举 payload：MAKE_ENUM/LOAD_ENUM_TAG 值复制 + STORE_FIELD 把名字索引当地址写 → 带 payload 枚举损坏 | 本表 2.6 | ✅ 已修复（2026-08-17，第四轮 F13：interp 按堆布局实现 MAKE_ENUM/STORE_FIELD） |
-| BC14 | instr.cr L905-915（IR_ALLOC_ARRAY）、L885-903（ALLOC_STRUCT） | 分配尺寸经 `mov edi, imm32`（0xBF 零扩展写 32 位寄存器）：≥2³² 按 mod 2³² 回绕（[2³¹, 2³²) 零扩展编码正确——原「高 32 位丢失」表述证伪） | 本表 2.4 | ✅ 已修复（2026-08-17，第四轮 F14：改 `movabs rdi, imm64`，溢出按 OOM；同族 F17 一并修复） |
+| BC4 | interp.cr L96-123 | 解释器对 TI_FLOAT 无分支：float 算术按整数位模式运算（结果错误）；op 24/30/31/32/33/41-45/49/50 未实现（静默跳过）；`IR_STORE_PTR` 槽拷贝错位（BC12 细化） | 本表 2.2/2.3/2.4 | [ok] 已修复（2026-08-17，第四轮 F9：TI_FLOAT 走 f64.cr 软件实现；其余 opcode 随 BC11 补齐） |
+| BC5 | instr.cr L460-481 | apx 路径 `==`/`!=` 对 NaN：`sete`/`setne` 直接读 ZF——NaN==NaN 得 1（IEEE/CompCert 为 false） | 本表 2.2 浮点路径；Asm.v compare_floats L453-463 | [ok] 已修复（2026-08-17，第四轮 F8：`setnp+sete`/`setp+setne`，对照 Asmgen.v L260） |
+| **BC6** | ext_safety.cr L8-31 + ir_gen.cr L1551/L1557 + instr.cr L1219-1230 | **直接数组索引的运行时越界守卫双重死亡**：①插件注册被 `CORE_SAFE=1` 门控；②ir_gen 恒传 `arr_len_lit=-1` → `IR_BOUNDS_CHECK` 永不发射。`arr[i]`（非指针路径）越界读写无任何检查（与 `&arr[i]` 的 provenance 检查链不对称）。另外 ELF 编码按变量槽加载 s2，与「字面量长度」发射约定冲突（若修复发射方需同步修编码）。**安全检查类，高优先级** | 本表 2.4 | [ok] 已修复（2026-08-17，第四轮 F1：CORE_SAFE 默认开 + 注册表布局修复 + 真实长度 + 写路径钩子 + s2 字面量加载） |
+| BC7 | ir_gen.cr L1546 + instr.cr L1202-1212 | IR_SLICE 只算指针；high 界（s3）不进入运行时值——slice 解引用无长度守卫 | 本表 2.4 | [ok] 部分修复（2026-08-17，第四轮 F11：切片字面量界侧表 + 创建期检查 + provenance 传播）；运行时 high 界需 slice 类型（IR 形态演进，设计项，见 TODO） |
+| BC8 | instr.cr L1265-1274 | IR_YIELD 实现为 `call sched_yield()` 且忽略 s1——与定义语义「向消费者通道发射值」不符；interp 复制、ELF 让出 CPU，三方不一致 | 本表 2.7 | [ok] 已修复（2026-08-17，第四轮 F5：ELF 改 eager 值传递近似，interp 补 d≥0 守卫，三方一致） |
+| BC9 | instr.cr L1304-1364 | IR_DYN_DISPATCH 未知 tag → `xor eax,eax; ret`（函数体中间 ret，语义 = 整个函数返回 0）；`s2` 未用 | 本表 2.6 | [ok] 已修复（2026-08-17，第四轮 F3：rel8 补丁加 pos 基——修复前已知 tag 也崩溃（SIGSEGV），现已知 tag 正确分发） |
+| BC10 | ir_gen.cr L758 + instr.cr L1048-1059 | IR_STORE_PTR 发射时 dest=-1/s3=0 → ELF 边界检查恒跳过；仅 provenance_verify 后置改写才启用——非 build 流程/多目标时无检查 | 本表 2.4 | [ok] 已修复（2026-08-17，第四轮 F6：s3=0 保留 null 陷阱（拆出 `e2_ptr_null_check`），修复前连 null 陷阱都没有） |
+| BC11 | interp.cr | 解释器未实现 12 个 opcode（24/30/31/32/33/41/42/43/44/45/49/50）——`run` 模式静默错值 | 本表 2.4-2.7 | [ok] 已修复（2026-08-17，第四轮波 2：12 个 opcode 全部补齐——SLICE/BOUNDS_CHECK/ADDR_INDEX/ARENA no-op/DYN 双槽/DISPATCH 与 CALL_EXTERN 显式报错/I2F/F2I f64 路径） |
+| BC12 | interp.cr L211 | IR_STORE_PTR 解释为 `w64(slot[s1], slot[d])`（槽拷贝、源在 d），与 ELF `M[ρ(s1)] := ρ(s2)` 不一致；d=-1 时恒 no-op | 本表 2.4 | [ok] 已修复（2026-08-17，第四轮 F12：改 `ir_interp_deref_write`，与 ELF 操作数一致） |
+| BC13 | interp.cr L192 | 枚举 payload：MAKE_ENUM/LOAD_ENUM_TAG 值复制 + STORE_FIELD 把名字索引当地址写 → 带 payload 枚举损坏 | 本表 2.6 | [ok] 已修复（2026-08-17，第四轮 F13：interp 按堆布局实现 MAKE_ENUM/STORE_FIELD） |
+| BC14 | instr.cr L905-915（IR_ALLOC_ARRAY）、L885-903（ALLOC_STRUCT） | 分配尺寸经 `mov edi, imm32`（0xBF 零扩展写 32 位寄存器）：≥2³² 按 mod 2³² 回绕（[2³¹, 2³²) 零扩展编码正确——原「高 32 位丢失」表述证伪） | 本表 2.4 | [ok] 已修复（2026-08-17，第四轮 F14：改 `movabs rdi, imm64`，溢出按 OOM；同族 F17 一并修复） |
 | BC15 | instr.cr L556-557 | IR_BINARY `OP_AND`/`OP_OR` 实现为按位 and/or：非 0/1 输入时与逻辑语义发散（当前无发射方，低优先级） | 本表 2.2 | 死路径已确认（第四轮 §2）——ir_gen 分支化短路（D11），启用时按契约补语义 |
-| BC16 | checker.cr L2065 + ext_safety.cr L20-25 | 常量索引（`arr[100]`）的编译期越界检查缺失：checker 只查类型不查界；ext_safety 的编译期分支同样死于 BC6 的门控（`arr_len_lit` 恒 -1） | 本表 2.4 | ✅ 已修复（2026-08-17，第四轮 F2：checker 编译期常量界检查，R002/TK05/TK06 硬错误门） |
+| BC16 | checker.cr L2065 + ext_safety.cr L20-25 | 常量索引（`arr[100]`）的编译期越界检查缺失：checker 只查类型不查界；ext_safety 的编译期分支同样死于 BC6 的门控（`arr_len_lit` 恒 -1） | 本表 2.4 | [ok] 已修复（2026-08-17，第四轮 F2：checker 编译期常量界检查，R002/TK05/TK06 硬错误门） |
 | BC17 | — | `EC_R_DIV_ZERO`/`EC_R_OVERFLOW`/`EC_R_LOSSY_CONVERT`/`EC_R_OOB`（ast.cr L483-486）全仓库无引用——运行时错误不产生诊断（依赖硬件陷阱） | 本表 0/2.4 | 死路径已确认（第四轮 §2，预留常量）——dex 迁移时按 R001/R003/R004 启用 |
 
 ## 6. 自检
@@ -306,7 +306,7 @@ load/store（对照 `Mem.load`/`Mem.store` Memory.v:L428/L531 + `valid_access` L
 - [x] dex（S=10⁶ 定点）与 apx（binary64）语义已覆盖（§4）
 - [x] 只读性：本任务未修改任何 Core 代码与 ~/compcert/
 - [x] 质量审查修正（2026-08-16 复核后）：Mem.alloc 行号更正（Memory.v:L348，非 L531）；BC14 零扩展措辞更正；S=10⁶ 标注为契约显式决策；D11 短路措辞更正；BC-F2I Intel SDM 措辞更正；Ccompf NaN 补 Op.v 层 None 与 Asmgen.v:L260 `Cond_and Cond_np Cond_e` 引用；Onotl/Values.v shll/shrl/ext_mgr 行号与引用归属校正
-- [x] 第四轮修复同步（2026-08-17）：F1-F20 全部修复合入后，本表已同步修复后状态（✅ 标记 + BC 表状态列 + 正文过时表述更新）；契约修正 3 处见文件末尾「修复记录」
+- [x] 第四轮修复同步（2026-08-17）：F1-F20 全部修复合入后，本表已同步修复后状态（[ok] 标记 + BC 表状态列 + 正文过时表述更新）；契约修正 3 处见文件末尾「修复记录」
 
 ## 7. 修复记录（2026-08-17，第四轮）
 
