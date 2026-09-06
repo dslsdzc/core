@@ -195,7 +195,7 @@ fn divide(a: int, b: int) -> int
 
 | 领域 | 用到的能力层 | 图结构特征 | 部署配置 | 状态 |
 |------|------------|-----------|---------|------|
-| **系统编程**（内核/驱动/协议栈） | ①②③④ + .crasm | 全部结构 | 裸机/无 OS | 能力已实现 |
+| **系统编程**（内核/驱动/协议栈） | ①②③④ + unsafe/HIT | 全部结构 | 裸机/无 OS | 能力已实现 |
 | **嵌入式与实时**（无 MMU/确定性） | ①③ | DAG/静态图 | 静态分配/无 GC | 能力已实现 |
 | **并发服务**（服务器/网络后端） | ③④ | 动态图 | 多核/OS 线程 | 已实现（单 M 端到端） |
 | **数据处理与科学计算** | ①③ | DAG | 通用 | 已实现（dex/数组） |
@@ -212,7 +212,7 @@ fn divide(a: int, b: int) -> int
 - `unsafe` 块：图边界入口（外部地址、FFI、无 provenance 的场景）
 - @ 内建：`@sizeOf(T)`、`@alignOf(T)`、`@fields(T)`、`@comptime`、`@inline`
 - 内存控制：`alloc_at(addr, size, align)` 声明式放置、布局控制
-- `.crasm` 汇编层：跨平台统一指令集 + 无限虚拟寄存器 + 平台映射表
+- 硬件接口(HIT):MMIO/特权/中断经 unsafe + HIT extern 事件(独立汇编格式 .crasm 已废弃,见 maintainer/adr/adr-0001)
 
 **心智模型**：字节级控制 + 图边界——指针和 C 一样自由，安全由 HDFG 自动验证（provenance/region/越界三 pass）；unsafe 不是"关掉验证"，是"标注图边界入口"。
 
@@ -223,7 +223,7 @@ unsafe {
 }
 ```
 
-**关联**：`docs/maintainer/design/pointer-model.md`、`docs/maintainer/design/memory-model.md`、`docs/maintainer/design/crasm.md`
+**关联**：`docs/maintainer/design/pointer-model.md`、`docs/maintainer/design/memory-model.md`、`docs/maintainer/adr/adr-0001-corespec-crasm-retired.md`(crasm 废弃决策)
 
 ### 示例：嵌入式与实时
 
