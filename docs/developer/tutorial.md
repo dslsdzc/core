@@ -39,7 +39,7 @@ fn sum(a: [int]) -> int {
 }
 ```
 
-**关联**：`docs/language/syntax.md`、`docs/design/execution-model.md` §5.1
+**关联**：`docs/developer/syntax.md`、`docs/maintainer/design/execution-model.md` §5.1
 
 ---
 
@@ -75,7 +75,7 @@ fn counter() -> int {
 }
 ```
 
-**关联**：`docs/design/execution-model.md` §5.2、`docs/superpowers/specs/2026-08-08-region-cfg-design.md`（region 结构细节）
+**关联**：`docs/maintainer/design/execution-model.md` §5.2、`docs/superpowers/specs/2026-08-08-region-cfg-design.md`（region 结构细节）
 
 ---
 
@@ -113,7 +113,7 @@ unsafe {
 }
 ```
 
-**关联**：`docs/design/pointer-model.md`、`docs/design/memory-model.md`
+**关联**：`docs/maintainer/design/pointer-model.md`、`docs/maintainer/design/memory-model.md`
 
 ---
 
@@ -152,13 +152,13 @@ fn main() -> int {
 }
 ```
 
-**关联**：`docs/proposals/concurrency.md`、`docs/design/execution-model.md` §5.3
+**关联**：`docs/maintainer/proposals/concurrency.md`、`docs/maintainer/design/execution-model.md` §5.3
 
 ---
 
 ## 形式规约（横切能力）
 
-> [注意] **未完成**：本节为设计预览。规约体系当前为**部分落地**——`requires`/`ensures` 已入 .cr 语法参与静态检查（见 `docs/language/syntax.md` 第十章；2026-09 起独立 `.corespec` 格式退役，语法归口 `grammar/core.ebnf`），但验证管线（翻译桥、CIC 内核、证书）均**未实现**，当前编译器不消费规约。实现推进见 `docs/design/spec-design.md` 与 `TODO.md`。
+> [注意] **未实现**：本节为设计预览。规约形态 2026-09 定稿为 `#check`/`#ensure` 标注(与 #pure/#terminating 标签同族,见 `docs/developer/syntax.md` 第十章与 `docs/maintainer/design/spec-design.md`;独立 `.corespec` 格式已退役,见 adr/adr-0001),但**规约语法与验证管线均未实现**——当前编译器不消费规约。实现推进见 spec-design.md 与 TODO.md。
 
 **目标**：理解"行为契约"——程序 = 实现 + 保证。
 
@@ -168,7 +168,7 @@ fn main() -> int {
 - `#check(...)`：前置条件
 - `#ensure(...)`：后置条件（可引用 `result`、`old(x)`）
 - `spec fn`：检查函数（用 Core 写的纯逻辑函数）
-- 函数内规约（`requires`/`ensures`，.cr 语法内表达——独立规约格式已退役）
+- 函数内规约(`#check`/`#ensure` 标注,.cr 内表达——独立规约格式已退役)
 
 **图结构**：图上的约束——规约约束挂载为图的标注（TagNode/.csr 方向，设计态），通过符号引用精确关联 HDFG 节点。
 
@@ -185,7 +185,7 @@ fn divide(a: int, b: int) -> int
 }
 ```
 
-**关联**：`docs/design/spec-design.md`、`docs/language/syntax.md` 第十章、`docs/adr/adr-0001-corespec-crasm-retired.md`(格式退役决策)、`docs/superpowers/specs/`(验证管线设计稿)
+**关联**：`docs/maintainer/design/spec-design.md`、`docs/developer/syntax.md` 第十章、`docs/maintainer/adr/adr-0001-corespec-crasm-retired.md`(格式退役决策)、`docs/superpowers/specs/`(验证管线设计稿)
 
 ---
 
@@ -223,13 +223,13 @@ unsafe {
 }
 ```
 
-**关联**：`docs/design/pointer-model.md`、`docs/design/memory-model.md`、`docs/design/crasm.md`
+**关联**：`docs/maintainer/design/pointer-model.md`、`docs/maintainer/design/memory-model.md`、`docs/maintainer/design/crasm.md`
 
 ### 示例：嵌入式与实时
 
 无 MMU 目标、确定性延迟——图锚定区域（静态路径纯 bump 零碎片、无 GC 停顿）+ 部署配置（`allocation = "static"`）是核心卖点。
 
-**关联**：`docs/design/execution-model.md` §3（部署配置）、`docs/design/memory-model.md`
+**关联**：`docs/maintainer/design/execution-model.md` §3（部署配置）、`docs/maintainer/design/memory-model.md`
 
 ---
 

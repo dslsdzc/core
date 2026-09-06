@@ -1,6 +1,7 @@
 # Core 规约系统设计（v2 — CIC 内核 + SMT 证书架构）
 
-> 定位：受众 = 维护者；状态 = active
+> 定位：受众 = 维护者(实现规约系统)+ 学术(验证架构);状态 = active(设计定稿,未实现——实现状态以 TODO.md 与 plans/ 为准)。
+> 语法形态 2026-09 定稿:#check/#ensure 标注(与 #pure 标签同族),.cr 内联书写——本文 .csp 段落均为自动生成物方向的设计稿。
 
 > 规约 = 图上的约束。表达力 = CIC（归纳构造演算）。自动化 = SMT 证书外包。
 
@@ -65,7 +66,7 @@ CIC 提供 Coq 级别的全部表达力，逐项对应：
 
 ## 四、文件格式
 
-> **退役同步注记(2026-09-06,ADR-0001)**:独立规约源码格式 `.corespec` 已退役——规约源 = `.cr` 内联(requires/ensures/标签),下方 `.csp` 段落为编译器生成物方向的设计稿,落地时以"规约 = .cr 语法唯一表达"为准则重新定案;`.csr`(约束二进制序列化)与图标注机制不受影响。
+> **退役同步注记(2026-09-06,ADR-0001)**:独立规约源码格式 `.corespec` 已退役——规约源 = `.cr` 内联(#check/#ensure 标注/标签,2026-09 语法定稿),下方 `.csp` 段落为编译器生成物方向的设计稿,落地时以"规约 = .cr 语法唯一表达"为准则重新定案;`.csr`(约束二进制序列化)与图标注机制不受影响。
 
 ### `.cr` — 实现源码（也可内联规约）
 
@@ -140,7 +141,7 @@ spec fn vec_invariant[T](v: Vec[T]) -> bool {
 
 ## 五、编译器自动推导（零门槛的核心）
 
-编译器从 `.cir` 图结构中自动推导性质，写入 `.csr`，不需要用户写任何东西。
+编译器从 `.cir` 图结构中自动推导性质(标签),输出进约束 IR(.csr),不需要用户写任何东西。
 
 ### 自动推导的标签
 
@@ -157,7 +158,7 @@ spec fn vec_invariant[T](v: Vec[T]) -> bool {
 
 ### 自动生成的检查函数（骨架）
 
-编译器识别常见图模式，自动生成检查函数代码。用户可以在 `.csp` 中 `#use` 或忽略。
+编译器识别常见图模式，自动生成检查函数代码。用户可以在规约区(.cr 内联或编译器生成的规约骨架)中 `#use` 或忽略(生成物形态见 §四 注记)。
 
 ```
 fn sort(a: [int]) -> [int]
@@ -193,7 +194,7 @@ fn transfer(from: &mut Account, to: &mut Account, amt: int)
 使用 `#` 前缀，与 `@`（外部项目引用）区分。
 
 ```core
-// 在 .cr 或 .csp 中使用
+// 在 .cr 中使用(设计定稿:规约内联于 .cr)
 fn foo() -> int
     #pure
     #check(x > 0)
@@ -348,11 +349,11 @@ Core 的 `int` 是无上限数学整数（2026-08-23 修订：i64 快路径 + �
 
 ## 十一、验证器：CIC 内核 + SMT 证书（v2 新增）
 
-> 内核选型与融合架构的完整论证见 `docs/design/verifier-kernel.md`（理论谱系、2025–2026 论文扫描、融合决策、自举路线）。
+> 内核选型与融合架构的完整论证见 `docs/academic/verifier-kernel.md`（理论谱系、2025–2026 论文扫描、融合决策、自举路线）。
 
 ### 内核
 
-CIC 类型检查器（Coq 内核级别：约数千行的信任根）。初期绑定成熟实现，后期自举为 Core 版（见 §14 与 `docs/design/verifier-kernel.md`）。
+CIC 类型检查器（Coq 内核级别：约数千行的信任根）。初期绑定成熟实现，后期自举为 Core 版（见 §14 与 `docs/academic/verifier-kernel.md`）。
 
 ### SMT 通道（证书架构，SMTCoq 模式）
 
@@ -452,18 +453,15 @@ corec build file.cr
   → tokenize/parse/check/ir_gen/lower
   → file.cir + file.ccr
 
-# 编译 + 规约
+# 编译 + 规约(设计定稿形态;.csp 独立文件概念已退役,见 §四 注记)
 corec build file.cr -s
   → tokenize/parse/check/ir_gen/lower
   → file.cir + file.ccr
-  → 自动生成/更新 file.csp
-      ├── 所有函数的声明骨架
-      ├── 编译器自动推导的标签（从 .cir 图结构分析）
-      └── 用户上次手写的规约（保留）
-  → 解析 file.csp → spec ir_gen → 输出 file.csr
-      ├── DFNode[]（指令节点 + 规约约束节点）
-      ├── TagNode[]（约束元数据：check/ensure/invariant/标签）
-      └── 符号引用表（指向 .cir 中的函数/变量）
+  → 解析 .cr 内联规约(#check/#ensure/spec fn)+ 编译器自动推导标签
+  → 输出 file.csr(规约约束 IR)
+      ├── DFNode[](指令节点 + 规约约束节点)
+      ├── TagNode[](约束元数据:check/ensure/invariant/标签)
+      └── 符号引用表(指向 .cir 中的函数/变量)
 
 # 验证（外部工具）
 verify file.csr

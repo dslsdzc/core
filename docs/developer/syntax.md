@@ -69,7 +69,7 @@ auto fileid move self in None Some unit
 - `self` 是词法关键字，用于方法接收者（`self` / `&self` / `&mut self`）。
 - `Self` 不是词法关键字——它是接口/方法签名中的上下文类型名，按标识符解析，由 checker 按上下文处理。
 - `comptime` 不是关键字（`@comptime` 是 @ 内建原语）。
-- `requires` / `ensures` / `old` / `result` 不是词法关键字——它们是规约层语法（见第 10 章;语法归口 `grammar/core.ebnf`,2026-09 起 .corespec 独立格式退役）。
+- `#check`/`#ensure`/`#tag`/`spec fn` 不是词法关键字——规约是标注层语法(第 10 章;设计定稿 = spec-design.md;实现态:parser 未支持)。
 
 ### 2.4 字面量
 
@@ -505,14 +505,14 @@ type Point3 = (dex, dex, dex);
 
 ## 十、规约
 
-规约（requires / ensures）与函数体并列，可选编写，参与静态检查，不影响运行时性能。规约语法详见 `docs/design/spec-design.md`;语法位置自 2026-09 起并入 `grammar/core.ebnf`(`.corespec` 独立格式退役,见 `docs/adr/adr-0001-corespec-crasm-retired.md`;`grammar/corespec.ebnf` 为迁移期残留)。
+规约(#check/#ensure 标注,2026-09 语法定稿——与 #pure/#terminating 自动推导标签同族)与函数体并列,可选编写。设计定稿见 docs/maintainer/design/spec-design.md;语法归口 grammar/core.ebnf(并入为迁移事项;.corespec 独立格式已退役,见 docs/maintainer/adr/adr-0001-corespec-crasm-retired.md)。**实现状态:设计态——lexer/parser 尚未实现规约语法**,示例为定稿形态。
 
-### 10.1 requires / ensures
+### 10.1 #check / #ensure
 
 ```core
 fn divide(a: int, b: int) -> int?
-    requires b != 0
-    ensures result.is_some() implies (a / b) == result.unwrap()
+    #check(b != 0)
+    #ensure(result.is_some() implies (a / b) == result.unwrap())
 {
     if b == 0 {
         return None;
@@ -521,12 +521,13 @@ fn divide(a: int, b: int) -> int?
 }
 ```
 
-- `requires` —— 调用方必须满足的前提条件
-- `ensures` —— 保证的后置条件；`result` 指返回值，`old(expr)` 指函数入口时表达式的值
+- `#check(...)` —— 调用方必须满足的前提条件
+- `#ensure(...)` —— 保证的后置条件;`result` 指返回值,`old(expr)` 指函数入口时表达式的值
+- `spec fn` —— 用 Core 写的纯检查函数(验证标准,见 spec-design.md §七)
 
 ### 10.2 where 值约束
 
-`where` 实现内联轻量前置条件，与 `requires` 同层：
+`where` 实现内联轻量前置条件(行内形态,与 #check 同层;定稿形态以 spec-design 为准):
 
 ```core
 fn sqrt(x: dex) -> dex where x >= 0 {
