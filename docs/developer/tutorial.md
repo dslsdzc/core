@@ -20,7 +20,7 @@ Core 是少数不能归入"第一门语言"或"第 N 门语言"二元分类的�
 - 循环：`for x in arr`、`for i in 0..n`
 - 数组 `[T]`、结构体 `struct`
 
-**图结构**：DAG——无环，按拓扑序串行执行。
+**图模型**：DAG——无环,值按依赖顺序流动;不依赖同一份数据的部分互不干扰。
 
 **心智模型**：顺序执行——执行的每一步严格按文本顺序，所有变量值完全可观测、可单步。
 
@@ -52,9 +52,9 @@ fn sum(a: [int]) -> int {
 - `while` 条件循环
 - 状态保持：可变变量跨迭代存活
 
-**图结构**：带反馈环的静态图（loop/for 嵌套 region，边界表达迭代与终止依赖）。
+**图模型**：带环的静态图——loop/for 让值流绕圈,循环的"再次执行"由图的环表达。
 
-**心智模型**：循环调度——每个周期内循环体按拓扑序执行，周期结束回到 region 头部触发下一轮迭代。程序开始出现时间维度。
+**心智模型**：循环 = 图中的环——每轮迭代值沿环流动一周;程序开始出现时间维度(状态跨迭代存活)。
 
 **里程碑**：能写计数器、状态机雏形、轮询循环。
 
@@ -75,7 +75,7 @@ fn counter() -> int {
 }
 ```
 
-**关联**：`docs/maintainer/design/execution-model.md` §5.2、`docs/superpowers/specs/2026-08-08-region-cfg-design.md`（region 结构细节）
+**关联**：`docs/maintainer/design/execution-model.md` §三(深入:执行模型与图的实现)
 
 ---
 
@@ -85,13 +85,13 @@ fn counter() -> int {
 
 **引入的概念**：
 - 裸指针：`*T` 类型、`&x` 取址、`*p` 解引用、`cast<T>(p)` 转换
-- `unsafe` 块：图边界入口（外部地址、FFI、无 provenance 的场景）
+- `unsafe` 块:图边界入口(外部地址、FFI 返回值、无法自动追踪来源的场景)
 - @ 内建：`@sizeOf(T)`、`@alignOf(T)`、`@fields(T)`、`@comptime`、`@inline`
 - 内存控制：`alloc_at(addr, size, align)` 声明式放置
 
-**图结构**：provenance/region——每个指针在 HDFG 上有来源（出生节点）和偏移，解引用点自动验证边界。
+**图模型**：每个指针自带来源(它来自哪次分配/取址)与偏移;解引用时编译器自动核对边界——不需要你标注任何生命周期。
 
-**心智模型**：指针和 C 一样自由，安全由 HDFG 自动验证（provenance/region/越界三 pass）；unsafe 不是"关掉验证"，是"标注图边界入口"——进入图内编译器重新获得追踪权。
+**心智模型**：指针和 C 一样自由;安全由编译器自动验证(来源追踪 + 边界核对)。unsafe 不是"关掉验证",是"声明此处是图边界入口"——一进图内,编译器重新获得追踪权。
 
 **里程碑**：能安全地做指针算术、类型双关、外部地址访问——不需要学 borrow checker。
 
@@ -103,7 +103,7 @@ fn counter() -> int {
 
 ```core
 fn deref(arr: [int], i: int) -> int {
-    p := &arr[i];      // provenance = arr，偏移 = i
+    p := &arr[i];      // 来源 = arr,偏移 = i(编译器自动记录)
     return *p;         // 越界 → 编译期拦截或运行时检查
 }
 
@@ -128,7 +128,7 @@ unsafe {
 - `flow`：可激活的命名子图模板；`yield`：暂停并输出值
 - 通道（chan）：跨执行流传递数据
 
-**图结构**：动态图——go 动态创建节点，拓扑在运行时扩展。
+**图模型**：动态图——go 在运行时长出新的子图,与启动它的代码并行流动。
 
 **心智模型**：节点、边、令牌——从"一行一行执行"平滑过渡到"数据驱动"：执行顺序由数据可用性驱动，而非文本顺序。
 
@@ -209,12 +209,12 @@ fn divide(a: int, b: int) -> int
 
 **新增概念**：
 - 裸指针：`*T` 类型、`&x` 取址、`*p` 解引用、`cast<T>(p)` 转换
-- `unsafe` 块：图边界入口（外部地址、FFI、无 provenance 的场景）
+- `unsafe` 块:图边界入口(外部地址、FFI 返回值、无法自动追踪来源的场景)
 - @ 内建：`@sizeOf(T)`、`@alignOf(T)`、`@fields(T)`、`@comptime`、`@inline`
 - 内存控制：`alloc_at(addr, size, align)` 声明式放置、布局控制
 - 硬件接口(HIT):MMIO/特权/中断经 unsafe + HIT extern 事件(独立汇编格式 .crasm 已废弃,见 maintainer/adr/adr-0001)
 
-**心智模型**：字节级控制 + 图边界——指针和 C 一样自由，安全由 HDFG 自动验证（provenance/region/越界三 pass）；unsafe 不是"关掉验证"，是"标注图边界入口"。
+**心智模型**：字节级控制 + 图边界——指针和 C 一样自由,安全由编译器自动验证;unsafe 是"声明图边界入口",不是"关掉验证"。
 
 ```core
 unsafe {
@@ -239,7 +239,7 @@ unsafe {
 |--------|---------|--------|---------|
 | ① 基础 | 变量、函数、分支、for | DAG | 顺序执行 |
 | ② 结构化控制流 | loop、while | 带反馈环的静态图 | 循环调度 |
-| ③ 指针与内存 | *T、&、unsafe、@内建、alloc_at | provenance/region | 字节级控制 |
+| ③ 指针与内存 | *T、&、unsafe、@内建、alloc_at | 来源追踪 + 自动边界验证 | 字节级控制 |
 | ④ 并发与通信 | go、await、flow、yield、chan | 动态图 | 数据驱动 |
 | 横切：形式规约 | #check/#ensure/spec fn | 图上约束 | 行为契约 |
 
