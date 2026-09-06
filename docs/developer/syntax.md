@@ -192,12 +192,14 @@ Type = BaseType | PathType | RefType | OptionalType | TupleType | ArrayType | Sl
 
 ```core
 pair  : (int, bool);        // 元组
-zeros : [int; 16];          // 数组（长度是常量）
-slice : [int];              // 切片
+zeros : [int; 16];          // 数组(长度是常量)
+slice : [int];              // 切片(无界序列)
 maybe : int?;               // 可选
 ref   : &Point;             // 引用
 mutr  : &mut Point;         // 可变引用
 ```
+
+> 类型形态以 2026-09-01 语法重写定稿为准(计划优先);切片类型的运行时边界完整化(high 界进值)按 TODO 推进,当前编译器的切片操作语义以源码为准。
 
 **接口作类型**：任何接口名可作为类型标注（`PathType`），见第 9 章。
 
