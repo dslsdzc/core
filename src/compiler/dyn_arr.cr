@@ -670,6 +670,12 @@ fn grow_mw_tag_off(needed: int) {
     nb := alloc(nc * 8); _dyncpy(g_x86_mw_tag_off, g_x86_mw_tag_off_cap * 8, nb);
     g_x86_mw_tag_off = nb; g_x86_mw_tag_off_cap = nc; }
 
+fn grow_mw_jo_patch(needed: int) {
+    if needed < g_x86_mw_jo_cap { return; }
+    nc : ., mut = g_x86_mw_jo_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+    nb := alloc(nc * 8); _dyncpy(g_x86_mw_jo_pos, g_x86_mw_jo_cap * 8, nb);
+    g_x86_mw_jo_pos = nb; g_x86_mw_jo_cap = nc; }
+
 fn grow_opt_meta(needed: int) {
     if needed <= g_opt_meta_cap { return; }
     nc : ., mut = g_opt_meta_cap * 2;

@@ -1312,8 +1312,10 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
             inst_idx := ist + ii;
             // HIT 表模式（M1 Task 2）：表映射 op 走 emit_instr_tabled；
             // -1（未映射/形态不支持/无表）落旧路径 emit_instr——混合模式。
+            // int 多字 M1（Task 2）：tagged int add/sub 需溢出跳（jo）——
+            // 表路径（hit_ev 降低不知 tag/无 jo 事件）整条排除落旧路径。
             sz : ., mut = -1;
-            if hit_table_active() != 0 {
+            if hit_table_active() != 0 && mw_int_arith_jo_needed(inst_idx) == 0 {
                 sz = emit_instr_tabled(inst_idx, buf, cp);
             }
             if sz < 0 { sz = emit_instr(inst_idx, buf, cp); }
@@ -1361,6 +1363,23 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
             w8(buf, cp, 93); cp = cp + 1;  // pop rbp
         }
         w8(buf, cp, 195); cp = cp + 1;  // ret
+
+        // ── int 多字 M1（Task 2）：慢路径块（函数尾附加）+ jo rel32 回填 ──
+        // jo 目标 = 本函数尾声之后——emit_instr 记录位置（g2_init 清零、
+        // 逐函数段），此处（块位置已知后）统一回填。块骨架 = ud2：溢出到达
+        // = 确定性 SIGILL（本任务跳转可达性验证载体）；Task 3 以真实 2-limb
+        // 修正代码替换块内容（届时 jo 记录也需扩展 dest 等现场信息）。
+        // 无 jo 的函数不发块、零字节影响（untagged 快路径零变化）。
+        if g_x86_mw_jo_count > 0 {
+            mw_blk := cp;
+            w8(buf, cp, 15); w8(buf, cp + 1, 11); cp = cp + 2;  // ud2（占位）
+            mw_ji : ., mut = 0;
+            loop { if mw_ji >= g_x86_mw_jo_count { break; }
+                jo_pos := r64(g_x86_mw_jo_pos, mw_ji * 8);
+                w32(buf, jo_pos + 2, mw_blk - (jo_pos + 6));
+                mw_ji = mw_ji + 1; }
+            g_x86_mw_jo_count = 0;
+        }
         fi = fi + 1; }
 
     // ── _init_globals ──

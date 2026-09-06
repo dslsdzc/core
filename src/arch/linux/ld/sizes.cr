@@ -29,6 +29,7 @@ fn sz_call() -> int { return 5; }
 fn sz_jmp() -> int { return 5; }
 fn sz_je() -> int { return 6; }
 fn sz_alu() -> int { return 3; }
+fn sz_jo() -> int { return 6; }  // jo rel32 (0F 80 cd)——慢路径块附函数尾，rel8 ±127 在 >127B 函数体上不可达
 fn sz_syscall() -> int { return 2; }
 
 // ── Prologue / epilogue sizes ──

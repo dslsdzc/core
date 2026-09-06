@@ -153,6 +153,11 @@ g_x86_emit_vars : string, mut;          g_x86_emit_vars_cap : int, mut; g_x86_em
 // g_x86_mw_tag_count：当前函数 tagged 变量数（tag 区字节数 = 每变量 1 字节）。
 g_x86_mw_tag_off : string, mut;     g_x86_mw_tag_off_cap : int, mut;
 g_x86_mw_tag_count : int, mut;
+// g_x86_mw_jo_*：int 多字 M1 Task 2——tagged int add/sub 快路径溢出跳
+// （jo 0F 80 rel32）补丁表：emit_instr 记录 jo 指令绝对位置，elf.cr 于该函数
+// 尾声（慢路径块位置后知）发射块骨架后按函数回填（g2_init 清零——ret_patch
+// 同款）。见 plan Task 2 与 specs/2026-09-06-int-multiword-backend-design.md。
+g_x86_mw_jo_pos : string, mut;      g_x86_mw_jo_cap : int, mut; g_x86_mw_jo_count : int, mut;
 g_x86_ret_patch_pos : string, mut;      g_x86_ret_patch_cap : int, mut; g_x86_ret_patch_count : int, mut;
 g_x86_call_patch_pos : string, mut;     g_x86_call_patch_name : string, mut;
 g_x86_call_patch_count : int, mut;      g_x86_call_patch_cap : int, mut;

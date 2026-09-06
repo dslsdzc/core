@@ -15,6 +15,9 @@ fn g2_init() {
     g_x86_emit_var_count = 0;
     g_x86_emit_stack_size = 0;
     g_x86_ret_patch_count = 0;
+    // g_x86_mw_jo_count: reset per function — jo rel32s are patched to the
+    // function-tail slow-path block right after each function's epilogue.
+    g_x86_mw_jo_count = 0;
     // g_x86_alloc_patch_count NOT reset: alloc calls are patched after all funcs.
     // g_x86_ext_rel_count NOT reset: extern relocations span all functions.
     // g_x86_rip_patch_count NOT reset
@@ -224,6 +227,32 @@ fn mw_frame_size(vc: int) -> int {
         if r != 0 { sz = sz + (16 - r); }
     }
     return sz;
+}
+
+// ── Task 2：快路径溢出检测发射（jo → 函数尾慢路径块）──
+// 发射条件 = 规则 A 的 add/sub 指令（emit 侧与 mw_setup_tags 同源判定）：
+// IR_BINARY、dest 为当前函数 tagged 变量（g2_tag_off ≠ -1——域外/非 int 恒
+// -1，天然过滤 globals/其他函数/dest=-1 与拷贝行）即溢出可能 → jo。untagged
+// 的 int 算术（cmp/shl/mul/div…）与 dex（TI_DEX SSE 先行分支）恒不发射——
+// 真快路径对 untagged 代码零字节影响。
+fn mw_int_arith_jo_needed(instr_idx: int) -> int {
+    if iri_op(instr_idx) != IR_BINARY { return 0; }
+    s3 := iri_s3(instr_idx);
+    if s3 != OP_ADD && s3 != OP_SUB { return 0; }
+    if g2_tag_off(iri_dest(instr_idx)) == -1 { return 0; }
+    return 1; }
+
+// jo rel32（0F 80 cd，6B）→ 慢路径块，位置后知：记录绝对位置到
+// g_x86_mw_jo_pos（g2_init 清零、elf.cr 函数尾统一回填）。
+// rel32（非 rel8）：块附函数尾——函数体 >127B 时 rel8 不可达（编译器自身
+// 的大函数在自举回归里必然命中；Task 2 用 t3 大函数用例锁定该编码）。
+fn e2_mw_jo(b: string, p: int) -> int {
+    grow_mw_jo_patch(g_x86_mw_jo_count + 1);
+    w64(g_x86_mw_jo_pos, g_x86_mw_jo_count * 8, p);
+    g_x86_mw_jo_count = g_x86_mw_jo_count + 1;
+    w8(b, p, 15); w8(b, p + 1, 128);  // 0F 80 = jo rel32
+    e2_w32(b, p + 2, 0);              // 占位——elf.cr 于块发射后回填
+    return 6;
 }
 
 // ── Byte encoding helpers ──
@@ -655,8 +684,18 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         }
         cp = cp + e2_load_var(buf, pos+cp, 10, s1);
         cp = cp + e2_load_var(buf, pos+cp, 11, s2);
-        if s3 == OP_ADD         { cp = cp + e2_alu(buf, pos+cp, 1); }
-        else if s3 == OP_SUB    { cp = cp + e2_alu(buf, pos+cp, 41); }
+        if s3 == OP_ADD         {
+            cp = cp + e2_alu(buf, pos+cp, 1);
+            // int 多字 M1（Task 2）：tagged dest 的 add/sub 后紧跟溢出跳
+            // （e2_alu 的 OF 其后无任何写标志指令可再被读）→ 函数尾慢路径
+            // 块。慢路径在快路径 store 之前跳走（Task 3 自行回存 dest 值 +
+            // 置 tag 并跳回 store 之后继续）。
+            if g2_tag_off(d) != -1 { cp = cp + e2_mw_jo(buf, pos+cp); }
+        }
+        else if s3 == OP_SUB    {
+            cp = cp + e2_alu(buf, pos+cp, 41);
+            if g2_tag_off(d) != -1 { cp = cp + e2_mw_jo(buf, pos+cp); }
+        }
         else if s3 == OP_MUL    {
             // imul r10, r11 — 2-byte opcode 0x0F 0xAF
             cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 11/8);
