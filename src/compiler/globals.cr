@@ -172,6 +172,23 @@ g_x86_mw_tag_count : int, mut;
 g_x86_mw_jo_pos : string, mut;      g_x86_mw_jo_cap : int, mut; g_x86_mw_jo_count : int, mut;
 g_x86_mw_jo_dest : string, mut;     g_x86_mw_jo_is_sub : string, mut;
 g_x86_mw_jo_resume : string, mut;
+// g_x86_mw_oc_*：int 多字 M1 Task 4——消费者站点（tagged 操作数读 tag）记录表：
+// add/sub/比较站点在快路径前发 tag 检查（test byte + jne 0F 85 rel32——tag=1
+// = 操作数为 2-limb），jne 目标 = 该站点函数尾 2L 块（位置后知——jo 同款
+// 回填机制）。记录 = 8 条并行 i64 数组（共享 cap，索引 = 站点序 = 指令序，
+// 单指令至多 1 站点）：
+//   g_x86_mw_oc_pos1/pos2 — 该站点第 1/2 个检查 jne 的绝对缓冲位置
+//                           （-1 = 无——操作数行 untagged 或 s1==s2）；
+//   g_x86_mw_oc_s1/s2/dest — 站点操作数行与 dest（块内现算槽形态/回存目标）；
+//   g_x86_mw_oc_op        — 站点 op（OP_ADD/OP_SUB = 128 算术块；
+//                           OP_EQ..OP_GE = 128 比较块）；
+//   g_x86_mw_oc_resume    — 块完成后跳回点（= 该站点指令尾，同 jo）。
+// 见 plan Task 4 与 e2_mw_opnd_block（instr.cr）。
+g_x86_mw_oc_pos1 : string, mut;     g_x86_mw_oc_pos2 : string, mut;
+g_x86_mw_oc_cap : int, mut;         g_x86_mw_oc_count : int, mut;
+g_x86_mw_oc_s1 : string, mut;       g_x86_mw_oc_s2 : string, mut;
+g_x86_mw_oc_dest : string, mut;     g_x86_mw_oc_op : string, mut;
+g_x86_mw_oc_resume : string, mut;
 g_x86_ret_patch_pos : string, mut;      g_x86_ret_patch_cap : int, mut; g_x86_ret_patch_count : int, mut;
 g_x86_call_patch_pos : string, mut;     g_x86_call_patch_name : string, mut;
 g_x86_call_patch_count : int, mut;      g_x86_call_patch_cap : int, mut;

@@ -683,6 +683,25 @@ fn grow_mw_jo_patch(needed: int) {
     g_x86_mw_jo_resume = nb4;
     g_x86_mw_jo_cap = nc; }
 
+fn grow_mw_oc_patch(needed: int) {
+    if needed < g_x86_mw_oc_cap { return; }
+    nc : ., mut = g_x86_mw_oc_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+    nb := alloc(nc * 8); _dyncpy(g_x86_mw_oc_pos1, g_x86_mw_oc_cap * 8, nb);
+    g_x86_mw_oc_pos1 = nb;
+    nb2 := alloc(nc * 8); _dyncpy(g_x86_mw_oc_pos2, g_x86_mw_oc_cap * 8, nb2);
+    g_x86_mw_oc_pos2 = nb2;
+    nb3 := alloc(nc * 8); _dyncpy(g_x86_mw_oc_s1, g_x86_mw_oc_cap * 8, nb3);
+    g_x86_mw_oc_s1 = nb3;
+    nb4 := alloc(nc * 8); _dyncpy(g_x86_mw_oc_s2, g_x86_mw_oc_cap * 8, nb4);
+    g_x86_mw_oc_s2 = nb4;
+    nb5 := alloc(nc * 8); _dyncpy(g_x86_mw_oc_dest, g_x86_mw_oc_cap * 8, nb5);
+    g_x86_mw_oc_dest = nb5;
+    nb6 := alloc(nc * 8); _dyncpy(g_x86_mw_oc_op, g_x86_mw_oc_cap * 8, nb6);
+    g_x86_mw_oc_op = nb6;
+    nb7 := alloc(nc * 8); _dyncpy(g_x86_mw_oc_resume, g_x86_mw_oc_cap * 8, nb7);
+    g_x86_mw_oc_resume = nb7;
+    g_x86_mw_oc_cap = nc; }
+
 fn grow_opt_meta(needed: int) {
     if needed <= g_opt_meta_cap { return; }
     nc : ., mut = g_opt_meta_cap * 2;

@@ -18,6 +18,9 @@ fn g2_init() {
     // g_x86_mw_jo_count: reset per function — jo rel32s are patched to the
     // function-tail slow-path block right after each function's epilogue.
     g_x86_mw_jo_count = 0;
+    // g_x86_mw_oc_count (Task 4): reset per function — 2L 操作数检查
+    // （jne 0F 85）同款回填到函数尾 2L 块。
+    g_x86_mw_oc_count = 0;
     // g_x86_alloc_patch_count NOT reset: alloc calls are patched after all funcs.
     // g_x86_ext_rel_count NOT reset: extern relocations span all functions.
     // g_x86_rip_patch_count NOT reset
@@ -235,9 +238,20 @@ fn mw_frame_size(vc: int) -> int {
 // -1，天然过滤 globals/其他函数/dest=-1 与拷贝行）即溢出可能 → jo。untagged
 // 的 int 算术（cmp/shl/mul/div…）与 dex（TI_DEX SSE 先行分支）恒不发射——
 // 真快路径对 untagged 代码零字节影响。
+// Task 4 扩展（本函数 = 表路径排除门——需旧路径（tag 检查/2L 块）的站点
+// 整条落旧路径）：比较（OP_EQ..OP_GE）且任一操作数行 tagged → 同样需旧路
+// 径（2L 比较读 tag——表路径不知 tag）。add/sub 的 tagged 操作数已由 dest
+// tagged 覆盖（规则 A 保证操作数 tagged ⟹ dest tagged）。
 fn mw_int_arith_jo_needed(instr_idx: int) -> int {
     if iri_op(instr_idx) != IR_BINARY { return 0; }
     s3 := iri_s3(instr_idx);
+    if s3 >= OP_EQ && s3 <= OP_GE {
+        s1 := iri_s1(instr_idx);
+        if g2_tag_off(s1) != -1 { return 1; }
+        s2 := iri_s2(instr_idx);
+        if s1 != s2 && g2_tag_off(s2) != -1 { return 1; }
+        return 0;
+    }
     if s3 != OP_ADD && s3 != OP_SUB { return 0; }
     if g2_tag_off(iri_dest(instr_idx)) == -1 { return 0; }
     return 1; }
@@ -330,6 +344,279 @@ fn e2_mw_slow_block(b: string, p: int, d: int, is_sub: int, resume: int) -> int 
     w8(b, p + cp, 233);  // E9 jmp rel32
     e2_w32(b, p + cp + 1, resume - (p + cp + 5));
     return cp + 5;
+}
+
+// ── Task 4：tag 卫生（定值点写 tag）+ 消费者读路径 ──
+// 值表示：槽 64 位 = 快值 或 2-limb 堆对象指针；旁路 tag 字节 0/1。
+//
+// tag 卫生策略 = 定值点写 tag（无帧入口清零——论证：tagged 行的每个定值点
+// 都属于以下集合之一，消费者只读「本调用内已执行的定值」之后的 tag）：
+//   ① add/sub 快路径落值（emit_instr IR_BINARY 尾 e2_st 后 tag 清 0）；
+//   ② 拷贝定值 IR_STORE/IR_LOAD（源 tagged → 运行时 tag 拷贝；源 untagged
+//      → 清 0——e2_mw_tag_copy）；
+//   ③ 本函数 prologue 参数保存（elf.cr——tagged 参数行在函数内首次定值
+//      前的读取需要确定性 tag=0）；
+//   ④ 2-limb 定值 = 慢路径块/2L 块写指针 + tag=1（Task 3/本任务）。
+// 行模型事实（.ccr 实证）：用户变量行只经 IR_STORE 得到真定值（常量/算术
+// 都经临时行 + STORE）；IR_CONST/IR_UNARY/IR_CALL 等的 dest 恒为一次性
+// 临时行（tag 闭包外）——因此定值点全集 = 上述四类，无遗漏。
+//
+// 消费者读路径（tag=1 → 槽 = 指针 → 解 2-limb）：
+//   A. IR_RETURN：解指针取低 limb → rax（exit 低 8 位 = 数学值低字节）；
+//   B. int 比较（IR_BINARY OP_EQ..OP_GE，任一操作数 tagged）：128 位比较
+//      ——高 limb 带符号、同则低 limb 无符号（两补语义）；结果 0/1 快值；
+//   C. add/sub 链（dest tagged，任一操作数 tagged）：128 位混合算术
+//      （快操作数符号扩展 + 低+低进位链 + 高+高/借位链），结果可装 64 位 →
+//      降级快值 + tag 0（保持「2L ⟹ |v| ≥ 2^63 ⟹ 非零」不变量——IR_BRANCH
+//      对 2L 指针的真值测试因此天然正确，无需改动）；否则新 2-limb 对象
+//      + tag 1。结果界：|加数| ≤ 2^64−1 + |2L| ≤ 2^65 → |和| < 2^66 ≪
+//      2^127——128 位码域永不越界（无码域错误路径；链长 ~2^63 步才可能
+//      触界 = 理论，M2 动态增长）。
+//   D. M2 边界（保持 Task 1 报告边界）：2L 操作数进入 MUL/DIV/SHL/一元
+//      neg/移位等未实现站点、出逃写（STORE 全局/堆/数组）、跨函数——
+//      本任务不改，测试规避。
+// ══════════════════════════════════════════════════════════════
+
+// 字节级小助手（rbp 相对偏移，disp8/disp32 自动）：
+// test byte [rbp+off], 0xFF——F6 /0（ZF ⇔ 字节==0；只写标志）
+fn e2_mw_t8(b: string, p: int, off: int) -> int {
+    if off >= -128 && off <= 127 {
+        w8(b, p, 246); w8(b, p+1, 69); w8(b, p+2, off); w8(b, p+3, 255); return 4;
+    }
+    w8(b, p, 246); w8(b, p+1, 133); e2_w32(b, p+2, off); w8(b, p+6, 255); return 7;
+}
+// mov byte [rbp+off], imm——C6 /0
+fn e2_mw_b8(b: string, p: int, off: int, imm: int) -> int {
+    if off >= -128 && off <= 127 {
+        w8(b, p, 198); w8(b, p+1, 69); w8(b, p+2, off); w8(b, p+3, imm); return 4;
+    }
+    w8(b, p, 198); w8(b, p+1, 133); e2_w32(b, p+2, off); w8(b, p+6, imm); return 7;
+}
+// mov al, [rbp+off]——8A /0（rax 低字节 scratch——发射点 rax 无 live）
+fn e2_mw_ld8(b: string, p: int, off: int) -> int {
+    if off >= -128 && off <= 127 {
+        w8(b, p, 138); w8(b, p+1, 69); w8(b, p+2, off); return 3;
+    }
+    w8(b, p, 138); w8(b, p+1, 133); e2_w32(b, p+2, off); return 6;
+}
+// mov [rbp+off], al——88 /0
+fn e2_mw_st8(b: string, p: int, off: int) -> int {
+    if off >= -128 && off <= 127 {
+        w8(b, p, 136); w8(b, p+1, 69); w8(b, p+2, off); return 3;
+    }
+    w8(b, p, 136); w8(b, p+1, 133); e2_w32(b, p+2, off); return 6;
+}
+
+// 定值点 tag 清 0：变量 v 的槽刚被 64 位快值定值（v tagged 时发 mov byte 0）。
+fn e2_mw_tag_clr(b: string, p: int, v: int) -> int {
+    tg := g2_tag_off(v);
+    if tg == -1 { return 0; }
+    return e2_mw_b8(b, p, tg, 0);
+}
+
+// 拷贝定值 tag 传播：dst 的槽 ← src 的值（拷贝后 dst 的 tag = src 的 tag；
+// src 无 tag 字节（恒快）→ dst 清 0）。dst untagged → 零字节。
+fn e2_mw_tag_cpy(b: string, p: int, dst: int, src: int) -> int {
+    dtg := g2_tag_off(dst);
+    if dtg == -1 { return 0; }
+    stg := g2_tag_off(src);
+    if stg == -1 { return e2_mw_b8(b, p, dtg, 0); }
+    c : ., mut = e2_mw_ld8(b, p, stg);
+    c = c + e2_mw_st8(b, p + c, dtg);
+    return c;
+}
+
+// ── 消费者站点记录（oc = operand-check）：位置后知（函数尾块），jo 同款 ──
+fn mw_oc_new(s1: int, s2: int, d: int, op: int) -> int {
+    grow_mw_oc_patch(g_x86_mw_oc_count + 1);
+    w64(g_x86_mw_oc_pos1, g_x86_mw_oc_count * 8, -1);
+    w64(g_x86_mw_oc_pos2, g_x86_mw_oc_count * 8, -1);
+    w64(g_x86_mw_oc_s1, g_x86_mw_oc_count * 8, s1);
+    w64(g_x86_mw_oc_s2, g_x86_mw_oc_count * 8, s2);
+    w64(g_x86_mw_oc_dest, g_x86_mw_oc_count * 8, d);
+    w64(g_x86_mw_oc_op, g_x86_mw_oc_count * 8, op);
+    g_x86_mw_oc_count = g_x86_mw_oc_count + 1;
+    return g_x86_mw_oc_count - 1;
+}
+
+// 站点检查：test tag(v), 0xFF；jne rel32（0F 85）→ 该站点函数尾 2L 块。
+// rel32 恒选：块附函数尾，函数体 >127B 时 rel8 不可达（jo 同理由）。chk =
+// 0/1 → pos1/pos2（站点至多 2 个检查——s1、s2 各行一个，s1==s2 只发 1 个）。
+// 记录位置 = jne 起始（p+c——test 前缀 4/7B 后；rel32 字段在 jne 起 +2——
+// 若误记 test 起，回填会覆写 test 的 disp/imm 字节）。
+fn e2_mw_oc_check(b: string, p: int, oc: int, chk: int, v: int) -> int {
+    c : ., mut = e2_mw_t8(b, p, g2_tag_off(v));
+    if chk == 0 { w64(g_x86_mw_oc_pos1, oc * 8, p + c); }
+    else { w64(g_x86_mw_oc_pos2, oc * 8, p + c); }
+    w8(b, p + c, 15); w8(b, p + c + 1, 133); e2_w32(b, p + c + 2, 0);
+    return c + 6;
+}
+
+// ── 2L 操作数装载（解 2-limb 对象到寄存器对）──
+// regs: A = (r8=lo, r9=hi)，B = (r10=lo, r11=hi)；rax = 指针 scratch；
+// 快值 → hi = sar 63 符号扩展（两补 128 语义）。快值载入 r8/r10；2L = 槽值
+// （指针）入 rax 后解 [rax+0]/[rax+8]（对象布局 [+0]=lo [+8]=hi）。
+//   mov r8, [rax]     4C 8B 00      mov r9, [rax+8]   4C 8B 48 08
+//   mov r10, [rax]    4C 8B 10      mov r11, [rax+8]  4C 8B 58 08
+fn e2_mw_ld2(b: string, p: int, lo_r: int, hi_r: int) -> int {
+    w8(b, p, 76); w8(b, p+1, 139); w8(b, p+2, (lo_r % 8) * 8);       // mov r{lo}, [rax]
+    w8(b, p+3, 76); w8(b, p+4, 139);
+    w8(b, p+5, 64 + (hi_r % 8) * 8); w8(b, p+6, 8);                  // mov r{hi}, [rax+8]
+    return 7;
+}
+// mov r{hi}, r{lo}; sar r{hi}, 63——快值 64→128 符号扩展（hi = sext）
+fn e2_mw_sext(b: string, p: int, lo_r: int, hi_r: int) -> int {
+    c : ., mut = e2_mov(b, p, hi_r, lo_r);
+    w8(b, p+c, 73); w8(b, p+c+1, 193);   // REX.WB + C1 /7
+    w8(b, p+c+2, 248 + (hi_r % 8));      // modrm 11 111 rm（/7 = SAR）
+    w8(b, p+c+3, 63);
+    return c + 4;
+}
+
+// ── 2L 操作数块（每消费者站点独立，附于函数尾 jo 块之后）──
+// 入口：≥1 操作数 2L（快路径 tag 检查 jne rel32 → 块首）。现场：无 live
+// 值（检查在操作数装载后、运算前——块内重载全部操作数，r10/r11 装载值
+// 废弃）；rsp ≡ 0 (mod 16)（站点帧级 rsp——同 jo 块论证；块内唯一 call
+// （alloc）由双 push/pop 自平衡）。只碰 caller-saved（rax/rdx/r8-r11）+
+// push/pop；callee-saved（O1/O2 reg 分配 rbx/r12-15）原样穿越。
+// 静态参数化：操作数行 untagged（恒快）→ 不发该行 tag 测试/2L 装载——
+// 块入口条件（≥1 2L）在单 tagged 站点下唯一确定装载路径；双 tagged 站点
+// 内部分派（测试 s1 → A 快则 B 必 2L；A 2L 再测 s2）。s1==s2 时两测试同
+// 字节（单检查站点：入口即 2L → A 2L → 同字节测试恒取 L_both，自洽）。
+// 块内 jcc/jmp 全部 rel8（块 ≤ ~120B，forward/backward 均 ±127 内）；
+// rel8 目标在块内顺序发射中即时回填（目标 = 已到达的后续位置）。
+fn e2_mw_opnd_block(b: string, p: int, s1: int, s2: int, d: int, op: int, resume: int) -> int {
+    cp : ., mut = 0;
+    t1 := g2_tag_off(s1);
+    t2 : ., mut = t1;
+    if s1 != s2 { t2 = g2_tag_off(s2); }
+    is_cmp : ., mut = 0;
+    if op >= OP_EQ && op <= OP_GE { is_cmp = 1; }
+    is_sub : ., mut = 0;
+    if is_cmp == 0 && op == OP_SUB { is_sub = 1; }
+
+    if t1 != -1 && t2 != -1 {
+        // ── 双 tagged 分派：测 t1——0 → A 快 + B 必 2L；1 → A 2L 再测 t2 ──
+        cp = cp + e2_mw_t8(b, p+cp, t1);
+        j_a2l : ., mut = cp; w8(b, p+cp, 117); w8(b, p+cp+1, 0); cp = cp + 2;  // jne L_a2l
+        // A 快
+        cp = cp + e2_load_var(b, p+cp, 8, s1);
+        cp = cp + e2_mw_sext(b, p+cp, 8, 9);
+        // B 必 2L
+        cp = cp + e2_load_var(b, p+cp, 0, s2);
+        cp = cp + e2_mw_ld2(b, p+cp, 10, 11);
+        j_op1 : ., mut = cp; w8(b, p+cp, 235); w8(b, p+cp+1, 0); cp = cp + 2;  // jmp L_op
+        // L_a2l：A 2L
+        w8(b, p + j_a2l + 1, cp - (j_a2l + 2));
+        cp = cp + e2_load_var(b, p+cp, 0, s1);
+        cp = cp + e2_mw_ld2(b, p+cp, 8, 9);
+        cp = cp + e2_mw_t8(b, p+cp, t2);
+        j_both : ., mut = cp; w8(b, p+cp, 117); w8(b, p+cp+1, 0); cp = cp + 2;  // jne L_both
+        // B 快
+        cp = cp + e2_load_var(b, p+cp, 10, s2);
+        cp = cp + e2_mw_sext(b, p+cp, 10, 11);
+        j_op2 : ., mut = cp; w8(b, p+cp, 235); w8(b, p+cp+1, 0); cp = cp + 2;  // jmp L_op
+        // L_both：B 2L
+        w8(b, p + j_both + 1, cp - (j_both + 2));
+        cp = cp + e2_load_var(b, p+cp, 0, s2);
+        cp = cp + e2_mw_ld2(b, p+cp, 10, 11);
+        // L_op = 当前 cp——回填两个 jmp
+        w8(b, p + j_op1 + 1, cp - (j_op1 + 2));
+        w8(b, p + j_op2 + 1, cp - (j_op2 + 2));
+    } else if t1 != -1 {
+        // 仅 s1 tagged：入口 ⟹ s1 2L → A 2L；B 恒快
+        cp = cp + e2_load_var(b, p+cp, 0, s1);
+        cp = cp + e2_mw_ld2(b, p+cp, 8, 9);
+        cp = cp + e2_load_var(b, p+cp, 10, s2);
+        cp = cp + e2_mw_sext(b, p+cp, 10, 11);
+    } else {
+        // 仅 s2 tagged：入口 ⟹ s2 2L → A 恒快；B 2L
+        cp = cp + e2_load_var(b, p+cp, 8, s1);
+        cp = cp + e2_mw_sext(b, p+cp, 8, 9);
+        cp = cp + e2_load_var(b, p+cp, 0, s2);
+        cp = cp + e2_mw_ld2(b, p+cp, 10, 11);
+    }
+
+    // ── L_op：128 位运算（A=(r8,r9) B=(r10,r11)）──
+    if is_cmp == 0 {
+        // 算术：结果 (r10 = lo, r11 = hi)
+        if is_sub == 0 {
+            w8(b, p+cp, 77); w8(b, p+cp+1, 1); w8(b, p+cp+2, 194); cp = cp + 3;   // add r10, r8（lo + CF）
+            w8(b, p+cp, 77); w8(b, p+cp+1, 17); w8(b, p+cp+2, 203); cp = cp + 3;  // adc r11, r9（hi 进位链）
+        } else {
+            w8(b, p+cp, 77); w8(b, p+cp+1, 41); w8(b, p+cp+2, 208); cp = cp + 3;  // sub r8, r10（lo，CF=借位）
+            w8(b, p+cp, 76); w8(b, p+cp+1, 137); w8(b, p+cp+2, 216); cp = cp + 3;  // mov rax, r11（暂存 bh）
+            w8(b, p+cp, 77); w8(b, p+cp+1, 137); w8(b, p+cp+2, 203); cp = cp + 3;  // mov r11, r9（ah）
+            w8(b, p+cp, 73); w8(b, p+cp+1, 25); w8(b, p+cp+2, 195); cp = cp + 3;   // sbb r11, rax（ah−bh−CF）
+            w8(b, p+cp, 77); w8(b, p+cp+1, 137); w8(b, p+cp+2, 194); cp = cp + 3;  // mov r10, r8（lo）
+        }
+        // 公共落值：fits-64 ⇔ hi == signmask(lo) → 降级快值；否则 2L 对象
+        // （结果界：|加数| ≤ 2^64−1 + 2^65 → |和| < 2^66 ≪ 2^127——M1 码域
+        // 内恒可表示，无需码域错误路径——见块注释）。
+        cp = cp + e2_mov(b, p+cp, 2, 10);                                        // mov rdx, r10
+        w8(b, p+cp, 72); w8(b, p+cp+1, 193); w8(b, p+cp+2, 250); w8(b, p+cp+3, 63); cp = cp + 4;  // sar rdx, 63
+        w8(b, p+cp, 77); w8(b, p+cp+1, 57); w8(b, p+cp+2, 211); cp = cp + 3;     // cmp r11, rdx
+        j_fit : ., mut = cp; w8(b, p+cp, 116); w8(b, p+cp+1, 0); cp = cp + 2;    // je L_fit
+        // 2L 存储：alloc(16) + 2-limb 写 + 槽存指针 + tag=1（同 Task 3 块）
+        w8(b, p+cp, 65); w8(b, p+cp+1, 82); cp = cp + 2;                         // push r10
+        w8(b, p+cp, 65); w8(b, p+cp+1, 83); cp = cp + 2;                         // push r11
+        w8(b, p+cp, 191); e2_w32(b, p+cp+1, 16); cp = cp + 5;                    // mov edi, 16
+        grow_alloc_patch(g_x86_alloc_patch_count + 1);
+        w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, p + cp);
+        g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1;
+        w8(b, p+cp, 232); e2_w32(b, p+cp+1, 0); cp = cp + 5;                     // call alloc
+        w8(b, p+cp, 65); w8(b, p+cp+1, 91); cp = cp + 2;                         // pop r11
+        w8(b, p+cp, 65); w8(b, p+cp+1, 90); cp = cp + 2;                         // pop r10
+        w8(b, p+cp, 76); w8(b, p+cp+1, 137); w8(b, p+cp+2, 16); cp = cp + 3;     // mov [rax], r10
+        w8(b, p+cp, 76); w8(b, p+cp+1, 137); w8(b, p+cp+2, 88); w8(b, p+cp+3, 8); cp = cp + 4;  // mov [rax+8], r11
+        cp = cp + e2_st(b, p+cp, 0, g2_slot(d));                                // 值槽存指针
+        cp = cp + e2_mw_b8(b, p+cp, g2_tag_off(d), 1);                          // tag = 1
+        w8(b, p+cp, 233); e2_w32(b, p+cp+1, resume - (p+cp+5)); cp = cp + 5;    // jmp rel32 → resume
+        l_fit := cp;
+        w8(b, p + j_fit + 1, l_fit - (j_fit + 2));                              // 回填 je → L_fit
+        cp = cp + e2_st(b, p+cp, 10, g2_slot(d));                               // 降级：快值落槽
+        cp = cp + e2_mw_tag_clr(b, p+cp, d);                                    // tag = 0
+        w8(b, p+cp, 233); e2_w32(b, p+cp+1, resume - (p+cp+5)); cp = cp + 5;    // jmp rel32 → resume
+        return cp;
+    }
+
+    // ── 比较：结果 0/1（128 位语义——高 limb 带符号、同则低 limb 无符号）──
+    if op == OP_EQ || op == OP_NE {
+        w8(b, p+cp, 77); w8(b, p+cp+1, 49); w8(b, p+cp+2, 208); cp = cp + 3;     // xor r8, r10（al^bl）
+        w8(b, p+cp, 77); w8(b, p+cp+1, 49); w8(b, p+cp+2, 217); cp = cp + 3;    // xor r9, r11（ah^bh）
+        w8(b, p+cp, 77); w8(b, p+cp+1, 9); w8(b, p+cp+2, 193); cp = cp + 3;     // or r9, r8（ZF ⇔ 全等）
+        if op == OP_EQ { w8(b, p+cp, 15); w8(b, p+cp+1, 148); w8(b, p+cp+2, 192); cp = cp + 3; }   // sete al
+        else { w8(b, p+cp, 15); w8(b, p+cp+1, 149); w8(b, p+cp+2, 192); cp = cp + 3; }            // setne al
+    } else {
+        // LT/GT/LE/GE：eax 缺省 0（假）；决定性 jcc → L_t（真）/L_d（假，
+        // 前向）；hi 同 → lo 无符号再判。布局：
+        //   xor eax; cmphi; j_ht L_t; j_hf L_d; cmplo; j_lf L_d;
+        //   L_t: mov eax,1;  L_d: 落值（j_ht 落 L_t、其余落 L_d——全前向）
+        w8(b, p+cp, 49); w8(b, p+cp+1, 192); cp = cp + 2;                       // xor eax, eax
+        w8(b, p+cp, 77); w8(b, p+cp+1, 57); w8(b, p+cp+2, 217); cp = cp + 3;    // cmp r9, r11（hi 符号）
+        hi_t : ., mut = 124; hi_f : ., mut = 127;   // 缺省 LT/LE：jl → 真、jg → 假
+        if op == OP_GT || op == OP_GE { hi_t = 127; hi_f = 124; }              // GT/GE：jg → 真、jl → 假
+        j_ht : ., mut = cp; w8(b, p+cp, hi_t); w8(b, p+cp+1, 0); cp = cp + 2;
+        j_hf : ., mut = cp; w8(b, p+cp, hi_f); w8(b, p+cp+1, 0); cp = cp + 2;
+        w8(b, p+cp, 77); w8(b, p+cp+1, 57); w8(b, p+cp+2, 208); cp = cp + 3;    // cmp r8, r10（lo 无符号）
+        lo_f : ., mut = 115;   // 缺省 LT：jae（lo ≥u → 假）
+        if op == OP_LE { lo_f = 119; } else if op == OP_GT { lo_f = 118; } else if op == OP_GE { lo_f = 114; }
+        // LE: ja / GT: jbe / GE: jb（lo 不满足 → 假——L_d 前向）
+        j_lf : ., mut = cp; w8(b, p+cp, lo_f); w8(b, p+cp+1, 0); cp = cp + 2;
+        // L_t: mov eax, 1（落入 L_d 共享落值——全前向布局）
+        l_t := cp; w8(b, p+cp, 184); e2_w32(b, p+cp+1, 1); cp = cp + 5;
+        // L_d = 当前 cp——回填（j_ht → L_t；j_hf/j_lf → L_d）
+        w8(b, p + j_ht + 1, l_t - (j_ht + 2));
+        w8(b, p + j_hf + 1, cp - (j_hf + 2));
+        w8(b, p + j_lf + 1, cp - (j_lf + 2));
+    }
+    // L_d：movzx + 落值（0/1 恒快；dest 若静态 tagged 防御性清 0——结果行
+    // 实际恒 untagged，见 mw_setup_tags 规则域）
+    w8(b, p+cp, 68); w8(b, p+cp+1, 15); w8(b, p+cp+2, 182); w8(b, p+cp+3, 208); cp = cp + 4;  // movzx r10d, al
+    cp = cp + e2_st(b, p+cp, 10, g2_slot(d));
+    cp = cp + e2_mw_tag_clr(b, p+cp, d);
+    w8(b, p+cp, 233); e2_w32(b, p+cp+1, resume - (p+cp+5)); cp = cp + 5;        // jmp rel32 → resume
+    return cp;
 }
 
 // ── Byte encoding helpers ──
@@ -761,6 +1048,22 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         }
         cp = cp + e2_load_var(buf, pos+cp, 10, s1);
         cp = cp + e2_load_var(buf, pos+cp, 11, s2);
+        // int 多字 M1（Task 4）：消费者站点 tag 检查——操作数行 tagged 且站点
+        // 属 2L 消费面（add/sub dest tagged = jo 同条件；比较任一操作数
+        // tagged）→ 快路径前查 tag：任一操作数 2L（tag=1）→ 函数尾 2L 块
+        // （128 位算术/比较，e2_mw_opnd_block）。untagged 行/站点零字节。
+        // （tag 检查在操作数装载后——检查只写标志，不扰 r10/r11。）
+        mw_oc : ., mut = -1;
+        if (s3 == OP_ADD || s3 == OP_SUB) && g2_tag_off(d) != -1 || (s3 >= OP_EQ && s3 <= OP_GE) {
+            if g2_tag_off(s1) != -1 {
+                if mw_oc == -1 { mw_oc = mw_oc_new(s1, s2, d, s3); }
+                cp = cp + e2_mw_oc_check(buf, pos+cp, mw_oc, 0, s1);
+            }
+            if s1 != s2 && g2_tag_off(s2) != -1 {
+                if mw_oc == -1 { mw_oc = mw_oc_new(s1, s2, d, s3); }
+                cp = cp + e2_mw_oc_check(buf, pos+cp, mw_oc, 1, s2);
+            }
+        }
         if s3 == OP_ADD         {
             cp = cp + e2_alu(buf, pos+cp, 1);
             // int 多字 M1（Task 2/3）：tagged dest 的 add/sub 后紧跟溢出跳
@@ -800,7 +1103,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
             cp = cp + emit_modrm(buf, pos+cp, 3, 5, 10%8);
         }
         else if s3 == OP_PTR_ADD {  // p + n: scale n by element size (8), add to p
-            // imul r11, 8, r11 — REX.WB + 0x6B + ModRM(3, r11, r11) + imm8
+            // imul r11, 8, r11 — REX.WRB + 0x6B + ModRM(3, r11, r11) + imm8
+            //（0x4D：reg 字段与 rm 同为 r11——R（reg）与 B（rm）都需置位）
             cp = cp + emit_rex(buf, pos+cp, 1, 11/8, 0, 11/8);
             e2_w8(buf, pos+cp, 107); cp = cp + 1;
             cp = cp + emit_modrm(buf, pos+cp, 3, 11%8, 11%8);
@@ -839,12 +1143,18 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
             sop := 148; if s3 == OP_NE { sop = 149; } else if s3 == OP_LT { sop = 156; } else if s3 == OP_GT { sop = 159; } else if s3 == OP_LE { sop = 158; } else if s3 == OP_GE { sop = 157; }
             // SETcc al — 2-byte opcode 0x0F 0x9x
             e2_w8(buf, pos+cp, 15); cp = cp + 1; e2_w8(buf, pos+cp, sop); cp = cp + 1; cp = cp + emit_modrm(buf, pos+cp, 3, 0, 0);
-            // movzx r10, al — REX.RB + 0x0FB6
+            // movzx r10d, al — REX.R + 0x0FB6（rm=al 无需 B——R 只因 reg=r10）
             cp = cp + emit_rex(buf, pos+cp, 0, 10/8, 0, 0); e2_w8(buf, pos+cp, 15); cp = cp + 1; e2_w8(buf, pos+cp, 182); cp = cp + 1; cp = cp + emit_modrm(buf, pos+cp, 3, 10%8, 0);
         }
         else if s3 == OP_AND { cp = cp + e2_alu(buf, pos+cp, 33); }
         else if s3 == OP_OR  { cp = cp + e2_alu(buf, pos+cp, 9); }
         cp = cp + e2_st(buf, pos+cp, 10, do2);
+        // int 多字 M1（Task 4）tag 卫生①：快路径 64 位定值点 tag 清 0——
+        // 快值落 tagged 槽后 tag 必须为 0（否则回边再执行时 stale tag=1 会
+        // 把快值当 2-limb 指针读）。jo/2L 块跳 resume 在此之后——慢路径自
+        // 写 tag=1，不被本条清除（resume 位于本条之后）。dest untagged →
+        // 零字节（mul/shl/…/非 add-sub 的 tagged dest 不存在——防御兜底）。
+        cp = cp + e2_mw_tag_clr(buf, pos+cp, d);
         return cp;
     }
 
@@ -1262,7 +1572,19 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
                 cp = cp + e2_lr(buf, pos+cp, 0);       // lea r10, [rip+0]
                 // mov rax, [r10] — REX.WB + 0x8B
             cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 10/8); e2_w8(buf, pos+cp, 139); cp = cp + 1; cp = cp + emit_modrm(buf, pos+cp, 0, 0, 10%8);
-            } else { cp = cp + e2_ld(buf, pos+cp, 0, g2_slot(s1)); }
+            } else {
+                cp = cp + e2_ld(buf, pos+cp, 0, g2_slot(s1));
+                // int 多字 M1（Task 4）tag 读路径 A：return 的 tagged 局部值
+                // ——tag=1（槽 = 2-limb 指针）→ 解指针取低 limb → rax（exit
+                // 低 8 位 = 数学值低字节；不解 = 指针低字节 = 错值）。tag=0
+                // → 快值原样。行内（je rel8 跨 3B deref——tag 字节测试）。
+                tg := g2_tag_off(s1);
+                if tg != -1 {
+                    cp = cp + e2_mw_t8(buf, pos+cp, tg);
+                    w8(buf, pos+cp, 116); w8(buf, pos+cp+1, 3); cp = cp + 2;  // je +3
+                    w8(buf, pos+cp, 72); w8(buf, pos+cp+1, 139); w8(buf, pos+cp+2, 0); cp = cp + 3;  // mov rax, [rax]
+                }
+            }
         }
         // record position for caller to patch jmp → epilogue
         grow_ret_patch(g_x86_ret_patch_count + 1); w64(g_x86_ret_patch_pos, g_x86_ret_patch_count * 8, pos + cp);
@@ -1370,7 +1692,14 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
                 // mov r10, [r10] — REX.WRB + 0x8B
             cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 10/8); e2_w8(buf, pos+cp, 139); cp = cp + 1; cp = cp + emit_modrm(buf, pos+cp, 0, 10%8, 10%8);
                 cp = cp + e2_st(buf, pos+cp, 10, do2);
-            } else { cp = cp + e2_load_var(buf, pos+cp, 10, s1); cp = cp + e2_st(buf, pos+cp, 10, do2); }
+                // 全局源（恒 64 位值）→ d tagged 时防御性清 tag
+                cp = cp + e2_mw_tag_clr(buf, pos+cp, d);
+            } else {
+                cp = cp + e2_load_var(buf, pos+cp, 10, s1); cp = cp + e2_st(buf, pos+cp, 10, do2);
+                // 拷贝定值 tag 传播（源 tagged → 运行时 tag 拷贝；源 untagged
+                // → 清 0）——d 为 as 转换/拷贝链行（规则 B 闭包成员）
+                cp = cp + e2_mw_tag_cpy(buf, pos+cp, d, s1);
+            }
         } else { cp = cp + e2_load_var(buf, pos+cp, 10, s1); cp = cp + e2_st(buf, pos+cp, 10, do2); }
         return cp;
     }
@@ -1387,7 +1716,12 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
                 cp = cp + e2_lrb(buf, pos+cp, 0);
                 // mov [r11], r10 — REX.WRB + 0x89
                 cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 11/8); e2_w8(buf, pos+cp, 137); cp = cp + 1; cp = cp + emit_modrm(buf, pos+cp, 0, 10%8, 11%8);
-            } else { cp = cp + e2_load_var(buf, pos+cp, 10, s2); cp = cp + e2_st(buf, pos+cp, 10, o1); }
+            } else {
+                cp = cp + e2_load_var(buf, pos+cp, 10, s2); cp = cp + e2_st(buf, pos+cp, 10, o1);
+                // 拷贝定值 tag 传播（规则 B' 闭包成员：s2 tagged → 运行时 tag
+                // 拷贝；untagged/全局源 → 清 0）——变量行真定值载体
+                cp = cp + e2_mw_tag_cpy(buf, pos+cp, s1, s2);
+            }
         } else { cp = cp + e2_load_var(buf, pos+cp, 10, s2); cp = cp + e2_st(buf, pos+cp, 10, o1); }
         return cp;
     }

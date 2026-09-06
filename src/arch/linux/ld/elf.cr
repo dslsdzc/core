@@ -1286,6 +1286,20 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
                 if pi == 4 { w8(buf, cp, 76); w8(buf, cp+1, 137); w8(buf, cp+2, 69); w8(buf, cp+3, po2); cp = cp + 4; }
                 if pi == 5 { w8(buf, cp, 76); w8(buf, cp+1, 137); w8(buf, cp+2, 77); w8(buf, cp+3, po2); cp = cp + 4; }
             }
+            // int 多字 M1（Task 4）tag 卫生③：tagged 参数行的 prologue 定值
+            // 清 tag——参数在函数内首次定值前可能被消费者读取（tag 闭包可含
+            // 参数行：p = p + k 的 B' 定值拷贝），无本清则读到上次调用/垃圾
+            // tag。参数行按强制栈槽保存（po2），tag 字节同在帧内。
+            if pty == TI_INT {
+                ptg := g2_tag_off(vs + pi);
+                if ptg != -1 {
+                    if ptg >= -128 && ptg <= 127 {
+                        w8(buf, cp, 198); w8(buf, cp+1, 69); w8(buf, cp+2, ptg); w8(buf, cp+3, 0); cp = cp + 4;
+                    } else {
+                        w8(buf, cp, 198); w8(buf, cp+1, 133); e2_w32(buf, cp+2, ptg); w8(buf, cp+6, 0); cp = cp + 7;
+                    }
+                }
+            }
         pi = pi + 1; }
 
         // Load register-allocated parameters from stack to callee-saved regs
@@ -1315,6 +1329,7 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
             // int 多字 M1（Task 2）：tagged int add/sub 需溢出跳（jo）——
             // 表路径（hit_ev 降低不知 tag/无 jo 事件）整条排除落旧路径。
             jo_before := g_x86_mw_jo_count;  // Task 3：站点回跳点记录
+            oc_before := g_x86_mw_oc_count;  // Task 4：2L 操作数站点回跳点记录
             sz : ., mut = -1;
             if hit_table_active() != 0 && mw_int_arith_jo_needed(inst_idx) == 0 {
                 sz = emit_instr_tabled(inst_idx, buf, cp);
@@ -1325,6 +1340,11 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
             // 块跳回后从此继续（跳走即跳过该 store；dest 由块自行回存）。
             if g_x86_mw_jo_count > jo_before {
                 w64(g_x86_mw_jo_resume, (g_x86_mw_jo_count - 1) * 8, cp + sz);
+            }
+            // Task 4：本指令若新建了 2L 操作数站点（至多 1/指令），其块回跳点
+            // 同样 = 指令尾（tag 清 0 之后——2L 块自写 tag 不受影响）。
+            if g_x86_mw_oc_count > oc_before {
+                w64(g_x86_mw_oc_resume, (g_x86_mw_oc_count - 1) * 8, cp + sz);
             }
             cp = cp + sz;
         ii = ii + 1; }
@@ -1394,6 +1414,30 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
                 cp = cp + e2_mw_slow_block(buf, cp, jo_d, jo_sub, jo_res);
                 mw_ji = mw_ji + 1; }
             g_x86_mw_jo_count = 0;
+        }
+        // ── int 多字 M1（Task 4）：2L 操作数块（函数尾附加，jo 块之后）──
+        // 每消费者站点独立块（快路径 tag 检查 jne → 块首；块 = 128 位算术
+        // 或比较 + 公共落值——e2_mw_opnd_block，instr.cr）。块形状按站点
+        // 静态参数化（操作数行 tagged 与否决定分派形态），含 alloc(16) 的
+        // 块与函数体同批回填（alloc_patch 计数逐函数不重置）。jne rel32
+        // 位置在 oc 记录（pos1/pos2，-1 = 无第二个检查），块位置 = 发射时
+        // cp。无消费者站点的函数零字节（untagged 快路径零变化保持）。
+        if g_x86_mw_oc_count > 0 {
+            mw_oi : ., mut = 0;
+            loop { if mw_oi >= g_x86_mw_oc_count { break; }
+                oc_p1 := r64(g_x86_mw_oc_pos1, mw_oi * 8);
+                oc_p2 := r64(g_x86_mw_oc_pos2, mw_oi * 8);
+                oc_s1 := r64(g_x86_mw_oc_s1, mw_oi * 8);
+                oc_s2 := r64(g_x86_mw_oc_s2, mw_oi * 8);
+                oc_d := r64(g_x86_mw_oc_dest, mw_oi * 8);
+                oc_op := r64(g_x86_mw_oc_op, mw_oi * 8);
+                oc_res := r64(g_x86_mw_oc_resume, mw_oi * 8);
+                oc_blk := cp;
+                if oc_p1 >= 0 { w32(buf, oc_p1 + 2, oc_blk - (oc_p1 + 6)); }
+                if oc_p2 >= 0 { w32(buf, oc_p2 + 2, oc_blk - (oc_p2 + 6)); }
+                cp = cp + e2_mw_opnd_block(buf, cp, oc_s1, oc_s2, oc_d, oc_op, oc_res);
+                mw_oi = mw_oi + 1; }
+            g_x86_mw_oc_count = 0;
         }
         fi = fi + 1; }
 
