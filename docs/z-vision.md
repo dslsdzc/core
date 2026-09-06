@@ -20,7 +20,7 @@
 
 **Core 的路径**：规约用 Core 语言本身书写（`#check`/`#ensure`/`spec fn`，不需要学数理逻辑），编译器经翻译桥自动编译进 CIC 项，健全性由 CIC 内核 + SMT 证书保证。用户写意图，编译器管证明。
 
-**状态**：设计完成（spec-design v2），**0 实现**——语法/EBNF 已定，.corespec 编译、.csr、翻译桥、内核绑定待推进。
+**状态**：设计完成（spec-design v2），**0 实现**——requires/ensures 语法已入 .cr（独立 .corespec 格式 2026-09 退役，见 adr/adr-0001），.csr、翻译桥、内核绑定待推进。
 
 ## 目标三：一门语言覆盖从零基础到系统编程的完整路径
 
