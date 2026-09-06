@@ -30,3 +30,14 @@
 | ADR-0002 | .ccr v6 段表架构 + ENT 存在结构段 + REG 坐标化 | accepted | 2026-09-05 |
 | ADR-0003 | 自举后端 x86-64 ELF 直出 | accepted | 2026-08 |
 | ADR-0004 | corec/corearch 前后端拆分(.ccr 为接口契约) | accepted | 2026-08 |
+| ADR-0005 | 内存模型分层定稿(图 → 格 → 编码)+ 能力定位 v4 | accepted | 2026-08-26/27 |
+| ADR-0006 | 缓存语义 = 存储语义本体(2026-08-15 纠偏) | accepted | 2026-08-15 |
+| ADR-0007 | 图锚定区域内存模型 + 逃逸 outlives 修订 | accepted | 2026-08-13 |
+| ADR-0008 | 执行模型 region 化(RVSDG 嵌套 + state edges) | accepted | 2026-08-08 |
+| ADR-0009 | 规约系统 v2(CIC 内核 + SMT 证书架构) | accepted | 2026-08-11 |
+| ADR-0010 | 数值类型 dex/apx——精确/授权二分 | accepted | 2026-08-16 |
+| ADR-0011 | 平台桥抽象(I/O 流/随机/哈希/时钟) | accepted | 2026-08-16 |
+| ADR-0012 | int 无上限语义(数学整数 + 编码层投影) | accepted | 2026-08-23~09-06 |
+| ADR-0013 | 类型系统方向 14 条(自动推导/借用收缩/声明式边界) | accepted | 2026-08-30 |
+| ADR-0014 | 惰性求值——编译期下沉路线 | accepted | 2026-08-09 |
+| ADR-0015 | HIT 硬件接口表(取代 .crasm 汇编层) | accepted | 2026-09-05 |
