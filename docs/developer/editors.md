@@ -1,6 +1,6 @@
 # 编辑器接入配置（corelsp）
 
-> 定位：受众 = users/contributors；状态 = active；真源 = corelsp 行为见 [design/corelsp.md](../maintainer/design/corelsp.md)（实现与文档冲突时以源码为准）；仓库内编辑器素材见 [editor/](../../editor/)（扩展源码与说明）。
+> 定位：受众 = 开发者；状态 = active；真源 = corelsp 行为见 [design/corelsp.md](../maintainer/design/corelsp.md)（实现与文档冲突时以源码为准）；仓库内编辑器素材见 [editor/](../../editor/)（扩展源码与说明）。
 > 本文是纯用户向接入指南——各编辑器怎么接 corelsp；corelsp 的架构（检查管线/诊断通道/能力契约）见 [design/corelsp.md](../maintainer/design/corelsp.md)。
 
 corelsp 是 Core 语言的语言服务器（标准 LSP 协议，stdio 管道）。接入后编辑器可获得：

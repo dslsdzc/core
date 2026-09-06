@@ -1,6 +1,6 @@
 # 缓存语义:存储语义本体(权威条款)
 
-> 定位:受众 = 维护者/贡献者/验证器实现者;状态 = active。
+> 定位:受众 = 学术(条款消费方:验证器实现者/维护者);状态 = active。
 > 本文件是 Core 存储语义本体的**唯一权威**——七条条款为定义性条款,将来供验证器(翻译桥/CIC 内核)消费;实现与文档冲突时以本文档为准(设计文档优先于代码)。
 > 设计依据:2026-08-15-cache-semantics-design;v4 晋升与归档讨论见 docs/archive/memory-model-capability-lattice.md。
 > 分层位置:三层映射链(图 → 格 → 编码)的「格」层语义本体;存在结构载体(IR 编码)见 docs/design/existence-structure.md;经典映射(区域/字节)见 docs/design/region-model.md;总览导航见 docs/design/memory-model.md。
