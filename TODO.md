@@ -240,10 +240,10 @@
 **M2 挂账**：
 - 控制流/函数调用/移位/乘除等全 op 合成（M1 子集边界 = main 入口函数；stdlib 闭包辅助函数现走旧路径混合模式）
 - nand 真语义（x86 and+not 两步序列投影）——现单步 and 占位；and→nand/or 合成规则（源语言无位与/或运算符载体）
-- `--table` × `--link/--shared` 组合（池 rip disp 在链接路径的指向验证或显式拒绝）
+- ~~`--table` × `--link/--shared` 组合~~（2026-09-06 已处理：显式拒绝 stderr+exit 1——test_hit_table 三形态覆盖）
 - 全量切换：无 --table 旧路径退役（emit 循环门控翻转）
 - corec build 透传 `--table`；事件流/表数据入 v6 段（NOD op ↔ HIT event_id 对齐）
-- M2 挂账细节（评审 Minor）：hit_w32 负值哨兵实现分裂、add 反减 dest-fresh 前提固化、'events emitted' 计数改名、负值/宽常量池载体
+- M2 挂账细节（2026-09-06 已清 3/4）：~~hit_w32 负值哨兵~~（存 0）、~~add 反减 dest-fresh 前提~~（d==s1 落 0 事件防御）、~~'events emitted' 计数改名~~；**负值/宽常量池载体**（仍待——M1 冒烟无负常量形态）
 
 ## 规约语法并入 .cr（2026-09-06 .corespec 退役挂账）
 
