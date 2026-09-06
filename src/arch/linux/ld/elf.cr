@@ -1085,17 +1085,18 @@ fn elf_gen(buf: string) -> int {
         g_x86_func_off_count = g_x86_func_off_count + 1;
 
         vc2 := r64(g_ir_func_var_count, fi * 8);
+        vs2 := r64(g_ir_func_var_start, fi * 8);
         pc2 := r64(g_ir_func_param_count, fi * 8);
 
+        // int 多字 M1（Task 1）：识别潜在多字变量并计入帧尺寸（tag 区）。
+        // tag 数为 0 → mw_frame_size 与旧公式逐字节一致（快路径零变化）。
+        mw_setup_tags(fi, vs2, vc2);
         fsz := r64(g_x86_func_code_sz, fi * 8);
         // SysV 16 字节对齐（发现 11）：call 后 rsp%16=8；
         // opt≥1 有 6 个 push（rbx,r12-15,rbp）→ rsp%16=8 → size 需 ≡8 (mod 16)；
         // opt<1 有 1 个 push（rbp）→ rsp%16=0 → size 需 ≡0 (mod 16)。
-        g_x86_emit_stack_size = vc2 * 8;
-        if (g_x86_emit_stack_size % 16 == 0 && g_opt_level >= 1) ||
-           (g_x86_emit_stack_size % 16 == 8 && g_opt_level < 1) {
-            g_x86_emit_stack_size = g_x86_emit_stack_size + 8;
-        }
+        // mw_frame_size 已含 tag 区并按上述规则取整（与 Phase 3 同源）。
+        g_x86_emit_stack_size = mw_frame_size(vc2);
         total_code = total_code + sz_push_rbp() + sz_mov_rbp_rsp();
         if g_opt_level >= 1 { total_code = total_code + 18; }  // push rbx,r12-r15(9) + pop r15-r12,rbx(9)
         ss_dry := g_x86_emit_stack_size;
@@ -1212,12 +1213,12 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         g2_init();
         g_current_func_var_start = vs;
         vi := 0; loop { if vi >= vc { break; } g2_slot(vs + vi); vi = vi + 1; }
+        // int 多字 M1（Task 1）：潜在多字变量识别 + tag 字节偏移表（g2_tag_off）。
+        // 帧尺寸 = mw_frame_size(vc)（含 tag 区，16 对齐规则与 Phase 2 dry run
+        // 同源）；tag 数为 0 → 与旧布局逐字节一致。
+        mw_setup_tags(fi, vs, vc);
         // SysV 16 字节对齐（发现 11）：与 dry run 相同的对齐规则
-        g_x86_emit_stack_size = vc * 8;
-        if (g_x86_emit_stack_size % 16 == 0 && g_opt_level >= 1) ||
-           (g_x86_emit_stack_size % 16 == 8 && g_opt_level < 1) {
-            g_x86_emit_stack_size = g_x86_emit_stack_size + 8;
-        }
+        g_x86_emit_stack_size = mw_frame_size(vc);
 
         // Init label state for single-pass backpatching (-1 = not yet seen)
         li2 : ., mut = 0;

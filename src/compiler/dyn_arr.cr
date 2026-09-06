@@ -664,6 +664,12 @@ fn grow_func_cp(needed: int) {
     nb := alloc(nc * 8); _dyncpy(g_x86_func_cp, g_x86_func_cp_cap * 8, nb);
     g_x86_func_cp = nb; g_x86_func_cp_cap = nc; }
 
+fn grow_mw_tag_off(needed: int) {
+    if needed < g_x86_mw_tag_off_cap { return; }
+    nc : ., mut = g_x86_mw_tag_off_cap * 2; if nc < 128 { nc = 128; } if nc < needed { nc = needed + 128; }
+    nb := alloc(nc * 8); _dyncpy(g_x86_mw_tag_off, g_x86_mw_tag_off_cap * 8, nb);
+    g_x86_mw_tag_off = nb; g_x86_mw_tag_off_cap = nc; }
+
 fn grow_opt_meta(needed: int) {
     if needed <= g_opt_meta_cap { return; }
     nc : ., mut = g_opt_meta_cap * 2;

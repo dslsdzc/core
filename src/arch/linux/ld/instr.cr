@@ -84,6 +84,117 @@ fn g2_rodata_sz() -> int {
     return o;
 }
 
+// ══════════════════════════════════════════════════════════════
+// int 多字 M1 tagged 槽（D1a）——潜在多字变量识别 + tag 区（Task 1）
+//
+// 值表示（plan 拍板）：快路径 int 变量槽仍 64 位（快值或 2-limb 堆指针）；
+// 潜在多字变量（运行时可持有 |v| ≥ 2^63 的值）在栈帧尾附加 1 字节 tag。
+// var 槽偏移（g2_slot）不变；tag 区位于槽区之下：k-th tagged（变量索引升序）
+// 的 tag 字节偏移 = -(vc*8 + 1 + k)（相对 rbp）。无 tagged 变量的函数 tag 区
+// 为空 → 帧公式与现状逐字节一致（快路径零变化硬约束）。
+//
+// 识别规则（保守最小正确集——M1 无区间证明，D1c 静态免 tag = M2 后置）：
+//   函数局部值流闭包（per 函数 [vs, vs+vc) 的 TI_INT 变量）：
+//     A. IR_BINARY(OP_ADD/OP_SUB) 的 dest —— add/sub 溢出是 M1 中唯一的
+//        >64 位值生产者（mul/div 溢出链 = M2；>64 字面量 lexer 拒 = D4 推迟 M2）；
+//     B. IR_LOAD 值拷贝 d ← s1：s1 已 tagged（TI_INT）→ d tagged —— 2-limb 值
+//        经拷贝传播（后端 IR_LOAD = e2_load_var 直拷槽值，无解引用）。
+//    定义先于使用（checker 静态顺序保证）→ 单遍前向扫描即达闭包。
+// 保守性：集合外变量运行时不可能是 2-limb 态（唯一生产者是 A 的溢出慢路径与
+// B 的拷贝）；A 无溢出只是运行时事实（付 1 字节栈 + 之后任务的 tag 初值写）。
+//
+// M1 边界（tag 不做传播，后续任务/文档挂账）：
+//   - 跨函数：2-limb 值经调用实参/返回值传递（含 goroutine 通道）——无协议；
+//   - 出逃：IR_STORE/STORE_PTR/STORE_INDEX 把 tagged 值写入全局/堆/数组；
+//   - globals/BSS：dest 为全局的算术（现 IR 中函数体 dest 均为局部）。
+// 上述场景若 tagged 值真的超 64 = M1 已知边界（正确性由测试套件规避）。
+//
+// 消费方接口（Task 2-5）：
+//   - mw_setup_tags(fi, vs, vc)：per 函数识别 + 填表（elf.cr 两阶段各一次）；
+//   - g_x86_mw_tag_count：tagged 数 = tag 区字节数；
+//   - g2_tag_off(var_idx)：var 的 tag 字节偏移（-1 = 非 tagged）——慢路径写
+//     tag（Task 3）、消费者读 tag（Task 4）、D6 寄存器排除（Task 5）均走它；
+//   - mw_frame_size(vc)：含 tag 区的帧总字节（已按 SysV 16 对齐规则取整）。
+// ══════════════════════════════════════════════════════════════
+
+fn mw_setup_tags(fi: int, vs: int, vc: int) {
+    // 识别函数 fi（var 域 [vs, vs+vc)）的潜在多字变量并建立 tag 字节偏移表。
+    // 纯 IR 函数——输入即 .ccr 载入后的最终 IR（发射所见），无格式/无跨进程态。
+    grow_mw_tag_off(vc);
+    z : ., mut = 0;
+    loop { if z >= vc { break; } w64(g_x86_mw_tag_off, z * 8, -1); z = z + 1; }
+    g_x86_mw_tag_count = 0;
+    if vc <= 0 { return; }
+    ic := r64(g_ir_func_instr_count, fi * 8);
+    ist := r64(g_ir_func_instr_start, fi * 8);
+    ve := vs + vc;
+    // Pass 1：单遍前向闭包（定义先于使用）——dest 在函数域内且为 TI_INT：
+    //   IR_BINARY(ADD/SUB) → 标 dest；IR_LOAD 且 s1 已标 → 传播标 dest。
+    ii : ., mut = 0;
+    loop {
+        if ii >= ic { break; }
+        ino := ist + ii;
+        op := iri_op(ino);
+        d := iri_dest(ino);
+        if d >= vs && d < ve && irv_type(d) == TI_INT {
+            if op == IR_BINARY {
+                s3 := iri_s3(ino);
+                if s3 == OP_ADD || s3 == OP_SUB {
+                    w64(g_x86_mw_tag_off, (d - vs) * 8, 0);  // 0 = 已标记（占位）
+                }
+            } else if op == IR_LOAD {
+                s1 := iri_s1(ino);
+                if s1 >= vs && s1 < ve && irv_type(s1) == TI_INT {
+                    if r64(g_x86_mw_tag_off, (s1 - vs) * 8) != -1 {
+                        w64(g_x86_mw_tag_off, (d - vs) * 8, 0);
+                    }
+                }
+            }
+        }
+        ii = ii + 1;
+    }
+    // Pass 2：变量索引升序分配 tag 字节（k-th → rbp - (vc*8 + k)）。
+    cnt : ., mut = 0;
+    k : ., mut = 0;
+    loop {
+        if k >= vc { break; }
+        if r64(g_x86_mw_tag_off, k * 8) != -1 {
+            cnt = cnt + 1;
+            w64(g_x86_mw_tag_off, k * 8, -(vc * 8 + cnt));
+        }
+        k = k + 1;
+    }
+    g_x86_mw_tag_count = cnt;
+}
+
+fn g2_tag_off(v: int) -> int {
+    // var v（当前函数内）的 tag 字节偏移（相对 rbp，恒负）；-1 = 非 tagged。
+    // 仅当前函数内有效（表由 mw_setup_tags 按函数填充）。
+    if v < 0 { return -1; }
+    lv := v - g_current_func_var_start;
+    if lv < 0 { return -1; }
+    if str_len(g_x86_mw_tag_off) <= lv * 8 { return -1; }
+    return r64(g_x86_mw_tag_off, lv * 8);
+}
+
+fn mw_frame_size(vc: int) -> int {
+    // 帧总字节 = var 槽 vc*8 + tag 区（g_x86_mw_tag_count 字节）再按现 SysV
+    // 规则补 16 对齐：opt≥1（6 pushes）帧 ≡ 8 (mod 16)；opt<1（1 push）≡ 0。
+    // tag 数为 0 时对任意 vc 的结果与旧公式逐字节一致（快路径零变化）。
+    sz : ., mut = vc * 8 + g_x86_mw_tag_count;
+    r := sz % 16;
+    if g_opt_level >= 1 {
+        if r != 8 {
+            pad := 8 - r;
+            if pad < 0 { pad = pad + 16; }
+            sz = sz + pad;
+        }
+    } else {
+        if r != 0 { sz = sz + (16 - r); }
+    }
+    return sz;
+}
+
 // ── Byte encoding helpers ──
 fn e2_w8(buf: string, pos: int, val: int) { store8(buf, pos, val % 256); }
 fn e2_w16(buf: string, off: int, val: int) { w32(buf, off, val); }

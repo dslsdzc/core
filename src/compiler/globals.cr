@@ -145,6 +145,14 @@ g_x86_global_cap : int, mut;
 g_x86_global_off : string, mut;         g_x86_global_off_cnt : int, mut; g_x86_global_off_cap : int, mut;
 g_x86_func_offsets : string, mut;       g_x86_func_offsets_cap : int, mut; g_x86_func_off_count : int, mut;
 g_x86_emit_vars : string, mut;          g_x86_emit_vars_cap : int, mut; g_x86_emit_var_count : int, mut; g_x86_emit_stack_size : int, mut;
+// int 多字 M1（tagged 槽，D1a）：潜在多字变量的旁路 tag 区（栈帧尾附加）。
+// 见 docs/superpowers/plans/2026-09-06-int-multiword-m1.md Task 1 与
+// docs/superpowers/specs/2026-09-06-int-multiword-backend-design.md（D1a/D3）。
+// g_x86_mw_tag_off：当前函数的 per-局部-变量 tag 字节偏移表（i64 数组，按
+// 局部位置 v-var_start 索引；值 = 相对 rbp 的负字节偏移；-1 = 非 tagged）。
+// g_x86_mw_tag_count：当前函数 tagged 变量数（tag 区字节数 = 每变量 1 字节）。
+g_x86_mw_tag_off : string, mut;     g_x86_mw_tag_off_cap : int, mut;
+g_x86_mw_tag_count : int, mut;
 g_x86_ret_patch_pos : string, mut;      g_x86_ret_patch_cap : int, mut; g_x86_ret_patch_count : int, mut;
 g_x86_call_patch_pos : string, mut;     g_x86_call_patch_name : string, mut;
 g_x86_call_patch_count : int, mut;      g_x86_call_patch_cap : int, mut;
