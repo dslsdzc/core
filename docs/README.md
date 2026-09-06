@@ -1,38 +1,42 @@
 # Core 文档中心
 
-> 定位：受众 = 用户与维护者；状态 = active；真源 = 各文档头部定位声明（实现与文档冲突时以源码为准）。
-> 分类规则：按「主题 × 读者 × 状态」组织；每份文档头部有定位声明（受众/状态/真源）。
-> 一份文档一个职责；本文件是唯一导航索引，与目录树一致。
+> 定位:受众 = 所有读者(入口);状态 = active。
+> 分类规则:一级 = **受众**(developer/maintainer/academic),二级 = 主题;每份文档头部有定位声明(受众/状态/真源)。
+> 一份文档一个职责;实现与文档冲突时以源码为准(既有惯例),设计意图与实现差距以"设计态"标注(设计文档优先于代码)。
 
-## 入口
-- [愿景 z-vision](z-vision.md)— 项目愿景入口（顶层保留）
+## 开发者(developer/)——用 Core 写程序
 
-## 用户向（language/）
-- [语言语法](language/syntax.md)— 词法/类型/声明/表达式/规约；真源 = grammar/core.ebnf + src/compiler/
-- [学习路径](language/learning-path.md)
-- [错误码参考](language/error-codes.md)
-- [编辑器与 LSP 配置](language/editor-setup.md)
+- [tutorial.md](developer/tutorial.md)— 渐进学习路径
+- [syntax.md](developer/syntax.md)— 语言语法参考
+- [errors.md](developer/errors.md)— 错误码参考
+- [editors.md](developer/editors.md)— 编辑器与 LSP 配置
+- [at-intrinsics.md](developer/at-intrinsics.md)— @ 内建原语
 
-## 定稿参考（design/）— 维护者向
-- [项目书](design/project-book.md)— 项目定位
-- [执行模型](design/execution-model.md)— v2 执行模型（region 嵌套 + state edges）；[dataflow-design.md](design/dataflow-design.md) 已被其取代，留档
-- [存储语义总览](design/memory-model.md)→ [缓存语义七条](design/cache-semantics.md)/[存在结构 v6](design/existence-structure.md)/[图锚定区域](design/region-model.md);[指针模型](design/pointer-model.md)、[寄存器分配缓存映射](design/regalloc-cache-mapping.md)
-- [IR 操作语义](design/ir-op-semantics.md)、[术语表](design/glossary.md)
-- [规约系统设计](design/spec-design.md)、[验证内核](design/verifier-kernel.md)、[@ 内建原语](design/at-intrinsics.md)
-- [corelsp 设计](design/corelsp.md)— 语言服务器架构（检查管线/诊断通道/能力契约；用户接入见上 editor-setup 条）
+## 维护者(maintainer/)——改编译器
 
-## 特性提案（proposals/）
-[generics](proposals/generics.md) / [comptime](proposals/comptime.md) / [ffi](proposals/ffi.md) / [concurrency](proposals/concurrency.md) / [dynamic-typing](proposals/dynamic-typing.md) / [lazy](proposals/lazy.md) / [distributed](proposals/distributed.md) / [probabilistic](proposals/probabilistic.md)（状态见各文件头注）
+**上手**:[onboarding.md](maintainer/onboarding.md)(先读)→ [testing.md](maintainer/testing.md)(回归操作)
 
-## 任务产物归档（archive/）
-compcert 对照审查材料与修复记录（[reference](archive/compcert-reference.md)、[round4-findings](archive/compcert-round4-findings.md)）、[数值类型迁移盘点](archive/numeric-migration-inventory.md)、[内存模型能力格讨论备忘](archive/memory-model-capability-lattice.md)
+**设计参考**(maintainer/design/):
+- 执行模型 / 图与 region:[execution-model.md](maintainer/design/execution-model.md)、[dataflow-design.md](maintainer/design/dataflow-design.md)(早期稿,已被取代,留档)
+- 存储语义:[memory-model.md](maintainer/design/memory-model.md)(总览)、[cache-semantics.md](academic/cache-semantics.md)(七条权威,跨 academic)、[existence-structure.md](maintainer/design/existence-structure.md)(v6 承载)、[region-model.md](maintainer/design/region-model.md)(经典映射)
+- 指针与验证 pass:[pointer-model.md](maintainer/design/pointer-model.md)、[regalloc-cache-mapping.md](maintainer/design/regalloc-cache-mapping.md)
+- 规约系统:[spec-design.md](maintainer/design/spec-design.md);IR 操作语义:[ir-op-semantics.md](maintainer/design/ir-op-semantics.md);corelsp:[corelsp.md](maintainer/design/corelsp.md);已废弃:[crasm.md](maintainer/design/crasm.md)
 
-## 维护者手册（maintainer/）
-- [onboarding.md](maintainer/onboarding.md)— 新维护者入门（仓库地图/构建/分支/jj/雷区）
-- [testing.md](maintainer/testing.md)— 测试与回归操作手册（三套定位/加用例/自举回归/失败定位）
+**决策记录**:[adr/](maintainer/adr/README.md)— ADR-0001 起
 
-## 决策记录（adr/）
-[adr/](adr/) — ADR-0001 起，编号递增（Task 6 产出 ADR-0001~0004）
+**特性提案**(maintainer/proposals/):generics/concurrency/dynamic-typing/comptime/ffi/lazy/distributed/probabilistic(状态见各文件头注)
 
-## 工具链目录（不动）
-pseudocode/（TDD 交付物）、superpowers/（specs + plans）、coq/、ir-schema/、verifier/
+## 学术(academic/)——验证/理论读者
+
+- [cache-semantics.md](academic/cache-semantics.md)— 缓存语义七条(存储语义本体,权威)
+- [verifier-kernel.md](academic/verifier-kernel.md)— 验证内核选型(CIC 信任根)
+
+## 顶层
+
+- [project-book.md](project-book.md)— 项目定位导航
+- [glossary.md](glossary.md)— 架构术语表(跨受众)
+- [z-vision.md](z-vision.md)— 愿景
+
+## 档案与工具链目录(不参与受众分类)
+
+archive/(任务产物)、pseudocode/(TDD 交付物)、superpowers/(specs + plans 工作目录)、coq/、ir-schema/、verifier/

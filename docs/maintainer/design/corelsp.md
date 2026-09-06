@@ -1,8 +1,8 @@
 # corelsp 架构（语言服务器设计）
 
-> 定位：受众 = maintainers；状态 = active；真源 = [src/lsp/](../../src/lsp/) + [build_selfhost_native.py](../../build_selfhost_native.py)（corelsp 段）；实现与文档冲突时以源码为准。
-> 用户接入（Neovim/VS Code/Zed 配置步骤）见 [language/editor-setup.md](../language/editor-setup.md)。
-> 早期设计稿（历史，细节以源码为准）：2026-08-08 [lsp-design](../superpowers/specs/2026-08-08-lsp-design.md)、2026-08-28 [lsp-production-design](../superpowers/specs/2026-08-28-lsp-production-design.md)。
+> 定位：受众 = maintainers；状态 = active；真源 = [src/lsp/](../../src/lsp/) + [build_selfhost_native.py](../../../build_selfhost_native.py)（corelsp 段）；实现与文档冲突时以源码为准。
+> 用户接入（Neovim/VS Code/Zed 配置步骤）见 [language/editor-setup.md](docs/developer/editors.md)。
+> 早期设计稿（历史，细节以源码为准）：2026-08-08 [lsp-design](docs/superpowers/specs/2026-08-08-lsp-design.md)、2026-08-28 [lsp-production-design](docs/superpowers/specs/2026-08-28-lsp-production-design.md)。
 
 ## 一、是什么
 
@@ -43,12 +43,12 @@ corelsp = 用 Core 自举编译器**前端子集**拼接出的语言服务器：
 
 ## 六、客户端接线现状
 
-用户配置步骤见 [language/editor-setup.md](../language/editor-setup.md)，仓库内接线：
+用户配置步骤见 [language/editor-setup.md](docs/developer/editors.md)，仓库内接线：
 
 - **VS Code**：[editor/vscode-core/](../../editor/vscode-core/)（语法高亮 + 客户端；`corelsp.path`/`corelsp.enabled` 设置）
-- **Zed**：扩展仓库 `dslsdzc/core-plugin-zed`（Rust wasm：`language_server_command` 返回命令路径——纯 TOML 无法指定命令，Zed 机制约束）；[.zed/settings.json](../../.zed/settings.json) 内置兜底配置（仅 LSP，无高亮）
-- **Neovim**：内置 LSP 直连 stdio；旧 compiler 插件 [editor/nvim/plugin/core.lua](../../editor/nvim/plugin/core.lua)（基于 corec）功能重叠，启用 LSP 时移除
+- **Zed**：扩展仓库 `dslsdzc/core-plugin-zed`（Rust wasm：`language_server_command` 返回命令路径——纯 TOML 无法指定命令，Zed 机制约束）；[.zed/settings.json](../../../.zed/settings.json) 内置兜底配置（仅 LSP，无高亮）
+- **Neovim**：内置 LSP 直连 stdio；旧 compiler 插件 [editor/nvim/plugin/core.lua](../../../editor/nvim/plugin/core.lua)（基于 corec）功能重叠，启用 LSP 时移除
 
 ## 七、集成测试
 
-[tests/selfhost/test_lsp.py](../../tests/selfhost/test_lsp.py)：八组场景按序执行——lifecycle、jsonrpc 错误码、diagnostics+reset、hover+definition、completion+documentSymbol、semanticTokens（含跨行差分）、stdout 污染守卫。**每组独立 spawn corelsp**（隔离全局状态——单文档全局状态机跨组复用会串状态）；结尾打印 `lsp suite: ALL PASS`，任一失败打印 FAIL 并非零退出。
+[tests/selfhost/test_lsp.py](../../../tests/selfhost/test_lsp.py)：八组场景按序执行——lifecycle、jsonrpc 错误码、diagnostics+reset、hover+definition、completion+documentSymbol、semanticTokens（含跨行差分）、stdout 污染守卫。**每组独立 spawn corelsp**（隔离全局状态——单文档全局状态机跨组复用会串状态）；结尾打印 `lsp suite: ALL PASS`，任一失败打印 FAIL 并非零退出。
