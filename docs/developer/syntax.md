@@ -81,6 +81,8 @@ auto fileid move self in None Some unit
 | `=` | 赋值（含声明初始化 `: T =`） |
 | `+=` `-=` `*=` `/=` | 复合赋值(`x += y` = `x = x + y`;无 `%=`) |
 | `->` | 返回类型（仅此用途） |
+| `=>` | match 臂分隔(见 7.3) |
+| `...` | 变参前缀(`...name: Type`,见 8.1) |
 | `*` | 乘 / 解引用 |
 | `&` `&mut` | 取地址（引用） |
 | `+ - / %` | 算术 |
@@ -426,7 +428,7 @@ fn add(a: int, b: int) -> int {
 fn pi() -> auto = 3.14159;  // 单行形式；返回类型推断
 ```
 
-`FunctionDecl = [ 'pub' ] 'fn' IDENT [ GenericParams ] '(' [ ParamList ] ')' '->' Type ( FunctionBody | '=' Expr ';' )`。参数 `Param = IDENT ':' Type`。返回类型可以是 `auto`（或 `.`），由函数体推导。
+`FunctionDecl = [ 'pub' ] 'fn' IDENT [ GenericParams ] '(' [ ParamList ] ')' '->' Type ( FunctionBody | '=' Expr ';' )`。参数 `Param = IDENT ':' Type`；末位参数可变参：`...name: Type`（收集剩余实参，见 stdlib variadic）。返回类型可以是 `auto`（或 `.`），由函数体推导。
 
 ### 8.2 方法
 
