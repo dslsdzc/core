@@ -27,7 +27,7 @@
 
 - int 变量 = 64 位栈槽（g2_slot 偏移布局 init_backend_arrays/opt 定）；寄存器分配负编码（CAG 后真实分配）
 - IR_BINARY(OP_ADD/SUB) 后端发射：e2_load_var(r10,s1)+e2_load_var(r11,s2)+opcode+modrm+e2_st(r10, slot d)（instr.cr 双寄存器累加形；x86 sub 4D 29 DA、add 4D 01 DA 形）
-- x86 溢出检测：add/sub 后 jo（0x70/0x71 rel8）——本计划慢路径跳转载体
+- x86 溢出检测：add/sub 后 jo（实现 = 0F 80 rel32 6B——Task 2 决策：rel8 ±127 对大函数不可达；下文「rel8」括注同义）
 - HIT 常量池先例：rodata 尾追加 8B/槽 + rip 位移回填（lower_to_core.cr + elf.cr）
 - IR_CONST s1 = i64 槽（64 位）——超 64 字面量现状在 lexer 被拒（P2 守卫 = 编码层限制错误，见 int-unbounded 定稿）
 
@@ -43,7 +43,7 @@
 ## 慢路径形态（M1 设计）
 
 ```
-快路径：add r10,r11 → jo slow_n  （jo = 0x70 rel8）
+快路径：add r10,r11 → jo slow_n  （jo（rel32 0F 80——Task 2 定案））
 慢路径块 slow_n：值已在 r10/r11（环绕结果）
   → 正确 128 值 = 符号扩展重建：[r10 结果, 高位 = (r10<0 ? -1 : 0)]（add 溢出结果低 64 位 = r10 环绕值——数学和 = 环绕低 64 + 进位修正？——add 溢出 jo 后 r10 = 环绕和；真值 = 环绕和 + (2^64 or -2^64)——由 CF/OF 判定）
   → 存 2-limb 到槽对（低槽 = 环绕值 + 高槽 = 修正）
