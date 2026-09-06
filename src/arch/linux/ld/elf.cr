@@ -1314,11 +1314,18 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
             // -1（未映射/形态不支持/无表）落旧路径 emit_instr——混合模式。
             // int 多字 M1（Task 2）：tagged int add/sub 需溢出跳（jo）——
             // 表路径（hit_ev 降低不知 tag/无 jo 事件）整条排除落旧路径。
+            jo_before := g_x86_mw_jo_count;  // Task 3：站点回跳点记录
             sz : ., mut = -1;
             if hit_table_active() != 0 && mw_int_arith_jo_needed(inst_idx) == 0 {
                 sz = emit_instr_tabled(inst_idx, buf, cp);
             }
             if sz < 0 { sz = emit_instr(inst_idx, buf, cp); }
+            // Task 3：本指令若发射了 jo（至多 1 站点/指令——add/sub 单点），
+            // 其回跳点 = 快路径 e2_st 之后的指令尾（绝对位置 cp+sz）——慢路径
+            // 块跳回后从此继续（跳走即跳过该 store；dest 由块自行回存）。
+            if g_x86_mw_jo_count > jo_before {
+                w64(g_x86_mw_jo_resume, (g_x86_mw_jo_count - 1) * 8, cp + sz);
+            }
             cp = cp + sz;
         ii = ii + 1; }
 
@@ -1364,19 +1371,27 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         }
         w8(buf, cp, 195); cp = cp + 1;  // ret
 
-        // ── int 多字 M1（Task 2）：慢路径块（函数尾附加）+ jo rel32 回填 ──
-        // jo 目标 = 本函数尾声之后——emit_instr 记录位置（g2_init 清零、
-        // 逐函数段），此处（块位置已知后）统一回填。块骨架 = ud2：溢出到达
-        // = 确定性 SIGILL（本任务跳转可达性验证载体）；Task 3 以真实 2-limb
-        // 修正代码替换块内容（届时 jo 记录也需扩展 dest 等现场信息）。
-        // 无 jo 的函数不发块、零字节影响（untagged 快路径零变化）。
+        // ── int 多字 M1（Task 3）：慢路径块（函数尾附加）+ jo rel32 回填 ──
+        // 每 jo 站点独立块（块形状决策：jo 现场 = dest 槽/回跳点逐站点而异，
+        // 共享块需逐站分发 = 复杂度不值；块 ≈ 45B × 站点数，函数尾冷区，M1
+        // 保守 tagged 集代价的一部分——与 Task 2 已付的每站 jo 6B 同族）。
+        // 块 = 真实 2-limb 修正代码（e2_mw_slow_block，instr.cr）：
+        //   修正 128 位值 → alloc(16)（alloc_patch 注册——计数逐函数不重置，
+        //   与函数体 alloc 调用同批回填）→ 写 2-limb → 值槽存指针（含
+        //   O1/O2 reg 形态——g2_slot 于当前函数上下文现算，与函数体发射
+        //   同源同值）→ tag 置位 → jmp 回该站点快路径 store 之后。
+        // jo 记录（pos/dest/is_sub/resume——g2_init 清零逐函数段）此处按站
+        // 点点序发射；无 jo 的函数不发块、零字节影响（untagged 快路径零变化）。
         if g_x86_mw_jo_count > 0 {
-            mw_blk := cp;
-            w8(buf, cp, 15); w8(buf, cp + 1, 11); cp = cp + 2;  // ud2（占位）
             mw_ji : ., mut = 0;
             loop { if mw_ji >= g_x86_mw_jo_count { break; }
                 jo_pos := r64(g_x86_mw_jo_pos, mw_ji * 8);
+                jo_d := r64(g_x86_mw_jo_dest, mw_ji * 8);
+                jo_sub := r64(g_x86_mw_jo_is_sub, mw_ji * 8);
+                jo_res := r64(g_x86_mw_jo_resume, mw_ji * 8);
+                mw_blk := cp;
                 w32(buf, jo_pos + 2, mw_blk - (jo_pos + 6));
+                cp = cp + e2_mw_slow_block(buf, cp, jo_d, jo_sub, jo_res);
                 mw_ji = mw_ji + 1; }
             g_x86_mw_jo_count = 0;
         }

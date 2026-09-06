@@ -1,25 +1,19 @@
 #!/usr/bin/env python3
-"""int 多字 M1 Task 2：快路径溢出检测发射（tagged int add/sub + jo → 慢路径块）。
+"""int 多字 M1 Task 2/3：快路径溢出检测发射（tagged int add/sub + jo → 慢路径块）。
 
 验证对象（src/arch/linux/ld/）：
   - emit_instr IR_BINARY int（TI_INT）ADD/SUB：dest ∈ tagged 集（g2_tag_off(d)
     != -1——Task 1 规则 A 对域内 add/sub dest 无条件标记）→ e2_alu 后紧跟
     jo（0F 80 rel32——rel8 对函数尾附加的慢路径块在 >127B 函数体上不可达，
-    t3 是此必要性的行为级断言）→ 慢路径块骨架（函数尾附加，占位 ud2 =
-    溢出触发 = SIGILL，确定性信号；Task 3 替换为 2-limb 修正代码）。
-  - untagged 程序（无 int add/sub）：零字节变化（z1/z2/z3 与改动前快照
-    逐字节 diff——Task 1 同一方法的零变化硬约束验证）。
+    t3 是此必要性的行为级断言）。
+  - Task 3 起：函数尾每 jo 站点独立真实慢路径块（2-limb 修正 + alloc(16) +
+    写 2-limb + dest 回存 + tag 置位 + 跳回 e2_st 之后——e2_mw_slow_block）；
+    无 jo 的函数不发块、untagged 快路径零变化（z 用例逐字节验证）。
+  - 块前缀 = push r10（41 52，确定性）——站点块定位锚。
 
-方法：oracle = Python 复刻识别（from test_mw_task1：同一 v6 .ccr 解析 + 不动点
-tag 集——不同实现同一断言面），期望 jo 数 = 该函数 IR 中
-(IR_BINARY, s3∈{ADD,SUB}, dest ∈ tagged) 的指令数；ELF 侧从 _start 尾 call main
-模式定位 main、以 _init_globals（push rbp; mov rbp,rsp; pop rbp; ret）为函数尾
-边界，在 main 区域扫描 0F 80（jo near rel32）字节模式并验证：
-  - 个数 == oracle（每个 tagged int add/sub 恰一个 jo）；
-  - 每个 rel32 目标 == 函数尾慢路径块（_init_globals 前 2 字节，内容 0F 0B ud2）；
-  - t3：首个 jo 距块 >127B（rel8 若被回退 → 该 jo 不可达/断言失败）。
 行为层：无溢出 add（t1）jo 不触发、exit 正常；溢出 add（t2）jo 触发 →
-ud2 → SIGILL（returncode -4）——跳转可达性行为验证（真溢出修正 = Task 3）；
+慢路径块 → 2-limb 结果经测试钩子（syscall3 原始 16B 写 stdout——验全 128
+位通道）assert 数学正确（本文件验 2^63 一例，全套验算在 test_mw_task3.py）；
 t3 大函数 250 次 +1 无溢出 exit 250。
 
 零 diff：z 用例（无 int 算术）需与改动前编译器输出逐字节一致。基线快照：
@@ -50,30 +44,32 @@ IR_BINARY = 2
 OP_ADD = 1
 OP_SUB = 2
 
-# jo near rel32 = 0F 80 cd（6B）；慢路径骨架占位 = ud2（0F 0B）
+# jo near rel32 = 0F 80 cd（6B）；慢路径块确定性前缀 = sbb r11, r11
+# （4D 19——高 limb 修正首操作，add/sub 共用；sub 后随 48 F7 not）
 JO_PAT = b"\x0f\x80"
-UD2 = b"\x0f\x0b"
+BLK_PREFIX = b"\x4d\x19"
 
 CASES = [
-    # (name, exit, intent)——exit: None = 溢出程序（期望 SIGILL，returncode -4）
-    ("t1_add", 0,
+    # (name, exit, stdout_want(16B)/None, intent)
+    ("t1_add", 0, None,
      "add 快路径无溢出（2e9+2e9=4e9 < 2^63）：jo 在但恒不触发——jo 发射断言 + 行为不变"),
-    ("t2_add_overflow", None,
-     "溢出（2^62+2^62=2^63 > i64max）触发 jo → 慢路径块骨架 ud2 = SIGILL："
-     "跳转可达性（真溢出修正 = Task 3，本任务验跳转本身）"),
-    ("t3_bigfunc", 250,
-     "250 次 +1（>127B 函数体）：jo rel32 必需性——每个 jo 仍可达函数尾块，"
+    ("t2_add_overflow", 16, struct.pack("<QQ", 1 << 63, 0),
+     "溢出（2^62+2^62=2^63 > i64max）触发 jo → 慢路径块 → 2-limb 数学正确："
+     "测试钩子（syscall3 原始 16B 写 stdout）验 lo=2^63、hi=0（全 128 位通道）"),
+    ("t3_bigfunc", 250, None,
+     "250 次 +1（>127B 函数体）：jo rel32 必需性——每个 jo 仍可达其函数尾块，"
      "首 jo 距块 >127B（rel8 编码在回退时不可达）"),
-    ("z1_noarith", 7, "untagged：无 int 算术——零 diff（与改动前快照逐字节一致）"),
-    ("z2_copy", 100, "untagged：const/STORE 拷贝链（B' 无 tag 源）——零 diff"),
-    ("z3_branch", 9, "untagged：BINARY cmp/分支/循环（无 ADD/SUB）——零 diff"),
+    ("z1_noarith", 7, None, "untagged：无 int 算术——零 diff（与改动前快照逐字节一致）"),
+    ("z2_copy", 100, None, "untagged：const/STORE 拷贝链（B' 无 tag 源）——零 diff"),
+    ("z3_branch", 9, None, "untagged：BINARY cmp/分支/循环（无 ADD/SUB）——零 diff"),
 ]
 
 SRCS = {
     "t1_add": "fn main() -> int {\n    a := 2000000000;\n    b := 2000000000;\n"
               "    c := a + b;\n    return c;\n}\n",
     "t2_add_overflow": "fn main() -> int {\n    x : ., mut = 4611686018427387904;\n"
-                       "    x = x + 4611686018427387904;\n    return x;\n}\n",
+                       "    x = x + 4611686018427387904;\n"
+                       "    r := syscall3(1, 1, x, 16);\n    return r;\n}\n",
     "t3_bigfunc": None,  # Python 生成（250 次 x = x + 1）
     "z1_noarith": "fn main() -> int {\n    return 7;\n}\n",
     "z2_copy": "fn main() -> int {\n    a := 123456;\n    b := a;\n"
@@ -195,7 +191,7 @@ def main() -> int:
     if args.snapshot:
         ZDIFF.mkdir(exist_ok=True)
     ok = True
-    for name, want_exit, desc in CASES:
+    for name, want_exit, want_out, desc in CASES:
         src = SCRATCH / f"{name}.cr"
         src.write_text(SRCS[name], encoding="utf-8")
         for opt in (0, 1, 2):
@@ -224,8 +220,7 @@ def main() -> int:
                 ok = False
                 continue
             jos = scan_jos(text, m0, m1)
-            blk = m1  # 慢路径块（ud2 骨架）附于 main 尾声 ret 之后、下一函数前
-            # ── jo 个数/目标断言（untagged 用例：exp=0 → 不得有任何 0F 80）──
+            # ── jo 个数断言（untagged 用例：exp=0 → 不得有任何 0F 80）──
             if len(jos) != exp:
                 print(f"[FAIL] {name} @O{opt}: jo sites {len(jos)} != oracle {exp} "
                       f"(tags={len(detect_tags(mainf, var_types))}) — {desc}")
@@ -235,19 +230,31 @@ def main() -> int:
                 print(f"[PASS] {name} @O{opt}: no jo (oracle {exp}); region "
                       f"[{m0},{m1}) len={m1 - m0} (desc: {desc})")
             else:
-                if text[blk:blk + 2] != UD2:
-                    print(f"[FAIL] {name} @O{opt}: block@{blk} != ud2 "
-                          f"({text[blk:blk + 2].hex()})")
+                # Task 3：每站点独立慢路径块——jo rel32 目标 = 各自块
+                # （发射序 = 指令序 → 扫描序；首站点块 = 尾声 ret 后首字节
+                # m1；块前缀 = sbb r11,r11 4D 19 确定性锚）。
+                targets = [t for (_, t) in jos]
+                if jos[0][1] != m1:
+                    print(f"[FAIL] {name} @O{opt}: first jo target {jos[0][1]} "
+                          f"!= block region start {m1}")
                     ok = False
                     continue
-                bad = [j for j in jos if j[1] != blk]
-                if bad:
-                    print(f"[FAIL] {name} @O{opt}: {len(bad)}/{len(jos)} jo "
-                          f"targets != block@{blk} (first bad {bad[0]})")
+                bad_pre = [t for t in targets if text[t:t + 2] != BLK_PREFIX]
+                bad_ord = [t for t in targets if t < m1]
+                if bad_pre or bad_ord:
+                    print(f"[FAIL] {name} @O{opt}: block targets invalid — "
+                          f"prefix-miss {[t for t in bad_pre]} "
+                          f"pre-epilogue {bad_ord}")
                     ok = False
                     continue
-                dmax = blk - jos[0][0]  # 首个（距块最远）jo 的距离
-                print(f"[PASS] {name} @O{opt}: {len(jos)} jo -> block@{blk} "
+                if any(targets[i] >= targets[i + 1] for i in range(len(targets) - 1)):
+                    print(f"[FAIL] {name} @O{opt}: block targets not strictly "
+                          f"increasing: {targets}")
+                    ok = False
+                    continue
+                dmax = targets[0] - jos[0][0]  # 首 jo 距其块（= m1 − jo0）
+                print(f"[PASS] {name} @O{opt}: {len(jos)} jo -> per-site blocks "
+                      f"@{targets[0]}..+{targets[-1] - targets[0]} "
                       f"(first-jo dist {dmax}B, desc: {desc})")
                 if name == "t3_bigfunc" and opt == 0:
                     # rel32 必需性：最远 jo 距块 >127B——rel8 编码不可达，回退必红
@@ -255,23 +262,23 @@ def main() -> int:
                         print(f"[FAIL] {name} @O{opt}: farthest jo-block dist "
                               f"{dmax} <= 127 — t3 失去 rel32 判别力")
                         ok = False
-            # ── 行为（t2 溢出 → SIGILL；其余 exit 码）──
+            # ── 行为（t2 溢出 → 2-limb 修正 + 测试钩子验 16B；其余 exit 码）──
             os.chmod(out, 0o755)
-            r = subprocess.run([str(out)], cwd=BASE, timeout=60)
-            if want_exit is None:
-                if r.returncode != -4:
-                    print(f"[FAIL] {name} @O{opt}: overflow run rc {r.returncode}"
-                          f" != -4 (SIGILL)——jo 未达慢路径块")
-                    ok = False
-                else:
-                    print(f"[PASS] {name} @O{opt}: overflow run rc -4 (SIGILL) "
-                          f"— jo -> block reachable")
-            elif r.returncode != want_exit:
+            r = subprocess.run([str(out)], cwd=BASE, capture_output=True, timeout=60)
+            if r.returncode != want_exit:
                 print(f"[FAIL] {name} @O{opt}: run exit {r.returncode}, "
                       f"want {want_exit}")
                 ok = False
             else:
                 print(f"[PASS] {name} @O{opt}: run exit {r.returncode}")
+            if want_out is not None:
+                if r.stdout != want_out:
+                    print(f"[FAIL] {name} @O{opt}: stdout {r.stdout.hex()} != "
+                          f"expected {want_out.hex()} (lo/hi 2-limb 全 128 位)")
+                    ok = False
+                else:
+                    print(f"[PASS] {name} @O{opt}: stdout 16B == {want_out.hex()} "
+                          f"(2-limb lo/hi 正确)")
             # ── 零 diff：untagged 用例 main 指令流 == 改动前快照（E8 call
             # 位移例外——stdlib 函数因 tagged 代码合法增长而整体后移）──
             if name.startswith("z") and not args.skip_zdiff:

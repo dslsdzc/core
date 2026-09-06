@@ -674,7 +674,14 @@ fn grow_mw_jo_patch(needed: int) {
     if needed < g_x86_mw_jo_cap { return; }
     nc : ., mut = g_x86_mw_jo_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
     nb := alloc(nc * 8); _dyncpy(g_x86_mw_jo_pos, g_x86_mw_jo_cap * 8, nb);
-    g_x86_mw_jo_pos = nb; g_x86_mw_jo_cap = nc; }
+    g_x86_mw_jo_pos = nb;
+    nb2 := alloc(nc * 8); _dyncpy(g_x86_mw_jo_dest, g_x86_mw_jo_cap * 8, nb2);
+    g_x86_mw_jo_dest = nb2;
+    nb3 := alloc(nc * 8); _dyncpy(g_x86_mw_jo_is_sub, g_x86_mw_jo_cap * 8, nb3);
+    g_x86_mw_jo_is_sub = nb3;
+    nb4 := alloc(nc * 8); _dyncpy(g_x86_mw_jo_resume, g_x86_mw_jo_cap * 8, nb4);
+    g_x86_mw_jo_resume = nb4;
+    g_x86_mw_jo_cap = nc; }
 
 fn grow_opt_meta(needed: int) {
     if needed <= g_opt_meta_cap { return; }

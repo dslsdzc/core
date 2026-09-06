@@ -153,11 +153,25 @@ g_x86_emit_vars : string, mut;          g_x86_emit_vars_cap : int, mut; g_x86_em
 // g_x86_mw_tag_count：当前函数 tagged 变量数（tag 区字节数 = 每变量 1 字节）。
 g_x86_mw_tag_off : string, mut;     g_x86_mw_tag_off_cap : int, mut;
 g_x86_mw_tag_count : int, mut;
-// g_x86_mw_jo_*：int 多字 M1 Task 2——tagged int add/sub 快路径溢出跳
-// （jo 0F 80 rel32）补丁表：emit_instr 记录 jo 指令绝对位置，elf.cr 于该函数
-// 尾声（慢路径块位置后知）发射块骨架后按函数回填（g2_init 清零——ret_patch
-// 同款）。见 plan Task 2 与 specs/2026-09-06-int-multiword-backend-design.md。
+// g_x86_mw_jo_*：int 多字 M1 Task 2/3——tagged int add/sub 快路径溢出跳
+// （jo 0F 80 rel32）站点记录表：emit_instr 发射 jo 时记录站点现场，elf.cr 于
+// 该函数尾声（慢路径块位置后知）按站点发射真实 2-limb 修正块并统一回填
+// （g2_init 清零——ret_patch 同款）。记录 = 4 条并行 i64 数组（共享 cap，
+// 同步增长，索引 = 站点点序 = 指令序，单指令至多 1 站点）：
+//   g_x86_mw_jo_pos     — jo 指令绝对缓冲位置（rel32 字段 = pos+2、jo 长 6）；
+//   g_x86_mw_jo_dest    — 快路径 store 的 dest 变量索引（块内回存目标：
+//                         发射块时经 g2_slot(dest) 现算——含 O1/O2 reg 形态，
+//                         无需入录槽形态本身）；
+//   g_x86_mw_jo_is_sub  — 1 = 该站点为 sub（高 limb 修正规则不同：add 溢出
+//                         高 limb = CF ? -1 : 0；sub = CF ? 0 : -1——CF/符号
+//                         关系见 e2_mw_slow_block 注释推演）；
+//   g_x86_mw_jo_resume  — 块处理完成后跳回点（= 该站点快路径 store e2_st
+//                         之后的绝对位置——elf.cr 于指令发射完、块位置已知
+//                         时填写，块发射时直接回填 jmp rel32）。
+// 见 plan Task 2/3 与 specs/2026-09-06-int-multiword-backend-design.md（D1a/D3）。
 g_x86_mw_jo_pos : string, mut;      g_x86_mw_jo_cap : int, mut; g_x86_mw_jo_count : int, mut;
+g_x86_mw_jo_dest : string, mut;     g_x86_mw_jo_is_sub : string, mut;
+g_x86_mw_jo_resume : string, mut;
 g_x86_ret_patch_pos : string, mut;      g_x86_ret_patch_cap : int, mut; g_x86_ret_patch_count : int, mut;
 g_x86_call_patch_pos : string, mut;     g_x86_call_patch_name : string, mut;
 g_x86_call_patch_count : int, mut;      g_x86_call_patch_cap : int, mut;

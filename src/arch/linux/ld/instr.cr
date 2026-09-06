@@ -242,17 +242,94 @@ fn mw_int_arith_jo_needed(instr_idx: int) -> int {
     if g2_tag_off(iri_dest(instr_idx)) == -1 { return 0; }
     return 1; }
 
-// jo rel32（0F 80 cd，6B）→ 慢路径块，位置后知：记录绝对位置到
-// g_x86_mw_jo_pos（g2_init 清零、elf.cr 函数尾统一回填）。
+// jo rel32（0F 80 cd，6B）→ 慢路径块，位置后知：记录站点现场到
+// g_x86_mw_jo_{pos,dest,is_sub}（g2_init 清零、elf.cr 函数尾统一发射块并回填；
+// resume 由 elf.cr 于该指令发射完后按序补写）。
 // rel32（非 rel8）：块附函数尾——函数体 >127B 时 rel8 不可达（编译器自身
 // 的大函数在自举回归里必然命中；Task 2 用 t3 大函数用例锁定该编码）。
-fn e2_mw_jo(b: string, p: int) -> int {
+fn e2_mw_jo(b: string, p: int, d: int, is_sub: int) -> int {
     grow_mw_jo_patch(g_x86_mw_jo_count + 1);
     w64(g_x86_mw_jo_pos, g_x86_mw_jo_count * 8, p);
+    w64(g_x86_mw_jo_dest, g_x86_mw_jo_count * 8, d);
+    w64(g_x86_mw_jo_is_sub, g_x86_mw_jo_count * 8, is_sub);
     g_x86_mw_jo_count = g_x86_mw_jo_count + 1;
     w8(b, p, 15); w8(b, p + 1, 128);  // 0F 80 = jo rel32
-    e2_w32(b, p + 2, 0);              // 占位——elf.cr 于块发射后回填
+    e2_w32(b, p + 2, 0);              // 占位——elf.cr 于块位置已知后回填
     return 6;
+}
+
+// ── Task 3：慢路径块（每站点独立块，附于函数尾 epilogue 之后）──
+// 站点状态（jo 到达块时）：
+//   - r10 = 快路径 add/sub 的环绕 64 位结果（低 limb）；
+//   - OF = 1（jo 前提）；CF 仍为 e2_alu 所置（jo 不改标志——块内首条指令
+//     前无任何写标志指令可再被读）；
+//   - rsp ≡ 0 (mod 16)（jo 站点位于 IR_BINARY 发射内——帧级 rsp，无 call
+//     栈参推送段在途；opt≥1 帧 ≡ 8 与 opt<1 帧 ≡ 0 的对齐规则保证）。
+//   其余现场：O1/O2 寄存器分配只用 callee-saved（rbx/r12-r15，opt.cr
+//   CAG）——块只碰 caller-saved（rax/rcx/rdx/rdi/r10/r11 等）+ push/pop
+//   自平衡，callee-saved 原样穿越（“块内 call 自平衡”约束）。
+//
+// 128 位修正（数学推演——溢出下真值 = 环绕 L + 高 limb·2^64，高 limb ∈
+// {0, −1} 恒成立，因 add 真值 S ∈ [−2^64, 2^64−2]、sub 真值 S ∈
+// [−2^64+1, 2^64−1]）：
+//   add：S = a+b 溢出 ⇔ a、b 同号。S ≥ 2^63（正溢出）→ 两操作数 ≥ 0 →
+//     无符号和 = S < 2^64 → CF=0 → 高 limb = 0；S < 0（负溢出，S ∈
+//     [−2^64, −2^63−1]）→ 两操作数 < 0 → 无符号和 = S+2^65 ≥ 2^64 →
+//     CF=1 → 高 limb = −1。∴ add 溢出高 limb = CF ? −1 : 0。
+//   sub：S = a−b 溢出。S ≥ 2^63（正溢出）→ a ≥ 0 > b → a_u < b_u →
+//     借位 CF=1 → 高 limb = 0；S ≤ −2^63−1（负溢出）→ a < 0 ≤ b →
+//     a_u > b_u → CF=0 → 高 limb = −1（混合符号无借位——a=−2^63、b=1
+//     即 S=−2^63−1、CF=0）。∴ sub 溢出高 limb = CF ? 0 : −1。
+//   实现：CF → r11：sbb r11, r11 = −CF（0 或 −1——add 直接可用）；
+//   sub 再 not r11（~(−CF) = CF ? 0 : −1）。低 limb = r10 环绕值照存。
+//   两者合一叙述（溢出 = 符号翻转）：高 limb = −1 ⇔ 环绕结果符号位 = 0
+//   （r10 ≥ 0）——add/sub 同式，CF 式只是其标志实现。
+// 边界核对（brute-force 全样本验证 + 逐用例，见 mw-m1-task-3 报告）：
+//   a=b=−2^63（add，S=−2^64 恰在 128 域内）：L=0、CF=1 → [lo=0, hi=−1] ✓。
+fn e2_mw_slow_block(b: string, p: int, d: int, is_sub: int, resume: int) -> int {
+    cp : ., mut = 0;
+    // 1. 高 limb → r11（add：sbb r11,r11 = −CF；sub：+not → CF?0:−1）。
+    //    须为块内首操作——CF 其后随时可能被写。
+    w8(b, p + cp, 77); w8(b, p + cp + 1, 25); w8(b, p + cp + 2, 219); cp = cp + 3;  // sbb r11, r11 (4D 19 DB)
+    if is_sub != 0 {
+        w8(b, p + cp, 73); w8(b, p + cp + 1, 247); w8(b, p + cp + 2, 211); cp = cp + 3;  // not r11 (49 F7 D3—REX.WB: rm=r11 需 B 位)
+    }
+    // 2. 保存 lo/hi（alloc 调用会摧毁 caller-saved r10/r11）：两 push 后
+    //    rsp ≡ 0 (mod 16)——满足 SysV call 对齐（进入块时 rsp ≡ 0）。
+    w8(b, p + cp, 65); w8(b, p + cp + 1, 82); cp = cp + 2;  // push r10 (41 52)
+    w8(b, p + cp, 65); w8(b, p + cp + 1, 83); cp = cp + 2;  // push r11 (41 53)
+    // 3. alloc(16)——16B 2-limb 对象；与 IR_ALLOC_* 同款补丁表注册
+    //    （g_x86_alloc_patch_count 逐函数不重置——函数尾块与函数体同批回填）。
+    //    mov edi, 16（BF imm32——16 为合法 imm32）
+    w8(b, p + cp, 191); e2_w32(b, p + cp + 1, 16); cp = cp + 5;
+    grow_alloc_patch(g_x86_alloc_patch_count + 1);
+    w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, p + cp);
+    g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1;
+    w8(b, p + cp, 232); e2_w32(b, p + cp + 1, 0); cp = cp + 5;  // call alloc（占位回填）
+    // 4. 恢复 lo/hi
+    w8(b, p + cp, 65); w8(b, p + cp + 1, 91); cp = cp + 2;  // pop r11 (41 5B)
+    w8(b, p + cp, 65); w8(b, p + cp + 1, 90); cp = cp + 2;  // pop r10 (41 5A)
+    // 5. 写 2-limb 对象（rax = alloc 返回的数据指针）：[+0] = lo（环绕值）、
+    //    [+8] = hi（符号扩展修正）。注意 REX：rm=rax 无需 B 位——仅 R（源
+    //    r10/r11）→ 4C（对照 elf.cr alloc 内 mov [rax], r9 = 4C 89 08）。
+    w8(b, p + cp, 76); w8(b, p + cp + 1, 137); w8(b, p + cp + 2, 16); cp = cp + 3;  // mov [rax], r10 (4C 89 10)
+    w8(b, p + cp, 76); w8(b, p + cp + 1, 137); w8(b, p + cp + 2, 88); w8(b, p + cp + 3, 8); cp = cp + 4;  // mov [rax+8], r11 (4C 89 58 08)
+    // 6. 值槽存指针（跳过快路径 e2_st——本块自回存 dest；g2_slot 含
+    //    O1/O2 reg 形态：E2_REG_SLOT_BASE 编码 → e2_mov reg, rax）
+    cp = cp + e2_st(b, p + cp, 0, g2_slot(d));
+    // 7. tag 字节置位（g2_tag_off(d) ≠ −1 由 jo 发射条件保证）：槽内现为
+    //    2-limb 指针 ⇔ tag = 1（tag 不变量慢路径侧）。
+    tago := g2_tag_off(d);
+    if tago >= -128 && tago <= 127 {
+        w8(b, p + cp, 198); w8(b, p + cp + 1, 69); w8(b, p + cp + 2, tago); w8(b, p + cp + 3, 1); cp = cp + 4;
+    } else {
+        w8(b, p + cp, 198); w8(b, p + cp + 1, 133); e2_w32(b, p + cp + 2, tago);
+        w8(b, p + cp + 6, 1); cp = cp + 7;
+    }
+    // 8. 跳回快路径 store 之后（resume = 该站点指令尾，elf.cr 填）
+    w8(b, p + cp, 233);  // E9 jmp rel32
+    e2_w32(b, p + cp + 1, resume - (p + cp + 5));
+    return cp + 5;
 }
 
 // ── Byte encoding helpers ──
@@ -686,15 +763,16 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         cp = cp + e2_load_var(buf, pos+cp, 11, s2);
         if s3 == OP_ADD         {
             cp = cp + e2_alu(buf, pos+cp, 1);
-            // int 多字 M1（Task 2）：tagged dest 的 add/sub 后紧跟溢出跳
+            // int 多字 M1（Task 2/3）：tagged dest 的 add/sub 后紧跟溢出跳
             // （e2_alu 的 OF 其后无任何写标志指令可再被读）→ 函数尾慢路径
-            // 块。慢路径在快路径 store 之前跳走（Task 3 自行回存 dest 值 +
-            // 置 tag 并跳回 store 之后继续）。
-            if g2_tag_off(d) != -1 { cp = cp + e2_mw_jo(buf, pos+cp); }
+            // 块。慢路径在快路径 store 之前跳走（块内自回存 dest 值 + 置 tag
+            // 并跳回 store 之后继续——e2_mw_slow_block，elf.cr 函数尾按站点
+            // 发射）。站点记录 dest 与 op（is_sub——高 limb 修正规则因 op 异）。
+            if g2_tag_off(d) != -1 { cp = cp + e2_mw_jo(buf, pos+cp, d, 0); }
         }
         else if s3 == OP_SUB    {
             cp = cp + e2_alu(buf, pos+cp, 41);
-            if g2_tag_off(d) != -1 { cp = cp + e2_mw_jo(buf, pos+cp); }
+            if g2_tag_off(d) != -1 { cp = cp + e2_mw_jo(buf, pos+cp, d, 1); }
         }
         else if s3 == OP_MUL    {
             // imul r10, r11 — 2-byte opcode 0x0F 0xAF
