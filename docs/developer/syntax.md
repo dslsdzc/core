@@ -55,7 +55,7 @@ auto fileid move self in None Some unit
 ```
 
 - `self` 是词法关键字，用于方法接收者（`self` / `&self` / `&mut self`）。
-- `Self` 不是词法关键字——它是接口/方法签名中的上下文类型名，按标识符解析，由 checker 按上下文处理。
+- `Self` 不是词法关键字——它是接口/方法签名中的上下文类型名，按标识符解析,由编译器按上下文处理。
 - `comptime` 不是关键字（`@comptime` 是 @ 内建原语）。
 - `#check`/`#ensure`/`#tag`/`spec fn` 不是词法关键字——规约是标注层语法(第 10 章;设计定稿 = spec-design.md;实现态:parser 未支持)。
 
@@ -523,7 +523,7 @@ fn sqrt(x: dex) -> dex where x >= 0 {
 }
 ```
 
-值约束按表达式形态分三档语义（一条语法，两层消费：checker + 验证管线）：
+值约束按表达式形态分三档语义(编译期求值 / 生成验证义务 / 运行时检查):
 
 | 约束形态 | 语义 |
 |----------|------|
@@ -582,7 +582,7 @@ for i in 0..5 {
 指针是裸地址，与 C 同级自由，编译器通过格/图自动验证安全（详见 `docs/design/pointer-model.md`）：
 
 ```core
-p := &arr[0];     // 取地址，编译器记下 provenance
+p := &arr[0];     // 取地址,编译器自动记录来源与偏移
 p = p + n;        // 偏移，随便算
 x := *p;          // 解引用，编译器验证 offset ∈ [0, len)
 ptr := addr as RawRef<int>;   // 显式转换
