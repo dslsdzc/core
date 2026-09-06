@@ -29,6 +29,7 @@
 ## 学术(academic/)——验证/理论读者
 
 - [cache-semantics.md](academic/cache-semantics.md)— 缓存语义七条(存储语义本体,权威)
+- [lattice-theory.md](academic/lattice-theory.md)— 三层映射理论定稿(图 → 格 → 编码)
 - [verifier-kernel.md](academic/verifier-kernel.md)— 验证内核选型(CIC 信任根)
 
 ## 顶层
