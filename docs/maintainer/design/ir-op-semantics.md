@@ -6,8 +6,9 @@
 > （本表定义语义 vs `src/arch/linux/ld/instr.cr` ELF 编码 vs `src/compiler/interp.cr` 解释执行）以本表为准。
 > 本任务纯只读：**不修改任何 Core 代码**；`~/compcert/` 为只读真源，绝不修改。
 > 差异标注约定：**D** = Core 有意不同于 CompCert（附设计理由）；**BC** = 可疑/bug 候选（Task 2 核实对象）。
-> **状态（2026-08-17）**：第四轮修复已完成并合入（F1-F20，维护者授权全修）——本表已同步修复后状态
+> **状态（2026-08-17 → 2026-09）**：第四轮修复已完成并合入（F1-F20）——本表已同步修复后状态
 > （「[ok] 已修复」标记），BC 表转为修复记录参考；D 表为设计差异，不受修复影响。
+> **2026-09 更新注记**：① int 语义定稿为无上限数学整数(2026-08-23 起)——§1 的 64 位契约是**编码层快路径投影**,超界 = 编码层事务(见 adr/adr-0002 语境与 plans/2026-09-06-int-multiword-m1);② .ccr v6 NOD 坐标化(本表 instr 引用 = v5 线性形态,语义不变);③ 规约语法定稿 #check/#ensure。
 > 修复记录见 `docs/archive/compcert-reference.md`「第四轮修复记录（2026-08-17）」；本表末尾「修复记录」小节汇总。
 
 ## 0. 真源与引用
@@ -30,8 +31,7 @@ Core 侧只读来源：`src/compiler/ast.cr`（opcode 常量，L527-580）、`sr
 
 - **状态** `σ = (ρ, M, ctrl)`：`ρ` = 变量环境（IR 变量 → 64 位值槽）；`M` = 字节寻址内存（堆/栈/rodata）；
   `ctrl` = 控制流位置（解释器：节点游标 + 标签表；ELF：PC）。
-- **int** = 64 位二补整数（实现层机器语义；验证层默认数学语义，见 spec-design §9.4 与 dex/apx 设计）。
-  溢出/截断 = **模 2^64 回绕**（与 CompCert `Int64` 位向量一致）。
+- **int**(2026-08-23 定稿后)= 无上限数学整数:本表的 64 位二补语义是**编码层快路径投影**(i64 快路径,超界 = 编码层事务:溢出自动升级,见 plans/int-multiword-m1);验证层数学语义与编码层投影的分离见 spec-design §9.4。**本契约表以编码层(ELF 实际发射)为基准**,与 CompCert `Int64` 位向量对照仍成立——编码层投影正确性 = 数学语义的映射实例(见 academic/cache-semantics.md 条款 7)。
 - **dex**（迁移目标）= 精确小数，定点表示：`v ∈ ℚ` ↔ 缩放整数 `⌊v·10⁶⌋`（S = 10⁶）。见 §4。
   > 注：设计文档（numeric-types-design.md）只定「缩放整数/定点实现、精度内置」，**未定缩放系数**——S = 10⁶ 是本契约的显式决策（十进制直觉、i64 内余量充足），迁移实现须以本表为准。
 - **apx** = 近似授权（变量级标签）；CPU 兑现 = binary64（IEEE 754）快路径。当前 `TI_FLOAT` 路径即其前身实现。
@@ -225,7 +225,7 @@ load/store（对照 `Mem.load`/`Mem.store` Memory.v:L428/L531 + `valid_access` L
 ### 2.7 并发 / 流 / 惰性（对照：CompCert 无，全部为 D 设计差异）
 
 - **IR_SPAWN**：见 2.5。
-- **IR_YIELD**（28）：语义 = **向 flow 消费者通道发射 `ρ(s1)`**（ast.cr L557）。**BC8 [ok] 已修复（2026-08-17，第四轮 F5）**：ELF 改 **eager 值传递近似**（`d := ρ(s1)`，不再 `call sched_yield()`——修复前实现与定义语义不符且未导入符号 rel32=0 崩溃）；interp 补 `d >= 0` 守卫（修复前发射恒 dest=-1 → `g_ir_vals[-8]` 堆下溢写，静默 UB）。三方一致为 eager 近似（D：单线程模式的既定近似）；flow fn 语法已修（parser 不再把 T_FN 当函数名）。
+- **IR_YIELD**（28）：语义 = **向 flow 消费者通道发射 `ρ(s1)`**（ast.cr L557）。**BC8 [ok] 已修复（2026-08-17，第四轮 F5）**：ELF 改 **eager 值传递近似**（`d := ρ(s1)`，不再 `call sched_yield()`——修复前实现与定义语义不符且未导入符号 rel32=0 崩溃）；interp 补 `d >= 0` 守卫（修复前发射恒 dest=-1 → `g_ir_vals[-8]` 堆下溢写，静默 UB）。三方一致为 eager 近似（D：单线程模式既定近似——完整 go/G-M 调度见 docs/maintainer/design/execution-model.md §三）；flow fn 语法已修（parser 不再把 T_FN 当函数名）。
 - **IR_AWAIT**（29）：语义 = 阻塞直到 future 就绪，`d` = 结果。ELF/interp 均为值复制（eager 近似，已文档化）——D：单线程模式的既定近似。
 - **IR_LAZY_THUNK**（46）：`d` = 惰性包装（s1 = 表达式求值）。**IR_LAZY_FORCE**（47）：`d` = 强求结果。两者当前均 eager 近似（值传递，ELF/interp 一致）——D：惰性求值尚未落地（lazy 设计文档），IR 保留显式 thunk 形态以便迁移。
 
@@ -261,7 +261,7 @@ load/store（对照 `Mem.load`/`Mem.store` Memory.v:L428/L531 + `valid_access` L
 
 | # | 差异 | 设计理由 |
 |---|---|---|
-| D1 | int = 64 位机器整数，模 2⁶⁴ 回绕 | 与 CompCert `Int64` 位向量一致；验证层默认数学语义（spec 9.4）——双层语义显式分离 |
+| D1 | 编码层 int = 64 位机器整数,模 2⁶⁴ 回绕(2026-08-23 后 = 无上限数学整数的快路径投影) | 与 CompCert `Int64` 位向量一致(编码层对照);语义层 = 数学整数(spec 9.4/int-unbounded 定稿)——三层分离:语义(数学)→ 格(编码层事务)→ 64 位投影 |
 | D2 | 无标志寄存器状态；比较直接产 0/1 值 | 数据流 IR（语义保鲜）形态——标志是机器惯例，不进 IR 语义 |
 | D3 | 错误 = 硬陷阱（SIGILL/SIGFPE）而非 `None`/`Stuck` | 安全优先：越界/除零中止程序，不留未定义值路径；错误不在 IR 层显式表达 |
 | D4 | 无无符号比较 opcode（无符号仅用于边界检查技巧） | int 全有符号（CompCert 的 Ccompu/Ccomplu 显式二元来自 C 语义，Core 无此需求） |
