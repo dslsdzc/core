@@ -197,7 +197,11 @@ fn str_to_f64_bits(s: string) -> int {
 }
 
 // Parse an integer literal after tokenization. Supports decimal separators
-// and 0x/0o/0b prefixes; overflow is reported as a lexer error.
+// and 0x/0o/0b prefixes; out-of-shape literals are rejected as lexer errors.
+// 层语义（int-unbounded-semantics 定稿）：语言 int = 无上限数学整数——本守卫报的
+// 「integer literal overflow」是编码层限制错误（编译器内部表示 = 经典 64 位机器字
+// 投影，超形状 = 该投影无载体），不是语义溢出事件——语义层无溢出概念。表示升级
+// （扩展/多字）为 hw-map/远期事项，见 specs/2026-09-06-int-unbounded-semantics.md。
 fn str_int_literal(s: string) -> int {
     sl := str_len(s);
     base : ., mut = 10;

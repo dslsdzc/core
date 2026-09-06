@@ -347,8 +347,10 @@ fn ccr_grow_func_entry_meta(needed: int) {
 // --- Save（写侧与 calc 侧一致；段表规范序、段体连续）---
 
 fn save_ccr(path: string) -> int {
-    // The v5 wire format stores these fields as signed i32. Refuse to emit a
-    // lossy file instead of letting w32 silently keep only the low bits.
+    // The v6 wire format stores these fields as signed i32 — 编码层文件格式
+    // 限制（字段形状 = 文件布局域，hw-map/经典投影实例；与 int 语义无涉，
+    // int-unbounded-semantics 定稿 §三）。Refuse to emit a lossy file instead
+    // of letting w32 silently keep only the low bits.
     if ccr_validate_i32_fields() == 0 { return -1; }
 
     // Entries must be computed before save（lower_to_ccr 尾部无条件计算）——
