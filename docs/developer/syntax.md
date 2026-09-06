@@ -57,7 +57,7 @@ IDENT = LETTER { LETTER | DIGIT | '_' | '\'' }
 
 ### 2.3 关键字
 
-共 37 个（以 `src/compiler/lexer.cr lookup_keyword()` 为准）：
+共 36 个（以 `src/compiler/lexer.cr lookup_keyword()` 为准,2026-09 核对）：
 
 ```
 fn mut return if else loop while for break continue
