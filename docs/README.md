@@ -16,7 +16,7 @@
 ## 定稿参考（design/）— 维护者向
 - [项目书](design/project-book.md)— 项目定位
 - [执行模型](design/execution-model.md)— v2 执行模型（region 嵌套 + state edges）；[dataflow-design.md](design/dataflow-design.md) 已被其取代，留档
-- [内存模型](design/memory-model.md)、[指针模型](design/pointer-model.md)、[寄存器分配缓存映射](design/regalloc-cache-mapping.md)
+- [存储语义总览](design/memory-model.md)→ [缓存语义七条](design/cache-semantics.md)/[存在结构 v6](design/existence-structure.md)/[图锚定区域](design/region-model.md);[指针模型](design/pointer-model.md)、[寄存器分配缓存映射](design/regalloc-cache-mapping.md)
 - [IR 操作语义](design/ir-op-semantics.md)、[术语表](design/glossary.md)
 - [规约系统设计](design/spec-design.md)、[验证内核](design/verifier-kernel.md)、[@ 内建原语](design/at-intrinsics.md)
 - [corelsp 设计](design/corelsp.md)— 语言服务器架构（检查管线/诊断通道/能力契约；用户接入见上 editor-setup 条）

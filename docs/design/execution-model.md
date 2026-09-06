@@ -165,7 +165,7 @@ G 状态机完整化(_Gwaiting 阻塞链)、range go 批量、select 聚合、�
 
 分配以 **arena** 为单元——arena 是"图锚定区域"内存模型的当前实现形态
 (区域 = 子图节点,生命周期 = 图活性;概念设计见 2026-08-13-graph-anchored-regions-design,
-映射实例层见 docs/design/memory-model.md):
+映射实例层见 docs/design/region-model.md):
 
 - 函数/loop/for/unsafe 等子图自动获得 arena 生命周期(ir_gen.cr 在子图边界发射
   IR_ARENA_NEW=32/IR_ARENA_RESET=33,含编译期大小预计算;ELF 后端双路径 alloc:

@@ -38,7 +38,7 @@ Core 的编译器内部维护一张完整的HDFG（dataflow graph）。图中每
 
 **经典映射**：字节地址。编译器和后端把条目标识投影为经典机器上的基地址；在非经典范式（如量子存储）上投影为别的物理表示。
 
-字节地址从来不是语义对象——它只是"缓存"（`docs/design/memory-model.md` §一）在经典硬件上的映射实例。本文件三个 pass（PointerAnalysis / RegionCheck / ProvenanceVerify）的判定全部在条目标识 + 偏移域上进行，与物理地址表示无关。
+字节地址从来不是语义对象——它只是"缓存"（`docs/design/cache-semantics.md` 七条）在经典硬件上的映射实例。本文件三个 pass（PointerAnalysis / RegionCheck / ProvenanceVerify）的判定全部在条目标识 + 偏移域上进行，与物理地址表示无关。
 
 ## 用户可见的语法
 
@@ -107,7 +107,7 @@ O(N × P)，其中 N 为指针变量数，P 为 points-to 集平均大小。Core
 
 跨子图引用：子图 A 分配的内存被子图 B 引用。当子图 A 退出后，B 中的指针变成悬垂指针。
 
-**2026-08-13 修订**：跨区域引用不再一刀切禁止——安全当且仅当**被引用区域的存活区间 ⊇ 引用的使用区间**（outlives 顺序判定，Cyclone 区域子类型的图形式）。RegionCheck 的 `cur_seq < exit_seq` 判定就是这个顺序判定。见 `docs/design/memory-model.md` 机制 #5。
+**2026-08-13 修订**：跨区域引用不再一刀切禁止——安全当且仅当**被引用区域的存活区间 ⊇ 引用的使用区间**（outlives 顺序判定，Cyclone 区域子类型的图形式）。RegionCheck 的 `cur_seq < exit_seq` 判定就是这个顺序判定。见 `docs/design/region-model.md` §3.3(逃逸规则 4)。
 
 ### 算法
 
@@ -214,7 +214,7 @@ p := mmio + 4096;        // 越界 → 编译错误或运行时 check
 
 ### 类型双关
 
-`*(dex*)&i` **不需要 unsafe**。图的存储语义是条目标识 + 偏移（`docs/design/memory-model.md` §一 条款 6）；经典映射下表现为"字节序列 + 宽度 + 边界"——provenance
+`*(dex*)&i` **不需要 unsafe**。图的存储语义是条目标识 + 偏移（`docs/design/cache-semantics.md` 条款 6）；经典映射下表现为"字节序列 + 宽度 + 边界"——provenance
 （alloc 归属）、offset（字节偏移）、alloc_size（字节大小）全部与类型无关，类型只是
 DEREF 处的"视图"。cast 以有类型的 `IR_LOAD` 保留值流，provenance 边不断：
 
@@ -224,7 +224,7 @@ DEREF 处的"视图"。cast 以有类型的 `IR_LOAD` 保留值流，provenance 
 
 ### 字节权限层（2026-08-13）
 
-经典映射在"字节序列 + 宽度 + 边界"之上补充**每字节权限**（CompCert v2 范式——经典机器的权限投影，见 `docs/design/memory-model.md` §一 条款 7）：
+经典映射在"字节序列 + 宽度 + 边界"之上补充**每字节权限**（CompCert v2 范式——经典机器的权限投影，见 `docs/design/cache-semantics.md` 条款 7）：
 
 ```
 Freeable > Writable > Readable > Nonempty > Empty
@@ -282,7 +282,7 @@ allocation-base-relative 的 `sub+cmp+jae+ud2` 边界检查，配合 2026-07-28 
 **更新（2026-08-16）**：访问宽度、store 边界检查和 `asp` 外部地址约束已落地。
 动态偏移检查使用 points-to 定位的实际 allocation base，不再使用页内偏移近似。
 
-设计依据：`docs/superpowers/specs/2026-08-13-graph-anchored-regions-design.md` + `docs/design/memory-model.md`。
+设计依据:`docs/superpowers/specs/2026-08-13-graph-anchored-regions-design.md` + `docs/design/region-model.md`。
 
 **更新（2026-08-15）**：`&` 所指定稿——条目标识 + 偏移是语义，字节地址是经典投影（见上"地址 = 映射"节）。与三个 pass 无行为冲突（判定域本就是条目标识 + 偏移）。
 
