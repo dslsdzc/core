@@ -134,6 +134,11 @@ fn g2_rodata_sz() -> int {
 fn mw_setup_tags(fi: int, vs: int, vc: int) {
     // 识别函数 fi（var 域 [vs, vs+vc)）的潜在多字变量并建立 tag 字节偏移表。
     // 纯 IR 函数——输入即 .ccr 载入后的最终 IR（发射所见），无格式/无跨进程态。
+    // 卫生锚：tag 读写模型与识别规则必须同域——tagged 行定值点全集 = ①add/sub
+    // 快路径落值清 0 ②IR_STORE/IR_LOAD 拷贝定值传播/清 0 ③prologue 参数保存清 0
+    // ④2L 慢路径块写 tag=1（四类由发射侧逐一维护 ⇒ 无帧入口清零——论证全文见
+    // 本文件 e2_mw_opnd_block 前「Task 4：tag 卫生」注释块；规则 A/B/B' 只标
+    // 这四类会写的行——闭包 ⊇ 2L 可能态由唯一生产者论证闭合）。
     grow_mw_tag_off(vc);
     z : ., mut = 0;
     loop { if z >= vc { break; } w64(g_x86_mw_tag_off, z * 8, -1); z = z + 1; }
@@ -483,8 +488,10 @@ fn e2_mw_sext(b: string, p: int, lo_r: int, hi_r: int) -> int {
 // 块入口条件（≥1 2L）在单 tagged 站点下唯一确定装载路径；双 tagged 站点
 // 内部分派（测试 s1 → A 快则 B 必 2L；A 2L 再测 s2）。s1==s2 时两测试同
 // 字节（单检查站点：入口即 2L → A 2L → 同字节测试恒取 L_both，自洽）。
-// 块内 jcc/jmp 全部 rel8（块 ≤ ~120B，forward/backward 均 ±127 内）；
-// rel8 目标在块内顺序发射中即时回填（目标 = 已到达的后续位置）。
+// 块内 jcc/jmp 全部 rel8（块全长最坏 ~160B——双 tagged + sub + 2L 落值尾；
+// 但 rel8 只跨发射点后的局部子区，最远前向 = je → L_fit 越过 2L 存储尾
+// ≤ ~60B——±127 恒足；跨块长距跳恒 rel32：tag 检查 jne → 块首、块尾 jmp →
+// resume）。rel8 目标在块内顺序发射中即时回填（目标 = 已到达的后续位置）。
 fn e2_mw_opnd_block(b: string, p: int, s1: int, s2: int, d: int, op: int, resume: int) -> int {
     cp : ., mut = 0;
     t1 := g2_tag_off(s1);
@@ -554,8 +561,8 @@ fn e2_mw_opnd_block(b: string, p: int, s1: int, s2: int, d: int, op: int, resume
         // （结果界：|加数| ≤ 2^64−1 + 2^65 → |和| < 2^66 ≪ 2^127——M1 码域
         // 内恒可表示，无需码域错误路径——见块注释）。
         cp = cp + e2_mov(b, p+cp, 2, 10);                                        // mov rdx, r10
-        w8(b, p+cp, 72); w8(b, p+cp+1, 193); w8(b, p+cp+2, 250); w8(b, p+cp+3, 63); cp = cp + 4;  // sar rdx, 63
-        w8(b, p+cp, 77); w8(b, p+cp+1, 57); w8(b, p+cp+2, 211); cp = cp + 3;     // cmp r11, rdx
+        w8(b, p+cp, 72); w8(b, p+cp+1, 193); w8(b, p+cp+2, 250); w8(b, p+cp+3, 63); cp = cp + 4;  // sar rdx, 63（signmask）
+        w8(b, p+cp, 73); w8(b, p+cp+1, 57); w8(b, p+cp+2, 211); cp = cp + 3;     // cmp r11, rdx（0x49 39 D3：REX.W+B——reg=rdx；错编 0x4D = reg r10 = cmp r11,r10——假 fit 截断，d1/d2 判别）
         j_fit : ., mut = cp; w8(b, p+cp, 116); w8(b, p+cp+1, 0); cp = cp + 2;    // je L_fit
         // 2L 存储：alloc(16) + 2-limb 写 + 槽存指针 + tag=1（同 Task 3 块）
         w8(b, p+cp, 65); w8(b, p+cp+1, 82); cp = cp + 2;                         // push r10
@@ -1701,6 +1708,9 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
                 cp = cp + e2_mw_tag_cpy(buf, pos+cp, d, s1);
             }
         } else { cp = cp + e2_load_var(buf, pos+cp, 10, s1); cp = cp + e2_st(buf, pos+cp, 10, do2); }
+        // s1<0 尾分支（域外行——现 IR 形态防御兜底）：mw_setup_tags 规则 B 只扫
+        // 函数域 [vs, ve)（s1 ∈ 域 且 tagged 才标 d）→ d 恒 untagged——快值原样
+        // 直拷，无 e2_mw_tag_cpy/清 0 字节（tag 拷贝只对有 tag 字节的域内行发）。
         return cp;
     }
 
@@ -1723,6 +1733,9 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
                 cp = cp + e2_mw_tag_cpy(buf, pos+cp, s1, s2);
             }
         } else { cp = cp + e2_load_var(buf, pos+cp, 10, s2); cp = cp + e2_st(buf, pos+cp, 10, o1); }
+        // s1<0 尾分支（域外目标行——现 IR 形态防御兜底）：规则 B' 只标函数域内
+        // [vs, ve) 的 s1（且 s2 tagged）→ 域外 s1 恒 untagged——快值原样直拷，
+        // 无 tag 拷贝/清 0（g2_tag_off 域外恒 -1，拷贝源 s2 的 tag 无需落地）。
         return cp;
     }
 
