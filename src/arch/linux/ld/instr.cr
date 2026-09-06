@@ -94,18 +94,26 @@ fn g2_rodata_sz() -> int {
 // 为空 → 帧公式与现状逐字节一致（快路径零变化硬约束）。
 //
 // 识别规则（保守最小正确集——M1 无区间证明，D1c 静态免 tag = M2 后置）：
-//   函数局部值流闭包（per 函数 [vs, vs+vc) 的 TI_INT 变量）：
+//   函数局部值流闭包（per 函数 [vs, vs+vc) 的 TI_INT 变量行——含表达式临时行，
+//   ir_gen 的赋值形态 = 临时行算值 + IR_STORE 定值拷贝落变量行）：
 //     A. IR_BINARY(OP_ADD/OP_SUB) 的 dest —— add/sub 溢出是 M1 中唯一的
 //        >64 位值生产者（mul/div 溢出链 = M2；>64 字面量 lexer 拒 = D4 推迟 M2）；
-//     B. IR_LOAD 值拷贝 d ← s1：s1 已 tagged（TI_INT）→ d tagged —— 2-limb 值
-//        经拷贝传播（后端 IR_LOAD = e2_load_var 直拷槽值，无解引用）。
-//    定义先于使用（checker 静态顺序保证）→ 单遍前向扫描即达闭包。
-// 保守性：集合外变量运行时不可能是 2-limb 态（唯一生产者是 A 的溢出慢路径与
-// B 的拷贝）；A 无溢出只是运行时事实（付 1 字节栈 + 之后任务的 tag 初值写）。
+//     B. IR_LOAD 值拷贝 d ← s1：s1 已 tagged（TI_INT）→ d tagged —— as 转换等
+//        拷贝形态（后端 IR_LOAD = e2_load_var 直拷槽值，无解引用）；
+//     B'. IR_STORE 定值拷贝 ρ(s1) := ρ(s2)（ir_gen 赋值形态；后端 = 槽值直拷）：
+//        s2 已 tagged → s1 tagged —— 2-limb 值经拷贝进入消费槽（return/比较读
+//        的是 s1 槽，只标 add 临时行不够——变量行才是跨语句/跨迭代的携带者）。
+//    闭包 = 不动点扫描（见 mw_setup_tags）：tag 态可沿循环回边携带（拷贝点线性
+//    先于其 tag 源的定值时，迭代 ≥2 拷贝的是 2-limb 值）——定义先于使用的线性
+//    论证只对无环成立；标记单调递增 ⇒ 至多 vc+1 遍收敛。
+// 保守性：集合外变量行运行时不可能是 2-limb 态（唯一生产者 = A 的溢出慢路径落
+// dest 槽与 B/B' 的槽拷贝）；A 无溢出只是运行时事实（付 1 字节栈 + 之后任务的
+// tag 初值写）。
 //
 // M1 边界（tag 不做传播，后续任务/文档挂账）：
 //   - 跨函数：2-limb 值经调用实参/返回值传递（含 goroutine 通道）——无协议；
-//   - 出逃：IR_STORE/STORE_PTR/STORE_INDEX 把 tagged 值写入全局/堆/数组；
+//   - 出逃：IR_STORE 的全局 s1 / STORE_PTR/STORE_INDEX 把 tagged 值写入
+//     全局/堆/数组（STORE 的局部 s1 = 函数内定值拷贝，属 B' 闭包）；
 //   - globals/BSS：dest 为全局的算术（现 IR 中函数体 dest 均为局部）。
 // 上述场景若 tagged 值真的超 64 = M1 已知边界（正确性由测试套件规避）。
 //
@@ -128,30 +136,53 @@ fn mw_setup_tags(fi: int, vs: int, vc: int) {
     ic := r64(g_ir_func_instr_count, fi * 8);
     ist := r64(g_ir_func_instr_start, fi * 8);
     ve := vs + vc;
-    // Pass 1：单遍前向闭包（定义先于使用）——dest 在函数域内且为 TI_INT：
-    //   IR_BINARY(ADD/SUB) → 标 dest；IR_LOAD 且 s1 已标 → 传播标 dest。
+    // Pass 1：不动点扫描（规则 A/B/B' 单调，重复全扫至某遍无新标收敛；
+    // ≤ vc+1 遍——回边携带：循环体内拷贝点可线性先于其 tag 源的定值，
+    // 单遍前向（定义先于使用）论证只对无环成立）。dest/目标在函数域内且
+    // 为 TI_INT 时：
+    //   A. IR_BINARY(ADD/SUB) → 标 dest；
+    //   B. IR_LOAD d←s1（as 转换拷贝）且 s1 已标 → 标 d；
+    //   B'. IR_STORE ρ(s1):=ρ(s2)（赋值定值拷贝）且 s2 已标 → 标 s1。
+    chg : ., mut = 1;
     ii : ., mut = 0;
     loop {
-        if ii >= ic { break; }
-        ino := ist + ii;
-        op := iri_op(ino);
-        d := iri_dest(ino);
-        if d >= vs && d < ve && irv_type(d) == TI_INT {
+        if chg == 0 { break; }
+        chg = 0;
+        ii = 0;
+        loop {
+            if ii >= ic { break; }
+            ino := ist + ii;
+            op := iri_op(ino);
             if op == IR_BINARY {
-                s3 := iri_s3(ino);
-                if s3 == OP_ADD || s3 == OP_SUB {
-                    w64(g_x86_mw_tag_off, (d - vs) * 8, 0);  // 0 = 已标记（占位）
+                d := iri_dest(ino);
+                if d >= vs && d < ve && irv_type(d) == TI_INT {
+                    s3 := iri_s3(ino);
+                    if (s3 == OP_ADD || s3 == OP_SUB) && r64(g_x86_mw_tag_off, (d - vs) * 8) == -1 {
+                        w64(g_x86_mw_tag_off, (d - vs) * 8, 0);  // 0 = 已标记（占位）
+                        chg = 1;
+                    }
                 }
             } else if op == IR_LOAD {
+                d := iri_dest(ino);
+                if d >= vs && d < ve && irv_type(d) == TI_INT {
+                    s1 := iri_s1(ino);
+                    if s1 >= vs && s1 < ve && irv_type(s1) == TI_INT && r64(g_x86_mw_tag_off, (s1 - vs) * 8) != -1 && r64(g_x86_mw_tag_off, (d - vs) * 8) == -1 {
+                        w64(g_x86_mw_tag_off, (d - vs) * 8, 0);
+                        chg = 1;
+                    }
+                }
+            } else if op == IR_STORE {
                 s1 := iri_s1(ino);
                 if s1 >= vs && s1 < ve && irv_type(s1) == TI_INT {
-                    if r64(g_x86_mw_tag_off, (s1 - vs) * 8) != -1 {
-                        w64(g_x86_mw_tag_off, (d - vs) * 8, 0);
+                    s2 := iri_s2(ino);
+                    if s2 >= vs && s2 < ve && irv_type(s2) == TI_INT && r64(g_x86_mw_tag_off, (s2 - vs) * 8) != -1 && r64(g_x86_mw_tag_off, (s1 - vs) * 8) == -1 {
+                        w64(g_x86_mw_tag_off, (s1 - vs) * 8, 0);
+                        chg = 1;
                     }
                 }
             }
+            ii = ii + 1;
         }
-        ii = ii + 1;
     }
     // Pass 2：变量索引升序分配 tag 字节（k-th → rbp - (vc*8 + k)）。
     cnt : ., mut = 0;
