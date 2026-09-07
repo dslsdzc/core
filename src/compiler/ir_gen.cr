@@ -360,14 +360,6 @@ fn ir_call_return_type(func_ni: int) -> int {
     return TI_UNIT;
 }
 
-fn get_ir_var_name(var_idx: int) -> string {
-    if var_idx >= 0 && var_idx < g_ir_var_count {
-        ni := irv_name(var_idx);
-        return istr_get(ni);
-    }
-    return "";
-}
-
 // --- Track string constants ---
 fn track_str(str_idx: int) {
     i : ., mut = 0;

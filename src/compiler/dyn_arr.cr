@@ -339,6 +339,16 @@ fn iri_set_s2(n: int, v: int) { w64(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_S2, v
 fn iri_set_s3(n: int, v: int) { w64(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_S3, v); }
 fn iri_set_tk(n: int, v: int) { w64(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_TK, v); }
 
+// 变量名查询（原定义于 ir_gen.cr——2026-09-07 regalloc 移后端随迁本文件：
+// corearch 闭包不含 ir_gen.cr，regalloc.cr 判定/注入打印消费本函数；双侧共享）
+fn get_ir_var_name(var_idx: int) -> string {
+    if var_idx >= 0 && var_idx < g_ir_var_count {
+        ni := irv_name(var_idx);
+        return istr_get(ni);
+    }
+    return "";
+}
+
 // FuncInfo helpers
 fn fi_name(n: int) -> int { return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_NAME); }
 fn fi_param_count(n: int) -> int { return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_COUNT); }

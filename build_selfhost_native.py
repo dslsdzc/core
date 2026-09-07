@@ -179,6 +179,7 @@ def main():
             'src/compiler/dyn_arr.cr',
             'src/arch/hit/hit.cr',
             'src/arch/hit/lower_to_core.cr',
+            'src/arch/linux/ld/regalloc.cr',
             'src/arch/linux/ld/sizes.cr',
             'src/arch/linux/ld/instr.cr',
             'src/arch/linux/ld/resolve.cr',
