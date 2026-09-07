@@ -52,6 +52,7 @@ step = {
 - 回填角色（rel kind）：M1 常量池 `hit_pool_patch` 机制扩展为三张回填表——事件流内部目标（jump/branch/call 函数体）、函数起点、外部符号
 - 角色解析复用 M1 约定：操作数角色（dst/src1/src2/val/addr/cond）→ 槽（`g2_slot`/`e2_load_var` 机制）或事件流位置
 - **每事件多形态**：事件可带多个 proj 条目（如 load 的 rm_mode 0/1/2 各一形态），发射按操作数形状选择（现 instr.cr 按类型/形状分发——数据化后 = 表内选择）
+- **字段扩展注（Task 0 盘点 2026-09-07 回填，先于 Task 2 落地）**：modrm 增 base_role（rm_mode 1 泛化——缺省 rbp，可 = 槽值寄存器；rm_mode 2 细化 = SIB 字段组 {scale, index_role, base_role}；base_role=rip = mod=00 rm=101 池/全局/rodata 形）；modrm 可缺（E8/E9/C3/0F05/0F0B）且 reg_role 可为 /digit 操作码扩展（C6/C7/F6/F7/D3/C1）；rel 补 size {8|32}（rel32 三角色 kind 已有）；imm 补 lit 字面量与 imm64 回填 kind（movabs 函数绝对地址）；操作数角色集补寄存器字面量/隐含（rcx 移位计数、rax/rdx:rax idiv/cqo 对、ABI 调用寄存器、xmm0-7 为 SSE 面预留）；disp.size 支持 auto（槽偏移回填按幅度选 1|4——解释器规则，与旧路径 e2_ld/e2_st 选择一致）；字节拼接序 = prefix → REX → opcode → ModRM → SIB → disp → imm（解释器固定序，非字段）。
 
 ## 4. 降低层设计（lower_to_core 全 op 覆盖）
 
