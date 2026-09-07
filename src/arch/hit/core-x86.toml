@@ -1,45 +1,47 @@
 # === core-x86.toml ===
-# 硬件接口表（HIT）：x86-64 平台投影表——最小核（M1）第一份表。
-# 格式定稿：docs/superpowers/plans/2026-09-05-hit-minimal-core-m1.md「表文件格式」节。
-# 设计依据：docs/superpowers/specs/2026-09-05-hardware-interface-table.md。
-# 契约：表 = corearch 运行的唯一平台依赖（M1：实现事件 1-4 即可运行）。
-#
-# 事件记录字段（每事件 32B，见 hit.cr 加载器）：
-#   id          最小核事件号（sub=1 nand=2 load=3 store=4）
-#   name        事件名（语义锚，供诊断/调试）
-#   arith       语义锚：规约层引用（M1 不消费）
-#   inputs/outputs      事件签名（无宽度/寄存器/寻址——最小核抽象）
-#   side_effect "pure"/"effect"——内存效应标记
-# [[event.proj]] 投影条目（每事件一个或多个；M1 每事件恰一个单步投影）：
-#   opcode            指令字节序列（M1 ≤2 字节 = 前缀+opcode；行内数值即真源——
-#                     sub = [0x4D,0x29]（REX.W+R+B：r10/r11 对需 R/B 位），非草案 0x48）
-#   modrm_reg_role    modrm.reg 字段操作数角色（dst/src1/src2/addr/val）
-#   modrm_rm_role     modrm.rm  字段操作数角色
-#   rm_mode           0 = rm 为寄存器（地址先加载进寄存器）；1 = rm 为 rbp+disp32（槽/常量池寻址）
-# 解析规则见 hit.cr；模板解释/发射见计划 Task 2。
+# 硬件接口表（HIT）：corearch 表驱动编码器的 x86-64 档（M1 Task 1 建立，
+# M2a Task 1 = schema v2 迁移）。
+# schema v2（docs/superpowers/specs/2026-09-07-hit-m2-design.md §3）：
+#   - 步模板字段完整化：prefix/REX（rex_w/r/x/b 逐位）/opcode/modrm 角色与
+#     /digit/SIB/disp/imm/rel/cond——模板字节 = prefix → REX → opcode 三段
+#     拼接序，legacy 视区（OP0/OP1）与之逐字节等价（M1 消费面不变）
+#   - [[event.proj.step]] 步小节表达多步序列；事件可多 proj 形态
+#   - [runtime.x86] 运行时条目小节（spec §6 最小描述）
+# M1 事件 1-4（sub/nand/load/store）迁为结构性 REX 字段后，legacy 字节视区
+# 与 M1 模板逐字节相同：4D 29 / 4D 21 / 4C 8B / 4C 89（walker 测试断言）。
+# 事件 5-9 = 控制/调用/系统核：jump/branch/call/ret/extern 真实 x86 投影
+# 声明（发射器消费 = M2b 起，先以「加载通过」落地，见 plan 2026-09-07-hit-m2）。
 
 [table]
 name = "core-x86-min"
-events = 4            # 最小核契约：实现 1-4 即可运行
+events = 9            # 运行时核：1-4 数据 + 5-9 控制/调用/系统（M2a）
 
+# ════════════════════════════════════════════════════════════════
+# 事件 1-4：数据面（M1 直通事件，v2 = 结构性字段；M1 字节视区不变）
+# ════════════════════════════════════════════════════════════════
+
+# ── 1 sub：sub r/m64, r64（REX.W+R+B；M1 模板 0x4D 0x29 等价拆解）──
 [[event]]
-id = 1                # sub
+id = 1
 name = "sub"
-arith = "sub"         # 语义锚：规约层引用（M1 不消费）
+arith = "sub"         # 语义锚：规约层引用（加载不消费）
 inputs = 2
 outputs = 1
 side_effect = "pure"
 
-[[event.proj]]        # x86 投影：sub r/m64, r64 = r/m ← r/m − r
+[[event.proj]]
 isa = "x86-64"
-# M1 模板解释器寄存器惯例（rm_mode=0，与 instr.cr e2_alu 逐字节同——旧路径为真值）：
-#   第一输入 src1 → r10（累加/结果寄存器）；第二输入 src2 → r11（reg 字段位）
-#   旧路径发射 = 4D 29 DA（REX.W+R+B：r10/r11 寄存器对需 R/B 扩展位）
-opcode = [0x4D, 0x29]        # REX.W+R+B + sub r/m64,r64
-modrm_reg_role = "src2"      # reg 字段 = 第二输入（被减数，驻 r11）
-modrm_rm_role = "dst"        # rm 字段 = 目标/结果寄存器（r10，运算前驻第一输入）
-rm_mode = 0                  # 0 = rm 为寄存器（加载到 r10）；1 = rm 为 rbp+disp32（槽/常量池寻址）
+[[event.proj.step]]
+rex_w = 1
+rex_r = 1
+rex_b = 1
+opcode = [0x29]
+modrm_reg_role = "src2"
+modrm_rm_role = "dst"
+rm_mode = 0
 
+# ── 2 nand：and r/m64, r64（REX.W+R+B；M1 模板 0x4D 0x21——nand 单步占位，
+#    M1 语义不变：and 结果 + 降低层 neg 合成）──
 [[event]]
 id = 2
 name = "nand"
@@ -49,41 +51,163 @@ side_effect = "pure"
 
 [[event.proj]]
 isa = "x86-64"
-# M1 占位：x86 无 nand 指令——单步 and（and r/m64,r64 = 4D 21 DA：r10 ← r10 & r11，
-# 同 sub 的 r10/r11 双寄存器形态）。投影到语义 nand 的完整序列（and+not 两步）
-# + 事件流语义闭合 = M2
-opcode = [0x4D, 0x21]        # REX.W+R+B + and r/m64,r64
+[[event.proj.step]]
+rex_w = 1
+rex_r = 1
+rex_b = 1
+opcode = [0x21]
 modrm_reg_role = "src2"
 modrm_rm_role = "dst"
 rm_mode = 0
 
+# ── 3 load：mov r64, r/m64（REX.W+R；M1 模板 0x4C 0x8B——rm = rbp+disp32
+#    槽寻址；rm_mode 1 + 无 base_role = 缺省 rbp；disp 由槽回填生成）──
 [[event]]
 id = 3
 name = "load"
-inputs = 1            # 地址
+inputs = 1
 outputs = 1
 side_effect = "effect"
 
 [[event.proj]]
 isa = "x86-64"
-# rm_mode=1：rm = rbp+disp32（槽/常量池寻址，mod=2 rm=5；disp = 地址角色变量的槽偏移）。
-# reg 字段寄存器 = dst（M1 惯例 r10 → REX.W+R = 0x4C）。disp8 短形 = M2 形态扩展。
-opcode = [0x4C, 0x8B]        # REX.W+R + mov r64, r/m64（读：dst ← [rbp+disp32]）
+[[event.proj.step]]
+rex_w = 1
+rex_r = 1
+opcode = [0x8B]
 modrm_reg_role = "dst"
 modrm_rm_role = "addr"
 rm_mode = 1
 
+# ── 4 store：mov r/m64, r64（REX.W+R；M1 模板 0x4C 0x89——写 [rbp+disp32]
+#    ← val）──
 [[event]]
 id = 4
 name = "store"
-inputs = 2            # 地址, 值
+inputs = 2
 outputs = 0
 side_effect = "effect"
 
 [[event.proj]]
 isa = "x86-64"
-# rm_mode=1：rm = rbp+disp32（槽寻址）。reg 字段寄存器 = val（M1 惯例 r10 → 0x4C）。
-opcode = [0x4C, 0x89]        # REX.W+R + mov r/m64, r64（写：[rbp+disp32] ← val）
+[[event.proj.step]]
+rex_w = 1
+rex_r = 1
+opcode = [0x89]
 modrm_reg_role = "val"
 modrm_rm_role = "addr"
 rm_mode = 1
+
+# ════════════════════════════════════════════════════════════════
+# 事件 5-9：控制/调用/系统核（v2 语法；语义绑定 = Task 4 降低对照定稿）
+# ════════════════════════════════════════════════════════════════
+
+# ── 5 jump：E9 rel32（无条件转移；rel kind = event → 事件流位置回填表）──
+[[event]]
+id = 5
+name = "jump"
+inputs = 1            # 目标 = 事件流位置（IR_JUMP s1 → 标签映射）
+outputs = 0
+side_effect = "pure"
+
+[[event.proj]]
+isa = "x86-64"
+[[event.proj.step]]
+opcode = [0xE9]
+rel_role = "src1"
+rel_kind = "event"
+rel_size = 32
+
+# ── 6 branch：cmp + jne 两步序列 ──
+# 第一步 cmp r10(=条件载入), 0 → ZF=(s1==0)：83 /7 ib 带 REX.W+B（rm = r10
+# 需 B 位；/7 digit 组不得带 REX.R）+ imm 字面量 0；条件源槽 cond_role = src1
+#（判定语义 Task 4 对照定稿）。第二步 jne rel32（ZF=0 → 条件≠0 → 真目标 s2）；
+# 假目标 = 事件流下一条（相邻跳过选型 = 降低层 Task 4 定稿——此处仅模板声明）。
+[[event]]
+id = 6
+name = "branch"
+inputs = 3            # 条件 s1（≠0 真）、真目标 s2、假目标 s3
+outputs = 0
+side_effect = "pure"
+
+[[event.proj]]
+isa = "x86-64"
+[[event.proj.step]]
+rex_w = 1             # REX.W+B（rm = r10 需 B 位）
+rex_b = 1
+opcode = [0x83]       # 83 /7 ib = cmp r/m64, imm8
+modrm_reg_digit = 7
+modrm_rm_role = "dst"
+rm_mode = 0
+imm_size = 1
+imm_role = "lit"
+imm_lit = 0
+cond_role = "src1"    # 条件源槽（判定语义 Task 4 对照定稿）
+
+[[event.proj.step]]
+opcode = [0x0F, 0x85] # jne rel32（ZF=0 → 真目标）
+rel_role = "src2"
+rel_kind = "event"
+rel_size = 32
+
+# ── 7 call：E8 rel32（rel kind = func → 函数体事件流位置回填表）──
+[[event]]
+id = 7
+name = "call"
+inputs = 1            # 目标 = 函数索引（.ccr SYM func 行序）
+outputs = 0           # 值返回 = 调用点序列槽协议（R2/R7 算法保留代码，Task 4）
+side_effect = "effect"
+
+[[event.proj]]
+isa = "x86-64"
+[[event.proj.step]]
+opcode = [0xE8]
+rel_role = "src1"
+rel_kind = "func"
+rel_size = 32
+
+# ── 8 ret：C3（调用栈机制 = [runtime.x86] 条目；返回序列 = R7 算法保留代码）──
+[[event]]
+id = 8
+name = "ret"
+inputs = 0
+outputs = 0
+side_effect = "pure"
+
+[[event.proj]]
+isa = "x86-64"
+[[event.proj.step]]
+opcode = [0xC3]
+
+# ── 9 extern：E8 rel32 + 外部重定位标记（rel kind = extern → ext_rel 同族
+#    回填）──
+[[event]]
+id = 9
+name = "extern"
+inputs = 1            # 外部符号
+outputs = 0
+side_effect = "effect"
+
+[[event.proj]]
+isa = "x86-64"
+[[event.proj.step]]
+opcode = [0xE8]
+rel_role = "src1"
+rel_kind = "extern"
+rel_size = 32
+
+# ════════════════════════════════════════════════════════════════
+# [runtime.x86]：运行时条目最小描述（spec §6；M2a Task 1 声明，消费方 =
+# M2b+）。现行约定 = SysV 寄存器传参（rdi/rsi/rdx/rcx/r8/r9——elf.cr R2
+# 参数拷贝：callee 帧槽保存，与分配器一致）；save 集 = callee-saved
+# rbx/r12-15；extern = call rel32 + ext_rel 符号解析。
+# ════════════════════════════════════════════════════════════════
+[runtime.x86]
+call_mechanism = "stack"
+call_ret_addr = "pushed"
+call_stack_grow = "down"
+param_mode = "regs"
+param_regs = "rdi rsi rdx rcx r8 r9"
+save_regs = "rbx r12 r13 r14 r15"
+extern_entry = "call_rel32"
+extern_resolve = "ext_rel"
