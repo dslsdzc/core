@@ -24,16 +24,20 @@ plan D6 原案：「tagged（潜在多字）变量排除寄存器分配（只栈
 
   A. 行为（O0/O1/O2）：三类 2L 态用例全绿（exit + syscall3 16B 全 128
      通道）——与 task3/4 语义面重叠，但此处与 B 的元断言同用例链接；
-  B. 元断言（.ccr 双通道：oracle 复刻识别规则 vs REG_ASSIGN 段）：
-     - O1：REG_ASSIGN = 0（alloc_registers 门 = opt_level ≥ 2，opt.cr
-       optimize_all）——O1 tagged 变量恒全栈（只栈平凡成立）；
-     - O2：指定函数（运行时确实发生 2L 溢出的函数）tagged∩REG_ASSIGN
-       ≠ ∅ ——「2L 态值驻寄存器 + 行为全绿」链接成立 = reg 形态自洽的
-       活体实证。
+  B. 元断言（2026-09-07 regalloc 移后端后载体 = corearch --dump-regassign：
+     .ccr 不再携带 REG_ASSIGN（R2/D-1=Y）——corearch load 后自算；dump 通道
+     按 --opt-level 门逐对输出 var→reg。oracle 识别规则 = test_mw_task1）：
+     - O1：corearch -O1 dump = 空（分配门 = opt_level ≥ 2——O1 tagged 变量
+       恒全栈，只栈平凡成立）；
+     - O2：corearch -O2 dump：指定函数（运行时确实发生 2L 溢出的函数）
+       tagged∩REG_ASSIGN ≠ ∅ ——「2L 态值驻寄存器 + 行为全绿」链接成立 =
+       reg 形态自洽的活体实证。
 
-.ccr 读取依赖 v6 段表布局（test_ccr_v6.V6File 唯一真源）。
+.ccr 结构读取 = test_mw_task1.load_ir/detect_tags（oracle 复刻识别规则）；
+meta 元数据改经 corearch --dump-regassign（分配真相源 = corearch 内存态）。
 """
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -42,11 +46,13 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parents[2]
 BUILD = BASE / "build"
 COREC = BUILD / "corec"
+COREARCH = BUILD / "corearch"
 SCRATCH = BUILD / "mw_task5_scratch"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_ccr_v6 import V6File  # noqa: E402
 from test_mw_task1 import load_ir, detect_tags  # noqa: E402
+
+REGASSIGN_LINE = re.compile(r"^regassign: (\d+) (\d+)$", re.MULTILINE)
 
 
 def limb_bytes(S):
@@ -56,55 +62,23 @@ def limb_bytes(S):
     return struct.pack("<QQ", lo, hi)
 
 
-def opt_reg_assign(ccr_path):
-    """SYM 段尾 opt_meta → {var_idx: reg}（REG_ASSIGN key=0 对；loader 布局
-    = key u32 + data_len u32 + [count u32 + pairs(var u32, reg u32)]）。"""
-    v = V6File(ccr_path.read_bytes())
-    b = v.body(2)
-    pos = 0
+def dump_regassign(ccr_path, opt_level) -> dict:
+    """corearch --dump-regassign 通道（regalloc 移后端）：corearch load .ccr
+    后按 --opt-level 门自算（O2 = 分配）并逐对输出 var→reg。O0/O1 → 空。
 
-    def u32():
-        nonlocal pos
-        val = struct.unpack_from('<I', b, pos)[0]
-        pos += 4
-        return val
-
-    g = u32()
-    pos += g * 16
-    n = u32()
-    for _ in range(n):
-        (_, pc, _, _, _, _) = struct.unpack_from('<IIiiii', b, pos)
-        pos += 24 + pc * 4
-        vc = u32()
-        pos += vc * 8
-    scn = u32()                 # str_consts（注意：禁 pos += u32()*n 形——
-    pos += scn * 4              # 增广赋值先读 pos 再求值 RHS，u32() 副作用被覆写）
-    stn = u32()
-    for _ in range(stn):
-        pos += 4
-        fc = u32()
-        pos += fc * 8
-    en = u32()
-    for _ in range(en):
-        pos += 4
-        vc2 = u32()
-        for _ in range(vc2):
-            pos += 4
-            tc = u32()
-            pos += tc * 4
+    返回 {var_idx: reg}（.ccr 不再携带 REG_ASSIGN——分配结果同进程消费，
+    元断言改从此通道取分配真相源）。"""
+    r = subprocess.run(["nice", "-n", "19", str(COREARCH), str(ccr_path),
+                        "--dump-regassign", "--opt-level", str(opt_level)],
+                       cwd=BASE, capture_output=True, text=True, timeout=120)
+    if r.returncode != 0:
+        raise RuntimeError(f"corearch --dump-regassign rc={r.returncode}: "
+                           f"{r.stdout[-500:]} {r.stderr[-500:]}")
     pairs = {}
-    oc = u32()
-    for _ in range(oc):
-        key = u32()
-        dl = u32()
-        data = b[pos:pos + dl]
-        if key == 0 and dl >= 4:  # OPT_KEY_REG_ASSIGN
-            cnt = struct.unpack_from('<I', data, 0)[0]
-            for i in range(cnt):
-                vi, rg = struct.unpack_from('<II', data, 4 + i * 8)
-                pairs[vi] = rg
-        pos += dl
-    assert pos == len(b), f"SYM meta walk ended at {pos} of {len(b)}"
+    for ln in r.stdout.splitlines():
+        m = REGASSIGN_LINE.match(ln.strip())
+        if m:
+            pairs[int(m.group(1))] = int(m.group(2))
     return pairs
 
 
@@ -178,15 +152,16 @@ def main() -> int:
                 ok = False
                 continue
             funcs, var_types = load_ir(ccr)
-            regs = opt_reg_assign(ccr)
             if opt == 1:
+                regs = dump_regassign(ccr, 1)
                 if regs:
-                    print(f"[FAIL] {name} @O1: REG_ASSIGN = {len(regs)} != 0"
-                          "（O1 不应有寄存器分配——alloc_registers 门 = O2）")
+                    print(f"[FAIL] {name} @O1: corearch dump REG_ASSIGN = "
+                          f"{len(regs)} != 0（O1 不应有寄存器分配——分配门 = O2）")
                     ok = False
                 else:
                     print(f"[PASS] {name} @O1: REG_ASSIGN = 0（全栈，tagged 只栈平凡）")
             if opt == 2:
+                regs = dump_regassign(ccr, 2)
                 # 元断言：运行时 2L 溢出所在函数内 tagged∩REG_ASSIGN ≠ ∅
                 hit = False
                 for f in funcs:

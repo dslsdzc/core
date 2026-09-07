@@ -196,13 +196,6 @@ fn corec_main() -> int {
     cli_flag("output", "o", "Output path");
     cli_flag_bool("static", "", "Static linking (embed runtime)");
     cli_flag("opt-level", "O", "Optimization level (0,1,2,3; default=1)");
-    cli_flag_bool("dump-entries", "", "Hidden debug: versioned entries summary (v6 Task 2 test channel)");
-    cli_flag_bool("dump-coexist", "", "Hidden debug: coexistence summary (v6 Task 3 test channel)");
-    cli_flag_bool("check-regalloc", "", "Hidden debug: O2-forced alloc + regalloc consistency self-check (v6 Task 5 test channel)");
-    cli_flag_bool("inject-home-conflict", "", "Hidden debug: inject coexisting entries onto same home slot, then verify (Task 5 test hook)");
-    cli_flag_bool("inject-reg-conflict", "", "Hidden debug: inject fake var->reg pair colliding with a real one, then verify (Task 5 test hook)");
-    cli_flag_bool("inject-read-gap", "", "Hidden debug: truncate last version interval to def point, then verify (Task 5 test hook)");
-    cli_flag_bool("inject-coexist-oob", "", "Hidden debug: probe entries_coexist with OOB indices (GC-1 test hook)");
     cli_flag_bool("inject-var-shift", "", "Hidden debug: shift func0 var decl block left by 1, then save (GC-4 test hook)");
 
     if cli_parse() != 0 { return 1; }
@@ -496,54 +489,10 @@ fn corec_main() -> int {
 
     // === cir: output dataflow graph ===
     if cli_eq(cmd, "cir") {
-        // Hidden debug (--dump-entries): versioned entries summary. Runs before
-        // any opt-gated pass — compute_live_ranges (whose tail computes
-        // per-function version entries) is unconditional here, so the dump is
-        // visible at every -O level (entries describe the pre-CSE IR, i.e. the
-        // exact stream this command dumps).
-        if cli_has("dump-entries") != 0 {
-            compute_live_ranges();
-            dump_entries_summary();
-            return 0;
-        }
-        // Hidden debug (--inject-coexist-oob): GC-1 upper-bound probe — entries_coexist
-        // called with indices >= g_entry_count must answer 0 (guard) instead of reading
-        // past the table (zero-filled slack reads as overlapping [0,0] intervals → 1).
-        // Same data/precondition as dump-coexist; real build paths never inject.
-        if cli_has("inject-coexist-oob") != 0 {
-            compute_live_ranges();
-            return inject_coexist_oob();
-        }
-        // Hidden debug (--dump-coexist): coexistence summary — same data/precondition
-        // as dump-entries; flags are mutually exclusive (dump-entries wins if both given).
-        if cli_has("dump-coexist") != 0 {
-            compute_live_ranges();
-            dump_coexist_summary();
-            return 0;
-        }
-        // Hidden debug (--check-regalloc): v6 Task 5 判定消费测试载体。O2 强制
-        // 分配（alloc_registers 内含 compute_live_ranges → 条目表随算随新）后跑
-        // 一致性自检；测试钩子注入（--inject-*）在分配后、判定前改写条目表/
-        // g_opt_meta——真实构建路径永不注入（见 opt.cr 注入函数注释）。
-        // 校验对象 = 与 dump-entries 同源的前 CSE 线性流（cir 分支不跑 CSE）。
-        if cli_has("check-regalloc") != 0 {
-            saved_opt := g_opt_level;
-            g_opt_level = 2;
-            alloc_registers();
-            // 看门狗行：g_opt_meta REG_ASSIGN 对总数（rc>0 = 寄存器真实分配
-            // 实证——CAG 前 rc 恒 0 全栈发射，防回退，见 opt.cr alloc 区头）
-            print("regalloc-assign: "); print(int_str(meta_reg_assign_total()));
-            println(" pairs");
-            if cli_has("inject-home-conflict") != 0 { inject_home_conflict(); }
-            if cli_has("inject-reg-conflict") != 0 { inject_reg_conflict(); }
-            if cli_has("inject-read-gap") != 0 { inject_read_gap(); }
-            nv := regalloc_verify_all();
-            g_opt_level = saved_opt;
-            print("regalloc-consistency: funcs "); print(int_str(g_ir_func_count));
-            print(" violations "); println(int_str(nv));
-            if nv != 0 { return 1; }
-            return 0;
-        }
+        // regalloc 判定/条目调试通道（--dump-entries/--dump-coexist/--check-regalloc/
+        // --inject-*）已随编码决策层迁 corearch（2026-09-07 regalloc 移后端）——
+        // corearch load .ccr 后自算自检（src/arch/linux/ld/regalloc.cr），载体 =
+        // corearch 同名隐藏 flag。
         dot := df_graph_to_dot();
         out := cli_get("output");
         if str_len(out) == 0 {
@@ -576,16 +525,10 @@ fn corec_main() -> int {
     }
 
     // === build | ccr need lower_to_ccr ===
+    // regalloc 移后端（2026-09-07）：O2 分配 + 一致性判定已归位 corearch——
+    // corearch load .ccr 后自算自检（违反 = 编译错误）；corec 只留语义层 CSE。
     if g_opt_level >= 1 {
         pass_cse();
-    }
-    if g_opt_level >= 2 {
-        alloc_registers();
-        // v6 Task 5：寄存器分配一致性自检（消费条目表 + 分配结果；规约
-        // spec/regalloc-consistency.corespec——规则 ① 共存互斥全量 + ② 读点
-        // 覆盖框架）。违反 = 编译错误（诊断已打印，此处拦截）；成功静默。
-        if regalloc_verify_all() != 0 { return 1; }
-        pass_stack_share();
     }
     println("lower to ccr...");
     lower_to_ccr();

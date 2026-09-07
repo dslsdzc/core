@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """v6 .ccr 格式 IO 测试——段表架构 + ENT 存在结构段 + SYM 归并/REG 坐标化。
 
+注（2026-09-07 regalloc 移后端，D-1=Y/R2）：corec save 不再携带 ENT 条目与
+opt_meta（数据面/分配归位 corearch 自算）——ENT 段恒 0 条、SYM func/REG
+first_ent/last_ent 恒 -1、param_ents 恒 -1、opt_count 恒 0。段结构与 loader
+兼容语义保留（空表对照 pcnt==0 ↔ -1；格式描述 = loader 仍支持的形状）。
+
 格式真相：docs/superpowers/specs/2026-09-05-lattice-ir-v6-format.md（§2/§3.2/§3.5）
 + ccr_io.cr 头注释（v6 目标形状：SYM 归并 spec §3.2——globals/funcs/str_consts/
 structs/enums/opt_meta；REG 坐标化 spec §3.5——kind/parent/enter/exit/first_ent/
@@ -30,7 +35,6 @@ last_ent）。
           enter/exit 派生；first/last = 区内条目范围——定值点 ∈ [enter, exit)）
 """
 import os
-import re
 import struct
 import subprocess
 import tempfile
@@ -220,54 +224,6 @@ def read_ccr(path: str) -> bytes:
         return fh.read()
 
 
-def dump_entries(src: str) -> tuple:
-    """cir --dump-entries 通道：(rc, stdout)。内存闭区间表 = 落盘 ENT 的源头。"""
-    with tempfile.NamedTemporaryFile('w', suffix='.cr', delete=False) as f:
-        f.write(src)
-        path = f.name
-    try:
-        r = subprocess.run([COREC, 'cir', path, '--dump-entries'],
-                           capture_output=True, text=True, cwd=BASE, timeout=120)
-        return r.returncode, r.stdout
-    finally:
-        os.unlink(path)
-
-
-ENTRY_LINE = re.compile(
-    r"^e (\d+) var (\d+) name=(\S+) v (\d+) def (-?\d+) kind=(\S+) "
-    r"live (\d+)\.\.(\d+) home (-?\d+) flags (\d+)$")
-HEADER_LINE = re.compile(r"^== entries func (\d+) \((.*)\): (\d+)$")
-
-
-def parse_entry_blocks(out: str) -> dict:
-    blocks = {}
-    cur = None
-    for raw in out.splitlines():
-        ln = raw.strip()
-        m = HEADER_LINE.match(ln)
-        if m:
-            blocks[m.group(2)] = []
-            cur = blocks[m.group(2)]
-            continue
-        m = ENTRY_LINE.match(ln)
-        if m and cur is not None:
-            cur.append({
-                "e": int(m.group(1)), "var": int(m.group(2)), "name": m.group(3),
-                "v": int(m.group(4)), "def": int(m.group(5)), "kind": m.group(6),
-                "ls": int(m.group(7)), "le": int(m.group(8)),
-                "home": int(m.group(9)), "flags": int(m.group(10)),
-            })
-    return blocks
-
-
-def ent_groups(entries: list) -> dict:
-    """Group disk ENT records by var_id (order preserved)."""
-    groups = {}
-    for rec in entries:
-        groups.setdefault(rec[0], []).append(rec)
-    return groups
-
-
 # --- tests ---
 
 def test_header_segment_table_and_walk():
@@ -297,7 +253,7 @@ def test_header_segment_table_and_walk():
         reg = v6.reg()
         assert len(reg) >= 2, f"expected >=2 regions (func+for), got {len(reg)}"
         e = v6.ent()
-        assert len(e) > 0, "expected entries, got none"
+        assert e == [], "ENT not empty (regalloc move: corec no longer saves entries)"
     finally:
         try:
             os.unlink(ccr_path)
@@ -305,10 +261,12 @@ def test_header_segment_table_and_walk():
             pass
 
 
-def test_ent_record_conversion_matches_dump():
-    """ENT 落盘转换 = 内存闭区间表 + version 序数 + live_end 半开 +1：
-    cir --dump-entries（内存表，闭区间/组内版本序）↔ .ccr ENT 逐条对照：
-    var 相同、disk ls == mem ls、disk le == mem le + 1、disk version == 组内序数。"""
+def test_ent_optmeta_absent_after_move():
+    """regalloc 移后端（D-1=Y/R2，2026-09-07）：corec save 不再携带 ENT 与
+    opt_meta——ENT 段恒 0 条、SYM func/REG first_ent/last_ent 恒 -1、
+    param_ents 恒 -1、opt_count 恒 0（格式结构与 loader 空表语义保留：
+    loader 对照 pcnt==0 ↔ -1 已支持）。数据面正确性 = corearch 自算通道
+    （--dump-entries/--check-regalloc，载体 = test_live_ranges）。"""
     src = ("fn identity(n: int) -> int { return n; }\n"
            "fn main() -> int {\n"
            "    x := 1;\n"
@@ -316,20 +274,6 @@ def test_ent_record_conversion_matches_dump():
            "    x = x + 2;\n"
            "    return x;\n"
            "}\n")
-    # memory side (dump-entries is the same entry table save_ccr serializes)
-    rc, out = dump_entries(src)
-    assert rc == 0, f"dump-entries rc={rc}\n{out[-500:]}"
-    blocks = parse_entry_blocks(out)
-    assert "main" in blocks, f"no main block in dump:\n{out}"
-    mem_main = blocks["main"]
-    # GC 批 2 后 main 的临时 producer 也有 def'd 条目——x 的 4 版本按 name 断言
-    x_ent = [e for e in mem_main if e["name"] == "x"]
-    assert len(x_ent) == 4 and all(e["def"] >= 0 for e in x_ent), \
-        f"main/x should have 4 def'd entries, got {x_ent}"
-    # flatten all function blocks: the disk ENT spans every compiled func
-    # (res_imports pulls in stdlib funcs, so the file covers > the source funcs)
-    mem = [e for blk in blocks.values() for e in blk]
-    # disk side
     ccr_path = os.path.join(BASE, 'build/test_v6_ent.ccr')
     try:
         os.unlink(ccr_path)
@@ -338,50 +282,16 @@ def test_ent_record_conversion_matches_dump():
     try:
         corec_ccr(src, ccr_path)
         v6 = V6File(read_ccr(ccr_path))
-        entries = v6.ent()
-        nod_cnt = len(v6.nod())
-        # structural invariants first
-        for (var_id, ver, df, ls, le, home, flags) in entries:
-            assert ver >= 1, f"version must be 1-based: {entries}"
-            assert 0 <= ls < le <= nod_cnt, \
-                f"bad half-open range {ls}..{le} (nod_count={nod_cnt}): {entries}"
-            if df >= 0:
-                assert df < nod_cnt, f"def_nod {df} out of range: {entries}"
-                assert df == ls, f"def'd entry live_start {ls} != def {df}: {entries}"
-            else:
-                assert ls >= 0
-            assert home == -1, f"home must be -1 pre-allocation: {entries}"
-        # per-var groups: ascending defs, adjacent versions meet at def point
-        # (disk half-open slicing: le_j == ls_{j+1} == def_{j+1})
-        for var_id, group in ent_groups(entries).items():
-            if len(group) < 2:
-                continue
-            for j in range(1, len(group)):
-                assert group[j][1] == group[j - 1][1] + 1, \
-                    f"versions not sequential for var {var_id}: {group}"
-                assert group[j][0] == var_id
-                if group[j - 1][3] >= 0:  # prev is def'd → sliced at next def
-                    assert group[j - 1][4] == group[j][3], \
-                        f"version slice gap for var {var_id}: {group}"
-        # map disk entry -> memory entry (same var, same def), compare fields
-        mem_by_var_def = {}
-        for e in mem:
-            mem_by_var_def[(e["var"], e["def"])] = e
-        matched = 0
-        for (var_id, ver, df, ls, le, home, flags) in entries:
-            key = (var_id, df)
-            e = mem_by_var_def.get(key)
-            assert e is not None, f"disk entry (var {var_id}, def {df}) not in memory table"
-            assert ls == e["ls"], \
-                f"var {var_id} v{ver}: disk ls {ls} != mem ls {e['ls']}"
-            assert le == e["le"] + 1, \
-                f"var {var_id} v{ver}: disk half-open le {le} != mem le+1 {e['le'] + 1}"
-            assert ver == e["v"], \
-                f"var {var_id}: disk version {ver} != mem ordinal {e['v']}"
-            matched += 1
-        assert matched == len(entries), "not all disk entries matched"
-        assert len(entries) == len(mem), \
-            f"disk entry count {len(entries)} != memory entry count {len(mem)}"
+        assert v6.ent() == [], f"ENT not empty after regalloc move: {v6.ent()}"
+        sym = v6.sym_parse()
+        assert sym['opt_count'] == 0, f"opt_meta not empty: {sym['opt_count']}"
+        for f in sym['funcs']:
+            assert f['first_ent'] == -1 and f['last_ent'] == -1, \
+                f"func {f} first/last_ent != -1"
+            assert all(pe == -1 for pe in f['param_ents']), \
+                f"func {f} param_ents not all -1"
+        for r in v6.reg():
+            assert r[4] == -1 and r[5] == -1, f"REG row carries entry range: {r}"
     finally:
         try:
             os.unlink(ccr_path)
@@ -451,7 +361,7 @@ def test_ccr_v6_roundtrip_elf():
             f"expected exit 15 (sum 0..5), got {run.returncode} stdout={run.stdout!r}"
         assert os.path.exists(ccr_path), "corec build did not save .ccr alongside output"
         v6 = V6File(read_ccr(ccr_path))  # the built artifact is v6
-        assert v6.ent(), "built .ccr carries no ENT segment"
+        assert v6.ent() == [], "built .ccr should carry no ENT (regalloc move: corearch self-computes)"
         # 2) direct corearch invocation on the same .ccr
         out2 = os.path.join(BASE, 'build/test_v6_rt2')
         try:
@@ -572,10 +482,12 @@ def test_sym_reg_target_shape():
             pass
 
 
-def test_sym_func_params_blocks():
-    """函数记录 param_ents（参数 def=-1 条目 id）+ 条目块序（文件序 = 函数序）：
-    参数变量 = 函数 var 声明区前 param_count 个（行序 = 参数序，类型 int）；
-    add 全条目 def=-1；main 的 x 重定值切 4 个定值条目（dump-entries 同源）。"""
+def test_sym_func_shapes():
+    """SYM func 记录形状（ENT 恒空后——原参数 def=-1 条目/条目块序断言载体已
+    随 regalloc 移后端消亡，数据面断言归 test_live_ranges/corearch 通道）：
+    add/main 行序 = 声明序；参数 = var 声明区前 param_count 个（行序 = 参数序，
+    类型 int）；root_region 行序 1:1、span 连续铺满 NOD 空间；恒空字段 =
+    first/last_ent 与 param_ents 全 -1。"""
     src = ("fn add(a: int, b: int) -> int { return a + b; }\n"
            "fn main() -> int {\n"
            "    x := 1;\n"
@@ -594,11 +506,10 @@ def test_sym_func_params_blocks():
         sym = v6.sym_parse()
         funcs = sym['funcs']
         strs = v6.str_table()
-        ents = v6.ent()
         regs = v6.reg()
+        nod_cnt = len(v6.nod())
         assert strs[funcs[0]['name']] == 'add'
         assert strs[funcs[1]['name']] == 'main'
-        g_base = len(sym['globals'])
         # add: 参数声明 = var 声明区前 2 个（a, b, TI_INT=0）
         add = funcs[0]
         assert add['param_count'] == 2
@@ -606,131 +517,22 @@ def test_sym_func_params_blocks():
         pdecls = add['var_decls'][:2]
         assert [strs[d['name']] for d in pdecls] == ['a', 'b']
         assert [d['type'] for d in pdecls] == [0, 0], "int param type != TI_INT"
-        nod = v6.nod()
-        a_block = ents[add['first_ent']:add['last_ent'] + 1]
-        # GC 批 2（dest≥0 全定值）：add 的 producer 临时值（_arena/binary 组）有
-        # def'd 版本条目；a/b 参数无定值 → def=-1 单条目（块内扫描定位——参数
-        # def=-1 条目不再占据块首，位置式断言已不可用）
-        defd_add = [en for en in a_block if en[2] >= 0]
-        assert len(defd_add) >= 1, f"add has no def'd producer entries: {a_block}"
-        excluded = {16, 26, 44}  # STORE_INDEX_VAR/STORE_PTR/DYN_DISPATCH dest 非定值
-        assert not ({nod[en[2]][0] for en in defd_add} & excluded), \
-            f"add def'd entry from excluded op: {a_block}"
-        # param_ents 指向 a/b 的 def=-1 入参条目（var 扫描）；a/b 各恰一条
-        for pi, pvar in enumerate((g_base, g_base + 1)):
-            pid = add['param_ents'][pi]
-            assert pid >= 0, f"param {pi} entry missing: {add['param_ents']}"
-            assert ents[pid][0] == pvar and ents[pid][2] == -1, \
-                f"param {pi} entry wrong var/def: {ents[pid]}"
-            no_defs = [en for en in a_block if en[0] == pvar and en[2] == -1]
-            assert len(no_defs) == 1, f"param {pi}: def=-1 entries != 1: {no_defs}"
-        # 文件条目块 = 函数序（main 块紧接 add 块——add 块非空）
-        main_f = funcs[1]
-        assert main_f['first_ent'] == add['last_ent'] + 1
-        # 根 region（kind=0）行序 = 函数序 1:1（含目录 _import 拉入的 stdlib 函数）
+        # 恒空字段（regalloc 移后端：.ccr 无 ENT——参数字段与条目范围全 -1）
+        for f in funcs:
+            assert f['first_ent'] == -1 and f['last_ent'] == -1, f
+            assert all(pe == -1 for pe in f['param_ents']), f
+        # 根 region（kind=0）行序 = 函数序 1:1；span 连续铺满 NOD 空间
         roots = [(i, r) for i, r in enumerate(regs) if r[0] == 0]
         assert len(roots) == len(funcs)
         assert funcs[0]['root_region'] == roots[0][0]
         assert funcs[1]['root_region'] == roots[1][0]
-        assert roots[0][1][4] == add['first_ent'] and roots[0][1][5] == add['last_ent']
-        assert roots[1][1][4] == main_f['first_ent'] and roots[1][1][5] == main_f['last_ent']
-        # main: x 重定值 → ALLOC+3×STORE = 4 个版本条目（def_nod ops [6,9,9,9]；
-        # GC 批 2 后 main 还有 producer 组（CONST/BINARY/ARENA_NEW）——按组断言：
-        # ops 组合 [6,9,9,9] 的 4 版本组即 x）
-        main_block = ents[main_f['first_ent']:main_f['last_ent'] + 1]
-        groups = ent_groups(main_block)
-        x_group = [g for g in groups.values()
-                   if len(g) == 4 and [nod[en[2]][0] for en in g] == [6, 9, 9, 9]]
-        assert len(x_group) == 1, \
-            f"main: no x group (4 versions, ALLOC+3 STORE): {main_block}"
-        assert [en[1] for en in x_group[0]] == [1, 2, 3, 4], \
-            f"x versions not sequential: {x_group[0]}"
-        # GC 批 2 扩权实证：main 的 def'd 条目数 > 4（临时 producer 组入条目）
-        defd_main = [en for en in main_block if en[2] >= 0]
-        assert len(defd_main) > 4, \
-            f"main should have producer temp def'd entries beyond x: {main_block}"
-    finally:
-        try:
-            os.unlink(ccr_path)
-        except FileNotFoundError:
-            pass
-
-
-def test_sym_param_ents_redefined_param():
-    """GC 批 3（SYM 评审 M3）：重定值参数 param_ents=-1 定向测试。
-
-    重定值参数（函数体对参数赋值，`n = n + 1`）无「入参版本」条目：参数槽 =
-    调用方传入（不发射 IR_ALLOC 初定值），compute_entries 尾部 def=-1 补条
-    pass 条件 prev[lv] < 0（从未定值）不满足 → 函数条目块内参数只有 def'd
-    版本条目 → save 侧 param_ents 扫描（ccr_io.cr：行 vs+pi 的 def=-1 条目）
-    落空 → 落盘 -1。对照 = 只读参数（identity/n）：尾部补条成立 → param_ents
-    = def=-1 条目 id。语料真实存在（stdlib 2 例）；此前无定向测试（评审 M3）。
-    行为记录非修复——入参版本条目建模 = 后续若判定②扩权需要（注记同步见
-    regalloc-consistency.cr 已知缺口）。"""
-    src = ("fn identity(n: int) -> int { return n; }\n"
-           "fn bump(n: int) -> int {\n"
-           "    n = n + 1;\n"
-           "    return n;\n"
-           "}\n"
-           "fn main() -> int { return bump(41); }\n")
-    ccr_path = os.path.join(BASE, 'build/test_v6_paraments.ccr')
-    try:
-        os.unlink(ccr_path)
-    except FileNotFoundError:
-        pass
-    try:
-        corec_ccr(src, ccr_path)
-        v6 = V6File(read_ccr(ccr_path))
-        sym = v6.sym_parse()
-        funcs = sym['funcs']
-        strs = v6.str_table()
-        ents = v6.ent()
-
-        def by_name(nm):
-            hits = [f for f in funcs if strs[f['name']] == nm]
-            assert len(hits) == 1, f"expected exactly one func {nm}, got {len(hits)}"
-            return funcs.index(hits[0])
-
-        ii = by_name('identity')
-        bi = by_name('bump')
-
-        # 参数 var 行 = 函数 var 声明区行首（globals 行 + 前缀 var_count 累计——
-        # 声明区跨函数相接铺满命名空间的落盘不变量）
-        def pvar_of(fi):
-            return len(sym['globals']) + sum(f['var_count'] for f in funcs[:fi])
-
-        # 只读参数（identity/n）：def=-1 入参条目存在 → param_ents = 条目 id
-        ip = pvar_of(ii)
-        iblk = ents[funcs[ii]['first_ent']:funcs[ii]['last_ent'] + 1]
-        pid = funcs[ii]['param_ents'][0]
-        assert pid >= 0, f"identity/n: param_ents={funcs[ii]['param_ents']} (want entry id)"
-        assert funcs[ii]['first_ent'] <= pid <= funcs[ii]['last_ent'], \
-            f"identity/n: param entry {pid} outside block {funcs[ii]['first_ent']}..{funcs[ii]['last_ent']}"
-        assert ents[pid][0] == ip and ents[pid][2] == -1, \
-            f"identity/n: param_ents points at wrong entry: {ents[pid]}"
-        no_defs = [en for en in iblk if en[0] == ip and en[2] == -1]
-        assert len(no_defs) == 1, f"identity/n: def=-1 entries != 1: {no_defs}"
-        # 重定值参数（bump/n）：全 def'd 条目、无 def=-1 → param_ents == -1。
-        # 与「未引用参数」同形 -1（ccr_io.cr 注记）区分：断言条目块内含该 var
-        # 的 def'd 条目（bump/n 是被引用的重定值路径，不是无条目情形）
-        bp = pvar_of(bi)
-        bblk = ents[funcs[bi]['first_ent']:funcs[bi]['last_ent'] + 1]
-        assert funcs[bi]['param_ents'] == [-1], \
-            f"bump/n: param_ents={funcs[bi]['param_ents']} (want [-1])"
-        bpar = [en for en in bblk if en[0] == bp]
-        assert bpar and all(en[2] >= 0 for en in bpar), \
-            f"bump/n: expected def'd entries only, got {bpar}"
-        # dump-entries 通道对照（内存条目表 = save 序列化源头）：
-        # identity/n 尾部补条单 def=-1 条目；bump/n 重定值 STORE 版无 def=-1
-        rc, out = dump_entries(src)
-        assert rc == 0, f"dump-entries rc={rc}\n{out[-500:]}"
-        blocks = parse_entry_blocks(out)
-        idn = [e for e in blocks['identity'] if e['name'] == 'n']
-        assert len(idn) == 1 and idn[0]['def'] == -1 and idn[0]['kind'] == '-', \
-            f"identity/n: expected single def=-1 entry, got {idn}"
-        bnp = [e for e in blocks['bump'] if e['name'] == 'n']
-        assert len(bnp) == 1 and bnp[0]['def'] >= 0 and bnp[0]['kind'] == 'STORE', \
-            f"bump/n: expected single STORE def'd entry, got {bnp}"
+        prev_end = 0
+        for k, (rid, r) in enumerate(roots):
+            assert funcs[k]['root_region'] == rid
+            assert r[2] == prev_end, f"root {k} enter {r[2]} != prev end {prev_end}"
+            prev_end = r[3]
+        assert prev_end == nod_cnt, \
+            f"root spans end at {prev_end}, nod_count {nod_cnt}"
     finally:
         try:
             os.unlink(ccr_path)
@@ -834,10 +636,9 @@ def test_save_rejects_var_block_misalignment():
 
 if __name__ == '__main__':
     tests = [test_header_segment_table_and_walk,
-             test_ent_record_conversion_matches_dump,
+             test_ent_optmeta_absent_after_move,
              test_sym_reg_target_shape,
-             test_sym_func_params_blocks,
-             test_sym_param_ents_redefined_param,
+             test_sym_func_shapes,
              test_loader_rejects_non_v6_version,
              test_loader_rejects_root_span_beyond_nod_space,
              test_save_rejects_var_block_misalignment,

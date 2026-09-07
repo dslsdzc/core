@@ -385,11 +385,9 @@ fn lower_to_ccr() {
     // After lowering, compute per-variable usage counts for optimization passes
     compute_usage_counts();
 
-    // v6 Task 4：条目表在 save 前就绪——lower 尾部无条件计算（与 opt 门控解耦：
-    // O0/O1 build 的 .ccr 也要带 ENT 段）。compute_live_ranges 尾部对全部函数
-    // 运行 compute_entries（整表重建，幂等）；坐标 = 本函数刚重建的线性流
-    // （g_ir_func_instr_start/count 已由上方同步为 df 边界），NOD 落盘坐标同源。
-    compute_live_ranges();
+    // regalloc 移后端（2026-09-07，D-1=Y）：数据面（区间/条目）随分配归位
+    // corearch——.ccr ENT 恒空，不再在此无条件计算；corearch load 后自算自检
+    // （regalloc.cr compute_live_ranges/compute_entries，载入 NOD 流坐标同源）。
 }
 
 // --- Mark function boundary in graph ---

@@ -8,13 +8,15 @@ alloc_registers 改读 live_first/live_last——行为必须与内联扫描一�
 Task 2 追加：compute_entries 按定值点切分版本条目（变量 × 版本，24B/条）。
 定值指令 = IR_ALLOC（局部槽初定值）与该变量为目标的每次 IR_STORE
 （IR_STORE 形态 ρ(s1):=ρ(s2)——目标在 s1 不在 dest，见 ir-op-semantics.md）。
-调试通道：`corec cir FILE.cr --dump-entries`（隐藏标志，与 opt 门控解耦——
-cir 分支在任意 -O 下都先跑 compute_live_ranges（尾部 compute_entries）再出摘要）。
+调试通道（2026-09-07 regalloc 移后端随迁）：`corearch FILE.ccr --dump-entries`
+（corec cir 原通道——corearch load .ccr 后内存态自算 compute_live_ranges（尾部
+compute_entries）再出摘要；NOD 载入流与 corec cir 原 dump 流同构——ccr_v6
+conversion 对照测试曾逐条实证 dump ↔ 落盘 ENT 等价，现数据面归 corearch）。
 
 覆盖路径：
-- 默认 O1 build：pass_cse 路径（alloc_registers 在 O1 不运行，仍须正确）
-- --opt-level 2 build：alloc_registers + pass_stack_share 路径（读新表）
-- cir --dump-entries：版本条目断言（多定值变量版本切割 / 参数无定值单条目）
+- 默认 O1 build：pass_cse 路径（O2 分配在 corearch 侧不运行，仍须正确）
+- --opt-level 2 build：corearch 自算 alloc（读新表）+ verify 路径
+- corearch --dump-entries：版本条目断言（多定值变量版本切割 / 参数无定值单条目）
 
 fib(10)==55 为行为锚点（递归 + 分支密集，区间表错误会破坏寄存器指派）。
 
@@ -33,6 +35,31 @@ from pathlib import Path
 
 BASE = Path(__file__).resolve().parents[2]
 COREC = BASE / "build" / "corec"
+COREARCH = BASE / "build" / "corearch"
+
+
+def corearch_chan(source: str, *flags) -> tuple:
+    """数据面/判定调试通道（随迁 corearch）：corec ccr 产 .ccr（-O0 无 opt
+    pass 干扰——NOD = pre-CSE 流）→ corearch load 后自算执行 flag。返回
+    (rc, stdout+stderr)。"""
+    with tempfile.NamedTemporaryFile("w", suffix=".cr", delete=False) as f:
+        f.write(source)
+        path = f.name
+    ccr = path[:-3] + ".ccr"
+    try:
+        b = subprocess.run([str(COREC), "ccr", path, "--opt-level", "0", "-o", ccr],
+                           capture_output=True, text=True, cwd=BASE, timeout=120)
+        if b.returncode != 0:
+            return 999, f"corec ccr failed:\n{b.stdout[-500:]}\n{b.stderr[-500:]}"
+        r = subprocess.run([str(COREARCH), ccr] + list(flags),
+                           capture_output=True, text=True, cwd=BASE, timeout=120)
+        return r.returncode, r.stdout + r.stderr
+    finally:
+        for p in (path, ccr):
+            try:
+                os.unlink(p)
+            except FileNotFoundError:
+                pass
 
 
 def build_and_run(source: str, extra_flags) -> int:
@@ -57,19 +84,8 @@ def build_and_run(source: str, extra_flags) -> int:
 
 
 def dump_entries(source: str) -> tuple:
-    """cir --dump-entries 通道：返回 (rc, stdout)。不落盘（dump 分支先返回）。"""
-    with tempfile.NamedTemporaryFile("w", suffix=".cr", delete=False) as f:
-        f.write(source)
-        src = f.name
-    try:
-        r = subprocess.run([str(COREC), "cir", src, "--dump-entries"],
-                           capture_output=True, text=True, cwd=BASE, timeout=120)
-        return r.returncode, r.stdout
-    finally:
-        try:
-            os.unlink(src)
-        except FileNotFoundError:
-            pass
+    """corearch --dump-entries 通道：返回 (rc, stdout)。"""
+    return corearch_chan(source, "--dump-entries")
 
 
 ENTRY_LINE = re.compile(
@@ -253,16 +269,8 @@ def run_smoke() -> tuple:
 
 
 def dump_coexist(source: str) -> tuple:
-    """cir --dump-coexist 通道：返回 (rc, stdout)。"""
-    with tempfile.NamedTemporaryFile("w", suffix=".cr", delete=False) as f:
-        f.write(source)
-        src = f.name
-    try:
-        r = subprocess.run([str(COREC), "cir", src, "--dump-coexist"],
-                           capture_output=True, text=True, cwd=BASE, timeout=120)
-        return r.returncode, r.stdout + r.stderr
-    finally:
-        os.unlink(src)
+    """corearch --dump-coexist 通道：返回 (rc, stdout)。"""
+    return corearch_chan(source, "--dump-coexist")
 
 
 COEXIST_LINE = re.compile(
@@ -316,19 +324,8 @@ def check_coexistence() -> tuple:
 
 
 def check_regalloc(source: str, extra_flags) -> tuple:
-    """cir --check-regalloc 通道：O2 强制分配 + 判定自检，返回 (rc, stdout)。"""
-    with tempfile.NamedTemporaryFile("w", suffix=".cr", delete=False) as f:
-        f.write(source)
-        src = f.name
-    try:
-        r = subprocess.run([str(COREC), "cir", src, "--check-regalloc"] + extra_flags,
-                           capture_output=True, text=True, cwd=BASE, timeout=120)
-        return r.returncode, r.stdout + r.stderr
-    finally:
-        try:
-            os.unlink(src)
-        except FileNotFoundError:
-            pass
+    """corearch --check-regalloc 通道：O2 强制分配 + 判定自检，返回 (rc, stdout)。"""
+    return corearch_chan(source, "--check-regalloc", *extra_flags)
 
 
 SUMMARY_LINE = re.compile(r"^regalloc-consistency: funcs (\d+) violations (\d+)$", re.MULTILINE)
@@ -649,17 +646,9 @@ def check_coexist_oob_guard() -> tuple:
     r != 0（探针自检失败）→ 退出码 1。与 dump-coexist 摘要同源同前置
     （compute_live_ranges），真实构建路径永不注入。"""
     src = "fn main()->int{a:=1;b:=2;return a+b;}\n"
-    with tempfile.NamedTemporaryFile("w", suffix=".cr", delete=False) as f:
-        f.write(src)
-        path = f.name
-    try:
-        r = subprocess.run([str(COREC), "cir", path, "--inject-coexist-oob"],
-                           capture_output=True, text=True, cwd=BASE, timeout=120)
-        out = r.stdout + r.stderr
-    finally:
-        os.unlink(path)
-    if r.returncode != 0:
-        return False, f"cir --inject-coexist-oob rc={r.returncode}\n{out[-500:]}"
+    rc, out = corearch_chan(src, "--inject-coexist-oob")
+    if rc != 0:
+        return False, f"corearch --inject-coexist-oob rc={rc}\n{out[-500:]}"
     m = re.search(r"^coexist-oob-guard: (\d+)$", out, re.MULTILINE)
     if not m:
         return False, f"no coexist-oob-guard line:\n{out[-500:]}"

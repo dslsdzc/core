@@ -14,6 +14,68 @@ fn split_links(val: string) {
             start = i + 1; }
         i = i + 1; } }
 
+// regalloc 移后端（2026-09-07）：数据面/判定调试通道随编码决策层迁入——
+// 载体 = corec cir 原隐藏标志的 corearch 同名版本（load .ccr 后内存态自算，
+// 载入 NOD 流 = pre-CSE 流，与 corec 原 dump 语义同源）。返回：0 = 未请求
+// （正常发射路径继续）；1 = 已处理且通过；2 = 已处理且违反/失败。
+fn regalloc_debug_dispatch() -> int {
+    if cli_has("dump-entries") != 0 {
+        compute_live_ranges();
+        dump_entries_summary();
+        return 1;
+    }
+    if cli_has("inject-coexist-oob") != 0 {
+        compute_live_ranges();
+        if inject_coexist_oob() != 0 { return 2; }
+        return 1;
+    }
+    if cli_has("dump-coexist") != 0 {
+        compute_live_ranges();
+        dump_coexist_summary();
+        return 1;
+    }
+    if cli_has("dump-regassign") != 0 {
+        // 自算后逐对输出 var→reg（尊重 --opt-level 门：分配 = O2，O0/O1 → 空）
+        if g_opt_level >= 2 { alloc_registers(); }
+        mi : ., mut = 0;
+        loop {
+            if mi >= g_opt_meta_count { break; }
+            mo := mi * OPT_META_STRIDE;
+            if r32(g_opt_meta, mo) == OPT_KEY_REG_ASSIGN {
+                cnt := r32(g_opt_meta, mo + 8);
+                di : ., mut = 0;
+                loop {
+                    if di >= cnt { break; }
+                    print("regassign: "); print(int_str(r32(g_opt_meta, mo + 12 + di * 8)));
+                    print(" "); println(int_str(r32(g_opt_meta, mo + 16 + di * 8)));
+                    di = di + 1;
+                }
+            }
+            mi = mi + 1;
+        }
+        return 1;
+    }
+    if cli_has("check-regalloc") != 0 {
+        saved_opt := g_opt_level;
+        g_opt_level = 2;
+        alloc_registers();
+        // 看门狗行：REG_ASSIGN 对总数（rc>0 = 寄存器真实分配实证，防回退——
+        // 分配在 corearch 自算后计数 = 自算块；.ccr 不再带 corec 分配结果）
+        print("regalloc-assign: "); print(int_str(meta_reg_assign_total()));
+        println(" pairs");
+        if cli_has("inject-home-conflict") != 0 { inject_home_conflict(); }
+        if cli_has("inject-reg-conflict") != 0 { inject_reg_conflict(); }
+        if cli_has("inject-read-gap") != 0 { inject_read_gap(); }
+        nv := regalloc_verify_all();
+        g_opt_level = saved_opt;
+        print("regalloc-consistency: funcs "); print(int_str(g_ir_func_count));
+        print(" violations "); println(int_str(nv));
+        if nv != 0 { return 2; }
+        return 1;
+    }
+    return 0;
+}
+
 fn corearch_main() -> int {
     cli_init("corearch", "Core architecture backend");
     cli_flag_bool("elf", "", "Output ELF binary (default)");
@@ -24,6 +86,15 @@ fn corearch_main() -> int {
     cli_flag("opt-level", "O", "Optimization level (0-3, default=0)");
     cli_flag("table", "", "HIT table file (load & emit mapped ops through it)");
     cli_flag_bool("dump-events", "", "Dump lowered HIT event stream + const pool");
+    // regalloc 移后端：数据面/判定调试通道（corec cir 原载体随迁——同名 flag）
+    cli_flag_bool("dump-entries", "", "Hidden debug: versioned entries summary (regalloc 移后端 test channel)");
+    cli_flag_bool("dump-coexist", "", "Hidden debug: coexistence summary (regalloc 移后端 test channel)");
+    cli_flag_bool("dump-regassign", "", "Hidden debug: per-pair var->reg dump after O2 self-alloc (regalloc 移后端 test channel)");
+    cli_flag_bool("check-regalloc", "", "Hidden debug: O2-forced alloc + regalloc consistency self-check (regalloc 移后端 test channel)");
+    cli_flag_bool("inject-home-conflict", "", "Hidden debug: inject coexisting entries onto same home slot, then verify (test hook)");
+    cli_flag_bool("inject-reg-conflict", "", "Hidden debug: inject fake var->reg pair colliding with a real one, then verify (test hook)");
+    cli_flag_bool("inject-read-gap", "", "Hidden debug: truncate last version interval to def point, then verify (test hook)");
+    cli_flag_bool("inject-coexist-oob", "", "Hidden debug: probe entries_coexist with OOB indices (GC-1 test hook)");
 
     if cli_parse() != 0 { return 1; }
     // M2-1：--table × --link/--shared 显式拒绝——表模式池 mov [rip+disp] 的 disp
@@ -73,6 +144,18 @@ fn corearch_main() -> int {
     r := load_ccr(buf, fsize);
     if r != 0 { println("error: invalid .ccr file"); return 1; }
     init_backend_arrays();
+
+    // regalloc 移后端（R1a/R3，2026-09-07）：O2 分配 + 一致性判定归位 corearch
+    // ——load 后自算自检（.ccr 不再传 REG_ASSIGN/ENT，D-1=Y）。表模式跳过
+    // （M1 表驱动直线路径无 O2 组合验证——恒 O0 语义）。违反 = 编译错误。
+    dd := regalloc_debug_dispatch();
+    if dd == 1 { return 0; }
+    if dd == 2 { return 1; }
+    if g_opt_level >= 2 && hit_table_active() == 0 {
+        alloc_registers();
+        // 判定：成功静默（自检通过不打扰构建输出）；违反 = 诊断已打印 + 拦截
+        if regalloc_verify_all() != 0 { return 1; }
+    }
 
     // --table（M1 Task 3）：表模式 → 先降低（IR 直线子集 → 事件流 + 常量池）。
     // 超子集 op → 'needs more events' 错误 exit 1（发射前拒绝）；成功 → 事件流

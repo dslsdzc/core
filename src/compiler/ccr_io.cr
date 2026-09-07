@@ -225,10 +225,6 @@ fn ccr_func_root_sg(func_i: int) -> int {
     return -1;
 }
 
-// 函数 fi 条目块界（全局条目序）——写 reg/func 记录共用；未算过 = 0 段
-fn ccr_func_ent_start(func_i: int) -> int { return r64(g_ir_func_entry_start, func_i * 8); }
-fn ccr_func_ent_count(func_i: int) -> int { return r64(g_ir_func_entry_count, func_i * 8); }
-
 // --- Segment size calculation（段体大小；Header+段表 = 16 + 12×5 = 76）---
 // 每段自带计数 u32；写侧与 calc 侧逐字节一致（v6 测试 walk 校验 end==fsize）。
 
@@ -353,19 +349,9 @@ fn save_ccr(path: string) -> int {
     // of letting w32 silently keep only the low bits.
     if ccr_validate_i32_fields() == 0 { return -1; }
 
-    // Entries must be computed before save（lower_to_ccr 尾部无条件计算）——
-    // 内存表 24B/条闭区间；落盘转换在此做（version 序数、live_end 半开 +1）。
-    // 拒发损坏表：var 越界 / 区间反序（le < ls 或 ls < 0）都是内部错误。
-    ei : ., mut = 0;
-    loop {
-        if ei >= g_entry_count { break; }
-        ev := ccr_ent_var(ei);
-        els := ccr_ent_ls(ei);
-        ele := ccr_ent_le(ei);
-        if ev < 0 || ev >= g_ir_var_count { return -1; }
-        if els < 0 || ele < els { return -1; }
-        ei = ei + 1;
-    }
+    // regalloc 移后端（2026-09-07，D-1=Y）：.ccr 不再落 ENT——条目表由
+    // corearch load 后自算（regalloc.cr compute_live_ranges/compute_entries）；
+    // 内存表完整性守卫随迁 corearch（自算前置同域校验）。
 
     tsz := calc_ccr_size();
     buf := alloc(tsz);
@@ -451,32 +437,20 @@ fn save_ccr(path: string) -> int {
         vcursor = vcursor + vc;
         pc := r64(g_ir_func_param_count, fi * 8);
         if pc > vc { return -1; }
-        es := ccr_func_ent_start(fi);
-        ec := ccr_func_ent_count(fi);
+        // regalloc 移后端：.ccr 无 ENT——func 记录 first_ent/last_ent 恒 -1
+        // （loader 空表对照 pcnt==0 ↔ -1 已支持）、param_ents 恒 -1
         fe2 : ., mut = -1;
         le2 : ., mut = -1;
-        if ec > 0 { fe2 = es; le2 = es + ec - 1; }
         buf_write_u32(buf, pos, r64(g_ir_func_name_idx, fi * 8)); pos = pos + 4;
         buf_write_u32(buf, pos, pc); pos = pos + 4;
         buf_write_u32(buf, pos, r64(g_ir_func_ret_type, fi * 8)); pos = pos + 4;
         buf_write_i32(buf, pos, froot); pos = pos + 4;
         buf_write_i32(buf, pos, fe2); pos = pos + 4;
         buf_write_i32(buf, pos, le2); pos = pos + 4;
-        // param_ents：参数变量的入参条目 = 该参数（行 vs+pi）的 def=-1 条目
-        // （函数内被重定值——GC 批 2 后 = 任意 dest≥0 producer/STORE——或
-        // 从未引用的参数无入参版本条目 → -1）
         pp : ., mut = 0;
         loop {
             if pp >= pc { break; }
-            pvar := vs + pp;
-            pid : ., mut = -1;
-            e2 : ., mut = es;
-            loop {
-                if e2 >= es + ec { break; }
-                if ccr_ent_var(e2) == pvar && ccr_ent_def(e2) < 0 { pid = e2; break; }
-                e2 = e2 + 1;
-            }
-            buf_write_i32(buf, pos, pid); pos = pos + 4;
+            buf_write_i32(buf, pos, -1); pos = pos + 4;
             pp = pp + 1;
         }
         // var 声明区（行序声明——name/type；ENT「存在即声明」的名称/类型投影）
@@ -631,8 +605,8 @@ fn save_ccr(path: string) -> int {
         if sex < sen { return -1; }  // 未闭合 → ncount 不可派生
         if sk2 == SG_FUNC { rfunc = rfunc + 1; }
         if rfunc < 0 || rfunc >= g_ir_func_count { return -1; }  // 行序结构失配
-        fes := ccr_func_ent_start(rfunc);
-        fec := ccr_func_ent_count(rfunc);
+        // regalloc 移后端：.ccr 无 ENT——region 条目范围恒 -1（loader
+        // rfe/rle == -1 对已接受；根行与 SYM func first/last 对照均 -1）
         fe2 : ., mut = -1;
         le2 : ., mut = -1;
         if sk2 == SG_FUNC {
@@ -641,18 +615,6 @@ fn save_ccr(path: string) -> int {
             is2 := r64(g_ir_func_instr_start, rfunc * 8);
             ic2 := r64(g_ir_func_instr_count, rfunc * 8);
             if sen != is2 || sex != is2 + ic2 { return -1; }
-            if fec > 0 { fe2 = fes; le2 = fes + fec - 1; }
-        } else {
-            e3 : ., mut = fes;
-            loop {
-                if e3 >= fes + fec { break; }
-                dd := ccr_ent_def(e3);
-                if dd >= 0 && dd >= sen && dd < sex {
-                    if fe2 < 0 { fe2 = e3; }
-                    le2 = e3;
-                }
-                e3 = e3 + 1;
-            }
         }
         buf_write_i32(buf, pos, sk2); pos = pos + 4;
         buf_write_i32(buf, pos, spa); pos = pos + 4;
