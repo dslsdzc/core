@@ -60,7 +60,8 @@ g_ir_func_var_count : string, mut;  g_ir_func_var_count_cap : int, mut;
 g_ir_func_param_count : string, mut; g_ir_func_param_count_cap : int, mut;
 g_ir_func_count : int, mut;
 
-// v6 数据基础：存在区间表（compute_live_ranges 填充，alloc_registers 改读本表）。
+// v6 数据基础：存在区间表（compute_live_ranges 填充，alloc_registers 读本表——
+// regalloc 移后端后填充方 = corearch 侧 regalloc.cr，corec 不再计算）。
 // 布局：每函数一段，段内每「函数内 var」两条 i64（first_ref/last_ref，函数内指令序
 // ——坐标限定：0..instr_count-1 的函数内下标，见 opt.cr live_range_slot）；
 // func_i 段起始 = Σ var_count[0..func_i)，不乘固定稠密系数。未使用 var 为 -1。
@@ -70,7 +71,8 @@ g_live_range_count : int, mut;
 g_live_range_cap : int, mut;
 
 // v6 条目表（条目版本化，compute_entries 填充——compute_live_ranges 尾部对全部
-// 函数运行；.ccr v6 entries 段直写本表，Task 4）。24B/条（六字段各 4B，
+// 函数运行；D-1=Y 后 .ccr ENT 恒空——填充方 = corearch 侧 regalloc.cr，落盘
+// 直写已废止）。24B/条（六字段各 4B，
 // LE 存取：写 w32、读 buf_read_i32——r32 读在 bootstrap 产物中丢符号扩展，
 // 见 opt.cr ent_* 注记；与 v6 格式记录逐字节一致），字段偏移见 dyn_arr.cr：
 //   var_idx(0)   u32 = 全局 IR 变量索引（g_ir_vars 序）

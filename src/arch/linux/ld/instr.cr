@@ -27,8 +27,9 @@ fn g2_init() {
 }
 
 // ── Optimization metadata: register assignment lookup ──
-// Reads g_opt_meta (saved in .ccr v3+) to find register for a variable.
-// Returns -1 if no register assigned.
+// Reads g_opt_meta to find register for a variable. regalloc 移后端（2026-09-07）
+// 后 g_opt_meta 由 corearch O2 自算填充（load 后 alloc_registers，不再经 .ccr
+// 传输）；O0/O1 恒空 → 全栈发射。Returns -1 if no register assigned.
 
 fn get_reg_for_var(var_idx: int) -> int {
     mi : ., mut = 0;

@@ -1,7 +1,9 @@
 // === opt.cr ===
-// AST-level optimization passes.
-// Runs after check_all(), before ir_gen_all().
-// Only transforms AST nodes (g_ast), never touches IR or backend.
+// Corec 侧语义优化（2026-09-07 regalloc 移后端后剩件——编码层资源决策
+// 数据面/分配/判定已迁 src/arch/linux/ld/regalloc.cr）：
+//  - AST 常量折叠（ast_optimize_body 族——AST 层）
+//  - 线性流 CSE（pass_cse——IR 层，main.cr O≥1 调用）
+//  - optimize_all（历史编排入口——无调用者，见函数内注记）
 
 
 // ------------------------------------------------------------------

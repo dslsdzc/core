@@ -259,6 +259,31 @@ int 无上限语义（`docs/superpowers/specs/2026-09-06-int-unbounded-semantics
 - 表（HIT）模式 × 运行时 2L 组合验证（tagged 路径整条落旧路径——语义正确未验组合）
 - arena 生命周期债（2L 对象跨 arena_reset 悬挂；正确方向 = 永久 bump 或跨 reset 复制）
 
+## 寄存器分配移后端（2026-09-07 完成 → 挂账）
+
+编码层资源决策（寄存器分配数据面 + CAG 分配 + 一致性判定）从 corec（opt.cr）
+归位 corearch（`src/arch/linux/ld/regalloc.cr`）完成：.ccr 不再携带分配结果与
+条目（ENT 恒空 / opt_meta 恒 0 / func·REG first_ent 恒 -1 / param_ents 恒 -1——
+格式结构保留、loader 空表语义已支持、零 version bump）；corearch O2 = load 后
+自算 alloc + verify（emit 前，违反 = 编译错误，成功静默）；判定/条目调试通道
+随迁（--dump-entries/--dump-coexist/--check-regalloc/--inject-*/--dump-regassign
+同名 flag）；pass_stack_share 停用（产物死路径实证——g_stack_map 不落盘、
+corearch 恒空跑，零产物差异）。设计定稿 `docs/superpowers/specs/2026-09-07-regalloc-backend-design.md`
+（R1-R5/D-3 拍板记录 + 实施完成）；plan `docs/superpowers/plans/2026-09-07-regalloc-backend.md`
+六 Task 收官；回归全绿（mw1-6 + live_ranges 13/13 + ccr_v6 8/8 + region_cfg
+22/22 + compile + backend_bootstrap stage0-2 + hit_table 11/11 + bootstrap 三套）。
+
+**挂账（残余）**：
+- 栈共享恢复（pass_stack_share 停用——恢复 = corearch 内以 alloc 同 seam 实现并启用）
+- CSE 语义实证：pass_cse 对 .ccr 产物零效果（NOD O0/O1/O2 逐字节同——lower 自
+  df 重建丢弃其 NOP/替换）——O1 门语义现为进程内运行、产物不承载；产物级 CSE
+  生效需专项决策（重建链语义层优化归位）
+- R4：compile-time-linearity 的 corec 侧减负实测（分配/数据面计算已移 corearch）
+- v6 格式文档（specs/2026-09-05-lattice-ir-v6-format.md）ENT/opt_meta 载荷语义
+  同步（恒空态——ccr_io.cr 头注释为实现权威已先行）
+- docs/project-book.md 后端分层哲学表述（「机械翻译器」措辞与分配归位后现实）
+  校对
+
 ## 规约语法并入 .cr（2026-09-06 .corespec 退役挂账）
 
 独立 .corespec 格式/语言退役（crasm 同构：规约只有一种表达 = Core 语言，无第二套文件/语言）：

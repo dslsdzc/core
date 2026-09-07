@@ -195,7 +195,7 @@ fn corec_main() -> int {
     cli_cmd("clean-cache", "Delete incremental compilation cache");
     cli_flag("output", "o", "Output path");
     cli_flag_bool("static", "", "Static linking (embed runtime)");
-    cli_flag("opt-level", "O", "Optimization level (0,1,2,3; default=1)");
+    cli_flag("opt-level", "O", "Optimization level (0,1,2,3; default=1) — O1 CSE(corec 进程内)；O2 寄存器分配+判定在 corearch（corec build 透传 --opt-level，.ccr 不承载分配结果）");
     cli_flag_bool("inject-var-shift", "", "Hidden debug: shift func0 var decl block left by 1, then save (GC-4 test hook)");
 
     if cli_parse() != 0 { return 1; }

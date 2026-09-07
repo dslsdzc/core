@@ -1,5 +1,12 @@
 # 寄存器分配移后端实施计划
 
+> **状态：全部 Task 完成（2026-09-07）**——Task 1-6 执行记录见文末；设计决策
+> 拍板（R1a / R2=D-1=Y / R3 / R5 / D-3）与受波及面处置见 specs/
+> 2026-09-07-regalloc-backend-design.md（状态：设计定稿 + 实施完成）。
+> 执行偏差：Task 2/3/4 因 corec 闭包互锁（数据面摘除 ↔ 落盘废止 ↔ 通道迁移
+> 同批编译）合并为单一切换提交——纯搬移提交先行（可独立评审），切换提交内
+> 按原 Task 顺序自查（见执行记录）。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 寄存器分配（数据面 + CAG 分配 + 判定）从 corec（opt.cr）移至 corearch——编码层资源决策归位后端；.ccr opt_meta REG_ASSIGN 不再跨进程传输；「纯机械映射」表述取消。
@@ -161,3 +168,48 @@ corearch:
   - 方案 Y（推荐）：ENT 段恒空/出格式（loader 已支持段缺失 = 空 + pcnt=0 与 SYM first/last_ent=-1 对照——**格式结构零改动、无 version bump**）；数据面计算单宿主 corearch（compute_live_ranges/entries/grow/访问器迁 regalloc.cr）；corec lower 尾摘除调用；save 侧 ENT 计数 0；SYM/REG first/last_ent 落 -1；「发射不依赖 ENT」（ccr_io.cr:74 已注）✓
 - **D-2 调试通道联动**（随 D-1=Y）：corec `cir` 的 dump-entries/dump-coexist/check-regalloc/inject-* 载体与 test_live_ranges.py 改道 corearch（新 flag 组：--dump-entries/--dump-coexist/--check-regalloc/--inject-*，corearch load .ccr 后内存态即数据面）；corec 侧分支删除。D-1=X 则通道不动（数据面留 corec），仅判定注入随判定迁移面另行处置
 - **D-3 pass_stack_share 处置**：（a）随迁并启用（行为新变：帧缩小——现状产物无共享，启用 = 行为差异风险，需独立验证）；（b）停用（推荐：产物零差异，调用摘除 + optimize_all 死码同步清理；恢复 = 未来 corearch 内以 alloc 同 seam 实现，挂账）；（c）留 corec 空跑（现状，不归位）
+
+---
+
+## Task 2-6 执行记录（2026-09-07）
+
+### 提交线（每提交可独立评审）
+
+1. `refactor: regalloc 编码决策层纯搬移入 corearch`——新建 `src/arch/linux/ld/regalloc.cr`（opt.cr 189-1737 保真搬移：数据面/共存/判定/注入/CAG alloc）+ corearch 闭包接线 + `get_ir_var_name` 移 dyn_arr.cr（corearch 闭包无 ir_gen.cr——双侧共享位）；行为零变化基线（build 绿 + compile/ccr_v6 回归绿）
+2. `feat: regalloc 移后端切换`（Task 2+3+4 合并——互锁说明见顶部状态注）：
+   - corearch：load 后 **O2 自算 alloc_registers + regalloc_verify_all**（emit 前，违反 = 编译错误，成功静默）；表模式跳过（M1 直线路径无 O2 组合验证）；调试通道随迁同名 flag（--dump-entries/--dump-coexist/--check-regalloc/--inject-* 三态 dispatch + 新 --dump-regassign 逐对输出）
+   - corec：opt.cr 1940→312 行（迁走段删除；留 AST 折叠 + pass_cse + optimize_all 死码摘引用）；main.cr O2 段与 `cir` 调试通道摘除；dataflow lower 尾 compute 摘除
+   - .ccr 出格式（D-1=Y/R2）：ENT 段 0 条、SYM func 与 REG first/last_ent 恒 -1、param_ents 恒 -1、opt_meta 子节 0 块——格式结构保留（loader 空表语义已支持：pcnt==0 ↔ -1 对照），零 version bump
+   - 测试联动：live_ranges 通道改道 corearch（断言零变化）；mw_task5 元断言改 --dump-regassign；ccr_v6 重写恒空断言（conversion/param_ents 载体消亡删/改）
+3. Task 5 表述清除（本批，见下）+ Task 6 文档收尾（spec/plan/TODO，本批）
+
+### Task 2 验证（行为等价，切换后全锚点）
+
+- O2 行为等价：cse_probe exit 42、fib 55、loop-carry 20、cond-def 14/24、else-def 22/22、else-control 30/31、region roundtrip 6、ccr_v6 roundtrip 15、backend_bootstrap stage 7——全部绿（corearch 自算分配路径）
+- 双跑过渡验证：切换前 corec 落盘 meta 的旧 .ccr 由新 corearch 加载仍正常（载入 meta 首匹配遮蔽自算块 = 兼容旧产物）；新 .ccr 无 meta → 自算块生效
+- 与 plan 原「逐 var reg 对照」的偏差：CSE 实证无产物效果（NOD O0/O1/O2 逐字节同）→ corec meta（算于 CSE 后流）与 corearch 自算（算于载入 pre-CSE 流）窗口可不同——计划硬约束（行为/exit + 自举可运行判据）为验证判据，未做逐对恒同断言；判定自洽性反而提升（分配/判定/产物同流）
+
+### Task 3 验证
+
+- .ccr 载荷：ENT 段恒 4B（count 0）、opt_meta 恒 0 块、func/REG first/last -1（ccr_v6 8/8 恒空断言 + walker 全绿）；loader 对空表与 -1 对照零改动通过
+- home 字段：随 ENT 落盘消亡；内存表 home 保留（corearch 自算态，M1 分配不回填——判定 home 组规则保留供未来回填）
+
+### Task 4 验证
+
+- 判定红注入在 corearch 路径仍红：test_live_ranges check_regalloc_violations（rules 1/1/2）+ read_gap_nonfunc0（rule 2 on func 1）+ coexist OOB guard——全绿（13/13）；check-regalloc watchdog（regalloc-assign pairs > 0）实证自算分配真实发生
+- corec 侧判定触发（main.cr O2 段 + cir --check-regalloc）已移除
+
+### Task 5 表述清除（本次提交）
+
+- regalloc.cr 判定区头/镜像注记（「.ccr 传输 meta」「corec 不含后端文件」等 5 处）→ corearch 进程内自算自消费表述
+- instr.cr get_reg_for_var 头注（「saved in .ccr v3+」）→ 自算填充表述
+- globals.cr 存在区间/条目表注记（填充方 opt.cr）→ regalloc.cr + D-1=Y 注
+- regalloc-consistency.cr：参考实现指针 opt.cr → regalloc.cr；负编码数据模型表述清理；缺口注记更新（pass_stack_share 停用、param_ents 测试载体消亡、GC-1 已修）
+- CLI 语义（R5）：corec/corearch `-O` 帮助文案更新（O1 = CSE corec 进程内；O2 = 分配+判定 corearch，corec build 透传）；「纯机械映射」表述 src 侧无残留（docs/project-book 后端哲学表述 → TODO 挂账校对）
+- opt.cr 文件头注释（AST-level 单一表述）→ 剩件清单
+
+### Task 6 收尾（本批）
+
+- [x] 全套回归绿（切换提交后全量：mw1-6 + compile + backend_bootstrap stage0-2 + ccr_v6 8/8 + region_cfg 22/22 + slice_bounds 7/7 + hit_table 11/11 + live_ranges 13/13 + bootstrap 三套 + selfhost 其余）；Task 5 注释改动后 build 绿 + 关键子集复查（见提交记录）
+- [x] spec 状态：R1-R5/D-3 拍板记录 + 实施完成（§6/§7 更新）
+- [x] TODO 挂账（残余）：见 TODO.md 新节——栈共享 corearch 恢复、R4 时间分布实测、v6 格式文档 ENT/opt_meta 恒空同步、project-book 后端哲学表述校对

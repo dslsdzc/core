@@ -83,7 +83,7 @@ fn corearch_main() -> int {
     cli_flag_bool("static", "", "Static linking (embed runtime)");
     cli_flag("link", "l", "Comma-sep .so files, or 'auto' for ~/.core/lib/");
     cli_flag("output", "o", "Output path");
-    cli_flag("opt-level", "O", "Optimization level (0-3, default=0)");
+    cli_flag("opt-level", "O", "Optimization level (0-3, default=0) — O2: load 后自算寄存器分配 + 一致性自检（emit 前，违反 = 编译错误）");
     cli_flag("table", "", "HIT table file (load & emit mapped ops through it)");
     cli_flag_bool("dump-events", "", "Dump lowered HIT event stream + const pool");
     // regalloc 移后端：数据面/判定调试通道（corec cir 原载体随迁——同名 flag）

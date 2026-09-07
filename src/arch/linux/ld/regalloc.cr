@@ -466,8 +466,9 @@ fn inject_coexist_oob() -> int {
 // ===== v6 Task 5：判定消费最小闭环（一致性自检——共 specs/
 // regalloc-consistency.corespec 规约）=====
 // 分配结果真相源 = g_opt_meta 的 OPT_KEY_REG_ASSIGN 对（var_idx → x86 寄存器号）：
-// 后端 instr.cr 的 g2_slot/get_reg_for_var 在发射时按此把 var 落寄存器（corec 与
-// corearch 共享同一 .ccr 传输这份 meta）——判定消费它就是消费「实际编码的分配」。
+// instr.cr 的 g2_slot/get_reg_for_var 在发射时按此把 var 落寄存器（regalloc 移
+// 后端后 = corearch 进程内自算自消费——.ccr 不再传输这份 meta）——判定消费它
+// 就是消费「实际编码的分配」。
 // （注：本文件旧区头「IR 操作数改写为负编码」是过时设计残留——实现已改为
 // 元数据表 + 后端 g2_slot 查询，判定按实现走。）
 // 版本级 vs 变量级对齐（衔接决策 b）：alloc_registers（CAG 升级后仍）是变量级
@@ -485,8 +486,8 @@ fn inject_coexist_oob() -> int {
 LOC_HOME_BASE : int = 1000000;  // 位置编码：寄存器号直用（0..15）；home 槽偏移本常量
 RPT_MAX : int = 8;              // 规则违反诊断每函数每规则打印上限（计数不封顶）
 
-// 分配结果镜像解析（mirror instr.cr get_reg_for_var——corec 不含后端文件；
-// 两处解析同一 g_opt_meta 布局，分配器升级统一 seam 时收敛）。
+// 分配结果解析：与 instr.cr get_reg_for_var 同进程、同 g_opt_meta 布局
+// （regalloc 移后端前 corec 侧镜像已随迁收敛——本函数为判定侧独立访问）。
 fn meta_reg_for_var(var_idx: int) -> int {
     mi : ., mut = 0;
     loop {
@@ -843,8 +844,8 @@ fn inject_home_conflict() -> int {
 // ── 元数据写侧辅助（CAG 真实分配后注入以改写真实输出为手段——
 //    append 首匹配语义会被既有对遮蔽，注入须原位改写/移除）──
 
-// 返回 var 的 reg 字段偏移（g_opt_meta 内；-1 = 无对）。镜像 instr.cr
-// get_reg_for_var 扫描（corec 不含后端文件——两处解析同一布局）。
+// 返回 var 的 reg 字段偏移（g_opt_meta 内；-1 = 无对）。与 instr.cr
+// get_reg_for_var 同布局（随迁后同进程——见判定区头注）。
 fn meta_reg_pair_off(var_idx: int) -> int {
     mi : ., mut = 0;
     loop {
@@ -1066,14 +1067,16 @@ fn inject_read_gap() -> int {
 // 本实现 = 存在结构上 First Fit（指令序扫描 = CFG 退化实例）+ 上下文修正：
 // 共存（窗口互斥）、region 生命周期（回边携带值整函数窗口）、调用点
 // （callee-saved 专用——ABI 保留契约，判定 ④ 平凡满足）、使用次数/门控。
-// 结果写 g_opt_meta 的 OPT_KEY_REG_ASSIGN 对（var_idx → 物理 reg）；后端
+// 结果写 g_opt_meta 的 OPT_KEY_REG_ASSIGN 对（var_idx → 物理 reg）；同进程
 // instr.cr g2_slot/get_reg_for_var 在发射时按对把 var 落寄存器（E2_REG_SLOT_BASE
-// 正哨兵）——判定 meta_reg_for_var 镜像同源消费。旧「负编码改写 IR 操作数」
-// 是过时设计（见 575 区头注记），现 seam = meta 表 + 后端查询。
+// 正哨兵）——判定侧解析同布局同源消费（regalloc 移后端后无跨进程镜像）。
+// 旧「负编码改写 IR 操作数」是过时设计（见判定区头注记），现 seam = meta 表
+// + 后端查询。
 //
 // 分配粒度决策（var 级）：条目表（compute_entries）是版本级，但消费 seam 是
-// var 级单位置——meta 每 var 一条对、后端按 var 无指令上下文查询、.ccr 同构
-// 传输。版本级分配（同 var 不同版本不同位置）在该 seam 不可表达（需逐指令
+// var 级单位置——meta 每 var 一条对、后端按 var 无指令上下文查询（迁移前
+// .ccr 同构传输，现 corearch 进程内自算）。版本级分配（同 var 不同版本不同
+// 位置）在该 seam 不可表达（需逐指令
 // 操作数改写 + 后端带指令上下文的槽解析，为未来升级点）。故分配粒度 = var
 // 全窗口 [first_ref,last_ref]——该 var 各版本条目存在区间之并（版本按定值点
 // 无缝切割，见 compute_entries）；判定按 var 投影到版本条目（衔接决策 b），
