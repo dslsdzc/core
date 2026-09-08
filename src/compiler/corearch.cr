@@ -86,6 +86,7 @@ fn corearch_main() -> int {
     cli_flag("opt-level", "O", "Optimization level (0-3, default=0) — O2: load 后自算寄存器分配 + 一致性自检（emit 前，违反 = 编译错误）");
     cli_flag("table", "", "HIT table file (load & emit mapped ops through it)");
     cli_flag_bool("dump-events", "", "Dump lowered HIT event stream + const pool");
+    cli_flag_bool("dump-table", "", "Hidden debug: dump loaded HIT event/proj/step/runtime state (schema v2 read-back test channel)");
     // regalloc 移后端：数据面/判定调试通道（corec cir 原载体随迁——同名 flag）
     cli_flag_bool("dump-entries", "", "Hidden debug: versioned entries summary (regalloc 移后端 test channel)");
     cli_flag_bool("dump-coexist", "", "Hidden debug: coexistence summary (regalloc 移后端 test channel)");
@@ -118,6 +119,10 @@ fn corearch_main() -> int {
         print("hit table loaded: ");
         print_i(g_hit_event_count);
         println(" events");
+        // --dump-table（schema v2 读回测试通道）：加载态 proj/步/runtime 结构
+        // dump（hit.cr helper 只读表状态）。测试断言见
+        // tests/selfhost/test_hit_table.py:test_v2_fixture_multi_step_sections。
+        if cli_has("dump-table") != 0 { hit_dump_table_state(); }
     }
     if cli_arg_count() < 1 {
         println("usage: corearch <file.ccr> [options]");

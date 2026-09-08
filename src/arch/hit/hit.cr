@@ -790,7 +790,12 @@ fn hit_parse_proj_section(chunk: string, ph: int, ev_id: int) -> int {
             stext := str_sub(chunk, sl, send - sl);
             if hit_parse_step(stext, ev_id, scnt, 0) != 0 { return 1; }
             scnt = scnt + 1;
-            sp = ns; }
+            // 续行边界（Task 1 评审 fix）：ns 在下一 proj 头之后 = 属于后续
+            // [[event.proj]] 的步小节——不得续入本投影（np2 只截步文本、不
+            // 终止循环；旧缺陷 = 静默吸收后续投影步：本投影步数膨胀 + 步
+            // 记录重复入库，多 proj 步小节事件加载成功但表已错）
+            if ns >= 0 && (np2 < 0 || ns < np2) { sp = ns; }
+            else { sp = -1; } }
         if scnt == 0 {
             hit_err_ev(ev_id); println("projection has no steps");
             return 1; }
@@ -1012,6 +1017,9 @@ fn load_hit_table(path: string) -> int {
     if g_hit_event_count == 0 {
         println("error: HIT table: no [[event]] sections");
         return 1; }
+    // 注（M2a Task 1 评审记录）：spec §2「运行时核事件 id 1-9 每表必具」与验证项
+    // 「缺事件…拒绝」的加载器强制在场检查暂缓——事件绑定 = Task 4 落地（届时
+    // 消费方按 id 查找自然暴露缺失），此处仅拦零事件与 [table] events 计数不符。
     if g_hit_event_count != expected {
         print("error: HIT table: [table] events="); print_i(expected);
         print(" parsed="); print_i(g_hit_event_count); println(" mismatch");
@@ -1104,3 +1112,53 @@ fn hit_runtime_get(key: string, out: string) -> int {
     if slot < 0 { return -1; }
     hit_w32(out, 0, hit_r32(g_hit_runtime, slot * 4));
     return 0; }
+
+// ── --dump-table 读回通道（corearch 加载后调用；只读表状态，零写侧影响）──
+// 评审项 1 锁（多 proj 步小节归属）与评审项 4（v2 字段区读回覆盖）共用：
+// 每事件一行 proj 表记录回读（hit_proj_count/hit_proj_step_count——步数吞并
+// 在此失真）；每步一行 v2 字段区探针（hit_proj_step_get 整条 108B 复制后读
+// opcode 区 OPB0 = 偏移 32——写读一致的实证）；runtime 槽位掩码读回。
+fn hit_dump_table_state() {
+    // 事件 → 逐 proj 步数（proj0 镜像/M1 视区也随 p0 步数一起验证）
+    ei : int, mut = 0;
+    loop {
+        if ei >= g_hit_event_count { break; }
+        print("hit proj: ev=");
+        print_i(hit_r32(g_hit_events, ei * HIT_EVENT_REC + HIT_EV_OFF_ID));
+        pc := hit_proj_count(ei);
+        print(" projs="); print_i(pc);
+        pi : int, mut = 0;
+        loop {
+            if pi >= pc { break; }
+            print(" p"); print_i(pi); print("=");
+            print_i(hit_proj_step_count(ei, pi));
+            pi = pi + 1; }
+        println("");
+        ei = ei + 1; }
+    // 逐步 opcode 首字节探针（v2 字段区 = 步记录偏移 32 起）
+    st := alloc(HIT_STEP_REC);
+    ej : int, mut = 0;
+    loop {
+        if ej >= g_hit_event_count { break; }
+        idj := hit_r32(g_hit_events, ej * HIT_EVENT_REC + HIT_EV_OFF_ID);
+        pj : int, mut = 0;
+        loop {
+            if pj >= hit_proj_count(ej) { break; }
+            sj : int, mut = 0;
+            loop {
+                if sj >= hit_proj_step_count(ej, pj) { break; }
+                if hit_proj_step_get(ej, pj, sj, st) == 0 {
+                    print("hit step: ev="); print_i(idj);
+                    print(" p="); print_i(pj); print(" s="); print_i(sj);
+                    print(" opb="); print_i(hit_r32(st, HIT_ST_OFF_OPB0));
+                    println(""); }
+                sj = sj + 1; }
+            pj = pj + 1; }
+        ej = ej + 1; }
+    // runtime 槽读回（掩码十进制 = 测试期望锚：param = rdi rsi rdx rcx r8 r9；
+    // save = rbx r12-15）
+    if hit_runtime_get("param_regs", st) == 0 {
+        print("hit rt: param_regs="); print_i(hit_r32(st, 0)); println(""); }
+    if hit_runtime_get("save_regs", st) == 0 {
+        print("hit rt: save_regs="); print_i(hit_r32(st, 0)); println(""); }
+}

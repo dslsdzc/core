@@ -588,6 +588,35 @@ imm_kind = "fnaddr"
 
 V2_F3 = V2_FIX.replace("events = 9", "events = 10", 1) + V2_SINK
 
+# 事件 10：单事件双 proj、双双用步小节（Task 1 评审项 1 锁——步小节解析循环
+# 不得越过 [[event.proj]] 头续行吸收后续投影步小节：旧缺陷 p0 步数吞并 p1
+# 的步 + 步记录重复入库，加载静默成功但表已错）。proj0/1 步字节取互异 1 字节
+# opcode（90-93），读回即可判别归属。
+V2_SECSEC = """
+[[event]]
+id = 10
+name = "secsec"
+inputs = 0
+outputs = 0
+side_effect = "pure"
+
+[[event.proj]]
+isa = "x86-64"
+[[event.proj.step]]
+opcode = [0x90]
+[[event.proj.step]]
+opcode = [0x91]
+
+[[event.proj]]
+isa = "x86-64"
+[[event.proj.step]]
+opcode = [0x92]
+[[event.proj.step]]
+opcode = [0x93]
+"""
+
+V2_F4 = V2_FIX.replace("events = 9", "events = 10", 1) + V2_SECSEC
+
 
 def _write_fixture(tmp: Path, name: str, content: str) -> Path:
     p = tmp / f"{name}.toml"
@@ -1144,6 +1173,52 @@ def test_v2_bad_field_rejects(tmp: Path) -> bool:
     return ok
 
 
+def test_v2_fixture_multi_step_sections(tmp: Path) -> bool:
+    """F4 夹具（Task 1 评审项 1 锁）：单事件 ≥2 proj 且 ≥2 proj 用步小节 →
+    加载后逐 proj 步数与逐步归属正确（p0 = 2 步，不得吸收 p1 的 90-93 步）。
+
+    读回通道 = corearch --dump-table（hit_dump_table_state：proj 表记录逐条
+    + 每步 v2 字段区 opcode 探针（108B 整条复制后偏移 32 读）+ runtime 槽掩码
+    ——评审项 4 的 v2 字段区写读一致实证一并覆盖）。旧缺陷下本测试红：
+    ev=10 p0=4（吞并 92/93 两步）+ 额外 'p=0 s=2/3' 步行。"""
+    try:
+        ccr = compile_ccr(tmp, "f4_sub", SUB_SRC)
+        f4 = _write_fixture(tmp, "f4", V2_F4)
+        out_p = tmp / "f4_sub_tab"
+        r = run_bin(COREARCH, [str(ccr), "--elf", "--table", str(f4),
+                               "--dump-table", "-o", str(out_p)])
+    except RuntimeError as e:
+        print(f"[FAIL] f4: {e}")
+        return False
+    out = r.stdout + r.stderr
+    ok = True
+
+    def chk(cond, msg):
+        nonlocal ok
+        if not cond:
+            print(f"[FAIL] f4: {msg}")
+            print("  " + out.replace("\n", "\n  ")[:800])
+            ok = False
+
+    chk(r.returncode == 0 and out_p.exists(), "corearch --table <F4> failed")
+    chk("hit table loaded: 10 events" in out, "missing 'hit table loaded: 10 events'")
+    # proj 步数归属：p0/p1 各 2——旧缺陷 p0 吞并 p1 后 p0=4
+    chk("hit proj: ev=10 projs=2 p0=2 p1=2" in out,
+        "ev10 proj counts != 'projs=2 p0=2 p1=2'（p0 吸收 p1 步?）")
+    # 逐步归属 + v2 字段区读回（opb = opcode 首字节十进制：90→144 … 93→147）
+    for tag in ("hit step: ev=10 p=0 s=0 opb=144", "hit step: ev=10 p=0 s=1 opb=145",
+                "hit step: ev=10 p=1 s=0 opb=146", "hit step: ev=10 p=1 s=1 opb=147"):
+        chk(tag in out, f"missing {tag}")
+    chk("hit step: ev=10 p=0 s=2" not in out, "ev10 p0 越界吸收 p1 步（s=2 出现）")
+    # 既有形态不受扰：branch（ev6）两步序列 p0=2；runtime 槽位掩码读回
+    chk("hit proj: ev=6 projs=1 p0=2" in out, "ev6 branch 步数 != 2")
+    chk("hit rt: param_regs=966" in out, "runtime param_regs 读回 != 966（rdi rsi rdx rcx r8 r9）")
+    chk("hit rt: save_regs=61448" in out, "runtime save_regs 读回 != 61448（rbx r12-15）")
+    if ok:
+        print("[PASS] f4: 多 proj 步小节归属正确（p0=2 p1=2 无吸收）+ v2 字段区读回一致")
+    return ok
+
+
 def main():
     if not COREC.exists() or not COREARCH.exists():
         print("[FAIL] missing build/corec or build/corearch (run build_selfhost_native.py first)")
@@ -1168,6 +1243,7 @@ def main():
             test_v2_fixture_load_f1(tmp),
             test_v2_fixture_multi_proj(tmp),
             test_v2_fixture_sink_fields(tmp),
+            test_v2_fixture_multi_step_sections(tmp),
             test_v2_bad_field_rejects(tmp),
         ]
     passed = sum(results)

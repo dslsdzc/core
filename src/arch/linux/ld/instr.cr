@@ -2223,7 +2223,9 @@ fn hit_ev_slot_addr_ok(v: int) -> int {
     if o >= E2_REG_SLOT_BASE { return 0; }
     return 1; }
 
-// 取事件模板步（20B 记录入 st）；-1 = 表无此事件/步非法
+// 取事件模板步（proj0 视图整条 108B 记录复制入 st；本文件 M1 消费面只读
+// 前 20B 视区——schema v2 记录加宽后偏移 0-16 语义未变，见 hit.cr 布局注释）；
+// -1 = 表无此事件/步非法
 fn hit_ev_step_of(ev_id: int, st: string) -> int {
     es := hit_event_lookup(ev_id);
     if es < 0 { return -1; }
