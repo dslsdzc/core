@@ -206,6 +206,40 @@ fn regalloc_debug_dispatch() -> int {
     return 0;
 }
 
+// --dump-objects 调试通道（内核完备 Task 1 测试载体）：实例侧薄通道——
+// 经内核对象面访问器（nod_op/nod_dest/nod_s1-3/nod_tk + nod_edge_first/count
+// + v7_edge_to/v7_edge_kind——ent_kernel.cr，内核零新增）输出载入对象：逐
+// 节点语义字段 + 邻接域 + 配方出边遍历（邻接索引区间
+// [first, first+count) 内逐边——v7_edge_to/kind 读 EDG 缓冲）。
+// 行格式契约见 tests/selfhost/test_ccr_v7.py:parse_object_dump。
+fn dump_object_surface() {
+    print("objects: "); print_i(g_v7_nod_count); println("");
+    ni : ., mut = 0;
+    loop {
+        if ni >= g_v7_nod_count { break; }
+        print("nod "); print_i(ni);
+        print(" op "); print_i(nod_op(ni));
+        print(" dest "); print_i(nod_dest(ni));
+        print(" s1 "); print_i(nod_s1(ni));
+        print(" s2 "); print_i(nod_s2(ni));
+        print(" s3 "); print_i(nod_s3(ni));
+        print(" tk "); print_i(nod_tk(ni));
+        print(" fe "); print_i(nod_edge_first(ni));
+        print(" ec "); print_i(nod_edge_count(ni));
+        println("");
+        last : ., mut = nod_edge_first(ni) + nod_edge_count(ni);
+        ej : ., mut = nod_edge_first(ni);
+        loop {
+            if ej >= last { break; }
+            print("edge "); print_i(ni);
+            print(" to "); print_i(v7_edge_to(ej));
+            print(" kind "); println_i(v7_edge_kind(ej));
+            ej = ej + 1;
+        }
+        ni = ni + 1;
+    }
+}
+
 fn corearch_main() -> int {
     cli_init("corearch", "Core architecture backend");
     cli_flag_bool("elf", "", "Output ELF binary (default)");
@@ -227,6 +261,7 @@ fn corearch_main() -> int {
     cli_flag_bool("inject-reg-conflict", "", "Hidden debug: inject fake var->reg pair colliding with a real one, then verify (test hook)");
     cli_flag_bool("inject-read-gap", "", "Hidden debug: truncate last version interval to def point, then verify (test hook)");
     cli_flag_bool("inject-coexist-oob", "", "Hidden debug: probe entries_coexist with OOB indices (GC-1 test hook)");
+    cli_flag_bool("dump-objects", "", "Hidden debug: dump loaded NOD/EDG semantic objects via object-surface accessors (内核完备 Task 1 test channel)");
 
     if cli_parse() != 0 { return 1; }
     // 注册契约引导（Task 3）：读 flag → 查表选实例（--table 值存在 → 表模式
@@ -295,6 +330,20 @@ fn corearch_main() -> int {
     r := load_ccr(buf, fsize);
     if r != 0 { println("error: invalid .ccr file"); return 1; }
     init_backend_arrays();
+
+    // 内核完备 Task 1（调度重建移实例）：loader 只产语义对象——线性流
+    // （g_ir_instrs）重建 = 实例事务（build_linear_schedule，regalloc.cr——
+    // 重建段自 load_ccr 纯搬移，产物逐字节一致），load 成功后、分派/发射前
+    // 必须调用（ELF 发射/dump-entries/check-regalloc 全消费线性流）。
+    build_linear_schedule();
+
+    // --dump-objects（Task 1 测试通道——对象面配方可读断言载体，见
+    // tests/selfhost/test_ccr_v7.py:test_v7_object_surface_recipe_readable）：
+    // dump 分支在重建后、发射前（返回 0——不触发 O2 职责门/发射路径）。
+    if cli_has("dump-objects") != 0 {
+        dump_object_surface();
+        return 0;
+    }
 
     // regalloc 移后端（R1a/R3，2026-09-07）：O2 分配 + 一致性判定归位 corearch
     // ——load 后自算自检（.ccr 不再传 REG_ASSIGN/ENT，D-1=Y）。违反 = 编译错误。

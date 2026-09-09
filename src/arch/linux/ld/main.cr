@@ -57,6 +57,11 @@ fn corearch_main() -> int {
     if r != 0 { println("error: invalid .ccr file"); return 1; }
     init_backend_arrays();
 
+    // 内核完备 Task 1（调度重建移实例）：loader 只产语义对象——线性流重建 =
+    // 实例事务（build_linear_schedule——本文件所在自举 stage 链 = 本函数实际
+    // 消费方之一：load 后、elf_gen 前必须重建，产物逐字节同移出前）。
+    build_linear_schedule();
+
     emit_so := cli_has("shared");
     link_val := cli_get("link");
     out_path := cli_get("output");

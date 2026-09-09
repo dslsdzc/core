@@ -400,8 +400,10 @@ fn ccr_fill_edge_buf(buf: string, edge_offs: string) {
     }
 }
 
-// --- v7 读侧载入缓冲（EDG 校验后保留——Task 1 无消费方，供后续任务/调试；
-// g_df_edges 在 corearch 编译物中存在但 dataflow.cr 不在其内——独立缓冲）---
+// --- v7 读侧载入缓冲（EDG 校验后保留——图边语义对象：内核完备 Task 1 起经
+// 对象面 v7_edge_to/v7_edge_kind 消费（ent_kernel.cr——节点出边遍历 = 配方
+// 输入集）；g_df_edges 在 corearch 编译物中存在但 dataflow.cr 不在其内——
+// 独立缓冲）---
 g_v7_edges : string, mut;         // EDG 扁平记录（8B/条，文件序 = 节点运行序）
 g_v7_edge_count : int, mut;
 
@@ -810,14 +812,20 @@ fn inject_var_shift() -> int {
 
 // --- Load（v7-only：校验 Header + 段表规范布局 + 逐段越界拒绝；version ≠ 7
 // = v6 读路径退役——拒绝）---
+// 内核完备 Task 1（语义对象模型）：loader 产出 = 语义对象载入 + 守卫——
+// NOD→g_ir_instrs 线性重建段移出（调度重建 = 实例事务 build_linear_schedule，
+// regalloc.cr；入口 = corearch.cr / arch/linux/ld/main.cr 在 load 成功后调用）。
 // 解析序：STR → SYM（globals/funcs 声明区重建 var 命名空间行序）→ REG
-// （nstart/ncount 派生 + func 指令边界回填）→ NOD（36B——28B 语义字段重建
-// 线性流，邻接域暂存）→ ENT（28B → 内存 24B 表，去掉 version、live_end
-// 半开转回闭区间 −1；块界与 SYM func first/last 对照）→ EDG（邻接连续段
-// 校验 + 拓扑不变量 + 入 g_v7_edges 缓冲）。
+// （nstart/ncount 派生 + func 指令边界回填）→ NOD（36B——28B 语义字段入对象
+// 缓冲 g_v7_nod_sem（对象留存形态裁决 (a)，邻接域入 g_v7_nod_meta——不再写
+// 线性流）→ ENT（28B → 内存 24B 表，去掉 version、live_end 半开转回闭区间
+// −1；块界与 SYM func first/last 对照）→ EDG（邻接连续段校验 + 拓扑不变量
+// + 入 g_v7_edges 缓冲）。守卫消费 = NOD 计数（局部 instr_cnt）+ 邻接域
+// （g_v7_nod_meta）+ REG 派生边界——全程零线性流（iri_*/g_ir_instrs）依赖。
 // 内存态（g_ir_vars 行 id=行序 / g_ir_globals var_idx=行序 / func 七数组 /
-// g_sgs）与 v6 加载结果逐字节一致——28B 语义字段与 v6 逐字段相同，文件布局
-// 变化不影响下游（ELF 发射）。
+// g_sgs）与 v6 加载结果逐字节一致；线性流由 build_linear_schedule 从对象
+// 缓冲重建，与原重建段产物逐字节一致（28B 语义字段与 v6 逐字段相同，文件
+// 布局变化不影响下游——ELF 发射）。
 
 fn load_ccr(data: string, fsize: int) -> int {
     if fsize < 16 { return -1; }  // header
@@ -890,6 +898,7 @@ fn load_ccr(data: string, fsize: int) -> int {
     g_opt_meta_count = 0;
     g_entry_count = 0;
     g_v7_edge_count = 0;
+    g_v7_nod_count = 0;   // 内核完备 Task 1：NOD 对象缓冲计数（NOD 段载入后置位）
 
     // === STR: strings ===
     pos = seg_off1;
@@ -1201,16 +1210,20 @@ fn load_ccr(data: string, fsize: int) -> int {
         bfi = bfi + 1;
     }
 
-    // === NOD: instructions（36B each——28B 语义字段重建线性流 + 邻接索引
-    // first_edge/edge_count 先收集校验（EDG 段解析于 ENT 后），发射输入与
-    // v6 逐字段一致）===
+    // === NOD: instructions（36B each）===
+    // 内核完备 Task 1（语义对象模型）：loader 产出 = 对象载入 + 守卫——28B
+    // 语义字段 → 内核对象缓冲 g_v7_nod_sem（内存记录 = 盘记录剥离邻接的镜像，
+    // 布局 offset 同盘）+ 邻接域 first_edge/edge_count → g_v7_nod_meta
+    // （EDG 段校验 + 对象面 nod_edge_first/count 消费）。NOD→g_ir_instrs
+    // 线性重建段已移出本函数（调度重建 = 实例事务 build_linear_schedule，
+    // regalloc.cr——load 返回后、发射/分派前由入口调用）；g_ir_instrs/
+    // g_ir_instr_count 本段不再触碰（重建段原写点全清）。
     pos = seg_off3;
     if !ccr_has_bytes(pos, 4, seg_end3) { return -1; }
     instr_cnt := buf_read_u32(data, pos); pos = pos + 4;
     if instr_cnt > (seg_end3 - seg_off3) / ESZ_NOD_DISK { return -1; }
-    grow_ir_instrs(instr_cnt);
-    // NOD 邻接域暂存（EDG 校验消费）：{first_edge i64, edge_count i64} per node
-    nod_edge_meta := alloc((instr_cnt + 8) * 16);
+    g_v7_nod_sem = alloc((instr_cnt + 8) * ESZ_NOD_SEM);
+    g_v7_nod_meta = alloc((instr_cnt + 8) * ESZ_NOD_META);
     ii : ., mut = 0;
     loop {
         if ii >= instr_cnt { break; }
@@ -1223,17 +1236,19 @@ fn load_ccr(data: string, fsize: int) -> int {
         tk := buf_read_u32(data, pos); pos = pos + 4;
         nfe := buf_read_u32(data, pos); pos = pos + 4;  // first_edge（邻接索引）
         nec := buf_read_u32(data, pos); pos = pos + 4;  // edge_count
-        w64(nod_edge_meta, ii * 16, nfe);
-        w64(nod_edge_meta, ii * 16 + 8, nec);
-        iri_set_op(ii, opcode);
-        iri_set_dest(ii, dest);
-        iri_set_s1(ii, s1);
-        iri_set_s2(ii, s2);
-        iri_set_s3(ii, s3);
-        iri_set_tk(ii, tk);
-        g_ir_instr_count = ii + 1;
+        // 对象缓冲写（语义字段 = 盘字节镜像——w32/w64 低 32/64 位存储，存取
+        // 经 nod_* 访问器 buf_read_* 符号扩展，数值与原重建段消费完全一致）
+        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_OP, opcode);
+        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_DEST, dest);
+        w64(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S1, s1);
+        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S2, s2);
+        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S3, s3);
+        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_TK, tk);
+        w64(g_v7_nod_meta, ii * ESZ_NOD_META, nfe);
+        w64(g_v7_nod_meta, ii * ESZ_NOD_META + 8, nec);
         ii = ii + 1;
     }
+    g_v7_nod_count = instr_cnt;
 
     // GC-3（SYM 评审 M1）：REG root span 对 NOD 空间上界校验——函数指令边界
     // （root_region span）在 REG 段解析时回填，instr_cnt 直到 NOD 段才可知；
@@ -1346,8 +1361,11 @@ fn load_ccr(data: string, fsize: int) -> int {
     run_off : ., mut = 0;
     loop {
         if ei4 >= instr_cnt { break; }
-        nfe := r64(nod_edge_meta, ei4 * 16);
-        nec := r64(nod_edge_meta, ei4 * 16 + 8);
+        // 邻接域读内核对象缓冲 g_v7_nod_meta（原 nod_edge_meta loader 局部——
+        // 内核完备 Task 1 对象留存形态裁决 (a)：对象 = 内核持有物，EDG 守卫
+        // 与对象面 nod_edge_first/count 同源；守卫逻辑零改动）
+        nfe := r64(g_v7_nod_meta, ei4 * 16);
+        nec := r64(g_v7_nod_meta, ei4 * 16 + 8);
         if nfe != run_off { return -1; }       // ① 前缀累计失配（段错位/伪造）
         if run_off + nec > edg_cnt { return -1; }  // ① 节点段越出 EDG 空间
         rec : ., mut = 0;

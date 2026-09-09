@@ -311,6 +311,34 @@ def corec_ccr(src: str, out: str) -> str:
         os.unlink(path)
 
 
+def parse_object_dump(out: str):
+    """Parse corearch --dump-objects output (kernel object surface channel —
+    Task 1 语义对象模型): lines are
+      `objects: <count>`
+      `nod <i> op <o> dest <d> s1 <s> s2 <x> s3 <y> tk <t> fe <f> ec <c>`
+      `edge <i> to <to> kind <k>`   (one per out-edge of node i, index order)
+    Returns (count, {i: (op, dest, s1, s2, s3, tk, fe, ec)}, {i: [(to, kind)]})."""
+    lines = out.splitlines()
+    assert lines and lines[0].startswith('objects: '), \
+        f"dump missing count header: {lines[:3]!r}"
+    count = int(lines[0].split()[1])
+    nodes = {}
+    edges = {}
+    for ln in lines[1:]:
+        p = ln.split()
+        if not p:
+            continue
+        if p[0] == 'nod':
+            idx = int(p[1])
+            vals = [int(p[k + 1]) for k in range(2, len(p), 2)]
+            assert len(vals) == 8, f"nod line fields {vals}"
+            nodes[idx] = tuple(vals)
+        elif p[0] == 'edge':
+            idx = int(p[1])
+            edges.setdefault(idx, []).append((int(p[3]), int(p[5])))
+    return count, nodes, edges
+
+
 def read_ccr(path: str) -> bytes:
     with open(path, 'rb') as fh:
         return fh.read()
@@ -885,6 +913,71 @@ def test_v7_layout_and_walk():
         # EDG 段必落且至少一条边（每函数 arena_new→arena_reset def-use 存在）
         assert sum(len(v) for v in edg.values()) >= 2, \
             f"EDG unexpectedly small: {edg}"
+    finally:
+        try:
+            os.unlink(ccr_path)
+        except FileNotFoundError:
+            pass
+
+
+def test_v7_object_surface_recipe_readable():
+    """内核语义对象模型（内核完备 Task 1）——对象面配方可读判据（设计 spec
+    §4.4）：corearch 直载 .ccr 后经 --dump-objects 通道（对象面访问器
+    nod_op/nod_dest/nod_s1-3/nod_tk + nod_edge_first/count + v7_edge_to/kind
+    读内核对象缓冲）输出逐节点语义字段 + 出边遍历。断言三层：
+
+      · 全图逐节点/逐边 == V7File 文件解析（loader 对象缓冲 = 文件语义投影
+        ——语义字段与邻接域载入无损；现任务前 NOD 语义字段除 g_ir_instrs
+        线性流外无任何保留——本通道 = 对象留存形态的直接证据）；
+      · 节点出边遍历（邻接索引区间 [first, first+count) → v7_edge_to/kind）
+        == 文件 EDG 走查（配方输入集逐边一致——v7_edge_* 缓冲与邻接元数据
+        圆通）；
+      · 源函数域（节点 < EXPECT_SRC_SPAN）数据边/state 边 = 表一「去幽灵后」
+        期望（EXPECT_DATA/EXPECT_STATE 复用——已知小程序期望锚）。
+
+    说明：dump 通道经 loader（NOD/EDG 段载入对象缓冲）→ build_linear_schedule
+    （调度重建移实例后 g_ir_instrs 仍须就位——dump 分支在重建后、发射前）。"""
+    ccr_path = os.path.join(BASE, 'build/test_v7_objects.ccr')
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        corec_ccr(PROBE_SRC, ccr_path)
+        v7 = V7File(read_ccr(ccr_path))
+        nod = v7.nod()
+        file_edges = v7.edg()
+        r = subprocess.run([COREARCH, ccr_path, '--dump-objects'],
+                           capture_output=True, text=True, cwd=BASE,
+                           timeout=120)
+        assert r.returncode == 0, \
+            f"corearch --dump-objects rc={r.returncode}: {r.stdout!r} {r.stderr!r}"
+        count, nodes, edges = parse_object_dump(r.stdout)
+        assert count == len(nod), \
+            f"object count {count} != NOD count {len(nod)}"
+        assert len(nodes) == len(nod), \
+            f"dumped nodes {len(nodes)} != file nodes {len(nod)}"
+        for i, rec in enumerate(nod):
+            assert i in nodes, f"node {i} missing from dump"
+            assert nodes[i] == rec, \
+                f"node {i}: object surface {nodes[i]} != file record {rec}"
+        # 出边遍历 == 文件 EDG（空出边节点两侧都缺省）
+        for i, row in file_edges.items():
+            assert edges.get(i) == row, \
+                f"node {i}: traversal edges {edges.get(i)} != file EDG {row}"
+        assert set(edges) == set(file_edges), \
+            f"traversal edge nodes {sorted(edges)} != file {sorted(file_edges)}"
+        # 表一复用：源函数域数据/state 边 = 去幽灵后期望
+        got_data = {f: sorted(t for (t, k) in row if k == 0)
+                    for f, row in edges.items() if f < EXPECT_SRC_SPAN}
+        got_state = {f: sorted(t for (t, k) in row if k == 1)
+                     for f, row in edges.items() if f < EXPECT_SRC_SPAN}
+        got_data = {f: ts for f, ts in got_data.items() if ts}
+        got_state = {f: ts for f, ts in got_state.items() if ts}
+        assert got_data == EXPECT_DATA, \
+            f"data edges mismatch:\n  got      {got_data}\n  expected {EXPECT_DATA}"
+        assert got_state == EXPECT_STATE, \
+            f"state edges mismatch:\n  got      {got_state}\n  expected {EXPECT_STATE}"
     finally:
         try:
             os.unlink(ccr_path)
@@ -1749,6 +1842,7 @@ if __name__ == '__main__':
     shutil.rmtree(os.path.join(BASE, '.core', 'cache'), ignore_errors=True)
     tests = [test_v7_layout_and_walk,
              test_v7_edge_content_small_program,
+             test_v7_object_surface_recipe_readable,
              test_v7_ent_hand_expected_small,
              test_v7_ent_hand_expected_pure_add_block,
              test_v7_ent_model_replay_pure_add,

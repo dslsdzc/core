@@ -805,3 +805,56 @@ fn regalloc_verify_all() -> int {
     }
     return bad;
 }
+
+// ==================================================================
+// 语义对象模型（内核完备 Task 1，2026-09-10）：对象面 API + NOD 对象留存。
+// 对象集 = v7 载体内容的进程内形态（内核持有——配方可读承诺的载体：对象面
+// 访问器读内核缓冲而非文件重扫；裁决注：对象存储 (a) 而非文件重扫 (b)——
+// 内存成本 28B(语义) + 16B(邻接) 每节点，见 Task 1 报告）：
+//   图节点：g_v7_nod_sem（28B 语义字段——盘 36B 记录剥离邻接的镜像，offset
+//           布局同盘）+ g_v7_nod_meta（邻接域 {first_edge, edge_count}，
+//           16B/节点——EDG 段载入守卫与对象面 nod_edge_first/count 同源）
+//   图边：  g_v7_edges/g_v7_edge_count（EDG 段载入缓冲——声明见 ccr_io.cr，
+//           8B/条 {to_nod, kind} 打包，文件序 = 节点运行序）
+//   条目面：ent_* 族（本文件既有）；区域面 = REG 行（g_sgs）遍历——Task 0
+//           定夺：对象面不含 region_of_nod（区域面仅 REG 行遍历）。
+// loader（load_ccr，ccr_io.cr）载入对象 + 守卫；NOD→g_ir_instrs 线性重建
+// 移实例（build_linear_schedule——regalloc.cr，调度 = 实例事务）；线性流
+// accessor（iri_*）不再 = 内核对象面（实例调度产物）。本文件访问器 = 内核
+// 接口面（读缓冲；调用方保证界内——ent_* 同约）。字段读走 buf_read_*
+// （ccr_io.cr 真实函数体带符号扩展——r32 在 bootstrap 产物里零扩展，负值
+// 会读错，见 ent_var 注）；无界检查与 ent_* 约定一致。
+ESZ_NOD_SEM : int = 28;    // 内存对象记录 28B（= 盘 36B 剥离 first_edge/edge_count）
+ESZ_NOD_META : int = 16;   // 邻接域记录 16B {first_edge i64 @0, edge_count i64 @8}
+OFF_NS_OP : int = 0;       // 语义字段 offset（布局镜像盘记录：s1 = 8B 占 +8..+16）
+OFF_NS_DEST : int = 4;
+OFF_NS_S1 : int = 8;
+OFF_NS_S2 : int = 16;
+OFF_NS_S3 : int = 20;
+OFF_NS_TK : int = 24;
+
+g_v7_nod_sem : string, mut;   // NOD 语义字段对象缓冲（ESZ_NOD_SEM/节点——loader 载入）
+g_v7_nod_meta : string, mut;  // NOD 邻接域缓冲（ESZ_NOD_META/节点——EDG 守卫暂存同源）
+g_v7_nod_count : int, mut;    // 对象缓冲记录数（= NOD 段节点数——load 后可用）
+
+// 节点面访问器（n = NOD 节点坐标 0..g_v7_nod_count-1）：语义字段读
+// g_v7_nod_sem、邻接索引读 g_v7_nod_meta——数值与 loader 解析（buf_read_*）
+// 逐字节同（u32 字段 buf_read_u32 / 有符号 buf_read_i32 / s1 buf_read_i64）。
+fn nod_op(n: int) -> int { return buf_read_u32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_OP); }
+fn nod_dest(n: int) -> int { return buf_read_i32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_DEST); }
+fn nod_s1(n: int) -> int { return buf_read_i64(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_S1); }
+fn nod_s2(n: int) -> int { return buf_read_i32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_S2); }
+fn nod_s3(n: int) -> int { return buf_read_i32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_S3); }
+fn nod_tk(n: int) -> int { return buf_read_u32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_TK); }
+fn nod_edge_first(n: int) -> int { return r64(g_v7_nod_meta, n * ESZ_NOD_META); }
+fn nod_edge_count(n: int) -> int { return r64(g_v7_nod_meta, n * ESZ_NOD_META + 8); }
+
+// 边面访问器（e = 全局边下标 0..g_v7_edge_count-1）：读 EDG 缓冲 8B 记录
+// {to_nod u32 @0, kind u32 @4}（loader 打包 {to, kind×2^32} 的低/高 32 位）。
+fn v7_edge_to(e: int) -> int { return buf_read_u32(g_v7_edges, e * 8); }
+fn v7_edge_kind(e: int) -> int { return buf_read_u32(g_v7_edges, e * 8 + 4); }
+
+// 配方查询（薄封装）：节点 n 的配方输入集 = 出边遍历——邻接索引区间
+// [nod_edge_first(n), nod_edge_first(n) + nod_edge_count(n))（v7 邻接约定：
+// 节点 i 出边连续段，first_edge = 前缀累计），区间内逐边读
+// v7_edge_to/v7_edge_kind → 目标节点。节点无出边 = 空区间（count = 0）。

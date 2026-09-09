@@ -793,3 +793,28 @@ fn alloc_registers() {
         fi = fi + 1;
     }
 }
+
+// ===== 语义对象模型（内核完备 Task 1）：调度重建 = 实例事务 =====
+// NOD→g_ir_instrs 线性重建自 ccr_io.cr load_ccr 移出（原 NOD 段重建循环函数
+// 体纯搬移——零改动）：从内核对象缓冲（nod_* 访问器读 g_v7_nod_sem——28B
+// 语义字段载入镜像 + nod_edge_first/count 读邻接域）顺序直出 48B 线性流
+// （g_ir_instrs + g_ir_instr_count）。重建产物与移出前逐字节一致（判据 =
+// backend_bootstrap stage 链 byte-identical——纯搬移证明）。REG 展开/函数
+// 边界回填（root span → g_ir_func_instr_start/count）留在 loader（GC-3 守卫
+// 消费——Task 0 确认零线性流依赖）。调用方：corearch.cr / arch/linux/ld/
+// main.cr（自举 stage 链入口）——load_ccr 成功后、分派/发射前调用一次。
+fn build_linear_schedule() {
+    grow_ir_instrs(g_v7_nod_count);
+    ni : ., mut = 0;
+    loop {
+        if ni >= g_v7_nod_count { break; }
+        iri_set_op(ni, nod_op(ni));
+        iri_set_dest(ni, nod_dest(ni));
+        iri_set_s1(ni, nod_s1(ni));
+        iri_set_s2(ni, nod_s2(ni));
+        iri_set_s3(ni, nod_s3(ni));
+        iri_set_tk(ni, nod_tk(ni));
+        g_ir_instr_count = ni + 1;
+        ni = ni + 1;
+    }
+}
