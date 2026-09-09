@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态：实施完成（2026-09-10 Tasks 0-5 收官——落点：Task 0 盘点 8c3e6ad1 / Task 1 035ea289（+ 补正 72c40389）/ Task 2 99fc6af3 / Task 3 b4d8c74f / Task 4 b9685f5c / Task 5 = 收官提交）**——中立性 guard A+B 全绿（零残留）+ 全量回归绿 + 自举重建冒烟 + full-bootstrap guard（corec2/corec3 cmp 同 + N06=0）+ 文档同步（设计 spec 状态 → 已实施 + 执行注记 §7 / 蓝图步骤 2.5 完成注记 + §1.1 三组件完成态）；执行注记 = 设计 spec `2026-09-10-corearch-kernel-completion-design.md` §7
+
 **Goal:** 内核三组件按蓝图 §1.1 补完 + **全量中立化（2026-09-10 用户原则：内核零经典概念——寄存器/栈/调度/内存布局/指令任一概念不得出现）**——语义对象模型（对象面 API + 调度重建移实例）、A 通道中立化（compute 系改 NOD 对象面——内核零线性流引用）、B 通道中立化（登记表不透明位置 + LOC_HOME_BASE 移除）、注册契约完整（③④ 形式声明）——行为零变化。
 
 **Architecture:** 现状（步骤 2 收官态）= ent_kernel.cr（判定引擎 + 数据面，双 concat）+ regalloc.cr（机器侧）+ 实例声明表。全量中立化审计（设计 spec §4.5）结论：全部经典残留 = 一根因族两通道——A 线性流坐标派生读取（4 函数 4 iri_* 使用点——compute 系/dump/rl_rule2）+ B 位置通道（meta_reg_for_var 读实例布局 + LOC_HOME_BASE 编码）。本计划 = 中立化波：写侧 populate_nod_objects（corec 镜像对称）→ compute 系改 NOD 对象面（同 index——F5）→ 登记表不透明化（实例双面同步责任在实例）→ 输出面中性化 + 配方查询补体 + ③④ 声明。判据 = 行为零变化（全回归 + byte-identical 面）+ 中立性静态 guard（A 组/B 组 token 红→绿）。

@@ -1,7 +1,7 @@
 # corearch 重写设计：范式无关内核 + 实例定制
 
 日期：2026-09-09
-状态：设计定稿（蓝图——模块归属裁决 + 演进序）；**演进序步骤 2（内核抽取）已实施完成（2026-09-10，plan `2026-09-10-corearch-kernel-extraction.md` Tasks 1-4）**——执行状态注记见 §2/§3
+状态：设计定稿（蓝图——模块归属裁决 + 演进序）；**演进序步骤 2（内核抽取）已实施完成（2026-09-10，plan `2026-09-10-corearch-kernel-extraction.md` Tasks 1-4）**；**步骤 2.5（内核组件完备化——中立化波，plan `2026-09-10-corearch-kernel-completion.md` Tasks 1-5）已实施完成（2026-09-10）**——执行状态注记见 §1.1/§2/§3（步骤 2.5 执行注记 = 设计 spec `2026-09-10-corearch-kernel-completion-design.md` §7）
 性质：裁决性 spec——按 `2026-09-09-lattice-encoding-boundary-design.md`（边界 C1-C3 契约）执行的目标架构蓝图；蓝图本体无代码改动。
 
 关联：
@@ -68,6 +68,8 @@ v7 图载体(.ccr) ──► 范式无关小内核 ──► 实例(每范式/�
 
 **核心不包含**：任何机器编码知识（寄存器名/帧/ABI/ELF）、任何调度/执行序知识（执行者才需要调度——验证器消费不需要）、op 字典语义解释、HIT 表概念（表 = 实例数据形态，非内核概念——边界 spec C4 已定位表为实例数据载体）。
 
+**三组件完成态（2026-09-10 步骤 2.5 收官注记——plan `2026-09-10-corearch-kernel-completion.md` Tasks 1-5，执行注记详见设计 spec §7）**：内核 = **范式无关三组件完整**——① 语义对象模型（对象面 API nod_\*/v7_edge_\*/配方查询 nod_inputs 完整 + 调度重建移实例 = 实例侧 build_linear_schedule，loader 收敛为纯对象载入 + 校验守卫；region_of_nod = 定夺不含——区域面仅 REG 行遍历）；② 判定/分配引擎（位置登记表 kern_loc_\* 通道 + home 字段独立遍——中立性 guard A+B 全绿 = 内核零线性流引用/零实例布局读/零位置编码/零域分类，`tests/selfhost/test_ent_kernel_neutrality.py` 入回归面）；③ 实例注册契约（实例声明行扩 needs_eviction/needs_call_sites ③④ 形式声明 {0,0}——引擎不实现 = 演进点 + kern_verify_all 双向输出面确认）。判据：行为零变化（全量回归 + backend_bootstrap stage 链/ccr_v7 产物/28/28 判定通道 byte-identical）+ 自举重建 + full-bootstrap guard（corec2/corec3 cmp 同 + N06=0）。x86 实例化（演进序步骤 3）= 纯实例内工作——接缝 = 登记 API + 实例声明 + 对象面。
+
 ### 1.2 实例层（每范式/机定制）
 
 实例 = 该范式/机器把语义对象变成自己编码的**全部定制内容**——无跨范式共性，不强建通用翻译层：
@@ -118,7 +120,8 @@ v7 图载体(.ccr) ──► 范式无关小内核 ──► 实例(每范式/�
 
 1. **v7 实施**（计划 d76d14c3 已就绪）：图载体落盘 + loader 双端改——内核输入契约的前提。先行理由：内核对象模型的数据源 = v7 文件；ENT/EDG 不落盘则内核无对象可管
 2. ~~**内核抽取**：loader → 语义对象模型 + 判定引擎从 regalloc 拆出（compute_entries/live_ranges/共存/判定四条入内核；CAG 留实例）——**行为判据**：抽取中每步回归绿（判定语义不动只搬家——regalloc 移后端先例同款流程）；内核接口 = 注册契约最小面先立~~ ✅ **完成（2026-09-10，plan `2026-09-10-corearch-kernel-extraction.md` Tasks 1-4；执行状态注记见 §2）**——判定语义引擎族（compute_entries/live_ranges/共存/verify 规则①②/诊断通道）纯搬 `ent_kernel.cr` 进双 concat + 写侧镜像消除 + 注册契约最小面（实例声明表 + 表驱动引导）落地；判据：test_live_ranges 13/13 + test_ccr_v7 23/23（byte-identical）+ 全量回归绿（compile/backend_bootstrap 链/hit_table 24/24/region_cfg 22/22/mw1-6/slice_bounds 7/7/bootstrap 三套）+ full-bootstrap guard（corec2 N06=0、corec2/corec3 cmp=0、冒烟绿）+ 自举重建冒烟。**范围克制保持**：资源域参数化/双向契约 home 回填/loader 语义对象化（loader = 段表读取面，对象模型改造 = 后续步骤）未做——最小面已立
-3. **x86 实例化**（= M2 复启的接续形态）：实例边界内的数据化/参数化（帧/ABI/调用序列/tag 编码 → 实例算法 + HIT 表数据化推进）——判据按边界 C4 重定（行为等价/投影正确性，非逐字节复刻）；M2 挂起资产的承接点
+2.5. ~~**内核组件完备化（步骤 2.5——中立化波）**：三组件按 §1.1 补完 + 全量中立化（用户原则 2026-09-10：内核零经典概念）——对象模型补完（对象面 API + 调度重建移实例）、A 通道中立化（compute 系改 NOD 对象面 + 写侧 populate）、B 通道中立化（登记表 + LOC_HOME_BASE 移除）、注册契约完整（③④ 形式声明）~~ ✅ **完成（2026-09-10，plan `2026-09-10-corearch-kernel-completion.md` Tasks 1-5，提交 035ea289+72c40389 / 99fc6af3 / b4d8c74f / b9685f5c / 收官提交；执行注记 = 设计 spec §7）**——**内核 = 范式无关三组件完整**（完成态声明见 §1.1）；判据：中立性 guard A+B 全绿（红→绿记录核：A 组 10 token 红 → Task 2 绿 / B 组 11 token 红 → Task 3 绿 / Task 5 终态复跑零残留）+ 行为零变化（全量回归绿：compile/backend_bootstrap 11/11 链 byte-identical/hit_table 24/24/region_cfg 22/22/mw1-6/slice_bounds 7/7/live_ranges 13/13/ccr_v7 24/24/bootstrap 三套 29+4+3 + 判定通道 28/28 逐字节同 + 冷编译语料 3/3）+ 自举重建冒烟 + full-bootstrap guard（corec2/corec3 N06=0、cmp 同、冒烟 rc 42）。范围克制保持：F4 双坐标域统一 = 挂账（后续专项）；判定③④ 引擎实现 = 注册契约演进点（needs_* = 1 实例出现时）
+3. **x86 实例化**（= M2 复启的接续形态）：实例边界内的数据化/参数化（帧/ABI/调用序列/tag 编码 → 实例算法 + HIT 表数据化推进）——判据按边界 C4 重定（行为等价/投影正确性，非逐字节复刻）；M2 挂起资产的承接点；**接缝就绪（步骤 2.5 产物）** = 登记 API（kern_loc_\*）+ 实例声明（needs_* 行）+ 对象面（nod_\*/v7_edge_\*/nod_inputs）——步骤 3 = 纯实例内工作
 4. **第二范式/非经典实例验证**（远期）：注册契约的实证——范式 B 实例 = 新注册 + 新算法数据，零内核改动（规则封闭的验收）
 
 **时机注记**：步骤 1（v7）与步骤 2-3（重写）可分可合——v7 的 loader 改动若按内核对象模型的形状做（loader 产出语义对象而非线性流假设），可避免二次重构（实施计划的接缝优化项）。
