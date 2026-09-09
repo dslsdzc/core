@@ -333,6 +333,215 @@ def test_hit_lower_sources_check_clean() -> bool:
 
 
 # ════════════════════════════════════════════════════════════════
+# M2a Task 2：事件流注入测试通道（--hit-events-file）——模板解释器 v2 形态
+# 发射的对照载体。通道 = --dump-events 逆格式文本文件：`ev <name> [dst=N]
+# [s1=[pool]N] [s2=N]` 每事件一行（操作数缺省 = 从所附着指令取——附着规则见
+# lower_to_core.cr hit_inject_events 注释）+ `pool v0 v1..` 池值行。注入取代
+# 降低（跳过 lower 直接 emit）；只映射到指令的某条事件才走表（未列事件指令 =
+# 旧路径）——同源程序表路径 vs 旧路径逐字节对照成立面 = 每事件字节 == 旧路径
+# 该指令字节（jump = E9 rel32；sub/load/store 形态 = v2 字段发射 + disp auto）。
+# ════════════════════════════════════════════════════════════════
+
+# 注（MW 里程碑后）：int add/sub 定值目标 = 规则 A 恒 tagged → mw 门整条落旧
+# 路径——sub/nand 事件在现架构对真 IR 不可达（M2b Task 6/8 快路径走表通道），
+# 逐字节对照载体只用非门面指令：store/load（as 槽载入）/jump/cst。
+# jump 对照载体：if（无 else）体内 store 链 + 尾 jump 指向合并标签 = if 后首个
+# 事件指令（d 的 load——事件序 4）。跳转目标 = 事件序（jump 事件 s1 域）。
+JUMP_SRC = """fn main() -> int {
+    a : ., mut = 10;
+    b := 3;
+    if a > b {
+        c := a as int;
+        a = c;
+    }
+    d := a as int;
+    return d;
+}
+"""
+JUMP_EVENTS = ["ev load", "ev store", "ev store", "ev jump s1=4", "ev load", "ev store"]
+JUMP_RC = 10  # 10>3 真 → c=10、a=10 → d=10
+
+# disp 对照载体：let 初始化 store ×2 + as 槽 load/store 链 + 变量移动 store
+#（事件全部 auto disp8——旧路径 e2_ld/e2_st 同规则；固定 disp32 旧发射会红）
+DISP_SRC = """fn main() -> int {
+    a : ., mut = 10;
+    b := 3;
+    c := a as int;
+    a = c;
+    d := b as int;
+    e := a as int;
+    a = d;
+    return a;
+}
+"""
+DISP_EVENTS = ["ev store", "ev store", "ev load", "ev store", "ev store",
+               "ev load", "ev store", "ev load", "ev store", "ev store"]
+DISP_RC = 3  # a ← d ← b = 3
+
+# disp32 对照载体：20 槽变量（a16+ 槽偏移 < -128 → disp32；a15 = -128 边界 disp8）
+BIG_EVENTS = ["ev store"] * 20 + ["ev store"]
+BIG_RC = 18  # a19 = a18
+
+
+def big_src() -> str:
+    lines = ["fn main() -> int {"]
+    for i in range(20):
+        lines.append(f"    a{i} : ., mut = {i};")
+    lines.append("    a19 = a18;")
+    lines.append("    return a19;")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+# imm 对照载体：cst 事件（fixture 表事件 11 = C7 /0 [rbp+disp] imm32——与旧路径
+# const e2_li 同字节）。夹具 = 真实表 + 追加 cst 事件（events 9 → 10）。
+CST_FIX = TABLE.read_text().replace("events = 9", "events = 10", 1) + (
+    "\n[[event]]\nid = 11\nname = \"cst\"\ninputs = 2\noutputs = 1\n"
+    "side_effect = \"pure\"\n\n[[event.proj]]\nisa = \"x86-64\"\n"
+    "[[event.proj.step]]\nrex_w = 1\nopcode = [0xC7]\nmodrm_reg_digit = 0\n"
+    "modrm_rm_role = \"dst\"\nrm_mode = 1\nimm_size = 4\nimm_role = \"src1\"\n")
+
+IMM_SRC = "fn main() -> int {\n    a := 63;\n    return a;\n}\n"
+IMM_EVENTS = ["ev cst"]
+IMM_RC = 63
+
+# 池对照载体：const → 池 load（M1 语义——字节与旧路径 e2_li 有意不同，判据 = 运行）
+POOL_SRC = "fn main() -> int {\n    a := 7;\n    b := 5;\n    return a - b;\n}\n"
+POOL_LINES = ["pool 7 5"]
+POOL_EVENTS = ["ev load s1=pool0", "ev store", "ev load s1=pool1", "ev store"]
+POOL_RC = 2  # a-b 指令 = mw 门旧路径——池载入 + 初始化 store 经表
+
+
+def emit_inject(tmp: Path, name: str, src: str, ev_lines, pool_lines=(),
+                table=TABLE):
+    """corearch --table --hit-events-file：.cr → .ccr → 注入发射。
+    返回 (r, inj_bytes|None, out_p)。"""
+    ccr = compile_ccr(tmp, name, src)
+    ev_p = tmp / f"{name}.events"
+    ev_p.write_text("\n".join(list(pool_lines) + list(ev_lines)) + "\n")
+    out_p = tmp / f"{name}_inj"
+    r = run_bin(COREARCH, [str(ccr), "--elf", "--opt-level", OPT,
+                           "--table", str(table),
+                           "--hit-events-file", str(ev_p), "-o", str(out_p)])
+    return r, (out_p.read_bytes() if out_p.exists() else None), out_p
+
+
+def _ev_count(r) -> int:
+    """'hit table: N events emitted' 中 N（无 → -1）。"""
+    out = r.stdout + r.stderr
+    m = out.find(" events emitted")
+    if m < 0:
+        return -1
+    txt = out[:m].rsplit("hit table: ", 1)[-1].strip()
+    return int(txt) if txt.isdigit() else -1
+
+
+def test_inject_byte_compare(tmp: Path, tag: str, src: str, ev_lines,
+                             expected_rc: int, pool_lines=(), table=TABLE) -> bool:
+    """注入通道逐字节对照：同源 .ccr 旧路径 ELF vs 注入表路径 ELF 全文件一致
+    + 运行 exit 一致 + 注入事件全部经表发射（计数 == 文件事件行数）。"""
+    try:
+        ccr = compile_ccr(tmp, tag, src)
+        old_out = tmp / f"{tag}_old"
+        old_r = emit_bin(ccr, old_out, table=False)
+        old_b = old_out.read_bytes()
+        r, inj_b, out_p = emit_inject(tmp, tag + "_inj", src, ev_lines,
+                                      pool_lines=pool_lines, table=table)
+    except RuntimeError as e:
+        print(f"[FAIL] inject/{tag}: {e}")
+        return False
+    ok = True
+
+    def chk(cond, msg):
+        nonlocal ok
+        if not cond:
+            print(f"[FAIL] inject/{tag}: {msg}")
+            print("  " + (r.stdout + r.stderr).replace("\n", "\n  ")[:800])
+            ok = False
+
+    chk(r.returncode == 0 and inj_b is not None, "corearch --hit-events-file failed")
+    chk(_ev_count(r) == len(ev_lines),
+        f"events-emitted {_ev_count(r)} != file lines {len(ev_lines)}（有事件落旧路径?）")
+    chk(inj_b == old_b, f"injected ELF != old-path ELF ({len(old_b)} vs {len(inj_b or b'')} bytes)")
+    if ok:
+        old_rc = run_elf(old_out)
+        inj_rc = run_elf(out_p)
+        chk(old_rc == expected_rc and inj_rc == expected_rc,
+            f"run exit old={old_rc} inj={inj_rc} expected={expected_rc}")
+    if ok:
+        print(f"[PASS] inject/{tag}: {len(ev_lines)} 事件注入发射 == 旧路径逐字节 "
+              f"({len(old_b)}B) 且运行 exit {expected_rc}")
+    return ok
+
+
+def test_inject_pool_run(tmp: Path) -> bool:
+    """池注入运行闭环：const → 池 load 事件（M1 语义）——池值入 rodata、运行
+    exit 与旧路径一致（字节有意不同——const 走池 vs 旧路径 imm 直载）。"""
+    try:
+        r, inj_b, out_p = emit_inject(tmp, "pool", POOL_SRC, POOL_EVENTS,
+                                      pool_lines=POOL_LINES)
+    except RuntimeError as e:
+        print(f"[FAIL] inject/pool: {e}")
+        return False
+    ok = True
+
+    def chk(cond, msg):
+        nonlocal ok
+        if not cond:
+            print(f"[FAIL] inject/pool: {msg}")
+            print("  " + (r.stdout + r.stderr).replace("\n", "\n  ")[:800])
+            ok = False
+
+    chk(r.returncode == 0 and inj_b is not None, "corearch --hit-events-file failed")
+    chk(_ev_count(r) == len(POOL_EVENTS), f"events-emitted != {len(POOL_EVENTS)}")
+    if ok:
+        got = run_elf(out_p)
+        chk(got == POOL_RC, f"pool-injected ELF exit {got}, expected {POOL_RC}")
+    if ok:
+        print(f"[PASS] inject/pool: 池注入（pool 7 5）运行 exit {POOL_RC}")
+    return ok
+
+
+def test_inject_rejects(tmp: Path) -> bool:
+    """注入通道拒绝面：坏行语法 / 未知事件名 / 不支持事件（branch = Task 3 前
+    无指令期望它）/ 越界 jump 目标序 → exit 1 + 错误消息。"""
+    cases = [
+        ("bad_line", JUMP_SRC, ["ev sub dst=abc"], (), "bad dst"),
+        ("unknown_event", JUMP_SRC, ["ev bogus"], (), "unknown event"),
+        ("unsupported_branch", JUMP_SRC, ["ev store", "ev branch dst=0 s1=1 s2=0"],
+         (), "no instruction"),
+        ("jump_target_oob", JUMP_SRC, ["ev load", "ev jump s1=9", "ev store"],
+         (), "out of range"),
+        ("no_table", JUMP_SRC, ["ev store"], (), "needs --table"),
+    ]
+    ok = True
+    for tag, src, ev_lines, pool_lines, token in cases:
+        try:
+            ccr = compile_ccr(tmp, "rej_" + tag, src)
+            ev_p = tmp / f"rej_{tag}.events"
+            ev_p.write_text("\n".join(list(pool_lines) + list(ev_lines)) + "\n")
+            args = [str(ccr), "--elf", "--opt-level", OPT, "-o", str(tmp / "rej.out")]
+            if tag != "no_table":
+                args = [str(ccr), "--elf", "--opt-level", OPT, "--table", str(TABLE),
+                        "--hit-events-file", str(ev_p), "-o", str(tmp / "rej.out")]
+            else:
+                args += ["--hit-events-file", str(ev_p)]
+            r = run_bin(COREARCH, args)
+        except RuntimeError as e:
+            print(f"[FAIL] reject/{tag}: {e}")
+            ok = False
+            continue
+        out = r.stdout + r.stderr
+        if r.returncode == 0 or token not in out:
+            print(f"[FAIL] reject/{tag}: expected exit 1 + {token!r}")
+            print("  " + out.replace("\n", "\n  ")[:600])
+            ok = False
+            continue
+        print(f"[PASS] reject/{tag}: exit 1 with {token!r}")
+    return ok
+
+
+# ════════════════════════════════════════════════════════════════
 # M2a Task 1：schema v2 加载 walker + 字段解析断言（TDD：v2 加载器未实现前红）
 # ════════════════════════════════════════════════════════════════
 # 静态夹具（自包含，不随真实表迁移变动）：
@@ -1245,6 +1454,16 @@ def main():
             test_v2_fixture_sink_fields(tmp),
             test_v2_fixture_multi_step_sections(tmp),
             test_v2_bad_field_rejects(tmp),
+            # M2a Task 2：事件流注入通道 + v2 形态发射（跳转/disp/imm 逐字节对照）
+            test_inject_byte_compare(tmp, "simple", "fn main() -> int {\n    a : ., mut = 7;\n    return a;\n}\n",
+                                     ["ev store"], 7),
+            test_inject_byte_compare(tmp, "jump", JUMP_SRC, JUMP_EVENTS, JUMP_RC),
+            test_inject_byte_compare(tmp, "disp", DISP_SRC, DISP_EVENTS, DISP_RC),
+            test_inject_byte_compare(tmp, "bigframe", big_src(), BIG_EVENTS, BIG_RC),
+            test_inject_byte_compare(tmp, "imm", IMM_SRC, IMM_EVENTS, IMM_RC,
+                                     table=_write_fixture(tmp, "cst_fix", CST_FIX)),
+            test_inject_pool_run(tmp),
+            test_inject_rejects(tmp),
         ]
     passed = sum(results)
     print(f"{passed}/{len(results)} passed")

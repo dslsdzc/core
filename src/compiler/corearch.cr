@@ -85,6 +85,7 @@ fn corearch_main() -> int {
     cli_flag("output", "o", "Output path");
     cli_flag("opt-level", "O", "Optimization level (0-3, default=0) — O2: load 后自算寄存器分配 + 一致性自检（emit 前，违反 = 编译错误）");
     cli_flag("table", "", "HIT table file (load & emit mapped ops through it)");
+    cli_flag("hit-events-file", "", "Hidden debug: inject text event stream file (dump-events inverse; skips lowering — template compare test channel, M2a Task 2)");
     cli_flag_bool("dump-events", "", "Dump lowered HIT event stream + const pool");
     cli_flag_bool("dump-table", "", "Hidden debug: dump loaded HIT event/proj/step/runtime state (schema v2 read-back test channel)");
     // regalloc 移后端：数据面/判定调试通道（corec cir 原载体随迁——同名 flag）
@@ -165,9 +166,22 @@ fn corearch_main() -> int {
     // --table（M1 Task 3）：表模式 → 先降低（IR 直线子集 → 事件流 + 常量池）。
     // 超子集 op → 'needs more events' 错误 exit 1（发射前拒绝）；成功 → 事件流
     // 供 emit_instr_tabled 消费（elf.cr 发射循环不变）。--dump-events 调试 dump。
+    // --hit-events-file（M2a Task 2 注入测试通道）：文本事件流文件取代降低——
+    // 构造 g_hit_ev_stream/g_hit_pool + 指令映射，跳过 lower 直接 emit。测试专用
+    // （真实构建路径不启用；与 --inject-* 通道同哲学）。须与 --table 同用。
     dump_ev : ., mut = cli_has("dump-events");
+    inj_path : ., mut = cli_get("hit-events-file");
+    if str_len(inj_path) > 0 && hit_table_active() == 0 {
+        println("error: --hit-events-file needs --table (events emit through table projections)");
+        return 1; }
+    g_hit_inject_active = 0;
     if hit_table_active() != 0 {
-        if hit_lower_program() != 0 { return 1; }
+        if str_len(inj_path) > 0 {
+            g_hit_inject_active = 1;
+            if hit_inject_events(inj_path) != 0 { return 1; }
+        } else {
+            if hit_lower_program() != 0 { return 1; }
+        }
         if dump_ev != 0 {
             print("hit events lowered: "); print_i(g_hit_ev_count); println("");
             ei : ., mut = 0;
@@ -186,7 +200,16 @@ fn corearch_main() -> int {
                 else { print_i(hit_ev_s2(ei)); }
                 println("");
                 ei = ei + 1; }
+            // 池值行（M2a Task 2：注入文件 pool 行的 dump 逆面——值域随槽序）
             print("hit pool entries: "); print_i(g_hit_pool_count); println("");
+            if g_hit_pool_count > 0 {
+                print("hit pool:");
+                hpi : ., mut = 0;
+                loop {
+                    if hpi >= g_hit_pool_count { break; }
+                    print(" "); print_i(r64(g_hit_pool, hpi * 8));
+                    hpi = hpi + 1; }
+                println(""); }
         }
     }
 
@@ -305,4 +328,11 @@ fn corearch_main() -> int {
     if str_len(tbl) > 0 {
         print("hit table: "); print_i(g_hit_tabled_count); println(" events emitted");
     }
+    // 注入通道（测试专用）：事件须全部经表发射——预检拒绝（已打印）会使计数
+    // 短于注入行数 = 注入文件错误 → exit 1（不静默落旧路径掩盖）。
+    if g_hit_inject_active != 0 && g_hit_tabled_count != g_hit_ev_count {
+        print("error: HIT events: "); print_i(g_hit_tabled_count);
+        print(" of "); print_i(g_hit_ev_count);
+        println(" events emitted via table (injection file event not emittable)");
+        return 1; }
     return 0; }

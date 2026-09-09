@@ -1441,6 +1441,34 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         }
         fi = fi + 1; }
 
+    // ── M2a Task 2：事件流 rel32 回填（回填表 kind 0 = 事件流位置）──
+    // jump 事件于事件字节发射期登记（instr.cr hit_rel_add）；目标 = 事件序 →
+    // 发射期位置表（g_hit_ev_pos，边发射边记）解析为绝对字节位置后回填：
+    //   disp = 目标位置 - (rel 字段位置 + 4)（rel32——与旧路径 label 回填同公式）。
+    // kind 1/2（函数起点 / 外部符号）= Task 4/5 消费——回填未实现：出现即大声
+    // 拒（防御——现事件集（jump/branch 前）无 func/extern rel 步可达登记）。
+    hri : ., mut = 0;
+    loop {
+        if hri >= g_hit_rel_count { break; }
+        rk := r64(g_hit_rel, hri * 24);
+        rp := r64(g_hit_rel, hri * 24 + 8);
+        rt := r64(g_hit_rel, hri * 24 + 16);
+        if rk == 0 {
+            if rt >= 0 && rt < g_hit_ev_pos_count {
+                tp := r64(g_hit_ev_pos, rt * 8);
+                w32(buf, rp, tp - (rp + 4));
+            } else {
+                print("  MISSING event position for rel target ordinal ");
+                println(int_str(rt));
+            }
+        } else {
+            print("  BAD rel kind ");
+            print(int_str(rk));
+            println(" (func/extern backfill = Task 4/5)");
+        }
+        hri = hri + 1; }
+    g_hit_rel_count = 0;
+
     // ── _init_globals ──
     w8(buf, cp, 85); cp = cp + 1;
     w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 229); cp = cp + 3;

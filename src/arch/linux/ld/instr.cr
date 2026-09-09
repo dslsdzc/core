@@ -2232,6 +2232,121 @@ fn hit_ev_step_of(ev_id: int, st: string) -> int {
     if hit_proj_step(es, 0, st) != 0 { return -1; }
     return 0; }
 
+// ── v2 步模板发射/预检（M2a Task 2——模板解释器字段发射）──
+// 形态族字段（hit.cr HIT_ST_OFF_* v2 区）按解释器固定序组装：prefix → rex →
+// opcode → modrm → disp → imm → rel（= loader 字节视区拼接序同源）。本任务
+// 消费面：modrm 双角色（rm_mode 0 寄存器对 = 清单 A 族 / rm_mode 1 rbp+disp =
+// C 族）/digit 操作码扩展（C7 系）/disp auto|1|4（auto = 槽偏移幅度选 disp8/32
+// ——与旧路径 e2_ld/e2_st 同规则 ④）/imm 字面量与操作数原值/rel32 回填登记
+// （kind 0 = 事件流位置）。SIB（rm_mode 2）/rip 基/寄存器字面量角色/imm_kind/
+// rel8/cond/多步序列 = 后续批与 Task 3/6 消费——预检拒（保守落旧路径）。
+
+// 事件语义类（运行时核事件 id = 语义锚：粘合序列 = 保留代码，模板字节 = 表数据）：
+//   ALU（sub=1/nand=2）：rm_mode 0 双寄存器累加形（rm = dst r10、reg = src2 r11）
+//   MEM（load=3/store=4 槽寻址）：rm_mode 1 [rbp+disp]（reg = dst|val r10）
+//   POOL：load 事件 s1 = 池槽——池 mov（[rip+disp] 硬编码辅助——M1 通道，非模板）
+//   JUMP（5）：无 modrm rel32 步（E9——目标 = 事件序）
+//   IMM（11 cst——注入夹具）：/digit + [rbp+disp] + imm（imm 值 = 事件 s1 原值）
+HIT_EV_CLS_ALU  : int = 0;
+HIT_EV_CLS_MEM  : int = 1;
+HIT_EV_CLS_POOL : int = 2;
+HIT_EV_CLS_JUMP : int = 3;
+HIT_EV_CLS_IMM  : int = 4;
+
+fn hit_ev_class(ev_id: int, fl: int) -> int {
+    if ev_id == HIT_EV_SUB || ev_id == HIT_EV_NAND { return HIT_EV_CLS_ALU; }
+    if ev_id == HIT_EV_LOAD && fl % 2 == 1 { return HIT_EV_CLS_POOL; }
+    if ev_id == HIT_EV_LOAD || ev_id == HIT_EV_STORE { return HIT_EV_CLS_MEM; }
+    if ev_id == HIT_EV_JUMP { return HIT_EV_CLS_JUMP; }
+    if ev_id == 11 { return HIT_EV_CLS_IMM; }   // cst 夹具（注入测试载体）
+    return -1; }   // 事件 6-9 = Task 3 前拒绝（无语义类 → 落旧路径）
+
+// 形态（proj）选择：类按所需形态逐 proj 选首个匹配（条目序 = 优先序——
+// 槽寻址 = rm_mode 1/2 形态、寄存器对 = 0；jump 取首个投影）。st = 选中
+// proj 的步 0 记录（108B）。返回 proj 下标；-1 = 无匹配形态（'no projection
+// for shape'——预检落旧路径）。
+fn hit_ev_proj_pick(es: int, cls: int, st: string) -> int {
+    pc := hit_proj_count(es);
+    pi : ., mut = 0;
+    loop {
+        if pi >= pc { break; }
+        if hit_proj_step_get(es, pi, 0, st) != 0 { return -1; }
+        rm_mode := hit_r32(st, HIT_ST_OFF_RM_MODE);
+        if cls == HIT_EV_CLS_ALU && rm_mode == 0 { return pi; }
+        if cls == HIT_EV_CLS_MEM && (rm_mode == 1 || rm_mode == 2) { return pi; }
+        if cls == HIT_EV_CLS_IMM && rm_mode == 1 { return pi; }
+        if cls == HIT_EV_CLS_JUMP { return pi; }
+        pi = pi + 1; }
+    return -1; }
+
+// 模板字节头：prefix → rex → opcode（v2 字段区逐段；st = 108B 步记录）。
+// 返回字节数。
+fn hit_st_head(st: string, buf: string, pos: int) -> int {
+    cp : ., mut = 0;
+    p0 := hit_r32(st, HIT_ST_OFF_PFX0);
+    if p0 != 0 { e2_w8(buf, pos + cp, p0); cp = cp + 1; }
+    p1 := hit_r32(st, HIT_ST_OFF_PFX1);
+    if p1 != 0 { e2_w8(buf, pos + cp, p1); cp = cp + 1; }
+    rx := hit_r32(st, HIT_ST_OFF_REX);
+    if rx != 0 { e2_w8(buf, pos + cp, rx); cp = cp + 1; }
+    nop := hit_r32(st, HIT_ST_OFF_OPN);
+    j : ., mut = 0;
+    loop {
+        if j >= nop { break; }
+        if j == 0 { e2_w8(buf, pos + cp, hit_r32(st, HIT_ST_OFF_OPB0)); }
+        if j == 1 { e2_w8(buf, pos + cp, hit_r32(st, HIT_ST_OFF_OPB1)); }
+        if j == 2 { e2_w8(buf, pos + cp, hit_r32(st, HIT_ST_OFF_OPB2)); }
+        cp = cp + 1;
+        j = j + 1; }
+    return cp; }
+
+// rm_mode 1（base = rbp）的 modrm + disp 发射：宽度按步 disp_size 字段
+//（0 = auto——槽偏移幅度选 disp8|32，与旧路径 e2_ld/e2_st 同规则 ④）。
+// 返回字节数；宽度不符（disp8 越界）= -1。
+fn hit_st_modrm_disp(st: string, buf: string, pos: int, reg_lo: int, disp_val: int) -> int {
+    dsz := hit_r32(st, HIT_ST_OFF_DISP_SIZE);
+    cp : ., mut = 0;
+    if dsz == 1 {
+        if disp_val < -128 || disp_val > 127 { return -1; }
+        cp = cp + emit_modrm(buf, pos + cp, 1, reg_lo, 5);
+        e2_w8(buf, pos + cp, disp_val);
+        cp = cp + 1; }
+    else if dsz == 4 {
+        cp = cp + emit_modrm(buf, pos + cp, 2, reg_lo, 5);
+        cp = cp + e2_w32(buf, pos + cp, disp_val); }
+    else {
+        if disp_val >= -128 && disp_val <= 127 {
+            cp = cp + emit_modrm(buf, pos + cp, 1, reg_lo, 5);
+            e2_w8(buf, pos + cp, disp_val);
+            cp = cp + 1; }
+        else {
+            cp = cp + emit_modrm(buf, pos + cp, 2, reg_lo, 5);
+            cp = cp + e2_w32(buf, pos + cp, disp_val); } }
+    return cp; }
+
+// 步 imm 发射（imm_size 1/2/4/8；值由调用方解析——lit 取模板字面量、操作数
+// 角色取事件域原值）。返回字节数。
+fn hit_st_imm(st: string, buf: string, pos: int, imm_val: int) -> int {
+    isz := hit_r32(st, HIT_ST_OFF_IMM_SIZE);
+    if isz == 0 { return 0; }
+    if isz == 1 { e2_w8(buf, pos, imm_val); return 1; }
+    if isz == 2 { e2_w8(buf, pos, imm_val); e2_w8(buf, pos + 1, imm_val / 256); return 2; }
+    if isz == 4 { e2_w32(buf, pos, imm_val); return 4; }
+    e2_w64(buf, pos, imm_val);
+    return 8; }
+
+// 步 rel 发射 + 回填登记（kind 0 = 事件流位置——pos = rel 字段偏移；宽 = 32）。
+// 返回字节数；kind/宽度非本任务面 = -1（预检已拦——防御）。
+fn hit_st_rel_emit(st: string, buf: string, pos: int, target: int) -> int {
+    rk := hit_r32(st, HIT_ST_OFF_REL_KIND);
+    if rk == 0 { return 0; }
+    rs := hit_r32(st, HIT_ST_OFF_REL_SIZE);
+    if rk == HIT_REL_EVENT && rs == 32 {
+        e2_w32(buf, pos, 0);   // 占位——elf.cr 发射后按事件位置表回填
+        hit_rel_add(0, pos, target);
+        return 4; }
+    return -1; }
+
 // 单条事件预检（发射前整条指令全过才落字节；任一不支持 → 整条落旧路径，
 // 不产生半写）。Returns 0 = 可发射；1 = 不支持。
 fn hit_ev_preflight_ok(ev_i: int) -> int {
@@ -2240,38 +2355,82 @@ fn hit_ev_preflight_ok(ev_i: int) -> int {
     s1 := hit_ev_s1(ev_i);
     s2 := hit_ev_s2(ev_i);
     fl := hit_ev_flags(ev_i);
+    es := hit_event_lookup(ev_id);
+    if es < 0 { return 1; }   // 表在但事件缺 → 保守落旧路径
+    cls := hit_ev_class(ev_id, fl);
+    if cls < 0 { return 1; }  // 事件 6-9 等 = 无语义类 → 拒绝（Task 3 前保持）
+    if cls == HIT_EV_CLS_POOL {
+        // 池载入：load 模板 proj0 视区（= hit_ev_emit_pool_mov 同源形态）
+        if d < 0 { return 1; }
+        if s1 < 0 || s1 >= g_hit_pool_count { return 1; }
+        stx := alloc(HIT_STEP_REC);
+        if hit_ev_step_of(ev_id, stx) != 0 { return 1; }
+        rm_mode := hit_r32(stx, HIT_ST_OFF_RM_MODE);
+        rr := hit_r32(stx, HIT_ST_OFF_REG_ROLE);
+        mr := hit_r32(stx, HIT_ST_OFF_RM_ROLE);
+        if rm_mode != 1 || rr != HIT_ROLE_DST || mr != HIT_ROLE_ADDR { return 1; }
+        if hit_role_reg_low(rr) < 0 { return 1; }
+        return 0; }
     st := alloc(HIT_STEP_REC);
-    if hit_ev_step_of(ev_id, st) != 0 { return 1; }   // 表在但事件缺 → 保守落旧路径
+    pj := hit_ev_proj_pick(es, cls, st);
+    if pj < 0 { return 1; }   // 'no projection for shape'
+    if hit_proj_step_count(es, pj) != 1 { return 1; }   // 多步序列 = Task 3/6
     rm_mode := hit_r32(st, HIT_ST_OFF_RM_MODE);
     rr := hit_r32(st, HIT_ST_OFF_REG_ROLE);
     mr := hit_r32(st, HIT_ST_OFF_RM_ROLE);
-    if rm_mode == 0 {
+    // ── 步字段支持门（本任务发射面外 → 保守落旧路径）──
+    if hit_r32(st, HIT_ST_OFF_OPN) < 1 { return 1; }   // opcode 必选（loader 已验——防御）
+    if hit_r32(st, HIT_ST_OFF_SIB_SCALE) != 0 || rm_mode == 2 { return 1; }  // SIB = M2c 批 3
+    if hit_r32(st, HIT_ST_OFF_BASE_ROLE) != 0 { return 1; }   // 非 rbp 基（rip/槽值寄存器 = 批 4/3）
+    if hit_r32(st, HIT_ST_OFF_REG_ROLE) >= HIT_REG_BASE { return 1; }   // 寄存器字面量角色 = M2c
+    if hit_r32(st, HIT_ST_OFF_RM_ROLE) >= HIT_REG_BASE { return 1; }
+    if hit_r32(st, HIT_ST_OFF_IMM_KIND) != 0 { return 1; }   // imm64 fnaddr 回填 = M2c 批 2
+    if hit_r32(st, HIT_ST_OFF_REL_SIZE) == 8 { return 1; }   // rel8 = Task 12（批 2 G2）
+    if hit_r32(st, HIT_ST_OFF_COND_ROLE) != 0 { return 1; }  // cond 发射 = Task 3
+    if hit_r32(st, HIT_ST_OFF_REL_KIND) == HIT_REL_FUNC ||
+       hit_r32(st, HIT_ST_OFF_REL_KIND) == HIT_REL_EXTERN { return 1; }  // Task 4/5
+    if cls == HIT_EV_CLS_JUMP {
+        // 无条件转移：E9 rel32——目标 = 事件序（s1）；dst/s2 未用（恒 0）
+        if d != 0 || s2 != 0 { return 1; }
+        if fl != 0 { return 1; }
+        if s1 < 0 || s1 >= g_hit_ev_count { return 1; }
+        if rr != 0 || mr != 0 { return 1; }   // 无 modrm 形态
+        if hit_r32(st, HIT_ST_OFF_REL_KIND) != HIT_REL_EVENT { return 1; }
+        return 0; }
+    if cls == HIT_EV_CLS_ALU {
         // 双寄存器累加形（sub/nand…）：rm = dst 累加（r10）、reg = src2（r11）
         if mr != HIT_ROLE_DST { return 1; }
         if rr != HIT_ROLE_SRC2 { return 1; }
+        if hit_role_reg_low(rr) < 0 || hit_role_reg_low(mr) < 0 { return 1; }
         if d < 0 { return 1; }
         if fl % 2 == 0 && s1 < 0 { return 1; }       // var 操作数须非负
         if fl / 2 % 2 == 0 && s2 < 0 { return 1; }
-        if fl / 2 % 2 == 1 { return 1; }             // M1：仅首操作数可为池（r10 与 load 模板 reg 位同）
+        if fl / 2 % 2 == 1 { return 1; }             // M1：仅首操作数可为池
         return 0; }
-    if rm_mode == 1 {
-        // rbp+disp32（槽）寻址 / 池 rip 引用：reg 角色 = dst（load）或 val（store）
-        if mr != HIT_ROLE_ADDR { return 1; }
-        if rr == HIT_ROLE_DST {                    // load：读 [addr] → dst 槽
-            if d < 0 { return 1; }
-            if fl % 2 == 1 {
-                if s1 < 0 || s1 >= g_hit_pool_count { return 1; }
-            } else {
-                if hit_ev_slot_addr_ok(s1) == 0 { return 1; }
-            }
-            return 0; }
-        if rr == HIT_ROLE_VAL {                    // store：写 [addr] ← val
-            if fl % 2 == 1 { return 1; }           // 写池 = 无意义（池只读）——保守
-            if hit_ev_slot_addr_ok(s1) == 0 { return 1; }
-            if s2 < 0 { return 1; }
-            return 0; }
-        return 1; }
-    return 1; }   // M1 形态集外
+    if cls == HIT_EV_CLS_IMM {
+        // cst（注入夹具）：/digit + [rbp+disp] + imm——rm = dst 槽、值 = s1 原值
+        if d < 0 || s1 < 0 { return 1; }
+        if fl != 0 { return 1; }
+        if hit_r32(st, HIT_ST_OFF_REG_IS_DIGIT) != 1 { return 1; }
+        if hit_r32(st, HIT_ST_OFF_REG_DIGIT) > 7 { return 1; }
+        if mr != HIT_ROLE_DST { return 1; }
+        if hit_r32(st, HIT_ST_OFF_IMM_SIZE) == 0 { return 1; }
+        if hit_r32(st, HIT_ST_OFF_REL_KIND) != 0 { return 1; }
+        return 0; }
+    // MEM（load/store 槽寻址）：reg 角色 = dst（load）或 val（store）——rm 侧 = addr
+    if mr != HIT_ROLE_ADDR { return 1; }
+    if hit_role_reg_low(rr) < 0 { return 1; }
+    if rr == HIT_ROLE_DST {                    // load：读 [addr槽] → dst 槽
+        if d < 0 { return 1; }
+        if fl % 2 == 1 { return 1; }           // 池 load = C_POOL（上已走）
+        if hit_ev_slot_addr_ok(s1) == 0 { return 1; }
+        return 0; }
+    if rr == HIT_ROLE_VAL {                    // store：写 [addr槽] ← val
+        if fl % 2 == 1 { return 1; }           // 写池 = 无意义（池只读）——保守
+        if hit_ev_slot_addr_ok(s1) == 0 { return 1; }
+        if s2 < 0 { return 1; }
+        return 0; }
+    return 1; }
 
 // 池值 → 寄存器：mov r64, [rip+disp32]——load 事件模板字节 + mod=00（rm=101 =
 // rip 相对；disp 由 elf.cr 于 rodata 定稿后按池槽回填）。reg 低 3 位 = 目标。
@@ -2301,62 +2460,95 @@ fn hit_ev_emit_one(ev_i: int, buf: string, pos: int) -> int {
     s1 := hit_ev_s1(ev_i);
     s2 := hit_ev_s2(ev_i);
     fl := hit_ev_flags(ev_i);
+    es := hit_event_lookup(ev_id);
+    if es < 0 { return -1; }
+    cls := hit_ev_class(ev_id, fl);
+    if cls < 0 { return -1; }
     st := alloc(HIT_STEP_REC);
-    if hit_ev_step_of(ev_id, st) != 0 { return -1; }
+    cp : ., mut = 0;
+    if cls == HIT_EV_CLS_POOL {
+        // 池载入：mov r10, [rip+池槽]（load 模板字节 + rip 回填——M1 通道）
+        n := hit_ev_emit_pool_mov(buf, pos, hit_role_reg_low(HIT_ROLE_DST), s1);
+        if n < 0 { return -1; }
+        cp = cp + n;
+        cp = cp + e2_st(buf, pos + cp, 10, g2_slot(d));
+        return cp; }
+    if hit_ev_proj_pick(es, cls, st) < 0 { return -1; }
     rm_mode := hit_r32(st, HIT_ST_OFF_RM_MODE);
     rr := hit_r32(st, HIT_ST_OFF_REG_ROLE);
     mr := hit_r32(st, HIT_ST_OFF_RM_ROLE);
-    cp : ., mut = 0;
-    if rm_mode == 0 {
+    if cls == HIT_EV_CLS_JUMP {
+        // E9 rel32（模板头）+ rel 登记（目标 = 事件序 s1——elf.cr 按位置表回填）
+        hd := hit_st_head(st, buf, pos + cp);
+        if hd < 0 { return -1; }
+        cp = cp + hd;
+        n2 := hit_st_rel_emit(st, buf, pos + cp, s1);
+        if n2 < 0 { return -1; }
+        cp = cp + n2;
+        return cp; }
+    if cls == HIT_EV_CLS_ALU {
         // 双寄存器累加形：rm = dst 累加器（首输入驻）、reg = src2
         r_acc := hit_role_reg(mr);   // dst → 10
         r_sec := hit_role_reg(rr);   // src2 → 11
         if r_acc < 0 || r_sec < 0 { return -1; }
         if fl % 2 == 1 {
             // 首输入 = 池：mov r10, [rip+池槽]（load 模板字节；预检已验形态）
-            n := hit_ev_emit_pool_mov(buf, pos, hit_role_reg_low(mr), s1);
-            if n < 0 { return -1; }
-            cp = cp + n; }
+            n3 := hit_ev_emit_pool_mov(buf, pos, hit_role_reg_low(mr), s1);
+            if n3 < 0 { return -1; }
+            cp = cp + n3; }
         else {
-            cp = cp + e2_load_var(buf, pos+cp, r_acc, s1); }
-        cp = cp + e2_load_var(buf, pos+cp, r_sec, s2);
-        // 指令字节：opcode ≤2 字节逐字发射（REX 位含在表数据：r10/r11 对需
-        // W+R+B——reg 字段 r11 用 R 位、rm 字段 r10 用 B 位；如 sub = 4D 29）
-        e2_w8(buf, pos+cp, hit_r32(st, HIT_ST_OFF_OP0)); cp = cp + 1;
-        op1 := hit_r32(st, HIT_ST_OFF_OP1);
-        if op1 != 0 { e2_w8(buf, pos+cp, op1); cp = cp + 1; }
+            cp = cp + e2_load_var(buf, pos + cp, r_acc, s1); }
+        cp = cp + e2_load_var(buf, pos + cp, r_sec, s2);
+        // 指令字节：prefix → rex → opcode 三段（v2 字段区——legacy 视区同源）
+        hd2 := hit_st_head(st, buf, pos + cp);
+        if hd2 < 0 { return -1; }
+        cp = cp + hd2;
         // modrm：mod=3（寄存器）；reg/rm 低 3 位来自角色（src2→r11=3、dst→r10=2）
-        cp = cp + emit_modrm(buf, pos+cp, 3, hit_role_reg_low(rr), hit_role_reg_low(mr));
+        cp = cp + emit_modrm(buf, pos + cp, 3, hit_role_reg_low(rr), hit_role_reg_low(mr));
         // 结果回存（先读后写——dst 兼作操作数（add 反减中间值）时读先于写）
-        cp = cp + e2_st(buf, pos+cp, r_acc, g2_slot(d));
+        cp = cp + e2_st(buf, pos + cp, r_acc, g2_slot(d));
         return cp; }
-    if rm_mode == 1 {
-        r_val := hit_role_reg(rr);
-        if r_val < 0 { return -1; }
-        if rr == HIT_ROLE_DST {
-            // load：读 [addr] → dst。addr = 池槽 → rip 相对；槽 → rbp+disp32
-            if fl % 2 == 1 {
-                n := hit_ev_emit_pool_mov(buf, pos, hit_role_reg_low(rr), s1);
-                if n < 0 { return -1; }
-                cp = cp + n; }
-            else {
-                e2_w8(buf, pos+cp, hit_r32(st, HIT_ST_OFF_OP0)); cp = cp + 1;
-                op2 := hit_r32(st, HIT_ST_OFF_OP1);
-                if op2 != 0 { e2_w8(buf, pos+cp, op2); cp = cp + 1; }
-                cp = cp + emit_modrm(buf, pos+cp, 2, hit_role_reg_low(rr), 5);
-                cp = cp + e2_w32(buf, pos+cp, g2_slot(s1)); }
-            cp = cp + e2_st(buf, pos+cp, r_val, g2_slot(d));
-            return cp; }
-        if rr == HIT_ROLE_VAL {
-            // store：写 [addr槽] ← val（val 槽值先载入角色寄存器）
-            cp = cp + e2_load_var(buf, pos+cp, r_val, s2);
-            e2_w8(buf, pos+cp, hit_r32(st, HIT_ST_OFF_OP0)); cp = cp + 1;
-            op3 := hit_r32(st, HIT_ST_OFF_OP1);
-            if op3 != 0 { e2_w8(buf, pos+cp, op3); cp = cp + 1; }
-            cp = cp + emit_modrm(buf, pos+cp, 2, hit_role_reg_low(rr), 5);
-            cp = cp + e2_w32(buf, pos+cp, g2_slot(s1));
-            return cp; }
-        return -1; }
+    if cls == HIT_EV_CLS_IMM {
+        // cst：/digit + [rbp+disp(auto)] + imm——rm = dst 槽、imm 值 = s1 原值
+        hd3 := hit_st_head(st, buf, pos + cp);
+        if hd3 < 0 { return -1; }
+        cp = cp + hd3;
+        n4 := hit_st_modrm_disp(st, buf, pos + cp,
+                                hit_r32(st, HIT_ST_OFF_REG_DIGIT), g2_slot(d));
+        if n4 < 0 { return -1; }
+        cp = cp + n4;
+        iv : ., mut = s1;
+        if hit_r32(st, HIT_ST_OFF_IMM_ROLE) == HIT_CODE_LIT {
+            iv = hit_r32(st, HIT_ST_OFF_IMM_LIT); }
+        n5 := hit_st_imm(st, buf, pos + cp, iv);
+        if n5 < 0 { return -1; }
+        cp = cp + n5;
+        return cp; }
+    // MEM：reg 角色（dst/val）→ r10（glue 寄存器对同 M1）；rm = [rbp+disp 槽]
+    reg_lo := hit_role_reg_low(rr);
+    if reg_lo < 0 { return -1; }
+    r_val := hit_role_reg(rr);
+    if r_val < 0 { return -1; }
+    if rr == HIT_ROLE_DST {
+        // load：读 [addr槽] → dst（disp = addr 槽偏移——auto/1/4 按步字段）
+        hd4 := hit_st_head(st, buf, pos + cp);
+        if hd4 < 0 { return -1; }
+        cp = cp + hd4;
+        n6 := hit_st_modrm_disp(st, buf, pos + cp, reg_lo, g2_slot(s1));
+        if n6 < 0 { return -1; }
+        cp = cp + n6;
+        cp = cp + e2_st(buf, pos + cp, r_val, g2_slot(d));
+        return cp; }
+    if rr == HIT_ROLE_VAL {
+        // store：写 [addr槽] ← val（val 槽值先载入角色寄存器）
+        cp = cp + e2_load_var(buf, pos + cp, r_val, s2);
+        hd5 := hit_st_head(st, buf, pos + cp);
+        if hd5 < 0 { return -1; }
+        cp = cp + hd5;
+        n7 := hit_st_modrm_disp(st, buf, pos + cp, reg_lo, g2_slot(s1));
+        if n7 < 0 { return -1; }
+        cp = cp + n7;
+        return cp; }
     return -1; }
 
 // 表驱动单指令发射。与 emit_instr 同签名；返回写入字节数；-1 = 无事件/不支持。
@@ -2369,12 +2561,25 @@ fn emit_instr_tabled(instr_idx: int, buf: string, pos: int) -> int {
     e : ., mut = 0;
     loop {
         if e >= cnt { break; }
-        if hit_ev_preflight_ok(start + e) != 0 { return -1; }   // 整条落旧路径（不半写）
+        if hit_ev_preflight_ok(start + e) != 0 {
+            // 注入通道（测试专用）：预检拒绝 = 文件事件无法经表发射——大声错误
+            // （corearch 于发射后按事件计数不符 exit 1——不静默落旧路径掩盖）；
+            // 真实降低路径 = 整条落旧路径（M1 混合模式，不半写）。
+            if g_hit_inject_active != 0 {
+                print("error: HIT events: event ");
+                print_i(start + e);
+                print(" ("); print(hit_event_name(hit_event_lookup(hit_ev_id(start + e))));
+                println(") not emittable (shape/operands)");
+            }
+            return -1; }
         e = e + 1; }
     cp : ., mut = 0;
     e2 : ., mut = 0;
     loop {
         if e2 >= cnt { break; }
+        // 事件序 → 字节位置（M2a Task 2：rel 回填表 kind 0 的目标解析表——
+        // 边发射边记；位置 = 事件首字节的绝对 buf 偏移）
+        hit_ev_pos_set(start + e2, pos + cp);
         n := hit_ev_emit_one(start + e2, buf, pos + cp);
         if n < 0 { return -1; }   // 预检后不可达（防御）
         cp = cp + n;
