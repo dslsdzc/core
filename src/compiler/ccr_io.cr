@@ -438,6 +438,33 @@ fn ccr_param_entry_id(var_id: int, es: int, ec: int) -> int {
     return -1;
 }
 
+// --- 写侧对象镜像（内核完备 Task 2——A 通道中立化写侧载体裁决 2026-09-10）---
+// corec 写侧不经 loader——内核 compute 系（ent_kernel.cr）现读 NOD 对象面
+// nod_*（compute_live_ranges/compute_entries/… 的 iri_* 4 使用点已中立化）：
+// 本函数在 compute 前把线性流 g_ir_instrs 单遍镜像到内核对象缓冲
+// g_v7_nod_sem（28B 语义字段——字段序/宽度与 loader 解析逐字节对称：op u32
+// @0/dest i32 @4/s1 i64 @8/s2 i32 @16/s3 i32 @20/tk u32 @24，布局 = 盘 36B
+// 记录剥离邻接——OFF_NS_*/ESZ_NOD_SEM 见 ent_kernel.cr 语义对象节）。数值
+// 与本函数下方 NOD 段写盘同源（同 g_ir_instrs 直读、save_ccr 头已过
+// ccr_validate_i32_fields 形状守卫）→ loader 载入文件产生的镜像与本函数产物
+// 逐字节同 —— compute 尾随逐函数 compute_entries，ENT 数据面双进程同值、
+// 产物 byte-identical（行为零变化判据）。
+fn populate_nod_objects() {
+    g_v7_nod_sem = alloc((g_ir_instr_count + 8) * ESZ_NOD_SEM);
+    g_v7_nod_count = g_ir_instr_count;
+    ii : ., mut = 0;
+    loop {
+        if ii >= g_ir_instr_count { break; }
+        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_OP, iri_op(ii));
+        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_DEST, iri_dest(ii));
+        w64(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S1, iri_s1(ii));
+        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S2, iri_s2(ii));
+        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S3, iri_s3(ii));
+        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_TK, iri_tk(ii));
+        ii = ii + 1;
+    }
+}
+
 // --- Save（写侧与 calc 侧一致；段表规范序、段体连续）---
 
 fn save_ccr(path: string) -> int {
@@ -453,6 +480,12 @@ fn save_ccr(path: string) -> int {
     // g_ir_func_entry_start/count）。镜像 compute_entries_v7 已消除——双转录
     // R5 收敛；corearch 判定/分配自算 = 同一内核（双进程同源）。文件 ENT = 校验
     // 面 + 语义消费通道数据源，行为零变化（半开转换 live_end+1 仍在下方写点）。
+    // 内核完备 Task 2（A 通道中立化——写侧载体裁决 2026-09-10）：compute 系
+    // 已改读 NOD 对象面（nod_*——ent_kernel.cr iri_* 4 使用点中立化），corec
+    // 写侧不经 loader → 本进程 compute 前先 populate（g_ir_instrs →
+    // g_v7_nod_sem 镜像，与 loader 载入对称）；同值 → ENT 产物与直读时代
+    // byte-identical（双进程同实现，无第二套 compute）。
+    populate_nod_objects();
     compute_live_ranges();
 
     // v7：EDG 内容先收集（NOD 邻接域 + 段尺寸先决）——g_df_edges 内存 =

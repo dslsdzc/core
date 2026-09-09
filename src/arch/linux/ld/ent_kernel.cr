@@ -30,13 +30,15 @@
 // （判定读 g_opt_meta 的耦合）/双向契约（home 回填）= 蓝图后续步骤（范围克制）。
 // 区头注随搬逐字保留（其中「判定区」「alloc 区」互指现分居本文件/regalloc.cr）。
 // ------------------------------------------------------------------
-// v6 数据基础：存在区间推导（指令序 [first_ref, last_ref]）
+// v6 数据基础：存在区间推导（NOD 节点序 [first_ref, last_ref]——节点序 =
+// 指令序 index-aligned（F5），坐标语义同前；A 通道中立化 2026-09-10）
 // ------------------------------------------------------------------
 // compute_live_ranges 填充全局 g_ir_live_ranges（表全局声明在 globals.cr），
 // alloc_registers 改读本表——与原内联 iv_buf 构建逻辑逐行一致（行为不变）。
 // 表布局：每函数一段，段内每「函数内 var」16B（first_ref/last_ref 各 8B，
-// 函数内指令序）；func_i 段起始 = Σ var_count[0..func_i)，不乘固定稠密系数
-// （live_range_slot 即该前缀累计；16B 记录 + grow 风格同 g_ir_slice_lens）。
+// 函数内节点序 = 节点窗口内坐标）；func_i 段起始 = Σ var_count[0..func_i)，
+// 不乘固定稠密系数（live_range_slot 即该前缀累计；16B 记录 + grow 风格同
+// g_ir_slice_lens）。
 
 fn grow_live_ranges(needed: int) {
     if needed < g_live_range_cap { return; }
@@ -66,8 +68,10 @@ fn live_last(func_i: int, var_i: int) -> int {
 }
 
 // 存在区间推导：填充 g_ir_live_ranges。语义 = 原 alloc_registers 内联 iv_buf
-// 构建（:210-241）：逐函数逐指令扫描，dest/s1/s2 落在 [vs, vs+vc) 内则扩展
-// [first_ref,last_ref]（首见写 first，之后推进 last）；未使用 var 两条均为 -1。
+// 构建（:210-241）：逐函数逐节点扫描（节点字段读 = 对象面 nod_*——A 通道
+// 中立化 2026-09-10，同 index 数值与线性流时代 iri_* 逐字节同），dest/s1/s2
+// 落在 [vs, vs+vc) 内则扩展 [first_ref,last_ref]（首见写 first，之后推进
+// last）；未使用 var 两条均为 -1。
 fn compute_live_ranges() {
     total : ., mut = 0;
     fi : ., mut = 0;
@@ -82,7 +86,12 @@ fn compute_live_ranges() {
         w64(g_ir_live_ranges, zi * 16, -1);
         w64(g_ir_live_ranges, zi * 16 + 8, -1);
         zi = zi + 1; }
-    // 逐函数逐指令扫描：段偏移 = 运行中前缀累计（与 live_range_slot 前缀一致）
+    // 逐函数逐节点扫描：段偏移 = 运行中前缀累计（与 live_range_slot 前缀一致）。
+    // 函数窗口源 = g_ir_func_instr_start/count——值 = NOD 节点坐标（v7 节点序
+    // = 指令序 index-aligned，窗口 = 函数节点范围 [start, start+count)；
+    // loader 侧 REG root span 派生、构建侧区域快照，双进程同值——F3 注记，
+    // A 通道中立化 2026-09-10）。节点字段读全走对象面 nod_*（同 index——
+    // 数值与线性流时代 iri_* 逐字节同，见语义对象节）。
     seg : ., mut = 0;
     fi = 0;
     loop {
@@ -96,7 +105,7 @@ fn compute_live_ranges() {
             loop {
                 if ii >= ic { break; }
                 inst := ist + ii;
-                d := iri_dest(inst); s1 := iri_s1(inst); s2 := iri_s2(inst);
+                d := nod_dest(inst); s1 := nod_s1(inst); s2 := nod_s2(inst);
                 if d >= vs && d < vs + vc {
                     lv := d - vs;
                     st := (seg + lv) * 16;
@@ -202,6 +211,9 @@ fn entry_count(func_i: int) -> int {
 
 fn compute_entries(func_i: int) -> int {
     if func_i == 0 { g_entry_count = 0; }
+    // 函数窗口源同 compute_live_ranges（F3 注记，2026-09-10）：ist/ic =
+    // g_ir_func_instr_start/count——值 = NOD 节点坐标（节点序 = 指令序
+    // index-aligned）；节点字段读 = 对象面 nod_*（A 通道中立化）。
     ic := r64(g_ir_func_instr_count, func_i * 8);
     ist := r64(g_ir_func_instr_start, func_i * 8);
     vc := r64(g_ir_func_var_count, func_i * 8);
@@ -224,13 +236,13 @@ fn compute_entries(func_i: int) -> int {
         loop {
             if ii >= ic { break; }
             inst := ist + ii;
-            op := iri_op(inst);
+            op := nod_op(inst);
             dv : ., mut = -1;
             if op == IR_STORE {
-                s1 := iri_s1(inst);
+                s1 := nod_s1(inst);
                 if s1 >= vs && s1 < vs + vc { dv = s1; }
             } else if op != IR_STORE_INDEX_VAR && op != IR_STORE_PTR && op != IR_DYN_DISPATCH {
-                d := iri_dest(inst);
+                d := nod_dest(inst);
                 if d >= vs && d < vs + vc { dv = d; }
             }
             if dv >= 0 {
@@ -364,7 +376,9 @@ fn dump_entries_summary() {
             print(" def "); print(int_str(ent_def(e)));
             d := ent_def(e);
             if d >= 0 {
-                print(" kind="); print(ir_op_kind_name(iri_op(d)));
+                // d = 定值点 = 全局节点坐标（A 通道中立化：对象面 nod_op 同
+                // index——线性流读点 F2 清，2026-09-10）
+                print(" kind="); print(ir_op_kind_name(nod_op(d)));
             } else {
                 print(" kind=-");
             }
@@ -634,7 +648,12 @@ fn rl_report_rule2(func_i: int, gv: int, inst: int) {
 // 扩为 dest≥0 全定值（含 ALLOC_ARRAY/ALLOC_STRUCT 内存对象诞生），义务前读
 // 窗口（旧「非版本化定值供给」区）自动纳入：版本区间自定值点起连续覆盖至
 // last_ref，义务内读点恒有版本（构造不变量）——本检查零改动，承诺已验证。
-fn rl_rule2_func(func_i: int, vs: int, vc: int, ist: int, ic: int, es: int, ec: int) -> int {
+fn rl_rule2_func(func_i: int, vs: int, vc: int, nst: int, nc: int, es: int, ec: int) -> int {
+    // 签名措辞中性化（Task 2 F3，2026-09-10——值不变）：窗口参数 = 语义对象
+    // 空间切片——vs/vc = 变量窗口（全局 var 命名空间 [vs, vs+vc)）、nst/nc =
+    // 节点窗口（函数在 NOD 节点坐标空间的 [nst, nst+nc)，源 = 函数窗口表
+    // g_ir_func_instr_start/count——节点序 = 指令序 index-aligned，见
+    // compute_live_ranges F3 注记）。调用方位置传参，重命名零行为影响。
     violations : ., mut = 0;
     lv : ., mut = 0;
     loop {
@@ -663,21 +682,25 @@ fn rl_rule2_func(func_i: int, vs: int, vc: int, ist: int, ic: int, es: int, ec: 
             }
             ei = ei + 1;
         }
-        // 逐指令升序扫读点；版本游标单调推进（版本区间自 def 起无缝相接）。
-        // 坐标注意（评审 F1 修复）：ent_def/ent_live_end 存全局指令坐标（ist+局部，
-        // compute_entries 写入 inst = ist + ii）——比较必须用 inst 不得用局部 ii；
-        // func 0 上 ist=0 使 ii == inst 掩盖该错配，非 func 0 函数上规则 ② 会失明
-        // （只漏报不误报；回归 = test_live_ranges check_regalloc_read_gap_nonfunc0）。
+        // 逐节点升序扫读点（读点 = 节点坐标——F1：判定② 读点扫描点，A 通道
+        // 中立化 2026-09-10 后 = 对象面 nod_op/nod_s1/nod_s2 同 index 读取，
+        // 数值与线性流时代 iri_* 逐字节同）；版本游标单调推进（版本区间自 def
+        // 起无缝相接）。
+        // 坐标注意（评审 F1 修复）：ent_def/ent_live_end 存全局节点坐标
+        // （nst+局部，compute_entries 写入 inst = nst + ii）——比较必须用
+        // inst 不得用局部 ii；func 0 上 nst=0 使 ii == inst 掩盖该错配，非
+        // func 0 函数上规则 ② 会失明（只漏报不误报；回归 = test_live_ranges
+        // check_regalloc_read_gap_nonfunc0）。
         cursor : ., mut = 0;
         first_def := r64(vers, 0 * 8);
         ii : ., mut = 0;
         loop {
-            if ii >= ic { break; }
-            inst := ist + ii;
-            op := iri_op(inst);
+            if ii >= nc { break; }
+            inst := nst + ii;
+            op := nod_op(inst);
             rd : ., mut = 0;
-            s1 := iri_s1(inst);
-            s2 := iri_s2(inst);
+            s1 := nod_s1(inst);
+            s2 := nod_s2(inst);
             if s1 == gv && op != IR_STORE { rd = 1; }
             if s2 == gv { rd = 1; }
             if rd != 0 && inst >= ent_def(first_def) {
@@ -708,6 +731,9 @@ fn verify_regalloc_consistency(func_i: int) -> int {
     es := entry_start(func_i);
     ec := entry_count(func_i);
     if ec <= 0 { return 0; }
+    // 函数窗口源同 compute_live_ranges（F3 注记，2026-09-10）：g_ir_func_instr_*
+    // 值 = NOD 节点坐标（节点序 = 指令序 index-aligned）；ic/ist 传 rl_rule2_func
+    // 的 nst/nc 节点窗口参数（位置传参）。规则② 节点字段读 = 对象面 nod_*。
     ic := r64(g_ir_func_instr_count, func_i * 8);
     ist := r64(g_ir_func_instr_start, func_i * 8);
     vc := r64(g_ir_func_var_count, func_i * 8);
@@ -819,11 +845,17 @@ fn regalloc_verify_all() -> int {
 //   条目面：ent_* 族（本文件既有）；区域面 = REG 行（g_sgs）遍历——Task 0
 //           定夺：对象面不含 region_of_nod（区域面仅 REG 行遍历）。
 // loader（load_ccr，ccr_io.cr）载入对象 + 守卫；NOD→g_ir_instrs 线性重建
-// 移实例（build_linear_schedule——regalloc.cr，调度 = 实例事务）；线性流
-// accessor（iri_*）不再 = 内核对象面（实例调度产物）。本文件访问器 = 内核
-// 接口面（读缓冲；调用方保证界内——ent_* 同约）。字段读走 buf_read_*
-// （ccr_io.cr 真实函数体带符号扩展——r32 在 bootstrap 产物里零扩展，负值
-// 会读错，见 ent_var 注）；无界检查与 ent_* 约定一致。
+// 移实例（build_linear_schedule——regalloc.cr，调度 = 实例事务）。
+// A 通道中立化（内核完备 Task 2，2026-09-10）：本文件零线性流 accessor
+// （iri_*/g_ir_instrs）代码引用——compute_live_ranges/compute_entries/
+// dump_entries_summary/rl_rule2_func 的节点字段读（原 4 使用点）全走本对象
+// 面 nod_*（同 index 机械替换——F5 节点序 = 指令序）。节点面喂入 =
+// loader（corearch 侧）或 populate_nod_objects（ccr_io.cr corec 写侧——
+// compute 前单遍 g_ir_instrs → g_v7_nod_sem 镜像，与 loader 解析逐字节对称；
+// 写侧载体裁决 2026-09-10）。本文件访问器 = 内核接口面（读缓冲；调用方
+// 保证界内——ent_* 同约）。字段读走 buf_read_*（ccr_io.cr 真实函数体带符号
+// 扩展——r32 在 bootstrap 产物里零扩展，负值会读错，见 ent_var 注）；无界
+// 检查与 ent_* 约定一致。
 ESZ_NOD_SEM : int = 28;    // 内存对象记录 28B（= 盘 36B 剥离 first_edge/edge_count）
 ESZ_NOD_META : int = 16;   // 邻接域记录 16B {first_edge i64 @0, edge_count i64 @8}
 OFF_NS_OP : int = 0;       // 语义字段 offset（布局镜像盘记录：s1 = 8B 占 +8..+16）
