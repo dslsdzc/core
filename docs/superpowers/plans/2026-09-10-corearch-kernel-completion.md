@@ -132,6 +132,126 @@
 
 ---
 
-## Task 0 盘点结果（执行时回填）
+## Task 0 盘点结果（已回填——2026-09-10，实施 Task 1-4 依此锚定）
 
-> 盘点完成（2026-09-10）。基源 = 设计 spec（权威）+ 步骤 2 收官态代码。下列注记执行时回填：
+> 基源 = 设计 spec（权威）+ 步骤 2 收官态代码（ccr_io.cr 1372 行 / ent_kernel.cr 807 行 /
+> regalloc.cr 795 行 / corearch.cr 492 行现态）。行号 = 盘点日锚点（后续改动若漂移以语义为准）。
+
+### ① load_ccr 重建段依赖面（Task 1 移出裁决依据）
+
+- **重建段实际位置（纠正旧锚点）**：NOD→g_ir_instrs 线性重建 = ccr_io.cr **NOD 段解析 :1207-1236**
+  （盘 36B → 内存 48B：grow_ir_instrs(instr_cnt) :1211 + 逐记录 iri_set_op/dest/s1/s2/s3/tk :1228-1233 +
+  g_ir_instr_count 递增 :1234）。**不在先前锚 ~:1361-1393**（现文件 1372 行，EDG 校验尾 :1369——
+  旧锚点过时，重核如上）。消费 = data 缓冲 + seg_off3/seg_end3（段表局部），**不读任何 g_ir_* 内容**；
+  nod_edge_meta = load_ccr **局部**暂存（:1213 alloc 16B/节点 {first_edge, edge_count}——非全局）；
+  g_v7_edges/g_v7_edge_count（全局，:1343-1344 写）属 EDG 段、不属重建段。
+- **守卫消费面（决定性事实——重建移出后全部成立）**：GC-3 root span 上界校验 :1244-1251 消费
+  g_ir_func_instr_start/count（REG 段派生回填 :1186-1202）+ **NOD 段头计数 instr_cnt**（局部变量，
+  非 g_ir_instrs/iri_*）→ 线性流零依赖。ENT 校验 :1255-1322（evr≥1/var 命名空间/els≥ele、
+  **ele > instr_cnt 拒收 :1275、ed ≥ instr_cnt :1277、ed == els 定值恒等**——界全 = NOD 坐标 +
+  SYM var 命名空间；函数块界重建 :1291-1321 读 g_ir_entries 内容 + fn_meta（SYM first/last 双写对照））
+  → 线性流零依赖。EDG 校验 :1335-1369 消费 instr_cnt + nod_edge_meta（NOD 邻接域 :1349-1352）→
+  线性流零依赖。**load_ccr 全程零 iri_* 读**。
+- **移出推论**：loader 仍须读 NOD 段计数（段界校验必需）与每记录邻接域 first_edge/edge_count
+  （36B 记录偏移 +24/+28，EDG 守卫消费）——28B 语义字段写线性流 = 唯一可搬体。现 NOD 语义字段
+  除 g_ir_instrs 外**无任何保留**（含邻接 = load_ccr 局部）→ Task 1 须裁决 NOD 对象留存形态
+  （对象存储 or build_linear_schedule 重扫 data 缓冲——buf 存活至 corearch_main 尾，重扫式可行；
+  文件段偏移现为 load_ccr 局部，重扫式需把 NOD 段界传出或段表重走）。
+- **顺序依赖**（现实现序 STR→SYM→REG→NOD→ENT→EDG；段按 offset 随机寻址）：SYM funcs 产 fn_meta
+  暂存 → REG 根行对照 :1174-1180；REG 根 span → 函数指令边界回填 → GC-3（需 NOD 计数）；
+  NOD 计数 → ENT/EDG 界校验；SYM 声明区 → var 命名空间 → ENT var_id 界；ENT↔EDG 互不依赖。
+  重建段 loader 内**零下游消费者**——消费全在 load 返回后（见下）。
+- **load 后依赖面（接线点裁决）**：corearch_main 内 load_ccr :295 → init_backend_arrays :297
+  （仅 g_x86_* 数组——与线性流无关）→ regalloc_debug_dispatch :305。dispatch 各分支直食线性流：
+  dump-entries :153 / inject-coexist-oob :158 / dump-coexist :163 的 compute_live_ranges（扫
+  iri_dest/s1/s2）、dump-regassign :169 与 check-regalloc :191 的 alloc_registers、:199
+  regalloc_verify_all；生产 O2 门 :308-314（alloc → verify）；ELF 发射面（elf.cr/instr.cr/resolve.cr）。
+  → **build_linear_schedule() 接线点 = load_ccr 成功（:296）后、dispatch :305 前**（紧邻 load）。
+- 另一 load_ccr 调用方 = src/arch/linux/ld/main.cr:56——**死代码**（自注记 2026-09-10 内核抽取
+  Task 4：零 concat 引用，实际入口 = src/compiler/corearch.cr）——改签名/搬移无须同步。
+
+### ② region_of_nod 定夺（设计 spec §6 挂账 ① 裁决 = **不含**）
+
+- v7 文件无 g_df_node_region；loader **不重建**节点→区域映射——REG 段只派生 nstart/ncount
+  （:1172-1173 = enter/exit 副本写回 g_sgs 行），不产映射数组。corec 构建侧映射 = 构建期快照
+  （dataflow.cr df_create_node:110 写 g_df_node_region[nid] = g_cur_sg，-1 = 无）——不落盘。
+- **零消费方事实**：corearch concat 内 g_sgs 唯一消费者 = ccr_io.cr loader 自身；ent_kernel/
+  regalloc/instr/elf/resolve 全部零 g_sgs 读（判定①② 不消费区域）。另注：设计 §1.2「现有 sg
+  访问器」表述不确——corearch 侧无 sg_* 访问器函数（读写全为 r64/w64 直偏移）。
+- **推导可行性（后补注）**：REG 行 = 压栈序 + parent 链 + enter/exit 节点坐标（层流嵌套区间；
+  SG_FUNC 根 span = 函数指令范围，save :759-765/load GC-3 双侧校验过）。region_of_nod(n) = 含 n
+  的最深行：每查询 O(函数 REG 行数) 扫描或 O(nodes) 栈扫预计算——数据无损、可后补。
+- **定夺注记**：对象面 API **不含 region_of_nod——区域面仅 REG 行遍历**。理由：零现消费方 +
+  预计算表 = 无消费者内核数据（YAGNI）+ EDG 配方可读承诺不依赖区域。→ Task 1 不加区域推导
+  访问器；Task 4 文档同步时在 spec §1.2 表注 region_of_nod = 挂账已决（不含，按需后补）。
+
+### ③ 登记 API 接入面（Task 2 调用点清单）
+
+- **alloc_registers phase 5**（regalloc.cr :733-792，逐函数尾）：g_opt_meta 原语直写（store8
+  头/count/对 @+12，g_opt_meta_count = ei+1 :789；已分配 var = asg_lv/var_asg，全局 var id =
+  vs + lvp、reg = r64(var_asg,…)）。→ **登记调用点 = phase 5 尾每函数**：对每个已分配 var，其
+  全部版本条目 e ∈ [entry_start(fi), entry_start(fi)+entry_count(fi))（ent_var(e) == vw）逐一
+  kern_loc_assign(e, rn)（var 级分配 → 同 var 全条目同 loc——与现 meta_reg_for_var 投影语义
+  精确等价的前提，实施时保持全条目登记）。
+- **注入钩子写点（6+1 的实写点 = 3 个 try_*；顶层 inject_* = 纯遍历）**：
+  - try_inject_home_conflict :40-67：meta_remove_var(v1/v2) :56-57（配对 = 清两 var 全条目登记）
+    + home=7 直写条目表 :58-59（g_ir_entries = 内核数据面，无需登记——读侧由 ent_home + 域
+    home_base 合成，与现 ent_home 直读等价）。
+  - try_inject_reg_conflict :192-217：meta_set_reg(v1/v2, 3) :208-209（配对 = 登记两 var 全条目 → 3）。
+  - try_inject_read_gap :235-283：条件 meta_remove_var(:267) + meta_set_reg(gv,3)(:275)（配对 =
+    清共存 var 条目 + 登记 gv 条目）+ live_end 截断 :277（条目表直写，无需登记）。
+  - inject_coexist_oob :22-29：零 meta 写——无配对。
+- **配对点取舍**：meta 写辅助函数体内嵌（meta_set_reg :107-111 / meta_remove_var :115-154 /
+  meta_append_reg_assign :171-186）覆盖全部注入路径 → 最小配对面 = **phase 5 写点 + meta_set_reg
+  + meta_remove_var 共 3 处**（phase 5 原语直写不经辅助函数，须单独配对）。
+- **flag 路径时序（判定读登记表时点）**：判定唯一读面 = regalloc_verify_all :798-807，调用点两处：
+  check-regalloc 分支（corearch.cr :199——保序 = 强制 O2 :190 → alloc :191（phase 5 登记完成）→
+  看门狗 meta_reg_assign_total :194（**直读 g_opt_meta，实例面 viewer，不经登记表**）→ 注入
+  :196-198（配对保持同步）→ verify :199 读表）与生产 O2 门（:309 alloc → :312 verify）。
+  其余分支（dump-entries/dump-coexist/inject-coexist-oob）只跑 compute_live_ranges + 条目表
+  dump——不触发判定、不需登记表；dump-regassign :167-187 直读 g_opt_meta（实例面）。verify 无
+  不经 alloc 的路径（生产门 = g_opt_level≥2 + needs_alloc 声明；check 分支强制 2）→ 登记表进程
+  起点空表 = 等价现状（meta 空 + home 全 -1 → 0 违反）。
+
+### ④ 判定读 meta 面全集（通道切换精确函数面）
+
+- ent_kernel.cr 代码级 g_opt_meta 读点 = **唯一函数 meta_reg_for_var :504-525**（全文 12 处
+  g_opt_meta 提及：11 注释 + 本函数 5 代码读——循环界 g_opt_meta_count :507、块 key :509、
+  data_len :511、对 var :515、对 reg :517）。布局：OPT_META_STRIDE = 64（ast.cr:642）、
+  OPT_KEY_REG_ASSIGN = 0（ast.cr:641）@+0 / data_len @+4 / count @+8（跳过）/ 对 var@+12 reg@+16
+  8B 步进——与 loader opt_meta 段（ccr_io :1117-1140）及 emit 侧同布局。
+- **调用点（切换 = meta_reg_for_var 函数体等价改写为登记表查询，3 调用点不动）**：rl_rule2_func
+  :643（寄存器驻留过滤——var 级语义须保持：var 有任一已登记条目 = 驻留）、
+  verify_regalloc_consistency 计数遍 :726 + 记录构建遍 :742（逐条目投影）。
+- **LOC_HOME_BASE 代码面**：常量 :500 + rl_print_loc :590（分类打印）+ verify home 编码 :744
+  （home 组投影 = LOC_HOME_BASE + ent_home(e)）→ 域参数化替换面（kern_set_loc_domain 接
+  {home_base, reg_domain}）。注：reg_domain 现无分组消费点（规则① 组别 = meta 投影 ∪
+  ent_home 投影天然不相交：reg 0..15 vs home ≥ 10⁶）——reg_domain = 声明面参数 + 防相交护栏。
+- **emit 面独立实现（已核）**：instr.cr get_reg_for_var :34-53 = 与 meta_reg_for_var 字节级同构
+  的独立函数（g2_slot :55-73 消费；elf.cr:1309/resolve.cr:36-37 = get_reg_for_var/g2_slot 面）——
+  通道切换不动 emit 面。
+- **计划假设被实证反驳（修正注——Task 2 必须同步）**：plan Task 2 写「meta_reg_for_var 删——确认
+  emit 面无引用（instr.cr get_reg_for_var = 独立实现——已核）」只核了 emit 面——但
+  **regalloc.cr 注入探针 try_inject_read_gap :254/:261 调用 meta_reg_for_var**（实例侧读内核
+  函数）。删除/改写时须同步这两处（换实例侧直读 g_opt_meta 的私有扫描，或经登记表等价读——
+  前者贴实例面语义）；corec concat 无引用（定义随 concat 编译，未用不报错）。
+
+### ⑤ 中立性 guard 设计（Task 4 前置设计）
+
+- **ent_kernel.cr 实例味符号面（代码级全集）**：g_opt_meta/g_opt_meta_count + OPT_KEY_REG_ASSIGN/
+  OPT_META_STRIDE（全经 meta_reg_for_var 体——Task 2 切换后清零）+ LOC_HOME_BASE（:500——Task 2
+  移除）。注释层实例提及（guard 剥注释后不拦，记录在案）：x86/机器侧/regalloc.cr（头注 :4-30）、
+  instr.cr g2_slot/get_reg_for_var（:478/:502）、rl_print_loc x86 寄存器枚举注（:593「3=rbx,
+  12-15=r12-r15」）、alloc_registers() 前置条件注（:704）。
+- **结构性守卫（现成）**：ent_kernel.cr 双 concat 共享（corec concat 无 regalloc/instr/elf/
+  hit/corearch.cr）→ 指向实例独有文件的符号 = corec 编译失败。文本 guard 真正防的 =
+  **共享声明文件里的实例符号**（g_opt_meta/opt 常量 = globals.cr/ast.cr，双 concat 都有 →
+  结构守卫拦不住——正是静态 guard 必要性）。
+- **断言排除集（代码面 token 级）**：g_opt_meta、g_opt_meta_count、LOC_HOME_BASE、OPT_KEY_* /
+  OPT_META_STRIDE、E2_REG_SLOT_BASE/E2_*、g_x86_*、寄存器名 token（rbx/r12-r15 等实例枚举名）、
+  ELF 面（ELF/elf_gen 等）——NOD/EDG/ENT/REG = 文件格式语义名**不拦**（§4.3 例外）。
+  实现注：必须先剥注释（// 与 /* */）再扫 identifier——rl_print_loc x86 注记在注释层，不剥则
+  误报；可选强化 = 引用标识符 ∩ 实例独有文件函数定义集 = ∅（结构守卫的文本镜像，成本低）。
+- **测试落点**：tests/selfhost/ 新文件 test_ent_kernel_neutrality.py（纯源码文本扫描，无 build
+  依赖，与 selfhost 套件同风格入回归面）。Task 4 Step 1 先写先红（现态 meta_reg_for_var 仍在 →
+  红），Task 2 切换后转绿——guard 先写 = 早暴露纪律。
