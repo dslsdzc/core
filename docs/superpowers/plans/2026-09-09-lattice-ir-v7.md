@@ -111,3 +111,71 @@
 ## Task 0 盘点结果（执行时回填）
 
 > 盘点完成（2026-09-09）。基源 = ccr_io.cr 全文件（写侧 save_ccr :345-641/读侧 load_ccr :658-1145）+ dataflow.cr（emit 双写 + df_connect_srcs/df_connect_state + g_df_edges）+ regalloc.cr（compute_entries :180-268）+ test_ccr_v6.py（V6File walker 严格段契约）。关键锚点已内联于各任务 Files/Interfaces 节（2026-09-09 勘探输出）；Task 0 执行者按仓库惯例以代码复核为准。下列三表执行时回填：
+
+**表一：EDG 内容期望清单**（权威 = dataflow.cr `df_connect_srcs` :194-315 / `df_connect_state` :160-177 / `sg_pop` 终止边 :84-99 / `df_use_var` :179-190；op 全集 = ast.cr :538-588，0-51 无 40。Task 1 测试期望 = 本表 + 表一注记的幽灵边规则手算）
+
+| op 类别/区间 | op | 数据边（kind=0，本节点创建时自生产者连入，按操作数角色逐槽一条，平行边不合并） | state 边（kind=1，本节点创建时自 state 头连入 + 本节点成新头） |
+|---|---|---|---|
+| 字面量 | CONST(1) | 0（s1 = 标量值） | 无 |
+| 算术/逻辑 | BINARY(2) | 2（s1、s2；s3 = op 子码非 var） | 无 |
+| | UNARY(3) | 1（s1） | 无 |
+| 浮点换算 | I2F(49) / F2I(50) | **0**（s1 实为 var 但 df_connect_srcs 未列 → GAP 族） | 无 |
+| 指针/索引计算 | ADDR_INDEX(31) | **0**（s1=arr_var/s2=idx_var 实为 var 但未列 → GAP 族；ir_gen.cr:1129 真实发射） | 无 |
+| 内存读 | LOAD(10) / LOAD_FIELD(11) / LOAD_INDEX(13) | 1（s1） | 无（读不连 state 链） |
+| | LOAD_INDEX_VAR(15) | 2（s1、s2） | 无 |
+| | DEREF(25) / LOAD_ENUM_TAG(23) | 1（s1） | 无 |
+| | SLICE(24) | 3（s1、s2、s3） | 无 |
+| 越界守卫 | BOUNDS_CHECK(30) | s1；type_kind≠0 时 +s2（动态界，发射 :106-126 tk=1）→ 1 或 2 | 无 |
+| 内存写 | STORE(9) | 2（s1 目标、s2 值） | **入链** |
+| | STORE_FIELD(12) | 2（s1、s2） | **入链** |
+| | STORE_INDEX(14) | 2（s1=arr、s2=val；s3 = 常量下标） | **入链** |
+| | STORE_INDEX_VAR(16) | 2（s1=arr、s2=idx）——**dest = 被存值源（值 var）不入边 → GAP**；s3 = 字面量 0 → 0-slot 幽灵（见注 A） | **入链** |
+| | STORE_PTR(26) | 2（s1、s2） | **无 → GAP**（raw 指针内存写不连 state 链） |
+| 分配/释放 | ALLOC(6)/ALLOC_STRUCT(7)/ALLOC_ARRAY(8) | 0 | 无 |
+| | ARENA_NEW(32) | 名义 s1；**实际发射 s1 = 0 字面量**（ir_gen.cr:1663/1701/1761/2161/2275）→ 0-slot 幽灵边（见注 A），有效数据边 = 0 | 无 |
+| | ARENA_RESET(33) | 1（s1 = arena_var 真 var） | 无（arena 复位不连 state 链） |
+| 引用/解引用 | REF(18) | 1（s1） | 无 |
+| 调用族 | CALL(4) | s2 条（args 自 s1 连续 s1..s1+s2−1 逐参一条；s2=0 → 0 条） | **视纯度**：find_func(s3)（s3 = 函数名 idx）< 0 或 fi_ispure==0 → 入链 |
+| | CALL_EXTERN(45) | 1（仅 s2 = 首参）——**多参缺口 → GAP**（s3 = arg_count，args 2..n 不入边） | **无 → GAP**（extern 副作用不连 state 链） |
+| | SPAWN(27) | s2 条（同 CALL 参数遍历） | 无 |
+| | HOTPATCH_ROUTE(39) | 1（仅 s2 = 首参）——多参缺口同 CALL_EXTERN | 无 |
+| | LAZY_THUNK(46) / LAZY_FORCE(47) | 1（s1） | 无 |
+| 动态类型 | DYN_TAG(41)/DYN_VAL(42)/DYN_PACK(43)/DYN_DISPATCH(44) | 1（s1；DYN_PACK s2 = type_idx 字面量） | 无 |
+| 控制流 | BRANCH(19) | 1（s1 条件 var；**s2/s3 = label id 非 var——v7 §4 边界声明「目标 = 操作数非边」同源佐证**） | 无 |
+| | JUMP(20) | 0（s1 = label id） | 无 |
+| | RETURN(5) | s1 ≥ 0 → 1，否则 0 | 无 |
+| | LABEL(21) | 0 | 无（但可作 state 链头被后续边引用——出边出现在后续 state 节点创建时） |
+| 流程/并发 | YIELD(28)（s1=value var）/ AWAIT(29)（dest、s1） | **0**（实为 var 但未列 → GAP 族） | 无 |
+| 函数地址 | FNADDR(48) | 0（s1 = name idx int） | 无 |
+| 编译期标记 | NO_BOUNDS_CHECK(35)/FAST(36)/UNROLL(37)/SECTION(38)/APPROX(51)/NOP(0) | 0 | 无 |
+| 内联提示 | INLINE(34) | 1（s1） | 无 |
+| 合并伪节点 | PHI(22) | 0 | 无（注：全仓 ir_gen/pass/interp/instr 无 IR_PHI 发射点——恒不出现） |
+| 枚举构造 | MAKE_ENUM(17) | 0（s1 = variant name idx；字段走 STORE_FIELD） | 无 |
+| 区域收尾（非 op——sg_pop 附加） | SG_LOOP(1)/SG_FOR(2) 收尾（dataflow.cr:84-99） | — | 区内最后 state 节点 → 区出口 label 节点 kind=1 终止边（条件：`g_last_state_node ≥ NSTART`，纯循环体无区内 state → 不产）；随后 state 头 = 出口 label 节点 |
+
+注 A（**0-slot 幽灵边——本表最要命实测发现**）：`g_df_var_producer` 只在节点 `dest ≥ 0` 时写入 nid；-1 播种循环（init_df dataflow.cr:28-34）执行时 `g_ir_var_count == 0`（main.cr:396-408 序：先清零后 init_df 再 ir_gen_globals），`grow_df_arrays`（dyn_arr.cr:516）新段靠 alloc 零页 → **从未被定值的 var（全局、参数、未定值临时）producer 槽 = 0 =「节点 0」** → `df_use_var`（`producer >= 0` 判）产出幽灵数据边 0→消费者；节点 0 = func0 的 arena_new（每函数首节点 = arena_new，ir_gen.cr:2275）→ **每编译恒出自环 (0,0)**。双程序实测（v7t0_probe / v7t0_cse 的 cir DOT）：n0→n0 自环存在；参数读恒 = 幽灵边 0→读点。⇒ **与 v7 字节 spec §4 不变量 1「每条边 to_nod > 所属节点」直接冲突** —— Task 1 必先定夺其一：(a) dataflow.cr 修播种（grow 后新区写 -1 / init_df 延后到 globals 注册后）——改 .cir 视图但不动发射行为；(b) v7 写侧滤自环与 0→X 幽灵边（写侧净化，loader 校验面不动）；(c) 放宽校验（自环合法）——不建议（图 DAG 语义掺水）。本计划判定线 = 任务内定夺，**不影响 Task 2/3**（ENT 规则无涉边集）。
+
+**表二：compute_entries 规则对照**（权威 = regalloc.cr `compute_live_ranges` :48-111 + `compute_entries` :180-268；corearch 专属——build_selfhost_native.py 清单确认 regalloc.cr 仅在 corearch concat 列表；src/compiler/regalloc-consistency.cr = 双二进制均不编译的文档残留。Task 2 corec 侧 `compute_entries_v7` 的镜像对齐清单）
+
+| # | v6 §4.1 / 计划文字规则 | regalloc.cr 实现 | 差异 / Task 2 对齐项 |
+|---|---|---|---|
+| 1 | 定值点 = IR_STORE 的 s1 ∪ 其余 dest≥0（carve-out：STORE_INDEX_VAR/STORE_PTR/DYN_DISPATCH 排除） | :206-212 逐条一致（STORE 先判 s1；三 op else-if 排除；其余 dest）；追加约束：目标 var 须 ∈ [vs, vs+vc) 本函数 var 窗口 | 无差异——corec 侧同窗口约束；坐标 = NOD id 全局序（= 实现侧 `inst = ist + ii` 的全局坐标；corec 侧 ist 同源 = df func start，ii 序 = NOD 序） |
+| 2 | 版本切分；收口 end = min(def−1, last_ref) | :218-224 收口上一版本 `pend = min(inst−1, last_global)`，last_global = var 级 last_ref（含定值自身——dest 列计入引用，恒 ≥ 次定值 → min 恒取 def−1，数学与 spec 截断式等价）；末版 le 直接 = last_ref | 无差异（版本号不落盘：save 侧 vcnt 计数槽 :561-587 已实现，Task 2 激活） |
+| 3 | 参数/全局条目 def_nod = -1，区间 = [函数首节点, last_ref+1) | :240-262 只对**函数窗口内从未定值但有引用**的 var 产 def=-1 条目，区间 = **[first_ref, last_ref] 闭区间**（live_start = 首引用指令非函数首节点） | **差异①（文档面）**：v6 §4.1 ③ 文字「区间 = [函数首节点…]」与实现不符——实测 pure_add 参数 a/b 条目 live 1..1（首引用 = BINARY @n1，函数首节点 = 0）。Task 2 镜像按实现（loader 只校验 els < ele ≤ instr_cnt、def≥0 时 ed == els——两语义都过，但「双写对照一致」要求两侧同规则）；测试手算期望按实现语义 |
+| 4 | 参数/全局 def_nod = -1 | 全局 var（SYM 前缀 0..G−1）**不在任何函数 var 窗口 → 恒无条目**（flags bit2「全局」永不落） | **差异②（文档面）**：v6 spec §3.2/§4.1 的「全局条目」面在实现中不存在——SYM globals 记录是全局的唯一存在面。Task 2 同实现（v7 字节 spec §3.5 flags bit2 语义保留 = 零实例声明） |
+| 5 | 活区间（first/last_ref 扫描）为收口前提 | compute_live_ranges :48-111：逐函数逐指令扫 d/s1/s2 三列 ∈ 窗口 → [first_ref, last_ref]（未用 = 双 -1） | **对齐项（实现前提）**：corec 二进制无 regalloc.cr——`compute_entries_v7` 须自含同规则引用扫描（或等价的 df 出边反扫——注意 df 边有幽灵缺陷表一注 A，**不得**以 df 边替代三列扫描） |
+| 6 | 条目按函数升序成块；函数块界由 loader 按 var 窗口切 | :105-110 compute_live_ranges 尾部逐函数调 compute_entries（func_i==0 整表重置）；块内序 = 定值指令序，尾部 def=-1 补丁按 var 序扫 | 无差异（loader 分块 :1114-1145：pv ∈ [fvs, fvs+fvc)，fvc≤0 块断 → pcnt=0 对照 ffe==-1；与 SYM func first/last 双写对照已实现） |
+| 7 | home/flags | 恒 home=-1、flags=0（:232/:255） | 无差异（v7 字节 spec：home 恒 -1 直通、无配方/参数/全局/驱逐位零实例） |
+
+**表三：落盘序核对**（权威 = ir_gen.cr `emit` :193-206 / main.cr ccr·build 路径 :527-583 / dataflow.cr `lower_to_ccr` :351-391 / cir_cache.cr 恢复 :242-415）
+
+| 核对面 | 结论 |
+|---|---|
+| NOD 落盘源 = lower_to_ccr 后的 g_ir_instrs？ | ✓ save_ccr :542-556 逐条读 g_ir_instrs；main.cr :534 lower_to_ccr 先于 :557/:581 save（ccr/build 两路径同）；lower_to_ccr = g_ir_instr_count 清零后自 g_df_nodes 0..count−1 逐字段重建（:356-371）+ func 边界自 df func start/count 复制（:375-383）——**NOD = g_df_nodes 镜像 1:1 同序** |
+| emit 双写之外有无第三写点破坏 1:1？ | 全线性流写点审计：emit（双写同参）、cir_cache 恢复（load_cir_cache :379-399 指令 + :290-337 节点/边同快照双写——cache-hit 函数两表同参恢复，1:1 保持）、pass_cse（opt.cr :194-290 只 iri_set_op/iri_set_s1-3 改线性——lower 后回滚，见表后 CSE 注记）、lower_to_ccr。ir_gen 直改线性后补丁（arena size `iri_set_s1` :1710/:2279 等）只落线性侧、df 节点保持 emit 原值 → lower 后 NOD = emit 原值（既有行为，v7 同构，非本计划面） |
+| EDG 节点 id 与 NOD 文件序一致的前提 | ✓ 节点 id 全局单调追加（init_df 每编译一次 main.cr:407，无逐函数清空）；df func 切片 = start/count 视图（df_begin_func/df_end_func :395-410）；lower 后指令 i ≡ df 节点 i ≡ NOD 文件序 i——EDG to_nod 引用与文件序一致前提成立；REG enter/exit 同坐标系（loader 回填 func 边界 :1017-1033 与 GC-3 上界校验 :1061-1074） |
+| g_df_edges 节点 id 空间 = g_df_nodes（无跨函数泄漏？） | from/to 均在创建时点取节点 id，缓存恢复边同快照 → id 空间一致；**跨函数数据边存在两种形态**：(a) 表一注 A 幽灵边（node 0 → 任意函数消费者，实为跨函数）；(b) 缓存快照边——缓存命中恢复 save 时点**全图**边（cir_cache.cr :167-179 存全量），源不变时与重建同态；**源变（前序函数指纹 miss 重建、后续函数仍命中）时快照边陈旧——既有 .cir 缓存设计潜在面，待核注记**。state 链无跨函数（df_begin_func 重置 g_last_state_node :401）。Task 1 测试建议：新路径/清 .core/cache 跑（避免缓存面混入期望） |
+| 逐函数图清空机制 | 不存在——df 数组编译期全局追加；「每函数一图」只是切片视图。v7 写侧「按节点序收集出边」单遍扫 g_df_edges 即可（头插链表 → 落盘序任意但确定，节点出边连续布局由写侧回填 first_edge/count） |
+
+**CSE 时序 byte 级实测（注记——非修复项，Global Constraints 判定线确认）**：源 = 双函数含重复纯子表达式（x*x 双现 ×2、helper a*a 双现 + 循环内双现，NOD 解析证实 3 组 CSE-able 重复）。命令（每跑前 rm -rf .core 清缓存）：
+`nice -n 19 /home/DslsDZC/core/build/corec ccr /tmp/v7t0_cse_test.cr -o /tmp/v7t0_O0.ccr --opt-level 0` 与同源 `--opt-level 1` → **全文件 byte-identical**（cmp 一致；sha256 均 38cf7880d0db54ce…；NOD 段 = 72 节点 2020B 两版逐字节同）。代码路径佐证：main.cr:530-534 `pass_cse()`（opt.cr :194-290，只 NOP/改写线性 g_ir_instrs）位于 `lower_to_ccr()` 之前；lower 自 g_df_nodes 全量重建 → **O1 CSE 被整体回滚，NOD 落盘与 O0 恒同**（注：corec g_opt_level 默认 = 1，main.cr:203——默认跑即走此回滚路径，v6 现状如此）。结论：CSE 疑点坐实为「无效果 pass」，v7 落盘源 = df 镜像与其无涉，保持非修复项。
