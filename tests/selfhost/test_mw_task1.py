@@ -22,8 +22,9 @@
 核对 exit code。s6（循环携带拷贝）另断言不动点 ⊋ 单遍（防止 oracle/实现被
 回退成单遍而重新掩盖评审发现）。
 
-.ccr 读取依赖 v6 段表布局（test_ccr_v6.py 的 V6File 为格式唯一真源——格式
-演进时只需改那边）。
+.ccr 读取依赖 v7 段表布局（test_ccr_v7.py 的 V7File 为格式唯一真源——格式
+演进时只需改那边；Task 3 v7 收官后 test_ccr_v6.py 已退役合并，本文件别名
+V6File 仅为调用点命名惯性——语义 = v7 walker，见 import 行注释）。
 """
 import os
 import struct
@@ -37,7 +38,7 @@ COREC = BUILD / "corec"
 SCRATCH = BUILD / "mw_task1_scratch"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_ccr_v6 import V7File as V6File  # noqa: E402  (v6 段表解析器：格式唯一真源)
+from test_ccr_v7 import V7File as V6File  # noqa: E402  (v7 段表解析器 = 格式唯一真源；别名保调用点不变)
 
 # IR opcodes (ast.cr)
 IR_BINARY = 2

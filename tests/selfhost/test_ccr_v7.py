@@ -1,6 +1,23 @@
 #!/usr/bin/env python3
-"""v7 .ccr 真图载体 IO 测试（Task 1 骨架——version 7 + NOD 36B 邻接 + EDG 段
-必落；Task 2 ENT 主干化——corec 产实记录 + loader 激活 + SYM/REG 回填）。
+"""v7 .ccr 真图载体 IO 测试（Task 3 收官——本文件 = v7 测试族唯一真源：
+Task 1 骨架（version 7 + NOD 36B 邻接 + EDG 段必落）+ Task 2 ENT 主干化
+（corec 产实记录 + loader 激活 + SYM/REG 回填）+ Task 3 迁移吸收 test_ccr_v6.py
+全量用例（SYM/REG 目标形状、GC-3 root span 上界、GC-4 save 位置级守卫、
+ENT 实记录 + opt_meta 恒空）+ cache-hit 恢复路径回归（Task 1 review Minor M2）
++ ENT 负分支补面（Task 2 review R1/R2——块重推导/ev 命名空间/ed 越界与失配）。
+
+Task 3 吸收说明（v6 专属断言退役去向）：
+  · test_header_segment_table_and_walk → test_v7_layout_and_walk（同源同断言，
+    v7 版已含 reg ≥ 2/EDG 走查/ENT 形状——更强吸收）；
+  · test_loader_rejects_non_v7_version → test_v7_loader_rejects_version_ne_7
+    （v7 版覆盖 (6, 5, 8) 三值——更强吸收）；
+  · test_ccr_v6_roundtrip_elf → test_v7_roundtrip_elf（同源同期望 + corearch
+    直载双跑——更强吸收）；
+  · test_ent_real_optmeta_absent → test_v7_ent_real_optmeta_absent（迁移本
+    文件，opt_meta 恒 0 断言保留）；
+  · test_sym_reg_target_shape / test_sym_func_shapes /
+    test_loader_rejects_root_span_beyond_nod_space /
+    test_save_rejects_var_block_misalignment → test_v7_* 同名迁移。
 
 字节真相 = docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md：
   [0]   magic u32 = 0x31524343 ("CCR1")
@@ -32,6 +49,12 @@ Task 2 条目期望（Python 独立模型 + 手算对照——均按 regalloc.cr
 实现语义转写，见 test_v7_ent_* 的派生说明；loader 校验面 = 同文件内自洽：
 evr ≥ 1 / ev 命名空间 / els < ele ≤ instr_cnt / def ≥ 0 → ed == els / SYM
 func 块对照——reject 测试逐个 byte mutation 打）。
+Task 3 新增（2026-09-10）：
+  · test_v7_cache_hit_restore_path——cache-hit 恢复路径回归（冷/暖五段体逐
+    字节相同 + STR 前缀关系 + corearch 行为一致 + hybrid 单函数改动产物 ==
+    全冷编译 byte-identical）；Minor 3 注记见该测试 docstring。
+  · test_v7_loader_rejects_ent_var_foreign_block（R1）/ _ent_var_namespace_oob /
+    _ent_def_nod_oob / _ent_def_ne_live_start（R2）——ENT 校验负分支补面。
 """
 import os
 import shutil
@@ -212,6 +235,7 @@ class V7File:
         b = self.body(4)
         (n,) = struct.unpack_from('<I', b, 0)
         assert (len(b) - 4) % ENT_REC == 0, "ENT body size not a multiple of 28"
+        assert n == (len(b) - 4) // ENT_REC, f"ENT count {n} != bytes/28"
         pos = 4
         out = []
         for _ in range(n):
@@ -1097,6 +1121,630 @@ def test_v7_roundtrip_elf():
                 pass
 
 
+# === Task 3（收官）迁移用例——吸收 test_ccr_v6.py 全量（v7 命名/路径）；
+# 删除面（version-reject / roundtrip / layout-walk）由 v7 版更强吸收，见模块
+# docstring「Task 3 吸收说明」。===
+
+
+def test_v7_ent_real_optmeta_absent():
+    """（迁移 test_ent_real_optmeta_absent）ENT 实记录 + opt_meta 恒空面：
+    ENT 段携带实条目；opt_meta 仍恒 0（分配结果归位 corearch 自算，.ccr
+    不传）；SYM func first/last_ent 与 param_ents 实回填。Python 侧独立块
+    切分（loader 块对照同语义）：
+      · 每函数块 = 文件序连续段（var ∈ 函数 var 窗口）——块界 == SYM
+        first_ent/last_ent；
+      · param_ents 每参数 = -1 或该参数 var 的 def=-1 条目（identity 参数 n
+        未定值 → 实条目）；
+      · REG 根行（SG_FUNC）first/last 与 SYM func 记录双写一致（实值）。"""
+    ccr_path = os.path.join(BASE, 'build/test_v7_optmeta.ccr')
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        corec_ccr(ENT_SRC, ccr_path)
+        v7 = V7File(read_ccr(ccr_path))
+        ents = v7.ent()
+        assert len(ents) > 0, f"ENT empty: {ents}"
+        sym = v7.sym_parse()
+        assert sym['opt_count'] == 0, f"opt_meta not empty: {sym['opt_count']}"
+        funcs = sym['funcs']
+        assert len(funcs) >= 2
+        # Python 侧块切分（loader 块对照同语义）：块序 = 函数序，块 = 连续段
+        vs = len(sym['globals'])
+        pos = 0
+        for f in funcs:
+            win = range(vs, vs + f['var_count'])
+            start = pos
+            while pos < len(ents) and ents[pos][0] in win:
+                pos += 1
+            pcnt = pos - start
+            if pcnt == 0:
+                assert (f['first_ent'], f['last_ent']) == (-1, -1), f
+            else:
+                assert f['first_ent'] == start, \
+                    f"func first_ent {f['first_ent']} != block start {start}"
+                assert f['last_ent'] == start + pcnt - 1, \
+                    f"func last_ent {f['last_ent']} != block end {start + pcnt - 1}"
+            # param_ents：-1 或该参数 var 的 def=-1 条目（块内唯一）
+            for p in range(f['param_count']):
+                pvar = vs + p
+                pid = -1
+                for i in range(start, start + pcnt):
+                    (ev, evr, ed, els, ele, eho, efl) = ents[i]
+                    if ev == pvar and ed == -1:
+                        pid = i
+                assert f['param_ents'][p] == pid, \
+                    f"func param_ents[{p}] {f['param_ents'][p]} != {pid}"
+            vs += f['var_count']
+        assert pos == len(ents), "block partition did not cover all entries"
+        # REG 根行 first/last 与 SYM func 记录双写一致（实值）
+        regs = v7.reg()
+        roots = [(i, r) for i, r in enumerate(regs) if r[0] == 0]
+        for k, (rid, r) in enumerate(roots[:len(funcs)]):
+            assert r[4] == funcs[k]['first_ent'], \
+                f"root {rid} first_ent {r[4]} != SYM {funcs[k]['first_ent']}"
+            assert r[5] == funcs[k]['last_ent'], \
+                f"root {rid} last_ent {r[5]} != SYM {funcs[k]['last_ent']}"
+    finally:
+        try:
+            os.unlink(ccr_path)
+        except FileNotFoundError:
+            pass
+
+
+def test_v7_sym_reg_target_shape():
+    """（迁移 test_sym_reg_target_shape）SYM 归并/REG 坐标化目标形状
+    （v7 spec §3.2/§3.5 落地）：
+    - SYM func 记录 = {name/param_count/ret_type/root_region/first_ent/last_ent}
+      + param_ents + var 声明区；globals 记录带 type；
+    - REG 记录 = {kind, parent, enter_nod, exit_nod, first_ent, last_ent}；
+    - 根 region（SG_FUNC）行与 func 记录 1:1，span 连续铺满 NOD 空间，
+      first/last = 本函数条目块；嵌套 region 条目范围 = 定值点 ∈ [enter, exit)
+      （文件条目序连续一段）；变量命名空间行数覆盖 ENT/NOD 引用。"""
+    src = ("fn main() -> int {\n"
+           "    s : ., mut = 0;\n"
+           "    for i in 0..4 { s = s + i; }\n"
+           "    return s;\n"
+           "}\n")
+    ccr_path = os.path.join(BASE, 'build/test_v7_symreg.ccr')
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        corec_ccr(src, ccr_path)
+        v7 = V7File(read_ccr(ccr_path))
+        sym = v7.sym_parse()
+        globs = sym['globals']
+        funcs = sym['funcs']
+        strs = v7.str_table()
+        nod_cnt = len(v7.nod())
+        ents = v7.ent()
+        regs = v7.reg()
+        # func 记录
+        assert len(funcs) >= 1
+        f = funcs[0]
+        assert strs[f['name']] == 'main', f"func0 is {strs[f['name']]!r}"
+        assert f['param_count'] == 0
+        assert f['var_count'] >= f['param_count']
+        decl_names = [strs[d['name']] for d in f['var_decls']]
+        assert len(decl_names) == f['var_count']
+        # 局部变量声明随函数记录落盘（for 循环变量内部名 = for_i）
+        for want in ('s', 'for_i'):
+            assert want in decl_names, \
+                f"local {want} missing from func var decls: {decl_names}"
+        # 全局记录：>=1 条，全局行数 = var 行序前缀（func0 var 基准）
+        assert len(globs) >= 1
+        # REG: 根行（kind=0）与 func 1:1；span 连续铺满 NOD 空间
+        roots = [(i, r) for i, r in enumerate(regs) if r[0] == 0]
+        assert len(roots) == len(funcs), \
+            f"SG_FUNC rows {len(roots)} != func records {len(funcs)}"
+        prev_end = 0
+        for k, (rid, r) in enumerate(roots):
+            assert funcs[k]['root_region'] == rid, \
+                f"func {k} root_region {funcs[k]['root_region']} != row {rid}"
+            assert r[2] == prev_end, \
+                f"root {k} enter {r[2]} != previous end {prev_end}"
+            prev_end = r[3]
+            # 根 region 条目范围 == 函数条目块（SYM func 记录同值）
+            assert funcs[k]['first_ent'] == r[4] and funcs[k]['last_ent'] == r[5]
+            assert (r[4] == -1) == (r[5] == -1)
+        assert prev_end == nod_cnt, \
+            f"root spans end at {prev_end}, nod_count {nod_cnt}"
+        # 嵌套 region：first/last = def_nod ∈ [enter, exit) 的文件序连续段
+        for rid, r in enumerate(regs):
+            if r[0] == 0:
+                assert r[1] == -1, f"root {rid} parent != -1: {r}"
+                continue
+            if r[1] >= 0:
+                p = regs[r[1]]
+                assert r[2] >= p[2] and r[3] <= p[3], \
+                    f"region {rid} escapes parent span: {r} vs {p}"
+            exp = {ei for ei, en in enumerate(ents)
+                   if en[2] >= 0 and r[2] <= en[2] < r[3]}
+            if not exp:
+                assert r[4] == -1 and r[5] == -1, \
+                    f"empty region {rid} has range {r[4]}..{r[5]}"
+            else:
+                assert r[4] == min(exp) and r[5] == max(exp), \
+                    f"region {rid} range {r[4]}..{r[5]} != expected {min(exp)}..{max(exp)}"
+                got = set(range(r[4], r[5] + 1))
+                assert got == exp, \
+                    f"region {rid} run not exactly the def'd-in-range set"
+        # 变量命名空间（globals + 各 func var_count）覆盖 ENT var id / NOD dest
+        total_vars = len(globs) + sum(fn['var_count'] for fn in funcs)
+        for en in ents:
+            assert 0 <= en[0] < total_vars, \
+                f"ENT var_id {en[0]} outside var namespace 0..{total_vars - 1}"
+        for (op, dest, s1, s2, s3, tk, fe, ec) in v7.nod():
+            if dest >= 0:
+                assert dest < total_vars, f"NOD dest {dest} outside var namespace"
+            assert fe >= 0 and ec >= 0  # 邻接域自洽（完整校验在 edg() 走查）
+    finally:
+        try:
+            os.unlink(ccr_path)
+        except FileNotFoundError:
+            pass
+
+
+def test_v7_sym_func_shapes():
+    """（迁移 test_sym_func_shapes）SYM func 记录形状：add/main 行序 = 声明序；
+    参数 = var 声明区前 param_count 个（行序 = 参数序，类型 int）；root_region
+    行序 1:1、span 连续铺满 NOD 空间；first/last_ent 实回填（add 参数 a/b 从未
+    定值 → def=-1 条目 → param_ents = 其条目 id；main 无参；条目范围 = 块界）。"""
+    src = ("fn add(a: int, b: int) -> int { return a + b; }\n"
+           "fn main() -> int {\n"
+           "    x := 1;\n"
+           "    x = x + 1;\n"
+           "    x = x + 2;\n"
+           "    return x;\n"
+           "}\n")
+    ccr_path = os.path.join(BASE, 'build/test_v7_symparams.ccr')
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        corec_ccr(src, ccr_path)
+        v7 = V7File(read_ccr(ccr_path))
+        sym = v7.sym_parse()
+        funcs = sym['funcs']
+        strs = v7.str_table()
+        regs = v7.reg()
+        nod_cnt = len(v7.nod())
+        ents = v7.ent()
+        assert strs[funcs[0]['name']] == 'add'
+        assert strs[funcs[1]['name']] == 'main'
+        # add: 参数声明 = var 声明区前 2 个（a, b, TI_INT=0）
+        add = funcs[0]
+        assert add['param_count'] == 2
+        assert add['var_count'] >= 3
+        pdecls = add['var_decls'][:2]
+        assert [strs[d['name']] for d in pdecls] == ['a', 'b']
+        assert [d['type'] for d in pdecls] == [0, 0], "int param type != TI_INT"
+        # 条目范围/param_ents 实回填——Python 侧块切分自洽（loader 块对照同
+        # 语义）：add = 文件首块（func0 起点 0，含 a/b 的 def=-1 条目）
+        vs = len(sym['globals'])
+        pos = 0
+        block_of = []
+        for f in funcs:
+            win = range(vs, vs + f['var_count'])
+            start = pos
+            while pos < len(ents) and ents[pos][0] in win:
+                pos += 1
+            block_of.append((start, pos - start))
+            vs += f['var_count']
+        assert pos == len(ents), "block partition did not cover all entries"
+        for k, f in enumerate(funcs):
+            st, pcnt = block_of[k]
+            fe = st if pcnt else -1
+            le = st + pcnt - 1 if pcnt else -1
+            assert (f['first_ent'], f['last_ent']) == (fe, le), \
+                f"func {k} range ({f['first_ent']},{f['last_ent']}) != " \
+                f"block ({fe},{le})"
+        # add 参数 a/b 从未定值但有引用 → def=-1 条目；param_ents 指向它们
+        g0 = len(sym['globals'])
+        for p in range(add['param_count']):
+            pid = add['param_ents'][p]
+            assert pid >= 0, \
+                f"add param_ents[{p}] == -1 (expected def=-1 entry id)"
+            (ev, evr, ed, els, ele, eho, efl) = ents[pid]
+            assert ed == -1 and ev == g0 + p, \
+                f"add param_ents[{p}] -> row {pid} var {ev} (want {g0 + p})"
+        assert funcs[1]['param_count'] == 0 and funcs[1]['param_ents'] == []
+        # 根 region（kind=0）行序 = 函数序 1:1；span 连续铺满 NOD 空间
+        roots = [(i, r) for i, r in enumerate(regs) if r[0] == 0]
+        assert len(roots) == len(funcs)
+        prev_end = 0
+        for k, (rid, r) in enumerate(roots):
+            assert funcs[k]['root_region'] == rid
+            assert r[2] == prev_end, f"root {k} enter {r[2]} != prev end {prev_end}"
+            prev_end = r[3]
+            # 根行 first/last = 函数块界（与 SYM 双写一致）
+            assert (r[4], r[5]) == (funcs[k]['first_ent'],
+                                    funcs[k]['last_ent'])
+        assert prev_end == nod_cnt, \
+            f"root spans end at {prev_end}, nod_count {nod_cnt}"
+    finally:
+        try:
+            os.unlink(ccr_path)
+        except FileNotFoundError:
+            pass
+
+
+def test_v7_loader_rejects_root_span_beyond_nod_space():
+    """（迁移 GC-3——SYM 评审 M1）REG root span 对 NOD 空间上界校验。
+
+    loader 解析序 REG → NOD：root region（SG_FUNC 行）的 enter/exit 在 REG
+    段解析时就回填成函数指令边界，但 instr_cnt 直到 NOD 段才可知——彼时
+    无上界校验（ENT 有 ele > instr_cnt 拒绝先例）。损坏文件把末函数 root
+    region 的 exit_nod 推出 NOD 空间（exit == instr_cnt + 1）→ corearch 必须
+    拒绝（'invalid .ccr'）。"""
+    src = ("fn main() -> int {\n"
+           "    s : ., mut = 0;\n"
+           "    for i in 0..4 { s = s + i; }\n"
+           "    return s;\n"
+           "}\n")
+    ccr_path = os.path.join(BASE, 'build/test_v7_rootspan.ccr')
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        corec_ccr(src, ccr_path)
+        data = bytearray(read_ccr(ccr_path))
+        v7 = V7File(bytes(data))
+        regs = v7.reg()
+        nod_cnt = len(v7.nod())
+        # 末函数 root region（最后一个 kind==0 行）：span 末 = NOD 空间末
+        # （根行 span 连续铺满 NOD 空间的不变量），exit_nod += 1 → 越界
+        roots = [i for i, r in enumerate(regs) if r[0] == 0]
+        assert roots, f"no SG_FUNC rows in REG: {regs}"
+        rid = roots[-1]
+        assert regs[rid][3] == nod_cnt, \
+            f"last root exit {regs[rid][3]} != nod_count {nod_cnt}: {regs[rid]}"
+        reg_off, _ = v7.segs[5]
+        patch_at = reg_off + 4 + rid * REG_REC + 12  # exit_nod field (+12 in row)
+        struct.pack_into('<i', data, patch_at, regs[rid][3] + 1)
+        bad_path = ccr_path + '.oob'
+        with open(bad_path, 'wb') as fh:
+            fh.write(bytes(data))
+        r = subprocess.run([COREARCH, bad_path, '--elf', '--static',
+                            '-o', os.path.join(BASE, 'build/test_v7_rootspan.out')],
+                           capture_output=True, text=True, cwd=BASE, timeout=60)
+        assert r.returncode != 0, \
+            f"corearch accepted root span beyond NOD space: rc={r.returncode} {r.stdout!r}"
+        assert 'invalid' in (r.stdout + r.stderr), \
+            f"expected invalid-.ccr error, got: {r.stdout!r} {r.stderr!r}"
+    finally:
+        for p in (ccr_path, ccr_path + '.oob',
+                  os.path.join(BASE, 'build/test_v7_rootspan.out')):
+            try:
+                os.unlink(p)
+            except FileNotFoundError:
+                pass
+
+
+def test_v7_save_rejects_var_block_misalignment():
+    """（迁移 GC-4——SYM 评审 M2）save var 行序位置级守卫。
+
+    计数级守卫（Σ func var_count == var_count + var_idx==gi）总量守恒时察觉
+    不到块错位——func0 声明区起点左移 1（--inject-var-shift 测试钩子，真实
+    构建路径永不注入）后 Σ 不变，旧实现静默落盘行序错位的文件（声明区/
+    var 命名空间漂移）。位置级守卫（vs == 前缀累计）必须拒绝：rc != 0、
+    不落盘。"""
+    src = ("fn add(a: int, b: int) -> int { return a + b; }\n"
+           "fn main() -> int {\n"
+           "    x := 1;\n"
+           "    return x + 1;\n"
+           "}\n")
+    ccr_path = os.path.join(BASE, 'build/test_v7_varshift.ccr')
+    with tempfile.NamedTemporaryFile('w', suffix='.cr', delete=False) as f:
+        f.write(src)
+        path = f.name
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        r = subprocess.run([COREC, 'ccr', path, '-o', ccr_path,
+                            '--inject-var-shift'],
+                           capture_output=True, text=True, cwd=BASE, timeout=120)
+        out = r.stdout + r.stderr
+        assert r.returncode != 0, \
+            f"save accepted misaligned var block (rc=0):\n{out}"
+        assert 'inject-var-shift: precondition' not in out, \
+            f"hook precondition failed — test not exercising the guard:\n{out}"
+        assert not os.path.exists(ccr_path), \
+            "save wrote a .ccr file despite rejecting"
+    finally:
+        os.unlink(path)
+        try:
+            os.unlink(ccr_path)
+        except FileNotFoundError:
+            pass
+
+
+# === Task 3 新增一：ENT 负分支补面（Task 2 review R1/R2——loader 校验路径
+# 从未被现测试击中的分支逐个 byte mutation 打）===
+
+
+def test_v7_loader_rejects_ent_var_foreign_block():
+    """Task 2 review R1——ENT↔SYM 块重推导 reject 面（ccr_io.cr :1469-1478）。
+
+    现存 sym_ent_block_mismatch 只打 SYM func first_ent——REG↔SYM 对照
+    （:1331-1337）先于 ENT 解析触发，块重推导路径（:1452-1478）恒空走不到。
+    本 mutation：func0（add）块首条目的 var_id 改写进 func1（main）var 窗口
+    起点 → 逐条语义校验（ev 命名空间 :1431/区间 :1432/def 关系 :1433-1436）
+    全过（只动 var_id 一字段）→ 块重推导见 func0 首条 var 不在其窗口 →
+    pcnt=0 与 SYM first_ent 实值失配 → 拒绝。命中点唯一 = :1471-1478。"""
+    src = ("fn add(a: int, b: int) -> int { return a + b; }\n"
+           "fn main() -> int { return 42; }\n")
+    ccr_path = os.path.join(BASE, 'build/test_v7_entblk2.ccr')
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        corec_ccr(src, ccr_path)
+        data = bytearray(read_ccr(ccr_path))
+        v7 = V7File(bytes(data))
+        sym = v7.sym_parse()
+        funcs = sym['funcs']
+        ents = v7.ent()
+        assert funcs[0]['first_ent'] == 0, \
+            f"precondition: func0 first entry at 0, got {funcs[0]['first_ent']}"
+        vs1 = len(sym['globals']) + funcs[0]['var_count']  # func1 窗口起点
+        assert ents[0][0] < vs1, \
+            f"precondition: entry0 var {ents[0][0]} already outside func0 window"
+        _mutate_ent_field(data, 0, 0, vs1, '<i')  # var_id := func1 窗口起点
+        bad_path = ccr_path + '.fblk'
+        with open(bad_path, 'wb') as fh:
+            fh.write(bytes(data))
+        r = subprocess.run([COREARCH, bad_path, '--elf', '--static',
+                            '-o', os.path.join(BASE, 'build/test_v7_entblk2.out')],
+                           capture_output=True, text=True, cwd=BASE, timeout=60)
+        assert r.returncode != 0, \
+            f"corearch accepted entry in foreign func window: rc={r.returncode}"
+        assert 'invalid' in (r.stdout + r.stderr), \
+            f"expected invalid-.ccr error, got: {r.stdout!r} {r.stderr!r}"
+    finally:
+        for p in (ccr_path, ccr_path + '.fblk',
+                  os.path.join(BASE, 'build/test_v7_entblk2.out')):
+            try:
+                os.unlink(p)
+            except FileNotFoundError:
+                pass
+
+
+def test_v7_loader_rejects_ent_var_namespace_oob():
+    """Task 2 review R2——ENT var_id 命名空间校验（ccr_io.cr :1431）：var_id
+    改写出 SYM 行重建总量（= loader 侧 g_ir_var_count）→ 逐条校验拒绝。"""
+    src = "fn main() -> int { return 42; }\n"
+    ccr_path = os.path.join(BASE, 'build/test_v7_entns.ccr')
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        corec_ccr(src, ccr_path)
+        data = bytearray(read_ccr(ccr_path))
+        v7 = V7File(bytes(data))
+        sym = v7.sym_parse()
+        total = len(sym['globals']) + sum(f['var_count'] for f in sym['funcs'])
+        ents = _mutate_ent_field(data, 0, 0, total, '<i')  # ev := 命名空间外
+        assert ents[0][0] != total, "precondition: var_id already == total"
+        bad_path = ccr_path + '.ns'
+        with open(bad_path, 'wb') as fh:
+            fh.write(bytes(data))
+        r = subprocess.run([COREARCH, bad_path, '--elf', '--static',
+                            '-o', os.path.join(BASE, 'build/test_v7_entns.out')],
+                           capture_output=True, text=True, cwd=BASE, timeout=60)
+        assert r.returncode != 0, \
+            f"corearch accepted var_id outside namespace: rc={r.returncode}"
+        assert 'invalid' in (r.stdout + r.stderr), \
+            f"expected invalid-.ccr error, got: {r.stdout!r} {r.stderr!r}"
+    finally:
+        for p in (ccr_path, ccr_path + '.ns',
+                  os.path.join(BASE, 'build/test_v7_entns.out')):
+            try:
+                os.unlink(p)
+            except FileNotFoundError:
+                pass
+
+
+def _first_def_entry(ents):
+    """首个 def_nod ≥ 0 的条目下标（定值条目——mutation 需维持 ed ≥ 0 才走
+    :1433-1436 分支；恒存在：每函数 _arena 定值条目）。"""
+    for i, e in enumerate(ents):
+        if e[2] >= 0:
+            return i
+    raise AssertionError("no def entry found (def_nod >= 0)")
+
+
+def test_v7_loader_rejects_ent_def_nod_oob():
+    """Task 2 review R2——ENT def_nod 越界（ccr_io.cr :1434）：定值条目的
+    def_nod 改写为 instr_cnt（= NOD 空间外第一个坐标）→ 拒绝。"""
+    src = "fn main() -> int { return 42; }\n"
+    ccr_path = os.path.join(BASE, 'build/test_v7_entdef.ccr')
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        corec_ccr(src, ccr_path)
+        data = bytearray(read_ccr(ccr_path))
+        v7 = V7File(bytes(data))
+        nod_cnt = len(v7.nod())
+        idx = _first_def_entry(v7.ent())  # 定值条目（ed >= 0 才走 :1433-1436）
+        _mutate_ent_field(data, idx, 8, nod_cnt, '<i')  # def_nod := instr_cnt
+        bad_path = ccr_path + '.oob'
+        with open(bad_path, 'wb') as fh:
+            fh.write(bytes(data))
+        r = subprocess.run([COREARCH, bad_path, '--elf', '--static',
+                            '-o', os.path.join(BASE, 'build/test_v7_entdef.out')],
+                           capture_output=True, text=True, cwd=BASE, timeout=60)
+        assert r.returncode != 0, \
+            f"corearch accepted def_nod beyond NOD space: rc={r.returncode}"
+        assert 'invalid' in (r.stdout + r.stderr), \
+            f"expected invalid-.ccr error, got: {r.stdout!r} {r.stderr!r}"
+    finally:
+        for p in (ccr_path, ccr_path + '.oob',
+                  os.path.join(BASE, 'build/test_v7_entdef.out')):
+            try:
+                os.unlink(p)
+            except FileNotFoundError:
+                pass
+
+
+def test_v7_loader_rejects_ent_def_ne_live_start():
+    """Task 2 review R2——ENT 定值条目 def == live_start 失配（ccr_io.cr
+    :1435）：定值条目 def_nod 改写为 els+1（仍在 NOD 空间内 → 只触发
+    ed != els 分支）→ 拒绝。"""
+    src = "fn main() -> int { return 42; }\n"
+    ccr_path = os.path.join(BASE, 'build/test_v7_entdls.ccr')
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        corec_ccr(src, ccr_path)
+        data = bytearray(read_ccr(ccr_path))
+        v7 = V7File(bytes(data))
+        nod_cnt = len(v7.nod())
+        ents = v7.ent()
+        idx = _first_def_entry(ents)
+        (ev, evr, ed, els, ele, eho, efl) = ents[idx]
+        assert els + 1 < nod_cnt, \
+            f"precondition: els {els}+1 must stay in NOD space ({nod_cnt})"
+        _mutate_ent_field(data, idx, 8, els + 1, '<i')  # def_nod := els+1
+        bad_path = ccr_path + '.dne'
+        with open(bad_path, 'wb') as fh:
+            fh.write(bytes(data))
+        r = subprocess.run([COREARCH, bad_path, '--elf', '--static',
+                            '-o', os.path.join(BASE, 'build/test_v7_entdls.out')],
+                           capture_output=True, text=True, cwd=BASE, timeout=60)
+        assert r.returncode != 0, \
+            f"corearch accepted def_nod != live_start: rc={r.returncode}"
+        assert 'invalid' in (r.stdout + r.stderr), \
+            f"expected invalid-.ccr error, got: {r.stdout!r} {r.stderr!r}"
+    finally:
+        for p in (ccr_path, ccr_path + '.dne',
+                  os.path.join(BASE, 'build/test_v7_entdls.out')):
+            try:
+                os.unlink(p)
+            except FileNotFoundError:
+                pass
+
+
+# === Task 3 新增二：cache-hit 恢复路径回归（Task 1 review Minor M2）===
+# 全测试族惯例清 .core/cache → 恢复路径（cir_cache load）零覆盖；本测试锁定
+# 观察流（2026-09-10 探针实测，断言 = 实测关系）：
+#   冷（fresh 全编译）vs 暖（全函数 cache-hit 恢复）：SYM/NOD/ENT/REG/EDG
+#   五段体逐字节相同——EDG/ENT 经恢复路径零漂移（本测试核心锁）；
+#   STR：暖表 = 冷表前缀——冷多出尾部无引用字符串（Minor 3 现象级注记：
+#   编译器内名（_arena 等）二次 interning，review 实测 ~108B 级；本程序实测
+#   16 条 ~143B，方向/数量随程序形态变——良性：无引用、walker 走满校验过、
+#   其余段全等，断言只锁前缀关系不锁字节数）；
+#   暖运行不重写缓存文件（miss → load 失败 → 重编译 → save → mtime 变）。
+#   hybrid（单函数改动，同路径再编译）产物 == 清缓存后冷编译同一源文件，
+#   全文件 byte-identical（full-file rewrite 观察流）；corearch 双载行为一致。
+
+
+def test_v7_cache_hit_restore_path():
+    cache_dir = os.path.join(BASE, '.core', 'cache')
+    cir_dir = os.path.join(cache_dir, 'cir')
+    src_path = os.path.join(BASE, 'build', 'test_v7_cache_src.cr')
+    out_cold = os.path.join(BASE, 'build', 'test_v7_cache_cold.ccr')
+    out_warm = os.path.join(BASE, 'build', 'test_v7_cache_warm.ccr')
+    out_hyb = os.path.join(BASE, 'build', 'test_v7_cache_hyb.ccr')
+    out_cold2 = os.path.join(BASE, 'build', 'test_v7_cache_cold2.ccr')
+    elf_cold = os.path.join(BASE, 'build', 'test_v7_cache_cold.elf')
+    elf_warm = os.path.join(BASE, 'build', 'test_v7_cache_warm.elf')
+    elf_hyb = os.path.join(BASE, 'build', 'test_v7_cache_hyb.elf')
+    elf_cold2 = os.path.join(BASE, 'build', 'test_v7_cache_cold2.elf')
+    artifacts = [src_path, out_cold, out_warm, out_hyb, out_cold2,
+                 elf_cold, elf_warm, elf_hyb, elf_cold2]
+    src1 = ("fn mul2(x: int) -> int { return x * 2; }\n"
+            "fn main() -> int {\n"
+            "    s : ., mut = 0;\n"
+            "    for i in 0..4 { s = s + mul2(i); }\n"
+            "    return s;\n"   # Σ mul2(0..3) = 0+2+4+6 = 12
+            "}\n")
+    src2 = src1.replace('0..4', '0..6')  # Σ mul2(0..5) = 30
+
+    def ccr_run(out: str) -> None:
+        r = subprocess.run([COREC, 'ccr', src_path, '-o', out],
+                           capture_output=True, text=True, cwd=BASE, timeout=120)
+        assert r.returncode == 0, f"corec ccr failed rc={r.returncode}: {r.stderr}"
+
+    def arch_elf(ccr_in: str, elf_out: str) -> None:
+        r = subprocess.run([COREARCH, ccr_in, '--elf', '--static', '-o', elf_out],
+                           capture_output=True, text=True, cwd=BASE, timeout=120)
+        assert r.returncode == 0, \
+            f"corearch load failed: {r.stdout!r} {r.stderr!r}"
+        os.chmod(elf_out, 0o755)
+
+    try:
+        shutil.rmtree(cache_dir, ignore_errors=True)
+        with open(src_path, 'w') as fh:
+            fh.write(src1)
+        ccr_run(out_cold)                      # 冷：全编译 + 播种缓存
+        cold = read_ccr(out_cold)
+        # 命中证据：暖运行不重写缓存文件（miss → 重编译 → save → mtime 变）
+        snap = {os.path.join(cir_dir, f): os.stat(
+                    os.path.join(cir_dir, f)).st_mtime_ns
+                for f in os.listdir(cir_dir)}
+        assert snap, "cold run did not populate cir cache"
+        ccr_run(out_warm)                      # 暖：全函数恢复路径
+        for p, ns in snap.items():
+            assert os.stat(p).st_mtime_ns == ns, \
+                f"warm run rewrote cache file {p} (not a full hit?)"
+        warm = read_ccr(out_warm)
+        vc = V7File(cold)
+        vw = V7File(warm)
+        # 核心锁：恢复路径下 SYM/NOD/ENT/REG/EDG 五段体逐字节相同
+        for tag in (2, 3, 4, 5, 6):
+            assert vc.body(tag) == vw.body(tag), \
+                f"segment {tag} drifted on cache-hit restore"
+        # STR：暖表 = 冷表前缀（冷多出尾部 = 无引用内名二次 interning）
+        sc, sw = vc.str_table(), vw.str_table()
+        assert len(sw) <= len(sc), \
+            f"warm STR {len(sw)} > cold STR {len(sc)} (restore bloat?)"
+        assert sc[:len(sw)] == sw, \
+            "warm STR not a prefix of cold STR"
+        # corearch 行为一致：冷/暖双载 + 运行同退出码
+        arch_elf(out_cold, elf_cold)
+        arch_elf(out_warm, elf_warm)
+        for p in (elf_cold, elf_warm):
+            r = subprocess.run([p], capture_output=True, timeout=10)
+            assert r.returncode == 12, \
+                f"{p} exit {r.returncode} != 12 (cold/warm divergence)"
+        # hybrid：单函数改动（main 体 + 循环上界）→ 再编译（部分/全量命中
+        # 视指纹失效粒度——产物断言不依赖）→ 产物 == 清缓存冷编译全文件
+        with open(src_path, 'w') as fh:
+            fh.write(src2)
+        ccr_run(out_hyb)
+        shutil.rmtree(cache_dir, ignore_errors=True)
+        ccr_run(out_cold2)
+        assert read_ccr(out_hyb) == read_ccr(out_cold2), \
+            "hybrid cache output != full-cold compile (stale graph/STR drift?)"
+        arch_elf(out_hyb, elf_hyb)
+        arch_elf(out_cold2, elf_cold2)
+        for p in (elf_hyb, elf_cold2):
+            r = subprocess.run([p], capture_output=True, timeout=10)
+            assert r.returncode == 30, \
+                f"{p} exit {r.returncode} != 30"
+    finally:
+        for p in artifacts:
+            try:
+                os.unlink(p)
+            except FileNotFoundError:
+                pass
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+
 if __name__ == '__main__':
     shutil.rmtree(os.path.join(BASE, '.core', 'cache'), ignore_errors=True)
     tests = [test_v7_layout_and_walk,
@@ -1104,13 +1752,23 @@ if __name__ == '__main__':
              test_v7_ent_hand_expected_small,
              test_v7_ent_hand_expected_pure_add_block,
              test_v7_ent_model_replay_pure_add,
+             test_v7_ent_real_optmeta_absent,
+             test_v7_sym_reg_target_shape,
+             test_v7_sym_func_shapes,
              test_v7_loader_rejects_bad_ent_version,
              test_v7_loader_rejects_ent_liveend_oob,
              test_v7_loader_rejects_ent_ls_ge_le,
+             test_v7_loader_rejects_ent_var_foreign_block,
+             test_v7_loader_rejects_ent_var_namespace_oob,
+             test_v7_loader_rejects_ent_def_nod_oob,
+             test_v7_loader_rejects_ent_def_ne_live_start,
              test_v7_loader_rejects_sym_ent_block_mismatch,
+             test_v7_loader_rejects_root_span_beyond_nod_space,
              test_v7_loader_rejects_version_ne_7,
              test_v7_loader_rejects_backward_edge,
              test_v7_loader_rejects_edg_count_mismatch,
+             test_v7_save_rejects_var_block_misalignment,
+             test_v7_cache_hit_restore_path,
              test_v7_roundtrip_elf]
     failed = 0
     for t in tests:

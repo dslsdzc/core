@@ -144,7 +144,12 @@ v7 载体的消费 = 两个通道，接口 = 载体（图 + 条目），归一�
   ① IR_STORE 单列：定值目标在 s1（ρ(s1):=ρ(s2)，dest 恒 -1）
   ② 三 op 排除：STORE_INDEX_VAR / STORE_PTR / DYN_DISPATCH 的 dest ≥ 0 非定值
 - 活区间：图坐标扫描（[first_ref, last_ref] 逻辑，坐标单位 = NOD id）；版本 k 区间 = [def_k, def_{k+1}) 截断
-- 参数/全局条目：def_nod = -1，区间 = [函数首节点, last_ref+1)
+- 参数条目（从未定值但有引用的 var——函数参数等）：def_nod = -1，区间 = **[first_ref, last_ref]**
+  （**差异①注记，2026-09-10 Task 3 同步**：v6 spec §4.1 ③ 文字「[函数首节点, last_ref+1)」
+  与实现不符——live_start = 首引用指令而非函数首节点；盘上 live_end 半开 = last_ref+1。
+  **实现语义为准**，v7 同规则（loader 只校验 els < ele ≤ instr_cnt，两语义都过，但
+  corec 写侧/测试期望按实现语义）；「全局条目」面实现不存在（全局 var 不在任何函数
+  var 窗口 → 恒无条目——差异②，SYM globals 记录 = 全局唯一存在面，flags bit2 零实例）
 - 无配方条目（边界/图内不可重算）：flags 标注 + home 必须（持久存储语义——边界 spec 引用条款 4b 统一规则）
 
 ### 4.2 生产与消费分工

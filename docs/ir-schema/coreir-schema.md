@@ -7,11 +7,11 @@ Core 编译器使用两种中间表示：
 | 格式 | 全称 | 用途 | 生产者 | 消费者 |
 |------|------|------|--------|--------|
 | `.cir` | Core IR Graph | HDFG + 规约约束（验证 IR） | `corec`（前端） | 验证工具 / `corearch` / 解释器 |
-| `.ccr` | Core Region Representation（C 路线：格形态，v6 演进中） | 格层存在结构的线性投影（region 段；升级设计见 `docs/superpowers/specs/2026-08-27-lattice-form-ir-design.md`） | `corec`（前端） | `corearch`（后端） |
+| `.ccr` | Core Region Representation（C 路线：格形态，v7 = 真图载体） | 格层**图载体**——NOD+EDG（节点 + 数据/state 边）+ ENT（条目 × 版本）+ REG（区域），存在结构与图语义落盘；文件序 = 合法拓扑调度，**执行序 = 投影**（字节权威 = `docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md`） | `corec`（前端） | `corearch`（后端） |
 
 **`.cir` 是 Core 的验证核心。** 它承载程序的完整语义（HDFG）。验证工具消费 `.cir` + `.csr`（规约约束元数据）进行验证。
 
-自托管编译器在 IR 生成期间同时构建 HDFG（`.cir`，图形态）和格层线性投影（`.ccr`，格形态 v5），然后 `lower_to_ccr()` 将图节点拷贝为线性指令数组供 x86-64 后端消费。
+自托管编译器在 IR 生成期间同时构建 HDFG（`.cir`，图形态）和格层图载体（`.ccr`，格形态 v7——NOD/EDG/ENT/REG 段，节点 + 边 + 条目落盘），然后 `lower_to_ccr()` 将图节点镜像投影为文件序线性数组（= 合法拓扑调度）供 x86-64 后端消费——执行序是图的投影，不再是文件唯一语义主干。
 
 ---
 
@@ -246,33 +246,39 @@ struct 类型关联布局描述符。**默认由编译器推导自然布局**（
 
 ---
 
-## 六、线性化（HDFG → `.ccr`）
+## 六、图载体投影（HDFG → `.ccr`）
 
-`lower_to_ccr()` 将HDFG线性化为线性 IR 指令数组供后端消费。规约约束节点（opcode ≥ 30）照常线性化，但 `corearch` 后端在代码生成时跳过它们。
+`lower_to_ccr()` 将 HDFG 镜像投影为文件序线性数组供后端消费——v7 起文件序 = 生产者选择的合法拓扑调度（沿 EDG 边约束，DAG 前向），**执行序 = 图的投影**，不再是文件唯一语义主干（格形态语义见 `docs/superpowers/specs/2026-09-09-lattice-ir-v7-carrier-design.md`）。规约约束节点（opcode ≥ 30）照常线性化，但 `corearch` 后端在代码生成时跳过它们。
 
-### `.ccr` 二进制序列化（v6，2026-09；v6-only）
+### `.ccr` 二进制序列化（v7，2026-09；v7-only——v6 中间态已退役）
 
-`.ccr` 文件头 magic 为 `0x31524343`（ASCII `CCR1`）。v6 = 段表架构 + 存在结构段（字节真相 = `ccr_io.cr` 头注释 + `docs/superpowers/specs/2026-09-05-lattice-ir-v6-format.md` 设计定稿；v6.0 保守实施，SYM/REG 归并坐标化 = 后续任务）：
+`.ccr` 文件头 magic 为 `0x31524343`（ASCII `CCR1`）。v7 = 段表架构 + 真图载体（字节权威 = `docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md` + `ccr_io.cr` 头注释）：
 
 ```
-[header 16B]: magic u32="CCR1" | version u32=6 | seg_count u32=5 | reserved u32=0
-[seg table 5×12B]: {tag u32, offset u32, size u32}——规范序（tag=行号 1..5）
+[header 16B]: magic u32="CCR1" | version u32=7 | seg_count u32=6 | reserved u32=0
+[seg table 6×12B]: {tag u32, offset u32, size u32}——规范序（tag=行号 1..6）
 [seg bodies]:
-  STR(1) 字符串表：   [str_count] [× {len u32, data}]（同 v5）
-  SYM(2) 符号面：      v5 func_meta(28B/函数)/vars(12B)/str_consts/structs/
-                      enums/globals(16B)/opt_meta 自描述拼接（v6.0 未归并）
-  NOD(3) 节点表：      [nod_count] [×28B {op i32,dest i32,src1 i64,src2 i32,
-                      src3 i32,tk i32}]——v5 instrs 内容不变；NOD id = 文件序
-                      （图坐标 D1）
+  STR(1) 字符串表：   [str_count] [× {len u32, data}]
+  SYM(2) 符号面：      globals(16B {name,type,init}) + funcs（内嵌 var 声明区、
+                      param_ents、first_ent/last_ent、root_region）+ str_consts
+                      /structs/enums/opt_meta 自描述拼接
+  NOD(3) 节点表：      [nod_count] [×36B {op i32,dest i32,src1 i64,src2 i32,
+                      src3 i32,tk i32,first_edge u32,edge_count u32}]——28B
+                      语义字段 + 邻接索引；NOD id = 文件序 = 图坐标（D1）
   ENT(4) 条目表：      [ent_count] [×28B {var_id i32,version u32,def_nod i32,
                       live_start u32,live_end u32(半开:最后使用点+1),home i32,
-                      flags u32}]——存在结构核心（内存表 24B 闭区间 →
-                      version=同 var 定值升序序数、live_end+1）
-  REG(5) region 表：   [sg_count] [×24B kind/enter/exit/parent/nstart/ncount]
-                      （v5 sgs 内容，坐标与 NOD 文件序同一）
+                      flags u32}]——存在结构（corec 产实记录；home 恒 -1
+                      直通 = 实例层注记）
+  REG(5) region 表：   [sg_count] [×24B kind/parent/enter_nod/exit_nod/
+                      first_ent/last_ent]（enter/exit = NOD id，nstart/ncount
+                      由 span 派生）
+  EDG(6) 边表（v7 必落）：[edg_count] [×8B {to_nod u32, kind u32}]——节点出边
+                      连续成段（first_edge = 前缀累计）；每条边 to_nod > 所属
+                      节点（前向拓扑）；kind 0=数据 1=state（branch/jump 目标
+                      = 操作数字段非边）
 ```
 
-v6-only：load 校验 version==6（无 v5 兼容/转换——.ccr 为管线中间产物现生成）。**DFEdge 不落盘 `.ccr`**——边仅在内存与 `.cir` 缓存中（v5 按 4×8B：from/to/next/kind，0=data, 1=state）。
+v7-only：load 校验 version==7（无 v6 兼容/转换——.ccr 为管线中间产物现生成）。v6 中间态（5 段、NOD 28B、ENT 恒空、**DFEdge 不落盘**——边仅在内存与 `.cir` 缓存中）已被取代：v7 起 EDG 段必落（P3 修复），ENT 携带实记录（P2 修复）。
 
 ---
 

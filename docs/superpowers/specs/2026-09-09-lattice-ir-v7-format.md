@@ -1,7 +1,7 @@
 # 格形态 IR v7 字节格式设计（真图载体）
 
 日期：2026-09-09
-状态：格式设计定稿（待实现——实施计划后置）
+状态：~~格式设计定稿（待实现）~~ → **已实施（2026-09-10，`plans/2026-09-09-lattice-ir-v7.md` Task 1-3 收官）**——v7-only 时代，字节状态以此为准；实施期裁决回填见 §4 规则 4 / §6 开放点 3、5
 性质：两段式第二段（字节格式）；语义定义 = `2026-09-09-lattice-ir-v7-carrier-design.md`（权威）；本文件 = 字节怎么排。
 
 关联：
@@ -106,7 +106,7 @@ v6 其余字节惯例沿用：小端、i32/u32、offset/size u32、`ccr_i32_fits
 1. **拓扑不变量（语义约束的字节形态）**：EDG 每条边 `所属节点 < to_nod`（数据/state 边前向——DAG 拓扑调度）；违规 = 文件损坏拒绝
 2. **边界声明（非边）**：branch/jump/调用目标的 NOD id 引用（可后向——回边语义）是**操作数字段，不是边**；循环语义 = REG（SG_LOOP 嵌套）+ state 链表达（VSDG 先例）——EDG 只承载数据/state 两类前向边
 3. `edg_count` == Σ edge_count；NOD/ENT/REG 引用 id 界内（NOD id < nod_count 等）
-4. 段表 offset/size 界、ENT home 恒 -1 检查（非 -1 = 违反实例注记约定，警告级或拒绝 = 实施期定）
+4. 段表 offset/size 界、ENT home/flags 读入放行——**裁决（2026-09-10 Task 2 review R3）**：loader 对 home≠-1 / flags≠0 **接受不拒绝**——home = 实例映射注记，.ccr = corec→corearch 传输中间物，实例层（分配/缓存映射）决策不写回格式；非 -1/非 0 值不构成损坏证据（无消费方依赖恒 -1/0 前提之外的安全面）。开放点 3 保留：未来实例层选择写回（非传输中间物用途）时重议
 5. magic/version；`ccr_i32_fits` 沿用（中间产物 < 4GB）
 
 ## 5. 消费方影响
@@ -120,8 +120,9 @@ v6 其余字节惯例沿用：小端、i32/u32、offset/size u32、`ccr_i32_fits
 
 1. EDG kind 扩展（2+ 预留：驱逐标注/证书边）——仅常量定义，不占空间（v6 先例同款）
 2. NOD 28B 原字段与 v5 instrs 的同构声明是否需版本字段级文档对齐（ir-schema coreir-schema 同步项）
-3. ENT home 非 -1 的处理级（警告 vs 拒绝）——若未来实例层选择回写（非传输中间物用途）时重议
+3. ENT home 非 -1 的处理级——**裁决（2026-09-10）：接受不拒绝**（§4 规则 4 注记回填）；若未来实例层选择回写（非传输中间物用途）时重议
 4. 图化生产的构建时机（dataflow 现服务于 dump/分析面或全量编译——决定 v7 产成本；实施计划核实）
+5. loader 侧 per-parameter ENT 内容核对与嵌套 REG 行条目范围内容核对——**推迟裁决（2026-09-10 Task 2 review R4）**：per-param 核对（param_ents 应指向该参数 var 的 def=-1 条目等）需 fn_meta 参数窗口展开（现 fn_meta 无 per-param 声明面），在 Python 测试族净锁（test_ccr_v7.py 全量块切分/param_ents/SYM 双写断言 = 测试侧同语义锁，2026-09-10 Task 3 迁移收官）期间不值得扩 fn_meta——测试锁保持，loader 内容锁挂账（未来 fn_meta 展开时激活）
 
 ## 7. 关联同步项
 

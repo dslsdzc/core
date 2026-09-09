@@ -1,5 +1,7 @@
 # v7 格形态（真图载体）实施计划
 
+> **状态：实施完成（2026-09-10 Task 3 收官）**——Task 1（v7 骨架：version 7 + NOD 36B 邻接 + EDG 段必落 + 幽灵边播种修复 + CIR_CACHE_VER 14）、Task 2（ENT 实记录 compute_entries_v7 + SYM/REG 条目回填 + loader 激活）、Task 3（测试族迁移收官：test_ccr_v6.py 合并退役 → test_ccr_v7.py 23/23 全绿（V7File walker 全量 + cache-hit 恢复路径回归 + ENT 负分支补面 R1/R2）+ 全量回归 + 自举重建冒烟 + 文档同步）全部落地；报告 = `.superpowers/sdd/v7-task-*-report.md`。字节状态以 v7 格式 spec 为准（§4 规则 4/§6 开放点 3 = home/flags 接受不拒绝裁决（R3）、开放点 5 = per-param/嵌套 REG 内容锁推迟（R4）回填）；v6 spec = 历史基线（取代注记 + 差异① 实现语义为准）；测试期望语义 = regalloc.cr compute_entries 实现（Task 0 表二差异①）。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** .ccr 从 v6（线性 NOD + 恒空 ENT）切换到 v7 真图载体——NOD 36B 邻接 + EDG 段（数据/state 边必落）+ ENT 实记录（corec 产时重建），全链行为不变。
