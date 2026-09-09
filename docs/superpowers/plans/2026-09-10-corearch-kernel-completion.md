@@ -62,7 +62,7 @@
 
 **Files:**
 - Modify: `src/arch/linux/ld/ent_kernel.cr`（位置登记表 {entry→loc} + kern_loc_assign/kern_loc_clear/kern_loc_of; verify 规则①② 读通道切换（meta_reg_for_var 改读登记表——函数体等价改写）; LOC_HOME_BASE 常量移除 → 域参数读实例声明（或经 kern 设置函数——设计 spec §2.2: 位置分类按实例声明域 {home_base, reg_domain}——内核读声明数据（g_instance_decl 扩展先行? 依赖 Task 3 声明扩展——**顺序裁决：域参数先经内核设置面（kern_set_loc_domain(home_base, reg_domain)——corearch 引导按实例行调）落地, Task 3 声明表字段接同一数据源**））
-- Modify: `src/arch/linux/ld/regalloc.cr`（alloc_registers phase 5 + 注入钩子写 g_opt_meta 后调 kern 登记/清除——双面同步; meta_reg_for_var 删（判定不再读 g_opt_meta）——确认 emit 面无引用（instr.cr get_reg_for_var = 独立实现——已核））
+- Modify: `src/arch/linux/ld/regalloc.cr`（alloc_registers phase 5 + 注入钩子写 g_opt_meta 后调 kern 登记/清除——双面同步; **meta_reg_for_var 函数体等价改写为登记表查询——不删**（Task 0 ④ 修正注：regalloc.cr 注入探针 try_inject_read_gap :254/:261 调用它——须同步改实例侧私有扫描或经登记表等价读; emit 面 instr.cr get_reg_for_var = 独立实现不受影响））
 - Test: `tests/selfhost/test_live_ranges.py`（13/13——判定红/绿路径经登记表通道输出与直读时代逐字节同）+ test_ccr_v7.py 23/23
 
 **Interfaces:**
@@ -71,7 +71,7 @@
 - 判据：test_live_ranges 13/13（通道切换输出同——先基线后对照）+ O2 全链 byte-identical（--check-regalloc 绿/红路径经登记通道）+ 回归快子集
 - 双份同步纪律：实例写点成对（g_opt_meta + 登记）——代码注记 + 注入钩子测试覆盖（红路径 = 双面一致注入）
 
-- [ ] **Step 1:** 写失败测试：登记表 API + 域参数（kern_loc_assign/domain——现无 → FAIL）
+- [ ] **Step 1:** 写失败测试：登记表 API + 域参数 + **中立性 guard**（kern_loc_assign/domain——现无 → FAIL; test_ent_kernel_neutrality.py——现态 meta_reg_for_var 读 g_opt_meta → 红——早暴露纪律）
 - [ ] **Step 2:** 跑测试确认失败
 - [ ] **Step 3:** 登记表 + kern API 实现（ent_kernel）
 - [ ] **Step 4:** 判定读通道切换（verify/rl_rule2 读登记表——等价改写）; LOC_HOME_BASE 域参数化（kern_set_loc_domain + 引导调用——corearch 按实例行传域）
@@ -114,7 +114,7 @@
 - Consumes: Task 1-3 全部
 - 验证: 中立性 guard 绿（内核零实例符号）+ 全量回归绿 + 自举重建冒烟 + 文档同步（设计 spec 状态/蓝图步骤 2.5 注记/progress 台账）
 
-- [ ] **Step 1:** 中立性 guard 测试写 + 绿（清 ent_kernel 残留实例引用——若有, 回 Task 2 通道切换补漏）
+- [ ] **Step 1:** 中立性 guard 绿确认（Task 2 Step 1 已前置写——核红→绿记录）+ 残留清零（若有 ent_kernel 残留实例引用——回 Task 2 通道切换补漏）
 - [ ] **Step 2:** 全量回归跑批
 - [ ] **Step 3:** 自举重建 + 冒烟
 - [ ] **Step 4:** 文档同步（设计 spec 状态回填/蓝图步骤 2.5 注记）
@@ -153,7 +153,7 @@
   → 线性流零依赖。EDG 校验 :1335-1369 消费 instr_cnt + nod_edge_meta（NOD 邻接域 :1349-1352）→
   线性流零依赖。**load_ccr 全程零 iri_* 读**。
 - **移出推论**：loader 仍须读 NOD 段计数（段界校验必需）与每记录邻接域 first_edge/edge_count
-  （36B 记录偏移 +24/+28，EDG 守卫消费）——28B 语义字段写线性流 = 唯一可搬体。现 NOD 语义字段
+  （36B 记录偏移 **+28/+32**——first_edge@+28/edge_count@+32，s1 为 8B 占 +8..+16；EDG 守卫消费）——28B 语义字段写线性流 = 唯一可搬体。现 NOD 语义字段
   除 g_ir_instrs 外**无任何保留**（含邻接 = load_ccr 局部）→ Task 1 须裁决 NOD 对象留存形态
   （对象存储 or build_linear_schedule 重扫 data 缓冲——buf 存活至 corearch_main 尾，重扫式可行；
   文件段偏移现为 load_ccr 局部，重扫式需把 NOD 段界传出或段表重走）。
@@ -216,7 +216,7 @@
 ### ④ 判定读 meta 面全集（通道切换精确函数面）
 
 - ent_kernel.cr 代码级 g_opt_meta 读点 = **唯一函数 meta_reg_for_var :504-525**（全文 12 处
-  g_opt_meta 提及：11 注释 + 本函数 5 代码读——循环界 g_opt_meta_count :507、块 key :509、
+  g_opt_meta 提及 = 12 行（**7 注释 + 5 代码读**——评审修正：11+5 计数矛盾）——循环界 g_opt_meta_count :507、块 key :509、
   data_len :511、对 var :515、对 reg :517）。布局：OPT_META_STRIDE = 64（ast.cr:642）、
   OPT_KEY_REG_ASSIGN = 0（ast.cr:641）@+0 / data_len @+4 / count @+8（跳过）/ 对 var@+12 reg@+16
   8B 步进——与 loader opt_meta 段（ccr_io :1117-1140）及 emit 侧同布局。
@@ -253,5 +253,6 @@
   实现注：必须先剥注释（// 与 /* */）再扫 identifier——rl_print_loc x86 注记在注释层，不剥则
   误报；可选强化 = 引用标识符 ∩ 实例独有文件函数定义集 = ∅（结构守卫的文本镜像，成本低）。
 - **测试落点**：tests/selfhost/ 新文件 test_ent_kernel_neutrality.py（纯源码文本扫描，无 build
-  依赖，与 selfhost 套件同风格入回归面）。Task 4 Step 1 先写先红（现态 meta_reg_for_var 仍在 →
-  红），Task 2 切换后转绿——guard 先写 = 早暴露纪律。
+  依赖，与 selfhost 套件同风格入回归面）。**guard 落点 = Task 2 Step 1（评审 Minor 3 修正——与登记表
+  API 失败测试同批前置写）：现态 meta_reg_for_var 仍在 → 红; Task 2 切换后转绿**——Task 4 首写则首跑即绿、
+  红验证丢失（且坏剥注释/正则空转不可察）。
