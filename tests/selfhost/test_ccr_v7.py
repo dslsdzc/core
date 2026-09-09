@@ -935,6 +935,12 @@ def test_v7_object_surface_recipe_readable():
       · 源函数域（节点 < EXPECT_SRC_SPAN）数据边/state 边 = 表一「去幽灵后」
         期望（EXPECT_DATA/EXPECT_STATE 复用——已知小程序期望锚）。
 
+    Task 4 配方查询补体（函数化收敛锚）：出边遍历 = 内核 nod_inputs 薄封装
+    （dump_object_surface 内联遍历收敛调用——行为零变化，上列全量输出断言 =
+    收敛后封装体逐字节同的运行时证明）；结构断言（本测试尾部）= fn nod_inputs
+    存在 + dump 通道经 nod_inputs 出边——防悬空注复发（历史：Task 1 评审 M-1
+    曾以文档化遍历模式交付、封装推迟）。
+
     说明：dump 通道经 loader（NOD/EDG 段载入对象缓冲）→ build_linear_schedule
     （调度重建移实例后 g_ir_instrs 仍须就位——dump 分支在重建后、发射前）。"""
     ccr_path = os.path.join(BASE, 'build/test_v7_objects.ccr')
@@ -978,6 +984,17 @@ def test_v7_object_surface_recipe_readable():
             f"data edges mismatch:\n  got      {got_data}\n  expected {EXPECT_DATA}"
         assert got_state == EXPECT_STATE, \
             f"state edges mismatch:\n  got      {got_state}\n  expected {EXPECT_STATE}"
+        # Task 4 配方查询补体结构锚（悬空注落实——见 docstring Task 4 节）：
+        # 内核定义 fn nod_inputs（薄封装——查询函数落实）+ 实例通道收敛经其
+        # 出边（函数化收敛）。上列运行时断言经收敛后通道 = 封装体行为证明。
+        kern_src = os.path.join(BASE, 'src/arch/linux/ld/ent_kernel.cr')
+        ktext = open(kern_src, encoding='utf-8').read()
+        assert 'fn nod_inputs(n: int) {' in ktext, \
+            "kernel nod_inputs recipe-query wrapper missing (dangling note reverted)"
+        drv_src = os.path.join(BASE, 'src/compiler/corearch.cr')
+        dtext = open(drv_src, encoding='utf-8').read()
+        assert 'nod_inputs(ni)' in dtext, \
+            "dump_object_surface must traverse edges via kernel nod_inputs"
     finally:
         try:
             os.unlink(ccr_path)

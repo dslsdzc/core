@@ -328,8 +328,13 @@ def check_regalloc(source: str, extra_flags) -> tuple:
     return corearch_chan(source, "--check-regalloc", *extra_flags)
 
 
+# 措辞注记（Task 4 输出面中性化——测试 = 行为锚, 措辞 = 输出面）：内核违反
+# 诊断前缀 "regalloc-consistency" → "entry-consistency"（条目版本表一致性——
+# 中性语义名；内核措辞批，判定语义/规则号/数值结构不变）；SUMMARY_LINE/
+# ASSIGN_LINE 前缀 = 实例侧（corearch.cr 通道名 --check-regalloc 命名空间）
+# 输出——措辞批范围外，断言保持。
 SUMMARY_LINE = re.compile(r"^regalloc-consistency: funcs (\d+) violations (\d+)$", re.MULTILINE)
-VIOLATION_LINE = re.compile(r"^regalloc-consistency: func \d+ \(.+\): rule (\d+) violation", re.MULTILINE)
+VIOLATION_LINE = re.compile(r"^entry-consistency: func \d+ \(.+\): rule (\d+) violation", re.MULTILINE)
 ASSIGN_LINE = re.compile(r"^regalloc-assign: (\d+) pairs$", re.MULTILINE)
 
 
@@ -625,7 +630,7 @@ def check_regalloc_read_gap_nonfunc0() -> tuple:
     m = SUMMARY_LINE.search(out)
     if not m or int(m.group(2)) == 0:
         return False, f"check-regalloc +--inject-read-gap (non-func0): summary missing or 0 violations:\n{out[-500:]}"
-    v = re.search(r"^regalloc-consistency: func (\d+) \((\S+)\): rule (\d+) violation",
+    v = re.search(r"^entry-consistency: func (\d+) \((\S+)\): rule (\d+) violation",
                   out, re.MULTILINE)
     if not v:
         return False, f"check-regalloc +--inject-read-gap (non-func0): no violation line:\n{out[-500:]}"

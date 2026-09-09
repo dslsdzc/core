@@ -13,7 +13,7 @@
 // （资源域代数参数化（判定读 g_opt_meta 的耦合）/双向契约（home 回填）= 蓝图
 // 后续步骤——范围克制注，本任务不做）。
 //
-// 声明行字段（8 × i32；INST_DECL_STRIDE = 32，行序 = id 序）：
+// 声明行字段（10 × i32；INST_DECL_STRIDE = 40，行序 = id 序）：
 //   id            实例标识（INST_X86 = 0 默认实例；INST_TABLE = 1）
 //   name          str_idx（str_intern 内联名——instance_lookup 查表键；有效期 =
 //                  装载前引导选择期：load_ccr 会重置 g_strs 重载 .ccr STR 段，
@@ -23,6 +23,12 @@
 //   allow_link    是否允许 --link/--shared（M2-1 拒绝门）
 //   needs_alloc   生产路径是否执行寄存器分配职责（级别 ≥ 2 时）
 //   needs_verify  生产路径是否执行一致性自检职责（alloc 后）
+//   needs_eviction  判定③ 形式声明（x86 = 0——静态放置无驱逐事件）
+//   needs_call_sites 判定④ 形式声明（x86 = 0——callee-saved 平凡满足）
+//   ——③④ 引擎不实现（用户裁决——设计 spec §3.2：字段 = 能力声明承载，契约
+//   完整性 = 字段存在 + 文档；needs_* = 1 的未来实例出现时 = 引擎扩展的注册
+//   契约演进点）。行数据注：表模式路径行同 {0, 0}（表路径无驱逐/调用点事件
+//   ——恒 O0 直线路径）。
 //
 // 表数据 = x86 实例声明 + 表模式路径声明：
 //   · x86（原生路径）   ：窗口 [0,3]（现 CLI 钳制常数即该窗口值），allow_link
@@ -44,7 +50,7 @@
 
 INST_X86 : int = 0;
 INST_TABLE : int = 1;
-INST_DECL_STRIDE : int = 32;    // 行 = 8 × i32（LE）
+INST_DECL_STRIDE : int = 40;    // 行 = 10 × i32（LE）
 INST_OFF_ID : int = 0;
 INST_OFF_NAME : int = 4;
 INST_OFF_OPT_MIN : int = 8;
@@ -53,6 +59,8 @@ INST_OFF_ALLOW_TABLE : int = 16;
 INST_OFF_ALLOW_LINK : int = 20;
 INST_OFF_NEEDS_ALLOC : int = 24;
 INST_OFF_NEEDS_VERIFY : int = 28;
+INST_OFF_NEEDS_EVICTION : int = 32;     // 判定③ 形式声明（引擎不实现——§3.2）
+INST_OFF_NEEDS_CALL_SITES : int = 36;   // 判定④ 形式声明（引擎不实现——§3.2）
 
 g_instance_decl : string, mut;  // 实例声明表（行 × INST_DECL_STRIDE 字节）
 g_instance_count : int, mut;
@@ -68,7 +76,8 @@ fn grow_instance_decl(needed: int) {
 }
 
 fn instance_decl_add(id: int, name_idx: int, opt_min: int, opt_max: int,
-                     allow_table: int, allow_link: int, needs_alloc: int, needs_verify: int) {
+                     allow_table: int, allow_link: int, needs_alloc: int,
+                     needs_verify: int, needs_eviction: int, needs_call_sites: int) {
     grow_instance_decl(g_instance_count + 1);
     off : ., mut = g_instance_count * INST_DECL_STRIDE;
     w32(g_instance_decl, off + INST_OFF_ID, id);
@@ -79,6 +88,8 @@ fn instance_decl_add(id: int, name_idx: int, opt_min: int, opt_max: int,
     w32(g_instance_decl, off + INST_OFF_ALLOW_LINK, allow_link);
     w32(g_instance_decl, off + INST_OFF_NEEDS_ALLOC, needs_alloc);
     w32(g_instance_decl, off + INST_OFF_NEEDS_VERIFY, needs_verify);
+    w32(g_instance_decl, off + INST_OFF_NEEDS_EVICTION, needs_eviction);
+    w32(g_instance_decl, off + INST_OFF_NEEDS_CALL_SITES, needs_call_sites);
     g_instance_count = g_instance_count + 1;
 }
 
@@ -91,8 +102,11 @@ fn instance_decl_init() {
     // （instance_select）全在选择期（装载前），无装载后读名路径——届时注册
     // 校验若读名须装载后重内联（蓝图后续）。
     if g_instance_count > 0 { return; }
-    instance_decl_add(INST_X86, str_intern("x86"), 0, 3, 0, 1, 1, 1);
-    instance_decl_add(INST_TABLE, str_intern("table"), 0, 0, 1, 0, 0, 0);
+    // ③④ 行数据 = {0, 0}（x86：静态放置无驱逐事件 + callee-saved 平凡满足；
+    // 表模式路径：恒 O0 直线路径无驱逐/调用点事件——同 {0, 0}；引擎不实现，
+    // 设计 spec §3.2——字段 = 声明完整性）。
+    instance_decl_add(INST_X86, str_intern("x86"), 0, 3, 0, 1, 1, 1, 0, 0);
+    instance_decl_add(INST_TABLE, str_intern("table"), 0, 0, 1, 0, 0, 0, 0, 0);
 }
 
 fn inst_id(i: int) -> int { return r32(g_instance_decl, i * INST_DECL_STRIDE + INST_OFF_ID); }
@@ -103,6 +117,8 @@ fn inst_allow_table(i: int) -> int { return r32(g_instance_decl, i * INST_DECL_S
 fn inst_allow_link(i: int) -> int { return r32(g_instance_decl, i * INST_DECL_STRIDE + INST_OFF_ALLOW_LINK); }
 fn inst_needs_alloc(i: int) -> int { return r32(g_instance_decl, i * INST_DECL_STRIDE + INST_OFF_NEEDS_ALLOC); }
 fn inst_needs_verify(i: int) -> int { return r32(g_instance_decl, i * INST_DECL_STRIDE + INST_OFF_NEEDS_VERIFY); }
+fn inst_needs_eviction(i: int) -> int { return r32(g_instance_decl, i * INST_DECL_STRIDE + INST_OFF_NEEDS_EVICTION); }
+fn inst_needs_call_sites(i: int) -> int { return r32(g_instance_decl, i * INST_DECL_STRIDE + INST_OFF_NEEDS_CALL_SITES); }
 
 fn instance_lookup(name_idx: int) -> int {
     // 按名查行（name = str_idx，str_intern 去重 → 等值串恒同 idx）。
@@ -208,9 +224,10 @@ fn regalloc_debug_dispatch() -> int {
 
 // --dump-objects 调试通道（内核完备 Task 1 测试载体）：实例侧薄通道——
 // 经内核对象面访问器（nod_op/nod_dest/nod_s1-3/nod_tk + nod_edge_first/count
-// + v7_edge_to/v7_edge_kind——ent_kernel.cr，内核零新增）输出载入对象：逐
-// 节点语义字段 + 邻接域 + 配方出边遍历（邻接索引区间
-// [first, first+count) 内逐边——v7_edge_to/kind 读 EDG 缓冲）。
+// + v7_edge_to/v7_edge_kind——ent_kernel.cr）输出载入对象：逐节点语义字段 +
+// 邻接域 + 配方出边遍历（Task 4 函数化收敛：出边遍历 = 内核配方查询封装
+// nod_inputs 调用——内联遍历自本通道搬移，dump 输出逐字节同，判据 =
+// test_ccr_v7 对象面断言 + --dump-objects 语料 byte-compare）。
 // 行格式契约见 tests/selfhost/test_ccr_v7.py:parse_object_dump。
 fn dump_object_surface() {
     print("objects: "); print_i(g_v7_nod_count); println("");
@@ -227,15 +244,7 @@ fn dump_object_surface() {
         print(" fe "); print_i(nod_edge_first(ni));
         print(" ec "); print_i(nod_edge_count(ni));
         println("");
-        last : ., mut = nod_edge_first(ni) + nod_edge_count(ni);
-        ej : ., mut = nod_edge_first(ni);
-        loop {
-            if ej >= last { break; }
-            print("edge "); print_i(ni);
-            print(" to "); print_i(v7_edge_to(ej));
-            print(" kind "); println_i(v7_edge_kind(ej));
-            ej = ej + 1;
-        }
+        nod_inputs(ni);   // 配方输入遍历（出边记录行——内核 nod_inputs 封装）
         ni = ni + 1;
     }
 }
