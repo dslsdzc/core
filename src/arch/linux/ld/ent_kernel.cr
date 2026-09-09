@@ -6,28 +6,38 @@
 // （位置 + 配方 + 存在）；资源域（寄存器/槽的代数）= 实例侧声明。
 // 机器侧（x86 实例）= regalloc.cr：CAG alloc_registers + g_opt_meta 写入
 // （meta_set/append/remove/meta_reg_assign_total）+ 注入钩子（cir debug 测试通道）。
-// 同 concat 单编译单元（corearch concat）互调——跨文件引用无需声明头；判定
-// 消费的分配结果真相源 = g_opt_meta（globals.cr 共享声明），本文件读通道 =
-// meta_reg_for_var（纯读——写入留实例侧）。
+// 同 concat 单编译单元（corearch concat）互调——跨文件引用无需声明头。
+// B 通道中立化（内核完备 Task 3，2026-09-10）：判定输入真相源 = 位置登记表
+// {entry→loc}（kern_loc_assign/clear/of——实例写 g_opt_meta 后经 kern API 成对
+// 登记/清除——双份同步责任在实例）；本文件读通道 = 登记表（meta_reg_for_var
+// = 登记表查询——var 级驻留，历史名保留——调用点 = rl_rule2_func + regalloc.cr
+// 注入探针）。g_opt_meta 本身 = 实例 emit 面私有结构（instr.cr get_reg_for_var
+// 消费），本文件零代码引用（中立性 guard B 组绿判据）。
 //
 // 本文件函数集 = 内核接口面（现名即 API——不加 kern_ 包装层，YAGNI 裁决，
 // 内核抽取 Task 3）。内核 API 面按职责族：
 //   数据面  ：grow_live_ranges/live_range_slot/live_first/live_last/compute_live_ranges
 //            grow_entries/grow_func_entry_meta/ent_off/ent_var/ent_def/ent_live_start/
 //            ent_live_end/ent_home/ent_flags/entry_start/entry_count/compute_entries
+//   位置登记：kern_loc_assign/kern_loc_clear/kern_loc_of（{entry→loc} 不透明位置
+//            登记表——判定输入统一形态，实例经 API 写入；loc_registry_reset =
+//            条目重建同点清表）
 //   判定服务：entries_coexist/coexist_version_conflicts/coexist_home_conflicts/
 //            verify_regalloc_consistency/regalloc_verify_all（规则①②合成）+ 判定
 //            诊断（rl_rec_lt/rl_merge_sort/rl_print_loc/rl_func_name/rl_report_*）
 //   诊断通道：dump_entries_summary/dump_coexist_summary（cir 调试 dump 载体）
 //            + ir_op_kind_name（--dump-entries kind= 定值种类名，Task 2 迁入）
 // 实例侧（x86 实例机器函数）= regalloc.cr：CAG alloc_registers + g_opt_meta 写入
-// （meta_set/append/remove/meta_reg_assign_total）+ 注入钩子（cir debug 测试通道）。
+// （meta_set/append/remove/meta_reg_assign_total）+ 注入钩子（cir debug 测试通道）
+// ——写入点成对调 kern 登记/清除（双份同步纪律，Task 3 配对点 = phase 5 +
+// meta_set_reg/meta_remove_var，见 regalloc.cr 注记）。
 // 注册契约最小面（2026-09-10 内核抽取 Task 3）：实例声明表 g_instance_decl
 // （corearch.cr 声明——corearch 侧数据）——行 = {id, name str_idx, opt_min,
 // opt_max, allow_table, allow_link, needs_alloc, needs_verify} × n（x86 实例 +
 // 表模式路径声明）；引导 = corearch_main 读 flag → instance_select() 查表选实例
-// → 决策逐点查询活动实例行（拒绝门/表管线门/O2 职责门）。资源域代数参数化
-// （判定读 g_opt_meta 的耦合）/双向契约（home 回填）= 蓝图后续步骤（范围克制）。
+// → 决策逐点查询活动实例行（拒绝门/表管线门/O2 职责门）。判定输入中立化
+// （B 通道——位置登记表 + home 字段独立遍，2026-09-10 完成，见登记表节）/
+// 双向契约（home 回填生产）= 蓝图后续步骤（范围克制）。
 // 区头注随搬逐字保留（其中「判定区」「alloc 区」互指现分居本文件/regalloc.cr）。
 // ------------------------------------------------------------------
 // v6 数据基础：存在区间推导（NOD 节点序 [first_ref, last_ref]——节点序 =
@@ -210,7 +220,13 @@ fn entry_count(func_i: int) -> int {
 }
 
 fn compute_entries(func_i: int) -> int {
-    if func_i == 0 { g_entry_count = 0; }
+    if func_i == 0 {
+        g_entry_count = 0;
+        // 条目表整代重建——旧登记全失效（B 通道中立化 2026-09-10：登记 =
+        // 本代条目语义——新代条目复用旧槽位，不清 = 陈旧 loc 误读；实例登记
+        // 只发生在本代 compute 完成之后 = phase 5/注入，时序安全）
+        loc_registry_reset();
+    }
     // 函数窗口源同 compute_live_ranges（F3 注记，2026-09-10）：ist/ic =
     // g_ir_func_instr_start/count——值 = NOD 节点坐标（节点序 = 指令序
     // index-aligned）；节点字段读 = 对象面 nod_*（A 通道中立化）。
@@ -488,10 +504,11 @@ fn dump_coexist_summary() {
 }
 // ===== v6 Task 5：判定消费最小闭环（一致性自检——共 specs/
 // regalloc-consistency.corespec 规约）=====
-// 分配结果真相源 = g_opt_meta 的 OPT_KEY_REG_ASSIGN 对（var_idx → x86 寄存器号）：
-// instr.cr 的 g2_slot/get_reg_for_var 在发射时按此把 var 落寄存器（regalloc 移
-// 后端后 = corearch 进程内自算自消费——.ccr 不再传输这份 meta）——判定消费它
-// 就是消费「实际编码的分配」。
+// 分配结果：实例侧 g_opt_meta 的 OPT_KEY_REG_ASSIGN 对（var_idx → 位置——x86
+// 寄存器号；instr.cr g2_slot/get_reg_for_var 发射时按对落寄存器 = emit 面）。
+// 判定消费 = 位置登记表（B 通道中立化 2026-09-10：实例写 g_opt_meta 后经
+// kern_loc_* 登记——判定经登记表消费「实际编码的分配」的一致视图——本文件
+// 零 g_opt_meta 代码引用，布局知识留实例侧）。
 // （注：本文件旧区头「IR 操作数改写为负编码」是过时设计残留——实现已改为
 // 元数据表 + 后端 g2_slot 查询，判定按实现走。）
 // 版本级 vs 变量级对齐（衔接决策 b）：alloc_registers（CAG 升级后仍）是变量级
@@ -511,31 +528,96 @@ fn dump_coexist_summary() {
 // 侧零引用（2026-09-10 内核抽取 Task 2 自 regalloc.cr 迁入）。
 RPT_MAX : int = 8;              // 规则违反诊断每函数每规则打印上限（计数不封顶）
 
-LOC_HOME_BASE : int = 1000000;  // 位置编码：寄存器号直用（0..15）；home 槽偏移本常量
+// ===== 位置登记表（B 通道中立化——内核完备 Task 3，2026-09-10）=====
+// 判定输入 = 实例分配结果的统一形态——{entry → loc} 登记。loc = 不透明整数：
+// 内核只做相等/排序/同值互斥，无寄存器号/域分类/编码合成概念（设计 spec
+// §2.2 修正——home 面 = 条目 home 字段独立遍，不复用合成，见 verify 规则①）。
+// 写侧 = 实例（alloc_registers phase 5 + 注入钩子——写 g_opt_meta 后经本 API
+// 成对登记/清除——双份同步责任在实例，配对点注记见 regalloc.cr）；读侧 =
+// 判定（规则① 登记表遍 kern_loc_of + meta_reg_for_var var 级驻留查询）。
+// 生命周期：条目表整代重建（compute_entries func_i==0）使全部登记失效 → 同点
+// loc_registry_reset()。表 = 每条目 4B 槽（entry_idx * 4；-1 = 未登记），按
+// 条目下标 O(1) 寻址（读走 buf_read_i32 带符号扩展——w32/buf_read_i32 同
+// ent_* 族约定，见 ent_var 注）。
+g_loc_reg_buf : string, mut;   // 登记表缓冲（4B/槽——槽 e = 条目 e 的 loc 或 -1）
+g_loc_reg_cap : int, mut;      // 登记表容量（槽数）
 
-// 分配结果解析：与 instr.cr get_reg_for_var 同进程、同 g_opt_meta 布局
-// （regalloc 移后端前 corec 侧镜像已随迁收敛——本函数为判定侧独立访问）。
-fn meta_reg_for_var(var_idx: int) -> int {
-    mi : ., mut = 0;
+fn loc_registry_reset() {
+    // 条目重建点调用（compute_entries func_i==0）——已登记区整清 -1
+    // （O(cap) 一次/代；新增长槽已在 kern_loc_assign -1 初始化）
+    zi : ., mut = 0;
     loop {
-        if mi >= g_opt_meta_count { break; }
-        mo := mi * OPT_META_STRIDE;
-        mk := r32(g_opt_meta, mo);
-        if mk == OPT_KEY_REG_ASSIGN {
-            data_len := r32(g_opt_meta, mo + 4);
-            di : ., mut = 4;  // skip count u32, pairs start at +4
-            loop {
-                if di >= data_len { break; }
-                vi := r32(g_opt_meta, mo + 8 + di);
-                if vi == var_idx {
-                    return r32(g_opt_meta, mo + 8 + di + 4);
-                }
-                di = di + 8;
-            }
-        }
-        mi = mi + 1;
+        if zi >= g_loc_reg_cap { break; }
+        w32(g_loc_reg_buf, zi * 4, -1);
+        zi = zi + 1;
     }
-    return -1;
+}
+
+fn kern_loc_assign(entry_idx: int, loc: int) {
+    if entry_idx < 0 { return; }
+    if entry_idx >= g_loc_reg_cap {
+        nc : ., mut = g_loc_reg_cap * 2;
+        if nc < 64 { nc = 64; }
+        if nc <= entry_idx { nc = entry_idx + 64; }
+        nb := alloc(nc * 4);
+        _dyncpy(g_loc_reg_buf, g_loc_reg_cap * 4, nb);
+        zi : ., mut = g_loc_reg_cap;
+        loop {
+            if zi >= nc { break; }
+            w32(nb, zi * 4, -1);   // 新槽 -1 初始化（未登记 = -1 哨兵）
+            zi = zi + 1;
+        }
+        g_loc_reg_buf = nb;
+        g_loc_reg_cap = nc;
+    }
+    w32(g_loc_reg_buf, entry_idx * 4, loc);
+}
+
+fn kern_loc_clear(entry_idx: int) {
+    if entry_idx < 0 || entry_idx >= g_loc_reg_cap { return; }
+    w32(g_loc_reg_buf, entry_idx * 4, -1);
+}
+
+fn kern_loc_of(entry_idx: int) -> int {
+    if entry_idx < 0 || entry_idx >= g_loc_reg_cap { return -1; }
+    return buf_read_i32(g_loc_reg_buf, entry_idx * 4);
+}
+
+// var 级驻留查询（判定读通道——B 通道中立化 2026-09-10 函数体等价改写：旧 =
+// 直读 g_opt_meta 实例布局 → 现 = 登记表查询——kern_loc_of 逐条目）。var 级
+// 单位置分配（regalloc.cr 分配粒度决策）⇒ 同 var 全版本条目同 loc 登记——
+// 任一已登记条目 = 驻留、loc = 该条目 loc（与旧投影语义精确等价：var 分配
+// ⇔ 全条目登记，配对点见 regalloc.cr phase 5 注记）。历史函数名保留（现名
+// 即 API）：调用点 = rl_rule2_func 驻留过滤 + regalloc.cr 注入探针
+// try_inject_read_gap（探针读同一内核函数 = 经登记表读——判定与探针单真源，
+// 注入路径配对保持登记与 g_opt_meta 同步，红路径测试 = test_live_ranges
+// check_regalloc_violations/read_gap_nonfunc0）。
+// 窗口搜索注记：var 的条目只存在于所属函数的条目段——先按 var 窗口定位函数
+// 再扫该段（避免全表扫描；与 rl_rule2_func 既有 per-var 条目收集同界）。
+fn meta_reg_for_var(var_idx: int) -> int {
+    fi : ., mut = 0;
+    loop {
+        if fi >= g_ir_func_count { break; }
+        vs := r64(g_ir_func_var_start, fi * 8);
+        vc := r64(g_ir_func_var_count, fi * 8);
+        if var_idx >= vs && var_idx < vs + vc {
+            es := entry_start(fi);
+            ec := entry_count(fi);
+            ei : ., mut = 0;
+            loop {
+                if ei >= ec { break; }
+                e := es + ei;
+                if ent_var(e) == var_idx {
+                    loc := kern_loc_of(e);
+                    if loc >= 0 { return loc; }
+                }
+                ei = ei + 1;
+            }
+            return -1;   // 窗口内无登记条目 = 非驻留
+        }
+        fi = fi + 1;
+    }
+    return -1;   // 不在任何函数 var 窗口（全局 var 等）——恒非驻留
 }
 
 // 16B 记录比较（归并用）：key = (loc, entry 的 live_start)，均升序
@@ -599,12 +681,15 @@ fn rl_merge_sort(buf: string, n: int) {
     }
 }
 
-// 打印位置描述（loc < LOC_HOME_BASE = 寄存器号；否则 home 槽）
-fn rl_print_loc(loc: int) {
-    if loc >= LOC_HOME_BASE {
-        print("home slot "); print(int_str(loc - LOC_HOME_BASE));
+// 打印位置描述（B 通道中立化 2026-09-10：登记表 loc 与条目 home 字段 = 两个
+// 独立值域——规则① 两遍互斥判定各自报告；home 标记 = 遍来源（home 字段遍 vs
+// 登记表遍），非位置值分类——判据不消费此标记，仅诊断措辞面（输出措辞中性化
+// = Task 4 输出面批——本任务保持措辞字节不变）。无域偏移合成。
+fn rl_print_loc(loc: int, home: int) {
+    if home != 0 {
+        print("home slot "); print(int_str(loc));
     } else {
-        print("reg "); print(int_str(loc));  // x86 寄存器枚举号（3=rbx, 12-15=r12-r15）
+        print("reg "); print(int_str(loc));
     }
 }
 
@@ -613,16 +698,58 @@ fn rl_func_name(fi: int) {
     print(istr_get(r64(g_ir_func_name_idx, fi * 8))); print(")");
 }
 
-// 规则 ① 违反诊断（打印上限 RPT_MAX 防病理刷屏，计数不封顶）
-fn rl_report_rule1(func_i: int, loc: int, e1: int, e2: int) {
+// 规则 ① 违反诊断（打印上限 RPT_MAX 防病理刷屏，计数不封顶）。
+// home != 0 = home 字段遍（措辞标记——见 rl_print_loc 注）
+fn rl_report_rule1(func_i: int, loc: int, e1: int, e2: int, home: int) {
     print("regalloc-consistency: "); rl_func_name(func_i);
     print(": rule 1 violation: entries "); print(int_str(e1));
     print(" (var "); print(int_str(ent_var(e1))); print(") and "); print(int_str(e2));
     print(" (var "); print(int_str(ent_var(e2))); print(") both at ");
-    rl_print_loc(loc);
+    rl_print_loc(loc, home);
     print(", coexist ["); print(int_str(ent_live_start(e1))); print("..");
     print(int_str(ent_live_end(e1))); print("] x ["); print(int_str(ent_live_start(e2)));
     print(".."); print(int_str(ent_live_end(e2))); println("]");
+}
+
+// 规则① 同值互斥遍（归并段扫——sweep 门禁）：rec = {loc:8, entry:8} 记录按
+// (loc, live_start) 归并排序（rl_merge_sort）——同 loc 连续段内维持最大
+// live_end：max_end ≥ 当前 ls ⟹ 区间相交 = 违反（rl_report_rule1 报告）。
+// home != 0 = home 字段遍（措辞标记）；cap_base = 前遍已打印数——RPT_MAX
+// 按规则合并封顶（两遍共享 = 与现单遍合成打印同界——输出逐字节同）。
+fn rl_rule1_sweep(func_i: int, rec: string, cnt: int, home: int, cap_base: int) -> int {
+    viol : ., mut = 0;
+    rl_merge_sort(rec, cnt);
+    run_start : ., mut = 0;
+    loop {
+        if run_start >= cnt { break; }
+        run_end : ., mut = run_start + 1;
+        loop {
+            if run_end >= cnt { break; }
+            if r64(rec, run_end * 16) != r64(rec, run_start * 16) { break; }
+            run_end = run_end + 1;
+        }
+        maxj : ., mut = -1;
+        zi : ., mut = run_start;
+        loop {
+            if zi >= run_end { break; }
+            e := r64(rec, zi * 16 + 8);
+            if maxj >= 0 {
+                mej := r64(rec, maxj * 16 + 8);
+                if ent_live_end(mej) >= ent_live_start(e) {
+                    if cap_base + viol < RPT_MAX {
+                        rl_report_rule1(func_i, r64(rec, zi * 16), mej, e, home);
+                    }
+                    viol = viol + 1;
+                }
+            }
+            if maxj < 0 || ent_live_end(e) > ent_live_end(r64(rec, maxj * 16 + 8)) {
+                maxj = zi;
+            }
+            zi = zi + 1;
+        }
+        run_start = run_end;
+    }
+    return viol;
 }
 
 // 规则 ② 违反诊断
@@ -724,8 +851,9 @@ fn rl_rule2_func(func_i: int, vs: int, vc: int, nst: int, nc: int, es: int, ec: 
     return violations;
 }
 
-// 判定实现（0 = 一致 1 = 违反）——消费条目表（存在区间/home）+ 分配结果
-// （g_opt_meta 投影）。precondition：alloc_registers() 已跑（条目表随算随新）。
+// 判定实现（0 = 一致 1 = 违反）——消费条目表（存在区间/home 字段）+ 位置
+// 登记表（分配结果统一形态——B 通道中立化 2026-09-10，见登记表节）。
+// precondition：alloc_registers() 已跑（条目表随算随新、登记已配对）。
 fn verify_regalloc_consistency(func_i: int) -> int {
     if func_i < 0 || func_i >= g_ir_func_count { return 0; }
     es := entry_start(func_i);
@@ -739,35 +867,41 @@ fn verify_regalloc_consistency(func_i: int) -> int {
     vc := r64(g_ir_func_var_count, func_i * 8);
     vs := r64(g_ir_func_var_start, func_i * 8);
 
-    // 规则 ①：位置组 = 寄存器（meta 投影，loc = 寄存器号）∪ home（回填 seam，
-    // loc = LOC_HOME_BASE + home）。收集有位置条目 → 按 (loc, live_start) 归并
-    // 排序 → 同 loc 段内 ls 升序单遍维持最大 live_end：max_end ≥ 当前 ls ⟹ 相交。
-    cnt : ., mut = 0;
+    // 规则 ①：同值互斥两遍（B 通道中立化 2026-09-10——设计 spec §2.2 修正：
+    // 位置 = 不透明整数，内核无 reg/home 值域分类与编码合成概念）——
+    //   (1) 登记表遍：kern_loc_of(e) ≥ 0 的条目按 loc 分组（实例分配输出的
+    //       统一登记——现 = 寄存器面；实例若把 home 也登记，合成发生在实例
+    //       登记动作内，内核只见不透明值）；
+    //   (2) home 字段遍：ent_home ≥ 0 条目按 home 值分组（条目字段独立遍，
+    //       -1 未分配哨兵跳过——不复用合成）。
+    // 遍序 = 登记表遍先（与现合成排序同序：reg loc 段升序全部先于 home 段——
+    // 输出逐字节同）；两遍各自 (loc, live_start) 归并排序后同值互斥 sweep。
+    // 排他注记（与现 else-if 合成语义逐条等价）：已登记条目不进 home 遍——
+    // 双态条目（已登记 + home ≥ 0）不可达（注入路径先清登记再写 home；真实
+    // 分配不回填 home），排他 = 现语义 reg 优先的保持（防双态假冲突）。
+    reg_cnt : ., mut = 0;
+    home_cnt : ., mut = 0;
     ei : ., mut = 0;
     loop {
         if ei >= ec { break; }
         e := es + ei;
         if ent_live_start(e) >= 0 && ent_live_end(e) >= 0 {
-            v := ent_var(e);
-            if meta_reg_for_var(v) >= 0 { cnt = cnt + 1; }
-            else if ent_home(e) >= 0 { cnt = cnt + 1; }
+            if kern_loc_of(e) >= 0 { reg_cnt = reg_cnt + 1; }
+            else if ent_home(e) >= 0 { home_cnt = home_cnt + 1; }
         }
         ei = ei + 1;
     }
     rule1_viol : ., mut = 0;
-    if cnt > 1 {
-        rec : string, mut = alloc(cnt * 16);
+    // 登记表遍（先）
+    if reg_cnt > 1 {
+        rec : string, mut = alloc(reg_cnt * 16);
         ci : ., mut = 0;
         ei = 0;
         loop {
             if ei >= ec { break; }
             e := es + ei;
             if ent_live_start(e) >= 0 && ent_live_end(e) >= 0 {
-                v := ent_var(e);
-                loc : ., mut = -1;
-                rn := meta_reg_for_var(v);
-                if rn >= 0 { loc = rn; }
-                else if ent_home(e) >= 0 { loc = LOC_HOME_BASE + ent_home(e); }
+                loc := kern_loc_of(e);
                 if loc >= 0 {
                     w64(rec, ci * 16, loc);
                     w64(rec, ci * 16 + 8, e);
@@ -776,37 +910,27 @@ fn verify_regalloc_consistency(func_i: int) -> int {
             }
             ei = ei + 1;
         }
-        rl_merge_sort(rec, cnt);
-        run_start : ., mut = 0;
+        rule1_viol = rl_rule1_sweep(func_i, rec, reg_cnt, 0, 0);
+    }
+    // home 字段遍（独立遍——cap_base = 登记表遍已打印数（RPT_MAX 合并封顶））
+    if home_cnt > 1 {
+        rec : string, mut = alloc(home_cnt * 16);
+        ci : ., mut = 0;
+        ei = 0;
         loop {
-            if run_start >= cnt { break; }
-            run_end : ., mut = run_start + 1;
-            loop {
-                if run_end >= cnt { break; }
-                if r64(rec, run_end * 16) != r64(rec, run_start * 16) { break; }
-                run_end = run_end + 1;
-            }
-            maxj : ., mut = -1;
-            zi : ., mut = run_start;
-            loop {
-                if zi >= run_end { break; }
-                e := r64(rec, zi * 16 + 8);
-                if maxj >= 0 {
-                    mej := r64(rec, maxj * 16 + 8);
-                    if ent_live_end(mej) >= ent_live_start(e) {
-                        if rule1_viol < RPT_MAX {
-                            rl_report_rule1(func_i, r64(rec, zi * 16), mej, e);
-                        }
-                        rule1_viol = rule1_viol + 1;
-                    }
+            if ei >= ec { break; }
+            e := es + ei;
+            if ent_live_start(e) >= 0 && ent_live_end(e) >= 0 {
+                h := ent_home(e);
+                if h >= 0 {
+                    w64(rec, ci * 16, h);
+                    w64(rec, ci * 16 + 8, e);
+                    ci = ci + 1;
                 }
-                if maxj < 0 || ent_live_end(e) > ent_live_end(r64(rec, maxj * 16 + 8)) {
-                    maxj = zi;
-                }
-                zi = zi + 1;
             }
-            run_start = run_end;
+            ei = ei + 1;
         }
+        rule1_viol = rule1_viol + rl_rule1_sweep(func_i, rec, home_cnt, 1, rule1_viol);
     }
 
     // 规则 ②（框架）：寄存器驻留变量的读点活跃版本覆盖

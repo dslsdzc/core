@@ -102,12 +102,41 @@ fn meta_reg_pair_off(var_idx: int) -> int {
     return -1;
 }
 
+// ── 登记表配对辅助（双份同步纪律——内核完备 Task 3）──
+// 判定面输入 = 位置登记表（kern_loc_assign/clear/of，ent_kernel.cr）；本文件
+// 每 g_opt_meta 写点成对调 kern API——var 级分配/撤销 → 该 var 全部版本条目
+// 逐条登记/清除（与判定侧 meta_reg_for_var「任一已登记条目 = 驻留」投影语义
+// 等价）。配对点全集 = meta_set_reg/meta_remove_var（注入钩子只经此二函数
+// 改写 meta——全部注入路径覆盖，红路径测试 = test_live_ranges
+// check_regalloc_violations/read_gap_nonfunc0 经登记通道仍红）+ alloc_registers
+// phase 5（原语直写不经辅助函数——单独配对，见 alloc 区尾注记）。
+// 条目的所属函数未知（var_idx = 全局 var id）→ 全表扫描（注入 = cir debug
+// 通道，低频小表；生产路径 = phase 5 段界扫描不经本辅助）。
+fn reg_assign_var_entries(var_idx: int, loc: int) {
+    e : ., mut = 0;
+    loop {
+        if e >= g_entry_count { break; }
+        if ent_var(e) == var_idx { kern_loc_assign(e, loc); }
+        e = e + 1;
+    }
+}
+
+fn reg_clear_var_entries(var_idx: int) {
+    e : ., mut = 0;
+    loop {
+        if e >= g_entry_count { break; }
+        if ent_var(e) == var_idx { kern_loc_clear(e); }
+        e = e + 1;
+    }
+}
+
 // 强制 var → reg（已有对原位改写；无对追加——append 语义 = 首匹配生效，
 // 无对时追加必然生效）
 fn meta_set_reg(var_idx: int, reg: int) {
     po := meta_reg_pair_off(var_idx);
-    if po >= 0 { w32(g_opt_meta, po, reg); return; }
-    meta_append_reg_assign(var_idx, reg);
+    if po >= 0 { w32(g_opt_meta, po, reg); }
+    else { meta_append_reg_assign(var_idx, reg); }
+    reg_assign_var_entries(var_idx, reg);   // 登记表配对（判定面同步）
 }
 
 // 移除 var 的分配对（块内左移收拢；空块整体移除）——「撤销寄存器驻留」=
@@ -144,6 +173,7 @@ fn meta_remove_var(var_idx: int) {
                             mj = mj + 1; }
                         g_opt_meta_count = g_opt_meta_count - 1;
                     }
+                    reg_clear_var_entries(var_idx);   // 登记表配对（判定面同步）
                     return;
                 }
                 di = di + 1;
@@ -251,6 +281,11 @@ fn try_inject_read_gap(func_i: int) -> int {
             ei = ei + 1;
         }
         if last >= 0 && ent_live_end(last) > ent_def(last) {
+            // 探针 = 读 meta_reg_for_var（内核完备 Task 3 后 = 登记表读——探针
+            // 与 verify 读同一判定输入通道——单真源选择，理由注记：registry 由
+            // 实例配对写点（alloc phase 5 + meta_set_reg/meta_remove_var）保持
+            // 与 g_opt_meta 同步——本注入的撤销/强制驻留经配对辅助，探针读 =
+            // g_opt_meta 的一致视图，无需实例侧私有直扫）
             if meta_reg_for_var(gv) < 0 {
                 // 强制驻留路径：撤销与 gv 任何版本条目共存的已分配 var
                 ej : ., mut = 0;
@@ -788,6 +823,31 @@ fn alloc_registers() {
                 }
                 g_opt_meta_count = ei + 1;
                 pb = pb + n_in;
+            }
+            // ── 阶段 5 尾：登记表配对（双份同步纪律——内核完备 Task 3）──
+            // g_opt_meta = emit 面私有结构（instr.cr get_reg_for_var 消费）；判定
+            // 面输入 = 位置登记表（kern_loc_assign——每 g_opt_meta 写点成对登记，
+            // 实例责任）。分配粒度 = var 级单位置（见上分配粒度决策）→ 同 var
+            // 全部版本条目登记同 loc：对每个已分配 var vw，对 e ∈ [entry_start(fi),
+            // +entry_count(fi)) 且 ent_var(e) == vw 逐一 kern_loc_assign(e, rn)——
+            // 与判定侧 meta_reg_for_var 投影语义精确等价的前提（var 分配 ⇔ 全
+            // 条目登记；分配器将来升条目级时按条目登记，判定零改动）。
+            es := entry_start(fi);
+            ec := entry_count(fi);
+            ai = 0;
+            loop {
+                if ai >= rc { break; }
+                lvp := r64(asg_lv, ai * 8);
+                vw := vs + lvp;
+                rn := r64(var_asg, lvp * 8);
+                ej : ., mut = 0;
+                loop {
+                    if ej >= ec { break; }
+                    e := es + ej;
+                    if ent_var(e) == vw { kern_loc_assign(e, rn); }
+                    ej = ej + 1;
+                }
+                ai = ai + 1;
             }
         }
         fi = fi + 1;
