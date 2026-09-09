@@ -5,7 +5,7 @@
 // 范式无关：不读值内容、无寄存器名/ABI 常量/编码知识——判定作用于条目类别
 // （位置 + 配方 + 存在）；资源域（寄存器/槽的代数）= 实例侧声明。
 // 机器侧（x86 实例）= regalloc.cr：CAG alloc_registers + g_opt_meta 写入
-// （meta_set/append/remove/reg_assign_total）+ 注入钩子（cir debug 测试通道）。
+// （meta_set/append/remove/meta_reg_assign_total）+ 注入钩子（cir debug 测试通道）。
 // 同 concat 单编译单元（corearch concat）互调——跨文件引用无需声明头；判定
 // 消费的分配结果真相源 = g_opt_meta（globals.cr 共享声明），本文件读通道 =
 // meta_reg_for_var（纯读——写入留实例侧）。
@@ -21,7 +21,7 @@
 //   诊断通道：dump_entries_summary/dump_coexist_summary（cir 调试 dump 载体）
 //            + ir_op_kind_name（--dump-entries kind= 定值种类名，Task 2 迁入）
 // 实例侧（x86 实例机器函数）= regalloc.cr：CAG alloc_registers + g_opt_meta 写入
-// （meta_set/append/remove/reg_assign_total）+ 注入钩子（cir debug 测试通道）。
+// （meta_set/append/remove/meta_reg_assign_total）+ 注入钩子（cir debug 测试通道）。
 // 注册契约最小面（2026-09-10 内核抽取 Task 3）：实例声明表 g_instance_decl
 // （corearch.cr 声明——corearch 侧数据）——行 = {id, name str_idx, opt_min,
 // opt_max, allow_table, allow_link, needs_alloc, needs_verify} × n（x86 实例 +

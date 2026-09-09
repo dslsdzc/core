@@ -1,6 +1,6 @@
 # corearch 内核抽取实施计划（范式无关内核 + 实例定制——演进序步骤 2）
 
-> **状态：待执行（2026-09-10 计划定稿）**
+> **状态：实施完成（2026-09-10）——Task 1-4 落点：Task 1 语义侧纯搬（b0d24b1b：ent_kernel.cr = 内核 32 函数逐字搬移 + LOC_HOME_BASE 单份随判定入内核；regalloc.cr 1560→844 纯机器侧；判据通道 sha256 逐字节同）；Task 2 写侧单源化（edc70fbe + c138c44c：compute_entries_v7/ccr_grow_* 镜像删除、RPT_MAX/ir_op_kind_name 迁内核、ent_kernel 进双 concat + src/compiler import ent_kernel——full-bootstrap 面 N06/SIGSEGV 缺口闭合，全链 N06=0 + corec2/corec3 cmp=0）；Task 3 注册契约最小面（6413dd80：g_instance_decl 两行实例声明表 + 表驱动 dispatch，评审独立 48/48 通道 base↔head 逐字节全同）；Task 4 收官（本提交：全量回归绿——compile/backend_bootstrap 链/hit_table 24/24/region_cfg 22/22/mw1-6/slice_bounds 7/7/live_ranges 13/13/ccr_v7 23/23/bootstrap 三套 + full-bootstrap guard + 自举重建冒烟；蓝图步骤 2 完成注记；cir cache 指纹缺陷挂账 TODO 预存 Bug #5）**
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 从 corearch 的 regalloc.cr 抽出范式无关内核（语义判定引擎 + 条目/区间数据面 + 注册契约最小面），机器侧（CAG 分配/meta 写入）留 x86 实例——行为零变化（判定语义不动只搬家）。

@@ -120,6 +120,12 @@
 - **gdb 证据**：v7 Task 1 报告（.superpowers/sdd/v7-task-1-report.md Concern 1）+ elf.cr 注记
 - **修复方向**：编译器层专项（独立于 v7 链——仓促同修危及 byte-identical 判据）；修复后还原规避代码验证
 
+### 5. cir cache 跨编译器重建不失效（2026-09-10 内核抽取 Task 3 评审确认——预存,待修）
+- **现象**：`.core/cache/cir` 以「源路径::函数名」为键缓存每函数 CIR 快照；缓存命中时旧条目跨编译器重建存活 → 复用的 CIR 与新版字符串表（g_strs 驻留序）错位 → dump 通道（如 corearch --dump-entries）输出部分变量名缺失/错位——实证：806→381 个 `name=` 的翻转（Task 3 验证中复现，同源重建即触发，与具体代码改动无关）
+- **机制**：指纹 = magic/格式版本/完整解析源 AST，无编译器身份分量；源未变则键/指纹不变 → 二进制重建后字符串驻留序漂移不反映到键上 → 陈旧条目静默污染 dump-channel var 名输出
+- **证据**：内核抽取 Task 3 评审 concern ①（.superpowers/sdd/kernel-task-3-report.md）——Task 3 diff 仅 corearch + 注释，base↔head corec cmp 相同；清 .core/cache 后逐字节复现判据成立（计划 Global Constraints 的「清 cache 跑测试」即为规避）
+- **修复方向**：cir_cache.cr 缓存键 += 编译器指纹（产物内容哈希或编译器身份分量）——重建后旧条目自动失效；现状兜底 = CIR_CACHE_VER 手工 bump + 测试前清 cache
+
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
 来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：

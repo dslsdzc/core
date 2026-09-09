@@ -1,8 +1,8 @@
 # corearch 重写设计：范式无关内核 + 实例定制
 
 日期：2026-09-09
-状态：设计定稿（蓝图——模块归属裁决 + 演进序；实施 = 后续独立决策）
-性质：裁决性 spec——按 `2026-09-09-lattice-encoding-boundary-design.md`（边界 C1-C3 契约）执行的目标架构蓝图；无代码改动。
+状态：设计定稿（蓝图——模块归属裁决 + 演进序）；**演进序步骤 2（内核抽取）已实施完成（2026-09-10，plan `2026-09-10-corearch-kernel-extraction.md` Tasks 1-4）**——执行状态注记见 §2/§3
+性质：裁决性 spec——按 `2026-09-09-lattice-encoding-boundary-design.md`（边界 C1-C3 契约）执行的目标架构蓝图；蓝图本体无代码改动。
 
 关联：
 - `docs/superpowers/specs/2026-09-09-lattice-encoding-boundary-design.md`（格层边界——§3 转换器契约 C1-C3 = 本设计的裁决依据；C4 = 判据裁决）
@@ -104,12 +104,20 @@ v7 图载体(.ccr) ──► 范式无关小内核 ──► 实例(每范式/�
 
 **拆分原则**：语义侧（存在/区间/共存/驱逐/写回/互斥——不读值内容、不知资源名） → 内核；机器侧（物理资源/编码/布局/协议） → 实例。含糊处按 G3-2 先例类推（对缓存语义的机器侧资源决策 = 实例算法；对条目的语义判定 = 内核）。
 
+**执行状态注记（2026-09-10，演进序步骤 2 = plan `2026-09-10-corearch-kernel-extraction.md` Tasks 1-4 全落地，行为零变化判据绿）**：
+- regalloc.cr 拆分（本表首四行裁决执行化）：语义侧（compute_live_ranges/compute_entries/共存族/verify 判定面/诊断通道/dump）逐函数**纯搬**入 `src/arch/linux/ld/ent_kernel.cr`（内核，双 concat 共享——同时进 corec 与 corearch 二进制）；CAG alloc_registers + g_opt_meta 写入（meta_set/append/remove/meta_reg_assign_total）+ 注入钩子留 `regalloc.cr` = x86 实例机器侧。LOC_HOME_BASE 裁决修正为单份随判定入内核（双份不可构建实证——concat 单编译单元自举 NameResolver 拒重复顶层声明，且机器侧零引用）。
+- ccr_io 写侧单源化：`compute_entries_v7` 镜像 + `ccr_grow_*` 副本删除——corec 写侧直调内核 `compute_live_ranges`（尾部逐 func 调 compute_entries），loader/写侧均单源 = 双转录 R5 收敛（产物 byte-identical 判据 23/23）；半开盘布局转换（写 +1/读 −1）保留在 ccr_io 写点（内核算闭区间）。
+- corearch.cr 引导收敛为**实例声明表 + 表驱动 dispatch**（本表「corearch.cr 编排/flag 分派」行裁决的最小面落地）：`g_instance_decl` 两行（INST_X86 [0,3] allow_link=1 needs_alloc/needs_verify=1；INST_TABLE [0,0] 恒 O0 职责窗口 allow_table=1）→ instance_select() → 决策逐点查询活动实例行——`--check-regalloc` 顺序保序（强制 O2 → alloc → 看门狗 → 注入 → verify_all）；三路分派（--table×opt 门/--opt-level/O2 verify）收敛行为不变（评审独立 48/48 通道 base↔head 逐字节同）。
+- **注册契约需双向（勘探发现——本设计 §1.1③ 表述为单向「实例向内核注册」不完整）**：实证数据流 = 实例（分配器）**写入** g_opt_meta（meta_set/append/remove/meta_reg_assign_total）→ 内核判定（verify 规则①②）经 `meta_reg_for_var`（纯读通道）**消费**实例输出。该读通道随判定入内核（Task 1 裁决）——注册契约的请求/消费面天然双向：实例产出 → 内核读通道消费；蓝图后续「资源域参数化/双向契约（home 回填）」步骤在此基础上扩展。判定→机器侧唯一读通道 = meta_reg_for_var（分配输出输入通道）。
+- **grow/accessor 收敛成果**：ccr_io 局部 lr 表机制/ccr_grow_entries/ccr_grow_func_entry_meta 删除后，grow 单实例化——loader 与写侧同调内核 ent_kernel 的 grow（共享 globals.cr 声明 + 内核文件进双 concat = 单源化路径实证可行）；ccr_ent_* 访问器按真引用保留。
+- **挂账注记**：① rl_print_loc 内 x86 注释随搬入内核（ent_kernel.cr:593「x86 寄存器枚举号（3=rbx, 12-15=r12-r15）」——注释层遗留，范式无关声明以代码为准，清理 = 后续步骤）；② 按实例钳制时记起 corearch.cr:255-256 钳制点（现钳制直写 x86 实例行窗口非查活动实例行——Task 3 评审 Minor M1）与 :244 拒绝消息带 `--table` 措辞（未来非表实例 allow_link=0 误伤面，今日不可达——M4，消息措辞参数化时处理）；③ 实例侧描述双份头注（ent_kernel.cr/regalloc.cr——演进漂移风险，当前互引一致——M5）；④ ent_kernel.cr 头注函数名漂移已顺手修（reg_assign_total → meta_reg_assign_total——Task 3 评审 Minor M3）。
+
 ---
 
 ## 3. 演进序（蓝图裁决——实施另立）
 
 1. **v7 实施**（计划 d76d14c3 已就绪）：图载体落盘 + loader 双端改——内核输入契约的前提。先行理由：内核对象模型的数据源 = v7 文件；ENT/EDG 不落盘则内核无对象可管
-2. **内核抽取**：loader → 语义对象模型 + 判定引擎从 regalloc 拆出（compute_entries/live_ranges/共存/判定四条入内核；CAG 留实例）——**行为判据**：抽取中每步回归绿（判定语义不动只搬家——regalloc 移后端先例同款流程）；内核接口 = 注册契约最小面先立
+2. ~~**内核抽取**：loader → 语义对象模型 + 判定引擎从 regalloc 拆出（compute_entries/live_ranges/共存/判定四条入内核；CAG 留实例）——**行为判据**：抽取中每步回归绿（判定语义不动只搬家——regalloc 移后端先例同款流程）；内核接口 = 注册契约最小面先立~~ ✅ **完成（2026-09-10，plan `2026-09-10-corearch-kernel-extraction.md` Tasks 1-4；执行状态注记见 §2）**——判定语义引擎族（compute_entries/live_ranges/共存/verify 规则①②/诊断通道）纯搬 `ent_kernel.cr` 进双 concat + 写侧镜像消除 + 注册契约最小面（实例声明表 + 表驱动引导）落地；判据：test_live_ranges 13/13 + test_ccr_v7 23/23（byte-identical）+ 全量回归绿（compile/backend_bootstrap 链/hit_table 24/24/region_cfg 22/22/mw1-6/slice_bounds 7/7/bootstrap 三套）+ full-bootstrap guard（corec2 N06=0、corec2/corec3 cmp=0、冒烟绿）+ 自举重建冒烟。**范围克制保持**：资源域参数化/双向契约 home 回填/loader 语义对象化（loader = 段表读取面，对象模型改造 = 后续步骤）未做——最小面已立
 3. **x86 实例化**（= M2 复启的接续形态）：实例边界内的数据化/参数化（帧/ABI/调用序列/tag 编码 → 实例算法 + HIT 表数据化推进）——判据按边界 C4 重定（行为等价/投影正确性，非逐字节复刻）；M2 挂起资产的承接点
 4. **第二范式/非经典实例验证**（远期）：注册契约的实证——范式 B 实例 = 新注册 + 新算法数据，零内核改动（规则封闭的验收）
 

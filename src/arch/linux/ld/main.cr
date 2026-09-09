@@ -1,6 +1,12 @@
 // === arch/linux/ld/main.cr ===
 // Backend project entry: .ccr → ELF/assembly/SO
 // Self-hosted counterpart of src/compiler/corearch.cr
+//
+// 死代码遗留注记（2026-09-10 内核抽取 Task 4——只注记不删）：本文件零 concat
+// 引用（自举构建 = 双二进制 corec/corearch concat 清单，均不含本文件；实际
+// 入口 = src/compiler/corearch.cr）——删除待核挂账（内核抽取计划 Global
+// Constraints 裁决：非本计划范围，删除需专项核对其与 corearch.cr 的功能
+// 重合面后另行决策；本文件内容 = 旧后端独立入口的历史实现）。
 
 fn init_backend_arrays() {
     g_x86_var_count = 0; g_x86_stack_size = 0; g_x86_func_idx = 0; g_x86_is_enum_count = 0;
