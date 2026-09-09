@@ -1364,8 +1364,8 @@ fn load_ccr(data: string, fsize: int) -> int {
         // 邻接域读内核对象缓冲 g_v7_nod_meta（原 nod_edge_meta loader 局部——
         // 内核完备 Task 1 对象留存形态裁决 (a)：对象 = 内核持有物，EDG 守卫
         // 与对象面 nod_edge_first/count 同源；守卫逻辑零改动）
-        nfe := r64(g_v7_nod_meta, ei4 * 16);
-        nec := r64(g_v7_nod_meta, ei4 * 16 + 8);
+        nfe := r64(g_v7_nod_meta, ei4 * ESZ_NOD_META);
+        nec := r64(g_v7_nod_meta, ei4 * ESZ_NOD_META + 8);
         if nfe != run_off { return -1; }       // ① 前缀累计失配（段错位/伪造）
         if run_off + nec > edg_cnt { return -1; }  // ① 节点段越出 EDG 空间
         rec : ., mut = 0;

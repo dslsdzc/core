@@ -2,11 +2,17 @@
 // Backend project entry: .ccr → ELF/assembly/SO
 // Self-hosted counterpart of src/compiler/corearch.cr
 //
-// 死代码遗留注记（2026-09-10 内核抽取 Task 4——只注记不删）：本文件零 concat
-// 引用（自举构建 = 双二进制 corec/corearch concat 清单，均不含本文件；实际
-// 入口 = src/compiler/corearch.cr）——删除待核挂账（内核抽取计划 Global
-// Constraints 裁决：非本计划范围，删除需专项核对其与 corearch.cr 的功能
-// 重合面后另行决策；本文件内容 = 旧后端独立入口的历史实现）。
+// 活入口注记（2026-09-10 内核完备 Task 1 评审 I-1 修正——原「死代码」注记驳斥）：
+// 本文件 = ld 独立工程 project-mode 构建的活入口——corec build src/arch/linux/ld
+// 以本文件 main:152 → corearch_main :23 → load_ccr :56 → build_linear_schedule
+// :63 为链，backend_bootstrap stage 链全程经此入口自举（tests/selfhost/
+// test_backend_bootstrap.py project mode：corec build <目录> 的入口 = 该目录
+// main.cr——与 concat 清单并列的独立构建机制；Task 1 偏差 ① 实证并接线）。
+// 入口二元性：corearch concat 清单入口 = src/compiler/corearch.cr（wrapper
+// corearch_main），ld project-mode 入口 = 本文件——两条均活、均已接线（load 后
+// 调 build_linear_schedule）。内核抽取 Task 4 原注记「零 concat 引用 → 实际入口
+// = corearch.cr → 删除挂账」仅核对 concat 清单而误判 project-mode 入口；两入口
+// 未来如需合并/删除，须同步双入口接线与 _import.cr 导入集（现 load 后行为同构）。
 
 fn init_backend_arrays() {
     g_x86_var_count = 0; g_x86_stack_size = 0; g_x86_func_idx = 0; g_x86_is_enum_count = 0;

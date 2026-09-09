@@ -167,8 +167,11 @@
   iri_dest/s1/s2）、dump-regassign :169 与 check-regalloc :191 的 alloc_registers、:199
   regalloc_verify_all；生产 O2 门 :308-314（alloc → verify）；ELF 发射面（elf.cr/instr.cr/resolve.cr）。
   → **build_linear_schedule() 接线点 = load_ccr 成功（:296）后、dispatch :305 前**（紧邻 load）。
-- 另一 load_ccr 调用方 = src/arch/linux/ld/main.cr:56——**死代码**（自注记 2026-09-10 内核抽取
-  Task 4：零 concat 引用，实际入口 = src/compiler/corearch.cr）——改签名/搬移无须同步。
+- ~~另一 load_ccr 调用方 = src/arch/linux/ld/main.cr:56——**死代码**（自注记 2026-09-10 内核抽取
+  Task 4：零 concat 引用，实际入口 = src/compiler/corearch.cr）——改签名/搬移无须同步。~~
+  **（2026-09-10 Task 1 评审 I-1 驳斥——证据 = Task 1 报告 §3 偏差 ①：该调用方 = backend_bootstrap
+  stage 链活入口（project 模式 corec build src/arch/linux/ld → 目录 main.cr corearch_main →
+  load_ccr :56 → build_linear_schedule），Task 1 已接线——改签名/搬移须双入口同步）**
 
 ### ② region_of_nod 定夺（设计 spec §6 挂账 ① 裁决 = **不含**）
 
