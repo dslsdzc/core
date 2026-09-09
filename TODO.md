@@ -112,6 +112,14 @@
 - math.cr / collections.cr 均为 stub
 - 字符串操作、JSON 序列化待补（JSON-RPC 序列化已完成；动态字符串索引边界与字节读写已接入，通用字符串 API 仍待补）
 
+### 4. 自举编译器巨型函数尾代码生成缺陷（elf.cr 回填循环，2026-09-09 v7 Task 1 激活发现——用户批准推迟，注册跟踪）
+- **现象**：elf_gen 的 hit_rel 回填循环（×24）在巨型函数尾读**未初始化栈槽**（循环界比较值）——gdb 实证全函数零写点；v6 时代同源 dir 构建潜伏（陈旧栈值恰 0），v7 loader 帧轮廓改变陈旧值（fsize-4 残值）后激活（确定性 codegen → 非 v7 loader 回归——v7 Task 1 评审裁决：loader 与 g_hit_rel 状态零引用，28B 语义字段 verbatim，stage 链 byte-identical + hit_table 24/24 证明 loader 干净）
+- **现状**：elf.cr:1450-1479 语义等价规避（回填界读取一次入局部变量 + 无条件重置保持）+ 代码内注记（诚实标注 = 规避非修复）
+- **子系统假设**：ELF 后端巨型函数尾的栈槽分配/寄存器分配（循环界变量被分配到一个全程无写点的栈槽——疑似栈槽复用/分配器对巨函数尾的处理）
+- **repro**：还原 elf.cr 重构（注记处）→ `python3 build_selfhost_native.py` dir 构建 stage1 → 确定性 segv
+- **gdb 证据**：v7 Task 1 报告（.superpowers/sdd/v7-task-1-report.md Concern 1）+ elf.cr 注记
+- **修复方向**：编译器层专项（独立于 v7 链——仓促同修危及 byte-identical 判据）；修复后还原规避代码验证
+
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
 来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：
