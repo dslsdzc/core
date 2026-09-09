@@ -12,6 +12,7 @@ import diag
 import ir_gen
 import dataflow
 import ccr_io
+import ent_kernel
 import module
 import toml
 import project

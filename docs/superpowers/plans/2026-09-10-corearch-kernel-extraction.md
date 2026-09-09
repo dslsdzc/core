@@ -15,7 +15,7 @@
 
 - 版本控制 `jj`（铁律 #2，git 被 hook 拦截）。每任务 `jj commit -m '<msg>'`
 - 构建 `nice -n 19 python3 build_selfhost_native.py`（约 2-3 分钟）；测试 `nice -n 19` 前缀（铁律 #6）；清 .core/cache 跑测试
-- **行为零变化硬约束**：判定语义不动只搬家——判据 = test_live_ranges.py 13/13（判定绿/红路径 + dump 通道输出不变）+ test_ccr_v7.py 23/23（写侧单源化后产物 byte-identical）+ 回归面（compile/backend_bootstrap/hit_table/region_cfg/mw1-6/slice_bounds/bootstrap 三套——Task 收官全量）
+- **行为零变化硬约束**：判定语义不动只搬家——判据 = test_live_ranges.py 13/13（判定绿/红路径 + dump 通道输出不变）+ test_ccr_v7.py 23/23（写侧单源化后产物 byte-identical）+ 回归面（compile/backend_bootstrap/hit_table/region_cfg/mw1-6/slice_bounds/bootstrap 三套 + run.sh full-bootstrap corec 链——Task 收官全量；ent_kernel 双 concat 共享后 src/compiler 单源自编译单元 = 回归面成员：Task 2 评审发现该面 N06/SIGSEGV 缺口，src/compiler/_import.cr import ent_kernel + module.cr 跨树回退补齐）
 - **搬移纪律**：逐函数搬移零改动（函数体 byte-identical 搬入新文件——除去重收敛点）；禁止顺手改语义/加接口抽象（蓝图"判定语义不动只搬家"——资源域参数化/双向注册契约 = 后续步骤，非本计划）
 - 共享文件约束：globals.cr/dyn_arr.cr/ast.cr/ccr_io.cr 进双二进制；regalloc.cr 只在 corearch concat；新内核文件若需 corec 侧（写侧单源化）→ 进双 concat
 - 判定③④ 无实现（文档化 TODO——静态放置无驱逐事件/callee-saved 平凡满足）——本计划不补实现
@@ -99,7 +99,7 @@
 ## Task 4: 收官——全量回归 + 自举重建 + 文档/台账
 
 **Files:**
-- Test: 全量回归面（compile/backend_bootstrap/hit_table/region_cfg/mw1-6/slice_bounds/live_ranges/ccr_v7 + bootstrap 三套）
+- Test: 全量回归面（compile/backend_bootstrap/hit_table/region_cfg/mw1-6/slice_bounds/live_ranges/ccr_v7 + bootstrap 三套 + full-bootstrap stage：`./build/corec build src/compiler/main.cr -o /tmp/corec2 --static -O 0` 输出 N06-free 且 /tmp/corec2 冒烟绿——src/compiler 单源自编译单元含内核的守护断言）
 - Modify: `docs/superpowers/specs/2026-09-09-corearch-rewrite-design.md`（§2 裁决表执行状态注记 + 步骤 2 完成标记;新发现注记: 判定→meta 读通道随判定入内核/写入留实例——注册契约需双向的勘探发现）
 - Modify: `src/arch/linux/ld/main.cr` 死代码注记（删除待核挂账——TODO 或删除 = 本任务裁决：**只注记不删**——非本计划范围确认）
 - Test: `nice -n 19 python3 build_selfhost_native.py` 重建 + 冒烟（corec check/run 小样本 + backend_bootstrap stage 链）

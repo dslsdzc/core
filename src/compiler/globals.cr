@@ -61,20 +61,21 @@ g_ir_func_param_count : string, mut; g_ir_func_param_count_cap : int, mut;
 g_ir_func_count : int, mut;
 
 // v6 数据基础：存在区间表（compute_live_ranges 填充，alloc_registers 读本表——
-// regalloc 移后端后填充方 = corearch 侧 regalloc.cr，corec 不再计算）。
+// 填充方 = 内核 ent_kernel.cr（双 concat 共享：corec 写侧 save_ccr 直调
+// compute_live_ranges/compute_entries，corearch alloc_registers 读本表）。
 // 布局：每函数一段，段内每「函数内 var」两条 i64（first_ref/last_ref，函数内指令序
-// ——坐标限定：0..instr_count-1 的函数内下标，见 opt.cr live_range_slot）；
+// ——坐标限定：0..instr_count-1 的函数内下标，见 ent_kernel.cr live_range_slot）；
 // func_i 段起始 = Σ var_count[0..func_i)，不乘固定稠密系数。未使用 var 为 -1。
-// 与 g_ir_slice_lens 同风格：16B 记录 + grow 函数（grow_live_ranges 在 opt.cr）。
+// 与 g_ir_slice_lens 同风格：16B 记录 + grow 函数（grow_live_ranges 在 ent_kernel.cr）。
 g_ir_live_ranges : string, mut;
 g_live_range_count : int, mut;
 g_live_range_cap : int, mut;
 
 // v6 条目表（条目版本化，compute_entries 填充——compute_live_ranges 尾部对全部
-// 函数运行；D-1=Y 后 .ccr ENT 恒空——填充方 = corearch 侧 regalloc.cr，落盘
-// 直写已废止）。24B/条（六字段各 4B，
+// 函数运行；v7 ENT 主干化后 .ccr ENT = 实记录，corec 写侧 save_ccr 直调内核
+// 填充再落盘——填充方 = 内核 ent_kernel.cr，双 concat 共享）。24B/条（六字段各 4B，
 // LE 存取：写 w32、读 buf_read_i32——r32 读在 bootstrap 产物中丢符号扩展，
-// 见 opt.cr ent_* 注记；与 v6 格式记录逐字节一致），字段偏移见 dyn_arr.cr：
+// 见 ent_kernel.cr ent_* 访问器注记；与 v6 格式记录逐字节一致），字段偏移见 dyn_arr.cr：
 //   var_idx(0)   u32 = 全局 IR 变量索引（g_ir_vars 序）
 //   def_instr(4) i32 = 定值指令全局索引——IR_ALLOC(dest=var) 或 IR_STORE(s1=var)
 //                      （IR_STORE 定值形态 = ρ(s1):=ρ(s2)，目标在 s1、dest 恒 -1，

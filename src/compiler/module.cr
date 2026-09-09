@@ -549,6 +549,14 @@ fn res_imports() {
                             path = "src/arch/hit/" + fs_path + ".cr";
                             content = module_get_source(path);
                         }
+                        // ent_kernel.cr（内核）双 concat 共享——corec 写侧 save_ccr 直调
+                        // compute_live_ranges/grow_entries 等；镜像 src/compiler 跨树回退
+                        // （同 concat 共享文件可被任意编译单元 import——src/compiler 单
+                        // 元自身需经此路径收编内核，ld 单源经 g_source_dir 直命中）
+                        if str_len(content) == 0 {
+                            path = "src/arch/linux/ld/" + fs_path + ".cr";
+                            content = module_get_source(path);
+                        }
                         if str_len(content) == 0 {
                             path = fs_path + ".cr";
                             content = module_get_source(path);
