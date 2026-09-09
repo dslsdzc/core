@@ -36,7 +36,7 @@
   - 共存：entries_coexist (:364)/coexist_version_conflicts (:380)/coexist_home_conflicts (:411)
   - sweep 门禁：rl_rec_lt (:515)/rl_merge_sort (:525)
   - 诊断：dump_entries_summary (:314)/dump_coexist_summary (:440)/rl_print_loc (:576)/rl_func_name (:584)——注意 rl_print_loc 内 x86 注释（:580 "3=rbx"）随搬（注释层——本计划不清理，注记待后续）
-  - 常量：LOC_HOME_BASE (:486)（位置编码约定 = 判定与实例的共享 seam——随判定搬，实例侧 alloc 引用处经内核导出访问或保留副本？——**裁决：常量保留 regalloc.cr 一份 + 内核一份同值，去重 = Task 4 单源化面**）
+  - 常量：LOC_HOME_BASE (:486)（位置编码约定 = 判定与实例的共享 seam——**裁决修正（Task 1 实证）：单份随判定搬内核**——concat 单编译单元下自举 NameResolver 拒重复顶层声明（name_resolver.py:73 无去重守卫 + symbol_table.py:28 NameError），且机器侧实证零引用）
 - 保留 regalloc.cr（机器侧）：meta_reg_for_var (:491——**裁决：随判定搬入内核**——它是判定输入通道（verify 读分配输出），纯读取；meta_set/append/remove/reg_assign_total (:849-936) 留实例侧（写入 = 实例动作）；alloc_registers (:1136-1560) 留；注入钩子 (:805-1125) 留（注入 = 改分配结果 → 属实例侧测试通道）；ir_op_kind_name (:278) 留（dump 诊断公共，或随搬——裁决：留 regalloc.cr，两文件同 concat 可互调）
 - verify 判定面（规则①②合成）——**裁决：本任务搬 verify_regalloc_consistency (:693-781)/rl_rule2_func (:624)/rl_report_rule1/2 (:590/:602)/regalloc_verify_all (:785)**：它们读 meta_reg_for_var（已随判定搬内核）——搬移后 verify 全在内核；regalloc.cr 机器侧经 alloc_registers 尾/外部调用内核 verify（现调用点 corearch.cr:69/:163 不变——函数名不变即可）
 - 判据：test_live_ranges.py 13/13 + 回归快子集（O2 check-regalloc 路径绿——corearch.cr 调用点签名不变）
@@ -55,6 +55,7 @@
 
 **Files:**
 - Modify: `src/compiler/ccr_io.cr`（删 compute_entries_v7 :458-579 + ccr_grow_entries/ccr_grow_func_entry_meta :419-433 + 局部 lr 表机制——写侧直调内核 compute_entries/compute_live_ranges; save_ccr ENT 写调用点 :611 适配）
+- Modify: `src/arch/linux/ld/regalloc.cr` + `src/arch/linux/ld/ent_kernel.cr`（**迁 RPT_MAX + ir_op_kind_name 自 regalloc.cr 入 ent_kernel.cr**——Task 1 评审 Important: 两声明机器侧零剩余使用（ir_op_kind_name 唯一调用方 = 内核 dump_entries_summary; RPT_MAX 唯一使用方 = 内核 rl_rule2_func/verify_regalloc_consistency），regalloc.cr 不在 corec concat → 内核进 corec concat 前不迁则 corec 构建解析失败; 迁移零风险）
 - Modify: `build_selfhost_native.py`（**ent_kernel.cr 进 corec concat**——corec 二进制需要内核 compute_entries）
 - Test: `tests/selfhost/test_ccr_v7.py`（23/23——ENT 实记录产物 byte-identical 判据）
 
@@ -63,7 +64,7 @@
 - 差异消解（Task 0 勘探注记）：①表载体（ccr_io 局部 lr → 内核全局 g_ir_live_ranges——corec 侧 grow/init 检查）②整表重置时序（compute_entries func_i==0 分支 vs compute_entries_v7 函数头清零——统一为内核语义）③grow 单实例（删 ccr_* 副本）④半开转换（写侧盘布局 +1 逻辑保留在 ccr_io 写点——内核算闭区间,写盘转换归 ccr_io）
 - 判据：test_ccr_v7.py 23/23（含 ENT 手算期望/独立模型 replay——产物与 Task 2 原实现 byte-identical 即镜像消除无损）+ test_live_ranges 13/13（corearch 侧不动）
 
-- [ ] **Step 1:** corec concat 加 ent_kernel.cr；构建（corec 二进制含内核）
+- [ ] **Step 1:** RPT_MAX + ir_op_kind_name 迁入 ent_kernel.cr（自 regalloc.cr——Task 1 评审 Important 携带）→ corec concat 加 ent_kernel.cr；构建（corec 二进制含内核）
 - [ ] **Step 2:** ccr_io 写侧适配：save ENT 前调内核 compute_live_ranges + 逐函数 compute_entries（func_i 循环——内核 compute_live_ranges 尾部已逐 func 调 compute_entries：直接调 compute_live_ranges 即可）→ 写盘（半开转换保留）
 - [ ] **Step 3:** 删 compute_entries_v7/ccr_grow_*/局部 lr 机制（ccr_param_entry_id/ccr_ent_* 访问器如仍被 loader/写侧用则保留——按实际引用删）
 - [ ] **Step 4:** test_ccr_v7.py 23/23 绿（产物 byte-identical——若差异：先比对 ENT 段,差异 = 单源化语义偏差,修内核调用序而非弯判据）
@@ -109,7 +110,7 @@
 
 - [ ] **Step 1:** 全量回归跑批
 - [ ] **Step 2:** 自举重建 + 冒烟
-- [ ] **Step 3:** 文档同步（蓝图状态/裁决表/新发现注记——判定→meta 读通道方向、grow/accessor 收敛成果、LOC_HOME_BASE 双份待去重挂账、rl_print_loc x86 注释待清挂账）
+- [ ] **Step 3:** 文档同步（蓝图状态/裁决表/新发现注记——判定→meta 读通道方向、grow/accessor 收敛成果、rl_print_loc x86 注释待清挂账）
 - [ ] **Step 4:** 提交 `docs: 内核抽取收官——蓝图步骤 2 完成 + 全量回归 + 文档同步`
 
 ---
@@ -118,6 +119,6 @@
 
 - Task 1 为最大风险（搬移 30+ 函数跨文件）——判据 = dump/verify 输出与搬移前逐字节同（先基线后对照）；逐函数零改动纪律防语义漂移
 - 双 concat 符号共享：ent_kernel.cr 进 corec concat（Task 2）时,ccr_io 内残留同名函数（ccr_grow_* 等已删）——删除完整性以构建 + 测试判
-- LOC_HOME_BASE 双份（裁决保留）——去重 = 挂账（判定/实例 seam 常量——单源化 = 注册契约参数化步骤的天然内容）
+- LOC_HOME_BASE = 单份随判定入内核（裁决修正——双份不可构建 + 机器侧零引用实证; 实例 seam 常量单源化 = 注册契约参数化步骤的天然内容——届时实例侧经内核导出访问）
 - corec 侧 compute_live_ranges 首次运行时序（g_ir_live_ranges grow/init——corec 进程 init_df 无此表初始化? globals 声明即零态——compute 前自 grow——与 corearch 同路径,回归验证）
 - 判定③④ 无实现不补（Global Constraints）——verify 覆盖 = 规则①②,test_live_ranges 现有绿/红路径即判据锚
