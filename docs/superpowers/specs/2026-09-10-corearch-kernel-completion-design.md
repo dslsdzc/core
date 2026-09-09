@@ -54,7 +54,8 @@
   :857-860 配方查询节注释：邻接索引区间 [first, first+count) 内逐边读
   v7_edge_to/kind——访问器齐备后遍历即查询，配方可读判据已实证）；`nod_inputs`
   函数封装未交付 = 计划合规（实施计划禁止新增接口抽象）——封装 = 消费方按需
-  （YAGNI）。
+  （YAGNI）。→ **已交付（Task 4，2026-09-10——评审 M1 取代注记）**：`nod_inputs`
+  于消费者出现时落地（dump_object_surface 收敛调用, ent_kernel.cr:1046——YAGNI 门开启如预期）。
 - 线性流 accessor（iri_*）**不再是内核对象面**——属实例调度产物（§1.3）
 
 ### 1.3 调度重建移实例
@@ -149,8 +150,10 @@
 
 > 本节约 = 设计落地确认（plan `2026-09-10-corearch-kernel-completion.md` Tasks 1-5）。
 > 提交落点：Task 1 = 035ea289（+ 补正 72c40389）/ Task 2 = 99fc6af3 / Task 3 = b4d8c74f /
-> Task 4 = b9685f5c / Task 5（收官）= 本状态行随收官提交落盘。行为零变化判据（§4.1-4.4）
-> 与中立性 guard（§4.3——tests/selfhost/test_ent_kernel_neutrality.py 入回归面）全绿。
+> Task 4 = b9685f5c / Task 5（收官）= 本状态行随收官提交落盘。行为零变化判据（§4 判据 1-2）
+> 与中立性 guard（§4 判据 3——tests/selfhost/test_ent_kernel_neutrality.py 入回归面；注：
+> src/ci/run.sh 现仅跑四旧套件族，guard 与新内核套件由每批显式调用——CI 聚合层恢复时补入）全绿。
+> Task 4 终态：配方查询 nod_inputs 已交付（§1.2 M-1 注记取代——见 §1.2）。
 
 ### 7.1 §4.5 审计结论落地确认（A/B 通道清零——红→绿记录核）
 
