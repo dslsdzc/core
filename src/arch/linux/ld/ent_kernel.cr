@@ -10,7 +10,24 @@
 // 消费的分配结果真相源 = g_opt_meta（globals.cr 共享声明），本文件读通道 =
 // meta_reg_for_var（纯读——写入留实例侧）。
 //
-// 本文件函数集 = 内核接口面（现名即 API——注册契约/参数化 = 后续步骤）。
+// 本文件函数集 = 内核接口面（现名即 API——不加 kern_ 包装层，YAGNI 裁决，
+// 内核抽取 Task 3）。内核 API 面按职责族：
+//   数据面  ：grow_live_ranges/live_range_slot/live_first/live_last/compute_live_ranges
+//            grow_entries/grow_func_entry_meta/ent_off/ent_var/ent_def/ent_live_start/
+//            ent_live_end/ent_home/ent_flags/entry_start/entry_count/compute_entries
+//   判定服务：entries_coexist/coexist_version_conflicts/coexist_home_conflicts/
+//            verify_regalloc_consistency/regalloc_verify_all（规则①②合成）+ 判定
+//            诊断（rl_rec_lt/rl_merge_sort/rl_print_loc/rl_func_name/rl_report_*）
+//   诊断通道：dump_entries_summary/dump_coexist_summary（cir 调试 dump 载体）
+//            + ir_op_kind_name（--dump-entries kind= 定值种类名，Task 2 迁入）
+// 实例侧（x86 实例机器函数）= regalloc.cr：CAG alloc_registers + g_opt_meta 写入
+// （meta_set/append/remove/reg_assign_total）+ 注入钩子（cir debug 测试通道）。
+// 注册契约最小面（2026-09-10 内核抽取 Task 3）：实例声明表 g_instance_decl
+// （corearch.cr 声明——corearch 侧数据）——行 = {id, name str_idx, opt_min,
+// opt_max, allow_table, allow_link, needs_alloc, needs_verify} × n（x86 实例 +
+// 表模式路径声明）；引导 = corearch_main 读 flag → instance_select() 查表选实例
+// → 决策逐点查询活动实例行（拒绝门/表管线门/O2 职责门）。资源域代数参数化
+// （判定读 g_opt_meta 的耦合）/双向契约（home 回填）= 蓝图后续步骤（范围克制）。
 // 区头注随搬逐字保留（其中「判定区」「alloc 区」互指现分居本文件/regalloc.cr）。
 // ------------------------------------------------------------------
 // v6 数据基础：存在区间推导（指令序 [first_ref, last_ref]）

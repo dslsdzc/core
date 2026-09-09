@@ -2,6 +2,131 @@
 // Backend: .ccr → ELF/assembly/SO
 // Supports: --elf (static), --shared (DSO), --link (dynamic linking)
 
+// ═══════════════════════════════════════════════════════════════════
+// 注册契约最小面（内核抽取 Task 3，2026-09-10）——实例声明表 + 表驱动引导
+// ═══════════════════════════════════════════════════════════════════
+// 蓝图（docs/superpowers/specs/2026-09-09-corearch-rewrite-design.md §1.1③）：
+// 实例 = {能力声明、资源域/代数参数、请求分派形态}，注册契约 = 内核与实例的
+// 唯一耦合面（本文件 = 内核引导 + 实例注册侧）。Core 无高阶函数 → 能力声明 =
+// 数据表（g_instance_decl，行 = 声明字段），表驱动分派 = 引导决策逐点查询活动
+// 实例行（不设虚表/回调——查询即分派）。本任务 = 最小面：声明表 + 引导收敛
+// （资源域代数参数化（判定读 g_opt_meta 的耦合）/双向契约（home 回填）= 蓝图
+// 后续步骤——范围克制注，本任务不做）。
+//
+// 声明行字段（8 × i32；INST_DECL_STRIDE = 32，行序 = id 序）：
+//   id            实例标识（INST_X86 = 0 默认实例；INST_TABLE = 1）
+//   name          str_idx（str_intern 内联名——instance_lookup 查表键；有效期 =
+//                  装载前引导选择期：load_ccr 会重置 g_strs 重载 .ccr STR 段，
+//                  本任务无装载后读名路径——见 instance_decl_init 注）
+//   opt_min/opt_max  声明优化级别窗口（语义侧职责窗口）
+//   allow_table   是否接受 HIT 表输入（表管线业务门）
+//   allow_link    是否允许 --link/--shared（M2-1 拒绝门）
+//   needs_alloc   生产路径是否执行寄存器分配职责（级别 ≥ 2 时）
+//   needs_verify  生产路径是否执行一致性自检职责（alloc 后）
+//
+// 表数据 = x86 实例声明 + 表模式路径声明：
+//   · x86（原生路径）   ：窗口 [0,3]（现 CLI 钳制常数即该窗口值），allow_link
+//                          = 1，O2 职责全声明（级别 ≥ 2 → alloc + verify——
+//                          旧直写条件）。
+//   · table（表模式路径雏形）：M1 表驱动直线路径 = 独立实例路径雏形（蓝图 §2
+//     表裁决）。恒 O0 语义/无 O2 组合验证 = needs_alloc/needs_verify = 0 →
+//     O2 职责永不执行（旧 hit_table_active 门的声明化）；--table ×
+//     --link/--shared 显式拒绝保持 = allow_link = 0。注：CLI 优化级别值透传
+//     （不按表窗口 [0,0] 钳制——发射侧 O1+ 帧布局沿 g_opt_level 现状保持；
+//     值域钳制按实例参数化 = 蓝图后续）。
+//
+// 引导收敛（现三路分派 = --table×opt 门 / --opt-level / 调试 flag → 声明查询）：
+// corearch_main 读 flag → instance_select()（查表选实例）→ g_active_instance
+// 固定 → 拒绝门/表管线门/O2 职责门逐点查询活动实例行字段。调试 flag 通道
+// （regalloc_debug_dispatch）= 请求分派形态（实例消费内核判定服务的方式）——
+// 六分支顺序与输出保持（--check-regalloc 顺序保序：强制 O2 → alloc →
+// 看门狗 meta_reg_assign_total → 注入钩子×3 → regalloc_verify_all → 摘要/rc）。
+
+INST_X86 : int = 0;
+INST_TABLE : int = 1;
+INST_DECL_STRIDE : int = 32;    // 行 = 8 × i32（LE）
+INST_OFF_ID : int = 0;
+INST_OFF_NAME : int = 4;
+INST_OFF_OPT_MIN : int = 8;
+INST_OFF_OPT_MAX : int = 12;
+INST_OFF_ALLOW_TABLE : int = 16;
+INST_OFF_ALLOW_LINK : int = 20;
+INST_OFF_NEEDS_ALLOC : int = 24;
+INST_OFF_NEEDS_VERIFY : int = 28;
+
+g_instance_decl : string, mut;  // 实例声明表（行 × INST_DECL_STRIDE 字节）
+g_instance_count : int, mut;
+g_instance_cap : int, mut;
+g_active_instance : int, mut;   // 引导选中实例行（= id；instance_select 设定）
+
+fn grow_instance_decl(needed: int) {
+    if needed < g_instance_cap { return; }
+    nc : ., mut = g_instance_cap * 2; if nc < 2 { nc = 2; } if nc < needed { nc = needed; }
+    nb := alloc(nc * INST_DECL_STRIDE);
+    _dyncpy(g_instance_decl, g_instance_cap * INST_DECL_STRIDE, nb);
+    g_instance_decl = nb; g_instance_cap = nc;
+}
+
+fn instance_decl_add(id: int, name_idx: int, opt_min: int, opt_max: int,
+                     allow_table: int, allow_link: int, needs_alloc: int, needs_verify: int) {
+    grow_instance_decl(g_instance_count + 1);
+    off : ., mut = g_instance_count * INST_DECL_STRIDE;
+    w32(g_instance_decl, off + INST_OFF_ID, id);
+    w32(g_instance_decl, off + INST_OFF_NAME, name_idx);
+    w32(g_instance_decl, off + INST_OFF_OPT_MIN, opt_min);
+    w32(g_instance_decl, off + INST_OFF_OPT_MAX, opt_max);
+    w32(g_instance_decl, off + INST_OFF_ALLOW_TABLE, allow_table);
+    w32(g_instance_decl, off + INST_OFF_ALLOW_LINK, allow_link);
+    w32(g_instance_decl, off + INST_OFF_NEEDS_ALLOC, needs_alloc);
+    w32(g_instance_decl, off + INST_OFF_NEEDS_VERIFY, needs_verify);
+    g_instance_count = g_instance_count + 1;
+}
+
+fn instance_decl_init() {
+    // 幂等（防重复调用——引导只调一次，注册函数最小面）。声明字段恒非负
+    // （0/1/3/str idx）——r32 零扩展读安全（符号修正歧义只涉及负值）。
+    // name 内联时机注：本函数跑在 load_ccr 前（引导期）——str idx 依当时
+    // g_strs 内容（等值串恒同 idx——str_intern 去重，位置无关）；load_ccr
+    // 重置 g_strs 重载 .ccr STR 段后这些 idx 不再指向内联名。本任务消费面
+    // （instance_select）全在选择期（装载前），无装载后读名路径——届时注册
+    // 校验若读名须装载后重内联（蓝图后续）。
+    if g_instance_count > 0 { return; }
+    instance_decl_add(INST_X86, str_intern("x86"), 0, 3, 0, 1, 1, 1);
+    instance_decl_add(INST_TABLE, str_intern("table"), 0, 0, 1, 0, 0, 0);
+}
+
+fn inst_id(i: int) -> int { return r32(g_instance_decl, i * INST_DECL_STRIDE + INST_OFF_ID); }
+fn inst_name(i: int) -> int { return r32(g_instance_decl, i * INST_DECL_STRIDE + INST_OFF_NAME); }
+fn inst_opt_min(i: int) -> int { return r32(g_instance_decl, i * INST_DECL_STRIDE + INST_OFF_OPT_MIN); }
+fn inst_opt_max(i: int) -> int { return r32(g_instance_decl, i * INST_DECL_STRIDE + INST_OFF_OPT_MAX); }
+fn inst_allow_table(i: int) -> int { return r32(g_instance_decl, i * INST_DECL_STRIDE + INST_OFF_ALLOW_TABLE); }
+fn inst_allow_link(i: int) -> int { return r32(g_instance_decl, i * INST_DECL_STRIDE + INST_OFF_ALLOW_LINK); }
+fn inst_needs_alloc(i: int) -> int { return r32(g_instance_decl, i * INST_DECL_STRIDE + INST_OFF_NEEDS_ALLOC); }
+fn inst_needs_verify(i: int) -> int { return r32(g_instance_decl, i * INST_DECL_STRIDE + INST_OFF_NEEDS_VERIFY); }
+
+fn instance_lookup(name_idx: int) -> int {
+    // 按名查行（name = str_idx，str_intern 去重 → 等值串恒同 idx）。
+    // 未找到返回 -1（构造保证不触发——两行两名）。
+    i : ., mut = 0;
+    loop {
+        if i >= g_instance_count { break; }
+        if inst_name(i) == name_idx { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn instance_select() -> int {
+    // 引导选择：读 flag → 实例名 → 查表 → 行 idx（行序 = id 序 → 行 = id）。
+    // 选择旗标 = --table 值存在性（与装载条件同源）；兜底 INST_X86 = 默认
+    // 实例（防御性——lookup 未命中不掩构造错误，退默认路径）。
+    nm : ., mut = "x86";
+    if str_len(cli_get("table")) > 0 { nm = "table"; }
+    r := instance_lookup(str_intern(nm));
+    if r < 0 { return INST_X86; }
+    return r;
+}
+
 fn init_backend_arrays() {
     g_x86_var_count = 0; g_x86_stack_size = 0; g_x86_func_idx = 0; g_x86_is_enum_count = 0;
     g_x86_var_cap = 0; g_x86_is_enum_cap = 0; g_stack_map = ""; }
@@ -18,6 +143,11 @@ fn split_links(val: string) {
 // 载体 = corec cir 原隐藏标志的 corearch 同名版本（load .ccr 后内存态自算，
 // 载入 NOD 流 = pre-CSE 流，与 corec 原 dump 语义同源）。返回：0 = 未请求
 // （正常发射路径继续）；1 = 已处理且通过；2 = 已处理且违反/失败。
+// 注册契约角色（Task 3）：本函数 = 请求分派形态——实例经 flag 通道消费内核
+// 判定服务（dump-entries/dump-coexist = 诊断通道；check-regalloc/inject-* =
+// 判定服务 + 机器侧注入钩子）的入口。分支顺序与输出保持（行为不变）：
+// --check-regalloc 保序 = 强制 O2 → alloc_registers → 看门狗
+// meta_reg_assign_total → 注入钩子×3 → regalloc_verify_all → 摘要/rc。
 fn regalloc_debug_dispatch() -> int {
     if cli_has("dump-entries") != 0 {
         compute_live_ranges();
@@ -99,20 +229,35 @@ fn corearch_main() -> int {
     cli_flag_bool("inject-coexist-oob", "", "Hidden debug: probe entries_coexist with OOB indices (GC-1 test hook)");
 
     if cli_parse() != 0 { return 1; }
-    // M2-1：--table × --link/--shared 显式拒绝——表模式池 mov [rip+disp] 的 disp
-    // 由 elf.cr 按池槽回填，链接路径（ctx 重布局重定位用户代码段）下指向未经
-    // 测试（M1 计划偏差 #2）。显式拒绝（stderr + exit 1）优于未测组合。
+    // 注册契约引导（Task 3）：读 flag → 查表选实例（--table 值存在 → 表模式
+    // 路径实例；否则 x86 原生实例）——后续拒绝门/表管线门/O2 职责门逐点查询
+    // g_active_instance 声明行字段（表驱动分派，行为不变）。
+    instance_decl_init();
+    g_active_instance = instance_select();
+    // 拒绝门（M2-1 显式拒绝保持——声明化）：表实例声明 allow_link = 0 →
+    // 不接受 --link/--shared。表模式池 mov [rip+disp] 的 disp 由 elf.cr 按池槽
+    // 回填，链接路径（ctx 重布局重定位用户代码段）下指向未经测试（M1 计划
+    // 偏差 #2）。显式拒绝（stderr + exit 1）优于未测组合。消息/顺序不变。
     // 测试断言见 tests/selfhost/test_hit_table.py:test_reject_table_with_link_shared。
-    if str_len(cli_get("table")) > 0 {
+    if inst_allow_link(g_active_instance) == 0 {
         if cli_has("shared") != 0 || cli_has("link") != 0 || str_len(cli_get("link")) > 0 {
             em := "error: --table cannot be combined with --link/--shared (pool mov rip disp untested under ctx relayout)\n";
             syscall3(1, 2, em, str_len(em));
             return 1; } }
     g_opt_level = 0;
     ol : ., mut = cli_get("opt-level");
-    if str_len(ol) > 0 { g_opt_level = str_int(ol); if g_opt_level > 3 { g_opt_level = 3; } if g_opt_level < 0 { g_opt_level = 0; } }
+    if str_len(ol) > 0 {
+        g_opt_level = str_int(ol);
+        // 值域钳制窗口 = x86 实例声明窗口 [0,3]（默认实例——旧钳制常数即该
+        // 窗口值；级别消毒与实例选择正交）。表实例声明窗口 [0,0] = 语义侧
+        // 职责窗口（恒 O0——经 needs_alloc/needs_verify = 0 的职责门强制），
+        // CLI 级别值透传发射侧（O1+ 帧布局沿 g_opt_level 现状保持）。
+        if g_opt_level > inst_opt_max(INST_X86) { g_opt_level = inst_opt_max(INST_X86); }
+        if g_opt_level < inst_opt_min(INST_X86) { g_opt_level = inst_opt_min(INST_X86); }
+    }
     // --table（M1 Task 2）：load 成功 → 表模式继续（表映射 op 走 emit_instr_tabled，
     // 未映射落旧路径 = 混合模式）；失败即退出。load 成功打印计数供测试断言。
+    // 装载条件 = 实例选择同源旗标（选择已把表实例置活动——allow_table = 1）。
     tbl : ., mut = cli_get("table");
     if str_len(tbl) > 0 {
         if load_hit_table(tbl) != 0 { return 1; }
@@ -152,15 +297,20 @@ fn corearch_main() -> int {
     init_backend_arrays();
 
     // regalloc 移后端（R1a/R3，2026-09-07）：O2 分配 + 一致性判定归位 corearch
-    // ——load 后自算自检（.ccr 不再传 REG_ASSIGN/ENT，D-1=Y）。表模式跳过
-    // （M1 表驱动直线路径无 O2 组合验证——恒 O0 语义）。违反 = 编译错误。
+    // ——load 后自算自检（.ccr 不再传 REG_ASSIGN/ENT，D-1=Y）。违反 = 编译错误。
+    // O2 职责门（Task 3 声明化）：alloc + verify = 实例声明能力——needs_alloc/
+    // needs_verify（x86 = 1/1 → 级别 ≥ 2 时执行；表实例 = 0/0 → O2 组合验证
+    // 永不执行——M1 表驱动直线路径恒 O0 语义，与旧 hit_table_active 门等价：
+    // 此刻实例 = 装载态恒等——--table 装载成功才达此处）。
     dd := regalloc_debug_dispatch();
     if dd == 1 { return 0; }
     if dd == 2 { return 1; }
-    if g_opt_level >= 2 && hit_table_active() == 0 {
+    if g_opt_level >= 2 && inst_needs_alloc(g_active_instance) != 0 {
         alloc_registers();
-        // 判定：成功静默（自检通过不打扰构建输出）；违反 = 诊断已打印 + 拦截
-        if regalloc_verify_all() != 0 { return 1; }
+        if inst_needs_verify(g_active_instance) != 0 {
+            // 判定：成功静默（自检通过不打扰构建输出）；违反 = 诊断已打印 + 拦截
+            if regalloc_verify_all() != 0 { return 1; }
+        }
     }
 
     // --table（M1 Task 3）：表模式 → 先降低（IR 直线子集 → 事件流 + 常量池）。
@@ -169,13 +319,17 @@ fn corearch_main() -> int {
     // --hit-events-file（M2a Task 2 注入测试通道）：文本事件流文件取代降低——
     // 构造 g_hit_ev_stream/g_hit_pool + 指令映射，跳过 lower 直接 emit。测试专用
     // （真实构建路径不启用；与 --inject-* 通道同哲学）。须与 --table 同用。
+    // 表管线业务门（Task 3 声明化）= 活动实例声明 allow_table（表实例 = 1）：
+    // 此刻实例与装载态恒等（--table 装载成功才达此处——load 失败已提前退出，
+    // 未给 --table 则实例 = x86 且无任何装载路径）——旧 hit_table_active() 门
+    // 的声明等价物。
     dump_ev : ., mut = cli_has("dump-events");
     inj_path : ., mut = cli_get("hit-events-file");
-    if str_len(inj_path) > 0 && hit_table_active() == 0 {
+    if str_len(inj_path) > 0 && inst_allow_table(g_active_instance) == 0 {
         println("error: --hit-events-file needs --table (events emit through table projections)");
         return 1; }
     g_hit_inject_active = 0;
-    if hit_table_active() != 0 {
+    if inst_allow_table(g_active_instance) != 0 {
         if str_len(inj_path) > 0 {
             g_hit_inject_active = 1;
             if hit_inject_events(inj_path) != 0 { return 1; }
