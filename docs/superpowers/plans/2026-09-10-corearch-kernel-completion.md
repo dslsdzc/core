@@ -10,8 +10,6 @@
 
 **Tech Stack:** ent_kernel.cr（内核）、regalloc.cr（实例机器侧）、ccr_io.cr（loader 收敛 + 写侧 populate）、corearch.cr（引导/实例侧调用）、build_selfhost_native.py、Python 测试（test_live_ranges.py/test_ccr_v7.py 判据锚 + test_ent_kernel_neutrality.py 中立性 guard）。
 
-**Tech Stack:** ent_kernel.cr（内核）、regalloc.cr（实例机器侧）、ccr_io.cr（loader 收敛）、corearch.cr（引导/实例侧调用）、build_selfhost_native.py、Python 测试（test_live_ranges.py/test_ccr_v7.py 判据锚）。
-
 **设计 spec:** `docs/superpowers/specs/2026-09-10-corearch-kernel-completion-design.md`（本计划执行依据——§1 对象模型/§2 中立化/§3 契约/§4 判据/§6 挂账）。
 
 ## Global Constraints
