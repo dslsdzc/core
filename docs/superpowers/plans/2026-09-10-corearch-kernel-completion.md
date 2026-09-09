@@ -2,9 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 内核三组件按蓝图 §1.1 补完——语义对象模型（对象面 API + 调度重建移实例）、判定中立化（登记表通道 + 位置域声明化）、注册契约完整（资源域代数 + ③④ 形式声明 + 双向输出面）——行为零变化。
+**Goal:** 内核三组件按蓝图 §1.1 补完 + **全量中立化（2026-09-10 用户原则：内核零经典概念——寄存器/栈/调度/内存布局/指令任一概念不得出现）**——语义对象模型（对象面 API + 调度重建移实例）、A 通道中立化（compute 系改 NOD 对象面——内核零线性流引用）、B 通道中立化（登记表不透明位置 + LOC_HOME_BASE 移除）、注册契约完整（③④ 形式声明）——行为零变化。
 
-**Architecture:** 现状（步骤 2 收官态）= ent_kernel.cr（判定引擎 + 数据面，双 concat）+ regalloc.cr（机器侧）+ 实例声明表。本计划 = 三组件完备：loader 收敛为对象产出（线性重建段搬实例侧 build_linear_schedule）；判定读通道从 g_opt_meta 直读切换为内核登记表（实例写完 g_opt_meta 后经 kern_loc_* API 登记——双份视图同步责任在实例）；LOC_HOME_BASE/域参数随实例声明；③④ 形式声明不实现。判据 = 行为零变化（全回归 + byte-identical 面）+ test_live_ranges 13/13 经新通道同输出 + 中立性静态 guard。
+**Architecture:** 现状（步骤 2 收官态）= ent_kernel.cr（判定引擎 + 数据面，双 concat）+ regalloc.cr（机器侧）+ 实例声明表。全量中立化审计（设计 spec §4.5）结论：全部经典残留 = 一根因族两通道——A 线性流坐标派生读取（4 函数 4 iri_* 使用点——compute 系/dump/rl_rule2）+ B 位置通道（meta_reg_for_var 读实例布局 + LOC_HOME_BASE 编码）。本计划 = 中立化波：写侧 populate_nod_objects（corec 镜像对称）→ compute 系改 NOD 对象面（同 index——F5）→ 登记表不透明化（实例双面同步责任在实例）→ 输出面中性化 + 配方查询补体 + ③④ 声明。判据 = 行为零变化（全回归 + byte-identical 面）+ 中立性静态 guard（A 组/B 组 token 红→绿）。
+
+**Tech Stack:** ent_kernel.cr（内核）、regalloc.cr（实例机器侧）、ccr_io.cr（loader 收敛 + 写侧 populate）、corearch.cr（引导/实例侧调用）、build_selfhost_native.py、Python 测试（test_live_ranges.py/test_ccr_v7.py 判据锚 + test_ent_kernel_neutrality.py 中立性 guard）。
 
 **Tech Stack:** ent_kernel.cr（内核）、regalloc.cr（实例机器侧）、ccr_io.cr（loader 收敛）、corearch.cr（引导/实例侧调用）、build_selfhost_native.py、Python 测试（test_live_ranges.py/test_ccr_v7.py 判据锚）。
 
@@ -16,7 +18,7 @@
 - 构建 `nice -n 19 python3 build_selfhost_native.py`（约 2-3 分钟）；测试 `nice -n 19` 前缀（铁律 #6）；清 .core/cache 跑测试
 - **行为零变化硬约束**：全回归绿 + byte-identical 面（backend_bootstrap stage 链 + ccr_v7 产物）——重建移实例/登记表通道 = 纯搬移 + 通道等价，产物不变
 - **搬移/改动纪律**：函数体搬移零改动；登记表通道切换 = 语义等价改写（禁止顺手改判定逻辑）；禁止新增接口抽象（现名即 API 裁决延续——新增面 = kern_loc_*/对象面访问器 = 设计 spec 明列者）
-- **中立性目标**：ent_kernel.cr 零实例符号引用（g_opt_meta/寄存器名/ELF 段名——Task 4 静态 guard 入回归面）
+- **中立性目标（全量）**：ent_kernel.cr 零经典概念引用——实例符号（g_opt_meta/寄存器名/ELF 段名）+ 线性流（g_ir_instrs/iri_\*）+ 位置编码（LOC_HOME_BASE）——test_ent_kernel_neutrality.py 静态 guard 入回归面（A 组 Task 2 绿、B 组 Task 3 绿）
 - corec 写侧不受影响（不经 loader）；interp 不经 loader
 - 判定③④ 不实现（用户裁决——needs_* 形式声明字段落契约）
 
@@ -58,70 +60,88 @@
 
 ---
 
-## Task 2: 判定中立化——登记表通道 + 位置域声明化
+## Task 2: A 通道中立化——compute 系改 NOD 对象面 + 写侧 populate（全量审计 F1/F2/F3/F5）
 
 **Files:**
-- Modify: `src/arch/linux/ld/ent_kernel.cr`（位置登记表 {entry→loc} + kern_loc_assign/kern_loc_clear/kern_loc_of; verify 规则①② 读通道切换（meta_reg_for_var 改读登记表——函数体等价改写）; **LOC_HOME_BASE 常量移除 + 引用面（:500/:590/:744）改写——位置 = 不透明整数, 零域分类（§2.2 修正：home 面 = 条目字段独立互斥遍; 合成若需保留 = 实例侧事务）; 无 kern_set_loc_domain/无域参数（废弃——2026-09-10 用户原则：内核无寄存器/域分类概念）**）
-- Modify: `src/arch/linux/ld/regalloc.cr`（alloc_registers phase 5 + 注入钩子写 g_opt_meta 后调 kern 登记/清除——双面同步; **meta_reg_for_var 函数体等价改写为登记表查询——不删**（Task 0 ④ 修正注：regalloc.cr 注入探针 try_inject_read_gap :254/:261 调用它——须同步改实例侧私有扫描或经登记表等价读; emit 面 instr.cr get_reg_for_var = 独立实现不受影响））
-- Test: `tests/selfhost/test_live_ranges.py`（13/13——判定红/绿路径经登记表通道输出与直读时代逐字节同）+ test_ccr_v7.py 23/23
+- Modify: `src/compiler/ccr_io.cr`（corec 写侧 `populate_nod_objects()`——lower 后单遍 g_ir_instrs → g_v7_nod_sem 镜像（28B 语义字段,与 loader 解析对称——写侧载体裁决 2026-09-10）; save_ccr 调 compute 前（:456 区）接入）
+- Modify: `src/arch/linux/ld/ent_kernel.cr`（**compute_live_ranges/compute_entries/rl_rule2_func/dump_entries_summary 的 iri_\* 4 使用点（:99/:227-233/:677-680/:367）→ nod_\* 对象面**——同 index 机械替换（F5）; 函数窗口源中性化（F3——现 g_ir_func_instr_\* 值 = NOD 坐标,以节点范围语义注记使用; rl_rule2_func 签名 ist/ic/vs/vc 措辞中性化——值不变）; 头注自证矛盾消除（:819-823））
+- Test: `tests/selfhost/test_live_ranges.py`（13/13——dump 通道输出逐字节同,坐标值不变）+ `tests/selfhost/test_ccr_v7.py` 24/24（ENT 产物 byte-identical——populate 镜像 + compute 同值）+ 回归快子集
 
 **Interfaces:**
-- Consumes: Task 0 登记 API 调用点清单 + Task 1 对象面
+- Consumes: Task 1 对象面（nod_\* 已建——corec 侧 populate 前 nod 缓冲为空,compute 时序 = populate 后）
+- Produces: `populate_nod_objects()`（corec 写侧——ccr_io,corec concat 内）
+- 判据: ENT 产物 byte-identical（写侧判据）+ dump 通道输出逐字节同 + O2 stage 链 byte-identical;核心判据 = 内核零 g_ir_instrs/iri_\* 代码引用（中立性 guard A 组 token 新增 g_ir_instrs——本任务转绿）
+
+- [ ] **Step 1:** 中立性 guard 文件先写（test_ent_kernel_neutrality.py——排除集 = g_opt_meta 族/LOC_HOME_BASE/OPT_\*/E2_\*/g_x86_\*/寄存器名/**g_ir_instrs**/iri_\*——现态红——早暴露纪律;A 组（g_ir_instrs/iri_\*）与 B 组（meta/LOC）分注,Task 2 绿 A 组、Task 3 绿 B 组）
+- [ ] **Step 2:** 写失败测试：populate + 对象面 compute（corec 写侧产物 ENT byte-identical 判据先行基线）
+- [ ] **Step 3:** `populate_nod_objects()` 实现（g_ir_instrs → g_v7_nod_sem——48B→28B 字段镜像,同 loader 解析字段序）
+- [ ] **Step 4:** compute 系 4 函数 iri_\* → nod_\* 改写（同 index——F1/F2）+ 函数窗口语义注记（F3——值 = NOD 坐标）
+- [ ] **Step 5:** 测试绿（A 组 guard 绿 + ENT byte-identical + dump 输出同 + stage 链）+ 回归快子集
+- [ ] **Step 6:** 提交 `feat: 内核完备 Task 2——A 通道中立化（compute 系改 NOD 对象面 + 写侧 populate,内核零线性流引用）`
+
+---
+
+## Task 3: B 通道中立化——登记表 + meta 改写 + LOC_HOME_BASE 移除
+
+**Files:**
+- Modify: `src/arch/linux/ld/ent_kernel.cr`（位置登记表 {entry→loc} + kern_loc_assign/kern_loc_clear/kern_loc_of; verify 规则①② 读通道切换（meta_reg_for_var 改读登记表——函数体等价改写）; **LOC_HOME_BASE 常量移除 + 引用面（:500/:590/:744）改写——位置 = 不透明整数,零域分类（§2.2 修正：home 面 = 条目字段独立互斥遍;合成若需保留 = 实例侧事务）;无 kern_set_loc_domain/无域参数（废弃——2026-09-10 用户原则：内核无寄存器/域分类概念）**）
+- Modify: `src/arch/linux/ld/regalloc.cr`（alloc_registers phase 5 + 注入钩子写 g_opt_meta 后调 kern 登记/清除——双面同步; **meta_reg_for_var 函数体等价改写为登记表查询——不删**（Task 0 ④ 修正注：regalloc.cr 注入探针 try_inject_read_gap :254/:261 调用它——须同步改实例侧私有扫描或经登记表等价读; emit 面 instr.cr get_reg_for_var = 独立实现不受影响））
+- Test: `tests/selfhost/test_live_ranges.py`（13/13——判定红/绿路径经登记表通道输出与直读时代逐字节同）+ test_ccr_v7.py 24/24
+
+**Interfaces:**
+- Consumes: Task 0 登记 API 调用点清单 + Task 1 对象面 + Task 2 A 通道
 - Produces: kern_loc_assign/clear/of; 登记表（内核数据——loc = 不透明整数）
-- 判据：test_live_ranges 13/13（通道切换输出同——先基线后对照）+ O2 全链 byte-identical（--check-regalloc 绿/红路径经登记通道）+ 回归快子集
+- 判据：test_live_ranges 13/13（通道切换输出同——先基线后对照）+ O2 全链 byte-identical（--check-regalloc 绿/红路径经登记通道）+ 回归快子集;guard B 组转绿
 - 双份同步纪律：实例写点成对（g_opt_meta + 登记）——代码注记 + 注入钩子测试覆盖（红路径 = 双面一致注入）
 
-- [ ] **Step 1:** 写失败测试：登记表 API + **中立性 guard**（kern_loc_assign——现无 → FAIL; test_ent_kernel_neutrality.py——现态 meta_reg_for_var 读 g_opt_meta + LOC_HOME_BASE 在 → 红——早暴露纪律）
+- [ ] **Step 1:** 写失败测试：登记表 API（kern_loc_assign——现无 → FAIL）——guard B 组红确认
 - [ ] **Step 2:** 跑测试确认失败
 - [ ] **Step 3:** 登记表 + kern API 实现（ent_kernel）
-- [ ] **Step 4:** 判定读通道切换（verify/rl_rule2 读登记表——等价改写）; LOC_HOME_BASE 移除（引用面改写——home 面 = 条目字段独立互斥遍或实例侧合成, 内核零域概念）
-- [ ] **Step 5:** 实例侧双面同步（alloc phase 5/注入钩子 → g_opt_meta + kern 登记成对）
-- [ ] **Step 6:** 测试绿（live_ranges 13/13 通道输出同 + ccr_v7 23/23 + O2 byte-identical）+ 回归快子集
-- [ ] **Step 7:** 提交 `feat: 内核完备 Task 2——判定中立化（登记表通道 + 位置域声明化, g_opt_meta 直读解除）`
+- [ ] **Step 4:** 判定读通道切换（verify/rl_rule2 读登记表——等价改写）; LOC_HOME_BASE 移除（引用面改写——home 面 = 条目字段独立互斥遍或实例侧合成,内核零域概念）
+- [ ] **Step 5:** 实例侧双面同步（alloc phase 5/注入钩子 → g_opt_meta + kern 登记成对; try_inject_read_gap :254/:261 同步——实例侧私有扫描或登记表等价读,注记理由）
+- [ ] **Step 6:** 测试绿（live_ranges 13/13 通道输出同 + ccr_v7 24/24 + O2 byte-identical + guard B 组绿）+ 回归快子集
+- [ ] **Step 7:** 提交 `feat: 内核完备 Task 3——B 通道中立化（登记表通道 + LOC_HOME_BASE 移除,内核零位置编码/零实例布局读）`
 
 ---
 
-## Task 3: 注册契约完整化——声明扩展 + ③④ 形式声明 + 输出面
+## Task 4: 输出面中性化 + 配方查询补体 + 注册契约完整化（③④ 声明）
 
 **Files:**
-- Modify: `src/compiler/corearch.cr`（g_instance_decl 行扩展: needs_eviction/needs_call_sites 字段 + 行数据（x86: {0, 0}）——home_base/reg_domain 已从范围删除（§2.2 修正——实例侧域编码 = 实例私有, 不在声明表））
-- Modify: `src/arch/linux/ld/ent_kernel.cr`（判定结果输出面形式化——kern_verify_all 命名确认 + 共存证据查询面确认 = 现函数集即 API 注记）;③④ 形式声明字段文档（不实现注记）
-- Test: `tests/selfhost/test_live_ranges.py`（13/13——flag 通道输出不变）+ flag 组合面
+- Modify: `src/arch/linux/ld/ent_kernel.cr`（rl_print_loc :589-595 中性化（不透明 loc 直印——去 reg/home slot 分类措辞）; rl_report_rule1/2 措辞（"regalloc-consistency" 前缀 → 中性描述——保留 spec 文件名引用注记）; **配方查询封装补体（857-860 悬空注——nod_inputs(n) 薄封装函数 = [first, first+count) 遍历——审计 API 缺口）**; ③④ 形式声明字段文档 + kern_verify_all 输出面注记）
+- Modify: `src/compiler/corearch.cr`（g_instance_decl 行扩展: needs_eviction/needs_call_sites 字段 + 行数据（x86: {0, 0}）——home_base/reg_domain 已从范围删除（§2.2 修正））
+- Test: `tests/selfhost/test_live_ranges.py`（13/13——flag 通道输出不变——措辞中性化不影响断言面确认; dump 文本断言如含 reg/home slot 字样 → 同步更新断言为中性措辞）+ 配方查询新断言（对象面遍历 = 现 dump_object_surface 内联逻辑的函数化）
 
 **Interfaces:**
-- Consumes: Task 2 登记/域面
-- Produces: 实例声明完整行（能力 + 资源域代数 + ③④ 形式声明）; 域数据源 = 声明表
-- 判据：flag 通道输出逐字节不变 + test_live_ranges 13/13 + 回归快子集
+- Consumes: Task 2/3（对象面 + 登记表——配方查询基于 nod_\* + v7_edge_\*）
+- Produces: nod_inputs(n)（内核面——配方查询承诺兑现）; 声明行 needs_eviction/needs_call_sites
+- 判据：flag 通道输出不变（措辞中性化后文本断言同步——测试 = 行为锚,措辞 = 输出面） + test_live_ranges 13/13 + 回归快子集
 
-- [ ] **Step 1:** 声明行扩展（needs_eviction/needs_call_sites——x86 {0,0}）
-- [ ] **Step 2:** ③④ 形式声明字段 + 文档注记（引擎不实现——设计 spec §3.2 引用）
-- [ ] **Step 3:** 输出面形式化注记（kern_verify_all/共存证据 = 现名即 API——注释层）
+- [ ] **Step 1:** rl_print_loc/rl_report 措辞中性化（loc 直印——测试断言同步）
+- [ ] **Step 2:** nod_inputs 封装补体 + 配方查询测试（对象面遍历函数化）
+- [ ] **Step 3:** 声明行 needs_eviction/needs_call_sites 扩展 + ③④ 文档注记（引擎不实现——设计 spec §3.2 引用）+ kern_verify_all 输出面注记
 - [ ] **Step 4:** test_live_ranges 13/13 + 回归快子集
-- [ ] **Step 5:** 提交 `feat: 内核完备 Task 3——注册契约完整化（资源域代数 + ③④ 形式声明 + 输出面注记）`
+- [ ] **Step 5:** 提交 `feat: 内核完备 Task 4——输出面中性化 + 配方查询补体 + 注册契约完整化（③④ 声明）`
 
 ---
 
-## Task 4: 收官——中立性 guard + 全量回归 + 自举 + 文档
+## Task 5: 收官——中立性 guard 全绿 + 全量回归 + 自举 + 文档
 
 **Files:**
-- Test: 中立性静态 guard 新建（ent_kernel.cr 零实例符号断言——g_opt_meta/寄存器名/ELF 段名; 脚本或 Python 测试——设计 spec §4.3）入回归面
+- Test: 中立性 guard 全量绿确认（A 组 Task 2 绿 + B 组 Task 3 绿——红→绿记录核）+ 残留清零
 - Test: 全量回归（compile/backend_bootstrap/hit_table/region_cfg/mw1-6/slice_bounds/live_ranges/ccr_v7/bootstrap 三套 + full-bootstrap guard）
-- Modify: `docs/superpowers/specs/2026-09-10-corearch-kernel-completion-design.md`（状态 → 已实施 + 执行注记回填——含 Task 0 定夺（region_of_nod）/登记表双份纪律实证/③④ 声明落点）
+- Modify: `docs/superpowers/specs/2026-09-10-corearch-kernel-completion-design.md`（状态 → 已实施 + 执行注记回填——含审计结论（§4.5）/写侧载体裁决/登记表双份纪律实证/③④ 声明落点/F4 挂账）
 - Modify: `docs/superpowers/specs/2026-09-09-corearch-rewrite-design.md`（步骤 2.5 完成注记 + §1.1 三组件完成态）
 - Test: `nice -n 19 python3 build_selfhost_native.py` 重建 + 冒烟
 
 **Interfaces:**
-- Consumes: Task 1-3 全部
-- 验证: 中立性 guard 绿（内核零实例符号）+ 全量回归绿 + 自举重建冒烟 + 文档同步（设计 spec 状态/蓝图步骤 2.5 注记/progress 台账）
+- Consumes: Task 2-4 全部
+- 验证: 中立性 guard 全绿（内核零实例符号/零线性流/零位置编码）+ 全量回归绿 + 自举重建冒烟 + 文档同步（设计 spec 状态/蓝图步骤 2.5 注记/progress 台账）
 
-- [ ] **Step 1:** 中立性 guard 绿确认（Task 2 Step 1 已前置写——核红→绿记录）+ 残留清零（若有 ent_kernel 残留实例引用——回 Task 2 通道切换补漏）
+- [ ] **Step 1:** 中立性 guard 全量绿确认（红→绿记录核——A/B 组分注）+ 残留清零（若有——回对应通道补漏）
 - [ ] **Step 2:** 全量回归跑批
 - [ ] **Step 3:** 自举重建 + 冒烟
-- [ ] **Step 4:** 文档同步（设计 spec 状态回填/蓝图步骤 2.5 注记）
-- [ ] **Step 5:** 提交 `feat: 内核完备收官——中立性 guard + 全量回归 + 自举 + 文档同步`
-
----
-
+- [ ] **Step 4:** 文档同步（设计 spec 状态回填含审计注记/蓝图步骤 2.5 注记）
+- [ ] **Step 5:** 提交 `feat: 内核完备收官——中立性 guard 全绿 + 全量回归 + 自举 + 文档同步`
 ## 风险注记
 
 - Task 1 重建移出 = 最大动面（loader 与发射之间契约变化）——判据 = backend_bootstrap stage byte-identical（重建产物纯搬移证明）; loader 守卫面 Task 0 核对防漏
