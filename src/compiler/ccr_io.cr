@@ -5,7 +5,8 @@
 // v7 format（serialization v4；v7-only——load 校验 version==7，无 v6 兼容/转换；
 // v6 读路径退役：旧 v6 文件由 version 拒收，无转换工具）
 // 字节真相 = docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md（设计定稿
-// ——在 v6 段表架构上扩展：NOD 36B 邻接 + EDG 段必落；ENT 恒空至 Task 2）
+// ——在 v6 段表架构上扩展：NOD 36B 邻接 + EDG 段必落 + ENT 实记录（Task 2：
+// corec 产时重建——compute_entries_v7，见下））
 // + coreir-schema.md 家风格（Task 6 并入 schema）。本文件头注释 = 实现权威
 // （v6 目标形状落地：SYM 归并 spec §3.2——vars 表并入函数记录声明区/globals；
 // REG 坐标化 spec §3.5——kind/parent/enter/exit/first_ent/last_ent，nstart/
@@ -69,11 +70,16 @@
 //     ENT(4) 条目表：    [ent_count u32] [×28B {var_id i32, version u32,
 //                        def_nod i32, live_start u32, live_end u32（半开：
 //                        最后使用点+1）, home i32, flags u32}]
-//                        regalloc 移后端后恒 0 条（Task 2 翻转——corec 产实
-//                        记录）；内存表 24B/条（闭区间、无 version，opt.cr
-//                        compute_entries）→ 落盘：version = 同 var 组内定值
-//                        升序序数（1-based），live_end_disk = live_end_mem + 1；
-//                        盘上 7 字段 = 28B
+//                        v7 Task 2 起实记录（corec 产时重建 = 同文件
+//                        compute_entries_v7——regalloc.cr 规则镜像，非 corearch
+//                        自算的双算：regalloc 自算保持不变，文件 ENT = 校验面
+//                        + 语义消费通道数据源）；内存表 24B/条（闭区间、无
+//                        version，regalloc.cr/本文件写侧共用）→ 落盘：
+//                        version = 同 var 组内定值升序序数（1-based），
+//                        live_end_disk = live_end_mem + 1；盘上 7 字段 = 28B。
+//                        home 恒 -1（实例注记——分配决策不写回格式，字节
+//                        spec §3.5）；flags 恒 0（无配方/参数/全局/驱逐位
+//                        零实例——位语义保留）
 //     REG(5) region 表： [sg_count u32] [×24B {kind u32, parent i32,
 //                        enter_nod u32, exit_nod u32（v5 enter/exit 指令号 =
 //                        NOD 坐标，语义不变）, first_ent i32, last_ent i32}]
@@ -426,6 +432,166 @@ fn ccr_grow_func_entry_meta(needed: int) {
     g_ir_func_entry_cap = nc;
 }
 
+// --- v7 Task 2：ENT 主干化——corec 侧条目重建（compute_entries_v7）---
+// regalloc.cr compute_entries 的 corec 镜像（corec 二进制不含 regalloc.cr——
+// 独立实现同规则；对齐清单 = v7 计划 Task 0 表二 rows 1-7，差异①/②按实现）：
+//   · 引用区间（compute_live_ranges :48-111 同款）：逐函数逐指令扫
+//     d/s1/s2 三列 ∈ [vs, vs+vc) 函数 var 窗口 → [first_ref, last_ref]
+//     （局部坐标存储、全局坐标使用——不得以 df 边替代三列扫描：幽灵缺陷面，
+//     表一注 A）
+//   · 定值点（compute_entries :206-212 同款）：IR_STORE 的 s1 ∈ 窗口 ∪
+//     其余 op（IR_STORE_INDEX_VAR/IR_STORE_PTR/IR_DYN_DISPATCH 排除——dest
+//     非定值 = 被存值源/基址标注/占位）的 dest ∈ 窗口
+//   · 版本切分（:218-224 同款）：收口上一版本 pend = min(inst−1, last_ref)
+//     （last_ref 含定值自身 → 恒取 inst−1——与 spec 截断式数学等价）；新版本
+//     LS = inst、LE = last_ref（全局坐标 inst = ist + ii）
+//   · def=-1 补丁（:240-262 同款）：窗口内从未定值但有引用的 var（参数/单写
+//     临时值）单条目 def=-1，区间 = [first_ref, last_ref] 闭区间（差异①——
+//     实现语义：live_start = 首引用指令；loader 只校验 els < ele ≤ instr_cnt，
+//     与 corearch 自算同规则 = 双写一致前提）
+//   · home/flags 恒 -1/0（:232/:255 同款）；全局 var（SYM 前缀 0..G−1）不在
+//     任何函数窗口 → 恒无条目（差异②——flags bit2 零实例，字节 spec §3.5
+//     位语义保留）
+// 全量重建（g_entry_count 整表重置 = compute_entries 的 func_i==0 分支）；
+// 函数块界写 g_ir_func_entry_start/count（文件序升序 = save 侧 SYM/REG 回填
+// 与 loader 块对照的共同来源）。
+fn compute_entries_v7() -> int {
+    g_entry_count = 0;
+    fi : ., mut = 0;
+    loop {
+        if fi >= g_ir_func_count { break; }
+        ic := r64(g_ir_func_instr_count, fi * 8);
+        ist := r64(g_ir_func_instr_start, fi * 8);
+        vc := r64(g_ir_func_var_count, fi * 8);
+        vs := r64(g_ir_func_var_start, fi * 8);
+        cnt : ., mut = 0;
+        if ic > 0 && vc > 0 {
+            // 引用区间表：每「函数内 var」16B {first, last}（局部指令坐标，
+            // 同 regalloc live_range 布局——两 i64 槽、-1 播种）
+            lr := alloc(vc * 16);
+            lz : ., mut = 0;
+            loop {
+                if lz >= vc { break; }
+                w64(lr, lz * 16, -1);
+                w64(lr, lz * 16 + 8, -1);
+                lz = lz + 1;
+            }
+            // 三列引用扫描（d/s1/s2；dest 列含定值自身——区间恒覆盖定值点）
+            ii : ., mut = 0;
+            loop {
+                if ii >= ic { break; }
+                d := iri_dest(ist + ii);
+                s1 := iri_s1(ist + ii);
+                s2 := iri_s2(ist + ii);
+                if d >= vs && d < vs + vc {
+                    if r64(lr, (d - vs) * 16) < 0 { w64(lr, (d - vs) * 16, ii); }
+                    w64(lr, (d - vs) * 16 + 8, ii);
+                }
+                if s1 >= vs && s1 < vs + vc {
+                    if r64(lr, (s1 - vs) * 16) < 0 { w64(lr, (s1 - vs) * 16, ii); }
+                    w64(lr, (s1 - vs) * 16 + 8, ii);
+                }
+                if s2 >= vs && s2 < vs + vc {
+                    if r64(lr, (s2 - vs) * 16) < 0 { w64(lr, (s2 - vs) * 16, ii); }
+                    w64(lr, (s2 - vs) * 16 + 8, ii);
+                }
+                ii = ii + 1;
+            }
+            // 每「函数内 var」一条最近打开条目（-1 = 未打开）：定值序列切分
+            prev : string, mut = alloc(vc * 8);
+            pz : ., mut = 0;
+            loop {
+                if pz >= vc { break; }
+                w64(prev, pz * 8, -1);
+                pz = pz + 1;
+            }
+            ii = 0;
+            loop {
+                if ii >= ic { break; }
+                inst := ist + ii;
+                op := iri_op(inst);
+                dv : ., mut = -1;
+                if op == IR_STORE {
+                    s1 := iri_s1(inst);
+                    if s1 >= vs && s1 < vs + vc { dv = s1; }
+                } else if op != IR_STORE_INDEX_VAR && op != IR_STORE_PTR &&
+                          op != IR_DYN_DISPATCH {
+                    d := iri_dest(inst);
+                    if d >= vs && d < vs + vc { dv = d; }
+                }
+                if dv >= 0 {
+                    lv := dv - vs;
+                    last_global : ., mut = -1;
+                    ll := r64(lr, lv * 16 + 8);
+                    if ll >= 0 { last_global = ist + ll; }
+                    // 收口上一版本：end = min(def−1, last_ref)（last_ref ≥ 次
+                    // 定值 → 恒 def−1）
+                    pe := r64(prev, lv * 8);
+                    if pe >= 0 {
+                        pend : ., mut = inst - 1;
+                        if last_global >= 0 && last_global < pend { pend = last_global; }
+                        w32(g_ir_entries, pe * ESZ_ENTRY + OFF_ENTRY_LE, pend);
+                    }
+                    // 开新版本：区间端点暂定 = 定值点..last_ref，末版直接成立
+                    ccr_grow_entries(g_entry_count + 1);
+                    eo := g_entry_count * ESZ_ENTRY;
+                    w32(g_ir_entries, eo + OFF_ENTRY_VAR, dv);
+                    w32(g_ir_entries, eo + OFF_ENTRY_DEF, inst);
+                    w32(g_ir_entries, eo + OFF_ENTRY_LS, inst);
+                    w32(g_ir_entries, eo + OFF_ENTRY_LE, last_global);
+                    w32(g_ir_entries, eo + OFF_ENTRY_HOME, -1);
+                    w32(g_ir_entries, eo + OFF_ENTRY_FLAGS, 0);
+                    w64(prev, lv * 8, g_entry_count);
+                    g_entry_count = g_entry_count + 1;
+                    cnt = cnt + 1;
+                }
+                ii = ii + 1;
+            }
+            // def=-1 补丁（按 var 行序）：无定值但有引用的 var（参数等）
+            lv2 : ., mut = 0;
+            loop {
+                if lv2 >= vc { break; }
+                if r64(prev, lv2 * 8) < 0 {
+                    ff := r64(lr, lv2 * 16);
+                    ll := r64(lr, lv2 * 16 + 8);
+                    if ff >= 0 && ll >= 0 {
+                        ccr_grow_entries(g_entry_count + 1);
+                        eo := g_entry_count * ESZ_ENTRY;
+                        w32(g_ir_entries, eo + OFF_ENTRY_VAR, vs + lv2);
+                        w32(g_ir_entries, eo + OFF_ENTRY_DEF, -1);
+                        w32(g_ir_entries, eo + OFF_ENTRY_LS, ist + ff);
+                        w32(g_ir_entries, eo + OFF_ENTRY_LE, ist + ll);
+                        w32(g_ir_entries, eo + OFF_ENTRY_HOME, -1);
+                        w32(g_ir_entries, eo + OFF_ENTRY_FLAGS, 0);
+                        g_entry_count = g_entry_count + 1;
+                        cnt = cnt + 1;
+                    }
+                }
+                lv2 = lv2 + 1;
+            }
+        }
+        ccr_grow_func_entry_meta(fi + 1);
+        w64(g_ir_func_entry_start, fi * 8, g_entry_count - cnt);
+        w64(g_ir_func_entry_count, fi * 8, cnt);
+        fi = fi + 1;
+    }
+    return g_entry_count;
+}
+
+// 函数条目块 [es, es+ec) 内 var 的 def=-1 条目 id（SYM func param_ents 回填
+// 用——参数「入参」条目 = 该参数 def=-1 条目；被重定值/从未引用 → 无 = -1；
+// def=-1 补丁每 var 至多一条）。写侧守卫：返回 id 恒 ≥ es 且在块内。
+fn ccr_param_entry_id(var_id: int, es: int, ec: int) -> int {
+    e : ., mut = 0;
+    loop {
+        if e >= ec { break; }
+        ei := es + e;
+        if ccr_ent_var(ei) == var_id && ccr_ent_def(ei) < 0 { return ei; }
+        e = e + 1;
+    }
+    return -1;
+}
+
 // --- Save（写侧与 calc 侧一致；段表规范序、段体连续）---
 
 fn save_ccr(path: string) -> int {
@@ -435,10 +601,14 @@ fn save_ccr(path: string) -> int {
     // of letting w32 silently keep only the low bits.
     if ccr_validate_i32_fields() == 0 { return -1; }
 
-    // regalloc 移后端（2026-09-07，D-1=Y）：.ccr 不再落 ENT——条目表由
-    // corearch load 后自算（regalloc.cr compute_live_ranges/compute_entries）；
-    // 内存表完整性守卫随迁 corearch（自算前置同域校验）。ENT 段恒 0 条
-    // （Task 2 翻转）。
+    // v7 Task 2（ENT 主干化）：corec 侧条目重建先行——compute_entries_v7 =
+    // regalloc.cr compute_entries 的独立镜像（corec 二进制不含 regalloc.cr；
+    // 对齐清单 = v7 计划 Task 0 表二）。填 g_ir_entries（内存 24B 闭区间表）/
+    // g_entry_count + 函数块界（g_ir_func_entry_start/count）——save 后续各处
+    // （SYM func first/last_ent/param_ents、ENT 28B 实记录、REG 区内范围）
+    // 消费同一来源 = 双写一致（loader 块对照校验同域；corearch regalloc 自算
+    // 保持不动——文件 ENT = 校验面 + 语义消费通道数据源，行为零变化）。
+    compute_entries_v7();
 
     // v7：EDG 内容先收集（NOD 邻接域 + 段尺寸先决）——g_df_edges 内存 =
     // 头插链表，按节点序走查 → 每节点出边连续段（first_edge = 前缀累计）
@@ -539,20 +709,28 @@ fn save_ccr(path: string) -> int {
         vcursor = vcursor + vc;
         pc := r64(g_ir_func_param_count, fi * 8);
         if pc > vc { return -1; }
-        // regalloc 移后端：.ccr 无 ENT——func 记录 first_ent/last_ent 恒 -1
-        // （loader 空表对照 pcnt==0 ↔ -1 已支持）、param_ents 恒 -1
+        // v7 Task 2：条目块界实回填（compute_entries_v7 已先行）——函数条目
+        // 块 = ENT 文件序连续段 [es, es+ec)（SYM func 与 REG 根行同源双写；
+        // loader 块对照消费：pcnt==0 ↔ -1、ffe == 块首、fle == 块末）
+        es := r64(g_ir_func_entry_start, fi * 8);
+        ec := r64(g_ir_func_entry_count, fi * 8);
         fe2 : ., mut = -1;
         le2 : ., mut = -1;
+        if ec > 0 { fe2 = es; le2 = es + ec - 1; }
         buf_write_u32(buf, pos, r64(g_ir_func_name_idx, fi * 8)); pos = pos + 4;
         buf_write_u32(buf, pos, pc); pos = pos + 4;
         buf_write_u32(buf, pos, r64(g_ir_func_ret_type, fi * 8)); pos = pos + 4;
         buf_write_i32(buf, pos, froot); pos = pos + 4;
         buf_write_i32(buf, pos, fe2); pos = pos + 4;
         buf_write_i32(buf, pos, le2); pos = pos + 4;
+        // param_ents 实回填：参数「入参」条目 = 该参数 var 的 def=-1 条目 id
+        // （函数内被重定值/从未引用 → -1；头注释 §3.2 语义）。loader 只做
+        // 界拒绝（pid < -1）——与 ENT 的一致性由 Python 侧/测试网对照。
         pp : ., mut = 0;
         loop {
             if pp >= pc { break; }
-            buf_write_i32(buf, pos, -1); pos = pos + 4;
+            buf_write_i32(buf, pos, ccr_param_entry_id(vs + pp, es, ec));
+            pos = pos + 4;
             pp = pp + 1;
         }
         // var 声明区（行序声明——name/type；ENT「存在即声明」的名称/类型投影）
@@ -711,10 +889,30 @@ fn save_ccr(path: string) -> int {
         if sex < sen { return -1; }  // 未闭合 → ncount 不可派生
         if sk2 == SG_FUNC { rfunc = rfunc + 1; }
         if rfunc < 0 || rfunc >= g_ir_func_count { return -1; }  // 行序结构失配
-        // regalloc 移后端：.ccr 无 ENT——region 条目范围恒 -1（loader
-        // rfe/rle == -1 对已接受；根行与 SYM func first/last 对照均 -1）
+        // v7 Task 2：条目范围实回填（compute_entries_v7 已先行）——根 region
+        // （SG_FUNC）= 整个函数条目块（含 def=-1 参数条目；与 SYM func
+        // first/last 同源双写——loader 逐根行对照）；嵌套 region = 定值点
+        // def_nod ∈ [enter, exit) 的条目段（块内定值点升序 → 文件条目序连续
+        // 一段；无 = -1）。头注释 §3.5 语义：区间 = def_nod 归属，非全块。
         fe2 : ., mut = -1;
         le2 : ., mut = -1;
+        bes := r64(g_ir_func_entry_start, rfunc * 8);
+        bec := r64(g_ir_func_entry_count, rfunc * 8);
+        if sk2 == SG_FUNC {
+            if bec > 0 { fe2 = bes; le2 = bes + bec - 1; }
+        } else {
+            kk : ., mut = 0;
+            loop {
+                if kk >= bec { break; }
+                eid2 := bes + kk;
+                ed2 := ccr_ent_def(eid2);
+                if ed2 >= sen && ed2 < sex {
+                    if fe2 < 0 { fe2 = eid2; }
+                    le2 = eid2;
+                }
+                kk = kk + 1;
+            }
+        }
         if sk2 == SG_FUNC {
             // 根 region span = 函数指令范围（REG = 文件里函数边界的唯一真源，
             // 与 func 表一致性校验——失配 = 内部状态漂移）
@@ -831,7 +1029,8 @@ fn load_ccr(data: string, fsize: int) -> int {
     // STR/SYM/NOD/REG 必备（v6 坐标化后 func 指令边界 = root_region span 的
     // 唯一真源，REG 缺段无法重建函数边界）；EDG v7 必落（spec §3.4——文件
     // 语义载体 = NOD+EDG，缺边段 = 格式不一致拒绝）；ENT 可缺（v5 精神：
-    // 旧段缺失 = 空——恒空时代等价）
+    // 旧段缺失 = 空表——Task 2 起 corec 恒产实记录，缺段等价空 = loader
+    // 兼容语义保留）
     if have1 == 0 || have2 == 0 || have3 == 0 || have5 == 0 || have6 == 0 { return -1; }
     if have4 == 0 { seg_off4 = 0; seg_end4 = 0; }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""v7 .ccr 真图载体 IO 测试（实施计划 Task 1：骨架——version 7 + NOD 36B 邻接
-+ EDG 段必落，v6 读路径退役）。
+"""v7 .ccr 真图载体 IO 测试（Task 1 骨架——version 7 + NOD 36B 邻接 + EDG 段
+必落；Task 2 ENT 主干化——corec 产实记录 + loader 激活 + SYM/REG 回填）。
 
 字节真相 = docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md：
   [0]   magic u32 = 0x31524343 ("CCR1")
@@ -9,7 +9,10 @@
   [12]  reserved u32 = 0
   [16]  段表 6 × 12B {tag u32, offset u32, size u32}（规范序 tag 1..6）
   [88]  段体（tag 升序连续）：STR(1) / SYM(2) / NOD(3) / ENT(4) / REG(5) / EDG(6)
-  STR/SYM/ENT/REG = v6 布局不变（ENT 恒空——Task 2 翻转）
+  STR/SYM/NOD/REG/EDG = v7 布局（Task 1）；ENT = 实记录（Task 2）——28B
+  {var_id i32, version u32, def_nod i32, live_start u32, live_end u32（半开 =
+  最后使用点 +1）, home i32（恒 -1）, flags u32}——corec 写侧按 v6 §4.1 规则
+  （regalloc compute_entries 镜像，Task 0 表二差异①/②实现语义）重建
   NOD(3): nod_count + 36B × nod_count
           {op i32, dest i32, s1 i64, s2 i32, s3 i32, tk i32,
            first_edge u32, edge_count u32}
@@ -24,6 +27,11 @@
   （期望值派生：对现 v6 线性 NOD 流按 df_connect_srcs 语义重放（Python 侧
   独立模型）+ 幽灵边去除 + state 链按现状（不受播种修复影响）——实现前
   从当前编译器产物导出并锁定，见 test_v7_edge_content_small_program）。
+
+Task 2 条目期望（Python 独立模型 + 手算对照——均按 regalloc.cr compute_entries
+实现语义转写，见 test_v7_ent_* 的派生说明；loader 校验面 = 同文件内自洽：
+evr ≥ 1 / ev 命名空间 / els < ele ≤ instr_cnt / def ≥ 0 → ed == els / SYM
+func 块对照——reject 测试逐个 byte mutation 打）。
 """
 import os
 import shutil
@@ -301,6 +309,522 @@ PROBE_SRC = (
     "}\n")
 
 
+# --- Task 2: ENT 实记录期望（Python 独立模型 + 手算对照）---
+
+# 模型 opcode 常量（规则需要判别的四个 op——与 ast.cr 编号一致）
+IR_STORE = 9
+IR_STORE_INDEX_VAR = 16
+IR_STORE_PTR = 26
+IR_DYN_DISPATCH = 44
+
+ENT_SRC = (
+    "fn identity(n: int) -> int { return n; }\n"
+    "fn main() -> int {\n"
+    "    x := 1;\n"
+    "    x = x + 1;\n"
+    "    x = x + 2;\n"
+    "    return x;\n"
+    "}\n")
+
+
+def model_compute_entries(nod, funcs, gcount, regs):
+    """v6 §4.1 条目重建规则（regalloc.cr compute_live_ranges/compute_entries
+    镜像）的 Python 独立实现——.cr 侧 compute_entries_v7 无共享代码，同为
+    regalloc.cr 规则文本转写，测试即交叉验证。
+
+    规则（Task 0 表二逐条）：
+      · 每函数三列引用扫描（d/s1/s2 ∈ [vs, vs+vc) 函数 var 窗口，局部坐标
+        存 [first_ref, last_ref]——不得以 df 边替代）；
+      · 定值点 = IR_STORE 的 s1 ∈ 窗口 ∪ 其余 op（STORE_INDEX_VAR/STORE_PTR/
+        DYN_DISPATCH 排除）的 dest ∈ 窗口；
+      · 版本切分：上一版本收口 end = min(def−1, last_ref)（dest/s1 列含定值
+        自身 → last_ref ≥ 次定值 → 恒 def−1）；末版 LE = last_ref（全局坐标）；
+      · 从未定值但有引用的 var（参数等）：def=-1 条目，区间 = [first_ref,
+        last_ref]（差异①实现语义——loader 只校验 els < ele ≤ instr_cnt）；
+      · 全局 var（SYM 前缀 0..G-1）不在任何函数窗口 → 恒无条目（差异②）；
+      · home/flags 恒 -1/0；版本 = 文件序同 var 组内 1-based 序数。
+    返回 (rows, blocks)：
+      rows:  [(var_id, version, def_nod, live_start, live_end_halfopen,
+               home, flags)]（文件序）
+      blocks: [(start_index, count)] per func（文件序块界）
+    """
+    defs_out = []  # entries in creation order (def-point order per func)
+    blocks = []
+    row_no = 0  # global entry counter across funcs (== file order)
+    var_start = gcount
+    for k, f in enumerate(funcs):
+        root = regs[f['root_region']]
+        ist, ex = root[2], root[3]
+        ic = ex - ist
+        vc = f['var_count']
+        vs = var_start
+        var_start += vc
+        ent0 = row_no
+        if ic > 0 and vc > 0:
+            first = [-1] * vc
+            last = [-1] * vc
+            for ii in range(ic):
+                inst = ist + ii
+                op, d, s1, s2, s3, tk, fe, ec = nod[inst]
+                for col in (d, s1, s2):
+                    if vs <= col < vs + vc:
+                        lv = col - vs
+                        if first[lv] < 0:
+                            first[lv] = ii
+                        last[lv] = ii
+            prev = [-1] * vc  # open-version entry id per local var
+            for ii in range(ic):
+                inst = ist + ii
+                op, d, s1, s2, s3, tk, fe, ec = nod[inst]
+                dv = -1
+                if op == IR_STORE:
+                    if vs <= s1 < vs + vc:
+                        dv = s1
+                elif op != IR_STORE_INDEX_VAR and op != IR_STORE_PTR and \
+                        op != IR_DYN_DISPATCH:
+                    if vs <= d < vs + vc:
+                        dv = d
+                if dv >= 0:
+                    lv = dv - vs
+                    last_global = ist + last[lv] if last[lv] >= 0 else -1
+                    pe = prev[lv]
+                    if pe >= 0:
+                        pend = inst - 1
+                        if last_global >= 0 and last_global < pend:
+                            pend = last_global
+                        # closure: overwrite LE of the still-open version
+                        row = defs_out[pe]
+                        defs_out[pe] = (row[0], row[1], row[2], row[3], pend,
+                                        row[5], row[6])
+                    defs_out.append((dv, 1, inst, inst, last_global, -1, 0))
+                    prev[lv] = len(defs_out) - 1
+                    row_no += 1
+            for lv2 in range(vc):
+                if prev[lv2] < 0 and first[lv2] >= 0 and last[lv2] >= 0:
+                    defs_out.append((vs + lv2, 1, -1, ist + first[lv2],
+                                     ist + last[lv2], -1, 0))
+                    row_no += 1
+        blocks.append((ent0, row_no - ent0))
+    # version = 同 var 文件序组内 1-based 序数
+    seen = {}
+    rows = []
+    for (var_id, _, dn, ls, le, ho, fl) in defs_out:
+        ord_ = seen.get(var_id, 0) + 1
+        seen[var_id] = ord_
+        rows.append((var_id, ord_, dn, ls, le + 1, ho, fl))
+    return rows, blocks
+
+
+def model_func_ranges(rows, blocks, funcs, gcount):
+    """从模型 rows/blocks 派生 SYM/REG 侧期望：per-func (first_ent, last_ent,
+    param_ents)；per-func param var 全局 id 列表（前 param_count 个 decl）。"""
+    out = []
+    vs = gcount
+    for k, f in enumerate(funcs):
+        st, cnt = blocks[k]
+        fe = st if cnt else -1
+        le = st + cnt - 1 if cnt else -1
+        pes = []
+        for p in range(f['param_count']):
+            pvar = vs + p
+            pid = -1
+            for i in range(st, st + cnt):
+                if rows[i][0] == pvar and rows[i][2] == -1:
+                    pid = i
+            pes.append(pid)
+        out.append((fe, le, pes))
+        vs += f['var_count']
+    return out
+
+
+def test_v7_ent_hand_expected_small():
+    """ENT 实记录 + 字段语义手算期望（Task 2 测试载体——已知小程序
+    identity/main，文件前两函数 = 节点 0..17，每函数首节点 = arena_new）：
+
+    手算（v6 §4.1 规则 + regalloc 实现语义——差异① def=-1 条目区间 =
+    [first_ref, last_ref] 闭区间、盘上 live_end 半开 = +1；版本 = 组内 1-based）：
+
+    identity func0 nodes[0:4) decls ['n','_arena']（n = var 窗口首行）:
+      n0 ARENA_NEW d=_arena；n1 RETURN s1=n；n2 ARENA_RESET s1=_arena；
+      n3 RETURN -1
+      → _arena: def@0，refs {0(d), 2(s1)} → 版本 1 [0,2] 闭 → 盘 (0, 3)
+      → n: 无定值，ref@1(s1) → def=-1 条目 (ls 1, le 2)  ← 差异① 参数条目
+    main func1 nodes[4:17) decls ['_arena','x','int','int','bin','int','bin']:
+      _arena def@4 refs{4,15} → (4, 16)
+      x defs@5(ALLOC),7,10,13(STORE)，refs{5,7,9,10,12,13,14} → 版本 1..4
+        版本 1 [5,6]→(5,7)；版本 2 [7,9]→(7,10)；版本 3 [10,12]→(10,13)；
+        版本 4 [13,14]→(13,15)
+      临时（RESOLVED/BINARY dest）：decl2 def@6 ref@7 → (6,8)；
+        decl3 def@8 ref@9 → (8,10)；decl4 def@9 ref@10 → (9,11)；
+        decl5 def@11 ref@12 → (11,13)；decl6 def@12 ref@13 → (12,14)
+    行 = (var_decl_row, version, def_nod, live_start, live_end_半开)；
+    home/flags 恒 -1/0。条目文件序 = 函数序块拼接：identity 块 = 文件行 0..1
+    （def 升序在前，def=-1 补丁按 var 行序在后），main 块 = 行 2..11。
+    """
+    ccr_path = os.path.join(BASE, 'build/test_v7_ent_hand.ccr')
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        corec_ccr(ENT_SRC, ccr_path)
+        v7 = V7File(read_ccr(ccr_path))
+        strs = v7.str_table()
+        sym = v7.sym_parse()
+        funcs = sym['funcs']
+        names = [strs[f['name']] for f in funcs]
+        assert names[0] == 'identity' and names[1] == 'main', names
+        ents = v7.ent()
+        # 手算表（var 以声明行序引用——与文件命名空间解耦）
+        exp = [
+            # identity block（文件行 0..1）
+            (1, 1, 0, 0, 3), (0, 1, -1, 1, 2),
+            # main block（文件行 2..11）
+            (0, 1, 4, 4, 16), (1, 1, 5, 5, 7), (2, 1, 6, 6, 8),
+            (1, 2, 7, 7, 10), (3, 1, 8, 8, 10), (4, 1, 9, 9, 11),
+            (1, 3, 10, 10, 13), (5, 1, 11, 11, 13), (6, 1, 12, 12, 14),
+            (1, 4, 13, 13, 15),
+        ]
+        # func var 窗口起点 = globals + 前缀 var_count
+        vs0 = len(sym['globals'])
+        vs1 = vs0 + funcs[0]['var_count']
+        var_of = {}
+        for di in range(funcs[0]['var_count']):
+            var_of[(0, di)] = vs0 + di
+        for di in range(funcs[1]['var_count']):
+            var_of[(1, di)] = vs1 + di
+        # 手算表只覆盖文件前两函数块（identity 2 + main 10 = 文件行 0..11——
+        # 函数块按函数序拼接，其余函数块在其后，本测试只断言前缀 12 行）
+        assert len(ents) >= len(exp), \
+            f"entries {len(ents)} < hand-expected {len(exp)}"
+        for k, (fidx, erow) in enumerate(zip([0] * 2 + [1] * 10, exp)):
+            evar, ever, edef, els, ele, eho, efl = ents[k]
+            assert evar == var_of[(fidx, erow[0])], \
+                f"row {k}: var {evar} != decl-row {erow[0]} var " \
+                f"{var_of[(fidx, erow[0])]}"
+            assert (ever, edef, els, ele) == erow[1:], \
+                f"row {k} {evar}: got ({ever},{edef},{els},{ele}) " \
+                f"expected {erow[1:]}"
+            assert eho == -1 and efl == 0, \
+                f"row {k}: home/flags ({eho},{efl}) != (-1,0)"
+        # SYM func 记录：块界回填 = 文件行 0..1 / 2..11；param_ents 实回填
+        # （identity 参数 n 的 def=-1 条目 = 文件行 1）
+        f0, f1 = funcs[0], funcs[1]
+        assert (f0['first_ent'], f0['last_ent']) == (0, 1), \
+            f"identity range {f0['first_ent']}..{f0['last_ent']}"
+        assert f0['param_ents'] == [1], \
+            f"identity param_ents {f0['param_ents']} != [1]"
+        assert (f1['first_ent'], f1['last_ent']) == (2, 11), \
+            f"main range {f1['first_ent']}..{f1['last_ent']}"
+        assert f1['param_count'] == 0
+        # REG 根行（SG_FUNC）first/last 与 SYM func 记录双写一致
+        regs = v7.reg()
+        roots = [i for i, r in enumerate(regs) if r[0] == 0]
+        assert regs[roots[0]][4] == 0 and regs[roots[0]][5] == 1
+        assert regs[roots[1]][4] == 2 and regs[roots[1]][5] == 11
+    finally:
+        try:
+            os.unlink(ccr_path)
+        except FileNotFoundError:
+            pass
+
+
+def test_v7_ent_model_replay_pure_add():
+    """整文件条目 = Python 独立模型预测（模型 = §4.1/regalloc 规则转写，与
+    .cr 实现无共享代码）——PROBE_SRC（pure_add 参数 def=-1 + main 全形态：
+    ALLOC/STORE/STORE_INDEX/STORE_INDEX_VAR carve-out 读/LAZY 族/多定值）。
+    对照面：
+      · ENT 段逐行 == 模型行（var_id/version/def/ls/le 半开/home/flags）；
+      · SYM func first_ent/last_ent/param_ents == 模型块界/参数条目派生；
+      · REG 每行 first/last == 模型派生（根行 = 函数块含 def=-1；嵌套 =
+        定值点 def ∈ [enter, exit) 的连续段，无 = -1）。"""
+    ccr_path = os.path.join(BASE, 'build/test_v7_ent_model.ccr')
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        corec_ccr(PROBE_SRC, ccr_path)
+        v7 = V7File(read_ccr(ccr_path))
+        sym = v7.sym_parse()
+        funcs = sym['funcs']
+        nod = v7.nod()
+        regs = v7.reg()
+        ents = v7.ent()
+        rows, blocks = model_compute_entries(nod, funcs, len(sym['globals']),
+                                             regs)
+        assert rows == ents, \
+            f"ENT rows != independent model:\n  file {ents[:8]}...\n  model {rows[:8]}..."
+        # func 名对照（模型按 SYM func 序——须 = 期望序）
+        strs = v7.str_table()
+        assert strs[funcs[0]['name']] == 'pure_add'
+        assert strs[funcs[1]['name']] == 'main'
+        # SYM func 块界 + param_ents 对照
+        exp_ranges = model_func_ranges(rows, blocks, funcs,
+                                       len(sym['globals']))
+        for k, f in enumerate(funcs):
+            fe, le, pes = exp_ranges[k]
+            assert (f['first_ent'], f['last_ent']) == (fe, le), \
+                f"func {k} ({strs[f['name']]}) first/last " \
+                f"({f['first_ent']},{f['last_ent']}) != model ({fe},{le})"
+            assert f['param_ents'] == pes, \
+                f"func {k} param_ents {f['param_ents']} != model {pes}"
+        # REG first/last 对照（根行 = 函数块；嵌套 = def ∈ span 连续段）
+        rfc = -1
+        for rid, r in enumerate(regs):
+            kind, par, en, ex, rfe, rle = r
+            if kind == 0:
+                rfc += 1
+            st, cnt = blocks[rfc]
+            if kind == 0:
+                me = st if cnt else -1
+                ml = st + cnt - 1 if cnt else -1
+            else:
+                in_span = [i for i in range(st, st + cnt)
+                           if rows[i][2] >= en and rows[i][2] < ex]
+                me = min(in_span) if in_span else -1
+                ml = max(in_span) if in_span else -1
+            assert (rfe, rle) == (me, ml), \
+                f"REG row {rid} (kind {kind}) range ({rfe},{rle}) " \
+                f"!= model ({me},{ml})"
+        # loader 语义不变量显式断言（与 load_ccr ENT 校验同面）
+        instr_cnt = len(nod)
+        for k, (ev, evr, ed, els, ele, eho, efl) in enumerate(ents):
+            assert evr >= 1, f"row {k}: version {evr} < 1"
+            assert 0 <= ev < len(sym['globals']) + sum(fn['var_count']
+                                                       for fn in funcs), \
+                f"row {k}: var_id {ev} outside namespace"
+            assert els < ele <= instr_cnt, \
+                f"row {k}: interval [{els},{ele}) invalid vs instr_cnt"
+            if ed >= 0:
+                assert ed == els, f"row {k}: def {ed} != live_start {els}"
+    finally:
+        try:
+            os.unlink(ccr_path)
+        except FileNotFoundError:
+            pass
+
+
+def test_v7_ent_hand_expected_pure_add_block():
+    """pure_add（PROBE_SRC func0，nodes[0:5) decls ['a','b','_arena','bin']）
+    条目块手算（= 差异① def=-1 参数条目形态的直接锁定）：
+
+      n0 ARENA_NEW d=_arena(decl2)；n1 BINARY d=bin(decl3) s1=a s2=b；
+      n2 RETURN s1=bin；n3 ARENA_RESET s1=_arena；n4 RETURN -1
+      → _arena def@0 refs{0,3} → 版本 1 (ls 0, le 4 半开)
+      → bin def@1 refs{1,2} → 版本 1 (ls 1, le 3)
+      → a def=-1 ref@1 → (ls 1, le 2)；b def=-1 ref@1 → (ls 1, le 2)
+    块 = 文件行 0..3（def 条目在前、def=-1 补丁按 var 行序 = a 先于 b）；
+    first/last_ent = 0..3；param_ents = [2, 3]（a/b 的 def=-1 条目文件行）。"""
+    ccr_path = os.path.join(BASE, 'build/test_v7_ent_pure.ccr')
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        corec_ccr(PROBE_SRC, ccr_path)
+        v7 = V7File(read_ccr(ccr_path))
+        sym = v7.sym_parse()
+        funcs = sym['funcs']
+        strs = v7.str_table()
+        assert strs[funcs[0]['name']] == 'pure_add'
+        ents = v7.ent()
+        vs0 = len(sym['globals'])
+        exp = [
+            (vs0 + 2, 1, 0, 0, 4), (vs0 + 3, 1, 1, 1, 3),
+            (vs0 + 0, 1, -1, 1, 2), (vs0 + 1, 1, -1, 1, 2),
+        ]
+        got = [(ev, ever, edef, els, ele) for (ev, ever, edef, els, ele,
+                                                eho, efl) in ents[:4]]
+        assert got == exp, f"pure_add block:\n  got      {got}\n  expected {exp}"
+        for (ev, ever, edef, els, ele, eho, efl) in ents[:4]:
+            assert eho == -1 and efl == 0
+        f0 = funcs[0]
+        assert (f0['first_ent'], f0['last_ent']) == (0, 3), \
+            f"pure_add range ({f0['first_ent']},{f0['last_ent']}) != (0,3)"
+        assert f0['param_ents'] == [2, 3], \
+            f"pure_add param_ents {f0['param_ents']} != [2,3]"
+        # main 内多定值 var 版本切分 spot-check（手算）：
+        #   v(decl9): ALLOC@20 + STORE@22 + STORE_INDEX_VAR@24 读(carve-out)
+        #     值读@26/@34 → 版本1 (20,22) 版本2 (22,35)
+        #   x(decl13): ALLOC@28 + STORE@31 → 版本1 (28,31) 版本2 (31,34)
+        #   s(decl15): ALLOC@32 + STORE@38 + STORE@41, 末读@42 RETURN
+        #     → 版本1 (32,38) 版本2 (38,41) 版本3 (41,43)
+        mvs = vs0 + funcs[0]['var_count']  # main var 窗口起点
+        main = funcs[1]
+        # main 条目块 = SYM 实回填范围（块长 = 条目数 ≠ var_count）
+        block = ents[main['first_ent']:main['last_ent'] + 1]
+        assert len(block) >= 20, f"main block too small: {len(block)}"
+        by_decl = {}
+        for (ev, ever, edef, els, ele, eho, efl) in block:
+            by_decl.setdefault(ev - mvs, []).append((ever, edef, els, ele))
+        assert by_decl[9] == [(1, 20, 20, 22), (2, 22, 22, 35)], \
+            f"main v versions {by_decl[9]}"
+        assert by_decl[13] == [(1, 28, 28, 31), (2, 31, 31, 34)], \
+            f"main x versions {by_decl[13]}"
+        assert by_decl[15] == [(1, 32, 32, 38), (2, 38, 38, 41),
+                               (3, 41, 41, 43)], \
+            f"main s versions {by_decl[15]}"
+    finally:
+        try:
+            os.unlink(ccr_path)
+        except FileNotFoundError:
+            pass
+
+
+def _mutate_ent_field(data, rec_idx, field_off, value, fmt='<I'):
+    """ENT 段第 rec_idx 条记录（0-based）字段偏移 field_off（记录内 0/4/8/
+    12/16/20/24）改写为 value。返回 (ent_off, rec0_version_ok)。"""
+    v7 = V7File(bytes(data))
+    ents = v7.ent()
+    assert len(ents) > 0, "precondition: ENT must carry real records"
+    ent_off, _ = v7.segs[4]
+    at = ent_off + 4 + rec_idx * ENT_REC + field_off
+    struct.pack_into(fmt, data, at, value)
+    return ents
+
+
+def test_v7_loader_rejects_bad_ent_version():
+    """loader ENT 实记录校验（激活面）：version 字段 = 0 → 拒绝。"""
+    src = "fn main() -> int { return 42; }\n"
+    ccr_path = os.path.join(BASE, 'build/test_v7_entver.ccr')
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        corec_ccr(src, ccr_path)
+        data = bytearray(read_ccr(ccr_path))
+        _mutate_ent_field(data, 0, 4, 0)  # version := 0（evr < 1）
+        bad_path = ccr_path + '.v0'
+        with open(bad_path, 'wb') as fh:
+            fh.write(bytes(data))
+        r = subprocess.run([COREARCH, bad_path, '--elf', '--static',
+                            '-o', os.path.join(BASE, 'build/test_v7_entver.out')],
+                           capture_output=True, text=True, cwd=BASE, timeout=60)
+        assert r.returncode != 0, \
+            f"corearch accepted version-0 entry: rc={r.returncode}"
+        assert 'invalid' in (r.stdout + r.stderr), \
+            f"expected invalid-.ccr error, got: {r.stdout!r} {r.stderr!r}"
+    finally:
+        for p in (ccr_path, ccr_path + '.v0',
+                  os.path.join(BASE, 'build/test_v7_entver.out')):
+            try:
+                os.unlink(p)
+            except FileNotFoundError:
+                pass
+
+
+def test_v7_loader_rejects_ent_liveend_oob():
+    """loader ENT 区间校验：live_end（半开）越出 NOD 空间（ele > instr_cnt）
+    → 拒绝。"""
+    src = "fn main() -> int { return 42; }\n"
+    ccr_path = os.path.join(BASE, 'build/test_v7_entle.ccr')
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        corec_ccr(src, ccr_path)
+        data = bytearray(read_ccr(ccr_path))
+        v7 = V7File(bytes(data))
+        nod_cnt = len(v7.nod())
+        _mutate_ent_field(data, 0, 16, nod_cnt + 1)  # live_end := oob
+        bad_path = ccr_path + '.oob'
+        with open(bad_path, 'wb') as fh:
+            fh.write(bytes(data))
+        r = subprocess.run([COREARCH, bad_path, '--elf', '--static',
+                            '-o', os.path.join(BASE, 'build/test_v7_entle.out')],
+                           capture_output=True, text=True, cwd=BASE, timeout=60)
+        assert r.returncode != 0, \
+            f"corearch accepted live_end beyond NOD space: rc={r.returncode}"
+        assert 'invalid' in (r.stdout + r.stderr), \
+            f"expected invalid-.ccr error, got: {r.stdout!r} {r.stderr!r}"
+    finally:
+        for p in (ccr_path, ccr_path + '.oob',
+                  os.path.join(BASE, 'build/test_v7_entle.out')):
+            try:
+                os.unlink(p)
+            except FileNotFoundError:
+                pass
+
+
+def test_v7_loader_rejects_ent_ls_ge_le():
+    """loader ENT 区间校验：live_start ≥ live_end（半开区间倒置/退化）→
+    拒绝。"""
+    src = "fn main() -> int { return 42; }\n"
+    ccr_path = os.path.join(BASE, 'build/test_v7_entls.ccr')
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        corec_ccr(src, ccr_path)
+        data = bytearray(read_ccr(ccr_path))
+        ents = _mutate_ent_field(data, 0, 16, 0)  # live_end := 0 → 0 ≥ ls
+        bad_path = ccr_path + '.inv'
+        with open(bad_path, 'wb') as fh:
+            fh.write(bytes(data))
+        r = subprocess.run([COREARCH, bad_path, '--elf', '--static',
+                            '-o', os.path.join(BASE, 'build/test_v7_entls.out')],
+                           capture_output=True, text=True, cwd=BASE, timeout=60)
+        assert r.returncode != 0, \
+            f"corearch accepted inverted interval: rc={r.returncode}"
+        assert 'invalid' in (r.stdout + r.stderr), \
+            f"expected invalid-.ccr error, got: {r.stdout!r} {r.stderr!r}"
+    finally:
+        for p in (ccr_path, ccr_path + '.inv',
+                  os.path.join(BASE, 'build/test_v7_entls.out')):
+            try:
+                os.unlink(p)
+            except FileNotFoundError:
+                pass
+
+
+def test_v7_loader_rejects_sym_ent_block_mismatch():
+    """loader 双写对照（激活面）：SYM func first_ent 与 ENT 实块界失配 →
+    拒绝。byte mutation：func0 记录 first_ent 字段 +1（REG 根行对照与
+    ENT 块界对照双路径同源拒绝）。"""
+    src = ("fn add(a: int, b: int) -> int { return a + b; }\n"
+           "fn main() -> int { return 42; }\n")
+    ccr_path = os.path.join(BASE, 'build/test_v7_entblk.ccr')
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        corec_ccr(src, ccr_path)
+        data = bytearray(read_ccr(ccr_path))
+        v7 = V7File(bytes(data))
+        sym = v7.sym_parse()
+        f0 = sym['funcs'][0]
+        assert f0['first_ent'] >= 0, \
+            f"precondition: func0 first_ent real, got {f0['first_ent']}"
+        sym_off, _ = v7.segs[2]
+        # SYM 体：global_count(4) + globals(16B×G) + func_count(4) + func0 头
+        # 24B——first_ent = 头内 +16
+        g = len(sym['globals'])
+        at = sym_off + 4 + g * 16 + 4 + 0 * 24 + 16
+        struct.pack_into('<i', data, at, f0['first_ent'] + 1)
+        bad_path = ccr_path + '.blk'
+        with open(bad_path, 'wb') as fh:
+            fh.write(bytes(data))
+        r = subprocess.run([COREARCH, bad_path, '--elf', '--static',
+                            '-o', os.path.join(BASE, 'build/test_v7_entblk.out')],
+                           capture_output=True, text=True, cwd=BASE, timeout=60)
+        assert r.returncode != 0, \
+            f"corearch accepted SYM/ENT block mismatch: rc={r.returncode}"
+        assert 'invalid' in (r.stdout + r.stderr), \
+            f"expected invalid-.ccr error, got: {r.stdout!r} {r.stderr!r}"
+    finally:
+        for p in (ccr_path, ccr_path + '.blk',
+                  os.path.join(BASE, 'build/test_v7_entblk.out')):
+            try:
+                os.unlink(p)
+            except FileNotFoundError:
+                pass
+
+
 def test_v7_layout_and_walk():
     """段表架构：magic/version=7/6 段规范序（EDG=tag 6 必落）/offset 连续/
     NOD 36B + 邻接域/EDG 段完整走查 == 文件大小。"""
@@ -327,7 +851,12 @@ def test_v7_layout_and_walk():
         assert len(n) > 4, f"expected nodes, got {len(n)}"
         assert len(v7.reg()) >= 2
         e = v7.ent()
-        assert e == [], "ENT not empty (Task 1: ENT still empty until Task 2)"
+        # Task 2: ENT 实记录（corec 产条目）——函数有 var 即有条目（参数/本地
+        # 引用 + _arena 定值），本程序条目数 > 0；全行字段自洽
+        assert len(e) > 0, f"ENT empty — Task 2: corec should write entries: {e}"
+        for (ev, evr, ed, els, ele, eho, efl) in e:
+            assert evr >= 1 and 0 <= ev and eho == -1 and efl == 0
+            assert els < ele and (ed < 0 or ed == els)
         edg = v7.edg()  # full EDG walk + forward/kind invariant checks
         # EDG 段必落且至少一条边（每函数 arena_new→arena_reset def-use 存在）
         assert sum(len(v) for v in edg.values()) >= 2, \
@@ -544,7 +1073,12 @@ def test_v7_roundtrip_elf():
         assert os.path.exists(ccr_path), "corec build did not save .ccr alongside output"
         data = read_ccr(ccr_path)
         v7 = V7File(data)  # built artifact is v7: header/segments/NOD36/EDG walk
-        assert v7.ent() == [], "built .ccr should carry no ENT (Task 1: empty until Task 2)"
+        ents = v7.ent()
+        # Task 2: build 链中间产物携带实条目（corearch 已 load 校验 + 发射）
+        assert len(ents) > 0, "built .ccr should carry real ENT records"
+        for (ev, evr, ed, els, ele, eho, efl) in ents:
+            assert evr >= 1 and eho == -1 and efl == 0
+            assert els < ele and (ed < 0 or ed == els)
         assert sum(len(v) for v in v7.edg().values()) >= 2
         # direct corearch invocation on the same .ccr
         r = subprocess.run([COREARCH, ccr_path, '--elf', '--static', '-o', out + '2'],
@@ -567,6 +1101,13 @@ if __name__ == '__main__':
     shutil.rmtree(os.path.join(BASE, '.core', 'cache'), ignore_errors=True)
     tests = [test_v7_layout_and_walk,
              test_v7_edge_content_small_program,
+             test_v7_ent_hand_expected_small,
+             test_v7_ent_hand_expected_pure_add_block,
+             test_v7_ent_model_replay_pure_add,
+             test_v7_loader_rejects_bad_ent_version,
+             test_v7_loader_rejects_ent_liveend_oob,
+             test_v7_loader_rejects_ent_ls_ge_le,
+             test_v7_loader_rejects_sym_ent_block_mismatch,
              test_v7_loader_rejects_version_ne_7,
              test_v7_loader_rejects_backward_edge,
              test_v7_loader_rejects_edg_count_mismatch,

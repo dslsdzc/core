@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""v6 测试族（迁移期 Task 1——段契约机械更新至 v7；Task 3 合并进
-test_ccr_v7.py，本文件退役）——v7 .ccr 格式 IO 测试：段表架构 + EDG 段必落 +
-SYM 归并/REG 坐标化 + NOD 36B 邻接。
+"""v6 测试族（迁移期 Task 1/2——段契约机械更新至 v7 + ENT 实记录翻转；Task 3
+合并进 test_ccr_v7.py，本文件退役）——v7 .ccr 格式 IO 测试：段表架构 + EDG 段
+必落 + SYM 归并/REG 坐标化 + NOD 36B 邻接 + ENT 实记录。
 
-注（2026-09-07 regalloc 移后端，D-1=Y/R2）：corec save 不再携带 ENT 条目与
-opt_meta（数据面/分配归位 corearch 自算）——ENT 段恒 0 条、SYM func/REG
-first_ent/last_ent 恒 -1、param_ents 恒 -1、opt_count 恒 0。段结构与 loader
-兼容语义保留（空表对照 pcnt==0 ↔ -1；格式描述 = loader 仍支持的形状）。
+注（2026-09-07 regalloc 移后端，D-1=Y/R2 → 2026-09-10 Task 2 翻转）：opt_meta
+仍恒 0（数据面/分配归位 corearch 自算，.ccr 不传分配结果）；ENT 段 Task 2 起
+携带实记录（corec 写侧按 v6 §4.1 规则重建——compute_entries_v7，regalloc.cr
+compute_entries 镜像）——SYM func/REG first_ent/last_ent 与 param_ents 实回填，
+loader 块对照校验全链激活。
 Task 1 翻转：EDG 段必落（v7 spec §3.4）——NOD 36B（28B 语义字段 + 邻接
 first_edge/edge_count）、段表 6 项、loader 拒 version≠7（v6 读路径退役）。
 
@@ -35,7 +36,7 @@ enums/opt_meta；REG 坐标化——kind/parent/enter/exit/first_ent/last_ent）
   ENT(4): ent_count + 28B×ent_count
           {var_id i32, version u32, def_nod i32, live_start u32,
            live_end u32（半开 = 最后使用点+1）, home i32, flags u32}
-          （Task 1：恒空——Task 2 翻转）
+          （Task 2：实记录——corec 产条目，函数块界与 SYM func 双写对照）
   REG(5): sg_count + 24B×sg_count {kind u32, parent i32, enter_nod u32,
           exit_nod u32, first_ent i32, last_ent i32}（nstart/ncount 由
           enter/exit 派生；first/last = 区内条目范围——定值点 ∈ [enter, exit)）
@@ -300,7 +301,13 @@ def test_header_segment_table_and_walk():
         reg = v7.reg()
         assert len(reg) >= 2, f"expected >=2 regions (func+for), got {len(reg)}"
         e = v7.ent()
-        assert e == [], "ENT not empty (regalloc move: corec no longer saves entries)"
+        # Task 2 翻转：ENT 实记录——本程序（add/main 带参数与本地 var）必有条目
+        assert len(e) > 0, f"ENT empty — Task 2: corec writes real entries: {e}"
+        for (ev, evr, ed, els, ele, eho, efl) in e:
+            assert evr >= 1, f"entry version {evr} < 1"
+            assert eho == -1 and efl == 0, \
+                f"entry home/flags ({eho},{efl}) != (-1,0)"
+            assert els < ele and (ed < 0 or ed == els)
         edg = v7.edg()  # EDG 段必落 + 邻接/拓扑/Σ 校验走查
         assert sum(len(v) for v in edg.values()) >= 2, \
             f"EDG unexpectedly small: {edg}"
@@ -311,12 +318,15 @@ def test_header_segment_table_and_walk():
             pass
 
 
-def test_ent_optmeta_absent_after_move():
-    """regalloc 移后端（D-1=Y/R2，2026-09-07）：corec save 不再携带 ENT 与
-    opt_meta——ENT 段恒 0 条、SYM func/REG first_ent/last_ent 恒 -1、
-    param_ents 恒 -1、opt_count 恒 0（格式结构与 loader 空表语义保留：
-    loader 对照 pcnt==0 ↔ -1 已支持）。数据面正确性 = corearch 自算通道
-    （--dump-entries/--check-regalloc，载体 = test_live_ranges）。"""
+def test_ent_real_optmeta_absent():
+    """Task 2 翻转（原 test_ent_optmeta_absent_after_move——regalloc 移后端
+    恒空断言被实记录取代）：ENT 段携带实条目；opt_meta 仍恒 0（分配结果
+    归位 corearch 自算，.ccr 不传）；SYM func first/last_ent 与 param_ents
+    实回填。自洽校验（Python 侧独立块切分——loader 块对照同语义）：
+      · 每函数块 = 文件序连续段（var ∈ 函数 var 窗口）——块界 == SYM
+        first_ent/last_ent；
+      · param_ents 每参数 = -1 或该参数 var 的 def=-1 条目（identity 参数 n
+        未定值 → 实条目；本程序两函数均参数字典可查）。"""
     src = ("fn identity(n: int) -> int { return n; }\n"
            "fn main() -> int {\n"
            "    x := 1;\n"
@@ -332,16 +342,48 @@ def test_ent_optmeta_absent_after_move():
     try:
         corec_ccr(src, ccr_path)
         v7 = V7File(read_ccr(ccr_path))
-        assert v7.ent() == [], f"ENT not empty after regalloc move: {v7.ent()}"
+        ents = v7.ent()
+        assert len(ents) > 0, f"ENT empty after Task 2: {ents}"
         sym = v7.sym_parse()
         assert sym['opt_count'] == 0, f"opt_meta not empty: {sym['opt_count']}"
-        for f in sym['funcs']:
-            assert f['first_ent'] == -1 and f['last_ent'] == -1, \
-                f"func {f} first/last_ent != -1"
-            assert all(pe == -1 for pe in f['param_ents']), \
-                f"func {f} param_ents not all -1"
-        for r in v7.reg():
-            assert r[4] == -1 and r[5] == -1, f"REG row carries entry range: {r}"
+        funcs = sym['funcs']
+        assert len(funcs) >= 2
+        # Python 侧块切分（loader 块对照同语义）：块序 = 函数序，块 = 连续段
+        vs = len(sym['globals'])
+        pos = 0
+        for f in funcs:
+            win = range(vs, vs + f['var_count'])
+            start = pos
+            while pos < len(ents) and ents[pos][0] in win:
+                pos += 1
+            pcnt = pos - start
+            if pcnt == 0:
+                assert (f['first_ent'], f['last_ent']) == (-1, -1), f
+            else:
+                assert f['first_ent'] == start, \
+                    f"func first_ent {f['first_ent']} != block start {start}"
+                assert f['last_ent'] == start + pcnt - 1, \
+                    f"func last_ent {f['last_ent']} != block end {start + pcnt - 1}"
+            # param_ents：-1 或该参数 var 的 def=-1 条目（块内唯一）
+            for p in range(f['param_count']):
+                pvar = vs + p
+                pid = -1
+                for i in range(start, start + pcnt):
+                    (ev, evr, ed, els, ele, eho, efl) = ents[i]
+                    if ev == pvar and ed == -1:
+                        pid = i
+                assert f['param_ents'][p] == pid, \
+                    f"func param_ents[{p}] {f['param_ents'][p]} != {pid}"
+            vs += f['var_count']
+        assert pos == len(ents), "block partition did not cover all entries"
+        # REG 根行 first/last 与 SYM func 记录双写一致（实值）
+        regs = v7.reg()
+        roots = [(i, r) for i, r in enumerate(regs) if r[0] == 0]
+        for k, (rid, r) in enumerate(roots[:len(funcs)]):
+            assert r[4] == funcs[k]['first_ent'], \
+                f"root {rid} first_ent {r[4]} != SYM {funcs[k]['first_ent']}"
+            assert r[5] == funcs[k]['last_ent'], \
+                f"root {rid} last_ent {r[5]} != SYM {funcs[k]['last_ent']}"
     finally:
         try:
             os.unlink(ccr_path)
@@ -414,7 +456,12 @@ def test_ccr_v6_roundtrip_elf():
             f"expected exit 15 (sum 0..5), got {run.returncode} stdout={run.stdout!r}"
         assert os.path.exists(ccr_path), "corec build did not save .ccr alongside output"
         v7 = V7File(read_ccr(ccr_path))  # the built artifact is v7
-        assert v7.ent() == [], "built .ccr should carry no ENT (regalloc move: corearch self-computes)"
+        # Task 2 翻转：build 链中间产物携带实条目（corearch load 校验通过才发射）
+        ents = v7.ent()
+        assert len(ents) > 0, "built .ccr should carry real ENT records"
+        for (ev, evr, ed, els, ele, eho, efl) in ents:
+            assert evr >= 1 and eho == -1 and efl == 0
+            assert els < ele and (ed < 0 or ed == els)
         assert sum(len(v) for v in v7.edg().values()) >= 2, "built .ccr EDG empty"
         # 2) direct corearch invocation on the same .ccr
         out2 = os.path.join(BASE, 'build/test_v6_rt2')
@@ -539,11 +586,11 @@ def test_sym_reg_target_shape():
 
 
 def test_sym_func_shapes():
-    """SYM func 记录形状（ENT 恒空后——原参数 def=-1 条目/条目块序断言载体已
-    随 regalloc 移后端消亡，数据面断言归 test_live_ranges/corearch 通道）：
+    """SYM func 记录形状（Task 2 翻转——实条目 + 回填断言恢复）：
     add/main 行序 = 声明序；参数 = var 声明区前 param_count 个（行序 = 参数序，
-    类型 int）；root_region 行序 1:1、span 连续铺满 NOD 空间；恒空字段 =
-    first/last_ent 与 param_ents 全 -1。"""
+    类型 int）；root_region 行序 1:1、span 连续铺满 NOD 空间；first/last_ent
+    实回填（add 参数 a/b 从未定值 → def=-1 条目 → param_ents = 其条目 id；
+    main 无参；条目范围 = 块界）。"""
     src = ("fn add(a: int, b: int) -> int { return a + b; }\n"
            "fn main() -> int {\n"
            "    x := 1;\n"
@@ -564,6 +611,7 @@ def test_sym_func_shapes():
         strs = v7.str_table()
         regs = v7.reg()
         nod_cnt = len(v7.nod())
+        ents = v7.ent()
         assert strs[funcs[0]['name']] == 'add'
         assert strs[funcs[1]['name']] == 'main'
         # add: 参数声明 = var 声明区前 2 个（a, b, TI_INT=0）
@@ -573,10 +621,37 @@ def test_sym_func_shapes():
         pdecls = add['var_decls'][:2]
         assert [strs[d['name']] for d in pdecls] == ['a', 'b']
         assert [d['type'] for d in pdecls] == [0, 0], "int param type != TI_INT"
-        # 恒空字段（regalloc 移后端：.ccr 无 ENT——参数字段与条目范围全 -1）
+        # Task 2：条目范围/param_ents 实回填——Python 侧块切分自洽（loader
+        # 块对照同语义）：add = 文件首块（func0 起点 0，含 a/b 的 def=-1 条目）
+        vs = len(sym['globals'])
+        pos = 0
+        block_of = []
         for f in funcs:
-            assert f['first_ent'] == -1 and f['last_ent'] == -1, f
-            assert all(pe == -1 for pe in f['param_ents']), f
+            win = range(vs, vs + f['var_count'])
+            start = pos
+            while pos < len(ents) and ents[pos][0] in win:
+                pos += 1
+            block_of.append((start, pos - start))
+            vs += f['var_count']
+        assert pos == len(ents), "block partition did not cover all entries"
+        for k, f in enumerate(funcs):
+            st, pcnt = block_of[k]
+            fe = st if pcnt else -1
+            le = st + pcnt - 1 if pcnt else -1
+            assert (f['first_ent'], f['last_ent']) == (fe, le), \
+                f"func {k} range ({f['first_ent']},{f['last_ent']}) != " \
+                f"block ({fe},{le})"
+        # add 参数 a/b 从未定值但有引用 → def=-1 条目；param_ents 指向它们
+        # （参数 var 行 = add 窗口前 param_count 行）
+        g0 = len(sym['globals'])
+        for p in range(add['param_count']):
+            pid = add['param_ents'][p]
+            assert pid >= 0, \
+                f"add param_ents[{p}] == -1 (expected def=-1 entry id)"
+            (ev, evr, ed, els, ele, eho, efl) = ents[pid]
+            assert ed == -1 and ev == g0 + p, \
+                f"add param_ents[{p}] -> row {pid} var {ev} (want {g0 + p})"
+        assert funcs[1]['param_count'] == 0 and funcs[1]['param_ents'] == []
         # 根 region（kind=0）行序 = 函数序 1:1；span 连续铺满 NOD 空间
         roots = [(i, r) for i, r in enumerate(regs) if r[0] == 0]
         assert len(roots) == len(funcs)
@@ -587,6 +662,9 @@ def test_sym_func_shapes():
             assert funcs[k]['root_region'] == rid
             assert r[2] == prev_end, f"root {k} enter {r[2]} != prev end {prev_end}"
             prev_end = r[3]
+            # 根行 first/last = 函数块界（与 SYM 双写一致）
+            assert (r[4], r[5]) == (funcs[k]['first_ent'],
+                                    funcs[k]['last_ent'])
         assert prev_end == nod_cnt, \
             f"root spans end at {prev_end}, nod_count {nod_cnt}"
     finally:
@@ -692,7 +770,7 @@ def test_save_rejects_var_block_misalignment():
 
 if __name__ == '__main__':
     tests = [test_header_segment_table_and_walk,
-             test_ent_optmeta_absent_after_move,
+             test_ent_real_optmeta_absent,
              test_sym_reg_target_shape,
              test_sym_func_shapes,
              test_loader_rejects_non_v7_version,
