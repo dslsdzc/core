@@ -110,7 +110,7 @@
 
 ## Task 0 盘点结果（执行时回填）
 
-> 盘点完成（2026-09-09）。基源 = ccr_io.cr 全文件（写侧 save_ccr :345-641/读侧 load_ccr :658-1145）+ dataflow.cr（emit 双写 + df_connect_srcs/df_connect_state + g_df_edges）+ regalloc.cr（compute_entries :180-268）+ test_ccr_v6.py（V6File walker 严格段契约）。关键锚点已内联于各任务 Files/Interfaces 节（2026-09-09 勘探输出）；Task 0 执行者按仓库惯例以代码复核为准。下列三表执行时回填：
+> 盘点完成（2026-09-09）。基源 = ccr_io.cr 全文件（写侧 save_ccr :345-636/读侧 load_ccr :658-1145）+ dataflow.cr（emit 双写 + df_connect_srcs/df_connect_state + g_df_edges）+ regalloc.cr（compute_entries :180-268）+ test_ccr_v6.py（V6File walker 严格段契约）。关键锚点已内联于各任务 Files/Interfaces 节（2026-09-09 勘探输出）；Task 0 执行者按仓库惯例以代码复核为准。下列三表执行时回填：
 
 **表一：EDG 内容期望清单**（权威 = dataflow.cr `df_connect_srcs` :194-315 / `df_connect_state` :160-177 / `sg_pop` 终止边 :84-99 / `df_use_var` :179-190；op 全集 = ast.cr :538-588，0-51 无 40。Task 1 测试期望 = 本表 + 表一注记的幽灵边规则手算）
 
@@ -125,7 +125,7 @@
 | | LOAD_INDEX_VAR(15) | 2（s1、s2） | 无 |
 | | DEREF(25) / LOAD_ENUM_TAG(23) | 1（s1） | 无 |
 | | SLICE(24) | 3（s1、s2、s3） | 无 |
-| 越界守卫 | BOUNDS_CHECK(30) | s1；type_kind≠0 时 +s2（动态界，发射 :106-126 tk=1）→ 1 或 2 | 无 |
+| 越界守卫 | BOUNDS_CHECK(30) | s1；type_kind≠0 时 +s2（动态界，ir_gen.cr:105-114 发射 tk=1）→ 1 或 2 | 无 |
 | 内存写 | STORE(9) | 2（s1 目标、s2 值） | **入链** |
 | | STORE_FIELD(12) | 2（s1、s2） | **入链** |
 | | STORE_INDEX(14) | 2（s1=arr、s2=val；s3 = 常量下标） | **入链** |
@@ -133,7 +133,7 @@
 | | STORE_PTR(26) | 2（s1、s2） | **无 → GAP**（raw 指针内存写不连 state 链） |
 | 分配/释放 | ALLOC(6)/ALLOC_STRUCT(7)/ALLOC_ARRAY(8) | 0 | 无 |
 | | ARENA_NEW(32) | 名义 s1；**实际发射 s1 = 0 字面量**（ir_gen.cr:1663/1701/1761/2161/2275）→ 0-slot 幽灵边（见注 A），有效数据边 = 0 | 无 |
-| | ARENA_RESET(33) | 1（s1 = arena_var 真 var） | 无（arena 复位不连 state 链） |
+| | ARENA_RESET(33) | 1（s1 = arena_var 真 var） | **无 → GAP**（arena 复位不连 state 链） |
 | 引用/解引用 | REF(18) | 1（s1） | 无 |
 | 调用族 | CALL(4) | s2 条（args 自 s1 连续 s1..s1+s2−1 逐参一条；s2=0 → 0 条） | **视纯度**：find_func(s3)（s3 = 函数名 idx）< 0 或 fi_ispure==0 → 入链 |
 | | CALL_EXTERN(45) | 1（仅 s2 = 首参）——**多参缺口 → GAP**（s3 = arg_count，args 2..n 不入边） | **无 → GAP**（extern 副作用不连 state 链） |
@@ -172,7 +172,7 @@
 | 核对面 | 结论 |
 |---|---|
 | NOD 落盘源 = lower_to_ccr 后的 g_ir_instrs？ | ✓ save_ccr :542-556 逐条读 g_ir_instrs；main.cr :534 lower_to_ccr 先于 :557/:581 save（ccr/build 两路径同）；lower_to_ccr = g_ir_instr_count 清零后自 g_df_nodes 0..count−1 逐字段重建（:356-371）+ func 边界自 df func start/count 复制（:375-383）——**NOD = g_df_nodes 镜像 1:1 同序** |
-| emit 双写之外有无第三写点破坏 1:1？ | 全线性流写点审计：emit（双写同参）、cir_cache 恢复（load_cir_cache :379-399 指令 + :290-337 节点/边同快照双写——cache-hit 函数两表同参恢复，1:1 保持）、pass_cse（opt.cr :194-290 只 iri_set_op/iri_set_s1-3 改线性——lower 后回滚，见表后 CSE 注记）、lower_to_ccr。ir_gen 直改线性后补丁（arena size `iri_set_s1` :1710/:2279 等）只落线性侧、df 节点保持 emit 原值 → lower 后 NOD = emit 原值（既有行为，v7 同构，非本计划面） |
+| emit 双写之外有无第三写点破坏 1:1？ | 全线性流写点审计：emit（双写同参）、cir_cache 恢复（load_cir_cache :242-407——节点 :288-318/SG :321-356/边 :358-374/指令 :376-392 同快照双写，cache-hit 函数两表同参恢复，1:1 保持）、pass_cse（opt.cr :194-290 只 iri_set_op/iri_set_s1-3 改线性——lower 后回滚，见表后 CSE 注记）、lower_to_ccr。ir_gen 直改线性后补丁（arena size `iri_set_s1` ir_gen.cr:1711/:2287 等，另 :1674/:1772/:2165）只落线性侧、df 节点保持 emit 原值 → lower 后 NOD = emit 原值（既有行为，v7 同构，非本计划面） |
 | EDG 节点 id 与 NOD 文件序一致的前提 | ✓ 节点 id 全局单调追加（init_df 每编译一次 main.cr:407，无逐函数清空）；df func 切片 = start/count 视图（df_begin_func/df_end_func :395-410）；lower 后指令 i ≡ df 节点 i ≡ NOD 文件序 i——EDG to_nod 引用与文件序一致前提成立；REG enter/exit 同坐标系（loader 回填 func 边界 :1017-1033 与 GC-3 上界校验 :1061-1074） |
 | g_df_edges 节点 id 空间 = g_df_nodes（无跨函数泄漏？） | from/to 均在创建时点取节点 id，缓存恢复边同快照 → id 空间一致；**跨函数数据边存在两种形态**：(a) 表一注 A 幽灵边（node 0 → 任意函数消费者，实为跨函数）；(b) 缓存快照边——缓存命中恢复 save 时点**全图**边（cir_cache.cr :167-179 存全量），源不变时与重建同态；**源变（前序函数指纹 miss 重建、后续函数仍命中）时快照边陈旧——既有 .cir 缓存设计潜在面，待核注记**。state 链无跨函数（df_begin_func 重置 g_last_state_node :401）。Task 1 测试建议：新路径/清 .core/cache 跑（避免缓存面混入期望） |
 | 逐函数图清空机制 | 不存在——df 数组编译期全局追加；「每函数一图」只是切片视图。v7 写侧「按节点序收集出边」单遍扫 g_df_edges 即可（头插链表 → 落盘序任意但确定，节点出边连续布局由写侧回填 first_edge/count） |
