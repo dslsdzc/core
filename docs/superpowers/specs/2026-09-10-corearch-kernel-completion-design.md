@@ -76,11 +76,14 @@
 - **g_opt_meta 保留** = 实例 emit 面私有结构（instr.cr get_reg_for_var 消费——不动）；实例（alloc_registers phase 5 + 注入钩子）写完 g_opt_meta 后调 kern API 登记/清除——实例动作 → 内核记录的契约方向（双向契约的产物侧）
 - 双份数据注记：g_opt_meta（emit 面）+ 登记表（判定面）——同一分配结果的两种视图；同步责任 = 实例（写入点成对）。替代方案（判定直接消费 g_opt_meta 经布局描述）= 否决——布局描述 = 隐性耦合，登记表 = 显式契约
 
-### 2.2 位置域声明化
+### 2.2 位置域声明化（**2026-09-10 修正——用户原则：内核不得有寄存器/域分类概念**）
 
-- **LOC_HOME_BASE 出内核**：10⁶ 编码约定 → 实例声明字段（home 段编码起始——x86 实例 = 10⁶）
-- 位置分类：判定① 需区分 loc 类别分组扫描（reg 组 vs home 组——现 coexist_home_conflicts 按 HOME 段边界分）——分类依据 = 实例声明的域参数（{home_base i32, reg_count i32}——x86 = {10⁶, 16}）；内核按声明域做 loc 分组，不解释编码内容
-- 内核只做：位置相等、排序（sweep 门禁）、按声明分类分组——位置 = 不透明整数 + 实例域声明
+- **删除域参数方案**：原设计（kern_set_loc_domain + home_base/reg_domain 分类语义「loc < reg_domain = reg 类」）**废弃**——分类/编码合成 = 实例侧事务，内核不解释位置
+- **修正后形态**：位置 = **不透明整数**——内核只做相等、排序（sweep 门禁）、同值互斥；判定① = 两条独立同值互斥规则：
+  1. **登记表 loc 相等**（实例分配输出的统一登记——reg 面；若实例选择把 home 也登记，合成发生在其登记动作内——内核只见不透明值）
+  2. **条目 home 字段相等**（g_ir_entries.home = 语义对象字段——纯语义遍，独立于登记表；现状 home 恒 -1 = 无事件面，规则照旧）
+- **LOC_HOME_BASE 完全不出现在内核**（现常量 :500 + 引用面 :590/:744 = Task 2 移除/改写——home 合成若需保留 = 实例侧（regalloc.cr 现有常量本就在实例文件））
+- reg_domain/home_base 实例声明字段（原 §3.1）= **从完备化范围删除**（无内核消费点——YAGNI；实例 emit 面如需域描述 = 实例私有数据，本就不在内核）
 
 ### 2.3 注入钩子通道
 
@@ -95,10 +98,10 @@
 | 字段（现） | 字段（新增） | 语义 |
 |---|---|---|
 | id/name/opt_min/opt_max/allow_table/allow_link/needs_alloc/needs_verify | — | 能力 + 引导（已有） |
-| — | `home_base i32` | home 段编码起始（位置域——x86 = 1000000） |
-| — | `reg_domain i32` | 寄存器域大小（x86 = 16——loc < reg_domain = reg 类, ≥ home_base = home 类；声明驱动分组） |
 | — | `needs_eviction i32` | 判定③ 形式声明（x86 = 0——静态放置无驱逐事件） |
 | — | `needs_call_sites i32` | 判定④ 形式声明（x86 = 0——callee-saved 平凡满足） |
+
+（home_base/reg_domain 域字段 = 已从完备化范围删除——§2.2 修正：内核无域分类概念，实例侧域编码 = 实例私有数据）
 
 ### 3.2 判定③④ 形式化（不实现——用户裁决）
 

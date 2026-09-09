@@ -61,20 +61,20 @@
 ## Task 2: 判定中立化——登记表通道 + 位置域声明化
 
 **Files:**
-- Modify: `src/arch/linux/ld/ent_kernel.cr`（位置登记表 {entry→loc} + kern_loc_assign/kern_loc_clear/kern_loc_of; verify 规则①② 读通道切换（meta_reg_for_var 改读登记表——函数体等价改写）; LOC_HOME_BASE 常量移除 → 域参数读实例声明（或经 kern 设置函数——设计 spec §2.2: 位置分类按实例声明域 {home_base, reg_domain}——内核读声明数据（g_instance_decl 扩展先行? 依赖 Task 3 声明扩展——**顺序裁决：域参数先经内核设置面（kern_set_loc_domain(home_base, reg_domain)——corearch 引导按实例行调）落地, Task 3 声明表字段接同一数据源**））
+- Modify: `src/arch/linux/ld/ent_kernel.cr`（位置登记表 {entry→loc} + kern_loc_assign/kern_loc_clear/kern_loc_of; verify 规则①② 读通道切换（meta_reg_for_var 改读登记表——函数体等价改写）; **LOC_HOME_BASE 常量移除 + 引用面（:500/:590/:744）改写——位置 = 不透明整数, 零域分类（§2.2 修正：home 面 = 条目字段独立互斥遍; 合成若需保留 = 实例侧事务）; 无 kern_set_loc_domain/无域参数（废弃——2026-09-10 用户原则：内核无寄存器/域分类概念）**）
 - Modify: `src/arch/linux/ld/regalloc.cr`（alloc_registers phase 5 + 注入钩子写 g_opt_meta 后调 kern 登记/清除——双面同步; **meta_reg_for_var 函数体等价改写为登记表查询——不删**（Task 0 ④ 修正注：regalloc.cr 注入探针 try_inject_read_gap :254/:261 调用它——须同步改实例侧私有扫描或经登记表等价读; emit 面 instr.cr get_reg_for_var = 独立实现不受影响））
 - Test: `tests/selfhost/test_live_ranges.py`（13/13——判定红/绿路径经登记表通道输出与直读时代逐字节同）+ test_ccr_v7.py 23/23
 
 **Interfaces:**
 - Consumes: Task 0 登记 API 调用点清单 + Task 1 对象面
-- Produces: kern_loc_assign/clear/of; kern_set_loc_domain; 登记表（内核数据）
+- Produces: kern_loc_assign/clear/of; 登记表（内核数据——loc = 不透明整数）
 - 判据：test_live_ranges 13/13（通道切换输出同——先基线后对照）+ O2 全链 byte-identical（--check-regalloc 绿/红路径经登记通道）+ 回归快子集
 - 双份同步纪律：实例写点成对（g_opt_meta + 登记）——代码注记 + 注入钩子测试覆盖（红路径 = 双面一致注入）
 
-- [ ] **Step 1:** 写失败测试：登记表 API + 域参数 + **中立性 guard**（kern_loc_assign/domain——现无 → FAIL; test_ent_kernel_neutrality.py——现态 meta_reg_for_var 读 g_opt_meta → 红——早暴露纪律）
+- [ ] **Step 1:** 写失败测试：登记表 API + **中立性 guard**（kern_loc_assign——现无 → FAIL; test_ent_kernel_neutrality.py——现态 meta_reg_for_var 读 g_opt_meta + LOC_HOME_BASE 在 → 红——早暴露纪律）
 - [ ] **Step 2:** 跑测试确认失败
 - [ ] **Step 3:** 登记表 + kern API 实现（ent_kernel）
-- [ ] **Step 4:** 判定读通道切换（verify/rl_rule2 读登记表——等价改写）; LOC_HOME_BASE 域参数化（kern_set_loc_domain + 引导调用——corearch 按实例行传域）
+- [ ] **Step 4:** 判定读通道切换（verify/rl_rule2 读登记表——等价改写）; LOC_HOME_BASE 移除（引用面改写——home 面 = 条目字段独立互斥遍或实例侧合成, 内核零域概念）
 - [ ] **Step 5:** 实例侧双面同步（alloc phase 5/注入钩子 → g_opt_meta + kern 登记成对）
 - [ ] **Step 6:** 测试绿（live_ranges 13/13 通道输出同 + ccr_v7 23/23 + O2 byte-identical）+ 回归快子集
 - [ ] **Step 7:** 提交 `feat: 内核完备 Task 2——判定中立化（登记表通道 + 位置域声明化, g_opt_meta 直读解除）`
@@ -84,7 +84,7 @@
 ## Task 3: 注册契约完整化——声明扩展 + ③④ 形式声明 + 输出面
 
 **Files:**
-- Modify: `src/compiler/corearch.cr`（g_instance_decl 行扩展: home_base/reg_domain/needs_eviction/needs_call_sites 字段 + 行数据（x86: {10⁶, 16, 0, 0}; 表路径行: 同域或 0——盘点定）; 引导按实例行调 kern_set_loc_domain（或声明表 = kern 域数据源——与 Task 2 接缝一致））
+- Modify: `src/compiler/corearch.cr`（g_instance_decl 行扩展: needs_eviction/needs_call_sites 字段 + 行数据（x86: {0, 0}）——home_base/reg_domain 已从范围删除（§2.2 修正——实例侧域编码 = 实例私有, 不在声明表））
 - Modify: `src/arch/linux/ld/ent_kernel.cr`（判定结果输出面形式化——kern_verify_all 命名确认 + 共存证据查询面确认 = 现函数集即 API 注记）;③④ 形式声明字段文档（不实现注记）
 - Test: `tests/selfhost/test_live_ranges.py`（13/13——flag 通道输出不变）+ flag 组合面
 
@@ -93,7 +93,7 @@
 - Produces: 实例声明完整行（能力 + 资源域代数 + ③④ 形式声明）; 域数据源 = 声明表
 - 判据：flag 通道输出逐字节不变 + test_live_ranges 13/13 + 回归快子集
 
-- [ ] **Step 1:** 声明行扩展 + 域数据源接线（corearch 引导 → kern_set_loc_domain 或声明表直供——与 Task 2 接缝一致）
+- [ ] **Step 1:** 声明行扩展（needs_eviction/needs_call_sites——x86 {0,0}）
 - [ ] **Step 2:** ③④ 形式声明字段 + 文档注记（引擎不实现——设计 spec §3.2 引用）
 - [ ] **Step 3:** 输出面形式化注记（kern_verify_all/共存证据 = 现名即 API——注释层）
 - [ ] **Step 4:** test_live_ranges 13/13 + 回归快子集
@@ -126,7 +126,7 @@
 
 - Task 1 重建移出 = 最大动面（loader 与发射之间契约变化）——判据 = backend_bootstrap stage byte-identical（重建产物纯搬移证明）; loader 守卫面 Task 0 核对防漏
 - Task 2 通道切换 = 判定语义等价改写面——基线对照纪律（直读时代输出 vs 登记表通道输出逐字节同）;双份同步漏点 = 注入红路径测试覆盖
-- 域参数接缝（Task 2 kern_set_loc_domain vs Task 3 声明表）——顺序已裁（Task 2 设置面先立, Task 3 声明表接同源）——实施时防双源漂移（Task 3 接线 = 声明表 → 设置面调用, 不并行双源）
+- 域参数面已整体废弃（2026-09-10 用户原则修正——内核零域分类概念; 原 kern_set_loc_domain/home_base/reg_domain 设计删除——见设计 spec §2.2 修正注）
 - 中立性 guard 若在 Task 4 发现 ent_kernel 残留实例引用 → 回 Task 2 面补漏（guard 先写 = 早暴露）
 - corec 写侧/interp 不经 loader——零影响（回归验证即可）
 
