@@ -9,6 +9,7 @@ import dyn_arr
 import hit
 import monomorph
 import ccr_io
+import ent_kernel
 import sizes
 import instr
 import resolve

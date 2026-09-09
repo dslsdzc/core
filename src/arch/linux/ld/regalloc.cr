@@ -14,46 +14,6 @@
 // compute_live_ranges）+ g_opt_meta 写入 + 注入钩子（cir debug 测试通道）。
 
 
-// 定值指令种类名（--dump-entries kind= 字段）：定值点 = dest≥0 producer
-// opcode ∪ IR_STORE(s1)（本区头规则）——只列会作为定值点出现的 opcode，
-// 未列 opcode 回退数字（不该出现；出现即探明新定值形态的信号）。
-fn ir_op_kind_name(op: int) -> string {
-    if op == IR_ALLOC { return "ALLOC"; }
-    if op == IR_ALLOC_STRUCT { return "ALLOC_STRUCT"; }
-    if op == IR_ALLOC_ARRAY { return "ALLOC_ARRAY"; }
-    if op == IR_STORE { return "STORE"; }
-    if op == IR_CONST { return "CONST"; }
-    if op == IR_LOAD { return "LOAD"; }
-    if op == IR_LOAD_FIELD { return "LOAD_FIELD"; }
-    if op == IR_LOAD_INDEX { return "LOAD_INDEX"; }
-    if op == IR_LOAD_INDEX_VAR { return "LOAD_INDEX_VAR"; }
-    if op == IR_BINARY { return "BINARY"; }
-    if op == IR_UNARY { return "UNARY"; }
-    if op == IR_CALL { return "CALL"; }
-    if op == IR_CALL_EXTERN { return "CALL_EXTERN"; }
-    if op == IR_HOTPATCH_ROUTE { return "HOTPATCH_ROUTE"; }
-    if op == IR_MAKE_ENUM { return "MAKE_ENUM"; }
-    if op == IR_REF { return "REF"; }
-    if op == IR_DEREF { return "DEREF"; }
-    if op == IR_LOAD_ENUM_TAG { return "LOAD_ENUM_TAG"; }
-    if op == IR_SLICE { return "SLICE"; }
-    if op == IR_ADDR_INDEX { return "ADDR_INDEX"; }
-    if op == IR_SPAWN { return "SPAWN"; }
-    if op == IR_AWAIT { return "AWAIT"; }
-    if op == IR_ARENA_NEW { return "ARENA_NEW"; }
-    if op == IR_DYN_PACK { return "DYN_PACK"; }
-    if op == IR_DYN_TAG { return "DYN_TAG"; }
-    if op == IR_DYN_VAL { return "DYN_VAL"; }
-    if op == IR_LAZY_THUNK { return "LAZY_THUNK"; }
-    if op == IR_LAZY_FORCE { return "LAZY_FORCE"; }
-    if op == IR_FNADDR { return "FNADDR"; }
-    if op == IR_I2F { return "I2F"; }
-    if op == IR_F2I { return "F2I"; }
-    if op == IR_PHI { return "PHI"; }
-    return "OP" + int_str(op);
-}
-
-
 // GC-1 测试探针（cir --inject-coexist-oob 载体；真实构建路径永不调用）：
 // entries_coexist 上界防御——e1/e2 = 首/次个越界条目索引（≥ g_entry_count）。
 // 守卫缺失时 accessor 对槽后区域越界读：条目表容量 ≥ 计数、alloc 零初始化
@@ -67,15 +27,6 @@ fn inject_coexist_oob() -> int {
     if r != 0 { return 1; }
     return 0;
 }
-
-//
-// （判定 seam 常量注记——内核抽取 Task 1）：RPT_MAX = 规则违反诊断打印上限，
-// 仅被内核判定函数引用（rl_rule2_func/verify_regalloc_consistency——跨文件
-// 互调，同 ir_op_kind_name 裁决）；内核文件进 corec concat（Task 2）时随迁
-// 内核。LOC_HOME_BASE 随判定搬入内核（实例侧零引用；同 concat 双声明会被
-// 自举 NameResolver 拒收——裁决修正，见 Task 1 报告）。
-RPT_MAX : int = 8;              // 规则违反诊断每函数每规则打印上限（计数不封顶）
-
 
 // ===== Task 5 测试钩子（cir --check-regalloc 载体专用注入；真实构建路径
 // 永不调用——注入只存在于 cir debug 分支，不触碰生产分配器行为）=====

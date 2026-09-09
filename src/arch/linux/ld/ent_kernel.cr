@@ -273,6 +273,47 @@ fn compute_entries(func_i: int) -> int {
     return cnt;
 }
 
+// （2026-09-10 内核抽取 Task 2 自 regalloc.cr 迁入——本函数唯一调用方 =
+// dump_entries_summary（--dump-entries kind= 字段映射）；机器侧零引用。
+// 定值指令种类名（--dump-entries kind= 字段）：定值点 = dest≥0 producer
+// opcode ∪ IR_STORE(s1)（本区头规则）——只列会作为定值点出现的 opcode，
+// 未列 opcode 回退数字（不该出现；出现即探明新定值形态的信号）。
+fn ir_op_kind_name(op: int) -> string {
+    if op == IR_ALLOC { return "ALLOC"; }
+    if op == IR_ALLOC_STRUCT { return "ALLOC_STRUCT"; }
+    if op == IR_ALLOC_ARRAY { return "ALLOC_ARRAY"; }
+    if op == IR_STORE { return "STORE"; }
+    if op == IR_CONST { return "CONST"; }
+    if op == IR_LOAD { return "LOAD"; }
+    if op == IR_LOAD_FIELD { return "LOAD_FIELD"; }
+    if op == IR_LOAD_INDEX { return "LOAD_INDEX"; }
+    if op == IR_LOAD_INDEX_VAR { return "LOAD_INDEX_VAR"; }
+    if op == IR_BINARY { return "BINARY"; }
+    if op == IR_UNARY { return "UNARY"; }
+    if op == IR_CALL { return "CALL"; }
+    if op == IR_CALL_EXTERN { return "CALL_EXTERN"; }
+    if op == IR_HOTPATCH_ROUTE { return "HOTPATCH_ROUTE"; }
+    if op == IR_MAKE_ENUM { return "MAKE_ENUM"; }
+    if op == IR_REF { return "REF"; }
+    if op == IR_DEREF { return "DEREF"; }
+    if op == IR_LOAD_ENUM_TAG { return "LOAD_ENUM_TAG"; }
+    if op == IR_SLICE { return "SLICE"; }
+    if op == IR_ADDR_INDEX { return "ADDR_INDEX"; }
+    if op == IR_SPAWN { return "SPAWN"; }
+    if op == IR_AWAIT { return "AWAIT"; }
+    if op == IR_ARENA_NEW { return "ARENA_NEW"; }
+    if op == IR_DYN_PACK { return "DYN_PACK"; }
+    if op == IR_DYN_TAG { return "DYN_TAG"; }
+    if op == IR_DYN_VAL { return "DYN_VAL"; }
+    if op == IR_LAZY_THUNK { return "LAZY_THUNK"; }
+    if op == IR_LAZY_FORCE { return "LAZY_FORCE"; }
+    if op == IR_FNADDR { return "FNADDR"; }
+    if op == IR_I2F { return "I2F"; }
+    if op == IR_F2I { return "F2I"; }
+    if op == IR_PHI { return "PHI"; }
+    return "OP" + int_str(op);
+}
+
 // --dump-entries 调试通道输出（cir 命令调用，Task 2 测试载体）：
 // 每函数一段、一行一条目；坐标 = 全局指令序/全局变量索引（与表内一致），
 // v = 组内版本序（1-based），kind = 定值指令种类（def≥0 = producer opcode
@@ -433,6 +474,11 @@ fn dump_coexist_summary() {
 // home 保留，判定③无事件）、只用 callee-saved（调用点契约 ④ 平凡满足）——
 // 随 CAG 批次裁定：③④ 的判定实现留待 spill/调用点解锁引入时，规约已先行落
 // 文档（spec/regalloc-consistency.corespec R3/R4）。
+
+// 规则违反诊断打印上限（rl_report_rule1/2 防病理刷屏，计数不封顶）——唯一
+// 使用方 = 本文件判定函数（rl_rule2_func/verify_regalloc_consistency）；机器
+// 侧零引用（2026-09-10 内核抽取 Task 2 自 regalloc.cr 迁入）。
+RPT_MAX : int = 8;              // 规则违反诊断每函数每规则打印上限（计数不封顶）
 
 LOC_HOME_BASE : int = 1000000;  // 位置编码：寄存器号直用（0..15）；home 槽偏移本常量
 

@@ -146,6 +146,7 @@ def main():
             'src/compiler/pass.cr',
             'src/compiler/dataflow.cr',
             'src/compiler/ccr_io.cr',
+            'src/arch/linux/ld/ent_kernel.cr',
             'src/compiler/module.cr',
             'src/stdlib/toml.cr',
             'src/stdlib/hotpatch.cr',
