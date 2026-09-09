@@ -7,10 +7,13 @@
 // Magic header for .cir cache files
 // v12: invalidate older call flags, generic cloning/indexing, and yield ASTs.
 // v13: persist nested SG region metadata in per-function cache files.
+// v14: 幽灵边播种修复（v7 Task 0 注 A 裁决）——快照内未产出 var 的 producer
+//      槽语义随 grow_df_arrays 播种变更为恒 -1；旧快照（含 0 槽幽灵边 + 恢复
+//      路径不重播种）必须失效——cache miss = 无害重建。
 // 注意：magic 位模式 = C1C1…（bytes）；以 signed 十进制书写——hex 字面量
 // 0xC1C1C1C1C1C1C1C1 超 i64 上界，会被词法溢出守卫拒绝（见 lexer P2 修复）。
 CIR_CACHE_MAGIC : int = -4485090715960753727;
-CIR_CACHE_VER   : int = 13;
+CIR_CACHE_VER   : int = 14;
 
 g_cir_write_buf : string, mut;
 g_cir_write_pos : int, mut;
@@ -308,7 +311,11 @@ fn load_cir_cache(path: string, func_idx: int) -> int {
         w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK, r64(data, pos)); pos = pos + 8;
         w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_FIRST_EDGE, r64(data, pos)); pos = pos + 8;
         w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_EDGE_COUNT, r64(data, pos)); pos = pos + 8;
-        // Record var producer
+        // Record var producer. 幽灵边修复（v7 注 A 裁决）缓存面：grow_df_arrays
+        // 对新增长区播种 -1（dyn_arr.cr 同款注释）——快照内未产出 var（参数等）
+        // 的 producer 槽恒 -1（修复前零页 = 0 =「节点 0」→ 缓存命中函数保留
+        // 幽灵边）；本处只覆写快照内真实定值的 var。旧快照由 CIR_CACHE_VER
+        // 13→14 失效。
         dest := r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_DEST);
         if dest >= 0 {
             grow_df_arrays(dest + 1);

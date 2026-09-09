@@ -2,8 +2,10 @@
 // .ccr binary serialization — the interface between corec (frontend)
 // and corearch (backend).
 //
-// v6 format（serialization v3；v6-only——load 校验 version==6，无 v5 兼容/转换）
-// 字节真相 = docs/superpowers/specs/2026-09-05-lattice-ir-v6-format.md（设计定稿）
+// v7 format（serialization v4；v7-only——load 校验 version==7，无 v6 兼容/转换；
+// v6 读路径退役：旧 v6 文件由 version 拒收，无转换工具）
+// 字节真相 = docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md（设计定稿
+// ——在 v6 段表架构上扩展：NOD 36B 邻接 + EDG 段必落；ENT 恒空至 Task 2）
 // + coreir-schema.md 家风格（Task 6 并入 schema）。本文件头注释 = 实现权威
 // （v6 目标形状落地：SYM 归并 spec §3.2——vars 表并入函数记录声明区/globals；
 // REG 坐标化 spec §3.5——kind/parent/enter/exit/first_ent/last_ent，nstart/
@@ -23,9 +25,9 @@
 //   (d) REG 由「可缺」升为必备（load 拒绝无 REG 的文件——函数指令边界唯一
 //       真源）；ENT 仍可缺（v5 精神：旧段缺失 = 空）。
 // 全整数 LE；offset 相对文件头：
-//   [header 16B]: magic u32 = "CCR1" | version u32 = 6 | seg_count u32 = 5 |
+//   [header 16B]: magic u32 = "CCR1" | version u32 = 7 | seg_count u32 = 6 |
 //                 reserved u32 = 0
-//   [seg table 5×12B]: {tag u32, offset u32, size u32}——规范序（tag = 行号 1..5，
+//   [seg table 6×12B]: {tag u32, offset u32, size u32}——规范序（tag = 行号 1..6，
 //                 offset = 上一段尾，段体紧随段表连续排列）
 //   [seg bodies]（按段表寻址）:
 //     STR(1) 字符串表：  [str_count u32] [× {len u32, data}]（同 v5）
@@ -50,16 +52,28 @@
 //                     variants[variant_count]×{name u32, type_count u32,
 //                     types[type_count]×u32}}]
 //       [opt_count][opt_count×{key u32, len u32, data lenB}]
-//     NOD(3) 节点表：    [nod_count u32] [×28B {op i32, dest i32, src1 i64,
-//                        src2 i32, src3 i32, tk i32}]——v5 instrs 内容不变；
-//                        NOD id = 文件序索引 0..nod_count-1（图坐标 D1；ENT
-//                        区间/def 即指此坐标）
+//     NOD(3) 节点表：    [nod_count u32] [×36B {op i32, dest i32, src1 i64,
+//                        src2 i32, src3 i32, tk i32, first_edge u32,
+//                        edge_count u32}]——28B v5 语义字段不变 + 邻接索引
+//                        （v7 spec §3.3；NOD id = 文件序索引 0..nod_count-1
+//                        = 图坐标 D1；ENT 区间/def 即指此坐标）
+//     EDG(6) 边表（v7 必落）：[edg_count u32] [×8B {to_nod u32, kind u32}]
+//                        ——节点 i 出边连续段 [first_edge, first_edge+edge_count)，
+//                        first_edge = 前缀累计（节点 i+1 first_edge = 前节点
+//                        first_edge+edge_count）；每边 to_nod > 所属节点（v7
+//                        spec §4 拓扑不变量 1——数据/state 边前向）；kind 0=数据
+//                        (def-use)、1=state（副作用序）。落盘源 = g_df_edges
+//                        （内存 = 头插链表，dataflow.cr）——save 前按节点序
+//                        单遍收集（见 ccr_collect_edges）；v7 校验规则
+//                        edg_count == Σ edge_count（规则 3）。
 //     ENT(4) 条目表：    [ent_count u32] [×28B {var_id i32, version u32,
 //                        def_nod i32, live_start u32, live_end u32（半开：
 //                        最后使用点+1）, home i32, flags u32}]
-//                        内存表 24B/条（闭区间、无 version，opt.cr compute_entries）
-//                        → 落盘：version = 同 var 组内定值升序序数（1-based），
-//                        live_end_disk = live_end_mem + 1；盘上 7 字段 = 28B
+//                        regalloc 移后端后恒 0 条（Task 2 翻转——corec 产实
+//                        记录）；内存表 24B/条（闭区间、无 version，opt.cr
+//                        compute_entries）→ 落盘：version = 同 var 组内定值
+//                        升序序数（1-based），live_end_disk = live_end_mem + 1；
+//                        盘上 7 字段 = 28B
 //     REG(5) region 表： [sg_count u32] [×24B {kind u32, parent i32,
 //                        enter_nod u32, exit_nod u32（v5 enter/exit 指令号 =
 //                        NOD 坐标，语义不变）, first_ent i32, last_ent i32}]
@@ -84,8 +98,18 @@
 // No bitwise ops in Core — use arithmetic instead.
 
 CCR_MAGIC : int = 827474755;  // "CCR1" (0x31524343)
-CCR_VERSION : int = 6;        // v6-only（load 校验 ==6；拒绝 v5——无转换工具）
-CCR_SEG_COUNT : int = 5;      // STR SYM NOD ENT REG（规范序；预留 tag 6+ 不占空间）
+CCR_VERSION : int = 7;        // v7-only（load 校验 ==7；v6 读路径退役——拒 version≠7）
+CCR_SEG_COUNT : int = 6;      // STR SYM NOD ENT REG EDG（规范序 tag 1..6；预留 7+ 不占空间）
+
+// On-disk NOD record size: 7 × i32 + 邻接 2 × u32 = 36 bytes — v7 spec §3.3
+// {op, dest, s1(i64), src2, src3, tk, first_edge, edge_count}（v5 28B 语义字段
+// 不变，first_edge/edge_count = 节点出边在 EDG 段的连续段索引）。
+ESZ_NOD_DISK : int = 36;
+
+// On-disk EDG record size: 2 × u32 = 8 bytes — v7 spec §3.4
+// {to_nod u32, kind u32}（from = 所属节点，邻接隐含——文件序节点 i 的出边
+// 在 [first_edge, first_edge+edge_count) 连续段内）
+ESZ_EDGE_DISK : int = 8;
 
 // On-disk REG record size: 6 × i32 = 24 bytes — v6 坐标化字段序
 // {kind, parent, enter_nod, exit_nod, first_ent, last_ent}（v5 的 nstart/ncount
@@ -225,8 +249,8 @@ fn ccr_func_root_sg(func_i: int) -> int {
     return -1;
 }
 
-// --- Segment size calculation（段体大小；Header+段表 = 16 + 12×5 = 76）---
-// 每段自带计数 u32；写侧与 calc 侧逐字节一致（v6 测试 walk 校验 end==fsize）。
+// --- Segment size calculation（段体大小；Header+段表 = 16 + 12×6 = 88）---
+// 每段自带计数 u32；写侧与 calc 侧逐字节一致（v7 测试 walk 校验 end==fsize）。
 
 fn ccr_str_seg_size() -> int {
     sz : ., mut = 4;  // str_count
@@ -290,7 +314,11 @@ fn ccr_sym_seg_size() -> int {
 }
 
 fn ccr_nod_seg_size() -> int {
-    return 4 + g_ir_instr_count * 28;
+    return 4 + g_ir_instr_count * ESZ_NOD_DISK;
+}
+
+fn ccr_edg_seg_size(edge_total: int) -> int {
+    return 4 + edge_total * ESZ_EDGE_DISK;
 }
 
 fn ccr_ent_seg_size() -> int {
@@ -301,17 +329,75 @@ fn ccr_reg_seg_size() -> int {
     return 4 + g_sg_count * ESZ_SG_DISK;
 }
 
-// --- Size calculation（v6：16B header + 5×12B seg table + 各段体）---
+// --- Size calculation（v7：16B header + 6×12B seg table + 各段体）---
+// edge_total = EDG 记录总数（save_ccr 先行收集，见 ccr_collect_edges）。
 
-fn calc_ccr_size() -> int {
+fn calc_ccr_size(edge_total: int) -> int {
     sz : ., mut = 16 + CCR_SEG_COUNT * 12;
     sz = sz + ccr_str_seg_size();
     sz = sz + ccr_sym_seg_size();
     sz = sz + ccr_nod_seg_size();
     sz = sz + ccr_ent_seg_size();
     sz = sz + ccr_reg_seg_size();
+    sz = sz + ccr_edg_seg_size(edge_total);
     return sz;
 }
+
+// --- EDG 内容收集（写侧；v7 spec §3.4/§4）---
+// g_df_edges = 每节点头插出边链表（dataflow.cr df_add_edge_kind，OFF_DFE_NEXT
+// 链）。落盘前按节点序单遍走查 → 每节点出边连续段（first_edge = 前缀累计）
+// + 扁平 {to, kind} 值缓冲（8B/边，to + kind×2^32 打包）。写侧守卫与 loader
+// 同域（v7 守卫面强度保持）：链表归属错乱/后向边（to_nod ≤ 所属节点，自环
+// 含）/kind > 1 → 拒绝落盘（内存图 = 文件 EDG 的唯一源，loader 永不拒绝
+// 自己 writer 的产物）。
+fn ccr_collect_edges(edge_counts: string, edge_offs: string) -> int {
+    total : ., mut = 0;
+    ni : ., mut = 0;
+    loop {
+        if ni >= g_ir_instr_count { break; }
+        w64(edge_offs, ni * 8, total);
+        cnt : ., mut = 0;
+        eid : ., mut = r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_FIRST_EDGE);
+        loop {
+            if eid < 0 { break; }
+            if eid >= g_df_edge_count { return -1; }   // 链表越界（缓存恢复错乱防御）
+            if r64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_FROM) != ni { return -1; }
+            eto := r64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_TO);
+            if eto <= ni { return -1; }                // v7 §4 规则 1：to_nod > 所属节点
+            if r64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_KIND) > 1 { return -1; }
+            cnt = cnt + 1;
+            eid = r64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_NEXT);
+        }
+        w64(edge_counts, ni * 8, cnt);
+        total = total + cnt;
+        ni = ni + 1;
+    }
+    return total;
+}
+
+// 第二遍：按节点序把出边写入扁平缓冲（slot = edge_offs[i] 起连续）
+fn ccr_fill_edge_buf(buf: string, edge_offs: string) {
+    ni : ., mut = 0;
+    loop {
+        if ni >= g_ir_instr_count { break; }
+        slot : ., mut = r64(edge_offs, ni * 8);
+        eid : ., mut = r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_FIRST_EDGE);
+        loop {
+            if eid < 0 { break; }
+            eto := r64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_TO);
+            ekind := r64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_KIND);
+            w64(buf, slot * 8, eto + ekind * 4294967296);
+            slot = slot + 1;
+            eid = r64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_NEXT);
+        }
+        ni = ni + 1;
+    }
+}
+
+// --- v7 读侧载入缓冲（EDG 校验后保留——Task 1 无消费方，供后续任务/调试；
+// g_df_edges 在 corearch 编译物中存在但 dataflow.cr 不在其内——独立缓冲）---
+g_v7_edges : string, mut;         // EDG 扁平记录（8B/条，文件序 = 节点运行序）
+g_v7_edge_count : int, mut;
 
 // --- Entry-table accessors（内存 24B 表读；不能调 opt.cr 的 ent_var——corearch
 // 二进制不含 opt.cr，本文件为双端共享。写侧 w32/读侧 buf_read_i32（符号扩展），
@@ -343,7 +429,7 @@ fn ccr_grow_func_entry_meta(needed: int) {
 // --- Save（写侧与 calc 侧一致；段表规范序、段体连续）---
 
 fn save_ccr(path: string) -> int {
-    // The v6 wire format stores these fields as signed i32 — 编码层文件格式
+    // The v7 wire format stores these fields as signed i32 — 编码层文件格式
     // 限制（字段形状 = 文件布局域，hw-map/经典投影实例；与 int 语义无涉，
     // int-unbounded-semantics 定稿 §三）。Refuse to emit a lossy file instead
     // of letting w32 silently keep only the low bits.
@@ -351,9 +437,22 @@ fn save_ccr(path: string) -> int {
 
     // regalloc 移后端（2026-09-07，D-1=Y）：.ccr 不再落 ENT——条目表由
     // corearch load 后自算（regalloc.cr compute_live_ranges/compute_entries）；
-    // 内存表完整性守卫随迁 corearch（自算前置同域校验）。
+    // 内存表完整性守卫随迁 corearch（自算前置同域校验）。ENT 段恒 0 条
+    // （Task 2 翻转）。
 
-    tsz := calc_ccr_size();
+    // v7：EDG 内容先收集（NOD 邻接域 + 段尺寸先决）——g_df_edges 内存 =
+    // 头插链表，按节点序走查 → 每节点出边连续段（first_edge = 前缀累计）
+    edge_counts := alloc((g_ir_instr_count + 8) * 8);
+    edge_offs := alloc((g_ir_instr_count + 8) * 8);
+    edge_total := ccr_collect_edges(edge_counts, edge_offs);
+    if edge_total < 0 { return -1; }
+    edge_buf : string, mut = "";
+    if edge_total > 0 {
+        edge_buf = alloc(edge_total * 8);
+        ccr_fill_edge_buf(edge_buf, edge_offs);
+    }
+
+    tsz := calc_ccr_size(edge_total);
     buf := alloc(tsz);
     pos : ., mut = 0;
 
@@ -369,19 +468,22 @@ fn save_ccr(path: string) -> int {
     s3 := ccr_nod_seg_size();
     s4 := ccr_ent_seg_size();
     s5 := ccr_reg_seg_size();
+    s6 := ccr_edg_seg_size(edge_total);
 
-    // Seg table（5 × 12B；offset = 前段尾，从段表后起）
+    // Seg table（6 × 12B；offset = 前段尾，从段表后起；规范序 tag 1..6）
     o1 : ., mut = 16 + CCR_SEG_COUNT * 12;
     o2 : ., mut = o1 + s1;
     o3 : ., mut = o2 + s2;
     o4 : ., mut = o3 + s3;
     o5 : ., mut = o4 + s4;
+    o6 : ., mut = o5 + s5;
 
     buf_write_u32(buf, pos, 1); buf_write_u32(buf, pos + 4, o1); buf_write_u32(buf, pos + 8, s1); pos = pos + 12;
     buf_write_u32(buf, pos, 2); buf_write_u32(buf, pos + 4, o2); buf_write_u32(buf, pos + 8, s2); pos = pos + 12;
     buf_write_u32(buf, pos, 3); buf_write_u32(buf, pos + 4, o3); buf_write_u32(buf, pos + 8, s3); pos = pos + 12;
     buf_write_u32(buf, pos, 4); buf_write_u32(buf, pos + 4, o4); buf_write_u32(buf, pos + 8, s4); pos = pos + 12;
     buf_write_u32(buf, pos, 5); buf_write_u32(buf, pos + 4, o5); buf_write_u32(buf, pos + 8, s5); pos = pos + 12;
+    buf_write_u32(buf, pos, 6); buf_write_u32(buf, pos + 4, o6); buf_write_u32(buf, pos + 8, s6); pos = pos + 12;
 
     // === STR: strings ===
     buf_write_u32(buf, pos, g_str_count); pos = pos + 4;
@@ -539,7 +641,9 @@ fn save_ccr(path: string) -> int {
         mi = mi + 1;
     }
 
-    // === NOD: instructions（28B each；NOD id = 文件序 = 全局指令序）===
+    // === NOD: instructions（36B each；NOD id = 文件序 = 全局指令序；28B
+    // 语义字段与 v6 逐字段一致 + first_edge/edge_count 邻接索引——EDG 段
+    // 由 edge_buf 在段体末尾落盘）===
     buf_write_u32(buf, pos, g_ir_instr_count); pos = pos + 4;
     ii : ., mut = 0;
     loop {
@@ -552,6 +656,8 @@ fn save_ccr(path: string) -> int {
         buf_write_i32(buf, pos, iri_s2(ii)); pos = pos + 4;
         buf_write_i32(buf, pos, iri_s3(ii)); pos = pos + 4;
         buf_write_u32(buf, pos, iri_tk(ii)); pos = pos + 4;
+        buf_write_u32(buf, pos, r64(edge_offs, ii * 8)); pos = pos + 4;   // first_edge
+        buf_write_u32(buf, pos, r64(edge_counts, ii * 8)); pos = pos + 4; // edge_count
         ii = ii + 1;
     }
 
@@ -625,6 +731,19 @@ fn save_ccr(path: string) -> int {
         si2 = si2 + 1;
     }
 
+    // === EDG: edges（v7 必落；8B each {to_nod u32, kind u32}——所属节点 =
+    // 邻接隐含：节点 i 出边连续段 [first_edge, first_edge+edge_count)，
+    // edge_buf = 收集遍的扁平记录（打包 to + kind×2^32，此处解包写 u32 对）===
+    buf_write_u32(buf, pos, edge_total); pos = pos + 4;
+    ei3 : ., mut = 0;
+    loop {
+        if ei3 >= edge_total { break; }
+        ev := r64(edge_buf, ei3 * 8);
+        buf_write_u32(buf, pos, ev % 4294967296); pos = pos + 4;   // to_nod
+        buf_write_u32(buf, pos, ev / 4294967296); pos = pos + 4;   // kind
+        ei3 = ei3 + 1;
+    }
+
     // Use syscall directly (write_file uses str_len which stops at null)
     fd := syscall3(2, path, 577, 420);  // open(O_WRONLY|O_CREAT|O_TRUNC, 0644)
     if fd < 0 { return -1; }
@@ -648,12 +767,16 @@ fn inject_var_shift() -> int {
     return 0;
 }
 
-// --- Load（v6-only：校验 Header + 段表规范布局 + 逐段越界拒绝）---
+// --- Load（v7-only：校验 Header + 段表规范布局 + 逐段越界拒绝；version ≠ 7
+// = v6 读路径退役——拒绝）---
 // 解析序：STR → SYM（globals/funcs 声明区重建 var 命名空间行序）→ REG
-// （nstart/ncount 派生 + func 指令边界回填）→ NOD → ENT（28B → 内存 24B 表，
-// 去掉 version、live_end 半开转回闭区间 −1；块界与 SYM func first/last 对照）。
+// （nstart/ncount 派生 + func 指令边界回填）→ NOD（36B——28B 语义字段重建
+// 线性流，邻接域暂存）→ ENT（28B → 内存 24B 表，去掉 version、live_end
+// 半开转回闭区间 −1；块界与 SYM func first/last 对照）→ EDG（邻接连续段
+// 校验 + 拓扑不变量 + 入 g_v7_edges 缓冲）。
 // 内存态（g_ir_vars 行 id=行序 / g_ir_globals var_idx=行序 / func 七数组 /
-// g_sgs）与 v6.0 加载结果逐字节一致——文件布局变化不影响下游（ELF 发射）。
+// g_sgs）与 v6 加载结果逐字节一致——28B 语义字段与 v6 逐字段相同，文件布局
+// 变化不影响下游（ELF 发射）。
 
 fn load_ccr(data: string, fsize: int) -> int {
     if fsize < 16 { return -1; }  // header
@@ -674,14 +797,14 @@ fn load_ccr(data: string, fsize: int) -> int {
     if seg_cnt > (fsize - 16) / 12 { return -1; }
 
     // 段表：规范布局——tag 必须 = 行号（1..），offset 必须 = 前段尾，段不越界。
-    // （段表 {tag, offset, size} 结构本身允段序自由，v6.0 writer 只用规范序——
+    // （段表 {tag, offset, size} 结构本身允段序自由，v7 writer 只用规范序——
     // loader 按规范序校验，非规范布局一律拒绝。）
     seg_off1 : ., mut = 0; seg_off2 : ., mut = 0; seg_off3 : ., mut = 0;
-    seg_off4 : ., mut = 0; seg_off5 : ., mut = 0;
+    seg_off4 : ., mut = 0; seg_off5 : ., mut = 0; seg_off6 : ., mut = 0;
     seg_end1 : ., mut = 0; seg_end2 : ., mut = 0; seg_end3 : ., mut = 0;
-    seg_end4 : ., mut = 0; seg_end5 : ., mut = 0;
+    seg_end4 : ., mut = 0; seg_end5 : ., mut = 0; seg_end6 : ., mut = 0;
     have1 : ., mut = 0; have2 : ., mut = 0; have3 : ., mut = 0;
-    have4 : ., mut = 0; have5 : ., mut = 0;
+    have4 : ., mut = 0; have5 : ., mut = 0; have6 : ., mut = 0;
     cursor : ., mut = 16 + seg_cnt * 12;
     ri : ., mut = 0;
     loop {
@@ -690,7 +813,7 @@ fn load_ccr(data: string, fsize: int) -> int {
         tg := buf_read_u32(data, pos); pos = pos + 4;
         soff := buf_read_u32(data, pos); pos = pos + 4;
         ssz := buf_read_u32(data, pos); pos = pos + 4;
-        if tg < 1 || tg > 5 { return -1; }
+        if tg < 1 || tg > 6 { return -1; }
         if tg != ri + 1 { return -1; }              // 规范 tag 序
         if soff != cursor { return -1; }            // 段体连续
         if ssz > fsize - cursor { return -1; }      // 越界拒绝
@@ -700,13 +823,16 @@ fn load_ccr(data: string, fsize: int) -> int {
         if tg == 3 { if have3 != 0 { return -1; } seg_off3 = soff; seg_end3 = soff + ssz; have3 = 1; }
         if tg == 4 { if have4 != 0 { return -1; } seg_off4 = soff; seg_end4 = soff + ssz; have4 = 1; }
         if tg == 5 { if have5 != 0 { return -1; } seg_off5 = soff; seg_end5 = soff + ssz; have5 = 1; }
+        if tg == 6 { if have6 != 0 { return -1; } seg_off6 = soff; seg_end6 = soff + ssz; have6 = 1; }
         cursor = soff + ssz;
         ri = ri + 1;
     }
 
     // STR/SYM/NOD/REG 必备（v6 坐标化后 func 指令边界 = root_region span 的
-    // 唯一真源，REG 缺段无法重建函数边界）；ENT 可缺（v5 精神：旧段缺失 = 空）
-    if have1 == 0 || have2 == 0 || have3 == 0 || have5 == 0 { return -1; }
+    // 唯一真源，REG 缺段无法重建函数边界）；EDG v7 必落（spec §3.4——文件
+    // 语义载体 = NOD+EDG，缺边段 = 格式不一致拒绝）；ENT 可缺（v5 精神：
+    // 旧段缺失 = 空——恒空时代等价）
+    if have1 == 0 || have2 == 0 || have3 == 0 || have5 == 0 || have6 == 0 { return -1; }
     if have4 == 0 { seg_off4 = 0; seg_end4 = 0; }
 
     // 状态重置（corearch 单次加载；保持可重入）
@@ -721,6 +847,7 @@ fn load_ccr(data: string, fsize: int) -> int {
     g_ir_global_count = 0;
     g_opt_meta_count = 0;
     g_entry_count = 0;
+    g_v7_edge_count = 0;
 
     // === STR: strings ===
     pos = seg_off1;
@@ -1032,22 +1159,30 @@ fn load_ccr(data: string, fsize: int) -> int {
         bfi = bfi + 1;
     }
 
-    // === NOD: instructions（28B each）===
+    // === NOD: instructions（36B each——28B 语义字段重建线性流 + 邻接索引
+    // first_edge/edge_count 先收集校验（EDG 段解析于 ENT 后），发射输入与
+    // v6 逐字段一致）===
     pos = seg_off3;
     if !ccr_has_bytes(pos, 4, seg_end3) { return -1; }
     instr_cnt := buf_read_u32(data, pos); pos = pos + 4;
-    if instr_cnt > (seg_end3 - seg_off3) / 28 { return -1; }
+    if instr_cnt > (seg_end3 - seg_off3) / ESZ_NOD_DISK { return -1; }
     grow_ir_instrs(instr_cnt);
+    // NOD 邻接域暂存（EDG 校验消费）：{first_edge i64, edge_count i64} per node
+    nod_edge_meta := alloc((instr_cnt + 8) * 16);
     ii : ., mut = 0;
     loop {
         if ii >= instr_cnt { break; }
-        if !ccr_has_bytes(pos, 28, seg_end3) { return -1; }
+        if !ccr_has_bytes(pos, ESZ_NOD_DISK, seg_end3) { return -1; }
         opcode := buf_read_u32(data, pos); pos = pos + 4;
         dest := buf_read_i32(data, pos); pos = pos + 4;
         s1 := buf_read_i64(data, pos); pos = pos + 8;   // 修复 14：s1 64 位
         s2 := buf_read_i32(data, pos); pos = pos + 4;
         s3 := buf_read_i32(data, pos); pos = pos + 4;
         tk := buf_read_u32(data, pos); pos = pos + 4;
+        nfe := buf_read_u32(data, pos); pos = pos + 4;  // first_edge（邻接索引）
+        nec := buf_read_u32(data, pos); pos = pos + 4;  // edge_count
+        w64(nod_edge_meta, ii * 16, nfe);
+        w64(nod_edge_meta, ii * 16 + 8, nec);
         iri_set_op(ii, opcode);
         iri_set_dest(ii, dest);
         iri_set_s1(ii, s1);
@@ -1143,6 +1278,53 @@ fn load_ccr(data: string, fsize: int) -> int {
         }
         if pe != g_entry_count { return -1; }
     }
+
+    // === EDG: edges（v7 必落；8B each {to_nod u32, kind u32}——所属节点 =
+    // 邻接隐含：节点 i 出边连续段 [first_edge, first_edge+edge_count)，first_edge
+    // = 前缀累计（v7 spec §3.3 邻接约定）。校验（spec §4 + 守卫面强度保持）：
+    //   ① 连续段与 NOD 邻接域逐节点对照（first_edge == 前缀累计；段界不出 EDG）
+    //   ② Σ edge_count == edg_count（规则 3；行走完 == 段体大小）
+    //   ③ 每条边 to_nod < instr_cnt（NOD 引用界内）+ to_nod > 所属节点
+    //      （规则 1 拓扑不变量——数据/state 边前向；自环/后向 = 文件损坏拒绝）
+    //   ④ kind ≤ 1（0=数据、1=state；2+ 预留 = 未知边类拒绝）
+    // 校验通过后边表入 g_v7_edges 缓冲（文件序连续段——图语义消费通道/调试）。
+    // branch/jump 目标 = 操作数引用非边（v7 §4 边界声明）——NOD 操作数不参与
+    // 本段校验。
+    pos = seg_off6;
+    if !ccr_has_bytes(pos, 4, seg_end6) { return -1; }
+    edg_cnt := buf_read_u32(data, pos); pos = pos + 4;
+    if edg_cnt > (seg_end6 - seg_off6) / ESZ_EDGE_DISK { return -1; }
+    v7_buf : string, mut = "";
+    if edg_cnt > 0 {
+        v7_buf = alloc(edg_cnt * 8);
+    }
+    g_v7_edges = v7_buf;
+    g_v7_edge_count = edg_cnt;
+    ei4 : ., mut = 0;
+    run_off : ., mut = 0;
+    loop {
+        if ei4 >= instr_cnt { break; }
+        nfe := r64(nod_edge_meta, ei4 * 16);
+        nec := r64(nod_edge_meta, ei4 * 16 + 8);
+        if nfe != run_off { return -1; }       // ① 前缀累计失配（段错位/伪造）
+        if run_off + nec > edg_cnt { return -1; }  // ① 节点段越出 EDG 空间
+        rec : ., mut = 0;
+        loop {
+            if rec >= nec { break; }
+            if !ccr_has_bytes(pos, ESZ_EDGE_DISK, seg_end6) { return -1; }
+            eto := buf_read_u32(data, pos); pos = pos + 4;
+            ekind := buf_read_u32(data, pos); pos = pos + 4;
+            if ekind > 1 { return -1; }              // ④ 未知边类
+            if eto >= instr_cnt { return -1; }       // ③ to 出 NOD 空间
+            if eto <= ei4 { return -1; }             // ③ 后向/自环（拓扑不变量）
+            w64(v7_buf, (run_off + rec) * 8, eto + ekind * 4294967296);
+            rec = rec + 1;
+        }
+        run_off = run_off + nec;
+        ei4 = ei4 + 1;
+    }
+    if run_off != edg_cnt { return -1; }         // ② Σ edge_count == edg_count
+    if pos != seg_end6 { return -1; }            // ② 行走完 == 段体大小
 
     return 0;
 }

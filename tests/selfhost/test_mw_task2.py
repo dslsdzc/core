@@ -92,7 +92,7 @@ def jo_sites_oracle(funcs, var_types):
     mainf = mains[0]
     tags = detect_tags(mainf, var_types)
     n = 0
-    for (op, d, s1, s2, s3, tk) in mainf["nodes"]:
+    for (op, d, s1, s2, s3, tk, fe, ec) in mainf["nodes"]:
         if op == IR_BINARY and s3 in (OP_ADD, OP_SUB) and d in tags:
             n = n + 1
     return mainf, n

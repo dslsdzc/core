@@ -1,38 +1,46 @@
 #!/usr/bin/env python3
-"""v6 .ccr 格式 IO 测试——段表架构 + ENT 存在结构段 + SYM 归并/REG 坐标化。
+"""v6 测试族（迁移期 Task 1——段契约机械更新至 v7；Task 3 合并进
+test_ccr_v7.py，本文件退役）——v7 .ccr 格式 IO 测试：段表架构 + EDG 段必落 +
+SYM 归并/REG 坐标化 + NOD 36B 邻接。
 
 注（2026-09-07 regalloc 移后端，D-1=Y/R2）：corec save 不再携带 ENT 条目与
 opt_meta（数据面/分配归位 corearch 自算）——ENT 段恒 0 条、SYM func/REG
 first_ent/last_ent 恒 -1、param_ents 恒 -1、opt_count 恒 0。段结构与 loader
 兼容语义保留（空表对照 pcnt==0 ↔ -1；格式描述 = loader 仍支持的形状）。
+Task 1 翻转：EDG 段必落（v7 spec §3.4）——NOD 36B（28B 语义字段 + 邻接
+first_edge/edge_count）、段表 6 项、loader 拒 version≠7（v6 读路径退役）。
 
-格式真相：docs/superpowers/specs/2026-09-05-lattice-ir-v6-format.md（§2/§3.2/§3.5）
-+ ccr_io.cr 头注释（v6 目标形状：SYM 归并 spec §3.2——globals/funcs/str_consts/
-structs/enums/opt_meta；REG 坐标化 spec §3.5——kind/parent/enter/exit/first_ent/
-last_ent）。
+格式真相：docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md（§3/§4）
++ ccr_io.cr 头注释（SYM 归并 spec §3.2——globals/funcs/str_consts/structs/
+enums/opt_meta；REG 坐标化——kind/parent/enter/exit/first_ent/last_ent）。
 落盘布局（全 LE，offset 相对文件头）：
   [0]   magic u32 = 0x31524343 ("CCR1")
-  [4]   version u32 = 6
-  [8]   seg_count u32 = 5
+  [4]   version u32 = 7
+  [8]   seg_count u32 = 6
   [12]  reserved u32 = 0
-  [16]  段表 5 × 12B {tag u32, offset u32, size u32}（规范序 tag 1..5）
-  [76]  段体（tag 升序）：STR / SYM / NOD / ENT / REG
+  [16]  段表 6 × 12B {tag u32, offset u32, size u32}（规范序 tag 1..6）
+  [88]  段体（tag 升序）：STR / SYM / NOD / ENT / REG / EDG
   STR(1): str_count + {len u32, data}
-  SYM(2): v5 vars/globals 归并——globals 16B（var_idx 槽 → type）前置 +
-          函数记录内嵌 var 声明区（v5 vars 表并入，位置即行序）：
+  SYM(2): globals 16B（var_idx 槽 → type）前置 + 函数记录内嵌 var 声明区：
     [global_count][globals × {name u32, type u32, init_val i64}]
     [func_count][funcs × {name u32, param_count u32, ret_type u32,
                  root_region i32, first_ent i32, last_ent i32 |
                  param_ents[param_count]×i32（参数 def=-1 条目 id，-1=无）|
                  var_count u32, var_decls[var_count]×{name u32, type u32}}]
     [str_const_count][×4B][structs][enums][opt_meta]
-  NOD(3): nod_count + 28B×nod_count（= v5 instrs 内容；NOD id = 文件序）
+  NOD(3): nod_count + 36B×nod_count
+          {op i32, dest i32, s1 i64, s2 i32, s3 i32, tk i32,
+           first_edge u32, edge_count u32}（28B = v5 instrs 内容不变；
+           NOD id = 文件序；邻接 = 节点出边 EDG 段连续段）
   ENT(4): ent_count + 28B×ent_count
           {var_id i32, version u32, def_nod i32, live_start u32,
            live_end u32（半开 = 最后使用点+1）, home i32, flags u32}
+          （Task 1：恒空——Task 2 翻转）
   REG(5): sg_count + 24B×sg_count {kind u32, parent i32, enter_nod u32,
-          exit_nod u32, first_ent i32, last_ent i32}（v5 nstart/ncount 由
+          exit_nod u32, first_ent i32, last_ent i32}（nstart/ncount 由
           enter/exit 派生；first/last = 区内条目范围——定值点 ∈ [enter, exit)）
+  EDG(6): edg_count + 8B×edg_count {to_nod u32, kind u32}（v7 必落——边段；
+          所属节点 = 邻接隐含；每条边 to_nod > 所属节点；kind 0=数据 1=state）
 """
 import os
 import struct
@@ -44,24 +52,25 @@ COREC = os.path.join(BASE, 'build/corec')
 COREARCH = os.path.join(BASE, 'build/corearch')
 
 MAGIC = 0x31524343  # "CCR1"
-V6 = 6
-SEG_TAGS = [1, 2, 3, 4, 5]  # STR SYM NOD ENT REG
-NOD_REC = 28
+V7 = 7
+SEG_TAGS = [1, 2, 3, 4, 5, 6]  # STR SYM NOD ENT REG EDG
+NOD_REC = 36
 ENT_REC = 28
 REG_REC = 24
+EDG_REC = 8
 
 
-class V6File:
-    """Parse a v6 .ccr file into its segments. Raises AssertionError on layout
+class V7File:
+    """Parse a v7 .ccr file into its segments. Raises AssertionError on layout
     violations (mirrors load_ccr's segment-table contract)."""
 
     def __init__(self, data: bytes):
         self.d = data
-        assert len(data) >= 76, f"file too small for v6 header+table: {len(data)}"
+        assert len(data) >= 88, f"file too small for v7 header+table: {len(data)}"
         (magic, ver, seg_count, reserved) = struct.unpack_from('<4I', data, 0)
         assert magic == MAGIC, f"bad magic {magic:#x}"
-        assert ver == V6, f"expected version {V6}, got {ver}"
-        assert seg_count == 5, f"expected 5 segments, got {seg_count}"
+        assert ver == V7, f"expected version {V7}, got {ver}"
+        assert seg_count == 6, f"expected 6 segments, got {seg_count}"
         assert reserved == 0, f"reserved != 0: {reserved}"
         # Segment table: canonical order, contiguous layout
         self.segs = {}
@@ -162,10 +171,13 @@ class V6File:
                 'enum_count': en, 'opt_count': oc}
 
     def nod(self):
+        """NOD 36B: {op, dest, s1, s2, s3, tk, first_edge, edge_count}——28B
+        语义字段 + 邻接索引（v7 spec §3.3；loader 由 28B 字段重建线性流，
+        发射输入与 v6 逐字段一致）。"""
         b = self.body(3)
         (n,) = struct.unpack_from('<I', b, 0)
-        assert (len(b) - 4) % NOD_REC == 0, "NOD body size not a multiple of 28"
-        assert n == (len(b) - 4) // NOD_REC, f"NOD count {n} != bytes/28"
+        assert (len(b) - 4) % NOD_REC == 0, "NOD body size not a multiple of 36"
+        assert n == (len(b) - 4) // NOD_REC, f"NOD count {n} != bytes/36"
         pos = 4
         out = []
         for _ in range(n):
@@ -173,7 +185,8 @@ class V6File:
             (s1,) = struct.unpack_from('<q', b, pos + 8)
             (s2, s3) = struct.unpack_from('<ii', b, pos + 16)
             (tk,) = struct.unpack_from('<I', b, pos + 24)
-            out.append((op, dest, s1, s2, s3, tk))
+            (fe, ec) = struct.unpack_from('<II', b, pos + 28)
+            out.append((op, dest, s1, s2, s3, tk, fe, ec))
             pos += NOD_REC
         return out
 
@@ -204,6 +217,39 @@ class V6File:
             pos += REG_REC
         return out
 
+    def edg(self):
+        """EDG records + per-node run reconstruction + v7 §4 校验（镜像 loader）：
+        连续邻接（first_edge == 前缀累计）、Σ edge_count == edg_count、行走完
+        == 段体大小、每条边 to_nod > 所属节点、kind ∈ {0=数据, 1=state}。
+        Returns {node: [(to, kind), ...]}."""
+        b = self.body(6)
+        (edg_cnt,) = struct.unpack_from('<I', b, 0)
+        assert (len(b) - 4) % EDG_REC == 0, "EDG body size not a multiple of 8"
+        assert edg_cnt == (len(b) - 4) // EDG_REC, f"EDG count {edg_cnt} != bytes/8"
+        pos = 4
+        edges = {}
+        run_off = 0
+        for i, nod_row in enumerate(self.nod()):
+            (fe, ec) = nod_row[6:8]
+            assert fe == run_off, \
+                f"node {i}: first_edge {fe} != cumulative offset {run_off}"
+            assert run_off + ec <= edg_cnt, \
+                f"node {i}: run exceeds edg_count {edg_cnt}"
+            row = []
+            for _ in range(ec):
+                (to, kind) = struct.unpack_from('<II', b, pos)
+                pos += EDG_REC
+                assert to > i, f"edge {i}->{to}: not forward (to_nod <= node)"
+                assert kind <= 1, f"edge {i}->{to}: unknown kind {kind}"
+                row.append((to, kind))
+            if row:
+                edges[i] = row
+            run_off += ec
+        assert run_off == edg_cnt, \
+            f"Σ edge_count {run_off} != edg_count {edg_cnt}"
+        assert pos == len(b), f"EDG walk ended at {pos} of {len(b)}"
+        return edges
+
 
 def corec_ccr(src: str, out: str) -> str:
     """Run `corec ccr` on src; returns stdout."""
@@ -227,7 +273,8 @@ def read_ccr(path: str) -> bytes:
 # --- tests ---
 
 def test_header_segment_table_and_walk():
-    """段表架构：magic/version=6/5 段规范序/offset 连续/走完 == 文件大小。"""
+    """段表架构：magic/version=7/6 段规范序（EDG tag 6 必落）/offset 连续/
+    NOD 36B/EDG 走查 == 文件大小。"""
     src = ("fn add(a: int, b: int) -> int { return a + b; }\n"
            "fn main() -> int {\n"
            "    s : ., mut = 0;\n"
@@ -241,19 +288,22 @@ def test_header_segment_table_and_walk():
         pass
     try:
         corec_ccr(src, ccr_path)
-        v6 = V6File(read_ccr(ccr_path))
+        v7 = V7File(read_ccr(ccr_path))
         # every segment body present and non-empty beyond its count
-        assert v6.fsize > 76
-        strs = v6.str_table()
+        assert v7.fsize > 88
+        strs = v7.str_table()
         assert len(strs) >= 2, f"expected >=2 strings, got {len(strs)}"
-        sym = v6.sym_parse()  # validates the full SYM body layout
+        sym = v7.sym_parse()  # validates the full SYM body layout
         assert len(sym['funcs']) >= 1 and len(sym['globals']) >= 1
-        n = v6.nod()
+        n = v7.nod()
         assert len(n) > 4, f"expected nodes, got {len(n)}"
-        reg = v6.reg()
+        reg = v7.reg()
         assert len(reg) >= 2, f"expected >=2 regions (func+for), got {len(reg)}"
-        e = v6.ent()
+        e = v7.ent()
         assert e == [], "ENT not empty (regalloc move: corec no longer saves entries)"
+        edg = v7.edg()  # EDG 段必落 + 邻接/拓扑/Σ 校验走查
+        assert sum(len(v) for v in edg.values()) >= 2, \
+            f"EDG unexpectedly small: {edg}"
     finally:
         try:
             os.unlink(ccr_path)
@@ -281,16 +331,16 @@ def test_ent_optmeta_absent_after_move():
         pass
     try:
         corec_ccr(src, ccr_path)
-        v6 = V6File(read_ccr(ccr_path))
-        assert v6.ent() == [], f"ENT not empty after regalloc move: {v6.ent()}"
-        sym = v6.sym_parse()
+        v7 = V7File(read_ccr(ccr_path))
+        assert v7.ent() == [], f"ENT not empty after regalloc move: {v7.ent()}"
+        sym = v7.sym_parse()
         assert sym['opt_count'] == 0, f"opt_meta not empty: {sym['opt_count']}"
         for f in sym['funcs']:
             assert f['first_ent'] == -1 and f['last_ent'] == -1, \
                 f"func {f} first/last_ent != -1"
             assert all(pe == -1 for pe in f['param_ents']), \
                 f"func {f} param_ents not all -1"
-        for r in v6.reg():
+        for r in v7.reg():
             assert r[4] == -1 and r[5] == -1, f"REG row carries entry range: {r}"
     finally:
         try:
@@ -299,8 +349,9 @@ def test_ent_optmeta_absent_after_move():
             pass
 
 
-def test_loader_rejects_non_v6_version():
-    """v6-only：version 字段改成 5（或任意非 6）→ corearch 必须拒绝。"""
+def test_loader_rejects_non_v7_version():
+    """v7-only（v6 读路径退役）：version 字段改成 6（v6 文件——旧生态直接
+    拒绝，无转换工具）或任意非 7 → corearch 必须拒绝。"""
     src = "fn main() -> int { return 42; }\n"
     ccr_path = os.path.join(BASE, 'build/test_v6_reject.ccr')
     try:
@@ -309,20 +360,22 @@ def test_loader_rejects_non_v6_version():
         pass
     try:
         corec_ccr(src, ccr_path)
-        data = bytearray(read_ccr(ccr_path))
-        struct.pack_into('<I', data, 4, 5)  # patch version to 5
-        bad_path = ccr_path + '.v5'
-        with open(bad_path, 'wb') as fh:
-            fh.write(bytes(data))
-        r = subprocess.run([COREARCH, bad_path, '--elf', '--static',
-                            '-o', os.path.join(BASE, 'build/test_v6_reject.out')],
-                           capture_output=True, text=True, cwd=BASE, timeout=60)
-        assert r.returncode != 0, \
-            f"corearch accepted a v5-patched file: rc={r.returncode} {r.stdout!r}"
-        assert 'invalid' in (r.stdout + r.stderr), \
-            f"expected invalid-.ccr error, got: {r.stdout!r} {r.stderr!r}"
+        for bad_ver in (6, 5):
+            data = bytearray(read_ccr(ccr_path))
+            struct.pack_into('<I', data, 4, bad_ver)  # patch version
+            bad_path = ccr_path + f'.v{bad_ver}'
+            with open(bad_path, 'wb') as fh:
+                fh.write(bytes(data))
+            r = subprocess.run([COREARCH, bad_path, '--elf', '--static',
+                                '-o', os.path.join(BASE, 'build/test_v6_reject.out')],
+                               capture_output=True, text=True, cwd=BASE, timeout=60)
+            assert r.returncode != 0, \
+                f"corearch accepted a version-{bad_ver}-patched file: rc={r.returncode} {r.stdout!r}"
+            assert 'invalid' in (r.stdout + r.stderr), \
+                f"expected invalid-.ccr error, got: {r.stdout!r} {r.stderr!r}"
     finally:
-        for p in (ccr_path, ccr_path + '.v5', os.path.join(BASE, 'build/test_v6_reject.out')):
+        for p in (ccr_path, ccr_path + '.v6', ccr_path + '.v5',
+                  os.path.join(BASE, 'build/test_v6_reject.out')):
             try:
                 os.unlink(p)
             except FileNotFoundError:
@@ -330,7 +383,7 @@ def test_loader_rejects_non_v6_version():
 
 
 def test_ccr_v6_roundtrip_elf():
-    """v6 落盘 → corec build 全链路（corec save v6 → corearch load v6 → ELF）：
+    """v7 落盘 → corec build 全链路（corec save v7 → corearch load v7 → ELF）：
     程序计算 0+1+2+3+4+5 = 15，ELF 运行时以 main 返回值为退出码。"""
     src = ("fn main() -> int {\n"
            "    s : ., mut = 0;\n"
@@ -351,7 +404,7 @@ def test_ccr_v6_roundtrip_elf():
         with tempfile.NamedTemporaryFile('w', suffix='.cr', delete=False) as f:
             f.write(src)
             path = f.name
-        # 1) corec build (its own corearch invocation) round-trips v6
+        # 1) corec build (its own corearch invocation) round-trips v7
         r = subprocess.run([COREC, 'build', path, '-o', out, '--static'],
                            capture_output=True, text=True, cwd=BASE, timeout=120)
         assert r.returncode == 0, f"corec build failed: {r.stderr}"
@@ -360,8 +413,9 @@ def test_ccr_v6_roundtrip_elf():
         assert run.returncode == 15, \
             f"expected exit 15 (sum 0..5), got {run.returncode} stdout={run.stdout!r}"
         assert os.path.exists(ccr_path), "corec build did not save .ccr alongside output"
-        v6 = V6File(read_ccr(ccr_path))  # the built artifact is v6
-        assert v6.ent() == [], "built .ccr should carry no ENT (regalloc move: corearch self-computes)"
+        v7 = V7File(read_ccr(ccr_path))  # the built artifact is v7
+        assert v7.ent() == [], "built .ccr should carry no ENT (regalloc move: corearch self-computes)"
+        assert sum(len(v) for v in v7.edg().values()) >= 2, "built .ccr EDG empty"
         # 2) direct corearch invocation on the same .ccr
         out2 = os.path.join(BASE, 'build/test_v6_rt2')
         try:
@@ -370,7 +424,7 @@ def test_ccr_v6_roundtrip_elf():
             pass
         r = subprocess.run([COREARCH, ccr_path, '--elf', '--static', '-o', out2],
                            capture_output=True, text=True, cwd=BASE, timeout=120)
-        assert r.returncode == 0, f"corearch load v6 failed: {r.stdout} {r.stderr}"
+        assert r.returncode == 0, f"corearch load v7 failed: {r.stdout} {r.stderr}"
         os.chmod(out2, 0o755)
         run2 = subprocess.run([out2], capture_output=True, text=True, timeout=10)
         assert run2.returncode == 15, \
@@ -408,14 +462,14 @@ def test_sym_reg_target_shape():
         pass
     try:
         corec_ccr(src, ccr_path)
-        v6 = V6File(read_ccr(ccr_path))
-        sym = v6.sym_parse()
+        v7 = V7File(read_ccr(ccr_path))
+        sym = v7.sym_parse()
         globs = sym['globals']
         funcs = sym['funcs']
-        strs = v6.str_table()
-        nod_cnt = len(v6.nod())
-        ents = v6.ent()
-        regs = v6.reg()
+        strs = v7.str_table()
+        nod_cnt = len(v7.nod())
+        ents = v7.ent()
+        regs = v7.reg()
         # func 记录
         assert len(funcs) >= 1
         f = funcs[0]
@@ -472,9 +526,11 @@ def test_sym_reg_target_shape():
         for en in ents:
             assert 0 <= en[0] < total_vars, \
                 f"ENT var_id {en[0]} outside var namespace 0..{total_vars - 1}"
-        for (op, dest, s1, s2, s3, tk) in v6.nod():
+        for (op, dest, s1, s2, s3, tk, fe, ec) in v7.nod():
             if dest >= 0:
                 assert dest < total_vars, f"NOD dest {dest} outside var namespace"
+            # 邻接域自洽（完整校验在 edg() 走查）
+            assert fe >= 0 and ec >= 0
     finally:
         try:
             os.unlink(ccr_path)
@@ -502,12 +558,12 @@ def test_sym_func_shapes():
         pass
     try:
         corec_ccr(src, ccr_path)
-        v6 = V6File(read_ccr(ccr_path))
-        sym = v6.sym_parse()
+        v7 = V7File(read_ccr(ccr_path))
+        sym = v7.sym_parse()
         funcs = sym['funcs']
-        strs = v6.str_table()
-        regs = v6.reg()
-        nod_cnt = len(v6.nod())
+        strs = v7.str_table()
+        regs = v7.reg()
+        nod_cnt = len(v7.nod())
         assert strs[funcs[0]['name']] == 'add'
         assert strs[funcs[1]['name']] == 'main'
         # add: 参数声明 = var 声明区前 2 个（a, b, TI_INT=0）
@@ -562,9 +618,9 @@ def test_loader_rejects_root_span_beyond_nod_space():
     try:
         corec_ccr(src, ccr_path)
         data = bytearray(read_ccr(ccr_path))
-        v6 = V6File(bytes(data))
-        regs = v6.reg()
-        nod_cnt = len(v6.nod())
+        v7 = V7File(bytes(data))
+        regs = v7.reg()
+        nod_cnt = len(v7.nod())
         # 末函数 root region（最后一个 kind==0 行）：span 末 = NOD 空间末
         # （根行 span 连续铺满 NOD 空间的不变量），exit_nod += 1 → 越界
         roots = [i for i, r in enumerate(regs) if r[0] == 0]
@@ -572,7 +628,7 @@ def test_loader_rejects_root_span_beyond_nod_space():
         rid = roots[-1]
         assert regs[rid][3] == nod_cnt, \
             f"last root exit {regs[rid][3]} != nod_count {nod_cnt}: {regs[rid]}"
-        reg_off, _ = v6.segs[5]
+        reg_off, _ = v7.segs[5]
         patch_at = reg_off + 4 + rid * REG_REC + 12  # exit_nod field (+12 in row)
         struct.pack_into('<i', data, patch_at, regs[rid][3] + 1)
         bad_path = ccr_path + '.oob'
@@ -639,7 +695,7 @@ if __name__ == '__main__':
              test_ent_optmeta_absent_after_move,
              test_sym_reg_target_shape,
              test_sym_func_shapes,
-             test_loader_rejects_non_v6_version,
+             test_loader_rejects_non_v7_version,
              test_loader_rejects_root_span_beyond_nod_space,
              test_save_rejects_var_block_misalignment,
              test_ccr_v6_roundtrip_elf]

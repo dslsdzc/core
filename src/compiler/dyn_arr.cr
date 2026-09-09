@@ -517,7 +517,19 @@ fn grow_df_arrays(needed: int) {
     if needed < g_df_cap { return; }
     nc : ., mut = g_df_cap * 2; if nc < 128 { nc = 128; } if nc < needed { nc = needed + 128; }
     sz := nc * 8;
-    n1 := alloc(sz); _dyncpy(g_df_var_producer, g_df_cap * 8, n1); g_df_var_producer = n1;
+    n1 := alloc(sz); _dyncpy(g_df_var_producer, g_df_cap * 8, n1);
+    // 幽灵边修复（v7 Task 0 注 A 裁决 = 播种修复，dataflow.cr/cir_cache.cr 同款）：
+    // producer 槽必须对全部 var 下标恒 -1——alloc 新段（零页/复用页）不可依赖，
+    // 未定值 var（全局/参数/0 字面量槽）若留 0 =「节点 0」→ df_use_var 产幽灵边
+    // 0→X + 自环 (0,0)。增长区显式播种 -1；既有区由 _dyncpy 保留（定值由
+    // df_create_node 覆写、缓存放回路径同走本函数 → 未产出 var 保持 -1）。
+    zi : ., mut = g_df_cap;
+    loop {
+        if zi >= nc { break; }
+        w64(n1, zi * 8, -1);
+        zi = zi + 1;
+    }
+    g_df_var_producer = n1;
     n2 := alloc(sz); _dyncpy(g_df_func_node_start, g_df_cap * 8, n2); g_df_func_node_start = n2;
     n3 := alloc(sz); _dyncpy(g_df_func_node_count, g_df_cap * 8, n3); g_df_func_node_count = n3;
     g_df_cap = nc; }

@@ -37,7 +37,7 @@ COREC = BUILD / "corec"
 SCRATCH = BUILD / "mw_task1_scratch"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_ccr_v6 import V6File  # noqa: E402  (v6 段表解析器：格式唯一真源)
+from test_ccr_v6 import V7File as V6File  # noqa: E402  (v6 段表解析器：格式唯一真源)
 
 # IR opcodes (ast.cr)
 IR_BINARY = 2
@@ -95,7 +95,7 @@ def detect_tags(func, var_types, max_passes=None, store_edges=True):
     npass = 0
     while True:
         changed = False
-        for (op, d, s1, s2, s3, tk) in func["nodes"]:
+        for (op, d, s1, s2, s3, tk, fe, ec) in func["nodes"]:
             if op == IR_BINARY:
                 if in_dom(d) and s3 in (OP_ADD, OP_SUB) and d not in tagged:
                     tagged.add(d)

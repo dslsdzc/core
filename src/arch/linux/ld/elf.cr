@@ -1447,9 +1447,17 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
     //   disp = 目标位置 - (rel 字段位置 + 4)（rel32——与旧路径 label 回填同公式）。
     // kind 1/2（函数起点 / 外部符号）= Task 4/5 消费——回填未实现：出现即大声
     // 拒（防御——现事件集（jump/branch 前）无 func/extern rel 步可达登记）。
-    hri : ., mut = 0;
+    // 守卫重构（v7 Task 1 注记——编译器巨型函数尾既有代码生成缺陷规避）：
+    // 计数先读入局部 + 外层 if 包裹，等价于原 `hri := 0; loop { if hri >=
+    // g_hit_rel_count ...`（循环体不改计数；reset 恒执行）——原形状在巨型
+    // 函数尾控制流下经自举编译器生成的边界读 = 未初始化栈槽（dir 目录构建
+    // corearch 的 stage1 场景 segv；concat 构建因陈旧栈值恰为 0 而潜伏），
+    // 重构后边界读落已写局部。语义零变化；缺陷 = 编译器层潜在面（待核注记）。
+    hri2 : ., mut = g_hit_rel_count;
+    if hri2 > 0 {
+        hri : ., mut = 0;
     loop {
-        if hri >= g_hit_rel_count { break; }
+        if hri >= hri2 { break; }
         rk := r64(g_hit_rel, hri * 24);
         rp := r64(g_hit_rel, hri * 24 + 8);
         rt := r64(g_hit_rel, hri * 24 + 16);
@@ -1467,6 +1475,7 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
             println(" (func/extern backfill = Task 4/5)");
         }
         hri = hri + 1; }
+    }
     g_hit_rel_count = 0;
 
     // ── _init_globals ──

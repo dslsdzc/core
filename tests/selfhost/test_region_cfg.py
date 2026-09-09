@@ -227,16 +227,17 @@ def test_nested_loop_run():
                        capture_output=True, text=True, cwd=BASE, timeout=30)
     assert r.returncode == 9, f"nested loop expected 9 (3x3), got exit={r.returncode} stdout={r.stdout!r} stderr={r.stderr!r}"
 
-# --- v6 serialization (.ccr segment-table layout + REG segment) ---
+# --- v7 serialization (.ccr segment-table layout + REG segment; Task 1 机械更新) ---
 
 def ccr_walk(path: str):
-    """Walk the v6 .ccr binary layout (mirrors load_ccr reading order) and return
+    """Walk the v7 .ccr binary layout (mirrors load_ccr reading order) and return
     (version, sg_count, file_size, end_pos). Raises if the layout is invalid.
 
-    v6 (serialization v3): Header 16B + 段表 5×12B {tag, offset, size}（规范序
-    tag 1..5）+ 段体 STR/SYM/NOD/ENT/REG。REG（tag 5）= 24B×sg_count（v6 坐标化
-    字段序 kind/parent/enter/exit/first_ent/last_ent，记录宽不变）。
-    见 ccr_io.cr 头注释（v6 布局权威）。"""
+    v7 (Task 1 机械更新): Header 16B + 段表 6×12B {tag, offset, size}（规范序
+    tag 1..6）+ 段体 STR/SYM/NOD/ENT/REG/EDG。NOD（tag 3）= 36B×nod_count（28B
+    语义字段 + first_edge/edge_count 邻接）、EDG（tag 6）= 8B×edg_count 必落。
+    REG（tag 5）= 24B×sg_count（坐标化字段序 kind/parent/enter/exit/
+    first_ent/last_ent，记录宽不变）。见 ccr_io.cr 头注释（v7 布局权威）。"""
     with open(path, 'rb') as fh:
         d = fh.read()
     pos = 0
@@ -251,10 +252,10 @@ def ccr_walk(path: str):
     seg_count = u32()
     reserved = u32()
     assert reserved == 0
-    # Segment table: canonical order (STR SYM NOD ENT REG), contiguous bodies
+    # Segment table: canonical order (STR SYM NOD ENT REG EDG), contiguous bodies
     segs = {}
     cur = 16 + seg_count * 12  # first body follows the whole table
-    for tag in (1, 2, 3, 4, 5):
+    for tag in (1, 2, 3, 4, 5, 6):
         t = u32()
         off = u32()
         size = u32()
@@ -275,10 +276,14 @@ def ccr_walk(path: str):
         sl = struct.unpack_from('<I', b, p)[0]
         p += 4 + sl
     assert p == len(b), "STR walk mismatch"
-    # NOD (tag 3): instrs, 28B each
+    # NOD (tag 3): nodes, 36B each (v7 spec §3.3: 28B 语义字段 + 邻接索引)
     b = body(3)
     (instr_cnt,) = struct.unpack_from('<I', b, 0)
-    assert 4 + instr_cnt * 28 == len(b), "NOD walk mismatch"
+    assert 4 + instr_cnt * 36 == len(b), "NOD walk mismatch"
+    # EDG (tag 6): edges, 8B each (v7 必落)
+    b = body(6)
+    (edg_cnt,) = struct.unpack_from('<I', b, 0)
+    assert 4 + edg_cnt * 8 == len(b), "EDG walk mismatch"
     # ENT (tag 4): entries, 28B each
     b = body(4)
     (ent_cnt,) = struct.unpack_from('<I', b, 0)
@@ -290,7 +295,7 @@ def ccr_walk(path: str):
     return ver, sg_count, len(d), cur
 
 def test_ccr_v6_reg_section():
-    """.ccr 序列化 v3（version==6）：段表架构，REG 段（tag 5）含 func+for 两个 region"""
+    """.ccr 序列化 v7（Task 1 机械更新，version==7）：段表架构，REG 段（tag 5）含 func+for 两个 region"""
     src = "fn main() -> int {\n    s : ., mut = 0;\n    for i in 0..3 { s = s + i; }\n    return s;\n}\n"
     with tempfile.NamedTemporaryFile('w', suffix='.cr', delete=False) as f:
         f.write(src)
@@ -305,7 +310,7 @@ def test_ccr_v6_reg_section():
     os.unlink(path)
     assert r.returncode == 0, f"ccr failed: {r.stderr}"
     ver, sg_count, fsize, end = ccr_walk(ccr_path)
-    assert ver == 6, f"expected .ccr version 6, got {ver}"
+    assert ver == 7, f"expected .ccr version 7, got {ver}"
     assert sg_count is not None and sg_count >= 2, \
         f"expected REG segment with >=2 regions (func+for), got {sg_count}"
     assert end == fsize, f"format walk ended at {end} of {fsize} bytes"
