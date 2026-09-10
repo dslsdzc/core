@@ -340,6 +340,14 @@ nice -n 19 ./build/corec check src/compiler/ccr_io.cr --type-shadow >> /tmp/p1_c
 - [ ] **Step 2: 两态零变化复验**（Task 2 Step 5 的命令，含 `check` 与 `build` 两条路径）
 - [ ] **Step 3: 自举链**（`corec2`→`corec3` `cmp` IDENTICAL + N06=0 + 冒烟 rc=42）
 - [ ] **Step 4: 文档**：spec §9 P1 行标 ✅ + 落点；TODO 登记（影子模式开关的默认值与产物影响、差异清单的后续裁决归属）；台账
+- [ ] **Step 4c: Task 3 评审遗留（4 Minor + 5 登记，随本步一并办）**：
+  - **M1 文档精度**：`type-shadow-findings.md` TL;DR「71 个文件」→「67 有效（71 候选 − 4 排除）」；§3.1「不变式在全部 71 行成立」→「67 条摘要行」。**注意：工作副本里已有 2 行未提交修正（`jj diff` 可见）——先核其正确性，与其余修正一并提交**。
+  - **M2**：report §1.1 / findings §1.1 / 源码注释的「前 6 字段前缀不变」→「**前 5 组 key=value**」（评审从 `28fed09` 的 `sh_report` 逐字比对）。
+  - **M3（注释与关态开销）**：`ty_shadow.cr` 注释称「影子关时 wrapper 不调本函数」**不成立**——8 站点无条件调 `sh_site_begin`（全仓仅 `type_equal` 内一处 `g_shadow_on` 判断）→ 关态每次多一次调用 + 一次性 64B alloc + RMW 自增。**产物仍逐字节相同（已实测）**，但注释理由错误且关态开销未测。→ 二选一并记录：① 改注释如实描述；② 给 `sh_site_begin` 加 `if g_shadow_on == 0 { return; }` 早退（推荐 ②，兼消除关态开销）。
+  - **M4**：dump 的 kind 名 `unknown`→`unknown_engine`（brief Step 0 契约变更，仓内无消费者）→ 在 findings 里注明读 dump 者须知。
+  - **登记 TODO（5 条）**：① **F1 = P2 硬前置**（同名 named 多行未规范化 → 换判定即从真变未判定；P2 第一项 + 守门用例）；② **F2 = P2 裁决**（数组长度 N 旧比引擎不比：现状 `error[TF01]`，替换后静默通过）；③ **F3**（调用位点实参类型不匹配无诊断，`unify_types` 返回值被丢弃 `checker.cr:1053`）；④ **F4**（泛型函数后续形参声明类型在推断中不生效）；⑤ 仓库卫生（`tests/suite/test_control_flow.cr` / `test_generics.cr` **0 字节**；`src/compiler/elf.cr` 陈旧 parse 不过；`linker.cr` 空文件）
+  - **登记 harness 缺口（新，评审发现）**：`.claude` 的 `block-git.py` 只拒「以 `git` 开头」的命令 → 复合/管道命令可绕过（铁律 #2「机械拦截」有洞）。**建议单开修复**（按 shell 分隔符分词后做词边界匹配）；本轮只登记不改 harness。
+
 - [ ] **Step 4b: 挂账清零**（按 Task 1/Task 2 评审实际状态更新）：
   - ~~① `build_selfhost_native.py:309` 注释更正~~ ——**已被 Task 2 提交完成，核销即可**（Task 2 评审 M2 提示勿重复劳动）
   - ② Task 1 评审「>1024 条目第二次重建无实测」——补一条守门用例或如实登记
