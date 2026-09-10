@@ -14,6 +14,7 @@ R1 Task 4 判据（语言面收窄 §1.3 / R1 ②）：文件级全局的运行�
 身份（TODO #5）——本脚本在开跑前清一次缓存，保证判据跑在当次构建的编译器上。
 """
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -140,8 +141,9 @@ def run_interp(source: str):
 
 def run_native(name: str, source: str):
     """ELF 路径：corec build --static + 运行产物。返回 (rc, combined_output)。"""
-    src = BUILD / f"global_init_{name}.cr"
-    binary = BUILD / f"global_init_{name}"
+    tag = f"{name}_{os.getpid()}"   # pid 后缀：并发跑同一测试不互踩（终审 Minor）
+    src = BUILD / f"global_init_{tag}.cr"
+    binary = BUILD / f"global_init_{tag}"
     ccr = Path(str(binary) + ".ccr")
     src.write_text(source.strip() + "\n", encoding="utf-8")
     try:

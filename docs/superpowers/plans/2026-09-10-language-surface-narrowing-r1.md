@@ -514,7 +514,7 @@ fn inject_global_inits() {
                     v = force_if_thunk(v);
                 } else {
                     // 无初值聚合：整流分配（零初始化由 alloc 语义保证——rt.s:94-98 rep stosb；
-                    // 解释器 IR_ALLOC_ARRAY 显式清零 interp.cr:182-183）。
+                    // 解释器 IR_ALLOC_ARRAY 显式清零 interp.cr:197-207）。
                     // 仅 `[T; N]`（N ≥ 1）注入；`[T]`（切片无长度，ast_int_val = 0）**不注入**
                     // ——保持 BSS 零 = 空切片/哑指针，空切片解引用属独立 null 陷阱类，不在本批。
                     tn := ast_b(lnode);
