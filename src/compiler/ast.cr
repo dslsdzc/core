@@ -226,6 +226,11 @@ EXPR_ASSIGN : int = 15;  // a=target, b=value
 EXPR_STRUCT : int = 16;  // a=type name idx, b=first field, c=field count
 EXPR_FN : int = 17;      // a=name idx, b=first param, c=param count, d=body, data=return_type
 EXPR_PARAM : int = 18;   // a=name idx, int_val=type
+// 表示层概念（2026-09-10 语言面收窄裁决 §1）：`[T; N]` 的类型构造器身份已退役——
+// 语义归处 = product（N 元聚合）/ 序列接口 + 长度 where（N 长序列）/ F11 图（长度事实，
+// 可表达依赖长度）。本语法保留为「内联容量存储」表示提示（映射参数层，与 hw-map 同层；
+// 随实例选择生效或退化，非经典范式映射可忽略）。见
+// docs/superpowers/specs/2026-09-10-language-surface-narrowing-design.md §1
 EXPR_ARRAY : int = 19;   // a=first elem, b=elem count
 EXPR_BREAK : int = 20;
 EXPR_CONTINUE : int = 21;
@@ -313,11 +318,13 @@ TI_DEX_S : int = 8;
 // Type table entry kinds
 TYP_BASE : int = 0;   // data = TY_* constant
 TYP_NAMED : int = 1;  // data = name string index
+// 表示层概念（2026-09-10 语言面收窄裁决 §1）：`[T; N]` 退役为「内联容量存储」表示提示（语义归处 = product / 序列+长度约束 / F11）——完整注记见本文件 EXPR_ARRAY 常量处，spec 见 docs/superpowers/specs/2026-09-10-language-surface-narrowing-design.md §1
 TYP_ARRAY : int = 2;  // data = element type idx, extra = size
 TYP_REF : int = 3;    // data = inner type idx, extra = mut flag
 TYP_PTR : int = 4;    // data=pointee_type, extra=address_space (0=tracked, 1=external)
 TYP_GENERIC_PARAM : int = 7;  // data = name string index (unresolved generic param)
 TYP_GENERIC_APPLY : int = 8;  // data = base type idx, extra = arg list start in g_gen_apply_data
+// 表示层概念（2026-09-10 语言面收窄裁决 §1）：`[T; N]` 退役为「内联容量存储」表示提示（语义归处 = product / 序列+长度约束 / F11）——完整注记见本文件 EXPR_ARRAY 常量处，spec 见 docs/superpowers/specs/2026-09-10-language-surface-narrowing-design.md §1
 TYP_SLICE : int = 9;   // data = element type idx (dynamic-length view into array)
 TYP_TUPLE : int = 10;  // data = element_count, extra = elem types start in g_gen_apply_data
 TYP_DYN : int = 11;  // data = type set bitmap (0 = single known type)

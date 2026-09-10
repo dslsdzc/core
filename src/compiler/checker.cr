@@ -390,6 +390,11 @@ fn res_type_node(node: int) -> int {
         return alloc_type(TYP_NAMED, name_idx, 0);
     }
     if ast_kind(node) == EXPR_ARRAY {
+        // 表示层概念（2026-09-10 语言面收窄裁决 §1）：`[T; N]` 的类型构造器身份已退役——
+        // 语义归处 = product（N 元聚合）/ 序列接口 + 长度 where（N 长序列）/ F11 图（长度事实，
+        // 可表达依赖长度）。本语法保留为「内联容量存储」表示提示（映射参数层，与 hw-map 同层；
+        // 随实例选择生效或退化，非经典范式映射可忽略）。见
+        // docs/superpowers/specs/2026-09-10-language-surface-narrowing-design.md §1
         // Array type [T; N] or slice type [T] (size 0)
         elem := res_type_node(ast_a(node));
         sz := ast_int_val(node);
@@ -1809,6 +1814,7 @@ fn infer_expr(node: int) -> int {
         // Range go: returns array of body type (size from data=range_node)
         range_node := ast_data(node);
         rng_count := ast_b(range_node) - ast_a(range_node);
+        // 表示层概念（2026-09-10 语言面收窄裁决 §1）：`[T; N]` 退役为「内联容量存储」表示提示（语义归处 = product / 序列+长度约束 / F11）——完整注记见本文件 res_type_node 的 EXPR_ARRAY 分支处，spec 见 docs/superpowers/specs/2026-09-10-language-surface-narrowing-design.md §1
         return alloc_type(TYP_ARRAY, body_ti, rng_count);
     }
 
@@ -2198,6 +2204,7 @@ fn infer_expr(node: int) -> int {
             }
             ei = ei + 1;
         }
+        // 表示层概念（2026-09-10 语言面收窄裁决 §1）：`[T; N]` 退役为「内联容量存储」表示提示（语义归处 = product / 序列+长度约束 / F11）——完整注记见本文件 res_type_node 的 EXPR_ARRAY 分支处，spec 见 docs/superpowers/specs/2026-09-10-language-surface-narrowing-design.md §1
         return alloc_type(TYP_ARRAY, elem_ti, ast_b(node));
     }
 

@@ -43,6 +43,11 @@ fn parse_type() -> int {
     line := tok_ln(t);
     col := tok_cl(t);
     res : ., mut = 0;
+    // 表示层概念（2026-09-10 语言面收窄裁决 §1）：`[T; N]` 的类型构造器身份已退役——
+    // 语义归处 = product（N 元聚合）/ 序列接口 + 长度 where（N 长序列）/ F11 图（长度事实，
+    // 可表达依赖长度）。本语法保留为「内联容量存储」表示提示（映射参数层，与 hw-map 同层；
+    // 随实例选择生效或退化，非经典范式映射可忽略）。见
+    // docs/superpowers/specs/2026-09-10-language-surface-narrowing-design.md §1
     if tok_k(t) == T_LBRACKET {
         advance_tok();
         inner := parse_type();
