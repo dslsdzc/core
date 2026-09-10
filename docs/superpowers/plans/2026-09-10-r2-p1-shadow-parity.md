@@ -179,6 +179,10 @@ nice -n 19 python3 build_selfhost_native.py && nice -n 19 ./build/corec selftest
 
 **Interfaces：**
 
+> **Task 1 评审落地注记（M1/M4，Task 2 一并办）**：
+> ① **native 分派改用 `get_type_data` 显式比对 `TY_*` 码**（而非 `TI_*` 行号）——现状「`init_types` 行号序恰与 `TY_*` 码序一致」属**隐式依赖**（当前真、不保证），显式化后不随表布局变化而坏。
+> ② `ty_shadow.cr` 头注**点明「`AK_*` 与 `TI_*` 下标不 1:1（bool/str 互换）」**这一反直觉事实，防后人照数值直传（Task 1 已留守门用例 `bridge.str_ak`/`bridge.bool_ak`）。
+
 ```
 // 影子判定：翻译两侧 → ty_equiv → 分类计数（old = 旧判定的结果）
 fn sh_compare(t1: int, t2: int, old_ok: int) -> void
