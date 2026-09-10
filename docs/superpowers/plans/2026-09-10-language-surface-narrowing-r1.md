@@ -504,14 +504,18 @@ fn inject_global_inits() {
                 } else {
                     // 无初值聚合：整流分配（零初始化由 alloc 语义保证——rt.s:94-98 rep stosb；
                     // 解释器 IR_ALLOC_ARRAY 显式清零 interp.cr:182-183）。
+                    // 仅 `[T; N]`（N ≥ 1）注入；`[T]`（切片无长度，ast_int_val = 0）**不注入**
+                    // ——保持 BSS 零 = 空切片/哑指针，空切片解引用属独立 null 陷阱类，不在本批。
                     tn := ast_b(lnode);
                     cnt : ., mut = 0;
                     if tn >= 0 { cnt = ast_int_val(tn); }
-                    v = new_ir_var("ginit", TI_UNIT);
-                    emit(IR_ALLOC_ARRAY, v, cnt, 0, 0, 0);
-                    irv_set_type(v, alloc_type(TYP_ARRAY, TI_INT, cnt));
+                    if cnt > 0 {
+                        v = new_ir_var("ginit", TI_UNIT);
+                        emit(IR_ALLOC_ARRAY, v, cnt, 0, 0, 0);
+                        irv_set_type(v, alloc_type(TYP_ARRAY, TI_INT, cnt));
+                    }
                 }
-                emit(IR_STORE, -1, gv, v, 0, 0);
+                if v >= 0 { emit(IR_STORE, -1, gv, v, 0, 0); }
             }
         }
         i = i + 1;
