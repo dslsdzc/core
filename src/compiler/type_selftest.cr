@@ -208,8 +208,42 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("bridge.str_ak", tt_a(sh_term_of_ti(TI_STR)), AK_STRING);
     total = total + 1; fails = fails + ts_check("bridge.bool_ak", tt_a(sh_term_of_ti(TI_BOOL)), AK_BOOL);
     total = total + 1; fails = fails + ts_check("bridge.dyn_ak", tt_a(sh_term_of_ti(TI_DYN)), AK_DYN);
+    // M3（Task 1 评审）：native 分派 = 读表本体（kind == TYP_BASE 且 data == TY_*）——**全表覆盖**
+    // （M1 后它成为主路径，此前只有 row 8 可达且无用例）。行 0..7 逐行对照，不抽样：
+    // 任一行错位（含 bool↔str 互换回归）即红。
+    // ⚠️ **row 7 陷阱**：TI_DYN 行 kind = TYP_DYN 而 **data = 0（== TY_INT！）**——若实现先比
+    // data 再判 kind，dyn 会静默译成 AK_INT。故 ① 断言 sh_native_ak(TI_DYN) == -1（dyn 必走
+    // kind 分支，绝不进 native 路径），② 项本身仍 = AK_DYN。两断言合起来把「先 data 后 kind」
+    // 的写法钉死在红。
+    acc_nat : ., mut = 1;
+    ri : ., mut = 0;
+    loop {
+        if ri >= 8 { break; }
+        want_ak : ., mut = -1;
+        if ri == TI_INT { want_ak = AK_INT; }
+        else if ri == TI_DEX { want_ak = AK_DEX; }
+        else if ri == TI_BOOL { want_ak = AK_BOOL; }
+        else if ri == TI_STR { want_ak = AK_STRING; }
+        else if ri == TI_UNIT { want_ak = AK_UNIT; }
+        else if ri == TI_NEVER { want_ak = AK_NEVER; }
+        else if ri == TI_CHAR { want_ak = AK_CHAR; }
+        got_ak := sh_native_ak(ri);
+        if ri == TI_DYN {
+            if got_ak != -1 { acc_nat = 0; }     // dyn：kind 分支，native 必 -1
+        } else if got_ak != want_ak { acc_nat = 0; }
+        ri = ri + 1;
+    }
+    total = total + 1; fails = fails + ts_check("bridge.native_row_table", acc_nat, 1);
+    total = total + 1; fails = fails + ts_check("bridge.native_dyn_kind_branch",
+        (sh_native_ak(TI_DYN) == -1 && tt_a(sh_term_of_ti(TI_DYN)) == AK_DYN), 1);
+    // TY_DEX_S 占位行（row 8）：M1 后走 native 路径（旧实现走通用路径），两侧同 = AK_DEX
+    total = total + 1; fails = fails + ts_check("bridge.native_dex_s",
+        (sh_native_ak(TI_DEX_S) == AK_DEX && tt_a(sh_term_of_ti(TI_DEX_S)) == AK_DEX), 1);
     // 参数链（内层项）+ 两份同类分支不得互串（PTR/REF 是两条独立分支）
     t_ptr := sh_term_of_ti(alloc_type(TYP_PTR, TI_INT, 0));
+    // M2（Task 1 评审）：class 断言与参数链**并列**——原用例只断参数链，整支误译成
+    // SEQUENCE/REF 也会绿（对照 ref_inner 已断 class）
+    total = total + 1; fails = fails + ts_check("bridge.ptr_ak", tt_a(t_ptr), AK_PTR);
     total = total + 1; fails = fails + ts_check("bridge.ptr_inner",
         tt_c(t_ptr), tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil()));
     t_ref := sh_term_of_ti(alloc_type(TYP_REF, TI_STR, 0));
