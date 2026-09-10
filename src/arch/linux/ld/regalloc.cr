@@ -9,7 +9,7 @@
 
 //
 // 2026-09-10 内核抽取 Task 1：存在区间/条目数据面 + 共存 + 规则①② 判定 +
-// 判定诊断已随判定搬入 src/arch/linux/ld/ent_kernel.cr（范式无关内核）——
+// 判定诊断已随判定搬入 src/lattice/ent_kernel.cr（范式无关内核，格层）——
 // 本文件余下 = x86 实例机器侧：CAG alloc_registers（调用内核
 // compute_live_ranges）+ g_opt_meta 写入 + 注入钩子（cir debug 测试通道）。
 

@@ -987,7 +987,7 @@ def test_v7_object_surface_recipe_readable():
         # Task 4 配方查询补体结构锚（悬空注落实——见 docstring Task 4 节）：
         # 内核定义 fn nod_inputs（薄封装——查询函数落实）+ 实例通道收敛经其
         # 出边（函数化收敛）。上列运行时断言经收敛后通道 = 封装体行为证明。
-        kern_src = os.path.join(BASE, 'src/arch/linux/ld/ent_kernel.cr')
+        kern_src = os.path.join(BASE, 'src/lattice/ent_kernel.cr')
         ktext = open(kern_src, encoding='utf-8').read()
         assert 'fn nod_inputs(n: int) {' in ktext, \
             "kernel nod_inputs recipe-query wrapper missing (dangling note reverted)"

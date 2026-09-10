@@ -4,7 +4,7 @@ import re, collections
 from pathlib import Path
 
 ROOTS = [Path("src/compiler"), Path("src/stdlib"),
-         Path("src/runtime"), Path("src/arch/linux/ld")]
+         Path("src/runtime"), Path("src/arch/linux/ld"), Path("src/lattice")]
 RE_FN = re.compile(r'(?<![A-Za-z0-9_])fn[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)')
 RE_STRUCT = re.compile(r'(?<![A-Za-z0-9_])struct[ \t]+([A-Za-z_][a-zA-Z0-9_]*)')
 RE_ENUM = re.compile(r'(?<![A-Za-z0-9_])enum[ \t]+([A-Za-z_][a-zA-Z0-9_]*)')

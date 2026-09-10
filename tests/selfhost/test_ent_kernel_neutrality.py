@@ -2,7 +2,7 @@
 """ent_kernel.cr 中立性静态 guard（内核完备计划 2026-09-10 全量中立化——用户
 原则：内核零经典概念——寄存器/栈/调度/内存布局/指令任一概念不得出现）。
 
-文本扫描 src/arch/linux/ld/ent_kernel.cr：剥注释（// 与 /* */）与字符串字面量
+文本扫描 src/lattice/ent_kernel.cr：剥注释（// 与 /* */）与字符串字面量
 后按 identifier token 查禁。禁止 token 分组注记（守卫入回归面——A 组 Task 2
 绿、B 组 Task 3 绿）：
 
@@ -37,7 +37,7 @@ import sys
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parents[2]
-KERNEL = BASE / "src" / "arch" / "linux" / "ld" / "ent_kernel.cr"
+KERNEL = BASE / "src" / "lattice" / "ent_kernel.cr"
 
 # --- 排除集（分组） ---
 

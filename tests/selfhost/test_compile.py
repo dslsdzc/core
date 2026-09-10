@@ -26,7 +26,7 @@ def concat_sources():
         'src/compiler/dataflow.cr',
         'src/compiler/backend/x86_64.cr', 'src/compiler/backend/x86_64/instr.cr',
         'src/compiler/module.cr', 'src/compiler/ccr_io.cr',
-        'src/arch/linux/ld/ent_kernel.cr',
+        'src/lattice/ent_kernel.cr',
         'src/compiler/dump.cr',
         'src/compiler/cir_cache.cr',
         'src/compiler/monomorph.cr',
