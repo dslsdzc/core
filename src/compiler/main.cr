@@ -185,6 +185,13 @@ fn default_out_path(src_path: string, ext: string) -> string {
     return out;
 }
 
+// R2 P1 影子对拍收尾：摘要行 + （给了 --type-shadow-dump 时）差异条目转储。
+// 影子关 = 零输出（sh_report / sh_dump_write 各自先查 g_shadow_on）。
+fn sh_finish() {
+    sh_report();
+    sh_dump_write(cli_get("type-shadow-dump"));
+}
+
 fn corec_main() -> int {
     cli_init("corec", "Core compiler frontend");
     cli_cmd("build", "Compile .cr or directory to ELF binary");
@@ -198,8 +205,13 @@ fn corec_main() -> int {
     cli_flag_bool("static", "", "Static linking (embed runtime)");
     cli_flag("opt-level", "O", "Optimization level (0,1,2,3; default=1) — O1 CSE(corec 进程内)；O2 寄存器分配+判定在 corearch（corec build 透传 --opt-level，.ccr 不承载分配结果）");
     cli_flag_bool("inject-var-shift", "", "Hidden debug: shift func0 var decl block left by 1, then save (GC-4 test hook)");
+    cli_flag_bool("type-shadow", "", "R2 P1: shadow type decisions with the engine (observation only)");
+    cli_flag("type-shadow-dump", "", "R2 P1: dump shadow diff entries to file");
 
     if cli_parse() != 0 { return 1; }
+    // R2 P1 影子对拍开关。**只解析不判定**：影子关（默认）时 g_shadow_on=0，type_equal 包装
+    // 直接返回（连影子代码都不进）→ 产物与开关前逐字节相同。check/build/cir/ccr/run 共用本处。
+    g_shadow_on = cli_has("type-shadow");
     // Parse -O flag (default O1)
     g_opt_level = 1;
     ol : ., mut = cli_get("opt-level");
@@ -346,7 +358,9 @@ fn corec_main() -> int {
             }
         }
 
-        if run_frontend() != 0 { return 1; }
+        run_rc := run_frontend();
+        sh_finish();                     // 影子摘要/转储（类型判定全部在 run_frontend 内完成）
+        if run_rc != 0 { return 1; }
         ir_gen_all();
         return ir_interpret();
     }
@@ -383,7 +397,9 @@ fn corec_main() -> int {
         g_source = rt_src + "\n" + g_source;
     }
 
-    if run_frontend() != 0 { return 1; }
+    fe_rc := run_frontend();
+    sh_finish();   // 影子摘要/转储：类型判定在 run_frontend 内已完成；诊断存在时也要出摘要
+    if fe_rc != 0 { return 1; }
 
     // === check: type-check only ===
     if cli_eq(cmd, "check") {

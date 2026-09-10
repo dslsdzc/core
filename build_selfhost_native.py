@@ -306,8 +306,10 @@ def main():
         # 本批为纯增量（checker/ir_gen/后端零改动 = 产物零变化）。
         'src/compiler/type_terms.cr',
         'src/compiler/type_engine.cr',
-        # R2 P1 影子对拍桥接层（checker ti → 引擎类型项 + per-ti 缓存）：仅 corec 单元
-        # （corearch/corelsp 清单不含引擎与 checker——见 type_terms.cr 头注的共享面教训）。
+        # R2 P1 影子对拍桥接层（checker ti → 引擎类型项 + per-ti 缓存 + Task 2 判定挂点）。
+        # **corelsp 清单也必须含本层**（Task 2 起 checker.cr 的 type_equal 包装引用
+        # sh_compare/sh_site_begin——挂在 checker 上的挂点无法只要 checker 不要影子层；
+        # corearch 无 checker 故仍不含）。相对顺序与 corec 一致（checker → 引擎 → 影子）。
         'src/compiler/ty_shadow.cr',
         'src/compiler/type_selftest.cr',
         'src/compiler/opt.cr',
@@ -384,6 +386,11 @@ def main():
         'src/compiler/lexer.cr',
         'src/compiler/parser.cr',
         'src/compiler/checker.cr',
+        # R2 P1：checker 的 type_equal 包装引用影子层（sh_compare/sh_site_begin）→
+        # corelsp 也必须链接 引擎 + 影子层（相对顺序与 corec 一致；corearch 无 checker 仍不含）。
+        'src/compiler/type_terms.cr',
+        'src/compiler/type_engine.cr',
+        'src/compiler/ty_shadow.cr',
         'src/compiler/diag.cr',
         'src/compiler/module.cr',
         'src/lsp/_import.cr',

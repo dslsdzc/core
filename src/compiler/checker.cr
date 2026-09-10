@@ -97,7 +97,10 @@ fn get_type_extra(ti: int) -> int {
     return 0;
 }
 
-fn type_equal(t1: int, t2: int) -> bool {
+// R2 P1：本函数是**唯一**结构判等实现（改名自 type_equal，改名 + 包装见下方包装函数）。
+// 内部 6 处递归调用点（:111/:126/:132/:135/:138/:150）指向本名，**不**经包装 → 影子只在
+// 8 个外部决策点取样一次/次调用（递归展开不重复计数）。
+fn type_equal_core(t1: int, t2: int) -> bool {
     if t1 == t2 { return true; }
     // Compare structure for non-base types
     if t1 >= 0 && t2 >= 0 && t1 < g_type_count && t2 < g_type_count {
@@ -108,7 +111,7 @@ fn type_equal(t1: int, t2: int) -> bool {
         }
 
         if k1 == TYP_ARRAY && k2 == TYP_ARRAY {
-            if type_equal(get_type_data(t1), get_type_data(t2)) {
+            if type_equal_core(get_type_data(t1), get_type_data(t2)) {
                 if get_type_extra(t1) == get_type_extra(t2) {
                     return true;
                 }
@@ -123,19 +126,19 @@ fn type_equal(t1: int, t2: int) -> bool {
             i : ., mut = 0;
             loop {
                 if i >= cnt { break; }
-                if !type_equal(r64(g_gen_apply_data, (start1 + i) * 8), r64(g_gen_apply_data, (start2 + i) * 8)) { return false; }
+                if !type_equal_core(r64(g_gen_apply_data, (start1 + i) * 8), r64(g_gen_apply_data, (start2 + i) * 8)) { return false; }
                 i = i + 1;
             }
             return true;
         }
         if k1 == TYP_REF && k2 == TYP_REF {
-            return get_type_extra(t1) == get_type_extra(t2) && type_equal(get_type_data(t1), get_type_data(t2));
+            return get_type_extra(t1) == get_type_extra(t2) && type_equal_core(get_type_data(t1), get_type_data(t2));
         }
         if k1 == TYP_PTR && k2 == TYP_PTR {
-            return type_equal(get_type_data(t1), get_type_data(t2));
+            return type_equal_core(get_type_data(t1), get_type_data(t2));
         }
         if k1 == TYP_SLICE && k2 == TYP_SLICE {
-            return type_equal(get_type_data(t1), get_type_data(t2));
+            return type_equal_core(get_type_data(t1), get_type_data(t2));
         }
         if k1 == TYP_GENERIC_APPLY && k2 == TYP_GENERIC_APPLY {
             if get_type_data(t1) != get_type_data(t2) { return false; }
@@ -147,7 +150,7 @@ fn type_equal(t1: int, t2: int) -> bool {
             ai : ., mut = 0;
             loop {
                 if ai >= count1 { break; }
-                if !type_equal(r64(g_gen_apply_data, (start1 + 1 + ai) * 8), r64(g_gen_apply_data, (start2 + 1 + ai) * 8)) { return false; }
+                if !type_equal_core(r64(g_gen_apply_data, (start1 + 1 + ai) * 8), r64(g_gen_apply_data, (start2 + 1 + ai) * 8)) { return false; }
                 ai = ai + 1;
             }
             return true;
@@ -157,6 +160,19 @@ fn type_equal(t1: int, t2: int) -> bool {
         }
     }
     return false;
+}
+
+// R2 P1 影子对拍包装：旧判定照常返回（**影子不改判定**）；影子判定只观察（--type-shadow 开时）。
+// 未开 = 单次全局读 + 直接返回 → 与包装前等价（P0/R1 的两态产物逐字节判据据此成立）。
+// 本语言无三元运算符 → ok 用显式分支（`r ? 1 : 0` 不合法）。
+fn type_equal(t1: int, t2: int) -> bool {
+    r := type_equal_core(t1, t2);
+    if g_shadow_on != 0 {
+        ok : ., mut = 0;
+        if r { ok = 1; }
+        sh_compare(t1, t2, ok);
+    }
+    return r;
 }
 
 fn scan_for_yield(node: int) -> int {
@@ -708,6 +724,7 @@ fn collect_decls() {
                     else if first_rt == TY_STRING { first_rt_ti = TI_STR; }
                     else if first_rt == TY_UNIT { first_rt_ti = TI_UNIT; }
 
+                    sh_site_begin(1);   // 站点 1 = hotpatch 返回类型一致（ty_shadow.cr 头注有全表）
                     if !type_equal(rt_ti, first_rt_ti) {
                         check_error(EC_TF_RETURN, "Hotpatch return type mismatch for '" + fn_name_str + "'", ast_line(fn_node), ast_col(fn_node));
                     }
@@ -944,6 +961,7 @@ fn unify_types(pattern: int, concrete: int) -> bool {
         loop {
             if mi >= g_gen_map_count { break; }
             if r64(g_gen_map_names, mi * 8) == name_idx {
+                sh_site_begin(2);   // 站点 2 = unify_types 泛型实参已绑定路径
                 return type_equal(r64(g_gen_map_types, mi * 8), concrete);
             }
             mi = mi + 1;
@@ -956,6 +974,7 @@ fn unify_types(pattern: int, concrete: int) -> bool {
         return false;
     }
     if pk == TYP_GENERIC_APPLY && ck == TYP_GENERIC_APPLY {
+        sh_site_begin(3);   // 站点 3 = unify_types 泛型应用基型比较
         if !type_equal(get_type_data(pattern), get_type_data(concrete)) { return false; }
         ps := get_type_extra(pattern);
         cs := get_type_extra(concrete);
@@ -970,6 +989,7 @@ fn unify_types(pattern: int, concrete: int) -> bool {
         }
         return true;
     }
+    sh_site_begin(4);   // 站点 4 = unify_types 兜底结构等价
     return type_equal(pattern, concrete);
 }
 
@@ -1209,6 +1229,7 @@ fn check_func(fi: int) {
         else if return_type == TY_UNIT { ret_ti = TI_UNIT; }
         else if return_type == TY_CHAR { ret_ti = TI_CHAR; }
         else if return_type == TY_NEVER { ret_ti = TI_NEVER; }
+        sh_site_begin(5);   // 站点 5 = 函数体返回类型
         if !type_equal(body_ti, ret_ti) && body_ti != TI_NEVER {
             // Skip check if return type is generic param (can't verify at declaration)
             // Skip check for flow functions (yield instead of return)
@@ -1402,6 +1423,7 @@ fn infer_expr(node: int) -> int {
             // Assignment: left = right
             lt := infer_expr(left);
             rt := infer_expr(right);
+            sh_site_begin(6);   // 站点 6 = 赋值兼容（EXPR_BINARY + OP_ASSIGN）
             if !type_equal(lt, rt) {
                 check_error(EC_TA_ASSIGN, "Assignment type mismatch", ast_line(node), ast_col(node));
             }
@@ -1793,6 +1815,7 @@ fn infer_expr(node: int) -> int {
                 mi = mi + 1;
             }
             g_dyn_type_set_count = merge_count;
+            sh_site_begin(7);   // 站点 7 = if 分支类型合并
             if !type_equal(then_ti, else_ti) && then_ti != TI_NEVER && else_ti != TI_NEVER {
                 check_error(EC_TC_IF_BRANCH, "If branches have different types", ast_line(node), ast_col(node));
             }
@@ -2124,8 +2147,11 @@ fn infer_expr(node: int) -> int {
                     dyn_set_type(target_si, vt);
                 }
             }
-        } else if !type_equal(tt, vt) {
-            check_error(EC_TA_ASSIGN, "Assignment type mismatch", ast_line(node), ast_col(node));
+        } else {
+            sh_site_begin(8);   // 站点 8 = 赋值兼容（EXPR_ASSIGN 节点）
+            if !type_equal(tt, vt) {
+                check_error(EC_TA_ASSIGN, "Assignment type mismatch", ast_line(node), ast_col(node));
+            }
         }
         return vt;
     }

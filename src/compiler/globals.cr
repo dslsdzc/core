@@ -248,6 +248,17 @@ g_ty_uncovered : int, mut;         // 未覆盖面命中位（如 AK_NAMED 具�
 g_shadow_map : string, mut;        g_shadow_map_cap : int, mut;
 g_shadow_hits : int, mut;          g_shadow_entries : int, mut;
 
+// R2 P1 Task 2：影子对拍挂点状态（`--type-shadow`）。**全部只在影子开时被写**——
+// 关时连读都不发生（type_equal 包装先查 g_shadow_on）→ 关态产物逐字节不变。
+// 四分类桶：agree（旧=引擎）/ old_stricter（旧拒新受）/ old_looser（旧受新拒 = 收紧面）
+// / unknown（三态 -1 或任一侧无法翻译）；恒有 agree+stricter+looser+unknown == total。
+g_shadow_on : int, mut;            g_shadow_site : int, mut;
+g_shadow_total : int, mut;         g_shadow_agree : int, mut;
+g_shadow_old_stricter : int, mut;  g_shadow_old_looser : int, mut;
+g_shadow_unknown : int, mut;
+// 差异/未知环形缓冲（前 256 条；40B/槽 {site, t1, t2, old_ok, kind}），满则只计数。
+g_shadow_ring : string, mut;       g_shadow_ring_cap : int, mut;   g_shadow_ring_count : int, mut;
+
 fn grow_plugin_tags(needed: int) {
     if needed < g_plugin_tag_cap { return; }
     ncap : ., mut = g_plugin_tag_cap * 2; if ncap < 8 { ncap = 8; } if ncap < needed { ncap = needed + 8; }
