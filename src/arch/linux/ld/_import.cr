@@ -7,6 +7,12 @@ import ast
 import globals
 import dyn_arr
 import hit
+// 降低层（HIT M2）：instr.cr 的表编码器消费 lower_to_core.cr 的事件流
+// （hit_rel_add/hit_ev_*/hit_pool_patch_add/HIT_EV_*/g_hit_*）——本文件原先只
+// import hit 而漏 lower_to_core，致 ld project-mode 单元 15×N06+16×N01 静默未
+// 定义（含 TA01 级联；与 c138c44c「compiler 单元缺 ent_kernel」同类）。经
+// src/arch/hit/ 跨树回退命中（与 hit 同机制、同目录）。
+import lower_to_core
 import monomorph
 import ccr_io
 import ent_kernel

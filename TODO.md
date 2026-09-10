@@ -126,6 +126,15 @@
 - **证据**：内核抽取 Task 3 评审 concern ①（.superpowers/sdd/kernel-task-3-report.md）——Task 3 diff 仅 corearch + 注释，base↔head corec cmp 相同；清 .core/cache 后逐字节复现判据成立（计划 Global Constraints 的「清 cache 跑测试」即为规避）
 - **修复方向**：cir_cache.cr 缓存键 += 编译器指纹（产物内容哈希或编译器身份分量）——重建后旧条目自动失效；现状兜底 = CIR_CACHE_VER 手工 bump + 测试前清 cache
 
+### 6. 双入口能力分歧：ld project-mode 后端缺 HIT/表旗标（2026-09-10 ld 导入集修复评审确认——预存,待修）
+- **现象**：`src/arch/linux/ld/main.cr` 的 corearch_main 只注册 7 个旗标（elf/shared/static/link/output/opt-level，:31-36），而 `src/compiler/corearch.cr` 的 corearch_main 同段注册其全部超集（:260-273）：`--table` / `--hit-events-file` / `--dump-events` / `--dump-table` 与全族 `--dump-entries`/`--dump-coexist`/`--dump-regassign`/`--check-regalloc`/`--inject-*`/`--dump-objects` 调试通道。ld/main.cr 全文零处引用 `table`（含 cli_get/save-ccr 后路径）——即 ld project-mode 构建出的后端（`corec build src/arch/linux/ld`，test_backend_bootstrap 的 stage1/2/3 即此产物）**整体不含 HIT/表机制**。
+- **实证**：`./build/corearch --dump-table` → 正常解析（打印 usage）；ld project-mode 产物 `--dump-table` / `--table` → `unknown flag: --dump-table` / `unknown flag: --table`（cli_parse 拒绝，非 usage 兜底）。故 `src/arch/linux/ld/main.cr` 头注「入口二元性…两入口…（现 load 后行为同构）」（:11-15）对表模式（及全部调试通道）**为假**——同构仅限 ELF 发射主路径。
+- **机制**：入口二元性（concat 入口 = src/compiler/corearch.cr wrapper；project-mode 入口 = ld/main.cr）靠人工双份维护 corearch_main——旗标注册与 load 后接线分散两处，无共享注册函数、无一致性守卫；《内核完备》抽取后 src/compiler/corearch.cr 单侧长表模式（M2 系列），ld/main.cr 未同步。
+- **影响**：ld 自举 stage 链（及任何经 ld 工程构建的后端）无法经 --table 走表投影路径——表模式回归只在 concat corearch 面被覆盖；`--hit-events-file` 注入测试通道对 ld 产物同样缺席。当前无测试经此入口断言表模式，故静默。
+- **证据**：本次 ld 导入集修复（N06/N01 静默未定义闭合）评审 trace —— .superpowers/sdd/lattice-move-report.md 与本文 #6 挂账；同类先例 = c138c44c（init 单元缺 import → 静默未定义 + SIGSEGV，N06 类静默失败反复出现于「入口/单元维护面不同步」）。
+- **修复方向**：①旗标注册收敛——两入口共调一个 `register_backend_flags()`（或 ld/main.cr 直接复用 corearch.cr 的注册段），保留双 wrapper 前提下的单份真源；②或显式 documented divergence 留档——ld/main.cr 头注改为「表模式/调试通道仅 concat 入口支持」并加守卫（如 ld 产物遇 --table 报明确「此入口不支持表模式」而非 unknown flag）。①优先（同构主张才是原本设计意图）。
+- **注意**：修①会改 ld project-mode 单元内容 → stage 链产物字节变（expected，非缺陷）；须同步跑 test_backend_bootstrap 判据（stage1==stage2==stage3 全程同源，仍成立）。
+
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
 来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：
