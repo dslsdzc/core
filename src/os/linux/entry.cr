@@ -4,10 +4,11 @@
 // → g_current_arena = -1 初始化 → 编译期常量全局初值环（imm32/imm64 两式）
 // → call main（位置登记 g_call_main_pos 供重定位）→ exit(60) syscall。
 // 外部耦合（共享全局——声明留格式轴 elf.cr，扁平编译单元内单次声明）：
-//   g_call_main_pos / gv_argc / gv_argv / gv_current_arena —— elf_gen 扫描段
-//   （src/format/elf/elf.cr）赋值；消费方 = 本文件 + elf.cr 补丁段 + instr.cr
-//   get_arg（gv_argv）。跨轴引用经 module.cr 三轴回退链 / 组合根 _import.cr 的
-//   `import entry` 解析（与 concat 清单 os_linux_files 双注册）。
+//   gv_argc / gv_argv / gv_current_arena —— elf_gen 扫描段（src/format/elf/elf.cr）
+//   赋值；g_call_main_pos —— 本文件写（call main 位置登记）、elf.cr 补丁段读。
+//   消费方 = 本文件 + elf.cr 补丁段 + instr.cr get_arg（gv_argv）。跨轴引用经
+//   module.cr 三轴回退链 / 组合根 _import.cr 的 `import entry` 解析（与 concat
+//   清单 os_linux_files 双注册）。
 // Depends on: x86_64/instr.cr（emit_rex/emit_modrm/emit_sib/e2_*）、
 //             x86_64/sizes.cr（sz_start_body/sz_start_argv_save）
 

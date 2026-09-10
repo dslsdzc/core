@@ -6,7 +6,8 @@
 //   - Phase 2 prologue/epilogue uses these helpers
 //   - emit_instr() returns sizes via e2_* return values (must match)
 //
-// NEVER hardcode byte counts in elf.cr, instr.cr, or resolve.cr.
+// NEVER hardcode byte counts in elf.cr, instr.cr, resolve.cr, or src/os/linux/entry.cr
+// (_start 体与 sz_start_body/sz_start_argv_save 必须同步——H2 类双源守护).
 // Change a size here → all phases automatically agree.
 // ══════════════════════════════════════════════════════════════
 
