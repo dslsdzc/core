@@ -232,6 +232,88 @@ fn get_type_extra(ti: int) -> int {
     return 0;
 }
 
+// ─── R2 P2a Task 2（F2）：常量档数组长度约束 ───
+// 背景（P1 findings §6.F2）：身份判等（type_equal_core 的 TYP_ARRAY 分支）曾把 N 与元素判等
+// 绑在一起 = N 属**类型身份**；而桥接按 R1 裁决 **N 不入身份**（AK_SEQUENCE 参数链只含元素项）
+// → 判定替换（Task 3：引擎 ty_equiv）后 `[int;4]` → `[int;3]` 会**静默通过**（现状是编译错误
+// error[TF01]）。用户裁决：落「常量档长度约束」——保持现状拒绝语义，不留静默缺口。本函数即
+// 该约束：N 从身份中**迁出**，成为具名、可独立调用/独立测试的检查（身份分支不再比 N）。
+//
+// 语义（本批 = 常量档：N 皆字面量 → 编译期定 恒真/恒假）：
+//   沿两类型的**结构对应位置**下钻（下钻位置与 type_equal_core 的递归同形：数组元素 /
+//   指针元素 / 引用元素 / 切片元素 / 元组字段 / 泛型应用实参），在**数组位置**比较 N（extra）
+//   ——N 必须相等；不等即 0（违反）。其余情形（异 kind / 异元数 / 非数组构造子）长度面无约束
+//   → 1（满足）。**1 = 满足；0 = 违反**。
+// 为何必须下钻：N 迁出身份后，嵌在非数组构造子内部的位置（`[[int;3];2]` 的数组元素位 /
+//   `G<[int;3]>` 的泛型实参位 / `*[int;3]` 的指针元素位 / `(int, [int;3])` 的元组字段位）
+//   不再有任何判等负责——不下钻即静默放宽（收紧面的反面）。覆盖面由 type_selftest.cr 的
+//   f2.* 用例逐位钉住（同结构同长 → 1 / 同结构异长 → 0 双断）。
+// 边界（如实登记）：**符号档 / 动态档未实现**（P3 面）；本批按字面量比较 extras，异 kind/异形
+//   不下钻（该面由身份判定的 kind/参数结构比较负责，本函数不越权给 0 = 不误拒）。
+// 无环：TYP_NAMED / TYP_GENERIC_PARAM / TYP_BASE / TYP_DYN 不下钻 → 深度 = 类型嵌套深度。
+fn array_len_constraint_ok(ti_a: int, ti_b: int) -> int {
+    ka := get_type_kind(ti_a);
+    kb := get_type_kind(ti_b);
+    if ka != kb { return 1; }
+    if ka == TYP_ARRAY {
+        if get_type_extra(ti_a) != get_type_extra(ti_b) { return 0; }
+        return array_len_constraint_ok(get_type_data(ti_a), get_type_data(ti_b));
+    }
+    if ka == TYP_PTR || ka == TYP_REF || ka == TYP_SLICE {
+        return array_len_constraint_ok(get_type_data(ti_a), get_type_data(ti_b));
+    }
+    if ka == TYP_TUPLE {
+        fc := get_type_data(ti_a);
+        if fc != get_type_data(ti_b) { return 1; }      // 字段数不同：身份判定负责
+        fs1 := get_type_extra(ti_a);
+        fs2 := get_type_extra(ti_b);
+        fi : ., mut = 0;
+        loop {
+            if fi >= fc { break; }
+            if array_len_constraint_ok(r64(g_gen_apply_data, (fs1 + fi) * 8), r64(g_gen_apply_data, (fs2 + fi) * 8)) == 0 { return 0; }
+            fi = fi + 1;
+        }
+        return 1;
+    }
+    if ka == TYP_GENERIC_APPLY {
+        if get_type_data(ti_a) != get_type_data(ti_b) { return 1; }   // 基型不同：身份判定负责
+        as1 := get_type_extra(ti_a);
+        as2 := get_type_extra(ti_b);
+        ac1 := r64(g_gen_apply_data, as1 * 8);
+        ac2 := r64(g_gen_apply_data, as2 * 8);
+        if ac1 != ac2 { return 1; }                     // 实参数不同：身份判定负责
+        ai : ., mut = 0;
+        loop {
+            if ai >= ac1 { break; }
+            if array_len_constraint_ok(r64(g_gen_apply_data, (as1 + 1 + ai) * 8), r64(g_gen_apply_data, (as2 + 1 + ai) * 8)) == 0 { return 0; }
+            ai = ai + 1;
+        }
+        return 1;
+    }
+    return 1;
+}
+
+// F2 判定点组合（**站点**用）：身份判等 ∧ 常量档长度约束。
+// N 不入身份（R1 裁决）⇒ 判定点必须在 type_equal 之外显式补检——否则 Task 3 替换身份实现后
+// N 不匹配静默通过。返回：1 = 兼容；0 = 身份不匹配（原诊断措辞）；-1 = 长度约束违反（专属
+// 措辞；**码不变**——TF01/TA01/TC02 的「门」= 拒绝集合不变，仅成因分列）。
+// **总是调用 type_equal**：影子通道（ty_shadow.cr）在 type_equal 内按站点采样，站点调用次数
+// 与位置必须保持不变（P1 站点覆盖 / 差异计数可比；关态仅多一次全局读，见 P1 登记）。
+fn type_compat_strict(ti_a: int, ti_b: int) -> int {
+    if !type_equal(ti_a, ti_b) { return 0; }
+    if array_len_constraint_ok(ti_a, ti_b) == 0 { return -1; }
+    return 1;
+}
+
+// F2 判定点诊断：verdict ≠ 1 时发码——-1（长度约束违反）用专属措辞，0 用原措辞。
+fn diag_type_incompatible(verdict: int, code: int, what: string, line: int, col: int) {
+    if verdict == -1 {
+        check_error(code, "Array length constraint not satisfied", line, col);
+    } else {
+        check_error(code, what, line, col);
+    }
+}
+
 // R2 P1：本函数是**唯一**结构判等实现（改名自 type_equal，改名 + 包装见下方包装函数）。
 // 内部 6 处递归调用点（:111/:126/:132/:135/:138/:150）指向本名，**不**经包装 → 影子只在
 // 8 个外部决策点取样一次/次调用（递归展开不重复计数）。
@@ -245,13 +327,11 @@ fn type_equal_core(t1: int, t2: int) -> bool {
             return get_type_data(t1) == get_type_data(t2);
         }
 
+        // F2（R2 P2a Task 2）：本分支**不比 N**——N 已迁出类型身份（与引擎侧一致：桥接的
+        // AK_SEQUENCE 参数链不含 N）。长度拒绝语义由 array_len_constraint_ok 在**判定点**
+        // 显式补检（type_compat_strict）；身份面只判结构（元素）。
         if k1 == TYP_ARRAY && k2 == TYP_ARRAY {
-            if type_equal_core(get_type_data(t1), get_type_data(t2)) {
-                if get_type_extra(t1) == get_type_extra(t2) {
-                    return true;
-                }
-            }
-            return false;
+            return type_equal_core(get_type_data(t1), get_type_data(t2));
         }
         if k1 == TYP_TUPLE && k2 == TYP_TUPLE {
             if get_type_data(t1) != get_type_data(t2) { return false; }
@@ -860,8 +940,9 @@ fn collect_decls() {
                     else if first_rt == TY_UNIT { first_rt_ti = TI_UNIT; }
 
                     sh_site_begin(1);   // 站点 1 = hotpatch 返回类型一致（ty_shadow.cr 头注有全表）
-                    if !type_equal(rt_ti, first_rt_ti) {
-                        check_error(EC_TF_RETURN, "Hotpatch return type mismatch for '" + fn_name_str + "'", ast_line(fn_node), ast_col(fn_node));
+                    compat := type_compat_strict(rt_ti, first_rt_ti);
+                    if compat != 1 {
+                        diag_type_incompatible(compat, EC_TF_RETURN, "Hotpatch return type mismatch for '" + fn_name_str + "'", ast_line(fn_node), ast_col(fn_node));
                     }
                     first_pc := fi_param_count(fj);
                     cur_pc := fi_param_count(i);
@@ -1097,7 +1178,7 @@ fn unify_types(pattern: int, concrete: int) -> bool {
             if mi >= g_gen_map_count { break; }
             if r64(g_gen_map_names, mi * 8) == name_idx {
                 sh_site_begin(2);   // 站点 2 = unify_types 泛型实参已绑定路径
-                return type_equal(r64(g_gen_map_types, mi * 8), concrete);
+                return type_compat_strict(r64(g_gen_map_types, mi * 8), concrete) == 1;
             }
             mi = mi + 1;
         }
@@ -1110,7 +1191,7 @@ fn unify_types(pattern: int, concrete: int) -> bool {
     }
     if pk == TYP_GENERIC_APPLY && ck == TYP_GENERIC_APPLY {
         sh_site_begin(3);   // 站点 3 = unify_types 泛型应用基型比较
-        if !type_equal(get_type_data(pattern), get_type_data(concrete)) { return false; }
+        if type_compat_strict(get_type_data(pattern), get_type_data(concrete)) != 1 { return false; }
         ps := get_type_extra(pattern);
         cs := get_type_extra(concrete);
         pc := r64(g_gen_apply_data, ps * 8);
@@ -1125,7 +1206,7 @@ fn unify_types(pattern: int, concrete: int) -> bool {
         return true;
     }
     sh_site_begin(4);   // 站点 4 = unify_types 兜底结构等价
-    return type_equal(pattern, concrete);
+    return type_compat_strict(pattern, concrete) == 1;
 }
 
 fn substitute_return_type(ti: int) -> int {
@@ -1365,13 +1446,14 @@ fn check_func(fi: int) {
         else if return_type == TY_CHAR { ret_ti = TI_CHAR; }
         else if return_type == TY_NEVER { ret_ti = TI_NEVER; }
         sh_site_begin(5);   // 站点 5 = 函数体返回类型
-        if !type_equal(body_ti, ret_ti) && body_ti != TI_NEVER {
+        compat := type_compat_strict(body_ti, ret_ti);
+        if compat != 1 && body_ti != TI_NEVER {
             // Skip check if return type is generic param (can't verify at declaration)
             // Skip check for flow functions (yield instead of return)
             is_flow_fn : ., mut = 0;
             if body >= 0 && scan_for_yield(body) != 0 { is_flow_fn = 1; }
             if !is_flow_fn && get_type_kind(ret_ti) != TYP_GENERIC_PARAM {
-                check_error(EC_TF_RETURN, "Function return type mismatch", ast_line(fn_node), ast_col(fn_node));
+                diag_type_incompatible(compat, EC_TF_RETURN, "Function return type mismatch", ast_line(fn_node), ast_col(fn_node));
             }
         }
     }
@@ -1559,8 +1641,9 @@ fn infer_expr(node: int) -> int {
             lt := infer_expr(left);
             rt := infer_expr(right);
             sh_site_begin(6);   // 站点 6 = 赋值兼容（EXPR_BINARY + OP_ASSIGN）
-            if !type_equal(lt, rt) {
-                check_error(EC_TA_ASSIGN, "Assignment type mismatch", ast_line(node), ast_col(node));
+            compat := type_compat_strict(lt, rt);
+            if compat != 1 {
+                diag_type_incompatible(compat, EC_TA_ASSIGN, "Assignment type mismatch", ast_line(node), ast_col(node));
             }
             return rt;
         }
@@ -1951,8 +2034,9 @@ fn infer_expr(node: int) -> int {
             }
             g_dyn_type_set_count = merge_count;
             sh_site_begin(7);   // 站点 7 = if 分支类型合并
-            if !type_equal(then_ti, else_ti) && then_ti != TI_NEVER && else_ti != TI_NEVER {
-                check_error(EC_TC_IF_BRANCH, "If branches have different types", ast_line(node), ast_col(node));
+            compat := type_compat_strict(then_ti, else_ti);
+            if compat != 1 && then_ti != TI_NEVER && else_ti != TI_NEVER {
+                diag_type_incompatible(compat, EC_TC_IF_BRANCH, "If branches have different types", ast_line(node), ast_col(node));
             }
             return then_ti;
         }
@@ -2284,8 +2368,9 @@ fn infer_expr(node: int) -> int {
             }
         } else {
             sh_site_begin(8);   // 站点 8 = 赋值兼容（EXPR_ASSIGN 节点）
-            if !type_equal(tt, vt) {
-                check_error(EC_TA_ASSIGN, "Assignment type mismatch", ast_line(node), ast_col(node));
+            compat := type_compat_strict(tt, vt);
+            if compat != 1 {
+                diag_type_incompatible(compat, EC_TA_ASSIGN, "Assignment type mismatch", ast_line(node), ast_col(node));
             }
         }
         return vt;

@@ -339,6 +339,64 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("f1.dedup_rehash_survived",
         (g_named_dedup_cap >= 4096 && g_named_dedup_count == c_before + 1700 && alloc_named_type(str_intern("DedupProbe")) == n1 && named_dedup_rows(str_intern("DedupProbe")) == 1), 1);
 
+    // --- F2（R2 P2a Task 2）：数组长度 N 迁为「常量档长度约束」 ---
+    // 背景（P1 findings §6.F2）：身份判等曾把 N 与元素判等绑在一起（N 属身份）；引擎侧按
+    // R1 裁决 **N 不入身份** → 直接替换判定会让 `[int;4]` → `[int;3]` **静默通过**。
+    // 修法（用户裁决 = 落常量档长度约束）：N 迁出身份 → 具名约束 array_len_constraint_ok
+    // （判定点显式补检）；拒绝语义保持（异长仍拒、同长仍过）。本组即该约束的守门用例。
+    // 默认预算窗口（ty_equiv 用例计数）——本组之前的用例只碰过裸分配/侧表，未跑判定。
+    ty_budget_reset(200000);
+    f2_arr3 := alloc_type(TYP_ARRAY, TI_INT, 3);
+    f2_arr3b := alloc_type(TYP_ARRAY, TI_INT, 3);   // **另一行**同长：约束不可是 ti 同一性
+    f2_arr4 := alloc_type(TYP_ARRAY, TI_INT, 4);
+    total = total + 1; fails = fails + ts_check("f2.same_len_ok",
+        array_len_constraint_ok(f2_arr3, f2_arr3b), 1);
+    total = total + 1; fails = fails + ts_check("f2.diff_len_reject",
+        array_len_constraint_ok(f2_arr4, f2_arr3), 0);
+    // 引擎侧：N 不入身份（spec §5.1；与 bridge.len_not_identity 同义，此处另立一行）
+    total = total + 1; fails = fails + ts_check("f2.engine_len_agnostic",
+        ty_equiv(sh_term_of_ti(f2_arr4), sh_term_of_ti(f2_arr3)), 1);
+    // 结构下钻（N 不在顶层数组位也要拦住——否则身份去 N 后这些位置静默放宽）：
+    // ① 数组元素位 `[[int;3];2]`；② 泛型应用实参位 `G<[int;3]>`；③ 指针元素位 `*[int;3]`；
+    // ④ 元组字段位 `(int, [int;3])`。每例双断：同结构同长 → 1 / 同结构异长 → 0（防误拒）。
+    f2_outer3 := alloc_type(TYP_ARRAY, f2_arr3, 2);
+    f2_outer4 := alloc_type(TYP_ARRAY, f2_arr4, 2);
+    total = total + 1; fails = fails + ts_check("f2.nested_elem_reject",
+        (array_len_constraint_ok(f2_outer3, f2_outer3) == 1 && array_len_constraint_ok(f2_outer4, f2_outer3) == 0), 1);
+    grow_gen_apply_data(g_gen_apply_data_count + 4);
+    f2_ga_s1 := g_gen_apply_data_count;
+    w64(g_gen_apply_data, f2_ga_s1 * 8, 1);
+    w64(g_gen_apply_data, (f2_ga_s1 + 1) * 8, f2_arr3);
+    f2_ga_s2 := f2_ga_s1 + 2;
+    w64(g_gen_apply_data, f2_ga_s2 * 8, 1);
+    w64(g_gen_apply_data, (f2_ga_s2 + 1) * 8, f2_arr4);
+    g_gen_apply_data_count = f2_ga_s2 + 2;
+    // base 走**裸分配**（人造行不入侧表——P1 桥接夹具同款约定，防假键污染 name→ti）
+    f2_base := alloc_type(TYP_NAMED, 1202, 0);
+    f2_ga3 := alloc_type(TYP_GENERIC_APPLY, f2_base, f2_ga_s1);
+    f2_ga4 := alloc_type(TYP_GENERIC_APPLY, f2_base, f2_ga_s2);
+    total = total + 1; fails = fails + ts_check("f2.genapply_arg_reject",
+        (array_len_constraint_ok(f2_ga3, f2_ga3) == 1 && array_len_constraint_ok(f2_ga4, f2_ga3) == 0), 1);
+    f2_pt3 := alloc_type(TYP_PTR, f2_arr3, 0);
+    f2_pt4 := alloc_type(TYP_PTR, f2_arr4, 0);
+    total = total + 1; fails = fails + ts_check("f2.ptr_elem_reject",
+        (array_len_constraint_ok(f2_pt3, f2_pt3) == 1 && array_len_constraint_ok(f2_pt4, f2_pt3) == 0), 1);
+    grow_gen_apply_data(g_gen_apply_data_count + 4);
+    f2_tp_s1 := g_gen_apply_data_count;
+    w64(g_gen_apply_data, f2_tp_s1 * 8, TI_INT);
+    w64(g_gen_apply_data, (f2_tp_s1 + 1) * 8, f2_arr3);
+    f2_tp_s2 := f2_tp_s1 + 2;
+    w64(g_gen_apply_data, f2_tp_s2 * 8, TI_INT);
+    w64(g_gen_apply_data, (f2_tp_s2 + 1) * 8, f2_arr4);
+    g_gen_apply_data_count = f2_tp_s2 + 2;
+    f2_tup3 := alloc_type(TYP_TUPLE, 2, f2_tp_s1);
+    f2_tup4 := alloc_type(TYP_TUPLE, 2, f2_tp_s2);
+    total = total + 1; fails = fails + ts_check("f2.tuple_field_reject",
+        (array_len_constraint_ok(f2_tup3, f2_tup3) == 1 && array_len_constraint_ok(f2_tup4, f2_tup3) == 0), 1);
+    // 负控：非数组对（含单侧数组）长度面无约束 → 恒满足（防「一律拒绝」的退化实现）
+    total = total + 1; fails = fails + ts_check("f2.nonarray_no_constraint",
+        (array_len_constraint_ok(f2_arr3, TI_INT) == 1 && array_len_constraint_ok(TI_INT, f2_arr3) == 1), 1);
+
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }
     return 0;
