@@ -29,6 +29,7 @@
   3. `tests/selfhost/test_compile.py` 的 `concat_sources()` 清单（同位置）
   （`corelsp` / `corearch` 清单 P0 **不加**：引擎尚无消费者。）
 - **判据铁律**：`corec selftest-types` 全 PASS + 末行计数断言 + 无 `FAIL` 行；全回归绿；自举 `corec2/corec3` `cmp` IDENTICAL + N06=0。
+- **附加验证纪律（Task 1 实证教训，2026-09-10）**：白盒/压力验证**必须限时**——禁止 `sleep` 式长等待（用短超时或直接看日志）；同一缺陷最多迭代 **2 轮**（≥3 轮说明假设错了，改为最小化失败用例 + BLOCKED 上报）；**计划代码不是免检的**（本次 `h - (h/cap)*cap` 负哈希取模越界即为计划缺陷，由压力测试抓出）。
 
 ---
 
