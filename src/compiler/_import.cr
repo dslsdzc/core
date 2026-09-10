@@ -12,6 +12,7 @@ import type_terms
 import type_engine
 import ty_shadow
 import type_selftest
+import purity_selftest
 import diag
 import ir_gen
 import dataflow

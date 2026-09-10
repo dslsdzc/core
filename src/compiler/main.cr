@@ -207,6 +207,7 @@ fn corec_main() -> int {
     cli_cmd("run",   "Execute code directly (interpreter mode)");
     cli_cmd("clean-cache", "Delete incremental compilation cache");
     cli_cmd("selftest-types", "Run type-engine self tests (R2 P0)");
+    cli_cmd("selftest-purity", "Run effect-purity self tests (Task 1)");
     cli_flag("output", "o", "Output path");
     cli_flag_bool("static", "", "Static linking (embed runtime)");
     cli_flag("opt-level", "O", "Optimization level (0,1,2,3; default=1) — O1 CSE(corec 进程内)；O2 寄存器分配+判定在 corearch（corec build 透传 --opt-level，.ccr 不承载分配结果）");
@@ -383,6 +384,9 @@ fn corec_main() -> int {
     // === selftest-types: 类型项引擎自测（R2 P0）——不读源文件、不产生产物 ===
     if cli_eq(cmd, "selftest-types") { return type_selftest_run(); }
 
+    // === selftest-purity: 效应纯度自测（Task 1）——自建内联源 + 完整前端/IR ===
+    if cli_eq(cmd, "selftest-purity") { return purity_selftest_run(); }
+
     // === File-based subcommands: build | check | cir | ccr ===
     if cli_arg_count() < 1 {
         print("error: ");
@@ -513,6 +517,11 @@ fn corec_main() -> int {
 
         fi = fi + 1;
     }
+
+    // === 纯度 + state 链最终化（IR 生成结束、任何链消费者之前）===
+    // 真纯度只能由全程序 IR 体算（checker.cr compute_all_purity 头注），链的连接
+    // 依赖真纯度 ⇒ 两者同点时后移（dataflow.cr df_replay_state_chain 头注）。
+    df_state_finalize();
 
     // === cir: output dataflow graph ===
     if cli_eq(cmd, "cir") {

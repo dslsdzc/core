@@ -312,6 +312,7 @@ def main():
         # corearch 无 checker 故仍不含）。相对顺序与 corec 一致（checker → 引擎 → 影子）。
         'src/compiler/ty_shadow.cr',
         'src/compiler/type_selftest.cr',
+        'src/compiler/purity_selftest.cr',
         'src/compiler/opt.cr',
         'src/compiler/ptr_analysis.cr',
         'src/compiler/region_check.cr',

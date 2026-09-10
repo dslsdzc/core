@@ -25,6 +25,10 @@ def concat_sources():
         'src/compiler/type_terms.cr', 'src/compiler/type_engine.cr',
         # R2 P1 桥接层（ti → 类型项）——与 build_selfhost_native.py 的 corec 清单同位
         'src/compiler/ty_shadow.cr', 'src/compiler/type_selftest.cr',
+        # 效应/纯度修正 Task 1：纯度自测通道（main.cr 的 selftest-purity 调用它）——
+        # 与 build_selfhost_native.py 的 corec 清单同位（清单漂移 = 本测试的
+        # resolver 报 Undefined name，见该文件头注「清单条目现全部为现存路径」）。
+        'src/compiler/purity_selftest.cr',
         'src/compiler/opt.cr', 'src/compiler/ptr_analysis.cr',
         'src/compiler/region_check.cr', 'src/compiler/provenance_verify.cr', 'src/compiler/diag.cr',
         'src/compiler/ext_mgr.cr', 'src/compiler/ext_safety.cr',

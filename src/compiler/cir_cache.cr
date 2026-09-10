@@ -12,8 +12,12 @@
 //      路径不重播种）必须失效——cache miss = 无害重建。
 // 注意：magic 位模式 = C1C1…（bytes）；以 signed 十进制书写——hex 字面量
 // 0xC1C1C1C1C1C1C1C1 超 i64 上界，会被词法溢出守卫拒绝（见 lexer P2 修复）。
+// v15（效应/纯度修正 Task 1）：state 链（kind=1）不再随函数即时连接——改由
+// df_replay_state_chain 在 IR 生成结束后对成品图统一重建 ⇒ 快照里不再需要
+// （也不应）持久化链边。旧快照带链边 + 重建再连一次 = 重复链边，必须失效
+// （cache miss = 无害重建）。
 CIR_CACHE_MAGIC : int = -4485090715960753727;
-CIR_CACHE_VER   : int = 14;
+CIR_CACHE_VER   : int = 15;
 
 g_cir_write_buf : string, mut;
 g_cir_write_pos : int, mut;

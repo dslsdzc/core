@@ -2706,6 +2706,10 @@ fn ir_gen_all() {
         df_end_func(ir_func_idx);
         i = i + 1;
     }
+
+    // 纯度 + state 链最终化（全部 IR 体就绪后；理由见 checker.cr compute_all_purity
+    // 与 dataflow.cr df_replay_state_chain 头注）。文件路径的同点调用在 main.cr。
+    df_state_finalize();
 }
 
 // Compute function body fingerprint: hash of the function body source text.

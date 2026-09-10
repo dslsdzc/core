@@ -2859,3 +2859,229 @@ fn check_all() {
     // Check impl-for relationships
     check_impl_for();
 }
+
+// ─── 效应/纯度修正 Task 1（P0 插队批）：真纯度计算 ─────────────────────────
+// 语义出处：docs/superpowers/plans/2026-08-08-region-cfg.md:484「非纯调用才进链；
+// find_func 不可得（外部函数）保守进链」。
+//
+// 纯（1）⟺ 下列全部成立（全按 IR/DF 面判定，一律保守）：
+//   ① 体无 store 族：IR_STORE / IR_STORE_FIELD / IR_STORE_INDEX /
+//      IR_STORE_INDEX_VAR / IR_STORE_PTR（裸指针写同为效应）；无 unsafe 区
+//      （IR 无 unsafe 专用 opcode——按 SG_UNSAFE 区的归属函数判定）。
+//   ② 体无 IO/FFI/并发效应 opcode：IR_CALL_EXTERN / IR_HOTPATCH_ROUTE /
+//      IR_DYN_DISPATCH / IR_SPAWN / IR_YIELD / IR_AWAIT / IR_INLINE 见 ③。
+//   ③ 传递闭包内被调者全纯：IR_CALL 的 s3 = 名 ni 经 find_func 解析（不可解析 =
+//      runtime builtin ⇒ 不纯）；IR_INLINE 的 s1 同为名 ni（不可解析 ⇒ 不纯）。
+//   ④ 递归/SCC ⇒ 保守不纯：不动点从「全不纯」起点**升纯**——自环/互环永远等不到
+//      「被调者已纯」⇒ 自动留在不纯，无需显式 SCC 检测。
+// 泛型源函数（无 IR 体、永不被调用——调用点解析到实例）：纯度 = 实例的合取
+// （无实例 = 0），故「实例与源同值」恒成立。
+//
+// 时点：**IR 生成结束之后**（唯一入口 = df_state_finalize，见 dataflow.cr）。
+// IR 体是纯度的唯一权威来源，而 IR 体逐函数生成（调用者先于被调者、含递归与
+// 前向引用）⇒ check_all 尾部（声明就绪但 IR 体尚未生成）与 collect_decls 期
+// （调用图未闭合）都不可用；链消费者（df_connect_state）相应后移到同一时点
+// （df_replay_state_chain）——否则链只能读到生成期的乐观默认值。
+//
+// 默认值冻结注记：checker.cr 注册函数时的 fi_set_ispure(..., 1)（乐观默认）
+// **有意保留**——IR 生成期它的唯一消费者是 ir_gen.cr 的 lazy 判定，本批明令
+// 冻结该判定（use_count 时序缺陷另批修）⇒ 删掉默认值会让 lazy 全部不发射、
+// 发射面逐字节改变。真纯度在 IR 生成后由本函数覆盖写回。
+
+fn purity_op_effect(op: int) -> int {
+    if op == IR_STORE           { return 1; }
+    if op == IR_STORE_FIELD     { return 1; }
+    if op == IR_STORE_INDEX     { return 1; }
+    if op == IR_STORE_INDEX_VAR { return 1; }
+    if op == IR_STORE_PTR       { return 1; }
+    if op == IR_CALL_EXTERN     { return 1; }
+    if op == IR_HOTPATCH_ROUTE  { return 1; }
+    if op == IR_DYN_DISPATCH    { return 1; }
+    if op == IR_SPAWN           { return 1; }
+    if op == IR_YIELD           { return 1; }
+    if op == IR_AWAIT           { return 1; }
+    return 0;
+}
+
+// IR 函数序号（g_ir_func_* 表下标）→ 源 FuncInfo 下标；-1 = 越界（不可达防御）。
+// 依据：IR 生成循环按源序**跳过泛型函数**发 IR；monomorph 实例只追加到 g_funcs
+// 末尾（唯一创建点 = ir_gen.cr 的调用点）⇒ IR 序 = 源序非泛型子序列 ++ 实例创建序，
+// 与本函数「按源序跳过泛型」的重放一致。调用方另按 g_ir_func_name_idx 复核名字，
+// 复核失败即保守判不纯（防映射漂移静默错标）。
+fn src_func_of_ir(irf: int) -> int {
+    cnt : ., mut = 0;
+    i : ., mut = 0;
+    loop {
+        if i >= g_func_count { return -1; }
+        if fi_generic_count(i) == 0 {
+            if cnt == irf { return i; }
+            cnt = cnt + 1;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// DF 节点序号 → 所属 IR 函数序号（-1 = 无）。g_df_func_node_start 单调 ⇒ 线性
+// 取下界即上界；unsafe 区稀少，不值得为它引二分。
+fn df_func_of_node(pos: int) -> int {
+    best : ., mut = -1;
+    irf : ., mut = 0;
+    loop {
+        if irf >= g_ir_func_count { break; }
+        if r64(g_df_func_node_start, irf * 8) <= pos { best = irf; }
+        irf = irf + 1;
+    }
+    return best;
+}
+
+fn compute_all_purity() {
+    fcount := g_func_count;
+    if fcount <= 0 { return; }
+    if g_ir_func_count <= 0 { return; }   // 无 IR 体（check-only 路径）⇒ 不覆盖默认值
+
+    // 侧表（本函数自持）：local = 局部效应/硬不纯位；pure = 当前纯度工作值；
+    // callee = 每条 IR 指令的可解析被调 fi（-1 = 非调用；不可解析记在 local 位）。
+    // alloc 不保证清零（rt.s bump 分配器）⇒ 三表全部显式初始化。
+    local := alloc(fcount * 8);
+    pure := alloc(fcount * 8);
+    callee := alloc(g_ir_instr_count * 8);
+    z : ., mut = 0;
+    loop {
+        if z >= fcount { break; }
+        w64(local, z * 8, 0);
+        w64(pure, z * 8, 0);
+        z = z + 1;
+    }
+    z = 0;
+    loop {
+        if z >= g_ir_instr_count { break; }
+        w64(callee, z * 8, -1);
+        z = z + 1;
+    }
+
+    // ── 1) 逐 IR 函数扫体：局部效应位 + 调用边解析 ──
+    irf : ., mut = 0;
+    loop {
+        if irf >= g_ir_func_count { break; }
+        sfi := src_func_of_ir(irf);
+        map_ok : ., mut = 1;
+        if sfi < 0 { map_ok = 0; }
+        else if r64(g_ir_func_name_idx, irf * 8) != fi_name(sfi) { map_ok = 0; }
+        else if ast_kind(fi_ast_node(sfi)) == EXPR_EXTERN { map_ok = 0; }
+        if map_ok == 0 {
+            // 映射漂移/extern 声明体（无可生成的体）：保守判不纯
+            if sfi >= 0 { w64(local, sfi * 8, 1); }
+            irf = irf + 1; continue;
+        }
+        istart := r64(g_ir_func_instr_start, irf * 8);
+        icnt := r64(g_ir_func_instr_count, irf * 8);
+        ii := istart;
+        loop {
+            if ii >= istart + icnt { break; }
+            op := iri_op(ii);
+            if purity_op_effect(op) != 0 { w64(local, sfi * 8, 1); }
+            if op == IR_CALL {
+                cf := find_func(iri_s3(ii));
+                if cf < 0 { w64(local, sfi * 8, 1); }   // 不可解析（runtime builtin）⇒ 不纯
+                else { w64(callee, ii * 8, cf); }
+            }
+            if op == IR_INLINE {
+                cf2 := find_func(iri_s1(ii));
+                if cf2 < 0 { w64(local, sfi * 8, 1); }
+                else { w64(callee, ii * 8, cf2); }
+            }
+            ii = ii + 1;
+        }
+        irf = irf + 1;
+    }
+
+    // ── 2) unsafe 区 ⇒ 归属函数不纯（IR 无 unsafe opcode：效应藏在块内裸操作里；
+    //      归属 = 区起始节点落在哪个函数的节点区间）──
+    si : ., mut = 0;
+    loop {
+        if si >= g_sg_count { break; }
+        if r64(g_sgs, si * ESZ_SG + OFF_SG_KIND) == SG_UNSAFE {
+            uf := df_func_of_node(r64(g_sgs, si * ESZ_SG + OFF_SG_NSTART));
+            if uf >= 0 {
+                usf := src_func_of_ir(uf);
+                if usf >= 0 { w64(local, usf * 8, 1); }
+            }
+        }
+        si = si + 1;
+    }
+
+    // ── 3) 不动点：全不纯起点升纯（保守单调，语义见头注 ④）──
+    changed : ., mut = 1;
+    loop {
+        if changed == 0 { break; }
+        changed = 0;
+        irf = 0;
+        loop {
+            if irf >= g_ir_func_count { break; }
+            sf := src_func_of_ir(irf);
+            if sf >= 0 {
+                if r64(local, sf * 8) == 0 {
+                    if r64(pure, sf * 8) == 0 {
+                        ist2 := r64(g_ir_func_instr_start, irf * 8);
+                        ic2 := r64(g_ir_func_instr_count, irf * 8);
+                        allpure : ., mut = 1;
+                        ii2 := ist2;
+                        loop {
+                            if ii2 >= ist2 + ic2 { break; }
+                            c := r64(callee, ii2 * 8);
+                            if c >= 0 {
+                                if r64(pure, c * 8) == 0 { allpure = 0; break; }
+                            }
+                            ii2 = ii2 + 1;
+                        }
+                        if allpure != 0 {
+                            w64(pure, sf * 8, 1);
+                            changed = 1;
+                        }
+                    }
+                }
+            }
+            irf = irf + 1;
+        }
+    }
+
+    // ── 4) 泛型源（无 IR 体）回填：源纯度 = 实例合取（无实例 = 0）──
+    fi : ., mut = 0;
+    loop {
+        if fi >= fcount { break; }
+        if fi_generic_count(fi) > 0 {
+            ninst : ., mut = 0;
+            allp : ., mut = 1;
+            gi : ., mut = 0;
+            loop {
+                if gi >= g_purity_inst_count { break; }
+                if r64(g_purity_inst, gi * 24) == fi {
+                    ninst = ninst + 1;
+                    nf := r64(g_purity_inst, gi * 24 + 16);
+                    if nf >= 0 && nf < fcount {
+                        if r64(pure, nf * 8) == 0 { allp = 0; }
+                    } else { allp = 0; }
+                }
+                gi = gi + 1;
+            }
+            if ninst > 0 && allp != 0 { w64(pure, fi * 8, 1); }
+        }
+        fi = fi + 1;
+    }
+
+    // ── 5) 写回 ──
+    fi = 0;
+    loop {
+        if fi >= fcount { break; }
+        fi_set_ispure(fi, r64(pure, fi * 8));
+        fi = fi + 1;
+    }
+}
+
+// 自测辅助：按名查纯度（-1 = 无此函数——与 0/1 区分，防「查不到」被当「不纯」）。
+fn fi_ispure_of(name_ni: int) -> int {
+    fi := find_func(name_ni);
+    if fi < 0 { return -1; }
+    return fi_ispure(fi);
+}

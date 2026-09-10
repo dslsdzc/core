@@ -81,23 +81,9 @@ fn sg_pop() {
     // Loop termination dependency: the region exit node (last node created in
     // the region, i.e. the exit label) must happen after the region's last
     // side effect — a VSDG state edge enforcing loop-exit ordering.
-    kind := r64(g_sgs, idx * ESZ_SG + OFF_SG_KIND);
-    if kind == SG_LOOP || kind == SG_FOR {
-        last_node := g_df_node_count - 1;
-        if last_node >= r64(g_sgs, idx * ESZ_SG + OFF_SG_NSTART) {
-            // The termination-edge source must be inside the region. When the
-            // loop body is pure, g_last_state_node is a pre-loop store
-            // (created before the region) — linking it would claim the loop
-            // exit follows a side effect the region does not contain.
-            if g_last_state_node >= r64(g_sgs, idx * ESZ_SG + OFF_SG_NSTART) {
-                df_add_edge_kind(g_last_state_node, last_node, 1);  // termination dependency
-            }
-            // Advance the state-chain head to the region exit node: side
-            // effects after the loop must depend on loop termination (spec
-            // §4.2: a loop that never terminates must terminate the graph).
-            g_last_state_node = last_node;
-        }
-    }
+    // 循环终止依赖（kind=1）与链头推进**不在本处连接**——state 链统一在
+    // 全部 IR 生成结束后重建（df_replay_state_chain；时点理由见该函数头注）：
+    // 被调函数真纯度只有拿到全程序 IR 体才能算，链不能再边生成边连。
     g_cur_sg = r64(g_sgs, idx * ESZ_SG + OFF_SG_PARENT);
 }
 
@@ -126,8 +112,8 @@ fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, type_
 
     // Add edges for src fields that are IR variables (based on opcode)
     df_connect_srcs(nid, opcode, src1, src2, src3, type_kind);
-    // VSDG state chain: side-effecting nodes are ordered by state edges
-    df_connect_state(nid, opcode, src3);
+    // VSDG state chain（kind=1）不在此连接——见 df_replay_state_chain 头注
+    // （时点：真纯度需要全程序 IR 体 ⇒ 链统一在 IR 生成结束后重建）。
     return nid;
 }
 
@@ -154,9 +140,9 @@ fn df_add_edge(from_id: int, to_id: int) {
 }
 
 // VSDG state chain: keep the ordering of side-effecting operations in program
-// order. Called for every created DFNode; only nodes that mutate memory or
-// call impure functions enter the chain (each links to the previous one via a
-// kind=1 state edge).
+// order. 只有改内存或调不纯函数的节点入链（各自与前一节点以 kind=1 状态边相连）。
+// 时点（效应/纯度修正 Task 1）：**不再逐节点即时连接**——改由 df_replay_state_chain
+// 在全部 IR 生成结束后对成品图重放调用；入链判据未变，仍是本函数。
 fn df_connect_state(node_id: int, opcode: int, s3: int) {
     is_side_effect : ., mut = 0;
     if opcode == IR_STORE          { is_side_effect = 1; }
@@ -174,6 +160,94 @@ fn df_connect_state(node_id: int, opcode: int, s3: int) {
         if g_last_state_node >= 0 { df_add_edge_kind(g_last_state_node, node_id, 1); }
         g_last_state_node = node_id;
     }
+}
+
+// ─── state 链重建（效应/纯度修正 Task 1）──────────────────────────────
+// 出处：链原在 df_create_node 内逐节点即时连接。改为「全部 IR 生成结束后重放」的
+// 唯一理由 = **纯度时点**：入链判据含「调不纯函数」（df_connect_state 的 IR_CALL
+// 分支），而「被调者是否纯」只能由全程序 IR 体算出（compute_all_purity——IR 体
+// 逐函数生成，调用者先于被调者生成是常态，且递归/前向引用无解）⇒ 生成期恒无
+// 全程序事实。链与发射面无关（NOD 序 = 节点创建序，与边无关；corearch 三轴不读
+// EDG）⇒ 时点后移零发射影响。
+// 重放保真：节点创建序 = 程序序；每函数链头重置（与 df_begin_func 同语义）；
+// 循环终止规则按「区关闭位 = 该区 OFF_SG_EXIT」逐句复刻原 sg_pop 语义。
+fn df_state_close_regions_at(head: string, next: string, pos: int) {
+    sg := r64(head, pos * 8);
+    loop {
+        if sg < 0 { break; }
+        // 原 sg_pop 的链语义（spec region-cfg §4.2）逐句复刻：关闭位 = 该区最后一个
+        // 节点 + 1（当时 g_df_node_count）⇒ last_node = pos - 1。
+        last_node := pos - 1;
+        nstart := r64(g_sgs, sg * ESZ_SG + OFF_SG_NSTART);
+        if last_node >= nstart {
+            // 终止边源必须在区内（循环体无副作用时链头是区前的 store——连过去等于
+            // 宣称循环退出依赖于该区不含的副作用）。
+            if g_last_state_node >= nstart {
+                df_add_edge_kind(g_last_state_node, last_node, 1);  // termination dependency
+            }
+            // 链头推进到区退出节点：循环之后的副作用必须依赖循环终止
+            // （spec §4.2：不终止的循环必须终止整图）。
+            g_last_state_node = last_node;
+        }
+        sg = r64(next, sg * 8);
+    }
+}
+
+fn df_replay_state_chain() {
+    if g_ir_func_count <= 0 { return; }
+    // 位置 → 关闭区（只收 SG_LOOP/SG_FOR——链规则只对这两族生效）：head[pos] 与
+    // next[sg] 两条 i64 链，按区号升序头插 ⇒ 同位置读出为区号降序 = sg_pop 的关闭序。
+    // alloc 不保证清零（rt.s bump 分配器）⇒ head 逐项显式置 -1。
+    head := alloc((g_df_node_count + 1) * 8);
+    next := alloc((g_sg_count + 1) * 8);
+    i : ., mut = 0;
+    loop {
+        if i > g_df_node_count { break; }
+        w64(head, i * 8, -1);
+        i = i + 1;
+    }
+    si : ., mut = 0;
+    loop {
+        if si >= g_sg_count { break; }
+        k := r64(g_sgs, si * ESZ_SG + OFF_SG_KIND);
+        if k == SG_LOOP || k == SG_FOR {
+            ex := r64(g_sgs, si * ESZ_SG + OFF_SG_EXIT);
+            if ex >= 0 && ex <= g_df_node_count {
+                w64(next, si * 8, r64(head, ex * 8));
+                w64(head, ex * 8, si);
+            }
+        }
+        si = si + 1;
+    }
+    irf : ., mut = 0;
+    loop {
+        if irf >= g_ir_func_count { break; }
+        start := r64(g_df_func_node_start, irf * 8);
+        cnt := r64(g_df_func_node_count, irf * 8);
+        g_last_state_node = -1;   // 每函数独立链（与 df_begin_func 同语义）
+        n : ., mut = 0;
+        loop {
+            if n >= cnt { break; }
+            if n > 0 { df_state_close_regions_at(head, next, start + n); }
+            pos := start + n;
+            df_connect_state(pos, r64(g_df_nodes, pos * ESZ_DFNODE + OFF_DF_OPCODE),
+                r64(g_df_nodes, pos * ESZ_DFNODE + OFF_DF_S3));
+            n = n + 1;
+        }
+        // 函数末端关闭位（SG_FUNC 恒在此；循环落在函数末句时该环也在此）——只在此
+        // 处理：下一函数走 n=0 时跳过 start ⇒ 每个关闭位恰好处理一次。函数 0 的
+        // start（位 0）无人处理，但那里 last_node = -1 < nstart ≥ 0 ⇒ 规则恒 no-op。
+        df_state_close_regions_at(head, next, start + cnt);
+        irf = irf + 1;
+    }
+}
+
+// 链最终化（唯一入口）：真纯度 + 链重建。两个调用点均在「IR 生成结束、任何链
+// 消费者之前」——run 路径 = ir_gen_all 尾；文件路径 = main.cr IR 循环之后
+// （cir 转储 / 区域检查 / lower_to_ccr / 保存 .ccr 之前）。
+fn df_state_finalize() {
+    compute_all_purity();
+    df_replay_state_chain();
 }
 
 fn df_use_var(consumer_node: int, var_idx: int) {

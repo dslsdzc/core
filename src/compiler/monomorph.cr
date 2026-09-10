@@ -31,6 +31,14 @@ fn grow_gen_instances(needed: int) {
     nb := alloc(nc * 24); _dyncpy(g_gen_instances, g_gen_instance_cap * 24, nb);
     g_gen_instances = nb; g_gen_instance_cap = nc; }
 
+// 效应/纯度修正 Task 1：实例 → 源映射侧表（声明在 globals.cr——checker.cr 的
+// compute_all_purity 要读它，bootstrap 名字解析按声明序）。
+fn grow_purity_inst(needed: int) {
+    if needed < g_purity_inst_cap { return; }
+    nc : ., mut = g_purity_inst_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+    nb := alloc(nc * 24); _dyncpy(g_purity_inst, g_purity_inst_cap * 24, nb);
+    g_purity_inst = nb; g_purity_inst_cap = nc; }
+
 fn grow_gen_subst(needed: int) {
     if needed < g_gen_subst_cap { return; }
     nc : ., mut = g_gen_subst_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
@@ -434,6 +442,17 @@ fn gen_create_instance(func_ni: int, type_args: string) -> int {
     w64(g_gen_instances, g_gen_instance_count * 24 + 8, type_args_ni);
     w64(g_gen_instances, g_gen_instance_count * 24 + 16, new_fi);
     g_gen_instance_count = g_gen_instance_count + 1;
+
+    // 效应/纯度修正 Task 1：登记实例 → 源（纯度回填用，见 globals.cr 表注）。
+    // 注意：不在此处写 fi_set_ispure(new_fi, fi_ispure(func_ni))——本时点（IR 生成期）
+    // 源函数还没有真纯度（真纯度只能由全程序 IR 体算，见 checker.cr 头注），
+    // 抄过来的是乐观默认值，会把有效应泛型实例错标为纯。实例纯度由其自身体
+    // 在 df_state_finalize 算出；源函数纯度 = 实例合取（compute_all_purity 回填）。
+    grow_purity_inst(g_purity_inst_count + 1);
+    w64(g_purity_inst, g_purity_inst_count * 24, func_ni);
+    w64(g_purity_inst, g_purity_inst_count * 24 + 8, type_args_ni);
+    w64(g_purity_inst, g_purity_inst_count * 24 + 16, new_fi);
+    g_purity_inst_count = g_purity_inst_count + 1;
 
     // 5. Return new function index
     return new_fi;

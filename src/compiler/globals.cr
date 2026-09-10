@@ -282,6 +282,15 @@ g_shadow_site_counts : string, mut; g_shadow_site_cap : int, mut;
 // 时侧表随之惰性重建，防「陈旧 name→ti 复用」把已失效行号当命中（silent miscompile）。
 g_named_dedup : string, mut;      g_named_dedup_cap : int, mut;   g_named_dedup_count : int, mut;
 
+// 效应/纯度修正 Task 1（P0 插队批）：泛型实例 → 源映射侧表（24B/条
+// {src_fi, type_args_ni, inst_fi}，布局同 monomorph.cr 的 g_gen_instances）。
+// monomorph 于实例创建时追加（gen_create_instance），compute_all_purity 读它回填
+// 泛型源函数的纯度（源 = 实例合取 ⇒「实例与源同值」）。
+// **声明位置约束**：bootstrap 的名字解析按声明序（跨文件前向引用不成立）——
+// checker.cr 的 compute_all_purity 要用本表，故它必须声明在 checker.cr 之前
+// （globals.cr）。grow 帮助函数放 monomorph.cr（函数前向引用合法）。
+g_purity_inst : string, mut;    g_purity_inst_count : int, mut;   g_purity_inst_cap : int, mut;
+
 // R2 P2a Task 3：判定替换的**回落计数**（unknown 政策落地面，checker.cr 的 type_equal）：
 // 引擎三态 1/0 直接采信；-1（未知：预算耗尽/未覆盖面）**不得静默当 0/1** → 回落
 // type_equal_legacy 并计数（g_replace_unknown）；桥接失败（sh_term_of_ti 返回 -1 = 该
@@ -358,6 +367,9 @@ fn reset_frontend_state() {
     g_gen_map_count = 0; g_dyn_type_set_count = 0;
     g_mod_func_count = 0; g_mod_path_count = 0;
     g_file_count = 0; g_mod_count = 0;
+    // Task 1 侧表与 g_func_count 同生命周期（fi 下标会整体复用——不清则陈旧
+    // 映射把新函数的纯度算到旧实例上，静默错标）
+    g_purity_inst_count = 0;
     g_seg_count = 0; g_line_count = 0;
     g_unsafe_depth = 0;
     g_alloc_pts_cap = 0;
