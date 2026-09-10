@@ -17,6 +17,19 @@ fn ts_check(name: string, got: int, want: int) -> int {
     return 1;
 }
 
+// 宽联合探针（预算守卫用）：N 层左深 union —— sub_cover 逐支递归，每支 1 步，
+// N > 预算即耗尽（深 μ 链不行：参数位置的字面蕴含不递归展开，会在参数比较处短路）。
+fn tt_probe_wide_union(depth: int) -> int {
+    acc : ., mut = tt_atom(AK_INT, TI_INT, -1);
+    d : ., mut = 0;
+    loop {
+        if d >= depth { break; }
+        acc = tt_union(acc, tt_atom(AK_STRING, TI_STR, -1));
+        d = d + 1;
+    }
+    return acc;
+}
+
 fn type_selftest_run() -> int {
     fails : ., mut = 0;
     total : ., mut = 0;
@@ -43,6 +56,26 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("norm.distributed", tt_tag(tt_norm(probe)), TT_UNION);
     total = total + 1; fails = fails + ts_check("norm.idempotent",
         (tt_norm(tt_norm(probe)) == tt_norm(probe)), 1);
+
+    // --- 判定（Task 3）：子类型 / 等价 / 不相交 / 可空 / ⊤ₖ / 预算三态 ---
+    u_is := tt_union(a_int, a_str);
+    total = total + 1; fails = fails + ts_check("sub.union_right", ty_sub(a_int, u_is), 1);
+    total = total + 1; fails = fails + ts_check("sub.union_left_neg", ty_sub(u_is, a_int), 0);
+    total = total + 1; fails = fails + ts_check("sub.inter", ty_sub(tt_inter(a_int, a_str), a_int), 1);
+    total = total + 1; fails = fails + ts_check("equiv.absorb", ty_equiv(tt_union(a_int, a_int), a_int), 1);
+    total = total + 1; fails = fails + ts_check("disjoint.atoms", ty_disjoint(a_int, a_str), 1);
+    total = total + 1; fails = fails + ts_check("disjoint.same", ty_disjoint(a_int, a_int), 0);
+    total = total + 1; fails = fails + ts_check("inh.atom", ty_inhabited(a_int), 1);
+    total = total + 1; fails = fails + ts_check("inh.contra", ty_inhabited(tt_inter(a_int, tt_not(a_int))), 0);
+    total = total + 1; fails = fails + ts_check("inh.mixed_atoms",
+        ty_inhabited(tt_inter(a_int, tt_atom(AK_SEQUENCE, -1, -1))), 0);
+    total = total + 1; fails = fails + ts_check("topk.sub", ty_sub(a_int, tt_top_k(AK_INT)), 1);
+    total = total + 1; fails = fails + ts_check("topk.neg", ty_sub(a_str, tt_top_k(AK_INT)), 0);
+    // 预算守卫：深递归项 + 极小预算 → 三态 -1（禁止与「不成立」混淆）
+    ty_budget_reset(64);
+    total = total + 1; fails = fails + ts_check("budget.unknown", ty_sub(tt_probe_wide_union(300), a_int), -1);
+    total = total + 1; fails = fails + ts_check("budget.flag", ty_exhausted(), 1);
+    ty_budget_reset(200000);
 
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }

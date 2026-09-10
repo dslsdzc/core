@@ -237,7 +237,7 @@ g_tt_index : string, mut;          g_tt_index_cap : int, mut;      g_tt_index_co
 g_tt_nil : int, mut;               g_tt_nil_ok : int, mut;
 g_tt_top : int, mut;               g_tt_top_ok : int, mut;
 g_ty_memo_keys : string, mut;      g_ty_memo_vals : string, mut;
-g_ty_memo_count : int, mut;        g_ty_memo_cap : int, mut;
+g_ty_memo_count : int, mut;        g_ty_memo_cap : int, mut;      g_ty_memo_ok : int, mut;
 g_ty_steps : int, mut;             g_ty_budget_max : int, mut;     g_ty_exhausted : int, mut;
 g_ty_lits : string, mut;           g_ty_lits_cap : int, mut;       g_ty_lits_count : int, mut;
 g_ty_uncovered : int, mut;         // 未覆盖面命中位（如 AK_NAMED 具体行不展开）——P0 只登记不消费
