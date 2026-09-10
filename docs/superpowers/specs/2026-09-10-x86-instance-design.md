@@ -97,7 +97,7 @@ src/runtime/                      ← 运行时（rt.s——OS 轴补充）
 
 ## 5. 演进波次（实施另立）
 
-1. ~~**波 1 结构**：三轴目录重组（文件迁移）+ 序列算法文件化（frame/callseq/tag2l/syscall/entry 抽取）+ 表数据迁架构轴 + 构建清单分段 + 守卫——判据 = 行为零变化（纯搬移）~~ ✅ **完成（2026-09-10，plan `2026-09-10-x86-instance-wave1.md` Tasks 1-7，提交 29d177ac49a5 / b23f008000cf / b0ba8c1c9b01 / d65fc1b8f3c3 / 3ab39f6eaa16 / 94d1ac15359 + 各自 docs 提交；执行注记 = §8）**——三轴目录（`src/arch/x86_64/` + `src/format/elf/` + `src/os/linux/`）+ 组合根 `src/targets/x86_64-linux/` 落位；序列算法文件化五件（entry 整搬 / frame 抽取含帧公式双源合流 / tag2l 整搬 / callseq 抽取含 SysV 三处同源合流 / syscall 抽取）；表数据 `core-x86.toml` 迁架构轴（hit 引擎留原位）；清单六段化 + 存在性守卫 + `error[` 计数门。判据：**行为零变化全绿**（每任务 stage 链 byte-identical + 收官全量回归逐套计数 + full-bootstrap guard corec2/corec3 cmp 同 + N06=0）+ 自举重建冒烟 + syscall4 套件持久覆盖（`tests/suite/syscall4_test.cr`）
+1. ~~**波 1 结构**：三轴目录重组（文件迁移）+ 序列算法文件化（frame/callseq/tag2l/syscall/entry 抽取）+ 表数据迁架构轴 + 构建清单分段 + 守卫——判据 = 行为零变化（纯搬移）~~ ✅ **完成（2026-09-10，plan `2026-09-10-x86-instance-wave1.md` Tasks 1-7，提交 29d177ac49a5 / b23f008000cf / b0ba8c1c9b01 / d65fc1b8f3c3 / 3ab39f6eaa16 / 94d1cac15359 + 各自 docs 提交；执行注记 = §8）**——三轴目录（`src/arch/x86_64/` + `src/format/elf/` + `src/os/linux/`）+ 组合根 `src/targets/x86_64-linux/` 落位；序列算法文件化五件（entry 整搬 / frame 抽取含帧公式双源合流 / tag2l 整搬 / callseq 抽取含 SysV 三处同源合流 / syscall 抽取）；表数据 `core-x86.toml` 迁架构轴（hit 引擎留原位）；清单八段化 + 存在性守卫 + `error[` 计数门。判据：**行为零变化全绿**（每任务 stage 链 byte-identical + 收官全量回归逐套计数 + full-bootstrap guard corec2/corec3 cmp 同 + N06=0）+ 自举重建冒烟 + syscall4 套件持久覆盖（`tests/suite/syscall4_test.cr`）
 2. **波 2 参数化**：序列算法按实例边界参数化/整理（C2/C3 实例算法形态——含 TODO #6 双入口处置）
 3. **波 3 能力**（后置独立）：spill/驱逐 + 判定③④ 激活 + 双向契约第三段落地 + M2 复启（判据按 C4 修订）
 4. 远期：实例 B（arm64 或非经典）——三轴组合验证（换轴零内核改动 = 规则封闭验收）
@@ -126,7 +126,7 @@ src/runtime/                      ← 运行时（rt.s——OS 轴补充）
 > 29d177ac49a5（+ 补正 c927525baf35、docs 58e6be3a1c18）/ Task 2 entry.cr 整搬
 > b23f008000cf（+ docs 8dcfaeca52b2）/ Task 3 frame.cr 抽取 b0ba8c1c9b01 / Task 4
 > tag2l.cr 整搬 d65fc1b8f3c3（+ docs c6b6cbfe9a75）/ Task 5 callseq.cr 抽取
-> 3ab39f6eaa16（+ docs 525a872a0ba7）/ Task 6 syscall.cr 抽取 94d1ac15359（+ docs
+> 3ab39f6eaa16（+ docs 525a872a0ba7）/ Task 6 syscall.cr 抽取 94d1cac15359（+ docs
 > d2f3e0968d8c）/ Task 7（本状态行随收官提交落盘）。行为零变化判据（§4.3 结构波）
 > 全绿——**逐任务 stage 链 byte-identical**（搬迁任务 R 重命名内容 verbatim；抽取任务
 > 内容进新文件 + 调用点替换，每步独立构建验证）+ **收官全量回归逐套计数**。
@@ -147,7 +147,7 @@ src/runtime/                      ← 运行时（rt.s——OS 轴补充）
 - **组合根** `src/targets/x86_64-linux/`：`main.cr` + `_import.cr` + `Core.toml`
   （target triple 命名；project-mode 入口链，不入 concat）——Task 1。stage0 硬编码点
   `test_backend_bootstrap.py:13` **先改后搬**（H6）。
-- **清单分段 + 守卫**（`build_selfhost_native.py`）：六段化（`common_files`/`hit_engine_files`/
+- **清单分段 + 守卫**（`build_selfhost_native.py`）：八段化（`common_files`/`hit_engine_files`/
   `kernel_files`/`arch_x86_64_files`/`format_elf_files`/`os_linux_files`/`backend_support_files`/
   `x86_linux_target_files`）；守卫 = 清单文件存在性断言 + 构建日志 `error[` 计数非零 = 失败门
   （TODO #6 ③ 建议的构建面落地）+ project-mode 面 `run_checked` 同门（`test_backend_bootstrap.py`，
@@ -185,7 +185,7 @@ src/runtime/                      ← 运行时（rt.s——OS 轴补充）
 - `IR_CALL_EXTERN` 栈参/栈清理不对称未修（TODO #9）；前端 ≥18 形参缺陷未修（TODO #8）——
   两者皆预存、与结构波正交，按「零变化」纪律不混入。
 - `src/format/elf/elf.cr` 三处手写 syscall 序列未收编（TODO #10）；内置体名索引扫描段留原位
-  加注（`elf.cr` 877-882）——整段参数化 = 波 2。
+  加注（`elf.cr` 877-886）——整段参数化 = 波 2。
 - `pf_frame_overhead` 预存双计（无发射影响）未清；`sizes.cr` tag2l 同源化声称已软化（值一致
   尚未同源）——Task 4 评审注记，波 2 清。
 - 架构特化参数位（格式层 machine/reloc）未建机制；spill/驱逐（§4.2）未启。

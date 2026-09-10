@@ -76,7 +76,7 @@ format_elf_files = [
     'src/format/elf/ld.cr',
 ]
 
-# ③ OS 轴 Linux：syscall/callseq/entry（波 1 Task 2/5/6 逐个落位）。
+# ③ OS 轴 Linux：syscall/callseq/entry（波 1 Task 2/5/6 已全部落位——波 2 参数化待启）。
 # entry.cr（Task 2 落位）= _start 发射序 emit_start/emit_start_size——
 # 自 src/format/elf/elf.cr 整函数搬迁；跨轴调用经本 concat 扁平单元解析。
 # callseq.cr（Task 5 落位）= SysV AMD64 调用约定序列（参数分派/栈参/栈清理/

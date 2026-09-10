@@ -1,6 +1,6 @@
 # x86 实例化 波 1（结构波）实施计划
 
-> **状态：实施完成（2026-09-10 波 1 结构波 Task 1-7 收官）——落点：Task 0 盘点 327c2cf01af3（设计定稿 6694f358f376）/ Task 1 三轴搬迁 + 组合根 29d177ac49a5（+ 补正 c927525baf35、docs 58e6be3a1c18）/ Task 2 entry.cr 整搬 b23f008000cf（+ docs 8dcfaeca52b2）/ Task 3 frame.cr 抽取 b0ba8c1c9b01 / Task 4 tag2l.cr 整搬 d65fc1b8f3c3（+ docs c6b6cbfe9a75）/ Task 5 callseq.cr 抽取 3ab39f6eaa16（+ docs 525a872a0ba7）/ Task 6 syscall.cr 抽取 94d1ac15359（+ docs d2f3e0968d8c）/ Task 7 = 收官提交**。判据全绿：**行为零变化**（每任务 stage 链 byte-identical + 收官全量回归逐套计数）+ 自举重建冒烟 + full-bootstrap guard（corec2/corec3 cmp 同 + N06=0）+ syscall4 套件持久覆盖（`tests/suite/syscall4_test.cr`）——逐套计数与未做项见设计 spec `2026-09-10-x86-instance-design.md` §8 执行注记。
+> **状态：实施完成（2026-09-10 波 1 结构波 Task 1-7 收官）——落点：Task 0 盘点 327c2cf01af3（设计定稿 6694f358f376）/ Task 1 三轴搬迁 + 组合根 29d177ac49a5（+ 补正 c927525baf35、docs 58e6be3a1c18）/ Task 2 entry.cr 整搬 b23f008000cf（+ docs 8dcfaeca52b2）/ Task 3 frame.cr 抽取 b0ba8c1c9b01 / Task 4 tag2l.cr 整搬 d65fc1b8f3c3（+ docs c6b6cbfe9a75）/ Task 5 callseq.cr 抽取 3ab39f6eaa16（+ docs 525a872a0ba7）/ Task 6 syscall.cr 抽取 94d1cac15359（+ docs d2f3e0968d8c）/ Task 7 = 收官提交**。判据全绿：**行为零变化**（每任务 stage 链 byte-identical + 收官全量回归逐套计数）+ 自举重建冒烟 + full-bootstrap guard（corec2/corec3 cmp 同 + N06=0）+ syscall4 套件持久覆盖（`tests/suite/syscall4_test.cr`）——逐套计数与未做项见设计 spec `2026-09-10-x86-instance-design.md` §8 执行注记。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
