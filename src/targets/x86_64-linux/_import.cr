@@ -23,6 +23,12 @@ import ent_kernel
 import regalloc
 import sizes
 import instr
+// 架构轴 frame（x86 实例化波 1 Task 3 落位）：函数帧单源——pf_frame_size
+// （Phase 2 dry-run 与 Phase 3 sub rsp 立即数共用）+ pf_prologue/pf_epilogue
+// （帧发射序自 format/elf/elf.cr 抽出）+ g2_tag_off（自 instr.cr 迁入，H3）。
+// project-mode 单元须经本清单收编（回退链命中 src/arch/x86_64/；concat 面 =
+// arch_x86_64_files）。
+import frame
 import resolve
 import elf
 import ld

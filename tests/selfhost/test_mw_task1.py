@@ -121,7 +121,8 @@ def detect_tags(func, var_types, max_passes=None, store_edges=True):
 
 
 def frame_total(vc, n, opt):
-    """复刻 instr.cr mw_frame_size（含 tag 区 + SysV 16 对齐）。"""
+    """复刻 frame.cr pf_frame_size（含 tag 区 + SysV 16 对齐；x86 实例化波 1
+    Task 3 自 instr.cr mw_frame_size 迁入并改名——公式 verbatim）。"""
     sz = vc * 8 + n
     if opt >= 1:
         if sz % 16 != 8:

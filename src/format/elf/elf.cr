@@ -1,7 +1,11 @@
 // === src/format/elf/elf.cr（格式轴：ELF 容器/段/phdr + elf_gen + allocator body；
-// 波 1 Task 1 迁入；_start 发射序 = OS 轴 src/os/linux/entry.cr，Task 2 迁出）===
+// 波 1 Task 1 迁入；_start 发射序 = OS 轴 src/os/linux/entry.cr，Task 2 迁出；
+// 函数帧（尺寸核算 + 序言/尾声/函数尾附加块）= 架构轴 src/arch/x86_64/frame.cr，
+// Task 3 抽出——本文件零帧尺寸计算（H2））===
 // Direct ELF binary output for x86-64 using the new resolve+emit interface.
 // Depends on: x86_64/instr.cr (instr_size, emit_instr, g2_*)
+// Depends on: x86_64/frame.cr (pf_frame_size, pf_frame_overhead, pf_prologue,
+//             pf_epilogue——Phase 2 dry-run 与 Phase 3 两处调用点;帧公式单源)
 // Depends on: backend/resolve.cr (res_labels)
 
 // ── ELF constants (x86-64) ──
@@ -972,18 +976,18 @@ fn elf_gen(buf: string) -> int {
         pc2 := r64(g_ir_func_param_count, fi * 8);
 
         // int 多字 M1（Task 1）：识别潜在多字变量并计入帧尺寸（tag 区）。
-        // tag 数为 0 → mw_frame_size 与旧公式逐字节一致（快路径零变化）。
+        // tag 数为 0 → pf_frame_size 与旧公式逐字节一致（快路径零变化）。
         mw_setup_tags(fi, vs2, vc2);
         fsz := r64(g_x86_func_code_sz, fi * 8);
-        // SysV 16 字节对齐（发现 11）：call 后 rsp%16=8；
-        // opt≥1 有 6 个 push（rbx,r12-15,rbp）→ rsp%16=8 → size 需 ≡8 (mod 16)；
-        // opt<1 有 1 个 push（rbp）→ rsp%16=0 → size 需 ≡0 (mod 16)。
-        // mw_frame_size 已含 tag 区并按上述规则取整（与 Phase 3 同源）。
-        g_x86_emit_stack_size = mw_frame_size(vc2);
-        total_code = total_code + sz_push_rbp() + sz_mov_rbp_rsp();
-        if g_opt_level >= 1 { total_code = total_code + 18; }  // push rbx,r12-r15(9) + pop r15-r12,rbx(9)
+        // 帧尺寸/帧相关字节 = frame.cr 单源（H2）：SysV 16 字节对齐（发现 11）
+        // ——call 后 rsp%16=8；opt≥1 有 6 个 push（rbx,r12-15,rbp）→ rsp%16=8
+        // → size 需 ≡8 (mod 16)；opt<1 有 1 个 push（rbp）→ rsp%16=0 → ≡0。
+        // 本 dry-run 与 Phase 3 的 sub rsp 立即数**调用同一函数**（pf_frame_size
+        // ——双源合流）；帧相关字节总数 = pf_frame_overhead（须与 pf_prologue/
+        // pf_epilogue 实际发射一致）。本文件零帧尺寸计算（H2 纪律）。
+        g_x86_emit_stack_size = pf_frame_size(vc2);
         ss_dry := g_x86_emit_stack_size;
-        total_code = total_code + sz_sub_rsp(ss_dry);
+        total_code = total_code + pf_frame_overhead(ss_dry);
         reg_pc2 : ., mut = pc2;
         if reg_pc2 > 6 { reg_pc2 = 6; }
         stack_pc2 : ., mut = pc2 - 6;
@@ -991,8 +995,6 @@ fn elf_gen(buf: string) -> int {
         total_code = total_code + reg_pc2 * sz_save_param();
         total_code = total_code + stack_pc2 * sz_save_stack_param();
         total_code = total_code + fsz;
-        total_code = total_code + sz_add_rsp(ss_dry) + sz_pop_rbp() + sz_ret();
-        if g_opt_level >= 1 { total_code = total_code + 9; }  // pop r15,r14,r13,r12,rbx
     fi = fi + 1; }
 
     rd_sz := g2_rodata_sz();
@@ -1097,109 +1099,22 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
         g_current_func_var_start = vs;
         vi := 0; loop { if vi >= vc { break; } g2_slot(vs + vi); vi = vi + 1; }
         // int 多字 M1（Task 1）：潜在多字变量识别 + tag 字节偏移表（g2_tag_off）。
-        // 帧尺寸 = mw_frame_size(vc)（含 tag 区，16 对齐规则与 Phase 2 dry run
+        // 帧尺寸 = pf_frame_size(vc)（含 tag 区，16 对齐规则与 Phase 2 dry run
         // 同源）；tag 数为 0 → 与旧布局逐字节一致。
         mw_setup_tags(fi, vs, vc);
         // SysV 16 字节对齐（发现 11）：与 dry run 相同的对齐规则
-        g_x86_emit_stack_size = mw_frame_size(vc);
+        g_x86_emit_stack_size = pf_frame_size(vc);
 
         // Init label state for single-pass backpatching (-1 = not yet seen)
         li2 : ., mut = 0;
         loop { if li2 >= g_label_count { break; } grow_label_poses(li2 + 1); w64(g_label_poses, li2*8, -1); li2 = li2 + 1; }
         g_pending_count = 0;
 
-        // Save callee-saved registers (pushed before rbp setup → at [rbp+8..48])
-        if g_opt_level >= 1 {
-            w8(buf, cp, 83); cp = cp + 1;  // push rbx
-            w8(buf, cp, 65); w8(buf, cp+1, 84); cp = cp + 2;  // push r12
-            w8(buf, cp, 65); w8(buf, cp+1, 85); cp = cp + 2;  // push r13
-            w8(buf, cp, 65); w8(buf, cp+1, 86); cp = cp + 2;  // push r14
-            w8(buf, cp, 65); w8(buf, cp+1, 87); cp = cp + 2;  // push r15
-        }
-        // frame
-        w8(buf, cp, 85); cp = cp + 1;  // push rbp
-        w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 229); cp = cp + 3;  // mov rbp, rsp
-        g_x86_sub_rsp_pos = cp;
-        if g_x86_emit_stack_size > 0 {
-            if g_x86_emit_stack_size > 127 {
-                w8(buf, cp, 72); w8(buf, cp+1, 129); w8(buf, cp+2, 236);
-                e2_w32(buf, cp+3, 0); cp = cp + 7;
-            } else {
-                w8(buf, cp, 72); w8(buf, cp+1, 131); w8(buf, cp+2, 236); w8(buf, cp+3, 0); cp = cp + 4;
-            }
-        }
-        // Save register and caller-stack params into this function's slots.
-        pi := 0; loop { if pi >= pc { break; }
-            po2 := -(vs + pi + 1 - g_current_func_var_start) * 8;  // force stack slot, ignore reg alloc
-            pty := irv_type(vs + pi);
-            if pty == TI_DEX && pi < 6 {
-                // float 参数在 XMM：movsd [rbp+po2], xmm{frn}（SysV）
-                // frn = 第 pi 个参数前的 float 参数数
-                frn : ., mut = 0;
-                fj : ., mut = 0;
-                loop { if fj >= pi { break; }
-                    if irv_type(vs + fj) == TI_DEX { frn = frn + 1; }
-                    fj = fj + 1; }
-                if frn < 8 {
-                    // movsd [rbp+po2], xmm{frn} — F2 0F 11 /rn（mod=01, rm=5）
-                    w8(buf, cp, 242); w8(buf, cp+1, 15); w8(buf, cp+2, 17);
-                    w8(buf, cp+3, 64 + frn * 8 + 5); w8(buf, cp+4, po2); cp = cp + 5;
-                } else {
-                    // 9+ binary64 参数在栈上（边缘场景，位置布局简化处理）
-                    caller_off := 16 + (pi - 6) * 8;
-                    if g_opt_level >= 1 { caller_off = caller_off + 40; }
-                    cp = cp + e2_sd_load(buf, cp, caller_off);
-                    cp = cp + e2_sd_store(buf, cp, po2);
-                }
-            } else if pi >= 6 {
-                caller_off := 16 + (pi - 6) * 8;
-                if g_opt_level >= 1 { caller_off = caller_off + 40; }
-                if pty == TI_DEX {
-                    cp = cp + e2_sd_load(buf, cp, caller_off);
-                    cp = cp + e2_sd_store(buf, cp, po2);
-                } else {
-                    cp = cp + e2_ld(buf, cp, 10, caller_off);
-                    cp = cp + e2_st(buf, cp, 10, po2);
-                }
-            } else {
-                if pi == 0 { cp = cp + e2_st(buf, cp, 7, po2); }
-                if pi == 1 { w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 117); w8(buf, cp+3, po2); cp = cp + 4; }
-                if pi == 2 { w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 85); w8(buf, cp+3, po2); cp = cp + 4; }
-                if pi == 3 { w8(buf, cp, 72); w8(buf, cp+1, 137); w8(buf, cp+2, 77); w8(buf, cp+3, po2); cp = cp + 4; }
-                if pi == 4 { w8(buf, cp, 76); w8(buf, cp+1, 137); w8(buf, cp+2, 69); w8(buf, cp+3, po2); cp = cp + 4; }
-                if pi == 5 { w8(buf, cp, 76); w8(buf, cp+1, 137); w8(buf, cp+2, 77); w8(buf, cp+3, po2); cp = cp + 4; }
-            }
-            // int 多字 M1（Task 4）tag 卫生③：tagged 参数行的 prologue 定值
-            // 清 tag——参数在函数内首次定值前可能被消费者读取（tag 闭包可含
-            // 参数行：p = p + k 的 B' 定值拷贝），无本清则读到上次调用/垃圾
-            // tag。参数行按强制栈槽保存（po2），tag 字节同在帧内。
-            if pty == TI_INT {
-                ptg := g2_tag_off(vs + pi);
-                if ptg != -1 {
-                    if ptg >= -128 && ptg <= 127 {
-                        w8(buf, cp, 198); w8(buf, cp+1, 69); w8(buf, cp+2, ptg); w8(buf, cp+3, 0); cp = cp + 4;
-                    } else {
-                        w8(buf, cp, 198); w8(buf, cp+1, 133); e2_w32(buf, cp+2, ptg); w8(buf, cp+6, 0); cp = cp + 7;
-                    }
-                }
-            }
-        pi = pi + 1; }
-
-        // Load register-allocated parameters from stack to callee-saved regs
-        if g_opt_level >= 1 {
-            pi2 : ., mut = 0;
-            loop { if pi2 >= pc || pi2 >= 6 { break; }
-                pri := get_reg_for_var(vs + pi2);
-                if pri >= 0 {
-                    pso2 := -(vs + pi2 + 1 - g_current_func_var_start) * 8;  // force stack slot
-                    // mov reg, [rbp+offset] — load from stack to allocated register
-                    cp = cp + emit_rex(buf, cp, 1, pri/8, 0, 0);
-                    e2_w8(buf, cp, 139); cp = cp + 1;  // 0x8B MOV r64, r/m64
-                    cp = cp + emit_modrm(buf, cp, 1, pri%8, 5);  // [rbp+disp8]
-                    e2_w8(buf, cp, pso2); cp = cp + 1;
-                }
-            pi2 = pi2 + 1; }
-        }
+        // ── 序言 + 形参落槽 + 寄存器参数装载（frame.cr pf_prologue）──
+        // 帧 setup（opt≥1 六寄存器保存 → push rbp/mov rbp,rsp → sub rsp 占位
+        // 立即数）+ 形参落槽（XMM/int/栈参 + tag 卫生③参数行清 tag）+ 寄存器
+        // 分配参数装载。帧序唯一发射器（H2 ③）；ss = pf_frame_size 结果。
+        cp = pf_prologue(vs, pc, g_x86_emit_stack_size, buf, cp);
 
         // function body — emit instructions
         g_x86_func_frame_start = cp;  // absolute buffer pos of body start
@@ -1232,96 +1147,11 @@ fi = 0; loop { if fi >= g_ir_func_count { break; }
             cp = cp + sz;
         ii = ii + 1; }
 
-        // patch RETURNs to epilogue
-        epi_pos := cp;
-        print("  rets: "); print(int_str(g_x86_ret_patch_count)); println("");
-        rpi := 0; loop { if rpi >= g_x86_ret_patch_count { break; }
-            jmp_pos := r64(g_x86_ret_patch_pos, rpi * 8);
-            rel := epi_pos - (jmp_pos + 5);
-            w32(buf, jmp_pos + 1, rel);
-        rpi = rpi + 1; }
-        g_x86_ret_patch_count = 0;
-
-        // Patch prologue sub rsp with actual stack size
-        if save_ss > 0 {
-            ss3 := save_ss;
-            if ss3 > 127 {
-                e2_w32(buf, g_x86_sub_rsp_pos + 3, ss3);
-            } else {
-                w8(buf, g_x86_sub_rsp_pos + 3, ss3);
-            }
-        }
-
-        // epilogue (emit with correct stack size, no placeholder)
-        if save_ss > 0 {
-            if save_ss > 127 {
-                w8(buf, cp, 72); w8(buf, cp+1, 129); w8(buf, cp+2, 196);
-                e2_w32(buf, cp+3, save_ss); cp = cp + 7;
-            } else {
-                w8(buf, cp, 72); w8(buf, cp+1, 131); w8(buf, cp+2, 196); w8(buf, cp+3, save_ss); cp = cp + 4;
-            }
-        }
-        if g_opt_level >= 1 {
-            // Pops in REVERSE order: rbp, r15, r14, r13, r12, rbx
-            w8(buf, cp, 93); cp = cp + 1;  // pop rbp
-            w8(buf, cp, 65); w8(buf, cp+1, 95); cp = cp + 2;  // pop r15
-            w8(buf, cp, 65); w8(buf, cp+1, 94); cp = cp + 2;  // pop r14
-            w8(buf, cp, 65); w8(buf, cp+1, 93); cp = cp + 2;  // pop r13
-            w8(buf, cp, 65); w8(buf, cp+1, 92); cp = cp + 2;  // pop r12
-            w8(buf, cp, 91); cp = cp + 1;  // pop rbx
-        } else {
-            w8(buf, cp, 93); cp = cp + 1;  // pop rbp
-        }
-        w8(buf, cp, 195); cp = cp + 1;  // ret
-
-        // ── int 多字 M1（Task 3）：慢路径块（函数尾附加）+ jo rel32 回填 ──
-        // 每 jo 站点独立块（块形状决策：jo 现场 = dest 槽/回跳点逐站点而异，
-        // 共享块需逐站分发 = 复杂度不值；块 ≈ 45B × 站点数，函数尾冷区，M1
-        // 保守 tagged 集代价的一部分——与 Task 2 已付的每站 jo 6B 同族）。
-        // 块 = 真实 2-limb 修正代码（e2_mw_slow_block，instr.cr）：
-        //   修正 128 位值 → alloc(16)（alloc_patch 注册——计数逐函数不重置，
-        //   与函数体 alloc 调用同批回填）→ 写 2-limb → 值槽存指针（含
-        //   O1/O2 reg 形态——g2_slot 于当前函数上下文现算，与函数体发射
-        //   同源同值）→ tag 置位 → jmp 回该站点快路径 store 之后。
-        // jo 记录（pos/dest/is_sub/resume——g2_init 清零逐函数段）此处按站
-        // 点点序发射；无 jo 的函数不发块、零字节影响（untagged 快路径零变化）。
-        if g_x86_mw_jo_count > 0 {
-            mw_ji : ., mut = 0;
-            loop { if mw_ji >= g_x86_mw_jo_count { break; }
-                jo_pos := r64(g_x86_mw_jo_pos, mw_ji * 8);
-                jo_d := r64(g_x86_mw_jo_dest, mw_ji * 8);
-                jo_sub := r64(g_x86_mw_jo_is_sub, mw_ji * 8);
-                jo_res := r64(g_x86_mw_jo_resume, mw_ji * 8);
-                mw_blk := cp;
-                w32(buf, jo_pos + 2, mw_blk - (jo_pos + 6));
-                cp = cp + e2_mw_slow_block(buf, cp, jo_d, jo_sub, jo_res);
-                mw_ji = mw_ji + 1; }
-            g_x86_mw_jo_count = 0;
-        }
-        // ── int 多字 M1（Task 4）：2L 操作数块（函数尾附加，jo 块之后）──
-        // 每消费者站点独立块（快路径 tag 检查 jne → 块首；块 = 128 位算术
-        // 或比较 + 公共落值——e2_mw_opnd_block，instr.cr）。块形状按站点
-        // 静态参数化（操作数行 tagged 与否决定分派形态），含 alloc(16) 的
-        // 块与函数体同批回填（alloc_patch 计数逐函数不重置）。jne rel32
-        // 位置在 oc 记录（pos1/pos2，-1 = 无第二个检查），块位置 = 发射时
-        // cp。无消费者站点的函数零字节（untagged 快路径零变化保持）。
-        if g_x86_mw_oc_count > 0 {
-            mw_oi : ., mut = 0;
-            loop { if mw_oi >= g_x86_mw_oc_count { break; }
-                oc_p1 := r64(g_x86_mw_oc_pos1, mw_oi * 8);
-                oc_p2 := r64(g_x86_mw_oc_pos2, mw_oi * 8);
-                oc_s1 := r64(g_x86_mw_oc_s1, mw_oi * 8);
-                oc_s2 := r64(g_x86_mw_oc_s2, mw_oi * 8);
-                oc_d := r64(g_x86_mw_oc_dest, mw_oi * 8);
-                oc_op := r64(g_x86_mw_oc_op, mw_oi * 8);
-                oc_res := r64(g_x86_mw_oc_resume, mw_oi * 8);
-                oc_blk := cp;
-                if oc_p1 >= 0 { w32(buf, oc_p1 + 2, oc_blk - (oc_p1 + 6)); }
-                if oc_p2 >= 0 { w32(buf, oc_p2 + 2, oc_blk - (oc_p2 + 6)); }
-                cp = cp + e2_mw_opnd_block(buf, cp, oc_s1, oc_s2, oc_d, oc_op, oc_res);
-                mw_oi = mw_oi + 1; }
-            g_x86_mw_oc_count = 0;
-        }
+        // ── 尾声 + 函数尾附加块（frame.cr pf_epilogue）──
+        // RETURN patch → sub rsp 立即数回填（save_ss = 本函数帧字节）→
+        // epilogue（add rsp/opt≥1 逆序 pop/pop rbp/ret）→ jo 慢路径块 +
+        // 2L 操作数块（函数尾冷区）。帧序唯一发射器（H2 ③）。
+        cp = pf_epilogue(save_ss, buf, cp);
         fi = fi + 1; }
 
     // ── M2a Task 2：事件流 rel32 回填（回填表 kind 0 = 事件流位置）──

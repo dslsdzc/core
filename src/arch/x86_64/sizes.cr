@@ -6,8 +6,10 @@
 //   - Phase 2 prologue/epilogue uses these helpers
 //   - emit_instr() returns sizes via e2_* return values (must match)
 //
-// NEVER hardcode byte counts in elf.cr, instr.cr, resolve.cr, or src/os/linux/entry.cr
-// (_start 体与 sz_start_body/sz_start_argv_save 必须同步——H2 类双源守护).
+// NEVER hardcode byte counts in elf.cr, instr.cr, resolve.cr, frame.cr, or
+// src/os/linux/entry.cr (_start 体与 sz_start_body/sz_start_argv_save 必须同步
+// ——H2 类双源守护；frame.cr 的 pf_frame_overhead/pf_prologue/pf_epilogue 分居
+// 核算侧与发射侧,尺寸必须经本文件 sz_* 单源).
 // Change a size here → all phases automatically agree.
 // ══════════════════════════════════════════════════════════════
 

@@ -60,6 +60,7 @@ arch_x86_64_files = [
     'src/arch/x86_64/regalloc.cr',
     'src/arch/x86_64/sizes.cr',
     'src/arch/x86_64/instr.cr',
+    'src/arch/x86_64/frame.cr',
 ]
 
 # ② 格式轴 ELF：重定位 + 容器/段/phdr + 链接机制。

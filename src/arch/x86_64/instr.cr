@@ -128,8 +128,12 @@ fn g2_rodata_sz() -> int {
 //   - mw_setup_tags(fi, vs, vc)：per 函数识别 + 填表（elf.cr 两阶段各一次）；
 //   - g_x86_mw_tag_count：tagged 数 = tag 区字节数；
 //   - g2_tag_off(var_idx)：var 的 tag 字节偏移（-1 = 非 tagged）——慢路径写
-//     tag（Task 3）、消费者读 tag（Task 4）均走它；
-//   - mw_frame_size(vc)：含 tag 区的帧总字节（已按 SysV 16 对齐规则取整）。
+//     tag（Task 3）、消费者读 tag（Task 4）均走它；**x86 实例化波 1 Task 3
+//     起定义迁 src/arch/x86_64/frame.cr（H3 裁决：帧布局面归 frame——tag2l
+//     依赖 frame；本文件 mw 族消费点经扁平单元解析不变）**；
+//   - pf_frame_size(vc)：含 tag 区的帧总字节（已按 SysV 16 对齐规则取整）——
+//     同迁 frame.cr（H2 单源：Phase 2 dry-run 与 Phase 3 sub rsp 立即数共用
+//     ——此前名字 mw_frame_size）。
 // Task 5（D6「tagged 只栈」）定案：**不排除寄存器分配**——plan 原案的排除
 // 动机（多字值不可驻单寄存器）被本表示消解：槽/寄存器驻留的是 64 位快值或
 // 2-limb 堆对象指针，128 位载荷在堆上，tag 在帧字节——reg 形态状态完整。
@@ -217,34 +221,6 @@ fn mw_setup_tags(fi: int, vs: int, vc: int) {
         k = k + 1;
     }
     g_x86_mw_tag_count = cnt;
-}
-
-fn g2_tag_off(v: int) -> int {
-    // var v（当前函数内）的 tag 字节偏移（相对 rbp，恒负）；-1 = 非 tagged。
-    // 仅当前函数内有效（表由 mw_setup_tags 按函数填充）。
-    if v < 0 { return -1; }
-    lv := v - g_current_func_var_start;
-    if lv < 0 { return -1; }
-    if str_len(g_x86_mw_tag_off) <= lv * 8 { return -1; }
-    return r64(g_x86_mw_tag_off, lv * 8);
-}
-
-fn mw_frame_size(vc: int) -> int {
-    // 帧总字节 = var 槽 vc*8 + tag 区（g_x86_mw_tag_count 字节）再按现 SysV
-    // 规则补 16 对齐：opt≥1（6 pushes）帧 ≡ 8 (mod 16)；opt<1（1 push）≡ 0。
-    // tag 数为 0 时对任意 vc 的结果与旧公式逐字节一致（快路径零变化）。
-    sz : ., mut = vc * 8 + g_x86_mw_tag_count;
-    r := sz % 16;
-    if g_opt_level >= 1 {
-        if r != 8 {
-            pad := 8 - r;
-            if pad < 0 { pad = pad + 16; }
-            sz = sz + pad;
-        }
-    } else {
-        if r != 0 { sz = sz + (16 - r); }
-    }
-    return sz;
 }
 
 // ── Task 2：快路径溢出检测发射（jo → 函数尾慢路径块）──
