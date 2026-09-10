@@ -163,9 +163,9 @@ Direct ELF binary output for x86-64, used by `corearch`. 三轴目录 = 跨轴 i
 唯一通道（`module.cr` 回退链），组合根 = `src/targets/x86_64-linux/`（target triple 命名）：
 
 ```
-src/arch/x86_64/          → regalloc.cr（CAG 寄存器分配）· sizes.cr（指令字节尺寸单源）· instr.cr（指令编码 REX/ModRM/SIB + 全 IR opcode 发射）· core-x86.toml（HIT 表数据）
+src/arch/x86_64/          → regalloc.cr（CAG 寄存器分配）· sizes.cr（指令字节尺寸单源）· instr.cr（指令编码 REX/ModRM/SIB + 全 IR opcode 发射 + e2_* 原语）· frame.cr（帧布局/序言尾声——帧公式单入口 pf_frame_size）· tag2l.cr（int 多字 M1 tag/2L 编码族）· core-x86.toml（HIT 表数据）
 src/format/elf/           → elf.cr（ELF 头/phdr/段发射 + elf_gen）· resolve.cr（标签解析 res_labels）· ld.cr（动态链接 PLT/GOT/.so 装载）
-src/os/linux/             → entry.cr（_start 发射序 emit_start/emit_start_size——波 1 Task 2 落位）· syscall/callseq（Task 5/6 逐个落位）
+src/os/linux/             → entry.cr（_start 发射序 emit_start/emit_start_size）· callseq.cr（SysV AMD64 参数/栈/返回/调用序列）· syscall.cr（syscall3/4 内置体——rax 号 + rdi/rsi/rdx(/r10) 参数序）（三件均波 1 落位：Task 2/5/6）
 src/targets/x86_64-linux/ → 组合根（target triple）：main.cr + _import.cr + Core.toml（`corec build <dir>` 的 project-mode 入口）
 ```
 

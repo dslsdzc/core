@@ -13,11 +13,12 @@ Pipeline (fast path — no interpreter bottleneck, no gcc dependency):
 3. Generate x86-64 assembly via X86_64StackAsmGen
 4. Assemble + link with rt.s using as + ld
 
-清单分段（x86 实例化设计 §3——三轴组合）：
+清单分段（x86 实例化设计 §3——三轴组合；波 1 结构波已实施，Task 1-7 收官）：
   段内/段间**相对顺序 = 行为定义面**（平铺编译单元的声明序/全局序），分段只做
   命名与按序组合，顺序与拆分前逐一对应，不可乱序。
   架构轴 `arch_x86_64_files` × 格式轴 `format_elf_files` × OS 轴 `os_linux_files`
-  （波 1 Task 2/5/6 逐个落位——Task 2 已落 entry.cr）+ 组合根
+  （波 1 落位：Task 1 三轴搬迁 + 组合根 / Task 3/4 frame·tag2l 入架构轴 /
+  Task 2/5/6 entry·callseq·syscall 入 OS 轴——**全轴已就位**）+ 组合根
   `x86_linux_target_files`（target triple 命名：project-mode 入口链，不入
   concat——见段注释）。
 """

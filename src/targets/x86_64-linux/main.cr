@@ -5,8 +5,8 @@
 // 活入口注记（2026-09-10 内核完备 Task 1 评审 I-1 修正——原「死代码」注记驳斥）：
 // 本文件 = 组合根（x86_64-linux target）project-mode 构建的活入口——
 // corec build src/targets/x86_64-linux
-// 以本文件 main:158 → corearch_main :29 → load_ccr :62 → build_linear_schedule
-// :69 为链，backend_bootstrap stage 链全程经此入口自举（tests/selfhost/
+// 以本文件 main:160 → corearch_main :31 → load_ccr :64 → build_linear_schedule
+// :71 为链，backend_bootstrap stage 链全程经此入口自举（tests/selfhost/
 // test_backend_bootstrap.py project mode：corec build <目录> 的入口 = 该目录
 // main.cr——与 concat 清单并列的独立构建机制；Task 1 偏差 ① 实证并接线）。
 // 入口二元性：corearch concat 清单入口 = src/compiler/corearch.cr（wrapper
