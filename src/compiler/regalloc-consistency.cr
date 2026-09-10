@@ -30,7 +30,7 @@
 //   分配结果       = g_opt_meta REG_ASSIGN 对（var→reg）——corearch 进程内自算
 //                    （2026-09-07 移后端；负编码写 IR 操作数是已废弃旧设计）
 
-// 【四条判定（逻辑契约）——实现映射 src/arch/linux/ld/regalloc.cr】
+// 【四条判定（逻辑契约）——实现映射 src/arch/x86_64/regalloc.cr】
 //   ① 共存互斥：同位置（寄存器/home）的条目不共存
 //      —— verify_regalloc_consistency 规则①（sweep：归并排序 O(k log k) +
 //         组内最大 live_end 单遍——消费端门禁，不复用 O(E²) 两两）
@@ -61,7 +61,7 @@
 //     2026-09-06；探针 --inject-coexist-oob 随迁 corearch）
 
 // 参考实现（唯一真源，勿在此复制代码）：
-//   src/arch/linux/ld/regalloc.cr —— compute_live_ranges / compute_entries /
+//   src/arch/x86_64/regalloc.cr —— compute_live_ranges / compute_entries /
 //             entries_coexist / coexist_version_conflicts /
 //             verify_regalloc_consistency / alloc_registers（CAG 上下文贪心）
 //             （2026-09-07 自 opt.cr 迁入 corearch——corec 侧不再含分配实现）

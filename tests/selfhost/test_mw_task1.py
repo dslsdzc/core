@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """int 多字 M1 Task 1：tagged 槽框架（潜在多字变量识别 + tag 区 + 栈布局）。
 
-验证对象（src/arch/linux/ld/）：
+验证对象（架构轴 src/arch/x86_64/ + 格式轴 src/format/elf/）：
   - mw_setup_tags（instr.cr）：per 函数潜在多字识别 → tag 字节偏移表。
     识别 = 不动点闭包（评审修复：单遍前向对循环携带值不成立——tag 态可沿
     回边携带）：

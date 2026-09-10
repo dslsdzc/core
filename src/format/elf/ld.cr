@@ -1,4 +1,4 @@
-// === arch/linux/ld/ld.cr ===
+// === format/elf/ld.cr ===
 // Core dynamic ELF linker — mold-inspired chunk architecture.
 //
 // Chunks (kind dispatch):

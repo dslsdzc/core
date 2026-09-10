@@ -2186,7 +2186,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
 // HIT 表驱动发射（M1 Task 2/3）——事件流编码器（emit_instr 的并行路径）
 // ══════════════════════════════════════════════════════════════
 // 表模式下 corearch 内部 = IR →（lower_to_core.cr 降低）→ 事件流 →（本编码器
-// 表投影）→ 字节。数据 = core-x86.toml（src/arch/hit/，load_hit_table 已载入
+// 表投影）→ 字节。数据 = core-x86.toml（表数据归架构轴 src/arch/x86_64/，
+// load_hit_table 已载入
 // g_hit_events/steps）。降低在发射前一次性完成（hit_lower_program，
 // lower_to_core.cr：IR 直线子集 → 事件流 + 常量池）；每条 IR 指令在
 // g_hit_ev_map 记 [事件流起点, 条数]（0 条 = 非子集 → 落旧路径）。

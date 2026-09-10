@@ -8,8 +8,9 @@
 // （meta_set/append/remove/meta_reg_assign_total）+ 注入钩子（cir debug 测试通道）。
 // 同 concat 单编译单元（corearch concat）互调——跨文件引用无需声明头。
 // 目录分层（2026-09-10）：本文件位于 src/lattice/（格层 = 图→格→编码三层链的
-// 层名）——语义内核不属 x86 实例目录（原 src/arch/linux/ld/）；import ent_kernel
-// 解析经 module.cr 回退链的 src/lattice/ 条目（src/compiler 与 ld 两侧共享）。
+// 层名）——语义内核不属 x86 实例目录（原实例目录已于 x86 实例化波 1 Task 1
+// 拆为三轴 src/arch/x86_64 + src/format/elf + src/os/linux）；import ent_kernel
+// 解析经 module.cr 回退链的 src/lattice/ 条目（src/compiler 与组合根两侧共享）。
 // B 通道中立化（内核完备 Task 3，2026-09-10）：判定输入真相源 = 位置登记表
 // {entry→loc}（kern_loc_assign/clear/of——实例写 g_opt_meta 后经 kern API 成对
 // 登记/清除——双份同步责任在实例）；本文件读通道 = 登记表（meta_reg_for_var

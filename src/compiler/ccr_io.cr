@@ -847,7 +847,8 @@ fn inject_var_shift() -> int {
 // = v6 读路径退役——拒绝）---
 // 内核完备 Task 1（语义对象模型）：loader 产出 = 语义对象载入 + 守卫——
 // NOD→g_ir_instrs 线性重建段移出（调度重建 = 实例事务 build_linear_schedule，
-// regalloc.cr；入口 = corearch.cr / arch/linux/ld/main.cr 在 load 成功后调用）。
+// regalloc.cr；入口 = corearch.cr / 组合根 src/targets/x86_64-linux/main.cr
+// 在 load 成功后调用）。
 // 解析序：STR → SYM（globals/funcs 声明区重建 var 命名空间行序）→ REG
 // （nstart/ncount 派生 + func 指令边界回填）→ NOD（36B——28B 语义字段入对象
 // 缓冲 g_v7_nod_sem（对象留存形态裁决 (a)，邻接域入 g_v7_nod_meta——不再写

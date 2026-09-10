@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """int 多字 M1 Task 2/3：快路径溢出检测发射（tagged int add/sub + jo → 慢路径块）。
 
-验证对象（src/arch/linux/ld/）：
+验证对象（架构轴 src/arch/x86_64/ + 格式轴 src/format/elf/）：
   - emit_instr IR_BINARY int（TI_INT）ADD/SUB：dest ∈ tagged 集（g2_tag_off(d)
     != -1——Task 1 规则 A 对域内 add/sub dest 无条件标记）→ e2_alu 后紧跟
     jo（0F 80 rel32——rel8 对函数尾附加的慢路径块在 >127B 函数体上不可达，

@@ -491,7 +491,7 @@ fn corec_main() -> int {
     if cli_eq(cmd, "cir") {
         // regalloc 判定/条目调试通道（--dump-entries/--dump-coexist/--check-regalloc/
         // --inject-*）已随编码决策层迁 corearch（2026-09-07 regalloc 移后端）——
-        // corearch load .ccr 后自算自检（src/arch/linux/ld/regalloc.cr），载体 =
+        // corearch load .ccr 后自算自检（src/arch/x86_64/regalloc.cr），载体 =
         // corearch 同名隐藏 flag。
         dot := df_graph_to_dot();
         out := cli_get("output");

@@ -160,7 +160,7 @@ fn _toml_hex_digit(c: int) -> int {
 
 // Extract an int array value: key = [a, b, c]（项支持十进制与 0x/0X 十六进制，
 // 非负整数；值写入 out，每项 4B 小端）。供 HIT 表 opcode = [0x48, 0x29] 类
-// 条目使用（见 src/arch/hit/core-x86.toml）。
+// 条目使用（见 src/arch/x86_64/core-x86.toml）。
 // Returns item count on success（遇 ']' 收尾）；-1 = key 缺 / 值非数组 /
 // 项格式错 / 项数超过 max_items（不静默截断）。
 fn toml_get_int_list(content: string, key: string, out: string, max_items: int) -> int {

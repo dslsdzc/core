@@ -1,5 +1,7 @@
 // === src/arch/hit/hit.cr ===
 // 硬件接口表（HIT）：core-x86.toml → 内存表 加载器（M1 Task 1 + M2a Task 1 schema v2）。
+// 表数据归架构轴（src/arch/x86_64/core-x86.toml，x86 实例化波 1 Task 1 迁入）——
+// 本文件 = 引擎（留 src/arch/hit/，未来实例可复用）；路径由 --table 传入。
 // 设计：docs/superpowers/specs/2026-09-05-hardware-interface-table.md
 // 格式：docs/superpowers/plans/2026-09-05-hit-minimal-core-m1.md「表文件格式」节
 //      + docs/superpowers/specs/2026-09-07-hit-m2-design.md §3（schema v2）

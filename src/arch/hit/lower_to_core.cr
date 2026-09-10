@@ -23,8 +23,9 @@
 // 常量池（g_hit_pool，每槽 8B，按值去重）：值于发射尾随字符串区写入 .rodata；
 // 事件对池槽的引用由编码器记 g_hit_pool_patch（instr.cr 记、elf.cr 发射后回填 rip 位移）。
 //
-// 本文件进两份构建：corearch concat 清单（build_selfhost_native.py，位于
-// hit.cr 之后、instr.cr 之前）与 ld project-mode 单元（src/arch/linux/ld/
+// 本文件进两份构建：corearch concat 清单（build_selfhost_native.py 的
+// hit_engine_files 段，位于 common 之后、内核/架构轴之前）与组合根
+// project-mode 单元（src/targets/x86_64-linux/
 // _import.cr 的 `import lower_to_core`，2026-09-10 补——该单元原先漏此导入，
 // 致 15×N06+16×N01 静默未定义）。import 行供独立 `corec check`/project-mode
 // 解析（concat 构建剥离 import 行；io/ast/globals/dyn_arr/hit 均在闭包内；

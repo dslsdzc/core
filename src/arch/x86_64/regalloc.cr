@@ -1,4 +1,4 @@
-// === regalloc.cr ===
+// === regalloc.cr（架构轴 src/arch/x86_64/——x86 实例化波 1 Task 1 自实例目录迁入）===
 // 编码层资源决策（corearch 侧）：寄存器分配数据面（存在区间/版本条目/共存）
 // + CAG 分配（alloc_registers）+ 一致性判定（verify/注入钩子）。
 // 2026-09-07 自 opt.cr 按层拆分迁入（迁移段于 corec 侧 opt.cr 切换提交删除；
@@ -861,8 +861,9 @@ fn alloc_registers() {
 // （g_ir_instrs + g_ir_instr_count）。重建产物与移出前逐字节一致（判据 =
 // backend_bootstrap stage 链 byte-identical——纯搬移证明）。REG 展开/函数
 // 边界回填（root span → g_ir_func_instr_start/count）留在 loader（GC-3 守卫
-// 消费——Task 0 确认零线性流依赖）。调用方：corearch.cr / arch/linux/ld/
-// main.cr（自举 stage 链入口）——load_ccr 成功后、分派/发射前调用一次。
+// 消费——Task 0 确认零线性流依赖）。调用方：corearch.cr / 组合根
+// src/targets/x86_64-linux/main.cr（自举 stage 链入口）——load_ccr 成功后、
+// 分派/发射前调用一次。
 fn build_linear_schedule() {
     grow_ir_instrs(g_v7_nod_count);
     ni : ., mut = 0;

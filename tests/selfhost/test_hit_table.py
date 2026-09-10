@@ -25,7 +25,7 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parents[2]
 COREC = BASE / "build" / "corec"
 COREARCH = BASE / "build" / "corearch"
-TABLE = BASE / "src" / "arch" / "hit" / "core-x86.toml"
+TABLE = BASE / "src" / "arch" / "x86_64" / "core-x86.toml"
 HIT_SRC = BASE / "src" / "arch" / "hit" / "hit.cr"
 LOWER_SRC = BASE / "src" / "arch" / "hit" / "lower_to_core.cr"
 SMOKE_ADD = BASE / "tests" / "hit" / "smoke_add.cr"

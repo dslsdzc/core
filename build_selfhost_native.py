@@ -12,12 +12,88 @@ Pipeline (fast path — no interpreter bottleneck, no gcc dependency):
 2. Run through bootstrap Lexer → Parser → NameResolver → TypeChecker → IRGen
 3. Generate x86-64 assembly via X86_64StackAsmGen
 4. Assemble + link with rt.s using as + ld
+
+清单分段（x86 实例化设计 §3——三轴组合）：
+  段内/段间**相对顺序 = 行为定义面**（平铺编译单元的声明序/全局序），分段只做
+  命名与按序组合，顺序与拆分前逐一对应，不可乱序。
+  架构轴 `arch_x86_64_files` × 格式轴 `format_elf_files` × OS 轴 `os_linux_files`
+  （波 1 Task 2+ 落位，现为空）+ 组合根 `x86_linux_target_files`（target triple
+  命名：project-mode 入口链，不入 concat——见段注释）。
 """
-import sys, os, subprocess
+import sys, os, subprocess, io, contextlib
 
 sys.path.insert(0, 'bootstrap')
 
 BASE = os.path.dirname(__file__)
+
+
+# ── 清单分段（按三轴组织——concat = 按确定顺序组合）────────────────────
+
+# 与轴无关的公共面：runtime + stdlib + 前端共享数据结构。
+common_files = [
+    'src/runtime/arena_globals.cr',
+    'src/runtime/rt.cr',
+    'src/stdlib/io.cr',
+    'src/stdlib/fmt.cr',
+    'src/stdlib/cli.cr',
+    'src/stdlib/toml.cr',
+    'src/compiler/ast.cr',
+    'src/compiler/globals.cr',
+    'src/compiler/dyn_arr.cr',
+]
+
+# HIT 表引擎段：引擎留 src/arch/hit/（未来实例可复用的框架），
+# 表数据 core-x86.toml 归架构轴 src/arch/x86_64/（波 1 Task 1 迁移裁决）。
+hit_engine_files = [
+    'src/arch/hit/hit.cr',
+    'src/arch/hit/lower_to_core.cr',
+]
+
+# 语义内核段（lattice——范式无关，corec/corearch 双 concat 共享）。
+kernel_files = [
+    'src/lattice/ent_kernel.cr',
+]
+
+# ① 架构轴 x86_64：寄存器分配 CAG + 指令编码 + 字节尺寸单源（sizes.cr）。
+arch_x86_64_files = [
+    'src/arch/x86_64/regalloc.cr',
+    'src/arch/x86_64/sizes.cr',
+    'src/arch/x86_64/instr.cr',
+]
+
+# ② 格式轴 ELF：重定位 + 容器/段/phdr + 链接机制。
+format_elf_files = [
+    'src/format/elf/resolve.cr',
+    'src/format/elf/elf.cr',
+    'src/format/elf/ld.cr',
+]
+
+# ③ OS 轴 Linux：syscall/callseq/entry（波 1 Task 2/5/6 逐个落位——现为空段占位）。
+os_linux_files = [
+]
+
+# 后端收尾段：ccr 载入 + 单态化 + 运行时 stdlib 桥 + corearch 入口。
+backend_support_files = [
+    'src/compiler/ccr_io.cr',
+    'src/compiler/monomorph.cr',
+    'src/stdlib/hotpatch.cr',
+    'src/stdlib/arena.cr',
+    'src/stdlib/goroutine.cr',
+    'src/stdlib/chan.cr',
+    'src/stdlib/sched.cr',
+    'src/compiler/corearch.cr',
+]
+
+# 组合根（x86_64-linux target triple）：project-mode 入口链——`corec build
+# src/targets/x86_64-linux` 的入口 = 该目录 main.cr（load_project 直读）+
+# _import.cr（load_imports 直读）+ Core.toml（工程名）。**不入 concat**：
+# main.cr 的 fn main 与 concat 追加的 wrapper 冲突，且其 .cr 经 project-mode
+# 独立收编（stage0/stage 链即此入口）。仅纳入清单存在性守卫。
+x86_linux_target_files = [
+    'src/targets/x86_64-linux/main.cr',
+    'src/targets/x86_64-linux/_import.cr',
+    'src/targets/x86_64-linux/Core.toml',
+]
 
 
 def concat(files, wrapper_fn=None):
@@ -43,45 +119,58 @@ def concat(files, wrapper_fn=None):
     return src
 
 
-def compile_and_assemble(src, label, out_name):
-    """Run full pipeline on src, produce binary at build/{out_name}."""
-    from corec.frontend.lexer import Lexer
-    from corec.frontend.parser import Parser
-    from corec.frontend.name_resolver import NameResolver
-    from corec.frontend.desugar import MatchDesugarer
-    from corec.frontend.type_checker import TypeChecker
-    from corec.frontend.ir_gen import IRGen
-    from corec.backend.x86_64_stack_asm import X86_64StackAsmGen
-    from corec.utils.module_loader import resolve_imports
+# ── 构建守卫（x86 实例化设计 §3——吸收 ld 单元静默缺陷教训）──────────────
 
-    print(f"--- {label} ---")
-
-    lex = Lexer(src)
-    tokens = lex.tokenize()
-    print(f"  Tokens: {len(tokens)}")
-    ast = Parser(tokens).parse_compilation_unit()
-    resolve_imports(ast)
-    resolver = NameResolver()
-    resolver.resolve(ast)
-    desugarer = MatchDesugarer(resolver.symtab)
-    ast = desugarer.desugar(ast)
-    checker = TypeChecker(resolver.symtab)
-    checker.check(ast)
-    if resolver.errors:
-        print("  Errors:", resolver.errors)
+def guard_manifest(files, label):
+    """守卫①：清单文件存在性断言——缺失 = 构建早失败（防路径漂/搬迁漏改）。"""
+    missing = [f for f in files if not os.path.exists(os.path.join(BASE, f))]
+    if missing:
+        print(f"[GUARD FAIL] {label}: {len(missing)} manifest entr(y|ies) missing:")
+        for f in missing:
+            print(f"  - {f}")
         sys.exit(1)
-    if checker.errors:
-        print("  Checker warnings (non-fatal):", checker.errors)
-    print("  Type check passed")
+    print(f"[GUARD] {label}: manifest OK ({len(files)} files)")
 
-    ir_gen = IRGen(resolver.symtab)
-    mod = ir_gen.gen_module(ast)
-    print(f"  Functions: {len(mod.functions)}")
 
-    asm_gen = X86_64StackAsmGen(mod)
-    asm = asm_gen.generate()
-    print(f"  Assembly: {len(asm)} bytes")
+# 守卫②：构建日志诊断计数非零 = 失败门（TODO #6 建议③落地——project-mode
+# 单元曾以 rc=0 + 产物正常 + 全套互测 byte-identical 通过而**静默吞掉**
+# 34 行 error[（N06 未定义函数 / N01 未定义名），互测面完全不可见）。
+# 计数面 = `error[`（self-hosted corec 诊断前缀，src/compiler/diag.cr:134）
+# + Python bootstrap 面的等价未定义符号消息（bootstrap 诊断不带 `error[`
+# 前缀，其 checker 的未定义名消息 = 同一类静默未定义信号）。
+BOOTSTRAP_UNDEFINED_MARKERS = ("Undefined name:", "Undefined function")
 
+
+def guard_build_log(log_text, label):
+    """守卫②：本阶段构建日志 error[/未定义符号计数必须为 0。"""
+    hits = [ln for ln in log_text.splitlines() if "error[" in ln]
+    undef = sum(log_text.count(m) for m in BOOTSTRAP_UNDEFINED_MARKERS)
+    if hits or undef != 0:
+        print(f"[GUARD FAIL] {label}: build log diagnostics — "
+              f"error[ lines = {len(hits)}, undefined-symbol marks = {undef}")
+        for ln in hits[:40]:
+            print(f"  {ln}")
+        sys.exit(1)
+    print(f"[GUARD] {label}: build log clean (error[ = 0, undefined = 0)")
+
+
+class _LogTee:
+    """stdout 分流：终端（实时可见）+ 内存缓冲（供守卫②扫描本阶段日志）。"""
+
+    def __init__(self, stream, buf):
+        self._stream = stream
+        self._buf = buf
+
+    def write(self, s):
+        self._buf.write(s)
+        return self._stream.write(s)
+
+    def flush(self):
+        self._stream.flush()
+
+
+def emit(asm, out_name):
+    """Assemble + link the generated assembly into build/{out_name}."""
     os.makedirs('build', exist_ok=True)
     asm_path = f'build/{out_name}.s'
     with open(asm_path, 'w', encoding='utf-8') as f:
@@ -104,6 +193,53 @@ def compile_and_assemble(src, label, out_name):
     print()
 
 
+def compile_and_assemble(src, label, out_name):
+    """Run full pipeline on src, produce binary at build/{out_name}."""
+    from corec.frontend.lexer import Lexer
+    from corec.frontend.parser import Parser
+    from corec.frontend.name_resolver import NameResolver
+    from corec.frontend.desugar import MatchDesugarer
+    from corec.frontend.type_checker import TypeChecker
+    from corec.frontend.ir_gen import IRGen
+    from corec.backend.x86_64_stack_asm import X86_64StackAsmGen
+    from corec.utils.module_loader import resolve_imports
+
+    print(f"--- {label} ---")
+
+    log = io.StringIO()
+    with contextlib.redirect_stdout(_LogTee(sys.__stdout__, log)):
+        lex = Lexer(src)
+        tokens = lex.tokenize()
+        print(f"  Tokens: {len(tokens)}")
+        ast = Parser(tokens).parse_compilation_unit()
+        resolve_imports(ast)
+        resolver = NameResolver()
+        resolver.resolve(ast)
+        desugarer = MatchDesugarer(resolver.symtab)
+        ast = desugarer.desugar(ast)
+        checker = TypeChecker(resolver.symtab)
+        checker.check(ast)
+        if resolver.errors:
+            print("  Errors:", resolver.errors)
+            sys.exit(1)
+        if checker.errors:
+            print("  Checker warnings (non-fatal):", checker.errors)
+        print("  Type check passed")
+
+        ir_gen = IRGen(resolver.symtab)
+        mod = ir_gen.gen_module(ast)
+        print(f"  Functions: {len(mod.functions)}")
+
+    # 守卫②：诊断面（error[/未定义符号）在本阶段日志内必须为零。
+    guard_build_log(log.getvalue(), label)
+
+    asm_gen = X86_64StackAsmGen(mod)
+    asm = asm_gen.generate()
+    print(f"  Assembly: {len(asm)} bytes")
+
+    emit(asm, out_name)
+
+
 def build_runtime():
     """Build the shared runtime .o once."""
     print("--- Runtime (rt.s) ---")
@@ -122,80 +258,63 @@ def main():
     build_runtime()
 
     # corec — frontend: .cr → .ccr/.cir
+    corec_files = [
+        'src/runtime/arena_globals.cr',
+        'src/runtime/rt.cr',
+        'src/stdlib/io.cr',
+        'src/stdlib/fmt.cr',
+        'src/stdlib/cli.cr',
+        'src/compiler/ast.cr',
+        'src/compiler/globals.cr',
+        'src/compiler/dyn_arr.cr',
+        'src/compiler/lexer.cr',
+        'src/compiler/parser.cr',
+        'src/compiler/checker.cr',
+        'src/compiler/opt.cr',
+        'src/compiler/ptr_analysis.cr',
+        'src/compiler/region_check.cr',
+        'src/compiler/provenance_verify.cr',
+        'src/compiler/diag.cr',
+        'src/compiler/ext_mgr.cr',
+        'src/compiler/ext_safety.cr',
+        'src/compiler/ir_gen.cr',
+        'src/compiler/pass.cr',
+        'src/compiler/dataflow.cr',
+        'src/compiler/ccr_io.cr',
+        'src/lattice/ent_kernel.cr',
+        'src/compiler/module.cr',
+        'src/stdlib/toml.cr',
+        'src/stdlib/hotpatch.cr',
+        'src/stdlib/arena.cr',
+        'src/stdlib/goroutine.cr',
+        'src/stdlib/chan.cr',
+        'src/stdlib/sched.cr',
+        'src/compiler/project.cr',
+        'src/stdlib/os.cr',
+        'src/compiler/interp.cr',
+        'src/compiler/dump.cr',
+        'src/compiler/cir_cache.cr',
+        'src/compiler/monomorph.cr',
+        'src/compiler/main.cr',
+    ]
+    guard_manifest(corec_files, 'corec')
     compile_and_assemble(
-        concat([
-            'src/runtime/arena_globals.cr',
-            'src/runtime/rt.cr',
-            'src/stdlib/io.cr',
-            'src/stdlib/fmt.cr',
-            'src/stdlib/cli.cr',
-            'src/compiler/ast.cr',
-            'src/compiler/globals.cr',
-            'src/compiler/dyn_arr.cr',
-            'src/compiler/lexer.cr',
-            'src/compiler/parser.cr',
-            'src/compiler/checker.cr',
-            'src/compiler/opt.cr',
-            'src/compiler/ptr_analysis.cr',
-            'src/compiler/region_check.cr',
-            'src/compiler/provenance_verify.cr',
-            'src/compiler/diag.cr',
-            'src/compiler/ext_mgr.cr',
-            'src/compiler/ext_safety.cr',
-            'src/compiler/ir_gen.cr',
-            'src/compiler/pass.cr',
-            'src/compiler/dataflow.cr',
-            'src/compiler/ccr_io.cr',
-            'src/lattice/ent_kernel.cr',
-            'src/compiler/module.cr',
-            'src/stdlib/toml.cr',
-            'src/stdlib/hotpatch.cr',
-            'src/stdlib/arena.cr',
-            'src/stdlib/goroutine.cr',
-            'src/stdlib/chan.cr',
-            'src/stdlib/sched.cr',
-            'src/compiler/project.cr',
-            'src/stdlib/os.cr',
-            'src/compiler/interp.cr',
-            'src/compiler/dump.cr',
-            'src/compiler/cir_cache.cr',
-            'src/compiler/monomorph.cr',
-            'src/compiler/main.cr',
-        ], wrapper_fn='compiler_main'),
+        concat(corec_files, wrapper_fn='compiler_main'),
         label='corec',
         out_name='corec',
     )
 
     # corearch — backend: .ccr → binary/asm
+    # 段顺序 = 行为定义面：common → hit → kernel → 架构轴 → 格式轴 → OS 轴
+    # → 后端收尾（与拆分前清单逐一对应）。组合根 x86_linux_target_files 不入
+    # concat（见段注释）——单独纳入存在性守卫。
+    corearch_files = (common_files + hit_engine_files + kernel_files +
+                      arch_x86_64_files + format_elf_files + os_linux_files +
+                      backend_support_files)
+    guard_manifest(corearch_files, 'corearch')
+    guard_manifest(x86_linux_target_files, 'x86_64-linux target')
     compile_and_assemble(
-        concat([
-            'src/runtime/arena_globals.cr',
-            'src/runtime/rt.cr',
-            'src/stdlib/io.cr',
-            'src/stdlib/fmt.cr',
-            'src/stdlib/cli.cr',
-            'src/stdlib/toml.cr',
-            'src/compiler/ast.cr',
-            'src/compiler/globals.cr',
-            'src/compiler/dyn_arr.cr',
-            'src/arch/hit/hit.cr',
-            'src/arch/hit/lower_to_core.cr',
-            'src/lattice/ent_kernel.cr',
-            'src/arch/linux/ld/regalloc.cr',
-            'src/arch/linux/ld/sizes.cr',
-            'src/arch/linux/ld/instr.cr',
-            'src/arch/linux/ld/resolve.cr',
-            'src/arch/linux/ld/elf.cr',
-            'src/arch/linux/ld/ld.cr',
-            'src/compiler/ccr_io.cr',
-            'src/compiler/monomorph.cr',
-            'src/stdlib/hotpatch.cr',
-            'src/stdlib/arena.cr',
-            'src/stdlib/goroutine.cr',
-            'src/stdlib/chan.cr',
-            'src/stdlib/sched.cr',
-            'src/compiler/corearch.cr',
-        ], wrapper_fn='corearch_main'),
+        concat(corearch_files, wrapper_fn='corearch_main'),
         label='corearch',
         out_name='corearch',
     )
@@ -206,35 +325,37 @@ def main():
     # （ast/dyn_arr/toml/os/hotpatch——hotpatch 为 rt.s 的 SIGHUP 处理器必需）。
     # 注意：不含 src/compiler/main.cr 与 entry.cr——corec_main 未被 lsp 使用，
     # 且 entry.cr 的 fn main() 与 concat 追加的 wrapper 冲突。
+    corelsp_files = [
+        'src/runtime/arena_globals.cr',
+        'src/runtime/rt.cr',
+        'src/stdlib/io.cr',
+        'src/stdlib/fmt.cr',
+        'src/stdlib/toml.cr',
+        'src/stdlib/os.cr',
+        'src/stdlib/hotpatch.cr',
+        'src/stdlib/panic.cr',
+        'src/stdlib/arena.cr',
+        'src/stdlib/goroutine.cr',
+        'src/stdlib/chan.cr',
+        'src/stdlib/sched.cr',
+        'src/compiler/ast.cr',
+        'src/compiler/globals.cr',
+        'src/compiler/dyn_arr.cr',
+        'src/compiler/lexer.cr',
+        'src/compiler/parser.cr',
+        'src/compiler/checker.cr',
+        'src/compiler/diag.cr',
+        'src/compiler/module.cr',
+        'src/lsp/_import.cr',
+        'src/lsp/json.cr',
+        'src/lsp/rpc.cr',
+        'src/lsp/lsp.cr',
+        'src/lsp/analysis.cr',
+        'src/lsp/main.cr',
+    ]
+    guard_manifest(corelsp_files, 'corelsp')
     compile_and_assemble(
-        concat([
-            'src/runtime/arena_globals.cr',
-            'src/runtime/rt.cr',
-            'src/stdlib/io.cr',
-            'src/stdlib/fmt.cr',
-            'src/stdlib/toml.cr',
-            'src/stdlib/os.cr',
-            'src/stdlib/hotpatch.cr',
-            'src/stdlib/panic.cr',
-            'src/stdlib/arena.cr',
-            'src/stdlib/goroutine.cr',
-            'src/stdlib/chan.cr',
-            'src/stdlib/sched.cr',
-            'src/compiler/ast.cr',
-            'src/compiler/globals.cr',
-            'src/compiler/dyn_arr.cr',
-            'src/compiler/lexer.cr',
-            'src/compiler/parser.cr',
-            'src/compiler/checker.cr',
-            'src/compiler/diag.cr',
-            'src/compiler/module.cr',
-            'src/lsp/_import.cr',
-            'src/lsp/json.cr',
-            'src/lsp/rpc.cr',
-            'src/lsp/lsp.cr',
-            'src/lsp/analysis.cr',
-            'src/lsp/main.cr',
-        ], wrapper_fn='lsp_main'),
+        concat(corelsp_files, wrapper_fn='lsp_main'),
         label='corelsp',
         out_name='corelsp',
     )

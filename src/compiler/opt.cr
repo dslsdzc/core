@@ -1,6 +1,6 @@
 // === opt.cr ===
 // Corec 侧语义优化（2026-09-07 regalloc 移后端后剩件——编码层资源决策
-// 数据面/分配/判定已迁 src/arch/linux/ld/regalloc.cr）：
+// 数据面/分配/判定已迁 src/arch/x86_64/regalloc.cr）：
 //  - AST 常量折叠（ast_optimize_body 族——AST 层）
 //  - 线性流 CSE（pass_cse——IR 层，main.cr O≥1 调用）
 //  - optimize_all（历史编排入口——无调用者，见函数内注记）
@@ -306,7 +306,7 @@ fn optimize_all() {
         fi = fi + 1;
     }
     // 注（2026-09-07 regalloc 移后端）：alloc_registers/pass_stack_share 已迁
-    // corearch（src/arch/linux/ld/regalloc.cr——.ccr 不再传 REG_ASSIGN/ENT）。
+    // corearch（src/arch/x86_64/regalloc.cr——.ccr 不再传 REG_ASSIGN/ENT）。
     // 本函数无调用者（main.cr 直调各 pass），保留为历史编排入口。
     if g_opt_level >= 2 {
         pass_cse();

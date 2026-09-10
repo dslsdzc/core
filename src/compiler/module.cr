@@ -541,6 +541,28 @@ fn res_imports() {
                             path = "src/runtime/" + fs_path + ".cr";
                             content = module_get_source(path);
                         }
+                        // ── 三轴实例目录（x86 实例化波 1 Task 1 搬迁落位）──
+                        // 架构 × 格式 × OS 三轴目录 = 跨轴 import 的唯一通道（H5：
+                        // elf→arch 6 处跨轴缝依赖此回退链）。**置于 src/compiler/
+                        // 之前**：①实例文件须先于通用面命中（实例 = 特化，通用面 =
+                        // 兜底——与 src/arch/hit 同理）；②否则 src/compiler/elf.cr
+                        // （遗留死文件：零 importer + 不入任何 concat 清单）会遮蔽
+                        // src/format/elf/elf.cr，目标单元解析漂移 → elf_gen 等
+                        // N06 静默未定义。既有条目命中不漂：本三条目录为新建，
+                        // 其文件名（instr/sizes/regalloc/elf/resolve/ld）在
+                        // g_source_dir / src/stdlib / src/runtime 三级均无同名文件。
+                        if str_len(content) == 0 {
+                            path = "src/format/elf/" + fs_path + ".cr";
+                            content = module_get_source(path);
+                        }
+                        if str_len(content) == 0 {
+                            path = "src/arch/x86_64/" + fs_path + ".cr";
+                            content = module_get_source(path);
+                        }
+                        if str_len(content) == 0 {
+                            path = "src/os/linux/" + fs_path + ".cr";
+                            content = module_get_source(path);
+                        }
                         if str_len(content) == 0 {
                             path = "src/compiler/" + fs_path + ".cr";
                             content = module_get_source(path);
@@ -550,13 +572,24 @@ fn res_imports() {
                             content = module_get_source(path);
                         }
                         // ent_kernel.cr（语义内核，格层 src/lattice/——2026-09-10 自
-                        // src/arch/linux/ld/ 迁出：实例目录不再承载语义内核）双 concat
+                        // 旧实例目录迁出：实例目录不再承载语义内核；该目录于 x86
+                        // 实例化波 1 Task 1 拆为三轴 src/arch/x86_64 + src/format/elf
+                        // + src/os/linux）双 concat
                         // 共享——corec 写侧 save_ccr 直调 compute_live_ranges/
                         // grow_entries 等；镜像 src/compiler 跨树回退（同 concat 共享
                         // 文件可被任意编译单元 import——src/compiler 单元自身需经此路
-                        // 径收编内核；ld 实例单元与独立工程构建同经此路径命中）
+                        // 径收编内核；实例单元与独立工程构建同经此路径命中）
                         if str_len(content) == 0 {
                             path = "src/lattice/" + fs_path + ".cr";
+                            content = module_get_source(path);
+                        }
+                        // 组合根（三轴组合 = target triple 命名）：project-mode 入口
+                        // = 该目录 main.cr（load_project 直读）+ _import.cr（load_imports
+                        // 直读）——**后置于 compiler/lattice**：目录内 main.cr 非 import
+                        // 目标，前置会遮蔽既有 main/entry 命中（src/compiler/_import.cr
+                        // 的 import main/entry）；此条目为跨轴/跨单元收编面而备。
+                        if str_len(content) == 0 {
+                            path = "src/targets/x86_64-linux/" + fs_path + ".cr";
                             content = module_get_source(path);
                         }
                         if str_len(content) == 0 {
