@@ -516,9 +516,15 @@ fn tt_dnf(i: int) -> int {
     if t == TT_UNION { return tt_union(tt_dnf(tt_a(i)), tt_dnf(tt_b(i))); }
     if t == TT_INTER {
         l := tt_dnf(tt_a(i)); r := tt_dnf(tt_b(i));
-        if tt_tag(l) == TT_UNION { return tt_dnf(tt_inter(tt_a(l), r)); }   // (A∪B)∩C → (A∩C)∪(B∩C)
-        if tt_tag(r) == TT_UNION { return tt_dnf(tt_inter(l, tt_a(r))); }
-        return tt_inter(l, r);   // 已规范化（若为 ∩-链，由构造保证扁平）
+        // 分配律**两支都展开**：(A∪B)∩C → (A∩C) ∪ (B∩C)
+        // （本计划初稿只展开一支 = 静默丢项；P0 Task 2 自测 norm.distributed 实证 got INTER want UNION）
+        if tt_tag(l) == TT_UNION {
+            return tt_union(tt_dnf(tt_inter(tt_a(l), r)), tt_dnf(tt_inter(tt_b(l), r)));
+        }
+        if tt_tag(r) == TT_UNION {
+            return tt_union(tt_dnf(tt_inter(l, tt_a(r))), tt_dnf(tt_inter(l, tt_b(r))));
+        }
+        return tt_inter(l, r);   // 已规范化（∩-链扁平）
     }
     if t == TT_MU { return tt_mu(tt_a(i), tt_dnf(tt_b(i))); }
     return i;   // 字面
