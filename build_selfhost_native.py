@@ -132,17 +132,28 @@ def guard_manifest(files, label):
     print(f"[GUARD] {label}: manifest OK ({len(files)} files)")
 
 
-# 守卫②：构建日志诊断计数非零 = 失败门（TODO #6 建议③落地——project-mode
-# 单元曾以 rc=0 + 产物正常 + 全套互测 byte-identical 通过而**静默吞掉**
-# 34 行 error[（N06 未定义函数 / N01 未定义名），互测面完全不可见）。
+# 守卫②：**bootstrap-concat 日志**诊断计数非零 = 失败门（TODO #6 建议③的
+# concat 面落地）。背景：project-mode 单元曾以 rc=0 + 产物正常 + 全套互测
+# byte-identical 通过而**静默吞掉** 34 行 error[（N06 未定义函数 / N01 未定义名）。
 # 计数面 = `error[`（self-hosted corec 诊断前缀，src/compiler/diag.cr:134）
 # + Python bootstrap 面的等价未定义符号消息（bootstrap 诊断不带 `error[`
 # 前缀，其 checker 的未定义名消息 = 同一类静默未定义信号）。
+# **作用域限制**：本门只见本文件 concat 源经 Python bootstrap 管线的日志
+# （compile_and_assemble 的 _LogTee 缓冲）——self-hosted corec 的 project-mode
+# 构建（`corec build <dir>`，**TODO #6 ③ 的真正事发层**）不走此路径，故本门
+# 对它零覆盖；该面的同类门 = tests/selfhost/test_backend_bootstrap.py 的
+# run_checked（rc=0 时扫 stdout+stderr 的 `error[`）——test_backend_bootstrap
+# 的 stage 链（含各核心单元 project-mode 构建）正是该门的被执行面。两门互补，
+# 改一处须同步另一处。
 BOOTSTRAP_UNDEFINED_MARKERS = ("Undefined name:", "Undefined function")
 
 
 def guard_build_log(log_text, label):
-    """守卫②：本阶段构建日志 error[/未定义符号计数必须为 0。"""
+    """守卫②：本阶段（bootstrap-concat 面）构建日志 error[/未定义符号计数必须为 0。
+
+    project-mode 面（`corec build <dir>` 的 self-hosted 构建日志）不经此函数——
+    见 tests/selfhost/test_backend_bootstrap.py run_checked 内的对应门。
+    """
     hits = [ln for ln in log_text.splitlines() if "error[" in ln]
     undef = sum(log_text.count(m) for m in BOOTSTRAP_UNDEFINED_MARKERS)
     if hits or undef != 0:

@@ -135,6 +135,12 @@
 - **修复方向**：①旗标注册收敛——两入口共调一个 `register_backend_flags()`（或 ld/main.cr 直接复用 corearch.cr 的注册段），保留双 wrapper 前提下的单份真源；②或显式 documented divergence 留档——ld/main.cr 头注改为「表模式/调试通道仅 concat 入口支持」并加守卫（如 ld 产物遇 --table 报明确「此入口不支持表模式」而非 unknown flag）。①优先（同构主张才是原本设计意图）。**③静默未定义类守卫（2026-09-10 修复评审残留建议）**：project-mode 构建（`corec build src/arch/linux/ld` 等单元）的 `error[` 计数无任何自动断言——N06 类静默失败在 rc=0 + 产物正常 + 全部互测 byte-identical 的情况下完全不可见（pre-fix 状态即如此通过全套）；建议加「build log error 计数非零 = 失败」的构建/测试门（或 tools/diagnose.py 类收集纳入套件）。
 - **注意**：修①会改 ld project-mode 单元内容 → stage 链产物字节变（expected，非缺陷）；须同步跑 test_backend_bootstrap 判据（stage1==stage2==stage3 全程同源，仍成立）。
 
+### 7. 死文件 `src/compiler/elf.cr`（566 行，零 importer，不入任何清单）——符号遮蔽/归属误导（2026-09-10 x86 实例化波 1 Task 1 评审登记）
+- **现象**：`src/compiler/elf.cr` 无任何 importer、不入任何 concat 清单（build_selfhost_native.py / Core.toml / _import.cr 三面皆无），但以**同名符号**与活文件碰撞：`w8/w16/w32/w64`（= src/compiler/dyn_arr.cr 的字节写函数）与 `elf_write_code/elf_begin/elf_finish/parse_line/encode_instr/measure_instr/asm_to_bytes/skip_dir/is_label_line/align_up/ElfCtx/LineInfo/g_asm_code_size`（= src/format/elf/elf.cr 的原实现面）。
+- **机制/隐患**：`module.cr` 回退链序当前**恰好**保护它——三轴目录（`src/format/elf` 等）置于 `src/compiler/` **之前**（module.cr:544-553 注释明言：否则本文件遮蔽 `src/format/elf/elf.cr` → 目标单元解析漂移 → elf_gen 等 N06 静默未定义）。但这是**顺序依赖**而非结构保证：任何回退链重排或新增目录（波 1 Task 2-6 正在改 import 集与命中面）都可能翻转命中，而翻转后果 = `error[` 静默未定义类故障（先例见 #6 ③ / c138c44c）。
+- **实证**：波 1 Task 1 评审（.superpowers/sdd/w1-task-1-report.md §2.1、§6.1）+ module.cr:548-553 注释推理；全仓 grep 唯一引用 = 自身 + `docs/pseudocode/`（生成产物）——`tools/pseudocode_extract.py` ROOTS 含 `src/compiler` 整目录 glob，仍从该死文件抽取 ELF 写侧符号 → `docs/pseudocode/标识符对照表.md` **20 行**归属误导（与 `src/format/elf/elf.cr` 双源并存，无法分辨活面）。
+- **修复方向**：**删除**（首选——零 importer、零功能贡献；删除需用户明确许可，铁律 #3）并重生成伪代码对照表；备选 = 迁出活树（`legacy/` 等，避开 ROOTS glob）保留历史。删除后复跑 test_backend_bootstrap + full-bootstrap guard（预期零影响、byte-identical）。
+
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
 来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：

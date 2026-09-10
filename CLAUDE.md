@@ -157,17 +157,16 @@ src/compiler/
 └── _import.cr      → Shared imports for all compiler modules
 ```
 
-### ELF Backend (`src/arch/linux/ld/`)
+### Backend（x86 实例化三轴布局：架构 × 格式 × OS；`src/arch/linux/ld/` 已退役）
 
-Direct ELF binary output for x86-64, used by `corearch`:
+Direct ELF binary output for x86-64, used by `corearch`. 三轴目录 = 跨轴 import 的
+唯一通道（`module.cr` 回退链），组合根 = `src/targets/x86_64-linux/`（target triple 命名）：
 
 ```
-src/arch/linux/ld/
-├── elf.cr      → ELF header + program header generation, _start emission
-├── instr.cr    → Instruction encoding: REX, ModRM, SIB, all IR opcode emitters
-├── sizes.cr    → Instruction byte size helpers (sz_* functions)
-├── resolve.cr  → Label resolution pass (res_labels)
-└── ld.cr       → Dynamic linking (PLT/GOT, .so loading)
+src/arch/x86_64/          → regalloc.cr（CAG 寄存器分配）· sizes.cr（指令字节尺寸单源）· instr.cr（指令编码 REX/ModRM/SIB + 全 IR opcode 发射）· core-x86.toml（HIT 表数据）
+src/format/elf/           → elf.cr（ELF 头/phdr/段发射 + _start）· resolve.cr（标签解析 res_labels）· ld.cr（动态链接 PLT/GOT/.so 装载）
+src/os/linux/             → syscall/callseq/entry（OS 轴，波 1 Task 2+ 逐个落位——现空占位）
+src/targets/x86_64-linux/ → 组合根（target triple）：main.cr + _import.cr + Core.toml（`corec build <dir>` 的 project-mode 入口）
 ```
 
 ### Standard Library (`src/stdlib/`)

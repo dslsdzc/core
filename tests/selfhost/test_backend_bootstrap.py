@@ -24,7 +24,20 @@ def run_checked(args: list[str], label: str, env: dict[str, str]) -> bool:
         text=True,
         timeout=180,
     )
+    out = (result.stdout or "") + (result.stderr or "")
     if result.returncode == 0:
+        # 守卫②（project-mode 面）：rc=0 但构建日志带 error[ 诊断 = 失败。
+        # self-hosted corec 对未定义函数/名（error[N06]/N01）只打印诊断、**不置 rc**，
+        # 产物照常生成 → 互测面（stage 链 byte-identical）完全不可见（TODO #6 ③ 的
+        # 事发层）。bootstrap concat 面的同类门见 build_selfhost_native.py
+        # guard_build_log（该门只能看 concat 日志，看不到本入口）。
+        diag = [ln for ln in out.splitlines() if "error[" in ln]
+        if diag:
+            print(f"[FAIL] {label}: exit 0 but build log carries "
+                  f"{len(diag)} error[ diagnostic line(s):")
+            for ln in diag[:40]:
+                print(f"  {ln}")
+            return False
         print(f"[PASS] {label}")
         return True
     print(f"[FAIL] {label}: exit {result.returncode}")
