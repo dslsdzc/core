@@ -394,33 +394,20 @@ fn is_upper_first(s: string) -> bool {
 
 fn parse_primary() -> int {
     t := cur_tok();
-    if tok_k(t) == T_INT || (tok_k(t) >= T_INT_I8 && tok_k(t) <= T_INT_U64) {
+    if tok_k(t) == T_INT {
         advance_tok();
-        kn := tok_k(t);
-        w : ., mut = 0;
-        if kn == T_INT_I8 { w = W_I8; }
-        else if kn == T_INT_I16 { w = W_I16; }
-        else if kn == T_INT_I32 { w = W_I32; }
-        else if kn == T_INT_I64 { w = W_I64; }
-        else if kn == T_INT_U8 { w = W_U8; }
-        else if kn == T_INT_U16 { w = W_U16; }
-        else if kn == T_INT_U32 { w = W_U32; }
-        else if kn == T_INT_U64 { w = W_U64; }
-        return alloc_node(EXPR_INT, 0, 0, 0, tok_iv(t), TY_INT, w, tok_ln(t), tok_cl(t));
+        return alloc_node(EXPR_INT, 0, 0, 0, tok_iv(t), TY_INT, 0, tok_ln(t), tok_cl(t));
     }
-    if tok_k(t) == T_DEX || tok_k(t) == T_FLOAT_F32 || tok_k(t) == T_FLOAT_F64 {
+    if tok_k(t) == T_DEX {
         advance_tok();
-        kn := tok_k(t);
-        w : ., mut = 0;
-        if kn == T_FLOAT_F32 { w = W_F32; }
-        else if kn == T_FLOAT_F64 { w = W_F64; }
         // 节点字段（数值迁移 Task 4）：a = binary64 位模式（apx 快路径字面量表示，
         // 由 lexer 存入 token 的 lexeme 槽的数字串还原）；int_val = 定点缩放整数
-        // （精确表示，默认路径）；data = 宽度标注（_f32/_f64，保留）
+        // （精确表示，默认路径）。宽度后缀退役（2026-09-10 语言面收窄 §2）：data 槽
+        // 不再承载宽度标注，恒 0。
         bits : int = 0;
-        tl := r64(g_tokens, t * ESZ_TOKEN + OFF_TK_LEXEME);   // 词素串下标（-1 = 无）
+        tl := r64(g_tokens, t * ESZ_TOKEN + OFF_TK_LEXEME);
         if tl >= 0 { bits = str_to_f64_bits(istr_get(tl)); }
-        return alloc_node(EXPR_DEX, bits, 0, 0, tok_iv(t), TY_DEX, w, tok_ln(t), tok_cl(t));
+        return alloc_node(EXPR_DEX, bits, 0, 0, tok_iv(t), TY_DEX, 0, tok_ln(t), tok_cl(t));
     }
     if tok_k(t) == T_STRING {
         advance_tok();
@@ -899,19 +886,9 @@ fn parse_pattern() -> int {
         advance_tok();
         return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
     }
-    if tok_k(t) == T_INT || (tok_k(t) >= T_INT_I8 && tok_k(t) <= T_INT_U64) {
+    if tok_k(t) == T_INT {
         advance_tok();
-        kn := tok_k(t);
-        w : ., mut = 0;
-        if kn == T_INT_I8 { w = W_I8; }
-        else if kn == T_INT_I16 { w = W_I16; }
-        else if kn == T_INT_I32 { w = W_I32; }
-        else if kn == T_INT_I64 { w = W_I64; }
-        else if kn == T_INT_U8 { w = W_U8; }
-        else if kn == T_INT_U16 { w = W_U16; }
-        else if kn == T_INT_U32 { w = W_U32; }
-        else if kn == T_INT_U64 { w = W_U64; }
-        return alloc_node(EXPR_INT, 0, 0, 0, tok_iv(t), TY_INT, w, tok_ln(t), tok_cl(t));
+        return alloc_node(EXPR_INT, 0, 0, 0, tok_iv(t), TY_INT, 0, tok_ln(t), tok_cl(t));
     }
     if tok_k(t) == T_STRING {
         advance_tok();

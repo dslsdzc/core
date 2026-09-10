@@ -81,17 +81,9 @@ T_MINUS_EQ : int = 74;
 T_STAR_EQ : int = 75;
 T_SLASH_EQ : int = 76;
 
-// Suffixed integer/float token kinds (lexer emits these when suffix like _i32, _u64, _f32 is found)
-T_INT_I8 : int = 77;
-T_INT_I16 : int = 78;
-T_INT_I32 : int = 79;
-T_INT_I64 : int = 80;
-T_INT_U8 : int = 81;
-T_INT_U16 : int = 82;
-T_INT_U32 : int = 83;
-T_INT_U64 : int = 84;
-T_FLOAT_F32 : int = 85;
-T_FLOAT_F64 : int = 86;
+// 77-86 原为宽度后缀 token kind（T_INT_I8..T_INT_U64 / T_FLOAT_F32 / T_FLOAT_F64）。
+// 2026-09-10 语言面收窄 §2 删除：lexer 从不发射这些 kind（宽度后缀已退役，改响亮报错），
+// parser 侧引用同步移除。**勿重编号**——编号空间稳定（先例：T_FLOAT_TYPE 91 已删除）。
 T_NONE : int = 87;
 T_SOME : int = 88;
 T_LET : int = 89;
@@ -106,17 +98,8 @@ T_REF : int = 96;
 T_DYN : int = 99;  // dynamic type
 T_EXTERN : int = 100;  // extern "C" / foreign function declaration
 
-// Width constants (stored in EXPR_INT/EXPR_DEX data field)
-W_I8 : int = 1;
-W_I16 : int = 2;
-W_I32 : int = 3;
-W_I64 : int = 4;
-W_U8 : int = 5;
-W_U16 : int = 6;
-W_U32 : int = 7;
-W_U64 : int = 8;
-W_F32 : int = 9;
-W_F64 : int = 10;
+// W_I8..W_F64（1..10）原为「宽度标注」值域，仅供宽度后缀 token 分支使用。
+// 2026-09-10 语言面收窄 §2 随死分支一并删除。**勿重编号**。
 
 // Type constants
 TY_INT : int = 0;
