@@ -151,6 +151,12 @@
 - **现象**：IR_CALL_EXTERN 仅装载 6 个寄存器参（不调用栈参/清理——与 IR_CALL 的不对称，预存原样保留于 callseq.cr）；>6 int 参 extern 调用 = 静默语义缺口。
 - **取证/修复**：FFI 面（2026-07-30 FFI 计划未提及）；修复 = extern 栈参分派补齐或显式拒绝（rc=1）——波 2 FFI 面。
 
+### 10. elf.cr 三处手写 syscall 序列 = OS 轴收编面（2026-09-10 波 1 Task 6 评审登记——波 2 / 实例 B 前必办）
+- **现象**：`src/format/elf/elf.cr` 内三处 raw syscall 序列（**非内置体径**——内置体 syscall3/4 已归 src/os/linux/syscall.cr）：`emit_heap_expand` mmap（:442-468——6 参 rdi/rsi/rdx/r10/r8/r9，raw `w8(...)` 发射）、worker exit（:680——`mov eax,60` + syscall，**syscall1 形**）、clone（:710-724——`mov eax,56` + syscall，**syscall5 形**）。
+- **为何登记而非报告注**：①在**格式轴**文件里——波 2 若只做"syscall3/4 参数化"扫不到它们；②**证伪实例 B 承诺**——设计 §1/§5"换轴零改动"要求非 Linux OS 轴下 Linux ABI 字节不得留在 `src/format/elf/`。
+- **修复方向**：OS 轴 syscall 序面收编（搬运/参数化到 `src/os/linux/`——波 2 或实例 B 前置任务）；`elf.cr` 相关注已加交叉引用（Task 6 评审同批）。
+- **关联**：波 1 Task 6 评审 Important（.superpowers/sdd/w1-task-6-report.md）；TODO #8 ④（22 参 runtime 用例）同属波 1 遗留收口。
+
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
 来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：

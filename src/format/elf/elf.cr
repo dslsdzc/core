@@ -875,11 +875,15 @@ fn elf_gen(buf: string) -> int {
     grow_is_global(g_ir_var_count);
 
     // 内置体名索引扫描段（g_ni_* 赋值）：**保留原位**——本段整体参数化 =
-    // 波 2 面（x86 实例化设计 §5.2）。syscall3/syscall4 二项消费方 =
+    // 波 2 面（x86 实例化设计 §5 波 2）。syscall3/syscall4 二项消费方 =
     // instr.cr emit_instr 内置体分派链，其**发射序**已归 OS 轴
     // src/os/linux/syscall.cr（波 1 Task 6 抽取——sys_syscall3_stub/
     // sys_syscall4_stub：rax 号 + rdi/rsi/rdx(/r10) 参数序 + 0F 05 + 回存）；
-    // 本段只负责"名字 → 索引"，与发射面解耦（后续波次搬移/参数化只动本段）。
+    // 本段只负责"名字 → 索引"，与发射面解耦。**注**：本段 ≠ syscall 序全集
+    // ——elf.cr 另有三处手写 syscall 序列（emit_heap_expand mmap / worker
+    // exit / clone，syscall1/5/6 形，非内置体径）= OS 轴收编面，见 TODO #10
+    // （波 2 / 实例 B 前必办——实例 B 承诺"换轴零改动"要求 Linux ABI 字节
+    // 不留在格式轴）。
     g_ni_syscall3 = -1; g_ni_syscall4 = -1; g_ni_load8 = -1; g_ni_store8 = -1; g_ni_load64 = -1;
     g_ni_load_str_ptr = -1; g_ni_store_str_ptr = -1; g_ni_get_arg = -1;
     g_ni_w64 = -1; g_ni_dyncpy = -1; g_ni_r64 = -1;
