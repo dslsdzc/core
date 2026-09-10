@@ -15,7 +15,6 @@ R1 Task 4 判据（语言面收窄 §1.3 / R1 ②）：文件级全局的运行�
 """
 
 import subprocess
-import sys
 from pathlib import Path
 
 
@@ -106,13 +105,22 @@ CASES = [
 
 
 def clean_cache() -> None:
-    """ci 缓存键不含编译器身份（TODO #5）——判据前清缓存，避免旧 IR 冒充新编译器。"""
-    subprocess.run(
+    """ci 缓存键不含编译器身份（TODO #5）——判据前清缓存，避免旧 IR 冒充新编译器。
+
+    返回码必须检查（Task 4 评审 Minor）：清缓存失败 + 旧缓存 = 判据被静默污染
+    （正是本项目大忌）——失败即报错退出，不许继续跑。
+    """
+    result = subprocess.run(
         ["nice", "-n", "19", str(COREC), "clean-cache"],
         cwd=BASE,
         capture_output=True,
         text=True,
     )
+    if result.returncode != 0:
+        print(f"[FAIL] clean-cache failed (rc={result.returncode})")
+        for line in (result.stdout + result.stderr).strip().splitlines()[:10]:
+            print(f"       | {line}")
+        raise SystemExit(1)
 
 
 def has_diag(output: str) -> bool:

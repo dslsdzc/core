@@ -158,6 +158,22 @@
 - **修复方向**：OS 轴 syscall 序面收编（搬运/参数化到 `src/os/linux/`——波 2 或实例 B 前置任务）；`elf.cr` 相关注已加交叉引用（Task 6 评审同批）。
 - **关联**：波 1 Task 6 评审 Important（.superpowers/sdd/w1-task-6-report.md）；TODO #8 ④（22 参 runtime 用例）同属波 1 遗留收口。
 
+### 11. 解释器 callee 内联路径缺枚举族 opcode → 枚举双路径分叉（2026-09-10 R1 Task 4 评审发现——Important，本批 15 例未覆盖）
+- **现象**：解释器（interp.cr）的 callee 内联分派只补了聚合族（Task 4 补 7/8/11-16/31），**枚举族 opcode 仍缺**（如 `IR_MAKE_ENUM(17)`）——枚举值在 callee 内构造时 interp 与 ELF 结果分叉。
+- **复现（R1 Task 5 亲测复核）**：`build/review_t4/p14_enum_in_callee.cr` interp rc=0 vs ELF rc=33（interp 错值）；`build/review_t4/p15_enum_split.cr` interp rc=139（SIGSEGV）vs ELF rc=33。ELF 侧两例均正确。
+- **机制**：同 Task 4 已修的聚合族缺口——外函数内联路径缺 opcode 分派（主循环有、callee 路径无）；静默分叉类（rc 不反映）。
+- **修复方向**：按 Task 4 §6.2 同款「与主循环同语义同守卫」补齐枚举族分派（并加双路径用例入 tests/）。
+
+### 12. 类型别名仅一层解析（2026-09-10 R1 Task 4 评审发现——Minor）
+- **现象**：`type A = [int;2]; type B = A; g : B;` 仍双路径 SIGSEGV（interp rc=139 / ELF rc=139；R1 Task 5 亲测复核）；一层别名（`g : A`）正常（对照 interp rc=7）。
+- **机制**：`agg_elem_count_of` 只解析一层别名，嵌套别名至底元素类型/长度未回溯。
+- **修复方向**：`agg_elem_count_of` 递归/迭代至底（并防环——自引用别名）。有初值形态工作、无初值形态崩，故非全断。
+
+### 13. lexer 诊断前缀不一致 + 重复打印 + 边缘形态分歧（2026-09-10 R1 Task 3/5 评审与实测发现——诊断门零覆盖面）
+- **① 前缀不一致（守卫/测试门零覆盖——重要）**：lexer 走 `add_error`（`src/compiler/lexer.cr:38-44`）输出 `error: <msg>`（**无错误码**），而 checker/其余走 `diag.cr:134` 的 `error[XX]`。既有守卫与测试门（`build_selfhost_native.py:171-185` guard_build_log、`test_backend_bootstrap.py:29-40` run_checked、test_global_init `has_diag`）一律扫 `error[`——对 **lexer 诊断零覆盖**（实测 `./build/corec run 'fn main()->int{return 0xZZ;}'` → `error: invalid digit in integer literal`，全无 `error[`，rc=1 非静默故未被吞，但门不可见）。建议统一格式或扩展守卫扫描面（`error:` 类同样计入门）。
+- **② 重复打印 4 遍（Task 3 评审 Minor）**：同一条 lexer 诊断打印 4 次——多轮 tokenize 累积、`tokenize()` 不清零 `g_error_count`（既有行为，父版同款注释）。措辞层噪声，非正确性。
+- **③ 边缘形态分歧（既有，超出 R1 判据集）**：`1._5`（self-hosted 响亮报错 vs bootstrap 词法层 INT(1)+DOT+IDENT(_5)——整管线下仍报错、**无静默接受**）；`1.`（既有分歧）；`0x_` 诊断措辞优先级变化（现报分隔符消息，原报 invalid integer literal——两者皆错误，仅措辞）。
+
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
 来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：
@@ -205,6 +221,11 @@
 - 整数转指针产生 `asp=1`，解引必须位于 `unsafe`
 - 动态偏移使用 points-to 目标的实际 allocation base 生成 ELF 检查；多目标无法唯一定位基址时保守拒绝
 - 回归见 `tests/selfhost/test_pointer_safety.py`
+
+### 测试清单陈旧 + exists 静默跳过（2026-09-10 R1 Task 5 发现——**已修，登记备查同类面**；本小节编号系文档区既有序列，与「预存 Bug」区 #8 无关）
+- **已修**：`tests/selfhost/test_compile.py` `concat_sources()` 原以 `if os.path.exists(path)` **静默跳过**缺失条目——三条 `src/compiler/backend/**`（x86_64.cr / x86_64/instr.cr / resolve.cr）自波 1 三轴搬迁后长期不存在，清单无声缺斤短两而测试始终「全绿」。现改为**存在性断言**（`build_selfhost_native.py` guard_manifest 同款，缺失即 rc=1；负对照实证有牙：插入伪路径 → 精确报出该条目名）。死条目已删，清单条目全部现存。
+- **为何不补入三轴文件（实证）**：补入 `src/arch/x86_64/*` + `src/format/elf/*` + `src/os/linux/*` 后该单元缺 **68 个 HIT 引擎符号**（`src/arch/hit/hit.cr` / `lower_to_core.cr` 属独立清单段）——三轴文件归属 **corearch 编译单元**，本清单 = corec 前端单元闭包，故原为**刻意裁剪**（就地注释已写明归属）；已按 brief 的 fallback 分支处理（不硬塞、不静默跳过）。
+- **同类面建议**：其余「文件清单 + exists 静默跳过」形态应同法改存在性断言（波 1 评审曾清点同类 rc-only 面：`test_mw_task2.py:172` / `test_compile.py:127` / `test_live_ranges.py:52,73` / `test_directory_build.py:50,80,100`——那是 rc 门面，本条是**清单完整性**面，二者互补）。
 
 ### 内存模型方向：能力 + 格（v4 发布，2026-08-27）
 - 备忘：`docs/memory-model-capability-lattice.md`（v1 2026-08-16 → v2 2026-08-20 → v3 2026-08-26 → **v4 发布**；上下文包已删并入）
@@ -276,7 +297,10 @@
 - ~~**裸指针 asp 标记**（bare-ptr-model）~~（2026-09-05 落点核实：ir_gen.cr:2111-2117 整数转指针 asp=1 且从 `source_ti` 的 type extra 继承/清零，checker.cr:2244-2246 同步——与 pointer-model 设计一致）
 - **dex 任意精度精确小数未实现**（dex-precision，2026-08-28 审计）：设计 = 无上限小数位精确小数；实现 = 定点 S=10⁶（`src/stdlib/dex.cr:3-18`，注释「定点方案（执行时定稿，2026-08-16）」）——6 位小数 + int64 硬上限（加减 ≤9.2e12、乘 |a|·|b| ≤9.2e6）；设计意图与实现为语义级偏差。修复方向 = 动态位数表示（任意精度运算，重活，排期）
 - **apx 降级策略被实现为报错**（apx-degrade，2026-08-28 审计）：设计 = 只支持精确的环境直接忽略 apx 标签、走精确语义（优雅降级）；实现 = 解释器对 apx 的 I2F/F2I 显式报错（`src/stdlib/dex.cr:32-33`；报错本身是 Task 6 安全修复——替代静默跳过致 SIGFPE，但方向与设计相悖）。修复方向 = 解释器忽略 apx 标签走精确路径。注：apx 结果跨环境可不同（native 走 binary64），为标签显式代价，账本如实记录
-- **宽度类型移出语言**（width-out-of-language，2026-08-30 定案）：设计决定——int 无上限为默认（已定）；宽度（i64/u32/w32 等）不进入语言类型/标签体系，避免第二标签范式（单标签单范式原则）；机器形状全部归 hw-map/硬件接口表（`docs/superpowers/specs/2026-08-23-hw-map-design.md` 设备层 + `specs/2026-09-05-hardware-interface-table.md` 指令/运行层；crasm 退役后链式阻塞解除）；apx 保持单一语义 = 精度降级开关，不扩张为宽度标签。三层映射对应：图/格 = 纯数学，编码 = hw-map 领域。语言侧清理（不阻塞，可立即做）：ast.cr `T_INT_I8..T_INT_U64` / `T_FLOAT_F32/F64` 死条目移除（勿重编号）、`_f32/_f64` 后缀死路径处理、`1_000` 两编译器分歧复核；v6 规格影响：编码层宽度由目标自动决定，hw-map 为未来显式控制通道（v6 格式规格先行更新）
+- **宽度类型移出语言**（width-out-of-language，2026-08-30 定案）：设计决定——int 无上限为默认（已定）；宽度（i64/u32/w32 等）不进入语言类型/标签体系，避免第二标签范式（单标签单范式原则）；机器形状全部归 hw-map/硬件接口表（`docs/superpowers/specs/2026-08-23-hw-map-design.md` 设备层 + `specs/2026-09-05-hardware-interface-table.md` 指令/运行层；crasm 退役后链式阻塞解除）；apx 保持单一语义 = 精度降级开关，不扩张为宽度标签。三层映射对应：图/格 = 纯数学，编码 = hw-map 领域。语言侧清理（不阻塞，可立即做）——**✅ 2026-09-10 语言面收窄 R1 全部完成**：~~ast.cr `T_INT_I8..T_INT_U64` / `T_FLOAT_F32/F64` 死条目移除（勿重编号）~~（落点 ce3e541c——ast.cr 墓碑注释 + `W_*` 值域 + parser 两处死分支）、~~`_f32/_f64` 后缀死路径处理~~（落点 51d74be3——侦查裁决 = 纯机器宽度 → 退役并响亮报错；后缀位宽在词法层即丢弃、data 槽恒 0，无语言语义承载）、~~`1_000` 两编译器分歧复核~~（落点 51d74be3——`_` 分隔符不支持，bootstrap/self-hosted **统一响亮报错**：原 self-hosted 静默消费成值 0、bootstrap 静默接受成 1000，双向皆错；新增 `tests/selfhost/test_lexer_parity.py`）；v6 规格影响：编码层宽度由目标自动决定，hw-map 为未来显式控制通道（v6 格式规格先行更新）
+- **定长数组裁决**（fixed-array-retire，2026-09-10 用户拍板）：`[T; N]` **退役类型构造器身份、保留为「内联容量存储」表示提示**（语义归处 = product / 序列接口 + 长度 where / 图 F11 长度来源链；表示层归处 = 映射参数，与 hw-map 同层）；自举 10 处用法零改造。**R1 已办（2026-09-10）**：裁决注记（aa76f7f5——ast/checker/parser 七处「表示层概念」注释，零行为）+ 全局定长路径修复（71cb6278，见下行「全局初始化机制」）。**未办 = 类型身份退役本身**：`[T; N]` 从类型相等/子类型判定中降格 = **接口化轮 R2 落实**（checker 类型判定重做时自然剔除——R1 明确不做）。设计见 `docs/superpowers/specs/2026-09-10-language-surface-narrowing-design.md`（状态 = 已实施（R1））
+- **全局初始化机制**（global-init，2026-09-10 R1 Task 4 落地 71cb6278）：文件级全局的运行期初始化 = **main 序言 IR 注入**（需运行期初始化的全局：聚合 / 非常量初值 → `alloc + 逐元素/求值存 + 写槽` 序列）+ **解释器常量阶段**（标量常量初值）。两路径语义一致（判据 `tests/selfhost/test_global_init.py` 15 例双路径精确 rc）。原缺陷：`[T; N]` 全局 run rc=139（SIGSEGV）或静默 0；同面根因四修 = ELF 字段访问全局基址（`e2_load_var` 规约，原读栈垃圾）/ 解释器 callee 内联缺聚合族 opcode / callee 返回值暂存槽覆写首个全局 / 类型别名一层解析。**约束**：注入点选 main 序言的理由 = 无新 IR 函数 / 无 .ccr 段变更 / 无 `_start` 字节扰动——**未来若支持非 main 入口或库形态，须迁移到独立 init 区**（届时本条目的注入点假设失效）
+  - **记录（Task 4 评审 Minor，不修）**：① Task 4 报告 §6.5 称注入在 `g_cur_ret_ti = ret_ti` **之后**，实际在**之前**（`ir_gen.cr:2282`，= brief 指定位置）——报告措辞与代码不符（读码无歧义，代码正确、报告笔误）；② `alloc_type(TYP_ARRAY, TI_INT, cnt)` 硬编码元素类型 `TI_INT`（无观测差异——当前元素尺寸恒 8；未来出现非 8 字节元素类型时需参数化）
 - **类型系统方向定案**（type-system-direction，2026-08-30 定稿）：图本体 + 接口统一总纲——图 = 唯一真相层（类型 = 图标注、接口 = 图上契约、类型检查 = 图良构性验证 pass，与指针三 pass 同级）；接口注册表（int/dex/string = 原生接口条目，规则内建、公理引用规约层、用户不可实现）；where 值约束三档语义（常量→编译错误 / 符号→VC / 动态→运行时检查）；泛型 = 编译期接口具体化（无运行期字典）；宽度移出语言（见 width-out-of-language）。损失账本（免费午餐债 5 项）+ 演进顺序（where 值约束 → 泛型=编译期接口 → 验证切片 → v6 格形态 → 类型概念收敛，两条根基革命不得同时进行）+ 学术支撑（PLDI 2025 Webs 平行印证、语义子类型 = 完整补偿、ISO TS 6010 provenance 对齐）详见 `docs/superpowers/specs/2026-08-30-type-system-direction-design.md`
 - **边界判定图 pass**（bounds-inference，2026-09-05 挂账）：在 HDFG 上做下标/切片长度的符号传播 pass（与指针三 pass 同级）——idx 来源链 + slice 长度来源链（F11 侧表传播的图化升级）：证明恒安全 → 不发射检查（零成本）；证明恒越界 → 编译期 R002 拒绝；证明不了 → 保留运行时检查并带图推导必要性标注。目标：运行时 trap 面最小化（trap = 推导不出才留的兜底，兼作验证证据）；核心_pattern 桌面挂起坑的根治方向（见 :125 划销注）。现状基础：pass_before_array_access/ext_safety 检查发射钩子、slice_len 侧表（字面量/长度变量编码）、checker R002 编译期越界
 ## HIT 最小核（2026-09-06 M1 完成 → M2 挂账）

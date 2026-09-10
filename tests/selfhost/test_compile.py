@@ -24,24 +24,39 @@ def concat_sources():
         'src/compiler/ext_mgr.cr', 'src/compiler/ext_safety.cr',
         'src/compiler/ir_gen.cr', 'src/compiler/pass.cr',
         'src/compiler/dataflow.cr',
-        'src/compiler/backend/x86_64.cr', 'src/compiler/backend/x86_64/instr.cr',
+        # 原三条 `src/compiler/backend/**` 条目（x86_64.cr / x86_64/instr.cr /
+        # resolve.cr）已随波 1 三轴搬迁不存在，继任者居 src/arch/x86_64/*、
+        # src/format/elf/*、src/os/linux/*——归属 **corearch 编译单元**，不在本清单
+        # （本清单 = corec 前端单元的源码闭包）。2026-09-10 R1 Task 5 实证：把三轴
+        # 文件补入本单元会缺 68 个 HIT 引擎符号（src/arch/hit/* 为独立清单段，
+        # lower_to_core 亦缺）——即这是刻意裁剪而非遗漏，故不补入。三条死条目
+        # 删除（原被 exists 静默跳过，**拼接内容零变化**）；清单条目现全部为现存
+        # 路径，配下方存在性断言，杜绝再次静默漂移。
         'src/compiler/module.cr', 'src/compiler/ccr_io.cr',
         'src/lattice/ent_kernel.cr',
         'src/compiler/dump.cr',
         'src/compiler/cir_cache.cr',
         'src/compiler/monomorph.cr',
         'src/compiler/project.cr', 'src/compiler/interp.cr', 'src/stdlib/os.cr',
-        'src/compiler/backend/resolve.cr',
         'src/compiler/main.cr',
     ]
+    # 存在性断言（build_selfhost_native.py guard_manifest 同款）：清单条目缺失 =
+    # 立即失败。原实现为 `if os.path.exists(path)` 静默跳过——路径陈旧时清单会
+    # 无声缺斤短两，测试仍「全绿」（2026-09-10 R1 Task 5 发现并修正）。
+    missing = [f for f in files if not os.path.exists(os.path.join(BASE, f))]
+    if missing:
+        print(f"concat_sources: {len(missing)} manifest entr(y|ies) missing:")
+        for f in missing:
+            print(f"  - {f}")
+        sys.exit(1)
+
     parts = []
     for f in files:
         path = os.path.join(BASE, f)
-        if os.path.exists(path):
-            with open(path) as fh:
-                content = fh.read().strip()
-                if content:
-                    parts.append(content)
+        with open(path) as fh:
+            content = fh.read().strip()
+            if content:
+                parts.append(content)
     return '\n\n'.join(parts)
 
 

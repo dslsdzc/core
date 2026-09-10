@@ -405,7 +405,7 @@ fn parse_primary() -> int {
         // （精确表示，默认路径）。宽度后缀退役（2026-09-10 语言面收窄 §2）：data 槽
         // 不再承载宽度标注，恒 0。
         bits : int = 0;
-        tl := r64(g_tokens, t * ESZ_TOKEN + OFF_TK_LEXEME);
+        tl := r64(g_tokens, t * ESZ_TOKEN + OFF_TK_LEXEME);   // 词素串下标（-1 = 无）
         if tl >= 0 { bits = str_to_f64_bits(istr_get(tl)); }
         return alloc_node(EXPR_DEX, bits, 0, 0, tok_iv(t), TY_DEX, 0, tok_ln(t), tok_cl(t));
     }
