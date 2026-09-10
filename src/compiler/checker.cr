@@ -231,6 +231,10 @@ fn named_dedup_verify() -> int {
 fn init_types() {
     g_type_count = 0;
     named_dedup_reset();   // 类型表重置 → 侧表随之作废（陈旧 name→ti 不得跨重置复用）
+    // R2 P2a Task 3 评审 Critical：桥接缓存（ti→term）**同理必须作废**——本批起判定路径无条件
+    // 调 sh_term_of_ti，长驻进程（corelsp 每请求 init_types）复用行号时会命中陈旧 ti→term
+    // ⇒ 两个不同类型被判等（静默漏报；评审实证见 ty_shadow.cr:sh_map_reset 注记）。
+    sh_map_reset();
     // R2 P2a Task 3：判定回落计数随之归零（类型行号空间作废 → 计数只对本编译期有意义；
     // LSP 每请求走 check_all → 本行 → 计数不跨请求累积）
     g_replace_unknown = 0; g_replace_bridge = 0;

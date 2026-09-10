@@ -382,6 +382,40 @@ def test_large_frame_body():
     assert diagnostics["params"]["diagnostics"] == [], diagnostics
     shutdown_and_wait(proc)
 
+def test_double_open_bridge_cache_reset():
+    """R2 P2a Task 3 评审 Critical：桥接缓存（g_shadow_map）必须随类型表重置失效。
+
+    机制：Task 3 起判定路径**无条件**调用 sh_term_of_ti（此前仅 --type-shadow 下译项），
+    而桥接缓存 key = ti 本体；corelsp 每请求 `reset_frontend_state → check_all → init_types`
+    会清空重建类型表（**行号空间复用**）→ 陈旧 ti→term 命中即返回 ⇒ 两个不同类型被判等
+    （静默漏报）。本用例：同 URI 两次 didOpen，只把 `a` 的数组**元素型** int→bool，第二次
+    必须报出 1 条 `Assignment type mismatch`（新进程单跑 V2 = 1 条，见 fixture 注释）。
+    修复前实测 RED：V1=0 / V2=0（应为 V2=1）——证据见 r2p2-task-3-report §13。
+    """
+    proc = subprocess.Popen([BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    send(proc, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+    uri = "file:///tmp/bridge_cache_reset.cr"
+
+    def open_doc(text, version):
+        # didOpen 是通知：直接写帧再读一帧（不能用 send()——它会吞掉 publishDiagnostics）
+        body = json.dumps({"jsonrpc": "2.0", "method": "textDocument/didOpen",
+                           "params": {"textDocument": {"uri": uri, "version": version,
+                                                       "text": text}}}).encode()
+        proc.stdin.write(f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+        proc.stdin.flush()
+        return read_frame(proc)
+
+    r1 = open_doc(BRIDGE_V1, 1)
+    assert r1 is not None and r1["method"] == "textDocument/publishDiagnostics", r1
+    assert r1["params"]["diagnostics"] == [], r1      # 同为 [int;3] → 无诊断
+    r2 = open_doc(BRIDGE_V2, 2)
+    assert r2 is not None and r2["method"] == "textDocument/publishDiagnostics", r2
+    diags = r2["params"]["diagnostics"]
+    assert len(diags) == 1, r2                        # [bool;3] ← [int;3]：必须报出
+    assert "Assignment type mismatch" in diags[0]["message"], r2
+    shutdown_and_wait(proc)
+
+
 # ── 统一驱动（Task 7）───────────────────────────────────────────────────────
 # 按序执行全部测试组（每组独立 spawn，隔离全局状态）；失败即非零退出。
 
@@ -395,6 +429,7 @@ TESTS = [
     test_semantic_tokens_multiline,
     test_stdout_pollution_guard,
     test_large_frame_body,
+    test_double_open_bridge_cache_reset,
 ]
 
 def main() -> int:
@@ -416,6 +451,24 @@ def main() -> int:
 
 SAMPLE = 'fn main() -> int { return 42; }'
 BAD = 'fn main() -> int { return ; }'
+
+# 桥接缓存跨请求失效回归（R2 P2a Task 3 评审 Critical）——两版只差 `a` 的元素型：
+# V1 `[int;3]` → 新进程 rc=0（ok）；V2 `[bool;3]` → 新进程 1 条 error[TA01] Assignment
+# type mismatch。两次 didOpen 之间类型行号被复用（同 URI 重开），故缓存不失效即漏报。
+BRIDGE_V1 = ("fn f() -> int {\n"
+             "    a : [int;3] = [1,2,3];\n"
+             "    b : [int;3], mut = [4,5,6];\n"
+             "    b = a;\n"
+             "    return 0;\n"
+             "}\n"
+             "fn main() -> int { return f(); }\n")
+BRIDGE_V2 = ("fn f() -> int {\n"
+             "    a : [bool;3] = [true,false,true];\n"
+             "    b : [int;3], mut = [4,5,6];\n"
+             "    b = a;\n"
+             "    return 0;\n"
+             "}\n"
+             "fn main() -> int { return f(); }\n")
 
 if __name__ == "__main__":
     sys.exit(main())

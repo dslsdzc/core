@@ -30,9 +30,16 @@
 // 影子只**观察**：本层只读 checker 侧（g_types / g_gen_apply_data，见 sh_term_of_ti 的
 // 递归翻译）与引擎构造/判定 API，不写任何 checker 判定状态、不改判定结果、不写产物。
 // 引擎预算/memo 在每次影子判定前后各 ty_budget_reset → 影子运行不污染后续。
-// 影子的全部写入面 = globals.cr 的 g_shadow_* 一组 + 本层自持的 g_shadow_map（--type-shadow
-// 关时**除 `g_shadow_on` 自身外**连读都不发生：`type_equal` 包装 + `sh_site_begin` 早退
-// 先查它）→ 关/开两态基线产物逐字节不变。
+//
+// ⚠ **R2 P2a Task 3 起「关态连读都不发生」不再成立（评审 Critical 修复时更正）**：
+// 判定路径已改经引擎 → `type_equal_engine` **无条件**调用 `sh_term_of_ti`（Task 3 前仅
+// `--type-shadow` 下才译项）⇒ 本层的桥接缓存与 `g_shadow_hits/entries` 在**影子关**时也读写。
+// 因此：① 桥接缓存**必须随类型表重置失效**（`sh_map_reset`，经 `init_types()` 调用——
+// 否则长驻进程复用行号命中陈旧 ti→term = 两个不同类型被判等，见该函数注记）；
+// ② 本层「只观察」的准确含义是「不写 checker 判定状态、不改判定结果、不写产物」，
+// **不是**「零写入」；③ 仅剩的影子专属读数 = `g_shadow_on` 早退的
+// `sh_compare`/`sh_site_begin`/`sh_report`/`sh_dump_write`。
+// 关/开两态基线产物逐字节不变（判据实测见 r2p2-task-3-report §8.1）与上述无冲突。
 //
 // 缓存 g_shadow_map（16B/条 {ti, term}）：开放寻址线性探测（与引擎 g_tt_index 同式），
 // 键 = ti 本体（term 不入键）。计划骨架的两处缺口在本实现补齐（偏差逐条见 Task 1 报告）：
@@ -81,6 +88,19 @@ fn sh_base_ak(ty: int) -> int {
 }
 
 // ─── 桥接缓存（ti → term）───
+// **重置 = 随类型表作废**（R2 P2a Task 3 评审 Critical 修复；与 named_dedup_reset 同式）：
+// 键 = ti 本体，而 `init_types()` 会把类型表清空重建（行号空间复用）→ 陈旧 ti→term 若不清，
+// 长驻进程（corelsp 每请求 `reset_frontend_state → check_all → init_types`）里**命中即返回**
+// 上一请求的类型项 ⇒ 两个不同类型被判等（静默漏报）。评审实证：同 URI 两次 didOpen 只把
+// 数组元素型 int→bool，第二次 diagnostics=0（应 1 条 Assignment type mismatch）。
+// cap = 0 → 下次 sh_map_find 惰性重建（空槽全 -1）；entries/hits 归零（否则装填因子守卫
+// 按陈旧计数提前扩容，且 hits 跨请求累积失去诊断意义）。
+fn sh_map_reset() {
+    g_shadow_map_cap = 0;
+    g_shadow_entries = 0;
+    g_shadow_hits = 0;
+}
+
 fn sh_map_cap_init() {
     if g_shadow_map_cap <= 0 {
         nc : ., mut = SHADOW_MAP_INIT_CAP;

@@ -453,6 +453,33 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("t3.bridge_fallback_legacy", t3_bf, 1);
     ty_budget_reset(200000);
 
+    // --- R2 P2a Task 3 评审 Critical：桥接缓存**随类型表重置失效**（sh_map_reset）---
+    // 机制：本批起判定路径**无条件**调 sh_term_of_ti（Task 3 前仅 --type-shadow 下）→ 桥接缓存
+    // key = ti 本体，而 init_types() 清空重建类型表（**行号空间复用**）→ 陈旧的 ti→term 命中
+    // 即返回 = 两个不同类型被判等（长驻进程静默漏报；评审复现：corelsp 同 URI 两次 didOpen）。
+    // 用例 ① 重置后缓存确实清空（entries 0 + cap 0 = 惰性重建）；② 行号复用场景下**不得**返回
+    // 陈旧项——返回的必须是新类型的项（元素 AK 由 int 变 bool）。② 是 ① 的行为级对偶：
+    // 只查计数不查返回值的断言在「清了计数但表还活着」的错法下会假绿。
+    init_types();                                    // 干净起点（同时建立缓存基线）
+    t3c_tiA := alloc_type(TYP_ARRAY, TI_INT, 2);     // 行号 T
+    t3c_termA := sh_term_of_ti(t3c_tiA);             // 缓存 {T → seq(int)}
+    t3c_entries_mid := sh_map_entries();
+    init_types();                                    // 类型表 + 桥接缓存一并失效
+    t3c_entries_after := sh_map_entries();
+    total = total + 1; fails = fails + ts_check("t3c.map_reset_clears_bridge",
+        (t3c_entries_mid >= 1 && t3c_entries_after == 0 && g_shadow_map_cap == 0), 1);
+    t3c_tiB := alloc_type(TYP_ARRAY, TI_BOOL, 2);    // 同一行号 T（复用）
+    t3c_termB := sh_term_of_ti(t3c_tiB);
+    t3c_ok : ., mut = 0;
+    if t3c_tiB == t3c_tiA {                          // 场景成立：行号确实复用
+        if t3c_termB != t3c_termA {                  // 未返回陈旧项
+            if tt_a(tt_a(tt_c(t3c_termA))) == AK_INT {
+                if tt_a(tt_a(tt_c(t3c_termB))) == AK_BOOL { t3c_ok = 1; }
+            }
+        }
+    }
+    total = total + 1; fails = fails + ts_check("t3c.no_stale_term_after_reset", t3c_ok, 1);
+
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }
     return 0;
