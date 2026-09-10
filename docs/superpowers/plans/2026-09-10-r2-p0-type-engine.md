@@ -234,13 +234,22 @@ fn tt_hash5(tag: int, a: int, b: int, c: int, d: int) -> int {
     return h;
 }
 
+fn tt_mod(h: int, cap: int) -> int {
+    // 非负取模（**必须用这个，不要写 h - (h/cap)*cap**）：
+    // i64 除法向零截断——h 为负时上式得到负下标 → 探针越界 → 去重静默失效
+    // （2026-09-10 P0 Task 1 压力测试实证：扩容后 dedup 全灭）。
+    m : ., mut = h / 2;          // 折半再去符号：避免 i64min 直接取负溢出
+    if m < 0 { m = 0 - m; }
+    return m - (m / cap) * cap;
+}
+
 fn tt_reindex() {
     // 重建索引（扩容后调用）：遍历现有项，重放开放寻址插入
     i : ., mut = 0;
     loop {
         if i >= g_type_term_count { break; }
         h := r64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_HASH);
-        p : ., mut = h - (h / g_tt_index_cap) * g_tt_index_cap;
+        p : ., mut = tt_mod(h, g_tt_index_cap);
         loop {
             if r64(g_tt_index, p * 8) < 0 { break; }
             p = p + 1; if p >= g_tt_index_cap { p = 0; }
@@ -264,7 +273,7 @@ fn tt_term(tag: int, a: int, b: int, c: int, d: int) -> int {
     // 构造/复用：查哈希索引（开放寻址），未命中则追加
     if g_tt_index_cap <= 0 { grow_tt_index(2); }
     h := tt_hash5(tag, a, b, c, d);
-    p : ., mut = h - (h / g_tt_index_cap) * g_tt_index_cap;
+    p : ., mut = tt_mod(h, g_tt_index_cap);   // 非负取模（见 tt_mod 注释：负数取模是越界静默失效源）
     loop {
         idx := r64(g_tt_index, p * 8);
         if idx < 0 { break; }
