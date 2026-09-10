@@ -24,7 +24,8 @@
 // 递归翻译）与引擎构造/判定 API，不写任何 checker 判定状态、不改判定结果、不写产物。
 // 引擎预算/memo 在每次影子判定前后各 ty_budget_reset → 影子运行不污染后续。
 // 影子的全部写入面 = globals.cr 的 g_shadow_* 一组 + 本层自持的 g_shadow_map（--type-shadow
-// 关时连读都不发生：type_equal 包装先查 g_shadow_on）→ 关/开两态基线产物逐字节不变。
+// 关时**除 `g_shadow_on` 自身外**连读都不发生：`type_equal` 包装 + `sh_site_begin` 早退
+// 先查它）→ 关/开两态基线产物逐字节不变。
 //
 // 缓存 g_shadow_map（16B/条 {ti, term}）：开放寻址线性探测（与引擎 g_tt_index 同式），
 // 键 = ti 本体（term 不入键）。计划骨架的两处缺口在本实现补齐（偏差逐条见 Task 1 报告）：

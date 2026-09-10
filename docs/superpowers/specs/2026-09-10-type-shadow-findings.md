@@ -121,6 +121,8 @@ $ sha256sum /tmp/r1t4_base_bin /tmp/p1t3_off2 /tmp/p1t3_on2
 
 不变式：`agree + stricter + looser + unknown == decisions` 在**全部 67 条摘要行**成立（71 候选 − 4 排除 = 67；逐行核对，0 违例）。
 
+**「Task 3 时点」注（终审 M-3）**：上表逐行数字为 **Task 3 时点**（提交 `75c20297`）实测，**在最终提交上不可逐字复现**——②③ 含**编译器自身语料**（§2 末「语料自指说明」），Task 4 对 `ty_shadow.cr`/`type_terms.cr`/`type_selftest.cr` 的改动进入该语料 → 自指行一致 **+3**：`main.cr` 3964→3967、`_import.cr` 3844→3847、`ccr_io.cr`（③）4177→4180（Task 4 实测，提交 `7624a53c`）。非自指行不变（源与导入面均未改；抽检 `ptr_arith.cr` = 74、`toml.cr` = 120，与表/§1.2 一致）。机制见 §9.4；跨提交比较判定数须**同源同二进制**。**该组自指数字本身也随编译器自身源码改动而移动**（含注释行）——引用时须连同提交号（本注即为示例）。
+
 ### 3.2 站点直方图（逐档）
 
 | 档 | hotpatch-ret(1) | generic-arg(2) | generic-apply-base(3) | unify-fallback(4) | fn-body-ret(5) | assign-binary(6) | if-branch(7) | assign-node(8) |
@@ -251,7 +253,7 @@ $ sha256sum /tmp/r1t4_base_bin /tmp/p1t3_off2 /tmp/p1t3_on2
 `unknown_engine_budget = 0`（预算 200000 步在全部 26,704 次判定中**从未耗尽**）。
 
 **其他已登记项（非本任务范围）**：
-- 站点 6（`assign-binary`）不可达：parser 已把 `=` 一律降为 `EXPR_ASSIGN`（`parser.cr:222-224`），挂点保留但无样本 → 建议 Task 4 决定去留；
+- 站点 6（`assign-binary`）不可达：parser 已把 `=` 一律降为 `EXPR_ASSIGN`（`parser.cr:222-224`），挂点保留但无样本 → **Task 4 裁决（终审 M-1）：保留挂点，去留归 P2**（零成本、留证据面；不删——删须同步本节与 `ty_shadow.cr` 站点表）；
 - 站点 4 的分类行为（§5(c)）需在 P2 语料里补定向样例；
 - `tests/suite/test_control_flow.cr` / `test_generics.cr` 为 0 字节空文件（勘误 Task 2 的「预期失败 fixture」措辞）；`at_test_mini4/6` rc=139 属 TODO #16（嵌套 fn）；
 - `src/compiler/elf.cr`（566 行）在本轮 rc=0 但 2 个 parse error、0 判定 → 陈旧遗留文件，建议单开清理；
@@ -276,7 +278,7 @@ $ sha256sum /tmp/r1t4_base_bin /tmp/p1t3_off2 /tmp/p1t3_on2
 ```bash
 # 构建 + 自测（CPU 限制）
 nice -n 19 python3 build_selfhost_native.py
-nice -n 19 ./build/corec selftest-types            # 71/71
+nice -n 19 ./build/corec selftest-types            # 72/72（Task 4 后：+ 第二次重建守门 bridge.grow_rehash2；Task 3 时点 = 71/71）
 
 # 两态判据（开/关均须与基线逐字节相同；每次判据前 clean-cache，cwd = 仓库根）
 nice -n 19 ./build/corec clean-cache

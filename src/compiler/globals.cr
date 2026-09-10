@@ -249,7 +249,8 @@ g_shadow_map : string, mut;        g_shadow_map_cap : int, mut;
 g_shadow_hits : int, mut;          g_shadow_entries : int, mut;
 
 // R2 P1 Task 2：影子对拍挂点状态（`--type-shadow`）。**全部只在影子开时被写**——
-// 关时连读都不发生（type_equal 包装先查 g_shadow_on）→ 关态产物逐字节不变。
+// 关时**除 `g_shadow_on` 自身外**连读都不发生（`type_equal` 包装、`sh_site_begin` 早退
+// （Task 4 M3）、`sh_report`/`sh_dump_write` 首行各查它一次）→ 关态产物逐字节不变。
 // 四分类桶：agree（旧=引擎）/ old_stricter（旧拒新受）/ old_looser（旧受新拒 = 收紧面）
 // / unknown（三态 -1 或任一侧无法翻译）；恒有 agree+stricter+looser+unknown == total。
 g_shadow_on : int, mut;            g_shadow_site : int, mut;
