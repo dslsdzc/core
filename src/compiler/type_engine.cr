@@ -67,26 +67,53 @@ fn ty_ak_of(i: int) -> int {
 }
 
 // ─── 字面矛盾判定（product 是否为空集的一阶判据）───
+// 字面所属原子类（ATOM/⊤ₖ 正位置，及其否定）——-1 = 无类（VAR/复合/⊥/⊤）
+fn lit_class_of(i: int) -> int {
+    t := tt_tag(i);
+    if t == TT_ATOM || t == TT_TOP_K { return tt_a(i); }
+    if t == TT_NOT {
+        it := tt_tag(tt_a(i));
+        if it == TT_ATOM || it == TT_TOP_K { return tt_a(tt_a(i)); }
+    }
+    return -1;
+}
+
+fn lit_is_neg(i: int) -> int { if tt_tag(i) == TT_NOT { return 1; } return 0; }
+
+// 单对字面是否互斥（⟦p⟧ ∩ ⟦q⟧ = ∅）——**规则要窄**：
+//   正×正 异类 → ∅ ✓；正×负 **异类不空**（int ∩ ¬string = int ≠ ∅——P0 Task 4 自测实证
+//   早期版本把这条写错，导致 witness 恒 -1）；正×¬⊤ₖ 同类 → ∅；负×负 永不空。
+fn lit_empty_pair(p: int, q: int) -> int {
+    if tt_tag(p) == TT_BOT || tt_tag(q) == TT_BOT { return 1; }
+    if tt_not(q) == p { return 1; }                     // X ∧ ¬X
+    pc := lit_class_of(p);
+    qc := lit_class_of(q);
+    if pc < 0 || qc < 0 { return 0; }
+    pneg := lit_is_neg(p);
+    qneg := lit_is_neg(q);
+    if pneg == 0 && qneg == 0 { return ak_disjoint(pc, qc); }   // 正 × 正
+    if pneg == 0 && qneg != 0 {
+        if tt_tag(q) == TT_NOT && tt_tag(tt_a(q)) == TT_TOP_K && pc == qc { return 1; }
+        return 0;
+    }
+    if pneg != 0 && qneg == 0 {
+        if tt_tag(p) == TT_NOT && tt_tag(tt_a(p)) == TT_TOP_K && pc == qc { return 1; }
+        return 0;
+    }
+    return 0;   // 负 × 负
+}
+
 // 独立缓冲版（避免侧缓冲互踩：sub_cover 需同时持有 p/q 两侧字面集）
 fn lits_contradictory_buf(buf: int, n: int) -> int {
     i : ., mut = 0;
     loop {
         if i >= n { break; }
         p := r64(buf, i * 8);
-        if tt_tag(p) == TT_BOT { return 1; }
         j : ., mut = i + 1;
         loop {
             if j >= n { break; }
             q := r64(buf, j * 8);
-            if tt_not(q) == p { return 1; }              // X 与 ¬X
-            pk := ty_ak_of(p);
-            qk := ty_ak_of(q);
-            if pk >= 0 && qk >= 0 {
-                ppos := tt_tag(p) == TT_ATOM;
-                qpos := tt_tag(q) == TT_ATOM;
-                // 两个正原子、异类 → ∅
-                if ppos != 0 && qpos != 0 && ak_disjoint(pk, qk) == 1 { return 1; }
-            }
+            if lit_empty_pair(p, q) == 1 { return 1; }
             j = j + 1;
         }
         i = i + 1;
@@ -106,40 +133,7 @@ fn lits_copy(p: int) -> int {
 }
 
 fn lits_contradictory() -> int {
-    n := g_ty_lits_count;
-    i : ., mut = 0;
-    loop {
-        if i >= n { break; }
-        p := ty_lit_at(i);
-        if tt_tag(p) == TT_BOT { return 1; }
-        j : ., mut = i + 1;
-        loop {
-            if j >= n { break; }
-            q := ty_lit_at(j);
-            // X 与 ¬X
-            if tt_not(q) == p { return 1; }
-            // 互斥原子类
-            pk := ty_ak_of(p);
-            qk := ty_ak_of(q);
-            if pk >= 0 && qk >= 0 {
-                pneg := tt_tag(p) == TT_NOT;
-                qneg := tt_tag(q) == TT_NOT;
-                ppos := tt_tag(p) == TT_ATOM;
-                qpos := tt_tag(q) == TT_ATOM;
-                // 正原子 × 正原子 / 正原子 × ¬原子（异类）
-                if (ppos != 0 || pneg != 0) && (qpos != 0 || qneg != 0) {
-                    if (ppos != 0 && qpos != 0) && ak_disjoint(pk, qk) == 1 { return 1; }
-                    if (ppos != 0 && qneg != 0) && ak_disjoint(pk, qk) == 1 { return 1; }
-                    if (pneg != 0 && qpos != 0) && ak_disjoint(pk, qk) == 1 { return 1; }
-                }
-                // ¬⊤ₖ × 同类正原子 = ∅（⊤ₖ 被同原子类完全覆盖之外的补集仍非空——
-                // 只有类内单元素时才空；P0 保守不判，登记未覆盖面）
-            }
-            j = j + 1;
-        }
-        i = i + 1;
-    }
-    return 0;
+    return lits_contradictory_buf(g_ty_lits, g_ty_lits_count);
 }
 
 // ─── 字面蕴含（⟦lp⟧ ⊆ ⟦lq⟧）───
@@ -263,9 +257,11 @@ fn ty_uncovered() -> int { return g_ty_uncovered; }
 fn sub_cover(p: int, q: int) -> int {
     g_ty_steps = g_ty_steps + 1;
     if g_ty_steps > g_ty_budget_max { g_ty_exhausted = 1; return -1; }
-    // μ 展开（左右各自）
-    if tt_tag(p) == TT_MU { return sub_cover(tt_subst(tt_b(p), tt_a(p), p), q); }
-    if tt_tag(q) == TT_MU { return sub_cover(p, tt_subst(tt_b(q), tt_a(q), q)); }
+    // μ 展开（左右各自）——**必须走 ty_sub_core（memo 入口）**：展开后的项对会重复出现，
+    // 靠「进行中 = 假设成立」的余归纳终止（直接递归 sub_cover 会不收敛——Task 4 自测
+    // rec.absorb 实证：μX.(int ∪ X) ≤ int 需要假设-判定才成立）。
+    if tt_tag(p) == TT_MU { return ty_sub_core(tt_subst(tt_b(p), tt_a(p), p), q); }
+    if tt_tag(q) == TT_MU { return ty_sub_core(p, tt_subst(tt_b(q), tt_a(q), q)); }
     if tt_tag(p) == TT_UNION {
         x := sub_cover(tt_a(p), q);
         if x != 1 { return x; }
@@ -350,25 +346,60 @@ fn ty_equiv(a: int, b: int) -> int {
 fn ty_inhabited(a: int) -> int {
     if g_ty_budget_max <= 0 { ty_budget_reset(200000); }
     n := tt_norm(a);
-    return inh_any(n);
+    return inh_any_at(n, 0);
 }
 
-fn inh_any(i: int) -> int {
+// 深度守卫：μ 展开的**空递归**（如 μX.X）无可终止判据——超深即 -1 + 未覆盖面
+// （登记：空递归保守判为不可判，不静默当 0/1）
+fn inh_any(i: int) -> int { return inh_any_at(i, 0); }
+
+fn inh_any_at(i: int, depth: int) -> int {
+    if depth > 512 { g_ty_exhausted = 1; return -1; }
     if tt_tag(i) == TT_UNION {
-        x := inh_any(tt_a(i));
+        x := inh_any_at(tt_a(i), depth);
         if x == 1 { return 1; }
-        y := inh_any(tt_b(i));
+        y := inh_any_at(tt_b(i), depth);
         if y == 1 { return 1; }
         if x == -1 || y == -1 { return -1; }
         return 0;
     }
-    if tt_tag(i) == TT_MU { return inh_any(tt_subst(tt_b(i), tt_a(i), i)); }
+    if tt_tag(i) == TT_MU { return inh_any_at(tt_subst(tt_b(i), tt_a(i), i), depth + 1); }
     if tt_tag(i) == TT_BOT { return 0; }
     ty_lits_reset();
     lit_collect(i);
     // 本语言无三元运算符（`?:` 不合法——P0 Task 3 构建期实证）→ 显式分支
     if lits_contradictory() == 1 { return 0; }
     return 1;
+}
+
+// ─── 反例（witness）与穷尽性（Task 4）───
+// witness = A\B 的规范化类型项；不可满足 → -1（= 无遗漏/无反例值）
+fn tt_witness(a: int, b: int) -> int {
+    r := tt_norm(tt_inter(a, tt_not(b)));
+    if tt_tag(r) == TT_BOT { return -1; }
+    x := ty_inhabited(r);
+    if x != 1 { return -1; }
+    return r;
+}
+
+// 穷尽 witness = domain \ ⋃patterns（patterns = CONS 链）
+fn ty_exhaust_witness(domain: int, patterns: int) -> int {
+    acc : ., mut = tt_bot();
+    p : ., mut = patterns;
+    loop {
+        if p < 0 { break; }
+        if tt_tag(p) != TT_CONS { break; }
+        acc = tt_union(acc, tt_a(p));
+        p = tt_b(p);
+    }
+    return tt_witness(domain, acc);
+}
+
+fn ty_exhaustive(domain: int, patterns: int) -> int {
+    w := ty_exhaust_witness(domain, patterns);
+    if g_ty_exhausted != 0 { return -1; }
+    if w < 0 { return 1; }   // 补集空 = 穷尽
+    return 0;
 }
 
 fn ty_disjoint(a: int, b: int) -> int {

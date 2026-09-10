@@ -77,6 +77,50 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("budget.flag", ty_exhausted(), 1);
     ty_budget_reset(200000);
 
+    // --- 反例（witness）+ 穷尽性（Task 4）---
+    w := tt_witness(a_int, a_str);
+    total = total + 1; fails = fails + ts_check("witness.nonempty", (w >= 0), 1);
+    total = total + 1; fails = fails + ts_check("witness.sub_of_a", ty_sub(w, a_int), 1);
+    total = total + 1; fails = fails + ts_check("witness.not_sub_of_b", ty_sub(w, a_str), 0);
+    total = total + 1; fails = fails + ts_check("witness.empty", tt_witness(a_int, a_int), -1);
+
+    dom := tt_union(tt_union(a_int, a_str), a_bool);
+    pats := tt_cons(a_int, tt_cons(a_str, tt_nil()));
+    total = total + 1; fails = fails + ts_check("exhaust.incomplete", ty_exhaustive(dom, pats), 0);
+    miss := ty_exhaust_witness(dom, pats);
+    total = total + 1; fails = fails + ts_check("exhaust.witness_bool", ty_equiv(miss, a_bool), 1);
+    total = total + 1; fails = fails + ts_check("exhaust.complete",
+        ty_exhaustive(dom, tt_cons(a_int, tt_cons(a_str, tt_cons(a_bool, tt_nil())))), 1);
+
+    // --- 递归 + 参数化（Task 4）---
+    rec_abs := tt_mu(0, tt_union(a_int, tt_var(0)));
+    total = total + 1; fails = fails + ts_check("rec.absorb", ty_equiv(rec_abs, a_int), 1);
+    rec_list := tt_mu(0, tt_union(a_int, tt_atom(AK_PRODUCT, -1, tt_cons(tt_var(0), tt_nil()))));
+    total = total + 1; fails = fails + ts_check("rec.inh", ty_inhabited(rec_list), 1);
+    total = total + 1; fails = fails + ts_check("rec.sub_self", ty_sub(rec_list, rec_list), 1);
+    seq_i := tt_atom(AK_SEQUENCE, -1, tt_cons(a_int, tt_nil()));
+    seq_s := tt_atom(AK_SEQUENCE, -1, tt_cons(a_str, tt_nil()));
+    total = total + 1; fails = fails + ts_check("param.same", ty_sub(seq_i, seq_i), 1);
+    total = total + 1; fails = fails + ts_check("param.invariant_p0", ty_sub(seq_i, seq_s), 0);
+
+    // --- 索引扩容守门（Task 1 遗留：判据规模 << 初始容量 → 扩容/重建路径无常规覆盖）---
+    ref := tt_atom(AK_SEQUENCE, -1, tt_cons(a_int, tt_nil()));
+    before := tt_count();
+    g_tt_index_cap = 0;      // 直接逼出 grow_tt_index → 重建索引（tt_reindex）+ 重放插入
+    grow_tt_index(2);
+    after := tt_atom(AK_SEQUENCE, -1, tt_cons(a_int, tt_nil()));
+    total = total + 1; fails = fails + ts_check("grow.index_rebuilt", (after == ref), 1);
+    d : ., mut = 0;
+    loop {
+        if d >= 40 { break; }
+        item := tt_atom(AK_PRODUCT, -1, tt_cons(tt_mu(d, a_int), tt_nil()));
+        d = d + 1;
+    }
+    total = total + 1; fails = fails + ts_check("grow.count_40", (tt_count() >= before + 40), 1);
+    total = total + 1; fails = fails + ts_check("grow.dedup_after_rebuild",
+        (tt_atom(AK_PRODUCT, -1, tt_cons(tt_mu(0, a_int), tt_nil())) ==
+         tt_atom(AK_PRODUCT, -1, tt_cons(tt_mu(0, a_int), tt_nil()))), 1);
+
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }
     return 0;

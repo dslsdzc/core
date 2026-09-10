@@ -16,7 +16,7 @@ COREC = BASE / "build" / "corec"
 # bot_sub_int / int_sub_str / int_sub_int / dedup / notnot）；计划 Step 1 原文的
 # 下限 20 是 **spec §8 全类**（子类型/等价/不相交/可空/反例/穷尽性/递归/参数化/
 # 预算）落地后的目标值——Task 3/4 填表后此常量抬到 20。
-MIN_CASES = 5
+MIN_CASES = 32
 
 
 def run_selftest():
