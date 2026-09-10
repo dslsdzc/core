@@ -1,4 +1,4 @@
-// === backend/x86_64/elf.cr ===
+// === src/format/elf/elf.cr（格式轴：ELF 容器/段/phdr/_start；波 1 Task 1 迁入）===
 // Direct ELF binary output for x86-64 using the new resolve+emit interface.
 // Depends on: x86_64/instr.cr (instr_size, emit_instr, g2_*)
 // Depends on: backend/resolve.cr (res_labels)
