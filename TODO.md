@@ -175,6 +175,12 @@
 - **② 重复打印 4 遍（Task 3 评审 Minor）**：同一条 lexer 诊断打印 4 次——多轮 tokenize 累积、`tokenize()` 不清零 `g_error_count`（既有行为，父版同款注释）。措辞层噪声，非正确性。
 - **③ 边缘形态分歧（既有，超出 R1 判据集）**：`1._5`（self-hosted 响亮报错 vs bootstrap 词法层 INT(1)+DOT+IDENT(_5)——整管线下仍报错、**无静默接受**）；`1.`（既有分歧）；`0x_` 诊断措辞优先级变化（现报分隔符消息，原报 invalid integer literal——两者皆错误，仅措辞）。
 
+### 14. bootstrap 后端：全局初值为非字面量（含一元负号）→ 静默降级为 0（2026-09-10 R2 P0 Task 1 实测确认）
+- **现象**：`bootstrap/corec/frontend/ir_gen.py:68-74` 的 `constant_value` **只对 `Literal` 赋值**——`x : int = -1;`（一元负号）、`x : int = f();`（调用）等初值一律拿到 `.quad 0`（`bootstrap/corec/backend/x86_64_stack_asm.py:622-626` 的 `cv is None` 分支），解释器侧同源（`interpreter.py:35/81` 取 `constant_value`）→ **静默错值**（0 冒充初值）。
+- **影响面**：仅 **bootstrap 构建路径**（Python 工具链产出物）；self-hosted 路径的同类缺陷已由 R1 Task 4（`71cb6278`：main 序言注入 + 解释器常量阶段）修复。当前自举链未触发（编译器自身无此类全局），属潜伏缺陷。
+- **触发实证**：R2 P0 Task 1 的 `tt_top()` 惰性 memo 原计划用全局 `= -1` 作「未初始化」哨兵 → 实测返回项 0（= ⊥），被迫改零初值 + ready 位（`g_tt_top_ok`/`g_tt_nil_ok`）。
+- **修复方向**：bootstrap `ir_gen.py` 的初值提取扩展到一元负号/常量折叠可判定形态（与 self-hosted 的 `global_init_val` 对齐），或对不可判定初值发诊断（**禁止静默 0**）；判据 = `tests/bootstrap/` 增用例（负号初值/调用初值 → 值正确或响亮报错）。
+
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
 来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：

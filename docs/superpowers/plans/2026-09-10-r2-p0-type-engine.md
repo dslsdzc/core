@@ -40,8 +40,8 @@
 | `src/compiler/type_terms.cr`（新建） | 类型项表 `g_type_terms` + 构造/去重（DAG）+ 访问器 + NNF + DNF 规范化 |
 | `src/compiler/type_engine.cr`（新建） | 原子类 id/互斥公理 + 判定 API（`ty_sub`/`ty_equiv`/`ty_disjoint`/`ty_inhabited`/`tt_witness`）+ memo + 预算守卫 |
 | `src/compiler/type_selftest.cr`（新建） | 用例表（数据驱动）+ `type_selftest_run()` 驱动（打印 PASS/FAIL + 摘要，返回 rc） |
-| `src/compiler/globals.cr`（修改） | 新增表全局声明（`g_type_terms` / `g_tt_*` / memo / budget） |
-| `src/compiler/dyn_arr.cr`（修改） | `grow_type_terms` / `grow_tt_index` 扩容 |
+| `src/compiler/globals.cr`（修改） | 新增表全局声明（`g_type_terms` / `g_tt_*` / memo / budget / 引擎侧缓冲） |
+| ~~`src/compiler/dyn_arr.cr`~~ | **不入本批**——扩容函数由引擎自持（`type_terms.cr`）。理由（Task 1 实测，D5）：`dyn_arr.cr` 属**双 concat 共享面**（`build_selfhost_native.py` 的 `common_files`，corearch/corelsp 都编），而引擎文件只入 corec 清单 → 在共享文件里引用引擎符号 = corearch 解析期 `Undefined name: ESZ_TYPE_TERM / tt_reindex` 硬失败 |
 | `src/compiler/main.cr`（修改） | `cli_cmd("selftest-types", ...)` + `corec_main` 分派 |
 | `src/compiler/_import.cr`（修改） | 注册三个新模块 |
 | `build_selfhost_native.py`（修改） | corec 清单加三个文件 |
@@ -55,7 +55,8 @@
 **Files:**
 - Create: `src/compiler/type_terms.cr`
 - Create: `src/compiler/type_selftest.cr`
-- Modify: `src/compiler/globals.cr`（表全局声明）、`src/compiler/dyn_arr.cr`（扩容）、`src/compiler/main.cr`（CLI）、`src/compiler/_import.cr`、`build_selfhost_native.py`、`tests/selfhost/test_compile.py`
+- Modify: `src/compiler/globals.cr`（表全局声明）、`src/compiler/main.cr`（CLI）、`src/compiler/_import.cr`、`build_selfhost_native.py`、`tests/selfhost/test_compile.py`
+  （**不含 `dyn_arr.cr`**——扩容函数放 `type_terms.cr` 自持，理由见「文件结构」表注）
 - Create: `tests/selfhost/test_type_engine.py`
 
 **Interfaces（本任务产出，后续任务依赖，签名不可改）：**
@@ -110,6 +111,10 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parents[2]
 COREC = BASE / "build" / "corec"
 
+# 用例数下限：Task 1 = 建层，用例表 = 5 例（最小面：bot_sub_int/int_sub_str/int_sub_int/
+# dedup/notnot）；Task 3/4 填满 spec §8 全类后**必须把此常量抬到 32**（Task 4 Step 4 明文要求）。
+MIN_CASES = 5
+
 
 def run_selftest():
     return subprocess.run(
@@ -125,7 +130,7 @@ def test_selftest_types_all_pass():
     m = re.search(r"(\d+)/(\d+) type-engine cases passed", out)
     assert m, out
     passed, total = int(m.group(1)), int(m.group(2))
-    assert passed == total and total >= 20, (passed, total, out)
+    assert passed == total and total >= MIN_CASES, (passed, total, out)
     assert r.returncode == 0, (r.returncode, out)
 
 
@@ -157,7 +162,9 @@ g_ty_lits : string, mut;           g_ty_lits_cap : int, mut;       g_ty_lits_cou
 g_ty_uncovered : int, mut;         // 未覆盖面命中位（如 AK_NAMED 具体行不展开）——P0 只登记不消费
 ```
 
-- [ ] **Step 4: 扩容函数（`src/compiler/dyn_arr.cr`）**
+- [ ] **Step 4: 扩容函数（**落在 `src/compiler/type_terms.cr`，不放 `dyn_arr.cr`**）**
+
+> **位置修正（Task 1 实测 D5）**：照 `grow_types` 先例放 `dyn_arr.cr` 会让 **corearch 解析期硬失败**（`Undefined name: ESZ_TYPE_TERM / tt_reindex`）——`dyn_arr.cr` 是双 concat 共享面。引擎自持扩容与常量（Step 5 代码块内），共享面零改动。
 
 追加（照 `grow_types` 先例）：
 
@@ -189,6 +196,11 @@ fn grow_tt_index(needed: int) {
 ```
 
 - [ ] **Step 5: 类型项表 + 构造 API（`src/compiler/type_terms.cr`）**
+
+> **Task 1 落地确认的三条实现约定（Task 2/3/4 必须沿用，勿回退）**：
+> ① **键 = 五字段全比，哈希不入键**（哈希只负责槽位定位）——「存储哈希 == 重算哈希」只在 i64 回绕下成立，而 bootstrap 解释器为任意精度整数 ⇒ 该等式恒假、引擎静默退化为「只插不查」（Task 1 实证）。
+> ② **惰性 memo 用零初值 + ready 位**（`g_tt_top_ok`/`g_tt_nil_ok`）——全局 `= -1` 初值被 bootstrap 后端降级为 0（`bootstrap/corec/frontend/ir_gen.py:68-74`：`constant_value` 只对 `Literal` 赋值 → 其余 `.quad 0`；见 TODO #14）。
+> ③ **本语言无位异或算子** → 哈希用 FNV-1 加法折叠（照 `dyn_arr.cr` 的 `hash_bytes` 家族），不用 FNV-1a 的 `^`。
 
 ```core
 // R2 P0：类型项表（集合语义的类型项 DAG）
@@ -419,10 +431,11 @@ Expected: 全绿。
 
 ```bash
 jj commit src/compiler/type_terms.cr src/compiler/type_engine.cr src/compiler/type_selftest.cr \
-  src/compiler/globals.cr src/compiler/dyn_arr.cr src/compiler/main.cr src/compiler/_import.cr \
+  src/compiler/globals.cr src/compiler/main.cr src/compiler/_import.cr \
   build_selfhost_native.py tests/selfhost/test_compile.py tests/selfhost/test_type_engine.py \
   -m 'feat: R2 P0 Task 1——类型项表（DAG + 哈希去重）+ 构造 API + selftest-types 自测通道骨架（checker 零改动）'
 ```
+（**不含 `dyn_arr.cr`**——扩容自持于 `type_terms.cr`，见「文件结构」表注。）
 
 ---
 
@@ -826,11 +839,20 @@ fn ty_exhaustive(domain: int, patterns: int) -> int {
 
 - [ ] **Step 4: 跑测试（用例表到 spec §8 全类）**
 
+**同时必办两件**（Task 1 评审遗留，2026-09-10）：
+1. 把 `tests/selfhost/test_type_engine.py` 的 `MIN_CASES` 从 `5` **抬到 `32`**（注释同步：P0 全类落地）。
+2. 用例表加入**索引扩容守门**（Task 1 实测：5 例 << 初始容量 1024 → 扩容路径在判据下不可达，只能靠一次性压力程序验证；长期守门须有常规用例）：
+   新增自测函数（`type_selftest.cr`）：先把 `g_tt_index` 预置为 8 槽（直接 `grow_tt_index` 前先手动置 `g_tt_index_cap = 0` 再调 `grow_tt_index(2)`，或按实现时可用的最小触发路径），随后构造 ~40 个互异项逼出装填因子守卫扩容 + `tt_reindex` + 同轮重试，最后断言：
+   - `tt_count()` 等于期望项数（无重复插入、无丢项）
+   - 一组「扩容前构造的项」在扩容后**行号不变**（DAG 键跨重建稳定）
+   - 新项插入后 `tt_tag/tt_a` 读回正确
+   断言写成 `ts_check("grow.*", …)` 若干例（≥3）。
+
 ```bash
 nice -n 19 python3 build_selfhost_native.py && nice -n 19 ./build/corec selftest-types
 nice -n 19 python3 tests/selfhost/test_type_engine.py
 ```
-Expected: 全 PASS，`N/N ... passed` 且 N ≥ 32（子类型/等价/不相交/可空/反例/穷尽性/递归/参数化/预算全类齐）。
+Expected: 全 PASS，`N/N ... passed` 且 N ≥ 32（子类型/等价/不相交/可空/反例/穷尽性/递归/参数化/预算全类齐 + 扩容守门）。
 
 - [ ] **Step 5: 提交**
 
