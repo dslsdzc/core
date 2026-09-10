@@ -305,7 +305,10 @@ fn ty_budget_reset(limit: int) {
     g_ty_uncovered = 0;
     // memo 随之清空（下次 ty_memo_slot 重建）：**每个顶层查询独立**——否则跨查询的
     // 缓存命中会让结果依赖预算历史而非输入项（P0 终审 Critical 3 实证）
+    // 注意还要清 cap：grow_ty_memo 有 `needed < cap → return` 早退，若 cap 已涨过
+    // （经 rehash），只清 ok 位会复用旧表 → 隔离承诺落空（修复复审 N1）
     g_ty_memo_ok = 0;
+    g_ty_memo_cap = 0;
 }
 
 fn ty_exhausted() -> int { return g_ty_exhausted; }

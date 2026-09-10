@@ -14,8 +14,9 @@ COREC = BASE / "build" / "corec"
 
 # 用例数下限。P0 Task 1 = 建层，用例表 = 5 例（计划 Step 6 的 P0 最小面：
 # bot_sub_int / int_sub_str / int_sub_int / dedup / notnot）；计划 Step 1 原文的
-# 下限 20 是 **spec §8 全类**（子类型/等价/不相交/可空/反例/穷尽性/递归/参数化/
-# 预算）落地后的目标值——Task 3/4 填表后此常量抬到 20。
+# 下限 32 是 **spec §8 全类**（子类型/等价/不相交/可空/反例/穷尽性/递归/参数化/
+# 预算）落地后的目标值；P0 终审修复轮后用例表实际 49 例（含 Critical/Important
+# 各配回归例 + 预算窗口扫描 + 三态 -2 例）。
 MIN_CASES = 32
 
 

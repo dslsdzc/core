@@ -184,7 +184,8 @@
 ### 15. R2 P0 类型项引擎落地（2026-09-10——落点与未覆盖面登记，非缺陷）
 - **落点**：`src/compiler/type_terms.cr`（类型项 DAG 表 48B/条 + 开放寻址索引 + 哈希去重 + NNF/DNF 规范化）、`src/compiler/type_engine.cr`（三态判定 `ty_sub`/`ty_equiv`/`ty_disjoint`/`ty_inhabited` + 反例 `tt_witness` + 穷尽性 `ty_exhaustive`（补集空性）；原子类互斥公理、μ 展开余归纳 memo、预算守卫）、`src/compiler/type_selftest.cr`（38 例用例表）+ CLI `corec selftest-types` + 判据 `tests/selfhost/test_type_engine.py`。spec = `docs/superpowers/specs/2026-09-10-type-interface-unification-design.md` §9 P0；计划 = `docs/superpowers/plans/2026-09-10-r2-p0-type-engine.md`。
 - **P0 边界兑现**：checker/ir_gen/后端/内核零改动；产物 byte-identical（`ptr_arith.cr` 与 R1 基线逐字节相同）；自举 `corec2/corec3` `cmp` IDENTICAL。
-- **未覆盖面（显式登记：命中返回 -1 或按守卫，**不静默**）**：① 参数化原子的参数仅同形判等（变型规则 = P3）；② `AK_NAMED` 具体行不展开（待 P2 接入 checker 类型表后可用）；③ 空递归（如 μX.X）按深度守卫 512 → -1；④ 判定预算默认 200000 步，超限 → -1 + `g_ty_exhausted`。
+- **未覆盖面（显式登记：命中返回 -1 或按守卫，**不静默**）**：① 参数化原子的参数仅同形判等（变型规则 = P3）；② `AK_NAMED` 具体行不展开（待 P2 接入 checker 类型表后可用）；③ 空递归（如 μX.X）按深度守卫 512 → -1；④ 判定预算默认 200000 步（**规范化亦计入**：∩ 分配律 2^n 爆炸在 n≈13-14 处截断），超限 → -1 + `g_ty_exhausted`；⑤ 命中①/②/`¬μ` 时置 `g_ty_uncovered = 1`（写入点在 `lit_implies` 与 `tt_nnf_neg`）并以 -1 上抛——**未覆盖面恒给「未知」，不给确定答案**。
+- **三态约定（判据面）**：判定 API 返回 `1 = 成立 / 0 = 不成立 / -1 = 未知（预算耗尽或未覆盖）`；`tt_witness` 另用 `-2 = 未知` 与 `-1 = 不可满足` 严格区分（`ty_exhaustive` 对 -2 返回 -1，绝不当「穷尽」）。**预算耗尽的结果一律不缓存**（memo 每顶层查询清空）。
 - **实现期实证教训（后续期通用）**：Core **无三元运算符** `?:`；取模须非负（i64 向零截断，负下标 → 越界静默失效）；键比较**不得依赖 i64 回绕**（bootstrap 解释器任意精度 → 回绕等式恒假）；字面矛盾规则须窄（正原子 × 异类负原子**不空**：`int ∩ ¬string = int`）；μ 展开必须走 memo 入口（余归纳终止）。
 
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）

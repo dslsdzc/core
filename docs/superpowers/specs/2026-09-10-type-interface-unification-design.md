@@ -244,7 +244,7 @@ ty_witness(a, b) -> term  // 反例值（判定失败时给具体值示例）
 
 | 期 | 内容 |
 |---|---|
-| P0 | 建层：类型项表 + 引擎 + 查询 API + 用例表（checker 零改动）——**✅ 已实施（2026-09-10）**：类型项 DAG 表（48B/条 + 开放寻址索引 + 哈希去重）、NNF/DNF 规范化、三态判定引擎（`ty_sub`/`ty_equiv`/`ty_disjoint`/`ty_inhabited`/`tt_witness`/`ty_exhaustive`，含原子类互斥公理、μ 展开余归纳 memo、预算守卫）、`corec selftest-types` 自测通道（38 例，判据 `tests/selfhost/test_type_engine.py`）。落点：计划 `plans/2026-09-10-r2-p0-type-engine.md`；提交链 `52c15d53`→`595999dd`→`58117dad`→`efad9d06`。**P0 未覆盖面（显式登记）**：① 参数化原子的参数仅同形判等（变型规则 = P3）；② `AK_NAMED` 具体行不展开（待 P2 接入 checker 类型表）；③ 空递归（μX.X）保守按深度守卫返回 -1；④ 查询 API `iface_*` 属 P2 接线面，P0 只出判定 API |
+| P0 | 建层：类型项表 + 引擎 + 查询 API + 用例表（checker 零改动）——**✅ 已实施（2026-09-10）**：类型项 DAG 表（48B/条 + 开放寻址索引 + 哈希去重）、NNF/DNF 规范化、三态判定引擎（`ty_sub`/`ty_equiv`/`ty_disjoint`/`ty_inhabited`/`tt_witness`/`ty_exhaustive`，含原子类互斥公理、μ 展开余归纳 memo、预算守卫）、`corec selftest-types` 自测通道（**49 例**，判据 `tests/selfhost/test_type_engine.py`；P0 终审 NOT READY → 修复轮 `13b8b564` 闭环 3 Critical + 4 Important，用例 38→49）。落点：计划 `plans/2026-09-10-r2-p0-type-engine.md`；提交链 `52c15d53`→`595999dd`→`58117dad`→`efad9d06`。**P0 未覆盖面（显式登记）**：① 参数化原子的参数仅同形判等（变型规则 = P3）；② `AK_NAMED` 具体行不展开（待 P2 接入 checker 类型表）；③ 空递归（μX.X）保守按深度守卫返回 -1；④ 查询 API `iface_*` 属 P2 接线面，P0 只出判定 API |
 | P1 | 影子对拍：旧判定并行 + 差异清单（收紧面在此暴露） |
 | P2 | 逐点替换：`type_equal` / `infer_expr` 公理区 / 索引·字段·match·转换 / `res_type_node` 两表合一（+ 收紧清单） |
 | P3 | 能力落地：定长退役 + 序列接口/长度约束 + 穷尽性/联合/可选 + 泛型约束 + impl 契约 |

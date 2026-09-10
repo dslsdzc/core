@@ -107,6 +107,9 @@ fn type_selftest_run() -> int {
     // P0 不判变型（读视图协变 = P3）→ 同类不同参数 = **未知**（-1），不给确定 0
     // （P0 终审 Important B：确定 0 会与 spec §2.2 的 sequence<⊤> 正向判定冲突）
     total = total + 1; fails = fails + ts_check("param.unknown_p0", ty_sub(seq_i, seq_s), -1);
+    // 未覆盖面位断言前**显式重置**（全局粘滞位，前面案例碰过 ¬μ 会误过——修复复审 N5）
+    ty_budget_reset(200000);
+    d_dummy := ty_sub(seq_i, seq_s);   // 重置后重新触发一次未覆盖面
     total = total + 1; fails = fails + ts_check("param.uncovered_flag", ty_uncovered(), 1);
 
     // --- P0 终审补例（三个 Critical + 两条 Important 各配一例回归）---
@@ -115,10 +118,26 @@ fn type_selftest_run() -> int {
         ty_sub(tt_not(seq_i), tt_not(tt_top_k(AK_SEQUENCE))), 0);
     total = total + 1; fails = fails + ts_check("neg.supertype_rev",
         ty_sub(tt_not(tt_top_k(AK_SEQUENCE)), tt_not(seq_i)), 1);
-    // C3：预算耗尽不得被吞成 0（三态必须上抛）
+    // C3：预算耗尽不得被吞成 0（三态必须上抛）——**预算窗口扫描**守「exhausted ⇒ -1」
+    // 不变量（单点预算 1 会被规范化预算满足，守不住 lit_implies 吞并面——修复复审 N2）
+    ok_sw : ., mut = 1;
+    bi : ., mut = 1;
+    loop {
+        if bi > 12 { break; }
+        ty_budget_reset(bi);
+        r_sw := ty_sub(tt_not(seq_i), tt_not(tt_top_k(AK_SEQUENCE)));
+        if ty_exhausted() == 1 && r_sw != -1 { ok_sw = 0; }
+        bi = bi + 1;
+    }
+    ty_budget_reset(200000);
+    total = total + 1; fails = fails + ts_check("budget.no_swallow_sweep", ok_sw, 1);
+    // witness 的三态：-1 = 不可满足 / -2 = 未知（预算耗尽），ty_exhaustive 对 -2 → -1
+    // （dom/pats 在此处重新构造：本块位于「反例+穷尽性」节之前）
+    dom_u := tt_union(tt_union(a_int, a_str), a_bool);
+    pats_u := tt_cons(a_int, tt_cons(a_str, tt_nil()));
     ty_budget_reset(1);
-    total = total + 1; fails = fails + ts_check("budget.no_swallow",
-        ty_sub(tt_not(seq_i), tt_not(tt_top_k(AK_SEQUENCE))), -1);
+    total = total + 1; fails = fails + ts_check("witness.unknown_budget", tt_witness(a_int, a_str), -2);
+    total = total + 1; fails = fails + ts_check("exhaust.unknown_budget", ty_exhaustive(dom_u, pats_u), -1);
     ty_budget_reset(200000);
     // C2：memo 表扩容不挂（1200 互异对逼出装填因子守卫 + 重建重放；到得了下一行 = 未死循环）
     d2 : ., mut = 0;
