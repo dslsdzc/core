@@ -244,10 +244,15 @@ fn sh_count_old_stricter() -> int { return g_shadow_old_stricter; }
 fn sh_count_old_looser() -> int { return g_shadow_old_looser; }
 fn sh_count_unknown() -> int { return g_shadow_unknown; }
 
-// 站点标注（在 8 个外部决策点调用 type_equal 前紧邻落）；影子关时该值无读者 = 惰性。
+// 站点标注（在 8 个外部决策点调用 type_equal 前紧邻落）。**8 个站点无条件调用本函数**
+// （挂点在决策点上，不在 type_equal 包装内——包装只挡 sh_compare）→ 关态若不守卫，每次
+// 判定都多一次调用 + 一次性 64B alloc（直方图缓冲）+ 计数 RMW。故首行按 g_shadow_on 早退
+// （M3，Task 3 评审实证：原注释「影子关时 wrapper 不调本函数」**不成立**）；早退后关态
+// 残留开销 = 一次全局读 + 返回，与 type_equal 包装同量级。
 // Task 3 扩面：顺带累计站点直方图（每个决策点「跑到过几次」——0 差异语料下这是站点
-// 覆盖面的唯一实证；site 出界即忽略，不越界写）。影子关时 wrapper 不调本函数 → 关态零影响。
+// 覆盖面的唯一实证；site 出界即忽略，不越界写）。
 fn sh_site_begin(site: int) {
+    if g_shadow_on == 0 { return; }
     g_shadow_site = site;
     if site < 1 || site > 8 { return; }
     if g_shadow_site_cap <= 0 {
@@ -337,7 +342,8 @@ fn sh_kind_name(k: int) -> string {
 }
 
 // 摘要行（仅影子开时打印；关 = 零输出 → 两态 stdout 也零变化）。
-// 前 6 字段 = Task 2 契约（**前缀不变**，既有 grep 读取方不受影响）；后 4 字段 = Task 3 Step 0
+// 前 5 组 key=value = Task 2 契约（**前缀不变**，既有 grep 读取方不受影响；Task 3 评审
+// M2 逐字比对 `28fed09` 的 sh_report：Task 2 原文正是 5 组）；后 4 组 = Task 3 Step 0
 // 拆因（unknown 两因 + engine 桶成因位），因 ring 只有 256 条、摘要才是无损计数通道。
 fn sh_report() -> int {
     if g_shadow_on == 0 { return 0; }

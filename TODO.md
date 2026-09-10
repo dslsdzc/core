@@ -194,6 +194,43 @@
 - **修复方向**：嵌套 fn 的解析/注册路径（parser 的嵌套声明处理或 checker `collect_decls`）——先定位崩溃点（gdb/诊断输出），再修；判据 = 最小复现 rc=0 + 两个 fixture 恢复 + 全回归。
 - **实现期实证教训（后续期通用）**：Core **无三元运算符** `?:`；取模须非负（i64 向零截断，负下标 → 越界静默失效）；键比较**不得依赖 i64 回绕**（bootstrap 解释器任意精度 → 回绕等式恒假）；字面矛盾规则须窄（正原子 × 异类负原子**不空**：`int ∩ ¬string = int`）；μ 展开必须走 memo 入口（余归纳终止）。
 
+### 17. R2 P1 影子对拍落地（2026-09-11——落点 / 开关默认值与产物影响 / 裁决归属登记，非缺陷）
+- **落点**：`src/compiler/ty_shadow.cr`（桥接 ti→类型项 + per-ti 缓存 + 8 站点挂点 + 分类计数 + 摘要/转储）、`src/compiler/checker.cr`（`type_equal` → `type_equal_core` 包装 + 8 站点 `sh_site_begin`）、`src/compiler/type_selftest.cr`（桥接用例）、`src/compiler/globals.cr`（`g_shadow_*` 组）、`src/compiler/main.cr`（CLI 旗标）。清单三处注册：corec + **corelsp**（Task 2 起 checker 引用影子层）+ test_compile。清单 = `docs/superpowers/specs/2026-09-10-type-shadow-findings.md`；计划 = `plans/2026-09-10-r2-p1-shadow-parity.md`；提交链 `e4c293b2`（桥接）→`844cec6c`+`514956a1`（挂点/补强）→`75c20297`（Step 0 拆因 + 语料清单）。
+- **开关默认值与产物影响（登记）**：`--type-shadow`（**默认关**，纯观察通道；`--type-shadow-dump <file>` 另给差异转储）。两态产物**逐字节相同**（`ptr_arith.cr` 开/关/基线三份 sha256 全等 `95084e7b…d475`；`check` 路径 stdout 仅开态追加以 `[type-shadow]`/`[type-shadow-sites]` 起头的两行）。影子预算/memo 每次判定前后各 `ty_budget_reset` → 不污染 checker 判定；关态 `sh_site_begin` 首行早退（Task 4 M3）→ 关态残留开销 = 每次判定一次全局读。**结论：开关可安全长期保留默认关，无产物影响。**
+- **差异清单裁决归属（登记）**：findings 的 F1（P2 硬前置）/F2（P2 裁决）/F3/F4（checker 缺陷面，单开任务）与「按差异清单替换旧判定」的**替换门**全部归 **P2**；P2 验收不得只看「差异数 = 0」，须同时报告站点覆盖（P1 实测 4/8 站点零命中）。下 #18-#21 为逐条登记。
+
+### 18. F1（P2 硬前置）：同名 named 类型占多行未规范化 → 引擎按行建原子 → 判不了
+- **现象**：`type_equal_core` 的 `TYP_NAMED` 按 **name_idx** 判等（同名恒等价）；类型表同一名字可占**多行**（`MemLayout` 2 行 / `Box` 5 行——`res_call_type` 在符号不可见处 `alloc_type(TYP_NAMED,...)` 新建行、泛型实例化另建行），而桥接按**行号**建原子 `tt_atom(AK_NAMED, ti, -1)` → 两个不同原子 → 引擎 `AK_NAMED` 不展开 → **-1（未判定）**。
+- **实证**：P1 三档语料 26,704 判定中 9 条差异（去重 3 类型对）**全部**由此产生（`old_looser=0`、`old_stricter=0`；差异 = 「旧能判、引擎判不了」）；根因探针 = findings §4.2 + §6.F1。
+- **影响（为何是硬前置）**：替换后主流「同类型比较」会从**真**变**未判定**；若 P2 把未知当拒绝 → 大面积假拒，当通过 → 静默失去命名类型检查。二者皆不可接受。
+- **修复方向**：二选一并裁决——① 引擎侧引入 named 身份规范化（同名 → 同一原子，需 name 注册表）；② 桥接把同名行折叠到同一项（须先裁决「同名是否恒等价」，会掩盖跨声明域同名）。**P2 第一项，且须补同名多行的守门用例**（findings 探针 B/F/G/K 可升格为回归）。
+
+### 19. F2（P2 裁决）：数组长度 `N` 旧判定比、引擎不比 → 替换即放宽
+- **现象**：`type_equal_core` 的 `TYP_ARRAY` 分支比较 `extra`（= N）；桥接按 R1 裁决**不把 N 入身份**（`AK_SEQUENCE` 参数链只含元素项）→ 替换后 `[int;3]` vs `[int;4]` **静默通过**（当前是 `error[TF01]`）。
+- **实证**：探针 D（`[int;4]` 返回给 `[int;3]`）与探针 G（泛型实参位）均 `old_stricter=1`；本轮语料 0 触发。
+- **修复方向**：R1 的「N 不入身份」是 **IR 侧**身份裁决；**checker 侧是否保留 N 检查需单独裁决**——保留 → 需在引擎/桥接把 N 作为维度/字面量入判定；不保留 → 记为有意的语言放宽并写进 spec。裁决后同步 `bridge.len_not_identity` 用例语义。
+
+### 20. F3：调用位点实参类型不匹配**无诊断**（`unify_types` 返回值被丢弃，`checker.cr:1053`）
+- **现象**：`infer_gen_call` 调 `unify_types(pattern_ti, concrete_ti);`（`src/compiler/checker.cr:1053`）**丢弃返回值**；非泛型调用位点同样不报。
+- **实证**：`fn take2(n: int)->int` 以 `take2("s")` 调用 → 输出 `ok`（无诊断）；`fn take[T](a: T, n: str)` 以 `take(1, 2)` 调用 → `ok`（探针 J/C，源在 `/tmp/r2p1t3/probes/`）。
+- **与影子的关系**：影子只对账 `type_equal` 的 verdict（此例两侧皆「拒」= agree），**不负责诊断**；但 P2 若以引擎判定作为诊断来源，必须补「判定 → 诊断」这一环（含 `unknown` 的处置策略：拒绝 / 降级警告 / 放行，需与「语义保鲜」目标一致）。
+- **修复方向**：单开任务（属 checker 缺陷面，非影子层）。
+
+### 21. F4：泛型函数**后续形参**的声明类型在推断中不生效
+- **现象**：`fn take[T](a: T, n: int)` 以 `take(1, "s")` 调用时，`unify_types` 收到的 pattern 是 **`gparam(T)`** 而非 `int`（探针副本 `[dbg-unify]` 实测）；`fn take[T](a: T, n: str)` 以 `take(1, 2)` 调用同样收到 `gparam(T)`。而**首个形参为具体类型**时正常（探针 K：`fn take[T](n: int, a: T)` → pattern = `base(int)`，正确进站点 4）。
+- **影响**：泛型函数的非泛型形参类型约束在调用推断中被绕过（与 #20 叠加 → 完全无诊断）。
+- **修复方向**：单开任务定位 `ast_data(pn)` / 形参链导航（`infer_gen_call`，`checker.cr:1030-1060`）。
+
+### 22. 仓库卫生：suite 空 fixture ×2 + 死文件扫描噪声（2026-09-11 R2 P1 Task 3 语料扫描发现）
+- **`tests/suite/test_control_flow.cr` / `test_generics.cr` = 0 字节空文件**：`corec` 对它们报 `error: cannot read`（**勘误**：Task 2 报告曾记为「预期失败 fixture」，实为空文件）。修复方向 = 补内容或删名（删需用户许可，铁律 #3）。
+- **`src/compiler/elf.cr`**：`check` 扫描 rc=0 但 **2 个 parse error、decisions=0**——陈旧遗留文件（死文件本体的登记见 #7；本条补充**语料卫生**事实：批量 check 脚本须排除它，否则 parse error 混入语料日志）。**`src/compiler/linker.cr` 为 0 字节空文件**（同类：批扫时排除或删除）。
+- **实证**：findings §8 末「其他已登记项」；语料日志 `/tmp/r2p1t3/all_tiers2.txt`。
+
+### 23. harness 缺口：`.claude/hooks/block-git.py` 只拦「以 git 开头」→ 复合/管道命令可绕过（2026-09-11 R2 P1 Task 3 评审发现——**只登记，本轮不改 harness**）
+- **现象**：钩子仅判 `stripped == "git"` 或 `stripped.startswith("git ")`（`.claude/hooks/block-git.py:10-11`）——`cd x && git status`、`echo hi; git log`、`(git status)`、`sudo git ...` 等**复合/包装形态全部放行**；铁律 #2 的「机械拦截」有洞。
+- **影响**：非恶意误用（多 agent 并行时的习惯性复合命令）即可能绕过禁 git 约束；本轮工作副本已出现一次只读 `git diff --numstat` 违例（Task 3 自陈 D7，无写操作）。
+- **修复方向（建议单开）**：按 shell 分隔符（`;` `&&` `||` `|` `(` 换行等）分词后做**词边界**匹配，命中 `git` 词即拒（注意放行 `jj git push` 等 jj 子命令形态与 `gitignore` 类词元）；并补负控用例（复合形态必拒、`jj git` 必放）。
+
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
 来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：

@@ -292,6 +292,20 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("bridge.grow_rehash",
         (sh_map_entries() == g_before + 600 && sh_term_of_ti(arr_ti2) == t_arr2), 1);
     total = total + 1; fails = fails + ts_check("bridge.grow_cap_doubled", (g_shadow_map_cap >= 2048), 1);
+    // 第二次重建守门（Step 4b ②，Task 1 评审挂账：「>1024 条目第二次重建无实测」）：
+    // 上一例只推过第一条守卫线（entries=511 → cap 1024→2048）；本例再入 1100 条互异 ti
+    // 把条目推过第二条守卫线（entries=1023 → cap 2048→4096）——断三件事：①重放守恒（恰
+    // +1100，不多不少）②cap ≥ 4096（**证明**第二次重建真的发生，不是「读码判安全」）
+    // ③首批（第一次重建前入表）条目仍命中（两次重放都把它搬过去了）。
+    g2_before := sh_map_entries();
+    gj : ., mut = 0;
+    loop {
+        if gj >= 1100 { break; }
+        sh_term_of_ti(alloc_type(TYP_ARRAY, TI_INT, 5000 + gj));
+        gj = gj + 1;
+    }
+    total = total + 1; fails = fails + ts_check("bridge.grow_rehash2",
+        (sh_map_entries() == g2_before + 1100 && g_shadow_map_cap >= 4096 && sh_term_of_ti(arr_ti2) == t_arr2), 1);
 
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }

@@ -3,7 +3,7 @@
 日期：2026-09-10（Task 3 落地日 2026-09-11 复核）
 范围：R2 计划 P1「影子对拍」——把 P0 类型判定引擎与旧 `type_equal_core` 在**真实语料**上逐点对账，
 产出「收紧面（old_looser = 旧受新拒）暴露清单」与「未覆盖面清单」，供 P2（替换旧判定）裁决。
-上游：P0 引擎（`844cec6c`）+ P1 Task 1 桥接层 + Task 2 挂点/通道（`514956a1`）+ Task 3 Step 0 拆因（本文件对应提交）。
+上游：P0 引擎 + P1 Task 1 桥接层 + Task 2 挂点/通道（`844cec6c` + 评审补强 `514956a1`）+ Task 3 Step 0 拆因 + 本清单（同一提交）。
 
 引擎/通道事实来源：`src/compiler/ty_shadow.cr`（桥接 + 挂点 + 摘要/转储）、`src/compiler/checker.cr`（`type_equal` 包装 + 8 站点）、
 `src/compiler/type_engine.cr`（三态 + 成因位）。
@@ -12,7 +12,7 @@
 
 ## 0. 结论（TL;DR）
 
-1. **真收紧面 = 0**：三档语料（+2 档扩面）共 **71 个文件 / 26,704 次判定**，`old_looser=0`、`old_stricter=0`。
+1. **真收紧面 = 0**：三档语料（+2 档扩面）共 **67 个有效文件 / 26,704 次判定**（71 个候选中 4 个排除，见 §2），`old_looser=0`、`old_stricter=0`。
    全部 9 条差异条目（**去重后仅 3 个类型对**）都落在 `unknown` 桶的 **engine 侧**。
 2. **unknown 拆因（Step 0）**：`bridge`（任一侧翻译失败 = 桥接缺口）= **0**；`engine`（引擎三态负值）= **9**，
    其中 **未覆盖面 9 / 预算耗尽 0**。桥接缺口在现有 `TYP_*`×`TY_*` 全集下**结构性不可达**（非语料不足，见 §3.3）。
@@ -37,7 +37,7 @@
 
 | 文件 | 改动 |
 |---|---|
-| `src/compiler/ty_shadow.cr` | `sh_compare`：`a<0 \|\| b<0`（桥接缺口）→ `kind=3` + `g_shadow_unknown_bridge`；`e<0`（引擎负值）→ `kind=0` + `g_shadow_unknown_engine`，并按引擎自报成因位细分 `unc=ty_uncovered()` / `exh=ty_exhausted()`（**必须在第二次 `ty_budget_reset` 之前读**）；`sh_kind_name` 增 `unknown_bridge`；`sh_report` 增 4 个字段（**前 6 字段前缀不变**，既有 grep 读取方不受影响） |
+| `src/compiler/ty_shadow.cr` | `sh_compare`：`a<0 \|\| b<0`（桥接缺口）→ `kind=3` + `g_shadow_unknown_bridge`；`e<0`（引擎负值）→ `kind=0` + `g_shadow_unknown_engine`，并按引擎自报成因位细分 `unc=ty_uncovered()` / `exh=ty_exhausted()`（**必须在第二次 `ty_budget_reset` 之前读**）；`sh_kind_name` 增 `unknown_bridge`；`sh_report` 增 4 个字段（**前 5 组 key=value 前缀不变**，既有 grep 读取方不受影响） |
 | `src/compiler/globals.cr` | +4 全局：`g_shadow_unknown_bridge` / `g_shadow_unknown_engine` / `g_shadow_unknown_uncovered` / `g_shadow_unknown_budget` |
 | `src/compiler/ty_shadow.cr`（Task 3 扩面） | +站点直方图：`sh_site_begin` 累计 8 个站点的**判定次数**（`g_shadow_site_counts`，8×8B），`sh_report` 增第二行 `[type-shadow-sites]`。理由：环形缓冲（256 条）只装「有差异/未知」的条目，**0 差异语料下「某站点是否真的跑到过」没有别的证据通道**，而 brief 要求登记「站点 4 恒 agree / 站点 6 不可达」 |
 
@@ -49,6 +49,7 @@
 ```
 
 转储 kind 空间：`0 = unknown_engine` / `1 = old_stricter` / `2 = old_looser` / `3 = unknown_bridge`（dump 的 `kind` 列同步改名）。
+**读 dump 者须知（M4，Task 3 评审）**：Step 0 前 `kind=0` 的名字是 `unknown` → 现名 `unknown_engine`（契约变更）；按字面旧名匹配的分析脚本会漏读该列（仓内已核**无消费者**，破坏面仅限外部/未来脚本）。
 
 ### 1.2 判据（全部通过，原始输出）
 
@@ -118,7 +119,7 @@ $ sha256sum /tmp/r1t4_base_bin /tmp/p1t3_off2 /tmp/p1t3_on2
 | ⑤ examples | 4 | 151 | 151 | 0 | **0** | 0 | 0 | 0 | 0 | 0 |
 | **合计** | **67**（+4 排除） | **26,704** | **26,695** | **0** | **0** | **9** | **0** | **9** | **9** | **0** |
 
-不变式：`agree + stricter + looser + unknown == decisions` 在**全部 71 行**成立（逐行核对，0 违例）。
+不变式：`agree + stricter + looser + unknown == decisions` 在**全部 67 条摘要行**成立（71 候选 − 4 排除 = 67；逐行核对，0 违例）。
 
 ### 3.2 站点直方图（逐档）
 
