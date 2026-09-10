@@ -260,12 +260,15 @@ def test_bootstrap_rejects():
             pass
 
 def test_selfhost_rejects():
-    # 断言必须命中**我们自己的诊断文本**——否则 `return 1_000` 既有的 TF01 会假绿
+    # 断言必须命中**我们自己的诊断文本**——否则 `return 1_000` 既有的 TF01 会假绿。
+    # 注意：lexer 诊断走 src/compiler/lexer.cr add_error，输出前缀是 `error: `，
+    # **不是** `error[XX]`（实测 `fn main()->int{return 0xZZ;}` → `error: invalid digit
+    # in integer literal`，rc=1）——故只断言消息标记 + 出现 `error`，不断言 `error[`。
     for bad, marker in (('1_000', 'not supported'), ('1_000.5', 'not supported'),
                         ('0x1_0', 'not supported'), ('10f32', 'retired'),
                         ('1.5f64', 'retired'), ('10u8', 'retired')):
         rc, out = selfhost(bad)
-        assert 'error[' in out and marker in out, (bad, rc, out)
+        assert 'error' in out and marker in out, (bad, rc, out)
 
 def test_legal_forms_unchanged():
     for src, want in (('0x1f', 31), ('0o17', 15), ('0b1010', 10), ('1000', 232)):
@@ -385,8 +388,8 @@ INT_LIT = DIGIT { DIGIT } ;
 nice -n 19 python3 build_selfhost_native.py
 nice -n 19 python3 tests/selfhost/test_lexer_parity.py      # Expected: 三条全 PASS
 nice -n 19 python3 tests/bootstrap/test_pipeline.py         # Expected: 全 PASS（含改后的 check_integer_literals）
-nice -n 19 ./build/corec run 'fn main()->int{x := 1_000; return x;}'   # 期望含 error[ + 'not supported'
-nice -n 19 ./build/corec run 'fn main()->int{return 1000;}'            # 期望 rc=232、无 error[
+nice -n 19 ./build/corec run 'fn main()->int{x := 1_000; return x;}'   # 期望含 'not supported'（lexer 诊断前缀 = `error: `，非 `error[`）
+nice -n 19 ./build/corec run 'fn main()->int{return 1000;}'            # 期望 rc=232、无任何 error
 nice -n 19 python3 tests/selfhost/test_compile.py
 ```
 
@@ -607,6 +610,7 @@ nice -n 19 ./build/corec run 'fn main()->int{return 42;}'   # rc=42
 
 - spec 状态行 → 「**已实施（R1）**」+ §3 波 R1 三项逐条标记完成 + 记录三处行为变化（`1_000`、宽度后缀、全局初始化）
 - `TODO.md`：宽度类型移出语言条目内三项（死条目移除 / `_f32/_f64` 后缀 / `1_000` 复核）划销并注记落点；定长裁决条目注记「类型身份退役 = R2 落实，R1 注记 + 全局路径已修」；新增「全局初始化机制」记录（main 序言注入 + 解释器常量阶段；未来若支持非 main 入口/库形态需迁移到独立 init 区）
+- `TODO.md` **新登记**（R1 实测发现）：**lexer 诊断前缀不一致**——lexer 走 `add_error`（`lexer.cr:38-44`）输出 `error: <msg>`（**无错误码**），checker/其余走 `diag.cr:134` 的 `error[XX]`；既有守卫与测试门（扫 `error[`）对 lexer 诊断**零覆盖**（实测 `return 0xZZ;` → `error: invalid digit in integer literal`，全无 `error[`）。建议统一格式或扩展守卫扫描面
 
 - [ ] **Step 4: 台账**
 
