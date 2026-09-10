@@ -164,6 +164,12 @@ if g_opt_level >= 1 && g_func_count > 0 {
     
 */
         println("[5/5] frontend done");
+    // R2 P2a Task 3（C-4）：侧表 ↔ res_type_node 管线内断言（隐藏调试通道，默认关）。
+    // 必须跑在 check_all 之后（类型表/侧表已成型）；不一致 → rc≠0（判据可挂）。默认关 =
+    // 一次全局读 + 返回（产物/输出零影响）。
+    if cli_has("verify-named-dedup") != 0 {
+        if named_dedup_verify() != 0 { return 1; }
+    }
     return 0;
 }
 
@@ -207,6 +213,7 @@ fn corec_main() -> int {
     cli_flag_bool("inject-var-shift", "", "Hidden debug: shift func0 var decl block left by 1, then save (GC-4 test hook)");
     cli_flag_bool("type-shadow", "", "R2 P1: shadow type decisions with the engine (observation only)");
     cli_flag("type-shadow-dump", "", "R2 P1: dump shadow diff entries to file");
+    cli_flag_bool("verify-named-dedup", "", "R2 P2a: assert side-table == res_type_node for all named types (debug)");
 
     if cli_parse() != 0 { return 1; }
     // R2 P1 影子对拍开关。**只解析不判定**：影子关（默认）时 g_shadow_on=0，type_equal 包装

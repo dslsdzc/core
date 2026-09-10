@@ -1,7 +1,14 @@
 // === ty_shadow.cr ===
 // R2 P1：影子对拍——① 桥接层：把 checker 的类型表行号（ti）翻译成 P0 引擎的类型项
-// （term，Task 1）；② 判定挂点：把引擎判定与旧判定（type_equal_core）逐点对账分类
+// （term，Task 1）；② 判定挂点：把引擎判定与旧判定逐点对账分类
 // （Task 2，sh_compare/sh_site_begin/sh_report）。
+// R2 P2a Task 3：判定权已移交引擎（`type_equal` = 快路径 + 桥接 + `ty_equiv`），影子挂点
+// 仍在 `type_equal` 包装层，**对照物切到 `type_equal_legacy`**（旧结构判等，P5 删）：
+// sh_compare 的 `old_ok` 现在喂的是 legacy 结论 → 分类语义 = 「引擎 vs 旧结构判等」，
+// 即替换门对拍（差异须归零）。⚠ 影子对 **N 面已失明**（legacy 自身 Task 2 起 N-free）：
+// old_stricter/old_looser 在数组长度面上恒 0（同义反复）——N 面验收走行为探针
+// （array_len_constraint_ok 判定点 + 异长/同长/嵌套位），不得以对拍归零充当 N 面证据
+// （Task 2 评审 Important）。
 // Task 3 Step 0（Task 2 评审硬性要求）：unknown 桶拆因——bridge（翻译失败 = 桥接缺口，
 // kind=3）vs engine（引擎三态负值，kind=0），后者再按引擎成因位细分（未覆盖面 / 预算耗尽）；
 // Task 3 扩面：站点直方图（站点覆盖面实证——环缓冲只装得下「有差异/未知」的条目）。
@@ -346,6 +353,13 @@ fn sh_kind_name(k: int) -> string {
 // 前 5 组 key=value = Task 2 契约（**前缀不变**，既有 grep 读取方不受影响；Task 3 评审
 // M2 逐字比对 `28fed09` 的 sh_report：Task 2 原文正是 5 组）；后 4 组 = Task 3 Step 0
 // 拆因（unknown 两因 + engine 桶成因位），因 ring 只有 256 条、摘要才是无损计数通道。
+// R2 P2a Task 3 追加 2 组 = **判定替换的回落计数**（checker.cr 的 type_equal；与影子
+// unknown 桶不同：那是影子自己的引擎判定，这两组数**判定路径**的回落次数）。
+// 注意：计数器只在影子开时**打印**，但累加与开关无关——type_equal_engine 里的自增在
+// `if g_shadow_on != 0` 之前且不以它为条件（码级），故关态计数与开态同值、关态 stdout
+// 逐字节不变（两态零变化判据）。**可复核的独立交叉证据**：影子侧的 unknown_engine（影子
+// 自查的引擎负值次数）与 replace_unknown（判定路径回落次数）在 71 个语料文件上**逐文件
+// 相等**（同一批调用、两个独立计数器）——见 Task 3 报告 §unknown 处置。
 fn sh_report() -> int {
     if g_shadow_on == 0 { return 0; }
     print("[type-shadow] decisions=");
@@ -365,7 +379,11 @@ fn sh_report() -> int {
     print(" unknown_engine_uncovered=");
     print(int_str(g_shadow_unknown_uncovered));
     print(" unknown_engine_budget=");
-    println(int_str(g_shadow_unknown_budget));
+    print(int_str(g_shadow_unknown_budget));
+    print(" replace_bridge=");
+    print(int_str(g_replace_bridge));
+    print(" replace_unknown=");
+    println(int_str(g_replace_unknown));
     // 站点直方图（Task 3 扩面）：与主行同开同关；恒有 sum(site_i) == decisions（每个
     // sh_compare 之前必有一次 sh_site_begin）——两行互为校验。
     print("[type-shadow-sites]");

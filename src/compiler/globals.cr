@@ -282,6 +282,18 @@ g_shadow_site_counts : string, mut; g_shadow_site_cap : int, mut;
 // 时侧表随之惰性重建，防「陈旧 name→ti 复用」把已失效行号当命中（silent miscompile）。
 g_named_dedup : string, mut;      g_named_dedup_cap : int, mut;   g_named_dedup_count : int, mut;
 
+// R2 P2a Task 3：判定替换的**回落计数**（unknown 政策落地面，checker.cr 的 type_equal）：
+// 引擎三态 1/0 直接采信；-1（未知：预算耗尽/未覆盖面）**不得静默当 0/1** → 回落
+// type_equal_legacy 并计数（g_replace_unknown）；桥接失败（sh_term_of_ti 返回 -1 = 该
+// ti 译不成类型项）同样回落（g_replace_bridge）。两因分开计数——与 P1 Task 3 Step 0
+// 的 unknown 拆因同因：混记则归因不可恢复。
+// 归零 = init_types()（类型表重置 = 判定行号空间作废 → 计数同生命周期；LSP 每请求一次）。
+// 报告通道 = [type-shadow] 摘要行尾两字段。影子关时计数器**照常累加**（自增在 type_equal_engine
+// 内、位于 g_shadow_on 判定之前且不以它为条件），仅不打印——关态输出逐字节不变是硬判据。
+// 独立交叉证据（可复核）：影子侧 unknown_engine 与 replace_unknown 在 71 语料文件上逐文件
+// 相等（见 ty_shadow.cr 同处注记 + Task 3 报告 §unknown 处置）。
+g_replace_unknown : int, mut;      g_replace_bridge : int, mut;
+
 fn grow_plugin_tags(needed: int) {
     if needed < g_plugin_tag_cap { return; }
     ncap : ., mut = g_plugin_tag_cap * 2; if ncap < 8 { ncap = 8; } if ncap < needed { ncap = needed + 8; }

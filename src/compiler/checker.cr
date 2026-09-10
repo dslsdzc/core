@@ -24,10 +24,12 @@ fn alloc_type(kind: int, data: int, extra: int) -> int {
 // 实读核对：全仓 TYP_NAMED 分配点恰 8 处（:406/:554/:598/:613/:622/:920/:2191/:2206），
 // 实参恒 (TYP_NAMED, name_idx, 0) → 键 = name_idx（extra 恒 0，不入键）。读取点全部经
 // get_type_data(ti) 取**名字**（:496 是解引用到名字的唯一入口），故按名字归一行不改读法。
-// **例外（如实登记）**：type_equal_core 的 TYP_GENERIC_APPLY 分支（:143-144）比的是
-// get_type_data = base_ti（基型**行号**）——去重把「同名字不同出现点 ⇒ 不等」改成「同名 ⇒
-// 同 base 行，继续比实参」，这正是本条修复的目的（P1 差异的对偶面）；其放宽面由 Task 3
-// 对拍复跑量化，非本任务裁决面。
+// **例外（如实登记）**：type_equal_legacy 的 TYP_GENERIC_APPLY 分支（符号锚点：该分支的
+// `get_type_data(t1) != get_type_data(t2)` 基型比较）比的是 get_type_data = base_ti（基型
+// **行号**）——去重把「同名字不同出现点 ⇒ 不等」改成「同名 ⇒ 同 base 行，继续比实参」，
+// 这正是本条修复的目的（P1 差异的对偶面）；其放宽面由 Task 3 对拍复跑量化，非本任务裁决面。
+// Task 3 复核：判定替换后该分支**仅在引擎未知时**参与（TYP_GENERIC_APPLY 桥接为 AK_NAMED
+// 不展开 → 引擎恒 -1 → 回落 legacy）；宽松方向的量化见对拍三档（old_looser）。
 //
 // 侧表 g_named_dedup（16B/条 {name_idx, ti}，开放寻址线性探测，与 ty_shadow.cr 的
 // g_shadow_map 同式同因）。P0/P1 血泪三件套缺一即可能挂死，逐条落：
@@ -150,9 +152,88 @@ fn named_dedup_rows(name_idx: int) -> int {
     return n;
 }
 
+// ─── R2 P2a Task 3（C-4）：侧表 ↔ res_type_node **管线内断言**（`--verify-named-dedup`）───
+// 背景（Task 1 交接必测项，评审裁决）：`f1.*` 用例是**人造夹具**（自测通道不经 check_all，
+// 手工 alloc + 单名查行数）——它证明不了「8 个生产分配点全走侧表」：任一生产点若退回裸
+// `alloc_type(TYP_NAMED, name, 0)`，自测照样全绿，而真实编译中该名字会**占两行**（读名字
+// 的点仍对，比行号的点错——`type_equal_legacy` 的 TYP_GENERIC_APPLY 基型比较即比行号）。
+// 本函数把该性质升为**行为级证据**：跑在真实编译流水线（check_all 之后）上，三组断言
+// 全部基于本编译期的真实类型表 / 符号表 / AST，不构造任何夹具：
+//   ① 类型表 → 侧表：每个 TYP_NAMED 行按名查侧表必须**命中且回指本行**（唯一分配点 ⇒
+//      每个 named 行都该有登记；回指不等 = 有生产点绕过侧表另建了同名行）；
+//   ② 侧表 → 类型表 + 唯一性：每条登记必须指回 kind=TYP_NAMED 且名字相符的**合法行**，
+//      且该名字在类型表里**恰 1 行**（去重不变量，全表而非抽样）；
+//   ③ 读取面（替换弱断言 f1.row_count 的那条）：AST 中每个解析为**已注册命名类型**的
+//      EXPR_IDENT 节点，`res_type_node(node)` 的返回值必须等于侧表命中 ti——覆盖
+//      res_type_node 的两条出口（SYM_TYPE 注册行 / 惰性 alloc_named_type）。
+// 只计不改：不动类型表/侧表/符号表，只读 + 计数。返回 = 不一致条数（0 = 全过）。
+// 摘要行恒打印（本函数仅在 --verify-named-dedup 下被调用；默认路径零调用）。
+// 性能注：③ 的 find_gsym 是符号表倒序线性扫描 → 语料越大越慢，仅调试通道（默认关）。
+fn named_dedup_verify() -> int {
+    bad : ., mut = 0;            // 不一致条数（返回）
+    named_rows : ., mut = 0;     // 断言①覆盖的 TYP_NAMED 行数
+    ident_checked : ., mut = 0;  // 断言③覆盖的类型名引用节点数
+    // ① 类型表 → 侧表
+    ti : ., mut = 0;
+    loop {
+        if ti >= g_type_count { break; }
+        if get_type_kind(ti) == TYP_NAMED {
+            named_rows = named_rows + 1;
+            ni := get_type_data(ti);
+            slot := named_dedup_slot(ni);
+            if r64(g_named_dedup, slot * 16) != ni { bad = bad + 1; }
+            else if r64(g_named_dedup, slot * 16 + 8) != ti { bad = bad + 1; }
+        }
+        ti = ti + 1;
+    }
+    // ② 侧表 → 类型表 + 唯一性
+    e : ., mut = 0;
+    loop {
+        if e >= g_named_dedup_cap { break; }
+        ni2 := r64(g_named_dedup, e * 16);
+        if ni2 >= 0 {
+            ti2 := r64(g_named_dedup, e * 16 + 8);
+            if get_type_kind(ti2) != TYP_NAMED { bad = bad + 1; }
+            else if get_type_data(ti2) != ni2 { bad = bad + 1; }
+            if named_dedup_rows(ni2) != 1 { bad = bad + 1; }
+        }
+        e = e + 1;
+    }
+    // ③ 读取面：EXPR_IDENT（类型名引用）→ res_type_node 必须落回侧表同一行
+    ai : ., mut = 0;
+    loop {
+        if ai >= g_ast_count { break; }
+        if ast_kind(ai) == EXPR_IDENT {
+            ni3 := ast_int_val(ai);
+            si := find_gsym(ni3);
+            if si >= 0 && sym_kind(si) == SYM_TYPE {
+                sti := sym_type(si);
+                // 泛型形参也 def_sym 为 SYM_TYPE，但其行 kind = TYP_GENERIC_PARAM（不经侧表）
+                if get_type_kind(sti) == TYP_NAMED {
+                    ident_checked = ident_checked + 1;
+                    slot3 := named_dedup_slot(ni3);
+                    if r64(g_named_dedup, slot3 * 16) != ni3 { bad = bad + 1; }
+                    else if r64(g_named_dedup, slot3 * 16 + 8) != res_type_node(ai) { bad = bad + 1; }
+                }
+            }
+        }
+        ai = ai + 1;
+    }
+    print("[named-dedup] named_rows=");
+    print(int_str(named_rows));
+    print(" ident_checks=");
+    print(int_str(ident_checked));
+    print(" mismatches=");
+    println(int_str(bad));
+    return bad;
+}
+
 fn init_types() {
     g_type_count = 0;
     named_dedup_reset();   // 类型表重置 → 侧表随之作废（陈旧 name→ti 不得跨重置复用）
+    // R2 P2a Task 3：判定回落计数随之归零（类型行号空间作废 → 计数只对本编译期有意义；
+    // LSP 每请求走 check_all → 本行 → 计数不跨请求累积）
+    g_replace_unknown = 0; g_replace_bridge = 0;
     alloc_type(TYP_BASE, TY_INT, 0);     // TI_INT = 0
     alloc_type(TYP_BASE, TY_DEX, 0);   // TI_DEX = 1
     alloc_type(TYP_BASE, TY_BOOL, 0);    // TI_BOOL = 2
@@ -233,20 +314,20 @@ fn get_type_extra(ti: int) -> int {
 }
 
 // ─── R2 P2a Task 2（F2）：常量档数组长度约束 ───
-// 背景（P1 findings §6.F2）：身份判等（type_equal_core 的 TYP_ARRAY 分支）曾把 N 与元素判等
+// 背景（P1 findings §6.F2）：身份判等（type_equal_legacy 的 TYP_ARRAY 分支）曾把 N 与元素判等
 // 绑在一起 = N 属**类型身份**；而桥接按 R1 裁决 **N 不入身份**（AK_SEQUENCE 参数链只含元素项）
 // → 判定替换（Task 3：引擎 ty_equiv）后 `[int;4]` → `[int;3]` 会**静默通过**（现状是编译错误
 // error[TF01]）。用户裁决：落「常量档长度约束」——保持现状拒绝语义，不留静默缺口。本函数即
 // 该约束：N 从身份中**迁出**，成为具名、可独立调用/独立测试的检查（身份分支不再比 N）。
 //
 // 语义（本批 = 常量档：N 皆字面量 → 编译期定 恒真/恒假）：
-//   沿两类型的**结构对应位置**下钻（下钻位置覆盖 type_equal_core 的**递归位**：数组元素 /
+//   沿两类型的**结构对应位置**下钻（下钻位置覆盖 type_equal_legacy 的**递归位**：数组元素 /
 //   指针元素 / 引用元素 / 切片元素 / 元组字段 / 泛型应用实参），在**数组位置**比较 N（extra）
 //   ——N 必须相等；不等即 0（违反）。其余情形（异 kind / 异元数 / 非数组构造子）长度面无约束
 //   → 1（满足）。**1 = 满足；0 = 违反**。
 //   ⚠「同形」仅指**递归位覆盖**（下钻走得到的位），**不**指比较项相同——各构造子另有非长度
 //   面，且**一律归身份判定**，本约束有意不重复（只认 N = TYP_ARRAY 的 extra 一个维度）：
-//     · REF —— `type_equal_core` 的 TYP_REF 分支另比 `extra`（mut 标记），本函数不重复；
+//     · REF —— `type_equal_legacy` 的 TYP_REF 分支另比 `extra`（mut 标记），本函数不重复；
 //     · TUPLE / GENERIC_APPLY —— 身份另比元数、APPLY 另比基型行号，同上；
 //     · 反向不对称 —— PTR 的 `extra`（地址空间位 asp，`infer_expr` 的指针升格分配点）身份
 //       **亦不比**（现状如此，非本任务面），本函数同样不引入该比较。
@@ -321,10 +402,17 @@ fn diag_type_incompatible(verdict: int, code: int, what: string, line: int, col:
     }
 }
 
-// R2 P1：本函数是**唯一**结构判等实现（改名自 type_equal，改名 + 包装见下方包装函数）。
-// 内部 6 处递归调用点（:111/:126/:132/:135/:138/:150）指向本名，**不**经包装 → 影子只在
+// R2 P1：本函数曾是**唯一**结构判等实现（原名 type_equal）。
+// R2 P2a Task 3：改名 `type_equal_legacy`——判定权已移交引擎（见下方 `type_equal` 双函数），
+// 本函数降级为两用：
+//   ① 影子通道的**对拍对照物**（替换门：引擎判定 vs 旧结构判等逐点对账，见 sh_compare）；
+//   ② 引擎三态返回 -1（未知）或桥接失败时的**回落实现**（unknown 政策：不得静默当 0/1）。
+//   **P5 删**（引擎覆盖面补齐、unknown 清零后）。
+// 内部 6 处递归调用点（数组/元组/引用/指针/切片/泛型应用）指向本名，**不**经包装 → 影子只在
 // 8 个外部决策点取样一次/次调用（递归展开不重复计数）。
-fn type_equal_core(t1: int, t2: int) -> bool {
+// F2（Task 2）后数组分支已 **N-free**（N 迁出类型身份）——与引擎侧一致；长度面走
+// array_len_constraint_ok（判定点显式补检），本函数**不得**再引回 N 比较（Task 2/3 评审裁决）。
+fn type_equal_legacy(t1: int, t2: int) -> bool {
     if t1 == t2 { return true; }
     // Compare structure for non-base types
     if t1 >= 0 && t2 >= 0 && t1 < g_type_count && t2 < g_type_count {
@@ -338,7 +426,7 @@ fn type_equal_core(t1: int, t2: int) -> bool {
         // AK_SEQUENCE 参数链不含 N）。长度拒绝语义由 array_len_constraint_ok 在**判定点**
         // 显式补检（type_compat_strict）；身份面只判结构（元素）。
         if k1 == TYP_ARRAY && k2 == TYP_ARRAY {
-            return type_equal_core(get_type_data(t1), get_type_data(t2));
+            return type_equal_legacy(get_type_data(t1), get_type_data(t2));
         }
         if k1 == TYP_TUPLE && k2 == TYP_TUPLE {
             if get_type_data(t1) != get_type_data(t2) { return false; }
@@ -348,19 +436,19 @@ fn type_equal_core(t1: int, t2: int) -> bool {
             i : ., mut = 0;
             loop {
                 if i >= cnt { break; }
-                if !type_equal_core(r64(g_gen_apply_data, (start1 + i) * 8), r64(g_gen_apply_data, (start2 + i) * 8)) { return false; }
+                if !type_equal_legacy(r64(g_gen_apply_data, (start1 + i) * 8), r64(g_gen_apply_data, (start2 + i) * 8)) { return false; }
                 i = i + 1;
             }
             return true;
         }
         if k1 == TYP_REF && k2 == TYP_REF {
-            return get_type_extra(t1) == get_type_extra(t2) && type_equal_core(get_type_data(t1), get_type_data(t2));
+            return get_type_extra(t1) == get_type_extra(t2) && type_equal_legacy(get_type_data(t1), get_type_data(t2));
         }
         if k1 == TYP_PTR && k2 == TYP_PTR {
-            return type_equal_core(get_type_data(t1), get_type_data(t2));
+            return type_equal_legacy(get_type_data(t1), get_type_data(t2));
         }
         if k1 == TYP_SLICE && k2 == TYP_SLICE {
-            return type_equal_core(get_type_data(t1), get_type_data(t2));
+            return type_equal_legacy(get_type_data(t1), get_type_data(t2));
         }
         if k1 == TYP_GENERIC_APPLY && k2 == TYP_GENERIC_APPLY {
             if get_type_data(t1) != get_type_data(t2) { return false; }
@@ -372,7 +460,7 @@ fn type_equal_core(t1: int, t2: int) -> bool {
             ai : ., mut = 0;
             loop {
                 if ai >= count1 { break; }
-                if !type_equal_core(r64(g_gen_apply_data, (start1 + 1 + ai) * 8), r64(g_gen_apply_data, (start2 + 1 + ai) * 8)) { return false; }
+                if !type_equal_legacy(r64(g_gen_apply_data, (start1 + 1 + ai) * 8), r64(g_gen_apply_data, (start2 + 1 + ai) * 8)) { return false; }
                 ai = ai + 1;
             }
             return true;
@@ -384,14 +472,47 @@ fn type_equal_core(t1: int, t2: int) -> bool {
     return false;
 }
 
-// R2 P1 影子对拍包装：旧判定照常返回（**影子不改判定**）；影子判定只观察（--type-shadow 开时）。
-// 未开 = 单次全局读 + 直接返回 → 与包装前等价（P0/R1 的两态产物逐字节判据据此成立）。
+// ─── R2 P2a Task 3：判定替换（引擎 ty_equiv 成为判定权威）───
+// 判定主体（P1 的包装层拆两半：本函数 = 引擎判定，`type_equal` = 入口 + 影子对拍包装）。
+//   ① 同一行快路径：t1 == t2 → true（与 legacy 首行**逐字同义**——legacy 首行也是
+//      `if t1 == t2 { return true; }`，含负 ti 情形；故快路径不改任何判定结果，只省一次
+//      桥接 + 引擎查询）；
+//   ② 桥接（sh_term_of_ti）：任一侧译不成类型项（-1）→ 回落 legacy 并计数 g_replace_bridge；
+//   ③ 引擎三态：1 → true；**0 → false（引擎结论即权威）**；-1（未知：预算耗尽/未覆盖面）→
+//      **不静默当 0/1**，回落 legacy 并计数 g_replace_unknown（unknown 政策，P1 交接硬性）；
+//   ④ 预算隔离：判定前后各 ty_budget_reset(200000)——引擎 memo 跨查询命中会让结果依赖预算
+//      历史而非输入项（P0 终审 Critical 3 实证）；判定路径不得受前次查询影响。
+// N 面（Task 2/3 评审裁决「N 不得回身份」）：本函数路径**不含** N 比较——桥接的 AK_SEQUENCE
+// 参数链只含元素项，legacy 数组分支亦已 N-free；长度拒绝一律由 array_len_constraint_ok 在
+// 判定点（type_compat_strict）承担。本函数**不得**引入任何 N（get_type_extra 的数组位）比较。
+fn type_equal_engine(t1: int, t2: int) -> bool {
+    if t1 == t2 { return true; }                       // 快路径：同一行
+    a := sh_term_of_ti(t1);
+    b := sh_term_of_ti(t2);
+    if a < 0 || b < 0 {
+        g_replace_bridge = g_replace_bridge + 1;       // 桥接缺口（登记，不静默）
+        return type_equal_legacy(t1, t2);
+    }
+    ty_budget_reset(200000);
+    e := ty_equiv(a, b);
+    ty_budget_reset(200000);                           // 判定后即复位（不污染后续查询）
+    if e == 1 { return true; }
+    if e == 0 { return false; }
+    // e == -1（未知）：不静默——回落 legacy 并计数（unknown 政策，报告单列）
+    g_replace_unknown = g_replace_unknown + 1;
+    return type_equal_legacy(t1, t2);
+}
+
+// R2 P1 影子对拍包装 / R2 P2a Task 3 判定入口：判定照常返回（**影子不改判定**）；影子只观察
+// （--type-shadow 开时）。**对照物 = type_equal_legacy**（替换门：引擎 vs 旧结构判等逐点
+// 对账——`sh_compare` 内部另算引擎判定与 `ok` 比较，故 ok 必须喂 legacy 的结论）。
+// 未开 = 单次全局读 + 直接返回 → 两态产物逐字节判据据此成立。
 // 本语言无三元运算符 → ok 用显式分支（`r ? 1 : 0` 不合法）。
 fn type_equal(t1: int, t2: int) -> bool {
-    r := type_equal_core(t1, t2);
+    r := type_equal_engine(t1, t2);
     if g_shadow_on != 0 {
         ok : ., mut = 0;
-        if r { ok = 1; }
+        if type_equal_legacy(t1, t2) { ok = 1; }
         sh_compare(t1, t2, ok);
     }
     return r;

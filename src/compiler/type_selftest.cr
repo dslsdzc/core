@@ -397,6 +397,39 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("f2.nonarray_no_constraint",
         (array_len_constraint_ok(f2_arr3, TI_INT) == 1 && array_len_constraint_ok(TI_INT, f2_arr3) == 1), 1);
 
+    // --- R2 P2a Task 3：判定替换（引擎为判定权威 + unknown 政策 + N 不回身份）---
+    // ① N 面（Task 2/3 评审裁决「N 不得回身份」）：`type_equal`（引擎判定）对**同结构异长**
+    //    判 true——N 不在身份内；拒绝语义由 array_len_constraint_ok 独立承担（第二断）。
+    //    两断合起来 = 该不变量的双钉：引擎不放宽成身份 → 但拒绝不丢。
+    // ② unknown 政策：两个**互异命名型**行 → 桥接 AK_NAMED 不展开 → 引擎 -1（未知）→
+    //    **不得静默当 0/1**：回落 legacy（此处判 false）+ g_replace_unknown 恰 +1。
+    // ③ 同一行快路径：不触发引擎/回落（同型自反恒 true）。
+    ty_budget_reset(200000);
+    t3_arr3 := alloc_type(TYP_ARRAY, TI_INT, 3);
+    t3_arr4 := alloc_type(TYP_ARRAY, TI_INT, 4);
+    t3_ok : ., mut = 0;
+    if type_equal(t3_arr3, t3_arr4) {
+        if array_len_constraint_ok(t3_arr4, t3_arr3) == 0 { t3_ok = 1; }
+    }
+    total = total + 1; fails = fails + ts_check("t3.engine_len_not_identity", t3_ok, 1);
+    // 行 1203/1204 = 人造行（不进生产侧表语义面；alloc_named_type 仅为取得互异 named 行）
+    t3_na := alloc_named_type(str_intern("T3NamedA"));
+    t3_nb := alloc_named_type(str_intern("T3NamedB"));
+    t3_unknown_before := g_replace_unknown;
+    t3_ub : ., mut = 0;
+    if !type_equal(t3_na, t3_nb) {
+        if (g_replace_unknown - t3_unknown_before) == 1 { t3_ub = 1; }
+    }
+    total = total + 1; fails = fails + ts_check("t3.unknown_fallback_legacy", t3_ub, 1);
+    // 桥接缺口（sh_term_of_ti 译不成项：行号越界）→ 同样回落 legacy（判 false）+ 计数 g_replace_bridge
+    t3_bridge_before := g_replace_bridge;
+    t3_bf : ., mut = 0;
+    if !type_equal(g_type_count + 100, TI_INT) {
+        if (g_replace_bridge - t3_bridge_before) == 1 { t3_bf = 1; }
+    }
+    total = total + 1; fails = fails + ts_check("t3.bridge_fallback_legacy", t3_bf, 1);
+    ty_budget_reset(200000);
+
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }
     return 0;
