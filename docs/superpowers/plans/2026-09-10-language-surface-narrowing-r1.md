@@ -620,6 +620,11 @@ nice -n 19 ./build/corec run 'fn main()->int{return 42;}'   # rc=42
 - `TODO.md`：宽度类型移出语言条目内三项（死条目移除 / `_f32/_f64` 后缀 / `1_000` 复核）划销并注记落点；定长裁决条目注记「类型身份退役 = R2 落实，R1 注记 + 全局路径已修」；新增「全局初始化机制」记录（main 序言注入 + 解释器常量阶段；未来若支持非 main 入口/库形态需迁移到独立 init 区）
 - `TODO.md` **新登记**（R1 实测发现）：**lexer 诊断前缀不一致**——lexer 走 `add_error`（`lexer.cr:38-44`）输出 `error: <msg>`（**无错误码**），checker/其余走 `diag.cr:134` 的 `error[XX]`；既有守卫与测试门（扫 `error[`）对 lexer 诊断**零覆盖**（实测 `return 0xZZ;` → `error: invalid digit in integer literal`，全无 `error[`）。建议统一格式或扩展守卫扫描面
 - `TODO.md` **新登记（Task 3 评审 Minor）**：① lexer 诊断**重复打印 4 遍**（多轮 tokenize 累积、`tokenize()` 不清零 `g_error_count`——既有行为，父版同款注释）；② 边缘形态分歧（既有，超出本批判据集）：`1._5`（SH 响亮报错 vs bootstrap 词法层 INT(1)+DOT+IDENT(_5)，整管线下仍报错、无静默接受）、`1.`（既有分歧）；③ `0x_` 诊断措辞优先级变化（现报分隔符消息，原报 invalid integer literal——两者皆错误，仅措辞）
+- `TODO.md` **新登记（Task 4 评审发现）**：
+  - **Important（既有缺口，双路径分叉）**：解释器 callee 内联路径仍缺枚举族 opcode（如 `IR_MAKE_ENUM(17)`）——枚举值在 callee 内构造时 interp 与 ELF 结果分叉（复现件：`build/review_t4/p14_enum_in_callee.cr` interp 0 vs ELF 33；`p15_enum_split.cr` interp -11 vs ELF 33）；本批 15 例未覆盖。建议按 Task 4 §6.2 同款「与主循环同语义同守卫」补齐
+  - **Minor**：类型别名仅**一层**解析（`type A = [int;2]; type B = A; g : B;` 仍双路径 SIGSEGV；有初值形态工作）——`agg_elem_count_of` 需递归/迭代至底
+  - **Minor（测试卫生，随本任务修）**：`tests/selfhost/test_global_init.py` 的 `clean_cache()` 返回码未检查（清缓存失败 + TODO #5 旧缓存 = 判据被静默污染——正是本项目大忌）→ 改为断言 rc=0；另删未用的 `import sys`
+  - **Minor（记录，不修）**：Task 4 报告 §6.5 称注入在 `g_cur_ret_ti = ret_ti` **之后**，实际在**之前**（`ir_gen.cr:2282`，= brief 指定位置）——报告措辞与代码不符（读码无歧义）；`alloc_type(TYP_ARRAY, TI_INT, cnt)` 硬编码元素类型 TI_INT（无观测差异，元素尺寸恒 8）
 - **Task 2 评审遗留（Minor）随本步清账**：
   - M1：`parser.cr` dex 分支恢复被替换文本丢掉的**行尾注释** `// 词素串下标（-1 = 无）`（信息有损、零行为——纯注释恢复）
   - M3：**文档面随迁**（Task 2 只动 `src/`）——`docs/pseudocode/compiler/parser-2.md:167-205,729-740`、`docs/pseudocode/compiler/ast.md:87-118,445-490`、`docs/numeric-migration-inventory.md:29,32,51,148,190,230-231,244` 中引用已删条目处逐条更新/标注（其中 `:148` 声称 `src/lsp/analysis.cr:895` 有 `(k >= T_INT_I8 && k <= T_FLOAT_F64)` 区间——**实测不存在**，该行本身即过时，按实测修正）
