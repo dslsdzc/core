@@ -619,6 +619,7 @@ nice -n 19 ./build/corec run 'fn main()->int{return 42;}'   # rc=42
 - spec 状态行 → 「**已实施（R1）**」+ §3 波 R1 三项逐条标记完成 + 记录三处行为变化（`1_000`、宽度后缀、全局初始化）
 - `TODO.md`：宽度类型移出语言条目内三项（死条目移除 / `_f32/_f64` 后缀 / `1_000` 复核）划销并注记落点；定长裁决条目注记「类型身份退役 = R2 落实，R1 注记 + 全局路径已修」；新增「全局初始化机制」记录（main 序言注入 + 解释器常量阶段；未来若支持非 main 入口/库形态需迁移到独立 init 区）
 - `TODO.md` **新登记**（R1 实测发现）：**lexer 诊断前缀不一致**——lexer 走 `add_error`（`lexer.cr:38-44`）输出 `error: <msg>`（**无错误码**），checker/其余走 `diag.cr:134` 的 `error[XX]`；既有守卫与测试门（扫 `error[`）对 lexer 诊断**零覆盖**（实测 `return 0xZZ;` → `error: invalid digit in integer literal`，全无 `error[`）。建议统一格式或扩展守卫扫描面
+- `TODO.md` **新登记（Task 3 评审 Minor）**：① lexer 诊断**重复打印 4 遍**（多轮 tokenize 累积、`tokenize()` 不清零 `g_error_count`——既有行为，父版同款注释）；② 边缘形态分歧（既有，超出本批判据集）：`1._5`（SH 响亮报错 vs bootstrap 词法层 INT(1)+DOT+IDENT(_5)，整管线下仍报错、无静默接受）、`1.`（既有分歧）；③ `0x_` 诊断措辞优先级变化（现报分隔符消息，原报 invalid integer literal——两者皆错误，仅措辞）
 - **Task 2 评审遗留（Minor）随本步清账**：
   - M1：`parser.cr` dex 分支恢复被替换文本丢掉的**行尾注释** `// 词素串下标（-1 = 无）`（信息有损、零行为——纯注释恢复）
   - M3：**文档面随迁**（Task 2 只动 `src/`）——`docs/pseudocode/compiler/parser-2.md:167-205,729-740`、`docs/pseudocode/compiler/ast.md:87-118,445-490`、`docs/numeric-migration-inventory.md:29,32,51,148,190,230-231,244` 中引用已删条目处逐条更新/标注（其中 `:148` 声称 `src/lsp/analysis.cr:895` 有 `(k >= T_INT_I8 && k <= T_FLOAT_F64)` 区间——**实测不存在**，该行本身即过时，按实测修正）
