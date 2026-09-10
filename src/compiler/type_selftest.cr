@@ -396,6 +396,29 @@ fn type_selftest_run() -> int {
     // 负控：非数组对（含单侧数组）长度面无约束 → 恒满足（防「一律拒绝」的退化实现）
     total = total + 1; fails = fails + ts_check("f2.nonarray_no_constraint",
         (array_len_constraint_ok(f2_arr3, TI_INT) == 1 && array_len_constraint_ok(TI_INT, f2_arr3) == 1), 1);
+    // Task 4 Step 5c（Task 2 评审 M2 收口）：① 补齐约束的 REF / SLICE 两个递归位（此前已钉
+    // 数组元素 / 泛型实参 / 指针元素 / 元组字段四位，下钻面 6 位里缺这两位）；② 把**站点接线**
+    // 纳入自测面——站点的措辞由 type_compat_strict 的**三态**分派（1 = 兼容 / 0 = 身份不匹配
+    // → 原措辞 / -1 = 身份通过但长度约束违反 → 专属措辞），故 0 与 -1 的**区分**本身就是判据
+    // （把两路并成一路 = 措辞面回归，且会把「长度不满足」误报成普通类型不匹配）。
+    // REF 位注：约束只看 data（元素），**不**比 extra（mut）——mut 归身份判定（头注「同形」限定）。
+    f2_rf3 := alloc_type(TYP_REF, f2_arr3, 0);
+    f2_rf4 := alloc_type(TYP_REF, f2_arr4, 0);
+    total = total + 1; fails = fails + ts_check("f2.ref_elem_reject",
+        (array_len_constraint_ok(f2_rf3, f2_rf3) == 1 && array_len_constraint_ok(f2_rf4, f2_rf3) == 0), 1);
+    f2_sl3 := alloc_type(TYP_SLICE, f2_arr3, 0);
+    f2_sl4 := alloc_type(TYP_SLICE, f2_arr4, 0);
+    total = total + 1; fails = fails + ts_check("f2.slice_elem_reject",
+        (array_len_constraint_ok(f2_sl3, f2_sl3) == 1 && array_len_constraint_ok(f2_sl4, f2_sl3) == 0), 1);
+    // 站点三态（type_compat_strict 恒「先 type_equal 再约束」，站点调用面不变）：
+    // ① 同结构同长 → 1；② 异结构（数组 vs 基类型）→ 0（身份面否决，原措辞）；③ 同结构异长
+    // → -1（**只有**这一路走长度措辞；且它证明 type_equal 已放行 = 引擎身份确实 N-free）。
+    total = total + 1; fails = fails + ts_check("t3.strict_dispatch_ok",
+        type_compat_strict(f2_arr3, f2_arr3b), 1);
+    total = total + 1; fails = fails + ts_check("t3.strict_dispatch_identity",
+        type_compat_strict(f2_arr3, TI_INT), 0);
+    total = total + 1; fails = fails + ts_check("t3.strict_dispatch_len",
+        type_compat_strict(f2_arr4, f2_arr3), -1);
 
     // --- R2 P2a Task 3：判定替换（引擎为判定权威 + unknown 政策 + N 不回身份）---
     // ① N 面（Task 2/3 评审裁决「N 不得回身份」）：`type_equal`（引擎判定）对**同结构异长**

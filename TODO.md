@@ -125,6 +125,7 @@
 - **机制**：指纹 = magic/格式版本/完整解析源 AST，无编译器身份分量；源未变则键/指纹不变 → 二进制重建后字符串驻留序漂移不反映到键上 → 陈旧条目静默污染 dump-channel var 名输出
 - **证据**：内核抽取 Task 3 评审 concern ①（.superpowers/sdd/kernel-task-3-report.md）——Task 3 diff 仅 corearch + 注释，base↔head corec cmp 相同；清 .core/cache 后逐字节复现判据成立（计划 Global Constraints 的「清 cache 跑测试」即为规避）
 - **修复方向**：cir_cache.cr 缓存键 += 编译器指纹（产物内容哈希或编译器身份分量）——重建后旧条目自动失效；现状兜底 = CIR_CACHE_VER 手工 bump + 测试前清 cache
+- **同族第二实例（2026-09-11 R2 P2a Task 4 收官登记）：`.ccr` 输出与 cir 缓存态相关——同一二进制二次运行产出不同 `.ccr` 字节**。实证（Task 1 评审首测 + Task 4 亲测复现，`tests/suite/at_test_struct.cr`）：`clean-cache` 后首次 `corec ccr` → sha256 `53ebcf12…`；**同二进制紧接二次运行**（缓存已被首次填热）→ `5054e26d…`（三次运行起稳定于该值）。冷缓存下 pre/post 两态行为一致，故**判据比较 `.ccr` 前必须 `clean-cache`**（已并入 R2 P2a 计划 Global Constraints 精神与各任务采样方法）；本条与上条同源（缓存键缺编译器/环境身份分量），非独立缺陷。
 
 ### 6. 双入口能力分歧：ld project-mode 后端缺 HIT/表旗标（2026-09-10 ld 导入集修复评审确认——预存,待修）
 - **现象**：`src/arch/linux/ld/main.cr` 的 corearch_main 只注册 **6** 个旗标（elf/shared/static/link/output/opt-level，:31-36；评审修正——原文计数 7 误），而 `src/compiler/corearch.cr` 的 corearch_main 同段注册其全部超集（:260-273）：`--table` / `--hit-events-file` / `--dump-events` / `--dump-table` 与全族 `--dump-entries`/`--dump-coexist`/`--dump-regassign`/`--check-regalloc`/`--inject-*`/`--dump-objects` 调试通道。ld/main.cr 全文零处引用 `table`/`instance_decl_init`/`instance_select`/`g_active_instance`/`g_hit_table`——即 ld project-mode 构建出的后端（`corec build src/arch/linux/ld`，test_backend_bootstrap 的 stage1/2/3 即此产物）**HIT lowering 层与表编码器已编译在内但惰性**（评审修正——原文「整体不含 HIT/表机制」过度表述；精确缺面 = CLI/分派接线：旗标注册 + 实例声明引导 + 表装载），`:15`「两入口行为同构」括注对表模式为假。
@@ -200,13 +201,13 @@
 - **差异清单裁决归属（登记）**：findings 的 F1（P2 硬前置）/F2（P2 裁决）/F3/F4（checker 缺陷面，单开任务）与「按差异清单替换旧判定」的**替换门**全部归 **P2**；P2 验收不得只看「差异数 = 0」，须同时报告站点覆盖（P1 实测 4/8 站点零命中）。下 #18-#21 为逐条登记。
 - **站点 6 去留裁决（终审 M-1 交接项）**：站点 6（`assign-binary`，`EXPR_BINARY + OP_ASSIGN` 遗留路径——parser 已把 `=` 一律降为 `EXPR_ASSIGN`，`parser.cr:222-224`，故**不可达、无样本**）**保留挂点，去留归 P2 裁决**——零成本且留证据面（若 parser 未来恢复 `=` 的二元形态，挂点自动生效）；**不删**（删须同步 findings §8 与 `ty_shadow.cr` 站点表，属 P2 的站点面清理一并办）。
 
-### 18. F1（P2 硬前置）：同名 named 类型占多行未规范化 → 引擎按行建原子 → 判不了
+### 18. ~~F1（P2 硬前置）：同名 named 类型占多行未规范化 → 引擎按行建原子 → 判不了~~（2026-09-11 R2 P2a Task 1 **已修**：建表去重——唯一分配点收敛 `alloc_named_type` + 开放寻址侧表（装填守卫/重建重放/回写重探，照 `sh_map_*` 先例），8 个生产分配点全改调；12 个读取点读**名字**故语义不变。落点 `src/compiler/checker.cr`（+`globals.cr`/`type_selftest.cr`），提交 `3c8402e8`（评审 3 Minor 收口 `8c9d773f` 纯注释）；判据 = `selftest-types`（f1.* 四例 + 扩容重建例）+ 侧表↔`res_type_node` 管线内断言（`tests/selfhost/test_named_dedup.py`，正控 mismatches=0 / 负控注入 6、rc=1）+ P1 9 条 unknown **清零** + ELF 逐字节同）
 - **现象**：`type_equal_core` 的 `TYP_NAMED` 按 **name_idx** 判等（同名恒等价）；类型表同一名字可占**多行**（`MemLayout` 2 行 / `Box` 5 行——`res_call_type` 在符号不可见处 `alloc_type(TYP_NAMED,...)` 新建行、泛型实例化另建行），而桥接按**行号**建原子 `tt_atom(AK_NAMED, ti, -1)` → 两个不同原子 → 引擎 `AK_NAMED` 不展开 → **-1（未判定）**。
 - **实证**：P1 三档语料 26,704 判定中 9 条差异（去重 3 类型对）**全部**由此产生（`old_looser=0`、`old_stricter=0`；差异 = 「旧能判、引擎判不了」）；根因探针 = findings §4.2 + §6.F1。
 - **影响（为何是硬前置）**：替换后主流「同类型比较」会从**真**变**未判定**；若 P2 把未知当拒绝 → 大面积假拒，当通过 → 静默失去命名类型检查。二者皆不可接受。
 - **修复方向**：二选一并裁决——① 引擎侧引入 named 身份规范化（同名 → 同一原子，需 name 注册表）；② 桥接把同名行折叠到同一项（须先裁决「同名是否恒等价」，会掩盖跨声明域同名）。**P2 第一项，且须补同名多行的守门用例**（findings 探针 B/F/G/K 可升格为回归）。
 
-### 19. F2（P2 裁决）：数组长度 `N` 旧判定比、引擎不比 → 替换即放宽
+### 19. ~~F2（P2 裁决）：数组长度 `N` 旧判定比、引擎不比 → 替换即放宽~~（2026-09-11 R2 P2a Task 2 **已裁决并实施**：用户裁决 = 落「常量档长度约束」保持现状拒绝语义——`array_len_constraint_ok` 沿结构对应位下钻比 N（数组元素/指针元素/引用元素/切片元素/元组字段/泛型应用实参 6 位），身份分支去 N，判定点 `type_compat_strict` 显式补检（`-1` = 长度违反 → 专属措辞，码不变）；判定点**恒先调 `type_equal`** 保影子站点采样面。落点 `src/compiler/checker.cr`，提交 `b36d8e76`（评审 M1「同形」限定 `507daf7a` 纯注释）；判据 = `selftest-types` f2.* 8 例（**Task 4 补至 10 例**：+REF/SLICE 下钻位）+ 异长拒绝行为探针 + 全语料 `old_stricter=0`（探针 D/G 的 F2 面消除）；**P3 面遗留**：符号档/动态档长度约束未实现（本批按字面量比较 extras，异形不下钻））
 - **现象**：`type_equal_core` 的 `TYP_ARRAY` 分支比较 `extra`（= N）；桥接按 R1 裁决**不把 N 入身份**（`AK_SEQUENCE` 参数链只含元素项）→ 替换后 `[int;3]` vs `[int;4]` **静默通过**（当前是 `error[TF01]`）。
 - **实证**：探针 D（`[int;4]` 返回给 `[int;3]`）与探针 G（泛型实参位）均 `old_stricter=1`；本轮语料 0 触发。
 - **修复方向**：R1 的「N 不入身份」是 **IR 侧**身份裁决；**checker 侧是否保留 N 检查需单独裁决**——保留 → 需在引擎/桥接把 N 作为维度/字面量入判定；不保留 → 记为有意的语言放宽并写进 spec。裁决后同步 `bridge.len_not_identity` 用例语义。
@@ -231,6 +232,25 @@
 - **现象**：钩子仅判 `stripped == "git"` 或 `stripped.startswith("git ")`（`.claude/hooks/block-git.py:10-11`）——`cd x && git status`、`echo hi; git log`、`(git status)`、`sudo git ...` 等**复合/包装形态全部放行**；铁律 #2 的「机械拦截」有洞。
 - **影响**：非恶意误用（多 agent 并行时的习惯性复合命令）即可能绕过禁 git 约束；本轮工作副本已出现一次只读 `git diff --numstat` 违例（Task 3 自陈 D7，无写操作）。
 - **修复方向（建议单开）**：按 shell 分隔符（`;` `&&` `||` `|` `(` 换行等）分词后做**词边界**匹配，命中 `git` 词即拒（注意放行 `jj git push` 等 jj 子命令形态与 `gitignore` 类词元）；并补负控用例（复合形态必拒、`jj git` 必放）。
+
+### 24. R2 P2a 落地（2026-09-11——落点 / 未覆盖面登记 / P5 继承项，非缺陷）
+- **落点**：`src/compiler/checker.cr`（`alloc_named_type` + 去重侧表 / `array_len_constraint_ok` / `type_compat_strict`+`diag_type_incompatible` / `type_equal_engine`+`type_equal_legacy` 拆分）、`src/compiler/ty_shadow.cr`（对照物切 legacy + `replace_*` 计数）、`src/compiler/globals.cr`（`g_named_dedup*` / `g_replace_*`）、`src/compiler/main.cr`（`--verify-named-dedup`）、`src/compiler/type_selftest.cr`（f1./f2./t3.* 用例）、`tests/selfhost/test_named_dedup.py`（新增）。计划 = `docs/superpowers/plans/2026-09-10-r2-p2-replace.md`；报告三份 = `.superpowers/sdd/r2p2-task-{1,2,3}-report.md` + 收官报告。提交链 `3c8402e8`+`8c9d773f`（F1）→ `b36d8e76`+`507daf7a`（F2）→ `10718ba8`（判定替换）→ 收官（本条目所在提交）。
+- **行为面兑现**：判定权由结构判等移交引擎（`ty_equiv`），unknown（-1）/桥接失败**回落 legacy 并计数**（`replace_unknown`/`replace_bridge`，不静默）；ELF 逐字节 = R1 基线 `95084e7b…d475`（开/关两态）；自举 `corec2/corec3` cmp IDENTICAL + N06=0 + 冒烟 42；23 套件 rc=0。
+- **未覆盖面（显式登记）**：① 站点 1/2/4/6 语料**零命中**（同 P1）→「对拍差异归零」效力范围 = 赋值/返回/if 面（站点 5/7/8），泛型实参/应用基型/兜底等价/热补丁四面的证据来自定向探针而非语料（P1 交接硬性要求：报差异数须同报站点覆盖）；② 语料 `replace_unknown = 0` 说明语料未触达引擎未知面——未知面证据来自探针与 C-1（`G<[int;3]>` 等 3 处 =1）。
+- **P5 继承项（须在删 legacy 前清零/落地）**：① **`type_equal_legacy` 删除归 P5**——现为「对拍对照物 + unknown/桥接回落实现」双用；② **unknown 清零的前提 = 引擎命名展开**（`TYP_GENERIC_APPLY`/`AK_NAMED` 目前不展开 → 引擎 -1 → 回落 legacy；命名类型/泛型应用面的等价判定**仍由 legacy 承担**）——引擎命名展开落地前 unknown 清零不可达，且删 legacy 会把「回落」变「未判定」；③ 站点 6 挂点去留（P1 终审 M-1 交接）随 P5 站点面清理一并办。
+- **P2b 待办（同 spec §9 P2 行）**：`infer_expr` 公理区 → `iface_ops` 查表接线；`res_type_node` 两表合一。
+
+### 25. F5：`EXPR_TUPLE` 元素连续槽位假设对**复合表达式元素**不成立 → 元组字段类型错录（假拒 + soundness 漏放；含 `opt.cr:177` 恒空转登记）
+- **现象（Task 3 评审加码定位，pre-existing；建议单开任务）**：元组字面量 `(e0, e1, …)` 的元素类型按「`a + 0..a+ec-1` 连续槽位」读取，但**复合表达式元素自身占多个 AST 槽**（如 `[1,2,3]` 的数组节点在其 3 个子节点**之后**）→ 后续元素的槽位推断全错位。两类实证（`/tmp/r2p2t3/probes`）：
+  - ① **假拒绝（类型面）**：`(1,a)` vs `(1,[1,2,3])`（**语义同型** `(int,[int;3])`）→ 误报 `error[TA01]`；
+  - ② **soundness 漏放**：`(1,[1,2,3])` vs `(1,h())`（`h()->int`，**异型互赋**）→ **静默接受**；
+  - ③ N 面漏检（Task 3 §6.1）：`(int,[int;3])` 字段位的异长静默通过（元素为复合表达式时该位无检查）。
+  - 反证边界：`([1,2,3],1)`（数组在**首位**）正确——首位 = `parse_expr` 返回值，位置天然正确；`(1,a)`（单节点元素）正确。
+- **root cause（实读）**：`parser.cr:487` 元组分支只记 `ef = parse_expr()` 首元素节点 + `ec` 元素**个数**，注释「stored in consecutive g_ast slots」对复合元素不成立；**对照物 = struct 字面量有 wrapper**（`parser.cr:459` 每字段值后 `ast_alloc(0, fv, …)` 建转发节点 → 字段恒连续），元组分支缺同款。
+- **消费点（4 处同假设，须一并复核）**：`checker.cr:2639`（`infer_expr` 的 `EXPR_TUPLE` 分支）、`ir_gen.cr:2207`（`gen_expr` 的 `EXPR_TUPLE`）、`monomorph.cr:296`（注释原文「elements are consecutive」）、**`opt.cr:177`**（`EXPR_ARRAY || EXPR_TUPLE` 分支——读 `ast_b`/`ast_c` 而约定是 `a`/`b`（a=首元素槽、b=个数）⇒ 数组/元组元素优化**恒空转**（`ac` 取到 0 → 循环体从不执行）；**无正确性影响**，但同属「a/b 槽约定被写错」家族，修 F5 时一并校正）。
+- **修复方向**：补 wrapper（照 struct 先例，改动最小）或改元素存储为显式槽位表；须同步 4 个消费点。
+- **判据（建议）**：修 parser 后 3 条新探针（异长拒 / 同型接受 / 异型拒）+ `selftest-types` 增例 + 4 消费点复核 + ELF/`.ccr` 逐字节（**注意：改 AST 布局可能改变产物，须列明并逐字节实测**）+ 全回归。
+- **为何未在 P2a 修**：修法动 AST 布局 + **4 个消费点**（上列），可能改变 `.ccr`/ELF 产物 → 须单独立项裁决（非「顺手改」面）。
 
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
