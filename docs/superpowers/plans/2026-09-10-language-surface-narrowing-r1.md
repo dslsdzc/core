@@ -20,6 +20,12 @@
 - **自举守护**：`nice -n 19 python3 tests/selfhost/test_backend_bootstrap.py` 必须 stage 链全 `[PASS]` + `corec2`/`corec3` `cmp` IDENTICAL + N06 = 0。
 - **run 门**：任何 `run`/`build` 输出中 `error[` 计数 = 0（不许「rc=0 就算过」）。
 - **提交粒度**：每任务一次提交，中文提交信息，前缀 `docs:` / `refactor:` / `fix:` / `test:`。
+- **diff 校验命令（Task 1 实现者实测教训，2026-09-10）**：本机 `jj diff` 默认 color-words 输出**新增行不带 `+` 前缀**，任何 `jj diff | grep '^+'` 形式的校验**恒真空通过、零校验力**；且本机 `grep` = ugrep，`'^+ *//'` 这类式样会直接报错（rc=2）。规范式样：
+  ```bash
+  jj diff --git <paths...> | grep '^[+]' | grep -v -e '^[+][+][+]' -e '^[+][[:space:]]*//' -e '^[+][[:space:]]*$'   # 期望空
+  jj diff --git <paths...> | grep -c '^[-]'    # 期望 0（无删除行）
+  ```
+  并按需加**非真空控制组**（故意构造一条应命中的输入验证该命令真会报）。fish 环境另有 noclobber（`>` 覆盖已存在文件会静默失败）——重定向用 `>|` 或先删目标文件。
 
 ---
 
