@@ -26,3 +26,7 @@ import instr
 import resolve
 import elf
 import ld
+// OS 轴（x86 实例化波 1 Task 2 落位）：_start 发射序 emit_start/emit_start_size
+// 自 format/elf/elf.cr 整函数迁 src/os/linux/entry.cr——elf.cr 的调用点跨轴引它，
+// project-mode 单元须经本清单收编（回退链命中 src/os/linux/；concat 面 = os_linux_files）。
+import entry

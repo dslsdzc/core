@@ -1,4 +1,5 @@
-// === src/format/elf/elf.cr（格式轴：ELF 容器/段/phdr/_start；波 1 Task 1 迁入）===
+// === src/format/elf/elf.cr（格式轴：ELF 容器/段/phdr + elf_gen + allocator body；
+// 波 1 Task 1 迁入；_start 发射序 = OS 轴 src/os/linux/entry.cr，Task 2 迁出）===
 // Direct ELF binary output for x86-64 using the new resolve+emit interface.
 // Depends on: x86_64/instr.cr (instr_size, emit_instr, g2_*)
 // Depends on: backend/resolve.cr (res_labels)
@@ -837,8 +838,8 @@ fn elf2_hdr(buf: string, code_end: int, total_sz: int) {
         data_sz, 1073741824, 4096);  // memsz = 1 GiB virtual bump heap
 }
 
-// ── Emit _start code, return total bytes ──
-g_call_main_pos : int, mut;  // set by emit_start, used for patching call main
+// ── _start 面共享状态（发射序本体 = OS 轴 src/os/linux/entry.cr）──
+g_call_main_pos : int, mut;  // set by emit_start (OS 轴 entry.cr), used for patching call main
 gv_argc : int, mut;   // IR var index for g_rt_argc (or -1)
 gv_argv : int, mut;   // IR var index for g_rt_argv_ptr (or -1)
 
@@ -855,128 +856,10 @@ gv_hp_inflight : int, mut = -1;
 g_heap_expand_call_pos : int, mut = -1;
 g_alloc_gl_jmp_pos : int, mut = -1;  // Part 1 jl .Lglobal displacement position (patched at Part 8)
 
-fn emit_start(buf: string, pos: int) -> int {
-    cp : ., mut = pos;
-    // mov rdi, [rsp]  — load argc (rdi=7)
-    cp = cp + emit_rex(buf, cp, 1, 0, 0, 0);
-    e2_w8(buf, cp, 139); cp = cp + 1;
-    cp = cp + emit_modrm(buf, cp, 0, 7, 4);  // [rsp] via SIB
-    cp = cp + emit_sib(buf, cp, 0, 4, 4);
-
-    // lea rsi, [rsp+8]  — pointer to argv (rsi=6, no REX extension)
-    cp = cp + emit_rex(buf, cp, 1, 0, 0, 0);
-    e2_w8(buf, cp, 141); cp = cp + 1;
-    cp = cp + emit_modrm(buf, cp, 1, 6, 4);  // [rsp+disp8]
-    cp = cp + emit_sib(buf, cp, 0, 4, 4);
-    e2_w8(buf, cp, 8); cp = cp + 1;
-
-    if gv_argc >= 0 {
-        // lea r10, [rip + 0]  (placeholder, patched in Phase 3)
-        rip_pos := cp + 3;
-        cp = cp + e2_lr(buf, cp, 0);
-        grow_rip_patch(g_x86_rip_patch_count + 1);
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos);
-        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argc);
-        g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
-        // mov [r10], rdi — store argc
-        cp = cp + emit_rex(buf, cp, 1, 0, 0, 10/8);
-        e2_w8(buf, cp, 137); cp = cp + 1;
-        cp = cp + emit_modrm(buf, cp, 0, 7, 10%8);
-    }
-
-    if gv_argv >= 0 {
-        rip_pos2 := cp + 3;
-        cp = cp + e2_lr(buf, cp, 0);
-        grow_rip_patch(g_x86_rip_patch_count + 1);
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos2);
-        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argv);
-        g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
-        // mov [r10], rsi — store argv
-        cp = cp + emit_rex(buf, cp, 1, 0, 0, 10/8);
-        e2_w8(buf, cp, 137); cp = cp + 1;
-        cp = cp + emit_modrm(buf, cp, 0, 6, 10%8);
-    }
-
-    // Initialize g_current_arena = -1 (no arena active)
-    if gv_current_arena >= 0 {
-        rip_ca := cp + 3;
-        cp = cp + e2_lr(buf, cp, 0);  // lea r10, [rip+0]
-        grow_rip_patch(g_x86_rip_patch_count + 1);
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_ca);
-        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_current_arena);
-        g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
-        // mov qword [r10], -1  — REX.WB + 0xC7 /0
-        cp = cp + emit_rex(buf, cp, 1, 0, 0, 10/8);
-        e2_w8(buf, cp, 199); cp = cp + 1;      // 0xC7 MOV r/m64, imm32
-        cp = cp + emit_modrm(buf, cp, 0, 0, 10%8);
-        e2_w32(buf, cp, -1); cp = cp + 4;      // immediate = -1 (0xFFFFFFFF)
-    }
-
-    // Write compile-time constant global initializers (g_ir_globals[i].
-    // init_val, i64 at +16; 0 = none — BSS is already zero).
-    // g_current_arena is also covered by the explicit init above; the
-    // LET-based init below writes it again with the same value (harmless).
-    gi0 : ., mut = 0;
-    loop { if gi0 >= g_ir_global_count { break; }
-        iv := r64(g_ir_globals, gi0 * 24 + 16);
-        gvv0 := r64(g_ir_globals, gi0 * 24 + 8);
-        if iv != 0 && gvv0 >= 0 {
-            // lea r10, [rip+0] — rip_patch for the global's BSS slot
-            rip_pos_g := cp + 3;
-            cp = cp + e2_lr(buf, cp, 0);
-            grow_rip_patch(g_x86_rip_patch_count + 1);
-            w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos_g);
-            w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gvv0);
-            g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
-            if iv >= -2147483647 - 1 && iv <= 2147483647 {
-                // mov qword [r10], imm32 (sign-extended) — 49 C7 02 imm32
-                w8(buf, cp, 73); w8(buf, cp+1, 199); w8(buf, cp+2, 2);
-                e2_w32(buf, cp+3, iv); cp = cp + 7;
-            } else {
-                // mov rax, imm64; mov [r10], rax
-                w8(buf, cp, 72); w8(buf, cp+1, 184); e2_w64(buf, cp+2, iv); cp = cp + 10;
-                w8(buf, cp, 73); w8(buf, cp+1, 137); w8(buf, cp+2, 2); cp = cp + 3;
-            }
-        }
-    gi0 = gi0 + 1; }
-
-    g_call_main_pos = cp;
-    cp = cp + e2_call(buf, cp, 0);  // call main
-
-    // mov edi, eax
-    e2_w8(buf, cp, 137); cp = cp + 1;
-    cp = cp + emit_modrm(buf, cp, 3, 0, 7);
-
-    // mov eax, 60  (sys_exit)
-    e2_w8(buf, cp, 184); cp = cp + 1;  // 0xB8 MOV r, imm32 (rax)
-    cp = cp + e2_w32(buf, cp, 60);
-
-    // syscall
-    e2_w8(buf, cp, 15); cp = cp + 1;
-    e2_w8(buf, cp, 5); cp = cp + 1;
-
-    return cp - pos;
-}
-
-fn emit_start_size() -> int {
-    sz : ., mut = sz_start_body();
-    if gv_argc >= 0 { sz = sz + sz_start_argv_save(); }
-    if gv_argv >= 0 { sz = sz + sz_start_argv_save(); }
-    // g_current_arena init: lea(7) + rex+mov+modrm+imm32(7) = 14 bytes
-    if gv_current_arena >= 0 { sz = sz + 14; }
-    // Constant global initializers: lea r10(7) + mov imm32(7) = 14 bytes,
-    // or mov rax imm64 + mov [r10],rax = 20 bytes for large values.
-    gi0s : ., mut = 0;
-    loop { if gi0s >= g_ir_global_count { break; }
-        ivs := r64(g_ir_globals, gi0s * 24 + 16);
-        gvvs := r64(g_ir_globals, gi0s * 24 + 8);
-        if ivs != 0 && gvvs >= 0 {
-            if ivs >= -2147483647 - 1 && ivs <= 2147483647 { sz = sz + 14; }
-            else { sz = sz + 20; }
-        }
-    gi0s = gi0s + 1; }
-    return sz;
-}
+// ── _start 发射序（emit_start/emit_start_size）已整函数迁 OS 轴
+// src/os/linux/entry.cr（x86 实例化波 1 Task 2——跨轴调用经 module.cr 三轴回退
+// 链 / 组合根 _import.cr 的 `import entry` 解析；本文件保留调用点与下方共享
+// 全局声明——单扁平编译单元内解析，无重复声明）──
 
 // ── Main ELF generation ──
 fn elf_gen(buf: string) -> int {

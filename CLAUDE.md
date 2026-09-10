@@ -164,8 +164,8 @@ Direct ELF binary output for x86-64, used by `corearch`. 三轴目录 = 跨轴 i
 
 ```
 src/arch/x86_64/          → regalloc.cr（CAG 寄存器分配）· sizes.cr（指令字节尺寸单源）· instr.cr（指令编码 REX/ModRM/SIB + 全 IR opcode 发射）· core-x86.toml（HIT 表数据）
-src/format/elf/           → elf.cr（ELF 头/phdr/段发射 + _start）· resolve.cr（标签解析 res_labels）· ld.cr（动态链接 PLT/GOT/.so 装载）
-src/os/linux/             → syscall/callseq/entry（OS 轴，波 1 Task 2+ 逐个落位——现空占位）
+src/format/elf/           → elf.cr（ELF 头/phdr/段发射 + elf_gen）· resolve.cr（标签解析 res_labels）· ld.cr（动态链接 PLT/GOT/.so 装载）
+src/os/linux/             → entry.cr（_start 发射序 emit_start/emit_start_size——波 1 Task 2 落位）· syscall/callseq（Task 5/6 逐个落位）
 src/targets/x86_64-linux/ → 组合根（target triple）：main.cr + _import.cr + Core.toml（`corec build <dir>` 的 project-mode 入口）
 ```
 
