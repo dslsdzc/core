@@ -50,3 +50,10 @@ import entry
 // instr.cr 的四分支调用点跨轴引它，project-mode 单元须经本清单收编（回退链命中
 // src/os/linux/；concat 面 = os_linux_files）。
 import callseq
+// OS 轴（x86 实例化波 1 Task 6 落位）：Linux syscall 约定发射序——sys_syscall3_stub
+// （rax 号 + rdi/rsi/rdx 参数序 + 0F 05 + 回存）/sys_syscall4_stub（第 4 参经 r10
+// ——I-2 wait4 EFAULT 修复史随迁）——自 instr.cr emit_instr 内置体分派链抽出
+// （syscall3/4 两分支改调）。内置体名索引扫描段留 elf.cr 原位（波 2 参数化面）。
+// instr.cr 的分派链跨轴引它，project-mode 单元须经本清单收编（回退链命中
+// src/os/linux/；concat 面 = os_linux_files）。
+import syscall

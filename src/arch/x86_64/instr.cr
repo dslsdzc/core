@@ -104,8 +104,10 @@ fn g2_rodata_sz() -> int {
 // cs_stack_count/cs_stack_args）/栈清理（cs_stack_cleanup）/返回值
 // （cs_ret_value——IR_RETURN 值序列 + tag 读路径 A）/通用调用
 // （cs_call_direct）。本文件保留 e2_* 编码原语、emit_instr 分派与内置体
-// （syscall3/4、load8/store8/…、get_arg、_dyncpy、goroutine_wrapper_addr——
-// 内置体直通属波 2 参数化面，见 Task 6 syscall 抽取）。
+// （load8/store8/…、get_arg、_dyncpy、goroutine_wrapper_addr——内置体直通属
+// 波 2 参数化面）。**syscall 约定（syscall3/4 内置体）已移
+// src/os/linux/syscall.cr**（x86 实例化波 1 Task 6 抽取——sys_syscall3_stub/
+// sys_syscall4_stub；rax 号 + rdi/rsi/rdx(/r10) 参数序 + 0F 05 + 回存）。
 
 // ── Byte encoding helpers ──
 fn e2_w8(buf: string, pos: int, val: int) { store8(buf, pos, val % 256); }
@@ -677,27 +679,13 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         cp = cs_stack_args(buf, pos, cp, fa, ac);
         // Match builtins by interned string index (integer compare, no str_eq)
         if s3 == g_ni_syscall3 {
-            cp = cp + e2_mov(buf, pos+cp, 0, 7);
-            cp = cp + e2_mov(buf, pos+cp, 7, 6);
-            cp = cp + e2_mov(buf, pos+cp, 6, 2);
-            cp = cp + e2_mov(buf, pos+cp, 2, 1);
-            // syscall: 2-byte 0x0F 0x05
-            e2_w8(buf, pos+cp, 15); e2_w8(buf, pos+cp+1, 5); cp = cp + 2;
-            if d >= 0 { cp = cp + e2_store_ret(buf, pos+cp, d); }
+            // Linux syscall 约定发射序 = OS 轴序列（syscall.cr，波 1 Task 6
+            // 抽取——rax 号 + rdi/rsi/rdx 参数序 + 0F 05 + rax 回存）。
+            cp = sys_syscall3_stub(buf, pos, cp, d);
         } else if s3 == g_ni_syscall4 {
-            // syscall4(num, a, b, c, d)——第 4 参 d 经 r10 传递（x86-64 syscall
-            // 约定：第 4 参在 r10；rcx 被 syscall 指令用作返回地址）。
-            // I-2：wait4 的 rusage 此前无第 4 参通道——通用装载器把第 4 参放
-            // rcx（ir_cnt=3）、第 5 参放 r8（ir_cnt=4），syscall 读 r10 = 残留
-            // 垃圾 → 内核 EFAULT 或写错地址 → 退出码传播不可靠。
-            cp = cp + e2_mov(buf, pos+cp, 0, 7);   // rax = rdi — syscall number
-            cp = cp + e2_mov(buf, pos+cp, 7, 6);   // rdi = rsi — arg1
-            cp = cp + e2_mov(buf, pos+cp, 6, 2);   // rsi = rdx — arg2
-            cp = cp + e2_mov(buf, pos+cp, 2, 1);   // rdx = rcx — arg3
-            cp = cp + e2_mov(buf, pos+cp, 10, 8);  // r10 = r8  — arg4
-            // syscall: 2-byte 0x0F 0x05
-            e2_w8(buf, pos+cp, 15); e2_w8(buf, pos+cp+1, 5); cp = cp + 2;
-            if d >= 0 { cp = cp + e2_store_ret(buf, pos+cp, d); }
+            // Linux syscall 约定发射序 = OS 轴序列（syscall.cr，波 1 Task 6
+            // 抽取——第 4 参经 r10 的约定与 I-2 修复史见该文件内注）。
+            cp = sys_syscall4_stub(buf, pos, cp, d);
         } else if s3 == g_ni_load8 {
             // movzx rax, byte [rdi+rsi] — REX.W + 0x0FB6 + SIB
             cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 0); e2_w8(buf, pos+cp, 15); cp = cp + 1; e2_w8(buf, pos+cp, 182); cp = cp + 1;
