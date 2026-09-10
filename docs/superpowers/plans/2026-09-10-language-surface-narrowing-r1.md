@@ -202,7 +202,7 @@ Expected: 命中仅 `src/compiler/parser.cr` 第 392-411 / 897-908 行（若出�
 nice -n 19 grep -rn "T_INT_I8\|T_INT_I16\|T_INT_I32\|T_INT_I64\|T_INT_U8\|T_INT_U16\|T_INT_U32\|T_INT_U64\|T_FLOAT_F32\|T_FLOAT_F64\|W_I8\|W_I16\|W_I32\|W_I64\|W_U8\|W_U16\|W_U32\|W_U64\|W_F32\|W_F64" src/ --include='*.cr'
 nice -n 19 grep -n "T_INT_I64\|W_I64" bootstrap/ -r
 ```
-Expected: 两条命令均**零命中**（第二条：bootstrap 侧本无对应常量，确认 `src/compiler/ast.cr` 之外的 .cr 与 .py 都无引用）。
+Expected: **过滤注释行后**零命中（**代码引用面**归零）——注意墓碑注释正文本身含这些标识符字样，故原始 grep 不会全空（Task 2 实现者实测指出此点，判据按「代码引用零命中」执行）：`grep ... | grep -v '^[^:]*:[0-9]*: *//'` 或等价过滤后 rc=1/无输出。
 
 - [ ] **Step 5: 重建 + 冒烟 + 回归**
 
