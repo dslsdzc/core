@@ -225,6 +225,23 @@ g_offsets : string, mut;   g_offsets_count : int, mut; g_offsets_cap : int, mut;
 g_pa_alloc_count : int, mut;
 g_pa_alloc_nodes : string, mut;   g_pa_alloc_nodes_cap : int, mut;
 
+// R2 P0 类型项引擎：类型项 DAG 表 + 结构哈希索引 + 判定 memo + 预算守卫
+// （表 = 48B/条 {tag,a,b,c,d,hash}，见 type_terms.cr；扩容 grow_type_terms/
+//  grow_tt_index 亦在该文件——引擎自持，共享面 dyn_arr.cr 零改动；P0 只建层
+//  ——checker/ir_gen/后端零消费者）。
+// 惰性 memo 槽（g_tt_top/g_tt_nil）+ 零初值 ready 位：bootstrap 后端只认字面量
+// 常量初值（`= -1` 会被降级为 0，见 bootstrap x86_64_stack_asm 的 .quad 0 路径），
+// 故以 0 = 未建 + ready 位表达「未初始化」，与本仓库 g_home_dir_ok/g_ext_inited 同式。
+g_type_terms : string, mut;        g_type_term_count : int, mut;   g_type_term_cap : int, mut;
+g_tt_index : string, mut;          g_tt_index_cap : int, mut;      g_tt_index_count : int, mut;
+g_tt_nil : int, mut;               g_tt_nil_ok : int, mut;
+g_tt_top : int, mut;               g_tt_top_ok : int, mut;
+g_ty_memo_keys : string, mut;      g_ty_memo_vals : string, mut;
+g_ty_memo_count : int, mut;        g_ty_memo_cap : int, mut;
+g_ty_steps : int, mut;             g_ty_budget_max : int, mut;     g_ty_exhausted : int, mut;
+g_ty_lits : string, mut;           g_ty_lits_cap : int, mut;       g_ty_lits_count : int, mut;
+g_ty_uncovered : int, mut;         // 未覆盖面命中位（如 AK_NAMED 具体行不展开）——P0 只登记不消费
+
 fn grow_plugin_tags(needed: int) {
     if needed < g_plugin_tag_cap { return; }
     ncap : ., mut = g_plugin_tag_cap * 2; if ncap < 8 { ncap = 8; } if ncap < needed { ncap = needed + 8; }

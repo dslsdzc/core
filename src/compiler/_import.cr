@@ -8,6 +8,9 @@ import dyn_arr
 import lexer
 import parser
 import checker
+import type_terms
+import type_engine
+import type_selftest
 import diag
 import ir_gen
 import dataflow

@@ -19,7 +19,11 @@ def concat_sources():
         'src/stdlib/io.cr', 'src/stdlib/fmt.cr', 'src/stdlib/cli.cr', 'src/stdlib/toml.cr',
         'src/compiler/ast.cr', 'src/compiler/globals.cr',
         'src/compiler/dyn_arr.cr', 'src/compiler/lexer.cr', 'src/compiler/parser.cr',
-        'src/compiler/checker.cr', 'src/compiler/opt.cr', 'src/compiler/ptr_analysis.cr',
+        'src/compiler/checker.cr',
+        # R2 P0 类型项引擎（建层，与 build_selfhost_native.py 的 corec 清单同位）：
+        # 前端单元新增三文件的源码闭包条目。
+        'src/compiler/type_terms.cr', 'src/compiler/type_engine.cr', 'src/compiler/type_selftest.cr',
+        'src/compiler/opt.cr', 'src/compiler/ptr_analysis.cr',
         'src/compiler/region_check.cr', 'src/compiler/provenance_verify.cr', 'src/compiler/diag.cr',
         'src/compiler/ext_mgr.cr', 'src/compiler/ext_safety.cr',
         'src/compiler/ir_gen.cr', 'src/compiler/pass.cr',

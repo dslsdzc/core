@@ -1,0 +1,214 @@
+// === type_terms.cr ===
+// R2 P0：类型项表（集合语义的类型项 DAG）
+// 语义见 spec §1：τ ::= ⊥ | ⊤ | ⊤ₖ | τ₁∪τ₂ | τ₁∩τ₂ | ¬τ | μX.τ | X | k(τ₁…τₙ)
+// 条目 48B {tag, a, b, c, d, hash}；同构项共享（DAG），索引 = 开放寻址哈希表 g_tt_index。
+// 本文件只做「表示 + 构造去重」；判定在 type_engine.cr，规范化（NNF/DNF）在 Task 2。
+//
+// 哈希面注记（与计划代码的偏差逐条见 Task 1 报告）：
+//   ① 本语言无位异或算子（lexer 无 caret/CARET token，ast.cr OP_* 无 BXOR），
+//      FNV-1a 的 `h ^ byte` 改用本仓库既有 FNV-1 加法折叠（dyn_arr.cr hash_bytes 同族：
+//      h = h * prime + byte）——确定性、与插入顺序无关，正是 DAG 去重所需的键性质。
+//   ② 槽位一律经 tt_mod 取非负（计划同日同款修正；负数取模 = 负下标 → 探针越界 →
+//      扩容后去重静默失效，原生压力测试实证）。
+//   ③ 键 = 五字段全比，哈希不入键（只定位槽位）——见 tt_term 内注记。
+
+// ─── 标签常量（TT_*；与 ast.cr 的 TI_* 类型 kind 无关——本层是类型项语言）───
+TT_BOT : int = 0;   TT_TOP : int = 1;   TT_TOP_K : int = 2;
+TT_UNION : int = 3; TT_INTER : int = 4; TT_NOT : int = 5;
+TT_MU : int = 6;    TT_ATOM : int = 7;  TT_VAR : int = 8;
+TT_NIL : int = 9;   TT_CONS : int = 10;
+
+// 条目 = 48B，六字段各 8B（与 g_ir_entries 同风格：字节缓冲 + 偏移常量）
+ESZ_TYPE_TERM : int = 48;
+OFF_TT_TAG : int = 0;  OFF_TT_A : int = 8;   OFF_TT_B : int = 16;
+OFF_TT_C : int = 24;   OFF_TT_D : int = 32;  OFF_TT_HASH : int = 40;
+
+// ─── 访问器（i = 类型项行号；调用方保证 0 ≤ i < tt_count()）───
+fn tt_tag(i: int) -> int { return r64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_TAG); }
+fn tt_a(i: int) -> int { return r64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_A); }
+fn tt_b(i: int) -> int { return r64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_B); }
+fn tt_c(i: int) -> int { return r64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_C); }
+fn tt_d(i: int) -> int { return r64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_D); }
+fn tt_count() -> int { return g_type_term_count; }
+
+// ─── 结构哈希（DAG 去重的键：五字段 fold，与插入顺序无关）───
+fn tt_hash5(tag: int, a: int, b: int, c: int, d: int) -> int {
+    h : ., mut = 1469598103934665603;
+    slot : ., mut = 0;
+    loop {
+        if slot >= 5 { break; }
+        v : ., mut = tag;
+        if slot == 1 { v = a; } else if slot == 2 { v = b; }
+        else if slot == 3 { v = c; } else if slot == 4 { v = d; }
+        k : ., mut = 0;
+        loop {
+            if k >= 8 { break; }
+            byte : ., mut = v % 256;
+            if byte < 0 { byte = -byte; }
+            h = h * 1099511628211 + byte;
+            v = v / 256;
+            k = k + 1;
+        }
+        slot = slot + 1;
+    }
+    return h;
+}
+
+// 非负槽位（**不要写 h - (h/cap)*cap**：i64 除法向零截断，h 为负时该式得负下标 →
+// 探针越界 → 去重静默失效；2026-09-10 P0 Task 1 原生压力测试实证扩容后 dedup 全灭，
+// 计划同日同款修正 = 本函数）。
+// 先取余再取绝对值：|h % cap| < cap ≤ 2^63，取负不溢出（cap 恒为 2 的幂，见
+// grow_tt_index）；本仓库先例 = str_intern 的 `pos := h % cap; if pos < 0 { pos = -pos; }`。
+fn tt_mod(h: int, cap: int) -> int {
+    m : ., mut = h % cap;
+    if m < 0 { m = 0 - m; }
+    return m;
+}
+
+// ─── 扩容（本文件自持，**不置 dyn_arr.cr**）───
+// 计划 Step 4 把两函数放在 dyn_arr.cr（照 grow_types 先例），实测该位置破坏
+// corearch 单元：dyn_arr.cr 属双 concat 共享面（build_selfhost_native.py 的
+// common_files），而 type_terms.cr 只入 corec 清单——共享文件里引用引擎符号 =
+// corearch 解析期 `Undefined name: ESZ_TYPE_TERM / tt_reindex` 硬失败（实测）。
+// 引擎自持扩容 + 常量，共享面零改动，corearch/corelsp 不受影响。
+fn grow_type_terms(needed: int) {
+    if needed < g_type_term_cap { return; }
+    nc : ., mut = g_type_term_cap * 2;
+    if nc < 256 { nc = 256; }
+    if nc < needed { nc = needed + 64; }
+    nb := alloc(nc * ESZ_TYPE_TERM);
+    _dyncpy(g_type_terms, g_type_term_cap * ESZ_TYPE_TERM, nb);
+    g_type_terms = nb;
+    g_type_term_cap = nc;
+}
+
+fn grow_tt_index(needed: int) {
+    // 开放寻址索引：容量取 2 的幂、≥ 2×项数（重建式扩容，见 tt_reindex）
+    if needed < g_tt_index_cap { return; }
+    nc : ., mut = 1024;
+    loop { if nc >= needed { break; } nc = nc * 2; }
+    nb := alloc(nc * 8);
+    i : ., mut = 0;
+    loop { if i >= nc { break; } w64(nb, i * 8, -1); i = i + 1; }
+    g_tt_index = nb;
+    g_tt_index_cap = nc;
+    g_tt_index_count = 0;
+    tt_reindex();
+}
+
+// ─── 索引重建（grow_tt_index 扩容后调用：清表 + 重放全部项的开放寻址插入）───
+fn tt_reindex() {
+    i : ., mut = 0;
+    loop {
+        if i >= g_type_term_count { break; }
+        h := r64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_HASH);
+        cap := g_tt_index_cap;
+        p : ., mut = tt_mod(h, cap);
+        loop {
+            if r64(g_tt_index, p * 8) < 0 { break; }
+            p = p + 1; if p >= cap { p = 0; }
+        }
+        w64(g_tt_index, p * 8, i);
+        g_tt_index_count = g_tt_index_count + 1;
+        i = i + 1;
+    }
+}
+
+// 同构比较（五字段全比——DAG 键；哈希相同与否不参与，见 tt_term 内注记）
+fn tt_same(i: int, j: int) -> int {
+    if tt_tag(i) != tt_tag(j) { return 0; }
+    if tt_a(i) != tt_a(j) { return 0; }
+    if tt_b(i) != tt_b(j) { return 0; }
+    if tt_c(i) != tt_c(j) { return 0; }
+    if tt_d(i) != tt_d(j) { return 0; }
+    return 1;
+}
+
+// ─── 构造/复用（DAG 去重的唯一入口）───
+fn tt_term(tag: int, a: int, b: int, c: int, d: int) -> int {
+    if g_tt_index_cap <= 0 { grow_tt_index(2); }
+    h := tt_hash5(tag, a, b, c, d);
+    ret : ., mut = -1;
+    loop {
+        // 装填因子守卫：探测前扩容（扩容 = 重建索引，故探测位置不会中途失配）；
+        // 扩容后重试同一轮（loop 而非递归——避免深递归与重复增长）。
+        if (g_type_term_count + 1) * 2 >= g_tt_index_cap { grow_tt_index((g_type_term_count + 1) * 2); }
+        cap := g_tt_index_cap;
+        p : ., mut = tt_mod(h, cap);
+        loop {
+            idx := r64(g_tt_index, p * 8);
+            if idx < 0 { break; }
+            // 键比较 = 五字段全比（DAG 键）；**不**把「存储哈希 == 重算哈希」并入键：
+            // 该等式只在 i64 回绕语义下恒真（x86-64 后端成立），而 bootstrap 解释器
+            // 为任意精度整数（interpreter.py 二元运算无回绕）——重算 h 不回绕、落盘
+            // 哈希经 w64/r64 截断到 i64，等式恒假 → 去重静默退化为「只插不查」。
+            // 哈希在本层的唯一职责 = 槽位定位（插入与 tt_reindex 重放同用），
+            // 故键只认五字段；碰撞（含上述截断差）仅令探测链变长，不改变结果。
+            if tt_tag(idx) == tag && tt_a(idx) == a && tt_b(idx) == b &&
+               tt_c(idx) == c && tt_d(idx) == d { ret = idx; break; }
+            p = p + 1; if p >= cap { p = 0; }
+        }
+        if ret >= 0 { break; }
+        // 未命中：追加新项，写入本轮探测到的空槽（轮内索引未被改动）
+        grow_type_terms(g_type_term_count + 1);
+        i := g_type_term_count;
+        w64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_TAG, tag);
+        w64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_A, a);
+        w64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_B, b);
+        w64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_C, c);
+        w64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_D, d);
+        w64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_HASH, h);
+        g_type_term_count = i + 1;
+        w64(g_tt_index, p * 8, i);
+        g_tt_index_count = g_tt_index_count + 1;
+        ret = i;
+        break;
+    }
+    return ret;
+}
+
+// ─── 构造 API ───
+// 惰性 memo：0 = 未建 + ready 位（零初值惯例——全局 `= -1` 初值在 bootstrap
+// 后端会被降级为 0，见 globals.cr 声明段注记）
+fn tt_bot() -> int { return tt_term(TT_BOT, 0, 0, 0, 0); }
+
+fn tt_top() -> int {
+    if g_tt_top_ok == 0 { g_tt_top = tt_term(TT_TOP, 0, 0, 0, 0); g_tt_top_ok = 1; }
+    return g_tt_top;
+}
+
+fn tt_top_k(k: int) -> int { return tt_term(TT_TOP_K, k, 0, 0, 0); }
+
+fn tt_union(a: int, b: int) -> int {
+    if a == b { return a; }
+    if tt_tag(a) == TT_BOT { return b; }
+    if tt_tag(b) == TT_BOT { return a; }
+    if tt_tag(a) == TT_TOP || tt_tag(b) == TT_TOP { return tt_top(); }
+    return tt_term(TT_UNION, a, b, 0, 0);
+}
+
+fn tt_inter(a: int, b: int) -> int {
+    if a == b { return a; }
+    if tt_tag(a) == TT_TOP { return b; }
+    if tt_tag(b) == TT_TOP { return a; }
+    if tt_tag(a) == TT_BOT || tt_tag(b) == TT_BOT { return tt_bot(); }
+    return tt_term(TT_INTER, a, b, 0, 0);
+}
+
+fn tt_not(a: int) -> int {
+    if tt_tag(a) == TT_BOT { return tt_top(); }
+    if tt_tag(a) == TT_TOP { return tt_bot(); }
+    if tt_tag(a) == TT_NOT { return tt_a(a); }   // 双重否定免费（构造面代数律）
+    return tt_term(TT_NOT, a, 0, 0, 0);
+}
+
+fn tt_mu(v: int, body: int) -> int { return tt_term(TT_MU, v, body, 0, 0); }
+fn tt_var(v: int) -> int { return tt_term(TT_VAR, v, 0, 0, 0); }
+
+fn tt_nil() -> int {
+    if g_tt_nil_ok == 0 { g_tt_nil = tt_term(TT_NIL, 0, 0, 0, 0); g_tt_nil_ok = 1; }
+    return g_tt_nil;
+}
+
+fn tt_cons(head: int, tail: int) -> int { return tt_term(TT_CONS, head, tail, 0, 0); }
+fn tt_atom(ak: int, ti: int, params: int) -> int { return tt_term(TT_ATOM, ak, ti, params, 0); }

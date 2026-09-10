@@ -193,6 +193,7 @@ fn corec_main() -> int {
     cli_cmd("ccr",   "Output linear CFG (.ccr)");
     cli_cmd("run",   "Execute code directly (interpreter mode)");
     cli_cmd("clean-cache", "Delete incremental compilation cache");
+    cli_cmd("selftest-types", "Run type-engine self tests (R2 P0)");
     cli_flag("output", "o", "Output path");
     cli_flag_bool("static", "", "Static linking (embed runtime)");
     cli_flag("opt-level", "O", "Optimization level (0,1,2,3; default=1) — O1 CSE(corec 进程内)；O2 寄存器分配+判定在 corearch（corec build 透传 --opt-level，.ccr 不承载分配结果）");
@@ -357,6 +358,9 @@ fn corec_main() -> int {
         println(".core/cache/cir/");
         return 0;
     }
+
+    // === selftest-types: 类型项引擎自测（R2 P0）——不读源文件、不产生产物 ===
+    if cli_eq(cmd, "selftest-types") { return type_selftest_run(); }
 
     // === File-based subcommands: build | check | cir | ccr ===
     if cli_arg_count() < 1 {
