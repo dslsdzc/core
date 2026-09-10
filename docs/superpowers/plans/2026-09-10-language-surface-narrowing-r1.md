@@ -431,6 +431,14 @@ jj commit -m 'fix: 语言面收窄 R1 Task 3——数字词法收窄（_ 分隔�
 
 - [ ] **Step 2: 运行确认「红」（两路径）**
 
+**前置（必须先做）——清增量缓存**：`inject_global_inits` 的注入点在 `ir_gen_func` 内（`main.cr:480` 调用），而**函数命中 cir 缓存时根本不走 `ir_gen_func`**（`main.cr:483` 的 cache-hit 分支）——叠加已知缺陷 TODO #5（缓存键不含编译器身份，跨重建不失效），**旧缓存会让本次修复看起来"没生效"**。故每次判据前：
+
+```bash
+nice -n 19 ./build/corec clean-cache      # 若子命令不可用：rm -rf .core/cache（先 ls 确认路径）
+```
+
+并在报告里记录该交互（缓存键/失效面 = TODO #5，不在本批修）。测试脚本自身不必清缓存，但**判据运行必须在清缓存后进行**。
+
 ```bash
 nice -n 19 python3 tests/selfhost/test_global_init.py
 ```
