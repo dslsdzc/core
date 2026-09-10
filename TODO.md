@@ -142,6 +142,15 @@
 - **实证**：波 1 Task 1 评审（.superpowers/sdd/w1-task-1-report.md §2.1、§6.1）+ module.cr:548-553 注释推理；代码级引用 = 零（仅 plans 历史文档 `2026-08-08-pseudocode-tdd.md:400,413` 提及）；`tools/pseudocode_extract.py` ROOTS 含 `src/compiler` 整目录 glob，仍从该死文件抽取 ELF 写侧符号 → `docs/pseudocode/标识符对照表.md` **20 行**归属误导（且对照表整体未随波 1 重生成——212 行仍写已退役 `src/arch/linux/ld` 路径；重生成 = 修复方向二部分）。
 - **修复方向**：**删除**（首选——零 importer、零功能贡献；删除需用户明确许可，铁律 #3）并重生成伪代码对照表；备选 = 迁出活树（`legacy/` 等，避开 ROOTS glob）保留历史。删除后复跑 test_backend_bootstrap + full-bootstrap guard（预期零影响、byte-identical）。
 
+### 8. 前端 ≥18 形参静默误编译类（2026-09-10 x86 实例化波 1 Task 5 评审登记——高优先级：静默误编译）
+- **现象（评审修正——非单纯"丢名"）**：≥18 形参的函数在 .ccr 中 `name_idx=0`（解析为字符串表首项 'import'）且 `param_count=0`（N=17 正常：name_idx=3 'f' param_count=17）；同源 checker 另发 `error[TF01] Function return type mismatch` 并**误归到无关声明**（如 `g_rt_argc : int, mut;`）；`corec build` **仍 rc=0**，产物 SIGSEGV/错值（多行 18/20 参签名同样触发——参数计数依赖，非行长度依赖）。调用补丁随后失败 rel32=0 → rc=139。
+- **复现**：m18 probe（task 5 报告 + 评审 /tmp 产物）——基线工具链同样复现 = 预存，非波 1 引入（波 1 四文件均不在 corec_files）。
+- **影响**：a) 静默误编译类（rc=0 + 崩）；b) `>127B 栈清理形`（需 ≥16 栈参 = ≥22 形参）**无 runtime 覆盖可能**（结构不可达）——波 1 Task 5 的 7B add rsp 形仅字节级覆盖（评审确认 16×push + add rsp,0x80 逐字节同）。
+- **修复方向**：①修参数表解析/AST bookkeeping（根源）；②≥18 形参签名改硬错 rc=1（防御面）；③回归探针 `N=17 ok / N=18 rejected-or-ok` 入 tests/；④缺陷修复后补 22 参调用 runtime 用例（`tests/suite`，断言 rc=0）——任务 5 Minor 4 的收口条件。
+### 9. extern >6 int 参静默语义缺口（2026-09-10 波 1 Task 5 评审登记——callseq.cr:45 指针落地）
+- **现象**：IR_CALL_EXTERN 仅装载 6 个寄存器参（不调用栈参/清理——与 IR_CALL 的不对称，预存原样保留于 callseq.cr）；>6 int 参 extern 调用 = 静默语义缺口。
+- **取证/修复**：FFI 面（2026-07-30 FFI 计划未提及）；修复 = extern 栈参分派补齐或显式拒绝（rc=1）——波 2 FFI 面。
+
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
 来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：
