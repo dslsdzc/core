@@ -257,7 +257,8 @@ fn type_equal(t1: int, t2: int) -> bool {
 ```
 （`r ? 1 : 0`：**本语言无三元运算符**——用 `ok : ., mut = 0; if r { ok = 1; }` 显式写。）
 
-- [ ] **Step 2: 站点标注**：在 8 个外部调用点（`checker.cr:711/947/959/973/1212/1405/1796/2127`）调用前 `sh_site_begin(<id>)`（id = 1..8，含义记入 `ty_shadow.cr` 头注：1 hotpatch 返回 / 2 泛型实参 / 3 match 模式 / 4 泛型匹配 / 5 函数体返回 / 6 赋值兼容 / 7 if 分支合并 / 8 索引/其它）。
+- [ ] **Step 2: 站点标注**：在 8 个外部调用点（`checker.cr:711/947/959/973/1212/1405/1796/2127`）调用前 `sh_site_begin(<id>)`。
+  **实读修正（Task 2 落地，取代初稿标签）**：8 个外部点**无一是 match 路径**；站点 4 = 泛型匹配（pattern 侧恒 `TI_UNIT` → 难产差异）；站点 6 = `EXPR_BINARY+OP_ASSIGN` 遗留路径（**当前不可达**——parser 已把 `=` 统一降为 `EXPR_ASSIGN`，挂点保留但永不产样本，去留待 P2 裁决）；站点 8 = `EXPR_ASSIGN` 节点（**非「索引」**）。站点 ↔ 语义以 `ty_shadow.cr` 头注（实读表）为准。
 
 - [ ] **Step 3: 分类核心（`ty_shadow.cr`）**
 
@@ -321,6 +322,7 @@ nice -n 19 ./build/corec check src/compiler/ccr_io.cr --type-shadow >> /tmp/p1_c
 （`check` 路径若不带影子通道穿透，改用 `build … --type-shadow` 并丢弃产物；实现者按实际可用路径落，报告写明。）
 
 - [ ] **Step 2: 汇总差异**：从日志抽 `[type-shadow]` 摘要行；若有 dump 文件则按 `kind` 分类统计 Top 差异（`old_looser` 优先——那是真正的收紧面）。
+  **未知桶须拆两因**（Task 2 落地时同记 `kind=0`）：① **任一侧无法翻译**（桥接返回 -1，如未支持的 kind）；② **引擎三态 -1**（AK_NAMED 未展开 / 预算耗尽 / 未覆盖面）。Task 3 归因前**必须先把这两类分开统计**（否则「设计预期的 AK_NAMED 未知」会与「桥接缺口」混为一谈）。
   **dyn 类必须单列**：`TYP_DYN`（dyn 位图）按计划映射为 `AK_DYN`（=⊤）属**潜在**过宽近似（Task 1 评审：全仓仅 row 7 一处且今日被快路径截获、无位图 dyn 构造点）→ 凡两侧任一带 dyn 条目的差异一律归入「近似噪声」类，**不得计入收紧面/宽松面**，报告中单列计数与样本。
   **`&T` vs `&mut T` 必须单列**：桥接把 `TYP_REF` 译为 `AK_REF[inner]`（**丢 mut**）而旧 `type_equal` 比较 mut → 该对会**稳定产出**差异；归「已知 by-design（引用可变性 = P3「条目化 + 变型」面）」，**不得计入收紧面**（同款：PTR 的 `address_space` 旧亦不比 → 无差异，无需处理）。
 
@@ -336,6 +338,7 @@ nice -n 19 ./build/corec check src/compiler/ccr_io.cr --type-shadow >> /tmp/p1_c
 - [ ] **Step 2: 两态零变化复验**（Task 2 Step 5 的命令，含 `check` 与 `build` 两条路径）
 - [ ] **Step 3: 自举链**（`corec2`→`corec3` `cmp` IDENTICAL + N06=0 + 冒烟 rc=42）
 - [ ] **Step 4: 文档**：spec §9 P1 行标 ✅ + 落点；TODO 登记（影子模式开关的默认值与产物影响、差异清单的后续裁决归属）；台账
+- [ ] **Step 4b: 挂账清零**：① Task 1 评审 M4 —— `build_selfhost_native.py:309` 注释更正（**corelsp 清单确含 `checker.cr`**；且自 Task 2 起 corelsp **新增** `type_terms/type_engine/ty_shadow` 三文件——因 checker 引用影子层，注释与清单须一致）；② Task 1 评审「>1024 条目第二次重建无实测」——补一条守门用例或如实登记；③ 既有缺陷 `tests/suite/at_test_mini4/6`（`@inline` fixture 编译段错误 rc=139，Task 2 报告称非回归）——评审确认后登记 TODO
 - [ ] **Step 5: 提交**（路径限定）
 
 ---
