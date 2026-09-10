@@ -52,16 +52,22 @@ fn named_dedup_init() {
 }
 
 // 类型表重置（行号空间作废）时侧表随之作废：cap=0 → 下次用惰性重建（空槽全 -1）。
-// 当前 check_all/自测各只调一次 init_types → 本重置是不可达的防御；留它是因为陈旧的
-// name→ti 命中会把**已作废的行号**当有效行返回（silent miscompile，最难查的一类）。
+// **可达且必需**（Task 1 评审纠错——原注「不可达防御」是错的）：`reset_frontend_state()`
+// （globals.cr:332）清 `g_type_count` 却**不碰本侧表**，而 LSP 的 `lsp_check_file`
+// （src/lsp/lsp.cr:168→172→187）**每请求**都走 `reset_frontend_state() → check_all()`
+// 而 `check_all()` 首行即 `init_types()`（= 本重置）；且 `reset_frontend_state` 不清
+// 字符串表（`g_str_count`/`g_str_hash` 零触及）→ 长驻进程内 `str_intern` 名字下标跨请求
+// 稳定 ⇒ 陈旧 name→ti **必然命中**，返回的是**上一请求**的行号（此刻新表仅重建到基类型）
+// → 越界/错行静默错型。删本重置 = 静默错型，不是可选防御。
 fn named_dedup_reset() {
     g_named_dedup_cap = 0;
     g_named_dedup_count = 0;
 }
 
 // 无守卫探测（**只可在扩容守卫之后调用**；重建重放借道这里，不经守卫 = 防递归）：
-// 命中 → 该键所在槽；未命中 → 空槽（**不插入**）。形态 = sh_map_find_nogrow（ret + break
-// + 尾 return；函数体不以无 break 的 loop 收尾——自托管 checker 对该形态有 TF01 误报面）。
+// 命中 → 该键所在槽；未命中 → 空槽（**不插入**）。形态 = sh_map_find_nogrow（槽位变量
+// `slot` + break + 尾 return；函数体不以无 break 的 loop 收尾——自托管 checker 对该形态
+// 有 TF01 误报面）。
 fn named_dedup_probe(name_idx: int) -> int {
     cap := g_named_dedup_cap;
     p : ., mut = tt_mod(name_idx, cap);
@@ -110,7 +116,8 @@ fn named_dedup_slot(name_idx: int) -> int {
 
 // 同名 TYP_NAMED 归一行（唯一分配点，8 处调用点见文件头注）：命中返回既有行，未命中
 // 分配 + 登记。键域契约：name_idx >= 0（-1 = 空槽哨兵）——负键不进侧表（退化为裸分配），
-// 否则「负键」与「空槽」同形会把空槽读成命中并返回未定义行（ti=0 = TI_INT 的静默错型）。
+// 否则「负键」与「空槽」同形会把空槽读成命中并返回**未初始化 value 槽**的任意 ti
+// （`alloc` 是 bump 分配且不置零 → 不是特指某个固定值，而是任意值——静默错型）。
 // 8 处实参均为名字下标（str_intern / si_name / ei_name / 类型节点的 ast_int_val）≥ 0，
 // 该分支当前不可达 = 防御。
 fn alloc_named_type(name_idx: int) -> int {
