@@ -16,7 +16,7 @@
 - **根因修复**：不得用绕过/变通掩盖问题（铁律 #1/#4）。
 - **勿重编号**：`src/compiler/ast.cr` 常量编号空间稳定——删除条目**留墓碑注释**，绝不重排后续编号（先例：`// T_FLOAT_TYPE 91 已删除…`）。
 - **行为零变化面**：Task 1（注释）、Task 2（死代码移除）必须输出等价——判据 = 同命令前后输出逐字节相同。
-- **行为变化面仅限两处**：Task 3（`1_000` 由静默 0 改为 1000；宽度后缀由静默消费改为响亮报错）、Task 4（原先 SIGSEGV / 静默 0 的全局初始化场景）。**其余一切行为不得变化**。
+- **行为变化面仅限两处**：Task 3（`_` 分隔符与宽度后缀**均由静默改为响亮报错**——用户裁决 2026-09-10：数字字面量不支持 `_`）、Task 4（原先 SIGSEGV / 静默 0 的全局初始化场景）。**其余一切行为不得变化**。
 - **自举守护**：`nice -n 19 python3 tests/selfhost/test_backend_bootstrap.py` 必须 stage 链全 `[PASS]` + `corec2`/`corec3` `cmp` IDENTICAL + N06 = 0。
 - **run 门**：任何 `run`/`build` 输出中 `error[` 计数 = 0（不许「rc=0 就算过」）。
 - **提交粒度**：每任务一次提交，中文提交信息，前缀 `docs:` / `refactor:` / `fix:` / `test:`。
@@ -55,7 +55,9 @@
 | `0x1_0` | 16 ✓（十六进制路径早已吃 `_`） | 16 ✓ |
 | `10f32` / `1.5f32` | 静默：后缀消费 + dex 路由 hack（`suffix == "f32"` → 走 T_DEX），宽度值从不落地（`W_F32` 分支不可达） | 后缀并入词素（`INT_LIT '10f32'`）→ parser `int()` 抛 `ValueError` |
 
-**裁决（本批落实）**：`_` 分隔符**两编译器一致接受**（十六进制路径与 `str_int_literal:221` 早已支持，bootstrap 早已支持——拒绝会造出「同一 lexer 内不一致」）；**宽度后缀（`f32`/`f64`/`i8..u8`…）退出语言面**，改为**响亮报错**（grammar 早已注明它是「apx CPU 位宽标注」= 机器形状，且全仓 `src/`+`tests/` 零使用）。
+**裁决（2026-09-10 用户拍板，本批落实）**：数字字面量**不支持 `_` 分隔符**——两编译器**统一响亮报错**（现状双向皆错：self-hosted 静默 0、bootstrap 静默接受；grammar 原注记「以实现为准取不支持」方向正确但两实现均未落实）；**宽度后缀（`f32`/`f64`/`i8..u8`…）退出语言面**，同样**响亮报错**（grammar 早已注明它是「apx CPU 位宽标注」= 机器形状，且全仓 `src/`+`tests/` 零使用）。
+
+全仓数字下划线使用点（精确 grep：`(^|[^A-Za-z0-9_.])[0-9]+_[0-9]+`）**仅一处**：`tests/bootstrap/test_pipeline.py:329` `check_integer_literals`（bootstrap lexer 测试断言 `1_000`→1000）——随裁决改为断言报错。`src/` 与 `tests/` 其余为零，（自举构建不依赖该形态）。
 
 ### 关键既有机制（Task 4 复用，不新造）
 
@@ -212,64 +214,62 @@ jj commit -m 'refactor: 语言面收窄 R1 Task 2——宽度死条目移除（a
 
 ---
 
-## Task 3: 词法面收窄（`1_000` 对齐 + 宽度后缀退役）
+## Task 3: 词法面收窄（`_` 分隔符拒绝 + 宽度后缀退役——均响亮报错）
 
 **Files:**
-- Modify: `src/compiler/lexer.cr:121-160`（`str_to_f64_bits` 跳 `_`）、`:254-273`（`str_to_scaled` 跳 `_`）、`:418-470`（数字扫描：十进制/小数循环吃 `_`；后缀消费改为响亮报错；dex 路由去掉 f32/f64 条件；删空分支）
-- Modify: `bootstrap/corec/frontend/lexer.py:101-115`（后缀 → `self.error(...)`）
+- Modify: `src/compiler/lexer.cr`（数字扫描 `:418-470`：十进制/小数/`0x`/`0o`/`0b` 循环**均不接受** `_`；后缀段落改为响亮报错；dex 路由去掉 f32/f64 条件；删空分支）
+- Modify: `bootstrap/corec/frontend/lexer.py:85-115`（`_` 与字母后缀 → `self.error(...)`）
+- Modify: `tests/bootstrap/test_pipeline.py:327-340`（`check_integer_literals`：断言由「`1_000`→1000」改为「拒绝」）
 - Modify: `grammar/tokens.ebnf:22-31`、`grammar/core.ebnf:58`
 - Create: `tests/selfhost/test_lexer_parity.py`
 
 **Interfaces:**
 - Consumes: Task 2 已删掉宽度 token kind（本任务不再产生它们）
-- Produces: 词法契约——数字字面量接受 `_` 分隔符；数字后出现字母/下划线 → **响亮报错**（`invalid suffix on numeric literal (width suffixes retired 2026-09-10)`）
+- Produces: 词法契约——数字字面量**不接受** `_` 分隔符、**不接受**任何字母后缀，二者均**响亮报错**；合法形态（十进制/小数/`0x`/`0o`/`0b`/负号）行为不变
 
 - [ ] **Step 1: 写失败测试 `tests/selfhost/test_lexer_parity.py`**
 
-结构：bootstrap 侧直接用 `Lexer`（`sys.path.insert(0,'bootstrap')`，断言 `.lexeme`）；self-hosted 侧用 `./build/corec run` 的 rc + `error[` 门（rc = 返回值 & 0xFF）。
-
 ```python
 #!/usr/bin/env python3
-"""词法对照测试：bootstrap lexer ↔ self-hosted corec 的词法面等价（2026-09-10 语言面收窄 §2）。"""
+"""词法对照测试：`_` 分隔符与宽度后缀在两编译器均被拒绝（2026-09-10 语言面收窄 §2）。"""
 import sys, os, subprocess
 sys.path.insert(0, 'bootstrap')
 from corec.frontend.lexer import Lexer
 
 BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-COREc = os.path.join(BASE, 'build', 'corec')
-
-def boot(src):
-    return [(t.type.name, t.lexeme) for t in Lexer(src).tokenize()]
+COREC = os.path.join(BASE, 'build', 'corec')
+BAD = ('1_000', '1_000.5', '0x1_0', '10f32', '1.5f64', '10u8')
 
 def selfhost(src):
-    r = subprocess.run(['nice', '-n', '19', COREc, 'run', 'fn main()->int{return %s;}' % src],
+    r = subprocess.run(['nice', '-n', '19', COREC, 'run', 'fn main()->int{return %s;}' % src],
                        cwd=BASE, capture_output=True, text=True)
     return r.returncode, r.stdout + r.stderr
 
-def test_bootstrap_underscore():
-    assert boot('1_000') == [('INT_LIT', '1000'), ('EOF', '')]
-    assert boot('1_000.5') == [('FLOAT_LIT', '1000.5'), ('EOF', '')]
-    assert boot('0x1_0') == [('INT_LIT', '16'), ('EOF', '')]
+def test_bootstrap_rejects():
+    for bad in BAD:
+        try:
+            Lexer(bad).tokenize()
+            assert False, 'bootstrap accepted %s' % bad
+        except SyntaxError:
+            pass
 
-def test_selfhost_underscore():
-    rc, out = selfhost('1_000')
-    assert 'error[' not in out, out
-    assert rc == 1000 % 256, (rc, out)
+def test_selfhost_rejects():
+    # 断言必须命中**我们自己的诊断文本**——否则 `return 1_000` 既有的 TF01 会假绿
+    for bad, marker in (('1_000', 'not supported'), ('1_000.5', 'not supported'),
+                        ('0x1_0', 'not supported'), ('10f32', 'retired'),
+                        ('1.5f64', 'retired'), ('10u8', 'retired')):
+        rc, out = selfhost(bad)
+        assert 'error[' in out and marker in out, (bad, rc, out)
 
-def test_selfhost_hex_underscore():
-    rc, out = selfhost('0x1_0')
-    assert 'error[' not in out and rc == 16
+def test_legal_forms_unchanged():
+    for src, want in (('0x1f', 31), ('0o17', 15), ('0b1010', 10), ('1000', 232)):
+        rc, out = selfhost(src)
+        assert 'error[' not in out, (src, out)
+        assert rc == want, (src, rc, want)
 
-def test_bootstrap_suffix_rejected():
-    try:
-        Lexer('10f32').tokenize()
-        assert False, 'expected SyntaxError'
-    except SyntaxError as e:
-        assert 'suffix' in str(e)
-
-def test_selfhost_suffix_rejected():
-    rc, out = selfhost('10f32')
-    assert 'error[' in out, out
+if __name__ == '__main__':
+    for fn in (test_bootstrap_rejects, test_selfhost_rejects, test_legal_forms_unchanged):
+        fn(); print('PASS', fn.__name__)
 ```
 
 - [ ] **Step 2: 运行测试确认「红」**
@@ -277,30 +277,24 @@ def test_selfhost_suffix_rejected():
 ```bash
 nice -n 19 python3 tests/selfhost/test_lexer_parity.py
 ```
-Expected: FAIL —— `test_selfhost_underscore`（rc=0 ≠ 232）/ `test_bootstrap_suffix_rejected`（无 SyntaxError）/ `test_selfhost_suffix_rejected`（`error[` 可能来自 TF01 但行为非预期）。记录实际输出到报告。
+Expected: 两条 FAIL + 一条对照 PASS —— `test_bootstrap_rejects`（bootstrap 接受 `1_000`）/ `test_selfhost_rejects`（无我们的诊断文本，只有既有 TF01）/ `test_legal_forms_unchanged`（PASS，对照组）。记录实际输出到报告。
 
 - [ ] **Step 3: self-hosted lexer 改造（`src/compiler/lexer.cr`）**
 
-(a) 十进制数码循环（`:421-423`）与小数部分循环（`:445`）各接受 `_`：
-
-```core
-            loop {
-                cc := cur_char_at(_src, _pos, _slen);
-                if is_digit(cc) != 0 || cc == 95 { _pos = _pos + 1; }
-                else { break; }
-            }
-```
-（小数循环同款：`if is_digit(cur_char_at(_src, _pos, _slen)) != 0 || cur_char_at(_src, _pos, _slen) == 95 { … }`）
+(a) 十进制数码循环（`:421-423`）与小数部分循环（`:445`）**保持只吃 digit**（不加 `_`）；hex/oct/bin 三条循环（`:428-430`）各**删除** `|| hc == 95`、`|| oc == 95`、`|| bc == 95`（不再接受 `_`）。
 
 (b) 后缀段落（`:452-468`）整段替换为：
 
 ```core
-            // 宽度后缀退役（2026-09-10 语言面收窄 §2）：数字字面量后的字母序列曾是
-            // 宽度标注（f32/f64/i8..u64），被静默消费且宽度值从不落地（W_F32 分支不可达）。
-            // 现一律响亮报错；且**不消费**残余字符——按标识符继续 tokenize，使后续解析
-            // 给出第二重信号（不静默、不猜）。
+            // 数字词法收窄（2026-09-10 用户裁决，语言面收窄 §2）：`_` 分隔符与宽度后缀
+            // （f32/f64/i8..u64）**均不支持**——一律响亮报错且**不消费**残余字符
+            // （按标识符继续 tokenize，使后续解析给出第二重信号，不静默、不猜）。
+            // 修复前：`_` 被 is_alpha(95) 当后缀静默消费 → T_INT 取「无值」= 0
+            // （`x := 1_000` 静默成 0 = 实质误编译）；宽度后缀同样静默丢弃。
             sx := cur_char_at(_src, _pos, _slen);
-            if is_alpha(sx) != 0 {
+            if sx == 95 {
+                add_error("invalid character '_' in numeric literal (digit separators not supported)");
+            } else if is_alpha(sx) != 0 {
                 add_error("invalid suffix on numeric literal (width suffixes retired 2026-09-10)");
             }
             num_str := str_sub(_src, start, _pos - start);
@@ -311,49 +305,89 @@ Expected: FAIL —— `test_selfhost_underscore`（rc=0 ≠ 232）/ `test_bootst
             }
 ```
 
-(c) `str_to_scaled`（`:254-273`）与 `str_to_f64_bits`（`:121`）的字符循环各加一条跳过：
+(c) `str_int_literal`（`:221`）、`str_to_scaled`、`str_to_f64_bits` 内部既有的 `_` 跳过逻辑**保留不动**（防御性；删除属无谓风险，且未来若恢复分隔符即插即用）。
 
-```core
-        if c == 95 { i = i + 1; continue; }   // `_` 分隔符（str_int_literal:221 同款）
-```
+- [ ] **Step 4: bootstrap lexer 对齐（`bootstrap/corec/frontend/lexer.py:85-115`）**
 
-- [ ] **Step 4: bootstrap lexer 对齐（`bootstrap/corec/frontend/lexer.py:110-115`）**
+十进制分支：
 
 ```python
+        else:
+            while self.current().isdigit():
+                n += self.advance()
+            if self.current() == '_':
+                self.error("invalid character '_' in numeric literal (digit separators not supported)")
+            if self.current() == '.' and self.peek().isdigit():
+                is_float = True
+                n += self.advance()
+                while self.current().isdigit():
+                    n += self.advance()
+                if self.current() == '_':
+                    self.error("invalid character '_' in numeric literal (digit separators not supported)")
             if self.current().isalpha():
-                # 宽度后缀退役（2026-09-10 语言面收窄 §2）——与 self-hosted lexer
-                # 同款响亮报错；此前后缀被并入词素（'10f32'）→ parser int() 抛 ValueError。
+                # 宽度后缀退役（2026-09-10 语言面收窄 §2）——与 self-hosted lexer 同款
+                # 响亮报错；此前后缀被并入词素（'10f32'）→ parser int() 抛 ValueError。
                 self.error("invalid suffix on numeric literal (width suffixes retired 2026-09-10)")
 ```
 
-- [ ] **Step 5: grammar 同步**
+前缀进制分支（`:88-99`）：digits 循环去掉 `or self.current() == '_'`，并在其后加同款 `_` 报错。`n = n.replace('_', '')`（`:117`）已无输入可清，保留无害。
 
-`grammar/tokens.ebnf`：`INT_LIT` 行去掉 `[ INT_SUFFIX ]` 并删除 `INT_SUFFIX` 规则；`DEX_LIT` 行去掉 `[ 'f32' | 'f64' ]`。注释段改写为：
+- [ ] **Step 5: bootstrap 既有测试同步（`tests/bootstrap/test_pipeline.py:327-340`）**
+
+```python
+def check_integer_literals():
+    tokens = Lexer('0x1f 0o17 0b1010').tokenize()
+    values = [int(t.lexeme) for t in tokens[:-1]]
+    if values != [31, 15, 10]:
+        print(f'[FAIL] integer literal forms: got {values}')
+        return False
+    for bad in ('1_000', '0x1_0', '10f32', '1_000.5'):
+        try:
+            Lexer(bad).tokenize()
+        except SyntaxError:
+            continue
+        print(f'[FAIL] rejected form was accepted: {bad}')
+        return False
+    try:
+        Lexer('0x').tokenize()
+    except SyntaxError:
+        pass
+    else:
+        print('[FAIL] empty prefixed integer was accepted')
+        return False
+    print('[PASS] integer literal forms: hex/octal/binary; separators/suffixes rejected')
+    return True
+```
+
+- [ ] **Step 6: grammar 同步（`grammar/tokens.ebnf` / `grammar/core.ebnf`）**
+
+`INT_LIT` 行去掉 `[ INT_SUFFIX ]` 并删除 `INT_SUFFIX` 规则；`DEX_LIT` 行去掉 `[ 'f32' | 'f64' ]`。注释段改写为：
 
 ```ebnf
 (* 字面量 *)
-(* 数字字面量支持 '_' 分隔符（2026-09-10 语言面收窄 §2：两实现对齐——lexer.cr 十进制/
-   小数循环与 bootstrap lexer 均消费 '_'；十六进制路径与 str_int_literal 早已支持）。
-   宽度后缀（i8..u64 / f32/f64）已退役：数字后出现字母 = 响亮报错（机器形状归映射层）。 *)
-INT_LIT = DIGIT { DIGIT } | DIGIT { DIGIT | '_' } DIGIT ;
+(* 数字字面量不支持 '_' 分隔符、不支持任何宽度后缀（2026-09-10 语言面收窄 §2 用户裁决：
+   两实现统一响亮报错——修复前 self-hosted 把 '_' 当后缀静默消费成取值 0、bootstrap
+   静默接受；宽度后缀 = 机器形状，归映射层）。 *)
+INT_LIT = DIGIT { DIGIT } ;
 ```
-（实现者按语法惯例给出等价 EBNF；核心约束 = 不含任何后缀产生式。）
+（实现者按语法惯例给出等价 EBNF；核心约束 = 无 `_`、无任何后缀产生式。）
 `grammar/core.ebnf:58` 的「f32/f64 后缀 = apx CPU 位宽标注」注释改为退役记述。
 
-- [ ] **Step 6: 重建 + 测试全绿**
+- [ ] **Step 7: 重建 + 测试全绿**
 
 ```bash
 nice -n 19 python3 build_selfhost_native.py
-nice -n 19 python3 tests/selfhost/test_lexer_parity.py    # Expected: 全 PASS
-nice -n 19 ./build/corec run 'fn main()->int{x := 1_000; return x;}'   # 期望 rc=232（1000 & 255）、无 error[
-nice -n 19 ./build/corec run 'fn main()->int{return 10f32;}'           # 期望输出含 error[（响亮）
+nice -n 19 python3 tests/selfhost/test_lexer_parity.py      # Expected: 三条全 PASS
+nice -n 19 python3 tests/bootstrap/test_pipeline.py         # Expected: 全 PASS（含改后的 check_integer_literals）
+nice -n 19 ./build/corec run 'fn main()->int{x := 1_000; return x;}'   # 期望含 error[ + 'not supported'
+nice -n 19 ./build/corec run 'fn main()->int{return 1000;}'            # 期望 rc=232、无 error[
 nice -n 19 python3 tests/selfhost/test_compile.py
 ```
 
-- [ ] **Step 7: 提交**
+- [ ] **Step 8: 提交**
 
 ```bash
-jj commit -m 'fix: 语言面收窄 R1 Task 3——词法面收窄（1_000 两编译器对齐=1000，消灭静默 0；宽度后缀退役改响亮报错；grammar 同步；新增词法对照测试）'
+jj commit -m 'fix: 语言面收窄 R1 Task 3——数字词法收窄（_ 分隔符与宽度后缀一律响亮报错：消灭 1_000 静默 0 误编译；bootstrap/self-hosted 双侧对齐；grammar + bootstrap 测试同步；新增词法对照测试）'
 ```
 
 ---
