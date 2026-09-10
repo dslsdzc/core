@@ -89,8 +89,52 @@ fn sh_map_cap_init() {
     }
 }
 
+// ⚠️ 骨架修正（Task 1 评审 M6：**直接照抄初稿骨架会回归缺陷 ②③**）：
+//   · 探测前必须有**装填因子守卫**（否则 >cap 条目时探测永不落空 = 挂死）
+//   · 扩容 = 重建 + **重放既有条目**（`sh_map_rehash`）
+//   · 调用方**回写前必须重探**（递归翻译可能触发扩容/重建，写旧 slot 会写错槽）
 fn sh_map_find(ti: int) -> int {   // 命中返回槽位，未命中返回空槽位（不插入）
     sh_map_cap_init();
+    if (g_shadow_map_count + 1) * 2 >= g_shadow_map_cap { sh_map_rehash(); }   // 守卫（探测前）
+    h : ., mut = ti % g_shadow_map_cap;
+    if h < 0 { h = 0 - h; }
+    p : ., mut = h;
+    loop {
+        k := r64(g_shadow_map, p * 16);
+        if k < 0 { return p; }
+        if k == ti { return p; }
+        p = p + 1; if p >= g_shadow_map_cap { p = 0; }
+    }
+}
+
+// 扩容：容量翻倍（≥2 的幂）+ 逐条重放（保留既有映射）
+fn sh_map_rehash() {
+    old_map := g_shadow_map;
+    old_cap := g_shadow_map_cap;
+    nc : ., mut = old_cap * 2;
+    if nc < 1024 { nc = 1024; }
+    nb := alloc(nc * 16);
+    i : ., mut = 0;
+    loop { if i >= nc { break; } w64(nb, i * 16, -1); i = i + 1; }
+    g_shadow_map = nb;
+    g_shadow_map_cap = nc;
+    g_shadow_map_count = 0;
+    j : ., mut = 0;
+    loop {
+        if j >= old_cap { break; }
+        k := r64(old_map, j * 16);
+        if k >= 0 {
+            s := sh_map_slot_no_grow(k);      // ⚠️ 重放必须用**无守卫**版（有守卫版会再触发 rehash → 递归）
+            w64(g_shadow_map, s * 16, k);
+            w64(g_shadow_map, s * 16 + 8, r64(old_map, j * 16 + 8));
+            g_shadow_map_count = g_shadow_map_count + 1;
+        }
+        j = j + 1;
+    }
+}
+
+// 无守卫探测（仅供 rehash 重放；外部一律走 sh_map_find）
+fn sh_map_slot_no_grow(ti: int) -> int {
     h : ., mut = ti % g_shadow_map_cap;
     if h < 0 { h = 0 - h; }
     p : ., mut = h;
@@ -160,7 +204,14 @@ fn sh_term_of_ti(ti: int) -> int {
 ```core
 // R2 P1 影子对拍：ti → 类型项 缓存 + 统计
 g_shadow_map : string, mut;        g_shadow_map_cap : int, mut;
+g_shadow_map_count : int, mut;     // 已占用槽数（装填因子守卫用）
 g_shadow_hits : int, mut;          g_shadow_entries : int, mut;
+// 影子判定（Task 2）：开关 + 站点 + 分类计数 + 环形缓冲
+g_shadow_on : int, mut;            g_shadow_site : int, mut;
+g_shadow_total : int, mut;         g_shadow_agree : int, mut;
+g_shadow_old_stricter : int, mut;  g_shadow_old_looser : int, mut;
+g_shadow_unknown : int, mut;       g_shadow_buf : string, mut;
+g_shadow_buf_count : int, mut;     g_shadow_buf_cap : int, mut;
 ```
 
 - [ ] **Step 5: 跑绿 + 提交**
@@ -270,7 +321,8 @@ nice -n 19 ./build/corec check src/compiler/ccr_io.cr --type-shadow >> /tmp/p1_c
 （`check` 路径若不带影子通道穿透，改用 `build … --type-shadow` 并丢弃产物；实现者按实际可用路径落，报告写明。）
 
 - [ ] **Step 2: 汇总差异**：从日志抽 `[type-shadow]` 摘要行；若有 dump 文件则按 `kind` 分类统计 Top 差异（`old_looser` 优先——那是真正的收紧面）。
-  **dyn 类必须单列**：`TYP_DYN`（dyn 位图）按计划映射为 `AK_DYN`（=⊤）属**过宽近似**（Task 1 裁决登记）→ 凡两侧任一带 dyn 条目的差异一律归入「近似噪声」类，**不得计入收紧面/宽松面**，报告中单列计数与样本。
+  **dyn 类必须单列**：`TYP_DYN`（dyn 位图）按计划映射为 `AK_DYN`（=⊤）属**潜在**过宽近似（Task 1 评审：全仓仅 row 7 一处且今日被快路径截获、无位图 dyn 构造点）→ 凡两侧任一带 dyn 条目的差异一律归入「近似噪声」类，**不得计入收紧面/宽松面**，报告中单列计数与样本。
+  **`&T` vs `&mut T` 必须单列**：桥接把 `TYP_REF` 译为 `AK_REF[inner]`（**丢 mut**）而旧 `type_equal` 比较 mut → 该对会**稳定产出**差异；归「已知 by-design（引用可变性 = P3「条目化 + 变型」面）」，**不得计入收紧面**（同款：PTR 的 `address_space` 旧亦不比 → 无差异，无需处理）。
 
 - [ ] **Step 3: 写 findings 文档**（`docs/superpowers/specs/2026-09-10-type-shadow-findings.md`）：逐语料的计数表 + 差异样本（site/t1/t2/旧/新）+ 初步归因（结构性 vs 未覆盖面 vs 真收紧）+ 后续裁决建议（哪些进 P2 的替换清单、哪些需补引擎规则）。
 
