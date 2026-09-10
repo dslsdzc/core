@@ -39,7 +39,7 @@ ZDIFF = BUILD / "mw_task2_zdiff"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_mw_task1 import START_TAIL, detect_tags, find_main_frame, load_ir  # noqa: E402
 
-# IR opcodes / ops（ast.cr，oracle 用——与 instr.cr mw_setup_tags 同源常量）
+# IR opcodes / ops（ast.cr，oracle 用——与 tag2l.cr mw_setup_tags 同源常量）
 IR_BINARY = 2
 OP_ADD = 1
 OP_SUB = 2

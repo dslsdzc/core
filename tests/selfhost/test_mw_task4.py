@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """int 多字 M1 Task 4：消费者适配（tag 读路径 + tag 卫生）。
 
-验证对象（src/arch/x86_64/ instr.cr + frame.cr（波 1 Task 3 起：帧序 + 函数尾
-2L 操作数块发射）+ src/format/elf/ elf.cr）：
+验证对象（src/arch/x86_64/ instr.cr（消费点/站点发射）+ tag2l.cr（tag 卫生 +
+2L 块编码——波 1 Task 4 自 instr.cr 整搬）+ frame.cr（波 1 Task 3 起：帧序 +
+函数尾 2L 操作数块发射）+ src/format/elf/ elf.cr）：
   A. tag 卫生（定义点写，无帧入口清零——每 tagged 行的每个定值点都写 tag）：
      ① 快路径定值清 tag：tagged 变量被快路径 add/sub 重定义（同站点回边再
         执行——临时行 stale tag=1 会给拷贝传播错误值）；

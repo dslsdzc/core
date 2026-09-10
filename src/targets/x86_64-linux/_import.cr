@@ -23,6 +23,13 @@ import ent_kernel
 import regalloc
 import sizes
 import instr
+// 架构轴 tag2l（x86 实例化波 1 Task 4 落位）：int 多字 M1 的 tag 表 owner
+// （mw_setup_tags——elf.cr Phase 2/3 各一次）+ mw 族纯编码（jo 溢出跳/慢路径块/
+// 2L 操作数块/tag 卫生助手——自 instr.cr 整函数迁出）+ 表发射门
+// mw_int_arith_jo_needed。与 frame.cr 同轴双向引用（裁定②可接受——frame 的
+// pf_epilogue 调本文件 e2_mw_*，本文件经 frame 的 g2_tag_off 读表）。project-mode
+// 单元须经本清单收编（回退链命中 src/arch/x86_64/；concat 面 = arch_x86_64_files）。
+import tag2l
 // 架构轴 frame（x86 实例化波 1 Task 3 落位）：函数帧单源——pf_frame_size
 // （Phase 2 dry-run 与 Phase 3 sub rsp 立即数共用）+ pf_prologue/pf_epilogue
 // （帧发射序自 format/elf/elf.cr 抽出）+ g2_tag_off（自 instr.cr 迁入，H3）。

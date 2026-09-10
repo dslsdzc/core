@@ -6,10 +6,11 @@
 //   - Phase 2 prologue/epilogue uses these helpers
 //   - emit_instr() returns sizes via e2_* return values (must match)
 //
-// NEVER hardcode byte counts in elf.cr, instr.cr, resolve.cr, frame.cr, or
-// src/os/linux/entry.cr (_start 体与 sz_start_body/sz_start_argv_save 必须同步
+// NEVER hardcode byte counts in elf.cr, instr.cr, tag2l.cr, resolve.cr, frame.cr,
+// or src/os/linux/entry.cr (_start 体与 sz_start_body/sz_start_argv_save 必须同步
 // ——H2 类双源守护；frame.cr 的 pf_frame_overhead/pf_prologue/pf_epilogue 分居
-// 核算侧与发射侧,尺寸必须经本文件 sz_* 单源).
+// 核算侧与发射侧,尺寸必须经本文件 sz_* 单源；tag2l.cr mw 族同守护——jo 6B 等
+// 尺寸与 sz_jo/sz_* 同源).
 // Change a size here → all phases automatically agree.
 // ══════════════════════════════════════════════════════════════
 
@@ -46,6 +47,11 @@ fn sz_sub_rsp(ss: int) -> int {
 fn sz_add_rsp(ss: int) -> int { return sz_sub_rsp(ss); }
 fn sz_pop_rbp() -> int { return 1; }
 fn sz_ret() -> int { return 1; }
+// callee-saved 保存/恢复（opt≥1）：push rbx(1)+r12..r15(4×2)=9 / pop r15..r12(4×2)
+// +rbx(1)=9——frame.cr pf_frame_overhead 核算与 pf_prologue/pf_epilogue 发射同源
+// （波 1 Task 4 起自 pf_frame_overhead 的硬编码 18/9 提到本文件——值逐字节不变）。
+fn sz_callee_saved_push() -> int { return 9; }
+fn sz_callee_saved_pop() -> int { return 9; }
 
 // Each register param save uses func-relative offsets (always disp8)
 fn sz_save_param() -> int { return 4; }

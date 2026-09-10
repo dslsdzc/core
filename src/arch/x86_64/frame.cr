@@ -18,21 +18,25 @@
 //   ③ 实际发射     = pf_prologue/pf_epilogue —— 帧相关段的唯一发射器
 //                    （elf.cr 零残留帧尺寸计算/帧发射序）。
 // tag 区（int 多字 M1）：tag 字节位于槽区之下，偏移 -(vc*8+1+k)——公式与
-// 识别规则见 instr.cr mw_setup_tags 注释块；tag 数为 0 时帧公式与旧布局
+// 识别规则见 tag2l.cr mw_setup_tags 注释块（波 1 Task 4 起 tag 表 owner 在
+// tag2l.cr；本文件 g2_tag_off = 读侧 seam）；tag 数为 0 时帧公式与旧布局
 // 逐字节一致（快路径零变化硬约束）。
 //
 // 抽取纪律（H1）：cp/pos/buf 三参数显式传递（无环境态假设）；调用点 = elf.cr
 // Phase 2 dry-run 与 Phase 3 函数发射序。
 //
-// Depends on: x86_64/instr.cr（e2_*/e2_mw_slow_block/e2_mw_opnd_block/
-//             emit_rex/emit_modrm/get_reg_for_var/w8/w32/r64）、
+// Depends on: x86_64/instr.cr（e2_*/emit_rex/emit_modrm/get_reg_for_var/
+//             w8/w32/r64）、x86_64/tag2l.cr（e2_mw_slow_block/
+//             e2_mw_opnd_block——pf_epilogue 函数尾块；同轴双向引用见
+//             tag2l.cr 头注：本文件反向提供 g2_tag_off 给 tag2l）、
 //             x86_64/sizes.cr（sz_* 编码尺寸单源）、共享全局（g_opt_level/
 //             g_current_func_var_start/g_x86_sub_rsp_pos/g_x86_mw_* 站点表）。
 // 跨文件引用经 concat 扁平单元（build_selfhost_native.py arch_x86_64_files）
 // / module.cr 三轴回退链（组合根 _import.cr `import frame`）解析。
 // ══════════════════════════════════════════════════════════════
 
-// ── tag 表读取（H3 自 instr.cr 迁入；表由 instr.cr mw_setup_tags 按函数填充）──
+// ── tag 表读取（H3 自 instr.cr 迁入；表由 tag2l.cr mw_setup_tags 按函数填充
+//    ——波 1 Task 4 起 tag 表 owner 在 tag2l.cr）──
 fn g2_tag_off(v: int) -> int {
     // var v（当前函数内）的 tag 字节偏移（相对 rbp，恒负）；-1 = 非 tagged。
     // 仅当前函数内有效（表由 mw_setup_tags 按函数填充）。
@@ -65,12 +69,14 @@ fn pf_frame_size(vc: int) -> int {
 // ── Phase 2 dry-run：帧相关字节总数（序言 + 尾声；不含形参落槽与函数体）──
 // H2 ②：dry-run 核算（本函数）与 H2 ③ 实际发射（pf_prologue/pf_epilogue）必须
 // 一致——尺寸原语 sz_* 单源 sizes.cr；本函数 = 帧的核算侧唯一入口。
+// callee-saved 计入 = sz_callee_saved_push/pop（波 1 Task 4 自硬编码 18/9 提出
+// ——数值与提取前逐字节相同，波 1 零变化硬约束）。
 fn pf_frame_overhead(ss: int) -> int {
     sz : ., mut = sz_push_rbp() + sz_mov_rbp_rsp();
-    if g_opt_level >= 1 { sz = sz + 18; }  // push rbx,r12-r15(9) + pop r15-r12,rbx(9)
+    if g_opt_level >= 1 { sz = sz + sz_callee_saved_push() + sz_callee_saved_pop(); }  // push rbx,r12-r15(9) + pop r15-r12,rbx(9)
     sz = sz + sz_sub_rsp(ss);
     sz = sz + sz_add_rsp(ss) + sz_pop_rbp() + sz_ret();
-    if g_opt_level >= 1 { sz = sz + 9; }  // pop r15,r14,r13,r12,rbx
+    if g_opt_level >= 1 { sz = sz + sz_callee_saved_pop(); }  // pop r15,r14,r13,r12,rbx
     return sz;
 }
 
@@ -231,7 +237,7 @@ fn pf_epilogue(ss: int, buf: string, pos: int) -> int {
     // 每 jo 站点独立块（块形状决策：jo 现场 = dest 槽/回跳点逐站点而异，
     // 共享块需逐站分发 = 复杂度不值；块 ≈ 45B × 站点数，函数尾冷区，M1
     // 保守 tagged 集代价的一部分——与 Task 2 已付的每站 jo 6B 同族）。
-    // 块 = 真实 2-limb 修正代码（e2_mw_slow_block，instr.cr）：
+    // 块 = 真实 2-limb 修正代码（e2_mw_slow_block，tag2l.cr）：
     //   修正 128 位值 → alloc(16)（alloc_patch 注册——计数逐函数不重置，
     //   与函数体 alloc 调用同批回填）→ 写 2-limb → 值槽存指针（含
     //   O1/O2 reg 形态——g2_slot 于当前函数上下文现算，与函数体发射
@@ -253,7 +259,7 @@ fn pf_epilogue(ss: int, buf: string, pos: int) -> int {
     }
     // ── int 多字 M1（Task 4）：2L 操作数块（函数尾附加，jo 块之后）──
     // 每消费者站点独立块（快路径 tag 检查 jne → 块首；块 = 128 位算术
-    // 或比较 + 公共落值——e2_mw_opnd_block，instr.cr）。块形状按站点
+    // 或比较 + 公共落值——e2_mw_opnd_block，tag2l.cr）。块形状按站点
     // 静态参数化（操作数行 tagged 与否决定分派形态），含 alloc(16) 的
     // 块与函数体同批回填（alloc_patch 计数逐函数不重置）。jne rel32
     // 位置在 oc 记录（pos1/pos2，-1 = 无第二个检查），块位置 = 发射时

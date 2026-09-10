@@ -2,7 +2,8 @@
 """int 多字 M1 Task 1：tagged 槽框架（潜在多字变量识别 + tag 区 + 栈布局）。
 
 验证对象（架构轴 src/arch/x86_64/ + 格式轴 src/format/elf/）：
-  - mw_setup_tags（instr.cr）：per 函数潜在多字识别 → tag 字节偏移表。
+  - mw_setup_tags（tag2l.cr——波 1 Task 4 自 instr.cr 整搬；tag 表 owner）：
+    per 函数潜在多字识别 → tag 字节偏移表。
     识别 = 不动点闭包（评审修复：单遍前向对循环携带值不成立——tag 态可沿
     回边携带）：
       A. IR_BINARY(OP_ADD/OP_SUB) 的 dest（add/sub 溢出 = M1 唯一 >64 生产者）；
@@ -79,7 +80,7 @@ def load_ir(ccr_path):
 
 
 def detect_tags(func, var_types, max_passes=None, store_edges=True):
-    """复刻 instr.cr mw_setup_tags：规则 A + B(IR_LOAD 拷贝) + B'(IR_STORE
+    """复刻 tag2l.cr mw_setup_tags：规则 A + B(IR_LOAD 拷贝) + B'(IR_STORE
     定值拷贝)，重复全扫至无新标。
 
     退化形态（仅区分性断言用）：

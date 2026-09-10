@@ -157,8 +157,9 @@ g_x86_emit_vars : string, mut;          g_x86_emit_vars_cap : int, mut; g_x86_em
 g_x86_mw_tag_off : string, mut;     g_x86_mw_tag_off_cap : int, mut;
 g_x86_mw_tag_count : int, mut;
 // g_x86_mw_jo_*：int 多字 M1 Task 2/3——tagged int add/sub 快路径溢出跳
-// （jo 0F 80 rel32）站点记录表：emit_instr 发射 jo 时记录站点现场，elf.cr 于
-// 该函数尾声（慢路径块位置后知）按站点发射真实 2-limb 修正块并统一回填
+// （jo 0F 80 rel32）站点记录表：emit_instr 发射 jo 时记录站点现场，frame.cr
+// pf_epilogue 于该函数尾声（慢路径块位置后知）按站点发射真实 2-limb 修正块
+// 并统一回填（波 1 Task 3 起帧尾声/函数尾块归 frame.cr）
 // （g2_init 清零——ret_patch 同款）。记录 = 4 条并行 i64 数组（共享 cap，
 // 同步增长，索引 = 站点点序 = 指令序，单指令至多 1 站点）：
 //   g_x86_mw_jo_pos     — jo 指令绝对缓冲位置（rel32 字段 = pos+2、jo 长 6）；
@@ -167,7 +168,7 @@ g_x86_mw_tag_count : int, mut;
 //                         无需入录槽形态本身）；
 //   g_x86_mw_jo_is_sub  — 1 = 该站点为 sub（高 limb 修正规则不同：add 溢出
 //                         高 limb = CF ? -1 : 0；sub = CF ? 0 : -1——CF/符号
-//                         关系见 e2_mw_slow_block 注释推演）；
+//                         关系见 e2_mw_slow_block（tag2l.cr）注释推演）；
 //   g_x86_mw_jo_resume  — 块处理完成后跳回点（= 该站点快路径 store e2_st
 //                         之后的绝对位置——elf.cr 于指令发射完、块位置已知
 //                         时填写，块发射时直接回填 jmp rel32）。
@@ -186,7 +187,7 @@ g_x86_mw_jo_resume : string, mut;
 //   g_x86_mw_oc_op        — 站点 op（OP_ADD/OP_SUB = 128 算术块；
 //                           OP_EQ..OP_GE = 128 比较块）；
 //   g_x86_mw_oc_resume    — 块完成后跳回点（= 该站点指令尾，同 jo）。
-// 见 plan Task 4 与 e2_mw_opnd_block（instr.cr）。
+// 见 plan Task 4 与 e2_mw_opnd_block（tag2l.cr——波 1 Task 4 自 instr.cr 整搬）。
 g_x86_mw_oc_pos1 : string, mut;     g_x86_mw_oc_pos2 : string, mut;
 g_x86_mw_oc_cap : int, mut;         g_x86_mw_oc_count : int, mut;
 g_x86_mw_oc_s1 : string, mut;       g_x86_mw_oc_s2 : string, mut;

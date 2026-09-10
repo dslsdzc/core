@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """int 多字 M1 Task 3：慢路径 + 2-limb 表示运行时（jo 后数学修正 + 堆对象 + tag 写）。
 
-验证对象（src/arch/x86_64/ instr.cr e2_mw_slow_block + src/arch/x86_64/
-frame.cr pf_epilogue 函数尾块发射——波 1 Task 3 自 format/elf/elf.cr 抽出）：
+验证对象（src/arch/x86_64/ tag2l.cr e2_mw_slow_block（波 1 Task 4 自 instr.cr
+整搬）+ src/arch/x86_64/ frame.cr pf_epilogue 函数尾块发射——Task 3 自 elf.cr 抽出）：
   溢出（jo/OF=1）后 128 位真值修正：低 limb = 快路径环绕结果 r10；高 limb =
     add：CF ? -1 : 0（sbb r11,r11——正溢出 CF=0/负溢出 CF=1 推演）；
     sub：CF ? 0 : -1（sbb+not——正溢出借位 CF=1/负溢出混合符号无借位 CF=0）。
