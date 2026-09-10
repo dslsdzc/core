@@ -1052,9 +1052,13 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     }
 
     if op == IR_LOAD_FIELD && d >= 0 {
-        o1 := g2_slot(s1); do2 := g2_slot(d); fi2 := s3;
+        do2 := g2_slot(d); fi2 := s3;
         fo : ., mut = fi2 * 8;
-        cp = cp + e2_ld(buf, pos+cp, 10, o1);
+        // 基址加载走 e2_load_var（局部 = [rbp+slot]；全局 = RIP 相对 lea，
+        // 与 IR_LOAD_INDEX/IR_ADDR_INDEX 的「handles local and global」同规约）。
+        // 修复前为 g2_slot(s1)+e2_ld：全局行落在本函数帧之外，g2_slot 返回正的
+        // 伪 rbp 偏移 → 读栈垃圾（全局结构体字段读静默错值）。
+        cp = cp + e2_load_var(buf, pos+cp, 10, s1);
         // mov r10, [r10 + disp32] — REX.WRB + 0x8B
             cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 10/8); e2_w8(buf, pos+cp, 139); cp = cp + 1;
             cp = cp + emit_modrm(buf, pos+cp, 2, 10%8, 10%8); cp = cp + e2_w32(buf, pos+cp, fo);
@@ -1063,9 +1067,9 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     }
 
     if op == IR_STORE_FIELD {
-        o1 := g2_slot(s1); o2 := g2_slot(s2); fi2 := s3;
+        fi2 := s3;
         fo : ., mut = fi2 * 8;
-        cp = cp + e2_ld(buf, pos+cp, 10, o1); cp = cp + e2_ld(buf, pos+cp, 11, o2);
+        cp = cp + e2_load_var(buf, pos+cp, 10, s1); cp = cp + e2_load_var(buf, pos+cp, 11, s2);
         // mov [r10 + disp32], r11 — REX.WRB + 0x89
             cp = cp + emit_rex(buf, pos+cp, 1, 11/8, 0, 10/8); e2_w8(buf, pos+cp, 137); cp = cp + 1;
             cp = cp + emit_modrm(buf, pos+cp, 2, 11%8, 10%8); cp = cp + e2_w32(buf, pos+cp, fo);

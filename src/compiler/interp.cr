@@ -79,6 +79,13 @@ fn ir_interpret() -> int {
     node_count := r64(g_df_func_node_count, main_idx * 8);
     if node_start < 0 || node_count <= 0 { return -1; }
 
+    // 返回值暂存槽（callee 内联路径的 return 传递）。旧约定用 g_ir_vals[0]：
+    // 槽 0 = 第一个 IR 变量，而文件级全局按序注册在最前（ir_gen_globals 先于
+    // ir_gen_func）——全局在解释器槽模型里就是 g_ir_vals 的槽，于是每次 callee
+    // 返回都静默覆写第一个全局。改为 g_ir_var_count：清零区 need 内的首个填充槽，
+    // 不与任何真变量重叠。
+    ret_slot := g_ir_var_count;
+
     // Initialize value store (size = node_count + padding for destinations)
     need := g_ir_var_count + 64;
     if g_ir_vals_cap < need {
@@ -90,6 +97,20 @@ fn ir_interpret() -> int {
         if vi >= need { break; }
         w64(g_ir_vals, vi * 8, 0);
         vi = vi + 1;
+    }
+
+    // 编译期标量常量全局初始化阶段——与 ELF _start 的常量初始化循环
+    // （os/linux/entry.cr 的 g_ir_globals +16 环）同语义、同数据源。此前解释器
+    // 无此阶段：可变标量全局读回 0（不可变标量因 find_global_const_node 折叠
+    // 而侥幸正确）。运行期初始化的聚合/非常量全局不在此——它们在 main 序言以
+    // IR 序列注入（ir_gen.cr inject_global_inits，主循环执行）。
+    gi2 : ., mut = 0;
+    loop {
+        if gi2 >= g_ir_global_count { break; }
+        iv2 := r64(g_ir_globals, gi2 * 24 + 16);
+        gv2 := r64(g_ir_globals, gi2 * 24 + 8);
+        if iv2 != 0 && gv2 >= 0 && gv2 < need { w64(g_ir_vals, gv2 * 8, iv2); }
+        gi2 = gi2 + 1;
     }
 
     // Pre-scan: build label→node mapping (for branches)
@@ -471,6 +492,9 @@ fn ir_interpret() -> int {
                         f_start := r64(g_df_func_node_start, cfi * 8);
                         f_count := r64(g_df_func_node_count, cfi * 8);
                         if f_start >= 0 && f_count > 0 {
+                            // 暂存槽清零：callee 无值返回（IR_RETURN s1<0，如裸 return/尾
+                            // 部隐式返回）时调用方读到的应是 0，而非上次调用的残留。
+                            w64(g_ir_vals, ret_slot * 8, 0);
                             // Save label state
                             old_lc := g_label_count;
                             old_poses := g_label_poses;
@@ -516,13 +540,72 @@ fn ir_interpret() -> int {
                                 if op2 == 6 && d2 >= 0 { w64(g_ir_vals, d2 * 8, 0); }  // IR_ALLOC
                                 if op2 == 9 && t1 >= 0 && t2 >= 0 { w64(g_ir_vals, t1 * 8, r64(g_ir_vals, t2 * 8)); }  // IR_STORE
                                 if op2 == 10 && d2 >= 0 && t1 >= 0 { w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8)); }  // IR_LOAD
+                                // 聚合族（与主循环 IR_ALLOC_ARRAY/IR_ALLOC_STRUCT/LOAD|STORE_INDEX
+                                // /LOAD|STORE_FIELD/ADDR_INDEX 同语义）：此前外函数内联路径缺这组
+                                // opcode——callee 里读写聚合全局（数组/结构体）静默落 0。本批
+                                // §1.3 让这类全局在 main 序言获得运行期存储（ir_gen.cr），callee
+                                // 侧的读路径必须同批补齐，否则双路径语义仍分叉。
+                                if op2 == 8 && d2 >= 0 {  // IR_ALLOC_ARRAY
+                                    cnt2 := t1; esz2 := t2;
+                                    if esz2 <= 0 { esz2 = 8; }
+                                    need3 := cnt2 * esz2 + 8;
+                                    bp2 := alloc(need3);
+                                    vi3 : ., mut = 0;
+                                    loop { if vi3 >= need3 { break; } store8(bp2, vi3, 0); vi3 = vi3 + 1; }
+                                    w64(g_ir_vals, d2 * 8, bp2);
+                                }
+                                if op2 == 13 && d2 >= 0 && t1 >= 0 {  // IR_LOAD_INDEX: t1=arr_var, t3=literal_idx
+                                    av2 := r64(g_ir_vals, t1 * 8);
+                                    if irv_type(t1) == TI_STR { w64(g_ir_vals, d2 * 8, str_load8(av2, t3)); }
+                                    else { w64(g_ir_vals, d2 * 8, r64(av2, t3 * 8)); }
+                                }
+                                if op2 == 14 && t1 >= 0 && t2 >= 0 {  // IR_STORE_INDEX: t1=arr_var, t2=val_var
+                                    av2 := r64(g_ir_vals, t1 * 8);
+                                    if irv_type(t1) == TI_STR { store8(istr_get(av2), t3, r64(g_ir_vals, t2 * 8)); }
+                                    else { w64(av2, t3 * 8, r64(g_ir_vals, t2 * 8)); }
+                                }
+                                if op2 == 15 && d2 >= 0 && t1 >= 0 && t2 >= 0 {  // IR_LOAD_INDEX_VAR: t1=arr_var, t2=idx_var
+                                    av2 := r64(g_ir_vals, t1 * 8);
+                                    ix2 := r64(g_ir_vals, t2 * 8);
+                                    if irv_type(t1) == TI_STR { w64(g_ir_vals, d2 * 8, str_load8(av2, ix2)); }
+                                    else { w64(g_ir_vals, d2 * 8, r64(av2, ix2 * 8)); }
+                                }
+                                if op2 == 16 && d2 >= 0 && t1 >= 0 && t2 >= 0 {  // IR_STORE_INDEX_VAR: d2=val_var, t1=arr_var, t2=idx_var
+                                    av2 := r64(g_ir_vals, t1 * 8);
+                                    ix2 := r64(g_ir_vals, t2 * 8);
+                                    if irv_type(t1) == TI_STR { store8(istr_get(av2), ix2, r64(g_ir_vals, d2 * 8)); }
+                                    else { w64(av2, ix2 * 8, r64(g_ir_vals, d2 * 8)); }
+                                }
+                                if op2 == 31 && d2 >= 0 && t1 >= 0 && t2 >= 0 {  // IR_ADDR_INDEX: &arr[i]
+                                    w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8) + r64(g_ir_vals, t2 * 8) * 8);
+                                }
+                                if op2 == 11 && d2 >= 0 && t1 >= 0 {  // IR_LOAD_FIELD: t1=struct_var, t3=field_idx
+                                    pf2 := r64(g_ir_vals, t1 * 8);
+                                    if pf2 != 0 { w64(g_ir_vals, d2 * 8, r64(pf2, t3 * 8)); }
+                                    else { w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8)); }
+                                }
+                                if op2 == 12 && t1 >= 0 && t2 >= 0 {  // IR_STORE_FIELD: t1=struct_var, t2=val_var, t3=field_idx
+                                    pf2 := r64(g_ir_vals, t1 * 8);
+                                    if pf2 != 0 { w64(pf2, t3 * 8, r64(g_ir_vals, t2 * 8)); }
+                                    else { w64(g_ir_vals, t1 * 8, r64(g_ir_vals, t2 * 8)); }
+                                }
+                                if op2 == 7 && d2 >= 0 {  // IR_ALLOC_STRUCT
+                                    si2 := find_struct(t3);
+                                    fc2 : ., mut = 0;
+                                    if si2 >= 0 { fc2 = si_field_count(si2); }
+                                    need3 := fc2 * 8 + 8;
+                                    bp2 := alloc(need3);
+                                    vi3 : ., mut = 0;
+                                    loop { if vi3 >= need3 { break; } store8(bp2, vi3, 0); vi3 = vi3 + 1; }
+                                    w64(g_ir_vals, d2 * 8, bp2);
+                                }
                                 if op2 == 32 && d2 >= 0 { w64(g_ir_vals, d2 * 8, 0); }  // IR_ARENA_NEW
                                 if op2 == 33 { }  // IR_ARENA_RESET
                                 if op2 == 46 || op2 == 47 {
                                     if d2 >= 0 && t1 >= 0 { w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8)); }
                                 }
                                 if op2 == 5 {
-                                    if t1 >= 0 { w64(g_ir_vals, 0, r64(g_ir_vals, t1 * 8)); }
+                                    if t1 >= 0 { w64(g_ir_vals, ret_slot * 8, r64(g_ir_vals, t1 * 8)); }
                                     ip2 = f_count;  // return exits the callee immediately
                                 }  // IR_RETURN
                                 if op2 == 19 && t1 >= 0 {
@@ -532,7 +615,7 @@ fn ir_interpret() -> int {
                                 if op2 == 20 { if t1 >= 0 && t1 < g_label_count { ip2 = r64(g_label_poses, t1 * 8); } }
                                 ip2 = ip2 + 1;
                             }
-                            rval := r64(g_ir_vals, 0 * 8);
+                            rval := r64(g_ir_vals, ret_slot * 8);
                             // Restore label state
                             g_label_count = old_lc;
                             g_label_poses = old_poses;
