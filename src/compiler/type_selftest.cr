@@ -24,12 +24,25 @@ fn type_selftest_run() -> int {
     // --- P0 最小用例 ---
     a_int := tt_atom(AK_INT, TI_INT, -1);
     a_str := tt_atom(AK_STRING, TI_STR, -1);
+    a_bool := tt_atom(AK_BOOL, TI_BOOL, -1);
 
     total = total + 1; fails = fails + ts_check("unit.bot_sub_int", ty_sub(tt_bot(), a_int), 1);
     total = total + 1; fails = fails + ts_check("unit.int_sub_str",  ty_sub(a_int, a_str), 0);
     total = total + 1; fails = fails + ts_check("unit.int_sub_int",  ty_sub(a_int, a_int), 1);
     total = total + 1; fails = fails + ts_check("unit.dedup",       (tt_union(a_int, a_str) == tt_union(a_int, a_str)), 1);
     total = total + 1; fails = fails + ts_check("unit.notnot",      (tt_not(tt_not(a_int)) == a_int), 1);
+
+    // --- 规范化（Task 2）：De Morgan / 否定下推 / 分配律 / 幂等 ---
+    // 探针：(int ∪ string) ∩ bool —— 分配律必须把它展成 union（两层分配）
+    probe := tt_inter(tt_union(a_int, a_str), a_bool);
+    total = total + 1; fails = fails + ts_check("norm.demorgan",
+        (tt_norm(tt_not(tt_union(a_int, a_str))) == tt_norm(tt_inter(tt_not(a_int), tt_not(a_str)))), 1);
+    total = total + 1; fails = fails + ts_check("norm.nnf_neg_push",
+        tt_tag(tt_norm(tt_not(tt_union(a_int, a_str)))), TT_INTER);
+    total = total + 1; fails = fails + ts_check("norm.dnf_shape", tt_is_dnf(tt_norm(probe)), 1);
+    total = total + 1; fails = fails + ts_check("norm.distributed", tt_tag(tt_norm(probe)), TT_UNION);
+    total = total + 1; fails = fails + ts_check("norm.idempotent",
+        (tt_norm(tt_norm(probe)) == tt_norm(probe)), 1);
 
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }

@@ -212,3 +212,106 @@ fn tt_nil() -> int {
 
 fn tt_cons(head: int, tail: int) -> int { return tt_term(TT_CONS, head, tail, 0, 0); }
 fn tt_atom(ak: int, ti: int, params: int) -> int { return tt_term(TT_ATOM, ak, ti, params, 0); }
+
+// ─── NNF（否定下推）与 DNF 规范化（R2 P0 Task 2）───
+// 语义（spec §1.3）：规范化输出 = DNF（union of products；product = 字面集合）。
+// 本层只做「形态规整」——语义判定（覆盖/等价/可空/反例）在 type_engine.cr。
+
+// 参数链逐元素 NNF（ATOM 的 params = CONS 链；-1 = 无参）
+fn tt_nnf_list(p: int) -> int {
+    if p < 0 { return -1; }
+    if tt_tag(p) != TT_CONS { return tt_nnf(p); }
+    return tt_cons(tt_nnf(tt_a(p)), tt_nnf_list(tt_b(p)));
+}
+
+// 正位置 NNF：结构不变，否定下推（¬(∪) → ∩(¬)、¬(∩) → ∪(¬)、¬¬ 消，均在负位置函数里）
+fn tt_nnf(i: int) -> int {
+    t := tt_tag(i);
+    if t == TT_NOT { return tt_nnf_neg(tt_a(i)); }
+    if t == TT_UNION { return tt_union(tt_nnf(tt_a(i)), tt_nnf(tt_b(i))); }
+    if t == TT_INTER { return tt_inter(tt_nnf(tt_a(i)), tt_nnf(tt_b(i))); }
+    if t == TT_MU { return tt_mu(tt_a(i), tt_nnf(tt_b(i))); }
+    if t == TT_ATOM { return tt_atom(tt_a(i), tt_b(i), tt_nnf_list(tt_c(i))); }
+    if t == TT_CONS { return tt_nnf_list(i); }
+    return i;   // ⊥ / ⊤ / ⊤ₖ / VAR / NIL：字面，原样
+}
+
+// 负位置 NNF：计算 ¬i 的 NNF
+fn tt_nnf_neg(i: int) -> int {
+    t := tt_tag(i);
+    if t == TT_BOT { return tt_top(); }
+    if t == TT_TOP { return tt_bot(); }
+    if t == TT_NOT { return tt_nnf(tt_a(i)); }          // ¬¬i = i
+    if t == TT_UNION { return tt_inter(tt_nnf_neg(tt_a(i)), tt_nnf_neg(tt_b(i))); }
+    if t == TT_INTER { return tt_union(tt_nnf_neg(tt_a(i)), tt_nnf_neg(tt_b(i))); }
+    if t == TT_MU { return tt_mu(tt_a(i), tt_nnf_neg(tt_b(i))); }
+    return tt_not(i);   // 字面取反：¬ATOM / ¬VAR / ¬⊤ₖ
+}
+
+// 参数链逐元素 DNF（参数内的分配律同样要做）
+fn tt_dnf_list(p: int) -> int {
+    if p < 0 { return -1; }
+    if tt_tag(p) != TT_CONS { return tt_dnf(p); }
+    return tt_cons(tt_dnf(tt_a(p)), tt_dnf_list(tt_b(p)));
+}
+
+// DNF：∩ 分配到 ∪ 上（(A∪B)∩C → (A∩C)∪(B∩C)）；叶子 = product（∩-链）或字面
+fn tt_dnf(i: int) -> int {
+    t := tt_tag(i);
+    if t == TT_UNION { return tt_union(tt_dnf(tt_a(i)), tt_dnf(tt_b(i))); }
+    if t == TT_INTER {
+        l := tt_dnf(tt_a(i));
+        r := tt_dnf(tt_b(i));
+        // 分配律必须**两支都展开**：(A∪B)∩C → (A∩C) ∪ (B∩C)。
+        // 只展开一支 = 静默丢项（P0 Task 2 自测实证：norm.distributed got INTER want UNION
+        // ——计划骨架同样写错，本实现已修）。
+        if tt_tag(l) == TT_UNION {
+            return tt_union(tt_dnf(tt_inter(tt_a(l), r)), tt_dnf(tt_inter(tt_b(l), r)));
+        }
+        if tt_tag(r) == TT_UNION {
+            return tt_union(tt_dnf(tt_inter(l, tt_a(r))), tt_dnf(tt_inter(l, tt_b(r))));
+        }
+        return tt_inter(l, r);
+    }
+    if t == TT_MU { return tt_mu(tt_a(i), tt_dnf(tt_b(i))); }
+    if t == TT_ATOM { return tt_atom(tt_a(i), tt_b(i), tt_dnf_list(tt_c(i))); }
+    return i;
+}
+
+// 规范化入口（NNF → DNF；DAG 去重使「同形同项」免费）
+fn tt_norm(i: int) -> int { return tt_dnf(tt_nnf(i)); }
+
+// ─── 形态判定（自测断言与引擎前置检查共用）───
+fn tt_is_literal(i: int) -> int {
+    t := tt_tag(i);
+    if t == TT_ATOM || t == TT_VAR || t == TT_TOP_K || t == TT_BOT || t == TT_TOP { return 1; }
+    if t == TT_NOT {
+        it := tt_tag(tt_a(i));
+        if it == TT_ATOM || it == TT_VAR || it == TT_TOP_K { return 1; }
+    }
+    return 0;
+}
+
+fn tt_is_product_chain(i: int) -> int {
+    if tt_tag(i) == TT_INTER {
+        if tt_tag(tt_a(i)) == TT_UNION || tt_tag(tt_b(i)) == TT_UNION { return 0; }
+        if tt_is_product_chain(tt_a(i)) == 0 { return 0; }
+        return tt_is_product_chain(tt_b(i));
+    }
+    return tt_is_literal(i);
+}
+
+// DNF 成员：union 的子项 = product 或字面（不得再嵌 union）
+fn tt_is_dnf_member(i: int) -> int {
+    if tt_tag(i) == TT_UNION { return 0; }
+    if tt_tag(i) == TT_INTER { return tt_is_product_chain(i); }
+    return tt_is_literal(i);
+}
+
+fn tt_is_dnf(i: int) -> int {
+    if tt_tag(i) == TT_UNION {
+        if tt_is_dnf_member(tt_a(i)) == 0 { return 0; }
+        return tt_is_dnf_member(tt_b(i));
+    }
+    return tt_is_dnf_member(i);
+}
