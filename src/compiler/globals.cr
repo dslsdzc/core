@@ -242,6 +242,12 @@ g_ty_steps : int, mut;             g_ty_budget_max : int, mut;     g_ty_exhauste
 g_ty_lits : string, mut;           g_ty_lits_cap : int, mut;       g_ty_lits_count : int, mut;
 g_ty_uncovered : int, mut;         // 未覆盖面命中位（如 AK_NAMED 具体行不展开）——P0 只登记不消费
 
+// R2 P1 影子对拍：checker ti → 类型项 桥接缓存 + 统计（16B/条 {ti, term}；
+// 探测/装填因子守卫/扩容重放见 ty_shadow.cr——桥接层自持，与引擎 g_tt_index 同式）。
+// entries 只增不减、恒等于占用槽数 → 兼作扩容判据（不另设 count 全局）。
+g_shadow_map : string, mut;        g_shadow_map_cap : int, mut;
+g_shadow_hits : int, mut;          g_shadow_entries : int, mut;
+
 fn grow_plugin_tags(needed: int) {
     if needed < g_plugin_tag_cap { return; }
     ncap : ., mut = g_plugin_tag_cap * 2; if ncap < 8 { ncap = 8; } if ncap < needed { ncap = needed + 8; }

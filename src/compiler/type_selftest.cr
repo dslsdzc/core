@@ -187,6 +187,78 @@ fn type_selftest_run() -> int {
         (tt_atom(AK_PRODUCT, -1, tt_cons(tt_mu(0, a_int), tt_nil())) ==
          tt_atom(AK_PRODUCT, -1, tt_cons(tt_mu(0, a_int), tt_nil()))), 1);
 
+    // --- P1 桥接（checker ti → 引擎项，R2 P1 Task 1；映射表 = 计划 Task 1 表）---
+    // 前置：本通道不经 check_all()，g_types 未初始化 → 显式 init_types()（原生 9 项
+    // 占下标 0..8，用户类型自 9 起——桥接用例的 alloc_type 依赖该布局）。
+    // 预算：前段用例累积 g_ty_steps（仅显式 ty_budget_reset 归零），重置到干净窗口
+    // （P0 修复复审 N5 同款卫生）。
+    init_types();
+    ty_budget_reset(200000);
+    t_int := sh_term_of_ti(TI_INT);
+    total = total + 1; fails = fails + ts_check("bridge.int_atom", tt_tag(t_int), TT_ATOM);
+    total = total + 1; fails = fails + ts_check("bridge.int_ak", tt_a(t_int), AK_INT);
+    t_arr := sh_term_of_ti(alloc_type(TYP_ARRAY, TI_INT, 3));
+    total = total + 1; fails = fails + ts_check("bridge.arr_seq", tt_a(t_arr), AK_SEQUENCE);
+    t_arr3 := sh_term_of_ti(alloc_type(TYP_ARRAY, TI_INT, 4));
+    total = total + 1; fails = fails + ts_check("bridge.len_not_identity",
+        ty_equiv(t_arr, t_arr3), 1);            // N 不入身份（R1 裁决）——3 与 4 等价
+    total = total + 1; fails = fails + ts_check("bridge.cache_hit", (sh_term_of_ti(TI_INT) == t_int), 1);
+    // 原生序守门：checker 下标序 ≠ 引擎 AK 序——TI_BOOL=2/TI_STR=3 vs AK_STRING=2/AK_BOOL=3
+    // （计划注释「AK_* 与 TI_* 前 7 项 1:1」**不成立**，按下标直通会 bool↔string 静默错标）
+    total = total + 1; fails = fails + ts_check("bridge.str_ak", tt_a(sh_term_of_ti(TI_STR)), AK_STRING);
+    total = total + 1; fails = fails + ts_check("bridge.bool_ak", tt_a(sh_term_of_ti(TI_BOOL)), AK_BOOL);
+    total = total + 1; fails = fails + ts_check("bridge.dyn_ak", tt_a(sh_term_of_ti(TI_DYN)), AK_DYN);
+    // 参数链（内层项）+ 两份同类分支不得互串（PTR/REF 是两条独立分支）
+    t_ptr := sh_term_of_ti(alloc_type(TYP_PTR, TI_INT, 0));
+    total = total + 1; fails = fails + ts_check("bridge.ptr_inner",
+        tt_c(t_ptr), tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil()));
+    t_ref := sh_term_of_ti(alloc_type(TYP_REF, TI_STR, 0));
+    total = total + 1; fails = fails + ts_check("bridge.ref_inner",
+        (tt_a(t_ref) == AK_REF && tt_c(t_ref) == tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil())), 1);
+    t_slice := sh_term_of_ti(alloc_type(TYP_SLICE, TI_STR, 0));
+    total = total + 1; fails = fails + ts_check("bridge.slice_seq",
+        (tt_a(t_slice) == AK_SEQUENCE && tt_c(t_slice) == tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil())), 1);
+    // TYP_NAMED：AK_NAMED + 行号存 b 槽（引擎不展开 → 判定 UNKNOWN = P1 预期未覆盖面）
+    named_ti := alloc_type(TYP_NAMED, 1201, 0);
+    t_named := sh_term_of_ti(named_ti);
+    total = total + 1; fails = fails + ts_check("bridge.named_ak_b",
+        (tt_a(t_named) == AK_NAMED && tt_b(t_named) == named_ti), 1);
+    // TYP_TUPLE 实读布局（checker.cr:118 type_equal 分支 + :2041+ 字段访问 t.N）：
+    //   data = 字段数，extra = 字段 ti 在 g_gen_apply_data 的起始下标（8B/元素）
+    grow_gen_apply_data(g_gen_apply_data_count + 2);
+    tup_start := g_gen_apply_data_count;
+    w64(g_gen_apply_data, tup_start * 8, TI_INT);
+    w64(g_gen_apply_data, (tup_start + 1) * 8, TI_STR);
+    g_gen_apply_data_count = g_gen_apply_data_count + 2;
+    t_tup := sh_term_of_ti(alloc_type(TYP_TUPLE, 2, tup_start));
+    total = total + 1; fails = fails + ts_check("bridge.tuple_product", tt_a(t_tup), AK_PRODUCT);
+    total = total + 1; fails = fails + ts_check("bridge.tuple_fields",
+        tt_c(t_tup), tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil())));
+    // 缓存语义：新 ti 恰入表 1 条（其元素 = 原生快路径，不入表）；同 ti 二次调用恰命中 1 次
+    e_before := sh_map_entries();
+    arr_ti2 := alloc_type(TYP_ARRAY, TI_STR, 9);
+    t_arr2 := sh_term_of_ti(arr_ti2);
+    total = total + 1; fails = fails + ts_check("bridge.entries_delta", (sh_map_entries() - e_before), 1);
+    h_before := sh_map_hits();
+    t_arr2b := sh_term_of_ti(arr_ti2);
+    total = total + 1; fails = fails + ts_check("bridge.hit_delta",
+        ((sh_map_hits() - h_before) == 1 && t_arr2b == t_arr2), 1);
+    // 缓存扩容/重建守门（P0「扩容路径判据不可达」教训同款）：上面仅 8 条 << 初始容量
+    // 1024 → 装填因子守卫/重建路径**不可达**。用 600 个互异 ti（extra=N 各不同 = 互异
+    // 类型表行，正是「N 不入身份」下 600 行同项的典型规模）逼出一次扩容重建（守卫
+    // (entries+1)*2 >= cap 在 entries=511 时触发）；再验两件事：①重放守恒（条目数恰
+    // +600，不多不少）②重建**前**已入表的条目仍命中（重放把旧表条目全搬过去了）。
+    g_before := sh_map_entries();
+    gi : ., mut = 0;
+    loop {
+        if gi >= 600 { break; }
+        sh_term_of_ti(alloc_type(TYP_ARRAY, TI_INT, 1000 + gi));
+        gi = gi + 1;
+    }
+    total = total + 1; fails = fails + ts_check("bridge.grow_rehash",
+        (sh_map_entries() == g_before + 600 && sh_term_of_ti(arr_ti2) == t_arr2), 1);
+    total = total + 1; fails = fails + ts_check("bridge.grow_cap_doubled", (g_shadow_map_cap >= 2048), 1);
+
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }
     return 0;

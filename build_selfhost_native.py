@@ -306,6 +306,9 @@ def main():
         # 本批为纯增量（checker/ir_gen/后端零改动 = 产物零变化）。
         'src/compiler/type_terms.cr',
         'src/compiler/type_engine.cr',
+        # R2 P1 影子对拍桥接层（checker ti → 引擎类型项 + per-ti 缓存）：仅 corec 单元
+        # （corearch/corelsp 清单不含引擎与 checker——见 type_terms.cr 头注的共享面教训）。
+        'src/compiler/ty_shadow.cr',
         'src/compiler/type_selftest.cr',
         'src/compiler/opt.cr',
         'src/compiler/ptr_analysis.cr',

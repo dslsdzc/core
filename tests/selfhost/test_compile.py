@@ -22,7 +22,9 @@ def concat_sources():
         'src/compiler/checker.cr',
         # R2 P0 类型项引擎（建层，与 build_selfhost_native.py 的 corec 清单同位）：
         # 前端单元新增三文件的源码闭包条目。
-        'src/compiler/type_terms.cr', 'src/compiler/type_engine.cr', 'src/compiler/type_selftest.cr',
+        'src/compiler/type_terms.cr', 'src/compiler/type_engine.cr',
+        # R2 P1 桥接层（ti → 类型项）——与 build_selfhost_native.py 的 corec 清单同位
+        'src/compiler/ty_shadow.cr', 'src/compiler/type_selftest.cr',
         'src/compiler/opt.cr', 'src/compiler/ptr_analysis.cr',
         'src/compiler/region_check.cr', 'src/compiler/provenance_verify.cr', 'src/compiler/diag.cr',
         'src/compiler/ext_mgr.cr', 'src/compiler/ext_safety.cr',

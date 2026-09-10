@@ -10,6 +10,7 @@ import parser
 import checker
 import type_terms
 import type_engine
+import ty_shadow
 import type_selftest
 import diag
 import ir_gen
