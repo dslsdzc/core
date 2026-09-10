@@ -2,6 +2,9 @@
 // R2 P1：影子对拍——① 桥接层：把 checker 的类型表行号（ti）翻译成 P0 引擎的类型项
 // （term，Task 1）；② 判定挂点：把引擎判定与旧判定（type_equal_core）逐点对账分类
 // （Task 2，sh_compare/sh_site_begin/sh_report）。
+// Task 3 Step 0（Task 2 评审硬性要求）：unknown 桶拆因——bridge（翻译失败 = 桥接缺口，
+// kind=3）vs engine（引擎三态负值，kind=0），后者再按引擎成因位细分（未覆盖面 / 预算耗尽）；
+// Task 3 扩面：站点直方图（站点覆盖面实证——环缓冲只装得下「有差异/未知」的条目）。
 // 语义映射 = 计划 Task 1 表；命名/泛型/未知 kind → AK_NAMED（引擎不展开 → 判定
 // UNKNOWN，这正是 P1 要暴露的「未覆盖面」，与「收紧面」分开统计）。
 //
@@ -242,11 +245,24 @@ fn sh_count_old_looser() -> int { return g_shadow_old_looser; }
 fn sh_count_unknown() -> int { return g_shadow_unknown; }
 
 // 站点标注（在 8 个外部决策点调用 type_equal 前紧邻落）；影子关时该值无读者 = 惰性。
-fn sh_site_begin(site: int) { g_shadow_site = site; }
+// Task 3 扩面：顺带累计站点直方图（每个决策点「跑到过几次」——0 差异语料下这是站点
+// 覆盖面的唯一实证；site 出界即忽略，不越界写）。影子关时 wrapper 不调本函数 → 关态零影响。
+fn sh_site_begin(site: int) {
+    g_shadow_site = site;
+    if site < 1 || site > 8 { return; }
+    if g_shadow_site_cap <= 0 {
+        g_shadow_site_counts = alloc(8 * 8);
+        g_shadow_site_cap = 8;
+    }
+    off : ., mut = (site - 1) * 8;
+    w64(g_shadow_site_counts, off, r64(g_shadow_site_counts, off) + 1);
+}
 
 // 差异/未知环形缓冲（**前 256 条**；满则只计数不覆盖——P1 要的是「首批样本」而非滚动窗口）。
-// kind：0 = unknown（任一侧无法翻译 / 引擎三态 -1）/ 1 = old_stricter（旧拒新受）
-// / 2 = old_looser（旧受新拒 = 收紧面）——比骨架的 0/1 二值多存一分方向，便于 Task 3 归档。
+// kind：0 = unknown_engine（引擎三态负值：预算耗尽 / 未覆盖面）/ 1 = old_stricter（旧拒新受）
+// / 2 = old_looser（旧受新拒 = 收紧面）/ 3 = unknown_bridge（任一侧翻译失败 = 桥接缺口）；
+// 比骨架的 0/1 二值多存方向，便于 Task 3 归档。0 与 3 的拆分是 Task 3 Step 0（Task 2 评审
+// 硬性要求：混记则归因不可恢复）；engine 桶的进一步归因走摘要（ring 只有 256 条）。
 fn sh_record(kind: int, t1: int, t2: int, old_ok: int) {
     if g_shadow_ring_cap <= 0 {
         g_shadow_ring = alloc(SHADOW_RING_CAP * 40);
@@ -269,12 +285,30 @@ fn sh_compare(t1: int, t2: int, old_ok: int) {
     g_shadow_total = g_shadow_total + 1;
     a := sh_term_of_ti(t1);
     b := sh_term_of_ti(t2);
-    if a < 0 || b < 0 { g_shadow_unknown = g_shadow_unknown + 1; sh_record(0, t1, t2, old_ok); return; }
+    // 因①：任一侧翻译失败（桥接缺口，kind=3）——与因②分开记，否则 Task 3 归因不可恢复
+    if a < 0 || b < 0 {
+        g_shadow_unknown = g_shadow_unknown + 1;
+        g_shadow_unknown_bridge = g_shadow_unknown_bridge + 1;
+        sh_record(3, t1, t2, old_ok);
+        return;
+    }
     ty_budget_reset(200000);
     e := ty_equiv(a, b);
+    // 成因位必须在**第二次 reset 之前**读（ty_budget_reset 会清 g_ty_exhausted/g_ty_uncovered）
+    unc := ty_uncovered();
+    exh := ty_exhausted();
     ty_budget_reset(200000);                 // 影子运行不污染后续
     // 三态：任何负值都是「未判定」（-1 预算耗尽 / 未覆盖面）——不得降级为 0/1
-    if e < 0 { g_shadow_unknown = g_shadow_unknown + 1; sh_record(0, t1, t2, old_ok); return; }
+    if e < 0 {
+        // 因②：引擎三态负值（kind=0）；摘要再按引擎自报成因位细分（uncovered 优先——它是
+        // 「未覆盖面」的显式登记，与「预算不够」是两类完全不同的后续动作）
+        g_shadow_unknown = g_shadow_unknown + 1;
+        g_shadow_unknown_engine = g_shadow_unknown_engine + 1;
+        if unc != 0 { g_shadow_unknown_uncovered = g_shadow_unknown_uncovered + 1; }
+        if unc == 0 && exh != 0 { g_shadow_unknown_budget = g_shadow_unknown_budget + 1; }
+        sh_record(0, t1, t2, old_ok);
+        return;
+    }
     // 注意语义：旧 true ⇔ 引擎 1
     if e == old_ok { g_shadow_agree = g_shadow_agree + 1; return; }
     if old_ok == 0 && e == 1 { g_shadow_old_stricter = g_shadow_old_stricter + 1; sh_record(1, t1, t2, old_ok); return; }
@@ -295,13 +329,16 @@ fn sh_site_name(s: int) -> string {
 }
 
 fn sh_kind_name(k: int) -> string {
-    if k == 0 { return "unknown"; }
+    if k == 0 { return "unknown_engine"; }
     if k == 1 { return "old_stricter"; }
     if k == 2 { return "old_looser"; }
+    if k == 3 { return "unknown_bridge"; }
     return "?";
 }
 
-// 摘要行（仅影子开时打印；关 = 零输出 → 两态 stdout 也零变化）
+// 摘要行（仅影子开时打印；关 = 零输出 → 两态 stdout 也零变化）。
+// 前 6 字段 = Task 2 契约（**前缀不变**，既有 grep 读取方不受影响）；后 4 字段 = Task 3 Step 0
+// 拆因（unknown 两因 + engine 桶成因位），因 ring 只有 256 条、摘要才是无损计数通道。
 fn sh_report() -> int {
     if g_shadow_on == 0 { return 0; }
     print("[type-shadow] decisions=");
@@ -313,7 +350,30 @@ fn sh_report() -> int {
     print(" old_looser=");
     print(int_str(g_shadow_old_looser));
     print(" unknown=");
-    println(int_str(g_shadow_unknown));
+    print(int_str(g_shadow_unknown));
+    print(" unknown_bridge=");
+    print(int_str(g_shadow_unknown_bridge));
+    print(" unknown_engine=");
+    print(int_str(g_shadow_unknown_engine));
+    print(" unknown_engine_uncovered=");
+    print(int_str(g_shadow_unknown_uncovered));
+    print(" unknown_engine_budget=");
+    println(int_str(g_shadow_unknown_budget));
+    // 站点直方图（Task 3 扩面）：与主行同开同关；恒有 sum(site_i) == decisions（每个
+    // sh_compare 之前必有一次 sh_site_begin）——两行互为校验。
+    print("[type-shadow-sites]");
+    si : ., mut = 0;
+    loop {
+        if si >= 8 { break; }
+        print(" ");
+        print(sh_site_name(si + 1));
+        print("=");
+        n : ., mut = 0;
+        if g_shadow_site_cap > 0 { n = r64(g_shadow_site_counts, si * 8); }
+        print(int_str(n));
+        si = si + 1;
+    }
+    println("");
     return 0;
 }
 

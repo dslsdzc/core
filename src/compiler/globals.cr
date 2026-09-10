@@ -256,8 +256,20 @@ g_shadow_on : int, mut;            g_shadow_site : int, mut;
 g_shadow_total : int, mut;         g_shadow_agree : int, mut;
 g_shadow_old_stricter : int, mut;  g_shadow_old_looser : int, mut;
 g_shadow_unknown : int, mut;
+// unknown 桶拆因（R2 P1 Task 3 Step 0，Task 2 评审硬性要求）：**bridge** = 任一侧翻译失败
+// （sh_term_of_ti 返回 -1 = 桥接缺口）/ **engine** = 引擎三态负值（预算耗尽或未覆盖面标注）。
+// 混记则 Task 3 归因不可恢复。engine 桶再按引擎自报成因位细分（见下）——环形缓冲只有前
+// 256 条，摘要计数才是无损通道，故细分在此而非 dump 的 kind 列。
+g_shadow_unknown_bridge : int, mut;   g_shadow_unknown_engine : int, mut;
+// engine 负值的成因（读 ty_uncovered()/ty_exhausted()，均在 ty_budget_reset 时清）：
+// uncovered = 未覆盖面命中（AK_NAMED 不展开等）→ 需补引擎规则；budget = 预算耗尽
+// （200000 步不够）→ 属引擎参数/规范化代价问题；两条都未置 = 其它负出口（应为 0）。
+g_shadow_unknown_uncovered : int, mut; g_shadow_unknown_budget : int, mut;
 // 差异/未知环形缓冲（前 256 条；40B/槽 {site, t1, t2, old_ok, kind}），满则只计数。
 g_shadow_ring : string, mut;       g_shadow_ring_cap : int, mut;   g_shadow_ring_count : int, mut;
+// 站点直方图（8 × 8B，下标 = site id-1；Task 3 扩面：环里只有「有差异/未知」的条目，
+// 而「某站点是否真的跑到过」是覆盖面的实证——0 差异语料下这是唯一证据通道）。
+g_shadow_site_counts : string, mut; g_shadow_site_cap : int, mut;
 
 fn grow_plugin_tags(needed: int) {
     if needed < g_plugin_tag_cap { return; }
