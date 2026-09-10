@@ -326,10 +326,17 @@ fn main() -> int { return 7 % -3; }
 from corec.syntax.tokens import TokenType
 
 def check_integer_literals():
-    tokens = Lexer('0x1f 0o17 0b1010 1_000').tokenize()
+    tokens = Lexer('0x1f 0o17 0b1010').tokenize()
     values = [int(t.lexeme) for t in tokens[:-1]]
-    if values != [31, 15, 10, 1000]:
+    if values != [31, 15, 10]:
         print(f'[FAIL] integer literal forms: got {values}')
+        return False
+    for bad in ('1_000', '0x1_0', '10f32', '1_000.5'):
+        try:
+            Lexer(bad).tokenize()
+        except SyntaxError:
+            continue
+        print(f'[FAIL] rejected form was accepted: {bad}')
         return False
     try:
         Lexer('0x').tokenize()
@@ -338,7 +345,7 @@ def check_integer_literals():
     else:
         print('[FAIL] empty prefixed integer was accepted')
         return False
-    print('[PASS] integer literal forms: hex/octal/binary/separators')
+    print('[PASS] integer literal forms: hex/octal/binary; separators/suffixes rejected')
     return True
 
 if not check_integer_literals():

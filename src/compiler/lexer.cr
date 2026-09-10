@@ -425,9 +425,11 @@ fn tokenize(_src: string) {
             // Hex/octal/binary prefix
             if c == 48 && _pos - start == 1 {
                 nx := cur_char_at(_src, _pos, _slen);
-                if nx == 120 || nx == 88 { _pos = _pos + 1; loop { hc := cur_char_at(_src, _pos, _slen); if is_digit(hc) != 0 || (hc >= 65 && hc <= 70) || (hc >= 97 && hc <= 102) || hc == 95 { _pos = _pos + 1; } else { break; } } }
-                else if nx == 111 || nx == 79 { _pos = _pos + 1; loop { oc := cur_char_at(_src, _pos, _slen); if (oc >= 48 && oc <= 55) || oc == 95 { _pos = _pos + 1; } else { break; } } }
-                else if nx == 98 || nx == 66 { _pos = _pos + 1; loop { bc := cur_char_at(_src, _pos, _slen); if bc == 48 || bc == 49 || bc == 95 { _pos = _pos + 1; } else { break; } } }
+                // 三条进制前缀循环均**不再接受** '_'（2026-09-10 语言面收窄 §2）：
+                // 遗留 '_' 由下方后缀段落统一响亮报错（不静默消费）。
+                if nx == 120 || nx == 88 { _pos = _pos + 1; loop { hc := cur_char_at(_src, _pos, _slen); if is_digit(hc) != 0 || (hc >= 65 && hc <= 70) || (hc >= 97 && hc <= 102) { _pos = _pos + 1; } else { break; } } }
+                else if nx == 111 || nx == 79 { _pos = _pos + 1; loop { oc := cur_char_at(_src, _pos, _slen); if (oc >= 48 && oc <= 55) { _pos = _pos + 1; } else { break; } } }
+                else if nx == 98 || nx == 66 { _pos = _pos + 1; loop { bc := cur_char_at(_src, _pos, _slen); if bc == 48 || bc == 49 { _pos = _pos + 1; } else { break; } } }
                 bad_prefix_digit : ., mut = 0;
                 badc := cur_char_at(_src, _pos, _slen);
                 if is_ident_char(badc) != 0 { bad_prefix_digit = 1; }
@@ -442,30 +444,25 @@ fn tokenize(_src: string) {
                 has_dot = 1;
                 loop { if is_digit(cur_char_at(_src, _pos, _slen)) != 0 { _pos = _pos + 1; } else { break; } }
             }
-            // Suffix
-            suffix : ., mut = "";
+            // 数字词法收窄（2026-09-10 用户裁决，语言面收窄 §2）：`_` 分隔符与宽度后缀
+            // （f32/f64/i8..u64）**均不支持**——一律响亮报错且**不消费**残余字符
+            // （按标识符继续 tokenize，使后续解析给出第二重信号，不静默、不猜）。
+            // 修复前：`_` 被 is_alpha(95) 当后缀静默消费 → T_INT 取「无值」= 0
+            // （`x := 1_000` 静默成 0 = 实质误编译）；宽度后缀同样静默丢弃。
             sx := cur_char_at(_src, _pos, _slen);
-            if is_alpha(sx) != 0 {
-                ss := _pos;
-                loop {
-                    if is_alpha(cur_char_at(_src, _pos, _slen)) != 0 { _pos = _pos + 1; } else { break; }
-                }
-                suffix = str_sub(_src, ss, _pos - ss);
+            if sx == 95 {
+                add_error("invalid character '_' in numeric literal (digit separators not supported)");
+            } else if is_alpha(sx) != 0 {
+                add_error("invalid suffix on numeric literal (width suffixes retired 2026-09-10)");
             }
-            num_str := str_sub(_src, start, _pos - start - str_len(suffix));
-            // dex 字面量（含小数点或 f32/f64 后缀）：int_val = 定点缩放整数（精确解析，
-            // 数值迁移 Task 4——十进制 → 缩放整数，非二进制近似）；lexeme 槽 = 原数字串
+            num_str := str_sub(_src, start, _pos - start);
+            // dex 字面量（含小数点）：int_val = 定点缩放整数（精确解析，数值迁移
+            // Task 4——十进制 → 缩放整数，非二进制近似）；lexeme 槽 = 原数字串
             // （parser 在 apx 场景需要 binary64 位模式：str_to_f64_bits(num_str)）。
-            // 修复前 float 走 str_int（3.14 解析成 3，小数静默丢弃）
-            if has_dot != 0 || suffix == "f32" || suffix == "f64" {
+            if has_dot != 0 {
                 add_tok_int_lex(T_DEX, str_to_scaled(num_str), str_intern(num_str), start_line, start_col);
             } else {
-                ival : ., mut = str_int_literal(num_str);
-                if suffix == "u8" || suffix == "u16" || suffix == "u32" || suffix == "u64" { }
-                else if suffix == "i8" || suffix == "i16" || suffix == "i32" || suffix == "i64" { }
-                else if str_len(suffix) > 0 { }
-                if str_len(suffix) > 0 { add_tok(T_INT, -1, start_line, start_col); }
-                else { add_tok_int(T_INT, ival, start_line, start_col); }
+                add_tok_int(T_INT, str_int_literal(num_str), start_line, start_col);
             }
             _pos = skip_ws(_src, _pos, _slen);
             continue;

@@ -89,29 +89,36 @@ class Lexer:
         if is_prefixed:
             digits = '0123456789abcdefABCDEF' if base == 16 else (
                 '01234567' if base == 8 else '01')
-            while self.current() in digits or self.current() == '_':
+            while self.current() in digits:
                 c = self.current()
-                if c in digits or c == '_':
+                if c in digits:
                     n += self.advance()
                 else:
                     break
+            # 数字词法收窄（2026-09-10 语言面收窄 §2）：'_' 分隔符不支持——响亮报错，
+            # 不再消费（与 self-hosted lexer 同款；修复前被静默并入词素）。
+            if self.current() == '_':
+                self.error("invalid character '_' in numeric literal (digit separators not supported)")
             if n[-1] in 'xXoObB' or not any(c != '_' for c in n[2:]):
                 self.error("invalid integer literal")
             if self.current().isalnum() or self.current() == '_':
                 self.error("invalid digit in integer literal")
         else:
-            while self.current().isdigit() or self.current() == '_':
+            while self.current().isdigit():
                 n += self.advance()
+            if self.current() == '_':
+                self.error("invalid character '_' in numeric literal (digit separators not supported)")
             if self.current() == '.' and self.peek().isdigit():
                 is_float = True
                 n += self.advance()
-                while self.current().isdigit() or self.current() == '_':
+                while self.current().isdigit():
                     n += self.advance()
+                if self.current() == '_':
+                    self.error("invalid character '_' in numeric literal (digit separators not supported)")
             if self.current().isalpha():
-                suffix = ""
-                while self.current().isalpha() or self.current().isdigit():
-                    suffix += self.advance()
-                n += suffix
+                # 宽度后缀退役（2026-09-10 语言面收窄 §2）——与 self-hosted lexer 同款
+                # 响亮报错；此前后缀被并入词素（'10f32'）→ parser int() 抛 ValueError。
+                self.error("invalid suffix on numeric literal (width suffixes retired 2026-09-10)")
         n = n.replace('_', '')
         # 前缀进制（0x/0o/0b）整数字面量超形状拒绝——与 self-hosted lexer 的
         # base 校准守卫一致（P2）。层语义（int-unbounded-semantics 定稿）：
