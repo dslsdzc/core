@@ -9,8 +9,9 @@
 // NEVER hardcode byte counts in elf.cr, instr.cr, tag2l.cr, resolve.cr, frame.cr,
 // or src/os/linux/entry.cr (_start 体与 sz_start_body/sz_start_argv_save 必须同步
 // ——H2 类双源守护；frame.cr 的 pf_frame_overhead/pf_prologue/pf_epilogue 分居
-// 核算侧与发射侧,尺寸必须经本文件 sz_* 单源；tag2l.cr mw 族同守护——jo 6B 等
-// 尺寸与 sz_jo/sz_* 同源).
+// 核算侧与发射侧,尺寸必须经本文件 sz_* 单源；tag2l.cr mw 族尺寸**值一致但尚未
+// 同源化**（评审修正——e2_mw_jo 现返回字面量 6, sz_jo 无引用：改 sz_jo 不会传播,
+// 波 2 同源化或保持注记）。
 // Change a size here → all phases automatically agree.
 // ══════════════════════════════════════════════════════════════
 

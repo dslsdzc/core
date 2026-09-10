@@ -71,6 +71,10 @@ fn pf_frame_size(vc: int) -> int {
 // 一致——尺寸原语 sz_* 单源 sizes.cr；本函数 = 帧的核算侧唯一入口。
 // callee-saved 计入 = sz_callee_saved_push/pop（波 1 Task 4 自硬编码 18/9 提出
 // ——数值与提取前逐字节相同，波 1 零变化硬约束）。
+// ⚠️ 已知预存偏差（波 1 Task 4 评审登记，波 2 清）：opt≥1 时本函数多计一个
+// sz_callee_saved_pop（9B/函数——push/pop 对已在 sz_callee_saved_push+pop 内,
+// 见下方函数尾再计点）。Phase 2 total_code 为临时值（Phase 3 由实际 cp 重算
+// rodata/bss/函数偏移——elf.cr:1380/1422/1088），**无发射字节影响**、偏保守。
 fn pf_frame_overhead(ss: int) -> int {
     sz : ., mut = sz_push_rbp() + sz_mov_rbp_rsp();
     if g_opt_level >= 1 { sz = sz + sz_callee_saved_push() + sz_callee_saved_pop(); }  // push rbx,r12-r15(9) + pop r15-r12,rbx(9)
