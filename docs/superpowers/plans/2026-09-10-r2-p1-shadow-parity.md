@@ -309,6 +309,8 @@ nice -n 19 ./build/corec check src/compiler/checker.cr --type-shadow | tail -3  
 **Files:**
 - Create: `docs/superpowers/specs/2026-09-10-type-shadow-findings.md`
 
+- [ ] **Step 0（前置，评审硬性要求）：未知桶拆两因（**先改代码再采数**）**——`sh_compare` 里把「任一侧翻译失败（`sh_term_of_ti` 返回 -1）」与「引擎三态负值（-1/-2，含预算耗尽）」分记两个 kind（如 `kind=3` = 桥接 -1 / `kind=0` = 引擎负值）。理由（Task 2 评审）：dump 现存条已混记，**若只做文档不拆代码，Task 3 的归因不可恢复**。
+
 - [ ] **Step 1: 三档语料跑影子（各自 clean-cache + cwd=仓库根）**
 
 ```bash
@@ -338,7 +340,12 @@ nice -n 19 ./build/corec check src/compiler/ccr_io.cr --type-shadow >> /tmp/p1_c
 - [ ] **Step 2: 两态零变化复验**（Task 2 Step 5 的命令，含 `check` 与 `build` 两条路径）
 - [ ] **Step 3: 自举链**（`corec2`→`corec3` `cmp` IDENTICAL + N06=0 + 冒烟 rc=42）
 - [ ] **Step 4: 文档**：spec §9 P1 行标 ✅ + 落点；TODO 登记（影子模式开关的默认值与产物影响、差异清单的后续裁决归属）；台账
-- [ ] **Step 4b: 挂账清零**：① Task 1 评审 M4 —— `build_selfhost_native.py:309` 注释更正（**corelsp 清单确含 `checker.cr`**；且自 Task 2 起 corelsp **新增** `type_terms/type_engine/ty_shadow` 三文件——因 checker 引用影子层，注释与清单须一致）；② Task 1 评审「>1024 条目第二次重建无实测」——补一条守门用例或如实登记；③ 既有缺陷 `tests/suite/at_test_mini4/6`（`@inline` fixture 编译段错误 rc=139，Task 2 报告称非回归）——评审确认后登记 TODO
+- [ ] **Step 4b: 挂账清零**（按 Task 1/Task 2 评审实际状态更新）：
+  - ~~① `build_selfhost_native.py:309` 注释更正~~ ——**已被 Task 2 提交完成，核销即可**（Task 2 评审 M2 提示勿重复劳动）
+  - ② Task 1 评审「>1024 条目第二次重建无实测」——补一条守门用例或如实登记
+  - ③ **既有缺陷登记（最小复现已由 Task 2 评审更正）**：**函数体内嵌套 `fn` 声明 → 编译 rc=139**（min4/min6 同族；mini6 **无** `@inline`——原报告措辞有误）；崩点在 parse→checker 之间（日志止于 `[3/5] parse...`）；**两版编译器均复现**（非影子层引入）→ TODO #16
+  - ④ **Task 2 评审 M3**：`src/compiler/type_terms.cr:73` 头注「corearch/corelsp 不受影响」半句陈旧（corelsp 自 Task 2 起必须链接引擎层）→ 更正
+  - ⑤ Task 2 评审 M5：站点 4 因 `res_call_type` 无 `EXPR_ARRAY`/tuple 分支将**恒 agree** → Task 3 findings 中不得据「站点 4 零差异」判该面收敛（写入 findings 文档的限制说明）
 - [ ] **Step 5: 提交**（路径限定）
 
 ---
