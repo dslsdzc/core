@@ -181,6 +181,12 @@
 - **触发实证**：R2 P0 Task 1 的 `tt_top()` 惰性 memo 原计划用全局 `= -1` 作「未初始化」哨兵 → 实测返回项 0（= ⊥），被迫改零初值 + ready 位（`g_tt_top_ok`/`g_tt_nil_ok`）。
 - **修复方向**：bootstrap `ir_gen.py` 的初值提取扩展到一元负号/常量折叠可判定形态（与 self-hosted 的 `global_init_val` 对齐），或对不可判定初值发诊断（**禁止静默 0**）；判据 = `tests/bootstrap/` 增用例（负号初值/调用初值 → 值正确或响亮报错）。
 
+### 15. R2 P0 类型项引擎落地（2026-09-10——落点与未覆盖面登记，非缺陷）
+- **落点**：`src/compiler/type_terms.cr`（类型项 DAG 表 48B/条 + 开放寻址索引 + 哈希去重 + NNF/DNF 规范化）、`src/compiler/type_engine.cr`（三态判定 `ty_sub`/`ty_equiv`/`ty_disjoint`/`ty_inhabited` + 反例 `tt_witness` + 穷尽性 `ty_exhaustive`（补集空性）；原子类互斥公理、μ 展开余归纳 memo、预算守卫）、`src/compiler/type_selftest.cr`（38 例用例表）+ CLI `corec selftest-types` + 判据 `tests/selfhost/test_type_engine.py`。spec = `docs/superpowers/specs/2026-09-10-type-interface-unification-design.md` §9 P0；计划 = `docs/superpowers/plans/2026-09-10-r2-p0-type-engine.md`。
+- **P0 边界兑现**：checker/ir_gen/后端/内核零改动；产物 byte-identical（`ptr_arith.cr` 与 R1 基线逐字节相同）；自举 `corec2/corec3` `cmp` IDENTICAL。
+- **未覆盖面（显式登记：命中返回 -1 或按守卫，**不静默**）**：① 参数化原子的参数仅同形判等（变型规则 = P3）；② `AK_NAMED` 具体行不展开（待 P2 接入 checker 类型表后可用）；③ 空递归（如 μX.X）按深度守卫 512 → -1；④ 判定预算默认 200000 步，超限 → -1 + `g_ty_exhausted`。
+- **实现期实证教训（后续期通用）**：Core **无三元运算符** `?:`；取模须非负（i64 向零截断，负下标 → 越界静默失效）；键比较**不得依赖 i64 回绕**（bootstrap 解释器任意精度 → 回绕等式恒假）；字面矛盾规则须窄（正原子 × 异类负原子**不空**：`int ∩ ¬string = int`）；μ 展开必须走 memo 入口（余归纳终止）。
+
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
 来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：
