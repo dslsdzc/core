@@ -2,9 +2,10 @@
 // R2 P0：类型项引擎判定用例表 + 自测驱动（`corec selftest-types`）。
 // 判据：每例一行 PASS/FAIL，末行 "N/M type-engine cases passed"，rc=0 = 全过。
 // 说明：本文件只依赖 type_terms.cr / type_engine.cr 的公开 API。
-// 用例面分期：Task 1 = P0 最小 5 例（建层：表/DAG 去重/构造面代数律 + 桩判定）；
-// Task 3/4 扩充为 spec §8 全类（子类型/等价/不相交/可空/反例/穷尽性/递归/参数化/预算），
-// 同步抬 tests/selfhost/test_type_engine.py 的 MIN_CASES 到 20。
+// 用例面分期：Task 1 = P0 最小 5 例（建层）；Task 3/4 扩到 spec §8 全类
+// （子类型/等价/不相交/可空/反例/穷尽性/递归/参数化/预算）；**P0 终审补 8 例**
+// （否定在超类型侧 / memo 扩容不挂 / 预算不吞 -1 / n 元析取 / 命名原子未知 /
+// ¬μ 不下推 / 未覆盖面未知）。tests/selfhost/test_type_engine.py 的 MIN_CASES = 32。
 
 fn ts_check(name: string, got: int, want: int) -> int {
     if got == want {
@@ -62,7 +63,9 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("sub.union_right", ty_sub(a_int, u_is), 1);
     total = total + 1; fails = fails + ts_check("sub.union_left_neg", ty_sub(u_is, a_int), 0);
     total = total + 1; fails = fails + ts_check("sub.inter", ty_sub(tt_inter(a_int, a_str), a_int), 1);
-    total = total + 1; fails = fails + ts_check("equiv.absorb", ty_equiv(tt_union(a_int, a_int), a_int), 1);
+    // 非平凡吸收：int ∪ (str ∪ int) ≡ int ∪ str（需引擎判定，非构造律）
+    total = total + 1; fails = fails + ts_check("equiv.absorb",
+        ty_equiv(tt_union(a_int, tt_union(a_str, a_int)), tt_union(a_int, a_str)), 1);
     total = total + 1; fails = fails + ts_check("disjoint.atoms", ty_disjoint(a_int, a_str), 1);
     total = total + 1; fails = fails + ts_check("disjoint.same", ty_disjoint(a_int, a_int), 0);
     total = total + 1; fails = fails + ts_check("inh.atom", ty_inhabited(a_int), 1);
@@ -101,7 +104,42 @@ fn type_selftest_run() -> int {
     seq_i := tt_atom(AK_SEQUENCE, -1, tt_cons(a_int, tt_nil()));
     seq_s := tt_atom(AK_SEQUENCE, -1, tt_cons(a_str, tt_nil()));
     total = total + 1; fails = fails + ts_check("param.same", ty_sub(seq_i, seq_i), 1);
-    total = total + 1; fails = fails + ts_check("param.invariant_p0", ty_sub(seq_i, seq_s), 0);
+    // P0 不判变型（读视图协变 = P3）→ 同类不同参数 = **未知**（-1），不给确定 0
+    // （P0 终审 Important B：确定 0 会与 spec §2.2 的 sequence<⊤> 正向判定冲突）
+    total = total + 1; fails = fails + ts_check("param.unknown_p0", ty_sub(seq_i, seq_s), -1);
+    total = total + 1; fails = fails + ts_check("param.uncovered_flag", ty_uncovered(), 1);
+
+    // --- P0 终审补例（三个 Critical + 两条 Important 各配一例回归）---
+    // C1：否定在超类型侧 —— ¬A ⊆ ¬B ⟺ B ⊆ A（方向反会让两侧同时成立）
+    total = total + 1; fails = fails + ts_check("neg.supertype",
+        ty_sub(tt_not(seq_i), tt_not(tt_top_k(AK_SEQUENCE))), 0);
+    total = total + 1; fails = fails + ts_check("neg.supertype_rev",
+        ty_sub(tt_not(tt_top_k(AK_SEQUENCE)), tt_not(seq_i)), 1);
+    // C3：预算耗尽不得被吞成 0（三态必须上抛）
+    ty_budget_reset(1);
+    total = total + 1; fails = fails + ts_check("budget.no_swallow",
+        ty_sub(tt_not(seq_i), tt_not(tt_top_k(AK_SEQUENCE))), -1);
+    ty_budget_reset(200000);
+    // C2：memo 表扩容不挂（1200 互异对逼出装填因子守卫 + 重建重放；到得了下一行 = 未死循环）
+    d2 : ., mut = 0;
+    last := 0;
+    loop {
+        if d2 >= 1200 { break; }
+        last = ty_sub(tt_mu(d2, a_int), a_int);
+        d2 = d2 + 1;
+    }
+    total = total + 1; fails = fails + ts_check("memo.overflow_survived", last, 1);
+    // A：n 元析取（≥3）是合法 DNF（左深嵌套 union）
+    total = total + 1; fails = fails + ts_check("dnf.n_ary",
+        tt_is_dnf(tt_norm(tt_inter(tt_union(a_int, a_str), tt_union(a_bool, a_int)))), 1);
+    // B：命名原子不展开 → 未知；且不得断言与它互斥
+    named_t := tt_atom(AK_NAMED, 7, -1);
+    a_prod := tt_atom(AK_PRODUCT, -1, -1);
+    total = total + 1; fails = fails + ts_check("named.unknown", ty_sub(named_t, a_prod), -1);
+    total = total + 1; fails = fails + ts_check("named.not_disjoint", ty_disjoint(named_t, a_prod), 0);
+    // D：¬μ 不静默改写为 μ¬（保留为字面 + 未覆盖面）
+    total = total + 1; fails = fails + ts_check("neg.mu_kept",
+        tt_tag(tt_norm(tt_not(tt_mu(0, a_int)))), TT_NOT);
 
     // --- 索引扩容守门（Task 1 遗留：判据规模 << 初始容量 → 扩容/重建路径无常规覆盖）---
     ref := tt_atom(AK_SEQUENCE, -1, tt_cons(a_int, tt_nil()));
@@ -116,7 +154,16 @@ fn type_selftest_run() -> int {
         item := tt_atom(AK_PRODUCT, -1, tt_cons(tt_mu(d, a_int), tt_nil()));
         d = d + 1;
     }
-    total = total + 1; fails = fails + ts_check("grow.count_40", (tt_count() >= before + 40), 1);
+    // 40 个互异项建两遍：第二遍必须**全部命中**已有项（DAG 去重幂等）——精确断言
+    // （早期版本用 `>= before+40`，既弱又不精确；P0 终审 Minor 指出）
+    c_after_first := tt_count();
+    d4 : ., mut = 0;
+    loop {
+        if d4 >= 40 { break; }
+        item2 := tt_atom(AK_PRODUCT, -1, tt_cons(tt_mu(d4, a_int), tt_nil()));
+        d4 = d4 + 1;
+    }
+    total = total + 1; fails = fails + ts_check("grow.dedup_40_idempotent", (tt_count() - c_after_first), 0);
     total = total + 1; fails = fails + ts_check("grow.dedup_after_rebuild",
         (tt_atom(AK_PRODUCT, -1, tt_cons(tt_mu(0, a_int), tt_nil())) ==
          tt_atom(AK_PRODUCT, -1, tt_cons(tt_mu(0, a_int), tt_nil()))), 1);

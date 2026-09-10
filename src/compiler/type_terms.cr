@@ -83,10 +83,15 @@ fn grow_type_terms(needed: int) {
 }
 
 fn grow_tt_index(needed: int) {
-    // 开放寻址索引：容量取 2 的幂、≥ 2×项数（重建式扩容，见 tt_reindex）
+    // 开放寻址索引：容量取 2 的幂、**≥ 2×现有项数**（重建式扩容，见 tt_reindex）。
+    // 「≥ 2×项数」不是可选项：tt_reindex 的重放插入**没有**装填因子守卫，若新表按
+    // needed 定得过小（如调用方传 2、而现有项已 >512），重放时探测永不落空 = 死循环
+    // （P0 自测守门用例实证：`g_tt_index_cap = 0; grow_tt_index(2)` 直接挂死）。
     if needed < g_tt_index_cap { return; }
     nc : ., mut = 1024;
-    loop { if nc >= needed { break; } nc = nc * 2; }
+    need2 : ., mut = needed;
+    if (g_type_term_count + 1) * 2 > need2 { need2 = (g_type_term_count + 1) * 2; }
+    loop { if nc >= need2 { break; } nc = nc * 2; }
     nb := alloc(nc * 8);
     i : ., mut = 0;
     loop { if i >= nc { break; } w64(nb, i * 8, -1); i = i + 1; }
@@ -244,7 +249,12 @@ fn tt_nnf_neg(i: int) -> int {
     if t == TT_NOT { return tt_nnf(tt_a(i)); }          // ¬¬i = i
     if t == TT_UNION { return tt_inter(tt_nnf_neg(tt_a(i)), tt_nnf_neg(tt_b(i))); }
     if t == TT_INTER { return tt_union(tt_nnf_neg(tt_a(i)), tt_nnf_neg(tt_b(i))); }
-    if t == TT_MU { return tt_mu(tt_a(i), tt_nnf_neg(tt_b(i))); }
+    if t == TT_MU {
+        // ¬μX.F ≠ μX.¬F（后者需要 ν 绑定）——**不静默做非等价改写**（P0 终审 Important D）：
+        // 保留 ¬(μ…) 为字面（tt_is_literal 接受）+ 登记未覆盖面；判定侧走保守路径（不覆盖）
+        g_ty_uncovered = 1;
+        return tt_not(i);
+    }
     return tt_not(i);   // 字面取反：¬ATOM / ¬VAR / ¬⊤ₖ
 }
 
@@ -256,30 +266,65 @@ fn tt_dnf_list(p: int) -> int {
 }
 
 // DNF：∩ 分配到 ∪ 上（(A∪B)∩C → (A∩C)∪(B∩C)）；叶子 = product（∩-链）或字面
+// 全程计预算；-1 = 预算耗尽（上抛，不得当 0/形态用）
 fn tt_dnf(i: int) -> int {
+    if tt_step() == -1 { return -1; }
     t := tt_tag(i);
-    if t == TT_UNION { return tt_union(tt_dnf(tt_a(i)), tt_dnf(tt_b(i))); }
+    if t == TT_UNION {
+        a1 := tt_dnf(tt_a(i));
+        if a1 < 0 { return -1; }
+        b1 := tt_dnf(tt_b(i));
+        if b1 < 0 { return -1; }
+        return tt_union(a1, b1);
+    }
     if t == TT_INTER {
         l := tt_dnf(tt_a(i));
+        if l < 0 { return -1; }
         r := tt_dnf(tt_b(i));
+        if r < 0 { return -1; }
         // 分配律必须**两支都展开**：(A∪B)∩C → (A∩C) ∪ (B∩C)。
         // 只展开一支 = 静默丢项（P0 Task 2 自测实证：norm.distributed got INTER want UNION
         // ——计划骨架同样写错，本实现已修）。
         if tt_tag(l) == TT_UNION {
-            return tt_union(tt_dnf(tt_inter(tt_a(l), r)), tt_dnf(tt_inter(tt_b(l), r)));
+            x := tt_dnf(tt_inter(tt_a(l), r));
+            if x < 0 { return -1; }
+            y := tt_dnf(tt_inter(tt_b(l), r));
+            if y < 0 { return -1; }
+            return tt_union(x, y);
         }
         if tt_tag(r) == TT_UNION {
-            return tt_union(tt_dnf(tt_inter(l, tt_a(r))), tt_dnf(tt_inter(l, tt_b(r))));
+            x := tt_dnf(tt_inter(l, tt_a(r)));
+            if x < 0 { return -1; }
+            y := tt_dnf(tt_inter(l, tt_b(r)));
+            if y < 0 { return -1; }
+            return tt_union(x, y);
         }
         return tt_inter(l, r);
     }
-    if t == TT_MU { return tt_mu(tt_a(i), tt_dnf(tt_b(i))); }
+    if t == TT_MU {
+        b1 := tt_dnf(tt_b(i));
+        if b1 < 0 { return -1; }
+        return tt_mu(tt_a(i), b1);
+    }
     if t == TT_ATOM { return tt_atom(tt_a(i), tt_b(i), tt_dnf_list(tt_c(i))); }
     return i;
 }
 
-// 规范化入口（NNF → DNF；DAG 去重使「同形同项」免费）
-fn tt_norm(i: int) -> int { return tt_dnf(tt_nnf(i)); }
+// 预算步进（**规范化也计入**——P0 终审 Important C 实证：∩ 分配律在 n 元联合下
+// 词项数 2^n 爆炸（n=16 → 29 万项）而 exhausted 恒 0，预算形同虚设）。
+fn tt_step() -> int {
+    if g_ty_budget_max <= 0 { g_ty_budget_max = 200000; }
+    g_ty_steps = g_ty_steps + 1;
+    if g_ty_steps > g_ty_budget_max { g_ty_exhausted = 1; return -1; }
+    return 0;
+}
+
+// 规范化入口（NNF → DNF；DAG 去重使「同形同项」免费）——-1 = 预算耗尽（调用方必须上抛）
+fn tt_norm(i: int) -> int {
+    n := tt_nnf(i);
+    if n < 0 { return -1; }
+    return tt_dnf(n);
+}
 
 // ─── 形态判定（自测断言与引擎前置检查共用）───
 fn tt_is_literal(i: int) -> int {
@@ -287,7 +332,8 @@ fn tt_is_literal(i: int) -> int {
     if t == TT_ATOM || t == TT_VAR || t == TT_TOP_K || t == TT_BOT || t == TT_TOP { return 1; }
     if t == TT_NOT {
         it := tt_tag(tt_a(i));
-        if it == TT_ATOM || it == TT_VAR || it == TT_TOP_K { return 1; }
+        // NOT(MU) 亦为字面：¬μ 不下推动（见 tt_nnf_neg 的 MU 分支）
+        if it == TT_ATOM || it == TT_VAR || it == TT_TOP_K || it == TT_MU { return 1; }
     }
     return 0;
 }
@@ -309,9 +355,12 @@ fn tt_is_dnf_member(i: int) -> int {
 }
 
 fn tt_is_dnf(i: int) -> int {
+    // union 是**左深嵌套**（tt_union 不扁平化）→ 必须递归接受 n 元析取：
+    // 早期版本对子项调 tt_is_dnf_member（要求子项非 union）→ ≥3 析取的合法 DNF 被误判 0
+    // （P0 终审 Important A 实证：(A|B)∩(C|D) 规范化为 4 析取 → 判 0）。
     if tt_tag(i) == TT_UNION {
-        if tt_is_dnf_member(tt_a(i)) == 0 { return 0; }
-        return tt_is_dnf_member(tt_b(i));
+        if tt_is_dnf(tt_a(i)) == 0 { return 0; }
+        return tt_is_dnf(tt_b(i));
     }
     return tt_is_dnf_member(i);
 }

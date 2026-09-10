@@ -54,6 +54,9 @@ fn ak_disjoint(x: int, y: int) -> int {
     if x == y { return 0; }
     if x == AK_DYN || y == AK_DYN { return 0; }
     if x == AK_NEVER || y == AK_NEVER { return 1; }
+    // AK_NAMED 的具体行不展开（未覆盖面②）→ **不得断言互斥**（P0 终审 Important B 实证：
+    // named 可能是任何结构类型的别名，断言互斥即不可能断言）
+    if x == AK_NAMED || y == AK_NAMED { return 0; }
     return 1;
 }
 
@@ -152,18 +155,30 @@ fn lit_implies(lp: int, lq: int) -> int {
     // lq = ¬x：lp ⊆ ¬x ⟺ lp ∩ x = ∅
     if tt_tag(lq) == TT_NOT {
         x := tt_a(lq);
-        if tt_tag(lp) == TT_NOT { return ty_sub(tt_a(lp), x); }   // ¬p ⊆ ¬x ⟺ x ⊆ p
-        pk := ty_ak_of(lp);
-        xk := ty_ak_of(x);
-        if pk >= 0 && xk >= 0 && ak_disjoint(pk, xk) == 1 { return 1; }
-        if tt_tag(x) == TT_BOT { return 1; }
+        // ¬P ⊆ ¬X ⟺ **X ⊆ P**（逆否）——P0 终审 Critical 1：早期写成 ty_sub(P, X)（方向反），
+        // 使 ¬A ⊆ ¬B 与 A ⊊ B 同时成立（自相矛盾）。
+        if tt_tag(lp) == TT_NOT { return ty_sub(x, tt_a(lp)); }
+        // ¬(μ…) 等无类字面：未知（登记，保守不覆盖）
+        if lit_class_of(lp) < 0 || lit_class_of(x) < 0 {
+            if tt_tag(x) == TT_BOT { return 1; }
+            if tt_tag(lp) == TT_BOT { return 1; }
+            g_ty_uncovered = 1;
+            return -1;
+        }
+        pk := lit_class_of(lp);
+        xk := lit_class_of(x);
+        if pk == AK_NAMED || xk == AK_NAMED { g_ty_uncovered = 1; return -1; }   // 不展开 → 未知
+        if ak_disjoint(pk, xk) == 1 { return 1; }
         return 0;
     }
     // 双方皆正原子：同类 + 参数同形（P0：参数不变，见未覆盖面①）
     if tt_tag(lp) == TT_ATOM && tt_tag(lq) == TT_ATOM {
+        if tt_a(lp) == AK_NAMED || tt_a(lq) == AK_NAMED { g_ty_uncovered = 1; return -1; }
         if tt_a(lp) != tt_a(lq) { return 0; }
-        if tt_b(lp) != tt_b(lq) { return 0; }
-        return tt_list_same(tt_c(lp), tt_c(lq));
+        if tt_list_same(tt_c(lp), tt_c(lq)) == 1 { return 1; }
+        // 同类但参数不同形：P0 不判变型（读视图协变 = P3）→ **未知**（登记；不得给确定 0）
+        g_ty_uncovered = 1;
+        return -1;
     }
     return 0;
 }
@@ -194,8 +209,38 @@ fn grow_ty_memo(needed: int) {
     g_ty_memo_count = 0;
 }
 
-fn ty_memo_slot(a: int, b: int) -> int {
-    if g_ty_memo_ok == 0 { grow_ty_memo(1024); g_ty_memo_ok = 1; }
+// 扩容 = 重建 + **重放既有条目**（保留「进行中」状态：清表会丢余归纳假设 → 可能不终止）
+fn ty_memo_rehash() {
+    old_keys := g_ty_memo_keys;
+    old_vals := g_ty_memo_vals;
+    old_cap := g_ty_memo_cap;
+    nc : ., mut = old_cap * 2;
+    if nc < 1024 { nc = 1024; }
+    nb := alloc(nc * 16);
+    nv := alloc(nc * 8);
+    i : ., mut = 0;
+    loop { if i >= nc { break; } w64(nb, i * 16, -1); w64(nv, i * 8, 0); i = i + 1; }
+    g_ty_memo_keys = nb;
+    g_ty_memo_vals = nv;
+    g_ty_memo_cap = nc;
+    g_ty_memo_count = 0;
+    j : ., mut = 0;
+    loop {
+        if j >= old_cap { break; }
+        k := r64(old_keys, j * 16);
+        if k >= 0 {
+            b2 := r64(old_keys, j * 16 + 8);
+            s := ty_memo_slot_no_grow(k, b2);
+            w64(g_ty_memo_keys, s * 16, k);
+            w64(g_ty_memo_keys, s * 16 + 8, b2);
+            w64(g_ty_memo_vals, s * 8, r64(old_vals, j * 8));
+            g_ty_memo_count = g_ty_memo_count + 1;
+        }
+        j = j + 1;
+    }
+}
+
+fn ty_memo_slot_no_grow(a: int, b: int) -> int {
     h : ., mut = (a * 31 + b) % g_ty_memo_cap;
     if h < 0 { h = 0 - h; }
     p : ., mut = h;
@@ -205,6 +250,16 @@ fn ty_memo_slot(a: int, b: int) -> int {
         if k == a && r64(g_ty_memo_keys, p * 16 + 8) == b { return p; }
         p = p + 1; if p >= g_ty_memo_cap { p = 0; }
     }
+}
+
+fn ty_memo_slot(a: int, b: int) -> int {
+    if g_ty_memo_ok == 0 { grow_ty_memo(1024); g_ty_memo_ok = 1; }
+    // 装填因子守卫（**必须在探测前**）：表满且键不存在时开放寻址永不退出
+    // （P0 终审 Critical 2 实证：1200 互异对 → 98% CPU 空转）→ 先扩容（重建 + 重放）
+    if (g_ty_memo_count + 1) * 2 >= g_ty_memo_cap { ty_memo_rehash(); }
+    // memo 查找计入预算（防备忘录自身成为无界成本）；耗尽 → -1 上抛（调用方处理）
+    if tt_step() == -1 { return -1; }
+    return ty_memo_slot_no_grow(a, b);
 }
 
 fn ty_memo_state(slot: int) -> int {
@@ -248,6 +303,9 @@ fn ty_budget_reset(limit: int) {
     g_ty_budget_max = limit;
     g_ty_exhausted = 0;
     g_ty_uncovered = 0;
+    // memo 随之清空（下次 ty_memo_slot 重建）：**每个顶层查询独立**——否则跨查询的
+    // 缓存命中会让结果依赖预算历史而非输入项（P0 终审 Critical 3 实证）
+    g_ty_memo_ok = 0;
 }
 
 fn ty_exhausted() -> int { return g_ty_exhausted; }
@@ -293,7 +351,11 @@ fn sub_cover(p: int, q: int) -> int {
         loop {
             if pi >= pn { break; }
             lp := r64(bufp, pi * 8);
-            if lit_implies(lp, lq) == 1 { covered = 1; break; }
+            li := lit_implies(lp, lq);
+            if li == 1 { covered = 1; break; }
+            // 预算耗尽/未覆盖面必须**上抛**（P0 终审 Critical 3：早期 `== 1` 把 -1 当「未覆盖」
+            // → 判定结果被吞成 0 并缓存，违反 spec §3.3「禁止当 0 用」）
+            if li == -1 { return -1; }
             pi = pi + 1;
         }
         if covered == 0 { return 0; }
@@ -305,6 +367,7 @@ fn sub_cover(p: int, q: int) -> int {
 // ─── 顶层：包含（假设-判定 + memo + 预算）───
 fn ty_sub_core(a: int, b: int) -> int {
     slot := ty_memo_slot(a, b);
+    if slot < 0 { return -1; }        // 预算耗尽（memo 查找本身计数）
     st := ty_memo_state(slot);
     if st == 2 { return 1; }            // 进行中 = 假设成立（余归纳）
     if st == 1 { return 1; }
@@ -327,7 +390,9 @@ fn ty_sub(a: int, b: int) -> int {
     if g_ty_budget_max <= 0 { ty_budget_reset(200000); }
     if a == b { return 1; }
     n1 := tt_norm(a);
+    if n1 < 0 { return -1; }      // 规范化预算耗尽（P0 终审 Important C）
     n2 := tt_norm(b);
+    if n2 < 0 { return -1; }
     if n1 == n2 { return 1; }
     if tt_tag(n2) == TT_TOP { return 1; }
     if tt_tag(n1) == TT_BOT { return 1; }
@@ -346,6 +411,7 @@ fn ty_equiv(a: int, b: int) -> int {
 fn ty_inhabited(a: int) -> int {
     if g_ty_budget_max <= 0 { ty_budget_reset(200000); }
     n := tt_norm(a);
+    if n < 0 { return -1; }       // 规范化预算耗尽
     return inh_any_at(n, 0);
 }
 
@@ -373,11 +439,15 @@ fn inh_any_at(i: int, depth: int) -> int {
 }
 
 // ─── 反例（witness）与穷尽性（Task 4）───
-// witness = A\B 的规范化类型项；不可满足 → -1（= 无遗漏/无反例值）
+// witness = A\B 的规范化类型项；**不可满足 → -1**（无遗漏/无反例值）；
+// **-2 = 未知**（预算耗尽/未覆盖面——与「不可满足」严格区分：P0 终审 Minor 指出早期
+// 二者共用 -1 会让「证明不了」被当成「确实穷尽」）
 fn tt_witness(a: int, b: int) -> int {
     r := tt_norm(tt_inter(a, tt_not(b)));
+    if r < 0 { return -2; }
     if tt_tag(r) == TT_BOT { return -1; }
     x := ty_inhabited(r);
+    if x == -1 { return -2; }
     if x != 1 { return -1; }
     return r;
 }
@@ -397,8 +467,9 @@ fn ty_exhaust_witness(domain: int, patterns: int) -> int {
 
 fn ty_exhaustive(domain: int, patterns: int) -> int {
     w := ty_exhaust_witness(domain, patterns);
+    if w == -2 { return -1; }            // 未知（预算耗尽/未覆盖面）——不得当「穷尽」
     if g_ty_exhausted != 0 { return -1; }
-    if w < 0 { return 1; }   // 补集空 = 穷尽
+    if w < 0 { return 1; }               // 补集空 = 穷尽
     return 0;
 }
 
