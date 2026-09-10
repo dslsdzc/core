@@ -42,12 +42,12 @@ fn sh_map_entries() -> int     // 已翻译条目数
 
 | checker | 引擎项 |
 |---|---|
-| `TYP_BASE` + `TY_INT/TY_DEX/TY_STRING/TY_BOOL/TY_UNIT/TY_NEVER/TY_CHAR` | `AK_INT/AK_DEX/AK_STRING/AK_BOOL/AK_UNIT/AK_NEVER/AK_CHAR`（`ti` 存 `b` 槽） |
+| `TYP_BASE` + `TY_INT/TY_DEX/TY_STRING/TY_BOOL/TY_UNIT/TY_NEVER/TY_CHAR` | `AK_INT/AK_DEX/AK_STRING/AK_BOOL/AK_UNIT/AK_NEVER/AK_CHAR`（`ti` 存 `b` 槽）——**⚠️ 必须按语义逐项分派，不得按数值直传**：`TI_BOOL=2/TI_STR=3` 与 `AK_STRING=2/AK_BOOL=3` **下标互换**（Task 1 实测：照抄数值直传会把 bool↔string 静默错标，且两侧同错自洽 → 差异清单全成假信号）；`TY_DEX_S`（精确缩放 dex，占位哨兵行）同样归 `AK_DEX` |
 | `TYP_DYN` | `AK_DYN` |
 | `TYP_ARRAY`（data=元素, extra=N） | `AK_SEQUENCE`，参数链 `[elem]`（**N 不入身份**——R1 裁决） |
 | `TYP_SLICE` | `AK_SEQUENCE`，参数链 `[elem]` |
 | `TYP_PTR` / `TYP_REF` | `AK_PTR` / `AK_REF`，参数链 `[inner]` |
-| `TYP_TUPLE`（字段在 `g_tuple_*`，见 checker 侧访问器） | `AK_PRODUCT`，参数链 = 逐字段项 |
+| `TYP_TUPLE`（**实读布局：`data` = 字段数、`extra` = `g_gen_apply_data` 起始下标**——checker.cr:118 与 :2041 两处消费点同证；计划初稿的「`g_tuple_*`」全仓不存在，Task 1 实测） | `AK_PRODUCT`，参数链 = 逐字段项 |
 | `TYP_NAMED` | `AK_NAMED`（`ti` 存 `b` 槽；引擎不展开 → 多为 UNKNOWN，P1 预期） |
 | `TYP_GENERIC_PARAM` / `TYP_GENERIC_APPLY` | `AK_NAMED`（同上，未知类） |
 
@@ -104,9 +104,17 @@ fn sh_map_find(ti: int) -> int {   // 命中返回槽位，未命中返回空槽
 
 fn sh_term_of_ti(ti: int) -> int {
     if ti < 0 { return -1; }
-    // 预置常量：natives 直接查表（TI_INT..TI_CHAR / TI_DYN）
-    if ti <= TI_CHAR { return tt_atom(ti, ti, -1); }   // AK_* 与 TI_* 前 7 项 1:1（AK_INT=0..AK_CHAR=6）
-    if ti == TI_DYN { return tt_atom(AK_DYN, ti, -1); }
+    // 预置常量：natives **按语义逐项分派**（⚠️ 数值不 1:1：TI_BOOL=2/TI_STR=3 vs
+    // AK_STRING=2/AK_BOOL=3 下标互换——直接 tt_atom(ti,ti,-1) 会静默错标，Task 1 实测）
+    if ti == TI_INT { return tt_atom(AK_INT, ti, -1); }
+    if ti == TI_DEX { return tt_atom(AK_DEX, ti, -1); }
+    if ti == TI_BOOL { return tt_atom(AK_BOOL, ti, -1); }
+    if ti == TI_STR { return tt_atom(AK_STRING, ti, -1); }
+    if ti == TI_UNIT { return tt_atom(AK_UNIT, ti, -1); }
+    if ti == TI_NEVER { return tt_atom(AK_NEVER, ti, -1); }
+    if ti == TI_CHAR { return tt_atom(AK_CHAR, ti, -1); }
+    if ti == TI_DYN { return tt_atom(AK_DYN, ti, -1); }   // 注意：dyn 位图按 ⊤ 近似（过宽）→ Task 3 须单列 dyn 类差异
+    if ti == TI_DEX_S { return tt_atom(AK_DEX, ti, -1); } // 精确 dex 与 dex 同语义域
     slot := sh_map_find(ti);
     k := r64(g_shadow_map, slot * 16);
     if k == ti {
@@ -135,8 +143,12 @@ fn sh_term_of_ti(ti: int) -> int {
         term = tt_atom(AK_NAMED, ti, -1);   // 未知 kind 保守归入命名类
     }
     if term < 0 { return -1; }
-    w64(g_shadow_map, slot * 16, ti);
-    w64(g_shadow_map, slot * 16 + 8, term);
+    // ⚠️ 缓存表必须：① 装填因子守卫（表满时开放寻址探测永不落空 = 挂死——P0 C2 同族，
+    // Task 1 实测：固定 1024 容量在编译器自身语料（数千 ti）下必挂）；② 重建时重放既有
+    // 条目；③ **回写前重探**（递归翻译可能触发扩容/重建，直接写旧 slot 会写错槽）。
+    slot2 := sh_map_find(ti);
+    w64(g_shadow_map, slot2 * 16, ti);
+    w64(g_shadow_map, slot2 * 16 + 8, term);
     g_shadow_entries = g_shadow_entries + 1;
     return term;
 }
@@ -254,6 +266,7 @@ nice -n 19 ./build/corec check src/compiler/ccr_io.cr --type-shadow >> /tmp/p1_c
 （`check` 路径若不带影子通道穿透，改用 `build … --type-shadow` 并丢弃产物；实现者按实际可用路径落，报告写明。）
 
 - [ ] **Step 2: 汇总差异**：从日志抽 `[type-shadow]` 摘要行；若有 dump 文件则按 `kind` 分类统计 Top 差异（`old_looser` 优先——那是真正的收紧面）。
+  **dyn 类必须单列**：`TYP_DYN`（dyn 位图）按计划映射为 `AK_DYN`（=⊤）属**过宽近似**（Task 1 裁决登记）→ 凡两侧任一带 dyn 条目的差异一律归入「近似噪声」类，**不得计入收紧面/宽松面**，报告中单列计数与样本。
 
 - [ ] **Step 3: 写 findings 文档**（`docs/superpowers/specs/2026-09-10-type-shadow-findings.md`）：逐语料的计数表 + 差异样本（site/t1/t2/旧/新）+ 初步归因（结构性 vs 未覆盖面 vs 真收紧）+ 后续裁决建议（哪些进 P2 的替换清单、哪些需补引擎规则）。
 
