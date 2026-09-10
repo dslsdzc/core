@@ -97,6 +97,15 @@ fn g2_rodata_sz() -> int {
 // 逐字节 verbatim，无行为变化）。本文件保留通用编码原语（e2_*/emit_*）与
 // emit_instr；mw 族消费点见 IR_BINARY/IR_LOAD/IR_STORE/IR_RETURN 分支的
 // tag 检查 / jo / tag 卫生调用（tag 表读取 = frame.cr g2_tag_off）。
+//
+// 调用序列——**已移至 src/os/linux/callseq.cr**（x86 实例化波 1 Task 5 抽取；
+// OS 轴 = SysV AMD64 调用约定）：寄存器参数分派（cs_args_dispatch——IR_CALL/
+// IR_CALL_EXTERN/IR_SPAWN 三处同源合流）/栈参压栈（cs_arg_on_stack/
+// cs_stack_count/cs_stack_args）/栈清理（cs_stack_cleanup）/返回值
+// （cs_ret_value——IR_RETURN 值序列 + tag 读路径 A）/通用调用
+// （cs_call_direct）。本文件保留 e2_* 编码原语、emit_instr 分派与内置体
+// （syscall3/4、load8/store8/…、get_arg、_dyncpy、goroutine_wrapper_addr——
+// 内置体直通属波 2 参数化面，见 Task 6 syscall 抽取）。
 
 // ── Byte encoding helpers ──
 fn e2_w8(buf: string, pos: int, val: int) { store8(buf, pos, val % 256); }
@@ -659,53 +668,13 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
 
     if op == IR_CALL {
         fa := s1; ac := s2;
-        // SysV AMD64 参数分派：int 用 ir（0-5 → rdi,rsi,rdx,rcx,r8,r9），
-        // binary64 参数用 fr（0-7 → xmm0-7），各自独立编号（标准答案）
+        // SysV AMD64 参数分派 + 栈超限压栈 = OS 轴序列（callseq.cr，波 1
+        // Task 5 抽取——三处同源合流/差异核对见该文件头注）。
         // 第一遍：寄存器参数（位置顺序，左到右）
-        ir_cnt : ., mut = 0; fr_cnt : ., mut = 0;
-        ai := 0;
-        loop { if ai >= ac { break; }
-            pt := irv_type(fa + ai);
-            if pt == TI_DEX {
-                if fr_cnt < 8 {
-                    cp = cp + e2_sd_load_x(buf, pos+cp, g2_slot(fa + ai), fr_cnt);
-                    fr_cnt = fr_cnt + 1;
-                }
-            } else {
-                if ir_cnt < 6 {
-                    r := -1;
-                    if ir_cnt == 0 { r = 7; } if ir_cnt == 1 { r = 6; } if ir_cnt == 2 { r = 2; }
-                    if ir_cnt == 3 { r = 1; } if ir_cnt == 4 { r = 8; } if ir_cnt == 5 { r = 9; }
-                    cp = cp + e2_load_var(buf, pos+cp, r, fa + ai);
-                    ir_cnt = ir_cnt + 1;
-                }
-            }
-        ai = ai + 1; }
+        cp = cs_args_dispatch(buf, pos, cp, fa, ac);
         // 第二遍：栈参数（右到左压，第 7 个 int / 第 9 个 binary64 超限才压）
-        stack_total : ., mut = 0;
-        stack_ai : ., mut = ac - 1;
-        loop {
-            if stack_ai < 0 { break; }
-            ic2 : ., mut = 0; fc2 : ., mut = 0;
-            j2 : ., mut = 0;
-            loop { if j2 >= stack_ai { break; }
-                if irv_type(fa + j2) == TI_DEX { fc2 = fc2 + 1; } else { ic2 = ic2 + 1; }
-                j2 = j2 + 1; }
-            if irv_type(fa + stack_ai) == TI_DEX {
-                if fc2 >= 8 {
-                    cp = cp + e2_sd_load_x(buf, pos+cp, g2_slot(fa + stack_ai), 0);
-                    cp = cp + e2_push_xmm0(buf, pos+cp);
-                    stack_total = stack_total + 1;
-                }
-            } else {
-                if ic2 >= 6 {
-                    cp = cp + e2_load_var(buf, pos+cp, 10, fa + stack_ai);
-                    e2_w8(buf, pos+cp, 65); e2_w8(buf, pos+cp+1, 82); cp = cp + 2;  // push r10
-                    stack_total = stack_total + 1;
-                }
-            }
-            stack_ai = stack_ai - 1;
-        }
+        stack_total := cs_stack_count(fa, ac);
+        cp = cs_stack_args(buf, pos, cp, fa, ac);
         // Match builtins by interned string index (integer compare, no str_eq)
         if s3 == g_ni_syscall3 {
             cp = cp + e2_mov(buf, pos+cp, 0, 7);
@@ -850,41 +819,16 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
             cp = cp + 10;
             cp = cp + e2_st(buf, pos+cp, 10, do2);
         } else if s3 >= 0 {
-            fn2 := istr_get(s3);
-            to := -1; tf := 0;
-            loop { if tf >= g_x86_func_off_count { break; } if str_eq(istr_get(r64(g_x86_func_offsets, tf*16)), fn2) != 0 { to = r64(g_x86_func_offsets, tf*16+8); break; } tf = tf + 1; }
-                        // Record call position for post-emission patching
-            grow_call_patch(g_x86_call_patch_count + 1);
-            w64(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp);
-            w64(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern(fn2));
-            g_x86_call_patch_count = g_x86_call_patch_count + 1;
-            if to >= 0 {
-                cp = cp + e2_call(buf, pos+cp, (176 + to) - (pos + cp + 5));
-            } else {
-                // Unknown function: emit external relocation (for dynamic linking)
-                grow_ext_rel(g_x86_ext_rel_count + 1);
-                w64(g_x86_ext_rel_pos, g_x86_ext_rel_count * 8, pos + cp + 1);
-                w64(g_x86_ext_rel_name, g_x86_ext_rel_count * 8, s3);
-                g_x86_ext_rel_count = g_x86_ext_rel_count + 1;
-                cp = cp + e2_call(buf, pos+cp, 0);
-            }
-            if d >= 0 { cp = cp + e2_store_ret(buf, pos+cp, d); }
+            // 通用调用路径 = callseq.cr cs_call_direct（查名 → e2_call /
+            // 外部位 + 返回值存；波 1 Task 5 抽取）
+            cp = cs_call_direct(buf, pos, cp, s3, d);
         } else {
             // xor eax, eax
             e2_w8(buf, pos+cp, 49); e2_w8(buf, pos+cp+1, 192); cp = cp + 2;
             if d >= 0 { cp = cp + e2_store_ret(buf, pos+cp, d); }
         }
-        stack_count := stack_total;   // 实际压栈数（int 超 6 + float 超 8）
-        if stack_count > 0 {
-            stack_bytes := stack_count * 8;
-            if stack_bytes <= 127 {
-                e2_w8(buf, pos+cp, 72); e2_w8(buf, pos+cp+1, 131);
-                e2_w8(buf, pos+cp+2, 196); e2_w8(buf, pos+cp+3, stack_bytes); cp = cp + 4;
-            } else {
-                e2_w8(buf, pos+cp, 72); e2_w8(buf, pos+cp+1, 129); e2_w8(buf, pos+cp+2, 196);
-                e2_w32(buf, pos+cp+3, stack_bytes); cp = cp + 7;
-            }
-        }
+        // 栈清理（call 后恢复 rsp）= callseq.cr cs_stack_cleanup（波 1 Task 5 抽取）
+        cp = cs_stack_cleanup(buf, pos, cp, stack_total);
         return cp;
     }
 
@@ -893,27 +837,10 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         name_ni := s1;
         // F16①：装载参数（s2=首参、s3=参数个数，SysV AMD64 约定：
         // int rdi,rsi,rdx,rcx,r8,r9；float xmm0-7）——修复前 call 前无任何装载。
-        fa2 := s2; ac2 := s3;
-        ir_cnt2 : ., mut = 0; fr_cnt2 : ., mut = 0;
-        ai2 : ., mut = 0;
-        loop { if ai2 >= ac2 { break; }
-            pt2 := irv_type(fa2 + ai2);
-            if pt2 == TI_DEX {
-                if fr_cnt2 < 8 {
-                    cp = cp + e2_sd_load_x(buf, pos+cp, g2_slot(fa2 + ai2), fr_cnt2);
-                    fr_cnt2 = fr_cnt2 + 1;
-                }
-            } else {
-                if ir_cnt2 < 6 {
-                    r2 := -1;
-                    if ir_cnt2 == 0 { r2 = 7; } if ir_cnt2 == 1 { r2 = 6; } if ir_cnt2 == 2 { r2 = 2; }
-                    if ir_cnt2 == 3 { r2 = 1; } if ir_cnt2 == 4 { r2 = 8; } if ir_cnt2 == 5 { r2 = 9; }
-                    cp = cp + e2_load_var(buf, pos+cp, r2, fa2 + ai2);
-                    ir_cnt2 = ir_cnt2 + 1;
-                }
-            }
-            ai2 = ai2 + 1;
-        }
+        // 分派段 = callseq.cr cs_args_dispatch（波 1 Task 5 三处同源合流）。
+        // **注**：extern 路径只做寄存器分派——无栈参压栈/栈清理（预存行为，
+        // 逐字节保持；差异核对见 callseq.cr 头注）。
+        cp = cs_args_dispatch(buf, pos, cp, s2, s3);
         // Record external relocation
         grow_ext_rel(g_x86_ext_rel_count + 1);
         w64(g_x86_ext_rel_pos, g_x86_ext_rel_count * 8, pos + cp);
@@ -946,70 +873,22 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         //  函数名查表 → 补丁失败 → call rel32=0 → 栈不平衡 → SIGSEGV 139。）
         name_ni := s3;
         // F4：补参数装载——与 IR_CALL 完全相同的 SysV AMD64 分派
-        // （int: rdi,rsi,rdx,rcx,r8,r9 + 栈超限；float: xmm0-7）。
+        // （int: rdi,rsi,rdx,rcx,r8,r9 + 栈超限；float: xmm0-7）——
+        // = callseq.cr cs_args_dispatch（波 1 Task 5 三处同源合流）。
         fa := s1; ac := s2;
-        ir_cnt : ., mut = 0; fr_cnt : ., mut = 0;
-        ai := 0;
-        loop { if ai >= ac { break; }
-            pt := irv_type(fa + ai);
-            if pt == TI_DEX {
-                if fr_cnt < 8 {
-                    cp = cp + e2_sd_load_x(buf, pos+cp, g2_slot(fa + ai), fr_cnt);
-                    fr_cnt = fr_cnt + 1;
-                }
-            } else {
-                if ir_cnt < 6 {
-                    r := -1;
-                    if ir_cnt == 0 { r = 7; } if ir_cnt == 1 { r = 6; } if ir_cnt == 2 { r = 2; }
-                    if ir_cnt == 3 { r = 1; } if ir_cnt == 4 { r = 8; } if ir_cnt == 5 { r = 9; }
-                    cp = cp + e2_load_var(buf, pos+cp, r, fa + ai);
-                    ir_cnt = ir_cnt + 1;
-                }
-            }
-        ai = ai + 1; }
+        cp = cs_args_dispatch(buf, pos, cp, fa, ac);
         // 栈参数（右到左压，第 7 个 int / 第 9 个 float 超限才压）——同 IR_CALL
-        stack_total : ., mut = 0;
-        stack_ai : ., mut = ac - 1;
-        loop {
-            if stack_ai < 0 { break; }
-            ic2 : ., mut = 0; fc2 : ., mut = 0;
-            j2 : ., mut = 0;
-            loop { if j2 >= stack_ai { break; }
-                if irv_type(fa + j2) == TI_DEX { fc2 = fc2 + 1; } else { ic2 = ic2 + 1; }
-                j2 = j2 + 1; }
-            if irv_type(fa + stack_ai) == TI_DEX {
-                if fc2 >= 8 {
-                    cp = cp + e2_sd_load_x(buf, pos+cp, g2_slot(fa + stack_ai), 0);
-                    cp = cp + e2_push_xmm0(buf, pos+cp);
-                    stack_total = stack_total + 1;
-                }
-            } else {
-                if ic2 >= 6 {
-                    cp = cp + e2_load_var(buf, pos+cp, 10, fa + stack_ai);
-                    e2_w8(buf, pos+cp, 65); e2_w8(buf, pos+cp+1, 82); cp = cp + 2;  // push r10
-                    stack_total = stack_total + 1;
-                }
-            }
-            stack_ai = stack_ai - 1;
-        }
+        // （= callseq.cr cs_stack_args/cs_stack_count；波 1 Task 5 抽取）
+        stack_total := cs_stack_count(fa, ac);
+        cp = cs_stack_args(buf, pos, cp, fa, ac);
         // Emit call to function + store result (single-threaded approximation)
         grow_call_patch(g_x86_call_patch_count + 1);
         w64(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp);
         w64(g_x86_call_patch_name, g_x86_call_patch_count * 8, name_ni);
         g_x86_call_patch_count = g_x86_call_patch_count + 1;
         e2_w8(buf, pos+cp, 232); e2_w32(buf, pos+cp+1, 0); cp = cp + 5;
-        // 栈清理（call 后恢复 rsp）——同 IR_CALL
-        stack_count := stack_total;
-        if stack_count > 0 {
-            stack_bytes := stack_count * 8;
-            if stack_bytes <= 127 {
-                e2_w8(buf, pos+cp, 72); e2_w8(buf, pos+cp+1, 131);
-                e2_w8(buf, pos+cp+2, 196); e2_w8(buf, pos+cp+3, stack_bytes); cp = cp + 4;
-            } else {
-                e2_w8(buf, pos+cp, 72); e2_w8(buf, pos+cp+1, 129); e2_w8(buf, pos+cp+2, 196);
-                e2_w32(buf, pos+cp+3, stack_bytes); cp = cp + 7;
-            }
-        }
+        // 栈清理（call 后恢复 rsp）——同 IR_CALL（= callseq.cr cs_stack_cleanup）
+        cp = cs_stack_cleanup(buf, pos, cp, stack_total);
         if d >= 0 && irv_type(d) == TI_DEX {
             cp = cp + e2_sd_store(buf, pos+cp, do2);
         } else {
@@ -1039,37 +918,9 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     }
 
     if op == IR_RETURN {
-        if s1 >= 0 {
-            if irv_type(s1) == TI_DEX {
-                // binary64 返回：movsd xmm0, [slot]（SysV 返回值在 XMM0，apx 快路径）
-                cp = cp + e2_sd_load(buf, pos+cp, g2_slot(s1));
-            } else if r64(g_x86_is_global, s1 * 8) != 0 {
-                // Global: load via RIP-relative into rax
-                grow_rip_patch(g_x86_rip_patch_count + 1);
-                w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3);
-                w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1);
-                g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
-                cp = cp + e2_lr(buf, pos+cp, 0);       // lea r10, [rip+0]
-                // mov rax, [r10] — REX.WB + 0x8B
-            cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 10/8); e2_w8(buf, pos+cp, 139); cp = cp + 1; cp = cp + emit_modrm(buf, pos+cp, 0, 0, 10%8);
-            } else {
-                cp = cp + e2_ld(buf, pos+cp, 0, g2_slot(s1));
-                // int 多字 M1（Task 4）tag 读路径 A：return 的 tagged 局部值
-                // ——tag=1（槽 = 2-limb 指针）→ 解指针取低 limb → rax（exit
-                // 低 8 位 = 数学值低字节；不解 = 指针低字节 = 错值）。tag=0
-                // → 快值原样。行内（je rel8 跨 3B deref——tag 字节测试）。
-                tg := g2_tag_off(s1);
-                if tg != -1 {
-                    cp = cp + e2_mw_t8(buf, pos+cp, tg);
-                    w8(buf, pos+cp, 116); w8(buf, pos+cp+1, 3); cp = cp + 2;  // je +3
-                    w8(buf, pos+cp, 72); w8(buf, pos+cp+1, 139); w8(buf, pos+cp+2, 0); cp = cp + 3;  // mov rax, [rax]
-                }
-            }
-        }
-        // record position for caller to patch jmp → epilogue
-        grow_ret_patch(g_x86_ret_patch_count + 1); w64(g_x86_ret_patch_pos, g_x86_ret_patch_count * 8, pos + cp);
-        g_x86_ret_patch_count = g_x86_ret_patch_count + 1;
-        cp = cp + e2_jmp(buf, pos+cp, 0);
+        // 值序列 + ret_patch 登记 + jmp 占位 = callseq.cr cs_ret_value
+        // （波 1 Task 5 抽取；tag 读路径 A 见该文件注释）
+        cp = cs_ret_value(buf, pos, cp, s1);
         return cp;
     }
 

@@ -43,3 +43,10 @@ import ld
 // 自 format/elf/elf.cr 整函数迁 src/os/linux/entry.cr——elf.cr 的调用点跨轴引它，
 // project-mode 单元须经本清单收编（回退链命中 src/os/linux/；concat 面 = os_linux_files）。
 import entry
+// OS 轴（x86 实例化波 1 Task 5 落位）：SysV AMD64 调用约定序列——cs_args_dispatch
+// （寄存器参数分派，IR_CALL/EXTERN/SPAWN 三处同源合流）/cs_stack_args（+ 判定
+// cs_arg_on_stack/计数 cs_stack_count）/cs_stack_cleanup/cs_ret_value（IR_RETURN
+// 值序列 + tag 读路径 A）/cs_call_direct——自 instr.cr emit_instr 内联段落抽出。
+// instr.cr 的四分支调用点跨轴引它，project-mode 单元须经本清单收编（回退链命中
+// src/os/linux/；concat 面 = os_linux_files）。
+import callseq

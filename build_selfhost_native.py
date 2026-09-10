@@ -78,8 +78,12 @@ format_elf_files = [
 # ③ OS 轴 Linux：syscall/callseq/entry（波 1 Task 2/5/6 逐个落位）。
 # entry.cr（Task 2 落位）= _start 发射序 emit_start/emit_start_size——
 # 自 src/format/elf/elf.cr 整函数搬迁；跨轴调用经本 concat 扁平单元解析。
+# callseq.cr（Task 5 落位）= SysV AMD64 调用约定序列（参数分派/栈参/栈清理/
+# 返回值/直接调用——自 instr.cr emit_instr 内联段落抽出；三处同源合流见文件
+# 头注）；跨轴消费 x86_64/instr.cr 编码原语。
 os_linux_files = [
     'src/os/linux/entry.cr',
+    'src/os/linux/callseq.cr',
 ]
 
 # 后端收尾段：ccr 载入 + 单态化 + 运行时 stdlib 桥 + corearch 入口。
