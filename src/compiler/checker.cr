@@ -16,8 +16,136 @@ fn alloc_type(kind: int, data: int, extra: int) -> int {
     return idx;
 }
 
+// ─── R2 P2a Task 1（F1）：同名 TYP_NAMED 建表去重 ───
+// 背景（P1 影子对拍 9/9 差异的根因）：同一类型名在**每个出现点**都建一行——struct 字面量
+// （:2206）、泛型应用的基型（:2191）等——于是同名多行。桥接层按行建原子（AK_NAMED 的 b 槽
+// = 行号）→ 引擎把两行当互异命名类型 → 判不了（unknown）。裁决（用户）：根治 = 建表去重，
+// 唯一分配点收敛到本函数（alloc_type 仍是裸分配器，语义不变）。
+// 实读核对：全仓 TYP_NAMED 分配点恰 8 处（:406/:554/:598/:613/:622/:920/:2191/:2206），
+// 实参恒 (TYP_NAMED, name_idx, 0) → 键 = name_idx（extra 恒 0，不入键）。读取点全部经
+// get_type_data(ti) 取**名字**（:496 是解引用到名字的唯一入口），故按名字归一行不改读法。
+// **例外（如实登记）**：type_equal_core 的 TYP_GENERIC_APPLY 分支（:143-144）比的是
+// get_type_data = base_ti（基型**行号**）——去重把「同名字不同出现点 ⇒ 不等」改成「同名 ⇒
+// 同 base 行，继续比实参」，这正是本条修复的目的（P1 差异的对偶面）；其放宽面由 Task 3
+// 对拍复跑量化，非本任务裁决面。
+//
+// 侧表 g_named_dedup（16B/条 {name_idx, ti}，开放寻址线性探测，与 ty_shadow.cr 的
+// g_shadow_map 同式同因）。P0/P1 血泪三件套缺一即可能挂死，逐条落：
+//   ① 装填因子守卫（**探测前**）：(count + 1) * 2 >= cap → 重建扩容。表满且键不存在时
+//      开放寻址永不落空 = 死循环；count 只增不减、恒等于占用槽数（兼作守卫判据）。
+//   ② 重建 + **重放既有条目**：count 随重放重算（守卫读的就是它，不得沿用旧值）；重放
+//      借道 named_dedup_probe（**不**经守卫）——否则重放自身可能再触发扩容 = 递归。
+//   ③ 回写前重探：探测与回写之间若有插入/扩容，先前槽位即失效。本路径当前**不可达**
+//      （alloc_type 不回入本函数、grow_types 不碰本表），保留 = 固化契约 + 与先例同形。
+NAMED_DEDUP_INIT_CAP : int = 1024;
+
+fn named_dedup_init() {
+    if g_named_dedup_cap <= 0 {
+        nc : ., mut = NAMED_DEDUP_INIT_CAP;
+        nb := alloc(nc * 16);
+        i : ., mut = 0;
+        loop { if i >= nc { break; } w64(nb, i * 16, -1); i = i + 1; }
+        g_named_dedup = nb;
+        g_named_dedup_cap = nc;
+        g_named_dedup_count = 0;
+    }
+}
+
+// 类型表重置（行号空间作废）时侧表随之作废：cap=0 → 下次用惰性重建（空槽全 -1）。
+// 当前 check_all/自测各只调一次 init_types → 本重置是不可达的防御；留它是因为陈旧的
+// name→ti 命中会把**已作废的行号**当有效行返回（silent miscompile，最难查的一类）。
+fn named_dedup_reset() {
+    g_named_dedup_cap = 0;
+    g_named_dedup_count = 0;
+}
+
+// 无守卫探测（**只可在扩容守卫之后调用**；重建重放借道这里，不经守卫 = 防递归）：
+// 命中 → 该键所在槽；未命中 → 空槽（**不插入**）。形态 = sh_map_find_nogrow（ret + break
+// + 尾 return；函数体不以无 break 的 loop 收尾——自托管 checker 对该形态有 TF01 误报面）。
+fn named_dedup_probe(name_idx: int) -> int {
+    cap := g_named_dedup_cap;
+    p : ., mut = tt_mod(name_idx, cap);
+    slot : ., mut = -1;
+    loop {
+        k := r64(g_named_dedup, p * 16);
+        if k < 0 { slot = p; break; }
+        if k == name_idx { slot = p; break; }
+        p = p + 1; if p >= cap { p = 0; }
+    }
+    return slot;
+}
+
+// 扩容 = 重建 + 重放既有条目（sh_map_rehash / 引擎 grow_tt_index 同式）；计数随重放重算。
+fn named_dedup_rehash() {
+    old := g_named_dedup;
+    old_cap := g_named_dedup_cap;
+    nc : ., mut = old_cap * 2;
+    if nc < NAMED_DEDUP_INIT_CAP { nc = NAMED_DEDUP_INIT_CAP; }
+    nb := alloc(nc * 16);
+    i : ., mut = 0;
+    loop { if i >= nc { break; } w64(nb, i * 16, -1); i = i + 1; }
+    g_named_dedup = nb;
+    g_named_dedup_cap = nc;
+    g_named_dedup_count = 0;
+    j : ., mut = 0;
+    loop {
+        if j >= old_cap { break; }
+        k := r64(old, j * 16);
+        if k >= 0 {
+            s := named_dedup_probe(k);
+            w64(g_named_dedup, s * 16, k);
+            w64(g_named_dedup, s * 16 + 8, r64(old, j * 16 + 8));
+            g_named_dedup_count = g_named_dedup_count + 1;
+        }
+        j = j + 1;
+    }
+}
+
+// 槽位（含装填因子守卫 + 重建重放）：命中 → 该键所在槽；未命中 → 空槽（不插入）。
+fn named_dedup_slot(name_idx: int) -> int {
+    named_dedup_init();
+    if (g_named_dedup_count + 1) * 2 >= g_named_dedup_cap { named_dedup_rehash(); }
+    return named_dedup_probe(name_idx);
+}
+
+// 同名 TYP_NAMED 归一行（唯一分配点，8 处调用点见文件头注）：命中返回既有行，未命中
+// 分配 + 登记。键域契约：name_idx >= 0（-1 = 空槽哨兵）——负键不进侧表（退化为裸分配），
+// 否则「负键」与「空槽」同形会把空槽读成命中并返回未定义行（ti=0 = TI_INT 的静默错型）。
+// 8 处实参均为名字下标（str_intern / si_name / ei_name / 类型节点的 ast_int_val）≥ 0，
+// 该分支当前不可达 = 防御。
+fn alloc_named_type(name_idx: int) -> int {
+    if name_idx < 0 { return alloc_type(TYP_NAMED, name_idx, 0); }
+    slot := named_dedup_slot(name_idx);
+    if r64(g_named_dedup, slot * 16) == name_idx { return r64(g_named_dedup, slot * 16 + 8); }
+    ti := alloc_type(TYP_NAMED, name_idx, 0);
+    // 回写前重探（见文件头注③）
+    slot2 := named_dedup_slot(name_idx);
+    if r64(g_named_dedup, slot2 * 16) == name_idx {
+        // 防御（当前不可达）：既有登记优先 → 本次刚分配的行成孤儿行（不写侧表、不计数）。
+        // 反例写法（无条件写 slot2）会覆盖活跃条目 = 丢登记。
+        return r64(g_named_dedup, slot2 * 16 + 8);
+    }
+    w64(g_named_dedup, slot2 * 16, name_idx);
+    w64(g_named_dedup, slot2 * 16 + 8, ti);
+    g_named_dedup_count = g_named_dedup_count + 1;
+    return ti;
+}
+
+// 自测用（type_selftest.cr）：该名字当前在类型表里占的行数（恒 0/1；0 = 尚未分配）。
+fn named_dedup_rows(name_idx: int) -> int {
+    n : ., mut = 0;
+    i : ., mut = 0;
+    loop {
+        if i >= g_type_count { break; }
+        if get_type_kind(i) == TYP_NAMED && get_type_data(i) == name_idx { n = n + 1; }
+        i = i + 1;
+    }
+    return n;
+}
+
 fn init_types() {
     g_type_count = 0;
+    named_dedup_reset();   // 类型表重置 → 侧表随之作废（陈旧 name→ti 不得跨重置复用）
     alloc_type(TYP_BASE, TY_INT, 0);     // TI_INT = 0
     alloc_type(TYP_BASE, TY_DEX, 0);   // TI_DEX = 1
     alloc_type(TYP_BASE, TY_BOOL, 0);    // TI_BOOL = 2
@@ -403,7 +531,7 @@ fn res_type_node(node: int) -> int {
             return sym_type(si);
         }
         // Create named type entry
-        return alloc_type(TYP_NAMED, name_idx, 0);
+        return alloc_named_type(name_idx);
     }
     if ast_kind(node) == EXPR_ARRAY {
         // 表示层概念（2026-09-10 语言面收窄裁决 §1）：`[T; N]` 的类型构造器身份已退役——
@@ -551,7 +679,7 @@ fn collect_decls() {
     loop {
         if i >= g_struct_count { break; }
         name_idx := si_name(i);
-        type_idx := alloc_type(TYP_NAMED, name_idx, 0);
+        type_idx := alloc_named_type(name_idx);
         def_sym(name_idx, SYM_TYPE, type_idx, -1);
         i = i + 1;
     }
@@ -595,7 +723,7 @@ fn collect_decls() {
     loop {
         if i >= g_iface_count { break; }
         name_idx := r64(g_ifaces, i * ESZ_IFACEINFO + OFF_IF_NAME);
-        type_idx := alloc_type(TYP_NAMED, name_idx, 0);
+        type_idx := alloc_named_type(name_idx);
         def_sym(name_idx, SYM_TYPE, type_idx, -1);
         i = i + 1;
     }
@@ -610,7 +738,7 @@ fn collect_decls() {
     if option_found == 0 {
         // Auto-register Option as a generic built-in type
         option_name_idx := str_intern("Option");
-        option_ti := alloc_type(TYP_NAMED, option_name_idx, 0);
+        option_ti := alloc_named_type(option_name_idx);
         def_sym(option_name_idx, SYM_TYPE, option_ti, -1);
     }
 
@@ -619,7 +747,7 @@ fn collect_decls() {
     loop {
         if i >= g_enum_count { break; }
         name_idx := ei_name(i);
-        type_idx := alloc_type(TYP_NAMED, name_idx, 0);
+        type_idx := alloc_named_type(name_idx);
         def_sym(name_idx, SYM_TYPE, type_idx, -1);
         // Register each variant as a function returning the enum type
         vi : ., mut = 0;
@@ -917,7 +1045,7 @@ fn res_call_type(node: int, func_fi: int) -> int {
         // Regular named type
         si := find_gsym(name_idx);
         if si >= 0 && sym_kind(si) == SYM_TYPE { return sym_type(si); }
-        return alloc_type(TYP_NAMED, name_idx, 0);
+        return alloc_named_type(name_idx);
     }
     if ast_kind(node) == EXPR_GENERIC_APPLY {
         name_idx := ast_a(node);
@@ -2188,7 +2316,7 @@ fn infer_expr(node: int) -> int {
                 fi = fi + 1;
             }
             // Create TYP_GENERIC_APPLY for this struct
-            base_ti := alloc_type(TYP_NAMED, name_ni, 0);
+            base_ti := alloc_named_type(name_ni);
             ds := g_gen_apply_data_count;
             grow_gen_apply_data(ds + 1 + g_gen_map_count);
             w64(g_gen_apply_data, ds * 8, g_gen_map_count);
@@ -2203,7 +2331,7 @@ fn infer_expr(node: int) -> int {
             return alloc_type(TYP_GENERIC_APPLY, base_ti, ds);
         }
         // Non-generic struct
-        ti := alloc_type(TYP_NAMED, name_ni, 0);
+        ti := alloc_named_type(name_ni);
         fi : ., mut = 0;
         fn2 : ., mut = ast_b(node);
         loop {

@@ -253,6 +253,9 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("bridge.slice_seq",
         (tt_a(t_slice) == AK_SEQUENCE && tt_c(t_slice) == tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil())), 1);
     // TYP_NAMED：AK_NAMED + 行号存 b 槽（引擎不展开 → 判定 UNKNOWN = P1 预期未覆盖面）
+    // ⚠️ 本行**刻意走裸分配**（P2a Task 1 后 8 个生产分配点已收敛到 alloc_named_type）：
+    // 它构造的是人造 TYP_NAMED 行（键 1201 不对应任何真名），登记进生产侧表会用假键污染
+    // name→ti 映射（自测将来若被并入编译路径即静默错型）。裸分配 = 不登记 = 不污染。
     named_ti := alloc_type(TYP_NAMED, 1201, 0);
     t_named := sh_term_of_ti(named_ti);
     total = total + 1; fails = fails + ts_check("bridge.named_ak_b",
@@ -306,6 +309,35 @@ fn type_selftest_run() -> int {
     }
     total = total + 1; fails = fails + ts_check("bridge.grow_rehash2",
         (sh_map_entries() == g2_before + 1100 && g_shadow_map_cap >= 4096 && sh_term_of_ti(arr_ti2) == t_arr2), 1);
+
+    // --- F1（R2 P2a Task 1）：同名 TYP_NAMED 归一行 —— P1 影子对拍 9/9 差异根因消除 ---
+    // 根因：同一类型名（struct 字面量 / 泛型应用基型在不同**出现点**）各建一行 → 桥接按行
+    // 建原子（AK_NAMED 的 b 槽 = 行号）→ 引擎视两行为互异命名类型 → 判不了（9 条 unknown）。
+    // 修法（用户裁决 = 根治）：建表去重，唯一分配点收敛到 alloc_named_type。
+    n1 := alloc_named_type(str_intern("DedupProbe"));
+    n2 := alloc_named_type(str_intern("DedupProbe"));
+    total = total + 1; fails = fails + ts_check("f1.same_name_one_row", (n1 == n2), 1);
+    total = total + 1; fails = fails + ts_check("f1.row_count", named_dedup_rows(str_intern("DedupProbe")), 1);
+    n3 := alloc_named_type(str_intern("DedupProbe2"));
+    total = total + 1; fails = fails + ts_check("f1.diff_name_diff_row", (n3 != n1), 1);
+    // 引擎侧：同名两行归一后，桥接的同一性成立（P1 的 9 unknown 根因消除）
+    total = total + 1; fails = fails + ts_check("f1.bridge_same_term",
+        (sh_term_of_ti(n1) == sh_term_of_ti(n2)), 1);
+    // 扩容/重建覆盖（P0/P1 血泪教训：装填守卫/重建重放路径判据不可达 = 挂死风险只靠读码）：
+    // 入 1700 个互异**真名**（键域 = str_intern 分配的名字下标，与生产同域）推过**两道**
+    // 守卫线——count=511 → cap 1024→2048，count=1023 → 2048→4096。断四件事：①两次重建都
+    // 真的发生（cap≥4096，非「读码判安全」）②重放守恒（条目计数恰 +1700，不多不少——
+    // 重放漏条目/重复计数即红）③首条（重建前入表）仍归**原行**（重放把旧条目全搬过去了）
+    // ④该名字行数仍为 1（重建不产生重复行 = 去重不因扩容失效）。
+    c_before := g_named_dedup_count;
+    f1i : ., mut = 0;
+    loop {
+        if f1i >= 1700 { break; }
+        alloc_named_type(str_intern("DedupGrow" + int_str(f1i)));
+        f1i = f1i + 1;
+    }
+    total = total + 1; fails = fails + ts_check("f1.dedup_rehash_survived",
+        (g_named_dedup_cap >= 4096 && g_named_dedup_count == c_before + 1700 && alloc_named_type(str_intern("DedupProbe")) == n1 && named_dedup_rows(str_intern("DedupProbe")) == 1), 1);
 
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }

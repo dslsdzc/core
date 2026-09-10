@@ -272,6 +272,16 @@ g_shadow_ring : string, mut;       g_shadow_ring_cap : int, mut;   g_shadow_ring
 // 而「某站点是否真的跑到过」是覆盖面的实证——0 差异语料下这是唯一证据通道）。
 g_shadow_site_counts : string, mut; g_shadow_site_cap : int, mut;
 
+// R2 P2a Task 1（F1）：同名 TYP_NAMED 建表去重侧表（开放寻址，16B/条 {name_idx, ti}）。
+// 唯一分配点 alloc_named_type 查表命中即复用存量行 → 同一类型名（struct 字面量/泛型
+// 应用基型在多处出现）恒占一行。P1 影子对拍 9/9 差异的根因正是「同名多行」：桥接层按行
+// 建原子（AK_NAMED 的 b 槽 = 行号）→ 引擎把两行当互异命名类型 → 判不了（unknown）。
+// 探测/装填因子守卫/重建重放/回写前重探见 checker.cr（与 ty_shadow.cr 的 g_shadow_map
+// 同式同因——P0/P1 三件套缺一即可能挂死）。count 只增不减、恒等于占用槽数 → 兼作扩容
+// 判据（不另设 count 之外的全局）。init_types() 置 cap=0 → 类型表重置（行号空间作废）
+// 时侧表随之惰性重建，防「陈旧 name→ti 复用」把已失效行号当命中（silent miscompile）。
+g_named_dedup : string, mut;      g_named_dedup_cap : int, mut;   g_named_dedup_count : int, mut;
+
 fn grow_plugin_tags(needed: int) {
     if needed < g_plugin_tag_cap { return; }
     ncap : ., mut = g_plugin_tag_cap * 2; if ncap < 8 { ncap = 8; } if ncap < needed { ncap = needed + 8; }
