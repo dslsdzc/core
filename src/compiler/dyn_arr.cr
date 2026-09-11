@@ -53,7 +53,7 @@ ESZ_ASTNODE  : int = 72;    // kind,a,b,c,int_val,type_val,data,line,col = 9×8
 ESZ_SYMENTRY : int = 32;    // name_idx,kind,type_idx,node_idx = 4×8
 ESZ_IRVAR    : int = 24;    // name_idx,id,type_kind = 3×8
 ESZ_IRINSTR  : int = 48;    // opcode,dest,src1,src2,src3,type_kind = 6×8
-ESZ_FUNCINFO : int = 208;
+ESZ_FUNCINFO : int = 688;
 ESZ_STRUCTINFO : int = 440;
 ESZ_ENUMINFO : int = 2360;  // name+variants[16]+variant_count+generic_names[4]+generic_count
 
@@ -79,11 +79,19 @@ OFF_IRI_S1 : int = 16; OFF_IRI_S2 : int = 24;
 OFF_IRI_S3 : int = 32; OFF_IRI_TK : int = 40;
 
 // FuncInfo offsets
+// 形参槽上限：param_types 是**定长内嵌槽区**（跟在 param_count 之后、return_type
+// 之前），槽数即硬上限。修复前槽数 = 16 且写入无界 → 第 17 个形参起改写
+// return_type/ast_node（TY_INT=0 恰把 ast_node 写成 0 = 节点表首项）→
+// 「TF01 误归 + .ccr name_idx/param_count=0 + rc=0 产物崩」静默误编译
+// （TODO #8，2026-09-11）。64 = 与 ast.cr FuncInfo 镜像 `[int; 64]` 对齐，
+// 并覆盖 ≥22（16 栈参 + 6 寄存器参，SysV）的栈清理形。越界 = parser 硬错
+// P020（rc=1）+ 下方访问器护栏双保险——**任何情况下不得静默越界写**。
+MAX_FN_PARAMS : int = 64;
 OFF_FI_NAME : int = 0; OFF_FI_PARAM_COUNT : int = 8;
-OFF_FI_PARAM_TYPES : int = 16;
-OFF_FI_RETURN_TYPE : int = 144; OFF_FI_AST_NODE : int = 152;
-OFF_FI_GENERIC_NAMES : int = 160; OFF_FI_GENERIC_COUNT : int = 192;
-OFF_FI_ISPURE : int = 200;  // 1 = pure (no side effects), 0 = impure
+OFF_FI_PARAM_TYPES : int = 16;                        // 64 槽 × 8B = 512 → 至 527
+OFF_FI_RETURN_TYPE : int = 528; OFF_FI_AST_NODE : int = 536;
+OFF_FI_GENERIC_NAMES : int = 544; OFF_FI_GENERIC_COUNT : int = 672;
+OFF_FI_ISPURE : int = 680;  // 1 = pure (no side effects), 0 = impure
 
 // StructInfo offsets
 OFF_SI_NAME : int = 0; OFF_SI_FIELD_NAMES : int = 8;
@@ -355,11 +363,15 @@ fn fi_param_count(n: int) -> int { return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI
 fn fi_return_type(n: int) -> int { return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_RETURN_TYPE); }
 fn fi_ast_node(n: int) -> int { return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_AST_NODE); }
 fn fi_generic_count(n: int) -> int { return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_GENERIC_COUNT); }
-fn fi_param_type(n: int, pi: int) -> int { return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_TYPES + pi * 8); }
+fn fi_param_type(n: int, pi: int) -> int {
+    if pi < 0 || pi >= MAX_FN_PARAMS { return 0; }  // 越界 = 槽区外（读护栏；写侧同护栏 + parser 硬错）
+    return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_TYPES + pi * 8); }
 fn fi_generic_name(n: int, gi: int) -> int { return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gi * 8); }
 fn fi_set_name(n: int, v: int) { w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_NAME, v); }
 fn fi_set_param_count(n: int, v: int) { w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_COUNT, v); }
-fn fi_set_param_type(n: int, pi: int, v: int) { w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_TYPES + pi*8, v); }
+fn fi_set_param_type(n: int, pi: int, v: int) {
+    if pi < 0 || pi >= MAX_FN_PARAMS { return; }  // 槽区护栏：越界写会踩 return_type/ast_node/generic_*/ispure（TODO #8 根源）
+    w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_TYPES + pi*8, v); }
 fn fi_set_return_type(n: int, v: int) { w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_RETURN_TYPE, v); }
 fn fi_set_ast_node(n: int, v: int) { w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_AST_NODE, v); }
 fn fi_set_generic_name(n: int, gi: int, v: int) { w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gi*8, v); }

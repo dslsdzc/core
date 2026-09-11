@@ -1215,10 +1215,20 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
     }
 
     fn_node := alloc_node(EXPR_FN, fn_ni, pf, pc, rtv + hotpatch_ver * 256, rt, body, fn_line, fn_col);
+    // 形参上限硬错（防御面，TODO #8）：FuncInfo.param_types 是定长内嵌槽区
+    // （MAX_FN_PARAMS 槽），超限签名无法表示 ⇒ 拒绝编译（rc=1）而非截断/越界写。
+    // 形参表容纳不下时**必须**在这条路径上停住：静默越界写曾踩 ast_node 致
+    // name_idx/param_count 归零 + TF01 误归 + rc=0 产物崩。
+    if pc > MAX_FN_PARAMS {
+        check_error(EC_P_TOO_MANY_PARAMS,
+            "Function has too many parameters (" + int_str(pc) + " > " + int_str(MAX_FN_PARAMS) + ")",
+            fn_line, fn_col);
+    }
     fi := add_func(fn_name, pc, rtv, fn_node);
     if fi >= 0 && gc > 0 { save_func_generics(fi, gnames, gc); save_func_gen_constrs(fi, gconstrs, gc); }
-    // Store param types in FuncInfo
-    if fi >= 0 { pstore_i : ., mut = 0; pstore_n : ., mut = pf;
+    // Store param types in FuncInfo（pc > MAX_FN_PARAMS 已被上方硬错拒绝；
+    // 此处再显式跳过 + fi_set_param_type 内槽区护栏 = 双保险，未来新调用点亦不越过界）
+    if fi >= 0 && pc <= MAX_FN_PARAMS { pstore_i : ., mut = 0; pstore_n : ., mut = pf;
         loop { if pstore_i >= pc { break; } if pstore_n < 0 { break; }
             if ast_kind(pstore_n) == EXPR_PARAM {
                 fi_set_param_type(fi, pstore_i, ast_type_val(pstore_n));
