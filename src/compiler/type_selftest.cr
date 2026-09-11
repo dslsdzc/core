@@ -540,7 +540,8 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("iface.ty_code_gray",
         (iface_by_ty_code(TY_DEX_S) == AK_DEX && iface_by_ty_code(TY_GENERIC_PARAM) == AK_NAMED), 1);
     total = total + 1; fails = fails + ts_check("iface.ty_code_unknown", iface_by_ty_code(999), -1);
-    // 字面量定型（查表入口 = 条目 lit_code 列；**当前实现 = infer_expr:1892-1897 的内联 if 链**）
+    // 字面量定型（查表入口 = 条目 lit_code 列；接线后 = infer_expr 的 5 处唯一真源，
+    // 端到端对拍见本文件末段 `lit.infer_*`）
     total = total + 1; fails = fails + ts_check("iface.lit_int", iface_lit_ti(EXPR_INT), TI_INT);
     total = total + 1; fails = fails + ts_check("iface.lit_dex", iface_lit_ti(EXPR_DEX), TI_DEX);
     total = total + 1; fails = fails + ts_check("iface.lit_str", iface_lit_ti(EXPR_STRING), TI_STR);
@@ -616,6 +617,44 @@ fn type_selftest_run() -> int {
     // ⑥ 语义分派守卫（P1 血泪：AK/TI 下标不 1:1）——若哪天有人「按下标直传」，本行必红
     total = total + 1; fails = fails + ts_check("iface.dispatch_no_index_shortcut",
         (iface_ti_of(AK_STRING) != AK_STRING && iface_ti_of(AK_BOOL) != AK_BOOL && TI_STR != TI_BOOL), 1);
+
+    // --- R2 P2b Task 3：字面量定型查表接线（infer_expr 的 5 个字面量分支 → iface_lit_ti）---
+    // 判据 = **接线端到端**：用与 parser 同族的 `alloc_node` 构造 5 个字面量 AST 节点，逐 kind 比
+    // `infer_expr(节点)` 与改动前的字面常量（= 内联 if 链 `checker.cr:1896-1901` 的逐格转录）。
+    // 为什么不能只看表侧（`iface.lit_*`）：表对而**线错**（接线点写错键，如 EXPR_INT 行调
+    // `iface_lit_ti(EXPR_DEX)`）在表侧用例下**全绿**——只有经 infer_expr 真跑才暴露。
+    // 本段为**本 Task 的判据本体**，其非真空性由实施报告记录的**突变控制**（翻转表格 ⇒ 本段
+    // `lit.infer_int` 必红 ⇒ 复位）实证，非仅「跑过一遍」。
+    li_int := alloc_node(EXPR_INT, -1, -1, -1, 42, TY_INT, -1, 0, 0);
+    li_dex := alloc_node(EXPR_DEX, -1, -1, -1, 314, TY_DEX, -1, 0, 0);
+    li_str := alloc_node(EXPR_STRING, -1, -1, -1, str_intern("iface_lit_probe"), TY_STRING, -1, 0, 0);
+    li_bool := alloc_node(EXPR_BOOL, -1, -1, -1, 1, TY_BOOL, -1, 0, 0);
+    li_char := alloc_node(EXPR_CHAR, -1, -1, -1, 65, TY_CHAR, -1, 0, 0);
+    // 反真空哨兵：构造出的节点确实带预期 kind（防 alloc_node 参数错位 ⇒ 「拿错节点比错值」假绿）
+    total = total + 1; fails = fails + ts_check("lit.node_kinds",
+        (ast_kind(li_int) == EXPR_INT && ast_kind(li_dex) == EXPR_DEX && ast_kind(li_str) == EXPR_STRING &&
+         ast_kind(li_bool) == EXPR_BOOL && ast_kind(li_char) == EXPR_CHAR), 1);
+    total = total + 1; fails = fails + ts_check("lit.infer_int", infer_expr(li_int), TI_INT);
+    total = total + 1; fails = fails + ts_check("lit.infer_dex", infer_expr(li_dex), TI_DEX);
+    total = total + 1; fails = fails + ts_check("lit.infer_str", infer_expr(li_str), TI_STR);
+    total = total + 1; fails = fails + ts_check("lit.infer_bool", infer_expr(li_bool), TI_BOOL);
+    total = total + 1; fails = fails + ts_check("lit.infer_char", infer_expr(li_char), TI_CHAR);
+    // 端到端 ↔ 表 对拍：接线后 infer_expr 的结果必须**逐 kind 等于表查表结果**（表 = 唯一真源；
+    // 若哪天有人把某行改回硬编码常量，本行仍绿但 `lit.infer_*` 亦绿——真正的守门是实施报告的
+    // 突变控制：改表格 ⇒ infer_* 红 ⇒ 该行确在读表）
+    total = total + 1; fails = fails + ts_check("lit.infer_is_table",
+        (infer_expr(li_int) == iface_lit_ti(EXPR_INT) && infer_expr(li_dex) == iface_lit_ti(EXPR_DEX) &&
+         infer_expr(li_str) == iface_lit_ti(EXPR_STRING) && infer_expr(li_bool) == iface_lit_ti(EXPR_BOOL) &&
+         infer_expr(li_char) == iface_lit_ti(EXPR_CHAR)), 1);
+    // 短路顺序（接线硬口径：**逐字保持**）——EXPR_NONE 转发行夹在 EXPR_INT 与 EXPR_DEX 之间：
+    // ① 带内层值的 wrapper：在 EXPR_INT 行不命中（kind=0）⇒ 走转发行 → 内层类型；
+    // ② 空 wrapper（a = -1）：转发行不命中 ⇒ 落函数中部的 EXPR_NONE 分支 → TI_UNIT。
+    li_wrap := alloc_node(EXPR_NONE, li_int, -1, -1, 0, 0, -1, 0, 0);
+    li_wrap_empty := alloc_node(EXPR_NONE, -1, -1, -1, 0, 0, -1, 0, 0);
+    total = total + 1; fails = fails + ts_check("lit.none_forwards", infer_expr(li_wrap), TI_INT);
+    total = total + 1; fails = fails + ts_check("lit.none_empty_unit", infer_expr(li_wrap_empty), TI_UNIT);
+    // 负节点先行拒绝（infer_expr 头行；接线不得把它挤掉）
+    total = total + 1; fails = fails + ts_check("lit.neg_node_unit", infer_expr(-1), TI_UNIT);
 
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }

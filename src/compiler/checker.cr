@@ -1893,12 +1893,17 @@ fn infer_expr(node: int) -> int {
     if node < 0 { return TI_UNIT; }
 
 
-    if ast_kind(node) == EXPR_INT { return TI_INT; }
+    // R2 P2b Task 3：字面量定型 → 本质条目表查表（唯一真源 = iface_registry.cr 的 lit_code 列）。
+    // 改动前 = 本处 5 条内联 if（`return TI_INT/TI_DEX/TI_STR/TI_BOOL/TI_CHAR`，计划时点
+    // checker.cr:1892-1897 → 现址 :1896-1901，偏移 +4）**逐格转录**进表；5 个 kind 的判断
+    // 顺序与短路行为**逐字保持**——EXPR_NONE 转发行仍夹在 EXPR_INT 与 EXPR_DEX 之间，
+    // **不得**重排、**不得**合并成「先取 kind 再查」的循环（那会改短路面）。
+    if ast_kind(node) == EXPR_INT { return iface_lit_ti(EXPR_INT); }
     if ast_kind(node) == EXPR_NONE && ast_a(node) >= 0 && ast_a(node) != node { return infer_expr(ast_a(node)); }
-    if ast_kind(node) == EXPR_DEX { return TI_DEX; }
-    if ast_kind(node) == EXPR_STRING { return TI_STR; }
-    if ast_kind(node) == EXPR_BOOL { return TI_BOOL; }
-    if ast_kind(node) == EXPR_CHAR { return TI_CHAR; }
+    if ast_kind(node) == EXPR_DEX { return iface_lit_ti(EXPR_DEX); }
+    if ast_kind(node) == EXPR_STRING { return iface_lit_ti(EXPR_STRING); }
+    if ast_kind(node) == EXPR_BOOL { return iface_lit_ti(EXPR_BOOL); }
+    if ast_kind(node) == EXPR_CHAR { return iface_lit_ti(EXPR_CHAR); }
 
     if ast_kind(node) == EXPR_IDENT {
         name_idx := ast_int_val(node);

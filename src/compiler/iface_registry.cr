@@ -23,7 +23,8 @@
 //    位下标常量，须把 `IP_*` 声明在 `globals.cr`（否则解析期 Undefined name）。
 //
 // 现状依据（逐格转录；Task 3/4/5 接线时按此对拍，格注 = 计划 Global Constraints 第 4 条）：
-//   lit_code 列 = infer_expr 头部的 5 条内联 if（checker.cr:1892-1897）：EXPR_INT→TI_INT /
+//   lit_code 列 = infer_expr 头部的 5 条内联 if（计划时点 checker.cr:1892-1897；接线时点
+//     实测 :1896-1901，偏移 +4）：EXPR_INT→TI_INT /
 //     EXPR_DEX→TI_DEX / EXPR_STRING→TI_STR / EXPR_BOOL→TI_BOOL / EXPR_CHAR→TI_CHAR。
 //   ti_row 列  = ast.cr:286-293 的 TI_* 常量（**常量，非位置推演**）。
 //   ak/kind 列 = checker 侧原子宇宙 13 类（侦查 §4.1）：TYP_BASE→8 原生（经 TY_* 码）、
@@ -147,7 +148,8 @@ fn iface_lit_entry(lit_kind: int) -> int {
     return -1;
 }
 
-// 字面量 AST kind → TI_*（-1 = 非字面量 kind）——Task 3 接线 infer_expr:1892-1897 的查表入口
+// 字面量 AST kind → TI_*（-1 = 非字面量 kind）——Task 3 已接线：infer_expr（现址 :1896-1901）的
+// 5 个字面量分支逐条改调本函数（表 = 唯一真源；`iface.lit_*` 用例 + `lit.infer_*` 端到端用例对拍）
 fn iface_lit_ti(lit_kind: int) -> int {
     e := iface_lit_entry(lit_kind);
     if e < 0 { return -1; }

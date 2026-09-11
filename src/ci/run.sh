@@ -68,7 +68,7 @@ case "$CI_JOB_NAME" in
   selfhost-tests)
     build_selfhost
     python3 tests/selfhost/test_compile.py
-    python3 tests/selfhost/test_type_engine.py   # 类型项引擎自测通道（selftest-types 145 例；P0/P1/P2a/P2b-T1/T2 一路漏挂）
+    python3 tests/selfhost/test_type_engine.py   # 类型项引擎自测通道（selftest-types 155 例；P0/P1/P2a/P2b-T1/T2/T3 一路漏挂）
     python3 tests/selfhost/test_purity.py          # 效应/纯度批判据（真纯度 13 例 + 链语义 4 例的自测通道驱动）
     python3 tests/selfhost/test_ccr_v7.py          # 效应/纯度批 Task 3：.ccr 层三条边集语义断言（取代「与旧版逐字节同」）
     python3 tests/selfhost/test_impl.py
