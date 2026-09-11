@@ -27,5 +27,5 @@
 
 ## 关联
 
-- 文档:docs/design/project-book.md(系统骨架);CLAUDE.md(Build & Test 命令)
+- 文档:docs/project-book.md(系统骨架);CLAUDE.md(Build & Test 命令)
 - 相关 ADR:ADR-0002(.ccr v6 段表)、ADR-0003(ELF 直出)

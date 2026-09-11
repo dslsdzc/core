@@ -10,7 +10,7 @@
 
 - [quickstart.md](developer/quickstart.md)— 快速开始(构建/第一个程序)
 - [tutorial.md](developer/tutorial.md)— 渐进学习路径
-- [concepts.md](developer/concepts.md)— 核心概念导览(图/内存/部署/规约,分篇见 concepts/)
+- [concepts.md](developer/concepts.md)— 核心概念导览(分篇:[graph](developer/concepts/graph.md)/[memory](developer/concepts/memory.md)/[deploy](developer/concepts/deploy.md)/[spec](developer/concepts/spec.md))
 - [syntax.md](developer/syntax.md)— 语言语法参考
 - [examples.md](developer/examples.md)— 示例集
 - [faq.md](developer/faq.md)— 常见问题
@@ -46,4 +46,7 @@
 
 ## 档案与工具链目录(不参与受众分类)
 
-archive/(任务产物)、pseudocode/(TDD 交付物)、superpowers/(specs + plans 工作目录)、coq/、ir-schema/、verifier/
+- archive/(任务产物):[compcert-reference.md](archive/compcert-reference.md)、[compcert-round4-findings.md](archive/compcert-round4-findings.md)、[numeric-migration-inventory.md](archive/numeric-migration-inventory.md)、[memory-model-capability-lattice.md](archive/memory-model-capability-lattice.md)
+- [pseudocode/](pseudocode/README.md)(TDD 交付物)、[superpowers/](superpowers/)(specs + plans 工作目录)
+- [ir-schema/](ir-schema/):[coreir-schema.md](ir-schema/coreir-schema.md)、[corespecir-schema.md](ir-schema/corespecir-schema.md)
+- [verifier/](verifier/):[kernel-spec.md](verifier/kernel-spec.md);[coq/](coq/README.md):Coq 验证 stdlib 纯函数

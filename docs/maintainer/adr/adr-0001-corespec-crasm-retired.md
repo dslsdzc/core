@@ -26,5 +26,5 @@ ebnf/后端各要维护一套),且独立格式绑定经典硬件过深(寄存器
 
 ## 关联
 
-- 文档:docs/design/crasm.md(废弃收尾);grammar/core.ebnf
+- 文档:docs/maintainer/design/crasm.md(废弃收尾);grammar/core.ebnf
 - 后续:spec/ 目录 .corespec 占位清理(挂账)

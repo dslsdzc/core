@@ -3,7 +3,7 @@
 > 定位:受众 = 学术(条款消费方:验证器实现者/维护者);状态 = active。
 > 本文件是 Core 存储语义本体的**唯一权威**——七条条款为定义性条款,将来供验证器(翻译桥/CIC 内核)消费;实现与文档冲突时以本文档为准(设计文档优先于代码)。
 > 设计依据:2026-08-15-cache-semantics-design;v4 晋升与归档讨论见 docs/archive/memory-model-capability-lattice.md。
-> 分层位置:三层映射链(图 → 格 → 编码)的「格」层语义本体;存在结构载体(IR 编码)见 docs/design/existence-structure.md;经典映射(区域/字节)见 docs/design/region-model.md;总览导航见 docs/design/memory-model.md。
+> 分层位置:三层映射链(图 → 格 → 编码)的「格」层语义本体;存在结构载体(IR 编码)见 docs/maintainer/design/existence-structure.md;经典映射(区域/字节)见 docs/maintainer/design/region-model.md;总览导航见 docs/maintainer/design/memory-model.md。
 
 ---
 
@@ -25,7 +25,7 @@ Core 的存储语义本体是**缓存**——范式无关的存储抽象,不是�
 2. **驱逐不变量**。驱逐图内任意条目(丢弃存储物、保留配方)不改变可观测语义——只影响性能,不影响正确性。形式化目标:⟦G ∖ storage(e)⟧ = ⟦G⟧。这是"缓存语义"的定义性质。
 3. **再生等价**。重跑配方节点产生的值与原条目可观测等价。这是条款 2 的机制保证,也是"任何范式都能换映射"的语义依据。
 4. **边界公理**。图边界输入(MMIO/FFI/输入/测量)是无配方条目(边界类),语义上是符号常量。语法层叫 `unsafe`(边界标注),语义层只叫"边界"。边界之外才需要 state,边界之内全是可重算的。
-4b. **图内不可重算(v4 并入,M4 输入)**。执行标注空间(神谕 / BSS 实数 / FIXPT 声明 / 模糊融合,见 docs/design/dataflow-design.md §8)存在**图内**无配方条目——非边界、不可重算。驱逐不变量/再生等价对其不成立(重跑神谕 ≠ 原结果):其存储必须持久(home 保有材料),驱逐必须写回;身份 = 产生节点(图节点身份)。边界条目与图内不可重算条目统一为「无配方条目」规则,一视同仁、不按范式枚举。
+4b. **图内不可重算(v4 并入,M4 输入)**。执行标注空间(神谕 / BSS 实数 / FIXPT 声明 / 模糊融合,见 docs/maintainer/design/dataflow-design.md §8)存在**图内**无配方条目——非边界、不可重算。驱逐不变量/再生等价对其不成立(重跑神谕 ≠ 原结果):其存储必须持久(home 保有材料),驱逐必须写回;身份 = 产生节点(图节点身份)。边界条目与图内不可重算条目统一为「无配方条目」规则,一视同仁、不按范式枚举。
 5. **赋值 = 版本化**。`x = x + 1` 在语义上 = "x₁ 创建、x₀ 失效、绑定移动",不是修改内存单元。顺序约束由 state edges 表达。"可变"不是内存单元的属性,是绑定可移动的许可。
 6. **地址 = 映射**。`&x` = (条目标识, 偏移),字节地址只是经典投影,不是语义对象。指针算术合法性由条目标识 + 偏移域验证(现有 provenance 三 pass 保留不动)。
 7. **映射实例正确性**。区域/arena/字节权限(CompCert v2)是经典映射实例,其正确性标准 = 保持条款 1–6 的可观测语义。
@@ -90,9 +90,9 @@ Core 的存储语义本体是**缓存**——范式无关的存储抽象,不是�
 
 ## 四、关联
 
-- 语义本体总览:docs/design/memory-model.md
-- IR 载体:v6 存在结构(ENT/NOD/REG)— docs/design/existence-structure.md
-- 经典映射:docs/design/region-model.md(区域/arena/权限)
-- 寄存器实例:docs/design/regalloc-cache-mapping.md(判定四条)
+- 语义本体总览:docs/maintainer/design/memory-model.md
+- IR 载体:v6 存在结构(ENT/NOD/REG)— docs/maintainer/design/existence-structure.md
+- 经典映射:docs/maintainer/design/region-model.md(区域/arena/权限)
+- 寄存器实例:docs/maintainer/design/regalloc-cache-mapping.md(判定四条)
 - 设计依据:docs/superpowers/specs/2026-08-15-cache-semantics-design.md
-- 术语索引:docs/design/glossary.md §四(缓存语义术语)
+- 术语索引:docs/glossary.md §四(缓存语义术语)

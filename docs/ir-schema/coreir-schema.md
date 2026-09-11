@@ -153,7 +153,7 @@ DFNode 覆盖两种节点：普通指令节点（opcode ≤ IR_AWAIT）和规约
 
 ### ALLOC_AT 节点（声明式放置，2026-08-13）
 
-固定地址放置的声明式进图节点（图锚定区域内存模型，见 `docs/memory-model.md` 机制 #3）：
+固定地址放置的声明式进图节点（图锚定区域内存模型，见 `docs/maintainer/design/memory-model.md` 机制 #3）：
 
 | 字段 | 含义 |
 |------|------|

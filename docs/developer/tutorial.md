@@ -158,7 +158,7 @@ fn main() -> int {
 
 ## 形式规约（横切能力）
 
-> [注意] **未实现**：本节为设计预览。规约形态 2026-09 定稿为 `#check`/`#ensure` 标注(与 #pure/#terminating 标签同族,见 `docs/developer/syntax.md` 第十章与 `docs/maintainer/design/spec-design.md`;独立 `.corespec` 格式已退役,见 adr/adr-0001),但**规约语法与验证管线均未实现**——当前编译器不消费规约。实现推进见 spec-design.md 与 TODO.md。
+> [注意] **未实现**：本节为设计预览。规约形态 2026-09 定稿为 `#check`/`#ensure` 标注(与 #pure/#terminating 标签同族,见 `docs/developer/syntax.md` 第十章与 `docs/maintainer/design/spec-design.md`;独立 `.corespec` 格式已退役,见 adr/adr-0001),但**规约语法与验证管线均未实现**——当前编译器不消费规约。实现推进见 maintainer/design/spec-design.md 与 TODO.md。
 
 **目标**：理解"行为契约"——程序 = 实现 + 保证。
 

@@ -20,7 +20,7 @@ Core 只有一种执行语义:HDFG(全息数据流图)。代码经语义 IR 翻�
 程序员不需要声明"模式":代码写了什么,图就反映什么。执行方式(串行/并行/调度)属于
 部署层,图语义不变。
 
-三层映射(术语见 docs/design/glossary.md):**图**表达计算(关系空间)、**格**承载计算
+三层映射(术语见 docs/glossary.md):**图**表达计算(关系空间)、**格**承载计算
 (存在空间,条目/配方)、**编码**实现计算(物理空间,ELF)。本文只讲图这一层。
 
 ---
@@ -91,7 +91,7 @@ val := recv(ch);           // 接收
 close(ch);                 // 关闭
 ```
 
-- 语法层与 stdlib chan_* 的对应见 docs/language/syntax.md 第十一章与 chan.cr
+- 语法层与 stdlib chan_* 的对应见 docs/developer/syntax.md 第十一章与 chan.cr
 - go 也支持范围批量形态(go var start..end expr,parser.cr desugar)
 
 ### 3.2 G:goroutine(fiber)
@@ -165,7 +165,7 @@ G 状态机完整化(_Gwaiting 阻塞链)、range go 批量、select 聚合、�
 
 分配以 **arena** 为单元——arena 是"图锚定区域"内存模型的当前实现形态
 (区域 = 子图节点,生命周期 = 图活性;概念设计见 2026-08-13-graph-anchored-regions-design,
-映射实例层见 docs/design/region-model.md):
+映射实例层见 docs/maintainer/design/region-model.md):
 
 - 函数/loop/for/unsafe 等子图自动获得 arena 生命周期(ir_gen.cr 在子图边界发射
   IR_ARENA_NEW=32/IR_ARENA_RESET=33,含编译期大小预计算;ELF 后端双路径 alloc:
@@ -207,7 +207,7 @@ I/O 同理:程序语义 = 流变换(转导器:(输入流)→(输出流));系统�
 - 教学环境 → 解释器逐步执行,可单步
 - 桌面 → AOT 编译原生执行(ELF 直出)
 - 嵌入/裸机 → 静态分配 + arena,零运行时依赖
-- 集群 → 图可远程部署(分布式为设计态,见 docs/proposals/distributed.md)
+- 集群 → 图可远程部署(分布式为设计态,见 docs/maintainer/proposals/distributed.md)
 
 代码不改。图语义唯一。部署配置不同。
 

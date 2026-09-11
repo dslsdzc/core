@@ -2,7 +2,7 @@
 
 > 定位:受众 = 维护者/贡献者;状态 = active。
 > 本文件是存储语义三层结构的**导航总览**——细节各归其位:条款权威 = cache-semantics.md;IR 载体 = existence-structure.md;经典映射 = region-model.md。
-> 分层:三层映射链(图 → 格 → 编码)中「格」层的内容;术语权威见 docs/design/glossary.md。
+> 分层:三层映射链(图 → 格 → 编码)中「格」层的内容;术语权威见 docs/glossary.md。
 
 ---
 
@@ -41,8 +41,8 @@
 
 ## 四、相关文档
 
-- 寄存器分配 = 缓存语义的映射实例:docs/design/regalloc-cache-mapping.md(判定四条)
-- 指针模型(provenance 三 pass):docs/design/pointer-model.md
+- 寄存器分配 = 缓存语义的映射实例:docs/maintainer/design/regalloc-cache-mapping.md(判定四条)
+- 指针模型(provenance 三 pass):docs/maintainer/design/pointer-model.md
 - 控制流 region(与内存"区域"区分):execution-model.md §二、existence-structure.md REG
-- 术语表:docs/design/glossary.md §二(三层映射)/§四(缓存语义术语)
+- 术语表:docs/glossary.md §二(三层映射)/§四(缓存语义术语)
 - 归档讨论:docs/archive/memory-model-capability-lattice.md(v1-v4 备忘)

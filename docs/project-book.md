@@ -32,7 +32,7 @@ Core 的目标是证明:一门现代语言可以同时获得快速编译、轻�
 |---|---|---|
 | 语义保鲜 | 语义信息在 IR 中全量保留,不逐级丢弃 | [execution-model.md](maintainer/design/execution-model.md) |
 | 单一执行模型 | 全部代码 = HDFG(全息数据流图),执行方式由部署配置决定 | [execution-model.md](maintainer/design/execution-model.md)、[dataflow-design.md](maintainer/design/dataflow-design.md)(早期稿,已被前者取代) |
-| 规约即语法 | 规约 = .cr 语法内的约束表达(2026-09 起 .corespec 独立格式退役,见 [adr/../maintainer/adr/adr-0001-corespec-crasm-retired.md](maintainer/adr/adr-0001-corespec-crasm-retired.md)) | [spec-design.md](maintainer/design/spec-design.md) |
+| 规约即语法 | 规约 = .cr 语法内的约束表达(2026-09 起 .corespec 独立格式退役,见 [maintainer/adr/adr-0001-corespec-crasm-retired.md](maintainer/adr/adr-0001-corespec-crasm-retired.md)) | [spec-design.md](maintainer/design/spec-design.md) |
 | 三层映射 | 语义 → 图 → 格 → 编码;图表达计算,格承载计算,编码实现计算 | [memory-model.md](maintainer/design/memory-model.md)、[regalloc-cache-mapping.md](maintainer/design/regalloc-cache-mapping.md) |
 
 ## 四、系统骨架

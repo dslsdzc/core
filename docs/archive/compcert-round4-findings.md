@@ -5,8 +5,8 @@
 > **状态：修复已完成（2026-08-16~17，维护者授权全修）——F1-F20 全部修复合入，本清单转为修复记录参考**。
 > 原始产出为只读审查（未修改任何 Core 代码），修复范围当时由维护者决定（反馈门）。
 > 修复记录见 `docs/archive/compcert-reference.md`「第四轮修复记录（2026-08-17）」；语义表已同步修复后状态
-> （✅ 标记 + BC 表状态列，见 `docs/design/ir-op-semantics.md` §5/§7）；遗留项见 `TODO.md`。
-> 契约：`docs/design/ir-op-semantics.md`（IR 操作语义表，Task 1 产物）；方法论：CompCert Coq 语义 = 真源，
+> （✅ 标记 + BC 表状态列，见 `docs/maintainer/design/ir-op-semantics.md` §5/§7）；遗留项见 `TODO.md`。
+> 契约：`docs/maintainer/design/ir-op-semantics.md`（IR 操作语义表，Task 1 产物）；方法论：CompCert Coq 语义 = 真源，
 > 三方对照（语义表 vs ELF 编码 instr.cr vs 解释器 interp.cr）。
 > 日期：2026-08-16。审查分组：算术/转换（A）、内存/安全（B）、控制流/调用/并发/动态（C）、未修复项复核（T）。
 

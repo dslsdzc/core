@@ -151,7 +151,7 @@ compcert/
 
 ## 第四轮对照审查记录（2026-08-16，只读）
 
-- 契约：`docs/design/ir-op-semantics.md`（IR 操作语义表——Task 1，对照 Op.v/Asm.v/Values.v/Integers.v/Floats.v/Memory.v 逐 opcode 定义）
+- 契约：`docs/maintainer/design/ir-op-semantics.md`（IR 操作语义表——Task 1，对照 Op.v/Asm.v/Values.v/Integers.v/Floats.v/Memory.v 逐 opcode 定义）
 - 发现清单：`docs/archive/compcert-round4-findings.md`（Task 2 只读审查产物——F1-F20，含证据分级与修复优先级）
 - **流程**：四组并行只读审查（算术/转换、内存/安全、控制流/调用/并发/动态、未修复项复核）+ 清单任务审查（spec ✅）——**全程未修改任何 Core 代码**；修复范围待维护者反馈后另行授权（反馈门）
 - 核心结论：
@@ -178,4 +178,4 @@ compcert/
 
 - **F18（环境项）**：build/ 产物重建 + 清缓存——修复验证均基于全新重建产物（build/corec + corearch，2026-08-17 00:27），消除 dex 实验残留污染。
 - **test_directory_build 回归**：波 3 审查发现（波 1 附带修复「字符串长度头按存储字节数」对转义形式计数偏长，GAS .asciz 反转义后引号类比较恒失败→Core.toml 项目名读取失效）——**已修**（nsysysyukvyv c8c4d22f：长度头改按**原始字符串 UTF-8 字节数**，同时覆盖中文按字符数偏短与转义按转义形式偏长两种情况）。
-- 修复后遗留项（M-2/I-3/lexer 字面量等）见 `TODO.md`「第四轮 CompCert 对照遗留项（2026-08-17 记）」；语义表已同步（✅ 标记 + BC 表状态列，见 `docs/design/ir-op-semantics.md` §5/§7）。
+- 修复后遗留项（M-2/I-3/lexer 字面量等）见 `TODO.md`「第四轮 CompCert 对照遗留项（2026-08-17 记）」；语义表已同步（✅ 标记 + BC 表状态列，见 `docs/maintainer/design/ir-op-semantics.md` §5/§7）。

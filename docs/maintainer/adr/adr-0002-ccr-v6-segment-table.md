@@ -29,5 +29,5 @@
 
 ## 关联
 
-- 文档:spec 2026-09-05-lattice-ir-v6-format.md;docs/design/ir-op-semantics.md
+- 文档:spec 2026-09-05-lattice-ir-v6-format.md;docs/maintainer/design/ir-op-semantics.md
 - 提交:88272207(GC 批 3 定向测试)等 v6 系列

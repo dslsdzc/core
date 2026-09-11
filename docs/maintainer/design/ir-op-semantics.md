@@ -196,7 +196,7 @@ load/store（对照 `Mem.load`/`Mem.store` Memory.v:L428/L531 + `valid_access` L
 - **IR_SLICE**（24）：`d := ρ(s1) + 8·ρ(s2)`（`&arr[low]`；`s3` = high 变量）。**BC7 [ok] 部分修复（2026-08-17，第四轮 F11）**：切片字面量界已建长度侧表 + 创建期检查 + slice provenance 传播（interp 同步补 SLICE）；**运行时 high 界仍不进入值**——slice 解引用无长度信息，完整修复需 IR 形态演进（slice 类型），已标注设计项（见 TODO）。对照 CompCert：slice 无对照（C 无 slice）。
 - **IR_REF**（18）：`d := &ρ(s1)`（栈帧内地址，ELF `lea r10,[rbp+disp]`；interp：值复制近似）。对照 `Oleal`/`Aindexed`（Asm.v:L701-702）。
 - **IR_BOUNDS_CHECK**（30）：`if ρ(s1) ≥ᵤ s2 → ud2`（SIGILL ⊥）；`s2 < 0` → no-op。无符号比较对负索引正确捕获（负 → 无符号巨大 ≥ᵤ 正界）✓；且能同时覆盖 `index ≥ max_len` 与 `index < 0`。对照：CompCert 越界在 load/store 返回 `None` → `Stuck`；Core 前置显式检查 + 硬陷阱——**D：中止而非未定义值（安全优先）**。ELF 编码现状（F1c 修复后，instr.cr L1373-1392）：`s1`（index）按变量槽加载（`e2_load_var` r10），**`s2`（max_len）按字面量加载**（`movabs r11, imm64` + `cmp r10, r11` + `jb +2` 跳过 ud2）——修复前两个操作数**均按变量槽加载**（`e2_load_var`），与发射约定「s2 = 字面量长度」冲突，编码会把字面量当变量索引加载。**BC6 [ok] 已修复（2026-08-17，第四轮 F1）**：发射路径已启用（见 IR_LOAD_INDEX_VAR）。interp 已实现（BC11 已修）——越界返回中止，解释器内 OOB 不再静默。
-- **IR_ARENA_NEW**（32）：`d := arena_new(s1)`（新 arena 句柄；`s1`=大小估计）。对照：CompCert 无 arena 概念（每函数 `Pallocframe` 一帧）——**D：Core arena 内存模型（docs/design/region-model.md §四），无 CompCert 对照**。interp：no-op 近似（置 0，BC11 已修）。
+- **IR_ARENA_NEW**（32）：`d := arena_new(s1)`（新 arena 句柄；`s1`=大小估计）。对照：CompCert 无 arena 概念（每函数 `Pallocframe` 一帧）——**D：Core arena 内存模型（docs/maintainer/design/region-model.md §四），无 CompCert 对照**。interp：no-op 近似（置 0，BC11 已修）。
 - **IR_ARENA_RESET**（33）：`arena_reset(ρ(s1))`；`s1 < 0` → no-op（ELF 带 `jl` 保护防递归）。interp：no-op 近似（BC11 已修）。
 
 ### 2.5 控制流与调用
@@ -267,7 +267,7 @@ load/store（对照 `Mem.load`/`Mem.store` Memory.v:L428/L531 + `valid_access` L
 | D4 | 无无符号比较 opcode（无符号仅用于边界检查技巧） | int 全有符号（CompCert 的 Ccompu/Ccomplu 显式二元来自 C 语义，Core 无此需求） |
 | D5 | 枚举 tag = 变体名驻留索引（运行时布局 [tag, payload]） | 语义保鲜（tag 可读名）而非编号；C 枚举无运行时形态 |
 | D6 | 内存模型 = 分配块 + 边界检查，无权限/对齐维度 | 语言无 MMIO/无别名权限需求；对齐由 x86 容忍（未对齐访问合法） |
-| D7 | arena 内存模型（ARENA_NEW/RESET） | 作用域内存回收（docs/design/region-model.md）；CompCert 每函数一帧不可比 |
+| D7 | arena 内存模型（ARENA_NEW/RESET） | 作用域内存回收（docs/maintainer/design/region-model.md）；CompCert 每函数一帧不可比 |
 | D8 | IR_YIELD/AWAIT/SPAWN/DYN_*/HOTPATCH/LAZY/FAST 等 | CompCert 无并发/动态类型/热补丁/惰性——无对照部分不强行映射 |
 | D9 | 移位量 ≥ 64：硬件掩码（mod 64）vs CompCert `Vundef` | Core 跟随硬件（机器语义），CompCert 保守未定义；OP_SHL/SHR 当前无发射方 |
 | D10 | dex/apx 精确-授权二分 | 范式普适哲学：默认精确（数学语义），近似需显式授权（apx 标签） |

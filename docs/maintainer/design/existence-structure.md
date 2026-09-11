@@ -1,7 +1,7 @@
 # 存在结构:v6 格形态 IR 的语义承载(ENT/NOD/REG)
 
 > 定位:受众 = 维护者(ccr_io/分配器/验证器实现者);状态 = active(设计定稿,实现推进中)。
-> 本文件从**语义视角**讲 v6 存在结构——七条缓存语义条款(权威 = docs/design/cache-semantics.md)如何在 .ccr 中落成 IR 一等结构;字节级布局(段表/字段宽/对齐)的最终规格在 docs/ir-schema/coreir-schema.md(实现期并入),格式设计草案与实施状态以 docs/superpowers/specs/2026-09-05-lattice-ir-v6-format.md 与实施计划为准。
+> 本文件从**语义视角**讲 v6 存在结构——七条缓存语义条款(权威 = docs/academic/cache-semantics.md)如何在 .ccr 中落成 IR 一等结构;字节级布局(段表/字段宽/对齐)的最终规格在 docs/ir-schema/coreir-schema.md(实现期并入),格式设计草案与实施状态以 docs/superpowers/specs/2026-09-05-lattice-ir-v6-format.md 与实施计划为准。
 > 决策:adr/adr-0002(.ccr v6 段表架构)。
 
 ---
@@ -123,9 +123,9 @@ REG 的 first_ent/last_ent 使"子图边界 = 存在域边界"成为直接查询
 
 ## 九、关联
 
-- 条款权威:docs/design/cache-semantics.md(七条)
+- 条款权威:docs/academic/cache-semantics.md(七条)
 - 格式字节级:docs/superpowers/specs/2026-09-05-lattice-ir-v6-format.md(设计定稿)
 - 方向:docs/superpowers/specs/2026-08-27-lattice-form-ir-design.md
-- 决策:docs/adr/adr-0002-ccr-v6-segment-table.md
+- 决策:docs/maintainer/adr/adr-0002-ccr-v6-segment-table.md
 - 实施:docs/superpowers/plans/2026-09-05-lattice-ir-v6.md(状态以此为准)
-- 分配器判定:docs/design/regalloc-cache-mapping.md(判定四条消费共存)
+- 分配器判定:docs/maintainer/design/regalloc-cache-mapping.md(判定四条消费共存)

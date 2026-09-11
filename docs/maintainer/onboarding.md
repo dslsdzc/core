@@ -109,7 +109,7 @@ jj git fetch && jj bookmark move develop -r develop@origin   # 同步远端 deve
 
 分工约定：第二维护者负责 TODO 横向扩展与 bug 修复；验证闭环主线归 DslsDZC。
 
-- [ ] 读 [docs/README.md](../README.md) 定位文档；背景从 [design/project-book.md](../project-book.md)（项目定位）与 [design/execution-model.md](design/execution-model.md)（执行模型）入手
+- [ ] 读 [docs/README.md](../README.md) 定位文档；背景从 [project-book.md](../project-book.md)（项目定位）与 [design/execution-model.md](design/execution-model.md)（执行模型）入手
 - [ ] 从 [TODO.md](../../TODO.md) 挑一个明确任务；不启动归属验证闭环主线的改动
 - [ ] `jj bookmark create feature/xxx`（base = develop）；全程只用 jj
 - [ ] 开发；改动只限目标文件；提交前 `jj st` 复查无意外文件

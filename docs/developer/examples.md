@@ -15,10 +15,10 @@
 
 | 示例 | 内容 | 看点 |
 |---|---|---|
-| [add](../examples/add/main.cr) | 两数相加,main 返回退出码 | 最小完整程序——第一个程序从这里开始 |
-| [complex](../examples/complex/main.cr) | 复数运算 | 结构体 + 函数组合 |
-| [pi](../examples/pi/main.cr) | 圆周率计算 | 数值循环(带 deploy.toml 的部署配置示例) |
-| [load_balancer](../examples/load_balancer/main.cr) | 负载均衡器 | 并发/任务分发方向(含 spec/ 规约骨架) |
+| [add](../../examples/add/main.cr) | 两数相加,main 返回退出码 | 最小完整程序——第一个程序从这里开始 |
+| [complex](../../examples/complex/main.cr) | 复数运算 | 结构体 + 函数组合 |
+| [pi](../../examples/pi/main.cr) | 圆周率计算 | 数值循环(带 deploy.toml 的部署配置示例) |
+| [load_balancer](../../examples/load_balancer/main.cr) | 负载均衡器 | 并发/任务分发方向(含 spec/ 规约骨架) |
 
 > 注:examples/hello/ 目前是空骨架(未填 main)——忽略或用 add/ 起步。
 

@@ -182,7 +182,7 @@ ALLOC(arr[16]) ──→ ADDR(&arr[0]) ──→ ADD(p + n) ──→ DEREF(*p)
                   provenance=arr    offset=n       验证 offset < 16
 ```
 
-编译器在 DEREF 节点处自动验证当前偏移是否在分配范围内。从 ALLOC 到 DEREF 的路径就是安全证明。不需要 borrow checker、Arena tag、或 RawRef 等额外概念。详见 `docs/design/pointer-model.md`。
+编译器在 DEREF 节点处自动验证当前偏移是否在分配范围内。从 ALLOC 到 DEREF 的路径就是安全证明。不需要 borrow checker、Arena tag、或 RawRef 等额外概念。详见 `docs/maintainer/design/pointer-model.md`。
 
 ## 8. 环语义标注：迭代与一致解（非因果范式准备）
 

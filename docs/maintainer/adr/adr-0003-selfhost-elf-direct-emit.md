@@ -29,5 +29,5 @@
 ## 关联
 
 - 提交:2026-07-27 自举贯通批;后端修复批(SIGFPE/SIGSEGV 解除、64 位编码、CCR 有符号字段)
-- 文档:docs/design/execution-model.md(后端管线);docs/pseudocode/arch/linux/ld/(TDD 交付物)
+- 文档:docs/maintainer/design/execution-model.md(后端管线);docs/pseudocode/arch/linux/ld/(TDD 交付物)
 - 相关 ADR:ADR-0004(corec/corearch 拆分)

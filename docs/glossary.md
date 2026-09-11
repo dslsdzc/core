@@ -17,10 +17,10 @@
 | 术语 | 含义 | 出处 |
 |---|---|---|
 | 图(HDFG) | 关系空间:发生什么——节点/边/region/state edges;超图灵性属于图 | maintainer/design/execution-model.md |
-| 格(层) | 存在空间:如何存在——条目、配方、驱逐、再生 | design/memory-model.md |
-| 编码(层) | 物理编码空间:如何实现(2026-08-27 更名,原「二进制」) | design/memory-model.md |
-| 格(Lattice) | 层内组织代数成分——映射参数,非层本体承诺(无格承诺) | design/memory-model.md |
-| 范式映射表 | 映射正确性定理表——证明缓存语义 ⊇ 该实现;寄存器映射实例为其一行 | design/memory-model.md |
+| 格(层) | 存在空间:如何存在——条目、配方、驱逐、再生 | maintainer/design/memory-model.md |
+| 编码(层) | 物理编码空间:如何实现(2026-08-27 更名,原「二进制」) | maintainer/design/memory-model.md |
+| 格(Lattice) | 层内组织代数成分——映射参数,非层本体承诺(无格承诺) | maintainer/design/memory-model.md |
+| 范式映射表 | 映射正确性定理表——证明缓存语义 ⊇ 该实现;寄存器映射实例为其一行 | maintainer/design/memory-model.md |
 
 ## 三、IR 形态
 
@@ -47,13 +47,13 @@
 | 地址 = 映射 | `&x` = (条目标识, 偏移);字节地址只是经典投影 | 6 |
 | 映射实例正确性 | 映射实例保持条款 1-6 = 范式映射表的行定理 | 7 |
 
-> 完整七条 + 字节权限层/home/存在区间/驱逐配对等扩展术语:design/memory-model.md。
+> 完整七条 + 字节权限层/home/存在区间/驱逐配对等扩展术语:maintainer/design/memory-model.md。
 
 ## 五、寄存器分配(缓存语义映射实例)
 
 一致性判定/共存互斥/读点无陈旧/调用点失效契约/remat/共存偏序 width/order-free/
 上下文贪心 CAG/spill/栈槽/装载存储/写回——全部术语定义与论证见
-design/regalloc-cache-mapping.md(正式参考),本表不重复。
+maintainer/design/regalloc-cache-mapping.md(正式参考),本表不重复。
 
 ## 六、执行标注空间
 
@@ -76,7 +76,7 @@ design/regalloc-cache-mapping.md(正式参考),本表不重复。
 | 术语 | 含义 | 出处 |
 |---|---|---|
 | 规约层 | 程序"应该做什么"的约束——2026-09 起并入 .cr 语法(独立格式退役) | maintainer/adr/adr-0001、maintainer/design/spec-design.md |
-| CIC 内核 / SMT 证书 | 信任根 = CIC;自动化 = 证书外包(计算在外、健全性在内) | design/verifier-kernel.md |
+| CIC 内核 / SMT 证书 | 信任根 = CIC;自动化 = 证书外包(计算在外、健全性在内) | academic/verifier-kernel.md |
 | 证明驱动优化 | 已证性质回流入优化器 | maintainer/design/spec-design.md |
 
 ## 九、讨论判据与术语演进

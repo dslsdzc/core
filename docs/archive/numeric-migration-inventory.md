@@ -3,7 +3,7 @@
 > 定位：受众 = 维护者；状态 = archive(数值类型迁移盘点任务产物)
 
 日期：2026-08-16
-依据：[2026-08-16-numeric-types-design.md](superpowers/specs/2026-08-16-numeric-types-design.md)（已批准）
+依据：[2026-08-16-numeric-types-design.md](../superpowers/specs/2026-08-16-numeric-types-design.md)（已批准）
 用途：Task 5/6 的迁移契约——每个站点按本表逐点执行，**禁止机械替换（sed/全局替换）**。
 
 ## 分类规则

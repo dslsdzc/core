@@ -57,7 +57,7 @@ auto fileid move self in None Some unit
 - `self` 是词法关键字，用于方法接收者（`self` / `&self` / `&mut self`）。
 - `Self` 不是词法关键字——它是接口/方法签名中的上下文类型名，按标识符解析,由编译器按上下文处理。
 - `comptime` 不是关键字（`@comptime` 是 @ 内建原语）。
-- `#check`/`#ensure`/`#tag`/`spec fn` 不是词法关键字——规约是标注层语法(第 10 章;设计定稿 = spec-design.md;实现态:parser 未支持)。
+- `#check`/`#ensure`/`#tag`/`spec fn` 不是词法关键字——规约是标注层语法(第 10 章;设计定稿 = maintainer/design/spec-design.md;实现态:parser 未支持)。
 
 ### 2.4 字面量
 
@@ -185,7 +185,7 @@ Type = BaseType | PathType | RefType | OptionalType | TupleType | ArrayType | Sl
 | `char` | Unicode 标量值 |
 | `unit` | 空值 `()` |
 | `never` | 发散类型 |
-| `dyn` | 动态类型——图全量已知所有分支，边界自动插转换（详见 `docs/proposals/dynamic-typing.md`） |
+| `dyn` | 动态类型——图全量已知所有分支，边界自动插转换（详见 `docs/maintainer/proposals/dynamic-typing.md`） |
 | `Self` | 上下文类型名，仅在接口/方法签名内有效（实现类型本身） |
 
 **复合类型**：
@@ -516,7 +516,7 @@ fn divide(a: int, b: int) -> int?
 
 - `#check(...)` —— 调用方必须满足的前提条件
 - `#ensure(...)` —— 保证的后置条件;`result` 指返回值,`old(expr)` 指函数入口时表达式的值
-- `spec fn` —— 用 Core 写的纯检查函数(验证标准,见 spec-design.md §七)
+- `spec fn` —— 用 Core 写的纯检查函数(验证标准,见 maintainer/design/spec-design.md §七)
 
 ### 10.2 where 值约束
 
@@ -584,7 +584,7 @@ for i in 0..5 {
 
 ### 12.1 指针
 
-指针是裸地址，与 C 同级自由，编译器通过格/图自动验证安全（详见 `docs/design/pointer-model.md`）：
+指针是裸地址，与 C 同级自由，编译器通过格/图自动验证安全（详见 `docs/maintainer/design/pointer-model.md`）：
 
 ```core
 p := &arr[0];     // 取地址,编译器自动记录来源与偏移
@@ -614,7 +614,7 @@ unsafe {
 
 ## 十三、@ 内建原语
 
-`@` 开头的标识符是编译器内建的能力入口，不通过标准库实现。分三类（详见 `docs/design/at-intrinsics.md`）。
+`@` 开头的标识符是编译器内建的能力入口，不通过标准库实现。分三类（详见 `docs/developer/at-intrinsics.md`）。
 
 **元数据查询**——编译期查询类型信息，零运行时开销：
 
