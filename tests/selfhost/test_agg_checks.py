@@ -256,6 +256,15 @@ fn main() -> int { b := mk(); return b.val.val; }
 """,
         "ACCEPT",
     ),
+    (
+        "负控：嵌套泛型应用**错型**仍拒（两趟修复不得引入假阴性——评审 Important #1 的反面）",
+        """
+struct Box[T] { val: T }
+struct P { b: Box[Box[int]] }
+fn main() -> int { p := P{b: Box{val: Box{val: "s"}}}; return 0; }
+""",
+        "TS03",
+    ),
 ]
 
 
