@@ -21,6 +21,12 @@ Task 5 接线点（`t5_*` 段；**唯一** = 索引面兜底拒绝 → `IP_INDEX
 把 PTR/STRING 填进算术门的 ADD 格 ⇒ ANY 门下 `permits(PTR,ADD)=1` 足以放行 ⇒ `*T + *T`、
 `"a" - "b"` 从 error[TB01] 变静默 —— 本文件的负控段把这两条钉死。
 
+Task 6 段（`t6_*`；`res_type_node`/`res_call_type` 双份 TY→TI 映射合一 → 单表 `ty_code_to_ti`）：
+8 个站点的**域逐站不同**（注册链缺 CHAR/NEVER/7、extern 链含 CHAR、形参链缺 NEVER、
+iface 返回链值域是 TY_* 码…），且这些域差异是**载荷**的（`fn f() -> char` 在注册链 = unit、
+在 extern 链 = char）。本段用「逐条 (码,行号) 多元集」把差异钉死，防后续按「表 + 尾回落」
+一刀切（= 静默改判定）；两表**唯一语义差 = NEVER 格**（res_call_type 侧 = unit，探针实测可达）。
+
 登记面（现状宽松 = P3 收紧清单的预备队，本批**不得**顺手改）：
   · 算术门「任一侧数值即可」：`1 + [int;3]` / `"a" * 2` 静默为 int（无诊断）；
   · 一元透传：`!arr` / `-"a"` / `*x`（x: int）原样返回操作数类型，不校验；
@@ -29,6 +35,7 @@ Task 5 接线点（`t5_*` 段；**唯一** = 索引面兜底拒绝 → `IP_INDEX
 """
 
 import os
+import re
 import resource
 import subprocess
 import tempfile
@@ -81,6 +88,24 @@ def case_reject(name, source, code):
         print(f"[FAIL] {name}: rc={r.returncode} 但缺 error[{code}]\n{out}")
         return False
     print(f"[PASS] {name}: rc={r.returncode} + error[{code}]")
+    return True
+
+
+def case_diag_lines(name, source, expect):
+    """Task 6 站点域判据：rc + **逐条 (码, 行号)** 多元集相等。
+
+    为什么需要行号：TY→TI 的 8 个站点里有 6 处是**内联链**（注册/形参/返回/iface 返回），
+    它们对同一份源码可能各报一条同码诊断——「报了几条、报在哪一行」正是区分「哪一站点产出了
+    什么类型」的观测量（只数码会两说）。
+    """
+    r = _check(source)
+    out = r.stdout + r.stderr
+    got = sorted(re.findall(r"error\[([A-Z0-9]+)\]:[^\n]*\n --> (\d+):", out))
+    want = sorted((c, str(l)) for c, l in expect)
+    if r.returncode != 1 or got != want:
+        print(f"[FAIL] {name}: rc={r.returncode} got={got} want={want}\n{out}")
+        return False
+    print(f"[PASS] {name}: rc=1 + {got}")
     return True
 
 
@@ -214,6 +239,78 @@ def main():
     ok.append(case_reject("t5_dyn_struct_method_missing",
                           S5 + "fn main() -> int { s := S { a: 1 }; d : dyn = s; d.nosuch(); return 0; }\n",
                           "N08"))
+
+    # ─── R2 P2b Task 6：res_type_node/res_call_type 双份 TY→TI 映射合一（单表 ty_code_to_ti）───
+    # 口径 = **保语义（零行为变化）**：8 个站点的**域逐站不同且载荷**（探针组 F/R/B/A/C，见报告）——
+    # 本段把「站点域差异」钉死，防后续按「表 + 尾回落」一刀切（那会把 S1 的 char/never 从 unit
+    # 静默改成 char/never、把 S3 的 char 从 char 改成 unit 等）。行号 = 诊断所在行（区分站点）。
+    #   ① 两表基型分支（res_type_node / res_call_type）
+    ok.append(case_ok("t6_R_dyn_decl",
+                      "fn main() -> int { x : dyn = 5; return 0; }\n"))
+    # res_type_node 的 7 码格 ⇒ TI_DYN（dyn 方法分派据此走 N08 路径）
+    ok.append(case_reject("t6_R_dyn_cell_live",
+                          "fn main() -> int { x : dyn = 5; x.nosuch(); return 0; }\n", "N08"))
+    ok.append(case_ok("t6_R_char_ret",
+                      "fn f() -> char { return 'a'; }\nfn main() -> int { c := f(); return 0; }\n"))
+    #   ② **两表唯一差异格 = NEVER**：res_call_type 对调用位点的 `-> never` 返回 unit（现状），
+    #      res_type_node 对类型位 `x : never = 1` 映 TI_NEVER——后者由 t6_S1/S3/S4/S6 的排除面互为镜像
+    ok.append(case_diag_lines("t6_C_never_call_unit",
+                              "fn g[T](a: T) -> never { loop { } }\n"
+                              "fn main() -> int { x := g(1); y := @raw_int(x); return 0; }\n",
+                              [("TF01", 1), ("TF07", 2)]))
+    # 对照（同一调用位点、`-> int`）：:1615 路径确实在判（unit 兜底假设下 @raw_int 必报 TF07）
+    ok.append(case_ok("t6_C_int_call_ctrl",
+                      "fn g[T](a: T) -> int { return 1; }\n"
+                      "fn main() -> int { x := g(1); y := @raw_int(x); return 0; }\n"))
+    ok.append(case_ok("t6_C_never_param",
+                      "fn f[T](a: T, b: never) -> int { return 1; }\n"
+                      "fn main() -> int { return f(1, 2); }\n"))
+    #   ③ 同族 6 处内联链：**逐站域**（同一形在不同站点产出不同类型 ⇒ 域差异载荷）
+    #      S1（hotpatch/普通注册链，域缺 CHAR/NEVER/7）vs S3（extern 链，域含 CHAR）：同形不同果
+    ok.append(case_diag_lines("t6_S1_char_unit",
+                              "fn f() -> char { return 'a'; }\n"
+                              "fn main() -> char { x := f(); return x; }\n",
+                              [("TF01", 2)]))
+    ok.append(case_ok("t6_S3_char_covered",
+                      "extern fn f() -> char;\nfn main() -> char { x := f(); return x; }\n"))
+    ok.append(case_diag_lines("t6_S1_never_unit",
+                              "fn f() -> never { loop { } }\n"
+                              "fn main() -> never { x := f(); return x; }\n",
+                              [("TF01", 1), ("TF01", 2)]))
+    ok.append(case_diag_lines("t6_S3_never_unit",
+                              "extern fn f() -> never;\n"
+                              "fn main() -> never { x := f(); return x; }\n",
+                              [("TF01", 2)]))
+    #      S4（`check_func` 形参链，域缺 NEVER）：形参符号类型 = unit（@raw_int 只收 dex/int/never）
+    ok.append(case_diag_lines("t6_S4_param_never_unit",
+                              "fn f(b: never) -> int { x := @raw_int(b); return 0; }\n"
+                              "fn main() -> int { return 0; }\n",
+                              [("TF07", 1)]))
+    ok.append(case_ok("t6_S4_param_char",
+                      "fn f(b: char) -> int { y : char = b; return 0; }\n"
+                      "fn main() -> int { return 0; }\n"))
+    #      S5（`check_func` 返回链，域含 NEVER）／S1 的 never 格排除面：`-> never` 声明自身报体检查
+    ok.append(case_diag_lines("t6_S5_never_covered",
+                              "fn f() -> never { return 1; }\nfn main() -> int { return 0; }\n",
+                              [("TF01", 1)]))
+    #      S6（iface 返回链，值域 = parser 写入的 TY_* 码；域缺 NEVER/7）——**显式化**撞车比较
+    T6_S6 = "struct S { a: int }\n"
+    ok.append(case_ok("t6_S6_iface_int",
+                      "interface Show { fn show(self) -> int; }\n" + T6_S6 +
+                      "impl S { fn show(self: S) -> int { return 1; } }\n"
+                      "fn f[T: Show](a: T) -> int { x := a.show(); return x; }\n"
+                      "fn main() -> int { s := S { a: 1 }; return f(s); }\n"))
+    ok.append(case_diag_lines("t6_S6_iface_never_unit",
+                              "interface Show { fn show(self) -> never; }\n" + T6_S6 +
+                              "impl S { fn show(self: S) -> never { loop { } } }\n"
+                              "fn f[T: Show](a: T) -> int { x := a.show(); y := @raw_int(x); return 0; }\n"
+                              "fn main() -> int { s := S { a: 1 }; return f(s); }\n",
+                              [("TF01", 3), ("TF07", 4)]))
+    ok.append(case_ok("t6_S6_iface_char_covered",
+                      "interface Show { fn show(self) -> char; }\n" + T6_S6 +
+                      "impl S { fn show(self: S) -> char { return 'a'; } }\n"
+                      "fn f[T: Show](a: T) -> int { x := a.show(); y : char = x; return 0; }\n"
+                      "fn main() -> int { s := S { a: 1 }; return f(s); }\n"))
 
     passed = sum(ok)
     print(f"{passed}/{len(ok)} passed")

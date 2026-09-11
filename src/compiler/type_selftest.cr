@@ -970,6 +970,62 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("idx.infer_range_oob_diag", g_diag_count - ix_m8, 1);
     total = total + 1; fails = fails + ts_check("idx.infer_range_oob_code", ts_diag_code_at(ix_m8), EC_TK_SLICE_BOUNDS);
 
+    // --- R2 P2b Task 6：`res_type_node`/`res_call_type` 双份 TY→TI 映射合一（单表 ty_code_to_ti）---
+    // 三层判据：
+    //   ① 表侧逐码（含**表内不兜底**：TY_DEX_S/未知/负码 → -1）；
+    //   ② 两处基型分支**端到端**（`alloc_node(0,…,tv)` 构造基型节点 → 经真 res_type_node/res_call_type
+    //      比返回，= 改动前 inline 链的逐格转录）；
+    //   ③ 反真空哨兵（构造节点 kind/tv 回读正确；负节点先行拒绝）＋ **两表唯一差异格** NEVER 的双向断言
+    //      （A → TI_NEVER、B → TI_UNIT——探针实测该格在调用位点**可达**，差异显式保留不静默合一）。
+    // 非真空性（表变 ⇒ ②段必变）由实施报告的突变控制承担：表侧用例只能证明表对，证明不了线对。
+    total = total + 1; fails = fails + ts_check("t6.ty_code_head",
+        (ty_code_to_ti(TY_INT) == TI_INT && ty_code_to_ti(TY_DEX) == TI_DEX &&
+         ty_code_to_ti(TY_BOOL) == TI_BOOL && ty_code_to_ti(TY_STRING) == TI_STR &&
+         ty_code_to_ti(TY_UNIT) == TI_UNIT), 1);
+    total = total + 1; fails = fails + ts_check("t6.ty_code_tail",
+        (ty_code_to_ti(TY_NEVER) == TI_NEVER && ty_code_to_ti(TY_CHAR) == TI_CHAR), 1);
+    // 码 7 = TY_GENERIC_PARAM 与 TI_DYN 的数值撞车格（spec §2.4 现场）：现状两表原文原样保留
+    total = total + 1; fails = fails + ts_check("t6.ty_code_dyn7",
+        (ty_code_to_ti(TI_DYN) == TI_DYN && ty_code_to_ti(TY_GENERIC_PARAM) == TI_DYN), 1);
+    // **表内不兜底**：TY_DEX_S(8) 不入表（计划注「不属两表并集」）+ 未知/负码 → -1
+    total = total + 1; fails = fails + ts_check("t6.ty_code_domain",
+        (ty_code_to_ti(TY_DEX_S) == -1 && ty_code_to_ti(-1) == -1 && ty_code_to_ti(999) == -1), 1);
+    // ② 端到端：基型节点逐码（含 7 = dyn 码位——parser.cr:98 对 `dyn` 类型名正产此码）
+    t6_int := alloc_node(0, 0, 0, 0, 0, TY_INT, 0, 0, 0);
+    t6_dex := alloc_node(0, 0, 0, 0, 0, TY_DEX, 0, 0, 0);
+    t6_bool := alloc_node(0, 0, 0, 0, 0, TY_BOOL, 0, 0, 0);
+    t6_str := alloc_node(0, 0, 0, 0, 0, TY_STRING, 0, 0, 0);
+    t6_unit := alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, 0, 0);
+    t6_never := alloc_node(0, 0, 0, 0, 0, TY_NEVER, 0, 0, 0);
+    t6_char := alloc_node(0, 0, 0, 0, 0, TY_CHAR, 0, 0, 0);
+    t6_dyn := alloc_node(0, 0, 0, 0, 0, TI_DYN, 0, 0, 0);
+    t6_dex_s := alloc_node(0, 0, 0, 0, 0, TY_DEX_S, 0, 0, 0);
+    t6_oob := alloc_node(0, 0, 0, 0, 0, 999, 0, 0, 0);
+    total = total + 1; fails = fails + ts_check("t6.node_kinds",
+        (ast_kind(t6_never) == 0 && ast_type_val(t6_never) == TY_NEVER &&
+         ast_type_val(t6_dyn) == TI_DYN && ast_type_val(t6_dex_s) == TY_DEX_S), 1);
+    total = total + 1; fails = fails + ts_check("t6.R_codes",
+        (res_type_node(t6_int) == TI_INT && res_type_node(t6_dex) == TI_DEX &&
+         res_type_node(t6_bool) == TI_BOOL && res_type_node(t6_str) == TI_STR &&
+         res_type_node(t6_unit) == TI_UNIT && res_type_node(t6_never) == TI_NEVER &&
+         res_type_node(t6_char) == TI_CHAR), 1);
+    total = total + 1; fails = fails + ts_check("t6.C_codes",
+        (res_call_type(t6_int, -1) == TI_INT && res_call_type(t6_dex, -1) == TI_DEX &&
+         res_call_type(t6_bool, -1) == TI_BOOL && res_call_type(t6_str, -1) == TI_STR &&
+         res_call_type(t6_unit, -1) == TI_UNIT && res_call_type(t6_char, -1) == TI_CHAR), 1);
+    // **两表唯一语义差**：NEVER 格（A 有 / B 无 ⇒ B 落 TI_UNIT）——差异不得被合一抹平
+    total = total + 1; fails = fails + ts_check("t6.never_cell_diff",
+        (res_type_node(t6_never) == TI_NEVER && res_call_type(t6_never, -1) == TI_UNIT), 1);
+    // 两表**共有**的 7 码格（dyn）：均 → TI_DYN（B2 探针：`x : dyn = 5; x.nosuch()` 的 N08 依赖本格）
+    total = total + 1; fails = fails + ts_check("t6.dyn_cell_both",
+        (res_type_node(t6_dyn) == TI_DYN && res_call_type(t6_dyn, -1) == TI_DYN), 1);
+    // 域外码（TY_DEX_S/未知）两表均落 TI_UNIT（= 改动前的尾回落；表内无兜底）
+    total = total + 1; fails = fails + ts_check("t6.dex_s_oob_unit",
+        (res_type_node(t6_dex_s) == TI_UNIT && res_call_type(t6_dex_s, -1) == TI_UNIT &&
+         res_type_node(t6_oob) == TI_UNIT && res_call_type(t6_oob, -1) == TI_UNIT), 1);
+    total = total + 1; fails = fails + ts_check("t6.neg_node_unit",
+        (res_type_node(-1) == TI_UNIT && res_call_type(-1, -1) == TI_UNIT), 1);
+
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }
     return 0;

@@ -244,6 +244,30 @@ fn iface_by_ty_code(ty: int) -> int {
     return -1;
 }
 
+// TY_*（基类型码）→ TI_*（类型表行常量）；**-1 = 无对应**（调用方自行回落，本表不兜底）。
+// P2b Task 6：`res_type_node`/`res_call_type` 的**双份基型分支** + 同族 6 处内联链
+// （checker.cr 的 hotpatch 注册 / extern 注册 / 形参 / 返回 / iface 返回）合一的**唯一映射表**。
+//   · 逐项按语义写死（**禁止按值直传**——P1 血泪：AK/TI 下标不 1:1，见本文件头注）；
+//   · 码 7 一格 = **现状两表原文原样保留**（`if tv == TI_DYN { return TI_DYN; }`）：TY_GENERIC_PARAM=7
+//     与 TI_DYN=7 的纯数字撞车（spec §2.4），而 parser.cr:98 对 `dyn` 类型名**正产** `type_val=TI_DYN`
+//     ⇒ 本格**可达**（探针 B2：`x : dyn = 5; x.nosuch()` → N08，即 res_type_node 走本格）。
+//   · **TY_DEX_S(8) 不入表**（计划 Interfaces 注「占位行，仅 init_types 面用；不属两表并集」）：
+//     两处调用点现状对码 8 均落 `TI_UNIT`（尾部回落）⇒ 入表 = 若该码可达即行为变化（selftest
+//     `t6.R_dex_s_unit`/`t6.C_dex_s_unit` 把「码 8 → TI_UNIT」钉红）。全 src 实测：TY_DEX_S 只出现在
+//     init_types 的位置公理（checker.cr:253）与注释；无任何 parser/铸点写 `type_val = 8`（parser
+//     只产 int/dex/bool/string/char/never/dyn 七码 + 复合节点）。**域外码一律 -1**（含负值）。
+fn ty_code_to_ti(ty: int) -> int {
+    if ty == TY_INT { return TI_INT; }
+    if ty == TY_DEX { return TI_DEX; }
+    if ty == TY_BOOL { return TI_BOOL; }
+    if ty == TY_STRING { return TI_STR; }
+    if ty == TY_UNIT { return TI_UNIT; }
+    if ty == TY_NEVER { return TI_NEVER; }
+    if ty == TY_CHAR { return TI_CHAR; }
+    if ty == TI_DYN { return TI_DYN; }   // ← 现状原样：7 = TY_GENERIC_PARAM 的数值撞车格（见头注）
+    return -1;
+}
+
 // checker 类型行号 → AK_*（-1 = 越界/负）。
 // 分派表 = 侦查 §4.1 的 checker 侧原子宇宙 13 类，与条目表的 ak 列同源。
 // ⚠ P2b Task 2 边界（**勿混**）：桥接层 `sh_native_ak` **不**调本函数——它保留自己的

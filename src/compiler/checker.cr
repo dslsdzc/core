@@ -735,16 +735,13 @@ fn res_type_node(node: int) -> int {
     if node < 0 { return TI_UNIT; }
     if ast_kind(node) == 0 {
         // Base type node: type_val = TY_*
+        // P2b Task 6：8 行内联链 → 单表 `ty_code_to_ti`（尾部回落显式写出，不藏表里）；
+        //   本站点域 = {INT,DEX,BOOL,STRING,UNIT,NEVER,CHAR} ∪ {7 = dyn 码}——**与 res_call_type 的
+        //   唯一语义差 = NEVER 格**（该函数无此格，见其注）。域外（如 TY_DEX_S=8/未知码）落 TI_UNIT。
         tv := ast_type_val(node);
-        if tv == TY_INT { return TI_INT; }
-        if tv == TY_DEX { return TI_DEX; }
-        if tv == TY_BOOL { return TI_BOOL; }
-        if tv == TY_STRING { return TI_STR; }
-        if tv == TY_UNIT { return TI_UNIT; }
-        if tv == TY_NEVER { return TI_NEVER; }
-        if tv == TY_CHAR { return TI_CHAR; }
-        if tv == TI_DYN { return TI_DYN; }
-        return TI_UNIT;
+        mapped : ., mut = ty_code_to_ti(tv);
+        if mapped < 0 { mapped = TI_UNIT; }
+        return mapped;
     }
     if ast_kind(node) == EXPR_IDENT {
         // Named type: int_val = name string index
@@ -1058,11 +1055,16 @@ fn collect_decls() {
             type_node := ast_type_val(fn_node);
             if type_node > 0 && ast_kind(type_node) != 0 {
                 rt_ti = res_type_node(type_node);
-            } else if rt == TY_INT { rt_ti = TI_INT; }
-            else if rt == TY_DEX { rt_ti = TI_DEX; }
-            else if rt == TY_BOOL { rt_ti = TI_BOOL; }
-            else if rt == TY_STRING { rt_ti = TI_STR; }
-            else if rt == TY_UNIT { rt_ti = TI_UNIT; }
+            } else {
+                // P2b Task 6：值经单表 `ty_code_to_ti`；**本站点域 = 现状链 {INT,DEX,BOOL,STRING,UNIT}**
+                //   （无 CHAR/NEVER/7 ⇒ 三者与域外码一律保留 `rt_ti` 初值 TI_UNIT——域差异**逐站保留**，
+                //   不得按「表 + 尾回落」一刀切：站点域差异是**载荷**的，探针 F1/F2/F4 实证，
+                //   `fn f() -> char` 的非泛型符号类型现状 = unit、extern 站点同形 = char）。
+                rt_mapped := ty_code_to_ti(rt);
+                if rt_mapped >= 0 && rt_mapped != TI_CHAR && rt_mapped != TI_NEVER && rt_mapped != TI_DYN {
+                    rt_ti = rt_mapped;
+                }
+            }
         }
         if hotpatch_ver > 0 {
             // @hotpatch function: register with mangled name fn_name.vN
@@ -1082,11 +1084,13 @@ fn collect_decls() {
                     type_node2 := ast_type_val(first_fn);
                     if type_node2 > 0 && ast_kind(type_node2) != 0 {
                         first_rt_ti = res_type_node(type_node2);
-                    } else if first_rt == TY_INT { first_rt_ti = TI_INT; }
-                    else if first_rt == TY_DEX { first_rt_ti = TI_DEX; }
-                    else if first_rt == TY_BOOL { first_rt_ti = TI_BOOL; }
-                    else if first_rt == TY_STRING { first_rt_ti = TI_STR; }
-                    else if first_rt == TY_UNIT { first_rt_ti = TI_UNIT; }
+                    } else {
+                        // P2b Task 6：同上一处（本站点 = **hotpatch 首版**返回，域与上一处逐字相同）
+                        first_mapped := ty_code_to_ti(first_rt);
+                        if first_mapped >= 0 && first_mapped != TI_CHAR && first_mapped != TI_NEVER && first_mapped != TI_DYN {
+                            first_rt_ti = first_mapped;
+                        }
+                    }
 
                     sh_site_begin(1);   // 站点 1 = hotpatch 返回类型一致（ty_shadow.cr 头注有全表）
                     compat := type_compat_strict(rt_ti, first_rt_ti);
@@ -1135,13 +1139,14 @@ fn collect_decls() {
             ret_type := ast_type_val(ei);
 
             // Resolve return type to type index
+            // P2b Task 6：值经单表 `ty_code_to_ti`；**本站点域 = {INT,DEX,BOOL,STRING,UNIT,CHAR}**
+            //   （含 CHAR、缺 NEVER/7——与上方 hotpatch 注册站点的域**不同且载荷**：探针 F4 实测
+            //   `extern fn f() -> char` 的符号类型 = char，而 F1 同形非 extern = unit）
             rt_ti : ., mut = TI_UNIT;
-            if ret_type == TY_INT { rt_ti = TI_INT; }
-            else if ret_type == TY_DEX { rt_ti = TI_DEX; }
-            else if ret_type == TY_BOOL { rt_ti = TI_BOOL; }
-            else if ret_type == TY_STRING { rt_ti = TI_STR; }
-            else if ret_type == TY_UNIT { rt_ti = TI_UNIT; }
-            else if ret_type == TY_CHAR { rt_ti = TI_CHAR; }
+            ext_mapped := ty_code_to_ti(ret_type);
+            if ext_mapped >= 0 && ext_mapped != TI_NEVER && ext_mapped != TI_DYN {
+                rt_ti = ext_mapped;
+            }
 
             // Register in symbol table (skip if duplicate)
             if find_gsym(name_ni) < 0 {
@@ -1384,15 +1389,14 @@ fn res_call_type(node: int, func_fi: int) -> int {
     // Resolve a type node for call inference, treating generic params as TYP_GENERIC_PARAM
     if node < 0 { return TI_UNIT; }
     if ast_kind(node) == 0 {
+        // P2b Task 6：7 行内联链 → 单表 `ty_code_to_ti`；**本站点与 res_type_node 的唯一语义差
+        //   = NEVER 格**（现状链无 TY_NEVER 分支 ⇒ 落尾 TI_UNIT）——探针实测**可达**
+        //   （`fn g[T](a: T) -> never {...}` 的调用位点；插桩 build 实测 PROBE6_CALL_NEVER 命中 1 次，
+        //   见报告 §探针）⇒ 差异**显式保留**，不静默合一；「never 在调用位点被当 unit」登记为 P3 待裁决项。
         tv := ast_type_val(node);
-        if tv == TY_INT { return TI_INT; }
-        if tv == TY_DEX { return TI_DEX; }
-        if tv == TY_BOOL { return TI_BOOL; }
-        if tv == TY_STRING { return TI_STR; }
-        if tv == TY_UNIT { return TI_UNIT; }
-        if tv == TY_CHAR { return TI_CHAR; }
-        if tv == TI_DYN { return TI_DYN; }
-        return TI_UNIT;
+        mapped : ., mut = ty_code_to_ti(tv);
+        if mapped < 0 || tv == TY_NEVER { mapped = TI_UNIT; }
+        return mapped;
     }
     if ast_kind(node) == EXPR_IDENT {
         name_idx := ast_int_val(node);
@@ -1671,12 +1675,14 @@ fn check_func(fi: int) {
                 ti = res_type_node(orig_type_node);
             } else {
                 // Base type: switch on type_val (TY_*)
+                // P2b Task 6：值经单表 `ty_code_to_ti`；**本站点域 = {INT,DEX,BOOL,STRING,CHAR}**
+                //   （缺 UNIT/NEVER/7——UNIT 缺不等于行为差：映射值 = 初值 TI_UNIT；NEVER 差异载荷，
+                //   探针 F7 实测：`fn f(b: never)` 的形参符号类型 = unit（@raw_int 报 TF07））
                 ptype := ast_type_val(pn);
-                if ptype == TY_INT { ti = TI_INT; }
-                else if ptype == TY_DEX { ti = TI_DEX; }
-                else if ptype == TY_BOOL { ti = TI_BOOL; }
-                else if ptype == TY_STRING { ti = TI_STR; }
-                else if ptype == TY_CHAR { ti = TI_CHAR; }
+                ptype_mapped := ty_code_to_ti(ptype);
+                if ptype_mapped >= 0 && ptype_mapped != TI_NEVER && ptype_mapped != TI_DYN {
+                    ti = ptype_mapped;
+                }
             }
         } else {
             // Self param: derive struct type from mangled function name "Struct.method"
@@ -1725,13 +1731,12 @@ fn check_func(fi: int) {
         type_node := ast_type_val(fn_node);
         if type_node > 0 && ast_kind(type_node) != 0 {
             ret_ti = res_type_node(type_node);
-        } else if return_type == TY_INT { ret_ti = TI_INT; }
-        else if return_type == TY_DEX { ret_ti = TI_DEX; }
-        else if return_type == TY_BOOL { ret_ti = TI_BOOL; }
-        else if return_type == TY_STRING { ret_ti = TI_STR; }
-        else if return_type == TY_UNIT { ret_ti = TI_UNIT; }
-        else if return_type == TY_CHAR { ret_ti = TI_CHAR; }
-        else if return_type == TY_NEVER { ret_ti = TI_NEVER; }
+        } else {
+            // P2b Task 6：值经单表 `ty_code_to_ti`；**本站点域 = {INT..CHAR}**（含 NEVER；缺 7——
+            //   探针 F11：`fn f() -> dyn` 的体检查用 unit 兜底，与 F10 的 never 格互不干扰）
+            ret_ti_mapped := ty_code_to_ti(return_type);
+            if ret_ti_mapped >= 0 && ret_ti_mapped != TI_DYN { ret_ti = ret_ti_mapped; }
+        }
         sh_site_begin(5);   // 站点 5 = 函数体返回类型
         compat := type_compat_strict(body_ti, ret_ti);
         if compat != 1 && body_ti != TI_NEVER {
@@ -2145,12 +2150,17 @@ fn infer_expr(node: int) -> int {
                                             mangled_ni2 := str_intern(mangled2);
                                             ast_set_data(node, mangled_ni2);
                                             iface_ret2 := r64(g_ifaces, imbase2 + OFF_IFM_RET_TI);
-                                            if iface_ret2 == TY_INT { func_ni = mangled_ni2; return TI_INT; }
-                                            if iface_ret2 == TY_DEX { func_ni = mangled_ni2; return TI_DEX; }
-                                            if iface_ret2 == TY_BOOL { func_ni = mangled_ni2; return TI_BOOL; }
-                                            if iface_ret2 == TY_STRING { func_ni = mangled_ni2; return TI_STR; }
-                                            if iface_ret2 == TY_UNIT { func_ni = mangled_ni2; return TI_UNIT; }
-                                            if iface_ret2 == TY_CHAR { func_ni = mangled_ni2; return TI_CHAR; }
+                                            // P2b Task 6：值经单表 `ty_code_to_ti`；本站点值域 = parser 写入的
+                                            //   `unpack_type(返回型节点)`（parser.cr:1701，即 TY_* 码）；**域 = {INT..CHAR}**
+                                            //   （缺 NEVER/7 ⇒ 落尾 TI_UNIT）。**显式化**：现状 6 行用的是 `iface_ret2 == TY_*`
+                                            //   而值域是 TI_*，靠「TY_INT==TI_INT==0 … TY_CHAR==TI_CHAR==6」的数值撞车成立，
+                                            //   合一后改按语义查表（探针 F13：`-> never` 的 iface 方法在调用点 = unit；
+                                            //   F14：`-> char` = char）。
+                                            iface_ret_ti := ty_code_to_ti(iface_ret2);
+                                            if iface_ret_ti >= 0 && iface_ret_ti != TI_NEVER && iface_ret_ti != TI_DYN {
+                                                func_ni = mangled_ni2;
+                                                return iface_ret_ti;
+                                            }
                                             func_ni = mangled_ni2; return TI_UNIT;
                                         }
                                         imi2 = imi2 + 1;
