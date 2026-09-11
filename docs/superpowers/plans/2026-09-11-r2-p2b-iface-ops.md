@@ -344,7 +344,8 @@ fn iface_bit(n: int) -> int { b : ., mut = 1; k : ., mut = n; loop { if k <= 0 {
 
 | 原子类 | 许可格（现状依据） |
 |---|---|
-| `AK_INT`/`AK_DEX` | 门：`ADD..MOD`（`:1950`）+ `AND/OR`（`:1960` 允许 bool\|int）+ `EQ..GE`（`:1956` 全许可）+ `NEG/NOT`（`:1970`）+ `REF`（`:1973`）+ `DEREF`（`:1994-2005` 兜底透传）+ `AS`（`:2904` 无校验）+ `IP_COND`（`:2265` 收 int）；**`IP_COND_BOOL` 否**（`:2376` 只收 bool）；`IP_INDEX*` 否（非容器） |
+| `AK_INT` | 门：`ADD..MOD`（`:1950`）+ `AND/OR`（`:1960` 允许 bool\|int）+ `EQ..GE`（`:1956` 全许可）+ `NEG/NOT`（`:1970`）+ `REF`（`:1973`）+ `DEREF`（`:1994-2005` 兜底透传）+ `AS`（`:2904` 无校验）+ `IP_COND`（`:2265` 收 int）；**`IP_COND_BOOL` 否**（`:2376` 只收 bool）；`IP_INDEX*` 否（非容器） |
+| `AK_DEX` | 门：`ADD..MOD`（`:1950`）+ `EQ..GE`/`NEG/NOT`/`REF`/`DEREF`/`AS`（全许可面同上）；**逻辑/条件格 = 0**——`AND/OR` = 0（`:1960` 只收 bool\|int）、`IP_COND` = 0、`IP_COND_BOOL` = 0（`:2265`/`:2376`）；实测拒：`1.5 && true` / `1.5 \|\| false` / `if 1.5` → `error[TC01]`；`IP_INDEX*` 否（非容器） |
 | `AK_BOOL` | 门：`ADD..MOD = 0`（`:1950` 门不含 bool）+ `AND/OR` + `EQ..GE` + `NEG(NOT)`/`REF`/`DEREF`/`AS` + `IP_COND`/**`IP_COND_BOOL`** |
 | `AK_STRING` | 门：**全 0**（拼接走 `:1937` 早退）+ `EQ..GE` + `NEG/NOT`/`REF`/`DEREF`/`AS` + `IP_INDEX`（`:2619` 串下标→int）；`IP_COND*` 否（`:2265` 只收 bool/int） |
 | `AK_UNIT`/`AK_NEVER`/`AK_CHAR`/`AK_DYN` | 门全 0 + `EQ..GE` + `NEG/NOT`/`REF`/`DEREF`/`AS`；**`IP_COND`/`IP_COND_BOOL` 否**（`:2265`/`:2376` 只收 bool\|int / bool——**不得因「全许可面」顺手表上**）；`AK_DYN` 额外 `IP_METHOD`（`:2066` dyn 方法校验路径） |
@@ -352,6 +353,8 @@ fn iface_bit(n: int) -> int { b : ., mut = 1; k : ., mut = n; loop { if k <= 0 {
 | `AK_SEQUENCE` | 门全 0 + `IP_INDEX`（`:2605-2618`）+ `IP_INDEX_RANGE`（`:2586`）+ 比较/一元/转换面 |
 | `AK_REF`/`AK_PTR` | 门全 0（**指针算术由 `:1939-1948` 早退承担，见上「结构事实」**）+ `DEREF`（`:1996-2001`）+ 比较全许可面 + `AS`（`:2897`） |
 | `AK_NAMED` | 门全 0 + `IP_FIELD`（`:2522` 字段）+ `IP_METHOD`（`:2088` 方法表）+ 比较全许可面 + `NEG/NOT`/`REF`/`DEREF`/`AS` |
+
+> **勘误（P2b 阶段评审 Important #1-A 回填；实测见 `.superpowers/sdd/p2b-review` 结论）**：上表原为 `AK_INT`/`AK_DEX` **合并一行**，把 `AND/OR`（`:1960` 允许 bool\|int）与 `IP_COND`（`:2265` 收 int）记在合并行上——**错**，这两格属 `AK_INT` **独有**；`AK_DEX` 的 `AND/OR` = 0、`IP_COND` = 0、`IP_COND_BOOL` = 0（`1.5 && true` / `1.5 || false` / `if 1.5` 实测 `error[TC01]`）。已拆为两行；交付真值 = `src/compiler/iface_registry.cr:114`（`AK_INT = o_base + o_arith + o_logic + o_cond`）与 `:116`（`AK_DEX = o_base + o_arith`；in-code 裁决注记 `:98-100`）。
 
 （**「比较/一元/转换面全许可」的口径**：`:1956` 比较不校验 ⇒ 6 个比较位对**全部 13 类**置 1；`:1970` 一元透传、`:1994-2005` 解引用兜底、`:2904` 转换无校验 ⇒ `NEG/NOT`/`DEREF`/`AS` 对**全部 13 类**置 1；`UOP_REF`：`:1973` 对任意操作数产 `TYP_PTR` ⇒ 亦全许可。**这四组「全 1 列」是现状宽松面的集中体现**，报告须单列其 P3 收紧建议。）
 
@@ -374,7 +377,7 @@ fn iface_bit(n: int) -> int { b : ., mut = 1; k : ., mut = n; loop { if k <= 0 {
 
 - [ ] **Step 1: 红态**：索引容器许可三正（数组/切片/串）+ 非容器负控（`1[0]` → `error[TK01]` 现状已有，`:2634`）+ 落空分支**登记**（`p.f` 落空 rc=0；`x as T` 任意组合 rc=0；`dyn` 方法不存在 → `error[N08]`（`EC_N_METHOD=2008`）`checker.cr:1878`）。
 - [ ] **Step 2: 接线**（**与 Task 4 的关键区别**：索引面的三个 kind 分支**做的是不同的事**——数组带 F2 越界检查、切片返元素、串返 `TI_INT`——**它们都是结果规则，必须原地保留**；表在这里只承担「谁**可以**进这个面」的**拒绝判定**）：
-  - **不得**把 `if arr_kind == TYP_ARRAY`（`:2605`）/`if arr_kind == TYP_SLICE`（`:2616`）/`if arr_ti == TI_STR`（`:2619`）换成 `iface_permits(...)`——那会把三个分支合并成一条（结果类型与检查全丢）。改动只落在一处：`:2634` 的兜底拒绝（`check_error(EC_TK_INDEX, ...)`）之前加/改为 `if iface_permits(iface_kind_of(arr_ti), IP_INDEX) == 0 { <原 TK01 报错，码与文案逐字不变> }`，**其后保留原兜底**（双保险：表的拒绝集与兜底一致，措辞路径不变）。
+  - **不得**把 `if arr_kind == TYP_ARRAY`（`:2605`）/`if arr_kind == TYP_SLICE`（`:2616`）/`if arr_ti == TI_STR`（`:2619`）换成 `iface_permits(...)`——那会把三个分支合并成一条（结果类型与检查全丢）。改动只落在一处：`:2634` 的兜底拒绝（`check_error(EC_TK_INDEX, ...)`）之前加/改为 `if iface_permits(iface_kind_of(arr_ti), IP_INDEX) == 0 { <原 TK01 报错，码与文案逐字不变> }`，**门体即原兜底调用；`return TI_INT` 保留**（勘误——原句「其后保留原兜底（双保险）」不成立：`check_error` 无同码同位去重，门后叠加第二次裸调用会在拒绝路径上报**两条 TK01** = 可观测行为变化；表的拒绝集与兜底逐行相等，措辞路径不变。勘误来源 = P2b 阶段评审 Important #1-B 回填，实测见 `.superpowers/sdd/p2b-review` 结论；交付真值 = `src/compiler/checker.cr:2678-2681`）。
   - 同理 CHECK：`IP_INDEX_RANGE` 的拒绝分支（`:2602` 的 `return TI_UNIT`）**保留现状**（range 索引非数组时今日静默返 `TI_UNIT` 无诊断——登记面，不改）。
   - 字段/转换/dyn：**落空分支一律保留现状**（`:2578` 返 `TI_UNIT` 无诊断、`:2907` 恒等透传、`:2071` `validate_dyn_method`）——本 Task 只把它们的**许可判据**改成查表（`IP_FIELD`/`IP_METHOD`/`IP_AS`），**诊断面零改动**；落空分支的「无诊断」事实写入报告的事实表（P3 收紧面的输入）。
   - **可空的接线强度（如实登记）**：索引/字段/转换三面的表格在现状下**几乎不改变判定**（拒绝集与兜底同集）——其价值 = 把「拒绝集」从散落的分支变成表里可审计的一格（P3 收紧的旋钮位置）。报告须如实说明哪些格子**当前不可达/无行为差异**，不得把它记成「已生效的接线」。
