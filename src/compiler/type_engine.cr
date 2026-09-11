@@ -8,7 +8,12 @@
 //   → 每步计预算，超限置 g_ty_exhausted 并返回 -1（不静默、不猜）。
 //
 // 未覆盖面（P0 显式登记，命中即 g_ty_uncovered = 1，不当作「不成立」）：
-//   ① 参数化原子的**参数只在同形时判等**（变型规则 = P3 条目化后落地）；
+//   ① 参数化原子的参数位**变型规则** = R2 P3 Task 1 **已落地**（`ty_variance_of` +
+//      `tt_list_variance`：AK_SEQUENCE/AK_PTR/AK_REF 三构造子）。**协变槽**已判（只读 ref
+//      元素 = ty_sub 三态）；**不变槽的非同形参数仍按本项登记为未覆盖面（-1）**——语义上的
+//      「确定不等价 ⇒ 0」加强需先有「链元素皆类型项」不变量，而展开层链含**身份令牌**
+//      （Task 0 变体项链 = name 索引；实测：用 ty_equiv 会令牌碰撞误判，见 tt_list_variance_at
+//      注记）⇒ 归后续面；
 //   ② AK_NAMED 的具体行不展开（命名类型的结构定义在 P2 接入 checker 后可用）；
 //   ③ μ 的**空递归**（如 μX.X）保守判为可空。
 //
@@ -171,25 +176,133 @@ fn lit_implies(lp: int, lq: int) -> int {
         if ak_disjoint(pk, xk) == 1 { return 1; }
         return 0;
     }
-    // 双方皆正原子：同类 + 参数同形（P0：参数不变，见未覆盖面①）
+    // 双方皆正原子：同类 + 参数链按**变型**比较（R2 P3 Task 1 取代 P0「仅同形判等」）
     if tt_tag(lp) == TT_ATOM && tt_tag(lq) == TT_ATOM {
         if tt_a(lp) == AK_NAMED || tt_a(lq) == AK_NAMED { g_ty_uncovered = 1; return -1; }
         if tt_a(lp) != tt_a(lq) { return 0; }
-        if tt_list_same(tt_c(lp), tt_c(lq)) == 1 { return 1; }
-        // 同类但参数不同形：P0 不判变型（读视图协变 = P3）→ **未知**（登记；不得给确定 0）
-        g_ty_uncovered = 1;
-        return -1;
+        lv := tt_list_variance(tt_a(lp), tt_c(lp), tt_c(lq));
+        if lv == 1 { return 1; }
+        if lv == -1 { return -1; }     // 未知（不定槽的 ty_equiv 三态负值）：**上抛**，不得当 0
+        // 确定不蕴含（不变槽查到确定不等价 / 协变槽 ty_sub 确定不成立 / 链形不同）：
+        // P0 此处一律回 -1 + 未覆盖面（登记「参数仅同形判等」）——变型落地后它是**已判**面
+        return 0;
     }
     return 0;
 }
 
-// 参数链同形（P0：结构相等；变型 = P3）
+// 参数链同形（结构相等；R2 P3 Task 1 起为**变型表的默认槽比较**——不变槽即此恒等）
 fn tt_list_same(p: int, q: int) -> int {
     if p == q { return 1; }
     if p < 0 || q < 0 { return 0; }
     if tt_tag(p) != TT_CONS || tt_tag(q) != TT_CONS { return 0; }
     if tt_list_same(tt_a(p), tt_a(q)) == 0 { return 0; }
     return tt_list_same(tt_b(p), tt_b(q));
+}
+
+// ─── R2 P3 Task 1：不变槽的「类型项相等」——序列项**固定性位（b）不入** ───
+// 背景（本任务实测）：序列项的 b 槽是表示提示（N / 固定性，见 ty_shadow.cr 的 sh_seq_term），
+// 但 b 会经**嵌套元素位的节点同一性**泄进判定：`[[int;3];2]` 的元素项（序列项）与
+// `[[int];2]` 的元素项**除 b 外逐位相同却节点不同** ⇒ tt_list_same 判「非同形」⇒ 引擎回 -1
+// （未覆盖面）⇒ 回落 legacy——① 身份路径出现 N/固定性（违 R1 不变量「N 只在常量档与表示层」）；
+// ② 站点措辞从长度专属退化为普通不匹配（实测探针 pN3：`return [s, s]` 给
+// 「Function return type mismatch」而非「Array length constraint not satisfied」）。
+// 修法：**双方皆 AK_SEQUENCE 原子**时按「忽略 b 的结构相等」递归（元素仍可能是序列 ⇒ 继续
+// 忽略）；**其余构造子一律节点同一性（tt_list_same）**——AK_NAMED 的 b = 行号是**身份**
+// （[S] 与 [T] 必须不同）、令牌原子（AK_SUM 的 name 令牌 / AK_REF 的 mut 标记）的 b 也是身份。
+// 守卫「皆 AK_SEQUENCE」使本函数**永不**解释令牌（令牌恒为 AK_UNIT 原子，见 sh_name_token /
+// sh_ref_mut_marker）——旧约定（裸 name 索引入链）下的别名风险已随之消除。
+fn tt_type_elem_same(p: int, q: int) -> int {
+    if p == q { return 1; }
+    if p < 0 || q < 0 { return 0; }
+    if tt_tag(p) == TT_ATOM && tt_a(p) == AK_SEQUENCE &&
+       tt_tag(q) == TT_ATOM && tt_a(q) == AK_SEQUENCE { return tt_seq_same(p, q); }
+    return tt_list_same(p, q);
+}
+
+// 序列项相等（忽略 b）：class 相同 + 参数链逐元素递归（元素位经 tt_type_elem_same 再判定）。
+fn tt_seq_same(p: int, q: int) -> int {
+    if p == q { return 1; }
+    cp := tt_c(p);
+    cq := tt_c(q);
+    if cp == cq { return 1; }
+    if cp < 0 || cq < 0 { return 0; }
+    if tt_tag(cp) != TT_CONS || tt_tag(cq) != TT_CONS { return 0; }
+    if tt_type_elem_same(tt_a(cp), tt_a(cq)) != 1 { return 0; }
+    return tt_type_elem_same(tt_b(cp), tt_b(cq));
+}
+
+// ═══════════════ R2 P3 Task 1：变型表（slot 单调性）+ 参数链按变型比较 ═══════════════
+// 语义（spec §5.1）：只读视图**协变**（⟦槽a⟧ ⊆ ⟦槽b⟧ ⇒ 蕴含），可写视图**不变**（槽须等价）。
+// 0 = 不变 / 1 = 协变。**其余构造子默认不变**（= P0 同形判等逐位保持）。
+// 首版覆盖三构造子（计划 Task 1 Step 2 指定）：
+//   · AK_SEQUENCE 槽 0（元素）= 不变：本语言数组/切片**可写**（实测探针 `s := a[0..3]; s[0] = 9;`
+//     rc=0）⇒ 元素协变不健全（写坏是静默错值级）。定长退役的**方向**面（[T;N] <: [T]）不走本表：
+//     N/固定性存于序列项的 **b 槽（标注，不入比较）**，方向由 checker 的 array_len_constraint_ok
+//     承担（理由与参序约定见该函数注记——身份/子类型路径零 N 是 P2a 不变量）。
+//   · AK_PTR 槽 0（元素）= 不变：可写裸指针（与 legacy 的 PTR 分支「只比元素」同语义）。
+//   · AK_REF 槽 0 = **mut 标记**（不变，且比较**可判定**——标记是语法令牌非类型集，见
+//     tt_list_variance_at）；槽 1（元素）= **只读协变 / 可写不变**：变型依赖槽 0 的值 ⇒ 静态
+//     二元表表达不了该条件，故本表给只读侧（mut = 0）的默认值 1，可写侧由 tt_list_variance_at
+//     依链首标记降为 0（**条件单点收敛在比较函数内**，本表不重复表达）。
+fn ty_variance_of(ak: int, slot: int) -> int {
+    if ak == AK_REF {
+        if slot == 0 { return 0; }
+        if slot == 1 { return 1; }
+        return 0;
+    }
+    if ak == AK_SEQUENCE { return 0; }
+    if ak == AK_PTR { return 0; }
+    return 0;   // 表外构造子（含原生八员/命名类）：不变 = 现状结构相等
+}
+
+// 参数链按变型比较（lit_implies 的正原子同形面入口）。返回 1 / 0 / **-1 = 未知**（上抛）。
+// 槽位语义（逐槽成对推进）：
+//   · 协变槽 → ty_sub(槽a, 槽b)：三态直传（-1 上抛；0 = 确定不蕴含 ⇒ 0）；
+//   · AK_REF 槽 0（mut 标记）→ **节点同一性且判定**：标记是**语法令牌**（不同标记 = 确定
+//     不匹配 ⇒ **0**，不回 -1）——它**不是**类型集，故不适用「未知」保守性；回 -1 只会让
+//     调用方回落 legacy 把同一结论重算一遍（mut 面 legacy 本就比 extra）。标记项 =
+//     tt_atom(AK_UNIT, mut, -1)（b 槽 = 标记值，照 AK_NAMED 的 b = 行号同约定；见
+//     ty_shadow.cr 的 sh_ref_mut_marker）。
+//   · 其余不变槽 → 结构相等（tt_list_same）；非同形 ⇒ **-1 + 未覆盖面**（= P0 语义**逐位
+//     保持**）。⚠ 为何不变槽不用 ty_equiv 做「确定不等价 ⇒ 0」的加强：参数链中并非全是类型项
+//     ——展开层把**身份令牌**直接放入链（Task 0：变体项链 = 枚举名/变体名 **name 索引**，
+//     @ tt_atom(AK_SUM,...) 约定），tokennum 被 ty_equiv 当术语解释即误判（实测：M 改法下
+//     `unf.enum_variant_identity_scoped` 红 = 异枚举同名变体被令牌碰撞判等）。不变槽的
+//     「确定不等价」加强须先有「链元素皆类型项」的不变量——登记为后续面（Task 3/4 若需要）。
+// 同形快路径：p == q → 1（DAG 去重使「同形同项」恒为同一节点 ⇒ 主流路径零额外开销，且
+// **改动前后逐位一致**）。链形不同（非 CONS / 负）→ 0（结构不同 = 现状语义）。
+fn tt_list_variance_at(ak: int, slot: int, mutv: int, p: int, q: int) -> int {
+    if p == q { return 1; }
+    if p < 0 || q < 0 { return 0; }
+    if tt_tag(p) != TT_CONS || tt_tag(q) != TT_CONS { return 0; }
+    ha := tt_a(p);
+    hb := tt_a(q);
+    if ak == AK_REF && slot == 0 {
+        if tt_list_same(ha, hb) != 1 { return 0; }     // 标记槽：可判定（见上）
+    } else {
+        v : ., mut = ty_variance_of(ak, slot);
+        if ak == AK_REF && slot == 1 && mutv == 1 { v = 0; }   // 可写 ref：元素降为不变
+        if v == 1 {
+            s := ty_sub(ha, hb);
+            if s != 1 { return s; }
+        } else {
+            if tt_type_elem_same(ha, hb) != 1 { g_ty_uncovered = 1; return -1; }
+        }
+    }
+    return tt_list_variance_at(ak, slot + 1, mutv, tt_b(p), tt_b(q));
+}
+
+fn tt_list_variance(ak: int, p: int, q: int) -> int {
+    mutv : ., mut = 0;
+    if ak == AK_REF {
+        // 槽 0 已在调用前判定同形（p == q 快路径或由本函数逐槽比较）——此处只取标记值：
+        // 链首 = 标记项（链形约定见 sh_ref_mut_marker；非标记形态保守取 0 = 只读）
+        if p >= 0 && tt_tag(p) == TT_CONS {
+            m := tt_a(p);
+            if tt_tag(m) == TT_ATOM && tt_a(m) == AK_UNIT { mutv = tt_b(m); }
+        }
+    }
+    return tt_list_variance_at(ak, 0, mutv, p, q);
 }
 
 // ─── memo（假设-判定；0 = 假 / 1 = 真 / 2 = 进行中即假设真）───

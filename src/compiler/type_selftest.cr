@@ -273,9 +273,12 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("bridge.ptr_ak", tt_a(t_ptr), AK_PTR);
     total = total + 1; fails = fails + ts_check("bridge.ptr_inner",
         tt_c(t_ptr), tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil()));
+    // P3 Task 1（断言更新，用例数不变）：AK_REF 链 = [mut 标记项, 元素项]（mut 入链 = 判定
+    // 维度）⇒ 本用例守的「REF 链含元素项」改断链**第二项**（标记项由 t1.var_mut_* 单列）。
+    // 旧断言（链首即元素）随 mut 入链的布局裁决更新——原因见 ty_shadow.cr 的 sh_ref_mut_marker。
     t_ref := sh_term_of_ti(alloc_type(TYP_REF, TI_STR, 0));
     total = total + 1; fails = fails + ts_check("bridge.ref_inner",
-        (tt_a(t_ref) == AK_REF && tt_c(t_ref) == tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil())), 1);
+        (tt_a(t_ref) == AK_REF && tt_b(tt_c(t_ref)) == tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil())), 1);
     t_slice := sh_term_of_ti(alloc_type(TYP_SLICE, TI_STR, 0));
     total = total + 1; fails = fails + ts_check("bridge.slice_seq",
         (tt_a(t_slice) == AK_SEQUENCE && tt_c(t_slice) == tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil())), 1);
@@ -1220,6 +1223,128 @@ fn type_selftest_run() -> int {
     // 三态 -1——**不得**被消费方当 0/1 用。负键/越界键同律（断言在 Task 2/6 落地后仍成立）。
     total = total + 1; fails = fails + ts_check("unf.iface_stub_three_state",
         (sh_iface_shape_term(-1) == -1 && iface_satisfies(-1, 0) == -1 && iface_satisfies(TI_INT, 9999) == -1), 1);
+
+    // ═══ R2 P3 Task 1：定长退役收口（array/slice 方向 + 变型表 + N 读取面守门）═══
+    // 判据面 = ① 方向：`[T;N] <: [T]`（固定 → 视图 = 拓宽，放行）/ `[T] ⊄ [T;N]`（视图 → 固定，
+    // 无法证 len==N ⇒ 拒；**确定 0 而非 -1**）；② 变型：只读协变通过 / 可写不变拒绝（AK_REF
+    // 槽语义）+ mut 标记成为判定维度（`&T` ≢ `&mut T` 双向）；③ **N 读取面守门**：身份路径与
+    // 子类型路径零 N（`[int;3]` 与 `[int;4]` 的项除 b 槽外逐位相同），拒绝**唯一**来源 =
+    // 常量档约束；④ 嵌套位（指针元素 / 元组字段 / 泛型实参 / 数组元素）逐位同律；⑤ 动态档登记
+    // （视图运行期长度不可证 ⇒ 决定 0，不得以 -1 冒充决定）。
+    // 层归属（计划编排列「方向 4」于引擎步内）：固定性存于序列项 **b 槽（标注，不入引擎比较）**
+    // ⇒ 方向**不在**引擎 ty_sub 面，而在 checker 的 array_len_constraint_ok（参序 =（源，目标））
+    // ——与 P2a「N 迁出身份、拒绝由常量档承担」同一构造；故本组的方向断言直接打该函数与站点
+    // 三态包装 type_compat_strict（引擎侧只保留「N 不入身份/子类型」的守门）。
+    ty_budget_reset(200000);
+    t1_arr3 := alloc_type(TYP_ARRAY, TI_INT, 3);
+    t1_arr4 := alloc_type(TYP_ARRAY, TI_INT, 4);
+    t1_sl := alloc_type(TYP_SLICE, TI_INT, 0);
+    t1_sl2 := alloc_type(TYP_SLICE, TI_INT, 0);      // 另一行同形切片：方向面不得靠 ti 同一性
+    // ① 方向（顶层）：固定→视图 放行；视图→固定 拒（0 = 决定，非 -1）；视图→视图 同元素放行
+    total = total + 1; fails = fails + ts_check("t1.dir_arr_to_slice_ok",
+        array_len_constraint_ok(t1_arr3, t1_sl), 1);
+    total = total + 1; fails = fails + ts_check("t1.dir_slice_to_arr_reject",
+        array_len_constraint_ok(t1_sl, t1_arr3), 0);
+    total = total + 1; fails = fails + ts_check("t1.dir_slice_slice_ok",
+        array_len_constraint_ok(t1_sl, t1_sl2), 1);
+    // ② N 不入身份（同固定性异 N）：引擎等价 1 ∧ 常量档拒 0（双钉 = 「N 迁移」不变量）
+    total = total + 1; fails = fails + ts_check("t1.dir_fixed_two_lengths_identity",
+        (ty_equiv(sh_term_of_ti(t1_arr3), sh_term_of_ti(t1_arr4)) == 1 &&
+         array_len_constraint_ok(t1_arr4, t1_arr3) == 0), 1);
+    // ③ 嵌套位逐位同律（负控：反向拓宽必须仍放行——防「一律拒绝」的退化实现）
+    t1_pt_sl := alloc_type(TYP_PTR, t1_sl, 0);
+    t1_pt_arr := alloc_type(TYP_PTR, t1_arr3, 0);
+    total = total + 1; fails = fails + ts_check("t1.dir_nested_ptr",
+        (array_len_constraint_ok(t1_pt_sl, t1_pt_arr) == 0 && array_len_constraint_ok(t1_pt_arr, t1_pt_sl) == 1), 1);
+    t1_out_sl := alloc_type(TYP_ARRAY, t1_sl, 2);       // [[int];2]
+    t1_out_arr := alloc_type(TYP_ARRAY, t1_arr3, 2);    // [[int;3];2]
+    total = total + 1; fails = fails + ts_check("t1.dir_nested_elem",
+        (array_len_constraint_ok(t1_out_sl, t1_out_arr) == 0 && array_len_constraint_ok(t1_out_arr, t1_out_sl) == 1), 1);
+    grow_gen_apply_data(g_gen_apply_data_count + 4);
+    t1_tp_s1 := g_gen_apply_data_count;
+    w64(g_gen_apply_data, t1_tp_s1 * 8, TI_INT);
+    w64(g_gen_apply_data, (t1_tp_s1 + 1) * 8, t1_sl);
+    t1_tp_s2 := t1_tp_s1 + 2;
+    w64(g_gen_apply_data, t1_tp_s2 * 8, TI_INT);
+    w64(g_gen_apply_data, (t1_tp_s2 + 1) * 8, t1_arr3);
+    g_gen_apply_data_count = t1_tp_s2 + 2;
+    t1_tup_sl := alloc_type(TYP_TUPLE, 2, t1_tp_s1);     // (int, [int])
+    t1_tup_arr := alloc_type(TYP_TUPLE, 2, t1_tp_s2);    // (int, [int;3])
+    total = total + 1; fails = fails + ts_check("t1.dir_nested_tuple",
+        (array_len_constraint_ok(t1_tup_sl, t1_tup_arr) == 0 && array_len_constraint_ok(t1_tup_arr, t1_tup_sl) == 1), 1);
+    grow_gen_apply_data(g_gen_apply_data_count + 4);
+    t1_ga_s1 := g_gen_apply_data_count;
+    w64(g_gen_apply_data, t1_ga_s1 * 8, 1);
+    w64(g_gen_apply_data, (t1_ga_s1 + 1) * 8, t1_sl);
+    t1_ga_s2 := t1_ga_s1 + 2;
+    w64(g_gen_apply_data, t1_ga_s2 * 8, 1);
+    w64(g_gen_apply_data, (t1_ga_s2 + 1) * 8, t1_arr3);
+    g_gen_apply_data_count = t1_ga_s2 + 2;
+    t1_base := alloc_type(TYP_NAMED, 1203, 0);           // 人造基型行（裸分配，防假键污染）
+    t1_ga_sl := alloc_type(TYP_GENERIC_APPLY, t1_base, t1_ga_s1);
+    t1_ga_arr := alloc_type(TYP_GENERIC_APPLY, t1_base, t1_ga_s2);
+    total = total + 1; fails = fails + ts_check("t1.dir_nested_genapply",
+        (array_len_constraint_ok(t1_ga_sl, t1_ga_arr) == 0 && array_len_constraint_ok(t1_ga_arr, t1_ga_sl) == 1), 1);
+    // ④ 站点三态（专属措辞 = -1 路）：拓宽 1；视图→固定 -1（身份放行、方向拒）；对称核 = 现状
+    total = total + 1; fails = fails + ts_check("t1.strict_widen_ok",
+        type_compat_strict(t1_arr3, t1_sl), 1);
+    total = total + 1; fails = fails + ts_check("t1.strict_view_to_fixed",
+        type_compat_strict(t1_sl, t1_arr3), -1);
+    total = total + 1; fails = fails + ts_check("t1.strict_sym_no_direction",
+        (type_compat_sym(t1_sl, t1_arr3) == 1 && type_compat_sym(t1_arr3, t1_sl) == 1), 1);
+    // ⑤ 变型：只读协变通过 / 可写不变拒绝（AK_REF 槽 1 条件变型）；表外构造子默认不变
+    t1_u := tt_union(tt_atom(AK_INT, TI_INT, -1), tt_atom(AK_STRING, TI_STR, -1));   // int ∪ string
+    t1_rv_ro := tt_atom(AK_REF, -1, tt_cons(sh_ref_mut_marker(0), tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil())));
+    t1_rv_ro_w := tt_atom(AK_REF, -1, tt_cons(sh_ref_mut_marker(0), tt_cons(t1_u, tt_nil())));
+    t1_rv_mut := tt_atom(AK_REF, -1, tt_cons(sh_ref_mut_marker(1), tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil())));
+    t1_rv_mut_w := tt_atom(AK_REF, -1, tt_cons(sh_ref_mut_marker(1), tt_cons(t1_u, tt_nil())));
+    total = total + 1; fails = fails + ts_check("t1.var_readonly_covariant",
+        (ty_sub(t1_rv_ro, t1_rv_ro_w) == 1 && ty_sub(t1_rv_ro_w, t1_rv_ro) == 0), 1);
+    // 不变槽非同形的判定**语义** = 「不是子类型」；引擎回 **-1**（未覆盖面登记——不变槽的
+    // 「确定不等价 ⇒ 0」加强需先有「链元素皆类型项」不变量，见 type_engine.cr 注记）⇒ 断
+    // 「两向皆不得判 1」= 不变性的可执行内容；生产面（checker type_equal）在此回落 legacy
+    // 得 false = 实拒（pE 探针实测 rc=1）。
+    total = total + 1; fails = fails + ts_check("t1.var_mut_invariant_reject",
+        (ty_sub(t1_rv_mut, t1_rv_mut_w) != 1 && ty_sub(t1_rv_mut_w, t1_rv_mut) != 1), 1);
+    total = total + 1; fails = fails + ts_check("t1.var_seq_elem_invariant",
+        ty_sub(tt_atom(AK_SEQUENCE, -1, tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil())),
+               tt_atom(AK_SEQUENCE, -1, tt_cons(t1_u, tt_nil()))) != 1, 1);
+    // ⑥ mut 标记入链 = 判定维度（走真实桥接）：`&T` ≢ `&mut T` 双向；同 mut 同元素仍等价
+    t1_ref_ro := alloc_type(TYP_REF, TI_INT, 0);
+    t1_ref_ro2 := alloc_type(TYP_REF, TI_INT, 0);
+    t1_ref_mut := alloc_type(TYP_REF, TI_INT, 1);
+    total = total + 1; fails = fails + ts_check("t1.var_mut_marker_dimension",
+        (ty_equiv(sh_term_of_ti(t1_ref_ro), sh_term_of_ti(t1_ref_mut)) == 0 &&
+         ty_equiv(sh_term_of_ti(t1_ref_mut), sh_term_of_ti(t1_ref_ro)) == 0 &&
+         ty_equiv(sh_term_of_ti(t1_ref_ro), sh_term_of_ti(t1_ref_ro2)) == 1 &&
+         tt_b(tt_a(tt_c(sh_term_of_ti(t1_ref_mut)))) == 1), 1);
+    // ⑦ N 读取面守门：身份路径（ty_equiv）+ **子类型路径（ty_sub）**零 N；唯一拒绝来源 = 常量档
+    total = total + 1; fails = fails + ts_check("t1.n_face_gate",
+        (type_equal(t1_arr3, t1_arr4) &&
+         ty_sub(sh_term_of_ti(t1_arr3), sh_term_of_ti(t1_arr4)) == 1 &&
+         array_len_constraint_ok(t1_arr4, t1_arr3) == 0), 1);
+    // ⑧ 动态档登记：切片运行期长度不可证 ⇒ 视图→固定是**决定**（0），不得回 -1 冒充未知；
+    //    异长固定档同理（常量档拒绝也在决定面）。
+    total = total + 1; fails = fails + ts_check("t1.dyn_tier_decided",
+        (array_len_constraint_ok(t1_sl, t1_arr3) == 0 && array_len_constraint_ok(t1_sl2, t1_arr4) == 0 &&
+         array_len_constraint_ok(t1_arr3, t1_arr4) == 0), 1);
+    // ⑨ **嵌套位**的身份不变量 + 站点三态（本批实测发现的回归面：序列项的固定性位 b 会经
+    //    嵌套元素位的**节点同一性**泄进身份 ⇒ 必须由引擎的「忽略 b 的序列项相等」挡住——
+    //    type_engine.cr 的 tt_type_elem_same/tt_seq_same）。断三件事：
+    //    ① 嵌套 N：`type_equal([[int;3];2], [[int;4];2])` 仍 true **且不触发 unknown 回落**
+    //    （引擎自决 = 身份路径零 N 的强式；旧实现靠 legacy 回落兜底，措辞随之退化）；
+    //    ② 嵌套固定性同样**不入身份**（`ty_equiv` 两向 1）；
+    //    ③ 站点层：嵌套 视图→固定 = -1（专属措辞路）、嵌套 固定→视图 = 1（拓宽保持）。
+    t1_out_arr4 := alloc_type(TYP_ARRAY, t1_arr4, 2);   // [[int;4];2]
+    t1_ru0 := g_replace_unknown;
+    t1_nest_ok : ., mut = 0;
+    if type_equal(t1_out_arr, t1_out_arr4) { if (g_replace_unknown - t1_ru0) == 0 { t1_nest_ok = 1; } }
+    total = total + 1; fails = fails + ts_check("t1.n_face_gate_nested",
+        (t1_nest_ok == 1 && array_len_constraint_ok(t1_out_arr4, t1_out_arr) == 0), 1);
+    total = total + 1; fails = fails + ts_check("t1.fixedness_not_identity_nested",
+        ty_equiv(sh_term_of_ti(t1_out_sl), sh_term_of_ti(t1_out_arr)), 1);
+    total = total + 1; fails = fails + ts_check("t1.dir_nested_strict",
+        (type_compat_strict(t1_out_sl, t1_out_arr) == -1 && type_compat_strict(t1_out_arr, t1_out_sl) == 1), 1);
 
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }

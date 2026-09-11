@@ -5,6 +5,10 @@
 // R2 P3 Task 0：**引擎展开层**（文件末段）——named/struct/enum/generic-apply → 结构项，
 // 只服务「满足判定」与「穷尽性域/模式项」两条路径；等价判定保持原子名义（边界与理由见
 // 该段头注——裁错即判定全面漂移）。
+// R2 P3 Task 1：**序列项 / ref mut 标记**（`sh_seq_term` / `sh_ref_mut_marker`，见下方
+// 构造点注记）：序列项的 b 槽 = 固定性位（N 或 -1；**不入等价身份**），AK_REF 链 = [mut 标记,
+// 元素]（mut 成为判定维度——旧约定「不入链」下引擎把 `&T` 与 `&mut T` 判等价 = 静默放宽，
+// legacy 比 extra ⇒ 替换后 mut 面失守；本批关闭）。变型规则（引擎侧表）在 type_engine.cr。
 // R2 P2a Task 3：判定权已移交引擎（`type_equal` = 快路径 + 桥接 + `ty_equiv`），影子挂点
 // 仍在 `type_equal` 包装层，**对照物切到 `type_equal_legacy`**（旧结构判等，P5 删）：
 // sh_compare 的 `old_ok` 现在喂的是 legacy 结论 → 分类语义 = 「引擎 vs 旧结构判等」，
@@ -203,6 +207,44 @@ fn sh_map_rehash() {
 // 计划文中的「字段在 g_tuple_*」在本仓库**不存在**（全仓 grep 零命中），以实读为准。
 // CONS 链**逆序构造**（i 自末尾向前 cons）：DAG 项不可变，正向追加需改写已建项——
 // 不可行；逆序构造的结果顺序仍 = 声明顺序。
+// ─── R2 P3 Task 1：序列项 / ref mut 标记（桥接的两个新构造点）───
+// 序列项（TYP_ARRAY 与 TYP_SLICE 的**唯一**构造点）：tt_atom(AK_SEQUENCE, fixed_len, [元素项])。
+//   b 槽 = **固定性位**：数组 = N（长度字面量），切片/视图 = -1。
+//   ⚠ 引擎比较只看 a（原子类）与 c（参数链）两槽（`lit_implies` 的**双方皆正原子**分支；
+//   b 槽是**标注**——AK_NAMED 的 b = 行号即此约定）⇒ **N 不入等价/包含身份**（R1 裁决 +
+//   P2a 长度约束不变量的延续）：`[int;3]` 与 `[int;4]` 的项除 b 外逐位相同 ⇒ `ty_equiv == 1`、
+//   `ty_sub == 1`，拒绝一律由 checker 的常量档约束承担。固定性位的消费者 = checker.cr
+//   `array_len_constraint_ok` 的**方向规则**（视图→固定拒绝）与后续横切形状（P3 Task 2）。
+//   -1 = 元素项译不成（调用方回 -1，不缓存）。
+fn sh_seq_term(elem_ti: int, fixed_len: int) -> int {
+    el := sh_term_of_ti(elem_ti);
+    if el < 0 { return -1; }
+    return tt_atom(AK_SEQUENCE, fixed_len, tt_cons(el, tt_nil()));
+}
+
+// AK_REF 链槽 0 = mut 标记（R2 P3 Task 1 起 mut **成为判定维度**，替代旧约定的「不入链」——
+// 旧约定下 `&T` 与 `&mut T` 的项逐位相同 ⇒ 引擎判等价，而 legacy 比 extra(mut) 判不等 ⇒
+// 判定替换后 mut 面静默放宽；本标记即该缺口的关闭）。
+// 标记项 = tt_atom(AK_UNIT, mut, -1)：**语法令牌**（b 槽 = 标记值，照 AK_NAMED 的 b = 行号
+// 同约定），非类型集——引擎侧按**节点同一性**比较（type_engine.cr 的 tt_list_variance_at
+// 槽 0 分支；不同标记 = 确定不匹配 ⇒ 0，不回 -1）。
+fn sh_ref_mut_marker(mutv: int) -> int {
+    return tt_atom(AK_UNIT, mutv, -1);
+}
+
+// 名字令牌（P3 Task 1 起：变体身份链的 name **索引入链**升级为**令牌原子上链**）。
+// 旧约定（Task 0）= `tt_cons(ei_name(ea), tt_cons(name_ni, tt_nil()))` 直接把 **name 索引**
+// 当链元素——索引是**别名**：任何把链元素当术语解释的比较（如按结构/等价比较）会把
+// `str_intern` 得到的小整数当**术语下标**读取（`tt_tag(ni)` = 第 ni 个项的 tag）⇒ 名字
+// 碰撞即静默判等。本任务实证两类：① 不变槽改用 ty_equiv 比较时
+// `unf.enum_variant_identity_scoped` 红（异枚举同名变体被判等）；② 固定性守卫
+// （tt_type_elem_same）会读链元素的 class。⇒ 令牌改为**原子节点**
+// `tt_atom(AK_UNIT, ni, -1)`（与 mut 标记同式；b = 值），只按**节点同一性**比较，
+// 结构比较再也不可能把它当术语解释。语义等价（不同名字 → 不同节点；同名字 → 同节点）。
+fn sh_name_token(ni: int) -> int {
+    return tt_atom(AK_UNIT, ni, -1);
+}
+
 fn sh_tuple_to_product(ti: int) -> int {
     cnt := get_type_data(ti);
     start := get_type_extra(ti);
@@ -243,16 +285,21 @@ fn sh_term_of_ti(ti: int) -> int {
         // 里同源 dyn 集被判「等价」的假信号）；P1 不改引擎，先按表落 + 报告注记。
         term = tt_atom(AK_DYN, ti, -1);
     } else if k1 == TYP_ARRAY || k1 == TYP_SLICE {
-        // TYP_ARRAY 的 extra = N（长度），**不入身份**（R1 裁决）→ 参数链只含元素项
-        el := sh_term_of_ti(d1);
-        if el >= 0 { term = tt_atom(AK_SEQUENCE, -1, tt_cons(el, tt_nil())); }
+        // TYP_ARRAY 的 extra = N（长度），**不入身份**（R1 裁决）→ 参数链只含元素项，
+        // N 落 b 槽 = 固定性位（P3 Task 1；构造点单源化到 sh_seq_term）
+        fl : ., mut = -1;
+        if k1 == TYP_ARRAY { fl = get_type_extra(ti); }
+        term = sh_seq_term(d1, fl);
     } else if k1 == TYP_PTR {
+        // 同 PTR：元素入链（AK_PTR 槽 0 变型 = 不变，见 type_engine.cr 变型表）；
+        // extra（asp 地址空间位）不入链——与 legacy 的 PTR 分支（只比 data）同语义
         in1 := sh_term_of_ti(d1);
         if in1 >= 0 { term = tt_atom(AK_PTR, -1, tt_cons(in1, tt_nil())); }
     } else if k1 == TYP_REF {
-        // extra = mut 标记：同 PTR，不入参数链（引擎无只读/可写区分 = P3 条目化面）
+        // extra = mut 标记：**入链**（P3 Task 1）——链 = [mut 标记项, 元素项]，标记与元素
+        // 各占一槽（槽 0 不变 / 槽 1 只读协变、可写不变，见 type_engine.cr 变型表）
         in2 := sh_term_of_ti(d1);
-        if in2 >= 0 { term = tt_atom(AK_REF, -1, tt_cons(in2, tt_nil())); }
+        if in2 >= 0 { term = tt_atom(AK_REF, -1, tt_cons(sh_ref_mut_marker(get_type_extra(ti)), tt_cons(in2, tt_nil()))); }
     } else if k1 == TYP_TUPLE {
         term = sh_tuple_to_product(ti);
     } else if k1 == TYP_NAMED || k1 == TYP_GENERIC_PARAM || k1 == TYP_GENERIC_APPLY {
@@ -511,7 +558,8 @@ fn sh_dump_write(path: string) -> int {
 // 否则两类不同声明会静默合并（例：两个枚举的同名变体、两个不同枚举的域）。
 //   struct → tt_atom(AK_PRODUCT, ti, 字段项链)          // 链序 = 声明序；**结构项**（同形同项）
 //   enum   → 各变体项之**并**（左深 union）= 域         // 空枚举 → ⊥（无值可取，见下）
-//   变体项 → tt_atom(AK_SUM, ti, [枚举名 ni, 变体名 ni]) // 身份 = (枚举, 变体) 两名**入链**
+//   变体项 → tt_atom(AK_SUM, ti, [枚举名令牌, 变体名令牌]) // 身份 = (枚举, 变体) 两名**入链**
+//     （P3 Task 1：两名以 **sh_name_token 原子**上链，不再用裸 name 索引——见该函数注记）
 // 变体项**不含 payload**：枚举表只存 payload 的**裸 TY 码**（parser.cr:1601 的 unpack_type；
 // 非基型塌缩为 0 = TY_INT，与「payload 是 int」**不可区分**）⇒ 含入即静默谎报；故 payload
 // 不入项（**未覆盖面登记**：payload 面的满足判定归 Task 4——若需要，须先扩枚举表存 payload
@@ -683,7 +731,10 @@ fn sh_variant_term(ti: int, name_ni: int) -> int {
     ea := find_enum_row_of(ti);
     if ea < 0 { return -1; }
     if sh_enum_variant_index(ea, name_ni) < 0 { return -1; }
-    return tt_atom(AK_SUM, ti, tt_cons(ei_name(ea), tt_cons(name_ni, tt_nil())));
+    // P3 Task 1：身份两名经 **sh_name_token** 上链（旧约定 = 裸 name 索引入链——索引用作
+    // 链元素时会被结构比较当术语下标解释，见 sh_name_token 注记）；两构造点（域/模式项）
+    // 仍逐位同一 ✓
+    return tt_atom(AK_SUM, ti, tt_cons(sh_name_token(ei_name(ea)), tt_cons(sh_name_token(name_ni), tt_nil())));
 }
 
 // enum 命名行 / 泛型应用行 → **域** = 各变体项之并（左深 union）。
