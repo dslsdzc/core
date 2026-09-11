@@ -298,6 +298,15 @@
 - **判据（实测）**：`selftest-types` 95/95 · `test_compile` PASS · `test_purity` PASS · `test_tuple_slots` 14/14（未回归）· `test_ccr_v7` 27/27 · 新增 `tests/selfhost/test_agg_slots.py` **13/13**（值 9 例 build+run 退出码 = main 返回值 & 0xFF：struct 主判据 2 + 三字段中位 + 嵌套 struct + 单槽反证边界 + 泛型实例体克隆 + 数组中位 / 嵌套数组 / `[v;N]`；类型 4 例：嵌套 vs 扁平拒 / 元素数不符拒 / 同形收 / `[T;N]` 类型形控制）+ `src/ci/run.sh` selfhost-tests 挂钩；ELF canary `tests/suite/ptr_arith.cr` = `95084e7b…d475` **IDENTICAL**（该语料**含**数组字面量 ⇒ 数组侧的「AST 布局零泄漏」为实测证据，非同 #25 的「语料无该构造」情形）；`.ccr` sha 与前序状态相同（`ecd7a9df…d29d`，struct 修复后 → 数组修复后未变）。
 - **本族剩余面（发现即登记，未修）**：① **struct 字面量字段名被丢弃**——parser 取 `fni` 后从未写入（值按**声明位序**绑定）：`P{b: 11, a: 22}` 静默得 `a=11,b=22`（rc=0 静默错值），字段名/顺序校验、缺字段均不存在；② **struct 字面量字段类型不比对声明**：`P{a: 1, b: "x"}`（b: int）、`P{a: 1}`（缺 b）、`P{a: 1, b: 3}`（b: Q 结构体）全部 rc=0 静默通过；③ **数组元素同质性不检查**：`[1, "x", 3]` rc=0；④ **struct 模式绑定未实现**（`P{a: x}` 中 `x` 报 N01 未定义——checker 对 `EXPR_STRUCTPAT` 直接返 `TI_UNIT`、ir_gen 返 -1）⇒ 模式分支的槽位修复为防御性，无可观测行为变化。以上四项另立条目。
 
+### 29. F5 同族剩余面（#28 修复时发现即登记，2026-09-11——struct/数组字面量的「名 / 型 / 同质性」三校验全缺 + struct 模式绑定未实现）
+- **现象（全部 rc=0 静默；RED 由 #28 实现者实测）**：
+  ① **struct 字段名被丢弃** —— parser 取 `fni` 后从未写入，字面量值按**声明位序**绑定：`P{b: 11, a: 22}` 静默得 `a=11, b=22`（**静默错值**级，字段名/顺序校验、缺字段检测均不存在）；
+  ② **字段类型不与声明比对** —— `P{a: 1, b: "x"}`（b 声明为 int）、`P{a: 1}`（缺 b）、`P{a: 1, b: 3}`（b 声明为 Q 结构体）**全部 rc=0 静默通过**；
+  ③ **数组元素同质性不检查** —— `[1, "x", 3]` rc=0；
+  ④ **struct 模式绑定未实现** —— `P{a: x}` 中 `x` 报 N01 未定义（checker 对 `EXPR_STRUCTPAT` 直接返 `TI_UNIT`、ir_gen 返 -1）⇒ #28 的模式分支修复为防御性、无观测变化。
+- **修复方向**：①②③ = checker 侧补齐（字段名/顺序/完整性检查 + 字段类型走 `type_compat_strict`/`type_equal` 判定 + 数组元素同质判定），诊断须**定位 + 非静默**（rc≥1）；④ = 独立特性（模式绑定），需 checker + ir_gen 联动，`EXPR_STRUCTPAT` 的槽位契约已由 #28 对齐。
+- **判据建议**：三条负控（各报定位诊断且 rc≠0）+ 正控（正确写法仍 rc=0）+ ELF / `.ccr` 逐字节 + 全回归（照 #28 的 `tests/selfhost/test_agg_slots.py` 风格扩例）。
+
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
 来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：
