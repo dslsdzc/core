@@ -24,6 +24,11 @@
 // 会把 bool↔string 静默错标，且两侧同错自洽 → 差异清单全成假信号。故本层用两张显式
 // 分支表按语义逐项分派（sh_native_ak / sh_base_ak）；守门用例 = bridge.str_ak /
 // bridge.bool_ak（type_selftest.cr）。
+// **R2 P2b Task 2：分派单源化**——同一映射此前有两份实现（本层 + 注册表 iface_registry.cr 的
+// iface_by_ty_code/iface_kind_of），不合一 = P2b 亲手制造「同一映射两份」（本批要治的病）。
+// 现本层两个入口**委托** `iface_by_ty_code`（唯一实现）；改动前的实现作为**字面拷贝**保留为
+// `sh_base_ak_legacy`/`sh_native_ak_legacy`（对照物，供 type_selftest.cr **全表对拍**；P5 删——
+// 登记入 TODO #24 的 P5 继承项）。影子证据链可比性依赖调用点签名不变（两入口签名原样）。
 // M1（Task 1 评审）：native 分派读**类型表本体**（kind == TYP_BASE 且 data == TY_* 码），
 // 不再依赖「init_types 行号序恰与 TI_* 码序一致」这一隐式等价（当前真、不保证）。
 //
@@ -66,17 +71,37 @@ SHADOW_MAP_INIT_CAP : int = 1024;
 // ——旧实现按行号白名单把它留给通用路径，两条路产出的项完全一致（仅缓存占用差异）。
 fn sh_native_ak(ti: int) -> int {
     if ti < 0 { return -1; }
+    // **原门保留**（P2b Task 2 的关键点）：本快路径只认「类型表本体 = TYP_BASE」的行；
+    // TYP_DYN 行与全部结构/命名行一律 -1（TI_DYN 走 sh_term_of_ti 的 TYP_DYN 分支，见文件头注）。
+    // ⚠ **不得**把本函数直接换成 iface_kind_of：后者对 TYP_DYN 行回 AK_DYN、对结构行回
+    // AK_SEQUENCE/…（= 注册表的分派面），与本层的「原生快路径」契约不同——两函数只用
+    // 同一个 TY_* 逐项分派表（iface_by_ty_code），门各自保留。
     if get_type_kind(ti) != TYP_BASE { return -1; }
-    return sh_base_ak(get_type_data(ti));
+    return iface_by_ty_code(get_type_data(ti));
 }
 
 // TYP_BASE 的 data（TY_*）→ AK_*：同款语义对应（TY 序与 TI 序一致，故与 AK 下标同样
 // 不可混用）。-1 = 无对应（调用方回退 AK_NAMED）。
+// R2 P2b Task 2：实现已**单源化**到 iface_registry.cr 的 `iface_by_ty_code`（唯一实现；
+// 逐项语义分派，含 TY_DEX_S→AK_DEX / TY_GENERIC_PARAM→AK_NAMED 两条已裁决灰格）。
 fn sh_base_ak(ty: int) -> int {
+    return iface_by_ty_code(ty);
+}
+
+// ─── 对照物（R2 P2b Task 2：改动前实现的**字面拷贝**；仅 type_selftest.cr 全表对拍用，P5 删）───
+// 用途 = `iface.by_ty_code_all_codes` / `iface.native_ak_all_rows`（逐 TY 码 × 逐 ti 行，非抽样）
+// 的旧版对照——**生产路径不调用**（影子/判定链路只经上面的委托版）。P5 删（TODO #24 继承项）。
+fn sh_native_ak_legacy(ti: int) -> int {
+    if ti < 0 { return -1; }
+    if get_type_kind(ti) != TYP_BASE { return -1; }
+    return sh_base_ak_legacy(get_type_data(ti));
+}
+
+// TY_DEX_S（dex 定点形式）的计划表未列项：其值域仍是 dex（缩放整数表示），故归 AK_DEX
+// （引擎无「同值域不同表示」的区分——表示层差异不进类型身份）。
+fn sh_base_ak_legacy(ty: int) -> int {
     if ty == TY_INT { return AK_INT; }
     if ty == TY_DEX { return AK_DEX; }
-    // TY_DEX_S（dex 定点形式）的计划表未列项：其值域仍是 dex（缩放整数表示），
-    // 故归 AK_DEX（引擎无「同值域不同表示」的区分——表示层差异不进类型身份）。
     if ty == TY_DEX_S { return AK_DEX; }
     if ty == TY_BOOL { return AK_BOOL; }
     if ty == TY_STRING { return AK_STRING; }

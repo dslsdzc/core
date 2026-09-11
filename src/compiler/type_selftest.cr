@@ -566,6 +566,57 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("iface.permits_bad_op",
         (iface_permits(AK_INT, -1) == 0 && iface_permits(AK_INT, 63) == 0 && iface_permits(9999, OP_ADD) == 0), 1);
 
+    // --- R2 P2b Task 2：`iface_kind_of` 单源化——桥接分派（sh_native_ak/sh_base_ak）与注册表合一 ---
+    // 判据 = **全表对拍**（非抽样）：生产入口（委托版）与 legacy 版（改动前实现的字面拷贝，
+    // 仅存于此对拍面；ty_shadow.cr 注明 P5 删）逐格相同。只比「两版相等」会漏两类错——
+    // 入口被换成第三个实现、两版一起错 ⇒ 另加③~⑥的**显式**断言（反真空/灰格/门/下标不 1:1）。
+    // ① TY 码面：全部 9 个 TY_* 码（含 TY_DEX_S / TY_GENERIC_PARAM 两条已裁决灰格）+ 未映射码
+    t2_codes := alloc(10 * 8);
+    w64(t2_codes, 0, TY_INT);            w64(t2_codes, 8, TY_DEX);
+    w64(t2_codes, 16, TY_BOOL);          w64(t2_codes, 24, TY_STRING);
+    w64(t2_codes, 32, TY_UNIT);          w64(t2_codes, 40, TY_NEVER);
+    w64(t2_codes, 48, TY_CHAR);          w64(t2_codes, 56, TY_GENERIC_PARAM);
+    w64(t2_codes, 64, TY_DEX_S);         w64(t2_codes, 72, 999);
+    t2_ty_bad : ., mut = 0;
+    t2_i : ., mut = 0;
+    loop {
+        if t2_i >= 10 { break; }
+        t2_code := r64(t2_codes, t2_i * 8);
+        if iface_by_ty_code(t2_code) != sh_base_ak_legacy(t2_code) { t2_ty_bad = t2_ty_bad + 1; }
+        t2_i = t2_i + 1;
+    }
+    total = total + 1; fails = fails + ts_check("iface.by_ty_code_all_codes", t2_ty_bad, 0);
+    // ② 行号面全表：逐 ti ∈ [0, g_type_count)（含 TI_DYN 行、TI_DEX_S 占位行与上方结构/命名行）
+    t2_ti_bad : ., mut = 0;
+    t2_j : ., mut = 0;
+    loop {
+        if t2_j >= g_type_count { break; }
+        if sh_native_ak(t2_j) != sh_native_ak_legacy(t2_j) { t2_ti_bad = t2_ti_bad + 1; }
+        t2_j = t2_j + 1;
+    }
+    total = total + 1; fails = fails + ts_check("iface.native_ak_all_rows", t2_ti_bad, 0);
+    // ③ **反真空哨兵**（两处 loop 是本 Task 的判据本体，不得空转假绿）：
+    //    ⓐ 扫描计数：码面 10 个键全扫过（且解码真读回写入值）；行面恰为 g_type_count 行且 ≥ 9；
+    //    ⓑ 比较是活的：对**已知不等**的一对（未映射码 -1 vs TY_INT → AK_INT）必须报不等。
+    total = total + 1; fails = fails + ts_check("iface.scan_coverage",
+        (t2_i == 10 && r64(t2_codes, 56) == TY_GENERIC_PARAM && r64(t2_codes, 64) == TY_DEX_S &&
+         t2_j == g_type_count && t2_j >= 9), 1);
+    total = total + 1; fails = fails + ts_check("iface.compare_is_live",
+        (iface_by_ty_code(999) == sh_base_ak_legacy(TY_INT)), 0);
+    // ④ 生产入口**确实在委托**（逐项钉死；含两条灰格与未映射码）
+    total = total + 1; fails = fails + ts_check("iface.bridge_delegates",
+        (sh_base_ak(TY_INT) == AK_INT && sh_base_ak(TY_STRING) == AK_STRING && sh_base_ak(TY_BOOL) == AK_BOOL &&
+         sh_base_ak(TY_DEX_S) == AK_DEX && sh_base_ak(TY_GENERIC_PARAM) == AK_NAMED && sh_base_ak(999) == -1 &&
+         sh_native_ak(TI_INT) == AK_INT && sh_native_ak(TI_STR) == AK_STRING), 1);
+    // ⑤ **原门保留**（委托不得把 sh_native_ak 变成 iface_kind_of）：DYN 行/结构行/负号 → -1，
+    // 而同时注册表侧对 DYN 行回 AK_DYN——两函数契约不同，各自钉一条。
+    total = total + 1; fails = fails + ts_check("iface.bridge_gate_kept",
+        (sh_native_ak(TI_DYN) == -1 && sh_native_ak(ifc_arr) == -1 && sh_native_ak(ifc_named) == -1 &&
+         sh_native_ak(-1) == -1 && iface_kind_of(TI_DYN) == AK_DYN), 1);
+    // ⑥ 语义分派守卫（P1 血泪：AK/TI 下标不 1:1）——若哪天有人「按下标直传」，本行必红
+    total = total + 1; fails = fails + ts_check("iface.dispatch_no_index_shortcut",
+        (iface_ti_of(AK_STRING) != AK_STRING && iface_ti_of(AK_BOOL) != AK_BOOL && TI_STR != TI_BOOL), 1);
+
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }
     return 0;

@@ -12,7 +12,7 @@
 //
 // ⚠️ **AK↔TI 下标不 1:1（P1 血泪，硬性）**：`AK_STRING=2` 而 `TI_STR=3`、`AK_BOOL=3` 而
 //    `TI_BOOL=2`（ty_shadow.cr:18-26）。本表 `ak`/`ti_row` 两列**逐项按语义写死**，禁止任何
-//    数值直传/下标互换；`iface_by_ty_code` 同 `sh_base_ak`（ty_shadow.cr:75-88）逐项分派。
+//    数值直传/下标互换；`iface_by_ty_code` 即改动前 `sh_base_ak`（ty_shadow.cr）的语义，逐项分派。
 //    守门 = type_selftest.cr 的 `iface.*_ti` 逐条目用例（bool/string 两行互换即红）。
 //
 // ⚠️ **声明序（本仓库 globals 可见性）**：本文件位于 `checker.cr` **之后**（清单序 =
@@ -161,8 +161,9 @@ fn iface_lit_ak(lit_kind: int) -> int {
     return r64(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_AK);
 }
 
-// TY_*（基类型码）→ AK_*：逐项语义分派（= 现 sh_base_ak 的语义；Task 2 起桥接层委托本函数
-// ⇒ 本函数是**唯一**实现）；-1 = 无对应。
+// TY_*（基类型码）→ AK_*：逐项语义分派（**唯一实现在此**）；-1 = 无对应。
+// P2b Task 2 单源化：桥接层 `sh_base_ak` 已改为**薄委托**本函数（改动前的字面拷贝保留为
+// ty_shadow.cr 的 `sh_base_ak_legacy`，仅 type_selftest.cr 全表对拍用，P5 删）。
 //   TY_DEX_S → AK_DEX（同值域不同表示——表示层差异不进类型身份，ty_shadow.cr:78-80 已裁决）
 //   TY_GENERIC_PARAM → AK_NAMED（泛型参数哨兵 → 命名类，不展开；ty_shadow.cr:86 已裁决）
 fn iface_by_ty_code(ty: int) -> int {
@@ -178,8 +179,14 @@ fn iface_by_ty_code(ty: int) -> int {
     return -1;
 }
 
-// checker 类型行号 → AK_*（-1 = 越界/负）；Task 2 起为**唯一**实现（桥接层委托）。
+// checker 类型行号 → AK_*（-1 = 越界/负）。
 // 分派表 = 侦查 §4.1 的 checker 侧原子宇宙 13 类，与条目表的 ak 列同源。
+// ⚠ P2b Task 2 边界（**勿混**）：桥接层 `sh_native_ak` **不**调本函数——它保留自己的
+// `get_type_kind != TYP_BASE → -1` 门（原生快路径契约：TI_DYN 行经 sh_term_of_ti 的 TYP_DYN
+// 分支，结构/命名行走通用路径），只共用上面的 `iface_by_ty_code` 一张 TY 码表。故本函数对
+// TYP_DYN 行回 AK_DYN、对结构/命名行回其类，而 sh_native_ak 对同样这些行回 -1——「单源化」
+// = 两入口共用**逐项分派表**，不是把两个入口合并成同一语义（type_selftest.cr 的
+// `iface.bridge_gate_kept` 把该差异钉在红）。
 fn iface_kind_of(ti: int) -> int {
     k := get_type_kind(ti);
     if k < 0 { return -1; }                       // 负值/越界行（get_type_kind 已做范围闸）
