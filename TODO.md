@@ -166,6 +166,11 @@
 - **关联**：波 1 Task 6 评审 Important（.superpowers/sdd/w1-task-6-report.md）；TODO #8 ④（22 参 runtime 用例）同属波 1 遗留收口。
 
 ### 11. 解释器 callee 内联路径缺 opcode（枚举 / 裸指针 / 切片 / 边界检查族）→ 双路径分叉（2026-09-10 R1 终审扩写——Important，本批 15 例未覆盖）
+- **✅ 已修（2026-09-11，提交 `9068629c`（并入后 `c589c47b` 系）；报告 `.superpowers/sdd/fix-interp11-report.md`）**：
+  改法 = **分派统一为单实现**（`ir_interp_call` / `ir_interp_run_fn`：callee 内联臂与主循环臂共用同一实现，不再两处各写一份）——比逐个补 opcode 更彻底；18 族按「同语义同守卫」补齐，另补 **嵌套/递归内联**（重入帧保存恢复 + 深度守卫 + 中止码沿调用链上抛，**绝不静默落 0**）。
+  回归 = `tests/selfhost/test_interp_parity.py` **23/23**（interp callee ≡ interp main ≡ ELF oracle）；**RED 对照**（换回修复前 interp.cr 重建）= 4/23，TODO 原件 interp `0`/SIGSEGV(`-11`)/`0` vs ELF `33`/`33`/`7` → GREEN 全对齐。
+  判据：selftest-types 95/95 · test_compile/test_purity PASS · test_ccr_v7 27/27 · **ELF 逐字节 `95084e7b…d475` IDENTICAL**。
+  **余留**：① `IR_DYN_TAG`(41) 全仓无 ir_gen 发射点 = 当前不可达（内联侧为防御性对齐，建议另单）；② 深度守卫超限 interp rc=255+诊断 而 ELF SIGSEGV（**都非静默**，行为不同）；③ `IR_FNADDR=0`/`ARENA no-op` 为既存近似，判据只钉「双路径一致」不钉「与 ELF 等价」。
 - **现象**：解释器（interp.cr）的 callee 内联分派相对主循环**缺 18 个 opcode**（终审实测清单：4/17/18/23/24/25/26/27/28/29/30/41/42/43/44/45/48/51）——Task 4 只补了聚合族（7/8/11-16/31），其余仍缺。
 - **复现（终审亲跑）**：① 枚举：`build/review_t4/p14_enum_in_callee.cr` interp rc=0 vs ELF rc=33（interp 错值）；`build/review_t4/p15_enum_split.cr` interp rc=139（SIGSEGV）vs ELF rc=33。② 裸指针解引用：`g:[int;3]=[5,6,7]; fn f()->int{ p:=&g[2]; return *p; } fn main()->int{return f();}` → interp rc=0 vs ELF rc=7。ELF 侧均正确。
 - **机制**：外函数内联路径缺 opcode 分派（主循环有、callee 路径无）；静默分叉类（rc 不反映）。
