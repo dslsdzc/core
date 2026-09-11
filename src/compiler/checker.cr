@@ -235,6 +235,9 @@ fn init_types() {
     // 调 sh_term_of_ti，长驻进程（corelsp 每请求 init_types）复用行号时会命中陈旧 ti→term
     // ⇒ 两个不同类型被判等（静默漏报；评审实证见 ty_shadow.cr:sh_map_reset 注记）。
     sh_map_reset();
+    // R2 P3 Task 0：展开层缓存（ti→展开项）**同理必须作废**（同因：行号空间复用 ⇒ 陈旧
+    // ti→展开项命中 = 把上一请求的类型结构安到当前行上；同 sh_map_reset 的评审 Critical）。
+    sh_unf_map_reset();
     // R2 P2a Task 3：判定回落计数随之归零（类型行号空间作废 → 计数只对本编译期有意义；
     // LSP 每请求走 check_all → 本行 → 计数不跨请求累积）
     g_replace_unknown = 0; g_replace_bridge = 0;
@@ -850,6 +853,35 @@ fn find_iface(name_ni: int) -> int {
         i = i + 1;
     }
     return -1;
+}
+
+// ─── R2 P3 Task 0：展开层的「行 → 声明」入口（名字解析归 checker；展开层只读声明表）───
+// ti 接受两种形态（与桥接 sh_term_of_ti 的 TYP_NAMED / TYP_GENERIC_APPLY 两分支同域）：
+//   TYP_NAMED（data = 名字 ni）/ TYP_GENERIC_APPLY（data = 基型行；基型须为 TYP_NAMED）。
+// -1 = 既非命名行也非泛型应用行 / 基型非命名行。**只读**（不改类型表、不报诊断、不分配）。
+fn decl_name_of_ti(ti: int) -> int {
+    if ti < 0 { return -1; }
+    k := get_type_kind(ti);
+    if k == TYP_NAMED { return get_type_data(ti); }
+    if k == TYP_GENERIC_APPLY {
+        base := get_type_data(ti);
+        if get_type_kind(base) == TYP_NAMED { return get_type_data(base); }
+    }
+    return -1;
+}
+
+// 命名/泛型应用行 → struct 声明行（-1 = 非此二形态 / 该名字未声明为 struct）
+fn find_struct_row_of(ti: int) -> int {
+    ni := decl_name_of_ti(ti);
+    if ni < 0 { return -1; }
+    return find_struct(ni);
+}
+
+// 同上 → enum 声明行
+fn find_enum_row_of(ti: int) -> int {
+    ni := decl_name_of_ti(ti);
+    if ni < 0 { return -1; }
+    return find_enum(ni);
 }
 
 fn get_type_name(ti: int) -> int {

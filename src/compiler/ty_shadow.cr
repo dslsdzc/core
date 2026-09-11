@@ -2,6 +2,9 @@
 // R2 P1：影子对拍——① 桥接层：把 checker 的类型表行号（ti）翻译成 P0 引擎的类型项
 // （term，Task 1）；② 判定挂点：把引擎判定与旧判定逐点对账分类
 // （Task 2，sh_compare/sh_site_begin/sh_report）。
+// R2 P3 Task 0：**引擎展开层**（文件末段）——named/struct/enum/generic-apply → 结构项，
+// 只服务「满足判定」与「穷尽性域/模式项」两条路径；等价判定保持原子名义（边界与理由见
+// 该段头注——裁错即判定全面漂移）。
 // R2 P2a Task 3：判定权已移交引擎（`type_equal` = 快路径 + 桥接 + `ty_equiv`），影子挂点
 // 仍在 `type_equal` 包装层，**对照物切到 `type_equal_legacy`**（旧结构判等，P5 删）：
 // sh_compare 的 `old_ok` 现在喂的是 legacy 结论 → 分类语义 = 「引擎 vs 旧结构判等」，
@@ -479,4 +482,250 @@ fn sh_dump_write(path: string) -> int {
     print(" entries -> ");
     println(path);
     return 0;
+}
+
+// ═══════════════ R2 P3 Task 0：引擎展开层（named/struct/enum/generic-apply → 结构项）═══════════════
+// **语义边界（裁错即判定全面漂移——本层第一性约束）**：展开**只服务**两条路径
+//   ① 满足判定 `T <: 形状`（P3 Task 2 横切形状 / Task 6 用户接口；本批 = type_engine.cr 的
+//      `iface_satisfies` 占位）
+//   ② 穷尽性域/模式项（`sh_enum_domain_term` / `sh_variant_term`，P3 Task 3）
+// **等价/包含判定（`type_equal` → `type_equal_engine` → `sh_term_of_ti` → `ty_equiv`）一律
+// 不经本层**：命名类型在等价面的身份 = **原子名义**（AK_NAMED + 行号；`sh_term_of_ti` 的
+// NAMED/GENERIC_* 分支本批**一行未动**）。把展开项接进等价判定 = 两个**同形不同名**的
+// struct 被判等价（语义漂移），并推翻 P2a 对拍归零基线（`old_stricter=0 / old_looser=0`
+// ——那条基线同时是 P5 删 `type_equal_legacy` 的前提）。守门用例 = `unf.nominal_*` 三例
+// （双钉：展开项**结构相等** ∧ 桥接项 `ty_equiv` 仍 -1 ∧ `type_equal` 仍 false 且回落计数 +1）。
+// 深度 = **一层**：字段/变体子项一律走既有 `sh_term_of_ti`（其命名/泛型分支**不展开**）
+// ⇒ 递归结构（`struct Node { next: *Node }`）在第二层即终止；一层不足 → 按引擎既有约定
+// **-1 上抛**（-1 = 不可展开/未覆盖面，消费方按三态处理——**不得**静默判否）。
+// **非纯只读（诚实登记）**：字段类型节点经 checker 的 `res_type_node` 解析（**唯一实现**——
+// 本层不复制其语义），故对非基型字段可追加类型行（alloc_type/alloc_named_type）、并可能报
+// EC_N_GENERIC_TYPE。与 checker.cr EXPR_FIELD（:2583-2606）的字段解析**同源同径**。本批零
+// 生产消费者；接入判定路径（Task 2/6）前须评估「判定中途分配类型行」的时序影响。
+// 预算：展开步进计入引擎预算（`tt_step`）——耗尽 → -1（不得当 0/1）。范式与
+// `ty_budget_reset` 的窗口隔离兼容（消费方在查询前 reset ⇒ 展开步数计入该窗口）。
+
+// ─── 展开项布局（Task 3/4/6 消费约定；按**引擎比较面**设计）───
+// ⚠ 引擎的原子比较只看 `a`（原子类）与 `c`（参数链）两槽（lit_implies:175-182；`b` 槽是
+// **标注**、不参与比较——AK_NAMED 的 b 槽 = 行号即此约定）⇒ **语义身份必须入参数链**，
+// 否则两类不同声明会静默合并（例：两个枚举的同名变体、两个不同枚举的域）。
+//   struct → tt_atom(AK_PRODUCT, ti, 字段项链)          // 链序 = 声明序；**结构项**（同形同项）
+//   enum   → 各变体项之**并**（左深 union）= 域         // 空枚举 → ⊥（无值可取，见下）
+//   变体项 → tt_atom(AK_SUM, ti, [枚举名 ni, 变体名 ni]) // 身份 = (枚举, 变体) 两名**入链**
+// 变体项**不含 payload**：枚举表只存 payload 的**裸 TY 码**（parser.cr:1601 的 unpack_type；
+// 非基型塌缩为 0 = TY_INT，与「payload 是 int」**不可区分**）⇒ 含入即静默谎报；故 payload
+// 不入项（**未覆盖面登记**：payload 面的满足判定归 Task 4——若需要，须先扩枚举表存 payload
+// 类型节点，照 struct 的 OFF_SI_FIELD_TYPE_NODES 先例）。穷尽性按变体身份判定不受影响
+// （现状模式面亦不按 payload 分解——EXPR_ENUMPAT 的子模式是另一条路径）。
+
+UNF_MAP_INIT_CAP : int = 256;
+
+// 展开缓存随类型表作废（同 sh_map_reset 同因同式：init_types 行号空间复用 ⇒ 陈旧 ti→展开项
+// 命中 = 把上一个请求的类型结构安到当前行上；长驻 corelsp 每请求一次 init_types）。
+fn sh_unf_map_reset() {
+    g_unf_map_cap = 0;
+    g_unf_entries = 0;
+    g_unf_hits = 0;
+}
+
+fn sh_unf_cap_init() {
+    if g_unf_map_cap <= 0 {
+        nc : ., mut = UNF_MAP_INIT_CAP;
+        nb := alloc(nc * 16);
+        i : ., mut = 0;
+        loop { if i >= nc { break; } w64(nb, i * 16, -1); i = i + 1; }
+        g_unf_map = nb;
+        g_unf_map_cap = nc;
+    }
+}
+
+// 无守卫探测（**只可在扩容守卫之后调用**；重建重放借道）——形态照 sh_map_find_nogrow
+// （typed 探测用 ret + break + 尾 return；函数体不以无 break 的 loop 收尾——自托管 checker
+// 对该形态有 TF01 误报面，见该函数注记）。
+fn sh_unf_find_nogrow(ti: int) -> int {
+    cap := g_unf_map_cap;
+    p : ., mut = tt_mod(ti, cap);
+    ret : ., mut = -1;
+    loop {
+        k := r64(g_unf_map, p * 16);
+        if k < 0 { ret = p; break; }
+        if k == ti { ret = p; break; }
+        p = p + 1; if p >= cap { p = 0; }
+    }
+    return ret;
+}
+
+fn sh_unf_find(ti: int) -> int {
+    sh_unf_cap_init();
+    // 装填因子守卫（**必须在探测前**）：表满且键不存在时开放寻址永不退出（死循环）
+    if (g_unf_entries + 1) * 2 >= g_unf_map_cap { sh_unf_rehash(); }
+    return sh_unf_find_nogrow(ti);
+}
+
+// 扩容 = 重建 + **重放既有条目**（引擎 grow_tt_index / 桥接 sh_map_rehash 同式）；计数随重放重算
+fn sh_unf_rehash() {
+    old := g_unf_map;
+    old_cap := g_unf_map_cap;
+    nc : ., mut = old_cap * 2;
+    if nc < UNF_MAP_INIT_CAP { nc = UNF_MAP_INIT_CAP; }
+    nb := alloc(nc * 16);
+    i : ., mut = 0;
+    loop { if i >= nc { break; } w64(nb, i * 16, -1); i = i + 1; }
+    g_unf_map = nb;
+    g_unf_map_cap = nc;
+    g_unf_entries = 0;
+    j : ., mut = 0;
+    loop {
+        if j >= old_cap { break; }
+        k := r64(old, j * 16);
+        if k >= 0 {
+            s := sh_unf_find_nogrow(k);
+            w64(g_unf_map, s * 16, k);
+            w64(g_unf_map, s * 16 + 8, r64(old, j * 16 + 8));
+            g_unf_entries = g_unf_entries + 1;
+        }
+        j = j + 1;
+    }
+}
+
+fn sh_unf_hits() -> int { return g_unf_hits; }
+fn sh_unf_entries() -> int { return g_unf_entries; }
+
+// 枚举变体名 → 变体下标（-1 = 该枚举无此变体名）。线性扫（≤ MAX_ENUM_VARIANTS=16）。
+fn sh_enum_variant_index(ea: int, name_ni: int) -> int {
+    i : ., mut = 0;
+    ret : ., mut = -1;
+    loop {
+        if i >= ei_variant_count(ea) { break; }
+        if ei_variant_name(ea, i) == name_ni { ret = i; break; }
+        i = i + 1;
+    }
+    return ret;
+}
+
+// struct 第 fi 字段 → 项（-1 = 不可展开）。泛型形参代入照 checker.cr EXPR_FIELD 的路径
+// （那里返回 ti、消费方是 checker；此处返回项）：字段节点为 EXPR_IDENT 且名字 ∈ 该 struct 的
+// 泛型形参名表 ⇒ 从**泛型应用实参**（ga，g_gen_apply_data: [count, arg1, …]）取对应实参项；
+// 其余（非形参 / 非应用形态 / 实参缺位）→ 经 res_type_node 解析字段类型节点。
+// 注：非应用形态下泛型形参保持**名义**（res_type_node 取该形参的类型行 ⇒ AK_NAMED 原子）——
+// 不假装知道实参是什么（EXPR_FIELD 的落空路径同款）。嵌套代入（`Box[Box[T]]`）现状不可达：
+// 形参只做**一层**代入（与 checker 现状一致；F4 同族缺陷，TODO #21 / Task 5 收口）。
+fn sh_struct_field_term(sa: int, fi: int, ga: int) -> int {
+    fnode := si_field_type_node(sa, fi);
+    if fnode < 0 { return -1; }
+    if ast_kind(fnode) == EXPR_IDENT {
+        fni := ast_int_val(fnode);
+        if is_struct_generic(sa, fni) {
+            if ga >= 0 && get_type_kind(ga) == TYP_GENERIC_APPLY {
+                gstart := get_type_extra(ga);
+                gcnt := r64(g_gen_apply_data, gstart * 8);
+                gpi : ., mut = 0;
+                loop {
+                    if gpi >= si_generic_count(sa) { break; }
+                    if si_generic_name(sa, gpi) == fni {
+                        if gpi < gcnt { return sh_term_of_ti(r64(g_gen_apply_data, (gstart + 1 + gpi) * 8)); }
+                        break;   // 实参缺位 → 落空到名义项（下方 res_type_node），不得取越界槽
+                    }
+                    gpi = gpi + 1;
+                }
+            }
+        }
+    }
+    fti := res_type_node(fnode);
+    if fti < 0 { return -1; }
+    return sh_term_of_ti(fti);
+}
+
+// struct 命名行 / 泛型应用行 → AK_PRODUCT（参数链 = 逐字段项，**声明序**）。
+// -1 = 不可展开（既非命名行也非泛型应用行 / 名字未声明为 struct / 任一字段不可展开 / 预算耗尽）。
+fn sh_struct_term(ti: int) -> int {
+    if ti < 0 { return -1; }
+    if get_type_kind(ti) < 0 { return -1; }          // 行号越界（ti ≥ g_type_count）
+    sa := find_struct_row_of(ti);
+    if sa < 0 { return -1; }
+    slot := sh_unf_find(ti);
+    if r64(g_unf_map, slot * 16) == ti {
+        g_unf_hits = g_unf_hits + 1;
+        return r64(g_unf_map, slot * 16 + 8);
+    }
+    ga : ., mut = -1;
+    if get_type_kind(ti) == TYP_GENERIC_APPLY { ga = ti; }
+    // CONS 链**逆序构造**（i 自末尾向前）：DAG 项不可变，正向追加需改写已建项；逆序构造的
+    // 结果顺序仍 = 声明序（照 sh_tuple_to_product 同款同因）。
+    tail : ., mut = tt_nil();
+    i : ., mut = si_field_count(sa) - 1;
+    loop {
+        if i < 0 { break; }
+        if tt_step() == -1 { return -1; }             // 预算耗尽 → 上抛（不得当「空 product」）
+        ft := sh_struct_field_term(sa, i, ga);
+        if ft < 0 { return -1; }                      // 任一字段不可展开 ⇒ 整项不可展开（不缓存）
+        tail = tt_cons(ft, tail);
+        i = i - 1;
+    }
+    term := tt_atom(AK_PRODUCT, ti, tail);
+    // 写回前**重探**（字段解析期间可能已扩容——照 sh_term_of_ti 注记②同款）
+    slot2 := sh_unf_find(ti);
+    if r64(g_unf_map, slot2 * 16) == ti {
+        g_unf_hits = g_unf_hits + 1;
+        return r64(g_unf_map, slot2 * 16 + 8);
+    }
+    w64(g_unf_map, slot2 * 16, ti);
+    w64(g_unf_map, slot2 * 16 + 8, term);
+    g_unf_entries = g_unf_entries + 1;
+    return term;
+}
+
+// 变体名 → 变体项（穷尽性**模式项**用；与域中的对应变体项**同一构造**——两者必须逐位相同，
+// 否则补集判定失真）。name_ni 必须是该枚举**声明过的**变体名（否则 -1：不得为未声明变体臆造项）。
+// ti 接受命名行与泛型应用行（变体身份与实参无关——payload 不入项时 Option[int]/Option[str]
+// 的变体集相同，正是穷尽性所需）。
+fn sh_variant_term(ti: int, name_ni: int) -> int {
+    ea := find_enum_row_of(ti);
+    if ea < 0 { return -1; }
+    if sh_enum_variant_index(ea, name_ni) < 0 { return -1; }
+    return tt_atom(AK_SUM, ti, tt_cons(ei_name(ea), tt_cons(name_ni, tt_nil())));
+}
+
+// enum 命名行 / 泛型应用行 → **域** = 各变体项之并（左深 union）。
+// -1 = 不可展开（非枚举行 / 预算耗尽）。空枚举（0 变体）→ ⊥ = 无值可取（**唯一**的
+// 「展开成功但域为空」形态；Task 3 判穷尽时对该形态须显式裁决——空域在补集语义下恒穷尽）。
+fn sh_enum_domain_term(ti: int) -> int {
+    if ti < 0 { return -1; }
+    if get_type_kind(ti) < 0 { return -1; }
+    ea := find_enum_row_of(ti);
+    if ea < 0 { return -1; }
+    slot := sh_unf_find(ti);
+    if r64(g_unf_map, slot * 16) == ti {
+        g_unf_hits = g_unf_hits + 1;
+        return r64(g_unf_map, slot * 16 + 8);
+    }
+    acc : ., mut = tt_bot();
+    i : ., mut = 0;
+    loop {
+        if i >= ei_variant_count(ea) { break; }
+        if tt_step() == -1 { return -1; }
+        v := sh_variant_term(ti, ei_variant_name(ea, i));
+        if v < 0 { return -1; }
+        acc = tt_union(acc, v);
+        i = i + 1;
+    }
+    slot2 := sh_unf_find(ti);
+    if r64(g_unf_map, slot2 * 16) == ti {
+        g_unf_hits = g_unf_hits + 1;
+        return r64(g_unf_map, slot2 * 16 + 8);
+    }
+    w64(g_unf_map, slot2 * 16, ti);
+    w64(g_unf_map, slot2 * 16 + 8, acc);
+    g_unf_entries = g_unf_entries + 1;
+    return acc;
+}
+
+// 接口 → 形状项（方法集 = product of fn）——**本批为占位，恒 -1**：
+// 现状接口方法签名存**裸 TY_***（parser.cr:1671/1685 的 unpack_type ⇒ 无法表达命名/泛型类型），
+// 且 P2b 未交付接口条目/满足关系（P3 计划附录 A.3-①）⇒ 形状项**无处可建**（建出来即谎报形状）。
+// 接管 = P3 Task 6（签名类型项化 + 条目 + iface_satisfies）。三态纪律：此处 -1 = 未覆盖面，
+// **不得**被消费方当 0（不满足）或 1（满足）用。
+fn sh_iface_shape_term(iface_ni: int) -> int {
+    if iface_ni < 0 { return -1; }
+    return -1;
 }

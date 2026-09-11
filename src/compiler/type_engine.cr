@@ -482,3 +482,18 @@ fn ty_disjoint(a: int, b: int) -> int {
     if x == 0 { return 1; }
     return 0;
 }
+
+// ─── R2 P3 Task 0：满足判定入口（**占位**；P3 Task 2/6 接管）───
+// 语义（P3 计划 Task 0「语义边界」）：满足判定 = 左项经**展开层**（ty_shadow.cr 末段：
+// struct → product / enum → sum 域）展开后对**形状项**的包含判定；**等价/包含判定
+// （type_equal 路径）不经本入口**——命名类型在等价面保持原子名义（理由与守门用例见
+// ty_shadow.cr 展开段头注）。
+// 现状 = **恒三态 -1**：P2b 未交付接口条目/满足关系（P3 计划附录 A.3-①），且形状项构造
+// （sh_iface_shape_term）亦为占位（接口签名类型项化归 Task 6）⇒ 无形状项可判。
+// 三态纪律：-1 = 未覆盖/未知，**不得**被消费方当 0（不满足）或 1（满足）用——故本占位
+// 只可能「保守不判」，不可能静默放宽。
+// 接管：P3 Task 2（横切形状：sequence / 可索引 / 可迭代 / product）/ Task 6（用户接口 + impl 契约）。
+fn iface_satisfies(t_ti: int, iface_ni: int) -> int {
+    if t_ti < 0 || iface_ni < 0 { return -1; }
+    return -1;
+}

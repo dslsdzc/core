@@ -310,6 +310,17 @@ g_shadow_site_counts : string, mut; g_shadow_site_cap : int, mut;
 // 时侧表随之惰性重建，防「陈旧 name→ti 复用」把已失效行号当命中（silent miscompile）。
 g_named_dedup : string, mut;      g_named_dedup_cap : int, mut;   g_named_dedup_count : int, mut;
 
+// R2 P3 Task 0：引擎展开层的 per-ti 缓存（开放寻址，16B/条 {ti, 展开项}）。
+// **第二张表**（与 g_shadow_map 键空间相同 = ti，但**值语义不同**）：本表存**展开项**
+// （struct → AK_PRODUCT / enum → AK_SUM 域，见 ty_shadow.cr 展开段），桥接表存**原子名义项**
+// （命名类型的等价面身份）。同一 ti 两值不同 ⇒ **不得**共用一张表——共用即让展开项进入
+// 等价判定 = 同形不同名类型被判等价 = 语义漂移（裁错边界，见 ty_shadow.cr 头注）。
+// 生命周期同 g_shadow_map：init_types() 置 cap=0（sh_unf_map_reset）→ 类型表重置（行号空间
+// 作废）时惰性重建，防陈旧 ti→展开项跨请求复用。探测/装填守卫/重建重放/回写重探见
+// ty_shadow.cr（与桥接缓存同式同因；count 只增不减、恒等于占用槽数）。
+g_unf_map : string, mut;          g_unf_map_cap : int, mut;
+g_unf_entries : int, mut;         g_unf_hits : int, mut;
+
 // 效应/纯度修正 Task 1（P0 插队批）：泛型实例 → 源映射侧表（24B/条
 // {src_fi, type_args_ni, inst_fi}，布局同 monomorph.cr 的 g_gen_instances）。
 // monomorph 于实例创建时追加（gen_create_instance），compute_all_purity 读它回填

@@ -39,6 +39,25 @@ fn tt_probe_wide_union(depth: int) -> int {
     return acc;
 }
 
+// R2 P3 Task 0 夹具：声明单 `int` 字段 struct（a: int），返回其命名行。本通道不经
+// parser/check_all ⇒ struct 声明表照 parser.cr:1539-1560 的写槽序人工落（字段名 /
+// 裸码槽 / 类型节点 / 字段数），类型节点照 parse_type 的产物形态构造。
+fn ts_unf_mk_int_struct(name: string) -> int {
+    sa := add_struct(name);
+    w64(g_structs, sa * ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES, str_intern("a"));
+    w64(g_structs, sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES, TY_INT);
+    w64(g_structs, sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES, alloc_node(0, 0, 0, 0, 0, TY_INT, 0, 0, 0));
+    w64(g_structs, sa * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, 1);
+    return alloc_named_type(str_intern(name));
+}
+
+// 域项的析取支计数（「变体数」判据用）：只按引擎项形态走 union 树，**不与实现共享计数逻辑**
+// （独立重算——否则同源同错自洽假绿）。⊥/单支 → 1。
+fn ts_unf_union_leaves(t: int) -> int {
+    if tt_tag(t) == TT_UNION { return ts_unf_union_leaves(tt_a(t)) + ts_unf_union_leaves(tt_b(t)); }
+    return 1;
+}
+
 fn type_selftest_run() -> int {
     fails : ., mut = 0;
     total : ., mut = 0;
@@ -1025,6 +1044,182 @@ fn type_selftest_run() -> int {
          res_type_node(t6_oob) == TI_UNIT && res_call_type(t6_oob, -1) == TI_UNIT), 1);
     total = total + 1; fails = fails + ts_check("t6.neg_node_unit",
         (res_type_node(-1) == TI_UNIT && res_call_type(-1, -1) == TI_UNIT), 1);
+
+    // ═══ R2 P3 Task 0：引擎展开层（named/struct/enum/generic-apply → 结构项）═══
+    // 判据面 = ① 正向形态：字段**声明序** / 变体数 / 泛型实参代入；② **名义不变量双钉**
+    // （等价面零漂移：展开项结构相等 ∧ 桥接项 ty_equiv 仍 -1 ∧ type_equal 仍 false）；
+    // ③ 缺口上抛（不可展开 → -1，**不得**静默判否）；④ 展开缓存语义（命中计数 / 失败不入表）；
+    // ⑤ 域/模式项在引擎穷尽性上的**端到端**前哨（Task 3 判据的种子）。
+    // 夹具全部人造行（本通道不经 parser/check_all）：声明表照 parser 的写槽序落，类型节点照
+    // parse_type 的产物形态构造（基型节点 kind=0 + type_val=TY_*；EXPR_IDENT = 泛型形参/
+    // 命名类型；EXPR_ARRAY = `[T;N]`）。
+    init_types();                    // 干净起点（类型行号空间复位；原生 9 行在前）
+    ty_budget_reset(200000);
+
+    // 夹具 ①：struct UnfBoxU[T] { val: T }（泛型字段 = 形参 ⇒ 实参代入判据）+ 两个应用行
+    // 形参照 collect_decls（checker.cr:941-950）登记为符号——**生产路径 struct 泛型形参必在
+    // 符号表**（res_type_node 经 find_gsym 解析形参名），本通道照此登记 = 走真实解析路径。
+    unf_gp := str_intern("UnfTGparamU");
+    def_sym(unf_gp, SYM_TYPE, alloc_type(TYP_GENERIC_PARAM, unf_gp, 0), -1);
+    unf_box_sa := add_struct("UnfBoxU");
+    w64(g_structs, unf_box_sa * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT, 1);
+    w64(g_structs, unf_box_sa * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES, unf_gp);
+    w64(g_structs, unf_box_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES, str_intern("val"));
+    w64(g_structs, unf_box_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES, 0);   // 裸码槽 = parser 对非基型的塌缩值（0 = TY_INT；本层不读）
+    w64(g_structs, unf_box_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES,
+        alloc_node(EXPR_IDENT, -1, -1, -1, unf_gp, 0, -1, 0, 0));
+    w64(g_structs, unf_box_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, 1);
+    unf_box_ti := alloc_named_type(str_intern("UnfBoxU"));
+    // 应用行 `UnfBoxU[int]` / `UnfBoxU[string]`（g_gen_apply_data: [count, arg]）
+    grow_gen_apply_data(g_gen_apply_data_count + 2);
+    unf_gas1 := g_gen_apply_data_count;
+    w64(g_gen_apply_data, unf_gas1 * 8, 1);
+    w64(g_gen_apply_data, (unf_gas1 + 1) * 8, TI_INT);
+    g_gen_apply_data_count = unf_gas1 + 2;
+    unf_ga_int := alloc_type(TYP_GENERIC_APPLY, unf_box_ti, unf_gas1);
+    grow_gen_apply_data(g_gen_apply_data_count + 2);
+    unf_gas2 := g_gen_apply_data_count;
+    w64(g_gen_apply_data, unf_gas2 * 8, 1);
+    w64(g_gen_apply_data, (unf_gas2 + 1) * 8, TI_STR);
+    g_gen_apply_data_count = unf_gas2 + 2;
+    unf_ga_str := alloc_type(TYP_GENERIC_APPLY, unf_box_ti, unf_gas2);
+    unf_ta := sh_struct_term(unf_ga_int);
+    unf_tb := sh_struct_term(unf_ga_str);
+    total = total + 1; fails = fails + ts_check("unf.ga_arg_subst",
+        (tt_a(unf_ta) == AK_PRODUCT && tt_c(unf_ta) == tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil()) &&
+         tt_c(unf_tb) == tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil()) && unf_ta != unf_tb), 1);
+    // 未应用形态：泛型形参保持**名义**（res_type_node 取形参行 ⇒ AK_NAMED）——不得凭空代入 int
+    unf_tbare := sh_struct_term(unf_box_ti);
+    total = total + 1; fails = fails + ts_check("unf.ga_unapplied_nominal",
+        (unf_tbare >= 0 && tt_a(unf_tbare) == AK_PRODUCT && tt_a(tt_a(tt_c(unf_tbare))) != AK_INT), 1);
+
+    // 夹具 ②：struct UnfP1U { a: int, b: string }（字段**声明序**；含基型两种）
+    unf_p1_sa := add_struct("UnfP1U");
+    w64(g_structs, unf_p1_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES, str_intern("a"));
+    w64(g_structs, unf_p1_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES, TY_INT);
+    w64(g_structs, unf_p1_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES, alloc_node(0, 0, 0, 0, 0, TY_INT, 0, 0, 0));
+    w64(g_structs, unf_p1_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES + 8, str_intern("b"));
+    w64(g_structs, unf_p1_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES + 8, TY_STRING);
+    w64(g_structs, unf_p1_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES + 8, alloc_node(0, 0, 0, 0, 0, TY_STRING, 0, 0, 0));
+    w64(g_structs, unf_p1_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, 2);
+    unf_p1_ti := alloc_named_type(str_intern("UnfP1U"));
+    unf_tp1 := sh_struct_term(unf_p1_ti);
+    total = total + 1; fails = fails + ts_check("unf.struct_field_order",
+        (tt_a(unf_tp1) == AK_PRODUCT &&
+         tt_c(unf_tp1) == tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil()))), 1);
+    // 夹具 ③：struct UnfP2U { x: [int;2] }——字段**裸码槽 = 0（= TY_INT）而类型节点 = 数组**：
+    // 「只读裸码槽」的实现会把该字段静默误判为 int（本用例即其守门；裸码塌缩 = parser 事实）
+    unf_p2_sa := add_struct("UnfP2U");
+    unf_arrn := alloc_node(EXPR_ARRAY, alloc_node(0, 0, 0, 0, 0, TY_INT, 0, 0, 0), -1, -1, 2, 0, -1, 0, 0);
+    w64(g_structs, unf_p2_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES, str_intern("x"));
+    w64(g_structs, unf_p2_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES, 0);
+    w64(g_structs, unf_p2_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES, unf_arrn);
+    w64(g_structs, unf_p2_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, 1);
+    unf_p2_ti := alloc_named_type(str_intern("UnfP2U"));
+    unf_tp2 := sh_struct_term(unf_p2_ti);
+    total = total + 1; fails = fails + ts_check("unf.struct_field_node_not_code",
+        (tt_a(unf_tp2) == AK_PRODUCT && tt_a(tt_a(tt_c(unf_tp2))) == AK_SEQUENCE), 1);
+
+    // 夹具 ④：两个**同形不同名** struct（UnfS1U{a:int} / UnfS2U{a:int}）——本 Task 的风险边界，
+    // 三断 = 双钉：① 展开项（满足面）**结构相等**（同形 ⇒ 同项 = 满足判定的设计意图）；
+    // ② 桥接项（等价面）仍 -1（AK_NAMED 原子不展开，**不得**当 0/1）；③ type_equal 仍 false
+    // 且回落 legacy 恰 +1（不静默）。
+    unf_s1_ti := ts_unf_mk_int_struct("UnfS1U");
+    unf_s2_ti := ts_unf_mk_int_struct("UnfS2U");
+    unf_e1 := sh_struct_term(unf_s1_ti);
+    unf_e2 := sh_struct_term(unf_s2_ti);
+    total = total + 1; fails = fails + ts_check("unf.nominal_structural_equal",
+        (unf_e1 >= 0 && unf_e2 >= 0 && ty_equiv(unf_e1, unf_e2) == 1), 1);
+    total = total + 1; fails = fails + ts_check("unf.nominal_equiv_atomic_unknown",
+        ty_equiv(sh_term_of_ti(unf_s1_ti), sh_term_of_ti(unf_s2_ti)), -1);
+    unf_ru0 := g_replace_unknown;
+    unf_eqf : ., mut = 0;
+    if !type_equal(unf_s1_ti, unf_s2_ti) {
+        if (g_replace_unknown - unf_ru0) == 1 { unf_eqf = 1; }
+    }
+    total = total + 1; fails = fails + ts_check("unf.nominal_type_equal_false", unf_eqf, 1);
+
+    // 夹具 ⑤：enum UnfColorU { UnfRedU, UnfGreenU, UnfBlueU }（tag-only，3 变体）
+    unf_col_ei := add_enum("UnfColorU");
+    w64(g_enums, unf_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("UnfRedU"));
+    w64(g_enums, unf_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("UnfGreenU"));
+    w64(g_enums, unf_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 2 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("UnfBlueU"));
+    w64(g_enums, unf_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 3);
+    unf_col_ti := alloc_named_type(str_intern("UnfColorU"));
+    unf_dom := sh_enum_domain_term(unf_col_ti);
+    total = total + 1; fails = fails + ts_check("unf.enum_domain_count",
+        (unf_dom >= 0 && ts_unf_union_leaves(unf_dom) == 3), 1);
+    unf_vr := sh_variant_term(unf_col_ti, str_intern("UnfRedU"));
+    unf_vg := sh_variant_term(unf_col_ti, str_intern("UnfGreenU"));
+    unf_vb := sh_variant_term(unf_col_ti, str_intern("UnfBlueU"));
+    total = total + 1; fails = fails + ts_check("unf.enum_variant_in_domain",
+        (ty_sub(unf_vr, unf_dom) == 1 && ty_sub(unf_vg, unf_dom) == 1 && ty_sub(unf_vb, unf_dom) == 1 &&
+         sh_variant_term(unf_col_ti, str_intern("UnfNoSuchVariantU")) == -1), 1);
+    // 变体身份**含枚举名**（引擎只比 a/c 两槽 ⇒ 身份必须入参数链）：异枚举**同名变体**不得被判等价
+    unf_dup_ei := add_enum("UnfDupU");
+    w64(g_enums, unf_dup_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + OFF_EV_NAME, str_intern("UnfRedU"));
+    w64(g_enums, unf_dup_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 1);
+    unf_dup_ti := alloc_named_type(str_intern("UnfDupU"));
+    unf_vdup := sh_variant_term(unf_dup_ti, str_intern("UnfRedU"));
+    total = total + 1; fails = fails + ts_check("unf.enum_variant_identity_scoped",
+        (unf_vdup >= 0 && ty_sub(unf_vdup, unf_vr) != 1 && ty_sub(unf_vr, unf_vdup) != 1), 1);
+    // 空枚举：域 = ⊥（无值可取——**登记语义**：空域在补集语义下恒穷尽，Task 3 须显式裁决）
+    unf_emp_ei := add_enum("UnfEmptyU");
+    w64(g_enums, unf_emp_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 0);
+    unf_emp_ti := alloc_named_type(str_intern("UnfEmptyU"));
+    total = total + 1; fails = fails + ts_check("unf.enum_empty_domain_bot", tt_tag(sh_enum_domain_term(unf_emp_ti)), TT_BOT);
+
+    // 夹具 ⑥：enum UnfOptU[T] { UnfNoneU, UnfSomeU(T) }（tag + payload 混合）——域/模式项在
+    // 引擎穷尽性上的**端到端**前哨（Task 3 判据的种子）。payload 槽照 parser 落裸码（非基型
+    // 塌缩为 0 ⇒ 本层**不读**它：payload 不入变体项，见 ty_shadow.cr 展开段未覆盖面注记）。
+    unf_opt_ei := add_enum("UnfOptU");
+    w64(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 1);
+    w64(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES, str_intern("UnfTOptU"));
+    w64(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("UnfNoneU"));
+    w64(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("UnfSomeU"));
+    w64(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, 1);
+    w64(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_TYPES, TY_INT);   // 裸码槽（parser 事实；本层不读）
+    w64(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 2);
+    unf_opt_ti := alloc_named_type(str_intern("UnfOptU"));
+    unf_odom := sh_enum_domain_term(unf_opt_ti);
+    unf_onone := sh_variant_term(unf_opt_ti, str_intern("UnfNoneU"));
+    unf_osome := sh_variant_term(unf_opt_ti, str_intern("UnfSomeU"));
+    total = total + 1; fails = fails + ts_check("unf.exhaust_cover_all",
+        ty_exhaustive(unf_odom, tt_cons(unf_onone, tt_cons(unf_osome, tt_nil()))), 1);
+    total = total + 1; fails = fails + ts_check("unf.exhaust_missing_one",
+        ty_exhaustive(unf_odom, tt_cons(unf_onone, tt_nil())), 0);
+    // 缺变体 witness：不可空且 ⊆ 缺失变体。**登记**：原始 witness = 各析取支之并（**含空析取支**
+    // ——norm 不做空支净化）⇒ Task 3 若当「具体反例值」用，须先取有住户的支（或引擎加净化）。
+    unf_w2 := ty_exhaust_witness(unf_odom, tt_cons(unf_onone, tt_nil()));
+    total = total + 1; fails = fails + ts_check("unf.exhaust_witness_subset",
+        (unf_w2 >= 0 && ty_inhabited(unf_w2) == 1 && ty_sub(unf_w2, unf_osome) == 1), 1);
+
+    // 展开缓存：新 ti 恰入表 1 条；二次调用恰命中 1 次且返回**同项**；**失败不缓存**（-1 不入表）
+    unf_fresh := ts_unf_mk_int_struct("UnfCacheU");
+    unf_ce0 := sh_unf_entries();
+    unf_ch0 := sh_unf_hits();
+    unf_ct1 := sh_struct_term(unf_fresh);
+    unf_ce1 := sh_unf_entries();
+    unf_ct2 := sh_struct_term(unf_fresh);
+    unf_fail_e0 := sh_unf_entries();
+    sh_struct_term(g_type_count + 7);
+    total = total + 1; fails = fails + ts_check("unf.cache_hit_and_no_neg_cache",
+        ((unf_ce1 - unf_ce0) == 1 && (sh_unf_hits() - unf_ch0) == 1 && unf_ct2 == unf_ct1 &&
+         (sh_unf_entries() - unf_fail_e0) == 0), 1);
+
+    // 缺口上抛（**不得静默判否**）：行号越界 / 未声明的名字行 / 裸泛型形参行 / 非枚举变体名 → -1
+    unf_plain_ti := alloc_named_type(str_intern("UnfNoDeclU"));
+    unf_loose_gp := alloc_type(TYP_GENERIC_PARAM, str_intern("UnfLooseTU"), 0);
+    total = total + 1; fails = fails + ts_check("unf.neg_paths",
+        (sh_struct_term(g_type_count + 7) == -1 && sh_enum_domain_term(g_type_count + 7) == -1 &&
+         sh_struct_term(-1) == -1 && sh_variant_term(-1, 0) == -1 && sh_variant_term(unf_col_ti, -1) == -1 &&
+         sh_struct_term(unf_plain_ti) == -1 && sh_enum_domain_term(unf_plain_ti) == -1 &&
+         sh_struct_term(unf_loose_gp) == -1), 1);
+
+    // 接口面占位（P2b 未交付条目/满足关系、签名类型项化归 Task 6）：形状项与满足判定一律
+    // 三态 -1——**不得**被消费方当 0/1 用。负键/越界键同律（断言在 Task 2/6 落地后仍成立）。
+    total = total + 1; fails = fails + ts_check("unf.iface_stub_three_state",
+        (sh_iface_shape_term(-1) == -1 && iface_satisfies(-1, 0) == -1 && iface_satisfies(TI_INT, 9999) == -1), 1);
 
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }
