@@ -77,6 +77,74 @@ fn ps_call_node(irf: int, callee: string) -> int {
     return -1;
 }
 
+// 函数 irf 体内「调 callee」的 DF 节点总数（非空断言用：防「查不到 ⇒ 恒 0」
+// 把「零入链」退化断言混过）
+fn ps_count_call_nodes(irf: int, callee: string) -> int {
+    if irf < 0 { return -1; }
+    cni := str_intern(callee);
+    start := r64(g_df_func_node_start, irf * 8);
+    cnt := r64(g_df_func_node_count, irf * 8);
+    r : ., mut = 0;
+    n : ., mut = start;
+    loop {
+        if n >= start + cnt { return r; }
+        if r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE) == IR_CALL {
+            if r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S3) == cni { r = r + 1; }
+        }
+        n = n + 1;
+    }
+    return r;
+}
+
+// 函数 irf 体内首个 opcode 节点（-1 = 无）
+fn ps_op_node(irf: int, opcode: int) -> int {
+    if irf < 0 { return -1; }
+    start := r64(g_df_func_node_start, irf * 8);
+    cnt := r64(g_df_func_node_count, irf * 8);
+    n : ., mut = start;
+    loop {
+        if n >= start + cnt { return -1; }
+        if r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE) == opcode { return n; }
+        n = n + 1;
+    }
+    return -1;
+}
+
+// 节点 nid 是否被 kind=1 边指入（1 = 有入边，0 = 无，-1 = 无此节点）
+fn ps_has_state_in(nid: int) -> int {
+    if nid < 0 { return -1; }
+    t := ps_state_touch(nid);
+    return t - (t / 2) * 2;   // t 的入边位（无按位与；t >= 0 ⇒ 取模非负）
+}
+
+// 节点 nid 是否以 kind=1 边指出（1 = 有出边，0 = 无，-1 = 无此节点）
+fn ps_has_state_out(nid: int) -> int {
+    if nid < 0 { return -1; }
+    t := ps_state_touch(nid);
+    return t / 2 - (t / 4) * 2;
+}
+
+// 函数 irf 体内「调 callee 且被链指入」的节点数（Task 2 验收例：同一被调者
+// 被调两次 ⇒ 必须两个都在链上；纯调用同形 ⇒ 0）
+fn ps_calls_in_chain(irf: int, callee: string) -> int {
+    if irf < 0 { return -1; }
+    cni := str_intern(callee);
+    start := r64(g_df_func_node_start, irf * 8);
+    cnt := r64(g_df_func_node_count, irf * 8);
+    r : ., mut = 0;
+    n : ., mut = start;
+    loop {
+        if n >= start + cnt { return r; }
+        if r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE) == IR_CALL {
+            if r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S3) == cni {
+                if ps_has_state_in(n) == 1 { r = r + 1; }
+            }
+        }
+        n = n + 1;
+    }
+    return r;
+}
+
 // 节点 nid 被 kind=1 边触及的面：+1 = 有入边，+2 = 有出边（返回 0..3）
 fn ps_state_touch(nid: int) -> int {
     if nid < 0 { return -1; }
@@ -135,6 +203,14 @@ fn purity_selftest_run() -> int {
     src = src + "fn chain_effect() -> int { a : ., mut = 0; a = 1; effect(); a = 2; return a; }\n";
     src = src + "fn chain_pure() -> int { a : ., mut = 0; a = 1; b := pure_add(a, 1); a = 2; return a + b; }\n";
     src = src + "fn chain_loop() -> int { acc : ., mut = 0; i : ., mut = 0; loop { if i >= 3 { break; } acc = acc + 1; i = i + 1; } return acc; }\n";
+    // Task 2 用例：① 效应调用双调（验收例：两个 CALL 都必须进链）+ 同形纯调用
+    // 负控；② IR_CALL_EXTERN / IR_SPAWN / IR_YIELD 三类 Task 2 新入链 opcode
+    // ——每例都带前 store（链头播种）与后 store（出边），故期望 touch == 3。
+    src = src + "fn chain_two() -> int { a : ., mut = 0; a = 1; effect(); effect(); b := pure_add(a, 1); a = 2; return a + b; }\n";
+    src = src + "fn chain_extern_op(x: int) -> int { a : ., mut = 0; a = 1; r := ext_probe(a); a = 2; return a + r; }\n";
+    src = src + "fn spawnee(x: int) -> int { return x + 1; }\n";
+    src = src + "fn chain_spawn_op() -> int { a : ., mut = 0; a = 1; r := go i 0..2 spawnee(i); a = 2; return a; }\n";
+    src = src + "flow fn chain_yield_op(n: int) -> int { a : ., mut = 0; a = 1; yield n; a = 2; return a; }\n";
     src = src + "fn main() -> int { return 0; }\n";
 
     if ps_compile(src) != 0 {
@@ -191,6 +267,31 @@ fn purity_selftest_run() -> int {
     // ③' 负控：无循环的函数区间内不得出现指向 label 的链边（防「恒真」实现）
     total = total + 1; fails = fails + ps_check("chain.no_label_edge_without_loop",
         ps_has_label_state_target(irf_cp), 0);
+
+    // ── Task 2：分类表补全（效应 opcode 全族入链；单一真源 = purity_op_effect）──
+    // ④ 验收例：effect 被调两次 ⇒ **两个** CALL 都在链上；同形纯调用 ⇒ 0。
+    irf_tw := ps_ir_index_of("chain_two");
+    total = total + 1; fails = fails + ps_check("chain.two_calls_exist",
+        ps_count_call_nodes(irf_tw, "effect"), 2);          // 非空断言（防「零入链」退化假绿）
+    total = total + 1; fails = fails + ps_check("chain.two_impure_calls_in_chain",
+        ps_calls_in_chain(irf_tw, "effect"), 2);
+    total = total + 1; fails = fails + ps_check("chain.two_pure_call_untouched",
+        ps_calls_in_chain(irf_tw, "pure_add"), 0);
+    // ⑤ IR_CALL_EXTERN：extern 调用入链（前后 store 夹逼 ⇒ touch == 3）
+    irf_ex := ps_ir_index_of("chain_extern_op");
+    n_ex := ps_op_node(irf_ex, IR_CALL_EXTERN);
+    total = total + 1; fails = fails + ps_check("chain.extern_op_exists", (n_ex >= 0), 1);
+    total = total + 1; fails = fails + ps_check("chain.extern_op_pierced", ps_state_touch(n_ex), 3);
+    // ⑥ IR_SPAWN（range-go 每迭代发射）：入链
+    irf_sp := ps_ir_index_of("chain_spawn_op");
+    n_sp := ps_op_node(irf_sp, IR_SPAWN);
+    total = total + 1; fails = fails + ps_check("chain.spawn_op_exists", (n_sp >= 0), 1);
+    total = total + 1; fails = fails + ps_check("chain.spawn_op_in_chain", ps_has_state_in(n_sp), 1);
+    // ⑦ IR_YIELD（flow 函数体）：入链
+    irf_yl := ps_ir_index_of("chain_yield_op");
+    n_yl := ps_op_node(irf_yl, IR_YIELD);
+    total = total + 1; fails = fails + ps_check("chain.yield_op_exists", (n_yl >= 0), 1);
+    total = total + 1; fails = fails + ps_check("chain.yield_op_pierced", ps_state_touch(n_yl), 3);
 
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" purity cases passed");
     if fails != 0 { return 1; }

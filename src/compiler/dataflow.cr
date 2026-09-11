@@ -145,10 +145,11 @@ fn df_add_edge(from_id: int, to_id: int) {
 // 在全部 IR 生成结束后对成品图重放调用；入链判据未变，仍是本函数。
 fn df_connect_state(node_id: int, opcode: int, s3: int) {
     is_side_effect : ., mut = 0;
-    if opcode == IR_STORE          { is_side_effect = 1; }
-    if opcode == IR_STORE_FIELD    { is_side_effect = 1; }
-    if opcode == IR_STORE_INDEX    { is_side_effect = 1; }
-    if opcode == IR_STORE_INDEX_VAR { is_side_effect = 1; }
+    // opcode 级效应清单的**唯一真源** = purity_op_effect（checker.cr；D7「效应清单
+    // 收敛为一份」——链分类与纯度判定同表，两条判据才不会各自漂移）。历史两处
+    // 缺失即由此收敛：① IR_CALL_EXTERN 两侧皆缺（extern 调用既被乐观标纯、又不在
+    // 本表）；② IR_STORE_PTR/IR_AWAIT 只进了纯度侧（裸指针写、spawn 同步）。
+    if purity_op_effect(opcode) != 0 { is_side_effect = 1; }
     if opcode == IR_CALL {
         // s3 = func name idx; resolve to func index for purity. Unknown/external
         // functions are conservatively treated as side-effecting.
