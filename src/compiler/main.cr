@@ -152,6 +152,12 @@ fn run_frontend() -> int {
             if ec == EC_R_OOB || ec == EC_TK_SLICE_BOUNDS || ec == EC_TK_SLICE_LEN { hard = 1; }
             if ec == EC_TS_MISSING_FIELD || ec == EC_TS_UNKNOWN_FIELD || ec == EC_TS_FIELD_TYPE || ec == EC_TS_FIELD_DUP { hard = 1; }
             if ec == EC_TK_ELEM_TYPE { hard = 1; }
+            // 例外（R2 P3 Task 3）：match 非穷尽（TM03）为硬错误——穷尽性判定的消费面。
+            // 修复前 match **零检查**（EC_TM_* 仅定义零 raise）：缺臂 ⇒ rc=0 + 产物照出，
+            // 未匹配值静默得 0（探针 p1b 实测 rc=100 = 0 + 100，无任何信号）。开门依据 =
+            // 全语料 report-only 清单为空（72 档 check 日志与基线逐字节同，见 Task 3 报告 §）。
+            // TM04（冗余臂）**不入**本名单 = 软面登记（同 Rust unreachable-pattern 的警告口径）。
+            if ec == EC_TM_EXHAUST { hard = 1; }
             di = di + 1;
         }
         print_diagnostics();

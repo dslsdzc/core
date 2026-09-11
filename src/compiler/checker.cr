@@ -2520,14 +2520,45 @@ fn infer_expr(node: int) -> int {
     if ast_kind(node) == EXPR_MATCH {
         match_expr := ast_a(node);
         first_arm := ast_b(node);
-        infer_expr(match_expr);
+        match_ti := infer_expr(match_expr);
         res : ., mut = TI_UNIT;
         ai : ., mut = 0;
         an : ., mut = first_arm;
+        // R2 P3 Task 3：穷尽性判定面（补集空性 + 具体变体反例）。收集与臂体推断同趟：
+        // 模式类别/归属 → 模式项 CONS 链（m_pats）+ 覆盖位（m_cover）+ 不可映射标记
+        // （m_unmappable）；臂体推断后统一判（判据本体与消费点封装见 ty_shadow.cr 末段）。
+        m_pats : ., mut = tt_nil();
+        m_cover : ., mut = 0;
+        m_unmappable : ., mut = 0;
+        m_wild : ., mut = 0;      // 通配/绑定已见（冗余臂判据用；非穷尽性判据本体）
+        m_dup : ., mut = -1;      // 首个冗余臂模式节点（-1 = 无）
         loop {
             if an < 0 { break; }
             arm_pat := ast_a(an);  // EXPR_ARM: a = pattern
             arm_body := ast_b(an);  // EXPR_ARM: b = body
+            if arm_pat >= 0 {
+                pk := sh_match_pat_kind(arm_pat);
+                if pk == 1 {
+                    if m_wild != 0 { if m_dup < 0 { m_dup = arm_pat; } }
+                    m_wild = 1;
+                    m_pats = tt_cons(tt_top(), m_pats);
+                } else if pk == 2 {
+                    vi := sh_match_pat_variant(match_ti, arm_pat);
+                    vt : ., mut = -1;
+                    if vi >= 0 { vt = sh_match_variant_term(match_ti, vi); }
+                    if vt < 0 {
+                        m_unmappable = 1;      // 非本枚举/未声明变体名 ⇒ 不判（不得当 ∅/⊤）
+                    } else {
+                        bit := sh_match_bit(vi);
+                        if m_wild != 0 { if m_dup < 0 { m_dup = arm_pat; } }
+                        if (m_cover / bit) % 2 != 0 { if m_dup < 0 { m_dup = arm_pat; } }
+                        m_cover = m_cover + bit;
+                        m_pats = tt_cons(vt, m_pats);
+                    }
+                } else {
+                    m_unmappable = 1;          // 字面量/struct 模式 ⇒ 不判（登记）
+                }
+            }
             // Bind pattern variables in new scope
             push_scope();
             if arm_pat >= 0 {
@@ -2559,6 +2590,23 @@ fn infer_expr(node: int) -> int {
             pop_scope();
             an = ast_c(an);  // next arm via linked list
             ai = ai + 1;
+        }
+        // 穷尽性判定：引擎补集空性（预算前后隔离照 type_equal_engine 的窗口纪律）。
+        // 三态：0 = 不穷尽（诊断 + 具体反例变体名）；1 = 穷尽；-1 = 不判（非枚举域/不可映射
+        // 模式/引擎未知）——**零诊断**（三态纪律：未知不得当「不穷尽」，也不得当「穷尽」）。
+        ty_budget_reset(200000);
+        m_verdict := sh_match_exhaustive(match_ti, m_pats, m_unmappable);
+        ty_budget_reset(200000);
+        if m_verdict == 0 {
+            ea := find_enum_row_of(match_ti);
+            mi : ., mut = -1;
+            if ea >= 0 { mi = sh_match_first_missing(m_cover, ei_variant_count(ea)); }
+            msg := "Non-exhaustive match";
+            if mi >= 0 { msg = msg + ": missing variant '" + istr_get(ei_variant_name(ea, mi)) + "'"; }
+            check_error(EC_TM_EXHAUST, msg, ast_line(node), ast_col(node));
+        }
+        if m_dup >= 0 {
+            check_error(EC_TM_REDUNDANT, "Redundant match arm", ast_line(m_dup), ast_col(m_dup));
         }
         return res;
     }

@@ -1346,6 +1346,131 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("t1.dir_nested_strict",
         (type_compat_strict(t1_out_sl, t1_out_arr) == -1 && type_compat_strict(t1_out_arr, t1_out_sl) == 1), 1);
 
+    // ═══ R2 P3 Task 3：match 穷尽性真判定（补集空性 + 具体变体反例）═══
+    // 判据面 = ① 引擎三态：全覆盖 / 缺一 / 无臂 / 通配吸收 / 单变体；② **反例的具体值** =
+    // 缺失**变体名**（逐变体覆盖位命名——引擎 witness 原始形态含空析取支，与缺失变体按
+    // ty_equiv 不等，本组第 3 例把该事实与消费点命名一并钉死）；③ 域守卫与不可映射守卫
+    // （-1 = 不判，不得当 0/1）；④ 空枚举域 = 空洞穷尽（登记语义，与计划原文「= 0」的偏差
+    // 见任务报告）；⑤ payload 变体混合 / 限定名解析 / 重复臂 / 泛型应用行。
+    // 夹具照 Task 0 先例人工落行（写槽序 = parser 的；payload 裸码槽照 parser 事实落）。
+    init_types();
+    ty_budget_reset(200000);
+    t3_col_ei := add_enum("T3Color");
+    w64(g_enums, t3_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T3Red"));
+    w64(g_enums, t3_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T3Green"));
+    w64(g_enums, t3_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 2 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T3Blue"));
+    w64(g_enums, t3_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 3);
+    t3_col_ti := alloc_named_type(str_intern("T3Color"));
+    t3_r := sh_match_variant_term(t3_col_ti, 0);
+    t3_g := sh_match_variant_term(t3_col_ti, 1);
+    t3_b := sh_match_variant_term(t3_col_ti, 2);
+    // ① 全覆盖 = 1（模式项与域项同一构造 ⇒ 补集空）
+    total = total + 1; fails = fails + ts_check("t3.cover_all",
+        sh_match_exhaustive(t3_col_ti, tt_cons(t3_r, tt_cons(t3_g, tt_cons(t3_b, tt_nil()))), 0), 1);
+    // ② 缺一变体 = 0；反例 = **缺失变体名**（引擎判据 + 覆盖位命名两路并用）
+    t3_ab := tt_cons(t3_r, tt_cons(t3_g, tt_nil()));
+    total = total + 1; fails = fails + ts_check("t3.missing_one_verdict",
+        sh_match_exhaustive(t3_col_ti, t3_ab, 0), 0);
+    t3_w := ty_exhaust_witness(sh_enum_domain_term(t3_col_ti), t3_ab);
+    t3_cx := sh_match_first_missing(sh_match_bit(0) + sh_match_bit(1), ei_variant_count(t3_col_ei));
+    t3_cx_named : ., mut = 0;
+    if t3_cx == 2 {
+        if str_eq(istr_get(ei_variant_name(t3_col_ei, t3_cx)), "T3Blue") != 0 { t3_cx_named = 1; }
+    }
+    // 引擎 witness 原始形态 = 含空析取支的并（Task 0 §5-②）：本批**实测**（三态）=
+    // ty_sub(w, 缺失变体) = 1（w ⊆ b）∧ ty_sub(反方向) = **-1**（未覆盖面——空析取支让反向
+    // 结构比较落空）∧ ty_equiv = **-1**（**不是 0**：Task 0 报告记「不等」为 `== 0`，实测为
+    // -1 = 未覆盖面，此处按实测钉死；-1 不得当 0 用的三态纪律在此具体化）∧ 可空 = 1。
+    // 故「反例给具体值」由**覆盖位命名**承担（引擎 witness 项在其上不可作显示名）。
+    total = total + 1; fails = fails + ts_check("t3.counterexample_named_variant",
+        (t3_w >= 0 && ty_inhabited(t3_w) == 1 && ty_sub(t3_w, t3_b) == 1 &&
+         ty_equiv(t3_w, t3_b) == -1 && t3_cx_named), 1);
+    // ③ 通配/绑定 = ⊤：吸收一切（引擎侧 ⊤ 语义；checker 侧映射见 EXPR_MATCH）
+    total = total + 1; fails = fails + ts_check("t3.wildcard_absorbs",
+        sh_match_exhaustive(t3_col_ti, tt_cons(tt_top(), tt_nil()), 0), 1);
+    // ④ 单变体枚举：有臂 = 1 / 无臂 = 0（空链 ⇒ 补集 = 全域）
+    t3_only_ei := add_enum("T3Only");
+    w64(g_enums, t3_only_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + OFF_EV_NAME, str_intern("T3One"));
+    w64(g_enums, t3_only_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 1);
+    t3_only_ti := alloc_named_type(str_intern("T3Only"));
+    t3_one := sh_match_variant_term(t3_only_ti, 0);
+    total = total + 1; fails = fails + ts_check("t3.single_variant_covered",
+        sh_match_exhaustive(t3_only_ti, tt_cons(t3_one, tt_nil()), 0), 1);
+    total = total + 1; fails = fails + ts_check("t3.no_arms_not_exhaustive",
+        (sh_match_exhaustive(t3_only_ti, tt_nil(), 0) == 0 && sh_match_first_missing(0, 1) == 0), 1);
+    // ⑤ 域守卫与不可映射守卫：非枚举 scrutinee / 不可映射模式 ⇒ -1（**不判**，不得当 0/1）
+    t3_s_ti := ts_unf_mk_int_struct("T3StrU");
+    total = total + 1; fails = fails + ts_check("t3.domain_guard_unknown",
+        (sh_match_exhaustive(TI_INT, tt_nil(), 0) == -1 && sh_match_exhaustive(t3_s_ti, tt_nil(), 0) == -1 &&
+         sh_match_exhaustive(-1, tt_nil(), 0) == -1 && sh_enum_domain_term(t3_s_ti) == -1), 1);
+    total = total + 1; fails = fails + ts_check("t3.unmappable_guard_unknown",
+        sh_match_exhaustive(t3_col_ti, tt_cons(t3_r, tt_cons(t3_g, tt_cons(t3_b, tt_nil()))), 1), -1);
+    // ⑥ 空枚举域 = ⊥：补集语义下**空洞穷尽**（无值可漏 ⇒ 无反例；计划原文「= 0」的偏差登记）
+    t3_emp_ei := add_enum("T3Empty");
+    w64(g_enums, t3_emp_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 0);
+    t3_emp_ti := alloc_named_type(str_intern("T3Empty"));
+    total = total + 1; fails = fails + ts_check("t3.empty_domain_vacuous",
+        (sh_match_exhaustive(t3_emp_ti, tt_nil(), 0) == 1 && sh_match_first_missing(0, 0) == -1), 1);
+    // ⑦ payload 变体与 tag 变体混合（payload 不入项 = 变体身份粒度；覆盖语义不受影响）
+    t3_mix_ei := add_enum("T3Mix");
+    w64(g_enums, t3_mix_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T3None"));
+    w64(g_enums, t3_mix_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T3Some"));
+    w64(g_enums, t3_mix_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, 1);
+    w64(g_enums, t3_mix_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_TYPES, TY_INT);
+    w64(g_enums, t3_mix_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 2);
+    t3_mix_ti := alloc_named_type(str_intern("T3Mix"));
+    t3_none := sh_match_variant_term(t3_mix_ti, 0);
+    t3_some := sh_match_variant_term(t3_mix_ti, 1);
+    total = total + 1; fails = fails + ts_check("t3.payload_mixed_cover",
+        (t3_none >= 0 && t3_some >= 0 && t3_none != t3_some &&
+         sh_match_exhaustive(t3_mix_ti, tt_cons(t3_some, tt_cons(t3_none, tt_nil())), 0) == 1 &&
+         sh_match_exhaustive(t3_mix_ti, tt_cons(t3_none, tt_nil()), 0) == 0 &&
+         sh_match_first_missing(sh_match_bit(0), 2) == 1), 1);
+    // ⑧ 模式名字解析：限定名 `Enum.Variant` 与裸名同判；异枚举前缀 / 未声明名 ⇒ -1（不可映射）；
+    //    类别分类：通配/绑定 = ⊤、枚举模式 = 变体、字面量/负节点 = 不可映射
+    t3_pat_q := alloc_node(EXPR_ENUMPAT, str_intern("T3Color.T3Blue"), 0, 0, 0, 0, 0, 0, 0);
+    t3_pat_b := alloc_node(EXPR_ENUMPAT, str_intern("T3Blue"), 0, 0, 0, 0, 0, 0, 0);
+    t3_pat_f := alloc_node(EXPR_ENUMPAT, str_intern("T3Mix.T3Blue"), 0, 0, 0, 0, 0, 0, 0);
+    t3_pat_n := alloc_node(EXPR_ENUMPAT, str_intern("T3Nope"), 0, 0, 0, 0, 0, 0, 0);
+    t3_pat_w := alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, 0, 0);
+    t3_pat_l := alloc_node(EXPR_INT, 0, 0, 0, 5, TY_INT, 0, 0, 0);
+    t3_pat_i := alloc_node(EXPR_IDENT, 0, 0, 0, str_intern("t3bind"), 0, 0, 0, 0);
+    total = total + 1; fails = fails + ts_check("t3.pat_name_resolution",
+        (sh_match_pat_variant(t3_col_ti, t3_pat_q) == 2 && sh_match_pat_variant(t3_col_ti, t3_pat_b) == 2 &&
+         sh_match_pat_variant(t3_col_ti, t3_pat_f) == -1 && sh_match_pat_variant(t3_col_ti, t3_pat_n) == -1 &&
+         sh_match_pat_variant(t3_col_ti, t3_pat_w) == -1 && sh_match_pat_variant(t3_s_ti, t3_pat_b) == -1), 1);
+    total = total + 1; fails = fails + ts_check("t3.pat_kind_classification",
+        (sh_match_pat_kind(t3_pat_w) == 1 && sh_match_pat_kind(t3_pat_i) == 1 &&
+         sh_match_pat_kind(t3_pat_q) == 2 && sh_match_pat_kind(t3_pat_l) == 0 &&
+         sh_match_pat_kind(-1) == 0), 1);
+    // ⑨ 重复臂：覆盖面无贡献（补集仍空 = 穷尽；覆盖位去重在 checker 侧收集时做——
+    // 「位已置 ⇒ 该臂冗余」由行为集钉死）
+    total = total + 1; fails = fails + ts_check("t3.dup_arm_complement",
+        (sh_match_exhaustive(t3_only_ti, tt_cons(t3_one, tt_cons(t3_one, tt_nil())), 0) == 1 &&
+         sh_match_first_missing(sh_match_bit(0), 3) == 1), 1);
+    // ⑩ 泛型应用行（`T3GOpt[int]`）：域可展开 + 全覆盖 = 1（变体身份与实参无关）
+    t3_go_ei := add_enum("T3GOpt");
+    w64(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 1);
+    w64(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES, str_intern("T3GT"));
+    w64(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T3GN"));
+    w64(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T3GS"));
+    w64(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, 1);
+    w64(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_TYPES, 0);
+    w64(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 2);
+    t3_go_ti := alloc_named_type(str_intern("T3GOpt"));
+    grow_gen_apply_data(g_gen_apply_data_count + 2);
+    t3_gas := g_gen_apply_data_count;
+    w64(g_gen_apply_data, t3_gas * 8, 1);
+    w64(g_gen_apply_data, (t3_gas + 1) * 8, TI_INT);
+    g_gen_apply_data_count = t3_gas + 2;
+    t3_go_ga := alloc_type(TYP_GENERIC_APPLY, t3_go_ti, t3_gas);
+    t3_gn := sh_match_variant_term(t3_go_ga, 0);
+    t3_gs := sh_match_variant_term(t3_go_ga, 1);
+    total = total + 1; fails = fails + ts_check("t3.generic_apply_domain",
+        (t3_gn >= 0 && t3_gs >= 0 &&
+         sh_match_exhaustive(t3_go_ga, tt_cons(t3_gn, tt_cons(t3_gs, tt_nil())), 0) == 1 &&
+         sh_match_exhaustive(t3_go_ga, tt_cons(t3_gn, tt_nil()), 0) == 0), 1);
+
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }
     return 0;

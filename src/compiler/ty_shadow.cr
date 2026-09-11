@@ -780,3 +780,107 @@ fn sh_iface_shape_term(iface_ni: int) -> int {
     if iface_ni < 0 { return -1; }
     return -1;
 }
+
+// ═══════════════ R2 P3 Task 3：match 穷尽性消费点（补集空性 + 具体变体反例）═══════════════
+// 判据本体 = 引擎的**补集空性**（`ty_exhaustive`：domain \ ⋃patterns 的可满足性；P0 已落）。
+// **引擎不在本 Task 文件面内**（协调者裁决）⇒ 引擎侧的两处缺口一律在**消费点**消化：
+//   ① **域守卫**（域限定，计划显式登记）：仅**枚举 scrutinee** 判穷尽（域 = 变体集）；
+//      scrutinee 非枚举/域不可展开（struct/原生/int/string/bool…）⇒ **不判**（-1）。非枚举域
+//      **不得**假装穷尽、**不得**假装不穷尽——故本层零诊断、零硬错误。
+//   ② **模式面守卫**：任一臂模式**不可忠实映射** ⇒ **不判**（-1）。不可映射 = 字面量模式
+//      （int/string/char/bool）/ struct 模式 / 非本枚举的变体名。**不得**把它们当 ∅（凭空判
+//      「不穷尽」）或当 ⊤（凭空判「穷尽」）——三态纪律：未知一律 -1，由消费方零动作。
+//   ③ **反例的具体值**：引擎 witness 的原始形态 = 各析取支之**并**（`tt_norm` 不做空支净化：
+//      缺失 B 时 = (A∩¬A)∪(B∩¬A)，按 `ty_equiv` 与「缺失变体」**不等**——Task 0 §5-② 实测）
+//      ⇒ 反例**不**取 witness 项，而按**变体逐项覆盖位**命名（`sh_match_first_missing`）：
+//      与引擎判据同源（同一变体项构造）但独立计算 ⇒ 两路一致性由自测用例钉死。
+// 模式项约定（与展开层/引擎对齐）：通配 `_` 与绑定 ident = `tt_top()`（引擎侧 ⊤ 吸收 = 覆盖
+// 一切；值域不绑）；变体模式 = `sh_variant_term(scrut_ti, vni)`——**与域内对应变体同一构造**
+// （两个构造点不同 ⇒ 补集判定失真）。
+
+// 臂模式 → 类别：1 = ⊤（通配 `_` / 绑定 ident）/ 2 = 枚举变体模式（须再判归属）/ 0 = 不可映射。
+fn sh_match_pat_kind(pat_node: int) -> int {
+    if pat_node < 0 { return 0; }
+    k := ast_kind(pat_node);
+    if k == EXPR_WILDCARD { return 1; }
+    if k == EXPR_IDENT { return 1; }        // 绑定 = 通配（值域不绑；与 ir_gen 的按值比较臂不同层）
+    if k == EXPR_ENUMPAT { return 2; }
+    return 0;                               // 字面量 / struct 模式 / EXPR_NONE ⇒ 不可映射（登记）
+}
+
+// 变体模式 → **本枚举**变体下标（-1 = 不属本枚举 / 名字不可解析 / scrutinee 不可展开）。
+// 名字两形态（parser.cr parse_pattern 的产物）：裸变体名（`Red`）/ 限定名（`Color.Red`
+// ——parser 的 name + "." + variant 拼接）。限定名取**末点后段**为变体名（口径与 ir_gen.cr
+// get_variant_name_idx 一致；此处**不调 str_intern**——`.ccr` STR 段 = g_strs 全量，
+// 见 P2b 附录 A.3-② 的硬判据约束）。前缀不是本枚举名 ⇒ -1（该模式对本域无覆盖，但按②取
+// **不可判**而非 ∅）。变体名比较用 str_eq 逐项（不驻留新串）。
+fn sh_match_pat_variant(scrut_ti: int, pat_node: int) -> int {
+    ea := find_enum_row_of(scrut_ti);
+    if ea < 0 { return -1; }
+    if pat_node < 0 { return -1; }
+    // 名字槽 = **a**（parser.cr parse_pattern：`alloc_node(EXPR_ENUMPAT, ni, …)`；ir_gen 的
+    // 消费点同用 ast_a 取之。**不是** int_val——EXPR_IDENT 才把名字放 int_val）。
+    pname := istr_get(ast_a(pat_node));
+    slen := str_len(pname);
+    dot : ., mut = -1;
+    i : ., mut = 0;
+    loop {
+        if i >= slen { break; }
+        c := get_char(pname, i);
+        if str_eq(c, ".") != 0 { dot = i; }
+        i = i + 1;
+    }
+    vname : ., mut = pname;
+    if dot >= 0 {
+        head := str_sub(pname, 0, dot);
+        if str_eq(head, istr_get(ei_name(ea))) == 0 { return -1; }
+        vname = str_sub(pname, dot + 1, slen - dot - 1);
+    }
+    vi : ., mut = 0;
+    loop {
+        if vi >= ei_variant_count(ea) { return -1; }
+        if str_eq(istr_get(ei_variant_name(ea, vi)), vname) != 0 { return vi; }
+        vi = vi + 1;
+    }
+    return -1;
+}
+
+// 变体下标 → 变体项（-1 = 越界/scrutinee 不可展开）；与 sh_variant_term 的唯一入口关系
+fn sh_match_variant_term(scrut_ti: int, vi: int) -> int {
+    ea := find_enum_row_of(scrut_ti);
+    if ea < 0 { return -1; }
+    if vi < 0 || vi >= ei_variant_count(ea) { return -1; }
+    return sh_variant_term(scrut_ti, ei_variant_name(ea, vi));
+}
+
+// 覆盖位：bit(vi) = 2^vi（本语言无移位 ⇒ 循环乘 2，同 iface_bit；vi < 63 由
+// MAX_ENUM_VARIANTS = 16 保证不溢出）
+fn sh_match_bit(vi: int) -> int {
+    if vi < 0 { return 0; }
+    b : ., mut = 1;
+    k : ., mut = vi;
+    loop { if k <= 0 { break; } b = b * 2; k = k - 1; }
+    return b;
+}
+
+// 首个**未覆盖**变体下标（-1 = 全覆盖 = 反例面为空）。反例命名 = 本函数（头注③）；位测试照
+// iface_permits 的 (bits / bit) % 2 惯例（**无按位与运算符**；bits ≥ 0、bit > 0 ⇒ 取模非负）。
+fn sh_match_first_missing(cover_bits: int, count: int) -> int {
+    i : ., mut = 0;
+    loop {
+        if i >= count { return -1; }
+        b := sh_match_bit(i);            // i ≥ 0 ⇒ b ≥ 1（除零不可达）
+        if (cover_bits / b) % 2 == 0 { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// 穷尽性三态：1 = 穷尽（补集空）/ 0 = 不穷尽（有反例变体）/ -1 = **不判**（域不可展开 /
+// 模式不可映射 / 引擎未知=预算耗尽）。消费方：0 → 诊断 + 反例命名；1/-1 → 零动作。
+fn sh_match_exhaustive(scrut_ti: int, pat_terms: int, unmappable: int) -> int {
+    if unmappable != 0 { return -1; }
+    dom := sh_enum_domain_term(scrut_ti);
+    if dom < 0 { return -1; }               // 非枚举域 ⇒ 不判（域限定的显式登记）
+    return ty_exhaustive(dom, pat_terms);
+}
