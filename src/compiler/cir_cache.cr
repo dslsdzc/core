@@ -23,12 +23,100 @@
 // 恢复成活产物（rc=0）——正是本修复要消灭的静默类。bump 使旧条目整体失效
 // （cache miss = 无害重建）。注意：本条只治「本仓旧快照」，键缺编译器身份
 // 的根因另见 TODO #5。
+// v17（TODO #5 修复）：头部新增**编译器身份**字段（见下）。布局 = magic/ver/
+// identity/fp/sig/name_len/name…（相对 v16 整体后移 8B），旧条目读取即错位 ⇒
+// 必须 bump。v16→v17 的手工 bump 本身只覆盖「本仓旧条目」；身份字段起自动
+// 覆盖面（重建即失效）。
 CIR_CACHE_MAGIC : int = -4485090715960753727;
-CIR_CACHE_VER   : int = 16;
+CIR_CACHE_VER   : int = 17;
 
 g_cir_write_buf : string, mut;
 g_cir_write_pos : int, mut;
 g_cir_write_cap : int, mut;
+
+// === 编译器身份（TODO #5）===
+// 现象：缓存键 = 源路径::函数名 + 纯 AST 指纹（func_fingerprint/sig_fingerprint
+// 只覆盖目标源），**无编译器身份分量**。编译器二进制重建后，字符串驻留序
+// （g_strs 的 intern 序）与快照内索引（var 的 irv_name / 指令 s1..s3 / 名字
+// 索引）不再一致，而键与指纹一字未变 ⇒ 旧条目被命中，旧序索引被当活产物
+// 使用（dump 变量名缺失/错位，rc=0 静默）。CIR_CACHE_VER 的手工 bump 是
+// 现状兜底，已经忘记过两次（14→15、15→16）——本字段即为其自动化。
+//
+// 修复 = 头部写入**运行中编译器自身 ELF 的内容哈希**（/proc/self/exe 全文件
+// 单趟哈希），装载时比对：不等 = cache miss = 无害重建。不变量：**任何改变
+// 前端语义的重建都改变身份**（二进制变了，哈希必变）。
+//
+// 为什么是「运行中二进制自哈希」而非「构建期源哈希常量」：
+//   * 自哈希捕获**全部**决定编译器语义的输入——src/compiler 清单 + 其顺序 +
+//     bootstrap Python 工具链 + rt.s + as/ld——源哈希只是其中一部分的代理，
+//     漏掉任何一项就复现本单要消灭的静默类；
+//   * 无需构建管道改动/生成文件：其它编译路径（tests 直编 src/compiler、
+//     full-bootstrap 的 corec2/corec3）不因缺一个生成文件而断；
+//   * 自哈希取内容而非路径 ⇒ 「同内容二进制」判为同身份（正确：语义同）。
+// 依赖（实测成立，判据在案）：本仓 ELF 构建逐字节确定（两连建 cmp IDENTICAL
+// ——本单修复前后两侧均实测；run.sh full-bootstrap 亦以 cmp 为判据）⇒ 同源
+// 重建身份不变，缓存命中面不退化。若某日构建变为非确定，症状 = 缓存恒 miss
+// （性能面，非正确性面），由该判据暴露。
+// 退化路径（无 procfs / 读取失败）：身份 = 0 ⇒ 两端点均关缓存，每次全量重建
+// ——绝不落「身份 0」条目（否则两个同样取不到身份的编译器互相当作同身份命中，
+// 正是本单静默类复活）。实测：`unshare -rm` 把 tmpfs 挂到 /proc 掩掉 procfs 后
+// 编译 rc=0 且 **零条目落盘**；已删除（unlink）的编译器二进制反而仍可经
+// /proc/self/exe 打开取到原 inode 内容（身份照常成立）。
+//
+// 与 CIR_CACHE_VER 的分工：VER = 手工粗粒度（格式/语义生成代，例如「快照里
+// 不该有链边」这类**格式**变更）；身份 = 自动细粒度（编译器内容驱动，覆盖
+// 「同格式、不同前端行为」）。两者都必须匹配才命中——格式变更手工 bump，
+// 行为变更由身份自动接管，不必再记得 bump。
+g_cir_compiler_id       : int, mut = 0;
+g_cir_compiler_id_ready : int, mut = 0;
+
+// 运行中编译器 ELF 的内容哈希（memoized）。0 = 取不到身份（无 procfs /
+// 读取失败 / 空文件）——调用方按「身份不可证」处理（关缓存，见两端点）。
+fn cir_compiler_identity() -> int {
+    if g_cir_compiler_id_ready != 0 { return g_cir_compiler_id; }
+    g_cir_compiler_id_ready = 1;
+    g_cir_compiler_id = cir_hash_running_binary();
+    return g_cir_compiler_id;
+}
+
+// 单趟乘加哈希（FNV-1 64-bit 常数；本语言无 XOR 运算符——与 ir_gen.cr
+// func_fingerprint 同族写法）。8 字节字一步（load64 = 单条未对齐小端读；
+// corec 目标面即 x86-64 小端，字节序不影响「确定性」这一唯一要求）+ 余尾
+// 逐字节 + 末尾混入总长（长度不同必不同）。
+// 采样（本单判据，热身缓存，build/corec 1.32MB）：逐字节形中位 +11.6ms/次
+// （小文件编译 17→29ms）→ 8 字节字粒度后 min 基准 +2~3ms/次（同件 15→17ms；
+// 大件 src/compiler/main.cr 热身 5.5s 下不可分——采样噪声大于该值）。代价只在
+// **真正走到缓存**的进程里付一次（memoized：strace 实测热身全量编译 1 次
+// open("/proc/self/exe")），身份不可得/无条目可查时不付。
+// 非密码学用途（对侧不设敌手）：它要区分的是「同一编译器的两次构建」，随机
+// 差异撞上 2^-64 忽略；能写缓存文件的对手本来就能写任意载荷。
+fn cir_hash_running_binary() -> int {
+    fd := syscall3(2, "/proc/self/exe", 0, 0);  // open(O_RDONLY)
+    if fd < 0 { return 0; }
+    buf := alloc(65536);
+    h : ., mut = -3750763034362895579;  // FNV-1 64 offset basis（signed i64）
+    total : ., mut = 0;
+    loop {
+        n := syscall3(0, fd, buf, 65536);  // read(fd, buf, 65536)
+        if n <= 0 { break; }
+        i : ., mut = 0;
+        loop {
+            if i + 8 > n { break; }
+            h = h * 1099511628211 + load64(buf, i);
+            i = i + 8;
+        }
+        loop {
+            if i >= n { break; }
+            h = h * 1099511628211 + load8(buf, i);
+            i = i + 1;
+        }
+        total = total + n;
+    }
+    r1 := syscall3(3, fd, 0, 0);  // close(fd)
+    if total == 0 { return 0; }
+    h = h * 1099511628211 + total;
+    return h;
+}
 
 // Count non-function regions belonging to one function. The function SG is
 // recreated by df_begin_func on a cache hit, so only nested records are stored.
@@ -77,6 +165,12 @@ fn cir_cache_sg_parent(sg_idx: int, node_start: int, node_count: int) -> int {
 // ir_fi: compact IR function index used for IR/DFG ranges
 // Returns 0 on success, -1 on failure.
 fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int {
+    // 身份不可证（无 procfs 等）⇒ 绝不落盘：否则身份 0 的条目会被另一个同样
+    // 取不到身份的编译器当作「同身份」命中——即本单的静默类在退化路径复活。
+    // 关缓存 = 每次都全量重建 = 正确性优先（见 cir_compiler_identity 头注）。
+    cid := cir_compiler_identity();
+    if cid == 0 { return -1; }
+
     fd := syscall3(2, path, 577, 420);  // O_WRONLY|O_CREAT|O_TRUNC, 0644
     if fd < 0 { return -1; }
 
@@ -97,7 +191,7 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int {
 
     // Serialize in memory and issue one write. The previous per-field writes
     // made a full self-host build perform millions of syscalls on its cache.
-    total_size : ., mut = 40 + name_len;
+    total_size : ., mut = 48 + name_len;  // v17 头部 = magic/ver/identity/fp/sig/name_len
     total_size = total_size + 8 + var_count * 24;
     total_size = total_size + 8 + node_count * 64;
     total_size = total_size + 8 + g_df_edge_count * 32;  // v5: 4 fields incl. kind
@@ -125,6 +219,7 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int {
     // Write header
     w64_cir(fd, CIR_CACHE_MAGIC);
     w64_cir(fd, CIR_CACHE_VER);
+    w64_cir(fd, cid);  // v17: 编译器身份（重建即失效）
     w64_cir(fd, fp);
     w64_cir(fd, sig);
     w64_cir(fd, name_len);
@@ -255,7 +350,8 @@ fn write_fd(fd: int, data: string, len: int) {
 // against the current AST. Returns 0 on success, -1 on failure (cache miss).
 fn load_cir_cache(path: string, func_idx: int) -> int {
     data := read_file(path);
-    if str_len(data) < 48 { return -1; }
+    // v17 头部 = 48B + 函数名（再至少 8B 载荷段头）。
+    if str_len(data) < 56 { return -1; }
     pos : ., mut = 0;
 
     // Validate header
@@ -263,6 +359,14 @@ fn load_cir_cache(path: string, func_idx: int) -> int {
     if magic != CIR_CACHE_MAGIC { return -1; }
     ver := r64(data, pos); pos = pos + 8;
     if ver != CIR_CACHE_VER { return -1; }
+
+    // v17: 编译器身份——条目由另一个（或旧版）编译器二进制写入 ⇒ 其字符串
+    // 驻留序/索引与本次运行不一致，而 fp/sig 只覆盖目标源（同源必同）⇒ 必须
+    // 在此拒绝，否则下面恢复出的旧序索引即成活产物（TODO #5 静默类）。
+    // 身份取不到（0）同样拒绝（save 侧对称地不落盘）：身份不可证 = 不可命中。
+    cid := cir_compiler_identity();
+    entry_cid := r64(data, pos); pos = pos + 8;
+    if cid == 0 || entry_cid != cid { return -1; }
 
     fp := r64(data, pos); pos = pos + 8;
     sig := r64(data, pos); pos = pos + 8;
