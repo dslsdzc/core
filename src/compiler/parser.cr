@@ -452,7 +452,10 @@ fn parse_primary() -> int {
             ff := -1;
             fc : ., mut = 0;
             loop {
-                if check(T_RBRACE) { break; }
+                // EOF 护栏（TODO #16 根因面）：本循环只认 `}`，而 advance_tok 在 EOF 是空操作
+                // ⇒ 解析失步至 EOF 后自旋，每轮分配 AST 节点直至 OOM（alloc 失败返回 NULL →
+                // grow_ast 向 NULL 拷贝 SIGSEGV）。同族 6 处循环统一补 EOF 退出。
+                if check(T_RBRACE) || check(T_EOF) { break; }
                 ft := advance_tok();
                 fni := str_intern(tok_lx(ft));
                 advance_tok();
@@ -785,6 +788,28 @@ fn parse_new_var_decl() -> int {
     return first_node;
 }
 
+// 跳过整段嵌套函数声明（P021 已报错，仅错误恢复路径）：`fn name(params) -> T {body}`
+// 按花括号配平跳过整段；`= expr;` 形式（含 extern 无体形式）遇分号收尾。起始 token 可为
+// `pub`。花括号配平从函数体的 `{` 起算（depth 0→1），体内嵌套块/struct 字面量的花括号
+// 成对计入，不会在 depth 归零前误判结束。
+fn skip_nested_fn() {
+    depth : ., mut = 0;
+    seen_brace : ., mut = 0;
+    loop {
+        k := tok_k(cur_tok());
+        if k == T_EOF { return; }
+        if k == T_LBRACE { depth = depth + 1; seen_brace = 1; advance_tok(); continue; }
+        if k == T_RBRACE {
+            advance_tok();
+            depth = depth - 1;
+            if depth <= 0 { return; }
+            continue;
+        }
+        if k == T_SEMI && seen_brace == 0 { advance_tok(); return; }
+        advance_tok();
+    }
+}
+
 fn parse_stmt() -> int {
     // Drain batch extras from previous call
     if g_extra_let_count > 0 {
@@ -793,6 +818,25 @@ fn parse_stmt() -> int {
     }
 
     t := cur_tok();
+    // 嵌套 `fn`/`flow` 声明不属语言面——grammar/core.ebnf 的 Statement 不含 FunctionDecl
+    // （函数声明仅顶层 TopLevelDecl），bootstrap 参考实现亦以 positioned error 拒绝。
+    // 修复前此处落回 parse_primary 的「Unexpected token in expression」通用兜底：只消费
+    // `fn` 一个 token，解析失步后 `IDENT {` 进入 struct 字面量循环并把外层 `}` 当字段吃掉，
+    // 至 EOF 后因该循环只认 `}` 且 advance_tok 在 EOF 是空操作而自旋——每轮分配 AST 节点，
+    // 直到 bump allocator 耗尽返回 NULL、grow_ast 向 NULL 拷贝（rc=139 SIGSEGV，TODO #16）。
+    // 现显式报 P021 并整段跳过该声明：错误定位到声明处，且后续语句恢复正常解析。
+    if tok_k(t) == T_FN || tok_k(t) == T_FLOW
+       || (tok_k(t) == T_PUB && (tok_k(t + 1) == T_FN || tok_k(t + 1) == T_FLOW)) {
+        fnt : ., mut = t;
+        if tok_k(fnt) == T_PUB { fnt = fnt + 1; }
+        msg : ., mut = "Nested function declaration is not supported; declare it at top level";
+        if tok_k(fnt + 1) == T_IDENT {
+            msg = "Nested function declaration '" + tok_lx(fnt + 1) + "' is not supported; declare it at top level";
+        }
+        check_error(EC_P_NESTED_FN, msg, tok_ln(fnt), tok_cl(fnt));
+        skip_nested_fn();
+        return 0;
+    }
     // New variable declaration syntax
     if tok_k(t) == T_IDENT && is_new_var_decl() {
         return parse_new_var_decl();
@@ -986,7 +1030,7 @@ fn parse_pattern() -> int {
             ff := -1;
             fc : ., mut = 0;
             loop {
-                if check(T_RBRACE) { break; }
+                if check(T_RBRACE) || check(T_EOF) { break; }
                 ft := advance_tok();
                 fni := str_intern(tok_lx(ft));
                 advance_tok(); // =
@@ -1415,7 +1459,7 @@ fn parse_declaration() {
             }
             fc : ., mut = 0;
             loop {
-                if check(T_RBRACE) { break; }
+                if check(T_RBRACE) || check(T_EOF) { break; }
                 ft := advance_tok();
                 fn2 := tok_lx(ft);
                 w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES + fc * 8, str_intern(fn2));
@@ -1457,7 +1501,7 @@ fn parse_declaration() {
             }
             vc : ., mut = 0;
             loop {
-                if check(T_RBRACE) { break; }
+                if check(T_RBRACE) || check(T_EOF) { break; }
                 vt := advance_tok();
                 vname := tok_lx(vt);
                 w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vc * OFF_EV_SIZE + OFF_EV_NAME, str_intern(vname));
@@ -1508,7 +1552,7 @@ fn parse_declaration() {
         method_count : ., mut = 0;
 
         loop {
-            if check(T_RBRACE) { break; }
+            if check(T_RBRACE) || check(T_EOF) { break; }
             if check(T_FN) {
                 advance_tok(); // fn
                 mt := advance_tok(); // method name
@@ -1608,7 +1652,7 @@ fn parse_declaration() {
         }
         advance_tok(); // {
         loop {
-            if check(T_RBRACE) { break; }
+            if check(T_RBRACE) || check(T_EOF) { break; }
             if check(T_FN) {
                 ft := advance_tok();
                 method_nt := advance_tok();

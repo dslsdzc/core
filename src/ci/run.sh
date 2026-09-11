@@ -36,6 +36,11 @@ check_compiler_sources() {
 run_suite() {
   for f in tests/suite/*.cr; do
     case "$f" in
+      # mini* 语料整体 SKIP（历史遗留：其中 at_test_mini4/6 为**函数体内嵌套 fn 声明**，
+      # TODO #16 —— 该构造不属语言面（grammar/core.ebnf：Statement 不含 FunctionDecl），
+      # 修复前编译 rc=139 段错误；现由 corec 以 error[P21] 定位诊断拒绝（rc=1），
+      # 属**负例**而非可运行正例，故仍不进正例套件；回归见 tests/selfhost/test_nested_fn.py
+      # （同族扁平正例 at_test_mini5.cr / at_test.cr 已在套件内）。
       *_mini*.cr) continue ;;
     esac
     if [ ! -s "$f" ]; then
@@ -68,6 +73,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_pointer_safety.py
     python3 tests/selfhost/test_params_limit.py   # TODO #8 形参上限/≥18 形参静默误编译回归
     python3 tests/selfhost/test_tuple_slots.py
+    python3 tests/selfhost/test_nested_fn.py      # TODO #16 嵌套 fn 声明段错误 → 定位诊断回归
     ;;
 
   suite)

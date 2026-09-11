@@ -352,6 +352,7 @@ EC_P_FILEID       : int = 1017; // P017  Invalid fileid declaration
 EC_P_VAR_DECL     : int = 1018; // P018  Invalid var declaration
 EC_P_LIT_OVERFLOW : int = 1019; // P019  Numeric literal overflow
 EC_P_TOO_MANY_PARAMS : int = 1020; // P020  Too many function parameters (FuncInfo 参数槽区容量)
+EC_P_NESTED_FN    : int = 1021; // P021  Nested function declaration (函数声明仅限顶层)
 
 // N0xx — Name Resolution
 EC_N_UNDEFINED     : int = 2001; // N001  Undefined name
