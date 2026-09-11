@@ -1,5 +1,7 @@
 # Core IR Schema — HDFG (.cir / .csr)
 
+> 定位:受众 = 维护者(后端/ccr_io 实现者);状态 = active(实现期规格);真源 = src/compiler/ccr_io.cr 与 ast.cr。
+
 ## 概述
 
 Core 编译器使用两种中间表示：

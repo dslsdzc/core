@@ -1,5 +1,7 @@
 # Core Spec IR Schema — 规约约束层 (.csr)
 
+> 定位:受众 = 维护者(规约约束层实现者);状态 = active;真源 = src/compiler/ccr_io.cr(.csr 读写)+ maintainer/design/spec-design.md。
+
 ## 概述
 
 `.csr` 是 `.cir`（HDFG）的规约约束扩展的二进制序列化格式。它不是独立的 IR，而是 `.cir` 的补充——携带规约约束元数据（check/ensure/invariant/标签），与 `.cir` 的 DFNode 数组通过节点索引精确关联。
