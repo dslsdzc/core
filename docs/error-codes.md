@@ -44,6 +44,8 @@
 | P017 | fileid 声明格式 | `Invalid fileid declaration` |
 | P018 | 变量声明语法 | `Invalid variable declaration syntax` |
 | P019 | 字面量后缀溢出 | `Numeric literal overflow` |
+| P020 | 形参数目超上限（> `MAX_FN_PARAMS=64`） | `too many parameters`（TODO #8 修复：修复前 ≥18 形参静默误编译——越界写踩 return_type/ast_node） |
+| P021 | 函数体内嵌套 `fn` 声明（不属语言面） | 定位拒绝（TODO #16 修复：修复前 parse 失步 → bump allocator 耗尽 → `rep movsb` 向 NULL 拷 → rc=139） |
 
 ## N0xx — 名字解析 (Name Resolution)
 
@@ -253,7 +255,7 @@
 | 段 | 范围 | 数量 | 说明 |
 |----|------|------|------|
 | L | L001–L011 | 11 | 词法 |
-| P | P001–P019 | 19 | 语法 |
+| P | P001–P021 | 21 | 语法 |
 | N | N001–N021 | 21 | 名字解析 |
 | I | I001–I006 | 6 | 类型推断 |
 | TA | TA01–TA08 | 8 | 赋值与绑定 |

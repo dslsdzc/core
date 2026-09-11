@@ -195,6 +195,11 @@
 - **三态约定（判据面）**：判定 API 返回 `1 = 成立 / 0 = 不成立 / -1 = 未知（预算耗尽或未覆盖）`；`tt_witness` 另用 `-2 = 未知` 与 `-1 = 不可满足` 严格区分（`ty_exhaustive` 对 -2 返回 -1，绝不当「穷尽」）。**预算耗尽的结果一律不缓存**（memo 每顶层查询清空）。
 
 ### 16. 函数体内嵌套 `fn` 声明 → 编译段错误 rc=139（2026-09-10 R2 P1 Task 2 评审确认——既有缺陷，非该批回归）
+- **✅ 已修（2026-09-11，提交 `f417d3453a79`；报告 `.superpowers/sdd/fix-nestedfn16-report.md`）**：
+  根因 = `parse_primary` **无 `T_FN` 分支** ⇒ 语句位遇嵌套 `fn` 落回通用兜底 → 解析**失步**；随后 struct 字面量字段循环在 EOF 处**自旋** → bump allocator 耗尽 → `grow_ast` 的 `rep movsb` 向 **NULL** 拷贝（gdb 实测 `rdi=0`、`rcx=0x12000000`＝288MB），日志止于 `[3/5] parse`（与 TODO 归属证据一致）。
+  **结局判定（推翻 TODO 原文「判据 rc=0」前提）**：嵌套 `fn` **不属语言面**——`grammar/core.ebnf` 的 Statement 不含 FunctionDecl、bootstrap 对同输入报 SyntaxError、函数值设计为 YAGNI 挂起 ⇒ 正确结局 = **定位拒绝 `P021`（rc=1）**，而非 rc=0。依据已写入 `tests/selfhost/test_nested_fn.py` 文件头与 `run.sh` 注释。
+  修复 = `P021` 定位拒绝 + `}`-键循环 6 处 EOF 护栏（防同类自旋）+ `run.sh` selfhost-tests 挂钩；回归 = `test_nested_fn.py` 17/17（含 4 例 EOF 失步探针，独立对拍父版均 rc=139）+ `tests/suite` 21 pass/0 fail。
+  **余留**：① EOF 失步恢复期会重复打印无定位 parse error（有界 ≤64、毫秒级、rc=1；既有报告面，非本次引入）；② 若将来要「支持」嵌套函数，`P021` 即显式拦截点，需连 checker/ir_gen/后端一起做。
 - **最小复现**：函数体内**嵌套 `fn` 声明**的 `.cr` 编译 rc=139（评审最小件 `/tmp/rv_nested.cr`）；**扁平版（同逻辑不嵌套）rc=0** → 触发点 = 嵌套 fn 声明本身。注意：原先被归因的 `tests/suite/at_test_mini4/6` 只是同族样例（**mini6 并无 `@inline`**，原报告措辞有误）。
 - **归属证据**：编译日志止于 `[3/5] parse...`（该行打印于 `parse_all()` 之前），checker 的 `[4/5]` 未开始 → 崩点在 parse→checker 之间；**在 R2 P1 之前的编译器上同样复现**（两版均 139）→ 与影子层/类型引擎无关。
 - **影响**：`tests/suite/` 中 2 个 fixture 长期 rc=139（P1 语料扫描标记 SKIP）。
