@@ -1955,8 +1955,13 @@ fn infer_expr(node: int) -> int {
             if op == OP_SUB && get_type_kind(lt) == TYP_PTR && get_type_kind(rt) == TYP_PTR {
                 return TI_INT;
             }
-            // Check: arithmetic ops require int or dex
-            if lt != TI_INT && lt != TI_DEX && rt != TI_INT && rt != TI_DEX {
+            // Check: arithmetic ops require int or dex —— R2 P2b Task 4：查表（门形状 = ANY：
+            // 「至少一侧许可即通过」，与改动前的 `&&` 形状一字等价）。转录依据 = 本处改动前的
+            // `lt != TI_INT && lt != TI_DEX && rt != TI_INT && rt != TI_DEX`；表的 ADD..MOD 格
+            // **只含 int/dex**（PTR/STRING 不在内——早退规则 :1946/:1948/:1951/:1955（接线前实测
+            // 行号；接线后本块 +4）仍在原处 = 结果规则，不进本门）。负控（须仍报 error[TB01]）：
+            // `*T + *T`、`"a" - "b"`。
+            if iface_permits(iface_kind_of(lt), op) == 0 && iface_permits(iface_kind_of(rt), op) == 0 {
                 check_error(EC_TB_ADD, "Arithmetic operation requires int or dex", ast_line(node), ast_col(node));
             }
             if lt == TI_DEX || rt == TI_DEX { return TI_DEX; }
@@ -1966,7 +1971,12 @@ fn infer_expr(node: int) -> int {
             return TI_BOOL;
         }
         if op == OP_AND || op == OP_OR {
-            if lt != TI_BOOL && lt != TI_INT || rt != TI_BOOL && rt != TI_INT {
+            // R2 P2b Task 4：查表（门形状 = ALL「每侧都须许可」）。转录依据 = 本处改动前的
+            // `lt != TI_BOOL && lt != TI_INT || rt != TI_BOOL && rt != TI_INT`（= 某侧「非 bool 且
+            // 非 int」即报错）；谓词写 OP_AND（**不另设** IP_LOGIC——OP_AND/OP_OR 在表中同步置位，
+            // 且现状 :1969 对两个 op 一字不分）。表的 AND/OR 格恰 {int, bool}——**dex 不在内**
+            // （`1.5 && true` 现状 error[TC01]，探针 N7 实测）。
+            if iface_permits(iface_kind_of(lt), OP_AND) == 0 || iface_permits(iface_kind_of(rt), OP_AND) == 0 {
                 check_error(EC_TC_IF_COND, "Logical operator requires bool or int operands", ast_line(node), ast_col(node));
             }
             return TI_BOOL;
@@ -2271,7 +2281,11 @@ fn infer_expr(node: int) -> int {
         else_node := ast_c(node);
         cond_ti := infer_expr(cond);
         // Accept int as truthy/falsy in conditions (not just strict bool)
-        if cond_ti != TI_BOOL && cond_ti != TI_INT {
+        // R2 P2b Task 4：查表（门形状 = ONE 单操作数）。转录依据 = 本处改动前的
+        // `cond_ti != TI_BOOL && cond_ti != TI_INT`；IP_COND 格恰 {int, bool}——**dex 拒**
+        // （`if 1.5` 现状 error[TC01]，探针 N8 实测）。**不得**与 `while` 的 IP_COND_BOOL 合并
+        // （那条只收 bool——合并 = 收紧 `if` 或放宽 `while`）。
+        if iface_permits(iface_kind_of(cond_ti), IP_COND) == 0 {
             check_error(EC_TC_IF_COND, "If condition must be bool or int", ast_line(node), ast_col(node));
         }
         // --- Dyn type set merge: save pre-if state ---
@@ -2382,7 +2396,9 @@ fn infer_expr(node: int) -> int {
         cond := ast_a(node);
         body := ast_b(node);
         cond_ti := infer_expr(cond);
-        if cond_ti != TI_BOOL {
+        // R2 P2b Task 4：查表（门形状 = ONE）。转录依据 = 本处改动前的 `cond_ti != TI_BOOL`；
+        // IP_COND_BOOL 格**只含 bool**（`while 1` 现状 error[TC04]，探针 N9 实测）。
+        if iface_permits(iface_kind_of(cond_ti), IP_COND_BOOL) == 0 {
             check_error(EC_TC_WHILE_COND, "While condition must be bool", ast_line(node), ast_col(node));
         }
         push_borrow_scope();

@@ -18,6 +18,14 @@ fn ts_check(name: string, got: int, want: int) -> int {
     return 1;
 }
 
+// Task 4 端到端用例的诊断探针：check_error 只追加 g_diags（不打印），故「门是否报错」可由
+// 增量计数 + 首条新诊断码直接读——这是「接线后门真的在判」的行为证据（表侧用例只能证明表对）。
+fn ts_diag_code_at(idx: int) -> int {
+    if idx < 0 { return -1; }
+    if idx >= g_diag_count { return -1; }
+    return r64(g_diags, idx * DIAG_REC_SIZE);
+}
+
 // 宽联合探针（预算守卫用）：N 层左深 union —— sub_cover 逐支递归，每支 1 步，
 // N > 预算即耗尽（深 μ 链不行：参数位置的字面蕴含不递归展开，会在参数比较处短路）。
 fn tt_probe_wide_union(depth: int) -> int {
@@ -655,6 +663,202 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("lit.none_empty_unit", infer_expr(li_wrap_empty), TI_UNIT);
     // 负节点先行拒绝（infer_expr 头行；接线不得把它挤掉）
     total = total + 1; fails = fails + ts_check("lit.neg_node_unit", infer_expr(-1), TI_UNIT);
+
+    // --- R2 P2b Task 4：操作许可位集接线（ops 列逐格；消费者 = checker.cr 的三个门）---
+    // 判据口径 = **与改动前的判定一字等价**（逐格全表对拍，非抽样）：把「改动前的谓词」内联进
+    // 本段，逐 ak × 逐 op 与 `iface_permits` 对拍。三组关键等价（改动前原文 = checker.cr 算术门
+    // :1959 / 逻辑门 :1969 / 条件门 :2274 + :2385）：
+    //   ① ADD..MOD 许可 ⟺ ak ∈ {AK_INT, AK_DEX}（门**只含 int/dex**；PTR/STRING 不在内 ⇒
+    //      `*T + *T`/`"a" - "b"` 仍 error[TB01]）
+    //   ② OP_AND/OP_OR 许可 ⟺ ak ∈ {AK_INT, AK_BOOL}（dex 拒——`1.5 && true` 现状 TC01）
+    //   ③ IP_COND ⟺ ak ∈ {AK_INT, AK_BOOL}；IP_COND_BOOL ⟺ ak == AK_BOOL（`while 1` 现状 TC04）
+    // 反真空：另立「许可为 1 的格数」哨兵（全 0 表 ⇒ 计数 0 必红）+ 条目面一致性 + 端到端段。
+    o4_aks := alloc(13 * 8);   // 13 类枚举（顺序 = 条目表声明序）
+    w64(o4_aks, 0, AK_INT);      w64(o4_aks, 8, AK_DEX);      w64(o4_aks, 16, AK_STRING);
+    w64(o4_aks, 24, AK_BOOL);    w64(o4_aks, 32, AK_UNIT);    w64(o4_aks, 40, AK_NEVER);
+    w64(o4_aks, 48, AK_CHAR);    w64(o4_aks, 56, AK_DYN);     w64(o4_aks, 64, AK_PRODUCT);
+    w64(o4_aks, 72, AK_SEQUENCE); w64(o4_aks, 80, AK_REF);    w64(o4_aks, 88, AK_PTR);
+    w64(o4_aks, 96, AK_NAMED);
+    o4_ops := alloc(5 * 8);    // 算术族 5 op（门消费面：OP_ADD..OP_MOD）
+    w64(o4_ops, 0, OP_ADD);      w64(o4_ops, 8, OP_SUB);      w64(o4_ops, 16, OP_MUL);
+    w64(o4_ops, 24, OP_DIV);     w64(o4_ops, 32, OP_MOD);
+    // ① 算术门：逐 ak × 逐 op 对拍「许可 ⟺ int|dex」
+    o4_arith_bad : ., mut = 0;
+    o4_arith_yes : ., mut = 0;
+    o4_i : ., mut = 0;
+    loop {
+        if o4_i >= 13 { break; }
+        o4_ak := r64(o4_aks, o4_i * 8);
+        o4_j : ., mut = 0;
+        loop {
+            if o4_j >= 5 { break; }
+            o4_op := r64(o4_ops, o4_j * 8);
+            o4_want : ., mut = 0;
+            if o4_ak == AK_INT || o4_ak == AK_DEX { o4_want = 1; }
+            if iface_permits(o4_ak, o4_op) != o4_want { o4_arith_bad = o4_arith_bad + 1; }
+            if iface_permits(o4_ak, o4_op) == 1 { o4_arith_yes = o4_arith_yes + 1; }
+            o4_j = o4_j + 1;
+        }
+        o4_i = o4_i + 1;
+    }
+    total = total + 1; fails = fails + ts_check("ops.arith_gate_eq_legacy", o4_arith_bad, 0);
+    total = total + 1; fails = fails + ts_check("ops.arith_permit_count", o4_arith_yes, 10);  // = 2 ak × 5 op
+    // ② 逻辑族：逐 ak × 逐 op（OP_AND/OP_OR）对拍「许可 ⟺ int|bool」——谓词取 OP_AND（不另设 IP_LOGIC）
+    o4_logic_bad : ., mut = 0;
+    o4_logic_yes : ., mut = 0;
+    o4_k : ., mut = 0;
+    loop {
+        if o4_k >= 13 { break; }
+        o4_ak2 := r64(o4_aks, o4_k * 8);
+        o4_want2 : ., mut = 0;
+        if o4_ak2 == AK_INT || o4_ak2 == AK_BOOL { o4_want2 = 1; }
+        if iface_permits(o4_ak2, OP_AND) != o4_want2 { o4_logic_bad = o4_logic_bad + 1; }
+        if iface_permits(o4_ak2, OP_OR) != o4_want2 { o4_logic_bad = o4_logic_bad + 1; }
+        if iface_permits(o4_ak2, OP_AND) == 1 { o4_logic_yes = o4_logic_yes + 1; }
+        o4_k = o4_k + 1;
+    }
+    total = total + 1; fails = fails + ts_check("ops.logic_gate_eq_legacy", o4_logic_bad, 0);
+    total = total + 1; fails = fails + ts_check("ops.logic_permit_count", o4_logic_yes, 2);  // int + bool
+    // ③ 条件族：IP_COND = {int, bool}；IP_COND_BOOL = {bool}（**两条规则现状不同，不得合并**）
+    o4_cond_bad : ., mut = 0;
+    o4_cond_yes : ., mut = 0;
+    o4_condb_yes : ., mut = 0;
+    o4_m : ., mut = 0;
+    loop {
+        if o4_m >= 13 { break; }
+        o4_ak3 := r64(o4_aks, o4_m * 8);
+        o4_want3 : ., mut = 0;
+        if o4_ak3 == AK_INT || o4_ak3 == AK_BOOL { o4_want3 = 1; }
+        o4_want4 : ., mut = 0;
+        if o4_ak3 == AK_BOOL { o4_want4 = 1; }
+        if iface_permits(o4_ak3, IP_COND) != o4_want3 { o4_cond_bad = o4_cond_bad + 1; }
+        if iface_permits(o4_ak3, IP_COND_BOOL) != o4_want4 { o4_cond_bad = o4_cond_bad + 1; }
+        if iface_permits(o4_ak3, IP_COND) == 1 { o4_cond_yes = o4_cond_yes + 1; }
+        if iface_permits(o4_ak3, IP_COND_BOOL) == 1 { o4_condb_yes = o4_condb_yes + 1; }
+        o4_m = o4_m + 1;
+    }
+    total = total + 1; fails = fails + ts_check("ops.cond_gate_eq_legacy", o4_cond_bad, 0);
+    total = total + 1; fails = fails + ts_check("ops.cond_permit_count", o4_cond_yes * 10 + o4_condb_yes, 21);  // 2 与 1
+    // ④ 全许可面（现状**无拒绝路径** ⇒ 本批不接线、只登记为 P3 旋钮）：比较 6 op / 一元 4 op / AS
+    //    对全部 13 类置 1——逐格对拍（计数 = 13 × 11 = 143）
+    o4_all_bad : ., mut = 0;
+    o4_all_yes : ., mut = 0;
+    o4_n : ., mut = 0;
+    loop {
+        if o4_n >= 13 { break; }
+        o4_ak4 := r64(o4_aks, o4_n * 8);
+        o4_n2 : ., mut = 0;
+        loop {
+            if o4_n2 >= 6 { break; }
+            o4_cop := OP_EQ + o4_n2;                     // OP_EQ..OP_GE 连续取值（6..11）
+            if iface_permits(o4_ak4, o4_cop) != 1 { o4_all_bad = o4_all_bad + 1; }
+            if iface_permits(o4_ak4, o4_cop) == 1 { o4_all_yes = o4_all_yes + 1; }
+            o4_n2 = o4_n2 + 1;
+        }
+        o4_n3 : ., mut = 0;
+        loop {
+            if o4_n3 >= 4 { break; }
+            o4_uop := IP_UOP_BIAS + 1 + o4_n3;           // UOP_NEG..UOP_DEREF → 21..24
+            if iface_permits(o4_ak4, o4_uop) != 1 { o4_all_bad = o4_all_bad + 1; }
+            if iface_permits(o4_ak4, o4_uop) == 1 { o4_all_yes = o4_all_yes + 1; }
+            o4_n3 = o4_n3 + 1;
+        }
+        if iface_permits(o4_ak4, IP_AS) != 1 { o4_all_bad = o4_all_bad + 1; }
+        if iface_permits(o4_ak4, IP_AS) == 1 { o4_all_yes = o4_all_yes + 1; }
+        o4_n = o4_n + 1;
+    }
+    total = total + 1; fails = fails + ts_check("ops.all_permit_eq_legacy", o4_all_bad, 0);
+    total = total + 1; fails = fails + ts_check("ops.all_permit_count", o4_all_yes, 143);  // 13 × 11
+    // ⑤ 容器/方法面（Task 5 的消费格；本批登记）：索引/字段/方法各恰两类
+    total = total + 1; fails = fails + ts_check("ops.index_permit_set",
+        (iface_permits(AK_SEQUENCE, IP_INDEX) == 1 && iface_permits(AK_STRING, IP_INDEX) == 1 &&
+         iface_permits(AK_INT, IP_INDEX) == 0 && iface_permits(AK_REF, IP_INDEX) == 0 &&
+         iface_permits(AK_SEQUENCE, IP_INDEX_RANGE) == 1 && iface_permits(AK_STRING, IP_INDEX_RANGE) == 0), 1);
+    total = total + 1; fails = fails + ts_check("ops.field_permit_set",
+        (iface_permits(AK_NAMED, IP_FIELD) == 1 && iface_permits(AK_PRODUCT, IP_FIELD) == 1 &&
+         iface_permits(AK_INT, IP_FIELD) == 0 && iface_permits(AK_SEQUENCE, IP_FIELD) == 0), 1);
+    total = total + 1; fails = fails + ts_check("ops.method_permit_set",
+        (iface_permits(AK_DYN, IP_METHOD) == 1 && iface_permits(AK_NAMED, IP_METHOD) == 1 &&
+         iface_permits(AK_INT, IP_METHOD) == 0 && iface_permits(AK_PTR, IP_METHOD) == 0), 1);
+    // ⑥ 条目面一致性（逐条目：`iface_ops(ak)` 必须回读该行的 ops 列；防「列未填/查错行」）
+    o4_row_bad : ., mut = 0;
+    o4_r : ., mut = 0;
+    loop {
+        if o4_r >= g_iface_entry_count { break; }
+        o4_akr := r64(g_iface_entries, o4_r * ESZ_IFACE_ENTRY + OFF_IE_AK);
+        if iface_ops(o4_akr) != r64(g_iface_entries, o4_r * ESZ_IFACE_ENTRY + OFF_IE_OPS) { o4_row_bad = o4_row_bad + 1; }
+        if iface_ops(o4_akr) == 0 { o4_row_bad = o4_row_bad + 1; }   // 全 0 行 = 空集残留（Task 1 口径）
+        o4_r = o4_r + 1;
+    }
+    total = total + 1; fails = fails + ts_check("ops.entry_row_consistent", o4_row_bad, 0);
+    // ⑦ 端到端（经真 infer_expr 走三个门；**行为证据**——表侧用例证明不了「线对」）：
+    //    ptr 操作数 = `&int 字面量` 的构造节点（EXPR_UNARY/UOP_REF，非 ident 分支 ⇒ 不触借用检查）
+    o4_ref := alloc_node(EXPR_UNARY, li_int, -1, UOP_REF, 0, 0, -1, 0, 0);
+    o4_ref2 := alloc_node(EXPR_UNARY, li_int, -1, UOP_REF, 0, 0, -1, 0, 0);
+    o4_b_add_int := alloc_node(EXPR_BINARY, li_int, li_int, OP_ADD, 0, 0, -1, 0, 0);
+    o4_b_sub_str := alloc_node(EXPR_BINARY, li_str, li_str, OP_SUB, 0, 0, -1, 0, 0);
+    o4_b_add_str := alloc_node(EXPR_BINARY, li_str, li_str, OP_ADD, 0, 0, -1, 0, 0);
+    o4_b_ptrptr := alloc_node(EXPR_BINARY, o4_ref, o4_ref2, OP_ADD, 0, 0, -1, 0, 0);
+    o4_b_ptrdiff := alloc_node(EXPR_BINARY, o4_ref, o4_ref2, OP_SUB, 0, 0, -1, 0, 0);
+    o4_b_ptradd := alloc_node(EXPR_BINARY, o4_ref, li_int, OP_ADD, 0, 0, -1, 0, 0);
+    o4_b_dex := alloc_node(EXPR_BINARY, li_dex, li_int, OP_ADD, 0, 0, -1, 0, 0);
+    o4_b_logic := alloc_node(EXPR_BINARY, li_bool, li_int, OP_AND, 0, 0, -1, 0, 0);
+    o4_b_logic_bad := alloc_node(EXPR_BINARY, li_dex, li_bool, OP_AND, 0, 0, -1, 0, 0);
+    o4_b_eq := alloc_node(EXPR_BINARY, li_str, li_int, OP_EQ, 0, 0, -1, 0, 0);
+    // 反真空哨兵：构造节点确实带预期 kind/op（防 alloc_node 参数错位 ⇒ 假绿）
+    total = total + 1; fails = fails + ts_check("ops.node_kinds",
+        (ast_kind(o4_b_add_int) == EXPR_BINARY && ast_c(o4_b_add_int) == OP_ADD &&
+         ast_kind(o4_ref) == EXPR_UNARY && ast_c(o4_ref) == UOP_REF), 1);
+    // 正控：int 算术 / 串拼接（早退规则）/ 指针算术 + int / dex 支配 / 逻辑 int 侧 / 比较不校验
+    o4_m0 := g_diag_count;
+    o4_r_add := infer_expr(o4_b_add_int);
+    total = total + 1; fails = fails + ts_check("ops.infer_add_int",
+        o4_r_add * 100 + (g_diag_count - o4_m0), TI_INT * 100);
+    o4_m1 := g_diag_count;
+    o4_r_cat := infer_expr(o4_b_add_str);
+    total = total + 1; fails = fails + ts_check("ops.infer_add_str_concat",
+        o4_r_cat * 100 + (g_diag_count - o4_m1), TI_STR * 100);
+    o4_m2 := g_diag_count;
+    o4_r_pa := infer_expr(o4_b_ptradd);
+    // 结果 = `*T` 行本身（T = int）：**不**与另一次 `infer_expr(o4_ref)` 的行号比——alloc_type
+    // 是裸分配器（不去重，每次调用追加新行）⇒ 两次推断的行号必然不同（比行号 = 永久红）。
+    o4_pa_ok : ., mut = 0;
+    if get_type_kind(o4_r_pa) == TYP_PTR && get_type_data(o4_r_pa) == TI_INT {
+        if g_diag_count - o4_m2 == 0 { o4_pa_ok = 1; }
+    }
+    total = total + 1; fails = fails + ts_check("ops.infer_ptr_add_int", o4_pa_ok, 1);
+    o4_m3 := g_diag_count;
+    o4_r_dx := infer_expr(o4_b_dex);
+    total = total + 1; fails = fails + ts_check("ops.infer_dex_add",
+        o4_r_dx * 100 + (g_diag_count - o4_m3), TI_DEX * 100);
+    o4_m4 := g_diag_count;
+    o4_r_lg := infer_expr(o4_b_logic);
+    total = total + 1; fails = fails + ts_check("ops.infer_logic_int_ok",
+        o4_r_lg * 100 + (g_diag_count - o4_m4), TI_BOOL * 100);
+    o4_m5 := g_diag_count;
+    o4_r_eq := infer_expr(o4_b_eq);
+    total = total + 1; fails = fails + ts_check("ops.infer_cmp_unchecked",
+        o4_r_eq * 100 + (g_diag_count - o4_m5), TI_BOOL * 100);   // 现状宽松面：比较不校验（登记）
+    // 负控（**本批最易放宽的三条**）：string 算术 / ptr+ptr / dex 逻辑 → 必须仍报错（码不变）
+    o4_m6 := g_diag_count;
+    o4_r_bad1 := infer_expr(o4_b_sub_str);
+    total = total + 1; fails = fails + ts_check("ops.infer_sub_str_diag", g_diag_count - o4_m6, 1);
+    total = total + 1; fails = fails + ts_check("ops.infer_sub_str_code", ts_diag_code_at(o4_m6), EC_TB_ADD);
+    total = total + 1; fails = fails + ts_check("ops.infer_sub_str_result", o4_r_bad1, TI_INT);
+    o4_m7 := g_diag_count;
+    o4_r_bad2 := infer_expr(o4_b_ptrptr);
+    total = total + 1; fails = fails + ts_check("ops.infer_ptr_add_ptr_diag", g_diag_count - o4_m7, 1);
+    total = total + 1; fails = fails + ts_check("ops.infer_ptr_add_ptr_code", ts_diag_code_at(o4_m7), EC_TB_ADD);
+    total = total + 1; fails = fails + ts_check("ops.infer_ptr_add_ptr_result", o4_r_bad2, TI_INT);
+    o4_m8 := g_diag_count;
+    o4_r_bad3 := infer_expr(o4_b_logic_bad);
+    total = total + 1; fails = fails + ts_check("ops.infer_logic_dex_diag", g_diag_count - o4_m8, 1);
+    total = total + 1; fails = fails + ts_check("ops.infer_logic_dex_code", ts_diag_code_at(o4_m8), EC_TC_IF_COND);
+    // 早退规则保留（结果规则）：指针差 = `*T - *T` → int（不经门、不报错）
+    o4_m9 := g_diag_count;
+    o4_r_pd := infer_expr(o4_b_ptrdiff);
+    total = total + 1; fails = fails + ts_check("ops.infer_ptr_diff",
+        o4_r_pd * 100 + (g_diag_count - o4_m9), TI_INT * 100);
 
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }

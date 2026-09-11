@@ -252,6 +252,24 @@ g_ty_uncovered : int, mut;         // 未覆盖面命中位（如 AK_NAMED 具�
 // ⇒ `.ccr` 类型段/行号零扰动。ok 位 = 惰性建表旗标（0 初值惯例，见上方 g_tt_nil_ok 注记）。
 g_iface_entries : string, mut;   g_iface_entry_count : int, mut;   g_iface_registry_ok : int, mut;
 
+// R2 P2b Task 4：操作许可位集的**位下标常量**（spec §2.1「操作许可」；表数据在
+// iface_registry.cr 的 ops 列，消费点在 checker.cr 的三个门）。
+// 位下标约定（写死，跨 Task 一致）：
+//   OP_*  1..14 → **直接用其值**（OP_ADD=1 … OP_ASSIGN=14；OP_AND=12/OP_OR=13 同理，
+//                故**不另设** IP_LOGIC——逻辑族的谓词就写 iface_permits(kind, OP_AND)）。
+//                注：OP_ASSIGN(14) 位**不使用**——赋值兼容 = type_compat_strict（P2a 引擎面）。
+//   UOP_* 1..4  → 经 +IP_UOP_BIAS 偏置（UOP_NEG→21 / UOP_NOT→22 / UOP_REF→23 / UOP_DEREF→24）。
+//   新族  25.. → IP_INDEX=25 / IP_INDEX_RANGE=26 / IP_FIELD=27 / IP_METHOD=28 / IP_AS=29
+//                / IP_COND=30（真值性：`if` 现状收 bool|int）/ IP_COND_BOOL=31（严格 bool：
+//                `while` 现状**只收 bool**——两条规则现状不同，**不得合并成一个「更统一」的位**：
+//                合并 = 收紧 `if` 或放宽 `while`）。
+// **声明位置约束**（Task 1 实测登记）：bootstrap 名字解析对变量/常量按声明序、跨文件前向引用
+// 不成立 —— checker.cr 位于 iface_registry.cr **之前**，故 IP_* 必须声明在本文件（checker.cr 可直接
+// 引用 `IP_COND` 等）；**函数**不受此限（checker.cr 可前向引用 iface_* 函数）。
+IP_UOP_BIAS : int = 20;
+IP_INDEX : int = 25;  IP_INDEX_RANGE : int = 26;  IP_FIELD : int = 27;
+IP_METHOD : int = 28; IP_AS : int = 29;  IP_COND : int = 30;  IP_COND_BOOL : int = 31;
+
 // R2 P1 影子对拍：checker ti → 类型项 桥接缓存 + 统计（16B/条 {ti, term}；
 // 探测/装填因子守卫/扩容重放见 ty_shadow.cr——桥接层自持，与引擎 g_tt_index 同式）。
 // entries 只增不减、恒等于占用槽数 → 兼作扩容判据（不另设 count 全局）。

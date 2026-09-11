@@ -32,7 +32,11 @@
 //     TYP_REF→AK_REF、TYP_PTR→AK_PTR、TYP_TUPLE→AK_PRODUCT、TYP_DYN→AK_DYN。
 //     **无 AK_SUM/AK_FN 条目**：checker 侧无对应原子（enum 类型行 = TYP_NAMED，checker.cr:982；
 //     无函数类型行）。
-//   ops 列     = 空集（Task 4/5 按计划逐格填；本 Task 零消费者）。
+//   ops 列     = **Task 4 逐格填写**（Task 1 落空集）——每格 = 现状 checker.cr 的判定，
+//     逐格注现状行号（见 iface_registry_init 内的组位集）：算术门 ADD..MOD **只含 int/dex**
+//     （现状「两层结构」：早退规则（串拼接/指针算术/指针差）留代码 = 结果规则，本列只记门）。
+//     消费点 = checker.cr 的三个门（ANY 算术 :1959 / ALL 逻辑 :1969 / ONE 条件 :2274+:2385 ——
+//     **行号一律为接线前实测**；接线后同处 +4，按内容定址）。
 
 // ─── 条目布局（40B/条 × 5 字段；与 g_types(24B/条)/ESZ_TYPE_TERM(48B/条) 同族：扁平 i64 缓冲）───
 //   {ak, ti_row, name_ni, lit_code, ops}
@@ -47,6 +51,16 @@ OFF_IE_AK : int = 0;  OFF_IE_TI : int = 8;  OFF_IE_NAME : int = 16;
 OFF_IE_LIT : int = 24; OFF_IE_OPS : int = 32;
 
 IFACE_ENTRY_COUNT : int = 13;   // 8 原生 + product/sequence/ref/ptr/named
+
+// 位构造（乘 2 循环，照既有 dyn_set_type 惯例——本语言无移位运算符）。下标语义见 globals.cr
+// 的 IP_* 块；n ≥ 63 时 i64 负号翻转（= 全位命中）由 `iface_permits` 的越界闸拒绝，本函数只
+// 供表内**已知常量**使用，不做校验（表内容 = 常量，n 恒 < 32）。
+fn iface_bit(n: int) -> int {
+    b : ., mut = 1;
+    k : ., mut = n;
+    loop { if k <= 0 { break; } b = b * 2; k = k - 1; }
+    return b;
+}
 
 // ─── 建表（由 init_types() 尾部调用；幂等）───
 // 表内容 = 常量（AK_*/TI_*/-1/0）⇒ 不读类型表、不缓存行号、不因 init_types 的重复调用而失效
@@ -64,21 +78,53 @@ fn iface_registry_init() {
     if g_iface_registry_ok != 0 { return; }   // 幂等（内容恒定，无需重建）
     g_iface_entries = alloc(IFACE_ENTRY_COUNT * ESZ_IFACE_ENTRY);
     g_iface_entry_count = IFACE_ENTRY_COUNT;
+    // ─── ops 列组位集（Task 4 逐格填写；每格注现状 checker.cr 行号 = 逐格转录依据）───
+    // 算术门（唯一消费者 = checker.cr:1959 的 ANY 门）：**只含 int/dex**——这不是省事，而是与
+    // :1959 一字等价所要求的最小集。现状「算术许可」是**两层**：早退规则（串拼接 :1946 /
+    // 指针算术 :1948+:1951 / 指针差 :1955）命中即 return、不会走到门；门只管「两侧皆非数值才
+    // 报错」。故把 PTR/STRING 填进本组 = **放宽**（ANY 语义下 permits(PTR,ADD)=1 足以放行
+    // `*T + *T`、`"a" - "b"`——两条现状均为 error[TB01]，有负控钉红）。
+    o_arith := iface_bit(OP_ADD) + iface_bit(OP_SUB) + iface_bit(OP_MUL) + iface_bit(OP_DIV) + iface_bit(OP_MOD);
+    // 逻辑族（消费者 = checker.cr:1969 的 ALL 门）：现状每侧须 `bool|int`（:1969 逐字：
+    // `(lt != BOOL && lt != INT) || (rt != BOOL && rt != INT)`）⇒ 本组**恰 {int, bool}**。
+    // ⚠ 计划 Task 4 许可格表把本组写在「AK_INT/AK_DEX」行（括注「允许 bool|int」自相矛盾）——
+    //   **实测裁决**：dex 在现状被拒（`1.5 && true` → error[TC01]，探针实测）⇒ DEX 格必为 0，
+    //   否则 = 放宽。取「与 :1969 一字等价」为准（计划 Step 2 的替换代码即此要求）。
+    o_logic := iface_bit(OP_AND) + iface_bit(OP_OR);
+    // 比较族（:1965-1967 六个比较 op 恒返 bool、**不校验操作数**）+ 一元族（:1979 NEG/NOT 透传、
+    // :1982 REF 对任意操作数产 TYP_PTR、:2003-2014 DEREF 兜底透传）+ 转换（:2892-2908 除 PTR 的
+    // asp 外恒等透传）⇒ **对全部 13 类置 1**（现状宽松面的集中体现；P3 收紧旋钮，本批只登记）。
+    // 口径：这四项在现状**没有拒绝路径**，故本批不接线（无门可换）——表登记为 P3 的可审计位。
+    o_cmp := iface_bit(OP_EQ) + iface_bit(OP_NE) + iface_bit(OP_LT) + iface_bit(OP_GT) + iface_bit(OP_LE) + iface_bit(OP_GE);
+    o_un := iface_bit(IP_UOP_BIAS + UOP_NEG) + iface_bit(IP_UOP_BIAS + UOP_NOT) +
+            iface_bit(IP_UOP_BIAS + UOP_REF) + iface_bit(IP_UOP_BIAS + UOP_DEREF);
+    o_base := o_cmp + o_un + iface_bit(IP_AS);          // 13 类共有面（比较/一元/转换全许可）
+    o_cond := iface_bit(IP_COND);                       // `if`（:2274 收 bool|int）
+    o_cond_b := iface_bit(IP_COND_BOOL);                // `while`（:2385 **只收 bool**——不得与上合并）
     // 8 原生（ti_row 取 TI_* 常量；AK↔TI 逐项分派——bool/string 两行按语义错位书写）
-    iface_put(0, AK_INT, TI_INT, -1, EXPR_INT, 0);
-    iface_put(1, AK_DEX, TI_DEX, -1, EXPR_DEX, 0);
-    iface_put(2, AK_STRING, TI_STR, -1, EXPR_STRING, 0);
-    iface_put(3, AK_BOOL, TI_BOOL, -1, EXPR_BOOL, 0);
-    iface_put(4, AK_UNIT, TI_UNIT, -1, -1, 0);
-    iface_put(5, AK_NEVER, TI_NEVER, -1, -1, 0);
-    iface_put(6, AK_CHAR, TI_CHAR, -1, EXPR_CHAR, 0);
-    iface_put(7, AK_DYN, TI_DYN, -1, -1, 0);
+    //   AK_INT ：门 + 逻辑 + 条件（:2274 收 int）——**无 IP_COND_BOOL**（:2385 拒 int，探针 N9 实测）
+    iface_put(0, AK_INT, TI_INT, -1, EXPR_INT, o_base + o_arith + o_logic + o_cond);
+    //   AK_DEX ：仅门——逻辑/条件均**不含 dex**（:1969/:2274 只认 bool|int；探针 N7/N8 实测拒）
+    iface_put(1, AK_DEX, TI_DEX, -1, EXPR_DEX, o_base + o_arith);
+    //   AK_STRING：无算术/逻辑/条件（串拼接走 :1946 早退，不进本表）；索引面 = :2619（串下标→int）
+    iface_put(2, AK_STRING, TI_STR, -1, EXPR_STRING, o_base + iface_bit(IP_INDEX));
+    //   AK_BOOL ：逻辑 + 两条条件位（:2274 收 bool、:2385 收 bool）
+    iface_put(3, AK_BOOL, TI_BOOL, -1, EXPR_BOOL, o_base + o_logic + o_cond + o_cond_b);
+    iface_put(4, AK_UNIT, TI_UNIT, -1, -1, o_base);
+    iface_put(5, AK_NEVER, TI_NEVER, -1, -1, o_base);
+    iface_put(6, AK_CHAR, TI_CHAR, -1, EXPR_CHAR, o_base);
+    //   AK_DYN ：+ 方法面（:2066 dyn 方法校验路径）
+    iface_put(7, AK_DYN, TI_DYN, -1, -1, o_base + iface_bit(IP_METHOD));
     // 结构/命名（ti_row = -1 = 类级，无「规范行」）
-    iface_put(8, AK_PRODUCT, -1, -1, -1, 0);
-    iface_put(9, AK_SEQUENCE, -1, -1, -1, 0);
-    iface_put(10, AK_REF, -1, -1, -1, 0);
-    iface_put(11, AK_PTR, -1, -1, -1, 0);
-    iface_put(12, AK_NAMED, -1, -1, -1, 0);
+    //   AK_PRODUCT ：+ 字段面（:2566-2577 元组 `.N`）
+    iface_put(8, AK_PRODUCT, -1, -1, -1, o_base + iface_bit(IP_FIELD));
+    //   AK_SEQUENCE：+ 索引面（:2605-2618 数组/切片元素 + F2 越界；:2586 range→slice）
+    iface_put(9, AK_SEQUENCE, -1, -1, -1, o_base + iface_bit(IP_INDEX) + iface_bit(IP_INDEX_RANGE));
+    //   AK_REF/AK_PTR：门全 0——**指针算术由 :1948-1955 早退承担**（结果规则留代码），非本表
+    iface_put(10, AK_REF, -1, -1, -1, o_base);
+    iface_put(11, AK_PTR, -1, -1, -1, o_base);
+    //   AK_NAMED ：+ 字段面（:2522-2563 struct 字段表）+ 方法面（:2088 方法表）
+    iface_put(12, AK_NAMED, -1, -1, -1, o_base + iface_bit(IP_FIELD) + iface_bit(IP_METHOD));
     g_iface_registry_ok = 1;
 }
 
