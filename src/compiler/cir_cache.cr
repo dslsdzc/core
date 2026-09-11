@@ -16,8 +16,15 @@
 // df_replay_state_chain 在 IR 生成结束后对成品图统一重建 ⇒ 快照里不再需要
 // （也不应）持久化链边。旧快照带链边 + 重建再连一次 = 重复链边，必须失效
 // （cache miss = 无害重建）。
+// v16（TODO #8 修复）：参数槽区 16→64（dyn_arr.cr OFF_FI_PARAM_TYPES 扩容）——
+// 修复前编译 ≥18 形参函数时，越界写把 return_type/ast_node 踩坏，**且该坏
+// 状态已被写入 .cir 快照**（IR 体 46→28 instrs 等）。缓存键 = 源路径::函数名 +
+// 纯 AST 指纹 ⇒ 同源文件在修复前后指纹相同 → 旧快照会被命中，把坏 IR 原样
+// 恢复成活产物（rc=0）——正是本修复要消灭的静默类。bump 使旧条目整体失效
+// （cache miss = 无害重建）。注意：本条只治「本仓旧快照」，键缺编译器身份
+// 的根因另见 TODO #5。
 CIR_CACHE_MAGIC : int = -4485090715960753727;
-CIR_CACHE_VER   : int = 15;
+CIR_CACHE_VER   : int = 16;
 
 g_cir_write_buf : string, mut;
 g_cir_write_pos : int, mut;
