@@ -315,6 +315,7 @@
 
 ### 文档更新
 - `docs/memory-model.md` — 设计文档（待同步实现细节）
+- **docs 重组合并时的连带改点（2026-09-11 登记，`feature/docs-reorg` 已推送 `9eab0757` 待合）**：该分支把 `docs/error-codes.md` → `docs/developer/errors.md`、`docs/compcert-reference.md` → `docs/archive/compcert-reference.md`，故**合并该分支时必须同步两处 src 注释**：`src/compiler/ast.cr:315`、`src/compiler/ptr_analysis.cr:235`（在本线/当前 develop 上这两个路径**仍然正确**，故不在 docs 分支内改——避免把 src/ 拉进 docs 分支，也避免在本线留下悬空引用）。
 - `docs/pointer-model.md` — 指针安全完整设计
 - `docs/language-syntax.md` — 指针、@ 内建语法已更新
 - `docs/at-intrinsics.md` — @ 内建原语完整规格
