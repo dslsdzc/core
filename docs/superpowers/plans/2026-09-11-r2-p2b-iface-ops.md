@@ -7,7 +7,7 @@
 **Architecture:** 三块，逐块独立可验收：
 1. **注册表（新建 `iface_registry.cr`）**——13 条本质条目（8 原生 + product/sequence/ref/ptr/named）+ 操作许可位集 + 字面量定型码 + `iface_*` 查询 API。表是**静态数据**（不新增 `g_types` 行 ⇒ 不动 `.ccr` 类型段）。
 2. **接线（`checker.cr` 三个面）**——① 字面量定型 5 处；② 操作许可（二元 11 条 / 一元 4 条 / 条件 3 条）；③ 容器面（索引 5 条 / 字段 4 条 / 转换 1 条 / dyn）。
-3. **两表合一**——`res_type_node` 与 `res_call_type` 的基型分支合为 `ty_code_to_ti(ty)`；**顺带**把同族 5 处 TY→TI 内联链与「checker 行号 → 原子类」映射（现散在桥接层 `sh_base_ak`/`sh_native_ak`）也收敛到同一处，避免 P2b 自己制造新重复。
+3. **两表合一**——`res_type_node` 与 `res_call_type` 的基型分支合为 `ty_code_to_ti(ty)`；**顺带**把同族 6 处 TY→TI 内联链与「checker 行号 → 原子类」映射（现散在桥接层 `sh_base_ak`/`sh_native_ak`）也收敛到同一处，避免 P2b 自己制造新重复。
 
 **接线口径 = 保语义（零行为变化）**：本批**只换寻址方式，不换判定结果**——表的每一格都是从现状代码**逐格转录**而来，且每格注上现状 `file:line`。任何「旧接受 → 新拒绝/新放宽」都**不在本批**（spec §4 裁决 6 的收紧处置属 P3 能力落地批，见 Global Constraints 第 4 条）。
 
@@ -45,7 +45,7 @@
 
 ### 1. 公理区全量枚举（`infer_expr` = `checker.cr:1888-3061`，1174 行）
 
-口径：**一条 = 一处决定「操作是否许可」或「结果是什么类型」的硬编码判定**。家族 × 条数 = **≈65 条**（下列逐条）。量度代理（同口径的可复核计数）：`return TI_<非 unit>` **49** 处 · `== TI_*`/`!= TI_*` **28** 处 · `get_type_kind(...)` 调用 **20 点/21 次** · `check_error` **36** 处 · `TYP_*` 提及面 PTR 9 / GENERIC_APPLY 6 / ARRAY 5 / TUPLE 3 / REF 3 / NAMED 3 / GENERIC_PARAM 3 / SLICE 2。
+口径：**一条 = 一处决定「操作是否许可」或「结果是什么类型」的硬编码判定**。家族 × 条数 = **66 条**（下表逐条；= 5+8+1+1+2+4+3+5+5+5+1+4+4+15+3）。量度代理（同口径的可复核计数）：`return TI_<非 unit>` **49** 处 · `== TI_*`/`!= TI_*` **28** 处 · `get_type_kind(...)` 调用 **20 点/21 次** · `check_error` **36** 处 · `TYP_*` 提及面 PTR 9 / GENERIC_APPLY 6 / ARRAY 5 / TUPLE 3 / REF 3 / NAMED 3 / GENERIC_PARAM 3 / SLICE 2。
 
 | # | 家族 | 现状行号 | 条数 | 内容（现状语义） |
 |---|---|---|---|---|
@@ -67,7 +67,7 @@
 
 ### 2. 现状「宽松面」清单（**保真/收紧分界**；本批逐格转录，P3 才动）
 
-逐条实测（读码 + 推演，**未**逐条跑探针——见 §5 待补），这些是接线时**最容易被"顺手修正"**的格子：
+逐条实测（读码 + 推演，**未**逐条跑探针——见 §6.2 待补），这些是接线时**最容易被"顺手修正"**的格子：
 
 1. **比较不校验操作数**（`:1956-1958`）：`(1, "a") == …` / 结构体 `==` / 数组 `==` 一律收敛为 `TI_BOOL` 无诊断。
 2. **算术合法性门是「任一侧」语义**（`:1950`）：`lt != INT && lt != DEX && rt != INT && rt != DEX` ⇒ **两侧皆非数值才报错**。故 `1 + [int;3]`（lt=int）**静默为 INT**；`"a" * 2`（rt=int）**静默为 INT**；`"a" * "b"` 才报 `EC_TB_ADD`。
@@ -144,13 +144,13 @@
 //   ti_row   = 该原子的**规范 checker 类型行**（8 原生 = TI_INT..TI_DYN 常量；结构/命名 = -1）
 //   name_ni  = 名字 ni（str_intern；自测/诊断显示用）
 //   lit_code = **字面量定型**：AST 字面量 kind（EXPR_INT/EXPR_DEX/EXPR_STRING/EXPR_BOOL/EXPR_CHAR）
-//              → 本条目；-1 = 本原子无字面量（`iface_lit_of` 的逆）
+//              → 本条目（查表入口 = `iface_lit_ti`/`iface_lit_ak` 的**字典**，本字段为其中一项）；-1 = 无字面量
 //   ops      = 操作许可位集（bit(OP_*)/bit(UOP_*+20)/bit(IP_*)；见 Task 4 的位下标约定）
 ESZ_IFACE_ENTRY : int = 40;
 OFF_IE_AK : int = 0;  OFF_IE_TI : int = 8;  OFF_IE_NAME : int = 16;
 OFF_IE_LIT : int = 24; OFF_IE_OPS : int = 32;
 
-fn iface_registry_init()            // 幂等；由 init_types() 尾部调用（类型表重置 ⇒ 表重建，行号不作缓存键）
+fn iface_registry_init()            // 幂等；由 init_types() 调用（尾部，原生 9 行 alloc 之后；表内容 = 常量，不缓存行号）
 fn iface_count() -> int             // 条目数（恒 13；自测断言用）
 fn iface_entry(ak: int) -> int      // 原子类 → 条目行号（-1 = 无此原子）
 fn iface_ops(ak: int) -> int        // 操作许可位集（**spec §2.5 的签名**；-1/未知原子 → 全 0 = 无许可）
@@ -158,6 +158,7 @@ fn iface_permits(ak: int, op: int) -> int            // 1/0：位测试（op 已
 fn iface_lit_ti(lit_kind: int) -> int                // 字面量 AST kind → TI_*（-1 = 非字面量 kind）
 fn iface_lit_ak(lit_kind: int) -> int                // 同上 → AK_*（交叉断言/引擎侧用）
 fn iface_kind_of(ti: int) -> int                     // checker 行号 → AK_*（-1 = 越界/负）——Task 2 起为**唯一**实现
+fn iface_by_ty_code(ty: int) -> int                  // TY_* 码 → AK_*（= 现 sh_base_ak 的语义；-1 = 无对应）
 fn iface_ti_of(ak: int) -> int                       // 原子类 → 规范行（8 原生；其余 -1）
 fn iface_of_term(t: int) -> int                      // 类型项 → AK_*（单一原子；非单一 → -1；⊤ₖ → 其 k）
 ```
@@ -198,22 +199,23 @@ fn iface_of_term(t: int) -> int                      // 类型项 → AK_*（单
 
 - [ ] **Step 3: 实现**（`iface_registry.cr` + `globals.cr` + 清单一/二/三处）
   - 表用**两条平行 i64 缓冲**（照 `bi_add` 先例）还是单 40B 缓冲？**取单缓冲**（40B/条，`alloc(13 * 40)`，`w64(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_*)`）——理由是「13 条 × 5 字段」有 4 个异构字段，平行表会产生四份偏移表（`bi_add` 式只有「名字/返回型」两列才划算）。
-  - `iface_kind_of(ti)`：`k := get_type_kind(ti)`；`k == TYP_BASE` → `iface_native_ak(get_type_data(ti))`；`k == TYP_DYN` → `AK_DYN`；`TYP_NAMED|TYP_GENERIC_PARAM|TYP_GENERIC_APPLY` → `AK_NAMED`；`TYP_ARRAY|TYP_SLICE` → `AK_SEQUENCE`；`TYP_REF` → `AK_REF`；`TYP_PTR` → `AK_PTR`；`TYP_TUPLE` → `AK_PRODUCT`；`k < 0` → `-1`。**本步先在本文件内实现 `iface_native_ak`（= `sh_base_ak` 的语义，含 `TY_DEX_S→AK_DEX`、`TY_GENERIC_PARAM→AK_NAMED`）；Task 2 再把桥接层改成调它。**
-  - `iface_lit_ti/lit_ak`：按条目表的 `lit_code` 反向扫（13 条线性扫，15 位字面量 kind 面只有 5 个命中项）。
-  - `iface_of_term(t)`：`tt_tag(t) == TT_ATOM` → `tt_a(t)`；`tt_tag(t) == TT_TOP_K` → `tt_a(t)`；其余（union/inter/not/bot/top/mu/var）→ `-1`。
-  - `iface_registry_init()`：`init_types()` 尾部调用（照 `named_dedup_reset()`/`sh_map_reset()` 先例，`checker.cr:233-237`）；幂等（`g_iface_registry_ok`）。
+  - `iface_kind_of(ti)`：`k := get_type_kind(ti)`；`k == TYP_BASE` → `iface_by_ty_code(get_type_data(ti))`；`k == TYP_DYN` → `AK_DYN`；`TYP_NAMED|TYP_GENERIC_PARAM|TYP_GENERIC_APPLY` → `AK_NAMED`；`TYP_ARRAY|TYP_SLICE` → `AK_SEQUENCE`；`TYP_REF` → `AK_REF`；`TYP_PTR` → `AK_PTR`；`TYP_TUPLE` → `AK_PRODUCT`；`k < 0` → `-1`。**本步先在本文件内实现 `iface_by_ty_code`（= `sh_base_ak` 的语义，含 `TY_DEX_S→AK_DEX`、`TY_GENERIC_PARAM→AK_NAMED` 两条已裁决格）；Task 2 再把桥接层改成委托它。**
+  - `iface_lit_ti/lit_ak`：按条目表的 `lit_code` 反向扫（13 条线性扫，AST kind 面只有 5 个命中项）。
+  - `iface_of_term(t)`：`tt_tag(t) == TT_ATOM` → `tt_a(t)`；`tt_tag(t) == TT_TOP_K` → `tt_a(t)`；其余（union/inter/not/bot/top/mu/var/nil/cons）→ `-1`。
+  - `iface_registry_init()`：由 `init_types()` 调用（**尾部**，`:253` 原生 9 行 alloc 之后——表要读 `get_type_kind`）；幂等（`g_iface_registry_ok`）；照 `named_dedup_reset()`（`checker.cr:233`）/`sh_map_reset()`（`:237`）的重置先例挂同处。
   - `ops` 位集本 Task 先落**空集**（全 0），Task 4/5 逐格填——**空集期间不得有消费者**（本 Task 零消费者）。
 
 - [ ] **Step 4: 判据**
 ```bash
 nice -n 19 python3 build_selfhost_native.py
-nice -n 19 ./build/corec selftest-types            # 期望 95 + 19 ≈ 114/114（实现者实测补面，计数以实测为准）
+nice -n 19 ./build/corec selftest-types            # 现值 95/95（本计划实测）→ 本 Task 加 20 例 ⇒ 期望 115/115（实现者实测补面，计数以实测为准）
 nice -n 19 ./build/corec clean-cache
 nice -n 19 ./build/corec build tests/suite/ptr_arith.cr --static -o /tmp/p2b_t1_bin
 sha256sum /tmp/p2b_t1_bin                          # 必须 == 95084e7b…d475
 # .ccr 面（预期逐字节不变，须实测报告）：
 nice -n 19 ./build/corec clean-cache && nice -n 19 ./build/corec ccr tests/suite/ptr_arith.cr -o /tmp/t1.ccr
-# 与基线比 sha 并记录（基线口径 = Task 0 步骤：本批第一个提交前用同一二进制 + clean-cache 取）
+# 与基线比 sha 并记录（基线 = 本批**第一个提交前**用同一构造路径 + clean-cache 取；若未取，
+# 则以「同源两次构建产出一致」替代并在报告**显式记录该替代**——照 P0 计划先例）
 nice -n 19 python3 tests/selfhost/test_ccr_v7.py   # 结构判据全绿
 ```
   - `iface.count != 13` 或 `iface_*.ti` 对不上 → **停下上报**（AK/TI 下标事故的现场）。
@@ -230,16 +232,42 @@ nice -n 19 python3 tests/selfhost/test_ccr_v7.py   # 结构判据全绿
 **Interfaces：**
 ```core
 // ty_shadow.cr 保留原签名（影子证据链的可比性依赖调用点不变），实现改委托：
-fn sh_native_ak(ti: int) -> int { if ti < 0 { return -1; } return iface_kind_of(ti); }  // ⚠ 语义等价须逐条验证，见下
-fn sh_base_ak(ty: int) -> int  { return iface_by_ty_code(ty); }                        // 注册表侧新增
+fn sh_native_ak(ti: int) -> int {
+    if ti < 0 { return -1; }
+    if get_type_kind(ti) != TYP_BASE { return -1; }        // **原门保留**（见下）
+    return iface_by_ty_code(get_type_data(ti));
+}
+fn sh_base_ak(ty: int) -> int { return iface_by_ty_code(ty); }
 ```
-（`sh_native_ak` 原实现要求 `get_type_kind(ti) == TYP_BASE` 才回 AK，否则 -1——**委托后必须保持该门**：`iface_kind_of` 对 `TYP_DYN` 行回 `AK_DYN`，而原 `sh_native_ak(TI_DYN)` 回 **-1**（`:69` 的 `!= TYP_BASE → -1`），由 `sh_term_of_ti` 的 `TYP_DYN` 分支另行处理（`:212-216`）⇒ **不可直接等价替换**，须逐 case 对拍：见 Step 1 用例。）
+（**`sh_native_ak` 不可直接换成 `iface_kind_of`**：原实现要求 `get_type_kind(ti) == TYP_BASE` 才回 AK，否则 -1（`ty_shadow.cr:67-71`）；而 `iface_kind_of` 对 `TYP_DYN` 行回 `AK_DYN`、对结构行回 `AK_SEQUENCE` 等。原 `sh_native_ak(TI_DYN)` 回 **-1**，`TI_DYN` 由 `sh_term_of_ti` 的 `TYP_DYN` 分支另行处理（`:212-216`）⇒ 两者只在 `TYP_BASE` 行上重合，委托必须**显式保留该门**。）
 
-- [ ] **Step 1: 对拍用例（红）**：对 `ti ∈ [0, g_type_count)` **全表逐行**断言 `sh_term_of_ti(ti)` 在合一前后**同值**（用 `tt_same`/`==` 比项索引；DAG 去重保证同构项同索引）——这是**全量**对拍（不是抽样）：`type_selftest.cr` 里构造 8 原生 + 1 struct 行 + 1 数组 + 1 指针 + 1 元组 + 1 泛型应用后逐行比。
+- [ ] **Step 1: 对拍用例（红）——**对照物**先行**：旧实现**改名保留**（`sh_base_ak_legacy`/`sh_native_ak_legacy`，照 P2a 的 `type_equal_legacy` 双用先例；**P5 删**），委托版与 legacy 版**全表逐项对拍**——不是抽样：`ty ∈ 全部 TY 码`（含 `TY_DEX_S` 与 `TY_GENERIC_PARAM` 两条灰格 + 未映射码）× `ti ∈ [0, g_type_count)`（含 `TI_DYN` 行与全部结构/命名行）。
 ```core
-    // --- P2b Task 2：iface_kind_of 与桥接分派单源化（全表对拍，非抽样）---
-    // 逐 ti 记录**现状** sh_term_of_ti 结果（本用例先写成"两两同项"的断言：
-    // 合一的正确性判据 = 每个 ti 的项索引在合一前后相同）
+    // --- P2b Task 2：iface_kind_of 与桥接分派单源化（**全表对拍**，非抽样）---
+    // 判据 = 对每个 ti 码：委托版 == legacy 版（legacy = 改动前的字面拷贝；P5 删）
+    ty_codes := alloc(16 * 8);
+    w64(ty_codes, 0, TY_INT);  w64(ty_codes, 8, TY_DEX);   w64(ty_codes, 16, TY_BOOL);
+    w64(ty_codes, 24, TY_STRING); w64(ty_codes, 32, TY_UNIT); w64(ty_codes, 40, TY_NEVER);
+    w64(ty_codes, 48, TY_CHAR); w64(ty_codes, 56, TY_GENERIC_PARAM); w64(ty_codes, 64, TY_DEX_S);
+    w64(ty_codes, 72, 999);   // 未映射码
+    ty_bad : ., mut = 0;
+    tc_i : ., mut = 0;
+    loop {
+        if tc_i >= 10 { break; }
+        if iface_by_ty_code(r64(ty_codes, tc_i * 8)) != sh_base_ak_legacy(r64(ty_codes, tc_i * 8)) { ty_bad = ty_bad + 1; }
+        tc_i = tc_i + 1;
+    }
+    total = total + 1; fails = fails + ts_check("iface.by_ty_code_all_codes", ty_bad, 0);
+    // 行号面全表：构造 8 原生 + struct/数组/指针/元组/泛型应用行后逐 ti 比
+    ti_bad : ., mut = 0;
+    ti_i : ., mut = 0;
+    loop {
+        if ti_i >= g_type_count { break; }
+        if sh_native_ak(ti_i) != sh_native_ak_legacy(ti_i) { ti_bad = ti_bad + 1; }
+        ti_i = ti_i + 1;
+    }
+    total = total + 1; fails = fails + ts_check("iface.native_ak_all_rows", ti_bad, 0);
+    // 两条灰格的**显式**断言（不止"两版相等"——防两版一起错）
     total = total + 1; fails = fails + ts_check("iface.kind_dyn_vs_bridge",
         (iface_kind_of(TI_DYN) == AK_DYN), 1);                    // 注册表：DYN 行 → AK_DYN
     total = total + 1; fails = fails + ts_check("iface.bridge_dyn_branch",
@@ -255,7 +283,7 @@ fn sh_base_ak(ty: int) -> int  { return iface_by_ty_code(ty); }                 
     total = total + 1; fails = fails + ts_check("iface.dispatch_no_index_shortcut",
         (iface_ti_of(AK_STRING) != AK_STRING), 1);                // 若哪天有人"按下标直传"，本行必红
 ```
-- [ ] **Step 2: 实现并全量比对**：改写 `sh_native_ak`/`sh_base_ak` 为委托（保留 `ti < 0` / `!= TYP_BASE` 两个门）；`sh_base_ak` 保留名字（影子链路可读性）但体 = `iface_by_ty_code`。
+- [ ] **Step 2: 实现**：① 原体改名为 `sh_base_ak_legacy`/`sh_native_ak_legacy`（**保留**，供对拍 + 报告引用；P5 删，登记入 TODO #24 的 P5 继承项）；② `sh_base_ak`/`sh_native_ak` 改为委托 `iface_by_ty_code`（**显式保留** `ti < 0` 与 `get_type_kind(ti) != TYP_BASE → -1` 两个门）；③ 跑 Step 1 用例，`*_all_codes`/`*_all_rows` 必须为 0 mismatches。
 - [ ] **Step 3: 判据**：`selftest-types` 全绿 + **影子语料复跑数字与基线逐项相同**（71 文件 / 26989 / agree 26989 / 0 / 0 / 0；**必须同报站点直方图**——P1 交接硬性要求）+ ELF/`.ccr` 逐字节 + `test_lsp.py`（桥接缓存重置面，P2a 评审 Critical 的守卫）。
 - [ ] **Step 4: 提交**：`refactor: R2 P2b Task 2——iface_kind_of 与桥接分派（sh_native_ak/sh_base_ak）单源化（逐 case 对拍含 DYN/GENERIC_PARAM/DEX_S 三条灰格；影子语料数字逐项不变）`
 
@@ -281,37 +309,60 @@ fn sh_base_ak(ty: int) -> int  { return iface_by_ty_code(ty); }                 
 **位下标约定（写死，跨 Task 一致）：**
 ```core
 // 许可位下标 = **复用 ast.cr 既有操作码**（少一层映射 = 少一处漂移源；P1 的 AK/TI 事故即映射层自造）：
-//   OP_*  1..19  →  直接用其值（OP_ADD=1 … OP_PTR_DIFF=19）
+//   OP_*  1..19  →  直接用其值（OP_ADD=1 … OP_PTR_DIFF=19；OP_AND=12/OP_OR=13 同理，
+//                   故**不另设** IP_LOGIC——逻辑族的谓词就写 iface_permits(kind, OP_AND)）
 //   UOP_* 1..4   →  经 +20 偏置（UOP_NEG→21 … UOP_DEREF→24）
-//   新族    25.. →  IP_INDEX=25 / IP_INDEX_RANGE=26 / IP_FIELD=27 / IP_METHOD=28 / IP_AS=29 / IP_COND=30
+//   新族    25.. →  IP_INDEX=25 / IP_INDEX_RANGE=26 / IP_FIELD=27 / IP_METHOD=28 / IP_AS=29
+//                   / IP_COND=30（真值性，`if` 现状收 bool|int）
+//                   / IP_COND_BOOL=31（严格 bool，`while` 现状**只收 bool**——两条规则现状不同，
+//                     **不得合并为一个「更统一」的位**：合并 = 收紧 `if` 或放宽 `while`）
 IP_UOP_BIAS : int = 20;
 IP_INDEX : int = 25;  IP_INDEX_RANGE : int = 26;  IP_FIELD : int = 27;
-IP_METHOD : int = 28; IP_AS : int = 29;  IP_COND : int = 30;
+IP_METHOD : int = 28; IP_AS : int = 29;  IP_COND : int = 30;  IP_COND_BOOL : int = 31;
 // 位构造照 dyn_set_type 的乘 2 循环（本语言无移位运算符）：
 fn iface_bit(n: int) -> int { b : ., mut = 1; k : ., mut = n; loop { if k <= 0 { break; } b = b * 2; k = k - 1; } return b; }
 ```
 
-**表填空（逐格 = 现状语义；**这是本 Task 的核心产出物**，每格注现状行号）**：
+**站点侧的三种「门形状」（现状各异，**必须逐字保留**；表只出「原子类 × op」的单侧许可）：**
+```core
+// ① ANY（算术族 :=1950）：至少一侧许可即通过 —— if iface_permits(k(lt),op) == 0 && iface_permits(k(rt),op) == 0 { 报错 }
+// ② ALL（逻辑族 :=1960）：每侧都须许可     —— if iface_permits(k(lt),OP_AND) == 0 || iface_permits(k(rt),OP_AND) == 0 { 报错 }
+// ③ ONE（条件族 :=2265 / :2376）：单操作数 —— if iface_permits(k(c),IP_COND)==0 { 报错 }（while 用 IP_COND_BOOL）
+```
+
+**表填空（逐格 = 现状语义；**这是本 Task 的核心产出物**，每格注现状行号）**
+
+**先立一条结构事实（否则表会填错）**：现状的「算术许可」是**两层**——① `:1937/1939/1942/1946` 的**早退规则**（串拼接、指针算术、指针差：命中即 `return`，**不会走到门**）；② `:1950` 的**门**（「两侧皆非数值才报错」）。故：
+
+- **门集合只含 `INT`/`DEX` 两员**——这**不是**省事，而是与 `:1950` 一字等价所要求的最小集。反例（**若把 `PTR` 或 `STRING` 也放进门的 ADD 格，就会放宽**）：
+  `*T + *T` 现状 = 报错（`:1939/1942` 都不命中、`:1950` 两侧非数值）——若 `PTR@ADD=1`，ANY 门下 `permits(PTR,ADD)=1` ⇒ **不再报错**（静默降为 `TI_INT`）= 放宽；
+  `"a" - "b"` 同理（`:1937` 只管 `OP_ADD`）。
+- **串拼接（`+` on string）的「许可」在现状**落在①（`:1937`）**而非门里**——这与 spec §2.1 的示例（「`+` 对 int/dex/string 合法」）**不冲突**：spec 说的是语义层的操作许可，本批的落地形态把它拆成「门集合 + 早退规则」两处，两处合起来 = spec 的语义（**报告须逐条给出该对应关系**，见 Task 7 Step 5 的事实表）。
+- 故门的**许可格**只有 `AK_INT`/`AK_DEX` 的 `ADD..MOD = 1`，其余原子一律 `0`；早退规则（串拼接/指针算术/指针差）**留代码**（它们同时决定**结果类型**，属结果规则）。
+
+**许可格（门 + 非算术族；每格注现状行号）：**
 
 | 原子类 | 许可格（现状依据） |
 |---|---|
-| `AK_INT`/`AK_DEX` | `ADD..MOD`（`:1950` 门允许）+ `EQ..GE`（`:1956` 全许可）+ `AND/OR`（`:1960` 允许 bool\|int）+ `NEG/NOT`（`:1970`）+ `REF`（`:1973`）+ `DEREF`（`:1994-2005` 兜底透传）+ `AS`（`:2904` 无校验）+ `COND`（`:2265`/`:2376` 允许 int 真值）+ `IP_INDEX_RANGE`？**否**（int 不是容器） |
-| `AK_STRING` | `ADD`（`:1937` 串拼接）+ `EQ..GE`（`:1956`）+ `NEG/NOT`/`REF`/`DEREF`/`AS`（同全许可面）+ `IP_INDEX`（`:2619` 串下标→int）+ `IP_COND`？**否**（`:2265` 只收 bool/int） |
-| `AK_BOOL` | `AND/OR`/`EQ..GE`/`NEG(NOT)`/`REF`/`DEREF`/`AS`/`IP_COND` |
-| `AK_UNIT`/`AK_NEVER`/`AK_CHAR`/`AK_DYN` | 全许可面（比较/一元/转换）+ `AK_DYN` 额外：`IP_METHOD`（`:2066` dyn 方法校验路径）；`AK_CHAR` 无 `COND` |
-| `AK_PRODUCT`（元组） | `EQ..GE`？——**:1956 无校验** ⇒ 现状**全许可**（登记为 P3 收紧面）；`IP_FIELD`（`:2566` `.N`）；`DEREF`/`REF`/`AS` |
-| `AK_SEQUENCE` | `IP_INDEX`（`:2605-2618`）+ `IP_INDEX_RANGE`（`:2586`）+ 比较/一元/转换（全许可面） |
-| `AK_REF`/`AK_PTR` | `ADD/SUB`（指针算术 `:1939-1948`）+ `DEREF`（`:1996-2001`）+ 比较全许可面 + `AS`（`:2897`） |
-| `AK_NAMED` | `IP_FIELD`（`:2522` 字段）+ `IP_METHOD`（`:2088` 方法表）+ 比较全许可面 + `NEG/NOT`/`REF`/`DEREF`/`AS` |
+| `AK_INT`/`AK_DEX` | 门：`ADD..MOD`（`:1950`）+ `AND/OR`（`:1960` 允许 bool\|int）+ `EQ..GE`（`:1956` 全许可）+ `NEG/NOT`（`:1970`）+ `REF`（`:1973`）+ `DEREF`（`:1994-2005` 兜底透传）+ `AS`（`:2904` 无校验）+ `IP_COND`（`:2265` 收 int）；**`IP_COND_BOOL` 否**（`:2376` 只收 bool）；`IP_INDEX*` 否（非容器） |
+| `AK_BOOL` | 门：`ADD..MOD = 0`（`:1950` 门不含 bool）+ `AND/OR` + `EQ..GE` + `NEG(NOT)`/`REF`/`DEREF`/`AS` + `IP_COND`/**`IP_COND_BOOL`** |
+| `AK_STRING` | 门：**全 0**（拼接走 `:1937` 早退）+ `EQ..GE` + `NEG/NOT`/`REF`/`DEREF`/`AS` + `IP_INDEX`（`:2619` 串下标→int）；`IP_COND*` 否（`:2265` 只收 bool/int） |
+| `AK_UNIT`/`AK_NEVER`/`AK_CHAR`/`AK_DYN` | 门全 0 + `EQ..GE` + `NEG/NOT`/`REF`/`DEREF`/`AS`；**`IP_COND`/`IP_COND_BOOL` 否**（`:2265`/`:2376` 只收 bool\|int / bool——**不得因「全许可面」顺手表上**）；`AK_DYN` 额外 `IP_METHOD`（`:2066` dyn 方法校验路径） |
+| `AK_PRODUCT`（元组） | 门全 0（`:1956` 比较**无校验** ⇒ 比较面全许可，登记 P3 收紧面）+ `IP_FIELD`（`:2566` `.N`）+ `REF`/`DEREF`/`AS` |
+| `AK_SEQUENCE` | 门全 0 + `IP_INDEX`（`:2605-2618`）+ `IP_INDEX_RANGE`（`:2586`）+ 比较/一元/转换面 |
+| `AK_REF`/`AK_PTR` | 门全 0（**指针算术由 `:1939-1948` 早退承担，见上「结构事实」**）+ `DEREF`（`:1996-2001`）+ 比较全许可面 + `AS`（`:2897`） |
+| `AK_NAMED` | 门全 0 + `IP_FIELD`（`:2522` 字段）+ `IP_METHOD`（`:2088` 方法表）+ 比较全许可面 + `NEG/NOT`/`REF`/`DEREF`/`AS` |
+
+（**「比较/一元/转换面全许可」的口径**：`:1956` 比较不校验 ⇒ 6 个比较位对**全部 13 类**置 1；`:1970` 一元透传、`:1994-2005` 解引用兜底、`:2904` 转换无校验 ⇒ `NEG/NOT`/`DEREF`/`AS` 对**全部 13 类**置 1；`UOP_REF`：`:1973` 对任意操作数产 `TYP_PTR` ⇒ 亦全许可。**这四组「全 1 列」是现状宽松面的集中体现**，报告须单列其 P3 收紧建议。）
 
 - [ ] **Step 1: 红态（现状行为探针先行，`tests/selfhost/test_iface_ops.py` 新建）**——先跑出 §2 九条宽松面的**现状事实**（本计划未测，须由实现者实测确证），再接线：
   - 正控（许可）：`fn main()->int{ x:=1+2; return x; }` rc=0；`"a"+"b"` rc=0；`p+1`/`1+p`（`*int`）rc=0；`s[0]`（string）rc=0；`t.0`（元组）rc=0。
-  - 负控（拒绝，码不变）：`[int;3] + [int;3]` → `error[TB01]` rc=1；`"a" * "b"` → `error[TB01]` rc=1；`!x` 中 `x: [int;3]`？—— **不适用**（一元现状透传，须断 rc=0 且类型 = 数组，登记为 P3 面）；`if [int;3] {}` → `error[TC01]` rc=1；`while 1.5 {}` → `error[TC01]` rc=1。
+  - 负控（拒绝，码不变）：`[int;3] + [int;3]` → `error[TB01]` rc=1；`"a" * "b"` → `error[TB01]` rc=1；`"a" - "b"` → `error[TB01]` rc=1（**门不含 string**）；**`*T + *T` → `error[TB01]` rc=1（本批最易放宽的一条——见上「结构事实」）**；`!x` 中 `x: [int;3]`—— **不适用**（一元现状透传，须断 rc=0 且类型 = 数组，登记为 P3 面）；`if [int;3] {}` → `error[TC01]` rc=1；`while 1.5 {}` → `error[TC01]` rc=1。
   - 登记面（现状宽松，**断言"现状不动"**）：`1 + [int;3]` rc=0；`"a" * 2` rc=0；`arr[true]` rc=0（索引类型不校验）；`p.f`（p 非 struct）rc=0。
-- [ ] **Step 2: 接线（逐条同构替换）**：`if lt != TI_INT && lt != TI_DEX && rt != TI_INT && rt != TI_DEX`（`:1950`）→
-  `if iface_permits(iface_kind_of(lt), OP_ADD…组的当前 op) == 0 && iface_permits(iface_kind_of(rt), <同 op>) == 0` ——**`&&` 的语义必须与现状一字不差**（现状是「两侧皆无许可才报错」，即 ANY 语义；`:1950` 的原始表达式形状就是判据，接线后保留形状、只换谓词）。
-  `:1960`（逻辑，**每侧独立**）→ `iface_permits(kind(lt), IP_LOGIC) == 0 || iface_permits(kind(rt), IP_LOGIC) == 0`（等价改写：现状 `(lt!=B && lt!=I) || (rt!=B && rt!=I)`）。
-  `:2265`/`:2376`（条件，单侧）→ `iface_permits(kind(cond), IP_COND) == 0`（**注意**：`:2265` 现状允许 **bool\|int**，`:2376` 只允许 **bool** ⇒ while 的谓词用 `IP_COND_BOOL` 独占位或显式二次判断——**不得合并为一个"看起来更统一"的位**，那是收紧）。
+- [ ] **Step 2: 接线（逐条同构替换，三种门形状照上表）**：
+  - `:1950`（ANY）`if lt != TI_INT && lt != TI_DEX && rt != TI_INT && rt != TI_DEX` → `if iface_permits(iface_kind_of(lt), op) == 0 && iface_permits(iface_kind_of(rt), op) == 0`（**`&&` 形状与现状一字不差**——现状「两侧皆无许可才报错」）。
+  - `:1960`（ALL）`(lt != BOOL && lt != INT) || (rt != BOOL && rt != INT)` → `iface_permits(k(lt), OP_AND) == 0 || iface_permits(k(rt), OP_AND) == 0`（`op` 手头就是 `OP_AND`/`OP_OR`）。
+  - `:2265`（ONE，`IP_COND` = bool\|int）与 `:2376`（ONE，`IP_COND_BOOL` = 仅 bool）分别取各自位——**两条规则现状不同，不得合并**。
 - [ ] **Step 3: 判据**：`selftest-types` 全绿（含新增 `iface.ops.*` 逐格用例 ≥10 例）+ `test_iface_ops.py` 正/负/登记三类全绿 + ELF 逐字节 + `.ccr` 实测 + 全回归 + 影子语料数字不变。
 - [ ] **Step 4: 提交**：`refactor: R2 P2b Task 4——操作许可查表接线（二元/一元/条件；许可位 = ast.cr 既有操作码复用；ANY/ALL 语义与现状逐字等价，宽松面原样保留并登记）`
 
@@ -321,12 +372,12 @@ fn iface_bit(n: int) -> int { b : ., mut = 1; k : ., mut = n; loop { if k <= 0 {
 
 **Files:** Modify: `src/compiler/checker.cr`（`:2581-2636`、`:2509-2579`、`:2892-2908`、`:2066-2082`、`:2643-2651`、`:2473-2477`）、`src/compiler/iface_registry.cr`、`tests/selfhost/test_iface_ops.py`
 
-- [ ] **Step 1: 红态**：索引容器许可三正（数组/切片/串）+ 非容器负控（`1[0]` → `error[TK01]` 现状已有）+ 落空分支**登记**（`p.f` 落空 rc=0；`x as T` 任意组合 rc=0；`dyn` 方法不存在 → `error[N07]` `checker.cr:1878`）。
-- [ ] **Step 2: 接线**：
-  - `:2605` `if arr_kind == TYP_ARRAY` → `iface_permits(iface_kind_of(arr_ti), IP_INDEX) != 0` **且保留 kind 分支体**（数组分支还带 F2 越界检查，`get_type_data` 取元素——**结果规则留代码**，表只管「准不准进去」）。
-  - `:2619` `if arr_ti == TI_STR` → `iface_permits(…, IP_INDEX)` + `iface_kind_of(arr_ti) == AK_STRING`（串的**结果**是 int，属结果规则）。
-  - `:2634` 的 `TK01` 拒绝位置与措辞**不变**（码 + 文案逐字保留）。
+- [ ] **Step 1: 红态**：索引容器许可三正（数组/切片/串）+ 非容器负控（`1[0]` → `error[TK01]` 现状已有，`:2634`）+ 落空分支**登记**（`p.f` 落空 rc=0；`x as T` 任意组合 rc=0；`dyn` 方法不存在 → `error[N08]`（`EC_N_METHOD=2008`）`checker.cr:1878`）。
+- [ ] **Step 2: 接线**（**与 Task 4 的关键区别**：索引面的三个 kind 分支**做的是不同的事**——数组带 F2 越界检查、切片返元素、串返 `TI_INT`——**它们都是结果规则，必须原地保留**；表在这里只承担「谁**可以**进这个面」的**拒绝判定**）：
+  - **不得**把 `if arr_kind == TYP_ARRAY`（`:2605`）/`if arr_kind == TYP_SLICE`（`:2616`）/`if arr_ti == TI_STR`（`:2619`）换成 `iface_permits(...)`——那会把三个分支合并成一条（结果类型与检查全丢）。改动只落在一处：`:2634` 的兜底拒绝（`check_error(EC_TK_INDEX, ...)`）之前加/改为 `if iface_permits(iface_kind_of(arr_ti), IP_INDEX) == 0 { <原 TK01 报错，码与文案逐字不变> }`，**其后保留原兜底**（双保险：表的拒绝集与兜底一致，措辞路径不变）。
+  - 同理 CHECK：`IP_INDEX_RANGE` 的拒绝分支（`:2602` 的 `return TI_UNIT`）**保留现状**（range 索引非数组时今日静默返 `TI_UNIT` 无诊断——登记面，不改）。
   - 字段/转换/dyn：**落空分支一律保留现状**（`:2578` 返 `TI_UNIT` 无诊断、`:2907` 恒等透传、`:2071` `validate_dyn_method`）——本 Task 只把它们的**许可判据**改成查表（`IP_FIELD`/`IP_METHOD`/`IP_AS`），**诊断面零改动**；落空分支的「无诊断」事实写入报告的事实表（P3 收紧面的输入）。
+  - **可空的接线强度（如实登记）**：索引/字段/转换三面的表格在现状下**几乎不改变判定**（拒绝集与兜底同集）——其价值 = 把「拒绝集」从散落的分支变成表里可审计的一格（P3 收紧的旋钮位置）。报告须如实说明哪些格子**当前不可达/无行为差异**，不得把它记成「已生效的接线」。
 - [ ] **Step 3: 判据**：同 Task 4 + 现有 `test_agg_checks.py`（TS01-04/TK02）、`test_slice_bounds.py`、`test_agg_slots.py` 全绿。
 - [ ] **Step 4: 提交**：`refactor: R2 P2b Task 5——容器面许可查表接线（索引/字段/转换/dyn；结果规则与诊断面零改动，落空分支现状登记）`
 
@@ -380,7 +431,8 @@ fn ty_code_to_ti(ty: int) -> int
 
 - **根因 vs 止血**：本批**不是止血**——它是 spec §2「一张注册表、检查器统一查表」的**第一段落地面**（此前只有 P0 的判定 API，无查询 API、无条目表）。**采用的路线 = 保语义接线**（表逐格转录现状），**明确不做**「顺手收紧」（= P3）：理由是 P2a 已确立「替换门 = 语料差异归零 + 站点覆盖同报」的纪律，而收紧面尚无全语料证据（P1 的 9 条差异 100% 是 unknown，**零条**是收紧面）。**未采用**的替代方案：① 一步到位「表 + 收紧」（会把语言面收紧混进接线批，违反裁决 6 的「逐处记录 + 争议停下」）；② 只建 API 不接线（P2b 交付物缺一半，且下游切片等的是「统一入口」）。
 - **两个交付物的耦合（设计说明）**：`iface_lit_ti`（字面量定型）与 `ty_code_to_ti`（TY→TI 单表）在本语言里**同源**——字面量节点本就携带 `type_val = TY_*`（`parser.cr:399/410/414/416/556`）。本批选**kind 主路**（保语义：`infer_expr` 现状按 AST kind 判，不读 `type_val`），并把 `type_val` 路作为**交叉断言**（Task 3 Step 1）而非主路——因为并非所有字面量铸点都写 type_val（`monomorph.cr:228-231` 克隆**保留** `tv`，但其它路径未审计），主路换 kind 会在未来铸点漏写时静默错型。
-- **占位符扫描**：无 TBD；两处**明标未测**（侦查 §6：`never` 可达性 + 宽松面行为实证）已各自绑定「Step 1 红态探针」而非「稍后填」。表中 `AK_STRING` 行的许可格写明「结果规则留代码」（不是占位）。
+- **占位符扫描**：无 TBD；两处**明标未测**（侦查 §6：`never` 可达性 + 宽松面行为实证）已各自绑定「Step 1 红态探针」而非「稍后填」。表的空白格一律有明确取值（0/1），无「待定」。
+- **关键结构发现（本计划最大单点风险，已写入 Task 4）**：现状的「算术许可」是**两层**（`:1937/1939/1942/1946` 早退规则 + `:1950` 门），故**门的许可集只能含 `INT`/`DEX`**——把 `PTR`/`STRING` 填进 `ADD` 格会让 `*T + *T`、`"a" - "b"` 从「报错」变「静默」（ANY 门语义下 `permits(PTR,ADD)=1` 足以放行）。spec §2.1 说「`+` 对 int/dex/string 合法」与此不冲突：该语义在现状由「门 + 早退规则」两处合起来给出，本批的落地形态**照现状拆**，并把它列入报告的事实表。**若实现者按直觉把 string/ptr 填进门，判据（负控 `*T + *T` / `"a" - "b"` rc=1）必红。**
 - **命名一致性**：`iface_registry.cr` / `iface_count` / `iface_entry` / `iface_ops` / `iface_permits` / `iface_lit_ti` / `iface_lit_ak` / `iface_kind_of` / `iface_ti_of` / `iface_of_term` / `iface_by_ty_code` / `ty_code_to_ti` / `iface_bit` / `ESZ_IFACE_ENTRY` / `OFF_IE_*` / `IP_*` / `IP_UOP_BIAS` 在任务间一致；`sh_native_ak`/`sh_base_ak` 保留原名（影子链路可比性）。
 - **spec 覆盖**：§2.1 三字段（操作许可 / 字面量定型 / 尺寸对齐「非语义」）→ Task 1/3/4/5 + 范围节第 ③ 条；§2.5 五个 API → Task 1（`iface_satisfies` 明标 P3，零调用者）；§2.4 编号撞车 → **登记**（Task 6 Step 3 显式化 `:2129-2134` 一处，其余归 P4/P5，不在本批改命名空间）；§4 步 3 的两个点 → Task 4/5 与 Task 6；§9 P2 (b) → 全批。
 - **风险 / 退路**：
