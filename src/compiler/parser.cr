@@ -475,15 +475,42 @@ fn parse_primary() -> int {
         g_parse_no_struct_literal = saved_nsl;
         if check(T_COMMA) {
             // Tuple: (e1, e2, ...)
-            ef := e;
+            // 契约（F5 修复）：EXPR_TUPLE = a=首 wrapper、b=元素个数；wrapper 在 g_ast 中
+            // **连续**，每个 wrapper（kind=EXPR_NONE）的 a = 该元素的值节点 → 消费者经
+            // `ast_a(wrapper + i)` 取元素值节点。元素值节点本身对复合表达式**不连续**
+            // （复合元素子树自占多槽），故必须分两趟：先解析全部元素值，再统建连续 wrapper。
+            // 注：不得照 struct 字面量分支（本文件 T_IDENT+T_LBRACE 段）的「逐值后随建
+            // wrapper」交错顺序——复合值会插在相邻 wrapper 之间致其不连续，同属本根因。
+            cap : ., mut = 8;
+            vals : string, mut = alloc(cap * 8);
+            w64(vals, 0, e);
             ec : ., mut = 1;
             loop {
                 advance_tok();  // consume comma
-                parse_expr();   // next element (stored in consecutive g_ast slots)
+                if ec >= cap {
+                    ncap := cap * 2;
+                    nv := alloc(ncap * 8);
+                    _dyncpy(vals, cap * 8, nv);
+                    vals = nv;
+                    cap = ncap;
+                }
+                w64(vals, ec * 8, parse_expr());  // 元素值（子树自占若干槽）
                 ec = ec + 1;
                 if !check(T_COMMA) { break; }
             }
             advance_tok();  // consume )
+            ef : ., mut = -1;
+            ei : ., mut = 0;
+            loop {
+                if ei >= ec { break; }
+                vn := r64(vals, ei * 8);
+                ln : ., mut = tok_ln(t);
+                cl : ., mut = tok_cl(t);
+                if vn >= 0 { ln = ast_line(vn); cl = ast_col(vn); }
+                wl := ast_alloc(EXPR_NONE, vn, 0, 0, 0, 0, 0, ln, cl);
+                if ei == 0 { ef = wl; }
+                ei = ei + 1;
+            }
             return alloc_node(EXPR_TUPLE, ef, ec, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
         }
         advance_tok();

@@ -173,11 +173,28 @@ fn ast_optimize_body(body: int) {
         if ast_a(body) >= 0 { ast_optimize_body(ast_a(body)); }
         return;
     }
-    // EXPR_ARRAY, EXPR_TUPLE: optimize elements
-    if bk == EXPR_ARRAY || bk == EXPR_TUPLE {
-        an := ast_b(body); ac := ast_c(body);
+    // EXPR_ARRAY: a=first_elem, b=elem_count（旧读 ast_b/ast_c ⇒ count 恒取 0 = 恒空转；
+    // 槽约定校正为 a/b。注意元素连续仅对单槽元素成立——复合元素错位是本族已知残留）
+    if bk == EXPR_ARRAY {
+        an := ast_a(body); ac := ast_b(body);
         i : ., mut = 0;
         loop { if i >= ac { break; } if an >= 0 { ast_optimize_body(an); an = an + 1; } i = i + 1; }
+        return;
+    }
+    // EXPR_TUPLE: a=first wrapper（连续）, b=elem_count；wrapper.a=元素值节点（F5 契约）
+    if bk == EXPR_TUPLE {
+        an := ast_a(body); ac := ast_b(body);
+        i : ., mut = 0;
+        loop {
+            if i >= ac { break; }
+            if an >= 0 {
+                vn : ., mut = -1;
+                if ast_kind(an) == EXPR_NONE { vn = ast_a(an); }
+                if vn >= 0 { ast_optimize_body(vn); }
+                an = an + 1;
+            }
+            i = i + 1;
+        }
         return;
     }
     // EXPR_AS: optimize both sides

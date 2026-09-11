@@ -301,10 +301,28 @@ fn gen_clone_tree(node: int) -> int {
         gen_dedup_add(node, n); return n;
     }
 
-    // ── EXPR_TUPLE: a=first_elem(YES), b=elem_count(NOT) — elements are consecutive ──
+    // ── EXPR_TUPLE: a=first wrapper(YES, consecutive), b=elem_count(NOT)；
+    //    wrapper.a = element value node（F5 契约，见 parser.cr 元组分支）──
     if k == EXPR_TUPLE {
         if a >= 0 && b > 0 {
-            new_first := gen_clone_consecutive(a, b);
+            // 元素值先逐个深克隆（各自子树自占槽位），再统建连续 wrapper——
+            // 不得「克隆值后随建 wrapper」逐元素交错：wrapper 将不连续（与 parser 同契约）。
+            nvs : string, mut = alloc(b * 8);
+            i : ., mut = 0;
+            loop {
+                if i >= b { break; }
+                vn : ., mut = -1;
+                if a + i >= 0 { vn = ast_a(a + i); }
+                w64(nvs, i * 8, gen_clone_tree(vn));
+                i = i + 1;
+            }
+            new_first := g_ast_count;
+            i = 0;
+            loop {
+                if i >= b { break; }
+                ast_alloc(EXPR_NONE, r64(nvs, i * 8), 0, 0, 0, 0, 0, ln, cl);
+                i = i + 1;
+            }
             n := ast_alloc(k, new_first, b, c, iv, tv, d, ln, cl);
             gen_dedup_add(node, n); return n;
         }

@@ -230,7 +230,7 @@ EXPR_MOVE : int = 32;     // a=expr being moved
 EXPR_ENUM_CONSTRUCTOR : int = 37; // a=name idx, b=first arg, c=arg count
 EXPR_REFTYPE : int = 38;   // a=inner type node, data=mut flag (for &T / &mut T in type position)
 EXPR_GENERIC_APPLY : int = 39; // a=base name idx, b=first arg type node, c=arg count
-EXPR_TUPLE : int = 40;         // a=first elem, b=elem count (tuple literal)
+EXPR_TUPLE : int = 40;         // a=first wrapper（g_ast 中连续；wrapper kind=EXPR_NONE 且 a=元素值节点）, b=elem count (tuple literal)
 EXPR_ARG : int = 41;            // a=expr, b=next arg node or -1 (argument linked list)
 EXPR_GO : int = 42;             // go expr: a=-1, b=body;  go var start..end expr: a=-1, b=body, c=iter_ni, data=range_node
 EXPR_FLOW : int = 43;           // flow fn — a=fn_name_ni, b=param_count, c=first_param, data=body

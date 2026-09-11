@@ -67,6 +67,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_borrow.py
     python3 tests/selfhost/test_pointer_safety.py
     python3 tests/selfhost/test_params_limit.py   # TODO #8 形参上限/≥18 形参静默误编译回归
+    python3 tests/selfhost/test_tuple_slots.py
     ;;
 
   suite)

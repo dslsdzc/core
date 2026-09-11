@@ -2642,18 +2642,34 @@ fn infer_expr(node: int) -> int {
     }
     if ast_kind(node) == EXPR_TUPLE {
         // Tuple: create a TYP_TUPLE type with element types
+        // F5 契约：a=首 wrapper（g_ast 中连续）、b=元素个数；wrapper.a = 元素值节点。
+        // 复合元素（如 [1,2,3]）的值节点自身不连续，必须经 wrapper 解引用——
+        // 直读 `elem_idx + e` 会把元素子节点当元素（类型错录 → 假拒 + soundness 漏放）。
         elem_idx := ast_a(node);
         ec : ., mut = ast_b(node);
-        data_start := g_gen_apply_data_count;
+        // 元素类型**两趟**记录（F5 第二根因）：先逐个推断（元素的推断自身可能向
+        // g_gen_apply_data 追加数据——嵌套元组 / 泛型应用 / 泛型结构字面量的
+        // g_gen_map 段），再一次性连续落盘。若照旧在循环前取 data_start 边推边写，
+        // 前面元素追加的数据会把后续元素的位置顶开，extra 与实际落点错位（实测：
+        // ((2,3),1) 的元素表被读成内层元组的字段 [int,int] → 嵌套元组异型互赋静默通过）。
+        tis : string, mut = alloc(ec * 8);
         e : ., mut = 0;
         loop {
             if e >= ec { break; }
-            elem_ti := infer_expr(elem_idx + e);
-            grow_gen_apply_data(g_gen_apply_data_count + 1);
-            w64(g_gen_apply_data, g_gen_apply_data_count * 8, elem_ti);
-            g_gen_apply_data_count = g_gen_apply_data_count + 1;
+            wn : ., mut = -1;
+            if elem_idx >= 0 { wn = ast_a(elem_idx + e); }
+            w64(tis, e * 8, infer_expr(wn));
             e = e + 1;
         }
+        data_start := g_gen_apply_data_count;
+        grow_gen_apply_data(data_start + ec);
+        e = 0;
+        loop {
+            if e >= ec { break; }
+            w64(g_gen_apply_data, (data_start + e) * 8, r64(tis, e * 8));
+            e = e + 1;
+        }
+        g_gen_apply_data_count = data_start + ec;
         return alloc_type(TYP_TUPLE, ec, data_start);
     }
 

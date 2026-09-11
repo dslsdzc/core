@@ -2198,6 +2198,8 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
     }
     if ast_kind(node) == EXPR_TUPLE {
         // Tuple: allocate array for N elements, store each
+        // F5 契约：a=首 wrapper（g_ast 中连续）、b=元素个数；wrapper.a = 元素值节点
+        // （复合元素值节点不连续，须经 wrapper 解引用——见 checker.cr EXPR_TUPLE 注）。
         elem_idx := ast_a(node);
         ec : ., mut = ast_b(node);
         tv := new_ir_var("tuple", TI_INT);
@@ -2206,7 +2208,9 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
         e : ., mut = 0;
         loop {
             if e >= ec { break; }
-            elem_var := gen_expr(elem_idx + e);
+            en : ., mut = -1;
+            if elem_idx >= 0 { en = ast_a(elem_idx + e); }
+            elem_var := gen_expr(en);
             elem_var = force_if_thunk(elem_var);
             emit(IR_STORE_FIELD, -1, tv, elem_var, e, 0);
             e = e + 1;
@@ -2596,10 +2600,25 @@ fn ast_patch_node(node: int, subst_from: string, subst_to: string) {
         an5 := ast_b(node); ac5 := ast_c(node);
         ai5 : ., mut = 0;
         loop { if ai5 >= ac5 { break; } if an5 >= 0 { ast_patch_node(an5, subst_from, subst_to); an5 = an5 + 1; } ai5 = ai5 + 1; }
-    } else if k == EXPR_ARRAY || k == EXPR_TUPLE {
-        an6 := ast_b(node); ac6 := ast_c(node);
+    } else if k == EXPR_ARRAY {
+        // a=first_elem, b=elem_count（槽约定校正为 a/b——旧读 b/c 恒空转）
+        an6 := ast_a(node); ac6 := ast_b(node);
         ai6 : ., mut = 0;
         loop { if ai6 >= ac6 { break; } if an6 >= 0 { ast_patch_node(an6, subst_from, subst_to); an6 = an6 + 1; } ai6 = ai6 + 1; }
+    } else if k == EXPR_TUPLE {
+        // a=first wrapper（连续）, b=elem_count；wrapper.a=元素值节点（F5 契约）
+        an6 := ast_a(node); ac6 := ast_b(node);
+        ai6 : ., mut = 0;
+        loop {
+            if ai6 >= ac6 { break; }
+            if an6 >= 0 {
+                vn6 : ., mut = -1;
+                if ast_kind(an6) == EXPR_NONE { vn6 = ast_a(an6); }
+                if vn6 >= 0 { ast_patch_node(vn6, subst_from, subst_to); }
+                an6 = an6 + 1;
+            }
+            ai6 = ai6 + 1;
+        }
     } else if k == EXPR_FIELD || k == EXPR_INDEX || k == EXPR_UNARY || k == EXPR_RETURN || k == EXPR_TRY || k == EXPR_MOVE {
         if ast_a(node) >= 0 { ast_patch_node(ast_a(node), subst_from, subst_to); }
     }
