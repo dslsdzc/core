@@ -98,8 +98,8 @@
 **判据 (b) 的可判定性论证（本族的关键结构事实）**：π 不是图对象，图上没有"到达序号"这种输入端口。因此"依赖物理序"在实践中**只能**通过代理量实现，而代理量是图上的普通节点、可被扫描。这使「隐式竞争」成为**可判定**的（而非传统自动并行化那样靠依赖猜测——TODO 2026-08-30 记的同一论据）。
 
 **判据 (a) 的可靠性前提（硬性——假阴性风险；**已于 2026-09-11 效应/纯度批满足**，修复前快照见下）**：判据 (a)「无 state 边入边」只在 **state 链覆盖全部可观测效应**时才是充分的；否则 (a) 会**假阴性**——把实际有序依赖的汇合误判为 `deterministic`。**前提已于 `762bd429`+`c9099d73` 满足**：
-- 入链判据 = 单一真源 `purity_op_effect`（`checker.cr:2891`）——store 家族 + `IR_CALL_EXTERN` + `IR_SPAWN`/`IR_YIELD`/`IR_HOTPATCH_ROUTE`/`IR_DYN_DISPATCH`（间接调用）/`IR_STORE_PTR`/`IR_AWAIT` 全入链（`df_connect_state`，`dataflow.cr:146`）；
-- `fi_ispure` = `compute_all_purity`（`checker.cr:2938`）真值（保守起点「全不纯」+ 调用图不动点 + 递归/SCC 保守 + 不可解析调用保守）⇒ **一切未证纯的可解析调用**（`print` / `read_file` / `chan_send` / `sched_go`…）入链。**保守方向保证无假阴性**（宁可多判 `ordered`，不可漏判 `deterministic`）。
+- 入链判据 = 单一真源 `purity_op_effect`（`checker.cr:2912`）——store 家族 + `IR_CALL_EXTERN` + `IR_SPAWN`/`IR_YIELD`/`IR_HOTPATCH_ROUTE`/`IR_DYN_DISPATCH`（间接调用）/`IR_STORE_PTR`/`IR_AWAIT` 全入链（`df_connect_state`，`dataflow.cr:146`）；
+- `fi_ispure` = `compute_all_purity`（`checker.cr:2959`）真值（保守起点「全不纯」+ 调用图不动点 + 递归/SCC 保守 + 不可解析调用保守）⇒ **一切未证纯的可解析调用**（`print` / `read_file` / `chan_send` / `sched_go`…）入链。**保守方向保证无假阴性**（宁可多判 `ordered`，不可漏判 `deterministic`）。
 - 修复前（历史快照，保留备查）：`df_connect_state`（`dataflow.cr:160-177`）分类表不含 `IR_CALL_EXTERN`（`ast.cr:572` = 45）；`fi_ispure` 唯一写入点（`checker.cr:1107`「all functions are pure」/ `:1142` extern）值恒 1 ⇒ 除 store 家族与不可解析调用（builtin）外没有任何调用进入 state 链；且链每函数重置（`dataflow.cr:401`）。
 
 ⇒ **外部效应已有保证的序通道（函数内）**（权威事实锚点 = `2026-09-11-policy-state-version-toctou-design.md` §1.2 回填条，即 S-B5 §1 事实底座；其处置面在那边）。
