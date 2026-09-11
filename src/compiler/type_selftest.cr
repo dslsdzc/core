@@ -860,6 +860,116 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("ops.infer_ptr_diff",
         o4_r_pd * 100 + (g_diag_count - o4_m9), TI_INT * 100);
 
+    // --- R2 P2b Task 5：容器面接线（**唯一接线点** = 索引兜底拒绝 → IP_INDEX 查表）---
+    // 三层判据：
+    //   ① **集等价**（保语义硬口径，全类型行枚举非抽样）：门的可达集 =「kind ∉ {ARRAY, SLICE} ∧
+    //      ti ≠ TI_STR」= 结果分支后的落空集；表的拒绝集与之**逐行相等**（`permits == 1 ⟺ 可达
+    //      集外`，双向都数）⇒ 接线不改变任何一行的判定。**这是本 Task 接线等价性的本体证据**；
+    //      非真空性由实施报告的突变控制承担（给 AK_INT 加 IP_INDEX ⇒ 本例必红）。
+    //   ② **端到端经真 infer_expr**（三个结果分支保留 + 兜底门在判）：诊断增量 + 码 + 结果类型。
+    //   ③ 反真空哨兵：枚举覆盖行类直方图非退化 + 构造节点 kind/op 正确。
+    // 覆盖行类自备（不依赖前序段落的残余行）：PTR/REF/TUPLE 各一行，供 ③ 的直方图计数
+    ix_row_ptr := alloc_type(TYP_PTR, TI_INT, 0);
+    ix_row_ref := alloc_type(TYP_REF, TI_INT, 0);
+    ix_row_tup := alloc_type(TYP_TUPLE, 0, 0);
+    ix_li0 := alloc_node(EXPR_INT, -1, -1, -1, 0, TY_INT, -1, 0, 0);   // 索引值 0（串下标须在界内，避免 F 面诊断）
+    ix_arr3 := alloc_node(EXPR_ARRAY, -1, 3, -1, 0, 0, -1, 0, 0);   // 数组字面量 len=3（无元素）
+    ix_arr0 := alloc_node(EXPR_ARRAY, -1, 0, -1, 0, 0, -1, 0, 0);   // 空数组字面量 len=0
+    ix_idx_arr := alloc_node(EXPR_INDEX, ix_arr0, li_int, -1, 0, 0, -1, 0, 0);
+    ix_idx_str := alloc_node(EXPR_INDEX, li_str, ix_li0, -1, 0, 0, -1, 0, 0);
+    ix_idx_int := alloc_node(EXPR_INDEX, li_int, li_int, -1, 0, 0, -1, 0, 0);
+    ix_idx_bool := alloc_node(EXPR_INDEX, li_bool, li_int, -1, 0, 0, -1, 0, 0);
+    ix_ref := alloc_node(EXPR_UNARY, li_int, -1, UOP_REF, 0, 0, -1, 0, 0);
+    ix_idx_ptr := alloc_node(EXPR_INDEX, ix_ref, li_int, -1, 0, 0, -1, 0, 0);
+    ix_range := alloc_node(EXPR_RANGE, li_int, li_int, -1, 0, 0, -1, 0, 0);
+    ix_idx_arr_range := alloc_node(EXPR_INDEX, ix_arr0, ix_range, -1, 0, 0, -1, 0, 0);
+    ix_idx_str_range := alloc_node(EXPR_INDEX, li_str, ix_range, -1, 0, 0, -1, 0, 0);
+    ix_idx_arr_oob := alloc_node(EXPR_INDEX, ix_arr3, li_int, -1, 0, 0, -1, 0, 0);
+    ix_idx_range_oob := alloc_node(EXPR_INDEX, ix_arr3, ix_range, -1, 0, 0, -1, 0, 0);
+    total = total + 1; fails = fails + ts_check("idx.node_kinds",
+        (ast_kind(ix_idx_arr) == EXPR_INDEX && ast_kind(ix_arr3) == EXPR_ARRAY && ast_b(ix_idx_arr) == li_int &&
+         ast_kind(ix_range) == EXPR_RANGE && ast_kind(ix_idx_ptr) == EXPR_INDEX && ast_c(ix_ref) == UOP_REF), 1);
+    // ① 集等价（逐行）：perm == 1 ⟺ 该行**不**属于「结果分支已处理集」{kind ARRAY, kind SLICE, ti == TI_STR}
+    ix_bad : ., mut = 0;
+    ix_n_rows : ., mut = 0;
+    ix_n_seq : ., mut = 0;
+    ix_n_str : ., mut = 0;
+    ix_n_named : ., mut = 0;
+    ix_n_prod : ., mut = 0;
+    ix_n_ref : ., mut = 0;
+    ix_n_ptr : ., mut = 0;
+    ix_n_dyn : ., mut = 0;
+    ix_i : ., mut = 0;
+    loop {
+        if ix_i >= g_type_count { break; }
+        ix_k := get_type_kind(ix_i);
+        ix_ak := iface_kind_of(ix_i);
+        ix_reach : ., mut = 1;   // 1 = 到达兜底门（结果分支都不命中）
+        if ix_k == TYP_ARRAY || ix_k == TYP_SLICE || ix_i == TI_STR { ix_reach = 0; }
+        ix_perm := iface_permits(ix_ak, IP_INDEX);
+        ix_want : ., mut = 1;
+        if ix_reach == 1 { ix_want = 0; }
+        if ix_perm != ix_want { ix_bad = ix_bad + 1; }
+        if ix_k == TYP_ARRAY || ix_k == TYP_SLICE { ix_n_seq = ix_n_seq + 1; }
+        if ix_i == TI_STR { ix_n_str = ix_n_str + 1; }
+        if ix_ak == AK_NAMED { ix_n_named = ix_n_named + 1; }
+        if ix_ak == AK_PRODUCT { ix_n_prod = ix_n_prod + 1; }
+        if ix_ak == AK_REF { ix_n_ref = ix_n_ref + 1; }
+        if ix_ak == AK_PTR { ix_n_ptr = ix_n_ptr + 1; }
+        if ix_ak == AK_DYN { ix_n_dyn = ix_n_dyn + 1; }
+        ix_n_rows = ix_n_rows + 1;
+        ix_i = ix_i + 1;
+    }
+    total = total + 1; fails = fails + ts_check("idx.gate_deny_covers_fallback", ix_bad, 0);
+    // ③ 反真空：扫满全表 + 每类至少一行 + **STR 行恰 1 行**（`ti == TI_STR` ⇔ AK_STRING 的等价性
+    //    依赖「TYP_BASE 行唯一分配点 = init_types」——该行数若变，本例先红）
+    total = total + 1; fails = fails + ts_check("idx.scan_coverage",
+        (ix_n_rows == g_type_count && ix_n_rows >= 15 && ix_n_seq >= 2 && ix_n_str == 1 &&
+         ix_n_named >= 1 && ix_n_prod >= 1 && ix_n_ref >= 1 && ix_n_ptr >= 1 && ix_n_dyn >= 1 &&
+         get_type_kind(ix_row_ptr) == TYP_PTR && get_type_kind(ix_row_ref) == TYP_REF &&
+         get_type_kind(ix_row_tup) == TYP_TUPLE), 1);
+    // ② 端到端：结果分支保留（数组 → int、串 → int；含 OOB/F11 两个既有诊断仍发）
+    ix_m0 := g_diag_count;
+    ix_r_arr := infer_expr(ix_idx_arr);
+    total = total + 1; fails = fails + ts_check("idx.infer_arr_ok", ix_r_arr * 100 + (g_diag_count - ix_m0), TI_INT * 100);
+    ix_m1 := g_diag_count;
+    ix_r_str := infer_expr(ix_idx_str);
+    total = total + 1; fails = fails + ts_check("idx.infer_str_ok", ix_r_str * 100 + (g_diag_count - ix_m1), TI_INT * 100);
+    ix_m2 := g_diag_count;
+    ix_r_asc := infer_expr(ix_idx_arr_range);
+    ix_asc_ok : ., mut = 0;
+    if get_type_kind(ix_r_asc) == TYP_SLICE && get_type_data(ix_r_asc) == TI_INT {
+        if g_diag_count - ix_m2 == 0 { ix_asc_ok = 1; }
+    }
+    total = total + 1; fails = fails + ts_check("idx.infer_range_slice", ix_asc_ok, 1);
+    // 兜底门在判：非容器行 → TK01（码/结果逐字不变）
+    ix_m3 := g_diag_count;
+    ix_r_int := infer_expr(ix_idx_int);
+    total = total + 1; fails = fails + ts_check("idx.infer_int_denied_diag", g_diag_count - ix_m3, 1);
+    total = total + 1; fails = fails + ts_check("idx.infer_int_denied_code", ts_diag_code_at(ix_m3), EC_TK_INDEX);
+    total = total + 1; fails = fails + ts_check("idx.infer_int_denied_result", ix_r_int, TI_INT);
+    ix_m4 := g_diag_count;
+    infer_expr(ix_idx_bool);
+    total = total + 1; fails = fails + ts_check("idx.infer_bool_denied_diag", g_diag_count - ix_m4, 1);
+    total = total + 1; fails = fails + ts_check("idx.infer_bool_denied_code", ts_diag_code_at(ix_m4), EC_TK_INDEX);
+    ix_m5 := g_diag_count;
+    infer_expr(ix_idx_ptr);
+    total = total + 1; fails = fails + ts_check("idx.infer_ptr_denied_diag", g_diag_count - ix_m5, 1);
+    total = total + 1; fails = fails + ts_check("idx.infer_ptr_denied_code", ts_diag_code_at(ix_m5), EC_TK_INDEX);
+    // 登记面（现状宽松，本 Task 断言「不动」）：串 range 索引静默 → unit（range 分支的非数组落空）
+    ix_m6 := g_diag_count;
+    ix_r_sr := infer_expr(ix_idx_str_range);
+    total = total + 1; fails = fails + ts_check("idx.infer_str_range_unit", ix_r_sr * 100 + (g_diag_count - ix_m6), TI_UNIT * 100);
+    // 结果规则原地保留的**正证据**（防「接线把分支合并掉」）：F2 越界 + F11 切片界仍发
+    ix_m7 := g_diag_count;
+    infer_expr(ix_idx_arr_oob);
+    total = total + 1; fails = fails + ts_check("idx.infer_arr_oob_diag", g_diag_count - ix_m7, 1);
+    total = total + 1; fails = fails + ts_check("idx.infer_arr_oob_code", ts_diag_code_at(ix_m7), EC_R_OOB);
+    ix_m8 := g_diag_count;
+    infer_expr(ix_idx_range_oob);
+    total = total + 1; fails = fails + ts_check("idx.infer_range_oob_diag", g_diag_count - ix_m8, 1);
+    total = total + 1; fails = fails + ts_check("idx.infer_range_oob_code", ts_diag_code_at(ix_m8), EC_TK_SLICE_BOUNDS);
+
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }
     return 0;

@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
-"""R2 P2b Task 4：操作许可查表接线的行为回归（checker.cr 三个门 ← iface_registry 的 ops 列）。
+"""R2 P2b Task 4/5：接口查表接线的行为回归（checker.cr ← iface_registry 的 ops 列）。
 
-接线点（三层门形状，改动前原文逐字等价）：
+Task 4 接线点（三层门形状，改动前原文逐字等价）：
   · 算术门 `checker.cr:1959`（ANY：至少一侧许可即通过；改动前 = `lt != TI_INT && lt != TI_DEX
     && rt != TI_INT && rt != TI_DEX`）——表的 ADD..MOD 格**只含 int/dex**；
   · 逻辑门 `checker.cr:1969`（ALL：每侧都须许可；改动前 = `(lt≠bool ∧ lt≠int) ∨ (rt≠bool ∧ rt≠int)`）
     ——表的 AND/OR 格恰 {int, bool}（**dex 不在内**）；
   · 条件门 `checker.cr:2274`（ONE / IP_COND = bool|int）与 `checker.cr:2385`（ONE / IP_COND_BOOL
     = **仅 bool**）——两条规则现状不同，不得合并。
+
+Task 5 接线点（`t5_*` 段；**唯一** = 索引面兜底拒绝 → `IP_INDEX` 查表）：门体即原
+`EC_TK_INDEX` 调用（码/文案/位置逐字不变），可达集 = 数组/切片/串三个**结果分支**之后的落空集，
+与表的拒绝集逐行相等（selftest `idx.gate_deny_covers_fallback` 全类型行枚举钉死）。字段
+（`IP_FIELD`）/转换（`IP_AS`）/dyn（`IP_METHOD`）三面**未接线**：前两面在现状**无任何拒绝路径**
+（EXPR_FIELD/EXPR_AS 全形 rc=0，门会退化成恒真空转）；dyn 面的拒绝谓词是**逐具体行的方法表
+成员判定**（int/string 候选行今日也发 N08），类级门会抑制它 = 放宽。三者均为 P3 收紧旋钮。
 
 判据口径 = **保语义**（零行为变化）：正控 rc=0 / 负控 rc=1 + 错误码逐字不变 / 登记面（现状
 宽松面）断言「不动」。**关键守卫**（本批最易放宽的两条，见计划 Task 4 的「结构事实」）：
@@ -150,6 +157,63 @@ def main():
                       'fn main() -> int { b := "a" == 1; return 0; }\n'))
     ok.append(case_ok("reg_as_identity",
                       'fn main() -> int { s := "a"; x := s as int; return 0; }\n'))
+
+    # ─── R2 P2b Task 5：容器面（**唯一接线点** = 索引兜底拒绝 → IP_INDEX 查表）───
+    # 接线口径 = 与改动前**一字等价**：门体即原 `EC_TK_INDEX` 调用；可达集（= 三个结果分支
+    # 之后的落空集）与表的拒绝集逐行相等（selftest `idx.gate_deny_covers_fallback` 钉死）。
+    # 字段/转换/dyn 三面**未接线**（无拒绝路径 / 谓词不是类级位）——本段以「现状不动」钉住，
+    # 防后续把 `IP_FIELD`/`IP_METHOD`/`IP_AS` 硬接成收紧或放宽。
+    S5 = "struct S { a: int }\n"
+    # 正控：三个结果分支（数组→元素 / 切片→元素 / 数组 range→切片）
+    ok.append(case_ok("t5_pos_arr_index",
+                      "fn main() -> int { a := [1,2,3]; c := a[1]; return c; }\n"))
+    ok.append(case_ok("t5_pos_slice_index",
+                      "fn main() -> int { a := [1,2,3]; s := a[0..2]; c := s[1]; return c; }\n"))
+    ok.append(case_ok("t5_pos_arr_range",
+                      "fn main() -> int { a := [1,2,3]; s := a[1..2]; return 0; }\n"))
+    # 负控：非容器行一律 TK01（码/文案逐字不变）——给表的 IP_INDEX 加任一非容器类即静默放行
+    ok.append(case_reject("t5_neg_index_int",
+                          "fn main() -> int { x := 1; c := x[0]; return 0; }\n", "TK01"))
+    ok.append(case_reject("t5_neg_index_bool",
+                          "fn main() -> int { x := true; c := x[0]; return 0; }\n", "TK01"))
+    ok.append(case_reject("t5_neg_index_dex",
+                          "fn main() -> int { x := 1.5; c := x[0]; return 0; }\n", "TK01"))
+    ok.append(case_reject("t5_neg_index_char",
+                          "fn main() -> int { c := 'a'[0]; return 0; }\n", "TK01"))
+    ok.append(case_reject("t5_neg_index_ptr",
+                          "fn main() -> int { x : ., mut = 5; p := &x; c := p[0]; return 0; }\n", "TK01"))
+    ok.append(case_reject("t5_neg_index_named",
+                          S5 + "fn main() -> int { s := S { a: 1 }; c := s[0]; return 0; }\n", "TK01"))
+    ok.append(case_reject("t5_neg_index_tuple",
+                          "fn main() -> int { t := (1,2); c := t[0]; return 0; }\n", "TK01"))
+    ok.append(case_reject("t5_neg_index_dyn",
+                          "fn main() -> int { d : dyn = 5; c := d[0]; return 0; }\n", "TK01"))
+    # 登记面（现状静默；本批断言「不动」= P3 收紧面）：
+    #   range 索引的非数组落空 `return TI_UNIT` 无诊断（表 IP_INDEX_RANGE **未接线**——门恒真空转）
+    ok.append(case_ok("t5_reg_str_range",
+                      'fn main() -> int { s := "ab"; t := s[0..1]; return 0; }\n'))
+    ok.append(case_ok("t5_reg_slice_range",
+                      "fn main() -> int { a := [1,2,3]; s := a[0..2]; t := s[0..1]; return 0; }\n"))
+    ok.append(case_ok("t5_reg_int_range",
+                      "fn main() -> int { x := 1; t := x[0..1]; return 0; }\n"))
+    #   字段落空静默（EXPR_FIELD 全形 rc=0：非 struct / 越界元组位 / 指针·数组·dyn 操作数）
+    ok.append(case_ok("t5_reg_int_field",
+                      "fn main() -> int { x := 1; c := x.a; return 0; }\n"))
+    ok.append(case_ok("t5_reg_tuple_field_oob",
+                      "fn main() -> int { t := (1,2); c := t . 5; return 0; }\n"))
+    ok.append(case_ok("t5_reg_ptr_field",
+                      S5 + "fn main() -> int { s := S { a: 1 }; p := &s; c := p.a; return 0; }\n"))
+    ok.append(case_ok("t5_reg_dyn_field",
+                      "fn main() -> int { d : dyn = 5; c := d.a; return 0; }\n"))
+    #   dyn 面：现状**有**拒绝路径（逐具体行的方法表判定）——int/string 候选行也发 N08；
+    #   类级 IP_METHOD 门会**抑制**它们（= 放宽）⇒ 本段把现有 N08 钉红
+    ok.append(case_reject("t5_dyn_int_method_missing",
+                          "fn main() -> int { d : dyn = 5; d.nosuch(); return 0; }\n", "N08"))
+    ok.append(case_reject("t5_dyn_str_method_missing",
+                          'fn main() -> int { d : dyn = "a"; d.nosuch(); return 0; }\n', "N08"))
+    ok.append(case_reject("t5_dyn_struct_method_missing",
+                          S5 + "fn main() -> int { s := S { a: 1 }; d : dyn = s; d.nosuch(); return 0; }\n",
+                          "N08"))
 
     passed = sum(ok)
     print(f"{passed}/{len(ok)} passed")

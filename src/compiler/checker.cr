@@ -2656,7 +2656,18 @@ fn infer_expr(node: int) -> int {
             }
             return TI_INT;  // string[i] → byte value
         }
-        check_error(EC_TK_INDEX, "Cannot index non-array type", ast_line(node), ast_col(node));
+        // R2 P2b Task 5：索引面兜底拒绝的许可判据改为查表（IP_INDEX 许可集 = {sequence, string}）。
+        // 与改动前**一字等价**：本门的**可达集** = 「arr_kind ∉ {TYP_ARRAY, TYP_SLICE} ∧ arr_ti ≠
+        // TI_STR」= 上方三个结果分支（arr→elem+F2 / slice→elem / str→int，均为结果规则、原地保留）
+        // 之后的落空集；表的**拒绝集**（permits(kind_of(ti), IP_INDEX) == 0）与之**逐行相等**
+        // （全类型行枚举由 type_selftest 的 `idx.gate_deny_covers_fallback` 钉死；同 `arr_ti ==
+        // TI_STR` ⇔ `kind_of == AK_STRING`——TYP_BASE 行唯一分配点 = init_types:241-253）。
+        // 故本门不改变任何一行的判定，只把「拒绝集」从散落分支变成表里可审计的一格（P3 旋钮）。
+        // **不**在保留原裸调用的同时叠加本门：那会在拒绝路径上报两条 TK01 = 可观测行为变化
+        // （计划原文「其后保留原兜底」按此实测裁决：本门体即原兜底调用，码/文案/位置逐字不变）。
+        if iface_permits(iface_kind_of(arr_ti), IP_INDEX) == 0 {
+            check_error(EC_TK_INDEX, "Cannot index non-array type", ast_line(node), ast_col(node));
+        }
         return TI_INT;
     }
 

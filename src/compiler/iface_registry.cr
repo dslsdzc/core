@@ -37,6 +37,14 @@
 //     （现状「两层结构」：早退规则（串拼接/指针算术/指针差）留代码 = 结果规则，本列只记门）。
 //     消费点 = checker.cr 的三个门（ANY 算术 :1959 / ALL 逻辑 :1969 / ONE 条件 :2274+:2385 ——
 //     **行号一律为接线前实测**；接线后同处 +4，按内容定址）。
+//     **Task 5 消费点（单点接线，逐格台账见实施报告 §5 / 事实表 §8）**：`IP_INDEX` → checker.cr 索引面
+//     兜底拒绝（接线前 :2659；接线后门体即原 TK01 调用）——见 iface_registry_init 的
+//     AK_STRING/AK_SEQUENCE 条目注。**其余容器位本批不接线**（各有实测理由，不接不代表位错）：
+//     `IP_INDEX_RANGE`（range 分支的非数组落空**无诊断** ⇒ 门是恒真门 = 空转）、`IP_FIELD`
+//     （EXPR_FIELD 全形 rc=0、无任何诊断路径 ⇒ 同上）、`IP_METHOD`（dyn 消费点的谓词是**逐具体
+//     行的方法表成员判定**（`type_has_method` 名拼接），非「原子类是否有方法面」——类级门会
+//     **抑制** int/string 行今日的 EC_N_METHOD（实测 D1/D4）⇒ 接线 = 放宽）、`IP_AS`
+//     （EXPR_AS 除 PTR 结果规则外恒等透传、无诊断）。四项均为 P3 收紧旋钮（登记，未接线）。
 
 // ─── 条目布局（40B/条 × 5 字段；与 g_types(24B/条)/ESZ_TYPE_TERM(48B/条) 同族：扁平 i64 缓冲）───
 //   {ak, ti_row, name_ni, lit_code, ops}
@@ -107,23 +115,32 @@ fn iface_registry_init() {
     //   AK_DEX ：仅门——逻辑/条件均**不含 dex**（:1969/:2274 只认 bool|int；探针 N7/N8 实测拒）
     iface_put(1, AK_DEX, TI_DEX, -1, EXPR_DEX, o_base + o_arith);
     //   AK_STRING：无算术/逻辑/条件（串拼接走 :1946 早退，不进本表）；索引面 = :2619（串下标→int）
+    //     ——Task 5：IP_INDEX 已接线（兜底门；串的**结果**分支 :2644 原地保留）
     iface_put(2, AK_STRING, TI_STR, -1, EXPR_STRING, o_base + iface_bit(IP_INDEX));
     //   AK_BOOL ：逻辑 + 两条条件位（:2274 收 bool、:2385 收 bool）
     iface_put(3, AK_BOOL, TI_BOOL, -1, EXPR_BOOL, o_base + o_logic + o_cond + o_cond_b);
     iface_put(4, AK_UNIT, TI_UNIT, -1, -1, o_base);
     iface_put(5, AK_NEVER, TI_NEVER, -1, -1, o_base);
     iface_put(6, AK_CHAR, TI_CHAR, -1, EXPR_CHAR, o_base);
-    //   AK_DYN ：+ 方法面（:2066 dyn 方法校验路径）
+    //   AK_DYN ：+ 方法面（:2066 dyn 方法校验路径）——Task 5：**未接线**（该路径的拒绝谓词 =
+    //     `type_has_method(具体行名, 方法名)`（名拼接方法表判定），非本类级位；实测 int/string
+    //     行今日也发 EC_N_METHOD（探针 D1/D4）⇒ 类级门会抑制 = 放宽）
     iface_put(7, AK_DYN, TI_DYN, -1, -1, o_base + iface_bit(IP_METHOD));
     // 结构/命名（ti_row = -1 = 类级，无「规范行」）
-    //   AK_PRODUCT ：+ 字段面（:2566-2577 元组 `.N`）
+    //   AK_PRODUCT ：+ 字段面（:2566-2577 元组 `.N`）——Task 5：IP_FIELD **未接线**（落空
+    //     `return TI_UNIT` 无诊断；其前的 kind 分支是结果规则）
     iface_put(8, AK_PRODUCT, -1, -1, -1, o_base + iface_bit(IP_FIELD));
     //   AK_SEQUENCE：+ 索引面（:2605-2618 数组/切片元素 + F2 越界；:2586 range→slice）
+    //     ——Task 5：IP_INDEX 已接线（兜底门；ARRAY/SLICE 的**结果**分支原地保留）；
+    //     IP_INDEX_RANGE **未接线**（range 分支 :2612-2627 的非数组落空 `return TI_UNIT` 无诊断
+    //     ⇒ 门恒真 = 空转；登记为 P3 旋钮）
     iface_put(9, AK_SEQUENCE, -1, -1, -1, o_base + iface_bit(IP_INDEX) + iface_bit(IP_INDEX_RANGE));
     //   AK_REF/AK_PTR：门全 0——**指针算术由 :1948-1955 早退承担**（结果规则留代码），非本表
     iface_put(10, AK_REF, -1, -1, -1, o_base);
     iface_put(11, AK_PTR, -1, -1, -1, o_base);
-    //   AK_NAMED ：+ 字段面（:2522-2563 struct 字段表）+ 方法面（:2088 方法表）
+    //   AK_NAMED ：+ 字段面（:2522-2563 struct 字段表）+ 方法面（:2088 方法表）——Task 5：
+    //     两位均**未接线**（EXPR_FIELD 全形 rc=0、零诊断路径；方法面 = 逐方法表名判定，
+    //     同 AK_DYN 注的理由）；登记为 P3 旋钮
     iface_put(12, AK_NAMED, -1, -1, -1, o_base + iface_bit(IP_FIELD) + iface_bit(IP_METHOD));
     g_iface_registry_ok = 1;
 }
