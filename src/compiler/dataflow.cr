@@ -247,6 +247,11 @@ fn df_replay_state_chain() {
 // 消费者之前」——run 路径 = ir_gen_all 尾；文件路径 = main.cr IR 循环之后
 // （cir 转储 / 区域检查 / lower_to_ccr / 保存 .ccr 之前）。
 fn df_state_finalize() {
+    // 幂等护栏（Task 4 终审 Minor #5）：重复调用会**二次连链**（同一图再加一遍
+    // kind=1 边 + 重算纯度）。当前两调用点互斥故不触发，属潜在坑；旗标随
+    // reset_frontend_state 复位（长驻进程每编译一次重建）。
+    if g_df_state_finalized != 0 { return; }
+    g_df_state_finalized = 1;
     compute_all_purity();
     df_replay_state_chain();
 }

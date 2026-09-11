@@ -2892,7 +2892,10 @@ fn check_all() {
 //   ② 体无 IO/FFI/并发效应 opcode：IR_CALL_EXTERN / IR_HOTPATCH_ROUTE /
 //      IR_DYN_DISPATCH / IR_SPAWN / IR_YIELD / IR_AWAIT / IR_INLINE 见 ③。
 //   ③ 传递闭包内被调者全纯：IR_CALL 的 s3 = 名 ni 经 find_func 解析（不可解析 =
-//      runtime builtin ⇒ 不纯）；IR_INLINE 的 s1 同为名 ni（不可解析 ⇒ 不纯）。
+//      runtime builtin ⇒ 不纯）；IR_INLINE 亦按 s1 经 find_func 解析，但 s1 的
+//      含义**依发射点分两形**：调用旗标形（ir_gen.cr:1523）s1 = 函数**名 ni**；
+//      `@inline(expr)` 形（ir_gen.cr:1373）s1 = **变量索引** ⇒ 该形必然解析失败、
+//      被保守判不纯（误差方向安全；终审 Minor #4 记录，注释原文「同为名 ni」失实）。
 //   ④ 递归/SCC ⇒ 保守不纯：不动点从「全不纯」起点**升纯**——自环/互环永远等不到
 //      「被调者已纯」⇒ 自动留在不纯，无需显式 SCC 检测。
 // 泛型源函数（无 IR 体、永不被调用——调用点解析到实例）：纯度 = 实例的合取

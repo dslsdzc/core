@@ -17,11 +17,14 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parents[2]
 COREC = BASE / "build" / "corec"
 
-# 用例数下限：本批用例表 = 17 例＝纯度 13（正控2 + ①store + ②传递 + ③extern +
+# 用例数下限：本批用例表 = 26 例＝纯度 13（正控2 + ①store + ②传递 + ③extern +
 # ④不可解析 + ⑤自递归 + ⑤b互递归x2 + ⑥泛型实例x2 + ⑥b有效应泛型x2）+ state 链
-# 4（效应调用被链穿过 / 纯调用不被触及 / 循环终止依赖 / 无循环无 label 边负控）。
+# 4（效应调用被链穿过 / 纯调用不被触及 / 循环终止依赖 / 无循环无 label 边负控）
+# + Task 2 分类表补全 9（验收例双调 x3 + extern x2 + spawn x2 + yield x2）。
 # 低于此数 = 用例被静默删减（判据空转），故设下限而非仅断言相等。
-MIN_CASES = 17
+# 注：Task 2 把用例从 17 加到 26 时未同步该下限（终审 Minor #3——守卫一度允许删 9 例）；
+# 此处随用例表钉死，后续再增删用例须同改此数。
+MIN_CASES = 26
 
 
 def run_selftest():

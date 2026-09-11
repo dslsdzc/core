@@ -212,6 +212,7 @@ g_df_node_region : string, mut;   g_df_node_region_cap : int, mut;  // per DFNod
 g_cur_sg : int, mut;              // currently open region id (-1 = none)
 g_cur_ret_ti : int, mut;          // 当前函数的返回 TI（dex 边界转换用，数值迁移 Task 4）
 g_last_state_node : int, mut;     // last side-effect DFNode id (VSDG state chain; -1 = none)
+g_df_state_finalized : int, mut;  // df_state_finalize 幂等旗标（0 = 未跑；数据流图重建每编译恰一次——见 dataflow.cr）
 
 // Plugin extension registry: tags and return types from .so/stdlib plugins
 // Each entry: 24 bytes = [ns_ni, name_ni, data_ni]
@@ -370,6 +371,7 @@ fn reset_frontend_state() {
     // Task 1 侧表与 g_func_count 同生命周期（fi 下标会整体复用——不清则陈旧
     // 映射把新函数的纯度算到旧实例上，静默错标）
     g_purity_inst_count = 0;
+    g_df_state_finalized = 0;   // 与上同理：链重建每编译恰一次（幂等旗标随前端状态复位）
     g_seg_count = 0; g_line_count = 0;
     g_unsafe_depth = 0;
     g_alloc_pts_cap = 0;
