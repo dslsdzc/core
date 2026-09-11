@@ -55,6 +55,18 @@ Task 3 新增（2026-09-10）：
     全冷编译 byte-identical）；Minor 3 注记见该测试 docstring。
   · test_v7_loader_rejects_ent_var_foreign_block（R1）/ _ent_var_namespace_oob /
     _ent_def_nod_oob / _ent_def_ne_live_start（R2）——ENT 校验负分支补面。
+
+Task 3 判据重定（2026-09-11 效应/纯度修正批——见文件末「Task 3 新增三」段）：
+  触及 state 边/纯度的改动**必然改** `.ccr` 的 NOD/EDG（Task 1/2 实测：extern/
+  spawn/yield 入链 ⇒ EDG kind=1 边 +N）⇒ 旧判据「与旧版逐字节相同」退役，替代
+  判据 = 语义零变化 + 边集语义断言 + 自举稳定（连续两次编译产物一致；TODO.md）。
+  本文件承载边集语义断言三条：① 可证纯调用无 kind=1 入边（test_v7_edge_
+  semantics_pure_call_untouched）；② 效应调用四类（store 体/extern/不可解析
+  builtin/间接 IR_DYN_DISPATCH）必有 kind=1 入边（..._effect_call_in_chain）；
+  ③ 每函数链独立——.ccr 层零跨函数 kind=1 边 + byte mutation 咬合控制
+  （test_v7_state_chain_per_function_independence）。期望表（EXPECT_DATA 41 /
+  EXPECT_STATE 13）经 Task 1/2/3 实测**未变**：fixture（PROBE_SRC）只含
+  pure_add 调用（可证纯 ⇒ 不入链）与 store 族，无新入链 opcode ⇒ 不重锁。
 """
 import os
 import shutil
@@ -368,6 +380,10 @@ IR_STORE = 9
 IR_STORE_INDEX_VAR = 16
 IR_STORE_PTR = 26
 IR_DYN_DISPATCH = 44
+
+# Task 3 边集语义断言用 opcode（ast.cr:532/571/572）
+IR_CALL = 4
+IR_CALL_EXTERN = 45
 
 ENT_SRC = (
     "fn identity(n: int) -> int { return n; }\n"
@@ -1855,6 +1871,283 @@ def test_v7_cache_hit_restore_path():
         shutil.rmtree(cache_dir, ignore_errors=True)
 
 
+# === Task 3 新增三：判据重定——边集语义断言（取代「.ccr 逐字节同旧版」）===
+# 时点（2026-09-11 效应/纯度修正 Task 3）：`.ccr` 的 NOD/EDG 对任何触及 state 边/
+# 纯度的改动**预期会变**（Task 1/2 实测：extern/spawn/yield 由不入链改为入链 ⇒
+# EDG kind=1 边 +N）——旧判据「与旧版逐字节相同」不再适用。替代判据 =「语义零
+# 变化 + 边集语义断言 + 自举稳定（连续两次编译产物一致）」（见 TODO.md 判据条目）。
+#
+# 本段三条性质各自带正/负控，且负控 = 同一 fixture 内的**真数据对照**（谓词必须
+# 在同一份产物上取反过，防「恒真/恒假」的退化实现假绿）：
+#   ① 可证纯调用 ⇒ 无 kind=1 入边（负控 = 同文件 effect 调用必有入边）；
+#   ② 效应调用（store 体 / extern / 不可解析 builtin / 间接调用）⇒ 必有 kind=1
+#      入边（负控 = 同文件 pure_add 调用无入边）；
+#   ③ 每函数链独立（跨函数不连）—— .ccr 层（本判据的产物面）；负控 = byte
+#      mutation（把 main 内一条 kind=1 边的 to_nod 改写到后一函数区间）后同一
+#      判据函数必须报出该违规（咬合证明）。
+# 期望值全部来自实现后实测（2026-09-11 探针：pure_add / id[int] 调用 state_in=[]、
+# effect/ext_probe/load64/dyn_dispatch 四类 state_in=[前驱]、全文件 329 条 kind=1
+# 边跨函数 = 0、15 个函数各自携带 kind=1 边 ⇒ ③ 非空非退化）。
+
+CHAIN_SRC = (
+    "fn pure_add(a: int, b: int) -> int { return a + b; }\n"
+    "fn id[T](x: T) -> T { return x; }\n"
+    "fn effect() { a : ., mut = 0; a = 1; a = 2; }\n"
+    "extern fn ext_probe(x: int) -> int;\n"
+    "struct Counter { n: int }\n"
+    "impl Counter {\n"
+    "    fn bump(self) { }\n"          # dyn 方法（间接调用载体）
+    "}\n"
+    "fn main() -> int {\n"
+    "    s : ., mut = 0;\n"
+    "    s = 1;\n"
+    "    p := pure_add(s, 1);\n"        # 可证纯调用（性质①载体）
+    "    s = p;\n"
+    "    q := id(s);\n"                 # 泛型纯调用（Task 1 前 = 意外入链的 RED 载体）
+    "    s = s + q;\n"
+    "    effect();\n"                   # store 体效应调用（②-a）
+    "    r := ext_probe(s);\n"          # extern（②-b）
+    "    s = s + r;\n"
+    "    b := load64(s);\n"             # 不可解析 runtime builtin（②-c）
+    "    s = s + b;\n"
+    "    c : Counter = Counter { n: 7 };\n"
+    "    d : dyn = c;\n"
+    "    d.bump();\n"                   # 间接调用（②-d）
+    "    s = s + 1;\n"
+    "    return s;\n"
+    "}\n")
+
+
+def _op_nodes(nod, opcode, lo=0, hi=-1):
+    """[lo, hi) 区间内该 opcode 的节点序号表（文件序）。"""
+    if hi < 0:
+        hi = len(nod)
+    return [i for i in range(lo, min(hi, len(nod))) if nod[i][0] == opcode]
+
+
+def _cname(strs, ni):
+    """NOD 字段里的名字下标 → 字符串（越界 = None，防名字表外静默相等）。"""
+    return strs[ni] if 0 <= ni < len(strs) else None
+
+
+def _func_span(v7, name):
+    """按名取函数节点区间 (lo, hi)（SYM func 记录 root_region → REG 根行 span）。"""
+    strs = v7.str_table()
+    sym = v7.sym_parse()
+    regs = v7.reg()
+    for f in sym['funcs']:
+        if strs[f['name']] == name:
+            r = regs[f['root_region']]
+            assert r[0] == 0, f"root_region row {f['root_region']} not SG_FUNC: {r}"
+            return (r[2], r[3])
+    raise AssertionError(f"function {name!r} not found in SYM")
+
+
+def _state_in(edges):
+    """{to: [from, ...]}——全文件 kind=1 入边索引（文件序）。"""
+    out = {}
+    for f, row in edges.items():
+        for (t, k) in row:
+            if k == 1:
+                out.setdefault(t, []).append(f)
+    return out
+
+
+def _reg_spans(v7):
+    """REG 根行（SG_FUNC）节点区间表 [enter, exit)（函数序 = SYM func 序）。"""
+    return [(r[2], r[3]) for r in v7.reg() if r[0] == 0]
+
+
+def _func_of(spans, n):
+    """节点序号 → 函数序号（-1 = 不在任何函数区间）。"""
+    for k, (en, ex) in enumerate(spans):
+        if en <= n < ex:
+            return k
+    return -1
+
+
+def _chain_cross_violations(edges, spans):
+    """性质③判据函数：kind=1 边两端不同属一个函数区间（或落在区间外）的违规表
+    [(from, to), ...]（文件序）。空表 = 每函数链独立。"""
+    out = []
+    for f in sorted(edges):
+        for (t, k) in edges[f]:
+            if k != 1:
+                continue
+            a, b = _func_of(spans, f), _func_of(spans, t)
+            if a < 0 or b < 0 or a != b:
+                out.append((f, t))
+    return out
+
+
+def test_v7_edge_semantics_pure_call_untouched():
+    """性质① 可证纯调用 ⇒ **无** kind=1 入边（判据重定——取代「.ccr 字节同旧」）。
+
+    正控：CHAIN_SRC 的两个可证纯调用——纯函数调用（pure_add）与**泛型纯实例**调用
+    （id[int]，Task 1 前 monomorph 未写 fi_ispure ⇒ 读到 0 ⇒ 意外入链的真实 RED
+    载体）——必须存在且不被任何 kind=1 边指入。负控（同文件真数据对照）：同一份
+    产物的 effect 调用节点必须被指入——若实现退化成「一律不入链」，负控挂；退化
+    成「一律入链」，正控挂。两断合起来才把「按真纯度入链」钉死（谓词在同一数据
+    上取过反）。"""
+    ccr_path = os.path.join(BASE, 'build/test_v7_sem_pure.ccr')
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        corec_ccr(CHAIN_SRC, ccr_path)
+        v7 = V7File(read_ccr(ccr_path))
+        strs = v7.str_table()
+        nod = v7.nod()
+        spins = _state_in(v7.edg())
+        lo, hi = _func_span(v7, 'main')
+        pure = []
+        for callee in ('pure_add', 'id[int]'):
+            ids = [i for i in _op_nodes(nod, IR_CALL, lo, hi)
+                   if _cname(strs, nod[i][4]) == callee]
+            assert ids, f"non-empty guard: no emitted call node for {callee}"
+            pure += ids
+        for i in pure:
+            assert i not in spins, \
+                f"provably-pure call node {i} pierced by state chain " \
+                f"(in-edges {spins.get(i)})"
+        # 负控：同文件 effect 调用必须有入边（谓词非恒真）
+        eff = [i for i in _op_nodes(nod, IR_CALL, lo, hi)
+               if _cname(strs, nod[i][4]) == 'effect']
+        assert eff and all(i in spins for i in eff), \
+            f"negative control failed: effect call must be chained — " \
+            f"got {[(i, spins.get(i)) for i in eff]}"
+    finally:
+        try:
+            os.unlink(ccr_path)
+        except FileNotFoundError:
+            pass
+
+
+def test_v7_edge_semantics_effect_call_in_chain():
+    """性质② 效应调用 ⇒ **必有** kind=1 入边（四类载体：store 体效应调用 /
+    extern / 不可解析 runtime builtin / 间接调用 IR_DYN_DISPATCH）。
+
+    正控：四类节点各自存在（非空守卫）且逐个被 kind=1 边指入。负控（同文件真数据
+    对照）：同一份产物里 pure_add 调用节点无入边——谓词非恒真。**咬合**：Task 2
+    实现前该断言在 C 层实测 RED（`chain.extern_op_pierced: got 0 want 3`——extern
+    调用无入链分支）；同一改动面在 .ccr 层即 EDG kind=1 边缺失。"""
+    ccr_path = os.path.join(BASE, 'build/test_v7_sem_effect.ccr')
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        corec_ccr(CHAIN_SRC, ccr_path)
+        v7 = V7File(read_ccr(ccr_path))
+        strs = v7.str_table()
+        nod = v7.nod()
+        spins = _state_in(v7.edg())
+        lo, hi = _func_span(v7, 'main')
+        cats = [
+            ('store-body effect call (IR_CALL effect)',
+             [i for i in _op_nodes(nod, IR_CALL, lo, hi)
+              if _cname(strs, nod[i][4]) == 'effect']),
+            ('extern call (IR_CALL_EXTERN ext_probe)',
+             [i for i in _op_nodes(nod, IR_CALL_EXTERN, lo, hi)
+              if _cname(strs, nod[i][2]) == 'ext_probe']),
+            ('unresolvable builtin call (IR_CALL load64)',
+             [i for i in _op_nodes(nod, IR_CALL, lo, hi)
+              if _cname(strs, nod[i][4]) == 'load64']),
+            ('indirect call (IR_DYN_DISPATCH)',
+             _op_nodes(nod, IR_DYN_DISPATCH, lo, hi)),
+        ]
+        for label, ids in cats:
+            assert ids, f"non-empty guard: no node for {label}"
+            for i in ids:
+                assert i in spins, \
+                    f"{label}: node {i} not pierced by state chain (no kind=1 in-edge)"
+        # 负控：同文件可证纯调用无入边（谓词非恒真）
+        pure = [i for i in _op_nodes(nod, IR_CALL, lo, hi)
+                if _cname(strs, nod[i][4]) == 'pure_add']
+        assert pure and not any(i in spins for i in pure), \
+            "negative control failed: pure_add call must stay unchained"
+    finally:
+        try:
+            os.unlink(ccr_path)
+        except FileNotFoundError:
+            pass
+
+
+def test_v7_state_chain_per_function_independence():
+    """性质③ 每函数链独立（跨函数不连）——.ccr 层（本判据的产物面；链在
+    df_replay_state_chain 内每函数重置链头 ⇒ 序列化 EDG 内 kind=1 边两端必同属
+    一个函数区间）。
+
+    正控：全文件 kind=1 边零跨函数（判据函数返回空表）+ 非退化守卫（链边 ≥ 3 且
+    ≥ 2 个函数各自携带 kind=1 边——空集/单函数上该断言恒真，不算过）。
+    负控（咬合）：byte mutation——取 main 内一条 kind=1 边的 EDG 记录，把 to_nod
+    改写到后一函数区间（保持 to > from 的前向不变量，V7File 走查仍过）→ 同一判据
+    函数必须报出恰好该条跨函数边（[] → [(from, to')]，谓词在同一产物字节上取反）。"""
+    ccr_path = os.path.join(BASE, 'build/test_v7_sem_chain.ccr')
+    bad_path = ccr_path + '.xfn'
+    try:
+        os.unlink(ccr_path)
+    except FileNotFoundError:
+        pass
+    try:
+        corec_ccr(CHAIN_SRC, ccr_path)
+        data = bytearray(read_ccr(ccr_path))
+        v7 = V7File(bytes(data))
+        nod = v7.nod()
+        edges = v7.edg()
+        spans = _reg_spans(v7)
+        assert len(spans) >= 2, f"need >= 2 functions, got {spans}"
+        # 非退化守卫：链边非空 + ≥ 2 个函数各自携带 kind=1 边
+        chain_edges = [(f, t) for f in sorted(edges)
+                       for (t, k) in edges[f] if k == 1]
+        assert len(chain_edges) >= 3, \
+            f"degenerate guard: only {len(chain_edges)} chain edges"
+        fns = {_func_of(spans, f) for (f, _) in chain_edges}
+        assert len(fns) >= 2, \
+            f"degenerate guard: chain edges confined to functions {sorted(fns)}"
+        # 正控：零跨函数
+        assert _chain_cross_violations(edges, spans) == [], \
+            f"cross-function chain edges: {_chain_cross_violations(edges, spans)}"
+        # 负控（咬合）：把 main 内一条 kind=1 边改写到后一函数区间
+        main_k = _func_of(spans, _func_span(v7, 'main')[0])
+        victim = None
+        for f in sorted(edges):
+            if _func_of(spans, f) != main_k:
+                continue
+            for (t, k) in edges[f]:
+                if k == 1 and _func_of(spans, t) == main_k:
+                    victim = (f, t)
+                    break
+            if victim:
+                break
+        assert victim, "precondition: no main-internal kind=1 edge found"
+        f, t = victim
+        next_k = _func_of(spans, t) + 1  # 区间连续铺满 NOD 空间 ⇒ 下一函数在前方
+        assert next_k < len(spans), "precondition: main is the last function span"
+        t_new = spans[next_k][0]
+        assert t_new > f, f"mutation target {t_new} violates forward invariant (f={f})"
+        # EDG 记录全局序 = 节点序前缀累计；定位该边（f 行内位置）
+        gidx = 0
+        for i in range(f):
+            gidx += nod[i][7]
+        gidx += edges[f].index((t, 1))
+        edg_off, _ = v7.segs[6]
+        struct.pack_into('<I', data, edg_off + 4 + gidx * EDG_REC, t_new)
+        with open(bad_path, 'wb') as fh:
+            fh.write(bytes(data))
+        mut = V7File(read_ccr(bad_path))  # 前向不变量仍满足 ⇒ 走查通过
+        v_after = _chain_cross_violations(mut.edg(), _reg_spans(mut))
+        assert v_after == [(f, t_new)], \
+            f"mutation control failed: violations {v_after} != [(f={f}, t'={t_new})]"
+    finally:
+        for p in (ccr_path, bad_path):
+            try:
+                os.unlink(p)
+            except FileNotFoundError:
+                pass
+
+
 if __name__ == '__main__':
     shutil.rmtree(os.path.join(BASE, '.core', 'cache'), ignore_errors=True)
     tests = [test_v7_layout_and_walk,
@@ -1880,7 +2173,10 @@ if __name__ == '__main__':
              test_v7_loader_rejects_edg_count_mismatch,
              test_v7_save_rejects_var_block_misalignment,
              test_v7_cache_hit_restore_path,
-             test_v7_roundtrip_elf]
+             test_v7_roundtrip_elf,
+             test_v7_edge_semantics_pure_call_untouched,
+             test_v7_edge_semantics_effect_call_in_chain,
+             test_v7_state_chain_per_function_independence]
     failed = 0
     for t in tests:
         try:

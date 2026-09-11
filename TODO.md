@@ -255,6 +255,13 @@
 - **判据（建议）**：修 parser 后 3 条新探针（异长拒 / 同型接受 / 异型拒）+ `selftest-types` 增例 + 4 消费点复核 + ELF/`.ccr` 逐字节（**注意：改 AST 布局可能改变产物，须列明并逐字节实测**）+ 全回归。
 - **为何未在 P2a 修**：修法动 AST 布局 + **4 个消费点**（上列），可能改变 `.ccr`/ELF 产物 → 须单独立项裁决（非「顺手改」面）。
 
+### 26. 判据重定：state 边 / 纯度类改动的判定基准（2026-09-11 效应/纯度修正批 Task 3 确立——**非缺陷，登记性条目**）
+- **适用面**：凡触及 state 链 / 纯度的改动——`dataflow.cr`（`df_connect_state` / `df_replay_state_chain`）、`checker.cr`（`purity_op_effect` / `compute_all_purity`）、`monomorph.cr`（实例纯度继承）、`ccr_io.cr`（EDG/NOD 序列化）等。
+- **新判据**（取代旧「`.ccr` 与旧版逐字节相同」）：① **语义零变化**（解释器 + ELF 两侧行为一致）；② **边集语义断言**——`.ccr` 层 `tests/selfhost/test_ccr_v7.py` 三条性质（可证纯调用⇒无 kind=1 入边 / 效应调用四类（store 体·extern·不可解析 builtin·间接调用）⇒必有 kind=1 入边 / 每函数链独立零跨函数；各带正负控）+ C 层同族 `corec selftest-purity`；③ **自举稳定**（连续两次编译产物一致：`corec2`/`corec3` `cmp` IDENTICAL + N06=0 + 冒烟 42）。
+- **旧判据退役理由**：该类改动**必然改**产物——`.ccr` 的 **EDG 段**（kind=1 边增删）与 **NOD 邻接域**（first_edge/edge_count；节点序不变——链只加边）、`corearch --dump-objects` 通道输出、（缓存态下）`.core/cache/cir` 与二次运行产物。Task 1/2 实测：`IR_CALL_EXTERN`/`IR_SPAWN`/`IR_YIELD` 由不入链改为入链 ⇒ EDG kind=1 边 +N。**ELF 逐字节不变判据在本类改动下仍有效**（lazy 判定解耦：`ir_gen.cr` 的 lazy 与 `IR_LAZY_THUNK/FORCE` 发射面不动）——若 ELF 变，说明改动泄进发射面，须停下上报。
+- **操作约束**：比较任何 `.ccr` 产物 sha 前必须 `clean-cache`（同 #5 家族：缓存键不含编译器身份 ⇒ 升级后旧缓存会使新链静默失效）；`.cir` 缓存同源受此约束。
+- **实测锚**：Task 1（`762bd429`）/ Task 2（`c9099d73`）/ Task 3（本条目所在提交）三任务后 `test_ccr_v7.py` 的 `EXPECT_DATA 41 / EXPECT_STATE 13` **未变**——fixture（PROBE_SRC）只含可证纯调用（不入链）与 store 族，无新入链 opcode ⇒ 期望表不重锁（该判断本身 = 实测后按「确无变化则不重锁」处理的记录）。
+
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
 来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：
