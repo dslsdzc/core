@@ -60,11 +60,11 @@
 | ③ 变更 | 图内变更 = STORE 族节点（已在 state 链）；**图外变更 = 无节点**——这正是 TOCTOU 的本体 | 变更**声明** = 注解（policy 层，路线图 §1.2 原则 1） |
 | ④ 序 | EDG `kind=1` state 边 | **既有** |
 
-- ③ 的注解面：外部调用节点可带 `mutates(κ)`（κ = 身份键）；**未标注的 extern / 未知调用保守视为「变更一切外部身份」**——沿用既有先例（`dataflow.cr:166-172`：未知/外部函数保守视为有副作用）。
-- **外部效应事实底座（2026-09-11 核对，**行号已复核修正**；实施时实测确认）**：今日纯度标注是乐观的——`checker.cr:1107`「optimistic: all functions are pure」+ `checker.cr:1142`「optimistic: extern functions are pure」（**值恒 1**，setter 全仓仅 `dyn_arr.cr:369` 一处实现）；且 `df_connect_state`（`dataflow.cr:160-177`）的分类表**不含 `IR_CALL_EXTERN`**（`:217` 只建数据边），链还是**每函数重置**（`:401`）。结论：**外部效应今日无保证的序通道**（对 TOCTOU 恰好是最坏情形）。
-- **修链归属（2026-09-11 裁决 D7(c) + 评审 I4 收敛）**：修链（`df_connect_state` 覆盖 `IR_CALL_EXTERN` + 更正 `fi_ispure` 写入点）= **独立里程碑单独立项**（动所有程序的图与产物，需全回归 + 逐字节验收），**不挂任何族切片的前置**——本族**不要求改它**，S-E §4.1 的「判给 S-B5 切片」表述**不成立**（两处口径已对齐为「单独立项」）。缺陷止血（`fi_ispure` 恒真 / 链缺 extern）已进**代码级缺陷登记**（P0/P1）。
+- ③ 的注解面：外部调用节点可带 `mutates(κ)`（κ = 身份键）；**未标注的 extern / 未知调用保守视为「变更一切外部身份」**——沿用既有先例（`dataflow.cr:153-159`：未知/外部函数保守视为有副作用——现按 `purity_op_effect` 单一真源 + `fi_ispure` 真值判定）。
+- **外部效应事实底座（2026-09-11 **已修复**；修复前快照保留备查）**：修复前纯度标注乐观——`checker.cr:1107`「optimistic: all functions are pure」+ `:1142`「optimistic: extern functions are pure」（**值恒 1**），且 `df_connect_state` 分类表**不含 `IR_CALL_EXTERN`**，链每函数重置 ⇒ **外部效应无保证的序通道**（对 TOCTOU 恰好是最坏情形）。**已于效应/纯度批修复**（`762bd429` 真纯度计算 + `c9099d73` 分类表补全/单一真源）：`df_connect_state`（`dataflow.cr:146`）按 `purity_op_effect`（`checker.cr:2891`）入链——extern / 间接调用（`IR_DYN_DISPATCH`）/ spawn / yield / hotpatch / 裸指针写 / await 全入链，且一切未证纯的可解析调用入链；`fi_ispure` = `compute_all_purity`（`checker.cr:2938`）真值。**⇒ 外部效应（含 extern 调用节点）已有函数内保证的序通道**；**残余面**：链每函数重置（设计不变——图内变更源在判据域内的序已覆盖；**图外变更无节点 = TOCTOU 本体，不受本修复影响**）+ lazy 判定冻结（`ir_gen.cr:1590`，不涉链）。
+- **修链归属（2026-09-11 裁决 D7(c) + 评审 I4 收敛；**已闭合**）**：修链（`df_connect_state` 覆盖 `IR_CALL_EXTERN` + 更正 `fi_ispure` 写入点）= 原「独立里程碑单独立项」，**已作为 P0 插队批落地**（`762bd429`+`c9099d73`+`c7ca4251`；落地登记 = TODO #27）。**门禁口径不变**：本族切片**不以其为前置**（修链落地前后同此）；S-E §4.1 的「判给 S-B5 切片」表述仍**不成立**（两处口径已对齐）。判据 = 本批实测（全量回归 + `.ccr` 边集语义断言 `test_ccr_v7` 24→27 + ELF canary 逐字节 + 自举稳定）。
 - **清单唯一约束（硬性）**：**外部效应 / 变更源清单只允许存在一份**（挂 S-A §1.7 的 policy 面）；本族切片自带的最小面 = **对该清单的消费**（`mutates(κ)` 注解 + 未标注 extern = 变更一切 κ，§1.2 ③），**不另写一份**（否则必然漂移）。负控（§5.4）建立在该面 + 该清单之上。
-- **待纯度批落地后回填（勿在本批改写）**：上一条的「今日纯度标注是乐观的 / 外部效应今日无保证的序通道」是**现状陈述**；在飞批 `docs/superpowers/plans/2026-09-11-effect-purity-fix.md`（Task 4 Step 4 明列回填面）落地后按实测结果重述（模板：「已于 <commit> 修复，链覆盖范围 = …」）。**本批不改其事实与门禁。**
+- **回填记录（2026-09-11，Task 4 Step 4 = 原「待纯度批落地后回填」marker 的落点）**：上两条的「纯度标注乐观 / 外部效应无保证的序通道」**已按实测重述**为修复后状态；链覆盖范围 = 函数内 store 家族 + `purity_op_effect` 全清单 + 一切不可解析/未证纯的可解析调用（跨函数不连）。实测证据 = TODO #27（回归 38/38 rc=0 · 语料级旧前端 vs 当前 ELF 逐字节 20/20 同 · canary `95084e7b…d475` IDENTICAL · 自举稳定 · `.ccr` 差异仅 chain（kind=1）边）。
 - 今日语言面事实：`syscall3/4` 是特判内置（`checker.cr:2021` 注释 / `:2024-2025` 返回点；`instr.cr:681` 内联发射），stdlib `read_file(path)` / `write_file(path, …)`（`io.cr:27/72`）是**按 pathname 重查**的形态（P3，§2.4）。
 
 ### 1.3 图版本 vs 世界版本（判据的诚实核心）

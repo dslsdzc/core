@@ -262,6 +262,14 @@
 - **操作约束**：比较任何 `.ccr` 产物 sha 前必须 `clean-cache`（同 #5 家族：缓存键不含编译器身份 ⇒ 升级后旧缓存会使新链静默失效）；`.cir` 缓存同源受此约束。
 - **实测锚**：Task 1（`762bd429`）/ Task 2（`c9099d73`）/ Task 3（本条目所在提交）三任务后 `test_ccr_v7.py` 的 `EXPECT_DATA 41 / EXPECT_STATE 13` **未变**——fixture（PROBE_SRC）只含可证纯调用（不入链）与 store 族，无新入链 opcode ⇒ 期望表不重锁（该判断本身 = 实测后按「确无变化则不重锁」处理的记录）。
 
+### 27. 效应/纯度修正批落地（2026-09-11 P0 插队批——`fi_ispure` 真计算 + state 链分类表补全；**非缺陷，落地登记**）
+- **落点**：`src/compiler/checker.cr`（`purity_op_effect` :2891 · `compute_all_purity` :2938 · `fi_ispure_of` :3083 · `src_func_of_ir` / `df_func_of_node`）、`src/compiler/dataflow.cr`（`df_connect_state` :146 改调单一真源 · `df_replay_state_chain` :197 · `df_state_finalize` :249）、`src/compiler/purity_selftest.cr`（新增，26 例）、`src/compiler/monomorph.cr`（实例→源侧表登记）、`src/compiler/cir_cache.cr`（版本 14→15——快照不再持久化链边）、`tests/selfhost/test_purity.py`、`tests/selfhost/test_ccr_v7.py`（24→27）。
+- **提交链**：`762bd429`（Task 1：真纯度计算 + 链迁至 IR 生成后重建）→ `c9099d73`（Task 2：分类表补全 / 单一真源）→ `c7ca4251`（Task 3：判据重定）→ 收官（本条目所在提交：全量回归 + 复验 + 本回填）。
+- **修了什么（P0 症状）**：`fi_ispure` 由「乐观常量 1」（`checker.cr:1107`/`:1142` 两写入点——**有意保留**为 IR 生成期的冻结输入，见残余面①）改为全程序 IR 面真计算——保守起点（全不纯）+ 调用图不动点升纯 + 递归/SCC 保守 + 不可解析调用保守 + `unsafe` 区不纯 + 泛型（实例按自身体；源 = 实例合取）⇒ `print`/`read_file`/`chan_send`/`sched_go` 等一切可解析但不纯的调用重新入 state 链。分类表 opcode 面收敛为 `purity_op_effect` **单一真源**（D7）：`IR_CALL_EXTERN`/`IR_SPAWN`/`IR_YIELD`/`IR_HOTPATCH_ROUTE`/**间接调用 `IR_DYN_DISPATCH`**/`IR_STORE_PTR`/`IR_AWAIT` 全入链。
+- **链覆盖范围（回填口径，供 spec 引用）**：函数内 = store 家族 + 上列全部效应 opcode + 一切不可解析调用 + 一切被判不纯的可解析调用；**链仍每函数重置**（`df_replay_state_chain` 链头重置与 `df_begin_func` 同语义——跨函数不连；判据域内调用节点 = 被调者效应的序代理）。**残余面**：① lazy 判定（`ir_gen.cr:1590`）**有意冻结**（本批 `ir_gen.cr` 零改动 ⇒ 生成期 `fi_ispure` 仍是乐观默认值）；② 其 use_count 时序缺陷**独立未修**（保持登记于「控制流自动惰性」节）。
+- **判据（本批确立，见 #26）与收官实测（Task 4）**：全量回归 **38/38 rc=0**（7 bootstrap + 31 selfhost，含 `test_ccr_v7` 27/27 · `test_purity` · `test_compile`）；`tests/suite` 语料 **20/20**（非 `*_mini*` 且非空 = 20 个）build+run rc=0；ELF canary `tests/suite/ptr_arith.cr` = `95084e7b…d475` **IDENTICAL**；语料级「旧前端（Task 1 前）+ 当前后端 vs 当前全链」**20/20 ELF 逐字节相同**（发射面零泄漏；运行 rc/stdout 同）；自举两连建（`build_selfhost_native.py` ×2）corec/corearch/corelsp 产物 sha 逐一相同 + `corec2b`/`corec3b` `cmp` **IDENTICAL** + N06=0 + 冒烟 42。
+- **`.ccr` 变更面（Task 4 实测，冷缓存）**：kind=1（链）边增删为唯一语义差；**NOD 语义字段（op/dest/s1/s2/s3/tk）零差异**（节点序不变），唯 `first_edge`/`edge_count` 邻接域随动；STR/SYM/ENT/REG 四段逐字节不变。量级（旧前端→当前）：`CHAIN_SRC` 303→**329**（+26）· `PROBE_SRC` 298→322（+24，但 src 域期望集合未变——Task 3）· `ptr_arith` 293→**318**（+25；Task 1 时代为 317，Task 2 的 opcode 面 +1）· 无效应程序 `fn main()->int{return 42;}` 285→309（+24——**全部**来自编译内建的 runtime/builtin 函数体，该程序自身零调用）。归因（noeffect 逐 opcode）：新增入链目标 = `IR_CALL` +18 入边、`IR_STORE` +6 入边。**效应 opcode 清单唯一 = `purity_op_effect`**（新增 IR opcode 必须同步该处，否则链/纯度两判据漂移——D7 的机械保证）。
+
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
 来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：
@@ -459,6 +467,7 @@ corearch 恒空跑，零产物差异）。设计定稿 `docs/superpowers/specs/2
   - IR_LAZY_THUNK(46)/IR_LAZY_FORCE(47) 已存在（ast.cr:571）；ir_gen 在纯函数调用后包 THUNK（ir_gen.cr:1106），`force_if_thunk()` 在所有操作数位置发 FORCE
   - **但当前 thunk 不产生实际延迟**：IR_CALL 在 THUNK 之前已急切发射，ELF 后端（instr.cr:1091，注释明言 "Calls are currently emitted eagerly… typed value transfer"）和解释器（interp.cr:194）都按纯值搬运降级——语义上是 no-op，只保证输出不变
   - **use_count 时序问题**：`compute_usage_counts()`（dataflow.cr:325）在全部 ir_gen 之后才运行（dataflow.cr:381），而 THUNK 判定在 ir_gen 当时读 `g_var_use_count`（ir_gen.cr:1108）→ 判定时恒 0/未初始化，`use_count <= 1` 恒真，实际每个纯调用都被包——"单次使用"条件名存实亡
+  - **行号复核（2026-09-11，效应/纯度修正批 Task 4）**：上条的源码锚点为 2026-08-09 快照、已漂移——THUNK 判定现 `ir_gen.cr:1588-1599`（`fi_ispure` 读 `:1590`、`g_var_use_count` 读 `:1592`）；`compute_usage_counts()` 现 `dataflow.cr:405`（调用点 `:461`）。**本缺陷独立于效应/纯度批**：该批（#27）已把 `fi_ispure` 改为真计算，但**有意冻结**本节的 lazy 判定（`ir_gen.cr` 零改动 ⇒ 生成期读到的仍是 checker 的乐观默认值）且未动 use_count 时序 ⇒ 本缺陷保持未修，待独立批（含 ELF 判据重定——见 #26/#27）。
   - 无 `lazy()` 显式惰性内建（旧条目"共存策略"为过时信息；docs/lazy.md 明确"无关键字"）
   - 控制流级惰性（if/while/for 分支表达式）与循环体内条件性惰性均未实现——即本条目
 - 方向（2026-08-09 定为编译期指令下沉路线，不做运行时实现）：
@@ -475,7 +484,7 @@ corearch 恒空跑，零产物差异）。设计定稿 `docs/superpowers/specs/2
 ### 性能自动化（2026-08-30 记）
 
 - **自动并发**（auto-parallel，2026-08-30）：数据依赖 + state edges 已显式化 → 无依赖 region 的可并行性**可判定**（区别于传统自动并行化的依赖猜测——四十年失败史的根源）。算法：扫描图 → 找无依赖独立 region → 自动分派 goroutine（go/sched 机制已有）。与 R-HLS（IEEE 2024，RVSDG 动态调度）平行；「并发异步」= 8 项验证清单的实证场景。注意：并行粒度成本模型（调度开销 vs 收益）需启发式；起步 = 显式 go 保持 + safe 子集自动并行
-- **自动记忆化**（auto-memo，2026-08-30）：图显式纯度判定（无副作用边）→ 多次使用的纯节点自动缓存结果。与自动惰性同机制（惰性 = 延迟执行，memo = 缓存结果），可共用判定/下沉基础设施
+- **自动记忆化**（auto-memo，2026-08-30）：图显式纯度判定（无副作用边）→ 多次使用的纯节点自动缓存结果。与自动惰性同机制（惰性 = 延迟执行，memo = 缓存结果），可共用判定/下沉基础设施。**判定事实现状（2026-09-11 效应/纯度批后，见 #27）**：state 链判据面已覆盖全部保守效应——可证纯调用不入链；extern/spawn/yield/hotpatch/**间接调用 `IR_DYN_DISPATCH`**/裸指针写一律保守入链 ⇒ 「无副作用边 ⇒ 纯」不再有乐观常量漏洞（本批修的 P0 症状即「memo 会把可观测效应缓存掉」）。**消费侧注意**：若实现读 `fi_ispure` 旗标而非链边，须在 IR 生成之后读（`compute_all_purity` 写回后）——生成期该字段是冻结的乐观默认值（lazy 判定解耦，见「控制流自动惰性」节）。
 - **PGO 自动剖析**（pgo，2026-08-30）：编译器自动插桩收集热路径 → 自动内联/特化/字段布局。标准基础设施（LLVM 成熟路线），零用户标注
 - **自动向量化**（auto-vectorize，2026-08-30）：可向量化 region 检测 → SIMD 发射（hw-map 编码层落地后接入）。标准技术，优先级低
 - **自动内联**（auto-inline，2026-08-30）：热路径自动内联（PGO 配套）；`@inline` 显式保留
