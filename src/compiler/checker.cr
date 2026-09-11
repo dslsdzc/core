@@ -1323,6 +1323,27 @@ fn type_node_mentions_struct_param(si: int, tn: int) -> int {
 // 未识别 → "?"（不伪造名字）。
 fn type_display(ti: int) -> string {
     k := get_type_kind(ti);
+    // 泛型应用**先于** get_type_name 捷径处理（#29 评审 Minor #2）：后者对
+    // TYP_GENERIC_APPLY 只返回基名 ⇒ 实参全丢（「expected Box, got Box」——
+    // 真正不匹配的那个类型实参恰是读者最需要的），且使本函数下方的实参分支
+    // 成死码。此处展开成 `Box[int]` / `Pair[Box[int], string]` 形式。
+    if k == TYP_GENERIC_APPLY {
+        base := get_type_data(ti);
+        s : string, mut;
+        s = type_display(base);
+        s = s + "[";
+        start := get_type_extra(ti);
+        cnt := r64(g_gen_apply_data, start * 8);
+        i : ., mut = 0;
+        loop {
+            if i >= cnt { break; }
+            if i > 0 { s = s + ", "; }
+            s = s + type_display(r64(g_gen_apply_data, (start + 1 + i) * 8));
+            i = i + 1;
+        }
+        s = s + "]";
+        return s;
+    }
     ni := get_type_name(ti);
     if ni >= 0 { return istr_get(ni); }
     if k == TYP_ARRAY { return "[" + type_display(get_type_data(ti)) + "; " + int_str(get_type_extra(ti)) + "]"; }
