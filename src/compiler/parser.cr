@@ -455,8 +455,12 @@ fn parse_primary() -> int {
             // **不连续**（子树自占多槽），故必须分两趟：先解析全部字段值，再统建连续 wrapper。
             // 旧写法「逐值后随建 wrapper」交错分配：复合值子树夹在相邻 wrapper 之间 ⇒ 第 2 个
             // 起字段槽位整体错位，读到子节点（实测 P{a:11, b:g()} 的 b 静默得 0，rc=0）。
+            // TODO #29 ①：wrapper.b = 字段名 idx（**名字绑定**，-1 = 无名字信息）——旧代码取
+            // `fni` 后从未写入 ⇒ 值按声明位序绑定（P{b:11,a:22} 静默得 a=11）。名字随 wrapper
+            // 同行（与值并列的平行表，两趟结构不变，仍无交错分配）。
             cap : ., mut = 8;
             vals : string, mut = alloc(cap * 8);
+            names : string, mut = alloc(cap * 8);
             fc : ., mut = 0;
             loop {
                 // EOF 护栏（TODO #16 根因面）：本循环只认 `}`，而 advance_tok 在 EOF 是空操作
@@ -471,9 +475,13 @@ fn parse_primary() -> int {
                     nv := alloc(ncap * 8);
                     _dyncpy(vals, cap * 8, nv);
                     vals = nv;
+                    nn := alloc(ncap * 8);
+                    _dyncpy(names, cap * 8, nn);
+                    names = nn;
                     cap = ncap;
                 }
                 w64(vals, fc * 8, parse_expr());  // 字段值（子树自占若干槽）
+                w64(names, fc * 8, fni);          // 字段名 idx（① 名字绑定）
                 fc = fc + 1;
                 if check(T_COMMA) { advance_tok(); }
             }
@@ -486,7 +494,7 @@ fn parse_primary() -> int {
                 ln : ., mut = tok_ln(t);
                 cl : ., mut = tok_cl(t);
                 if vn >= 0 { ln = ast_line(vn); cl = ast_col(vn); }
-                wl := ast_alloc(EXPR_NONE, vn, 0, 0, 0, 0, 0, ln, cl);
+                wl := ast_alloc(EXPR_NONE, vn, r64(names, fi2 * 8), 0, 0, 0, 0, ln, cl);
                 if fi2 == 0 { ff = wl; }
                 fi2 = fi2 + 1;
             }

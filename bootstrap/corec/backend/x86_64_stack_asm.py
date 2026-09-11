@@ -505,13 +505,20 @@ class X86_64StackAsmGen:
         for blk in blocks:
             if blk != func.entry:
                 self.emit(f"{blk.name}:")
+            # TODO #29 附带修复：ReturnInstr 是**块终结符**——其后同块指令是死代码，既不得
+            # 继续发射（否则其 `mov rax, ...` 会把该函数返回值覆盖成**最后**一个 return 的
+            # 值：死代码赢，静默错值——实测 checker.cr 的 unify_types `return true; return
+            # false;` 被编成恒返 false），也不得让执行流落入下一个块。修复前仅在「块的最后
+            # 一条恰好是 return」时补 epilogue，同块双 return 即命中。
+            returned_in_block = False
             for instr in blk.instrs:
                 self.gen_instr(instr)
-            # If block ends with a ReturnInstr, emit epilogue immediately
-            # (otherwise execution would fall through to the next block)
-            last_block_had_return = self._block_ends_with_return(blk)
-            if last_block_had_return:
-                self._emit_epilogue(func.name)
+                if isinstance(instr, ReturnInstr):
+                    # 块终结：补 epilogue 后停止发射（否则执行流落入下一个块）
+                    self._emit_epilogue(func.name)
+                    returned_in_block = True
+                    break
+            last_block_had_return = returned_in_block
 
         # Only emit final epilogue if the last block didn't already return
         if not last_block_had_return:
@@ -529,11 +536,6 @@ class X86_64StackAsmGen:
                 self.emit(f"    add rsp, {self.stack_size}")
             self.emit("    pop rbp")
             self.emit("    ret")
-
-    def _block_ends_with_return(self, blk: BasicBlock) -> bool:
-        if not blk.instrs:
-            return False
-        return isinstance(blk.instrs[-1], ReturnInstr)
 
     def gen_instr(self, instr):
         if isinstance(instr, ConstInstr): self.gen_constant(instr)

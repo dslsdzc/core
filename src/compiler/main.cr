@@ -139,6 +139,10 @@ fn run_frontend() -> int {
     // Only parse errors and resolver errors are fatal.
     // 例外（F2）：编译期确定的常量索引越界（R002）与字面量切片界越界（TK05/TK06）
     // 是硬错误——拦截编译（修复前静默生成越界二进制）。
+    // 例外（TODO #29）：聚合字面量三校验（TS01-04 + TK02）同为硬错误——修复前全部 rc=0
+    // 静默通过并照常产出二进制：未知字段/缺字段 ⇒ 字段从未被写入（读到垃圾值）、字段类型
+    // 不匹配 ⇒ 按错宽度存（静默错值）、数组元素异质 ⇒ 类型随末元素漂移（soundness 漏放）。
+    // 判定继续 = 产出**静默错产物**，与 R002 同类。
     if g_diag_count > 0 {
         hard : ., mut = 0;
         di : ., mut = 0;
@@ -146,6 +150,8 @@ fn run_frontend() -> int {
             if di >= g_diag_count { break; }
             ec := r64(g_diags, di * DIAG_REC_SIZE);
             if ec == EC_R_OOB || ec == EC_TK_SLICE_BOUNDS || ec == EC_TK_SLICE_LEN { hard = 1; }
+            if ec == EC_TS_MISSING_FIELD || ec == EC_TS_UNKNOWN_FIELD || ec == EC_TS_FIELD_TYPE || ec == EC_TS_FIELD_DUP { hard = 1; }
+            if ec == EC_TK_ELEM_TYPE { hard = 1; }
             di = di + 1;
         }
         print_diagnostics();

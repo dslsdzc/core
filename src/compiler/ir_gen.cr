@@ -2087,18 +2087,28 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
         // F5 契约（见 parser.cr struct 分支）：a=name idx、b=首 wrapper（连续）、c=字段数；
         // wrapper.a=字段值节点（gen_expr 对 EXPR_NONE 前向）。逐 wrapper 解引用，不得按偏移
         // 直取相邻节点当字段值——复合字段值子树占多槽会错位（静默错误值）。
+        // TODO #29 ①（名字绑定）：wrapper.b=字段名 idx（parser 写入；-1 = 无名字信息 → 位序
+        // 回落）。**存字段位按名字解出**（与 Python bootstrap 的 gen_struct_lit 同语义）——
+        // 修复前按 wrapper 序直取 fi = 声明位序绑定 ⇒ P{b:11, a:22} 静默得 a=11。发出顺序
+        // 仍是**源序**（求值顺序 = 源码书写顺序，与 bootstrap 一致）。
         name_ni := ast_a(node);
         s := new_ir_var("struct", TI_UNIT);
         emit(IR_ALLOC_STRUCT, s, 0, 0, name_ni, 0);
+        si := find_struct_by_name(name_ni);
         fi : ., mut = 0;
         fn2 : ., mut = ast_b(node);
         loop {
             if fi >= ast_c(node) { break; }
             if fn2 >= 0 {
-                // fn2 = wrapper node (kind=EXPR_NONE, a=value expr)
+                // fn2 = wrapper node (kind=EXPR_NONE, a=value expr, b=field name idx)
                 val_var := gen_expr(fn2);
                 val_var = force_if_thunk(val_var);
-                field_idx := fi;
+                field_idx : ., mut = fi;
+                nn := ast_b(fn2);
+                if si >= 0 && nn >= 0 {
+                    jdi := struct_field_index_by_name(si, nn);
+                    if jdi >= 0 { field_idx = jdi; }
+                }
                 emit(IR_STORE_FIELD, -1, s, val_var, field_idx, 0);
                 fn2 = fn2 + 1;
             }

@@ -279,25 +279,30 @@ fn gen_clone_tree(node: int) -> int {
     if k == EXPR_LET { b2 := gen_clone_tree(b); c2 := gen_clone_tree(c); n := ast_alloc(k, a, b2, c2, iv, tv, d, ln, cl); gen_dedup_add(node, n); return n; }
 
     // ── EXPR_STRUCT: a=type_name_ni(NOT), b=first wrapper(YES, consecutive), c=field_count(NOT)；
-    //    wrapper.a = field value node（F5 契约，见 parser.cr struct 字面量分支）──
+    //    wrapper.a = field value node、wrapper.b = 字段名 idx（TODO #29 ①；-1 = 无名字信息）
+    //    （F5 契约，见 parser.cr struct 字面量分支）──
     if k == EXPR_STRUCT {
         if b >= 0 && c > 0 {
             // 字段值先逐个深克隆（各自子树自占槽位），再统建连续 wrapper——
             // 不得「克隆值后随建 wrapper」逐元素交错：wrapper 将不连续（与 parser 同契约）。
+            // **名字随克隆保留**（#29 ①）：实例体里的字段绑定仍按名字（源序 ≠ 声明序时，
+            // 丢名字会让 ir_gen 回落位序 ⇒ 静默错值——正是 #29 要消灭的类）。
             nvs : string, mut = alloc(c * 8);
+            nms : string, mut = alloc(c * 8);
             i : ., mut = 0;
             loop {
                 if i >= c { break; }
                 vn : ., mut = -1;
                 if b + i >= 0 { vn = ast_a(b + i); }
                 w64(nvs, i * 8, gen_clone_tree(vn));
+                w64(nms, i * 8, ast_b(b + i));
                 i = i + 1;
             }
             new_first := g_ast_count;
             i = 0;
             loop {
                 if i >= c { break; }
-                ast_alloc(EXPR_NONE, r64(nvs, i * 8), 0, 0, 0, 0, 0, ln, cl);
+                ast_alloc(EXPR_NONE, r64(nvs, i * 8), r64(nms, i * 8), 0, 0, 0, 0, ln, cl);
                 i = i + 1;
             }
             n := ast_alloc(k, a, new_first, c, iv, tv, d, ln, cl);

@@ -308,13 +308,15 @@
 - **本族剩余面（发现即登记，未修）**：① **struct 字面量字段名被丢弃**——parser 取 `fni` 后从未写入（值按**声明位序**绑定）：`P{b: 11, a: 22}` 静默得 `a=11,b=22`（rc=0 静默错值），字段名/顺序校验、缺字段均不存在；② **struct 字面量字段类型不比对声明**：`P{a: 1, b: "x"}`（b: int）、`P{a: 1}`（缺 b）、`P{a: 1, b: 3}`（b: Q 结构体）全部 rc=0 静默通过；③ **数组元素同质性不检查**：`[1, "x", 3]` rc=0；④ **struct 模式绑定未实现**（`P{a: x}` 中 `x` 报 N01 未定义——checker 对 `EXPR_STRUCTPAT` 直接返 `TI_UNIT`、ir_gen 返 -1）⇒ 模式分支的槽位修复为防御性，无可观测行为变化。以上四项另立条目。
 
 ### 29. F5 同族剩余面（#28 修复时发现即登记，2026-09-11——struct/数组字面量的「名 / 型 / 同质性」三校验全缺 + struct 模式绑定未实现）
-- **现象（全部 rc=0 静默；RED 由 #28 实现者实测）**：
-  ① **struct 字段名被丢弃** —— parser 取 `fni` 后从未写入，字面量值按**声明位序**绑定：`P{b: 11, a: 22}` 静默得 `a=11, b=22`（**静默错值**级，字段名/顺序校验、缺字段检测均不存在）；
-  ② **字段类型不与声明比对** —— `P{a: 1, b: "x"}`（b 声明为 int）、`P{a: 1}`（缺 b）、`P{a: 1, b: 3}`（b 声明为 Q 结构体）**全部 rc=0 静默通过**；
-  ③ **数组元素同质性不检查** —— `[1, "x", 3]` rc=0；
-  ④ **struct 模式绑定未实现** —— `P{a: x}` 中 `x` 报 N01 未定义（checker 对 `EXPR_STRUCTPAT` 直接返 `TI_UNIT`、ir_gen 返 -1）⇒ #28 的模式分支修复为防御性、无观测变化。
-- **修复方向**：①②③ = checker 侧补齐（字段名/顺序/完整性检查 + 字段类型走 `type_compat_strict`/`type_equal` 判定 + 数组元素同质判定），诊断须**定位 + 非静默**（rc≥1）；④ = 独立特性（模式绑定），需 checker + ir_gen 联动，`EXPR_STRUCTPAT` 的槽位契约已由 #28 对齐。
-- **判据建议**：三条负控（各报定位诊断且 rc≠0）+ 正控（正确写法仍 rc=0）+ ELF / `.ccr` 逐字节 + 全回归（照 #28 的 `tests/selfhost/test_agg_slots.py` 风格扩例）。
+- **✅ ①②③ 已修（2026-09-11；工作区报告 `.superpowers/sdd/fix-agg29-report.md`）**：
+  · **① 名字绑定** —— parser 把字段名 idx 写入 **wrapper.b**（EXPR_STRUCT 契约：`wrapper.a`=值节点、`wrapper.b`=名字 idx，**-1 = 无名字信息 → 位序回落**；与值并列的平行名字表，两趟结构不变、仍无交错分配）。字段值**按名字绑定**（与 Python bootstrap 的 `gen_struct_lit` 同语义）：checker 解出「字面量字段 i → 声明下标 j」（`struct_field_index_by_name`），ir_gen 同一解算落 `IR_STORE_FIELD`，求值顺序仍为**源序**（实测 `P{b:nx(), a:nx()}` = 201 = b 先求值）。monomorph 克隆**保留 wrapper.b**（丢名字 ⇒ 实例体回落位序 = 静默错值，与 #29 同类）。
+  · **② 三校验 + 类型比对** —— 未知字段 `TS02` / 重复字段 `TS04` / 缺字段 `TS01`（只报首个）/ 字段类型 vs 声明 `TS03`（判定走 `type_compat_strict` + `diag_type_incompatible`，与赋值同一引擎，站点 9）。**两侧任一含未实例化泛型参数（`TYP_GENERIC_PARAM`，含嵌套）→ 跳过比对**（不假拒：泛型函数体 `fn f[T](x: T){ p := P{a:1,b:x}; }` 的值类型是 T）；字段声明类型提及结构体泛型参数（`T` / `[T;3]` / `Box[T]`）→ 跳过比对、走参数绑定（`unify_types`）。**附带修正**：泛型结构体字面量的 `TYP_GENERIC_APPLY` 实参改按**参数声明序**取（旧代码按字面量字段序 ⇒ 双参数且字段序 ≠ 参数序时实参错位）。
+  · **③ 元素同质性** —— 元素类型取**首**元素（旧代码逐个覆盖 = 随**末**元素漂移），后续逐个比对 `TK02`（站点 10），同样带泛型参数跳过门。
+  · **硬错误门（非静默的必要条件）**：`TS01-04` + `TK02` 入 `run_frontend` 硬错误名单（与 R002/TK05/TK06 同类）——修复前这些字面量即便报错也照常产出二进制：未知/缺字段 ⇒ 字段从未写入（读垃圾值）、错型 ⇒ 按错宽度存、异质数组 ⇒ 类型漂移（soundness 漏放）。现 rc=1 且**无产物**。
+- **④ struct 模式绑定仍未实现**（独立特性，需 checker + ir_gen 联动；`EXPR_STRUCTPAT` 槽位契约已由 #28 对齐）——本任务范围外，保持原状。
+- **附带修复（发现即修，本条提交）：bootstrap 后端 `return` 非块终结符** —— `bootstrap/corec/backend/x86_64_stack_asm.py` 仅在「块的最后一条指令恰是 ReturnInstr」时补 epilogue：**同块双 return**（return 后跟死代码）时两条 `mov rax, ...` 都发射、只在末尾退出 ⇒ 返回值 = **最后一个** return 的值（死代码赢，静默错值）。实测命中 `checker.cr` 的 `unify_types`（`return true; return false;` 被编成**恒返 false**）——此函数返回值此前**无人使用**（`infer_gen_call` 丢弃返回值、递归点从未触发）故长期潜伏；#29 的泛型绑定判定首次消费其返回值即暴露（`Box{val=100}` 被误判 TS03）。修复 = ReturnInstr 视为**块终结符**（发射 epilogue 后停止发射同块余下指令）。全 `build/corec.s` 扫描：命中面恰此 1 处。
+- **判据（实测，均在冷缓存下）**：`tests/selfhost/test_agg_checks.py` **17/17**（值 7：名字绑定主判据 / 源序副作用 / 三字段逆序 / 乱序+嵌套字面量 / 泛型 Pair 乱序 / 双参数字段序≠参数序 / 泛型函数体经 monomorph 克隆；类型 10：负 7（TS02+TS01 / TS04 / TS01 / TS03 int←string / TS03 Q←int / TK02 扁平 / TK02 嵌套，均验 rc≠0 + 码 + **无产物** + 定位）/ 正 3）+ `src/ci/run.sh` selfhost-tests 挂钩；`selftest-types` 95/95 · `test_compile` PASS · `test_purity` PASS · `test_agg_slots` 13/13 · `test_tuple_slots` 14/14 · `test_ccr_v7` 27/27 · selfhost 其余 7 套（impl/borrow/pointer_safety/params_limit/nested_fn/interp_parity/cache_identity/backend_bootstrap）全绿 · bootstrap 三套 29/29+4/4+3/3 · `tests/suite` 21 语料 ALL PASS（**generics_test.cr 是本次唯一被新检查拦下的现存语料**——见附带修复：它是 `Box { val = 100 }` 被误拒，属修复前潜伏的 bootstrap 误编译面，非新检查过严）· ELF canary `ptr_arith` = `95084e7b…d475` **IDENTICAL** · 三阶段自举 corec2 ≡ corec3 逐字节。
+- **`.ccr`/形状面**：名字随 wrapper 携带**不改变 IR 发射**（消费者解算后字段位与修复前同名同序写法完全一致）——ELF 逐字节 canary 与三阶段自举逐字节为证。
 
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 

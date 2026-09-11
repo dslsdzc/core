@@ -172,7 +172,7 @@
 | 码 | 检查点 | 消息模板 |
 |----|--------|---------|
 | TK01 | 下标索引非数组 | `Cannot index type {T}` |
-| TK02 | 数组元素类型不一致 | `Expected array element type {T1}, got {T2}` |
+| TK02 | 数组元素类型不一致（2026-09-11 TODO #29 起字面量处**实现**：元素类型取首元素，后续逐个比对；硬错误） | `Expected array element type {T1}, got {T2}` |
 | TK03 | 数组大小不是整数 | `Array size must be `int`` |
 | TK04 | 数组大小为负数 | `Array size must be positive, got {size}` |
 | TK05 | 切片越界 | `Slice start {N} is out of bounds (length {L})` |
@@ -181,6 +181,10 @@
 | TK08 | `for` 迭代变量与元素类型不匹配 | ``for` variable type {T1} does not match element type {T2}` |
 
 ## TS0xx — 类型检查：结构体字面量
+
+> 四码自 2026-09-11（TODO #29）起**全部实现**并列入 run_frontend 硬错误名单（rc=1 且不产出
+> 产物）：修复前字段名被丢弃（值按声明位序绑定 = 静默错值），四校验均不存在。字段值现按
+> **名字**绑定（与 Python bootstrap 的 gen_struct_lit 同语义；求值顺序仍为源序）。
 
 | 码 | 检查点 | 消息模板 |
 |----|--------|---------|

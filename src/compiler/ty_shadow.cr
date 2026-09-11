@@ -250,7 +250,7 @@ fn sh_map_hits() -> int { return g_shadow_hits; }
 fn sh_map_entries() -> int { return g_shadow_entries; }
 
 // ═══════════════ R2 P1 Task 2：影子判定挂点 + 分类计数 + 摘要/转储 ═══════════════
-// 站点 id ↔ 语义（checker.cr **8 个外部决策点**，id 按行号升序赋值；挂点 = 调用前
+// 站点 id ↔ 语义（checker.cr **10 个外部决策点**（#29 前为 8），id 按行号升序赋值；挂点 = 调用前
 // sh_site_begin(id)，见 checker.cr 对应行的行内注记）：
 //   1 = checker.cr:728（计划期 :711）hotpatch 返回类型一致（collect_decls，rt_ti vs first_rt_ti）
 //   2 = checker.cr:965（计划期 :947）unify_types 泛型实参已绑定路径（g_gen_map 命中 → 实参 vs 具体型）
@@ -260,7 +260,10 @@ fn sh_map_entries() -> int { return g_shadow_entries; }
 //   6 = checker.cr:1427（计划期 :1405）赋值兼容（infer_expr 的 EXPR_BINARY + OP_ASSIGN；**当前 parser 已无生产点 = 遗留路径，无样本**）
 //   7 = checker.cr:1819（计划期 :1796）if 分支类型合并（infer_expr 的 EXPR_IF）
 //   8 = checker.cr:2152（计划期 :2127）赋值兼容（infer_expr 的 EXPR_ASSIGN 节点）
-// 行号双列：落地后（Task 2 增 16 行）+ 计划期（与 plan/brief 对读用），两列同源同点。
+//   9 = checker.cr EXPR_STRUCT（TODO #29 ②；行号随 #29 落位漂移，按分支名锚定）struct 字面量字段类型 vs 声明
+//  10 = checker.cr EXPR_ARRAY（TODO #29 ③）数组字面量元素同质性（首元素类型 vs 后续元素）
+// 行号双列：落地后（Task 2 增 16 行）+ 计划期（与 plan/brief 对读用），两列同源同点；9/10 为
+// #29 增站点（+2 → 全表 10 个外部决策点），行号不再回填（锚点 = 分支名）。
 // **实读勘误**（计划骨架的站位标签）：骨架写「3 match 模式 / 8 索引」——实读不符：
 // match 模式路径不经 type_equal（8 个外部点无一是 match_*），:2127 落在 EXPR_ASSIGN 分支
 // 而非索引分支。上表为实读结论。
@@ -272,7 +275,7 @@ fn sh_count_old_stricter() -> int { return g_shadow_old_stricter; }
 fn sh_count_old_looser() -> int { return g_shadow_old_looser; }
 fn sh_count_unknown() -> int { return g_shadow_unknown; }
 
-// 站点标注（在 8 个外部决策点调用 type_equal 前紧邻落）。**8 个站点无条件调用本函数**
+// 站点标注（在 10 个外部决策点调用 type_equal 前紧邻落；#29 增站点 9/10）。**各站点无条件调用本函数**
 // （挂点在决策点上，不在 type_equal 包装内——包装只挡 sh_compare）→ 关态若不守卫，每次
 // 判定都多一次调用 + 一次性 64B alloc（直方图缓冲）+ 计数 RMW。故首行按 g_shadow_on 早退
 // （M3，Task 3 评审实证：原注释「影子关时 wrapper 不调本函数」**不成立**）；早退后关态
@@ -282,10 +285,10 @@ fn sh_count_unknown() -> int { return g_shadow_unknown; }
 fn sh_site_begin(site: int) {
     if g_shadow_on == 0 { return; }
     g_shadow_site = site;
-    if site < 1 || site > 8 { return; }
+    if site < 1 || site > 10 { return; }
     if g_shadow_site_cap <= 0 {
-        g_shadow_site_counts = alloc(8 * 8);
-        g_shadow_site_cap = 8;
+        g_shadow_site_counts = alloc(10 * 8);
+        g_shadow_site_cap = 10;
     }
     off : ., mut = (site - 1) * 8;
     w64(g_shadow_site_counts, off, r64(g_shadow_site_counts, off) + 1);
@@ -358,6 +361,8 @@ fn sh_site_name(s: int) -> string {
     if s == 6 { return "assign-binary"; }
     if s == 7 { return "if-branch"; }
     if s == 8 { return "assign-node"; }
+    if s == 9 { return "struct-field-type"; }
+    if s == 10 { return "array-elem-type"; }
     return "?";
 }
 
@@ -409,7 +414,7 @@ fn sh_report() -> int {
     print("[type-shadow-sites]");
     si : ., mut = 0;
     loop {
-        if si >= 8 { break; }
+        if si >= 10 { break; }
         print(" ");
         print(sh_site_name(si + 1));
         print("=");

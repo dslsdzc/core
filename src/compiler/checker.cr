@@ -413,7 +413,7 @@ fn diag_type_incompatible(verdict: int, code: int, what: string, line: int, col:
 //   ② 引擎三态返回 -1（未知）或桥接失败时的**回落实现**（unknown 政策：不得静默当 0/1）。
 //   **P5 删**（引擎覆盖面补齐、unknown 清零后）。
 // 内部 6 处递归调用点（数组/元组/引用/指针/切片/泛型应用）指向本名，**不**经包装 → 影子只在
-// 8 个外部决策点取样一次/次调用（递归展开不重复计数）。
+// 外部决策点（#29 前 8、现 10——增站点 9/10）取样一次/次调用（递归展开不重复计数）。
 // F2（Task 2）后数组分支已 **N-free**（N 迁出类型身份）——与引擎侧一致；长度面走
 // array_len_constraint_ok（判定点显式补检），本函数**不得**再引回 N 比较（Task 2/3 评审裁决）。
 fn type_equal_legacy(t1: int, t2: int) -> bool {
@@ -1220,6 +1220,105 @@ fn find_func(name_idx: int) -> int {
         i = i + 1;
     }
     return -1;
+}
+
+// ─── TODO #29 ①②：struct 字面量的名字绑定 / 类型比对 辅助 ───
+
+// 字段名 idx → 声明下标（-1 = 该名字不在声明中）。名字 idx 来自 parser 写入的 wrapper.b
+// （EXPR_STRUCT 契约，见 ast.cr / parser.cr struct 字面量分支）。
+fn struct_field_index_by_name(si: int, name_ni: int) -> int {
+    if si < 0 || name_ni < 0 { return -1; }
+    j : ., mut = 0;
+    loop {
+        if j >= si_field_count(si) { return -1; }
+        if si_field_name(si, j) == name_ni { return j; }
+        j = j + 1;
+    }
+    return -1;
+}
+
+// 类型里是否**仍含未实例化的泛型参数**（TYP_GENERIC_PARAM，可嵌套在数组 / 指针 / 引用 /
+// 切片 / 元组 / 泛型应用内）。字面量的「字段类型 vs 声明」「元素同质性」判定在**任一侧**
+// 含未实例化参数时**跳过**——参数未实例化时比较不成立，强行比较 = 假拒（实测泛型函数体
+// `fn f[T](x: T) { p := P{a: 1, b: x}; }`：x 的类型是 T，与声明的 int 比较必假）。参数实例化
+// 由 monomorph 负责，此判定不越权。
+fn ti_has_generic_param(ti: int) -> int {
+    k := get_type_kind(ti);
+    if k < 0 { return 0; }
+    if k == TYP_GENERIC_PARAM { return 1; }
+    if k == TYP_ARRAY || k == TYP_PTR || k == TYP_REF || k == TYP_SLICE {
+        return ti_has_generic_param(get_type_data(ti));
+    }
+    if k == TYP_TUPLE {
+        cnt := get_type_data(ti);
+        st := get_type_extra(ti);
+        i : ., mut = 0;
+        loop {
+            if i >= cnt { break; }
+            if ti_has_generic_param(r64(g_gen_apply_data, (st + i) * 8)) != 0 { return 1; }
+            i = i + 1;
+        }
+        return 0;
+    }
+    if k == TYP_GENERIC_APPLY {
+        st := get_type_extra(ti);
+        cnt := r64(g_gen_apply_data, st * 8);
+        i : ., mut = 0;
+        loop {
+            if i >= cnt { break; }
+            if ti_has_generic_param(r64(g_gen_apply_data, (st + 1 + i) * 8)) != 0 { return 1; }
+            i = i + 1;
+        }
+        return 0;
+    }
+    return 0;
+}
+
+// 字段**声明类型节点**是否提及本结构体的泛型参数（`T` / `[T; 3]` / `Box[T]` …）。提及 =
+// 该字段的声明类型在字面量处**无法静态解析**：结构体泛型参数在字面量作用域不在名字表里，
+// res_type_node 会把 `T` 误解析成名为 "T" 的具名类型 → 与实参比较必假（假拒）。故这些字段
+// 的类型比对跳过；参数本身走绑定路径（is_struct_generic 判定，见 EXPR_STRUCT 分支）。
+fn type_node_mentions_struct_param(si: int, tn: int) -> int {
+    if tn < 0 || si < 0 { return 0; }
+    k := ast_kind(tn);
+    if k == EXPR_IDENT {
+        if is_struct_generic(si, ast_int_val(tn)) { return 1; }
+        return 0;
+    }
+    if k == EXPR_ARRAY || k == EXPR_REFTYPE || k == EXPR_PTRTYPE {
+        return type_node_mentions_struct_param(si, ast_a(tn));
+    }
+    if k == EXPR_GENERIC_APPLY {
+        if is_struct_generic(si, ast_a(tn)) { return 1; }
+        cnt := ast_c(tn);
+        an : ., mut = ast_b(tn);
+        i : ., mut = 0;
+        loop {
+            if i >= cnt { break; }
+            if an >= 0 {
+                if type_node_mentions_struct_param(si, an) != 0 { return 1; }
+            }
+            an = an + 1;
+            i = i + 1;
+        }
+        return 0;
+    }
+    return 0;
+}
+
+// 类型展示名（诊断措辞用）：具名/基型/泛型应用基名走 get_type_name，其余构造子递归拼装。
+// 未识别 → "?"（不伪造名字）。
+fn type_display(ti: int) -> string {
+    k := get_type_kind(ti);
+    ni := get_type_name(ti);
+    if ni >= 0 { return istr_get(ni); }
+    if k == TYP_ARRAY { return "[" + type_display(get_type_data(ti)) + "; " + int_str(get_type_extra(ti)) + "]"; }
+    if k == TYP_SLICE { return "[" + type_display(get_type_data(ti)) + "]"; }
+    if k == TYP_PTR { return "*" + type_display(get_type_data(ti)); }
+    if k == TYP_REF { return "&" + type_display(get_type_data(ti)); }
+    if k == TYP_GENERIC_PARAM { return istr_get(get_type_data(ti)); }
+    if k == TYP_DYN { return "dyn"; }
+    return "?";
 }
 
 fn is_struct_generic(si: int, name_idx: int) -> bool {
@@ -2513,76 +2612,190 @@ fn infer_expr(node: int) -> int {
         // F5 契约（见 parser.cr struct 分支）：wrapper 在 g_ast 中连续、wrapper.a=字段值节点；
         // 逐 wrapper 解引用（infer_expr 对 EXPR_NONE 前向）——直接按偏移取「下一个节点」当字段值
         // 只在字段值单槽时成立，复合字段值（调用/字面量）会整体错位（静默错误值）。
+        // TODO #29 ①②（名字绑定 + 类型比对）：wrapper.b = 字段名 idx（parser 写入；-1 = 无名字
+        // 信息 → 不校验、按既有位序语义回落）。新增 = 未知字段（TS02）/ 重复字段（TS04）/
+        // 缺字段（TS01）三校验 + 字段类型 vs 声明比对（TS03，走 type_compat_strict 引擎判定）。
+        // **值按名字绑定**（与 Python bootstrap 的 gen_struct_lit 同语义；名字 → 声明下标，
+        // 消费者 ir_gen 同步按名字取字段位）：修复前值按**声明位序**绑定 ⇒ P{b:11, a:22} 静默
+        // 得 a=11（静默错值级，rc=0）。
         name_ni := ast_a(node);
-        // Check if struct is generic
         si := find_struct_by_name(name_ni);
-        if si >= 0 && si_generic_count(si) > 0 {
-            // Generic struct: infer concrete types from field values
-            g_gen_map_count = 0; g_gen_map_cap = 0;
-            fi : ., mut = 0;
-            fn2 : ., mut = ast_b(node);
+        c := ast_c(node);
+        w0 := ast_b(node);
+        // 名字信息齐备？（parser 恒写；克隆体丢名字 → 回落位序、不做名字类校验）
+        named : ., mut = 0;
+        if w0 >= 0 && c > 0 {
+            named = 1;
+            ni2 : ., mut = 0;
             loop {
-                if fi >= ast_c(node) { break; }
-                if fi < si_field_count(si) && fn2 >= 0 {
-                    field_val_ti := infer_expr(fn2);
-                    orig_type_node := si_field_type_node(si, fi);
-                    if orig_type_node >= 0 {
-                        if ast_kind(orig_type_node) == EXPR_IDENT {
-                            // Check if field type is a generic param
-                            field_name_idx := ast_int_val(orig_type_node);
-                            if is_struct_generic(si, field_name_idx) {
-                                grow_gen_map(g_gen_map_count + 1);
-                                w64(g_gen_map_names, g_gen_map_count * 8, field_name_idx);
-                                w64(g_gen_map_types, g_gen_map_count * 8, field_val_ti);
-                                g_gen_map_count = g_gen_map_count + 1;
+                if ni2 >= c { break; }
+                if ast_b(w0 + ni2) < 0 { named = 0; break; }
+                ni2 = ni2 + 1;
+            }
+        }
+        // didx[i] = 字面量第 i 个字段 → 声明字段下标（默认位序 = 无名字信息时的既有语义）
+        didx : string, mut = alloc((c + 1) * 8);
+        i : ., mut = 0;
+        loop {
+            if i >= c { break; }
+            w64(didx, i * 8, i);
+            i = i + 1;
+        }
+        if si >= 0 && (named != 0 || c == 0) {
+            // ── 名字 → 声明下标：未知字段 / 重复字段 / 缺字段 ──
+            fc := si_field_count(si);
+            used : string, mut = alloc((fc + 1) * 8);
+            j : ., mut = 0;
+            loop {
+                if j >= fc { break; }
+                w64(used, j * 8, 0);
+                j = j + 1;
+            }
+            if named != 0 {
+                i = 0;
+                loop {
+                    if i >= c { break; }
+                    nn := ast_b(w0 + i);
+                    jdi := struct_field_index_by_name(si, nn);
+                    if jdi < 0 {
+                        check_error(EC_TS_UNKNOWN_FIELD, "Unknown field '" + istr_get(nn) + "' in struct literal " + istr_get(name_ni), ast_line(w0 + i), ast_col(w0 + i));
+                    } else {
+                        if r64(used, jdi * 8) != 0 {
+                            check_error(EC_TS_FIELD_DUP, "Field '" + istr_get(nn) + "' initialized more than once", ast_line(w0 + i), ast_col(w0 + i));
+                        }
+                        w64(used, jdi * 8, 1);
+                        w64(didx, i * 8, jdi);
+                    }
+                    i = i + 1;
+                }
+            }
+            j = 0;
+            loop {
+                if j >= fc { break; }
+                if r64(used, j * 8) == 0 {
+                    // 只报第一个缺字段（同一程序员错误不刷屏）
+                    check_error(EC_TS_MISSING_FIELD, "Missing field '" + istr_get(si_field_name(si, j)) + "' in struct literal " + istr_get(name_ni), ast_line(node), ast_col(node));
+                    break;
+                }
+                j = j + 1;
+            }
+        }
+        // ── 值类型逐个推断（一次/字段：infer_expr 有副作用，勿重复推断；结构体名未找到时
+        //    也要推断——嵌套诊断/dyn 记录等副作用在此，旧行为不可丢）──
+        vts : string, mut = alloc((c + 1) * 8);
+        i = 0;
+        loop {
+            if i >= c { break; }
+            if w0 >= 0 { w64(vts, i * 8, infer_expr(w0 + i)); }
+            i = i + 1;
+        }
+        if si >= 0 {
+            gc := si_generic_count(si);
+            if gc > 0 {
+                // ── 泛型结构体：字段类型 = 泛型参数 → 绑定（重复绑定走 unify 已绑定路径比对）──
+                g_gen_map_count = 0; g_gen_map_cap = 0;
+                i = 0;
+                loop {
+                    if i >= c { break; }
+                    jdi := r64(didx, i * 8);
+                    if jdi >= 0 && jdi < si_field_count(si) {
+                        dtn := si_field_type_node(si, jdi);
+                        if dtn >= 0 && ast_kind(dtn) == EXPR_IDENT && is_struct_generic(si, ast_int_val(dtn)) {
+                            pt := alloc_type(TYP_GENERIC_PARAM, ast_int_val(dtn), 0);
+                            if !unify_types(pt, r64(vts, i * 8)) {
+                                check_error(EC_TS_FIELD_TYPE, "Field '" + istr_get(si_field_name(si, jdi)) + "': expected " + istr_get(ast_int_val(dtn)) + ", got " + type_display(r64(vts, i * 8)), ast_line(w0 + i), ast_col(w0 + i));
                             }
                         }
                     }
-                    fn2 = fn2 + 1;
+                    i = i + 1;
                 }
-                fi = fi + 1;
             }
-            // Create TYP_GENERIC_APPLY for this struct
-            base_ti := alloc_named_type(name_ni);
-            ds := g_gen_apply_data_count;
-            grow_gen_apply_data(ds + 1 + g_gen_map_count);
-            w64(g_gen_apply_data, ds * 8, g_gen_map_count);
-            g_gen_apply_data_count = ds + 1;
-            mi : ., mut = 0;
+            // ── 非参数声明类型：值类型 vs 声明类型比对（两侧任一含未实例化泛型参数 → 跳过）──
+            i = 0;
             loop {
-                if mi >= g_gen_map_count { break; }
-                w64(g_gen_apply_data, (ds + 1 + mi) * 8, r64(g_gen_map_types, mi * 8));
-                mi = mi + 1;
+                if i >= c { break; }
+                jdi := r64(didx, i * 8);
+                if jdi >= 0 && jdi < si_field_count(si) {
+                    dtn := si_field_type_node(si, jdi);
+                    is_param : ., mut = 0;
+                    if dtn >= 0 && ast_kind(dtn) == EXPR_IDENT && is_struct_generic(si, ast_int_val(dtn)) { is_param = 1; }
+                    if is_param == 0 && type_node_mentions_struct_param(si, dtn) == 0 {
+                        vt := r64(vts, i * 8);
+                        if ti_has_generic_param(vt) == 0 {
+                            dt := res_type_node(dtn);
+                            if ti_has_generic_param(dt) == 0 {
+                                sh_site_begin(9);   // 站点 9 = struct 字面量字段类型 vs 声明
+                                verdict := type_compat_strict(dt, vt);
+                                if verdict != 1 {
+                                    diag_type_incompatible(verdict, EC_TS_FIELD_TYPE, "Field '" + istr_get(si_field_name(si, jdi)) + "': expected " + type_display(dt) + ", got " + type_display(vt), ast_line(w0 + i), ast_col(w0 + i));
+                                }
+                            }
+                        }
+                    }
+                }
+                i = i + 1;
             }
-            g_gen_apply_data_count = ds + 1 + g_gen_map_count;
-            return alloc_type(TYP_GENERIC_APPLY, base_ti, ds);
-        }
-        // Non-generic struct
-        ti := alloc_named_type(name_ni);
-        fi : ., mut = 0;
-        fn2 : ., mut = ast_b(node);
-        loop {
-            if fi >= ast_c(node) { break; }
-            if fn2 >= 0 {
-                infer_expr(fn2); // wrapper node — forwards to value
-                fn2 = fn2 + 1;
+            if gc > 0 {
+                // ── 结果类型 TYP_GENERIC_APPLY：实参按**参数声明序**取映射 ──
+                // （旧代码按字面量字段序写映射 + 直取映射序 = 参数序 ≠ 字段序时实参错位）
+                base_ti := alloc_named_type(name_ni);
+                ds := g_gen_apply_data_count;
+                grow_gen_apply_data(ds + 1 + gc);
+                g_gen_apply_data_count = ds + 1;
+                found : ., mut = 0;
+                g : ., mut = 0;
+                loop {
+                    if g >= gc { break; }
+                    pni := si_generic_name(si, g);
+                    bind : ., mut = -1;
+                    mi : ., mut = 0;
+                    loop {
+                        if mi >= g_gen_map_count { break; }
+                        if r64(g_gen_map_names, mi * 8) == pni { bind = r64(g_gen_map_types, mi * 8); break; }
+                        mi = mi + 1;
+                    }
+                    if bind >= 0 {
+                        w64(g_gen_apply_data, (ds + 1 + found) * 8, bind);
+                        found = found + 1;
+                    }
+                    g = g + 1;
+                }
+                w64(g_gen_apply_data, ds * 8, found);
+                g_gen_apply_data_count = ds + 1 + found;
+                return alloc_type(TYP_GENERIC_APPLY, base_ti, ds);
             }
-            fi = fi + 1;
+            return alloc_named_type(name_ni);
         }
-        return ti;
+        // 结构体名未找到：既有行为（不在此报错，返回具名类型）
+        return alloc_named_type(name_ni);
     }
 
     if ast_kind(node) == EXPR_ARRAY {
         // Array literal（F5 契约，见 parser.cr 下标分支）：a = first wrapper（连续）,
         // b = elem count；wrapper.a=元素值节点（infer_expr 对 EXPR_NONE 前向）——不得按偏移
         // 直取相邻节点当元素，复合元素子树占多槽会整体错位（静默错型/错值）。
-        elem_ti := TI_INT;
+        // TODO #29 ③：元素**同质性**检查——旧代码逐个覆盖 elem_ti（最终 = **最后一个**元素的
+        // 类型），异质字面量 [1, "x", 3] 静默通过且类型随末元素漂移。现取首元素类型为元素类型
+        // （与 Python bootstrap 的 ArrayLit 同语义），后续元素逐个与首元素比对（TK02）。
+        elem_ti := TI_INT;   // 空字面量 []：沿用旧默认
         ei : ., mut = 0;
         en : ., mut = ast_a(node);
         loop {
             if ei >= ast_b(node) { break; }
             if en >= 0 {
-                elem_ti = infer_expr(en);
+                eti := infer_expr(en);
+                if ei == 0 {
+                    elem_ti = eti;
+                } else {
+                    // 两侧任一含未实例化泛型参数 → 跳过（不假拒，见 ti_has_generic_param）
+                    if ti_has_generic_param(elem_ti) == 0 && ti_has_generic_param(eti) == 0 {
+                        sh_site_begin(10);   // 站点 10 = 数组字面量元素同质性
+                        verdict := type_compat_strict(elem_ti, eti);
+                        if verdict != 1 {
+                            diag_type_incompatible(verdict, EC_TK_ELEM_TYPE, "Expected array element type " + type_display(elem_ti) + ", got " + type_display(eti), ast_line(en), ast_col(en));
+                        }
+                    }
+                }
                 en = en + 1;
             }
             ei = ei + 1;
