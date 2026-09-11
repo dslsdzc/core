@@ -480,6 +480,92 @@ fn type_selftest_run() -> int {
     }
     total = total + 1; fails = fails + ts_check("t3c.no_stale_term_after_reset", t3c_ok, 1);
 
+    // --- R2 P2b Task 1：本质条目表 + `iface_*` 查询 API（零消费者建层；表 = 静态数据）---
+    // 前置：表由 init_types() 尾部建立（本通道不经 check_all → 与 P1 桥接段同款显式调用）；
+    // 显式重建 = 干净起点（类型表行号空间复位，结构行自 9 起）。
+    // 覆盖面口径：13 条目 × 两向（ak→ti 行 / 行→ak 类）+ 11 个 API 逐签名；8 原生逐条目不抽样。
+    init_types();
+    total = total + 1; fails = fails + ts_check("iface.count", iface_count(), 13);
+    // 逐原生条目：ak → 规范行 + **AK↔TI 下标不 1:1** 的显式守卫（bool/string 互换即红）
+    total = total + 1; fails = fails + ts_check("iface.int_ti", iface_ti_of(AK_INT), TI_INT);
+    total = total + 1; fails = fails + ts_check("iface.dex_ti", iface_ti_of(AK_DEX), TI_DEX);
+    total = total + 1; fails = fails + ts_check("iface.str_ti", iface_ti_of(AK_STRING), TI_STR);
+    total = total + 1; fails = fails + ts_check("iface.bool_ti", iface_ti_of(AK_BOOL), TI_BOOL);
+    total = total + 1; fails = fails + ts_check("iface.unit_ti", iface_ti_of(AK_UNIT), TI_UNIT);
+    total = total + 1; fails = fails + ts_check("iface.never_ti", iface_ti_of(AK_NEVER), TI_NEVER);
+    total = total + 1; fails = fails + ts_check("iface.char_ti", iface_ti_of(AK_CHAR), TI_CHAR);
+    total = total + 1; fails = fails + ts_check("iface.dyn_ti", iface_ti_of(AK_DYN), TI_DYN);
+    // 反向：结构/命名条目无「规范行」（类级）→ 恒 -1（若哪天被填成某行 = 类级/行级混同）
+    total = total + 1; fails = fails + ts_check("iface.struct_ti_none",
+        (iface_ti_of(AK_PRODUCT) == -1 && iface_ti_of(AK_SEQUENCE) == -1 && iface_ti_of(AK_REF) == -1 &&
+         iface_ti_of(AK_PTR) == -1 && iface_ti_of(AK_NAMED) == -1), 1);
+    // 行号 → 原子类：8 原生经**类型表本体**（kind == TYP_BASE && data == TY_*）判，不按行号猜
+    total = total + 1; fails = fails + ts_check("iface.kind_int", iface_kind_of(TI_INT), AK_INT);
+    total = total + 1; fails = fails + ts_check("iface.kind_dex", iface_kind_of(TI_DEX), AK_DEX);
+    total = total + 1; fails = fails + ts_check("iface.kind_str", iface_kind_of(TI_STR), AK_STRING);
+    total = total + 1; fails = fails + ts_check("iface.kind_bool", iface_kind_of(TI_BOOL), AK_BOOL);
+    total = total + 1; fails = fails + ts_check("iface.kind_unit", iface_kind_of(TI_UNIT), AK_UNIT);
+    total = total + 1; fails = fails + ts_check("iface.kind_never", iface_kind_of(TI_NEVER), AK_NEVER);
+    total = total + 1; fails = fails + ts_check("iface.kind_char", iface_kind_of(TI_CHAR), AK_CHAR);
+    total = total + 1; fails = fails + ts_check("iface.kind_dyn", iface_kind_of(TI_DYN), AK_DYN);
+    total = total + 1; fails = fails + ts_check("iface.kind_oob", iface_kind_of(g_type_count + 7), -1);
+    total = total + 1; fails = fails + ts_check("iface.kind_neg", iface_kind_of(-1), -1);
+    // 结构/命名行 → 类（逐 kind 一条构造子；配对着写以钉死「非同类混判」）
+    ifc_ptr := alloc_type(TYP_PTR, TI_INT, 0);
+    ifc_ref := alloc_type(TYP_REF, TI_STR, 0);
+    total = total + 1; fails = fails + ts_check("iface.kind_ptr_ref",
+        (iface_kind_of(ifc_ptr) == AK_PTR && iface_kind_of(ifc_ref) == AK_REF), 1);
+    ifc_arr := alloc_type(TYP_ARRAY, TI_INT, 3);
+    ifc_slice := alloc_type(TYP_SLICE, TI_INT, 0);
+    total = total + 1; fails = fails + ts_check("iface.kind_seq",
+        (iface_kind_of(ifc_arr) == AK_SEQUENCE && iface_kind_of(ifc_slice) == AK_SEQUENCE), 1);
+    ifc_tup := alloc_type(TYP_TUPLE, 0, 0);
+    total = total + 1; fails = fails + ts_check("iface.kind_product", iface_kind_of(ifc_tup), AK_PRODUCT);
+    ifc_named := alloc_named_type(str_intern("IfaceNamedProbe"));
+    ifc_gp := alloc_type(TYP_GENERIC_PARAM, str_intern("IfaceGP"), 0);
+    ifc_ga := alloc_type(TYP_GENERIC_APPLY, ifc_named, 0);
+    total = total + 1; fails = fails + ts_check("iface.kind_named",
+        (iface_kind_of(ifc_named) == AK_NAMED && iface_kind_of(ifc_gp) == AK_NAMED &&
+         iface_kind_of(ifc_ga) == AK_NAMED), 1);
+    // 条目定位（含越界/负键：不得把「无此原子」与行 0 混同）
+    total = total + 1; fails = fails + ts_check("iface.entry_lookup",
+        (iface_entry(AK_INT) >= 0 && iface_entry(AK_INT) < iface_count() && iface_entry(AK_NAMED) >= 0 &&
+         iface_entry(-1) == -1 && iface_entry(9999) == -1), 1);
+    // TY_* 码 → 原子类（逐项语义分派；含两条已裁决灰格：DEX_S 同值域不同表示、GENERIC_PARAM 哨兵）
+    total = total + 1; fails = fails + ts_check("iface.ty_code_natives",
+        (iface_by_ty_code(TY_INT) == AK_INT && iface_by_ty_code(TY_DEX) == AK_DEX &&
+         iface_by_ty_code(TY_BOOL) == AK_BOOL && iface_by_ty_code(TY_STRING) == AK_STRING &&
+         iface_by_ty_code(TY_UNIT) == AK_UNIT && iface_by_ty_code(TY_NEVER) == AK_NEVER &&
+         iface_by_ty_code(TY_CHAR) == AK_CHAR), 1);
+    total = total + 1; fails = fails + ts_check("iface.ty_code_gray",
+        (iface_by_ty_code(TY_DEX_S) == AK_DEX && iface_by_ty_code(TY_GENERIC_PARAM) == AK_NAMED), 1);
+    total = total + 1; fails = fails + ts_check("iface.ty_code_unknown", iface_by_ty_code(999), -1);
+    // 字面量定型（查表入口 = 条目 lit_code 列；**当前实现 = infer_expr:1892-1897 的内联 if 链**）
+    total = total + 1; fails = fails + ts_check("iface.lit_int", iface_lit_ti(EXPR_INT), TI_INT);
+    total = total + 1; fails = fails + ts_check("iface.lit_dex", iface_lit_ti(EXPR_DEX), TI_DEX);
+    total = total + 1; fails = fails + ts_check("iface.lit_str", iface_lit_ti(EXPR_STRING), TI_STR);
+    total = total + 1; fails = fails + ts_check("iface.lit_bool", iface_lit_ti(EXPR_BOOL), TI_BOOL);
+    total = total + 1; fails = fails + ts_check("iface.lit_char", iface_lit_ti(EXPR_CHAR), TI_CHAR);
+    total = total + 1; fails = fails + ts_check("iface.lit_none", iface_lit_ti(EXPR_IDENT), -1);
+    total = total + 1; fails = fails + ts_check("iface.lit_ak",
+        (iface_lit_ak(EXPR_INT) == AK_INT && iface_lit_ak(EXPR_DEX) == AK_DEX &&
+         iface_lit_ak(EXPR_STRING) == AK_STRING && iface_lit_ak(EXPR_BOOL) == AK_BOOL &&
+         iface_lit_ak(EXPR_CHAR) == AK_CHAR), 1);
+    // 负键 = 条目的「无字面量」哨兵 ⇒ 必须先行拒绝（否则 -1 命中无字面量条目）
+    total = total + 1; fails = fails + ts_check("iface.lit_neg", iface_lit_ak(-1), -1);
+    // 类型项 → 原子类（单一原子 / ⊤ₖ；复合与越界 → -1）
+    ifc_term_atom := tt_atom(AK_INT, TI_INT, -1);
+    total = total + 1; fails = fails + ts_check("iface.of_term_atom", iface_of_term(ifc_term_atom), AK_INT);
+    total = total + 1; fails = fails + ts_check("iface.of_term_topk", iface_of_term(tt_top_k(AK_SEQUENCE)), AK_SEQUENCE);
+    total = total + 1; fails = fails + ts_check("iface.of_term_compound", iface_of_term(tt_union(a_int, a_str)), -1);
+    total = total + 1; fails = fails + ts_check("iface.of_term_oob",
+        (iface_of_term(-1) == -1 && iface_of_term(tt_count() + 9) == -1), 1);
+    // 未知原子 → 空许可集（不得给「看起来有许可」的位）；位下标越界 → 0（不得回绕成全位命中）
+    total = total + 1; fails = fails + ts_check("iface.ops_unknown", iface_ops(-1), 0);
+    total = total + 1; fails = fails + ts_check("iface.ops_unknown_ak", iface_ops(9999), 0);
+    total = total + 1; fails = fails + ts_check("iface.permits_bad_op",
+        (iface_permits(AK_INT, -1) == 0 && iface_permits(AK_INT, 63) == 0 && iface_permits(9999, OP_ADD) == 0), 1);
+
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }
     return 0;

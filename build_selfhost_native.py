@@ -306,6 +306,10 @@ def main():
         # 本批为纯增量（checker/ir_gen/后端零改动 = 产物零变化）。
         'src/compiler/type_terms.cr',
         'src/compiler/type_engine.cr',
+        # R2 P2b Task 1 本质条目表（native interface entries）+ iface_* 查询 API：**静态
+        # 数据表 + 只读查询**，零消费者零行为变化（不 alloc g_types 行 ⇒ .ccr 零扰动）。
+        # 置于引擎之后、桥接层之前（Task 2 起桥接层委托 iface_by_ty_code）。
+        'src/compiler/iface_registry.cr',
         # R2 P1 影子对拍桥接层（checker ti → 引擎类型项 + per-ti 缓存 + Task 2 判定挂点）。
         # **corelsp 清单也必须含本层**（Task 2 起 checker.cr 的 type_equal 包装引用
         # sh_compare/sh_site_begin——挂在 checker 上的挂点无法只要 checker 不要影子层；
@@ -391,6 +395,8 @@ def main():
         # corelsp 也必须链接 引擎 + 影子层（相对顺序与 corec 一致；corearch 无 checker 仍不含）。
         'src/compiler/type_terms.cr',
         'src/compiler/type_engine.cr',
+        # R2 P2b Task 1：注册表（引擎之后、影子层之前；Task 2 起影子层委托本层）
+        'src/compiler/iface_registry.cr',
         'src/compiler/ty_shadow.cr',
         'src/compiler/diag.cr',
         'src/compiler/module.cr',

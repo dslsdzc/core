@@ -243,6 +243,15 @@ g_ty_steps : int, mut;             g_ty_budget_max : int, mut;     g_ty_exhauste
 g_ty_lits : string, mut;           g_ty_lits_cap : int, mut;       g_ty_lits_count : int, mut;
 g_ty_uncovered : int, mut;         // 未覆盖面命中位（如 AK_NAMED 具体行不展开）——P0 只登记不消费
 
+// R2 P2b Task 1：本质条目表（native interface entries，spec §2）——40B/条 × 5 字段
+// {ak, ti_row, name_ni, lit_code, ops}，布局常量与表本体（iface_registry.cr）+ 查询 API
+// （iface_*）同文件；此处只声明全局（**声明位置约束**：bootstrap 名字解析对变量按声明序、
+// 跨文件前向引用不成立——g_purity_inst 先例，globals.cr:290-292；消费者在 checker.cr 之后
+// 的层，且本文件恒在最前）。
+// **不 alloc g_types 行、不占类型行号**（先例 init_builtins 的 g_rt_builtin_* 旁表）
+// ⇒ `.ccr` 类型段/行号零扰动。ok 位 = 惰性建表旗标（0 初值惯例，见上方 g_tt_nil_ok 注记）。
+g_iface_entries : string, mut;   g_iface_entry_count : int, mut;   g_iface_registry_ok : int, mut;
+
 // R2 P1 影子对拍：checker ti → 类型项 桥接缓存 + 统计（16B/条 {ti, term}；
 // 探测/装填因子守卫/扩容重放见 ty_shadow.cr——桥接层自持，与引擎 g_tt_index 同式）。
 // entries 只增不减、恒等于占用槽数 → 兼作扩容判据（不另设 count 全局）。

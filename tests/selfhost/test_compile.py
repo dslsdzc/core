@@ -23,6 +23,9 @@ def concat_sources():
         # R2 P0 类型项引擎（建层，与 build_selfhost_native.py 的 corec 清单同位）：
         # 前端单元新增三文件的源码闭包条目。
         'src/compiler/type_terms.cr', 'src/compiler/type_engine.cr',
+        # R2 P2b Task 1 本质条目表 + iface_* 查询 API（引擎之后、桥接层之前——与
+        # build_selfhost_native.py 的 corec 清单同位）
+        'src/compiler/iface_registry.cr',
         # R2 P1 桥接层（ti → 类型项）——与 build_selfhost_native.py 的 corec 清单同位
         'src/compiler/ty_shadow.cr', 'src/compiler/type_selftest.cr',
         # 效应/纯度修正 Task 1：纯度自测通道（main.cr 的 selftest-purity 调用它）——
