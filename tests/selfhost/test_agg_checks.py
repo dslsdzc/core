@@ -119,6 +119,18 @@ fn main() -> int { return f(1); }
 """,
         12,
     ),
+    (
+        "嵌套泛型应用字段类型 Box[Box[int]]（既存载荷写坏回归——修复前假拒）",
+        """
+struct Box[T] { val: T }
+struct Holder { b: Box[Box[int]] }
+fn main() -> int {
+    h := Holder{b: Box{val: Box{val: 7}}};
+    return h.b.val.val;
+}
+""",
+        7,
+    ),
 ]
 
 # ---- 类型判据：(名称, 源码, 期望码 / "ACCEPT") ----
@@ -232,6 +244,15 @@ fn main() -> int {
     b := [[1, 2], [3, 4]];
     return a[0] + b[1][1];
 }
+""",
+        "ACCEPT",
+    ),
+    (
+        "正控：嵌套泛型应用在**返回位**（既存载荷写坏回归——修复前假拒 TF01）",
+        """
+struct Box[T] { val: T }
+fn mk() -> Box[Box[int]] { return Box{val: Box{val: 1}}; }
+fn main() -> int { b := mk(); return b.val.val; }
 """,
         "ACCEPT",
     ),

@@ -788,19 +788,32 @@ fn res_type_node(node: int) -> int {
             return TI_UNIT;
         }
         base_ti := sym_type(si);
+        // 两趟（照 #25 元组第二根因同款）：实参类型解析**自身也会向
+        // g_gen_apply_data 追加**（嵌套应用如 Box[Box[int]] 的内层载荷）——
+        // 先解析进暂存，后一次性认领连续块。修复前「先认领块再逐参解析」会让
+        // 内层 append 冲掉外层的 count 槽与后续载荷槽（终点 count 截断），
+        // `Box[Box[int]]` 的字段/返回位因此被误判（假拒）。
+        args : string, mut;
+        if arg_count > 0 {
+            args = alloc(arg_count * 8);
+            ai : ., mut = 0;
+            an : ., mut = first_arg_node;
+            loop {
+                if ai >= arg_count { break; }
+                w64(args, ai * 8, res_type_node(an));
+                ai = ai + 1;
+                an = an + 1;
+            }
+        }
         // Store args in g_gen_apply_data: [count, arg1, arg2, ...]
         data_start := g_gen_apply_data_count;
         grow_gen_apply_data(data_start + 1 + arg_count);
         w64(g_gen_apply_data, data_start * 8, arg_count);
-        g_gen_apply_data_count = data_start + 1;
-        ai : ., mut = 0;
-        an : ., mut = first_arg_node;
+        ai2 : ., mut = 0;
         loop {
-            if ai >= arg_count { break; }
-            arg_ti := res_type_node(an);
-            w64(g_gen_apply_data, (data_start + 1 + ai) * 8, arg_ti);
-            ai = ai + 1;
-            an = an + 1;
+            if ai2 >= arg_count { break; }
+            w64(g_gen_apply_data, (data_start + 1 + ai2) * 8, r64(args, ai2 * 8));
+            ai2 = ai2 + 1;
         }
         g_gen_apply_data_count = data_start + 1 + arg_count;
         return alloc_type(TYP_GENERIC_APPLY, base_ti, data_start);
@@ -1373,18 +1386,27 @@ fn res_call_type(node: int, func_fi: int) -> int {
         si := find_gsym(name_idx);
         if si < 0 || sym_kind(si) != SYM_TYPE { return TI_UNIT; }
         base_ti := sym_type(si);
+        // 两趟（同 res_type_node 的泛型应用分支：实参解析会追加嵌套应用载荷）
+        args : string, mut;
+        if ac > 0 {
+            args = alloc(ac * 8);
+            ai : ., mut = 0;
+            an : ., mut = first_an;
+            loop {
+                if ai >= ac { break; }
+                w64(args, ai * 8, res_call_type(an, func_fi));
+                ai = ai + 1;
+                an = an + 1;
+            }
+        }
         ds := g_gen_apply_data_count;
         grow_gen_apply_data(ds + 1 + ac);
         w64(g_gen_apply_data, ds * 8, ac);
-        g_gen_apply_data_count = ds + 1;
-        ai : ., mut = 0;
-        an : ., mut = first_an;
+        ai2 : ., mut = 0;
         loop {
-            if ai >= ac { break; }
-            at := res_call_type(an, func_fi);
-            w64(g_gen_apply_data, (ds + 1 + ai) * 8, at);
-            ai = ai + 1;
-            an = an + 1;
+            if ai2 >= ac { break; }
+            w64(g_gen_apply_data, (ds + 1 + ai2) * 8, r64(args, ai2 * 8));
+            ai2 = ai2 + 1;
         }
         g_gen_apply_data_count = ds + 1 + ac;
         return alloc_type(TYP_GENERIC_APPLY, base_ti, ds);
@@ -1458,16 +1480,25 @@ fn substitute_return_type(ti: int) -> int {
         base := get_type_data(ti);
         start := get_type_extra(ti);
         count := r64(g_gen_apply_data, start * 8);
+        // 两趟（同 res_type_node：递归代换会追加嵌套应用载荷 ⇒ 先算进暂存再认领块）
+        subs : string, mut;
+        if count > 0 {
+            subs = alloc(count * 8);
+            ai : ., mut = 0;
+            loop {
+                if ai >= count { break; }
+                w64(subs, ai * 8, substitute_return_type(r64(g_gen_apply_data, (start + 1 + ai) * 8)));
+                ai = ai + 1;
+            }
+        }
         new_start := g_gen_apply_data_count;
         grow_gen_apply_data(new_start + 1 + count);
         w64(g_gen_apply_data, new_start * 8, count);
-        g_gen_apply_data_count = new_start + 1;
-        ai : ., mut = 0;
+        ai2 : ., mut = 0;
         loop {
-            if ai >= count { break; }
-            sub := substitute_return_type(r64(g_gen_apply_data, (start + 1 + ai) * 8));
-            w64(g_gen_apply_data, (new_start + 1 + ai) * 8, sub);
-            ai = ai + 1;
+            if ai2 >= count { break; }
+            w64(g_gen_apply_data, (new_start + 1 + ai2) * 8, r64(subs, ai2 * 8));
+            ai2 = ai2 + 1;
         }
         g_gen_apply_data_count = new_start + 1 + count;
         return alloc_type(TYP_GENERIC_APPLY, base, new_start);
