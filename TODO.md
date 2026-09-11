@@ -145,6 +145,12 @@
 - **修复方向**：**删除**（首选——零 importer、零功能贡献；删除需用户明确许可，铁律 #3）并重生成伪代码对照表；备选 = 迁出活树（`legacy/` 等，避开 ROOTS glob）保留历史。删除后复跑 test_backend_bootstrap + full-bootstrap guard（预期零影响、byte-identical）。
 
 ### 8. 前端 ≥18 形参静默误编译类（2026-09-10 x86 实例化波 1 Task 5 评审登记——高优先级：静默误编译）
+- **✅ 已修（2026-09-11，提交 `d7ad71d314cb` + 缓存面 `68ffa1e8`；工作区报告 `.superpowers/sdd/fix-params18-report.md`）**：
+  根因 = `FuncInfo.param_types` 是 **16 槽定长内嵌槽区**（`dyn_arr.cr` `OFF_FI_PARAM_TYPES=16` ⇒ `16+16×8=144=OFF_FI_RETURN_TYPE`），而 `parser.cr:1224` / `monomorph.cr:423` 写入无界——第 17 槽踩 `return_type`、**第 18 槽踩 `ast_node`**；形参类型值 `TY_INT=0` 恰把 `ast_node` 写成 AST 节点表首项（`rt.cr:4:13` 的 int 类型节点）⇒ checker 读 `fi_ast_node=0` 发 TF01 误归 + `.ccr` `name_idx=0`('import')/`param_count=0` + IR 体 46→28 instrs，而 `corec build` 仍 rc=0、产物 SIGSEGV 139（N=17 因 `TY_INT=0` **误打正着**；钳位最小实验单独证明因果）。
+  修复 = 槽区扩至 `MAX_FN_PARAMS=64`（对齐 `ast.cr` 镜像 `[int;64]`；覆盖 ≥22 参 = 6 寄存器 + 16 栈参的 `>127B` 栈清理形，使该结构 runtime 可达）+ `fi_param_type`/`fi_set_param_type` **唯一读写点护栏**（未来新调用点结构性地不可能再越界写）+ 超限签名 `P020` 硬错 rc=1（绝不静默 rc=0）。
+  回归 = `tests/selfhost/test_params_limit.py`（N=17/18 逐值 + 22/64 逐参校验 + 65 拒绝且无产物）+ `tests/suite/params_many.cr`（22 参 = `add rsp,0x80` 128B 栈清理形 runtime 覆盖——**Task 5 Minor 4 收口**）+ `src/ci/run.sh` 挂钩。
+  缓存面 = `CIR_CACHE_VER 15→16`（修复前 ≥18 参函数的坏 IR 已被写入 `.cir` 快照；键不含编译器身份 ⇒ 同源指纹相同会命中旧快照复活坏产物——评审 Important，已收口）。
+  **修复方向 ② 的阈值经重定**：字面「≥18 形参改硬错」与 ③（N=18 ok）+④（22 参 runtime rc=0）互斥 ⇒ 硬错定在 64（唯一自洽解）。
 - **现象（评审修正——非单纯"丢名"）**：≥18 形参的函数在 .ccr 中 `name_idx=0`（解析为字符串表首项 'import'）且 `param_count=0`（N=17 正常：name_idx=3 'f' param_count=17）；同源 checker 另发 `error[TF01] Function return type mismatch` 并**误归到无关声明**（如 `g_rt_argc : int, mut;`）；`corec build` **仍 rc=0**，产物 SIGSEGV/错值（多行 18/20 参签名同样触发——参数计数依赖，非行长度依赖）。调用补丁随后失败 rel32=0 → rc=139。
 - **复现**：m18 probe（task 5 报告 + 评审 /tmp 产物）——基线工具链同样复现 = 预存，非波 1 引入（波 1 四文件均不在 corec_files）。
 - **影响**：a) 静默误编译类（rc=0 + 崩）；b) `>127B 栈清理形`（需 ≥16 栈参 = ≥22 形参）**无 runtime 覆盖可能**（结构不可达）——波 1 Task 5 的 7B add rsp 形仅字节级覆盖（评审确认 16×push + add rsp,0x80 逐字节同）。
@@ -244,6 +250,10 @@
 - **P2b 待办（同 spec §9 P2 行）**：`infer_expr` 公理区 → `iface_ops` 查表接线；`res_type_node` 两表合一。
 
 ### 25. F5：`EXPR_TUPLE` 元素连续槽位假设对**复合表达式元素**不成立 → 元组字段类型错录（假拒 + soundness 漏放；含 `opt.cr:177` 恒空转登记）
+- **✅ 已修（2026-09-11，提交 `0390f0f4`；工作区报告 `.superpowers/sdd/fix-tuple25-report.md`）**：
+  parser 元组分支改**两趟**（先全部解析元素值、后统建连续 wrapper；`EXPR_TUPLE` 契约 a=首 wrapper / b=个数，wrapper.a=元素值节点）。**TODO 原建议「照 struct 先例（交错 wrapper）」经实测不成立**——交错下相邻 wrapper 间插着下一值子树（`P{a:11,b:g()}` 误返 0），故不采用。消费点 4 处同步解引用（checker/ir_gen/monomorph/opt；`opt.cr` 与 `ir_gen ast_patch_node` 两处 a/b 槽约定一并校正，经核均无调用者 = 死码，产物零影响）。
+  **第二根因**：checker `EXPR_TUPLE` 元素类型**两趟落盘**（`data_start` 曾在推断循环前取 ⇒ 嵌套元素推断向 `g_gen_apply_data` 追加数据顶开后续落点、extra 错位 ⇒ 嵌套元组异型互赋静默通过）。回归 = `tests/selfhost/test_tuple_slots.py` 14 例（3 主判据 + 边界 3 + 嵌套 4 + IR/ELF 冒烟）。
+  **同族未修（另立条目）**：struct 字面量复合字段值误编译（`P{a:11,b:g()}` 返 0）、ARRAY 复合元素 `[[1,2],[3,4]]` vs `[5,6]` 静默接受、monomorph 数组克隆实参错位。
 - **现象（Task 3 评审加码定位，pre-existing；建议单开任务）**：元组字面量 `(e0, e1, …)` 的元素类型按「`a + 0..a+ec-1` 连续槽位」读取，但**复合表达式元素自身占多个 AST 槽**（如 `[1,2,3]` 的数组节点在其 3 个子节点**之后**）→ 后续元素的槽位推断全错位。两类实证（`/tmp/r2p2t3/probes`）：
   - ① **假拒绝（类型面）**：`(1,a)` vs `(1,[1,2,3])`（**语义同型** `(int,[int;3])`）→ 误报 `error[TA01]`；
   - ② **soundness 漏放**：`(1,[1,2,3])` vs `(1,h())`（`h()->int`，**异型互赋**）→ **静默接受**；
