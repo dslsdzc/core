@@ -206,7 +206,7 @@ EXPR_RETURN : int = 12;  // a=value expr (-1 if none)
 EXPR_FIELD : int = 13;   // a=object, int_val=field name idx
 EXPR_INDEX : int = 14;   // a=object, b=index
 EXPR_ASSIGN : int = 15;  // a=target, b=value
-EXPR_STRUCT : int = 16;  // a=type name idx, b=first field, c=field count
+EXPR_STRUCT : int = 16;  // a=type name idx, b=first wrapper（g_ast 中连续；wrapper kind=EXPR_NONE 且 a=字段值节点）, c=field count (struct literal)
 EXPR_FN : int = 17;      // a=name idx, b=first param, c=param count, d=body, data=return_type
 EXPR_PARAM : int = 18;   // a=name idx, int_val=type
 // 表示层概念（2026-09-10 语言面收窄裁决 §1）：`[T; N]` 的类型构造器身份已退役——
@@ -241,7 +241,7 @@ EXPR_AT : int = 46;             // @builtin: a=name_ni, b=args_node, c=0, iv=0, 
 // Desugared constructs
 EXPR_TRY : int = 33;      // a=expr being tried (? operator)
 EXPR_UNSAFE : int = 34;   // a=block body
-EXPR_STRUCTPAT : int = 35; // struct pattern: a=name ni, b=first field pat, c=field count
+EXPR_STRUCTPAT : int = 35; // struct pattern: a=name ni, b=first wrapper（连续；wrapper kind=EXPR_NONE 且 a=子模式节点）, c=field count
 EXPR_AS : int = 36;        // a=expr, b=type node (cast: expr as Type)
 EXPR_PTRTYPE : int = 47;  // a=inner_type (for *T in type position)
 EXPR_EXTERN : int = 48;  // a=name_ni, b=first_param, c=param_count, data=ffi_lang_ni

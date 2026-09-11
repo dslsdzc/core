@@ -2084,6 +2084,9 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
 
     // Struct literal
     if ast_kind(node) == EXPR_STRUCT {
+        // F5 契约（见 parser.cr struct 分支）：a=name idx、b=首 wrapper（连续）、c=字段数；
+        // wrapper.a=字段值节点（gen_expr 对 EXPR_NONE 前向）。逐 wrapper 解引用，不得按偏移
+        // 直取相邻节点当字段值——复合字段值子树占多槽会错位（静默错误值）。
         name_ni := ast_a(node);
         s := new_ir_var("struct", TI_UNIT);
         emit(IR_ALLOC_STRUCT, s, 0, 0, name_ni, 0);
@@ -2092,7 +2095,7 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
         loop {
             if fi >= ast_c(node) { break; }
             if fn2 >= 0 {
-                // fn2 = wrapper node (kind=0, a=value expr)
+                // fn2 = wrapper node (kind=EXPR_NONE, a=value expr)
                 val_var := gen_expr(fn2);
                 val_var = force_if_thunk(val_var);
                 field_idx := fi;
@@ -2106,6 +2109,8 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
 
     // Array literal
     if ast_kind(node) == EXPR_ARRAY {
+        // F5 契约（见 parser.cr 下标分支）：a=首 wrapper（连续）、b=元素个数；wrapper.a=元素值
+        // 节点（gen_expr 对 EXPR_NONE 前向）。逐 wrapper 解引用，不得按偏移直取相邻节点。
         v := new_ir_var("arr", TI_UNIT);
         emit(IR_ALLOC_ARRAY, v, ast_b(node), 0, 0, 0);
         elem_ti : ., mut = TI_INT;
@@ -2597,14 +2602,36 @@ fn ast_patch_node(node: int, subst_from: string, subst_to: string) {
     } else if k == EXPR_STMT {
         if ast_a(node) >= 0 { ast_patch_node(ast_a(node), subst_from, subst_to); }
     } else if k == EXPR_STRUCT {
+        // a=type_name_ni, b=first wrapper（连续）, c=field_count；wrapper.a=字段值节点
+        // （F5 契约，见 parser.cr struct 字面量分支）——须解引用 wrapper 再递归，
+        // 旧代码把 EXPR_NONE wrapper 本身交给 ast_patch_node（无该 kind 分支）= 空转，
+        // 泛型实例体内 struct 字面量字段中的方法调用名得不到替换。
         an5 := ast_b(node); ac5 := ast_c(node);
         ai5 : ., mut = 0;
-        loop { if ai5 >= ac5 { break; } if an5 >= 0 { ast_patch_node(an5, subst_from, subst_to); an5 = an5 + 1; } ai5 = ai5 + 1; }
+        loop {
+            if ai5 >= ac5 { break; }
+            if an5 >= 0 {
+                vn5 : ., mut = -1;
+                if ast_kind(an5) == EXPR_NONE { vn5 = ast_a(an5); }
+                if vn5 >= 0 { ast_patch_node(vn5, subst_from, subst_to); }
+                an5 = an5 + 1;
+            }
+            ai5 = ai5 + 1;
+        }
     } else if k == EXPR_ARRAY {
-        // a=first_elem, b=elem_count（槽约定校正为 a/b——旧读 b/c 恒空转）
+        // a=first wrapper（连续）, b=elem_count；wrapper.a=元素值节点（F5 契约，见 parser.cr 下标分支）
         an6 := ast_a(node); ac6 := ast_b(node);
         ai6 : ., mut = 0;
-        loop { if ai6 >= ac6 { break; } if an6 >= 0 { ast_patch_node(an6, subst_from, subst_to); an6 = an6 + 1; } ai6 = ai6 + 1; }
+        loop {
+            if ai6 >= ac6 { break; }
+            if an6 >= 0 {
+                vn6 : ., mut = -1;
+                if ast_kind(an6) == EXPR_NONE { vn6 = ast_a(an6); }
+                if vn6 >= 0 { ast_patch_node(vn6, subst_from, subst_to); }
+                an6 = an6 + 1;
+            }
+            ai6 = ai6 + 1;
+        }
     } else if k == EXPR_TUPLE {
         // a=first wrapper（连续）, b=elem_count；wrapper.a=元素值节点（F5 契约）
         an6 := ast_a(node); ac6 := ast_b(node);

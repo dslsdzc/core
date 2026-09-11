@@ -126,11 +126,22 @@ fn ast_optimize_body(body: int) {
         loop { if ai >= ac { break; } if an >= 0 { ast_optimize_body(an); an = an + 1; } ai = ai + 1; }
         return;
     }
-    // EXPR_STRUCT: optimize field values
+    // EXPR_STRUCT: a=type_name_ni, b=first wrapper（连续）, c=field_count；wrapper.a=字段值节点
+    // （F5 契约，见 parser.cr struct 字面量分支）。旧代码直接对 wrapper 递归，而 wrapper 的
+    // kind=EXPR_NONE 在本函数无分支 ⇒ 常量折叠静默空转（字段值从不被优化）。
     if bk == EXPR_STRUCT {
         fn2 := ast_b(body); fc := ast_c(body);
         i : ., mut = 0;
-        loop { if i >= fc { break; } if fn2 >= 0 { ast_optimize_body(fn2); fn2 = fn2 + 1; } i = i + 1; }
+        loop {
+            if i >= fc { break; }
+            if fn2 >= 0 {
+                vn : ., mut = -1;
+                if ast_kind(fn2) == EXPR_NONE { vn = ast_a(fn2); }
+                if vn >= 0 { ast_optimize_body(vn); }
+                fn2 = fn2 + 1;
+            }
+            i = i + 1;
+        }
         return;
     }
     // EXPR_LET: optimize value expression
@@ -173,12 +184,21 @@ fn ast_optimize_body(body: int) {
         if ast_a(body) >= 0 { ast_optimize_body(ast_a(body)); }
         return;
     }
-    // EXPR_ARRAY: a=first_elem, b=elem_count（旧读 ast_b/ast_c ⇒ count 恒取 0 = 恒空转；
-    // 槽约定校正为 a/b。注意元素连续仅对单槽元素成立——复合元素错位是本族已知残留）
+    // EXPR_ARRAY: a=first wrapper（连续）, b=elem_count；wrapper.a=元素值节点
+    // （F5 契约，见 parser.cr 下标分支）；旧代码直接对 wrapper 递归 = 空转（EXPR_NONE 无分支）。
     if bk == EXPR_ARRAY {
         an := ast_a(body); ac := ast_b(body);
         i : ., mut = 0;
-        loop { if i >= ac { break; } if an >= 0 { ast_optimize_body(an); an = an + 1; } i = i + 1; }
+        loop {
+            if i >= ac { break; }
+            if an >= 0 {
+                vn : ., mut = -1;
+                if ast_kind(an) == EXPR_NONE { vn = ast_a(an); }
+                if vn >= 0 { ast_optimize_body(vn); }
+                an = an + 1;
+            }
+            i = i + 1;
+        }
         return;
     }
     // EXPR_TUPLE: a=first wrapper（连续）, b=elem_count；wrapper.a=元素值节点（F5 契约）

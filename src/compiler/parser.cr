@@ -449,7 +449,14 @@ fn parse_primary() -> int {
         ni := str_intern(name);
         if check(T_LBRACE) && g_parse_no_struct_literal == 0 {
             advance_tok();
-            ff := -1;
+            // 契约（F5 修复，与元组分支同款）：EXPR_STRUCT = a=类型名 idx、b=首 wrapper、c=字段数；
+            // wrapper 在 g_ast 中**连续**（kind=EXPR_NONE，wrapper.a=该字段的值节点）→ 消费者
+            // 经 EXPR_NONE 前向解引用取值。字段值节点自身对复合表达式（调用 / 字面量 / 嵌套聚合）
+            // **不连续**（子树自占多槽），故必须分两趟：先解析全部字段值，再统建连续 wrapper。
+            // 旧写法「逐值后随建 wrapper」交错分配：复合值子树夹在相邻 wrapper 之间 ⇒ 第 2 个
+            // 起字段槽位整体错位，读到子节点（实测 P{a:11, b:g()} 的 b 静默得 0，rc=0）。
+            cap : ., mut = 8;
+            vals : string, mut = alloc(cap * 8);
             fc : ., mut = 0;
             loop {
                 // EOF 护栏（TODO #16 根因面）：本循环只认 `}`，而 advance_tok 在 EOF 是空操作
@@ -459,13 +466,30 @@ fn parse_primary() -> int {
                 ft := advance_tok();
                 fni := str_intern(tok_lx(ft));
                 advance_tok();
-                fv := parse_expr();
-                ast_alloc(0, fv, 0, 0, 0, 0, 0, tok_ln(ft), tok_cl(ft));
-                if fc == 0 { ff = g_ast_count - 1; }
+                if fc >= cap {
+                    ncap := cap * 2;
+                    nv := alloc(ncap * 8);
+                    _dyncpy(vals, cap * 8, nv);
+                    vals = nv;
+                    cap = ncap;
+                }
+                w64(vals, fc * 8, parse_expr());  // 字段值（子树自占若干槽）
                 fc = fc + 1;
                 if check(T_COMMA) { advance_tok(); }
             }
             advance_tok();
+            ff : ., mut = -1;
+            fi2 : ., mut = 0;
+            loop {
+                if fi2 >= fc { break; }
+                vn := r64(vals, fi2 * 8);
+                ln : ., mut = tok_ln(t);
+                cl : ., mut = tok_cl(t);
+                if vn >= 0 { ln = ast_line(vn); cl = ast_col(vn); }
+                wl := ast_alloc(EXPR_NONE, vn, 0, 0, 0, 0, 0, ln, cl);
+                if fi2 == 0 { ff = wl; }
+                fi2 = fi2 + 1;
+            }
             return alloc_node(EXPR_STRUCT, ni, ff, fc, 0, 0, 0, tok_ln(t), tok_cl(t));
         }
         return alloc_node(EXPR_IDENT, 0, 0, 0, ni, 0, 0, tok_ln(t), tok_cl(t));
@@ -580,21 +604,36 @@ fn parse_primary() -> int {
     }
     if tok_k(t) == T_LBRACKET {
         advance_tok();
-        ef := -1;
+        // 契约（F5 修复，与元组/struct 字面量分支同款）：**字面量形** EXPR_ARRAY =
+        // a=首 wrapper、b=元素个数；wrapper 在 g_ast 中**连续**（kind=EXPR_NONE，wrapper.a=元素值
+        // 节点）→ 消费者经 EXPR_NONE 前向解引用取值。元素值节点自身对复合表达式（嵌套字面量 /
+        // 调用 / 下标）**不连续**（子树自占多槽），故必须两趟：先解析全部元素值，再统建 wrapper。
+        // 旧交错写法下第 2 个元素起槽位整体错位（实测 [[1,2],[3,4]] 的 a[1] 被读成扁平 3 →
+        // a[1][0] SIGSEGV 139；且 [[1,2],[3,4]] 与 [5,6] 类型互赋静默通过 = soundness 漏放）。
+        // 区分：**类型形** [T; N] / [T] 由 parse_type 产出（a=内层类型节点、b=0、int_val=尺寸），
+        // 不经本分支，不受本契约影响。
+        cap : ., mut = 8;
+        vals : string, mut = alloc(cap * 8);
         ec : ., mut = 0;
         if !check(T_RBRACKET) {
-            ef = parse_expr();
+            w64(vals, 0, parse_expr());  // 元素值（子树自占若干槽）
             ec = 1;
             if check(T_SEMI) {
-                // Repeat array: [value; count]
+                // Repeat array: [value; count] —— 值节点只解析一次，其后仅**共享**同一值节点
+                // 追加 wrapper（旧写法浅拷贝根节点 N-1 份；共享值节点语义等价，且不再复制多槽子树）。
                 advance_tok();
                 ct := advance_tok();
                 cnt : ., mut = tok_iv(ct);
-                // Replicate element AST nodes
+                if cnt > cap {
+                    nv := alloc(cnt * 8);
+                    _dyncpy(vals, cap * 8, nv);
+                    vals = nv;
+                    cap = cnt;
+                }
                 ri : ., mut = 1;
                 loop {
                     if ri >= cnt { break; }
-                    ast_alloc(ast_kind(ef), ast_a(ef), ast_b(ef), ast_c(ef), ast_int_val(ef), ast_type_val(ef), ast_data(ef), ast_line(ef), ast_col(ef));
+                    w64(vals, ri * 8, r64(vals, 0));
                     ri = ri + 1;
                 }
                 ec = cnt;
@@ -602,12 +641,31 @@ fn parse_primary() -> int {
                 loop {
                     if !check(T_COMMA) { break; }
                     advance_tok();
-                    parse_expr();  // parse remaining elements
+                    if ec >= cap {
+                        ncap := cap * 2;
+                        nv := alloc(ncap * 8);
+                        _dyncpy(vals, cap * 8, nv);
+                        vals = nv;
+                        cap = ncap;
+                    }
+                    w64(vals, ec * 8, parse_expr());  // 元素值（子树自占若干槽）
                     ec = ec + 1;
                 }
             }
         }
         advance_tok();
+        ef : ., mut = -1;
+        ei2 : ., mut = 0;
+        loop {
+            if ei2 >= ec { break; }
+            vn := r64(vals, ei2 * 8);
+            ln : ., mut = tok_ln(t);
+            cl : ., mut = tok_cl(t);
+            if vn >= 0 { ln = ast_line(vn); cl = ast_col(vn); }
+            wl := ast_alloc(EXPR_NONE, vn, 0, 0, 0, 0, 0, ln, cl);
+            if ei2 == 0 { ef = wl; }
+            ei2 = ei2 + 1;
+        }
         return alloc_node(EXPR_ARRAY, ef, ec, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
     }
     add_error("Unexpected token in expression");
@@ -1026,21 +1084,42 @@ fn parse_pattern() -> int {
         }
         if check(T_LBRACE) {
             // Struct pattern: Name { field = pat, ... }
+            // 契约（F5 修复，与 struct 字面量分支同款）：EXPR_STRUCTPAT = a=名字 idx、b=首 wrapper、
+            // c=字段数；wrapper 在 g_ast 中**连续**（kind=EXPR_NONE，wrapper.a=子模式节点）。
+            // 复合子模式（嵌套 struct/enum/tuple 模式）子树占多槽，故两趟：先全部解析、后统建 wrapper。
             advance_tok();
-            ff := -1;
+            cap : ., mut = 8;
+            vals : string, mut = alloc(cap * 8);
             fc : ., mut = 0;
             loop {
                 if check(T_RBRACE) || check(T_EOF) { break; }
                 ft := advance_tok();
                 fni := str_intern(tok_lx(ft));
                 advance_tok(); // =
-                fp := parse_pattern();
-                ast_alloc(0, fp, 0, 0, 0, 0, 0, tok_ln(ft), tok_cl(ft));
-                if fc == 0 { ff = g_ast_count - 1; }
+                if fc >= cap {
+                    ncap := cap * 2;
+                    nv := alloc(ncap * 8);
+                    _dyncpy(vals, cap * 8, nv);
+                    vals = nv;
+                    cap = ncap;
+                }
+                w64(vals, fc * 8, parse_pattern());
                 fc = fc + 1;
                 if check(T_COMMA) { advance_tok(); }
             }
             advance_tok();
+            ff : ., mut = -1;
+            fi2 : ., mut = 0;
+            loop {
+                if fi2 >= fc { break; }
+                vn := r64(vals, fi2 * 8);
+                ln : ., mut = tok_ln(t);
+                cl : ., mut = tok_cl(t);
+                if vn >= 0 { ln = ast_line(vn); cl = ast_col(vn); }
+                wl := ast_alloc(EXPR_NONE, vn, 0, 0, 0, 0, 0, ln, cl);
+                if fi2 == 0 { ff = wl; }
+                fi2 = fi2 + 1;
+            }
             return alloc_node(EXPR_STRUCTPAT, ni, ff, fc, 0, 0, 0, tok_ln(t), tok_cl(t));
         }
         if is_upper_first(name) {

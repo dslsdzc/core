@@ -278,11 +278,28 @@ fn gen_clone_tree(node: int) -> int {
     // ── EXPR_LET: a=name_ni(NOT), b=type(YES or -1), c=value(YES or -1), d=is_mut(NOT) ──
     if k == EXPR_LET { b2 := gen_clone_tree(b); c2 := gen_clone_tree(c); n := ast_alloc(k, a, b2, c2, iv, tv, d, ln, cl); gen_dedup_add(node, n); return n; }
 
-    // ── EXPR_STRUCT: a=type_name_ni(NOT), b=first_field_idx(NOT), c=field_count(NOT)
-    //     Fields are stored as 2 consecutive AST nodes per field: (name_node, value_node) ──
+    // ── EXPR_STRUCT: a=type_name_ni(NOT), b=first wrapper(YES, consecutive), c=field_count(NOT)；
+    //    wrapper.a = field value node（F5 契约，见 parser.cr struct 字面量分支）──
     if k == EXPR_STRUCT {
         if b >= 0 && c > 0 {
-            new_first := gen_clone_consecutive(b, c * 2);
+            // 字段值先逐个深克隆（各自子树自占槽位），再统建连续 wrapper——
+            // 不得「克隆值后随建 wrapper」逐元素交错：wrapper 将不连续（与 parser 同契约）。
+            nvs : string, mut = alloc(c * 8);
+            i : ., mut = 0;
+            loop {
+                if i >= c { break; }
+                vn : ., mut = -1;
+                if b + i >= 0 { vn = ast_a(b + i); }
+                w64(nvs, i * 8, gen_clone_tree(vn));
+                i = i + 1;
+            }
+            new_first := g_ast_count;
+            i = 0;
+            loop {
+                if i >= c { break; }
+                ast_alloc(EXPR_NONE, r64(nvs, i * 8), 0, 0, 0, 0, 0, ln, cl);
+                i = i + 1;
+            }
             n := ast_alloc(k, a, new_first, c, iv, tv, d, ln, cl);
             gen_dedup_add(node, n); return n;
         }
@@ -290,10 +307,27 @@ fn gen_clone_tree(node: int) -> int {
         gen_dedup_add(node, n); return n;
     }
 
-    // ── EXPR_ARRAY: a=first_elem(YES), b=elem_count(NOT) — elements are consecutive ──
+    // ── EXPR_ARRAY: a=first wrapper(YES, consecutive), b=elem_count(NOT)；
+    //    wrapper.a = element value node（F5 契约，见 parser.cr 下标分支）──
     if k == EXPR_ARRAY {
         if a >= 0 && b > 0 {
-            new_first := gen_clone_consecutive(a, b);
+            // 元素值先逐个深克隆（各自子树自占槽位），再统建连续 wrapper（与 parser 同契约）。
+            nvs : string, mut = alloc(b * 8);
+            i : ., mut = 0;
+            loop {
+                if i >= b { break; }
+                vn : ., mut = -1;
+                if a + i >= 0 { vn = ast_a(a + i); }
+                w64(nvs, i * 8, gen_clone_tree(vn));
+                i = i + 1;
+            }
+            new_first := g_ast_count;
+            i = 0;
+            loop {
+                if i >= b { break; }
+                ast_alloc(EXPR_NONE, r64(nvs, i * 8), 0, 0, 0, 0, 0, ln, cl);
+                i = i + 1;
+            }
             n := ast_alloc(k, new_first, b, c, iv, tv, d, ln, cl);
             gen_dedup_add(node, n); return n;
         }
@@ -353,8 +387,32 @@ fn gen_clone_tree(node: int) -> int {
     // ── EXPR_ENUMPAT: a=name_ni(NOT), b=first_subpat(YES, consecutive), c=subpat_count(NOT) ──
     if k == EXPR_ENUMPAT { b2 := gen_clone_consecutive(b, c); n := ast_alloc(k, a, b2, c, iv, tv, d, ln, cl); gen_dedup_add(node, n); return n; }
 
-    // ── EXPR_STRUCTPAT: a=name_ni(NOT), b=first_field(NOT, consecutive), c=field_count(NOT) ──
-    if k == EXPR_STRUCTPAT { b2 := gen_clone_consecutive(b, c * 2); n := ast_alloc(k, a, b2, c, iv, tv, d, ln, cl); gen_dedup_add(node, n); return n; }
+    // ── EXPR_STRUCTPAT: a=name_ni(NOT), b=first wrapper(YES, consecutive), c=field_count(NOT)；
+    //    wrapper.a = 子模式节点（F5 契约，见 parser.cr struct 模式分支）──
+    if k == EXPR_STRUCTPAT {
+        if b >= 0 && c > 0 {
+            nvs : string, mut = alloc(c * 8);
+            i : ., mut = 0;
+            loop {
+                if i >= c { break; }
+                vn : ., mut = -1;
+                if b + i >= 0 { vn = ast_a(b + i); }
+                w64(nvs, i * 8, gen_clone_tree(vn));
+                i = i + 1;
+            }
+            new_first := g_ast_count;
+            i = 0;
+            loop {
+                if i >= c { break; }
+                ast_alloc(EXPR_NONE, r64(nvs, i * 8), 0, 0, 0, 0, 0, ln, cl);
+                i = i + 1;
+            }
+            n := ast_alloc(k, a, new_first, c, iv, tv, d, ln, cl);
+            gen_dedup_add(node, n); return n;
+        }
+        n := ast_alloc(k, a, b, c, iv, tv, d, ln, cl);
+        gen_dedup_add(node, n); return n;
+    }
 
     // ── EXPR_AT: a=name_ni(NOT), b=args_node(YES or -1) ──
     if k == EXPR_AT { b2 := gen_clone_tree(b); n := ast_alloc(k, a, b2, c, iv, tv, d, ln, cl); gen_dedup_add(node, n); return n; }

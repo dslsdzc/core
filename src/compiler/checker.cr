@@ -2509,7 +2509,10 @@ fn infer_expr(node: int) -> int {
     }
 
     if ast_kind(node) == EXPR_STRUCT {
-        // Struct literal: a = name idx, b = first field value (wrapper), c = field count
+        // Struct literal: a = name idx, b = first field wrapper, c = field count。
+        // F5 契约（见 parser.cr struct 分支）：wrapper 在 g_ast 中连续、wrapper.a=字段值节点；
+        // 逐 wrapper 解引用（infer_expr 对 EXPR_NONE 前向）——直接按偏移取「下一个节点」当字段值
+        // 只在字段值单槽时成立，复合字段值（调用/字面量）会整体错位（静默错误值）。
         name_ni := ast_a(node);
         // Check if struct is generic
         si := find_struct_by_name(name_ni);
@@ -2570,7 +2573,9 @@ fn infer_expr(node: int) -> int {
     }
 
     if ast_kind(node) == EXPR_ARRAY {
-        // Array literal: a = first elem, b = elem count
+        // Array literal（F5 契约，见 parser.cr 下标分支）：a = first wrapper（连续）,
+        // b = elem count；wrapper.a=元素值节点（infer_expr 对 EXPR_NONE 前向）——不得按偏移
+        // 直取相邻节点当元素，复合元素子树占多槽会整体错位（静默错型/错值）。
         elem_ti := TI_INT;
         ei : ., mut = 0;
         en : ., mut = ast_a(node);
