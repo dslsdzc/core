@@ -13,7 +13,16 @@ import hit
 // 定义（含 TA01 级联；与 c138c44c「compiler 单元缺 ent_kernel」同类）。经
 // src/arch/hit/ 跨树回退命中（与 hit 同机制、同目录）。
 import lower_to_core
-import monomorph
+// R2 P3 Task 7 收官修复（2026-09-12）：此处原 `import monomorph`——P3 Task 5 给 monomorph.cr
+// 加的实例键类型项化（inst_key_of_ti/inst_type_node_of_ti 族）引入 checker/parser 层符号
+// （get_type_kind/get_type_data/get_type_extra/alloc_node/alloc_type），project-mode corearch
+// 单元集不含该层 ⇒ 构建 33×error[N06] 静默未定义（rc=0 + 产物照出 ⇒ stage 链互测不可见）；
+// concat 面 build_selfhost_native.py 的 backend_support_files 已同批迁出，唯本文件漏改。
+// 与 concat 面同一证据：monomorph 在 corearch 链接集**零代码引用**（全部定义符只出现在
+// globals.cr 的注释里），单态化本就是前端 ir_gen 期动作。删除本行 = 两面清单重新对齐；
+// 该缺陷的机械守卫 = tests/selfhost/test_backend_bootstrap.py 的 project-mode error[ 门
+// （TODO #31：该套件未挂 CI，收官全量枚举才跑到）。若将来自复活本文件，须先让它不依赖
+// checker/parser 层符号。
 import ccr_io
 import ent_kernel
 // 内核完备 Task 1（调度重建移实例）：build_linear_schedule（regalloc.cr——
