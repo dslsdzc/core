@@ -316,6 +316,9 @@ def main():
         # 数据表 + 只读查询**，零消费者零行为变化（不 alloc g_types 行 ⇒ .ccr 零扰动）。
         # 置于引擎之后、桥接层之前（Task 2 起桥接层委托 iface_by_ty_code）。
         'src/compiler/iface_registry.cr',
+        # R2 P4 Task 0：iface 满足判定簇 + `iface_kind_of` 的 corec-only 宿主（链接面纯化——
+        # type_engine.cr 留纯核、iface_registry.cr 除该函数；corearch 清单**不含**本文件）。
+        'src/compiler/iface_axis.cr',
         # R2 P1 影子对拍桥接层（checker ti → 引擎类型项 + per-ti 缓存 + Task 2 判定挂点）。
         # **corelsp 清单也必须含本层**（Task 2 起 checker.cr 的 type_equal 包装引用
         # sh_compare/sh_site_begin——挂在 checker 上的挂点无法只要 checker 不要影子层；
@@ -405,6 +408,8 @@ def main():
         'src/compiler/type_engine.cr',
         # R2 P2b Task 1：注册表（引擎之后、影子层之前；Task 2 起影子层委托本层）
         'src/compiler/iface_registry.cr',
+        # R2 P4 Task 0：iface 簇 + iface_kind_of（corec-only；checker.cr 经本层消费 iface_kind_of）
+        'src/compiler/iface_axis.cr',
         'src/compiler/ty_shadow.cr',
         'src/compiler/diag.cr',
         'src/compiler/module.cr',

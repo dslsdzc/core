@@ -268,29 +268,7 @@ fn ty_code_to_ti(ty: int) -> int {
     return -1;
 }
 
-// checker 类型行号 → AK_*（-1 = 越界/负）。
-// 分派表 = 侦查 §4.1 的 checker 侧原子宇宙 13 类，与条目表的 ak 列同源。
-// ⚠ P2b Task 2 边界（**勿混**）：桥接层 `sh_native_ak` **不**调本函数——它保留自己的
-// `get_type_kind != TYP_BASE → -1` 门（原生快路径契约：TI_DYN 行经 sh_term_of_ti 的 TYP_DYN
-// 分支，结构/命名行走通用路径），只共用上面的 `iface_by_ty_code` 一张 TY 码表。故本函数对
-// TYP_DYN 行回 AK_DYN、对结构/命名行回其类，而 sh_native_ak 对同样这些行回 -1——「单源化」
-// = 两入口共用**逐项分派表**，不是把两个入口合并成同一语义（type_selftest.cr 的
-// `iface.bridge_gate_kept` 把该差异钉在红）。
-fn iface_kind_of(ti: int) -> int {
-    k := get_type_kind(ti);
-    if k < 0 { return -1; }                       // 负值/越界行（get_type_kind 已做范围闸）
-    if k == TYP_BASE { return iface_by_ty_code(get_type_data(ti)); }
-    if k == TYP_DYN { return AK_DYN; }
-    if k == TYP_NAMED { return AK_NAMED; }
-    if k == TYP_GENERIC_PARAM { return AK_NAMED; }
-    if k == TYP_GENERIC_APPLY { return AK_NAMED; }
-    if k == TYP_ARRAY { return AK_SEQUENCE; }
-    if k == TYP_SLICE { return AK_SEQUENCE; }
-    if k == TYP_REF { return AK_REF; }
-    if k == TYP_PTR { return AK_PTR; }
-    if k == TYP_TUPLE { return AK_PRODUCT; }
-    return -1;                                     // 未知 kind（当前类型表无此情形）
-}
+// iface_kind_of 已移至 iface_axis.cr（R2 P4 Task 0，链接面纯化）
 
 // 原子类 → 规范行（8 原生 = TI_*；结构/命名条目 ti_row = -1 ⇒ 恒 -1）
 fn iface_ti_of(ak: int) -> int {

@@ -26,6 +26,11 @@ def concat_sources():
         # R2 P2b Task 1 本质条目表 + iface_* 查询 API（引擎之后、桥接层之前——与
         # build_selfhost_native.py 的 corec 清单同位）
         'src/compiler/iface_registry.cr',
+        # R2 P4 Task 0：iface 满足判定簇 + iface_kind_of 移入 corec-only 的 iface_axis.cr
+        # （清单漂移的后果 = 本测试 resolver 的 Undefined name 家族：iface_satisfies/
+        # iface_kind_of/iface_find_method/…——实测由本测试捕获，与 concat 面/self-host
+        # 链同源；与 build_selfhost_native.py 的 corec 清单同位）
+        'src/compiler/iface_axis.cr',
         # R2 P1 桥接层（ti → 类型项）——与 build_selfhost_native.py 的 corec 清单同位
         'src/compiler/ty_shadow.cr', 'src/compiler/type_selftest.cr',
         # 效应/纯度修正 Task 1：纯度自测通道（main.cr 的 selftest-purity 调用它）——
