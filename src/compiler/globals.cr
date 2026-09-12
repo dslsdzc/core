@@ -40,10 +40,20 @@ g_generic_constr : string, mut;  g_generic_constr_count : int, mut; g_generic_co
 // `fi * MAX_GENERICS + gi`，若共用同一缓冲，struct/enum 行号与函数行号会互相覆盖）。
 // 键 = `si * MAX_GENERICS + gi`（struct）/ `ei * MAX_GENERICS + gi`（enum），值 = 约束名 ni
 // （-1 = 无约束；稀疏：未写槽不读）。**语义边界**（P3 计划 Task 5）：保留（本表）归 P3a；
-// `T: I` 的**满足判定**走 P2b 注册表 `iface_satisfies`——未交付 ⇒ 用户接口约束在实例化点
-// 一律 -1（不判），只有本质轴（原生类型名约束）可判。见 checker.cr 的 gen_constr_* 段。
+// `T: I` 的**满足判定**走统一入口 `iface_satisfies`（**R2 P3b Task 0 已交付**，type_engine.cr
+// 的轴 C）——实例化点由 `gen_inst_constr_satisfied` 直取真值（本批起**真判定**：可证违反 ⇒
+// TG02 软诊断），函数调用点仍回落既有 check_iface 路径（措辞逐字不动，切换归 Task 6 Step 3）。
+// 见 checker.cr 的 gen_constr_* 段。
 g_sgen_constr : string, mut;     g_sgen_constr_count : int, mut;  g_sgen_constr_cap : int, mut;
 g_egen_constr : string, mut;     g_egen_constr_count : int, mut;  g_egen_constr_cap : int, mut;
+// R2 P3b Task 0（P2b 交接面回补）：**横切轴形状条目表**（名字 ni → 形状类型项），
+// `iface_satisfies` 的轴 A。与 `g_ifaces`（用户接口 = 方法集）平行：本表条目 = 一个**类型项**
+// （如 `sequence` ⇒ `⊤_SEQUENCE`），满足判定 = 一条包含判定（spec §2.2）。
+// 条目由 Task 2 注册（`iface_shape_register`）——**本批零条目**（空表 ⇒ 轴 A 恒 -1 = 不判，
+// 三态纪律不破）。⚠ 注册名须来自**已驻留**的名字 ni（lexer 已 intern 的源码标识符）；
+// 本表初始化路径**不得** `str_intern`（.ccr STR 段硬判据，照 iface_registry.cr 的 name_ni 注）。
+g_iface_shape_names : string, mut;  g_iface_shape_terms : string, mut;
+g_iface_shape_count : int, mut;     g_iface_shape_cap : int, mut;
 // R2 P3 Task 5（Step 4）：调用点泛型绑定侧表（monomorph 实例键类型项化）。
 // 由 checker 的 infer_gen_call 按**被调方泛型形参声明序**登记：每调用点 gc 个槽，值 = 实参
 // 推断出的**类型行 ti**（-1 = 未绑定）。起始下标写入调用节点 `ast_int_val`（调用节点的该槽
@@ -421,6 +431,9 @@ fn reset_frontend_state() {
     // R2 P3 Task 5：三条新侧表与声明表同生命周期（si/ei/调用点下标跨编译复用——不清则
     // 陈旧约束/绑定被新声明命中，静默错判；照 g_generic_constr_count 同址同因）
     g_sgen_constr_count = 0; g_egen_constr_count = 0; g_gen_binds_count = 0;
+    // R2 P3b Task 0：形状条目表与声明表同生命周期（注册名 = 驻留 ni，跨编译复用会命中陈旧条目
+    // ⇒ 静默错判；照 g_sgen_constr_count 同址同因）。`g_strs` 驻留表本身不重置（名字 ni 稳定）。
+    g_iface_shape_count = 0;
     g_global_let_count = 0;
     g_loop_depth = 0; g_scope_depth = 0;
     g_borrow_count = 0; g_holder_count = 0;

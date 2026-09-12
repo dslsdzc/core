@@ -8,10 +8,12 @@ docs/superpowers/specs/2026-09-10-type-interface-unification-design.md §5.2）�
      静默无约束）⇒ 本批登记到结构/枚举侧表，并在**实例化点**（`Box[P]` 的类型解析）判定。
   B. 实例化判定（**本质轴**）：约束名解析为原生/已声明类型 ⇒ `ty_sub(实参项, 约束项)` 三态；
      违反 = `error[TG02]`（软诊断：check rc=1 / build rc=0）+ **非空反例文本**。
-  C. 用户接口约束（`T: I`，I = `interface` 名）= **P3b 交接边界**：满足判定走 P2b 注册表
-     `iface_satisfies`（未交付，P3 计划附录 A.3-①）⇒ 本批一律 **-1 不判**（零诊断）。
-     反面口径：**「不判」≠「不满足」**——本套件把「零诊断」钉住 = 防后续把 -1 静默当 0/1。
-     函数调用点的接口约束走**既有** `check_iface` 名拼接路径（逐字未动，见 t6_S6 组）。
+  C. 用户接口约束（`T: I`，I = `interface` 名）：**P3b Task 0 起 `iface_satisfies` 已交付**
+     （P3 计划附录 B.1 阻塞项解除）⇒ 结构/枚举**实例化点真判定**（可证违反 = TG02 软诊断；
+     正控 = 方法在位不误报）；函数调用点的接口约束仍走**既有** `check_iface` 名拼接路径
+     （措辞/去重/rc 逐字未动；0 → 新措辞的切换归 Task 6 Step 3）。「不判」（-1）仍存在但
+     域收窄 = 非命名实参 / 泛型形参实参 / 签名编码不可判面（登记；覆盖集 =
+     test_iface_satisfies.py）。
   D. F4（形参链导航，TODO #21）：`infer_gen_call` 的 `pn = pn + 1` 落在**类型节点**上
      （每个形参的类型节点在其形参节点之前分配）⇒ 后续形参的声明类型被绕过、未绑定形参被
      凭空绑定。本批修为「前扫到下一个 EXPR_PARAM」——正控 = 旧态假拒现通过；负控 = 真不适配仍拒。
@@ -205,11 +207,19 @@ struct S { a: int }
 fn f[T: Show](a: T) -> int { return 0; }
 fn main() -> int { s := S { a: 1 }; return f(s); }
 """
-STRUCT_IFACE_UNJUDGED = """interface Show { fn show(self) -> int; }
+STRUCT_IFACE_REJECT = """interface Show { fn show(self) -> int; }
 struct Box[T: Show] { v: T }
 struct S { a: int }
 fn g(b: Box[S]) -> int { return 0; }
 fn main() -> int { return 0; }
+"""
+# 结构侧正控：方法在位 ⇒ 满足（P3b Task 0 起实例化点**真判定**——本常量 = 新判定不误报的守门）
+STRUCT_IFACE_ACCEPT = """interface Show { fn show(self) -> int; }
+struct Box[T: Show] { v: T }
+struct S { a: int }
+impl S { fn show(self: S) -> int { return 1; } }
+fn g(b: Box[S]) -> int { return b.v.a; }
+fn main() -> int { return g(Box { v = S { a = 7 } }); }
 """
 UNKNOWN_CONSTR_NAME = """fn f[T: NoSuchThing](a: T) -> int { return 0; }
 fn main() -> int { return f(1); }
@@ -256,8 +266,14 @@ def main():
         # 函数侧：既有路径拒绝（措辞 = interface，与本质轴路径区分）
         case_reject("iface_constr_legacy_reject", IFACE_LEGACY_BAD,
                     ["error[TG02]", "does not satisfy interface 'Show'"]),
-        # 结构侧：**不判**（iface_satisfies 未交付 ⇒ -1 ⇒ 零诊断）——钉住「不判」而非「不满足」
-        case_dual("struct_iface_constr_unjudged", STRUCT_IFACE_UNJUDGED, 0),
+        # 结构侧：**P3b Task 0 起真判定**（`iface_satisfies` 已交付 ⇒ 可证违反 = TG02）。
+        # 本用例原为「不判」钉（P3a 边界，rc=0 零诊断）——**台账：旧 rc=0 → 新 check rc=1 +
+        # error[TG02] + "does not satisfy interface 'Show'"**（收紧，全语料零命中；同族
+        # 覆盖集 = tests/selfhost/test_iface_satisfies.py 17 例）
+        case_reject("struct_iface_constr_violated", STRUCT_IFACE_REJECT,
+                    ["error[TG02]", "does not satisfy interface 'Show'"]),
+        # 结构侧正控：方法在位 ⇒ 满足（新判定不误报；三路同证）
+        case_dual("struct_iface_constr_present_accepted", STRUCT_IFACE_ACCEPT, 7),
         # 约束名不是任何类型/接口 ⇒ 不判（不发明诊断）
         case_dual("unknown_constr_name_unjudged", UNKNOWN_CONSTR_NAME, 0),
         # ── D：F4 形参链（正控 = 修复后绑定正确；负控 = 真不适配仍拒）──

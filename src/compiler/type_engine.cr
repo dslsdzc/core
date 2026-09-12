@@ -610,17 +610,133 @@ fn ty_disjoint(a: int, b: int) -> int {
     return 0;
 }
 
-// ─── R2 P3 Task 0：满足判定入口（**占位**；P3 Task 2/6 接管）───
-// 语义（P3 计划 Task 0「语义边界」）：满足判定 = 左项经**展开层**（ty_shadow.cr 末段：
-// struct → product / enum → sum 域）展开后对**形状项**的包含判定；**等价/包含判定
-// （type_equal 路径）不经本入口**——命名类型在等价面保持原子名义（理由与守门用例见
-// ty_shadow.cr 展开段头注）。
-// 现状 = **恒三态 -1**：P2b 未交付接口条目/满足关系（P3 计划附录 A.3-①），且形状项构造
-// （sh_iface_shape_term）亦为占位（接口签名类型项化归 Task 6）⇒ 无形状项可判。
-// 三态纪律：-1 = 未覆盖/未知，**不得**被消费方当 0（不满足）或 1（满足）用——故本占位
-// 只可能「保守不判」，不可能静默放宽。
-// 接管：P3 Task 2（横切形状：sequence / 可索引 / 可迭代 / product）/ Task 6（用户接口 + impl 契约）。
+// ─── R2 P3b Task 0：满足判定统一入口（P2b 交接契约 ① 的落地）───
+// 语义（spec §2.2/§2.3/§2.5 + P3 计划「与 P2b 的交接面」①）：`iface_satisfies(t_ti, iface_ni)`
+// 是**原生/横切/用户三类同入口**的满足判定；三态 1/0/-1（`-1` = 未覆盖/不判，**禁止**被消费
+// 方当 0（不满足）或 1（满足）用——P0 三态纪律）。
+//
+// 轴分派（**顺序 = 形状 → 接口 → 本质轴**，各自不判时逐级下落，绝无静默折算）：
+//   A 横切形状名：`iface_shape_lookup(iface_ni)`（Task 2 注册；本批空表 ⇒ 恒未命中）
+//     ⇒ 包含判定 `ty_sub(实参项, 形状项)`。形状项由 Task 2 按 spec §2.2 给出（如 `⊤_SEQUENCE`）。
+//   B 本质轴（原生/已声明类型名）：= P3a `gen_constr_satisfied` 的引擎面**逐字同口径**
+//     （`sh_term_of_ti` 桥接 + `ty_sub` + 预算隔离），本函数即该面的统一入口。
+//   C 用户接口名：`find_iface >= 0` ⇒ ① 形状项路由（`sh_iface_shape_term`——Task 6 落地前恒
+//     -1）→ ② 结构谓词 `iface_user_satisfies`（= `check_iface` 同源，见该函数头注）。
+// ⚠ 名字同时命中多轴时按上式**取先命中者**（A > C > B；原生名与接口名同名的撞车面在 C > B
+//   处保持 P3a 现状：`find_iface` 命中即走用户轴，不做本质轴判定）。
+//
+// 预算隔离（照 `type_equal_engine`/`gen_constr_satisfied` 先例）：每次进入引擎前
+// `ty_budget_reset`、返回前再复位——memo 跨查询命中会让结果依赖预算历史（P0 终审 Critical 3）。
+// 本常量 = 与 `gen_constr_satisfied` 同值（两处同为「一遍桥接 + 一次包含判定」的规模；
+// 常量定义在本文件（调用面在其后），`globals.cr` 无 IFACE_* 预算位）。
+IFACE_SAT_BUDGET : int = 200000;
+
 fn iface_satisfies(t_ti: int, iface_ni: int) -> int {
-    if t_ti < 0 || iface_ni < 0 { return -1; }
+    if t_ti < 0 { return -1; }
+    if iface_ni < 0 { return -1; }
+    // ── 轴 A：横切形状名（空表 ⇒ 未命中，落下方轴）──
+    st := iface_shape_lookup(iface_ni);
+    if st >= 0 { return iface_satisfies_term(t_ti, st); }
+    // ── 轴 C：用户接口（`find_iface` 命中 ⇒ 用户轴；不得再落本质轴）──
+    if find_iface(iface_ni) >= 0 {
+        // ① 形状项路由（Task 6 Step 1 签名类型项化 + Step 3 接引擎后生效；当前恒 -1 跳过）
+        shp := sh_iface_shape_term(iface_ni);
+        if shp >= 0 { return iface_satisfies_term(t_ti, shp); }
+        return iface_user_satisfies(t_ti, iface_ni);
+    }
+    // ── 轴 B：本质轴（原生/已声明类型名；非类型名 ⇒ -1 = 不判，不发明诊断）──
+    cti := gen_constr_type_ti(iface_ni);
+    if cti < 0 { return -1; }
+    return iface_satisfies_ti(t_ti, cti);
+}
+
+// ─── 引擎面原语（Task 2 的无名字消费点可直接用 `iface_satisfies_term`）───
+// `实参行 <: 形状项`：桥接失败（行不可译）⇒ -1；否则 `ty_sub` 三态**直传**（-1 上抛）。
+fn iface_satisfies_term(t_ti: int, shape: int) -> int {
+    if t_ti < 0 { return -1; }
+    if shape < 0 { return -1; }
+    a := sh_term_of_ti(t_ti);
+    if a < 0 { return -1; }
+    ty_budget_reset(IFACE_SAT_BUDGET);
+    s := ty_sub(a, shape);
+    ty_budget_reset(IFACE_SAT_BUDGET);
+    return s;
+}
+
+// `实参行 <: 约束行`（本质轴；= gen_constr_satisfied 的引擎面）
+fn iface_satisfies_ti(t_ti: int, cti: int) -> int {
+    if t_ti < 0 { return -1; }
+    if cti < 0 { return -1; }
+    a := sh_term_of_ti(t_ti);
+    b := sh_term_of_ti(cti);
+    if a < 0 || b < 0 { return -1; }
+    ty_budget_reset(IFACE_SAT_BUDGET);
+    s := ty_sub(a, b);
+    ty_budget_reset(IFACE_SAT_BUDGET);
+    return s;
+}
+
+// 方法行查找：`(类型名 ni, 方法名 ni) → mangled 函数名 ni`（-1 = 无此方法）。
+// 数据面 = parser 在 impl 块登记的 `g_methods`（24B/条 {type_ni, method_ni, mangled_ni}，
+// parser.cr 的 impl 分支**唯一**写点）——与 `type_has_method`（`find_func(str_intern("T.m"))`）
+// **同域**：两者判的都是「impl 块声明过 `Type.method`」这一面（等价性守门 = selftest
+// `isat.predicate_same_as_check_iface` 全表对拍 + 行为探针）。
+// ⚠ 本函数**零 str_intern**：查名走表、不构造串——方法缺失（= 判定 0 的路径）不得往 g_strs
+// 追加新串（.ccr STR 段硬判据；`type_has_method` 的 str_intern 只对**已存在**方法名幂等，
+// 对缺失方法名会增长驻留表——本层刻意避开该形态）。
+fn iface_find_method(type_ni: int, method_ni: int) -> int {
+    if type_ni < 0 { return -1; }
+    if method_ni < 0 { return -1; }
+    i : ., mut = 0;
+    loop {
+        if i >= g_method_count { return -1; }
+        if r64(g_methods, i * 24) == type_ni {
+            if r64(g_methods, i * 24 + 8) == method_ni { return r64(g_methods, i * 24 + 16); }
+        }
+        i = i + 1;
+    }
     return -1;
+}
+
+// ─── 轴 C：用户接口的结构谓词（**与 check_iface 同源**）───
+// 判定 = 对接口 I 的**每个方法** m：T 的方法表含 m，且 `fi_param_count` / `fi_return_type`
+// 与 I 的方法条目逐项相等。三态：
+//   · 1 = 全部方法在位且计数/返回码相符（含**零方法接口**的空洞满足）；
+//   · 0 = 方法名不在位 / 参数计数不符 / 返回码不同（**可证违反**——方法名与参数计数为忠实
+//         面；返回码相等/不等按映射层编码解释，见下「覆盖边界」）；
+//   · -1 = T 非命名行（原生/`dyn`/泛型形参/复合构造子——无方法表可查 ⇒ **不判**，绝不因
+//         「查不到」而报 0）；或方法表登记了名字但函数行缺失（表内不一致 ⇒ 不发明违反）。
+//
+// **覆盖边界（登记面，非漏放；解锁 = Task 6 Step 1）**：接口方法签名的参数/返回槽是**映射
+// 层编码**——parser 对接口与 impl 两侧同样取 `unpack_type(类型节点)`（非原生类型节点一律
+// 塌缩为码 0 = `TY_INT`，与 `int` 不可区分；`self`/`&self` 接收者槽两侧均写码 0），故：
+//   · 逐参数类型**不参与**判定（与 `check_iface` 逐字一致；`check_impl_for` 的逐参比对是
+//     声明侧校验，非本谓词面）；
+//   · 返回码比对的语义 = **编码相等**而非类型项等价 ⇒ 命名返回型与 `int` 相互「相等」
+//     （行为探针 `inst_encoding_limit_named_ret_pinned` 把现状钉死）。
+// 这条边界与 P3 计划 B.4-3（命名实参 vs 原生约束 = -1）同族：修复 = 签名类型项化后改由
+// 形状项包含判定承担（本函数上方轴 C ① 的路由即为该切换点）。
+fn iface_user_satisfies(t_ti: int, iface_ni: int) -> int {
+    ii := find_iface(iface_ni);
+    if ii < 0 { return -1; }
+    // 域限定：仅命名行（TYP_NAMED / TYP_GENERIC_APPLY 的基名）有方法表身份；其余 ⇒ 不判。
+    // 用 decl_name_of_ti（展开层的行→声明入口）而非 get_type_name：后者对 TYP_BASE 行会
+    // str_intern 基类型名（本层禁止驻留表增长，见 iface_find_method 注）。
+    tname_ni := decl_name_of_ti(t_ti);
+    if tname_ni < 0 { return -1; }
+    mc := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT);
+    mi : ., mut = 0;
+    loop {
+        if mi >= mc { break; }
+        mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD;
+        m_ni := r64(g_ifaces, mbase + OFF_IFM_NAME);
+        mangled_ni := iface_find_method(tname_ni, m_ni);
+        if mangled_ni < 0 { return 0; }                    // 无此方法 = 可证违反
+        fi := find_func(mangled_ni);
+        if fi < 0 { return -1; }                           // 表内不一致 ⇒ 不判（不发明违反）
+        if fi_param_count(fi) != r64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT) { return 0; }
+        if fi_return_type(fi) != r64(g_ifaces, mbase + OFF_IFM_RET_TI) { return 0; }
+        mi = mi + 1;
+    }
+    return 1;
 }

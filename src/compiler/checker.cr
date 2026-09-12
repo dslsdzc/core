@@ -1034,10 +1034,11 @@ fn check_iface(type_ni: int, iface_ii: int) -> bool {
 // 实例化检查 = `ty_sub(实参, 约束)`；失败给**非空反例**（`tt_witness`）。
 // **本批 = P3a 半边**（P3 计划 Task 5 与「与 P2b 的交接面」表第 4 行）：
 //   · 本质轴（约束项 = 原生/已声明类型名）：`gen_constr_satisfied` 走引擎判定 —— 本批落地；
-//   · 用户轴（`I` 是 `interface` 名）：满足判定须走 P2b 注册表 `iface_satisfies`——**未交付**
-//     （P3 计划附录 A.3-①）⇒ 本层回 **-1 = 不判**；函数调用点**回落既有 `check_iface`
-//     名拼接路径**（行为逐字保持 = 不回归），结构/枚举实例化点则零动作（**登记为 P3b 阻塞面**，
-//     不在本批发明「满足/不满足」）。⇒ 不得据本批「用户接口约束无诊断」推断语义缺失。
+//   · 用户轴（`I` 是 `interface` 名）：满足判定 = `iface_satisfies`（**P3b Task 0 已交付**，
+//     type_engine.cr 的轴 C）。两站点口径分家（**有意**）：函数调用点 `gen_constr_satisfied`
+//     只取 1（0/-1 回落既有 `check_iface` 名拼接路径——措辞/去重/rc 逐字保持，切换归 Task 6
+//     Step 3）；结构/枚举实例化点 `gen_inst_constr_satisfied` 直取真值（0 ⇒ TG02）。
+//     ⇒ 不得据「函数调用点措辞未变」推断判定面未落地。
 // 三态纪律（P0/P1/P2a 继承）：-1 一律**不判**——不得当 0（拒绝）或 1（放行）。
 // 预算隔离照 `ti_subsumes`（引擎 memo 跨查询命中会让结果依赖预算历史）。
 
@@ -1060,11 +1061,21 @@ fn gen_constr_type_ti(c_ni: int) -> int {
     return -1;
 }
 
-// 约束满足三态：1 = 满足 / 0 = 违反 / -1 = **不判**（接口约束 = P3b 未交付 / 名字非类型 /
-// 桥接失败）。三态直传（**不**把 -1 折成 0/1）。
+// 约束满足三态：1 = 满足 / 0 = 违反 / -1 = **不判**（名字非类型/非接口 / 桥接失败）。三态
+// 直传（**不**把 -1 折成 0/1）。
+// R2 P3b Task 0：本函数 = `iface_satisfies` 统一入口的**函数调用点消费者**（P2b 交接契约①）。
 fn gen_constr_satisfied(c_ni: int, arg_ti: int) -> int {
     if c_ni < 0 || arg_ti < 0 { return -1; }
-    if find_iface(c_ni) >= 0 { return -1; }        // 用户轴：iface_satisfies 未交付（P3b 阻塞面）
+    if find_iface(c_ni) >= 0 {
+        // 用户轴（接口名）：`iface_satisfies` 已交付（P3b Task 0）——**1 提前返回**（与回落
+        // 路径结论一致，省一次名拼接/查表）；**0 与 -1 一律落下方既有 `check_iface` 名拼接
+        // 路径**（本层口径 = P3a「函数调用点逐字不动」：措辞/去重/rc 全保持）。0 → 诊断的
+        // 切换（= 走 gen_constr_raise 的新措辞）归 Task 6 Step 3——两处谓词同源（
+        // iface_user_satisfies 与 check_iface 判同一面），故此处**不存在**判定分歧。
+        s := iface_satisfies(arg_ti, c_ni);
+        if s == 1 { return 1; }
+        return -1;
+    }
     cti := gen_constr_type_ti(c_ni);
     if cti < 0 { return -1; }                      // 非类型名（未定义名等）：不判、不发明诊断
     a := sh_term_of_ti(arg_ti);
@@ -1074,6 +1085,16 @@ fn gen_constr_satisfied(c_ni: int, arg_ti: int) -> int {
     s := ty_sub(a, b);
     ty_budget_reset(200000);
     return s;                                      // 1/0/-1 直传
+}
+
+// 实例化点（结构/枚举 `Box[T: I]` 的 `Box[P]`）专用满足判定：**用户轴直取 iface_satisfies
+// 的真值**（不回落）——回落面是函数调用点的消息/去重口径（见 gen_constr_satisfied 注），
+// 与实例化点无关。purpose：本批（P3b Task 0）起 `T: I` 在实例化点**真判定**（此前 = 恒 -1
+// 不判、零诊断——P3a 登记面）。三态直传：-1 = 不判 ⇒ 调用方零动作。
+fn gen_inst_constr_satisfied(c_ni: int, arg_ti: int) -> int {
+    if c_ni < 0 || arg_ti < 0 { return -1; }
+    if find_iface(c_ni) >= 0 { return iface_satisfies(arg_ti, c_ni); }
+    return gen_constr_satisfied(c_ni, arg_ti);
 }
 
 // 反例文本（诊断用）：`实参 \ 约束` 的具体值。三态 -1 / 反例不可得 → ""（**不谎报反例**）。
@@ -1093,6 +1114,14 @@ fn gen_constr_witness_str(arg_ti: int, c_ni: int) -> string {
 // 诊断发射（措辞分派：既有接口路径的措辞/码不动；本路径 = 约束 + 反例）。码沿用
 // EC_TG_BOUND（TG02，软诊断：check rc=1 / build rc=0 —— 与既有约束检查同门，**不新增硬门**）。
 fn gen_constr_raise(arg_ti: int, c_ni: int, line: int, col: int) {
+    // 措辞分派：接口名约束 ⇒ **与既有 check_iface 路径同措辞**（"does not satisfy interface
+    // 'X'"——两站点一致性；接口非类型行 ⇒ 反例项不可得 = 不附反例，不谎报）；类型名约束 ⇒
+    // 既有措辞 + 反例（措辞与反例面 P3a 已交付，逐字未动）。
+    if find_iface(c_ni) >= 0 {
+        msg_i := "Type '" + type_display(arg_ti) + "' does not satisfy interface '" + istr_get(c_ni) + "'";
+        check_error(EC_TG_BOUND, msg_i, line, col);
+        return;
+    }
     msg := "Type '" + type_display(arg_ti) + "' does not satisfy constraint '" + istr_get(c_ni) + "'";
     w := gen_constr_witness_str(arg_ti, c_ni);
     if str_len(w) > 0 { msg = msg + " (counterexample: " + w + ")"; }
@@ -1189,7 +1218,7 @@ fn gen_inst_constr_check(app_node: int, sa: int, ea: int, args: string, arg_coun
         if c_ni >= 0 {
             arg_ti := r64(args, i * 8);
             if arg_ti >= 0 {
-                if gen_constr_satisfied(c_ni, arg_ti) == 0 {
+                if gen_inst_constr_satisfied(c_ni, arg_ti) == 0 {
                     if gen_constr_seen_add(app_node * MAX_GENERICS + i) != 0 {
                         gen_constr_raise(arg_ti, c_ni, ast_line(app_node), ast_col(app_node));
                     }
@@ -1913,8 +1942,9 @@ fn infer_gen_call(fi: int, call_node: int, first_arg: int, arg_count: int) -> in
                     }
                     if concrete_ti >= 0 {
                         // R2 P3 Task 5（Step 3）：先走**本质轴**引擎判定（约束名 = 原生/已声明
-                        // 类型名时 `ty_sub(实参项, 约束项)` + 反例）；用户接口名 ⇒ 该函数回 -1
-                        // ⇒ 落下方既有 check_iface 路径（**逐字未动**，P3b 才换 iface_satisfies）。
+                        // 类型名时 `ty_sub(实参项, 约束项)` + 反例）；用户接口名 ⇒ 0 不在此直取
+                        // （1 走提前返回；0/-1 落下方既有 check_iface 路径——**措辞/去重/rc 逐字
+                        // 未动**，0 → 新措辞的诊断切换归 Task 6 Step 3；见 gen_constr_satisfied 注）。
                         if gen_constr_satisfied(iface_ni, concrete_ti) == 0 {
                             if gen_constr_seen_add(call_node * MAX_GENERICS + gci) != 0 {
                                 gen_constr_raise(concrete_ti, iface_ni, ast_line(call_node), ast_col(call_node));

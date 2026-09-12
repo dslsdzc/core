@@ -173,9 +173,11 @@ fn ts_t5_run() -> int {
          gen_constr_satisfied(t5_ni_int, TI_STR) == 0 &&
          gen_constr_satisfied(t5_ni_str, TI_INT) == 0 &&
          gen_constr_satisfied(t5_ni_nope, TI_INT) == -1), 1);
-    // ③ 用户接口约束 = -1（P3b 交接边界；夹具走真实接口表写入）
+    // ③ 用户接口约束 + **非命名实参** ⇒ -1（P3b Task 0 后仍 -1：域限定——接口方法表只对命名行
+    //    可查，故 `int` 实参不判；**不是**「未交付」。命名实参的判定面见 isat.* 段与
+    //    tests/selfhost/test_iface_satisfies.py）
     t5_if_ii := ts_t5_mk_iface("T5_Show");
-    fails = fails + ts_check("t5.constr_iface_is_unknown_p3b",
+    fails = fails + ts_check("t5.constr_iface_non_named_unjudged",
         (find_iface(str_intern("T5_Show")) == t5_if_ii &&
          gen_constr_satisfied(str_intern("T5_Show"), TI_INT) == -1), 1);
     // ④ 反例文本：失败非空、通过为空（**不谎报**）
@@ -272,6 +274,165 @@ fn ts_t5_run() -> int {
     fails = fails + ts_check("t5.inst_ti_subst_in_clone",
         (t5_f1 >= 0 && t5_f2 == t5_f1 && t5_f3 >= 0 && t5_f3 != t5_f1 && t5_cp_ok == 1), 1);
 
+    return fails;
+}
+
+// ═══════════════ R2 P3b Task 0：`iface_satisfies` 契约用例（isat.*）═══════════════
+// 面（详见 type_engine.cr 的契约头注）：轴分派 A 形状 → C 用户接口 → B 本质轴；三态纪律
+// （-1 不得当 0/1）；轴 C 谓词 = check_iface 同源（方法名在位 + 参数计数 + 返回码）；域限定 =
+// 命名行。**本段主判据 = ① 三态直传（不是「查不到就 0」）② 与 check_iface 逐例对拍
+// ③ 判定路径零 str_intern（.ccr STR 段守卫）④ 形状表注册/覆盖/复位语义。**
+
+// 接口方法条目追加（照 parser 的 interface 分支写点：mbase + name/param_count/ret_ti）
+fn ts_isat_add_method(ii: int, mname: string, pc: int, rt: int) -> int {
+    n := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT);
+    mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + n * ESZ_IFMETHOD;
+    w64(g_ifaces, mbase + OFF_IFM_NAME, str_intern(mname));
+    w64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT, pc);
+    w64(g_ifaces, mbase + OFF_IFM_RET_TI, rt);
+    w64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT, n + 1);
+    return mbase;
+}
+
+// impl 方法登记（**照 parser 的 impl 分支写点**：mangled 函数名 + g_methods 三元组
+// {type_ni, method_ni, mangled_ni}）——夹具须与生产写点同形，否则对拍在两种登记面上空转。
+fn ts_isat_add_impl_method(tname_ni: int, mname: string, pc: int, rt: int) -> int {
+    mn := istr_get(tname_ni) + "." + mname;
+    mangled_ni := str_intern(mn);
+    fi := add_func(mn, pc, rt, 0);
+    grow_methods(g_method_count + 1);
+    w64(g_methods, g_method_count * 24, tname_ni);
+    w64(g_methods, g_method_count * 24 + 8, str_intern(mname));
+    w64(g_methods, g_method_count * 24 + 16, mangled_ni);
+    g_method_count = g_method_count + 1;
+    return fi;
+}
+
+fn ts_isat_b2i(b: bool) -> int { if b { return 1; } return 0; }
+
+// 用例数 = 16（调用方 `total = total + 16` 须同步——增删用例两处一起改）。
+fn ts_isat_run() -> int {
+    fails : ., mut = 0;
+    // ── 夹具：接口 `T0bShow { fn show(pc=1, rt=0) }`；命名行 T0bS（有 show）/ T0bT（无方法）──
+    // rt 码语义 = 映射层编码（0 = TY_INT，见 type_engine.cr 轴 C 注）。
+    isat_ii := ts_t5_mk_iface("T0bShow");
+    ts_isat_add_method(isat_ii, "show", 1, 0);
+    isat_show_ni := str_intern("show");
+    isat_s_ti := alloc_named_type(str_intern("T0bS"));
+    isat_t_ti := alloc_named_type(str_intern("T0bT"));
+    ts_isat_add_impl_method(str_intern("T0bS"), "show", 1, 0);
+    // ① 轴 C 正例：方法在位 + 计数/返回码相符 ⇒ 1（命名行的空洞满足另见 ⑫）
+    fails = fails + ts_check("isat.axis_c_satisfied",
+        iface_satisfies(isat_s_ti, str_intern("T0bShow")), 1);
+    // ② 轴 C 反例：方法名不在位 ⇒ **0**（可证违反——名字面忠实；不是 -1）
+    fails = fails + ts_check("isat.axis_c_missing_method",
+        iface_satisfies(isat_t_ti, str_intern("T0bShow")), 0);
+    // ③ 轴 C 反例：参数计数不符 ⇒ 0
+    isat_c_ti := alloc_named_type(str_intern("T0bC"));
+    ts_isat_add_impl_method(str_intern("T0bC"), "show", 2, 0);
+    fails = fails + ts_check("isat.axis_c_param_count",
+        iface_satisfies(isat_c_ti, str_intern("T0bShow")), 0);
+    // ④ 轴 C 反例：返回码不符（3 = TY_STRING）⇒ 0
+    isat_r_ti := alloc_named_type(str_intern("T0bR"));
+    ts_isat_add_impl_method(str_intern("T0bR"), "show", 1, 3);
+    fails = fails + ts_check("isat.axis_c_ret_code",
+        iface_satisfies(isat_r_ti, str_intern("T0bShow")), 0);
+    // ⑤ 域限定：非命名行（原生 / dyn / 泛型形参）⇒ **不判**（无方法表身份；绝不因「查不到」报 0）
+    isat_dyn_ti := alloc_type(TYP_DYN, 0, 0);
+    isat_gp_ti := alloc_type(TYP_GENERIC_PARAM, str_intern("T0bU"), 0);
+    fails = fails + ts_check("isat.axis_c_non_named_unjudged",
+        ts_isat_b2i(iface_satisfies(TI_INT, str_intern("T0bShow")) == -1 &&
+         iface_satisfies(isat_dyn_ti, str_intern("T0bShow")) == -1 &&
+         iface_satisfies(isat_gp_ti, str_intern("T0bShow")) == -1), 1);
+    // ⑥ 轴 B（本质轴）：= gen_constr_satisfied 引擎面（迁移到统一入口后逐例同结论）
+    fails = fails + ts_check("isat.axis_b_essence",
+        ts_isat_b2i(iface_satisfies(TI_INT, str_intern("int")) == 1 &&
+         iface_satisfies(TI_INT, str_intern("string")) == 0 &&
+         iface_satisfies(TI_INT, str_intern("T0bNoSuchName")) == -1), 1);
+    // ⑦ 轴 A（横切形状）：注册 ⊤_SEQUENCE 名 ⇒ 切片行 1 / 原生行 0；**复位后同键 ⇒ -1**
+    //    （复位断言防「条目泄漏成全局态」；lookup 负键守卫）
+    isat_seq_ti := alloc_type(TYP_SLICE, TI_INT, 0);
+    isat_shape_name := str_intern("T0bShapeSeq");
+    isat_slot := iface_shape_register(isat_shape_name, tt_top_k(AK_SEQUENCE));
+    fails = fails + ts_check("isat.axis_a_shape",
+        ts_isat_b2i(isat_slot == 0 && iface_shape_count() == 1 &&
+         iface_shape_lookup(isat_shape_name) >= 0 &&
+         iface_satisfies(isat_seq_ti, isat_shape_name) == 1 &&
+         iface_satisfies(TI_INT, isat_shape_name) == 0), 1);
+    // ⑧ 轴优先级：同名既是形状又是接口 ⇒ **形状优先**（TI_INT 在形状面可判 0，在用户轴恒 -1
+    //    ⇒ 结果 0 即证明走了轴 A；零方法接口在用户轴本会走 1 的路径也一并在 ⑫ 覆盖）
+    isat_dup_ii := ts_t5_mk_iface("T0bDup");
+    fails = fails + ts_check("isat.axis_order_shape_first",
+        ts_isat_b2i(find_iface(str_intern("T0bDup")) == isat_dup_ii &&
+         iface_shape_register(str_intern("T0bDup"), tt_top_k(AK_SEQUENCE)) >= 0 &&
+         iface_satisfies(TI_INT, str_intern("T0bDup")) == 0), 1);
+    // ⑨ 轴优先级：同名既是接口又是原生类型名 ⇒ **接口优先**（= 现状 gen_constr_satisfied 的
+    //    find_iface 先行；非命名实参 ⇒ -1，**不做**本质轴判定）——P3a 零行为变化面
+    ts_t5_mk_iface("int");
+    fails = fails + ts_check("isat.axis_order_iface_over_essence",
+        ts_isat_b2i(iface_satisfies(TI_INT, str_intern("int")) == -1), 1);
+    // ⑩ 与 check_iface **逐例对拍**（谓词同源的最强守门：三形态 = 满足/计数不符/返回码
+    //    不符；缺方法形态在 ② 与 ⑪ 分别钉住 0 与零驻留表增长）
+    isat_eq := -1;
+    if ts_isat_b2i(check_iface(str_intern("T0bS"), isat_ii)) == iface_satisfies(isat_s_ti, str_intern("T0bShow")) {
+        if ts_isat_b2i(check_iface(str_intern("T0bC"), isat_ii)) == iface_satisfies(isat_c_ti, str_intern("T0bShow")) {
+            if ts_isat_b2i(check_iface(str_intern("T0bR"), isat_ii)) == iface_satisfies(isat_r_ti, str_intern("T0bShow")) {
+                isat_eq = 1;
+            }
+        }
+    }
+    fails = fails + ts_check("isat.predicate_same_as_check_iface", isat_eq, 1);
+    // ⑪ 判定路径**零 str_intern**（.ccr STR 段守卫）：缺失方法名（= 判定 0 的路径）不得把
+    //    新串追加进驻留表——`type_has_method` 的 `str_intern("T.m")` 形态在此会增长表。
+    isat_zz_ti := alloc_named_type(str_intern("T0bZz"));
+    isat_before := g_str_count;
+    iface_satisfies(isat_zz_ti, str_intern("T0bShow"));
+    fails = fails + ts_check("isat.no_str_intern_on_missing",
+        ts_isat_b2i(g_str_count == isat_before), 1);
+    // ⑫ 空洞满足：零方法接口 + 命名行 ⇒ 1；非命名行 ⇒ -1（域限定先于空循环）
+    isat_empty_ii := ts_t5_mk_iface("T0bEmpty");
+    fails = fails + ts_check("isat.empty_iface_vacuous",
+        ts_isat_b2i(find_iface(str_intern("T0bEmpty")) == isat_empty_ii &&
+         iface_satisfies(isat_t_ti, str_intern("T0bEmpty")) == 1 &&
+         iface_satisfies(TI_INT, str_intern("T0bEmpty")) == -1), 1);
+    // ⑬ 泛型应用行：查方法走**基名**（decl_name_of_ti 的 TYP_GENERIC_APPLY 分支）
+    grow_gen_apply_data(g_gen_apply_data_count + 2);
+    isat_ga_s := g_gen_apply_data_count;
+    w64(g_gen_apply_data, isat_ga_s * 8, 1);
+    w64(g_gen_apply_data, (isat_ga_s + 1) * 8, TI_INT);
+    g_gen_apply_data_count = isat_ga_s + 2;
+    isat_ga_ti := alloc_type(TYP_GENERIC_APPLY, isat_s_ti, isat_ga_s);
+    fails = fails + ts_check("isat.generic_apply_base_name",
+        iface_satisfies(isat_ga_ti, str_intern("T0bShow")), 1);
+    // ⑭ 三态 + 预算隔离：不可译行（越界 ti）/负键 ⇒ -1（**不得**当 0/1）；且**成功判定后**
+    //    预算窗口必须干净（g_ty_steps 归零 + 上限 = 本层窗口常量；memo 不复用跨查询历史——
+    //    P0 终审 Critical 3 的口径，同 type_equal_engine/gen_constr_satisfied）
+    ty_budget_reset(200000);
+    isat_bad_ti := g_type_count + 7;
+    // 两条引擎路径：**节点同一快路径**（0 步）+ **非同一比较**（sub_cover 计步 ⇒ 出口复位可观测：
+    // 缺出口复位时 g_ty_steps > 0 即红——MUT4 实证过「只用快路径 = 该断言空转」）
+    isat_ok := iface_satisfies(TI_STR, str_intern("string"));   // 轴 B 快路径（勿用 int——⑨ 已声明同名接口）
+    isat_no := iface_satisfies(TI_INT, str_intern("string"));   // 轴 B 非同一 ⇒ 计步
+    fails = fails + ts_check("isat.three_state_budget_isolated",
+        ts_isat_b2i(isat_ok == 1 && isat_no == 0 && g_ty_steps == 0 && g_ty_budget_max == IFACE_SAT_BUDGET &&
+         iface_satisfies(isat_bad_ti, str_intern("int")) == -1 &&
+         iface_satisfies(TI_INT, isat_bad_ti) == -1 &&
+         iface_satisfies(-1, 0) == -1 && iface_satisfies(TI_INT, -1) == -1 &&
+         iface_satisfies_term(-1, tt_top()) == -1 && iface_satisfies_term(TI_INT, -1) == -1 &&
+         g_ty_exhausted == 0), 1);
+    // ⑮ 形状表语义：覆盖（同名重注册不增长）+ 负键守卫 + 复位（count=0 ⇒ 同键未命中）
+    isat_n := iface_shape_count();
+    fails = fails + ts_check("isat.shape_registry_semantics",
+        ts_isat_b2i(iface_shape_register(isat_shape_name, tt_top_k(AK_SEQUENCE)) == isat_slot &&
+         iface_shape_count() == isat_n &&
+         iface_shape_register(-1, tt_top()) == -1 &&
+         iface_shape_register(isat_shape_name, -1) == -1 &&
+         iface_shape_lookup(-1) == -1 &&
+         iface_shape_lookup(str_intern("T0bNoShape")) == -1), 1);
+    iface_shape_reset();
+    fails = fails + ts_check("isat.shape_registry_reset",
+        ts_isat_b2i(iface_shape_count() == 0 && iface_shape_lookup(isat_shape_name) == -1 &&
+         iface_satisfies(isat_seq_ti, isat_shape_name) == -1), 1);
     return fails;
 }
 
@@ -1436,8 +1597,8 @@ fn type_selftest_run() -> int {
          sh_struct_term(unf_plain_ti) == -1 && sh_enum_domain_term(unf_plain_ti) == -1 &&
          sh_struct_term(unf_loose_gp) == -1), 1);
 
-    // 接口面占位（P2b 未交付条目/满足关系、签名类型项化归 Task 6）：形状项与满足判定一律
-    // 三态 -1——**不得**被消费方当 0/1 用。负键/越界键同律（断言在 Task 2/6 落地后仍成立）。
+    // 接口面负键守门（P3b Task 0 后：`iface_satisfies` 已交付，本用例 = **域外输入守卫**——
+    // 形状项构造仍为 Task 6 占位（-1），负键/未知名键一律三态 -1，**不得**被消费方当 0/1 用）
     total = total + 1; fails = fails + ts_check("unf.iface_stub_three_state",
         (sh_iface_shape_term(-1) == -1 && iface_satisfies(-1, 0) == -1 && iface_satisfies(TI_INT, 9999) == -1), 1);
 
@@ -1828,6 +1989,9 @@ fn type_selftest_run() -> int {
 
     // R2 P3 Task 5 段（用例体在 ts_t5_run——见该函数头注「不得内联」）
     total = total + 9; fails = fails + ts_t5_run();
+
+    // R2 P3b Task 0 段（用例体在 ts_isat_run——同上，不得内联）
+    total = total + 16; fails = fails + ts_isat_run();
 
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }

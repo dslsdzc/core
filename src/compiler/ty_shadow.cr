@@ -869,11 +869,17 @@ fn sh_enum_domain_term(ti: int) -> int {
     return acc;
 }
 
-// 接口 → 形状项（方法集 = product of fn）——**本批为占位，恒 -1**：
-// 现状接口方法签名存**裸 TY_***（parser.cr:1671/1685 的 unpack_type ⇒ 无法表达命名/泛型类型），
-// 且 P2b 未交付接口条目/满足关系（P3 计划附录 A.3-①）⇒ 形状项**无处可建**（建出来即谎报形状）。
-// 接管 = P3 Task 6（签名类型项化 + 条目 + iface_satisfies）。三态纪律：此处 -1 = 未覆盖面，
-// **不得**被消费方当 0（不满足）或 1（满足）用。
+// 接口 → 形状项（方法集 = product of fn）——**仍为占位，恒 -1**（阻塞精确定位见下）：
+// 现状接口方法签名存**裸 TY_***（parser.cr:1671/1685 的 `unpack_type` ⇒ 非原生类型节点一律
+// 塌缩为码 0，无法表达命名/泛型类型）⇒ 形状项**无处可建**（建出来即谎报形状：把「int」与
+// 「任意命名类型」混为一谈）。
+// **P3b Task 0 起**：`iface_satisfies`（type_engine.cr）的轴 C 已把本函数作为**第一路由**——
+// `shp >= 0` 即走 `iface_satisfies_term`（形状项包含判定），否则落 `iface_user_satisfies`
+// （结构谓词 = check_iface 同源）。本函数返回 -1 时**不打断判定**（那是设计上的逐级下落，
+// 非「未交付」）。解锁 = **Task 6 Step 1 签名类型项化**（把 `g_ifaces` 方法条目的裸 TY_* 槽
+// 换成类型节点/类型项；≥16 方法 / ≥8 参数上限同步处置）——到位后本函数按 spec §2.3 的
+// 「方法集 = product of fn」建项，`T: I` 的判定即由形状包含承担（本函数上方的路由已是切换点）。
+// 三态纪律：此处 -1 = 未覆盖面，**不得**被消费方当 0（不满足）或 1（满足）用。
 fn sh_iface_shape_term(iface_ni: int) -> int {
     if iface_ni < 0 { return -1; }
     return -1;

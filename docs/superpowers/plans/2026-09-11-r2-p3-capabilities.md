@@ -77,7 +77,7 @@
 
 **交接契约（要求 P2b 落点提供；若落地形态与此不符 → 停下上报后重定 Task 2/6）**：① `iface_satisfies(t_ti: int, iface_ni: int) -> int`（三态 1/0/-1，不得静默当 0）；② 本质条目留可扩展字段——`操作许可`（P2b 落）与**变型规则**（P3 落；引擎侧表可先在 Task 1 落，条目字段后续挂引用）；③ `res_type_node` 单一化后 `TYP_ARRAY`/`TYP_SLICE`/`TYP_NAMED` 构造语义不得变化（Task 0/1 依赖）。
 
-> **P2b 已落地（2026-09-11，提交链 `7f520dce`→`30545da7`）——本条契约按 P2b 实际交付面重定，实施前必读附录 A**：① **`iface_satisfies` 未交付**（P2b 范围明标「零调用者，P3 落地 impl 语义时才有对象」，见附录 A.3-①）⇒ Task 2/6 与 Task 5 的 `T: I` 满足半边**开工前先补条目 + 满足判定**；② 条目表已落 5 字段 `{ak, ti_row, name_ni, lit_code, ops}`（40B/条，无变型规则字段；`name_ni` 现为 `-1`——.ccr STR 段硬判据，见 A.3-②）⇒ 变型规则无处挂，Task 1 按「引擎侧表先行」口径落地（本计划原文已备此路）；③ 已满足：`res_type_node`/`res_call_type` 经单表 `ty_code_to_ti`，`TYP_ARRAY`/`TYP_SLICE`/`TYP_NAMED` 三构造语义零变化（P2b 全判据 = 零行为变化）。
+> **P2b 已落地（2026-09-11，提交链 `7f520dce`→`30545da7`）——本条契约按 P2b 实际交付面重定，实施前必读附录 A；⚠ 其后的 ① 已被 P3b Task 0 关闭（2026-09-12，见附录 B.1 首注）**：① **`iface_satisfies` 未交付**（P2b 范围明标「零调用者，P3 落地 impl 语义时才有对象」，见附录 A.3-①）⇒ Task 2/6 与 Task 5 的 `T: I` 满足半边**开工前先补条目 + 满足判定**；② 条目表已落 5 字段 `{ak, ti_row, name_ni, lit_code, ops}`（40B/条，无变型规则字段；`name_ni` 现为 `-1`——.ccr STR 段硬判据，见 A.3-②）⇒ 变型规则无处挂，Task 1 按「引擎侧表先行」口径落地（本计划原文已备此路）；③ 已满足：`res_type_node`/`res_call_type` 经单表 `ty_code_to_ti`，`TYP_ARRAY`/`TYP_SLICE`/`TYP_NAMED` 三构造语义零变化（P2b 全判据 = 零行为变化）。
 
 ---
 
@@ -199,11 +199,11 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 |---|---|---|---|---|
 | Task 0 引擎展开层 | ✅ 已交付 | `61d3a8b4` | 纯新增 502/0；用例 212→**229**；零行为变化（72 档三面 diff 空） | `.superpowers/sdd/p3-task0-report.md` |
 | Task 1 定长退役收口 | ✅ 已交付 | `ef61f002` | 用例 229→**249**；收紧 **6** / 放宽 0；修「切片→固定长」静默放宽 | `.superpowers/sdd/p3-task1-report.md` |
-| Task 2 横切接口 | ⛔ 未开工（P3b） | — | 阻塞 = `iface_satisfies` 未交付 | 附录 B.1 |
+| Task 2 横切接口 | ⛔ 未开工（P3b） | — | 阻塞**已解除**（`iface_satisfies` + 形状表注册面 = P3b Task 0 交付；剩 Step 1 条目细化 + Step 3 消费点换位） | 附录 B.1 |
 | Task 3 穷尽性真判定 | ✅ 已交付 | `e9818d62` | 用例 249→**263**；收紧 **6** + 软 1（TM04）；TM03 硬门；新套件 16 例 | `.superpowers/sdd/p3-task3-report.md` |
 | Task 4 联合/可选 | ✅ 已交付 | `c8c7731b` | 用例 263→**279**；收紧 **3** / 放宽 **7**（含挂死修复 2 端）；新套件 12 例 | `.superpowers/sdd/p3-task4-report.md` |
 | Task 5 泛型约束（P3a 半边） | ✅ 已交付 | `9c0a83ec` | 用例 279→**288**；收紧 **3** / 放宽 1 / 实例名忠实化 6；新套件 14 例；`T: I` 半边 = P3b | `.superpowers/sdd/p3-task5-report.md` |
-| Task 6 impl 契约 | ⛔ 未开工（P3b） | — | 阻塞 = `iface_satisfies` 未交付 | 附录 B.1 |
+| Task 6 impl 契约 | ⛔ 未开工（P3b） | — | 阻塞**已解除**（`iface_satisfies` 已交付；其 Step 1 签名类型项化 = `sh_iface_shape_term` 建项的前提） | 附录 B.1 |
 | Task 7 收官（P3a） | ✅ 已交付 | 收官提交 | 全量回归（49/49）+ canary + 台账汇总 + 交接包（附录 B）；**发现并修复 T5 的 project-mode 清单漏改回归**（附录 B.6） | `.superpowers/sdd/p3-task7-report.md` |
 
 ## 自检记录
@@ -312,7 +312,14 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 
 **范围与来源**：P3a = Task 0/1/3/4/5 的**非接口半边**，提交链 `61d3a8b4`→`ef61f002`→`e9818d62`→`c8c7731b`→`9c0a83ec` + 本附录所在收官提交。**P3b 三件全部未开工**：Task 2（横切接口）/ Task 6（impl 契约）/ Task 5 的 `T: I` 满足半边。本附录 = 五份任务报告（`.superpowers/sdd/p3-task{0,1,3,4,5}-report.md`）**逐条聚合**（不重新推导）+ 收官复验；数字出处 = 各报告 §2/§3，复验出处 = 收官报告（`.superpowers/sdd/p3-task7-report.md`）。
 
-### B.1 P3b 阻塞项与接线点（唯一阻塞 = `iface_satisfies` 未交付；附录 A.3-① 状态至今未变）
+### B.1 P3b 阻塞项与接线点（~~唯一阻塞 = `iface_satisfies` 未交付~~ ⇒ **2026-09-12 P3b Task 0 已解除**，状态见本节末「Task 0 交付后」）
+
+> **Task 0 交付后（2026-09-12；报告 = `.superpowers/sdd/p3b-task0-report.md`，提交见其 §11）——逐条对照下表**：
+> - **① `iface_satisfies(t_ti, iface_ni)` 已交付**（`type_engine.cr`，三态 + 每查询预算隔离）＝ **原生/横切/用户三类同入口**，轴分派 **A 横切形状名（表 `iface_shape_*` 已就位，本批空表）→ C 用户接口 → B 本质轴**（轴优先序 A > C > B；同名撞车面：形状优先、接口 vs 原生名**保持 P3a 现状 = 接口优先**）。
+> - **Task 5 的 `T: I` 半边 = 已接线并真判定（实例化点）**：新消费者 `gen_inst_constr_satisfied`（结构/枚举实例化点直取真值 ⇒ 可证违反 = `error[TG02]`「does not satisfy interface 'I'」，与既有函数调用点**同措辞**；软诊断同门同码）。函数调用点 = **1 提前返回 + 0/-1 回落既有 `check_iface`**（措辞/去重/rc 逐字未动）——**0 → 新措辞的切换仍归 Task 6 Step 3**。谓词 = 与 `check_iface` 同源（方法名在位 + 参数计数 + 返回码），域 = 命名行；**非命名/dyn/泛型形参 ⇒ -1 不判**；判定路径零 `str_intern`（`g_methods` 查名，.ccr STR 段守）。
+> - **② Task 2**：形状表的**注册面已就位**（`iface_shape_register/lookup/count/reset` + `iface_satisfies_term` 原语，全在 `iface_registry.cr`）⇒ Step 1 只剩**条目细化**（`sequence`/只读/可写/可索引/可迭代/product 各自形状项——注意 `AK_SEQUENCE` 元素槽**不变**，`<: 序列接口` 的形状项须用 `⊤ₖ` 形而非 `sequence<⊤>` 参数链；本批 selftest `isat.axis_a_shape` 即该形）；Step 3 消费点换位未动（本批未接线，行为零变化）。
+> - **③ Task 6**：**Step 1 签名类型项化仍是其第一步**（本批未做：`g_ifaces` 方法条目仍裸 `TY_*`）；故 `sh_iface_shape_term` **仍恒 -1**（但已是 `iface_satisfies` 轴 C 的**第一路由**：返回 ≥0 即走形状包含，-1 落结构谓词——切换点已就位）。`check_iface`/`check_impl_for`/mangling 未动。
+> - **收紧台账（本批新增）**：结构/枚举实例化点的接口约束违反 **rc=0 零诊断 → check rc=1 + TG02**（6 例，全语料 72 档零命中；`test_generic_constr.py::struct_iface_constr_unjudged` 按台账改为 `..._violated`）。**未覆盖面**：接口签名槽 = 映射层编码（非原生类型塌缩为码 0、`self` 槽两侧均 0）⇒ 逐参数类型不参与、返回码语义 = 编码相等（钉红用例 `inst_encoding_limit_named_ret_pinned`；解锁 = Task 6 Step 1）。**判据**：`selftest-types` **304/304**（+16 `isat.*`）+ 新套件 `test_iface_satisfies.py` 17 例（挂 CI）+ 四套件绿 + ELF canary 逐字节同 + 同源对拍零差异 + 影子全计数 0。
 
 | # | 件 | 阻塞形态（P3a 末实态） | P3a 侧已就位的接线点 |
 |---|---|---|---|

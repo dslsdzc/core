@@ -299,6 +299,76 @@ fn iface_ti_of(ak: int) -> int {
     return r64(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_TI);
 }
 
+// ═══════════════ R2 P3b Task 0：横切轴形状条目表（`iface_satisfies` 的轴 A）═══════════════
+// 语义（spec §2.2）：每条横切接口 = **一个形状类型项**（如 `sequence` ⇒ `⊤_SEQUENCE`、
+// `可索引`/`可迭代`/`product` 各一条），满足判定 = `ty_sub(实参项, 形状项)`——与用户轴/本质轴
+// 共用同一套引擎判定，不另建规则体系。本表 = 形状条目的**唯一数据面**（名字 ni → 类型项）。
+//
+// ⚠ 空表口径（本批 = P3b Task 0 backfill）：**零条目注册** ⇒ 轴 A 恒未命中 ⇒ `iface_satisfies`
+//   落轴 C/B（本批 P3b 的判定面 = 用户接口 + 本质轴）。条目细化（`sequence`/只读/可写/可索引/
+//   可迭代/product 四~六条 + 各自形状项）归 **Task 2 Step 1**（该步的「形状条目细化」原文）；
+//   到位后 `iface_satisfies(t, <形状名 ni>)` 即按包含判定给 1/0/-1，消费点（索引/切片/迭代）
+//   的换位归 Task 2 Step 3。
+//
+// ⚠ 注册名须为**已驻留**的名字 ni：本层**不做任何 `str_intern`**（初始化/查询路径 str_intern
+//   会把新串追加进 g_strs ⇒ .ccr STR 段变——A.3-② 硬约束；源码标识符由 lexer 驻留，调用方
+//   直接传 ni）。表本身不 alloc `g_types` 行、不进 .ccr 序列化 ⇒ 类型段/行号零扰动。
+//
+// 生命周期：count 随 `reset_frontend_state` 清零、cap 保留（缓冲复用）——照 g_sgen_constr 先例。
+// 同名**覆盖**（最后一次注册生效；幂等重注册不增长表）。
+fn iface_shape_grow(needed: int) {
+    if needed <= g_iface_shape_cap { return; }
+    nc : ., mut = g_iface_shape_cap * 2;
+    if nc < 8 { nc = 8; }
+    if nc < needed { nc = needed + 8; }
+    nb := alloc(nc * 8);
+    _dyncpy(g_iface_shape_names, g_iface_shape_cap * 8, nb);
+    g_iface_shape_names = nb;
+    nt := alloc(nc * 8);
+    _dyncpy(g_iface_shape_terms, g_iface_shape_cap * 8, nt);
+    g_iface_shape_terms = nt;
+    g_iface_shape_cap = nc;
+}
+
+// 注册（返回行号；-1 = 参数非法）。name_ni < 0 / term < 0 一律拒绝——**不得**把负值当
+// 「未注册」哨兵写进表（那会让 lookup 把 -1 名字与空槽混淆）。
+fn iface_shape_register(name_ni: int, term: int) -> int {
+    if name_ni < 0 { return -1; }
+    if term < 0 { return -1; }
+    i : ., mut = 0;
+    loop {
+        if i >= g_iface_shape_count { break; }
+        if r64(g_iface_shape_names, i * 8) == name_ni {
+            w64(g_iface_shape_terms, i * 8, term);   // 覆盖（幂等重注册）
+            return i;
+        }
+        i = i + 1;
+    }
+    iface_shape_grow(g_iface_shape_count + 1);
+    w64(g_iface_shape_names, g_iface_shape_count * 8, name_ni);
+    w64(g_iface_shape_terms, g_iface_shape_count * 8, term);
+    g_iface_shape_count = g_iface_shape_count + 1;
+    return g_iface_shape_count - 1;
+}
+
+// 查询：名字 ni → 形状项（-1 = 未注册/参数非法）
+fn iface_shape_lookup(name_ni: int) -> int {
+    if name_ni < 0 { return -1; }
+    i : ., mut = 0;
+    loop {
+        if i >= g_iface_shape_count { return -1; }
+        if r64(g_iface_shape_names, i * 8) == name_ni { return r64(g_iface_shape_terms, i * 8); }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn iface_shape_count() -> int { return g_iface_shape_count; }
+
+// 清空（**仅自测**：形状注册是进程级全局态，自测用例注册后复位，防条目泄漏进后续用例/
+// 编译——LSP 长驻进程内多编译共用本表，生产路径的复位点是 reset_frontend_state）。
+fn iface_shape_reset() { g_iface_shape_count = 0; }
+
 // 类型项 → AK_*（单一原子；非单一 → -1；⊤ₖ → 其 k）。
 // 越界/负项先行拒绝：tt_* 访问器**无范围闸**（约定「调用方保证 0 ≤ i < tt_count()」），
 // 直接喂 -1 会读到表前偏移。
