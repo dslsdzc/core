@@ -10,7 +10,8 @@ Task 3 吸收说明（v6 专属断言退役去向）：
   · test_header_segment_table_and_walk → test_v7_layout_and_walk（同源同断言，
     v7 版已含 reg ≥ 2/EDG 走查/ENT 形状——更强吸收）；
   · test_loader_rejects_non_v7_version → test_v7_loader_rejects_version_ne_7
-    （v7 版覆盖 (6, 5, 8) 三值——更强吸收）；
+    （v7 版覆盖 (6, 5, 8) 三值；R2 P4 Task 1 起合法版本 = 8 ⇒ 坏版本三元组
+    改 (6, 5, 7)——「旧 v7 文件整类拒收」由本用例的 bad_ver=7 承担）；
   · test_ccr_v6_roundtrip_elf → test_v7_roundtrip_elf（同源同期望 + corearch
     直载双跑——更强吸收）；
   · test_ent_real_optmeta_absent → test_v7_ent_real_optmeta_absent（迁移本
@@ -19,13 +20,17 @@ Task 3 吸收说明（v6 专属断言退役去向）：
     test_loader_rejects_root_span_beyond_nod_space /
     test_save_rejects_var_block_misalignment → test_v7_* 同名迁移。
 
-字节真相 = docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md：
+字节真相 = docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md
+（**R2 P4 Task 1 起版本 = 8**：v8 = v7 段表架构的加法扩展（D9/D10）——+TYPE(7)/
+IFACE(8) 两段（空壳，内容面归 Task 2/3）+ version 7→8；文件头/测试名保留「v7」
+字样，语义 = 「v7 段表架构」而非「version 7」）：
   [0]   magic u32 = 0x31524343 ("CCR1")
-  [4]   version u32 = 7
-  [8]   seg_count u32 = 6
+  [4]   version u32 = 8
+  [8]   seg_count u32 = 8
   [12]  reserved u32 = 0
-  [16]  段表 6 × 12B {tag u32, offset u32, size u32}（规范序 tag 1..6）
-  [88]  段体（tag 升序连续）：STR(1) / SYM(2) / NOD(3) / ENT(4) / REG(5) / EDG(6)
+  [16]  段表 8 × 12B {tag u32, offset u32, size u32}（规范序 tag 1..8）
+  [112] 段体（tag 升序连续）：STR(1) / SYM(2) / NOD(3) / ENT(4) / REG(5) / EDG(6)
+        / TYPE(7) / IFACE(8)（后两段 Task 1 空壳 = 计数 u32 = 0，恰 4B）
   STR/SYM/NOD/REG/EDG = v7 布局（Task 1）；ENT = 实记录（Task 2）——28B
   {var_id i32, version u32, def_nod i32, live_start u32, live_end u32（半开 =
   最后使用点 +1）, home i32（恒 -1）, flags u32}——corec 写侧按 v6 §4.1 规则
@@ -79,13 +84,14 @@ COREC = os.path.join(BASE, 'build/corec')
 COREARCH = os.path.join(BASE, 'build/corearch')
 
 MAGIC = 0x31524343  # "CCR1"
-V7 = 7
-SEG_TAGS = [1, 2, 3, 4, 5, 6]  # STR SYM NOD ENT REG EDG
+V7 = 8  # R2 P4 Task 1：v8（v7 段表架构的加法扩展，D10）——常量名/文件名从旧
+        # （「v7」= 段表架构代号；改名的引用面 40+ 处、收益为零）
+SEG_TAGS = [1, 2, 3, 4, 5, 6, 7, 8]  # STR SYM NOD ENT REG EDG TYPE IFACE
 NOD_REC = 36
 ENT_REC = 28
 REG_REC = 24
 EDG_REC = 8
-HEADER_TABLE = 16 + 6 * 12  # 88
+HEADER_TABLE = 16 + 8 * 12  # 112
 
 # 源程序 span 内（pure_add + main 两函数，节点 0..44）期望 EDG 内容——见
 # test_v7_edge_content_small_program 的派生说明。
@@ -126,7 +132,7 @@ class V7File:
         (magic, ver, seg_count, reserved) = struct.unpack_from('<4I', data, 0)
         assert magic == MAGIC, f"bad magic {magic:#x}"
         assert ver == V7, f"expected version {V7}, got {ver}"
-        assert seg_count == 6, f"expected 6 segments, got {seg_count}"
+        assert seg_count == 8, f"expected 8 segments, got {seg_count}"
         assert reserved == 0, f"reserved != 0: {reserved}"
         # Segment table: canonical order, contiguous layout
         self.segs = {}
@@ -894,8 +900,9 @@ def test_v7_loader_rejects_sym_ent_block_mismatch():
 
 
 def test_v7_layout_and_walk():
-    """段表架构：magic/version=7/6 段规范序（EDG=tag 6 必落）/offset 连续/
-    NOD 36B + 邻接域/EDG 段完整走查 == 文件大小。"""
+    """段表架构：magic/version=8/8 段规范序（EDG=tag 6 必落；TYPE=7/IFACE=8
+    空壳——R2 P4 Task 1）/offset 连续/NOD 36B + 邻接域/EDG 段完整走查 ==
+    文件大小。"""
     src = ("fn add(a: int, b: int) -> int { return a + b; }\n"
            "fn main() -> int {\n"
            "    s : ., mut = 0;\n"
@@ -1086,8 +1093,9 @@ def test_v7_edge_content_small_program():
 
 
 def test_v7_loader_rejects_version_ne_7():
-    """v7-only：version 改成 6（v6 读路径退役——旧文件直接拒绝）或任意非 7
-    → corearch 必须拒绝。"""
+    """v8-only（R2 P4 Task 1 起合法版本 = 8）：version 改成 7（**旧 v7 六段
+    文件整类拒收**——D10 的落点：不得静默当「TYPE/IFACE 缺席 = 空表」）或
+    任意非 8 → corearch 必须拒绝。"""
     src = "fn main() -> int { return 42; }\n"
     ccr_path = os.path.join(BASE, 'build/test_v7_reject.ccr')
     try:
@@ -1096,7 +1104,7 @@ def test_v7_loader_rejects_version_ne_7():
         pass
     try:
         corec_ccr(src, ccr_path)
-        for bad_ver in (6, 5, 8):
+        for bad_ver in (7, 6, 5):
             data = bytearray(read_ccr(ccr_path))
             struct.pack_into('<I', data, 4, bad_ver)  # patch version
             bad_path = ccr_path + f'.v{bad_ver}'
@@ -1110,7 +1118,7 @@ def test_v7_loader_rejects_version_ne_7():
             assert 'invalid' in (r.stdout + r.stderr), \
                 f"expected invalid-.ccr error, got: {r.stdout!r} {r.stderr!r}"
     finally:
-        for p in (ccr_path, ccr_path + '.v6', ccr_path + '.v5', ccr_path + '.v8',
+        for p in (ccr_path, ccr_path + '.v7', ccr_path + '.v6', ccr_path + '.v5',
                   os.path.join(BASE, 'build/test_v7_reject.out')):
             try:
                 os.unlink(p)
@@ -1196,7 +1204,8 @@ def test_v7_loader_rejects_edg_count_mismatch():
 def test_v7_roundtrip_elf():
     """v7 落盘 → corec build 全链路（corec save v7 → corearch load v7 → ELF）：
     0+1+2+3+4+5 = 15 → ELF 退出码 15；corearch 直载同文件同结果；中间产物 =
-    v7（version 7/EDG 必落/走查全绿）。"""
+    v7 段表架构（version 8/EDG 必落/走查全绿——R2 P4 Task 1 起 +TYPE/IFACE
+    空壳两段）。"""
     src = ("fn main() -> int {\n"
            "    s : ., mut = 0;\n"
            "    for i in 0..6 { s = s + i; }\n"
@@ -1830,8 +1839,9 @@ def test_v7_cache_hit_restore_path():
         warm = read_ccr(out_warm)
         vc = V7File(cold)
         vw = V7File(warm)
-        # 核心锁：恢复路径下 SYM/NOD/ENT/REG/EDG 五段体逐字节相同
-        for tag in (2, 3, 4, 5, 6):
+        # 核心锁：恢复路径下 SYM/NOD/ENT/REG/EDG + TYPE/IFACE（R2 P4 Task 1
+        # 空壳）七段体逐字节相同
+        for tag in (2, 3, 4, 5, 6, 7, 8):
             assert vc.body(tag) == vw.body(tag), \
                 f"segment {tag} drifted on cache-hit restore"
         # STR：暖表 = 冷表前缀（冷多出尾部 = 无引用内名二次 interning）

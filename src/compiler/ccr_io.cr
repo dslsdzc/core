@@ -2,8 +2,12 @@
 // .ccr binary serialization — the interface between corec (frontend)
 // and corearch (backend).
 //
-// v7 format（serialization v4；v7-only——load 校验 version==7，无 v6 兼容/转换；
-// v6 读路径退役：旧 v6 文件由 version 拒收，无转换工具）
+// v8 format（serialization v5；v8-only——load 校验 version==8，无 v7 兼容/转换；
+// 旧 v7 文件由 version 拒收，无转换工具。v8 = v7 段表架构的**加法扩展**
+// （R2 P4 Task 1，D9/D10）：+ TYPE(7)/IFACE(8) 两段（内容面归 Task 2/3，本
+// 任务落空壳）+ CCR_VERSION 7→8（留 7 会让旧 6 段文件被静默读成「两段缺席 =
+// 空表」——正是三态纪律要消灭的静默类）。规范序闸 tg == ri+1 与段体连续闸
+// 形状不变（D9 取 7/8 而非 9/10 的直接收益：加段成本 = 闸界 6→8 一处））
 // 字节真相 = docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md（设计定稿
 // ——在 v6 段表架构上扩展：NOD 36B 邻接 + EDG 段必落 + ENT 实记录（Task 2：
 // corec 产时重建——直调内核 compute_live_ranges（ent_kernel.cr 单源化，见 save_ccr））
@@ -26,9 +30,9 @@
 //   (d) REG 由「可缺」升为必备（load 拒绝无 REG 的文件——函数指令边界唯一
 //       真源）；ENT 仍可缺（v5 精神：旧段缺失 = 空）。
 // 全整数 LE；offset 相对文件头：
-//   [header 16B]: magic u32 = "CCR1" | version u32 = 7 | seg_count u32 = 6 |
+//   [header 16B]: magic u32 = "CCR1" | version u32 = 8 | seg_count u32 = 8 |
 //                 reserved u32 = 0
-//   [seg table 6×12B]: {tag u32, offset u32, size u32}——规范序（tag = 行号 1..6，
+//   [seg table 8×12B]: {tag u32, offset u32, size u32}——规范序（tag = 行号 1..8，
 //                 offset = 上一段尾，段体紧随段表连续排列）
 //   [seg bodies]（按段表寻址）:
 //     STR(1) 字符串表：  [str_count u32] [× {len u32, data}]（同 v5）
@@ -90,6 +94,20 @@
 //                        def_nod ∈ [enter_nod, exit_nod) 归属 region（定值点
 //                        升序 → 文件条目序连续一段）；根 region（kind=SG_FUNC）
 //                        = 整个函数条目块（含 def=-1 参数条目）；无条目 = -1。
+//     TYPE(7) 类型面（R2 P4 Task 1 空壳 = [row_count u32 = 0]；内容面归
+//                        Task 2：D12 两小节 = 类型行表 24B/条 {kind,data,extra}
+//                        + 类型项 DAG 40B/条 {tag,a..d}，哈希不落盘（加载
+//                        侧 tt_hash5 重算）。**段序 7/8 的数值权威 = 本文件
+//                        段序**（D9；format spec §2 的 `9+` 预留顺移驱逐
+//                        标注段/证书段——两段代码零实现，仅注释冲突）
+//     IFACE(8) 接口面（R2 P4 Task 1 空壳 = [native_count u32 = 0]；内容面归
+//                        Task 3：D14 五小节 = 原生条目/横切形状/用户接口签名
+//                        项/impl 边/方法表）
+//                        Task 1 空壳纪律：段体恒 4B count = 0；loader 对
+//                        count != 0 或段体非 4B **拒绝**（内容面落地前不接受
+//                        外部半成品——不得静默当空表，三态纪律 C.5-3）。
+//                        两段必备（D11：have7/have8 == 0 → 拒绝）——可选段 =
+//                        两种 .ccr 在野 = 静默降级面。
 // 载荷约定（corec → corearch）：NOD 段 = v5 instrs 坐标化（字段同布局）——
 // corearch 消费路径不变（硬约束）；ENT 由 corearch 加载校验，发射不依赖。
 // 内存态重建（load 后 = 本文件字节的投影，ELF 发射语义零变化）：g_ir_vars 行
@@ -104,8 +122,10 @@
 // No bitwise ops in Core — use arithmetic instead.
 
 CCR_MAGIC : int = 827474755;  // "CCR1" (0x31524343)
-CCR_VERSION : int = 7;        // v7-only（load 校验 ==7；v6 读路径退役——拒 version≠7）
-CCR_SEG_COUNT : int = 6;      // STR SYM NOD ENT REG EDG（规范序 tag 1..6；预留 7+ 不占空间）
+CCR_VERSION : int = 8;        // v8-only（load 校验 ==8；拒 version≠8——D10：v7 六段文件整类拒收，不得静默当「两段缺席 = 空表」）
+CCR_SEG_COUNT : int = 8;      // STR SYM NOD ENT REG EDG TYPE IFACE（规范序 tag 1..8；预留 9+ 不占空间——D9：原 7/8 预留段顺移）
+CCR_SEG_TYPE : int = 7;       // TYPE 段 tag（数值权威 = 段序；D9）
+CCR_SEG_IFACE : int = 8;      // IFACE 段 tag（D9）
 
 // On-disk NOD record size: 7 × i32 + 邻接 2 × u32 = 36 bytes — v7 spec §3.3
 // {op, dest, s1(i64), src2, src3, tk, first_edge, edge_count}（v5 28B 语义字段
@@ -335,7 +355,19 @@ fn ccr_reg_seg_size() -> int {
     return 4 + g_sg_count * ESZ_SG_DISK;
 }
 
-// --- Size calculation（v7：16B header + 6×12B seg table + 各段体）---
+// R2 P4 Task 1：TYPE(7)/IFACE(8) **空壳**段体 = 计数 u32 = 0（恰 4B）。内容面
+// 归 Task 2/3（D18：段体构造 = corec-only ccr_types.cr，本文件保持共享层纯度
+// ——ccr_io.cr 同时在 corearch 清单内，任何前端符号引用 = corearch N06 静默
+// 未定义）；届时本两函数扩为「4 + 段体缓冲长度」并由 save_ccr 搬运缓冲。
+fn ccr_type_seg_size() -> int {
+    return 4;
+}
+
+fn ccr_iface_seg_size() -> int {
+    return 4;
+}
+
+// --- Size calculation（v8：16B header + 8×12B seg table + 各段体）---
 // edge_total = EDG 记录总数（save_ccr 先行收集，见 ccr_collect_edges）。
 
 fn calc_ccr_size(edge_total: int) -> int {
@@ -346,6 +378,8 @@ fn calc_ccr_size(edge_total: int) -> int {
     sz = sz + ccr_ent_seg_size();
     sz = sz + ccr_reg_seg_size();
     sz = sz + ccr_edg_seg_size(edge_total);
+    sz = sz + ccr_type_seg_size();
+    sz = sz + ccr_iface_seg_size();
     return sz;
 }
 
@@ -517,14 +551,18 @@ fn save_ccr(path: string) -> int {
     s4 := ccr_ent_seg_size();
     s5 := ccr_reg_seg_size();
     s6 := ccr_edg_seg_size(edge_total);
+    s7 := ccr_type_seg_size();    // R2 P4 Task 1：空壳（4B）
+    s8 := ccr_iface_seg_size();   // R2 P4 Task 1：空壳（4B）
 
-    // Seg table（6 × 12B；offset = 前段尾，从段表后起；规范序 tag 1..6）
+    // Seg table（8 × 12B；offset = 前段尾，从段表后起；规范序 tag 1..8）
     o1 : ., mut = 16 + CCR_SEG_COUNT * 12;
     o2 : ., mut = o1 + s1;
     o3 : ., mut = o2 + s2;
     o4 : ., mut = o3 + s3;
     o5 : ., mut = o4 + s4;
     o6 : ., mut = o5 + s5;
+    o7 : ., mut = o6 + s6;
+    o8 : ., mut = o7 + s7;
 
     buf_write_u32(buf, pos, 1); buf_write_u32(buf, pos + 4, o1); buf_write_u32(buf, pos + 8, s1); pos = pos + 12;
     buf_write_u32(buf, pos, 2); buf_write_u32(buf, pos + 4, o2); buf_write_u32(buf, pos + 8, s2); pos = pos + 12;
@@ -532,6 +570,8 @@ fn save_ccr(path: string) -> int {
     buf_write_u32(buf, pos, 4); buf_write_u32(buf, pos + 4, o4); buf_write_u32(buf, pos + 8, s4); pos = pos + 12;
     buf_write_u32(buf, pos, 5); buf_write_u32(buf, pos + 4, o5); buf_write_u32(buf, pos + 8, s5); pos = pos + 12;
     buf_write_u32(buf, pos, 6); buf_write_u32(buf, pos + 4, o6); buf_write_u32(buf, pos + 8, s6); pos = pos + 12;
+    buf_write_u32(buf, pos, CCR_SEG_TYPE); buf_write_u32(buf, pos + 4, o7); buf_write_u32(buf, pos + 8, s7); pos = pos + 12;
+    buf_write_u32(buf, pos, CCR_SEG_IFACE); buf_write_u32(buf, pos + 4, o8); buf_write_u32(buf, pos + 8, s8); pos = pos + 12;
 
     // === STR: strings ===
     buf_write_u32(buf, pos, g_str_count); pos = pos + 4;
@@ -820,6 +860,11 @@ fn save_ccr(path: string) -> int {
         ei3 = ei3 + 1;
     }
 
+    // === TYPE(7)/IFACE(8)：空壳段体（R2 P4 Task 1——计数 = 0；内容面归
+    // Task 2/3，届时本处改为搬运 ccr_types.cr 预生成的段体缓冲，D18）===
+    buf_write_u32(buf, pos, 0); pos = pos + 4;   // TYPE row_count = 0
+    buf_write_u32(buf, pos, 0); pos = pos + 4;   // IFACE native_count = 0
+
     // Use syscall directly (write_file uses str_len which stops at null)
     fd := syscall3(2, path, 577, 420);  // open(O_WRONLY|O_CREAT|O_TRUNC, 0644)
     if fd < 0 { return -1; }
@@ -843,8 +888,10 @@ fn inject_var_shift() -> int {
     return 0;
 }
 
-// --- Load（v7-only：校验 Header + 段表规范布局 + 逐段越界拒绝；version ≠ 7
-// = v6 读路径退役——拒绝）---
+// --- Load（v8-only：校验 Header + 段表规范布局 + 逐段越界拒绝；version ≠ 8
+// = v7 读路径退役——拒绝。R2 P4 Task 1：段表 = 8 段规范序（加段成本 = 闸界
+// 6→8 一处，规范序/连续闸形状不变——D9），TYPE/IFACE 必落（D11）+ 空壳期
+// 内容校验（计数 = 0 且段体恰 4B））---
 // 内核完备 Task 1（语义对象模型）：loader 产出 = 语义对象载入 + 守卫——
 // NOD→g_ir_instrs 线性重建段移出（调度重建 = 实例事务 build_linear_schedule，
 // regalloc.cr；入口 = corearch.cr / 组合根 src/targets/x86_64-linux/main.cr
@@ -854,7 +901,8 @@ fn inject_var_shift() -> int {
 // 缓冲 g_v7_nod_sem（对象留存形态裁决 (a)，邻接域入 g_v7_nod_meta——不再写
 // 线性流）→ ENT（28B → 内存 24B 表，去掉 version、live_end 半开转回闭区间
 // −1；块界与 SYM func first/last 对照）→ EDG（邻接连续段校验 + 拓扑不变量
-// + 入 g_v7_edges 缓冲）。守卫消费 = NOD 计数（局部 instr_cnt）+ 邻接域
+// + 入 g_v7_edges 缓冲）→ TYPE/IFACE（R2 P4 Task 1 空壳：计数 = 0 且段体恰
+// 4B，非空拒绝——内容面归 Task 2/3）。守卫消费 = NOD 计数（局部 instr_cnt）+ 邻接域
 // （g_v7_nod_meta）+ REG 派生边界——全程零线性流（iri_*/g_ir_instrs）依赖。
 // 内存态（g_ir_vars 行 id=行序 / g_ir_globals var_idx=行序 / func 七数组 /
 // g_sgs）与 v6 加载结果逐字节一致；线性流由 build_linear_schedule 从对象
@@ -884,10 +932,13 @@ fn load_ccr(data: string, fsize: int) -> int {
     // loader 按规范序校验，非规范布局一律拒绝。）
     seg_off1 : ., mut = 0; seg_off2 : ., mut = 0; seg_off3 : ., mut = 0;
     seg_off4 : ., mut = 0; seg_off5 : ., mut = 0; seg_off6 : ., mut = 0;
+    seg_off7 : ., mut = 0; seg_off8 : ., mut = 0;
     seg_end1 : ., mut = 0; seg_end2 : ., mut = 0; seg_end3 : ., mut = 0;
     seg_end4 : ., mut = 0; seg_end5 : ., mut = 0; seg_end6 : ., mut = 0;
+    seg_end7 : ., mut = 0; seg_end8 : ., mut = 0;
     have1 : ., mut = 0; have2 : ., mut = 0; have3 : ., mut = 0;
     have4 : ., mut = 0; have5 : ., mut = 0; have6 : ., mut = 0;
+    have7 : ., mut = 0; have8 : ., mut = 0;
     cursor : ., mut = 16 + seg_cnt * 12;
     ri : ., mut = 0;
     loop {
@@ -896,7 +947,7 @@ fn load_ccr(data: string, fsize: int) -> int {
         tg := buf_read_u32(data, pos); pos = pos + 4;
         soff := buf_read_u32(data, pos); pos = pos + 4;
         ssz := buf_read_u32(data, pos); pos = pos + 4;
-        if tg < 1 || tg > 6 { return -1; }
+        if tg < 1 || tg > CCR_SEG_COUNT { return -1; }
         if tg != ri + 1 { return -1; }              // 规范 tag 序
         if soff != cursor { return -1; }            // 段体连续
         if ssz > fsize - cursor { return -1; }      // 越界拒绝
@@ -907,6 +958,8 @@ fn load_ccr(data: string, fsize: int) -> int {
         if tg == 4 { if have4 != 0 { return -1; } seg_off4 = soff; seg_end4 = soff + ssz; have4 = 1; }
         if tg == 5 { if have5 != 0 { return -1; } seg_off5 = soff; seg_end5 = soff + ssz; have5 = 1; }
         if tg == 6 { if have6 != 0 { return -1; } seg_off6 = soff; seg_end6 = soff + ssz; have6 = 1; }
+        if tg == CCR_SEG_TYPE { if have7 != 0 { return -1; } seg_off7 = soff; seg_end7 = soff + ssz; have7 = 1; }
+        if tg == CCR_SEG_IFACE { if have8 != 0 { return -1; } seg_off8 = soff; seg_end8 = soff + ssz; have8 = 1; }
         cursor = soff + ssz;
         ri = ri + 1;
     }
@@ -915,8 +968,11 @@ fn load_ccr(data: string, fsize: int) -> int {
     // 唯一真源，REG 缺段无法重建函数边界）；EDG v7 必落（spec §3.4——文件
     // 语义载体 = NOD+EDG，缺边段 = 格式不一致拒绝）；ENT 可缺（v5 精神：
     // 旧段缺失 = 空表——Task 2 起 corec 恒产实记录，缺段等价空 = loader
-    // 兼容语义保留）
+    // 兼容语义保留）；TYPE/IFACE 必备（R2 P4 Task 1，D11——可选段 = 两种
+    // .ccr 在野 = 任何消费者都要处理缺席 = 静默降级面；本阶段承诺即
+    // 「信息恒随载体」，与 ENT 的可选先例不同源）
     if have1 == 0 || have2 == 0 || have3 == 0 || have5 == 0 || have6 == 0 { return -1; }
+    if have7 == 0 || have8 == 0 { return -1; }
     if have4 == 0 { seg_off4 = 0; seg_end4 = 0; }
 
     // 状态重置（corearch 单次加载；保持可重入）
@@ -933,6 +989,8 @@ fn load_ccr(data: string, fsize: int) -> int {
     g_entry_count = 0;
     g_v7_edge_count = 0;
     g_v7_nod_count = 0;   // 内核完备 Task 1：NOD 对象缓冲计数（NOD 段载入后置位）
+    // R2 P4 Task 1：TYPE/IFACE 空壳无新内存表（内容面 Task 2/3 起在此复位
+    // g_types 行表 + 项层 g_type_terms/g_tt_index）——本任务复位面零变化
 
     // === STR: strings ===
     pos = seg_off1;
@@ -1423,6 +1481,22 @@ fn load_ccr(data: string, fsize: int) -> int {
     }
     if run_off != edg_cnt { return -1; }         // ② Σ edge_count == edg_count
     if pos != seg_end6 { return -1; }            // ② 行走完 == 段体大小
+
+    // === TYPE(7)/IFACE(8)：空壳段体校验（R2 P4 Task 1）===
+    // 空壳期纪律（三态纪律 C.5-3）：段体恒 = 计数 u32 = 0 且恰 4B。非零计数 =
+    // 内容面落地前的外部半成品 ⇒ **拒绝**（不得静默当空表/当 0——D11 同时保证
+    // 两段必备，本处保证「有段但空」不含未定义内容）。内容面（Task 2/3）落地
+    // 时本两段改为按 D12/D14 解析并重建内存表，本处空壳校验随之退役。
+    pos = seg_off7;
+    if !ccr_has_bytes(pos, 4, seg_end7) { return -1; }
+    type_cnt := buf_read_u32(data, pos); pos = pos + 4;
+    if type_cnt != 0 { return -1; }
+    if pos != seg_end7 { return -1; }            // 段体恰一个 u32（无尾随字节）
+    pos = seg_off8;
+    if !ccr_has_bytes(pos, 4, seg_end8) { return -1; }
+    iface_cnt := buf_read_u32(data, pos); pos = pos + 4;
+    if iface_cnt != 0 { return -1; }
+    if pos != seg_end8 { return -1; }
 
     return 0;
 }

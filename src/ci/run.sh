@@ -72,6 +72,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_iface_ops.py     # R2 P2b Task 4/5/6：接口查表接线（算术/逻辑/条件三门 + 索引兜底门 + TY→TI 单表合一；正控/负控/登记面/站点域 76 例）
     python3 tests/selfhost/test_purity.py          # 效应/纯度批判据（真纯度 13 例 + 链语义 4 例的自测通道驱动）
     python3 tests/selfhost/test_ccr_v7.py          # 效应/纯度批 Task 3：.ccr 层三条边集语义断言（取代「与旧版逐字节同」）
+    python3 tests/selfhost/test_ccr_types.py       # R2 P4 Task 1：段机制（TYPE=7/IFACE=8 空壳 + 版本 8 + loader 三闸/必备集 + 旧 v7 文件拒收）9 例
     python3 tests/selfhost/test_impl.py
     python3 tests/selfhost/test_borrow.py
     python3 tests/selfhost/test_pointer_safety.py

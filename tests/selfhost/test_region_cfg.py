@@ -252,10 +252,11 @@ def ccr_walk(path: str):
     seg_count = u32()
     reserved = u32()
     assert reserved == 0
-    # Segment table: canonical order (STR SYM NOD ENT REG EDG), contiguous bodies
+    # Segment table: canonical order (STR SYM NOD ENT REG EDG TYPE IFACE),
+    # contiguous bodies（R2 P4 Task 1 起 8 段——TYPE/IFACE 空壳）
     segs = {}
     cur = 16 + seg_count * 12  # first body follows the whole table
-    for tag in (1, 2, 3, 4, 5, 6):
+    for tag in (1, 2, 3, 4, 5, 6, 7, 8):
         t = u32()
         off = u32()
         size = u32()
@@ -295,7 +296,8 @@ def ccr_walk(path: str):
     return ver, sg_count, len(d), cur
 
 def test_ccr_v6_reg_section():
-    """.ccr 序列化 v7（Task 1 机械更新，version==7）：段表架构，REG 段（tag 5）含 func+for 两个 region"""
+    """.ccr 序列化 v7 段表架构（Task 1 机械更新；R2 P4 Task 1 起 version==8，
+    8 段）：REG 段（tag 5）含 func+for 两个 region"""
     src = "fn main() -> int {\n    s : ., mut = 0;\n    for i in 0..3 { s = s + i; }\n    return s;\n}\n"
     with tempfile.NamedTemporaryFile('w', suffix='.cr', delete=False) as f:
         f.write(src)
@@ -310,7 +312,7 @@ def test_ccr_v6_reg_section():
     os.unlink(path)
     assert r.returncode == 0, f"ccr failed: {r.stderr}"
     ver, sg_count, fsize, end = ccr_walk(ccr_path)
-    assert ver == 7, f"expected .ccr version 7, got {ver}"
+    assert ver == 8, f"expected .ccr version 8, got {ver}"
     assert sg_count is not None and sg_count >= 2, \
         f"expected REG segment with >=2 regions (func+for), got {sg_count}"
     assert end == fsize, f"format walk ended at {end} of {fsize} bytes"
