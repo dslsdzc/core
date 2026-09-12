@@ -124,11 +124,11 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 
 **依赖**：P2b 注册表的 `iface_satisfies` 与横切轴条目（交接契约 ①）。若 P2b 只落本质轴操作许可（lead 描述的窄版本），本任务 Step 1 先补横切轴条目再接线，并在报告登记范围扩大。
 
-- [ ] **Step 1: 形状条目细化（spec §2.2 的「待细化」）**：`序列接口` ⟺ `sequence<⊤>`；**只读/可写两形状**（只读 = 协变、可写 = 不变，与 Task 1 变型表同源）；`可索引`/`可迭代`/`product` 三条目首版（形状项 = 对应 AK 的 ⊤ 实例化）。
-- [ ] **Step 2: 用例（红）6 例**：数组/切片满足序列接口（正）；int 不满足（负）；只读形状接受数组与切片、可写形状拒绝只读视图；`可索引` 对字符串（TI_STR 索引已支持，checker.cr:2619-2633）正控；接口形状项不可展开 → -1（不得当 0）。
-- [ ] **Step 3: 消费点接线**：索引（checker.cr:2581-2636）/切片（:2586-2602）的 `get_type_kind` 直比改为「形状满足 + 元素项取出」；**行为保持**（既有接受/拒绝集合不变，仅来源换位——如出现差异按收紧清单登记）。
-- [ ] **Step 4: 判据**：`selftest-types` ≥109 → **≥115**；影子对拍复跑（站点 8/5/7 主流量：**判定数应不变**，agree 全绿）；行为探针：数组/切片/字符串索引全部正例 + 负例（`int` 索引拒绝）；ELF canary IDENTICAL；全回归。
-- [ ] **Step 5: 提交**：`feat: R2 P3 Task 2——横切接口接线（序列/可索引/可迭代/product 形状满足判定取代 TYP_* 直比；只读协变/可写不变两形状）`
+- [x] **Step 1: 形状条目细化（spec §2.2 的「待细化」）**：`序列接口` ⟺ `sequence<⊤>`；**只读/可写两形状**（只读 = 协变、可写 = 不变，与 Task 1 变型表同源）；`可索引`/`可迭代`/`product` 三条目首版（形状项 = 对应 AK 的 ⊤ 实例化）。——**已交付（2026-09-12）**：六条形状项 = `iface_registry.cr` 横切形状段（`sh_shape_seq` / `sh_shape_seq_ro` / `sh_shape_seq_rw` / `sh_shape_indexable` / `sh_shape_iterable` / `sh_shape_product`）。**两处按实测重定**：① 「`sequence<⊤>`」按 Task 0 §1.3 勘误落 **`⊤ₖ` 类别形**（不变槽遇 ⊤ 落 -1）；② 只读形状 = 序列本体 ∪ **只读视图**（`&[⊤ₖ(SEQ)]`，协变槽判定）——「只读 = 协变」在**视图面**兑现，可写形状 = 本体面 + 拒绝只读视图，可写**视图**形状不可表达（-1，登记）。**名字面**：生产路径不注册（注册名 = 驻留 ni，初始化路径 `str_intern` 会动 `.ccr` STR 段 = A.3-② 硬约束）⇒ 消费者走无名字入口 `iface_satisfies_term`；命名消费语法待裁决。
+- [x] **Step 2: 用例（红）6 例**：数组/切片满足序列接口（正）；int 不满足（负）；只读形状接受数组与切片、可写形状拒绝只读视图；`可索引` 对字符串（TI_STR 索引已支持，checker.cr:2619-2633）正控；接口形状项不可展开 → -1（不得当 0）。——**已交付**：15 例（`x2.*`，两路咬合：形状判定 + 两条**全类型行枚举**等价；含非同一比较断言防快路径冒充判定、零 `str_intern` 守门、注册/复位泄漏守门）。
+- [x] **Step 3: 消费点接线**：索引（checker.cr:2581-2636）/切片（:2586-2602）的 `get_type_kind` 直比改为「形状满足 + 元素项取出」；**行为保持**（既有接受/拒绝集合不变，仅来源换位——如出现差异按收紧清单登记）。——**已交付**：索引兜底门 → 可索引形状（-1 回落许可表）；range 分支 → 序列形状 ∧ 固定性位（取自序列项 b 槽，`sh_seq_fixed_len_of_ti`）。结果三分支原地保留（A.2 #16-18）。**差异 = 0**（收紧/放宽皆 0；12 例老/新两二进制逐例同 + 全语料 check 面零差异）。
+- [x] **Step 4: 判据**：`selftest-types` ≥109 → **≥115**；影子对拍复跑（站点 8/5/7 主流量：**判定数应不变**，agree 全绿）；行为探针：数组/切片/字符串索引全部正例 + 负例（`int` 索引拒绝）；ELF canary IDENTICAL；全回归。——**已交付（按 P3a/P3b-T0 后基线重定阈值）**：`selftest-types` 304 → **319/319**；影子对拍全计数 0（判定数变化逐条归因 = 新源码行自身站点）；新套件 12 例挂 `run.sh`；ELF canary `95084e7b…d475` + `.ccr` 逐字节同；全回归 + 自举链 + 突变控制。
+- [x] **Step 5: 提交**：`feat: R2 P3 Task 2——横切接口接线（序列/可索引/可迭代/product 形状满足判定取代 TYP_* 直比；只读协变/可写不变两形状）`
 
 ## Task 3（P3a）：穷尽性真判定——match 补集空性 + 反例值
 
@@ -199,7 +199,7 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 |---|---|---|---|---|
 | Task 0 引擎展开层 | ✅ 已交付 | `61d3a8b4` | 纯新增 502/0；用例 212→**229**；零行为变化（72 档三面 diff 空） | `.superpowers/sdd/p3-task0-report.md` |
 | Task 1 定长退役收口 | ✅ 已交付 | `ef61f002` | 用例 229→**249**；收紧 **6** / 放宽 0；修「切片→固定长」静默放宽 | `.superpowers/sdd/p3-task1-report.md` |
-| Task 2 横切接口 | ⛔ 未开工（P3b） | — | 阻塞**已解除**（`iface_satisfies` + 形状表注册面 = P3b Task 0 交付；剩 Step 1 条目细化 + Step 3 消费点换位） | 附录 B.1 |
+| Task 2 横切接口 | ✅ 已交付（P3b） | 见 §11 | 用例 304→**319**；六形状项（`⊤ₖ` 形 + 只读/可写分野）+ 索引/切片消费点换位；**收紧 0 / 放宽 0**（行为保持：12 例老新两二进制同、全语料零差异）；ELF/`.ccr` 逐字节同 | `.superpowers/sdd/p3b-task2-report.md` |
 | Task 3 穷尽性真判定 | ✅ 已交付 | `e9818d62` | 用例 249→**263**；收紧 **6** + 软 1（TM04）；TM03 硬门；新套件 16 例 | `.superpowers/sdd/p3-task3-report.md` |
 | Task 4 联合/可选 | ✅ 已交付 | `c8c7731b` | 用例 263→**279**；收紧 **3** / 放宽 **7**（含挂死修复 2 端）；新套件 12 例 | `.superpowers/sdd/p3-task4-report.md` |
 | Task 5 泛型约束（P3a 半边） | ✅ 已交付 | `9c0a83ec` | 用例 279→**288**；收紧 **3** / 放宽 1 / 实例名忠实化 6；新套件 14 例；`T: I` 半边 = P3b | `.superpowers/sdd/p3-task5-report.md` |
@@ -318,6 +318,7 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 > - **① `iface_satisfies(t_ti, iface_ni)` 已交付**（`type_engine.cr`，三态 + 每查询预算隔离）＝ **原生/横切/用户三类同入口**，轴分派 **A 横切形状名（表 `iface_shape_*` 已就位，本批空表）→ C 用户接口 → B 本质轴**（轴优先序 A > C > B；同名撞车面：形状优先、接口 vs 原生名**保持 P3a 现状 = 接口优先**）。
 > - **Task 5 的 `T: I` 半边 = 已接线并真判定（实例化点）**：新消费者 `gen_inst_constr_satisfied`（结构/枚举实例化点直取真值 ⇒ 可证违反 = `error[TG02]`「does not satisfy interface 'I'」，与既有函数调用点**同措辞**；软诊断同门同码）。函数调用点 = **1 提前返回 + 0/-1 回落既有 `check_iface`**（措辞/去重/rc 逐字未动）——**0 → 新措辞的切换仍归 Task 6 Step 3**。谓词 = 与 `check_iface` 同源（方法名在位 + 参数计数 + 返回码），域 = 命名行；**非命名/dyn/泛型形参 ⇒ -1 不判**；判定路径零 `str_intern`（`g_methods` 查名，.ccr STR 段守）。
 > - **② Task 2**：形状表的**注册面已就位**（`iface_shape_register/lookup/count/reset` + `iface_satisfies_term` 原语，全在 `iface_registry.cr`）⇒ Step 1 只剩**条目细化**（`sequence`/只读/可写/可索引/可迭代/product 各自形状项——注意 `AK_SEQUENCE` 元素槽**不变**，`<: 序列接口` 的形状项须用 `⊤ₖ` 形而非 `sequence<⊤>` 参数链；本批 selftest `isat.axis_a_shape` 即该形）；Step 3 消费点换位未动（本批未接线，行为零变化）。
+> - **②b Task 2 交付后（2026-09-12；报告 = `.superpowers/sdd/p3b-task2-report.md`）**：**Step 1 条目细化 + Step 3 消费点换位已交付**——六条形状项（`sh_shape_seq` / `sh_shape_seq_ro` / `sh_shape_seq_rw` / `sh_shape_indexable` / `sh_shape_iterable` / `sh_shape_product`，`iface_registry.cr` 横切形状段）；索引兜底门 → 可索引形状、range 分支 → 序列形状 ∧ 固定性位（序列项 b 槽）。**行为保持**（收紧 0 / 放宽 0）：12 例行为探针老/新两二进制逐例同 + 全语料 72 档 check 面**零差异**（rc + 诊断逐字节）+ ELF/`.ccr` 逐字节同。**两处按实测重定**：只读形状 = 序列本体 ∪ **只读视图**（协变槽判定；「只读 = 协变」在视图面兑现，T1 §6-④ 在形状面闭合），可写形状 = 本体面（**可写视图形状不可表达** = 不变槽遇 ⊤ 落 -1，登记 + 用例钉死）；**名字面不注册**（驻留 ni 约束 ⇒ 命名消费语法待裁决，消费者走 `iface_satisfies_term`）。`可迭代` 面**未接线**（`EXPR_FOR` 现状零类型检查，登记）。
 > - **③ Task 6**：**Step 1 签名类型项化仍是其第一步**（本批未做：`g_ifaces` 方法条目仍裸 `TY_*`）；故 `sh_iface_shape_term` **仍恒 -1**（但已是 `iface_satisfies` 轴 C 的**第一路由**：返回 ≥0 即走形状包含，-1 落结构谓词——切换点已就位）。`check_iface`/`check_impl_for`/mangling 未动。
 > - **收紧台账（本批新增）**：结构/枚举实例化点的接口约束违反 **rc=0 零诊断 → check rc=1 + TG02**（6 例，全语料 72 档零命中；`test_generic_constr.py::struct_iface_constr_unjudged` 按台账改为 `..._violated`）。**未覆盖面**：接口签名槽 = 映射层编码（非原生类型塌缩为码 0、`self` 槽两侧均 0）⇒ 逐参数类型不参与、返回码语义 = 编码相等（钉红用例 `inst_encoding_limit_named_ret_pinned`；解锁 = Task 6 Step 1）。**判据**：`selftest-types` **304/304**（+16 `isat.*`）+ 新套件 `test_iface_satisfies.py` 17 例（挂 CI）+ 四套件绿 + ELF canary 逐字节同 + 同源对拍零差异 + 影子全计数 0。
 

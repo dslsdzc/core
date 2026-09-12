@@ -885,6 +885,22 @@ fn sh_iface_shape_term(iface_ni: int) -> int {
     return -1;
 }
 
+// ─── R2 P3b Task 2：序列行的**固定性**读取（range 消费点的表示层维度）───
+// 返回：固定长序列的 N（数组，≥0）/ -1（视图（切片）/ 非序列行 / 不可译行）。
+// 依据 = 序列项的 **b 槽**（`sh_seq_term`：数组 = N、切片/视图 = -1）——**表示提示层**，
+// 语义判定不看 N（spec §5.1「N 是表示提示，语义判定不看」；T1 裁定「固定性位不入身份/比较」，
+// 消费者逐条登记 = 常量档检查 + 表示层 + 本 Task 的横切形状面）。
+// 用途 = checker 的 range 索引分支（`arr[lo..hi]`）：固定长 ⇒ 产视图（`[T]`）；视图 ⇒ 现状
+// `TI_UNIT`（IP_INDEX_RANGE 未接线，登记面）。**不得**把它读作身份/子类型维度（那是常量档的
+// 职责；本站只决定「range 在本行上产不产视图」的结果形态，行为与改动前逐行相同）。
+fn sh_seq_fixed_len_of_ti(ti: int) -> int {
+    t := sh_term_of_ti(ti);
+    if t < 0 { return -1; }
+    if tt_tag(t) != TT_ATOM { return -1; }
+    if tt_a(t) != AK_SEQUENCE { return -1; }
+    return tt_b(t);
+}
+
 // ═══════════════ R2 P3 Task 3：match 穷尽性消费点（补集空性 + 具体变体反例）═══════════════
 // 判据本体 = 引擎的**补集空性**（`ty_exhaustive`：domain \ ⋃patterns 的可满足性；P0 已落）。
 // **引擎不在本 Task 文件面内**（协调者裁决）⇒ 引擎侧的两处缺口一律在**消费点**消化：

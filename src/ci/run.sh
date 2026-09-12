@@ -68,7 +68,7 @@ case "$CI_JOB_NAME" in
   selfhost-tests)
     build_selfhost
     python3 tests/selfhost/test_compile.py
-    python3 tests/selfhost/test_type_engine.py   # 类型项引擎自测通道（selftest-types **304 例**——P3b Task 0 后计数；P0/P1/P2a/P2b-T1..T6/P3-T0..T5/P3b-T0 一路漏挂）
+    python3 tests/selfhost/test_type_engine.py   # 类型项引擎自测通道（selftest-types **319 例**——P3b Task 2 后计数；P0/P1/P2a/P2b-T1..T6/P3-T0..T5/P3b-T0..T2 一路漏挂）
     python3 tests/selfhost/test_iface_ops.py     # R2 P2b Task 4/5/6：接口查表接线（算术/逻辑/条件三门 + 索引兜底门 + TY→TI 单表合一；正控/负控/登记面/站点域 76 例）
     python3 tests/selfhost/test_purity.py          # 效应/纯度批判据（真纯度 13 例 + 链语义 4 例的自测通道驱动）
     python3 tests/selfhost/test_ccr_v7.py          # 效应/纯度批 Task 3：.ccr 层三条边集语义断言（取代「与旧版逐字节同」）
@@ -86,6 +86,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_optional.py       # R2 P3 Task 4：联合/可选（T? = T ∪ null；Some/None 解析 + ? 结构解包 + Option 名退役 + 载荷类型节点列）
     python3 tests/selfhost/test_generic_constr.py # R2 P3 Task 5：泛型约束（结构/枚举约束保留 + 实例化点 ty_sub 判定 + 反例文本；用户接口面 P3b Task 0 起真判定；F4 形参链；实例键类型项化）
     python3 tests/selfhost/test_iface_satisfies.py # R2 P3b Task 0：iface_satisfies 契约（轴分派/三态/与 check_iface 同源；实例化点 T: I 判定 + 登记面 17 例）
+    python3 tests/selfhost/test_xcut_iface.py     # R2 P3b Task 2：横切接口接线（索引兜底门 → 可索引形状 / range 分支 → 序列形状 + 固定性位；行为保持 12 例：三路同证正例 + TK01 软诊断负例 + F2/F11 硬错误钉子）
     ;;
 
   suite)

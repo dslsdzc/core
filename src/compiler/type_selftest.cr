@@ -436,6 +436,191 @@ fn ts_isat_run() -> int {
     return fails;
 }
 
+// ─── R2 P3b Task 2 用例体（独立函数：**不得**内联进 type_selftest_run——同 ts_t5_run 的
+// 栈式代码生成上限理由；用例数 = **15**，调用方 `total = total + 15` 须同步）。
+// 判据面 = ① 六条横切形状项（序列/只读/可写/可索引/可迭代/product）的**满足判定**；
+// ② 两个**消费点换位的等价前提**（索引兜底门 ↔ IP_INDEX 许可集；range 固定性 ↔ TYP_ARRAY）
+// 的**全类型行枚举**。
+// **两路纪律**（Task 0 M4 教训：只走节点同一快路径的断言 = 空转）：每例除「判定值」外加一条
+// 「非同一比较」断言（实参项 != 形状项 ⇒ 结果不可能由 ty_sub 的 `a == b` 快路径给出）；
+// 两条枚举例的枚举规模单独断言（防零行遍历/真空通过）。
+fn ts_x2_b(b: bool) -> int { if b { return 1; } return 0; }
+
+fn ts_x2_run() -> int {
+    fails : ., mut = 0;
+    // ── 夹具（行面）──
+    x2_arr := alloc_type(TYP_ARRAY, TI_INT, 3);        // 固定长序列（固定性位 = N = 3）
+    x2_slice := alloc_type(TYP_SLICE, TI_INT, 0);      // 视图（固定性位 = -1）
+    x2_ro_view := alloc_type(TYP_REF, x2_slice, 0);    // &[int]（只读视图）
+    x2_rw_view := alloc_type(TYP_REF, x2_slice, 1);    // &mut [int]（可写视图）
+    grow_gen_apply_data(g_gen_apply_data_count + 1);   // 元组行：字段列（product 面的行）
+    x2_tup_start := g_gen_apply_data_count;
+    w64(g_gen_apply_data, x2_tup_start * 8, TI_INT);
+    g_gen_apply_data_count = x2_tup_start + 1;
+    x2_tup := alloc_type(TYP_TUPLE, 1, x2_tup_start);
+    x2_named := alloc_named_type(str_intern("X2ShapeN"));
+
+    // ① 序列接口：数组 + 切片（皆 AK_SEQUENCE）满足；原生/只读视图/命名行不满足；**非同一**断言
+    fails = fails + ts_check("x2.seq_accepts_body",
+        ts_x2_b(iface_satisfies_term(x2_arr, sh_shape_seq()) == 1 &&
+         iface_satisfies_term(x2_slice, sh_shape_seq()) == 1 &&
+         sh_term_of_ti(x2_arr) != sh_shape_seq() && sh_term_of_ti(x2_slice) != sh_shape_seq()), 1);
+    fails = fails + ts_check("x2.seq_rejects_non_body",
+        ts_x2_b(iface_satisfies_term(TI_INT, sh_shape_seq()) == 0 &&
+         iface_satisfies_term(x2_ro_view, sh_shape_seq()) == 0 &&
+         iface_satisfies_term(x2_named, sh_shape_seq()) == 0), 1);
+    // ② 只读序列：本体（数组/切片）+ 只读视图满足（视图面由 AK_REF **协变槽**判定 = 元素非 ⊤
+    //    也成立，即「只读 = 协变」的兑现）；可写视图**不**满足（mut 标记等式语义 = Task 1 裁决）
+    fails = fails + ts_check("x2.ro_accepts_body_and_ro_view",
+        ts_x2_b(iface_satisfies_term(x2_arr, sh_shape_seq_ro()) == 1 &&
+         iface_satisfies_term(x2_slice, sh_shape_seq_ro()) == 1 &&
+         iface_satisfies_term(x2_ro_view, sh_shape_seq_ro()) == 1 &&
+         iface_satisfies_term(x2_rw_view, sh_shape_seq_ro()) == 0 &&
+         sh_term_of_ti(x2_ro_view) != sh_shape_seq_ro()), 1);
+    // ③ 可写序列：本体满足（切片可写 = T1 探针 pSliceW `s[0] = 9` rc=0 实证）；**拒绝只读视图**
+    fails = fails + ts_check("x2.rw_accepts_body_rejects_ro_view",
+        ts_x2_b(iface_satisfies_term(x2_arr, sh_shape_seq_rw()) == 1 &&
+         iface_satisfies_term(x2_slice, sh_shape_seq_rw()) == 1 &&
+         iface_satisfies_term(x2_ro_view, sh_shape_seq_rw()) == 0 &&
+         iface_satisfies_term(TI_INT, sh_shape_seq_rw()) == 0), 1);
+    // ④ 可写**视图**形状不可表达（登记面，三态纪律）：ref(mut=1, ⊤ₖ(SEQ)) ⇒ **-1**（不变槽遇 ⊤ =
+    //    未覆盖面），**不得**当 0/1（改成 0/1 的突变即红）。uncovered 位须**直调引擎**读
+    //    （`iface_satisfies_term` 出口做预算复位 = 清该位——本层读不到，非「未置位」）。
+    ty_budget_reset(200000);
+    x2_rw_shape := tt_atom(AK_REF, -1, tt_cons(sh_ref_mut_marker(1), tt_cons(tt_top_k(AK_SEQUENCE), tt_nil())));
+    x2_rw_s := iface_satisfies_term(x2_rw_view, x2_rw_shape);
+    ty_budget_reset(200000);
+    x2_rw_direct := ty_sub(sh_term_of_ti(x2_rw_view), x2_rw_shape);
+    x2_rw_unc := ty_uncovered();
+    fails = fails + ts_check("x2.rw_view_unexpressible",
+        ts_x2_b(x2_rw_s == -1 && x2_rw_direct == -1 && x2_rw_unc == 1), 1);
+    ty_budget_reset(200000);
+    // ⑤ 可索引：字符串正控（checker 既有串下标结果分支）+ 序列；原生负控
+    fails = fails + ts_check("x2.indexable_str_and_seq",
+        ts_x2_b(iface_satisfies_term(TI_STR, sh_shape_indexable()) == 1 &&
+         iface_satisfies_term(x2_arr, sh_shape_indexable()) == 1 &&
+         iface_satisfies_term(x2_slice, sh_shape_indexable()) == 1 &&
+         iface_satisfies_term(TI_INT, sh_shape_indexable()) == 0), 1);
+    // ⑥ 可迭代（首版）+ product：序列满足迭代；元组行满足 product；原生/命名行皆否
+    fails = fails + ts_check("x2.iterable_and_product",
+        ts_x2_b(iface_satisfies_term(x2_arr, sh_shape_iterable()) == 1 &&
+         iface_satisfies_term(x2_slice, sh_shape_iterable()) == 1 &&
+         iface_satisfies_term(TI_INT, sh_shape_iterable()) == 0 &&
+         iface_satisfies_term(x2_tup, sh_shape_product()) == 1 &&
+         iface_satisfies_term(TI_INT, sh_shape_product()) == 0 &&
+         iface_satisfies_term(x2_named, sh_shape_product()) == 0), 1);
+    // ⑦ **消费点换位等价（索引门）**：可索引形状满足集 == IP_INDEX 许可集——全类型行枚举。
+    //    checker 索引兜底门换位后行为保持的判据；枚举规模单独断言（反真空：行数/许可行数下界）
+    x2_n_rows : ., mut = 0;
+    x2_bad : ., mut = 0;
+    x2_n_perm : ., mut = 0;
+    x2_n_undec : ., mut = 0;
+    x2_i : ., mut = 0;
+    loop {
+        if x2_i >= g_type_count { break; }
+        x2_n_rows = x2_n_rows + 1;
+        x2_s := iface_satisfies_term(x2_i, sh_shape_indexable());
+        x2_o := iface_permits(iface_kind_of(x2_i), IP_INDEX);
+        if x2_s == -1 {
+            x2_n_undec = x2_n_undec + 1;
+        } else {
+            if x2_s == 1 { x2_n_perm = x2_n_perm + 1; }
+            if (x2_s == 1) != (x2_o == 1) { x2_bad = x2_bad + 1; }
+        }
+        x2_i = x2_i + 1;
+    }
+    fails = fails + ts_check("x2.indexable_matches_ops",
+        ts_x2_b(x2_n_rows == g_type_count && x2_n_rows >= 15 && x2_bad == 0 &&
+         x2_n_perm >= 3 && x2_n_undec == 0 && get_type_kind(TI_STR) == TYP_BASE), 1);
+    // ⑧ **消费点换位等价（range 分支）**：`形状满足 ∧ 固定性位 ≥ 0` == `kind == TYP_ARRAY`——
+    //    全类型行枚举（固定长行与视图行**两类皆须出现**，否则枚举面真空）
+    x2_bad2 : ., mut = 0;
+    x2_n_fixed : ., mut = 0;
+    x2_n_view : ., mut = 0;
+    x2_j : ., mut = 0;
+    loop {
+        if x2_j >= g_type_count { break; }
+        x2_s2 := iface_satisfies_term(x2_j, sh_shape_seq());
+        if x2_s2 != -1 {
+            x2_fixed : ., mut = 0;
+            if x2_s2 == 1 {
+                if sh_seq_fixed_len_of_ti(x2_j) >= 0 { x2_fixed = 1; }
+            }
+            x2_k : ., mut = 0;
+            if get_type_kind(x2_j) == TYP_ARRAY { x2_k = 1; }
+            if x2_fixed != x2_k { x2_bad2 = x2_bad2 + 1; }
+            if x2_s2 == 1 {
+                if x2_fixed == 1 { x2_n_fixed = x2_n_fixed + 1; } else { x2_n_view = x2_n_view + 1; }
+            }
+        }
+        x2_j = x2_j + 1;
+    }
+    fails = fails + ts_check("x2.range_fixedness_matches_kind",
+        ts_x2_b(x2_bad2 == 0 && x2_n_fixed >= 1 && x2_n_view >= 1), 1);
+    // ⑨ 形状项的**名字面**（轴 A 生产入口）：六条规范项经注册表可按名判定（= Step 1「条目」的
+    //    注册面兑现）；复位后同键 ⇒ -1（无泄漏）
+    x2_n0 := iface_shape_count();
+    x2_r1 := iface_shape_register(str_intern("X2NameSeq"), sh_shape_seq());
+    x2_r2 := iface_shape_register(str_intern("X2NameIdx"), sh_shape_indexable());
+    x2_r3 := iface_shape_register(str_intern("X2NameRo"), sh_shape_seq_ro());
+    x2_r4 := iface_shape_register(str_intern("X2NameRw"), sh_shape_seq_rw());
+    x2_r5 := iface_shape_register(str_intern("X2NameItr"), sh_shape_iterable());
+    x2_r6 := iface_shape_register(str_intern("X2NameProd"), sh_shape_product());
+    fails = fails + ts_check("x2.axis_a_registered",
+        ts_x2_b(x2_r1 >= 0 && x2_r2 >= 0 && x2_r3 >= 0 && x2_r4 >= 0 && x2_r5 >= 0 && x2_r6 >= 0 &&
+         iface_shape_count() == x2_n0 + 6 &&
+         iface_satisfies(x2_arr, str_intern("X2NameSeq")) == 1 &&
+         iface_satisfies(x2_arr, str_intern("X2NameIdx")) == 1 &&
+         iface_satisfies(x2_ro_view, str_intern("X2NameRo")) == 1 &&
+         iface_satisfies(x2_ro_view, str_intern("X2NameRw")) == 0 &&
+         iface_satisfies(x2_tup, str_intern("X2NameProd")) == 1 &&
+         iface_satisfies(TI_INT, str_intern("X2NameSeq")) == 0), 1);
+    iface_shape_reset();
+    fails = fails + ts_check("x2.shape_no_leak_after_reset",
+        ts_x2_b(iface_shape_count() == 0 && iface_satisfies(x2_arr, str_intern("X2NameSeq")) == -1), 1);
+    // ⑩ 零 str_intern（.ccr STR 段守卫，A.3-②）：六条形状项构造**不得**新增驻留串
+    x2_strs := g_str_count;
+    x2_t1 := sh_shape_seq();
+    x2_t2 := sh_shape_seq_ro();
+    x2_t3 := sh_shape_seq_rw();
+    x2_t4 := sh_shape_indexable();
+    x2_t5 := sh_shape_iterable();
+    x2_t6 := sh_shape_product();
+    fails = fails + ts_check("x2.no_str_intern",
+        ts_x2_b(g_str_count == x2_strs && x2_t1 >= 0 && x2_t2 >= 0 && x2_t3 >= 0 &&
+         x2_t4 >= 0 && x2_t5 >= 0 && x2_t6 >= 0), 1);
+    // ⑪ 三态纪律（形状面）：越界行/负键/不可译行 ⇒ **-1**（不得当 0/1）；成功判定后预算窗口干净
+    ty_budget_reset(200000);
+    x2_ok := iface_satisfies_term(x2_arr, sh_shape_seq());     // 非同一 ⇒ 计步（非快路径）
+    fails = fails + ts_check("x2.uncovered_not_folded",
+        ts_x2_b(x2_ok == 1 && g_ty_steps == 0 && g_ty_budget_max == IFACE_SAT_BUDGET &&
+         iface_satisfies_term(-1, sh_shape_seq()) == -1 &&
+         iface_satisfies_term(g_type_count + 7, sh_shape_seq()) == -1 &&
+         iface_satisfies_term(TI_INT, -1) == -1 &&
+         iface_satisfies(x2_arr, -1) == -1 && iface_satisfies(-1, 0) == -1 &&
+         g_ty_exhausted == 0), 1);
+    // ⑫ 用户接口形状项**仍不可展开**（Task 6 Step 1 前）：轴 C ① 路由恒 -1 ⇒ 落结构谓词（零方法
+    //    接口 + 命名行 = 空洞满足 1；原生行 = 域限定 -1）——「不可展开 ⇒ -1，不得当 0」的接口面
+    x2_ii := ts_t5_mk_iface("X2ShapeIface");
+    fails = fails + ts_check("x2.iface_shape_term_unexpanded",
+        ts_x2_b(find_iface(str_intern("X2ShapeIface")) == x2_ii &&
+         sh_iface_shape_term(x2_ii) == -1 &&
+         iface_satisfies(x2_named, str_intern("X2ShapeIface")) == 1 &&
+         iface_satisfies(TI_INT, str_intern("X2ShapeIface")) == -1), 1);
+    // ⑬ 形状项与**行**的桥接关系（形状判定 = 行桥接 + 引擎包含，两层都不可少）：切片的项
+    //    除固定性位外与数组项同形 ⇒ 两者同判（固定性**不**入形状判定——语义判定不看 N）
+    x2_same : ., mut = 0;
+    x2_ta := sh_term_of_ti(x2_arr);
+    x2_ts := sh_term_of_ti(x2_slice);
+    if x2_ta >= 0 && x2_ts >= 0 && x2_ta != x2_ts {
+        if ty_sub(x2_ta, x2_ts) == 1 && ty_sub(x2_ts, x2_ta) == 1 { x2_same = 1; }
+    }
+    fails = fails + ts_check("x2.fixedness_not_in_shape_judgment",
+        ts_x2_b(x2_same == 1 && sh_seq_fixed_len_of_ti(x2_arr) == 3 &&
+         sh_seq_fixed_len_of_ti(x2_slice) == -1 && sh_seq_fixed_len_of_ti(TI_INT) == -1), 1);
+    return fails;
+}
+
 fn type_selftest_run() -> int {
     fails : ., mut = 0;
     total : ., mut = 0;
@@ -1992,6 +2177,9 @@ fn type_selftest_run() -> int {
 
     // R2 P3b Task 0 段（用例体在 ts_isat_run——同上，不得内联）
     total = total + 16; fails = fails + ts_isat_run();
+
+    // R2 P3b Task 2 段（用例体在 ts_x2_run——同上，不得内联）
+    total = total + 15; fails = fails + ts_x2_run();
 
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }

@@ -3121,7 +3121,16 @@ fn infer_expr(node: int) -> int {
         arr_kind := get_type_kind(arr_ti);
         // Range index: arr[low..high] → slice type
         if ast_kind(ast_b(node)) == EXPR_RANGE {
-            if arr_kind == TYP_ARRAY {
+            // R2 P3b Task 2：类别判定换位到**序列形状**（数组/切片同属 AK_SEQUENCE；
+            // sh_shape_seq = ⊤ₖ(AK_SEQUENCE)，见 iface_registry.cr 的横切形状段）。
+            // 固定性维度（N vs 视图）取自序列项的 b 槽（sh_seq_fixed_len_of_ti——表示层提示，
+            // 语义判定不看 N：spec §5.1 + T1 的固定性位登记）。行为保持：仅**固定长序列**
+            // （数组）在 range 下产视图；切片/非序列现状 = TI_UNIT（IP_INDEX_RANGE 未接线，
+            // 登记面 A.2 #15）。三态纪律：形状 -1（不可译行）**不**折算，回落旧 kind 直比
+            // （该行改动前由 `arr_kind == TYP_ARRAY` 独判 ⇒ 回落即逐行同结论）。
+            seq_ok := iface_satisfies_term(arr_ti, sh_shape_seq());
+            if seq_ok == -1 && arr_kind == TYP_ARRAY { seq_ok = 1; }
+            if seq_ok == 1 && sh_seq_fixed_len_of_ti(arr_ti) >= 0 {
                 // F11：字面量切片界编译期验证（TK05/06 既有错误码）
                 arr_len : ., mut = get_type_extra(arr_ti);
                 rn := ast_b(node);
@@ -3168,16 +3177,16 @@ fn infer_expr(node: int) -> int {
             }
             return TI_INT;  // string[i] → byte value
         }
-        // R2 P2b Task 5：索引面兜底拒绝的许可判据改为查表（IP_INDEX 许可集 = {sequence, string}）。
-        // 与改动前**一字等价**：本门的**可达集** = 「arr_kind ∉ {TYP_ARRAY, TYP_SLICE} ∧ arr_ti ≠
-        // TI_STR」= 上方三个结果分支（arr→elem+F2 / slice→elem / str→int，均为结果规则、原地保留）
-        // 之后的落空集；表的**拒绝集**（permits(kind_of(ti), IP_INDEX) == 0）与之**逐行相等**
-        // （全类型行枚举由 type_selftest 的 `idx.gate_deny_covers_fallback` 钉死；同 `arr_ti ==
-        // TI_STR` ⇔ `kind_of == AK_STRING`——TYP_BASE 行唯一分配点 = init_types:241-253）。
-        // 故本门不改变任何一行的判定，只把「拒绝集」从散落分支变成表里可审计的一格（P3 旋钮）。
-        // **不**在保留原裸调用的同时叠加本门：那会在拒绝路径上报两条 TK01 = 可观测行为变化
-        // （计划原文「其后保留原兜底」按此实测裁决：本门体即原兜底调用，码/文案/位置逐字不变）。
-        if iface_permits(iface_kind_of(arr_ti), IP_INDEX) == 0 {
+        // R2 P3b Task 2：兜底门从「许可位集直查」换位到**横切形状满足判定**（可索引形状 =
+        // ⊤ₖ(SEQUENCE) ∪ ⊤ₖ(STRING)，见 iface_registry.cr 的横切形状段）。与 P2b Task 5 的
+        // 表查同一口径：本门的**可达集** = 上方三个结果分支（arr→elem+F2 / slice→elem /
+        // str→int——同时决定结果类型，A.2 #16-18 明令原地保留）之后的落空集；形状的**拒绝集**
+        // 与之逐行相等（全类型行枚举守门 = selftest `x2.indexable_matches_ops` + 既有
+        // `idx.gate_deny_covers_fallback`）。三态纪律：形状 -1（不可判：不可译行等）**不**折算成
+        // 0/1，而是**回落**既有许可表——改动前同类行本就走该表，故回落 = 逐行同结论。
+        idx_ok := iface_satisfies_term(arr_ti, sh_shape_indexable());
+        if idx_ok == -1 { idx_ok = iface_permits(iface_kind_of(arr_ti), IP_INDEX); }
+        if idx_ok != 1 {
             check_error(EC_TK_INDEX, "Cannot index non-array type", ast_line(node), ast_col(node));
         }
         return TI_INT;

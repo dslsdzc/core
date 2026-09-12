@@ -380,3 +380,54 @@ fn iface_of_term(t: int) -> int {
     if tg == TT_TOP_K { return tt_a(t); }
     return -1;                                     // union/inter/not/bot/top/mu/var/nil/cons
 }
+
+// ═══════════════ R2 P3b Task 2：横切轴形状项（Step 1「条目细化」的类型项数据面）══════════════
+// spec §2.2：每条横切接口 = **一个形状类型项**，满足判定 = 一条包含判定 `T <: 形状`（与本质轴
+// /用户轴共用同一套引擎判定，不另建规则体系）。本段 = 六条形状项的**唯一构造点**；名字面注册
+// 走上方的 `iface_shape_register`（`iface_satisfies` 轴 A 的查表键）。
+//
+// ⚠ **不得**写成 `sequence<⊤>` 参数链（P3b Task 0 §1.3 勘误，实测）：AK_SEQUENCE 的槽 0 是
+//   **不变**槽（Task 1 变型表：本语言数组/切片**可写**，元素协变不健全）⇒ 不变槽遇 ⊤ 会落
+//   **-1**（未覆盖面）而非 1 ⇒ 序列面形状一律取**类别形** `⊤ₖ(AK_SEQUENCE)`。
+// ⚠ 每个构造点**零 str_intern**（.ccr STR 段硬约束 = A.3-②）：形状项只进类型项 DAG
+//   （append-only ⇒ 跨编译/跨 init_types 稳定），不驻留新串——守门 = selftest `x2.no_str_intern`。
+// ⚠ **名字面：生产路径本批不注册**（Step 1 的「条目」= 数据面；注册裁决归后批）。理由 =
+//   形状名是**驻留 ni**，而编译器源码里的新标识符/串只在生产编译执行到那行时才驻留 ⇒ 在任何
+//   初始化路径（init_types / iface_registry_init）注册 = 把新串追加进 g_strs ⇒ `.ccr` STR 段
+//   逐字节变（A.3-② 硬判据）。本批消费者（索引/切片）是**无名字消费点**，直接 `iface_satisfies_term`
+//   （P3b Task 0 §1.3 已备此路）；命名消费（`T: 可索引` 一类语法）待命名面裁决后接。
+
+// 序列接口（spec §2.2 的 `序列接口 ⟺ sequence<⊤>`，按上方勘误兑现为 ⊤ₖ 类别形）。
+// 数组行与切片行同属 AK_SEQUENCE ⇒ 皆满足；`&[T]`/`&mut [T]`（AK_REF 行）**不**满足（见只读形状）。
+fn sh_shape_seq() -> int { return tt_top_k(AK_SEQUENCE); }
+
+// 只读序列 = 序列本体（数组/切片）+ **只读视图**（`&[T]`）。
+// 「只读 = **协变**」（计划 Step 1）：视图部分的元素落在 AK_REF 的**协变槽**（Task 1 变型表：
+// 只读 ref 的元素槽协变、可写 ref 降为不变）⇒ `&[int] <: 只读序列` 由协变槽判定（元素不是 ⊤
+// 也成立）——T1 §6-④ 登记的「只读序列形状」在**视图面**由此闭合。
+// **等式语义**（Task 1 裁决：mut 标记是判定维度，非 Rust 式单向放宽）：`&mut [T]` 的标记不同
+// ⇒ **不**满足只读形状（判 0，可判定）；`&mut [T]` 也不满足可写形状（见下：视图面不可表达）。
+fn sh_shape_seq_ro() -> int {
+    view := tt_atom(AK_REF, -1, tt_cons(sh_ref_mut_marker(0), tt_cons(tt_top_k(AK_SEQUENCE), tt_nil())));
+    return tt_union(tt_top_k(AK_SEQUENCE), view);
+}
+
+// 可写序列 = **序列本体**（数组/切片——本语言切片可写，T1 探针 pSliceW `s[0] = 9` rc=0 实证）
+// ⇒ 与序列接口同项；**拒绝只读视图**（`&[T]` 是 AK_REF 行，非序列类 ⇒ 0）。
+// 可写**视图**（`&mut [T]`）的形状**不可表达**：AK_REF 可写侧槽 1 = 不变（变型表）⇒ 槽内 ⊤ 落
+// -1（未覆盖面）而非 1 ⇒ 本形状只覆盖本体面；该边界由 selftest `x2.rw_view_unexpressible`
+// 钉红（**-1 不得当 0/1 用**）。
+fn sh_shape_seq_rw() -> int { return tt_top_k(AK_SEQUENCE); }
+
+// 可索引 = 序列 ∪ 字符串（串下标 → 字节值，checker 既有结果分支）。
+// **与 IP_INDEX 许可集逐行同集**（{AK_SEQUENCE, AK_STRING}）——这是索引兜底门换位后行为保持的
+// 等价前提（全类型行枚举守门 = selftest `x2.indexable_matches_ops`）。
+fn sh_shape_indexable() -> int { return tt_union(tt_top_k(AK_SEQUENCE), tt_top_k(AK_STRING)); }
+
+// 可迭代（首版）= 序列（数组/切片）。
+// 字符串**不**入本形状：迭代面现状**无任何类型检查**（checker 的 EXPR_FOR 只推迭代源类型、
+// ir_gen 把它当数值界用）⇒ 无「串可迭代」的代码面证据，不宣称。
+fn sh_shape_iterable() -> int { return tt_top_k(AK_SEQUENCE); }
+
+// product = 元组行（AK_PRODUCT）。struct 行 = AK_NAMED（结构项经展开层 / 用户轴面）⇒ 不在首版。
+fn sh_shape_product() -> int { return tt_top_k(AK_PRODUCT); }
