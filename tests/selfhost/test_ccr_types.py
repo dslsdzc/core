@@ -35,6 +35,11 @@ Task 2（TYPE 内容面）：
 
 Task 3（IFACE 内容面）：见文件末「R2 P4 Task 3：IFACE 内容面」节（⑯..㉕）。
 
+R2 P4 Task 4（DFNode.TK 迁移期双槽）见文件末「R2 P4 Task 4」节（㉖..㉛）：
+内存 DF 记录 64 → 72B（第 9 槽 OFF_DF_TK_TERM = 类型项引用，允许清单制派生）；
+`.ccr` NOD 36B 与 `.cir` 快照布局**皆不变**（`CIR_CACHE_VER` 保持 17——项槽是
+(opcode, tk) 的纯函数，落盘 = 第二真源 + 进程内索引悬空，实测见 cir_cache.cr 头注）。
+
 字节真相 = docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md
 （v8 = v7 段表架构的加法扩展——D9/D10；文件名/测试名保留「v7」字样）：
   [0]   magic u32 = 0x31524343 ("CCR1")
@@ -1388,6 +1393,311 @@ def _cleanup(*paths):
             pass
 
 
+# ═══════════════ R2 P4 Task 4：DFNode.TK 迁移期双槽（㉖..㉛）═══════════════
+# 观察通道 = `corec cir --dump-tk-terms`（核心新增 hidden flag；只读、不产产物）。
+# 独立复述（防同源同错自洽假绿）：本节的清单门/slot 规则按**规格文本**在 Python 侧重写，
+# 不复用编译器内部表——IR 常量取 ast.cr 的公开编号，TT_* / AK_* 取引擎常量语义。
+IR_CONST = 1          # ast.cr:547
+IR_BINARY = 2         # ast.cr:548
+IR_DEREF = 25         # ast.cr:571（tk = 访问宽度，非行号）
+IR_STORE_PTR = 26     # ast.cr:572（同上）
+IR_BOUNDS_CHECK = 30  # ast.cr:577（tk = 0/1 动态上限旗标）
+TT_ATOM = 7           # type_terms.cr 的 TT_* 标签
+AK_INT, AK_DEX, AK_STRING, AK_BOOL = 0, 1, 2, 3
+ALLOW_OPS = {IR_CONST, IR_BINARY}
+
+# 探针源（内联夹具；覆盖清单内 4 个类型行 + 三个陷阱形态）：
+#   IR_DEREF / IR_STORE_PTR 的 tk=8（= 访问宽度，数值恰是 TI_DEX_S 行）、
+#   IR_BOUNDS_CHECK 的 tk=0/1（旗标；1 数值恰是 TI_DEX 行）、
+#   IR_CALL 的 tk ∈ {int,bool,str,unit}（合法行但后端不按 ti 分派）。
+TK_FIXTURE = """// R2 P4 Task 4 tk-slot probe
+fn main() -> int {
+    arr := [10, 20, 30, 40, 50];
+    p := &arr[2];
+    if *p != 30 { return 1; }
+    q : ., mut = 42;
+    qp := &q;
+    *qp = 99;
+    s := "hi";
+    b := true;
+    d := 1.5;
+    x := 40 + 2;
+    if b { x = x + 1; }
+    lo : ., mut = 1;
+    hi : ., mut = 3;
+    sl := arr[lo..hi];
+    if sl[0] != 20 { return 2; }
+    if x > d { return 3; }
+    if s != "hi" { return 4; }
+    return x;
+}
+"""
+
+
+def corec_cir(src: str, out: str, extra=None) -> str:
+    """corec cir（cwd=BASE：import 解析与缓存目录都在仓根）。"""
+    cmd = [COREC, 'cir', src, '-o', out]
+    if extra:
+        cmd += list(extra)
+    r = subprocess.run(cmd, capture_output=True, text=True, cwd=BASE, timeout=180)
+    assert r.returncode == 0, \
+        f"corec cir failed rc={r.returncode}: {r.stdout}\n{r.stderr}"
+    return r.stdout
+
+
+def parse_tk_dump(text: str):
+    """`--dump-tk-terms` 输出 → (header dict, rows)。行格式见 dump.cr 该函数注。"""
+    hdr = None
+    rows = []
+    for line in text.splitlines():
+        if line.startswith('[df-tk-terms]'):
+            m = re.match(r'\[df-tk-terms\] nodes=(\d+) with_term=(\d+) '
+                         r'bad_term=(\d+) terms=(\d+) allow=([0-9,]+)', line)
+            assert m, f"malformed tk-terms header: {line!r}"
+            hdr = {'nodes': int(m.group(1)), 'with_term': int(m.group(2)),
+                   'bad_term': int(m.group(3)), 'terms': int(m.group(4)),
+                   'allow': {int(x) for x in m.group(5).split(',')}}
+            continue
+        if hdr is None:
+            continue
+        f = line.split('\t')
+        if len(f) != 8:
+            continue
+        rows.append(tuple(int(x) for x in f))
+    assert hdr is not None, "no [df-tk-terms] header in output"
+    return hdr, rows
+
+
+def tk_fixture(name: str):
+    """产一个探针源并返回路径。调用方负责 cleanup。"""
+    src_path = os.path.join(BASE, 'build', f'test_p4t4_{name}.cr')
+    for p in (src_path,):
+        try:
+            os.unlink(p)
+        except FileNotFoundError:
+            pass
+    with open(src_path, 'w') as fh:
+        fh.write(TK_FIXTURE)
+    return src_path
+
+
+def _tk_dump_of(src: str, name: str):
+    dot = os.path.join(BASE, 'build', f'test_p4t4_{name}.cir')
+    out = corec_cir(src, dot, extra=['--dump-tk-terms'])
+    os.unlink(dot)
+    return parse_tk_dump(out)
+
+
+def cir_entry_nodes(path: str):
+    """独立解析 .cir 快照的节点小节 → (ver, nodes, stride_ok)。
+    布局（cir_cache.cr 写侧，v17/v18 同）：
+      magic/ver/identity/fp/sig/name_len(6×8) + name(name_len)
+      var_count(8) + var_count×24 | node_count(8) + node_count×64 | …"""
+    d = open(path, 'rb').read()
+    ver = struct.unpack_from('<q', d, 8)[0]
+    name_len = struct.unpack_from('<q', d, 40)[0]
+    pos = 48 + name_len
+    var_count = struct.unpack_from('<q', d, pos)[0]
+    pos += 8 + var_count * 24
+    node_count = struct.unpack_from('<q', d, pos)[0]
+    pos += 8
+    stride_ok = pos + node_count * 64 <= len(d)
+    nodes = []
+    for i in range(node_count):
+        f = struct.unpack_from('<8q', d, pos + i * 64)
+        nodes.append(f)
+    return ver, nodes, stride_ok
+
+
+def test_p4t4_tk_slot_rule_per_node():
+    """㉖ 逐节点规则（探针夹具）：清单内 op（IR_CONST/IR_BINARY）∧ 合法行 ⇒ 项槽 ≥ 0
+    且项 = ATOM(b == 行号)；清单外 op 一律 -1——**含三个陷阱形态的非空断言**
+    （DEREF/STORE_PTR 的宽度 8、BOUNDS_CHECK 的旗标 1）。正控逐行类型面：
+    int/dex_s/bool/str 四个类型行的 AK_* 与行号 b 槽。"""
+    src = tk_fixture('rule')
+    try:
+        hdr, rows = _tk_dump_of(src, 'rule')
+        assert hdr['bad_term'] == 0, \
+            f"{hdr['bad_term']} nodes carry out-of-range term refs"
+        assert hdr['allow'] == ALLOW_OPS, f"allow set drifted: {hdr['allow']}"
+        assert hdr['nodes'] == len(rows), "row count != node count"
+        assert hdr['with_term'] > 0, "vacuous: no node carries a term"
+
+        saw = {'const_rows': set(), 'binary_rows': set()}
+        traps = {'deref_w8': 0, 'store_w8': 0, 'bounds_flag1': 0, 'bounds_flag0': 0,
+                 'call_row': 0}
+        for (n, op, tk, term, tag, a, b, c) in rows:
+            if op in ALLOW_OPS:
+                assert term >= 0, f"node {n}: allowlisted op {op} tk={tk} got no term"
+                assert 0 <= tk < hdr['terms'], \
+                    f"node {n}: allowlisted op with out-of-range tk {tk}"
+                assert tag == TT_ATOM and b == tk, \
+                    f"node {n}: term {term} not ATOM(row) — tag={tag} b={b} tk={tk}"
+                if op == IR_CONST:
+                    saw['const_rows'].add((tk, a))
+                else:
+                    saw['binary_rows'].add((tk, a))
+            else:
+                assert term == -1, \
+                    f"node {n}: non-allowlisted op {op} got term {term}"
+                # 非空断言：陷阱形态必须在语料里出现过（否则本用例是空转）
+                if op == IR_DEREF and tk == 8:
+                    traps['deref_w8'] += 1
+                if op == IR_STORE_PTR and tk == 8:
+                    traps['store_w8'] += 1
+                if op == IR_BOUNDS_CHECK and tk == 1:
+                    traps['bounds_flag1'] += 1
+                if op == IR_BOUNDS_CHECK and tk == 0:
+                    traps['bounds_flag0'] += 1
+                if op == 4 and tk in (0, 2, 3, 4):
+                    traps['call_row'] += 1
+        # 正控（清单内四种类型行的项内容：a = AK_*，b = 行号）
+        assert (0, AK_INT) in saw['const_rows'], saw['const_rows']
+        assert (2, AK_BOOL) in saw['const_rows'], saw['const_rows']
+        assert (3, AK_STRING) in saw['const_rows'], saw['const_rows']
+        assert (8, AK_DEX) in saw['const_rows'], \
+            f"dex_s row (8) not mapped to AK_DEX: {saw['const_rows']}"
+        assert saw['binary_rows'], "no binary node carries a term"
+        # 负控非空：三类陷阱形态逐条实证（宽度 8 / 旗标 1 / 合法行但 op 不在清单）
+        assert traps['deref_w8'] >= 1 and traps['store_w8'] >= 1, traps
+        assert traps['bounds_flag1'] >= 1 and traps['bounds_flag0'] >= 1, traps
+        assert traps['call_row'] >= 1, traps
+    finally:
+        _cleanup(src)
+
+
+def test_p4t4_tk_slot_dex_binary_corpus():
+    """㉗ 语料面（dex_test.cr，仓内文件）：IR_BINARY 的 TI_DEX 行（后端 `ti == TI_DEX`
+    分派 SSE2 的那支）⇒ 项 = dex 原子；IR_CONST 的 TI_DEX/DEX_S 两行都归 AK_DEX
+    （同值域不同表示——ty_shadow.cr 已裁决的灰格）。"""
+    src = os.path.join(BASE, 'tests', 'suite', 'dex_test.cr')
+    hdr, rows = _tk_dump_of(src, 'dex')
+    assert hdr['bad_term'] == 0, f"bad_term={hdr['bad_term']}"
+    bin_dex = [r for r in rows if r[1] == IR_BINARY and r[2] == 1]
+    const_dex = [r for r in rows if r[1] == IR_CONST and r[2] == 1]
+    const_dex_s = [r for r in rows if r[1] == IR_CONST and r[2] == 8]
+    assert bin_dex, "no IR_BINARY with TI_DEX in corpus (vacuous)"
+    assert const_dex and const_dex_s, "no dex/dex_s const in corpus (vacuous)"
+    for r in bin_dex + const_dex + const_dex_s:
+        assert r[3] >= 0 and r[4] == TT_ATOM and r[5] == AK_DEX and r[6] == r[2], \
+            f"dex row not mapped to dex atom: {r}"
+
+
+def ccr_nod_rows(data: bytes):
+    """独立解析 NOD 段（36B/条：{op i32, dest i32, s1..s3 i64/i32 混排}——字段序
+    见 test_ccr_v7.py 的同名解析；此处只取 op 与 tk 两列并按 36B 步长硬断）。"""
+    b = CcrFile(data).body(3)
+    n = struct.unpack_from('<I', b, 0)[0]
+    assert (len(b) - 4) % 36 == 0 and n == (len(b) - 4) // 36, \
+        f"NOD body {len(b)}B not 4 + n*36 (n={n})"
+    out = []
+    for i in range(n):
+        pos = 4 + i * 36
+        (op,) = struct.unpack_from('<I', b, pos)
+        (tk,) = struct.unpack_from('<I', b, pos + 24)
+        out.append((op, tk))
+    return out
+
+
+def test_p4t4_ccr_nod_tk_equals_graph_tk():
+    """㉘ `.ccr` 面零改动：NOD 仍 36B/条；且 NOD 的 (op, tk) 序列与 DF 节点的
+    (op, tk) 序列**逐位置相同**（1:1 同序）——即「tk 升格前后逐字节同」的
+    .ccr 侧证据（tk 只从 iri_tk 读出，升格只加了内存第 9 槽）。"""
+    src = tk_fixture('nod')
+    ccr_path = os.path.join(BASE, 'build', 'test_p4t4_nod.ccr')
+    dot = os.path.join(BASE, 'build', 'test_p4t4_nod.cir')
+    try:
+        hdr, rows = _tk_dump_of(src, 'nod')
+        corec_ccr(src, ccr_path)
+        nod = ccr_nod_rows(read_ccr(ccr_path))
+        assert len(nod) == len(rows), \
+            f"NOD rows {len(nod)} != DF nodes {len(rows)}"
+        for i, (nr, dr) in enumerate(zip(nod, rows)):
+            assert nr == (dr[1], dr[2]), \
+                f"node {i}: NOD (op,tk)={nr} != graph {(dr[1], dr[2])}"
+    finally:
+        _cleanup(src, ccr_path, dot)
+
+
+def test_p4t4_cold_warm_term_slot_symmetry():
+    """㉙ 快照对称（本任务的核心判据）：冷（emit 填槽）/ 暖（快照恢复 + 装载侧重派生）
+    两态的 (op, tk, term, tag, a, b, c) **逐行相同** + 项表长度同 + bad_term=0；
+    命中证据 = 暖运行不重写 .cir 条目。"""
+    cache_dir = os.path.join(BASE, '.core', 'cache')
+    cir_dir = os.path.join(cache_dir, 'cir')
+    src = tk_fixture('cw')
+    dot = os.path.join(BASE, 'build', 'test_p4t4_cw.cir')
+    try:
+        shutil.rmtree(cache_dir, ignore_errors=True)
+        cold_out = corec_cir(src, dot, extra=['--dump-tk-terms'])
+        hdr_c, rows_c = parse_tk_dump(cold_out)
+        snap = {os.path.join(cir_dir, f): os.stat(
+                    os.path.join(cir_dir, f)).st_mtime_ns
+                for f in os.listdir(cir_dir)}
+        assert snap, "cold run did not populate cir cache"
+        warm_out = corec_cir(src, dot, extra=['--dump-tk-terms'])
+        hdr_w, rows_w = parse_tk_dump(warm_out)
+        for p, ns in snap.items():
+            assert os.stat(p).st_mtime_ns == ns, \
+                f"warm run rewrote cache file {p} (not a full hit?)"
+        assert hdr_c['nodes'] > 0 and hdr_c['with_term'] > 0, hdr_c
+        assert hdr_c['bad_term'] == 0 and hdr_w['bad_term'] == 0, (hdr_c, hdr_w)
+        assert hdr_c == hdr_w, f"header drifted cold->warm: {hdr_c} vs {hdr_w}"
+        assert rows_c == rows_w, "term slot drifted cold->warm (per-node)"
+    finally:
+        _cleanup(src, dot)
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+
+def test_p4t4_dump_flag_zero_artifact_effect():
+    """㉚ `--dump-tk-terms` 只读：带/不带 flag 两次**冷**运行的产物与 stdout（剔除
+    dump 节）逐字节同（新增通道不泄入产物/输出面）。两轮之间清缓存 = 避开既有的
+    冷/热渲染差异（TODO #5 末条，非本任务面）。"""
+    src = tk_fixture('flag')
+    dot = os.path.join(BASE, 'build', 'test_p4t4_flag.cir')
+    cache_root = os.path.join(BASE, '.core', 'cache')
+    try:
+        shutil.rmtree(cache_root, ignore_errors=True)
+        out_flag = corec_cir(src, dot, extra=['--dump-tk-terms'])
+        dot_flag = open(dot, 'rb').read()
+        shutil.rmtree(cache_root, ignore_errors=True)
+        out_plain = corec_cir(src, dot)
+        dot_plain = open(dot, 'rb').read()
+        assert dot_flag == dot_plain, "dump flag changed the .cir artifact"
+        stripped = "\n".join(l for l in out_flag.splitlines()
+                             if not l.startswith('[df-tk-terms]')
+                             and not re.match(r'^-?\d+\t', l))
+        assert stripped == "\n".join(out_plain.splitlines()), \
+            "dump flag changed stdout beyond the dump section"
+    finally:
+        _cleanup(src, dot)
+        shutil.rmtree(cache_root, ignore_errors=True)
+
+
+def test_p4t4_cir_snapshot_layout_unbumped():
+    """㉛ `.cir` 快照布局未变（CIR_CACHE_VER 保持 17 的证据面）：条目版本位 == 17；
+    节点小节 = 8B 计数 + n×64B（8 字段）——即「项槽不落盘、装载侧重派生」的格式
+    事实；>0 节点保证非空转。"""
+    src = tk_fixture('snap')
+    dot = os.path.join(BASE, 'build', 'test_p4t4_snap.cir')
+    cache_dir = os.path.join(BASE, '.core', 'cache', 'cir')
+    try:
+        shutil.rmtree(os.path.dirname(cache_dir), ignore_errors=True)
+        corec_cir(src, dot)
+        entries = sorted(os.listdir(cache_dir))
+        assert entries, "no cir entries written"
+        total_nodes = 0
+        for f in entries:
+            ver, nodes, ok = cir_entry_nodes(os.path.join(cache_dir, f))
+            assert ver == 17, f"{f}: CIR_CACHE_VER {ver} != 17 (unbumped expected)"
+            assert ok, f"{f}: node section (64B stride) runs past EOF"
+            total_nodes += len(nodes)
+        assert total_nodes > 0, "vacuous: no nodes parsed from snapshots"
+    finally:
+        _cleanup(src, dot)
+        shutil.rmtree(os.path.dirname(cache_dir), ignore_errors=True)
+
+
 if __name__ == '__main__':
     tests = [test_p4t1_layout_eight_segments,
              test_p4t1_loader_rejects_valid_v7_file,
@@ -1416,7 +1726,13 @@ if __name__ == '__main__':
              test_p4t3_loader_rejects_iface_mutations,
              test_p4t3_dump_flag_zero_artifact_effect,
              test_p4t3_determinism_cold_cold,
-             test_p4t3_cold_warm_iface_segment]
+             test_p4t3_cold_warm_iface_segment,
+             test_p4t4_tk_slot_rule_per_node,
+             test_p4t4_tk_slot_dex_binary_corpus,
+             test_p4t4_ccr_nod_tk_equals_graph_tk,
+             test_p4t4_cold_warm_term_slot_symmetry,
+             test_p4t4_dump_flag_zero_artifact_effect,
+             test_p4t4_cir_snapshot_layout_unbumped]
     failed = 0
     for t in tests:
         try:

@@ -1576,6 +1576,50 @@ fn type_selftest_run() -> int {
     t_slice := sh_term_of_ti(alloc_type(TYP_SLICE, TI_STR, 0));
     total = total + 1; fails = fails + ts_check("bridge.slice_seq",
         (tt_a(t_slice) == AK_SEQUENCE && tt_c(t_slice) == tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil())), 1);
+
+    // --- R2 P4 Task 4（D15）：DFNode 项槽派生 = 允许清单制（sh_tk_term_of_code）---
+    // 8 例 = 3 正控（清单内 op × 合法行 ⇒ 与桥接层直译**同项**）+ 4 负控（旗标码 /
+    // 宽度码 / 「行合法但 op 不在清单」/ 越界与负值）+ 1 计数纪律。
+    // 负控的牙齿 = 每个「本该 -1」的用例都同时断言**直译路径非 -1**（证明拒绝出自
+    // 清单门而非「该行不可译」——否则门形同虚设也能绿）。
+    total = total + 1; fails = fails + ts_check("t4.tk_const_int",
+        (sh_tk_term_of_code(IR_CONST, TI_INT) == sh_term_of_ti(TI_INT) &&
+         tt_a(sh_tk_term_of_code(IR_CONST, TI_INT)) == AK_INT), 1);
+    total = total + 1; fails = fails + ts_check("t4.tk_binary_dex",
+        (sh_tk_term_of_code(IR_BINARY, TI_DEX) == sh_term_of_ti(TI_DEX) &&
+         tt_a(sh_tk_term_of_code(IR_BINARY, TI_DEX)) == AK_DEX), 1);
+    total = total + 1; fails = fails + ts_check("t4.tk_const_dex_s_row8",
+        (sh_tk_term_of_code(IR_CONST, TI_DEX_S) == sh_term_of_ti(TI_DEX_S) &&
+         tt_a(sh_tk_term_of_code(IR_CONST, TI_DEX_S)) == AK_DEX), 1);
+    // 负控 ①：IR_BOUNDS_CHECK 的 tk 是旗标（1 = 动态上限），而 1 数值上 = TI_DEX 行
+    // ——直译有值 ⇒ 只能靠清单门挡住（凭空安 dex 项 = 本用例钉死的形态）。
+    total = total + 1; fails = fails + ts_check("t4.tk_bounds_flag1_rejected",
+        (sh_tk_term_of_code(IR_BOUNDS_CHECK, 1) == -1 && sh_term_of_ti(1) >= 0), 1);
+    // 负控 ②：IR_DEREF 的 tk 是访问宽度（8B），8 数值上 = TI_DEX_S 行（同款陷阱）。
+    total = total + 1; fails = fails + ts_check("t4.tk_deref_width8_rejected",
+        (sh_tk_term_of_code(IR_DEREF, 8) == -1 && sh_term_of_ti(TI_DEX_S) >= 0), 1);
+    // 负控 ③：「行合法（0 = TI_INT）但 op 不在清单」——清单外 op 不得因 tk 恰好合法而放行。
+    total = total + 1; fails = fails + ts_check("t4.tk_unlisted_op_valid_row_rejected",
+        (sh_tk_term_of_code(IR_STORE, TI_INT) == -1 &&
+         sh_tk_term_of_code(IR_CALL, TI_INT) == -1 &&
+         sh_tk_term_of_code(IR_ALLOC, TI_INT) == -1 &&
+         sh_term_of_ti(TI_INT) >= 0), 1);
+    // 负控 ④：行号越界 / 负值 ⇒ -1（不得当 0/1 用；不得读越界项表）。
+    total = total + 1; fails = fails + ts_check("t4.tk_row_range_rejected",
+        (sh_tk_term_of_code(IR_CONST, g_type_count) == -1 &&
+         sh_tk_term_of_code(IR_BINARY, g_type_count + 7) == -1 &&
+         sh_tk_term_of_code(IR_CONST, -1) == -1), 1);
+    // 计数纪律：本函数是载体面派生（非判定站点）⇒ 不得扰动影子对账的 hits 缓存计数
+    // （entries 仍随真实建项增长——那是装填因子输入，复原即欺骗扩容守卫）。
+    // 牙齿：必须取**非原生行**（原生行走 sh_native_ak 快路径，本就不进缓存 ⇒ 拿 TI_INT
+    // 测等于恒真断言）。数组行首次直译建项入缓存、二次直译必命中（+1）——本函数二次
+    // 调用若不复原计数，此处必红。
+    t4_arr_row := alloc_type(TYP_ARRAY, TI_INT, 3);
+    t4_arr_term := sh_term_of_ti(t4_arr_row);          // 预热：首次（miss）入桥接缓存
+    h4_before := sh_map_hits();
+    sk4 := sh_tk_term_of_code(IR_CONST, t4_arr_row);   // 缓存命中路径（本应 +1 hits）
+    total = total + 1; fails = fails + ts_check("t4.tk_derivation_not_a_shadow_site",
+        ((t4_arr_term >= 0 && sk4 == t4_arr_term && sh_map_hits() == h4_before)), 1);
     // TYP_NAMED：AK_NAMED + 行号存 b 槽（引擎不展开 → 判定 UNKNOWN = P1 预期未覆盖面）
     // ⚠️ 本行**刻意走裸分配**（P2a Task 1 后 8 个生产分配点已收敛到 alloc_named_type）：
     // 它构造的是人造 TYP_NAMED 行（键 1201 不对应任何真名），登记进生产侧表会用假键污染
@@ -2934,6 +2978,7 @@ fn type_selftest_run() -> int {
     // R2 P4 Task 3：IFACE 段内容面（五小节往返/签名项槽/形状名注册面/条目扩列/判定面
     // 零变化/不可建签名拒绝）——见 ts_ccr2_run（**必须最后**：populate 复位项层/引擎/
     // 桥接三面缓存；两段共用同一装填入口）
+    // （R2 P4 Task 4 的 7 例已在前段 bridge 节内联——见 t4.tk_* 注释。）
     total = total + 5; fails = fails + ts_ccr_run();
     total = total + 8; fails = fails + ts_ccr2_run();
 

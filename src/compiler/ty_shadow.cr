@@ -342,6 +342,51 @@ fn sh_term_of_ti(ti: int) -> int {
     return term;
 }
 
+// ─── R2 P4 Task 4（D15）：DFNode 项槽派生（允许清单制）───
+// 出处 = `emit` 的 type_kind（DFNode 的 tk 槽）→ 类型项引用。**tk 是混用槽**：
+// 同一位置既放类型行（IR_CONST/IR_BINARY 的 TI_*）也放旗标/宽度码
+// （IR_BOUNDS_CHECK 的 1 = 动态上限旗标、IR_DEREF/IR_STORE_PTR 的 8 = 访问宽度）
+// ⇒ 无差别派生 = 凭空给「指针解引用」安上 dex 项（数值 8 恰是 TI_DEX_S 行）。
+// 故本函数**只认清单**，清单外一律 -1（不猜、不近似）。
+//
+// 清单推导（计划 Task 4 Step 2；两条**同时**成立才入清单）：
+//   ① 后端按 ti 分派发射（`instr.cr` 的 emit_instr 逐分支审计；全后端 iri_tk 消费者 =
+//      instr.cr 的 IR_CONST(`ti == TI_STR`)/IR_BINARY(`ti == TI_DEX`)/IR_DEREF/
+//      IR_STORE_PTR(e2_ptr_bounds_check 的 access_width)/IR_BOUNDS_CHECK(`ti != 0`)
+//      + regalloc.cr 的 dex 危险面 + dump.cr 的 IR_ALLOC 文本面）；
+//   ② 该 op 的 tk 由调用点传**类型行**（ir_gen.cr 全 216 个 emit 调用点逐 op 静态审计：
+//      `tk` 实参 = TI_* 常量或类型行变量）。
+//   ① × ② = **恰两个 op**：
+//     · IR_CONST  —— ti 是常量类型行（TI_INT/DEX/DEX_S/BOOL/STR/CHAR/const_type 行，
+//                    后端 `ti == TI_STR` 分派字符串常量路径）；
+//     · IR_BINARY —— ti 是操作数类型行（TI_INT/DEX/DEX_S/BOOL/fti；后端 `ti == TI_DEX`
+//                    分派 SSE2 浮点路径；比较/匹配族传 0 = 行为等价于 TI_INT —— 0 就是
+//                    合法类型行（TI_INT 行），派生出 int 项，非捏造）。
+//   排除项（逐 op，实测证据见报告 §2 表）：
+//     · IR_BOUNDS_CHECK —— tk = 0/1 旗标（1 = 动态上限；1 数值上 = TI_DEX 行 ⇒ 正是
+//       「不得凭空安项」的形态）；· IR_DEREF / IR_STORE_PTR —— tk = 访问宽度（8/4/2/1
+//       = 字节数，非行号；ptr_arith 实测 op25/26 tk=8）；· IR_ALLOC / IR_CALL / IR_I2F /
+//       IR_F2I / IR_LOAD —— 调用点传类型行，但后端**不按 ti 分派**（①不成立；它们读
+//       tk 的方式与发射路径无关）⇒ 暂不入清单，留待 P5 单槽化时按需再裁（登记）；
+//     · 其余全部 op —— tk 恒 0（无类型语义：IR_STORE/IR_LABEL/IR_BRANCH/…）。
+//
+// 门与派生：`0 <= tk < g_type_count` 之外 ⇒ -1（行号越界 = 不可译，不得当 0/1 用）；
+// 项层**复用既有缓存/建项语义**（sh_term_of_ti——同一 ti→term 映射，无第二套建项逻辑）；
+// 该调用**不进**影子对账计数（hits/entries 只统计判定站点；本函数是载体面派生，
+// 冷/暖两态与判定历史无关）——故先存后复原 g_shadow_hits。
+fn sh_tk_term_of_code(opcode: int, tk: int) -> int {
+    if opcode != IR_CONST && opcode != IR_BINARY { return -1; }
+    if tk < 0 || tk >= g_type_count { return -1; }
+    // 复原 hits：sh_term_of_ti 的缓存命中计数属**判定对账**面（sh_map_hits 的
+    // 语义 = 判定站点缓存效率），emit 期调用不构成判定站点。entries（装填因子
+    // 输入 = 真实占用槽数）**不复原**——复原即欺骗扩容守卫（表满而计数偏低 ⇒
+    // 探测永不落空）。冷/暖两态该项槽值的一致性由构造保证（同 tk ⇒ 同项）。
+    hits_before := g_shadow_hits;
+    term := sh_term_of_ti(tk);
+    g_shadow_hits = hits_before;
+    return term;
+}
+
 // ─── 桥接统计（自测断言/影子摘要用）───
 fn sh_map_hits() -> int { return g_shadow_hits; }
 fn sh_map_entries() -> int { return g_shadow_entries; }

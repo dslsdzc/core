@@ -202,7 +202,12 @@ fn emit(opcode: int, dest: int, src1: int, src2: int, src3: int, type_kind: int)
     iri_set_tk(idx, type_kind);
     g_ir_instr_count = idx + 1;
     // Build dataflow graph (.cir) in parallel
-    df_create_node(opcode, dest, src1, src2, src3, type_kind);
+    // R2 P4 Task 4（D15）：项槽在 **emit 期**派生（允许清单制，见 sh_tk_term_of_code
+    // 头注）——不得后移到 save 前（快照在 IR 生成期逐函数写 ⇒ 后填必然冷/暖分歧）。
+    // 代价 = 每 emit 一次桥接查询（清单外 op = 两次整数比较即返回；清单内 =
+    // sh_term_of_ti 的原生快路径/桥接缓存，实测耗时见报告 §5）。
+    df_create_node(opcode, dest, src1, src2, src3, type_kind,
+                   sh_tk_term_of_code(opcode, type_kind));
 }
 
 fn new_label() -> int {

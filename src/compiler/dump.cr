@@ -334,6 +334,73 @@ fn cir_text_dump() -> string {
     return dump_buf_finish();
 }
 
+// ─── R2 P4 Task 4 测试通道（corec 侧 hidden flag `cir --dump-tk-terms`）───
+// 用途 = 双槽内容的**逐节点**观察面：tk 槽（升格前后逐字节同的判据）+ 项槽
+// （OFF_DF_TK_TERM）及其项结构（tag/a/b/c，直读 g_type_terms）——冷路径（emit 填）
+// 与暖路径（`.cir` 快照读回）两态用同一通道 dump 后逐行对拍。
+// 只读：不改任何全局、不产产物（与 --dump-types/--dump-ifaces 同纪律）。
+// 行格式（制表分隔；头行含计数与越界项计数）：
+//   [df-tk-terms] nodes=N with_term=M bad_term=B
+//   <node>\t<opcode>\t<tk>\t<term>\t<tag>\t<a>\t<b>\t<c>
+// term < 0（无项）或行号越出项表（bad_term，跨进程索引空间分歧的暴露面——不得
+// 静默读越界内存）：tag/a/b/c 一律 -1。
+fn df_tk_term_dump() -> string {
+    dump_buf_reset();
+    total := g_df_node_count;
+    with_term : ., mut = 0;
+    bad_term : ., mut = 0;
+    n0 : ., mut = 0;
+    loop {
+        if n0 >= total { break; }
+        t0 := r64(g_df_nodes, n0 * ESZ_DFNODE + OFF_DF_TK_TERM);
+        if t0 >= 0 { with_term = with_term + 1; }
+        if t0 >= tt_count() { bad_term = bad_term + 1; }
+        n0 = n0 + 1;
+    }
+    dump_buf_append("[df-tk-terms] nodes=");
+    dump_buf_append(int_str(total));
+    dump_buf_append(" with_term=");
+    dump_buf_append(int_str(with_term));
+    dump_buf_append(" bad_term=");
+    dump_buf_append(int_str(bad_term));
+    dump_buf_append(" terms=");
+    dump_buf_append(int_str(tt_count()));
+    dump_buf_append(" allow=");
+    dump_buf_append(int_str(IR_CONST));
+    dump_buf_append(",");
+    dump_buf_append(int_str(IR_BINARY));
+    dump_buf_append("\n");
+    n : ., mut = 0;
+    loop {
+        if n >= total { break; }
+        op := r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE);
+        tk := r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK);
+        t := r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK_TERM);
+        dump_buf_append(int_str(n));
+        dump_buf_append("\t");
+        dump_buf_append(int_str(op));
+        dump_buf_append("\t");
+        dump_buf_append(int_str(tk));
+        dump_buf_append("\t");
+        dump_buf_append(int_str(t));
+        dump_buf_append("\t");
+        if t >= 0 && t < tt_count() {
+            dump_buf_append(int_str(tt_tag(t)));
+            dump_buf_append("\t");
+            dump_buf_append(int_str(tt_a(t)));
+            dump_buf_append("\t");
+            dump_buf_append(int_str(tt_b(t)));
+            dump_buf_append("\t");
+            dump_buf_append(int_str(tt_c(t)));
+        } else {
+            dump_buf_append("-1\t-1\t-1\t-1");
+        }
+        dump_buf_append("\n");
+        n = n + 1;
+    }
+    return dump_buf_finish();
+}
+
 fn cmd_cir(src_path: string) -> int {
     g_source = read_file(src_path);
     if str_len(g_source) == 0 {

@@ -232,6 +232,7 @@ fn corec_main() -> int {
     cli_flag_bool("inject-var-shift", "", "Hidden debug: shift func0 var decl block left by 1, then save (GC-4 test hook)");
     cli_flag_bool("dump-types", "", "Hidden debug: dump TYPE segment content (row table + term DAG + cross-process judgment probe) after populate (R2 P4 Task 2 test channel)");
     cli_flag_bool("dump-ifaces", "", "Hidden debug: dump IFACE segment content (entry table + shapes + user ifaces + impls + method table + cross-segment term probe) after populate (R2 P4 Task 3 test channel)");
+    cli_flag_bool("dump-tk-terms", "", "Hidden debug: dump per-DFNode tk + type-term slot (cir; R2 P4 Task 4 test channel — cold/warm snapshot symmetry)");
     cli_flag_bool("type-shadow", "", "R2 P1: shadow type decisions with the engine (observation only)");
     cli_flag("type-shadow-dump", "", "R2 P1: dump shadow diff entries to file");
     cli_flag_bool("verify-named-dedup", "", "R2 P2a: assert side-table == res_type_node for all named types (debug)");
@@ -566,6 +567,10 @@ fn corec_main() -> int {
         print(cir_text_dump());
         print(" -> ");
         println(out);
+        // R2 P4 Task 4 测试通道（hidden）：逐节点 tk/项槽 dump——冷路径（emit 填槽）
+        // 与暖路径（.cir 快照读回）用同一通道对拍（test_ccr_types.py 的 T4 节）。
+        // 时点 = 全图构建完（含命中恢复）；只读，不产产物。
+        if cli_has("dump-tk-terms") != 0 { print(df_tk_term_dump()); }
         return 0;
     }
 

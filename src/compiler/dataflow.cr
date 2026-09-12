@@ -89,7 +89,13 @@ fn sg_pop() {
 
 // --- Node creation ---
 
-fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, type_kind: int) -> int {
+// R2 P4 Task 4（D15）：`tk_term` = 类型项引用（g_type_terms 行号；-1 = 无项），由
+// **调用方**（唯一调用点 = ir_gen.cr 的 emit）经桥接层派生后传入。本文件仍属 corec
+// 侧（build_selfhost_native.py 的 corec_files），但**不引用任何前端/桥接符号**
+// ——按「共享文件零前端依赖」纪律留余量（dataflow.cr 若某日并入 corearch 清单，
+// 本函数零改动即可链接）。参数语义 = 「存储」：本函数只落槽，不解释、不校验、
+// 不派生（派生规则单源 = ty_shadow.cr 的 sh_tk_term_of_code）。
+fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, type_kind: int, tk_term: int) -> int {
     nid := g_df_node_count;
     grow_df_nodes(nid + 1);
     grow_df_node_region(nid + 1);
@@ -100,6 +106,7 @@ fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, type_
     w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_S2, src2);
     w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_S3, src3);
     w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_TK, type_kind);
+    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_TK_TERM, tk_term);   // R2 P4 Task 4
     w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_FIRST_EDGE, -1);
     w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_EDGE_COUNT, 0);
     g_df_node_count = nid + 1;

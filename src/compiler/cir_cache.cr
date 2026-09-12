@@ -27,6 +27,23 @@
 // identity/fp/sig/name_len/name…（相对 v16 整体后移 8B），旧条目读取即错位 ⇒
 // 必须 bump。v16→v17 的手工 bump 本身只覆盖「本仓旧条目」；身份字段起自动
 // 覆盖面（重建即失效）。
+// v18（不 bump——R2 P4 Task 4 / D15 的实测修正，见下）：DF 节点内存记录
+// 64 → 72B 新增该项槽，但**快照盘记录仍 64B/节点**（第 9 槽不落盘）⇒ 格式
+// 与布局零变化 ⇒ 版本位不动。
+// 计划 D15 原写「`.cir` 快照入项槽并 CIR_CACHE_VER 17→18」，其前提 = 「不入槽
+// 则命中恢复路径与冷路径分歧」。**该前提实测不成立且方向相反**（本任务新增
+// `cir --dump-tk-terms` 通道实测，ptr_arith）：
+//   冷路径 terms=13 / bad_term=0；暖路径 terms=10 / **bad_term=329**
+// ——暖路径所有恢复来的项引用域外。根因 = 项表（g_type_terms）是**进程内**
+// 内容寻址表，emit 期按需追加（本语料冷路径 emit 新增 3 项）⇒ 快照里的项索引
+// 只在**写侧进程**的索引空间里成立；暖路径若跳过 emit（全命中）则项表更短，
+// 恢复出的索引整体悬空——若日后有消费者，读到的就是错项（或越界读）= 正是
+// 本批要消灭的静默类。**且**「把 f(tk) 的纯函数值与其入参并存于同一记录」=
+// 第二真源（本仓反复治过的病），分歧时盘面值静默胜出。
+// 修正（根因级）= **不落盘，装载时按 emit 的等价时点重派生**：load_cir_cache
+// 逐节点（节点序 = emit 序）调 sh_tk_term_of_code(opcode, tk)——opcode/tk 本就
+// 在盘记录内（单源），派生值与冷路径**同项同索引**（项表按同序追加 ⇒ 两进程
+// 索引空间对齐，由 T4 用例的冷/暖 dump 逐行相等断言锁住）。
 CIR_CACHE_MAGIC : int = -4485090715960753727;
 CIR_CACHE_VER   : int = 17;
 
@@ -193,6 +210,8 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int {
     // made a full self-host build perform millions of syscalls on its cache.
     total_size : ., mut = 48 + name_len;  // v17 头部 = magic/ver/identity/fp/sig/name_len
     total_size = total_size + 8 + var_count * 24;
+    // 节点盘记录 = 8 字段 × 8B = 64B（内存记录的**前八槽**；第 9 槽 OFF_DF_TK_TERM
+    // 不落盘——装载时按 opcode/tk 重派生，见文件头 v18 注）。
     total_size = total_size + 8 + node_count * 64;
     total_size = total_size + 8 + g_df_edge_count * 32;  // v5: 4 fields incl. kind
     total_size = total_size + 8 + instr_count * 48;
@@ -251,6 +270,9 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int {
         w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK));
         w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_FIRST_EDGE));
         w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_EDGE_COUNT));
+        // 第 9 槽（OFF_DF_TK_TERM）**不写盘**：项引用是 (opcode, tk) 的纯函数，
+        // 装载侧按 emit 的等价时点重派生（文件头 v18 注——实测快照携带进程内
+        // 索引会在暖路径整体悬空）。
         ni2 = ni2 + 1;
     }
 
@@ -426,6 +448,13 @@ fn load_cir_cache(path: string, func_idx: int) -> int {
         w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK, r64(data, pos)); pos = pos + 8;
         w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_FIRST_EDGE, r64(data, pos)); pos = pos + 8;
         w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_EDGE_COUNT, r64(data, pos)); pos = pos + 8;
+        // R2 P4 Task 4（D15）：项槽**不读盘**，按本节点的 opcode/tk 重派生——时点
+        // = emit 的等价点（逐函数、逐节点序），故项表追加序与冷路径一致 ⇒ 冷/暖
+        // 两态项槽同项**同索引**（T4 用例逐行对拍；文件头 v18 注 = 为何不落盘）。
+        // 派生入参 = 刚恢复的两槽（单源，盘上无第二份 f(tk) 值）。
+        w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK_TERM,
+            sh_tk_term_of_code(r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE),
+                               r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK)));
         // Record var producer. 幽灵边修复（v7 注 A 裁决）缓存面：grow_df_arrays
         // 对新增长区播种 -1（dyn_arr.cr 同款注释）——快照内未产出 var（参数等）
         // 的 producer 槽恒 -1（修复前零页 = 0 =「节点 0」→ 缓存命中函数保留
