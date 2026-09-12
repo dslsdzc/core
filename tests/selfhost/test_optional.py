@@ -255,6 +255,14 @@ fn main() -> int { s : ., mut = S { a: 5 }; return match s.a { Some(v) => { retu
 UNCOVERED_FIELD_BOXED = """struct S { a: int? }
 fn main() -> int { s : ., mut = S { a: Some(5) }; return match s.a { Some(v) => { return v; } None => { return 0; } }; }
 """
+# 全局槽（无表示位 = 未覆盖面，走既有装箱假定）：装箱形态照常正确（**前提 = tag 读取
+# 源支持全局行**——修复前 ELF 读帧外伪偏移 ⇒ 静默走空臂返回 0，与解释器 5 分歧）
+UNCOVERED_GLOBAL_BOXED = """g : int? = Some(5);
+fn main() -> int { return match g { Some(v) => { return v; } None => { return 0; } }; }
+"""
+UNCOVERED_GLOBAL_NONE = """g : int? = None;
+fn main() -> int { return match g { Some(v) => { return v; } None => { return 9; } }; }
+"""
 
 
 def main():
@@ -338,6 +346,10 @@ def main():
         # （Python subprocess 对 SIGSEGV 报 returncode = -11 ≡ shell 的 139）
         case_dual_rc("uncovered_field_bare_is_loud", UNCOVERED_FIELD_BARE, -11),
         case_dual("uncovered_field_boxed_ok", UNCOVERED_FIELD_BOXED, 5),
+        # 全局槽未覆盖面：装箱形态照常正确（钉 tag 读取源的全局行分派——修复前该路径
+        # ELF 静默返回 0 / 解释器 5 = 双路径分歧，基线同病）
+        case_dual("uncovered_global_boxed_ok", UNCOVERED_GLOBAL_BOXED, 5),
+        case_dual("uncovered_global_none_ok", UNCOVERED_GLOBAL_NONE, 9),
     ]
     passed = sum(1 for x in ok if x is True)
     print(f"{passed}/{len(ok)} passed")

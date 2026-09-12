@@ -1214,7 +1214,12 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
 
     if op == IR_LOAD_ENUM_TAG && d >= 0 {
         o1 := g2_slot(s1); do2 := g2_slot(d);
-        cp = cp + e2_ld(buf, pos+cp, 10, o1);
+        // R2 P4 Task 5（与 IR_CONST 全局行分支同族）：**tag 读取源走 e2_load_var**
+        // （局部 = [rbp+slot]；全局 = RIP 相对 lea）。修复前 `e2_ld(o1)` 对全局行读
+        // 帧外伪偏移 ⇒ tag 读垃圾 ⇒ 全局可选槽的 match **静默走空臂**（实测：
+        // `g : int? = Some(5)` + Some 臂 ELF=0 / 解释器=5 = 双路径分歧，基线同病）。
+        // 注：目的槽仍按帧槽（全局目的行的 RIP 相对 store 未接——当前零发射点）。
+        cp = cp + e2_load_var(buf, pos+cp, 10, s1);
         // mov r10, [r10 + disp32] — tag at offset 0
         // mov r10, [r10 + 0] (enum tag)
             cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 10/8); e2_w8(buf, pos+cp, 139); cp = cp + 1;
