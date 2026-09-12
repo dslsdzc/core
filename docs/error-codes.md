@@ -46,6 +46,8 @@
 | P019 | 字面量后缀溢出 | `Numeric literal overflow` |
 | P020 | 形参数目超上限（> `MAX_FN_PARAMS=64`） | `too many parameters`（TODO #8 修复：修复前 ≥18 形参静默误编译——越界写踩 return_type/ast_node） |
 | P021 | 函数体内嵌套 `fn` 声明（不属语言面） | 定位拒绝（TODO #16 修复：修复前 parse 失步 → bump allocator 耗尽 → `rep movsb` 向 NULL 拷 → rc=139） |
+| P022 | 枚举变体数 / 变体载荷类型数超上限（> `MAX_ENUM_VARIANTS=16` / `MAX_VARIANT_TYPES=16`） | `Enum has too many variants (17 > 16)` / `Enum variant has too many payload types (17 > 16)`（TODO #35 修复：修复前写入侧**无界**——第 17 变体槽起点 = `variant_count` 自身、槽尾越记录尾 224B 的静默越界写） |
+| P023 | 结构体字段数超上限（> `MAX_STRUCT_FIELDS=16`） | `Struct has too many fields (17 > 16)`（TODO #35 同族：第 17 字段踩 `OFF_SI_FIELD_COUNT`/泛型槽与邻记录；修复前 check rc=0 零诊断） |
 
 ## N0xx — 名字解析 (Name Resolution)
 
@@ -259,7 +261,7 @@
 | 段 | 范围 | 数量 | 说明 |
 |----|------|------|------|
 | L | L001–L011 | 11 | 词法 |
-| P | P001–P021 | 21 | 语法 |
+| P | P001–P023 | 23 | 语法 |
 | N | N001–N021 | 21 | 名字解析 |
 | I | I001–I006 | 6 | 类型推断 |
 | TA | TA01–TA08 | 8 | 赋值与绑定 |

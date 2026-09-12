@@ -1268,7 +1268,8 @@ fn sh_match_variant_term(scrut_ti: int, vi: int) -> int {
 }
 
 // 覆盖位：bit(vi) = 2^vi（本语言无移位 ⇒ 循环乘 2，同 iface_bit；vi < 63 由
-// MAX_ENUM_VARIANTS = 16 保证不溢出）
+// MAX_ENUM_VARIANTS = 16 保证不溢出——**该前提自 R2 P4 Task 6 起由写入侧护栏强制**：
+// >16 变体 = `error[P022]` 硬拒（parse 阶段诊断闸，编译不进入判定面）；此前只是假设）
 fn sh_match_bit(vi: int) -> int {
     if vi < 0 { return 0; }
     b : ., mut = 1;

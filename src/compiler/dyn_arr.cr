@@ -477,9 +477,17 @@ fn fi_set_ispure(n: int, v: int) { w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_ISPURE
 fn si_name(n: int) -> int { return r64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_NAME); }
 fn si_field_count(n: int) -> int { return r64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT); }
 fn si_generic_count(n: int) -> int { return r64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT); }
-fn si_field_name(n: int, fi: int) -> int { return r64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES + fi*8); }
-fn si_field_type(n: int, fi: int) -> int { return r64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES + fi*8); }
-fn si_field_type_node(n: int, fi: int) -> int { return r64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES + fi*8); }
+// 读护栏（R2 P4 Task 6 / TODO #35）：越界 = 槽区外（读会取到 count/generic 槽或邻记录）
+// ⇒ 回哨兵（名字/类型码/类型节点 = -1；见下方「受护访问器」注）。
+fn si_field_name(n: int, fi: int) -> int {
+    if fi < 0 || fi >= MAX_STRUCT_FIELDS { return -1; }
+    return r64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES + fi*8); }
+fn si_field_type(n: int, fi: int) -> int {
+    if fi < 0 || fi >= MAX_STRUCT_FIELDS { return -1; }
+    return r64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES + fi*8); }
+fn si_field_type_node(n: int, fi: int) -> int {
+    if fi < 0 || fi >= MAX_STRUCT_FIELDS { return -1; }
+    return r64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES + fi*8); }
 fn si_generic_name(n: int, gi: int) -> int { return r64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + gi*8); }
 
 // EnumInfo helpers
@@ -487,12 +495,55 @@ fn ei_name(n: int) -> int { return r64(g_enums, n * ESZ_ENUMINFO + OFF_EI_NAME);
 fn ei_variant_count(n: int) -> int { return r64(g_enums, n * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT); }
 fn ei_generic_count(n: int) -> int { return r64(g_enums, n * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT); }
 fn ei_generic_name(n: int, gi: int) -> int { return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + gi*8); }
-fn ei_variant_name(n: int, vi: int) -> int { return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_NAME); }
-fn ei_variant_type(n: int, vi: int, ti: int) -> int { return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPES + ti*8); }
-fn ei_variant_type_count(n: int, vi: int) -> int { return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPE_COUNT); }
+// 读护栏（R2 P4 Task 6 / TODO #35）：越界 = 槽区外（读会取到 variant_count/generic 槽或邻
+// 记录）⇒ 回哨兵（名字/类型码/类型节点 = -1；计数 = 0）。在界调用点（count ≤ 16）行为不变。
+fn ei_variant_name(n: int, vi: int) -> int {
+    if vi < 0 || vi >= MAX_ENUM_VARIANTS { return -1; }
+    return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_NAME); }
+fn ei_variant_type(n: int, vi: int, ti: int) -> int {
+    if vi < 0 || vi >= MAX_ENUM_VARIANTS || ti < 0 || ti >= MAX_VARIANT_TYPES { return -1; }
+    return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPES + ti*8); }
+fn ei_variant_type_count(n: int, vi: int) -> int {
+    if vi < 0 || vi >= MAX_ENUM_VARIANTS { return 0; }
+    return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPE_COUNT); }
 // R2 P3 Task 4（T0 交接 ①）：载荷第 ti 个的**类型节点**（-1/0 = 无信息——.ccr 不落本列，
 // 序列化读回侧该列恒 0；消费者须以 type_count 为界，不得据 0 反推「节点 0」）。
-fn ei_variant_type_node(n: int, vi: int, ti: int) -> int { return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPE_NODES + ti*8); }
+fn ei_variant_type_node(n: int, vi: int, ti: int) -> int {
+    if vi < 0 || vi >= MAX_ENUM_VARIANTS || ti < 0 || ti >= MAX_VARIANT_TYPES { return -1; }
+    return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPE_NODES + ti*8); }
+
+// ─── 枚举/结构体记录**受护访问器**（R2 P4 Task 6；TODO #35 收口，#8 同族形态）───
+// 背景（TODO #35 代码级定位）：EnumVariant 槽区（`MAX_ENUM_VARIANTS` 槽 × `OFF_EV_SIZE`）与
+// StructInfo 字段槽区（`MAX_STRUCT_FIELDS` 槽）是**定长内嵌槽区**——其后紧跟记录自身的
+// count/generic 槽，再往后是**下一条记录**（同一 buffer）⇒ 无界写入既踩自身记录尾也踩邻记录
+// （实测：第 17 变体槽起点 = `OFF_EI_VARIANT_COUNT` 自身、槽尾越过 `ESZ_ENUMINFO` 224B）。
+// 修复形态**照 TODO #8 收口**（`fi_param_type`/`fi_set_param_type`）：
+//   ① **唯一受护写点** = 本组 setter（parser 全改走它们 ⇒ 未来新调用点亦不可能越界写）；
+//   ② 读护栏 = 越界回哨兵（名字/类型节点 = -1 = 无效下标；计数 = 0），**不越读**；
+//   ③ 面向用户的拒绝由 parser 的 P022/P023 硬错承担（本层只做内存安全兜底，不代替诊断）。
+// count 槽（`ei_variant_count`/`si_field_count` 的写）**不设护栏**——真值是诊断依据，照
+// P020 的 `add_func(pc)` 先例（计数保持真实值，超限由硬错拒绝；越界读由②兜底）。
+fn ei_set_variant_name(n: int, vi: int, v: int) {
+    if vi < 0 || vi >= MAX_ENUM_VARIANTS { return; }
+    w64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_NAME, v); }
+fn ei_set_variant_type(n: int, vi: int, ti: int, v: int) {
+    if vi < 0 || vi >= MAX_ENUM_VARIANTS || ti < 0 || ti >= MAX_VARIANT_TYPES { return; }
+    w64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPES + ti*8, v); }
+fn ei_set_variant_type_count(n: int, vi: int, v: int) {
+    if vi < 0 || vi >= MAX_ENUM_VARIANTS { return; }
+    w64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPE_COUNT, v); }
+fn ei_set_variant_type_node(n: int, vi: int, ti: int, v: int) {
+    if vi < 0 || vi >= MAX_ENUM_VARIANTS || ti < 0 || ti >= MAX_VARIANT_TYPES { return; }
+    w64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPE_NODES + ti*8, v); }
+fn si_set_field_name(n: int, fi: int, v: int) {
+    if fi < 0 || fi >= MAX_STRUCT_FIELDS { return; }
+    w64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES + fi*8, v); }
+fn si_set_field_type(n: int, fi: int, v: int) {
+    if fi < 0 || fi >= MAX_STRUCT_FIELDS { return; }
+    w64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES + fi*8, v); }
+fn si_set_field_type_node(n: int, fi: int, v: int) {
+    if fi < 0 || fi >= MAX_STRUCT_FIELDS { return; }
+    w64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES + fi*8, v); }
 
 // ============================================================
 // String table helpers (dynamic byte buffer)

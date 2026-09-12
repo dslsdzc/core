@@ -1621,19 +1621,33 @@ fn parse_declaration() {
                 save_struct_gen_constrs(si, sg_constrs, sg_count);
             }
             fc : ., mut = 0;
+            over_f : ., mut = 0;
             loop {
                 if check(T_RBRACE) || check(T_EOF) { break; }
                 ft := advance_tok();
                 fn2 := tok_lx(ft);
-                w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES + fc * 8, str_intern(fn2));
+                fni := str_intern(fn2);
+                // TODO #35（R2 P4 Task 6）：字段槽区（MAX_STRUCT_FIELDS）护栏——旧态无界写
+                // （第 17 字段踩 OFF_SI_FIELD_COUNT/generic 槽与邻记录）。超限不再写槽（写
+                // 访问器同护栏 = 双保险），计数保持真值 + 末尾 P023 硬错（照 P020 形态）。
+                if fc < MAX_STRUCT_FIELDS {
+                    si_set_field_name(si, fc, fni);
+                } else { over_f = 1; }
                 advance_tok();
                 fty := parse_type();
-                w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES + fc * 8, unpack_type(fty));
-                w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES + fc * 8, fty);
+                if fc < MAX_STRUCT_FIELDS {
+                    si_set_field_type(si, fc, unpack_type(fty));
+                    si_set_field_type_node(si, fc, fty);
+                }
                 fc = fc + 1;
                 if check(T_COMMA) { advance_tok(); }
             }
             w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, fc);
+            if over_f != 0 {
+                check_error(EC_P_STRUCT_LIMIT,
+                    "Struct has too many fields (" + int_str(fc) + " > " + int_str(MAX_STRUCT_FIELDS) + ")",
+                    tok_ln(t), tok_cl(t));
+            }
         }
         advance_tok();
         return;
@@ -1665,33 +1679,56 @@ fn parse_declaration() {
                 save_enum_gen_constrs(ei, eg_constrs, eg_count);
             }
             vc : ., mut = 0;
+            over_v : ., mut = 0;
+            over_t : ., mut = 0;
+            mtc : ., mut = 0;   // 载荷计数最大值（诊断用；P022 消息需报真实数码）
             loop {
                 if check(T_RBRACE) || check(T_EOF) { break; }
                 vt := advance_tok();
                 vname := tok_lx(vt);
-                w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vc * OFF_EV_SIZE + OFF_EV_NAME, str_intern(vname));
+                vni := str_intern(vname);
+                // TODO #35（R2 P4 Task 6）：变体槽区（MAX_ENUM_VARIANTS）护栏——旧态无界写：
+                // 第 17 变体槽起点 = OFF_EI_VARIANT_COUNT 自身、槽尾越过 ESZ_ENUMINFO 224B
+                // （踩邻记录/缓冲区尾部）。超限不再写槽（写访问器同护栏 = 双保险），计数保持
+                // 真值 + 末尾 P022 硬错（照 P020 形态：**非静默截断**）。
+                if vc < MAX_ENUM_VARIANTS {
+                    ei_set_variant_name(ei, vc, vni);
+                } else { over_v = 1; }
                 tc : ., mut = 0;
                 if check(T_LPAREN) {
                     advance_tok();
                     loop {
                         if check(T_RPAREN) { break; }
                         fty := parse_type();
-                        w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vc * OFF_EV_SIZE + OFF_EV_TYPES + tc * 8, unpack_type(fty));
-                        // R2 P3 Task 4（T0 交接 ①）：载荷类型**节点**随裸码同写（照 struct 的
-                        // OFF_SI_FIELD_TYPE_NODES 先例）——裸码把非基型载荷塌缩成 0 = TY_INT，
-                        // 节点是载荷面（泛型形参代入 / 满足判定）的唯一忠实来源。
-                        w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vc * OFF_EV_SIZE + OFF_EV_TYPE_NODES + tc * 8, fty);
+                        if tc < MAX_VARIANT_TYPES {
+                            ei_set_variant_type(ei, vc, tc, unpack_type(fty));
+                            // R2 P3 Task 4（T0 交接 ①）：载荷类型**节点**随裸码同写（照 struct 的
+                            // OFF_SI_FIELD_TYPE_NODES 先例）——裸码把非基型载荷塌缩成 0 = TY_INT，
+                            // 节点是载荷面（泛型形参代入 / 满足判定）的唯一忠实来源。
+                            ei_set_variant_type_node(ei, vc, tc, fty);
+                        } else { over_t = 1; }
                         tc = tc + 1;
                         if !check(T_COMMA) { break; }
                         advance_tok();
                     }
                     advance_tok();
                 }
-                w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vc * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, tc);
+                if vc < MAX_ENUM_VARIANTS { ei_set_variant_type_count(ei, vc, tc); }
+                if tc > mtc { mtc = tc; }
                 vc = vc + 1;
                 if check(T_COMMA) { advance_tok(); }
             }
             w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, vc);
+            if over_v != 0 {
+                check_error(EC_P_ENUM_LIMIT,
+                    "Enum has too many variants (" + int_str(vc) + " > " + int_str(MAX_ENUM_VARIANTS) + ")",
+                    tok_ln(t), tok_cl(t));
+            }
+            if over_t != 0 {
+                check_error(EC_P_ENUM_LIMIT,
+                    "Enum variant has too many payload types (" + int_str(mtc) + " > " + int_str(MAX_VARIANT_TYPES) + ")",
+                    tok_ln(t), tok_cl(t));
+            }
         }
         advance_tok();
         return;

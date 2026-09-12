@@ -90,6 +90,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_iface_satisfies.py # R2 P3b Task 0：iface_satisfies 契约（轴分派/三态/与 check_iface 同源；实例化点 T: I 判定 + 登记面 17 例）
     python3 tests/selfhost/test_xcut_iface.py     # R2 P3b Task 2：横切接口接线（索引兜底门 → 可索引形状 / range 分支 → 序列形状 + 固定性位；行为保持 12 例：三路同证正例 + TK01 软诊断负例 + F2/F11 硬错误钉子）
     python3 tests/selfhost/test_impl_iface.py     # R2 P3b Task 6：impl 契约覆盖集（签名类型项化 + 形状项逐成员判定 + mangling 退役 + 上限钉子；20 例：正向三路/两路同证 + 反向签名五面 + 错误例 + 登记面 + 硬错误）
+    python3 tests/selfhost/test_enum_limit.py     # R2 P4 Task 6（TODO #35）：枚举变体/载荷与结构体字段写入侧护栏（MAX_ENUM_VARIANTS/MAX_VARIANT_TYPES/MAX_STRUCT_FIELDS）——定位硬错 P022/P023 + 无产物 + 16 边界三面正控；13 例
     ;;
 
   suite)
