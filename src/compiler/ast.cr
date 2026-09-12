@@ -198,6 +198,11 @@ EXPR_UNARY : int = 6;    // a=operand, c=opcode
 EXPR_CALL : int = 7;     // a=func, b=first arg idx, c=arg count, type_val=CALL_FLAG_*
 CALL_FLAG_MODULE : int = 1;
 CALL_FLAG_INLINE : int = 2;
+// R2 P3b Task 6（Step 3，mangling 退役）：接口方法调用（泛型形参接收者，`fn f[T: I]` 体内
+// `x.m()`）——data = **泛型形参名 ni**（不是合成的 "T.m" 串）；实例化时由 monomorph 按
+// 具体类型查方法表（`iface_find_method`）解析为真实函数名。旧态 = 名字拼接 + 克隆期文本替换，
+// 实例体内调用目标悬空（产物运行 rc=139，实测）。
+CALL_FLAG_IFACE_METHOD : int = 4;
 EXPR_BLOCK : int = 8;    // a=g_block_stmts start, b=stmt count
 EXPR_IF : int = 9;       // a=cond, b=then, c=else (-1 if none)
 EXPR_LOOP : int = 10;    // a=body

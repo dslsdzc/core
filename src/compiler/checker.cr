@@ -995,37 +995,22 @@ fn get_type_name(ti: int) -> int {
     return -1;
 }
 
+// R2 P3b Task 6（Step 3，mangling 退役）：方法解析从「`Type.method` 字符串拼接 + `find_func`」
+// 改为**表查询**（`g_methods` 三元组 {type_ni, method_ni, func_name_ni}，parser 的 impl 分支
+// 唯一写点；引擎侧同一入口 `iface_find_method`）。域等价（同一 impl 声明面），且**零 str_intern**
+// ——旧形态对缺失方法名会往驻留表追加新串（`.ccr` STR 段增长面，见 A.3-②）。
 fn type_has_method(type_ni: int, method_ni: int) -> bool {
-    tname := istr_get(type_ni);
-    mname := istr_get(method_ni);
-    mangled := tname + "." + mname;
-    mangled_ni := str_intern(mangled);
-    return find_func(mangled_ni) >= 0;
+    if iface_find_method(type_ni, method_ni) < 0 { return false; }
+    return true;
 }
 
+// 接口满足判定（bool 面；语义 = 引擎轴 C 用户谓词的**同一实现** `iface_user_satisfies_ii`，
+// 见 type_engine.cr：方法名表查询 + 接收者模式 + 签名项引擎判定）。保持 bool 返回值的理由 =
+// 调用点（泛型约束的函数调用位点）的既有语义「不能判定为满足 ⇒ 报 TG02」逐字不变（措辞/去重/
+// rc 不在本任务面内）；三态面由 `iface_satisfies` / `iface_user_satisfies` 承担。
 fn check_iface(type_ni: int, iface_ii: int) -> bool {
-    method_count := r64(g_ifaces, iface_ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT);
-    mi : ., mut = 0;
-    loop {
-        if mi >= method_count { return true; }
-        mbase2 := iface_ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD;
-        method_ni := r64(g_ifaces, mbase2 + OFF_IFM_NAME);
-        if !type_has_method(type_ni, method_ni) { return false; }
-        // Also verify param count and return type match
-        tname2 := istr_get(type_ni);
-        mname2 := istr_get(method_ni);
-        mangled2 := tname2 + "." + mname2;
-        mangled_ni2 := str_intern(mangled2);
-        fi2 := find_func(mangled_ni2);
-        if fi2 >= 0 {
-            iface_pc := r64(g_ifaces, mbase2 + OFF_IFM_PARAM_COUNT);
-            if fi_param_count(fi2) != iface_pc { return false; }
-            iface_rt := r64(g_ifaces, mbase2 + OFF_IFM_RET_TI);
-            if fi_return_type(fi2) != iface_rt { return false; }
-        }
-        mi = mi + 1;
-    }
-    return true;
+    if iface_user_satisfies_ii(type_ni, iface_ii) == 1 { return true; }
+    return false;
 }
 
 // ═══════════════ R2 P3 Task 5：泛型约束（保留 / 实例化判定 / 反例）═══════════════
@@ -2162,41 +2147,51 @@ fn check_impl_for() {
             mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD;
             method_ni := r64(g_ifaces, mbase + OFF_IFM_NAME);
             method_pc := r64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT);
-            method_rt := r64(g_ifaces, mbase + OFF_IFM_RET_TI);
-
-            // Check if the implementing type has this method
-            type_name := istr_get(type_ni);
             method_name := istr_get(method_ni);
-            mangled := type_name + "." + method_name;
-            mangled_ni := str_intern(mangled);
+            iface_name2 := istr_get(iface_ni);
 
-            fi := find_func(mangled_ni);
+            // R2 P3b Task 6（Step 3，mangling 退役）：方法解析 = **表查询**
+            // （`g_methods` 三元组 → 函数名 ni → 函数行），不再拼 "Type.method" 串。
+            func_ni := iface_find_method(type_ni, method_ni);
+            fi : ., mut = -1;
+            if func_ni >= 0 { fi = find_func(func_ni); }
             if fi < 0 {
-                check_error(EC_TF_METHOD_NOT_FOUND, "Impl missing method '" + method_name + "' for interface '" + istr_get(iface_ni) + "'", 0, 0);
+                check_error(EC_TF_METHOD_NOT_FOUND, "Impl missing method '" + method_name + "' for interface '" + iface_name2 + "'", 0, 0);
                 mi = mi + 1;
                 continue;
             }
-            // Check param count
+            // 接收者模式（调用约定维度；旧态两侧皆码 0 ⇒ 不可比 ⇒ 本任务起显式比较）
+            if sh_iface_self_mode(ii, mi) != sh_func_self_mode(fi) {
+                check_error(EC_TF_METHOD_ARG_TYP, "Param 1 type mismatch for method '" + method_name + "' in interface '" + iface_name2 + "'", 0, 0);
+            }
+            // 参数计数
             actual_pc := fi_param_count(fi);
             if actual_pc != method_pc {
                 check_error(EC_TF_METHOD_ARG_CNT, "Param count mismatch for method '" + method_name + "': expected " + int_str(method_pc) + " got " + int_str(actual_pc), 0, 0);
             }
-            // Check each param type
+            // 逐参类型（**签名项**比较：N 不入项 / 泛型应用展开 / 命名行按名 —— 取代旧裸码相等）
             pti : ., mut = 0;
             loop {
-                if pti >= method_pc || pti >= 8 { break; }
-                expected_pt := r64(g_ifaces, mbase + OFF_IFM_PARAM_TYPES + pti * 8);
-                actual_pt := fi_param_type(fi, pti);
-                if expected_pt != actual_pt {
-                    pnum_str := int_str(pti + 1);
-                    check_error(EC_TF_METHOD_ARG_TYP, "Param " + pnum_str + " type mismatch for method '" + method_name + "' in interface '" + istr_get(iface_ni) + "'", 0, 0);
+                if pti >= method_pc || pti >= MAX_IFACE_METHOD_PARAMS { break; }
+                apt := sh_func_sig_param_term(fi, pti);
+                ept := sh_iface_sig_param_term(ii, mi, pti);
+                if apt >= 0 && ept >= 0 {
+                    // 判定 = 引擎的不变槽结构比较原语（0/1 全域；理由见 type_engine.cr 的
+                    // iface_user_satisfies_ii 注——ty_sub 会把「确定不同」上抛为 -1 = 未覆盖面）
+                    if tt_list_same(apt, ept) != 1 {
+                        pnum_str := int_str(pti + 1);
+                        check_error(EC_TF_METHOD_ARG_TYP, "Param " + pnum_str + " type mismatch for method '" + method_name + "' in interface '" + iface_name2 + "'", 0, 0);
+                    }
                 }
                 pti = pti + 1;
             }
-            // Check return type
-            actual_rt := fi_return_type(fi);
-            if actual_rt != method_rt {
-                check_error(EC_TF_RETURN, "Return type mismatch for method '" + method_name + "' in interface '" + istr_get(iface_ni) + "'", 0, 0);
+            // 返回类型（签名项比较；同上）
+            art := sh_func_sig_ret_term(fi);
+            ert := sh_iface_sig_ret_term(ii, mi);
+            if art >= 0 && ert >= 0 {
+                if tt_list_same(art, ert) != 1 {
+                    check_error(EC_TF_RETURN, "Return type mismatch for method '" + method_name + "' in interface '" + iface_name2 + "'", 0, 0);
+                }
             }
             mi = mi + 1;
         }
@@ -2534,11 +2529,15 @@ fn infer_expr(node: int) -> int {
                                         if imi2 >= imc2 { break; }
                                         imbase2 := ii2 * ESZ_IFACEINFO + OFF_IF_METHODS + imi2 * ESZ_IFMETHOD;
                                         if r64(g_ifaces, imbase2 + OFF_IFM_NAME) == method_ni {
-                                            tname2 := istr_get(gen_ni);
-                                            mname2 := istr_get(method_ni);
-                                            mangled2 := tname2 + "." + mname2;
-                                            mangled_ni2 := str_intern(mangled2);
-                                            ast_set_data(node, mangled_ni2);
+                                            // R2 P3b Task 6（Step 3，mangling 退役）：不再合成 "T.m"
+                                            //   串——调用点记（**泛型形参名 ni**，标记位），实例化
+                                            //   时由 monomorph 按具体类型查方法表解析为真实函数名
+                                            //   （对照 gen_clone_tree 的 EXPR_CALL 分支与 ast.cr 的
+                                            //   CALL_FLAG_IFACE_METHOD 注）。旧态 = 名字拼接 + 克隆
+                                            //   期文本替换 ⇒ 实例体内调用目标悬空（实测产物运行
+                                            //   rc=139）；本任务起表查询（同 iface_find_method）。
+                                            ast_set_data(node, gen_ni);
+                                            ast_set_type_val(node, CALL_FLAG_IFACE_METHOD);
                                             iface_ret2 := r64(g_ifaces, imbase2 + OFF_IFM_RET_TI);
                                             // P2b Task 6：值经单表 `ty_code_to_ti`；本站点值域 = parser 写入的
                                             //   `unpack_type(返回型节点)`（parser.cr:1701，即 TY_* 码）；**域 = {INT..CHAR}**
@@ -2548,10 +2547,10 @@ fn infer_expr(node: int) -> int {
                                             //   F14：`-> char` = char）。
                                             iface_ret_ti := ty_code_to_ti(iface_ret2);
                                             if iface_ret_ti >= 0 && iface_ret_ti != TI_NEVER && iface_ret_ti != TI_DYN {
-                                                func_ni = mangled_ni2;
+                                                func_ni = gen_ni;
                                                 return iface_ret_ti;
                                             }
-                                            func_ni = mangled_ni2; return TI_UNIT;
+                                            func_ni = gen_ni; return TI_UNIT;
                                         }
                                         imi2 = imi2 + 1;
                                     }

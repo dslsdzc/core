@@ -1734,23 +1734,36 @@ fn parse_declaration() {
     param_tis = alloc(128 * 8); param_tis_cap = 128;
                 pi2 : ., mut = 0;
                 loop { if pi2 >= 8 { break; } w64(param_tis, pi2 * 8, TY_UNIT); pi2 = pi2 + 1; }
+                // R2 P3b Task 6（Step 1）：签名**类型节点**槽（与裸码槽并行写，照 struct/enum
+                // 的 code+node 双写先例）。self 接收者槽恒无节点（两侧同约定，见 OFF_IFM_SELF_MODE）。
+                param_nodes : string, mut;    param_nodes_cap : int, mut;
+    param_nodes = alloc(128 * 8); param_nodes_cap = 128;
+                pni2 : ., mut = 0;
+                loop { if pni2 >= 8 { break; } w64(param_nodes, pni2 * 8, -1); pni2 = pni2 + 1; }
+                self_mode : ., mut = 0;
                 if !check(T_RPAREN) {
                     loop {
                         fst := cur_tok();
                         // Handle &self / &mut self / self
                         if tok_k(fst) == T_AMPERSAND || tok_k(fst) == T_SELF {
+                            self_mode_t : ., mut = 1;                 // self
                             if tok_k(fst) == T_AMPERSAND {
                                 advance_tok(); // &
-                                if check(T_MUT) { advance_tok(); } // mut
+                                self_mode_t = 2;                       // &self
+                                if check(T_MUT) { advance_tok(); self_mode_t = 3; } // &mut self
                             }
                             nt2 := advance_tok(); // self
                             if pc < 8 { w64(param_tis, pc * 8, 0); }  // match function's default for &self
+                            if pc == 0 { self_mode = self_mode_t; }   // 首参 = 接收者才记模式
                             pc = pc + 1;
                         } else {
                             advance_tok(); // param name
                             advance_tok(); // :
                             ptype := parse_type();
-                            if pc < 8 { w64(param_tis, pc * 8, unpack_type(ptype)); }
+                            if pc < 8 {
+                                w64(param_tis, pc * 8, unpack_type(ptype));
+                                w64(param_nodes, pc * 8, ptype);
+                            }
                             pc = pc + 1;
                         }
                         if !check(T_COMMA) { break; }
@@ -1761,15 +1774,19 @@ fn parse_declaration() {
 
                 // Parse return type
                 ret_ti : ., mut = TY_UNIT;
+                ret_node : ., mut = -1;
                 if check(T_ARROW) {
                     advance_tok();
-                    ret_node := parse_type();
-                    ret_ti = unpack_type(ret_node);
+                    rn2 := parse_type();
+                    ret_node = rn2;
+                    ret_ti = unpack_type(rn2);
                 }
                 advance_tok(); // ;
 
                 // Store method in interface entry (with overflow checks)
-                if method_count >= 16 {
+                // R2 P3b Task 6（Step 1）：上限**显式登记保留**（单源常量 MAX_IFACE_METHODS）——
+                // 超限 = 硬错 rc=1（非静默截断），解除面（侧表迁移）见 dyn_arr.cr 常量注。
+                if method_count >= MAX_IFACE_METHODS {
                     grow_diags(g_diag_count + 1);
                     w64(g_diags, g_diag_count * DIAG_REC_SIZE, EC_P_FIELD_SYNTAX);
                     store_str_ptr(g_diags, g_diag_count * DIAG_REC_SIZE + 8, "interface '" + iface_name + "' exceeds max 16 methods");
@@ -1781,9 +1798,12 @@ fn parse_declaration() {
                     w64(g_ifaces, mbase + OFF_IFM_NAME, method_ni);
                     w64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT, pc);
                     w64(g_ifaces, mbase + OFF_IFM_RET_TI, ret_ti);
+                    w64(g_ifaces, mbase + OFF_IFM_RET_NODE, ret_node);
+                    w64(g_ifaces, mbase + OFF_IFM_SELF_MODE, self_mode);
                     pj : ., mut = 0;
                     loop { if pj >= 8 || pj >= pc { break; }
                         w64(g_ifaces, mbase + OFF_IFM_PARAM_TYPES + pj * 8, r64(param_tis, pj * 8));
+                        w64(g_ifaces, mbase + OFF_IFM_PARAM_NODES + pj * 8, r64(param_nodes, pj * 8));
                         pj = pj + 1; }
                     if pc > 8 {
                         grow_diags(g_diag_count + 1);

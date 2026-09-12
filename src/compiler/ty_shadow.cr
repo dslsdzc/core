@@ -871,17 +871,265 @@ fn sh_enum_domain_term(ti: int) -> int {
 
 // 接口 → 形状项（方法集 = product of fn）——**仍为占位，恒 -1**（阻塞精确定位见下）：
 // 现状接口方法签名存**裸 TY_***（parser.cr:1671/1685 的 `unpack_type` ⇒ 非原生类型节点一律
-// 塌缩为码 0，无法表达命名/泛型类型）⇒ 形状项**无处可建**（建出来即谎报形状：把「int」与
-// 「任意命名类型」混为一谈）。
-// **P3b Task 0 起**：`iface_satisfies`（type_engine.cr）的轴 C 已把本函数作为**第一路由**——
-// `shp >= 0` 即走 `iface_satisfies_term`（形状项包含判定），否则落 `iface_user_satisfies`
-// （结构谓词 = check_iface 同源）。本函数返回 -1 时**不打断判定**（那是设计上的逐级下落，
-// 非「未交付」）。解锁 = **Task 6 Step 1 签名类型项化**（把 `g_ifaces` 方法条目的裸 TY_* 槽
-// 换成类型节点/类型项；≥16 方法 / ≥8 参数上限同步处置）——到位后本函数按 spec §2.3 的
-// 「方法集 = product of fn」建项，`T: I` 的判定即由形状包含承担（本函数上方的路由已是切换点）。
-// 三态纪律：此处 -1 = 未覆盖面，**不得**被消费方当 0（不满足）或 1（满足）用。
+// ═══════════════ R2 P3b Task 6（Step 1/3）：签名规范项 + 接口形状项 ═══════════════
+// 语义（spec §2.3「interface I → 形状类型项：方法集 = product of fn 原子（方法签名各自为
+// fn(τ₁…τₙ)->τ 项）」）：本段是**签名项化**的唯一构造点。Step 1 交付了类型节点槽
+// （`OFF_IFM_PARAM_NODES` / `OFF_IFM_RET_NODE`）⇒ 签名首次可用**类型**而非映射层码表达。
+//
+// ⚠ 为何需要**规范形**（而不是直接复用 `sh_term_of_ti` 的项）：判定走引擎 `ty_sub`，而
+// 引擎在「不变槽」上按**节点同一性**比较链元素（`tt_list_same`），且对 AK_NAMED **不展开**
+// （P0 未覆盖面②）。直接桥接的项有两个身份缺陷：
+//   ① `TYP_GENERIC_APPLY` 行经 `alloc_type` **裸分配**（不去重）⇒ 同型的两次出现是**不同**
+//      节点 ⇒ 同签名被判不同（假违反）；
+//   ② 序列项的 b 槽（N / 固定性）在节点同一性下**入身份** ⇒ `[int;3]` 与 `[int;4]` 判不同
+//      ——与「N 不入身份」不变量（R1 裁决 / P3a Task 1）相悖（N 面由常量档承担）。
+// 规范形把**身份维度**入项、其余归一：泛型应用 = 基名行（named_dedup 已按名规范） + 实参链；
+// 序列 = N 归 -1；指针 = asp 不入项（照桥接）；命名行 = 行（按名规范）；引用 = mut 标记入项
+// （身份维度，照桥接）。⇒ **同型恒同节点、异型恒异节点**，引擎的 `ty_sub`（顶原子 AK_FN 的
+// 不变槽链比较）即给出签名相等判定（1/0；-1 面只剩建项失败）。
+// dyn（位图行不参与规范形）与未知 kind ⇒ -1（未覆盖面，**不得**当 0/1）。
+// 零 str_intern：全部走既有 ni/行（.ccr STR 段守）。
+fn sh_sig_term_of_ti(ti: int) -> int {
+    if ti < 0 { return -1; }
+    k := get_type_kind(ti);
+    if k < 0 { return -1; }
+    if k == TYP_BASE {
+        d := get_type_data(ti);
+        ak := sh_base_ak(d);
+        if ak < 0 { return -1; }
+        return tt_atom(ak, ti, -1);
+    }
+    if k == TYP_NAMED || k == TYP_GENERIC_PARAM {
+        // 命名行：named_dedup 按名规范（同名恒同行）；泛型形参行 = 声明点行（跨声明不同行 =
+        // 已登记面：签名内含泛型形参的匹配只在同一声明内成立）
+        return tt_atom(AK_NAMED, ti, -1);
+    }
+    if k == TYP_NULL { return sh_null_term(); }
+    if k == TYP_ARRAY || k == TYP_SLICE {
+        el := sh_sig_term_of_ti(get_type_data(ti));
+        if el < 0 { return -1; }
+        return tt_atom(AK_SEQUENCE, -1, tt_cons(el, tt_nil()));
+    }
+    if k == TYP_PTR {
+        el2 := sh_sig_term_of_ti(get_type_data(ti));
+        if el2 < 0 { return -1; }
+        return tt_atom(AK_PTR, -1, tt_cons(el2, tt_nil()));
+    }
+    if k == TYP_REF {
+        el3 := sh_sig_term_of_ti(get_type_data(ti));
+        if el3 < 0 { return -1; }
+        return tt_atom(AK_REF, -1, tt_cons(sh_ref_mut_marker(get_type_extra(ti)), tt_cons(el3, tt_nil())));
+    }
+    if k == TYP_OPTIONAL {
+        el4 := sh_sig_term_of_ti(get_type_data(ti));
+        if el4 < 0 { return -1; }
+        return tt_union(el4, sh_null_term());
+    }
+    if k == TYP_TUPLE {
+        cnt := get_type_data(ti);
+        start := get_type_extra(ti);
+        tail : ., mut = tt_nil();
+        i : ., mut = cnt - 1;
+        loop {
+            if i < 0 { break; }
+            et := sh_sig_term_of_ti(r64(g_gen_apply_data, (start + i) * 8));
+            if et < 0 { return -1; }
+            tail = tt_cons(et, tail);
+            i = i - 1;
+        }
+        return tt_atom(AK_PRODUCT, -1, tail);
+    }
+    if k == TYP_GENERIC_APPLY {
+        base := get_type_data(ti);
+        if get_type_kind(base) != TYP_NAMED { return -1; }
+        start2 := get_type_extra(ti);
+        cnt2 := r64(g_gen_apply_data, start2 * 8);
+        if cnt2 < 0 { return -1; }
+        tail2 : ., mut = tt_nil();
+        j : ., mut = cnt2 - 1;
+        loop {
+            if j < 0 { break; }
+            at := sh_sig_term_of_ti(r64(g_gen_apply_data, (start2 + 1 + j) * 8));
+            if at < 0 { return -1; }
+            tail2 = tt_cons(at, tail2);
+            j = j - 1;
+        }
+        return tt_atom(AK_NAMED, base, tail2);
+    }
+    return -1;   // TYP_DYN（位图行）/ 未知 kind：未覆盖面
+}
+
+// 类型**节点** → 签名项（节点契约：<0 = 无节点 ⇒ unit；照 checker 的 `type_node > 0` 约定，
+// 但用 -1 哨兵以免与「节点 0」混同）。res_type_node 的解析面 = 与其它消费点同一入口。
+fn sh_sig_term_of_node(node: int) -> int {
+    if node < 0 { return sh_sig_term_of_ti(TI_UNIT); }
+    ti := res_type_node(node);
+    return sh_sig_term_of_ti(ti);
+}
+
+// 接口方法签名的**参数项**（idx 自 0 起）。接收者槽（self_mode ≠ 0 且 idx == 0）= unit
+// **占位**——接收者模式（self/&self/&mut self）是调用约定而非类型集维度，由消费方**显式比较**
+//（`sh_iface_self_mode` / `sh_func_self_mode`）；不为它造令牌原子的理由：令牌的 b 槽在引擎
+// 的类级比较（只看 a/c 两槽）下不可见 ⇒ 模式 1/2/3 会互相判等（静默）。
+fn sh_iface_sig_param_term(ii: int, mi: int, idx: int) -> int {
+    if ii < 0 || mi < 0 || idx < 0 { return -1; }
+    if idx >= MAX_IFACE_METHOD_PARAMS { return -1; }
+    mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD;
+    if r64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT) <= idx { return -1; }
+    smode := r64(g_ifaces, mbase + OFF_IFM_SELF_MODE);
+    if idx == 0 && smode != 0 { return sh_sig_term_of_ti(TI_UNIT); }
+    return sh_sig_term_of_node(r64(g_ifaces, mbase + OFF_IFM_PARAM_NODES + idx * 8));
+}
+
+fn sh_iface_sig_ret_term(ii: int, mi: int) -> int {
+    if ii < 0 || mi < 0 { return -1; }
+    mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD;
+    return sh_sig_term_of_node(r64(g_ifaces, mbase + OFF_IFM_RET_NODE));
+}
+
+fn sh_iface_self_mode(ii: int, mi: int) -> int {
+    if ii < 0 || mi < 0 { return -1; }
+    return r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD + OFF_IFM_SELF_MODE);
+}
+
+// impl 侧（函数行）签名的**参数项**（idx 自 0 起；从 AST 形参链前扫解析——形参节点不连续，
+// 每参的类型节点插在其后，照 ir_gen/checker 同款扫描约定）。接收者槽同占位约定。
+fn sh_func_sig_param_term(fi: int, idx: int) -> int {
+    if fi < 0 || idx < 0 { return -1; }
+    fn_node := fi_ast_node(fi);
+    if fn_node < 0 { return -1; }
+    if ast_kind(fn_node) != EXPR_FN { return -1; }
+    if idx >= fi_param_count(fi) { return -1; }
+    pn := ast_b(fn_node);   // EXPR_FN: b = first param node（a = 函数名 ni——不是形参入口）
+    pi : ., mut = 0;
+    loop {
+        if pn < 0 { return -1; }
+        if pn >= g_ast_count { return -1; }
+        if ast_kind(pn) == EXPR_PARAM {
+            if pi == idx {
+                mode := ast_int_val(pn);
+                if mode == -1 { return -1; }      // 变参：签名项不可表达（登记）
+                if mode != 0 { return sh_sig_term_of_ti(TI_UNIT); }
+                return sh_sig_term_of_node(ast_data(pn));
+            }
+            pi = pi + 1;
+        }
+        pn = pn + 1;
+    }
+    return -1;
+}
+
+fn sh_func_self_mode(fi: int) -> int {
+    if fi < 0 { return -1; }
+    fn_node := fi_ast_node(fi);
+    if fn_node < 0 { return -1; }
+    if ast_kind(fn_node) != EXPR_FN { return -1; }
+    if fi_param_count(fi) <= 0 { return 0; }
+    pn := ast_b(fn_node);   // EXPR_FN: b = first param node
+    loop {
+        if pn < 0 { return -1; }
+        if pn >= g_ast_count { return -1; }
+        if ast_kind(pn) == EXPR_PARAM {
+            m := ast_int_val(pn);
+            if m == -1 { return -1; }
+            return m;
+        }
+        pn = pn + 1;
+    }
+    return -1;
+}
+
+// impl 侧函数行的返回项（解析规则 = check_func 的返回位逐字同款：非基型节点走
+// res_type_node；基型/无节点走码表（域含 NEVER、缺 7 ⇒ unit 兜底））。
+fn sh_func_sig_ret_term(fi: int) -> int {
+    if fi < 0 { return -1; }
+    fn_node := fi_ast_node(fi);
+    if fn_node < 0 { return -1; }
+    if ast_kind(fn_node) != EXPR_FN { return -1; }
+    rnode := ast_type_val(fn_node);
+    ret_ti : ., mut = TI_UNIT;
+    if rnode > 0 && ast_kind(rnode) != 0 {
+        ret_ti = res_type_node(rnode);
+    } else {
+        rm := ty_code_to_ti(fi_return_type(fi));
+        if rm >= 0 && rm != TI_DYN { ret_ti = rm; }
+    }
+    return sh_sig_term_of_ti(ret_ti);
+}
+
+// 函数行 → **fn 项**：`tt_atom(AK_FN, -1, [返回项, 参数项…])`（链序 = 返回在首，参数按声明序；
+// 逆序构造，照 sh_tuple_to_product 同因）。b 槽留空（引擎比较只看 a/c ⇒ 方法名不参与判定）。
+fn sh_func_sig_term(fi: int) -> int {
+    if fi < 0 { return -1; }
+    pc := fi_param_count(fi);
+    if pc < 0 || pc > MAX_FN_PARAMS { return -1; }
+    rt := sh_func_sig_ret_term(fi);
+    if rt < 0 { return -1; }
+    tail : ., mut = tt_cons(rt, tt_nil());
+    i : ., mut = pc - 1;
+    loop {
+        if i < 0 { break; }
+        pt := sh_func_sig_param_term(fi, i);
+        if pt < 0 { return -1; }
+        tail = tt_cons(pt, tail);
+        i = i - 1;
+    }
+    return tt_atom(AK_FN, -1, tail);
+}
+
+// 接口 → 形状类型项（spec §2.3）：`tt_atom(AK_PRODUCT, -1, [fn 项…])`，链序 = 方法声明序
+// （与 `g_ifaces` 方法表同序——消费方按表索引取成员，见 type_engine 的轴 C）。成员 fn 项的
+// **b 槽 = 方法名 ni**（消费方的查表键；引擎不比较 b，本层显式读取）。
+// -1 = 不可建（接口名未声明 / 方法数越界（>16）/ 任一签名项不可建 / 参数数越界（>8））。
+// 零方法接口 ⇒ 空 product（`tt_nil()` 链）——空洞满足的载体（判定面见轴 C）。
+// 三态纪律：-1 = 未覆盖面，**不得**被消费方当 0（不满足）或 1（满足）用。
 fn sh_iface_shape_term(iface_ni: int) -> int {
     if iface_ni < 0 { return -1; }
+    ii := find_iface(iface_ni);
+    if ii < 0 { return -1; }
+    mc := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT);
+    if mc < 0 { return -1; }
+    if mc > MAX_IFACE_METHODS { return -1; }
+    tail : ., mut = tt_nil();
+    i : ., mut = mc - 1;
+    loop {
+        if i < 0 { break; }
+        mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + i * ESZ_IFMETHOD;
+        m_ni := r64(g_ifaces, mbase + OFF_IFM_NAME);
+        pc := r64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT);
+        if pc < 0 || pc > MAX_IFACE_METHOD_PARAMS { return -1; }
+        rt2 := sh_iface_sig_ret_term(ii, i);
+        if rt2 < 0 { return -1; }
+        ptail : ., mut = tt_cons(rt2, tt_nil());
+        pj : ., mut = pc - 1;
+        loop {
+            if pj < 0 { break; }
+            pterm := sh_iface_sig_param_term(ii, i, pj);
+            if pterm < 0 { return -1; }
+            ptail = tt_cons(pterm, ptail);
+            pj = pj - 1;
+        }
+        tail = tt_cons(tt_atom(AK_FN, m_ni, ptail), tail);
+        i = i - 1;
+    }
+    return tt_atom(AK_PRODUCT, -1, tail);
+}
+
+// 形状项的第 idx 个成员（fn 项；-1 = 越界/非形状项）。消费方（轴 C）按方法表索引取用。
+fn sh_shape_member_at(shp: int, idx: int) -> int {
+    if shp < 0 || idx < 0 { return -1; }
+    if tt_tag(shp) != TT_ATOM { return -1; }
+    if tt_a(shp) != AK_PRODUCT { return -1; }
+    c := tt_c(shp);
+    i : ., mut = 0;
+    loop {
+        if i > idx { return -1; }
+        if c < 0 { return -1; }
+        if tt_tag(c) != TT_CONS { return -1; }
+        if i == idx { return tt_a(c); }
+        c = tt_b(c);
+        i = i + 1;
+    }
     return -1;
 }
 

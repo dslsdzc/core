@@ -290,16 +290,46 @@ fn ts_isat_add_method(ii: int, mname: string, pc: int, rt: int) -> int {
     w64(g_ifaces, mbase + OFF_IFM_NAME, str_intern(mname));
     w64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT, pc);
     w64(g_ifaces, mbase + OFF_IFM_RET_TI, rt);
+    // R2 P3b Task 6（Step 1 签名类型项化）：**类型节点**槽（与生产 parser 同形：基类型节点 =
+    // kind 0 + type_val = TY_* 码）+ 接收者模式（0 = 无接收者，本组夹具形态）。
+    w64(g_ifaces, mbase + OFF_IFM_RET_NODE, ts_ifc_base_node(rt));
+    w64(g_ifaces, mbase + OFF_IFM_SELF_MODE, 0);
+    pj : ., mut = 0;
+    loop {
+        if pj >= pc || pj >= MAX_IFACE_METHOD_PARAMS { break; }
+        w64(g_ifaces, mbase + OFF_IFM_PARAM_TYPES + pj * 8, TY_INT);
+        w64(g_ifaces, mbase + OFF_IFM_PARAM_NODES + pj * 8, ts_ifc_base_node(TY_INT));
+        pj = pj + 1;
+    }
     w64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT, n + 1);
     return mbase;
 }
 
+// 基类型节点（= parser `parse_type` 的基类型产物同形：kind 0、type_val = TY_* 码；
+// 签名面消费点（`sh_sig_term_of_node` → `res_type_node`）按同一分派表解析）。
+fn ts_ifc_base_node(ty: int) -> int {
+    return alloc_node(0, 0, 0, 0, 0, ty, 0, 0, 0);
+}
+
 // impl 方法登记（**照 parser 的 impl 分支写点**：mangled 函数名 + g_methods 三元组
 // {type_ni, method_ni, mangled_ni}）——夹具须与生产写点同形，否则对拍在两种登记面上空转。
+// R2 P3b Task 6：函数行带**真 EXPR_FN 节点**（形参链 + 类型节点；形参节点**不连续**——类型
+// 节点插在其后，照 parse_body 的分配布局）——签名面（`sh_func_sig_term`）从 AST 读参数/返回型。
 fn ts_isat_add_impl_method(tname_ni: int, mname: string, pc: int, rt: int) -> int {
     mn := istr_get(tname_ni) + "." + mname;
     mangled_ni := str_intern(mn);
-    fi := add_func(mn, pc, rt, 0);
+    pf : ., mut = -1;
+    pj : ., mut = 0;
+    loop {
+        if pj >= pc { break; }
+        tn := ts_ifc_base_node(TY_INT);
+        if pf < 0 { pf = g_ast_count; }
+        alloc_node(EXPR_PARAM, str_intern("p"), 0, 0, 0, TY_INT, tn, 0, 0);
+        pj = pj + 1;
+    }
+    rtn := ts_ifc_base_node(rt);
+    fn_node := alloc_node(EXPR_FN, mangled_ni, pf, pc, rt, rtn, -1, 0, 0);
+    fi := add_func(mn, pc, rt, fn_node);
     grow_methods(g_method_count + 1);
     w64(g_methods, g_method_count * 24, tname_ni);
     w64(g_methods, g_method_count * 24 + 8, str_intern(mname));
@@ -599,12 +629,14 @@ fn ts_x2_run() -> int {
          iface_satisfies_term(TI_INT, -1) == -1 &&
          iface_satisfies(x2_arr, -1) == -1 && iface_satisfies(-1, 0) == -1 &&
          g_ty_exhausted == 0), 1);
-    // ⑫ 用户接口形状项**仍不可展开**（Task 6 Step 1 前）：轴 C ① 路由恒 -1 ⇒ 落结构谓词（零方法
-    //    接口 + 命名行 = 空洞满足 1；原生行 = 域限定 -1）——「不可展开 ⇒ -1，不得当 0」的接口面
+    // ⑫ 用户接口形状项（R2 P3b Task 6 Step 1 起**可建**）：零方法接口 ⇒ **空 product**（≥0，
+    //    空洞满足的载体）；未声明的接口名 ⇒ -1（不得当 0/1）。判断面：命名行 + 零方法 = 满足 1
+    //    （空洞）；原生行 = 域限定 -1。
     x2_ii := ts_t5_mk_iface("X2ShapeIface");
-    fails = fails + ts_check("x2.iface_shape_term_unexpanded",
+    fails = fails + ts_check("x2.iface_shape_term_built",
         ts_x2_b(find_iface(str_intern("X2ShapeIface")) == x2_ii &&
-         sh_iface_shape_term(x2_ii) == -1 &&
+         sh_iface_shape_term(str_intern("X2ShapeIface")) >= 0 &&
+         sh_iface_shape_term(str_intern("X2NoSuchIface")) == -1 &&
          iface_satisfies(x2_named, str_intern("X2ShapeIface")) == 1 &&
          iface_satisfies(TI_INT, str_intern("X2ShapeIface")) == -1), 1);
     // ⑬ 形状项与**行**的桥接关系（形状判定 = 行桥接 + 引擎包含，两层都不可少）：切片的项
@@ -618,6 +650,255 @@ fn ts_x2_run() -> int {
     fails = fails + ts_check("x2.fixedness_not_in_shape_judgment",
         ts_x2_b(x2_same == 1 && sh_seq_fixed_len_of_ti(x2_arr) == 3 &&
          sh_seq_fixed_len_of_ti(x2_slice) == -1 && sh_seq_fixed_len_of_ti(TI_INT) == -1), 1);
+    return fails;
+}
+
+// ═══════════════ R2 P3b Task 6：impl 契约用例（ifc.*）═══════════════
+// 面（详见 ty_shadow.cr 的 sh_sig_term_of_ti / sh_iface_shape_term 注 + type_engine.cr 的
+// iface_user_satisfies 注）：① **签名类型项化**——接口方法条目的类型**节点**槽是签名的忠实
+// 来源，判定按**类型**（命名/泛型应用/接收者模式/元数）而非裸码；② **接口形状项** = 方法集
+// （product of fn，b 槽 = 方法名）建项与不可建面；③ **mangling 退役**——方法解析走 g_methods
+// 表、判定路径零 str_intern；④ 三态纪律（不可判 ⇒ -1，绝不当 0/1）。
+// 夹具须与生产写点同形（parser 的 interface/impl 分支）：接口方法条目 = 节点槽 + 接收者模式；
+// impl 函数行 = 真 EXPR_FN（形参链 + 类型节点，形参节点**不连续**）。
+// 用例数 = 14（调用方 `total = total + 14` 须同步——增删用例两处一起改）。
+
+// 命名类型夹具（结构声明 + SYM_TYPE 登记 + 命名行——供 res_type_node 的 EXPR_IDENT /
+// EXPR_GENERIC_APPLY 两分支解析）。
+fn ts_ifc_mk_named(name: string) -> int {
+    ni := str_intern(name);
+    add_struct(name);
+    ti := alloc_named_type(ni);
+    def_sym(ni, SYM_TYPE, ti, -1);
+    return ti;
+}
+
+// 签名类型**节点**夹具：命名型（EXPR_IDENT，int_val = 名字 ni）
+fn ts_ifc_named_node(name: string) -> int {
+    return alloc_node(EXPR_IDENT, 0, 0, 0, str_intern(name), 0, 0, 0, 0);
+}
+
+// 签名类型节点：序列（EXPR_ARRAY；n = 长度，0 = 视图）——实参根单槽契约照 parser 产物
+fn ts_ifc_seq_node(elem_node: int, n: int) -> int {
+    return alloc_node(EXPR_ARRAY, elem_node, 0, 0, n, 0, 0, 0, 0);
+}
+
+// 签名类型节点：泛型应用（EXPR_GENERIC_APPLY；a = 基名 ni、b = 首实参节点（**连续**）、c = 个数）
+fn ts_ifc_apply_node(base_name: string, arg_node: int) -> int {
+    return alloc_node(EXPR_GENERIC_APPLY, str_intern(base_name), arg_node, 1, 0, 0, 0, 0, 0);
+}
+
+// 接口方法条目（节点面可控：pnodes = 参数节点缓冲（可 -1 = 全无节点）；rnode = 返回型节点；
+// smode = 接收者模式（0 = 无接收者，1/2/3 = self/&self/&mut self））
+fn ts_ifc_add_method_n(ii: int, mname: string, pc: int, smode: int, n0: int, n1: int, n2: int, n3: int, rnode: int) -> int {
+    n := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT);
+    mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + n * ESZ_IFMETHOD;
+    w64(g_ifaces, mbase + OFF_IFM_NAME, str_intern(mname));
+    w64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT, pc);
+    w64(g_ifaces, mbase + OFF_IFM_RET_TI, 0);
+    w64(g_ifaces, mbase + OFF_IFM_RET_NODE, rnode);
+    w64(g_ifaces, mbase + OFF_IFM_SELF_MODE, smode);
+    pj : ., mut = 0;
+    loop {
+        if pj >= pc || pj >= MAX_IFACE_METHOD_PARAMS { break; }
+        pn : ., mut = -1;
+        if pj == 0 { pn = n0; }
+        if pj == 1 { pn = n1; }
+        if pj == 2 { pn = n2; }
+        if pj == 3 { pn = n3; }
+        w64(g_ifaces, mbase + OFF_IFM_PARAM_TYPES + pj * 8, TY_INT);
+        w64(g_ifaces, mbase + OFF_IFM_PARAM_NODES + pj * 8, pn);
+        pj = pj + 1;
+    }
+    w64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT, n + 1);
+    return mbase;
+}
+
+// impl 侧函数行（节点面可控；mode0 = 首参接收者模式（≠0 时该参无节点——接收者槽约定））。
+// 返回 = 函数行号。
+fn ts_ifc_add_impl(tname_ni: int, mname: string, pc: int, mode0: int, n0: int, n1: int, rnode: int) -> int {
+    mn := istr_get(tname_ni) + "." + mname;
+    mangled_ni := str_intern(mn);
+    pf : ., mut = -1;
+    pj : ., mut = 0;
+    loop {
+        if pj >= pc { break; }
+        pn2 : ., mut = -1;
+        m : ., mut = 0;
+        if pj == 0 { m = mode0; }
+        if m == 0 {
+            if pj == 0 { pn2 = n0; }
+            if pj == 1 { pn2 = n1; }
+        }
+        if pf < 0 { pf = g_ast_count; }
+        alloc_node(EXPR_PARAM, str_intern("p"), 0, 0, m, TY_INT, pn2, 0, 0);
+        pj = pj + 1;
+    }
+    fn_node := alloc_node(EXPR_FN, mangled_ni, pf, pc, 0, rnode, -1, 0, 0);
+    fi := add_func(mn, pc, 0, fn_node);
+    grow_methods(g_method_count + 1);
+    w64(g_methods, g_method_count * 24, tname_ni);
+    w64(g_methods, g_method_count * 24 + 8, str_intern(mname));
+    w64(g_methods, g_method_count * 24 + 16, mangled_ni);
+    g_method_count = g_method_count + 1;
+    return fi;
+}
+
+fn ts_ifc_run() -> int {
+    fails : ., mut = 0;
+    // ── 夹具：4 个命名类型（A/B 同构异名——名义 vs 结构面）+ 3 个 impl 宿主 ──
+    ifc_a_ti := ts_ifc_mk_named("IfcA");
+    ts_ifc_mk_named("IfcB");
+    ts_ifc_mk_named("IfcBox");
+    ifc_a_n := ts_ifc_named_node("IfcA");
+    ifc_b_n := ts_ifc_named_node("IfcB");
+    ifc_int_n := ts_ifc_base_node(TY_INT);
+    // 泛型应用节点：`IfcBox[IfcA]` / `IfcBox[IfcB]`（实参根单槽连续）
+    ifc_ap_a := ts_ifc_apply_node("IfcBox", ifc_a_n);
+    ifc_ap_b := ts_ifc_apply_node("IfcBox", ifc_b_n);
+    // 序列节点：`[int; 3]` / `[int; 4]`
+    ifc_seq3 := ts_ifc_seq_node(ifc_int_n, 3);
+    ifc_seq4 := ts_ifc_seq_node(ifc_int_n, 4);
+    // 接口：IfcI0 { m(x: IfcA) -> IfcB }（无接收者；参数/返回皆命名型）
+    ifc_ii0 := ts_t5_mk_iface("IfcI0");
+    ts_ifc_add_method_n(ifc_ii0, "m", 1, 0, ifc_a_n, -1, -1, -1, ifc_b_n);
+    // 命中：同签名
+    ifc_h_ti := ts_ifc_mk_named("IfcH");
+    ts_ifc_add_impl(str_intern("IfcH"), "m", 1, 0, ifc_a_n, -1, ifc_b_n);
+    // 参数类型不符（IfcB ← IfcA）
+    ifc_p_ti := ts_ifc_mk_named("IfcP");
+    ts_ifc_add_impl(str_intern("IfcP"), "m", 1, 0, ifc_b_n, -1, ifc_b_n);
+    // 返回类型不符（int ← IfcB）
+    ifc_r_ti := ts_ifc_mk_named("IfcR");
+    ts_ifc_add_impl(str_intern("IfcR"), "m", 1, 0, ifc_a_n, -1, ifc_int_n);
+
+    // ① 签名类型项化（参数面）：命名参数型按**类型**判定——同型 1 / 异型 0（旧态两侧皆码 0 ⇒ 恒等）
+    fails = fails + ts_check("ifc.sig_named_param_bound",
+        ts_isat_b2i(iface_satisfies(ifc_h_ti, str_intern("IfcI0")) == 1 &&
+         iface_satisfies(ifc_p_ti, str_intern("IfcI0")) == 0), 1);
+    // ② 签名类型项化（返回面）：命名返回型 vs 原生返回型 ⇒ 0；同命名型 ⇒ 1（编码面闭合的直接判据）
+    fails = fails + ts_check("ifc.sig_named_ret_bound",
+        ts_isat_b2i(iface_satisfies(ifc_r_ti, str_intern("IfcI0")) == 0 &&
+         iface_satisfies(ifc_h_ti, str_intern("IfcI0")) == 1), 1);
+    // ③ 泛型应用实参面：`IfcBox[IfcA]` vs `IfcBox[IfcB]` ⇒ 0；同实参 ⇒ 1
+    //    （旧态：应用行裸码塌缩为 0 ⇒ 静默判等；规范形展开基名 + 实参链 ⇒ 异实参异节点）
+    ifc_ii1 := ts_t5_mk_iface("IfcI1");
+    ts_ifc_add_method_n(ifc_ii1, "m", 1, 0, ifc_ap_a, -1, -1, -1, ifc_int_n);
+    ifc_g_ti := ts_ifc_mk_named("IfcG");
+    ts_ifc_add_impl(str_intern("IfcG"), "m", 1, 0, ifc_ap_a, -1, ifc_int_n);
+    ifc_g2_ti := ts_ifc_mk_named("IfcG2");
+    ts_ifc_add_impl(str_intern("IfcG2"), "m", 1, 0, ifc_ap_b, -1, ifc_int_n);
+    fails = fails + ts_check("ifc.sig_apply_arg_bound",
+        ts_isat_b2i(iface_satisfies(ifc_g_ti, str_intern("IfcI1")) == 1 &&
+         iface_satisfies(ifc_g2_ti, str_intern("IfcI1")) == 0), 1);
+    // ④ 接收者模式是判定维度：iface `&self`（2）vs impl `self`（1）/`&mut self`（3）⇒ 0；同模式 ⇒ 1
+    ifc_ii2 := ts_t5_mk_iface("IfcI2");
+    ts_ifc_add_method_n(ifc_ii2, "m", 1, 2, -1, -1, -1, -1, ifc_int_n);
+    ifc_m1_ti := ts_ifc_mk_named("IfcM1");
+    ts_ifc_add_impl(str_intern("IfcM1"), "m", 1, 1, -1, -1, ifc_int_n);
+    ifc_m2_ti := ts_ifc_mk_named("IfcM2");
+    ts_ifc_add_impl(str_intern("IfcM2"), "m", 1, 2, -1, -1, ifc_int_n);
+    ifc_m3_ti := ts_ifc_mk_named("IfcM3");
+    ts_ifc_add_impl(str_intern("IfcM3"), "m", 1, 3, -1, -1, ifc_int_n);
+    fails = fails + ts_check("ifc.sig_receiver_mode",
+        ts_isat_b2i(iface_satisfies(ifc_m2_ti, str_intern("IfcI2")) == 1 &&
+         iface_satisfies(ifc_m1_ti, str_intern("IfcI2")) == 0 &&
+         iface_satisfies(ifc_m3_ti, str_intern("IfcI2")) == 0), 1);
+    // ⑤ 元数（链长）：iface 1 参 vs impl 2 参 ⇒ 0（链形不同）；impl 0 参 ⇒ 0
+    ifc_w_ti := ts_ifc_mk_named("IfcW");
+    ts_ifc_add_impl(str_intern("IfcW"), "m", 2, 0, ifc_a_n, ifc_int_n, ifc_b_n);
+    ifc_w0_ti := ts_ifc_mk_named("IfcW0");
+    ts_ifc_add_impl(str_intern("IfcW0"), "m", 0, 0, -1, -1, ifc_b_n);
+    fails = fails + ts_check("ifc.sig_arity_chain",
+        ts_isat_b2i(iface_satisfies(ifc_w_ti, str_intern("IfcI0")) == 0 &&
+         iface_satisfies(ifc_w0_ti, str_intern("IfcI0")) == 0), 1);
+    // ⑥ N **不入**签名身份（P3a 不变量）：`[int;3]` vs `[int;4]` ⇒ 1（长度面由常量档承担）
+    ifc_ii3 := ts_t5_mk_iface("IfcI3");
+    ts_ifc_add_method_n(ifc_ii3, "m", 1, 0, ifc_seq3, -1, -1, -1, ifc_int_n);
+    ifc_n_ti := ts_ifc_mk_named("IfcN");
+    ts_ifc_add_impl(str_intern("IfcN"), "m", 1, 0, ifc_seq4, -1, ifc_int_n);
+    fails = fails + ts_check("ifc.sig_len_not_in_identity",
+        ts_isat_b2i(iface_satisfies(ifc_n_ti, str_intern("IfcI3")) == 1), 1);
+    // ⑦ 命名行**名义**（不展开）：IfcA 与 IfcB 结构同构（皆零字段）但不可互换 ⇒ 0
+    //    （判定不落引擎的 AK_NAMED 展开面——签名身份按**行**（同名字同行））
+    fails = fails + ts_check("ifc.sig_named_nominal_not_structural",
+        ts_isat_b2i(iface_satisfies(ifc_p_ti, str_intern("IfcI1")) == 0 &&
+         iface_satisfies(ifc_g_ti, str_intern("IfcI1")) == 1), 1);
+    // ⑧ 接口形状项 = 方法集（product of fn）：成员数 = 方法数、成员 b 槽 = 方法名、
+    //    链长 = 1 + 参数数；越界成员 ⇒ -1
+    ifc_ii4 := ts_t5_mk_iface("IfcI4");
+    ts_ifc_add_method_n(ifc_ii4, "m", 1, 0, ifc_a_n, -1, -1, -1, ifc_b_n);
+    ts_ifc_add_method_n(ifc_ii4, "n", 2, 0, ifc_a_n, ifc_int_n, -1, -1, ifc_int_n);
+    ifc_shp := sh_iface_shape_term(str_intern("IfcI4"));
+    ifc_m0 := sh_shape_member_at(ifc_shp, 0);
+    ifc_m1 := sh_shape_member_at(ifc_shp, 1);
+    ifc_chain_ok : ., mut = 0;
+    if ifc_m0 >= 0 && ifc_m1 >= 0 {
+        c0 := tt_c(ifc_m0);
+        c1 := tt_c(ifc_m1);
+        // 链长（1 + pc）：cons(ret, cons(p…)) ⇒ 2 元链（pc=1）/ 3 元链（pc=2）
+        if tt_tag(c0) == TT_CONS && tt_tag(tt_b(c0)) == TT_CONS && tt_tag(tt_b(tt_b(c0))) == TT_NIL {
+            if tt_tag(c1) == TT_CONS && tt_tag(tt_b(c1)) == TT_CONS {
+                if tt_tag(tt_b(tt_b(c1))) == TT_CONS && tt_tag(tt_b(tt_b(tt_b(c1)))) == TT_NIL { ifc_chain_ok = 1; }
+            }
+        }
+    }
+    fails = fails + ts_check("ifc.shape_product_of_fn",
+        ts_isat_b2i(ifc_shp >= 0 && tt_tag(ifc_shp) == TT_ATOM && tt_a(ifc_shp) == AK_PRODUCT &&
+         ifc_m0 >= 0 && tt_tag(ifc_m0) == TT_ATOM && tt_a(ifc_m0) == AK_FN &&
+         tt_b(ifc_m0) == str_intern("m") && tt_b(ifc_m1) == str_intern("n") &&
+         ifc_chain_ok == 1 && sh_shape_member_at(ifc_shp, 2) == -1 &&
+         sh_shape_member_at(ifc_shp, -1) == -1), 1);
+    // ⑨ 形状项不可建面：参数数越界（9 > MAX_IFACE_METHOD_PARAMS）⇒ -1（未覆盖面，不得当 0/1）；
+    //    未声明接口名 ⇒ -1
+    ifc_ii5 := ts_t5_mk_iface("IfcI5");
+    ts_ifc_add_method_n(ifc_ii5, "m", 9, 0, -1, -1, -1, -1, ifc_int_n);
+    fails = fails + ts_check("ifc.shape_build_unjudged",
+        ts_isat_b2i(sh_iface_shape_term(str_intern("IfcI5")) == -1 &&
+         sh_iface_shape_term(str_intern("IfcNope")) == -1 &&
+         iface_satisfies(ifc_h_ti, str_intern("IfcI5")) == -1), 1);
+    // ⑩ mangling 退役：判定/查表路径**零 str_intern**（缺失方法 = 判定 0 的路径也不得驻留新串
+    //    ——旧 `type_has_method` 的 `str_intern("T.m")` 形态在此会增长表）
+    ifc_zz_ti := ts_ifc_mk_named("IfcZz");
+    ifc_strs := g_str_count;
+    ifc_p1 := iface_satisfies(ifc_zz_ti, str_intern("IfcI0"));
+    ifc_p2 := type_has_method(str_intern("IfcZz"), str_intern("m"));
+    fails = fails + ts_check("ifc.mangling_zero_str_intern",
+        ts_isat_b2i(ifc_p1 == 0 && ifc_p2 == false && g_str_count == ifc_strs), 1);
+    // ⑪ 方法解析 = 表查询（`type_has_method` ⇔ `iface_find_method >= 0`）：在位 true / 缺失 false
+    fails = fails + ts_check("ifc.type_has_method_table",
+        ts_isat_b2i(type_has_method(str_intern("IfcH"), str_intern("m")) == true &&
+         type_has_method(str_intern("IfcZz"), str_intern("m")) == false &&
+         iface_find_method(str_intern("IfcH"), str_intern("m")) >= 0 &&
+         iface_find_method(str_intern("IfcZz"), str_intern("m")) < 0), 1);
+    // ⑫ 同源对拍（check_iface bool 面 ⇔ iface_satisfies 三态面 的 1 侧）：三形态逐例相等
+    ifc_eq : ., mut = 0;
+    if ts_isat_b2i(check_iface(str_intern("IfcH"), ifc_ii0)) == iface_satisfies(ifc_h_ti, str_intern("IfcI0")) {
+        if ts_isat_b2i(check_iface(str_intern("IfcP"), ifc_ii0)) == iface_satisfies(ifc_p_ti, str_intern("IfcI0")) {
+            if ts_isat_b2i(check_iface(str_intern("IfcR"), ifc_ii0)) == iface_satisfies(ifc_r_ti, str_intern("IfcI0")) {
+                ifc_eq = 1;
+            }
+        }
+    }
+    fails = fails + ts_check("ifc.check_iface_same_source", ifc_eq, 1);
+    // ⑬ 三态（域限定与不可判）：非命名行（原生/泛型形参/dyn）⇒ -1；零方法接口 + 命名行 ⇒ 1
+    //    （空洞满足）；未知接口名 ⇒ -1
+    ifc_gp_ti := alloc_type(TYP_GENERIC_PARAM, str_intern("IfcU"), 0);
+    ifc_dyn_ti := alloc_type(TYP_DYN, 0, 0);
+    ifc_ii6 := ts_t5_mk_iface("IfcI6");
+    fails = fails + ts_check("ifc.three_state_unjudged",
+        ts_isat_b2i(iface_satisfies(TI_INT, str_intern("IfcI0")) == -1 &&
+         iface_satisfies(ifc_gp_ti, str_intern("IfcI0")) == -1 &&
+         iface_satisfies(ifc_dyn_ti, str_intern("IfcI0")) == -1 &&
+         iface_satisfies(ifc_h_ti, str_intern("IfcI6")) == 1 &&
+         iface_satisfies(ifc_h_ti, str_intern("IfcNope")) == -1 &&
+         iface_satisfies(-1, str_intern("IfcI0")) == -1), 1);
+    // ⑭ 空 product 的形状面：零方法接口的形状项链为空（tt_nil）——成员/链形判据
+    ifc_shp6 := sh_iface_shape_term(str_intern("IfcI6"));
+    fails = fails + ts_check("ifc.shape_empty_product",
+        ts_isat_b2i(ifc_shp6 >= 0 && tt_tag(ifc_shp6) == TT_ATOM && tt_a(ifc_shp6) == AK_PRODUCT &&
+         tt_c(ifc_shp6) >= 0 && tt_tag(tt_c(ifc_shp6)) == TT_NIL &&
+         sh_shape_member_at(ifc_shp6, 0) == -1 && ifc_a_ti >= 0), 1);
     return fails;
 }
 
@@ -2180,6 +2461,8 @@ fn type_selftest_run() -> int {
 
     // R2 P3b Task 2 段（用例体在 ts_x2_run——同上，不得内联）
     total = total + 15; fails = fails + ts_x2_run();
+    // R2 P3b Task 6：impl 契约（签名类型项化 / 形状项 / mangling 退役 / 三态）——见 ts_ifc_run
+    total = total + 14; fails = fails + ts_ifc_run();
 
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }

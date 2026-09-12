@@ -14,13 +14,16 @@
 **三态纪律（本文件的主判据）**：「不判」≠「不满足」。负例段把「违反 ⇒ error[TG02]」钉死；
 登记面段把「不判 ⇒ 零诊断」钉死（防后续把 -1 静默折成 0/1）。
 
-**覆盖边界（登记，非漏放）——机制 = 接口签名槽是映射层编码**（parser 的 `unpack_type` /
-`fi_set_param_type`：非原生类型节点一律塌缩为码 0 = `TY_INT`，与 `int` 不可区分）
-⇒ 逐参数类型不可比（与 `check_iface` 一致），返回码比对语义 = **编码相等**。本条由
-`inst_encoding_limit_named_ret_pinned` 钉住现状；解锁 = Task 6 Step 1（签名类型项化）后由
-形状项包含判定（`sh_iface_shape_term` 路由）取代，并由 Task 6 Step 3 切换调用点。
-另注：接口签名的 `self`/`&self` 槽在两侧均写码 0（parser 约定），故含接收者的方法签名面亦
-不参与类型比对——同属上述登记面。
+**覆盖边界（R2 P3b Task 6 关闭本条的返回型面）——旧机制 = 接口签名槽是映射层编码**（parser
+的 `unpack_type`：非原生类型节点一律塌缩为码 0 = `TY_INT`，与 `int` 不可区分）⇒ 旧态逐参数类型
+不可比、返回码比对语义 = **编码相等**。Task 6 起签名**类型项化**（`g_ifaces` 方法条目新增
+**类型节点**槽 + `sh_iface_shape_term` / `sh_func_sig_term` 规范项 + 引擎结构比较原语），逐参
+与返回**都按类型**判定 ⇒ 本条已闭合。**台账（收紧）**：
+  | 用例 | 旧 | 新 |
+  |---|---|---|
+  | `inst_encoding_limit_named_ret_rejected`（原 `..._pinned`） | rc=0 零诊断（编码面判「满足」） | check rc=1 + TG02 |
+  另：接收者模式（`self`/`&self`/`&mut self`）两侧显式比较（口径 = 调用约定维度，不入类型项面）
+  ——同为 Task 6 收紧面，覆盖集在 `tests/selfhost/test_impl_iface.py`。
 
 **判据口径**：正例三路同证（check rc=0 ∧ ELF rc=N ∧ interp rc=N）；负例走 `check`
 （有诊断即 rc=1）+ 措辞断言 + 无产物。TG02 为**软诊断**（check rc=1 / build rc=0 + 产物
@@ -241,7 +244,8 @@ struct Box[T: Show] { v: T }
 fn g(b: Box[int]) -> int { return 0; }
 fn main() -> int { return 0; }
 """
-# 编码面登记：命名的返回型（两侧均码 0）⇒ 判定「满足」（**现状口径钉死**，Task 6 解锁）
+# 签名类型项化的直接可观测面（Task 6 Step 1/3）：命名的返回型 vs int 返回 ⇒ **拒绝**
+# （旧态编码面判「满足」= 静默通过；台账见文件头注）
 IFACE_NAMED_RET = """interface Show { fn show(self) -> S2; }
 struct S2 { b: int }
 struct S { a: int }
@@ -310,8 +314,9 @@ def main():
         # ── 登记面（不判 ⇒ 零诊断；三态纪律的正面钉——零动作而非「已验证满足」）──
         case_unjudged("inst_generic_param_arg_unjudged", IFACE_GP_ARG),
         case_unjudged("inst_native_arg_unjudged", IFACE_NATIVE_ARG),
-        # 编码面登记：命名返回型 vs int 返回 ⇒ **判定满足（1）**（映射层编码口径；Task 6 Step 1 解锁）
-        case_unjudged("inst_encoding_limit_named_ret_pinned", IFACE_NAMED_RET),
+        # 签名类型项化（Task 6 收紧）：命名返回型 vs int 返回 ⇒ 拒绝（旧态 = 编码面判「满足」）
+        case_reject("inst_encoding_limit_named_ret_rejected", IFACE_NAMED_RET,
+                    ["error[TG02]", "does not satisfy interface 'Show'"]),
     ]
 
     passed = sum(ok)

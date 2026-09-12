@@ -620,8 +620,8 @@ fn ty_disjoint(a: int, b: int) -> int {
 //     ⇒ 包含判定 `ty_sub(实参项, 形状项)`。形状项由 Task 2 按 spec §2.2 给出（如 `⊤_SEQUENCE`）。
 //   B 本质轴（原生/已声明类型名）：= P3a `gen_constr_satisfied` 的引擎面**逐字同口径**
 //     （`sh_term_of_ti` 桥接 + `ty_sub` + 预算隔离），本函数即该面的统一入口。
-//   C 用户接口名：`find_iface >= 0` ⇒ ① 形状项路由（`sh_iface_shape_term`——Task 6 落地前恒
-//     -1）→ ② 结构谓词 `iface_user_satisfies`（= `check_iface` 同源，见该函数头注）。
+//   C 用户接口名：`find_iface >= 0` ⇒ `iface_user_satisfies`（Task 6 Step 3：形状项 +
+//     逐成员签名判定；= `check_iface` 同源，见该函数头注）。
 // ⚠ 名字同时命中多轴时按上式**取先命中者**（A > C > B；原生名与接口名同名的撞车面在 C > B
 //   处保持 P3a 现状：`find_iface` 命中即走用户轴，不做本质轴判定）。
 //
@@ -639,9 +639,15 @@ fn iface_satisfies(t_ti: int, iface_ni: int) -> int {
     if st >= 0 { return iface_satisfies_term(t_ti, st); }
     // ── 轴 C：用户接口（`find_iface` 命中 ⇒ 用户轴；不得再落本质轴）──
     if find_iface(iface_ni) >= 0 {
-        // ① 形状项路由（Task 6 Step 1 签名类型项化 + Step 3 接引擎后生效；当前恒 -1 跳过）
-        shp := sh_iface_shape_term(iface_ni);
-        if shp >= 0 { return iface_satisfies_term(t_ti, shp); }
+        // 形状项路由（R2 P3b Task 6 Step 1/3 已落地）：形状项 = 接口方法集（product of fn，
+        // 建项见 ty_shadow.cr 的 sh_iface_shape_term），判定 = **逐成员包含**（下述
+        // iface_user_satisfies：方法名经 impl 方法表查表 + 成员 fn 项经引擎 ty_sub）。
+        // **不是** `iface_satisfies_term(t_ti, shp)`（整形状 ty_sub）——两条实测理由：
+        //   ① 引擎对 AK_NAMED 不展开（P0 未覆盖面②）⇒ 命名行实参与 product 形状的 `ty_sub`
+        //      恒 -1（全部负例会静默降级为「不判」= 静默通过面复活）；
+        //   ② product 的引擎比较是**不变槽链结构相等**而非子集包含 ⇒ 方法集 ⊇ 形状集
+        //      （实现方带额外方法，常态）会被误拒。
+        // ⇒ 整形状 ty_sub 路由**不可用**（登记为未覆盖面）；形状项作为签名载体由逐成员判定消费。
         return iface_user_satisfies(t_ti, iface_ni);
     }
     // ── 轴 B：本质轴（原生/已声明类型名；非类型名 ⇒ -1 = 不判，不发明诊断）──
@@ -698,24 +704,24 @@ fn iface_find_method(type_ni: int, method_ni: int) -> int {
     return -1;
 }
 
-// ─── 轴 C：用户接口的结构谓词（**与 check_iface 同源**）───
-// 判定 = 对接口 I 的**每个方法** m：T 的方法表含 m，且 `fi_param_count` / `fi_return_type`
-// 与 I 的方法条目逐项相等。三态：
-//   · 1 = 全部方法在位且计数/返回码相符（含**零方法接口**的空洞满足）；
-//   · 0 = 方法名不在位 / 参数计数不符 / 返回码不同（**可证违反**——方法名与参数计数为忠实
-//         面；返回码相等/不等按映射层编码解释，见下「覆盖边界」）；
-//   · -1 = T 非命名行（原生/`dyn`/泛型形参/复合构造子——无方法表可查 ⇒ **不判**，绝不因
-//         「查不到」而报 0）；或方法表登记了名字但函数行缺失（表内不一致 ⇒ 不发明违反）。
-//
-// **覆盖边界（登记面，非漏放；解锁 = Task 6 Step 1）**：接口方法签名的参数/返回槽是**映射
-// 层编码**——parser 对接口与 impl 两侧同样取 `unpack_type(类型节点)`（非原生类型节点一律
-// 塌缩为码 0 = `TY_INT`，与 `int` 不可区分；`self`/`&self` 接收者槽两侧均写码 0），故：
-//   · 逐参数类型**不参与**判定（与 `check_iface` 逐字一致；`check_impl_for` 的逐参比对是
-//     声明侧校验，非本谓词面）；
-//   · 返回码比对的语义 = **编码相等**而非类型项等价 ⇒ 命名返回型与 `int` 相互「相等」
-//     （行为探针 `inst_encoding_limit_named_ret_pinned` 把现状钉死）。
-// 这条边界与 P3 计划 B.4-3（命名实参 vs 原生约束 = -1）同族：修复 = 签名类型项化后改由
-// 形状项包含判定承担（本函数上方轴 C ① 的路由即为该切换点）。
+// ─── 轴 C：用户接口的满足谓词（**与 check_iface 同源**；R2 P3b Task 6 Step 3 重写）───
+// 语义（spec §2.3）：`interface I` 的形状类型项 = 方法集（product of fn，建项 =
+// `sh_iface_shape_term`）；判定 = **逐成员包含**：对 I 的每个方法 m——
+//   ① T 的方法表含 m（表查询 `iface_find_method`，**mangling 已退役**：不再拼 "T.m" 串）；
+//   ② 接收者模式相等（调用约定维度；两侧显式比较，见 `sh_iface_sig_param_term` 注）；
+//   ③ 签名包含：成员 fn 项与 impl 函数行的 fn 项做引擎 `ty_sub`——项为**身份规范形**
+//      （N 不入项 / 泛型应用展开 / 命名行按名规范，见 ty_shadow.cr 的 sh_sig_term_of_ti 注）
+//      ⇒ 判定 = 逐参类型 + 返回类型（**类型项等价**，取代旧态的裸码比较）。
+// 三态：
+//   · 1 = 全部方法在位且签名相符（含**零方法接口**的空洞满足）；
+//   · 0 = 方法名不在位 / 接收者模式不同 / 参数数不符（链长不同）/ 签名项不同（**可证违反**）；
+//   · -1 = T 非命名行（原生/`dyn`/泛型形参/复合构造子——无方法表 ⇒ **不判**）；方法表登记了
+//         名字但函数行缺失（表内不一致）；接口形状项不可建（签名节点缺失 / 域外参数数）；
+//         函数行签名项不可建（变参/未知 kind）。**-1 绝不因「查不到」而报 0**。
+// 覆盖边界（登记面，非漏放）：签名含**泛型形参行**的匹配只在同一声明内成立（行号身份）——
+// 接口侧不产生该形态（`interface I[T]` 的形参被 parser 丢弃，登记）；`dyn` 位图行不参与
+// 规范形 ⇒ 含 dyn 的签名 = -1 不判。
+// 预算隔离：每次引擎查询前后 `ty_budget_reset`（照本文件其它入口同款）。
 fn iface_user_satisfies(t_ti: int, iface_ni: int) -> int {
     ii := find_iface(iface_ni);
     if ii < 0 { return -1; }
@@ -724,18 +730,42 @@ fn iface_user_satisfies(t_ti: int, iface_ni: int) -> int {
     // str_intern 基类型名（本层禁止驻留表增长，见 iface_find_method 注）。
     tname_ni := decl_name_of_ti(t_ti);
     if tname_ni < 0 { return -1; }
+    return iface_user_satisfies_ii(tname_ni, ii);
+}
+
+// 名字面核心（`iface_user_satisfies` 与 checker 的 `check_iface` 的**共同实现**——两侧
+// 同源由构造保证，selftest `isat.predicate_same_as_check_iface` 仍逐例对拍）。
+fn iface_user_satisfies_ii(tname_ni: int, ii: int) -> int {
+    if tname_ni < 0 || ii < 0 { return -1; }
     mc := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT);
+    if mc < 0 || mc > MAX_IFACE_METHODS { return -1; }
+    shp := sh_iface_shape_term(r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_NAME));
+    if shp < 0 { return -1; }
     mi : ., mut = 0;
     loop {
-        if mi >= mc { break; }
+        if mi >= mc { return 1; }
         mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD;
         m_ni := r64(g_ifaces, mbase + OFF_IFM_NAME);
-        mangled_ni := iface_find_method(tname_ni, m_ni);
-        if mangled_ni < 0 { return 0; }                    // 无此方法 = 可证违反
-        fi := find_func(mangled_ni);
-        if fi < 0 { return -1; }                           // 表内不一致 ⇒ 不判（不发明违反）
-        if fi_param_count(fi) != r64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT) { return 0; }
-        if fi_return_type(fi) != r64(g_ifaces, mbase + OFF_IFM_RET_TI) { return 0; }
+        f_ni := iface_find_method(tname_ni, m_ni);
+        if f_ni < 0 { return 0; }                    // 无此方法 = 可证违反（名字面忠实）
+        fi := find_func(f_ni);
+        if fi < 0 { return -1; }                     // 表内不一致 ⇒ 不判（不发明违反）
+        if sh_iface_self_mode(ii, mi) != sh_func_self_mode(fi) { return 0; }   // 接收者模式
+
+        ifm := sh_shape_member_at(shp, mi);
+        if ifm < 0 { return -1; }                    // 形状项与方法表失同步 ⇒ 不判
+        implf := sh_func_sig_term(fi);
+        if implf < 0 { return -1; }                  // impl 侧签名项不可建 ⇒ 不判
+        // 判定 = 引擎的**不变槽结构比较原语** `tt_list_same`（0/1 **全域**）——**不是**
+        // 直接 `ty_sub`：引擎在不变槽上把「确定不同」上抛为 -1（type_engine 的
+        // tt_list_variance_at 分支：`tt_type_elem_same != 1 → g_ty_uncovered = 1; return -1`，
+        // 「确定不等 ⇒ 0」的加强仍是登记面）⇒ 用 ty_sub 会让签名不符退化成「不判」=
+        // 静默通过面复活（实测：isat.axis_c_ret_code 得 -1）。项为**规范形**（见 ty_shadow.cr
+        // 的 sh_sig_term_of_ti 注）⇒ 同型恒同节点、异型恒异节点 ⇒ 节点同一性就是签名相等的
+        // 正确判据。**比的是 fn 项的链**（`tt_c`）：fn 原子的 b 槽 = 方法名（接口侧标注；
+        // impl 侧为 -1）是元数据不入签名——整项同一是 `tt_list_same` 的「非 CONS ⇒ 节点同一」
+        // 规则下的假不等（实测命中）。本原语不计步（不动预算/memo）⇒ 无需预算隔离。
+        if tt_list_same(tt_c(implf), tt_c(ifm)) != 1 { return 0; }
         mi = mi + 1;
     }
     return 1;

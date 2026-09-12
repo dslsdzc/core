@@ -139,15 +139,32 @@ SG_UNSAFE : int = 4;
 SG_IF     : int = 5;  // conditional region: covers [condition, merge)
 
 // InterfaceInfo: fixed-size entry per interface
-// Header(24) + methods[16] * method_entry(88) = 1432 total
-ESZ_IFACEINFO : int = 1432;
+// Header(24) + methods[16] * method_entry(168) = 2712 total
+ESZ_IFACEINFO : int = 2712;
 OFF_IF_NAME : int = 0; OFF_IF_METHOD_COUNT : int = 8; OFF_IF_GENERIC_COUNT : int = 16;
 OFF_IF_METHODS : int = 24;  // first method entry
-// Each method entry: name_idx(8) + param_count(8) + ret_ti(8) + param_types[8](64) = 88 bytes
-ESZ_IFMETHOD : int = 88;
+// Each method entry: name_idx(8) + param_count(8) + ret_ti(8) + param_types[8](64)
+//   + param_nodes[8](64) + ret_node(8) + self_mode(8) = 168 bytes
+// R2 P3b Task 6（Step 1 签名类型项化）：**裸码槽保留**（`param_types` / `ret_ti`）——
+//   S6 站点（checker 的泛型方法调用返回型映射）的值域 = 映射层编码（TY_*），P2b Task 6 已把
+//   该域**显式化钉住**（t6_S6_* 行为用例）⇒ 不得改；新增**类型节点**槽 = 签名的忠实来源
+//   （裸码把非原生类型一律塌缩为 0 = TY_INT，与 int 不可区分）——供 Step 3 的签名项比较
+//   （满足判定 / impl 声明面）与 `sh_iface_shape_term` 建项。-1 = 无节点（哨兵；不用 0——
+//   节点 0 是合法下标，用 0 会与「首个分配节点」混同）。接收者槽两侧皆无节点（parser 的
+//   self 约定，见 self_mode）。
+ESZ_IFMETHOD : int = 168;
 OFF_IFM_NAME : int = 0; OFF_IFM_PARAM_COUNT : int = 8; OFF_IFM_RET_TI : int = 16;
-OFF_IFM_PARAM_TYPES : int = 24;  // first of up to 8 param types (each 8 bytes)
+OFF_IFM_PARAM_TYPES : int = 24;   // first of up to 8 param types (each 8 bytes)   → 24..87
+OFF_IFM_PARAM_NODES : int = 88;   // first of up to 8 param type nodes (8B each)  → 88..151
+OFF_IFM_RET_NODE : int = 152;     // return type node（-1 = 无，= unit）
+OFF_IFM_SELF_MODE : int = 160;    // 接收者模式：0 = 无接收者（首参为普通形参）/ 1 = self /
+                                  //   2 = &self / 3 = &mut self（照 EXPR_PARAM 的 int_val 约定）
 MAX_IFACE_METHOD_PARAMS : int = 8;
+// R2 P3b Task 6（Step 1）：方法上限单源化（旧态 = parser 内联字面量 16，与 ESZ_IFACEINFO
+// 的槽数隐式绑定）。**本任务显式登记保留**（不解除）：解除需把方法表迁到侧表（全部读点换位），
+// 按 B.4-7 的 MAX_* 统一口径「先加护栏、再评估解除」；护栏现状 = 超限**硬错 rc=1**（非静默
+// 截断——实测），本任务加钉子用例（test_impl_iface.py 的 limit 组）。
+MAX_IFACE_METHODS : int = 16;
 
 // EnumInfo offsets
 // R2 P3 Task 4（T0 交接 ①）：变体载荷**类型节点**槽（照 struct 先例 OFF_SI_FIELD_TYPE_NODES）

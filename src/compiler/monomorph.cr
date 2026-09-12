@@ -570,6 +570,23 @@ fn gen_clone_tree(node: int) -> int {
         // 原样拷贝，沿用 = 用源上下文的形参行给实例建键（错实例）。
         n := ast_alloc(k, a2, b2, c, iv, tv, d, ln, cl);
         ast_set_int_val(n, gen_remap_binds(iv));
+        // R2 P3b Task 6（Step 3，mangling 退役）：接口方法调用（泛型形参接收者）的**实例化解析**。
+        // 源节点携带（data = 泛型形参名 ni，type_val = CALL_FLAG_IFACE_METHOD；检查见 checker 的
+        // 泛型约束方法路径注）⇒ 此处按当前实例的具体类型**查方法表**取真实函数名（`g_methods`
+        // 三元组 → 函数名 ni）。旧态 = 克隆期沿用合成的 "T.m" 串（文本替换只作用于 EXPR_IDENT）
+        // ⇒ 实例体内调用目标悬空（实测：产物运行 rc=139）。
+        // 解析失败（形参未绑定 / 具体类型无此方法 / 嵌套形参）⇒ 保持原状（登记面，不发明目标）。
+        if tv == CALL_FLAG_IFACE_METHOD {
+            cni := gen_lookup_subst(d);
+            if cni >= 0 && a2 >= 0 {
+                m_ni := ast_int_val(a2);
+                f_ni := iface_find_method(cni, m_ni);
+                if f_ni >= 0 {
+                    ast_set_data(n, f_ni);
+                    ast_set_type_val(n, 0);
+                }
+            }
+        }
         gen_dedup_add(node, n); return n;
     }
 
