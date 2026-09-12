@@ -381,11 +381,14 @@ fn ts_isat_run() -> int {
          iface_satisfies(TI_INT, str_intern("T0bNoSuchName")) == -1), 1);
     // ⑦ 轴 A（横切形状）：注册 ⊤_SEQUENCE 名 ⇒ 切片行 1 / 原生行 0；**复位后同键 ⇒ -1**
     //    （复位断言防「条目泄漏成全局态」；lookup 负键守卫）
+    //    R2 P4 Task 3 重定：形状表在 init_types 尾部已有**生产注册面**（6 条 D17 名）
+    //    ——本行 = 第 7 条（slot 6），计数基数由 0 改 6；注册/查询/判定语义零变化。
     isat_seq_ti := alloc_type(TYP_SLICE, TI_INT, 0);
     isat_shape_name := str_intern("T0bShapeSeq");
+    isat_n_pre := iface_shape_count();
     isat_slot := iface_shape_register(isat_shape_name, tt_top_k(AK_SEQUENCE));
     fails = fails + ts_check("isat.axis_a_shape",
-        ts_isat_b2i(isat_slot == 0 && iface_shape_count() == 1 &&
+        ts_isat_b2i(isat_slot == isat_n_pre && iface_shape_count() == isat_n_pre + 1 &&
          iface_shape_lookup(isat_shape_name) >= 0 &&
          iface_satisfies(isat_seq_ti, isat_shape_name) == 1 &&
          iface_satisfies(TI_INT, isat_shape_name) == 0), 1);
@@ -588,7 +591,23 @@ fn ts_x2_run() -> int {
     fails = fails + ts_check("x2.range_fixedness_matches_kind",
         ts_x2_b(x2_bad2 == 0 && x2_n_fixed >= 1 && x2_n_view >= 1), 1);
     // ⑨ 形状项的**名字面**（轴 A 生产入口）：六条规范项经注册表可按名判定（= Step 1「条目」的
-    //    注册面兑现）；复位后同键 ⇒ -1（无泄漏）
+    //    注册面兑现）；复位后同键 ⇒ -1（无泄漏）。
+    //    R2 P4 Task 3 重钉（裁决 1 + D17）：**生产注册面**同例断言——`iface_shape_builtin_init()`
+    //    显式重跑（幂等）后，六个 D17 名可按名查询且与 sh_shape_*() 构造点**同项**；
+    //    随后照旧注册六个自测名（同名覆盖语义不受影响，计数 = 6 + 6）。
+    iface_shape_builtin_init();
+    x2_p1 := iface_shape_lookup(str_intern("sequence"));
+    x2_p2 := iface_shape_lookup(str_intern("sequence_ro"));
+    x2_p3 := iface_shape_lookup(str_intern("sequence_rw"));
+    x2_p4 := iface_shape_lookup(str_intern("indexable"));
+    x2_p5 := iface_shape_lookup(str_intern("iterable"));
+    x2_p6 := iface_shape_lookup(str_intern("product"));
+    fails = fails + ts_check("x2.shape_builtin_names", ts_x2_b(
+        iface_shape_count() == 6 && x2_p1 == sh_shape_seq() && x2_p2 == sh_shape_seq_ro() &&
+        x2_p3 == sh_shape_seq_rw() && x2_p4 == sh_shape_indexable() &&
+        x2_p5 == sh_shape_iterable() && x2_p6 == sh_shape_product() &&
+        iface_satisfies(x2_arr, str_intern("sequence")) == 1 &&
+        iface_satisfies(TI_INT, str_intern("sequence")) == 0), 1);
     x2_n0 := iface_shape_count();
     x2_r1 := iface_shape_register(str_intern("X2NameSeq"), sh_shape_seq());
     x2_r2 := iface_shape_register(str_intern("X2NameIdx"), sh_shape_indexable());
@@ -606,9 +625,26 @@ fn ts_x2_run() -> int {
          iface_satisfies(x2_tup, str_intern("X2NameProd")) == 1 &&
          iface_satisfies(TI_INT, str_intern("X2NameSeq")) == 0), 1);
     iface_shape_reset();
+    // R2 P4 Task 3 重钉：复位守门口径不变（count = 0 + 旧键 -1）；**新增**生产注册面的
+    // 「复位后可重建」断言（生产重置点 = reset_frontend_state 清 count，随 init_types 尾部
+    // 的 iface_shape_builtin_init 重建 ⇒ 长驻进程每请求一致）。
+    x2_restored : ., mut = 0;
+    if iface_shape_count() == 0 && iface_satisfies(x2_arr, str_intern("X2NameSeq")) == -1 {
+        iface_shape_builtin_init();
+        if iface_shape_count() == 6 && iface_shape_lookup(str_intern("sequence")) == sh_shape_seq() {
+            x2_restored = 1;
+        }
+    }
     fails = fails + ts_check("x2.shape_no_leak_after_reset",
-        ts_x2_b(iface_shape_count() == 0 && iface_satisfies(x2_arr, str_intern("X2NameSeq")) == -1), 1);
-    // ⑩ 零 str_intern（.ccr STR 段守卫，A.3-②）：六条形状项构造**不得**新增驻留串
+        ts_x2_b(x2_restored == 1), 1);
+    // ⑩ 零 str_intern（.ccr STR 段守卫）——R2 P4 Task 3 重定（裁决 1）：
+    //    (a) **判定/查询路径零新增驻留**：形状项构造（六构造点）+ 按名查询 + 注册幂等重跑
+    //        （iface_shape_builtin_init 重复调用）皆不得增长 g_strs；
+    //    (b) **初始化/注册面的固定增量**：增量 = 逐名注册的 6 个 D17 名（在 init_types 首次
+    //        调用时一次性支付——裁决 1 明示接受 STR 段增长），此后幂等 ⇒ 本处以「(a) 零增长 +
+    //        六名可查（= 名字已驻留且 ni 解析正确）」两式联立钉住。
+    //    注：T1..T2 期的绝对口径「构造路径恒零驻留」在初始化面已不成立（原文保留于
+    //    iface_registry.cr 头注），本重定即该翻转的落地面。
     x2_strs := g_str_count;
     x2_t1 := sh_shape_seq();
     x2_t2 := sh_shape_seq_ro();
@@ -616,9 +652,18 @@ fn ts_x2_run() -> int {
     x2_t4 := sh_shape_indexable();
     x2_t5 := sh_shape_iterable();
     x2_t6 := sh_shape_product();
+    x2_p1b := iface_shape_lookup(str_intern("sequence"));
+    x2_p2b := iface_shape_lookup(str_intern("sequence_ro"));
+    x2_p3b := iface_shape_lookup(str_intern("sequence_rw"));
+    x2_p4b := iface_shape_lookup(str_intern("indexable"));
+    x2_p5b := iface_shape_lookup(str_intern("iterable"));
+    x2_p6b := iface_shape_lookup(str_intern("product"));
+    iface_shape_builtin_init();   // 幂等重跑（不得再增长驻留表）
     fails = fails + ts_check("x2.no_str_intern",
         ts_x2_b(g_str_count == x2_strs && x2_t1 >= 0 && x2_t2 >= 0 && x2_t3 >= 0 &&
-         x2_t4 >= 0 && x2_t5 >= 0 && x2_t6 >= 0), 1);
+         x2_t4 >= 0 && x2_t5 >= 0 && x2_t6 >= 0 &&
+         x2_p1b == x2_t1 && x2_p2b == x2_t2 && x2_p3b == x2_t3 &&
+         x2_p4b == x2_t4 && x2_p5b == x2_t5 && x2_p6b == x2_t6), 1);
     // ⑪ 三态纪律（形状面）：越界行/负键/不可译行 ⇒ **-1**（不得当 0/1）；成功判定后预算窗口干净
     ty_budget_reset(200000);
     x2_ok := iface_satisfies_term(x2_arr, sh_shape_seq());     // 非同一 ⇒ 计步（非快路径）
@@ -967,6 +1012,10 @@ fn ts_ccr_purity_ok() -> int {
     n0 := g_ccr_type_seg_len;
     cp := alloc(n0 + 8);
     _dyncpy(g_ccr_type_seg, n0, cp);
+    // R2 P4 Task 3：IFACE 段同批纳入（D13 的承诺面 = **两段**皆类型表/接口表的纯函数）
+    i0 := g_ccr_iface_seg_len;
+    ip := alloc(i0 + 8);
+    _dyncpy(g_ccr_iface_seg, i0, ip);
     // 判定历史扰动：跨项判定 + 规范化（向项表追加新项——旧「直接序列化活表」必在此变）
     pa := tt_atom(AK_INT, TI_INT, -1);
     pb := tt_atom(AK_STRING, TI_STR, -1);
@@ -982,7 +1031,7 @@ fn ts_ccr_purity_ok() -> int {
         println("ct.seg_determinism: unique-term fixture failed"); return 0;
     }
     // 重装填（项层/引擎/桥接复位 → 行序重建）⇒ 段体逐字节同
-    if ccr_type_prepare_save() != 0 { println("ct.seg_determinism: rebuild prepare failed"); return 0; }
+    if ccr_seg_prepare_save() != 0 { println("ct.seg_determinism: rebuild prepare failed"); return 0; }
     if g_ccr_type_seg_len != n0 {
         print("ct.seg_determinism: buffer length changed "); print(int_str(n0));
         print(" -> "); println(int_str(g_ccr_type_seg_len));
@@ -997,17 +1046,40 @@ fn ts_ccr_purity_ok() -> int {
         }
         k = k + 1;
     }
+    // IFACE 段同判（R2 P4 Task 3）：重装填后逐字节同（形状重注册/签名装填皆纯函数）
+    if g_ccr_iface_seg_len != i0 {
+        print("ct.seg_determinism: iface buffer length changed "); print(int_str(i0));
+        print(" -> "); println(int_str(g_ccr_iface_seg_len));
+        return 0;
+    }
+    k2 : ., mut = 0;
+    loop {
+        if k2 >= i0 { break; }
+        if load8(g_ccr_iface_seg, k2) != load8(ip, k2) {
+            print("ct.seg_determinism: iface buffer byte mismatch at "); println(int_str(k2));
+            return 0;
+        }
+        k2 = k2 + 1;
+    }
     return 1;
 }
 
 fn ts_ccr_run() -> int {
     fails : ., mut = 0;
     init_types();   // 干净表（9 原生行——不受前段夹具影响）
+    // R2 P4 Task 3：接口表同批清零（段体含 IFACE 五小节 ⇒ 上游 ifc/isat 夹具的**死节点**
+    // （EXPR_IDENT 指向已被 init_types 作废的命名行 ⇒ res_type_node 落 dyn 行）会令签名项
+    // 不可建 ⇒ 装填拒绝。本组语义 = 「干净类型表 + 干净接口表」的段体往返夹具。
+    g_iface_count = 0;
+    g_impl_for_count = 0;
+    g_method_count = 0;
+    iface_shape_reset();
+    iface_shape_builtin_init();
     opt_a := alloc_type(TYP_OPTIONAL, TI_INT, 0);
     opt_b := alloc_type(TYP_OPTIONAL, TI_INT, 0);
     arr3 := alloc_type(TYP_ARRAY, TI_INT, 3);
     arr4 := alloc_type(TYP_ARRAY, TI_INT, 4);
-    prep := ccr_type_prepare_save();
+    prep := ccr_seg_prepare_save();
     fails = fails + ts_check("ct.seg_prepare", prep, 0);
     if prep == 0 {
         fails = fails + ts_check("ct.seg_roundtrip", ts_ccr_roundtrip_ok(), 1);
@@ -1021,6 +1093,262 @@ fn ts_ccr_run() -> int {
     rej := ccr_type_populate();
     if bad_row < 0 { rej = 1; }   // 夹具未建成 ⇒ 不算通过（防假绿）
     fails = fails + ts_check("ct.seg_reject_untranslatable", rej, -1);
+    return fails;
+}
+
+// ═══════════ R2 P4 Task 3：IFACE 段内容面（扩列 / 命名化 / 签名项化 / 段体往返）═══════════
+// 用例面（7 例）：① 段体五小节与内存表逐字段一致 + 行走完 == 缓冲长度（无尾随）；
+// ② 签名项槽（ret_term/param_terms）== 活算值（装填与签名来源零漂移；未用槽 = -1）；
+// ③ 形状名生产注册面（六名可按名查询且与 sh_shape_*() 构造点**同项**）；④ 条目表扩列
+// （16 行 + 三新行 ops = 0 + 逐名可读）；⑤ 判定面零变化（全类型行枚举无新映射 +
+// TYP_NULL/TYP_OPTIONAL 行仍 -1）；⑥ 不可建签名（dyn 位图行入签名）⇒ 装填拒绝
+// （save 拒落盘）——**最后**（污染接口表）。
+// 夹具/边界：本组自建**干净接口表**（g_iface_count/g_impl_for_count/g_method_count 清零 +
+// 形状表 reset + 生产注册面重跑）——上游 ts_ifc_run 的夹具含 9 形参接口（不可建面），
+// 不清零会令装填拒绝（设计如此：populate 不静默跳过）。**必须最后运行**（populate 复位三面缓存）。
+fn ts_ccr2_row_ok(b: string, p: int, i: int) -> int {
+    eo := i * ESZ_IFACE_ENTRY;
+    if buf_read_i32(b, p) != r64(g_iface_entries, eo + OFF_IE_AK) { return 0; }
+    if buf_read_i32(b, p + 4) != r64(g_iface_entries, eo + OFF_IE_TI) { return 0; }
+    if buf_read_i32(b, p + 8) != r64(g_iface_entries, eo + OFF_IE_NAME) { return 0; }
+    if buf_read_i32(b, p + 12) != r64(g_iface_entries, eo + OFF_IE_LIT) { return 0; }
+    if buf_read_i64(b, p + 16) != r64(g_iface_entries, eo + OFF_IE_OPS) { return 0; }
+    return 1;
+}
+
+fn ts_ccr2_seg_walk_ok() -> int {
+    b := g_ccr_iface_seg;
+    n := g_ccr_iface_seg_len;
+    if n <= 0 { return 0; }
+    // ① 原生条目（计数 == 常量 == 表计数；逐行 5 字段 == g_iface_entries）
+    if buf_read_u32(b, 0) != IFACE_ENTRY_COUNT { return 0; }
+    if buf_read_u32(b, 0) != g_iface_entry_count { return 0; }
+    p : ., mut = 4;
+    ei : ., mut = 0;
+    loop {
+        if ei >= IFACE_ENTRY_COUNT { break; }
+        if ts_ccr2_row_ok(b, p, ei) != 1 { return 0; }
+        p = p + 24;
+        ei = ei + 1;
+    }
+    // ② 横切形状
+    if buf_read_u32(b, p) != g_iface_shape_count { return 0; }
+    p = p + 4;
+    si : ., mut = 0;
+    loop {
+        if si >= g_iface_shape_count { break; }
+        if buf_read_i32(b, p) != r64(g_iface_shape_names, si * 8) { return 0; }
+        if buf_read_i32(b, p + 4) != r64(g_iface_shape_terms, si * 8) { return 0; }
+        p = p + 8;
+        si = si + 1;
+    }
+    // ③ 用户接口（头 16B + 方法 80B：项槽先于裸码槽——实施取声明行序，见 ccr_types.cr 头注）
+    if buf_read_u32(b, p) != g_iface_count { return 0; }
+    p = p + 4;
+    fi : ., mut = 0;
+    loop {
+        if fi >= g_iface_count { break; }
+        fo := fi * ESZ_IFACEINFO;
+        mc := r64(g_ifaces, fo + OFF_IF_METHOD_COUNT);
+        if buf_read_i32(b, p) != r64(g_ifaces, fo + OFF_IF_NAME) { return 0; }
+        if buf_read_i32(b, p + 4) != mc { return 0; }
+        if buf_read_i32(b, p + 8) != r64(g_ifaces, fo + OFF_IF_GENERIC_COUNT) { return 0; }
+        p = p + 16;
+        mj : ., mut = 0;
+        loop {
+            if mj >= mc { break; }
+            mo := fo + OFF_IF_METHODS + mj * ESZ_IFMETHOD;
+            if buf_read_i32(b, p) != r64(g_ifaces, mo + OFF_IFM_NAME) { return 0; }
+            if buf_read_i32(b, p + 4) != r64(g_ifaces, mo + OFF_IFM_PARAM_COUNT) { return 0; }
+            if buf_read_i32(b, p + 8) != r64(g_ifaces, mo + OFF_IFM_SELF_MODE) { return 0; }
+            if buf_read_i32(b, p + 12) != r64(g_ifaces, mo + OFF_IFM_RET_TERM) { return 0; }
+            p = p + 16;
+            kq : ., mut = 0;
+            loop {
+                if kq >= MAX_IFACE_METHOD_PARAMS { break; }
+                if buf_read_i32(b, p) != r64(g_ifaces, mo + OFF_IFM_PARAM_TERMS + kq * 8) { return 0; }
+                p = p + 4;
+                kq = kq + 1;
+            }
+            qq : ., mut = 0;
+            loop {
+                if qq >= MAX_IFACE_METHOD_PARAMS { break; }
+                if buf_read_i32(b, p) != r64(g_ifaces, mo + OFF_IFM_PARAM_TYPES + qq * 8) { return 0; }
+                p = p + 4;
+                qq = qq + 1;
+            }
+            mj = mj + 1;
+        }
+        fi = fi + 1;
+    }
+    // ④ impl 边
+    if buf_read_u32(b, p) != g_impl_for_count { return 0; }
+    p = p + 4;
+    gi : ., mut = 0;
+    loop {
+        if gi >= g_impl_for_count { break; }
+        if buf_read_i32(b, p) != r64(g_impl_for, gi * 16) { return 0; }
+        if buf_read_i32(b, p + 4) != r64(g_impl_for, gi * 16 + 8) { return 0; }
+        p = p + 8;
+        gi = gi + 1;
+    }
+    // ⑤ 方法表
+    if buf_read_u32(b, p) != g_method_count { return 0; }
+    p = p + 4;
+    mi : ., mut = 0;
+    loop {
+        if mi >= g_method_count { break; }
+        if buf_read_i32(b, p) != r64(g_methods, mi * 24) { return 0; }
+        if buf_read_i32(b, p + 4) != r64(g_methods, mi * 24 + 8) { return 0; }
+        if buf_read_i32(b, p + 8) != r64(g_methods, mi * 24 + 16) { return 0; }
+        p = p + 12;
+        mi = mi + 1;
+    }
+    if p != n { return 0; }        // 行走完 == 缓冲长度（五小节自洽 + 无尾随字节）
+    return 1;
+}
+
+fn ts_ccr2_sig_slots_ok() -> int {
+    ii : ., mut = 0;
+    loop {
+        if ii >= g_iface_count { break; }
+        mc := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT);
+        mi : ., mut = 0;
+        loop {
+            if mi >= mc { break; }
+            mo := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD;
+            // 返回槽 == 活算（签名的唯一来源 = sh_iface_sig_ret_term）
+            if r64(g_ifaces, mo + OFF_IFM_RET_TERM) != sh_iface_sig_ret_term(ii, mi) { return 0; }
+            pc := r64(g_ifaces, mo + OFF_IFM_PARAM_COUNT);
+            pj : ., mut = 0;
+            loop {
+                if pj >= MAX_IFACE_METHOD_PARAMS { break; }
+                if pj < pc {
+                    if r64(g_ifaces, mo + OFF_IFM_PARAM_TERMS + pj * 8) != sh_iface_sig_param_term(ii, mi, pj) { return 0; }
+                } else {
+                    if r64(g_ifaces, mo + OFF_IFM_PARAM_TERMS + pj * 8) != -1 { return 0; }   // 未用槽 = -1
+                }
+                pj = pj + 1;
+            }
+            mi = mi + 1;
+        }
+        ii = ii + 1;
+    }
+    return 1;
+}
+
+fn ts_ccr2_shape_names_ok() -> int {
+    // 六生产名可查 + 与构造点**同项**（节点同一——形状项 = 唯一数据面）
+    if iface_shape_count() < 6 { return 0; }
+    if iface_shape_lookup(str_intern("sequence")) != sh_shape_seq() { return 0; }
+    if iface_shape_lookup(str_intern("sequence_ro")) != sh_shape_seq_ro() { return 0; }
+    if iface_shape_lookup(str_intern("sequence_rw")) != sh_shape_seq_rw() { return 0; }
+    if iface_shape_lookup(str_intern("indexable")) != sh_shape_indexable() { return 0; }
+    if iface_shape_lookup(str_intern("iterable")) != sh_shape_iterable() { return 0; }
+    if iface_shape_lookup(str_intern("product")) != sh_shape_product() { return 0; }
+    return 1;
+}
+
+fn ts_ccr2_entries_ok() -> int {
+    // 扩列 13 → 16：三新行可查 + ops = 0（纯信息面）+ 16 行逐名（注册面固定增量）
+    if iface_count() != 16 { return 0; }
+    if iface_entry(AK_NULL) < 0 { return 0; }
+    if iface_entry(AK_SUM) < 0 { return 0; }
+    if iface_entry(AK_FN) < 0 { return 0; }
+    if iface_ops(AK_NULL) != 0 { return 0; }
+    if iface_ops(AK_SUM) != 0 { return 0; }
+    if iface_ops(AK_FN) != 0 { return 0; }
+    if iface_ti_of(AK_NULL) != -1 { return 0; }   // 无规范行（类级）
+    if iface_ti_of(AK_SUM) != -1 { return 0; }
+    if iface_ti_of(AK_FN) != -1 { return 0; }
+    // 逐名（16 行：8 原生 + 5 结构/命名 + 3 新行）
+    if iface_name_of(AK_INT) != str_intern("int") { return 0; }
+    if iface_name_of(AK_DEX) != str_intern("dex") { return 0; }
+    if iface_name_of(AK_STRING) != str_intern("string") { return 0; }
+    if iface_name_of(AK_BOOL) != str_intern("bool") { return 0; }
+    if iface_name_of(AK_UNIT) != str_intern("unit") { return 0; }
+    if iface_name_of(AK_NEVER) != str_intern("never") { return 0; }
+    if iface_name_of(AK_CHAR) != str_intern("char") { return 0; }
+    if iface_name_of(AK_DYN) != str_intern("dyn") { return 0; }
+    if iface_name_of(AK_PRODUCT) != str_intern("product") { return 0; }
+    if iface_name_of(AK_SEQUENCE) != str_intern("sequence") { return 0; }
+    if iface_name_of(AK_REF) != str_intern("ref") { return 0; }
+    if iface_name_of(AK_PTR) != str_intern("ptr") { return 0; }
+    if iface_name_of(AK_NAMED) != str_intern("named") { return 0; }
+    if iface_name_of(AK_NULL) != str_intern("null") { return 0; }
+    if iface_name_of(AK_SUM) != str_intern("sum") { return 0; }
+    if iface_name_of(AK_FN) != str_intern("fn") { return 0; }
+    if iface_name_of(-1) != -1 { return 0; }      // 负键守卫（不得与行 0 混同）
+    if iface_name_of(9999) != -1 { return 0; }
+    return 1;
+}
+
+fn ts_ccr2_kind_domain_ok() -> int {
+    // 判定面零变化（扩列只加「可查询性」）：全类型行枚举——三新原子不得被任何行命中
+    // （若未来给某行新映射到 AK_NULL/AK_SUM/AK_FN，本用例转红 = 有意的闸）
+    i : ., mut = 0;
+    loop {
+        if i >= g_type_count { break; }
+        k := iface_kind_of(i);
+        if k == AK_NULL || k == AK_SUM || k == AK_FN { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+fn ts_ccr2_run() -> int {
+    fails : ., mut = 0;
+    // 生产重置路径的接线钉（先于夹具）：`reset_frontend_state` 清形状表 count +
+    // `check_all` 首行的 init_types ⇒ 六名重建——**不经**显式 iface_shape_builtin_init
+    // （本断言 = 「init_types 尾部调用」的牙；若该调用缺失/被挪走 ⇒ 本条转红）。
+    iface_shape_reset();
+    init_types();                 // 干净类型表（9 原生行）+ 生产形状注册面
+    fails = fails + ts_check("ct2.shape_face_from_init_types",
+        (iface_shape_count() == 6 &&
+         iface_shape_lookup(str_intern("sequence")) == sh_shape_seq() &&
+         iface_shape_lookup(str_intern("product")) == sh_shape_product()), 1);
+    g_iface_count = 0;            // 干净接口表（上游 ts_ifc_run 夹具含不可建面——不清零即拒装填）
+    g_impl_for_count = 0;
+    g_method_count = 0;
+    iface_shape_reset();
+    iface_shape_builtin_init();   // 生产注册面（6 名）——populate 会重跑（幂等）
+    // 夹具：命名行 + null/可选行（判定面显式钉）+ 1 接口（self 接收者 + 命名型形参）
+    //       + impl 边 + 方法表（生产写点同形：parser 的 interface/impl 分支）
+    ts_ifc_mk_named("Ct2Named");
+    ct2_null := alloc_type(TYP_NULL, 0, 0);
+    ct2_opt := alloc_type(TYP_OPTIONAL, TI_INT, 0);
+    ct2_n := ts_ifc_named_node("Ct2Named");
+    ct2_int_n := ts_ifc_base_node(TY_INT);
+    ct2_ii := ts_t5_mk_iface("Ct2Iface");
+    ts_ifc_add_method_n(ct2_ii, "a", 1, 1, -1, -1, -1, -1, ct2_int_n);      // fn a(self) -> int
+    ts_ifc_add_method_n(ct2_ii, "b", 1, 0, ct2_n, -1, -1, -1, ct2_int_n);   // fn b(x: Ct2Named) -> int
+    grow_impl_for(1);
+    w64(g_impl_for, 0, str_intern("Ct2Iface"));
+    w64(g_impl_for, 8, str_intern("Ct2Named"));
+    g_impl_for_count = 1;
+    grow_methods(1);
+    w64(g_methods, 0, str_intern("Ct2Named"));
+    w64(g_methods, 8, str_intern("b"));
+    w64(g_methods, 16, str_intern("Ct2Named.b"));
+    g_method_count = 1;
+    prep := ccr_seg_prepare_save();
+    fails = fails + ts_check("ct2.seg_prepare", prep, 0);
+    if prep == 0 {
+        fails = fails + ts_check("ct2.iface_seg_walk", ts_ccr2_seg_walk_ok(), 1);
+        fails = fails + ts_check("ct2.iface_sig_slots", ts_ccr2_sig_slots_ok(), 1);
+        fails = fails + ts_check("ct2.shape_names_production", ts_ccr2_shape_names_ok(), 1);
+    } else {
+        fails = fails + 3;   // 后续三例无法运行 ⇒ 计失败（不得静默少算）
+    }
+    fails = fails + ts_check("ct2.entry_table_16_named", ts_ccr2_entries_ok(), 1);
+    fails = fails + ts_check("ct2.kind_of_no_new_mapping",
+        (ts_ccr2_kind_domain_ok() == 1 && iface_kind_of(ct2_null) == -1 && iface_kind_of(ct2_opt) == -1), 1);
+    // ⑥ 不可建签名（dyn 位图行入签名：sh_sig_term_of_ti 对 TYP_DYN 回 -1）⇒ 装填拒绝
+    //    （save 拒落盘——三态纪律：不得把缺项签名静默写成 -1 落盘）——**最后**（污染接口表）
+    ct2_dyn_n := ts_ifc_base_node(TI_DYN);   // parser 对 `dyn` 正产 type_val = TI_DYN
+    ts_ifc_add_method_n(ct2_ii, "c", 0, 0, -1, -1, -1, -1, ct2_dyn_n);
+    rej2 := ccr_iface_populate();
+    fails = fails + ts_check("ct2.reject_unbuildable_sig", rej2, -1);
     return fails;
 }
 
@@ -1479,9 +1807,12 @@ fn type_selftest_run() -> int {
     // --- R2 P2b Task 1：本质条目表 + `iface_*` 查询 API（零消费者建层；表 = 静态数据）---
     // 前置：表由 init_types() 尾部建立（本通道不经 check_all → 与 P1 桥接段同款显式调用）；
     // 显式重建 = 干净起点（类型表行号空间复位，结构行自 9 起）。
-    // 覆盖面口径：13 条目 × 两向（ak→ti 行 / 行→ak 类）+ 11 个 API 逐签名；8 原生逐条目不抽样。
+    // 覆盖面口径：**16 条目**（R2 P4 Task 3 扩列：13 → +AK_NULL +AK_SUM +AK_FN）× 两向
+    // （ak→ti 行 / 行→ak 类）+ 12 个 API 逐签名；8 原生逐条目不抽样。扩列 = 纯信息面
+    // （三新行 ops = 0、ti_row = -1）——判定面零变化由 `ct2.kind_of_no_new_mapping`（全类型
+    // 行枚举）承担，本行只钉「可查询性」面。
     init_types();
-    total = total + 1; fails = fails + ts_check("iface.count", iface_count(), 13);
+    total = total + 1; fails = fails + ts_check("iface.count", iface_count(), 16);
     // 逐原生条目：ak → 规范行 + **AK↔TI 下标不 1:1** 的显式守卫（bool/string 互换即红）
     total = total + 1; fails = fails + ts_check("iface.int_ti", iface_ti_of(AK_INT), TI_INT);
     total = total + 1; fails = fails + ts_check("iface.dex_ti", iface_ti_of(AK_DEX), TI_DEX);
@@ -1768,17 +2099,25 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("ops.method_permit_set",
         (iface_permits(AK_DYN, IP_METHOD) == 1 && iface_permits(AK_NAMED, IP_METHOD) == 1 &&
          iface_permits(AK_INT, IP_METHOD) == 0 && iface_permits(AK_PTR, IP_METHOD) == 0), 1);
-    // ⑥ 条目面一致性（逐条目：`iface_ops(ak)` 必须回读该行的 ops 列；防「列未填/查错行」）
+    // ⑥ 条目面一致性（逐条目：`iface_ops(ak)` 必须回读该行的 ops 列；防「列未填/查错行」）。
+    // R2 P4 Task 3 重定：扩列三行（AK_NULL/AK_SUM/AK_FN）= **纯信息面**（ops = 0 是设计值，
+    // 非「空集残留」）⇒ 零 ops 行 = **恰三行且逐名可指**（允许集显式列举，其余行仍须非 0
+    // ——T1..T2 口径保持）。
     o4_row_bad : ., mut = 0;
+    o4_zero : ., mut = 0;
     o4_r : ., mut = 0;
     loop {
         if o4_r >= g_iface_entry_count { break; }
         o4_akr := r64(g_iface_entries, o4_r * ESZ_IFACE_ENTRY + OFF_IE_AK);
         if iface_ops(o4_akr) != r64(g_iface_entries, o4_r * ESZ_IFACE_ENTRY + OFF_IE_OPS) { o4_row_bad = o4_row_bad + 1; }
-        if iface_ops(o4_akr) == 0 { o4_row_bad = o4_row_bad + 1; }   // 全 0 行 = 空集残留（Task 1 口径）
+        if iface_ops(o4_akr) == 0 {
+            if o4_akr == AK_NULL || o4_akr == AK_SUM || o4_akr == AK_FN { o4_zero = o4_zero + 1; }
+            else { o4_row_bad = o4_row_bad + 1; }
+        }
         o4_r = o4_r + 1;
     }
-    total = total + 1; fails = fails + ts_check("ops.entry_row_consistent", o4_row_bad, 0);
+    total = total + 1; fails = fails + ts_check("ops.entry_row_consistent",
+        (o4_row_bad == 0 && o4_zero == 3), 1);
     // ⑦ 端到端（经真 infer_expr 走三个门；**行为证据**——表侧用例证明不了「线对」）：
     //    ptr 操作数 = `&int 字面量` 的构造节点（EXPR_UNARY/UOP_REF，非 ident 分支 ⇒ 不触借用检查）
     o4_ref := alloc_node(EXPR_UNARY, li_int, -1, UOP_REF, 0, 0, -1, 0, 0);
@@ -2478,10 +2817,14 @@ fn type_selftest_run() -> int {
         (type_compat_strict(TI_INT, t4_int_opt) == 1 && type_compat_strict(t4_int_opt, TI_INT) == 0 &&
          type_compat_strict(TI_STR, t4_int_opt) == 0 && type_compat_strict(t4_null, t4_int_opt) == 1 &&
          type_compat_strict(t4_int_opt, t4_int_opt) == 1 && type_compat_strict(TI_INT, t4_str_opt) == 0), 1);
-    // ⑤ 注册表/许可：null 与可选行都**不是**单一原子类 ⇒ -1（门全拒；AK_NULL 无条目）
+    // ⑤ 注册表/许可：null 与可选行都**不是**单一原子类 ⇒ -1（门全拒）。
+    //    R2 P4 Task 3 重定（原判据「AK_NULL 无条目」随扩列翻转）：AK_NULL **有条目**
+    //    （第 14 行，可查询性面）但 ops = 0 ⇒ 操作门仍全拒——保守面由「无条目」换位到
+    //    「条目 + 零许可位」（同一行为、更可查询）；条目数 13 → 16（扩列硬值）。
     total = total + 1; fails = fails + ts_check("t4.null_no_ops_no_entry",
         (iface_kind_of(t4_null) == -1 && iface_kind_of(t4_int_opt) == -1 &&
-         iface_permits(-1, OP_ADD) == 0 && iface_entry(AK_NULL) == -1 && iface_count() == 13), 1);
+         iface_permits(-1, OP_ADD) == 0 && iface_entry(AK_NULL) >= 0 &&
+         iface_ops(AK_NULL) == 0 && iface_permits(AK_NULL, OP_ADD) == 0 && iface_count() == 16), 1);
     // ⑥ AK_NULL 互斥公理全表（13 类逐类）：除 AK_DYN（⊤ 相容规则）与自身外皆不相交
     t4_dj : ., mut = 0;
     t4_k : ., mut = 0;
@@ -2581,14 +2924,18 @@ fn type_selftest_run() -> int {
     // R2 P3b Task 0 段（用例体在 ts_isat_run——同上，不得内联）
     total = total + 16; fails = fails + ts_isat_run();
 
-    // R2 P3b Task 2 段（用例体在 ts_x2_run——同上，不得内联）
-    total = total + 15; fails = fails + ts_x2_run();
+    // R2 P3b Task 2 段（用例体在 ts_x2_run——同上，不得内联；16 例 = 原 15 + R2 P4
+    // Task 3 新增 x2.shape_builtin_names）
+    total = total + 16; fails = fails + ts_x2_run();
     // R2 P3b Task 6：impl 契约（签名类型项化 / 形状项 / mangling 退役 / 三态）——见 ts_ifc_run
     total = total + 14; fails = fails + ts_ifc_run();
 
     // R2 P4 Task 2：TYPE 段内容面（装填/roundtrip/dedup/确定性/拒绝面）——见 ts_ccr_run
-    // （**必须最后**：populate 复位项层/引擎/桥接三面缓存）
+    // R2 P4 Task 3：IFACE 段内容面（五小节往返/签名项槽/形状名注册面/条目扩列/判定面
+    // 零变化/不可建签名拒绝）——见 ts_ccr2_run（**必须最后**：populate 复位项层/引擎/
+    // 桥接三面缓存；两段共用同一装填入口）
     total = total + 5; fails = fails + ts_ccr_run();
+    total = total + 8; fails = fails + ts_ccr2_run();
 
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }

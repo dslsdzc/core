@@ -27,6 +27,10 @@ OFF_TR_KIND : int = 0;  OFF_TR_DATA : int = 8;  OFF_TR_EXTRA : int = 16;
 // 声明位置约束：本文件恒在最前（双 concat 共享面）——若把两件挪进 ccr_types.cr
 // （corearch 清单不含），ccr_io.cr 的引用即 corearch 侧 N06 静默未定义（B.6 同族）。
 g_ccr_type_seg : string, mut;   g_ccr_type_seg_len : int, mut;
+// R2 P4 Task 3：IFACE(8) 段体缓冲（同 TYPE 的 D18 解耦——段体**构造**在 corec-only 的
+// ccr_types.cr（引用桥接层 sh_iface_sig_*/形状构造点），ccr_io.cr 只按段表搬运/解析）。
+// 缓冲**含段体首字段**（native_count u32）⇒ 段体大小 ≡ 缓冲长度（ccr_iface_seg_size 单源）。
+g_ccr_iface_seg : string, mut;  g_ccr_iface_seg_len : int, mut;
 g_ast : string, mut;         g_ast_count : int, mut;     g_ast_cap : int, mut;
 g_tokens : string, mut;      g_token_count : int, mut;   g_tok_cap : int, mut;
 g_errors : string, mut;      g_error_count : int, mut;   g_err_cap : int, mut;

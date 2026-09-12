@@ -231,6 +231,7 @@ fn corec_main() -> int {
     cli_flag("opt-level", "O", "Optimization level (0,1,2,3; default=1) — O1 CSE(corec 进程内)；O2 寄存器分配+判定在 corearch（corec build 透传 --opt-level，.ccr 不承载分配结果）");
     cli_flag_bool("inject-var-shift", "", "Hidden debug: shift func0 var decl block left by 1, then save (GC-4 test hook)");
     cli_flag_bool("dump-types", "", "Hidden debug: dump TYPE segment content (row table + term DAG + cross-process judgment probe) after populate (R2 P4 Task 2 test channel)");
+    cli_flag_bool("dump-ifaces", "", "Hidden debug: dump IFACE segment content (entry table + shapes + user ifaces + impls + method table + cross-segment term probe) after populate (R2 P4 Task 3 test channel)");
     cli_flag_bool("type-shadow", "", "R2 P1: shadow type decisions with the engine (observation only)");
     cli_flag("type-shadow-dump", "", "R2 P1: dump shadow diff entries to file");
     cli_flag_bool("verify-named-dedup", "", "R2 P2a: assert side-table == res_type_node for all named types (debug)");
@@ -610,16 +611,19 @@ fn corec_main() -> int {
                 return 1;
             }
         }
-        // R2 P4 Task 2（D13）：TYPE 段内容构造 = 确定性装填（项层/引擎/桥接复位 →
-        // 行序装填）+ 段体缓冲；save_ccr 只按段表搬运缓冲（D18）。装填失败（不可译
-        // 行）= 拒绝落盘（rc=1 + 诊断——不得产出缺项的类型段）。
-        if ccr_type_prepare_save() != 0 {
-            println("error: could not build TYPE segment");
+        // R2 P4 Task 2/3（D13/D14）：TYPE/IFACE 段内容构造 = 确定性装填（项层/引擎/
+        // 桥接复位 → 形状重注册 → 行序装填 → 接口签名项装填）+ 两段体缓冲；save_ccr
+        // 只按段表搬运缓冲（D18）。装填失败（不可译行/签名项）= 拒绝落盘（rc=1 +
+        // 诊断——不得产出缺项的类型/接口段）。
+        if ccr_seg_prepare_save() != 0 {
+            println("error: could not build TYPE/IFACE segments");
             return 1;
         }
-        // 测试通道（hidden）：载入前 dump 段内容面（行表/项 DAG/probe）——与
-        // corearch --dump-types 同一条打印路径（跨进程对拍），见 test_ccr_types.py。
+        // 测试通道（hidden）：载入前 dump 段内容面（行表/项 DAG/probe；接口表/形状/
+        // 签名项/跨段引用域探针）——与 corearch --dump-types/--dump-ifaces 同一条打印
+        // 路径（跨进程对拍），见 test_ccr_types.py。
         if cli_has("dump-types") != 0 { ccr_type_selftest_dump(); }
+        if cli_has("dump-ifaces") != 0 { ccr_iface_selftest_dump(); }
         r := save_ccr(out);
         if r != 0 {
             print("error: could not write ");
@@ -644,10 +648,10 @@ fn corec_main() -> int {
     // Save .ccr alongside output (real IR artifact)
     println("save .ccr...");
     ccr_path : ., mut = out_path + ".ccr";
-    // R2 P4 Task 2（D13/D18）：TYPE 段装填 + 段体缓冲（同 ccr 分支；前置核查 =
-    // 本点之后无类型项消费者——其后仅拼 corearch 命令行并子进程执行）。
-    if ccr_type_prepare_save() != 0 {
-        println("error: could not build TYPE segment");
+    // R2 P4 Task 2/3（D13/D14/D18）：TYPE/IFACE 段装填 + 段体缓冲（同 ccr 分支；
+    // 前置核查 = 本点之后无类型项/接口消费者——其后仅拼 corearch 命令行并子进程执行）。
+    if ccr_seg_prepare_save() != 0 {
+        println("error: could not build TYPE/IFACE segments");
         return 1;
     }
     r := save_ccr(ccr_path);

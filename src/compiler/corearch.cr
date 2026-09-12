@@ -272,6 +272,7 @@ fn corearch_main() -> int {
     cli_flag_bool("inject-coexist-oob", "", "Hidden debug: probe entries_coexist with OOB indices (GC-1 test hook)");
     cli_flag_bool("dump-objects", "", "Hidden debug: dump loaded NOD/EDG semantic objects via object-surface accessors (内核完备 Task 1 test channel)");
     cli_flag_bool("dump-types", "", "Hidden debug: dump loaded TYPE segment content (row table + term DAG + judgment probe; R2 P4 Task 2 read-back channel)");
+    cli_flag_bool("dump-ifaces", "", "Hidden debug: dump loaded IFACE segment content (entry table + shapes + user ifaces + impls + method table + cross-segment term probe; R2 P4 Task 3 read-back channel)");
 
     if cli_parse() != 0 { return 1; }
     // 注册契约引导（Task 3）：读 flag → 查表选实例（--table 值存在 → 表模式
@@ -347,6 +348,15 @@ fn corearch_main() -> int {
     // 线性流（在被重建前返回 0——不触发发射路径）。
     if cli_has("dump-types") != 0 {
         ccr_type_surface_dump();
+        return 0;
+    }
+
+    // --dump-ifaces（R2 P4 Task 3 读回通道）：载入 IFACE 段重建后的条目表/形状表/
+    // 接口表/impl 边/方法表打印——与 corec 侧 `ccr --dump-ifaces` 共用同一条打印
+    // 路径（ccr_io.cr 的 ccr_iface_surface_dump；跨进程逐行对拍 + ifaceprobe 行 =
+    // 跨段项索引在重建项表上的解析同值）。同样在被重建前返回 0（不触发发射路径）。
+    if cli_has("dump-ifaces") != 0 {
+        ccr_iface_surface_dump();
         return 0;
     }
 

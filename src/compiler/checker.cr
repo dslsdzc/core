@@ -257,10 +257,16 @@ fn init_types() {
     // is_ptr_var 的哨兵守卫对首个真实类型误触发。占住下标 8 后用户类型从 9 起，
     // 守卫永不再命中真实类型（TI_DEX_S 本身仍不查类型表，见 ir_gen.cr 注释）。
     alloc_type(TYP_BASE, TY_DEX_S, 0);   // TI_DEX_S = 8 占位
-    // R2 P2b Task 1：本质条目表（iface_registry.cr）——静态数据（AK_*/TI_* 常量 + -1/0），
-    // 不 alloc 类型行、不缓存本函数刚分配的行号 ⇒ 重复调用无副作用（长驻进程每请求一次）。
+    // R2 P2b Task 1：本质条目表（iface_registry.cr）——静态数据（AK_*/TI_* 常量 + -1/0 +
+    // R2 P4 Task 3 起的注册名 ni），不 alloc 类型行、不缓存本函数刚分配的行号 ⇒ 重复调用
+    // 无副作用（长驻进程每请求一次）。
     // 位置 = 9 行原生 alloc 之后（表内容不依赖类型表，此处仅为「随类型表生命周期初始化」）。
     iface_registry_init();
+    // R2 P4 Task 3（裁决 1 + D17）：六形状**名字生产注册面**（sequence/sequence_ro/
+    // sequence_rw/indexable/iterable/product → sh_shape_*() 构造点）。无条件调用（幂等：
+    // iface_shape_register 同名覆盖；reset_frontend_state 清 count 后由本行重建）——
+    // 段内容 = 表本体（生产编译下恰 6 条）。详细边界见 iface_shape_builtin_init 注。
+    iface_shape_builtin_init();
 }
 
 // ── Runtime builtin declarations (no .cr body, implemented in rt.s) ──

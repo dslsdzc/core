@@ -19,12 +19,12 @@
 | 面 | v6 | v7 | **v8**（R2 P4 Task 1 起 = 现行版本） |
 |---|---|---|---|
 | version | 6 | **7**（magic `"CCR1"` 不变） | **8**（magic 不变；**旧 v7 六段文件由版本闸整类拒收**——D10） |
-| 段集合 | STR/SYM/NOD/ENT/REG | + **EDG**（边段，tag 6） | + **TYPE(7) / IFACE(8)**（D9——原 `7+` 预留段顺移 9/10；type/iface 内容面归 Task 2/3，Task 1 落**空壳**：段体恒 = 计数 u32 = 0） |
+| 段集合 | STR/SYM/NOD/ENT/REG | + **EDG**（边段，tag 6） | + **TYPE(7) / IFACE(8)**（D9——原 `7+` 预留段顺移 9/10；**两段内容面现行**：TYPE = Task 2、IFACE = Task 3；T1 空壳期已退役） |
 | NOD 记录 | 28B（op/dest/s1/s2/s3/tk） | **36B** = 28B 原字段 + `first_edge u32` + `edge_count u32` | 不变（36B） |
 | 边 | 开放点（v6.0 省略） | **EDG 段必落**（P3 修复）——记录 8B 邻接式 | 不变 |
 | ENT | 恒空（loader 空表语义） | **实记录**（corec 产时重建——P2 修复）；记录布局 28B 不变 | 不变 |
 | 语义 | 文件序 = 执行序（唯一主干） | 文件序 = 合法调度（拓扑投影）；语义 = 图（NOD+EDG+REG+ENT） | 不变（TYPE/IFACE = 信息面，不参与发射） |
-| 前六段字节 | — | — | **逐字节不变**（加法扩展——实测 `ptr_arith` 88943→88975B = +32B，恰 2 行段表 24B + 2 空壳段体 8B） |
+| 前六段字节 | — | — | **布局逐字节不变**（取值随 STR 段增长重编号——R2 P4 Task 3 起 IFACE 注册名按裁决 1 驻留 ⇒ 冷路径晚于 `init_types` 驻留的串 ni 整体后移；实测 `ptr_arith` SYM 同长不同 ni。语义不变、ELF canary 不变；判据按 TODO #26 = 结构性断言） |
 
 v6 其余字节惯例沿用：小端、i32/u32、offset/size u32、`ccr_i32_fits` 界校验、段表 12B×n 段序自由、v7-only（无转换工具）、中间产物 < 4GB。
 
@@ -134,14 +134,38 @@ Task 2 报告，本 spec 只记段面。）
 跨进程同值未覆盖——该文件不入 corearch 清单（两条既有 TF01 诊断触发 project-mode
 `error[`=0 门），归 Task 3/4/P5 收口（T2 报告登记）。
 
-### 3.8 IFACE — 接口面（tag 8；R2 P4 Task 1 空壳，内容面归 Task 3）
+### 3.8 IFACE — 接口面（tag 8；R2 P4 Task 3 内容面落地）
 
-**现行（Task 1）**：`native_count u32` = **恒 0**（段体恰 4B）。校验面同 §3.7
-（必备 + 计数 == 0 + 段体恰一个 u32；非空拒绝）。
+**现行（Task 3）**：五小节（D14；各带 count u32；**字段宽度 = 逐字段声明形**）：
+① `native_count u32 = 16`（扩列硬值：13 → +AK_NULL/AK_SUM/AK_FN——裁决 3/7）
++ `× 24B {ak i32, ti_row i32, name_ni i32, lit_code i32, ops i64}`（`g_iface_entries`
+原样；`name_ni` = R2 P4 Task 3 起的注册名，STR 段增长按裁决 1 接受）；
+② `shape_count u32` + `× 8B {name_ni i32, term i32}`（六条 D17 生产名：`sequence` /
+`sequence_ro` / `sequence_rw` / `indexable` / `iterable` / `product` → 形状项）；
+③ `iface_count u32` + `× {name_ni i32, method_count i32, generic_count i32, pad i32}`
++ `method_count × 80B {name_ni i32, param_count i32, self_mode i32, ret_term i32,
+param_terms[8] i32, param_codes[8] i32}`——**方法记录字段序取计划「声明行」序**
+（同块尺寸式两数组次序相反 ⇒ 取声明行为准，登记见 Task 3 报告）；`ret_term`/
+`param_terms` = **类型项索引**（签名项；-1 = 不可建——写侧遇不可建 = 拒绝落盘，
+`ccr_iface_populate`），`param_codes` = **信息面**裸码（S6 消费点不入段）；
+④ `impl_count u32` + `× 8B {trait_ni i32, type_ni i32}`（`g_impl_for`——裁决 2：
+声明元数据，不入判定）；⑤ `method_count u32` + `× 12B {type_ni i32, method_ni i32,
+mangled_ni i32}`（`g_methods`——`iface_find_method` 的唯一数据面）。
 
-**内容面（Task 3 落地，D14）**：五小节 = ①原生条目 ②横切形状（名 ni + 项）
-③用户接口（方法签名存**类型项索引**——裸码不入段）④impl 边（`g_impl_for`）
-⑤方法表（`g_methods`）。
+**loader 校验（违规 = 拒绝，三态纪律 C.5-3）**：段必备（D11）+ 五小节计数/长度
+自洽 + 行走完 == 段体（无尾随字节）+ `native_count == 16` + 结构域（ak ∈ 0..AK_NULL、
+method_count ≤ `MAX_IFACE_METHODS`、param_count ≤ `MAX_IFACE_METHOD_PARAMS`、
+self_mode ∈ 0..3）+ **跨段引用域**：`name_ni`/`type_ni`/`method_ni`/`mangled_ni` ∈
+[0, STR 串数)、`ti_row` ∈ {-1} ∪ [0, TYPE 行数)、`term` ∈ {-1} ∪ [0, TYPE 项数)
+（TYPE(7) 先于 IFACE(8) 解析 ⇒ 两域已建立）。载入 = 重建 `g_iface_entries`
+（`g_iface_registry_ok = 1`——**段 = corearch 侧真源**）/ `g_iface_shape_*` /
+`g_ifaces`（corearch 无 AST ⇒ 节点槽恒 -1，**项槽** = 段值）/ `g_impl_for` /
+`g_methods`；失败整体拒绝（**不得**静默当空表）。
+
+**读回通道**：`corearch --dump-ifaces`（corec 侧 `ccr --dump-ifaces` 同一打印路径；
+含 `ifaceprobe` 行 = 跨段项索引在重建项表上的解析同值证据；`ifacesig*` 节 = corec-only
+活算对拍）——跨进程行格式对拍载体（tests/selfhost/test_ccr_types.py）。**零判定面
+变化**：扩列三行 ops = 0（纯信息面），`iface_kind_of` 的行分派与 P2b 域逐格保持。
 
 ## 4. 不变量与校验规则
 
@@ -151,7 +175,7 @@ Task 2 报告，本 spec 只记段面。）
 4. 段表 offset/size 界、ENT home/flags 读入放行——**裁决（2026-09-10 Task 2 review R3）**：loader 对 home≠-1 / flags≠0 **接受不拒绝**——home = 实例映射注记，.ccr = corec→corearch 传输中间物，实例层（分配/缓存映射）决策不写回格式；非 -1/非 0 值不构成损坏证据（无消费方依赖恒 -1/0 前提之外的安全面）。开放点 3 保留：未来实例层选择写回（非传输中间物用途）时重议
 5. magic/version（**`version == 8`**——R2 P4 Task 1 起；`version ≠ 8` 整类拒收，含全部 v7 六段文件——D10）；`ccr_i32_fits` 沿用（中间产物 < 4GB）
 6. **段集合完备性（R2 P4 Task 1，D11）**：`seg_cnt` 未满 / 缺任一必备段（STR/SYM/NOD/REG/EDG/**TYPE/IFACE**）⇒ 拒绝；ENT 仍可缺（v5 精神：旧段缺失 = 空表，`ccr_io.cr` 既有口径）。**「缺段 = 空表」仅适用于 ENT**——TYPE/IFACE 缺席必须响亮拒绝（可选段 = 两种 `.ccr` 在野 = 静默降级面）
-7. **空壳期段体校验（R2 P4 Task 1）**：IFACE 段体恒 = 计数 u32 = 0 且恰 4B；非零计数 / 尾随字节 ⇒ 拒绝（Task 3 落地时本条退役，改为 D14 的逐小节解析 + 重建）。**TYPE 段自 Task 2 起为内容面**——校验改为 §3.7 的逐条不变量（本条对 TYPE 不再适用）
+7. **~~空壳期段体校验（R2 P4 Task 1）~~（已退役——R2 P4 Task 3）**：TYPE 段自 Task 2 起、IFACE 段自 Task 3 起皆为内容面，校验 = §3.7/§3.8 的逐条不变量（含跨段引用域）；两段**必备**（规则 6）不变
 
 ## 5. 消费方影响
 

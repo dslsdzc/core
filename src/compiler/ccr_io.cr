@@ -374,11 +374,11 @@ fn ccr_type_seg_size() -> int {
     return g_ccr_type_seg_len;
 }
 
-// R2 P4 Task 1：IFACE(8) **空壳**段体 = 计数 u32 = 0（恰 4B）。内容面归 Task 3
-// （D14 五小节 = 原生条目/横切形状/用户接口签名项/impl 边/方法表）；届时本函数
-// 扩为段体缓冲长度并由 save_ccr 搬运缓冲。
+// R2 P4 Task 3：IFACE(8) 段体大小（D14 五小节；D18 解耦——内容构造 = corec-only
+// ccr_types.cr 的 ccr_iface_populate/ccr_iface_seg_build；本文件（corearch 也链接）
+// 只按段表搬运/解析）。缓冲**含首字段 native_count** ⇒ 段体大小 ≡ 缓冲长度（单源）。
 fn ccr_iface_seg_size() -> int {
-    return 4;
+    return g_ccr_iface_seg_len;
 }
 
 // --- Size calculation（v8：16B header + 8×12B seg table + 各段体）---
@@ -565,8 +565,8 @@ fn save_ccr(path: string) -> int {
     s4 := ccr_ent_seg_size();
     s5 := ccr_reg_seg_size();
     s6 := ccr_edg_seg_size(edge_total);
-    s7 := ccr_type_seg_size();    // R2 P4 Task 1：空壳（4B）
-    s8 := ccr_iface_seg_size();   // R2 P4 Task 1：空壳（4B）
+    s7 := ccr_type_seg_size();    // R2 P4 Task 2：内容面（缓冲长度）
+    s8 := ccr_iface_seg_size();   // R2 P4 Task 3：内容面（缓冲长度）
 
     // Seg table（8 × 12B；offset = 前段尾，从段表后起；规范序 tag 1..8）
     o1 : ., mut = 16 + CCR_SEG_COUNT * 12;
@@ -888,8 +888,19 @@ fn save_ccr(path: string) -> int {
         ct = ct + 1;
     }
 
-    // === IFACE(8)：空壳段体（R2 P4 Task 1——计数 = 0；内容面归 Task 3）===
-    buf_write_u32(buf, pos, 0); pos = pos + 4;   // IFACE native_count = 0
+    // === IFACE(8)：段体缓冲搬运（R2 P4 Task 3；内容构造 = corec-only ccr_types.cr
+    // 的 ccr_iface_populate/ccr_iface_seg_build，D18——本处只按段表搬运）===
+    // 缓冲含首字段 native_count ⇒ 大小 ≡ ccr_iface_seg_size()（同一来源）。空缓冲 =
+    // 未装填（调用点漏调 prepare）⇒ **拒绝落盘**（不得产出「五小节缺席」的半成品；
+    // 条目表恒 16 行 ⇒ 空缓冲只可能是程序错误，三态纪律）。
+    if g_ccr_iface_seg_len <= 0 { return -1; }
+    ict : ., mut = 0;
+    loop {
+        if ict >= g_ccr_iface_seg_len { break; }
+        store8(buf, pos, load8(g_ccr_iface_seg, ict));
+        pos = pos + 1;
+        ict = ict + 1;
+    }
 
     // Use syscall directly (write_file uses str_len which stops at null)
     fd := syscall3(2, path, 577, 420);  // open(O_WRONLY|O_CREAT|O_TRUNC, 0644)
@@ -1017,7 +1028,16 @@ fn load_ccr(data: string, fsize: int) -> int {
     g_v7_nod_count = 0;   // 内核完备 Task 1：NOD 对象缓冲计数（NOD 段载入后置位）
     // R2 P4 Task 2：TYPE 段有真实内存表（g_types 行表 + 项层 g_type_terms/
     // g_tt_index）——复位在 TYPE 段解析处（行表大小随段内容，且需与项层 memo
-    // 同步作废；见该段注释）。IFACE 段仍空壳（Task 3），无新内存表。
+    // 同步作废；见该段注释）。
+    // R2 P4 Task 3：IFACE 段同理有真实内存表（g_iface_entries/g_iface_shape_*/
+    // g_ifaces/g_impl_for/g_methods）——计数复位在此（表缓冲随段内容重建；
+    // g_iface_registry_ok 清 0 = 「表未建立」，本段解析末尾置 1 = **段真源**）。
+    g_iface_count = 0;
+    g_iface_entry_count = 0;
+    g_iface_registry_ok = 0;
+    g_iface_shape_count = 0;
+    g_impl_for_count = 0;
+    g_method_count = 0;
 
     // === STR: strings ===
     pos = seg_off1;
@@ -1567,16 +1587,171 @@ fn load_ccr(data: string, fsize: int) -> int {
     if pos != seg_end7 { return -1; }            // 段体恰两小节（无尾随字节）
     grow_tt_index(g_type_term_count + 1);        // 索引重建（cap 已清零 → 必走重建）
 
-    // === IFACE(8)：空壳段体校验（R2 P4 Task 1；内容面归 Task 3）===
-    // 空壳期纪律（三态纪律 C.5-3）：段体恒 = 计数 u32 = 0 且恰 4B。非零计数 =
-    // 内容面落地前的外部半成品 ⇒ **拒绝**（不得静默当空表/当 0——D11 同时保证
-    // 两段必备，本处保证「有段但空」不含未定义内容）。Task 3 落地时改为按 D14
-    // 五小节解析并重建内存表，本处空壳校验随之退役。
+    // === IFACE(8)：接口面（R2 P4 Task 3 内容面——D14 五小节解析 + 内存重建）===
+    // 重建 = g_iface_entries（条目表；并置 g_iface_registry_ok = 1——**段 = corearch
+    // 侧真源**，防「常量表覆盖段内容」）+ g_iface_shape_names/terms + g_ifaces
+    // （ESZ_IFACEINFO 布局；corearch 侧无 AST ⇒ 节点槽恒 -1、**项槽** = 段值）
+    // + g_impl_for + g_methods。
+    // 逐条校验（违规 = 拒绝；三态纪律 C.5-3——不得静默当空表/截断表）：
+    //   ① 五小节计数/长度自洽（计数 × 记录尺寸 ≤ 段余量）+ 行走完 == seg_end8（无尾随）；
+    //   ② native_count == IFACE_ENTRY_COUNT（表内容 = 常量表，计数漂移 = 损坏）；
+    //   ③ **跨段引用域**：name_ni/type_ni/method_ni/mangled_ni ∈ [0, g_str_count)（STR
+    //      段先于本段解析）；ti_row ∈ {-1} ∪ [0, g_type_count)；term ∈ {-1} ∪ [0, tt_count())
+    //      （TYPE(7) 段先于本段解析 ⇒ 两域已建立）；
+    //   ④ 结构域：ak ∈ 0..AK_NULL、method_count ≤ MAX_IFACE_METHODS、
+    //      param_count ≤ MAX_IFACE_METHOD_PARAMS、self_mode ∈ 0..3。
+    // IFACE 段 = 纯信息面（不参与 ELF 发射）；本段解析失败 = 整体拒绝（load_ccr -1）。
     pos = seg_off8;
     if !ccr_has_bytes(pos, 4, seg_end8) { return -1; }
-    iface_cnt := buf_read_u32(data, pos); pos = pos + 4;
-    if iface_cnt != 0 { return -1; }
-    if pos != seg_end8 { return -1; }
+    ifc_nat := buf_read_u32(data, pos); pos = pos + 4;
+    if ifc_nat != IFACE_ENTRY_COUNT { return -1; }
+    if !ccr_has_bytes(pos, ifc_nat * 24, seg_end8) { return -1; }
+    g_iface_entries = alloc(ifc_nat * ESZ_IFACE_ENTRY);
+    ifr : ., mut = 0;
+    loop {
+        if ifr >= ifc_nat { break; }
+        fak := buf_read_i32(data, pos); pos = pos + 4;
+        fti := buf_read_i32(data, pos); pos = pos + 4;
+        fname := buf_read_i32(data, pos); pos = pos + 4;
+        flit := buf_read_i32(data, pos); pos = pos + 4;
+        fops := buf_read_i64(data, pos); pos = pos + 8;
+        if fak < 0 || fak > AK_NULL { return -1; }                       // 原子类域
+        if fti < -1 || fti >= g_type_count { return -1; }                // 类型行引用域（跨段）
+        if fname < 0 || fname >= g_str_count { return -1; }              // 名字引用域（跨段）
+        if flit < -1 { return -1; }
+        fo2 := ifr * ESZ_IFACE_ENTRY;
+        w64(g_iface_entries, fo2 + OFF_IE_AK, fak);
+        w64(g_iface_entries, fo2 + OFF_IE_TI, fti);
+        w64(g_iface_entries, fo2 + OFF_IE_NAME, fname);
+        w64(g_iface_entries, fo2 + OFF_IE_LIT, flit);
+        w64(g_iface_entries, fo2 + OFF_IE_OPS, fops);
+        ifr = ifr + 1;
+    }
+    g_iface_entry_count = ifc_nat;
+    g_iface_registry_ok = 1;
+
+    // ② 横切形状（名 ni + 形状项）
+    if !ccr_has_bytes(pos, 4, seg_end8) { return -1; }
+    ifc_shn := buf_read_u32(data, pos); pos = pos + 4;
+    if ifc_shn > (seg_end8 - pos) / 8 { return -1; }
+    iface_shape_grow(ifc_shn);
+    ifs : ., mut = 0;
+    loop {
+        if ifs >= ifc_shn { break; }
+        sname := buf_read_i32(data, pos); pos = pos + 4;
+        sterm := buf_read_i32(data, pos); pos = pos + 4;
+        if sname < 0 || sname >= g_str_count { return -1; }
+        if sterm < 0 || sterm >= tt_count() { return -1; }               // 项引用域（跨段）
+        w64(g_iface_shape_names, ifs * 8, sname);
+        w64(g_iface_shape_terms, ifs * 8, sterm);
+        ifs = ifs + 1;
+    }
+    g_iface_shape_count = ifc_shn;
+
+    // ③ 用户接口（头 16B + 方法 80B × method_count）
+    if !ccr_has_bytes(pos, 4, seg_end8) { return -1; }
+    ifc_usn := buf_read_u32(data, pos); pos = pos + 4;
+    if ifc_usn > (seg_end8 - pos) / 16 { return -1; }
+    grow_ifaces(ifc_usn);
+    ifu : ., mut = 0;
+    loop {
+        if ifu >= ifc_usn { break; }
+        if !ccr_has_bytes(pos, 16, seg_end8) { return -1; }
+        uname := buf_read_i32(data, pos); pos = pos + 4;
+        umc := buf_read_i32(data, pos); pos = pos + 4;
+        ugc := buf_read_i32(data, pos); pos = pos + 4;
+        pos = pos + 4;                                                    // pad（预留）
+        if uname < 0 || uname >= g_str_count { return -1; }
+        if umc < 0 || umc > MAX_IFACE_METHODS { return -1; }
+        if ugc < 0 { return -1; }
+        if !ccr_has_bytes(pos, umc * 80, seg_end8) { return -1; }
+        ub := ifu * ESZ_IFACEINFO;
+        // 先清零整条记录（防上轮残留；节点槽/项槽的初值 = -1 由下方逐槽写）
+        uz : ., mut = 0;
+        loop { if uz >= ESZ_IFACEINFO { break; } w8(g_ifaces, ub + uz, 0); uz = uz + 1; }
+        w64(g_ifaces, ub + OFF_IF_NAME, uname);
+        w64(g_ifaces, ub + OFF_IF_METHOD_COUNT, umc);
+        w64(g_ifaces, ub + OFF_IF_GENERIC_COUNT, ugc);
+        ium : ., mut = 0;
+        loop {
+            if ium >= umc { break; }
+            mb := ub + OFF_IF_METHODS + ium * ESZ_IFMETHOD;
+            mname := buf_read_i32(data, pos); pos = pos + 4;
+            mpc := buf_read_i32(data, pos); pos = pos + 4;
+            msm := buf_read_i32(data, pos); pos = pos + 4;
+            mrt := buf_read_i32(data, pos); pos = pos + 4;
+            if mname < 0 || mname >= g_str_count { return -1; }
+            if mpc < 0 || mpc > MAX_IFACE_METHOD_PARAMS { return -1; }
+            if msm < 0 || msm > 3 { return -1; }
+            if mrt < -1 || mrt >= tt_count() { return -1; }              // 项引用域（跨段）
+            w64(g_ifaces, mb + OFF_IFM_NAME, mname);
+            w64(g_ifaces, mb + OFF_IFM_PARAM_COUNT, mpc);
+            w64(g_ifaces, mb + OFF_IFM_SELF_MODE, msm);
+            w64(g_ifaces, mb + OFF_IFM_RET_TERM, mrt);
+            w64(g_ifaces, mb + OFF_IFM_RET_NODE, -1);    // corearch 无 AST ⇒ 节点槽恒 -1
+            mq : ., mut = 0;
+            loop {
+                if mq >= MAX_IFACE_METHOD_PARAMS { break; }
+                mt := buf_read_i32(data, pos); pos = pos + 4;
+                if mt < -1 || mt >= tt_count() { return -1; }             // 项引用域（跨段）
+                w64(g_ifaces, mb + OFF_IFM_PARAM_TERMS + mq * 8, mt);
+                w64(g_ifaces, mb + OFF_IFM_PARAM_NODES + mq * 8, -1);     // 节点槽恒 -1
+                mq = mq + 1;
+            }
+            mp : ., mut = 0;
+            loop {
+                if mp >= MAX_IFACE_METHOD_PARAMS { break; }
+                mc2 := buf_read_i32(data, pos); pos = pos + 4;            // 裸码（信息面）
+                if mc2 < -1 { return -1; }
+                w64(g_ifaces, mb + OFF_IFM_PARAM_TYPES + mp * 8, mc2);
+                mp = mp + 1;
+            }
+            ium = ium + 1;
+        }
+        ifu = ifu + 1;
+    }
+    g_iface_count = ifc_usn;
+
+    // ④ impl 边（g_impl_for：{trait_ni, type_ni}——声明元数据）
+    if !ccr_has_bytes(pos, 4, seg_end8) { return -1; }
+    ifc_imp := buf_read_u32(data, pos); pos = pos + 4;
+    if ifc_imp > (seg_end8 - pos) / 8 { return -1; }
+    grow_impl_for(ifc_imp);
+    ifi : ., mut = 0;
+    loop {
+        if ifi >= ifc_imp { break; }
+        itr := buf_read_i32(data, pos); pos = pos + 4;
+        ity := buf_read_i32(data, pos); pos = pos + 4;
+        if itr < 0 || itr >= g_str_count { return -1; }
+        if ity < 0 || ity >= g_str_count { return -1; }
+        w64(g_impl_for, ifi * 16, itr);
+        w64(g_impl_for, ifi * 16 + 8, ity);
+        ifi = ifi + 1;
+    }
+    g_impl_for_count = ifc_imp;
+
+    // ⑤ 方法表（g_methods：{type_ni, method_ni, mangled_ni}——iface_find_method 数据面）
+    if !ccr_has_bytes(pos, 4, seg_end8) { return -1; }
+    ifc_met := buf_read_u32(data, pos); pos = pos + 4;
+    if ifc_met > (seg_end8 - pos) / 12 { return -1; }
+    grow_methods(ifc_met);
+    ifm : ., mut = 0;
+    loop {
+        if ifm >= ifc_met { break; }
+        mtn := buf_read_i32(data, pos); pos = pos + 4;
+        mmn := buf_read_i32(data, pos); pos = pos + 4;
+        mmg := buf_read_i32(data, pos); pos = pos + 4;
+        if mtn < 0 || mtn >= g_str_count { return -1; }
+        if mmn < 0 || mmn >= g_str_count { return -1; }
+        if mmg < 0 || mmg >= g_str_count { return -1; }
+        w64(g_methods, ifm * 24, mtn);
+        w64(g_methods, ifm * 24 + 8, mmn);
+        w64(g_methods, ifm * 24 + 16, mmg);
+        ifm = ifm + 1;
+    }
+    g_method_count = ifc_met;
+
+    if pos != seg_end8 { return -1; }            // 五小节行走完 == 段体（无尾随字节）
 
     return 0;
 }
@@ -1654,6 +1829,148 @@ fn ccr_type_surface_dump() {
 // 下标漂移 ⇒ 摘要变。
 // 本探针**会**向项表追加规范化新项（tt_norm 的构造面）——在 dump 的 terms 节
 // 之后运行，故不影响打印面（序列化缓冲早在 dump 前已生成，见 ccr_type_prepare_save）。
+// ─── --dump-ifaces 通道（R2 P4 Task 3）：IFACE 段内容面打印 ───
+// 写侧（corec `ccr --dump-ifaces`，经 ccr_types.cr 的 ccr_iface_selftest_dump 调本
+// 函数）与读侧（corearch `--dump-ifaces`）共用**同一条打印路径**——跨进程行格式零
+// 分歧；行格式契约见 tests/selfhost/test_ccr_types.py:parse_iface_dump。
+// 读侧意义 = §6.3 的读回证据：载入段重建后的条目表/形状表/接口表/impl 边/方法表与
+// 写侧逐行一致；`ifaceprobe` 行 = **跨段引用域的可解析性**（每个项槽在重建的项表上
+// 解析：tag/a/c 折叠成摘要——两侧同值即「段内项索引在 corearch 侧解析到同构项」）。
+// **零建项**（纯读：不动项表/预算/memo——与 TYPE 的 probe 不同，本处无需构造面）。
+fn ccr_iface_surface_dump() {
+    print("ifacenative: "); print_i(g_iface_entry_count); println("");
+    ei2 : ., mut = 0;
+    loop {
+        if ei2 >= g_iface_entry_count { break; }
+        eo2 := ei2 * ESZ_IFACE_ENTRY;
+        print("native "); print_i(ei2);
+        print(" ak "); print_i(r64(g_iface_entries, eo2 + OFF_IE_AK));
+        print(" ti "); print_i(r64(g_iface_entries, eo2 + OFF_IE_TI));
+        print(" name "); print_i(r64(g_iface_entries, eo2 + OFF_IE_NAME));
+        print(" lit "); print_i(r64(g_iface_entries, eo2 + OFF_IE_LIT));
+        print(" ops "); print_i(r64(g_iface_entries, eo2 + OFF_IE_OPS));
+        println("");
+        ei2 = ei2 + 1;
+    }
+    print("ifaceshapes: "); print_i(g_iface_shape_count); println("");
+    sh2 : ., mut = 0;
+    loop {
+        if sh2 >= g_iface_shape_count { break; }
+        print("shape "); print_i(sh2);
+        print(" name "); print_i(r64(g_iface_shape_names, sh2 * 8));
+        print(" term "); print_i(r64(g_iface_shape_terms, sh2 * 8));
+        println("");
+        sh2 = sh2 + 1;
+    }
+    print("ifaceuser: "); print_i(g_iface_count); println("");
+    iu2 : ., mut = 0;
+    loop {
+        if iu2 >= g_iface_count { break; }
+        bo := iu2 * ESZ_IFACEINFO;
+        mc3 := r64(g_ifaces, bo + OFF_IF_METHOD_COUNT);
+        print("iface "); print_i(iu2);
+        print(" name "); print_i(r64(g_ifaces, bo + OFF_IF_NAME));
+        print(" methods "); print_i(mc3);
+        print(" generics "); print_i(r64(g_ifaces, bo + OFF_IF_GENERIC_COUNT));
+        println("");
+        mj2 : ., mut = 0;
+        loop {
+            if mj2 >= mc3 { break; }
+            mbo := bo + OFF_IF_METHODS + mj2 * ESZ_IFMETHOD;
+            mpc := r64(g_ifaces, mbo + OFF_IFM_PARAM_COUNT);
+            print("method "); print_i(iu2); print(" "); print_i(mj2);
+            print(" name "); print_i(r64(g_ifaces, mbo + OFF_IFM_NAME));
+            print(" params "); print_i(mpc);
+            print(" self "); print_i(r64(g_ifaces, mbo + OFF_IFM_SELF_MODE));
+            print(" ret "); print_i(r64(g_ifaces, mbo + OFF_IFM_RET_TERM));
+            println("");
+            mq2 : ., mut = 0;
+            loop {
+                if mq2 >= MAX_IFACE_METHOD_PARAMS { break; }
+                print("mparam "); print_i(iu2); print(" "); print_i(mj2);
+                print(" "); print_i(mq2);
+                print(" code "); print_i(r64(g_ifaces, mbo + OFF_IFM_PARAM_TYPES + mq2 * 8));
+                print(" term "); print_i(r64(g_ifaces, mbo + OFF_IFM_PARAM_TERMS + mq2 * 8));
+                println("");
+                mq2 = mq2 + 1;
+            }
+            mj2 = mj2 + 1;
+        }
+        iu2 = iu2 + 1;
+    }
+    print("ifaceimpl: "); print_i(g_impl_for_count); println("");
+    ip2 : ., mut = 0;
+    loop {
+        if ip2 >= g_impl_for_count { break; }
+        print("impl "); print_i(ip2);
+        print(" trait "); print_i(r64(g_impl_for, ip2 * 16));
+        print(" type "); print_i(r64(g_impl_for, ip2 * 16 + 8));
+        println("");
+        ip2 = ip2 + 1;
+    }
+    print("ifacemethods: "); print_i(g_method_count); println("");
+    im2 : ., mut = 0;
+    loop {
+        if im2 >= g_method_count { break; }
+        print("gmethod "); print_i(im2);
+        print(" type "); print_i(r64(g_methods, im2 * 24));
+        print(" method "); print_i(r64(g_methods, im2 * 24 + 8));
+        print(" mangled "); print_i(r64(g_methods, im2 * 24 + 16));
+        println("");
+        im2 = im2 + 1;
+    }
+    // 跨段引用域探针：逐接口/方法/有效形参的项槽
+    //   resolved = 0 ≤ t < tt_count()（在重建项表上可解析）；unbuilt = t == -1；
+    //   bad = t < -1 || t ≥ tt_count()（**必须为 0**——写侧不产、loader 拒绝）。
+    //   摘要 = Σ (tt_tag×31 + tt_a) 与 (tt_c×31 + 2) 的混入（两侧同值 = 段内项索引
+    //   解析到同构项；TYPE 段的跨进程同构由 --dump-types 的 probe 行独立承担）。
+    slots : ., mut = 0;
+    built : ., mut = 0;
+    unbuilt : ., mut = 0;
+    bad : ., mut = 0;
+    hsh : ., mut = 0;
+    ipc : ., mut = 0;
+    loop {
+        if ipc >= g_iface_count { break; }
+        boc := ipc * ESZ_IFACEINFO;
+        mcc := r64(g_ifaces, boc + OFF_IF_METHOD_COUNT);
+        mic : ., mut = 0;
+        loop {
+            if mic >= mcc { break; }
+            mbc := boc + OFF_IF_METHODS + mic * ESZ_IFMETHOD;
+            pcc := r64(g_ifaces, mbc + OFF_IFM_PARAM_COUNT);
+            slots = slots + 1;
+            rtc := r64(g_ifaces, mbc + OFF_IFM_RET_TERM);
+            if rtc == -1 { unbuilt = unbuilt + 1; }
+            if rtc >= 0 {
+                if rtc >= tt_count() { bad = bad + 1; }
+                if rtc < tt_count() { built = built + 1; hsh = hsh * 31 + tt_tag(rtc); hsh = hsh * 31 + tt_a(rtc); hsh = hsh * 31 + tt_c(rtc); }
+            }
+            if rtc < -1 { bad = bad + 1; }
+            pqc : ., mut = 0;
+            loop {
+                if pqc >= pcc { break; }
+                slots = slots + 1;
+                ptc := r64(g_ifaces, mbc + OFF_IFM_PARAM_TERMS + pqc * 8);
+                if ptc == -1 { unbuilt = unbuilt + 1; }
+                if ptc >= 0 {
+                    if ptc >= tt_count() { bad = bad + 1; }
+                    if ptc < tt_count() { built = built + 1; hsh = hsh * 31 + tt_tag(ptc); hsh = hsh * 31 + tt_a(ptc); hsh = hsh * 31 + tt_c(ptc); }
+                }
+                if ptc < -1 { bad = bad + 1; }
+                pqc = pqc + 1;
+            }
+            mic = mic + 1;
+        }
+        ipc = ipc + 1;
+    }
+    print("ifaceprobe: slots "); print_i(slots);
+    print(" built "); print_i(built);
+    print(" unbuilt "); print_i(unbuilt);
+    print(" bad "); print_i(bad);
+    print(" digest "); println(int_str(hsh));
+}
+
 fn ccr_type_probe_dump() {
     n := tt_count();
     if n > CCR_TYPE_PROBE_N { n = CCR_TYPE_PROBE_N; }

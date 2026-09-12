@@ -139,12 +139,13 @@ SG_UNSAFE : int = 4;
 SG_IF     : int = 5;  // conditional region: covers [condition, merge)
 
 // InterfaceInfo: fixed-size entry per interface
-// Header(24) + methods[16] * method_entry(168) = 2712 total
-ESZ_IFACEINFO : int = 2712;
+// Header(24) + methods[16] * method_entry(240) = 3864 total（R2 P4 Task 3：168 → 240，
+//   + 类型项槽 72B——见下 OFF_IFM_PARAM_TERMS/OFF_IFM_RET_TERM 注）
+ESZ_IFACEINFO : int = 3864;
 OFF_IF_NAME : int = 0; OFF_IF_METHOD_COUNT : int = 8; OFF_IF_GENERIC_COUNT : int = 16;
 OFF_IF_METHODS : int = 24;  // first method entry
 // Each method entry: name_idx(8) + param_count(8) + ret_ti(8) + param_types[8](64)
-//   + param_nodes[8](64) + ret_node(8) + self_mode(8) = 168 bytes
+//   + param_nodes[8](64) + ret_node(8) + self_mode(8) + param_terms[8](64) + ret_term(8) = 240 bytes
 // R2 P3b Task 6（Step 1 签名类型项化）：**裸码槽保留**（`param_types` / `ret_ti`）——
 //   S6 站点（checker 的泛型方法调用返回型映射）的值域 = 映射层编码（TY_*），P2b Task 6 已把
 //   该域**显式化钉住**（t6_S6_* 行为用例）⇒ 不得改；新增**类型节点**槽 = 签名的忠实来源
@@ -152,19 +153,63 @@ OFF_IF_METHODS : int = 24;  // first method entry
 //   （满足判定 / impl 声明面）与 `sh_iface_shape_term` 建项。-1 = 无节点（哨兵；不用 0——
 //   节点 0 是合法下标，用 0 会与「首个分配节点」混同）。接收者槽两侧皆无节点（parser 的
 //   self 约定，见 self_mode）。
-ESZ_IFMETHOD : int = 168;
+ESZ_IFMETHOD : int = 240;
 OFF_IFM_NAME : int = 0; OFF_IFM_PARAM_COUNT : int = 8; OFF_IFM_RET_TI : int = 16;
 OFF_IFM_PARAM_TYPES : int = 24;   // first of up to 8 param types (each 8 bytes)   → 24..87
 OFF_IFM_PARAM_NODES : int = 88;   // first of up to 8 param type nodes (8B each)  → 88..151
 OFF_IFM_RET_NODE : int = 152;     // return type node（-1 = 无，= unit）
 OFF_IFM_SELF_MODE : int = 160;    // 接收者模式：0 = 无接收者（首参为普通形参）/ 1 = self /
                                   //   2 = &self / 3 = &mut self（照 EXPR_PARAM 的 int_val 约定）
+// R2 P4 Task 3（IFACE 段签名项化）——**类型项槽**（-1 = 不可建/无）：
+//   param_terms[8] = 各形参的签名类型项（`sh_iface_sig_param_term`；接收者槽 = unit 占位项）
+//   ret_term       = 返回签名类型项（`sh_iface_sig_ret_term`）
+// 与 param_nodes/ret_node 的关系：节点槽 = **corec 侧**的签名来源（AST 节点，判定路径消费）；
+// 项槽 = **载体面**（IFACE(8) 段落盘 + corearch 读回）——corearch 侧无 AST ⇒ 节点槽恒 -1，
+// 项槽是签名在载入侧的唯一忠实表示（二者不同域，不得互相复用）。写侧 = ccr_types.cr 的
+// ccr_iface_populate 填充（与段体同一读点）；读侧 = load_ccr 由段填充。**不入 .cir 快照**
+// （快照字段清单不含 g_ifaces——见 Task 3 报告 §布局影响面）。
+OFF_IFM_PARAM_TERMS : int = 168;  // first of up to 8 param terms (8B each)       → 168..231
+OFF_IFM_RET_TERM : int = 232;     // return signature term (-1 = 不可建)
 MAX_IFACE_METHOD_PARAMS : int = 8;
 // R2 P3b Task 6（Step 1）：方法上限单源化（旧态 = parser 内联字面量 16，与 ESZ_IFACEINFO
 // 的槽数隐式绑定）。**本任务显式登记保留**（不解除）：解除需把方法表迁到侧表（全部读点换位），
 // 按 B.4-7 的 MAX_* 统一口径「先加护栏、再评估解除」；护栏现状 = 超限**硬错 rc=1**（非静默
 // 截断——实测），本任务加钉子用例（test_impl_iface.py 的 limit 组）。
 MAX_IFACE_METHODS : int = 16;
+
+// ─── 本质条目表布局（R2 P4 Task 3：自 iface_registry.cr **迁入**）───
+// 迁入理由 = IFACE(8) 段的 loader（corearch 侧，ccr_io.cr）要重建 `g_iface_entries`
+// 并校验 `native_count == IFACE_ENTRY_COUNT`，而 iface_registry.cr **不入 corearch
+// 清单**（corec-only：内含 checker 耦合的 iface_kind_of 之邻）⇒ 布局常量必须在双
+// concat 共享面（本文件 = 共享层；与 ESZ_IFACEINFO/ESZ_IFMETHOD 同居一处的先例）。
+// 迁入只放宽声明序（dyn_arr.cr < checker.cr < iface_registry.cr），零语义变化。
+//   {ak, ti_row, name_ni, lit_code, ops}：ak = 原子类（AK_*）；ti_row = 规范 checker
+//   类型行（8 原生 = TI_* 常量；结构/命名 = -1）；name_ni = 名字 ni（显示/查询用，
+//   R2 P4 Task 3 起在注册面 str_intern 填充——裁决 1 接受 STR 段增长）；lit_code =
+//   字面量定型（AST kind；-1 = 无）；ops = 操作许可位集。
+ESZ_IFACE_ENTRY : int = 40;
+OFF_IE_AK : int = 0;  OFF_IE_TI : int = 8;  OFF_IE_NAME : int = 16;
+OFF_IE_LIT : int = 24; OFF_IE_OPS : int = 32;
+// R2 P4 Task 3（裁决 3+7）：13 → 16（+AK_NULL 原生第九员 + AK_SUM + AK_FN——纯信息面，
+// ops = 0 = 无操作许可；判定面零变化由全类型行枚举守门）。
+IFACE_ENTRY_COUNT : int = 16;
+
+// 形状条目表 grow（R2 P4 Task 3：自 iface_registry.cr **迁入**——同 IFACE 段 loader
+// 读回面：corearch 侧重建 g_iface_shape_* 需表增长；本文件 = grow 助手统一宿主，
+// 零依赖（alloc/_dyncpy 皆共享层））。语义/布局零变化（逐字搬迁）。
+fn iface_shape_grow(needed: int) {
+    if needed <= g_iface_shape_cap { return; }
+    nc : ., mut = g_iface_shape_cap * 2;
+    if nc < 8 { nc = 8; }
+    if nc < needed { nc = needed + 8; }
+    nb := alloc(nc * 8);
+    _dyncpy(g_iface_shape_names, g_iface_shape_cap * 8, nb);
+    g_iface_shape_names = nb;
+    nt := alloc(nc * 8);
+    _dyncpy(g_iface_shape_terms, g_iface_shape_cap * 8, nt);
+    g_iface_shape_terms = nt;
+    g_iface_shape_cap = nc;
+}
 
 // EnumInfo offsets
 // R2 P3 Task 4（T0 交接 ①）：变体载荷**类型节点**槽（照 struct 先例 OFF_SI_FIELD_TYPE_NODES）

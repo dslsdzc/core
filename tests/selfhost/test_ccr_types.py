@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""R2 P4 Task 1/2：`.ccr` TYPE=7 / IFACE=8 段（机制面 + TYPE 内容面）断言套件。
+"""R2 P4 Task 1/2/3：`.ccr` TYPE=7 / IFACE=8 段（机制面 + TYPE/IFACE 内容面）断言套件。
 
 本套件 = **机制面**（Task 1：段表/版本/loader 三闸）+ **TYPE 内容面**（Task 2：
-行表 + 项 DAG 序列化 / D13 确定性装填 / corearch 读回重建 / 判定原语跨进程同值）。
-IFACE 内容面归 Task 3（当前仍空壳）。
+行表 + 项 DAG 序列化 / D13 确定性装填 / corearch 读回重建 / 判定原语跨进程同值）
++ **IFACE 内容面**（Task 3：五小节 = 原生条目 16 行 + 形状名 + 接口签名项化 +
+impl 边 + 方法表 / corearch 读回 / 跨段引用域 / 扩列与命名化守门）。
 
 Task 1（机制面）：
   ① 段表 = 8 段、tag 序 = 1..8、offset 连续、末段尾 == 文件大小；
   ② header: version = 8、seg_count = 8、reserved = 0；
-  ③ IFACE(8) 空壳：段体 = count u32 = 0（恰 4B，无余量）；TYPE(7) = 内容面（非空）；
+  ③ TYPE(7)/IFACE(8) **皆为内容面**（R2 P4 Task 2/3 起——空壳期已退役）；
   ④ loader 负分支（byte mutation，逐个打；全部要求 corearch rc≠0 且**不得
      静默当空表**——三态纪律 C.5-3）：
        · version := 7 → 拒（D10：旧 v7 文件在版本闸整类拒收）；
@@ -16,12 +17,11 @@ Task 1（机制面）：
          非「字节破烂」被拒，而是合法旧文件被版本闸拒）；
        · seg_cnt := 6（末段 size 扩到 EOF——前闸全过）→ 拒（D11 必备集）；
        · 段 tag ∉ 1..8（tag := 9）/ 重复 tag（7 → 6）→ 拒（闸界 + 规范序）；
-       · IFACE 段体 count := 1（半成品内容）→ 拒（空壳期不接受外部内容）；
        · 段体截断（文件 −1B）→ 拒（越界）。
   ⑤ 端到端：corec build --static + corearch --elf 双路径 rc=0 + 产物 rc=42
-     + 产物 .ccr 的 TYPE 段非空（内容面入真实构建路径）；
-  ⑥ 冷/热两态：既有段 + IFACE + TYPE 段体逐字节同（语料 = add/main——ir_gen 不
-     新增类型行 ⇒ 行表缓存不变量；见 T2 用例 ⑪ 的分语料拆解）。
+     + 产物 .ccr 的 TYPE/IFACE 段非空（内容面入真实构建路径）；
+  ⑥ 冷/热两态：既有段 + TYPE + IFACE 段体逐字节同（语料 = add/main——ir_gen 不
+     新增类型行 ⇒ 行表缓存不变量；见 T2 用例 ⑮ 的分语料拆解）。
 
 Task 2（TYPE 内容面）：
   ⑦ 段结构（两小节计数/长度自洽、行表前 9 行 = 原生行块）；⑧ 段内行表/项表 ==
@@ -32,6 +32,8 @@ Task 2（TYPE 内容面）：
      5000 接受；负控 = 真引用槽同值拒绝）；⑭ 冷/冷两次编译 TYPE 逐字节同；⑮
      冷/热分语料拆解（缓存不变量语料 TYPE 同；ptr_arith 热态行表 = 冷态前缀 +
      项表/probe 同 + SYM 悬挂引用实测登记）。
+
+Task 3（IFACE 内容面）：见文件末「R2 P4 Task 3：IFACE 内容面」节（⑯..㉕）。
 
 字节真相 = docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md
 （v8 = v7 段表架构的加法扩展——D9/D10；文件名/测试名保留「v7」字样）：
@@ -44,7 +46,15 @@ Task 2（TYPE 内容面）：
         STR(1) / SYM(2) / NOD(3) / ENT(4) / REG(5) / EDG(6) / TYPE(7) / IFACE(8)
   TYPE(7)  = [row_count u32] [row_count × 24B {kind,data,extra} i64×3]
              [term_count u32] [term_count × 40B {tag,a..d} i64×5]（哈希不落盘）
-  IFACE(8) = [native_count u32]（空壳 = 0；内容面 Task 3：五小节）
+  IFACE(8) = 五小节（R2 P4 Task 3，D14；字段宽度见下）：
+    ① [native_count u32 = 16] [× 24B {ak i32, ti_row i32, name_ni i32, lit_code i32,
+       ops i64}]
+    ② [shape_count u32] [× 8B {name_ni i32, term i32}]
+    ③ [iface_count u32] [× {name_ni i32, method_count i32, generic_count i32, pad i32}
+       + method_count × 80B {name_ni i32, param_count i32, self_mode i32, ret_term i32,
+                             param_terms[8] i32, param_codes[8] i32}]
+    ④ [impl_count u32] [× 8B {trait_ni i32, type_ni i32}]
+    ⑤ [method_count u32] [× 12B {type_ni i32, method_ni i32, mangled_ni i32}]
 """
 import os
 import re
@@ -60,11 +70,19 @@ MAGIC = 0x31524343  # "CCR1"
 VER = 8             # v8 = v7 段表架构的加法扩展（D10）
 SEG_TAGS = [1, 2, 3, 4, 5, 6, 7, 8]  # STR SYM NOD ENT REG EDG TYPE IFACE
 HEADER_TABLE = 16 + 8 * 12  # 112
-SHELL_TAGS = (8,)    # IFACE 空壳（Task 3 前）；TYPE(7) 自 R2 P4 Task 2 起为内容面
-SHELL_SIZE = 4       # count u32（空壳）
 TYPE_TAG = 7
+IFACE_TAG = 8
 ESZ_TYPE_ROW = 24    # 类型行表记录：{kind,data,extra} i64×3（D12）
 ESZ_TYPE_TERM = 40   # 项 DAG 记录：{tag,a,b,c,d} i64×5（哈希不落盘，加载侧重算）
+IFACE_NATIVE_N = 16  # R2 P4 Task 3 扩列硬值（13 → 16；见 ccr_io.cr 注）
+IFACE_ENTRY_DISK = 24
+IFACE_SHAPE_DISK = 8
+IFACE_METHOD_DISK = 80
+IFACE_IMPL_DISK = 8
+IFACE_GMETHOD_DISK = 12
+# D17 的六个形状名（生产注册面；corec 侧 iface_shape_builtin_init 逐名 str_intern）
+IFACE_SHAPE_NAMES = ('sequence', 'sequence_ro', 'sequence_rw',
+                     'indexable', 'iterable', 'product')
 # 项引用槽字段表（tag → 槽下标；未列 tag = 无引用槽——标注/保留槽不得按
 # 「< 自身行号」校验）：TT_UNION/TT_INTER/TT_CONS = a,b；TT_NOT = a；
 # TT_MU = b（a = 绑定变量）；TT_ATOM = c（参数链头；a = ak、b = 标注）。
@@ -210,27 +228,11 @@ def test_p4t1_layout_eight_segments():
         tbody = c.body(TYPE_TAG)
         assert len(tbody) >= 4 + 9 * ESZ_TYPE_ROW + 4 + ESZ_TYPE_TERM, \
             f"TYPE body {len(tbody)}B < native 9-row minimum"
-        # IFACE(8) 仍空壳（Task 3）
-        for tag in SHELL_TAGS:
-            assert c.segs[tag][1] == SHELL_SIZE, \
-                f"tag {tag} body {c.segs[tag][1]}B != shell {SHELL_SIZE}B"
-    finally:
-        for p in (src_path, ccr_path):
-            try:
-                os.unlink(p)
-            except FileNotFoundError:
-                pass
-
-
-def test_p4t1_shell_bodies_zero_count():
-    """③ IFACE(8) 空壳 count == 0 且段体恰由一个 u32 构成（无余量/无尾随垃圾）。
-    （TYPE(7) 自 R2 P4 Task 2 起为内容面——其计数/长度自洽由 T2 用例 ⑦ 承担。）"""
-    src_path, ccr_path = _shell_fixture('shell')
-    try:
-        c = CcrFile(read_ccr(ccr_path))
-        for tag in SHELL_TAGS:
-            assert c.count(tag) == 0, f"tag {tag} shell count != 0"
-            assert len(c.body(tag)) == 4, f"tag {tag} shell body not bare u32"
+        # IFACE(8) = 内容面（R2 P4 Task 3 起；空壳期已退役——原 SHELL_TAGS 断言
+        # 由 `test_p4t3_iface_segment_layout` 的五小节结构断言取代）
+        ibody = c.body(IFACE_TAG)
+        assert len(ibody) >= 4 + IFACE_NATIVE_N * IFACE_ENTRY_DISK + 4 + 6 * IFACE_SHAPE_DISK, \
+            f"IFACE body {len(ibody)}B < native 16 rows + 6 shapes minimum"
     finally:
         for p in (src_path, ccr_path):
             try:
@@ -320,30 +322,20 @@ def test_p4t1_loader_rejects_tag_mutations():
 
 
 def test_p4t1_loader_rejects_nonempty_shell():
-    """④-d 空壳期不接受外部内容：IFACE(8) 段体 count := 1 → 拒绝（内容面落地前，
-    非零计数 = 半成品，不得静默忽略）。TYPE(7) 自 R2 P4 Task 2 起 count 是内容
-    字段（非空 = 正常），其 loader 负分支见 T2 用例 ⑫。"""
+    """④-d **退役（R2 P4 Task 3）**：IFACE「空壳期不接受外部内容」断言随内容面落地
+    退役——非零计数 = 正常内容（其 loader 负分支改由 T3 用例的跨段引用域/结构闸
+    承担：见 `test_p4t3_loader_rejects_iface_mutations`）。
+    本用例保留占位：TYPE 段体的**首字段语义**（row_count）仍受 T2 用例 ⑫ 的
+    计数闸管辖；空壳闸（TYPE/IFACE count == 0 且恰 4B）自 T1 起已无适用对象。"""
+    # 空壳期无对象可打 ⇒ 断言「内容面段体必然远大于 4B」（防「空壳闸静默复活」误判）
     src_path, ccr_path = _shell_fixture('shellne')
     try:
-        base = read_ccr(ccr_path)
-        for tag in SHELL_TAGS:
-            data = bytearray(base)
-            c = CcrFile(bytes(data))
-            off, _ = c.segs[tag]
-            struct.pack_into('<I', data, off, 1)  # count := 1
-            bad = ccr_path + f'.c{tag}'
-            _write(bad, bytes(data))
-            try:
-                arch_elf(bad, os.path.join(BASE, 'build/test_p4t1_ne.out'),
-                         must_fail=True)
-            finally:
-                try:
-                    os.unlink(bad)
-                except FileNotFoundError:
-                    pass
+        c = CcrFile(read_ccr(ccr_path))
+        for tag in (TYPE_TAG, IFACE_TAG):
+            assert c.segs[tag][1] > 4, \
+                f"tag {tag} body collapsed to shell size {c.segs[tag][1]}B"
     finally:
-        for p in (src_path, ccr_path,
-                  os.path.join(BASE, 'build/test_p4t1_ne.out')):
+        for p in (src_path, ccr_path):
             try:
                 os.unlink(p)
             except FileNotFoundError:
@@ -427,7 +419,7 @@ def test_p4t1_cold_warm_shell_stability():
                 f"warm run rewrote cache file {p} (not a full hit?)"
         cc = CcrFile(read_ccr(out_cold))
         cw = CcrFile(read_ccr(out_warm))
-        for tag in (2, 3, 4, 5, 6, TYPE_TAG) + SHELL_TAGS:
+        for tag in (2, 3, 4, 5, 6, TYPE_TAG, IFACE_TAG):
             assert cc.body(tag) == cw.body(tag), \
                 f"segment {tag} drifted cold→warm"
     finally:
@@ -867,6 +859,527 @@ def test_p4t2_cold_warm_type_segment():
                  pa_cold + '.d', pa_warm + '.d')
 
 
+# ═════════════════════ R2 P4 Task 3：IFACE 内容面 ═════════════════════
+# 字节布局 = 文件头 docstring（D14 五小节；方法记录字段序取计划「声明行」序：
+# {name_ni, param_count, self_mode, ret_term, param_terms[8], param_codes[8]}）。
+
+P4T3_NATIVE_RE = re.compile(r'^native (\d+) ak (-?\d+) ti (-?\d+) name (-?\d+) lit (-?\d+) ops (-?\d+)$')
+P4T3_SHAPE_RE = re.compile(r'^shape (\d+) name (-?\d+) term (-?\d+)$')
+P4T3_IFACE_RE = re.compile(r'^iface (\d+) name (-?\d+) methods (\d+) generics (-?\d+)$')
+P4T3_METHOD_RE = re.compile(r'^method (\d+) (\d+) name (-?\d+) params (\d+) self (-?\d+) ret (-?\d+)$')
+P4T3_MPARAM_RE = re.compile(r'^mparam (\d+) (\d+) (\d+) code (-?\d+) term (-?\d+)$')
+P4T3_IMPL_RE = re.compile(r'^impl (\d+) trait (-?\d+) type (-?\d+)$')
+P4T3_GMETHOD_RE = re.compile(r'^gmethod (\d+) type (-?\d+) method (-?\d+) mangled (-?\d+)$')
+P4T3_PROBE_RE = re.compile(
+    r'^ifaceprobe: slots (\d+) built (\d+) unbuilt (\d+) bad (\d+) digest (-?\d+)$')
+P4T3_SIG_RE = re.compile(r'^ifacesig (\d+) (\d+) ret (-?\d+) pc (\d+)$')
+P4T3_SIGP_RE = re.compile(r'^ifacesigp (\d+) (\d+) (\d+) (-?\d+)$')
+
+
+def parse_iface_segment(body: bytes):
+    """IFACE 段字节 → (natives, shapes, ifaces, impls, methods)
+    （D14 布局直解——独立于 dump 的第三方实现；行走完必须恰等于段体长度）。
+    natives = [(ak, ti, name_ni, lit, ops)]；shapes = [(name_ni, term)]；
+    ifaces = [(name_ni, method_count, generic_count, pad, [(mname, pc, self_mode,
+    ret_term, param_terms(8), param_codes(8))])]；impls = [(trait_ni, type_ni)]；
+    methods = [(type_ni, method_ni, mangled_ni)]。"""
+    p = 0
+    (nat,) = struct.unpack_from('<I', body, p)
+    p += 4
+    natives = []
+    for _ in range(nat):
+        ak, ti, nm, lit = struct.unpack_from('<4i', body, p)
+        (ops,) = struct.unpack_from('<q', body, p + 16)
+        natives.append((ak, ti, nm, lit, ops))
+        p += IFACE_ENTRY_DISK
+    (shn,) = struct.unpack_from('<I', body, p)
+    p += 4
+    shapes = []
+    for _ in range(shn):
+        nm, term = struct.unpack_from('<2i', body, p)
+        shapes.append((nm, term))
+        p += IFACE_SHAPE_DISK
+    (ifn,) = struct.unpack_from('<I', body, p)
+    p += 4
+    ifaces = []
+    for _ in range(ifn):
+        nm, mc, gc, pad = struct.unpack_from('<4i', body, p)
+        p += 16
+        meths = []
+        for _ in range(mc):
+            mname, pc, sm, rt = struct.unpack_from('<4i', body, p)
+            p += 16
+            terms = struct.unpack_from('<8i', body, p)
+            p += 32
+            codes = struct.unpack_from('<8i', body, p)
+            p += 32
+            meths.append((mname, pc, sm, rt, terms, codes))
+        ifaces.append((nm, mc, gc, pad, meths))
+    (ic,) = struct.unpack_from('<I', body, p)
+    p += 4
+    impls = []
+    for _ in range(ic):
+        tr, ty = struct.unpack_from('<2i', body, p)
+        impls.append((tr, ty))
+        p += IFACE_IMPL_DISK
+    (mcnt,) = struct.unpack_from('<I', body, p)
+    p += 4
+    methods = []
+    for _ in range(mcnt):
+        ty, mn, mg = struct.unpack_from('<3i', body, p)
+        methods.append((ty, mn, mg))
+        p += IFACE_GMETHOD_DISK
+    assert p == len(body), \
+        f"IFACE body length drift: walked {p}, body {len(body)}"
+    return natives, shapes, ifaces, impls, methods
+
+
+def parse_iface_dump(text: str):
+    """解析 `--dump-ifaces` 输出（corec 与 corearch **同一条打印路径**，行格式
+    契约见 ccr_io.cr:ccr_iface_surface_dump）。返回 dict；"ifacesig*" 节
+    （corec-only 活算）另存 'sig'/'sigp'。"""
+    out = {'natives': [], 'shapes': [], 'ifaces': [], 'method': [], 'mparam': [],
+           'impls': [], 'gmethods': [], 'probe': None, 'sig': {}, 'sigp': {}}
+    for ln in text.splitlines():
+        m = P4T3_NATIVE_RE.match(ln)
+        if m:
+            out['natives'].append(tuple(int(m.group(k)) for k in range(2, 7)))
+            continue
+        m = P4T3_SHAPE_RE.match(ln)
+        if m:
+            out['shapes'].append((int(m.group(2)), int(m.group(3))))
+            continue
+        m = P4T3_IFACE_RE.match(ln)
+        if m:
+            out['ifaces'].append((int(m.group(2)), int(m.group(3)), int(m.group(4))))
+            continue
+        m = P4T3_METHOD_RE.match(ln)
+        if m:
+            out['method'].append((int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                                  int(m.group(4)), int(m.group(5)), int(m.group(6))))
+            continue
+        m = P4T3_MPARAM_RE.match(ln)
+        if m:
+            out['mparam'].append((int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                                  int(m.group(4)), int(m.group(5))))
+            continue
+        m = P4T3_IMPL_RE.match(ln)
+        if m:
+            out['impls'].append((int(m.group(2)), int(m.group(3))))
+            continue
+        m = P4T3_GMETHOD_RE.match(ln)
+        if m:
+            out['gmethods'].append((int(m.group(2)), int(m.group(3)), int(m.group(4))))
+            continue
+        m = P4T3_PROBE_RE.match(ln)
+        if m:
+            out['probe'] = tuple(int(m.group(k)) for k in range(1, 6))
+            continue
+        m = P4T3_SIG_RE.match(ln)
+        if m:
+            out['sig'][(int(m.group(1)), int(m.group(2)))] = (int(m.group(3)), int(m.group(4)))
+            continue
+        m = P4T3_SIGP_RE.match(ln)
+        if m:
+            out['sigp'][(int(m.group(1)), int(m.group(2)), int(m.group(3)))] = int(m.group(4))
+            continue
+    assert out['natives'], "iface dump has no 'native' lines"
+    assert out['probe'] is not None, "iface dump has no 'ifaceprobe' line"
+    return out
+
+
+def corec_dump_ifaces(src: str, out: str) -> str:
+    r = subprocess.run([COREC, 'ccr', src, '-o', out, '--dump-ifaces'],
+                       capture_output=True, text=True, cwd=BASE, timeout=180)
+    assert r.returncode == 0, \
+        f"corec ccr --dump-ifaces failed rc={r.returncode}: {r.stdout}\n{r.stderr}"
+    return r.stdout
+
+
+def arch_dump_ifaces(ccr_in: str) -> str:
+    r = subprocess.run([COREARCH, ccr_in, '--dump-ifaces'],
+                       capture_output=True, text=True, cwd=BASE, timeout=180)
+    assert r.returncode == 0, \
+        f"corearch --dump-ifaces failed rc={r.returncode}: {r.stdout}\n{r.stderr}"
+    return r.stdout
+
+
+def str_table(data: bytes):
+    """STR 段 → 串列表（ni → 串——跨段引用域断言的独立解析面）。"""
+    off, size = CcrFile(data).segs[1]
+    p = off
+    (n,) = struct.unpack_from('<I', data, p)
+    p += 4
+    out = []
+    for _ in range(n):
+        (l,) = struct.unpack_from('<I', data, p)
+        p += 4
+        out.append(data[p:p + l].decode('utf-8', 'replace'))
+        p += l
+    assert p == off + size, "STR walk overran segment"
+    return out
+
+
+def iface_seg(data: bytes) -> bytes:
+    return CcrFile(data).body(IFACE_TAG)
+
+
+# 夹具源：2 接口（self 接收者 + &self + 带参方法）+ 1 结构 + impl 块
+# （g_impl_for 边 + g_methods 方法表 + 接口方法签名项——五小节全非空）
+_T3_SRC = ("interface Show { fn show(self) -> int; }\n"
+           "interface Pair2 { fn first(&self) -> int; fn second(self, x: int) -> int; }\n"
+           "struct S { a: int }\n"
+           "impl Show for S { fn show(self: S) -> int { return 2; } }\n"
+           "fn main() -> int { s := S { a = 2 }; return s.a; }\n")
+
+
+def _t3_fixture(name: str):
+    src_path = os.path.join(BASE, 'build', f'test_p4t3_{name}.cr')
+    ccr_path = os.path.join(BASE, 'build', f'test_p4t3_{name}.ccr')
+    for p in (src_path, ccr_path):
+        try:
+            os.unlink(p)
+        except FileNotFoundError:
+            pass
+    with open(src_path, 'w') as fh:
+        fh.write(_T3_SRC)
+    corec_ccr(src_path, ccr_path)
+    return src_path, ccr_path
+
+
+def _resize_iface_tail(data: bytes, delta: int) -> bytes:
+    """IFACE 段体尾增(+)/删(-) |delta| 字节（段表有尾随量可容纳时用——本段是末段，
+    增删会改变文件长度；调用方负责只做「可容纳」的破坏）。"""
+    d = bytearray(data)
+    (i_off, i_size) = struct.unpack_from('<2I', d, 16 + 7 * 12 + 4)
+    struct.pack_into('<I', d, 16 + 7 * 12 + 8, i_size + delta)
+    cut = i_off + i_size
+    if delta > 0:
+        return bytes(d[:cut]) + b'\x00' * delta + bytes(d[cut:])
+    return bytes(d[:cut + delta]) + bytes(d[cut:])
+
+
+def test_p4t3_iface_segment_layout():
+    """⑯ 五小节结构自洽：计数/长度逐小节与内存真值一致（native 16 == 扩列硬值、
+    形状 6 == D17 生产注册面、接口/方法/impl/方法表逐条 == dump）+ 行走完 == 段体
+    长度（无尾随字节）+ 逐记录不变量（ak ∈ 0..15、ti_row ∈ {-1} ∪ 行域、name_ni
+    入 STR 域、term 入 TYPE 项域、self_mode ∈ 0..3）。"""
+    src_path, ccr_path = _t3_fixture('layout')
+    try:
+        data = read_ccr(ccr_path)
+        natives, shapes, ifaces, impls, methods = parse_iface_segment(iface_seg(data))
+        names = str_table(data)
+        rows, terms = parse_type_segment(type_seg(data))
+        # ① 原生条目：扩列硬值 + 三新行（AK_NULL=15 / AK_SUM=9 / AK_FN=13）纯信息面
+        assert len(natives) == IFACE_NATIVE_N, f"native count {len(natives)} != 16"
+        aks = [r[0] for r in natives]
+        assert len(set(aks)) == len(aks), f"duplicate ak rows: {aks}"
+        new_rows = {r[0]: r for r in natives if r[0] in (15, 9, 13)}
+        assert set(new_rows) == {15, 9, 13}, f"missing extended rows: {aks}"
+        assert new_rows[15][4] == 0 and new_rows[9][4] == 0 and new_rows[13][4] == 0, \
+            "extended rows must be pure-info (ops == 0)"
+        assert new_rows[15][3] == -1 and new_rows[9][3] == -1 and new_rows[13][3] == -1, \
+            "extended rows must have no lit_code"
+        # ② 形状：6 条 D17 生产名（按 STR 解析，逐名）
+        assert len(shapes) == 6, f"shape count {len(shapes)} != 6"
+        sh_names = sorted(names[nm] for nm, _ in shapes)
+        assert sh_names == sorted(IFACE_SHAPE_NAMES), f"shape names drifted: {sh_names}"
+        # ③ 用户接口：夹具 2 接口 + Pair2 双方法；签名项槽逐条入域
+        assert len(ifaces) == 2, f"iface count {len(ifaces)} != 2"
+        for nm, mc, gc, pad, meths in ifaces:
+            assert 0 <= nm < len(names)
+            assert mc == len(meths) and 0 < mc <= 16
+            for (mname, pc, sm, rt, pterms, pcodes) in meths:
+                assert 0 <= mname < len(names)
+                assert 0 <= pc <= 8 and 0 <= sm <= 3
+                assert rt == -1 or 0 <= rt < len(terms), f"ret term {rt} out of domain"
+                for t in pterms:
+                    assert t == -1 or 0 <= t < len(terms), f"param term {t} out of domain"
+                for c in pcodes:
+                    assert c >= -1
+        # ④ impl 边 + ⑤ 方法表：逐条 ni 入 STR 域
+        assert len(impls) >= 1, "fixture has no impl edge"
+        assert len(methods) >= 1, "fixture has no g_methods rows"
+        for tr, ty in impls:
+            assert 0 <= tr < len(names) and 0 <= ty < len(names)
+        for ty, mn, mg in methods:
+            assert 0 <= ty < len(names) and 0 <= mn < len(names) and 0 <= mg < len(names)
+    finally:
+        _cleanup(src_path, ccr_path)
+
+
+def test_p4t3_bytes_match_corec_dump():
+    """⑰ 段内五小节 == corec 侧 dump（内存真值）——写侧装填 + 序列化保真链
+    （内存 → 缓冲 → 文件，Python 直解字节逐字段对拍）。"""
+    src_path, ccr_path = _t3_fixture('rows')
+    try:
+        dump = corec_dump_ifaces(src_path, ccr_path)
+        d = parse_iface_dump(dump)
+        data = read_ccr(ccr_path)
+        natives, shapes, ifaces, impls, methods = parse_iface_segment(iface_seg(data))
+        assert [tuple(r) for r in natives] == [tuple(r) for r in d['natives']], \
+            "file natives != memory natives"
+        assert shapes == d['shapes'], "file shapes != memory shapes"
+        assert impls == d['impls'], "file impls != memory impls"
+        assert methods == d['gmethods'], "file g_methods != memory g_methods"
+        # ③ 用户接口（含方法 80B 记录逐字段：项槽/裸码槽分别对拍）
+        d_if = d['ifaces']
+        d_me = [m for m in d['method']]
+        d_mp = {(i, j, k): (c, t) for (i, j, k, c, t) in d['mparam']}
+        assert len(ifaces) == len(d_if), "iface count drift"
+        for i, (nm, mc, gc, pad, meths) in enumerate(ifaces):
+            assert (nm, mc, gc) == d_if[i], f"iface {i} header drift"
+            for j, (mname, pc, sm, rt, pterms, pcodes) in enumerate(meths):
+                mrow = next(m for m in d_me if m[0] == i and m[1] == j)
+                assert (mname, pc, sm, rt) == mrow[2:], f"method {i}.{j} drift"
+                for k in range(8):
+                    assert (pcodes[k], pterms[k]) == d_mp[(i, j, k)], \
+                        f"method {i}.{j} param {k} slot drift"
+    finally:
+        _cleanup(src_path, ccr_path)
+
+
+def test_p4t3_corearch_readback_parity():
+    """⑱ 读回证据（spec §6.3）：corearch `--dump-ifaces` 与 corec 侧 dump 的共享节
+    逐行一致（条目表/形状表/接口表/impl 边/方法表 + ifaceprobe 行——跨段项索引在
+    重建项表上解析同值）；corec-only 的活算节（ifacesig*）只在写侧存在。"""
+    src_path, ccr_path = _t3_fixture('par')
+    try:
+        corec_out = corec_dump_ifaces(src_path, ccr_path)
+        arch_out = arch_dump_ifaces(ccr_path)
+        c = parse_iface_dump(corec_out)
+        a = parse_iface_dump(arch_out)
+        for key in ('natives', 'shapes', 'ifaces', 'method', 'mparam', 'impls', 'gmethods'):
+            assert c[key] == a[key], f"read-back {key} drifted"
+        assert c['probe'] == a['probe'], \
+            f"ifaceprobe diverged across processes: {c['probe']} vs {a['probe']}"
+        assert c['probe'][3] == 0, f"cross-segment probe bad != 0: {c['probe']}"
+        assert c['sig'] and not a['sig'], "ifacesig section must be corec-only"
+        assert c['sigp'] and not a['sigp'], "ifacesigp section must be corec-only"
+    finally:
+        _cleanup(src_path, ccr_path)
+
+
+def test_p4t3_signature_itemization_matches_live():
+    """⑲ 签名项化：段内 ret_term/param_terms == corec 侧**活算**签名项
+    （sh_iface_sig_ret_term/sh_iface_sig_param_term——缓冲构造后独立读点）⇒
+    装填与签名来源零漂移；未用形参槽 = -1；接收者槽 = unit 占位项（>= 0）。"""
+    src_path, ccr_path = _t3_fixture('sig')
+    try:
+        dump = corec_dump_ifaces(src_path, ccr_path)
+        d = parse_iface_dump(dump)
+        data = read_ccr(ccr_path)
+        natives, shapes, ifaces, impls, methods = parse_iface_segment(iface_seg(data))
+        for i, (nm, mc, gc, pad, meths) in enumerate(ifaces):
+            for j, (mname, pc, sm, rt, pterms, pcodes) in enumerate(meths):
+                live_ret, live_pc = d['sig'][(i, j)]
+                assert live_pc == pc, f"live param count {live_pc} != file {pc}"
+                assert rt == live_ret, \
+                    f"method {i}.{j} ret term {rt} != live {live_ret}"
+                for k in range(8):
+                    if k < pc:
+                        live = d['sigp'][(i, j, k)]
+                        assert pterms[k] == live, \
+                            f"method {i}.{j} param {k} term {pterms[k]} != live {live}"
+                        assert live >= 0, f"live signature item unbuildable at {i}.{j}.{k}"
+                    else:
+                        assert (i, j, k) not in d['sigp'], \
+                            "live section must not print unused param slots"
+                        assert pterms[k] == -1, "unused param term slot must be -1"
+        # 签名项确实**非空**（防「全 -1 空签名」假绿）：至少一个有效项 >= 0
+        assert any(t >= 0 for _, _, _, _, ms in ifaces for m in ms for t in m[4]), \
+            "no effective signature terms in fixture"
+    finally:
+        _cleanup(src_path, ccr_path)
+
+
+def test_p4t3_shape_name_registration():
+    """⑳ 形状命名化（裁决 1 + D17）：六生产名入段（name_ni → STR 解析逐名）+
+    形状项在 TYPE 项域内（跨段引用域）；`shape` 行的 term 与接口轴 A 的
+    形状项同域（判定 `arr <: 形状项` 语义见 selftest `x2.shape_builtin_names`）。"""
+    src_path, ccr_path = _t3_fixture('shape')
+    try:
+        data = read_ccr(ccr_path)
+        natives, shapes, ifaces, impls, methods = parse_iface_segment(iface_seg(data))
+        names = str_table(data)
+        rows, terms = parse_type_segment(type_seg(data))
+        got = {names[nm]: term for nm, term in shapes}
+        assert sorted(got) == sorted(IFACE_SHAPE_NAMES), f"shape names: {sorted(got)}"
+        for nm, term in shapes:
+            assert 0 <= term < len(terms), f"shape {nm} term {term} out of TYPE domain"
+        # 形状项结构（与 iface_registry.cr 的构造点语义独立对拍）：顶层展开收集原子类
+        # ——TT_TOP_K(2) → a = 原子类；TT_UNION(3) → 两操作数；TT_ATOM(7) → a = 原子类。
+        # 期望值 = 六形状的**语义定义**（D17/spec §2.2）：序列本体 = ⊤_SEQUENCE；
+        # 只读 = 序列 ∪ ref 视图（AK_REF=11）；可索引 = 序列 ∪ 字符串（AK_STRING=2）；
+        # product = ⊤_PRODUCT（AK_PRODUCT=8）。
+        AK_STRING, AK_PRODUCT, AK_SEQUENCE, AK_REF = 2, 8, 10, 11
+        exp = {'sequence': sorted([AK_SEQUENCE]),
+               'sequence_ro': sorted([AK_SEQUENCE, AK_REF]),
+               'sequence_rw': sorted([AK_SEQUENCE]),
+               'indexable': sorted([AK_SEQUENCE, AK_STRING]),
+               'iterable': sorted([AK_SEQUENCE]),
+               'product': sorted([AK_PRODUCT])}
+
+        def top_classes(ti):
+            tag, a, b = terms[ti][0], terms[ti][1], terms[ti][2]
+            if tag == 2:      # TT_TOP_K
+                return [a], tag
+            if tag == 7:      # TT_ATOM
+                return [a], tag
+            if tag == 3:      # TT_UNION：两操作数各递归（各为 TOP_K/ATOM）
+                out = []
+                for op in (a, b):
+                    assert 0 <= op < len(terms), f"union operand {op} out of domain"
+                    sub, _ = top_classes(op)
+                    out.extend(sub)
+                return sorted(out), tag
+            raise AssertionError(f"unexpected shape term tag {tag}")
+
+        for nm, term in shapes:
+            classes, tag = top_classes(term)
+            assert classes == exp[names[nm]], \
+                f"shape {names[nm]} classes {classes} != expected {exp[names[nm]]}"
+    finally:
+        _cleanup(src_path, ccr_path)
+
+
+def test_p4t3_cross_process_term_probe():
+    """㉑ 跨段引用域探针：`ifaceprobe` 行的 slots == Σ(方法数 × (1 + pc))、
+    built + unbuilt == slots、bad == 0，且逐槽 **解析摘要跨进程同值**
+    （corec 与 corearch 两侧 digest 同 ⇒ 段内项索引在重建项表上解析到同构项）。"""
+    src_path, ccr_path = _t3_fixture('probe')
+    try:
+        corec_out = corec_dump_ifaces(src_path, ccr_path)
+        arch_out = arch_dump_ifaces(ccr_path)
+        c = parse_iface_dump(corec_out)
+        a = parse_iface_dump(arch_out)
+        data = read_ccr(ccr_path)
+        natives, shapes, ifaces, impls, methods = parse_iface_segment(iface_seg(data))
+        exp_slots = sum(1 + m[1] for _, _, _, _, ms in ifaces for m in ms)
+        for probe, tag in ((c['probe'], 'corec'), (a['probe'], 'corearch')):
+            slots, built, unbuilt, bad, digest = probe
+            assert slots == exp_slots >= 1, \
+                f"{tag}: probe slots {slots} != expected {exp_slots}"
+            assert built + unbuilt == slots, f"{tag}: built+unbuilt != slots"
+            assert bad == 0, f"{tag}: cross-segment probe bad {bad} != 0"
+        assert c['probe'][4] == a['probe'][4], \
+            f"probe digest diverged: {c['probe']} vs {a['probe']}"
+    finally:
+        _cleanup(src_path, ccr_path)
+
+
+def test_p4t3_loader_rejects_iface_mutations():
+    """㉒ loader 负分支（跨段引用域 + 结构闸 + 尾随字节，逐个 byte mutation
+    → 必须拒绝，不得静默接受）：
+      · native_count := 15（≠ 扩列硬值）
+      · 形状行的 term 越 TYPE 项域（term := tt+1）
+      · 接口方法 ret_term 越 TYPE 项域
+      · 方法名的 name_ni 越 STR 串数
+      · 段体尾插 4B 垃圾（五小节行走完 ≠ 段体长）
+      · 段体尾截 4B（计数 × 记录尺寸 > 段余量）
+    """
+    src_path, ccr_path = _t3_fixture('mut')
+    try:
+        data = read_ccr(ccr_path)
+        c = CcrFile(data)
+        i_off, i_size = c.segs[IFACE_TAG]
+        natives, shapes, ifaces, impls, methods = parse_iface_segment(iface_seg(data))
+        rows, terms = parse_type_segment(type_seg(data))
+        names = str_table(data)
+        sh_off = i_off + 4 + len(natives) * IFACE_ENTRY_DISK
+        if_off = sh_off + 4 + len(shapes) * IFACE_SHAPE_DISK
+        # ③ 第一节：夹具首接口首方法记录基址
+        rec = if_off + 4 + 16
+        muts = {}
+        d = bytearray(data)
+        struct.pack_into('<I', d, i_off, IFACE_NATIVE_N - 1)          # native_count
+        muts['nativecnt'] = bytes(d)
+        d = bytearray(data)
+        struct.pack_into('<i', d, sh_off + 4 + 4, len(terms) + 1)     # shape term oob
+        muts['shapeterm'] = bytes(d)
+        d = bytearray(data)
+        struct.pack_into('<i', d, rec + 12, len(terms) + 1)           # ret_term oob
+        muts['retterm'] = bytes(d)
+        d = bytearray(data)
+        struct.pack_into('<i', d, rec, len(names) + 5)                # method name ni oob
+        muts['nameni'] = bytes(d)
+        muts['trail'] = _resize_iface_tail(data, 4)
+        muts['trunc'] = _resize_iface_tail(data, -4)
+        for name, mdata in muts.items():
+            bad = ccr_path + f'.{name}'
+            _write(bad, mdata)
+            try:
+                arch_elf(bad, os.path.join(BASE, 'build/test_p4t3_mut.out'),
+                         must_fail=True)
+            finally:
+                _cleanup(bad)
+    finally:
+        _cleanup(src_path, ccr_path, os.path.join(BASE, 'build/test_p4t3_mut.out'))
+
+
+def test_p4t3_dump_flag_zero_artifact_effect():
+    """㉓ `--dump-ifaces` 是**只读通道**：带/不带 flag 的 .ccr 逐字节同
+    （活算节在段体缓冲构造**之后**运行，不得泄入序列化面）。"""
+    src_path, ccr_path = _t3_fixture('flag')
+    with_dump = ccr_path + '.dump'
+    try:
+        corec_ccr(src_path, ccr_path)
+        corec_dump_ifaces(src_path, with_dump)
+        assert read_ccr(ccr_path) == read_ccr(with_dump), \
+            "--dump-ifaces changed the emitted .ccr"
+    finally:
+        _cleanup(src_path, ccr_path, with_dump)
+
+
+def test_p4t3_determinism_cold_cold():
+    """㉔ 确定性（D13 对 IFACE 段的直接守门）：同源两次**冷缓存**编译 ⇒ IFACE 段
+    逐字节同（且整 .ccr 逐字节同——形状重注册/条目注册名/签名装填皆纯函数）。"""
+    cache_dir = os.path.join(BASE, '.core', 'cache')
+    src_path, ccr_path = _t3_fixture('det')
+    a = ccr_path + '.a'
+    b = ccr_path + '.b'
+    try:
+        for out in (a, b):
+            shutil.rmtree(cache_dir, ignore_errors=True)
+            corec_ccr(src_path, out)
+        da, db = read_ccr(a), read_ccr(b)
+        assert iface_seg(da) == iface_seg(db), "IFACE segment not deterministic"
+        assert type_seg(da) == type_seg(db), "TYPE segment not deterministic"
+        assert da == db, ".ccr drifted between two cold builds"
+    finally:
+        _cleanup(src_path, ccr_path, a, b)
+
+
+def test_p4t3_cold_warm_iface_segment():
+    """㉕ 冷/热两态（缓存不变量语料 = 夹具源：.cir 命中不改变类型行/接口表）⇒
+    IFACE + TYPE 段体逐字节同；命中证据 = 暖运行不重写缓存文件。"""
+    cache_dir = os.path.join(BASE, '.core', 'cache')
+    cir_dir = os.path.join(cache_dir, 'cir')
+    src_path, ccr_path = _t3_fixture('cw')
+    cold = ccr_path + '.cold'
+    warm = ccr_path + '.warm'
+    try:
+        shutil.rmtree(cache_dir, ignore_errors=True)
+        corec_ccr(src_path, cold)
+        snap = {os.path.join(cir_dir, f): os.stat(
+                    os.path.join(cir_dir, f)).st_mtime_ns
+                for f in os.listdir(cir_dir)}
+        assert snap, "cold run did not populate cir cache"
+        corec_ccr(src_path, warm)
+        for p, ns in snap.items():
+            assert os.stat(p).st_mtime_ns == ns, \
+                f"warm run rewrote cache file {p} (not a full hit?)"
+        dc, dw = read_ccr(cold), read_ccr(warm)
+        assert iface_seg(dc) == iface_seg(dw), "IFACE drifted cold->warm"
+        assert type_seg(dc) == type_seg(dw), "TYPE drifted cold->warm"
+        for tag in (2, 3, 4, 5, 6):
+            assert CcrFile(dc).body(tag) == CcrFile(dw).body(tag), \
+                f"segment {tag} drifted cold->warm"
+    finally:
+        _cleanup(src_path, ccr_path, cold, warm)
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+
 def _cleanup(*paths):
     for p in paths:
         try:
@@ -877,7 +1390,6 @@ def _cleanup(*paths):
 
 if __name__ == '__main__':
     tests = [test_p4t1_layout_eight_segments,
-             test_p4t1_shell_bodies_zero_count,
              test_p4t1_loader_rejects_valid_v7_file,
              test_p4t1_loader_rejects_missing_type_iface,
              test_p4t1_loader_rejects_tag_mutations,
@@ -894,7 +1406,17 @@ if __name__ == '__main__':
              test_p4t2_loader_accepts_annotation_slot,
              test_p4t2_loader_rejects_count_and_truncation,
              test_p4t2_determinism_cold_cold,
-             test_p4t2_cold_warm_type_segment]
+             test_p4t2_cold_warm_type_segment,
+             test_p4t3_iface_segment_layout,
+             test_p4t3_bytes_match_corec_dump,
+             test_p4t3_corearch_readback_parity,
+             test_p4t3_signature_itemization_matches_live,
+             test_p4t3_shape_name_registration,
+             test_p4t3_cross_process_term_probe,
+             test_p4t3_loader_rejects_iface_mutations,
+             test_p4t3_dump_flag_zero_artifact_effect,
+             test_p4t3_determinism_cold_cold,
+             test_p4t3_cold_warm_iface_segment]
     failed = 0
     for t in tests:
         try:

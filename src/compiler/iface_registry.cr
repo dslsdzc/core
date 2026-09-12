@@ -2,8 +2,9 @@
 // R2 P2b Task 1：本质条目表（native interface entries）+ `iface_*` 查询 API（spec §2/§2.5）。
 //
 // 定位：spec §2「一张注册表、检查器统一查表」的**第一段地面**——本文件只**建层**：
-//   · 13 条本质条目（8 原生 + product/sequence/ref/ptr/named）= **静态数据**（表内容 = 常量，
-//     不缓存任何类型表行号——P1 M1 教训：init_types 的行号序不是可依赖的契约）；
+//   · 16 条本质条目（R2 P4 Task 3 扩列：8 原生 + product/sequence/ref/ptr/named + null/sum/fn
+//     ——旧 13 = T1..T2 值）= **静态数据**（表内容 = 常量 + 注册名 ni，不缓存任何类型表行号
+//     ——P1 M1 教训：init_types 的行号序不是可依赖的契约）；
 //   · 操作许可位集（`ops`）+ 字面量定型码（`lit_code`）+ 查询 API（`iface_*`）。
 // **零消费者、零行为变化**（Task 1 硬口径）：checker/ir_gen/后端一律未接线；表**不 alloc
 // `g_types` 行**（先例 `init_builtins` 的 `g_rt_builtin_*` 旁表，checker.cr:261-303）⇒ `.ccr`
@@ -48,17 +49,15 @@
 
 // ─── 条目布局（40B/条 × 5 字段；与 g_types(24B/条)/ESZ_TYPE_TERM(48B/条) 同族：扁平 i64 缓冲）───
 //   {ak, ti_row, name_ni, lit_code, ops}
-//   ak       = 原子类（AK_*；type_engine.cr:19-22）
+//   ak       = 原子类（AK_*；type_engine.cr 的 AK_* 块）
 //   ti_row   = 该原子的**规范 checker 类型行**（8 原生 = TI_INT..TI_DYN 常量；结构/命名 = -1）
-//   name_ni  = 名字 ni（显示用）——**本 Task 落 -1**，见 iface_registry_init 注记
+//   name_ni  = 名字 ni（显示/查询用）——R2 P4 Task 3 起**注册面 str_intern 填充**（裁决 1
+//              接受 STR 段随之增长；T1..T2 期留 -1，注记原文保留在 iface_registry_init 内）
 //   lit_code = **字面量定型**：AST 字面量 kind（EXPR_INT/EXPR_DEX/EXPR_STRING/EXPR_BOOL/
 //              EXPR_CHAR）→ 本条目（`iface_lit_ti`/`iface_lit_ak` 的查表键）；-1 = 无字面量
 //   ops      = 操作许可位集（bit(OP_*)/bit(UOP_*+20)/bit(IP_*)；见 Task 4 的位下标约定）
-ESZ_IFACE_ENTRY : int = 40;
-OFF_IE_AK : int = 0;  OFF_IE_TI : int = 8;  OFF_IE_NAME : int = 16;
-OFF_IE_LIT : int = 24; OFF_IE_OPS : int = 32;
-
-IFACE_ENTRY_COUNT : int = 13;   // 8 原生 + product/sequence/ref/ptr/named
+// ⚠ 布局常量（ESZ_IFACE_ENTRY/OFF_IE_*/IFACE_ENTRY_COUNT）已**迁入 dyn_arr.cr**（R2 P4
+//   Task 3：IFACE 段 loader 在 corearch 侧要重建条目表 + 校验计数，本文件不入 corearch 清单）。
 
 // 位构造（乘 2 循环，照既有 dyn_set_type 惯例——本语言无移位运算符）。下标语义见 globals.cr
 // 的 IP_* 块；n ≥ 63 时 i64 负号翻转（= 全位命中）由 `iface_permits` 的越界闸拒绝，本函数只
@@ -71,17 +70,17 @@ fn iface_bit(n: int) -> int {
 }
 
 // ─── 建表（由 init_types() 尾部调用；幂等）───
-// 表内容 = 常量（AK_*/TI_*/-1/0）⇒ 不读类型表、不缓存行号、不因 init_types 的重复调用而失效
-// （行号空间复用不影响本表——这正是「不缓存行号」的目的；长驻进程 corelsp 每请求 init_types）。
+// 表内容 = 常量（AK_*/TI_*/-1/0）+ **注册名 ni**（R2 P4 Task 3 起）⇒ 不读类型表、不缓存行号、
+// 不因 init_types 的重复调用而失效（行号空间复用不影响本表——这正是「不缓存行号」的目的；
+// 长驻进程 corelsp 每请求 init_types；str_intern 对同名幂等 ⇒ 重复调用零增长）。
 //
-// **name_ni = -1（本 Task 的落地口径；与计划文「name_ni = str_intern 显示名」有一处受判据
-// 约束的偏差，实测依据如下）**：`.ccr` 的 STR 段 = 编译期 `g_strs` **全量**（ccr_io.cr:537 起
-// 逐串落盘；实测 ptr_arith 的 .ccr 含 159 串，其中 load64/fpow2i/g_cir_write_buf 等编译器
-// 内部串与源文件无关）⇒ 在本函数里 `str_intern("product")` 之类会把 13 个新串**追加**进
-// g_strs ⇒ `.ccr` 逐字节变（Global Constraints 硬判据：「预期逐字节不变；若变 → 停下上报」）。
-// 零消费者阶段无一格需要显示名 ⇒ 本 Task 不 interning（name 列留 -1），待**首个消费者**
-// （P3 诊断/显示）落地时再一并裁决「是否接受 .ccr STR 段增长」。**不得**为了让本列「看起来
-// 完整」而在初始化路径上 str_intern（那是拿硬判据换美观）。
+// **name_ni 的历史口径与翻转（原文保留 + 翻转注记）**：T1..T2 期本列留 -1，理由 = `.ccr` 的
+// STR 段 = 编译期 `g_strs` **全量**（ccr_io.cr 逐串落盘）⇒ 在本函数里 `str_intern("product")`
+// 会把新串**追加**进 g_strs ⇒ `.ccr` 逐字节变（当时的全局硬判据「预期逐字节不变」）。
+// **R2 P4 Task 3 起翻转为「逐名注册」**：维护者裁决 1（2026-09-12）明示**接受 STR 段增长**，
+// 换结构性判据（TODO #26）；IFACE 段 ① 小节要求 name_ni 是 STR 段内的合法索引（跨段引用域
+// 检查），无名的条目表无法兑现「信息恒随载体」。⇒ 本函数 = 生产注册面（**固定增量**：
+// 逐名列举于下，守门用例按新口径重定「判定/查询路径零新增驻留 + 初始化面固定增量」）。
 fn iface_registry_init() {
     if g_iface_registry_ok != 0 { return; }   // 幂等（内容恒定，无需重建）
     g_iface_entries = alloc(IFACE_ENTRY_COUNT * ESZ_IFACE_ENTRY);
@@ -110,38 +109,53 @@ fn iface_registry_init() {
     o_cond := iface_bit(IP_COND);                       // `if`（:2274 收 bool|int）
     o_cond_b := iface_bit(IP_COND_BOOL);                // `while`（:2385 **只收 bool**——不得与上合并）
     // 8 原生（ti_row 取 TI_* 常量；AK↔TI 逐项分派——bool/string 两行按语义错位书写）
+    // 第 4 参 = name_ni（R2 P4 Task 3：生产注册面固定增量——逐名 = 下表 16 行；见头注）
     //   AK_INT ：门 + 逻辑 + 条件（:2274 收 int）——**无 IP_COND_BOOL**（:2385 拒 int，探针 N9 实测）
-    iface_put(0, AK_INT, TI_INT, -1, EXPR_INT, o_base + o_arith + o_logic + o_cond);
+    iface_put(0, AK_INT, TI_INT, str_intern("int"), EXPR_INT, o_base + o_arith + o_logic + o_cond);
     //   AK_DEX ：仅门——逻辑/条件均**不含 dex**（:1969/:2274 只认 bool|int；探针 N7/N8 实测拒）
-    iface_put(1, AK_DEX, TI_DEX, -1, EXPR_DEX, o_base + o_arith);
+    iface_put(1, AK_DEX, TI_DEX, str_intern("dex"), EXPR_DEX, o_base + o_arith);
     //   AK_STRING：无算术/逻辑/条件（串拼接走 :1946 早退，不进本表）；索引面 = :2619（串下标→int）
     //     ——Task 5：IP_INDEX 已接线（兜底门；串的**结果**分支 :2644 原地保留）
-    iface_put(2, AK_STRING, TI_STR, -1, EXPR_STRING, o_base + iface_bit(IP_INDEX));
+    iface_put(2, AK_STRING, TI_STR, str_intern("string"), EXPR_STRING, o_base + iface_bit(IP_INDEX));
     //   AK_BOOL ：逻辑 + 两条条件位（:2274 收 bool、:2385 收 bool）
-    iface_put(3, AK_BOOL, TI_BOOL, -1, EXPR_BOOL, o_base + o_logic + o_cond + o_cond_b);
-    iface_put(4, AK_UNIT, TI_UNIT, -1, -1, o_base);
-    iface_put(5, AK_NEVER, TI_NEVER, -1, -1, o_base);
-    iface_put(6, AK_CHAR, TI_CHAR, -1, EXPR_CHAR, o_base);
+    iface_put(3, AK_BOOL, TI_BOOL, str_intern("bool"), EXPR_BOOL, o_base + o_logic + o_cond + o_cond_b);
+    iface_put(4, AK_UNIT, TI_UNIT, str_intern("unit"), -1, o_base);
+    iface_put(5, AK_NEVER, TI_NEVER, str_intern("never"), -1, o_base);
+    iface_put(6, AK_CHAR, TI_CHAR, str_intern("char"), EXPR_CHAR, o_base);
     //   AK_DYN ：+ 方法面（:2066 dyn 方法校验路径）——Task 5：**未接线**（该路径的拒绝谓词 =
     //     `type_has_method(具体行名, 方法名)`（名拼接方法表判定），非本类级位；实测 int/string
     //     行今日也发 EC_N_METHOD（探针 D1/D4）⇒ 类级门会抑制 = 放宽）
-    iface_put(7, AK_DYN, TI_DYN, -1, -1, o_base + iface_bit(IP_METHOD));
+    iface_put(7, AK_DYN, TI_DYN, str_intern("dyn"), -1, o_base + iface_bit(IP_METHOD));
     // 结构/命名（ti_row = -1 = 类级，无「规范行」）
     //   AK_PRODUCT ：+ 字段面（:2566-2577 元组 `.N`）——Task 5：IP_FIELD **未接线**（落空
     //     `return TI_UNIT` 无诊断；其前的 kind 分支是结果规则）
-    iface_put(8, AK_PRODUCT, -1, -1, -1, o_base + iface_bit(IP_FIELD));
+    iface_put(8, AK_PRODUCT, -1, str_intern("product"), -1, o_base + iface_bit(IP_FIELD));
     //   AK_SEQUENCE：+ 索引面（:2605-2618 数组/切片元素 + F2 越界；:2586 range→slice）
     //     ——Task 5：IP_INDEX 已接线（兜底门；ARRAY/SLICE 的**结果**分支原地保留）；
     //     IP_INDEX_RANGE **未接线**（range 分支 :2612-2627 的非数组落空 `return TI_UNIT` 无诊断
     //     ⇒ 门恒真 = 空转；登记为 P3 旋钮）
-    iface_put(9, AK_SEQUENCE, -1, -1, -1, o_base + iface_bit(IP_INDEX) + iface_bit(IP_INDEX_RANGE));
+    iface_put(9, AK_SEQUENCE, -1, str_intern("sequence"), -1, o_base + iface_bit(IP_INDEX) + iface_bit(IP_INDEX_RANGE));
     //   AK_REF/AK_PTR：门全 0——**指针算术由 :1948-1955 早退承担**（结果规则留代码），非本表
-    iface_put(10, AK_REF, -1, -1, -1, o_base);
-    iface_put(11, AK_PTR, -1, -1, -1, o_base);
+    iface_put(10, AK_REF, -1, str_intern("ref"), -1, o_base);
+    iface_put(11, AK_PTR, -1, str_intern("ptr"), -1, o_base);
     //   AK_NAMED ：+ 字段面（:2522-2563 struct 字段表）+ 方法面（:2088 方法表）——Task 5：
     //     两位均**未接线**（EXPR_FIELD 全形 rc=0、零诊断路径；方法面 = 逐方法表名判定，
     //     同 AK_DYN 注的理由）；登记为 P3 旋钮
-    iface_put(12, AK_NAMED, -1, -1, -1, o_base + iface_bit(IP_FIELD) + iface_bit(IP_METHOD));
+    iface_put(12, AK_NAMED, -1, str_intern("named"), -1, o_base + iface_bit(IP_FIELD) + iface_bit(IP_METHOD));
+    // ─── R2 P4 Task 3 扩列（裁决 3 + 7）：13 → 16 —— **纯信息面**（只加「可查询性」）───
+    // 三行共同点：ti_row = -1（无规范行；ti_row 是**行级**面，本三原子是类级/无行）、lit_code = -1
+    // （无字面量）、ops = 0（**无操作许可**——null/sum/fn 面在现状对算术/逻辑/条件门全拒，
+    // 与「未登记」同值 ⇒ 本三行不改任何判定；`iface_permits` 对 0 位集恒 0）。
+    // ⚠ 硬性边界（计划 Step 3）：`iface_kind_of`（iface_axis.cr）**零改动**——`TYP_NULL`/
+    //   `TYP_OPTIONAL`/`TYP_DYN` 等行的分派与 P2b 钉死的域逐格保持；扩列只加「可查询性」，
+    //   不加「行 → 类」新映射（守门 = selftest 的全类型行枚举用例 + t4.null_no_ops_no_entry 重定）。
+    //   AK_NULL（裁决 7：独立原子槽，不作 ⊥ 折叠——`type_engine.cr` 的 AK_NULL 语义零改动）
+    iface_put(13, AK_NULL, -1, str_intern("null"), -1, 0);
+    //   AK_SUM（枚举/联合的类级原子；checker 侧枚举类型行 = TYP_NAMED ⇒ 本行无行分派，
+    //     忠实反映「checker 侧无 AK_SUM 行」这一现状——登记面而非新映射）
+    iface_put(14, AK_SUM, -1, str_intern("sum"), -1, 0);
+    //   AK_FN（函数类型项（AK_FN）的类级原子；checker 侧无函数类型行 ⇒ 同行分派现状）
+    iface_put(15, AK_FN, -1, str_intern("fn"), -1, 0);
     g_iface_registry_ok = 1;
 }
 
@@ -277,6 +291,15 @@ fn iface_ti_of(ak: int) -> int {
     return r64(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_TI);
 }
 
+// 原子类 → 注册名 ni（R2 P4 Task 3 起非 -1；-1 = 无此原子/未注册）。
+// 消费面 = IFACE 段 ① 小节的 name_ni 列 + 自测守门（逐名对拍）；**零 str_intern**
+// （只读表，不构造串——判定/查询路径不得驻留新串）。
+fn iface_name_of(ak: int) -> int {
+    e := iface_entry(ak);
+    if e < 0 { return -1; }
+    return r64(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_NAME);
+}
+
 // ═══════════════ R2 P3b Task 0：横切轴形状条目表（`iface_satisfies` 的轴 A）═══════════════
 // 语义（spec §2.2）：每条横切接口 = **一个形状类型项**（如 `sequence` ⇒ `⊤_SEQUENCE`、
 // `可索引`/`可迭代`/`product` 各一条），满足判定 = `ty_sub(实参项, 形状项)`——与用户轴/本质轴
@@ -294,19 +317,8 @@ fn iface_ti_of(ak: int) -> int {
 //
 // 生命周期：count 随 `reset_frontend_state` 清零、cap 保留（缓冲复用）——照 g_sgen_constr 先例。
 // 同名**覆盖**（最后一次注册生效；幂等重注册不增长表）。
-fn iface_shape_grow(needed: int) {
-    if needed <= g_iface_shape_cap { return; }
-    nc : ., mut = g_iface_shape_cap * 2;
-    if nc < 8 { nc = 8; }
-    if nc < needed { nc = needed + 8; }
-    nb := alloc(nc * 8);
-    _dyncpy(g_iface_shape_names, g_iface_shape_cap * 8, nb);
-    g_iface_shape_names = nb;
-    nt := alloc(nc * 8);
-    _dyncpy(g_iface_shape_terms, g_iface_shape_cap * 8, nt);
-    g_iface_shape_terms = nt;
-    g_iface_shape_cap = nc;
-}
+// iface_shape_grow 已迁入 dyn_arr.cr（R2 P4 Task 3，grow 助手统一宿主；IFACE 段 corearch
+// 读回侧重建形状表需要）
 
 // 注册（返回行号；-1 = 参数非法）。name_ni < 0 / term < 0 一律拒绝——**不得**把负值当
 // 「未注册」哨兵写进表（那会让 lookup 把 -1 名字与空槽混淆）。
@@ -369,11 +381,12 @@ fn iface_of_term(t: int) -> int {
 //   **-1**（未覆盖面）而非 1 ⇒ 序列面形状一律取**类别形** `⊤ₖ(AK_SEQUENCE)`。
 // ⚠ 每个构造点**零 str_intern**（.ccr STR 段硬约束 = A.3-②）：形状项只进类型项 DAG
 //   （append-only ⇒ 跨编译/跨 init_types 稳定），不驻留新串——守门 = selftest `x2.no_str_intern`。
-// ⚠ **名字面：生产路径本批不注册**（Step 1 的「条目」= 数据面；注册裁决归后批）。理由 =
-//   形状名是**驻留 ni**，而编译器源码里的新标识符/串只在生产编译执行到那行时才驻留 ⇒ 在任何
-//   初始化路径（init_types / iface_registry_init）注册 = 把新串追加进 g_strs ⇒ `.ccr` STR 段
-//   逐字节变（A.3-② 硬判据）。本批消费者（索引/切片）是**无名字消费点**，直接 `iface_satisfies_term`
-//   （P3b Task 0 §1.3 已备此路）；命名消费（`T: 可索引` 一类语法）待命名面裁决后接。
+// ⚠ **名字面（P3b 原文保留 + R2 P4 Task 3 翻转注记）**：P3b 期生产路径**不注册**（理由 =
+//   形状名是驻留 ni，初始化路径 str_intern 会把新串追加进 g_strs ⇒ `.ccr` STR 段变，当时的
+//   全局硬判据）。**R2 P4 Task 3 起翻转为「按名注册」**：维护者裁决 1 接受 STR 段增长 ⇒
+//   生产注册面 = 文件尾的 `iface_shape_builtin_init()`（init_types 尾部调用 + D13 重建重跑）。
+//   消费侧不变：本批消费者（索引/切片）仍是**无名字消费点**（直接 `iface_satisfies_term`）；
+//   命名消费（`T: 可索引` 一类语法）待命名面裁决后接（不在本批）。
 
 // 序列接口（spec §2.2 的 `序列接口 ⟺ sequence<⊤>`，按上方勘误兑现为 ⊤ₖ 类别形）。
 // 数组行与切片行同属 AK_SEQUENCE ⇒ 皆满足；`&[T]`/`&mut [T]`（AK_REF 行）**不**满足（见只读形状）。
@@ -409,3 +422,29 @@ fn sh_shape_iterable() -> int { return tt_top_k(AK_SEQUENCE); }
 
 // product = 元组行（AK_PRODUCT）。struct 行 = AK_NAMED（结构项经展开层 / 用户轴面）⇒ 不在首版。
 fn sh_shape_product() -> int { return tt_top_k(AK_PRODUCT); }
+
+// ═══════════ R2 P4 Task 3：形状名生产注册面（裁决 1 + D17）═══════════
+// 六个形状**按名注册**（D17 的六个 ASCII 名：sequence / sequence_ro / sequence_rw /
+// indexable / iterable / product——与 spec §2.2 的构造子英文名同形、与 AK_* 命名同族、
+// 避免非 ASCII 进 STR 段）。语义零变化：注册值 = 上方 sh_shape_*() 的构造点（逐名同项，
+// 守门 = selftest 的 `x2.shape_builtin_names`）。
+//
+// 注册时机 = `init_types()` 尾部（iface_registry_init 之后）——**唯一生产入口**：
+//   · 名字 ni 在该点 str_intern（裁决 1 接受 STR 段增长；共 6 个新串，逐名登记）；
+//   · `iface_shape_register` 同名覆盖幂等 ⇒ 重复调用（corelsp 每请求 init_types；
+//     `reset_frontend_state` 清 count 后重建）不增长表；
+//   · 注册**不做 reset**：表内容 = 生产注册面（本函数 6 行）+ 自测注册面（仅 selftest）；
+//     段体序列化的是**表本体**（`g_iface_shape_*`）⇒ 生产编译下 = 恰 6 条。
+// 与 D13 的关系：ccr_iface_populate 在此**重跑**本函数（order：reset → 形状重注册 →
+// 行装填 → 签名装填）⇒ 段内容 = 类型表/接口表的纯函数（与判定历史无关）。
+//
+// ⚠ 命名**消费语法**（`T: 可索引` 一类）不在本批（P3 未开工清单项，另裁）——本函数只兑现
+//   「形状名入生产注册面」；消费方（轴 A 判定）今日走 `iface_satisfies_term` 的无名字路径。
+fn iface_shape_builtin_init() {
+    iface_shape_register(str_intern("sequence"), sh_shape_seq());
+    iface_shape_register(str_intern("sequence_ro"), sh_shape_seq_ro());
+    iface_shape_register(str_intern("sequence_rw"), sh_shape_seq_rw());
+    iface_shape_register(str_intern("indexable"), sh_shape_indexable());
+    iface_shape_register(str_intern("iterable"), sh_shape_iterable());
+    iface_shape_register(str_intern("product"), sh_shape_product());
+}
