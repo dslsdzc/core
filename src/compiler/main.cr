@@ -458,6 +458,9 @@ fn corec_main() -> int {
     g_ir_source_hash = 0;
     g_ir_source_hash_ready = 0;
     init_df();
+    // 可选表示面（R2 P4 Task 5）：本路径不经过 ir_gen_all ⇒ 必须自行初始化（侧表复位
+    // + 启用扫描），且**先于 ir_gen_globals**（隐藏信道的 var 行序依赖）。
+    optrep_begin();
     ir_gen_globals();
 
     // Incremental cache: ensure cache directory exists
@@ -471,6 +474,13 @@ fn corec_main() -> int {
         if cache_scan >= g_func_count { break; }
         if fi_generic_count(cache_scan) > 0 { cache_enabled = 0; break; }
         cache_scan = cache_scan + 1;
+    }
+    // 可选表示面启用 ⇒ **关 .cir 快照缓存**（R2 P4 Task 5）：表示位侧表是**编译期
+    // 进程内状态**（var → 表示位 var 映射），快照只存指令/节点不存侧表 ⇒ 命中恢复的
+    // 函数解包点会回落既有装箱路径，与冷路径**产物分歧**（冷/热分歧类，同 Task 4 的
+    // bad_term 教训）。关缓存 = 每次全量重建 = 正确性优先；非可选程序照常缓存。
+    if g_optrep_on != 0 {
+        cache_enabled = 0;
     }
 
     // Generate IR for each function, checking cache first

@@ -491,6 +491,22 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
             g_x86_rodataref_count = g_x86_rodataref_count + 1;
             cp = cp + e2_lr(buf, pos+cp, 0);  // placeholder, patched later
             cp = cp + e2_st(buf, pos+cp, 10, do2);
+        } else if r64(g_x86_is_global, d * 8) != 0 {
+            // R2 P4 Task 5：**全局行**直写（g2_slot 对全局行返回帧外伪偏移 ⇒ 修复前
+            // 本分支落 `e2_li` 即写栈垃圾 = 静默丢写；解释器同 IR 直写 g_ir_vals ⇒
+            // **两路径分歧**）。与 IR_LOAD/IR_STORE 的全局分派同款：常量入 r10 +
+            // RIP 相对 store（e2_lrb 取址、patch 记录与 IR_STORE 同构）。
+            // 注：TI_STR 分支（rodata 指针）对全局行同样未分派——当前零发射点
+            // （字符串常量入全局走 .data/_init_globals），登记不改。
+            e2_w8(buf, pos+cp, 73); e2_w8(buf, pos+cp+1, 186);  // movabs r10, imm64（REX.W + B8+rd）
+            e2_w64(buf, pos+cp+2, s1); cp = cp + 10;
+            grow_rip_patch(g_x86_rip_patch_count + 1);
+            w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3);
+            w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, d);
+            g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
+            cp = cp + e2_lrb(buf, pos+cp, 0);
+            // mov [r11], r10 — REX.WRB + 0x89
+            cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 11/8); e2_w8(buf, pos+cp, 137); cp = cp + 1; cp = cp + emit_modrm(buf, pos+cp, 0, 10%8, 11%8);
         } else {
             cp = cp + e2_li(buf, pos+cp, do2, s1);
         }

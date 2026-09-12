@@ -190,6 +190,142 @@ fn new_ir_var(name: string, type_idx: int) -> int {
     return idx;
 }
 
+// ── 可选运行期表示面（R2 P4 Task 5；裁决 5「解包侧判表示」；附录 B.7）──
+// 事实：`Some(1)`/`None` 走 IR_MAKE_ENUM 对象（[tag][payload…]），而 `T?` 槽里的
+// **裸值**仍是裸值 ⇒ 同一 `T?` 值两种表示；`Some` 臂的载荷解包（IR_LOAD_FIELD fi+1）
+// 把裸值当对象解引用 ⇒ 双路径 SIGSEGV（check/build rc=0 零诊断）。
+// 机制（**纯 IR**：无新 opcode、无 ABI/帧布局改动 ⇒ ELF 后端与解释器天然同源）：
+// 每个可选槽（局部/形参/调用结果）配一个**表示位 IR 变量**（普通 int 局部，运行期值：
+// 0 = 裸值、1 = 装箱）。写点置位（静态已知 → 常量；源已配表示位 → 拷贝），**解包点
+// 分派**（`match` 的 Some/None 臂、`?`）：
+//   · 裸值（0）→ 槽值**即**载荷（Some 臂直取、不读 tag；None 臂不命中）
+//   · 装箱（≠0）→ 既有 tag 分派 + 字段 fi+1 取载荷（逐字不变）
+// 跨函数面（返回/形参）用隐藏全局信道（纯 IR：返回点写/调用点读、调用点写/被调序言读）。
+// 未覆盖面（结构体字段/数组元素/全局槽/match 结果/惰性 thunk）：不配表示位 ⇒ 解包走
+// **既有**装箱假定（P3 前语义）——响亮失败或既有正确值，不新增静默错值（逐形态实测入报告）。
+// g_optrep_on 关（AST 无 EXPR_OPTIONAL 且无 `Some`/`None`）⇒ 本面**零足迹**（发射面逐字节不变）。
+
+// 表示码常量 OE_BARE/OE_BOXED 声明在 **globals.cr**（负值文件级常量放本文件会静默读 0
+// ——见该处注记与 iface_registry.cr:23 先例；实测踩过）。
+
+fn grow_ir_var_rep(needed: int) {
+    if needed < g_ir_var_rep_cap { return; }
+    nc := g_ir_var_rep_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+    nb := alloc(nc * 8); _dyncpy(g_ir_var_rep, g_ir_var_rep_cap * 8, nb);
+    // 新槽填 **-1（哨兵 = 无表示位）**——alloc 零初始化，不填则「未写槽」被读成
+    // 表示位 var 0（每个值都被判成「有表示位」= 静默错值；实测踩过：`None` 初值
+    // 的表示位被读成 var0 的当前值 0 = 裸值）。照 tag2l.cr 的 tag 区初始化先例。
+    z : ., mut = g_ir_var_rep_cap;
+    loop { if z >= nc { break; } w64(nb, z * 8, -1); z = z + 1; }
+    g_ir_var_rep = nb; g_ir_var_rep_cap = nc;
+}
+
+// 槽的表示位变量索引（-1 = 无表示位 = 非可选槽 / 未覆盖面 / 本编译单元未启用）。
+// 守卫走 **cap（int 全局，默认 0）而非 str_len(base)**——base 未分配时是空串/空指针，
+// 未初始化的 str_len 即 SIGSEGV（实测：文件路径（main.cr 逐函数 + .cir 缓存）不经过
+// 批量入口的复位面 ⇒ 本函数必须自守卫）。
+fn irv_rep(var_idx: int) -> int {
+    if var_idx < 0 { return -1; }
+    if g_ir_var_rep_cap <= 0 { return -1; }
+    if var_idx >= g_ir_var_rep_cap { return -1; }
+    return r64(g_ir_var_rep, var_idx * 8);
+}
+
+fn irv_set_rep(var_idx: int, rep_var: int) {
+    if var_idx < 0 { return; }
+    grow_ir_var_rep(var_idx + 1);
+    w64(g_ir_var_rep, var_idx * 8, rep_var);
+}
+
+// 置表示位：enc >= 0 → 从该表示位槽拷贝；OE_BARE/OE_BOXED → 直接常量写。
+fn emit_rep_set(rep_var: int, enc: int) {
+    if rep_var < 0 { return; }
+    if enc == oe_bare() { emit(IR_CONST, rep_var, 0, 0, 0, TI_INT); return; }
+    if enc == oe_boxed() { emit(IR_CONST, rep_var, 1, 0, 0, TI_INT); return; }
+    if enc >= 0 { emit(IR_STORE, -1, rep_var, enc, 0, 0); }
+}
+
+// 给可选槽配表示位变量（初始值 = 1 装箱 = 既有语义）；非可选/未启用 → -1。
+fn opt_rep_slot(ti: int, name: string) -> int {
+    if g_optrep_on == 0 { return -1; }
+    if ti < 0 || ti >= g_type_count { return -1; }
+    if get_type_kind(ti) != TYP_OPTIONAL { return -1; }
+    rv := new_ir_var(name + "_rep", TI_INT);
+    emit(IR_CONST, rv, 1, 0, 0, TI_INT);
+    return rv;
+}
+
+// 全局槽的声明类型是否可选（globals 无表示位 ⇒ 视作未覆盖面；照声明区分裸/装箱假定）。
+fn global_decl_optional(name_ni: int) -> int {
+    gi : ., mut = 0;
+    loop {
+        if gi >= g_global_let_count { break; }
+        lnode := r64(g_global_lets, gi * 8);
+        if ast_a(lnode) == name_ni {
+            tn := ast_b(lnode);
+            if tn >= 0 && res_type_node(tn) >= 0 {
+                if get_type_kind(res_type_node(tn)) == TYP_OPTIONAL { return 1; }
+            }
+            return 0;
+        }
+        gi = gi + 1;
+    }
+    return 0;
+}
+
+// 被调方返回类型是否可选。判据走**返回类型节点**（`EXPR_FN.type_val`）而非
+// `fi_return_type`：后者是 parser 存的**裸类型码**，而 `T?` 的类型节点 `type_val` = 0
+// ⇒ 被读成 int 行、判据恒假（实测踩过：裸值返回不写返回信道 + 调用点不读信道，
+// 回落装箱假定 ⇒ `fn g() -> int? { return 5; }` 的调用点解包仍崩）。
+fn callee_ret_optional(func_ni: int) -> int {
+    if func_ni < 0 { return 0; }
+    cfi := find_func(func_ni);
+    if cfi < 0 { return 0; }
+    cfn := fi_ast_node(cfi);
+    if cfn < 0 || ast_kind(cfn) != EXPR_FN { return 0; }
+    rtn := ast_type_val(cfn);
+    if rtn < 0 { return 0; }
+    rti := res_type_node(rtn);
+    if rti < 0 || rti >= g_type_count { return 0; }
+    if get_type_kind(rti) == TYP_OPTIONAL { return 1; }
+    return 0;
+}
+
+// 值表达式的**静态表示判定**（解包侧判表示的另一半：写点置位的入参）。
+// 返回：>= 0 = 从该表位槽拷贝（源值自身已配表示位：可选局部/形参/调用结果）；
+//   OE_BARE = 静态裸值（T 值注入 `T?`：字面量/算术/解包结果/非可选槽/聚合字面量…）；
+//   OE_BOXED = 静态装箱（`Some`/`None`）**或**未覆盖面回落（字段/下标/match 结果/
+//   惰性 thunk/未识别形态）——回落取装箱 = P3 前既有语义，绝不新造静默错值。
+fn rep_enc_of_expr(node: int, val_var: int) -> int {
+    if val_var >= 0 {
+        rv := irv_rep(val_var);
+        if rv >= 0 { return rv; }
+    }
+    if node < 0 { return oe_boxed(); }
+    k := ast_kind(node);
+    if k == EXPR_ENUM_CONSTRUCTOR {
+        nm := istr_get(ast_a(node));
+        if str_eq(nm, "Some") != 0 || str_eq(nm, "None") != 0 { return oe_boxed(); }
+        return oe_bare();  // 用户枚举变体 = T 值（对象指针即载荷）
+    }
+    if k == EXPR_INT || k == EXPR_BOOL || k == EXPR_DEX || k == EXPR_STRING { return oe_bare(); }
+    if k == EXPR_CHAR { return oe_bare(); }
+    if k == EXPR_BINARY || k == EXPR_UNARY || k == EXPR_AS { return oe_bare(); }
+    if k == EXPR_TRY { return oe_bare(); }  // `?` 解包结果 = T 值
+    if k == EXPR_STRUCT || k == EXPR_ARRAY || k == EXPR_TUPLE { return oe_bare(); }
+    if k == EXPR_IDENT {
+        ni := ast_int_val(node);
+        if find_local(ni) >= 0 { return oe_bare(); }  // 无表示位（上方已排除可选槽）= 非可选槽
+        gv := find_global(ni);
+        if gv >= 0 {
+            if global_decl_optional(ni) != 0 { return oe_boxed(); }
+            return oe_bare();
+        }
+        return oe_bare();  // 枚举裸变体等 T 值
+    }
+    return oe_boxed();
+}
+
 fn emit(opcode: int, dest: int, src1: int, src2: int, src3: int, type_kind: int) {
     // Build linear IR (.ccr) — consumed by x86-64 backend
     idx := g_ir_instr_count;
@@ -1063,6 +1199,9 @@ emit(IR_STORE, -1, target, val_var, 0, 0);
                      // F11：切片长度沿赋值传播（字面量/运行时界长度变量同步；源无记录则清除）
                      slice_len_copy_to(lv, val_var);
 emit(IR_STORE, -1, lv, val_var, 0, 0);
+                    // 可选表示（R2 P4 Task 5）：赋值写点置位（同 LET——解包点据此分派）
+                    rpv := irv_rep(lv);
+                    if rpv >= 0 { emit_rep_set(rpv, rep_enc_of_expr(val_node, val_var)); }
                 }
             } else {
                 gv := find_global(name_idx);
@@ -1241,8 +1380,12 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
         is_module_call := call_flags == CALL_FLAG_MODULE || call_flags == CALL_FLAG_MODULE + CALL_FLAG_INLINE;
         is_inline_call := call_flags == CALL_FLAG_INLINE || call_flags == CALL_FLAG_MODULE + CALL_FLAG_INLINE;
         arg_vars : string, mut;    arg_vars_cap : int, mut;
+        // R2 P4 Task 5：实参**节点**并行表（表示面写信道按实参位判表示需要节点——
+        // 值 var 的类型不足以区分裸 T 与装箱 T?；方法调用时 arg 0 = 接收者节点）
+        arg_nodes : string, mut;   arg_nodes_cap : int, mut;
         ac : ., mut = 0;
     arg_vars = alloc(64 * 8); arg_vars_cap = 64;
+    arg_nodes = alloc(64 * 8); arg_nodes_cap = 64;
         func_ni : ., mut = -1;
 
         // @builtin(args) — parser wraps @foo(args) as EXPR_CALL(func=EXPR_AT, ...)
@@ -1431,6 +1574,7 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                 self_var := gen_expr(obj_node);
                 self_var = force_if_thunk(self_var);
                 if ac >= arg_vars_cap { nc := arg_vars_cap * 2; nb := alloc(nc * 8); _dyncpy(arg_vars, arg_vars_cap * 8, nb); arg_vars = nb; arg_vars_cap = nc; } w64(arg_vars, ac * 8, self_var);
+                if ac >= arg_nodes_cap { nc := arg_nodes_cap * 2; nb := alloc(nc * 8); _dyncpy(arg_nodes, arg_nodes_cap * 8, nb); arg_nodes = nb; arg_nodes_cap = nc; } w64(arg_nodes, ac * 8, obj_node);
                 ac = ac + 1;
             }
         } else if ast_kind(func_node) == EXPR_IDENT {
@@ -1444,6 +1588,7 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             arg_var := gen_expr(ast_a(an));
             arg_var = force_if_thunk(arg_var);
             if ac >= arg_vars_cap { nc := arg_vars_cap * 2; nb := alloc(nc * 8); _dyncpy(arg_vars, arg_vars_cap * 8, nb); arg_vars = nb; arg_vars_cap = nc; } w64(arg_vars, ac * 8, arg_var);
+            if ac >= arg_nodes_cap { nc := arg_nodes_cap * 2; nb := alloc(nc * 8); _dyncpy(arg_nodes, arg_nodes_cap * 8, nb); arg_nodes = nb; arg_nodes_cap = nc; } w64(arg_nodes, ac * 8, ast_a(an));
             ac = ac + 1;
             an = ast_b(an);
         }
@@ -1624,9 +1769,29 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                 }
             }
         }
+        // 可选表示（R2 P4 Task 5）：实参表示写信道——逐实参位写（被调序言最早处读；
+        // 写点 = 全部实参求值之后、IR_CALL 紧邻之前 ⇒ 嵌套调用不覆写信道）。
+        if g_optrep_on != 0 && g_optrep_arg_count > 0 {
+            ai3 : ., mut = 0;
+            loop {
+                if ai3 >= ac { break; }
+                if ai3 >= g_optrep_arg_count { break; }
+                av3 := r64(arg_vars, ai3 * 8);
+                an3 : ., mut = -1;
+                if ai3 < arg_nodes_cap { an3 = r64(arg_nodes, ai3 * 8); }
+                emit_rep_set(g_optrep_arg_cell0 + ai3, rep_enc_of_expr(an3, av3));
+                ai3 = ai3 + 1;
+            }
+        }
         emit(IR_CALL, dest, first_arg_var, ac, func_ni, call_ti);
+        // 可选表示（R2 P4 Task 5）：被调返回可选 ⇒ 1) 读返回信道（读点必须**紧跟真实
+        // 调用**：调用点与返回点同进程同栈、其间无写入）；2) **禁惰性 thunk**——thunk 把
+        // 调用推迟到 force 点，读点即悬空（实测踩过：`v := g()` 的 g 判纯 ⇒ thunk ⇒ 表示位
+        // 回落装箱 ⇒ 裸值返回解包崩）。代价 = 仅「返回可选」的被调不做 thunk 延迟。
+        ret_opt : ., mut = 0;
+        if g_optrep_on != 0 && g_optrep_ret_cell >= 0 { ret_opt = callee_ret_optional(func_ni); }
         // Lazy thunk: if calling a pure function with single use, wrap as thunk
-        if func_ni >= 0 {
+        if func_ni >= 0 && ret_opt == 0 {
             call_fi := find_func(func_ni);
             if call_fi >= 0 && fi_ispure(call_fi) != 0 {
                 grow_var_use_count(dest + 1);
@@ -1637,6 +1802,11 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                     return thunk_var;
                 }
             }
+        }
+        if ret_opt != 0 {
+            rvr := new_ir_var("call_rep", TI_INT);
+            emit(IR_LOAD, rvr, g_optrep_ret_cell, 0, 0, TI_INT);
+            irv_set_rep(dest, rvr);
         }
         return dest;
     }
@@ -1846,6 +2016,8 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             if arm_pat >= 0 { pat_kind = ast_kind(arm_pat); }
             is_wildcard := 0;
             if pat_kind == EXPR_WILDCARD { is_wildcard = 1; }
+            // 可选表示位（R2 P4 Task 5）：臂条件与臂体绑定共用（声明在臂作用域）
+            rep_v : ., mut = -1;
             body_lbl := new_label();
             fall_lbl : ., mut = merge_lbl;
             has_next := 0;
@@ -1854,14 +2026,44 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                 emit(IR_JUMP, -1, body_lbl, 0, 0, 0);
             } else if pat_kind == EXPR_ENUMPAT {
                 variant_ni := get_variant_name_idx(ast_a(arm_pat));
-                tag_var := new_ir_var("tag", TI_INT);
-                emit(IR_LOAD_ENUM_TAG, tag_var, match_val, 0, 0, 0);
-                vtag := new_ir_var("vtag", TI_INT);
-                emit(IR_CONST, vtag, variant_ni, 0, 0, TI_INT);
-                cmp_var := new_ir_var("cmp", TI_INT);
-                emit(IR_BINARY, cmp_var, tag_var, vtag, OP_EQ, 0);
-                if has_next == 1 { fall_lbl = new_label(); }
-                emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0);
+                // R2 P4 Task 5：**解包侧判表示**——scrutinee 配表示位（可选槽）时按位分派：
+                //   裸值（0）→ 值即载荷：Some 模式命中臂体（**不读 tag**——裸值非对象，
+                //   读 tag 即 SIGSEGV = 原红态）；None 模式不命中（裸值非 null）。
+                //   装箱（≠0）→ 既有 tag 分派（逐字不变）。
+                // 无表示位（非可选槽 / 未覆盖面）→ 既有路径逐字不变（装箱假定）。
+                if g_optrep_on != 0 && match_val >= 0 { rep_v = irv_rep(match_val); }
+                if rep_v < 0 {
+                    tag_var := new_ir_var("tag", TI_INT);
+                    emit(IR_LOAD_ENUM_TAG, tag_var, match_val, 0, 0, 0);
+                    vtag := new_ir_var("vtag", TI_INT);
+                    emit(IR_CONST, vtag, variant_ni, 0, 0, TI_INT);
+                    cmp_var := new_ir_var("cmp", TI_INT);
+                    emit(IR_BINARY, cmp_var, tag_var, vtag, OP_EQ, 0);
+                    if has_next == 1 { fall_lbl = new_label(); }
+                    emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0);
+                } else {
+                    is_some_pat : ., mut = 0;
+                    if str_eq(istr_get(variant_ni), "Some") != 0 { is_some_pat = 1; }
+                    tag_lbl := new_label();
+                    if has_next == 1 { fall_lbl = new_label(); }
+                    zb := new_ir_var("_rz", TI_INT);
+                    emit(IR_CONST, zb, 0, 0, 0, TI_INT);
+                    isb := new_ir_var("rep_isbare", TI_INT);
+                    if is_some_pat != 0 { emit(IR_BINARY, isb, rep_v, zb, OP_EQ, 0); }
+                    else { emit(IR_BINARY, isb, rep_v, zb, OP_NE, 0); }
+                    // Some：裸 → 直接命中；装箱 → 落 tag 比对。None：裸 → 不命中（落 fall）；
+                    // 装箱 → 落 tag 比对。
+                    if is_some_pat != 0 { emit(IR_BRANCH, -1, isb, body_lbl, tag_lbl, 0); }
+                    else { emit(IR_BRANCH, -1, isb, tag_lbl, fall_lbl, 0); }
+                    emit(IR_LABEL, -1, tag_lbl, 0, 0, 0);
+                    tag_var := new_ir_var("tag", TI_INT);
+                    emit(IR_LOAD_ENUM_TAG, tag_var, match_val, 0, 0, 0);
+                    vtag := new_ir_var("vtag", TI_INT);
+                    emit(IR_CONST, vtag, variant_ni, 0, 0, TI_INT);
+                    cmp_var := new_ir_var("cmp", TI_INT);
+                    emit(IR_BINARY, cmp_var, tag_var, vtag, OP_EQ, 0);
+                    emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0);
+                }
             } else if pat_kind == EXPR_INT {
                 pat_val := new_ir_var("pval", TI_INT);
                 emit(IR_CONST, pat_val, ast_int_val(arm_pat), 0, 0, TI_INT);
@@ -1887,7 +2089,27 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                 loop {
                     if fi >= sub_count { break; }
                     fv := new_ir_var("fld", TI_INT);
-                    emit(IR_LOAD_FIELD, fv, match_val, 0, fi + 1, 0);  // +1 for tag offset
+                    if rep_v < 0 {
+                        emit(IR_LOAD_FIELD, fv, match_val, 0, fi + 1, 0);  // +1 for tag offset
+                    } else {
+                        // 解包侧判表示：裸值（0）→ 槽值**即**载荷（直取，不解引用）；
+                        // 装箱（≠0）→ 字段 fi+1（既有语义）。裸分支须**跳过**装
+                        // 箱分支的字段读（end_lbl）——否则裸值仍被解引用（原红态）。
+                        bare_lbl := new_label();
+                        boxed_lbl := new_label();
+                        end_lbl := new_label();
+                        zb2 := new_ir_var("_rz", TI_INT);
+                        emit(IR_CONST, zb2, 0, 0, 0, TI_INT);
+                        ib2 := new_ir_var("rep_isbare", TI_INT);
+                        emit(IR_BINARY, ib2, rep_v, zb2, OP_EQ, 0);
+                        emit(IR_BRANCH, -1, ib2, bare_lbl, boxed_lbl, 0);
+                        emit(IR_LABEL, -1, bare_lbl, 0, 0, 0);
+                        emit(IR_STORE, -1, fv, match_val, 0, 0);
+                        emit(IR_JUMP, -1, end_lbl, 0, 0, 0);
+                        emit(IR_LABEL, -1, boxed_lbl, 0, 0, 0);
+                        emit(IR_LOAD_FIELD, fv, match_val, 0, fi + 1, 0);
+                        emit(IR_LABEL, -1, end_lbl, 0, 0, 0);
+                    }
                     spn := ast_b(arm_pat) + fi;
                     if spn >= 0 && ast_kind(spn) == EXPR_IDENT {
                         bind_local(ast_int_val(spn), fv);
@@ -1927,6 +2149,10 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
         var := new_ir_var(istr_get(var_ni), TI_UNIT);
         declared_ti : ., mut = TI_UNIT;
         if type_node >= 0 { declared_ti = res_type_node(type_node); }
+        // 可选表示（R2 P4 Task 5）：显式 `T?` 标注的槽配表示位（默认 1 = 装箱）。
+        // 推断槽（无标注）在初值求值后按初值表示面补配（`v := g()` / `x := Some(1)`）。
+        rep_var : ., mut = opt_rep_slot(declared_ti, istr_get(var_ni));
+        if rep_var >= 0 { irv_set_rep(var, rep_var); }
         // `dex` is the source-level type; its IR slot has two forms. Only an
         // explicitly tagged `apx` declaration uses binary64 bits.
         target_ti : ., mut = declared_ti;
@@ -1954,6 +2180,12 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
         if val_node >= 0 {
             val_var := gen_expr(val_node);
             val_var = force_if_thunk(val_var);
+            // 可选表示：推断槽按初值表示面补配表示位（有表示位可拷贝 / Some/None 构造 /
+            // 未覆盖面回落值——回落配位无害：默认 1 = 装箱 = 既有语义）
+            if rep_var < 0 && g_optrep_on != 0 && rep_enc_of_expr(val_node, val_var) != oe_bare() {
+                rep_var = new_ir_var(istr_get(var_ni) + "_rep", TI_INT);
+                irv_set_rep(var, rep_var);
+            }
             // An `apx` dex local stores binary64 bits, unlike the default
             // scaled-integer dex form. The annotation alone is not enough:
             // switch the slot type and convert the initializer before later
@@ -1983,6 +2215,8 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             // 运行时界 slice 同步长度变量——slice_len_copy_to）
             slice_len_copy_to(var, val_var);
             emit(IR_STORE, -1, var, val_var, 0, 0);
+            // 可选表示：写点置位（静态已知常量 / 源表示位拷贝）——解包点据此分派
+            if rep_var >= 0 { emit_rep_set(rep_var, rep_enc_of_expr(val_node, val_var)); }
         }
         bind_local(var_ni, var);
         if is_apx != 0 { emit(IR_APPROX, -1, 0, 0, 0, 0); }
@@ -2009,12 +2243,18 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
 
     if ast_kind(node) == EXPR_RETURN {
         if ast_a(node) >= 0 {
-            val_var := gen_expr(ast_a(node));
+            val_node := ast_a(node);
+            val_var := gen_expr(val_node);
             val_var = force_if_thunk(val_var);
             // dex 边界规则（数值迁移 Task 4）：函数返回一律精确形式（缩放整数）——
             // apx 位模式在返回点转 scaled（F2I(bits×S)，按定点 6 位舍入）
             if g_cur_ret_ti == TI_DEX && irv_type(val_var) == TI_DEX {
                 val_var = dex_bits_to_scaled(val_var);
+            }
+            // 可选表示（R2 P4 Task 5）：返回点写返回信道——值求值**完成后**、IR_RETURN
+            // 紧邻处（其间无调用 ⇒ 嵌套调用不覆写信道；调用点紧跟 IR_CALL 读）。
+            if g_cur_ret_opt != 0 {
+                emit_rep_set(g_optrep_ret_cell, rep_enc_of_expr(val_node, val_var));
             }
             emit(IR_RETURN, -1, val_var, 0, 0, 0);
         } else {
@@ -2242,8 +2482,32 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
         return cast_var;
     }
     if ast_kind(node) == EXPR_TRY {
-        // Try: unwrap Result/Option, just emit the inner expr for now
-        return gen_expr(ast_a(node));
+        // R2 P4 Task 5：`?` 解包 = 解包点之一 ⇒ 同规则判表示：裸值（0）→ 槽值即载荷
+        // （直取）；装箱（≠0）→ 字段 1（tag 之后）。无表示位（未覆盖面/非可选）→ 既有
+        // 行为**逐字不变**（原样返回内层表达式值）。
+        inner := gen_expr(ast_a(node));
+        if g_optrep_on != 0 && inner >= 0 {
+            rv := irv_rep(inner);
+            if rv >= 0 {
+                dest := new_ir_var("tryv", irv_type(inner));
+                bl := new_label();
+                xl := new_label();
+                xend := new_label();
+                zb := new_ir_var("_rz", TI_INT);
+                emit(IR_CONST, zb, 0, 0, 0, TI_INT);
+                ib := new_ir_var("rep_isbare", TI_INT);
+                emit(IR_BINARY, ib, rv, zb, OP_EQ, 0);
+                emit(IR_BRANCH, -1, ib, bl, xl, 0);
+                emit(IR_LABEL, -1, bl, 0, 0, 0);
+                emit(IR_STORE, -1, dest, inner, 0, 0);
+                emit(IR_JUMP, -1, xend, 0, 0, 0);
+                emit(IR_LABEL, -1, xl, 0, 0, 0);
+                emit(IR_LOAD_FIELD, dest, inner, 0, 1, 0);
+                emit(IR_LABEL, -1, xend, 0, 0, 0);
+                return dest;
+            }
+        }
+        return inner;
     }
     if ast_kind(node) == EXPR_STRUCTPAT {
         return -1;
@@ -2316,6 +2580,17 @@ fn ir_gen_func(fi: int) {
         pvar := new_ir_var(pname, param_type);
         // Bind param name
         bind_local(pname_idx, pvar);
+        // 可选表示（R2 P4 Task 5）：形参表示位——**序言最早处**从实参信道读（先于任何
+        // 可能改写信道的调用；调用点在 IR_CALL 前写）。形参类型节点 = EXPR_PARAM.data。
+        ptn := ast_data(pn);
+        if g_optrep_on != 0 && g_optrep_arg_count > 0 && ptn >= 0 && pi < g_optrep_arg_count {
+            pti := res_type_node(ptn);
+            if pti >= 0 && get_type_kind(pti) == TYP_OPTIONAL {
+                prv := new_ir_var(pname + "_prep", TI_INT);
+                emit(IR_LOAD, prv, g_optrep_arg_cell0 + pi, 0, 0, TI_INT);
+                irv_set_rep(pvar, prv);
+            }
+        }
         pi = pi + 1;
         // Scan past type nodes to next EXPR_PARAM
         pn = pn + 1;
@@ -2343,17 +2618,31 @@ fn ir_gen_func(fi: int) {
 
     // Generate body（记录返回 TI——EXPR_RETURN 的 dex 边界转换用）
     g_cur_ret_ti = ret_ti;
+    // 可选表示（R2 P4 Task 5）：本函数返回可选时，返回点写返回信道（见 EXPR_RETURN）。
+    // 判据走**返回类型节点**（ast_type_val(fn_node) = 返回类型节点下标——见上方 ret_ti
+    // 注释）而非 fi_return_type 裸码（`T?` 的类型节点 type_val = 0 ⇒ 恒判否）。
+    g_cur_ret_opt = 0;
+    if g_optrep_on != 0 && g_optrep_ret_cell >= 0 {
+        rtn := ast_type_val(fn_node);
+        if rtn >= 0 {
+            rti := res_type_node(rtn);
+            if rti >= 0 && rti < g_type_count && get_type_kind(rti) == TYP_OPTIONAL { g_cur_ret_opt = 1; }
+        }
+    }
     if body >= 0 {
         gen_expr(body);
     }
     g_cur_ret_ti = -1;
+    g_cur_ret_opt = 0;
 
     // Patch arena size and reset before return
     total := r64(g_sg_alloc_total, (g_sg_count - 1) * 8);
     if total > 0 { iri_set_s1(arena_instr, total); }
     emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0);
 
-    // Add return at end if not already terminated
+    // Add return at end if not already terminated（可达 = 兜底 return；不可达 = 死码，
+    // 两后端同语义不执行）。可选返回点写装箱默认值（与 ABI 返回寄存器的未定义值同档）。
+    if g_cur_ret_opt != 0 { emit_rep_set(g_optrep_ret_cell, oe_boxed()); }
     emit(IR_RETURN, -1, -1, 0, 0, 0);
 
     w64(g_ir_func_instr_count, func_idx * 8, g_ir_instr_count - r64(g_ir_func_instr_start, func_idx * 8));
@@ -2584,6 +2873,78 @@ fn ir_gen_globals() {
     reg_one_global(str_intern("g_arena_cap"));
     reg_one_global(str_intern("g_arena_pool_data"));
     reg_one_global(str_intern("g_arena_free_list"));
+    reg_optrep_globals();
+}
+
+// 表示面初始化（**两条 IR 生成入口都必须先调**：ir_gen_all 批量路径 + main.cr 文件路径
+// （逐函数 + .cir 缓存）——后者不经过本文件的批量入口，漏调即侧表未分配）。位置：
+// **先于 ir_gen_globals**（隐藏信道的 var 行序 = 全局行序依赖）。
+fn optrep_begin() {
+    g_ir_var_rep = "";
+    g_ir_var_rep_cap = 0;
+    g_optrep_ret_cell = -1;
+    g_optrep_arg_cell0 = -1;
+    g_optrep_arg_count = 0;
+    g_cur_ret_opt = 0;
+    optrep_prescan();
+}
+
+// 表示面启用扫描（**零足迹门**）：AST 含任一 `T?` 类型节点（EXPR_OPTIONAL）或任一
+// `Some`/`None` 构造（关键字名分派，与 checker 同规约：用户变体同名时上方 SYM_FN 优先，
+// 但扫描**宽于**实际使用只会多启用一层空机器、不会漏启用——判据面为「启用 ⇒ 表示面完整」）。
+fn optrep_prescan() {
+    g_optrep_on = 0;
+    i : ., mut = 0;
+    loop {
+        if i >= g_ast_count { break; }
+        k := ast_kind(i);
+        if k == EXPR_OPTIONAL { g_optrep_on = 1; break; }
+        if k == EXPR_ENUM_CONSTRUCTOR {
+            nm := istr_get(ast_a(i));
+            if str_eq(nm, "Some") != 0 || str_eq(nm, "None") != 0 { g_optrep_on = 1; break; }
+        }
+        i = i + 1;
+    }
+}
+
+// 隐藏全局注册（照 reg_one_global 形态但不查 g_global_lets——编译器内部名，零初值）。
+// var_idx == 行序（save_ccr 的全局行序守卫）由「本函数只在 ir_gen_globals 尾部调用、
+// 此后不再注册全局」保证。
+fn reg_hidden_global(name_ni: int) -> int {
+    gvar := new_ir_var(istr_get(name_ni), TI_INT);
+    grow_ir_globals(g_ir_global_count + 1);
+    w64(g_ir_globals, g_ir_global_count * 24, name_ni);
+    w64(g_ir_globals, g_ir_global_count * 24 + 8, gvar);
+    w64(g_ir_globals, g_ir_global_count * 24 + 16, 0);
+    g_ir_global_count = g_ir_global_count + 1;
+    return gvar;
+}
+
+// 可选表示的跨函数信道注册（仅在 g_optrep_on 时）：返回信道单元 + 每形参位一个实参
+// 信道单元（连续 var 索引；被调按形参位读、调用点按实参位写）。
+fn reg_optrep_globals() {
+    g_optrep_ret_cell = -1;
+    g_optrep_arg_cell0 = -1;
+    g_optrep_arg_count = 0;
+    if g_optrep_on == 0 { return; }
+    maxp : ., mut = 0;
+    fi2 : ., mut = 0;
+    loop {
+        if fi2 >= g_func_count { break; }
+        pc := fi_param_count(fi2);
+        if pc > maxp { maxp = pc; }
+        fi2 = fi2 + 1;
+    }
+    if maxp > 64 { maxp = 64; }
+    g_optrep_ret_cell = reg_hidden_global(str_intern("__optrep_ret"));
+    j : ., mut = 0;
+    loop {
+        if j >= maxp { break; }
+        cv := reg_hidden_global(str_intern("__optrep_arg" + int_str(j)));
+        if j == 0 { g_optrep_arg_cell0 = cv; }
+        j = j + 1;
+    }
+    g_optrep_arg_count = maxp;
 }
 
 // --- AST walk: patch method call names for monomorphization ---
@@ -2786,6 +3147,8 @@ fn ir_gen_all() {
     g_next_label = 1;
     g_ir_loop_depth = 0;
     g_ir_str_const_count = 0;
+    // 可选表示面：侧表复位 + 启用扫描（先于全局注册——隐藏信道的 var 行序依赖）
+    optrep_begin();
 
     // Initialize dataflow graph
     init_df();

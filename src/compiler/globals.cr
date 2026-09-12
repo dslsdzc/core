@@ -41,6 +41,38 @@ g_ir_locals : string, mut;   g_ir_local_count : int, mut; g_ir_local_cap : int, 
 g_ir_globals : string, mut;  g_ir_global_count : int, mut; g_ir_global_cap : int, mut;
 g_ir_str_consts : string, mut; g_ir_str_const_count : int, mut; g_ir_str_const_cap : int, mut;
 
+// ── 可选运行期表示面（R2 P4 Task 5；裁决 5「解包侧判表示」，附录 B.7）──
+// 事实：`Some(1)`/`None` 走 IR_MAKE_ENUM 对象（[tag][payload…]），而 `T?` 槽里的
+// **裸值**仍是裸值 ⇒ 同一 `T?` 值两种表示；`Some` 臂的载荷解包把裸值当对象解引用
+// （双路径 SIGSEGV，check/build rc=0 零诊断）。
+// 机制：**表示位** = 每个可选槽（局部/形参/调用结果）配一个普通 int IR 变量的
+// **运行期值**（0 = 裸值、1 = 装箱）。写点置位（静态已知则常量、否则从源槽表示位
+// 拷贝）、**解包点分派**（`match` 的 Some/None 臂、`?`）——纯 IR，无新 opcode、
+// 无 ABI 改动，故 ELF 后端与解释器天然同源。
+// g_ir_var_rep：IR var → 表示位变量索引（i64 数组；-1 = 无表示位）。无表示位的槽
+//   走既有装箱假定（未覆盖面：结构体字段/数组元素/全局槽/match 结果/惰性 thunk，
+//   逐形态实测入报告——响亮失败或既有正确值，不新增静默错值）。
+g_ir_var_rep : string, mut;     g_ir_var_rep_cap : int, mut;
+// g_optrep_on：本编译单元是否启用表示面（AST 预扫：EXPR_OPTIONAL / `Some` / `None`）。
+//   关 = **零足迹**（不注册隐藏全局、不发任何表示指令）⇒ 非可选程序的发射面逐字节不变。
+g_optrep_on : int, mut;
+// g_optrep_ret_cell：返回表示的信道单元（IR 全局 var；-1 = 未注册）。返回点写、
+//   调用点读（读点紧跟 IR_CALL ⇒ 跨嵌套调用不被覆写；写点为值求值完成后 → 语义确定）。
+g_optrep_ret_cell : int, mut;
+// g_optrep_arg_cell0 / g_optrep_arg_count：形参表示信道（每形参位一个 IR 全局 var，
+//   连续分配）。调用点写、被调序言读（先于任何可能改写信道的调用）。
+g_optrep_arg_cell0 : int, mut;  g_optrep_arg_count : int, mut;
+// g_cur_ret_opt：当前函数的返回类型是否可选（ir_gen_func 设置；返回点写信道用）。
+g_cur_ret_opt : int, mut;
+// 表示码（rep_enc_of_expr 的返回）：>= 0 = 从该表示位槽**拷贝**；oe_bare() = -1 = 裸值
+// 常量；oe_boxed() = -2 = 装箱常量。**用函数而非文件级常量**：Python bootstrap 的
+// gen_let_decl 只对**裸字面量**记 constant_value（`-1` 解析成 UnaryOp ⇒ 丢初值 ⇒
+// StackAsmGen 发 `.quad 0`）⇒ 自举链二进制里的负值文件级常量**静默读 0**（实测踩过：
+// 两常量读 0 后 `Some` 初值表示位与裸值同码；同类既存面 = cir_cache.cr 的
+// CIR_CACHE_MAGIC，其在自举二进制里同读 0——已登记报告）。返回值表达式不受该限制。
+fn oe_bare() -> int { return 0 - 1; }
+fn oe_boxed() -> int { return 0 - 2; }
+
 // Parser/checker dynamic arrays (shared between corec and corearch builds)
 g_global_lets : string, mut;         g_global_let_count : int, mut;     g_global_lets_cap : int, mut;
 g_loop_stack : string, mut;          g_loop_depth : int, mut;           g_loop_stack_cap : int, mut;

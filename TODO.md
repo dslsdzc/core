@@ -200,6 +200,8 @@
 - **现象**：`bootstrap/corec/frontend/ir_gen.py:68-74` 的 `constant_value` **只对 `Literal` 赋值**——`x : int = -1;`（一元负号）、`x : int = f();`（调用）等初值一律拿到 `.quad 0`（`bootstrap/corec/backend/x86_64_stack_asm.py:622-626` 的 `cv is None` 分支），解释器侧同源（`interpreter.py:35/81` 取 `constant_value`）→ **静默错值**（0 冒充初值）。
 - **影响面**：仅 **bootstrap 构建路径**（Python 工具链产出物）；self-hosted 路径的同类缺陷已由 R1 Task 4（`71cb6278`：main 序言注入 + 解释器常量阶段）修复。当前自举链未触发（编译器自身无此类全局），属潜伏缺陷。
 - **触发实证**：R2 P0 Task 1 的 `tt_top()` 惰性 memo 原计划用全局 `= -1` 作「未初始化」哨兵 → 实测返回项 0（= ⊥），被迫改零初值 + ready 位（`g_tt_top_ok`/`g_tt_nil_ok`）。
+- **触发实证 ②（2026-09-13，R2 P4 Task 5）**：本任务的两枚表示码常量 `OE_BARE = -1` / `OE_BOXED = -2`（先置于 `ir_gen.cr`、后移 `globals.cr` 均同病）在自举链二进制里**读 0** ⇒ `Some` 初值的表示位与裸值同码 ⇒ 解包走错分支（gdb 实测 `emit_rep_set(enc=0)`、常量槽读 0）；**改走 `oe_bare()/oe_boxed()` 函数**（返回值表达式不受该路径限制）后消解。原文「当前自举链未触发（编译器自身无此类全局）」**已不成立**——本仓自源现有此形态。
+- **live 实例（本轮实测）**：`cir_cache.cr` 的 `CIR_CACHE_MAGIC : int = -4485090715960753727` 在 bootstrap 构建的 corec/corearch 里同读 0 ⇒ 落盘 `.cir` 头部 magic 实测 **全 0**（`od` 读缓存文件首 8B = `0000000000000000`，应为 C1C1…）——写/读两侧同常量故**自洽**（不炸测试），但格式与 spec 记载的 magic 值静默不符（属本条目同族；修复须与 `CIR_CACHE_VER` bump 同批）。
 - **修复方向**：bootstrap `ir_gen.py` 的初值提取扩展到一元负号/常量折叠可判定形态（与 self-hosted 的 `global_init_val` 对齐），或对不可判定初值发诊断（**禁止静默 0**）；判据 = `tests/bootstrap/` 增用例（负号初值/调用初值 → 值正确或响亮报错）。
 
 ### 15. R2 P0 类型项引擎落地（2026-09-10——落点与未覆盖面登记，非缺陷）
@@ -441,6 +443,17 @@
 - **突变控制（/tmp 侧，仓库零改动）**：A（清单门 + hits 复原移除）= ㉖ 转红 + selftest 4 例转红（351/355）；B（装载侧重派生移除）= ㉙ 转红（暖态 `with_term=1354` vs 冷 `348`）。
 - **登记/承接（P5）**：① 单槽化时 `tk` 本身 = 项引用 ⇒ 盘面项槽/`.csr` 消费面另定；**项引用的稳定形态**（内容寻址 / 落盘项 ID / 同款重派生）是 P5 前置裁决项——**不得**直接落进程内索引（本任务 `bad_term=329` 即红证）；② 本批 `tk_term` 无生产消费者（价值由内容断言兑现，不假装有外部消费者）；③ 冷/热 **`cir` 文本 dump** 的渲染差异（变量名 vs 数字）为既有面（TODO #5 末条，baseline 二进制度量 1620 行 diff，非本任务引入）。
 - **关联**：#41（Task 3）· #39（P3b 交接附录 C 待裁决 8 = TK 升格）· 计划 `docs/superpowers/plans/2026-09-12-r2-p4-carrier.md` Task 4（D15）· spec `docs/superpowers/specs/2026-09-10-type-interface-unification-design.md` §6.2。
+
+### 43. R2 P4 Task 5：可选运行期表示——解包侧判表示（2026-09-13——B.7 一等条目闭合 + 三根因连带修）
+- **交付**：本提交（路径限定 9 文件 = `src/compiler/{ir_gen,globals,main}.cr` + `src/arch/x86_64/instr.cr` + `tests/selfhost/test_optional.py` + `src/ci/run.sh` + 计划 ×2 + 本条目）。详版 = `.superpowers/sdd/p4-task5-report.md`。
+- **形态（裁决 5 = 解包侧判表示）**：**表示位 = 普通 int IR 变量**（每个可选槽一个；0 = 裸值「槽内即 T 值，Some 臂载荷 = 槽值本身」/ 1 = 装箱「`IR_MAKE_ENUM` 对象，载荷 = 字段 `fi+1`」）。**写点置位**（`EXPR_LET`/`EXPR_ASSIGN`：静态已知 → 常量、源有表示位 → 拷贝）+ **两解包点分派**（`match` 的 Some/None 臂条件与载荷绑定、`?`）。**无表示位的槽 = 逐字走既有路径**（未覆盖面不静默分歧的结构保证）。**跨函数面 = 隐藏全局信道**（返回点写/调用点读、调用点写/被调序言读；纯 IR）。**纯 IR ⇒ 零 ABI/opcode/帧布局改动 ⇒ ELF 与解释器同源**。
+- **零足迹门**：AST 无 `EXPR_OPTIONAL` 且无 `Some`/`None` ⇒ 整面不启用 ⇒ **非可选程序发射面逐字节不变**（ELF canary `95084e7b…d475` **IDENTICAL** + `ptr_arith`/`generics_test` `.ccr` 与基线编译器同源重建**逐字节同** + `--dump-objects` 逐字节同）。
+- **根因（5 条；后 4 条为计划未列面，逐条实测定位）**：① 表示位侧表空槽哨兵——`alloc` 零初始化而哨兵 = -1 ⇒ 未写槽读 0（= 「表示位 var 0」）⇒ 全部置位取 0；修 = 新槽填 -1（照 `tag2l.cr` 先例）。② **ELF 后端 `IR_CONST` 无全局行分支**（`g2_slot` 对全局返回帧外伪偏移 ⇒ 写栈垃圾 = 静默丢写；解释器直写 `g_ir_vals` ⇒ **双路径分歧**）——本任务首次出现该发射点（形参信道单元）；修 = 加全局行分支（与 `IR_LOAD`/`IR_STORE` 同款 RIP 相对 + patch 记录）；`TI_STR` 变体仍零发射点（已注释登记）。③ **负值文件级常量在自举二进制里静默读 0**（= TODO #14 的 live 触发；改用 `oe_bare()/oe_boxed()` 函数）。④ 返回类型判据取 `fi_return_type` **裸码**（`T?` 的类型节点 `type_val` = 0 ⇒ 读成 int 行、判据恒假）⇒ 改走返回类型**节点**（被调序言 + 调用点两侧同改，新增 `callee_ret_optional`）。⑤ 惰性 thunk 把调用推迟到 force 点 ⇒ 返回信道读点悬空 ⇒ **被调返回可选者禁 thunk**（代价仅此一类）。
+- **判据**：构建 rc=0（三面 `error[`=0）· `check src/compiler` rc=0 · `test_backend_bootstrap` rc=0 + `error[`=0 · `selftest-types` **355/355**（用例数不变）· `test_optional.py` **12 → 32/32** · **ELF canary IDENTICAL** · `.ccr` 新记录值 `ptr_arith` **90966B** / `generics_test` **134844B**（与 Task 4 记录值的 +143B **非本任务**——同源用基线编译器重建同得该差，= 期间 `arena_globals` 导入引入的 4 全局 + 1 串，逐段点名）· 可选程序冷/热 `.ccr` IDENTICAL · 自举链 `corec2==corec3` cmp IDENTICAL（双 2783750B `5492d9ad…`）+ N06=0 + 冒烟 42 + `corec3 --help` rc=1 · 全枚举 **54/54** · CI {check,bootstrap-tests,suite,selfhost-tests} 全 rc=0 · 同源对拍 check/shadow 两侧 **diff 空**（`decisions=32564=agree`；站点覆盖 assign-node=24709 · fn-body-ret=5793 · if-branch=2028 · struct-field-type=28 · array-elem-type=4 · generic-apply-base=2）· 编译耗时：可选 315→282ms、非可选 55→55ms（无回退）。
+- **台账**：放宽 **0** / 收紧 **0**（判定面零变化由对拍反证）；修复 **8 形态**（局部裸值路径 + 返回/形参裸值路径）+ **1 静默错值类**（`?` 解包装箱值：修复前 ELF=8 / interp=200 **各错各的**，现 7/7）。
+- **未覆盖面（登记，不静默）**：结构体字段 / 数组元素 / 全局槽 / match 结果 / 可选的惰性 thunk ⇒ 不配表示位 ⇒ 解包回落既有装箱假定：裸值形态 **rc=139 双路径同**（响亮）、装箱形态照常正确；`test_optional.py` 两例分别钉。修复面（对象布局里放 packed 表示位 / 数组 stride）归 P5 与 `MAX_*` 定长槽评估同批。
+- **登记面**：① **可选面启用即关 `.cir` 缓存**（表示位侧表 = 编译期进程内状态、快照不载 ⇒ 命中恢复与冷路径产物分歧，同 Task 4 `bad_term=329` 教训形态；非可选程序照常缓存；P5 若要收回须给快照加表示位面或装载侧重派生）；② `IR_CONST` 的 `TI_STR`+全局行未分派（零发射点）；③ 影子通道**零覆盖载体面**（正确性证据一律 = 行为探针 + 双路径同值）。
+- **关联**：#42（Task 4，`.cir` 快照面）· #14（本轮**触发实证 ②**：负值文件级常量；连带 live 实例 = `CIR_CACHE_MAGIC` 在自举二进制读 0 ⇒ 落盘 `.cir` magic 实测全 0、写/读自洽故不炸测试）· P3 计划附录 B.7（本节顶部已标 ✅ 闭合）· 计划 `docs/superpowers/plans/2026-09-12-r2-p4-carrier.md` Task 5 · spec `2026-09-10-type-interface-unification-design.md` §9 P3 行（未统一条目已划销）。
 
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 

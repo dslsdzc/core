@@ -13,9 +13,15 @@ docs/superpowers/specs/2026-09-10-type-interface-unification-design.md §5.4）�
   登记：载荷**类型节点列**（T0 交接 ①）：`--verify-evp-nodes` 断言每槽有节点（bad=0），
       并数出裸码列丢失真实类型的槽数（collapses>0 = 节点列携带的信息量；旧布局裸码把
       非基型塌缩为 0 = TY_INT）
-  表示面登记（如实，非本任务面）：`Some`/`None` 的运行时形态 = 枚举对象（IR_MAKE_ENUM +
-      tag），裸值入 T? 仍是裸值——两形态在同一次 match 里各自正确（本套件两例分别钉），
-      但「T? 值表示统一」不在本任务 Files 面内（未覆盖面，见任务报告）。
+  表示面（R2 P4 Task 5，裁决 5「解包侧判表示」——本套件下半段）：可选槽配**表示位**
+      （0 = 裸值 / 1 = 装箱，运行期值）：写点置位、解包点（`match` 的 Some/None 臂、
+      `?`）分派——裸值路径**值即载荷**（Some 臂直取、不读 tag；None 臂不命中），装箱
+      路径沿用既有 tag 分派 + 字段 fi+1。跨函数面（返回/形参）走隐藏全局信道（纯 IR）。
+      **前置红态（B.7 一等条目）**：裸值 + `Some` 臂 = 双路径 SIGSEGV（check/build rc=0
+      零诊断）——修复前后 rc 逐形态见任务报告。
+  未覆盖面（**如实登记**，同批未修）：结构体字段 / 数组元素 / 全局槽 / match 结果 /
+      惰性 thunk 的可选值不配表示位 ⇒ 解包走既有装箱假定（P3 前语义）——裸值形态仍
+      **响亮失败**（rc=139，双路径同）而非静默错值；装箱形态照常正确。
 """
 
 import os
@@ -109,6 +115,22 @@ def case_dual(name, source, expect_rc):
     return True
 
 
+def case_dual_rc(name, source, expect_rc):
+    """双路径**同 rc**（不要求 check rc=0）：用于**未覆盖面登记**——钉「未覆盖面要么正确、
+    要么响亮失败（elf rc == interp rc），**绝不静默分歧**」；rc=139 = 既有装箱假定下的
+    响亮失败（非本任务面，逐形态实测见任务报告 §未覆盖面）。"""
+    r, rr = build_and_run(source)
+    if rr is None:
+        print(f"[FAIL] {name}: compile rc={r.returncode}: {r.stdout}{r.stderr}")
+        return False
+    ri = run_interp(source)
+    if rr.returncode != expect_rc or ri.returncode != expect_rc:
+        print(f"[FAIL] {name}: expected rc {expect_rc} both paths, got ELF={rr.returncode} interp={ri.returncode}")
+        return False
+    print(f"[PASS] {name}: ELF+interp rc={rr.returncode}（未覆盖面：双路径同，响亮）")
+    return True
+
+
 def case_reject(name, source, needles, cmd="build"):
     r, out, src = _compile(source, cmd)
     try:
@@ -171,6 +193,69 @@ NONE_FLOW = """fn g() -> int? { return None; }
 fn main() -> int { v := g(); return match v { Some(x) => x + 100, None => 7, }; }
 """
 
+# ── R2 P4 Task 5（裁决 5：解包侧判表示）：B.7 四形态 + 跨函数面 ──────────────
+# 语义口径：裸值入 `T?` = 该值本身（`T ⊆ T?`）⇒ Some 臂**命中**且载荷 = 裸值。
+BARE_SOME_ARM = """fn main() -> int { x : int? = 5; return match x { Some(v) => { return v; } None => { return 0; } }; }
+"""
+BARE_SOME_WILDCARD = """fn main() -> int { x : int? = 5; return match x { Some(v) => { return v; } _ => { return 6; } }; }
+"""
+BARE_MATCH_EXPR = """fn main() -> int { x : int? = 5; y := match x { Some(v) => v, None => 0, }; return y; }
+"""
+BARE_WILDCARD = """fn main() -> int { x : int? = 5; return match x { _ => { return 7; } }; }
+"""
+BARE_THEN_BOXED_WRITE = """fn main() -> int { x : int? = 5; x = Some(7); return match x { Some(v) => { return v; } None => { return 0; } }; }
+"""
+BOXED_THEN_BARE_WRITE = """fn main() -> int { x : int? = Some(7); x = 3; return match x { Some(v) => { return v; } None => { return 0; } }; }
+"""
+# 条件写：同一槽两条路径两种表示 ⇒ 表示位必须是**运行期值**（静态收窄无法覆盖）
+COND_ON = """fn main() -> int { x : int? = 5; c := 1; if c > 0 { x = Some(4); } return match x { Some(v) => { return v; } None => { return 0; } }; }
+"""
+COND_OFF = """fn main() -> int { x : int? = 5; c := 0; if c > 0 { x = Some(4); } return match x { Some(v) => { return v; } None => { return 0; } }; }
+"""
+# 跨函数面（返回信道 / 形参信道）
+BARE_RET_SOME_ARM = """fn g() -> int? { return 5; }
+fn main() -> int { v := g(); return match v { Some(x) => { return x; } None => { return 0; } }; }
+"""
+BOXED_RET_SOME_ARM = """fn g() -> int? { return Some(9); }
+fn main() -> int { v := g(); return match v { Some(x) => { return x; } None => { return 0; } }; }
+"""
+BARE_RET_WILDCARD = """fn g() -> int? { return 5; }
+fn main() -> int { v := g(); return match v { _ => { return 11; } }; }
+"""
+BARE_PARAM_SOME_ARM = """fn f(x: int?) -> int { return match x { Some(v) => { return v; } None => { return 0; } }; }
+fn main() -> int { return f(5); }
+"""
+BOXED_PARAM_SOME_ARM = """fn f(x: int?) -> int { return match x { Some(v) => { return v; } None => { return 0; } }; }
+fn main() -> int { return f(Some(6)); }
+"""
+BARE_PARAM_TRY = """fn f(x: int?) -> int { return x?; }
+fn main() -> int { return f(3); }
+"""
+# `?` 解包装箱值：修复前 ELF 返回指针、解释器返回内部地址（**双路径分歧的静默错值**）
+BOXED_PARAM_TRY = """fn g() -> int? { return Some(7); }
+fn f(x: int?) -> int { return x?; }
+fn main() -> int { return f(g()); }
+"""
+# 混合返回（同函数两条 return 两种表示；表示位运行期分派 ⇒ 两条路径各自正确）
+MIXED_RET_BARE = """fn g(c: int) -> int? { if c > 0 { return 5; } return Some(4); }
+fn main() -> int { v := g(1); return match v { Some(x) => { return x; } None => { return 0; } }; }
+"""
+MIXED_RET_BOXED = """fn g(c: int) -> int? { if c > 0 { return 5; } return Some(4); }
+fn main() -> int { v := g(0); return match v { Some(x) => { return x; } None => { return 0; } }; }
+"""
+# 装箱值 + 通配臂（既有语义保持）
+BOXED_WILDCARD = """fn main() -> int { x : int? = Some(9); return match x { _ => { return 12; } }; }
+"""
+# 未覆盖面（登记，非本任务面）：结构体字段裸值 + Some 臂 ⇒ 既有装箱假定 ⇒ 响亮失败
+# （rc=139 双路径**同**：钉「未覆盖面不静默分歧」，不钉错误值本身）
+UNCOVERED_FIELD_BARE = """struct S { a: int? }
+fn main() -> int { s : ., mut = S { a: 5 }; return match s.a { Some(v) => { return v; } None => { return 0; } }; }
+"""
+# 未覆盖面之装箱形态：照常正确（登记双面）
+UNCOVERED_FIELD_BOXED = """struct S { a: int? }
+fn main() -> int { s : ., mut = S { a: Some(5) }; return match s.a { Some(v) => { return v; } None => { return 0; } }; }
+"""
+
 
 def main():
     ok = [
@@ -217,6 +302,42 @@ def main():
                  "struct S { a: int }\nenum E { V(S), W(int) }\nenum Opt[T] { N, Some(T) }\n"
                  "fn main() -> int { return 0; }\n",
                  ["[enum-payload-verify]", "slots=3", "collapses=2", "bad=0"]),
+
+        # ── R2 P4 Task 5：解包侧判表示（B.7 四形态；修复前多个形态双路径 139）──
+        # 裸值 + Some 臂（B.7 最小复现）：裸值即载荷 ⇒ 5
+        case_dual("bare_value_some_arm", BARE_SOME_ARM, 5),
+        # 裸值 + Some/通配混合臂（B.7 边界形态）
+        case_dual("bare_value_some_wildcard", BARE_SOME_WILDCARD, 5),
+        # match 作表达式取值（B.7 边界形态）
+        case_dual("bare_value_match_expr", BARE_MATCH_EXPR, 5),
+        # 纯通配臂（B.7 边界形态；修复前即不崩——**不得回退**）
+        case_dual("bare_value_wildcard", BARE_WILDCARD, 7),
+        # 写点置位的运行期性：裸→装箱、装箱→裸，最后一次写点决定表示
+        case_dual("bare_then_boxed_write", BARE_THEN_BOXED_WRITE, 7),
+        case_dual("boxed_then_bare_write", BOXED_THEN_BARE_WRITE, 3),
+        # 条件写：两路径两种表示 ⇒ 表示位必须是运行期值（两臂各自正确）
+        case_dual("conditional_write_boxed_taken", COND_ON, 4),
+        case_dual("conditional_write_bare_taken", COND_OFF, 5),
+        # ── 跨函数面（返回信道 / 形参信道）──
+        case_dual("bare_return_some_arm", BARE_RET_SOME_ARM, 5),
+        case_dual("boxed_return_some_arm", BOXED_RET_SOME_ARM, 9),
+        case_dual("bare_return_wildcard", BARE_RET_WILDCARD, 11),
+        case_dual("bare_param_some_arm", BARE_PARAM_SOME_ARM, 5),
+        case_dual("boxed_param_some_arm", BOXED_PARAM_SOME_ARM, 6),
+        case_dual("bare_param_try", BARE_PARAM_TRY, 3),
+        # `?` 解包装箱值：修复前 ELF/解释器**各错各的**（指针 vs 内部地址 = 双路径分歧）
+        case_dual("boxed_param_try", BOXED_PARAM_TRY, 7),
+        # 混合返回：同函数两条 return 两种表示
+        case_dual("mixed_return_bare_taken", MIXED_RET_BARE, 5),
+        case_dual("mixed_return_boxed_taken", MIXED_RET_BOXED, 4),
+        # 装箱值 + 通配臂（既有语义保持）
+        case_dual("boxed_value_wildcard", BOXED_WILDCARD, 12),
+        # ── 未覆盖面登记（结构体字段）：响亮失败双路径同 / 装箱形态照常正确 ──
+        # 裸值字段 = 既有装箱假定 ⇒ 载荷解包把裸值当对象 ⇒ 双路径 139（SIGSEGV = 响亮，
+        # 非静默错值）；该面**不在本任务修复面内**（见任务报告 §未覆盖面）。
+        # （Python subprocess 对 SIGSEGV 报 returncode = -11 ≡ shell 的 139）
+        case_dual_rc("uncovered_field_bare_is_loud", UNCOVERED_FIELD_BARE, -11),
+        case_dual("uncovered_field_boxed_ok", UNCOVERED_FIELD_BOXED, 5),
     ]
     passed = sum(1 for x in ok if x is True)
     print(f"{passed}/{len(ok)} passed")
