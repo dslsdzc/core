@@ -32,7 +32,13 @@ def concat_sources():
         # 链同源；与 build_selfhost_native.py 的 corec 清单同位）
         'src/compiler/iface_axis.cr',
         # R2 P1 桥接层（ti → 类型项）——与 build_selfhost_native.py 的 corec 清单同位
-        'src/compiler/ty_shadow.cr', 'src/compiler/type_selftest.cr',
+        'src/compiler/ty_shadow.cr',
+        # R2 P4 Task 2：TYPE(7) 段内容构造（D13 装填 + 段体缓冲 + corec-only dump 节）
+        # ——与 build_selfhost_native.py 的 corec 清单同位（清单漂移 = 本测试 resolver
+        # 的 Undefined name 家族：ccr_type_prepare_save/ccr_type_populate/
+        # ccr_type_selftest_dump——实测由本测试捕获，与 concat 面/self-host 链同源）。
+        'src/compiler/ccr_types.cr',
+        'src/compiler/type_selftest.cr',
         # 效应/纯度修正 Task 1：纯度自测通道（main.cr 的 selftest-purity 调用它）——
         # 与 build_selfhost_native.py 的 corec 清单同位（清单漂移 = 本测试的
         # resolver 报 Undefined name，见该文件头注「清单条目现全部为现存路径」）。

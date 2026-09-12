@@ -101,6 +101,16 @@ os_linux_files = [
 # ELF canary 逐字节 + 全套回归独立验证（本次迁出的唯一产物面影响 = corearch 二进制不再含
 # 这段死码）。
 backend_support_files = [
+    # R2 P4 Task 2（TYPE 段读回）：ccr_io.cr 的 load 侧要重算项哈希（tt_hash5）、
+    # 重建索引（grow_tt_index→tt_reindex）、复位项层（tt_layer_reset），--dump-types
+    # 通道还要跑项层原语（tt_norm/tt_is_dnf）⇒ type_terms.cr **必须先于 ccr_io.cr**
+    # 入 corearch 清单（清单顺序 = 常量可见性约束——ESZ_TYPE_TERM/OFF_TT_*/TT_*
+    # 在本文件；iface_registry.cr:18-23 先例）。**type_engine.cr 不入 corearch**：
+    # 它带两条既有诊断（lits_copy 真·类型洗白 TF01 + ty_memo_slot_no_grow 的
+    # loop-落空误报，`check` 作业 rc=1 的既定划界）——入清单即触发 project-mode
+    # `error[`=0 门（test_backend_bootstrap）；判定原语（ty_sub 族）跨进程同值
+    # 因此**未覆盖**（登记于 T2 报告，归 Task 3/4/P5 收口）。
+    'src/compiler/type_terms.cr',
     'src/compiler/ccr_io.cr',
     'src/stdlib/hotpatch.cr',
     'src/stdlib/arena.cr',
@@ -324,6 +334,12 @@ def main():
         # sh_compare/sh_site_begin——挂在 checker 上的挂点无法只要 checker 不要影子层；
         # corearch 无 checker 故仍不含）。相对顺序与 corec 一致（checker → 引擎 → 影子）。
         'src/compiler/ty_shadow.cr',
+        # R2 P4 Task 2：TYPE(7) 段内容构造（D13 确定性装填 + 段体缓冲 + corec-only
+        # dump 节）。位置 = 影子层之后（装填引用 sh_term_of_ti 与 checker 类型行表；
+        # 函数跨文件可见，顺序只为常量可见性与阅读序）、type_selftest 之前（自测段
+        # ts_ccr_run 调本文件函数）。**corearch 清单不含本文件**（D18：装填引用
+        # 桥接层——corearch 无此层）。
+        'src/compiler/ccr_types.cr',
         'src/compiler/type_selftest.cr',
         'src/compiler/purity_selftest.cr',
         'src/compiler/opt.cr',

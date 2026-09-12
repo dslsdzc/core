@@ -94,11 +94,20 @@
 //                        def_nod ∈ [enter_nod, exit_nod) 归属 region（定值点
 //                        升序 → 文件条目序连续一段）；根 region（kind=SG_FUNC）
 //                        = 整个函数条目块（含 def=-1 参数条目）；无条目 = -1。
-//     TYPE(7) 类型面（R2 P4 Task 1 空壳 = [row_count u32 = 0]；内容面归
-//                        Task 2：D12 两小节 = 类型行表 24B/条 {kind,data,extra}
-//                        + 类型项 DAG 40B/条 {tag,a..d}，哈希不落盘（加载
-//                        侧 tt_hash5 重算）。**段序 7/8 的数值权威 = 本文件
-//                        段序**（D9；format spec §2 的 `9+` 预留顺移驱逐
+//     TYPE(7) 类型面（R2 P4 Task 2 内容面；D12 两小节 = 类型行表 24B/条
+//                        {kind,data,extra}（i64×3——与内存 g_types 槽逐位同源）
+//                        + 类型项 DAG 40B/条 {tag,a..d}（i64×5），哈希不落盘
+//                        （加载侧 tt_hash5 重算）→ load 重建 g_types/
+//                        g_type_terms/g_tt_index，失败 = 整体拒绝（**不得**
+//                        留空表）。段体构造 = corec-only 的 ccr_types.cr（D18：
+//                        装填引用桥接层 sh_term_of_ti，corearch 无此层）；本文件
+//                        只搬运 g_ccr_type_seg 缓冲（保存侧）+ 解析重建（加载侧）。
+//                        loader 逐条校验（违规 = 拒绝）：两小节计数/长度自洽 +
+//                        段体无尾随字节；tag ∈ 0..10（TT_*）；a..d ≥ -1；子项
+//                        引用 < 自身行号（标注槽不查——字段表见 ccr_type_term_ref_ok）。
+//                        段内容确定性 = ccr_types.cr 的 D13 装填（类型表/接口表
+//                        的纯函数，与判定历史无关）。**段序 7/8 的数值权威 =
+//                        本文件段序**（D9；format spec §2 的 `9+` 预留顺移驱逐
 //                        标注段/证书段——两段代码零实现，仅注释冲突）
 //     IFACE(8) 接口面（R2 P4 Task 1 空壳 = [native_count u32 = 0]；内容面归
 //                        Task 3：D14 五小节 = 原生条目/横切形状/用户接口签名
@@ -111,6 +120,7 @@
 // 载荷约定（corec → corearch）：NOD 段 = v5 instrs 坐标化（字段同布局）——
 // corearch 消费路径不变（硬约束）；ENT 由 corearch 加载校验，发射不依赖。
 // 内存态重建（load 后 = 本文件字节的投影，ELF 发射语义零变化）：g_ir_vars 行
+// （+ TYPE 段：g_types 行表 + g_type_terms 项 DAG + g_tt_index 索引，见 TYPE 段注）
 // {name,id,type}（id = 行序）、g_ir_globals {name,var_idx,init_val}（var_idx =
 // 行序）、g_ir_func_* 七数组（instr/var 范围派生，见 (c)）、g_sgs（nstart/
 // ncount 派生）、g_ir_entries 24B 表 + func 条目块（块界按 SYM func first/last
@@ -355,14 +365,18 @@ fn ccr_reg_seg_size() -> int {
     return 4 + g_sg_count * ESZ_SG_DISK;
 }
 
-// R2 P4 Task 1：TYPE(7)/IFACE(8) **空壳**段体 = 计数 u32 = 0（恰 4B）。内容面
-// 归 Task 2/3（D18：段体构造 = corec-only ccr_types.cr，本文件保持共享层纯度
-// ——ccr_io.cr 同时在 corearch 清单内，任何前端符号引用 = corearch N06 静默
-// 未定义）；届时本两函数扩为「4 + 段体缓冲长度」并由 save_ccr 搬运缓冲。
+// R2 P4 Task 2：TYPE(7) 段体大小 = 段体缓冲长度（D18：内容构造 = corec-only
+// ccr_types.cr；本文件保持共享层纯度——ccr_io.cr 同时在 corearch 清单内，任何
+// 前端符号引用 = corearch N06 静默未定义）。缓冲**含首字段 row_count** ⇒ 段体
+// 大小 ≡ 缓冲长度（单源；T1 空壳期注释写的「4 + 段体缓冲长度」是缓冲不含计数的
+// 方案，实施取「缓冲 = 完整段体」，偏差登记见 Task 2 报告）。
 fn ccr_type_seg_size() -> int {
-    return 4;
+    return g_ccr_type_seg_len;
 }
 
+// R2 P4 Task 1：IFACE(8) **空壳**段体 = 计数 u32 = 0（恰 4B）。内容面归 Task 3
+// （D14 五小节 = 原生条目/横切形状/用户接口签名项/impl 边/方法表）；届时本函数
+// 扩为段体缓冲长度并由 save_ccr 搬运缓冲。
 fn ccr_iface_seg_size() -> int {
     return 4;
 }
@@ -860,9 +874,21 @@ fn save_ccr(path: string) -> int {
         ei3 = ei3 + 1;
     }
 
-    // === TYPE(7)/IFACE(8)：空壳段体（R2 P4 Task 1——计数 = 0；内容面归
-    // Task 2/3，届时本处改为搬运 ccr_types.cr 预生成的段体缓冲，D18）===
-    buf_write_u32(buf, pos, 0); pos = pos + 4;   // TYPE row_count = 0
+    // === TYPE(7)：段体缓冲搬运（R2 P4 Task 2；内容构造 = corec-only
+    // ccr_types.cr 的 ccr_type_prepare_save，D18——本处只按段表搬运）===
+    // 缓冲含首字段 row_count ⇒ 大小 ≡ ccr_type_seg_size()（同一来源）。空缓冲 =
+    // 未装填（调用点漏调 prepare）⇒ **拒绝落盘**：不得产出「两小节缺席」的
+    // 半成品文件（三态纪律；行表恒含原生 9 行，空缓冲只可能是程序错误）。
+    if g_ccr_type_seg_len <= 0 { return -1; }
+    ct : ., mut = 0;
+    loop {
+        if ct >= g_ccr_type_seg_len { break; }
+        store8(buf, pos, load8(g_ccr_type_seg, ct));
+        pos = pos + 1;
+        ct = ct + 1;
+    }
+
+    // === IFACE(8)：空壳段体（R2 P4 Task 1——计数 = 0；内容面归 Task 3）===
     buf_write_u32(buf, pos, 0); pos = pos + 4;   // IFACE native_count = 0
 
     // Use syscall directly (write_file uses str_len which stops at null)
@@ -989,8 +1015,9 @@ fn load_ccr(data: string, fsize: int) -> int {
     g_entry_count = 0;
     g_v7_edge_count = 0;
     g_v7_nod_count = 0;   // 内核完备 Task 1：NOD 对象缓冲计数（NOD 段载入后置位）
-    // R2 P4 Task 1：TYPE/IFACE 空壳无新内存表（内容面 Task 2/3 起在此复位
-    // g_types 行表 + 项层 g_type_terms/g_tt_index）——本任务复位面零变化
+    // R2 P4 Task 2：TYPE 段有真实内存表（g_types 行表 + 项层 g_type_terms/
+    // g_tt_index）——复位在 TYPE 段解析处（行表大小随段内容，且需与项层 memo
+    // 同步作废；见该段注释）。IFACE 段仍空壳（Task 3），无新内存表。
 
     // === STR: strings ===
     pos = seg_off1;
@@ -1482,16 +1509,69 @@ fn load_ccr(data: string, fsize: int) -> int {
     if run_off != edg_cnt { return -1; }         // ② Σ edge_count == edg_count
     if pos != seg_end6 { return -1; }            // ② 行走完 == 段体大小
 
-    // === TYPE(7)/IFACE(8)：空壳段体校验（R2 P4 Task 1）===
-    // 空壳期纪律（三态纪律 C.5-3）：段体恒 = 计数 u32 = 0 且恰 4B。非零计数 =
-    // 内容面落地前的外部半成品 ⇒ **拒绝**（不得静默当空表/当 0——D11 同时保证
-    // 两段必备，本处保证「有段但空」不含未定义内容）。内容面（Task 2/3）落地
-    // 时本两段改为按 D12/D14 解析并重建内存表，本处空壳校验随之退役。
+    // === TYPE(7)：类型面（R2 P4 Task 2 内容面——两小节解析 + 内存重建）===
+    // D12 字节：row_count → 行表（24B/条）→ term_count → 项 DAG（40B/条；哈希
+    // 不落盘、本处 tt_hash5 重算）。重建 = g_types 行 + g_type_terms 项 +
+    // g_tt_index 索引重放（grow_tt_index → tt_reindex）。
+    // 逐条校验（违规 = 拒绝——不得静默当空表/截断表，三态纪律 C.5-3）：
+    //   ① 计数/长度自洽（计数 × 记录尺寸 ≤ 段余量）；② 段体恰两小节（行走完
+    //   == seg_end7，无尾随字节）；③ tag ∈ 0..10（TT_*）+ a..d ≥ -1；④ 子项引用
+    //   -1 或 < 自身行号（拓扑无环；标注槽按 tag 分派跳过，字段表见
+    //   ccr_type_term_ref_ok——ATOM 的 b = 自类型行号可达数千，不得误拒）。
+    // 复位：行表/项层（含引擎预算/memo/lits——见 tt_layer_reset 注记）全部作废
+    // 重建（旧行号语义的缓存一并清；行表大小随段内容，此处为唯一复位点）。
+    // corearch 侧无桥接/checker 层：行表 = 数据（消费者 = --dump-types 通道 +
+    // 未来判定原语），本处不做语义解释。
+    g_type_count = 0;
+    tt_layer_reset();
     pos = seg_off7;
     if !ccr_has_bytes(pos, 4, seg_end7) { return -1; }
-    type_cnt := buf_read_u32(data, pos); pos = pos + 4;
-    if type_cnt != 0 { return -1; }
-    if pos != seg_end7 { return -1; }            // 段体恰一个 u32（无尾随字节）
+    trow_cnt := buf_read_u32(data, pos); pos = pos + 4;
+    if trow_cnt > (seg_end7 - pos) / ESZ_TYPE_ROW { return -1; }
+    grow_types(trow_cnt);
+    trow : ., mut = 0;
+    loop {
+        if trow >= trow_cnt { break; }
+        if !ccr_has_bytes(pos, ESZ_TYPE_ROW, seg_end7) { return -1; }
+        w64(g_types, trow * ESZ_TYPE_ROW + OFF_TR_KIND, buf_read_i64(data, pos)); pos = pos + 8;
+        w64(g_types, trow * ESZ_TYPE_ROW + OFF_TR_DATA, buf_read_i64(data, pos)); pos = pos + 8;
+        w64(g_types, trow * ESZ_TYPE_ROW + OFF_TR_EXTRA, buf_read_i64(data, pos)); pos = pos + 8;
+        trow = trow + 1;
+    }
+    g_type_count = trow_cnt;
+    if !ccr_has_bytes(pos, 4, seg_end7) { return -1; }
+    tterm_cnt := buf_read_u32(data, pos); pos = pos + 4;
+    if tterm_cnt > (seg_end7 - pos) / ESZ_TYPE_TERM_DISK { return -1; }
+    grow_type_terms(tterm_cnt + 1);
+    tj : ., mut = 0;
+    loop {
+        if tj >= tterm_cnt { break; }
+        if !ccr_has_bytes(pos, ESZ_TYPE_TERM_DISK, seg_end7) { return -1; }
+        ttag := buf_read_i64(data, pos); pos = pos + 8;
+        ta := buf_read_i64(data, pos); pos = pos + 8;
+        tb := buf_read_i64(data, pos); pos = pos + 8;
+        tc2 := buf_read_i64(data, pos); pos = pos + 8;
+        td := buf_read_i64(data, pos); pos = pos + 8;
+        if ttag < 0 || ttag > TT_CONS { return -1; }
+        if ta < -1 || tb < -1 || tc2 < -1 || td < -1 { return -1; }
+        if ccr_type_term_ref_ok(ttag, ta, tb, tc2, td, tj) == 0 { return -1; }
+        w64(g_type_terms, tj * ESZ_TYPE_TERM + OFF_TT_TAG, ttag);
+        w64(g_type_terms, tj * ESZ_TYPE_TERM + OFF_TT_A, ta);
+        w64(g_type_terms, tj * ESZ_TYPE_TERM + OFF_TT_B, tb);
+        w64(g_type_terms, tj * ESZ_TYPE_TERM + OFF_TT_C, tc2);
+        w64(g_type_terms, tj * ESZ_TYPE_TERM + OFF_TT_D, td);
+        w64(g_type_terms, tj * ESZ_TYPE_TERM + OFF_TT_HASH, tt_hash5(ttag, ta, tb, tc2, td));
+        g_type_term_count = tj + 1;
+        tj = tj + 1;
+    }
+    if pos != seg_end7 { return -1; }            // 段体恰两小节（无尾随字节）
+    grow_tt_index(g_type_term_count + 1);        // 索引重建（cap 已清零 → 必走重建）
+
+    // === IFACE(8)：空壳段体校验（R2 P4 Task 1；内容面归 Task 3）===
+    // 空壳期纪律（三态纪律 C.5-3）：段体恒 = 计数 u32 = 0 且恰 4B。非零计数 =
+    // 内容面落地前的外部半成品 ⇒ **拒绝**（不得静默当空表/当 0——D11 同时保证
+    // 两段必备，本处保证「有段但空」不含未定义内容）。Task 3 落地时改为按 D14
+    // 五小节解析并重建内存表，本处空壳校验随之退役。
     pos = seg_off8;
     if !ccr_has_bytes(pos, 4, seg_end8) { return -1; }
     iface_cnt := buf_read_u32(data, pos); pos = pos + 4;
@@ -1499,4 +1579,109 @@ fn load_ccr(data: string, fsize: int) -> int {
     if pos != seg_end8 { return -1; }
 
     return 0;
+}
+
+// ─── TYPE 段项引用拓扑（R2 P4 Task 2；load 侧校验 + 通道/dump 共用）───
+// 项引用 = -1（无）或 < 自身行号（DAG 由 tt_term 追加式构造 ⇒ 子项恒先建）。
+// **字段表按 tag 分派**（不得全槽施检——标注槽会被误拒）：
+//   TT_UNION/TT_INTER/TT_CONS：a, b          （两子项）
+//   TT_NOT：a                                 ；TT_MU：b（a = 绑定变量标注）
+//   TT_ATOM：c（参数链头，-1 = 无参）         ；a = ak、b = 标注（自类型行号/固定性位/
+//                                               令牌值/mut 标记——可达数千）、d = 保留
+//   TT_BOT/TT_TOP/TT_NIL：无引用槽           ；TT_TOP_K：a = k；TT_VAR：a = 绑定变量
+// 构造点单源见 ty_shadow.cr 的 sh_ref_mut_marker/sh_name_token/sh_seq_term 三处注记。
+fn ccr_type_ref_before(r: int, row: int) -> int {
+    if r < 0 { return 1; }      // -1 = 无引用
+    if r < row { return 1; }    // 子项恒先建（DAG 无环）
+    return 0;
+}
+
+fn ccr_type_term_ref_ok(tag: int, a: int, b: int, c: int, d: int, row: int) -> int {
+    if tag == TT_UNION || tag == TT_INTER || tag == TT_CONS {
+        if ccr_type_ref_before(a, row) == 0 { return 0; }
+        return ccr_type_ref_before(b, row);
+    }
+    if tag == TT_NOT { return ccr_type_ref_before(a, row); }
+    if tag == TT_MU { return ccr_type_ref_before(b, row); }
+    if tag == TT_ATOM { return ccr_type_ref_before(c, row); }
+    return 1;   // ⊥ / ⊤ / ⊤ₖ / VAR / NIL：无引用槽（a 为标注）
+}
+
+// ─── --dump-types 通道（R2 P4 Task 2）：段内容面打印 ───
+// 写侧（corec `ccr --dump-types`，经 ccr_types.cr 的 ccr_type_selftest_dump 调
+// 本函数）与读侧（corearch `--dump-types`）共用**同一条打印路径**——跨进程行
+// 格式零分歧；行格式契约见 tests/selfhost/test_ccr_types.py:parse_type_dump。
+// 读侧意义 = §6.3 的读回证据：载入段重建后的行表/项 DAG 与写侧逐行一致，
+// 且 probe 行的跨进程同值 = 项层原语（tt_norm/tt_is_dnf/tt_is_literal）在同构
+// 重建表上逐点同值（下标含新建项 ⇒ 索引重建/去重行为的实证）。
+CCR_TYPE_PROBE_N : int = 16;   // probe 窗口（前 N 项）
+
+fn ccr_type_surface_dump() {
+    print("rows: "); print_i(g_type_count); println("");
+    i : ., mut = 0;
+    loop {
+        if i >= g_type_count { break; }
+        print("row "); print_i(i);
+        print(" kind "); print_i(r64(g_types, i * ESZ_TYPE_ROW + OFF_TR_KIND));
+        print(" data "); print_i(r64(g_types, i * ESZ_TYPE_ROW + OFF_TR_DATA));
+        print(" extra "); print_i(r64(g_types, i * ESZ_TYPE_ROW + OFF_TR_EXTRA));
+        println("");
+        i = i + 1;
+    }
+    print("terms: "); print_i(tt_count()); println("");
+    j : ., mut = 0;
+    loop {
+        if j >= tt_count() { break; }
+        print("term "); print_i(j);
+        print(" tag "); print_i(tt_tag(j));
+        print(" a "); print_i(tt_a(j));
+        print(" b "); print_i(tt_b(j));
+        print(" c "); print_i(tt_c(j));
+        print(" d "); print_i(tt_d(j));
+        println("");
+        j = j + 1;
+    }
+    ccr_type_probe_dump();
+}
+
+// 项层原语跨进程同值探针（**项层**——type_terms.cr 面；判定原语 ty_sub 族不入
+// corearch 清单，见 build_selfhost_native.py 的 backend_support_nodes 注记）：
+// 预算状态复位（两侧同起点）→ 前 N 项逐个 tt_norm（规范化 = 判定算法输入形态，
+// spec §1.3）→ 折叠**规范化结果的项下标** + 形态位（tt_is_dnf/tt_is_literal）
+// 成摘要。两侧表同构（行表/项表/probe 前各节逐行同）⇒ 调用序、步数消耗、
+// **新建项的下标**逐点同 ⇒ 摘要同。下标入摘要即「重建后的索引（g_tt_index）
+// 与去重行为」的实证：索引未重建/重建错位 ⇒ tt_norm 的去重退化/错配 ⇒ 新建项
+// 下标漂移 ⇒ 摘要变。
+// 本探针**会**向项表追加规范化新项（tt_norm 的构造面）——在 dump 的 terms 节
+// 之后运行，故不影响打印面（序列化缓冲早在 dump 前已生成，见 ccr_type_prepare_save）。
+fn ccr_type_probe_dump() {
+    n := tt_count();
+    if n > CCR_TYPE_PROBE_N { n = CCR_TYPE_PROBE_N; }
+    tt_budget_state_reset();
+    nn_ok : ., mut = 0;
+    nn_bad : ., mut = 0;
+    dnf_ok : ., mut = 0;
+    lit_ok : ., mut = 0;
+    h : ., mut = 0;
+    i : ., mut = 0;
+    loop {
+        if i >= n { break; }
+        norm := tt_norm(i);
+        if norm < 0 { nn_bad = nn_bad + 1; } else { nn_ok = nn_ok + 1; }
+        d := -1;
+        if norm >= 0 { d = tt_is_dnf(norm); }
+        if d == 1 { dnf_ok = dnf_ok + 1; }
+        if tt_is_literal(i) == 1 { lit_ok = lit_ok + 1; }
+        // 摘要 = 规范化结果下标 + DNF 位（-1 = 预算耗尽，下标面用 -1 表示）
+        h = h * 31 + (norm + 2);
+        h = h * 31 + (d + 2);
+        i = i + 1;
+    }
+    print("probe: n "); print_i(n);
+    print(" norm_ok "); print_i(nn_ok);
+    print(" norm_unknown "); print_i(nn_bad);
+    print(" dnf_ok "); print_i(dnf_ok);
+    print(" lit_ok "); print_i(lit_ok);
+    print(" exhausted "); print_i(g_ty_exhausted);
+    print(" digest "); println(int_str(h));
 }

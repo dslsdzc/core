@@ -902,6 +902,128 @@ fn ts_ifc_run() -> int {
     return fails;
 }
 
+// ═══════════ R2 P4 Task 2：TYPE 段内容面（装填 / 序列化 / dedup / 确定性）═══════════
+// 用例面：① 段体缓冲 ↔ 内存表逐字段 roundtrip（行表 24B/条 + 项表 40B/条 + 长度公式）；
+// ② dedup 重建（同构项 = 同节点；b 标注区分固定长度；DAG 无同 (tag,a..d) 重行）；
+// ③ **确定性**（D13 的牙）：判定历史扰动（ty_sub/ty_equiv 触发规范化向项表追加新项）
+// 后重装填 ⇒ 段体逐字节同（「直接序列化活表」的旧实现必在此变——见 ccr_types.cr 头注）；
+// ④ 不可译行 ⇒ 装填拒绝（save 侧拒落盘，三态纪律）。
+// 夹具说明：本组自建干净类型表（init_types 9 原生行 + 4 行可选/定长数组），不经
+// parser/check_all；**必须最后运行**（populate 复位项层/引擎/桥接三面缓存）。
+fn ts_ccr_roundtrip_ok() -> int {
+    rc := g_type_count;
+    tc := tt_count();
+    if g_ccr_type_seg_len != 4 + rc * ESZ_TYPE_ROW + 4 + tc * ESZ_TYPE_TERM_DISK { return 0; }
+    if buf_read_u32(g_ccr_type_seg, 0) != rc { return 0; }
+    pos : ., mut = 4;
+    i : ., mut = 0;
+    loop {
+        if i >= rc { break; }
+        if buf_read_i64(g_ccr_type_seg, pos) != r64(g_types, i * ESZ_TYPE_ROW + OFF_TR_KIND) { return 0; }
+        if buf_read_i64(g_ccr_type_seg, pos + 8) != r64(g_types, i * ESZ_TYPE_ROW + OFF_TR_DATA) { return 0; }
+        if buf_read_i64(g_ccr_type_seg, pos + 16) != r64(g_types, i * ESZ_TYPE_ROW + OFF_TR_EXTRA) { return 0; }
+        pos = pos + ESZ_TYPE_ROW;
+        i = i + 1;
+    }
+    if buf_read_u32(g_ccr_type_seg, pos) != tc { return 0; }
+    pos = pos + 4;
+    j : ., mut = 0;
+    loop {
+        if j >= tc { break; }
+        if buf_read_i64(g_ccr_type_seg, pos) != tt_tag(j) { return 0; }
+        if buf_read_i64(g_ccr_type_seg, pos + 8) != tt_a(j) { return 0; }
+        if buf_read_i64(g_ccr_type_seg, pos + 16) != tt_b(j) { return 0; }
+        if buf_read_i64(g_ccr_type_seg, pos + 24) != tt_c(j) { return 0; }
+        if buf_read_i64(g_ccr_type_seg, pos + 32) != tt_d(j) { return 0; }
+        pos = pos + ESZ_TYPE_TERM_DISK;
+        j = j + 1;
+    }
+    if pos != g_ccr_type_seg_len { return 0; }
+    return 1;
+}
+
+fn ts_ccr_dedup_ok(opt_a: int, opt_b: int, arr3: int, arr4: int) -> int {
+    // 同构 ⇒ 同节点（两个 `int?` 行 → 同一 union 项）；b 标注（固定长度）区分 ⇒ 异节点
+    if sh_term_of_ti(opt_a) != sh_term_of_ti(opt_b) { return 0; }
+    if sh_term_of_ti(arr3) == sh_term_of_ti(arr4) { return 0; }
+    // DAG 不变量：表内无两个同 (tag,a..d) 的行（tt_term 去重——重建路径的牙）
+    n := tt_count();
+    i : ., mut = 0;
+    loop {
+        if i >= n { break; }
+        j : ., mut = i + 1;
+        loop {
+            if j >= n { break; }
+            if tt_tag(i) == tt_tag(j) && tt_a(i) == tt_a(j) && tt_b(i) == tt_b(j) &&
+               tt_c(i) == tt_c(j) && tt_d(i) == tt_d(j) { return 0; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return 1;
+}
+
+fn ts_ccr_purity_ok() -> int {
+    n0 := g_ccr_type_seg_len;
+    cp := alloc(n0 + 8);
+    _dyncpy(g_ccr_type_seg, n0, cp);
+    // 判定历史扰动：跨项判定 + 规范化（向项表追加新项——旧「直接序列化活表」必在此变）
+    pa := tt_atom(AK_INT, TI_INT, -1);
+    pb := tt_atom(AK_STRING, TI_STR, -1);
+    if ty_sub(tt_union(pa, pb), pa) != 0 { println("ct.seg_determinism: perturbation ty_sub != 0"); return 0; }
+    if ty_disjoint(pa, pb) != 1 { println("ct.seg_determinism: perturbation ty_disjoint != 1"); return 0; }
+    if ty_equiv(tt_union(pa, tt_union(pb, pa)), tt_union(pa, pb)) != 1 {
+        println("ct.seg_determinism: perturbation ty_equiv != 1"); return 0;
+    }
+    // 唯一标注项（**保证**向项表追加新项——判定扰动可能与既有项同构而零新增，
+    // 突变控制实证：仅判定扰动的版本对「跳过装填」突变不转红，本项补上该牙）
+    uq := tt_atom(AK_DEX, 900001, tt_cons(pa, tt_nil()));
+    if tt_tag(uq) != TT_ATOM || tt_b(uq) != 900001 {
+        println("ct.seg_determinism: unique-term fixture failed"); return 0;
+    }
+    // 重装填（项层/引擎/桥接复位 → 行序重建）⇒ 段体逐字节同
+    if ccr_type_prepare_save() != 0 { println("ct.seg_determinism: rebuild prepare failed"); return 0; }
+    if g_ccr_type_seg_len != n0 {
+        print("ct.seg_determinism: buffer length changed "); print(int_str(n0));
+        print(" -> "); println(int_str(g_ccr_type_seg_len));
+        return 0;
+    }
+    k : ., mut = 0;
+    loop {
+        if k >= n0 { break; }
+        if load8(g_ccr_type_seg, k) != load8(cp, k) {
+            print("ct.seg_determinism: buffer byte mismatch at "); println(int_str(k));
+            return 0;
+        }
+        k = k + 1;
+    }
+    return 1;
+}
+
+fn ts_ccr_run() -> int {
+    fails : ., mut = 0;
+    init_types();   // 干净表（9 原生行——不受前段夹具影响）
+    opt_a := alloc_type(TYP_OPTIONAL, TI_INT, 0);
+    opt_b := alloc_type(TYP_OPTIONAL, TI_INT, 0);
+    arr3 := alloc_type(TYP_ARRAY, TI_INT, 3);
+    arr4 := alloc_type(TYP_ARRAY, TI_INT, 4);
+    prep := ccr_type_prepare_save();
+    fails = fails + ts_check("ct.seg_prepare", prep, 0);
+    if prep == 0 {
+        fails = fails + ts_check("ct.seg_roundtrip", ts_ccr_roundtrip_ok(), 1);
+        fails = fails + ts_check("ct.seg_dedup_identity", ts_ccr_dedup_ok(opt_a, opt_b, arr3, arr4), 1);
+        fails = fails + ts_check("ct.seg_determinism", ts_ccr_purity_ok(), 1);
+    } else {
+        fails = fails + 3;   // 后续三例无法运行 ⇒ 计失败（不得静默少算）
+    }
+    // ④ 不可译行（子行越界）⇒ 装填拒绝（save 拒落盘）——**最后**（污染类型表）
+    bad_row := alloc_type(TYP_ARRAY, 999999, 0);
+    rej := ccr_type_populate();
+    if bad_row < 0 { rej = 1; }   // 夹具未建成 ⇒ 不算通过（防假绿）
+    fails = fails + ts_check("ct.seg_reject_untranslatable", rej, -1);
+    return fails;
+}
+
 fn type_selftest_run() -> int {
     fails : ., mut = 0;
     total : ., mut = 0;
@@ -2463,6 +2585,10 @@ fn type_selftest_run() -> int {
     total = total + 15; fails = fails + ts_x2_run();
     // R2 P3b Task 6：impl 契约（签名类型项化 / 形状项 / mangling 退役 / 三态）——见 ts_ifc_run
     total = total + 14; fails = fails + ts_ifc_run();
+
+    // R2 P4 Task 2：TYPE 段内容面（装填/roundtrip/dedup/确定性/拒绝面）——见 ts_ccr_run
+    // （**必须最后**：populate 复位项层/引擎/桥接三面缓存）
+    total = total + 5; fails = fails + ts_ccr_run();
 
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }

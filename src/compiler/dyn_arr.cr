@@ -217,7 +217,9 @@ fn grow_syms(needed: int) {
 fn grow_types(needed: int) {
     if needed < g_type_cap { return; }
     nc : ., mut = g_type_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := alloc(nc * 24); _dyncpy(g_types, g_type_cap * 24, nb);
+    // R2 P4 Task 2：行尺寸经 ESZ_TYPE_ROW 单源（globals.cr——与 alloc_type/
+    // TYPE 段序列化同源；原为字面量 24）。
+    nb := alloc(nc * ESZ_TYPE_ROW); _dyncpy(g_types, g_type_cap * ESZ_TYPE_ROW, nb);
     g_types = nb; g_type_cap = nc; }
 
 fn grow_funcs(needed: int) {

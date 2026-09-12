@@ -23,6 +23,15 @@ import lower_to_core
 // 该缺陷的机械守卫 = tests/selfhost/test_backend_bootstrap.py 的 project-mode error[ 门
 // （TODO #31：该套件未挂 CI，收官全量枚举才跑到）。若将来自复活本文件，须先让它不依赖
 // checker/parser 层符号。
+// R2 P4 Task 2（TYPE 段内容面读回）：ccr_io.cr 的 load 侧重建类型项表——调
+// tt_hash5/grow_tt_index/tt_reindex/tt_layer_reset（type_terms.cr）与 --dump-types
+// 通道的项层原语（tt_norm/tt_is_dnf/tt_is_literal）。**必须先于 ccr_io 入本清单**
+// （常量可见性：ESZ_TYPE_TERM/OFF_TT_*/TT_*——若漏列本行，project-mode corearch
+// 单元即 N06 静默未定义，B.6 同族；concat 面 = backend_support_files 头部同位置）。
+// **type_engine.cr 不入本清单**：既有两条诊断（lits_copy 类型洗白 TF01 +
+// ty_memo_slot_no_grow loop-落空误报）会触发本单元的 project-mode `error[`=0 门
+// （test_backend_bootstrap）；判定原语跨进程同值因此未覆盖（T2 报告登记）。
+import type_terms
 import ccr_io
 import ent_kernel
 // 内核完备 Task 1（调度重建移实例）：build_linear_schedule（regalloc.cr——

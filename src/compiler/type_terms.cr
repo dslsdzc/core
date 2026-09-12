@@ -23,6 +23,12 @@ ESZ_TYPE_TERM : int = 48;
 OFF_TT_TAG : int = 0;  OFF_TT_A : int = 8;   OFF_TT_B : int = 16;
 OFF_TT_C : int = 24;   OFF_TT_D : int = 32;  OFF_TT_HASH : int = 40;
 
+// 盘上项记录（TYPE 段，R2 P4 Task 2 / D12）：5 × i64 = 40B {tag,a,b,c,d}——
+// 内存 48B 记录**去掉 hash 槽**（哈希 = 五字段的纯函数，落盘 = 冗余 + 第二真源；
+// 加载侧由 tt_hash5 重算）。字段宽度 8B = 与内存槽逐位同源（无截断面；D12 的
+// 「40B/条」= 5×8B，不是 5×i32）。
+ESZ_TYPE_TERM_DISK : int = 40;
+
 // ─── 访问器（i = 类型项行号；调用方保证 0 ≤ i < tt_count()）───
 fn tt_tag(i: int) -> int { return r64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_TAG); }
 fn tt_a(i: int) -> int { return r64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_A); }
@@ -120,6 +126,41 @@ fn tt_reindex() {
         g_tt_index_count = g_tt_index_count + 1;
         i = i + 1;
     }
+}
+
+// ─── 项层复位（R2 P4 Task 2：D13 确定性装填 与 loader 重建 的共点）───
+// 计数/索引/惰性 memo 全清：g_tt_index_cap = 0 ⇒ 下一次 tt_term 触发
+// grow_tt_index(2)（惰性重建空表 + tt_reindex 重放 0 行）；g_tt_top_ok/g_tt_nil_ok
+// = 0 ⇒ 惰性 memo 重取（重建出的表里若已有 ⊤/nil 项，tt_term 去重会命中同一节点）。
+// **不释放缓冲**（cap 保留——重建/加载复用已分配空间，且 next grow 判定依赖 cap）。
+// 本函数另含**引擎面**复位（预算/memo/lits——同属「项行号语义」的状态）：
+// type_engine.cr **不入 corearch 清单**（其两条既有诊断会触发 project-mode
+// `error[`=0 门，见 build_selfhost_native.py 的 backend_support_files 注记），
+// 故此处直写全局（等价于 ty_budget_reset(200000) + ty_lits_reset()：steps/budget/
+// exhausted/uncovered + memo 表与 cap（cap 必须清——grow_ty_memo 有 `needed < cap
+// → return` 早退，只清 ok 位会复用旧表，照该函数 N1 修复注记）+ 字面缓冲计数）。
+// 调用方（ccr_types.cr 装填 / ccr_io.cr loader）另须复位桥接面
+// （sh_map_reset/sh_unf_map_reset，corec 侧）——陈旧 ti→term 缓存持有旧行号语义。
+fn tt_layer_reset() {
+    g_type_term_count = 0;
+    g_tt_index_cap = 0;
+    g_tt_index_count = 0;
+    g_tt_top_ok = 0;
+    g_tt_nil_ok = 0;
+    tt_budget_state_reset();
+    g_ty_memo_ok = 0;
+    g_ty_memo_cap = 0;
+    g_ty_lits_count = 0;
+}
+
+// 预算/未覆盖位复位（**不动项表**）：--dump-types 的 probe 在表已载入后跑项层
+// 原语（tt_norm——规范化计步），两侧（写侧进程/读侧进程）须从同一计数起点出发
+// 才能对拍消耗与结果。
+fn tt_budget_state_reset() {
+    g_ty_steps = 0;
+    g_ty_budget_max = 200000;
+    g_ty_exhausted = 0;
+    g_ty_uncovered = 0;
 }
 
 // 同构比较（五字段全比——DAG 键；哈希相同与否不参与，见 tt_term 内注记）

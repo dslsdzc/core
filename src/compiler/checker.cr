@@ -4,14 +4,15 @@
 // Second pass: type-check function bodies
 
 // --- Type table ---
-// Entries are 3 ints: kind, data, extra
+// Entries are 3 ints: kind, data, extra（24B/条——布局常量 ESZ_TYPE_ROW/OFF_TR_*
+// 在 globals.cr 单源，R2 P4 Task 2 起与 TYPE 段序列化/dump 同源）
 
 fn alloc_type(kind: int, data: int, extra: int) -> int {
     idx := g_type_count;
     grow_types(idx + 1);
-    w64(g_types, idx * 24, kind);
-    w64(g_types, idx * 24 + 8, data);
-    w64(g_types, idx * 24 + 16, extra);
+    w64(g_types, idx * ESZ_TYPE_ROW + OFF_TR_KIND, kind);
+    w64(g_types, idx * ESZ_TYPE_ROW + OFF_TR_DATA, data);
+    w64(g_types, idx * ESZ_TYPE_ROW + OFF_TR_EXTRA, extra);
     g_type_count = idx + 1;
     return idx;
 }

@@ -21,6 +21,10 @@ import iface_registry
 // 本文件与引擎簇（本任务不动该文件）。
 import iface_axis
 import ty_shadow
+// R2 P4 Task 2：TYPE(7) 段内容构造（D18 corec-only——装填引用桥接层 sh_term_of_ti；
+// project-mode 面必须同列本行：src/compiler 目录的文件集 = 本清单，漏列 ⇒ 自举链上
+// ccr_type_prepare_save 族全 N06 静默未定义（B.6 同族）。corearch 清单不列本文件。）
+import ccr_types
 import type_selftest
 import purity_selftest
 import diag

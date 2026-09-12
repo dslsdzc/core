@@ -104,16 +104,35 @@ v6 其余字节惯例沿用：小端、i32/u32、offset/size u32、`ccr_i32_fits
 
 同 v6（kind/parent/enter_nod/exit_nod/first_ent/last_ent，坐标 = NOD id）。
 
-### 3.7 TYPE — 类型面（tag 7；R2 P4 Task 1 空壳，内容面归 Task 2）
+### 3.7 TYPE — 类型面（tag 7；R2 P4 Task 2 内容面落地）
 
-**现行（Task 1）**：`row_count u32` = **恒 0**（段体恰 4B）。loader 校验：段必备
-（D11）+ 计数 == 0 + 段体恰一个 u32；非空 = **拒绝**（内容面落地前不接受外部
-半成品，不得静默当空表——三态纪律 C.5-3）。
+**现行（Task 2）**：两小节 = `row_count u32` + `row_count × 24B {kind,data,extra}`
+（**i64×3**——与内存 `g_types` 槽逐位同源；24B/条按 8B 字段计）→ `term_count u32`
++ `term_count × 40B {tag,a,b,c,d}`（**i64×5**；类型项 DAG，**哈希不落盘**——加载侧
+由五字段重算 `tt_hash5`）。字段宽度注记：Task 1 此处曾以 `i32` 记法书写但字节数
+写 24B/40B（自相矛盾）——**实施权威 = 8B 字段**（内存槽宽度，无截断面），
+`ccr_io.cr` 头注释同步（实现权威）。
 
-**内容面（Task 2 落地，D12——本处先落定义，实施时以 `ccr_io.cr` 头注释为准）**：
-两小节 = `row_count u32` + `row_count × 24B {kind i32, data i32, extra i32}`
-（类型行表）→ `term_count u32` + `term_count × 40B {tag i32, a i32, b i32,
-c i32, d i32}`（类型项 DAG；**哈希不落盘**——加载侧由五字段重算 `tt_hash5`）。
+**段内容确定性（D13）**：段体 = 类型表/接口表的**纯函数**（与判定历史无关）——
+写侧 `save` 前做「项层规范化重建」（`ccr_types.cr:ccr_type_populate`：项层/引擎/
+桥接三面复位 → 按行序逐行装填 → 序列化），故项 DAG 行号 = 行序遍历的构造序。
+（注：**行表本身**的冷/热 `.cir` 缓存态分歧 = 既有的前端行分配面——缓存命中跳过
+ir_gen 的 `alloc_type`，`ptr_arith` 实测冷 15 行/热 12 行且热 = 冷前缀；见 P4
+Task 2 报告，本 spec 只记段面。）
+
+**loader 校验（违规 = 拒绝，三态纪律 C.5-3）**：段必备（D11）+ 两小节计数/长度
+自洽 + 段体无尾随字节 + `tag ∈ 0..10`（TT_*）+ `a..d ≥ -1` + **子项引用 -1 或
+< 自身行号**（拓扑无环；标注槽按 tag 分派跳过——ATOM 的 a/b、MU/VAR 的 a 等，
+字段表见 `ccr_io.cr:ccr_type_term_ref_ok`）。载入 = 重建 `g_types` 行表 +
+`g_type_terms` 项表 + `g_tt_index` 索引（`grow_tt_index`/`tt_reindex` 重放），
+失败整体拒绝（**不得**留空表）。
+
+**读回通道**：`corearch --dump-types`（corec 侧 `ccr --dump-types` 同一打印路径，
+含项层原语 probe 行 = `tt_norm`/`tt_is_dnf`/`tt_is_literal` 在同构重建表上的
+逐点同值证据）——跨进程行格式对拍载体（tests/selfhost/test_ccr_types.py）。
+**未覆盖面**：判定原语（`ty_sub`/`ty_equiv`/`ty_disjoint` 族，`type_engine.cr`）
+跨进程同值未覆盖——该文件不入 corearch 清单（两条既有 TF01 诊断触发 project-mode
+`error[`=0 门），归 Task 3/4/P5 收口（T2 报告登记）。
 
 ### 3.8 IFACE — 接口面（tag 8；R2 P4 Task 1 空壳，内容面归 Task 3）
 
@@ -132,7 +151,7 @@ c i32, d i32}`（类型项 DAG；**哈希不落盘**——加载侧由五字段�
 4. 段表 offset/size 界、ENT home/flags 读入放行——**裁决（2026-09-10 Task 2 review R3）**：loader 对 home≠-1 / flags≠0 **接受不拒绝**——home = 实例映射注记，.ccr = corec→corearch 传输中间物，实例层（分配/缓存映射）决策不写回格式；非 -1/非 0 值不构成损坏证据（无消费方依赖恒 -1/0 前提之外的安全面）。开放点 3 保留：未来实例层选择写回（非传输中间物用途）时重议
 5. magic/version（**`version == 8`**——R2 P4 Task 1 起；`version ≠ 8` 整类拒收，含全部 v7 六段文件——D10）；`ccr_i32_fits` 沿用（中间产物 < 4GB）
 6. **段集合完备性（R2 P4 Task 1，D11）**：`seg_cnt` 未满 / 缺任一必备段（STR/SYM/NOD/REG/EDG/**TYPE/IFACE**）⇒ 拒绝；ENT 仍可缺（v5 精神：旧段缺失 = 空表，`ccr_io.cr` 既有口径）。**「缺段 = 空表」仅适用于 ENT**——TYPE/IFACE 缺席必须响亮拒绝（可选段 = 两种 `.ccr` 在野 = 静默降级面）
-7. **空壳期段体校验（R2 P4 Task 1）**：TYPE/IFACE 段体恒 = 计数 u32 = 0 且恰 4B；非零计数 / 尾随字节 ⇒ 拒绝（内容面 Task 2/3 落地时本条退役，改为 D12/D14 的逐小节解析 + 重建）
+7. **空壳期段体校验（R2 P4 Task 1）**：IFACE 段体恒 = 计数 u32 = 0 且恰 4B；非零计数 / 尾随字节 ⇒ 拒绝（Task 3 落地时本条退役，改为 D14 的逐小节解析 + 重建）。**TYPE 段自 Task 2 起为内容面**——校验改为 §3.7 的逐条不变量（本条对 TYPE 不再适用）
 
 ## 5. 消费方影响
 

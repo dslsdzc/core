@@ -14,6 +14,19 @@ g_structs : string, mut;     g_struct_count : int, mut;   g_struct_cap : int, mu
 g_enums : string, mut;       g_enum_count : int, mut;     g_enum_cap : int, mut;
 g_syms : string, mut;        g_sym_count : int, mut;     g_sym_cap : int, mut;
 g_types : string, mut;       g_type_count : int, mut;     g_type_cap : int, mut;
+// 类型行表布局单源（R2 P4 Task 2）：24B/条 {kind,data,extra}（i64×3）——
+// alloc_type（checker.cr）/grow_types（dyn_arr.cr）/TYPE 段序列化与 dump（ccr_io.cr）
+// 三方共用，改一处即全改（此前为三处字面量 24/8/16 并行）。
+ESZ_TYPE_ROW : int = 24;
+OFF_TR_KIND : int = 0;  OFF_TR_DATA : int = 8;  OFF_TR_EXTRA : int = 16;
+
+// R2 P4 Task 2：TYPE(7) 段体缓冲（D18 解耦——段体**构造**在 corec-only 的
+// ccr_types.cr（引用桥接层 sh_term_of_ti：corearch 无此层），本文件只声明载体，
+// ccr_io.cr（corearch 也链接）只按段表搬运/解析）。缓冲**含段体首字段**
+// （row_count u32），故段体大小 ≡ 缓冲长度（ccr_type_seg_size 单源）。
+// 声明位置约束：本文件恒在最前（双 concat 共享面）——若把两件挪进 ccr_types.cr
+// （corearch 清单不含），ccr_io.cr 的引用即 corearch 侧 N06 静默未定义（B.6 同族）。
+g_ccr_type_seg : string, mut;   g_ccr_type_seg_len : int, mut;
 g_ast : string, mut;         g_ast_count : int, mut;     g_ast_cap : int, mut;
 g_tokens : string, mut;      g_token_count : int, mut;   g_tok_cap : int, mut;
 g_errors : string, mut;      g_error_count : int, mut;   g_err_cap : int, mut;

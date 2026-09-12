@@ -271,6 +271,7 @@ fn corearch_main() -> int {
     cli_flag_bool("inject-read-gap", "", "Hidden debug: truncate last version interval to def point, then verify (test hook)");
     cli_flag_bool("inject-coexist-oob", "", "Hidden debug: probe entries_coexist with OOB indices (GC-1 test hook)");
     cli_flag_bool("dump-objects", "", "Hidden debug: dump loaded NOD/EDG semantic objects via object-surface accessors (内核完备 Task 1 test channel)");
+    cli_flag_bool("dump-types", "", "Hidden debug: dump loaded TYPE segment content (row table + term DAG + judgment probe; R2 P4 Task 2 read-back channel)");
 
     if cli_parse() != 0 { return 1; }
     // 注册契约引导（Task 3）：读 flag → 查表选实例（--table 值存在 → 表模式
@@ -339,6 +340,15 @@ fn corearch_main() -> int {
     r := load_ccr(buf, fsize);
     if r != 0 { println("error: invalid .ccr file"); return 1; }
     init_backend_arrays();
+
+    // --dump-types（R2 P4 Task 2 读回通道）：载入 TYPE 段重建后的行表/项 DAG 打印
+    // ——与 corec 侧 `ccr --dump-types` 共用同一条打印路径（ccr_io.cr 的
+    // ccr_type_surface_dump；跨进程逐行对拍 + probe 行 = 判定原语同值）。不依赖
+    // 线性流（在被重建前返回 0——不触发发射路径）。
+    if cli_has("dump-types") != 0 {
+        ccr_type_surface_dump();
+        return 0;
+    }
 
     // 内核完备 Task 1（调度重建移实例）：loader 只产语义对象——线性流
     // （g_ir_instrs）重建 = 实例事务（build_linear_schedule，regalloc.cr——
