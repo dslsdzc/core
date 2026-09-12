@@ -126,7 +126,7 @@ fn lit_empty_pair(p: int, q: int) -> int {
 }
 
 // 独立缓冲版（避免侧缓冲互踩：sub_cover 需同时持有 p/q 两侧字面集）
-fn lits_contradictory_buf(buf: int, n: int) -> int {
+fn lits_contradictory_buf(buf: string, n: int) -> int {
     i : ., mut = 0;
     loop {
         if i >= n { break; }
@@ -143,8 +143,11 @@ fn lits_contradictory_buf(buf: int, n: int) -> int {
     return 0;
 }
 
-// 收集 product 的字面到独立缓冲，返回缓冲指针（元素数 = g_ty_lits_count）
-fn lits_copy(p: int) -> int {
+// 收集 product 的字面到独立缓冲，返回缓冲（元素数 = g_ty_lits_count）
+// 返回型 = `string`：`alloc` 在类型模型里就是 `() -> string`（checker.cr 的 bi_add("alloc",
+// TI_STR)），本值流转面也全按字节缓冲走（`r64`/`w64`/`lits_contradictory_buf` 皆收 string）
+// ——旧声明 `-> int` 是真·类型洗白（TF01；check 作业 rc=1 划界之一，本批修）。
+fn lits_copy(p: int) -> string {
     ty_lits_reset();
     lit_collect(p);
     n := g_ty_lits_count;

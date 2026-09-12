@@ -195,7 +195,7 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 
 > P3b = Task 0（契约回补 `9aa1786c`）/ Task 2（横切接口 `44100ba4`）/ Task 6（impl 契约 `e838f18b`）三件；本 Task = 三份任务报告（`.superpowers/sdd/p3b-task{0,2,6}-report.md`）之上的**阶段收官**——全量回归 + 判据复验 + 台账统一 + P4 交接包（附录 C）。判据口径继承：**本轮实跑 vs 继承基线逐条标注**（收官报告 §1/§2）。
 
-- [x] **Step 1: 全量回归**——五 CI job（selfhost-tests / bootstrap-tests / suite / full-bootstrap / check）rc + 逐档计数；全枚举 selfhost 45 档 + bootstrap 7 档逐档 rc；`check` job rc=1 = **既有 red 划界**（恰 2 条 TF01 误报 `lits_copy`/`ty_memo_slot_no_grow`，非本批引入）。✅ 实测见收官报告 §1。
+- [x] **Step 1: 全量回归**——五 CI job（selfhost-tests / bootstrap-tests / suite / full-bootstrap / check）rc + 逐档计数；全枚举 selfhost 45 档 + bootstrap 7 档逐档 rc；`check` job rc=1 = **既有 red 划界**（恰 2 条 TF01 误报 `lits_copy`/`ty_memo_slot_no_grow`，非本批引入）。✅ 实测见收官报告 §1。【**2026-09-13 更新**：两条已修（TODO #40）⇒ `check src/compiler` rc=0，该划界口径作废（行保留为当期实跑记录）。】
 - [x] **Step 2: 判据复验**——`clean-cache` → ELF canary `95084e7b…d475` IDENTICAL；`corec2/corec3` `cmp` IDENTICAL + N06=0 + 冒烟 42 + `corec3 --help` rc=1（既有约定）；`.ccr` 面（`ptr_arith`/`generics_test`）。✅ 实测见收官报告 §2。
 - [x] **Step 3: 统一台账**（P3b 三件聚合；下表 = 收紧 **10** / 放宽 **0** / 崩溃修复 **1**；全语料零命中，逐任务同源对拍零差异）
 - [x] **Step 4: P3 总状态 + 未开工清单**（见本节末）

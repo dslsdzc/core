@@ -105,12 +105,15 @@ backend_support_files = [
     # 重建索引（grow_tt_index→tt_reindex）、复位项层（tt_layer_reset），--dump-types
     # 通道还要跑项层原语（tt_norm/tt_is_dnf）⇒ type_terms.cr **必须先于 ccr_io.cr**
     # 入 corearch 清单（清单顺序 = 常量可见性约束——ESZ_TYPE_TERM/OFF_TT_*/TT_*
-    # 在本文件；iface_registry.cr:18-23 先例）。**type_engine.cr 不入 corearch**：
-    # 它带两条既有诊断（lits_copy 真·类型洗白 TF01 + ty_memo_slot_no_grow 的
-    # loop-落空误报，`check` 作业 rc=1 的既定划界）——入清单即触发 project-mode
-    # `error[`=0 门（test_backend_bootstrap）；判定原语（ty_sub 族）跨进程同值
-    # 因此**未覆盖**（登记于 T2 报告，归 Task 3/4/P5 收口）。
+    # 在本文件；iface_registry.cr:18-23 先例）。
+    # **TF01 收口（2026-09-13）**：type_engine.cr 本条**入 corearch**——原阻塞 = 该文件
+    # 带两条诊断（lits_copy 真·类型洗白 TF01 + ty_memo_slot_no_grow 的 loop-落空误报）
+    # ⇒ 入清单即触发 project-mode `error[`=0 门（test_backend_bootstrap）。两条已修
+    # （lits_copy 返回型改 string；落空分析入 checker.cr）⇒ 判定原语（ty_sub 族）跨进程
+    # 同值面**解阻**（T2 报告的 Task 3/4/P5 收口路径 (a)；探针可另批接）。
+    # 位置 = type_terms 之后（tt_* 常量可见性）、ccr_io 之前（读回路径无关，仅为阅读序）。
     'src/compiler/type_terms.cr',
+    'src/compiler/type_engine.cr',
     'src/compiler/ccr_io.cr',
     'src/stdlib/hotpatch.cr',
     'src/stdlib/arena.cr',

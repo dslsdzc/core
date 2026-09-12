@@ -147,10 +147,11 @@ fn sh_map_cap_init() {
 // 无守卫探测（**只可在扩容守卫之后调用**；sh_map_rehash 重放时借道这里）：
 // 命中返回槽位，未命中返回空槽位（不插入）。
 // 形态 = tt_term 的探测循环（ret + break + 尾 return），**不**用「循环体内裸 return 收尾」
-// （如 ty_memo_slot_no_grow）：后者是自托管 checker 的已知误报面——函数体以无 break 的
-// loop 收尾时它按「落空 = 返回 unit」判 → TF01 "Function return type mismatch"（实跑
-// `check src/compiler/main.cr` 对 lits_copy / ty_memo_slot_no_grow 各报一条）。本函数
-// 是 typed 探测，尾 return 语义等价且不给 P1 Task 3 的语料日志添新误报行。
+// （如 ty_memo_slot_no_grow）：后者曾是自托管 checker 的误报面——函数体以无 break 的 loop
+// 收尾时它按「落空 = 返回 unit」判 → TF01 "Function return type mismatch"。**该误报已修**
+// （TF01 收口：checker.cr 的 `stmt_cannot_fall_through`/`loop_body_has_break` 落空分析 +
+// type_engine.cr 的 `lits_copy` 返回型改 string），此处形态保留仅为 typed 探测的旧写法，
+// 不再有「不许这么写」的合规约束（不过改写无益，故不动）。
 fn sh_map_find_nogrow(ti: int) -> int {
     cap := g_shadow_map_cap;
     // 非负槽位（负数取模 = 负下标 → 探针越界；与引擎 tt_mod 同式同因——直接复用引擎

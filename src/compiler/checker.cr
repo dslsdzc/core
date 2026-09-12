@@ -632,6 +632,132 @@ fn scan_for_yield(node: int) -> int {
     return 0;
 }
 
+// ─── 落空（fall through）分析 —— TF01 收口 ───
+// 背景：函数体返回检查（站点 5）以「块类型 = 末语句类型」判返回；以**无 break 的 loop**
+// 收尾的体运行时永不走到函数尾（只能从体内 return 出），其「unit」不是缺返回值的证据
+// ⇒ 历史误报一例 `ty_memo_slot_no_grow`（ty_shadow.cr 记载面）。判定**保守**：只认确定
+// 不能落空的形态，其余一律回 0（= 可落空 = 照旧判 TF01）——真落空体绝不能溜过
+// （那是静默接受洞，比误报危险得多）。
+
+// 循环体内是否存在**直属于本循环**的 break（嵌套 loop/while/for 内的 break 归内层 ⇒
+// 在循环节点处截断、不下钻）。返回 1 亦覆盖「形态未知」（默认兜底）——未知按「可能有
+// break」处理 = fail-closed：宁可照旧报 TF01，也不误判「无 break ⇒ 永不落空」。
+fn loop_body_has_break(node: int) -> int {
+    if node < 0 { return 0; }
+    k := ast_kind(node);
+    if k == EXPR_BREAK { return 1; }
+    if k == EXPR_LOOP || k == EXPR_WHILE || k == EXPR_FOR { return 0; }
+    if k == EXPR_BLOCK {
+        ss := ast_a(node); sc := ast_b(node);
+        i : ., mut = 0;
+        loop { if i >= sc { break; }
+            if loop_body_has_break(r64(g_block_stmts, (ss + i) * 8)) != 0 { return 1; }
+            i = i + 1; }
+        return 0;
+    }
+    if k == EXPR_IF {
+        if loop_body_has_break(ast_a(node)) != 0 { return 1; }
+        if loop_body_has_break(ast_b(node)) != 0 { return 1; }
+        return loop_body_has_break(ast_c(node));
+    }
+    if k == EXPR_MATCH {
+        // 臂 = EXPR_ARM 链（parser 以 arm.c 串联，尾 -1）——**非连续槽**，勿按段扫
+        if loop_body_has_break(ast_a(node)) != 0 { return 1; }
+        an : ., mut = ast_b(node);
+        loop { if an < 0 { break; }
+            if loop_body_has_break(ast_b(an)) != 0 { return 1; }
+            an = ast_c(an); }
+        return 0;
+    }
+    if k == EXPR_ARM || k == EXPR_BINARY || k == EXPR_ASSIGN || k == EXPR_INDEX ||
+       k == EXPR_RANGE || k == EXPR_AS || k == EXPR_ARG || k == EXPR_CALL {
+        if loop_body_has_break(ast_a(node)) != 0 { return 1; }
+        return loop_body_has_break(ast_b(node));
+    }
+    if k == EXPR_ENUM_CONSTRUCTOR || k == EXPR_AT {
+        // a = 名 ni（**不是节点**）：只下钻实参链（b）
+        return loop_body_has_break(ast_b(node));
+    }
+    if k == EXPR_GO {
+        // a 恒 -1、体在 b（range 形态另有 c/data）；a/b 双下钻 = 保守（go 体内 break 不漏判）
+        if loop_body_has_break(ast_a(node)) != 0 { return 1; }
+        return loop_body_has_break(ast_b(node));
+    }
+    if k == EXPR_LET {
+        // a = 名 ni（**不是节点**）：只下钻类型（b）与值（c）
+        if loop_body_has_break(ast_b(node)) != 0 { return 1; }
+        return loop_body_has_break(ast_c(node));
+    }
+    if k == EXPR_STRUCT || k == EXPR_STRUCTPAT || k == EXPR_ENUMPAT || k == EXPR_GENERIC_APPLY {
+        // 连续子节点段：首 b、个数 c（wrapper.a = 值/子模式，经 EXPR_NONE 分支承接）
+        return seg_has_break(ast_b(node), ast_c(node));
+    }
+    if k == EXPR_ARRAY || k == EXPR_TUPLE {
+        return seg_has_break(ast_a(node), ast_b(node));
+    }
+    if k == EXPR_NONE {
+        // wrapper（a = 值节点）或基类型节点（a = 0）：照 monomorph 的判据
+        if ast_a(node) >= 0 && ast_a(node) != node { return loop_body_has_break(ast_a(node)); }
+        return 0;
+    }
+    if k == EXPR_STMT || k == EXPR_UNSAFE || k == EXPR_RETURN || k == EXPR_YIELD ||
+       k == EXPR_AWAIT || k == EXPR_MOVE || k == EXPR_TRY || k == EXPR_UNARY ||
+       k == EXPR_FIELD || k == EXPR_OPTIONAL || k == EXPR_REFTYPE || k == EXPR_PTRTYPE {
+        return loop_body_has_break(ast_a(node));
+    }
+    if k == EXPR_INT || k == EXPR_DEX || k == EXPR_BOOL || k == EXPR_STRING ||
+       k == EXPR_IDENT || k == EXPR_CHAR || k == EXPR_WILDCARD || k == EXPR_CONTINUE {
+        return 0;
+    }
+    // 兜底（含 EXPR_FN/PARAM/FLOW/EXTERN 等未枚举形态）：按「可能有 break」保守处理
+    return 1;
+}
+
+fn seg_has_break(first: int, count: int) -> int {
+    if first < 0 { return 0; }
+    i : ., mut = 0;
+    loop { if i >= count { break; }
+        n := first + i;
+        if n >= 0 && n < g_ast_count {
+            if loop_body_has_break(n) != 0 { return 1; }
+        }
+        i = i + 1; }
+    return 0;
+}
+
+// 语句是否**不能落空**（走到本语句之后的代码）：1 = 确定不能，0 = 可能落空（保守默认）。
+// 注意 `return` 在此**不判 divergence**：它虽然「不能走完」，但**带返回值**——本分析只服务
+// 「块末语句类型是否代表函数返回值」这一问，而 return 的值类型恰是该问的被检对象（豁免它
+// = 洗白真错面，lits_copy 型）。故只认**不产出值**的不可落空形态：无直系 break 的 loop、
+// 双分支皆不可落空且无 else 的 if、包裹层（STMT/UNSAFE/嵌套 block）。
+// **登记面**：非落空体内的 return 值类型本分析**不核对**（checker 现模型无逐 return 核对；
+// 该面 = 既有面——本条只把「以无 break 的 loop 收尾」从 TF01 误报中解放，不新增核对）。
+fn stmt_cannot_fall_through(node: int) -> int {
+    if node < 0 { return 0; }
+    k := ast_kind(node);
+    if k == EXPR_BLOCK {
+        ss := ast_a(node); sc := ast_b(node);
+        i : ., mut = 0;
+        loop { if i >= sc { break; }
+            if stmt_cannot_fall_through(r64(g_block_stmts, (ss + i) * 8)) != 0 { return 1; }
+            i = i + 1; }
+        return 0;
+    }
+    if k == EXPR_LOOP {
+        // 无直系 break ⇒ 只可能从体内 return 出（loop_body_has_break 的未知 = 1 保证
+        // 此处判 1 只在**确定**无 break 时成立）
+        if loop_body_has_break(ast_a(node)) == 0 { return 1; }
+        return 0;
+    }
+    if k == EXPR_IF {
+        if ast_c(node) < 0 { return 0; }   // 无 else：条件不成立即落空
+        if stmt_cannot_fall_through(ast_b(node)) == 0 { return 0; }
+        return stmt_cannot_fall_through(ast_c(node));
+    }
+    if k == EXPR_STMT || k == EXPR_UNSAFE { return stmt_cannot_fall_through(ast_a(node)); }
+    return 0;
+}
+
 // --- Symbol table ---
 struct SymEntry {
     name_idx: int,
@@ -2114,7 +2240,10 @@ fn check_func(fi: int) {
         }
         sh_site_begin(5);   // 站点 5 = 函数体返回类型
         compat := type_compat_strict(body_ti, ret_ti);
-        if compat != 1 && body_ti != TI_NEVER {
+        // 落空分析（TF01 收口，见 stmt_cannot_fall_through 头注）：体确定不能落空（如以
+        // 无 break 的 loop 收尾）⇒ 「块类型 = 末语句类型」推出的 unit 不是缺返回值的证据，
+        // 等价于 never 格（与下行既有 TI_NEVER 豁免同路）。
+        if compat != 1 && body_ti != TI_NEVER && stmt_cannot_fall_through(body) == 0 {
             // Skip check if return type is generic param (can't verify at declaration)
             // Skip check for flow functions (yield instead of return)
             is_flow_fn : ., mut = 0;

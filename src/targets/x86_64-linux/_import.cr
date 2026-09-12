@@ -28,10 +28,13 @@ import lower_to_core
 // 通道的项层原语（tt_norm/tt_is_dnf/tt_is_literal）。**必须先于 ccr_io 入本清单**
 // （常量可见性：ESZ_TYPE_TERM/OFF_TT_*/TT_*——若漏列本行，project-mode corearch
 // 单元即 N06 静默未定义，B.6 同族；concat 面 = backend_support_files 头部同位置）。
-// **type_engine.cr 不入本清单**：既有两条诊断（lits_copy 类型洗白 TF01 +
-// ty_memo_slot_no_grow loop-落空误报）会触发本单元的 project-mode `error[`=0 门
-// （test_backend_bootstrap）；判定原语跨进程同值因此未覆盖（T2 报告登记）。
+// **type_engine.cr（TF01 收口 2026-09-13 起入本清单）**：原阻塞 = 该文件带两条诊断
+// （lits_copy 类型洗白 TF01 + ty_memo_slot_no_grow loop-落空误报）会触发本单元的
+// project-mode `error[`=0 门（test_backend_bootstrap）；两条已修（lits_copy 返回型改
+// string；落空分析入 checker.cr）⇒ 判定原语（ty_sub 族）跨进程同值面解阻
+// （T2 报告的收口路径 (a)）。位置 = type_terms 之后、ccr_io 之前（同 concat 面）。
 import type_terms
+import type_engine
 import ccr_io
 import ent_kernel
 // 内核完备 Task 1（调度重建移实例）：build_linear_schedule（regalloc.cr——

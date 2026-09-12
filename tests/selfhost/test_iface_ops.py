@@ -254,10 +254,13 @@ def main():
                       "fn f() -> char { return 'a'; }\nfn main() -> int { c := f(); return 0; }\n"))
     #   ② **两表唯一差异格 = NEVER**：res_call_type 对调用位点的 `-> never` 返回 unit（现状），
     #      res_type_node 对类型位 `x : never = 1` 映 TI_NEVER——后者由 t6_S1/S3/S4/S6 的排除面互为镜像
+    # TF01 收口（2026-09-13）：`fn g[T](a: T) -> never { loop { } }` 体以**无 break 的 loop**
+    # 收尾 ⇒ 不落空 ⇒ 站点 5 不再误报 TF01@1（该函数语义上确为 never 函数）。本用例的关注面 =
+    # 调用位点（`never` 在调用位点被当 unit ⇒ @raw_int 报 TF07@2），该面**不变**。
     ok.append(case_diag_lines("t6_C_never_call_unit",
                               "fn g[T](a: T) -> never { loop { } }\n"
                               "fn main() -> int { x := g(1); y := @raw_int(x); return 0; }\n",
-                              [("TF01", 1), ("TF07", 2)]))
+                              [("TF07", 2)]))
     # 对照（同一调用位点、`-> int`）：:1615 路径确实在判（unit 兜底假设下 @raw_int 必报 TF07）
     ok.append(case_ok("t6_C_int_call_ctrl",
                       "fn g[T](a: T) -> int { return 1; }\n"
@@ -273,10 +276,12 @@ def main():
                               [("TF01", 2)]))
     ok.append(case_ok("t6_S3_char_covered",
                       "extern fn f() -> char;\nfn main() -> char { x := f(); return x; }\n"))
+    # TF01 收口（2026-09-13）：TF01@1 = 同为「无 break 的 loop 收尾」误报面（已修）；
+    # 本用例的关注面 = S1 链域（`never` 声明经该链落到 unit ⇒ TF01@2），该面**不变**。
     ok.append(case_diag_lines("t6_S1_never_unit",
                               "fn f() -> never { loop { } }\n"
                               "fn main() -> never { x := f(); return x; }\n",
-                              [("TF01", 1), ("TF01", 2)]))
+                              [("TF01", 2)]))
     ok.append(case_diag_lines("t6_S3_never_unit",
                               "extern fn f() -> never;\n"
                               "fn main() -> never { x := f(); return x; }\n",
@@ -300,12 +305,14 @@ def main():
                       "impl S { fn show(self: S) -> int { return 1; } }\n"
                       "fn f[T: Show](a: T) -> int { x := a.show(); return x; }\n"
                       "fn main() -> int { s := S { a: 1 }; return f(s); }\n"))
+    # TF01 收口（2026-09-13）：TF01@3 = 同为「无 break 的 loop 收尾」误报面（已修）；
+    # 本用例的关注面 = S6 iface 返回链（域缺 NEVER ⇒ @raw_int 报 TF07@4），该面**不变**。
     ok.append(case_diag_lines("t6_S6_iface_never_unit",
                               "interface Show { fn show(self) -> never; }\n" + T6_S6 +
                               "impl S { fn show(self: S) -> never { loop { } } }\n"
                               "fn f[T: Show](a: T) -> int { x := a.show(); y := @raw_int(x); return 0; }\n"
                               "fn main() -> int { s := S { a: 1 }; return f(s); }\n",
-                              [("TF01", 3), ("TF07", 4)]))
+                              [("TF07", 4)]))
     ok.append(case_ok("t6_S6_iface_char_covered",
                       "interface Show { fn show(self) -> char; }\n" + T6_S6 +
                       "impl S { fn show(self: S) -> char { return 'a'; } }\n"

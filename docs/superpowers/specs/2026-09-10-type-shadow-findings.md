@@ -350,7 +350,7 @@ rsync -a --exclude .jj --exclude .git --exclude build --exclude .core ./ /tmp/r2
 | 9 | dyn = ⊤ 近似 + **逐行**方法表判定 `:1870-1893` ←`:1865-1888`（64 钳位 `:1834-1843`） | `d.nosuch()` → `error[N08]`——**int/string 候选行也报**（名拼接方法表判定，非类级） | `IP_METHOD` 恰 {dyn, named}（类级位表达不了逐行谓词；装上 = 抑制既有 N08 = 放宽） | 不接线 | ① (方法名 × 类型行) 二维判定；② 解除位图 64 上限（spec §3.3） |
 | 10 | **range 索引非数组落空静默** `:2637` ←`:2611-2628` | 串/切片/int 的 range 索引 **rc=0 静默**（落空 `return TI_UNIT` 无诊断） | `IP_INDEX_RANGE` 恰 {sequence}（未接线） | 不接线（无诊断 ⇒ 门恒真） | 落空分支加诊断，或把「串 range」定为 slice 语义（**语义裁决**，须先有全语料证据） |
 
-**P2b 收紧清单（「旧接受 → 新拒绝」）= 空**（零条；反向「旧拒绝 → 新接受」亦零条）。证据 = 同源双编译器对拍（旧二进制 × 新源 == 新二进制 × 新源）：21 档 `tests/suite` 语料 check 输出（stdout+stderr+rc）逐字节同 · 自源 `check src/compiler` 逐字节同（仅既有 2 条 TF01 误报 `lits_copy`/`ty_memo_slot_no_grow`，两侧一致）· 4 档 `.ccr` 逐字节同（`ecd7a9df…`/`891377232b…`/`35cf0f26…`/`dfb82d2b…`）· 32 档影子通道逐字节同 · ELF canary `95084e7b…d475`（开/关两态同）；逐任务另有各自的前一任务基线对拍（Task 1~6 报告 §判据）。**站点台账（31 个未接线站点 + 接线面清单 + P3 裁决点）见 `docs/superpowers/plans/2026-09-11-r2-p3-capabilities.md` 附录 A。**
+**P2b 收紧清单（「旧接受 → 新拒绝」）= 空**（零条；反向「旧拒绝 → 新接受」亦零条）。证据 = 同源双编译器对拍（旧二进制 × 新源 == 新二进制 × 新源）：21 档 `tests/suite` 语料 check 输出（stdout+stderr+rc）逐字节同 · 自源 `check src/compiler` 逐字节同（仅既有 2 条 TF01 误报 `lits_copy`/`ty_memo_slot_no_grow`，两侧一致）【**2026-09-13 更新（TODO #40 TF01 收口）**：`lits_copy` 为真·类型洗白（返回型改 `string`），`ty_memo_slot_no_grow` 为 checker 落空分析缺失（`stmt_cannot_fall_through` 落空分析入 checker.cr）⇒ `check src/compiler` 现 rc=0；本句为当期实跑记录】· 4 档 `.ccr` 逐字节同（`ecd7a9df…`/`891377232b…`/`35cf0f26…`/`dfb82d2b…`）· 32 档影子通道逐字节同 · ELF canary `95084e7b…d475`（开/关两态同）；逐任务另有各自的前一任务基线对拍（Task 1~6 报告 §判据）。**站点台账（31 个未接线站点 + 接线面清单 + P3 裁决点）见 `docs/superpowers/plans/2026-09-11-r2-p3-capabilities.md` 附录 A。**
 
 ---
 
