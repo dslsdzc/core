@@ -1130,6 +1130,10 @@ fn load_ccr(data: string, fsize: int) -> int {
             w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + zvi * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, 0);
             ztj : ., mut = 0;
             loop { if ztj >= 16 { break; } w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + zvi * OFF_EV_SIZE + OFF_EV_TYPES + ztj * 8, 0); ztj = ztj + 1; }
+            // R2 P3 Task 4：载荷**类型节点**列（编译期信息）**不落 .ccr**（v7 段布局不动）⇒
+            // 读回侧恒 0（= 无信息）；消费者以 OFF_EV_TYPE_COUNT 为界，不得据 0 反推「节点 0」。
+            znt : ., mut = 0;
+            loop { if znt >= 16 { break; } w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + zvi * OFF_EV_SIZE + OFF_EV_TYPE_NODES + znt * 8, 0); znt = znt + 1; }
             zvi = zvi + 1;
         }
         w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 0);

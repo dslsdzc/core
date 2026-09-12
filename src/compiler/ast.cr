@@ -245,6 +245,10 @@ EXPR_STRUCTPAT : int = 35; // struct pattern: a=name ni, b=first wrapper（连�
 EXPR_AS : int = 36;        // a=expr, b=type node (cast: expr as Type)
 EXPR_PTRTYPE : int = 47;  // a=inner_type (for *T in type position)
 EXPR_EXTERN : int = 48;  // a=name_ni, b=first_param, c=param_count, data=ffi_lang_ni
+// R2 P3 Task 4：`T?` 的目标形态（退役「T? → EXPR_GENERIC_APPLY(Option, T)」的**名字依赖**：
+// 旧形态要求内建 Option 名注册在符号表里，且 §5.4 的「T? = T ∪ null」无法表达）。
+// a = 内层类型节点。-1 内层 / 非法形态 → res_type_node 落 TI_UNIT（照各类型节点分支同款）。
+EXPR_OPTIONAL : int = 49;  // a=inner type node (T? 类型位置)
 
 // Field representation in struct literal: two consecutive AST nodes
 // (name_idx, value_idx, line=line, col=col)
@@ -311,6 +315,13 @@ TYP_GENERIC_APPLY : int = 8;  // data = base type idx, extra = arg list start in
 TYP_SLICE : int = 9;   // data = element type idx (dynamic-length view into array)
 TYP_TUPLE : int = 10;  // data = element_count, extra = elem types start in g_gen_apply_data
 TYP_DYN : int = 11;  // data = type set bitmap (0 = single known type)
+// R2 P3 Task 4（联合/可选）：`T?` = `T ∪ null`（spec §5.4）——不再是「内建 Option[T] 命名类型」。
+// data = 内层类型行；桥接侧译作 union(内层项, null 原子项)（ty_shadow.cr 的 TYP_OPTIONAL 分支）。
+// 引擎面 = 联合项（非原子类）⇒ `iface_kind_of` 对之行回 -1（不得按单一原子处理）。
+TYP_OPTIONAL : int = 12;  // data = inner type idx（T? = T ∪ null）
+// `null` 的类型（`None` 值的类型；spec §5.4 的「T ∪ null」里的 null）。值域单点 ⇒ 引擎侧
+// AK_NULL 原子（原生第九员）；行不带参数（None 无载荷）。与 AK_UNIT/AK_NEVER 均不相交。
+TYP_NULL : int = 13;  // 无字段（data/extra 恒 0）
 
 // Error codes: category * 1000 + number, matching docs/error-codes.md
 // Category 0 = unclassified (000-)

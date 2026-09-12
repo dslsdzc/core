@@ -1471,6 +1471,144 @@ fn type_selftest_run() -> int {
          sh_match_exhaustive(t3_go_ga, tt_cons(t3_gn, tt_cons(t3_gs, tt_nil())), 0) == 1 &&
          sh_match_exhaustive(t3_go_ga, tt_cons(t3_gn, tt_nil()), 0) == 0), 1);
 
+    // ═══ R2 P3 Task 4：联合/可选（`T?` = `T ∪ null`；退役内建 Option 注册）═══
+    // 判据面 = ① 项层：`T?` 行译作 union(内层项, null 原子项)——与**独立构造**的并项等价；
+    // ② 子类型/不相交/可空：None ⊆ T?、Some(1) ⊆ int?、null ⊥ int（与 unit/never 亦不相交）、
+    //    null 有值（单点域）；③ null 行规范化（同一项，两行不分裂）；④ 判定点注入的**方向性**
+    //    （T ⊆ T? 放行 / T? ⊄ T 拒绝——soundness 面）；⑤ match 域面（两分支：有值 + None）与
+    //    反例命名、通配吸收、不可映射守卫、非可选域零变化；⑥ 枚举载荷**类型节点列**（T0 交接 ①：
+    //    裸码塌缩为 0 = TY_INT，节点列才是载荷真值——本组以「码说是 int、节点说是 string」的
+    //    反向夹具把节点列的读取钉死）；⑦ 退役面（Option 无命名行、AK_NULL 无注册表条目）。
+    // 夹具：行 = alloc_type/alloc_named_type；枚举表照 parser 写槽序人工落（两列都写）。
+    init_types();
+    ty_budget_reset(200000);
+    t4_null := alloc_type(TYP_NULL, 0, 0);            // None 的类型行（每出现点一行）
+    t4_null2 := alloc_type(TYP_NULL, 0, 0);           // 第二个出现点（规范化判据用）
+    t4_int_opt := alloc_type(TYP_OPTIONAL, TI_INT, 0);
+    t4_str_opt := alloc_type(TYP_OPTIONAL, TI_STR, 0);
+    t4_intt := sh_term_of_ti(TI_INT);
+    t4_nullt := sh_null_term();
+    t4_optt := sh_term_of_ti(t4_int_opt);
+    // ① 项层：`int?` 项 = int ∪ null（与独立构造的并项等价），且 **不等于** 裸 int
+    total = total + 1; fails = fails + ts_check("t4.opt_term_is_union",
+        (ty_equiv(t4_optt, tt_union(t4_intt, t4_nullt)) == 1 &&
+         ty_equiv(t4_optt, t4_intt) == 0 && ty_sub(t4_intt, t4_optt) == 1), 1);
+    // ② 子类型/不相交/可空
+    total = total + 1; fails = fails + ts_check("t4.none_sub_optional",
+        (ty_sub(t4_nullt, t4_optt) == 1 && ty_sub(t4_nullt, sh_term_of_ti(t4_str_opt)) == 1 &&
+         ty_sub(t4_optt, t4_nullt) == 0 && ty_sub(t4_optt, t4_intt) == 0), 1);
+    total = total + 1; fails = fails + ts_check("t4.some_sub_optional",
+        (ty_equiv(sh_term_of_ti(alloc_type(TYP_OPTIONAL, TI_INT, 0)), t4_optt) == 1), 1);
+    total = total + 1; fails = fails + ts_check("t4.null_disjoint_and_inhabited",
+        (ty_disjoint(t4_nullt, t4_intt) == 1 && ty_disjoint(t4_nullt, sh_term_of_ti(TI_UNIT)) == 1 &&
+         ty_disjoint(t4_nullt, sh_term_of_ti(TI_NEVER)) == 1 && ty_disjoint(t4_nullt, t4_nullt) == 0 &&
+         ty_inhabited(t4_nullt) == 1), 1);
+    // ③ null 行规范化：两个出现点译成**同一项**（节点同一），且互判包含
+    total = total + 1; fails = fails + ts_check("t4.null_row_canonical",
+        (sh_term_of_ti(t4_null) == sh_term_of_ti(t4_null2) &&
+         ty_sub(sh_term_of_ti(t4_null), sh_term_of_ti(t4_null2)) == 1), 1);
+    // ④ 判定点注入（type_compat_strict）：T ⊆ T? 放行、反向拒绝、异型拒绝；同型走身份路径
+    total = total + 1; fails = fails + ts_check("t4.sub_injection_asymmetry",
+        (type_compat_strict(TI_INT, t4_int_opt) == 1 && type_compat_strict(t4_int_opt, TI_INT) == 0 &&
+         type_compat_strict(TI_STR, t4_int_opt) == 0 && type_compat_strict(t4_null, t4_int_opt) == 1 &&
+         type_compat_strict(t4_int_opt, t4_int_opt) == 1 && type_compat_strict(TI_INT, t4_str_opt) == 0), 1);
+    // ⑤ 注册表/许可：null 与可选行都**不是**单一原子类 ⇒ -1（门全拒；AK_NULL 无条目）
+    total = total + 1; fails = fails + ts_check("t4.null_no_ops_no_entry",
+        (iface_kind_of(t4_null) == -1 && iface_kind_of(t4_int_opt) == -1 &&
+         iface_permits(-1, OP_ADD) == 0 && iface_entry(AK_NULL) == -1 && iface_count() == 13), 1);
+    // ⑥ AK_NULL 互斥公理全表（13 类逐类）：除 AK_DYN（⊤ 相容规则）与自身外皆不相交
+    t4_dj : ., mut = 0;
+    t4_k : ., mut = 0;
+    t4_aks := alloc(13 * 8);
+    w64(t4_aks, 0 * 8, AK_INT); w64(t4_aks, 1 * 8, AK_DEX); w64(t4_aks, 2 * 8, AK_STRING);
+    w64(t4_aks, 3 * 8, AK_BOOL); w64(t4_aks, 4 * 8, AK_UNIT); w64(t4_aks, 5 * 8, AK_NEVER);
+    w64(t4_aks, 6 * 8, AK_CHAR); w64(t4_aks, 7 * 8, AK_DYN); w64(t4_aks, 8 * 8, AK_PRODUCT);
+    w64(t4_aks, 9 * 8, AK_SUM); w64(t4_aks, 10 * 8, AK_SEQUENCE); w64(t4_aks, 11 * 8, AK_REF);
+    w64(t4_aks, 12 * 8, AK_PTR);
+    loop {
+        if t4_k >= 13 { break; }
+        ka := r64(t4_aks, t4_k * 8);
+        want : ., mut = 1;
+        if ka == AK_DYN { want = 0; }          // AK_DYN = ⊤：与一切相容（含 null）——登记
+        if ak_disjoint(AK_NULL, ka) != want { t4_dj = t4_dj + 1; }
+        t4_k = t4_k + 1;
+    }
+    total = total + 1; fails = fails + ts_check("t4.ak_null_disjoint_table",
+        (t4_dj == 0 && ak_disjoint(AK_NULL, AK_NULL) == 0 && ak_disjoint(AK_NULL, AK_NAMED) == 1), 1);
+    // ⑦ match 域面：可选域 = 两分支（有值 = Some 模式 / null = None 模式）
+    t4_some_pat := alloc_node(EXPR_ENUMPAT, str_intern("Some"), 0, 0, 0, 0, 0, 0, 0);
+    t4_none_pat := alloc_node(EXPR_ENUMPAT, str_intern("None"), 0, 0, 0, 0, 0, 0, 0);
+    t4_other_pat := alloc_node(EXPR_ENUMPAT, str_intern("Red"), 0, 0, 0, 0, 0, 0, 0);
+    t4_qual_pat := alloc_node(EXPR_ENUMPAT, str_intern("Option.Some"), 0, 0, 0, 0, 0, 0, 0);
+    t4_some_t := sh_match_opt_term(t4_int_opt, sh_match_opt_pat(t4_int_opt, t4_some_pat));
+    t4_none_t := sh_match_opt_term(t4_int_opt, sh_match_opt_pat(t4_int_opt, t4_none_pat));
+    t4_full := tt_cons(t4_some_t, tt_cons(t4_none_t, tt_nil()));
+    total = total + 1; fails = fails + ts_check("t4.match_opt_two_branch_cover",
+        (t4_some_t == t4_intt && t4_none_t == t4_nullt &&
+         sh_match_exhaustive(t4_int_opt, t4_full, 0) == 1 &&
+         sh_match_exhaustive(t4_int_opt, tt_cons(t4_some_t, tt_nil()), 0) == 0 &&
+         sh_match_exhaustive(t4_int_opt, tt_cons(t4_none_t, tt_nil()), 0) == 0), 1);
+    total = total + 1; fails = fails + ts_check("t4.match_opt_counterexample_naming",
+        (sh_match_first_missing(sh_match_bit(0), 2) == 1 &&
+         sh_match_first_missing(sh_match_bit(1), 2) == 0 &&
+         sh_match_first_missing(0, 2) == 0), 1);
+    total = total + 1; fails = fails + ts_check("t4.match_opt_wildcard_and_guards",
+        (sh_match_exhaustive(t4_int_opt, tt_cons(tt_top(), tt_nil()), 0) == 1 &&
+         sh_match_exhaustive(t4_int_opt, t4_full, 1) == -1 &&
+         sh_match_exhaustive(TI_INT, t4_full, 0) == -1 &&
+         sh_match_domain_term(TI_INT) == -1 && sh_match_domain_term(t4_str_opt) >= 0), 1);
+    total = total + 1; fails = fails + ts_check("t4.opt_pat_mapping",
+        (sh_match_opt_pat(t4_int_opt, t4_some_pat) == 0 && sh_match_opt_pat(t4_int_opt, t4_none_pat) == 1 &&
+         sh_match_opt_pat(t4_int_opt, t4_other_pat) == -1 && sh_match_opt_pat(t4_int_opt, t4_qual_pat) == -1 &&
+         sh_match_opt_pat(TI_INT, t4_none_pat) == -1), 1);
+    total = total + 1; fails = fails + ts_check("t4.opt_domain_leaf_count",
+        (ts_unf_union_leaves(sh_match_domain_term(t4_int_opt)) == 2 &&
+         ts_unf_union_leaves(sh_match_domain_term(t4_str_opt)) == 2), 1);
+    // ⑧ 枚举载荷类型节点列（T0 交接 ① 的消费面：sh_variant_payload_term）
+    t4_p_ei := add_enum("T4Payload");
+    w64(g_enums, t4_p_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T4Tag"));
+    // 变体 1：**裸码槽 = 0（= TY_INT，旧布局的全部信息）而节点列 = string** —— 节点列才是真值
+    w64(g_enums, t4_p_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T4Str"));
+    w64(g_enums, t4_p_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, 1);
+    w64(g_enums, t4_p_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_TYPES, TY_INT);
+    w64(g_enums, t4_p_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_TYPE_NODES, alloc_node(0, 0, 0, 0, 0, TY_STRING, 0, 0, 0));
+    w64(g_enums, t4_p_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 2);
+    t4_p_ti := alloc_named_type(str_intern("T4Payload"));
+    total = total + 1; fails = fails + ts_check("t4.payload_node_beats_bare_code",
+        (sh_variant_payload_term(t4_p_ti, str_intern("T4Str")) == sh_term_of_ti(TI_STR) &&
+         ty_disjoint(sh_variant_payload_term(t4_p_ti, str_intern("T4Str")), t4_intt) == 1 &&
+         sh_variant_payload_term(t4_p_ti, str_intern("T4Tag")) == -1 &&
+         sh_variant_payload_term(t4_p_ti, str_intern("T4Nope")) == -1), 1);
+    // ⑨ 载荷泛型代入：`enum T4GP[T] { T4S(T) }` 的 apply 行取实参项；两实例不同
+    t4_g_ei := add_enum("T4GP");
+    w64(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 1);
+    w64(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES, str_intern("T4GT"));
+    w64(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T4GS"));
+    w64(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, 1);
+    w64(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_TYPES, TY_INT);
+    w64(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_TYPE_NODES, alloc_node(EXPR_IDENT, 0, 0, 0, str_intern("T4GT"), 0, 0, 0, 0));
+    w64(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 1);
+    t4_g_ti := alloc_named_type(str_intern("T4GP"));
+    grow_gen_apply_data(g_gen_apply_data_count + 2);
+    t4_gs := g_gen_apply_data_count;
+    w64(g_gen_apply_data, t4_gs * 8, 1);
+    w64(g_gen_apply_data, (t4_gs + 1) * 8, TI_INT);
+    g_gen_apply_data_count = t4_gs + 2;
+    t4_g_ga := alloc_type(TYP_GENERIC_APPLY, t4_g_ti, t4_gs);
+    grow_gen_apply_data(g_gen_apply_data_count + 2);
+    t4_gs2 := g_gen_apply_data_count;
+    w64(g_gen_apply_data, t4_gs2 * 8, 1);
+    w64(g_gen_apply_data, (t4_gs2 + 1) * 8, TI_STR);
+    g_gen_apply_data_count = t4_gs2 + 2;
+    t4_g_ga2 := alloc_type(TYP_GENERIC_APPLY, t4_g_ti, t4_gs2);
+    total = total + 1; fails = fails + ts_check("t4.payload_generic_subst",
+        (sh_variant_payload_term(t4_g_ga, str_intern("T4GS")) == sh_term_of_ti(TI_INT) &&
+         sh_variant_payload_term(t4_g_ga2, str_intern("T4GS")) == sh_term_of_ti(TI_STR) &&
+         sh_variant_payload_term(t4_g_ga, str_intern("T4GS")) != sh_variant_payload_term(t4_g_ga2, str_intern("T4GS"))), 1);
+    // ⑩ 退役面：`Option` 名在类型表**零行**（内建注册已退役；用户声明才建行）
+    total = total + 1; fails = fails + ts_check("t4.option_not_registered",
+        (named_dedup_rows(str_intern("Option")) == 0 && find_gsym(str_intern("Option")) < 0), 1);
+
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }
     return 0;

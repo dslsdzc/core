@@ -25,6 +25,15 @@ AK_INT : int = 0;      AK_DEX : int = 1;     AK_STRING : int = 2;   AK_BOOL : in
 AK_UNIT : int = 4;     AK_NEVER : int = 5;   AK_CHAR : int = 6;     AK_DYN : int = 7;
 AK_PRODUCT : int = 8;  AK_SUM : int = 9;     AK_SEQUENCE : int = 10;
 AK_REF : int = 11;     AK_PTR : int = 12;    AK_FN : int = 13;      AK_NAMED : int = 14;
+// R2 P3 Task 4（联合/可选）：`null`（`None` 值的类型）——**原生第九员**，值域 = 单点。
+// 语义（spec §5.4）：`T?` = `T ∪ null`（桥接侧把 TYP_OPTIONAL 行译作该原子与内层项之并）。
+// 公理（ak_disjoint）：与一切异类原子**不相交**（含 AK_UNIT / AK_NEVER / AK_NAMED——null 不是
+// 任何别的原子类；与 AK_DYN 保持 DYN 的相容规则）；自身相等（x == y 早退）。
+// 可空：AK_NULL 是**有值**类型（唯一值 None）⇒ ty_inhabited = 1（引擎的 inh 只判字面矛盾，
+// 无需特例）。无类型参数（ty_variance_of 落表外默认不变，链恒空）。
+// 注册表：**不入 iface_registry 条目表**（IFACE_ENTRY_COUNT = 13 为 P2b 判据硬值；且本原子
+// 无操作许可 —— 算术/逻辑/条件门对其全拒，正是期望行为）⇒ `iface_kind_of` 对承载行回 -1。
+AK_NULL : int = 15;
 
 // ─── 字面收集侧缓冲（product 的字面集）───
 fn grow_ty_lits(needed: int) {
@@ -58,6 +67,11 @@ fn lit_collect(i: int) {
 fn ak_disjoint(x: int, y: int) -> int {
     if x == y { return 0; }
     if x == AK_DYN || y == AK_DYN { return 0; }
+    // R2 P3 Task 4：null 是**它自己的**单点原子类——与其余一切类不相交。位置在 AK_NEVER/
+    // AK_NAMED 两条之前：与 NEVER 相交（两者都无公共值）；与 NAMED 的「不得断言互斥」无关
+    // （NAMED 保守律针对的是「命名类型可能是任何结构类型」——null 不是结构类型，任何用户
+    // 声明类型的值集里都不含 None 这个值 ⇒ 断互斥是**可断言**的，不违 P0 终审 Important B）。
+    if x == AK_NULL || y == AK_NULL { return 1; }
     if x == AK_NEVER || y == AK_NEVER { return 1; }
     // AK_NAMED 的具体行不展开（未覆盖面②）→ **不得断言互斥**（P0 终审 Important B 实证：
     // named 可能是任何结构类型的别名，断言互斥即不可能断言）

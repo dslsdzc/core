@@ -135,11 +135,14 @@ fn parse_type() -> int {
         g_diag_count = g_diag_count + 1;
         res = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, line, col);
     }
-    // Handle T? desugaring → Option[T]
+    // R2 P3 Task 4：`T?` 的目标形态 = **EXPR_OPTIONAL**（内层类型节点入 a 槽）。
+    // 旧形态（T? → EXPR_GENERIC_APPLY(Option, T)）要求「内建 Option 名」在符号表里被注册，
+    // 正是本任务退役的做法（spec §5.4）；且旧形态无法表达 `T? = T ∪ null`（GenericApply 行
+    // 在桥接侧是不展开的 AK_NAMED 原子）。新形态**零名字依赖**（不再 str_intern("Option")，
+    // 见 test_optional.py 的行数对照用例）。
     if check(T_QUESTION) {
         advance_tok();
-        option_ni := str_intern("Option");
-        res = alloc_node(EXPR_GENERIC_APPLY, option_ni, res, 1, 0, 0, 0, line, col);
+        res = alloc_node(EXPR_OPTIONAL, res, 0, 0, 0, 0, 0, line, col);
     }
     return res;
 }
@@ -423,11 +426,33 @@ fn parse_primary() -> int {
         advance_tok();
         ni := str_intern("Some");
         if check(T_LPAREN) {
-            // Parse Some(expr)
+            // Parse Some(expr[, expr…]) —— R2 P3 Task 4 修复：**实参须照通用枚举构造器分支
+            // （下方 parse_postfix 的路径）建 EXPR_ARG 链**。旧实现把值节点直接放 b 槽，
+            // 而 checker/ir_gen 的 EXPR_ENUM_CONSTRUCTOR 消费点按 EXPR_ARG 链走
+            // （`an := ast_b(node); ast_a(an); an = ast_b(an)`）⇒ 旧形态令该链读进值节点自身
+            // 的 a/b 槽（节点 0 当实参、按 ast_b 前行）——实测（本任务开工前）：
+            // `enum Option[T] { None, Some(T) }` + `x: int? = Some(5)` **checker 死循环**
+            // （`corec check` rc=124 超时）。链一修，消费点契约恢复（parser.cr:300-312 同款）。
             advance_tok();
-            val := parse_expr();
+            af : ., mut = -1;
+            ac : ., mut = 0;
+            if !check(T_RPAREN) {
+                first_expr := parse_expr();
+                af = alloc_node(EXPR_ARG, first_expr, -1, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
+                ac = 1;
+                prev_arg : ., mut = af;
+                loop {
+                    if !check(T_COMMA) { break; }
+                    advance_tok();
+                    next_expr := parse_expr();
+                    new_arg := alloc_node(EXPR_ARG, next_expr, -1, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
+                    ast_set_b(prev_arg, new_arg);
+                    prev_arg = new_arg;
+                    ac = ac + 1;
+                }
+            }
             advance_tok();  // consume )
-            return alloc_node(EXPR_ENUM_CONSTRUCTOR, ni, val, 1, 0, 0, 0, tok_ln(t), tok_cl(t));
+            return alloc_node(EXPR_ENUM_CONSTRUCTOR, ni, af, ac, 0, 0, 0, tok_ln(t), tok_cl(t));
         }
         // Some without parens → treat as identifier (will be resolved by uppercase → enum constructor)
         return alloc_node(EXPR_IDENT, 0, 0, 0, ni, 0, 0, tok_ln(t), tok_cl(t));
@@ -1599,6 +1624,10 @@ fn parse_declaration() {
                         if check(T_RPAREN) { break; }
                         fty := parse_type();
                         w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vc * OFF_EV_SIZE + OFF_EV_TYPES + tc * 8, unpack_type(fty));
+                        // R2 P3 Task 4（T0 交接 ①）：载荷类型**节点**随裸码同写（照 struct 的
+                        // OFF_SI_FIELD_TYPE_NODES 先例）——裸码把非基型载荷塌缩成 0 = TY_INT，
+                        // 节点是载荷面（泛型形参代入 / 满足判定）的唯一忠实来源。
+                        w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vc * OFF_EV_SIZE + OFF_EV_TYPE_NODES + tc * 8, fty);
                         tc = tc + 1;
                         if !check(T_COMMA) { break; }
                         advance_tok();

@@ -331,6 +331,14 @@
 - **影响**：不削弱 P2b 批自身保证（其两个新测试文件已挂 `run.sh:71-72`），但上述守卫此后回归 CI 捕获不到。
 - **建议修法**：一次性挂齐（评估耗时后决定全集或分批）。
 
+### 32. `EXPR_LET` 站点**无任何兼容检查**（2026-09-11 R2 P3 Task 1 实测发现 → Task 4 登记——既有洞，建议专批）
+- **现状**：`checker.cr` 的 `EXPR_LET` 分支（`infer_expr`）**只登记符号**：`ti := val_ti; if type_node >= 0 { ti = res_type_node(type_node); }`——**不做值/注解比对**（该分支无 `type_equal`/`type_compat_strict` 调用，全仓 grep 可核）。实测（Task 1 与 Task 4 两代二进制同值）：
+  · `x: [int;3] = s;`（s 为切片）→ **rc=0**（pA 类静默放宽的站点外同族；pA 面已被 Task 1 关闭，本站点仍留缺口）；
+  · `x: [int;4] = [1,2,3];`（常量档异长）→ **rc=0**（比 pA 更宽）；
+  · Task 4 面：`x: int? = 5; y: int = x;`（**可选值流进窄槽**）→ check rc=0、build rc=0、`run rc=5`——即 `T? ⊄ T` 的站点级拒绝（返回位/赋值位已落，见 Task 4 的 `type_compat_strict` 注）在**本站点可被绕过**；同族 `fn f(v: int)` ← `int?` 实参 ⇒ 运行期拿指针值（实测 `run rc=8`）——后者归 **#20（F3 调用位点无诊断）**，与本案互为姊妹面。
+- **为何不是 Task 1/Task 4 顺手修**：本站**不是**既有 10 判定点之一（Task 1 报告 §6-① 已论证）；追加 = 「**新增判定点 + 新硬错误门**」，须走全语料 report-only 清单（Global Constraints 第 6 条）与「判定点不变」之外的裁决。Task 4 的判定面改动一律限于既有 `type_compat_strict` 组合函数内部（可选目标注入），**未**新增站点。
+- **建议修法**：按 Task 1 §3.1 的参序（源 = `val_ti`，目标 = 注解行）在 `EXPR_LET` 加 `type_compat_strict` + `diag_type_incompatible`（码/措辞沿用 TF01/TA01/TC02 体系或新码，二者先裁决），**先全语料 report-only** 出清单（预期命中：泛型函数体内的 `T` 注解、`[T;N]` 表示提示位、可选注入面——逐条审查后入硬名单）；同时确认「无注解 `x := <值>`」与「`x : .` auto 注解」不受影响。修完应同时覆盖 #20 的调用位点面（同参序同判定），或显式在 #20 划界。
+
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
 来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：

@@ -260,6 +260,16 @@ fn sh_tuple_to_product(ti: int) -> int {
     return tt_atom(AK_PRODUCT, -1, tail);
 }
 
+// ─── R2 P3 Task 4：null 项（`T? = T ∪ null` 的右支；`None` 类型的项）───
+// 规范形态 = tt_atom(AK_NULL, -1, -1)：**行号不入项**（b 槽是标注；此处刻意连标注都空）。
+// 理由：`None` 每出现一次就分配一行（TYP_NULL 不做行去重）⇒ 若把行号写进 b 槽，同一类型
+// 会有 N 个「不同节点」——虽然引擎比较只看 a/c 两槽（b 是标注）⇒ 语义不受影响，但节点同一
+// 性快路径（ty_sub 的 `a == b`、tt_norm 的哈希去重）会失去同项合并，读数与缓存都变差。
+// 单点语义 ⇒ 项恒定，构造去重（tt_term 的哈希合表）保证全仓只有**一个** null 节点。
+fn sh_null_term() -> int {
+    return tt_atom(AK_NULL, -1, -1);
+}
+
 // ti → 类型项（带 per-ti 缓存；-1 = 无法翻译）
 fn sh_term_of_ti(ti: int) -> int {
     if ti < 0 { return -1; }
@@ -300,6 +310,17 @@ fn sh_term_of_ti(ti: int) -> int {
         // 各占一槽（槽 0 不变 / 槽 1 只读协变、可写不变，见 type_engine.cr 变型表）
         in2 := sh_term_of_ti(d1);
         if in2 >= 0 { term = tt_atom(AK_REF, -1, tt_cons(sh_ref_mut_marker(get_type_extra(ti)), tt_cons(in2, tt_nil()))); }
+    } else if k1 == TYP_OPTIONAL {
+        // R2 P3 Task 4：`T?` = `T ∪ null`（spec §5.4）。这是桥接层**唯一**译作非原子项的行
+        // （其余行 → 单原子）；依据 = 定义式本身（不是名义展开——T? 无名字可展开）。语义落点：
+        // 引擎对 union 的一切判定（包含/等价/不相交/穷尽性）零新规则。
+        in3 := sh_term_of_ti(d1);
+        if in3 >= 0 { term = tt_union(in3, sh_null_term()); }
+    } else if k1 == TYP_NULL {
+        // null 单点类型（`None` 值的类型）：规范项 = null 原子（无参数、无 b 槽行号——同一
+        // 类型的不同出现点（每处 `None` 各一行）必须译成**同一**项，否则 `ty_sub(null, null)`
+        // 会走结构比较而非节点同一/规范化快路径（语义仍对，但多绕一圈且不可读）。
+        term = sh_null_term();
     } else if k1 == TYP_TUPLE {
         term = sh_tuple_to_product(ti);
     } else if k1 == TYP_NAMED || k1 == TYP_GENERIC_PARAM || k1 == TYP_GENERIC_APPLY {
@@ -878,9 +899,153 @@ fn sh_match_first_missing(cover_bits: int, count: int) -> int {
 
 // 穷尽性三态：1 = 穷尽（补集空）/ 0 = 不穷尽（有反例变体）/ -1 = **不判**（域不可展开 /
 // 模式不可映射 / 引擎未知=预算耗尽）。消费方：0 → 诊断 + 反例命名；1/-1 → 零动作。
+// R2 P3 Task 4：域面扩一条 —— `T?`（TYP_OPTIONAL）的域 = `T ∪ null`（sh_match_domain_term）。
 fn sh_match_exhaustive(scrut_ti: int, pat_terms: int, unmappable: int) -> int {
     if unmappable != 0 { return -1; }
-    dom := sh_enum_domain_term(scrut_ti);
-    if dom < 0 { return -1; }               // 非枚举域 ⇒ 不判（域限定的显式登记）
+    dom := sh_match_domain_term(scrut_ti);
+    if dom < 0 { return -1; }               // 非枚举/非可选域 ⇒ 不判（域限定的显式登记）
     return ty_exhaustive(dom, pat_terms);
+}
+
+// ═══════════════ R2 P3 Task 4：联合/可选（`T?` = `T ∪ null`）的 match 域面 ═══════════════
+// 域：枚举行 → 变体集之并（Task 0/3 的 sh_enum_domain_term）；**TYP_OPTIONAL 行 → T ∪ null**。
+// 分支（两分，与 spec §5.4 的「T? 两分支：有值 + None」一致）：
+//   0 = 有值部分（`Some(…)` 模式；项 = 内层项本身——`T?` 的值域含裸 T 值，见 checker 的行语义）
+//   1 = null 部分（`None` 模式；项 = sh_null_term()）
+// 三态纪律：非可选 scrutinee ⇒ -1（不判）；可选 scrutinee 上的**异域模式**（别的变体名/字面量）
+// ⇒ -1（不可映射，同 Task 3 的②：不得当 ∅ 或 ⊤）。
+// 名字形态：仅裸名 `Some`/`None`（**限定名不接受**——可选无类型名可作前缀；用户声明
+// `enum Option` 时那走枚举域那条路，与本路互不干扰）。
+fn sh_match_domain_term(ti: int) -> int {
+    if ti < 0 { return -1; }
+    if get_type_kind(ti) == TYP_OPTIONAL {
+        in5 := sh_term_of_ti(get_type_data(ti));
+        if in5 < 0 { return -1; }           // 内层不可译 ⇒ 域不可展开（不判）
+        return tt_union(in5, sh_null_term());
+    }
+    return sh_enum_domain_term(ti);
+}
+
+// 可选模式 → 分支下标（0 = 有值 / 1 = null；-1 = 不可映射或非可选 scrutinee）。
+// 名字槽 = ast_a（EXPR_ENUMPAT 契约，Task 3 §6-②）；`Some`/`None` 是关键字名。
+fn sh_match_opt_pat(scrut_ti: int, pat_node: int) -> int {
+    if scrut_ti < 0 { return -1; }
+    if get_type_kind(scrut_ti) != TYP_OPTIONAL { return -1; }
+    if pat_node < 0 { return -1; }
+    pname := istr_get(ast_a(pat_node));
+    if str_eq(pname, "Some") != 0 { return 0; }   // `Some(…)` 与裸 `Some` 同判（载荷绑定不参与）
+    if str_eq(pname, "None") != 0 { return 1; }
+    return -1;
+}
+
+// 分支下标 → 覆盖项（与 sh_match_domain_term 的析取支**同一构造**——两个构造点不同 ⇒ 补集失真）。
+fn sh_match_opt_term(scrut_ti: int, part: int) -> int {
+    if part == 0 { return sh_term_of_ti(get_type_data(scrut_ti)); }
+    return sh_null_term();
+}
+
+// ─── R2 P3 Task 4：枚举变体**载荷项**（T0 交接 ① 的消费面；载荷类型节点列的唯一读取点）───
+// 背景（Task 0 §5-①）：枚举表旧布局只存载荷**裸 TY 码**（OFF_EV_TYPES），非基型一律塌缩为
+// 0 = TY_INT ⇒ 「载荷是 int」与「载荷是 string/命名类型/泛型形参」**不可区分**。本任务按
+// struct 先例补 **OFF_EV_TYPE_NODES 列**（parser 随裸码同写类型节点；见 parser.cr 枚举分支），
+// 本函数即该列的忠实读取点：泛型形参按泛型应用行的实参**代入**（照 sh_struct_field_term 的
+// 路径——一层代入，嵌套代入属 F4 同族缺陷/TODO #21）。
+// 返回：单载荷 = 该载荷项；多载荷 = AK_PRODUCT 链（**声明序**，逆序构造）；**0 载荷（tag 变体）→ -1**
+// （语义域外登记：载荷为空 ≠ 载荷 unit——不发明「tag 变体 = 单点」的项，Task 5/6 若需要另裁）。
+// -1 = 不可展开（非枚举行 / 无此变体名 / 无载荷 / 载荷节点缺失 / 任一载荷不可译 / 预算耗尽）。
+fn sh_variant_payload_at(ea: int, vi: int, i: int, ga: int) -> int {
+    pn := ei_variant_type_node(ea, vi, i);
+    if pn < 0 { return -1; }
+    if ast_kind(pn) == EXPR_IDENT {
+        pni := ast_int_val(pn);
+        gi2 : ., mut = 0;
+        loop {
+            if gi2 >= ei_generic_count(ea) { break; }
+            if ei_generic_name(ea, gi2) == pni {
+                // 泛型形参：泛型应用行的对应实参（缺位 → 落空到名义，照 sh_struct_field_term）
+                if ga >= 0 && get_type_kind(ga) == TYP_GENERIC_APPLY {
+                    gstart2 := get_type_extra(ga);
+                    gcnt2 := r64(g_gen_apply_data, gstart2 * 8);
+                    if gi2 < gcnt2 { return sh_term_of_ti(r64(g_gen_apply_data, (gstart2 + 1 + gi2) * 8)); }
+                }
+                break;
+            }
+            gi2 = gi2 + 1;
+        }
+    }
+    pti := res_type_node(pn);
+    if pti < 0 { return -1; }
+    return sh_term_of_ti(pti);
+}
+
+fn sh_variant_payload_term(ti: int, name_ni: int) -> int {
+    ea := find_enum_row_of(ti);
+    if ea < 0 { return -1; }
+    vi := sh_enum_variant_index(ea, name_ni);
+    if vi < 0 { return -1; }
+    tc := ei_variant_type_count(ea, vi);
+    if tc <= 0 { return -1; }
+    ga : ., mut = -1;
+    if get_type_kind(ti) == TYP_GENERIC_APPLY { ga = ti; }
+    tail : ., mut = tt_nil();
+    i : ., mut = tc - 1;
+    loop {
+        if i < 0 { break; }
+        if tt_step() == -1 { return -1; }
+        pt := sh_variant_payload_at(ea, vi, i, ga);
+        if pt < 0 { return -1; }
+        tail = tt_cons(pt, tail);
+        i = i - 1;
+    }
+    if tc == 1 { return tt_a(tail); }        // 单载荷：链首即载荷项（不套空实义 product）
+    return tt_atom(AK_PRODUCT, ti, tail);
+}
+
+// ─── R2 P3 Task 4：枚举载荷列入库断言（调试通道 `--verify-evp-nodes`，默认关）───
+// 报文 = `[enum-payload-verify] enums=E variants=V slots=S collapses=C bad=B`，返回 bad
+// （>0 ⇒ 调用方 rc=1）。断言：**每个载荷槽都有类型节点**（< 0 = parser 未写 = 本任务的前置
+// 缺口复发）。`collapses` = 裸码列说 int（TY_INT=0）而**节点列不是 int 基型节点**的槽数——
+// 即「裸码丢失了真实载荷类型」的可数证据（T0 §5-① 的仓库级量化）；它是**信息量**（≥ 0 正常），
+// 不是失败（bad 才算失败）。只读、只计数、不写任何表。
+fn sh_evp_verify() -> int {
+    bad : ., mut = 0;
+    slots : ., mut = 0;
+    collapsed : ., mut = 0;
+    variants : ., mut = 0;
+    ei : ., mut = 0;
+    loop {
+        if ei >= g_enum_count { break; }
+        vi : ., mut = 0;
+        loop {
+            if vi >= ei_variant_count(ei) { break; }
+            variants = variants + 1;
+            tc2 := ei_variant_type_count(ei, vi);
+            ti2 : ., mut = 0;
+            loop {
+                if ti2 >= tc2 { break; }
+                slots = slots + 1;
+                code := ei_variant_type(ei, vi, ti2);
+                pn2 := ei_variant_type_node(ei, vi, ti2);
+                if pn2 < 0 {
+                    bad = bad + 1;
+                } else if code == TY_INT {
+                    if ast_kind(pn2) != 0 || ast_type_val(pn2) != TY_INT { collapsed = collapsed + 1; }
+                }
+                ti2 = ti2 + 1;
+            }
+            vi = vi + 1;
+        }
+        ei = ei + 1;
+    }
+    print("[enum-payload-verify] enums=");
+    print(int_str(g_enum_count));
+    print(" variants=");
+    print(int_str(variants));
+    print(" slots=");
+    print(int_str(slots));
+    print(" collapses=");
+    print(int_str(collapsed));
+    print(" bad=");
+    println(int_str(bad));
+    return bad;
 }

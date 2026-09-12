@@ -55,7 +55,7 @@ ESZ_IRVAR    : int = 24;    // name_idx,id,type_kind = 3×8
 ESZ_IRINSTR  : int = 48;    // opcode,dest,src1,src2,src3,type_kind = 6×8
 ESZ_FUNCINFO : int = 688;
 ESZ_STRUCTINFO : int = 440;
-ESZ_ENUMINFO : int = 2360;  // name+variants[16]+variant_count+generic_names[4]+generic_count
+ESZ_ENUMINFO : int = 4408;  // name+variants[16]（含载荷类型节点槽，P3 Task 4）+variant_count+generic_names[4]+generic_count
 
 // Token field offsets
 OFF_TK_KIND : int = 0; OFF_TK_LEXEME : int = 8;
@@ -150,12 +150,18 @@ OFF_IFM_PARAM_TYPES : int = 24;  // first of up to 8 param types (each 8 bytes)
 MAX_IFACE_METHOD_PARAMS : int = 8;
 
 // EnumInfo offsets
+// R2 P3 Task 4（T0 交接 ①）：变体载荷**类型节点**槽（照 struct 先例 OFF_SI_FIELD_TYPE_NODES）
+// ——裸码槽 OFF_EV_TYPES 的非基型载荷一律塌缩为 0 = TY_INT（parser 的 unpack_type），
+// 「载荷是 int」与「载荷是 string/命名类型/泛型形参」不可区分 ⇒ 载荷面（泛型代入/满足判定）
+// 在裸码表上不可能忠实。nodes 槽 = parse_type 的产物节点（-1/0 = 无信息）。
+// 布局：EnumVariant = name(8) + types[16](128) + type_count(8) + type_nodes[16](128) = 272
 OFF_EI_NAME : int = 0; OFF_EI_VARIANTS : int = 8;
-OFF_EI_VARIANT_COUNT : int = 2312;
-OFF_EI_GENERIC_NAMES : int = 2320; OFF_EI_GENERIC_COUNT : int = 2352;
-// EnumVariant within variants[N]: name(8) + types[16](128) + type_count(8)
+OFF_EI_VARIANT_COUNT : int = 4360;
+OFF_EI_GENERIC_NAMES : int = 4368; OFF_EI_GENERIC_COUNT : int = 4400;
+// EnumVariant within variants[N]: name(8) + types[16](128) + type_count(8) + type_nodes[16](128)
 OFF_EV_NAME : int = 0; OFF_EV_TYPES : int = 8; OFF_EV_TYPE_COUNT : int = 136;
-OFF_EV_SIZE : int = 144;
+OFF_EV_TYPE_NODES : int = 144;
+OFF_EV_SIZE : int = 272;
 
 // ============================================================
 // Copy helper
@@ -316,10 +322,19 @@ fn ast_alloc(kind: int, a: int, b: int, c: int, iv: int, tv: int, d: int, line: 
     return idx; }
 
 // Accessor helpers for SymEntry
-fn sym_name(n: int) -> int { return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_NAME); }
-fn sym_kind(n: int) -> int { return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_KIND); }
-fn sym_type(n: int) -> int { return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_TYPE); }
-fn sym_node(n: int) -> int { return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_NODE); }
+// ─── R2 P3 Task 4：读取面护栏（n ∉ [0, g_sym_count) ⇒ -1，不触内存）───
+// 触发链（本任务实测）：① 本任务退役了内建 Option 注册（collect_decls 早期的一次 def_sym）
+// ⇒ 「无类型声明的源文件」在函数注册循环处 g_syms 仍为 **NULL**（首个 def_sym 尚未发生，
+// 这是合法状态）；② `collect_decls` 的重复函数检查写的是 `existing_si >= 0 && sym_kind(existing_si)`
+// （checker.cr:1202），而 **bootstrap 构建的编译器二进制不求值短路**（T0 §5-③ 实测：`&&`
+// 两侧无条件求值）⇒ `sym_kind(-1)` 被求值 → `r64(NULL, 负偏移)` → SIGSEGV（实测 d0 类
+// 「只有 fn、无类型声明」的源 rc=139）。修法 = 访问器自身带范围闸（与类型表访问器
+// get_type_kind/get_type_data 同款）；合法读零变化，越界/未分配返回 -1（哨兵语义与
+// find_gsym 的 -1 一致）。根因（bootstrap 不短路）仍归 T0 §5-③ 登记，不在本任务面内。
+fn sym_name(n: int) -> int { if n < 0 || n >= g_sym_count { return -1; } return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_NAME); }
+fn sym_kind(n: int) -> int { if n < 0 || n >= g_sym_count { return -1; } return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_KIND); }
+fn sym_type(n: int) -> int { if n < 0 || n >= g_sym_count { return -1; } return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_TYPE); }
+fn sym_node(n: int) -> int { if n < 0 || n >= g_sym_count { return -1; } return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_NODE); }
 fn sym_set_name(n: int, v: int) { w64(g_syms, n * ESZ_SYMENTRY + OFF_SY_NAME, v); }
 fn sym_set_kind(n: int, v: int) { w64(g_syms, n * ESZ_SYMENTRY + OFF_SY_KIND, v); }
 fn sym_set_type(n: int, v: int) { w64(g_syms, n * ESZ_SYMENTRY + OFF_SY_TYPE, v); }
@@ -397,6 +412,9 @@ fn ei_generic_name(n: int, gi: int) -> int { return r64(g_enums, n*ESZ_ENUMINFO 
 fn ei_variant_name(n: int, vi: int) -> int { return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_NAME); }
 fn ei_variant_type(n: int, vi: int, ti: int) -> int { return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPES + ti*8); }
 fn ei_variant_type_count(n: int, vi: int) -> int { return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPE_COUNT); }
+// R2 P3 Task 4（T0 交接 ①）：载荷第 ti 个的**类型节点**（-1/0 = 无信息——.ccr 不落本列，
+// 序列化读回侧该列恒 0；消费者须以 type_count 为界，不得据 0 反推「节点 0」）。
+fn ei_variant_type_node(n: int, vi: int, ti: int) -> int { return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPE_NODES + ti*8); }
 
 // ============================================================
 // String table helpers (dynamic byte buffer)

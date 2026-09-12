@@ -244,6 +244,10 @@ fn gen_clone_tree(node: int) -> int {
     if k == EXPR_FIELD { a2 := gen_clone_tree(a); n := ast_alloc(k, a2, b, c, iv, tv, d, ln, cl); gen_dedup_add(node, n); return n; }
     if k == EXPR_STMT { a2 := gen_clone_tree(a); n := ast_alloc(k, a2, b, c, iv, tv, d, ln, cl); gen_dedup_add(node, n); return n; }
     if k == EXPR_GO { a2 := gen_clone_tree(a); n := ast_alloc(k, a2, b, c, iv, tv, d, ln, cl); gen_dedup_add(node, n); return n; }
+    // ── R2 P3 Task 4：`T?`（a = 内层类型节点，可能含泛型形参）——单子节点克隆，
+    //    形参代入由 EXPR_IDENT 分支承担（clone 时经 gen_lookup_subst），故此处只递归 a。
+    //    **必配分支**：默认兜底会把 d（=0）当 AST 子节点克隆（读进节点 0）——显式分支消除该面。
+    if k == EXPR_OPTIONAL { a2 := gen_clone_tree(a); n := ast_alloc(k, a2, b, c, iv, tv, d, ln, cl); gen_dedup_add(node, n); return n; }
 
     // ── Two children: `a` and `b` ──
     if k == EXPR_BINARY { a2 := gen_clone_tree(a); b2 := gen_clone_tree(b); n := ast_alloc(k, a2, b2, c, iv, tv, d, ln, cl); gen_dedup_add(node, n); return n; }

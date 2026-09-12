@@ -182,6 +182,12 @@ if g_opt_level >= 1 && g_func_count > 0 {
     if cli_has("verify-named-dedup") != 0 {
         if named_dedup_verify() != 0 { return 1; }
     }
+    // R2 P3 Task 4：枚举载荷**类型节点**列入库断言（隐藏调试通道，默认关；与上一条同址同式）。
+    // 断言 = 每个载荷槽都有类型节点（parser 同写；缺口复发即 rc≠0）；`collapses` 计数 = 裸码
+    // 列丢失真实载荷类型的槽数（信息量，非失败）。见 ty_shadow.cr 的 sh_evp_verify。
+    if cli_has("verify-evp-nodes") != 0 {
+        if sh_evp_verify() != 0 { return 1; }
+    }
     return 0;
 }
 
@@ -227,6 +233,7 @@ fn corec_main() -> int {
     cli_flag_bool("type-shadow", "", "R2 P1: shadow type decisions with the engine (observation only)");
     cli_flag("type-shadow-dump", "", "R2 P1: dump shadow diff entries to file");
     cli_flag_bool("verify-named-dedup", "", "R2 P2a: assert side-table == res_type_node for all named types (debug)");
+    cli_flag_bool("verify-evp-nodes", "", "R2 P3 T4: assert enum variant payload type nodes recorded (debug)");
 
     if cli_parse() != 0 { return 1; }
     // R2 P1 影子对拍开关。**只解析不判定**：影子关（默认）时 g_shadow_on=0，type_equal 包装

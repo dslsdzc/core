@@ -431,9 +431,39 @@ fn array_len_constraint_sym(ti_a: int, ti_b: int) -> int {
 // 与位置必须保持不变（P1 站点覆盖 / 差异计数可比；关态仅多一次全局读，见 P1 登记）。
 // 参序 =（源，目标）——见 array_len_walk 上方的归一说明。
 fn type_compat_strict(ti_a: int, ti_b: int) -> int {
-    if !type_equal(ti_a, ti_b) { return 0; }
+    if !type_equal(ti_a, ti_b) {
+        // ─── R2 P3 Task 4：**可选目标的子类型注入**（`T ⊆ T?`、`null ⊆ T?`）───
+        // 语义（spec §5.4）：`T?` = `T ∪ null` ⇒ 裸 T 值与 None 值**本来就该**流进 T? 的槽
+        // （返回位/赋值位/实参位/字段位…同一组合函数）。而行面判定是**身份**口径
+        // （type_equal = 等价），等价不含 `int ⊆ int ∪ null` ⇒ 不注入则 `fn g() -> int? { return 5; }`
+        // 被拒（实测 TF01），「联合类型」在行为面等于没落地。
+        // 收窄面（为何不是「站点改子类型」）：注入**只在目标行 kind == TYP_OPTIONAL 时**触发
+        // —— 该 kind 只由 `T?` 产生，语料零命中（全仓无 `T?`），故既有接受/拒绝集合**逐点不变**；
+        // 站点面（type_equal 采样、长度档、措辞分派）与 P2a/P2b 判据**零改动**。反方向
+        // （`T?` 值进 `T` 槽）不注入：引擎 ty_sub(union, T) = 0 ⇒ 照旧拒绝（soundness 面）。
+        // 三态纪律：引擎 0/-1（不含/未知）一律**不放行**（未知不得当放宽）。
+        if get_type_kind(ti_b) == TYP_OPTIONAL {
+            if ti_subsumes(ti_a, ti_b) == 1 { return 1; }
+        }
+        return 0;
+    }
     if array_len_constraint_ok(ti_a, ti_b) == 0 { return -1; }
     return 1;
+}
+
+// R2 P3 Task 4：ti 级包含判定（源 ⊆ 目标）——桥接 + 引擎 `ty_sub` 三态，**仅 1 放行**
+// （0 = 确定不含、-1 = 未知 ⇒ 都回 0：本入口只服务「放松注入」，未知绝不当放宽 = 三态纪律）。
+// 预算前后隔离照 type_equal_engine 的窗口纪律（引擎 memo 跨查询命中会让结果依赖预算历史）；
+// 不触碰 `g_replace_*` 计数（那两个计数是 type_equal 替换面的台账，本入口不属该面）。
+fn ti_subsumes(src_ti: int, tgt_ti: int) -> int {
+    a := sh_term_of_ti(src_ti);
+    b := sh_term_of_ti(tgt_ti);
+    if a < 0 || b < 0 { return 0; }
+    ty_budget_reset(200000);
+    s := ty_sub(a, b);
+    ty_budget_reset(200000);
+    if s == 1 { return 1; }
+    return 0;
 }
 
 // 无方向站点的组合（与 type_compat_strict 同构，仅长度面走对称核）：hotpatch 站（1）用。
@@ -500,6 +530,14 @@ fn type_equal_legacy(t1: int, t2: int) -> bool {
         if k1 == TYP_SLICE && k2 == TYP_SLICE {
             return type_equal_legacy(get_type_data(t1), get_type_data(t2));
         }
+        // R2 P3 Task 4：可选/null 身份。`T?` 的身份 = 内层身份（N 面先例：结构判等只判结构，
+        // 语义包含由引擎承担）；null 单点类型恒自等（两个 None 出现的行不同但类型同一）。
+        // 跨 kind（TYP_NULL vs TYP_OPTIONAL vs 其余）一律 false（落尾部 return false）——
+        // 与引擎一致（null 原子与 union 项不同一）。
+        if k1 == TYP_OPTIONAL && k2 == TYP_OPTIONAL {
+            return type_equal_legacy(get_type_data(t1), get_type_data(t2));
+        }
+        if k1 == TYP_NULL && k2 == TYP_NULL { return true; }
         if k1 == TYP_GENERIC_APPLY && k2 == TYP_GENERIC_APPLY {
             if get_type_data(t1) != get_type_data(t2) { return false; }
             start1 := get_type_extra(t1);
@@ -820,6 +858,16 @@ fn res_type_node(node: int) -> int {
         inner := res_type_node(ast_a(node));
         return alloc_type(TYP_PTR, inner, 0);
     }
+    if ast_kind(node) == EXPR_OPTIONAL {
+        // R2 P3 Task 4：`T?` = `T ∪ null`（spec §5.4）——行 = TYP_OPTIONAL(data = 内层行)。
+        // 语义在三层落：① 桥接把本行译作 union(内层项, null 原子项)（ty_shadow.cr）；
+        // ② 引擎按普通联合项判定（包含/等价/不相交/穷尽性，全走既有 DNF 路径，零新规则）；
+        // ③ 判定点（type_compat_strict 等）不变——`int ⊆ int ∪ null`、`int ∪ null ⊄ int`。
+        // 一条**不**去侧表的理由：本行无名字（旧形态 Option[T] 的「名字身份」正是本任务退役的
+        // 东西），故不进 named_dedup；同内容的两个行在引擎侧译成同一个项（DAG 去重）⇒ 判定等价。
+        inner := res_type_node(ast_a(node));
+        return alloc_type(TYP_OPTIONAL, inner, 0);
+    }
     if ast_kind(node) == EXPR_GENERIC_APPLY {
         // Generic application: Box[int]
         name_idx := ast_a(node);
@@ -1031,20 +1079,17 @@ fn collect_decls() {
         def_sym(name_idx, SYM_TYPE, type_idx, -1);
         i = i + 1;
     }
-    // Register built-in Option type (for T? desugaring)
-    option_found : ., mut = 0;
-    i = 0;
-    loop {
-        if i >= g_enum_count { break; }
-        if ei_name(i) == str_intern("Option") { option_found = 1; }
-        i = i + 1;
-    }
-    if option_found == 0 {
-        // Auto-register Option as a generic built-in type
-        option_name_idx := str_intern("Option");
-        option_ti := alloc_named_type(option_name_idx);
-        def_sym(option_name_idx, SYM_TYPE, option_ti, -1);
-    }
+    // ─── R2 P3 Task 4：**退役**内建 Option 注册（spec §5.4）───
+    // 旧行为：无用户 `enum Option` 时自动注册一个名为 "Option" 的**命名类型**行并 def_sym
+    // （`T?` 经 parser 降级为 `Option[T]` 泛型应用，靠这个名字解析）。
+    // 退役依据：① `T?` 的目标形态 = EXPR_OPTIONAL → TYP_OPTIONAL（`T ∪ null` 可直接表达）；
+    // ② 名字路径把「可选」绑死在一个用户可重名的标识符上（用户声明 `enum Option` 时 `T?`
+    // 的含义静默改变——Task 3 §6-⑥ 登记的交互面）；③ `.ccr` STR 段与行号序随该注册漂移。
+    // 退役后 `Option` **不再是**语言内建名（无行、无符号）：用户自声明 `enum Option` 则按
+    // 普通枚举解析；一行不注册 = `test_optional.py` 的行数对照用例（selftest `t4.option_not_registered`）。
+    // ⚠ 连带面（须登记）：`Some`/`None` 不再靠该行解析——内建构造器路径见 EXPR_ENUM_CONSTRUCTOR
+    // （按关键字名给 TYP_OPTIONAL/TYP_NULL 行）；`EXPR_TRY` 的 `base_name == "Option"/"Result"`
+    // 名字串判断同期退役（改按类型项结构解包）。
 
     // Register all enum types and their variant constructors
     i = 0;
@@ -1379,7 +1424,8 @@ fn type_node_mentions_struct_param(si: int, tn: int) -> int {
         if is_struct_generic(si, ast_int_val(tn)) { return 1; }
         return 0;
     }
-    if k == EXPR_ARRAY || k == EXPR_REFTYPE || k == EXPR_PTRTYPE {
+    if k == EXPR_ARRAY || k == EXPR_REFTYPE || k == EXPR_PTRTYPE || k == EXPR_OPTIONAL {
+        // EXPR_OPTIONAL（P3 Task 4）：内层提及形参（`T?` 字段）⇒ 同上跳过字面量处的静态比对。
         return type_node_mentions_struct_param(si, ast_a(tn));
     }
     if k == EXPR_GENERIC_APPLY {
@@ -1433,6 +1479,9 @@ fn type_display(ti: int) -> string {
     if k == TYP_REF { return "&" + type_display(get_type_data(ti)); }
     if k == TYP_GENERIC_PARAM { return istr_get(get_type_data(ti)); }
     if k == TYP_DYN { return "dyn"; }
+    // R2 P3 Task 4：`T?` 显示为 `T?`、null 单点类型显示为 "null"（诊断措辞面；未识别仍 "?"）
+    if k == TYP_OPTIONAL { return type_display(get_type_data(ti)) + "?"; }
+    if k == TYP_NULL { return "null"; }
     return "?";
 }
 
@@ -1516,6 +1565,12 @@ fn res_call_type(node: int, func_fi: int) -> int {
         inner := res_call_type(ast_a(node), func_fi);
         mf := ast_int_val(node);
         return alloc_type(TYP_REF, inner, mf);
+    }
+    if ast_kind(node) == EXPR_OPTIONAL {
+        // R2 P3 Task 4：`T?` 在调用位点的解析（与 res_type_node 同语义；本函数只多一条
+        // 泛型形参分支的差异，见函数头注——optional 分支两侧一致）。
+        inner := res_call_type(ast_a(node), func_fi);
+        return alloc_type(TYP_OPTIONAL, inner, 0);
     }
     return TI_UNIT;
 }
@@ -2546,10 +2601,19 @@ fn infer_expr(node: int) -> int {
                     vi := sh_match_pat_variant(match_ti, arm_pat);
                     vt : ., mut = -1;
                     if vi >= 0 { vt = sh_match_variant_term(match_ti, vi); }
+                    // R2 P3 Task 4：可选域（`T?`）——枚举归属不成立时试 `Some`/`None` 两分支
+                    // （sh_match_opt_pat 对非可选 scrutinee 恒 -1 ⇒ 既有枚举/非枚举面零变化）。
+                    oi : ., mut = -1;
+                    if vi < 0 {
+                        oi = sh_match_opt_pat(match_ti, arm_pat);
+                        if oi >= 0 { vt = sh_match_opt_term(match_ti, oi); }
+                    }
                     if vt < 0 {
-                        m_unmappable = 1;      // 非本枚举/未声明变体名 ⇒ 不判（不得当 ∅/⊤）
+                        m_unmappable = 1;      // 非本枚举/非本域/未声明变体名 ⇒ 不判（不得当 ∅/⊤）
                     } else {
-                        bit := sh_match_bit(vi);
+                        ci : ., mut = vi;
+                        if vi < 0 { ci = oi; }   // 可选域：覆盖位 0 = 有值 / 1 = null
+                        bit := sh_match_bit(ci);
                         if m_wild != 0 { if m_dup < 0 { m_dup = arm_pat; } }
                         if (m_cover / bit) % 2 != 0 { if m_dup < 0 { m_dup = arm_pat; } }
                         m_cover = m_cover + bit;
@@ -2598,11 +2662,18 @@ fn infer_expr(node: int) -> int {
         m_verdict := sh_match_exhaustive(match_ti, m_pats, m_unmappable);
         ty_budget_reset(200000);
         if m_verdict == 0 {
-            ea := find_enum_row_of(match_ti);
             mi : ., mut = -1;
-            if ea >= 0 { mi = sh_match_first_missing(m_cover, ei_variant_count(ea)); }
             msg := "Non-exhaustive match";
-            if mi >= 0 { msg = msg + ": missing variant '" + istr_get(ei_variant_name(ea, mi)) + "'"; }
+            if get_type_kind(match_ti) == TYP_OPTIONAL {
+                // `T?` 两分支反例命名（R2 P3 Task 4）：0 = 有值（Some）/ 1 = null（None）
+                mi = sh_match_first_missing(m_cover, 2);
+                if mi == 0 { msg = msg + ": missing variant 'Some'"; }
+                if mi == 1 { msg = msg + ": missing variant 'None'"; }
+            } else {
+                ea := find_enum_row_of(match_ti);
+                if ea >= 0 { mi = sh_match_first_missing(m_cover, ei_variant_count(ea)); }
+                if mi >= 0 { msg = msg + ": missing variant '" + istr_get(ei_variant_name(ea, mi)) + "'"; }
+            }
             check_error(EC_TM_EXHAUST, msg, ast_line(node), ast_col(node));
         }
         if m_dup >= 0 {
@@ -2663,6 +2734,52 @@ fn infer_expr(node: int) -> int {
             return sym_type(si); // enum type
         }
         name := istr_get(name_idx);
+        // ─── R2 P3 Task 4：内建可选构造器（退役内建 Option 注册后的解析路径）───
+        // `Some`/`None` 是**关键字**（lexer.cr 的 T_SOME/T_NONE 仅由这两个词产出）⇒ 本分派是
+        // 关键字名分派，不是「类型名分派」：用户声明同名**变体**时上面的 SYM_FN 命中优先
+        // （p20 语义保持：用户 `enum Option[T] { None, Some(T) }` 时 Some/None 仍是它的变体）。
+        // 类型面：`None` = TYP_NULL（null 单点类型，`T ∪ null` 里的 null）；`Some(x)` =
+        // TYP_OPTIONAL(载荷行) ⇒ `Some(1)` 的类型 = `int?`（计划用例「Some(1) 满足 int?」）。
+        // 表示面（如实登记）：运行时形态沿用既有 EXPR_ENUM_CONSTRUCTOR 代码路径（ir_gen 的
+        // IR_MAKE_ENUM + 字段存；EXPR_TRY 的 IR = 内层表达式）——本任务落**类型层**的联合/
+        // 可选语义，运行期表示统一（Some 值 vs 裸值）不在本任务 Files 面内（计划未列 ir_gen/
+        // 后端），登记为未覆盖面。
+        if str_eq(name, "Some") != 0 {
+            at : ., mut = TI_UNIT;
+            if arg_count == 1 && first_arg >= 0 {
+                at = infer_expr(ast_a(first_arg));
+            } else if arg_count > 1 {
+                // 多载荷（`Some(a, b)`）：载荷行 = TYP_TUPLE（两趟落盘，照 EXPR_TUPLE 契约——
+                // 元素推断自身可向 g_gen_apply_data 追加数据，不得边推边写；见该分支注记）。
+                tis : string, mut = alloc(arg_count * 8);
+                ai : ., mut = 0;
+                an2 : ., mut = first_arg;
+                loop {
+                    if ai >= arg_count { break; }
+                    ev : ., mut = TI_UNIT;
+                    if an2 >= 0 {
+                        ev = infer_expr(ast_a(an2));
+                        an2 = ast_b(an2);
+                    }
+                    w64(tis, ai * 8, ev);
+                    ai = ai + 1;
+                }
+                ds := g_gen_apply_data_count;
+                grow_gen_apply_data(ds + arg_count);
+                ai = 0;
+                loop {
+                    if ai >= arg_count { break; }
+                    w64(g_gen_apply_data, (ds + ai) * 8, r64(tis, ai * 8));
+                    ai = ai + 1;
+                }
+                g_gen_apply_data_count = ds + arg_count;
+                at = alloc_type(TYP_TUPLE, arg_count, ds);
+            }
+            return alloc_type(TYP_OPTIONAL, at, 0);
+        }
+        if str_eq(name, "None") != 0 {
+            return alloc_type(TYP_NULL, 0, 0);
+        }
         check_error(EC_N_UNDEFINED, "Undefined enum constructor '" + name + "'", ast_line(node), ast_col(node));
         return TI_UNIT;
     }
@@ -3044,20 +3161,20 @@ fn infer_expr(node: int) -> int {
         return ret;
     }
     if ast_kind(node) == EXPR_TRY {
-        // Try operator: unwrap Option[T] → T, Result[T,E] → T
+        // R2 P3 Task 4：`?` 解包改按**类型项结构**（spec §5.4），废掉基名字符串判断
+        // （旧实现按 `base_name == "Option" || base_name == "Result"` 取第一个类型实参——
+        // 与「可选不再依赖内建 Option 枚举名」相悖，且对用户自定义枚举按名字猜测语义）。
+        // 语义：`T?` = `T ∪ null` ⇒ 解包 = 取**非 null 析取支**。行面只有两种承载：
+        //   · TYP_OPTIONAL（data = 内层行）→ 返回内层（= T）；
+        //   · TYP_NULL（null 单点类型，无值可取）→ **不做解包**（返回原行）——「解包 null」
+        //     的结果是空类型，而本层的 `never`/`⊥` 行在引擎侧不是真 ⊥（AK_NEVER 仍按原子类
+        //     判包含，见 type_engine.cr 的 lit_implies）⇒ 判 never 会引入**新的**拒绝面；
+        //     故保守不动（如实登记：`None?` 的类型 = null 自身）。
+        // 其余（命名行/泛型应用行/原生行）**一律不解包**（旧行为：名字命中 Option/Result 才解包；
+        // 用户枚举不再按名字猜——语义面登记见任务报告「收紧清单/语义保持」双表）。
         inner_ti := infer_expr(ast_a(node));
-        if get_type_kind(inner_ti) == TYP_GENERIC_APPLY {
-            base_ti := get_type_data(inner_ti);
-            if get_type_kind(base_ti) == TYP_NAMED {
-                base_ni := get_type_data(base_ti);
-                base_name := istr_get(base_ni);
-                if base_name == "Option" || base_name == "Result" {
-                    ga_start := get_type_extra(inner_ti);
-                    if r64(g_gen_apply_data, ga_start * 8) >= 1 {
-                        return r64(g_gen_apply_data, (ga_start + 1) * 8); // first type arg
-                    }
-                }
-            }
+        if get_type_kind(inner_ti) == TYP_OPTIONAL {
+            return get_type_data(inner_ti);
         }
         return inner_ti;
     }
