@@ -185,7 +185,7 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 - [ ] **Step 4: 收紧清单汇总**：本批「旧接受 → 新拒绝」逐条（预期 ≥1 条：pA 切片→数组；标「P2a 引入的静默放宽在本批关闭」）
 - [ ] **Step 5: 文档**：spec §9 P3 行标 ✅ + 未覆盖面更新（符号档登记）；TODO：`fixed-array-retire`（TODO.md:446）未办句划销、#19 的「P3 面遗留」收口、#26 判据继承、新增登记（非枚举域不判穷尽 / 空递归保守 / MAX_* 上限处置）；findings 文档追加「P3 后复跑」节
 - [x] **Step 1: 全量回归**（`src/ci/run.sh` selfhost + bootstrap 全档）——收官实测：五 job（selfhost-tests / bootstrap-tests / suite / check / full-bootstrap）rc 与逐档计数见收官报告 §1；全量套件枚举 **42 selfhost + 7 bootstrap** 逐档记录 rc；`check` job rc=1 = **既有 red 划界**（2 条 TF01 误报，非本批引入）；枚举**暴露 1 处新增 red**（`test_backend_bootstrap.py` — T5 漏改 project-mode 清单 ⇒ 33×N06 静默，**已修**，见**附录 B.6**）⇒ 终态 **49/49 rc=0**
-- [x] **Step 2: 零变化复验**：ELF canary IDENTICAL（clean-cache）`95084e7b…d475` ✓；`.ccr` 变更面逐任务列（T0/T1/T3 不变；T4 = STR 段整串退役 −10B；T5 = `generics_test` +370B 反折叠而 `ptr_arith` 不变）✓；影子对拍终态 `decisions=30338 agree=30338` 全计数 0、站点覆盖同报 ✓
+- [x] **Step 2: 零变化复验**：ELF canary IDENTICAL（clean-cache）`95084e7b…d475` ✓；`.ccr` 变更面逐任务列（T0/T1/T3 不变；T4 = STR 段整串退役 −10B；T5 = `generics_test` +370B 反折叠而 `ptr_arith` 不变）✓；影子对拍终态 `decisions=30128 agree=30128`（T5 的 30338 → 收官 30128，−210 = 附录 B.6 修复所致，归因见 B.3）全计数 0、站点覆盖同报 ✓
 - [x] **Step 3: 自举链**：`corec2/corec3` `cmp` IDENTICAL + N06=0 + 冒烟 42 ✓（收官复验，见报告 §2）
 - [x] **Step 4: 收紧清单汇总**：**18 条**（T0 0 · T1 6 · T3 6 · T4 3 · T5 3）+ 诊断面新增 1（TM04 软）；放宽 **8 条**（T4 7 + T5 1）+ 实例名忠实化 6（T5）——统一台账 = **附录 B.2**
 - [x] **Step 5: 文档**：spec §9 P3 行标 ✅（**P3a**）+ 符号档登记；TODO = #34（P3a 落地）+ `fixed-array-retire` 未办句划销 + #19「P3 面遗留」收口 + #26 判据继承 + 新登记（非枚举域不判穷尽 / 空递归保守 / MAX_* 上限处置）；findings §13「P3a 后复跑」
@@ -320,7 +320,7 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 | 2 | Task 2 横切接口 | 形状条目（`sequence<⊤>` / 只读 / 可写 / 可索引 / 可迭代 / product）不存在；索引/切片/迭代的 `get_type_kind` 直比未换位 | `ty_variance_of`（T1：只读协变/可写不变已在引擎侧表）+ `sh_seq_term`（固定性位）+ `sh_struct_term`/`sh_enum_domain_term`（T0 展开层，一层深度） |
 | 3 | Task 6 impl 契约 | 接口签名仍裸 `TY_*`（`g_ifaces` 布局未动 ⇒ 签名**无法表达**命名/泛型类型）；`check_iface`/`check_impl_for` 未接引擎；mangling 未退役；方法 16/参数 8 上限未处置 | `sh_iface_shape_term`（占位）+ `iface_registry.cr` 条目表（5 字段，**无变型规则字段**——T1 口径 = 变型表留引擎侧，条目字段后挂引用） |
 
-**开工顺序建议**：先补 `iface_satisfies`（三态 1/0/-1，不得静默当 0；零调用者 → 首个消费者）→ Task 6 Step 1 签名类型项化（**形状项构造的前提**）→ Task 2 形状条目 + 消费点换位 → Task 5 半边接线（`gen_constr_satisfied` 一处 + `sh_iface_shape_term`）。**继承的硬口径**：新硬错误先全语料 report-only（Global Constraints 第 6 条）；`.ccr` STR 段约束（A.3-②：初始化路径**不得** `str_intern`）；三态纪律（-1 不当 0/1）。**新裁决面**：P3a 的 `AK_NULL` 不进 `iface_registry`（`iface.count == 13` 为判据硬值）——若 Task 2 形状面要覆盖 `T?`/`null`，须先裁「条目表扩列 vs 引擎侧另表」。
+**开工顺序建议**：先补 `iface_satisfies`（三态 1/0/-1，不得静默当 0；零调用者 → 首个消费者）→ Task 6 Step 1 签名类型项化（**形状项构造的前提**）→ Task 2 形状条目 + 消费点换位 → Task 5 半边接线（`gen_constr_satisfied` 一处 + `sh_iface_shape_term`）。**继承的硬口径**：新硬错误先全语料 report-only（Global Constraints 第 6 条）；`.ccr` STR 段约束（A.3-②：初始化路径**不得** `str_intern`）；三态纪律（-1 不当 0/1）。**新裁决面**：P3a 的 `AK_NULL` 不进 `iface_registry`（`iface.count == 13` 为判据硬值）——若 Task 2 形状面要覆盖 `T?`/`null`，须先裁「条目表扩列 vs 引擎侧另表」。**另见 B.7 一等条目**（`T?` 运行期表示未统一 ⇒ `Some` 臂双路径 SIGSEGV rc=0+139——非本三件的开工阻塞，但 P3b/P4 必修）。
 
 ### B.2 P3a 收紧/放宽统一台账（逐条 = 旧 → 新 + 处置；**汇总：收紧 18 · 放宽 8 · 诊断面新增 1 · 实例名忠实化 6**）
 
@@ -390,8 +390,8 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 3. **命名实参 vs 原生约束 = -1 不判**（T5 §7-③）：`struct Box[T: int]` + `Box[S]`（S = struct）零诊断——根因 = 引擎 `AK_NAMED` 不展开（P0 未覆盖面②；T0 的展开层**故意**只服务满足判定/域查询）；`Box[string]` 这类可判的照拒。⇒ 若 P3b/P4 要闭合，须裁「满足判定侧启用展开」（**不得**动等价面）。
 4. **MAX_GENERICS = 4 未解除**（T5 §0-②，显式登记）：>4 现状 = parse 期硬报（`P01`/`TA08`，非静默截断）；解除面 = struct/enum 表 4 槽布局 + `ESZ_*` + `parse_generics_into` + `ccr_io` 零写槽；语料最大 2 ⇒ 零收益零容忍成本，归单开批。
 5. **`EXPR_LET` 无任何兼容检查**（T1 §6-① → TODO #32）：`x: [int;3] = s;` / `x: [int;4] = [1,2,3];` / `x: int? = 5; y: int = x;`（运行 rc=5）全部 rc=0——**本站不是既有 10 判定点之一**，追加即「新判定点 + 新硬错误门」⇒ 须 report-only 专批；与 #20（调用位点无诊断）互为姊妹面（T4-L5 同源）。
-6. **运行期表示未统一**（T4 §7-③）：`Some(1)`/`None` 走 `IR_MAKE_ENUM` 对象 + tag，`T?` 槽里的**裸值**仍是裸值 ⇒ 同一 `T?` 变量可持两种表示（`x: int? = 5; match x { Some(v) => …, None => … }` 走 `None` 臂）。需 ir_gen/后端 + 表示决策（后续批）。
-7. **枚举变体数/载荷数 >16 越界写**（T4 §7-⑥，既有）：parser 写 `OFF_EI_VARIANTS + vc*OFF_EV_SIZE` 与载荷列 `+ tc*8` **无上限闸**（`MAX_ENUM_VARIANTS`/`MAX_VARIANT_TYPES` 仅 `.ccr` 读回侧检查）；修法照 TODO #8 先例（parser 硬错 + 访问器护栏，P020 式）⇒ **先 report-only**。**同族 MAX_* 处置总口径**（本批新登记）：MAX_ENUM_VARIANTS/MAX_VARIANT_TYPES（本条）、MAX_GENERICS（上条 4）三者均属「表布局定长槽 + 无写入闸」族，统一按「先加护栏、再评估解除」办。
+6. **运行期表示未统一 = 一等缺口**（T4 §7-③；**升级条目 = B.7**）：`Some(1)`/`None` 走 `IR_MAKE_ENUM` 对象 + tag，`T?` 槽里的**裸值**仍是裸值 ⇒ 同一 `T?` 变量可持两种表示。**实测（2026-09-12 复核，P3a 收官二进制，cwd = 仓库根）**：`x : int? = 5; match x { Some(v) => { return v; } None => { return 0; } }` —— `check`/`build` 均 **rc=0 零诊断**，而产物运行与 `corec run`（解释器）**双路径 SIGSEGV rc=139**；含 `Some(...)` 臂的其余形态同崩（`Some(v)` + 通配 `_`、match 作表达式取值 `y := match x { … }` 均双路径 139）；**纯通配臂**（`match x { _ => { return 7; } }`，无 `Some` 绑定）实测**不崩**（双路径 rc=7 = 通配臂照常执行）。⇒ 旧文「走 `None` 臂」的准确内核 = 「裸值不被识别为 `Some`（静默走非 Some 分支）」，**但凡存在 `Some` 臂即由静默升为崩溃**（载荷解包把裸值当枚举对象解引用）。**非 P3a 引入**：pre-P3a 工具链（`/tmp/p3t0_base_bin` 的 corec+corearch）同程序同 rc（check 0 / build 0 / 运行 139）。需 ir_gen/后端 + 表示决策（P3b/P4；复现、边界、修法归属详版 = **B.7**）。
+7. **枚举变体数/载荷数 >16 越界写**（T4 §7-⑥，既有；**已登记为 TODO #35**）：parser 写 `OFF_EI_VARIANTS + vc*OFF_EV_SIZE` 与载荷列 `OFF_EV_TYPES + tc*8` **无上限闸**——`MAX_ENUM_VARIANTS`/`MAX_VARIANT_TYPES`（皆 16）**只在 `.ccr` 读回侧**（`ccr_io.cr:1121`/`:1148`）检查，写入侧（parser）零引用。**「静默」只限 check 面**（前端不读回 ⇒ rc=0 零诊断）；**build 面非静默** = corearch 读回命中该闸 ⇒ rc=1（`error: .ccr enum variant count exceeds max` + `error: invalid .ccr file`，无产物）——但**写入已发生在读回闸之前**（护栏在读回侧 ≠ 写入侧），第 17 变体槽越 `ESZ_ENUMINFO` 224B（常量/写点/实测细节见 #35）。修法照 TODO #8 先例（parser 硬错 + 访问器护栏，P020 式）⇒ **先 report-only**。**同族 MAX_* 处置总口径**（本批新登记）：MAX_ENUM_VARIANTS/MAX_VARIANT_TYPES（本条 = #35）、MAX_GENERICS（上条 4）三者均属「表布局定长槽 + 无写入闸」族，统一按「先加护栏、再评估解除」办。
 8. **不可判面清点**（T3 §6-④ + T4 §7-⑩）：match 面四条（非枚举域 / 不可映射模式（字面量·struct 模式·未声明名·异枚举限定名）/ 引用 scrutinee / `T?` 无声明枚举——T4 后 `T?` 已入判定，仅「无声明枚举」的旧口径失效）；可选域模式名**只接裸名**（`Option.Some` ⇒ 不可映射 ⇒ 不判）；`TYP_NULL` 的 `EXPR_TRY` **不解包**（保守）；`type_compat_sym`（hotpatch 站）**无**可选注入；`iface_*` 对 `TYP_OPTIONAL`/`TYP_NULL` 行回 **-1**（门全拒 = 保守面）。
 9. **空枚举域 = 空洞穷尽**（T3 §6-③，计划原文「= 0」的偏差登记）：域 = ⊥ ⇒ 反例集恒空 ⇒ 判穷尽 = **1**（不报错是正确行为）；源码面 `enum E { }` 可写（`EC_P_ENUM_EMPTY`(P009) 有定义未见 raise——既有事实）。
 10. **空递归保守**（P0 引擎未覆盖面③，P3a 未动）：`μX.X` 按深度守卫回 -1；P3a 新增面（变型/展开/联合）均在预算窗口内（`ty_budget_reset(200000)` 前后隔离，照 `type_equal_engine`）。
@@ -425,3 +425,35 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 **修复**：删 `src/targets/x86_64-linux/_import.cr` 的 `import monomorph`（证据与 concat 面同一：monomorph 在 corearch 链接集**零代码引用**——全部定义符只出现在 globals.cr 注释里；文件头注记落案）。**复验**：该套件 rc=0（stage1/2/3 逐字节同 + smoke/O2 smoke 全绿）· project-mode 构建日志 `error[` **33 → 0** · ELF canary `95084e7b…d475` 不变 · 三二进制（corec/corearch/corelsp）sha 不变（该文件不入任何 concat 清单）· 全量枚举终态 **49/49 rc=0**。
 
 **给后续批（P3b 尤其 Task 6 的清单改动）**：① 动 `build_selfhost_native.py` 的任何清单 = 必须同步核 `src/targets/x86_64-linux/_import.cr` 与 `src/compiler/_import.cr`（两面）；② 每任务回归面**必含** `test_backend_bootstrap.py`（或先把它挂进 CI——#31）。
+
+### B.7 一等条目（P3b/P4 必修；**非 P3a 引入**）：`T?` 运行期表示未统一 ⇒ `Some` 臂双路径 SIGSEGV
+
+**缺口**（T4 §7-③ 原登记，B.4-6 升级）：`Some(1)`/`None` 走 `IR_MAKE_ENUM` 对象 + tag，而 `T?` 槽里的**裸值**仍是裸值 ⇒ 同一 `T?` 变量可持两种表示；计划未列 ir_gen/后端，P3a 只登记未修。**升级理由 = 实测后果不是「走 `None` 臂」而是崩溃**（2026-09-12 复核）。
+
+**复现（最小 8 行）**：
+
+```
+fn main() -> int {
+    x : int? = 5;
+    match x {
+        Some(v) => { return v; }
+        None => { return 0; }
+    }
+    return 0;
+}
+```
+
+**实测 rc（P3a 收官二进制 `./build/corec`，2026-09-12；cwd = 仓库根——`/tmp` cwd 会触发 import 解析假失败，勿用）**：
+
+| 面 | rc | 观察 |
+|---|---|---|
+| `check` | 0 | **零诊断**（编译器完全不拦） |
+| `build --static` | 0 | 产物照出 |
+| 产物运行 | **139** | SIGSEGV |
+| `corec run`（解释器） | **139** | 同崩（非 ELF 特有） |
+
+**边界（防误诊；本轮四形态逐个实测）**：`Some(v)`+`None` 臂 = 双路径 139（上表）；`Some(v)`+通配 `_` 混合臂 = 双路径 139；`y := match x { Some(v) => v, None => 0 };`（match 作表达式取值）= 双路径 139；**纯通配臂**（`match x { _ => { return 7; } }`，无 `Some` 绑定）= 双路径 **rc=7、不崩**（通配臂照常执行）。⇒ 崩溃面 = **`Some` 臂的载荷解包**（把裸值当枚举对象解引用）；「裸值入 `T?`」本身是静默的，是 `Some` 臂把它变成崩溃。
+
+**非 P3a 引入（预存证据）**：pre-P3a 工具链 `/tmp/p3t0_base_bin`（P3a Task 0 起点，corec+corearch）同程序：`check` rc=0 · `build` rc=0 · 运行 **rc=139**——与终态同 rc ⇒ 无回归；T4 报告 §7-③ 与 `tests/selfhost/test_optional.py` 头注均已如实登记（「表示统一不在本任务 Files 面内」）。
+
+**修法归属（P3b/P4）**：运行期表示统一，二选一——①**构造/赋值侧装箱**（`T?` 槽一律存带 tag 的表示，裸值入口补 `IR_MAKE_ENUM`）；②**解包侧判表示**（`Some` 臂按 tag/表示判别后取载荷，裸值路径直取）。落点 = `ir_gen.cr` + 后端（`T?` 的赋值/形参/返回/字段等流）；**与 P4 的 .ccr TYPE 段载体一并裁**（B.1 末「条目表扩列 vs 引擎侧另表」同批）。**判据面** = `tests/selfhost/test_optional.py` 扩例（`x : int? = 5` 的 Some/混合/通配臂 + 产物运行 + 解释器双路）——现套件只钉「Some 对象走 Some 臂 / None 走 None 臂 / 裸值入返回位 / 裸值配通配臂」，**未覆盖「裸值 + `Some` 臂」**，这正是该缺口存活至今的直接原因。
