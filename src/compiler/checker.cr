@@ -231,6 +231,8 @@ fn named_dedup_verify() -> int {
 fn init_types() {
     g_type_count = 0;
     named_dedup_reset();   // 类型表重置 → 侧表随之作废（陈旧 name→ti 不得跨重置复用）
+    // R2 P3 Task 5：约束诊断去重侧表同理作废（键含 AST 节点下标：跨编译期复用会漏报/误报）
+    gen_constr_seen_reset();
     // R2 P2a Task 3 评审 Critical：桥接缓存（ti→term）**同理必须作废**——本批起判定路径无条件
     // 调 sh_term_of_ti，长驻进程（corelsp 每请求 init_types）复用行号时会命中陈旧 ti→term
     // ⇒ 两个不同类型被判等（静默漏报；评审实证见 ty_shadow.cr:sh_map_reset 注记）。
@@ -896,6 +898,9 @@ fn res_type_node(node: int) -> int {
                 an = an + 1;
             }
         }
+        // R2 P3 Task 5（Step 3）：**实例化点**的结构/枚举泛型约束检查（`Box[T: I]` 的 `Box[P]`）。
+        // 判定 = ty_sub（本质轴）+ 反例诊断；用户接口约束 = -1 零动作（P3b 阻塞面）。
+        gen_inst_constr_check(node, find_struct(name_idx), find_enum(name_idx), args, arg_count);
         // Store args in g_gen_apply_data: [count, arg1, arg2, ...]
         data_start := g_gen_apply_data_count;
         grow_gen_apply_data(data_start + 1 + arg_count);
@@ -1021,6 +1026,178 @@ fn check_iface(type_ni: int, iface_ii: int) -> bool {
         mi = mi + 1;
     }
     return true;
+}
+
+// ═══════════════ R2 P3 Task 5：泛型约束（保留 / 实例化判定 / 反例）═══════════════
+// 语义（spec §5.2）：`fn f[T]`（约束 = ⊤）/ `fn f[T: I]`（约束 = 类型项 I）；**结构/枚举泛型
+// 补上约束**（旧态：parser 写进 dummy 缓冲后丢弃，见 parser.cr 的 save_*_gen_constrs）；
+// 实例化检查 = `ty_sub(实参, 约束)`；失败给**非空反例**（`tt_witness`）。
+// **本批 = P3a 半边**（P3 计划 Task 5 与「与 P2b 的交接面」表第 4 行）：
+//   · 本质轴（约束项 = 原生/已声明类型名）：`gen_constr_satisfied` 走引擎判定 —— 本批落地；
+//   · 用户轴（`I` 是 `interface` 名）：满足判定须走 P2b 注册表 `iface_satisfies`——**未交付**
+//     （P3 计划附录 A.3-①）⇒ 本层回 **-1 = 不判**；函数调用点**回落既有 `check_iface`
+//     名拼接路径**（行为逐字保持 = 不回归），结构/枚举实例化点则零动作（**登记为 P3b 阻塞面**，
+//     不在本批发明「满足/不满足」）。⇒ 不得据本批「用户接口约束无诊断」推断语义缺失。
+// 三态纪律（P0/P1/P2a 继承）：-1 一律**不判**——不得当 0（拒绝）或 1（放行）。
+// 预算隔离照 `ti_subsumes`（引擎 memo 跨查询命中会让结果依赖预算历史）。
+
+// 约束名 → 类型行（-1 = 不是类型名）。原生名按 parse_type 的字典逐名判（parser.cr 的
+// 8 个基类型名分支：int/dex/bool/string/char/never/unit/dyn——**原生名不经符号表**，
+// init_types 只建类型行不 def_sym）；其余查符号表 SYM_TYPE（struct/enum/别名/泛型形参）。
+fn gen_constr_type_ti(c_ni: int) -> int {
+    if c_ni < 0 { return -1; }
+    s := istr_get(c_ni);
+    if str_eq(s, "int") != 0 { return TI_INT; }
+    if str_eq(s, "dex") != 0 { return TI_DEX; }
+    if str_eq(s, "bool") != 0 { return TI_BOOL; }
+    if str_eq(s, "string") != 0 { return TI_STR; }
+    if str_eq(s, "char") != 0 { return TI_CHAR; }
+    if str_eq(s, "unit") != 0 { return TI_UNIT; }
+    if str_eq(s, "never") != 0 { return TI_NEVER; }
+    if str_eq(s, "dyn") != 0 { return TI_DYN; }
+    si := find_gsym(c_ni);
+    if si >= 0 && sym_kind(si) == SYM_TYPE { return sym_type(si); }
+    return -1;
+}
+
+// 约束满足三态：1 = 满足 / 0 = 违反 / -1 = **不判**（接口约束 = P3b 未交付 / 名字非类型 /
+// 桥接失败）。三态直传（**不**把 -1 折成 0/1）。
+fn gen_constr_satisfied(c_ni: int, arg_ti: int) -> int {
+    if c_ni < 0 || arg_ti < 0 { return -1; }
+    if find_iface(c_ni) >= 0 { return -1; }        // 用户轴：iface_satisfies 未交付（P3b 阻塞面）
+    cti := gen_constr_type_ti(c_ni);
+    if cti < 0 { return -1; }                      // 非类型名（未定义名等）：不判、不发明诊断
+    a := sh_term_of_ti(arg_ti);
+    b := sh_term_of_ti(cti);
+    if a < 0 || b < 0 { return -1; }               // 桥接缺口 ⇒ 不判
+    ty_budget_reset(200000);
+    s := ty_sub(a, b);
+    ty_budget_reset(200000);
+    return s;                                      // 1/0/-1 直传
+}
+
+// 反例文本（诊断用）：`实参 \ 约束` 的具体值。三态 -1 / 反例不可得 → ""（**不谎报反例**）。
+fn gen_constr_witness_str(arg_ti: int, c_ni: int) -> string {
+    cti := gen_constr_type_ti(c_ni);
+    if cti < 0 { return ""; }
+    a := sh_term_of_ti(arg_ti);
+    b := sh_term_of_ti(cti);
+    if a < 0 || b < 0 { return ""; }
+    ty_budget_reset(200000);
+    w := tt_witness(a, b);
+    ty_budget_reset(200000);
+    if w < 0 { return ""; }
+    return tt_display(w);
+}
+
+// 诊断发射（措辞分派：既有接口路径的措辞/码不动；本路径 = 约束 + 反例）。码沿用
+// EC_TG_BOUND（TG02，软诊断：check rc=1 / build rc=0 —— 与既有约束检查同门，**不新增硬门**）。
+fn gen_constr_raise(arg_ti: int, c_ni: int, line: int, col: int) {
+    msg := "Type '" + type_display(arg_ti) + "' does not satisfy constraint '" + istr_get(c_ni) + "'";
+    w := gen_constr_witness_str(arg_ti, c_ni);
+    if str_len(w) > 0 { msg = msg + " (counterexample: " + w + ")"; }
+    check_error(EC_TG_BOUND, msg, line, col);
+}
+
+// ─── 诊断去重侧表（开放寻址，16B/条 {key, 1}；key = node * MAX_GENERICS + gi）───
+// 为何需要：实例化点的判定函数（res_type_node / res_call_type）按**语法出现点**调用，同一
+// AST 节点可被多次解析（字段访问、多次引用同一注解…），且 `check_error` 无去重 ⇒ 不去重即
+// 同一条约束违反被打印多次。键 = (节点, 形参下标)——同节点不同形参各报一条（信息不丢）。
+// 生命周期同 named_dedup（init_types 置 cap=0 → 惰性重建）；键含 AST 节点下标 ⇒ 随编译期作废。
+fn gen_constr_seen_init() {
+    if g_constr_seen_cap > 0 { return; }
+    nc := 1024;
+    nb := alloc(nc * 16);
+    i : ., mut = 0;
+    loop { if i >= nc { break; } w64(nb, i * 16, -1); i = i + 1; }
+    g_constr_seen = nb;
+    g_constr_seen_cap = nc;
+    g_constr_seen_count = 0;
+}
+
+fn gen_constr_seen_reset() {
+    g_constr_seen_cap = 0;
+    g_constr_seen_count = 0;
+}
+
+fn gen_constr_seen_probe(k: int) -> int {
+    cap := g_constr_seen_cap;
+    p : ., mut = tt_mod(k, cap);
+    ret : ., mut = -1;
+    loop {
+        kk := r64(g_constr_seen, p * 16);
+        if kk < 0 { ret = p; break; }
+        if kk == k { ret = p; break; }
+        p = p + 1; if p >= cap { p = 0; }
+    }
+    return ret;
+}
+
+fn gen_constr_seen_rehash() {
+    old := g_constr_seen;
+    old_cap := g_constr_seen_cap;
+    nc := old_cap * 2;
+    nb := alloc(nc * 16);
+    i : ., mut = 0;
+    loop { if i >= nc { break; } w64(nb, i * 16, -1); i = i + 1; }
+    g_constr_seen = nb;
+    g_constr_seen_cap = nc;
+    g_constr_seen_count = 0;
+    j : ., mut = 0;
+    loop {
+        if j >= old_cap { break; }
+        kk := r64(old, j * 16);
+        if kk >= 0 {
+            s := gen_constr_seen_probe(kk);
+            w64(g_constr_seen, s * 16, kk);
+            w64(g_constr_seen, s * 16 + 8, 1);
+            g_constr_seen_count = g_constr_seen_count + 1;
+        }
+        j = j + 1;
+    }
+}
+
+// 1 = 首次（调用方报诊断），0 = 已报过（丢弃）。装填因子守卫在探测**前**（表满 + 键不存在
+// ⇒ 开放寻址永不退出，照 named_dedup / sh_map 同款同因）。
+fn gen_constr_seen_add(k: int) -> int {
+    gen_constr_seen_init();
+    if (g_constr_seen_count + 1) * 2 >= g_constr_seen_cap { gen_constr_seen_rehash(); }
+    s := gen_constr_seen_probe(k);
+    if r64(g_constr_seen, s * 16) == k { return 0; }
+    w64(g_constr_seen, s * 16, k);
+    w64(g_constr_seen, s * 16 + 8, 1);
+    g_constr_seen_count = g_constr_seen_count + 1;
+    return 1;
+}
+
+// ─── 实例化点检查（结构/枚举泛型：`Box[T: I]` 的 `Box[P]`）───
+// 消费点 = res_type_node / res_call_type 的 EXPR_GENERIC_APPLY 分支（实参已解析成 ti 处）。
+// sa/ea = struct/enum 声明行（-1 = 该名字不是 struct/enum —— 接口泛型/未知名，零动作）。
+// **实参缺位不判**（不越界读）；**arg_ti < 0 不判**（未解析）；用户接口约束经
+// gen_constr_satisfied 回 -1 ⇒ 零动作（P3b 阻塞面，见该函数注）。
+fn gen_inst_constr_check(app_node: int, sa: int, ea: int, args: string, arg_count: int) {
+    gc : ., mut = 0;
+    if sa >= 0 { gc = si_generic_count(sa); }
+    else if ea >= 0 { gc = ei_generic_count(ea); }
+    else { return; }
+    i : ., mut = 0;
+    loop {
+        if i >= gc { break; }
+        if i >= arg_count { break; }
+        c_ni : ., mut = -1;
+        if sa >= 0 { c_ni = si_gen_constr(sa, i); } else { c_ni = ei_gen_constr(ea, i); }
+        if c_ni >= 0 {
+            arg_ti := r64(args, i * 8);
+            if arg_ti >= 0 {
+                if gen_constr_satisfied(c_ni, arg_ti) == 0 {
+                    if gen_constr_seen_add(app_node * MAX_GENERICS + i) != 0 {
+                        gen_constr_raise(arg_ti, c_ni, ast_line(app_node), ast_col(app_node));
+                    }
+                }
+            }
+        }
+        i = i + 1;
+    }
 }
 
 // --- First pass: collect all declarations ---
@@ -1549,6 +1726,9 @@ fn res_call_type(node: int, func_fi: int) -> int {
                 an = an + 1;
             }
         }
+        // R2 P3 Task 5（Step 3）：调用位点的实例化检查（与 res_type_node 同源；本节的存在理由
+        // = 调用位点的类型语法（形参/返回/字段）两侧都要覆盖——见 res_call_type 头注的域差）。
+        gen_inst_constr_check(node, find_struct(name_idx), find_enum(name_idx), args, ac);
         ds := g_gen_apply_data_count;
         grow_gen_apply_data(ds + 1 + ac);
         w64(g_gen_apply_data, ds * 8, ac);
@@ -1693,7 +1873,20 @@ fn infer_gen_call(fi: int, call_node: int, first_arg: int, arg_count: int) -> in
         }
 
         pi = pi + 1;
+        // ─── R2 P3 Task 5（Step 1）：F4 形参链导航修复（TODO #21）───
+        // 旧态 `pn = pn + 1` 假设 EXPR_PARAM 在节点表里**连续**——不成立：每个形参的类型
+        // 节点由 parse_type 在**该形参节点之前**分配（parser.cr 的 `pty := parse_type()` →
+        // `alloc_node(EXPR_PARAM, …, pty, …)`），且**每个**类型（含基类型）都占一节点
+        // （parse_type 尾部 `alloc_node(0,…,ty,0,…)`）⇒ 第 i+1 个形参不是 pn+1。
+        // 实测症状（TODO #21 原始探针的机制，本批实读）：`fn take[T](a: T, n: int)` 的
+        // param1 落到 `int` 的类型节点上——`ast_data(基类型节点) = 0` ⇒ res_call_type(0) 读
+        // **AST 节点 0**（= 本文件首个类型节点；若它恰是 `EXPR_IDENT(T)` 则回 gparam(T)）：
+        // 非泛型形参的**声明类型约束**在调用推断中被绕过，且 gparam(T) 分支会给**未绑定**的
+        // 形参凭空绑定 T（`fn take[T](n: int, a: T)` 场景）。
+        // 修法 = 前扫到下一个 EXPR_PARAM（与 ir_gen.cr 的三处同款同因：:1481-1487 的 dex 参数
+        // 对齐 / :2279-2285 的参数建 var / :2715 的 mono 克隆），扫到表尾置 -1（外循环 break）。
         pn = pn + 1;
+        loop { if pn >= g_ast_count { pn = -1; break; } if ast_kind(pn) == EXPR_PARAM { break; } pn = pn + 1; }
         an = ast_b(an);  // next EXPR_ARG
     }
 
@@ -1719,6 +1912,14 @@ fn infer_gen_call(fi: int, call_node: int, first_arg: int, arg_count: int) -> in
                         hmi = hmi + 1;
                     }
                     if concrete_ti >= 0 {
+                        // R2 P3 Task 5（Step 3）：先走**本质轴**引擎判定（约束名 = 原生/已声明
+                        // 类型名时 `ty_sub(实参项, 约束项)` + 反例）；用户接口名 ⇒ 该函数回 -1
+                        // ⇒ 落下方既有 check_iface 路径（**逐字未动**，P3b 才换 iface_satisfies）。
+                        if gen_constr_satisfied(iface_ni, concrete_ti) == 0 {
+                            if gen_constr_seen_add(call_node * MAX_GENERICS + gci) != 0 {
+                                gen_constr_raise(concrete_ti, iface_ni, ast_line(call_node), ast_col(call_node));
+                            }
+                        } else {
                         type_ni := get_type_name(concrete_ti);
                         if type_ni >= 0 {
                             ii := find_iface(iface_ni);
@@ -1728,6 +1929,7 @@ fn infer_gen_call(fi: int, call_node: int, first_arg: int, arg_count: int) -> in
                                 }
                             }
                         }
+                        }
                     }
                 }
             }
@@ -1735,12 +1937,39 @@ fn infer_gen_call(fi: int, call_node: int, first_arg: int, arg_count: int) -> in
         }
     }
 
-    // Store concrete type name on call node for backend monomorphization
+    // ─── R2 P3 Task 5（Step 4）：调用点**泛型绑定**登记（monomorph 实例键类型项化）───
+    // 旧态 = 把「首个绑定的类型名」写进调用节点 int_val（唯一读者 `ir_gen.cr` 的
+    // find_or_create_mono_func 是**死码**——零调用者；ir_gen 的实际实例键来自**实参 IR 变量
+    // 的类型**，对命名/复合实参一律塌缩 "int" ⇒ 异型实例折叠 + 错替换）。新态 = 按**被调方
+    // 泛型形参声明序**登记 ti 段（块 = [count, ti…]），节点 int_val = 块起始 + 1（**0 = 无**
+    // ——parser 建 EXPR_CALL 时 iv 初值即 0，见 parser.cr 的 alloc_node(EXPR_CALL, …, 0, …)）。
+    // ir_gen 据此生成规范实例键（inst_key_of_ti）并以 ti 型替换（monomorph.cr）；
+    // 绑定全缺（g_gen_map_count == 0，如 T 只出现在返回型）⇒ 不写（0 = 回落旧名字路径）。
     if g_gen_map_count > 0 {
-        conc_type_ni := r64(g_gen_map_types, 0 * 8);
-        conc_name_ni := get_type_name(conc_type_ni);
-        if conc_name_ni >= 0 {
-            ast_set_int_val(call_node, conc_name_ni);
+        gc_b := fi_generic_count(fi);
+        if gc_b > 0 {
+            bstart := g_gen_binds_count;
+            grow_gen_binds(bstart + 1 + gc_b);
+            w64(g_gen_binds, bstart * 8, gc_b);
+            gi_b : ., mut = 0;
+            loop {
+                if gi_b >= gc_b { break; }
+                pname_b := fi_generic_name(fi, gi_b);
+                tv_b : ., mut = -1;
+                hmi_b : ., mut = 0;
+                loop {
+                    if hmi_b >= g_gen_map_count { break; }
+                    if r64(g_gen_map_names, hmi_b * 8) == pname_b {
+                        tv_b = r64(g_gen_map_types, hmi_b * 8);
+                        break;
+                    }
+                    hmi_b = hmi_b + 1;
+                }
+                w64(g_gen_binds, (bstart + 1 + gi_b) * 8, tv_b);
+                gi_b = gi_b + 1;
+            }
+            g_gen_binds_count = bstart + 1 + gc_b;
+            ast_set_int_val(call_node, bstart + 1);
         }
     }
 

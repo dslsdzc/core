@@ -1493,26 +1493,62 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
         if func_ni >= 0 && (ast_kind(func_node) == EXPR_IDENT) {
             gen_fi := find_func(func_ni);
             if gen_fi >= 0 && fi_generic_count(gen_fi) > 0 {
-                // Build type args string from call argument types
+                // ─── R2 P3 Task 5（Step 4）：实例键类型项化 ───
+                // 优先：checker 登记的**调用点绑定段**（g_gen_binds；节点 int_val = 段起始+1，
+                // 0 = 无）——按被调方泛型形参**声明序**给 ti，键 = `inst_key_of_ti` 规范结构名
+                // （含命名/应用实参真身份），替换走 ti 路径（monomorph.cr）。前置 = 段长与形参
+                // 数一致 + 全绑定 + 全具体（否则回落旧路径；半解实例比旧路径更坏）。
+                // 回落（旧路径，**逐字保留**）：键由**实参 IR 变量类型**拼名串（非原生 → "int"
+                // 兜底），替换走名字路径——`gen_create_instance(func, args, -1)`。
+                gc_g := fi_generic_count(gen_fi);
+                biv := ast_int_val(node);
                 type_args : ., mut = "";
-                ai : ., mut = 0;
-                loop {
-                    if ai >= ac { break; }
-                    av := r64(arg_vars, ai * 8);
-                    ti := TI_INT;
-                    if av >= 0 { ti = irv_type(av); }
-                    if ai > 0 { type_args = type_args + ","; }
-                    if ti == TI_INT { type_args = type_args + "int"; }
-                    else if ti == TI_STR { type_args = type_args + "string"; }
-                    else if ti == TI_BOOL { type_args = type_args + "bool"; }
-                    else if ti == TI_CHAR { type_args = type_args + "char"; }
-                    else if ti == TI_DEX || ti == TI_DEX_S { type_args = type_args + "dex"; }
-                    else if ti == TI_UNIT { type_args = type_args + "unit"; }
-                    else { type_args = type_args + "int"; }
-                    ai = ai + 1;
+                bstart : ., mut = -1;
+                if biv > 0 {
+                    bs := biv - 1;
+                    if bs < g_gen_binds_count {
+                        bcnt := r64(g_gen_binds, bs * 8);
+                        if bcnt == gc_g && bs + 1 + bcnt <= g_gen_binds_count {
+                            ok_b : ., mut = 1;
+                            gi_b : ., mut = 0;
+                            loop {
+                                if gi_b >= bcnt { break; }
+                                bt := r64(g_gen_binds, (bs + 1 + gi_b) * 8);
+                                if bt < 0 { ok_b = 0; break; }
+                                if inst_ti_concrete(bt) == 0 { ok_b = 0; break; }
+                                if inst_type_node_of_ti(bt) < 0 { ok_b = 0; break; }
+                                if gi_b > 0 { type_args = type_args + ","; }
+                                type_args = type_args + inst_key_of_ti(bt);
+                                gi_b = gi_b + 1;
+                            }
+                            if ok_b != 0 { bstart = bs; }
+                        }
+                    }
+                }
+                if bstart < 0 {
+                    // 旧路径：逐实参类型名串（**不得**改动——checker 未给绑定时的唯一退路）
+                    type_args = "";
+                    ai : ., mut = 0;
+                    loop {
+                        if ai >= ac { break; }
+                        av := r64(arg_vars, ai * 8);
+                        ti := TI_INT;
+                        if av >= 0 { ti = irv_type(av); }
+                        if ai > 0 { type_args = type_args + ","; }
+                        if ti == TI_INT { type_args = type_args + "int"; }
+                        else if ti == TI_STR { type_args = type_args + "string"; }
+                        else if ti == TI_BOOL { type_args = type_args + "bool"; }
+                        else if ti == TI_CHAR { type_args = type_args + "char"; }
+                        else if ti == TI_DEX || ti == TI_DEX_S { type_args = type_args + "dex"; }
+                        else if ti == TI_UNIT { type_args = type_args + "unit"; }
+                        else { type_args = type_args + "int"; }
+                        ai = ai + 1;
+                    }
                 }
                 // Find or create specialized function instance
-                spec_ni := gen_find_or_create(gen_fi, type_args);
+                spec_ni : ., mut = -1;
+                if bstart >= 0 { spec_ni = gen_find_or_create_bind(gen_fi, type_args, bstart); }
+                else { spec_ni = gen_find_or_create(gen_fi, type_args); }
                 if spec_ni >= 0 {
                     func_ni = fi_name(spec_ni);
                     // Fall through to normal IR_CALL emission

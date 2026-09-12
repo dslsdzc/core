@@ -36,6 +36,25 @@ g_borrow_scope_markers : string, mut; g_borrow_scope_depth : int, mut;  g_borrow
 g_ifaces : string, mut;          g_iface_count : int, mut;     g_iface_cap : int, mut;
 g_impl_for : string, mut;        g_impl_for_count : int, mut;  g_impl_for_cap : int, mut;
 g_generic_constr : string, mut;  g_generic_constr_count : int, mut; g_generic_constr_cap : int, mut;
+// R2 P3 Task 5：结构/枚举泛型约束侧表（**索引空间与函数侧分家**——g_generic_constr 的键 =
+// `fi * MAX_GENERICS + gi`，若共用同一缓冲，struct/enum 行号与函数行号会互相覆盖）。
+// 键 = `si * MAX_GENERICS + gi`（struct）/ `ei * MAX_GENERICS + gi`（enum），值 = 约束名 ni
+// （-1 = 无约束；稀疏：未写槽不读）。**语义边界**（P3 计划 Task 5）：保留（本表）归 P3a；
+// `T: I` 的**满足判定**走 P2b 注册表 `iface_satisfies`——未交付 ⇒ 用户接口约束在实例化点
+// 一律 -1（不判），只有本质轴（原生类型名约束）可判。见 checker.cr 的 gen_constr_* 段。
+g_sgen_constr : string, mut;     g_sgen_constr_count : int, mut;  g_sgen_constr_cap : int, mut;
+g_egen_constr : string, mut;     g_egen_constr_count : int, mut;  g_egen_constr_cap : int, mut;
+// R2 P3 Task 5（Step 4）：调用点泛型绑定侧表（monomorph 实例键类型项化）。
+// 由 checker 的 infer_gen_call 按**被调方泛型形参声明序**登记：每调用点 gc 个槽，值 = 实参
+// 推断出的**类型行 ti**（-1 = 未绑定）。起始下标写入调用节点 `ast_int_val`（调用节点的该槽
+// 在本批之前只被**死码** `ir_gen.cr find_or_create_mono_func` 读——该函数零调用者，登记见
+// 报告）。ir_gen 侧据 ti 生成规范实例键 `inst_key_of_ti`，并以 ti 型替换（`g_gen_subst_tis`）
+// 取代纯名字文本替换（旧法：非原生实参一律塌缩 "int" ⇒ 异型实例折叠 + 错替换）。
+g_gen_binds : string, mut;       g_gen_binds_count : int, mut;    g_gen_binds_cap : int, mut;
+// R2 P3 Task 5：约束违反诊断去重侧表（开放寻址，16B/条 {key, 1}；key = node*MAX_GENERICS+gi）。
+// 生命周期同 g_named_dedup（init_types → gen_constr_seen_reset 置 cap=0 惰性重建；键含 AST
+// 节点下标 ⇒ 跨编译期复用即失效）。见 checker.cr 的 gen_constr_seen_* 段。
+g_constr_seen : string, mut;     g_constr_seen_cap : int, mut;    g_constr_seen_count : int, mut;
 g_gen_params : string, mut;     g_gen_param_count : int, mut;     g_gen_param_cap : int, mut;
 g_checker_current_fi : int, mut;
 g_unsafe_depth : int, mut;
@@ -399,6 +418,9 @@ fn reset_frontend_state() {
     g_sym_count = 0; g_type_count = 0;
     g_iface_count = 0; g_impl_for_count = 0; g_method_count = 0;
     g_type_alias_count = 0; g_generic_constr_count = 0; g_gen_param_count = 0;
+    // R2 P3 Task 5：三条新侧表与声明表同生命周期（si/ei/调用点下标跨编译复用——不清则
+    // 陈旧约束/绑定被新声明命中，静默错判；照 g_generic_constr_count 同址同因）
+    g_sgen_constr_count = 0; g_egen_constr_count = 0; g_gen_binds_count = 0;
     g_global_let_count = 0;
     g_loop_depth = 0; g_scope_depth = 0;
     g_borrow_count = 0; g_holder_count = 0;

@@ -864,6 +864,41 @@ fn grow_gen_constr(needed: int) {
     nb := alloc(nc * 8); _dyncpy(g_generic_constr, g_generic_constr_cap * 8, nb);
     g_generic_constr = nb; g_generic_constr_cap = nc; }
 
+// R2 P3 Task 5：结构/枚举泛型约束侧表（键 = row * MAX_GENERICS + gi；索引空间与函数侧分家，
+// 见 globals.cr 表注）。增长式样逐字照 grow_gen_constr（同族第三/第四份，语义同构）。
+fn grow_sgen_constr(needed: int) {
+    if needed < g_sgen_constr_cap { return; }
+    nc : ., mut = g_sgen_constr_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
+    nb := alloc(nc * 8); _dyncpy(g_sgen_constr, g_sgen_constr_cap * 8, nb);
+    g_sgen_constr = nb; g_sgen_constr_cap = nc; }
+
+fn grow_egen_constr(needed: int) {
+    if needed < g_egen_constr_cap { return; }
+    nc : ., mut = g_egen_constr_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
+    nb := alloc(nc * 8); _dyncpy(g_egen_constr, g_egen_constr_cap * 8, nb);
+    g_egen_constr = nb; g_egen_constr_cap = nc; }
+
+// R2 P3 Task 5（Step 4）：调用点绑定侧表增长（i64 顺序追加，无洞——与上面两张稀疏表不同）
+fn grow_gen_binds(needed: int) {
+    if needed < g_gen_binds_cap { return; }
+    nc : ., mut = g_gen_binds_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+    nb := alloc(nc * 8); _dyncpy(g_gen_binds, g_gen_binds_cap * 8, nb);
+    g_gen_binds = nb; g_gen_binds_cap = nc; }
+
+// 结构/枚举第 gi 个泛型形参的约束名 ni（-1 = 无约束/越界）。读取面护栏（照 SI 访问器惯例：
+// 越界不越读——gi 上限 MAX_GENERICS、行下标上限计数）。
+fn si_gen_constr(n: int, gi: int) -> int {
+    if n < 0 || gi < 0 || gi >= MAX_GENERICS { return -1; }
+    idx := n * MAX_GENERICS + gi;
+    if idx >= g_sgen_constr_count { return -1; }
+    return r64(g_sgen_constr, idx * 8); }
+
+fn ei_gen_constr(n: int, gi: int) -> int {
+    if n < 0 || gi < 0 || gi >= MAX_GENERICS { return -1; }
+    idx := n * MAX_GENERICS + gi;
+    if idx >= g_egen_constr_count { return -1; }
+    return r64(g_egen_constr, idx * 8); }
+
 fn grow_sg(n: int) {
     if n < g_sg_cap { return; }
     nc := g_sg_cap;

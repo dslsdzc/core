@@ -92,10 +92,16 @@ os_linux_files = [
     'src/os/linux/syscall.cr',
 ]
 
-# 后端收尾段：ccr 载入 + 单态化 + 运行时 stdlib 桥 + corearch 入口。
+# 后端收尾段：ccr 载入 + 运行时 stdlib 桥 + corearch 入口。
+# R2 P3 Task 5：monomorph.cr 自本段**迁出**（→ corec_files），理由 = ① 它的类型项化改造需要
+# 类型表读取器/节点合成（get_type_kind/alloc_node——checker/parser 层，corearch 清单无此层）；
+# ② corearch 侧对它**零引用**（本批以脚本逐符号核对 corearch 链接集：monomorph.cr 的全部
+# 定义符（gen_*/grow_gen_*/g_gen_*）在链接集内只出现在 globals.cr 的**注释**里，无一是代码
+# 引用；单态化本就是前端 ir_gen 期的动作，后端消费已特化的 .ccr）。corearch 行为不变由
+# ELF canary 逐字节 + 全套回归独立验证（本次迁出的唯一产物面影响 = corearch 二进制不再含
+# 这段死码）。
 backend_support_files = [
     'src/compiler/ccr_io.cr',
-    'src/compiler/monomorph.cr',
     'src/stdlib/hotpatch.cr',
     'src/stdlib/arena.cr',
     'src/stdlib/goroutine.cr',
@@ -325,6 +331,9 @@ def main():
         'src/compiler/ext_mgr.cr',
         'src/compiler/ext_safety.cr',
         'src/compiler/ir_gen.cr',
+        # R2 P3 Task 5：自 backend_support_files 迁入（原因与 corearch 零引用证据见该段注）。
+        # 位置 = ir_gen 之后（函数跨文件可见与顺序无关；本文件的自有全局只在本文件使用）。
+        'src/compiler/monomorph.cr',
         'src/compiler/pass.cr',
         'src/compiler/dataflow.cr',
         'src/compiler/ccr_io.cr',
@@ -341,7 +350,6 @@ def main():
         'src/compiler/interp.cr',
         'src/compiler/dump.cr',
         'src/compiler/cir_cache.cr',
-        'src/compiler/monomorph.cr',
         'src/compiler/main.cr',
     ]
     guard_manifest(corec_files, 'corec')

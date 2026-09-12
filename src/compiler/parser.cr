@@ -1246,6 +1246,53 @@ fn save_func_gen_constrs(fi: int, constrs: string, count: int) {
     }
 }
 
+// ─── R2 P3 Task 5（Step 2）：结构/枚举泛型约束登记（**索引空间分家** —— 键 = row*MAX_GENERICS+gi，
+// 与函数侧 g_generic_constr 不同缓冲；见 globals.cr 表注）───
+// **空槽预填 -1**（本批实测缺陷修复）：表是**稀疏**填的（只写有约束的槽），而缓冲零初值 ⇒
+// 高水位区内的「本行未写过的槽」读出 0——0 是**合法的名字 ni**（首个驻留串）⇒ 读取方
+// `c_ni >= 0` 会把空槽当有效约束名（把首个驻留串当接口/类型名查表）＝ 凭空约束。
+// 故本三函数一律先整行（MAX_GENERICS 槽）写 -1 再覆盖有约束的槽——行的语义 = 「本行全部
+// 形参位都有明确值」。读取器的越界闸（idx ≥ count）仍保留（整行未登记时的兜底）。
+fn save_struct_gen_constrs(si: int, constrs: string, count: int) {
+    grow_sgen_constr(si * MAX_GENERICS + MAX_GENERICS);
+    if si * MAX_GENERICS + MAX_GENERICS > g_sgen_constr_count { g_sgen_constr_count = si * MAX_GENERICS + MAX_GENERICS; }
+    zi : ., mut = 0;
+    loop {
+        if zi >= MAX_GENERICS { break; }
+        w64(g_sgen_constr, (si * MAX_GENERICS + zi) * 8, -1);
+        zi = zi + 1;
+    }
+    gi : ., mut = 0;
+    loop {
+        if gi >= count { break; }
+        if gi >= MAX_GENERICS { break; }
+        if r64(constrs, gi * 8) >= 0 {
+            w64(g_sgen_constr, (si * MAX_GENERICS + gi) * 8, r64(constrs, gi * 8));
+        }
+        gi = gi + 1;
+    }
+}
+
+fn save_enum_gen_constrs(ei: int, constrs: string, count: int) {
+    grow_egen_constr(ei * MAX_GENERICS + MAX_GENERICS);
+    if ei * MAX_GENERICS + MAX_GENERICS > g_egen_constr_count { g_egen_constr_count = ei * MAX_GENERICS + MAX_GENERICS; }
+    zi : ., mut = 0;
+    loop {
+        if zi >= MAX_GENERICS { break; }
+        w64(g_egen_constr, (ei * MAX_GENERICS + zi) * 8, -1);
+        zi = zi + 1;
+    }
+    gi : ., mut = 0;
+    loop {
+        if gi >= count { break; }
+        if gi >= MAX_GENERICS { break; }
+        if r64(constrs, gi * 8) >= 0 {
+            w64(g_egen_constr, (ei * MAX_GENERICS + gi) * 8, r64(constrs, gi * 8));
+        }
+        gi = gi + 1;
+    }
+}
+
 fn add_func(name: string, pc: int, rt: int, an: int) -> int {
     idx := g_func_count;
     grow_funcs(idx + 1);
@@ -1553,9 +1600,9 @@ fn parse_declaration() {
         name := tok_lx(nt);
         sg_names : string, mut;    sg_names_cap : int, mut;
     sg_names = alloc(64 * 8); sg_names_cap = 64;
-        sg_dummy : string, mut;    sg_dummy_cap : int, mut;
-    sg_dummy = alloc(64 * 8); sg_dummy_cap = 64;
-        sg_count := parse_generics_into(sg_names, sg_dummy);
+        sg_constrs : string, mut;    sg_constrs_cap : int, mut;
+    sg_constrs = alloc(64 * 8); sg_constrs_cap = 64;
+        sg_count := parse_generics_into(sg_names, sg_constrs);
         advance_tok(); // {
 
         si := add_struct(name);
@@ -1568,6 +1615,10 @@ fn parse_declaration() {
                     w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + sgi * 8, str_intern(r64(sg_names, sgi * 8)));
                     sgi = sgi + 1;
                 }
+                // R2 P3 Task 5（Step 2）：约束**不再丢弃**（旧态 = 写进 dummy 缓冲后随作用域
+                // 消失 ⇒ `struct Box[T: I]` 静默无约束）。登记到 struct 侧表，实例化点
+                // （res_type_node 的 EXPR_GENERIC_APPLY 分支）消费。
+                save_struct_gen_constrs(si, sg_constrs, sg_count);
             }
             fc : ., mut = 0;
             loop {
@@ -1595,9 +1646,9 @@ fn parse_declaration() {
         name := tok_lx(nt);
         eg_names : string, mut;    eg_names_cap : int, mut;
     eg_names = alloc(64 * 8); eg_names_cap = 64;
-        eg_dummy : string, mut;    eg_dummy_cap : int, mut;
-    eg_dummy = alloc(64 * 8); eg_dummy_cap = 64;
-        eg_count := parse_generics_into(eg_names, eg_dummy);
+        eg_constrs : string, mut;    eg_constrs_cap : int, mut;
+    eg_constrs = alloc(64 * 8); eg_constrs_cap = 64;
+        eg_count := parse_generics_into(eg_names, eg_constrs);
         advance_tok();
 
         ei := add_enum(name);
@@ -1610,6 +1661,8 @@ fn parse_declaration() {
                     w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + egi * 8, str_intern(r64(eg_names, egi * 8)));
                     egi = egi + 1;
                 }
+                // R2 P3 Task 5（Step 2）：同 struct 分支——枚举泛型约束登记（旧态同款丢弃）
+                save_enum_gen_constrs(ei, eg_constrs, eg_count);
             }
             vc : ., mut = 0;
             loop {

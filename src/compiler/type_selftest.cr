@@ -58,6 +58,223 @@ fn ts_unf_union_leaves(t: int) -> int {
     return 1;
 }
 
+// ─── R2 P3 Task 5 夹具（生产函数入口，见 t5.* 段注）───
+
+// g_gen_map 按名字查绑定（-1 = 未绑定）——t5.f4 用（独立读取，不复用 checker 内部循环）
+fn ts_gen_map_ti(name_ni: int) -> int {
+    i : ., mut = 0;
+    loop {
+        if i >= g_gen_map_count { return -1; }
+        if r64(g_gen_map_names, i * 8) == name_ni { return r64(g_gen_map_types, i * 8); }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// 单泛型形参 + 单约束名的 struct 声明行夹具（约束经 **parser 的生产登记函数**
+// save_struct_gen_constrs 落侧表——测真实路径，不手写侧表）
+fn ts_t5_mk_constr_struct(name: string, cname: string) -> int {
+    sa := add_struct(name);
+    w64(g_structs, sa * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT, 1);
+    w64(g_structs, sa * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES, str_intern("T5_CS_T"));
+    cb := alloc(8);
+    w64(cb, 0, str_intern(cname));
+    save_struct_gen_constrs(sa, cb, 1);
+    return sa;
+}
+
+fn ts_t5_mk_constr_enum(name: string, cname: string) -> int {
+    ea := add_enum(name);
+    w64(g_enums, ea * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 1);
+    w64(g_enums, ea * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES, str_intern("T5_CE_T"));
+    cb := alloc(8);
+    w64(cb, 0, str_intern(cname));
+    save_enum_gen_constrs(ea, cb, 1);
+    return ea;
+}
+
+// 接口表行夹具（零方法）：t5.constr_iface_is_unknown_p3b 用（谓词 = find_iface 命中 ⇒
+// gen_constr_satisfied 必须回 -1——P3b 交接边界）
+fn ts_t5_mk_iface(name: string) -> int {
+    grow_ifaces(g_iface_count + 1);
+    base := g_iface_count * ESZ_IFACEINFO;
+    zi : ., mut = 0;
+    loop { if zi >= ESZ_IFACEINFO { break; } w8(g_ifaces, base + zi, 0); zi = zi + 1; }
+    w64(g_ifaces, base + OFF_IF_NAME, str_intern(name));
+    w64(g_ifaces, base + OFF_IF_GENERIC_COUNT, 0);
+    g_iface_count = g_iface_count + 1;
+    return g_iface_count - 1;
+}
+
+// ─── R2 P3 Task 5 用例体（独立函数：**不得**内联进 type_selftest_run ——
+/// 该函数已是巨型函数，本段 40+ 局部变量的加入会使其在 Python bootstrap 的
+/// 栈式代码生成下越界（实测：内联版 SIGSEGV rc=139；拆出后正常）。返回 = 失败数。
+/// 用例数 = 9（调用方 `total = total + 9` 须同步——增删用例两处一起改）。
+fn ts_t5_run() -> int {
+    fails : ., mut = 0;
+    // ═══ R2 P3 Task 5：泛型约束（保留 / 实例化判定 / 反例 / 实例键类型项化）═══
+    // 判据面 = ① F4 形参链导航（形参节点**不连续**布局下的正/负控——旧 `pn+1` 导航的牙）；
+    // ② 约束名解析 + 本质轴三态判定（1/0/-1）；③ 用户接口约束 = **-1 不判**（P3b 交接边界：
+    // 「不判」≠「不满足」）；④ 反例文本（失败有值 / 通过无值）；⑤ 实例化点检查的**诊断去重**
+    // （同节点同形参只报一次）+ 正负控；⑥ 结构/枚举约束经 parser 登记函数落到侧表后可读；
+    // ⑦ 实例键结构忠实（异型异键 = 反折叠）+ ti 型替换在**克隆体**上的落点（形参类型节点）。
+    // 夹具说明：本组不经 parser/check_all（照 t3/t4 口径人工落表），但**走生产函数**——
+    // save_struct_gen_constrs / gen_inst_constr_check / infer_gen_call / gen_find_or_create_bind。
+    init_types();
+    ty_budget_reset(200000);
+    // ① F4：夹具 = 「文件首类型节点恰是另一泛型形参的 ident」+ 形参 (n: int, a: T)（类型节点
+    //   插在形参节点之前 ⇒ 形参在节点表不连续）。旧导航把 param1 的 pattern 读成节点 0 ⇒
+    //   凭空绑定 U（phanton）且 T 永不绑定；修复后 param1 的 pattern = 声明类型 gparam(T)。
+    init_types();   // 夹具前再清一次（上面 alloc 的行使节点下标可预期：本组不依赖具体下标）
+    t5_u_ni := str_intern("T5_U");
+    t5_u_row := alloc_type(TYP_GENERIC_PARAM, t5_u_ni, 0);
+    def_sym(t5_u_ni, SYM_TYPE, t5_u_row, -1);
+    alloc_node(EXPR_IDENT, 0, 0, 0, t5_u_ni, 0, 0, 0, 0);            // 「文件首类型节点」
+    t5_int_n := alloc_node(0, 0, 0, 0, 0, TY_INT, 0, 0, 0);
+    t5_p0 := alloc_node(EXPR_PARAM, str_intern("n"), 0, 0, 0, TY_INT, t5_int_n, 0, 0);
+    t5_t_ni := str_intern("T5_T");
+    t5_t_row := alloc_type(TYP_GENERIC_PARAM, t5_t_ni, 0);
+    def_sym(t5_t_ni, SYM_TYPE, t5_t_row, -1);
+    t5_t_n1 := alloc_node(EXPR_IDENT, 0, 0, 0, t5_t_ni, 0, 0, 0, 0);
+    t5_p1 := alloc_node(EXPR_PARAM, str_intern("a"), 0, 0, 0, 0, t5_t_n1, 0, 0);
+    t5_rt := alloc_node(EXPR_IDENT, 0, 0, 0, t5_t_ni, 0, 0, 0, 0);
+    t5_fn := alloc_node(EXPR_FN, str_intern("t5_f4_take"), t5_p0, 2, 0, t5_rt, -1, 0, 0);
+    t5_fi := add_func("t5_f4_take", 2, 0, t5_fn);   // add_func 收**字符串**（parser 同款：tok_lx 结果），不是 ni
+    fi_set_generic_count(t5_fi, 1);
+    println("M5b");
+    fi_set_generic_name(t5_fi, 0, t5_t_ni);
+    println("M5c");
+    def_sym(str_intern("t5_f4_take"), SYM_FN, TI_UNIT, -1);
+    t5_arg2 := alloc_node(EXPR_ARG, alloc_node(EXPR_STRING, 0, 0, 0, str_intern("s"), 0, 0, 0, 0), 0, 0, 0, 0, 0, 0, 0);
+    // EXPR_ARG: a = expr, b = next（末项 b = 0 即终止符——链遍历按 `an < 0` 停，见 infer_gen_call）
+    ast_set_b(t5_arg2, -1);
+    t5_arg1 := alloc_node(EXPR_ARG, alloc_node(EXPR_INT, 0, 0, 0, 1, 0, 0, 0, 0), t5_arg2, 0, 0, 0, 0, 0, 0);
+    t5_calln := alloc_node(EXPR_CALL, 0, t5_arg1, 2, 0, 0, 0, 0, 0);
+    infer_gen_call(t5_fi, t5_calln, t5_arg1, 2);
+    t5_ti_bound := ts_gen_map_ti(t5_t_ni);
+    fails = fails + ts_check("t5.f4_later_param_declared_type",
+        (t5_ti_bound == TI_STR && ts_gen_map_ti(t5_u_ni) == -1), 1);
+    fails = fails + ts_check("t5.f4_bind_seg_recorded",
+        (g_gen_binds_count == 2 && r64(g_gen_binds, 0 * 8) == 1 &&
+         r64(g_gen_binds, 1 * 8) == TI_STR && ast_int_val(t5_calln) == 1), 1);
+    // ② 约束名解析 + 本质轴三态
+    t5_ni_int := str_intern("int");
+    t5_ni_str := str_intern("string");
+    t5_ni_nope := str_intern("T5_NoSuchTypeName");
+    fails = fails + ts_check("t5.constr_name_resolve",
+        (gen_constr_type_ti(t5_ni_int) == TI_INT && gen_constr_type_ti(t5_ni_str) == TI_STR &&
+         gen_constr_type_ti(str_intern("never")) == TI_NEVER && gen_constr_type_ti(t5_ni_nope) == -1 &&
+         gen_constr_type_ti(-1) == -1), 1);
+    fails = fails + ts_check("t5.constr_essence_three_state",
+        (gen_constr_satisfied(t5_ni_int, TI_INT) == 1 &&
+         // `never` **不**满足原生约束（引擎现状：AK_NEVER 是与 AK_INT 互斥的**原子**，不是 ⊥
+         // ——P0 既有语义「never 行在引擎侧不是真 ⊥」（T4 报告 §7-⑨），本批如实钉住、不动）
+         gen_constr_satisfied(t5_ni_int, TI_NEVER) == 0 &&
+         gen_constr_satisfied(t5_ni_int, TI_STR) == 0 &&
+         gen_constr_satisfied(t5_ni_str, TI_INT) == 0 &&
+         gen_constr_satisfied(t5_ni_nope, TI_INT) == -1), 1);
+    // ③ 用户接口约束 = -1（P3b 交接边界；夹具走真实接口表写入）
+    t5_if_ii := ts_t5_mk_iface("T5_Show");
+    fails = fails + ts_check("t5.constr_iface_is_unknown_p3b",
+        (find_iface(str_intern("T5_Show")) == t5_if_ii &&
+         gen_constr_satisfied(str_intern("T5_Show"), TI_INT) == -1), 1);
+    // ④ 反例文本：失败非空、通过为空（**不谎报**）
+    fails = fails + ts_check("t5.constr_witness_text",
+        (str_len(gen_constr_witness_str(TI_STR, t5_ni_int)) > 0 &&
+         str_len(gen_constr_witness_str(TI_INT, t5_ni_int)) == 0 &&
+         str_len(gen_constr_witness_str(TI_INT, t5_ni_nope)) == 0), 1);
+    // ⑤⑥ 实例化点检查：结构/枚举约束经 parser 登记函数落侧表 + 判定 + 去重 + 正负控 + 接口面零动作
+    t5_si := ts_t5_mk_constr_struct("T5BoxInt", "int");
+    t5_ei := ts_t5_mk_constr_enum("T5EBoxInt", "int");
+    t5_si2 := ts_t5_mk_constr_struct("T5BoxShow", "T5_Show");
+    fails = fails + ts_check("t5.constr_side_table_readback",
+        (si_generic_count(t5_si) == 1 && si_gen_constr(t5_si, 0) == t5_ni_int &&
+         si_gen_constr(t5_si, 1) == -1 && si_gen_constr(-1, 0) == -1 &&
+         ei_generic_count(t5_ei) == 1 && ei_gen_constr(t5_ei, 0) == t5_ni_int &&
+         ei_gen_constr(t5_ei, 4) == -1), 1);
+    t5_args := alloc(8);
+    w64(t5_args, 0 * 8, TI_STR);
+    t5_gnode := alloc_node(EXPR_GENERIC_APPLY, str_intern("T5BoxInt"), -1, 1, 0, 0, 0, 41, 3);
+    t5_d0 := g_diag_count;
+    gen_inst_constr_check(t5_gnode, t5_si, -1, t5_args, 1);
+    t5_d1 := g_diag_count;
+    gen_inst_constr_check(t5_gnode, t5_si, -1, t5_args, 1);      // 同节点同形参 → 去重
+    t5_d2 := g_diag_count;
+    t5_gnode2 := alloc_node(EXPR_GENERIC_APPLY, str_intern("T5BoxInt"), -1, 1, 0, 0, 0, 42, 3);
+    gen_inst_constr_check(t5_gnode2, t5_si, -1, t5_args, 1);     // 新节点 → 再报（去重不跨节点）
+    t5_d3 := g_diag_count;
+    w64(t5_args, 0 * 8, TI_INT);
+    t5_gnode3 := alloc_node(EXPR_GENERIC_APPLY, str_intern("T5BoxInt"), -1, 1, 0, 0, 0, 43, 3);
+    gen_inst_constr_check(t5_gnode3, t5_si, -1, t5_args, 1);     // 正控：满足 → 零诊断
+    gen_inst_constr_check(t5_gnode3, t5_ei, -1, t5_args, 1);     // 枚举侧同（满足）
+    t5_d4 := g_diag_count;
+    w64(t5_args, 0 * 8, TI_STR);
+    t5_gnode4 := alloc_node(EXPR_GENERIC_APPLY, str_intern("T5EBoxInt"), -1, 1, 0, 0, 0, 44, 3);
+    gen_inst_constr_check(t5_gnode4, -1, t5_ei, t5_args, 1);     // 枚举侧违反 → 诊断
+    t5_d5 := g_diag_count;
+    t5_gnode5 := alloc_node(EXPR_GENERIC_APPLY, str_intern("T5BoxShow"), -1, 1, 0, 0, 0, 45, 3);
+    gen_inst_constr_check(t5_gnode5, t5_si2, -1, t5_args, 1);    // 接口约束 = 不判 → 零诊断
+    t5_d6 := g_diag_count;
+    fails = fails + ts_check("t5.inst_check_dedup_and_controls",
+        (t5_d1 - t5_d0 == 1 && t5_d2 - t5_d1 == 0 && t5_d3 - t5_d2 == 1 &&
+         t5_d4 - t5_d3 == 0 && t5_d5 - t5_d4 == 1 && t5_d6 - t5_d5 == 0 &&
+         ts_diag_code_at(t5_d0) == EC_TG_BOUND &&
+         // 末条记录下标 = **调用后计数 - 1**（d5 是调用后的 g_diag_count）
+         ts_diag_code_at(t5_d5 - 1) == EC_TG_BOUND), 1);
+    // ⑦ 实例键：异型异键（反折叠）+ 同名义同行同键 + 结构忠实（复合键含结构）
+    t5_a_ti := alloc_named_type(str_intern("T5_A"));
+    t5_b_ti := alloc_named_type(str_intern("T5_B"));
+    t5_a2_ti := alloc_type(TYP_NAMED, str_intern("T5_A"), 0);
+    t5_arr_ti := alloc_type(TYP_ARRAY, TI_INT, 3);
+    t5_ptr_ti := alloc_type(TYP_PTR, t5_a_ti, 0);
+    t5_slice_ti := alloc_type(TYP_SLICE, TI_INT, 0);
+    fails = fails + ts_check("t5.inst_key_structural_faithful",
+        (str_eq(inst_key_of_ti(t5_a_ti), inst_key_of_ti(t5_b_ti)) == 0 &&
+         str_eq(inst_key_of_ti(t5_a_ti), inst_key_of_ti(t5_a2_ti)) != 0 &&
+         str_eq(inst_key_of_ti(TI_INT), "int") != 0 &&
+         str_eq(inst_key_of_ti(t5_arr_ti), "[int; 3]") != 0 &&
+         str_eq(inst_key_of_ti(t5_ptr_ti), "*T5_A") != 0), 1);
+    // ⑧ ti 型替换端到端：克隆体内**泛型形参位**换成实参类型节点；异键异实例、同键缓存命中。
+    // 夹具形参实参 = **切片** `[int]`（键 "[int]"）：ti 路径产出 EXPR_ARRAY 类型节点，名字路径
+    // 只会产出 EXPR_IDENT("[int]")（非法声明名）⇒ 本判据对「ti 路径是否生效」有牙。
+    // ⚠ **范围登记**：替换只覆盖**函数体内**节点——EXPR_FN 分支不克隆形参（形参类型由
+    // fi_param_type 的裸码承担），故克隆体形参仍指向源节点（与实例化的既有语义一致）。
+    t5_m_ni := str_intern("T5_M");
+    t5_m_tynode := alloc_node(EXPR_IDENT, 0, 0, 0, t5_m_ni, 0, 0, 0, 0);
+    t5_m_body := alloc_node(EXPR_RETURN, t5_m_tynode, 0, 0, 0, 0, 0, 0, 0);   // 体内形参位
+    t5_m_p := alloc_node(EXPR_PARAM, str_intern("x"), 0, 0, 0, 0, t5_m_tynode, 0, 0);
+    t5_m_rt := alloc_node(EXPR_IDENT, 0, 0, 0, t5_m_ni, 0, 0, 0, 0);
+    t5_m_fn := alloc_node(EXPR_FN, t5_m_ni, t5_m_p, 1, 0, t5_m_rt, t5_m_body, 0, 0);
+    t5_m_fi := add_func("T5_M", 1, 0, t5_m_fn);
+    fi_set_generic_count(t5_m_fi, 1);
+    fi_set_generic_name(t5_m_fi, 0, t5_m_ni);
+    // 绑定段（人工按 checker 写入形态落：块 = [count, ti…]，节点 int_val = 起始 + 1）
+    grow_gen_binds(g_gen_binds_count + 2);
+    t5_bstart := g_gen_binds_count;
+    w64(g_gen_binds, t5_bstart * 8, 1);
+    w64(g_gen_binds, (t5_bstart + 1) * 8, t5_slice_ti);
+    g_gen_binds_count = t5_bstart + 2;
+    t5_key_s := inst_key_of_ti(t5_slice_ti);
+    t5_f1 := gen_find_or_create_bind(t5_m_fi, t5_key_s, t5_bstart);
+    t5_f2 := gen_find_or_create_bind(t5_m_fi, t5_key_s, t5_bstart);   // 同键 → 缓存命中
+    t5_f3 := gen_find_or_create_bind(t5_m_fi, inst_key_of_ti(t5_b_ti), t5_bstart);  // 异键 → 新实例
+    t5_cp_ok : ., mut = 0;
+    if t5_f1 >= 0 {
+        t5_cb := ast_data(fi_ast_node(t5_f1));      // 克隆体（EXPR_FN）的 body
+        if t5_cb >= 0 && ast_kind(t5_cb) == EXPR_RETURN {
+            t5_cn := ast_a(t5_cb);                  // 体内形参位（源 = EXPR_IDENT(T5_M)）
+            if t5_cn >= 0 && ast_kind(t5_cn) == EXPR_ARRAY {
+                t5_cn_e := ast_a(t5_cn);            // 切片元素位（源实参 = int）
+                if t5_cn_e >= 0 && ast_kind(t5_cn_e) == 0 && ast_type_val(t5_cn_e) == TY_INT { t5_cp_ok = 1; }
+            }
+        }
+    }
+    fails = fails + ts_check("t5.inst_ti_subst_in_clone",
+        (t5_f1 >= 0 && t5_f2 == t5_f1 && t5_f3 >= 0 && t5_f3 != t5_f1 && t5_cp_ok == 1), 1);
+
+    return fails;
+}
+
 fn type_selftest_run() -> int {
     fails : ., mut = 0;
     total : ., mut = 0;
@@ -1608,6 +1825,9 @@ fn type_selftest_run() -> int {
     // ⑩ 退役面：`Option` 名在类型表**零行**（内建注册已退役；用户声明才建行）
     total = total + 1; fails = fails + ts_check("t4.option_not_registered",
         (named_dedup_rows(str_intern("Option")) == 0 && find_gsym(str_intern("Option")) < 0), 1);
+
+    // R2 P3 Task 5 段（用例体在 ts_t5_run——见该函数头注「不得内联」）
+    total = total + 9; fails = fails + ts_t5_run();
 
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
     if fails != 0 { return 1; }

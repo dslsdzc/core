@@ -345,6 +345,83 @@ fn sh_term_of_ti(ti: int) -> int {
 fn sh_map_hits() -> int { return g_shadow_hits; }
 fn sh_map_entries() -> int { return g_shadow_entries; }
 
+// ─── R2 P3 Task 5：类型项文本化（诊断反例用）───
+// 用途 = `tt_witness` 的反例项 → 人可读文本（P3 计划 Task 5 Step 3「诊断含反例值」）。
+// **只读、零 str_intern**：`.ccr` 的 STR 段 = 编译期 g_strs 全量（P2b 附录 A.3-②）⇒ 渲染
+// 不得驻留新串（诊断文本一律用 dyn 串拼接；istr_get 读既有串）。
+// 形态 = 结构化 JSON 风格（`int`/`string`/`sequence<int>`/`{int, string}`/`A ∪ B`/`¬A`…）；
+// 未识别 tag → "?"（**不谎报**形态）。深度上限 = 避免病态项上的栈爆（超限 → "…"）。
+fn tt_display_at(t: int, depth: int) -> string {
+    if t < 0 { return "?"; }
+    if depth > 24 { return "…"; }
+    if t >= tt_count() { return "?"; }
+    tg := tt_tag(t);
+    if tg == TT_BOT { return "⊥"; }
+    if tg == TT_TOP { return "⊤"; }
+    if tg == TT_TOP_K { return "⊤" + int_str(tt_a(t)); }
+    if tg == TT_UNION { return tt_display_at(tt_a(t), depth + 1) + " ∪ " + tt_display_at(tt_b(t), depth + 1); }
+    if tg == TT_INTER { return tt_display_at(tt_a(t), depth + 1) + " ∩ " + tt_display_at(tt_b(t), depth + 1); }
+    if tg == TT_NOT { return "¬" + tt_display_at(tt_a(t), depth + 1); }
+    if tg == TT_MU { return "μ" + int_str(tt_a(t)) + "." + tt_display_at(tt_b(t), depth + 1); }
+    if tg == TT_VAR { return "X" + int_str(tt_a(t)); }
+    if tg == TT_NIL { return "nil"; }
+    if tg == TT_CONS { return "cons(" + tt_display_at(tt_a(t), depth + 1) + ", " + tt_display_at(tt_b(t), depth + 1) + ")"; }
+    if tg == TT_ATOM {
+        ak := tt_a(t);
+        // AK_NAMED 单列提前返回（**不是**风格偏好）：若并入下方 if-else 链，链内既有赋值分支
+        // 又有 return 分支 ⇒ 自托管 checker 报 `error[TC02]: If branches have different types`
+        // （本文件属 `check src/compiler` 语料 ⇒ 会给 CI 的 check 作业加一条**新**诊断——
+        // 实测 build10 前版本命中：`tt_display_at` 的 AK_FN/AK_NAMED 分支）。
+        if ak == AK_NAMED {
+            nb := tt_b(t);
+            if nb >= 0 { return "named#" + int_str(nb); }
+            return "named";
+        }
+        head : ., mut = "";
+        if ak == AK_INT { head = "int"; }
+        else if ak == AK_DEX { head = "dex"; }
+        else if ak == AK_STRING { head = "string"; }
+        else if ak == AK_BOOL { head = "bool"; }
+        else if ak == AK_UNIT { head = "unit"; }
+        else if ak == AK_NEVER { head = "never"; }
+        else if ak == AK_CHAR { head = "char"; }
+        else if ak == AK_DYN { head = "dyn"; }
+        else if ak == AK_NULL { head = "null"; }
+        else if ak == AK_PRODUCT { head = "product"; }
+        else if ak == AK_SUM { head = "sum"; }
+        else if ak == AK_SEQUENCE { head = "sequence"; }
+        else if ak == AK_REF { head = "ref"; }
+        else if ak == AK_PTR { head = "ptr"; }
+        else if ak == AK_FN { head = "fn"; }
+        else { head = "atom#" + int_str(ak); }
+        // 参数链（AK_REF 的槽 0 是 mut 标记：语义为 &/&mut，照桥接约定还原）
+        if ak == AK_REF && tt_c(t) >= 0 && tt_tag(tt_c(t)) == TT_CONS {
+            m := tt_a(tt_c(t));
+            mut_s : ., mut = "&";
+            if tt_tag(m) == TT_ATOM && tt_a(m) == AK_UNIT && tt_b(m) == 1 { mut_s = "&mut "; }
+            rest := tt_b(tt_c(t));
+            if rest >= 0 && tt_tag(rest) == TT_CONS { return mut_s + tt_display_at(tt_a(rest), depth + 1); }
+            return mut_s;
+        }
+        p := tt_c(t);
+        if p < 0 || tt_tag(p) != TT_CONS { return head; }
+        s : ., mut = head + "<";
+        k : ., mut = 0;
+        loop {
+            if p < 0 { break; }
+            if tt_tag(p) != TT_CONS { break; }
+            if k > 0 { s = s + ", "; }
+            s = s + tt_display_at(tt_a(p), depth + 1);
+            p = tt_b(p);
+            k = k + 1;
+        }
+        return s + ">";
+    }
+    return "?";
+}
+
+fn tt_display(t: int) -> string { return tt_display_at(t, 0); }
+
 // ═══════════════ R2 P1 Task 2：影子判定挂点 + 分类计数 + 摘要/转储 ═══════════════
 // 站点 id ↔ 语义（checker.cr **10 个外部决策点**（#29 前为 8），id 按行号升序赋值；挂点 = 调用前
 // sh_site_begin(id)，见 checker.cr 对应行的行内注记）：
