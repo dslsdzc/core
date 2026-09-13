@@ -295,6 +295,61 @@ fn te_named_pair(pk: int, p: int, qk: int, q: int) -> int {
     return 0;
 }
 
+// ─── R2 P6 Task 2（E-10）：同类原子的「确定不交」判定（¬ 面专用）───
+// 用途：`lit_implies` 的 ¬ 面判 `lp ⊆ ¬x ⟺ lp ∩ x = ∅`；两侧**同类**原子时，类目互斥公理
+// （`ak_disjoint`）给不出信息（同类 ⇒ `x == y` 早退 0）⇒ 原实现判 0（**过判**：`B ⊄ ¬R`
+// 与真值 1 相反，见 `type_selftest.cr` 的 t3 段登记注）。本函数按**身份链**补该判定。
+//
+// 域（逐条见 P6 T2 域证明；**越域一律回 0 = 维持现状**，不新开未覆盖面）：
+//   ① 域内：**AK_SUM 变体项**——链 = [枚举名令牌, 变体名令牌]（`sh_variant_term`）⇒ 异链 =
+//      异 (枚举, 变体) = 值集不交 ⇒ **1**；同链（DAG 去重 ⇒ 同节点 = 同一变体）⇒ 相交 ⇒ **0**。
+//      跨枚举同名变体亦判「不交」（链首令牌含枚举名，即 P3 Task 1 的
+//      `unf.enum_variant_identity_scoped` 事实）。
+//   ② 域外·类顶：`⊤ₖ(k)` 含该类**全部值** ⇒ 与同类原子相交非空 ⇒ 0（**必须显式排除**：
+//      `tt_top_k` 的 c 槽 = 0（非 -1）⇒ 仅靠空链守卫拦不住，会把 term 0 当链比较）。
+//   ③ 域外·参数化构造子（SEQUENCE/PTR/REF/PRODUCT/FN）与原生类：**「链不同 ⇒ 不交」在
+//      该面不成立**（反例：`[int]` vs `[int ∪ string]` 元素项不同而值集相交；`&T` vs
+//      `&mut T` 的值集语义未建模）⇒ 维持现状 0。**不得**顺手扩域（负控 t2.neg_param_*）。
+//   ④ 域外·无身份链（空链）：照 `te_named_pair` 的「空链 = 无身份」登记面 ⇒ 维持现状 0
+//      （**P1-a 已裁定**：域外逐位不变 ⇒ 零新增未覆盖面、零行为变化；P1-b（-1 + 未覆盖面）
+//      = 扩面，须 report-only 先行 ⇒ 另立登记，不在本批）。
+//   ⑤ AK_SUM 链元素非令牌（手造畸形项）⇒ 不可判 ⇒ 同 P1-a ⇒ 0。
+// 三态说明：本函数**只回 0/1**，不置 `g_ty_uncovered`（域外面由调用点既有守卫承担）。
+// 生产可达性：`sh_variant_term`（ty_shadow.cr:823）恒造双令牌链 ⇒ ④/⑤ 生产不可达。
+fn atom_same_class_disjoint(p: int, q: int) -> int {
+    if tt_tag(p) == TT_TOP_K || tt_tag(q) == TT_TOP_K { return 0; }   // ② 类顶
+    if tt_a(p) != AK_SUM { return 0; }                                 // ③ 非身份型原子（含原生/参数化）
+    cp := tt_c(p);
+    cq := tt_c(q);
+    if cp < 0 || cq < 0 { return 0; }                                  // ④ 空链 = 无身份
+    d := sum_chain_same(cp, cq);                                       // 三态（见下）
+    if d == 1 { return 0; }                                            // 同身份 ⇒ 相交
+    if d == 0 { return 1; }                                            // 异身份 ⇒ 确定不交
+    return 0;                                                          // ⑤ 不可判（同 P1-a）
+}
+
+// AK_SUM 变体项身份链的「同链」判定（三态：1 = 同链 / 0 = 确定异链 / -1 = 不可判）。
+// 链 = [枚举名令牌, 变体名令牌]（唯一生产构造点 `sh_variant_term`，ty_shadow.cr:823）⇒
+// **逐元素皆令牌**，按**节点同一性**比较：异节点 = 异 (枚举, 变体) = 确定异链。
+// ⚠ **不得复用 `te_chain_cmp`**：它的槽位语义是命名面布局（槽 0 = 令牌 / 槽 ≥1 = 泛型实参
+// **类型项**），对 AK_SUM 的**槽 1（变体令牌）**会走 `te_arg_cmp → ty_equiv` ⇒ 两个不同令牌
+// 在结构比较下**判等**（令牌的 b 槽只是标注，引擎只看 a/c ⇒ 同形）⇒ 误判「同链」。
+// 实测（本批）：首版用 `te_chain_cmp` 时三例 `t3.*_over_claim` 仍判 0，而 9 例负控全过
+// （N5 跨枚举在**槽 0** 被令牌规则救回）⇒ 补 N10「同枚举异变体」后才暴露。
+// 不可判面（空链 / 形状异常 / 非令牌元素）= 手造畸形项，生产不可达；调用方按 P1-a 归 0。
+fn sum_chain_same(p: int, q: int) -> int {
+    if p == q { return 1; }
+    if p < 0 || q < 0 { return -1; }
+    if tt_tag(p) != TT_CONS || tt_tag(q) != TT_CONS { return -1; }
+    e1 := tt_a(p);
+    e2 := tt_a(q);
+    if e1 != e2 {
+        if te_is_name_token(e1) == 0 || te_is_name_token(e2) == 0 { return -1; }
+        return 0;                                                   // 两侧皆令牌且异节点 ⇒ 确定异链
+    }
+    return sum_chain_same(tt_b(p), tt_b(q));
+}
+
 // ─── 字面蕴含（⟦lp⟧ ⊆ ⟦lq⟧）───
 fn lit_implies(lp: int, lq: int) -> int {
     if lp == lq { return 1; }
@@ -324,6 +379,10 @@ fn lit_implies(lp: int, lq: int) -> int {
         pk := lit_class_of(lp);
         xk := lit_class_of(x);
         if pk == AK_NAMED || xk == AK_NAMED { g_ty_uncovered = 1; return -1; }   // 不展开 → 未知
+        // R2 P6 Task 2（E-10）：同类 ⇒ 身份判据（异身份 ⇒ 确定不交 ⇒ lp ⊆ ¬x 成立）。
+        // 异类面照旧走 ak_disjoint 的公理表——identity 只存在于**项**里，而 ak_disjoint 只见
+        // 类 id（故本加强不得落在 ak_disjoint 本体：那会退化成「同类一律不交」= 假不交）。
+        if pk == xk { return atom_same_class_disjoint(lp, x); }
         if ak_disjoint(pk, xk) == 1 { return 1; }
         return 0;
     }

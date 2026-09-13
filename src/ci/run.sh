@@ -82,7 +82,7 @@ case "$CI_JOB_NAME" in
     # 见 main.cr 硬名单）。新批次新增判定面行为**必须**同时给这三类证据之一，不得回退到
     # 「与旧版逐字节同」（TODO #26 口径）。
     python3 tests/selfhost/test_compile.py
-    python3 tests/selfhost/test_type_engine.py   # 类型项引擎自测通道（selftest-types **404 例**——P5 Task 3b 后 401 + P5 T4 新增 3（ts_t4_run：ICE04 硬错——桥接缺口 / 引擎未覆盖面 / 决定面零误报）＝ 404，P5 T5 两例重钉（hits 计数断言 → 查询纯度 / 缓存命中同项）不增减；P0/P1/P2a/P2b-T1..T6/P3-T0..T5/P3b-T0..T2/T6/P4-T2/T3/T4/P5-T2/T3/T3b/T4/T5/T6 一路漏挂；T6 不增减）
+    python3 tests/selfhost/test_type_engine.py   # 类型项引擎自测通道（selftest-types **415 例**——P5 收官 404 + R2 P6 Task 2 增 11（`ts_t2_neg_run`：¬ 面同类原子身份判据的邻域覆盖——同身份 / μ 字面 / ⊤ₖ 双向 / 跨枚举同名 / 同枚举异变体 / 令牌字面 / AK_NAMED / 空链与链元素域外 / 参数化面 / REF mut 标记面；三例 `t3.*_over_claim` 为**重钉**（0→1，不增减）；P0..P6 T2 一路漏挂）
     python3 tests/selfhost/test_iface_ops.py     # R2 P2b Task 4/5/6：接口查表接线（算术/逻辑/条件三门 + 索引兜底门 + TY→TI 单表合一；正控/负控/登记面/站点域 76 例）
     python3 tests/selfhost/test_purity.py          # 效应/纯度批判据（真纯度 13 例 + 链语义 4 例的自测通道驱动）
     python3 tests/selfhost/test_ccr_v7.py          # 效应/纯度批 Task 3：.ccr 层三条边集语义断言（取代「与旧版逐字节同」）
