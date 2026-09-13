@@ -95,6 +95,8 @@ python3 tests/selfhost/test_borrow.py      # Self-hosted borrow checker (7 rules
 
 Integration tests in `tests/suite/` are `.cr` source files — run through `./build/corec`.
 
+**行为探针语料**（`tests/probes/`，29 档 `check` 面负例为主，**非编译单元**）与**回归网配方**（`tools/baseline/`：冻结基线重建 + sha 白名单 + 两条 runner）见 `tools/baseline/REBUILD.md`——判定面回归网 = 冻结基线同源对拍 + 行为探针 + 突变控制 + 三态纪律（R2 P6 Task 1 起；影子通道已下线，不得引用其计数）。
+
 ## Architecture
 
 ### Python Bootstrap Compiler
