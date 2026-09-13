@@ -3,6 +3,7 @@
 日期：2026-09-09
 状态：~~格式设计定稿（待实现）~~ → **已实施（2026-09-10，`plans/2026-09-09-lattice-ir-v7.md` Task 1-3 收官）**——v7 段表架构时代，字节状态以此为准；实施期裁决回填见 §4 规则 4 / §6 开放点 3、5。
 **2026-09-12 追加（R2 P4 Task 1，D9/D10）**：**版本 7 → 8** + 段集合 +TYPE(7)/IFACE(8)（Task 1 落空壳；内容面归 Task 2/3）。文件名保留「v7」= 段表架构代号（改名引用面 40+ 处、收益为零）；**v8 = v7 的加法扩展**：前六段字节布局不变，加段 + 版本 bump。旧 v7 六段文件由版本闸**整类拒收**（不静默当「两段缺席 = 空表」）——本条为现行字节权威（§1/§2/§3.7/§3.8/§4 已同步）。
+**2026-09-14 追加（R2 P5 Task 2/7）**：**版本 / 段集合 / 记录布局零变化**——单槽化只在**内存面**（DFNode `OFF_DF_TK` = 类型项引用 / `OFF_DF_AUX` = 辅码，72B 不变）；`.ccr` 面 `tk` 语义定为**派生码**（§3.3 的「`tk` 字段语义」块，含 D20 稳定引用形态规范）；`version` 保持 8、`CIR_CACHE_VER` 保持 17；`test_ccr_types` 34 → **40** 例。
 性质：两段式第二段（字节格式）；语义定义 = `2026-09-09-lattice-ir-v7-carrier-design.md`（权威）；本文件 = 字节怎么排。
 
 关联：
@@ -72,6 +73,8 @@ v6 其余字节惯例沿用：小端、i32/u32、offset/size u32、`ccr_i32_fits
 | edge_count | u32 | 出边数 |
 
 邻接约定：节点出边在 EDG 段**连续**（节点 i+1 的 first_edge = 节点 i 的 first_edge + edge_count）——重建流式零索引（cir_cache v13 同款）。文件序 = 节点 id 序 = 生产者选择的合法拓扑调度。
+
+**`tk` 字段语义（R2 P5 Task 2 起 = 现行；字节/偏移/版本零变化）**：`tk` = **派生码**——类型面 op → 类型行（`IR_CONST`/`IR_BINARY` ∪ `{IR_ALLOC, IR_CALL, IR_LOAD, IR_I2F, IR_F2I}`）；辅码面 op → 旗标/宽度/计数（`IR_BOUNDS_CHECK`/`IR_DEREF`/`IR_STORE_PTR`/`IR_SPAWN`/`IR_HOTPATCH_ROUTE`）；其余 → 0。由 `sh_dfn_code_of_slots(类型项, 辅码)` **单源派生**（emit / `lower_to_ccr` / `.cir` 装载侧三处同源；分类表 = `ty_shadow.cr` 的 `sh_tk_face_of_code`）。**盘面不承载进程内项引用**——D20 禁令：进程内项表索引不得跨进程/跨复位边界（P4 `bad_term=329` 红证）；未来跨边界唯一许可形态 = **TYPE 段文件内项索引**（β，转 P6）。P5 单槽化只在**内存面**（DFNode 72B 不变：`OFF_DF_TK` = 类型项引用 / `OFF_DF_AUX` = 辅码），NOD `.ccr` 面实测与 P4 逐字节同（`ptr_arith`/`generics_test`；`--dump-objects` 同）——详见 `plans/2026-09-13-r2-p5-cleanup.md` Task 2。
 
 ### 3.4 EDG — 边表（8B/记录，v7 新增）〔配方闭合的载体〕
 
@@ -183,7 +186,7 @@ self_mode ∈ 0..3）+ **跨段引用域**：`name_ni`/`type_ni`/`method_ni`/`ma
 - **corearch（载）**：段表寻址 → NOD/EDG/ENT 载入 → 校验（§4）→ 图 → 线性调度重建（载体设计 §3：文件序 + 沿边合法性校验 + REG 展开）→ 发射（现路径语义）
 - 判定/证书：共存 sweep（v6 §4.2）消费 ENT 区间；图语义消费（验证/优化）直接消费 NOD+EDG
 - **TYPE/IFACE 段（R2 P4 Task 1 起）**：Task 1 = 空壳，**零消费者**（loader 仅做存在性/空壳校验）；内容面（Task 2/3）落地后由 corearch 载入**重建**类型行表/类型项表与接口表（统一设计 spec §6.3 的 `atom_of` 承接面）——纯信息面，**不参与 ELF 发射**（发射面零泄漏判据 = ELF canary 不变）
-- 测试族：test_ccr_v7.py 27/27（2026-09-10 Task 3 迁移收官；2026-09-12 R2 P4 Task 1 结构断言重定 = 8 段/`HEADER_TABLE=112`/`seg_count==8`/坏版本 (7,6,5)）+ test_ccr_types.py **34/34**（T1 新建 9 例 = 段机制/loader 负分支/旧 v7 文件拒收；T2 内容面 +10（行表/项 DAG 序列化 + 确定性装填 + corearch 读回对拍 + 拓扑/标注槽负分支）；T3 IFACE 内容面 +10（五小节/扩列 16/形状命名化/签名项化/impl 边与方法表/跨段引用域）；T4 DFNode.TK 项槽 +6（逐节点允许清单规则/dex 语料/NOD 36B 同序/冷·暖快照对称/dump 零产物影响/`.cir` 布局未变）；机制面随批重定）——v6 测试族已合并退役；无版本链对照（v8-only 世界，行为判据 = 全量回归 + stage 链 byte-identical，见载体设计 §3.3 注记）。**判据口径（TODO #26，T1 起）**：不以「与旧版逐字节同」为准 = 结构断言全绿 + 语义零变化 + 自举稳定。
+- 测试族：test_ccr_v7.py 27/27（2026-09-10 Task 3 迁移收官；2026-09-12 R2 P4 Task 1 结构断言重定 = 8 段/`HEADER_TABLE=112`/`seg_count==8`/坏版本 (7,6,5)）+ test_ccr_types.py **40/40**（T1 新建 9 例 = 段机制/loader 负分支/旧 v7 文件拒收；T2 内容面 +10（行表/项 DAG 序列化 + 确定性装填 + corearch 读回对拍 + 拓扑/标注槽负分支）；T3 IFACE 内容面 +10（五小节/扩列 16/形状命名化/签名项化/impl 边与方法表/跨段引用域）；T4 DFNode.TK 项槽 +6（逐节点允许清单规则/dex 语料/NOD 36B 同序/冷·暖快照对称/dump 零产物影响/`.cir` 布局未变）；**P5 T2 单槽化 +6**（复合行走辅码 / 互斥不变量 / F1 hotpatch 无面 / 复合行冷·暖对称 / 复合行 NOD 同序 / 快照盘面派生码保真）；机制面随批重定）——v6 测试族已合并退役；无版本链对照（v8-only 世界，行为判据 = 全量回归 + stage 链 byte-identical，见载体设计 §3.3 注记）。**判据口径（TODO #26，T1 起）**：不以「与旧版逐字节同」为准 = 结构断言全绿 + 语义零变化 + 自举稳定。
 
 ## 6. 开放点（实施期定夺）
 
