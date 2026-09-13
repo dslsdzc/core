@@ -271,6 +271,60 @@ fn sh_null_term() -> int {
     return tt_atom(AK_NULL, -1, -1);
 }
 
+// ─── R2 P5 Task 3：命名面**身份链**（两构造点共用；取代「空链 + b 槽当身份」）───
+// 语义：命名型（TYP_NAMED / TYP_GENERIC_PARAM / TYP_GENERIC_APPLY）的**身份** = 身份链：
+//   TYP_NAMED / TYP_GENERIC_PARAM : c = [sh_name_token(name_ni)]
+//   TYP_GENERIC_APPLY             : c = [sh_name_token(基名 ni), 实参项…]
+// b 槽（NAMED/PARAM = 本行；APPLY = **基型行**）仍是**标注**：引擎命名面只比 a/c 两槽
+// （type_engine.cr 的 te_named_pair / te_chain_cmp），b 的既有消费者 = D21 的
+// sh_atom_of_term（DF 载体的类型行派生）。
+// APPLY 的 b 槽取**基型行**（不取本行）是**规范形**要求：`Box[int]` 的两处实例化各占一行
+// （alloc_type 裸分配）⇒ 若 b = 本行则同型两行**节点不同** ⇒ 节点同一性快路径 / 不变槽
+// 结构比较 / 接口签名（iface_axis 的 tt_list_same 判等）全部失真。基型行经 named_dedup
+// 按名规范 ⇒ 同型恒同节点。本形态 = sh_sig_term_of_ti 原形态，本任务把它单源化到**两构造
+// 点** ⇒ 两点逐位同构（计划停条件③；两点差异只剩实参项的递归函数——签名面 N 不入项）。
+// 命名面**不展开**（P1 裁决 + P3a 反证：展开项接进等价面 ⇒ 同形不同名 struct 判等）——
+// 链里只有身份令牌与实参类型项，没有任何结构定义。
+// -1 = 不可构造（行越界 / 基型非命名行 / 实参不可译）——调用方按桥接缺口上抛。
+fn sh_named_identity_term(ti: int) -> int {
+    if ti < 0 { return -1; }
+    ni := get_type_data(ti);
+    if ni < 0 { return -1; }
+    return tt_atom(AK_NAMED, ti, tt_cons(sh_name_token(ni), tt_nil()));
+}
+
+// 泛型应用实参链（两构造点共用骨架；variant：0 = 桥接面递归 sh_term_of_ti /
+// 1 = 签名面递归 sh_sig_term_of_ti）。
+fn sh_apply_args_chain(ti: int, variant: int) -> int {
+    start := get_type_extra(ti);
+    cnt := r64(g_gen_apply_data, start * 8);
+    if cnt < 0 { return -1; }
+    tail : ., mut = tt_nil();
+    j : ., mut = cnt - 1;
+    loop {
+        if j < 0 { break; }
+        ai := r64(g_gen_apply_data, (start + 1 + j) * 8);
+        at : ., mut = -1;
+        if variant == 0 { at = sh_term_of_ti(ai); } else { at = sh_sig_term_of_ti(ai); }
+        if at < 0 { return -1; }                    // 任一实参不可译 ⇒ 整项不可译（不缓存）
+        tail = tt_cons(at, tail);
+        j = j - 1;
+    }
+    return tail;
+}
+
+// 泛型应用行 → 命名原子（身份 = 基名令牌 + 实参项链；b = 基型行 = 规范形）。-1 = 不可构造。
+fn sh_apply_identity_term(ti: int, variant: int) -> int {
+    if ti < 0 { return -1; }
+    base := get_type_data(ti);
+    if get_type_kind(base) != TYP_NAMED { return -1; }
+    bni := get_type_data(base);
+    if bni < 0 { return -1; }
+    tail := sh_apply_args_chain(ti, variant);
+    if tail < 0 { return -1; }
+    return tt_atom(AK_NAMED, base, tt_cons(sh_name_token(bni), tail));
+}
+
 // ti → 类型项（带 per-ti 缓存；-1 = 无法翻译）
 fn sh_term_of_ti(ti: int) -> int {
     if ti < 0 { return -1; }
@@ -324,10 +378,16 @@ fn sh_term_of_ti(ti: int) -> int {
         term = sh_null_term();
     } else if k1 == TYP_TUPLE {
         term = sh_tuple_to_product(ti);
-    } else if k1 == TYP_NAMED || k1 == TYP_GENERIC_PARAM || k1 == TYP_GENERIC_APPLY {
-        term = tt_atom(AK_NAMED, ti, -1);   // 不展开 → UNKNOWN（P1 预期）
+    } else if k1 == TYP_NAMED || k1 == TYP_GENERIC_PARAM {
+        // R2 P5 Task 3：身份链（名字令牌）——取代原「空链 + b 槽当身份」（见
+        // sh_named_identity_term 文件头注）
+        term = sh_named_identity_term(ti);
+    } else if k1 == TYP_GENERIC_APPLY {
+        term = sh_apply_identity_term(ti, 0);
     } else {
-        term = tt_atom(AK_NAMED, ti, -1);   // 未知 kind 保守归入命名类
+        // 未知 kind 保守归入命名类：**无链** ⇒ 引擎命名面域外（-1，见 te_named_pair 守卫）。
+        // 全部 kind 已在上面逐项分派 ⇒ 本分支不可达（防御面，非未覆盖面）。
+        term = tt_atom(AK_NAMED, ti, -1);
     }
     if term < 0 { return -1; }
     // 写回前**重探**（递归翻译期间可能已扩容——见文件头注记②）
@@ -1044,7 +1104,9 @@ fn sh_sig_term_of_ti(ti: int) -> int {
     if k == TYP_NAMED || k == TYP_GENERIC_PARAM {
         // 命名行：named_dedup 按名规范（同名恒同行）；泛型形参行 = 声明点行（跨声明不同行 =
         // 已登记面：签名内含泛型形参的匹配只在同一声明内成立）
-        return tt_atom(AK_NAMED, ti, -1);
+        // R2 P5 Task 3：身份链与 sh_term_of_ti 的命名分支**逐位同构**（同一 sh_name_token
+        // 链形态）——双构造点契约（计划停条件③；改动必须两点同时）。
+        return sh_named_identity_term(ti);
     }
     if k == TYP_NULL { return sh_null_term(); }
     if k == TYP_ARRAY || k == TYP_SLICE {
@@ -1082,21 +1144,11 @@ fn sh_sig_term_of_ti(ti: int) -> int {
         return tt_atom(AK_PRODUCT, -1, tail);
     }
     if k == TYP_GENERIC_APPLY {
-        base := get_type_data(ti);
-        if get_type_kind(base) != TYP_NAMED { return -1; }
-        start2 := get_type_extra(ti);
-        cnt2 := r64(g_gen_apply_data, start2 * 8);
-        if cnt2 < 0 { return -1; }
-        tail2 : ., mut = tt_nil();
-        j : ., mut = cnt2 - 1;
-        loop {
-            if j < 0 { break; }
-            at := sh_sig_term_of_ti(r64(g_gen_apply_data, (start2 + 1 + j) * 8));
-            if at < 0 { return -1; }
-            tail2 = tt_cons(at, tail2);
-            j = j - 1;
-        }
-        return tt_atom(AK_NAMED, base, tail2);
+        // R2 P5 Task 3：形态与 sh_term_of_ti 的 APPLY 分支**同构**（基型行 + [基名令牌,
+        // 实参项…]）——不再只挂裸实参链（那是「基型行当身份」的旧形态：与桥接侧命名分支
+        // 失同步 ⇒ 两构造点对同型给出不同节点）。差别只剩实参项递归走**本构造点**
+        // （variant=1：签名面 N 不入项，见 sh_apply_args_chain 注）。
+        return sh_apply_identity_term(ti, 1);
     }
     return -1;   // TYP_DYN（位图行）/ 未知 kind：未覆盖面
 }

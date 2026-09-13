@@ -947,6 +947,145 @@ fn ts_ifc_run() -> int {
     return fails;
 }
 
+// ═══════════ R2 P5 Task 3：命名面判定化（身份链 + 可判定面加强）用例段 ═══════════
+// 判据面（行为/结构断言，**不依赖 legacy 存活**——影子层下线后本段仍是回归网组件；
+// 源级探针面见 tests/selfhost/test_named_face.py）：
+//   ① 链形态（**双构造点逐位同构**：NAMED/PARAM = [名字令牌]；APPLY = [基名令牌, 实参项…]）；
+//   ② 同链 ⇒ 1 / 链异 ⇒ 0（同名/异名命名；同/异实参泛型应用；嵌套应用）；
+//   ③ 混类（命名 × 原生）⇒ 0（= legacy 跨 kind 同结论 = false）；
+//   ④ 域外 ⇒ -1（空链 / 令牌位错位 / 实参位 μ 变元 / NEVER·DYN 混类）——三态纪律
+//      （不得近似成 0/1）；
+//   ⑤ 回落计数归零（g_replace_unknown 零增量 = 清零判据的二进制内断言）；
+//   ⑥ **残留面登记**（计划停条件②，本任务不动）：参数链**不变槽**的元素非同形仍 -1
+//      （`[NA;2]` vs `[NB;2]`）——它是可判定面（legacy 判 0）但属 `tt_list_variance_at`
+//      不变槽，动它须单独裁决（见 P5 Task 3 报告）。
+// 夹具 = 人造行（alloc_named_type/alloc_type），不进生产侧表语义面，只服务本段断言。
+fn ts_t3n_run() -> int {
+    fails : ., mut = 0;
+    ty_budget_reset(200000);
+    n_a := alloc_named_type(str_intern("T3NA"));
+    n_b := alloc_named_type(str_intern("T3NB"));
+    na_ni := get_type_data(n_a);
+    ta := sh_term_of_ti(n_a);
+    tb := sh_term_of_ti(n_b);
+    // ① 链形态：b 槽 = 行号（标注；D21 的 atom_of 消费者），c = [令牌(name_ni)]
+    fails = fails + ts_check("t3n.chain_shape",
+        (ta >= 0 && tt_a(ta) == AK_NAMED && tt_b(ta) == n_a &&
+         tt_c(ta) >= 0 && tt_tag(tt_c(ta)) == TT_CONS &&
+         tt_a(tt_c(ta)) == sh_name_token(na_ni) &&
+         tt_b(tt_c(ta)) >= 0 && tt_tag(tt_b(tt_c(ta))) == TT_NIL), 1);
+    // ① D21 契约不回退：atom_of 仍读 b（命名行 = 本行；应用行 = 基型行，规范形）
+    // ② 同名 ⇒ 同行（named_dedup）⇒ 同节点 ⇒ 等价 1；异名 ⇒ 0（双向）
+    n_a2 := alloc_named_type(str_intern("T3NA"));
+    fails = fails + ts_check("t3n.same_name_same_row",
+        (n_a2 == n_a && sh_term_of_ti(n_a2) == ta && ty_equiv(ta, sh_term_of_ti(n_a2)) == 1), 1);
+    fails = fails + ts_check("t3n.diff_name_diff",
+        (ty_sub(ta, tb) == 0 && ty_sub(tb, ta) == 0 && ty_equiv(ta, tb) == 0), 1);
+    // ③ 混类：命名 × 原生 ⇒ 0（名义型与异类原子不交）
+    fails = fails + ts_check("t3n.named_vs_base_zero",
+        (ty_equiv(ta, sh_term_of_ti(TI_INT)) == 0 && ty_equiv(ta, sh_term_of_ti(TI_STR)) == 0 &&
+         ty_equiv(sh_term_of_ti(TI_STR), ta) == 0), 1);
+    // ④ 域外：NEVER/DYN 混类 ⇒ -1 + 未覆盖面位置位（⊥/⊤ 语义未建模，登记）
+    ty_budget_reset(200000);
+    dn := ty_equiv(ta, sh_term_of_ti(TI_NEVER));
+    unc1 := ty_uncovered();
+    ty_budget_reset(200000);
+    dd := ty_equiv(ta, sh_term_of_ti(TI_DYN));
+    unc2 := ty_uncovered();
+    fails = fails + ts_check("t3n.never_dyn_out_of_domain",
+        (dn == -1 && dd == -1 && unc1 == 1 && unc2 == 1), 1);
+    // ④ 域外：空链（无身份 = 未覆盖面②原形态）⇒ -1
+    ty_budget_reset(200000);
+    dnc := ty_equiv(tt_atom(AK_NAMED, -1, -1), ta);
+    fails = fails + ts_check("t3n.no_chain_out_of_domain", (dnc == -1 && ty_uncovered() == 1), 1);
+    // ④ 域外：令牌位放类型项 ⇒ -1（位置错位不猜）
+    ty_budget_reset(200000);
+    mis1 := ty_equiv(tt_atom(AK_NAMED, -1, tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil())), ta);
+    fails = fails + ts_check("t3n.token_pos_mismatch_out", (mis1 == -1 && ty_uncovered() == 1), 1);
+    // ④ 域外：实参位 μ 变元 ⇒ -1（实参位只收类型项；令牌位同节点 ⇒ 比较推进到实参位）
+    bad_arg := tt_atom(AK_NAMED, n_a, tt_cons(sh_name_token(na_ni), tt_cons(tt_var(0), tt_nil())));
+    good_arg := tt_atom(AK_NAMED, n_a, tt_cons(sh_name_token(na_ni), tt_cons(sh_term_of_ti(TI_INT), tt_nil())));
+    ty_budget_reset(200000);
+    mis2 := ty_equiv(bad_arg, good_arg);
+    fails = fails + ts_check("t3n.arg_var_out_of_domain", (mis2 == -1 && ty_uncovered() == 1), 1);
+    // ⑤ 清零判据（二进制内）：命名面经 type_equal 不再回落 legacy（g_replace_unknown 零增量）
+    ru0 := g_replace_unknown;
+    eqf : ., mut = 0;
+    if !type_equal(n_a, n_b) {
+        if g_replace_unknown == ru0 { eqf = 1; }
+    }
+    fails = fails + ts_check("t3n.replace_unknown_zero", (eqf == 1 && ty_sub(ta, tb) == 0), 1);
+    // ② 泛型应用：规范形 b = 基型行 + 链 [基名令牌, 实参项…]
+    grow_gen_apply_data(g_gen_apply_data_count + 2);
+    gs1 := g_gen_apply_data_count;
+    w64(g_gen_apply_data, gs1 * 8, 1);
+    w64(g_gen_apply_data, (gs1 + 1) * 8, TI_INT);
+    g_gen_apply_data_count = gs1 + 2;
+    ga1 := alloc_type(TYP_GENERIC_APPLY, n_a, gs1);
+    ga2 := alloc_type(TYP_GENERIC_APPLY, n_a, gs1);      // **另一行**，同基型同实参
+    grow_gen_apply_data(g_gen_apply_data_count + 2);
+    gs2 := g_gen_apply_data_count;
+    w64(g_gen_apply_data, gs2 * 8, 1);
+    w64(g_gen_apply_data, (gs2 + 1) * 8, TI_STR);
+    g_gen_apply_data_count = gs2 + 2;
+    ga3 := alloc_type(TYP_GENERIC_APPLY, n_a, gs2);      // 同基型**异实参**
+    t_ga1 := sh_term_of_ti(ga1);
+    t_ga2 := sh_term_of_ti(ga2);
+    t_ga3 := sh_term_of_ti(ga3);
+    fails = fails + ts_check("t3n.apply_canonical_b",
+        (t_ga1 >= 0 && tt_a(t_ga1) == AK_NAMED && tt_b(t_ga1) == n_a &&
+         sh_atom_of_term(t_ga1) == n_a &&
+         tt_c(t_ga1) >= 0 && tt_tag(tt_c(t_ga1)) == TT_CONS &&
+         tt_a(tt_c(t_ga1)) == sh_name_token(na_ni) &&
+         tt_a(tt_b(tt_c(t_ga1))) == sh_term_of_ti(TI_INT)), 1);
+    fails = fails + ts_check("t3n.apply_two_rows_same_args",
+        (ga1 != ga2 && t_ga1 == t_ga2 && ty_equiv(t_ga1, t_ga2) == 1), 1);
+    fails = fails + ts_check("t3n.apply_diff_args_zero",
+        (ty_sub(t_ga1, t_ga3) == 0 && ty_sub(t_ga3, t_ga1) == 0), 1);
+    fails = fails + ts_check("t3n.apply_vs_bare_diff",
+        (ty_sub(t_ga1, ta) == 0 && ty_sub(ta, t_ga1) == 0), 1);
+    // ② 双构造点逐位同构（计划停条件③守门）：同型两构造 ⇒ **同节点**
+    fails = fails + ts_check("t3n.two_points_isomorphic",
+        (sh_sig_term_of_ti(n_a) == ta && sh_sig_term_of_ti(ga1) == t_ga1), 1);
+    // ② 嵌套应用：Box[Box[int]] 两处（外层实参分别指向同实参的**不同行**）⇒ 同节点
+    grow_gen_apply_data(g_gen_apply_data_count + 2);
+    gs3 := g_gen_apply_data_count;
+    w64(g_gen_apply_data, gs3 * 8, 1);
+    w64(g_gen_apply_data, (gs3 + 1) * 8, ga1);
+    g_gen_apply_data_count = gs3 + 2;
+    ga4 := alloc_type(TYP_GENERIC_APPLY, n_a, gs3);
+    grow_gen_apply_data(g_gen_apply_data_count + 2);
+    gs4 := g_gen_apply_data_count;
+    w64(g_gen_apply_data, gs4 * 8, 1);
+    w64(g_gen_apply_data, (gs4 + 1) * 8, ga2);
+    g_gen_apply_data_count = gs4 + 2;
+    ga5 := alloc_type(TYP_GENERIC_APPLY, n_a, gs4);
+    fails = fails + ts_check("t3n.nested_apply_same",
+        (ga4 != ga5 && sh_term_of_ti(ga4) == sh_term_of_ti(ga5)), 1);
+    // ② 可选面（union）：NA ⊂ NA?（注入面）⇒ 1；NA? vs NB?（内层异名）⇒ 0
+    opt_a := tt_union(ta, sh_null_term());
+    opt_b := tt_union(tb, sh_null_term());
+    fails = fails + ts_check("t3n.optional_named",
+        (ty_sub(ta, opt_a) == 1 && ty_sub(opt_a, opt_b) == 0), 1);
+    // ④ 域外：union 面含**无链**命名原子（未覆盖面②原形态）⇒ 仍 -1（加强不得把
+    // 未范化/域外并集面误判成 0——计划 Step 1 的 union 负控）
+    ty_budget_reset(200000);
+    u_out := ty_equiv(tt_union(tt_atom(AK_NAMED, -1, -1), sh_null_term()),
+                      tt_union(tt_atom(AK_NAMED, -2, -1), sh_null_term()));
+    fails = fails + ts_check("t3n.union_out_of_domain", (u_out == -1 && ty_uncovered() == 1), 1);
+    // ⑥ 残留面（停条件②；本任务不动）：序列**不变槽**元素非同形 ⇒ -1 + 未覆盖面
+    arr_a := sh_seq_term(n_a, 2);
+    arr_b := sh_seq_term(n_b, 2);
+    ty_budget_reset(200000);
+    rs := ty_sub(arr_a, arr_b);
+    fails = fails + ts_check("t3n.invariant_slot_residual_negative",
+        (arr_a >= 0 && arr_b >= 0 && rs == -1 && ty_uncovered() == 1), 1);
+    // ⑥ 对照：同元素（不同行）⇒ 1（N 不入身份 + 同链 ⇒ 快路径）
+    arr_a2 := sh_seq_term(n_a, 2);
+    fails = fails + ts_check("t3n.same_elem_seq_equiv", ty_equiv(arr_a, arr_a2), 1);
+    return fails;
+}
+
 // ═══════════ R2 P4 Task 2：TYPE 段内容面（装填 / 序列化 / dedup / 确定性）═══════════
 // 用例面：① 段体缓冲 ↔ 内存表逐字段 roundtrip（行表 24B/条 + 项表 40B/条 + 长度公式）；
 // ② dedup 重建（同构项 = 同节点；b 标注区分固定长度；DAG 无同 (tag,a..d) 重行）；
@@ -1917,12 +2056,17 @@ fn type_selftest_run() -> int {
     // 行 1203/1204 = 人造行（不进生产侧表语义面；alloc_named_type 仅为取得互异 named 行）
     t3_na := alloc_named_type(str_intern("T3NamedA"));
     t3_nb := alloc_named_type(str_intern("T3NamedB"));
+    // **R2 P5 Task 3 重钉**：命名面接引擎（身份链）后本形态 = 引擎**自决 0**（= legacy 同值），
+    // 不再回落——旧断「回落恰 +1」随清零判据翻转（翻转向量表：t3.unknown_fallback_legacy →
+    // 「引擎自决 + 零回落」；Case 名同步改写以不谎报语义）。三断 = 行为（false）+ 引擎直判 0
+    // + 回落计数零增量。
     t3_unknown_before := g_replace_unknown;
     t3_ub : ., mut = 0;
     if !type_equal(t3_na, t3_nb) {
-        if (g_replace_unknown - t3_unknown_before) == 1 { t3_ub = 1; }
+        if (g_replace_unknown - t3_unknown_before) == 0 { t3_ub = 1; }
     }
-    total = total + 1; fails = fails + ts_check("t3.unknown_fallback_legacy", t3_ub, 1);
+    total = total + 1; fails = fails + ts_check("t3.named_face_decided_no_fallback",
+        (t3_ub == 1 && ty_equiv(sh_term_of_ti(t3_na), sh_term_of_ti(t3_nb)) == 0), 1);
     // 桥接缺口（sh_term_of_ti 译不成项：行号越界）→ 同样回落 legacy（判 false）+ 计数 g_replace_bridge
     t3_bridge_before := g_replace_bridge;
     t3_bf : ., mut = 0;
@@ -2593,12 +2737,17 @@ fn type_selftest_run() -> int {
     unf_e2 := sh_struct_term(unf_s2_ti);
     total = total + 1; fails = fails + ts_check("unf.nominal_structural_equal",
         (unf_e1 >= 0 && unf_e2 >= 0 && ty_equiv(unf_e1, unf_e2) == 1), 1);
-    total = total + 1; fails = fails + ts_check("unf.nominal_equiv_atomic_unknown",
-        ty_equiv(sh_term_of_ti(unf_s1_ti), sh_term_of_ti(unf_s2_ti)), -1);
+    // **R2 P5 Task 3 重钉**（翻转向量表：`unf.nominal_equiv_atomic_unknown` →
+    // `unf.nominal_equiv_atomic_decided`）：命名面接引擎身份链后，**异名同形**两个命名型的
+    // 桥接项判 **0 = 确定不同**（旧断 -1 = 未覆盖面；legacy 同结论 = false ⇒ 行为同值，
+    // 差异 = 引擎自决而非回落）。展开项（满足面）结构相等断（上一例）逐字未动——「等价面
+    // 不展开」的边界仍由该例把住（同形不同名 ⇒ 桥接项 0，展开项 1）。
+    total = total + 1; fails = fails + ts_check("unf.nominal_equiv_atomic_decided",
+        ty_equiv(sh_term_of_ti(unf_s1_ti), sh_term_of_ti(unf_s2_ti)), 0);
     unf_ru0 := g_replace_unknown;
     unf_eqf : ., mut = 0;
     if !type_equal(unf_s1_ti, unf_s2_ti) {
-        if (g_replace_unknown - unf_ru0) == 1 { unf_eqf = 1; }
+        if (g_replace_unknown - unf_ru0) == 0 { unf_eqf = 1; }   // T3 重钉：零回落
     }
     total = total + 1; fails = fails + ts_check("unf.nominal_type_equal_false", unf_eqf, 1);
 
@@ -3084,6 +3233,9 @@ fn type_selftest_run() -> int {
     total = total + 16; fails = fails + ts_x2_run();
     // R2 P3b Task 6：impl 契约（签名类型项化 / 形状项 / mangling 退役 / 三态）——见 ts_ifc_run
     total = total + 14; fails = fails + ts_ifc_run();
+
+    // R2 P5 Task 3：命名面判定化（身份链 + 可判定面加强 + 域外守卫 + 残留面登记）——见 ts_t3n_run
+    total = total + 19; fails = fails + ts_t3n_run();
 
     // R2 P4 Task 2：TYPE 段内容面（装填/roundtrip/dedup/确定性/拒绝面）——见 ts_ccr_run
     // R2 P4 Task 3：IFACE 段内容面（五小节往返/签名项槽/形状名注册面/条目扩列/判定面

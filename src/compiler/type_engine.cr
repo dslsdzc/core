@@ -14,7 +14,10 @@
 //      「确定不等价 ⇒ 0」加强需先有「链元素皆类型项」不变量，而展开层链含**身份令牌**
 //      （Task 0 变体项链 = name 索引；实测：用 ty_equiv 会令牌碰撞误判，见 tt_list_variance_at
 //      注记）⇒ 归后续面；
-//   ② AK_NAMED 的具体行不展开（命名类型的结构定义在 P2 接入 checker 后可用）；
+//   ② AK_NAMED 的具体行不展开（命名类型的结构定义在 P2 接入 checker 后可用）——
+//      R2 P5 Task 3 **部分收口**：命名面按**身份链**判定（同链 1 / 链异 0 / 域外 -1，见
+//      `te_named_pair` 头注）；**结构展开**仍不进判定面（P3a 反证：同形不同名 struct 判等）。
+//      残留域外面 = 空链/位置错位/AK_NEVER·AK_DYN 混类（登记于 P5 Task 3 报告）；
 //   ③ μ 的**空递归**（如 μX.X）保守判为可空。
 //
 // 原子类 id 与 g_types 行解耦（spec §1）：natives 1:1 映射，结构/命名原子挂 g_types 行
@@ -161,6 +164,103 @@ fn lits_contradictory() -> int {
     return lits_contradictory_buf(g_ty_lits, g_ty_lits_count);
 }
 
+// ═══════════ R2 P5 Task 3：命名面可判定域（身份链判定）═══════════
+// 背景：AK_NAMED 原子原为**一律 -1**（未覆盖面②「命名行不展开」）⇒ 任何两个命名型比较都
+// 回落 legacy（checker 的 g_replace_unknown）。本任务把**可判定**的命名面接进引擎：身份 =
+// 桥接层构造的**身份链**（ty_shadow.cr 的 sh_named_identity_term / sh_apply_identity_term：
+// `[名字令牌]` / `[基名令牌, 实参项…]`），**不是**结构性展开（P3a 实测反证：把展开项接进
+// 等价面 ⇒ 同形不同名 struct 判等 + 推翻 P2a 归零基线，见 ty_shadow.cr 展开层头注）。
+//
+// 规则（三态；-1 = **适用域外**，调用方置 g_ty_uncovered 上抛——不得近似成 0/1）：
+//   ① 链同（逐元素）⇒ 1；② 链异且两侧元素皆在可判定域内 ⇒ 0（确定不同）；
+//   ③ 域外 ⇒ -1：空链（未覆盖面②的原形态：无身份的命名原子）/ 位置错位（令牌位放类型项或
+//      反之）/ **AK_NEVER·AK_DYN** 的混类（⊥/⊤ 语义未在本层建模——"never ⊆ X"、"X ⊆ dyn"
+//      不属本批，保持 -1；其余类 vs 命名型 ⇒ 0 = 名义型与异类原子不交，与 legacy 跨 kind
+//      同结论）。
+// 位置语义（链 = proper list；位置 0 = 身份令牌，位置 ≥ 1 = 泛型实参类型项）：
+//   · 令牌位 → **节点同一性**（令牌不是类型集：拿 ty_equiv 比会把一切 AK_UNIT 令牌判等
+//     ——P3 Task 1 实测的令牌碰撞类；见 tt_list_variance_at 注）；
+//   · 实参位 → 引擎**自身的等价判定** ty_equiv（三态直传）——链元素是桥接构造的规范项
+//     （同型 ⇒ 同节点），N 面（数组固定性 b 槽）经既有不变槽 b-忽略规则处理
+//     （`[int;3]` 与 `[int;4]` 作实参仍判等 ✓）。
+// 与 legacy 的口径对齐（等价面）：同链 ⇒ legacy 判 1；链异 ⇒ legacy 判 0。legacy 的判据 =
+// kind 相同 + data 递归（命名行 data = 名字索引；named_dedup 使「同名 ⇔ 同行」⇒ 与令牌
+// 同一性一致）。**已登记未编码角落**：本链不区分 kind（TYP_NAMED vs TYP_GENERIC_PARAM
+// 同名 ⇒ 判等，legacy 按 kind 判否）——需同名跨类比较才可达，可达性未证实（P5 T3 报告 §）。
+fn te_is_name_token(e: int) -> int {
+    if e < 0 || e >= tt_count() { return 0; }
+    if tt_tag(e) != TT_ATOM { return 0; }
+    if tt_a(e) != AK_UNIT { return 0; }
+    if tt_b(e) < 0 { return 0; }
+    return 1;
+}
+
+// 实参位允许的项：类型项（原子/并/交/链/空链）。μ 变元/¬/裸值一律域外。
+// 注：AK_UNIT 原子（原生 unit 类型项）**在**域内——它与令牌同形（b ≥ 0），本层不按键区分：
+// 实参位比较走 ty_equiv（unit vs int ⇒ 类不同 ⇒ 0，与 legacy 同结论；令牌不会出现在实参位，
+// 令牌位的比较另有 te_token_cmp）。
+fn te_is_arg_term(e: int) -> int {
+    if e < 0 || e >= tt_count() { return 0; }
+    t := tt_tag(e);
+    if t == TT_ATOM || t == TT_UNION || t == TT_INTER || t == TT_CONS || t == TT_NIL { return 1; }
+    return 0;
+}
+
+// 位置 0（身份令牌）比较；调用方已保证 e1 != e2。差异 ⇒ 确定不同（名字令牌的身份 = 节点）。
+fn te_token_cmp(e1: int, e2: int) -> int {
+    if te_is_name_token(e1) != 0 && te_is_name_token(e2) != 0 { return 0; }
+    return -1;      // 位置错位（非令牌）⇒ 域外，不猜
+}
+
+// 位置 ≥ 1（泛型实参类型项）比较：引擎等价（0/1/-1 直传）。
+fn te_arg_cmp(e1: int, e2: int) -> int {
+    if te_is_arg_term(e1) == 0 || te_is_arg_term(e2) == 0 { return -1; }
+    return ty_equiv(e1, e2);
+}
+
+// 身份链比较（三态）：slot = 当前位置（0 = 令牌位）。链形不同 = 结构不同（proper list 前提：
+// nil vs cons ⇒ 0；任一侧非链形（非 nil/cons）⇒ 域外 ⇒ -1）。
+fn te_chain_cmp(slot: int, p: int, q: int) -> int {
+    if p == q { return 1; }
+    if p < 0 || q < 0 { return 0; }              // 空链 vs 非空链
+    tp := tt_tag(p);
+    tq := tt_tag(q);
+    if tp != TT_CONS || tq != TT_CONS {
+        if tp == TT_NIL || tq == TT_NIL { return 0; }
+        return -1;
+    }
+    e1 := tt_a(p);
+    e2 := tt_a(q);
+    d : ., mut = 1;
+    if e1 != e2 {
+        if slot == 0 { d = te_token_cmp(e1, e2); } else { d = te_arg_cmp(e1, e2); }
+    }
+    if d == -1 { return -1; }
+    if d == 0 { return 0; }
+    return te_chain_cmp(slot + 1, tt_b(p), tt_b(q));
+}
+
+// 命名面成对判定（三态）：p/q 皆 TT_ATOM 且至少一侧 AK_NAMED（调用方保证）。
+fn te_named_pair(pk: int, p: int, qk: int, q: int) -> int {
+    if pk == qk {
+        // 双方皆 AK_NAMED（同类 ∧ 至少一侧 NAMED）
+        cp := tt_c(p);
+        cq := tt_c(q);
+        if cp < 0 || cq < 0 { return -1; }       // 空链 = 无身份（未覆盖面②原形态）⇒ 域外
+        return te_chain_cmp(0, cp, cq);
+    }
+    // 名义型 × 异类原子：确定不同（legacy 跨 kind 同结论）。守卫：命名侧必须带身份链；
+    // 异类侧不得是 AK_NEVER/AK_DYN（⊥/⊤ 语义未建模 ⇒ 域外，保持 -1）。
+    if pk == AK_NAMED {
+        if tt_c(p) < 0 { return -1; }
+        if qk == AK_NEVER || qk == AK_DYN { return -1; }
+        return 0;
+    }
+    if tt_c(q) < 0 { return -1; }
+    if pk == AK_NEVER || pk == AK_DYN { return -1; }
+    return 0;
+}
+
 // ─── 字面蕴含（⟦lp⟧ ⊆ ⟦lq⟧）───
 fn lit_implies(lp: int, lq: int) -> int {
     if lp == lq { return 1; }
@@ -195,9 +295,17 @@ fn lit_implies(lp: int, lq: int) -> int {
     }
     // 双方皆正原子：同类 + 参数链按**变型**比较（R2 P3 Task 1 取代 P0「仅同形判等」）
     if tt_tag(lp) == TT_ATOM && tt_tag(lq) == TT_ATOM {
-        if tt_a(lp) == AK_NAMED || tt_a(lq) == AK_NAMED { g_ty_uncovered = 1; return -1; }
-        if tt_a(lp) != tt_a(lq) { return 0; }
-        lv := tt_list_variance(tt_a(lp), tt_c(lp), tt_c(lq));
+        pk := tt_a(lp);
+        qk := tt_a(lq);
+        // R2 P5 Task 3：命名面（身份链）——取代原「AK_NAMED ⇒ 一律 -1」守卫。
+        // 可判定域/域外三态见 te_named_pair 头注（P5 前此面 = unknown 清零对象）
+        if pk == AK_NAMED || qk == AK_NAMED {
+            d := te_named_pair(pk, lp, qk, lq);
+            if d == -1 { g_ty_uncovered = 1; return -1; }
+            return d;
+        }
+        if pk != qk { return 0; }
+        lv := tt_list_variance(pk, tt_c(lp), tt_c(lq));
         if lv == 1 { return 1; }
         if lv == -1 { return -1; }     // 未知（不定槽的 ty_equiv 三态负值）：**上抛**，不得当 0
         // 确定不蕴含（不变槽查到确定不等价 / 协变槽 ty_sub 确定不成立 / 链形不同）：

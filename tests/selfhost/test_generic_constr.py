@@ -254,9 +254,14 @@ def main():
         # 结构实例化点：`Box[string]` 违反 `T: int`
         case_reject("struct_inst_constr_violated", STRUCT_INT_CONSTR_STR_BAD,
                     ["error[TG02]", "does not satisfy constraint 'int'", "counterexample"]),
-        # 结构实例化点：命名类型实参（S）——引擎对 AK_NAMED 不展开 ⇒ **不判**（三态纪律：
-        # 未知不得当违反；这是**登记面**，不是漏放——同族「命名实参 vs 原生约束」见报告 §登记）
-        case_dual("struct_inst_named_arg_unjudged", STRUCT_INT_CONSTR_BAD, 0),
+        # 结构实例化点：命名类型实参（S）——**R2 P5 Task 3 重钉**（收紧面，登记）：
+        # 命名面接引擎身份链后，「命名实参 × 原生约束」由「-1 不判」变为「0 = 确定违反」
+        # ⇒ TG02 + 反例（旧断：case_dual ... 0 = 零诊断「不判」= 引擎未覆盖面②的静默面）。
+        # 语义 = 与 legacy 同结论（type_equal(S, int) = false ⇒ 本就不满足）；全语料 0 命中
+        # （72 档 rc/日志与冻结基线逐条同）+ D26 同源对拍零差异 ⇒ 新 rc=1 面仅在本登记例
+        # 内可见（build 侧 tg02 非硬名单 ⇒ 产物面不变）。见 p5-task3-report §收紧。
+        case_reject("struct_inst_named_arg_rejected", STRUCT_INT_CONSTR_BAD,
+                    ["error[TG02]", "does not satisfy constraint 'int'", "counterexample"]),
         # 枚举实例化点
         case_reject("enum_inst_constr_violated", ENUM_INT_CONSTR_BAD,
                     ["error[TG02]", "does not satisfy constraint 'int'"]),
