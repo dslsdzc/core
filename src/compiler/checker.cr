@@ -751,6 +751,27 @@ fn stmt_cannot_fall_through(node: int) -> int {
     return 0;
 }
 
+// 语句是否**确定发散**（本层不产出值、不落到后继）——**含 `return`**。
+// **仅服务 TC02 的「else 支类型是幻影」判定**（消费点 = infer_expr 的 EXPR_IF 合并点守卫）；
+// **不得**用于 TF01——那里豁免 return 体会洗白真错面（lits_copy 型），见上一条的头注。
+// 保守默认 0（不确定即 0）：只认 return 族 + 包裹层（STMT/UNSAFE）+ 块内任一句确定发散。
+// 未覆盖面（登记，本批不判）：`break`/`continue` 收尾的分支（需循环上下文）。
+fn stmt_diverges(node: int) -> int {
+    if node < 0 { return 0; }
+    k := ast_kind(node);
+    if k == EXPR_RETURN { return 1; }
+    if k == EXPR_STMT || k == EXPR_UNSAFE { return stmt_diverges(ast_a(node)); }
+    if k == EXPR_BLOCK {
+        ss := ast_a(node); sc := ast_b(node);
+        i : ., mut = 0;
+        loop { if i >= sc { break; }
+            if stmt_diverges(r64(g_block_stmts, (ss + i) * 8)) != 0 { return 1; }
+            i = i + 1; }
+        return 0;
+    }
+    return 0;
+}
+
 // --- Symbol table ---
 struct SymEntry {
     name_idx: int,
@@ -2904,8 +2925,15 @@ fn infer_expr(node: int) -> int {
             // P3 Task 1 参序归一：合并**结果类型 = then_ti**（下方 return then_ti）⇒ 源 = else 侧，
             // 目标 = then 侧（长度约束更弱者放前面会被这里拦住 = 与结果类型一致；反之亦然）
             compat := type_compat_strict(else_ti, then_ti);
+            // TC02 收口（P3）：if 的**值类型定义为 then_ti**（下方 return then_ti）⇒ 当 **else 支
+            // 确定发散**（`return` 族收尾、不产出值）时，else 侧的「类型」是幻影（EXPR_RETURN 推断
+            // = 所返回值类型）⇒ 相容判定无对象 ⇒ 不报。
+            // **不对称是有意的**：then 支发散时 then_ti 本身即幻影（模型面，另案）⇒ 该形态继续报
+            // TC02（保留真信号）。谓词 = stmt_diverges（头注：只服务本判定点）。
             if compat != 1 && then_ti != TI_NEVER && else_ti != TI_NEVER {
-                diag_type_incompatible(compat, EC_TC_IF_BRANCH, "If branches have different types", ast_line(node), ast_col(node));
+                if stmt_diverges(else_node) == 0 {
+                    diag_type_incompatible(compat, EC_TC_IF_BRANCH, "If branches have different types", ast_line(node), ast_col(node));
+                }
             }
             return then_ti;
         }

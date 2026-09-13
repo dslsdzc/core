@@ -353,3 +353,12 @@ tools/baseline/build_gate_run.sh <corec二进制> <outdir>
 - **与既有裁决的一致性复核**：不回退 TM03/TG02（#31/#33）、TS01-04/TK02（#29）、ICE04（P-A）、TA02（#32）、F2/R002（先例即入闸依据）；TM04 的「软面」裁定经裁-FC-2(d) 显式处置（**不得**由实施者私自改判）。
 - **占位符扫描**：无 TBD；「须 T1 实测」逐处给出测量命令或产物格式；六条裁决门**逐条点名问句**，未用「推荐」冒充裁定。
 - **本批最大风险（一句话）**：**一次反转会让 CI `suite` job 至少 7 档（TF01×5/TF07×1/B04×1）与 ELF canary 载体同时转红——而 canary 载体 `ptr_arith.cr` 自身就是 check rc=1 档 ⇒ 不先取裁-FC-3，本批无法开门。**
+
+---
+
+## 勘误与进展（2026-09-14，TC02 极小批落地后回填）
+
+- **本条只动一处**：表 1 第 10 行（TC02）的处置由「① 必须阻断」改判为「**已修**（真误报）」。归因报告 = `/tmp/fct1/tc02_attribution.md`；设计稿 = `/tmp/fct2/tc02_minibatch.md`；落地 = `checker.cr` 新增 `stmt_diverges` + EXPR_IF 合并点守卫（P3：**仅 else 支发散 ⇒ 不报**；不对称是有意的）。
+- **对「表 2 转红面」的影响**：`test_native_float` 从「裸反转 6 档红套件」中**移出**；CI `selfhost-tests` 的裸反转真红面由 **6 → 5 档**（`test_ccr_types` [TF07+TB01] · `test_interp_float` [B04] · `test_interp_parity` [B04] · `test_match_exhaust` [TM04] · `test_xcut_iface` [TK01]）。
+- **对「豁免表草案」的影响**：`/tmp/fct1/exemption_draft.tsv` 的 **TC02 条目可撤**（退出条件「逐例归因后」已达成）⇒ 豁免表初稿由 **10 码降为 9 码**（TF01 · TF07 · TB01 · TM04 · TK01 · N01 · N06 · N11 · B04）。**表调整由 FC 批 T2 统一执行**（维护者 2026-09-14 裁）。
+- **未覆盖面（本批不判，登记）**：`break`/`continue` 收尾的分支（需循环上下文）；`x := if c { } else { return 1; }`（值被用且 else 发散）形态按 P3 不报（if 型 = `then_ti` = unit 是真值 ⇒ 误用由 TA02/TF01 兜住；**未构造端到端用例**）。

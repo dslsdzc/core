@@ -155,7 +155,7 @@
 | 码 | 检查点 | 消息模板 |
 |----|--------|---------|
 | TC01 | if 条件不是 bool | `If condition must be `bool`, got {T}` |
-| TC02 | if/else 分支类型不一致 | `If branches have different types: {T1} vs {T2}` |
+| TC02 | if/else 分支类型不一致（**2026-09-14 起带「else 支发散」豁免**：`EXPR_RETURN` 推断 = 所返回值类型 ⇒ `{ return X; }` 支的「类型」是幻影，而 if 的值类型定义为 `then_ti` ⇒ **else 支确定发散时不判**；判定谓词 = `stmt_diverges`（checker.cr，**只服务本判定点**）。**不对称是有意的**：then 支发散时 `then_ti` 本身即幻影（模型面）⇒ 仍报，保留真信号） | `If branches have different types: {T1} vs {T2}` |
 | TC03 | if 单分支不能有返回值 | `If without `else` cannot return value` |
 | TC04 | while 条件不是 bool | `While condition must be `bool`, got {T}` |
 | TC05 | loop 内 break 带值不一致 | ``break` with value conflicts with previous `break` without value` |
