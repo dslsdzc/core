@@ -158,6 +158,12 @@ fn run_frontend() -> int {
             // 全语料 report-only 清单为空（72 档 check 日志与基线逐字节同，见 Task 3 报告 §）。
             // TM04（冗余臂）**不入**本名单 = 软面登记（同 Rust unreachable-pattern 的警告口径）。
             if ec == EC_TM_EXHAUST { hard = 1; }
+            // 例外（R2 P5 Task 4 / P-A）：类型判定不可判（ICE04）为硬错误——三态纪律：
+            // 「未知」不得当 0/1（legacy 回落面已删，判定 = 引擎唯一权威）⇒ 判定不可进行时
+            // 产出的代码不可信（返回 false 只是 bool 面唯一保守出口，不是结论）⇒ 拒绝落盘。
+            // 开门依据 = report-only 全语料零命中（72 档 check/shadow 日志与基线逐条同 +
+            // `replace_*=0`；Task 3 Step 2 清零判据 + T3b 残留收口，见 p5-task4-report §1）。
+            if ec == EC_ICE_TY_INDET { hard = 1; }
             di = di + 1;
         }
         print_diagnostics();

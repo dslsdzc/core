@@ -929,70 +929,10 @@ fn gen_expr(node: int) -> int {
         right := ast_b(node);
         op := ast_c(node);
 
-        // Assignment
-        if op == OP_ASSIGN {
-            val_var := gen_expr(right);
-            val_var = force_if_thunk(val_var);
-            // Determine lhs kind
-            if ast_kind(left) == EXPR_IDENT {
-                name_idx := ast_int_val(left);
-                target := find_local(name_idx);
-                if target >= 0 {
-                    if irv_type(target) == TI_DYN {
-                        // Dyn variable assignment: pack value with type tag
-                        tag := irv_type(val_var);
-                        if tag < 0 { tag = TI_INT; }
-                        emit(IR_DYN_PACK, target, val_var, tag, 0, 0);
-                    } else {
-                        // dex 槽位形式转换（数值迁移 Task 4：apx 槽存 bits，精确槽存缩放）
-                        val_var = dex_store_adjust(target, val_var, right);
-                         // F11：切片长度沿赋值传播（字面量/运行时界长度变量同步；源无记录则清除）
-                         slice_len_copy_to(target, val_var);
-emit(IR_STORE, -1, target, val_var, 0, 0);
-                    }
-                } else {
-                    gtarget := find_global(name_idx);
-                    if gtarget >= 0 {
-                        val_var = dex_store_adjust(gtarget, val_var, right);
-                        emit(IR_STORE, -1, gtarget, val_var, 0, 0);
-                    }
-                }
-                return val_var;
-            }
-            if ast_kind(left) == EXPR_FIELD {
-                obj_var := gen_expr(ast_a(left));
-                obj_var = force_if_thunk(obj_var);
-                field_ni := ast_int_val(left);
-                fi := ast_data(left);  // field index stored by checker
-                emit(IR_STORE_FIELD, -1, obj_var, val_var, fi, 0);
-                return val_var;
-            }
-            if ast_kind(left) == EXPR_INDEX {
-                arr_var := gen_expr(ast_a(left));
-                arr_var = force_if_thunk(arr_var);
-                idx_node := ast_b(left);
-                idx_kind := ast_kind(idx_node);
-                // F1：写路径越界守卫钩子（EXPR_BINARY OP_ASSIGN 遗留路径，同步修复）
-                arr_len_lit : ., mut = arr_len_lit_of(arr_var);
-                if idx_kind == EXPR_INT {
-                    emit_string_lit_bounds(arr_var, ast_int_val(idx_node));
-                    emit_slice_lit_bounds(arr_var, ast_int_val(idx_node));
-                    if pass_before_array_access(arr_var, -1, ast_int_val(idx_node), arr_len_lit) == 0 {
-                        emit(IR_STORE_INDEX, -1, arr_var, val_var, ast_int_val(idx_node), 0);
-                    }
-        } else {
-            idx_var := gen_expr(idx_node);
-            idx_var = force_if_thunk(idx_var);
-            emit_string_bounds(arr_var, idx_var);
-            emit_slice_bounds(arr_var, idx_var);
-            if pass_before_array_access(arr_var, idx_var, -1, arr_len_lit) == 0 {
-                emit(IR_STORE_INDEX_VAR, val_var, arr_var, idx_var, 0, 0);
-            }
-                }
-                return val_var;
-            }
-            return val_var;
-        }
+        // R2 P5 Task 4（D25）：`EXPR_BINARY + OP_ASSIGN` 赋值分支**已删**——不可达
+        // （parser 不产该组合：`tok2op` 零 OP_ASSIGN；`T_EQ` → EXPR_ASSIGN；`+=` 族构造
+        // `EXPR_ASSIGN` 包裹的 EXPR_BINARY 且 op ∈ {ADD,SUB,MUL,DIV}；语料站点直方图 0 命中）。
+        // 赋值发射面在下方 `EXPR_ASSIGN` 分支（gen_expr 的另一 arm），逐字未动。
 
         // Regular binary
         left_var := gen_expr(left);

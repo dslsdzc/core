@@ -165,7 +165,8 @@ fn lits_contradictory() -> int {
 
 // ═══════════ R2 P5 Task 3：命名面可判定域（身份链判定）═══════════
 // 背景：AK_NAMED 原子原为**一律 -1**（未覆盖面②「命名行不展开」）⇒ 任何两个命名型比较都
-// 回落 legacy（checker 的 g_replace_unknown）。本任务把**可判定**的命名面接进引擎：身份 =
+// 回落 legacy（checker 的 g_replace_unknown；**R2 P5 Task 4 已随 legacy 删除**——残留 -1 面
+// 现为 P-A 硬错 ICE04）。本任务把**可判定**的命名面接进引擎：身份 =
 // 桥接层构造的**身份链**（ty_shadow.cr 的 sh_named_identity_term / sh_apply_identity_term：
 // `[名字令牌]` / `[基名令牌, 实参项…]`），**不是**结构性展开（P3a 实测反证：把展开项接进
 // 等价面 ⇒ 同形不同名 struct 判等 + 推翻 P2a 归零基线，见 ty_shadow.cr 展开层头注）。

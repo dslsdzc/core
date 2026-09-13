@@ -417,17 +417,9 @@ g_unf_entries : int, mut;         g_unf_hits : int, mut;
 // （globals.cr）。grow 帮助函数放 monomorph.cr（函数前向引用合法）。
 g_purity_inst : string, mut;    g_purity_inst_count : int, mut;   g_purity_inst_cap : int, mut;
 
-// R2 P2a Task 3：判定替换的**回落计数**（unknown 政策落地面，checker.cr 的 type_equal）：
-// 引擎三态 1/0 直接采信；-1（未知：预算耗尽/未覆盖面）**不得静默当 0/1** → 回落
-// type_equal_legacy 并计数（g_replace_unknown）；桥接失败（sh_term_of_ti 返回 -1 = 该
-// ti 译不成类型项）同样回落（g_replace_bridge）。两因分开计数——与 P1 Task 3 Step 0
-// 的 unknown 拆因同因：混记则归因不可恢复。
-// 归零 = init_types()（类型表重置 = 判定行号空间作废 → 计数同生命周期；LSP 每请求一次）。
-// 报告通道 = [type-shadow] 摘要行尾两字段。影子关时计数器**照常累加**（自增在 type_equal_engine
-// 内、位于 g_shadow_on 判定之前且不以它为条件），仅不打印——关态输出逐字节不变是硬判据。
-// 独立交叉证据（可复核）：影子侧 unknown_engine 与 replace_unknown 在 71 语料文件上逐文件
-// 相等（见 ty_shadow.cr 同处注记 + Task 3 报告 §unknown 处置）。
-g_replace_unknown : int, mut;      g_replace_bridge : int, mut;
+// R2 P2a Task 3 的判定回落计数（g_replace_unknown/g_replace_bridge）**R2 P5 Task 4 删除**：
+// 清零判据成立（全语料 replace_*=0）⇒ 回落面已删（legacy 一并删除）；未知面改走 P-A 硬错
+// （EC_ICE_TY_INDET，见 checker.cr 的 ty_indeterminate_report）。
 
 fn grow_plugin_tags(needed: int) {
     if needed < g_plugin_tag_cap { return; }

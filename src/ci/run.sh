@@ -68,7 +68,7 @@ case "$CI_JOB_NAME" in
   selfhost-tests)
     build_selfhost
     python3 tests/selfhost/test_compile.py
-    python3 tests/selfhost/test_type_engine.py   # 类型项引擎自测通道（selftest-types **401 例**——P5 Task 3b 后计数（P5 T3 的 386 − 1（不变槽残留例迁出）+ 13（t3b 段：不变槽元素三态/令牌位/unit 形态负控/域外守卫/回落归零）+ 3（t3 witness 合取式拆项：反向过判登记 ×2 + 最小复现）＝ 401）；P0/P1/P2a/P2b-T1..T6/P3-T0..T5/P3b-T0..T2/T6/P4-T2/T3/T4 一路漏挂）
+    python3 tests/selfhost/test_type_engine.py   # 类型项引擎自测通道（selftest-types **404 例**——P5 Task 3b 后 401 + P5 T4 新增 3（ts_t4_run：ICE04 硬错——桥接缺口 / 引擎未覆盖面 / 决定面零误报）＝ 404；P0/P1/P2a/P2b-T1..T6/P3-T0..T5/P3b-T0..T2/T6/P4-T2/T3/T4/P5-T2/T3/T3b 一路漏挂）
     python3 tests/selfhost/test_iface_ops.py     # R2 P2b Task 4/5/6：接口查表接线（算术/逻辑/条件三门 + 索引兜底门 + TY→TI 单表合一；正控/负控/登记面/站点域 76 例）
     python3 tests/selfhost/test_purity.py          # 效应/纯度批判据（真纯度 13 例 + 链语义 4 例的自测通道驱动）
     python3 tests/selfhost/test_ccr_v7.py          # 效应/纯度批 Task 3：.ccr 层三条边集语义断言（取代「与旧版逐字节同」）

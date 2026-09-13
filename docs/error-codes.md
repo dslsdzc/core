@@ -253,6 +253,7 @@
 | ICE01 | 不应该发生的状况 | `Internal compiler error: {detail}` |
 | ICE02 | 全局缓冲区溢出 | `Compiler limit: {buffer} overflow (max {max})` |
 | ICE03 | IR 生成缺实现 | `Unsupported expression: {kind}` |
+| ICE04 | 类型判定不可判（引擎 `-1`：未覆盖面/预算耗尽；或桥接缺口 = 该行译不成类型项）——R2 P5 Task 4 的 P-A 政策：**未知不当 0/1**（legacy 回落面已删），硬错拒绝落盘；反例（两侧类型项文本）随消息，判定点无 AST 位置 ⇒ `--> 0:0` | `type judgment indeterminate: {term_a} vs {term_b} ({cause})` / `type judgment indeterminate: no type term for type row {t1} / {t2} (bridge gap)` |
 
 ---
 
@@ -276,5 +277,5 @@
 | B | B001–B010 | 10 | 借用 |
 | R | R001–R004 | 4 | 运行时 |
 | E | E001–E004 | 4 | I/O |
-| ICE | ICE01–ICE03 | 3 | 编译器内部 |
-| **总计** | | **~145** | |
+| ICE | ICE01–ICE04 | 4 | 编译器内部 |
+| **总计** | | **~146** | |

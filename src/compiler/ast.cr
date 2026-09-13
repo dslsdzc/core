@@ -515,6 +515,10 @@ EC_E_CCR_OPEN     : int = 15004; // E004  Cannot open CCR
 EC_ICE_UNEXPECTED : int = 16001; // ICE01  Unexpected
 EC_ICE_OVERFLOW   : int = 16002; // ICE02  Buffer overflow
 EC_ICE_UNSUPPORTED : int = 16003; // ICE03  Unsupported
+// R2 P5 Task 4（P-A）：类型判定不可判（引擎 -1 = 未覆盖面/预算耗尽，或桥接缺口 = 该行译不成
+// 类型项）。三态纪律：**未知不得当 0/1** ⇒ 硬错（legacy 回落面已删，D24）。反例（两侧类型项
+// 文本）随诊断输出；判定点无 AST 位置 ⇒ line/col = 0。
+EC_ICE_TY_INDET   : int = 16004; // ICE04  Type judgment indeterminate
 
 // Diagnostic entry
 struct Diag {

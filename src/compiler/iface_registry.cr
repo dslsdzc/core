@@ -241,8 +241,9 @@ fn iface_lit_ak(lit_kind: int) -> int {
 }
 
 // TY_*（基类型码）→ AK_*：逐项语义分派（**唯一实现在此**）；-1 = 无对应。
-// P2b Task 2 单源化：桥接层 `sh_base_ak` 已改为**薄委托**本函数（改动前的字面拷贝保留为
-// ty_shadow.cr 的 `sh_base_ak_legacy`，仅 type_selftest.cr 全表对拍用，P5 删）。
+// P2b Task 2 单源化：桥接层 `sh_base_ak` 已改为**薄委托**本函数（改动前的字面拷贝
+// `sh_base_ak_legacy`/`sh_native_ak_legacy` 曾存于 ty_shadow.cr 供全表对拍，**R2 P5 Task 4
+// 已删**——对拍面改为 type_selftest.cr 的**冻结期望表** `ts_t4_ak_expected`）。
 //   TY_DEX_S → AK_DEX（同值域不同表示——表示层差异不进类型身份，ty_shadow.cr:78-80 已裁决）
 //   TY_GENERIC_PARAM → AK_NAMED（泛型参数哨兵 → 命名类，不展开；ty_shadow.cr:86 已裁决）
 fn iface_by_ty_code(ty: int) -> int {

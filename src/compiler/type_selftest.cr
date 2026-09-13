@@ -26,6 +26,38 @@ fn ts_diag_code_at(idx: int) -> int {
     return r64(g_diags, idx * DIAG_REC_SIZE);
 }
 
+// 诊断消息探针（R2 P5 Task 4）：读第 idx 条诊断的消息指针（check_error 存的就是该指针）。
+fn ts_diag_msg_at(idx: int) -> string {
+    if idx < 0 { return ""; }
+    if idx >= g_diag_count { return ""; }
+    return load_str_ptr(g_diags, idx * DIAG_REC_SIZE + 8);
+}
+
+// ─── R2 P5 Task 4：AK 映射的**冻结期望表**（替代已删的 legacy 副本对照物）───
+// 与 iface_registry.cr 的 `iface_by_ty_code`（唯一生产实现）逐格对照用：本表 = 数据形态的期望，
+// 不再是生产文件里的第二份实现（单源化的判据由此从「两份实现互比」变「实现 vs 冻结期望」）。
+// 依据 = P2b Task 2 已裁决的映射（含两条灰格：TY_DEX_S → AK_DEX（同值域不同表示）、
+// TY_GENERIC_PARAM → AK_NAMED（泛型参数哨兵 → 命名类，不展开））；未映射码 ⇒ -1。
+fn ts_t4_ak_expected(ty: int) -> int {
+    if ty == TY_INT { return AK_INT; }
+    if ty == TY_DEX { return AK_DEX; }
+    if ty == TY_DEX_S { return AK_DEX; }
+    if ty == TY_BOOL { return AK_BOOL; }
+    if ty == TY_STRING { return AK_STRING; }
+    if ty == TY_UNIT { return AK_UNIT; }
+    if ty == TY_NEVER { return AK_NEVER; }
+    if ty == TY_CHAR { return AK_CHAR; }
+    if ty == TY_GENERIC_PARAM { return AK_NAMED; }
+    return -1;
+}
+
+// 行号面期望：**门**（kind 非 TYP_BASE ⇒ -1，含 TYP_DYN/结构/命名行与负 ti）+ 表内分派。
+fn ts_t4_native_ak_expected(ti: int) -> int {
+    if ti < 0 { return -1; }
+    if get_type_kind(ti) != TYP_BASE { return -1; }
+    return ts_t4_ak_expected(get_type_data(ti));
+}
+
 // 宽联合探针（预算守卫用）：N 层左深 union —— sub_cover 逐支递归，每支 1 步，
 // N > 预算即耗尽（深 μ 链不行：参数位置的字面蕴含不递归展开，会在参数比较处短路）。
 fn tt_probe_wide_union(depth: int) -> int {
@@ -955,7 +987,8 @@ fn ts_ifc_run() -> int {
 //   ③ 混类（命名 × 原生）⇒ 0（= legacy 跨 kind 同结论 = false）；
 //   ④ 域外 ⇒ -1（空链 / 令牌位错位 / 实参位 μ 变元 / NEVER·DYN 混类）——三态纪律
 //      （不得近似成 0/1）；
-//   ⑤ 回落计数归零（g_replace_unknown 零增量 = 清零判据的二进制内断言）；
+//   ⑤ 清零判据（二进制内）：命名面经 type_equal = 引擎自决 + **零 ICE04 诊断**（T4：回落
+//      计数随 legacy 删除，断言形态由「计数零增量」升级为「未知诊断缺席」）；
 //   ⑥ **残留面**（计划停条件②）= 参数链**不变槽**的元素非同形（`[NA;2]` vs `[NB;2]`）：
 //      T3 时未动（可判定但属 `tt_list_variance_at` 不变槽，须单独裁决）⇒ **T3b 已关闭**
 //      （`te_elem_cmp` 三态；断言迁往 `ts_t3b_run` 段——本段只剩同元素对照）。
@@ -1008,13 +1041,15 @@ fn ts_t3n_run() -> int {
     ty_budget_reset(200000);
     mis2 := ty_equiv(bad_arg, good_arg);
     fails = fails + ts_check("t3n.arg_var_out_of_domain", (mis2 == -1 && ty_uncovered() == 1), 1);
-    // ⑤ 清零判据（二进制内）：命名面经 type_equal 不再回落 legacy（g_replace_unknown 零增量）
-    ru0 := g_replace_unknown;
+    // ⑤ 清零判据（二进制内）：命名面经 type_equal = **引擎自决**——R2 P5 Task 4 后回落计数
+    //    本体已删（legacy 一并删除）⇒ 断言升级为「自决 + **零 ICE04 诊断**」：诊断缺席 = 引擎
+    //    真判（0/1），而不是「未知被静默当 false」（P-A 的牙齿 = t4.ice04_* 三例）。
+    t3n_d0 := g_diag_count;
     eqf : ., mut = 0;
     if !type_equal(n_a, n_b) {
-        if g_replace_unknown == ru0 { eqf = 1; }
+        if g_diag_count == t3n_d0 { eqf = 1; }
     }
-    fails = fails + ts_check("t3n.replace_unknown_zero", (eqf == 1 && ty_sub(ta, tb) == 0), 1);
+    fails = fails + ts_check("t3n.decided_no_indeterminate", (eqf == 1 && ty_sub(ta, tb) == 0), 1);
     // ② 泛型应用：规范形 b = 基型行 + 链 [基名令牌, 实参项…]
     grow_gen_apply_data(g_gen_apply_data_count + 2);
     gs1 := g_gen_apply_data_count;
@@ -1093,7 +1128,8 @@ fn ts_t3n_run() -> int {
 //      「同名不同节点」，节点同一性比较不可能把同名令牌判不同）；(b) 令牌 × 原生 unit 项
 //      **同形**（AK_UNIT ∧ b ≥ 0）——`ty_equiv` 判**等**（令牌碰撞类的实证），`te_elem_cmp`
 //      令牌先判 ⇒ 0（绝不产生假等；失效方向选择见 type_engine.cr 该函数头注）；
-//   ⑥ 二进制面清零判据：数组行经 `type_equal` **零回落**（`g_replace_unknown` 零增量）。
+//   ⑥ 二进制面清零判据：数组行经 `type_equal` = **引擎自决 + 零 ICE04 诊断**（T4 重钉：
+//      回落计数随 legacy 删除，断言形态改为「未知诊断缺席」）。
 // 夹具 = 人造行（alloc_named_type/alloc_type，同名 ⇒ 同名去重行）；不进生产侧表语义面。
 fn ts_t3b_run() -> int {
     fails : ., mut = 0;
@@ -1188,13 +1224,61 @@ fn ts_t3b_run() -> int {
     rm := ty_sub(ref_a, ref_m);
     fails = fails + ts_check("t3b.ref_elem_and_marker",
         ts_isat_b2i(rb == 0 && rm == 0 && ty_uncovered() == 0), 1);
-    // ⑥ 清零判据（二进制内）：数组行经 type_equal 零回落（g_replace_unknown 零增量）
-    ru0 := g_replace_unknown;
+    // ⑥ 清零判据（二进制内）：数组行经 type_equal = 引擎自决 + 零 ICE04 诊断（T4 重钉：
+    //    回落计数已随 legacy 删除 ⇒ 断言形态 = 「未知诊断缺席」）
+    t3b_d0 := g_diag_count;
     dec : ., mut = 0;
     if !type_equal(arr_a, arr_b) {
-        if g_replace_unknown == ru0 { dec = 1; }
+        if g_diag_count == t3b_d0 { dec = 1; }
     }
-    fails = fails + ts_check("t3b.replace_unknown_zero_arr", dec, 1);
+    fails = fails + ts_check("t3b.decided_no_indeterminate_arr", dec, 1);
+    return fails;
+}
+
+// ═══════════ R2 P5 Task 4：残留 -1 政策 P-A（ICE04 硬错）用例段 ═══════════
+// 判据面（**不依赖 legacy 存活**——它就是 legacy 删除后的替身证据；影子层下线后照常）：
+//   ① 桥接缺口（行号越界 ⇒ 该行译不成类型项）⇒ **判 false + ICE04 恰 1 条**（旧行为 = 回落
+//      legacy + g_replace_bridge 计数；两件旧物均已删除）；
+//   ② 引擎 -1（未覆盖面：命名原子身份链 × NEVER 原子 ⇒ 域外，`te_named_pair` 的 NEVER/DYN
+//      守卫）⇒ **判 false + ICE04**，且措辞 ≠ 桥接缺口措辞（成因可读 = 归因不混）；
+//   ③ 决定面**零误报**：引擎自决（0/1）与同一行快路径一律不产 ICE04——三态纪律的牙齿 =
+//      「未知 ⇒ 诊断」而「确定 ⇒ 无诊断」（P-A 若被改回「静默 false」= ①②转红；若被改成
+//      「全报」= ③转红）。
+// 诊断是**故意**触发的：本段结束时复位 g_diag_count（不留进后续用例的增量基线）。
+fn ts_t4_run() -> int {
+    fails : ., mut = 0;
+    // ① 桥接缺口（ti 越界 = 无项）
+    t4_d0 := g_diag_count;
+    t4_b1 : ., mut = 0;
+    if !type_equal(g_type_count + 100, TI_INT) { t4_b1 = 1; }
+    t4_d1 := g_diag_count;
+    t4_m_bridge := ts_diag_msg_at(t4_d0);
+    fails = fails + ts_check("t4.ice04_bridge_gap_hard_error",
+        (t4_b1 == 1 && t4_d1 == t4_d0 + 1 && ts_diag_code_at(t4_d0) == EC_ICE_TY_INDET &&
+         str_len(t4_m_bridge) > 0), 1);
+    // ② 引擎 -1（未覆盖面）：命名原子（T3 身份链）× NEVER 原子 = **域外**（`te_named_pair`
+    //    的 NEVER/DYN 守卫 ⇒ -1 + g_ty_uncovered，见 t3n.never_dyn_out_of_domain）——这是
+    //    桥接**能译**（两条目皆 ≥ 0）但引擎判不了的形态：与 ① 的桥接缺口是**两个不同出口**。
+    //    （反例形态记：AK_NEVER × AK_DYN 是**已判**面（⊥ ⊆ ⊤ 不反向 ⇒ 0），不产 -1。）
+    t4_na := alloc_named_type(str_intern("T4IndetNamed"));
+    t4_d2 := g_diag_count;
+    t4_b2 : ., mut = 0;
+    if !type_equal(t4_na, TI_NEVER) { t4_b2 = 1; }
+    t4_d3 := g_diag_count;
+    t4_m_engine := ts_diag_msg_at(t4_d2);
+    fails = fails + ts_check("t4.ice04_engine_uncovered_hard_error",
+        (t4_b2 == 1 && t4_d3 == t4_d2 + 1 && ts_diag_code_at(t4_d2) == EC_ICE_TY_INDET &&
+         str_len(t4_m_engine) > 0 && str_eq(t4_m_bridge, t4_m_engine) == 0), 1);
+    // ③ 决定面零误报（引擎自决 0 与同一行快路径各自零诊断）
+    t4_d4 := g_diag_count;
+    t4_ok : ., mut = 0;
+    if !type_equal(TI_INT, TI_STR) {                    // 引擎自决 0
+        if type_equal(TI_INT, TI_INT) {                 // 同一行快路径（自反）
+            if g_diag_count == t4_d4 { t4_ok = 1; }
+        }
+    }
+    fails = fails + ts_check("t4.ice04_decided_no_false_positive", t4_ok, 1);
+    g_diag_count = t4_d4;    // 复位（本段的 ICE04 是故意触发的）
     return fails;
 }
 
@@ -2160,8 +2244,9 @@ fn type_selftest_run() -> int {
     // ① N 面（Task 2/3 评审裁决「N 不得回身份」）：`type_equal`（引擎判定）对**同结构异长**
     //    判 true——N 不在身份内；拒绝语义由 array_len_constraint_ok 独立承担（第二断）。
     //    两断合起来 = 该不变量的双钉：引擎不放宽成身份 → 但拒绝不丢。
-    // ② unknown 政策：两个**互异命名型**行 → 桥接 AK_NAMED 不展开 → 引擎 -1（未知）→
-    //    **不得静默当 0/1**：回落 legacy（此处判 false）+ g_replace_unknown 恰 +1。
+    // ② unknown 政策（R2 P5 Task 3 重钉 → T4 终态）：两个**互异命名型**行 → 桥接身份链 ⇒
+    //    引擎**自决 0**（不再未知 ⇒ 零回落）；T4 后回落本体已删 ⇒ 断言 = 「自决 + 零未知
+    //    诊断（ICE04 缺席）」。**不得静默当 0/1** 的牙齿在 t4.ice04_* 三例（真未知面）。
     // ③ 同一行快路径：不触发引擎/回落（同型自反恒 true）。
     ty_budget_reset(200000);
     t3_arr3 := alloc_type(TYP_ARRAY, TI_INT, 3);
@@ -2174,24 +2259,28 @@ fn type_selftest_run() -> int {
     // 行 1203/1204 = 人造行（不进生产侧表语义面；alloc_named_type 仅为取得互异 named 行）
     t3_na := alloc_named_type(str_intern("T3NamedA"));
     t3_nb := alloc_named_type(str_intern("T3NamedB"));
-    // **R2 P5 Task 3 重钉**：命名面接引擎（身份链）后本形态 = 引擎**自决 0**（= legacy 同值），
-    // 不再回落——旧断「回落恰 +1」随清零判据翻转（翻转向量表：t3.unknown_fallback_legacy →
-    // 「引擎自决 + 零回落」；Case 名同步改写以不谎报语义）。三断 = 行为（false）+ 引擎直判 0
-    // + 回落计数零增量。
-    t3_unknown_before := g_replace_unknown;
+    // **R2 P5 Task 3 重钉 / T4 终态**：命名面接引擎（身份链）后本形态 = 引擎**自决 0**
+    // （= legacy 同值），不再回落——T4 后回落计数本体亦删 ⇒ 断言形态 = 「行为（false）+
+    // 引擎直判 0 + **零未知诊断**（ICE04 缺席 = 引擎真判而非未知被静默当 false）」。
+    t3_d0 := g_diag_count;
     t3_ub : ., mut = 0;
     if !type_equal(t3_na, t3_nb) {
-        if (g_replace_unknown - t3_unknown_before) == 0 { t3_ub = 1; }
+        if g_diag_count == t3_d0 { t3_ub = 1; }
     }
-    total = total + 1; fails = fails + ts_check("t3.named_face_decided_no_fallback",
+    total = total + 1; fails = fails + ts_check("t3.named_face_decided_no_indeterminate",
         (t3_ub == 1 && ty_equiv(sh_term_of_ti(t3_na), sh_term_of_ti(t3_nb)) == 0), 1);
-    // 桥接缺口（sh_term_of_ti 译不成项：行号越界）→ 同样回落 legacy（判 false）+ 计数 g_replace_bridge
-    t3_bridge_before := g_replace_bridge;
+    // 桥接缺口（sh_term_of_ti 译不成项：行号越界）→ **P-A 硬错**（T4 重钉：旧行为 = 回落
+    // legacy + g_replace_bridge 计数；现行为 = 判 false + ICE04 诊断恰 1 条）。措辞/成因面
+    // 由 t4.ice04_* 段复核（本例只钉「行为 + 码」）。
+    t3_bf_d0 := g_diag_count;
     t3_bf : ., mut = 0;
     if !type_equal(g_type_count + 100, TI_INT) {
-        if (g_replace_bridge - t3_bridge_before) == 1 { t3_bf = 1; }
+        if g_diag_count == t3_bf_d0 + 1 {
+            if ts_diag_code_at(t3_bf_d0) == EC_ICE_TY_INDET { t3_bf = 1; }
+        }
     }
-    total = total + 1; fails = fails + ts_check("t3.bridge_fallback_legacy", t3_bf, 1);
+    total = total + 1; fails = fails + ts_check("t3.bridge_gap_ice04_hard_error", t3_bf, 1);
+    g_diag_count = t3_bf_d0;    // 本诊断是**故意**触发的（复位：不留进后续用例的增量基线）
     ty_budget_reset(200000);
 
     // --- R2 P2a Task 3 评审 Critical：桥接缓存**随类型表重置失效**（sh_map_reset）---
@@ -2312,9 +2401,11 @@ fn type_selftest_run() -> int {
         (iface_permits(AK_INT, -1) == 0 && iface_permits(AK_INT, 63) == 0 && iface_permits(9999, OP_ADD) == 0), 1);
 
     // --- R2 P2b Task 2：`iface_kind_of` 单源化——桥接分派（sh_native_ak/sh_base_ak）与注册表合一 ---
-    // 判据 = **全表对拍**（非抽样）：生产入口（委托版）与 legacy 版（改动前实现的字面拷贝，
-    // 仅存于此对拍面；ty_shadow.cr 注明 P5 删）逐格相同。只比「两版相等」会漏两类错——
-    // 入口被换成第三个实现、两版一起错 ⇒ 另加③~⑥的**显式**断言（反真空/灰格/门/下标不 1:1）。
+    // 判据 = **全表逐格**（非抽样）：生产入口对**冻结期望表**逐格相同。**R2 P5 Task 4 重定**：
+    // 改动前实现的字面拷贝（sh_base_ak_legacy/sh_native_ak_legacy）已随 legacy 面删除 ⇒ 对照物
+    // 改为 `ts_t4_ak_expected`/`ts_t4_native_ak_expected`（**本文件的冻结期望**，不再是生产文件里
+    // 的第二份实现——单源化的收益自此由数据钉住）。只比「两版相等」会漏两类错——入口被换成
+    // 第三个实现、两版一起错 ⇒ 另加③~⑥的**显式**断言（反真空/灰格/门/下标不 1:1）。
     // ① TY 码面：全部 9 个 TY_* 码（含 TY_DEX_S / TY_GENERIC_PARAM 两条已裁决灰格）+ 未映射码
     t2_codes := alloc(10 * 8);
     w64(t2_codes, 0, TY_INT);            w64(t2_codes, 8, TY_DEX);
@@ -2327,7 +2418,7 @@ fn type_selftest_run() -> int {
     loop {
         if t2_i >= 10 { break; }
         t2_code := r64(t2_codes, t2_i * 8);
-        if iface_by_ty_code(t2_code) != sh_base_ak_legacy(t2_code) { t2_ty_bad = t2_ty_bad + 1; }
+        if iface_by_ty_code(t2_code) != ts_t4_ak_expected(t2_code) { t2_ty_bad = t2_ty_bad + 1; }
         t2_i = t2_i + 1;
     }
     total = total + 1; fails = fails + ts_check("iface.by_ty_code_all_codes", t2_ty_bad, 0);
@@ -2336,18 +2427,18 @@ fn type_selftest_run() -> int {
     t2_j : ., mut = 0;
     loop {
         if t2_j >= g_type_count { break; }
-        if sh_native_ak(t2_j) != sh_native_ak_legacy(t2_j) { t2_ti_bad = t2_ti_bad + 1; }
+        if sh_native_ak(t2_j) != ts_t4_native_ak_expected(t2_j) { t2_ti_bad = t2_ti_bad + 1; }
         t2_j = t2_j + 1;
     }
     total = total + 1; fails = fails + ts_check("iface.native_ak_all_rows", t2_ti_bad, 0);
     // ③ **反真空哨兵**（两处 loop 是本 Task 的判据本体，不得空转假绿）：
     //    ⓐ 扫描计数：码面 10 个键全扫过（且解码真读回写入值）；行面恰为 g_type_count 行且 ≥ 9；
-    //    ⓑ 比较是活的：对**已知不等**的一对（未映射码 -1 vs TY_INT → AK_INT）必须报不等。
+    //    ⓑ 比较是活的：两个**已知互补**的格必须给出**不同**结果（未映射码 → -1 而 TY_INT → AK_INT）。
     total = total + 1; fails = fails + ts_check("iface.scan_coverage",
         (t2_i == 10 && r64(t2_codes, 56) == TY_GENERIC_PARAM && r64(t2_codes, 64) == TY_DEX_S &&
          t2_j == g_type_count && t2_j >= 9), 1);
     total = total + 1; fails = fails + ts_check("iface.compare_is_live",
-        (iface_by_ty_code(999) == sh_base_ak_legacy(TY_INT)), 0);
+        (iface_by_ty_code(999) == ts_t4_ak_expected(TY_INT)), 0);
     // ④ 生产入口**确实在委托**（逐项钉死；含两条灰格与未映射码）
     total = total + 1; fails = fails + ts_check("iface.bridge_delegates",
         (sh_base_ak(TY_INT) == AK_INT && sh_base_ak(TY_STRING) == AK_STRING && sh_base_ak(TY_BOOL) == AK_BOOL &&
@@ -2862,10 +2953,12 @@ fn type_selftest_run() -> int {
     // 不展开」的边界仍由该例把住（同形不同名 ⇒ 桥接项 0，展开项 1）。
     total = total + 1; fails = fails + ts_check("unf.nominal_equiv_atomic_decided",
         ty_equiv(sh_term_of_ti(unf_s1_ti), sh_term_of_ti(unf_s2_ti)), 0);
-    unf_ru0 := g_replace_unknown;
+    // T3 重钉（零回落）→ **T4 终态**：回落计数已随 legacy 删除 ⇒ 断言 = 「判 false + 零
+    // 未知诊断（ICE04 缺席 = 引擎真判 0，而非未知被静默当 false）」。
+    unf_d0 := g_diag_count;
     unf_eqf : ., mut = 0;
     if !type_equal(unf_s1_ti, unf_s2_ti) {
-        if (g_replace_unknown - unf_ru0) == 0 { unf_eqf = 1; }   // T3 重钉：零回落
+        if g_diag_count == unf_d0 { unf_eqf = 1; }
     }
     total = total + 1; fails = fails + ts_check("unf.nominal_type_equal_false", unf_eqf, 1);
 
@@ -3063,9 +3156,10 @@ fn type_selftest_run() -> int {
     //    ② 嵌套固定性同样**不入身份**（`ty_equiv` 两向 1）；
     //    ③ 站点层：嵌套 视图→固定 = -1（专属措辞路）、嵌套 固定→视图 = 1（拓宽保持）。
     t1_out_arr4 := alloc_type(TYP_ARRAY, t1_arr4, 2);   // [[int;4];2]
-    t1_ru0 := g_replace_unknown;
+    // T4 终态：断言从「零回落计数」改为「零未知诊断」（ICE04 缺席 = 引擎真判身份路径）
+    t1_d0 := g_diag_count;
     t1_nest_ok : ., mut = 0;
-    if type_equal(t1_out_arr, t1_out_arr4) { if (g_replace_unknown - t1_ru0) == 0 { t1_nest_ok = 1; } }
+    if type_equal(t1_out_arr, t1_out_arr4) { if g_diag_count == t1_d0 { t1_nest_ok = 1; } }
     total = total + 1; fails = fails + ts_check("t1.n_face_gate_nested",
         (t1_nest_ok == 1 && array_len_constraint_ok(t1_out_arr4, t1_out_arr) == 0), 1);
     total = total + 1; fails = fails + ts_check("t1.fixedness_not_identity_nested",
@@ -3376,6 +3470,10 @@ fn type_selftest_run() -> int {
 
     // R2 P5 Task 3b：不变槽元素三态（te_elem_cmp）——见 ts_t3b_run（13 例）
     total = total + 13; fails = fails + ts_t3b_run();
+
+    // R2 P5 Task 4：残留 -1 政策 P-A（ICE04 硬错；桥接缺口 / 引擎未覆盖面 / 决定面零误报）
+    // ——见 ts_t4_run（3 例）
+    total = total + 3; fails = fails + ts_t4_run();
 
     // R2 P4 Task 2：TYPE 段内容面（装填/roundtrip/dedup/确定性/拒绝面）——见 ts_ccr_run
     // R2 P4 Task 3：IFACE 段内容面（五小节往返/签名项槽/形状名注册面/条目扩列/判定面

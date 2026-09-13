@@ -25,12 +25,11 @@ fn alloc_type(kind: int, data: int, extra: int) -> int {
 // 实读核对：全仓 TYP_NAMED 分配点恰 8 处（:406/:554/:598/:613/:622/:920/:2191/:2206），
 // 实参恒 (TYP_NAMED, name_idx, 0) → 键 = name_idx（extra 恒 0，不入键）。读取点全部经
 // get_type_data(ti) 取**名字**（:496 是解引用到名字的唯一入口），故按名字归一行不改读法。
-// **例外（如实登记）**：type_equal_legacy 的 TYP_GENERIC_APPLY 分支（符号锚点：该分支的
-// `get_type_data(t1) != get_type_data(t2)` 基型比较）比的是 get_type_data = base_ti（基型
-// **行号**）——去重把「同名字不同出现点 ⇒ 不等」改成「同名 ⇒ 同 base 行，继续比实参」，
-// 这正是本条修复的目的（P1 差异的对偶面）；其放宽面由 Task 3 对拍复跑量化，非本任务裁决面。
-// Task 3 复核：判定替换后该分支**仅在引擎未知时**参与（TYP_GENERIC_APPLY 桥接为 AK_NAMED
-// 不展开 → 引擎恒 -1 → 回落 legacy）；宽松方向的量化见对拍三档（old_looser）。
+// **比行号的面（去重的收益面）**：泛型应用的**基型行**（TYP_GENERIC_APPLY 的 data = base_ti）
+// 与桥接项 AK_NAMED 的 b 槽（`sh_apply_identity_term` 的规范形 = 基型行）都按行比——去重把
+// 「同名字不同出现点 ⇒ 不等」改成「同名 ⇒ 同 base 行，继续比实参」，这正是本条修复的目的
+// （P1 差异的对偶面）。R2 P5 Task 4 后回落的 legacy 结构判等已删 ⇒ 该行号面**只剩**桥接项
+// 的 b 槽（规范形，T3 起身份链按**名字令牌**比较，b 槽为标注）。
 //
 // 侧表 g_named_dedup（16B/条 {name_idx, ti}，开放寻址线性探测，与 ty_shadow.cr 的
 // g_shadow_map 同式同因）。P0/P1 血泪三件套缺一即可能挂死，逐条落：
@@ -157,7 +156,7 @@ fn named_dedup_rows(name_idx: int) -> int {
 // 背景（Task 1 交接必测项，评审裁决）：`f1.*` 用例是**人造夹具**（自测通道不经 check_all，
 // 手工 alloc + 单名查行数）——它证明不了「8 个生产分配点全走侧表」：任一生产点若退回裸
 // `alloc_type(TYP_NAMED, name, 0)`，自测照样全绿，而真实编译中该名字会**占两行**（读名字
-// 的点仍对，比行号的点错——`type_equal_legacy` 的 TYP_GENERIC_APPLY 基型比较即比行号）。
+// 的点仍对，比**行号**的点错——现存比行号面 = 泛型应用基型行 / 桥接项 AK_NAMED 的 b 槽）。
 // 本函数把该性质升为**行为级证据**：跑在真实编译流水线（check_all 之后）上，三组断言
 // 全部基于本编译期的真实类型表 / 符号表 / AST，不构造任何夹具：
 //   ① 类型表 → 侧表：每个 TYP_NAMED 行按名查侧表必须**命中且回指本行**（唯一分配点 ⇒
@@ -241,9 +240,8 @@ fn init_types() {
     // R2 P3 Task 0：展开层缓存（ti→展开项）**同理必须作废**（同因：行号空间复用 ⇒ 陈旧
     // ti→展开项命中 = 把上一请求的类型结构安到当前行上；同 sh_map_reset 的评审 Critical）。
     sh_unf_map_reset();
-    // R2 P2a Task 3：判定回落计数随之归零（类型行号空间作废 → 计数只对本编译期有意义；
-    // LSP 每请求走 check_all → 本行 → 计数不跨请求累积）
-    g_replace_unknown = 0; g_replace_bridge = 0;
+    // R2 P5 Task 4：判定回落计数（g_replace_*）随 legacy 一并删除——未知面改走 P-A 硬错
+    // （ICE04，无跨请求累积语义：诊断在产生它的那次编译里即出）。
     // R2 P5 Task 2（D23）：单槽化建项失败位同生命周期（类型行号空间作废 ⇒ 该位只对本
     // 编译期有意义；LSP 每请求 init_types ⇒ 不跨请求累积）。
     g_tk_face_fail = 0;
@@ -337,21 +335,23 @@ fn get_type_extra(ti: int) -> int {
 }
 
 // ─── R2 P2a Task 2（F2）：常量档数组长度约束 ───
-// 背景（P1 findings §6.F2）：身份判等（type_equal_legacy 的 TYP_ARRAY 分支）曾把 N 与元素判等
-// 绑在一起 = N 属**类型身份**；而桥接按 R1 裁决 **N 不入身份**（AK_SEQUENCE 参数链只含元素项）
-// → 判定替换（Task 3：引擎 ty_equiv）后 `[int;4]` → `[int;3]` 会**静默通过**（现状是编译错误
-// error[TF01]）。用户裁决：落「常量档长度约束」——保持现状拒绝语义，不留静默缺口。本函数即
-// 该约束：N 从身份中**迁出**，成为具名、可独立调用/独立测试的检查（身份分支不再比 N）。
+// 背景（P1 findings §6.F2）：身份判等（当时的 type_equal 结构判等，R2 P5 Task 4 已删）曾把 N
+// 与元素判等绑在一起 = N 属**类型身份**；而桥接按 R1 裁决 **N 不入身份**（AK_SEQUENCE 参数链
+// 只含元素项）→ 判定替换（Task 3：引擎 ty_equiv）后 `[int;4]` → `[int;3]` 会**静默通过**
+// （现状是编译错误 error[TF01]）。用户裁决：落「常量档长度约束」——保持现状拒绝语义，不留
+// 静默缺口。本函数即该约束：N 从身份中**迁出**，成为具名、可独立调用/独立测试的检查
+// （身份分支不再比 N）。
 //
 // 语义（本批 = 常量档：N 皆字面量 → 编译期定 恒真/恒假）：
-//   沿两类型的**结构对应位置**下钻（下钻位置覆盖 type_equal_legacy 的**递归位**：数组元素 /
+//   沿两类型的**结构对应位置**下钻（下钻位置 = 结构判等（已删）的**递归位**：数组元素 /
 //   指针元素 / 引用元素 / 切片元素 / 元组字段 / 泛型应用实参），在**数组位置**比较 N（extra）
 //   ——N 必须相等；不等即 0（违反）。其余情形（异 kind / 异元数 / 非数组构造子）长度面无约束
 //   → 1（满足）。**1 = 满足；0 = 违反**。
 //   ⚠「同形」仅指**递归位覆盖**（下钻走得到的位），**不**指比较项相同——各构造子另有非长度
-//   面，且**一律归身份判定**，本约束有意不重复（只认 N = TYP_ARRAY 的 extra 一个维度）：
-//     · REF —— `type_equal_legacy` 的 TYP_REF 分支另比 `extra`（mut 标记），本函数不重复；
-//     · TUPLE / GENERIC_APPLY —— 身份另比元数、APPLY 另比基型行号，同上；
+//   面，且**一律归身份判定（引擎）**，本约束有意不重复（只认 N = TYP_ARRAY 的 extra 一个维度）：
+//     · REF —— 身份含 `extra`（mut 标记；桥接链 [mut 标记项, 元素项]，见 ty_shadow.cr
+//       `sh_ref_mut_marker`），本函数不重复；
+//     · TUPLE / GENERIC_APPLY —— 身份另比元数、APPLY 另比基型行号（规范形），同上；
 //     · 反向不对称 —— PTR 的 `extra`（地址空间位 asp，`infer_expr` 的指针升格分配点）身份
 //       **亦不比**（现状如此，非本任务面），本函数同样不引入该比较。
 //   故切勿据「同形」推断两者判等项一致（评审 M1 收口）。
@@ -494,128 +494,74 @@ fn diag_type_incompatible(verdict: int, code: int, what: string, line: int, col:
     }
 }
 
-// R2 P1：本函数曾是**唯一**结构判等实现（原名 type_equal）。
-// R2 P2a Task 3：改名 `type_equal_legacy`——判定权已移交引擎（见下方 `type_equal` 双函数），
-// 本函数降级为两用：
-//   ① 影子通道的**对拍对照物**（替换门：引擎判定 vs 旧结构判等逐点对账，见 sh_compare）；
-//   ② 引擎三态返回 -1（未知）或桥接失败时的**回落实现**（unknown 政策：不得静默当 0/1）。
-//   **P5 删**（引擎覆盖面补齐、unknown 清零后）。
-// 内部 6 处递归调用点（数组/元组/引用/指针/切片/泛型应用）指向本名，**不**经包装 → 影子只在
-// 外部决策点（#29 前 8、现 10——增站点 9/10）取样一次/次调用（递归展开不重复计数）。
-// F2（Task 2）后数组分支已 **N-free**（N 迁出类型身份）——与引擎侧一致；长度面走
-// array_len_constraint_ok（判定点显式补检），本函数**不得**再引回 N 比较（Task 2/3 评审裁决）。
-fn type_equal_legacy(t1: int, t2: int) -> bool {
-    if t1 == t2 { return true; }
-    // Compare structure for non-base types
-    if t1 >= 0 && t2 >= 0 && t1 < g_type_count && t2 < g_type_count {
-        k1 := get_type_kind(t1);
-        k2 := get_type_kind(t2);
-        if k1 == TYP_NAMED && k2 == TYP_NAMED {
-            return get_type_data(t1) == get_type_data(t2);
-        }
+// R2 P1：本文件曾同时有**结构判等实现**（原名 type_equal）与引擎判定两套。
+// R2 P2a Task 3：结构判等降级为 `type_equal_legacy`（影子对拍对照物 + 引擎 -1 的回落实现）。
+// **R2 P5 Task 4 删除**（本处）：断言前提 = 清零判据成立（全语料 72 档 `decisions=agree=32988`、
+//   `replace_bridge=replace_unknown=0`；残留 -1 面由 Task 3 命名面判定化 + Task 3b 不变槽元素
+//   三态收口，探针 `unknown_engine=0`）——D24 顺序：清零 → 删 legacy → 影子层下线。
+// 删除件与替代证据（D26）见 p5-task4-report §判据；P-A 政策见 `type_equal_engine` 头注。
 
-        // F2（R2 P2a Task 2）：本分支**不比 N**——N 已迁出类型身份（与引擎侧一致：桥接的
-        // AK_SEQUENCE 参数链不含 N）。长度拒绝语义由 array_len_constraint_ok 在**判定点**
-        // 显式补检（type_compat_strict）；身份面只判结构（元素）。
-        if k1 == TYP_ARRAY && k2 == TYP_ARRAY {
-            return type_equal_legacy(get_type_data(t1), get_type_data(t2));
-        }
-        if k1 == TYP_TUPLE && k2 == TYP_TUPLE {
-            if get_type_data(t1) != get_type_data(t2) { return false; }
-            start1 := get_type_extra(t1);
-            start2 := get_type_extra(t2);
-            cnt := get_type_data(t1);
-            i : ., mut = 0;
-            loop {
-                if i >= cnt { break; }
-                if !type_equal_legacy(r64(g_gen_apply_data, (start1 + i) * 8), r64(g_gen_apply_data, (start2 + i) * 8)) { return false; }
-                i = i + 1;
-            }
-            return true;
-        }
-        if k1 == TYP_REF && k2 == TYP_REF {
-            return get_type_extra(t1) == get_type_extra(t2) && type_equal_legacy(get_type_data(t1), get_type_data(t2));
-        }
-        if k1 == TYP_PTR && k2 == TYP_PTR {
-            return type_equal_legacy(get_type_data(t1), get_type_data(t2));
-        }
-        if k1 == TYP_SLICE && k2 == TYP_SLICE {
-            return type_equal_legacy(get_type_data(t1), get_type_data(t2));
-        }
-        // R2 P3 Task 4：可选/null 身份。`T?` 的身份 = 内层身份（N 面先例：结构判等只判结构，
-        // 语义包含由引擎承担）；null 单点类型恒自等（两个 None 出现的行不同但类型同一）。
-        // 跨 kind（TYP_NULL vs TYP_OPTIONAL vs 其余）一律 false（落尾部 return false）——
-        // 与引擎一致（null 原子与 union 项不同一）。
-        if k1 == TYP_OPTIONAL && k2 == TYP_OPTIONAL {
-            return type_equal_legacy(get_type_data(t1), get_type_data(t2));
-        }
-        if k1 == TYP_NULL && k2 == TYP_NULL { return true; }
-        if k1 == TYP_GENERIC_APPLY && k2 == TYP_GENERIC_APPLY {
-            if get_type_data(t1) != get_type_data(t2) { return false; }
-            start1 := get_type_extra(t1);
-            start2 := get_type_extra(t2);
-            count1 := r64(g_gen_apply_data, start1 * 8);
-            count2 := r64(g_gen_apply_data, start2 * 8);
-            if count1 != count2 { return false; }
-            ai : ., mut = 0;
-            loop {
-                if ai >= count1 { break; }
-                if !type_equal_legacy(r64(g_gen_apply_data, (start1 + 1 + ai) * 8), r64(g_gen_apply_data, (start2 + 1 + ai) * 8)) { return false; }
-                ai = ai + 1;
-            }
-            return true;
-        }
-        if k1 == TYP_GENERIC_PARAM && k2 == TYP_GENERIC_PARAM {
-            return get_type_data(t1) == get_type_data(t2);
-        }
+// P-A（Task 4 Step 1 推荐案，落纸）：判定不可判 = **硬错 ICE04**（三态纪律：未知不得当 0/1，
+// 也**不得**回落/近似）。两个出口：
+//   ① 桥接缺口（sh_term_of_ti 返回 -1 = 该行译不成类型项——行越界/桥接未覆盖）；
+//   ② 引擎三态 -1（预算耗尽 / 未覆盖面：μ/¬/⊤ₖ 等，见 Task 0 表 D 清点）。
+// 诊断面：新码 ICE04（main.cr 硬名单 ⇒ build 亦拒绝）+ 反例（两侧类型项文本，D23 先例）。
+// 判定点（type_equal 无 AST 位置）⇒ line/col = 0；定位由调用点自身的诊断（TA01/TF01…）承担。
+// 全语料零命中（report-only 先行，由 Task 3 的 0 计数支撑）⇒ 零行为变化。
+fn ty_indeterminate_report(kind: int, t1: int, t2: int, a: int, b: int, unc: int, exh: int) {
+    msg : ., mut = "";
+    if kind == 0 {
+        msg = "type judgment indeterminate: no type term for type row " + int_str(t1) + " / " + int_str(t2) + " (bridge gap)";
+    } else {
+        cause : ., mut = "uncovered face";
+        if unc == 0 && exh != 0 { cause = "budget exhausted"; }
+        msg = "type judgment indeterminate: " + tt_display(a) + " vs " + tt_display(b) + " (" + cause + ")";
     }
-    return false;
+    check_error(EC_ICE_TY_INDET, msg, 0, 0);
 }
 
-// ─── R2 P2a Task 3：判定替换（引擎 ty_equiv 成为判定权威）───
-// 判定主体（P1 的包装层拆两半：本函数 = 引擎判定，`type_equal` = 入口 + 影子对拍包装）。
-//   ① 同一行快路径：t1 == t2 → true（与 legacy 首行**逐字同义**——legacy 首行也是
-//      `if t1 == t2 { return true; }`，含负 ti 情形；故快路径不改任何判定结果，只省一次
-//      桥接 + 引擎查询）；
-//   ② 桥接（sh_term_of_ti）：任一侧译不成类型项（-1）→ 回落 legacy 并计数 g_replace_bridge；
-//   ③ 引擎三态：1 → true；**0 → false（引擎结论即权威）**；-1（未知：预算耗尽/未覆盖面）→
-//      **不静默当 0/1**，回落 legacy 并计数 g_replace_unknown（unknown 政策，P1 交接硬性）；
+// ─── R2 P2a Task 3 / R2 P5 Task 4：判定 = 引擎唯一权威 ───
+// 判定主体（P1 的包装层拆两半：本函数 = 引擎判定，`type_equal` = 入口转发）。
+//   ① 同一行快路径：t1 == t2 → true（含负 ti 情形；快路径不改任何判定结果，只省一次桥接
+//      + 引擎查询）；
+//   ② 桥接（sh_term_of_ti）：任一侧译不成类型项（-1）⇒ **P-A 硬错**（ICE04 + 桥接缺口措辞）
+//      —— 判定不可进行 = 未知；旧行为（Task 4 前）= 回落 legacy + g_replace_bridge（已删）；
+//   ③ 引擎三态：1 → true；**0 → false（引擎结论即权威）**；-1（未知：预算耗尽/未覆盖面）⇒
+//      **P-A 硬错**（ICE04 + 成因 + 反例）——旧行为 = 回落 legacy + g_replace_unknown（已删）；
 //   ④ 预算隔离：判定前后各 ty_budget_reset(200000)——引擎 memo 跨查询命中会让结果依赖预算
 //      历史而非输入项（P0 终审 Critical 3 实证）；判定路径不得受前次查询影响。
+// 返回 false 是「未知」在 bool 面上唯一的保守出口（fail-closed：不因未知放宽），
+//   **不等价于**「确定不等价」——后者由 ICE04 与实际 0 区分（诊断只在未知时发）。
 // N 面（Task 2/3 评审裁决「N 不得回身份」）：本函数路径**不含** N 比较——桥接的 AK_SEQUENCE
-// 参数链只含元素项，legacy 数组分支亦已 N-free；长度拒绝一律由 array_len_constraint_ok 在
-// 判定点（type_compat_strict）承担。本函数**不得**引入任何 N（get_type_extra 的数组位）比较。
+// 参数链只含元素项；长度拒绝一律由 array_len_constraint_ok 在判定点（type_compat_strict）
+// 承担。本函数**不得**引入任何 N（get_type_extra 的数组位）比较。
 fn type_equal_engine(t1: int, t2: int) -> bool {
     if t1 == t2 { return true; }                       // 快路径：同一行
     a := sh_term_of_ti(t1);
     b := sh_term_of_ti(t2);
     if a < 0 || b < 0 {
-        g_replace_bridge = g_replace_bridge + 1;       // 桥接缺口（登记，不静默）
-        return type_equal_legacy(t1, t2);
+        ty_indeterminate_report(0, t1, t2, a, b, 0, 0);
+        return false;
     }
     ty_budget_reset(200000);
     e := ty_equiv(a, b);
+    // 成因位须在**第二次 reset 之前**读（ty_budget_reset 清 g_ty_uncovered/g_ty_exhausted）
+    unc := ty_uncovered();
+    exh := ty_exhausted();
     ty_budget_reset(200000);                           // 判定后即复位（不污染后续查询）
     if e == 1 { return true; }
     if e == 0 { return false; }
-    // e == -1（未知）：不静默——回落 legacy 并计数（unknown 政策，报告单列）
-    g_replace_unknown = g_replace_unknown + 1;
-    return type_equal_legacy(t1, t2);
+    // e == -1（未知）：P-A —— 不静默、不回落：硬错 + 反例
+    ty_indeterminate_report(1, t1, t2, a, b, unc, exh);
+    return false;
 }
 
-// R2 P1 影子对拍包装 / R2 P2a Task 3 判定入口：判定照常返回（**影子不改判定**）；影子只观察
-// （--type-shadow 开时）。**对照物 = type_equal_legacy**（替换门：引擎 vs 旧结构判等逐点
-// 对账——`sh_compare` 内部另算引擎判定与 `ok` 比较，故 ok 必须喂 legacy 的结论）。
-// 未开 = 单次全局读 + 直接返回 → 两态产物逐字节判据据此成立。
-// 本语言无三元运算符 → ok 用显式分支（`r ? 1 : 0` 不合法）。
+// R2 P1 影子对拍包装 / R2 P2a Task 3 判定入口 → **R2 P5 Task 4：纯转发**。
+// 对照物（type_equal_legacy）已删 ⇒ `sh_compare` 的调用点随之移除（影子判定观察面**停摆**；
+// 余部——ring/摘要/站点直方图/CLI 通道——随 Task 5 下线，D24：中间态不跑影子判据）。
+// 保留本名 = 判定入口单点，调用面零改动。
 fn type_equal(t1: int, t2: int) -> bool {
-    r := type_equal_engine(t1, t2);
-    if g_shadow_on != 0 {
-        ok : ., mut = 0;
-        if type_equal_legacy(t1, t2) { ok = 1; }
-        sh_compare(t1, t2, ok);
-    }
-    return r;
+    return type_equal_engine(t1, t2);
 }
 
 fn scan_for_yield(node: int) -> int {
@@ -2456,18 +2402,12 @@ fn infer_expr(node: int) -> int {
         left := ast_a(node);
         right := ast_b(node);
         op := ast_c(node);
-        if op == OP_ASSIGN {
-            // Assignment: left = right
-            lt := infer_expr(left);
-            rt := infer_expr(right);
-            sh_site_begin(6);   // 站点 6 = 赋值兼容（EXPR_BINARY + OP_ASSIGN）
-            // P3 Task 1 参序归一：赋值 = 目标(lt) ← 值(rt) ⇒ 源 = rt，目标 = lt
-            compat := type_compat_strict(rt, lt);
-            if compat != 1 {
-                diag_type_incompatible(compat, EC_TA_ASSIGN, "Assignment type mismatch", ast_line(node), ast_col(node));
-            }
-            return rt;
-        }
+        // R2 P5 Task 4（D25）：`EXPR_BINARY + OP_ASSIGN` 分支**已删**（站点 6 随之退役——
+        // 其挂点在本分支内）。不可达三面证明：① `tok2op`（parser.cr）不产 OP_ASSIGN；
+        // ② `T_EQ` → `EXPR_ASSIGN`（parser.cr）；③ `+=` 族显式构造 `EXPR_ASSIGN` 包裹的
+        // `EXPR_BINARY` 且 op ∈ {ADD,SUB,MUL,DIV} ⇒ 全仓无生产者（含 opt/pass 面）。
+        // 实证：全语料 shadow 站点直方图 `assign-binary=0`（32988 次判定）。**赋值判定点
+        // = 站点 8（EXPR_ASSIGN，见 infer_expr 的 EXPR_ASSIGN 分支）**，逐字保留。
         lt := infer_expr(left);
         rt := infer_expr(right);
         if op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV || op == OP_MOD {

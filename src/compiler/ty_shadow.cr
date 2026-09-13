@@ -10,12 +10,14 @@
 // 元素]（mut 成为判定维度——旧约定「不入链」下引擎把 `&T` 与 `&mut T` 判等价 = 静默放宽，
 // legacy 比 extra ⇒ 替换后 mut 面失守；本批关闭）。变型规则（引擎侧表）在 type_engine.cr。
 // R2 P2a Task 3：判定权已移交引擎（`type_equal` = 快路径 + 桥接 + `ty_equiv`），影子挂点
-// 仍在 `type_equal` 包装层，**对照物切到 `type_equal_legacy`**（旧结构判等，P5 删）：
-// sh_compare 的 `old_ok` 现在喂的是 legacy 结论 → 分类语义 = 「引擎 vs 旧结构判等」，
-// 即替换门对拍（差异须归零）。⚠ 影子对 **N 面已失明**（legacy 自身 Task 2 起 N-free）：
-// old_stricter/old_looser 在数组长度面上恒 0（同义反复）——N 面验收走行为探针
-// （array_len_constraint_ok 判定点 + 异长/同长/嵌套位），不得以对拍归零充当 N 面证据
-// （Task 2 评审 Important）。
+// 仍在 `type_equal` 包装层，对照物 = 旧结构判等（`type_equal_legacy`）：sh_compare 的
+// `old_ok` 喂的是它的结论 → 分类语义 = 「引擎 vs 旧结构判等」，即替换门对拍（差异须归零）。
+// **R2 P5 Task 4：对照物已删 ⇒ 调用点移除、判定观察面停摆**（余部随 Task 5 下线，D24）；
+// 本节余下描述 = 停摆前的口径（历史证据链，见各 Task 报告）。⚠ 影子对 **N 面已失明**
+// （legacy Task 2 起 N-free）：old_stricter/old_looser 在数组长度面上恒 0（同义反复）——
+// N 面验收走行为探针（array_len_constraint_ok 判定点 + 异长/同长/嵌套位），不得以对拍归零
+// 充当 N 面证据（Task 2 评审 Important）。T4 后的判定面回归网 = 冻结基线同源对拍 +
+// 行为探针（tests/selfhost/test_named_face.py 等）+ 突变控制（D26-①）。
 // Task 3 Step 0（Task 2 评审硬性要求）：unknown 桶拆因——bridge（翻译失败 = 桥接缺口，
 // kind=3）vs engine（引擎三态负值，kind=0），后者再按引擎成因位细分（未覆盖面 / 预算耗尽）；
 // Task 3 扩面：站点直方图（站点覆盖面实证——环缓冲只装得下「有差异/未知」的条目）。
@@ -33,9 +35,9 @@
 // bridge.bool_ak（type_selftest.cr）。
 // **R2 P2b Task 2：分派单源化**——同一映射此前有两份实现（本层 + 注册表 iface_registry.cr 的
 // iface_by_ty_code/iface_kind_of），不合一 = P2b 亲手制造「同一映射两份」（本批要治的病）。
-// 现本层两个入口**委托** `iface_by_ty_code`（唯一实现）；改动前的实现作为**字面拷贝**保留为
-// `sh_base_ak_legacy`/`sh_native_ak_legacy`（对照物，供 type_selftest.cr **全表对拍**；P5 删——
-// 登记入 TODO #24 的 P5 继承项）。影子证据链可比性依赖调用点签名不变（两入口签名原样）。
+// 现本层两个入口**委托** `iface_by_ty_code`（唯一实现）。**R2 P5 Task 4**：改动前实现的两份
+// 字面拷贝（`sh_base_ak_legacy`/`sh_native_ak_legacy`）已删——单源化后它们再无生产判据价值，
+// 自测的全表对拍改钉**冻结期望表**（type_selftest.cr 的 `ts_t4_ak_expected`）。
 // M1（Task 1 评审）：native 分派读**类型表本体**（kind == TYP_BASE 且 data == TY_* 码），
 // 不再依赖「init_types 行号序恰与 TI_* 码序一致」这一隐式等价（当前真、不保证）。
 //
@@ -50,7 +52,7 @@
 // 否则长驻进程复用行号命中陈旧 ti→term = 两个不同类型被判等，见该函数注记）；
 // ② 本层「只观察」的准确含义是「不写 checker 判定状态、不改判定结果、不写产物」，
 // **不是**「零写入」；③ 仅剩的影子专属读数 = `g_shadow_on` 早退的
-// `sh_compare`/`sh_site_begin`/`sh_report`/`sh_dump_write`。
+// `sh_site_begin`/`sh_report`/`sh_dump_write`（`sh_compare` 自 R2 P5 Task 4 起无调用点）。
 // 关/开两态基线产物逐字节不变（判据实测见 r2p2-task-3-report §8.1）与上述无冲突。
 //
 // 缓存 g_shadow_map（16B/条 {ti, term}）：开放寻址线性探测（与引擎 g_tt_index 同式），
@@ -95,29 +97,12 @@ fn sh_base_ak(ty: int) -> int {
     return iface_by_ty_code(ty);
 }
 
-// ─── 对照物（R2 P2b Task 2：改动前实现的**字面拷贝**；仅 type_selftest.cr 全表对拍用，P5 删）───
-// 用途 = `iface.by_ty_code_all_codes` / `iface.native_ak_all_rows`（逐 TY 码 × 逐 ti 行，非抽样）
-// 的旧版对照——**生产路径不调用**（影子/判定链路只经上面的委托版）。P5 删（TODO #24 继承项）。
-fn sh_native_ak_legacy(ti: int) -> int {
-    if ti < 0 { return -1; }
-    if get_type_kind(ti) != TYP_BASE { return -1; }
-    return sh_base_ak_legacy(get_type_data(ti));
-}
-
-// TY_DEX_S（dex 定点形式）的计划表未列项：其值域仍是 dex（缩放整数表示），故归 AK_DEX
+// ─── 对照物（R2 P2b Task 2 的改动前实现字面拷贝）**R2 P5 Task 4 删除**───
+// 用途曾是 `iface.by_ty_code_all_codes` / `iface.native_ak_all_rows`（逐 TY 码 × 逐 ti 行，
+// 非抽样）的旧版对照。删因：单源化的收益已由**冻结期望表**承担（期望值以数据形式落在
+// type_selftest.cr 的 `ts_t4_ak_expected`，不再需要生产文件里的第二份实现）。
+// TY_DEX_S（dex 定点形式）的裁决仍有效：值域仍是 dex（缩放整数表示）⇒ 归 AK_DEX
 // （引擎无「同值域不同表示」的区分——表示层差异不进类型身份）。
-fn sh_base_ak_legacy(ty: int) -> int {
-    if ty == TY_INT { return AK_INT; }
-    if ty == TY_DEX { return AK_DEX; }
-    if ty == TY_DEX_S { return AK_DEX; }
-    if ty == TY_BOOL { return AK_BOOL; }
-    if ty == TY_STRING { return AK_STRING; }
-    if ty == TY_UNIT { return AK_UNIT; }
-    if ty == TY_NEVER { return AK_NEVER; }
-    if ty == TY_CHAR { return AK_CHAR; }
-    if ty == TY_GENERIC_PARAM { return AK_NAMED; }   // 泛型参数哨兵 → 命名类（不展开）
-    return -1;
-}
 
 // ─── 桥接缓存（ti → term）───
 // **重置 = 随类型表作废**（R2 P2a Task 3 评审 Critical 修复；与 named_dedup_reset 同式）：
@@ -632,7 +617,10 @@ fn tt_display(t: int) -> string { return tt_display_at(t, 0); }
 //   3 = checker.cr:978（计划期 :959）unify_types 泛型应用基型比较（TYP_GENERIC_APPLY 头部）
 //   4 = checker.cr:993（计划期 :973）unify_types 兜底结构等价（非泛型 / 未匹配路径）
 //   5 = checker.cr:1233（计划期 :1212）函数体返回类型（check_func）
-//   6 = checker.cr:1427（计划期 :1405）赋值兼容（infer_expr 的 EXPR_BINARY + OP_ASSIGN；**当前 parser 已无生产点 = 遗留路径，无样本**）
+//   6 = **退役（R2 P5 Task 4 / D25）**：原为 `EXPR_BINARY + OP_ASSIGN` 赋值兼容——该分支
+//       不可达（parser 三面：`tok2op` 不产 OP_ASSIGN / `T_EQ` → `EXPR_ASSIGN` / `+=` 族显式
+//       包裹且 op ∈ {ADD,SUB,MUL,DIV}），语料站点直方图 `assign-binary=0`（32988 次判定）；
+//       分支与挂点已删。**站点 id 不重编号**（本槽恒 0 = 退役留白；真实赋值判定点 = 站点 8）。
 //   7 = checker.cr:1819（计划期 :1796）if 分支类型合并（infer_expr 的 EXPR_IF）
 //   8 = checker.cr:2152（计划期 :2127）赋值兼容（infer_expr 的 EXPR_ASSIGN 节点）
 //   9 = checker.cr EXPR_STRUCT（TODO #29 ②；行号随 #29 落位漂移，按分支名锚定）struct 字面量字段类型 vs 声明
@@ -650,7 +638,8 @@ fn sh_count_old_stricter() -> int { return g_shadow_old_stricter; }
 fn sh_count_old_looser() -> int { return g_shadow_old_looser; }
 fn sh_count_unknown() -> int { return g_shadow_unknown; }
 
-// 站点标注（在 10 个外部决策点调用 type_equal 前紧邻落；#29 增站点 9/10）。**各站点无条件调用本函数**
+// 站点标注（在外部决策点调用 type_equal 前紧邻落；#29 增站点 9/10；**T4 后剩 9 个活挂点**
+// ——站点 6 随其分支退役，见上表）。**各站点无条件调用本函数**
 // （挂点在决策点上，不在 type_equal 包装内——包装只挡 sh_compare）→ 关态若不守卫，每次
 // 判定都多一次调用 + 一次性 64B alloc（直方图缓冲）+ 计数 RMW。故首行按 g_shadow_on 早退
 // （M3，Task 3 评审实证：原注释「影子关时 wrapper 不调本函数」**不成立**）；早退后关态
@@ -692,6 +681,9 @@ fn sh_record(kind: int, t1: int, t2: int, old_ok: int) {
 // 影子判定：翻译两侧 → 引擎三态 → 与旧判定（old_ok，0/1）分类对账。
 // **只观察**：不返回值、不写 checker 状态；预算/memo 前后各重置（影子运行不污染后续——
 // 引擎 memo 跨查询命中会让结果依赖预算历史，P0 终审 Critical 3 实证）。
+// ⚠ **R2 P5 Task 4：无调用点**（对照物 type_equal_legacy 已删 ⇒ `type_equal` 包装层的
+// `sh_compare(t1, t2, old_ok)` 调用随之移除）。函数体**保留**至 Task 5（D24：删除批必须
+// 连续提交，中间态不删面、不发布）；此后本文件的判定观察面（ring/摘要/差异桶）恒为 0。
 fn sh_compare(t1: int, t2: int, old_ok: int) {
     g_shadow_total = g_shadow_total + 1;
     a := sh_term_of_ti(t1);
@@ -753,13 +745,10 @@ fn sh_kind_name(k: int) -> string {
 // 前 5 组 key=value = Task 2 契约（**前缀不变**，既有 grep 读取方不受影响；Task 3 评审
 // M2 逐字比对 `28fed09` 的 sh_report：Task 2 原文正是 5 组）；后 4 组 = Task 3 Step 0
 // 拆因（unknown 两因 + engine 桶成因位），因 ring 只有 256 条、摘要才是无损计数通道。
-// R2 P2a Task 3 追加 2 组 = **判定替换的回落计数**（checker.cr 的 type_equal；与影子
-// unknown 桶不同：那是影子自己的引擎判定，这两组数**判定路径**的回落次数）。
-// 注意：计数器只在影子开时**打印**，但累加与开关无关——type_equal_engine 里的自增在
-// `if g_shadow_on != 0` 之前且不以它为条件（码级），故关态计数与开态同值、关态 stdout
-// 逐字节不变（两态零变化判据）。**可复核的独立交叉证据**：影子侧的 unknown_engine（影子
-// 自查的引擎负值次数）与 replace_unknown（判定路径回落次数）在 71 个语料文件上**逐文件
-// 相等**（同一批调用、两个独立计数器）——见 Task 3 报告 §unknown 处置。
+// R2 P5 Task 4：P2a Task 3 追加的 2 组回落计数（replace_bridge/replace_unknown）**已删**
+// ——计数本体随 legacy 一并删除（清零判据成立；未知面改走 P-A 硬错 ICE04）。**中间态口径
+// （D24）**：`sh_compare` 的调用点已移除（对照物 legacy 已删）⇒ 本摘要的 decisions/agree
+// 与全部差异桶恒 0、站点直方图仍在（挂点未动）——影子判定对拍**停摆**，余部随 Task 5 下线。
 fn sh_report() -> int {
     if g_shadow_on == 0 { return 0; }
     print("[type-shadow] decisions=");
@@ -779,13 +768,9 @@ fn sh_report() -> int {
     print(" unknown_engine_uncovered=");
     print(int_str(g_shadow_unknown_uncovered));
     print(" unknown_engine_budget=");
-    print(int_str(g_shadow_unknown_budget));
-    print(" replace_bridge=");
-    print(int_str(g_replace_bridge));
-    print(" replace_unknown=");
-    println(int_str(g_replace_unknown));
-    // 站点直方图（Task 3 扩面）：与主行同开同关；恒有 sum(site_i) == decisions（每个
-    // sh_compare 之前必有一次 sh_site_begin）——两行互为校验。
+    println(int_str(g_shadow_unknown_budget));
+    // 站点直方图（Task 3 扩面）：与主行同开同关。**T4 起不再有 sum(site_i) == decisions 的
+    // 交叉校验**（sh_compare 调用点已移除 ⇒ decisions 恒 0，站点仍按其挂点计数）。
     print("[type-shadow-sites]");
     si : ., mut = 0;
     loop {
@@ -840,8 +825,9 @@ fn sh_dump_write(path: string) -> int {
 // 不经本层**：命名类型在等价面的身份 = **原子名义**（AK_NAMED + 行号；`sh_term_of_ti` 的
 // NAMED/GENERIC_* 分支本批**一行未动**）。把展开项接进等价判定 = 两个**同形不同名**的
 // struct 被判等价（语义漂移），并推翻 P2a 对拍归零基线（`old_stricter=0 / old_looser=0`
-// ——那条基线同时是 P5 删 `type_equal_legacy` 的前提）。守门用例 = `unf.nominal_*` 三例
-// （双钉：展开项**结构相等** ∧ 桥接项 `ty_equiv` 仍 -1 ∧ `type_equal` 仍 false 且回落计数 +1）。
+// ——那条基线正是 P5 Task 4 删除 `type_equal_legacy` 的前提，删除已落地）。守门用例 =
+// `unf.nominal_*` 三例（双钉：展开项**结构相等** ∧ 桥接项 `ty_equiv` 判**确定不同 0**
+// 〔T3 之后；T4 起 `type_equal` 判 false 且**零 ICE04 诊断** = 引擎真判〕）。
 // 深度 = **一层**：字段/变体子项一律走既有 `sh_term_of_ti`（其命名/泛型分支**不展开**）
 // ⇒ 递归结构（`struct Node { next: *Node }`）在第二层即终止；一层不足 → 按引擎既有约定
 // **-1 上抛**（-1 = 不可展开/未覆盖面，消费方按三态处理——**不得**静默判否）。
