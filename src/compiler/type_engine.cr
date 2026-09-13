@@ -10,10 +10,9 @@
 // 未覆盖面（P0 显式登记，命中即 g_ty_uncovered = 1，不当作「不成立」）：
 //   ① 参数化原子的参数位**变型规则** = R2 P3 Task 1 **已落地**（`ty_variance_of` +
 //      `tt_list_variance`：AK_SEQUENCE/AK_PTR/AK_REF 三构造子）。**协变槽**已判（只读 ref
-//      元素 = ty_sub 三态）；**不变槽的非同形参数仍按本项登记为未覆盖面（-1）**——语义上的
-//      「确定不等价 ⇒ 0」加强需先有「链元素皆类型项」不变量，而展开层链含**身份令牌**
-//      （Task 0 变体项链 = name 索引；实测：用 ty_equiv 会令牌碰撞误判，见 tt_list_variance_at
-//      注记）⇒ 归后续面；
+//      元素 = ty_sub 三态）；**不变槽的非同形参数** = R2 P5 Task 3b **已收口**（`te_elem_cmp`
+//      三态：令牌按节点同一性 / 类型项按 ty_equiv ⇒ 确定不同回 0、仅域外回 -1——「链元素皆
+//      类型项或身份令牌」的排序分派即 P0 登记时缺的那个不变量，见 tt_list_variance_at 注记）；
 //   ② AK_NAMED 的具体行不展开（命名类型的结构定义在 P2 接入 checker 后可用）——
 //      R2 P5 Task 3 **部分收口**：命名面按**身份链**判定（同链 1 / 链异 0 / 域外 -1，见
 //      `te_named_pair` 头注）；**结构展开**仍不进判定面（P3a 反证：同形不同名 struct 判等）。
@@ -240,6 +239,40 @@ fn te_chain_cmp(slot: int, p: int, q: int) -> int {
     return te_chain_cmp(slot + 1, tt_b(p), tt_b(q));
 }
 
+// ═══════════ R2 P5 Task 3b：不变槽元素比较（三态）═══════════
+// 背景（P5 Task 3 §6 残留面，本步收口）：不变槽元素原为「结构同形（tt_type_elem_same）
+// 否则 -1 + 未覆盖面」⇒ 元素是**已可判**的命名原子时（`[NA;2]` vs `[NB;2]`、`*NA` vs
+// `*NB`、元组含异名元素）判不出 ⇒ 回落 legacy。本函数把「确定不同 ⇒ 0」从命名面扩到
+// **全部不变槽元素**（native/struct/token）。适用域（三态；-1 = 域外 ⇒ 调用方上抛）：
+//   ① 两侧皆**身份令牌**（`te_is_name_token`：AK_UNIT ∧ b ≥ 0，= sh_name_token /
+//      sh_ref_mut_marker 的形态）⇒ **节点同一性**：不同节点 = 不同名字/标记 = 确定不同
+//      （禁 ty_equiv：令牌不是类型集，同形不同名会被判等——P3 Task 1 实测的令牌碰撞类）；
+//   ② 两侧皆**类型项**（te_is_arg_term）⇒ 引擎等价三态直传（`ty_equiv`）——命名/序列/
+//      原生元素各按其自有的可判定域递归（域外在内层置位上抛，本层不吞）；
+//   ③ 其余（任一侧**既非令牌也非类型项**：μ 变元 / ¬ / ⊤ₖ / 裸值…）⇒ -1 + 未覆盖面位（不猜）。
+//      注：**排序错位**（名字/标记令牌 × 普通类型项，如 vs `int` 项）落 ②——令牌是 TT_ATOM，
+//      按类型项面走 ty_equiv（异类原子不交 ⇒ 0，**不产生假等**）；AK_UNIT 类**内部**的混排
+//      （令牌 × 原生 unit 项）落 ①（形态二义，见下）。
+// 域内前提（同 (ak, slot) 上不出现排序混排——**构造点**保证，见 ty_shadow.cr 链构造段）：
+//   AK_SUM（展开层变体项）链 = [枚举名令牌, 变体名令牌] ⇒ 槽 0/1 皆令牌 ⇒ ①；AK_REF 槽 0
+//   （mut 标记）另有判定分支、槽 1 及其余构造子（SEQUENCE/PTR/PRODUCT/FN）链元素皆类型项
+//   ⇒ ②；命名面链（AK_NAMED）先分派 te_named_pair，不经本函数。③ = **域外面**（可达：接口
+//   形状面把 `⊤ₖ(序列)` 放进可写 ref 的不变槽 ⇒ 该槽无判据——守门例 `x2.rw_view_unexpressible`；
+//   本步对该面**保持 -1**，未动），非「不可达防御分支」。
+// ⚠ **AK_UNIT 形态二义**（登记）：原生 unit 类型项 = tt_atom(AK_UNIT, 行号, -1) 与令牌
+//   同形（b ≥ 0）⇒ 两者结构不可分辨。选择「令牌先判」是**失效方向**要求：若走 ty_equiv，
+//   token × unit 同类同形 ⇒ 判**等**（假等 = 令牌碰撞类）；先判令牌则最坏回 0 = 确定不同，
+//   绝不产生假等。可达性：唯一原生 unit 项在 DAG 里**只有一个节点**（单行 + 去重）⇒ unit
+//   × unit 恒同节点（快路径）；token × unit 需构造点在同一槽混排两排序——全构造点无此形态
+//   （负控见 type_selftest.cr 的 t3b.* 段）。
+fn te_elem_cmp(p: int, q: int) -> int {
+    if p == q { return 1; }
+    if te_is_name_token(p) != 0 && te_is_name_token(q) != 0 { return 0; }
+    if te_is_arg_term(p) != 0 && te_is_arg_term(q) != 0 { return ty_equiv(p, q); }
+    g_ty_uncovered = 1;
+    return -1;
+}
+
 // 命名面成对判定（三态）：p/q 皆 TT_ATOM 且至少一侧 AK_NAMED（调用方保证）。
 fn te_named_pair(pk: int, p: int, qk: int, q: int) -> int {
     if pk == qk {
@@ -388,12 +421,12 @@ fn ty_variance_of(ak: int, slot: int) -> int {
 //     调用方回落 legacy 把同一结论重算一遍（mut 面 legacy 本就比 extra）。标记项 =
 //     tt_atom(AK_UNIT, mut, -1)（b 槽 = 标记值，照 AK_NAMED 的 b = 行号同约定；见
 //     ty_shadow.cr 的 sh_ref_mut_marker）。
-//   · 其余不变槽 → 结构相等（tt_list_same）；非同形 ⇒ **-1 + 未覆盖面**（= P0 语义**逐位
-//     保持**）。⚠ 为何不变槽不用 ty_equiv 做「确定不等价 ⇒ 0」的加强：参数链中并非全是类型项
-//     ——展开层把**身份令牌**直接放入链（Task 0：变体项链 = 枚举名/变体名 **name 索引**，
-//     @ tt_atom(AK_SUM,...) 约定），tokennum 被 ty_equiv 当术语解释即误判（实测：M 改法下
-//     `unf.enum_variant_identity_scoped` 红 = 异枚举同名变体被令牌碰撞判等）。不变槽的
-//     「确定不等价」加强须先有「链元素皆类型项」的不变量——登记为后续面（Task 3/4 若需要）。
+//   · 其余不变槽 → 「同形（tt_type_elem_same）⇒ 同」，否则 **`te_elem_cmp` 三态**
+//     （R2 P5 Task 3b 落地）：令牌按节点同一性 / 类型项按引擎等价 ⇒ 确定不同回 **0**（已判面）、
+//     仅域外回 **-1 + 未覆盖面**（上抛）。⚠ 早期（P0~P5 T3）此处一律「非同形 ⇒ -1」的理由是
+//     「链元素并非皆类型项」（展开层把身份令牌直接放链）——te_elem_cmp 的**排序分派**（先判
+//     令牌、再判类型项）即该不变量，令牌不再被 ty_equiv 当术语解释（P3 Task 1 实测的令牌
+//     碰撞类；M 改法红例 = 异枚举同名变体被判等），故加强面现在可安全落地。
 // 同形快路径：p == q → 1（DAG 去重使「同形同项」恒为同一节点 ⇒ 主流路径零额外开销，且
 // **改动前后逐位一致**）。链形不同（非 CONS / 负）→ 0（结构不同 = 现状语义）。
 fn tt_list_variance_at(ak: int, slot: int, mutv: int, p: int, q: int) -> int {
@@ -411,7 +444,13 @@ fn tt_list_variance_at(ak: int, slot: int, mutv: int, p: int, q: int) -> int {
             s := ty_sub(ha, hb);
             if s != 1 { return s; }
         } else {
-            if tt_type_elem_same(ha, hb) != 1 { g_ty_uncovered = 1; return -1; }
+            if tt_type_elem_same(ha, hb) != 1 {
+                // R2 P5 Task 3b：非同形 ⇒ 三态加强（确定不同 ⇒ 0；域外/内层未知 ⇒ -1 上抛，
+                // 位由 te_elem_cmp / 内层置起——本层不吞、不改标）
+                d := te_elem_cmp(ha, hb);
+                if d == -1 { return -1; }
+                if d == 0 { return 0; }
+            }
         }
     }
     return tt_list_variance_at(ak, slot + 1, mutv, tt_b(p), tt_b(q));
