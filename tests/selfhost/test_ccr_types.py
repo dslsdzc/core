@@ -8,11 +8,11 @@ impl 边 + 方法表 / corearch 读回 / 跨段引用域 / 扩列与命名化守
 
 Task 1（机制面）：
   ① 段表 = 8 段、tag 序 = 1..8、offset 连续、末段尾 == 文件大小；
-  ② header: version = 8、seg_count = 8、reserved = 0；
+  ② header: version = 9、seg_count = 8、reserved = 0；
   ③ TYPE(7)/IFACE(8) **皆为内容面**（R2 P4 Task 2/3 起——空壳期已退役）；
   ④ loader 负分支（byte mutation，逐个打；全部要求 corearch rc≠0 且**不得
      静默当空表**——三态纪律 C.5-3）：
-       · version := 7 → 拒（D10：旧 v7 文件在版本闸整类拒收）；
+       · version := 7/8 → 拒（D10：旧 v7/v8 文件在版本闸整类拒收）；
        · **结构性合法的 v7（6 段）文件整体重建** → 拒（D10 的正面证据：
          非「字节破烂」被拒，而是合法旧文件被版本闸拒）；
        · seg_cnt := 6（末段 size 扩到 EOF——前闸全过）→ 拒（D11 必备集）；
@@ -38,14 +38,15 @@ Task 3（IFACE 内容面）：见文件末「R2 P4 Task 3：IFACE 内容面」�
 R2 P4 Task 4（DFNode.TK 迁升）+ R2 P5 Task 2（单槽化）见文件末同名节（㉖..㉛ / ㉜..㊲）：
 内存 DF 记录 72B = 9 槽；P5 T2 起两槽语义对调并分离——`OFF_DF_TK`(40) = **类型项引用**
 （类型面唯一真源）、`OFF_DF_AUX`(64) = **辅码**（旗标/宽度/不可逆行的原码）。
-`.ccr` NOD 36B 与 `.cir` 快照布局**皆不变**（`CIR_CACHE_VER` 保持 17；盘面只承载
+`.ccr` NOD **40B**（R2 P6 Task 3：32B 语义区 + 8B 邻接；+28 = 项索引 i32——TYPE 段
+文件空间项索引，-1 = 无项；`tk` 槽仍是派生码）与 `.cir` 快照布局**不变**（`CIR_CACHE_VER` 保持 17；盘面只承载
 **派生码**——两槽都是 (opcode, 码) 的纯函数，落盘 = 第二真源 + 进程内索引悬空，
 实测见 cir_cache.cr 头注）。派生码逐节点 ≡ 单槽化前的混用码（D22-①）。
 
 字节真相 = docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md
 （v8 = v7 段表架构的加法扩展——D9/D10；文件名/测试名保留「v7」字样）：
   [0]   magic u32 = 0x31524343 ("CCR1")
-  [4]   version u32 = 8
+  [4]   version u32 = 9
   [8]   seg_count u32 = 8
   [12]  reserved u32 = 0
   [16]  段表 8 × 12B {tag u32, offset u32, size u32}（规范序 tag 1..8）
@@ -68,13 +69,17 @@ import re
 import shutil
 import struct
 import subprocess
+import sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 段表/对象面解析器唯一真源 = test_ccr_v7.py（同目录；test_mw_task1.py 先例）
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from test_ccr_v7 import parse_object_dump  # noqa: E402
 COREC = os.path.join(BASE, 'build/corec')
 COREARCH = os.path.join(BASE, 'build/corearch')
 
 MAGIC = 0x31524343  # "CCR1"
-VER = 8             # v8 = v7 段表架构的加法扩展（D10）
+VER = 9             # v9 = v7 段表架构的加法扩展（D10）——R2 P6 Task 3：NOD 记录 36→40B（+28 项索引）
 SEG_TAGS = [1, 2, 3, 4, 5, 6, 7, 8]  # STR SYM NOD ENT REG EDG TYPE IFACE
 HEADER_TABLE = 16 + 8 * 12  # 112
 TYPE_TAG = 7
@@ -1639,23 +1644,34 @@ def test_p4t4_tk_slot_dex_binary_corpus():
 
 
 def ccr_nod_rows(data: bytes):
-    """独立解析 NOD 段（36B/条：{op i32, dest i32, s1..s3 i64/i32 混排}——字段序
-    见 test_ccr_v7.py 的同名解析；此处只取 op 与 tk 两列并按 36B 步长硬断）。"""
+    """独立解析 NOD 段（**40B/条**——R2 P6 Task 3 起：32B 语义区 + 8B 邻接；
+    字段序见 test_ccr_v7.py 的同名解析；此处只取 op 与 tk 两列并按 40B 步长硬断）。"""
+    return [(r[0], r[1]) for r in ccr_nod_records(data)]
+
+
+def ccr_nod_records(data: bytes):
+    """40B/条独立解析 → `[(op, tk, item), …]`（item = +28 i32；-1 = 无项）。
+    硬断 = 步长恒等式（段体 = 4 + n×40）+ 邻接域前缀累计不变量。"""
     b = CcrFile(data).body(3)
     n = struct.unpack_from('<I', b, 0)[0]
-    assert (len(b) - 4) % 36 == 0 and n == (len(b) - 4) // 36, \
-        f"NOD body {len(b)}B not 4 + n*36 (n={n})"
+    assert (len(b) - 4) % 40 == 0 and n == (len(b) - 4) // 40, \
+        f"NOD body {len(b)}B not 4 + n*40 (n={n})"
     out = []
+    run = 0
     for i in range(n):
-        pos = 4 + i * 36
+        pos = 4 + i * 40
         (op,) = struct.unpack_from('<I', b, pos)
         (tk,) = struct.unpack_from('<I', b, pos + 24)
-        out.append((op, tk))
+        (item,) = struct.unpack_from('<i', b, pos + 28)
+        (fe, ec) = struct.unpack_from('<II', b, pos + 32)
+        assert fe == run, f"node {i}: first_edge {fe} != cumulative {run}"
+        run += ec
+        out.append((op, tk, item))
     return out
 
 
 def test_p4t4_ccr_nod_tk_equals_graph_tk():
-    """㉘ `.ccr` 面零改动：NOD 仍 36B/条；且 NOD 的 (op, tk) 序列与 DF 节点的
+    """㉘ `.ccr` 面零改动：NOD **40B/条**（R2 P6 T3 起；`tk` 槽语义/字节不变）；且 NOD 的 (op, tk) 序列与 DF 节点的
     (op, tk) 序列**逐位置相同**（1:1 同序）——即「tk 升格前后逐字节同」的
     .ccr 侧证据（tk 只从 iri_tk 读出，升格只加了内存第 9 槽）。"""
     src = tk_fixture('nod')
@@ -1926,6 +1942,246 @@ def test_p5t2_snapshot_disk_code_preserved():
         shutil.rmtree(os.path.dirname(cache_dir), ignore_errors=True)
 
 
+# ═══════════ R2 P6 Task 3（β）：NOD 盘面项索引（+28 i32）+ 版本 9 ═══════════
+# 口径：`item` = **TYPE 段文件空间**项索引（-1 = 无项）；写侧 = corec 的
+# ccr_types.cr:ccr_nod_item_populate（保存期由盘上派生码经桥接层重派生），读侧 =
+# load_ccr 的 TYPE 段后**一致性硬校验**（域外/不一致 ⇒ 拒绝）+ corearch
+# `--dump-nod-items` 读回通道。`tk` 槽语义/字节不变（派生码，D22-①）。
+
+def _nod_items_dump(ccr_path: str):
+    """`corearch F.ccr --dump-nod-items` → (hdr, rows)。
+    行格式契约见 corearch.cr:dump_nod_items：
+      `[nod-items] nodes= with_item= terms= rows=`
+      `item <n> op <o> code <c> idx <i> atom <a>`
+    rows = [(node, op, code, idx, atom), …]。"""
+    r = subprocess.run([COREARCH, ccr_path, '--dump-nod-items'],
+                       capture_output=True, text=True, cwd=BASE, timeout=120)
+    assert r.returncode == 0, \
+        f"corearch --dump-nod-items rc={r.returncode}: {r.stdout!r} {r.stderr!r}"
+    hdr = None
+    rows = []
+    for ln in r.stdout.splitlines():
+        if ln.startswith('[nod-items]'):
+            m = re.match(r'\[nod-items\] nodes=(\d+) with_item=(\d+) '
+                         r'terms=(\d+) rows=(\d+)', ln)
+            assert m, f"malformed nod-items header: {ln!r}"
+            hdr = {'nodes': int(m.group(1)), 'with_item': int(m.group(2)),
+                   'terms': int(m.group(3)), 'rows': int(m.group(4))}
+            continue
+        p = ln.split()
+        if p and p[0] == 'item':
+            assert len(p) == 10 and p[2] == 'op' and p[4] == 'code' \
+                and p[6] == 'idx' and p[8] == 'atom', f"malformed item line: {ln!r}"
+            rows.append(tuple(int(p[k]) for k in (1, 3, 5, 7, 9)))
+    assert hdr is not None, "nod-items header missing"
+    assert len(rows) == hdr['nodes'], \
+        f"rows {len(rows)} != header nodes {hdr['nodes']}"
+    return hdr, rows
+
+
+def test_p6t3_version_gate_rejects_v8():
+    """㊳ 版本闸：v9 接受 / **v8 拒收**（D10 先例——旧格式整类拒收，不得静默）。
+    非平凡性控制：未补丁版必须 rc=0 + 出产物（否则「拒绝」可能只是畸形字节的副产品）。"""
+    src = tk_fixture('p6t3ver')
+    ccr_path = os.path.join(BASE, 'build', 'test_p6t3_ver.ccr')
+    bad = ccr_path + '.v8'
+    out = os.path.join(BASE, 'build', 'test_p6t3_ver.out')
+    try:
+        corec_ccr(src, ccr_path)
+        arch_elf(ccr_path, out)                      # v9 正控（非平凡性）
+        data = bytearray(read_ccr(ccr_path))
+        struct.pack_into('<I', data, 4, 8)           # version := 8
+        _write(bad, bytes(data))
+        arch_elf(bad, out, must_fail=True)           # 拒收（不得静默当空表）
+    finally:
+        _cleanup(src, ccr_path, bad, out)
+
+
+def test_p6t3_nod_record_40b_field_order():
+    """㊴ NOD 记录 40B + 字段序（独立解析）：段体 = `4 + n×40`；`item` 落 **+28 i32**、
+    邻接域顺移 **+32/+36**（`fe` 前缀累计不变量在 `ccr_nod_records` 内硬断）；
+    且 (op/dest/s1/s2/s3/tk) 六列与 `--dump-objects` 的对象面逐节点同（跨通道）。"""
+    src = tk_fixture('p6t3rec')
+    ccr_path = os.path.join(BASE, 'build', 'test_p6t3_rec.ccr')
+    try:
+        corec_ccr(src, ccr_path)
+        data = read_ccr(ccr_path)
+        recs = ccr_nod_records(data)                 # 内含 40B 步长 + fe 累计断言
+        assert recs, "vacuous: no nodes parsed"
+        b = CcrFile(data).body(3)
+        n = struct.unpack_from('<I', b, 0)[0]
+        assert len(b) == 4 + n * 40, f"NOD body {len(b)} != 4 + {n}*40"
+        r = subprocess.run([COREARCH, ccr_path, '--dump-objects'],
+                           capture_output=True, text=True, cwd=BASE, timeout=120)
+        assert r.returncode == 0, f"--dump-objects rc={r.returncode}"
+        cnt, nodes, _ = parse_object_dump(r.stdout)
+        assert cnt == len(recs)
+        for i, (op, tk, _item) in enumerate(recs):
+            o = nodes[i]
+            assert (op, tk) == (o[0], o[5]), \
+                f"node {i}: NOD (op,tk)=({op},{tk}) != object surface ({o[0]},{o[5]})"
+    finally:
+        _cleanup(src, ccr_path)
+
+
+def test_p6t3_nod_items_roundtrip():
+    """㊵ **项索引落盘/读回对拍（本任务承重例）**：corearch 逐节点 `item → 项表取项 →
+    `tt_atom_of_term` → 原子行`，判据 = ① `mism == 0`（有项节点 atom ≡ 盘上码）·
+    ② `with_item > 0`（非空转）· ③ **非退化**：至少一节点 `idx != code`（项 DAG 序 ≠
+    行序——否则「回读通道其实是把码打印两遍」的假绿不可辨）。
+    写侧若误用 emit 期活表索引（而非保存期重派生），① 必红。"""
+    for src_name in ('nod', 'comp'):
+        src = tk_fixture('p6t3rt_' + src_name,
+                         TK_FIXTURE if src_name == 'nod' else COMPOSITE_FIXTURE)
+        ccr_path = os.path.join(BASE, 'build', f'test_p6t3_rt_{src_name}.ccr')
+        try:
+            corec_ccr(src, ccr_path)
+            hdr, rows = _nod_items_dump(ccr_path)
+            assert hdr['with_item'] > 0, f"{src_name}: vacuous (no item-bearing node)"
+            mism = [r for r in rows if r[3] >= 0 and r[4] != r[2]]
+            assert not mism, f"{src_name}: {len(mism)} item/code mismatch, e.g. {mism[:3]}"
+            with_i = [r for r in rows if r[3] >= 0]
+            assert any(r[3] != r[2] for r in with_i), \
+                f"{src_name}: every idx == code — read-back may be degenerate"
+            for (n, op, code, idx, atom) in rows:
+                if idx >= 0:
+                    assert 0 <= idx < hdr['terms'], f"node {n}: idx {idx} out of term space"
+                    assert atom == code, f"node {n}: atom {atom} != code {code}"
+        finally:
+            _cleanup(src, ccr_path)
+
+
+def test_p6t3_items_match_memory_face():
+    """㊶ 两通道面一致：`(item ≥ 0) ⟺ (内存项槽 ≥ 0)` 逐节点 + 计数相等
+    （`--dump-tk-terms` 的 `term` 列 = emit 期分类结果；`item` = 保存期同判定的投影）。
+    同时锁 D22-①：**盘上 tk 列 ≡ 内存派生码列**（全节点，含辅码面/复合行）。"""
+    src = tk_fixture('p6t3face', COMPOSITE_FIXTURE)
+    ccr_path = os.path.join(BASE, 'build', 'test_p6t3_face.ccr')
+    dot = os.path.join(BASE, 'build', 'test_p6t3_face.cir')
+    try:
+        hdr, rows = _tk_dump_of(src, 'face')          # (node, op, tk(派生码), term, tag, a, b, c, aux)
+        corec_ccr(src, ccr_path)
+        recs = ccr_nod_records(read_ccr(ccr_path))
+        assert len(recs) == len(rows), f"nodes {len(recs)} != mem rows {len(rows)}"
+        w_mem = sum(1 for r in rows if r[3] >= 0)
+        nhdr, nrows = _nod_items_dump(ccr_path)
+        assert nhdr['with_item'] == w_mem, \
+            f"with_item {nhdr['with_item']} != memory with_term {w_mem}"
+        for i, ((op, tk, item), r) in enumerate(zip(recs, rows)):
+            assert (op, tk) == (r[1], r[2]), \
+                f"node {i}: NOD (op,tk)=({op},{tk}) != memory derived ({r[1]},{r[2]})"
+            assert (item >= 0) == (r[3] >= 0), \
+                f"node {i}: item {item} vs memory term {r[3]} (face disagreement)"
+    finally:
+        _cleanup(src, ccr_path, dot)
+
+
+def test_p6t3_aux_face_and_composite_preserved():
+    """㊷ 辅码面 + 复合行保真：辅码面 op（`IR_BOUNDS_CHECK`/`IR_DEREF`/`IR_STORE_PTR`/
+    `IR_SPAWN`/`IR_HOTPATCH_ROUTE`）**必须无项**（`item == -1`）且码原值；复合行
+    （仓内语料 `ptr_ref_first.cr` 的 `IR_BINARY` 指针行）同（F2 裁决：不可逆行不建项）。
+    非空转：三类形态在语料里都必须真出现。"""
+    aux_ops = {IR_BOUNDS_CHECK, IR_DEREF, IR_STORE_PTR, IR_SPAWN, IR_HOTPATCH_ROUTE}
+    # 语料分工（各自覆盖不同形态；非空转 = 三类形态合计必须真出现）：
+    #   ptr_ref_first.cr = 复合行（IR_BINARY 指针行）+ hotpatch route 辅码；
+    #   p_dex.cr = IR_STORE_PTR 宽度 + IR_BOUNDS_CHECK 旗标；
+    #   p_spawn.cr = IR_SPAWN 计数（**含负码** —— 盘上以 u32 位型承载）。
+    sources = [(os.path.join(BASE, 'tests', 'suite', 'ptr_ref_first.cr'), 'prf', 'comp'),
+               (os.path.join(BASE, 'tests', 'probes', 'p_dex.cr'), 'dex', 'aux'),
+               (os.path.join(BASE, 'tests', 'probes', 'p_spawn.cr'), 'spawn', 'aux')]
+    total_aux = 0
+    for src, tag, kind in sources:
+        ccr_path = os.path.join(BASE, 'build', f'test_p6t3_aux_{tag}.ccr')
+        try:
+            corec_ccr(src, ccr_path)
+            recs = ccr_nod_records(read_ccr(ccr_path))
+            total_aux += sum(1 for (op, _tk, _it) in recs if op in aux_ops)
+            if kind == 'comp':
+                comp = [r for r in recs if r[0] == IR_BINARY and r[2] == -1 and r[1] >= 0]
+                assert comp, f"{tag}: vacuous (no composite-row node)"
+            for (op, tk, item) in recs:
+                if op in aux_ops:
+                    assert item == -1, \
+                        f"{tag}: aux-face op {op} carries item {item} (must be -1)"
+        finally:
+            _cleanup(ccr_path)
+    assert total_aux > 0, "vacuous: no aux-face node in any source"
+
+
+def _patch_item(data: bytes, node: int, value: int) -> bytes:
+    """把第 node 个 NOD 记录的 `item` 字段（+28）改写为 value。"""
+    d = bytearray(data)
+    off, _ = CcrFile(bytes(d)).segs[3]
+    struct.pack_into('<i', d, off + 4 + node * 40 + 28, value)
+    return bytes(d)
+
+
+def test_p6t3_item_oob_rejected():
+    """㊸ 项索引**域外/不一致 ⇒ 拒绝**（三态纪律：不得猜、不得静默当「无项」）：
+    ① `item := tt_count()`（域外）· ② `item := -2`（负域外）· ③ `item := 指向非原子项的
+    索引`（域内但 `tt_atom_of_term` < 0）。三子例 corearch 必须 rc≠0 + 无产物。"""
+    src = tk_fixture('p6t3oob')
+    ccr_path = os.path.join(BASE, 'build', 'test_p6t3_oob.ccr')
+    out = os.path.join(BASE, 'build', 'test_p6t3_oob.out')
+    try:
+        corec_ccr(src, ccr_path)
+        data = read_ccr(ccr_path)
+        hdr, rows = _nod_items_dump(ccr_path)
+        with_i = [r for r in rows if r[3] >= 0]
+        assert with_i, "vacuous: no item-bearing node to patch"
+        n0 = with_i[0][0]
+        # ③ 找一个非原子项索引（tag != TT_ATOM 或 b < 0）——独立读 --dump-types
+        r = subprocess.run([COREARCH, ccr_path, '--dump-types'],
+                           capture_output=True, text=True, cwd=BASE, timeout=120)
+        assert r.returncode == 0, "--dump-types rc!=0"
+        _rows, terms, _probe, _rt = parse_type_dump(r.stdout)
+        nonatom = [i for i, t in enumerate(terms)
+                   if not (t[0] == TT_ATOM and t[2] >= 0)]
+        assert nonatom, "vacuous: no non-atom term in file"
+        cases = [('oob_count', hdr['terms']), ('neg2', -2), ('nonatom', nonatom[0])]
+        for tag, val in cases:
+            bad = f'{ccr_path}.{tag}'
+            _write(bad, _patch_item(data, n0, val))
+            arch_elf(bad, out, must_fail=True)
+            os.unlink(bad)
+    finally:
+        _cleanup(src, ccr_path, out)
+
+
+def test_p6t3_nod_count_overflow_rejected():
+    """㊹ 段界检（40B 新尺寸下）：`nod_count := n + 1` ⇒ 记录数超段体 ⇒ 拒绝
+    （`(seg_end3-seg_off3)/ESZ_NOD_DISK` 界检）。正控 = 未补丁版 rc=0。"""
+    src = tk_fixture('p6t3cnt')
+    ccr_path = os.path.join(BASE, 'build', 'test_p6t3_cnt.ccr')
+    bad = ccr_path + '.cnt'
+    out = os.path.join(BASE, 'build', 'test_p6t3_cnt.out')
+    try:
+        corec_ccr(src, ccr_path)
+        arch_elf(ccr_path, out)
+        data = bytearray(read_ccr(ccr_path))
+        off, size = CcrFile(bytes(data)).segs[3]
+        (n,) = struct.unpack_from('<I', data, off)
+        struct.pack_into('<I', data, off, n + 1)
+        _write(bad, bytes(data))
+        arch_elf(bad, out, must_fail=True)
+    finally:
+        _cleanup(src, ccr_path, bad, out)
+
+
+def test_p6t3_d18_purity_static():
+    """㊺ **D18 纯度静态断言**（硬约束：`ccr_io.cr` 在 corearch 清单内 ⇒ 不得引桥接层）：
+    该文件**代码面**（非注释）零 `sh_`/`get_type_` 符号引用——项索引只能经
+    `g_ccr_nod_item` 缓冲搬运。注释行与字符串不算。"""
+    path = os.path.join(BASE, 'src', 'compiler', 'ccr_io.cr')
+    with open(path, encoding='utf-8') as fh:
+        bad = []
+        for no, ln in enumerate(fh, 1):
+            code = ln.split('//', 1)[0]
+            if re.search(r'\b(sh_[a-z_]+|get_type_[a-z_]+)\b', code):
+                bad.append((no, ln.strip()))
+    assert not bad, f"ccr_io.cr references bridge-layer symbols in code: {bad[:3]}"
+
+
 if __name__ == '__main__':
     tests = [test_p4t1_layout_eight_segments,
              test_p4t1_loader_rejects_valid_v7_file,
@@ -1966,7 +2222,15 @@ if __name__ == '__main__':
              test_p5t2_f1_hotpatch_route_no_face,
              test_p5t2_cold_warm_composite_symmetry,
              test_p5t2_ccr_nod_composite_parity,
-             test_p5t2_snapshot_disk_code_preserved]
+             test_p5t2_snapshot_disk_code_preserved,
+             test_p6t3_version_gate_rejects_v8,
+             test_p6t3_nod_record_40b_field_order,
+             test_p6t3_nod_items_roundtrip,
+             test_p6t3_items_match_memory_face,
+             test_p6t3_aux_face_and_composite_preserved,
+             test_p6t3_item_oob_rejected,
+             test_p6t3_nod_count_overflow_rejected,
+             test_p6t3_d18_purity_static]
     failed = 0
     for t in tests:
         try:

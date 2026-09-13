@@ -132,15 +132,22 @@
 // No bitwise ops in Core — use arithmetic instead.
 
 CCR_MAGIC : int = 827474755;  // "CCR1" (0x31524343)
-CCR_VERSION : int = 8;        // v8-only（load 校验 ==8；拒 version≠8——D10：v7 六段文件整类拒收，不得静默当「两段缺席 = 空表」）
+CCR_VERSION : int = 9;        // v9-only（load 校验 ==9；拒 version≠9——D10 先例：v8 及更早整类拒收，**不得**静默当「段/字段缺席 = 空表」）。
+//                              R2 P6 Task 3（β）：v8→v9 = NOD 记录 36→40B（+28 项索引 i32、邻接域顺移 +32/+36）——旧文件在版本闸整类拒收
+//                              （cache miss 语义 = 使用者重编；.cir 快照面零改动 ⇒ CIR_CACHE_VER 保持 17）
 CCR_SEG_COUNT : int = 8;      // STR SYM NOD ENT REG EDG TYPE IFACE（规范序 tag 1..8；预留 9+ 不占空间——D9：原 7/8 预留段顺移）
 CCR_SEG_TYPE : int = 7;       // TYPE 段 tag（数值权威 = 段序；D9）
 CCR_SEG_IFACE : int = 8;      // IFACE 段 tag（D9）
 
-// On-disk NOD record size: 7 × i32 + 邻接 2 × u32 = 36 bytes — v7 spec §3.3
-// {op, dest, s1(i64), src2, src3, tk, first_edge, edge_count}（v5 28B 语义字段
-// 不变，first_edge/edge_count = 节点出边在 EDG 段的连续段索引）。
-ESZ_NOD_DISK : int = 36;
+// On-disk NOD record size: 32B 语义区（8 字段）+ 邻接 2 × u32 = 40 bytes — v7 spec §3.3
+// {op, dest, s1(i64), src2, src3, tk, item, first_edge, edge_count}（v5 原 28B 语义
+// 字段逐字节不变 + R2 P6 Task 3 的 4B 项索引 = 32B 语义区；first_edge/edge_count =
+// 节点出边在 EDG 段的连续段索引）。`tk` = **派生码**（sh_dfn_code_of_slots，
+// 语义/字节与 v8 逐字节同——辅码面节点即靠它）；`item` = **TYPE 段文件空间**
+// 项索引（i32，-1 = 无项；写侧装填 = ccr_types.cr:ccr_nod_item_populate，
+// 读侧 = load_ccr 的 TYPE 段后一致性硬校验——见该段注）。内存对象记录 = 本记录
+// 前 32B（ESZ_NOD_SEM，剥离邻接）——见 ent_kernel.cr 语义对象节。
+ESZ_NOD_DISK : int = 40;
 
 // On-disk EDG record size: 2 × u32 = 8 bytes — v7 spec §3.4
 // {to_nod u32, kind u32}（from = 所属节点，邻接隐含——文件序节点 i 的出边
@@ -509,6 +516,13 @@ fn populate_nod_objects() {
         w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S2, iri_s2(ii));
         w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S3, iri_s3(ii));
         w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_TK, iri_tk(ii));
+        // R2 P6 Task 3（β）：项索引（TYPE 段文件空间；-1 = 无项）。缓冲由 corec-only
+        // 的 ccr_types.cr:ccr_nod_item_populate 装填（D18：本文件在 corearch 清单内，
+        // 此处**不得**引桥接层符号），本函数纯搬运；缓冲短于节点数（不经
+        // ccr_seg_prepare_save 的诊断路径）⇒ 落 -1（响亮面由 load 侧一致性校验承担）。
+        it0 : ., mut = -1;
+        if ii < g_ccr_nod_item_count { it0 = buf_read_i32(g_ccr_nod_item, ii * 4); }
+        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_ITEM, it0);
         ii = ii + 1;
     }
 }
@@ -766,6 +780,11 @@ fn save_ccr(path: string) -> int {
         buf_write_i32(buf, pos, iri_s2(ii)); pos = pos + 4;
         buf_write_i32(buf, pos, iri_s3(ii)); pos = pos + 4;
         buf_write_u32(buf, pos, iri_tk(ii)); pos = pos + 4;
+        // R2 P6 Task 3（β）：项索引（i32；-1 = 无项）——与内存镜像同源
+        // （g_ccr_nod_item，corec-only 侧装填；本文件纯搬运）。
+        it1 : ., mut = -1;
+        if ii < g_ccr_nod_item_count { it1 = buf_read_i32(g_ccr_nod_item, ii * 4); }
+        buf_write_i32(buf, pos, it1); pos = pos + 4;
         buf_write_u32(buf, pos, r64(edge_offs, ii * 8)); pos = pos + 4;   // first_edge
         buf_write_u32(buf, pos, r64(edge_counts, ii * 8)); pos = pos + 4; // edge_count
         ii = ii + 1;
@@ -1377,6 +1396,7 @@ fn load_ccr(data: string, fsize: int) -> int {
         s2 := buf_read_i32(data, pos); pos = pos + 4;
         s3 := buf_read_i32(data, pos); pos = pos + 4;
         tk := buf_read_u32(data, pos); pos = pos + 4;
+        it2 := buf_read_i32(data, pos); pos = pos + 4;  // R2 P6 Task 3：项索引（i32；-1 = 无项）
         nfe := buf_read_u32(data, pos); pos = pos + 4;  // first_edge（邻接索引）
         nec := buf_read_u32(data, pos); pos = pos + 4;  // edge_count
         // 对象缓冲写（语义字段 = 盘字节镜像——w32/w64 低 32/64 位存储，存取
@@ -1387,6 +1407,7 @@ fn load_ccr(data: string, fsize: int) -> int {
         w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S2, s2);
         w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S3, s3);
         w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_TK, tk);
+        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_ITEM, it2);   // R2 P6 Task 3：项索引（-1 = 无）
         w64(g_v7_nod_meta, ii * ESZ_NOD_META, nfe);
         w64(g_v7_nod_meta, ii * ESZ_NOD_META + 8, nec);
         ii = ii + 1;
@@ -1752,6 +1773,29 @@ fn load_ccr(data: string, fsize: int) -> int {
     g_method_count = ifc_met;
 
     if pos != seg_end8 { return -1; }            // 五小节行走完 == 段体（无尾随字节）
+
+    // === NOD 项索引一致性硬校验（R2 P6 Task 3 β）===
+    // 时点约束：项索引的解析域 = TYPE 段重建的项表（g_type_terms/tt_count）⇒ **必须**
+    // 排在 TYPE/IFACE 段之后——NOD 段（规范序 3）解析时项表尚不存在（TYPE = 7）。
+    // 判据（三态纪律：不得猜、不得静默当空表/当无项）：
+    //   · item < -1                                  ⇒ 拒绝（域外）
+    //   · item ≥ tt_count()                          ⇒ 拒绝（域外）
+    //   · item ≥ 0 且 tt_atom_of_term(item) != 盘上码 ⇒ 拒绝（**并存两值分歧 = 硬错**；
+    //     这正是本布局的 D20 合规条件——分歧不得静默择一，见 Task 3 报告 §1.1-3）
+    //   · item = -1                                  ⇒ 无需校验（无项：复合行 / 辅码面 /
+    //     无面 / 暖态缺行——码由 `tk` 槽逐字节承担）
+    // 合法文件恒通过（写侧两值同源于 ccr_types.cr:ccr_nod_item_populate 的单次派生）。
+    ni : ., mut = 0;
+    loop {
+        if ni >= g_v7_nod_count { break; }
+        itv := nod_item(ni);
+        if itv < -1 { return -1; }
+        if itv >= 0 {
+            if itv >= tt_count() { return -1; }
+            if tt_atom_of_term(itv) != nod_tk(ni) { return -1; }
+        }
+        ni = ni + 1;
+    }
 
     return 0;
 }

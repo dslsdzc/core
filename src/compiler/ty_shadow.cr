@@ -269,7 +269,7 @@ fn sh_null_term() -> int {
 //   TYP_GENERIC_APPLY             : c = [sh_name_token(基名 ni), 实参项…]
 // b 槽（NAMED/PARAM = 本行；APPLY = **基型行**）仍是**标注**：引擎命名面只比 a/c 两槽
 // （type_engine.cr 的 te_named_pair / te_chain_cmp），b 的既有消费者 = D21 的
-// sh_atom_of_term（DF 载体的类型行派生）。
+// tt_atom_of_term（DF 载体的类型行派生）。
 // APPLY 的 b 槽取**基型行**（不取本行）是**规范形**要求：`Box[int]` 的两处实例化各占一行
 // （alloc_type 裸分配）⇒ 若 b = 本行则同型两行**节点不同** ⇒ 节点同一性快路径 / 不变槽
 // 结构比较 / 接口签名（iface_axis 的 tt_list_same 判等）全部失真。基型行经 named_dedup
@@ -438,20 +438,15 @@ fn sh_tk_row_state(tk: int) -> int {
     return 1;
 }
 
-// D21 契约：`TT_ATOM ∧ b ≥ 0 ⇒ b`（b 槽即该原子的类型行）；其余（union/product/μ/
-// 空链/负）⇒ **-1 = 非单一原子**（不得近似、不得回 0）。
-fn sh_atom_of_term(term: int) -> int {
-    if term < 0 || term >= tt_count() { return -1; }
-    if tt_tag(term) != TT_ATOM { return -1; }
-    if tt_b(term) < 0 { return -1; }
-    return tt_b(term);
-}
+// D21 契约的实现在 **type_terms.cr:tt_atom_of_term**（R2 P6 Task 3 整函数迁出：
+// corearch 清单不含本文件，而 `load_ccr` 的项索引一致性校验 + corearch 回读通道
+// 需要它）——本层及上层调用点一律用该单源入口，**不再**在此留第二定义。
 
 // 分类（纯函数）：0 = 类型行面（**项可逆**才归此面）/ 1 = 辅码面 / 2 = 无面。
 fn sh_tk_face_of_code(opcode: int, tk: int) -> int {
     if sh_tk_is_type_face(opcode) != 0 {
         if sh_tk_row_state(tk) == 1 {
-            if sh_atom_of_term(sh_term_of_ti(tk)) == tk { return 0; }
+            if tt_atom_of_term(sh_term_of_ti(tk)) == tk { return 0; }
         }
         return 1;   // 复合行 / 越界 / 桥接缺口 / 负值 —— 一律辅码（码保真）
     }
@@ -513,7 +508,7 @@ fn sh_tk_split_impl(opcode: int, tk: int, count_fail: int) {
 fn sh_dfn_code_of_slots(tk_term: int, tk_aux: int) -> int {
     if tk_aux != 0 { return tk_aux; }
     if tk_term < 0 { return 0; }
-    return sh_atom_of_term(tk_term);
+    return tt_atom_of_term(tk_term);
 }
 
 // 兼容入口（自测/诊断面）：单槽化前 `sh_tk_term_of_code(opcode, tk)` 的语义 =

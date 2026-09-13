@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """v7 .ccr 真图载体 IO 测试（Task 3 收官——本文件 = v7 测试族唯一真源：
-Task 1 骨架（version 7 + NOD 36B 邻接 + EDG 段必落）+ Task 2 ENT 主干化
+Task 1 骨架（version 7 段表架构 + NOD 邻接 + EDG 段必落；R2 P6 T3 起 version 9 / NOD 40B）+ Task 2 ENT 主干化
 （corec 产实记录 + loader 激活 + SYM/REG 回填）+ Task 3 迁移吸收 test_ccr_v6.py
 全量用例（SYM/REG 目标形状、GC-3 root span 上界、GC-4 save 位置级守卫、
 ENT 实记录 + opt_meta 恒空）+ cache-hit 恢复路径回归（Task 1 review Minor M2）
@@ -25,7 +25,7 @@ Task 3 吸收说明（v6 专属断言退役去向）：
 IFACE(8) 两段（空壳，内容面归 Task 2/3）+ version 7→8；文件头/测试名保留「v7」
 字样，语义 = 「v7 段表架构」而非「version 7」）：
   [0]   magic u32 = 0x31524343 ("CCR1")
-  [4]   version u32 = 8
+  [4]   version u32 = 9
   [8]   seg_count u32 = 8
   [12]  reserved u32 = 0
   [16]  段表 8 × 12B {tag u32, offset u32, size u32}（规范序 tag 1..8）
@@ -35,7 +35,7 @@ IFACE(8) 两段（空壳，内容面归 Task 2/3）+ version 7→8；文件头/�
   {var_id i32, version u32, def_nod i32, live_start u32, live_end u32（半开 =
   最后使用点 +1）, home i32（恒 -1）, flags u32}——corec 写侧按 v6 §4.1 规则
   （regalloc compute_entries 镜像，Task 0 表二差异①/②实现语义）重建
-  NOD(3): nod_count + 36B × nod_count
+  NOD(3): nod_count + 40B × nod_count（32B 语义 + 邻接；+28 = 项索引，R2 P6 T3）
           {op i32, dest i32, s1 i64, s2 i32, s3 i32, tk i32,
            first_edge u32, edge_count u32}
   EDG(6): edg_count + 8B × edg_count {to_nod u32, kind u32}
@@ -84,10 +84,10 @@ COREC = os.path.join(BASE, 'build/corec')
 COREARCH = os.path.join(BASE, 'build/corearch')
 
 MAGIC = 0x31524343  # "CCR1"
-V7 = 8  # R2 P4 Task 1：v8（v7 段表架构的加法扩展，D10）——常量名/文件名从旧
+V7 = 9  # R2 P6 Task 3：v9（v7 段表架构的加法扩展，D10）——常量名/文件名从旧
         # （「v7」= 段表架构代号；改名的引用面 40+ 处、收益为零）
 SEG_TAGS = [1, 2, 3, 4, 5, 6, 7, 8]  # STR SYM NOD ENT REG EDG TYPE IFACE
-NOD_REC = 36
+NOD_REC = 40
 ENT_REC = 28
 REG_REC = 24
 EDG_REC = 8
@@ -229,14 +229,15 @@ class V7File:
                 'enum_count': en, 'opt_count': oc}
 
     def nod(self):
-        """NOD 36B: {op, dest, s1, s2, s3, tk, first_edge, edge_count} —
-        adjacency indices first_edge/edge_count (validated against EDG by the
-        walker / tests; loader rebuilds the linear stream from the 28B semantic
-        fields, emission input identical to v6)."""
+        """NOD 40B: {op, dest, s1, s2, s3, tk, item, first_edge, edge_count} —
+        item = TYPE-segment file-space item index (+28 i32, -1 = none; R2 P6
+        Task 3). adjacency indices first_edge/edge_count (validated against EDG
+        by the walker / tests; loader rebuilds the linear stream from the 32B
+        semantic fields, emission input identical to v6)."""
         b = self.body(3)
         (n,) = struct.unpack_from('<I', b, 0)
-        assert (len(b) - 4) % NOD_REC == 0, "NOD body size not a multiple of 36"
-        assert n == (len(b) - 4) // NOD_REC, f"NOD count {n} != bytes/36"
+        assert (len(b) - 4) % NOD_REC == 0, "NOD body size not a multiple of 40"
+        assert n == (len(b) - 4) // NOD_REC, f"NOD count {n} != bytes/40"
         pos = 4
         out = []
         for _ in range(n):
@@ -244,7 +245,8 @@ class V7File:
             (s1,) = struct.unpack_from('<q', b, pos + 8)
             (s2, s3) = struct.unpack_from('<ii', b, pos + 16)
             (tk,) = struct.unpack_from('<I', b, pos + 24)
-            (fe, ec) = struct.unpack_from('<II', b, pos + 28)
+            _it = struct.unpack_from('<i', b, pos + 28)[0]   # 项索引（P6 T3；本解析器不透出）
+            (fe, ec) = struct.unpack_from('<II', b, pos + 32)
             out.append((op, dest, s1, s2, s3, tk, fe, ec))
             pos += NOD_REC
         return out
@@ -901,7 +903,7 @@ def test_v7_loader_rejects_sym_ent_block_mismatch():
 
 def test_v7_layout_and_walk():
     """段表架构：magic/version=8/8 段规范序（EDG=tag 6 必落；TYPE=7/IFACE=8
-    空壳——R2 P4 Task 1）/offset 连续/NOD 36B + 邻接域/EDG 段完整走查 ==
+    空壳——R2 P4 Task 1）/offset 连续/NOD 40B（P6 T3 起）+ 邻接域/EDG 段完整走查 ==
     文件大小。"""
     src = ("fn add(a: int, b: int) -> int { return a + b; }\n"
            "fn main() -> int {\n"
@@ -1093,9 +1095,9 @@ def test_v7_edge_content_small_program():
 
 
 def test_v7_loader_rejects_version_ne_7():
-    """v8-only（R2 P4 Task 1 起合法版本 = 8）：version 改成 7（**旧 v7 六段
-    文件整类拒收**——D10 的落点：不得静默当「TYPE/IFACE 缺席 = 空表」）或
-    任意非 8 → corearch 必须拒绝。"""
+    """v9-only（R2 P6 Task 3 起合法版本 = 9）：version 改成 7/8/6/5（**旧 v7 六段
+    文件与 v8 文件整类拒收**——D10 的落点：不得静默当「TYPE/IFACE 缺席 = 空表」）或
+    任意非 9 → corearch 必须拒绝。"""
     src = "fn main() -> int { return 42; }\n"
     ccr_path = os.path.join(BASE, 'build/test_v7_reject.ccr')
     try:
@@ -1104,7 +1106,7 @@ def test_v7_loader_rejects_version_ne_7():
         pass
     try:
         corec_ccr(src, ccr_path)
-        for bad_ver in (7, 6, 5):
+        for bad_ver in (8, 7, 6, 5):
             data = bytearray(read_ccr(ccr_path))
             struct.pack_into('<I', data, 4, bad_ver)  # patch version
             bad_path = ccr_path + f'.v{bad_ver}'
@@ -1180,7 +1182,7 @@ def test_v7_loader_rejects_edg_count_mismatch():
         nod = v7.nod()
         assert nod[0][7] >= 1, f"node 0 has no out edges: {nod[0]}"
         nod_off, _ = v7.segs[3]
-        row0_ec = nod_off + 4 + 0 * NOD_REC + 32  # edge_count field (+32 in 36B row)
+        row0_ec = nod_off + 4 + 0 * NOD_REC + 36  # edge_count field (+36 in 40B row)
         struct.pack_into('<I', data, row0_ec, nod[0][7] + 1)
         bad_path = ccr_path + '.cnt'
         with open(bad_path, 'wb') as fh:
@@ -1204,7 +1206,7 @@ def test_v7_loader_rejects_edg_count_mismatch():
 def test_v7_roundtrip_elf():
     """v7 落盘 → corec build 全链路（corec save v7 → corearch load v7 → ELF）：
     0+1+2+3+4+5 = 15 → ELF 退出码 15；corearch 直载同文件同结果；中间产物 =
-    v7 段表架构（version 8/EDG 必落/走查全绿——R2 P4 Task 1 起 +TYPE/IFACE
+    v7 段表架构（version 9/EDG 必落/走查全绿——R2 P4 Task 1 起 +TYPE/IFACE
     空壳两段）。"""
     src = ("fn main() -> int {\n"
            "    s : ., mut = 0;\n"

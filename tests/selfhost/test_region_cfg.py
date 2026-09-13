@@ -234,7 +234,7 @@ def ccr_walk(path: str):
     (version, sg_count, file_size, end_pos). Raises if the layout is invalid.
 
     v7 (Task 1 机械更新): Header 16B + 段表 6×12B {tag, offset, size}（规范序
-    tag 1..6）+ 段体 STR/SYM/NOD/ENT/REG/EDG。NOD（tag 3）= 36B×nod_count（28B
+    tag 1..6）+ 段体 STR/SYM/NOD/ENT/REG/EDG。NOD（tag 3）= 40B×nod_count（32B
     语义字段 + first_edge/edge_count 邻接）、EDG（tag 6）= 8B×edg_count 必落。
     REG（tag 5）= 24B×sg_count（坐标化字段序 kind/parent/enter/exit/
     first_ent/last_ent，记录宽不变）。见 ccr_io.cr 头注释（v7 布局权威）。"""
@@ -277,10 +277,11 @@ def ccr_walk(path: str):
         sl = struct.unpack_from('<I', b, p)[0]
         p += 4 + sl
     assert p == len(b), "STR walk mismatch"
-    # NOD (tag 3): nodes, 36B each (v7 spec §3.3: 28B 语义字段 + 邻接索引)
+    # NOD (tag 3): nodes, 40B each (v7 spec §3.3: 32B 语义字段 [R2 P6 T3 起含
+    # +28 项索引 i32] + 邻接索引)
     b = body(3)
     (instr_cnt,) = struct.unpack_from('<I', b, 0)
-    assert 4 + instr_cnt * 36 == len(b), "NOD walk mismatch"
+    assert 4 + instr_cnt * 40 == len(b), "NOD walk mismatch"
     # EDG (tag 6): edges, 8B each (v7 必落)
     b = body(6)
     (edg_cnt,) = struct.unpack_from('<I', b, 0)
@@ -296,7 +297,7 @@ def ccr_walk(path: str):
     return ver, sg_count, len(d), cur
 
 def test_ccr_v6_reg_section():
-    """.ccr 序列化 v7 段表架构（Task 1 机械更新；R2 P4 Task 1 起 version==8，
+    """.ccr 序列化 v7 段表架构（Task 1 机械更新；R2 P6 Task 3 起 version==9，
     8 段）：REG 段（tag 5）含 func+for 两个 region"""
     src = "fn main() -> int {\n    s : ., mut = 0;\n    for i in 0..3 { s = s + i; }\n    return s;\n}\n"
     with tempfile.NamedTemporaryFile('w', suffix='.cr', delete=False) as f:
@@ -312,7 +313,7 @@ def test_ccr_v6_reg_section():
     os.unlink(path)
     assert r.returncode == 0, f"ccr failed: {r.stderr}"
     ver, sg_count, fsize, end = ccr_walk(ccr_path)
-    assert ver == 8, f"expected .ccr version 8, got {ver}"
+    assert ver == 9, f"expected .ccr version 9, got {ver}"
     assert sg_count is not None and sg_count >= 2, \
         f"expected REG segment with >=2 regions (func+for), got {sg_count}"
     assert end == fsize, f"format walk ended at {end} of {fsize} bytes"

@@ -249,6 +249,40 @@ fn dump_object_surface() {
     }
 }
 
+// --dump-nod-items（R2 P6 Task 3 β 读回通道）：逐节点打印 NOD 项索引 → TYPE 段项表
+// 取项 → `tt_atom_of_term` → 原子行。这是「项跨进程可解析」的**可观测证据**：
+// 头行给计数（with_item = 带项节点数——非空转门），正文逐节点给
+// `{idx, atom}` 供测试断言 `atom == code`（idx ≥ 0 时）。load_ccr 已做同款**硬校验**
+// （域外/不一致 ⇒ 拒绝），本通道是它的显式读出面。不触发发射路径（返回 0 早退）。
+fn dump_nod_items() {
+    with_item : ., mut = 0;
+    ni : ., mut = 0;
+    loop {
+        if ni >= g_v7_nod_count { break; }
+        if nod_item(ni) >= 0 { with_item = with_item + 1; }
+        ni = ni + 1;
+    }
+    print("[nod-items] nodes="); print_i(g_v7_nod_count);
+    print(" with_item="); print_i(with_item);
+    print(" terms="); print_i(tt_count());
+    print(" rows="); print_i(g_type_count);
+    println("");
+    nj : ., mut = 0;
+    loop {
+        if nj >= g_v7_nod_count { break; }
+        itv := nod_item(nj);
+        at : ., mut = -1;
+        if itv >= 0 { at = tt_atom_of_term(itv); }
+        print("item "); print_i(nj);
+        print(" op "); print_i(nod_op(nj));
+        print(" code "); print_i(nod_tk(nj));
+        print(" idx "); print_i(itv);
+        print(" atom "); print_i(at);
+        println("");
+        nj = nj + 1;
+    }
+}
+
 fn corearch_main() -> int {
     cli_init("corearch", "Core architecture backend");
     cli_flag_bool("elf", "", "Output ELF binary (default)");
@@ -271,6 +305,7 @@ fn corearch_main() -> int {
     cli_flag_bool("inject-read-gap", "", "Hidden debug: truncate last version interval to def point, then verify (test hook)");
     cli_flag_bool("inject-coexist-oob", "", "Hidden debug: probe entries_coexist with OOB indices (GC-1 test hook)");
     cli_flag_bool("dump-objects", "", "Hidden debug: dump loaded NOD/EDG semantic objects via object-surface accessors (内核完备 Task 1 test channel)");
+    cli_flag_bool("dump-nod-items", "", "Hidden debug: dump loaded NOD item indices resolved through the TYPE segment term table (R2 P6 Task 3 β read-back channel)");
     cli_flag_bool("dump-types", "", "Hidden debug: dump loaded TYPE segment content (row table + term DAG + judgment probe; R2 P4 Task 2 read-back channel)");
     cli_flag_bool("dump-ifaces", "", "Hidden debug: dump loaded IFACE segment content (entry table + shapes + user ifaces + impls + method table + cross-segment term probe; R2 P4 Task 3 read-back channel)");
 
@@ -357,6 +392,16 @@ fn corearch_main() -> int {
     // 跨段项索引在重建项表上的解析同值）。同样在被重建前返回 0（不触发发射路径）。
     if cli_has("dump-ifaces") != 0 {
         ccr_iface_surface_dump();
+        return 0;
+    }
+
+    // --dump-nod-items（R2 P6 Task 3 β 读回通道）：NOD 项索引 → TYPE 段项表取项 →
+    // `tt_atom_of_term` → 原子行。与上两通道同族：TYPE 段已在 load_ccr 内重建
+    // （⇒ 项表可用），且在 `build_linear_schedule()` **之前**返回 0（不触发发射路径）。
+    // load_ccr 的 TYPE 段后一致性 pass 已把「域外/不一致 ⇒ 拒绝」做成硬闸；本通道
+    // 是它的显式读出面（可观测证据：项跨进程可解析 + 非空转计数）。
+    if cli_has("dump-nod-items") != 0 {
+        dump_nod_items();
         return 0;
     }
 

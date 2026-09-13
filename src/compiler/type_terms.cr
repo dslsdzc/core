@@ -37,6 +37,18 @@ fn tt_c(i: int) -> int { return r64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_C);
 fn tt_d(i: int) -> int { return r64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_D); }
 fn tt_count() -> int { return g_type_term_count; }
 
+// ─── D21 契约：`TT_ATOM ∧ b ≥ 0 ⇒ b`（b 槽即该原子的类型行）；其余（union/product/μ/
+// 空链/负）⇒ **-1 = 非单一原子**（不得近似、不得回 0）。R2 P6 Task 3 自
+// `ty_shadow.cr:sh_atom_of_term` **整函数迁入**（单一真源；原位置 = 桥接层，而
+// corearch 清单不含 ty_shadow.cr ⇒ `load_ccr` 的项索引一致性校验与 corearch 回读
+// 通道无此函数可用）。语义/返回域与迁移前逐字同（唯一改点 = 函数名，调用点同步）。
+fn tt_atom_of_term(term: int) -> int {
+    if term < 0 || term >= tt_count() { return -1; }
+    if tt_tag(term) != TT_ATOM { return -1; }
+    if tt_b(term) < 0 { return -1; }
+    return tt_b(term);
+}
+
 // ─── 结构哈希（DAG 去重的键：五字段 fold，与插入顺序无关）───
 fn tt_hash5(tag: int, a: int, b: int, c: int, d: int) -> int {
     h : ., mut = 1469598103934665603;

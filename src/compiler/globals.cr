@@ -31,6 +31,15 @@ g_ccr_type_seg : string, mut;   g_ccr_type_seg_len : int, mut;
 // ccr_types.cr（引用桥接层 sh_iface_sig_*/形状构造点），ccr_io.cr 只按段表搬运/解析）。
 // 缓冲**含段体首字段**（native_count u32）⇒ 段体大小 ≡ 缓冲长度（ccr_iface_seg_size 单源）。
 g_ccr_iface_seg : string, mut;  g_ccr_iface_seg_len : int, mut;
+// R2 P6 Task 3（β）：NOD 项索引装填缓冲（同 TYPE/IFACE 的 D18 解耦——**装填**在
+// corec-only 的 ccr_types.cr（引用桥接层 sh_tk_face_of_code/sh_term_of_ti），本文件
+// 只声明载体，ccr_io.cr 保存侧按节点序搬运落盘（盘记录 +28 i32 槽）。
+// 语义 = TYPE 段**文件空间**的项索引：-1 = 无项（非 face-0 节点 / 暖态缺行——
+// 辅码槽保真码）；≥0 = 该节点原子行对应的项 DAG 行号（写侧与盘上派生码同源，
+// 读侧 load_ccr 在 TYPE 段解析后做**一致性硬校验**：域外或 atom_of ≠ 码 ⇒ 拒绝）。
+// 声明位置约束同上方两件：本文件恒在最前（双 concat 共享面）——挪进 ccr_types.cr
+// 即 corearch 侧 N06 静默未定义（B.6 同族）。
+g_ccr_nod_item : string, mut;   g_ccr_nod_item_count : int, mut;
 g_ast : string, mut;         g_ast_count : int, mut;     g_ast_cap : int, mut;
 g_tokens : string, mut;      g_token_count : int, mut;   g_tok_cap : int, mut;
 g_errors : string, mut;      g_error_count : int, mut;   g_err_cap : int, mut;
