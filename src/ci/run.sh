@@ -70,11 +70,14 @@ case "$CI_JOB_NAME" in
     # ─── 判定面回归网（R2 P5 Task 5 起；**影子通道已下线**，不得引用其计数/摘要/站点直方图）───
     # 影子对拍（R2 P1 的迁移期仪器：`--type-shadow` / `[type-shadow]` 摘要 / 差异转储 / 站点直方图）
     # 已随 R2 P5 Task 5 整体删除（对照物 `type_equal_legacy` 在 T4 删除后对拍停摆，全语料
-    # `decisions=0`）。判定面回归网 = ① **冻结基线同源对拍**：pre-P5 二进制（`/tmp/p5t0/base/`）×
-    # 当前源 vs 当前二进制 × 当前源，72 档语料（runner `/tmp/p3t0_run.sh`，逐档 clean-cache）
-    # `check` rc + 日志逐档 diff（本 job 内无法复现——冻结二进制不入库；手工判据见
-    # `.superpowers/sdd/p5-task5-report.md`）；② **行为探针**：下列套件（test_named_face /
-    # test_named_dedup / test_type_engine / test_optional / test_match_exhaust …）+ 各批探针语料；
+    # `decisions=0`）。判定面回归网 = ① **冻结基线同源对拍**：冻结基线（**由
+    # `tools/baseline/rebuild.sh` 从 pinned revision 重建**——配方 + 三 sha 白名单见
+    # `tools/baseline/REBUILD.md`；R2 P6 Task 1 起可复现，二进制仍不入库）× 当前源 vs
+    # 当前二进制 × 当前源，72 档语料（runner `tools/baseline/parity_run.sh`，逐档 clean-cache）
+    # `check` rc + 日志逐档 diff（手工判据，本 job 内不跑——CI 为浅检出且无 jj）；② **行为探针**：
+    # 下列套件（test_named_face / test_named_dedup / test_type_engine / test_optional /
+    # test_match_exhaust …）+ **入仓探针语料 `tests/probes/`（29 档；runner
+    # `tools/baseline/probes_run.sh`；变异态/影子态不可复跑面见该目录 README）**；
     # ③ **突变控制**（改坏派生面 ⇒ 探针/对拍转红）；④ **三态纪律**（引擎 -1 ⇒ ICE04 硬错，
     # 见 main.cr 硬名单）。新批次新增判定面行为**必须**同时给这三类证据之一，不得回退到
     # 「与旧版逐字节同」（TODO #26 口径）。
