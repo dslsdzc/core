@@ -11,12 +11,15 @@
 set -euo pipefail
 
 # ── 白名单（来源修订 + 三 sha；换代纪律见 REBUILD.md）──
-PINNED_REV="9bcb7083"          # P4 收官（R2 P4 Task 7）
+# 换代（2026-09-14，容量批 CAP Task 1）：PINNED_REV 9bcb7083（P4 收官）→ 97f4394f（P6 终态 /
+# 本批起点）。依据 = `REBUILD.md`「换代纪律」1/2（下一批以本批收官为 pre-侧；旧值留痕）。
+# 旧代三 sha（9bcb7083）：corec 5d2b15ad… · corearch 493dc490… · corelsp 18b94bd9…（全值见 REBUILD.md 历史表）。
+PINNED_REV="97f4394f"          # P6 终态（R2 P6 Task 6 收官）/ 容量批起点
 WS_NAME="p6-baseline-build"    # 临时 workspace 名（收工 forget）
 
-WHITELIST_COREC="5d2b15ad746018619b01143cce400e6f3489ae72a962e12283a7afd3dcdb41e7"
-WHITELIST_COREARCH="493dc490dfaed7774b46b74ccf1cfeca9fe5f61620e34229afb8991b1628a2a7"
-WHITELIST_CORELSP="18b94bd955fa204accf0753095a28f6499871566254d846333a7496c99109d49"
+WHITELIST_COREC="ae01de7534ea8428e3e062fccbc5fef5d45abfc5d3dafb90b3c85e08f354cce2"
+WHITELIST_COREARCH="228f82e948cfaf8170ada982d80f1ebddfd3847e71cdf04ca4b42d9226373d2e"
+WHITELIST_CORELSP="90eb19c6d3bd4e3234b4328d8b8f3284cca6d1644d3959bb83f07b7e71473032"
 
 usage() { echo "usage: bash tools/baseline/rebuild.sh <outdir>" >&2; exit 2; }
 [ $# -eq 1 ] || usage

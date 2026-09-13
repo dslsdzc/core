@@ -25,17 +25,25 @@ bash tools/baseline/rebuild.sh /tmp/p6-baseline      # 产物：/tmp/p6-baseline
 前置：`jj` 可用、工作树不处于多 agent 并发构建窗口（本仓纪律：一构建一编译串行）。
 `COREC_REPO_ROOT=<path>` 可覆盖仓库根（脚本默认从自身位置 `../..` 推导）。
 
-## sha 白名单
+## sha 白名单（**现行代**）
 
 | 二进制 | sha256 | 源修订 |
 |---|---|---|
-| `corec` | `5d2b15ad746018619b01143cce400e6f3489ae72a962e12283a7afd3dcdb41e7` | `9bcb7083`（R2 P4 收官 / P4 Task 7） |
-| `corearch` | `493dc490dfaed7774b46b74ccf1cfeca9fe5f61620e34229afb8991b1628a2a7` | 同上 |
-| `corelsp` | `18b94bd955fa204accf0753095a28f6499871566254d846333a7496c99109d49` | 同上 |
+| `corec` | `ae01de7534ea8428e3e062fccbc5fef5d45abfc5d3dafb90b3c85e08f354cce2` | `97f4394f`（R2 P6 终态 / P6 Task 6 收官） |
+| `corearch` | `228f82e948cfaf8170ada982d80f1ebddfd3847e71cdf04ca4b42d9226373d2e` | 同上 |
+| `corelsp` | `90eb19c6d3bd4e3234b4328d8b8f3284cca6d1644d3959bb83f07b7e71473032` | 同上 |
 
-> `PINNED_REV` = `9bcb7083`（**P4 收官**）——P5 批（单槽化 / 删 legacy / 影子下线 / 判定点收口）
-> 的「pre-批」侧；P5 T0 的 `/tmp/p5t0/base/` 与本配方产物**逐字节 IDENTICAL ×3**
-> （R2 P6 T0 §1.4 实测）⇒ 白名单自洽。
+> `PINNED_REV` = `97f4394f`（**P6 终态**）——容量批（CAP：E-2 表示面聚合 / E-3 `MAX_*` 解除 /
+> E-4 收回可选程序 `.cir` 缓存）的「pre-批」侧。换代自证：重跑本配方 ⇒ 三 sha = 上表 +
+> 冒烟 42 + 确定性 ×2（rebuilt 两次逐字节同）；且 `jj diff --from 97f4394f --to <本批起点树>`
+> 证明其后仅有计划文档新增（无构建输入变化）⇒ 与直接构建产物同 sha。
+
+## 白名单历史（**旧值不删**——换代纪律 2；本表 = 历次换代台账）
+
+| 代 | 源修订 | `corec` | `corearch` | `corelsp` | 理由 / 出处 |
+|---|---|---|---|---|---|
+| 初代 | `9bcb7083`（R2 P4 收官 / P4 Task 7） | `5d2b15ad746018619b01143cce400e6f3489ae72a962e12283a7afd3dcdb41e7` | `493dc490dfaed7774b46b74ccf1cfeca9fe5f61620e34229afb8991b1628a2a7` | `18b94bd955fa204accf0753095a28f6499871566254d846333a7496c99109d49` | P5 批的 pre-侧（P6 T0 §1.4：与本配方产物逐字节 IDENTICAL ×3，白名单自洽） |
+| **2 代（现行）** | `97f4394f`（R2 P6 终态） | `ae01de75…`（全值见上表） | `228f82e9…`（全值见上表） | `90eb19c6…`（全值见上表） | 容量批 CAP 的 pre-侧；换代依据 = 换代纪律 1（下一批以本批收官为 pre-侧）；自证见「现行代」注与 `cap-task1-report.md` |
 
 ## 用法
 
