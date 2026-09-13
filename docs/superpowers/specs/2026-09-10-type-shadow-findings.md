@@ -394,3 +394,18 @@ rsync -a --exclude .jj --exclude .git --exclude build --exclude .core ./ /tmp/r2
 **新登记面（P3a 引入/更新；详版 = 附录 B.4）**：非枚举域不判穷尽 · 空枚举域 = 空洞穷尽（判据 1）· 空递归保守 -1 · MAX_* 族处置（MAX_GENERICS / MAX_ENUM_VARIANTS / MAX_VARIANT_TYPES）· 运行期可选表示未统一 · witness 空析取支（反例走覆盖位）· `EXPR_ENUMPAT` 名字槽 = `ast_a` · bootstrap `&&`/`||` 短路根因（T4 只关触发链）· `EXPR_LET` 无检查（TODO #32）· 符号档长度约束（VC 义务，显式登记不实现）。
 
 **残差与交 P5**：同 §11 尾（`type_equal_legacy` / `sh_*_ak_legacy` / 站点 6 / 影子层下线）——**状态更新**：T0 的展开层按设计只服务满足判定/域查询 ⇒ §11 的「unknown 清零前提 = 引擎命名展开」**不会被满足**（等价面展开属裁决）；P5 须裁「接受命名展开（推翻 P2a 对拍基线）」或「legacy 长期化」（见计划附录 B.5）。
+
+## 14. P4 后复跑（2026-09-13，R2 P4 收官——载体批终态）
+
+**口径**：pre-P4 二进制（P3b 终态构建，sha `9a583215…`）× **当前源** vs 当前二进制（`5d2b15ad…`）× **当前源**；语料 = 72 档（`tests/suite` + 自源 `main.cr`/`_import.cr` + 后端/内核单元 + `src/stdlib` + `examples`；runner `/tmp/p3t0_run.sh`，冷缓存逐档 `clean-cache`），两面 {`check`, `check --type-shadow --type-shadow-dump`}。
+
+| 面 | pre-P4 侧 | 当前侧 | 结论 |
+|---|---|---|---|
+| 影子摘要（70 档出摘要） | `decisions=32620 agree=32620`，`old_stricter`/`old_looser`/`unknown*`/`replace_*` 全 0 | 同值（逐档同） | **判定面零变化** |
+| 站点覆盖 | assign-node=24721 · fn-body-ret=5828 · if-branch=2037 · struct-field-type=28 · array-elem-type=4 · generic-apply-base=2（其余 0） | 逐项同（Σ = 32620 = decisions） | 同上 |
+| check 日志面 | 8 档差异，**100% = TF01 收口类**（5 处 `ty_memo_slot_no_grow` 误报消失 + 3 档 rc 1→0） | — | P4 内**有意修复**，非语义回归 |
+| rc 分布（72 档） | 31×0 / 41×1 | 34×0 / 38×1（恰 3 档 1→0） | 同上 |
+
+- **dumps 通道说明（勿当强证据）**：两侧 `dumps/` 目录**均无文件** ⇒ 常被引用的「dumps `diff -r` 空」是**空洞证据**——`sh_dump_write`（`ty_shadow.cr:651`）在无差异条目（`g_shadow_ring_count ≤ 0`）时早退、不落盘。真证据 = 上列摘要全 0 + 站点覆盖同报 + rc 分布差恰为 TF01 面。
+- **效力范围（继承 §11/§13 口径）**：影子通道只覆盖 `type_equal` 站点面——**对 P4 载体面（TYPE/IFACE 段、corearch 读回、DFNode.TK 项槽、运行期表示位）零覆盖**；载体正确性证据 = 结构性断言（`test_ccr_types` 34 例）+ corearch 读回对拍（`--dump-types`/`--dump-ifaces`）+ 定向探针，见计划 Task 1–6。
+- **承接 P5**（同附录 D-3）：`type_equal_legacy` 删除 / unknown 清零（前提不会被自动满足，须二选一裁决）/ `sh_*_ak_legacy` 桥接缓存退出生产路径 / 站点 6 去留（须先补站点评级说明）/ 影子层下线。P4 未新增站点、未改站点语义（本表可作 P5 的基线）。

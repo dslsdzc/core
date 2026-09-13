@@ -73,7 +73,7 @@ python3 build_selfhost_native.py       # Produces build/corec + build/corearch
 # Dataflow graph dump
 ./build/corec cir FILE.cr
 
-# 格形态 IR dump（v6 = 段表 + 存在结构段 ENT）
+# 格形态 IR dump（v8 = 段表 8 段：STR/SYM/NOD/ENT/REG/EDG + TYPE(7)/IFACE(8)）
 ./build/corec ccr FILE.cr
 ```
 
@@ -114,7 +114,7 @@ bootstrap/corec/frontend/type_checker.py → Type inference + checking + borrow 
 bootstrap/corec/frontend/ir_gen.py     → AST → Core IR
 
 bootstrap/corec/ir/cir.py              → Dataflow graph IR definitions
-bootstrap/corec/ir/ccr.py              → 格形态 IR（注：该文件实际不存在——.ccr 仅由 self-hosted ccr_io.cr 读写；v6 = 段表 + ENT 存在结构段，见 specs/2026-09-05-lattice-ir-v6-format.md）
+bootstrap/corec/ir/ccr.py              → 格形态 IR（注：该文件实际不存在——.ccr 仅由 self-hosted ccr_io.cr 读写；现行 = v8 八段段表，见 specs/2026-09-09-lattice-ir-v7-format.md；v6 版历史设计见 specs/2026-09-05-lattice-ir-v6-format.md）
 bootstrap/corec/ir/base.py             → IRNode base class, IRVar, VarKind
 bootstrap/corec/ir/symbol_table.py     → Scoped symbol table
 
@@ -262,7 +262,7 @@ Design documents (Chinese):
 
 ## Key Conventions
 
-- File extensions: `.cr` (source), `.cir` (dataflow graph IR / 图形态), `.ccr` (格形态 IR，v6 = 段表架构 + 存在结构段 ENT，v6-only), `.corespec`（已退役 2026-09-06——规约并入 .cr 语法，见 grammar/core.ebnf 迁移事项）
+- File extensions: `.cr` (source), `.cir` (dataflow graph IR / 图形态), `.ccr`（格形态 IR，**v8 = 段表架构 8 段**：STR/SYM/NOD/ENT/REG/EDG + TYPE(7)/IFACE(8)（R2 P4 载体批；文件名/测试名保留「v7」= 段表架构代号，见 specs/2026-09-09-lattice-ir-v7-format.md））, `.corespec`（已退役 2026-09-06——规约并入 .cr 语法，见 grammar/core.ebnf 迁移事项）
 - Tests in `tests/bootstrap/` and `tests/selfhost/` define inline Core source strings and compare output
 - Python bootstrap: `sys.path.insert(0, 'bootstrap')` to import compiler modules
 - VS Code extension in `vscode-core/`
