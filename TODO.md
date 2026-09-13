@@ -549,6 +549,14 @@
 - **E-12 半身（未实施，挂裁-P6-2）**：见附录 E-12 勘误——「非泛型调用位点」**不存在**（已知 SYM_FN 的非泛型调用分支连实参推断都不走）⇒ 实施 = **新增**判定点；锚点与参数型取法已入计划 Task 4 Step 4。
 - **关联**：附录 E-11/E-12 · 计划 Task 4 节勘误 · #20（F3）· #32（声明位判定，同族豁免面）· P3 附录 A（「never 在调用位点被当 unit」的 P3 待裁决项 ⇒ 本批收口）。
 
+### 53. R2 P6 Task 5：文档/卫生批（2026-09-14——E-7/E-8/E-16 收口：MIN_CASES 收紧 + 废弃标注 + 陈旧值与先例载体改写；**零行为变化**（重建三二进制逐字节同））
+- **交付**：本提交（路径限定 = `tests/selfhost/test_type_engine.py` · `tools/module_to_ccr.py` · 两 spec（`2026-09-11-explain-predict-incremental-design.md` / `2026-09-11-policy-injection-design.md`）· `TODO.md` · 计划）。工作树 = 合流树 `/tmp/p6mrg`（head `9bdbdf16`）；证据 `/tmp/p6t5/`。
+- **逐件**：① `MIN_CASES` 32 → **415**（+「只增不减」注：新增/删除用例须同步下界；判据 = `test_type_engine.py` 绿）② `tools/module_to_ccr.py` 头注废弃块（version=1 / `ccr_io.cr:135` `CCR_VERSION = 8` 整类拒收 / 零 in-repo 调用者 / **保留不删**，删除候选登记）③ `explain-predict` **5 处**（`:371` 三陈旧：旧值 14 → **17**、行号 `:16` → **`:51`**、**magic `C1C1…` 分句删去**（该断言与实测不符——自举二进制落盘 magic 全 0，P4 T5 / TODO #14 登记）；`:84`/`:181` 旗标计数 `8 → 7`；`:127`/`:447` 先例载体 → `--verify-*` 家族 + 行为探针）④ `policy-injection:275` 同款改写 ⑤ **`run.sh` 零改动**（逐条实测复核：其全部 `N 例` 注与实测一致——T2/T3/T4a 已各自同步；陈旧「14 档挂点」在**本计划**，不在 `run.sh`）⑥ **计划勘误**（Task 5 节实况化 + 侦查底座陈旧锚（挂点 28 / 自述块行域 / 计数注行号）+ T1 记录里一句不精确）。
+- **判据（本实例实跑）**：**重建 ⇒ `corec ae01de75…` / `corearch 228f82e9…` / `corelsp 90eb19c6…` 与编辑前逐字节同**（T5 零 `.cr` 改动 ⇒ 零行为变化的**构造性证据**）· 五 CI job 全 rc=0 · 全枚举 **58/58** · `selftest-types` **415/415** · `check src/compiler` rc=0 · canary **`95084e7b…d475`（28822B）IDENTICAL** · `.ccr` 四条 = T3 新锁值（96015 `680a6f98…` / 96158 `76f36e6a…` / 142793 `41e9d845…` / 142936 `704316c8…`；差恒 143B）· **腿① 同源对拍 72 档零差异**（冻结基线 `/tmp/p6t1/base/corec` × 当前源 vs 当前二进制 × 当前源；rc 34×0/38×1 两侧同）· `test_backend_bootstrap` rc=0 + `error[`=0 · 自举链 `corec2==corec3` IDENTICAL（`0b2e06d0…`）+ N06=0 + 冒烟 42 + `--help` rc=1。
+- **grep 复核（实跑）**：`--type-shadow` **无活跃引用**（`src/` 8 条 + `tests/` 3 条**全为**「已下线/历史」注；旗标注册面三处实核 = `main.cr`/`corearch.cr`/`targets/x86_64-linux/main.cr`，`--type-shadow*` 零在位）；陈旧版本值（14）在 `docs/ src/ tests/` **零引用**（修靶后）；`MIN_CASES` = 修靶（`test_type_engine.py:20` = 415）+ 邻域（`test_purity.py:27` = 26）。
+- **登记（转 T6 / 待办，本任务不代改他节）**：① `tools/module_to_ccr.py` **删除候选**（本任务只标废弃；删除 = 独立决定）② `test_purity.py` 的 `MIN_CASES = 26`（同形面，未纳入 E-7 点名）③ **T0 缺失实施记录归 T6**（T5 只登记、不动 T0 节——理由：章程边界 / 与 T6「统一台账」同类 / 避免计划文件被两批各改一次）④ **T2 无 TODO 条目**（#50=T1 / #51=T3 / #52=T4a ⇒ 建议 T6 补或 T2 自补）⑤ `pkg/` 非入库面（`.gitignore` 覆盖；仅报告登记，不进提交）。
+- **关联**：附录 E-7/E-8/E-16 · 计划 Task 5 实施记录 · T1 报告 §9-5（T0 记录）· T0 报告 §3/表 D-4（探针 29 / 挂点 28）。
+
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
 来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：

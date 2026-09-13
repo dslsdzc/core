@@ -81,7 +81,7 @@
 2. 答案是**产物的函数**，不是「再跑一遍编译器，这次开着日志」——同一产物两次查询必须逐字节同（与 §3 同一条纪律）；
 3. 答不出就说答不出（`unattributed`），**不得编造理由**——这是 §1.2 原则 3「义务不静默消失」在解释面的同构条款：**解释不静默编造**。
 
-反面（明确不做）：把 `explain` 做成「第 N 个 dump 通道」。现状已有 8 个 dump 旗标（`--dump-entries` / `--dump-coexist` / `--dump-regassign` / `--dump-objects` / `--dump-events` / `--dump-table` / `--check-regalloc` / `--type-shadow-dump`），它们是**整图转储**：无锚点、无问题类、无稳定 schema、不回答「为什么」。
+反面（明确不做）：把 `explain` 做成「第 N 个 dump 通道」。现状已有 7 个 dump 旗标（`--dump-entries` / `--dump-coexist` / `--dump-regassign` / `--dump-objects` / `--dump-events` / `--dump-table` / `--check-regalloc`），它们是**整图转储**：无锚点、无问题类、无稳定 schema、不回答「为什么」。（原第 8 个 `--type-shadow-dump` 已随 R2 P5 Task 5 影子通道下线删除——R2 P6 Task 5 勘误。）
 
 ### 1.2 查询面：锚点 × 问题类
 
@@ -124,7 +124,7 @@
 
 **单一真源（★D27 / A 线 M1）**：本表 = 全仓**唯一** schema 真源；消费者（如 S-C §5 R1）只引用本表字段集 + 各自补充项，**不得**另立字段表（S-D §4.1 禁止双源漂移）。
 
-**不重造的部分（复用判据）**：记录表**不是**新分析。它是对既有产出的**记录化**——`--type-shadow` 的分类计数（AGREE / OLD_STRICTER / OLD_LOOSER / UNKNOWN）已经是一条决策记录，只是没有 id、没有 subject、没有落盘；`--dump-regassign` 已经是 `placement` 记录，只是没有因由码。本 spec 要求的是**统一条目与统一查询**，不是重写这些 pass。
+**不重造的部分（复用判据）**：记录表**不是**新分析。它是对既有产出的**记录化**——**迁移期影子对拍通道**（R2 P1 起，已随 R2 P5 Task 5 整体下线）曾把判定决策记成分类计数（AGREE / OLD_STRICTER / OLD_LOOSER / UNKNOWN），只是没有 id、没有 subject、没有落盘；现行同类载体 = `--verify-named-dedup` / `--verify-evp-nodes`（默认关的校验通道）+ 行为探针与结构性断言；`--dump-regassign` 已经是 `placement` 记录，只是没有因由码。本 spec 要求的是**统一条目与统一查询**，不是重写这些 pass。（先例载体更新 = R2 P6 Task 5 / E-16。）
 
 **开销纪律（承 R2 P1 先例）**：R2 P1 已实证「记录通道默认关 + 关/开两态产物逐字节同（sha256 `95084e7b…d475`）」。本 spec 沿用该纪律的**加强版**：
 
@@ -178,7 +178,7 @@
 
 ### 1.6 现状基础与缺口（诚实清单）
 
-有：`ext_safety` 钩子 + F11 长度侧表（`g_ir_slice_lens`，编码：≥0 字面量 / ≤−2 长度变量 / −1 清除）+ `IR_BOUNDS_CHECK` + checker R002 + 8 个 dump 旗标 + `--type-shadow` 两态纪律 + `analysis.cr` 快照查询 + `json.cr` 读写。
+有：`ext_safety` 钩子 + F11 长度侧表（`g_ir_slice_lens`，编码：≥0 字面量 / ≤−2 长度变量 / −1 清除）+ `IR_BOUNDS_CHECK` + checker R002 + 7 个 dump 旗标 + 审计通道（默认关；**两态产物逐字节同**的纪律沿用——现行载体 = `--verify-named-dedup` / `--verify-evp-nodes`）+ `analysis.cr` 快照查询 + `json.cr` 读写。（原 `--type-shadow` 两态纪律的载体已随 R2 P5 Task 5 下线——R2 P6 Task 5 勘误。）
 缺：统一记录表（0 实现）｜内容寻址 id｜因由码体系（现状无稳定规则标识符）｜`unattributed` 概念｜向量化决策（生产者不存在）｜边界节点标注（`unsafe`/边界是语义概念，但**无查询通道**）｜成本模型（S-C）｜~~**效应事实不可靠（B 线 C2 登记）**~~（**已修，2026-09-11 效应/纯度批 `762bd429`+`c9099d73`**：`fi_ispure` 真计算 + `IR_CALL_EXTERN`/间接调用等全入链 ⇒ 本项移出「缺」清单；残余限定与证据见 §1.7.1 硬约束 8 修订与 TODO #27；历史快照：恒 1 写入点 `checker.cr:1107`/`:1142`、`IR_CALL_EXTERN`（`ast.cr:572`=45）不入链、链每函数重置 `dataflow.cr:401`）。
 
 ### 1.7 确定性报告面：`core analyze --determinism`（路线图 §1.4，2026-09-11 追加）
@@ -368,7 +368,7 @@ cost_model_query(kind, subject, mapping_desc) -> {
 
 ### 3.2 与现有缓存的差距（含两个已实测缺陷）
 
-**现状**：函数级 `.cir` 快照，`CIR_CACHE_VER = 14`（`cir_cache.cr:16`，magic `C1C1…`），头部 = 格式版本 / 函数体指纹 / 签名指纹 / func_id；命中即跳过 check + IR gen。
+**现状**：函数级 `.cir` 快照，`CIR_CACHE_VER = 17`（`src/compiler/cir_cache.cr:51`），头部 = magic / 版本 / **编译器身份**（v17 起引入——TODO #5 修复，见 `cir_cache.cr:26` 与 `:214` 的字段序注）/ 函数体指纹 / 签名指纹 / name_len+name；命中即跳过 check + IR gen。（原记 `CIR_CACHE_VER`=14 / `cir_cache.cr` 行号 16 / magic `C1C1…` 三处双陈旧已在 R2 P6 Task 5 修正；magic 值不作承诺——`CIR_CACHE_MAGIC` 常量声明见 `cir_cache.cr:50`。）
 
 **差距 A（TODO #5，预存）**：键**缺编译器身份分量** ⇒ 二进制重建后旧条目存活 ⇒ 旧 CIR 与新版字符串表（`g_strs` 驻留序）错位 ⇒ dump 通道变量名缺失/错位（实证：806 → 381 个 `name=` 翻转；清 cache 即复现判据）。
 
@@ -444,7 +444,7 @@ cost_model_query(kind, subject, mapping_desc) -> {
 
 - **记录生成**：常开（轻量条目）；**记录展开**：按需（§1.3）——保证缓存命中路径也有记录（L8），同时不给常态编译加可观测负担。
 - **落盘位置**：**先行 = 旁路文件**（S-D1 落地路径；与产物同目录或 `.core/`，命名待实施批定）；**终态 = `.ccr` 决策记录段**（**已裁，★D4**：随 R2 P4 同波进段——**段 tag 空间可扩展**，`2026-09-09-lattice-ir-v7-format.md:44` 的 `7+` **未固定分配**（既有注明用途 = 驱逐标注段 / 证书段，与本段并列取号，段名随实施批定））——段化前旁路文件是唯一载体；段化后**两态产物须逐字节同**（守卫判据）。
-- **守卫判据**：记录通道关 → 产物逐字节同（照 R2 P1 的 `--type-shadow` 先例，sha256 两态同）。
+- **守卫判据**：记录通道关 → 产物逐字节同（照**审计通道默认关 + 两态产物 sha256 同**的既有纪律；现行载体 = `--verify-named-dedup` / `--verify-evp-nodes`；迁移期 `--type-shadow` 已随 R2 P5 Task 5 下线——R2 P6 Task 5 勘误）。
 
 ### 4.4 为什么不能各建一套（反例）
 
