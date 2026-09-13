@@ -11,7 +11,8 @@ import checker
 import type_terms
 import type_engine
 // R2 P2b Task 1：本质条目表 + iface_* 查询 API（静态数据表；置于引擎之后、桥接层之前
-// ——Task 2 起桥接层（ty_shadow.cr）委托本层，故顺序必须是 引擎 → 注册表 → 影子层）。
+// ——Task 2 起桥接层（ty_shadow.cr）委托本层，故顺序必须是 引擎 → 注册表 → 桥接层。
+// 注：ty_shadow.cr 的文件名是历史遗留（其影子对拍挂点已随 R2 P5 Task 5 下线）。
 import iface_registry
 // R2 P4 Task 0：引擎核纯化拆分——iface 满足判定簇 + `iface_kind_of` 移入 corec-only 的
 // iface_axis.cr（type_engine.cr 留纯核、iface_registry.cr 除该函数）。**project-mode 面必须

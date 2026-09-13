@@ -215,12 +215,9 @@ fn default_out_path(src_path: string, ext: string) -> string {
     return out;
 }
 
-// R2 P1 影子对拍收尾：摘要行 + （给了 --type-shadow-dump 时）差异条目转储。
-// 影子关 = 零输出（sh_report / sh_dump_write 各自先查 g_shadow_on）。
-fn sh_finish() {
-    sh_report();
-    sh_dump_write(cli_get("type-shadow-dump"));
-}
+// **R2 P5 Task 5 删除**：`sh_finish`（R2 P1 影子对拍收尾 = 摘要行 + `--type-shadow-dump` 时的
+// 差异条目转储）与其两处调用点（run/build 路径各一）随影子通道整体下线；`--type-shadow` /
+// `--type-shadow-dump` 两个 CLI 通道同删（D27）。运行期不再有任何影子收尾钩子。
 
 fn corec_main() -> int {
     cli_init("corec", "Core compiler frontend");
@@ -239,15 +236,12 @@ fn corec_main() -> int {
     cli_flag_bool("dump-types", "", "Hidden debug: dump TYPE segment content (row table + term DAG + cross-process judgment probe) after populate (R2 P4 Task 2 test channel)");
     cli_flag_bool("dump-ifaces", "", "Hidden debug: dump IFACE segment content (entry table + shapes + user ifaces + impls + method table + cross-segment term probe) after populate (R2 P4 Task 3 test channel)");
     cli_flag_bool("dump-tk-terms", "", "Hidden debug: dump per-DFNode tk + type-term slot (cir; R2 P4 Task 4 test channel — cold/warm snapshot symmetry)");
-    cli_flag_bool("type-shadow", "", "R2 P1: shadow type decisions with the engine (observation only)");
-    cli_flag("type-shadow-dump", "", "R2 P1: dump shadow diff entries to file");
+    // **R2 P5 Task 5 删除**：`--type-shadow` / `--type-shadow-dump`（R2 P1 影子对拍的两个隐藏
+    // 通道）随影子层整体下线（D27/TODO #24 同族清偿）；判定路径不再有开关（无条件经引擎）。
     cli_flag_bool("verify-named-dedup", "", "R2 P2a: assert side-table == res_type_node for all named types (debug)");
     cli_flag_bool("verify-evp-nodes", "", "R2 P3 T4: assert enum variant payload type nodes recorded (debug)");
 
     if cli_parse() != 0 { return 1; }
-    // R2 P1 影子对拍开关。**只解析不判定**：影子关（默认）时 g_shadow_on=0，type_equal 包装
-    // 直接返回（连影子代码都不进）→ 产物与开关前逐字节相同。check/build/cir/ccr/run 共用本处。
-    g_shadow_on = cli_has("type-shadow");
     // Parse -O flag (default O1)
     g_opt_level = 1;
     ol : ., mut = cli_get("opt-level");
@@ -395,7 +389,6 @@ fn corec_main() -> int {
         }
 
         run_rc := run_frontend();
-        sh_finish();                     // 影子摘要/转储（类型判定全部在 run_frontend 内完成）
         if run_rc != 0 { return 1; }
         ir_gen_all();
         return ir_interpret();
@@ -437,7 +430,6 @@ fn corec_main() -> int {
     }
 
     fe_rc := run_frontend();
-    sh_finish();   // 影子摘要/转储：类型判定在 run_frontend 内已完成；诊断存在时也要出摘要
     if fe_rc != 0 { return 1; }
 
     // === check: type-check only ===

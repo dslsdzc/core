@@ -383,9 +383,10 @@ def test_large_frame_body():
     shutdown_and_wait(proc)
 
 def test_double_open_bridge_cache_reset():
-    """R2 P2a Task 3 评审 Critical：桥接缓存（g_shadow_map）必须随类型表重置失效。
+    """R2 P2a Task 3 评审 Critical：桥接缓存（g_term_map；P5 T5 前名 g_shadow_map）必须随类型表重置失效。
 
-    机制：Task 3 起判定路径**无条件**调用 sh_term_of_ti（此前仅 --type-shadow 下译项），
+    机制：R2 P2a Task 3 起判定路径**无条件**调用 sh_term_of_ti（此前仅 --type-shadow 下译项；
+    该旗标已随 R2 P5 Task 5 影子层下线删除），
     而桥接缓存 key = ti 本体；corelsp 每请求 `reset_frontend_state → check_all → init_types`
     会清空重建类型表（**行号空间复用**）→ 陈旧 ti→term 命中即返回 ⇒ 两个不同类型被判等
     （静默漏报）。本用例：同 URI 两次 didOpen，只把 `a` 的数组**元素型** int→bool，第二次

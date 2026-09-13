@@ -49,13 +49,13 @@
 // 装填归 Task 3）⇒ 项行号 = 行序遍历的构造序（确定），与判定历史无关。
 // 调用点前置核查（plan Step 2，逐站点核）：save_ccr 两处调用点（main.cr:612 `ccr`
 // / main.cr:636 `build`）之后无类型项消费者——`ccr` 分支随后即 return；`build` 分支
-// 其后只拼 corearch 命令行（子进程）并 syscall 执行；sh_finish（影子摘要）在
-// run_frontend 之后、本函数之前。
+// 其后只拼 corearch 命令行（子进程）并 syscall 执行（R2 P5 T5 前此处另有影子摘要
+// sh_finish——已随影子层下线删除）。
 fn ccr_type_populate() -> int {
     // ① 复位：项层（含引擎预算/memo/lits——见 tt_layer_reset 注记）→ 桥接层。
     //    三面都持**旧行号语义**的缓存，少复位任一面 = 陈旧项被当活项（静默）。
     tt_layer_reset();
-    sh_map_reset();            // ti→term 桥接缓存（含 entries/hits 计数）
+    sh_map_reset();            // ti→term 桥接缓存（cap/entries 复位；hits 计数随 P5 T5 删除）
     sh_unf_map_reset();        // ti→展开项缓存
     // ①.5 形状重注册（D13 顺序第 2 步，R2 P4 Task 3 落地）：六形状按 D17 名重注册
     //     （幂等覆盖）——先于行装填 ⇒ 形状项行号 = 构造序前段（确定性；形状表本体

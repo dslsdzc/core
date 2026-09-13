@@ -32,7 +32,7 @@ fn alloc_type(kind: int, data: int, extra: int) -> int {
 // 的 b 槽（规范形，T3 起身份链按**名字令牌**比较，b 槽为标注）。
 //
 // 侧表 g_named_dedup（16B/条 {name_idx, ti}，开放寻址线性探测，与 ty_shadow.cr 的
-// g_shadow_map 同式同因）。P0/P1 血泪三件套缺一即可能挂死，逐条落：
+// g_term_map（P5 T5 前名 g_shadow_map）同式同因）。P0/P1 血泪三件套缺一即可能挂死，逐条落：
 //   ① 装填因子守卫（**探测前**）：(count + 1) * 2 >= cap → 重建扩容。表满且键不存在时
 //      开放寻址永不落空 = 死循环；count 只增不减、恒等于占用槽数（兼作守卫判据）。
 //   ② 重建 + **重放既有条目**：count 随重放重算（守卫读的就是它，不得沿用旧值）；重放
@@ -439,8 +439,9 @@ fn array_len_constraint_sym(ti_a: int, ti_b: int) -> int {
 // N 不入身份（R1 裁决）⇒ 判定点必须在 type_equal 之外显式补检——否则 Task 3 替换身份实现后
 // N/固定性不匹配静默通过。返回：1 = 兼容；0 = 身份不匹配（原诊断措辞）；-1 = 长度/方向约束
 // 违反（专属措辞；**码不变**——TF01/TA01/TC02 的「门」= 拒绝集合不变，仅成因分列）。
-// **总是调用 type_equal**：影子通道（ty_shadow.cr）在 type_equal 内按站点采样，站点调用次数
-// 与位置必须保持不变（P1 站点覆盖 / 差异计数可比；关态仅多一次全局读，见 P1 登记）。
+// **总是调用 type_equal**（判定入口单点）：判定点**一律**经此组合函数，不得就地内联等价比较
+// ——否则判定面旁路（历史依据：影子对拍期站点调用次数/位置必须可比，P1 登记；影子通道已随
+// P5 Task 5 下线，本条 = 判定面单点纪律的继承）。
 // 参序 =（源，目标）——见 array_len_walk 上方的归一说明。
 fn type_compat_strict(ti_a: int, ti_b: int) -> int {
     if !type_equal(ti_a, ti_b) {
@@ -498,7 +499,9 @@ fn diag_type_incompatible(verdict: int, code: int, what: string, line: int, col:
 // R2 P2a Task 3：结构判等降级为 `type_equal_legacy`（影子对拍对照物 + 引擎 -1 的回落实现）。
 // **R2 P5 Task 4 删除**（本处）：断言前提 = 清零判据成立（全语料 72 档 `decisions=agree=32988`、
 //   `replace_bridge=replace_unknown=0`；残留 -1 面由 Task 3 命名面判定化 + Task 3b 不变槽元素
-//   三态收口，探针 `unknown_engine=0`）——D24 顺序：清零 → 删 legacy → 影子层下线。
+//   三态收口，探针 `unknown_engine=0`）——D24 顺序：清零 → 删 legacy → 影子层下线（T5 已完成，
+//   影子通道整体删除；判定面回归网 = 冻结基线同源对拍 + 行为探针 + 突变控制，见 TODO 与
+//   src/ci/run.sh 的自述）。
 // 删除件与替代证据（D26）见 p5-task4-report §判据；P-A 政策见 `type_equal_engine` 头注。
 
 // P-A（Task 4 Step 1 推荐案，落纸）：判定不可判 = **硬错 ICE04**（三态纪律：未知不得当 0/1，
@@ -556,10 +559,9 @@ fn type_equal_engine(t1: int, t2: int) -> bool {
     return false;
 }
 
-// R2 P1 影子对拍包装 / R2 P2a Task 3 判定入口 → **R2 P5 Task 4：纯转发**。
-// 对照物（type_equal_legacy）已删 ⇒ `sh_compare` 的调用点随之移除（影子判定观察面**停摆**；
-// 余部——ring/摘要/站点直方图/CLI 通道——随 Task 5 下线，D24：中间态不跑影子判据）。
-// 保留本名 = 判定入口单点，调用面零改动。
+// R2 P1 影子对拍包装 / R2 P2a Task 3 判定入口 → R2 P5 Task 4 纯转发（对照物删除）。
+// **R2 P5 Task 5**：影子通道整体下线（`sh_compare` 及其调用点、ring/摘要/站点直方图/CLI 通道、
+// `g_shadow_*` 全部删除）。保留本名与转发形态 = 判定入口单点（调用面零改动；站点/计数面无残留）。
 fn type_equal(t1: int, t2: int) -> bool {
     return type_equal_engine(t1, t2);
 }
@@ -1481,7 +1483,6 @@ fn collect_decls() {
                         }
                     }
 
-                    sh_site_begin(1);   // 站点 1 = hotpatch 返回类型一致（ty_shadow.cr 头注有全表）
                     // P3 Task 1：本站两侧**皆声明**（无源/目标之分）⇒ 长度面走对称核（= 现状语义）
                     compat := type_compat_sym(rt_ti, first_rt_ti);
                     if compat != 1 {
@@ -1862,7 +1863,6 @@ fn unify_types(pattern: int, concrete: int) -> bool {
         loop {
             if mi >= g_gen_map_count { break; }
             if r64(g_gen_map_names, mi * 8) == name_idx {
-                sh_site_begin(2);   // 站点 2 = unify_types 泛型实参已绑定路径
                 // P3 Task 1 参序归一：源 = concrete（实参），目标 = 已绑定项
                 return type_compat_strict(concrete, r64(g_gen_map_types, mi * 8)) == 1;
             }
@@ -1876,7 +1876,6 @@ fn unify_types(pattern: int, concrete: int) -> bool {
         return false;
     }
     if pk == TYP_GENERIC_APPLY && ck == TYP_GENERIC_APPLY {
-        sh_site_begin(3);   // 站点 3 = unify_types 泛型应用基型比较
         // P3 Task 1 参序归一：源 = concrete 基型，目标 = pattern 基型（两侧恒 TYP_NAMED ⇒ 方向面不可达）
         if type_compat_strict(get_type_data(concrete), get_type_data(pattern)) != 1 { return false; }
         ps := get_type_extra(pattern);
@@ -1892,7 +1891,6 @@ fn unify_types(pattern: int, concrete: int) -> bool {
         }
         return true;
     }
-    sh_site_begin(4);   // 站点 4 = unify_types 兜底结构等价
     // P3 Task 1 参序归一：源 = concrete（实参），目标 = pattern（声明）
     return type_compat_strict(concrete, pattern) == 1;
 }
@@ -2193,7 +2191,6 @@ fn check_func(fi: int) {
             ret_ti_mapped := ty_code_to_ti(return_type);
             if ret_ti_mapped >= 0 && ret_ti_mapped != TI_DYN { ret_ti = ret_ti_mapped; }
         }
-        sh_site_begin(5);   // 站点 5 = 函数体返回类型
         compat := type_compat_strict(body_ti, ret_ti);
         // 落空分析（TF01 收口，见 stmt_cannot_fall_through 头注）：体确定不能落空（如以
         // 无 break 的 loop 收尾）⇒ 「块类型 = 末语句类型」推出的 unit 不是缺返回值的证据，
@@ -2817,7 +2814,6 @@ fn infer_expr(node: int) -> int {
                 mi = mi + 1;
             }
             g_dyn_type_set_count = merge_count;
-            sh_site_begin(7);   // 站点 7 = if 分支类型合并
             // P3 Task 1 参序归一：合并**结果类型 = then_ti**（下方 return then_ti）⇒ 源 = else 侧，
             // 目标 = then 侧（长度约束更弱者放前面会被这里拦住 = 与结果类型一致；反之亦然）
             compat := type_compat_strict(else_ti, then_ti);
@@ -3285,7 +3281,6 @@ fn infer_expr(node: int) -> int {
                 }
             }
         } else {
-            sh_site_begin(8);   // 站点 8 = 赋值兼容（EXPR_ASSIGN 节点）
             // P3 Task 1 参序归一：赋值 = 目标(tt) ← 值(vt) ⇒ 源 = vt，目标 = tt
             compat := type_compat_strict(vt, tt);
             if compat != 1 {
@@ -3412,7 +3407,6 @@ fn infer_expr(node: int) -> int {
                         if ti_has_generic_param(vt) == 0 {
                             dt := res_type_node(dtn);
                             if ti_has_generic_param(dt) == 0 {
-                                sh_site_begin(9);   // 站点 9 = struct 字面量字段类型 vs 声明
                                 // P3 Task 1 参序归一：源 = 值类型(vt)，目标 = 声明类型(dt)
                                 verdict := type_compat_strict(vt, dt);
                                 if verdict != 1 {
@@ -3478,7 +3472,6 @@ fn infer_expr(node: int) -> int {
                 } else {
                     // 两侧任一含未实例化泛型参数 → 跳过（不假拒，见 ti_has_generic_param）
                     if ti_has_generic_param(elem_ti) == 0 && ti_has_generic_param(eti) == 0 {
-                        sh_site_begin(10);   // 站点 10 = 数组字面量元素同质性
                         // P3 Task 1 参序归一：源 = 本元素(eti)，目标 = 首元素定下的元素类型(elem_ti)
                         verdict := type_compat_strict(eti, elem_ti);
                         if verdict != 1 {

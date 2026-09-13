@@ -332,10 +332,10 @@ def main():
         # R2 P4 Task 0：iface 满足判定簇 + `iface_kind_of` 的 corec-only 宿主（链接面纯化——
         # type_engine.cr 留纯核、iface_registry.cr 除该函数；corearch 清单**不含**本文件）。
         'src/compiler/iface_axis.cr',
-        # R2 P1 影子对拍桥接层（checker ti → 引擎类型项 + per-ti 缓存 + Task 2 判定挂点）。
-        # **corelsp 清单也必须含本层**（Task 2 起 checker.cr 的 type_equal 包装引用
-        # sh_compare/sh_site_begin——挂在 checker 上的挂点无法只要 checker 不要影子层；
-        # corearch 无 checker 故仍不含）。相对顺序与 corec 一致（checker → 引擎 → 影子）。
+        # R2 P1 桥接层（checker ti → 引擎类型项 + per-ti 缓存）。文件名 = 历史遗留（前身含
+        # R2 P1 影子对拍挂点，已随 R2 P5 Task 5 下线）；现为**生产面**（判定路径无条件经它译项）。
+        # **corelsp 清单也必须含本层**（checker.cr 的判定入口引用 sh_term_of_ti；corearch 无
+        # checker 故仍不含）。相对顺序与 corec 一致（checker → 引擎 → 桥接）。
         'src/compiler/ty_shadow.cr',
         # R2 P4 Task 2：TYPE(7) 段内容构造（D13 确定性装填 + 段体缓冲 + corec-only
         # dump 节）。位置 = 影子层之后（装填引用 sh_term_of_ti 与 checker 类型行表；
@@ -421,8 +421,8 @@ def main():
         'src/compiler/lexer.cr',
         'src/compiler/parser.cr',
         'src/compiler/checker.cr',
-        # R2 P1：checker 的 type_equal 包装引用影子层（sh_compare/sh_site_begin）→
-        # corelsp 也必须链接 引擎 + 影子层（相对顺序与 corec 一致；corearch 无 checker 仍不含）。
+        # R2 P1：checker 的判定入口引用桥接层（sh_term_of_ti；影子挂点已随 P5 T5 下线）→
+        # corelsp 也必须链接 引擎 + 桥接层（相对顺序与 corec 一致；corearch 无 checker 仍不含）。
         'src/compiler/type_terms.cr',
         'src/compiler/type_engine.cr',
         # R2 P2b Task 1：注册表（引擎之后、影子层之前；Task 2 起影子层委托本层）

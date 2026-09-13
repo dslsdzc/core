@@ -348,11 +348,15 @@ IP_UOP_BIAS : int = 20;
 IP_INDEX : int = 25;  IP_INDEX_RANGE : int = 26;  IP_FIELD : int = 27;
 IP_METHOD : int = 28; IP_AS : int = 29;  IP_COND : int = 30;  IP_COND_BOOL : int = 31;
 
-// R2 P1 影子对拍：checker ti → 类型项 桥接缓存 + 统计（16B/条 {ti, term}；
-// 探测/装填因子守卫/扩容重放见 ty_shadow.cr——桥接层自持，与引擎 g_tt_index 同式）。
+// R2 P1：checker ti → 类型项**桥接缓存**（16B/条 {ti, term}；探测/装填因子守卫/扩容重放见
+// ty_shadow.cr——桥接层自持，与引擎 g_tt_index 同式）。**这是生产面**（判定路径无条件
+// 调用 sh_term_of_ti），非影子调试面。
+// **R2 P5 Task 5：原名 `g_shadow_map`/`g_shadow_map_cap`/`g_shadow_entries` 改名**（影子
+// 判定通道已随本任务下线；`sh_` 前缀现为历史前缀，语义 = 「桥接/类型项层」）。影子期的
+// 调试计数 `g_shadow_hits` 一并删除（其唯一用途 = 影子对账的命中统计）。
 // entries 只增不减、恒等于占用槽数 → 兼作扩容判据（不另设 count 全局）。
-g_shadow_map : string, mut;        g_shadow_map_cap : int, mut;
-g_shadow_hits : int, mut;          g_shadow_entries : int, mut;
+g_term_map : string, mut;          g_term_map_cap : int, mut;
+g_term_map_entries : int, mut;
 
 // R2 P5 Task 2（D19/D23）：DFNode 类型面单槽化的拆分出参 + 建项失败位。
 // 出参（Core 无多返回值）：`sh_tk_split` 先置默认（-1 / 0）再写 ⇒ 无残留状态；
@@ -363,46 +367,29 @@ g_shadow_hits : int, mut;          g_shadow_entries : int, mut;
 g_sh_slot_term : int, mut;         g_sh_slot_aux : int, mut;
 g_tk_face_fail : int, mut;
 
-// R2 P1 Task 2：影子对拍挂点状态（`--type-shadow`）。**全部只在影子开时被写**——
-// 关时**除 `g_shadow_on` 自身外**连读都不发生（`type_equal` 包装、`sh_site_begin` 早退
-// （Task 4 M3）、`sh_report`/`sh_dump_write` 首行各查它一次）→ 关态产物逐字节不变。
-// 四分类桶：agree（旧=引擎）/ old_stricter（旧拒新受）/ old_looser（旧受新拒 = 收紧面）
-// / unknown（三态 -1 或任一侧无法翻译）；恒有 agree+stricter+looser+unknown == total。
-g_shadow_on : int, mut;            g_shadow_site : int, mut;
-g_shadow_total : int, mut;         g_shadow_agree : int, mut;
-g_shadow_old_stricter : int, mut;  g_shadow_old_looser : int, mut;
-g_shadow_unknown : int, mut;
-// unknown 桶拆因（R2 P1 Task 3 Step 0，Task 2 评审硬性要求）：**bridge** = 任一侧翻译失败
-// （sh_term_of_ti 返回 -1 = 桥接缺口）/ **engine** = 引擎三态负值（预算耗尽或未覆盖面标注）。
-// 混记则 Task 3 归因不可恢复。engine 桶再按引擎自报成因位细分（见下）——环形缓冲只有前
-// 256 条，摘要计数才是无损通道，故细分在此而非 dump 的 kind 列。
-g_shadow_unknown_bridge : int, mut;   g_shadow_unknown_engine : int, mut;
-// engine 负值的成因（读 ty_uncovered()/ty_exhausted()，均在 ty_budget_reset 时清）：
-// uncovered = 未覆盖面命中（AK_NAMED 不展开等）→ 需补引擎规则；budget = 预算耗尽
-// （200000 步不够）→ 属引擎参数/规范化代价问题；两条都未置 = 其它负出口（应为 0）。
-g_shadow_unknown_uncovered : int, mut; g_shadow_unknown_budget : int, mut;
-// 差异/未知环形缓冲（前 256 条；40B/槽 {site, t1, t2, old_ok, kind}），满则只计数。
-g_shadow_ring : string, mut;       g_shadow_ring_cap : int, mut;   g_shadow_ring_count : int, mut;
-// 站点直方图（8 × 8B，下标 = site id-1；Task 3 扩面：环里只有「有差异/未知」的条目，
-// 而「某站点是否真的跑到过」是覆盖面的实证——0 差异语料下这是唯一证据通道）。
-g_shadow_site_counts : string, mut; g_shadow_site_cap : int, mut;
+// **R2 P5 Task 5 删除**（本处 = 影子判定通道的全局态）：`g_shadow_on` / `g_shadow_site` /
+// 四分类桶（total/agree/old_stricter/old_looser/unknown + bridge·engine·uncovered·budget
+// 拆因）/ 差异环形缓冲（ring/cap/count）/ 站点直方图（site_counts/cap）。影子层 = P1 的
+// 迁移期对拍仪器（对照物 = `type_equal_legacy`）：对照物已在 P5 Task 4 删除 ⇒ 对拍停摆
+// （全语料 `decisions=0`，见 p5-task5-report 的 gate 节）⇒ 本任务整体下线。
+// 判定面回归网自此 = 冻结基线同源对拍 + 行为探针 + 突变控制（见 src/ci/run.sh 的自述）。
 
 // R2 P2a Task 1（F1）：同名 TYP_NAMED 建表去重侧表（开放寻址，16B/条 {name_idx, ti}）。
 // 唯一分配点 alloc_named_type 查表命中即复用存量行 → 同一类型名（struct 字面量/泛型
 // 应用基型在多处出现）恒占一行。P1 影子对拍 9/9 差异的根因正是「同名多行」：桥接层按行
 // 建原子（AK_NAMED 的 b 槽 = 行号）→ 引擎把两行当互异命名类型 → 判不了（unknown）。
-// 探测/装填因子守卫/重建重放/回写前重探见 checker.cr（与 ty_shadow.cr 的 g_shadow_map
+// 探测/装填因子守卫/重建重放/回写前重探见 checker.cr（与 ty_shadow.cr 的 g_term_map
 // 同式同因——P0/P1 三件套缺一即可能挂死）。count 只增不减、恒等于占用槽数 → 兼作扩容
 // 判据（不另设 count 之外的全局）。init_types() 置 cap=0 → 类型表重置（行号空间作废）
 // 时侧表随之惰性重建，防「陈旧 name→ti 复用」把已失效行号当命中（silent miscompile）。
 g_named_dedup : string, mut;      g_named_dedup_cap : int, mut;   g_named_dedup_count : int, mut;
 
 // R2 P3 Task 0：引擎展开层的 per-ti 缓存（开放寻址，16B/条 {ti, 展开项}）。
-// **第二张表**（与 g_shadow_map 键空间相同 = ti，但**值语义不同**）：本表存**展开项**
+// **第二张表**（与 g_term_map 键空间相同 = ti，但**值语义不同**）：本表存**展开项**
 // （struct → AK_PRODUCT / enum → AK_SUM 域，见 ty_shadow.cr 展开段），桥接表存**原子名义项**
 // （命名类型的等价面身份）。同一 ti 两值不同 ⇒ **不得**共用一张表——共用即让展开项进入
 // 等价判定 = 同形不同名类型被判等价 = 语义漂移（裁错边界，见 ty_shadow.cr 头注）。
-// 生命周期同 g_shadow_map：init_types() 置 cap=0（sh_unf_map_reset）→ 类型表重置（行号空间
+// 生命周期同 g_term_map：init_types() 置 cap=0（sh_unf_map_reset）→ 类型表重置（行号空间
 // 作废）时惰性重建，防陈旧 ti→展开项跨请求复用。探测/装填守卫/重建重放/回写重探见
 // ty_shadow.cr（与桥接缓存同式同因；count 只增不减、恒等于占用槽数）。
 g_unf_map : string, mut;          g_unf_map_cap : int, mut;

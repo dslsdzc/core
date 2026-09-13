@@ -1951,18 +1951,25 @@ fn type_selftest_run() -> int {
         (sh_tk_term_of_code(IR_CONST, g_type_count) == -1 &&
          sh_tk_term_of_code(IR_BINARY, g_type_count + 7) == -1 &&
          sh_tk_term_of_code(IR_CONST, -1) == -1), 1);
-    // 计数纪律（P5 T2 重钉：改走 TYP_DYN 行——数组行自本任务起是**复合行**，不再建项）。
-    // 本函数是载体面派生（非判定站点）⇒ 不得扰动影子对账的 hits 缓存计数（entries 仍
-    // 随真实建项增长——那是装填因子输入，复原即欺骗扩容守卫）。牙齿：必须取**非原生
-    // 行**（原生行走 sh_native_ak 快路径，本就不进缓存 ⇒ 拿 TI_INT 测等于恒真断言）。
-    // TYP_DYN 行首次直译建项入缓存、二次直译必命中（+1）——本函数二次调用若不复原
-    // 计数，此处必红。
+    // 查询纯度（P5 T2 引入 / **P5 T5 重钉**：原断言 = 「本函数不扰动影子对账的 hits 计数」，
+    // 影子通道下线后该计数已不存在 ⇒ 改钉**查询纯度**这一同源性质）：`sh_tk_term_of_code`
+    // 是**纯查询**——不写槽出参、不置 D23 失败位（诊断调用不得污染落盘闸；有副作用的生产
+    // 路径一律走 sh_tk_split）；且对同一行返回**同一项**（缓存语义）。
+    // 牙齿：必须取**非原生行**（原生行走 sh_native_ak 快路径，本就不进缓存 ⇒ 拿 TI_INT 测
+    // 等于恒真断言）。TYP_DYN 行首次直译建项入缓存、二次直译命中同项。
     t4_dyn_row := alloc_type(TYP_DYN, 0, 0);
     t4_dyn_term := sh_term_of_ti(t4_dyn_row);          // 预热：首次（miss）入桥接缓存
-    h4_before := sh_map_hits();
-    sk4 := sh_tk_term_of_code(IR_CONST, t4_dyn_row);   // 缓存命中路径（本应 +1 hits）
-    total = total + 1; fails = fails + ts_check("t4.tk_derivation_not_a_shadow_site",
-        ((t4_dyn_term >= 0 && sk4 == t4_dyn_term && sh_map_hits() == h4_before)), 1);
+    t4_fail_0 := g_tk_face_fail;
+    sh_tk_split(IR_CONST, g_type_count);               // 槽出参置哨兵（越界行 ⇒ term=-1/aux=越界行号）
+    t4_sent_t := g_sh_slot_term;
+    t4_sent_a := g_sh_slot_aux;
+    t4_fail_before := g_tk_face_fail;
+    sk4 := sh_tk_term_of_code(IR_CONST, t4_dyn_row);   // 查询路径（缓存命中）
+    total = total + 1; fails = fails + ts_check("t4.tk_query_purity_and_cache_hit",
+        ((t4_dyn_term >= 0 && sk4 == t4_dyn_term &&
+          g_sh_slot_term == t4_sent_t && g_sh_slot_aux == t4_sent_a &&
+          g_tk_face_fail == t4_fail_before)), 1);
+    g_tk_face_fail = t4_fail_0;                        // 复位（哨兵行的 D23 位 = 本用例产物，不留给后续）
 
     // ── R2 P5 Task 2 新例 ①：原子行契约（D21）──
     // TT_ATOM ∧ b ≥ 0 ⇒ b；union / cons / nil / 负 / 越界 ⇒ **-1**（显式，不得近似）。
@@ -2091,15 +2098,17 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("bridge.tuple_product", tt_a(t_tup), AK_PRODUCT);
     total = total + 1; fails = fails + ts_check("bridge.tuple_fields",
         tt_c(t_tup), tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil())));
-    // 缓存语义：新 ti 恰入表 1 条（其元素 = 原生快路径，不入表）；同 ti 二次调用恰命中 1 次
+    // 缓存语义：新 ti 恰入表 1 条（其元素 = 原生快路径，不入表）；同 ti 二次调用 = 命中
+    // （**P5 T5 重钉**：原断言 = hits 计数恰 +1；影子 hits 通道已随影子层下线 ⇒ 改钉
+    // 「命中 ⇒ 同项 + 不新增条目」——同一语义的占用面证据，不再依赖计数器）。
     e_before := sh_map_entries();
     arr_ti2 := alloc_type(TYP_ARRAY, TI_STR, 9);
     t_arr2 := sh_term_of_ti(arr_ti2);
     total = total + 1; fails = fails + ts_check("bridge.entries_delta", (sh_map_entries() - e_before), 1);
-    h_before := sh_map_hits();
+    e_hit_before := sh_map_entries();
     t_arr2b := sh_term_of_ti(arr_ti2);
-    total = total + 1; fails = fails + ts_check("bridge.hit_delta",
-        ((sh_map_hits() - h_before) == 1 && t_arr2b == t_arr2), 1);
+    total = total + 1; fails = fails + ts_check("bridge.cache_hit_same_term_no_new_entry",
+        (t_arr2b == t_arr2 && sh_map_entries() == e_hit_before), 1);
     // 缓存扩容/重建守门（P0「扩容路径判据不可达」教训同款）：上面仅 8 条 << 初始容量
     // 1024 → 装填因子守卫/重建路径**不可达**。用 600 个互异 ti（extra=N 各不同 = 互异
     // 类型表行，正是「N 不入身份」下 600 行同项的典型规模）逼出一次扩容重建（守卫
@@ -2114,7 +2123,7 @@ fn type_selftest_run() -> int {
     }
     total = total + 1; fails = fails + ts_check("bridge.grow_rehash",
         (sh_map_entries() == g_before + 600 && sh_term_of_ti(arr_ti2) == t_arr2), 1);
-    total = total + 1; fails = fails + ts_check("bridge.grow_cap_doubled", (g_shadow_map_cap >= 2048), 1);
+    total = total + 1; fails = fails + ts_check("bridge.grow_cap_doubled", (g_term_map_cap >= 2048), 1);
     // 第二次重建守门（Step 4b ②，Task 1 评审挂账：「>1024 条目第二次重建无实测」）：
     // 上一例只推过第一条守卫线（entries=511 → cap 1024→2048）；本例再入 1100 条互异 ti
     // 把条目推过第二条守卫线（entries=1023 → cap 2048→4096）——断三件事：①重放守恒（恰
@@ -2128,7 +2137,7 @@ fn type_selftest_run() -> int {
         gj = gj + 1;
     }
     total = total + 1; fails = fails + ts_check("bridge.grow_rehash2",
-        (sh_map_entries() == g2_before + 1100 && g_shadow_map_cap >= 4096 && sh_term_of_ti(arr_ti2) == t_arr2), 1);
+        (sh_map_entries() == g2_before + 1100 && g_term_map_cap >= 4096 && sh_term_of_ti(arr_ti2) == t_arr2), 1);
 
     // --- F1（R2 P2a Task 1）：同名 TYP_NAMED 归一行 —— P1 影子对拍 9/9 差异根因消除 ---
     // 根因：同一类型名（struct 字面量 / 泛型应用基型在不同**出现点**）各建一行 → 桥接按行
@@ -2284,7 +2293,8 @@ fn type_selftest_run() -> int {
     ty_budget_reset(200000);
 
     // --- R2 P2a Task 3 评审 Critical：桥接缓存**随类型表重置失效**（sh_map_reset）---
-    // 机制：本批起判定路径**无条件**调 sh_term_of_ti（Task 3 前仅 --type-shadow 下）→ 桥接缓存
+    // 机制：判定路径**无条件**调 sh_term_of_ti（R2 P2a Task 3 起；此前仅 --type-shadow 下译项，
+    // 该旗标随 P5 T5 影子层下线删除）→ 桥接缓存
     // key = ti 本体，而 init_types() 清空重建类型表（**行号空间复用**）→ 陈旧的 ti→term 命中
     // 即返回 = 两个不同类型被判等（长驻进程静默漏报；评审复现：corelsp 同 URI 两次 didOpen）。
     // 用例 ① 重置后缓存确实清空（entries 0 + cap 0 = 惰性重建）；② 行号复用场景下**不得**返回
@@ -2297,7 +2307,7 @@ fn type_selftest_run() -> int {
     init_types();                                    // 类型表 + 桥接缓存一并失效
     t3c_entries_after := sh_map_entries();
     total = total + 1; fails = fails + ts_check("t3c.map_reset_clears_bridge",
-        (t3c_entries_mid >= 1 && t3c_entries_after == 0 && g_shadow_map_cap == 0), 1);
+        (t3c_entries_mid >= 1 && t3c_entries_after == 0 && g_term_map_cap == 0), 1);
     t3c_tiB := alloc_type(TYP_ARRAY, TI_BOOL, 2);    // 同一行号 T（复用）
     t3c_termB := sh_term_of_ti(t3c_tiB);
     t3c_ok : ., mut = 0;

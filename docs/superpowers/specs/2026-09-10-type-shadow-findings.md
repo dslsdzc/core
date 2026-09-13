@@ -1,6 +1,6 @@
 # R2 P1 影子对拍差异清单（三档语料 + 归因与裁决建议）
 
-日期：2026-09-10（Task 3 落地日 2026-09-11 复核；**P2a 替换后复跑 = §11**，2026-09-11 Task 4 收官追加）
+日期：2026-09-10（Task 3 落地日 2026-09-11 复核；**P2a 替换后复跑 = §11**，2026-09-11 Task 4 收官追加；**R2 P5 Task 5（2026-09-13）起影子通道已整体下线 ⇒ 本文件为历史记录，§15 = 终态基线**）
 范围：R2 计划 P1「影子对拍」——把 P0 类型判定引擎与旧 `type_equal_core` 在**真实语料**上逐点对账，
 产出「收紧面（old_looser = 旧受新拒）暴露清单」与「未覆盖面清单」，供 P2（替换旧判定）裁决。
 上游：P0 引擎 + P1 Task 1 桥接层 + Task 2 挂点/通道（`844cec6c` + 评审补强 `514956a1`）+ Task 3 Step 0 拆因 + 本清单（同一提交）。
@@ -12,6 +12,8 @@
 
 ## 0. 结论（TL;DR）
 
+> **⚠ 影子通道已下线（R2 P5 Task 5，2026-09-13）**：本文件记录的通道（`--type-shadow` / `[type-shadow]` 摘要 / 差异转储 / 站点直方图 / `sh_compare`）**已整体删除**——对照物 `type_equal_legacy` 在 P5 Task 4 删除后对拍停摆（全语料 `decisions=0`），P5 Task 5 按 D24/D26 下线（§15 = 终态基线记录）。判定面回归网自此 = **冻结基线同源对拍 + 行为探针 + 突变控制 + 三态纪律（ICE04）**；**后续批次不得引用本文件的计数/摘要/站点直方图作为判据**（它们只在通道存活期可复现）。
+>
 > **本清单已闭环（2026-09-11 注记）**：P1 的两条硬项 F1（硬前置）/F2（裁决）已在 **R2 P2a** 实施（用户裁决 = 建表去重根治 / 落常量档长度约束），`type_equal` 判定权已移交引擎。**替换后复跑见 §11**（26,989/26,989 agree、`old_looser`/`old_stricter`/`unknown` 全 0、站点覆盖口径不变）。§1-§10 保留为 **P1 时点**记录（数字随自指语料漂移，跨提交不可逐字复现）；未结项 = F3/F4（TODO #20/#21）与 F5（TODO #25，P2a 新发现）。
 
 1. **真收紧面 = 0**：三档语料（+2 档扩面）共 **67 个有效文件 / 26,704 次判定**（71 个候选中 4 个排除，见 §2），`old_looser=0`、`old_stricter=0`。
@@ -409,3 +411,19 @@ rsync -a --exclude .jj --exclude .git --exclude build --exclude .core ./ /tmp/r2
 - **dumps 通道说明（勿当强证据）**：两侧 `dumps/` 目录**均无文件** ⇒ 常被引用的「dumps `diff -r` 空」是**空洞证据**——`sh_dump_write`（`ty_shadow.cr:651`）在无差异条目（`g_shadow_ring_count ≤ 0`）时早退、不落盘。真证据 = 上列摘要全 0 + 站点覆盖同报 + rc 分布差恰为 TF01 面。
 - **效力范围（继承 §11/§13 口径）**：影子通道只覆盖 `type_equal` 站点面——**对 P4 载体面（TYPE/IFACE 段、corearch 读回、DFNode.TK 项槽、运行期表示位）零覆盖**；载体正确性证据 = 结构性断言（`test_ccr_types` 34 例）+ corearch 读回对拍（`--dump-types`/`--dump-ifaces`）+ 定向探针，见计划 Task 1–6。
 - **承接 P5**（同附录 D-3）：`type_equal_legacy` 删除 / unknown 清零（前提不会被自动满足，须二选一裁决）/ `sh_*_ak_legacy` 桥接缓存退出生产路径 / 站点 6 去留（须先补站点评级说明）/ 影子层下线。P4 未新增站点、未改站点语义（本表可作 P5 的基线）。
+
+## 15. 影子通道终态（R2 P5 Task 5，2026-09-13——**通道下线；本节 = 最后一次基线**）
+
+**通道下线**（D24/D26）：对照物 `type_equal_legacy` 已在 P5 Task 4 删除 ⇒ 判定对账 `sh_compare` 无调用点、停摆（中间态）；P5 Task 5 按 D26-① **整体删除**——站点挂点（checker 9 处）/ 判定对账 / 差异环缓冲（前 256 条）/ 摘要 `[type-shadow]` / 站点直方图 `[type-shadow-sites]` / 转储 `--type-shadow-dump` / CLI 旗标 `--type-shadow` / 全局态 `g_shadow_*`（17 个）/ 桥接调试计数 `g_shadow_hits`（含存-复原补偿 hack）。桥接缓存**保留**（生产面）并改名 `g_shadow_map` → `g_term_map`。**本文件此后的任何计数均不可复现**（通道已不存在；`--type-shadow` 不再是合法旗标）。
+
+**终态基线（本任务实测，起点二进制 `eae13428…`（P5 T4）× 72 档语料，逐档 `clean-cache`；runner `/tmp/p3t0_run.sh shadow …`）**：
+
+| 面 | 终值 |
+|---|---|
+| 影子摘要（70 档出摘要） | **70/70 档 `decisions=0 agree=0 old_stricter=0 old_looser=0 unknown=0 unknown_bridge=0 unknown_engine=0 unknown_engine_uncovered=0 unknown_engine_budget=0`** |
+| 站点直方图 | `assign-node=24996 · fn-body-ret=5911 · if-branch=2045 · struct-field-type=28 · array-elem-type=4 · generic-apply-base=2`（`assign-binary`/`generic-arg`/`hotpatch-ret`/`unify-fallback` = 0） |
+| `check` rc 分布 | 34×0 / 38×1 |
+
+**沿革对照（各时点口径，仅历史）**：P1 26,704 次判定（`old_looser=0`，unknown 9 = 同名多行）→ P2a 26,989 agree 全额 → P3a 收官 30,128 → P3b 收官 32,620 → P5 T2 `32767` → P5 T3 `32917` → P5 T3b `32922` → P5 T4 `32988`（**最后一次有 meaning 的读数**：`decisions=agree`，全差异桶 0）→ **P5 T4 后停摆 `decisions=0`**（对照物已删）→ **P5 T5 通道下线**。
+
+**口径继承（对后续批次 = 强制）**：① **N 面（数组长度）对拍恒 0 是失明而非等价**（legacy N-free）⇒ N 面证据只能来自行为探针；② 本通道对**载体面**（TYPE/IFACE 段、corearch 读回、DFNode.TK 槽、运行期表示位）**零覆盖**——载体正确性证据 = 结构性断言 + 读回对拍 + 定向探针；③ 「零差异」只在通道存活期 = 证据，此后引用 = 空洞。**替代网与判据见 `TODO.md` #48 与 `.superpowers/sdd/p5-task5-report.md` §5。**

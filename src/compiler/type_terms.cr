@@ -77,8 +77,8 @@ fn tt_mod(h: int, cap: int) -> int {
 // common_files），而 type_terms.cr 当时只入 corec 清单——共享文件里引用引擎符号 =
 // corearch 解析期 `Undefined name: ESZ_TYPE_TERM / tt_reindex` 硬失败（实测）。
 // 引擎自持扩容 + 常量，共享面零改动 → **corearch 不受影响**（其清单无 checker/引擎层）。
-// **corelsp 更正（R2 P1 Task 2 评审 M3）**：自 Task 2 起 checker 的 type_equal 包装引用
-// 影子层（ty_shadow.cr）→ corelsp 清单必须链接 引擎 + 影子层，本文件已在其中
+// **corelsp 更正（R2 P1 Task 2 评审 M3）**：自 Task 2 起 checker 的判定入口引用
+// 桥接层（ty_shadow.cr）→ corelsp 清单必须链接 引擎 + 桥接层，本文件已在其中
 // （build_selfhost_native.py 的 corelsp_files）；「corelsp 不受影响」的旧半句已不成立。
 fn grow_type_terms(needed: int) {
     if needed < g_type_term_cap { return; }
