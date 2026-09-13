@@ -125,8 +125,11 @@ fn arr_len_lit_of(arr_var: int) -> int {
     }
     if ti == TI_STR {
         prod := r64(g_df_var_producer, arr_var * 8);
+        // R2 P5 Task 2（D19）：读 **派生码**（不是 40 槽——单槽化后 40 槽 = 类型项引用）；
+        // 常量节点的行是原子基行 ⇒ 派生码逐字节 ≡ 单槽化前该槽的混用码。
         if prod >= 0 && r64(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE) == IR_CONST &&
-           r64(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_TK) == TI_STR {
+           sh_dfn_code_of_slots(r64(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_TK),
+                                r64(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_AUX)) == TI_STR {
             return istr_len(r64(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1));
         }
     }
@@ -335,15 +338,17 @@ fn emit(opcode: int, dest: int, src1: int, src2: int, src3: int, type_kind: int)
     iri_set_s1(idx, src1);
     iri_set_s2(idx, src2);
     iri_set_s3(idx, src3);
-    iri_set_tk(idx, type_kind);
+    // R2 P5 Task 2（D19 单槽化）：类型面**单源** = DFNode 的（项, 辅码）两槽。
+    // 本处是**唯一**拆分点：同一次 sh_tk_split 同时喂 DFNode 两槽与 iri_tk 的派生码
+    // （sh_dfn_code_of_slots）——既无第二真源，也不可能两处漂移。
+    sh_tk_split(opcode, type_kind);
+    iri_set_tk(idx, sh_dfn_code_of_slots(g_sh_slot_term, g_sh_slot_aux));
     g_ir_instr_count = idx + 1;
     // Build dataflow graph (.cir) in parallel
-    // R2 P4 Task 4（D15）：项槽在 **emit 期**派生（允许清单制，见 sh_tk_term_of_code
-    // 头注）——不得后移到 save 前（快照在 IR 生成期逐函数写 ⇒ 后填必然冷/暖分歧）。
-    // 代价 = 每 emit 一次桥接查询（清单外 op = 两次整数比较即返回；清单内 =
-    // sh_term_of_ti 的原生快路径/桥接缓存，实测耗时见报告 §5）。
-    df_create_node(opcode, dest, src1, src2, src3, type_kind,
-                   sh_tk_term_of_code(opcode, type_kind));
+    // 拆分时点 = **emit 期**（不得后移到 save 前：快照在 IR 生成期逐函数写 ⇒ 后填
+    // 必然冷/暖分歧）。代价 = 每 emit 一次分类查询（非类型面 op = 几次整数比较即
+    // 返回；类型面 op = sh_term_of_ti 的原生快路径/桥接缓存，实测耗时见报告 §6）。
+    df_create_node(opcode, dest, src1, src2, src3, g_sh_slot_term, g_sh_slot_aux);
 }
 
 fn new_label() -> int {
@@ -1754,8 +1759,16 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
         }
 
         // Hotpatch function call: emit IR_HOTPATCH_ROUTE instead of IR_CALL
+        // R2 P5 Task 2（F1 裁决）：第 6 实参**必须显式给**。修复前本调用点只传 5 参，
+        // 而 `emit` 形参 6 个 ⇒ 第 6 参 = **残留寄存器值**（corec 由 Python bootstrap
+        // 生成：bootstrap/corec/backend/x86_64_stack_asm.py:222-226 只为实际存在的
+        // 实参写寄存器，r9 保持前序计算的残留 ⇒ 实测同一语料两种程序形状得 0 / 4 两值；
+        // 自托管语义下缺省实参 = 0）。op39 的类型面 = 「无」（Task 0 表 A），故显式 0。
+        // 已裁决偏差登记：含 hotpatch 的语料该节点码 4→0（该值本是垃圾、零消费者；
+        // canary 语料 ptr_arith 不含 hotpatch ⇒ 不受影响）。把未定义行为烘进分类表
+        // 不可接受——分类表要求「每格有依据」。
         if func_ni >= 0 && is_hotpatch_func(func_ni) != 0 {
-            emit(IR_HOTPATCH_ROUTE, dest, func_ni, first_arg_var, ac);
+            emit(IR_HOTPATCH_ROUTE, dest, func_ni, first_arg_var, ac, 0);
             return dest;
         }
         // Extern function call: emit IR_CALL_EXTERN for FFI dispatch

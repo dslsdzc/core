@@ -244,6 +244,9 @@ fn init_types() {
     // R2 P2a Task 3：判定回落计数随之归零（类型行号空间作废 → 计数只对本编译期有意义；
     // LSP 每请求走 check_all → 本行 → 计数不跨请求累积）
     g_replace_unknown = 0; g_replace_bridge = 0;
+    // R2 P5 Task 2（D23）：单槽化建项失败位同生命周期（类型行号空间作废 ⇒ 该位只对本
+    // 编译期有意义；LSP 每请求 init_types ⇒ 不跨请求累积）。
+    g_tk_face_fail = 0;
     alloc_type(TYP_BASE, TY_INT, 0);     // TI_INT = 0
     alloc_type(TYP_BASE, TY_DEX, 0);   // TI_DEX = 1
     alloc_type(TYP_BASE, TY_BOOL, 0);    // TI_BOOL = 2

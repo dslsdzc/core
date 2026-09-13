@@ -41,9 +41,12 @@
 // 本批要消灭的静默类。**且**「把 f(tk) 的纯函数值与其入参并存于同一记录」=
 // 第二真源（本仓反复治过的病），分歧时盘面值静默胜出。
 // 修正（根因级）= **不落盘，装载时按 emit 的等价时点重派生**：load_cir_cache
-// 逐节点（节点序 = emit 序）调 sh_tk_term_of_code(opcode, tk)——opcode/tk 本就
+// 逐节点（节点序 = emit 序）调 sh_tk_split(opcode, tk)——opcode/派生码本就
 // 在盘记录内（单源），派生值与冷路径**同项同索引**（项表按同序追加 ⇒ 两进程
 // 索引空间对齐，由 T4 用例的冷/暖 dump 逐行相等断言锁住）。
+// R2 P5 Task 2（D19 单槽化）后：盘上仍只有**一个** tk 字段（= 派生码，由
+// sh_dfn_code_of_slots 产出），装载侧由它同时重派生**两槽**（项引用 + 辅码）——
+// 盘面布局/版本位与 P4 逐字节相同（单槽化只在内存语义面）。
 CIR_CACHE_MAGIC : int = -4485090715960753727;
 CIR_CACHE_VER   : int = 17;
 
@@ -210,8 +213,9 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int {
     // made a full self-host build perform millions of syscalls on its cache.
     total_size : ., mut = 48 + name_len;  // v17 头部 = magic/ver/identity/fp/sig/name_len
     total_size = total_size + 8 + var_count * 24;
-    // 节点盘记录 = 8 字段 × 8B = 64B（内存记录的**前八槽**；第 9 槽 OFF_DF_TK_TERM
-    // 不落盘——装载时按 opcode/tk 重派生，见文件头 v18 注）。
+    // 节点盘记录 = 8 字段 × 8B = 64B（R2 P5 Task 2 起 = {op,dest,s1,s2,s3,**派生码**,
+    // first_edge,edge_count}；第 9 槽 OFF_DF_AUX 不落盘——两槽装载时按派生码重派生，
+    // 见文件头 v18 注）。
     total_size = total_size + 8 + node_count * 64;
     total_size = total_size + 8 + g_df_edge_count * 32;  // v5: 4 fields incl. kind
     total_size = total_size + 8 + instr_count * 48;
@@ -267,12 +271,15 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int {
         w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S1));
         w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S2));
         w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S3));
-        w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK));
+        // R2 P5 Task 2（D19）：盘记录承载**派生码**（不是 40 槽——单槽化后 40 槽 =
+        // 进程内类型项引用，不得跨进程/跨复位，D20；辅码槽同理不入盘）。派生码逐节点
+        // ≡ 单槽化前的混用码 ⇒ 盘面逐字节不变（布局与版本位零改动）。
+        w64_cir(fd, sh_dfn_code_of_slots(r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK),
+                                          r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_AUX)));
         w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_FIRST_EDGE));
         w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_EDGE_COUNT));
-        // 第 9 槽（OFF_DF_TK_TERM）**不写盘**：项引用是 (opcode, tk) 的纯函数，
-        // 装载侧按 emit 的等价时点重派生（文件头 v18 注——实测快照携带进程内
-        // 索引会在暖路径整体悬空）。
+        // 项槽/辅码槽**不写盘**：两槽都是 (opcode, 派生码) 的纯函数，装载侧按 emit 的
+        // 等价时点重派生（文件头 v18 注——实测快照携带进程内索引会在暖路径整体悬空）。
         ni2 = ni2 + 1;
     }
 
@@ -504,16 +511,18 @@ fn load_cir_cache(path: string, func_idx: int) -> int {
         w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S1, r64(data, pos)); pos = pos + 8;
         w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S2, r64(data, pos)); pos = pos + 8;
         w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S3, r64(data, pos)); pos = pos + 8;
-        w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK, r64(data, pos)); pos = pos + 8;
+        // R2 P5 Task 2（D19）：盘上只有**一个** tk 字段（派生码）；两槽皆由它**重派生**
+        // ——时点 = emit 的等价点（逐函数、逐节点序），拆分器单源 = sh_tk_split，故项表
+        // 追加序与冷路径一致 ⇒ 冷/暖两态同项**同索引**（T4 用例逐行对拍）。项引用/辅码
+        // **不读盘**（进程内项引用跨进程必悬空；盘上不存第二份 f(tk) 值 = 无第二真源）。
+        tk_disk := r64(data, pos); pos = pos + 8;
+        // 装载侧变体（不置 D23 失败位——盘码可能落在暖进程更小的类型表之外，见
+        // ty_shadow.cr 的 sh_tk_split_load 注；缓存命中绝不因此让编译失败）。
+        sh_tk_split_load(r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE), tk_disk);
+        w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK, g_sh_slot_term);
+        w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_AUX, g_sh_slot_aux);
         w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_FIRST_EDGE, r64(data, pos)); pos = pos + 8;
         w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_EDGE_COUNT, r64(data, pos)); pos = pos + 8;
-        // R2 P4 Task 4（D15）：项槽**不读盘**，按本节点的 opcode/tk 重派生——时点
-        // = emit 的等价点（逐函数、逐节点序），故项表追加序与冷路径一致 ⇒ 冷/暖
-        // 两态项槽同项**同索引**（T4 用例逐行对拍；文件头 v18 注 = 为何不落盘）。
-        // 派生入参 = 刚恢复的两槽（单源，盘上无第二份 f(tk) 值）。
-        w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK_TERM,
-            sh_tk_term_of_code(r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE),
-                               r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK)));
         // Record var producer. 幽灵边修复（v7 注 A 裁决）缓存面：grow_df_arrays
         // 对新增长区播种 -1（dyn_arr.cr 同款注释）——快照内未产出 var（参数等）
         // 的 producer 槽恒 -1（修复前零页 = 0 =「节点 0」→ 缓存命中函数保留

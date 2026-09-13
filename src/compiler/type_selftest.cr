@@ -1577,11 +1577,11 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("bridge.slice_seq",
         (tt_a(t_slice) == AK_SEQUENCE && tt_c(t_slice) == tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil())), 1);
 
-    // --- R2 P4 Task 4（D15）：DFNode 项槽派生 = 允许清单制（sh_tk_term_of_code）---
-    // 8 例 = 3 正控（清单内 op × 合法行 ⇒ 与桥接层直译**同项**）+ 4 负控（旗标码 /
-    // 宽度码 / 「行合法但 op 不在清单」/ 越界与负值）+ 1 计数纪律。
+    // --- R2 P5 Task 2（D19/D21/D22/D23）：DFNode 类型面**单槽化** ---
+    // 形态 = 两槽（OFF_DF_TK 项引用 + OFF_DF_AUX 辅码）+ 派生码（sh_dfn_code_of_slots）；
+    // P4 的 `t4.tk_*` 用例保留（语义未变者原地；清单扩大/复合行走辅码者重钉）。
     // 负控的牙齿 = 每个「本该 -1」的用例都同时断言**直译路径非 -1**（证明拒绝出自
-    // 清单门而非「该行不可译」——否则门形同虚设也能绿）。
+    // 分类门而非「该行不可译」——否则门形同虚设也能绿）。
     total = total + 1; fails = fails + ts_check("t4.tk_const_int",
         (sh_tk_term_of_code(IR_CONST, TI_INT) == sh_term_of_ti(TI_INT) &&
          tt_a(sh_tk_term_of_code(IR_CONST, TI_INT)) == AK_INT), 1);
@@ -1592,34 +1592,145 @@ fn type_selftest_run() -> int {
         (sh_tk_term_of_code(IR_CONST, TI_DEX_S) == sh_term_of_ti(TI_DEX_S) &&
          tt_a(sh_tk_term_of_code(IR_CONST, TI_DEX_S)) == AK_DEX), 1);
     // 负控 ①：IR_BOUNDS_CHECK 的 tk 是旗标（1 = 动态上限），而 1 数值上 = TI_DEX 行
-    // ——直译有值 ⇒ 只能靠清单门挡住（凭空安 dex 项 = 本用例钉死的形态）。
+    // ——直译有值 ⇒ 只能靠分类门挡住（凭空安 dex 项 = 本用例钉死的形态）。
     total = total + 1; fails = fails + ts_check("t4.tk_bounds_flag1_rejected",
         (sh_tk_term_of_code(IR_BOUNDS_CHECK, 1) == -1 && sh_term_of_ti(1) >= 0), 1);
     // 负控 ②：IR_DEREF 的 tk 是访问宽度（8B），8 数值上 = TI_DEX_S 行（同款陷阱）。
     total = total + 1; fails = fails + ts_check("t4.tk_deref_width8_rejected",
         (sh_tk_term_of_code(IR_DEREF, 8) == -1 && sh_term_of_ti(TI_DEX_S) >= 0), 1);
-    // 负控 ③：「行合法（0 = TI_INT）但 op 不在清单」——清单外 op 不得因 tk 恰好合法而放行。
+    // 负控 ③（重钉：P5 T2 起 IR_CALL/IR_ALLOC 入类型行面 ⇒ 换成「面外」op）：
+    // 「行合法（0 = TI_INT）但 op 不在任何类型/辅码面」——面外 op 不得因 tk 恰好合法而放行。
     total = total + 1; fails = fails + ts_check("t4.tk_unlisted_op_valid_row_rejected",
         (sh_tk_term_of_code(IR_STORE, TI_INT) == -1 &&
-         sh_tk_term_of_code(IR_CALL, TI_INT) == -1 &&
-         sh_tk_term_of_code(IR_ALLOC, TI_INT) == -1 &&
+         sh_tk_term_of_code(IR_RETURN, TI_INT) == -1 &&
+         sh_tk_term_of_code(IR_MAKE_ENUM, TI_INT) == -1 &&
          sh_term_of_ti(TI_INT) >= 0), 1);
     // 负控 ④：行号越界 / 负值 ⇒ -1（不得当 0/1 用；不得读越界项表）。
     total = total + 1; fails = fails + ts_check("t4.tk_row_range_rejected",
         (sh_tk_term_of_code(IR_CONST, g_type_count) == -1 &&
          sh_tk_term_of_code(IR_BINARY, g_type_count + 7) == -1 &&
          sh_tk_term_of_code(IR_CONST, -1) == -1), 1);
-    // 计数纪律：本函数是载体面派生（非判定站点）⇒ 不得扰动影子对账的 hits 缓存计数
-    // （entries 仍随真实建项增长——那是装填因子输入，复原即欺骗扩容守卫）。
-    // 牙齿：必须取**非原生行**（原生行走 sh_native_ak 快路径，本就不进缓存 ⇒ 拿 TI_INT
-    // 测等于恒真断言）。数组行首次直译建项入缓存、二次直译必命中（+1）——本函数二次
-    // 调用若不复原计数，此处必红。
-    t4_arr_row := alloc_type(TYP_ARRAY, TI_INT, 3);
-    t4_arr_term := sh_term_of_ti(t4_arr_row);          // 预热：首次（miss）入桥接缓存
+    // 计数纪律（P5 T2 重钉：改走 TYP_DYN 行——数组行自本任务起是**复合行**，不再建项）。
+    // 本函数是载体面派生（非判定站点）⇒ 不得扰动影子对账的 hits 缓存计数（entries 仍
+    // 随真实建项增长——那是装填因子输入，复原即欺骗扩容守卫）。牙齿：必须取**非原生
+    // 行**（原生行走 sh_native_ak 快路径，本就不进缓存 ⇒ 拿 TI_INT 测等于恒真断言）。
+    // TYP_DYN 行首次直译建项入缓存、二次直译必命中（+1）——本函数二次调用若不复原
+    // 计数，此处必红。
+    t4_dyn_row := alloc_type(TYP_DYN, 0, 0);
+    t4_dyn_term := sh_term_of_ti(t4_dyn_row);          // 预热：首次（miss）入桥接缓存
     h4_before := sh_map_hits();
-    sk4 := sh_tk_term_of_code(IR_CONST, t4_arr_row);   // 缓存命中路径（本应 +1 hits）
+    sk4 := sh_tk_term_of_code(IR_CONST, t4_dyn_row);   // 缓存命中路径（本应 +1 hits）
     total = total + 1; fails = fails + ts_check("t4.tk_derivation_not_a_shadow_site",
-        ((t4_arr_term >= 0 && sk4 == t4_arr_term && sh_map_hits() == h4_before)), 1);
+        ((t4_dyn_term >= 0 && sk4 == t4_dyn_term && sh_map_hits() == h4_before)), 1);
+
+    // ── R2 P5 Task 2 新例 ①：原子行契约（D21）──
+    // TT_ATOM ∧ b ≥ 0 ⇒ b；union / cons / nil / 负 / 越界 ⇒ **-1**（显式，不得近似）。
+    t5s_ptr_row := alloc_type(TYP_PTR, TI_INT, 0);
+    t5s_ptr_term := sh_term_of_ti(t5s_ptr_row);
+    total = total + 1; fails = fails + ts_check("p5t2.atom_of_contract",
+        (sh_atom_of_term(sh_term_of_ti(TI_INT)) == TI_INT &&
+         sh_atom_of_term(t5s_ptr_term) == -1 &&            // 复合项：AK_PTR 的 b = -1
+         sh_atom_of_term(tt_nil()) == -1 &&
+         sh_atom_of_term(tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil())) == -1 &&
+         sh_atom_of_term(-1) == -1 &&
+         sh_atom_of_term(tt_count() + 9) == -1), 1);
+
+    // ── 新例 ②：类型行面 —— 改走 split，断言**两槽**（项 + 空辅码）+ 互斥 ──
+    sh_tk_split(IR_BINARY, TI_STR);
+    t5s_bin_str_term := g_sh_slot_term;
+    t5s_bin_str_aux := g_sh_slot_aux;
+    total = total + 1; fails = fails + ts_check("p5t2.slot_type_face_atomic",
+        (t5s_bin_str_term == sh_term_of_ti(TI_STR) && t5s_bin_str_aux == 0 &&
+         sh_dfn_code_of_slots(t5s_bin_str_term, t5s_bin_str_aux) == TI_STR), 1);
+
+    // ── 新例 ③：类型行面扩面（Task 0 再裁的 5 个 op 正控）──
+    sh_tk_split(IR_ALLOC, TI_UNIT); t5s_a1 := g_sh_slot_term; t5s_a1x := g_sh_slot_aux;
+    sh_tk_split(IR_CALL, TI_INT); t5s_a2 := g_sh_slot_term; t5s_a2x := g_sh_slot_aux;
+    sh_tk_split(IR_LOAD, TI_INT); t5s_a3 := g_sh_slot_term; t5s_a3x := g_sh_slot_aux;
+    sh_tk_split(IR_I2F, TI_DEX); t5s_a4 := g_sh_slot_term; t5s_a4x := g_sh_slot_aux;
+    sh_tk_split(IR_F2I, TI_DEX); t5s_a5 := g_sh_slot_term; t5s_a5x := g_sh_slot_aux;
+    total = total + 1; fails = fails + ts_check("p5t2.slot_type_face_extended",
+        (t5s_a1 == sh_term_of_ti(TI_UNIT) && t5s_a1x == 0 && tt_a(t5s_a1) == AK_UNIT &&
+         t5s_a2 == sh_term_of_ti(TI_INT) && t5s_a2x == 0 &&
+         t5s_a3 == sh_term_of_ti(TI_INT) && t5s_a3x == 0 &&
+         t5s_a4 == sh_term_of_ti(TI_DEX) && t5s_a4x == 0 && tt_a(t5s_a4) == AK_DEX &&
+         t5s_a5 == sh_term_of_ti(TI_DEX) && t5s_a5x == 0 && tt_a(t5s_a5) == AK_DEX), 1);
+
+    // ── 新例 ④：复合行 ⇒ 走辅码（F2 裁决；码保真，派生码 ≡ 旧混用码）──
+    // 牙齿：先证该行**可译**（sh_term_of_ti ≥ 0）——否则「term = -1」可能出自不可译，
+    // 门形同虚设也能绿。
+    sh_tk_split(IR_BINARY, t5s_ptr_row);
+    total = total + 1; fails = fails + ts_check("p5t2.slot_composite_row_to_aux",
+        (t5s_ptr_term >= 0 && g_sh_slot_term == -1 && g_sh_slot_aux == t5s_ptr_row &&
+         sh_dfn_code_of_slots(g_sh_slot_term, g_sh_slot_aux) == t5s_ptr_row), 1);
+    // 同款：数组行（AK_SEQUENCE 的 b = 长度或 -1 ⇒ 复合）。
+    t5s_arr_row := alloc_type(TYP_ARRAY, TI_INT, 3);
+    sh_tk_split(IR_CONST, t5s_arr_row);
+    total = total + 1; fails = fails + ts_check("p5t2.slot_array_row_to_aux",
+        (sh_term_of_ti(t5s_arr_row) >= 0 && g_sh_slot_term == -1 &&
+         g_sh_slot_aux == t5s_arr_row &&
+         sh_dfn_code_of_slots(g_sh_slot_term, g_sh_slot_aux) == t5s_arr_row), 1);
+
+    // ── 新例 ⑤：辅码面 —— 旗标 / 宽度 / 计数（含负码）原码保真 ──
+    sh_tk_split(IR_BOUNDS_CHECK, 1); t5s_f1t := g_sh_slot_term; t5s_f1a := g_sh_slot_aux;
+    sh_tk_split(IR_BOUNDS_CHECK, 0); t5s_f0t := g_sh_slot_term; t5s_f0a := g_sh_slot_aux;
+    sh_tk_split(IR_DEREF, 8); t5s_d8t := g_sh_slot_term; t5s_d8a := g_sh_slot_aux;
+    sh_tk_split(IR_STORE_PTR, 4); t5s_d4t := g_sh_slot_term; t5s_d4a := g_sh_slot_aux;
+    sh_tk_split(IR_SPAWN, -1); t5s_spt := g_sh_slot_term; t5s_spa := g_sh_slot_aux;
+    total = total + 1; fails = fails + ts_check("p5t2.slot_aux_face_codes",
+        (t5s_f1t == -1 && t5s_f1a == 1 && sh_dfn_code_of_slots(t5s_f1t, t5s_f1a) == 1 &&
+         t5s_f0t == -1 && t5s_f0a == 0 && sh_dfn_code_of_slots(t5s_f0t, t5s_f0a) == 0 &&
+         t5s_d8t == -1 && t5s_d8a == 8 && sh_dfn_code_of_slots(t5s_d8t, t5s_d8a) == 8 &&
+         t5s_d4t == -1 && t5s_d4a == 4 &&
+         t5s_spt == -1 && t5s_spa == -1 && sh_dfn_code_of_slots(t5s_spt, t5s_spa) == -1), 1);
+    // 数值陷阱复证：辅码 1 / 8 直译确有其项（TI_DEX / TI_DEX_S 行）——分类门才是拦阻者。
+    total = total + 1; fails = fails + ts_check("p5t2.aux_trap_rows_translatable",
+        (sh_term_of_ti(1) >= 0 && tt_a(sh_term_of_ti(1)) == AK_DEX &&
+         sh_term_of_ti(TI_DEX_S) >= 0 && tt_a(sh_term_of_ti(TI_DEX_S)) == AK_DEX &&
+         sh_tk_term_of_code(IR_STORE_PTR, TI_DEX_S) == -1), 1);
+
+    // ── 新例 ⑥：面外 op ⇒ 两槽皆空、派生码 0（含 LOAD_ENUM_TAG = Task 0 再裁「无」）──
+    sh_tk_split(IR_STORE, 0); t5s_n1t := g_sh_slot_term; t5s_n1a := g_sh_slot_aux;
+    sh_tk_split(IR_LOAD_ENUM_TAG, 0); t5s_n2t := g_sh_slot_term; t5s_n2a := g_sh_slot_aux;
+    sh_tk_split(IR_LABEL, 0); t5s_n3t := g_sh_slot_term; t5s_n3a := g_sh_slot_aux;
+    total = total + 1; fails = fails + ts_check("p5t2.slot_none_face_empty",
+        (t5s_n1t == -1 && t5s_n1a == 0 && sh_dfn_code_of_slots(t5s_n1t, t5s_n1a) == 0 &&
+         t5s_n2t == -1 && t5s_n2a == 0 && t5s_n3t == -1 && t5s_n3a == 0), 1);
+
+    // ── 新例 ⑦：派生码契约（辅码优先 / 无项⇒0 / 不可逆⇒-1 显式）──
+    total = total + 1; fails = fails + ts_check("p5t2.code_derivation_contract",
+        (sh_dfn_code_of_slots(sh_term_of_ti(TI_STR), 0) == TI_STR &&
+         sh_dfn_code_of_slots(-1, 0) == 0 &&
+         sh_dfn_code_of_slots(-1, 7) == 7 &&
+         sh_dfn_code_of_slots(t5s_ptr_term, 0) == -1 &&      // 复合项入项槽 = 无法派生（显式响亮）
+         sh_dfn_code_of_slots(sh_term_of_ti(TI_INT), 9) == 9), 1);   // 辅码优先（互斥由拆分器保证）
+
+    // ── 新例 ⑧：互斥不变量（D22-②）逐 op 复核（面 0 / 面 1 / 面 2 各取代表）──
+    sh_tk_split(IR_CONST, TI_STR); t5s_m1 := (g_sh_slot_term >= 0 && g_sh_slot_aux == 0);
+    sh_tk_split(IR_DEREF, 8); t5s_m2 := (g_sh_slot_term == -1 && g_sh_slot_aux != 0);
+    sh_tk_split(IR_STORE, 0); t5s_m3 := (g_sh_slot_term == -1 && g_sh_slot_aux == 0);
+    t5s_m_ok := 1;
+    if t5s_m1 == 0 || t5s_m2 == 0 || t5s_m3 == 0 { t5s_m_ok = 0; }
+    total = total + 1; fails = fails + ts_check("p5t2.slot_mutual_exclusion", t5s_m_ok, 1);
+
+    // ── 新例 ⑨：F1 修正（IR_HOTPATCH_ROUTE 的类型面 = 无；显式 0 实参 ⇒ 两槽皆空）──
+    sh_tk_split(IR_HOTPATCH_ROUTE, 0);
+    total = total + 1; fails = fails + ts_check("p5t2.hotpatch_route_no_face",
+        (g_sh_slot_term == -1 && g_sh_slot_aux == 0 &&
+         sh_dfn_code_of_slots(g_sh_slot_term, g_sh_slot_aux) == 0), 1);
+
+    // ── 新例 ⑩：D23 建项失败位（越界类型面行 ⇒ 计数 +1；复合行**不**置位）──
+    t5s_fail_before := g_tk_face_fail;
+    sh_tk_split(IR_CONST, g_type_count);
+    t5s_fail_after := g_tk_face_fail;
+    t5s_out_t := g_sh_slot_term;               // 出参须**即时**取（下一次 split 会覆写）
+    t5s_out_a := g_sh_slot_aux;
+    sh_tk_split(IR_BINARY, t5s_ptr_row);      // 复合行 = 域内可译 ⇒ 不得置位
+    t5s_fail_final := g_tk_face_fail;
+    g_tk_face_fail = 0;                        // 复位（不污染后续落盘闸用例）
+    total = total + 1; fails = fails + ts_check("p5t2.d23_build_fail_bit",
+        (t5s_fail_after == t5s_fail_before + 1 && t5s_fail_final == t5s_fail_after &&
+         t5s_out_t == -1 && t5s_out_a == g_type_count), 1);
     // TYP_NAMED：AK_NAMED + 行号存 b 槽（引擎不展开 → 判定 UNKNOWN = P1 预期未覆盖面）
     // ⚠️ 本行**刻意走裸分配**（P2a Task 1 后 8 个生产分配点已收敛到 alloc_named_type）：
     // 它构造的是人造 TYP_NAMED 行（键 1201 不对应任何真名），登记进生产侧表会用假键污染

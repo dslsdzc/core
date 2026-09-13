@@ -354,6 +354,15 @@ IP_METHOD : int = 28; IP_AS : int = 29;  IP_COND : int = 30;  IP_COND_BOOL : int
 g_shadow_map : string, mut;        g_shadow_map_cap : int, mut;
 g_shadow_hits : int, mut;          g_shadow_entries : int, mut;
 
+// R2 P5 Task 2（D19/D23）：DFNode 类型面单槽化的拆分出参 + 建项失败位。
+// 出参（Core 无多返回值）：`sh_tk_split` 先置默认（-1 / 0）再写 ⇒ 无残留状态；
+// 读点 = ir_gen.cr 的 emit 与 cir_cache.cr 的装载侧（唯一两个分流出参消费面）。
+// g_tk_face_fail：类型面 op 的 tk **不可译**（越出类型表 / 桥接缺口，D23）⇒ 计数 +1，
+// save 侧拒绝落盘（rc=1 + 诊断，计数入消息）；复合行（域内可译、项不可逆）= 正常
+// 路径**不置位**。复位 = init_types()（同 g_replace_* 的生命周期）。
+g_sh_slot_term : int, mut;         g_sh_slot_aux : int, mut;
+g_tk_face_fail : int, mut;
+
 // R2 P1 Task 2：影子对拍挂点状态（`--type-shadow`）。**全部只在影子开时被写**——
 // 关时**除 `g_shadow_on` 自身外**连读都不发生（`type_equal` 包装、`sh_site_begin` 早退
 // （Task 4 M3）、`sh_report`/`sh_dump_write` 首行各查它一次）→ 关态产物逐字节不变。

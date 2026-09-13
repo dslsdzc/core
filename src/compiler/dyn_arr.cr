@@ -100,25 +100,28 @@ OFF_SI_FIELD_COUNT : int = 392;
 OFF_SI_GENERIC_NAMES : int = 400; OFF_SI_GENERIC_COUNT : int = 432;
 
 // DFNode sizes and offsets
-// R2 P4 Task 4（D15 = DFNode.TK 升格，迁移期双槽）：记录 64 → 72B，新增
-//   OFF_DF_TK_TERM = 类型项引用（g_type_terms 行号；-1 = 无项）。
-// 契约（三条，缺一即静默类）：
-//   ① **OFF_DF_TK 语义/字节零变化**——仍是「基类型常量槽」（emit 的 type_kind 原样，
-//      含 IR_BOUNDS_CHECK 的 1 = 动态上限旗标、IR_DEREF/IR_STORE_PTR 的宽度码）。
-//      `.ccr` NOD 36B 记录**只读 tk 槽**（ccr_io.cr 的 iri_tk）⇒ 盘面零改动。
-//   ② TK_TERM 只在 **emit 期**由桥接层派生（ir_gen.cr 的 emit → sh_shadow 的
-//      sh_tk_term_of_code，允许清单制：仅 IR_CONST/IR_BINARY ∧ tk 是合法类型行）
-//      ——时点不得后移（快照在 IR 生成期逐函数写，后填 ⇒ 冷/暖恢复路径分歧）。
-//   ③ 唯一写点 = df_create_node（dataflow.cr，本文件不引用桥接符号）+ `.cir` 快照
-//      读回（cir_cache.cr 第 9 槽，CIR_CACHE_VER 17→18）。
-// 消费面：本批 = 内容断言（selftest + test_ccr_types 的 T4 节）；`tk` 的既有消费者
-// （instr.cr/regalloc/dump/ccr_io）一律读 OFF_DF_TK 或 iri_tk，零改动。
-ESZ_DFNODE : int = 72;   // opcode,dest_var,src1,src2,src3,type_kind,first_edge,edge_count,tk_term = 9x8
+// R2 P5 Task 2（D19 单槽化 α = 槽语义对调 + 辅码显式分离）：类型面**单源**。
+//   OFF_DF_TK  (40) = **类型项引用**（g_type_terms 行号；-1 = 无项）= 类型面唯一真源；
+//   OFF_DF_AUX (64) = **辅码**（旗标/宽度/计数 + 不可入项的原始类型行码；0 = 无）。
+// 契约（四条，缺一即静默类）：
+//   ① **字节零变化**：ESZ_DFNODE 保持 72B，两槽只是**语义对调**（原 40 = 混用码、
+//      原 64 = 项引用）⇒ `.ccr`（NOD 36B）与 `.cir` 快照（节点 64B）布局零改动，
+//      `CCR_VERSION=8` / `CIR_CACHE_VER=17` 均不 bump。
+//   ② **互斥**（D22-②）：辅码 ≠ 0 ⇒ 项 = -1；项 ≥ 0 ⇒ 辅码 = 0（由拆分器构造保证）。
+//   ③ **码 = 派生量**（D22-①/D23）：`iri_tk` / `.ccr` NOD / `.cir` 快照里的类型码
+//      一律由 `sh_dfn_code_of_slots(项, 辅码)` 派生，**不得**当独立真源存储或读回
+//      （派生码逐节点 ≡ 单槽化前的混用码；`.ccr`/`.cir` 面因此逐字节不变）。
+//   ④ 写点 = df_create_node（dataflow.cr，本文件不引用桥接符号）+ `.cir` 快照装载
+//      侧的**重派生**（cir_cache.cr——盘面只承载派生码，不入项/辅码槽：进程内项
+//      引用不得跨进程，D20）。
+// 拆分器（(opcode, tk) → (项, 辅码)）单源 = ty_shadow.cr 的 sh_tk_split；既有消费者
+// （instr.cr/regalloc/lower_to_core/dump/ccr_io）读的是**派生码**，零改动。
+ESZ_DFNODE : int = 72;   // opcode,dest_var,src1,src2,src3,tk_term,first_edge,edge_count,tk_aux = 9x8
 OFF_DF_OPCODE : int = 0;     OFF_DF_DEST : int = 8;
 OFF_DF_S1 : int = 16;        OFF_DF_S2 : int = 24;
-OFF_DF_S3 : int = 32;        OFF_DF_TK : int = 40;
+OFF_DF_S3 : int = 32;        OFF_DF_TK : int = 40;   // ★语义（P5 T2）：类型项引用（-1 = 无项）
 OFF_DF_FIRST_EDGE : int = 48; OFF_DF_EDGE_COUNT : int = 56;
-OFF_DF_TK_TERM : int = 64;   // R2 P4 Task 4（D15）：类型项引用（-1 = 无项；迁移期双槽）
+OFF_DF_AUX : int = 64;   // P5 T2（D19，原 OFF_DF_TK_TERM 槽位）：辅码（0 = 无）
 
 // DFEdge sizes and offsets
 ESZ_DFEDGE : int = 32;   // from_node,to_node,next_out,kind = 4x8

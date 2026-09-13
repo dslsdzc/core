@@ -253,7 +253,11 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int {
         t1 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S1);
         t2 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S2);
         t3 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S3);
-        t4 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_TK);
+        // R2 P5 Task 2（D19）：这里是**派生码**（不是槽）——单槽化后 40 槽 = 类型项
+        // 引用。`ir_interp_binary` 当前不消费该参（槽 3 的 op 码决定运算），值仍与
+        // 单槽化前逐字节相同（派生码 ≡ 旧混用码）。
+        t4 := sh_dfn_code_of_slots(r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_TK),
+                                   r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_AUX));
         if op2 == 1 && d2 >= 0 { w64(g_ir_vals, d2 * 8, t1); }
         if op2 == 2 && t1 >= 0 && t2 >= 0 { ir_interp_binary(d2, t1, t2, t3, t4); }
         if op2 == 49 || op2 == 50 {
@@ -543,7 +547,9 @@ fn ir_interpret() -> int {
         s1 := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_S1);
         s2 := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_S2);
         s3 := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_S3);
-        ti := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_TK);
+        // R2 P5 Task 2（D19）：派生码（同上一处；IR_BINARY 传参，当前不消费）。
+        ti := sh_dfn_code_of_slots(r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_TK),
+                                   r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_AUX));
 
         if op == 1  { if d >= 0 { w64(g_ir_vals, d * 8, s1); } }  // IR_CONST（dex 的 s1 为缩放整数）
         if op == 5  { if s1 >= 0 { return r64(g_ir_vals, s1 * 8); } return 0; }  // IR_RETURN

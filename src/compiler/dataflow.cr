@@ -89,13 +89,14 @@ fn sg_pop() {
 
 // --- Node creation ---
 
-// R2 P4 Task 4（D15）：`tk_term` = 类型项引用（g_type_terms 行号；-1 = 无项），由
-// **调用方**（唯一调用点 = ir_gen.cr 的 emit）经桥接层派生后传入。本文件仍属 corec
+// R2 P5 Task 2（D19 单槽化）：`tk_term` = 类型项引用（g_type_terms 行号；-1 = 无项）、
+// `tk_aux` = 辅码（旗标/宽度/计数/不可入项的原始行码；0 = 无），由**调用方**
+// （唯一调用点 = ir_gen.cr 的 emit）经 `sh_tk_split` 派生后传入。本函数仍属 corec
 // 侧（build_selfhost_native.py 的 corec_files），但**不引用任何前端/桥接符号**
 // ——按「共享文件零前端依赖」纪律留余量（dataflow.cr 若某日并入 corearch 清单，
 // 本函数零改动即可链接）。参数语义 = 「存储」：本函数只落槽，不解释、不校验、
-// 不派生（派生规则单源 = ty_shadow.cr 的 sh_tk_term_of_code）。
-fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, type_kind: int, tk_term: int) -> int {
+// 不派生（派生规则单源 = ty_shadow.cr 的 sh_tk_split；码由 sh_dfn_code_of_slots 派生）。
+fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, tk_term: int, tk_aux: int) -> int {
     nid := g_df_node_count;
     grow_df_nodes(nid + 1);
     grow_df_node_region(nid + 1);
@@ -105,8 +106,8 @@ fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, type_
     w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_S1, src1);
     w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_S2, src2);
     w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_S3, src3);
-    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_TK, type_kind);
-    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_TK_TERM, tk_term);   // R2 P4 Task 4
+    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_TK, tk_term);   // R2 P5 Task 2：类型项引用
+    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_AUX, tk_aux);   // R2 P5 Task 2：辅码
     w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_FIRST_EDGE, -1);
     w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_EDGE_COUNT, 0);
     g_df_node_count = nid + 1;
@@ -118,7 +119,9 @@ fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, type_
     }
 
     // Add edges for src fields that are IR variables (based on opcode)
-    df_connect_srcs(nid, opcode, src1, src2, src3, type_kind);
+    // 第 6 参 = 辅码（IR_BOUNDS_CHECK 的 `!= 0` = 动态上限旗标——单槽化后旗标在
+    // 辅码槽；见 df_connect_srcs 的 IR_BOUNDS_CHECK 分支）。
+    df_connect_srcs(nid, opcode, src1, src2, src3, tk_aux);
     // VSDG state chain（kind=1）不在此连接——见 df_replay_state_chain 头注
     // （时点：真纯度需要全程序 IR 体 ⇒ 链统一在 IR 生成结束后重建）。
     return nid;
@@ -278,7 +281,7 @@ fn df_use_var(consumer_node: int, var_idx: int) {
 
 // Connect source operands based on opcode semantics.
 // Only fields that carry IR variable indices create dataflow edges.
-fn df_connect_srcs(node_id: int, opcode: int, s1: int, s2: int, s3: int, type_kind: int) {
+fn df_connect_srcs(node_id: int, opcode: int, s1: int, s2: int, s3: int, tk_aux: int) {
     if opcode == IR_CONST { return; }  // all srcs are scalar values/labels
 
     if opcode == IR_BINARY {
@@ -354,7 +357,9 @@ fn df_connect_srcs(node_id: int, opcode: int, s1: int, s2: int, s3: int, type_ki
     }
     if opcode == IR_BOUNDS_CHECK {
         df_use_var(node_id, s1);
-        if type_kind != 0 { df_use_var(node_id, s2); }
+        // 单槽化（P5 T2）：旗标已从混用 tk 槽移入**辅码**槽 ⇒ 读 tk_aux（值域不变：
+        // 1 = 动态上限 ⇒ 上限变量 s2 也是数据依赖；0 = 字面量上限 ⇒ 不连）。
+        if tk_aux != 0 { df_use_var(node_id, s2); }
         return;
     }
     if opcode == IR_REF {
@@ -452,7 +457,13 @@ fn lower_to_ccr() {
         iri_set_s1(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1));
         iri_set_s2(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2));
         iri_set_s3(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3));
-        iri_set_tk(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_TK));
+        // R2 P5 Task 2（D19）：iri_tk = **派生码**（不是槽值）——单槽化后 40 槽存的是
+        // 类型项引用，码一律经 sh_dfn_code_of_slots 派生（派生码逐节点 ≡ 单槽化前的
+        // 混用码 ⇒ .ccr 字节不变）。本文件对桥接符号的依赖仅此一处（df_create_node
+        // 本身保持零前端依赖；lower_to_ccr 本就引 checker 侧 purity_op_effect）。
+        iri_set_tk(idx, sh_dfn_code_of_slots(
+            r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_TK),
+            r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_AUX)));
         g_ir_instr_count = idx + 1;
         ni = ni + 1;
     }

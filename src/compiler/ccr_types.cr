@@ -293,7 +293,17 @@ fn ccr_iface_seg_build() -> int {
 
 // save 前单入口（main.cr 两处调用点共用：D13 装填 → 两段体构造）——-1 = 拒绝落盘。
 // R2 P4 Task 3：原 ccr_type_prepare_save 更名（IFACE 段同批入缓冲；调用点三处同步）。
+// R2 P5 Task 2（D23）：单槽化的**建项失败闸**也在此（类型面 op 的类型行不可译 ⇒ 拒绝
+// 落盘，rc=1 + 诊断）——三态纪律：不可译**不得**静默留空项（那会让 .ccr 的 NOD 类型码
+// 静默降级）。时点在本函数入口：拆分器（emit 期与 .cir 装载侧）已把失败计数写好，
+// 而落盘是最后一道闸（装填/段构造都不看该项面 ⇒ 不在入口拦就没人拦）。
 fn ccr_seg_prepare_save() -> int {
+    if g_tk_face_fail != 0 {
+        print("error: ");
+        print_i(g_tk_face_fail);
+        println(" type-face DF node(s) with untranslatable type row — refusing to save .ccr (D23)");
+        return -1;
+    }
     if ccr_type_populate() != 0 { return -1; }
     if ccr_type_seg_build() != 0 { return -1; }
     return ccr_iface_seg_build();

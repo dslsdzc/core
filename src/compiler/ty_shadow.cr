@@ -342,49 +342,145 @@ fn sh_term_of_ti(ti: int) -> int {
     return term;
 }
 
-// ─── R2 P4 Task 4（D15）：DFNode 项槽派生（允许清单制）───
-// 出处 = `emit` 的 type_kind（DFNode 的 tk 槽）→ 类型项引用。**tk 是混用槽**：
-// 同一位置既放类型行（IR_CONST/IR_BINARY 的 TI_*）也放旗标/宽度码
-// （IR_BOUNDS_CHECK 的 1 = 动态上限旗标、IR_DEREF/IR_STORE_PTR 的 8 = 访问宽度）
-// ⇒ 无差别派生 = 凭空给「指针解引用」安上 dex 项（数值 8 恰是 TI_DEX_S 行）。
-// 故本函数**只认清单**，清单外一律 -1（不猜、不近似）。
+// ─── R2 P5 Task 2（D19/D21/D22/D23）：DFNode 类型面单槽化 = 唯一分类表 + 拆分器 ───
+// 单槽化（α，内存面）：`OFF_DF_TK` = **类型项引用**（类型面唯一真源），
+// `OFF_DF_AUX` = **辅码**（原混用槽里的非类型部分：旗标/宽度/计数/不可入项的原始行码）。
+// `.ccr` NOD 与 `.cir` 快照**只承载派生码**（`sh_dfn_code_of_slots`）⇒ 盘面与版本位
+// 零改动（布局零变化，见 dyn_arr.cr 的四条契约）。
 //
-// 清单推导（计划 Task 4 Step 2；两条**同时**成立才入清单）：
-//   ① 后端按 ti 分派发射（`instr.cr` 的 emit_instr 逐分支审计；全后端 iri_tk 消费者 =
-//      instr.cr 的 IR_CONST(`ti == TI_STR`)/IR_BINARY(`ti == TI_DEX`)/IR_DEREF/
-//      IR_STORE_PTR(e2_ptr_bounds_check 的 access_width)/IR_BOUNDS_CHECK(`ti != 0`)
-//      + regalloc.cr 的 dex 危险面 + dump.cr 的 IR_ALLOC 文本面）；
-//   ② 该 op 的 tk 由调用点传**类型行**（ir_gen.cr 全 216 个 emit 调用点逐 op 静态审计：
-//      `tk` 实参 = TI_* 常量或类型行变量）。
-//   ① × ② = **恰两个 op**：
-//     · IR_CONST  —— ti 是常量类型行（TI_INT/DEX/DEX_S/BOOL/STR/CHAR/const_type 行，
-//                    后端 `ti == TI_STR` 分派字符串常量路径）；
-//     · IR_BINARY —— ti 是操作数类型行（TI_INT/DEX/DEX_S/BOOL/fti；后端 `ti == TI_DEX`
-//                    分派 SSE2 浮点路径；比较/匹配族传 0 = 行为等价于 TI_INT —— 0 就是
-//                    合法类型行（TI_INT 行），派生出 int 项，非捏造）。
-//   排除项（逐 op，实测证据见报告 §2 表）：
-//     · IR_BOUNDS_CHECK —— tk = 0/1 旗标（1 = 动态上限；1 数值上 = TI_DEX 行 ⇒ 正是
-//       「不得凭空安项」的形态）；· IR_DEREF / IR_STORE_PTR —— tk = 访问宽度（8/4/2/1
-//       = 字节数，非行号；ptr_arith 实测 op25/26 tk=8）；· IR_ALLOC / IR_CALL / IR_I2F /
-//       IR_F2I / IR_LOAD —— 调用点传类型行，但后端**不按 ti 分派**（①不成立；它们读
-//       tk 的方式与发射路径无关）⇒ 暂不入清单，留待 P5 单槽化时按需再裁（登记）；
-//     · 其余全部 op —— tk 恒 0（无类型语义：IR_STORE/IR_LABEL/IR_BRANCH/…）。
+// 分类表（Task 0 表 A 的代码化；逐 op 依据 = p5-task0-report §2 的 51 行表 + 后端
+// `ti` 消费者机器审计）：
+//   · **类型行面**（face 0，tk 语义 = 类型行 ⇒ 建项）：IR_CONST / IR_BINARY / IR_ALLOC /
+//     IR_CALL / IR_LOAD / IR_I2F / IR_F2I —— P4 的 {CONST,BINARY} 允许清单 + Task 0
+//     对 P4 六排除项的再裁（前五者「调用点显式传 TI_*/类型行变量」⇒ 语义即类型行；
+//     IR_LOAD_ENUM_TAG 两调用点传字面量 0 ⇒ 保留「无面」）。
+//   · **辅码面**（face 1，tk 语义 = 非类型码 ⇒ 原码进辅码槽）：IR_BOUNDS_CHECK（0/1
+//     动态上限旗标，instr.cr:1340 `ti != 0`）/ IR_DEREF / IR_STORE_PTR（访问宽度码
+//     8/4/2/1，instr.cr 的 e2_ptr_bounds_check）/ IR_SPAWN（spawn_count；-1 = 动态）/
+//     IR_HOTPATCH_ROUTE（F1 修正后的显式 0）。
+//   · **无面**（face 2，tk 语义 = 无）：其余全部 op。
+// 数值陷阱（P4 §2 实测）：旗标 `1` 数值上 = TI_DEX 行、宽度 `8` = TI_DEX_S 行 ⇒
+// 分类**必须逐 op**，按行号猜即凭空给「指针解引用」安 dex 项。
 //
-// 门与派生：`0 <= tk < g_type_count` 之外 ⇒ -1（行号越界 = 不可译，不得当 0/1 用）；
-// 项层**复用既有缓存/建项语义**（sh_term_of_ti——同一 ti→term 映射，无第二套建项逻辑）；
+// **原子行 vs 复合行**（F2 裁决 = Task 0 候选 (iii)+(ii)）：类型面**只接受项可逆的行**
+// （`atom_of(项) == 行号`，当且仅当项是 TT_ATOM 且 b 槽即行号）。指针/引用/数组/切片/
+// 可选/null/元组行的项是结构性项（如 AK_PTR 的 b = -1）⇒ **不建项**（D21：非原子 ⇒ -1，
+// 不近似），原码按辅码槽**保真**⇒ 派生码逐字节 ≡ 旧混用码（D22-① 在全语料成立，含
+// 复合行）。反例（实测）：`tests/suite/ptr_ref_first.cr` 的 IR_BINARY tk=10 = 指针行。
+//
+// 三态纪律（D23）：类型面 op 的行**越出类型表**或**在域内但译不出项**（桥接缺口）
+// ⇒ **建项失败**（`g_tk_face_fail` 置位）⇒ save 侧拒绝落盘（rc=1 + 诊断），绝不静默
+// 留空项。`tk < 0` = 「无类型」（IR_LOAD/CALL 的未定型路径）不是行码，不算失败。
+fn sh_tk_is_type_face(opcode: int) -> int {
+    if opcode == IR_CONST || opcode == IR_BINARY || opcode == IR_ALLOC ||
+       opcode == IR_CALL || opcode == IR_LOAD || opcode == IR_I2F || opcode == IR_F2I {
+        return 1;
+    }
+    return 0;
+}
+
+// 行三态（D23 判据面）：-1 = 非行码（tk < 0 = 无类型，合法）；0 = **不可译**（越界 /
+// 桥接缺口 ⇒ 建项失败）；1 = 可译（原子行 ⇒ 项；复合行 ⇒ 辅码保真）。
+fn sh_tk_row_state(tk: int) -> int {
+    if tk < 0 { return -1; }
+    if tk >= g_type_count { return 0; }
+    if sh_term_of_ti(tk) < 0 { return 0; }
+    return 1;
+}
+
+// D21 契约：`TT_ATOM ∧ b ≥ 0 ⇒ b`（b 槽即该原子的类型行）；其余（union/product/μ/
+// 空链/负）⇒ **-1 = 非单一原子**（不得近似、不得回 0）。
+fn sh_atom_of_term(term: int) -> int {
+    if term < 0 || term >= tt_count() { return -1; }
+    if tt_tag(term) != TT_ATOM { return -1; }
+    if tt_b(term) < 0 { return -1; }
+    return tt_b(term);
+}
+
+// 分类（纯函数）：0 = 类型行面（**项可逆**才归此面）/ 1 = 辅码面 / 2 = 无面。
+fn sh_tk_face_of_code(opcode: int, tk: int) -> int {
+    if sh_tk_is_type_face(opcode) != 0 {
+        if sh_tk_row_state(tk) == 1 {
+            if sh_atom_of_term(sh_term_of_ti(tk)) == tk { return 0; }
+        }
+        return 1;   // 复合行 / 越界 / 桥接缺口 / 负值 —— 一律辅码（码保真）
+    }
+    if opcode == IR_BOUNDS_CHECK || opcode == IR_DEREF || opcode == IR_STORE_PTR ||
+       opcode == IR_SPAWN || opcode == IR_HOTPATCH_ROUTE {
+        return 1;
+    }
+    return 2;
+}
+
+// 拆分器（**单源**；emit 与 `.cir` 装载侧共用）：(opcode, tk) → (项槽, 辅码槽)。
+// 出参经两个全局返回（Core 无多返回值）——**读前必先调用**（函数入口先置默认值，
+// 无残留状态）。规则：
+//   face 0 ⇒ 项 = `sh_term_of_ti(tk)`（此时构造已证可逆）、辅码 = 0；
+//   其余   ⇒ 项 = -1、辅码 = tk（**码保真**：旗标/宽度/复合行/无面 op 的非零码
+//            一律原样承载，派生码因此逐字节 ≡ 旧混用码）。
 // 该调用**不进**影子对账计数（hits/entries 只统计判定站点；本函数是载体面派生，
-// 冷/暖两态与判定历史无关）——故先存后复原 g_shadow_hits。
-fn sh_tk_term_of_code(opcode: int, tk: int) -> int {
-    if opcode != IR_CONST && opcode != IR_BINARY { return -1; }
-    if tk < 0 || tk >= g_type_count { return -1; }
-    // 复原 hits：sh_term_of_ti 的缓存命中计数属**判定对账**面（sh_map_hits 的
-    // 语义 = 判定站点缓存效率），emit 期调用不构成判定站点。entries（装填因子
-    // 输入 = 真实占用槽数）**不复原**——复原即欺骗扩容守卫（表满而计数偏低 ⇒
-    // 探测永不落空）。冷/暖两态该项槽值的一致性由构造保证（同 tk ⇒ 同项）。
+// 冷/暖两态与判定历史无关）——故 sh_term_of_ti 的命中计数先存后复原。
+// entries（装填因子输入 = 真实占用槽数）**不复原**——复原即欺骗扩容守卫。
+fn sh_tk_split(opcode: int, tk: int) {
+    sh_tk_split_impl(opcode, tk, 1);
+}
+
+// 装载侧变体（`.cir` 快照重派生）：**不置 D23 失败位**。理由 = 判据面不同：
+//   · emit 路径（count_fail=1）：类型面行的可译性是**真不变量**——行刚由前端/IR 生成
+//     产出，越界/译不出 = 编译器 bug（或桥接缺口）⇒ 拒绝落盘。
+//   · 装载路径（count_fail=0）：盘上的码是**不透明历史值**，而暖进程的类型表可能**更小**
+//     ——缓存命中跳过该函数的 IR 生成，而 ir_gen 自身会 `alloc_type` 新行
+//     （ir_gen.cr:1277/:1283/:2434/:2491/:2792 的 addr/ref/cast/数组行）⇒ 冷路径存在的行
+//     在暖进程可能不存在。这是**预存的缓存面局限**（登记：报告 §5-④；β 盘面项索引
+//     承接面 = P6），不是本进程的编译器 bug。代码由辅码槽保真 ⇒ 派生码仍逐字节正确，
+//     只有该项在本进程不可重建（term = -1）。缓存命中**绝不**因此让编译失败。
+fn sh_tk_split_load(opcode: int, tk: int) {
+    sh_tk_split_impl(opcode, tk, 0);
+}
+
+fn sh_tk_split_impl(opcode: int, tk: int, count_fail: int) {
+    // hits 复原**包住整个函数**（不止 sh_term_of_ti 那一处）：分类查询自己也走
+    // sh_term_of_ti（row_state 的可译判定 + 原子性检查），那同样是载体面派生。
     hits_before := g_shadow_hits;
-    term := sh_term_of_ti(tk);
+    fac := sh_tk_face_of_code(opcode, tk);
+    g_sh_slot_term = -1;
+    g_sh_slot_aux = 0;
+    if fac == 0 {
+        g_sh_slot_term = sh_term_of_ti(tk);
+    } else {
+        // 码保真：旗标/宽度/计数/复合行码/无面 op 的非零码一律原样承载（含负码——
+        // IR_SPAWN 的 tk = -1 = 「动态 spawn 计数」，是合法辅码，**不得**钳成 0）。
+        // 辅码哨兵：0 = 无；非零（含负）= 该码本身。
+        g_sh_slot_aux = tk;
+        // D23：类型面 op 的行**不可译**（越界/桥接缺口）⇒ 建项失败——复合行是
+        // 域内可译 ⇒ 正常路径，不置位。
+        if count_fail != 0 {
+            if sh_tk_is_type_face(opcode) != 0 && sh_tk_row_state(tk) == 0 { g_tk_face_fail = g_tk_face_fail + 1; }
+        }
+    }
     g_shadow_hits = hits_before;
-    return term;
+}
+
+// 槽 → 派生码（**唯一**派生点；dataflow.cr 的 lower_to_ccr / ir_gen.cr 的 emit /
+// cir_cache.cr 的装载侧共用）：辅码 ≠ 0 ⇒ 辅码；无项 ⇒ 0；否则 `atom_of(项)`
+// （不可逆 ⇒ -1：显式、响亮，绝不近似成 0/1）。
+fn sh_dfn_code_of_slots(tk_term: int, tk_aux: int) -> int {
+    if tk_aux != 0 { return tk_aux; }
+    if tk_term < 0 { return 0; }
+    return sh_atom_of_term(tk_term);
+}
+
+// 兼容入口（自测/诊断面）：单槽化前 `sh_tk_term_of_code(opcode, tk)` 的语义 =
+// 「类型面派生出的项；其余 -1」——即拆分器的**项槽**输出，但**纯查询**：不写槽出参、
+// 不计 D23 失败位（诊断调用不得污染落盘闸；有副作用的生产路径一律走 sh_tk_split）。
+// 与 split 共用同一个分类函数 sh_tk_face_of_code ⇒ 规则单源，无第二份判定。
+fn sh_tk_term_of_code(opcode: int, tk: int) -> int {
+    // hits 复原包住分类查询（它自己也走 sh_term_of_ti——同 split 的计数纪律）。
+    hits_before := g_shadow_hits;
+    t : ., mut = -1;
+    if sh_tk_face_of_code(opcode, tk) == 0 { t = sh_term_of_ti(tk); }
+    g_shadow_hits = hits_before;
+    return t;
 }
 
 // ─── 桥接统计（自测断言/影子摘要用）───

@@ -35,10 +35,12 @@ Task 2（TYPE 内容面）：
 
 Task 3（IFACE 内容面）：见文件末「R2 P4 Task 3：IFACE 内容面」节（⑯..㉕）。
 
-R2 P4 Task 4（DFNode.TK 迁移期双槽）见文件末「R2 P4 Task 4」节（㉖..㉛）：
-内存 DF 记录 64 → 72B（第 9 槽 OFF_DF_TK_TERM = 类型项引用，允许清单制派生）；
-`.ccr` NOD 36B 与 `.cir` 快照布局**皆不变**（`CIR_CACHE_VER` 保持 17——项槽是
-(opcode, tk) 的纯函数，落盘 = 第二真源 + 进程内索引悬空，实测见 cir_cache.cr 头注）。
+R2 P4 Task 4（DFNode.TK 迁升）+ R2 P5 Task 2（单槽化）见文件末同名节（㉖..㉛ / ㉜..㊲）：
+内存 DF 记录 72B = 9 槽；P5 T2 起两槽语义对调并分离——`OFF_DF_TK`(40) = **类型项引用**
+（类型面唯一真源）、`OFF_DF_AUX`(64) = **辅码**（旗标/宽度/不可逆行的原码）。
+`.ccr` NOD 36B 与 `.cir` 快照布局**皆不变**（`CIR_CACHE_VER` 保持 17；盘面只承载
+**派生码**——两槽都是 (opcode, 码) 的纯函数，落盘 = 第二真源 + 进程内索引悬空，
+实测见 cir_cache.cr 头注）。派生码逐节点 ≡ 单槽化前的混用码（D22-①）。
 
 字节真相 = docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md
 （v8 = v7 段表架构的加法扩展——D9/D10；文件名/测试名保留「v7」字样）：
@@ -1393,18 +1395,43 @@ def _cleanup(*paths):
             pass
 
 
-# ═══════════════ R2 P4 Task 4：DFNode.TK 迁移期双槽（㉖..㉛）═══════════════
-# 观察通道 = `corec cir --dump-tk-terms`（核心新增 hidden flag；只读、不产产物）。
-# 独立复述（防同源同错自洽假绿）：本节的清单门/slot 规则按**规格文本**在 Python 侧重写，
+# ═══ R2 P4 Task 4 + R2 P5 Task 2：DFNode 类型面（双槽 → 单槽化）㉖..㉛ / ㉜..㊳ ═══
+# 观察通道 = `corec cir --dump-tk-terms`（hidden flag；只读、不产产物）。
+# 独立复述（防同源同错自洽假绿）：本节的分类表/slot 规则按**规格文本**在 Python 侧重写，
 # 不复用编译器内部表——IR 常量取 ast.cr 的公开编号，TT_* / AK_* 取引擎常量语义。
-IR_CONST = 1          # ast.cr:547
-IR_BINARY = 2         # ast.cr:548
-IR_DEREF = 25         # ast.cr:571（tk = 访问宽度，非行号）
-IR_STORE_PTR = 26     # ast.cr:572（同上）
-IR_BOUNDS_CHECK = 30  # ast.cr:577（tk = 0/1 动态上限旗标）
+# R2 P5 Task 2（D19）后的槽语义：dump 的 `tk` 列 = **派生码**（= 单槽化前的混用码，逐节点
+# 不变）；`term` 列 = 类型项引用（-1 = 无项）；`aux` 列 = 辅码（0 = 无）。互斥：term ≥ 0
+# 与 aux ≠ 0 不同时成立。
+IR_CONST = 1          # ast.cr:549
+IR_BINARY = 2         # ast.cr:550
+IR_CALL = 4           # ast.cr:552（P5 T2 入类型行面：调用点传 call_ti）
+IR_ALLOC = 6          # ast.cr:554（同）
+IR_LOAD = 10          # ast.cr:558（同）
+IR_DEREF = 25         # ast.cr:573（tk = 访问宽度，非行号）
+IR_STORE_PTR = 26     # ast.cr:574（同上）
+IR_SPAWN = 27         # ast.cr:576（tk = spawn_count；-1 = 动态）
+IR_BOUNDS_CHECK = 30  # ast.cr:579（tk = 0/1 动态上限旗标）
+IR_HOTPATCH_ROUTE = 39  # ast.cr:587（F1 修正后 tk 恒 0 = 无面）
+IR_I2F = 49           # ast.cr:596（恒 TI_DEX 行）
+IR_F2I = 50           # ast.cr:597（同）
 TT_ATOM = 7           # type_terms.cr 的 TT_* 标签
-AK_INT, AK_DEX, AK_STRING, AK_BOOL = 0, 1, 2, 3
-ALLOW_OPS = {IR_CONST, IR_BINARY}
+AK_INT, AK_DEX, AK_STRING, AK_BOOL, AK_UNIT, AK_PTR = 0, 1, 2, 3, 4, 8
+# 类型行面（可建项）op 集 = 规格表；辅码面 op 集 = 规格表；其余 = 无面。
+MINT_OPS = {IR_CONST, IR_BINARY, IR_ALLOC, IR_CALL, IR_LOAD, IR_I2F, IR_F2I}
+AUX_OPS = {IR_DEREF, IR_STORE_PTR, IR_SPAWN, IR_BOUNDS_CHECK, IR_HOTPATCH_ROUTE}
+
+# 复合行夹具（F2 面）：BINARY 的操作数行是指针行（AK_PTR 项：b = -1 ⇒ 不可逆）——
+# 该节点的项槽必须为 -1、辅码槽 = 原行号，派生码 ≡ 行号（单槽化前该槽的值）。
+COMPOSITE_FIXTURE = """// R2 P5 Task 2 composite-row probe
+fn add1(p: *int) -> int { return *p + 1; }
+fn main() -> int {
+    arr := [10, 20, 30];
+    p := &arr[1];
+    q := p + 1;
+    if *q != 30 { return 1; }
+    return add1(p);
+}
+"""
 
 # 探针源（内联夹具；覆盖清单内 4 个类型行 + 三个陷阱形态）：
 #   IR_DEREF / IR_STORE_PTR 的 tk=8（= 访问宽度，数值恰是 TI_DEX_S 行）、
@@ -1446,29 +1473,35 @@ def corec_cir(src: str, out: str, extra=None) -> str:
 
 
 def parse_tk_dump(text: str):
-    """`--dump-tk-terms` 输出 → (header dict, rows)。行格式见 dump.cr 该函数注。"""
+    """`--dump-tk-terms` 输出 → (header dict, rows)。行格式见 dump.cr 该函数注：
+      [df-tk-terms] nodes= with_term= bad_term= aux_nonzero= face_fail= terms= rows= mint=…
+      <node>\\t<op>\\t<tk(派生码)>\\t<term>\\t<tag>\\t<a>\\t<b>\\t<c>\\t<aux>
+    rows = 9 元组 (node, op, tk, term, tag, a, b, c, aux)。"""
     hdr = None
     rows = []
     for line in text.splitlines():
         if line.startswith('[df-tk-terms]'):
             m = re.match(r'\[df-tk-terms\] nodes=(\d+) with_term=(\d+) '
-                         r'bad_term=(\d+) terms=(\d+) allow=([0-9,]+)', line)
+                         r'bad_term=(\d+) aux_nonzero=(\d+) face_fail=(-?\d+) '
+                         r'terms=(\d+) rows=(\d+) mint=([0-9,]+)', line)
             assert m, f"malformed tk-terms header: {line!r}"
             hdr = {'nodes': int(m.group(1)), 'with_term': int(m.group(2)),
-                   'bad_term': int(m.group(3)), 'terms': int(m.group(4)),
-                   'allow': {int(x) for x in m.group(5).split(',')}}
+                   'bad_term': int(m.group(3)), 'aux_nonzero': int(m.group(4)),
+                   'face_fail': int(m.group(5)), 'terms': int(m.group(6)),
+                   'rows': int(m.group(7)),
+                   'mint': {int(x) for x in m.group(8).split(',')}}
             continue
         if hdr is None:
             continue
         f = line.split('\t')
-        if len(f) != 8:
+        if len(f) != 9:
             continue
         rows.append(tuple(int(x) for x in f))
     assert hdr is not None, "no [df-tk-terms] header in output"
     return hdr, rows
 
 
-def tk_fixture(name: str):
+def tk_fixture(name: str, text: str = None):
     """产一个探针源并返回路径。调用方负责 cleanup。"""
     src_path = os.path.join(BASE, 'build', f'test_p4t4_{name}.cr')
     for p in (src_path,):
@@ -1477,7 +1510,7 @@ def tk_fixture(name: str):
         except FileNotFoundError:
             pass
     with open(src_path, 'w') as fh:
-        fh.write(TK_FIXTURE)
+        fh.write(TK_FIXTURE if text is None else text)
     return src_path
 
 
@@ -1510,37 +1543,57 @@ def cir_entry_nodes(path: str):
 
 
 def test_p4t4_tk_slot_rule_per_node():
-    """㉖ 逐节点规则（探针夹具）：清单内 op（IR_CONST/IR_BINARY）∧ 合法行 ⇒ 项槽 ≥ 0
-    且项 = ATOM(b == 行号)；清单外 op 一律 -1——**含三个陷阱形态的非空断言**
-    （DEREF/STORE_PTR 的宽度 8、BOUNDS_CHECK 的旗标 1）。正控逐行类型面：
-    int/dex_s/bool/str 四个类型行的 AK_* 与行号 b 槽。"""
+    """㉖（P5 T2 重钉：双槽 → 单槽化）逐节点规则（探针夹具）：
+      · 类型行面（MINT_OPS）∧ 原子行 ⇒ term ≥ 0 ∧ aux == 0 ∧ 项 = ATOM(b == 行号)；
+      · 类型行面 ∧ 复合行/越界/无类型 ⇒ term == -1 ∧ aux == 原码（码保真）；
+      · 辅码面 ⇒ term == -1 ∧ aux == 原码——**含数值陷阱**：DEREF/STORE_PTR 的宽度 8、
+        BOUNDS_CHECK 的旗标 1（两者数值上恰是合法类型行，只能靠分类表挡住）；
+      · 其余 op ⇒ term == -1 ∧ aux == 原码；
+      · **派生码不变量（逐节点）**：term ≥ 0 ⇒ tk == b；aux ≠ 0 ⇒ tk == aux；否则 tk == 0。
+    正控逐行类型面：int/bool/str/dex_s 四个类型行的 AK_* 与行号 b 槽。"""
     src = tk_fixture('rule')
     try:
         hdr, rows = _tk_dump_of(src, 'rule')
         assert hdr['bad_term'] == 0, \
             f"{hdr['bad_term']} nodes carry out-of-range term refs"
-        assert hdr['allow'] == ALLOW_OPS, f"allow set drifted: {hdr['allow']}"
+        assert hdr['face_fail'] == 0, \
+            f"face_fail={hdr['face_fail']} (untranslatable type-face row in fixture)"
+        assert hdr['mint'] == MINT_OPS, f"mint set drifted: {hdr['mint']}"
         assert hdr['nodes'] == len(rows), "row count != node count"
         assert hdr['with_term'] > 0, "vacuous: no node carries a term"
+        assert hdr['aux_nonzero'] > 0, "vacuous: no node carries an aux code"
 
         saw = {'const_rows': set(), 'binary_rows': set()}
         traps = {'deref_w8': 0, 'store_w8': 0, 'bounds_flag1': 0, 'bounds_flag0': 0,
-                 'call_row': 0}
-        for (n, op, tk, term, tag, a, b, c) in rows:
-            if op in ALLOW_OPS:
-                assert term >= 0, f"node {n}: allowlisted op {op} tk={tk} got no term"
-                assert 0 <= tk < hdr['terms'], \
-                    f"node {n}: allowlisted op with out-of-range tk {tk}"
+                 'call_row': 0, 'spawn_dyn': 0}
+        for (n, op, tk, term, tag, a, b, c, aux) in rows:
+            # ── 派生码不变量（D22-①，逐节点）──
+            if term >= 0:
+                assert aux == 0, f"node {n}: term {term} and aux {aux} both set"
                 assert tag == TT_ATOM and b == tk, \
                     f"node {n}: term {term} not ATOM(row) — tag={tag} b={b} tk={tk}"
+                # D21 契约的另一半：入项槽的必须是**行项**（b ≥ 0 = 行号）。复合行项
+                # （AK_PTR/AK_SEQUENCE 的 b = -1）若漏进项槽，此处必红（突变 M1 实证：
+                # 只查 b == tk 会被「tk 也被算成 -1」自洽掩盖 ⇒ 必须显式查 b ≥ 0）。
+                assert b >= 0, \
+                    f"node {n}: non-row item in term slot (tag={tag} b={b} term={term})"
+                assert tk == b, f"node {n}: derived code {tk} != row {b}"
+            elif aux != 0:
+                assert tk == aux, f"node {n}: derived code {tk} != aux {aux}"
+            else:
+                assert tk == 0, f"node {n}: empty slots but code {tk} != 0"
+            # ── 分类表逐面 ──
+            if op in MINT_OPS:
+                if term == -1:
+                    assert aux == tk, f"node {n}: mint op lost its code (aux={aux})"
                 if op == IR_CONST:
                     saw['const_rows'].add((tk, a))
-                else:
+                elif op == IR_BINARY:
                     saw['binary_rows'].add((tk, a))
             else:
                 assert term == -1, \
-                    f"node {n}: non-allowlisted op {op} got term {term}"
-                # 非空断言：陷阱形态必须在语料里出现过（否则本用例是空转）
+                    f"node {n}: non-mint op {op} got term {term}"
+                assert aux == tk, f"node {n}: non-mint op {op} aux {aux} != code {tk}"
                 if op == IR_DEREF and tk == 8:
                     traps['deref_w8'] += 1
                 if op == IR_STORE_PTR and tk == 8:
@@ -1549,19 +1602,21 @@ def test_p4t4_tk_slot_rule_per_node():
                     traps['bounds_flag1'] += 1
                 if op == IR_BOUNDS_CHECK and tk == 0:
                     traps['bounds_flag0'] += 1
-                if op == 4 and tk in (0, 2, 3, 4):
+                if op == IR_CALL and tk in (0, 2, 3, 4):
                     traps['call_row'] += 1
-        # 正控（清单内四种类型行的项内容：a = AK_*，b = 行号）
+            if op == IR_SPAWN and tk == -1:
+                traps['spawn_dyn'] += 1
+        # 正控（类型行的项内容：a = AK_*，b = 行号）
         assert (0, AK_INT) in saw['const_rows'], saw['const_rows']
         assert (2, AK_BOOL) in saw['const_rows'], saw['const_rows']
         assert (3, AK_STRING) in saw['const_rows'], saw['const_rows']
         assert (8, AK_DEX) in saw['const_rows'], \
             f"dex_s row (8) not mapped to AK_DEX: {saw['const_rows']}"
         assert saw['binary_rows'], "no binary node carries a term"
-        # 负控非空：三类陷阱形态逐条实证（宽度 8 / 旗标 1 / 合法行但 op 不在清单）
+        # 陷阱非空：宽度 8 / 旗标 1 / 旗标 0 必须逐条在夹具里出现过（否则用例空转）。
+        # IR_CALL 已入类型行面（P5 T2）⇒ 不再计入陷阱。
         assert traps['deref_w8'] >= 1 and traps['store_w8'] >= 1, traps
         assert traps['bounds_flag1'] >= 1 and traps['bounds_flag0'] >= 1, traps
-        assert traps['call_row'] >= 1, traps
     finally:
         _cleanup(src)
 
@@ -1620,9 +1675,16 @@ def test_p4t4_ccr_nod_tk_equals_graph_tk():
 
 
 def test_p4t4_cold_warm_term_slot_symmetry():
-    """㉙ 快照对称（本任务的核心判据）：冷（emit 填槽）/ 暖（快照恢复 + 装载侧重派生）
-    两态的 (op, tk, term, tag, a, b, c) **逐行相同** + 项表长度同 + bad_term=0；
-    命中证据 = 暖运行不重写 .cir 条目。"""
+    """㉙ 快照对称（核心判据，P5 T2 判据重定）：冷（emit 填槽）/ 暖（快照恢复 + 装载侧
+    重派生）两态的**派生码面**（node, op, tk, aux）逐行相同 + 项**内容**（tag/a/b/c）
+    逐行相同 + bad_term=0 + face_fail=0 + 命中证据（暖运行不重写 .cir 条目）。
+
+    判据重定（相对 P4 原版「header 全等 + 行全等」）：项**索引**（term 列）与两个表
+    长度（terms/rows）是**进程内表偏移**，暖进程可更小——缓存命中跳过该函数的 IR 生成，
+    而 ir_gen 自身会 `alloc_type` 新行（见 ty_shadow.cr 的 sh_tk_split_load 注）。
+    P4 的窄清单（仅 CONST/BINARY，行皆由 checker 建）掩盖了该差异；P5 T2 扩面后暴露。
+    故本用例改用**内容等价**（语义面）而非索引等价（进程内偏移）——两者中前者才是判据，
+    后者允许漂移；缺失项只允许出现在「行越出暖表」处。"""
     cache_dir = os.path.join(BASE, '.core', 'cache')
     cir_dir = os.path.join(cache_dir, 'cir')
     src = tk_fixture('cw')
@@ -1642,8 +1704,26 @@ def test_p4t4_cold_warm_term_slot_symmetry():
                 f"warm run rewrote cache file {p} (not a full hit?)"
         assert hdr_c['nodes'] > 0 and hdr_c['with_term'] > 0, hdr_c
         assert hdr_c['bad_term'] == 0 and hdr_w['bad_term'] == 0, (hdr_c, hdr_w)
-        assert hdr_c == hdr_w, f"header drifted cold->warm: {hdr_c} vs {hdr_w}"
-        assert rows_c == rows_w, "term slot drifted cold->warm (per-node)"
+        assert hdr_c['nodes'] == hdr_w['nodes'], (hdr_c, hdr_w)
+        assert hdr_c['aux_nonzero'] == hdr_w['aux_nonzero'], (hdr_c, hdr_w)
+        assert hdr_w['face_fail'] == 0, f"loader counted a D23 failure: {hdr_w}"
+        assert hdr_w['rows'] <= hdr_c['rows'], f"warm rows grew: {hdr_c} vs {hdr_w}"
+        missing = idx_drift = 0
+        for rc_, rw_ in zip(rows_c, rows_w):
+            assert rc_[0:3] == rw_[0:3] and rc_[8] == rw_[8], \
+                f"derived-code face drifted cold->warm: {rc_} vs {rw_}"
+            if rc_[3] >= 0 and rw_[3] >= 0:
+                assert rc_[4:8] == rw_[4:8], f"item content drifted: {rc_} vs {rw_}"
+                if rc_[3] != rw_[3]:
+                    idx_drift += 1
+            elif rc_[3] >= 0 and rw_[3] == -1:
+                assert rw_[2] >= hdr_w['rows'], \
+                    f"item lost for an in-range row {rw_[2]} < rows {hdr_w['rows']}: {rw_}"
+                missing += 1
+            else:
+                assert rw_[3] == rc_[3], f"warm-only item: {rc_} vs {rw_}"
+        assert missing == hdr_c['with_term'] - hdr_w['with_term'], \
+            (missing, hdr_c, hdr_w)
     finally:
         _cleanup(src, dot)
         shutil.rmtree(cache_dir, ignore_errors=True)
@@ -1698,6 +1778,154 @@ def test_p4t4_cir_snapshot_layout_unbumped():
         shutil.rmtree(os.path.dirname(cache_dir), ignore_errors=True)
 
 
+# ═══════════════ R2 P5 Task 2（D19 单槽化）：㉜..㊲ ═══════════════
+
+def test_p5t2_composite_row_goes_to_aux():
+    """㉜ F2 面（仓内语料 ptr_ref_first.cr + 自足夹具）：BINARY 的操作数行是**复合行**
+    （指针/引用/数组——项是 AK_PTR/AK_SEQUENCE，b 槽为 -1 等标注 ⇒ atom_of 不可逆）
+    ⇒ 项槽 = -1、辅码槽 = 原行号、派生码 ≡ 行号（单槽化前该槽的混用码）。
+    非空断言：该形态必须在两处语料里都出现过（ptr_ref_first 是 T0 实测的 BINARY tk=10
+    指针行；夹具自证 node=23 形态）。"""
+    corpus = os.path.join(BASE, 'tests', 'suite', 'ptr_ref_first.cr')
+    fixture = tk_fixture('comp', COMPOSITE_FIXTURE)
+    try:
+        for src, tag in ((corpus, 'prf'), (fixture, 'comp')):
+            hdr, rows = _tk_dump_of(src, tag)
+            assert hdr['bad_term'] == 0 and hdr['face_fail'] == 0, hdr
+            # 直接反证：项槽里**不得**出现非行项（b < 0 的结构性项 = 复合行漏进项槽）。
+            # （突变 M1 实证：只查「派生码 == b」会被「tk 也变成 -1」自洽掩盖。）
+            for (n, op, tk, term, tagv, a, b, c, aux) in rows:
+                assert not (term >= 0 and tagv == TT_ATOM and b < 0), \
+                    f"{tag} node {n}: non-row item in term slot (term={term} b={b})"
+            comp = [r for r in rows if r[1] in MINT_OPS and r[3] == -1 and r[8] > 0]
+            assert comp, f"no composite-row node in {tag} (vacuous)"
+            for (n, op, tk, term, tagv, a, b, c, aux) in comp:
+                assert aux == tk and tk >= 0, \
+                    f"{tag} node {n}: composite row code lost (tk={tk} aux={aux})"
+                assert 0 <= tk < hdr['terms'], f"{tag} node {n}: row {tk} out of range"
+    finally:
+        _cleanup(fixture)
+
+
+def test_p5t2_mutual_exclusion_invariant():
+    """㉝ 互斥不变量（D22-②）全节点扫描：任一节点不得同时有 项 ≥ 0 与 辅 ≠ 0；
+    且两槽的**占用面都必须非空**（否则是空转）——同时守住派生码逐节点一致。"""
+    corpus = os.path.join(BASE, 'tests', 'suite', 'ptr_ref_first.cr')
+    fixture = tk_fixture('mutex')
+    try:
+        for src, tag in ((corpus, 'prf'), (fixture, 'mutex')):
+            hdr, rows = _tk_dump_of(src, tag)
+            assert hdr['with_term'] > 0 and hdr['aux_nonzero'] > 0, hdr
+            for (n, op, tk, term, tagv, a, b, c, aux) in rows:
+                assert not (term >= 0 and aux != 0), \
+                    f"{tag} node {n}: both slots set (term={term} aux={aux})"
+    finally:
+        _cleanup(fixture)
+
+
+def test_p5t2_f1_hotpatch_route_no_face():
+    """㉞ F1 修正（仓内语料 hotpatch_test.cr）：IR_HOTPATCH_ROUTE 的类型面 = 「无」
+    ⇒ 显式第 6 实参 0 ⇒ 两槽皆空、派生码 0。非空断言：语料里必须真有该 op
+    （修复前该槽是残留寄存器值——3 调用语料实测得 4，纯属垃圾）。"""
+    src = os.path.join(BASE, 'tests', 'suite', 'hotpatch_test.cr')
+    hdr, rows = _tk_dump_of(src, 'hot')
+    hp = [r for r in rows if r[1] == IR_HOTPATCH_ROUTE]
+    assert hp, "no IR_HOTPATCH_ROUTE node in corpus (vacuous)"
+    for (n, op, tk, term, tagv, a, b, c, aux) in hp:
+        assert tk == 0 and term == -1 and aux == 0, \
+            f"node {n}: hotpatch-route carries tk={tk} term={term} aux={aux}"
+
+
+def test_p5t2_cold_warm_composite_symmetry():
+    """㉟ 复合行语料的冷/暖两态：**派生码面**（op, tk, aux）逐行相同（≤ 这是发射面
+    与盘面的唯一真值面）；项槽允许**单方向**缺失——暖进程类型表更小时（缓存命中跳过
+    该函数的 IR 生成，而 ir_gen 自身 `alloc_type` 新行）冷态存在的行在暖进程不存在
+    ⇒ 项不可重建（term -1）。本用例把该**预存缓存面局限**钉成精确形态：任一冷/暖
+    项槽差异都必须满足「暖 = -1 ∧ 码 ≥ 暖行数」，其余面逐行严格相等。"""
+    cache_dir = os.path.join(BASE, '.core', 'cache')
+    src = tk_fixture('cwc', COMPOSITE_FIXTURE)
+    dot = os.path.join(BASE, 'build', 'test_p4t4_cwc.cir')
+    try:
+        shutil.rmtree(cache_dir, ignore_errors=True)
+        out_c = corec_cir(src, dot, extra=['--dump-tk-terms'])
+        hdr_c, rows_c = parse_tk_dump(out_c)
+        out_w = corec_cir(src, dot, extra=['--dump-tk-terms'])
+        hdr_w, rows_w = parse_tk_dump(out_w)
+        assert hdr_c['nodes'] == hdr_w['nodes'], (hdr_c, hdr_w)
+        assert hdr_c['bad_term'] == 0 and hdr_w['bad_term'] == 0, (hdr_c, hdr_w)
+        assert hdr_c['aux_nonzero'] == hdr_w['aux_nonzero'], (hdr_c, hdr_w)
+        assert hdr_c['mint'] == hdr_w['mint'] == MINT_OPS, (hdr_c, hdr_w)
+        assert hdr_w['face_fail'] == 0, \
+            f"loader reported a D23 failure (should be emit-only): {hdr_w}"
+        assert hdr_w['rows'] <= hdr_c['rows'], f"warm rows grew: {hdr_c} vs {hdr_w}"
+        assert hdr_w['terms'] <= hdr_c['terms'], f"warm terms grew: {hdr_c} vs {hdr_w}"
+        assert hdr_c['with_term'] >= hdr_w['with_term'], (hdr_c, hdr_w)
+        seen_missing = 0
+        for rc_, rw_ in zip(rows_c, rows_w):
+            assert (rc_[0], rc_[1], rc_[2], rc_[8]) == (rw_[0], rw_[1], rw_[2], rw_[8]), \
+                f"derived code drifted cold->warm: {rc_} vs {rw_}"
+            if rc_[3] >= 0 and rw_[3] >= 0:
+                # 项**内容**逐节点同（索引可漂移——进程内表偏移）
+                assert rc_[4:8] == rw_[4:8], f"item content drifted: {rc_} vs {rw_}"
+            elif rc_[3] >= 0 and rw_[3] == -1:
+                assert rw_[2] >= hdr_w['rows'], \
+                    f"term lost for an in-range row {rw_[2]} < rows {hdr_w['rows']}: {rw_}"
+                seen_missing += 1
+            else:
+                assert rw_[3] == rc_[3], f"warm-only item: {rc_} vs {rw_}"
+        comp = [r for r in rows_c if r[1] in MINT_OPS and r[3] == -1 and r[8] > 0]
+        assert comp, "vacuous: no composite row in cold dump"
+    finally:
+        _cleanup(src, dot)
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+
+def test_p5t2_ccr_nod_composite_parity():
+    """㊱ 复合行语料的 `.ccr` 面：NOD (op, tk) 与图 (op, tk) 逐位置相同——码没有被
+    项槽吞掉（派生码 ≡ 旧混用码的 .ccr 侧证据）。"""
+    src = tk_fixture('nodc', COMPOSITE_FIXTURE)
+    ccr_path = os.path.join(BASE, 'build', 'test_p4t4_nodc.ccr')
+    dot = os.path.join(BASE, 'build', 'test_p4t4_nodc.cir')
+    try:
+        hdr, rows = _tk_dump_of(src, 'nodc')
+        corec_ccr(src, ccr_path)
+        nod = ccr_nod_rows(read_ccr(ccr_path))
+        assert len(nod) == len(rows), f"NOD rows {len(nod)} != DF nodes {len(rows)}"
+        for i, (nr, dr) in enumerate(zip(nod, rows)):
+            assert nr == (dr[1], dr[2]), f"node {i}: NOD {nr} != graph {(dr[1], dr[2])}"
+        assert any(r[1] in MINT_OPS and r[8] > 0 for r in rows), \
+            "vacuous: no composite row in fixture"
+    finally:
+        _cleanup(src, ccr_path, dot)
+
+
+def test_p5t2_snapshot_disk_code_preserved():
+    """㊲ `.cir` 快照盘面承载**派生码**（不是项引用、不是辅码）：快照节点的 (op, tk)
+    多重集 == dump 的 (op, tk) 多重集，且复合行的码 ≥ 0（若盘上落的是 -1 项槽或 0，
+    这里必红）。"""
+    cache_dir = os.path.join(BASE, '.core', 'cache', 'cir')
+    src = tk_fixture('snapc', COMPOSITE_FIXTURE)
+    dot = os.path.join(BASE, 'build', 'test_p4t4_snapc.cir')
+    try:
+        shutil.rmtree(os.path.dirname(cache_dir), ignore_errors=True)
+        hdr, rows = _tk_dump_of(src, 'snapc')
+        corec_cir(src, dot)   # 冷跑：写快照（上一步已建缓存，此处为命中/补写面）
+        disk = []
+        for f in sorted(os.listdir(cache_dir)):
+            ver, nodes, ok = cir_entry_nodes(os.path.join(cache_dir, f))
+            assert ver == 17 and ok, f"{f}: version/stride drifted"
+            disk += [(nd[0], nd[5]) for nd in nodes]
+        assert disk, "vacuous: no nodes parsed from snapshots"
+        comp = set((r[1], r[2]) for r in rows if r[1] in MINT_OPS and r[8] > 0)
+        assert comp, "vacuous: no composite row in fixture"
+        disk_set = set(disk)
+        missing = comp - disk_set
+        assert not missing, f"composite-row code lost on disk: {missing}"
+    finally:
+        _cleanup(src, dot)
+        shutil.rmtree(os.path.dirname(cache_dir), ignore_errors=True)
+
+
 if __name__ == '__main__':
     tests = [test_p4t1_layout_eight_segments,
              test_p4t1_loader_rejects_valid_v7_file,
@@ -1732,7 +1960,13 @@ if __name__ == '__main__':
              test_p4t4_ccr_nod_tk_equals_graph_tk,
              test_p4t4_cold_warm_term_slot_symmetry,
              test_p4t4_dump_flag_zero_artifact_effect,
-             test_p4t4_cir_snapshot_layout_unbumped]
+             test_p4t4_cir_snapshot_layout_unbumped,
+             test_p5t2_composite_row_goes_to_aux,
+             test_p5t2_mutual_exclusion_invariant,
+             test_p5t2_f1_hotpatch_route_no_face,
+             test_p5t2_cold_warm_composite_symmetry,
+             test_p5t2_ccr_nod_composite_parity,
+             test_p5t2_snapshot_disk_code_preserved]
     failed = 0
     for t in tests:
         try:

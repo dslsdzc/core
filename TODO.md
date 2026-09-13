@@ -473,6 +473,17 @@
 - **P5 交接包** = 计划 **附录 D**（D-1 两套口径 + 冷/热勘误表 · D-2 任务面：单槽化 + 大步删旧路径 + 文档/台账 · D-3 十四项继承项 · D-4 开工前置检查单）；指针链 = 统一设计 spec §9 的 P4 行 → 计划 Task 7 → 附录 D → 本条。**必读三项**：D-3-2（项引用稳定形态先裁——`bad_term=329` 红证）、D-3-4（unknown 清零 (a)/(b) 先裁）、D-3-9-(ii)（预存暖态 SIGSEGV：`corec build src/compiler/main.cr -O 0` 暖态 rc=139，`load_cir_cache` → `str_len` 栈，基线同病）——**已闭合（R2 P5 Task 1，本批首提交**：装载侧读缓冲累计 > 1GiB 堆 ⇒ 单一复用缓冲 + 载入失败 ⇒ miss；判据见 `.superpowers/sdd/p5-task1-report.md`）。
 - **关联**：#26（判据重定——P4 继承注见该条）· #40/#41/#42/#43（P4 逐件落地）· #35（T6 划销）· #32（`EXPR_LET` 无检查——未随 P4 收口，P5 继承）· #5 末条（冷/热 `.ccr` 分歧——本轮量化并重定判据）· 报告 = `.superpowers/sdd/p4-task7-report.md`（工作区）。
 
+### 45. R2 P5 Task 2：DFNode.TK **单槽化（α）**（2026-09-13——类型面单源 + 辅码分离 + `atom_of` 契约；**零行为变化**）
+- **形态（D19）**：`OFF_DF_TK`(40) 语义 = **类型项引用**（类型面唯一真源）；`OFF_DF_TK_TERM`(64) 更名 **`OFF_DF_AUX`** = 辅码（旗标/宽度/计数/不可逆行的原码；0 = 无）；`ESZ_DFNODE` 保持 72B ⇒ **布局零变化**（`CCR_VERSION=8` / `CIR_CACHE_VER=17` / `.ccr` NOD 36B / `.cir` 快照 64B·节点均不动）。码 = **派生量**：`iri_tk`/盘面一律 `sh_dfn_code_of_slots(项, 辅码)`。
+- **分类表（Task 0 表 A 代码化，`ty_shadow.cr`）**：类型行面 = `{IR_CONST, IR_BINARY}` ∪ **P4 六排除项再裁** `{IR_ALLOC, IR_CALL, IR_LOAD, IR_I2F, IR_F2I}`（P4 的「后端不按 ti 分派」= 发射面判据，不适用于语义类型面；`IR_LOAD_ENUM_TAG` 两调用点传字面量 0 ⇒ 仍「无面」）；辅码面 = `{IR_BOUNDS_CHECK(0/1 旗标), IR_DEREF/IR_STORE_PTR(宽度), IR_SPAWN(-1=动态), IR_HOTPATCH_ROUTE}`；其余无面。
+- **F1（协调者裁决：修调用点，不把 UB 烘进表）**：`ir_gen.cr:1758` 5 参 `emit` ⇒ op39 的 tk = **r9 残留**（bootstrap 只为实际实参写寄存器；实测 0/4 两态）⇒ 补显式第 6 实参 `0`；**已裁决偏差** = 含 hotpatch 语料该节点码 **4→0**（全语料 3 节点，零消费者；`hotpatch_test.cr` 的 `.ccr` 相应差 3 处）。
+- **F2（协调者裁决：分类表只覆盖原子行）**：复合行（ptr/ref/array/slice/optional/null/tuple 行 —— 项不可逆）**不建项**（`atom_of` ⇒ -1，不近似），原码进辅码槽**保真**（Task 0 候选 (iii)+(ii)）⇒ 派生码逐字节 ≡ 旧混用码。**证明**：5 个 `ti` 消费者谓词的值敏感面 = `{TI_STR=3, TI_DEX=1, 宽度, 旗标}`，复合行码（实测仅 `ptr_ref_first` BINARY tk=10 + 夹具 tk=13）永不落入 ⇒ 不变按构造成立（突变 M1 反证该格可抓）。
+- **D23 新硬错**：类型面行的可译性闸——**仅 emit 路径**计数（装载侧不计数：暖进程类型表可更小，见下）、`ccr_seg_prepare_save` 入口拒绝落盘（rc=1 + 计数诊断）；**全语料 0 命中**（94 档 `face_fail=0`，report-only 先行）；牙齿 = 突变 M4（越界行 ⇒ rc=1 + 无产物）。
+- **判据（本任务实跑；报告 `.superpowers/sdd/p5-task2-report.md`）**：`selftest-types` **367/367**（355+12）· `test_ccr_types` **40/40**（34+6）· `test_cir_warm_path` 19/19 · `test_cache_identity` 5/5（`VER_EXPECTED=17` 未动）· `check src/compiler` rc=0 · `test_backend_bootstrap` rc=0 + `error[`=0 · **ELF canary `95084e7b…d475` IDENTICAL**（28822B）· `.ccr` 两套口径冷态四条与起点基线逐条同 · `--dump-objects` 逐字节同（2427 行）· **派生码不变量**：94 档逐节点 diff = 仅 F1 的 3 节点（非自源 338,207 节点余者 0）· 全枚举 **56/56** · 五 CI job rc=0 · 自举链 `corec2==corec3` cmp IDENTICAL（2821374B）+ N06=0 + 冒烟 42 · 72 档 `check` 同源对拍（rc 同；日志差 2 档自源行号位移）· 影子对拍 `decisions=agree=32767` + 全分类计数 0 · **突变控制 4 条**逐条转红。
+- **判据重定（2 处，实测驱动）**：① 冷/暖比对由「索引全等」改为「**派生码面（op,tk,aux）逐行同 + 项内容（tag/a/b/c）等价**」——**暖态类型表/项表可小于冷态**（缓存命中跳过 `ir_gen`，而其自身 `alloc_type` 新行 ⇒ 冷态存在的行暖态不存在 ⇒ 该项不可重建；P4 窄清单掩盖、P5 扩面暴露；派生码与发射面/盘面零影响）；② `--dump-tk-terms` 头新增 `rows=`/`aux_nonzero=`/`face_fail=` 观测列。
+- **P6 承接**：暖态项面差异的根治 = **β 盘面项索引**（附录 E-1；D20-② 的许可形态）；本批盘面只承载派生码（进程内项引用零跨进程）。
+- **关联**：#42（P4 T4 的「P5 再裁」= 本条）· #24/#30（`g_shadow_map`/影子层 = P5 T5 面）· #44（P5 交接包）· 计划 `docs/superpowers/plans/2026-09-13-r2-p5-cleanup.md` Task 2 实施记录。
+
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
 来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：
