@@ -367,13 +367,72 @@ fn write_fd(fd: int, data: string, len: int) {
     }
 }
 
+// === 快照装载读缓冲（R2 P5 Task 1：暖态 SIGSEGV 根因修复）===
+// 根因链（实测，自源语料 src/compiler/main.cr -O 0，seed 见报告 §1）：
+//   ① 每函数快照的读侧原先 = read_file(path) = alloc(fsize+1)，而 bump 分配器
+//      （rt.s alloc）**不回收** ⇒ 946 个文件的读缓冲**累计驻留**（1,253,453,548B
+//      = 1.1674GiB）；
+//   ② 单文件尺寸是 O(程序) 而非 O(函数)（快照含全程序边表 + 全程序字符串表，
+//      实测 nod_s3（13 节点）文件 = 2.48MB，其中 98.7% 是 80100 条全程序边），
+//      累计 1.1674GiB > 1GiB 堆（rt.s heap_start .space 1024*1024*1024）；
+//   ③ alloc 耗尽返回 0（.Lalloc_oom）⇒ read_file 把 0 当 string 返回；
+//   ④ load_cir_cache 首行 str_len(0) → load64(0, -8) = SIGSEGV（暖态 rc=139；
+//      冷态不读快照故 rc=0）——预存缺陷（P4 T5 §7-5 登记）。
+// 修法（根因级，非给长度加钳位）：快照内容对装载是**瞬态**的——装完即弃，
+// 无指针被保留（var 名以索引入表、字符串经 str_sub 拷贝后 str_intern、
+// 节点/指令字段逐值拷入全局数组）⇒ 单个复用缓冲按需增长，峰值 = 最大单文件
+// 尺寸（本语料实测最大 3,987,879B = 3.80MiB）而非全体累计。布局语义 = 与 read_file 返回的字符串
+// 逐位同：alloc(cap+8) 的长度头在 buf-8，每次读取后改写为 fsize+1 ⇒
+// str_len(g_cir_read_buf) == fsize，既有消费面（r64/str_sub）零改动。
+g_cir_read_buf : string, mut;
+g_cir_read_cap : int, mut;   // 数据区容量（不含 -8 处的 8B 长度头）
+
+// 读取快照文件到复用缓冲。返回文件长度；< 0 = 不可用（open 失败/空文件/短读/
+// 缓冲分配失败）——调用方按 cache miss 处理（三态纪律：载入失败 ⇒ 拒绝，
+// 不得静默当空表）。快照恒为 save_cir_cache 单次 write 产出的常规文件 ⇒
+// fsize <= 0（空文件或伪文件）= 不可用，不做 read_file 的伪文件循环回退。
+fn cir_read_snapshot(path: string) -> int {
+    fd := syscall3(2, path, 0, 0);  // open(O_RDONLY)
+    if fd < 0 { return -1; }
+    fsize := syscall3(8, fd, 0, 2);  // lseek(fd, 0, SEEK_END)
+    if fsize <= 0 {
+        r0 := syscall3(3, fd, 0, 0);  // close
+        return -1;
+    }
+    if fsize + 1 > g_cir_read_cap {
+        new_cap : ., mut = g_cir_read_cap;
+        if new_cap < 4096 { new_cap = 4096; }
+        loop {
+            if new_cap >= fsize + 1 { break; }
+            new_cap = new_cap * 2;
+        }
+        g_cir_read_buf = alloc(new_cap + 8);
+        g_cir_read_cap = new_cap;
+    }
+    r2 := syscall3(8, fd, 0, 0);  // lseek(fd, 0, SEEK_SET)
+    nread := syscall3(0, fd, g_cir_read_buf, fsize);  // read(fd, buf, fsize)
+    r3 := syscall3(3, fd, 0, 0);  // close(fd)
+    // 缓冲不可得（alloc 耗尽 ⇒ g_cir_read_buf 仍为 0 ⇒ read 取 EFAULT）或短读
+    // （并发截断等）⇒ 均**不可用** ⇒ miss：绝不拿半份/空载荷继续解析（静默错值
+    // 类）。⚠ 此处刻意**不写** `buf == 0` 形态的空判——该字符串-整型混比在
+    // Python bootstrap 侧（x86_64_stack_asm.py:168 按 _is_string_var 分派）会编成
+    // `str_eq(buf, 0)` → `str_len(0)` 解引用 NULL-8 = 崩溃（与自举侧 int 比较
+    // 语义不一致，登记见报告 §6）；read 的 EFAULT 面已是同效且更稳的判据。
+    if nread != fsize { return -1; }
+    w64(g_cir_read_buf, -8, fsize + 1);  // 长度头 = fsize（str_len 口径同 read_file）
+    return fsize;
+}
+
 // Load a .cir cache file and restore DFG state.
 // func_idx is the function index used to verify the cached fingerprints
 // against the current AST. Returns 0 on success, -1 on failure (cache miss).
 fn load_cir_cache(path: string, func_idx: int) -> int {
-    data := read_file(path);
+    // 快照读入**复用缓冲**（不逐函数新分配——见 cir_read_snapshot 头注）。
+    dlen := cir_read_snapshot(path);
+    if dlen < 0 { return -1; }
+    data := g_cir_read_buf;
     // v17 头部 = 48B + 函数名（再至少 8B 载荷段头）。
-    if str_len(data) < 56 { return -1; }
+    if dlen < 56 { return -1; }
     pos : ., mut = 0;
 
     // Validate header
