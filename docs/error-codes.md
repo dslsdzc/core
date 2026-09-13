@@ -88,10 +88,17 @@
 
 ## TA0xx — 类型检查：赋值与绑定
 
+> TA02 自 2026-09-13（R2 P5 Task 6 / TODO #32）起**实现**并列入 run_frontend 硬错误名单
+> （rc=1 且不产出产物）：修复前 `EXPR_LET` 站点**无任何兼容检查**（符号取注解行、后端按注解
+> 行发射 = 静默错产物；`EC_TA_DECL` 定义零 raise）。判定点 = `checker.cr::check_let_annot_compat`
+> （局部 `EXPR_LET` + 全局 `check_global_let` 两调用点共用），组合函数 = `type_compat_strict`
+> （身份 + 常量档长度 + 可选目标注入）。豁免：无注解/auto/无初值 · 注解 `dyn` · 值 `never`
+> （底部 + 错误标记=级联抑制）· 注解为泛型形参。report-only 全语料零命中后开门。
+
 | 码 | 检查点 | 消息模板 |
 |----|--------|---------|
 | TA01 | 赋值号类型不匹配 | `Cannot assign {T2} to {T1}` |
-| TA02 | 变量声明类型与初始值不符 | `Variable declared as {T1}, got {T2}` |
+| TA02 | 变量声明类型与初始值不符（**2026-09-13 R2 P5 Task 6 起实现**：`EXPR_LET` 判定点——局部与全局初始化器共用；`-1` 分支 = 常量档数组长度约束，措辞同 TS03/TK02） | `Variable declared as {T1}, got {T2}` / `Array length constraint not satisfied` |
 | TA03 | 批量声明类型不一致 | `Batch declaration has mixed types: {T1} vs {T2}` |
 | TA04 | 赋值给不可变变量 | `Cannot assign to immutable variable '{name}'` |
 | TA05 | 变量未声明 mutable | `Variable '{name}' is not mutable` |

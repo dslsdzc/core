@@ -145,14 +145,17 @@ def main():
                     "fn g(a: Box[NA], b: Box[NA]) -> int { a = b; return 0; }\n"
                     "fn main() -> int { return 0; }\n"),
         # 容器/元组/指针含命名（同元素）——b 槽标注不入身份 + 同链
+        # （R2 P5 Task 6：指针位原为 `p : *NA = 0;`——`0` 是 int 字面量，声明位点此前无检查
+        #  故静默通过；TA02 落地后与**赋值位点**既有语义对齐（`*T ← int/null` 早已 TA01 拒绝，
+        #  见 p5-task6-report §收紧台账）= 改为无初值声明。指针身份面语义不变。）
         case_accept("named.in_container_same", NA_NB.replace("struct NB { x: int }\n", "") +
                     "fn main() -> int {\n"
                     "    a : [NA; 2] = [NA { x: 1 }, NA { x: 2 }];\n"
                     "    b : [NA; 2] = [NA { x: 3 }, NA { x: 4 }];\n"
                     "    c : NA? = NA { x: 5 };\n"
                     "    d : NA? = NA { x: 6 };\n"
-                    "    p : *NA = 0;\n"
-                    "    q : *NA = 0;\n"
+                    "    p : *NA, mut;\n"
+                    "    q : *NA, mut;\n"
                     "    a = b; c = d; p = q;\n"
                     "    return 0;\n"
                     "}\n"),

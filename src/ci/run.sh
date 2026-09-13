@@ -79,7 +79,7 @@ case "$CI_JOB_NAME" in
     # 见 main.cr 硬名单）。新批次新增判定面行为**必须**同时给这三类证据之一，不得回退到
     # 「与旧版逐字节同」（TODO #26 口径）。
     python3 tests/selfhost/test_compile.py
-    python3 tests/selfhost/test_type_engine.py   # 类型项引擎自测通道（selftest-types **404 例**——P5 Task 3b 后 401 + P5 T4 新增 3（ts_t4_run：ICE04 硬错——桥接缺口 / 引擎未覆盖面 / 决定面零误报）＝ 404，P5 T5 两例重钉（hits 计数断言 → 查询纯度 / 缓存命中同项）不增减；P0/P1/P2a/P2b-T1..T6/P3-T0..T5/P3b-T0..T2/T6/P4-T2/T3/T4/P5-T2/T3/T3b/T4/T5 一路漏挂）
+    python3 tests/selfhost/test_type_engine.py   # 类型项引擎自测通道（selftest-types **404 例**——P5 Task 3b 后 401 + P5 T4 新增 3（ts_t4_run：ICE04 硬错——桥接缺口 / 引擎未覆盖面 / 决定面零误报）＝ 404，P5 T5 两例重钉（hits 计数断言 → 查询纯度 / 缓存命中同项）不增减；P0/P1/P2a/P2b-T1..T6/P3-T0..T5/P3b-T0..T2/T6/P4-T2/T3/T4/P5-T2/T3/T3b/T4/T5/T6 一路漏挂；T6 不增减）
     python3 tests/selfhost/test_iface_ops.py     # R2 P2b Task 4/5/6：接口查表接线（算术/逻辑/条件三门 + 索引兜底门 + TY→TI 单表合一；正控/负控/登记面/站点域 76 例）
     python3 tests/selfhost/test_purity.py          # 效应/纯度批判据（真纯度 13 例 + 链语义 4 例的自测通道驱动）
     python3 tests/selfhost/test_ccr_v7.py          # 效应/纯度批 Task 3：.ccr 层三条边集语义断言（取代「与旧版逐字节同」）
@@ -105,6 +105,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_enum_limit.py     # R2 P4 Task 6（TODO #35）：枚举变体/载荷与结构体字段写入侧护栏（MAX_ENUM_VARIANTS/MAX_VARIANT_TYPES/MAX_STRUCT_FIELDS）——定位硬错 P022/P023 + 无产物 + 16 边界三面正控；13 例
     python3 tests/selfhost/test_named_face.py     # R2 P5 Task 3：命名面判定化（身份链：同链 1 / 链异 0 / 域外 -1）行为覆盖集——受 10 例（命名互赋 / 泛型应用两实例化 / 嵌套应用 / 实参含命名 / 容器元组 / 递归 *Node / 形参 T / 别名透明 / 函数边界）+ 拒 8 例（异名同形 / 异实参应用 / 命名 vs 原生 / 命名 vs 应用 / 可选异名 / T 赋 int / 不变槽残留 ×2）；**不依赖影子通道**（影子通道已于 P5 T5 下线 ⇒ 本套件 = 下线后的判定面行为网主力）；18 例
     python3 tests/selfhost/test_named_dedup.py    # R2 P2a Task 3（C-4）：侧表 ↔ res_type_node 管线内断言（`--verify-named-dedup`；**非影子通道**——判据 = 真实流水线上三组一致性，影子期亦无耦合）
+    python3 tests/selfhost/test_let_check.py      # R2 P5 Task 6（TODO #32）：`EXPR_LET` 站点值/注解兼容判定——TA02 定位硬错（值非兼容 + 数组长度档）+ 无产物 + 前端拒绝（不进入 lower/写 .ccr/ELF）+ 全局声明面（check_global_let 同款）+ 批量/丢弃名 + 级联抑制（TI_NEVER 错误标记只发原诊断）+ 正控（无注解/auto/dyn/泛型 T 与 [T;N]/可选注入/无初值）；23 例
     ;;
 
   suite)

@@ -495,6 +495,42 @@ fn diag_type_incompatible(verdict: int, code: int, what: string, line: int, col:
     }
 }
 
+// ─── R2 P5 Task 6（TODO #32）：声明位点的值/注解兼容判定 ───
+// 背景：`EXPR_LET` 站点自 P3 Task 1 实测起为**无任何兼容检查**的洞（`checker.cr` 该分支
+// 只登记符号，ti = 注解行 ⇒ 后端按注解行发射 = 静默错产物）。实测（旧/新二进制同值）：
+// `x : int = "s"` / `x : [int;3] = s`（切片）/ `x : [int;4] = [1,2,3]`（异长常量档）/
+// `x : int? = 5; y : int = x`（可选流进窄槽）全部 check rc=0 零诊断。
+// 判定 = `type_compat_strict`（身份 + 长度档 + 可选目标注入），照赋值位点（EXPR_ASSIGN）
+// 与返回位点（TF01）同款组合函数；参序归一（P3 T1 §3.1）=（源 = 初始化值, 目标 = 注解行）。
+// 两个调用点共用本函数：① `infer_expr` 的 `EXPR_LET` 分支（局部）；② `check_global_let`
+// （全局初始化器——同形缺口，一并在 #32 划界内收口）。
+// 豁免（逐条对齐邻站，各附理由；无豁免即无判定）：
+//   ① 无注解 / `: .` / `: auto`（type_node < 0）或无初值（val_node < 0）⇒ 无契约可核；
+//   ② 注解 = `dyn` ⇒ 不判（dyn 槽按值追踪；照赋值位点 `tt == TI_DYN` 分支与本站下行
+//      `dyn_set_type` 语义——注解 dyn 时值的类型**就是**该槽的合法类型集）；
+//   ③ 值 = `never`（TI_NEVER）⇒ 不判——两义：**底部**（发散值，照返回位点
+//      `body_ti != TI_NEVER` 豁免同路）+ 表达式层 TI_NEVER 的**错误标记**义（未定义名/
+//      未定义函数等错误路径的返回值，见 EXPR_IDENT/EXPR_CALL 的 `return TI_NEVER`）——
+//      后者是**诊断级联抑制**（实测 r1/r3 探针：只发一条 N01/N06，无二次 TA02）。
+//      实测登记：`-> never` 函数的**调用**被推断为 unit（非 never）⇒ `x : int = boom()`
+//      新增 TA02——与邻站现状一致（`return boom()` 今天即报 TF01，探针 q15），非本检查
+//      新引入的类；全语料零 `-> never`（src/tests/examples 皆无）⇒ 零命中。
+//   ④ 注解 kind == `TYP_GENERIC_PARAM` ⇒ 不判（声明期不可验证；照返回位点
+//      `get_type_kind(ret_ti) != TYP_GENERIC_PARAM` 豁免）。
+// 三态纪律：本函数只消费 `type_compat_strict` 的 {1,0,-1}；不可判（引擎 -1 / 桥接缺口）由
+//   `type_equal` 内部按 P-A 发 ICE04（硬错），**不**在本函数内回落或近似。
+fn check_let_annot_compat(node: int, val_node: int, val_ti: int, ti: int) {
+    type_node := ast_b(node);                          // EXPR_LET: b = 注解类型节点（-1 = 无）
+    if type_node < 0 || val_node < 0 { return; }
+    if ti == TI_DYN { return; }
+    if val_ti == TI_NEVER { return; }
+    if get_type_kind(ti) == TYP_GENERIC_PARAM { return; }
+    compat := type_compat_strict(val_ti, ti);
+    if compat != 1 {
+        diag_type_incompatible(compat, EC_TA_DECL, "Variable declared as " + type_display(ti) + ", got " + type_display(val_ti), ast_line(node), ast_col(node));
+    }
+}
+
 // R2 P1：本文件曾同时有**结构判等实现**（原名 type_equal）与引擎判定两套。
 // R2 P2a Task 3：结构判等降级为 `type_equal_legacy`（影子对拍对照物 + 引擎 -1 的回落实现）。
 // **R2 P5 Task 4 删除**（本处）：断言前提 = 清零判据成立（全语料 72 档 `decisions=agree=32988`、
@@ -2283,9 +2319,16 @@ fn check_impl_for() {
 
 fn check_global_let(node: int) {
     val_node := ast_c(node);  // EXPR_LET: c = value
+    type_node := ast_b(node); // EXPR_LET: b = 注解类型节点（-1 = 无）
+    val_ti := TI_UNIT;
     if val_node >= 0 {
-        infer_expr(val_node);
+        val_ti = infer_expr(val_node);
     }
+    // R2 P5 Task 6（TODO #32）：全局初始化器的值/注解兼容检查（局部站点同款；
+    // 全局符号类型在注册趟（check_global_lets）即取注解行 ⇒ 不查同样静默错产物）。
+    ti := val_ti;
+    if type_node >= 0 { ti = res_type_node(type_node); }
+    check_let_annot_compat(node, val_node, val_ti, ti);
 }
 
 // --- Dynamic type set tracking ---
@@ -3033,6 +3076,8 @@ fn infer_expr(node: int) -> int {
         }
         ti := val_ti;
         if type_node >= 0 { ti = res_type_node(type_node); }
+        // R2 P5 Task 6（TODO #32）：值/注解兼容检查（豁免面见 check_let_annot_compat 头注）
+        check_let_annot_compat(node, val_node, val_ti, ti);
         if istr_get(var_ni) != "_" {
             def_sym(var_ni, SYM_LOCAL, ti, -1);
             if ti == TI_DYN && val_node >= 0 {

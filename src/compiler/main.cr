@@ -164,6 +164,14 @@ fn run_frontend() -> int {
             // 开门依据 = report-only 全语料零命中（72 档 check/shadow 日志与基线逐条同 +
             // `replace_*=0`；Task 3 Step 2 清零判据 + T3b 残留收口，见 p5-task4-report §1）。
             if ec == EC_ICE_TY_INDET { hard = 1; }
+            // 例外（R2 P5 Task 6 / TODO #32）：声明位点值/注解不兼容（TA02）为硬错误——
+            // `EXPR_LET` 站点此前**无任何兼容检查**（全仓 grep：EC_TA_DECL 定义零 raise）⇒
+            // `x : int = "s"` / `x : [int;4] = [1,2,3]` / `x : int? = 5; y : int = x` 全部
+            // check rc=0 照常产出二进制：符号类型取**注解行**、值按注解行发射 ⇒ 静默错值
+            // （与 TS01-04/TK02 同族「判定继续 = 产出静默错产物」）。
+            // 开门依据 = report-only 全语料零命中（72 档 check rc 34×0/38×1 与基线逐条同 +
+            // 诊断正文逐条同 + `check src/compiler` rc=0；见 p5-task6-report §report-only）。
+            if ec == EC_TA_DECL { hard = 1; }
             di = di + 1;
         }
         print_diagnostics();
