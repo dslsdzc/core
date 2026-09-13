@@ -1007,7 +1007,7 @@ fn regalloc_verify_all() -> int {
 // 保证界内——ent_* 同约）。字段读走 buf_read_*（ccr_io.cr 真实函数体带符号
 // 扩展——r32 在 bootstrap 产物里零扩展，负值会读错，见 ent_var 注）；无界
 // 检查与 ent_* 约定一致。
-ESZ_NOD_SEM : int = 28;    // 内存对象记录 28B（= 盘 36B 剥离 first_edge/edge_count）
+ESZ_NOD_SEM : int = 32;    // 内存对象记录 32B（= 盘 40B 剥离 first_edge/edge_count；R2 P6 T3：+4B 项索引）
 ESZ_NOD_META : int = 16;   // 邻接域记录 16B {first_edge i64 @0, edge_count i64 @8}
 OFF_NS_OP : int = 0;       // 语义字段 offset（布局镜像盘记录：s1 = 8B 占 +8..+16）
 OFF_NS_DEST : int = 4;
@@ -1015,6 +1015,11 @@ OFF_NS_S1 : int = 8;
 OFF_NS_S2 : int = 16;
 OFF_NS_S3 : int = 20;
 OFF_NS_TK : int = 24;
+// R2 P6 Task 3（β）：TYPE 段**文件空间**项索引（i32；-1 = 无项）。盘记录 +28，
+// 邻接域自 +28/+32 顺移 +32/+36（语义区在前惯例自 v5 保持）。写侧 = 保存期
+// 单遍装填（ccr_types.cr——文件空间只在 ccr_type_populate 重建后成立）；
+// 读侧 = loader 直读 + TYPE 段解析后的域/一致性硬校验（ccr_io.cr load 尾）。
+OFF_NS_ITEM : int = 28;
 
 g_v7_nod_sem : string, mut;   // NOD 语义字段对象缓冲（ESZ_NOD_SEM/节点——loader 载入）
 g_v7_nod_meta : string, mut;  // NOD 邻接域缓冲（ESZ_NOD_META/节点——EDG 守卫暂存同源）
@@ -1029,6 +1034,9 @@ fn nod_s1(n: int) -> int { return buf_read_i64(g_v7_nod_sem, n * ESZ_NOD_SEM + O
 fn nod_s2(n: int) -> int { return buf_read_i32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_S2); }
 fn nod_s3(n: int) -> int { return buf_read_i32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_S3); }
 fn nod_tk(n: int) -> int { return buf_read_u32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_TK); }
+// R2 P6 Task 3（β）：项索引读访问器——**i32**（-1 = 无项必须读到 -1；码槽的
+// -1 在盘上是 u32 0xFFFFFFFF，两者语义不同，不得混用读法）。
+fn nod_item(n: int) -> int { return buf_read_i32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_ITEM); }
 fn nod_edge_first(n: int) -> int { return r64(g_v7_nod_meta, n * ESZ_NOD_META); }
 fn nod_edge_count(n: int) -> int { return r64(g_v7_nod_meta, n * ESZ_NOD_META + 8); }
 

@@ -306,7 +306,42 @@ fn ccr_seg_prepare_save() -> int {
     }
     if ccr_type_populate() != 0 { return -1; }
     if ccr_type_seg_build() != 0 { return -1; }
-    return ccr_iface_seg_build();
+    if ccr_iface_seg_build() != 0 { return -1; }
+    // R2 P6 Task 3（β）：NOD 项索引装填——**必须排在 ccr_type_populate() 之后**
+    // （文件空间 = 该调用重建的项表；emit 期活表索引此前已作废），且排在两段体
+    // 构造之后（本函数只**查询**桥接缓存——行装填已把 0..g_type_count-1 全部
+    // 建项 ⇒ 全部命中、不新增项 ⇒ 段体字节不受影响）。失败 = 沿用 D23 闸。
+    return ccr_nod_item_populate();
+}
+
+// ─── R2 P6 Task 3（β）：NOD 项索引装填（corec 侧；D18——本文件 corec-only）───
+// 逐节点（序 = 全局指令序 = 盘上 NOD 记录序）由**盘上派生码**反查 TYPE 段**文件
+// 空间**的项索引：
+//   · face 0（类型行面且项可逆）⇒ item = sh_term_of_ti(tk)——此时
+//     `tt_atom_of_term(项) == tk`（与分类表同一判定）⇒ loader 侧一致性校验必过；
+//   · 其余（复合行 / 辅码面 / 无面 / 行越界 / 桥接缺口——含**暖态缺行**）
+//     ⇒ item = -1（码仍由 NOD 的 `tk` 槽逐字节保真；**不得**猜项，不得近似）。
+// 单源：分类与建项一律走桥接层既有入口（sh_tk_face_of_code / sh_term_of_ti）——
+// 本函数**不引入**第二套建项/分类逻辑，也不置 D23 失败位（那是 sh_tk_split 的
+// 职责；纯查询不得污染落盘闸）。
+// 时点偏差登记：计划 Task 3 Step 3 原文写「项索引与派生码同出 emit 期的那一次
+// 拆分，不得二次构造」——实读时序下不可实施（ccr_type_populate 的 tt_layer_reset
+// 在 save 前作废 emit 期引用）；本实现 = 保存期由码经同一桥接函数重派生，与
+// `.cir` 装载侧的重派生同构（P4 T4 先例）。
+fn ccr_nod_item_populate() -> int {
+    n := g_ir_instr_count;
+    g_ccr_nod_item = alloc((n + 8) * 4);
+    g_ccr_nod_item_count = n;
+    ii : ., mut = 0;
+    loop {
+        if ii >= n { break; }
+        tk := iri_tk(ii);
+        it : ., mut = -1;
+        if sh_tk_face_of_code(iri_op(ii), tk) == 0 { it = sh_term_of_ti(tk); }
+        w32(g_ccr_nod_item, ii * 4, it);
+        ii = ii + 1;
+    }
+    return 0;
 }
 
 // ─── 自测/对拍通道（corec 侧 `ccr --dump-types`）───

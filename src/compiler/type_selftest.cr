@@ -1069,7 +1069,7 @@ fn ts_t3n_run() -> int {
     t_ga3 := sh_term_of_ti(ga3);
     fails = fails + ts_check("t3n.apply_canonical_b",
         (t_ga1 >= 0 && tt_a(t_ga1) == AK_NAMED && tt_b(t_ga1) == n_a &&
-         sh_atom_of_term(t_ga1) == n_a &&
+         tt_atom_of_term(t_ga1) == n_a &&
          tt_c(t_ga1) >= 0 && tt_tag(tt_c(t_ga1)) == TT_CONS &&
          tt_a(tt_c(t_ga1)) == sh_name_token(na_ni) &&
          tt_a(tt_b(tt_c(t_ga1))) == sh_term_of_ti(TI_INT)), 1);
@@ -2069,12 +2069,12 @@ fn type_selftest_run() -> int {
     t5s_ptr_row := alloc_type(TYP_PTR, TI_INT, 0);
     t5s_ptr_term := sh_term_of_ti(t5s_ptr_row);
     total = total + 1; fails = fails + ts_check("p5t2.atom_of_contract",
-        (sh_atom_of_term(sh_term_of_ti(TI_INT)) == TI_INT &&
-         sh_atom_of_term(t5s_ptr_term) == -1 &&            // 复合项：AK_PTR 的 b = -1
-         sh_atom_of_term(tt_nil()) == -1 &&
-         sh_atom_of_term(tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil())) == -1 &&
-         sh_atom_of_term(-1) == -1 &&
-         sh_atom_of_term(tt_count() + 9) == -1), 1);
+        (tt_atom_of_term(sh_term_of_ti(TI_INT)) == TI_INT &&
+         tt_atom_of_term(t5s_ptr_term) == -1 &&            // 复合项：AK_PTR 的 b = -1
+         tt_atom_of_term(tt_nil()) == -1 &&
+         tt_atom_of_term(tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil())) == -1 &&
+         tt_atom_of_term(-1) == -1 &&
+         tt_atom_of_term(tt_count() + 9) == -1), 1);
 
     // ── 新例 ②：类型行面 —— 改走 split，断言**两槽**（项 + 空辅码）+ 互斥 ──
     sh_tk_split(IR_BINARY, TI_STR);

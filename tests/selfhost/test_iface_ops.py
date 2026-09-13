@@ -276,16 +276,35 @@ def main():
                               [("TF01", 2)]))
     ok.append(case_ok("t6_S3_char_covered",
                       "extern fn f() -> char;\nfn main() -> char { x := f(); return x; }\n"))
-    # TF01 收口（2026-09-13）：TF01@1 = 同为「无 break 的 loop 收尾」误报面（已修）；
-    # 本用例的关注面 = S1 链域（`never` 声明经该链落到 unit ⇒ TF01@2），该面**不变**。
-    ok.append(case_diag_lines("t6_S1_never_unit",
-                              "fn f() -> never { loop { } }\n"
-                              "fn main() -> never { x := f(); return x; }\n",
-                              [("TF01", 2)]))
+    # TF01 收口（2026-09-13）：TF01@1 = 同为「无 break 的 loop 收尾」误报面（已修）。
+    # R2 P6 Task 4a（E-11）**重钉**（2026-09-14）：本用例改前钉的是**误报**——`f()` 的
+    #   调用推断此前回 unit（S1 注册链把 NEVER 钳成 unit，checker.cr:1491）⇒ `x` = unit ⇒
+    #   `main`（`-> never`）体检查在返回位报 TF01@2。E-11 落地后调用推断 = never（直调
+    #   站点守卫）⇒ `x` = never ⇒ 返回位豁免（checker.cr:2234）⇒ **诊断消失、rc=0**。
+    #   改前 = 误报在册 / 改后 = 正确行为在册（RED 实跑：改前 rc=1 + TF01@2；改后 rc=0）。
+    #   **S1 链的域差异**（`:1491` 挡 NEVER）**仍然成立**，其证据面改由 t6_S3/S4/S5/S6 四钉子
+    #   + `type_selftest` 的 `t6.never_cell_diff` 承担，不在本用例。
+    ok.append(case_ok("t6_S1_never_unit",
+                      "fn f() -> never { loop { } }\n"
+                      "fn main() -> never { x := f(); return x; }\n"))
     ok.append(case_diag_lines("t6_S3_never_unit",
                               "extern fn f() -> never;\n"
                               "fn main() -> never { x := f(); return x; }\n",
                               [("TF01", 2)]))
+    # R2 P6 Task 4a（E-11，裁②并入）：方法调用站点的 never 透传（姊妹站点 checker.cr:2694）。
+    #   改前：`s.m()` 推断 = unit（mangled "S.m" 经同一注册链钳位 :1491）⇒ 误发 TA02；
+    #   改后：rc=0（守卫含 `fi_generic_count(fi_m) == 0` + `sym_type == unit` + 裸码 never）。
+    ok.append(case_ok("t4a_method_never_call",
+                      "struct S { a: int }\n"
+                      "impl S { fn m(self: S) -> never { loop { } } }\n"
+                      "fn main() -> int { s := S { a: 1 }; x : int = s.m(); return 0; }\n"))
+    # 登记钉（裁④ 的泛型对齐面）：泛型方法**不动**（守卫含 `fi_generic_count(fi_m) == 0`，
+    #   与直调泛型面「调用推断 = unit」一致）——改前改后同为 TA02。
+    ok.append(case_reject("t4a_method_generic_never_unit",
+                          "struct S { a: int }\n"
+                          "impl S { fn m[T](self: S, v: T) -> never { loop { } } }\n"
+                          "fn main() -> int { s := S { a: 1 }; x : int = s.m(1); return 0; }\n",
+                          "TA02"))
     #      S4（`check_func` 形参链，域缺 NEVER）：形参符号类型 = unit（@raw_int 只收 dex/int/never）
     ok.append(case_diag_lines("t6_S4_param_never_unit",
                               "fn f(b: never) -> int { x := @raw_int(b); return 0; }\n"

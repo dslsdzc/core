@@ -181,6 +181,24 @@ fn f() -> int {
 # 按新口径接受（loop 永不落空）。若未来引入逐 return 核对，本条期望随之改为拒。
 POS_BOUNDARY_NO_RETURN_VALUE_CHECK = "fn f() -> int { loop { return \"x\"; } }\n"
 
+# ─── R2 P6 Task 4a（E-11）：`-> never` 调用的返回型透传（TF01 面）───
+# 改前（RED 实测）：`return boom()` 的块类型 = 调用推断 = unit（声明注册域守卫
+#   checker.cr:1491 把 NEVER 钳成 unit）⇒ `body_ti != TI_NEVER` 成立（是 unit）⇒
+#   误发 TF01；改后：调用推断 = never ⇒ 返回位豁免（checker.cr:2234）⇒ 接受。
+NEVER_RETURN_SRC = ("fn boom() -> never { loop { } }\n"
+                    "fn f() -> int { return boom(); }\n"
+                    "fn main() -> int { return f(); }\n")
+
+# 变量传播面（与 test_iface_ops 的重钉项 t6_S1_never_unit 同源）：`x` 绑定 = never
+# ⇒ `return x` 的块类型 = never ⇒ 返回位豁免（改前 = unit ⇒ 误发 TF01）。
+NEVER_PROPAGATE_SRC = ("fn boom() -> never { loop { } }\n"
+                       "fn main() -> int { x := boom(); return x; }\n")
+
+# 端到端（发射面回归）：分支不执行 ⇒ 运行 rc=42；改前 build rc=1（TA02 在硬名单 ⇒ 无产物）。
+RUN_NEVER_DEAD_BRANCH = ("fn boom() -> never { loop { } }\n"
+                         "fn main() -> int { if 1 > 2 { x : int = boom(); }\n"
+                         " return 42; }\n")
+
 # ─── 负控：可落空的体（修复前报 TF01，修复后**必须仍拒**——静默接受洞的钉子）───
 
 NEG_FALLTHRU = "fn f() -> int { 1 + 1; }\n"
@@ -249,6 +267,9 @@ def main():
         case_accept("pos_array_no_break", POS_ARRAY_NO_BREAK),
         case_accept("pos_loop_with_call", POS_LOOP_WITH_CALL),
         case_accept("pos_boundary_no_return_value_check", POS_BOUNDARY_NO_RETURN_VALUE_CHECK),
+        case_accept("pos_never_call_return", NEVER_RETURN_SRC),
+        case_accept("pos_never_call_propagates", NEVER_PROPAGATE_SRC),
+        case_run("run_never_call_dead_branch", RUN_NEVER_DEAD_BRANCH, 42),
         case_reject("neg_fallthru", NEG_FALLTHRU),
         case_reject("neg_loop_break", NEG_LOOP_BREAK),
         case_reject("neg_if_no_else", NEG_IF_NO_ELSE),

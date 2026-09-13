@@ -2691,6 +2691,26 @@ fn infer_expr(node: int) -> int {
             if func_ni >= 0 {
                 si := find_gsym(func_ni);
                 if si >= 0 && sym_kind(si) == SYM_FN {
+                    // R2 P6 Task 4a（E-11，姊妹站点）：与直调站点守卫同形——
+                    //   `func_ni` = parser impl 分支写入的 mangled ni（"S.m"，
+                    //   parser.cr:1887-1894）⇒ 与直调面同一张 g_funcs/符号表，
+                    //   `fi_return_type`/`sym_type` 语义逐位同。差异一处（显式对齐）：
+                    //   本尾无泛型早退（直调面走 `infer_gen_call`）⇒ 补
+                    //   `fi_generic_count == 0` 守卫，使泛型面两站点一致**不动**
+                    //   （参数化方法的返回型依实例化）。本面恒无 extern（impl 分支
+                    //   只认 `fn`，parser.cr:1864-1899）⇒ 不需 EXPR_FN 限定
+                    //   （行为等价，非逐字镜像）。嵌套 if 同直调站点（`&&` 不短路 +
+                    //   表读无护栏）。
+                    fi_m := find_func(func_ni);
+                    if fi_m >= 0 {
+                        if fi_generic_count(fi_m) == 0 {
+                            if sym_type(si) == TI_UNIT {
+                                if fi_return_type(fi_m) == TY_NEVER {
+                                    return TI_NEVER;
+                                }
+                            }
+                        }
+                    }
                     return sym_type(si);
                 }
             }
@@ -2748,6 +2768,30 @@ fn infer_expr(node: int) -> int {
                 fi := find_func(func_ni);
                 if fi >= 0 && fi_generic_count(fi) > 0 {
                     return infer_gen_call(fi, node, first_arg, arg_count);
+                }
+                // R2 P6 Task 4a（E-11）：被调**非泛型 `fn` 声明**的返回行 = `never`
+                //   ⇒ 调用推断 `never`。声明注册趟把 NEVER 钳成 unit（collect_decls 的
+                //   域守卫 :1491：`rt_mapped != TI_NEVER`）⇒ 此处按裸码 `fi_return_type`
+                //   复读一次；两处下游闸随之生效：声明位 `check_let_annot_compat` 豁免③
+                //   （:526）/ 返回位（:2234）。**只改推断结果**：`sym_type(si)` 值不动
+                //   ⇒ 发射面零耦合（ir_gen 的调用结果型经 sym_type，见 ir_gen.cr:1662）。
+                //   守卫四条：① 泛型已由上方早退排除；② 仍是被钳的 unit 格；③ 裸码 =
+                //   TY_NEVER；④ = `fn` 声明（**extern 面按裁④ 不动**）。
+                //   **嵌套 if**：bootstrap 构建的 corec 对 `&&` 两侧无条件求值
+                //   （bootstrap/corec/frontend/ir_gen.py:226-235），且 `fi_return_type`
+                //   （dyn_arr.cr:459）与 `ast_kind`（dyn_arr.cr:370）均无护栏 ⇒ 不得写
+                //   `guard && 表读`。
+                if fi >= 0 {
+                    if sym_type(si) == TI_UNIT {
+                        if fi_return_type(fi) == TY_NEVER {
+                            fnd := fi_ast_node(fi);
+                            if fnd >= 0 {
+                                if ast_kind(fnd) == EXPR_FN {
+                                    return TI_NEVER;
+                                }
+                            }
+                        }
+                    }
                 }
                 return sym_type(si);  // return type
             }

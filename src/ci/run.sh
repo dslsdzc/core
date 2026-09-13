@@ -83,10 +83,10 @@ case "$CI_JOB_NAME" in
     # 「与旧版逐字节同」（TODO #26 口径）。
     python3 tests/selfhost/test_compile.py
     python3 tests/selfhost/test_type_engine.py   # 类型项引擎自测通道（selftest-types **415 例**——P5 收官 404 + R2 P6 Task 2 增 11（`ts_t2_neg_run`：¬ 面同类原子身份判据的邻域覆盖——同身份 / μ 字面 / ⊤ₖ 双向 / 跨枚举同名 / 同枚举异变体 / 令牌字面 / AK_NAMED / 空链与链元素域外 / 参数化面 / REF mut 标记面；三例 `t3.*_over_claim` 为**重钉**（0→1，不增减）；P0..P6 T2 一路漏挂）
-    python3 tests/selfhost/test_iface_ops.py     # R2 P2b Task 4/5/6：接口查表接线（算术/逻辑/条件三门 + 索引兜底门 + TY→TI 单表合一；正控/负控/登记面/站点域 76 例）
+    python3 tests/selfhost/test_iface_ops.py     # R2 P2b Task 4/5/6：接口查表接线（算术/逻辑/条件三门 + 索引兜底门 + TY→TI 单表合一；正控/负控/登记面/站点域 76 例 + R2 P6 Task 4a 增 2（方法调用站点 never 透传 + 泛型方法登记钉）＝ 78 例）
     python3 tests/selfhost/test_purity.py          # 效应/纯度批判据（真纯度 13 例 + 链语义 4 例的自测通道驱动）
     python3 tests/selfhost/test_ccr_v7.py          # 效应/纯度批 Task 3：.ccr 层三条边集语义断言（取代「与旧版逐字节同」）
-    python3 tests/selfhost/test_ccr_types.py       # R2 P4 Task 1/2/3/4 + P5 Task 2：段机制（版本 8 + loader 三闸/必备集 + 旧 v7 拒收）8 例 + TYPE 内容面（行表/项 DAG 序列化 + 确定性装填 + corearch 读回对拍 + loader 负分支）10 例 + IFACE 内容面（五小节/条目扩列 16/形状命名化/签名项化/impl 边与方法表/corearch 读回/跨段引用域/确定性）10 例 + DFNode.TK 项槽（逐节点规则 + dex 语料 + NOD 36B/同序 + 冷/暖快照对称 + dump 零产物影响 + .cir 布局未变）6 例 = 34 例 + P5 T2 单槽化 6 例（复合行走辅码 + 互斥不变量 + F1 hotpatch 无面 + 复合行冷/暖对称 + 复合行 NOD 同序 + 快照盘面派生码保真）= 40 例
+    python3 tests/selfhost/test_ccr_types.py       # R2 P4 Task 1/2/3/4 + P5 Task 2：段机制（版本 8 + loader 三闸/必备集 + 旧 v7 拒收）8 例 + TYPE 内容面（行表/项 DAG 序列化 + 确定性装填 + corearch 读回对拍 + loader 负分支）10 例 + IFACE 内容面（五小节/条目扩列 16/形状命名化/签名项化/impl 边与方法表/corearch 读回/跨段引用域/确定性）10 例 + DFNode.TK 项槽（逐节点规则 + dex 语料 + NOD 36B/同序 + 冷/暖快照对称 + dump 零产物影响 + .cir 布局未变）6 例 = 34 例 + P5 T2 单槽化 6 例（复合行走辅码 + 互斥不变量 + F1 hotpatch 无面 + 复合行冷/暖对称 + 复合行 NOD 同序 + 快照盘面派生码保真）= 40 例 + R2 P6 Task 3 项索引 8 例（版本闸 v8 拒收 / NOD 40B 字段序 / 项索引落盘读回对拍（非退化）/ 两通道面一致 / 辅码面与复合行保真 / 项索引越界与不一致 ⇒ 拒绝 / 段界检 / D18 纯度静态）= 48 例
     python3 tests/selfhost/test_impl.py
     python3 tests/selfhost/test_borrow.py
     python3 tests/selfhost/test_pointer_safety.py
@@ -99,7 +99,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_cache_identity.py # TODO #5 cir 缓存编译器身份（跨重建失效）
     python3 tests/selfhost/test_cir_warm_path.py  # R2 P5 Task 1：.cir 暖态 SIGSEGV 根因修复回归——冷/暖 rc 双 0 + ELF 逐字节同 + .ccr 段级契约（STR 冷≠暖为预存口径）+ 暖态真命中（条目 size/mtime 不变）+ 变体（多串/0 串/大串/多函数）+ 可选面零条目 + **累计装载复现例**（400 条目补零至 3MB ⇒ Σ=1.2GB > 1GB 堆，暖态 rc=0 + 峰值 RSS < 512MB；修复前 rc=139 红态实测）= 19 例（COREC_WARM_SELF=1 另开 2 例自源语料，~3 分钟）
     python3 tests/selfhost/test_match_exhaust.py  # R2 P3 Task 3：match 穷尽性（补集空性 + 具体变体反例；TM03 硬门 + TM04 软面）
-    python3 tests/selfhost/test_tf01_fallthrough.py # TF01 收口：函数体落空分析（无 break 的 loop 收尾不再误报）+ lits_copy 返回型（真·类型洗白）；正控/负控/端到端 19 例
+    python3 tests/selfhost/test_tf01_fallthrough.py # TF01 收口：函数体落空分析（无 break 的 loop 收尾不再误报）+ lits_copy 返回型（真·类型洗白）；正控/负控/端到端 19 例 + R2 P6 Task 4a 增 3（never 调用返回位/传播位 + 死分支端到端）＝ 22 例
     python3 tests/selfhost/test_optional.py       # R2 P3 Task 4：联合/可选（T? = T ∪ null；Some/None 解析 + ? 结构解包 + Option 名退役 + 载荷类型节点列）12 例 + R2 P4 Task 5：解包侧判表示（裁决 5）——B.7「裸值 + Some 臂」双路径 SIGSEGV 闭合 + 表示位运行期分派（写点置位/条件写/两形态改写）+ 返回/形参信道 + `?` 解包装箱值双路径分歧闭合 + 未覆盖面（结构体字段裸/装箱 + 全局槽装箱/None）登记 = 34 例
     python3 tests/selfhost/test_generic_constr.py # R2 P3 Task 5：泛型约束（结构/枚举约束保留 + 实例化点 ty_sub 判定 + 反例文本；用户接口面 P3b Task 0 起真判定；F4 形参链；实例键类型项化）
     python3 tests/selfhost/test_iface_satisfies.py # R2 P3b Task 0：iface_satisfies 契约（轴分派/三态/与 check_iface 同源；实例化点 T: I 判定 + 登记面 17 例）
@@ -108,7 +108,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_enum_limit.py     # R2 P4 Task 6（TODO #35）：枚举变体/载荷与结构体字段写入侧护栏（MAX_ENUM_VARIANTS/MAX_VARIANT_TYPES/MAX_STRUCT_FIELDS）——定位硬错 P022/P023 + 无产物 + 16 边界三面正控；13 例
     python3 tests/selfhost/test_named_face.py     # R2 P5 Task 3：命名面判定化（身份链：同链 1 / 链异 0 / 域外 -1）行为覆盖集——受 10 例（命名互赋 / 泛型应用两实例化 / 嵌套应用 / 实参含命名 / 容器元组 / 递归 *Node / 形参 T / 别名透明 / 函数边界）+ 拒 8 例（异名同形 / 异实参应用 / 命名 vs 原生 / 命名 vs 应用 / 可选异名 / T 赋 int / 不变槽残留 ×2）；**不依赖影子通道**（影子通道已于 P5 T5 下线 ⇒ 本套件 = 下线后的判定面行为网主力）；18 例
     python3 tests/selfhost/test_named_dedup.py    # R2 P2a Task 3（C-4）：侧表 ↔ res_type_node 管线内断言（`--verify-named-dedup`；**非影子通道**——判据 = 真实流水线上三组一致性，影子期亦无耦合）
-    python3 tests/selfhost/test_let_check.py      # R2 P5 Task 6（TODO #32）：`EXPR_LET` 站点值/注解兼容判定——TA02 定位硬错（值非兼容 + 数组长度档）+ 无产物 + 前端拒绝（不进入 lower/写 .ccr/ELF）+ 全局声明面（check_global_let 同款）+ 批量/丢弃名 + 级联抑制（TI_NEVER 错误标记只发原诊断）+ 正控（无注解/auto/dyn/泛型 T 与 [T;N]/可选注入/无初值）；23 例
+    python3 tests/selfhost/test_let_check.py      # R2 P5 Task 6（TODO #32）：`EXPR_LET` 站点值/注解兼容判定——TA02 定位硬错（值非兼容 + 数组长度档）+ 无产物 + 前端拒绝（不进入 lower/写 .ccr/ELF）+ 全局声明面（check_global_let 同款）+ 批量/丢弃名 + 级联抑制（TI_NEVER 错误标记只发原诊断）+ 正控（无注解/auto/dyn/泛型 T 与 [T;N]/可选注入/无初值）；23 例〔**注释陈旧自纠**：T4a 前实读 = 24（23 为 P5 期旧值，差 1 未同步）〕+ R2 P6 Task 4a 增 5（never 调用声明位 / near-miss 负控 / 强负控调用返回型不符仍拒 / 语句位宽面 / 赋值位登记钉）＝ **29 例**
     ;;
 
   suite)

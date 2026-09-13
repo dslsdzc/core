@@ -188,6 +188,35 @@ def main():
         case_reject("let_error_marker_no_cascade_call",
                     "fn main() -> int { x : int = nosuchfn(); return 0; }\n",
                     ["error[N06]"], cmd="check", forbid=(), exact_diags=1),
+        # ── R2 P6 Task 4a（E-11）：`-> never` 调用的返回型透传（TA02 面）──
+        # 改前（RED 实测）：`boom()` 推断 = unit（声明注册域守卫 checker.cr:1491 钳位）⇒
+        #   声明位豁免③（:526 `val_ti == TI_NEVER`）不触发 ⇒ 误发 TA02。
+        # 改后：调用推断 = never ⇒ 豁免③ 生效 ⇒ rc=0。
+        case_accept_check("let_never_call_ok",
+                          "fn boom() -> never { loop { } }\n"
+                          "fn main() -> int { x : int = boom(); return 0; }\n"),
+        # near-miss 负控（突变 Mu2 的稳定牙齿）：普通 int 调用的注解位仍判，
+        #   守卫不得退化成「一律透传 never」。
+        case_accept_check("let_ordinary_call_unchanged",
+                          "fn f2() -> int { return 1; }\n"
+                          "fn main() -> int { x : int = f2(); return 0; }\n"),
+        # 强负控（Mu2 的**转红**牙齿）：**普通调用**的返回型若真不符仍须拒——
+        #   守卫退化为「无条件 return TI_NEVER」时本例转绿（= 抑制面被误开）。
+        case_reject("call_result_mismatch_still_rejected",
+                    "fn f2() -> int { return 1; }\n"
+                    "fn main() -> int { x : char = f2(); return 0; }\n",
+                    ["error[TA02]"], cmd="check", forbid=(), exact_diags=1),
+        # 宽面负控（C5）：语句位调用本无 TA/TF 判定面，改动不得新开抑制/新开诊断。
+        case_accept_check("never_stmt_position_unchanged",
+                          "fn boom() -> never { loop { } }\n"
+                          "fn main() -> int { if 1 > 2 { boom(); } return 0; }\n"),
+        # 登记钉（裁③）：赋值位无 never 豁免（EXPR_ASSIGN，checker.cr:3314-3336）——
+        #   改前（源 = unit）改后（源 = never）**都**报 TA01；既有缺口、非本改动引入，
+        #   入 TODO 登记（E-T4-5）；同族豁免已在声明位/返回位/if 合并三处，赋值位是剩余缺口。
+        case_reject("assign_never_still_ta01",
+                    "fn boom() -> never { loop { } }\n"
+                    "fn main() -> int { busy : int, mut = 0; busy = boom(); return 0; }\n",
+                    ["error[TA01]"], cmd="check", forbid=(), exact_diags=1),
         # ── 正控：合法注解 / 无注解 / auto / 泛型 / 可选注入 / 无初值 / 索引形态 ──
         case_run("let_exact_ok", "fn main() -> int { x : int = 5; return x; }\n", 5),
         case_run("let_no_annot_ok",

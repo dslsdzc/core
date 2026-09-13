@@ -243,7 +243,7 @@ ty_witness(a, b) -> term  // 反例值（判定失败时给具体值示例）
 
 - 载入 TYPE/IFACE 段重建类型项表 → 承接收尾期 `atom_of` 与未来验证消费（`.csr`/TagNode 图验证）
 
-**状态（R2 P5 收官，2026-09-14）**：段重建已在位（P4 T2/T3；`--dump-types`/`--dump-ifaces` 读回对拍在 `test_ccr_types` **40 例**内），但 **corearch 侧不消费 TYPE/IFACE 段**——发射面仍按 NOD 的**派生码**分派（P5 T2 起码 = 派生量）。**接线 = β 批次（P6）**：NOD 记录扩面（36B → 40B，承载 TYPE 段文件内项索引 + 辅码字段）+ `CCR_VERSION` 8→9 级联 + 发射路径改为「项索引 → 取项 → `atom_of` → 码」。**前置已齐** = P5 T2 的 `atom_of` 契约 + 分类表 + D20 形态规范（本条 ✅）。
+**状态（R2 P6 Task 3 收官，2026-09-14）**：**β ✅ 已实施**——NOD 记录扩面（36B → **40B**：+28 = **TYPE 段文件空间项索引** `item i32`，-1 = 无项；`tk` 槽仍 = 派生码，字节/语义零变化）+ `CCR_VERSION` **8 → 9**（旧 v8 及更早整类拒收）。**读回 = 两条腿**：① `load_ccr` 在 TYPE 段解析后的**一致性硬校验**（域外 / `tt_atom_of_term(项) ≠ 盘上码` ⇒ 拒绝 rc=1；实现 = `type_terms.cr:tt_atom_of_term`——R2 P6 T3 自 `ty_shadow.cr` 整函数迁入**共享层**，因 corearch 清单不含桥接层）；② corearch `--dump-nod-items` 通道（逐节点 `item → 项表取项 → atom_of → 行`，跨进程可解析的显式证据）。**发射面零变化**（实证：ELF canary `95084e7b…d475` IDENTICAL · `--dump-objects` 两口径逐字节同）：发射路径仍读 `tk` 派生码，`item` 是**语义面**增量（`.csr`/TagNode 图验证等未来消费者的直接入口）。**布局先裁 = L-a**（40B；D20 合规论证 = 单一写点 + 读侧单一权威 + **分歧即硬拒**——见 `plans/2026-09-14-r2-p6-tail.md` Task 3 与 `.superpowers/sdd/p6-task3-report.md` §1；更严的单源形态 L-c 登记未取）。**残留登记**：暖态（`.cir` 缓存命中跳过 ir_gen）文件对被缓存函数引用、而暖进程未分配的类型行只能落 `item = -1`（码由 `tk` 保真）⇒ 暖态项面为**部分**；`.cir` 快照不动（`CIR_CACHE_VER` 保持 17）。
 
 ### 6.4 语义保鲜兑现点
 
