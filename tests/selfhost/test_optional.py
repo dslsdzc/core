@@ -19,9 +19,13 @@ docs/superpowers/specs/2026-09-10-type-interface-unification-design.md §5.4）�
       路径沿用既有 tag 分派 + 字段 fi+1。跨函数面（返回/形参）走隐藏全局信道（纯 IR）。
       **前置红态（B.7 一等条目）**：裸值 + `Some` 臂 = 双路径 SIGSEGV（check/build rc=0
       零诊断）——修复前后 rc 逐形态见任务报告。
-  未覆盖面（**如实登记**，同批未修）：结构体字段 / 数组元素 / 全局槽 / match 结果 /
-      惰性 thunk 的可选值不配表示位 ⇒ 解包走既有装箱假定（P3 前语义）——裸值形态仍
-      **响亮失败**（rc=139，双路径同）而非静默错值；装箱形态照常正确。
+  聚合面（**容量批 T2，裁-CAP-1 (a)「存储边界规范化」**）：结构体字段 / 数组·切片元素 /
+      元组元素 / 枚举载荷 / 全局槽的可选值在**写点装箱**（裸 T 值 ⇒ Some(v)），读取侧
+      零改动（既有装箱假定）。局部/形参/返回/调用结果仍走表示位机制（P4 T5，可持裸值）。
+      **修复前**这四面的裸值形态是**响亮失败**（rc=139 双路径同，非静默）；本批转为正确值
+      （下方 `uncovered_*` 四例为**重钉**，死亡证据 = 本批能力变更）。**未覆盖面（登记）**：
+      指针写 `IR_STORE_PTR`（同一站点服务局部与聚合 + 别名不可静态闭合）、元组/数组字面量
+      的非 ident/调用元素、泛型形参字段实例化为 `T?` 的形态。
 """
 
 import os
@@ -264,6 +268,48 @@ UNCOVERED_GLOBAL_NONE = """g : int? = None;
 fn main() -> int { return match g { Some(v) => { return v; } None => { return 9; } }; }
 """
 
+# ── 容量批 T2：聚合面存储边界规范化（裁-CAP-1 (a)）——A 类 8 写点逐点覆盖 ──────────
+# 每例 = 裸值写入可选聚合槽后解包（修复前 139；现须给精确值）；装箱/None 形为对照。
+CAP_FIELD_ASSIGN = """struct S { a: int? }
+fn main() -> int { s : ., mut = S { a: Some(0) }; s.a = 5; return match s.a { Some(v) => { return v; } None => { return 0; } }; }
+"""
+CAP_FIELD_LITERAL = """struct S { a: int? }
+fn main() -> int { s : ., mut = S { a: 6 }; return match s.a { Some(v) => { return v; } None => { return 0; } }; }
+"""
+CAP_FIELD_NONE = """struct S { a: int? }
+fn main() -> int { s : ., mut = S { a: None }; return match s.a { Some(v) => { return v; } None => { return 3; } }; }
+"""
+CAP_ARR_ASSIGN_LIT = """fn main() -> int { a : [int?;2] = [Some(0), None]; a[0] = 7; return match a[0] { Some(v) => { return v; } None => { return 0; } }; }
+"""
+CAP_ARR_ASSIGN_DYN = """fn main() -> int { a : [int?;2] = [Some(1), None]; i := 1; a[i] = 8; return match a[i] { Some(v) => { return v; } None => { return 0; } }; }
+"""
+CAP_ARR_LITERAL_IDENT = """fn main() -> int { x : int? = 5; a : [int?;2] = [x, None]; return match a[0] { Some(v) => { return v; } None => { return 0; } }; }
+"""
+CAP_ARR_BOXED_LITERAL = """fn main() -> int { a : [int?;2] = [Some(4), None]; return match a[0] { Some(v) => { return v; } None => { return 0; } }; }
+"""
+CAP_GLOBAL_ASSIGN = """g : int? = None;
+fn main() -> int { g = 9; return match g { Some(v) => { return v; } None => { return 0; } }; }
+"""
+CAP_GLOBAL_INIT_BARE = """g : int? = 10;
+fn main() -> int { return match g { Some(v) => { return v; } None => { return 0; } }; }
+"""
+CAP_MATCHRES_COND = """fn f(c: int) -> int? { return match c { 0 => 11, _ => None, }; }
+fn main() -> int { v := f(0); return match v { Some(x) => { return x; } None => { return 0; } }; }
+"""
+CAP_ENUM_PAYLOAD = """enum E { V(int?), W }
+fn main() -> int { e := V(12); return match e { V(x) => { return match x { Some(v) => { return v; } None => { return 0; } }; } W => { return 1; } }; }
+"""
+CAP_TUPLE_ELEM = """fn main() -> int { x : int? = 13; t := (x, 3); return match t . 0 { Some(v) => { return v; } None => { return 0; } }; }
+"""
+CAP_FIELD_BARE_CROSSFN = """struct S { a: int? }
+fn f(s: S) -> int { return match s.a { Some(v) => { return v; } None => { return 0; } }; }
+fn main() -> int { s : ., mut = S { a: Some(0) }; s.a = 14; return f(s); }
+"""
+# 负控：非可选聚合槽不受本律影响（值形态不变）
+CAP_NONOPT_FIELD = """struct S { a: int }
+fn main() -> int { s : ., mut = S { a: 15 }; s.a = 16; return s.a; }
+"""
+
 
 def main():
     ok = [
@@ -340,16 +386,38 @@ def main():
         case_dual("mixed_return_boxed_taken", MIXED_RET_BOXED, 4),
         # 装箱值 + 通配臂（既有语义保持）
         case_dual("boxed_value_wildcard", BOXED_WILDCARD, 12),
-        # ── 未覆盖面登记（结构体字段）：响亮失败双路径同 / 装箱形态照常正确 ──
-        # 裸值字段 = 既有装箱假定 ⇒ 载荷解包把裸值当对象 ⇒ 双路径 139（SIGSEGV = 响亮，
-        # 非静默错值）；该面**不在本任务修复面内**（见任务报告 §未覆盖面）。
-        # （Python subprocess 对 SIGSEGV 报 returncode = -11 ≡ shell 的 139）
-        case_dual_rc("uncovered_field_bare_is_loud", UNCOVERED_FIELD_BARE, -11),
+        # ── 原未覆盖面（**容量批 T2 重钉**：裸值形态已由写点装箱闭合）──
+        # 死亡证据 = 本批能力变更：修复前 `uncovered_field_bare_is_loud` 期望 -11（响亮
+        # 失败），本批后为正确值 5 ⇒ 改判 `case_dual` 断言精确值（**禁令**：只断 rc 会
+        # 让「静默错值」类突变假绿——突变 M4 即此形态）。
+        case_dual("uncovered_field_bare_now_ok", UNCOVERED_FIELD_BARE, 5),
         case_dual("uncovered_field_boxed_ok", UNCOVERED_FIELD_BOXED, 5),
-        # 全局槽未覆盖面：装箱形态照常正确（钉 tag 读取源的全局行分派——修复前该路径
-        # ELF 静默返回 0 / 解释器 5 = 双路径分歧，基线同病）
+        # 全局槽：装箱/None 形态照常正确（钉 tag 读取源的全局行分派）
         case_dual("uncovered_global_boxed_ok", UNCOVERED_GLOBAL_BOXED, 5),
         case_dual("uncovered_global_none_ok", UNCOVERED_GLOBAL_NONE, 9),
+
+        # ── 容量批 T2：聚合面存储边界规范化（裁-CAP-1 (a)；A 类 8 写点逐点）──
+        # 字段：赋值点 / 字面量点（**两个独立写点**，突变 M1 专测其可判别性）
+        case_dual("cap_field_bare_assign", CAP_FIELD_ASSIGN, 5),
+        case_dual("cap_field_bare_literal", CAP_FIELD_LITERAL, 6),
+        case_dual("cap_field_none", CAP_FIELD_NONE, 3),
+        case_dual("cap_field_bare_crossfn", CAP_FIELD_BARE_CROSSFN, 14),
+        # 数组元素：字面量下标 / 动态下标 / 字面量元素（ident）/ 装箱对照
+        case_dual("cap_array_bare_assign_lit_idx", CAP_ARR_ASSIGN_LIT, 7),
+        case_dual("cap_array_bare_assign_dyn_idx", CAP_ARR_ASSIGN_DYN, 8),
+        case_dual("cap_array_literal_ident_elem", CAP_ARR_LITERAL_IDENT, 5),
+        case_dual("cap_array_boxed_literal", CAP_ARR_BOXED_LITERAL, 4),
+        # 全局槽：赋值点 / **初值点**（两个独立代码点；初值点另涉常量折叠抑制——见实现注）
+        case_dual("cap_global_bare_assign", CAP_GLOBAL_ASSIGN, 9),
+        case_dual("cap_global_bare_init", CAP_GLOBAL_INIT_BARE, 10),
+        # match 结果（裁决 (i) 表示位案）：条件写两表示共存
+        case_dual("cap_matchres_cond_bare_arm", CAP_MATCHRES_COND, 11),
+        # 枚举载荷（B 类 #10 实证可达 ⇒ 升 A）
+        case_dual("cap_enum_payload_bare", CAP_ENUM_PAYLOAD, 12),
+        # 元组元素（B 类 #11 实证可达 ⇒ 升 A；读语法须带空格 `t . 0`）
+        case_dual("cap_tuple_elem_bare", CAP_TUPLE_ELEM, 13),
+        # 负控：非可选聚合槽不受本律影响
+        case_dual("cap_nonopt_field_unaffected", CAP_NONOPT_FIELD, 16),
     ]
     passed = sum(1 for x in ok if x is True)
     print(f"{passed}/{len(ok)} passed")

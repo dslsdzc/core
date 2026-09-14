@@ -294,6 +294,174 @@ fn callee_ret_optional(func_ni: int) -> int {
     return 0;
 }
 
+// ── 容量批 T2（裁-CAP-1 (a)）：可选**聚合槽**的存储边界规范化（写点装箱）──
+// 法则：可选聚合槽（结构体字段 / 数组·切片元素 / 元组元素 / 枚举载荷 / 全局槽）任何时刻恒持
+// **装箱值（Some 对象）**或 None；**裸 T 值在写点装箱**。读侧零改动（既有装箱假定）。
+// 局部/形参/返回/调用结果**不走本律**（R2 P4 Task 5 表示位机制不变，可持裸值）。
+// 零足迹：目标槽类型不可选 ⇒ 本组函数恒不发射任何 IR（非可选程序逐字节不变）。
+// 未覆盖面（登记）：指针写 `IR_STORE_PTR`——同一站点同时服务局部与聚合槽，装箱会与局部
+// 表示位冲突（实测 c1 今日正确 / 装箱后静默错值）；元组·数组字面量的非 ident/调用元素。
+
+// 槽声明类型侧表（var → 声明类型索引；-1 = 无注解/未知）。仅进程内状态，零布局变更。
+// 内容（IR var 索引 → 类型索引）由声明面写入（LET 注解 / 形参类型节点），读点 = 元素写。
+fn grow_ir_var_decl(needed: int) {
+    if needed < g_ir_var_decl_cap { return; }
+    nc := g_ir_var_decl_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+    nb := alloc(nc * 8); _dyncpy(g_ir_var_decl_ti, g_ir_var_decl_cap * 8, nb);
+    z : ., mut = g_ir_var_decl_cap;
+    loop { if z >= nc { break; } w64(nb, z * 8, -1); z = z + 1; }
+    g_ir_var_decl_ti = nb; g_ir_var_decl_cap = nc;
+}
+fn irv_decl_ti(v: int) -> int {
+    if v < 0 { return -1; }
+    if g_ir_var_decl_cap <= 0 { return -1; }
+    if v >= g_ir_var_decl_cap { return -1; }
+    return r64(g_ir_var_decl_ti, v * 8);
+}
+fn irv_set_decl_ti(v: int, ti: int) {
+    if v < 0 || ti < 0 { return; }
+    grow_ir_var_decl(v + 1);
+    w64(g_ir_var_decl_ti, v * 8, ti);
+}
+
+// 目标槽类型是否可选（未知/越界 ⇒ 0 = 不装箱）
+fn ti_is_optional(ti: int) -> int {
+    if ti < 0 { return 0; }
+    if ti >= g_type_count { return 0; }
+    if get_type_kind(ti) == TYP_OPTIONAL { return 1; }
+    return 0;
+}
+
+// 槽（IR var）**声明**类型：声明侧表优先，否则运行期类型
+fn slot_decl_ti(v: int) -> int {
+    d := irv_decl_ti(v);
+    if d >= 0 { return d; }
+    return irv_type(v);
+}
+
+// 声明类型 → 数组/切片元素类型（-1 = 非数组/切片）
+fn elem_ti_of_decl(ti: int) -> int {
+    if ti < 0 { return -1; }
+    if ti >= g_type_count { return -1; }
+    k := get_type_kind(ti);
+    if k == TYP_ARRAY || k == TYP_SLICE { return get_type_data(ti); }
+    return -1;
+}
+
+// 数组/切片元素类型（-1 = 非数组/切片或未知）
+fn elem_ti_of(arr_var: int) -> int {
+    return elem_ti_of_decl(slot_decl_ti(arr_var));
+}
+
+// 结构体字段声明类型（field_node = EXPR_FIELD 目标节点；checker 写入 ast_c = 结构体名 ni；
+// 数字元组下标形（ast_type_val > 0）不是结构体字段 ⇒ 不判）
+fn field_ti_of_node(field_node: int, fi: int) -> int {
+    if field_node < 0 || fi < 0 { return -1; }
+    if ast_type_val(field_node) > 0 { return -1; }
+    si := find_struct(ast_c(field_node));
+    if si < 0 { return -1; }
+    return res_type_node(si_field_type_node(si, fi));
+}
+
+// 结构体行字段声明类型（结构体字面量写点用；si = 行，来自 find_struct_by_name）
+fn struct_row_field_ti(si: int, fi: int) -> int {
+    if si < 0 || fi < 0 { return -1; }
+    return res_type_node(si_field_type_node(si, fi));
+}
+
+// 全局槽声明类型（-1 = 非全局/无类型节点）
+fn global_decl_ti(name_ni: int) -> int {
+    gi : ., mut = 0;
+    loop {
+        if gi >= g_global_let_count { break; }
+        lnode := r64(g_global_lets, gi * 8);
+        if ast_a(lnode) == name_ni {
+            tn := ast_b(lnode);
+            if tn >= 0 { return res_type_node(tn); }
+            return -1;
+        }
+        gi = gi + 1;
+    }
+    return -1;
+}
+
+// 枚举变体载荷声明类型（-1 = 非用户枚举构造器/未知）
+fn enum_payload_ti(name_ni: int, pos: int) -> int {
+    si := find_gsym(name_ni);
+    if si < 0 { return -1; }
+    ei := find_enum_row_of(sym_type(si));
+    if ei < 0 { return -1; }
+    vi : ., mut = 0;
+    loop {
+        if vi >= ei_variant_count(ei) { return -1; }
+        if ei_variant_name(ei, vi) == name_ni {
+            return res_type_node(ei_variant_type_node(ei, vi, pos));
+        }
+        vi = vi + 1;
+    }
+    return -1;
+}
+
+// 元素表达式（元组/数组字面量的元素槽无声明面）的可选性：**保守 = 不可选 ⇒ 不装箱**
+// 覆盖面 = ident（声明侧表）/ 调用（被调返回类型可选）；其余形态登记为未覆盖面。
+fn elem_node_optional(node: int) -> int {
+    if node < 0 { return 0; }
+    k := ast_kind(node);
+    if k == EXPR_IDENT {
+        lv := find_local(ast_int_val(node));
+        if lv >= 0 { return ti_is_optional(slot_decl_ti(lv)); }
+        return 0;
+    }
+    if k == EXPR_CALL {
+        ni := ast_a(node);
+        fi2 := find_func(ni);
+        if fi2 >= 0 { return callee_ret_optional(ni); }
+        return 0;
+    }
+    return 0;
+}
+
+// 装箱体（静态）：obj = Some(v)（无新 opcode；形态照既有 EXPR_ENUM_CONSTRUCTOR 发射：
+// IR_MAKE_ENUM 的 s1 = 变体名索引、载荷经 IR_STORE_FIELD 存 fi+1；tag 值 = 名索引）
+fn emit_box_some(val_var: int) -> int {
+    obj := new_ir_var("box", TI_INT);
+    emit(IR_MAKE_ENUM, obj, str_intern("Some"), 1, 0, 0);
+    emit(IR_STORE_FIELD, -1, obj, val_var, 1, 0);
+    return obj;
+}
+
+// 写点规范化（按**可选性标志**）：不可选 ⇒ 原样（零 IR）；已装箱 ⇒ 原样；
+// 静态裸值 ⇒ 直接装箱；源槽带表示位 ⇒ **运行期条件装箱**（裸则装、装箱则原样）。
+fn box_for_slot_flag(val_node: int, val_var: int, is_opt: int) -> int {
+    if val_var < 0 { return val_var; }
+    if is_opt == 0 { return val_var; }
+    enc := rep_enc_of_expr(val_node, val_var);
+    if enc == oe_boxed() { return val_var; }
+    if enc == oe_bare() { return emit_box_some(val_var); }
+    dest := new_ir_var("boxed", TI_INT);
+    bare_lbl := new_label();
+    keep_lbl := new_label();
+    end_lbl := new_label();
+    zb := new_ir_var("_bz", TI_INT);
+    emit(IR_CONST, zb, 0, 0, 0, TI_INT);
+    isb := new_ir_var("box_isbare", TI_INT);
+    emit(IR_BINARY, isb, enc, zb, OP_EQ, 0);
+    emit(IR_BRANCH, -1, isb, bare_lbl, keep_lbl, 0);
+    emit(IR_LABEL, -1, bare_lbl, 0, 0, 0);
+    boxv := emit_box_some(val_var);
+    emit(IR_STORE, -1, dest, boxv, 0, 0);
+    emit(IR_JUMP, -1, end_lbl, 0, 0, 0);
+    emit(IR_LABEL, -1, keep_lbl, 0, 0, 0);
+    emit(IR_STORE, -1, dest, val_var, 0, 0);
+    emit(IR_LABEL, -1, end_lbl, 0, 0, 0);
+    return dest;
+}
+
+// 写点规范化（按**目标槽类型**）
+fn box_for_optional_slot(val_node: int, val_var: int, slot_ti: int) -> int {
+    return box_for_slot_flag(val_node, val_var, ti_is_optional(slot_ti));
+}
+
 // 值表达式的**静态表示判定**（解包侧判表示的另一半：写点置位的入参）。
 // 返回：>= 0 = 从该表位槽拷贝（源值自身已配表示位：可选局部/形参/调用结果）；
 //   OE_BARE = 静态裸值（T 值注入 `T?`：字面量/算术/解包结果/非可选槽/聚合字面量…）；
@@ -899,6 +1067,10 @@ fn gen_expr(node: int) -> int {
         lv := find_local(name_idx);
         if lv >= 0 { return lv; }
         const_node := find_global_const_node(name_idx);
+        // 容量批 T2：**可选全局槽不得常量折叠**——字面量初值（`g : int? = 5`）的读点若被
+        // 折成裸常量 5，则 match 的 tag 读会解引用该裸值（双路径 139，实测 e2_global_bare）。
+        // 折叠面只对非可选全局生效（零足迹）；可选全局由运行期初始化写入装箱对象。
+        if const_node >= 0 && g_optrep_on != 0 && global_decl_optional(name_idx) != 0 { const_node = -1; }
         if const_node >= 0 {
             const_type : ., mut = TI_INT;
             if ast_kind(const_node) == EXPR_BOOL { const_type = TI_BOOL; }
@@ -1152,6 +1324,8 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                 gv := find_global(name_idx);
                 if gv >= 0 {
                     val_var = dex_store_adjust(gv, val_var, val_node);
+                    // 容量批 T2：可选全局槽写点规范化（裸值装箱；目标不可选 ⇒ 零 IR）
+                    if g_optrep_on != 0 { val_var = box_for_optional_slot(val_node, val_var, global_decl_ti(name_idx)); }
                     emit(IR_STORE, -1, gv, val_var, 0, 0);
                 }
             }
@@ -1161,6 +1335,8 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             obj_var := gen_expr(ast_a(target));
             obj_var = force_if_thunk(obj_var);
             fi := ast_data(target);
+            // 容量批 T2：可选字段写点规范化（字段声明类型取自 checker 记的 ast_c 结构体名）
+            if g_optrep_on != 0 { val_var = box_for_optional_slot(val_node, val_var, field_ti_of_node(target, fi)); }
             emit(IR_STORE_FIELD, -1, obj_var, val_var, fi, 0);
             return val_var;
         }
@@ -1168,6 +1344,16 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             arr_var := gen_expr(ast_a(target));
             arr_var = force_if_thunk(arr_var);
             idx_node := ast_b(target);
+            // 容量批 T2：可选元素写点规范化（元素类型 = 数组/切片声明类型的内层；
+            // 全局数组的声明面在 g_global_lets ⇒ ident 形目标回退查全局声明）
+            et := elem_ti_of(arr_var);
+            if et < 0 {
+                anode := ast_a(target);
+                if anode >= 0 && ast_kind(anode) == EXPR_IDENT {
+                    et = elem_ti_of_decl(global_decl_ti(ast_int_val(anode)));
+                }
+            }
+            if g_optrep_on != 0 { val_var = box_for_optional_slot(val_node, val_var, et); }
             // F1：写路径越界守卫钩子（修复前完全没有——见 compcert-round4 F1）
             arr_len_lit : ., mut = arr_len_lit_of(arr_var);
             if ast_kind(idx_node) == EXPR_INT {
@@ -1959,6 +2145,16 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
         // Allocate a result variable for the match expression value
         result_var := new_ir_var("match_res", TI_INT);
         emit(IR_ALLOC, result_var, 0, 0, 0, TI_INT);
+        // 容量批 T2（裁-CAP-1 (a) 的 match 面 = 裁决 (i) 表示位案）：结果槽配**表示位**
+        // （与既有局部机制同源；默认 1 = 装箱），各臂写点置位 ⇒ 消费点（LET/返回/解包）
+        // 自动继承正确表示。修复前：臂写裸值时无表示 ⇒ 消费侧落 `oe_boxed()` 装箱假定
+        // ⇒ 双路径 139（T1 实测 e2_matchres_bare）。
+        mrep_var : ., mut = -1;
+        if g_optrep_on != 0 {
+            mrep_var = new_ir_var("match_res_rep", TI_INT);
+            emit(IR_CONST, mrep_var, 1, 0, 0, TI_INT);
+            irv_set_rep(result_var, mrep_var);
+        }
         merge_lbl := new_label();
         an : ., mut = first_arm;
         loop {
@@ -2074,6 +2270,8 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             body_val = force_if_thunk(body_val);
             if body_val >= 0 {
                 emit(IR_STORE, -1, result_var, body_val, 0, 0);
+                // 容量批 T2：结果槽表示位置位（同 LET/赋值的写点口径——解包点据此分派）
+                if mrep_var >= 0 { emit_rep_set(mrep_var, rep_enc_of_expr(arm_body, body_val)); }
             }
             pop_ir_scope();
             emit(IR_JUMP, -1, merge_lbl, 0, 0, 0);
@@ -2102,6 +2300,9 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
         var := new_ir_var(istr_get(var_ni), TI_UNIT);
         declared_ti : ., mut = TI_UNIT;
         if type_node >= 0 { declared_ti = res_type_node(type_node); }
+        // 容量批 T2：登记声明类型（元素写点判定目标元素类型用——声明的 `[T?;N]` 才是
+        // 权威；字面量推出的元素类型对可选元素退化为对象占位 TI_UNIT）
+        if g_optrep_on != 0 && type_node >= 0 { irv_set_decl_ti(var, declared_ti); }
         // 可选表示（R2 P4 Task 5）：显式 `T?` 标注的槽配表示位（默认 1 = 装箱）。
         // 推断槽（无标注）在初值求值后按初值表示面补配（`v := g()` / `x := Some(1)`）。
         rep_var : ., mut = opt_rep_slot(declared_ti, istr_get(var_ni));
@@ -2309,6 +2510,9 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             if an < 0 { break; }
             val_var := gen_expr(ast_a(an));
             val_var = force_if_thunk(val_var);
+            // 容量批 T2：可选载荷写点规范化（载荷类型 = 变体声明面；`Some`/`None` 关键字
+            // 形不带变体行 ⇒ enum_payload_ti 返回 -1 ⇒ 原样，不装箱）
+            if g_optrep_on != 0 { val_var = box_for_optional_slot(ast_a(an), val_var, enum_payload_ti(name_idx, ai)); }
             emit(IR_STORE_FIELD, -1, s, val_var, ai + 1, 0);  // +1 for tag offset
             an = ast_b(an);
             ai = ai + 1;
@@ -2343,6 +2547,8 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                     jdi := struct_field_index_by_name(si, nn);
                     if jdi >= 0 { field_idx = jdi; }
                 }
+                // 容量批 T2：可选字段写点规范化（字面量形；元素值节点 = wrapper.a）
+                if g_optrep_on != 0 { val_var = box_for_optional_slot(ast_a(fn2), val_var, struct_row_field_ti(si, field_idx)); }
                 emit(IR_STORE_FIELD, -1, s, val_var, field_idx, 0);
                 fn2 = fn2 + 1;
             }
@@ -2365,7 +2571,11 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             if en >= 0 {
                 e_var := gen_expr(en);
                 e_var = force_if_thunk(e_var);
-                if ei == 0 { elem_ti = irv_type(e_var); }
+                if ei == 0 { elem_ti = irv_type(e_var); }   // 先取原元素类型（装箱前）
+                // 容量批 T2：可选元素写点规范化（字面量形；元素槽无声明面 ⇒ 按元素
+                // 表达式可选性保守判定——ident/调用覆盖面，其余形态登记）。
+                // 注意：数组字面量的 en 是 **wrapper** 节点（值在 ast_a）——须解引用后判定。
+                if g_optrep_on != 0 { e_var = box_for_slot_flag(ast_a(en), e_var, elem_node_optional(ast_a(en))); }
                 emit(IR_STORE_INDEX, -1, v, e_var, ei, 0);
                 en = en + 1;
             }
@@ -2485,6 +2695,9 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             if elem_idx >= 0 { en = ast_a(elem_idx + e); }
             elem_var := gen_expr(en);
             elem_var = force_if_thunk(elem_var);
+            // 容量批 T2：可选元素写点规范化（元组元素槽无声明面 ⇒ 按元素表达式可选性
+            // 保守判定；ident/调用覆盖面，其余形态登记）
+            if g_optrep_on != 0 { elem_var = box_for_slot_flag(en, elem_var, elem_node_optional(en)); }
             emit(IR_STORE_FIELD, -1, tv, elem_var, e, 0);
             e = e + 1;
         }
@@ -2536,6 +2749,8 @@ fn ir_gen_func(fi: int) {
         // 可选表示（R2 P4 Task 5）：形参表示位——**序言最早处**从实参信道读（先于任何
         // 可能改写信道的调用；调用点在 IR_CALL 前写）。形参类型节点 = EXPR_PARAM.data。
         ptn := ast_data(pn);
+        // 容量批 T2：形参声明类型登记（元素写点判定用；与表示位面互不干扰）
+        if g_optrep_on != 0 && ptn >= 0 { irv_set_decl_ti(pvar, res_type_node(ptn)); }
         if g_optrep_on != 0 && g_optrep_arg_count > 0 && ptn >= 0 && pi < g_optrep_arg_count {
             pti := res_type_node(ptn);
             if pti >= 0 && get_type_kind(pti) == TYP_OPTIONAL {
@@ -2676,6 +2891,10 @@ fn global_needs_runtime_init(name_idx: int) -> int {
         if i < 0 { break; }
         node := r64(g_global_lets, i * 8);
         if ast_a(node) == name_idx {
+            // 容量批 T2：可选全局槽**必须**走运行期初始化——静态度量（.quad 裸值）写进槽后
+            // 读侧按装箱解引用 ⇒ 双路径 139（实测 e2_global_bare）。装箱在 inject_global_inits
+            // 内完成；非可选全局不受影响（零足迹）。
+            if g_optrep_on != 0 && ti_is_optional(global_decl_ti(name_idx)) != 0 { return 1; }
             if agg_elem_count_of(ast_b(node)) >= 0 { return 1; }
             vn := ast_c(node);
             if vn < 0 { return 0; }
@@ -2732,7 +2951,12 @@ fn inject_global_inits() {
                         irv_set_type(v, alloc_type(TYP_ARRAY, TI_INT, cnt));
                     }
                 }
-                if v >= 0 { emit(IR_STORE, -1, gv, v, 0, 0); }
+                if v >= 0 {
+                    // 容量批 T2：可选全局槽**初值**写点规范化（与赋值点 :1155 是两处独立
+                    // 代码点——初值走 inject_global_inits，赋值走 EXPR_ASSIGN）
+                    if g_optrep_on != 0 { v = box_for_optional_slot(vn, v, global_decl_ti(name_idx)); }
+                    emit(IR_STORE, -1, gv, v, 0, 0);
+                }
             }
         }
         i = i + 1;
@@ -2835,6 +3059,8 @@ fn ir_gen_globals() {
 fn optrep_begin() {
     g_ir_var_rep = "";
     g_ir_var_rep_cap = 0;
+    g_ir_var_decl_ti = "";
+    g_ir_var_decl_cap = 0;
     g_optrep_ret_cell = -1;
     g_optrep_arg_cell0 = -1;
     g_optrep_arg_count = 0;

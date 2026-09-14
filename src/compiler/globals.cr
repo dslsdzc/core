@@ -62,6 +62,11 @@ g_ir_str_consts : string, mut; g_ir_str_const_count : int, mut; g_ir_str_const_c
 //   走既有装箱假定（未覆盖面：结构体字段/数组元素/全局槽/match 结果/惰性 thunk，
 //   逐形态实测入报告——响亮失败或既有正确值，不新增静默错值）。
 g_ir_var_rep : string, mut;     g_ir_var_rep_cap : int, mut;
+// g_ir_var_decl_ti（容量批 T2）：IR var → **声明类型索引**（i64 数组；-1 = 无注解/未知）。
+//   用途 = 可选聚合槽写点装箱的「目标槽类型」判定：数组/切片元素类型只能由**声明**
+//   （`a : [int?;2]`）忠实给出（字面量推出的元素类型对可选元素退化为对象占位）。
+//   仅进程内状态，零布局变更；非可选程序不读取本表（零足迹）。
+g_ir_var_decl_ti : string, mut; g_ir_var_decl_cap : int, mut;
 // g_optrep_on：本编译单元是否启用表示面（AST 预扫：EXPR_OPTIONAL / `Some` / `None`）。
 //   关 = **零足迹**（不注册隐藏全局、不发任何表示指令）⇒ 非可选程序的发射面逐字节不变。
 g_optrep_on : int, mut;
