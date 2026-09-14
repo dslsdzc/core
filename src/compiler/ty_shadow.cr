@@ -725,7 +725,7 @@ fn sh_unf_rehash() {
 fn sh_unf_hits() -> int { return g_unf_hits; }
 fn sh_unf_entries() -> int { return g_unf_entries; }
 
-// 枚举变体名 → 变体下标（-1 = 该枚举无此变体名）。线性扫（≤ MAX_ENUM_VARIANTS=16）。
+// 枚举变体名 → 变体下标（-1 = 该枚举无此变体名）。线性扫（容量批 T3 起无变体上限）。
 fn sh_enum_variant_index(ea: int, name_ni: int) -> int {
     i : ., mut = 0;
     ret : ., mut = -1;
@@ -1201,9 +1201,64 @@ fn sh_match_variant_term(scrut_ti: int, vi: int) -> int {
     return sh_variant_term(scrut_ti, ei_variant_name(ea, vi));
 }
 
-// 覆盖位：bit(vi) = 2^vi（本语言无移位 ⇒ 循环乘 2，同 iface_bit；vi < 63 由
-// MAX_ENUM_VARIANTS = 16 保证不溢出——**该前提自 R2 P4 Task 6 起由写入侧护栏强制**：
-// >16 变体 = `error[P022]` 硬拒（parse 阶段诊断闸，编译不进入判定面）；此前只是假设）
+// ─── 容量批 T3（裁-CAP-2 (a)）：match 覆盖位**无界位图**（替换 2^vi 单 int）───
+// 动机：变体上限解除后 `2^vi` 在 vi ≥ 63 溢出 ⇒ 覆盖判定失真（e70 实测 SIGFPE 136）。
+// 位图 = 字节缓冲（每字节 8 位）+ 位下标寻址（本语言无按位与 ⇒ 除法/取模，照 iface_permits
+// 惯例）；**栈纪律**：`mc_begin` 记长度、`mc_end` 清零回退 ⇒ 嵌套 match 互不污染。
+fn grow_cov_bits(needed: int) {
+    if needed <= g_cov_cap { return; }
+    nc := g_cov_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+    nb := alloc(nc); _dyncpy(g_cov_bits, g_cov_cap, nb);
+    z : ., mut = g_cov_cap;
+    loop { if z >= nc { break; } store8(nb, z, 0); z = z + 1; }
+    g_cov_bits = nb; g_cov_cap = nc;
+}
+// 进入一次 match 覆盖收集：返回当前长度（供 mc_end 回退）
+fn mc_begin() -> int { return g_cov_len; }
+fn mc_add(vi: int) {
+    if vi < 0 { return; }
+    grow_cov_bits(vi / 8 + 1);
+    if vi + 1 > g_cov_len { g_cov_len = vi + 1; }
+    b := bu8(g_cov_bits, vi / 8);
+    pw : ., mut = 1;
+    k : ., mut = vi % 8;
+    loop { if k <= 0 { break; } pw = pw * 2; k = k - 1; }
+    if (b / pw) % 2 == 0 { store8(g_cov_bits, vi / 8, b + pw); }
+}
+fn mc_has(vi: int) -> int {
+    if vi < 0 { return 0; }
+    if vi >= g_cov_len { return 0; }
+    if vi / 8 >= g_cov_cap { return 0; }
+    b := bu8(g_cov_bits, vi / 8);
+    pw : ., mut = 1;
+    k : ., mut = vi % 8;
+    loop { if k <= 0 { break; } pw = pw * 2; k = k - 1; }
+    return (b / pw) % 2;
+}
+// 首个未覆盖位（-1 = 全覆盖）；三态口径与 sh_match_first_missing 同
+fn mc_first_missing(count: int) -> int {
+    i : ., mut = 0;
+    loop {
+        if i >= count { return -1; }
+        if mc_has(i) == 0 { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+// 退出：清零本层用过的位并回退长度（嵌套安全）
+fn mc_end(saved: int) {
+    i : ., mut = saved;
+    loop {
+        if i >= g_cov_len { break; }
+        if i / 8 < g_cov_cap { store8(g_cov_bits, i / 8, 0); }
+        i = i + 1;
+    }
+    g_cov_len = saved;
+}
+
+// 覆盖位（**遗留 API，仅供 selftest 的 ≤62 域使用**）：bit(vi) = 2^vi（本语言无移位 ⇒
+// 循环乘 2）。**生产路径自容量批 T3 起改用无界位图 `mc_*`**（本函数在 vi ≥ 63 溢出——
+// 旧前提「MAX_ENUM_VARIANTS = 16 保证不溢出」已随变体上限解除而失效）。
 fn sh_match_bit(vi: int) -> int {
     if vi < 0 { return 0; }
     b : ., mut = 1;

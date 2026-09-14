@@ -1,36 +1,16 @@
 #!/usr/bin/env python3
-"""TODO #35 回归：枚举变体/载荷与结构体字段**写入侧无界**（R2 P4 Task 6 修复）。
+"""枚举/结构体容量面回归（TODO #35 → **容量批 T3 解除**）。
 
-背景（RED，修复前实测——三档探针，二进制 = P4 Task 5 收官 `2be26cc5`）：
-  * 机制（代码级）：`EnumVariant` 槽区（`MAX_ENUM_VARIANTS=16` 槽 × `OFF_EV_SIZE=272`）与
-    `StructInfo` 字段槽区（`MAX_STRUCT_FIELDS=16` 槽）是**定长内嵌槽区**——其后紧跟记录自身
-    的 count/generic 槽，再往后是**下一条记录**（同一 buffer）。parser 的写入循环对下标
-    `vc`/`tc`/`fc` **零上限闸** ⇒ 「第 17 个」不再属于本记录：
-      - 第 17 变体的槽起点 = `OFF_EI_VARIANT_COUNT`（4360 = 8 + 16×272）**自身**，槽尾越过
-        `ESZ_ENUMINFO`（4408）**224B**（踩邻记录 / 缓冲区尾部——`grow_enums` 的扩容余量使
-        该越界多数落在 buffer 内部＝**静默**，无 SIGSEGV 可观测）；
-      - 第 17 个载荷类型写 `OFF_EV_TYPES+16×8 = 136 = OFF_EV_TYPE_COUNT`；第 17 个载荷
-        **节点**写 `OFF_EV_TYPE_NODES+16×8 = 272 = OFF_EV_SIZE`（下一变体槽首）。
-  * 静默面（修复前实测，三例）：
-      ① `enum E17 { V0..V16 }` 声明体 = `check` **rc=0 零诊断**（写入侧越界写完全静默）；
-      ② 同一枚举上的 `match` **穷尽性判定被静默禁用**——第 17 变体名槽存的是被 count 覆盖
-         的值 ⇒ 「名→变体项」映射失败 ⇒ 域不可展开 ⇒ 三态回落 -1「不判」⇒ 真·非穷尽
-         match（补 16 臂、缺 V16）也 **rc=0 零诊断**（对照：16 变体枚举同形必报 TM03）；
-      ③ 第 17 变体**不可构造**：`V16()` ⇒ 「Undefined enum constructor 'V16'」（假诊断）。
-  * `build` 面：修复前靠 `.ccr` **读回侧**闸兜底（`ccr_io.cr` 的 `vc > MAX_ENUM_VARIANTS` ⇒
-    rc=1）——但**写入已在读回闸之前发生**（护栏在读回侧 ≠ 写入侧；读回闸拦不住进程内的
-    越界写与其全部前端后果）。
+**旧态（#35 修复，2026-09-12）**：`EnumVariant` 槽区（`MAX_ENUM_VARIANTS=16` 槽 × `OFF_EV_SIZE=272`）
+与 `StructInfo` 字段槽区（`MAX_STRUCT_FIELDS=16` 槽）是**定长内嵌槽区** ⇒ >16 越界写（踩 count/邻记录）
+⇒ parser 写点护栏 + `error[P022]`/`error[P023]` 定位硬错（rc=1 + 无产物）。
 
-修复（照 TODO #8 收口形态）：① parser 写入点跳过超限槽 + 末尾 `error[P022]`（枚举变体/
-载荷）/`error[P023]`（结构体字段）**定位硬错**——由 **parse 阶段诊断闸**（`main.cr` 的
-`[3/5] parse...` 之后 `g_diag_count > 0 ⇒ rc=1`，与 P019/P020/P021 同款）拒绝 ⇒ 发生在
-**前端**，不进入 lower/写 .ccr/ELF 阶段，**非静默截断**（实测：hard 名单条目对本族**冗余**
-——删条目零行为差异，见报告 §突变控制）；② `dyn_arr.cr` 受护访问器（`ei_set_variant_*`/
-`si_set_field_*` 写护栏 + `ei_variant_*`/`si_field_*` 读护栏回哨兵）= 未来新调用点亦不可能
-越界（读护栏使 count 保持真值仍不越读：`vi ≥ 16 ⇒ 名字/类型节点 -1、计数 0`）。
+**新态（容量批 T3，裁-CAP-2 (a)「记录布局迁侧表」）**：字段/变体/载荷**迁侧表** ⇒ 三面**无硬上限**；
+`P022`/`P023` **退役**（零 raise）；覆盖位自 `2^vi` 单 int 换为**无界位图**（`mc_*`）⇒ ≥63 变体的
+穷尽性/冗余臂判定恢复正确（旧态实测 70 变体 SIGFPE rc=136）。
 
-判据：16（含）以内三面全对（check rc=0 / build rc=0 / 运行值正确）；17 ⇒ 定位硬错 rc=1 +
-无产物（bin 与 .ccr 皆无）。
+判据（本实例实跑）：≤16 与 >16 一律 **编译 + 运行值正确**（三路同证）；穷尽性/冗余臂的**真错**仍
+定位硬错（TM03/TM04）；越界写类旧闸的**死亡证据** = 本批能力变更（旧 17-拒绝用例转正）。
 """
 
 import os
@@ -171,43 +151,57 @@ def struct_src(n, extra="return 0"):
 
 def main():
     ok = [
-        # ── 上界内（16 = 边界值，含）三面全对 ──
+        # ── 16 = 旧边界（含）：三面全对（回归钉）──
         case_run("enum16_exhaustive_ok", enum_exhaustive_src(16, 9), 9),
         case_run("enum16_decl_only_ok", enum_src(16), 0),
-        # 两条枚举相邻（跨记录写入的正控：≤16 时邻记录零扰动）
-        case_run("enum16_two_enums_ok",
-                 enum_src(16, "return 0") + "enum F3 { X, Y, Z }\n"
-                 "fn g() -> int { v := Y(); return 2; }\n", 0),
         case_run("payload16_ok", payload_src(16, "x := B(); return 4"), 4),
-        # 16 字段结构体 + 全字段字面量（声明序）+ 末字段读取
         case_run("struct16_ok",
                  struct_src(16, "s := S16 { " + ", ".join(f"f{i}: {i}" for i in range(16))
                             + " }; return s.f15"),
                  15),
-        # ── 上界外（17）⇒ 定位硬错 + 无产物 ──
-        # ① 枚举变体：修复前 check rc=0 零诊断（写入侧静默）
-        case_reject("enum17_check_rejected", enum_src(17), ["error[P22]", "too many variants (17 > 16)"],
-                    cmd="check"),
-        # ② 修复前 build 面虽 rc=1，但那是**读回侧**闸；本用例断言写入侧定位诊断在场 +
-        #    拒绝发生在**前端**（不进入 lower/写 .ccr/ELF 阶段）
-        case_reject("enum17_build_rejected", enum_src(17),
-                    ["error[P22]", "too many variants (17 > 16)"],
-                    forbid=("lower to ccr", "save .ccr", "generate ELF")),
-        # ③ 静默禁用穷尽性判定的回归钉：真·非穷尽 match（缺 V16）修复前 rc=0 零诊断
-        case_reject("enum17_match_not_silently_accepted", enum_missing_arm_src(17),
-                    ["error[P22]"], cmd="check"),
-        # ④ 第 17 变体假诊断面（修复前 `V16()` ⇒ 「Undefined enum constructor」，P22 缺位）
-        case_reject("enum17_use_rejected",
-                    enum_src(17, "x := V16(); return 0"), ["error[P22]"], cmd="check"),
-        # ⑤ 载荷类型：修复前 check rc=0；第 17 个写 count 槽 / 第 17 节点写下一槽首
-        case_reject("payload17_rejected", payload_src(17),
-                    ["error[P22]", "payload types (17 > 16)"]),
-        case_reject("payload17_check_rejected", payload_src(17), ["error[P22]"], cmd="check"),
-        # ⑥ 结构体字段：修复前 check rc=0（第 17 字段踩 field_count/泛型槽与邻记录）
-        case_reject("struct17_check_rejected", struct_src(17), ["error[P23]", "too many fields (17 > 16)"],
-                    cmd="check"),
-        case_reject("struct17_build_rejected", struct_src(17), ["error[P23]"],
-                    forbid=("lower to ccr", "save .ccr", "generate ELF")),
+        # ── >16（17/40）：旧 P022/P023 拒绝面的**转正**（死亡证据 = 侧表解除）──
+        case_run("enum17_now_ok", enum_exhaustive_src(17, 13), 13),
+        case_run("enum40_now_ok", enum_exhaustive_src(40, 33), 33),
+        case_run("payload17_now_ok", payload_src(17, "x := A(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17); return match x { A(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17) => { return a17; } B => { return 0; } }"), 17),
+        case_run("struct17_now_ok",
+                 struct_src(17, "s := S17 { " + ", ".join(f"f{i}: {i}" for i in range(17))
+                            + " }; return s.f16"),
+                 16),
+        case_run("struct40_now_ok",
+                 struct_src(40, "s := S40 { " + ", ".join(f"f{i}: {i}" for i in range(40))
+                            + " }; return s.f39"),
+                 39),
+        # ── 跨记录完整性（侧表基址不重叠：宽记录 + 邻记录）──
+        case_run("enum40_plus_small_ok",
+                 enum_src(40, "v := V39(); return 0") + "enum F3 { X, Y, Z }\n"
+                 "fn g() -> int { w := Z(); return match w { X => { return 1; } Y => { return 2; } Z => { return 3; } }; }\n", 0),
+        # 记录碰撞敏感面（**判别性**）：大枚举之后声明小枚举 ⇒ 大枚举的**判定面**
+        # （穷尽性）仍须正确（侧表基址不重叠的机器抓手）
+        case_reject("enum40_then_small_missing_arm_rejected",
+                    enum_src(40, "v := V0(); return 0") + "enum H4 { S, T, U }\n"
+                    "fn hm(x: E40) -> int { return match x { "
+                    + ", ".join(f"V{i} => {{ return {i}; }}" for i in range(39)) + " }; }\n",
+                    ["error[TM03]", "missing variant 'V39'"], cmd="check"),
+        case_run("enum40_then_small_then_match_big_ok",
+                 enum_src(40, "v := V0(); return 0") + "enum H3 { S, T, U }\n"
+                 "fn hm(x: E40) -> int { return match x { " + ", ".join(f"V{i} => {{ return {i}; }}" for i in range(40)) + " }; }\n"
+                 "fn main3() -> int { return 0; }\n", 0),
+        case_run("enum40_plus_small_match_ok",
+                 enum_src(40, "v := V7(); return 0") + "enum G3 { P, Q, R }\n"
+                 "fn gm(x: G3) -> int { return match x { P => { return 41; } Q => { return 42; } R => { return 43; } }; }\n"
+                 "fn main2() -> int { return 0; }\n", 0),
+        case_run("struct40_plus_pair_ok",
+                 struct_src(40, "a := S40 { " + ", ".join(f"f{i}: {i}" for i in range(40)) + " }; return a.f39")
+                 + "struct P2 { x: int, y: int }\n"
+                 "fn h() -> int { p : ., mut = P2 { x: 7, y: 8 }; return p.y; }\n", 39),
+        # ── 覆盖位无界（≥63 变体）：穷尽性判定仍正确 ──
+        case_run("enum64_exhaustive_ok", enum_exhaustive_src(64, 63), 63 % 256),
+        case_run("enum70_exhaustive_ok", enum_exhaustive_src(70, 69), 69),
+        # ── 负控：覆盖位的**真错**仍定位硬错（TM03 缺臂 / TM04 冗余臂）──
+        case_reject("enum64_missing_arm_rejected", enum_missing_arm_src(64),
+                    ["error[TM03]", "missing variant 'V63'"], cmd="check"),
+        case_reject("enum70_missing_arm_rejected", enum_missing_arm_src(70),
+                    ["error[TM03]", "missing variant 'V69'"], cmd="check"),
     ]
     passed = sum(ok)
     print(f"{passed}/{len(ok)} passed")

@@ -94,8 +94,11 @@ OFF_FI_GENERIC_NAMES : int = 544; OFF_FI_GENERIC_COUNT : int = 672;
 OFF_FI_ISPURE : int = 680;  // 1 = pure (no side effects), 0 = impure
 
 // StructInfo offsets
-OFF_SI_NAME : int = 0; OFF_SI_FIELD_NAMES : int = 8;
-OFF_SI_FIELD_TYPES : int = 136; OFF_SI_FIELD_TYPE_NODES : int = 264;
+// 容量批 T3（裁-CAP-2 (a)）：字段槽区**迁侧表**——本槽（原 field_names 首槽）改义为
+// `field_base`（侧表起始行）；`OFF_SI_FIELD_TYPES`/`OFF_SI_FIELD_TYPE_NODES` 保留为
+// **未用填充**（记录尺寸不变 ⇒ 盘面与外部算术零改动）。
+OFF_SI_NAME : int = 0; OFF_SI_FIELD_BASE : int = 8;
+OFF_SI_FIELD_TYPES : int = 136; OFF_SI_FIELD_TYPE_NODES : int = 264;   // 保留未用
 OFF_SI_FIELD_COUNT : int = 392;
 OFF_SI_GENERIC_NAMES : int = 400; OFF_SI_GENERIC_COUNT : int = 432;
 
@@ -234,10 +237,11 @@ fn iface_shape_grow(needed: int) {
 // 「载荷是 int」与「载荷是 string/命名类型/泛型形参」不可区分 ⇒ 载荷面（泛型代入/满足判定）
 // 在裸码表上不可能忠实。nodes 槽 = parse_type 的产物节点（-1/0 = 无信息）。
 // 布局：EnumVariant = name(8) + types[16](128) + type_count(8) + type_nodes[16](128) = 272
-OFF_EI_NAME : int = 0; OFF_EI_VARIANTS : int = 8;
+// 容量批 T3（裁-CAP-2 (a)）：变体槽区**迁侧表**——`OFF_EI_VARIANTS` 槽改义为 `variant_base`
+// （侧表起始行）；`OFF_EV_*` 与 272B 槽区保留为**未用填充**（记录尺寸不变 ⇒ 外部算术零改动）。
+OFF_EI_NAME : int = 0; OFF_EI_VARIANTS : int = 8;    // = variant_base
 OFF_EI_VARIANT_COUNT : int = 4360;
 OFF_EI_GENERIC_NAMES : int = 4368; OFF_EI_GENERIC_COUNT : int = 4400;
-// EnumVariant within variants[N]: name(8) + types[16](128) + type_count(8) + type_nodes[16](128)
 OFF_EV_NAME : int = 0; OFF_EV_TYPES : int = 8; OFF_EV_TYPE_COUNT : int = 136;
 OFF_EV_TYPE_NODES : int = 144;
 OFF_EV_SIZE : int = 272;
@@ -480,17 +484,48 @@ fn fi_set_ispure(n: int, v: int) { w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_ISPURE
 fn si_name(n: int) -> int { return r64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_NAME); }
 fn si_field_count(n: int) -> int { return r64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT); }
 fn si_generic_count(n: int) -> int { return r64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT); }
-// 读护栏（R2 P4 Task 6 / TODO #35）：越界 = 槽区外（读会取到 count/generic 槽或邻记录）
-// ⇒ 回哨兵（名字/类型码/类型节点 = -1；见下方「受护访问器」注）。
+// ─── 容量批 T3（裁-CAP-2 (a)）：结构体字段**侧表**（无硬上限）───
+// 布局：记录内 `OFF_SI_FIELD_BASE` = 本记录字段在侧表的起始行；`OFF_SI_FIELD_COUNT` = 计数
+// （真值）。三条扁平表按「记录基数 + 字段下标」寻址；高水位 `g_si_f_used` 由
+// `si_commit_fields` 提交（记录字段区一次性占用，不重叠）。
+fn grow_si_fields(needed: int) {
+    if needed <= g_si_f_cap { return; }
+    nc := g_si_f_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+    nb := alloc(nc * 8); _dyncpy(g_si_f_names, g_si_f_cap * 8, nb); g_si_f_names = nb;
+    tb := alloc(nc * 8); _dyncpy(g_si_f_types, g_si_f_cap * 8, tb); g_si_f_types = tb;
+    ob := alloc(nc * 8); _dyncpy(g_si_f_nodes, g_si_f_cap * 8, ob); g_si_f_nodes = ob;
+    g_si_f_cap = nc;
+}
+fn si_field_base(n: int) -> int { return r64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_FIELD_BASE); }
+fn si_set_field_base(n: int, v: int) { w64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_FIELD_BASE, v); }
+// 提交字段区（base + 计数 ⇒ 高水位）；parser 与 ccr_io 装载共用
+fn si_commit_fields(n: int, fc: int) {
+    b := si_field_base(n);
+    if b < 0 { return; }
+    if fc < 0 { return; }
+    if b + fc > g_si_f_used { g_si_f_used = b + fc; }
+}
+// 读护栏（R2 P4 Task 6 / TODO #35 的**计数为界**版本）：fi 越界（< 0 或 ≥ count）⇒ 回哨兵
+// -1（不越读）；在界读 = 侧表取值。
+fn si_field_row(n: int, fi: int) -> int {
+    if fi < 0 { return -1; }
+    if fi >= si_field_count(n) { return -1; }
+    b := si_field_base(n);
+    if b < 0 { return -1; }
+    return b + fi;
+}
 fn si_field_name(n: int, fi: int) -> int {
-    if fi < 0 || fi >= MAX_STRUCT_FIELDS { return -1; }
-    return r64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES + fi*8); }
+    r := si_field_row(n, fi);
+    if r < 0 { return -1; }
+    return r64(g_si_f_names, r * 8); }
 fn si_field_type(n: int, fi: int) -> int {
-    if fi < 0 || fi >= MAX_STRUCT_FIELDS { return -1; }
-    return r64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES + fi*8); }
+    r := si_field_row(n, fi);
+    if r < 0 { return -1; }
+    return r64(g_si_f_types, r * 8); }
 fn si_field_type_node(n: int, fi: int) -> int {
-    if fi < 0 || fi >= MAX_STRUCT_FIELDS { return -1; }
-    return r64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES + fi*8); }
+    r := si_field_row(n, fi);
+    if r < 0 { return -1; }
+    return r64(g_si_f_nodes, r * 8); }
 fn si_generic_name(n: int, gi: int) -> int { return r64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + gi*8); }
 
 // EnumInfo helpers
@@ -500,24 +535,67 @@ fn ei_generic_count(n: int) -> int { return r64(g_enums, n * ESZ_ENUMINFO + OFF_
 fn ei_generic_name(n: int, gi: int) -> int { return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + gi*8); }
 // 读护栏（R2 P4 Task 6 / TODO #35）：越界 = 槽区外（读会取到 variant_count/generic 槽或邻
 // 记录）⇒ 回哨兵（名字/类型码/类型节点 = -1；计数 = 0）。在界调用点（count ≤ 16）行为不变。
+// ─── 容量批 T3：枚举变体**侧表**（无硬上限；同 struct 字段形态）───
+fn grow_ei_variants(needed: int) {
+    if needed <= g_ei_v_cap { return; }
+    nc := g_ei_v_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+    a := alloc(nc * 8); _dyncpy(g_ei_v_names, g_ei_v_cap * 8, a); g_ei_v_names = a;
+    b := alloc(nc * 8); _dyncpy(g_ei_v_tbase, g_ei_v_cap * 8, b); g_ei_v_tbase = b;
+    c := alloc(nc * 8); _dyncpy(g_ei_v_tcount, g_ei_v_cap * 8, c); g_ei_v_tcount = c;
+    z : ., mut = g_ei_v_cap;
+    loop { if z >= nc { break; } w64(b, z * 8, -1); z = z + 1; }   // tbase 新槽 = -1 哨兵
+    g_ei_v_cap = nc;
+}
+fn grow_ei_vtypes(needed: int) {
+    if needed <= g_ei_vt_cap { return; }
+    nc := g_ei_vt_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+    a := alloc(nc * 8); _dyncpy(g_ei_vt_types, g_ei_vt_cap * 8, a); g_ei_vt_types = a;
+    b := alloc(nc * 8); _dyncpy(g_ei_vt_nodes, g_ei_vt_cap * 8, b); g_ei_vt_nodes = b;
+    g_ei_vt_cap = nc;
+}
+fn ei_variant_base(n: int) -> int { return r64(g_enums, n * ESZ_ENUMINFO + OFF_EI_VARIANTS); }
+fn ei_set_variant_base(n: int, v: int) { w64(g_enums, n * ESZ_ENUMINFO + OFF_EI_VARIANTS, v); }
+fn ei_commit_variants(n: int, vc: int) {
+    b := ei_variant_base(n);
+    if b < 0 { return; }
+    if vc < 0 { return; }
+    if b + vc > g_ei_v_used { g_ei_v_used = b + vc; }
+}
+fn ei_variant_row(n: int, vi: int) -> int {
+    if vi < 0 { return -1; }
+    if vi >= ei_variant_count(n) { return -1; }
+    b := ei_variant_base(n);
+    if b < 0 { return -1; }
+    return b + vi;
+}
 fn ei_variant_name(n: int, vi: int) -> int {
-    if vi < 0 || vi >= MAX_ENUM_VARIANTS { return -1; }
-    return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_NAME); }
-fn ei_variant_type(n: int, vi: int, ti: int) -> int {
-    if vi < 0 || vi >= MAX_ENUM_VARIANTS || ti < 0 || ti >= MAX_VARIANT_TYPES { return -1; }
-    return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPES + ti*8); }
+    r := ei_variant_row(n, vi);
+    if r < 0 { return -1; }
+    return r64(g_ei_v_names, r * 8); }
 fn ei_variant_type_count(n: int, vi: int) -> int {
-    if vi < 0 || vi >= MAX_ENUM_VARIANTS { return 0; }
-    return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPE_COUNT); }
+    r := ei_variant_row(n, vi);
+    if r < 0 { return 0; }
+    return r64(g_ei_v_tcount, r * 8); }
+fn ei_variant_type(n: int, vi: int, ti: int) -> int {
+    r := ei_variant_row(n, vi);
+    if r < 0 { return -1; }
+    if ti < 0 || ti >= r64(g_ei_v_tcount, r * 8) { return -1; }
+    tb := r64(g_ei_v_tbase, r * 8);
+    if tb < 0 { return -1; }
+    return r64(g_ei_vt_types, (tb + ti) * 8); }
 // R2 P3 Task 4（T0 交接 ①）：载荷第 ti 个的**类型节点**（-1/0 = 无信息——.ccr 不落本列，
 // 序列化读回侧该列恒 0；消费者须以 type_count 为界，不得据 0 反推「节点 0」）。
 fn ei_variant_type_node(n: int, vi: int, ti: int) -> int {
-    if vi < 0 || vi >= MAX_ENUM_VARIANTS || ti < 0 || ti >= MAX_VARIANT_TYPES { return -1; }
-    return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPE_NODES + ti*8); }
+    r := ei_variant_row(n, vi);
+    if r < 0 { return -1; }
+    if ti < 0 || ti >= r64(g_ei_v_tcount, r * 8) { return -1; }
+    tb := r64(g_ei_v_tbase, r * 8);
+    if tb < 0 { return -1; }
+    return r64(g_ei_vt_nodes, (tb + ti) * 8); }
 
 // ─── 枚举/结构体记录**受护访问器**（R2 P4 Task 6；TODO #35 收口，#8 同族形态）───
-// 背景（TODO #35 代码级定位）：EnumVariant 槽区（`MAX_ENUM_VARIANTS` 槽 × `OFF_EV_SIZE`）与
-// StructInfo 字段槽区（`MAX_STRUCT_FIELDS` 槽）是**定长内嵌槽区**——其后紧跟记录自身的
+// 背景（TODO #35 代码级定位；**容量批 T3 起该定长槽区已退役**——字段/变体迁侧表）：EnumVariant 槽区（旧 `MAX_ENUM_VARIANTS` 槽 × `OFF_EV_SIZE`）与
+// StructInfo 字段槽区（旧 `MAX_STRUCT_FIELDS` 槽）曾是**定长内嵌槽区**——其后紧跟记录自身的
 // count/generic 槽，再往后是**下一条记录**（同一 buffer）⇒ 无界写入既踩自身记录尾也踩邻记录
 // （实测：第 17 变体槽起点 = `OFF_EI_VARIANT_COUNT` 自身、槽尾越过 `ESZ_ENUMINFO` 224B）。
 // 修复形态**照 TODO #8 收口**（`fi_param_type`/`fi_set_param_type`）：
@@ -527,26 +605,71 @@ fn ei_variant_type_node(n: int, vi: int, ti: int) -> int {
 // count 槽（`ei_variant_count`/`si_field_count` 的写）**不设护栏**——真值是诊断依据，照
 // P020 的 `add_func(pc)` 先例（计数保持真实值，超限由硬错拒绝；越界读由②兜底）。
 fn ei_set_variant_name(n: int, vi: int, v: int) {
-    if vi < 0 || vi >= MAX_ENUM_VARIANTS { return; }
-    w64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_NAME, v); }
+    if vi < 0 { return; }
+    b := ei_variant_base(n);
+    if b < 0 { return; }
+    grow_ei_variants(b + vi + 1);
+    if b + vi + 1 > g_ei_v_used { g_ei_v_used = b + vi + 1; }
+    w64(g_ei_v_names, (b + vi) * 8, v); }
+// 载荷基址**惰性分配**（首个载荷写入时占用高水位；后续增量推进）
+
+fn ei_variant_tbase_ensure(n: int, vi: int) -> int {
+    b := ei_variant_base(n);
+    if b < 0 { return -1; }
+    grow_ei_variants(b + vi + 1);
+    r := b + vi;
+    tb := r64(g_ei_v_tbase, r * 8);
+    if tb < 0 {
+        tb = g_ei_vt_used;
+        w64(g_ei_v_tbase, r * 8, tb);
+    }
+    return tb;
+}
 fn ei_set_variant_type(n: int, vi: int, ti: int, v: int) {
-    if vi < 0 || vi >= MAX_ENUM_VARIANTS || ti < 0 || ti >= MAX_VARIANT_TYPES { return; }
-    w64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPES + ti*8, v); }
+    if vi < 0 || ti < 0 { return; }
+    tb := ei_variant_tbase_ensure(n, vi);
+    if tb < 0 { return; }
+    grow_ei_vtypes(tb + ti + 1);
+    w64(g_ei_vt_types, (tb + ti) * 8, v);
+    if tb + ti + 1 > g_ei_vt_used { g_ei_vt_used = tb + ti + 1; } }
 fn ei_set_variant_type_count(n: int, vi: int, v: int) {
-    if vi < 0 || vi >= MAX_ENUM_VARIANTS { return; }
-    w64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPE_COUNT, v); }
+    if vi < 0 { return; }
+    b := ei_variant_base(n);
+    if b < 0 { return; }
+    grow_ei_variants(b + vi + 1);
+    w64(g_ei_v_tcount, (b + vi) * 8, v);
+    if v > 0 {
+        tb := ei_variant_tbase_ensure(n, vi);   // 申报区间整体占位（未写槽亦不与他人重叠）
+        if tb >= 0 && tb + v > g_ei_vt_used { g_ei_vt_used = tb + v; }
+    } }
 fn ei_set_variant_type_node(n: int, vi: int, ti: int, v: int) {
-    if vi < 0 || vi >= MAX_ENUM_VARIANTS || ti < 0 || ti >= MAX_VARIANT_TYPES { return; }
-    w64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPE_NODES + ti*8, v); }
+    if vi < 0 || ti < 0 { return; }
+    tb := ei_variant_tbase_ensure(n, vi);
+    if tb < 0 { return; }
+    grow_ei_vtypes(tb + ti + 1);
+    w64(g_ei_vt_nodes, (tb + ti) * 8, v);
+    if tb + ti + 1 > g_ei_vt_used { g_ei_vt_used = tb + ti + 1; } }
 fn si_set_field_name(n: int, fi: int, v: int) {
-    if fi < 0 || fi >= MAX_STRUCT_FIELDS { return; }
-    w64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES + fi*8, v); }
+    if fi < 0 { return; }
+    b := si_field_base(n);
+    if b < 0 { return; }
+    grow_si_fields(b + fi + 1);
+    if b + fi + 1 > g_si_f_used { g_si_f_used = b + fi + 1; }
+    w64(g_si_f_names, (b + fi) * 8, v); }
 fn si_set_field_type(n: int, fi: int, v: int) {
-    if fi < 0 || fi >= MAX_STRUCT_FIELDS { return; }
-    w64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES + fi*8, v); }
+    if fi < 0 { return; }
+    b := si_field_base(n);
+    if b < 0 { return; }
+    grow_si_fields(b + fi + 1);
+    if b + fi + 1 > g_si_f_used { g_si_f_used = b + fi + 1; }
+    w64(g_si_f_types, (b + fi) * 8, v); }
 fn si_set_field_type_node(n: int, fi: int, v: int) {
-    if fi < 0 || fi >= MAX_STRUCT_FIELDS { return; }
-    w64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES + fi*8, v); }
+    if fi < 0 { return; }
+    b := si_field_base(n);
+    if b < 0 { return; }
+    grow_si_fields(b + fi + 1);
+    if b + fi + 1 > g_si_f_used { g_si_f_used = b + fi + 1; }
+    w64(g_si_f_nodes, (b + fi) * 8, v); }
 
 // ============================================================
 // String table helpers (dynamic byte buffer)

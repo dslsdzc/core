@@ -1200,33 +1200,27 @@ fn load_ccr(data: string, fsize: int) -> int {
         if !ccr_has_bytes(pos, 8, seg_end2) { return -1; }
         sname_ni := buf_read_u32(data, pos); pos = pos + 4;
         fc := buf_read_u32(data, pos); pos = pos + 4;
-        if fc > MAX_STRUCT_FIELDS { println("error: .ccr struct field count exceeds max"); return 1; }
+        // 容量批 T3（裁-CAP-2 (a)）：字段数**无硬上限**（侧表承载）⇒ 旧 MAX_STRUCT_FIELDS
+        // 读回闸与 16 槽清零循环一并删除；段界核算保留（fc 越段 ⇒ 拒绝，三态纪律）。
         if fc > (seg_end2 - pos) / 8 { return -1; }
         w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_NAME, sname_ni);
         w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, fc);
-        // Zero out all field slots and type nodes
-        zfi : ., mut = 0;
-        loop {
-            if zfi >= 16 { break; }
-            w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES + zfi * 8, 0);
-            w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES + zfi * 8, 0);
-            w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES + zfi * 8, 0);
-            zfi = zfi + 1;
-        }
+        si_set_field_base(sti, g_si_f_used);
         // Zero generic slots
         w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT, 0);
         zgi : ., mut = 0;
         loop { if zgi >= 4 { break; } w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + zgi * 8, 0); zgi = zgi + 1; }
-        // Write field data
+        // Write field data（侧表；盘面逐字段变长，格式不变）
         fi2 : ., mut = 0;
         loop {
             if fi2 >= fc { break; }
             fn_ni := buf_read_u32(data, pos); pos = pos + 4;
             ft := buf_read_u32(data, pos); pos = pos + 4;
-            w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES + fi2 * 8, fn_ni);
-            w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES + fi2 * 8, ft);
+            si_set_field_name(sti, fi2, fn_ni);
+            si_set_field_type(sti, fi2, ft);
             fi2 = fi2 + 1;
         }
+        si_commit_fields(sti, fc);
         sti = sti + 1;
     }
 
@@ -1242,24 +1236,12 @@ fn load_ccr(data: string, fsize: int) -> int {
         if !ccr_has_bytes(pos, 8, seg_end2) { return -1; }
         ename_ni := buf_read_u32(data, pos); pos = pos + 4;
         vc := buf_read_u32(data, pos); pos = pos + 4;
-        if vc > MAX_ENUM_VARIANTS { println("error: .ccr enum variant count exceeds max"); return 1; }
+        // 容量批 T3（裁-CAP-2 (a)）：变体/载荷数**无硬上限**（侧表）⇒ 旧两闸与 16 槽清零
+        // 循环删除；段界核算保留（三态纪律）
         if vc > (seg_end2 - pos) / 8 { return -1; }
         w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_NAME, ename_ni);
         w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, vc);
-        // Zero all variant slots
-        zvi : ., mut = 0;
-        loop {
-            if zvi >= 16 { break; }
-            w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + zvi * OFF_EV_SIZE + OFF_EV_NAME, 0);
-            w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + zvi * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, 0);
-            ztj : ., mut = 0;
-            loop { if ztj >= 16 { break; } w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + zvi * OFF_EV_SIZE + OFF_EV_TYPES + ztj * 8, 0); ztj = ztj + 1; }
-            // R2 P3 Task 4：载荷**类型节点**列（编译期信息）**不落 .ccr**（v7 段布局不动）⇒
-            // 读回侧恒 0（= 无信息）；消费者以 OFF_EV_TYPE_COUNT 为界，不得据 0 反推「节点 0」。
-            znt : ., mut = 0;
-            loop { if znt >= 16 { break; } w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + zvi * OFF_EV_SIZE + OFF_EV_TYPE_NODES + znt * 8, 0); znt = znt + 1; }
-            zvi = zvi + 1;
-        }
+        ei_set_variant_base(ei, g_ei_v_used);
         w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 0);
         zgi2 : ., mut = 0;
         loop { if zgi2 >= 4 { break; } w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + zgi2 * 8, 0); zgi2 = zgi2 + 1; }
@@ -1269,15 +1251,14 @@ fn load_ccr(data: string, fsize: int) -> int {
             if vi3 >= vc { break; }
             vni := buf_read_u32(data, pos); pos = pos + 4;
             tc := buf_read_u32(data, pos); pos = pos + 4;
-            if tc > MAX_VARIANT_TYPES { println("error: .ccr variant type count exceeds max"); return 1; }
             if tc > (seg_end2 - pos) / 4 { return -1; }
-            w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vi3 * OFF_EV_SIZE + OFF_EV_NAME, vni);
-            w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vi3 * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, tc);
+            ei_set_variant_name(ei, vi3, vni);
+            ei_set_variant_type_count(ei, vi3, tc);
             tf : ., mut = 0;
             loop {
                 if tf >= tc { break; }
                 tval := buf_read_u32(data, pos); pos = pos + 4;
-                w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vi3 * OFF_EV_SIZE + OFF_EV_TYPES + tf * 8, tval);
+                ei_set_variant_type(ei, vi3, tf, tval);
                 tf = tf + 1;
             }
             vi3 = vi3 + 1;

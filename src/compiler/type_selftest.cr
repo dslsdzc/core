@@ -76,9 +76,9 @@ fn tt_probe_wide_union(depth: int) -> int {
 // 裸码槽 / 类型节点 / 字段数），类型节点照 parse_type 的产物形态构造。
 fn ts_unf_mk_int_struct(name: string) -> int {
     sa := add_struct(name);
-    w64(g_structs, sa * ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES, str_intern("a"));
-    w64(g_structs, sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES, TY_INT);
-    w64(g_structs, sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES, alloc_node(0, 0, 0, 0, 0, TY_INT, 0, 0, 0));
+    si_set_field_name(sa, 0, str_intern("a"));
+    si_set_field_type(sa, 0, TY_INT);
+    si_set_field_type_node(sa, 0, alloc_node(0, 0, 0, 0, 0, TY_INT, 0, 0, 0));
     w64(g_structs, sa * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, 1);
     return alloc_named_type(str_intern(name));
 }
@@ -2983,9 +2983,9 @@ fn type_selftest_run() -> int {
     unf_box_sa := add_struct("UnfBoxU");
     w64(g_structs, unf_box_sa * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT, 1);
     w64(g_structs, unf_box_sa * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES, unf_gp);
-    w64(g_structs, unf_box_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES, str_intern("val"));
-    w64(g_structs, unf_box_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES, 0);   // 裸码槽 = parser 对非基型的塌缩值（0 = TY_INT；本层不读）
-    w64(g_structs, unf_box_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES,
+    si_set_field_name(unf_box_sa, 0, str_intern("val"));
+    si_set_field_type(unf_box_sa, 0, 0);   // 裸码槽 = parser 对非基型的塌缩值（0 = TY_INT；本层不读）
+    si_set_field_type_node(unf_box_sa, 0,
         alloc_node(EXPR_IDENT, -1, -1, -1, unf_gp, 0, -1, 0, 0));
     w64(g_structs, unf_box_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, 1);
     unf_box_ti := alloc_named_type(str_intern("UnfBoxU"));
@@ -3014,12 +3014,12 @@ fn type_selftest_run() -> int {
 
     // 夹具 ②：struct UnfP1U { a: int, b: string }（字段**声明序**；含基型两种）
     unf_p1_sa := add_struct("UnfP1U");
-    w64(g_structs, unf_p1_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES, str_intern("a"));
-    w64(g_structs, unf_p1_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES, TY_INT);
-    w64(g_structs, unf_p1_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES, alloc_node(0, 0, 0, 0, 0, TY_INT, 0, 0, 0));
-    w64(g_structs, unf_p1_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES + 8, str_intern("b"));
-    w64(g_structs, unf_p1_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES + 8, TY_STRING);
-    w64(g_structs, unf_p1_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES + 8, alloc_node(0, 0, 0, 0, 0, TY_STRING, 0, 0, 0));
+    si_set_field_name(unf_p1_sa, 0, str_intern("a"));
+    si_set_field_type(unf_p1_sa, 0, TY_INT);
+    si_set_field_type_node(unf_p1_sa, 0, alloc_node(0, 0, 0, 0, 0, TY_INT, 0, 0, 0));
+    si_set_field_name(unf_p1_sa, 1, str_intern("b"));
+    si_set_field_type(unf_p1_sa, 1, TY_STRING);
+    si_set_field_type_node(unf_p1_sa, 1, alloc_node(0, 0, 0, 0, 0, TY_STRING, 0, 0, 0));
     w64(g_structs, unf_p1_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, 2);
     unf_p1_ti := alloc_named_type(str_intern("UnfP1U"));
     unf_tp1 := sh_struct_term(unf_p1_ti);
@@ -3030,9 +3030,9 @@ fn type_selftest_run() -> int {
     // 「只读裸码槽」的实现会把该字段静默误判为 int（本用例即其守门；裸码塌缩 = parser 事实）
     unf_p2_sa := add_struct("UnfP2U");
     unf_arrn := alloc_node(EXPR_ARRAY, alloc_node(0, 0, 0, 0, 0, TY_INT, 0, 0, 0), -1, -1, 2, 0, -1, 0, 0);
-    w64(g_structs, unf_p2_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES, str_intern("x"));
-    w64(g_structs, unf_p2_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES, 0);
-    w64(g_structs, unf_p2_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES, unf_arrn);
+    si_set_field_name(unf_p2_sa, 0, str_intern("x"));
+    si_set_field_type(unf_p2_sa, 0, 0);
+    si_set_field_type_node(unf_p2_sa, 0, unf_arrn);
     w64(g_structs, unf_p2_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, 1);
     unf_p2_ti := alloc_named_type(str_intern("UnfP2U"));
     unf_tp2 := sh_struct_term(unf_p2_ti);
@@ -3067,9 +3067,9 @@ fn type_selftest_run() -> int {
 
     // 夹具 ⑤：enum UnfColorU { UnfRedU, UnfGreenU, UnfBlueU }（tag-only，3 变体）
     unf_col_ei := add_enum("UnfColorU");
-    w64(g_enums, unf_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("UnfRedU"));
-    w64(g_enums, unf_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("UnfGreenU"));
-    w64(g_enums, unf_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 2 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("UnfBlueU"));
+    ei_set_variant_name(unf_col_ei, 0, str_intern("UnfRedU"));
+    ei_set_variant_name(unf_col_ei, 1, str_intern("UnfGreenU"));
+    ei_set_variant_name(unf_col_ei, 2, str_intern("UnfBlueU"));
     w64(g_enums, unf_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 3);
     unf_col_ti := alloc_named_type(str_intern("UnfColorU"));
     unf_dom := sh_enum_domain_term(unf_col_ti);
@@ -3083,7 +3083,7 @@ fn type_selftest_run() -> int {
          sh_variant_term(unf_col_ti, str_intern("UnfNoSuchVariantU")) == -1), 1);
     // 变体身份**含枚举名**（引擎只比 a/c 两槽 ⇒ 身份必须入参数链）：异枚举**同名变体**不得被判等价
     unf_dup_ei := add_enum("UnfDupU");
-    w64(g_enums, unf_dup_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + OFF_EV_NAME, str_intern("UnfRedU"));
+    ei_set_variant_name(unf_dup_ei, 0, str_intern("UnfRedU"));
     w64(g_enums, unf_dup_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 1);
     unf_dup_ti := alloc_named_type(str_intern("UnfDupU"));
     unf_vdup := sh_variant_term(unf_dup_ti, str_intern("UnfRedU"));
@@ -3101,10 +3101,10 @@ fn type_selftest_run() -> int {
     unf_opt_ei := add_enum("UnfOptU");
     w64(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 1);
     w64(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES, str_intern("UnfTOptU"));
-    w64(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("UnfNoneU"));
-    w64(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("UnfSomeU"));
-    w64(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, 1);
-    w64(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_TYPES, TY_INT);   // 裸码槽（parser 事实；本层不读）
+    ei_set_variant_name(unf_opt_ei, 0, str_intern("UnfNoneU"));
+    ei_set_variant_name(unf_opt_ei, 1, str_intern("UnfSomeU"));
+    ei_set_variant_type_count(unf_opt_ei, 1, 1);
+    ei_set_variant_type(unf_opt_ei, 1, 0, TY_INT);   // 裸码槽（parser 事实；本层不读）
     w64(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 2);
     unf_opt_ti := alloc_named_type(str_intern("UnfOptU"));
     unf_odom := sh_enum_domain_term(unf_opt_ti);
@@ -3280,9 +3280,9 @@ fn type_selftest_run() -> int {
     init_types();
     ty_budget_reset(200000);
     t3_col_ei := add_enum("T3Color");
-    w64(g_enums, t3_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T3Red"));
-    w64(g_enums, t3_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T3Green"));
-    w64(g_enums, t3_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 2 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T3Blue"));
+    ei_set_variant_name(t3_col_ei, 0, str_intern("T3Red"));
+    ei_set_variant_name(t3_col_ei, 1, str_intern("T3Green"));
+    ei_set_variant_name(t3_col_ei, 2, str_intern("T3Blue"));
     w64(g_enums, t3_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 3);
     t3_col_ti := alloc_named_type(str_intern("T3Color"));
     t3_r := sh_match_variant_term(t3_col_ti, 0);
@@ -3332,7 +3332,7 @@ fn type_selftest_run() -> int {
         sh_match_exhaustive(t3_col_ti, tt_cons(tt_top(), tt_nil()), 0), 1);
     // ④ 单变体枚举：有臂 = 1 / 无臂 = 0（空链 ⇒ 补集 = 全域）
     t3_only_ei := add_enum("T3Only");
-    w64(g_enums, t3_only_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + OFF_EV_NAME, str_intern("T3One"));
+    ei_set_variant_name(t3_only_ei, 0, str_intern("T3One"));
     w64(g_enums, t3_only_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 1);
     t3_only_ti := alloc_named_type(str_intern("T3Only"));
     t3_one := sh_match_variant_term(t3_only_ti, 0);
@@ -3355,10 +3355,10 @@ fn type_selftest_run() -> int {
         (sh_match_exhaustive(t3_emp_ti, tt_nil(), 0) == 1 && sh_match_first_missing(0, 0) == -1), 1);
     // ⑦ payload 变体与 tag 变体混合（payload 不入项 = 变体身份粒度；覆盖语义不受影响）
     t3_mix_ei := add_enum("T3Mix");
-    w64(g_enums, t3_mix_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T3None"));
-    w64(g_enums, t3_mix_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T3Some"));
-    w64(g_enums, t3_mix_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, 1);
-    w64(g_enums, t3_mix_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_TYPES, TY_INT);
+    ei_set_variant_name(t3_mix_ei, 0, str_intern("T3None"));
+    ei_set_variant_name(t3_mix_ei, 1, str_intern("T3Some"));
+    ei_set_variant_type_count(t3_mix_ei, 1, 1);
+    ei_set_variant_type(t3_mix_ei, 1, 0, TY_INT);
     w64(g_enums, t3_mix_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 2);
     t3_mix_ti := alloc_named_type(str_intern("T3Mix"));
     t3_none := sh_match_variant_term(t3_mix_ti, 0);
@@ -3394,10 +3394,10 @@ fn type_selftest_run() -> int {
     t3_go_ei := add_enum("T3GOpt");
     w64(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 1);
     w64(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES, str_intern("T3GT"));
-    w64(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T3GN"));
-    w64(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T3GS"));
-    w64(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, 1);
-    w64(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_TYPES, 0);
+    ei_set_variant_name(t3_go_ei, 0, str_intern("T3GN"));
+    ei_set_variant_name(t3_go_ei, 1, str_intern("T3GS"));
+    ei_set_variant_type_count(t3_go_ei, 1, 1);
+    ei_set_variant_type(t3_go_ei, 1, 0, 0);
     w64(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 2);
     t3_go_ti := alloc_named_type(str_intern("T3GOpt"));
     grow_gen_apply_data(g_gen_apply_data_count + 2);
@@ -3512,12 +3512,12 @@ fn type_selftest_run() -> int {
          ts_unf_union_leaves(sh_match_domain_term(t4_str_opt)) == 2), 1);
     // ⑧ 枚举载荷类型节点列（T0 交接 ① 的消费面：sh_variant_payload_term）
     t4_p_ei := add_enum("T4Payload");
-    w64(g_enums, t4_p_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T4Tag"));
+    ei_set_variant_name(t4_p_ei, 0, str_intern("T4Tag"));
     // 变体 1：**裸码槽 = 0（= TY_INT，旧布局的全部信息）而节点列 = string** —— 节点列才是真值
-    w64(g_enums, t4_p_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T4Str"));
-    w64(g_enums, t4_p_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, 1);
-    w64(g_enums, t4_p_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_TYPES, TY_INT);
-    w64(g_enums, t4_p_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 1 * OFF_EV_SIZE + OFF_EV_TYPE_NODES, alloc_node(0, 0, 0, 0, 0, TY_STRING, 0, 0, 0));
+    ei_set_variant_name(t4_p_ei, 1, str_intern("T4Str"));
+    ei_set_variant_type_count(t4_p_ei, 1, 1);
+    ei_set_variant_type(t4_p_ei, 1, 0, TY_INT);
+    ei_set_variant_type_node(t4_p_ei, 1, 0, alloc_node(0, 0, 0, 0, 0, TY_STRING, 0, 0, 0));
     w64(g_enums, t4_p_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 2);
     t4_p_ti := alloc_named_type(str_intern("T4Payload"));
     total = total + 1; fails = fails + ts_check("t4.payload_node_beats_bare_code",
@@ -3529,10 +3529,10 @@ fn type_selftest_run() -> int {
     t4_g_ei := add_enum("T4GP");
     w64(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 1);
     w64(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES, str_intern("T4GT"));
-    w64(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_NAME, str_intern("T4GS"));
-    w64(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, 1);
-    w64(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_TYPES, TY_INT);
-    w64(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + 0 * OFF_EV_SIZE + OFF_EV_TYPE_NODES, alloc_node(EXPR_IDENT, 0, 0, 0, str_intern("T4GT"), 0, 0, 0, 0));
+    ei_set_variant_name(t4_g_ei, 0, str_intern("T4GS"));
+    ei_set_variant_type_count(t4_g_ei, 0, 1);
+    ei_set_variant_type(t4_g_ei, 0, 0, TY_INT);
+    ei_set_variant_type_node(t4_g_ei, 0, 0, alloc_node(EXPR_IDENT, 0, 0, 0, str_intern("T4GT"), 0, 0, 0, 0));
     w64(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 1);
     t4_g_ti := alloc_named_type(str_intern("T4GP"));
     grow_gen_apply_data(g_gen_apply_data_count + 2);

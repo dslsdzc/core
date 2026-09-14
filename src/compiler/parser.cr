@@ -1318,6 +1318,8 @@ fn add_struct(name: string) -> int {
         zi = zi + 1;
     }
     w64(g_structs, base + OFF_SI_NAME, ni);
+    // 容量批 T3：字段区基址 = 侧表高水位（字段写入点按 base + 下标寻址；体尾 si_commit_fields 提交）
+    si_set_field_base(idx, g_si_f_used);
     g_struct_count = idx + 1;
     return idx;
 }
@@ -1335,6 +1337,8 @@ fn add_enum(name: string) -> int {
         zi = zi + 1;
     }
     w64(g_enums, base + OFF_EI_NAME, ni);
+    // 容量批 T3：变体区基址 = 侧表高水位（体尾 ei_commit_variants 提交）
+    ei_set_variant_base(idx, g_ei_v_used);
     g_enum_count = idx + 1;
     return idx;
 }
@@ -1621,33 +1625,23 @@ fn parse_declaration() {
                 save_struct_gen_constrs(si, sg_constrs, sg_count);
             }
             fc : ., mut = 0;
-            over_f : ., mut = 0;
             loop {
                 if check(T_RBRACE) || check(T_EOF) { break; }
                 ft := advance_tok();
                 fn2 := tok_lx(ft);
                 fni := str_intern(fn2);
-                // TODO #35（R2 P4 Task 6）：字段槽区（MAX_STRUCT_FIELDS）护栏——旧态无界写
-                // （第 17 字段踩 OFF_SI_FIELD_COUNT/generic 槽与邻记录）。超限不再写槽（写
-                // 访问器同护栏 = 双保险），计数保持真值 + 末尾 P023 硬错（照 P020 形态）。
-                if fc < MAX_STRUCT_FIELDS {
-                    si_set_field_name(si, fc, fni);
-                } else { over_f = 1; }
+                // 容量批 T3（裁-CAP-2 (a)）：字段**无硬上限**（侧表；第 17 字段起照常写入）
+                // ⇒ 旧 P023 闸与槽上限分支一并删除（不再存在越界写对象）。
+                si_set_field_name(si, fc, fni);
                 advance_tok();
                 fty := parse_type();
-                if fc < MAX_STRUCT_FIELDS {
-                    si_set_field_type(si, fc, unpack_type(fty));
-                    si_set_field_type_node(si, fc, fty);
-                }
+                si_set_field_type(si, fc, unpack_type(fty));
+                si_set_field_type_node(si, fc, fty);
                 fc = fc + 1;
                 if check(T_COMMA) { advance_tok(); }
             }
             w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, fc);
-            if over_f != 0 {
-                check_error(EC_P_STRUCT_LIMIT,
-                    "Struct has too many fields (" + int_str(fc) + " > " + int_str(MAX_STRUCT_FIELDS) + ")",
-                    tok_ln(t), tok_cl(t));
-            }
+            si_commit_fields(si, fc);   // 提交字段区（高水位 = base + fc）
         }
         advance_tok();
         return;
@@ -1679,56 +1673,37 @@ fn parse_declaration() {
                 save_enum_gen_constrs(ei, eg_constrs, eg_count);
             }
             vc : ., mut = 0;
-            over_v : ., mut = 0;
-            over_t : ., mut = 0;
-            mtc : ., mut = 0;   // 载荷计数最大值（诊断用；P022 消息需报真实数码）
             loop {
                 if check(T_RBRACE) || check(T_EOF) { break; }
                 vt := advance_tok();
                 vname := tok_lx(vt);
                 vni := str_intern(vname);
-                // TODO #35（R2 P4 Task 6）：变体槽区（MAX_ENUM_VARIANTS）护栏——旧态无界写：
-                // 第 17 变体槽起点 = OFF_EI_VARIANT_COUNT 自身、槽尾越过 ESZ_ENUMINFO 224B
-                // （踩邻记录/缓冲区尾部）。超限不再写槽（写访问器同护栏 = 双保险），计数保持
-                // 真值 + 末尾 P022 硬错（照 P020 形态：**非静默截断**）。
-                if vc < MAX_ENUM_VARIANTS {
-                    ei_set_variant_name(ei, vc, vni);
-                } else { over_v = 1; }
+                // 容量批 T3（裁-CAP-2 (a)）：变体**无硬上限**（侧表）⇒ 旧 P022 闸与槽上限
+                // 分支一并删除（不再存在越界写对象）
+                ei_set_variant_name(ei, vc, vni);
                 tc : ., mut = 0;
                 if check(T_LPAREN) {
                     advance_tok();
                     loop {
                         if check(T_RPAREN) { break; }
                         fty := parse_type();
-                        if tc < MAX_VARIANT_TYPES {
-                            ei_set_variant_type(ei, vc, tc, unpack_type(fty));
-                            // R2 P3 Task 4（T0 交接 ①）：载荷类型**节点**随裸码同写（照 struct 的
-                            // OFF_SI_FIELD_TYPE_NODES 先例）——裸码把非基型载荷塌缩成 0 = TY_INT，
-                            // 节点是载荷面（泛型形参代入 / 满足判定）的唯一忠实来源。
-                            ei_set_variant_type_node(ei, vc, tc, fty);
-                        } else { over_t = 1; }
+                        ei_set_variant_type(ei, vc, tc, unpack_type(fty));
+                        // R2 P3 Task 4（T0 交接 ①）：载荷类型**节点**随裸码同写（照 struct 的
+                        // OFF_SI_FIELD_TYPE_NODES 先例）——裸码把非基型载荷塌缩成 0 = TY_INT，
+                        // 节点是载荷面（泛型形参代入 / 满足判定）的唯一忠实来源。
+                        ei_set_variant_type_node(ei, vc, tc, fty);
                         tc = tc + 1;
                         if !check(T_COMMA) { break; }
                         advance_tok();
                     }
                     advance_tok();
                 }
-                if vc < MAX_ENUM_VARIANTS { ei_set_variant_type_count(ei, vc, tc); }
-                if tc > mtc { mtc = tc; }
+                ei_set_variant_type_count(ei, vc, tc);
                 vc = vc + 1;
                 if check(T_COMMA) { advance_tok(); }
             }
             w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, vc);
-            if over_v != 0 {
-                check_error(EC_P_ENUM_LIMIT,
-                    "Enum has too many variants (" + int_str(vc) + " > " + int_str(MAX_ENUM_VARIANTS) + ")",
-                    tok_ln(t), tok_cl(t));
-            }
-            if over_t != 0 {
-                check_error(EC_P_ENUM_LIMIT,
-                    "Enum variant has too many payload types (" + int_str(mtc) + " > " + int_str(MAX_VARIANT_TYPES) + ")",
-                    tok_ln(t), tok_cl(t));
-            }
+            ei_commit_variants(ei, vc);   // 提交变体区（高水位 = base + vc）
         }
         advance_tok();
         return;

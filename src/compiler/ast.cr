@@ -113,9 +113,9 @@ TY_GENERIC_PARAM : int = 7;  // special sentinel for generic type params
 TY_DEX_S : int = 8;  // dex 定点形式（TI_DEX_S）的类型表占位 data（终审 M1：占住表项
                      // 下标 8，用户类型从 9 起；占位项永不参与解析/运算）
 MAX_GENERICS : int = 4;      // max generic params per declaration (language limit)
-MAX_STRUCT_FIELDS : int = 16; // max fields per struct (struct info size limit)
-MAX_ENUM_VARIANTS : int = 16; // max variants per enum (enum info size limit)
-MAX_VARIANT_TYPES : int = 16; // max payload types per variant
+// 容量批 T3（裁-CAP-2 (a)）：`MAX_STRUCT_FIELDS` / `MAX_ENUM_VARIANTS` / `MAX_VARIANT_TYPES`
+// **已退役**（记录布局迁侧表 ⇒ 三面上限解除，P022/P023 硬错随之停发）。数值 16 不再具有
+// 语义（旧定长内嵌槽区的容量）；布局真源 = `dyn_arr.cr` 的 OFF_SI_*/OFF_EI_* 与侧表访问器。
 
 // Token struct
 struct Token {
@@ -126,44 +126,10 @@ struct Token {
     col: int,
 }
 
-// Function signature (for call resolution)
-struct FuncInfo {
-    name: string,
-    param_count: int,
-    param_types: [int; 64],
-    return_type: int,
-    ast_node: int,  // index into ast array for the fn body
-    generic_names: [string; 16],
-    generic_count: int,
-}
-
-// Struct layout
-struct StructInfo {
-    name: string,
-    field_names: [string; 64],
-    field_types: [int; 64],
-    field_type_nodes: [int; 64],  // original type node indices (for generic resolution)
-    field_count: int,
-    generic_names: [string; 16],
-    generic_count: int,
-}
-
-// Enum variant description
-struct EnumVariant {
-    name: string,
-    types: [int; 64],  // TY_* for each field
-    type_count: int,
-}
-
-// Enum layout
-struct EnumInfo {
-    name: string,
-    variants: [EnumVariant; 16],
-    variant_count: int,
-    generic_names: [string; 16],
-    generic_count: int,
-}
-
+// ── 记录镜像声明（旧）：容量批 T3 起**删除**——`FuncInfo`/`StructInfo`/`EnumInfo`/
+// `EnumVariant` 三个镜像结构在全仓**零类型使用点**（仅注释命中），且其定长槽区（`[.;64]`
+// 等）与运行期布局早已不一致（旧布局 = 内存字节缓冲 + 定长内嵌槽区，T3 起字段/变体迁
+// 侧表）。布局真源 = `dyn_arr.cr`（ESZ_*/OFF_* 常量 + 侧表访问器）。
 // Loop context (for break/continue)
 struct LoopInfo {
     start_label: string,
@@ -369,8 +335,8 @@ EC_P_VAR_DECL     : int = 1018; // P018  Invalid var declaration
 EC_P_LIT_OVERFLOW : int = 1019; // P019  Numeric literal overflow
 EC_P_TOO_MANY_PARAMS : int = 1020; // P020  Too many function parameters (FuncInfo 参数槽区容量)
 EC_P_NESTED_FN    : int = 1021; // P021  Nested function declaration (函数声明仅限顶层)
-EC_P_ENUM_LIMIT   : int = 1022; // P022  Too many enum variants / payload types (EnumInfo 变体槽区容量)
-EC_P_STRUCT_LIMIT : int = 1023; // P023  Too many struct fields (StructInfo 字段槽区容量)
+EC_P_ENUM_LIMIT   : int = 1022; // P022  **已退役**（容量批 T3：变体/载荷上限解除，零 raise）
+EC_P_STRUCT_LIMIT : int = 1023; // P023  **已退役**（容量批 T3：字段上限解除，零 raise）
 
 // N0xx — Name Resolution
 EC_N_UNDEFINED     : int = 2001; // N001  Undefined name

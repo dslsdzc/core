@@ -3031,7 +3031,7 @@ fn infer_expr(node: int) -> int {
         // 模式类别/归属 → 模式项 CONS 链（m_pats）+ 覆盖位（m_cover）+ 不可映射标记
         // （m_unmappable）；臂体推断后统一判（判据本体与消费点封装见 ty_shadow.cr 末段）。
         m_pats : ., mut = tt_nil();
-        m_cover : ., mut = 0;
+        mc_save := mc_begin();     // 容量批 T3：覆盖位图入栈（无界；旧态 = 单 int 2^vi）
         m_unmappable : ., mut = 0;
         m_wild : ., mut = 0;      // 通配/绑定已见（冗余臂判据用；非穷尽性判据本体）
         m_dup : ., mut = -1;      // 首个冗余臂模式节点（-1 = 无）
@@ -3061,10 +3061,9 @@ fn infer_expr(node: int) -> int {
                     } else {
                         ci : ., mut = vi;
                         if vi < 0 { ci = oi; }   // 可选域：覆盖位 0 = 有值 / 1 = null
-                        bit := sh_match_bit(ci);
                         if m_wild != 0 { if m_dup < 0 { m_dup = arm_pat; } }
-                        if (m_cover / bit) % 2 != 0 { if m_dup < 0 { m_dup = arm_pat; } }
-                        m_cover = m_cover + bit;
+                        if mc_has(ci) != 0 { if m_dup < 0 { m_dup = arm_pat; } }
+                        mc_add(ci);
                         m_pats = tt_cons(vt, m_pats);
                     }
                 } else {
@@ -3114,12 +3113,12 @@ fn infer_expr(node: int) -> int {
             msg := "Non-exhaustive match";
             if get_type_kind(match_ti) == TYP_OPTIONAL {
                 // `T?` 两分支反例命名（R2 P3 Task 4）：0 = 有值（Some）/ 1 = null（None）
-                mi = sh_match_first_missing(m_cover, 2);
+                mi = mc_first_missing(2);
                 if mi == 0 { msg = msg + ": missing variant 'Some'"; }
                 if mi == 1 { msg = msg + ": missing variant 'None'"; }
             } else {
                 ea := find_enum_row_of(match_ti);
-                if ea >= 0 { mi = sh_match_first_missing(m_cover, ei_variant_count(ea)); }
+                if ea >= 0 { mi = mc_first_missing(ei_variant_count(ea)); }
                 if mi >= 0 { msg = msg + ": missing variant '" + istr_get(ei_variant_name(ea, mi)) + "'"; }
             }
             check_error(EC_TM_EXHAUST, msg, ast_line(node), ast_col(node));
@@ -3127,6 +3126,7 @@ fn infer_expr(node: int) -> int {
         if m_dup >= 0 {
             check_error(EC_TM_REDUNDANT, "Redundant match arm", ast_line(m_dup), ast_col(m_dup));
         }
+        mc_end(mc_save);   // 容量批 T3：覆盖位图出栈（清零本层位 + 回退长度）
         return res;
     }
 

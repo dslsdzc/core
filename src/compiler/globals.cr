@@ -67,6 +67,22 @@ g_ir_var_rep : string, mut;     g_ir_var_rep_cap : int, mut;
 //   （`a : [int?;2]`）忠实给出（字面量推出的元素类型对可选元素退化为对象占位）。
 //   仅进程内状态，零布局变更；非可选程序不读取本表（零足迹）。
 g_ir_var_decl_ti : string, mut; g_ir_var_decl_cap : int, mut;
+// 容量批 T3（E-3 / 裁-CAP-2 (a)）：结构体字段**侧表**——字段槽区自定长内嵌记录迁出
+// （记录内 `OFF_SI_FIELD_BASE` 槽 = 本表起始行；记录尺寸与既有 OFF_* 不变）。
+// 三条扁平表按「全局字段行」索引（高水位 = g_si_f_used）。仅进程内状态；`.ccr` 盘面
+// 不变（盘面本就逐字段变长，见 ccr_io.cr 的 SYM 布局注）。
+g_si_f_names : string, mut;  g_si_f_types : string, mut;  g_si_f_nodes : string, mut;
+g_si_f_used : int, mut;      g_si_f_cap : int, mut;
+// 容量批 T3：枚举变体**侧表**（同 struct 形态）——`OFF_EI_VARIANTS` 槽改义为 `variant_base`；
+// 变体面三条（名/载荷基址/载荷计数）+ 载荷面两条（裸码/类型节点）。
+g_ei_v_names : string, mut;  g_ei_v_tbase : string, mut;  g_ei_v_tcount : string, mut;
+g_ei_vt_types : string, mut; g_ei_vt_nodes : string, mut;
+g_ei_v_used : int, mut;      g_ei_vt_used : int, mut;     g_ei_v_cap : int, mut;
+g_ei_vt_cap : int, mut;
+// 容量批 T3：match 覆盖位**无界位图**（旧态 = 单 int 的 2^vi 位图 ⇒ ≥63 变体溢出，
+// e70 实测 SIGFPE）。位图按「位下标 vi」寻址；`g_cov_len` = 当前已用位数，**栈纪律**：
+// mc_begin 存长度、mc_end 清零并回退（嵌套 match 安全）。
+g_cov_bits : string, mut;  g_cov_cap : int, mut;  g_cov_len : int, mut;
 // g_optrep_on：本编译单元是否启用表示面（AST 预扫：EXPR_OPTIONAL / `Some` / `None`）。
 //   关 = **零足迹**（不注册隐藏全局、不发任何表示指令）⇒ 非可选程序的发射面逐字节不变。
 g_optrep_on : int, mut;
