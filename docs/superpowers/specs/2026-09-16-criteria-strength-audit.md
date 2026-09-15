@@ -1,51 +1,89 @@
 # 判据强度审计 —— 字节/序列级判据的系统性弱点（2026-09-16）
 
-**性质**：只读审计（**零构建、零源码/测试改动**）· **体例**：照 `2026-09-16-preexisting-bug-ledger.md`
-**来源与核验口径**：本文件主体 = `criteria-strength-audit` 代理的判据强度审计（team-lead 转述 + 本代理**逐条坐标实核**）。
-**落纸状态**：**表 B 的 B1–B5 与 A5、§0 方法论、§4 结构性发现 = 本代理实核后落纸**；**表 A 全表 / 表 B 的 B6+ / 表 C = 待审计原文到达后回填**（本代理已向该代理索取原文；**未回填前不臆造**——留占位并在此声明）。
-每行标：**【实核】** = 本代理读码确认（坐标以本代理实读为准，漂移已标注）；**【待其实核】** = 仅有审计转述、本代理未逐行确认。
-**缘起（实证）**：seam 批（sd 助手三处 `REX.B` 漏写）——`[r11]` 被编码成 `[rbx]` ⇒ **野指针 139**；而**当时的判据各自独立 `find`**（一条查 `4c8d1d`、一条查 `f20f1003`），**中间插坏字节照样全绿** ⇒ 判据**放跑了一个真缺陷**。
+**性质**：只读审计（**零构建、零源码/测试改动**；全部结论来自实读 + `grep`）· **体例**：照 `2026-09-16-preexisting-bug-ledger.md`
+**来源**：`criteria-strength-audit` 代理的判据强度审计全文（含 **05:54–05:58「判据载体化」批落盘后的状态修订**）+ `plan-capacity` 代理的坐标实核。
+**扫描快照**：审计者 = 今日 23:21 前后的树，**05:54–05:58 一批落盘改变了数条结论与坐标**（下文逐条标「**已修 / 仍存**」）。
+**缘起（实证）**：seam 批 sd 助手三处漏 `REX.B` —— `[r11]` 编码成 `[rbx]` ⇒ **野指针 139**；而当时的判据**各自独立 `find`**（一条查 `4c8d1d`、一条查 `f20f1003`），**中间插坏字节照样全绿** ⇒ 判据放跑了真缺陷。
 
-## 0. 方法论条目（本审计的核心结论）
+## 0. 方法论条目（核心结论）
 
-**弱点形态：片段式字节判据（disjoint-fragment matching）**——同一段期望序列被拆成**多个各自独立的 `find`/`in`/子串断言**，片段之间的字节**无任何约束**。
-- **为何弱**：判据实际断言的命题是「这些片段各自出现过」≠「这段序列连续出现」。任何**片段间的插入/替换**（多一字节、错一个 ModRM 字节、指令被换成另一条等长指令）都不会让判据变红。
-- **实证**：seam 批 sd 助手漏 `REX.B`（`instr.cr:474`/`:489`/`:501` 现为修复后注释，原文写明「漏它则 rm=3 变成 [rbx] ⇒ 野指针 139」）——当时两条 `find` 判据全绿，缺陷漏到运行期。
-- **判据该怎么写（强形态）**：
-  1. **连续序列断言**：把期望字节写成**单一连续序列**（必要时含 `??` 通配位）整体 `find`；
-  2. **带 gap 限定的正则**：确需跨片段时，用**定长 gap**（`..{0,N}`，N 尽量小且写明理由）把片段**焊成一条**；
-  3. **锚点法**：以「指令边界锚 + 定长窗口」取代「片段存在」；长度可变的段用**长度公式**而非「找得到就行」；
-  4. **反例驱动**：每条字节判据在评审时须回答「**什么坏实现能骗过它**」（＝表 B 的「最小坏实现」栏）——写不出反例不等于强，写得出反例而判据仍绿就是弱判据。
-- **适用范围**：本仓一切字节/序列级判据（`tests/selfhost/test_*` 里对 `.ccr`/ELF/`.cir` 的字节断言 + HIT 表字节等价 + 慢路径块体 + 段尺寸）。
+**弱点形态：片段式字节判据（disjoint-fragment matching）**——同一段期望序列被拆成**多个各自独立的 `find`/子串断言**，片段之间的字节**无任何约束**。
+- 判据实际断言的命题是「这些片段各自出现过」≠「这段序列连续出现」⇒ **片段间的插入/替换**（多一字节、错一个 ModRM、换成等长异义指令）都不会变红。
+- **实证**：seam 批三处 `REX.B`（现 `src/arch/x86_64/instr.cr:474/489/501` 注释：「漏它则 rm=3 变成 [rbx] ⇒ 野指针 139」）；修复后 A1 判据已改为**连续序列 + 精确 4B gap + REX.B 入列**（表 A 行 A1 = 修正后的强形态）。
+- **④ 反例驱动（可操作自检问句，**本节的口味要求**）**：新增/评审任何字节判据时，**逐条问**：
+  > **「什么坏实现能骗过这条断言？」**
+  答不出 ⇒ 该判据**尚未被证明有效**（不是「够强」）；答得出且**真能骗过** ⇒ **弱判据**（进表 B + 登记 TODO）。
+  **落地建议**：把这句话**写进判据所在测试函数的注释**（一行即可，例：`# 反例自检：改 modrm_reg_role 能否骗过本断言？`）⇒ 让「能不能被骗过」成为写判据时的**必答题**，而不是评审时才想起。
+  **本日教训（维护者原话）**：判据弱**不是因为写得少，而是因为没人问过它能不能被骗过**。
+- **强判据写法**：① **连续序列断言**（整条指令字节，含 `??` 通配位）；② **带定长 gap 的正则**（`..{0,N}`，N 尽量小并写明理由——A1 即此形）；③ **锚点 + 定长窗口**（长度可变段用**长度公式**，如 A2 的 `text[m+1]==0x83 and text[m+2]==0xEC → text[m+3]`）；④ **反例驱动**：每条字节判据评审时须回答「**什么坏实现能骗过它**」——写不出反例 ≠ 强，写得出而判据仍绿 = 弱判据。
 
-## 1. 表 A：字节级断言清单（21 条；**【实核】/【待其实核】** 逐条标注）
+## 1. 表 A：字节级/序列级断言清单（22 条；坐标为**当前**实读）
 
-（**待 `criteria-strength-audit` 原文**：21 条的逐条内容 + `file:line` + 强度判定。本代理已实核与表 B 重叠者；
-其余条目待原文到达后逐条实核并回填，**未回填前不臆造**。）
+| # | 对象 | 判据（要点） | 强度 |
+|---|---|---|---|
+| A1 | `test_global_seams.py:107,109,230` | ELF（dex 全局实参取址）：`re.compile(rb"\x4c\x8d\x1d.{4}\xf2\x41\x0f\x10\x03", re.S)` + `pat.search(blob)` | **强**（连续 + 精确 4B gap + REX.B 入列 = 事故修复后形态；行号 228→230 因 05:54 改动）|
+| A2 | `test_mw_task1.py:145-146,158,162,164-167` | ELF `.text`：`text[m:m+13] == b"\x53\x41\x54\x41\x55\x41\x56\x41\x57\x55\x48\x89\xe5"`；`text[m+1]==0x83 and text[m+2]==0xEC → text[m+3]` | **强**（`find` 仅作 fail-closed 定位器）|
+| A3 | `test_mw_task2.py:109-127,224,237-263` | main 区/jo 站点/慢路径块：`find(tail)`+站点数+目标严格递增+`dmax<=127` | 定位/结构**强**；**块首 2B 锚弱**（见 B6）|
+| A4 | `test_mw_task2.py:149-166`（E8 现 `:164`）| main 区指令流逐字节（零 diff）：`if a[i] != b[i]: return False`，但 `if a[i] == 0xE8: i = i + 5` | **弱**（E8 后 4B 盲窗 = **B1**）|
+| A5 | `test_mw_task2.py:289-320`（原 284-303）| 零 diff 腿基线缺失分支 | **原弱（静默 SKIP）⇒ 05:58 已改 fail-closed**（新增 `--allow-skip` `:188`；缺基线默认 `[FAIL]` `:315-318`）——**已修** |
+| A6 | `test_mw_task3.py:144` / `task4.py:275` / `task5.py:186` / `task6.py:176` | 产物 stdout：`if r.stdout != want:` | **强** |
+| A7 | `test_hit_table.py:465` | 注入表路径 ELF vs 旧路径 ELF：`chk(inj_b == old_b, …)` | **强**（全文件逐字节）|
+| A8 | `test_hit_table.py:1207`（注释）/`:1208`（`for eid, want in …`）**..`:1220`（判据行）**| 表数据派生 legacy 字节流（事件 1-4）：`chk(stream[:2] == want, …)`（**引文锚**；`test_hit_table.py` mtime 09-15 23:21 未变）| **弱-前缀**（**B2**）|
+| A9 | `test_hit_table.py:281` | `--dump-events` 文本：4 字面量黑名单 | **弱-子串**（**B3**）|
+| A10 | `test_hit_table.py:1424-1425` | dump 行数值 `hit rt: param_regs=966` / `save_regs=61448` | **实为强**（掩码漂移必改十进制前缀 ⇒ 无可达反例）|
+| A11 | `test_cir_warm_path.py:245-247,257,272,284,313,332` | 冷/暖 ELF：`out_cold.read_bytes() == out_warm.read_bytes()` | **强** |
+| A12 | `test_cir_warm_path.py:176-197`（`CONTRACT_TAGS` `:178`、`ccr_contract_equal` `:191`）| `.ccr` 段体冷/暖（7/8 段逐字节；STR 不在判据内）| **强**（STR 面见 B4）|
+| A13 | `test_ccr_v7.py:1847,1853,1869` | 段体 / STR 前缀 / hybrid≡cold | **强**（STR 仅前缀）|
+| A14 | `test_ccr_types.py:435,679,1340,1358,1360,1773` | 段体 / 整 `.ccr` / `.cir` 多组相等 | **强** |
+| A15 | `test_ccr_types.py:1777` | `--dump-tk-terms` stdout：**剔行后**比对 | **弱**（**B5**）|
+| A16 | `test_ccr_types.py:1799,1956` | `.cir` 条目版本位 `assert ver == 17` | **强**（有意的变更检测器；bump 同批须重锁）|
+| A17 | `test_backend_bootstrap.py:106` | corearch stage1/2/3 逐字节相等 | **强**（**未挂 CI**）|
+| A18 | `test_cache_identity.py:239-247`（+`:134-135`）| `.cir` 条目 + dump 身份字段 | **强** |
+| A19 | `src/ci/run.sh:159`（原 141）| 自举链 `cmp /tmp/corec2 /tmp/corec3` | **强**（仅 `full-bootstrap` job）|
+| A20 | `tools/baseline/rebuild.sh:50-64` | 冻结基线三二进制 sha vs 白名单 | **强**（锁基线身份，不锁被测产物）|
+| A21 | `tools/baseline/{parity,probes}_run.sh` · `warm_leg.sh` | **无字节断言**（rc + `error[XX]` 码集 + 日志 diff；命中证据 = `stat`）| 非字节级（登记：本腿不提供字节面证据）|
+| A22 | **`tools/baseline/canary_check.sh:160-190`（05:58 新增）** | ELF canary + `.ccr` 四条：逐条 `sha256sum` + `wc -c` 对 `canary_values.tsv`；F2 值表缺/多条目即红、F4 缺工具即红；牙 = `tests/harness/test_canary_carrier.py`（S2 同尺寸改内容⇒红 / S3 尺寸变⇒红 / S6 假期望⇒红）；`run.sh:137,142` 已挂 `selfhost-tests` | **强**（原结论「canary/四条无自动化载体」**已被本批闭环**）|
 
-## 2. 表 B：弱判据清单（逐条 = `file:line` + 弱因 + 最小坏实现 + 兜底）
+## 2. 表 B：弱判据 + 最小坏实现（6 条；危害序见 §4）
 
-| # | 判据 | 弱因 | 最小坏实现（能骗过它却真坏） | 兜底 |
+| # | 判据 | 弱因 | **最小坏实现**（能骗过它却真坏）| 兜底 |
 |---|---|---|---|---|
-| **B1** | `tests/selfhost/test_hit_table.py:1207-1219`【实核】| 事件 1-4 由 TOML 字段**重装**字节流后**只比前 2 字节**（`chk(stream[:2] == want, …)`）⇒ modrm/sib/disp 及其后字节**无判据** | 改 `core-x86.toml` 的 `modrm_reg_role`/`modrm_rm_role`（或给 opcode 尾加一字节）⇒ 前 2B 不变 ⇒ **全绿** | 运行期行为腿（若该套件跑产物）；`test_backend_bootstrap`（未挂 CI） |
-| **B2** | `tests/selfhost/test_mw_task2.py:242`【实核】| 慢路径块体**只有 2B 锚**（`text[t:t+2] != BLK_PREFIX`）+ 目标序单调 ⇒ **块体其余字节无判据** | 改块体长度/尾部字节（保持前缀与序）⇒ 锚仍命中 ⇒ 绿 | **有行为兜底**（该套件对照 oracle/运行）|
-| **B3** | `tests/selfhost/test_hit_table.py:284`【实核】| 未用哨兵字段检查 = **4 个字面量黑名单**（`dst=255`/`s2=255`/`dst=-1`/`s2=-1`）⇒ 其它伪影形态（别字段、别进制/别措辞）不覆盖 | 让哨兵以 `0xFFFFFFFF`/`-2`/带前缀形态出现 ⇒ 黑名单不命中 ⇒ 绿 | 无（文本面） |
-| **B4** | `tests/selfhost/test_cir_warm_path.py:172-175`【实核】| `.ccr` 段级契约对 **STR 段冷≠暖「预存豁免」**（只登记尺寸）⇒ STR 段的冷/暖差异**无判据** | 让暖态 STR 段多写/漏写一条（尺寸同步变化或同尺寸改内容）⇒ 不红 | 真产物（ELF）逐字节同 |
-| **B5** | `tests/selfhost/test_ccr_types.py:1760`【实核】| `--dump-tk-terms` 比对**剔行后**进行（剔除面未在判据内声明为「必须为空」）⇒ 剔除行内容漂移不红 | 让被剔行的内容发生实质变化（仍被剔）⇒ 不红 | 无 |
-| **B6+** | （**待原文**）| —— | —— | —— |
-| **A5（已修）** | seam 批三处 sd 助手（`instr.cr:474/489/501`）【实核：修复后注释在位】| **片段式 `find`**（两条独立片段）| 漏 `REX.B`：`rm=3` ⇒ `[rbx]` 野指针 | 当时**无**（运行期 139 才暴露）|
+| **B1** | `test_mw_task2.py:164`（E8 盲窗）| `if a[i] == 0xE8: i = i + 5` ⇒ 任一 `0xE8` 字节（disp8 = −24 极常见）之后 **4 字节永不比较** | 把恰落该窗内的立即数/位移常量改掉（帧常数低 4B 位于某 `0xE8` 之后）⇒ **绿**、退出码不变 | **无**（该腿是「untagged 快路径字节不变」唯一证据）；静默 SKIP 那半已修（A5），**未挂 CI** 仍成立（allowlist:31「参照物结构性不可得」）|
+| **B2** | `test_hit_table.py:1220`（`stream[:2]`）| 只比 REX+opcode 两字节；**整条指令面**（modrm/sib/disp 及其后）无字节证据 | 改 `src/arch/x86_64/core-x86.toml`：事件 1（sub）`modrm_reg_role` `"dst"→"src1"`，或 `modrm_rm_role` `"src2"→"dst"`，或 `opcode = [0x4D,0x29,0x90]` 尾加一字节 ⇒ **均绿**（walker 只校验角色名 ∈ 白名单 `:1020-1025` 与 opcode 1..3B）| **无**（同文件自注 `:344-346`：sub/nand 事件在现架构对真 IR **不可达** ⇒ 注入逐字节对照 A7 与运行闭环都碰不到事件 1-4）|
+| **B3** | `test_hit_table.py:281`（**引文锚**：`bad = [s for s in ("dst=255", "s2=255", "dst=-1", "s2=-1") if s in out]`；`:284` 为 `if bad:` 分支邻域）| 未用哨兵字段检查 = **4 字面量黑名单** | 未用字段写 `1` 或 `0xFE`(−2) ⇒ 不出现 `255/-1` 字面 ⇒ **绿** | 无（该字段无消费者 ⇒ 危害低）|
+| **B4** | `test_cir_warm_path.py:176-197` + `test_ccr_v7.py:1853` | STR 段冷/暖**显式豁免**（只登记尺寸）+ 前缀判据 | 冷态 `str_intern` 把某名字写坏（长度/顺序不变、该串**不进发射面**）⇒ 七段全等 + ELF 全字节等仍成立 ⇒ **绿** | **部分**（ELF 全字节等仅在串入发射面时咬）|
+| **B5** | `test_ccr_types.py:1777` | `--dump-tk-terms` stdout **剔行后**比对 | 多打印一行 `123\t…` 形态数据行 ⇒ 被 `stripped` 吃掉 ⇒ **绿** | 产物面有（`:1773` `dot_flag == dot_plain`）；stdout 面无 |
+| **B6** | `test_mw_task2.py:242` | 慢路径块**只有 2B 锚** `4D 19`（`sbb r11,r11`，**不含 ModRM**）| `4D 19` 后插 `90`，或 ModRM 换行为等价编码（块体字节全变）⇒ 锚命中、行为不变 ⇒ **绿** | **有行为兜底**（A6：t2–t6 的 16B stdout 覆盖全部被语料触发的溢出形态）；漏洞限「未触发形态的块体字节漂移」|
 
-## 3. 表 C：兜底网盘点（哪些面有行为级兜底 / 哪些没有）
+**判为「实为强」（不凑数，勿计为弱）**：`test_mw_task2.py:120-127` 尾声 `find(tail)`（2B needle，模板由 oracle 帧字节构造 ⇒ 误配只会截短 ⇒ jo 数低于 oracle ⇒ 红）· `test_hit_table.py:1424-1425`（十进制前缀必随掩码漂移）· `test_global_seams.py:230`（残余 = 全文件**存在性**：命中 ≠ 命中在真实站点，属该形态通用极限）。
 
-（**待 `criteria-strength-audit` 原文**；本代理已实核的兜底列于表 B「兜底」栏。）
+## 3. 表 C：兜底网盘点（05:58 后状态）
 
-## 4. 结构性发现：**最强的字节判据恰恰全部未挂 CI**
+| # | 兜底 | 覆盖不到 |
+|---|---|---|
+| C1 | ELF canary `95084e7b…d475`（> `tests/suite/ptr_arith.cr`）——**已改机器闸门**（canary_check.sh + canary_values.tsv + test_canary_carrier.py；run.sh:137,142）| 非 canary 语料（含全部新写测试点）|
+| C2 | `.ccr` 四条锁定值——**同上机器闸门**（值表 5 条；「环境归一化（空 HOME）」口径）| 非 pa/gt 语料。**⚠ 值表已换代**：旧代 G2 值（`fb4a3b59…`/`592afa31…`/`ddec1ce6…`/`cd2af565…`）**自本批起作废**，且揭示「锁定值跨机不可复现」效力范围（**TODO #82**）——**引用不得沿用旧代** |
+| C3 | `test_hit_table.py:465` 注入逐字节等（强）| 事件 1-4（不可达）；**未挂 CI**（allowlist:25）|
+| C4 | `test_backend_bootstrap.py:106` | 非 corearch 单元；**未挂 CI**（allowlist:19 自标「最高危」）|
+| C5 | `test_mw_task1..6` 的 ELF 字节判据（A2/A3/A6）| 未入语料形态；**全部未挂 CI**（allowlist:30-35）|
+| C6 | 冷/暖 ELF 全字节等（A11）+ `.ccr` 段级契约（A12/A13/A14）——**真跑**（run.sh:98,110）| 非同源二跑面（新测试点字节、跨编译器身份、单跑正确性）|
+| C7 | `cmp corec2/corec3`（A19，run.sh:159，强全文件）| **仅 `full-bootstrap` job**；`.github/workflows/core-ci.yml` 该层仅 `merge_group`（休眠）或手动 `workflow_dispatch` ⇒ **PR 层不跑** |
+| C8 | `rebuild.sh` 三 sha（A20）| 只锁**基线二进制**身份，不锁被测产物 |
+| C9 | `test_region_cfg.py` / `test_live_ranges.py`（dump/通道文本结构）| **未挂 CI**（allowlist:26,28）|
+| C10 | STR 段 | 冷/暖面显式豁免；仅 `test_ccr_v7:1853` 前缀 + ELF 全字节等间接覆盖 |
 
-- **事实（【实核】`tests/harness/ci_hook_allowlist.txt`）**：`test_backend_bootstrap.py` **未挂（最高危）**（`:19`）——**唯一**拦「清单双注册漂移 ⇒ project-mode `error[N06]` 静默」之门，且已致 P3a **33×N06 真实漏检**；`test_hit_table.py`（`:25`）、`test_mw_task1..6.py`（`:30-35`）同族**未挂**。
-- **成本估算（allowlist 原文，【实核】）**：`test_ent_kernel_neutrality.py`（`:23`）**低成本**（纯 python 静态 guard，无构建依赖）；`test_mw_task2.py`（`:31`）**中高且属口径换代**（零 diff 腿的基线须在改动前编译器上产 ⇒ CI 里参照物结构性不可得；要机器化须「基线入仓」取裁或改口径）；`test_backend_bootstrap.py` 挂点须**先实测时长**（构建面）。
-- **建议批序**：① 低成本静态 guard（ent_kernel 面）先挂；② `test_backend_bootstrap` 实测时长后挂（**N06 唯一门，最高危**）；③ mw_task 族 = 口径换代批（先裁基线入仓 vs 结构断言口径）。
+## 4. 总结行 · 危害序 · 结构性发现（含修正）
 
-## 5. 登记去向
+**总结行**：**弱判据 6 条（B1–B6）**；**完全无兜底 3 条**（B1 的 E8 盲窗半（静默 SKIP 半已修）· B2 · B3）；**危害前 3** = ① **B2 `test_hit_table.py:1220`**（事件 1-4 表驱动发射**零字节证据**）② **B1 `test_mw_task2.py:164`**（E8 后 4B 盲窗；零 diff 腿仍未挂 CI）③ **B6 `test_mw_task2.py:242`**（慢路径块体无字节判据，仅行为兜底）。**修正**：原「ELF canary 与 `.ccr` 四条锁定值无自动化载体」**已被 05:58 载体化批闭环**（C1/C2/A22）——以本版为准。
 
-- 表 B 除已修的 A5 外，逐条落 `TODO.md` **独立条目（#84 起）**：B1（`test_hit_table.py:1207`）· B2（`test_mw_task2.py:242`）· B3（`test_hit_table.py:284`）· B4（`test_ccr_types`/`test_cir_warm_path` STR 豁免）· B5（`--dump-tk-terms` 剔行）· B6+（待原文）。
-- **结构性发现**单列一条（挂点缺失 + 成本 + 批序）。
+**结构性发现（修正后）**：
+1. 「最强字节判据全未挂 CI」**修正为**：canary/`.ccr` 四条载体**已于 05:58 挂上** `selfhost-tests`；**仍未挂**的强字节判据 = `test_backend_bootstrap`（C4）· `test_mw_task1-6`（C5）· `test_hit_table`（C3）· `test_region_cfg`/`test_live_ranges`（C9）⇒ **「未挂」集合收了 2 条、仍余 5 类**。
+2. `test_backend_bootstrap` = N06 静默之门：**这是仓库自述**（run.sh:72、allowlist:19），审计**未独立复核实为「唯一」**；allowlist 自标「未挂（**最高危**）」+「挂点须先实测时长（构建面）」。
+3. **挂载成本/批序（建议，非实核；依据 = allowlist 自述）**：**低成本** = `test_ent_kernel_neutrality.py`（`:23` 纯 python 静态 guard）· `test_slice_bounds.py`（`:40` 无二进制依赖）⇒ **先挂**；**中成本** = `test_hit_table`（`:25`）· `test_region_cfg`（`:39`，与格式批同族 ⇒ **漏检面最大**）· `test_live_ranges`（`:28`）；**高成本/需先取裁** = `test_mw_task1-6`（`:31` 明写「中高，且属**口径换代**不是挂点扩容」）· `test_backend_bootstrap`（时长未测）· `test_lsp`（`:29` 进程级）。批序 = 低成本 → 中成本 →（取裁后）高成本。
+4. **机制性观察（非弱判据）**：A16 `assert ver == 17` 与 `cir_cache.cr:51 CIR_CACHE_VER = 17` 现一致；任何正当 bump 都会使其红——属**有意的变更检测器**，但须在 bump 同批**重锁**（照 canary_values 的「显式归因 + 重锁 + 旧值留痕」纪律）。
+
+**坐标漂移声明**：A1 `:228→:230`、A3/A4/A5 随 `test_mw_task2.py` 05:58 改动后移（E8 `:162→:164`、零 diff `:284-303→:289-320`）、A19 `run.sh:141→:159`；其余（`test_hit_table`/`test_cir_warm_path`/`test_ccr_types`/`test_ccr_v7`/`test_mw_task1`/`test_backend_bootstrap`/`rebuild.sh`）mtime = 09-15 23:21，坐标未动。
+
+## 5. 登记去向（`TODO.md`）
+
+**审计编号 ↔ TODO 条目映射**（**两套编号不可混用**）：B2→**#84** · B6→**#85** · B3→**#86** · B4→**#87** · B5→**#88** · **B1→#90** · 结构性发现→**#89**（#89 正文已按本版 §4 修正）。
