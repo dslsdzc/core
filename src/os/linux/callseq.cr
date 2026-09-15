@@ -70,7 +70,9 @@ fn cs_args_dispatch(buf: string, pos: int, cp: int, fa: int, ac: int) -> int {
         pt := irv_type(fa + ai);
         if pt == TI_DEX {
             if fr_cnt < 8 {
-                cp = cp + e2_sd_load_x(buf, pos+cp, g2_slot(fa + ai), fr_cnt);
+                // 全局行实参走 seam（e2_sd_ld_var）：单实参调用恒不打包（ir_gen need_pack），
+                // 全局实参可直达此处 ⇒ 修复前 e2_sd_load_x(g2_slot(全局)) 读帧外伪偏移。
+                cp = cp + e2_sd_ld_var(buf, pos+cp, fr_cnt, fa + ai);
                 fr_cnt = fr_cnt + 1;
             }
         } else {
@@ -123,7 +125,8 @@ fn cs_stack_args(buf: string, pos: int, cp: int, fa: int, ac: int) -> int {
         if stack_ai < 0 { break; }
         if cs_arg_on_stack(fa, stack_ai) > 0 {
             if irv_type(fa + stack_ai) == TI_DEX {
-                cp = cp + e2_sd_load_x(buf, pos+cp, g2_slot(fa + stack_ai), 0);
+                // 栈参 dex 装载同样走 seam（与寄存器支同规约）
+                cp = cp + e2_sd_ld_var(buf, pos+cp, 0, fa + stack_ai);
                 cp = cp + e2_push_xmm0(buf, pos+cp);
             } else {
                 cp = cp + e2_load_var(buf, pos+cp, 10, fa + stack_ai);
@@ -157,18 +160,25 @@ fn cs_stack_cleanup(buf: string, pos: int, cp: int, stack_count: int) -> int {
 // 返回新 cp。
 fn cs_ret_value(buf: string, pos: int, cp: int, s1: int) -> int {
     if s1 >= 0 {
-        if irv_type(s1) == TI_DEX {
+        if e2_is_glob(s1) != 0 {
+            // 全局支**自身按型分派**（裁-SEAM-4 修正修法：不是把 dex 判定前移——前移
+            // 会让全局 dex 返回走 rax，而 dex 返回约定在 **XMM0**）。零字节代价：
+            // 全局 dex 返回当前不可达（返回点已转 scaled ⇒ s1 恒临时），属次序不变量加固。
+            if irv_type(s1) == TI_DEX {
+                cp = cp + e2_sd_ld_var(buf, pos+cp, 0, s1);   // movsd xmm0, [rip 槽]
+            } else {
+                // Global: load via RIP-relative into rax
+                grow_rip_patch(g_x86_rip_patch_count + 1);
+                w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3);
+                w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1);
+                g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
+                cp = cp + e2_lr(buf, pos+cp, 0);       // lea r10, [rip+0]
+                // mov rax, [r10] — REX.WB + 0x8B
+                cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 10/8); e2_w8(buf, pos+cp, 139); cp = cp + 1; cp = cp + emit_modrm(buf, pos+cp, 0, 0, 10%8);
+            }
+        } else if irv_type(s1) == TI_DEX {
             // binary64 返回：movsd xmm0, [slot]（SysV 返回值在 XMM0，apx 快路径）
             cp = cp + e2_sd_load(buf, pos+cp, g2_slot(s1));
-        } else if r64(g_x86_is_global, s1 * 8) != 0 {
-            // Global: load via RIP-relative into rax
-            grow_rip_patch(g_x86_rip_patch_count + 1);
-            w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3);
-            w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1);
-            g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
-            cp = cp + e2_lr(buf, pos+cp, 0);       // lea r10, [rip+0]
-            // mov rax, [r10] — REX.WB + 0x8B
-        cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 10/8); e2_w8(buf, pos+cp, 139); cp = cp + 1; cp = cp + emit_modrm(buf, pos+cp, 0, 0, 10%8);
         } else {
             cp = cp + e2_ld(buf, pos+cp, 0, g2_slot(s1));
             // int 多字 M1（Task 4）tag 读路径 A：return 的 tagged 局部值
