@@ -282,10 +282,12 @@
 - **`src/compiler/elf.cr`**：`check` 扫描 rc=0 但 **2 个 parse error、decisions=0**——陈旧遗留文件（死文件本体的登记见 #7；本条补充**语料卫生**事实：批量 check 脚本须排除它，否则 parse error 混入语料日志）。**`src/compiler/linker.cr` 为 0 字节空文件**（同类：批扫时排除或删除）。
 - **实证**：findings §8 末「其他已登记项」；语料日志 `/tmp/r2p1t3/all_tiers2.txt`。
 
-### 23. harness 缺口：`.claude/hooks/block-git.py` 只拦「以 git 开头」→ 复合/管道命令可绕过（2026-09-11 R2 P1 Task 3 评审发现——**只登记，本轮不改 harness**）
-- **现象**：钩子仅判 `stripped == "git"` 或 `stripped.startswith("git ")`（`.claude/hooks/block-git.py:10-11`）——`cd x && git status`、`echo hi; git log`、`(git status)`、`sudo git ...` 等**复合/包装形态全部放行**；铁律 #2 的「机械拦截」有洞。
-- **影响**：非恶意误用（多 agent 并行时的习惯性复合命令）即可能绕过禁 git 约束；本轮工作副本已出现一次只读 `git diff --numstat` 违例（Task 3 自陈 D7，无写操作）。
-- **修复方向（建议单开）**：按 shell 分隔符（`;` `&&` `||` `|` `(` 换行等）分词后做**词边界**匹配，命中 `git` 词即拒（注意放行 `jj git push` 等 jj 子命令形态与 `gitignore` 类词元）；并补负控用例（复合形态必拒、`jj git` 必放）。
+### 23. ~~harness 缺口：`.claude/hooks/block-git.py` 只拦「以 git 开头」→ 复合/管道命令可绕过~~（2026-09-11 登记）——**✅ 2026-09-16 修复**
+- **现象（原）**：钩子仅判 `stripped == "git"` 或 `stripped.startswith("git ")`（`.claude/hooks/block-git.py:10-11`）——`cd x && git status`、`echo hi; git log`、`(git status)`、`sudo git ...` 等**复合/包装形态全部放行**；铁律 #2 的「机械拦截」有洞。
+- **影响**：非恶意误用（多 agent 并行时的习惯性复合命令）即可能绕过禁 git 约束；2026-09-11 工作副本曾出现一次只读 `git diff --numstat` 违例（Task 3 自陈 D7，无写操作）。
+- **修复（2026-09-16 已实施，按原登记方向）**：改为**词边界扫描** —— 先按 shell 分隔符（`;` `&&` `||` `|` `&` `(` `)` 换行 反引号 `$(`）切段；每段 `shlex` 分词后**跳过前导**（环境赋值 / 前缀命令 sudo·doas·env·nice·nohup·time·exec·command·xargs·timeout·stdbuf·setsid·ionice·cpulimit·parallel·watch / shell 名 / 旗标 / 纯数字），再看**首个命令词**是否为 `git`（含 `/usr/bin/git`、`git.exe` 形态）；另**递归扫描** `bash -c '…'` / `sh -c "…"` 内联脚本（深度 ≤ 3）。**放行面**：`jj git push`（git 非命令词）· `echo git` · `grep -n git` · `find . -name .gitignore` · 引号内非命令位。
+- **判据**：`tests/harness/test_block_git.py`，**30 例**（BLOCK 19：裸 / 带路径 / `&&` / `;` / `|` / `||` / `&` / 子壳 / `$()` / 反引号 / `bash -c` / `sh -c` / sudo / nice / env / xargs / timeout / 嵌套；ALLOW 11）⇒ 实测 **30/30**；已挂 CI **`bootstrap-tests`** job（`src/ci/run.sh` 一行，纯 python 无需编译器）。
+- **失败模式（有意）**：hook 自身异常**一律放行**（exit 0）—— 宁可漏拦，不可把会话卡死。
 
 ### 24. R2 P2a 落地（2026-09-11——落点 / 未覆盖面登记 / P5 继承项，非缺陷）
 - **落点**：`src/compiler/checker.cr`（`alloc_named_type` + 去重侧表 / `array_len_constraint_ok` / `type_compat_strict`+`diag_type_incompatible` / `type_equal_engine`+`type_equal_legacy` 拆分）、`src/compiler/ty_shadow.cr`（对照物切 legacy + `replace_*` 计数）、`src/compiler/globals.cr`（`g_named_dedup*` / `g_replace_*`）、`src/compiler/main.cr`（`--verify-named-dedup`）、`src/compiler/type_selftest.cr`（f1./f2./t3.* 用例）、`tests/selfhost/test_named_dedup.py`（新增）。计划 = `docs/superpowers/plans/2026-09-10-r2-p2-replace.md`；报告三份 = `.superpowers/sdd/r2p2-task-{1,2,3}-report.md` + 收官报告。提交链 `3c8402e8`+`8c9d773f`（F1）→ `b36d8e76`+`507daf7a`（F2）→ `10718ba8`（判定替换）→ 收官（本条目所在提交）。

@@ -63,6 +63,8 @@ case "$CI_JOB_NAME" in
     python3 tests/bootstrap/test_pipeline.py
     python3 tests/bootstrap/test_borrow.py
     python3 tests/bootstrap/test_generics.py
+    # TODO #23：铁律 #2 机械执行钩子的加固判据（BLOCK 19 + ALLOW 11；纯 python，无需编译器）
+    python3 tests/harness/test_block_git.py
     ;;
 
   selfhost-tests)
