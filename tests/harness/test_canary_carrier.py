@@ -141,7 +141,12 @@ def main() -> int:
             skipped.append("C 真产物篡改腿 [SKIP]：build/corec 不存在（本地未构建；"
                            "CI selfhost-tests 首行 build_selfhost ⇒ 该腿必跑）")
     else:
-        if not (os.path.isdir(ARTIFACT_DIR) and os.path.exists(os.path.join(ARTIFACT_DIR, "pa.ccr"))):
+        # 复用条件：采集目录存在 **且比 build/corec 新**——否则是上一代二进制留下的陈货，
+        # 拿它做牙 = 假绿（CI 里 run.sh 先跑载体 ⇒ 恒新鲜，本守卫只防本地/乱序）。
+        fresh = (os.path.isdir(ARTIFACT_DIR)
+                 and os.path.exists(os.path.join(ARTIFACT_DIR, "pa.ccr"))
+                 and os.path.getmtime(ARTIFACT_DIR) >= os.path.getmtime(COREC))
+        if not fresh:
             rc = run(["bash", CARRIER]).returncode
             if rc != 0:
                 fails.append(f"C 采集（载体默认模式）rc={rc}——真判据未过 ⇒ 见上方载体输出")

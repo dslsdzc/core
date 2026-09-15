@@ -242,6 +242,8 @@ bash tools/baseline/canary_check.sh --selftest             # 合成夹具自证�
 | E7 | 同上（挂点后） | **rc=0**：A1/A2/A3/B 全 PASS；C 显式 `[SKIP]`（该骨架无编译器） | 实测（临时树骨架） |
 | E8 | `python3 tests/harness/test_ci_hook_coverage.py` | **rc=0 · scope=65 hooked=38 unhooked(allowlisted)=27**（差集不变；新测试已挂 ⇒ 不进白名单） | 实测（纯 python） |
 | E9 | `tests/selfhost/test_mw_task2.py --help` | 新 `--allow-skip` 旗标就位 | 实测（argparse 即退，不跑用例） |
+| E10 | **采集路径端到端**：桩编译器（回应同形状 CLI、用 `/tmp/capt6` 真产物作响应）驱动 `canary_check.sh` 默认模式 | **rc=0 · 采集 + 校验全绿 5/5** ⇒ 参数构造 / 逐条 `clean-cache` / 次序（canary 先落 `pa.ccr`、`ccr` 步覆盖之）/ `-o X ⇒ X.ccr` 派生 **全部经真代码路径验证**（仅「编译」一环由桩替代） | 实测（无编译） |
+| E11 | 牙的**新鲜度守卫**（E10 暴露的假绿面）：采集目录存在但**比 `build/corec` 旧**（= 上一代二进制的陈货）⇒ 不得复用，须重采 | 已实现（`test_canary_carrier.py` C 层 mtime 判据）；CI 中 `run.sh` 先跑载体 ⇒ 恒新鲜，该守卫只防本地/乱序 | 实测（代码路径 + 骨架复跑） |
 
 **待实测（等构建槽开放）**：载体默认模式（真采集 5/5）· `test_mw_task2.py` 无基线时 rc=1
 （与 `--allow-skip` 时 rc=0）· 五 CI job · 全枚举 · §8 的零足迹项 · **§2.1 挂点成本实测时长回填**。
