@@ -313,9 +313,18 @@ case "$MODE" in
     exit $?
     ;;
   collect)
-    if [ ! -x "$COREC_BIN" ] && [ ! -f "$COREC_BIN" ]; then
+    if [ ! -f "$COREC_BIN" ]; then
       echo "[FAIL] F4 编译器二进制不存在：$COREC_BIN"
       echo "       前置：nice -n 19 python3 build_selfhost_native.py（本脚本**不自建**）"
+      exit 1
+    fi
+    if [ ! -x "$COREC_BIN" ]; then
+      echo "[FAIL] F4 编译器不可执行：$COREC_BIN（rc=126 会被 F1 抓到，此处给更早的诊断）"
+      exit 1
+    fi
+    if [ ! -f "$(dirname "$COREC_BIN")/corearch" ]; then
+      echo "[FAIL] F4 同目录缺 corearch：$(dirname "$COREC_BIN")/corearch"
+      echo "       （build 路径按 src/compiler/main.cr:713-721 用 get_arg(0) 目录拼 corearch）"
       exit 1
     fi
     if [ "${CANARY_NO_NICE:-0}" = "1" ]; then CMD=("$COREC_BIN"); else CMD=(nice -n 19 "$COREC_BIN"); fi
