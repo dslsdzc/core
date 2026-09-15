@@ -47,6 +47,6 @@
 ## 档案与工具链目录(不参与受众分类)
 
 - archive/(任务产物):[compcert-reference.md](archive/compcert-reference.md)、[compcert-round4-findings.md](archive/compcert-round4-findings.md)、[numeric-migration-inventory.md](archive/numeric-migration-inventory.md)、[memory-model-capability-lattice.md](archive/memory-model-capability-lattice.md)
-- [pseudocode/](pseudocode/README.md)(TDD 交付物)、[superpowers/](superpowers/)(specs + plans 工作目录)
+- [pseudocode/](pseudocode/README.md)(TDD 交付物)、[superpowers/](superpowers/)(specs + plans 工作目录；2026-09-16 新增:[compile-time-theorems](superpowers/specs/2026-09-16-compile-time-theorems.md)、[verification-slice](superpowers/plans/2026-09-16-verification-slice.md)、[preexisting-bug-ledger](superpowers/specs/2026-09-16-preexisting-bug-ledger.md))
 - [ir-schema/](ir-schema/):[coreir-schema.md](ir-schema/coreir-schema.md)、[corespecir-schema.md](ir-schema/corespecir-schema.md)
 - [verifier/](verifier/):[kernel-spec.md](verifier/kernel-spec.md);[coq/](coq/README.md):Coq 验证 stdlib 纯函数
