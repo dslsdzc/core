@@ -214,7 +214,11 @@ bash tools/baseline/canary_check.sh --selftest             # 合成夹具自证�
 （且 `build` 路径要 corearch 同目录），而 `selfhost-tests` 首行即 `build_selfhost`
 （`src/ci/run.sh:78`）。`bootstrap-tests` 不构建编译器。**成本 = 1 档 canary ELF + 4 次 `.ccr`
 （2 语料 × 2 口径），语料 240B / 2.5KB，均为秒级；`--selftest` 与机械腿毫秒级。**
-（**待实测（等构建槽）**：实测时长须回填本节。）
+
+> **成本实测（2026-09-16，构建槽静默期实跑）**：载体独立 **1.04s**（5 条采集 + 校验全含）；
+> 牙独立 **2.24s**（其中 C 层复用载体刚落盘的 `build/canary_artifacts/` ⇒ **零额外编译**）；
+> 在 `CI_JOB_NAME=selfhost-tests` 内合计给该 job 增约 **3.3s**（该 job 全程 **78s**）。
+> ⇒ 本闸门对 PR 层 CI 的边际成本 ≈ **3 秒/次**，与「秒级」预估一致。
 
 ---
 
@@ -309,8 +313,22 @@ bash tools/baseline/canary_check.sh --selftest             # 合成夹具自证�
 | E12 | **T0 追加项结案**：两套 `.ccr` 四值 = (甲)「同口径不同时代」（旧 v8 `fb4a3b59…`/`592afa31…`/`ddec1ce6…`/`cd2af565…` ↔ 新 v9 = 本表），**非漂移** | 出处逐条挖到 `file:line`（P4 附录 D-1 表 · `TODO.md:474`/`:521`/`:376` ↔ `p6-task3-report.md:62` 的「原 …」括注 + `delta = 4B × 节点数`）；143B 根因 = `--static` 前置 `rt.cr`（`main.cr:433-437`，P4 D-1 已查明）；canary 28822B = **ELF 文件大小**（`\177ELF` + `-rwxr-xr-x`，实核） | 实测（文档/产物取证，零编译） |
 | E13 | 判据契约改写后全层复跑：值表头重写（两级契约 + 冷态-only + 两代关系） | `--selftest` 6/6 · 两套真产物 `--verify-only` 各 5/5 · 骨架 harness PASS | 实测（零编译） |
 
-**待实测（等构建槽开放）**：载体默认模式（真采集 5/5）· `test_mw_task2.py` 无基线时 rc=1
-（与 `--allow-skip` 时 rc=0）· 五 CI job · 全枚举 · §8 的零足迹项 · **§2.1 挂点成本实测时长回填**。
-
 **E4/E5 的意义**：不只证明「比的是 sha 而非只比尺寸」，还证明**红是可诊断的**（指名产物 +
 期望 vs 实际）——「闸门变红但没人看得懂」同样是判据失效形态。
+
+### 9.1 构建槽开放后的真跑（2026-09-16 04:49 起；串行闸门 = 等待 `plan-reffix` 的
+parity/probes/warm 链静默后才开工，未与其并行）
+
+| # | 项 | 结果 | 性质 |
+|---|---|---|---|
+| **E15** | **载体默认模式（真采集）** `bash tools/baseline/canary_check.sh` | **rc=0 · 5/5 PASS · 1.04s**；五条与值表**逐条 IDENTICAL**（canary `95084e7b…d475` 28822B · pa 96015 `680a6f98…` / 96158 `76f36e6a…` · gt 142793 `41e9d845…` / 142936 `704316c8…`）⇒ **四条 `.ccr` 预期 IDENTICAL 已被实测确认**（#8/#25 修复对本两语料构造性不可达，判断成立） | **实测（真编译）** |
+| **E16** | 牙的 C 层真跑 `test_canary_carrier.py --require-compiler` | 首跑 **rc=1** —— C 层抓到**本测试自身的断言字面量 bug**（见 E17）；修复后 **rc=0 · 7/7 · 2.24s**（含「真产物翻一字节 ⇒ 必红且指名 pa_ccr」+「缺产物 ⇒ 必红」） | **实测（真编译）** |
+| **E17** | 上述 bug 的性质与修复 | 载体渲染的是「期望**(expected)=** … 实际**(actual)=**」——`expected` 与 `=` 之间**隔着 `)`**，而断言写成 `expected=` ⇒ **恒不命中 ⇒ 恒假红**。修 = 断言改 `(expected)=` / `(actual)=`（`--selftest` 的 S2/S6 用 **grep 正则**、模式里本就含 `(expected)=` ⇒ 一直是对的，故 B 层没抓到、**C 层抓到了**）。**这正是「牙」的价值：它抓的是闸门/断言自身，不是产物。** | 实测（真编译） |
+| **E18** | **CI 挂点端到端** `CI_JOB_NAME=selfhost-tests bash src/ci/run.sh` | **rc=0 · 78s**；日志内**确凿出现**载体 5/5 与牙 7/7（`[canary] PASS 5/5` + `[canary-carrier] PASS — pass=7 skip=0`）⇒ 挂点**真接线**，非「注释里自称已挂」 | 实测（真编译） |
+| **E19** | 五 CI job（**逐条标实测/在跑**） | `bootstrap-tests` **rc=0**（含 hook-coverage：scope=65 hooked=38 unhooked=27 · BLOCK 20/ALLOW 16 = 36/36）· `check` **rc=0 · 30s** · `suite` **rc=0 · 19s** · `selfhost-tests` **rc=0 · 78s** —— 四条**已实测**；`full-bootstrap` = **在跑（>600s）** | 部分实测 |
+| **E20** | `full-bootstrap`（自举链） | **待实测（正在跑；完成后回填 rc / 时长 / N06 / `corec2==corec3` / 冒烟 42 / `--help`）** | 待回填 |
+| **E21** | **T3 自证（A5 修复的 fail-closed）**——在**隔离树**跑（`/tmp/mw_nobase`：仅 `build/corec`/`corearch` 软链，无 `mw_task2_zdiff` 基线），**零风险于共享 build/** | 默认口径 **rc=1 · 9 条 `[FAIL] … zero-diff baseline missing … 默认 fail-closed`**（改前同情形 = `[SKIP]` 且 rc=0）· `--allow-skip` ⇒ **rc=0** + 显式 `[SKIP]`（带补救命令）· 有基线树内 ⇒ **ALL PASS rc=0** | 实测（真编译） |
+| **E22** | 全枚举（套件全集 = `tests/selfhost/test_*.py` + `tests/bootstrap/test_*.py`） | **待实测（等 `full-bootstrap` 结束、槽位释放后跑；回填 N/N）** | 待回填 |
+
+**零足迹结论（实测）**：本批只新增 3 文件 + 改注释/挂点，**零 `.cr` 源码改动** ⇒
+canary 与四条 `.ccr` **逐条 IDENTICAL**（E15）——构造性论证与实测一致。
