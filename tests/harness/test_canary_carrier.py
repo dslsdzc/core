@@ -170,7 +170,11 @@ def main() -> int:
                     if r2.returncode == 0:
                         fails.append("C 篡改 pa.ccr 一字节后 --verify-only **仍绿** —— "
                                      "闸门无牙（值不符未变红）")
-                    elif "pa_ccr" not in out2 or "expected=" not in out2 or "actual=" not in out2:
+                    # 注意：载体渲染的是「期望(expected)= … 实际(actual)= …」——`expected` 与 `=`
+                    # 之间**隔着 `)`**，故断言的实参必须是 `(expected)=`（写过 `expected=` 会恒不命中 ⇒
+                    # 本断言恒假红；2026-09-16 C 层实跑抓到，见计划 §9 E14）。
+                    elif ("pa_ccr" not in out2 or "(expected)=" not in out2
+                          or "(actual)=" not in out2):
                         fails.append("C 篡改后虽红但未指名产物/未打印「期望 vs 实际」——"
                                      "红不可诊断；输出尾部：\n"
                                      + "\n".join("    " + ln for ln in out2.splitlines()[-5:]))
