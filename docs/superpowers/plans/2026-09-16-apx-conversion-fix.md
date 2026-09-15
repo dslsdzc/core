@@ -505,7 +505,9 @@ T1 执行期间**共享默认工作副本被并发操作移走**（`jj op log` �
    | `pa_static_ccr` | `pa.st.bin.ccr` | `76f36e6a6b6eb2f18fa5541550d09e5e73bb0e8dfc7df2ebbe3d747c382f329c` | 96158 |
    | `gt_ccr` | `gt.ccr` | `d92a2727d0c51aa887d7053305a26bdf85451303e08d268898cf1de76bae2c95` | 142765 |
    | `gt_static_ccr` | `gt.st.bin.ccr` | `a1f7b99c68c7d433834593100a776b74f883de291482f20762fe7399ec5182ea` | 142908 |
-   **本批预判 = 四条全 IDENTICAL**（实读依据：`tests/suite/ptr_arith.cr` 与 `tests/suite/generics_test.cr` **零 `dex`/`apx` 命中** ⇒ 漏斗恒早退、环不触发）。**若变且归因不出 ⇒ 红**（两级纪律：值变须「显式归因 + 同批重锁 + 旧值留痕」）。
+   **⚠ canary 正交性（T3 突变实测，**必读**）**：本批突变双向实验证明——**把 apx 面改坏两次，canary + `.ccr` 四条在两种突变下全部 IDENTICAL**（同期 apx 探针组全部转红）⇒ **canary 绿 ⇒ 不能推出 apx 面正确**。canary 的覆盖域 = `ptr_arith` / `generics_test` **两语料面**；对 apx/dex 面与一切未入该两语料的形态**零覆盖**。**跨面回归必须由该面的判据承担**（本批 = 探针套件 `test_apx_conversion.py`），不得以「canary 还绿着」代替。详见 `2026-09-16-criteria-strength-audit.md` §0ter。
+
+**本批预判 = 四条全 IDENTICAL**（实读依据：`tests/suite/ptr_arith.cr` 与 `tests/suite/generics_test.cr` **零 `dex`/`apx` 命中** ⇒ 漏斗恒早退、环不触发）。**若变且归因不出 ⇒ 红**（两级纪律：值变须「显式归因 + 同批重锁 + 旧值留痕」）。
 3. **腿① 冻结基线同源对拍 73 档**（`tools/baseline/parity_run.sh`；本批若新增 suite 语料 ⇒ **74**，须显式更新计数）。
 4. **行为探针 29 档**（`tools/baseline/probes_run.sh`）。
 5. **枚举 62/62**（口径 = 上批台账计数；**真源 = 当批实测重算**，见 U7）。
