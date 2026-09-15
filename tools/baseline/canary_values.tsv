@@ -4,22 +4,58 @@
 # 格式：<name><TAB><artifact><TAB><sha256><TAB><size>
 #   artifact = 相对**采集目录**的产物路径（采集目录默认 build/canary_artifacts/）
 # 口径（D28 继承）：一律**冷态**——每条编译前 `clean-cache`（= `rm -rf .core/cache/cir/`，
-#   相对 cwd ⇒ 闸门必须 cd 仓库根；src/compiler/main.cr:408-414）；
-#   cwd = 仓库根；源路径以 `tests/suite/...` 相对形给出；不传 -O（用默认档）。
+#   相对 cwd；src/compiler/main.cr:408-414 实读）；cwd = 仓库根；源路径以 `tests/suite/...`
+#   相对形给出；不传 -O（用默认档）。
 #
 # 配方出处（**可执行原文**，逐条实读）：
 #   ELF canary : /tmp/capt1/t1b_criteria.sh:34-38
 #                （$CC clean-cache → $CC build tests/suite/ptr_arith.cr --static -o "$O/pa"）
 #   .ccr 四条  : /tmp/capt1/t1b_criteria.sh:41-53 + 表原文 .superpowers/sdd/cap-task1-report.md:82
 #                （`ccr F -o O` / `build F -o O --static`，各 clean-cache；static 取 O.ccr）
-# 值来源：.superpowers/sdd/p6-task3-report.md:62（P6 T3 重锁）+ .superpowers/sdd/p6-task4-report.md:81（T4 复验）
+#   语料 A     : tests/suite/ptr_arith.cr（240B）
+#   语料 B     : **tests/suite/generics_test.cr**（2593B，本实例 stat 实核；全仓唯一同名档）。
+#                口径① 无额外参数；口径② 需 `--static`（其 .ccr = `-o O` 派生的 `O.ccr`）。
+#   值来源     : .superpowers/sdd/p6-task3-report.md:62（P6 T3 **重锁**）+ p6-task4-report.md:81（T4 复验）
+#
+# 两口径差恒 143B 的**根因**（P4 附录 D-1 查明；本批段表解码复核尺寸面）：
+#   `--static` 在 src/compiler/main.cr:433-437 前置 `rt.cr`（so `*` functions inline）
+#   ⇒ 4 全局 + 1 串进 `.ccr` = **+143B**（本批解码：STR +79B / SYM +64B，其余六段尺寸相同）。
+#
+# ── 两套历史值的关系：**不是漂移，是「同口径不同时代」**（T0 追加项结案）──
+#   旧（v8 格式 / NOD 36B；P4/P5 期记录）：ptr_arith 90823B `fb4a3b59…` / 90966B `592afa31…`
+#                                        generics_test 134701B `cafb4278…` / 134844B `ec8413ec…`
+#        出处：docs/superpowers/plans/2026-09-12-r2-p4-carrier.md 附录 D-1（D-1 表）+ TODO.md:474/:521
+#   新（v9 格式 / NOD 40B；P6 T3 起 = **本表**）：见下方四条
+#        出处：.superpowers/sdd/p6-task3-report.md:62——逐条带「原 …」括注 + **显式 delta 归因**
+#              （`delta = 4B × 节点数`：pa +5192 = 4×1298；gt +7452 = 4×1863）
+#   ⇒ 审计表 C 引的旧四值 = **P4/P5 时代记录值**（v8），非与本表冲突。
+#
+# ── 判据契约：**两级**（**不得**写成「永远不该变」，也不得写成「随便变」）──
+#   canary ELF = **发射面零泄漏检测器**：不应变；**变 = 越界 ⇒ 停下上报**
+#                （除非维护者显式声明发射面变更并同批重锁）。
+#   .ccr 四条  = **格式+内容形状检测器**：**值变 ≠ 必然回归**——可能是正当的格式/版式演进
+#                （P6 T3：v8→v9 / NOD 36→40B）或内容面演进（P4 T3：STR +16 串/+156B ·
+#                TYPE 段 +360~400B；P4 T5：「用户程序零扰动」= 预期不变的那一侧）；
+#                **但必须「显式归因 + 同批重锁 + 旧值留痕」**。**无归因的变化 = 红**。
+#   本闸门存在的意义不是禁止变化，而是**禁止无声变化**——上述两例都是「有归因的重锁」。
+#
+# 冷态-only（**不得「补全」成冷暖双锁**——三条理由）：
+#   ① 一切记录值都是冷态（cap-task1-report.md:82 明标「冷态」）⇒ 本载体复现的就是记录口径。
+#   ② P4 附录 D-1 明载：**非可选程序的冷≠热是预存面**（pre-P4 二进制同病 89086/88954）并被
+#      **豁免**（TODO #5 末条家族）⇒ 锁暖态 = 把「已登记豁免的已知分歧面」变成红闸门。
+#   ③ 暖态在本两档上**零区分力**：T1 表 B 8c 实测四条冷=暖（cap-task1-report.md:84）；
+#      `generics_test` 更是**构造性**的——含泛型 ⇒ `main.cr:480-486`（`:484` 置 0）
+#      `cache_enabled = 0` ⇒ 冷≡暖按构造。且暖态面**另有专属机器闸门**（tests/selfhost/test_warm_cache_gate.py
+#      已挂 CI + tools/baseline/warm_leg.sh 手工广度腿）⇒ 此处不锁 ≠ 无人守。
+#   ⚠ 若将来本两档出现冷≠热：**冷锁仍成立**（冷是记录口径）；暖侧分歧归暖态闸门抓，不并到这里。
+#
 # 复现性实测：三处独立采集体逐条同值（/tmp/capt1 2026-09-14 · /tmp/fct3 2026-09-15 ·
 #   /tmp/capt6 2026-09-16；输出目录各不相同 ⇒ **与输出路径无关** ⇒ CI 任意临时目录可复现）。
 #
-# 换代纪律（**不得**因跑出来不符就改本表）：
-#   本表 = 判据面**显式声明**变更时才换代（同批记旧值 + 新值 + 理由 + 出处提交；旧值留痕）；
-#   不符时的唯一正确动作 = **停下上报**（是回归就修回归，是越界就取裁）。
-#   详见 docs/superpowers/plans/2026-09-16-criteria-carrier.md §6。
+# 换代纪律（**不得**因跑出来不符就改本表对齐）：
+#   ① 值变化先**归因**（格式/版式？内容面？发射面？）——归因不出 = 按回归处理，停下上报；
+#   ② 归因成立才换代：同批记「旧值 + 新值 + 归因 + 出处提交」，旧值留痕（本文件头注即留痕面）；
+#   ③ 「停下上报」是默认动作。详见 docs/superpowers/plans/2026-09-16-criteria-carrier.md §6。
 
 canary_elf	pa	95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475	28822
 pa_ccr	pa.ccr	680a6f9843747b521213c3bcca1cf8724657943410f182e97ed63dcc11c7cd7a	96015

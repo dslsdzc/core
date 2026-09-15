@@ -21,12 +21,22 @@
 #                         生效时会打印显式告警行（不得在 CI 静默改指向）
 #   CANARY_NO_NICE=1      免 nice（默认 nice -n 19，遵 CLAUDE.md 铁律 6）
 #
-# 配方（口径 = 冷态；出处逐条实读）:
+# 配方（口径 = **冷态**；出处逐条实读）:
 #   ELF canary : clean-cache → build tests/suite/ptr_arith.cr --static -o <D>/pa
-#                （/tmp/capt1/t1b_criteria.sh:34-38；值 = 95084e7b…d475 · 28822B）
+#                （/tmp/capt1/t1b_criteria.sh:34-38；值 = 95084e7b…d475 · **28822B = ELF 文件大小**，
+#                  `stat -c %s` 于 `\177ELF` 魔数的可执行产物上，本实例实核）
 #   .ccr 四条  : 每条 clean-cache 前置 ——「ccr F -o O」与「build F -o O --static」（取 O.ccr）
 #                （/tmp/capt1/t1b_criteria.sh:41-53 + .superpowers/sdd/cap-task1-report.md:82）
-#   值/口径/复现性/换代纪律 = tools/baseline/canary_values.tsv 头注与
+#                语料 A = tests/suite/ptr_arith.cr · 语料 B = tests/suite/generics_test.cr
+#                两口径差恒 **143B**，根因 = `--static` 前置 rt.cr（main.cr:433-437）⇒ 4 全局 + 1 串入段。
+#   **判据契约是两级的**（勿写成「永远不该变」，也勿写成「随便变」）：
+#     canary ELF = 发射面零泄漏检测器（变 = 越界 ⇒ 停下上报）；
+#     .ccr 四条  = 格式+内容形状检测器（**值变 ≠ 必然回归**，但**必须显式归因 + 同批重锁 + 旧值留痕**；
+#                  无归因的变化 = 红）。**本闸门禁止的不是变化，是无声变化。**
+#   **只锁冷态**（不得「补全」成冷暖双锁）——三条理由（记录值即冷态 / 非可选程序冷≠热是
+#     P4 已豁免的预存面 / 暖态在本两档零区分力且另有专属闸门）。
+#   以上两条的完整论证 + 两套历史值的关系（旧 v8 四值 `fb4a3b59…` 等 = 同口径不同时代，
+#   非漂移）逐条见 tools/baseline/canary_values.tsv 头注与
 #   docs/superpowers/plans/2026-09-16-criteria-carrier.md §1/§6。
 #
 # fail-closed 四条（逐条对应一个已知静默形态）:
