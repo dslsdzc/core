@@ -1,0 +1,28 @@
+# 判据锁定值表（**单一真源**）——ELF canary + `.ccr` 四条
+#
+# 消费者：tools/baseline/canary_check.sh（闸门本体）· tests/harness/test_canary_carrier.py（牙）
+# 格式：<name><TAB><artifact><TAB><sha256><TAB><size>
+#   artifact = 相对**采集目录**的产物路径（采集目录默认 build/canary_artifacts/）
+# 口径（D28 继承）：一律**冷态**——每条编译前 `clean-cache`（= `rm -rf .core/cache/cir/`，
+#   相对 cwd ⇒ 闸门必须 cd 仓库根；src/compiler/main.cr:408-414）；
+#   cwd = 仓库根；源路径以 `tests/suite/...` 相对形给出；不传 -O（用默认档）。
+#
+# 配方出处（**可执行原文**，逐条实读）：
+#   ELF canary : /tmp/capt1/t1b_criteria.sh:34-38
+#                （$CC clean-cache → $CC build tests/suite/ptr_arith.cr --static -o "$O/pa"）
+#   .ccr 四条  : /tmp/capt1/t1b_criteria.sh:41-53 + 表原文 .superpowers/sdd/cap-task1-report.md:82
+#                （`ccr F -o O` / `build F -o O --static`，各 clean-cache；static 取 O.ccr）
+# 值来源：.superpowers/sdd/p6-task3-report.md:62（P6 T3 重锁）+ .superpowers/sdd/p6-task4-report.md:81（T4 复验）
+# 复现性实测：三处独立采集体逐条同值（/tmp/capt1 2026-09-14 · /tmp/fct3 2026-09-15 ·
+#   /tmp/capt6 2026-09-16；输出目录各不相同 ⇒ **与输出路径无关** ⇒ CI 任意临时目录可复现）。
+#
+# 换代纪律（**不得**因跑出来不符就改本表）：
+#   本表 = 判据面**显式声明**变更时才换代（同批记旧值 + 新值 + 理由 + 出处提交；旧值留痕）；
+#   不符时的唯一正确动作 = **停下上报**（是回归就修回归，是越界就取裁）。
+#   详见 docs/superpowers/plans/2026-09-16-criteria-carrier.md §6。
+
+canary_elf	pa	95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475	28822
+pa_ccr	pa.ccr	680a6f9843747b521213c3bcca1cf8724657943410f182e97ed63dcc11c7cd7a	96015
+pa_static_ccr	pa_st.bin.ccr	76f36e6a6b6eb2f18fa5541550d09e5e73bb0e8dfc7df2ebbe3d747c382f329c	96158
+gt_ccr	gt.ccr	41e9d84578ce2ca41934373ec0f96a2ec53e04422509147e05324b122e9f77eb	142793
+gt_static_ccr	gt_st.bin.ccr	704316c81aecd6ad9ce7f04417ec9a786243b74df62e8178e8a2bc064132f1cb	142936
