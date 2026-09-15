@@ -351,6 +351,39 @@ IR_STORE_INDEX_VAR(1), IR_STORE_PTR(1)}` 逐点分类 + 取址面复核 + 与 `p
 
 **停条件**：canary 变 ⇒ 停下；新静默错值 ⇒ 停下（本裁两条实证均为**响亮**面，且 ① 为修复）。
 
+### Task T3 实施记录（2026-09-16；报告 `/tmp/capt7/task3-report.md`；证据 `/tmp/capt7/**`）
+
+**提交**：裁决 `c5056b2d` → 实现+用例 `7642ad64`（基点 `1e11353c`，工作副本 `/tmp/p7t3`）。
+
+**裁-T3-1 落地（写点零改动）**：
+1. `EXPR_ARRAY`：**数组级元素可选性预扫**（`elem_ti_of_node`：Some/None 关键字形 / 可选 ident /
+   可选调用）⇒ 可选则 `irv_set_decl_ti(v, [T?;n])`；**装箱判定改用数组级可选位**（`[2, Some(1)]`
+   类元素序问题）；预扫在元素循环前（F5 wrapper 连续契约）。
+2. `IR_SLICE`：源数组元素可选 ⇒ `irv_set_decl_ti(v, [T?;·])`；**切片 var 的 IR 型面不动**
+   （避免影响 dtype/宽度等既有消费者）。
+3. **LET / 全局初值**：值面登记**继承到绑定 var**（`irv_decl_ti(val_var)` → `irv_set_decl_ti(var)`）——
+   登记落在**值 var**、写点读**绑定 var**，此环缺失则前三步全部无效（M_T3_3 实证 71/80）。
+4. 全部 `g_optrep_on` 门控 + 仅可选元素登记 ⇒ 零足迹（canary IDENTICAL 实测）。
+
+**实证**：7 漏点形态 139/139 → 正确（5/5/5/7/7/8/5）；对照 4 例不回退；`i3`（推断数组 + 指针写）
+6/6 = 与 (A) T2 W5 面联动成立。**突变**：M_T3_1（字面量登记关）73/80 · M_T3_2（切片登记关）
+77/80 · M_T3_3（LET 继承关）71/80；回滚后 canary IDENTICAL + 80/80。
+
+**裁-T3-2 / 裁-T3-3**：见上两节（extern 登记收窄 + 分类表 + T1 行 #6 更正）。
+
+**新增登记（未修）**：推断的模块级全局数组 `g := [Some(1), None]` 元素写点 139/139，但 check
+面已发 **TK01「Cannot index non-array type」**（推断全局在 checker 侧即无类型面）⇒ 归**全局类型
+推断**缺陷（非可选写点面），登记给全局面批次；标注全局数组写点 `i4` 5/5 · `i5` 6/6 ✓。
+
+**判据（全绿）**：构建确定性 ×2 IDENTICAL · `selftest-types` 415/415 · `check src/compiler` rc=0 ·
+枚举 61/61 · 五 CI job 5/5 · canary IDENTICAL（28822B）· `.ccr` 两口径四条命中锁定值 ·
+腿① 72 档零差异 · 探针 29 档冷态零差异 · 自举链 `093ba230…` + N06=0 + `--help` rc=1 + 冒烟 42 ·
+`test_optional` **80/80**（+14 例 T3 面）。
+
+**过程事故**：`/tmp/p7t3` 工作副本因他方操作推进 op log 而 stale，`update-stale` 重放**退回
+pre-T2 基点** —— 按事故教训**先备份未快照文件再 update-stale**，随后 `jj new 1e11353c` 回基点 +
+恢复 + **立即提交** ⇒ **零损失**；纪律强化 = 每次写文件后立刻 `jj status` + 提交。
+
 ## Task 5：收官
 
 全量回归（五 CI job + 枚举 + selftest + canary + `.ccr` + dump + DOT + 链 + 冻结基线同源对拍 72 档 + 探针 29）· 统一台账（KPI + 登记 + 偏差）· 终态陈述（三栏）· 报告 + 路径限定提交。
