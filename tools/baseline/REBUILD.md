@@ -78,6 +78,13 @@ bash tools/baseline/warm_run.sh ./build/corec /tmp/warm_now   # 牙齿层（语�
 - 时长实测（2026-09-15，本机）：牙齿层 **0.9s** · probes 广度层 **+3.5s** · parity 广度层
   **+125s**（72 档 ×2 次 `ccr`，大文件为主）⇒ **CI 只挂最小面**（`tests/selfhost/test_warm_cache_gate.py`，0.5s），
   广度层留手工判据。
+- **腿本体不进 CI**（维护者裁定 2026-09-15）：与套件**同语料**、覆盖重叠，收益仅「校验 runner 自身」。
+- **何时该跑（手工判据纪律）**——下列任一情形**必跑** `warm_run.sh`（0.9s）**加**至少一次
+  parity 广度层（`parity_run.sh` 默认已含）：① 改动 `tools/baseline/*` runner 本体；
+  ② 改动缓存面（`src/compiler/cir_cache.cr` · `ccr_io.cr` 的保存/装载路径 · `main.cr` 的缓存门/
+  见证规则 · `CIR_CACHE_VER`）；③ 关闭、降级或重定向 `.core/cache`（含 `clean-cache` 语义变更）；
+  ④ 新增/改动 `tests/probes/warm/` 语料（须同步 `warm_leg.sh` 的 `WARM_TOTAL` 与语料 README）。
+  日常 CI 已由最小面覆盖语料本身，**不**替代上述腿。
 
 ## 换代纪律（**只在此处更新白名单**）
 
