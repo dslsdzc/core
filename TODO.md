@@ -754,15 +754,15 @@
 
 - **最小复现**：方法带 8 个 `dex` 形参（第 9 个 `dex` 实参落栈：SysV 第 9 个 binary64 起走 `cs_stack_args`），第 9 参传 `lx : dex, apx, mut = 1.5`，方法直接 `return` 该形参 ⇒ **期望 1.5（rc=7 形），实得 rc=1**；`corec run` 与 `build --static` **同错**。
 - **对照**：第 9 参改用**全局** apx 量 ⇒ 该形态实测 rc=7（因 `need_pack` 打包介入，见 seam 批 §T2-c）⇒ 本条与全局行无关。
-- **与 #74 合看 = 面不是点**：`apx` 形式转换缺口在「**非 `EXPR_IDENT` 调用形态**（#74）」与「**栈参位**（本条）」两处共存 ⇒ 建议同批修（转换环覆盖面 + 栈参位形式），单点修必留另一处。
+- **与 #80 合看 = 面不是点**：`apx` 形式转换缺口在「**非 `EXPR_IDENT` 调用形态**（#80）」与「**栈参位**（本条）」两处共存 ⇒ 建议同批修（转换环覆盖面 + 栈参位形式），单点修必留另一处。
 - **关联**：#80 · 全局 operand seam 批计划 §T1 记录 N-1。
 
 ### 79. 全局 operand seam 批**收官**（2026-09-16——`g2_slot` 全局行「帧外伪偏移」同族六点收编；**四点 RED 转正** + 两条探针硬约束 + 偏差台账 3 条）
 
 - **根因**：`g2_slot`（`src/arch/x86_64/instr.cr:55-72`）对**全局行**（`v < var_start`）返回**帧外伪 rbp 偏移**（指向调用者帧的合法位移）⇒ 一切直吃 `g2_slot` 的操作数读写点**静默读写调用者帧**；int 面已由 `e2_load_var` 收编，**dex 面五件（`e2_sd_load/load1/load_x/cvt/store`）与写侧从未收编** ⇒ 按 `IR_*` 分支逐个漏。
-- **交付**：计划 `docs/superpowers/plans/2026-09-16-global-operand-seams.md`（含 T1 RED 实测、T2 完备性枚举、七门裁决与证伪留痕、探针表、停条件）；提交链 = 计划 → 七门裁决落纸 → T2 枚举 + `need_pack` 掩蔽修正 → **T1 决定性 RED**（B1/B2/B4/B5，`mut` 全局三重隔离）→ 裁-SEAM-3 证伪改判（准 (b) 单列 #74）→ **T3 seam 收编**（新增 `e2_lea_glob`/`e2_is_glob`/`e2_sd_ld_var`/`e2_sd_cvt_var`/`e2_sd_st_var`/`e2_st_var`；迁移 B1 585/586+593 · B2 532+533 · B4 1398-1403 · B5 1411-1416 · B6 `callseq.cr:75`/`:129` · B7 `cs_ret_value` 全局支按型分派 · B8 1886/1921/1952；删死码 `sz_ofs`/`sz_load_var` + 死变量 `o1`）→ T4 套件 `tests/selfhost/test_global_seams.py`（12 例）+ suite 语料 `tests/suite/global_seam_test.cr` + `run.sh` 挂钩 → REX.B 修复 + 判据收紧 → 腿① 计数 72→73 → T5 记录。
+- **交付**：计划 `docs/superpowers/plans/2026-09-16-global-operand-seams.md`（含 T1 RED 实测、T2 完备性枚举、七门裁决与证伪留痕、探针表、停条件）；提交链 = 计划 → 七门裁决落纸 → T2 枚举 + `need_pack` 掩蔽修正 → **T1 决定性 RED**（B1/B2/B4/B5，`mut` 全局三重隔离）→ 裁-SEAM-3 证伪改判（准 (b) 单列 #80）→ **T3 seam 收编**（新增 `e2_lea_glob`/`e2_is_glob`/`e2_sd_ld_var`/`e2_sd_cvt_var`/`e2_sd_st_var`/`e2_st_var`；迁移 B1 585/586+593 · B2 532+533 · B4 1398-1403 · B5 1411-1416 · B6 `callseq.cr:75`/`:129` · B7 `cs_ret_value` 全局支按型分派 · B8 1886/1921/1952；删死码 `sz_ofs`/`sz_load_var` + 死变量 `o1`）→ T4 套件 `tests/selfhost/test_global_seams.py`（12 例）+ suite 语料 `tests/suite/global_seam_test.cr` + `run.sh` 挂钩 → REX.B 修复 + 判据收紧 → 腿① 计数 72→73 → T5 记录。
 - **判据（全绿）**：T4 套件 **12/12** · suite 语料 rc=0 · 冒烟 42 · **canary `95084e7b…d475`（28822B）IDENTICAL** · `.ccr` 两口径四条全同 · `check src/compiler` rc=0（0 条 `error[`）· `selftest-types` 415/415 · 五 CI job 全 rc=0 · 自举链 `corec2==corec3` **IDENTICAL** + N06=0 · 腿① **73 档**对拍零差异 · 探针 29 档 rc/冷日志/暖态零差异 · **突变双向**（全局分支改坏 ⇒ 全局组探针 + 字节判据红；非全局分支改坏 ⇒ 探针 11/12 红 + **canary 变** `a7ef9ddf…`）。
-- **登记（本批不修，另单）**：#74/#75（`apx` 形式转换缺口族——B6(c) 方法调用形态经实测**证伪**归此类）· **B8 表实例 disp 参三处**（`hit_st_modrm_disp` 形态，seam 套不上）· **`e2_sd_*` 五件无 `E2_REG_SLOT_BASE` 分支**（现因 regalloc 类型门 `regalloc.cr:680-681` 不可达）· **全局 `string` 行型面**（`reg_one_global` 默认 `TI_INT` ⇒ `g[0]` 走 8 字节元素支、`g == "s"` 不比较内容）。
+- **登记（本批不修，另单）**：#80/#81（`apx` 形式转换缺口族——B6(c) 方法调用形态经实测**证伪**归此类）· **B8 表实例 disp 参三处**（`hit_st_modrm_disp` 形态，seam 套不上）· **`e2_sd_*` 五件无 `E2_REG_SLOT_BASE` 分支**（现因 regalloc 类型门 `regalloc.cr:680-681` 不可达）· **全局 `string` 行型面**（`reg_one_global` 默认 `TI_INT` ⇒ `g[0]` 走 8 字节元素支、`g == "s"` 不比较内容）。
 - **两条探针硬约束（写全局/dex 探针前必读）**：① 必须用 **`mut` 全局**——不可变 + 字面量初值的全局被 `find_global_const_node`（`ir_gen.cr:592-611`）**折叠成 `IR_CONST`**，读点不碰全局行（探针假绿；本批 T1 第一轮即栽在此处）② **`apx` 算术无解释器腿**（`corec run` 显式拒收 rc=255，能力边界非缺陷）⇒ 主判据 = **全局 vs 局部同形 ELF 对拍**（两条均已落 dex/apx 迁移遗留节 + 套件头注）。
 - **偏差台账 3 条（本批自曝、全部闭合）**：REX.B 自伤（`[r11]` 缺 REX.B 编码成 `[rbx]` ⇒ 139，T4 套件当场拦）· 弱判据（逐片段独立 `find` 放跑了它 ⇒ 改连续序列正则）· 计数漂移（新增语料 ⇒ 腿① 72→73 显式更新）。详见计划 §T5。
 
