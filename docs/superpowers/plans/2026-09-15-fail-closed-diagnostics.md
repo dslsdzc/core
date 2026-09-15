@@ -362,3 +362,18 @@ tools/baseline/build_gate_run.sh <corec二进制> <outdir>
 - **对「表 2 转红面」的影响**：`test_native_float` 从「裸反转 6 档红套件」中**移出**；CI `selfhost-tests` 的裸反转真红面由 **6 → 5 档**（`test_ccr_types` [TF07+TB01] · `test_interp_float` [B04] · `test_interp_parity` [B04] · `test_match_exhaust` [TM04] · `test_xcut_iface` [TK01]）。
 - **对「豁免表草案」的影响**：`/tmp/fct1/exemption_draft.tsv` 的 **TC02 条目可撤**（退出条件「逐例归因后」已达成）⇒ 豁免表初稿由 **10 码降为 9 码**（TF01 · TF07 · TB01 · TM04 · TK01 · N01 · N06 · N11 · B04）。**表调整由 FC 批 T2 统一执行**（维护者 2026-09-14 裁）。
 - **未覆盖面（本批不判，登记）**：`break`/`continue` 收尾的分支（需循环上下文）；`x := if c { } else { return 1; }`（值被用且 else 发散）形态按 P3 不报（if 型 = `then_ti` = unit 是真值 ⇒ 误用由 TA02/TF01 兜住；**未构造端到端用例**）。
+
+---
+
+## 勘误与进展（2026-09-15，FC 批 T2 落地后回填）
+
+- **本条 = 本计划的 T2 段落地记录**（设计稿 = `/tmp/fct3/fc-t2-impl-draft.md`；报告 = `.superpowers/sdd/fc-task2-report.md`）。
+- **落地形态（与设计稿的差异逐条）**：
+  1. **`diag_gate_exempt` 落 `diag.cr`**（表 9 条；`scope` 常量落 `globals.cr`）——照设计稿，零清单改动（`main.cr`/`globals.cr`/`diag.cr` 均在 corec 清单内；`corearch_files` 不含 `diag.cr`）。
+  2. **类型面闸反转**（`main.cr` 硬判定循环 → `diag_gate_exempt(ec, GATE_SCOPE_BUILD) == 0 ⇒ hard = 1`；旧 6 语句行/11 码名单整体退役）；**语法面 `:134/:135` 与安全检查面 `:594-603` 不动**（照设计稿）。
+  3. **零产物删除点**：`exit_code := system(cmd2)` 之后 `if exit_code != 0 { system("rm -f \"<ccr_path>\"") }`（只删**本次**写下者；既有旧 `<out>` 不删——裁-FC-6）。
+  4. **新增（设计稿未含）= 进度行保真修正**：`[5/5] frontend done` 由「仅 `hard==0` 路径」改为「诊断之后、返回之前一律打印」⇒ 72 档语料日志除**纯行号偏移**外零差异（否则 25 档会缺该行）。**唯一可见差异 = 探针 `n05_recursive.cr` 多一行**（其 `TS03` 属旧硬名单 ⇒ S0 提前返回无该行）。
+  5. **新套件** = `tests/selfhost/test_diag_gate.py`（**17 例**：正控 9 + 负控 6 + 零产物 3）+ `run.sh` 挂点（设计稿写 ≥14；实际 17）。
+- **对表结论**：**无表外命中**（T1 `would_block.tsv` 的 7 条 build 面行全部放行、34 条 check 面行逐条不变；T1 的 6 档红套件全绿）。**豁免表 = 9 条**（10 − TC02；TC02 已在 `7f53305d` 修掉）。
+- **72 档差异口径（先例继承）**：日志差异 **2 档 = 纯行号偏移 +53**（编辑编译器自身源码 ⇒ 语料含编译器 ⇒ 行号位移；先例 = P6 T2 的 +146）；rc 分布两侧 34×0/38×1 零差异。
+- **新登记（本批施工中发现，另批）**：**安全面诊断随 `.cir` 暖缓存静默消失**（冷 rc=1 / 暖 rc=0 出 ELF；P6 期二进制同病 ⇒ 预存）⇒ TODO #60（含派生建议：两条 runner 加「暖态腿」，**本批不实施**）。

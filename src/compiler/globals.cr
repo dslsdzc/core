@@ -201,6 +201,11 @@ g_ir_func_entry_cap : int, mut;
 
 // Module system arrays (dynamic byte buffers)
 DIAG_REC_SIZE : int = 40;   // g_diags 记录字节数：[ec(8) msg(8) line(8) col(8) file_id(8)]
+// fail-closed 判据线（FC 批 T2）：豁免表的**生效面**标签（消费点 = main.cr 的硬判定循环
+// 经 diag_gate_exempt(ec, scope)；表 = diag.cr）。裁-FC-1 = (C)：run_frontend 只以
+// GATE_SCOPE_BUILD 调用；check 面的 rc 规则（计数 > 0）不消费本表 ⇒ check 基线零变化。
+GATE_SCOPE_BUILD : int = 1;   // build/ccr/cir/run 面（经 run_frontend 的 hard 判定）
+GATE_SCOPE_CHECK : int = 2;   // check 面（**本批不消费**：仅登记；见 diag_gate_exempt 表注）
 g_diags : string, mut;           g_diag_count : int, mut;     g_diag_cap : int, mut;
 g_files : string, mut;           g_file_count : int, mut;     g_file_cap : int, mut;
 g_mods : string, mut;            g_mod_count : int, mut;      g_mod_cap : int, mut;

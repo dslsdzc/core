@@ -135,47 +135,32 @@ fn run_frontend() -> int {
     if g_error_count > 0 { print_parse_errors(); return 1; }
     println("[4/5] type check...");
     check_all();
-    // Type-check diagnostics are non-fatal (match Python bootstrap behavior).
-    // Only parse errors and resolver errors are fatal.
-    // 例外（F2）：编译期确定的常量索引越界（R002）与字面量切片界越界（TK05/TK06）
-    // 是硬错误——拦截编译（修复前静默生成越界二进制）。
-    // 例外（TODO #29）：聚合字面量三校验（TS01-04 + TK02）同为硬错误——修复前全部 rc=0
-    // 静默通过并照常产出二进制：未知字段/缺字段 ⇒ 字段从未被写入（读到垃圾值）、字段类型
-    // 不匹配 ⇒ 按错宽度存（静默错值）、数组元素异质 ⇒ 类型随末元素漂移（soundness 漏放）。
-    // 判定继续 = 产出**静默错产物**，与 R002 同类。
+    // Type-check diagnostics：**fail-closed（FC 批 T2；维护者裁）= 默认阻断 + 豁免登记表**。
+    // 判据（成文化）= 「判定继续 ⇒ 产出静默错产物」——五组先例：R002 常量档越界（F2）·
+    // TS01-04+TK02 聚合字面量三校验（TODO #29）· TM03 match 非穷尽（#31，修复前缺臂 ⇒ 未匹配值
+    // 静默得 0）· ICE04 判定不可判（P-A 三态纪律）· TA02 声明位点不兼容（#32，修复前符号取注解行、
+    // 值按注解行发射 ⇒ 静默错值）。**旧正向名单（11 码）整体退役**：新语义下它们本就在闸内。
+    // 豁免表 = `diag.cr::diag_gate_exempt`（码级 + 位点证据/理由/退出条件三字段；只减不增）。
+    // `scope`（裁-FC-1 = (C)）：本处**只以 GATE_SCOPE_BUILD 调用**；`check` 分支的 rc 规则
+    // （下方「计数 > 0」）不消费本表 ⇒ **check 面基线零变化**（72 档 34×0/38×1 不换代）。
     if g_diag_count > 0 {
         hard : ., mut = 0;
         di : ., mut = 0;
         loop {
             if di >= g_diag_count { break; }
             ec := r64(g_diags, di * DIAG_REC_SIZE);
-            if ec == EC_R_OOB || ec == EC_TK_SLICE_BOUNDS || ec == EC_TK_SLICE_LEN { hard = 1; }
-            if ec == EC_TS_MISSING_FIELD || ec == EC_TS_UNKNOWN_FIELD || ec == EC_TS_FIELD_TYPE || ec == EC_TS_FIELD_DUP { hard = 1; }
-            if ec == EC_TK_ELEM_TYPE { hard = 1; }
-            // 例外（R2 P3 Task 3）：match 非穷尽（TM03）为硬错误——穷尽性判定的消费面。
-            // 修复前 match **零检查**（EC_TM_* 仅定义零 raise）：缺臂 ⇒ rc=0 + 产物照出，
-            // 未匹配值静默得 0（探针 p1b 实测 rc=100 = 0 + 100，无任何信号）。开门依据 =
-            // 全语料 report-only 清单为空（72 档 check 日志与基线逐字节同，见 Task 3 报告 §）。
-            // TM04（冗余臂）**不入**本名单 = 软面登记（同 Rust unreachable-pattern 的警告口径）。
-            if ec == EC_TM_EXHAUST { hard = 1; }
-            // 例外（R2 P5 Task 4 / P-A）：类型判定不可判（ICE04）为硬错误——三态纪律：
-            // 「未知」不得当 0/1（legacy 回落面已删，判定 = 引擎唯一权威）⇒ 判定不可进行时
-            // 产出的代码不可信（返回 false 只是 bool 面唯一保守出口，不是结论）⇒ 拒绝落盘。
-            // 开门依据 = report-only 全语料零命中（72 档 check/shadow 日志与基线逐条同 +
-            // `replace_*=0`；Task 3 Step 2 清零判据 + T3b 残留收口，见 p5-task4-report §1）。
-            if ec == EC_ICE_TY_INDET { hard = 1; }
-            // 例外（R2 P5 Task 6 / TODO #32）：声明位点值/注解不兼容（TA02）为硬错误——
-            // `EXPR_LET` 站点此前**无任何兼容检查**（全仓 grep：EC_TA_DECL 定义零 raise）⇒
-            // `x : int = "s"` / `x : [int;4] = [1,2,3]` / `x : int? = 5; y : int = x` 全部
-            // check rc=0 照常产出二进制：符号类型取**注解行**、值按注解行发射 ⇒ 静默错值
-            // （与 TS01-04/TK02 同族「判定继续 = 产出静默错产物」）。
-            // 开门依据 = report-only 全语料零命中（72 档 check rc 34×0/38×1 与基线逐条同 +
-            // 诊断正文逐条同 + `check src/compiler` rc=0；见 p5-task6-report §report-only）。
-            if ec == EC_TA_DECL { hard = 1; }
+            // 默认阻断：**不在豁免表内 ⇒ hard = 1**（表 = diag.cr；只减不增）。
+            if diag_gate_exempt(ec, GATE_SCOPE_BUILD) == 0 { hard = 1; }
             di = di + 1;
         }
         print_diagnostics();
-        if hard != 0 { return 1; }
+        if hard != 0 {
+            // 进度行在此（诊断之后、返回之前）打印，与原位置同序：S0 期本行只覆盖 hard==0 路径，
+            // 本批使**被阻断路径也打印**（否则 25 档语料的日志会缺行）。唯一可见差异 = 「诊断码
+            // 全在旧硬名单」的档（S0 提前返回无本行；本批打印）——72 档语料内 0 档、探针 1 档。
+            println("[5/5] frontend done");
+            return 1;
+        }
     }
     // AST-level constant folding and optimization (O1+)
     /*
@@ -700,6 +685,12 @@ fn corec_main() -> int {
         }
     }
     exit_code := system(cmd2);
+    if exit_code != 0 {
+        // fail-closed 零产物（裁-FC-6）：corearch 失败 ⇒ 删除**本次** save_ccr 写下的 `.ccr`
+        // 半成品（`save_ccr` 已覆盖同名旧文件 ⇒ 删除不额外损失；**未创建者不删**——不删目标 ELF
+        // 的既有旧文件，见本批报告「零产物边界」）。
+        system("rm -f \"" + ccr_path + "\"");
+    }
     return exit_code;
 }
 
