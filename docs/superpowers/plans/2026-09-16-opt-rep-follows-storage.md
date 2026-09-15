@@ -208,20 +208,20 @@ W1–W6 全部首判 `g_optrep_on`（并可再判「标记面非空」）⇒ **�
 
 ## Task 2：先裁落纸（**未取裁前不得落码**）
 
-- [ ] **Step 1: 候选定案**（裁-REP-1..4 结果 + 与 P4 裁决 5 的关系 + 若取 (iv)/(i) 的额外论证）。
-- [ ] **Step 2: 不变量陈述**：推荐案 (iii) 的不变量 = 「**地址被取过的可选槽恒持装箱值**」+「**指针写（pointee 可选）装箱**」；并给 (iii) 的**完备性论证**（取址面枚举 ⇒ 每处取址者恒装箱 ⇒ 任何经指针的读/写都落在恒装箱槽上）。
-- [ ] **Step 3: 写点与取址点清单**（照 E-2 法逐条 `file:line` + 形态 + 漏改后果）。
-- [ ] **Step 4: 零足迹论证**（门控面 + canary/`.ccr` 预期 + 须实测项）。
+- [x] **Step 1: 候选定案**（裁-REP-1..4 结果 + 与 P4 裁决 5 的关系 + 若取 (iv)/(i) 的额外论证）⇒ §2.1。
+- [x] **Step 2: 不变量陈述** ⇒ §2.2（INV-1/2/3 + 引理 1–3 + 定理）。
+- [x] **Step 3: 写点与取址点清单** ⇒ §2.4（W1–W6 + 取址点七类）。
+- [x] **Step 4: 零足迹论证** ⇒ §2.5。**提交 = `a140340d`**（路径限定：仅本计划文件）。
 
 ---
 
 ## Task 3：实现（按取裁；推荐案 (iii) 的落点）
 
-- [ ] **Step 1: 取址预扫**（照 `optrep_prescan` 先例，`ir_gen.cr:3074`）：扫 AST 的 `UOP_REF` 节点，ident 操作数 ⇒ 标记该槽（新侧表 `g_ir_var_addr_taken`，进程内、零布局；`optrep_begin` 复位）。
-- [ ] **Step 2: 局部写点**（`ir_gen.cr:1320-1321` 赋值 / `:2373` LET）：标记槽 ⇒ 装箱（`box_for_slot_flag`）+ **表示位钉 1**（不写裸编码）。
-- [ ] **Step 3: 形参序言**（`:2520-2530` 区）：标记形参 ⇒ 读信道后**条件装箱**（裸 ⇒ 装）+ 表示位钉 1。
-- [ ] **Step 4: `IR_STORE_PTR`**（`:1378`）：`ptr_pointee_type`（`:810`）可选 ⇒ 装箱（复用同一 helper）。
-- [ ] **Step 5: 写点完备性审计**（IR 写指令全集 + 取址面枚举，逐条分类）。
+- [x] **Step 1: 取址预扫** ⇒ 落地为 `g_addr_taken_names` 侧表 + `optrep_addr_prescan`（`ir_gen.cr:3136` 调用；集合元素 = **操作数**名索引——注意 `EXPR_UNARY.int_val` 是 `is_mut` 位，踩坑见记录 §2）。
+- [x] **Step 2: 局部写点**（赋值 / LET 两站点）：标记槽 ⇒ `box_for_slot_flag(val,1)` + 表示位钉 1（W2/W3）。
+- [x] **Step 3: 形参序言**（`TYP_OPTIONAL` 形参分支，**行号漂移**：现行 ≈`ir_gen.cr:2755`）：标记形参 ⇒ 条件装箱回写 `pvar` + `prv` 钉 1（W4）。
+- [x] **Step 4: `IR_STORE_PTR`**：`ti_is_optional(ptr_pointee_type(ptr_var))` ⇒ 装箱（W5）。
+- [x] **Step 5: 写点完备性审计** ⇒ 见记录 §4（pointee 声见面 = W5 的前提件；另修 ELF `IR_REF` 全局取址 = 记录 §3）。
 
 **停条件**：① 取址面出现**无法在 IR-gen 期标记**的形态（如运行期取址）⇒ 停下（(iii) 不可行，转 (iv)/(i)）；② canary 变 ⇒ 停下；③ 出现任何**新的静默错值** ⇒ 停下。
 
@@ -229,10 +229,53 @@ W1–W6 全部首判 `g_optrep_on`（并可再判「标记面非空」）⇒ **�
 
 ## Task 4：用例 + 突变 + 判据
 
-- [ ] **Step 1: 用例 ≥12**（`test_optional.py` 增面）：四形态 × {裸, 装箱, None, 条件写}（指针写载体）+ `c1/c2/c3` 转正（或响亮）+ 边界探针（指针算术落相邻槽）+ 负控（非取址槽仍可持裸值）。
-- [ ] **Step 2: 突变 ≥3**：① 预扫漏标（取址槽不装箱）⇒ 对应用例红；② `IR_STORE_PTR` 不装箱 ⇒ 数组元素/全局指针写用例红；③ 装箱分支反转（双重装箱）⇒ 装箱族用例红（**须精确值断言**，照 T2 M4 教训）；④ 取址判定恒假 ⇒ 指针写用例红。
-- [ ] **Step 3: 判据全套**（Global Constraints 各条 + `test_optional` 只增不减）。
-- [ ] **Step 4: 文档**（spec §9 / TODO #56 划销或转条目 / `docs/error-codes.md` 若无新码则不动）。
+- [x] **Step 1: 用例 ≥12**（`test_optional.py` 增面；**实落 18 例 ⇒ 48→66，66/66 PASS**）：四形态 × {裸, 装箱, None, 条件写}（指针写载体）+ `c1/c2/c3` 转正（或响亮）+ 边界探针（指针算术落相邻槽）+ 负控（非取址槽仍可持裸值）。
+- [x] **Step 2: 突变 ≥3** ⇒ **M1/M2/M3a 三条全红**（记录 §5；③ 以 **门控失效** 实现——mutation 设计见记录）。
+- [x] **Step 3: 判据全套** ⇒ 记录 §6（canary IDENTICAL · `.ccr` 四条命中 · 枚举 61/61 · selftest 415/415 · 五 CI job · 腿① 零差异 · 探针 29 档 · 链 + N06=0 + 冒烟 42）。
+- [ ] **Step 4: 文档**（spec §9 / TODO #56 划销或转条目 / `docs/error-codes.md` 若无新码则不动；**随 T5 收官一并落**）。
+
+### Task 3 + Task 4 实施记录（2026-09-16；报告 `/tmp/capt6/task2-report.md`；证据 `/tmp/capt6/**`）
+
+**§1 改动面**：`src/compiler/ir_gen.cr`（+128/−11 区）· `src/compiler/globals.cr`（+4）·
+`src/arch/x86_64/instr.cr`（+19）· `tests/selfhost/test_optional.py`（+122，48→66 例）。
+
+**§2 实施踩坑（两条自伤型，皆为「假绿/退化」的成因）**
+1. **`EXPR_UNARY.int_val` 是 `is_mut` 位、不是操作数名索引**（`parser.cr:250` `alloc_node(EXPR_UNARY, op, 0, UOP_REF, is_mut, 0, 0, …)`）——首版以它当 `ni` 查取址表 ⇒ 标记面**恒查错名**；局部形态因 `irv_rep(op_var) >= 0` 兜住而**假绿**，全局形态漏装箱 ⇒ 139。修法 = 取 `ast_int_val(ast_a(node))`。
+2. **全局声明面只可「升级」不可「覆盖」**：`global_decl_ti(ni)` 若当 pointee 首选项，会把全局 IR var 自带的可选类型**降级**为非可选 ⇒ W5 不装箱 ⇒ 由 5/5 退化为 139/139（interp 亦红）。修法 = `ti_is_optional(gti)` 时才采纳。
+
+**§3 第二根因（计划外，本批新发现）：ELF 后端 `IR_REF` 全局取址错**
+`src/arch/x86_64/instr.cr:1095` 一律 `e2_lb(g2_slot(s1))`（`lea r10,[rbp+off]`）——全局行的
+`g2_slot` 是**帧外伪偏移**（与 `IR_LOAD_FIELD` 已修同型）⇒ `&g` 取栈上垃圾：写读经指针**自洽**
+（故被掩盖）但与全局槽**脱钩**。**冻结基线实证**（`/tmp/capt6/base/corec`）：`g_mut` ELF **1** /
+interp 5 · `g_refread` ELF **36** / interp 1 ⇒ **预存缺陷**。修法 = 全局源 `lea r10,[rip+rel32]` +
+RIP 补丁（照 `IR_STORE` 全局分支）。**形态③ 的 ELF 腿在此外修复前不可能正确**（T1 的
+`ELF 0 / interp 139` 分歧即此）。语料面：canary（`ptr_arith`）不含 `&全局` ⇒ 发射面零变化。
+
+**§4 pointee 声见面（W5 的前提件）**：`UOP_REF` ident 分支按 `slot_decl_ti` → `irv_type` →
+（全局）`global_decl_ti` 升级序解析 pointee；取址标记 ⇒ 具可选能力者 pointee 记 `TYP_OPTIONAL`
+（`alloc_type`），非可选槽 **rep < 0 且声明非可选 ⇒ 双形态皆不触发**（零足迹）。
+
+**§5 突变（三条全红 + 精确回滚）**：M1 去预扫 ⇒ 63/66（param/c1/c3 复红，暴露预扫承重面 =
+**初值裸槽的表示位钉 1**）· M2 去 `IR_STORE_PTR` 装箱 ⇒ 57/66（9 例 -11）· M3a 门控恒开 ⇒
+canary `47ed24a9…`（32918B ≠ 28822B）+ `.ccr` 四条全变 ⇒ **零足迹证据复红**。回滚自证：三源 sha
+逐条 = 备份 + canary IDENTICAL + 66/66。
+
+**§6 判据实测（全绿）**：构建确定性 ×2 IDENTICAL · `selftest-types` **415/415** ·
+`check src/compiler` rc=0 · 全枚举 **61/61**（54 selfhost + 7 bootstrap）· 五 CI job **5/5 rc=0** ·
+canary **`95084e7b…d475`（28822B）IDENTICAL**（改动后 6 次复测）· `.ccr` 两口径四条**逐条命中**
+（`ptr_arith` 96015 `680a6f98…` / 96158 `76f36e6a…`；`generics_test` 142793 `41e9d845…` /
+142936 `704316c8…`）· **腿① 72 档逐档 diff 零差异**（暖态腿 64/72 · 40/72 生效，FAIL=0）·
+探针 29 档（冷态逐档：仅 `n05_recursive` 多一行 `[5/5] frontend done`，T1 已归因；rc 面零差异；
+暖态腿 23/29 · 15/29 生效，FAIL=0）· 自举链 `corec2 == corec3` **`5725df65…`（2888278B）×2** +
+`error[N06]=0`（五 job 日志全 0）+ `--help` rc=1 + 冒烟 rc=**42**。
+
+**§7 偏差与口径**
+- 五 CI job 的 `suite` 腿按 `IFS` SKIP 规则排除 `*_mini*.cr`（既有口径，非本批）。
+- 探针**暖态腿跨二进制**日志差异（frozen 打印 `lower to ccr…` / 当前不打印）= **FC 批的早停**
+  （`main.cr:616-621` 诊断硬闸 ⇒ 负例探针不再进入 lowering），**与本批无关**（本批不触
+  `main.cr`/诊断面）；判据口径 = 冷态逐档 + 暖态自洽（FAIL=0）。
+- c3 用例按 T1 修正改为**自证式**（源内断言「解包值 == 写入载荷」，返回 1）——不钉历史数值。
+- ④ 字段取址：**裁-REP-3 维持登记**（`a_field_addr_registered` 只钉双路径同 rc）。
 
 ---
 

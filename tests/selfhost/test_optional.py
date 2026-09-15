@@ -29,6 +29,7 @@ docs/superpowers/specs/2026-09-10-type-interface-unification-design.md §5.4）�
 """
 
 import os
+import re
 import resource
 import subprocess
 import tempfile
@@ -132,6 +133,37 @@ def case_dual_rc(name, source, expect_rc):
         print(f"[FAIL] {name}: expected rc {expect_rc} both paths, got ELF={rr.returncode} interp={ri.returncode}")
         return False
     print(f"[PASS] {name}: ELF+interp rc={rr.returncode}（未覆盖面：双路径同，响亮）")
+    return True
+
+
+def case_dual_softdiag(name, source, expect_rc, diag="B04"):
+    """双路径同值 + check 面**已知软诊断**钉死（(A) 批新增面特有）。
+
+    面特性：`p := &x` 借出 x 后**再读 x** ⇒ 既有 B04（`Cannot use 'x' while it is
+    borrowed`）——**非本批引入**（T1 四形态探针同一诊断），属软诊断：`build` 路径
+    rc=0 + 产物照出。判据 = 诊断码集**恰为** {diag}（多一条即红，防新诊断混入）
+    ∧ build/ELF/interp 同值。
+    """
+    rc_chk, outc, srcc = _compile(source, cmd="check")
+    try:
+        codes = set(re.findall(r"error\[([A-Za-z0-9]+)\]", rc_chk.stdout + rc_chk.stderr))
+        if codes != {diag}:
+            print(f"[FAIL] {name}: check 诊断码集 {sorted(codes)} != ['{diag}'] (rc={rc_chk.returncode})")
+            return False
+    finally:
+        _cleanup(srcc, outc, outc + ".ccr")
+    r, rr = build_and_run(source)
+    if rr is None:
+        print(f"[FAIL] {name}: compile rc={r.returncode}: {r.stdout}{r.stderr}")
+        return False
+    if rr.returncode != expect_rc:
+        print(f"[FAIL] {name}: ELF expected rc {expect_rc}, got {rr.returncode}")
+        return False
+    ri = run_interp(source)
+    if ri.returncode != expect_rc:
+        print(f"[FAIL] {name}: interp expected rc {expect_rc}, got {ri.returncode}: {ri.stdout}{ri.stderr}")
+        return False
+    print(f"[PASS] {name}: ELF+interp rc={rr.returncode}（check 面既有软诊断 {diag} 钉死）")
     return True
 
 
@@ -311,6 +343,68 @@ fn main() -> int { s : ., mut = S { a: 15 }; s.a = 16; return s.a; }
 """
 
 
+# ── (A) 批 T2：表示位随存储走（裁-REP-1 (iii)：取址槽恒装箱）──────────────────
+# 载体 = 指针写（`p := &slot; *p = v`）。**四形态 × {裸, 装箱, None, 条件写}**：
+#   INV-1 取址槽恒持装箱值 ⇒ 裸值经指针写 ⇒ 写点装箱（W5）。
+# 判据形态：`case_dual_softdiag`（这些源带**既有** B04 软诊断：&x 借出后读 x；T1 探针同），
+# `case_dual`（check 零诊断面：数组元素 / 非可选对照），`case_dual_rc`（登记面：REP-2/REP-3）。
+# **形态③（全局）另钉第二根因**：ELF 后端 `IR_REF` 全局取址修复（`&g` 曾取帧外伪偏移 ⇒
+# 与全局槽脱钩）——负控 `a_neg_nonopt_global_ptr` 即其钉子（修复前 ELF 恒初值）。
+A_LOCAL_BARE = """fn main() -> int { x : int? = Some(0); p := &x; *p = 7; return match x { Some(v) => { return v; } None => { return 0; } }; }
+"""
+A_LOCAL_BOXED = """fn main() -> int { x : int? = Some(0); p := &x; *p = Some(8); return match x { Some(v) => { return v; } None => { return 0; } }; }
+"""
+A_LOCAL_NONE_WRITE = """fn main() -> int { x : int? = Some(0); p := &x; *p = None; return match x { Some(v) => { return v; } None => { return 3; } }; }
+"""
+A_LOCAL_COND = """fn main() -> int { x : int? = None; p := &x; c := 1; if c > 0 { *p = 5; } else { *p = Some(6); } return match x { Some(v) => { return v; } None => { return 0; } }; }
+"""
+A_ARR_BARE = """fn main() -> int { a : [int?;2] = [Some(0), None]; p := &a[0]; *p = 7; return match a[0] { Some(v) => { return v; } None => { return 0; } }; }
+"""
+A_ARR_COND = """fn main() -> int { a : [int?;2] = [Some(1), None]; p := &a[0]; c := 0; if c > 0 { *p = 5; } else { *p = 9; } return match a[0] { Some(v) => { return v; } None => { return 0; } }; }
+"""
+A_GLOBAL_BARE = """g : int? = None;
+fn main() -> int { p := &g; *p = 5; return match g { Some(v) => { return v; } None => { return 0; } }; }
+"""
+A_GLOBAL_BOXED = """g : int? = None;
+fn main() -> int { p := &g; *p = Some(5); return match g { Some(v) => { return v; } None => { return 0; } }; }
+"""
+A_GLOBAL_NONE_WRITE = """g : int? = Some(1);
+fn main() -> int { p := &g; *p = None; return match g { Some(v) => { return v; } None => { return 4; } }; }
+"""
+A_GLOBAL_COND = """g : int? = None;
+fn main() -> int { p := &g; c := 1; if c > 0 { *p = 5; } else { *p = Some(6); } return match g { Some(v) => { return v; } None => { return 0; } }; }
+"""
+# ④ 结构体字段取址：**裁-REP-3 维持登记**（`UOP_REF` 无字段分支 ⇒ 取临时量地址 ⇒ 写入丢失；
+# 属另一缺陷，须新增 `IR_ADDR_FIELD` 面才能修）——本例只钉「双路径同 rc（响亮同态）**不静默分歧**」，
+# 不钉错值本身（修好后本例会照常通过：rc=0 面两支同）。
+A_FIELD_ADDR = """struct S { a: int? }
+fn main() -> int { s : ., mut = S { a: Some(0) }; p := &s.a; *p = 5; return match s.a { Some(v) => { return v; } None => { return 0; } }; }
+"""
+# ①d 形参槽（W4：形参序言**条件装箱** + 表示位钉 1）——裸值经信道入形参后被取址
+A_PARAM_BARE = """fn f(x: int?) -> int { p := &x; *p = 7; return match x { Some(v) => { return v; } None => { return 0; } }; }
+fn main() -> int { return f(3); }
+"""
+# 三子形态（T1 记录：c1 正确但脆弱 / c2 139 双路径 / c3 双路径分歧静默错值）
+A_C1_BIT0_BARE = """fn main() -> int { x : int? = 5; p := &x; *p = 7; return match x { Some(v) => { return v; } None => { return 0; } }; }
+"""
+A_C2_BIT1_BARE = """fn main() -> int { x : int? = Some(5); p := &x; *p = 7; return match x { Some(v) => { return v; } None => { return 0; } }; }
+"""
+# c3 转正判据按 T1 修正：**断言「= 正确值」不钉历史观测数值**（T1 实测 ELF 8 / interp 96，
+# 数值随状态漂移）——判据内置：写入载荷 = 9 ⇒ 解包值须 == 9（自证，非外部钉数）。
+A_C3_BIT0_BOXED_SELFCHECK = """fn main() -> int { x : int? = 5; p := &x; *p = Some(9); return match x { Some(v) => { if v == 9 { return 1; } return 0; } None => { return 0; } }; }
+"""
+# REP-2 边界（指针算术伪造地址，裁-REP-2 登记 + 探针）：`p + 1` 落**非取址**槽——记录现实
+# 行为（当前布局下 y 未受影响 ⇒ 6，双路径同）。本律不覆盖该面；
+A_REP2_PTRADD = """fn main() -> int { x : int? = 5; y : int? = 6; p := &x; q := p + 1; *q = 7; return match y { Some(v) => { return v; } None => { return 0; } }; }
+"""
+# 负控：**非可选**取址槽不受本律影响（不装箱、值形态不变）；第二例同时钉 ELF 全局取址修复
+A_NEG_NONOPT_LOCAL = """fn main() -> int { n : int, mut = 1; p := &n; *p = 5; return n; }
+"""
+A_NEG_NONOPT_GLOBAL = """g : int, mut = 1;
+fn main() -> int { p := &g; *p = 5; return g; }
+"""
+
+
 def main():
     ok = [
         # 正：裸值入 T? 返回位（旧判定：TF01 拒绝——joint 语义落地后放行；双路径）
@@ -418,6 +512,34 @@ def main():
         case_dual("cap_tuple_elem_bare", CAP_TUPLE_ELEM, 13),
         # 负控：非可选聚合槽不受本律影响
         case_dual("cap_nonopt_field_unaffected", CAP_NONOPT_FIELD, 16),
+
+        # ── (A) 批 T2：表示位随存储走（裁-REP-1 (iii)；四形态 × 值形态）──
+        # ① 局部槽（T1: 139 双路径）
+        case_dual_softdiag("a_local_bare_ptrwrite", A_LOCAL_BARE, 7),
+        case_dual_softdiag("a_local_boxed_ptrwrite", A_LOCAL_BOXED, 8),
+        case_dual_softdiag("a_local_none_ptrwrite", A_LOCAL_NONE_WRITE, 3),
+        case_dual_softdiag("a_local_cond_ptrwrite", A_LOCAL_COND, 5),
+        # ①d 形参槽（W4 条件装箱）
+        case_dual_softdiag("a_param_bare_ptrwrite", A_PARAM_BARE, 7),
+        # ② 数组元素（T1: 139 双路径）
+        case_dual("a_arr_bare_ptrwrite", A_ARR_BARE, 7),
+        case_dual("a_arr_cond_ptrwrite", A_ARR_COND, 9),
+        # ③ 全局槽（T1: ELF 0 / interp 139 分歧）+ ③b 装箱写（T1: ELF 0 / interp 5 静默分歧）
+        case_dual_softdiag("a_global_bare_ptrwrite", A_GLOBAL_BARE, 5),
+        case_dual_softdiag("a_global_boxed_ptrwrite", A_GLOBAL_BOXED, 5),
+        case_dual_softdiag("a_global_none_ptrwrite", A_GLOBAL_NONE_WRITE, 4),
+        case_dual_softdiag("a_global_cond_ptrwrite", A_GLOBAL_COND, 5),
+        # ④ 结构体字段取址：裁-REP-3 维持登记（只钉「双路径同 rc」）
+        case_dual_rc("a_field_addr_registered", A_FIELD_ADDR, 0),
+        # 三子形态：c1 保持 / c2 转正 / c3 转正（自证式断言，不钉历史数值）
+        case_dual_softdiag("a_c1_bit0_bare", A_C1_BIT0_BARE, 7),
+        case_dual_softdiag("a_c2_bit1_bare", A_C2_BIT1_BARE, 7),
+        case_dual_softdiag("a_c3_bit0_boxed_selfcheck", A_C3_BIT0_BOXED_SELFCHECK, 1),
+        # REP-2 边界（指针算术）：登记 + 记录现实行为（双路径同）
+        case_dual("a_rep2_ptradd_boundary", A_REP2_PTRADD, 6),
+        # 负控：非可选取址槽不受本律影响
+        case_dual_softdiag("a_neg_nonopt_local_ptr", A_NEG_NONOPT_LOCAL, 5),
+        case_dual_softdiag("a_neg_nonopt_global_ptr", A_NEG_NONOPT_GLOBAL, 5),
     ]
     passed = sum(1 for x in ok if x is True)
     print(f"{passed}/{len(ok)} passed")

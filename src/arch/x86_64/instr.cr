@@ -1093,8 +1093,23 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     }
 
     if op == IR_REF && d >= 0 {
-        do2 := g2_slot(d); o1 := g2_slot(s1);
-        cp = cp + e2_lb(buf, pos+cp, o1); cp = cp + e2_st(buf, pos+cp, 10, do2);
+        do2 := g2_slot(d);
+        if s1 >= 0 && r64(g_x86_is_global, s1 * 8) != 0 {
+            // 全局取址：lea r10, [rip+rel32] + RIP 补丁（与 IR_STORE 全局分支、
+            // e2_load_var 全局分支同规约）。修复前一律 e2_lb(g2_slot(s1))——
+            // 全局行的 g2_slot 是**帧外的伪 rbp 偏移**（与 IR_LOAD_FIELD 修复前
+            // 同型缺陷）⇒ `&g` 取到栈上垃圾地址：`*p = x` 写进帧内临时、读回
+            // 自洽（`*p` 仍读到 x），但与全局槽 `g` 完全脱钩（EL2 实测：ELF
+            // `*p = 5; return g` 恒为初值，interp 正确）。
+            grow_rip_patch(g_x86_rip_patch_count + 1);
+            w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3);
+            w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1);
+            g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
+            cp = cp + e2_lr(buf, pos+cp, 0);
+        } else {
+            cp = cp + e2_lb(buf, pos+cp, g2_slot(s1));
+        }
+        cp = cp + e2_st(buf, pos+cp, 10, do2);
         return cp;
     }
 
