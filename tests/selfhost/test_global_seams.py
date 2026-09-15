@@ -107,7 +107,9 @@ def case_elf_match(name, source, patterns):
         blob = Path(out).read_bytes()
         for label, pat in patterns:
             if pat.search(blob) is None:
-                print(f"[FAIL] {name}: 产物缺连续序列 {label} ({pat.pattern.hex(' ')})")
+                # 注：`pat.pattern` 是**正则文本**（`\xNN` 由正则引擎解释为字节），
+                # 故此处按文本渲染；勿改回 `.hex()`（会把文本 dump 成 hex，误导排查）。
+                print(f"[FAIL] {name}: 产物缺连续序列 {label} (pattern={pat.pattern!r})")
                 return False
         print(f"[PASS] {name}: 产物命中 {len(patterns)} 条连续序列（发射字节级）")
         return True

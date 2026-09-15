@@ -237,6 +237,44 @@
 | T5 | 判据复验（全套 + 自举链） | 无 | Global Constraints 全绿 |
 | T6 | 收官（台账 + 文档 + 路径限定提交） | 计划/报告（+ 取裁的 TODO 登记） | `jj status` 干净 + 报告归档 |
 
+### 实施记录（2026-09-16；提交链）
+
+- **T1**（`ab17f428` 初稿 → `7151b90c` 决定性 RED）：四点 RED 全达标（B1/B2/B4/B5，mut 形三重隔离）。
+- **T2**（`4d786e00`）：`g2_slot` 全点 56 处枚举 + 写侧 d 域结构性初判 + B6 `need_pack` 掩蔽修正 + 转换环改动面评估。
+- **裁决/登记**（`6cac7df3`）：裁-SEAM-3 证伪与改判留痕 + TODO #74/#75 + dex/apx 节两条补注（N-2/N-4）。
+- **T3**（`619827c6`）：`instr.cr` 新增 `e2_lea_glob`/`e2_is_glob`/`e2_sd_ld_var`/`e2_sd_cvt_var`/`e2_sd_st_var`/`e2_st_var`；迁移 B1（585/586 + 593 dest）· B2（532 + 533 dest）· B4（1398-1403）· B5（1411-1416）· B6（`callseq.cr:75`/`:129`）· B7（`cs_ret_value` 全局支按型分派）· B8（1886/1921/1952）；删死码 `sz_ofs`/`sz_load_var` + 死变量 `o1`。
+- **T4**（`9df6b835`）：`tests/selfhost/test_global_seams.py`（12 例；B6(b) = 发射字节级）+ `tests/suite/global_seam_test.cr` + `src/ci/run.sh` 挂钩。
+- **T5（进行中）**：构建以 `nice -n 19` 起（构建槽位实查无本仓 corec 进程后）；判据逐条待回填。
+
+---
+
+## T5 实施记录（判据复验；2026-09-16 —— **全绿**）
+
+**构建**：`nice -n 19 python3 build_selfhost_native.py` rc=0（corec/corearch/corelsp 三件；构建槽位开跑前 `ps` 实查——无本仓 corec 进程；当时 CPU 占用者 = 用户自己的 Qt/CMake 构建）。**单构建串行**：全程 3 次构建（首建 + REX.B 修复重建 + 两次 /tmp 突变构建）均逐个排队。
+
+| 判据 | 结果 |
+|---|---|
+| T4 探针套件（12 例） | **12/12**（B1/B2/B4/B5 全局形转正 + 局部对照同值 + B6(b) 字节级 + B7 非回归） |
+| `tests/suite/global_seam_test.cr` | build rc=0 + run rc=0 |
+| 冒烟 | **42** |
+| **ELF canary** | **`95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475`（28822B）IDENTICAL** |
+| **`.ccr` 两口径四条**（逐条 clean-cache + 冷态） | 96015 `680a6f98…` · 96158 `76f36e6a…` · 142793 `41e9d845…` · 142936 `704316c8…`（**全 IDENTICAL**） |
+| `check src/compiler` | **rc=0 且 0 条 `error[`**（自源语料干净） |
+| `selftest-types` | **415/415** |
+| 五 CI job | `selfhost-tests` / `suite` / `check` / `bootstrap-tests` / `full-bootstrap` **全 rc=0** |
+| 自举链 | `corec2 == corec3` **IDENTICAL**（`093ba2305c204fdd…`）+ **N06=0**（五 job 日志零命中）+ 冒烟 42 |
+| **腿① 同源对拍（73 档）** | 参考（冻结基线 `/tmp/capt6/base/corec` × 当前源）vs 候选（当前二进制 × 当前源）：**`diff -rq` 零差异**（146 条目；rc 分布 35×0/38×1） |
+| **探针 29 档** | `rc.txt` 与 (A) 批 post 输出**零差异** + cold 日志零差异 + 暖态 `warm.out`（条目/命中）零差异；`warm/` 逐档日志仅**临时路径**差异（`/tmp/warm_leg.*`） |
+| **突变控制 ①（全局分支）** | Mu1 = `e2_lea_glob` 补丁位置 `pos+3 → pos+4` ⇒ B1/B2 全局形 **红（139）**、B6(b) 字节判据 **红**、**局部对照与 int 面保持绿**、canary **IDENTICAL** ✓ |
+| **突变控制 ②（非全局分支）** | Mu2 = `e2_ld` disp8 形 ModRM `rm=5 → rm=4` ⇒ 探针 **11/12 红** + **canary 变**（`a7ef9ddf…` ≠ 锁值）✓ |
+
+**判据修正（本批内产生，已落）**：`tools/baseline/parity_run.sh` 语料计数 **72 → 73**（本批新增 `tests/suite/global_seam_test.cr` ⇒ t1 32→33；runner 自身注「语料数变化 ⇒ 硬失败，须显式改本文件」）+ `src/ci/run.sh` 注释同步。
+
+**自伤与偏差台账（本批自曝、已闭合）**：
+1. **偏差-1（自伤缺陷，T4 套件当场拦住）**：`e2_sd_ld_var`/`e2_sd_cvt_var`/`e2_sd_st_var` 的 `movsd/cvt [r11]` **漏 REX.B** ⇒ 实际寻址 `[rbx]` ⇒ B1/B2 全局形由「静默错值」变 **SIGSEGV 139**（int 写侧 `e2_st_var` 未犯——按 IR_STORE 先例带了 `emit_rex`）。修复 = 三处补 `0x41`/cvt 形 `0x49`（提交 `b1792681`）。
+2. **偏差-2（弱判据，同批收紧）**：B6(b) 原判据把 `4c8d1d` 与 `f20f1003` **逐片段独立 find**，缺 REX.B 的坏序列照样通过（**判据放跑了偏差-1**）。收紧 = **连续序列正则** + 失败消息按文本渲染（`\xNN` 由正则引擎解释，`.hex()` 会 dump 文本误导排查）。
+3. **偏差-3（计数漂移）**：新增 suite 语料使腿① 计数断言硬失败 ⇒ 显式 72→73（见上）。
+
 ---
 
 ## Task 1：前置侦查 + 冻结基线 + 六点 RED（**源码零改动**）
