@@ -1,5 +1,7 @@
 # Core Spec IR Schema — 规约约束层 (.csr)
 
+> 定位:受众 = 维护者(规约约束层实现者);状态 = active;真源 = src/compiler/ccr_io.cr(.csr 读写)+ maintainer/design/spec-design.md。
+
 ## 概述
 
 `.csr` 是 `.cir`（HDFG）的规约约束扩展的二进制序列化格式。它不是独立的 IR，而是 `.cir` 的补充——携带规约约束元数据（check/ensure/invariant/标签），与 `.cir` 的 DFNode 数组通过节点索引精确关联。
@@ -112,4 +114,4 @@
 - **验证执行**（spec-design v2）：规约表达式（`#check`/`#ensure`/`spec fn` 体）经**翻译桥**编译为 CIC 项，走 CIC 内核 + SMT 证书双通道；`.csr` 的 `status` 字段（0=unproven, 1=auto_proven, 2=user_proven）承接验证结果
 - **自动推导**：编译器从 `.cir` 图结构推导的标签（`#pure`/`#terminating`/`#safe_index` 等）写入 `.csr`（status=auto_proven）
 
-即：**本 schema 定义"约束存在哪里"，spec-design v2 定义"约束如何被验证"**——两者分层，v2 不改变本格式。完整验证工作流见 `docs/spec-design.md`。
+即：**本 schema 定义"约束存在哪里"，spec-design v2 定义"约束如何被验证"**——两者分层，v2 不改变本格式。完整验证工作流见 `docs/maintainer/design/spec-design.md`。

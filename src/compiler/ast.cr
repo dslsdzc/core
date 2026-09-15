@@ -294,7 +294,7 @@ TYP_OPTIONAL : int = 12;  // data = inner type idx（T? = T ∪ null）
 // AK_NULL 原子（原生第九员）；行不带参数（None 无载荷）。与 AK_UNIT/AK_NEVER 均不相交。
 TYP_NULL : int = 13;  // 无字段（data/extra 恒 0）
 
-// Error codes: category * 1000 + number, matching docs/error-codes.md
+// Error codes: category * 1000 + number, matching docs/developer/errors.md
 // Category 0 = unclassified (000-)
 // Category 1 = P  (Parser)
 // Category 2 = N  (Name resolution)
