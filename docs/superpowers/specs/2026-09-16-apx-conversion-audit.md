@@ -50,18 +50,19 @@
 ## 2. 表 B：未覆盖/可疑清单（探针**只设计不运行**）
 
 > 通用形：每例含**局部对照**（同值走已覆盖路径）；期望值 = 该值在 scaled 世界的表示；预判 = **静默错值（两路径同错）** 除非另注。
+> **探针为设计稿（未编译验证语法）**：语法按本仓既有用例形（`impl S { fn m(self: S, …) }`、结构体字面量 `S { f = v }`）——(B) 批落地时先过一遍 `check`。
 > **N-4 纪律**：涉及全局的探针**必须 `mut`**（否则 `find_global_const_node` 折叠 ⇒ 读点不碰全局行）。
 
 | # | 机理一句话 | 最小探针（≤10 行）| 期望 | 可达性 |
 |---|---|---|---|---|
-| **B-1**（=N-3）| 方法调用不走转换环（门 `:1806`）| `struct S { v: dex } impl S { fn m(self, x: dex) -> int { return @raw_int(x) / 1000000; } } fn main() -> int { s := S{v:0.0}; d : ., apx = 7.0; return s.m(d); }` | 7 | **可达**：`EXPR_FIELD` 调用节点 |
+| **B-1**（=N-3）| 方法调用不走转换环（门 `:1806`）| `struct S { v: dex } impl S { fn m(self: S, x: dex) -> int { return @raw_int(x) / 1000000; } } fn main() -> int { s := S { v = 0.0 }; d : ., apx = 7.0; return s.m(d); }` | 7 | **可达**：`EXPR_FIELD` 调用节点 |
 | **B-2**（=②a，新确证）| Core `-> dex` 返 apx ⇒ 门 `g_cur_ret_ti==TI_DEX` 恒假（`:684-690` ⇒ `TI_DEX_S`）| `fn f() -> dex { d : ., apx = 7.0; return d; } fn main() -> int { v := f(); return @raw_int(v) / 1000000; }` | 7 | **可达**：`:2494` 不触发 |
-| **B-3**（=③a/b）| 字段槽按声明为 scaled，写入不转换 + 读回定型 `TI_INT` | `struct S { f: dex } fn main() -> int { d : ., apx = 7.0; s : ., mut = S { f: d }; return @raw_int(s.f) / 1000000; }` | 7 | **可达**：`:2645` 无 adjust |
+| **B-3**（=③a/b）| 字段槽按声明为 scaled，写入不转换 + 读回定型 `TI_INT` | `struct S { f: dex } fn main() -> int { d : ., apx = 7.0; s : ., mut = S { f = d }; return @raw_int(s.f) / 1000000; }` | 7 | **可达**：`:2645` 无 adjust |
 | **B-4**（=④a/b）| 数组/切片元素同 ③ | `fn main() -> int { d : ., apx = 7.0; a : [dex;2] = [d, 1.0]; return @raw_int(a[0]) / 1000000; }`（切片形：`g[lo..3]` 同）| 7 | **可达**：`:1362/:2690` 无 adjust |
 | **B-5**（=⑤）| 元组元素同 ③ | `fn main() -> int { d : ., apx = 7.0; t := (d, 1.0); return @raw_int(t . 0) / 1000000; }` | 7 | **可达**：`:2818` 无 adjust |
 | **B-6**（=⑥）| 枚举载荷同 ③ | `enum E { V(dex) } fn main() -> int { d : ., apx = 7.0; e := V(d); return match e { V(x) => { return @raw_int(x) / 1000000; } }; }` | 7 | **可达**：`:2558` 无 adjust |
 | **B-7**（=⑨）| `as` 为纯 `IR_LOAD` 拷贝（`:2765`），无形式转换 | `fn main() -> int { d : ., apx = 1.5; x := d as dex; return @raw_int(x) / 1000000; }` | 1（1.5 经 6 位定点 = 1500000/1e6）| **可达**：`:2749-2767` |
-| **B-8**（=⑧）| 聚合读丢型 ⇒ 比较不对齐（bits vs scaled 混比）| `struct S { f: dex } fn main() -> int { d : ., apx = 1.5; s : ., mut = S { f: 1.5 }; if s.f == d { return 1; } return 0; }` | 1（同值应相等）| **可达**（依赖 B-3/B-4 同因）|
+| **B-8**（=⑧）| 聚合读丢型 ⇒ 比较不对齐（bits vs scaled 混比）| `struct S { f: dex } fn main() -> int { d : ., apx = 1.5; s : ., mut = S { f = 1.5 }; if s.f == d { return 1; } return 0; }` | 1（同值应相等）| **可达**（依赖 B-3/B-4 同因）|
 | **B-9**（=①e，=N-1）| 前端已转 scaled，后端分类仍按 `irv_type`（`callseq.cr:71/97/99/125`）⇒ 落位/序与 callee 期望的交互 | 见 (B) T1 探针（8 个 binary64 实参 + 局部 apx 作第 9 参）| 7 | **(B) 实测可达**；**机理未实证**（§3）|
 | **B-10**（=⑪ 反证对照）| 已覆盖面**应当正确**（防「修法把正确的搞坏」）| `fn g(x: dex) -> int { return @raw_int(x) / 1000000; } fn main() -> int { d : ., apx = 7.0; return g(d); }` | 7 | 已覆盖（①a+⑪）|
 
