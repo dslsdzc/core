@@ -143,6 +143,10 @@ bash tools/baseline/canary_check.sh --selftest             # 合成夹具自证�
 否则「自称已挂」复现）+ **真产物篡改**（采集真产物 → 翻 `pa.ccr` 一字节 → `--verify-only`
 **必须红**）。后者是「值不符 ⇒ 必红」在**真判据**上的闭环。
 
+> **实测**（§9 E1–E7）：S1–S6 全按设计；「翻一字节 ⇒ 红且指名产物」已用**真产物**（从
+> `/tmp/capt6`、`/tmp/fct3` 两处采集）跑通，**零编译**。仅「由载体自己采集真产物」这一步
+> 待构建槽开放（§9 待实测）。
+
 ---
 
 ## 3. 挂点（T2）
@@ -222,3 +226,25 @@ bash tools/baseline/canary_check.sh --selftest             # 合成夹具自证�
 - **T3**：`python3 tests/selfhost/test_mw_task2.py` 在**无基线**时 **rc=1**（改前为 rc=0）；
   带 `--allow-skip` 时 rc=0。
 - **零足迹**：五 CI job + 全枚举 + canary/四条 —— **待实测（等构建槽）**。
+
+---
+
+## 9. 本批实测记录（T1–T3；**全部零编译**——构建槽被在途批占用）
+
+| # | 项 | 结果 | 性质 |
+|---|---|---|---|
+| E1 | `canary_check.sh --selftest` | **rc=0 · 6/6**（S1 绿路可达 + S2–S6 五类必红） | 实测（无编译器） |
+| E2 | `--verify-only` 对 `/tmp/capt6` 采集的真产物（2026-09-16，全局 seam 批在途采集体） | **5/5 PASS** | 实测（无编译器） |
+| E3 | `--verify-only` 对 `/tmp/fct3` 采集的真产物（2026-09-15，fail-closed T3 采集体；**另一目录、另一批次**） | **5/5 PASS** | 实测（无编译器） |
+| E4 | 真产物 `pa.ccr` **翻一字节（尺寸不变）** ⇒ `--verify-only` | **rc=1**，指名 `pa_ccr` + 打印期望 vs 实际；其余 4 条仍 PASS | 实测（无编译器） |
+| E5 | 误拷 `pa_static_ccr` 值入 `pa.ccr` 槽（S2 的「值不符」变体） | **rc=1**，两条 FAIL（size + sha256） | 实测（无编译器） |
+| E6 | `python3 tests/harness/test_canary_carrier.py`（挂点前） | **rc=1**：A1/A2 双 FAIL（「未真挂」被抓）+ B PASS | 实测（临时树骨架，无 `build/`） |
+| E7 | 同上（挂点后） | **rc=0**：A1/A2/A3/B 全 PASS；C 显式 `[SKIP]`（该骨架无编译器） | 实测（临时树骨架） |
+| E8 | `python3 tests/harness/test_ci_hook_coverage.py` | **rc=0 · scope=65 hooked=38 unhooked(allowlisted)=27**（差集不变；新测试已挂 ⇒ 不进白名单） | 实测（纯 python） |
+| E9 | `tests/selfhost/test_mw_task2.py --help` | 新 `--allow-skip` 旗标就位 | 实测（argparse 即退，不跑用例） |
+
+**待实测（等构建槽开放）**：载体默认模式（真采集 5/5）· `test_mw_task2.py` 无基线时 rc=1
+（与 `--allow-skip` 时 rc=0）· 五 CI job · 全枚举 · §8 的零足迹项 · **§2.1 挂点成本实测时长回填**。
+
+**E4/E5 的意义**：不只证明「比的是 sha 而非只比尺寸」，还证明**红是可诊断的**（指名产物 +
+期望 vs 实际）——「闸门变红但没人看得懂」同样是判据失效形态。
