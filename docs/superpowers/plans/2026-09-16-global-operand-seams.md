@@ -73,7 +73,7 @@
 | **B6(b)** | 同上 | 同上（**extern** 调用点） | 可达（extern 环只转 `TI_DEX_S→bits`；**apx 全局**保持 `TI_DEX` 直达分派）；**须单实参形**（`ac==1` 恒不打包，§T2-c） | 静默错值；静态构建下**无 .so 不能真跑** ⇒ 判据降级到发射字节（裁-SEAM-2） | dex 读 seam |
 | **B6(c)** | 同上 | 同上（**方法调用** `obj.m(x)`） | **寻址面被 `need_pack` 掩蔽**（接收者与全局索引不连续 ⇒ 打包进 `_arg`，§T2-c；仅偶合形可达）；**值面**（环门 = `ast_kind(func_node)==EXPR_IDENT`，方法调用 = `EXPR_FIELD` ⇒ 环整段跳过）**可达** | **两级缺陷**：① 寻址（本批 seam 覆盖，多数形被掩蔽）② 形式转换缺失（bits 当 scaled 用；callee 形参型 `TI_DEX ⇒ TI_DEX_S`，`ir_gen.cr:2866`）⇒ **任何方法调用可触发静默值错**（裁-SEAM-3 加硬封口） | dex 读 seam + 转换环（按裁-SEAM-3 同批封口） |
 | **B6(c-栈)** | `callseq.cr:126` | 栈参 dex 支 `e2_sd_load_x(g2_slot(fa+stack_ai),0)` | 可达（同 B6(b)/(c)，第 9 个 binary64 起落栈） | 同 B6(c) | dex 读 seam |
-| **B7** | `callseq.cr:160-163` | `cs_ret_value`：`irv_type(s1)==TI_DEX` **先于**全局判定 | **未确证可达**（读码构不出：返回点 `ir_gen.cr:2495` 已把 apx 值转 scaled ⇒ s1 恒临时）；属**次序错的不变量缺口** | 若未来可达 ⇒ 全局 dex 返回值走错路径（见裁-SEAM-4 修法修正） | 加固（取裁） |
+| **B7** | `callseq.cr:160-163` | `cs_ret_value`：`irv_type(s1)==TI_DEX` **先于**全局判定 | **B7 的全局支**当前不可达（读码判定）；**同族 `-> dex` 返回路径可达**——跨批 apx 审计确证：`fn_return_ti`（`ir_gen.cr:684-690`）把 `-> dex` 归一为 `TI_DEX_S`，而返回点转换门写 `g_cur_ret_ti == TI_DEX`（`ir_gen.cr:2494`）⇒ **门恒不触发** ⇒ `fn f() -> dex { return <局部 apx 值>; }` **静默错值 · 双路径同错**（**归 apx 批次**：审计表 B-2 / P0，非本批面） | 若未来可达 ⇒ 全局 dex 返回值走错路径（见裁-SEAM-4 修法修正） | 加固（取裁；**与上述机理不同层，不撤**） |
 | **B8** | `instr.cr:1817·1852·1860·1880·1883·1891` | HIT 表事件发射 dest/addr 槽 | **仅表实例可达**（① 活动实例 `allow_table=1`，`corearch.cr:451/455`；② 指令落降低子集且 d/s1 为全局行；③ 未实证） | 写落伪偏移、读侧正确 ⇒ 静默错值 | 取裁（裁-SEAM-5）；若 seam 覆盖到该函数则自动消失（但 1860/1880/1891 是 **disp 参**，需单独形态） |
 
 **已排除（审计依据 + 本计划采信，不重复侦查）**：B3 `IR_F2I` s1（唯一发射点恒内部临时）· `IR_YIELD`（`ir_gen.cr:2470-2476` 恒 `d=-1`，实读确认；且 `instr.cr:1418-1426` 有 `d>=0 && s1>=0` 门）· `IR_DYN_*`（全局行型恒不为 `TI_DYN`）· `IR_LAZY_THUNK`/`IR_LAZY_FORCE` s1（`instr.cr:1395-1406` 已走 `e2_load_var`；d 走 `g2_slot` — 见 U3 清点）· `IR_CONST` TI_STR + d=全局 · `IR_LOAD_ENUM_TAG` dest · `IR_LOAD` dest。
@@ -136,7 +136,7 @@
 | **B6(a)** | `dbl(g)`（裸标识符调 Core 函数，apx 全局） | 7 | 7 | 未复现（与审计「已排除」一致） |
 | **B6(b)** | `seam_ext(g)`（**单实参** extern）＋**对照 `seam_ext(1.5)`（无全局）** | 2 / 2 | **139 / 139** | **139 非判别**：对照（无全局实参）同样 139 ⇒ extern 在静态构建下调用**未解析符号必崩**（无 `.so`）⇒ **B6(b) 判据只能到发射字节**（裁-SEAM-2 原判正确；U6 修正） |
 | **B6(c)** | `s.m(g)`：不可变 apx 全局 / **mut apx 全局** | 7 / **1** | 7 / **1** | 不可变形未触达（折叠）；**mut 形双路径同错（1/1，期望 7）** ⇒ **非本批 seam 特征**（本批特征 = ELF-only 分歧）⇒ **登记 N-3**（形式转换缺口；**取裁见 §对 T3 范围的影响**） |
-| **B7** | `ret_g()` 返回 int 全局 | 5 | 5 | 非回归 ✓（不可达预期） |
+| **B7** | `ret_g()` 返回 int 全局 | 5 | 5 | 非回归 ✓（**B7 全局支**不可达；同族 `-> dex` 返回路径的可达形态归 apx 批次——见 §活点清单 B7 行的跨批更新） |
 
 **RED 判据达成情况**：计划要求「至少 B1/B2/B4/B5」⇒ **四项全部达标**（且均为 **mut 全局形 + 局部对照 + int 全局对照**三重隔离）；B6(b) 降级为字节判据（U6 修正）；B6(c) 转为 **N-3**（形式转换缺口，**非寻址面**；须 lead 重新取裁）。
 
@@ -385,7 +385,7 @@
 
 **未决项（须实施时实证，不得默认）**
 - **U1** B8 可达性（三条判据：活动实例 `allow_table=1` / 指令落降低子集且 d 或 s1 为全局行 / 静默错值）**未实证**；且 1860/1880/1891 是 **disp 参形态**（非 `e2_ld/e2_st` 偏移参）⇒ 修法须单独设计（seam 覆盖不到）。
-- **U2** B7 可达性**未确证**（读码构不出；返回点 `ir_gen.cr:2493-2495` 已把 apx 值转 scaled）⇒ 取裁 (a) 的收益 = 不变量，而非实测修复。
+- **U2** ~~B7 可达性未确证~~ ⇒ **跨批更新（2026-09-16，apx 审计）**：**B7 的全局支**当前不可达（读码判定，本批取裁 (a) 的收益 = 不变量而非实测修复）；**但同族 `-> dex` 返回路径可达**（`fn_return_ti`（`ir_gen.cr:684-690`）归一为 `TI_DEX_S` vs 返回点门 `g_cur_ret_ti == TI_DEX`（`ir_gen.cr:2494`）**恒不触发** ⇒ 局部 apx 值经 `-> dex` 返回静默错值、双路径同错）⇒ **归 apx 批次 P0（审计表 B-2）**，本批保持根因单一、不修。
 - **U3** **写侧 d 域**（`IR_REF` dst · `IR_ALLOC_STRUCT` · `IR_FNADDR` · `IR_MAKE_ENUM` · `e2_store_ret` 385-391 · `IR_SPAWN` · `IR_HOTPATCH_ROUTE` · `IR_LOAD_ENUM_TAG` dst〔代码注释自认未接〕· `IR_LAZY_THUNK/FORCE` dst · `IR_DYN_PACK` dst · `IR_FNADDR` 等）逐条「d 可否为全局行」**未清点** —— T2 产出；清点前**不得**宣称「写侧无活点」。
 - **U4** `e2_sd_load`/`load1`/`load_x`/`cvt`/`store` 五件**均无 `E2_REG_SLOT_BASE` 分支**（`e2_ld/e2_st/e2_li` 有）：本批实读 regalloc 类型门（`regalloc.cr:680-681` 排除 `TI_DEX/TI_DEX_S/TI_DYN/TI_UNIT` + `:458-462` hazard 门）⇒ **dex 行不参与寄存器分配 ⇒ 该缺口现不可达**；但**若未来 regalloc 放开 dex**，五件会把 `E2_REG_SLOT_BASE+rn`（≥1e9）当 disp32 写 ⇒ 静默错值。本批 = **登记**（不改，避免混淆 seam 边界）。
 - **U5** 全局 `string` 型面（`reg_one_global:3116` 默认 `TI_INT`）的确切现象（`g[0]` 走 8 字节元素支、`g == "s"` 不做内容比较）**未实测**（现有语料用 `str_len(g)` 以外无覆盖）⇒ 独立条目 + T1 顺带取证据。
