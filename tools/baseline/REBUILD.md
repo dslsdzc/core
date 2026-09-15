@@ -121,5 +121,5 @@ bash tools/baseline/warm_run.sh ./build/corec /tmp/warm_now   # 牙齿层（语�
   的 `.ccr` 记录值**自本批起**锁定「环境归一化（受控空 `HOME`）下的产物」——载体
   `canary_check.sh` 已把 `HOME` 钉到采集目录内的空 `home/`；**手工复跑时也须同样归一化**，
   否则会得到本机态的假红（**不得** unset/置空 `HOME`：`module.cr:526` 有硬编码 `/home/DslsDZC`
-  兜底，置空反会去读原开发者家目录）。根因已独立登记（TODO #79/#82，与「缓存键缺编译器身份」同族）。
+  兜底，置空反会去读原开发者家目录）。根因已独立登记（TODO #82/#83，与「缓存键缺编译器身份」同族）。
   注：本条的**两档语料**中 `ptr_arith` 零 import ⇒ 不受影响；受影响的只有 `generics_test`（两口径）。
