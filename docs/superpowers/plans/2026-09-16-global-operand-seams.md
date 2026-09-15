@@ -70,13 +70,54 @@
 | **B4** | `instr.cr:1334-1335` | `IR_SLICE` s1（数组指针）/s2（low） | 可达（全局数组 + 全局 low；两者**都**直吃 `g2_slot`） | 响亮 SIGSEGV 或静默错值（取决于伪偏移是否可读） | int 读 seam（`e2_load_var` 已有，**只差迁移**） |
 | **B5** | `instr.cr:1345` | `IR_AWAIT` s1（`e2_ld`），d（1346，`e2_st`） | 可达（`x := await g`，g 全局 int；d 恒临时） | 静默错值 | int 读 seam（迁移）+ d 写侧清点 |
 | **B6(a)** | `callseq.cr:73` | 寄存器参数 dex 支 `e2_sd_load_x(g2_slot(fa+ai))` | **已排除**（裸标识符调 Core 函数：`ir_gen.cr:1810` 转换环先做 `dex_bits_to_scaled` ⇒ 实参必为临时；`TI_DEX_S` 实参走 int 支 `:81` 已分派） | — | 不改（判据 = 回归钉） |
-| **B6(b)** | 同上 | 同上（**extern** 调用点） | 可达（extern 环只转 `TI_DEX_S→bits`；**apx 全局**保持 `TI_DEX` 直达分派） | 静默错值；静态构建下**无 .so 不能真跑** ⇒ 判据降级到发射字节（裁-SEAM-2） | dex 读 seam |
-| **B6(c)** | 同上 | 同上（**方法调用** `obj.m(x)`） | 可达（环门 = `ast_kind(func_node)==EXPR_IDENT`，方法调用 = `EXPR_FIELD` ⇒ **环整段跳过**） | **两级缺陷**：① 寻址（本批 seam 覆盖）② 形式转换缺失（bits 当 scaled 用；callee 形参型 `TI_DEX ⇒ TI_DEX_S`，`ir_gen.cr:2866`）⇒ **修①后仍静默错值**（裁-SEAM-3） | dex 读 seam + 第二根因单列/同批（取裁） |
+| **B6(b)** | 同上 | 同上（**extern** 调用点） | 可达（extern 环只转 `TI_DEX_S→bits`；**apx 全局**保持 `TI_DEX` 直达分派）；**须单实参形**（`ac==1` 恒不打包，§T2-c） | 静默错值；静态构建下**无 .so 不能真跑** ⇒ 判据降级到发射字节（裁-SEAM-2） | dex 读 seam |
+| **B6(c)** | 同上 | 同上（**方法调用** `obj.m(x)`） | **寻址面被 `need_pack` 掩蔽**（接收者与全局索引不连续 ⇒ 打包进 `_arg`，§T2-c；仅偶合形可达）；**值面**（环门 = `ast_kind(func_node)==EXPR_IDENT`，方法调用 = `EXPR_FIELD` ⇒ 环整段跳过）**可达** | **两级缺陷**：① 寻址（本批 seam 覆盖，多数形被掩蔽）② 形式转换缺失（bits 当 scaled 用；callee 形参型 `TI_DEX ⇒ TI_DEX_S`，`ir_gen.cr:2866`）⇒ **任何方法调用可触发静默值错**（裁-SEAM-3 加硬封口） | dex 读 seam + 转换环（按裁-SEAM-3 同批封口） |
 | **B6(c-栈)** | `callseq.cr:126` | 栈参 dex 支 `e2_sd_load_x(g2_slot(fa+stack_ai),0)` | 可达（同 B6(b)/(c)，第 9 个 binary64 起落栈） | 同 B6(c) | dex 读 seam |
 | **B7** | `callseq.cr:160-163` | `cs_ret_value`：`irv_type(s1)==TI_DEX` **先于**全局判定 | **未确证可达**（读码构不出：返回点 `ir_gen.cr:2495` 已把 apx 值转 scaled ⇒ s1 恒临时）；属**次序错的不变量缺口** | 若未来可达 ⇒ 全局 dex 返回值走错路径（见裁-SEAM-4 修法修正） | 加固（取裁） |
 | **B8** | `instr.cr:1817·1852·1860·1880·1883·1891` | HIT 表事件发射 dest/addr 槽 | **仅表实例可达**（① 活动实例 `allow_table=1`，`corearch.cr:451/455`；② 指令落降低子集且 d/s1 为全局行；③ 未实证） | 写落伪偏移、读侧正确 ⇒ 静默错值 | 取裁（裁-SEAM-5）；若 seam 覆盖到该函数则自动消失（但 1860/1880/1891 是 **disp 参**，需单独形态） |
 
 **已排除（审计依据 + 本计划采信，不重复侦查）**：B3 `IR_F2I` s1（唯一发射点恒内部临时）· `IR_YIELD`（`ir_gen.cr:2470-2476` 恒 `d=-1`，实读确认；且 `instr.cr:1418-1426` 有 `d>=0 && s1>=0` 门）· `IR_DYN_*`（全局行型恒不为 `TI_DYN`）· `IR_LAZY_THUNK`/`IR_LAZY_FORCE` s1（`instr.cr:1395-1406` 已走 `e2_load_var`；d 走 `g2_slot` — 见 U3 清点）· `IR_CONST` TI_STR + d=全局 · `IR_LOAD_ENUM_TAG` dest · `IR_LOAD` dest。
+
+---
+
+## T2 进展（部分；零构建，2026-09-16 —— **修正 B6 可达性 + 写侧 d 域初判**）
+
+> 本节 = T2 的零构建部分（裁决门已落纸、T1 因构建槽位被占未开跑时先行）。标「待实证」的条目由 T1 实测确认。
+
+### T2-a `g2_slot` 全点机械枚举（**56 处**；`awk` 按最近 `if op == IR_*` 归属，`instr.cr`）
+
+- **助手函数 5 处**：`:55`（定义本体）· `:387`/`:389`（`e2_store_ret` dex/int 两支）· `:442`（`e2_load_var` 局部支）· `:456`（**死码 `sz_load_var`**）。
+- **`emit_instr` 分支 45 处**：`IR_I2F` 467/468 · `IR_F2I` 475/476 · `IR_CONST` 484 · `IR_BINARY` 517/520/521 · `IR_UNARY` 669 · `IR_CALL`(goroutine_wrapper_addr 内置体) 815 · `IR_CALL_EXTERN` 840 · `IR_HOTPATCH_ROUTE` 861 · `IR_SPAWN` 873 · `IR_FNADDR` 908 · `IR_ALLOC_STRUCT` 936 · `IR_ALLOC_ARRAY` 956 · `IR_ARENA_NEW` 976 · `IR_LOAD` 1018 · `IR_STORE` 1046（**s1 侧，已分派**）· `IR_LOAD_FIELD` 1071/1075（已分派）· `IR_REF` 1096/1099/**1110（d 侧未分派）** · `IR_DEREF` 1117 · `IR_ADDR_INDEX` 1133 · `IR_LOAD_ENUM_TAG` 1231（**死变量**）· `IR_LOAD_INDEX` 1247 · `IR_LOAD_INDEX_VAR` 1283 · `IR_MAKE_ENUM` 1320 · `IR_SLICE` 1334 · `IR_AWAIT` 1345/1346 · `IR_LAZY_THUNK` 1402 · `IR_LAZY_FORCE` 1407 · `IR_YIELD` 1419/1420 · `IR_DYN_PACK` 1428 · `IR_DYN_TAG` 1437/1438 · `IR_DYN_VAL` 1446/1447 · `IR_DYN_DISPATCH` 1456/1457/1565。
+- **`hit_ev_emit_one` 6 处**：1817/1852/1860/1880/1883/1891（表实例面）。
+- **分类口径（T2 完成判据）**：逐条给「直接消费者（`e2_ld`/`e2_st`/`e2_sd_*`/`hit_st_modrm_disp`…）+ 该槽位能否为全局行 + 依据 `file:line`」；本表 = **坐标真源**，分类列在 T1 后回填（T1 的 RED 结果 = 「能否为全局」的实证来源）。
+
+### T2-b 写侧 d 域：**结构性初判 = 无活点（待 T1 实证复核）**
+
+- 全局 var 索引的**唯一来源** = `find_global`（`ir_gen.cr:579-587`）与 `global_var_of`（`:3055-3063`）。
+- `find_global` 实核调用点 **3 处**：`:524`（表示面分类，**只读**）· `:1116`（EXPR_IDENT 读值 → **操作数**）· `:1364`（赋值目标 → `emit(IR_STORE, -1, gv, val_var, 0, 0)`，**dest = -1、全局只作 s1**）。
+- `global_var_of` 唯一调用点 `:3074` → `emit(IR_STORE, -1, gv, v, 0, 0)`（**全局初值**注入，同为 s1）。
+- ⇒ **前端从不把全局索引传给任何 `emit` 的 dest**；一切全局写 = `IR_STORE` 的 s1（该分支已分派，`instr.cr:1048-1056`）⇒ 写侧 d 域（`IR_REF` dst · `IR_ALLOC_STRUCT` · `IR_FNADDR` · `IR_MAKE_ENUM` · `e2_store_ret` 387/389 · `IR_SPAWN` · `IR_HOTPATCH_ROUTE` · `IR_LAZY_*` dst · `IR_DYN_*` dst）**初判无活点**，依据 = emit dest 恒为 `new_ir_var` 产物（如 `IR_CALL` 的 `dest := new_ir_var("call", call_ti)` = `:1925`）。
+- **残余风险（待实证）**：若任何前端路径把全局索引传给 dest（如 `IR_REF` 的 **d 侧 1110**（`&g` 存入全局指针槽）），该点即错。裁-SEAM-1 定为**只清点不修** ⇒ T1 用「全局指针槽」探针实测复核，结果回填本表。
+
+### T2-c **B6 可达性修正：`need_pack` 掩蔽条件**（`ir_gen.cr:1927-1952`，实读）
+
+实参块**仅在非连续时才打包**进连续 `_arg` 临时：`first_arg_var = arg_vars[0]`，逐对检查 `cur == prev + 1`；全连续 ⇒ `need_pack = 0` ⇒ **不打包**（全局实参**直达**后端）。打包支（`need_pack != 0`）逐个 `emit(IR_STORE, -1, packed, av)`——**只搬值、不换形式**（`at := irv_type(av)` 原样）。
+
+- **`ac == 1` 恒不打包** ⇒ 单实参调用的全局实参直达 `cs_args_dispatch` ⇒ **B6(b) 的 extern 单参形 = 寻址面可达**（探针按此形设计）。
+- **多实参且索引连续**同样不打包（如相继注册的全局 `g1, g2`）⇒ 全局实参直达。
+- **方法调用 `s.m(g)`**：`ac ≥ 2`（接收者 + 实参；`ir_gen.cr:1779-1786` 显式前置 `self_var`，实读），接收者（局部/临时）索引与全局索引**几乎必然不连续** ⇒ `need_pack` 触发 ⇒ 实参被打包进 `_arg` ⇒ **寻址缺陷被掩蔽**（B6(c) 的寻址面可达性**大幅收窄**；仅「接收者恰为 `g+1`」的偶合形仍可达——须 T1 实证）。
+- **但第二根因（转换环缺口）不被掩蔽**：打包只搬值、不换形式 ⇒ 方法调用里 apx 实参仍以 **bits** 交付，而 callee 形参侧按 `TI_DEX_S`（`ir_gen.cr:2866`）解释 ⇒ **静默值错**（与寻址无关，任何方法调用可触发）。
+- ⇒ **对裁-SEAM-3 的直接影响**：B6(c) 的 RED 三选一里「响亮 139」大概率**不出现**、「静默错值」大概率**出现** ⇒ 按加硬规则 **同批修转换环**。
+- **探针设计修正**：B6(b) 用**单实参 extern**（恒不打包 = 寻址面判据）；B6(c) 用**方法调用**（值面判据），并在报告显式注明「寻址面被 `need_pack` 掩蔽」。
+
+### T2-d 转换环修法的改动面（裁-SEAM-3 ④ 的预算判定材料）
+
+环本体 = `ir_gen.cr:1810-1841`。放开门禁**不是**简单删 `ast_kind(func_node) == EXPR_IDENT`：
+
+- **`func_ni` 对方法调用可用**（`:1777` 由 checker 写 `ast_data(node)`）⇒ `find_func` 可解析；
+- **但实参/形参对齐差一格**：`arg_vars[0]` = 接收者（`:1783`），而被调方 `EXPR_PARAM` 链**不含 self** ⇒ 环内「arg i ↔ param i」必须对方法调用改为「arg i ↔ param i-1」（须引 `is_method` 位）；
+- 环只对 `ast_type_val(cpn) == TI_DEX` 的形参动作 ⇒ **非 dex 形参零足迹**。
+- **初判改动面 = 单函数 ~10-15 行 + 一个 `is_method` 位**（**未超预算** ⇒ 不触发「停下报 lead」条款）；**前置 = T1 实测确认现象（静默/响亮）+ `find_func(func_ni)` 对方法调用可用性的实测**。
 
 ---
 
@@ -255,8 +296,8 @@
 | **B2** | `h : dex = 1.5;`<br>`fn main() -> int { d : dex, apx = h; if d != 1.5 { return 1; } return 7; }` | rc=7 | `h` 下沉为局部（`h : dex = 1.5;` 在 main 内） | **静默错值**（cvt 读帧外） | 两路径同 rc=7 + 两版同值 |
 | **B4** | `g : [int;4] = [10,20,30,40]; lo : int = 1;`<br>`fn main() -> int { s := g[lo..3]; return s[0]; }` | rc=20 | `g`/`lo` 下沉为局部 | **响亮 SIGSEGV（139）或静默错值**（取决于伪偏移可读性） | 两路径同 rc=20；若全局版 139 ⇒ RED 成立；**附加子例**：`lo` 用字面量（隔离 s1 与 s2 两个 seam） |
 | **B5** | `g : int = 5;`<br>`fn main() -> int { x := await g; return x; }` | rc=5 | `g` 下沉为局部 | **静默错值** | 两路径同 rc=5 |
-| **B6(b)** | `g : dex, apx = 1.5;`<br>`extern fn seam_ext(x: dex) -> dex;`<br>`fn main() -> int { y := seam_ext(g); if y != 3.0 { return 1; } return 7; }` | **不可真跑**（静态无 .so） | — | 发射字节含 **rbp 相对 `movsd`** 承载 apx 全局实参 | **字节判据**：产物中 extern 调用点相邻窗口须出现 `4c 8d 1d`（`lea r11,[rip+disp32]`）后接 `f2 0f 10` ModRM `mod=00 rm=3`（`0x03 | n<<3`）；**负片段** = 该实参由 ModRM `01/10 000 101`（`0x45/0x85`）承载。判据级 = **发射字节**（报告中显式标注无运行期腿） |
-| **B6(c)** | `struct S {}`<br>`impl S { fn m(self, x: dex) -> dex { return x * 2.0; } }`<br>`g : dex, apx = 1.5;`<br>`fn main() -> int { s := S{}; y := s.m(g); if y != 3.0 { return 1; } return 7; }` | rc=7（封口后） | 实参改局部 apx 量 | 修复前：寻址错 ⇒ 垃圾/139；修①后：②若未修 ⇒ **静默错值**（bits 当 scaled） | **三选一记证（裁-SEAM-3 ①）**：响亮 139 / 拒收 / 静默错值；**封口判据（加硬）**：寻址面（不得 139/垃圾）+ 语义面（= 3.0）双绿；仅当取「保持响亮」时允许「响亮 + 已登记 + 独立条目」，**禁止静默 ≠7 当通过** |
+| **B6(b)** | `g : dex, apx = 1.5;`<br>`extern fn seam_ext(x: dex) -> dex;`<br>`fn main() -> int { y := seam_ext(g); if y != 3.0 { return 1; } return 7; }`（**单实参形 = 恒不打包**，§T2-c） | **不可真跑**（静态无 .so） | — | 发射字节含 **rbp 相对 `movsd`** 承载 apx 全局实参 | **字节判据**：产物中 extern 调用点相邻窗口须出现 `4c 8d 1d`（`lea r11,[rip+disp32]`）后接 `f2 0f 10` ModRM `mod=00 rm=3`（`0x03 | n<<3`）；**负片段** = 该实参由 ModRM `01/10 000 101`（`0x45/0x85`）承载。判据级 = **发射字节**（报告中显式标注无运行期腿） |
+| **B6(c)** | `struct S {}`<br>`impl S { fn m(self, x: dex) -> dex { return x * 2.0; } }`<br>`g : dex, apx = 1.5;`<br>`fn main() -> int { s := S{}; y := s.m(g); if y != 3.0 { return 1; } return 7; }` | rc=7（封口后） | 实参改局部 apx 量 | **寻址面被 `need_pack` 掩蔽**（§T2-c）⇒ 预判 = **静默值错**（bits 当 scaled），而非 139 | **三选一记证（裁-SEAM-3 ①）**：响亮 139 / 拒收 / 静默错值；**封口判据（加硬）**：寻址面（不得 139/垃圾）+ 语义面（= 3.0）双绿；仅当取「保持响亮」时允许「响亮 + 已登记 + 独立条目」，**禁止静默 ≠7 当通过** |
 | **B6(c-栈)** | 同上但方法加 dex 形参使实参 ≥9 个 binary64/或直接测 `cs_stack_args` 形的 extern | 同 B6(b)/(c) | — | 同上 + `e2_push_xmm0` 序列 | 同 B6(b) 字节判据（栈参装载窗口） |
 | **B7** | `g : int = 5;`<br>`fn ret_g() -> int { return g; }`<br>`fn main() -> int { return ret_g(); }` | rc=5（**非回归**） | `f() -> dex` 局部 apx 返回对照（`v : dex, apx = 3.0; return v;`，期望 = 3.0 语义） | 现状**正确**（全局支在 :163 已处理非 dex 全局） | 两路径同值；若取裁 (a) ⇒ 再加「次序不变量」钉（代码次序 + 三种 s1（int 全局/dex 局部/int 局部）全绿） |
 | **B8** | `corearch --table` 实例（**非默认管线**） | 取裁-SEAM-5 | — | 写落伪偏移 | 取 (a) 时判据 = 「该函数 g2_slot 调用点已分类零未分类」；无运行期腿（表实例不在 CI） |
