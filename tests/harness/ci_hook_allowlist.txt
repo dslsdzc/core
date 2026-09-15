@@ -1,0 +1,55 @@
+# CI 挂点白名单（R2 P7 非构建小批；审计 #9 的机制承接面）
+#
+# 语义：本文件逐条登记「**未挂** `src/ci/run.sh` 的守卫」——条目 = 允许未挂，
+# 但**必须带一行理由**（`路径<TAB>理由`；`#` 行与空行忽略）。
+# 判据（tests/harness/test_ci_hook_coverage.py）：枚举 tests/{selfhost,bootstrap,harness}/*.py
+# 与 run.sh 的可执行挂点做差集 ⇒ **差集必须逐条在此**；反向亦查（已挂/已删条目 = 白名单腐烂 ⇒ FAIL）。
+# 增减纪律：**删条目 = 该守卫已挂**（判据会要求同步删）；**加条目 = 显式登记一个新缺口**
+# （须写理由，最好在 TODO #31 同批登记）。
+#
+# 审计基线（2026-09-16 实读，主树工作副本）：selfhost 挂 31/54 · bootstrap 挂 3/7 ·
+# harness 挂 1/1 ⇒ 差集 = 23 selfhost + 4 bootstrap = 27 条（下方逐条）。
+# 计数自 2026-09-11 的 #31 登记（15/39 + 3/7）持续漂移，本条机制即为此而设。
+
+# ─── tests/selfhost（23 条；未挂）───
+tests/selfhost/test_apx_tag.py	未挂（历史缺口）：需 corec 端到端；挂点属构建面 ⇒ 与其它编译器型未挂档同批评估
+tests/selfhost/test_backend_bootstrap.py	未挂（**最高危**）：唯一拦「清单双注册漂移（project-mode error[N06] 静默）」之门；已致 P3a 33×N06 真实漏检（TODO #36 段）；挂点须先实测时长（构建面）
+tests/selfhost/test_dex_arith.py	未挂（历史缺口）：dex 定点语义；需 corec
+tests/selfhost/test_dex_type.py	未挂（历史缺口）：dex 类型核心；需 corec
+tests/selfhost/test_directory_build.py	未挂（历史缺口）：目录路径工程构建；需 corec+corearch
+tests/selfhost/test_ent_kernel_neutrality.py	未挂：纯 python 静态 guard（ent_kernel 中立性）——**无构建依赖，属可低成本挂点**（本批未挂，留给挂点扩容批）
+tests/selfhost/test_global_init.py	未挂（历史缺口）：全局初始化语义双路径；需 corec
+tests/selfhost/test_hit_table.py	未挂（历史缺口）：HIT 表模式合成层；需 corec+corearch
+tests/selfhost/test_interp_float.py	未挂（历史缺口）：解释器 dex/enum/dyn/pointer；需 corec
+tests/selfhost/test_lexer_parity.py	未挂（历史缺口）：词法对照（两编译器均拒 `_`/宽度后缀）；需 corec
+tests/selfhost/test_live_ranges.py	未挂（历史缺口）：存在区间 + 条目版本化 + O1/O2 冒烟；需 corec
+tests/selfhost/test_lsp.py	未挂（**TODO #31 点名**）：corelsp 八组集成；进程级 ⇒ 挂点须实测时长
+tests/selfhost/test_mw_task1.py	未挂（历史缺口）：int 多字 M1 边界套件族；需 corec
+tests/selfhost/test_mw_task2.py	未挂（同族）
+tests/selfhost/test_mw_task3.py	未挂（同族）
+tests/selfhost/test_mw_task4.py	未挂（同族）
+tests/selfhost/test_mw_task5.py	未挂（同族）
+tests/selfhost/test_mw_task6.py	未挂（同族）
+tests/selfhost/test_native_float.py	未挂（历史缺口）：Native ELF dex 运算
+tests/selfhost/test_native_memory.py	未挂（历史缺口）：Native ELF 聚合寻址
+tests/selfhost/test_native_strings.py	未挂（历史缺口）：Native ELF 字符串头
+tests/selfhost/test_region_cfg.py	未挂（历史缺口）：`.ccr`/`.cir` 区域结构 + **段表/版本断言**（与 test_ccr_v7/ccr_types 同族 ⇒ 格式批会漏检）；需 corec
+tests/selfhost/test_slice_bounds.py	未挂（**TODO #31 点名**）：F11 切片越界守卫回归钉；无二进制依赖 ⇒ 低成本挂点
+
+# ─── tests/bootstrap（4 条；未挂）───
+tests/bootstrap/test_apx_tag.py	未挂（历史缺口）：bootstrap 面 apx 标签（与 selfhost 同名档配对）
+tests/bootstrap/test_dex_arith.py	未挂（历史缺口）：bootstrap dex 精确运算
+tests/bootstrap/test_dex_type.py	未挂（历史缺口）：bootstrap dex 类型核心
+tests/bootstrap/test_modules.py	未挂（历史缺口）：bootstrap import alias 回归
+
+# ─── 范围外登记（不参与差集计算；仅登记「有守卫但不在本判据 SCOPE 内」者）───
+# 理由：本判据 SCOPE = tests/{selfhost,bootstrap,harness}/*.py（与 run.sh 挂点命名一一对应）。
+# 下列守卫/腿在其它目录 ⇒ 由本文件显式登记，避免「不查即忘」：
+#   tests/kernel/run_diff.py	**不可挂**：硬编码仓库外 Coq harness（~/mctt/...）⇒ CI 无该依赖
+#   tests/kernel/gen_corpus.py	未挂（语料生成器；随 run_diff.py 面）
+#   src/kernel/test_term_io.cr	未挂（协议层 TDD 遗留；自述运行法 = 手工 build + 执行）
+#   tests/probes/*.cr（29 档）	未挂（手工腿）：runner = tools/baseline/probes_run.sh（run.sh:79-80 注释登记）
+#   tools/baseline/parity_run.sh	未挂（手工腿，**CI 不可行**）：需 jj + 完整历史，而 CI 为浅检出（core-ci.yml:54 fetch-depth: 2）+ 无 jj 安装
+#   tools/baseline/rebuild.sh	同上（冻结基线重建）
+#   tools/baseline/warm_leg.sh / warm_run.sh	未挂（手工暖态广度腿；CI 暖态最小面 = test_warm_cache_gate.py 已挂）
+#   tools/pseudocode_check.py	未挂（文档质量守卫；可选挂）

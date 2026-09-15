@@ -65,6 +65,13 @@ case "$CI_JOB_NAME" in
     python3 tests/bootstrap/test_generics.py
     # TODO #23：铁律 #2 机械执行钩子的加固判据（BLOCK 19 + ALLOW 11；纯 python，无需编译器）
     python3 tests/harness/test_block_git.py
+    # R2 P7 非构建小批（CI 挂点审计 #9）：**挂点覆盖率机械判据**——枚举
+    # tests/{selfhost,bootstrap,harness}/*.py 与 run.sh 挂点做差集，未挂项必须逐条登记
+    # 白名单（tests/harness/ci_hook_allowlist.txt，带理由；含范围外登记段）；含**内存内
+    # 突变自证**（摘掉一个真挂点 ⇒ 必红）。纯 python、毫秒级、无需编译器 ⇒ 挂本 job。
+    # 根因：`test_backend_bootstrap.py` 曾「自称已挂」而 run.sh 零命中——该门是唯一能拦
+    # 「清单双注册漂移（project-mode error[N06] 静默）」的守卫，已致 P3a 33×N06 跨 5 任务漏检。
+    python3 tests/harness/test_ci_hook_coverage.py
     ;;
 
   selfhost-tests)
