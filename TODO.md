@@ -120,7 +120,7 @@
 - **gdb 证据**：v7 Task 1 报告（.superpowers/sdd/v7-task-1-report.md Concern 1）+ elf.cr 注记
 - **修复方向**：编译器层专项（独立于 v7 链——仓促同修危及 byte-identical 判据）；修复后还原规避代码验证
 
-### 5. cir cache 跨编译器重建不失效（2026-09-10 内核抽取 Task 3 评审确认——预存,**已修 2026-09-11**）
+### 5. ~~cir cache 跨编译器重建不失效（2026-09-10 内核抽取 Task 3 评审确认——预存,**已修 2026-09-11**）~~ —— **已核销（2026-09-16 分类账复核）**：`cir_cache.cr` `cir_compiler_identity()` 在位（+ 头部 identity 字段）+ `test_cache_identity.py` 5/5（提交 `3be4cb48`）
 - **✅ 已修（2026-09-11，提交 `3be4cb48`；工作区报告 `.superpowers/sdd/fix-cache5-report.md`）**：
   根因 = 条目身份**只有目标源**（键 = 源路径::函数名；头部指纹 `func_fingerprint`/`sig_fingerprint` 只覆盖目标 AST）⇒ 同源重建后字符串驻留序（`g_strs` intern 序）漂移不反映到键/指纹上，旧条目被命中、快照内旧序索引（var `irv_name` / instr `s1..s3`）被当活产物恢复（rc=0 静默）。
   **RED（pre-fix 二进制 sha256 `f0f00d7d…`）**：①载荷毒化（alpha 条目内 `var[0]/var[2]` 的 `name_ni` 互换 =「另一编译器写下的索引序」）后重跑——条目原样未被重写（命中）且 dump 错位（`binary 24 = a + b` → `24 = 20 + b`、`dest=22` → `dest=a`，rc=0）⇒ 装载路径对「索引序是否属于本编译器」零判据；②跨二进制 A/B（bootstrap 建的 `build/corec` vs 自举建的 `corec2`）实测 B 直接沿用 A 条目（无重写）。
@@ -153,7 +153,7 @@
 - **实证**：波 1 Task 1 评审（.superpowers/sdd/w1-task-1-report.md §2.1、§6.1）+ module.cr:548-553 注释推理；代码级引用 = 零（仅 plans 历史文档 `2026-08-08-pseudocode-tdd.md:400,413` 提及）；`tools/pseudocode_extract.py` ROOTS 含 `src/compiler` 整目录 glob，仍从该死文件抽取 ELF 写侧符号 → `docs/pseudocode/标识符对照表.md` **20 行**归属误导（且对照表整体未随波 1 重生成——212 行仍写已退役 `src/arch/linux/ld` 路径；重生成 = 修复方向二部分）。
 - **修复方向**：**删除**（首选——零 importer、零功能贡献；删除需用户明确许可，铁律 #3）并重生成伪代码对照表；备选 = 迁出活树（`legacy/` 等，避开 ROOTS glob）保留历史。删除后复跑 test_backend_bootstrap + full-bootstrap guard（预期零影响、byte-identical）。
 
-### 8. 前端 ≥18 形参静默误编译类（2026-09-10 x86 实例化波 1 Task 5 评审登记——高优先级：静默误编译）
+### 8. ~~前端 ≥18 形参静默误编译类（2026-09-10 x86 实例化波 1 Task 5 评审登记——高优先级：静默误编译）~~ —— **已核销（2026-09-16 分类账复核）**：`dyn_arr.cr:89` `MAX_FN_PARAMS=64` + `:467/:473` 读写护栏 + P020 硬错（提交 `d7ad71d3`/`68ffa1e8`）
 - **✅ 已修（2026-09-11，提交 `d7ad71d314cb` + 缓存面 `68ffa1e8`；工作区报告 `.superpowers/sdd/fix-params18-report.md`）**：
   根因 = `FuncInfo.param_types` 是 **16 槽定长内嵌槽区**（`dyn_arr.cr` `OFF_FI_PARAM_TYPES=16` ⇒ `16+16×8=144=OFF_FI_RETURN_TYPE`），而 `parser.cr:1224` / `monomorph.cr:423` 写入无界——第 17 槽踩 `return_type`、**第 18 槽踩 `ast_node`**；形参类型值 `TY_INT=0` 恰把 `ast_node` 写成 AST 节点表首项（`rt.cr:4:13` 的 int 类型节点）⇒ checker 读 `fi_ast_node=0` 发 TF01 误归 + `.ccr` `name_idx=0`('import')/`param_count=0` + IR 体 46→28 instrs，而 `corec build` 仍 rc=0、产物 SIGSEGV 139（N=17 因 `TY_INT=0` **误打正着**；钳位最小实验单独证明因果）。
   修复 = 槽区扩至 `MAX_FN_PARAMS=64`（对齐 `ast.cr` 镜像 `[int;64]`；覆盖 ≥22 参 = 6 寄存器 + 16 栈参的 `>127B` 栈清理形，使该结构 runtime 可达）+ `fi_param_type`/`fi_set_param_type` **唯一读写点护栏**（未来新调用点结构性地不可能再越界写）+ 超限签名 `P020` 硬错 rc=1（绝不静默 rc=0）。
@@ -174,7 +174,7 @@
 - **修复方向**：OS 轴 syscall 序面收编（搬运/参数化到 `src/os/linux/`——波 2 或实例 B 前置任务）；`elf.cr` 相关注已加交叉引用（Task 6 评审同批）。
 - **关联**：波 1 Task 6 评审 Important（.superpowers/sdd/w1-task-6-report.md）；TODO #8 ④（22 参 runtime 用例）同属波 1 遗留收口。
 
-### 11. 解释器 callee 内联路径缺 opcode（枚举 / 裸指针 / 切片 / 边界检查族）→ 双路径分叉（2026-09-10 R1 终审扩写——Important，本批 15 例未覆盖）
+### 11. ~~解释器 callee 内联路径缺 opcode（枚举 / 裸指针 / 切片 / 边界检查族）→ 双路径分叉（2026-09-10 R1 终审扩写——Important，本批 15 例未覆盖）~~ —— **已核销（2026-09-16 分类账复核）**：`tests/selfhost/test_interp_parity.py` 在位且已挂 CI（`src/ci/run.sh`）——分派已统一为单实现
 - **✅ 已修（2026-09-11，提交 `9068629c`（并入后 `c589c47b` 系）；报告 `.superpowers/sdd/fix-interp11-report.md`）**：
   改法 = **分派统一为单实现**（`ir_interp_call` / `ir_interp_run_fn`：callee 内联臂与主循环臂共用同一实现，不再两处各写一份）——比逐个补 opcode 更彻底；18 族按「同语义同守卫」补齐，另补 **嵌套/递归内联**（重入帧保存恢复 + 深度守卫 + 中止码沿调用链上抛，**绝不静默落 0**）。
   回归 = `tests/selfhost/test_interp_parity.py` **23/23**（interp callee ≡ interp main ≡ ELF oracle）；**RED 对照**（换回修复前 interp.cr 重建）= 4/23，TODO 原件 interp `0`/SIGSEGV(`-11`)/`0` vs ELF `33`/`33`/`7` → GREEN 全对齐。
@@ -210,7 +210,7 @@
 - **未覆盖面（显式登记：命中返回 -1 或按守卫，**不静默**）**：① 参数化原子的参数仅同形判等（变型规则 = P3）；② `AK_NAMED` 具体行不展开（待 P2 接入 checker 类型表后可用）；③ 空递归（如 μX.X）按深度守卫 512 → -1；④ 判定预算默认 200000 步（**规范化亦计入**：∩ 分配律 2^n 爆炸在 n≈13-14 处截断），超限 → -1 + `g_ty_exhausted`；⑤ 命中①/②/`¬μ` 时置 `g_ty_uncovered = 1`（写入点在 `lit_implies` 与 `tt_nnf_neg`）并以 -1 上抛——**未覆盖面恒给「未知」，不给确定答案**；⑥ memo 重建（`ty_memo_rehash`）与「进行中」状态的交互**无实测覆盖**（现有规则下需单次证明内 >512 互异对才可达；读码核验成立，复审登记）。
 - **三态约定（判据面）**：判定 API 返回 `1 = 成立 / 0 = 不成立 / -1 = 未知（预算耗尽或未覆盖）`；`tt_witness` 另用 `-2 = 未知` 与 `-1 = 不可满足` 严格区分（`ty_exhaustive` 对 -2 返回 -1，绝不当「穷尽」）。**预算耗尽的结果一律不缓存**（memo 每顶层查询清空）。
 
-### 16. 函数体内嵌套 `fn` 声明 → 编译段错误 rc=139（2026-09-10 R2 P1 Task 2 评审确认——既有缺陷，非该批回归）
+### 16. ~~函数体内嵌套 `fn` 声明 → 编译段错误 rc=139（2026-09-10 R2 P1 Task 2 评审确认——既有缺陷，非该批回归）~~ —— **已核销（2026-09-16 分类账复核）**：`parser.cr` P021 定位诊断（`ast.cr:337` `EC_P_NESTED_FN`）+ `test_nested_fn.py` 在位且挂 CI（提交 `f417d345`）
 - **✅ 已修（2026-09-11，提交 `f417d3453a79`；报告 `.superpowers/sdd/fix-nestedfn16-report.md`）**：
   根因 = `parse_primary` **无 `T_FN` 分支** ⇒ 语句位遇嵌套 `fn` 落回通用兜底 → 解析**失步**；随后 struct 字面量字段循环在 EOF 处**自旋** → bump allocator 耗尽 → `grow_ast` 的 `rep movsb` 向 **NULL** 拷贝（gdb 实测 `rdi=0`、`rcx=0x12000000`＝288MB），日志止于 `[3/5] parse`（与 TODO 归属证据一致）。
   **结局判定（推翻 TODO 原文「判据 rc=0」前提）**：嵌套 `fn` **不属语言面**——`grammar/core.ebnf` 的 Statement 不含 FunctionDecl、bootstrap 对同输入报 SyntaxError、函数值设计为 YAGNI 挂起 ⇒ 正确结局 = **定位拒绝 `P021`（rc=1）**，而非 rc=0。依据已写入 `tests/selfhost/test_nested_fn.py` 文件头与 `run.sh` 注释。
@@ -222,7 +222,7 @@
 - **修复方向**：嵌套 fn 的解析/注册路径（parser 的嵌套声明处理或 checker `collect_decls`）——先定位崩溃点（gdb/诊断输出），再修；判据 = 最小复现 rc=0 + 两个 fixture 恢复 + 全回归。
 - **实现期实证教训（后续期通用）**：Core **无三元运算符** `?:`；取模须非负（i64 向零截断，负下标 → 越界静默失效）；键比较**不得依赖 i64 回绕**（bootstrap 解释器任意精度 → 回绕等式恒假）；字面矛盾规则须窄（正原子 × 异类负原子**不空**：`int ∩ ¬string = int`）；μ 展开必须走 memo 入口（余归纳终止）。
 
-### 17. R2 P1 影子对拍落地（2026-09-11——落点 / 开关默认值与产物影响 / 裁决归属登记，非缺陷）
+### 17. R2 P1 影子对拍落地（2026-09-11——落点 / 开关默认值与产物影响 / 裁决归属登记，非缺陷） —— **已归档（2026-09-16 分类账复核）**：登记对象（影子层）已由 P5 T5 整体删除（`--type-shadow` 三注册面零在位）
 - **落点**：`src/compiler/ty_shadow.cr`（桥接 ti→类型项 + per-ti 缓存 + 8 站点挂点 + 分类计数 + 摘要/转储）、`src/compiler/checker.cr`（`type_equal` → `type_equal_core` 包装 + 8 站点 `sh_site_begin`）、`src/compiler/type_selftest.cr`（桥接用例）、`src/compiler/globals.cr`（`g_shadow_*` 组）、`src/compiler/main.cr`（CLI 旗标）。清单三处注册：corec + **corelsp**（Task 2 起 checker 引用影子层）+ test_compile。清单 = `docs/superpowers/specs/2026-09-10-type-shadow-findings.md`；计划 = `plans/2026-09-10-r2-p1-shadow-parity.md`；提交链 `e4c293b2`（桥接）→`844cec6c`+`514956a1`（挂点/补强）→`75c20297`（Step 0 拆因 + 语料清单）。
 - **开关默认值与产物影响（登记）**：`--type-shadow`（**默认关**，纯观察通道；`--type-shadow-dump <file>` 另给差异转储）。两态产物**逐字节相同**（`ptr_arith.cr` 开/关/基线三份 sha256 全等 `95084e7b…d475`；`check` 路径 stdout 仅开态追加以 `[type-shadow]`/`[type-shadow-sites]` 起头的两行）。影子预算/memo 每次判定前后各 `ty_budget_reset` → 不污染 checker 判定；关态 `sh_site_begin` 首行早退（Task 4 M3）→ 关态残留开销 = 每次判定一次全局读。**结论：开关可安全长期保留默认关，无产物影响。**
 - **差异清单裁决归属（登记）**：findings 的 F1（P2 硬前置）/F2（P2 裁决）/F3/F4（checker 缺陷面，单开任务）与「按差异清单替换旧判定」的**替换门**全部归 **P2**；P2 验收不得只看「差异数 = 0」，须同时报告站点覆盖（P1 实测 4/8 站点零命中）。下 #18-#21 为逐条登记。
@@ -239,7 +239,7 @@
 - **实证**：探针 D（`[int;4]` 返回给 `[int;3]`）与探针 G（泛型实参位）均 `old_stricter=1`；本轮语料 0 触发。
 - **修复方向**：R1 的「N 不入身份」是 **IR 侧**身份裁决；**checker 侧是否保留 N 检查需单独裁决**——保留 → 需在引擎/桥接把 N 作为维度/字面量入判定；不保留 → 记为有意的语言放宽并写进 spec。裁决后同步 `bridge.len_not_identity` 用例语义。
 
-### 20. F3：调用位点实参类型不匹配**无诊断**（`unify_types` 返回值被丢弃，`checker.cr:1053`）
+### 20. F3：调用位点实参类型不匹配**无诊断**（`unify_types` 返回值被丢弃；**锚点已勘误（2026-09-16）：`checker.cr:1053` → 定义 `:1912` / 丢弃点 `:2021`**）
 - **现象**：`infer_gen_call` 调 `unify_types(pattern_ti, concrete_ti);`（`src/compiler/checker.cr:1053`）**丢弃返回值**；非泛型调用位点同样不报。
 - **实证**：`fn take2(n: int)->int` 以 `take2("s")` 调用 → 输出 `ok`（无诊断）；`fn take[T](a: T, n: str)` 以 `take(1, 2)` 调用 → `ok`（探针 J/C，源在 `/tmp/r2p1t3/probes/`）。
 - **与影子的关系**：影子只对账 `type_equal` 的 verdict（此例两侧皆「拒」= agree），**不负责诊断**；但 P2 若以引擎判定作为诊断来源，必须补「判定 → 诊断」这一环（含 `unknown` 的处置策略：拒绝 / 降级警告 / 放行，需与「语义保鲜」目标一致）。
@@ -299,7 +299,7 @@
 - **覆盖清单（Task 4 挂账 → 由终审转入本条）**：F2 约束的 **4/6 下钻位（REF / SLICE 元素位）用例已补（`f2.ref_elem_reject` / `f2.slice_elem_reject`）但缺「突变控制」**（未验证把该位实现改坏时用例真的会红——其余下钻位同此：现有用例只断「同长 → 1 ∧ 异长 → 0」，未见证伪实验）。补法 = 逐位做一次「删/改该位下钻 → 用例必须 FAIL」的突变实验并记档（同 `t3c.*` 与 LSP 用例的负控做法）。
 - **P2b 待办（同 spec §9 P2 行）**：`infer_expr` 公理区 → `iface_ops` 查表接线；`res_type_node` 两表合一。→ ~~**2026-09-11 已落地**，见 #30~~（P2b 未交付面——`iface_satisfies` 等——已转入 P3 交接包：findings §12 + P3 计划附录 A）。
 
-### 25. F5：`EXPR_TUPLE` 元素连续槽位假设对**复合表达式元素**不成立 → 元组字段类型错录（假拒 + soundness 漏放；含 `opt.cr:177` 恒空转登记）
+### 25. ~~F5：`EXPR_TUPLE` 元素连续槽位假设对**复合表达式元素**不成立 → 元组字段类型错录（假拒 + soundness 漏放；含 `opt.cr:177` 恒空转登记）~~ —— **已核销（2026-09-16 分类账复核）**：`test_tuple_slots.py` 14/14 且挂 CI（提交 `0390f0f4`；两趟 wrapper 契约）
 - **✅ 已修（2026-09-11，提交 `0390f0f4`；工作区报告 `.superpowers/sdd/fix-tuple25-report.md`）**：
   parser 元组分支改**两趟**（先全部解析元素值、后统建连续 wrapper；`EXPR_TUPLE` 契约 a=首 wrapper / b=个数，wrapper.a=元素值节点）。**TODO 原建议「照 struct 先例（交错 wrapper）」经实测不成立**——交错下相邻 wrapper 间插着下一值子树（`P{a:11,b:g()}` 误返 0），故不采用。消费点 4 处同步解引用（checker/ir_gen/monomorph/opt；`opt.cr` 与 `ir_gen ast_patch_node` 两处 a/b 槽约定一并校正，经核均无调用者 = 死码，产物零影响）。
   **第二根因**：checker `EXPR_TUPLE` 元素类型**两趟落盘**（`data_start` 曾在推断循环前取 ⇒ 嵌套元素推断向 `g_gen_apply_data` 追加数据顶开后续落点、extra 错位 ⇒ 嵌套元组异型互赋静默通过）。回归 = `tests/selfhost/test_tuple_slots.py` 14 例（3 主判据 + 边界 3 + 嵌套 4 + IR/ELF 冒烟）。
@@ -332,7 +332,7 @@
 - **判据（本批确立，见 #26）与收官实测（Task 4）**：全量回归 **38/38 rc=0**（7 bootstrap + 31 selfhost，含 `test_ccr_v7` 27/27 · `test_purity` · `test_compile`）；`tests/suite` 语料 **20/20**（非 `*_mini*` 且非空 = 20 个）build+run rc=0；ELF canary `tests/suite/ptr_arith.cr` = `95084e7b…d475` **IDENTICAL**；语料级「旧前端（Task 1 前）+ 当前后端 vs 当前全链」**20/20 ELF 逐字节相同**（发射面零泄漏；运行 rc/stdout 同）；自举两连建（`build_selfhost_native.py` ×2）corec/corearch/corelsp 产物 sha 逐一相同 + `corec2b`/`corec3b` `cmp` **IDENTICAL** + N06=0 + 冒烟 42。
 - **`.ccr` 变更面（Task 4 实测，冷缓存）**：kind=1（链）边增删为唯一语义差；**NOD 语义字段（op/dest/s1/s2/s3/tk）零差异**（节点序不变），唯 `first_edge`/`edge_count` 邻接域随动；STR/SYM/ENT/REG 四段逐字节不变。量级（旧前端→当前）：`CHAIN_SRC` 303→**329**（+26）· `PROBE_SRC` 298→322（+24，但 src 域期望集合未变——Task 3）· `ptr_arith` 293→**318**（+25；Task 1 时代为 317，Task 2 的 opcode 面 +1）· 无效应程序 `fn main()->int{return 42;}` 285→309（+24——**全部**来自编译内建的 runtime/builtin 函数体，该程序自身零调用）。归因（noeffect 逐 opcode）：新增入链目标 = `IR_CALL` +18 入边、`IR_STORE` +6 入边。**效应 opcode 清单唯一 = `purity_op_effect`**（新增 IR opcode 必须同步该处，否则链/纯度两判据漂移——D7 的机械保证）。
 
-### 28. F5 同族：`EXPR_STRUCT` / `EXPR_STRUCTPAT` / `EXPR_ARRAY`（字面量形）的「值节点连续槽位」假设同样不成立 → 静默错误值 + `a[1][0]` SIGSEGV + soundness 漏放
+### 28. ~~F5 同族：`EXPR_STRUCT` / `EXPR_STRUCTPAT` / `EXPR_ARRAY`（字面量形）的「值节点连续槽位」假设同样不成立 → 静默错误值 + `a[1][0]` SIGSEGV + soundness 漏放~~ —— **已核销（2026-09-16 分类账复核）**：`test_agg_slots.py` 13/13 且挂 CI（三分支两趟）
 - **✅ 已修（2026-09-11，本条提交；工作区报告 `.superpowers/sdd/fix-struct2-report.md`；F5 系由 #25 发现者提出）**：parser 三分支统一**两趟**（先解析全部值进暂存表、后统建连续 wrapper）。契约 = `EXPR_STRUCT`/`EXPR_STRUCTPAT`/`EXPR_ARRAY`(字面量形) 的 **a=首 wrapper、b=个数**；wrapper（kind=`EXPR_NONE`）在 `g_ast` 中连续、`wrapper.a`=值节点。消费点 5 处同步逐 wrapper 解引用：`parser.cr:452`（struct 字面量）/ `parser.cr:607`（数组字面量）/ struct 模式分支（同款）· `checker.cr:2513`（`infer_expr` EXPR_STRUCT）/ `checker.cr:2576`（EXPR_ARRAY）· `ir_gen.cr:2087`（`gen_expr`）/ `ir_gen.cr:2112`（数组）/ `ir_gen.cr:2606`+`:2622`（`ast_patch_node`）· `monomorph.cr:282`+`:311`+`:391`（克隆改「先克隆值、后统建 wrapper」）· `opt.cr:130`+`:188`（折叠）。
 - **现象（RED 实测，修复前）**：① 静默错误值 `P{a: 11, b: g()}`（`g()->3`）→ `p.b` 得 **0**（`p.a*100+p.b` = 76≙1100，rc=0 无任何诊断）；`P{a: g(), b: h()}` → `p.b` 得 0；② `[[1,2],[3,4]]` 的 `a[1]` 被读成扁平 int 3 → `a[1][0]` **SIGSEGV 139**；`[1, g(), 3]` 的 `a[1]` 得 0；③ soundness：`[[1,2],[3,4]]` 与 `[5,6]` 类型互赋**静默通过**（元素类型被错录为 int）。
 - **root cause（实读）**：`parser.cr` struct 字面量分支原文 `fv := parse_expr(); ast_alloc(0, fv, …)` 逐值后随建 wrapper——值节点是复合表达式（调用 / 嵌套字面量 / 下标）时子树自占多槽、夹在相邻 wrapper 之间 ⇒ 第 2 个起槽位整体错位，消费者读到值节点的**子节点**。数组/模式分支同形（数组更甚：连 `[T; N]` 类型形与字面量形共用 `EXPR_ARRAY`，靠 b=0 区分）。**#25 的元组修复即为模板，本条目 = 同契约补齐最后三处实例**。
@@ -340,7 +340,7 @@
 - **判据（实测）**：`selftest-types` 95/95 · `test_compile` PASS · `test_purity` PASS · `test_tuple_slots` 14/14（未回归）· `test_ccr_v7` 27/27 · 新增 `tests/selfhost/test_agg_slots.py` **13/13**（值 9 例 build+run 退出码 = main 返回值 & 0xFF：struct 主判据 2 + 三字段中位 + 嵌套 struct + 单槽反证边界 + 泛型实例体克隆 + 数组中位 / 嵌套数组 / `[v;N]`；类型 4 例：嵌套 vs 扁平拒 / 元素数不符拒 / 同形收 / `[T;N]` 类型形控制）+ `src/ci/run.sh` selfhost-tests 挂钩；ELF canary `tests/suite/ptr_arith.cr` = `95084e7b…d475` **IDENTICAL**（该语料**含**数组字面量 ⇒ 数组侧的「AST 布局零泄漏」为实测证据，非同 #25 的「语料无该构造」情形）；`.ccr` sha 与前序状态相同（`ecd7a9df…d29d`，struct 修复后 → 数组修复后未变）。
 - **本族剩余面（发现即登记，未修）**：① **struct 字面量字段名被丢弃**——parser 取 `fni` 后从未写入（值按**声明位序**绑定）：`P{b: 11, a: 22}` 静默得 `a=11,b=22`（rc=0 静默错值），字段名/顺序校验、缺字段均不存在；② **struct 字面量字段类型不比对声明**：`P{a: 1, b: "x"}`（b: int）、`P{a: 1}`（缺 b）、`P{a: 1, b: 3}`（b: Q 结构体）全部 rc=0 静默通过；③ **数组元素同质性不检查**：`[1, "x", 3]` rc=0；④ **struct 模式绑定未实现**（`P{a: x}` 中 `x` 报 N01 未定义——checker 对 `EXPR_STRUCTPAT` 直接返 `TI_UNIT`、ir_gen 返 -1）⇒ 模式分支的槽位修复为防御性，无可观测行为变化。以上四项另立条目。
 
-### 29. F5 同族剩余面（#28 修复时发现即登记，2026-09-11——struct/数组字面量的「名 / 型 / 同质性」三校验全缺 + struct 模式绑定未实现）
+### 29. ~~F5 同族剩余面（#28 修复时发现即登记，2026-09-11——struct/数组字面量的「名 / 型 / 同质性」三校验全缺 + struct 模式绑定未实现）~~ —— **已核销（2026-09-16 分类账复核）**：`test_agg_checks.py` 17/17 且挂 CI + TS01-04/TK02 入硬门（**注**：④ struct 模式绑定 = 新特性，非缺陷，另计）
 - **✅ ①②③ 已修（2026-09-11；工作区报告 `.superpowers/sdd/fix-agg29-report.md`）**：
   · **① 名字绑定** —— parser 把字段名 idx 写入 **wrapper.b**（EXPR_STRUCT 契约：`wrapper.a`=值节点、`wrapper.b`=名字 idx，**-1 = 无名字信息 → 位序回落**；与值并列的平行名字表，两趟结构不变、仍无交错分配）。字段值**按名字绑定**（与 Python bootstrap 的 `gen_struct_lit` 同语义）：checker 解出「字面量字段 i → 声明下标 j」（`struct_field_index_by_name`），ir_gen 同一解算落 `IR_STORE_FIELD`，求值顺序仍为**源序**（实测 `P{b:nx(), a:nx()}` = 201 = b 先求值）。monomorph 克隆**保留 wrapper.b**（丢名字 ⇒ 实例体回落位序 = 静默错值，与 #29 同类）。
   · **② 三校验 + 类型比对** —— 未知字段 `TS02` / 重复字段 `TS04` / 缺字段 `TS01`（只报首个）/ 字段类型 vs 声明 `TS03`（判定走 `type_compat_strict` + `diag_type_incompatible`，与赋值同一引擎，站点 9）。**两侧任一含未实例化泛型参数（`TYP_GENERIC_PARAM`，含嵌套）→ 跳过比对**（不假拒：泛型函数体 `fn f[T](x: T){ p := P{a:1,b:x}; }` 的值类型是 T）；字段声明类型提及结构体泛型参数（`T` / `[T;3]` / `Box[T]`）→ 跳过比对、走参数绑定（`unify_types`）。**附带修正**：泛型结构体字面量的 `TYP_GENERIC_APPLY` 实参改按**参数声明序**取（旧代码按字面量字段序 ⇒ 双参数且字段序 ≠ 参数序时实参错位）。
@@ -362,12 +362,12 @@
 ### 31. CI 挂点缺口：`selfhost-tests` 挂 15/39、`bootstrap-tests` 挂 3/7（2026-09-11 R2 P2b 阶段评审登记——非缺陷，覆盖面缺口）
 - **现状**：`src/ci/run.sh` 的 `selfhost-tests` 只跑 15/39 个 selfhost 套件、`bootstrap-tests` 只跑 3/7 个 bootstrap 套件；未挂套件含前序阶段点名的守卫——`tests/selfhost/test_lsp.py`（桥接缓存重置，R2 P2a 评审 Critical 的回归钉）、`test_named_dedup.py`、`test_slice_bounds.py`。
 - **影响**：不削弱 P2b 批自身保证（其两个新测试文件已挂 `run.sh:71-72`），但上述守卫此后回归 CI 捕获不到。
-- **建议修法**：一次性挂齐（评估耗时后决定全集或分批）。**2026-09-13 进展（P5 T5 / #48）**：`test_named_dedup.py` 已挂进 `selfhost-tests`（点名四守卫之一；另三：`test_backend_bootstrap.py` 早已挂、`test_lsp.py`/`test_slice_bounds.py` 仍未挂）。
+- **建议修法**：一次性挂齐（评估耗时后决定全集或分批）。**2026-09-13 进展（P5 T5 / #48）**：`test_named_dedup.py` 已挂进 `selfhost-tests`（点名四守卫之一；另三：`test_backend_bootstrap.py` **经 2026-09-16 实读未挂**（`src/ci/run.sh` 命中 0；全仓仅 `build_selfhost_native.py` 的注释提及——该守卫只在手工全枚举路径执行）、`test_lsp.py`/`test_slice_bounds.py` 仍未挂）。
 - **2026-09-12 复测（P3a 收官；#34）**：`selfhost-tests` 挂 **18/42**（期间新增 3 档——`test_match_exhaust` / `test_optional` / `test_generic_constr`——均已挂钩）、`bootstrap-tests` 仍 **3/7**；缺口未变。收官全量枚举（42+7 逐档 rc）仅在收官运行器里执行一次，**未**落 CI。
 - **2026-09-14 复测（P5 收官；#49）**：`selfhost-tests` 挂 **28/51**（P5 期间新增挂钩 3 档：`test_named_face` / `test_let_check` / `test_named_dedup`；其余为前批挂点）、`bootstrap-tests` 仍 **3/7**；**未挂守卫** = `test_lsp.py` / `test_slice_bounds.py`（+ 其余按耗时未挂的档）。缺口缩小但未闭合 ⇒ 保留本条。**兜底口径**：P5 起每批收官以**全枚举 58/58**（逐档 rc）实测，不依赖 CI 挂点覆盖面。
 - **⚠ 缺口的实际代价（2026-09-12 实证，#34）**：P3 Task 5 的 monomorph 迁出只改了 concat 面清单（`build_selfhost_native.py`），漏改 project-mode 清单（`src/targets/x86_64-linux/_import.cr` 的 `import monomorph`）⇒ project-mode corearch 构建 **33×error[N06] 静默未定义**（rc=0 + 产物照出），**该缺陷在整个 P3a 期间不可见**（5 个任务的回归面均未跑到：`test_backend_bootstrap.py` 正是唯一守卫，而未挂 CI）；收官全量枚举首次暴露（rc=1）。⇒ 本条从「覆盖面缺口」升级为「已有一次真实漏检」；挂齐建议的优先级相应上调（至少把 `test_backend_bootstrap.py` / `test_lsp.py` / `test_named_dedup.py` / `test_slice_bounds.py` 四个点名的守卫先挂）。
 
-### 32. `EXPR_LET` 站点**无任何兼容检查**（2026-09-11 R2 P3 Task 1 实测发现 → Task 4 登记——既有洞，建议专批）
+### 32. ~~`EXPR_LET` 站点**无任何兼容检查**（2026-09-11 R2 P3 Task 1 实测发现 → Task 4 登记——既有洞，建议专批）~~ —— **已核销（2026-09-16 分类账复核）**：`checker.cr` `check_let_annot_compat` 在位 + `test_let_check.py` 挂 CI（P5 T6）
 - **✅ 已修（2026-09-13，R2 P5 Task 6；报告 `.superpowers/sdd/p5-task6-report.md`）**：
   - **修法**：新判定函数 `checker.cr::check_let_annot_compat`（与 `type_compat_strict` / `diag_type_incompatible` 同族），两个调用点共用——① `infer_expr` 的 `EXPR_LET` 分支（局部，本站点）；② `check_global_let`（**全局初始化器**——原登记面 `:1614-1620` 的注册趟同形缺口，本任务**显式划界覆盖**：全局符号同样在注册趟取注解行 ⇒ 不查同样静默错产物）。参序 =（源 = `val_ti`，目标 = 注解行）——Task 1 §3.1 归一。码 = **TA02**（`EC_TA_DECL`，error-codes.md 既有槽位「变量声明类型与初始值不符」，修复前**定义零 raise**；复用而非新码）+ 入 `main.cr` 硬名单 ⇒ `build` 亦拒绝。
   - **豁免四条**（各附理由，见函数头注）：无注解 / `: .` / `: auto` / 无初值（无契约可核）· 注解 `dyn`（按值追踪；照赋值位点）· 值 `TI_NEVER`（底部 + **错误标记=诊断级联抑制**：`x : int = nosuchname` 只发 N01 不叠 TA02）· 注解为泛型形参（声明期不可验证；照返回位点 `return 5` 于 `-> T` 体今天即 rc=0 的既有策略，套件 `let_generic_param_annotation_not_judged` 同策略钉住）。
@@ -376,7 +376,7 @@
   - **判据（全部本实例实跑，二进制 `f737e26b…`）**：新套件 `tests/selfhost/test_let_check.py` **24/24**（含正控 13 + 级联抑制 2；挂 `src/ci/run.sh` selfhost-tests）· `selftest-types` **404/404** · `check src/compiler` rc=0 · `test_backend_bootstrap` rc=0 + `error[`=0 · 五 CI job 全 rc=0 · 全枚举 **58/58** · **ELF canary `95084e7b…d475` IDENTICAL** · `.ccr` 两套口径四条与 T5 记录**逐字节同**（`ptr_arith` `fb4a3b59…`/`592afa31…`；`generics_test` `ddec1ce6…`/`cd2af565…`）· 自举链 `corec2==corec3` cmp IDENTICAL（`5559beef…`）+ N06=0 + 冒烟 42 + `--help` rc=1 · 冻结基线同源对拍 72 档 **rc + 诊断正文零差异** · **突变控制 4 条**逐条单点转红（局部调用点移除 → 15/24；豁免④移除 → 23/24；硬名单条目移除 → 20/24「静默面复活」；全局面调用点移除 → 23/24）并**精确回滚**（源 sha + 三二进制 sha 复原）。
   - **未覆盖 / 登记**：`-> never` 函数的**调用**被推断为 unit（非 never；`return boom()` 今天即 TF01）⇒ `x : int = boom()` 新增 TA02——与邻站现状一致、非新类，全语料零 `-> never`；`EXPR_FOR` iterable 接线（附录 E-6）与 **#20（F3 调用位点）** 不并入本任务（本任务只落声明位点；#20 仍开放，见其条目）。
 
-### 35. 前端枚举表**写入侧无护栏**：≥17 变体 / ≥17 载荷类型越界写（2026-09-12 R2 P3a 阶段评审登记——**#8 同族**；代码级定位 + check/build 两面实测）
+### 35. ~~前端枚举表**写入侧无护栏**：≥17 变体 / ≥17 载荷类型越界写（2026-09-12 R2 P3a 阶段评审登记——**#8 同族**；代码级定位 + check/build 两面实测）~~ —— **已核销（2026-09-16 分类账复核）**：**转历史**：容量批 E-3 三 `MAX_*` 退役 + P022/P023 停发（`ast.cr:338-339` 注「已退役、零 raise」）+ `test_enum_limit.py` 挂 CI
 - **✅ 已修（2026-09-13，R2 P4 Task 6；工作区报告 `.superpowers/sdd/p4-task6-report.md`）**：
   根因 = `EnumVariant` 槽区（16 槽 × `OFF_EV_SIZE=272`）与 `StructInfo` 字段槽区（16 槽，**同族第三处**，本轮 RED 步实测 `check` rc=0 静默）是**定长内嵌槽区**——其后紧跟自身 count/generic 槽，再往后是**邻记录**（同一 buffer），而 parser 的写入循环对 `vc`/`tc`/`fc` 零上限闸。
   **危害形态（首次构造，收口本条「未做」项；二进制 = 修复前 `6afbd333`，三档探针 + 突变对照）**：(a) 17 变体声明 `check` **rc=0 零诊断**；(b) **该枚举上的 match 穷尽性判定被静默禁用**——第 17 变体名槽与 `variant_count` 同址（4360），count 后写胜出 ⇒ 第 17 名槽存的是 count 值 ⇒ `sh_variant_term` 的「名→变体项」查表失败 ⇒ 域不可展开 ⇒ 三态回落 **-1「不判」** ⇒ **真·非穷尽 match 也 rc=0 零诊断**（对照：16 变体同形必报 TM03——同探针实测）；(c) 第 17 变体**不可构造**：`V16()` ⇒ 假诊断「Undefined enum constructor 'V16'」；(d) 17 字段结构体 / 17 载荷类型同族（载荷第 17 槽写 = `OFF_EV_TYPE_COUNT`、第 17 载荷**节点**写 = 下一变体槽首 `OFF_EV_SIZE`）。越界写多数落在 `grow_enums`/`grow_structs` 的扩容余量内 ⇒ **无 SIGSEGV 可观测**——危害 = **表污染 + 判定静默**（不是崩溃），故 `check` 面全静默。
@@ -425,7 +425,7 @@
 - **未开工（终态；P3 未覆盖面）**：iterable 接线（`EXPR_FOR` 零类型检查，`checker.cr:2810-2821`）· 形状命名消费语法（`T: 可索引`）· 整形状 `ty_sub` 路由（实测不可用）· **#38**（用户轴名义 vs 结构，维护者裁）· B.7 可选表示统一（`Some` 臂双路径 rc=139）· **#32**（`EXPR_LET` 无检查）· **#35**（枚举写侧无护栏）· MAX_* 解除（MAX_GENERICS=4 等）。
 - **关联**：#34（P3a 落地）· #36/#37/#38（P3b 三件详版）· 计划 Task 7b + 附录 C · spec §9 P3 行（本批更新为 P3a+P3b 双 ✅）；报告 = `.superpowers/sdd/p3b-task7-report.md`。
 
-### 40. TF01 收口：`check src/compiler` 两条长期诊断（2026-09-13——落空分析 + `lits_copy` 类型洗白；**check 门 rc 归零 + P4 Task 2 corearch 清单步解阻**）
+### 40. ~~TF01 收口：`check src/compiler` 两条长期诊断（2026-09-13——落空分析 + `lits_copy` 类型洗白；**check 门 rc 归零 + P4 Task 2 corearch 清单步解阻**）~~ —— **已核销（2026-09-16 分类账复核）**：`checker.cr` `stmt_cannot_fall_through` 在位 + `check src/compiler` rc=0（T0 实测）
 - **定性（探针实证，先于修复，旧二进制）**：`lits_copy` = **真·类型洗白**——`alloc` 类型模型 = `() -> string`（`checker.cr` `bi_add("alloc", TI_STR)`），声明 `-> int` 且 `return buf` ⇒ 与模型冲突；消费面（`r64(buf: string, …)`、`lits_contradictory_buf` 另一调用点传 `g_ty_lits : string`）全为字节缓冲 ⇒ 修 = 声明改 `string`（**不是**放宽 `alloc` 模型）。`ty_memo_slot_no_grow` = **checker 误报**——体以**无 break 的 loop** 收尾（只从体内 `return` 出）⇒ 永不落空，而站点 5 以「块末语句类型」判（`EXPR_LOOP` 恒 unit）⇒ 误报 TF01。
 - **修法**：`checker.cr` 新增落空分析 `stmt_cannot_fall_through` + `loop_body_has_break` + `seg_has_break`（保守：只认**不产出值**的不可落空形态——无直系 break 的 loop / 双分支皆不可落空且有 else 的 if / STMT·UNSAFE·block 包裹；**`return` 不判 divergence**（其值类型正是站点 5 的被检对象）；break 扫描在嵌套循环处截断（break 归内层）、未枚举形态 fail-closed），站点 5 接线一行；`type_engine.cr` 两处签名改 `string`；`ty_shadow.cr` 头注改写（原文记载该误报面，被本 TODO/计划引用）。
 - **判据**：`check src/compiler` **rc=0**（诊断 0 条）；构建 rc=0（GUARD clean：corec 45 / corearch **32** / corelsp 31）；`test_backend_bootstrap` rc=0（`error[`=0）；`selftest-types` **338/338**；ELF canary `95084e7b…d475` IDENTICAL（清单步前后各一次）；全枚举 **47 selfhost + 7 bootstrap 全 rc=0**；`full-bootstrap` rc=0（`corec2==corec3` `991eecc1…b2ba` 双 2604942B + N06=0 + 冒烟 42 + `--help` rc=1）；同源对拍（30 档语料 check 输出 + rc）**零差异**；突变控制 5 条逐条单点转红（过接受/过拒绝/嵌套截断/match 臂链/连续段）；新套件 `tests/selfhost/test_tf01_fallthrough.py` **19 例**挂 `src/ci/run.sh`。
@@ -559,7 +559,7 @@
 - **登记（转 T6 / 待办，本任务不代改他节）**：① `tools/module_to_ccr.py` **删除候选**（本任务只标废弃；删除 = 独立决定）② `test_purity.py` 的 `MIN_CASES = 26`（同形面，未纳入 E-7 点名）③ **T0 缺失实施记录归 T6**（T5 只登记、不动 T0 节——理由：章程边界 / 与 T6「统一台账」同类 / 避免计划文件被两批各改一次）④ **T2 无 TODO 条目**（#50=T1 / #51=T3 / #52=T4a ⇒ 建议 T6 补或 T2 自补）⑤ `pkg/` 非入库面（`.gitignore` 覆盖；仅报告登记，不进提交）。
 - **关联**：附录 E-7/E-8/E-16 · 计划 Task 5 实施记录 · T1 报告 §9-5（T0 记录）· T0 报告 §3/表 D-4（探针 29 / 挂点 28）。
 
-### 55. TC02 收口：`if` 分支相容判定的**发散豁免**（2026-09-14——真误报修复；fail-closed 面 TC02 豁免条可撤）
+### 55. ~~TC02 收口：`if` 分支相容判定的**发散豁免**（2026-09-14——真误报修复；fail-closed 面 TC02 豁免条可撤）~~ —— **已核销（2026-09-16 分类账复核）**：`checker.cr` `stmt_diverges` 在位 + `test_tc02_branch.py` 挂 CI（15/15）
 - **现象**（归因 = `/tmp/fct1/tc02_attribution.md`，证据同目录）：`if <cond> { } else { return 1; }`（及镜像形）在 `check` 面恒报 `error[TC02]`，而语义上 else 支**发散**（不产出值）⇒「分支值类型须相容」无对象。**与 float 无关**（纯 int 条件同报）、**预存**（冻结基线 `5d2b15ad…` 同值）、**对称**（then 发散同样命中）。
 - **根因**：`EXPR_RETURN` 的推断 = **所返回值类型**（`checker.cr` 的 EXPR_RETURN 分支）⇒ `{ return 1; }` 的块类型 = `int`；而 `if` 的值类型定义为 **then_ti**（`infer_expr` 的 EXPR_IF 合并点 `return then_ti`）⇒ 合并点只看 `then_ti != TI_NEVER && else_ti != TI_NEVER`（`:2907`）⇒ 发散支的幻影类型参与相容判定 ⇒ 误报。
 - **修法（P3，维护者 2026-09-14 裁）**：新增发散谓词 `stmt_diverges`（return 族 + 包裹层 + 块内任一句；**只服务本判定点**——**不得**用于 TF01：那里豁免 return 会洗白真错面，见 `stmt_cannot_fall_through` 头注明令），`:2907` 加嵌套 `if` 守卫：**仅 else 支发散 ⇒ 不报**。**不对称是有意的**：then 支发散时 then_ti 本身即幻影（模型面，另案）⇒ 仍报，保留真信号。**明令不做** = 改 `EXPR_RETURN` 推断（会连带关掉 TF01 ⇒ 静默错产物）。
@@ -626,6 +626,27 @@
 - **备选登记见 #64**（W4 = 「对该类程序整体关 `.cir` 缓存」，2026-09-15 落独立条目）。
 - **未决/登记（(c)/(d) 待触发，判据见 `.superpowers/sdd/warm-task3-report.md` §(d)）**：见证把「分配行的函数」整体移出缓存 ⇒ **复合 mint 行**（唯一来源 = ir_gen 分配行）**结构上不落盘**（101 档扫描：仅 `ptr_ref_first.cr` 有复合行、全缺 ⇒ ㊲ 重钉）。
 - **处置**：**本批**（#60 批：T1 测量 → T2 (b) 落地 → T3 暖态腿入仓 → T4 收官）——**已全阶段收官**，台账/终态见 #63。退出条件 = 冷/暖两态诊断一致 + 全语料对拍（含**定路径**暖态腿）**均已满足**（T4 实跑）。
+
+### 68. 验证切片轮（verification slice）**立项**：`#check`/`#ensure` 最小面 + VC 打印（2026-09-16——草案落仓，**待裁-V1..V6，未实施**）
+- **落点**：`docs/superpowers/plans/2026-09-16-verification-slice.md`（全文：切片边界五候选 + 推荐 **C1** · 分诊表逐要素实读 · 与 IR 的关系 · **六裁决门** · 任务总表 T0..T5 · Global Constraints · 停条件 7 条 · 未决项 U-1..U-7 · 自检记录）。
+- **范围（一句话）**：兑现「语义保鲜」的规约层 **0→1**——`#check`/`#ensure` 布尔表达式 ⇒ 编入图 ⇒ **可打印 VC 清单**；**不接求解器、不接 CIC 内核、不做 spec fn/量化**；**未证明不拦编译**（仅「常量假」= 硬错）。
+- **开工前置（六门）**：裁-V1 第一刀 = C1？ · 裁-V2 载体（dump 先行 vs `.csr` v1） · 裁-V3 消费面（`.ccr` vs `.cir` 对外序列化） · 裁-V4 `#` 零运行时足迹（canary 硬闸的构造性来源） · 裁-V5 表达式子集（是否允许可证纯调用） · 裁-V6「未证明不拦编译」+ 常量假 = 硬错。
+- **实读关键事实（草案内已固化，T1 须重取行号）**：lexer/parser/EBNF **零规约面**；`.csr`/TagNode 在 `src/` **零命中**（纯设计）；`.cir` **无对外序列化**（只有 DOT + 私有缓存快照）⇒ 建议消费面 = `.ccr`（v9 八段，有版本闸/段表/读回）；纯度 `compute_all_purity` 的**时序陷阱**（生成期读 = 乐观默认值）。
+- **状态**：**立项/草案**（未实施；六门未裁前不得落码）。
+
+### 69. 预存 Bug 分类账落仓（2026-09-16——65 条逐条实读分类：还活着 17 · 部分收口 2 · 已修 16 · 登记/非缺陷 28；**含 11 条划销与 2 条勘误**）
+- **落点**：`docs/superpowers/specs/2026-09-16-preexisting-bug-ledger.md`（全文：分类账表逐条带「本轮实读」证据 · 优先级排序 · **建议批 B1..B9** · 划销清单 · 重复项/互引 · 诚实项）。
+- **本次已落 TODO 的动作**：**划销 11 条**（#5/#8/#11/#16/#25/#28/#29/#32/#35/#40/#55——逐条按账内证据复核后核销；#23 已在位划销故未重复；#35 转历史口径）· **#17 归档**（登记对象 = 影子层，已随 P5 T5 删除）· **#31 文字勘误**（「`test_backend_bootstrap.py` 早已挂」经实读证伪：`src/ci/run.sh` 命中 0，该守卫只在手工全枚举路径执行）· **#20 锚点勘误**（`:1053` → 定义 `:1912` / 丢弃点 `:2021`）。
+- **账内**还活着 17 条 + 部分收口 2 条 + 建议批 **B1..B9**（B4 诊断门/CI 挂点被标「最高性价比」——见账 §2/§3）⇒ **待裁**（本条目只落账 + 已完成的内文核销，不实施任何修复）。
+- **空号注记**：`#66` 预留给「P6 T2 落地登记」（账 §6-④ 建议）。
+- **出处**：原稿 `/tmp/bugtriage/ledger.md`（2026-09-16；零构建零 jj 只读产出）。
+- **状态**：账已落仓 + TODO 内文已同步；**修复批未开**。
+
+### 67. ctl（编译时间线性化）计划**任务级细化**落仓（2026-09-16——纸面细化轮；**未实施任何修法**）
+- **落点**：定理清单 → `docs/superpowers/specs/2026-09-16-compile-time-theorems.md`（review checklist，12 行定理 + 机检口径）；任务表 **T1..T10** + **7 裁决门** + 审计勘误 → 并入 `docs/superpowers/plans/2026-09-04-compile-time-linearity.md` §8/§9（状态行改「已细化」，指针互引）。
+- **审计复核结论**（实读现址）：28 条审计点中 **仍成立 25**（8 条纯行号漂移 · 2 条位置迁移 · 2 条「疑似」升「确定」）· **已失效 1**（`pass_stack_share` 已停用 ⇒ 计划该行已就地划销）· **须开工首日定位 2**（elf 前向补丁解析循环 · Phase 3 的 O(F²) 回扫）；**后端目录 `src/arch/linux/ld/` 已退役** ⇒ 计划 §2.2 全部路径作废（新址见 §8.1-E4）。
+- **开工前置**：**裁-CTL-1..7**（证书形态 · `C_pass` 来源 · scaling 范围 · CI 挂钩面 · 哈希设施 · **先 B 后 A** 的批次顺序 · 定理载体）+ **T1**（冻结基线 + 起点判据 + **修复前 scaling 基线**，数值须实测不得预填）。
+- **状态**：细化完成，**未实施**（T1..T10 待裁后开工）；本节随该批收官更新。
 
 ### 63. #60 批收官：暖缓存静默缺陷修复（(b) 见证式）+ 判据网**暖态腿**入仓（2026-09-15——**独立批 T1–T4 全阶段收官**）
 - **提交链**：`e0e92eef`（T2 = 修复 + 套件 + TODO）→ `227b747e`（T3 = 定路径语料 + 暖态腿 + 文档）→ 本条目（T4 收官：台账 + 终态 + spec/REBUILD 指针）。计划+统一台账 = `docs/superpowers/plans/2026-09-15-warm-cache-diagnostics.md`（§8 台账 / §9 终态）；报告 = `.superpowers/sdd/warm-task{1,3,4}-report.md` + `/tmp/fct4/task{1,2}-report.md`。
