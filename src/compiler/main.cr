@@ -549,11 +549,26 @@ fn corec_main() -> int {
             df_end_func(ir_func_idx);
         } else {
             // Cache miss: do full frontend IR gen
+            // TODO #60（裁-W1 = (b) 先行，**见证式**一般化）：缓存命中会**跳过本函数的生成期
+            // 副作用**——凡该副作用落在「快照**不携带**的共享空间」上，命中后该空间与冷路径
+            // **分叉**，读它的判定即静默失效（首例 = TU03：ir_gen 期 alloc_type 出的 TYP_PTR
+            // extra=1 行不随快照 ⇒ 暖态 get_type_extra 判定落空；见 /tmp/fct4/task1-report.md E1）。
+            // 判据 = 「**生成期对快照不载的共享面有副作用 ⇒ 本条目不可写**」（非某诊断码专用）：
+            // 下次运行必 miss ⇒ 重放全部副作用 ⇒ 两态一致（宁可 miss 不可静默）。
+            // 见证面清单（**扩展点**：新增「快照不载 + 生成期写 + 生成后被读」的共享面 ⇒ 加一行）：
+            //   ① `g_type_count`（类型行表；E1 实锤）；② 已核**非**共享面者不列：`g_ir_locals`
+            //      （仅 ir_gen 生成期自用，无生成后消费者）· 状态链/项表（v15/v18 已各自收口）·
+            //      可选表示侧表（optrep 程序已整体关缓存，main.cr 的 g_optrep_on 门）。
+            //   ③ **未判**（T1 E5：未构造/未测）—— 内层 SG/`g_df_node_region`（装载有 Minor #4
+            //      近似）· 外链重定位（探针未触发）⇒ 若日后证实，按同一形态加见证。
+            tc0 := g_type_count;
             ir_gen_func(fi);
             df_end_func(ir_func_idx);
 
-            // Save cache for future compilations
-            if cache_enabled != 0 { save_cir_cache(cache_path, fi, ir_func_idx); }
+            // Save cache only when no side effect on snapshot-uncarried shared faces.
+            if cache_enabled != 0 {
+                if g_type_count == tc0 { save_cir_cache(cache_path, fi, ir_func_idx); }
+            }
         }
 
         fi = fi + 1;

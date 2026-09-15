@@ -1438,6 +1438,17 @@ fn main() -> int {
 }
 """
 
+# #60 T2：**可缓存**夹具（无 ir_gen 期类型行分配 ⇒ `main` 有条目）——㊲ 重钉用
+# （复合行的可达性见 ㊲ 注：复合 mint 行的唯一来源 = ir_gen 分配行 ⇒ 见证下不落盘）。
+PLAIN_FIXTURE = """// R2 P5 Task 2 disk-code probe (T2 重钉：可缓存形态)
+fn add(a: int, b: int) -> int { return a + b; }
+fn main() -> int {
+    x := add(1, 2);
+    if x != 3 { return 1; }
+    return 0;
+}
+"""
+
 # 探针源（内联夹具；覆盖清单内 4 个类型行 + 三个陷阱形态）：
 #   IR_DEREF / IR_STORE_PTR 的 tk=8（= 访问宽度，数值恰是 TI_DEX_S 行）、
 #   IR_BOUNDS_CHECK 的 tk=0/1（旗标；1 数值恰是 TI_DEX 行）、
@@ -1889,6 +1900,11 @@ def test_p5t2_cold_warm_composite_symmetry():
                 seen_missing += 1
             else:
                 assert rw_[3] == rc_[3], f"warm-only item: {rc_} vs {rw_}"
+        # #60 T2 收口：上述「暖态丢项」局限的**成因**（命中跳过 ir_gen 而该函数 alloc_type
+        # 新行）已由见证规则消除（分配行的函数不再有条目 ⇒ 必重放）。本夹具实测 0 —— 钉死，
+        # 防回退（若再出现，说明见证被绕过或行表分叉，属 T2 面回归）。
+        assert seen_missing == 0, \
+            f"warm run lost {seen_missing} term(s): 行表分叉（#60 T2 见证规则应已闭合）"
         comp = [r for r in rows_c if r[1] in MINT_OPS and r[3] == -1 and r[8] > 0]
         assert comp, "vacuous: no composite row in cold dump"
     finally:
@@ -1916,11 +1932,19 @@ def test_p5t2_ccr_nod_composite_parity():
 
 
 def test_p5t2_snapshot_disk_code_preserved():
-    """㊲ `.cir` 快照盘面承载**派生码**（不是项引用、不是辅码）：快照节点的 (op, tk)
-    多重集 == dump 的 (op, tk) 多重集，且复合行的码 ≥ 0（若盘上落的是 -1 项槽或 0，
-    这里必红）。"""
+    """㊲ `.cir` 快照盘面承载**派生码**（不是项引用、不是辅码）：盘上 mint 行的 (op, tk)
+    必须全部落在活体 dump 的派生码集内（若盘上落的是 -1 项槽或 0，这里必红）。
+
+    **#60 T2 重钉（死亡证据 = 本批能力变更，非放宽判据）**：原判据对象 = **复合行**
+    （mint ∧ aux>0）。实核（101 档全语料扫描 + 夹具矩阵）：复合 mint 行的唯一来源 =
+    ir_gen 期分配复合类型行的函数（ir_gen.cr:1403/1409/2584/2641/2951）⇒ 依 T2 见证
+    规则（main.cr miss 分支：分配过类型行 ⇒ 不写条目）这类函数**结构上不落盘** ⇒ 原判据
+    在见证下**可达主体为空**（原夹具 COMPOSITE_FIXTURE 实测：comp={(2,13)} 全缺）。重钉
+    为可达形态：夹具改为**可缓存**（PLAIN_FIXTURE），断言对象 = 「带码 mint 行」全集；
+    复合子面待 (c)/(d)（快照承载类型行）恢复可缓存后按原判据复位 —— 见 TODO #60。
+    抑制面**不在此处静默放宽**：由紧随其后的 ㊳ 单独钉住。"""
     cache_dir = os.path.join(BASE, '.core', 'cache', 'cir')
-    src = tk_fixture('snapc', COMPOSITE_FIXTURE)
+    src = tk_fixture('snapc', PLAIN_FIXTURE)
     dot = os.path.join(BASE, 'build', 'test_p4t4_snapc.cir')
     try:
         shutil.rmtree(os.path.dirname(cache_dir), ignore_errors=True)
@@ -1932,13 +1956,38 @@ def test_p5t2_snapshot_disk_code_preserved():
             assert ver == 17 and ok, f"{f}: version/stride drifted"
             disk += [(nd[0], nd[5]) for nd in nodes]
         assert disk, "vacuous: no nodes parsed from snapshots"
-        comp = set((r[1], r[2]) for r in rows if r[1] in MINT_OPS and r[8] > 0)
-        assert comp, "vacuous: no composite row in fixture"
-        disk_set = set(disk)
-        missing = comp - disk_set
-        assert not missing, f"composite-row code lost on disk: {missing}"
+        mint = set((r[1], r[2]) for r in rows if r[1] in MINT_OPS and r[2] > 0)
+        assert mint, "vacuous: no coded mint row in fixture"
+        missing = mint - set(disk)
+        assert not missing, f"mint derived code lost on disk: {missing}"
     finally:
         _cleanup(src, dot)
+        shutil.rmtree(os.path.dirname(cache_dir), ignore_errors=True)
+
+
+def test_p5t2_row_allocating_fn_not_snapshotted():
+    """㊳（#60 T2 能力变更钉）**见证规则**：ir_gen 期对「快照**不载**的共享面」（类型行表）
+    有副作用的函数 ⇒ **不写快照条目** ⇒ 下跑必 miss ⇒ 重放全部生成期副作用（「宁可 miss
+    不可静默」，main.cr miss 分支）。夹具 = 原 ㊲ 的 COMPOSITE_FIXTURE（数组字面量 + 取址：
+    ir_gen.cr:2584 / :1403 / :1409 分配复合行 ⇒ main 命中见证）。
+      · ① `main` **无**条目（见证生效；修复前有 —— 原 ㊲ 正因它落盘才可达）；
+      · ② `add1` **有**条目 ∧ 条目总数 > 1 = 抑制是**选择性**的（非整档放弃缓存）；
+      · ③ 冷/暖两态同形：本夹具的逐行派生码/项对称由 ㉟（test_p5t2_cold_warm_composite_
+        symmetry）钉住 —— 本用例只管**条目面**，不重复。"""
+    cache_dir = os.path.join(BASE, '.core', 'cache', 'cir')
+    src = tk_fixture('snapc_alloc', COMPOSITE_FIXTURE)
+    out1 = os.path.join(BASE, 'build', 'test_p4t4_snapc_alloc.ccr')
+    try:
+        shutil.rmtree(os.path.dirname(cache_dir), ignore_errors=True)
+        corec_ccr(src, out1)
+        ents = sorted(e.split('::')[-1] for e in os.listdir(cache_dir))
+        assert ents, "vacuous: no snapshot entry at all"
+        assert 'main.cir' not in ents, \
+            f"row-allocating fn was snapshotted (witness rule broken): {ents}"
+        assert 'add1.cir' in ents, f"non-selective: add1 entry missing: {ents}"
+        assert len(ents) > 1, f"non-selective: single entry only: {ents}"
+    finally:
+        _cleanup(src, out1)
         shutil.rmtree(os.path.dirname(cache_dir), ignore_errors=True)
 
 
@@ -2223,6 +2272,7 @@ if __name__ == '__main__':
              test_p5t2_cold_warm_composite_symmetry,
              test_p5t2_ccr_nod_composite_parity,
              test_p5t2_snapshot_disk_code_preserved,
+             test_p5t2_row_allocating_fn_not_snapshotted,
              test_p6t3_version_gate_rejects_v8,
              test_p6t3_nod_record_40b_field_order,
              test_p6t3_nod_items_roundtrip,
