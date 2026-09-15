@@ -1050,6 +1050,61 @@ fn dex_store_adjust(target: int, val: int, val_node: int) -> int {
     return val;
 }
 
+// 聚合/指针槽写点规范化（apx 批 T3）：**聚合面不存在 apx 形式**——`apx` 是 LET 专属
+// 标签（parser.cr:819），字段 / 数组·切片元素 / 元组元素 / 枚举载荷 / 指针 pointee
+// 的规范存储形式**恒为精确（scaled）** ⇒ 任何 TI_DEX（bits）值入这类槽前一律转
+// scaled；非 apx 值原样返回（**零 IR** ⇒ 非 apx 程序逐字节不变）。
+// 纪律（Global Constraint 12）：本判定**不含任何类型表查询**（不调 res_type_node/
+// alloc_type）——ir_gen 路径新增 alloc_type 站点会破坏暖缓存「不可写条目」不变式。
+fn dex_slot_norm(val: int) -> int {
+    if val < 0 { return val; }
+    if irv_type(val) != TI_DEX { return val; }
+    return dex_bits_to_scaled(val);
+}
+
+// 聚合读的**声明面** dex-ness（apx 批 T3 · 比较/相等点专用）：
+// #78 未修 ⇒ 聚合读的结果槽 IR 型恒 TI_INT、**声明型被抹** ⇒ 下游「按值型触发」的
+// 形式分流看不到 dex。本函数在**节点级**把声明面取回来（**零 alloc_type**；先例
+// agg_elem_count_of:3004），供比较点判断操作数的**规范槽形式**：
+//   EXPR_FIELD ⇒ 结构体字段的声明类型节点（数字元组下标 ast_type_val>0 不判——元组无声明面）
+//   EXPR_INDEX ⇒ **全局**定长数组/切片的元素声明类型节点（局部数组无节点级声明面 ⇒ 不判）
+// 返回 1 = 声明为 dex（⇒ 槽内规范形式 = **精确/scaled**，由本批写点保证）· 0 = 非 dex / 不可得。
+fn dex_decl_form_of_expr(node: int) -> int {
+    if node < 0 { return 0; }
+    k := ast_kind(node);
+    if k == EXPR_FIELD {
+        if ast_type_val(node) > 0 { return 0; }
+        si := find_struct(ast_c(node));
+        if si < 0 { return 0; }
+        fi : ., mut = ast_data(node);
+        if fi < 0 { return 0; }
+        tn := si_field_type_node(si, fi);
+        if tn >= 0 && ast_kind(tn) == 0 && ast_type_val(tn) == TY_DEX { return 1; }
+        return 0;
+    }
+    if k == EXPR_INDEX {
+        an := ast_a(node);
+        if an < 0 || ast_kind(an) != EXPR_IDENT { return 0; }
+        ni := ast_int_val(an);
+        gi : ., mut = 0;
+        loop {
+            if gi >= g_global_let_count { break; }
+            lnode := r64(g_global_lets, gi * 8);
+            if ast_a(lnode) == ni {
+                tn := ast_b(lnode);
+                if tn >= 0 && ast_kind(tn) == EXPR_ARRAY {
+                    etn := ast_a(tn);
+                    if etn >= 0 && ast_kind(etn) == 0 && ast_type_val(etn) == TY_DEX { return 1; }
+                }
+                break;
+            }
+            gi = gi + 1;
+        }
+        return 0;
+    }
+    return 0;
+}
+
 // --- IR generation for expressions ---
 // Returns the IR variable index holding the result
 
@@ -1222,6 +1277,13 @@ fn gen_expr(node: int) -> int {
                 return v;
             }
         }
+        // apx 批 T3（L10 · 比较/运算点的**声明面**查表）：聚合读的结果槽 IR 型恒 TI_INT
+        // （#78：读点定型丢失声明型）⇒ 当操作数节点是聚合读**且声明面为 dex** 时，槽内
+        // 规范形式 = **精确（scaled）**（由本批写点保证）⇒ 按 TI_DEX_S 参与分流——否则
+        // 会落「TI_INT 操作数 I2F」支，把 scaled 整数当整数升 double（实测 b8 红 0）。
+        // **作用域**：只覆盖本分流点；**不改读点定型**（那是 #78 的爆炸半径，#91/#78 另批）。
+        if lt == TI_INT && dex_decl_form_of_expr(left) != 0 { lt = TI_DEX_S; }
+        if rt == TI_INT && dex_decl_form_of_expr(right) != 0 { rt = TI_DEX_S; }
         fti : int = TI_INT;
         // Pointer arithmetic: use PTR_ADD/PTR_SUB/PTR_DIFF instead of standard opcodes.
         // Raw byte buffers from alloc() are byte-addressed — plain ADD/SUB, no scaling.
@@ -1376,6 +1438,7 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             obj_var = force_if_thunk(obj_var);
             fi := ast_data(target);
             // 容量批 T2：可选字段写点规范化（字段声明类型取自 checker 记的 ast_c 结构体名）
+            val_var = dex_slot_norm(val_var);   // apx 批 T3：聚合面恒精确（§0 推论）；先归形式后装箱
             if g_optrep_on != 0 { val_var = box_for_optional_slot(val_node, val_var, field_ti_of_node(target, fi)); }
             emit(IR_STORE_FIELD, -1, obj_var, val_var, fi, 0);
             return val_var;
@@ -1393,6 +1456,7 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                     et = elem_ti_of_decl(global_decl_ti(ast_int_val(anode)));
                 }
             }
+            val_var = dex_slot_norm(val_var);   // apx 批 T3：元素槽恒精确
             if g_optrep_on != 0 { val_var = box_for_optional_slot(val_node, val_var, et); }
             // F1：写路径越界守卫钩子（修复前完全没有——见 compcert-round4 F1）
             arr_len_lit : ., mut = arr_len_lit_of(arr_var);
@@ -1420,6 +1484,7 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             if g_optrep_on != 0 && ti_is_optional(ptr_pointee_type(ptr_var)) != 0 {
                 val_var = box_for_slot_flag(val_node, val_var, 1);
             }
+            val_var = dex_slot_norm(val_var);   // apx 批 T3：pointee 槽恒精确（`*p = d` 实测 RED）
             emit(IR_STORE_PTR, -1, ptr_var, val_var, 0, ptr_access_width(ptr_var));
             return val_var;
         }
@@ -1803,7 +1868,17 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
         //   Core 函数：一律精确形式（scaled），apx 位模式参数转 scaled（F2I(bits×S)）；
         //   extern 函数：C ABI 契约（module.cr：dex 编码 3 = binary64 跨 C 边界），
         //     精确形式（scaled）实参转 binary64 bits（I2F/S——字面量重发射位模式常量）
-        if func_ni >= 0 && ast_kind(func_node) == EXPR_IDENT {
+        // 覆盖面（apx 批 T3；维护者硬条件 1「逐形态收窄」）：环从「仅直调」放宽到
+        // **可解析到 Core/extern 函数的调用形态**——直调（EXPR_IDENT）/ 方法调用
+        // （EXPR_FIELD 且非模块调用）/ 模块限定调用（EXPR_FIELD 且 is_module_call）。
+        //   · 三者共用同一环：实参表与形参链**天然对齐**（方法调用的接收者占
+        //     arg_vars[0]，而 `self` 在方法形参链中亦占第 0 位——parser.cr:1378-1405
+        //     把 self 物化为 EXPR_PARAM）；`arg_nodes` 游标同步走 EXPR_ARG 链。
+        //   · **不是「凡调用都进环」**：EXPR_AT 内建在 `:1600` 已提前返回（独立路径）；
+        //     `find_func` 落空（func_ni < 0 / 名字非函数）⇒ 无声明面 ⇒ 环不进（零变化）。
+        //   · 实测依据：方法调用 b1/b1b 红 49/15 · 模块限定调用 m1b 红（ELF=4，期望 7）
+        //     —— 二者同因（旧门的 `EXPR_IDENT` 硬限制）。
+        if func_ni >= 0 {
             cfi := find_func(func_ni);
             if cfi >= 0 {
                 cfn := fi_ast_node(cfi);
@@ -1812,7 +1887,10 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                 if cfn >= 0 && (cfn_ext != 0 || ast_kind(cfn) == EXPR_FN) {
                     cpi : ., mut = 0;
                     cpn : ., mut = ast_b(cfn);
-                    an2 : ., mut = first_arg;  // 并行走 EXPR_ARG 链取实参节点（字面量重发射）
+                    // 实参节点与实参 var **同表锁步**取（`arg_nodes[cpi]` 与 `arg_vars[cpi]`
+                    // 同索引写入，接收者亦在内）——方法调用下 EXPR_ARG 链**不含接收者**，
+                    // 若按链另走游标会滞后一位（本批实测：node 仅服务于 extern 字面量
+                    // 重发射，Core 分支不用；仍按锁步改正以免埋雷）。
                     loop {
                         if cpi >= ac { break; }
                         if cpn < 0 { break; }
@@ -1823,7 +1901,7 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                                     // extern：scaled → bits（字面量直接重发射位模式常量）
                                     if irv_type(av) == TI_DEX_S {
                                         arg_node : ., mut = -1;
-                                        if an2 >= 0 { arg_node = ast_a(an2); }
+                                        if cpi < arg_nodes_cap { arg_node = r64(arg_nodes, cpi * 8); }
                                         av = dex_scaled_to_bits(av, arg_node);
                                         w64(arg_vars, cpi * 8, av);
                                     }
@@ -1835,7 +1913,6 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                             }
                         }
                         cpi = cpi + 1;
-                        if an2 >= 0 { an2 = ast_b(an2); }
                         cpn = cpn + 1;
                         loop {
                             if cpn >= g_ast_count { break; }
@@ -2608,6 +2685,7 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             // 容量批 T2：可选载荷写点规范化（载荷类型 = 变体声明面；`Some`/`None` 关键字
             // 形不带变体行 ⇒ enum_payload_ti 返回 -1 ⇒ 原样，不装箱）
             if g_optrep_on != 0 { val_var = box_for_optional_slot(ast_a(an), val_var, enum_payload_ti(name_idx, ai)); }
+            val_var = dex_slot_norm(val_var);   // apx 批 T3：载荷槽恒精确
             emit(IR_STORE_FIELD, -1, s, val_var, ai + 1, 0);  // +1 for tag offset
             an = ast_b(an);
             ai = ai + 1;
@@ -2644,6 +2722,7 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                 }
                 // 容量批 T2：可选字段写点规范化（字面量形；元素值节点 = wrapper.a）
                 if g_optrep_on != 0 { val_var = box_for_optional_slot(ast_a(fn2), val_var, struct_row_field_ti(si, field_idx)); }
+                val_var = dex_slot_norm(val_var);   // apx 批 T3：字段槽恒精确
                 emit(IR_STORE_FIELD, -1, s, val_var, field_idx, 0);
                 fn2 = fn2 + 1;
             }
@@ -2692,6 +2771,7 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                     if elem_opt_ti >= 0 { eo = 1; }
                     e_var = box_for_slot_flag(ast_a(en), e_var, eo);
                 }
+                e_var = dex_slot_norm(e_var);   // apx 批 T3：元素槽恒精确
                 emit(IR_STORE_INDEX, -1, v, e_var, ei, 0);
                 en = en + 1;
             }
@@ -2819,6 +2899,7 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             // 容量批 T2：可选元素写点规范化（元组元素槽无声明面 ⇒ 按元素表达式可选性
             // 保守判定；ident/调用覆盖面，其余形态登记）
             if g_optrep_on != 0 { elem_var = box_for_slot_flag(en, elem_var, elem_node_optional(en)); }
+            elem_var = dex_slot_norm(elem_var);   // apx 批 T3：元组元素槽恒精确
             emit(IR_STORE_FIELD, -1, tv, elem_var, e, 0);
             e = e + 1;
         }
@@ -3094,6 +3175,7 @@ fn inject_global_inits() {
                     // 容量批 T2：可选全局槽**初值**写点规范化（与赋值点 :1155 是两处独立
                     // 代码点——初值走 inject_global_inits，赋值走 EXPR_ASSIGN）
                     if g_optrep_on != 0 { v = box_for_optional_slot(vn, v, global_decl_ti(name_idx)); }
+                    v = dex_store_adjust(gv, v, vn);   // apx 批 T3：全局初值按槽声明型（含 apx 全局）
                     emit(IR_STORE, -1, gv, v, 0, 0);
                 }
             }
