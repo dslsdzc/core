@@ -1315,10 +1315,16 @@ fn gen_expr(node: int) -> int {
                     val_var = dex_store_adjust(lv, val_var, val_node);
                      // F11：切片长度沿赋值传播（字面量/运行时界长度变量同步；源无记录则清除）
                      slice_len_copy_to(lv, val_var);
+                    // (A) 批（INV-1）：取址槽恒装箱（同 LET 写点；名字索引判定）
+                    rpv0 := irv_rep(lv);
+                    forced2 := g_optrep_on != 0 && rpv0 >= 0 && addr_taken_of(name_idx) != 0;
+                    if forced2 != 0 { val_var = box_for_slot_flag(val_node, val_var, 1); }
 emit(IR_STORE, -1, lv, val_var, 0, 0);
                     // 可选表示（R2 P4 Task 5）：赋值写点置位（同 LET——解包点据此分派）
-                    rpv := irv_rep(lv);
-                    if rpv >= 0 { emit_rep_set(rpv, rep_enc_of_expr(val_node, val_var)); }
+                    if rpv0 >= 0 {
+                        if forced2 != 0 { emit_rep_set(rpv0, oe_boxed()); }
+                        else { emit_rep_set(rpv0, rep_enc_of_expr(val_node, val_var)); }
+                    }
                 }
             } else {
                 gv := find_global(name_idx);
@@ -1375,6 +1381,11 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
         if ast_kind(target) == EXPR_UNARY && ast_c(target) == UOP_DEREF {
             ptr_var := gen_expr(ast_a(target));
             ptr_var = force_if_thunk(ptr_var);
+            // (A) 批（INV-2）：**指针写且 pointee 可选 ⇒ 装箱**——一致性由 INV-1（取址槽恒装箱）
+            // 与 E-2（聚合恒装箱）保证；越界面 = REP-2（指针算术）/ extern（登记）
+            if g_optrep_on != 0 && ti_is_optional(ptr_pointee_type(ptr_var)) != 0 {
+                val_var = box_for_slot_flag(val_node, val_var, 1);
+            }
             emit(IR_STORE_PTR, -1, ptr_var, val_var, 0, ptr_access_width(ptr_var));
             return val_var;
         }
@@ -1393,11 +1404,16 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                 idx_var := gen_expr(ast_b(inner));
                 idx_var = force_if_thunk(idx_var);
                 elem_ti : ., mut = TI_INT;
-                arr_ti := irv_type(arr_var);
-                if arr_ti >= 0 {
-                    arr_kind := get_type_kind(arr_ti);
-                    if arr_kind == TYP_ARRAY || arr_kind == TYP_SLICE {
-                        elem_ti = get_type_data(arr_ti);
+                // (A) 批：元素类型**声见面优先**（T2 的 elem_ti_of：decl 表优先，退回运行期类型）
+                de := elem_ti_of(arr_var);
+                if de >= 0 { elem_ti = de; }
+                else {
+                    arr_ti := irv_type(arr_var);
+                    if arr_ti >= 0 {
+                        arr_kind := get_type_kind(arr_ti);
+                        if arr_kind == TYP_ARRAY || arr_kind == TYP_SLICE {
+                            elem_ti = get_type_data(arr_ti);
+                        }
                     }
                 }
                 v := new_ir_var("addr", alloc_type(TYP_PTR, elem_ti, 0));
@@ -1406,7 +1422,33 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             }
             op_var := gen_expr(ast_a(node));
             op_var = force_if_thunk(op_var);
-            v := new_ir_var("ref", alloc_type(TYP_PTR, irv_type(op_var), 0));
+            // (A) 批：pointee 类型**声见面优先**（字面量推出的 IR 类型对可选槽退化为对象占位），
+            // 且**取址槽（INV-1 恒装箱）⇒ pointee 记为 TYP_OPTIONAL**（装载侧 W5 据此装箱；
+            // 非可选取址槽不受影响）
+            // 取址目标的**源名索引**取自操作数（EXPR_UNARY 的 int_val 是 is_mut 位，不是名索引）
+            ni_src : ., mut = -1;
+            if ast_kind(ast_a(node)) == EXPR_IDENT { ni_src = ast_int_val(ast_a(node)); }
+            pti := slot_decl_ti(op_var);
+            if pti < 0 { pti = irv_type(op_var); }
+            if ni_src >= 0 {
+                // 全局槽：声明面在 g_global_lets（E-2 的 global_decl_ti）——局部表未登记全局。
+                // **只升级不降级**：全局声明可选 ⇒ 记可选；否则保留上面已得的类型
+                // （全局 IR var 本身可能已是可选类型，直接取声明面会把它覆盖成非可选 ⇒ W5 不装箱）。
+                gti := global_decl_ti(ni_src);
+                if ti_is_optional(gti) != 0 { pti = gti; }
+            }
+            if g_optrep_on != 0 && ni_src >= 0 && addr_taken_of(ni_src) != 0 {
+                // 取址目标具备可选能力（有表示位 / 声明为可选）⇒ pointee 记 TYP_OPTIONAL：
+                // 装载侧 IR_STORE_PTR（W5）据 pointee 是否可选决定装箱。非可选槽 rep<0
+                // 且声明非可选 ⇒ 两种形态都不触发（零足迹）。
+                if irv_rep(op_var) >= 0 || ti_is_optional(pti) != 0 {
+                    if ti_is_optional(pti) == 0 {
+                        inner3 := pti; if inner3 < 0 { inner3 = TI_INT; }
+                        pti = alloc_type(TYP_OPTIONAL, inner3, 0);
+                    }
+                }
+            }
+            v := new_ir_var("ref", alloc_type(TYP_PTR, pti, 0));
             emit(IR_REF, v, op_var, ast_int_val(node), 0, 0);
             return v;
         }
@@ -2368,9 +2410,16 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             // F11：切片长度沿 LET 初始化传播（s := arr[0..2] → s 带长度 2；
             // 运行时界 slice 同步长度变量——slice_len_copy_to）
             slice_len_copy_to(var, val_var);
+            // (A) 批（INV-1）：**取址槽恒装箱**——该槽地址被取过 ⇒ 写点装箱 + 表示位钉 1
+            //（指针写/直接写两路的表示必须一致；解包侧恒走装箱分支）
+            forced := g_optrep_on != 0 && rep_var >= 0 && addr_taken_of(var_ni) != 0;
+            if forced != 0 { val_var = box_for_slot_flag(val_node, val_var, 1); }
             emit(IR_STORE, -1, var, val_var, 0, 0);
             // 可选表示：写点置位（静态已知常量 / 源表示位拷贝）——解包点据此分派
-            if rep_var >= 0 { emit_rep_set(rep_var, rep_enc_of_expr(val_node, val_var)); }
+            if rep_var >= 0 {
+                if forced != 0 { emit_rep_set(rep_var, oe_boxed()); }
+                else { emit_rep_set(rep_var, rep_enc_of_expr(val_node, val_var)); }
+            }
         }
         bind_local(var_ni, var);
         if is_apx != 0 { emit(IR_APPROX, -1, 0, 0, 0, 0); }
@@ -2757,6 +2806,24 @@ fn ir_gen_func(fi: int) {
                 prv := new_ir_var(pname + "_prep", TI_INT);
                 emit(IR_LOAD, prv, g_optrep_arg_cell0 + pi, 0, 0, TI_INT);
                 irv_set_rep(pvar, prv);
+                // (A) 批（INV-1）：**取址形参**恒装箱——序言内条件装箱（信道 rep = 0 裸值 ⇒ 装箱）
+                // 并把表示位钉 1（后续含指针写在内的一切写点都由 W3/W2 保持该不变量）
+                if addr_taken_of(pname_idx) != 0 {
+                    zb := new_ir_var("_rz", TI_INT);
+                    emit(IR_CONST, zb, 0, 0, 0, TI_INT);
+                    isb := new_ir_var("prep_isbare", TI_INT);
+                    emit(IR_BINARY, isb, prv, zb, OP_EQ, 0);
+                    bare_lbl := new_label();
+                    end_lbl := new_label();
+                    emit(IR_BRANCH, -1, isb, bare_lbl, end_lbl, 0);
+                    emit(IR_LABEL, -1, bare_lbl, 0, 0, 0);
+                    boxed := emit_box_some(pvar);
+                    emit(IR_STORE, -1, pvar, boxed, 0, 0);
+                    one := new_ir_var("prep_one", TI_INT);
+                    emit(IR_CONST, one, 1, 0, 0, TI_INT);
+                    emit(IR_STORE, -1, prv, one, 0, 0);
+                    emit(IR_LABEL, -1, end_lbl, 0, 0, 0);
+                }
             }
         }
         pi = pi + 1;
@@ -3066,6 +3133,49 @@ fn optrep_begin() {
     g_optrep_arg_count = 0;
     g_cur_ret_opt = 0;
     optrep_prescan();
+    optrep_addr_prescan();
+}
+
+// (A) 批（裁-REP-4）：**取址面预扫**——收集一切「取址 ident」的名字索引（照 optrep_prescan
+// 先例；全 AST 一遍）。判据面 = `&ident`（`UOP_REF` 的 operand 为 `EXPR_IDENT`）；其余取址
+// 形态见计划 §2.3 引理 1（`&arr[i]` = 聚合面已恒装箱；`&<其它表达式>` = 临时量非槽；函数地址
+// 非槽；指针算术 = REP-2 边界；extern = 登记）。
+fn grow_addr_taken(needed: int) {
+    if needed <= g_addr_taken_cap { return; }
+    nc := g_addr_taken_cap * 2; if nc < 32 { nc = 32; } if nc < needed { nc = needed + 32; }
+    nb := alloc(nc * 8); _dyncpy(g_addr_taken_names, g_addr_taken_cap * 8, nb);
+    g_addr_taken_names = nb; g_addr_taken_cap = nc;
+}
+fn addr_taken_add(ni: int) {
+    if ni < 0 { return; }
+    if addr_taken_of(ni) != 0 { return; }          // 去重（线性扫；量级 = 源码里 &ident 的条数）
+    grow_addr_taken(g_addr_taken_count + 1);
+    w64(g_addr_taken_names, g_addr_taken_count * 8, ni);
+    g_addr_taken_count = g_addr_taken_count + 1;
+}
+fn addr_taken_of(ni: int) -> int {
+    if ni < 0 { return 0; }
+    i : ., mut = 0;
+    loop {
+        if i >= g_addr_taken_count { return 0; }
+        if r64(g_addr_taken_names, i * 8) == ni { return 1; }
+        i = i + 1;
+    }
+    return 0;
+}
+fn optrep_addr_prescan() {
+    g_addr_taken_count = 0;
+    i : ., mut = 0;
+    loop {
+        if i >= g_ast_count { break; }
+        if ast_kind(i) == EXPR_UNARY && ast_c(i) == UOP_REF {
+            opn := ast_a(i);
+            if opn >= 0 && ast_kind(opn) == EXPR_IDENT {
+                addr_taken_add(ast_int_val(opn));
+            }
+        }
+        i = i + 1;
+    }
 }
 
 // 表示面启用扫描（**零足迹门**）：AST 含任一 `T?` 类型节点（EXPR_OPTIONAL）或任一
