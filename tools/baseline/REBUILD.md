@@ -114,3 +114,12 @@ bash tools/baseline/warm_run.sh ./build/corec /tmp/warm_now   # 牙齿层（语�
   （4 档），故对拍是 examples 的**唯一**行为证据来源。
 - **`.ccr`/`.cir` 缓存态**：比较任何产物前 `clean-cache`（runner 已逐档做）；`.ccr` 记录值引用须带
   命令口径 + 缓存态（TODO #26 / P4 附录 D-1）。
+- **`.ccr` 记录值还依赖 `$HOME` 内容（2026-09-16 判据载体化批 CI 红档实锤）**：编译器解析 `import`
+  时会读 `$HOME/.core/lib/<模块>/index` 并把这些名字驻留进 `.ccr`（`src/compiler/module.cr:523-530`）
+  ⇒ **同一提交、同一编译器，换台机器产物就变**（`tests/suite/generics_test.cr` 在本机
+  `~/.core/lib/io/index` 在场时 142793B、在 CI 上 142765B）。**判据的效力范围**：`tools/baseline/`
+  的 `.ccr` 记录值**自本批起**锁定「环境归一化（受控空 `HOME`）下的产物」——载体
+  `canary_check.sh` 已把 `HOME` 钉到采集目录内的空 `home/`；**手工复跑时也须同样归一化**，
+  否则会得到本机态的假红（**不得** unset/置空 `HOME`：`module.cr:526` 有硬编码 `/home/DslsDZC`
+  兜底，置空反会去读原开发者家目录）。根因已独立登记（TODO #79/#82，与「缓存键缺编译器身份」同族）。
+  注：本条的**两档语料**中 `ptr_arith` 零 import ⇒ 不受影响；受影响的只有 `generics_test`（两口径）。

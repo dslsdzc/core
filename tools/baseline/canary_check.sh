@@ -29,6 +29,9 @@
 #                （/tmp/capt1/t1b_criteria.sh:41-53 + .superpowers/sdd/cap-task1-report.md:82）
 #                语料 A = tests/suite/ptr_arith.cr · 语料 B = tests/suite/generics_test.cr
 #                两口径差恒 **143B**，根因 = `--static` 前置 rt.cr（main.cr:433-437）⇒ 4 全局 + 1 串入段。
+#   环境       : **HOME 归一化**到采集目录内的空 home/（+ `CORE_SAFE=1`）——见下方「环境归一化」
+#                注。**不做归一化**时 gt 两条会随开发机 `~/.core/lib/io/index` 漂 ±28B
+#                （CI PR #80 红档的成因）。
 #   **判据契约是两级的**（勿写成「永远不该变」，也勿写成「随便变」）：
 #     canary ELF = 发射面零泄漏检测器（变 = 越界 ⇒ 停下上报）；
 #     .ccr 四条  = 格式+内容形状检测器（**值变 ≠ 必然回归**，但**必须显式归因 + 同批重锁 + 旧值留痕**；
@@ -59,6 +62,21 @@ REPO_ROOT="${COREC_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 cd "$REPO_ROOT" || exit 2
 
 D_CUR=""   # 采集目录（clean_cache/step_compile 的日志落点；只在采集路径赋值）
+
+# ── 环境归一化（本闸门**必须**与开发机家目录解耦）──────────────────────────────
+# 机理（2026-09-16 CI 红档实锤，PR #80）：编译器解析 `import` 时会读
+# `$HOME/.core/lib/<模块名>/index`（扩展 .so 元数据索引，module.cr:523-530 实读），
+# 命中则 `reg_so_funcs` 把其中声明的函数名驻留进 `.ccr` 串表 ⇒ **同一提交、同一编译器，
+# 换台机器产物就变**（本机 `~/.core/lib/io/index` 160B ⇒ `generics_test` +2 串
+# `print_int`/`println_int` = +28B）。
+#   · 归一化 = `HOME` 钉到**采集目录内的空 home/**，且在输出里打印实际 HOME（可审计）；
+#   · **不得 unset/置空 HOME**——`module.cr:526` 有一条硬编码兜底
+#     `if str_len(home_dir) == 0 { home_dir = "/home/DslsDZC"; }`，置空反而会去读
+#     **原开发者**的家目录（该缺陷已独立登记，见 TODO）。
+#   · `CORE_SAFE` 同法钉成文档默认值 `1`（`ext_mgr.cr:41`：仅在显式 `=0` 时关安全面）
+#     —— 防环境里一个 `CORE_SAFE=0` 造成假红。
+CANARY_HOME=""
+ENV_PIN=(env "CORE_SAFE=1")   # HOME 在采集时追加（见 collect_into）
 
 VALUES_DEFAULT="$SCRIPT_DIR/canary_values.tsv"
 DEFAULT_DIR="$REPO_ROOT/build/canary_artifacts"
@@ -178,7 +196,7 @@ COREC_BIN="./build/corec"
 CMD=()
 clean_cache() {
   local rc
-  "${CMD[@]}" clean-cache >| "$D_CUR/clean_cache.log" 2>&1; rc=$?
+  "${ENV_PIN[@]}" "HOME=$CANARY_HOME" "${CMD[@]}" clean-cache >| "$D_CUR/clean_cache.log" 2>&1; rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "[FAIL] F1 clean-cache rc=$rc（log=$D_CUR/clean_cache.log）"
     return 1
@@ -191,7 +209,7 @@ step_compile() {
   local name="$1" log="$2"; shift 2
   local rc
   clean_cache || return 1
-  "${CMD[@]}" "$@" >| "$D_CUR/$log" 2>&1; rc=$?
+  "${ENV_PIN[@]}" "HOME=$CANARY_HOME" "${CMD[@]}" "$@" >| "$D_CUR/$log" 2>&1; rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "[FAIL] F1 采集 $name: rc=$rc（log=$D_CUR/$log）"
     sed -n '1,8p' "$D_CUR/$log" | sed 's/^/       | /'
@@ -204,6 +222,11 @@ collect_into() {
   local d="$1"
   D_CUR="$d"
   rm -rf "$d"; mkdir -p "$d"
+  # 受控 HOME（采集目录内的空目录）——**非 unset**（防 module.cr:526 硬编码兜底）；
+  # 打印实际值以便审计（本行即「闸门与开发机 $HOME 内容解耦」的证据面）。
+  CANARY_HOME="$d/home"
+  mkdir -p "$CANARY_HOME"
+  echo "[canary] 环境归一化：HOME=$CANARY_HOME（空目录，已建）· CORE_SAFE=1 · corec=$COREC_BIN"
   step_compile canary_elf     pa.log     build tests/suite/ptr_arith.cr   --static -o "$d/pa"     || return 1
   step_compile pa_ccr         pa_ccr.log ccr   tests/suite/ptr_arith.cr   -o "$d/pa.ccr"         || return 1
   step_compile pa_static_ccr  pa_st.log  build tests/suite/ptr_arith.cr   --static -o "$d/pa_st.bin" || return 1
