@@ -249,10 +249,10 @@ Formal EBNF definitions in `grammar/`:
 Design documents (Chinese):
 - `docs/project-book.md` — Philosophy, IR system, formal verification architecture
 - `docs/dataflow-design.md` — Dataflow execution model design
-- `docs/language-syntax.md` — Language syntax reference
+- `docs/developer/syntax.md` — Language syntax reference
 - `docs/execution-model.md` — Execution model
-- `docs/memory-model.md` — Arena memory model design
-- `docs/error-codes.md` — Compiler error code reference
+- `docs/maintainer/design/memory-model.md` — Arena memory model design
+- `docs/developer/errors.md` — Compiler error code reference
 
 ## Known Issues
 

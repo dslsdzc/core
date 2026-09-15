@@ -657,19 +657,19 @@
 ## 架构规划
 
 ### 指针安全模型
-见 `docs/pointer-model.md`。裸指针 + HDFG provenance 推导，编译器自动验证，退路 `unsafe`。
+见 `docs/maintainer/design/pointer-model.md`。裸指针 + HDFG provenance 推导，编译器自动验证，退路 `unsafe`。
 三 pass：PointerAnalysis、RegionCheck、ProvenanceVerify — 全部实现。
 
 ### Arena 内存模型
-见 `docs/memory-model.md`。已完整实现。堆按 HDFG 子图划分独立 Arena，指针碰撞分配，
+见 `docs/maintainer/design/memory-model.md`。已完整实现。堆按 HDFG 子图划分独立 Arena，指针碰撞分配，
 游标重置回收。Arena 边界对应 HDFG 子图边界。
 
 ### 文档更新
-- `docs/memory-model.md` — 设计文档（待同步实现细节）
-- **docs 重组合并时的连带改点（2026-09-11 登记，`feature/docs-reorg` 已推送 `9eab0757` 待合）**：该分支把 `docs/error-codes.md` → `docs/developer/errors.md`、`docs/compcert-reference.md` → `docs/archive/compcert-reference.md`，故**合并该分支时必须同步两处 src 注释**：`src/compiler/ast.cr:315`、`src/compiler/ptr_analysis.cr:235`（在本线/当前 develop 上这两个路径**仍然正确**，故不在 docs 分支内改——避免把 src/ 拉进 docs 分支，也避免在本线留下悬空引用）。
-- `docs/pointer-model.md` — 指针安全完整设计
-- `docs/language-syntax.md` — 指针、@ 内建语法已更新
-- `docs/at-intrinsics.md` — @ 内建原语完整规格
+- `docs/maintainer/design/memory-model.md` — 设计文档（待同步实现细节）
+- **docs 重组合并时的连带改点（2026-09-11 登记，`feature/docs-reorg` 已推送 `9eab0757` 待合）**：该分支把 `docs/developer/errors.md` → `docs/developer/errors.md`、`docs/archive/compcert-reference.md` → `docs/archive/compcert-reference.md`，故**合并该分支时必须同步两处 src 注释**：`src/compiler/ast.cr:315`、`src/compiler/ptr_analysis.cr:235`（在本线/当前 develop 上这两个路径**仍然正确**，故不在 docs 分支内改——避免把 src/ 拉进 docs 分支，也避免在本线留下悬空引用）。
+- `docs/maintainer/design/pointer-model.md` — 指针安全完整设计
+- `docs/developer/syntax.md` — 指针、@ 内建语法已更新
+- `docs/developer/at-intrinsics.md` — @ 内建原语完整规格
 
 ### 6. 同步源码修改到伪代码文档（2026-08-09 记）
 - 背景：伪代码（docs/pseudocode/）基于源码快照翻译；以下源码变更后对应文档未同步
@@ -758,7 +758,7 @@
   - VS Code 客户端（协议层已编辑器无关）
 
 ### 设计定稿待实现（补挂账，2026-08-28 审计）
-- **概率性 pass**（probabilistic-pass，2026-07-30 已批准）：src/ 零实现，仅文档（`docs/probabilistic.md`）——范式相关，优先级低，待排期
+- **概率性 pass**（probabilistic-pass，2026-07-30 已批准）：src/ 零实现，仅文档（`docs/maintainer/proposals/probabilistic.md`）——范式相关，优先级低，待排期
 - **硬件映射表**（hw-map，2026-08-23 已批准）：MMIO 设备语义表 + 投影表——crasm 依赖已解除（2026-09-05 crasm 退役）；与硬件接口表（HIT）同族——HIT = 指令/运行层接口（`specs/2026-09-05-hardware-interface-table.md`），hw-map = 设备层接口，同构（语义表范式无关 + 投影表实例）。实现仍待排期。关联 `docs/superpowers/specs/2026-08-23-hw-map-design.md`
 - **平台桥抽象**（platform-abstract，2026-08-16 定案）：设计定案待实现——语义接口 + 后端实现原则；程序 IO = 流转导器。关联 `docs/superpowers/specs/2026-08-16-platform-abstract-design.md`
 - ~~**错误码体系**（error-codes，2026-08-08 已批准）~~（2026-09-05 复核：体系完整——ast.cr 定义 `EC_R_*`，checker.cr:2080/2095 发射 R002（编译期越界），main.cr:148 硬错误路径（R002/TK05/TK06 拦编译），diag.cr `error_cat_prefix`/`pad_diag_num` 完整打印 R001-R004；BC17「全仓库无引用」为历史旧况，已过时）
@@ -872,9 +872,9 @@ corearch 恒空跑，零产物差异）。设计定稿 `docs/superpowers/specs/2
 - **序列化/打印自动**（serialize-auto，2026-08-30）：从接口声明自动生成序列化代码与打印格式（serde 式派生；`dex_str` 已是雏形）——类型驱动代码生成家族
 
 ### ~~.crasm 统一汇编抽象层~~（2026-08-09 记｜**2026-09-05 退役**）
-- **退役（2026-09-05）**：独立 .crasm 格式取消——绑定经典硬件过深（寄存器/寻址/ISA 助记符/私有平台映射表），被**硬件接口表（HIT）**吸收：跨平台 = HIT 事件 + 投影表；MMIO/特权/中断 = `.cr` unsafe + HIT extern 接口事件；事件可读形态 = v6 NOD 文本 dump。正式声明 = `docs/crasm.md` 状态行（已废弃，保留为历史记录）；依赖解除引用见本文件「硬件映射表」与「宽度类型移出语言」两条。**原里程碑方向全部作废（保留下文备查），无实施计划。**
+- **退役（2026-09-05）**：独立 .crasm 格式取消——绑定经典硬件过深（寄存器/寻址/ISA 助记符/私有平台映射表），被**硬件接口表（HIT）**吸收：跨平台 = HIT 事件 + 投影表；MMIO/特权/中断 = `.cr` unsafe + HIT extern 接口事件；事件可读形态 = v6 NOD 文本 dump。正式声明 = `docs/maintainer/design/crasm.md` 状态行（已废弃，保留为历史记录）；依赖解除引用见本文件「硬件映射表」与「宽度类型移出语言」两条。**原里程碑方向全部作废（保留下文备查），无实施计划。**
 - （历史）目标：内核路线（project-book 第五阶段）的汇编级能力——MMIO、特权指令、中断。跨平台统一指令集 + 无限虚拟寄存器 + 平台映射表，寄存器分配按 v4 方向（缓存语义映射实例，`docs/regalloc-cache-mapping.md`——无限虚拟寄存器 + 平台映射表正是映射实例形态；现 `alloc_registers` 线性扫描器为升级起点）
-- （历史）现状：设计已批准（2026-08-08 brainstorming 逐节确认），2026-08-09 整理为正式文档 `docs/crasm.md`；实现从未落地（lexer/parser 无 asm 语法）——2026-09-05 整体退役
+- （历史）现状：设计已批准（2026-08-08 brainstorming 逐节确认），2026-08-09 整理为正式文档 `docs/maintainer/design/crasm.md`；实现从未落地（lexer/parser 无 asm 语法）——2026-09-05 整体退役
 - ~~方向（按里程碑顺序）：~~
   - ~~1. `.crasm` 词法/解析（结构化指令 → AST 复用）~~
   - ~~2. 寄存器生命周期 pass + 测试（未初始化读/重复写/生命周期逃逸/宽度一致/分支一致性）~~
@@ -883,9 +883,9 @@ corearch 恒空跑，零产物差异）。设计定稿 `docs/superpowers/specs/2
   - ~~5. .cr extern 接口接线 + 端到端~~
   - ~~6. （后补）ARM64/RISC-V 映射表~~
 - 明确不做（YAGNI，退役前定案保留）：模拟器/调试器、C 生态兼容、指令级时序验证、特权副作用验证（隔离，人工保证）
-- 参考：`docs/crasm.md`（**已废弃 2026-09-05**）、`docs/superpowers/specs/2026-08-08-crasm-design.md`（批准记录，历史）
+- 参考：`docs/maintainer/design/crasm.md`（**已废弃 2026-09-05**）、`docs/superpowers/specs/2026-08-08-crasm-design.md`（批准记录，历史）
 
-### 对照 CompCert 审查发现的未修复 bug（2026-08-11 记，详见 docs/compcert-reference.md）
+### 对照 CompCert 审查发现的未修复 bug（2026-08-11 记，详见 docs/archive/compcert-reference.md）
 
 - ~~**region_check 误报（B11）**：deref 读出的 int 值被当作指针做区域逃逸检查——`v := *p; return v;` 被拦（预先存在，pts 语义需按类型过滤）~~（2026-08-29 已修：deref/return/store 仅对指针类型执行 provenance/区域逃逸检查；`test_deref_loaded_int_is_not_pointer_escape` 覆盖原始误报）
 

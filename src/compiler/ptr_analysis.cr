@@ -232,7 +232,7 @@ fn ptr_analysis_func(nstart: int, ncount: int, vstart: int, vcount: int) {
                     // offset 由索引 s2 决定：常量索引可精确计算（idx*8），
                     // 运行时索引 → 未知（-1），迫使 provenance_verify 生成运行时检查。
                     // 修复前：无条件传播 s1 的 offset（数组=0），运行时越界被误判为
-                    // 编译期安全 → 越界裸读（见 docs/compcert-reference.md 审查记录）。
+                    // 编译期安全 → 越界裸读（见 docs/archive/compcert-reference.md 审查记录）。
                     base_off := r64(g_offsets, s1 * 8);
                     idx_val : int = -1;
                     if s2 >= 0 {
