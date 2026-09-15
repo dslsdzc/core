@@ -7,8 +7,11 @@
 # 增减纪律：**删条目 = 该守卫已挂**（判据会要求同步删）；**加条目 = 显式登记一个新缺口**
 # （须写理由，最好在 TODO #31 同批登记）。
 #
-# 审计基线（2026-09-16 实读，主树工作副本）：selfhost 挂 31/54 · bootstrap 挂 3/7 ·
-# harness 挂 1/1 ⇒ 差集 = 23 selfhost + 4 bootstrap = 27 条（下方逐条）。
+# 审计基线（2026-09-16 判据载体化批**在本分支上当场重算**；本行 = carrier 分支树）：
+#   selfhost 挂 31/54 · bootstrap 挂 3/7 · harness 挂 3/3 ⇒ 差集 = 23 selfhost + 4 bootstrap
+#   = 27 条（下方逐条）。**注**：同一天的 seam 分支树是 selfhost 55（多一个
+#   `test_global_seams.py`）⇒ 计数**随分支/在场提交漂移**，一律以当场重算为准（CI 实测
+#   本分支 = scope 64 / hooked 37，与本行一致）。
 # 计数自 2026-09-11 的 #31 登记（15/39 + 3/7）持续漂移，本条机制即为此而设。
 
 # ─── tests/selfhost（23 条；未挂）───
@@ -25,7 +28,7 @@ tests/selfhost/test_lexer_parity.py	未挂（历史缺口）：词法对照（�
 tests/selfhost/test_live_ranges.py	未挂（历史缺口）：存在区间 + 条目版本化 + O1/O2 冒烟；需 corec
 tests/selfhost/test_lsp.py	未挂（**TODO #31 点名**）：corelsp 八组集成；进程级 ⇒ 挂点须实测时长
 tests/selfhost/test_mw_task1.py	未挂（历史缺口）：int 多字 M1 边界套件族；需 corec
-tests/selfhost/test_mw_task2.py	未挂（同族）
+tests/selfhost/test_mw_task2.py	未挂（同族）。**现状（判据载体化批 2026-09-16 实核）**：其零 diff 断言（`:284-303`）原先「基线不在就 [SKIP]」而基线在 build/（不入库）+ run.sh 从不传 --snapshot ⇒ **判据可整体静默消失**（新克隆/CI 恒 SKIP 且 rc=0）。本批已改为**默认 fail-closed**（缺基线 ⇒ FAIL；仅显式 --allow-skip/--skip-zdiff 才降级）。**为何仍未挂 CI**：零 diff 腿的基线必须在**改动前**编译器上产（--snapshot），CI 每次都是改动后的树 ⇒ 该腿的**参照物结构性不可得**，挂上去只会恒 FAIL 或被迫 --allow-skip（= 挂了等于没挂）。若要机器化，需把基线**入仓**（二进制不入库纪律冲突，须先取裁）或改为「结构断言 + 语义零变化」口径（TODO #26 口径）⇒ **成本 = 中高，且属口径换代不是挂点扩容**。
 tests/selfhost/test_mw_task3.py	未挂（同族）
 tests/selfhost/test_mw_task4.py	未挂（同族）
 tests/selfhost/test_mw_task5.py	未挂（同族）
@@ -49,6 +52,10 @@ tests/bootstrap/test_modules.py	未挂（历史缺口）：bootstrap import alia
 #   tests/kernel/gen_corpus.py	未挂（语料生成器；随 run_diff.py 面）
 #   src/kernel/test_term_io.cr	未挂（协议层 TDD 遗留；自述运行法 = 手工 build + 执行）
 #   tests/probes/*.cr（29 档）	未挂（手工腿）：runner = tools/baseline/probes_run.sh（run.sh:79-80 注释登记）
+#   tools/baseline/canary_check.sh + canary_values.tsv	**已挂** selfhost-tests job（判据载体化批
+#       2026-09-16：ELF canary + `.ccr` 四条 = 机器闸门；值表 = 锁定值单一真源）；登记于此仅因
+#       SCOPE = tests/{selfhost,bootstrap,harness}/*.py ⇒ 不在差集计算内（**不查即忘**防护）。
+#       配套牙 = tests/harness/test_canary_carrier.py（在 SCOPE 内且已挂 ⇒ 不进白名单）。
 #   tools/baseline/parity_run.sh	未挂（手工腿，**CI 不可行**）：需 jj + 完整历史，而 CI 为浅检出（core-ci.yml:54 fetch-depth: 2）+ 无 jj 安装
 #   tools/baseline/rebuild.sh	同上（冻结基线重建）
 #   tools/baseline/warm_leg.sh / warm_run.sh	未挂（手工暖态广度腿；CI 暖态最小面 = test_warm_cache_gate.py 已挂）

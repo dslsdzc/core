@@ -18,8 +18,10 @@ t3 大函数 250 次 +1 无溢出 exit 250。
 
 零 diff：z 用例（无 int 算术）需与改动前编译器输出逐字节一致。基线快照：
   python3 tests/selfhost/test_mw_task2.py --snapshot   # 改动前执行一次
-产物存 build/mw_task2_zdiff/（build 目录不入库——缺基线时零 diff 断言 SKIP，
-其余断言照跑；CI/新克隆需在改动前编译器上自产基线）。
+产物存 build/mw_task2_zdiff/（build 目录不入库）。**缺基线时默认 FAIL**（A5 修复，
+判据载体化批 2026-09-16）——原实现「不在就 [SKIP]」使整套零 diff 断言可**静默消失**
+（新克隆/CI 恒 SKIP 而 rc=0 = 假绿）；现仅显式 `--allow-skip` / `--skip-zdiff` 才降级。
+CI/新克隆需在改动前编译器上自产基线（`--snapshot`）才能跑零 diff 腿。
 
 需先重建自举编译器：nice -n 19 python3 build_selfhost_native.py
 """
@@ -183,6 +185,8 @@ def main() -> int:
                     help="生成零 diff 基线（须在改动前编译器上运行）")
     ap.add_argument("--skip-zdiff", action="store_true",
                     help="跳过零 diff 字节比较（即使基线存在）")
+    ap.add_argument("--allow-skip", action="store_true",
+                    help="基线缺失时降级为 [SKIP]（默认 **FAIL**——见文件头 A5 修复注）")
     args = ap.parse_args()
     if not COREC.exists():
         print("build/corec missing; run build_selfhost_native.py")
@@ -298,9 +302,21 @@ def main() -> int:
                     import shutil
                     shutil.copyfile(out, bl)
                     print(f"[SNAP] {name} @O{opt}: baseline saved {bl.name}")
-                else:
+                elif args.allow_skip:
+                    # 显式豁免（**唯一**保留 SKIP 的口径）：调用者已知基线不可得并承担缺口。
                     print(f"[SKIP] {name} @O{opt}: no zero-diff baseline "
-                          f"(run --snapshot on pre-change compiler)")
+                          f"({bl}) — **显式 --allow-skip**：判据缺口由调用者承担"
+                          f"（run --snapshot on pre-change compiler 产基线）")
+                else:
+                    # A5 修复（判据载体化批 2026-09-16）：基线在 build/（不入库）而 run.sh
+                    # 从不传 --snapshot ⇒ 原实现「不在就 [SKIP]」使**整套零 diff 断言可静默
+                    # 消失**（新克隆/CI 恒 SKIP 而 rc=0 = 假绿）。现默认 fail-closed：
+                    # 基线缺失 ⇒ FAIL；仅显式 --allow-skip / --skip-zdiff 才降级。
+                    print(f"[FAIL] {name} @O{opt}: zero-diff baseline missing "
+                          f"({bl}) — 默认 fail-closed（判据不得静默消失）。"
+                          f"补救：在**改动前**编译器上跑 --snapshot 产基线；"
+                          f"确需跳过请显式 --allow-skip（或 --skip-zdiff）")
+                    ok = False
             print()
     print("=== mw task2: " + ("ALL PASS" if ok else "FAILURES") + " ===")
     return 0 if ok else 1

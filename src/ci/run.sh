@@ -122,6 +122,24 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_diag_gate.py      # FC 批 T2：fail-closed 闸门（默认阻断 + 豁免登记表 9 条）——正控 9（表内 6 个 build 面码仍放行 + scope=check 3 条 check rc=1 不变）+ 负控 6（语法面 P21 / 类型面 TA02·R02·TM03·TK05 / 安全检查面 TU03：仍阻断 + **零产物**）+ 零产物 3（前端失败无半成品 / corearch 失败删本次 .ccr [stub 仿真] / 旧哨兵原样仍在）＝ **17 例**
     python3 tests/selfhost/test_warm_cache_gate.py # #60 批 T2+T3：暖缓存两态回归（**CI 暖态最小面**；广度层 = tools/baseline/warm_leg.sh 手工判据）——缓存命中跳过 `ir_gen_func` ⇒ ir_gen 期 `alloc_type` 行不重建（T1 实锤：warm 缺 `TYP_PTR extra=1` ⇒ `provenance_verify.cr:66` TU03 静默失效）。修法 = 生成期对「快照不载的共享面」有副作用 ⇒ 该条目**不可写**（下次必 miss 重放副作用）；判据 ① `as *int` 解引用 load/store **冷/暖同**（都 rc=1 + TU03）② 机制钉：副作用函数 `::main.cir` **无条目** ③ 正控：普通程序条目在 + 二跑真命中（size/mtime 不变）④ TK01 冷/暖同 ⑤ `ccr` 面同判；**同路径重复编译 = 缺陷真触发场景（定路径是本设计的要点）**＝ **10 例**（**本批机械核对同步**：实测 10/10；注释旧值 6）
     python3 tests/selfhost/test_tc02_branch.py    # TC02 收口：`if` 分支相容判定的**发散豁免**（P3 不对称——else 支发散 ⇒ 不报；then 支发散 ⇒ 仍报真信号；谓词 `stmt_diverges`，checker.cr，只服务本判定点）+ 既有 NEVER 豁免（loop{} 收尾）零扰动 + TF01/TA02/TB01 面钉子（TF01 仍报 / 落空豁免不变 / 声明位 TA02 不变 / TB01 真错负控 ×2）+ 端到端 build+run（`test_native_float` 两源同形）＝ **15 例**
+    # ─── 判据载体化批（criteria-carrier，2026-09-16）：**ELF canary + `.ccr` 四条 = 机器闸门** ───
+    # 缘起（实核）：这两条判据的锁定值——canary `95084e7b…d475`（28822B）与 `.ccr` 四条
+    # 96015/96158/142793/142936——此前**只活在 docs/ 与 .superpowers/ 的文字里**，本仓
+    # `*.py/*.sh/*.cr/*.toml/*.yml` 命中数为 0（每个批次靠人/代理**手跑**引用）。同类事故本仓
+    # 已发生过一次：`test_backend_bootstrap.py` 自称已挂而本文件零命中 ⇒ `error[N06]` 跨 5 任务
+    # 33 次静默漏检（见本 job 上方与 tests/harness/test_ci_hook_coverage.py）。本批把它升一层。
+    # 载体 = tools/baseline/canary_check.sh（配方 + 锁定值**单一真源** = tools/baseline/
+    # canary_values.tsv；fail-closed 四规则：rc≠0 / 值表缩水 / sha 与尺寸逐条比 / 缺工具）。
+    # 挂本 job 的理由：闸门需**已构建**编译器（`build` 路径按 main.cr:713-721 用 get_arg(0)
+    # 的目录拼 corearch），而本 job 首行即 build_selfhost。成本 = 1 档 canary ELF + 4 次 `.ccr`
+    # （2 语料 × 2 口径；语料 240B/2.5KB）⇒ 秒级。**值表换代纪律**见
+    # docs/superpowers/plans/2026-09-16-criteria-carrier.md §6（不符 ⇒ 停下上报，勿改值表）。
+    bash tools/baseline/canary_check.sh
+    # 牙（防「闸门自己也是静默判据」）：A 机械（真挂断言）+ B 合成自证（S1 绿路可达 + S2–S6
+    # 五类必红）+ C **真产物篡改必红**（复制载体刚落盘的 build/canary_artifacts/ ⇒ 翻一字节 ⇒
+    # `--verify-only` 必须红且指名产物）。载体先跑 ⇒ 本腿**零额外编译**（顺序即契约）。
+    # `--require-compiler`：本 job 已构建 ⇒ 缺编译器不得静默跳过真牙腿（fail-closed）。
+    python3 tests/harness/test_canary_carrier.py --require-compiler
     ;;
 
   suite)

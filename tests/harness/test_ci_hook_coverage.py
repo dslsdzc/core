@@ -34,7 +34,8 @@ ALLOWLIST = os.path.join(BASE, "tests", "harness", "ci_hook_allowlist.txt")
 # SCOPE：与 run.sh 挂点命名一一对应的三目录（扩展须同步改本常量 + 白名单头注）
 SCOPE_DIRS = ("tests/selfhost", "tests/bootstrap", "tests/harness")
 
-# 非空转下限（实测基线 2026-09-16：语料 62 · 挂点 35 → 取下界留余量）
+# 非空转下限（实测基线 2026-09-16 判据载体化批当场重算：语料 65 · 挂点 38 → 取下界留余量；
+# 多 agent 并行在加档 ⇒ 计数持续上漂，下限只须留余量、**不追平**，漂移台账见白名单头注）
 MIN_SCOPE = 50
 MIN_HOOKED = 30
 
