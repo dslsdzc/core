@@ -405,6 +405,45 @@ fn main() -> int { p := &g; *p = 5; return g; }
 """
 
 
+# ── (A) 批 T3（裁-T3-1）：**推断（无标注）可选数组/切片**的元素写点 ────────────
+# 漏点实证（修复前）：`a := [Some(1), None]; a[0] = 5;` 等 7 形态 **139/139**（双路径同，响亮）
+# ——元素写点的元素类型取自**声明表**，而声明表此前只在**带注解**的 LET 登记。
+# 修法 = 字面量/切片两站点按「元素可选性」登记声明面 + LET/全局初值处**继承到绑定 var**
+#（登记在**值 var** 上、写点读**绑定 var**——本修的关键一环）；**写点零改动**。
+# 全部 `g_optrep_on` 门控 + 仅可选元素登记 ⇒ 非可选程序/既有语料零足迹。
+T3_INFERRED_ARR_BARE = """fn main() -> int { a := [Some(1), None]; a[0] = 5; return match a[0] { Some(v) => { return v; } None => { return 0; } }; }
+"""
+T3_INFERRED_ARR_LIT_IDX = """fn main() -> int { a := [Some(1), None]; a[1] = 5; return match a[1] { Some(v) => { return v; } None => { return 0; } }; }
+"""
+T3_INFERRED_IDENT_ELEM = """fn main() -> int { x : int? = 5; a := [x, None]; a[0] = 7; return match a[0] { Some(v) => { return v; } None => { return 0; } }; }
+"""
+T3_MIXED_LIT = """fn main() -> int { a := [Some(1), 2]; a[0] = 7; return match a[0] { Some(v) => { return v; } None => { return 0; } }; }
+"""
+T3_NONE_SLOT = """fn main() -> int { a := [Some(1), None]; a[1] = 8; return match a[1] { Some(v) => { return v; } None => { return 0; } }; }
+"""
+T3_INFERRED_SLICE = """fn main() -> int { a := [Some(1), None, Some(3), Some(4)]; s := a[0..4]; s[0] = 5; return match s[0] { Some(v) => { return v; } None => { return 0; } }; }
+"""
+T3_ANNOT_ARR_SLICE = """fn main() -> int { a : [int?;4] = [Some(0), None, Some(2), Some(3)]; s := a[0..4]; s[0] = 5; return match s[0] { Some(v) => { return v; } None => { return 0; } }; }
+"""
+T3_INFERRED_ARR_PTR = """fn main() -> int { a := [Some(1), None]; p := &a[0]; *p = 6; return match a[0] { Some(v) => { return v; } None => { return 0; } }; }
+"""
+T3_SLICE_OF_SLICE = """fn main() -> int { a : [int?;4] = [Some(0), None, Some(2), Some(3)]; s := a[0..4]; t := s[1..3]; t[0] = 5; return match t[0] { Some(v) => { return v; } None => { return 0; } }; }
+"""
+# 对照（修复前即正确，防回退）：标注数组动态下标 / 标注切片形参 / 装箱写 / 只读
+T3_ANNOT_ARR_DYN = """fn main() -> int { a : [int?;2] = [Some(1), None]; i := 0; a[i] = 5; return match a[i] { Some(v) => { return v; } None => { return 0; } }; }
+"""
+T3_PARAM_SLICE = """fn f(s: [int?;4]) -> int { s[0] = 5; return match s[0] { Some(v) => { return v; } None => { return 0; } }; }
+fn main() -> int { a : [int?;4] = [Some(0), None, Some(2), Some(3)]; return f(a[0..4]); }
+"""
+T3_SLICE_BOXED = """fn main() -> int { a : [int?;4] = [Some(0), None, Some(2), Some(3)]; s := a[0..4]; s[0] = Some(6); return match s[0] { Some(v) => { return v; } None => { return 0; } }; }
+"""
+T3_READ_ONLY = """fn main() -> int { a := [Some(1), None, Some(3), Some(4)]; s := a[1..3]; return match s[0] { Some(v) => { return v; } None => { return 9; } }; }
+"""
+# 负控：**非可选**推断数组写点不受本律影响（不装箱、值形态不变）
+T3_NEG_NONOPT = """fn main() -> int { a := [1, 2]; a[0] = 5; return a[0]; }
+"""
+
+
 def main():
     ok = [
         # 正：裸值入 T? 返回位（旧判定：TF01 拒绝——joint 语义落地后放行；双路径）
@@ -540,6 +579,24 @@ def main():
         # 负控：非可选取址槽不受本律影响
         case_dual_softdiag("a_neg_nonopt_local_ptr", A_NEG_NONOPT_LOCAL, 5),
         case_dual_softdiag("a_neg_nonopt_global_ptr", A_NEG_NONOPT_GLOBAL, 5),
+
+        # ── (A) 批 T3（裁-T3-1）：推断可选数组/切片的元素写点（修复前 7 形态 139/139）──
+        case_dual("t3_inferred_arr_bare_write", T3_INFERRED_ARR_BARE, 5),
+        case_dual("t3_inferred_arr_lit_idx_write", T3_INFERRED_ARR_LIT_IDX, 5),
+        case_dual("t3_inferred_ident_elem_write", T3_INFERRED_IDENT_ELEM, 7),
+        case_dual("t3_mixed_lit_write", T3_MIXED_LIT, 7),
+        case_dual("t3_none_slot_write", T3_NONE_SLOT, 8),
+        case_dual("t3_inferred_slice_write", T3_INFERRED_SLICE, 5),
+        case_dual("t3_annot_arr_slice_write", T3_ANNOT_ARR_SLICE, 5),
+        case_dual("t3_inferred_arr_ptr_write", T3_INFERRED_ARR_PTR, 6),
+        case_dual_softdiag("t3_slice_of_slice_write", T3_SLICE_OF_SLICE, 5, diag="TK01"),
+        # 对照（修复前即正确）：标注数组动态下标 / 切片形参 / 装箱写 / 只读
+        case_dual("t3_annot_arr_dyn_write", T3_ANNOT_ARR_DYN, 5),
+        case_dual("t3_param_slice_write", T3_PARAM_SLICE, 5),
+        case_dual("t3_slice_boxed_write", T3_SLICE_BOXED, 6),
+        case_dual("t3_read_only_inferred_slice", T3_READ_ONLY, 9),
+        # 负控：非可选推断数组写点零影响
+        case_dual("t3_neg_nonopt_inferred_arr", T3_NEG_NONOPT, 5),
     ]
     passed = sum(1 for x in ok if x is True)
     print(f"{passed}/{len(ok)} passed")

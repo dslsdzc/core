@@ -421,6 +421,40 @@ fn elem_node_optional(node: int) -> int {
     return 0;
 }
 
+// (A) T3（裁-T3-1）：元素表达式的**可选感知元素类型**（-1 = 不可选/未知面）。
+// 字面量/切片两站点的声明面登记用。**调用点必须已判 `g_optrep_on`**——Some/None/调用
+// 三支会 `alloc_type`（零足迹教训：新增类型面查询前先核是否 alloc）。
+//   `Some(x)` / `None`（关键字形）⇒ `T?`（内层此处不可得 ⇒ TI_UNIT 占位；`ti_is_optional`
+//   只看 kind ⇒ 写点装箱判定成立）；`ident`（声明面可选）⇒ 其声明类型；`call`（返回可选）
+//   ⇒ `T?` 占位；其余 ⇒ -1（不可选面）。
+fn elem_ti_of_node(node: int) -> int {
+    if node < 0 { return -1; }
+    k := ast_kind(node);
+    if k == EXPR_ENUM_CONSTRUCTOR {
+        nm := istr_get(ast_a(node));
+        if str_eq(nm, "Some") != 0 || str_eq(nm, "None") != 0 {
+            return alloc_type(TYP_OPTIONAL, TI_UNIT, 0);
+        }
+        return -1;
+    }
+    if k == EXPR_IDENT {
+        lv := find_local(ast_int_val(node));
+        if lv >= 0 {
+            dti := slot_decl_ti(lv);
+            if ti_is_optional(dti) != 0 { return dti; }
+        }
+        return -1;
+    }
+    if k == EXPR_CALL {
+        ni := ast_a(node);
+        if find_func(ni) >= 0 && callee_ret_optional(ni) != 0 {
+            return alloc_type(TYP_OPTIONAL, TI_UNIT, 0);
+        }
+        return -1;
+    }
+    return -1;
+}
+
 // 装箱体（静态）：obj = Some(v)（无新 opcode；形态照既有 EXPR_ENUM_CONSTRUCTOR 发射：
 // IR_MAKE_ENUM 的 s1 = 变体名索引、载荷经 IR_STORE_FIELD 存 fi+1；tag 值 = 名索引）
 fn emit_box_some(val_var: int) -> int {
@@ -2410,6 +2444,12 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             // F11：切片长度沿 LET 初始化传播（s := arr[0..2] → s 带长度 2；
             // 运行时界 slice 同步长度变量——slice_len_copy_to）
             slice_len_copy_to(var, val_var);
+            // (A) T3（裁-T3-1）：**推断**声明（无注解）但值面已判可选聚合 ⇒ 声明面继承到
+            // **绑定 var**（字面量/切片站点登记在**值 var** 上；元素写点的目标是绑定 var）
+            if g_optrep_on != 0 && type_node < 0 {
+                vd := irv_decl_ti(val_var);
+                if vd >= 0 { irv_set_decl_ti(var, vd); }
+            }
             // (A) 批（INV-1）：**取址槽恒装箱**——该槽地址被取过 ⇒ 写点装箱 + 表示位钉 1
             //（指针写/直接写两路的表示必须一致；解包侧恒走装箱分支）
             forced := g_optrep_on != 0 && rep_var >= 0 && addr_taken_of(var_ni) != 0;
@@ -2516,6 +2556,12 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             }
             v := new_ir_var("slice", TI_INT);
             emit(IR_SLICE, v, arr_var, low_var, high_var, 0);
+            // (A) T3（裁-T3-1）：源数组元素**可选** ⇒ 切片登记声明面（切片元素写点据此装箱；
+            // 非可选不登记 ⇒ 零足迹。切片 var 的 IR 型面不动——避免影响 dtype/宽度等消费者）
+            if g_optrep_on != 0 {
+                sti := elem_ti_of(arr_var);
+                if ti_is_optional(sti) != 0 { irv_set_decl_ti(v, alloc_type(TYP_SLICE, sti, 0)); }
+            }
             // F11：字面量界 → 登记切片编译期长度（解引用处 arr_len_lit 用）；
             // 运行时界 → 计算 len = high − low 并登记长度变量（解引用处发射
             // 动态边界检查——见 emit_slice_*_bounds）。
@@ -2613,6 +2659,22 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
         v := new_ir_var("arr", TI_UNIT);
         emit(IR_ALLOC_ARRAY, v, ast_b(node), 0, 0, 0);
         elem_ti : ., mut = TI_INT;
+        // (A) T3（裁-T3-1）：**数组级元素可选性预扫**——元素序在后的 Some/None 也必须影响
+        // 在前的裸元素（`[2, Some(1)]`）⇒ 装箱判定不能只按逐元素形态。
+        elem_opt_ti : ., mut = -1;
+        if g_optrep_on != 0 {
+            pn : ., mut = ast_a(node);
+            pi : ., mut = 0;
+            loop {
+                if pi >= ast_b(node) { break; }
+                if pn >= 0 {
+                    pet := elem_ti_of_node(ast_a(pn));
+                    if pet >= 0 { elem_opt_ti = pet; }
+                }
+                pn = pn + 1;   // wrapper 连续（F5 契约）
+                pi = pi + 1;
+            }
+        }
         ei : ., mut = 0;
         en : ., mut = ast_a(node);
         loop {
@@ -2624,13 +2686,23 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                 // 容量批 T2：可选元素写点规范化（字面量形；元素槽无声明面 ⇒ 按元素
                 // 表达式可选性保守判定——ident/调用覆盖面，其余形态登记）。
                 // 注意：数组字面量的 en 是 **wrapper** 节点（值在 ast_a）——须解引用后判定。
-                if g_optrep_on != 0 { e_var = box_for_slot_flag(ast_a(en), e_var, elem_node_optional(ast_a(en))); }
+                // (A) T3：数组级可选（预扫得）⇒ 逐元素判定亦须为真（裸元素装箱）。
+                if g_optrep_on != 0 {
+                    eo := elem_node_optional(ast_a(en));
+                    if elem_opt_ti >= 0 { eo = 1; }
+                    e_var = box_for_slot_flag(ast_a(en), e_var, eo);
+                }
                 emit(IR_STORE_INDEX, -1, v, e_var, ei, 0);
                 en = en + 1;
             }
             ei = ei + 1;
         }
         irv_set_type(v, alloc_type(TYP_ARRAY, elem_ti, ast_b(node)));
+        // (A) T3（裁-T3-1）：**可选元素数组 ⇒ 登记声明面**（元素写点 `elem_ti_of` 据此装箱；
+        // 非可选不登记 ⇒ 与既有语料/非可选程序零足迹）。IR 型面不动（只登记声明面）。
+        if g_optrep_on != 0 && elem_opt_ti >= 0 {
+            irv_set_decl_ti(v, alloc_type(TYP_ARRAY, elem_opt_ti, ast_b(node)));
+        }
         return v;
     }
 
