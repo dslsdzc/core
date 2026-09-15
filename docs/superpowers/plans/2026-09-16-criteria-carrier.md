@@ -325,10 +325,10 @@ parity/probes/warm 链静默后才开工，未与其并行）
 | **E16** | 牙的 C 层真跑 `test_canary_carrier.py --require-compiler` | 首跑 **rc=1** —— C 层抓到**本测试自身的断言字面量 bug**（见 E17）；修复后 **rc=0 · 7/7 · 2.24s**（含「真产物翻一字节 ⇒ 必红且指名 pa_ccr」+「缺产物 ⇒ 必红」） | **实测（真编译）** |
 | **E17** | 上述 bug 的性质与修复 | 载体渲染的是「期望**(expected)=** … 实际**(actual)=**」——`expected` 与 `=` 之间**隔着 `)`**，而断言写成 `expected=` ⇒ **恒不命中 ⇒ 恒假红**。修 = 断言改 `(expected)=` / `(actual)=`（`--selftest` 的 S2/S6 用 **grep 正则**、模式里本就含 `(expected)=` ⇒ 一直是对的，故 B 层没抓到、**C 层抓到了**）。**这正是「牙」的价值：它抓的是闸门/断言自身，不是产物。** | 实测（真编译） |
 | **E18** | **CI 挂点端到端** `CI_JOB_NAME=selfhost-tests bash src/ci/run.sh` | **rc=0 · 78s**；日志内**确凿出现**载体 5/5 与牙 7/7（`[canary] PASS 5/5` + `[canary-carrier] PASS — pass=7 skip=0`）⇒ 挂点**真接线**，非「注释里自称已挂」 | 实测（真编译） |
-| **E19** | 五 CI job（**逐条标实测/在跑**） | `bootstrap-tests` **rc=0**（含 hook-coverage：scope=65 hooked=38 unhooked=27 · BLOCK 20/ALLOW 16 = 36/36）· `check` **rc=0 · 30s** · `suite` **rc=0 · 19s** · `selfhost-tests` **rc=0 · 78s** —— 四条**已实测**；`full-bootstrap` = **在跑（>600s）** | 部分实测 |
-| **E20** | `full-bootstrap`（自举链） | **待实测（正在跑；完成后回填 rc / 时长 / N06 / `corec2==corec3` / 冒烟 42 / `--help`）** | 待回填 |
+| **E19** | **五 CI job 全 rc=0** | `bootstrap-tests` **rc=0**（含 hook-coverage：scope=65 hooked=38 unhooked=27 · BLOCK 20/ALLOW 16 = 36/36）· `check` **rc=0 · 30s** · `suite` **rc=0 · 19s** · `selfhost-tests` **rc=0 · 78s** · `full-bootstrap` **rc=0 · 676s** | 实测（真编译） |
+| **E20** | `full-bootstrap`（自举链） | rc=0 · **676s** · N06 计数 **0** · `corec2 == corec3` `cmp` **IDENTICAL**（双 **2892374B**，sha256 双 `093ba2305c204fdd1ce1ad892af21ade75fb79dfcb3957fdc897affd73d9c814`） | 实测（真编译） |
 | **E21** | **T3 自证（A5 修复的 fail-closed）**——在**隔离树**跑（`/tmp/mw_nobase`：仅 `build/corec`/`corearch` 软链，无 `mw_task2_zdiff` 基线），**零风险于共享 build/** | 默认口径 **rc=1 · 9 条 `[FAIL] … zero-diff baseline missing … 默认 fail-closed`**（改前同情形 = `[SKIP]` 且 rc=0）· `--allow-skip` ⇒ **rc=0** + 显式 `[SKIP]`（带补救命令）· 有基线树内 ⇒ **ALL PASS rc=0** | 实测（真编译） |
-| **E22** | 全枚举（套件全集 = `tests/selfhost/test_*.py` + `tests/bootstrap/test_*.py`） | **待实测（等 `full-bootstrap` 结束、槽位释放后跑；回填 N/N）** | 待回填 |
+| **E22** | 全枚举（套件全集 = `tests/selfhost/test_*.py` 55 + `tests/bootstrap/test_*.py` 7） | **62/62 rc=0 · 207s**（零 FAIL——判据 = 无任何 `FAIL:` 行写入，非仅计数） | 实测（真编译） |
 
 **零足迹结论（实测）**：本批只新增 3 文件 + 改注释/挂点，**零 `.cr` 源码改动** ⇒
 canary 与四条 `.ccr` **逐条 IDENTICAL**（E15）——构造性论证与实测一致。
