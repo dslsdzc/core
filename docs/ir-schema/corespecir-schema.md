@@ -1,6 +1,11 @@
 # Core Spec IR Schema — 规约约束层 (.csr)
 
-> 定位:受众 = 维护者(规约约束层实现者);状态 = active;真源 = src/compiler/ccr_io.cr(.csr 读写)+ maintainer/design/spec-design.md。
+> 定位:受众 = 维护者(规约约束层实现者);**状态 = 设计态（未实现）**;真源 = **（拟）`src/compiler/ccr_io.cr`（.csr 读写）——⚠ 当前零实现** + maintainer/design/spec-design.md。
+>
+> ⚠ **修订（2026-09-16 文档审计）**：原文写「状态 = active；真源 = `src/compiler/ccr_io.cr`（.csr 读写）」——
+> **不成立**：全仓 `grep -rn 'csr\|CSR1\|TagNode' --include='*.cr' src/` = **0 命中**；`ccr_io.cr` 亦零命中
+> ⇒ 本文件是**纯设计规格**（无实现、无读写代码）。照它实现前须先落「`.csr` 与 `.ccr` 的关系」裁决
+> （spec-design §四 注记 + ADR-0001：规约 = `.cr` 内联、编译进图）。
 
 ## 概述
 

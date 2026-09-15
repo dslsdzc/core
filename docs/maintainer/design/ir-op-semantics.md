@@ -13,6 +13,12 @@
 
 ## 0. 真源与引用
 
+> ⚠ **修订（2026-09-16 文档审计）**：下表真源为**仓外树**（`~/compcert/…`，CompCert 对照用）——
+> **无版本锚**（未记 commit/发布号）⇒ 本表的 `Op.v:Lxxx` 式行号引用**跨机/跨会话不可复现**，
+> 且 CompCert 侧更新后行号会**静默漂移**（对照结论仍可能成立，但「同源」需重核）。
+> 复核口径 = 「以本机 `~/compcert` 树为准 + 结论面（语义对照）与行号面（引用）分开判定」。
+> （同类问题另见 `docs/verifier/kernel-spec.md` 的 `~/mctt` 真源。）
+
 | 文件 | 内容 | 引用格式 |
 |---|---|---|
 | `~/compcert/x86/Op.v` | 运算/条件/寻址模式的数学语义（`eval_operation`/`eval_condition`/`eval_addressing`） | Op.v:L275 |
@@ -43,8 +49,11 @@ Core 侧只读来源：`src/compiler/ast.cr`（opcode 常量，L527-580）、`sr
 
 ## 2. Opcode 全清单
 
-`ast.cr` L527-580 定义 0-50（**40 号空缺未定义**），加规划中的 `IR_APPROX = 51`（dex/apx 设计，尚未入 ast.cr）——
-**共 51 个 opcode 条目**（50 个已定义 + 1 个规划）。`IR_RESOLVED`（L580）是 BRANCH/JUMP 的标签解析标记，非 opcode。
+`ast.cr` 定义 0-50（**40 号空缺未定义**），加 `IR_APPROX = 51`（dex/apx 设计）——
+**共 51 个 opcode 条目**（**51 个均已定义**；`IR_RESOLVED` 是 BRANCH/JUMP 的标签解析标记，非 opcode）。
+> ⚠ **修订（2026-09-16 文档审计）**：原文写「规划中的 `IR_APPROX = 51`（dex/apx 设计，**尚未入 ast.cr**）」
+> + 「50 个已定义 + 1 个规划」——**不成立**：`IR_APPROX : int = 51;` 已在 **`src/compiler/ast.cr:568`**（含正式注释）。
+> 现行事实 = **51 条全部已定义**；`IR_APPROX` 的**零发射点**（无 `emit(IR_APPROX` 调用）另记。
 
 | # | 名称 | 分组 | 发射方 | ELF 后端 | 解释器 | 本节 |
 |---|---|---|---|---|---|---|
@@ -99,7 +108,7 @@ Core 侧只读来源：`src/compiler/ast.cr`（opcode 常量，L527-580）、`sr
 | 48 | IR_FNADDR | 地址 | ir_gen | ✓ | ✓（d=0） | 2.5 |
 | 49 | IR_I2F | 转换 | ir_gen | ✓（[注意] 见 BC-I2F） | ✗ | 2.3 |
 | 50 | IR_F2I | 转换 | ir_gen | ✓ | ✗ | 2.3 |
-| 51 | IR_APPROX | 注解（规划） | —（迁移时加入） | — | — | 2.9 |
+| 51 | IR_APPROX | 注解 | —（**零发射点**；`ast.cr:568` 已定义） | — | — | 2.9 |
 
 对照 CompCert：Core 的「opcode + 操作数槽（dest/src1/src2/src3/type_kind）」形态对应 RTL 的 `Iop`（3 地址）
 与 Asm 的 `instruction` 之间的中间层——语义表以 Asm.v 的机器语义为基准（opcode 最终由机器指令兑现），

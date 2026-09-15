@@ -681,6 +681,15 @@
 - **待裁 2**：(D) 语言面拒绝 `*p = v`（pointee `T?`；已上报；影响面实读 = 拒绝**已错**形态）· T4「移除门」候选（性能面；附补证清单）。
 - **关联**：#56（c3 静默错值，高优先预存）· #57（移除门候选）· spec §9 **容量批行** · 计划台账/终态陈述 · 下一批指向 = 验证切片轮 或 按维护者裁定。
 
+### 70. 文档 vs 现实审计 + 修订批（2026-09-16——35 条断言实核：危险 7/陈旧 6/成立 20/无法判定 2；**13 条不成立项全部已修**）
+- **交付**：新文档 `docs/superpowers/specs/2026-09-16-doc-reality-audit.md`（全表：断言 · 出处 `file:line` · 实核命令/结果 · 判定 · 修订去向）+ 3 提交修订链 `820648bc`（CLAUDE.md）→ `d2265f7b`（spec-design + ir-schema + ir-op-semantics）→ `43427334`（project-book + onboarding + verifier + errors.md）+ `docs/README.md` 索引登记。
+- **危险 7（会让后来者照假前提设计）**：① `spec-design.md` **4 处**称 `variant`/`forall`「EBNF 已有」→ 实为零命中（`grammar/core.ebnf` 无标注槽；`corespec.ebnf` 已退役）· ② `ir-schema` 两文档称 `.csr`「真源 = `ccr_io.cr`」→ 全仓 **0 命中**（零实现却标 active）· ③④ **`CLAUDE.md`** 的 `src/compiler/` 清单 20→**38**、`src/stdlib/` 8→**19**（agent 必读面）· ⑤ `project-book §3.2` 按已退役独立 `.corespec`/`.corespecir` 叙述 → 整段改写 · ⑥ `onboarding.md:57` 把退役 `corespec.ebnf` 列「唯一真源」· ⑦ `verifier/kernel-spec.md:3` 仓外真源 `~/mctt` 无版本锚。
+- **陈旧 6**：`ir-op-semantics:46`（`IR_APPROX` 实已入 `ast.cr:568`）· `coreir-schema:255`（`.ccr` v7 → **v9**）· `CLAUDE.md`「corec2 tokenizer 死循环」（**不复现**：full-bootstrap 链 rc=0 + P6 T6 IDENTICAL）· 套件清单不全（selfhost 50+）· `errors.md:297`「~146」→ **150**（+ 三口径注 150/149/137）· `ir-op-semantics §0` 外部真源无锚。
+- **审计外新发现（已一并处置）**：`CLAUDE.md` 的 `.ccr` 版本 `v8→v9`（同类陈旧）· `src/compiler/linker.cr` = **0 字节空文件**（零引用；登记为清理候选）· `elf.cr` 死文件（TODO #7）在清单里已显式标注「勿引」。
+- **无法判定 2（保留）**：`pass_cse/O1`（须一次 `-O 1` 自举实测；已在 CLAUDE.md 就地标注「未复核」）· `~/compcert` 树存在性/版本（未核）。
+- **方法论登记（可复用）**：审计口径 = 「状态词 + 真源 + 计数」筛 → 逐条 `file:line` 实核 → 分级（危险/陈旧/轻微）→ 修复带**原断言原文**（注内引用/删除线），**不静默抹史**；采样本批 **35 条**（危险 7 条逐条给可复现命令）。
+- **关联**：验证切片轮规划（本审计的直接缘起 = 其四处实读发现）· #64/#65（同族文档面）· `docs/README.md` 索引（本批登记）· spec `2026-09-16-doc-reality-audit.md`。
+
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
 来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：

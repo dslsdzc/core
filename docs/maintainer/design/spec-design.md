@@ -43,7 +43,7 @@ CIC 提供 Coq 级别的全部表达力，逐项对应：
 |---|---|---|
 | 全称/存在量词（无限域） | `forall/exists` 是语言一等构造 | 零——量词是规约语言语法 |
 | 归纳类型 + 归纳原理 | 枚举/结构体 → 归纳类型，原理在内核 | 零 |
-| 递归函数 + 终止性 | 递归定义 + `loop variant` 标注 | 变体标注（EBNF 已有） |
+| 递归函数 + 终止性 | 递归定义 + `loop variant` 标注 | 变体标注（**EBNF 尚未定义——待实现**；2026-09-16 文档审计修订，原写「EBNF 已有」不成立：`grammar/core.ebnf` 对 `variant` 零命中。见 §9.3 修订注） |
 | 高阶量词（∀f: int→int） | 函数空间原生可量化 | 零（规约层函数类型，见 §10） |
 | 依赖类型（`Vec n`） | 内核有，**但 Core 不需要** | 被图验证替代：边界安全由图保证，长度性质由谓词表达（`#ensure(result.len() == |a|)`） |
 | 引理/定理复用 | 证明项可组合 | 见 §12 用户入口 |
@@ -257,7 +257,12 @@ spec fn all_nonneg(arr: [int]) -> bool
 `forall x: int => P(x)` 必须是规约语言的一等构造（**不是** for 循环的翻译）——int 域无限，遍历不了；for 循环只是有限域的便利糖（§7 纯公式支持的 `forall x in arr` 是有限域情形）。
 
 ```core
-// EBNF 已定义（2026-09 起归口 grammar/core.ebnf；corespec.ebnf 为迁移期残留）
+// ⚠ 修订（2026-09-16 文档审计）：**EBNF 尚未定义**——原写「EBNF 已定义（2026-09 起归口
+// grammar/core.ebnf；corespec.ebnf 为迁移期残留）」两处均不成立：
+//   ① `grammar/core.ebnf` 对 `forall|exists|#check|#ensure|spec ` **零命中**（实核 2026-09-16）；
+//   ② `grammar/corespec.ebnf` 已于 **2026-09-06 退役**（ADR-0001；其头部自述「规约语法并入
+//      grammar/core.ebnf（**迁移事项**）」）⇒ 它不是「迁移期残留」而是**已退役的迁移源**。
+// ⇒ 量词是**待实现语法**（迁移事项，见 TODO「规约语法并入 .cr」），不是既有能力。
 forall (x: int) => x >= 0
 exists (i: int) => a[i] == target
 ```
@@ -280,7 +285,7 @@ spec fn 用 Core 书写——命令式：变量重复赋值、循环、数组、
 | `if/else` | 条件表达式（ite/match） | `if b { A } else { B }` → `if b then A else B` |
 | `for x in arr` | fold/递归遍历 | `for x in arr: acc += x` → 对 list 递归 |
 | `for i in 0..n` | 有界递归（参数递减） | 变体 = `n - i` |
-| `loop { ... }` + `break` | 尾递归（需要变体） | 变体标注（EBNF 已有） |
+| `loop { ... }` + `break` | 尾递归（需要变体） | 变体标注（**EBNF 尚未定义——待实现**；2026-09-16 文档审计修订） |
 | 数组 `a[i]` 读写 | 归纳列表索引 / 数组理论 select-store | 或带长度约束的结构 |
 | 结构体/枚举 | 归纳类型构造子 + match | `Point{x, y}` → `mk_point x y` |
 | 递归调用 | CIC 递归定义（良基递归） | `fact(n) = n * fact(n-1)` |
@@ -298,7 +303,7 @@ f(acc, i) = if i >= n then acc
 
 CIC 只接受**良基递归**（递归参数严格递减）——非终止的"递归"在 CIC 里无法定义。因此：
 
-- 每个循环/递归翻译必须携带**变体**（loop variant，EBNF 已有）——递减度量
+- 每个循环/递归翻译必须携带**变体**（loop variant，**EBNF 尚未定义——待实现**；2026-09-16 文档审计修订，原写「EBNF 已有」不成立）——递减度量
 - 编译器自动推导（§五 的 `#terminating` 图模式）优先；推导不出的要求用户标注
 - 无变体的循环 → 翻译失败（编译错误），或降级为未解释函数（用户确认语义）
 
