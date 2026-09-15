@@ -146,12 +146,29 @@ fn run_frontend() -> int {
     if g_diag_count > 0 {
         hard : ., mut = 0;
         di : ., mut = 0;
+        n_block : ., mut = 0;   // --diag-gate-report 用（默认关时恒 0，零行为影响）
+        rep : ., mut = "";
         loop {
             if di >= g_diag_count { break; }
             ec := r64(g_diags, di * DIAG_REC_SIZE);
             // 默认阻断：**不在豁免表内 ⇒ hard = 1**（表 = diag.cr；只减不增）。
-            if diag_gate_exempt(ec, GATE_SCOPE_BUILD) == 0 { hard = 1; }
+            if diag_gate_exempt(ec, GATE_SCOPE_BUILD) == 0 {
+                hard = 1;
+                n_block = n_block + 1;
+                if str_len(rep) > 0 { rep = rep + ","; }
+                rep = rep + error_cat_prefix(ec / 1000) + pad_diag_num(ec % 1000);
+            }
             di = di + 1;
+        }
+        // 隐藏通道（--diag-gate-report，默认关；同 --verify-* 家族纪律）：**只读报告**——
+        // 逐条列出会被闸门阻断的码 + 计数。开/关两态 **rc 与产物逐字节同**（本行仅追加输出）。
+        if cli_has("diag-gate-report") != 0 {
+            print("[diag-gate] face=build blocked=");
+            print(int_str(n_block));
+            print(" total=");
+            print(int_str(g_diag_count));
+            print(" codes=");
+            println(rep);
         }
         print_diagnostics();
         if hard != 0 {
@@ -233,6 +250,7 @@ fn corec_main() -> int {
     // 通道）随影子层整体下线（D27/TODO #24 同族清偿）；判定路径不再有开关（无条件经引擎）。
     cli_flag_bool("verify-named-dedup", "", "R2 P2a: assert side-table == res_type_node for all named types (debug)");
     cli_flag_bool("verify-evp-nodes", "", "R2 P3 T4: assert enum variant payload type nodes recorded (debug)");
+    cli_flag_bool("diag-gate-report", "", "FC T2: report fail-closed gate verdicts per compile (debug; default off — 不改 rc/产物)");
 
     if cli_parse() != 0 { return 1; }
     // Parse -O flag (default O1)

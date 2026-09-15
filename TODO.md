@@ -597,6 +597,13 @@
 - **进度行保真（本批的一处细节修正）**：`[5/5] frontend done` 改在「诊断之后、返回之前」打印（原行仅覆盖 `hard==0` 路径）⇒ 72 档语料日志除行号偏移外零差异；**唯一可见差异 = 探针 `n05_recursive.cr` 多一行**（其诊断 `TS03` 属旧硬名单 ⇒ S0 提前返回无该行）。
 - **登记（本批不修）**：① `stmt_diverges` 之外的豁免表**只减不增**纪律（撤条须带根因证据；加条须维护者批）；② `scope=check` 3 条在 (C) 下**惰性**（不得据此实现 (B) 活分支）。
 
+### 61. FC 批 T3：隐藏通道 `--diag-gate-report`（2026-09-15——report-only 二次核对载体；**默认关、两态零差异**）
+- **形态**：`main.cr` 注册 `cli_flag_bool("diag-gate-report", …)`（与 `--verify-*` 家族同址同式）+ 闸门内只读报告：`[diag-gate] face=build blocked=N total=M codes=<用户面码,...>`（用 `error_cat_prefix`/`pad_diag_num` 渲染，覆盖 `g_diag_count > 0` 的前端类型面）。
+- **判据（本实例实跑）**：**默认关两态零差异**——72 档 `diff -rq` **零差异** · 探针 29 档零差异（与 T2 基线逐字节同）；**开态**：rc 与产物 sha 逐字节同（ptr_arith canary 两态同 `95084e7b…`、arena_test/ptr_ref_first 同），日志仅多一行标记 ✓。
+- **重放对表（vs T1）**：101 档（72 语料 + 29 探针）重放 ⇒ **无表外命中**：语料面 25 档 blocked（= T1 `would_block.tsv` 34 行 − 7 行 build 面豁免 − 2 行 P21[**解析阶段闸**，不属本报告面]）逐条对齐；探针面 11 档（TA01/TS03）为 T1 表**未覆盖面**（口径差，已登记）。
+- **判据全套**：五 CI job 5/5 rc=0 · 枚举 60/60 · selftest 415/415 · canary `95084e7b…d475` IDENTICAL · `.ccr` 四条 96015/96158/142793/142936 · dump 3521 · cir 165915B · 链 `24802386a1…` IDENTICAL · `backend_bootstrap` rc=0。
+- **登记**：本通道**只读**（不改 rc/产物）；`blocked` 计数含重复码（逐诊断计数，非去重）——同一码多次命中会重复出现（照原样保留，便于定位）。
+
 ### 60. **【高危·预存】安全面诊断随 `.cir` 暖缓存静默消失**（2026-09-15 FC 批 T2 施工中发现）
 - **现象**：同一源、同一二进制，`clean-cache` 与否是唯一变量——**冷态 `error[TU03]` 报出（rc=1、无产物）；暖态诊断消失 → rc=0 且照常产出 ELF**（28822B）。`build --static` 与 `ccr` **两面同病**。
 - **复现源**：`fn main() -> int { p := 4096 as *int; return *p; }`（= `tests/selfhost/test_pointer_safety.py:131-138` 的形态）。
