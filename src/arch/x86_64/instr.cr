@@ -470,10 +470,11 @@ fn e2_is_glob(var_idx: int) -> int {
 fn e2_sd_ld_var(buf: string, pos: int, xmmn: int, var_idx: int) -> int {
     if e2_is_glob(var_idx) != 0 {
         cp := e2_lea_glob(buf, pos, var_idx);
-        // movsd xmm{n}, [r11] — F2 0F 10 /n, mod=00 rm=3（r11%8=3）
-        e2_w8(buf, pos+cp, 242); e2_w8(buf, pos+cp+1, 15); e2_w8(buf, pos+cp+2, 16);
-        e2_w8(buf, pos+cp+3, xmmn * 8 + 3);
-        return cp + 4;
+        // movsd xmm{n}, [r11] — F2 **41** 0F 10 /n, ModRM mod=00 reg=n rm=3
+        // （41 = REX.B：r11 在 ModRM rm 需 REX.B=1；漏它则 rm=3 变成 [rbx] ⇒ 野指针 139）
+        e2_w8(buf, pos+cp, 242); e2_w8(buf, pos+cp+1, 65); e2_w8(buf, pos+cp+2, 15); e2_w8(buf, pos+cp+3, 16);
+        e2_w8(buf, pos+cp+4, xmmn * 8 + 3);
+        return cp + 5;
     }
     if xmmn == 0 { return e2_sd_load(buf, pos, g2_slot(var_idx)); }
     if xmmn == 1 { return e2_sd_load1(buf, pos, g2_slot(var_idx)); }
@@ -484,8 +485,9 @@ fn e2_sd_ld_var(buf: string, pos: int, xmmn: int, var_idx: int) -> int {
 fn e2_sd_cvt_var(buf: string, pos: int, var_idx: int) -> int {
     if e2_is_glob(var_idx) != 0 {
         cp := e2_lea_glob(buf, pos, var_idx);
-        // cvtsi2sd xmm0, [r11] — F2 48 0F 2A /0, mod=00 rm=3
-        e2_w8(buf, pos+cp, 242); e2_w8(buf, pos+cp+1, 72); e2_w8(buf, pos+cp+2, 15);
+        // cvtsi2sd xmm0, [r11] — F2 **49** 0F 2A /0, ModRM mod=00 reg=0 rm=3
+        // （49 = REX.W=1 + REX.B=1：REX.B 选 r11；漏它则 rm=3 变成 [rbx]）
+        e2_w8(buf, pos+cp, 242); e2_w8(buf, pos+cp+1, 73); e2_w8(buf, pos+cp+2, 15);
         e2_w8(buf, pos+cp+3, 42); e2_w8(buf, pos+cp+4, 3);
         return cp + 5;
     }
@@ -496,10 +498,10 @@ fn e2_sd_cvt_var(buf: string, pos: int, var_idx: int) -> int {
 fn e2_sd_st_var(buf: string, pos: int, var_idx: int) -> int {
     if e2_is_glob(var_idx) != 0 {
         cp := e2_lea_glob(buf, pos, var_idx);
-        // movsd [r11], xmm0 — F2 0F 11 /0, mod=00 rm=3
-        e2_w8(buf, pos+cp, 242); e2_w8(buf, pos+cp+1, 15); e2_w8(buf, pos+cp+2, 17);
-        e2_w8(buf, pos+cp+3, 3);
-        return cp + 4;
+        // movsd [r11], xmm0 — F2 **41** 0F 11 /0, ModRM mod=00 reg=0 rm=3（41 = REX.B）
+        e2_w8(buf, pos+cp, 242); e2_w8(buf, pos+cp+1, 65); e2_w8(buf, pos+cp+2, 15);
+        e2_w8(buf, pos+cp+3, 17); e2_w8(buf, pos+cp+4, 3);
+        return cp + 5;
     }
     return e2_sd_store(buf, pos, g2_slot(var_idx));
 }

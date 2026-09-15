@@ -24,6 +24,7 @@ B7 = 非回归（非 dex 全局返回已正确）。
 """
 
 import os
+import re
 import resource
 import subprocess
 import tempfile
@@ -91,19 +92,24 @@ def case_run(name, source, expect_rc, interp_rc=None):
     return True
 
 
-def case_elf_has(name, source, fragments):
-    """发射字节级判据（无运行期腿时用）：构建产物须含全部正片段。"""
+def case_elf_match(name, source, patterns):
+    """发射字节级判据（无运行期腿时用）：产物须命中全部**连续序列**正则。
+
+    逐片段独立 find 是坏判据（本批实测踩过：把 `4c 8d 1d` 与 `f2 0f 10 03` 分别查找时，
+    一个**缺 REX.B** 的坏序列 `f2 0f 10 03`（实际寻址 [rbx] 而非 [r11]）照样通过）——
+    必须按连续序列查。
+    """
     built, out, src = _compile(source)
     try:
         if built.returncode != 0:
             print(f"[FAIL] {name}: compile-failed(rc={built.returncode}): {built.stdout}{built.stderr}")
             return False
         blob = Path(out).read_bytes()
-        for label, want in fragments:
-            if blob.find(want) < 0:
-                print(f"[FAIL] {name}: 产物缺片段 {label} ({want.hex(' ')})")
+        for label, pat in patterns:
+            if pat.search(blob) is None:
+                print(f"[FAIL] {name}: 产物缺连续序列 {label} ({pat.pattern.hex(' ')})")
                 return False
-        print(f"[PASS] {name}: 产物含 {len(fragments)} 条正片段（发射字节级）")
+        print(f"[PASS] {name}: 产物命中 {len(patterns)} 条连续序列（发射字节级）")
         return True
     finally:
         _cleanup(src, out, out + ".ccr")
@@ -215,10 +221,11 @@ fn main() -> int { return ret_g(); }
 
 
 def main():
-    # B6(b) 正片段：lea r11,[rip+disp32]（4c 8d 1d ??×4）后紧跟 movsd xmm0,[r11]（f2 0f 10 03）
+    # B6(b) 正片段（**连续序列**）：lea r11,[rip+disp32]（4c 8d 1d ??×4）后紧跟
+    # movsd xmm0,[r11]（f2 **41** 0f 10 03；41 = REX.B，缺它即变成 [rbx]）。
     b6b_frags = [
-        ("lea r11,[rip+disp32]", bytes.fromhex("4c8d1d")),
-        ("movsd xmm0,[r11]", bytes.fromhex("f20f1003")),
+        ("lea r11,[rip+disp32] + movsd xmm0,[r11]",
+         re.compile(rb"\x4c\x8d\x1d.{4}\xf2\x41\x0f\x10\x03", re.S)),
     ]
     ok = [
         # B1：全局形判假（1）——修复前 ELF 判真（7）
@@ -236,7 +243,7 @@ def main():
         case_run("b5_await_global", B5_GLOBAL, 9, interp_rc=9),
         case_run("b5_await_local_control", B5_LOCAL, 9, interp_rc=9),
         # B6(b)：发射字节级（无运行期腿）
-        case_elf_has("b6b_extern_global_arg_rip_form", B6B_EXTERN, b6b_frags),
+        case_elf_match("b6b_extern_global_arg_rip_form", B6B_EXTERN, b6b_frags),
         # B7：非回归
         case_run("b7_non_dex_global_return", B7_RET_GLOBAL, 5),
     ]
