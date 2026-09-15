@@ -48,5 +48,6 @@
 
 - archive/(任务产物):[compcert-reference.md](archive/compcert-reference.md)、[compcert-round4-findings.md](archive/compcert-round4-findings.md)、[numeric-migration-inventory.md](archive/numeric-migration-inventory.md)、[memory-model-capability-lattice.md](archive/memory-model-capability-lattice.md)
 - [pseudocode/](pseudocode/README.md)(TDD 交付物)、[superpowers/](superpowers/)(specs + plans 工作目录；2026-09-16 新增:[compile-time-theorems](superpowers/specs/2026-09-16-compile-time-theorems.md)、[verification-slice](superpowers/plans/2026-09-16-verification-slice.md)、[preexisting-bug-ledger](superpowers/specs/2026-09-16-preexisting-bug-ledger.md))
+- **文档 vs 现实审计（2026-09-16）**：[specs/2026-09-16-doc-reality-audit.md](superpowers/specs/2026-09-16-doc-reality-audit.md)——「声称了但不成立」的文档断言全表（35 条：危险 7/陈旧 6/成立 20/无法判定 2）+ 逐条**修订去向**；**改文档或照文档设计前先查此表**
 - [ir-schema/](ir-schema/):[coreir-schema.md](ir-schema/coreir-schema.md)、[corespecir-schema.md](ir-schema/corespecir-schema.md)
 - [verifier/](verifier/):[kernel-spec.md](verifier/kernel-spec.md);[coq/](coq/README.md):Coq 验证 stdlib 纯函数
