@@ -442,19 +442,85 @@ fn e2_load_var(buf: string, pos: int, reg: int, var_idx: int) -> int {
     return e2_ld(buf, pos, reg, g2_slot(var_idx));
 }
 
-fn e2_rslot(r: int) -> int { return E2_REG_SLOT_BASE + r; }
+// ── 全局行操作数 seam（2026-09-16 批）：全局 vs 局部的分派单入口 ──
+// 根因：`g2_slot` 对**全局行**（`v < g_current_func_var_start`）返回**帧外伪 rbp 偏移**
+// （指向调用者帧的合法位移）⇒ 任何直吃 `g2_slot` 的操作数读写点都静默读写调用者帧
+// （读静默错值 / 写静默丢写 / 个别响亮 139），而 int 面已由 `e2_load_var` 收编。
+// 本族把判定收进单入口，**非全局行 = 既有字节逐字节原样**（零足迹硬约束）。
+// `e2_lea_glob`：lea r11,[rip+0] + RIP 补丁登记（disp32 位置 = pos+3，与 `e2_load_var`
+// 内联段逐字节同序）。**仅当 is_global 时调用**；scratch = r11 **即时消费、不跨指令存活**
+// （双全局操作数形 = 两次「lea r11 + 消费」序列，目标寄存器各自独立 ⇒ 无需第二 scratch）。
+fn e2_lea_glob(buf: string, pos: int, var_idx: int) -> int {
+    grow_rip_patch(g_x86_rip_patch_count + 1);
+    w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + 3);
+    w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, var_idx);
+    g_x86_rip_patch_count = g_x86_rip_patch_count + 1;
+    return e2_lrb(buf, pos, 0);
+}
 
-fn sz_ofs(o: int) -> int {
-    if o >= E2_REG_SLOT_BASE { return 3; }
-    if o >= -128 && o <= 127 { return 4; }
-    return 7;
+fn e2_is_glob(var_idx: int) -> int {
+    if var_idx < 0 { return 0; }
+    return r64(g_x86_is_global, var_idx * 8);
 }
-fn sz_load_var(v: int) -> int {
-    if v >= 0 && v < g_ir_var_count && g_str_count > 0 {
-        if r64(g_x86_is_global, v * 8) != 0 { return sz_lr() + 3; }
+
+// 读侧 dex（movsd xmm{n}, [槽]）：全局 → RIP 相对（lea r11 + movsd [r11]）；
+// 局部 → 现 `e2_sd_load`/`e2_sd_load1`/`e2_sd_load_x` 原字节（按 xmmn 分派，n=0/1 与
+// `e2_sd_load_x` 编码逐字节等价）。消费点：IR_BINARY(TI_DEX) 双操作数、cs_args_dispatch、
+// cs_stack_args（callseq.cr）。
+fn e2_sd_ld_var(buf: string, pos: int, xmmn: int, var_idx: int) -> int {
+    if e2_is_glob(var_idx) != 0 {
+        cp := e2_lea_glob(buf, pos, var_idx);
+        // movsd xmm{n}, [r11] — F2 **41** 0F 10 /n, ModRM mod=00 reg=n rm=3
+        // （41 = REX.B：r11 在 ModRM rm 需 REX.B=1；漏它则 rm=3 变成 [rbx] ⇒ 野指针 139）
+        e2_w8(buf, pos+cp, 242); e2_w8(buf, pos+cp+1, 65); e2_w8(buf, pos+cp+2, 15); e2_w8(buf, pos+cp+3, 16);
+        e2_w8(buf, pos+cp+4, xmmn * 8 + 3);
+        return cp + 5;
     }
-    return sz_ld(g2_slot(v));
+    if xmmn == 0 { return e2_sd_load(buf, pos, g2_slot(var_idx)); }
+    if xmmn == 1 { return e2_sd_load1(buf, pos, g2_slot(var_idx)); }
+    return e2_sd_load_x(buf, pos, g2_slot(var_idx), xmmn);
 }
+
+// 读侧 dex（int 源 cvt 形，IR_I2F）：全局 → RIP 相对 cvtsi2sd；局部 → 现 `e2_sd_cvt` 原字节。
+fn e2_sd_cvt_var(buf: string, pos: int, var_idx: int) -> int {
+    if e2_is_glob(var_idx) != 0 {
+        cp := e2_lea_glob(buf, pos, var_idx);
+        // cvtsi2sd xmm0, [r11] — F2 **49** 0F 2A /0, ModRM mod=00 reg=0 rm=3
+        // （49 = REX.W=1 + REX.B=1：REX.B 选 r11；漏它则 rm=3 变成 [rbx]）
+        e2_w8(buf, pos+cp, 242); e2_w8(buf, pos+cp+1, 73); e2_w8(buf, pos+cp+2, 15);
+        e2_w8(buf, pos+cp+3, 42); e2_w8(buf, pos+cp+4, 3);
+        return cp + 5;
+    }
+    return e2_sd_cvt(buf, pos, g2_slot(var_idx));
+}
+
+// 写侧 dex（movsd [槽], xmm0）：全局 → RIP 相对；局部 → 现 `e2_sd_store` 原字节。
+fn e2_sd_st_var(buf: string, pos: int, var_idx: int) -> int {
+    if e2_is_glob(var_idx) != 0 {
+        cp := e2_lea_glob(buf, pos, var_idx);
+        // movsd [r11], xmm0 — F2 **41** 0F 11 /0, ModRM mod=00 reg=0 rm=3（41 = REX.B）
+        e2_w8(buf, pos+cp, 242); e2_w8(buf, pos+cp+1, 65); e2_w8(buf, pos+cp+2, 15);
+        e2_w8(buf, pos+cp+3, 17); e2_w8(buf, pos+cp+4, 3);
+        return cp + 5;
+    }
+    return e2_sd_store(buf, pos, g2_slot(var_idx));
+}
+
+// 写侧 int（mov [槽], reg）：全局 → RIP 相对（lea r11 + mov [r11], reg）；
+// 局部 → 现 `e2_st` 原字节。消费点：HIT 表路径 dest 回存（hit_ev_emit_one）+ IR_AWAIT dest。
+fn e2_st_var(buf: string, pos: int, reg: int, var_idx: int) -> int {
+    if e2_is_glob(var_idx) != 0 {
+        cp := e2_lea_glob(buf, pos, var_idx);
+        // mov [r11], reg — REX.WRB + 0x89
+        cp = cp + emit_rex(buf, pos+cp, 1, reg/8, 0, 11/8);
+        e2_w8(buf, pos+cp, 137); cp = cp + 1;
+        cp = cp + emit_modrm(buf, pos+cp, 0, reg%8, 11%8);
+        return cp;
+    }
+    return e2_st(buf, pos, reg, g2_slot(var_idx));
+}
+
+fn e2_rslot(r: int) -> int { return E2_REG_SLOT_BASE + r; }
 
 fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     op := iri_op(instr_idx); d := iri_dest(instr_idx); s1 := iri_s1(instr_idx); s2 := iri_s2(instr_idx); s3 := iri_s3(instr_idx); ti := iri_tk(instr_idx);
@@ -463,10 +529,10 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     if op == IR_NOP { return 0; }
 
     if op == IR_I2F && d >= 0 {
-        // int → binary64：cvtsi2sd xmm0, [rbp+disp] — F2 0F 2A /0，然后 movsd 存回
-        do2 := g2_slot(d);
-        cp = cp + e2_sd_cvt(buf, pos+cp, g2_slot(s1));   // cvtsi2sd xmm0, [s1]
-        cp = cp + e2_sd_store(buf, pos+cp, do2);
+        // int → binary64：cvtsi2sd xmm0, [槽] — F2 0F 2A /0，然后 movsd 存回。
+        // 读写两端走全局行 seam（修复前 s1 为全局行时读帧外伪偏移 ⇒ 静默错值）。
+        cp = cp + e2_sd_cvt_var(buf, pos+cp, s1);   // cvtsi2sd xmm0, [s1]
+        cp = cp + e2_sd_st_var(buf, pos+cp, d);
         return cp;
     }
 
@@ -517,15 +583,16 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         do2 := g2_slot(d);
         if ti == TI_DEX {
             // binary64 运算（SSE2 double，IEEE 754）——apx 快路径标准答案实现
-            cp = cp + e2_sd_load(buf, pos+cp, g2_slot(s1));   // xmm0 = s1
-            cp = cp + e2_sd_load1(buf, pos+cp, g2_slot(s2));  // xmm1 = s2
+            // 操作数两端走全局行 seam（修复前全局行读帧外伪偏移 ⇒ 静默错值）
+            cp = cp + e2_sd_ld_var(buf, pos+cp, 0, s1);   // xmm0 = s1
+            cp = cp + e2_sd_ld_var(buf, pos+cp, 1, s2);   // xmm1 = s2
             // F2 0F 5x C1：addsd/subsd/mulsd/divsd xmm0, xmm1
             if s3 == OP_ADD { w8(buf, pos+cp, 242); w8(buf, pos+cp+1, 15); w8(buf, pos+cp+2, 88); w8(buf, pos+cp+3, 193); cp = cp + 4; }
             else if s3 == OP_SUB { w8(buf, pos+cp, 242); w8(buf, pos+cp+1, 15); w8(buf, pos+cp+2, 92); w8(buf, pos+cp+3, 193); cp = cp + 4; }
             else if s3 == OP_MUL { w8(buf, pos+cp, 242); w8(buf, pos+cp+1, 15); w8(buf, pos+cp+2, 89); w8(buf, pos+cp+3, 193); cp = cp + 4; }
             else if s3 == OP_DIV { w8(buf, pos+cp, 242); w8(buf, pos+cp+1, 15); w8(buf, pos+cp+2, 94); w8(buf, pos+cp+3, 193); cp = cp + 4; }
             if s3 >= OP_ADD && s3 <= OP_DIV {
-                cp = cp + e2_sd_store(buf, pos+cp, do2);
+                cp = cp + e2_sd_st_var(buf, pos+cp, d);
             } else if s3 >= OP_EQ && s3 <= OP_GE {
                 w8(buf, pos+cp, 102); w8(buf, pos+cp+1, 15); w8(buf, pos+cp+2, 47); w8(buf, pos+cp+3, 193); cp = cp + 4;
                 if s3 == OP_EQ {
@@ -1228,7 +1295,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     }
 
     if op == IR_LOAD_ENUM_TAG && d >= 0 {
-        o1 := g2_slot(s1); do2 := g2_slot(d);
+        do2 := g2_slot(d);
         // R2 P4 Task 5（与 IR_CONST 全局行分支同族）：**tag 读取源走 e2_load_var**
         // （局部 = [rbp+slot]；全局 = RIP 相对 lea）。修复前 `e2_ld(o1)` 对全局行读
         // 帧外伪偏移 ⇒ tag 读垃圾 ⇒ 全局可选槽的 match **静默走空臂**（实测：
@@ -1331,8 +1398,10 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
     }
 
     if op == IR_SLICE && d >= 0 {
-        do2 := g2_slot(d); o1 := g2_slot(s1); o2 := g2_slot(s2);
-        cp = cp + e2_ld(buf, pos+cp, 10, o1); cp = cp + e2_ld(buf, pos+cp, 11, o2);
+        do2 := g2_slot(d);
+        // 数组指针（s1）与低界（s2）两端走全局行 seam（修复前直吃 g2_slot ⇒ 全局行
+        // 读帧外伪偏移：实测 ELF 71 vs 解释器 20 的静默错值，见批计划 §T1 B4）
+        cp = cp + e2_load_var(buf, pos+cp, 10, s1); cp = cp + e2_load_var(buf, pos+cp, 11, s2);
         // shl r11, 3 — REX.WB + 0xC1, /4
             cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 11/8); e2_w8(buf, pos+cp, 193); cp = cp + 1;
             cp = cp + emit_modrm(buf, pos+cp, 3, 4, 11%8); e2_w8(buf, pos+cp, 3); cp = cp + 1;
@@ -1342,8 +1411,9 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int {
         return cp;
     }
     if op == IR_AWAIT && d >= 0 && s1 >= 0 {
-        cp = cp + e2_ld(buf, pos+cp, 10, g2_slot(s1));
-        cp = cp + e2_st(buf, pos+cp, 10, g2_slot(d));
+        // s1 走全局行 seam（修复前全局行读帧外伪偏移 ⇒ 静默错值，实测 interp 9 / ELF 26）
+        cp = cp + e2_load_var(buf, pos+cp, 10, s1);
+        cp = cp + e2_st_var(buf, pos+cp, 10, d);
         return cp;
     }
 
@@ -1814,7 +1884,8 @@ fn hit_ev_emit_one(ev_i: int, buf: string, pos: int) -> int {
         n := hit_ev_emit_pool_mov(buf, pos, hit_role_reg_low(HIT_ROLE_DST), s1);
         if n < 0 { return -1; }
         cp = cp + n;
-        cp = cp + e2_st(buf, pos + cp, 10, g2_slot(d));
+        // dest 回存走全局行 seam（表实例面：d 为全局行时原先写帧外伪偏移）
+        cp = cp + e2_st_var(buf, pos + cp, 10, d);
         return cp; }
     if hit_ev_proj_pick(es, cls, st) < 0 { return -1; }
     rm_mode := hit_r32(st, HIT_ST_OFF_RM_MODE);
@@ -1849,7 +1920,7 @@ fn hit_ev_emit_one(ev_i: int, buf: string, pos: int) -> int {
         // modrm：mod=3（寄存器）；reg/rm 低 3 位来自角色（src2→r11=3、dst→r10=2）
         cp = cp + emit_modrm(buf, pos + cp, 3, hit_role_reg_low(rr), hit_role_reg_low(mr));
         // 结果回存（先读后写——dst 兼作操作数（add 反减中间值）时读先于写）
-        cp = cp + e2_st(buf, pos + cp, r_acc, g2_slot(d));
+        cp = cp + e2_st_var(buf, pos + cp, r_acc, d);
         return cp; }
     if cls == HIT_EV_CLS_IMM {
         // cst：/digit + [rbp+disp(auto)] + imm——rm = dst 槽、imm 值 = s1 原值
@@ -1880,7 +1951,7 @@ fn hit_ev_emit_one(ev_i: int, buf: string, pos: int) -> int {
         n6 := hit_st_modrm_disp(st, buf, pos + cp, reg_lo, g2_slot(s1));
         if n6 < 0 { return -1; }
         cp = cp + n6;
-        cp = cp + e2_st(buf, pos + cp, r_val, g2_slot(d));
+        cp = cp + e2_st_var(buf, pos + cp, r_val, d);
         return cp; }
     if rr == HIT_ROLE_VAL {
         // store：写 [addr槽] ← val（val 槽值先载入角色寄存器）

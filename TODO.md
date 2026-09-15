@@ -741,6 +741,31 @@
 - **状态**：**登记，未修**（本轮**只读审计**，零构建/零源码改动）。**判据（修复时）**：① 审计表 B 的 B-2/B-3/B-4/B-5/B-6/B-8 由「静默错值」转**精确值**；② canary/`.ccr` 四条**不变**（门控面须审）；③ 聚合读的 `irv_type` 断言进自测（新用例 ≥6）。
 - **关联**：apx 批次（表 B 的 RED 语料）· (A) 批 T3「声明面登记」修法（**正交**，勿混：T3 修的是**写点**的登记来源，本条修的是**读点**的定型）· `ptr_analysis.cr` 型面消费者（交叉核对面）。
 
+### 80. ⚠ **【高危·预存】方法调用的 `apx` 实参不做形式转换**（环门 `EXPR_IDENT` ⇒ `EXPR_FIELD` 整段跳过）——**静默错值 · 双路径同错**（2026-09-16 全局 operand seam 批 T1 实测；**同族见 #81**）
+
+- **最小复现**：`struct S { v: int }` + `impl S { fn m(self: S, x: dex) -> dex { return x * 2.0; } }` + `g : dex, apx, mut = 1.5;` + `y := s.m(g); if y != 3.0 { return 1; } return 7;` ⇒ **实得 rc=1（期望 7）**。
+- **双路径实测**：`corec run` rc=1 / `build --static` 产物 rc=1 ⇒ **两条路径一致地错**（**不是** ELF-only 分歧）。
+- **局部对照（定性关键）**：`lx : dex, apx, mut = 1.5; y := s.m(lx);` ⇒ **同样 interp 1 / ELF 1** ⇒ **与全局行无关**：根因 = 调用点 dex 形式转换环（`ir_gen.cr:1810-1841`）以 `ast_kind(func_node) == EXPR_IDENT` 为门，方法调用（`EXPR_FIELD`）**整段跳过** ⇒ apx（binary64 bits）实参未转 scaled 直达 callee，而 callee 形参侧按 `TI_DEX_S` 解释（`ir_gen.cr:2866`）。修法须注意**实参/形参对齐差一格**（`arg_vars[0]` = 接收者，被调 `EXPR_PARAM` 链不含 self，`ir_gen.cr:1779-1786`）。
+- **为什么比响亮失败更危险**：**无声**（无诊断）+ **两路径一致** ⇒ 「双路径对拍」类判据**抓不到**，只能靠语义断言（值的量纲/期望值）抓。**排队优先级按高危表述，不得写成「低优先登记」。**
+- **附注（勿混根因）**：直调 `dbl(g)`（`EXPR_IDENT`）走环内转换，其错值可归因**全局读 seam**（全局 operand seam 批 B1 迁移面）；与本条（非 IDENT 调用形态）根因不同。
+- **关联**：#81（同族）· 全局 operand seam 批计划 `docs/superpowers/plans/2026-09-16-global-operand-seams.md` §T1 记录 N-3。
+
+### 81. ⚠ **【高危·预存】局部 `apx` 量作第 9 个 binary64 栈参**（`cs_stack_args` 面）——**静默错值 · 双路径同错**（2026-09-16 全局 operand seam 批 T1 实测；**与 #80 同族 = `apx` 形式转换缺口族**）
+
+- **最小复现**：方法带 8 个 `dex` 形参（第 9 个 `dex` 实参落栈：SysV 第 9 个 binary64 起走 `cs_stack_args`），第 9 参传 `lx : dex, apx, mut = 1.5`，方法直接 `return` 该形参 ⇒ **期望 1.5（rc=7 形），实得 rc=1**；`corec run` 与 `build --static` **同错**。
+- **对照**：第 9 参改用**全局** apx 量 ⇒ 该形态实测 rc=7（因 `need_pack` 打包介入，见 seam 批 §T2-c）⇒ 本条与全局行无关。
+- **与 #80 合看 = 面不是点**：`apx` 形式转换缺口在「**非 `EXPR_IDENT` 调用形态**（#80）」与「**栈参位**（本条）」两处共存 ⇒ 建议同批修（转换环覆盖面 + 栈参位形式），单点修必留另一处。
+- **关联**：#80 · 全局 operand seam 批计划 §T1 记录 N-1。
+
+### 79. 全局 operand seam 批**收官**（2026-09-16——`g2_slot` 全局行「帧外伪偏移」同族六点收编；**四点 RED 转正** + 两条探针硬约束 + 偏差台账 3 条）
+
+- **根因**：`g2_slot`（`src/arch/x86_64/instr.cr:55-72`）对**全局行**（`v < var_start`）返回**帧外伪 rbp 偏移**（指向调用者帧的合法位移）⇒ 一切直吃 `g2_slot` 的操作数读写点**静默读写调用者帧**；int 面已由 `e2_load_var` 收编，**dex 面五件（`e2_sd_load/load1/load_x/cvt/store`）与写侧从未收编** ⇒ 按 `IR_*` 分支逐个漏。
+- **交付**：计划 `docs/superpowers/plans/2026-09-16-global-operand-seams.md`（含 T1 RED 实测、T2 完备性枚举、七门裁决与证伪留痕、探针表、停条件）；提交链 = 计划 → 七门裁决落纸 → T2 枚举 + `need_pack` 掩蔽修正 → **T1 决定性 RED**（B1/B2/B4/B5，`mut` 全局三重隔离）→ 裁-SEAM-3 证伪改判（准 (b) 单列 #80）→ **T3 seam 收编**（新增 `e2_lea_glob`/`e2_is_glob`/`e2_sd_ld_var`/`e2_sd_cvt_var`/`e2_sd_st_var`/`e2_st_var`；迁移 B1 585/586+593 · B2 532+533 · B4 1398-1403 · B5 1411-1416 · B6 `callseq.cr:75`/`:129` · B7 `cs_ret_value` 全局支按型分派 · B8 1886/1921/1952；删死码 `sz_ofs`/`sz_load_var` + 死变量 `o1`）→ T4 套件 `tests/selfhost/test_global_seams.py`（12 例）+ suite 语料 `tests/suite/global_seam_test.cr` + `run.sh` 挂钩 → REX.B 修复 + 判据收紧 → 腿① 计数 72→73 → T5 记录。
+- **判据（全绿）**：T4 套件 **12/12** · suite 语料 rc=0 · 冒烟 42 · **canary `95084e7b…d475`（28822B）IDENTICAL** · `.ccr` 两口径四条全同 · `check src/compiler` rc=0（0 条 `error[`）· `selftest-types` 415/415 · 五 CI job 全 rc=0 · 自举链 `corec2==corec3` **IDENTICAL** + N06=0 · 腿① **73 档**对拍零差异 · 探针 29 档 rc/冷日志/暖态零差异 · **突变双向**（全局分支改坏 ⇒ 全局组探针 + 字节判据红；非全局分支改坏 ⇒ 探针 11/12 红 + **canary 变** `a7ef9ddf…`）。
+- **登记（本批不修，另单）**：#80/#81（`apx` 形式转换缺口族——B6(c) 方法调用形态经实测**证伪**归此类）· **B8 表实例 disp 参三处**（`hit_st_modrm_disp` 形态，seam 套不上）· **`e2_sd_*` 五件无 `E2_REG_SLOT_BASE` 分支**（现因 regalloc 类型门 `regalloc.cr:680-681` 不可达）· **全局 `string` 行型面**（`reg_one_global` 默认 `TI_INT` ⇒ `g[0]` 走 8 字节元素支、`g == "s"` 不比较内容）。
+- **两条探针硬约束（写全局/dex 探针前必读）**：① 必须用 **`mut` 全局**——不可变 + 字面量初值的全局被 `find_global_const_node`（`ir_gen.cr:592-611`）**折叠成 `IR_CONST`**，读点不碰全局行（探针假绿；本批 T1 第一轮即栽在此处）② **`apx` 算术无解释器腿**（`corec run` 显式拒收 rc=255，能力边界非缺陷）⇒ 主判据 = **全局 vs 局部同形 ELF 对拍**（两条均已落 dex/apx 迁移遗留节 + 套件头注）。
+- **偏差台账 3 条（本批自曝、全部闭合）**：REX.B 自伤（`[r11]` 缺 REX.B 编码成 `[rbx]` ⇒ 139，T4 套件当场拦）· 弱判据（逐片段独立 `find` 放跑了它 ⇒ 改连续序列正则）· 计数漂移（新增语料 ⇒ 腿① 72→73 显式更新）。详见计划 §T5。
+
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
 来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：
@@ -1015,3 +1040,5 @@ corearch 恒空跑，零产物差异）。设计定稿 `docs/superpowers/specs/2
 - str_to_f64_bits ~2ulp 截断（保留站点文档化限制）：binary64 判别子用 1/3（0.1b+0.2b==0.3 仅 −1ulp 组合恰好落位模式，不可作断言）；native APX/FFI/格式化回归已在 WSL 通过
 - ~~INT_LIT 缺 hex/octal/binary 前缀分支（0x1F 等）；`1_000` 下划线产生 T_INT(-1) 静默值 0~~（2026-08-29 已修：bootstrap 与自举 lexer 支持 `0x`/`0o`/`0b` 及下划线，并拒绝非法数字；2026-09-05 #61 收尾补强：溢出守卫按 base 校准——固定 i64max/10 阈值对 base 16 无效，`0x8000000000000000` 静默环绕为 i64min；现 16/8/2 分别用 i64max/base 阈值，bootstrap `read_number` 同步前缀进制溢出拒绝，cir_cache 魔数改 signed 十进制同字节模式）
 - interp 裸 opcode 数字风格（与既有 op == 26 风格一致，非缺陷）；`_f32/_f64` 宽度透传死路径（EBNF/inventory 争议点 7 已标注，apx 位宽标注需新发射路径）
+- **`corec run` 不能执行 apx dex 算术（既有能力边界，非缺陷——响亮）**：`IR_I2F/IR_F2I` 遇 apx 路径时解释器显式报错 `interpreter error: IR_I2F/IR_F2I needs binary64 semantics (apx dex) — corec run cannot execute apx dex arithmetic; build & run natively (corec build) instead` 并 rc=255（2026-09-16 全局 operand seam 批 T1 实测复核；与上文「深度守卫超限 interp rc=255」同码不同因）。**影响**：凡 apx 算术探针（`dex, apx` 变量参与运算/转换）**无解释器腿** ⇒ 该面判据只能用「**同形局部 vs 全局 ELF 对拍**」或改写成 scaled 形态（能用 interp 腿）——写 dex/apx 探针前先确认这一条，别把 255 当错值信号。
+- **模块级全局的常量折叠陷阱（探针设计）**：`find_global_const_node`（`ir_gen.cr:592-611`，要求 `ast_data(node) == 0` = **非 mut**，接受 `EXPR_INT/EXPR_BOOL/EXPR_DEX`）把「**不可变 + 字面量初值**」的全局折叠成 `IR_CONST` ⇒ **读点根本不碰全局行**。凡针对「全局行寻址/读取」的探针**必须用 `mut` 全局**（否则探针不触达被测面、假绿；2026-09-16 全局 operand seam 批 T1 第一轮即栽在此处，见该批计划 §N-4）。
