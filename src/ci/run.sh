@@ -82,7 +82,7 @@ case "$CI_JOB_NAME" in
     # `decisions=0`）。判定面回归网 = ① **冻结基线同源对拍**：冻结基线（**由
     # `tools/baseline/rebuild.sh` 从 pinned revision 重建**——配方 + 三 sha 白名单见
     # `tools/baseline/REBUILD.md`；R2 P6 Task 1 起可复现，二进制仍不入库）× 当前源 vs
-    # 当前二进制 × 当前源，72 档语料（runner `tools/baseline/parity_run.sh`，逐档 clean-cache）
+    # 当前二进制 × 当前源，73 档语料（runner `tools/baseline/parity_run.sh`，逐档 clean-cache；2026-09-16 全局 seam 批 +1 = `tests/suite/global_seam_test.cr`）
     # `check` rc + 日志逐档 diff（手工判据，本 job 内不跑——CI 为浅检出且无 jj）；② **行为探针**：
     # 下列套件（test_named_face / test_named_dedup / test_type_engine / test_optional /
     # test_match_exhaust …）+ **入仓探针语料 `tests/probes/`（29 档；runner
