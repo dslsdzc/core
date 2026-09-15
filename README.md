@@ -47,7 +47,7 @@
 | | `@hotpatch` 滚动更新（IR_HOTPATCH_ROUTE + SIGHUP 热加载） | 完成 |
 | | 惰性求值（IR_LAZY_THUNK/FORCE，调用级） | 部分（thunk/force 为值搬运，无实际延迟） |
 | | 控制流自动惰性（编译期指令下沉路线） | 设计定案，待实现 |
-| **汇编层** | `.crasm` 统一汇编抽象层（虚拟寄存器 + 平台映射表） | 设计完成（docs/crasm.md） |
+| **汇编层** | ~~`.crasm` 统一汇编抽象层~~——**2026-09-05 退役**，被硬件接口表（HIT）吸收：跨平台 = HIT 事件 + 投影表；MMIO/特权/中断 = `.cr` unsafe + HIT extern | 已退役（docs/crasm.md 保留为历史） |
 | **语义检查** | 名字解析 + 类型检查、结构化错误码 + 源码定位 | 完成 |
 | **模块系统** | `import`、`fileid`、`@project`、`_import.cr`、依赖裁剪 | 完成 |
 | **标准库** | `io.cr` / `cli.cr` / `toml.cr` | 完成 |
@@ -72,7 +72,7 @@
 | 内存 | 完整自举 1 GiB bump heap 峰值（需按函数回收而非扩堆） | TODO 预存 bug 1 |
 | 并发 | 多 M worker 未连调度器、channel 队列未并发验证 | TODO 预存 bug 2 |
 | CI | 工作流注册冻结（注册表陈旧，GitHub 侧）——develop 的 required_status_checks 暂移除 | spec §3.3 |
-| 语言 | 控制流自动惰性、`.crasm` 汇编层、分布式（跨机器/QUIC） | 设计完成/定案，待实现 |
+| 语言 | 控制流自动惰性、分布式（跨机器/QUIC）；~~`.crasm` 汇编层~~（2026-09-05 退役，被 HIT 吸收） | 设计完成/定案，待实现 |
 
 ---
 

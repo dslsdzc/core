@@ -1,5 +1,9 @@
 # .crasm 统一汇编抽象层
 
+> **状态：已废弃（2026-09-05）**——独立 .crasm 格式取消，绑定经典硬件过深（寄存器/寻址/ISA 助记符/私有平台映射表）。
+> 被硬件接口表（`docs/superpowers/specs/2026-09-05-hardware-interface-table.md`）吸收：跨平台 = HIT 事件 + 投影表；
+> MMIO/特权/中断 = `.cr` unsafe + HIT extern 接口事件；事件可读形态 = v6 NOD 文本 dump。本文保留为历史记录。
+
 ## 概述
 
 Core 的内核路线（project-book 第五阶段）需要汇编级能力（MMIO、特权指令、中断），

@@ -54,7 +54,10 @@ fn provenance_verify_func(nstart: int, ncount: int) {
     loop { if ni >= nstart + ncount { break; }
         op := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE);
         s1 := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1);
-        width : ., mut = r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_TK);
+        // R2 P5 Task 2（D19）：本处读的是**访问宽度**（字节数）——单槽化前它住在混用
+        // tk 槽，现居**辅码**槽（OFF_DF_AUX）。值域/语义零变化（仅 IR_DEREF/IR_STORE_PTR
+        // 消费；两 op 均属辅码面）。读 40 槽（类型项引用）会把项行号当宽度 = 静默错值。
+        width : ., mut = r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_AUX);
 
         if (op == IR_DEREF || op == IR_STORE_PTR) && s1 >= 0 {
             // Skip checks in unsafe blocks

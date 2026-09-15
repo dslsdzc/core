@@ -3,6 +3,8 @@
 日期：2026-08-08
 状态：已批准（brainstorming 会话，五节逐节确认）；2026-08-09 整理为正式文档 → `docs/crasm.md`（本 spec 保留为批准记录）
 
+> **2026-09-05 退役**：独立 .crasm 格式取消——绑定经典硬件过深；诉求被硬件接口表（HIT）吸收（见 `docs/superpowers/specs/2026-09-05-hardware-interface-table.md`）。本文保留为历史批准记录。
+
 ## 1. 背景与动机
 
 Core 的内核路线（project-book 第五阶段）需要汇编级能力（MMIO、特权指令、中断），

@@ -55,8 +55,9 @@ ProjectAccess = '@' IDENT IDENT '::' IDENT ;
 ArgList = Expr { ',' Expr } ;
 
 (* 注：DEX_LIT（`3.14` 十进制小数，词法令牌名 T_DEX，原 T_FLOAT）默认产生 dex（精确
-   定点小数，数值迁移 Task 4）；f32/f64 后缀 = apx CPU 位宽标注（见数值类型设计，
-   2026-08-16；lexer 消费后缀后仅发 T_DEX，宽度透传为已知缺口） *)
+   定点小数，数值迁移 Task 4）；f32/f64 后缀已退役（2026-09-10 语言面收窄 §2）——词法
+   对数字字面量的字母后缀一律响亮报错，宽度 = 机器形状，归映射层（数值类型设计，
+   2026-08-16） *)
 Literal = INT_LIT | DEX_LIT | STRING_LIT | CHAR_LIT | BOOL_LIT | UNIT_LIT | 'None' | 'Some' '(' Expr ')' ;
 BlockExpr = Block ;
 IfExpr = 'if' Expr Block [ 'else' ( Block | IfExpr ) ] ;

@@ -3,6 +3,13 @@
 每一个错误码对应编译器中 **一个唯一可区分的检查点**。
 同一条性质但不同上下文（赋值 vs 传参 vs 初始化）的报错各占独立码。
 
+> **fail-closed 语义（2026-09-15，FC 批 T2 起）**：**默认阻断**——任何**不在豁免登记表**内的
+> 类型面诊断 ⇒ `rc=1` + **零产物**（不落目标 ELF、不落本次 `<out>.ccr`）。豁免表 =
+> `src/compiler/diag.cr::diag_gate_exempt`（码级 9 条：TF01 · TF07 · TB01 · TM04 · TK01 · B04
+> [build 面] + N01 · N06 · N11 [check 面，仅登记]；每条带位点证据/理由/退出条件，**只减不增**）。
+> 语法面（P/L 族）与安全检查面（B11/TU03…）本就「任一即 rc=1」；`check` 面的 rc 规则
+> （计数 > 0）不消费豁免表 ⇒ check 基线不换代（裁-FC-1 = (C)）。
+
 ---
 
 ## L0xx — 词法 (Lexer)
@@ -44,6 +51,10 @@
 | P017 | fileid 声明格式 | `Invalid fileid declaration` |
 | P018 | 变量声明语法 | `Invalid variable declaration syntax` |
 | P019 | 字面量后缀溢出 | `Numeric literal overflow` |
+| P020 | 形参数目超上限（> `MAX_FN_PARAMS=64`） | `too many parameters`（TODO #8 修复：修复前 ≥18 形参静默误编译——越界写踩 return_type/ast_node） |
+| P021 | 函数体内嵌套 `fn` 声明（不属语言面） | 定位拒绝（TODO #16 修复：修复前 parse 失步 → bump allocator 耗尽 → `rep movsb` 向 NULL 拷 → rc=139） |
+| P022 | 枚举变体数 / 变体载荷类型数超上限（> `MAX_ENUM_VARIANTS=16` / `MAX_VARIANT_TYPES=16`） | `Enum has too many variants (17 > 16)` / `Enum variant has too many payload types (17 > 16)`（TODO #35 修复：修复前写入侧**无界**——第 17 变体槽起点 = `variant_count` 自身、槽尾越记录尾 224B 的静默越界写） |
+| P023 | 结构体字段数超上限（> `MAX_STRUCT_FIELDS=16`） | `Struct has too many fields (17 > 16)`（TODO #35 同族：第 17 字段踩 `OFF_SI_FIELD_COUNT`/泛型槽与邻记录；修复前 check rc=0 零诊断） |
 
 ## N0xx — 名字解析 (Name Resolution)
 
@@ -84,10 +95,17 @@
 
 ## TA0xx — 类型检查：赋值与绑定
 
+> TA02 自 2026-09-13（R2 P5 Task 6 / TODO #32）起**实现**并列入 run_frontend 硬错误名单
+> （rc=1 且不产出产物）：修复前 `EXPR_LET` 站点**无任何兼容检查**（符号取注解行、后端按注解
+> 行发射 = 静默错产物；`EC_TA_DECL` 定义零 raise）。判定点 = `checker.cr::check_let_annot_compat`
+> （局部 `EXPR_LET` + 全局 `check_global_let` 两调用点共用），组合函数 = `type_compat_strict`
+> （身份 + 常量档长度 + 可选目标注入）。豁免：无注解/auto/无初值 · 注解 `dyn` · 值 `never`
+> （底部 + 错误标记=级联抑制）· 注解为泛型形参。report-only 全语料零命中后开门。
+
 | 码 | 检查点 | 消息模板 |
 |----|--------|---------|
 | TA01 | 赋值号类型不匹配 | `Cannot assign {T2} to {T1}` |
-| TA02 | 变量声明类型与初始值不符 | `Variable declared as {T1}, got {T2}` |
+| TA02 | 变量声明类型与初始值不符（**2026-09-13 R2 P5 Task 6 起实现**：`EXPR_LET` 判定点——局部与全局初始化器共用；`-1` 分支 = 常量档数组长度约束，措辞同 TS03/TK02） | `Variable declared as {T1}, got {T2}` / `Array length constraint not satisfied` |
 | TA03 | 批量声明类型不一致 | `Batch declaration has mixed types: {T1} vs {T2}` |
 | TA04 | 赋值给不可变变量 | `Cannot assign to immutable variable '{name}'` |
 | TA05 | 变量未声明 mutable | `Variable '{name}' is not mutable` |
@@ -144,7 +162,7 @@
 | 码 | 检查点 | 消息模板 |
 |----|--------|---------|
 | TC01 | if 条件不是 bool | `If condition must be `bool`, got {T}` |
-| TC02 | if/else 分支类型不一致 | `If branches have different types: {T1} vs {T2}` |
+| TC02 | if/else 分支类型不一致（**2026-09-14 起带「else 支发散」豁免**：`EXPR_RETURN` 推断 = 所返回值类型 ⇒ `{ return X; }` 支的「类型」是幻影，而 if 的值类型定义为 `then_ti` ⇒ **else 支确定发散时不判**；判定谓词 = `stmt_diverges`（checker.cr，**只服务本判定点**）。**不对称是有意的**：then 支发散时 `then_ti` 本身即幻影（模型面）⇒ 仍报，保留真信号） | `If branches have different types: {T1} vs {T2}` |
 | TC03 | if 单分支不能有返回值 | `If without `else` cannot return value` |
 | TC04 | while 条件不是 bool | `While condition must be `bool`, got {T}` |
 | TC05 | loop 内 break 带值不一致 | ``break` with value conflicts with previous `break` without value` |
@@ -170,7 +188,7 @@
 | 码 | 检查点 | 消息模板 |
 |----|--------|---------|
 | TK01 | 下标索引非数组 | `Cannot index type {T}` |
-| TK02 | 数组元素类型不一致 | `Expected array element type {T1}, got {T2}` |
+| TK02 | 数组元素类型不一致（2026-09-11 TODO #29 起字面量处**实现**：元素类型取首元素，后续逐个比对；硬错误） | `Expected array element type {T1}, got {T2}` |
 | TK03 | 数组大小不是整数 | `Array size must be `int`` |
 | TK04 | 数组大小为负数 | `Array size must be positive, got {size}` |
 | TK05 | 切片越界 | `Slice start {N} is out of bounds (length {L})` |
@@ -179,6 +197,10 @@
 | TK08 | `for` 迭代变量与元素类型不匹配 | ``for` variable type {T1} does not match element type {T2}` |
 
 ## TS0xx — 类型检查：结构体字面量
+
+> 四码自 2026-09-11（TODO #29）起**全部实现**并列入 run_frontend 硬错误名单（rc=1 且不产出
+> 产物）：修复前字段名被丢弃（值按声明位序绑定 = 静默错值），四校验均不存在。字段值现按
+> **名字**绑定（与 Python bootstrap 的 gen_struct_lit 同语义；求值顺序仍为源序）。
 
 | 码 | 检查点 | 消息模板 |
 |----|--------|---------|
@@ -245,6 +267,7 @@
 | ICE01 | 不应该发生的状况 | `Internal compiler error: {detail}` |
 | ICE02 | 全局缓冲区溢出 | `Compiler limit: {buffer} overflow (max {max})` |
 | ICE03 | IR 生成缺实现 | `Unsupported expression: {kind}` |
+| ICE04 | 类型判定不可判（引擎 `-1`：未覆盖面/预算耗尽；或桥接缺口 = 该行译不成类型项）——R2 P5 Task 4 的 P-A 政策：**未知不当 0/1**（legacy 回落面已删），硬错拒绝落盘；反例（两侧类型项文本）随消息，判定点无 AST 位置 ⇒ `--> 0:0` | `type judgment indeterminate: {term_a} vs {term_b} ({cause})` / `type judgment indeterminate: no type term for type row {t1} / {t2} (bridge gap)` |
 
 ---
 
@@ -253,7 +276,7 @@
 | 段 | 范围 | 数量 | 说明 |
 |----|------|------|------|
 | L | L001–L011 | 11 | 词法 |
-| P | P001–P019 | 19 | 语法 |
+| P | P001–P023 | 23 | 语法 |
 | N | N001–N021 | 21 | 名字解析 |
 | I | I001–I006 | 6 | 类型推断 |
 | TA | TA01–TA08 | 8 | 赋值与绑定 |
@@ -268,5 +291,5 @@
 | B | B001–B010 | 10 | 借用 |
 | R | R001–R004 | 4 | 运行时 |
 | E | E001–E004 | 4 | I/O |
-| ICE | ICE01–ICE03 | 3 | 编译器内部 |
-| **总计** | | **~145** | |
+| ICE | ICE01–ICE04 | 4 | 编译器内部 |
+| **总计** | | **~146** | |

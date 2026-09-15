@@ -43,6 +43,11 @@ fn parse_type() -> int {
     line := tok_ln(t);
     col := tok_cl(t);
     res : ., mut = 0;
+    // 表示层概念（2026-09-10 语言面收窄裁决 §1）：`[T; N]` 的类型构造器身份已退役——
+    // 语义归处 = product（N 元聚合）/ 序列接口 + 长度 where（N 长序列）/ F11 图（长度事实，
+    // 可表达依赖长度）。本语法保留为「内联容量存储」表示提示（映射参数层，与 hw-map 同层；
+    // 随实例选择生效或退化，非经典范式映射可忽略）。见
+    // docs/superpowers/specs/2026-09-10-language-surface-narrowing-design.md §1
     if tok_k(t) == T_LBRACKET {
         advance_tok();
         inner := parse_type();
@@ -130,11 +135,14 @@ fn parse_type() -> int {
         g_diag_count = g_diag_count + 1;
         res = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, line, col);
     }
-    // Handle T? desugaring → Option[T]
+    // R2 P3 Task 4：`T?` 的目标形态 = **EXPR_OPTIONAL**（内层类型节点入 a 槽）。
+    // 旧形态（T? → EXPR_GENERIC_APPLY(Option, T)）要求「内建 Option 名」在符号表里被注册，
+    // 正是本任务退役的做法（spec §5.4）；且旧形态无法表达 `T? = T ∪ null`（GenericApply 行
+    // 在桥接侧是不展开的 AK_NAMED 原子）。新形态**零名字依赖**（不再 str_intern("Option")，
+    // 见 test_optional.py 的行数对照用例）。
     if check(T_QUESTION) {
         advance_tok();
-        option_ni := str_intern("Option");
-        res = alloc_node(EXPR_GENERIC_APPLY, option_ni, res, 1, 0, 0, 0, line, col);
+        res = alloc_node(EXPR_OPTIONAL, res, 0, 0, 0, 0, 0, line, col);
     }
     return res;
 }
@@ -389,33 +397,20 @@ fn is_upper_first(s: string) -> bool {
 
 fn parse_primary() -> int {
     t := cur_tok();
-    if tok_k(t) == T_INT || (tok_k(t) >= T_INT_I8 && tok_k(t) <= T_INT_U64) {
+    if tok_k(t) == T_INT {
         advance_tok();
-        kn := tok_k(t);
-        w : ., mut = 0;
-        if kn == T_INT_I8 { w = W_I8; }
-        else if kn == T_INT_I16 { w = W_I16; }
-        else if kn == T_INT_I32 { w = W_I32; }
-        else if kn == T_INT_I64 { w = W_I64; }
-        else if kn == T_INT_U8 { w = W_U8; }
-        else if kn == T_INT_U16 { w = W_U16; }
-        else if kn == T_INT_U32 { w = W_U32; }
-        else if kn == T_INT_U64 { w = W_U64; }
-        return alloc_node(EXPR_INT, 0, 0, 0, tok_iv(t), TY_INT, w, tok_ln(t), tok_cl(t));
+        return alloc_node(EXPR_INT, 0, 0, 0, tok_iv(t), TY_INT, 0, tok_ln(t), tok_cl(t));
     }
-    if tok_k(t) == T_DEX || tok_k(t) == T_FLOAT_F32 || tok_k(t) == T_FLOAT_F64 {
+    if tok_k(t) == T_DEX {
         advance_tok();
-        kn := tok_k(t);
-        w : ., mut = 0;
-        if kn == T_FLOAT_F32 { w = W_F32; }
-        else if kn == T_FLOAT_F64 { w = W_F64; }
         // 节点字段（数值迁移 Task 4）：a = binary64 位模式（apx 快路径字面量表示，
         // 由 lexer 存入 token 的 lexeme 槽的数字串还原）；int_val = 定点缩放整数
-        // （精确表示，默认路径）；data = 宽度标注（_f32/_f64，保留）
+        // （精确表示，默认路径）。宽度后缀退役（2026-09-10 语言面收窄 §2）：data 槽
+        // 不再承载宽度标注，恒 0。
         bits : int = 0;
         tl := r64(g_tokens, t * ESZ_TOKEN + OFF_TK_LEXEME);   // 词素串下标（-1 = 无）
         if tl >= 0 { bits = str_to_f64_bits(istr_get(tl)); }
-        return alloc_node(EXPR_DEX, bits, 0, 0, tok_iv(t), TY_DEX, w, tok_ln(t), tok_cl(t));
+        return alloc_node(EXPR_DEX, bits, 0, 0, tok_iv(t), TY_DEX, 0, tok_ln(t), tok_cl(t));
     }
     if tok_k(t) == T_STRING {
         advance_tok();
@@ -431,11 +426,33 @@ fn parse_primary() -> int {
         advance_tok();
         ni := str_intern("Some");
         if check(T_LPAREN) {
-            // Parse Some(expr)
+            // Parse Some(expr[, expr…]) —— R2 P3 Task 4 修复：**实参须照通用枚举构造器分支
+            // （下方 parse_postfix 的路径）建 EXPR_ARG 链**。旧实现把值节点直接放 b 槽，
+            // 而 checker/ir_gen 的 EXPR_ENUM_CONSTRUCTOR 消费点按 EXPR_ARG 链走
+            // （`an := ast_b(node); ast_a(an); an = ast_b(an)`）⇒ 旧形态令该链读进值节点自身
+            // 的 a/b 槽（节点 0 当实参、按 ast_b 前行）——实测（本任务开工前）：
+            // `enum Option[T] { None, Some(T) }` + `x: int? = Some(5)` **checker 死循环**
+            // （`corec check` rc=124 超时）。链一修，消费点契约恢复（parser.cr:300-312 同款）。
             advance_tok();
-            val := parse_expr();
+            af : ., mut = -1;
+            ac : ., mut = 0;
+            if !check(T_RPAREN) {
+                first_expr := parse_expr();
+                af = alloc_node(EXPR_ARG, first_expr, -1, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
+                ac = 1;
+                prev_arg : ., mut = af;
+                loop {
+                    if !check(T_COMMA) { break; }
+                    advance_tok();
+                    next_expr := parse_expr();
+                    new_arg := alloc_node(EXPR_ARG, next_expr, -1, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
+                    ast_set_b(prev_arg, new_arg);
+                    prev_arg = new_arg;
+                    ac = ac + 1;
+                }
+            }
             advance_tok();  // consume )
-            return alloc_node(EXPR_ENUM_CONSTRUCTOR, ni, val, 1, 0, 0, 0, tok_ln(t), tok_cl(t));
+            return alloc_node(EXPR_ENUM_CONSTRUCTOR, ni, af, ac, 0, 0, 0, tok_ln(t), tok_cl(t));
         }
         // Some without parens → treat as identifier (will be resolved by uppercase → enum constructor)
         return alloc_node(EXPR_IDENT, 0, 0, 0, ni, 0, 0, tok_ln(t), tok_cl(t));
@@ -457,20 +474,55 @@ fn parse_primary() -> int {
         ni := str_intern(name);
         if check(T_LBRACE) && g_parse_no_struct_literal == 0 {
             advance_tok();
-            ff := -1;
+            // 契约（F5 修复，与元组分支同款）：EXPR_STRUCT = a=类型名 idx、b=首 wrapper、c=字段数；
+            // wrapper 在 g_ast 中**连续**（kind=EXPR_NONE，wrapper.a=该字段的值节点）→ 消费者
+            // 经 EXPR_NONE 前向解引用取值。字段值节点自身对复合表达式（调用 / 字面量 / 嵌套聚合）
+            // **不连续**（子树自占多槽），故必须分两趟：先解析全部字段值，再统建连续 wrapper。
+            // 旧写法「逐值后随建 wrapper」交错分配：复合值子树夹在相邻 wrapper 之间 ⇒ 第 2 个
+            // 起字段槽位整体错位，读到子节点（实测 P{a:11, b:g()} 的 b 静默得 0，rc=0）。
+            // TODO #29 ①：wrapper.b = 字段名 idx（**名字绑定**，-1 = 无名字信息）——旧代码取
+            // `fni` 后从未写入 ⇒ 值按声明位序绑定（P{b:11,a:22} 静默得 a=11）。名字随 wrapper
+            // 同行（与值并列的平行表，两趟结构不变，仍无交错分配）。
+            cap : ., mut = 8;
+            vals : string, mut = alloc(cap * 8);
+            names : string, mut = alloc(cap * 8);
             fc : ., mut = 0;
             loop {
-                if check(T_RBRACE) { break; }
+                // EOF 护栏（TODO #16 根因面）：本循环只认 `}`，而 advance_tok 在 EOF 是空操作
+                // ⇒ 解析失步至 EOF 后自旋，每轮分配 AST 节点直至 OOM（alloc 失败返回 NULL →
+                // grow_ast 向 NULL 拷贝 SIGSEGV）。同族 6 处循环统一补 EOF 退出。
+                if check(T_RBRACE) || check(T_EOF) { break; }
                 ft := advance_tok();
                 fni := str_intern(tok_lx(ft));
                 advance_tok();
-                fv := parse_expr();
-                ast_alloc(0, fv, 0, 0, 0, 0, 0, tok_ln(ft), tok_cl(ft));
-                if fc == 0 { ff = g_ast_count - 1; }
+                if fc >= cap {
+                    ncap := cap * 2;
+                    nv := alloc(ncap * 8);
+                    _dyncpy(vals, cap * 8, nv);
+                    vals = nv;
+                    nn := alloc(ncap * 8);
+                    _dyncpy(names, cap * 8, nn);
+                    names = nn;
+                    cap = ncap;
+                }
+                w64(vals, fc * 8, parse_expr());  // 字段值（子树自占若干槽）
+                w64(names, fc * 8, fni);          // 字段名 idx（① 名字绑定）
                 fc = fc + 1;
                 if check(T_COMMA) { advance_tok(); }
             }
             advance_tok();
+            ff : ., mut = -1;
+            fi2 : ., mut = 0;
+            loop {
+                if fi2 >= fc { break; }
+                vn := r64(vals, fi2 * 8);
+                ln : ., mut = tok_ln(t);
+                cl : ., mut = tok_cl(t);
+                if vn >= 0 { ln = ast_line(vn); cl = ast_col(vn); }
+                wl := ast_alloc(EXPR_NONE, vn, r64(names, fi2 * 8), 0, 0, 0, 0, ln, cl);
+                if fi2 == 0 { ff = wl; }
+                fi2 = fi2 + 1;
+            }
             return alloc_node(EXPR_STRUCT, ni, ff, fc, 0, 0, 0, tok_ln(t), tok_cl(t));
         }
         return alloc_node(EXPR_IDENT, 0, 0, 0, ni, 0, 0, tok_ln(t), tok_cl(t));
@@ -483,15 +535,42 @@ fn parse_primary() -> int {
         g_parse_no_struct_literal = saved_nsl;
         if check(T_COMMA) {
             // Tuple: (e1, e2, ...)
-            ef := e;
+            // 契约（F5 修复）：EXPR_TUPLE = a=首 wrapper、b=元素个数；wrapper 在 g_ast 中
+            // **连续**，每个 wrapper（kind=EXPR_NONE）的 a = 该元素的值节点 → 消费者经
+            // `ast_a(wrapper + i)` 取元素值节点。元素值节点本身对复合表达式**不连续**
+            // （复合元素子树自占多槽），故必须分两趟：先解析全部元素值，再统建连续 wrapper。
+            // 注：不得照 struct 字面量分支（本文件 T_IDENT+T_LBRACE 段）的「逐值后随建
+            // wrapper」交错顺序——复合值会插在相邻 wrapper 之间致其不连续，同属本根因。
+            cap : ., mut = 8;
+            vals : string, mut = alloc(cap * 8);
+            w64(vals, 0, e);
             ec : ., mut = 1;
             loop {
                 advance_tok();  // consume comma
-                parse_expr();   // next element (stored in consecutive g_ast slots)
+                if ec >= cap {
+                    ncap := cap * 2;
+                    nv := alloc(ncap * 8);
+                    _dyncpy(vals, cap * 8, nv);
+                    vals = nv;
+                    cap = ncap;
+                }
+                w64(vals, ec * 8, parse_expr());  // 元素值（子树自占若干槽）
                 ec = ec + 1;
                 if !check(T_COMMA) { break; }
             }
             advance_tok();  // consume )
+            ef : ., mut = -1;
+            ei : ., mut = 0;
+            loop {
+                if ei >= ec { break; }
+                vn := r64(vals, ei * 8);
+                ln : ., mut = tok_ln(t);
+                cl : ., mut = tok_cl(t);
+                if vn >= 0 { ln = ast_line(vn); cl = ast_col(vn); }
+                wl := ast_alloc(EXPR_NONE, vn, 0, 0, 0, 0, 0, ln, cl);
+                if ei == 0 { ef = wl; }
+                ei = ei + 1;
+            }
             return alloc_node(EXPR_TUPLE, ef, ec, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
         }
         advance_tok();
@@ -558,21 +637,36 @@ fn parse_primary() -> int {
     }
     if tok_k(t) == T_LBRACKET {
         advance_tok();
-        ef := -1;
+        // 契约（F5 修复，与元组/struct 字面量分支同款）：**字面量形** EXPR_ARRAY =
+        // a=首 wrapper、b=元素个数；wrapper 在 g_ast 中**连续**（kind=EXPR_NONE，wrapper.a=元素值
+        // 节点）→ 消费者经 EXPR_NONE 前向解引用取值。元素值节点自身对复合表达式（嵌套字面量 /
+        // 调用 / 下标）**不连续**（子树自占多槽），故必须两趟：先解析全部元素值，再统建 wrapper。
+        // 旧交错写法下第 2 个元素起槽位整体错位（实测 [[1,2],[3,4]] 的 a[1] 被读成扁平 3 →
+        // a[1][0] SIGSEGV 139；且 [[1,2],[3,4]] 与 [5,6] 类型互赋静默通过 = soundness 漏放）。
+        // 区分：**类型形** [T; N] / [T] 由 parse_type 产出（a=内层类型节点、b=0、int_val=尺寸），
+        // 不经本分支，不受本契约影响。
+        cap : ., mut = 8;
+        vals : string, mut = alloc(cap * 8);
         ec : ., mut = 0;
         if !check(T_RBRACKET) {
-            ef = parse_expr();
+            w64(vals, 0, parse_expr());  // 元素值（子树自占若干槽）
             ec = 1;
             if check(T_SEMI) {
-                // Repeat array: [value; count]
+                // Repeat array: [value; count] —— 值节点只解析一次，其后仅**共享**同一值节点
+                // 追加 wrapper（旧写法浅拷贝根节点 N-1 份；共享值节点语义等价，且不再复制多槽子树）。
                 advance_tok();
                 ct := advance_tok();
                 cnt : ., mut = tok_iv(ct);
-                // Replicate element AST nodes
+                if cnt > cap {
+                    nv := alloc(cnt * 8);
+                    _dyncpy(vals, cap * 8, nv);
+                    vals = nv;
+                    cap = cnt;
+                }
                 ri : ., mut = 1;
                 loop {
                     if ri >= cnt { break; }
-                    ast_alloc(ast_kind(ef), ast_a(ef), ast_b(ef), ast_c(ef), ast_int_val(ef), ast_type_val(ef), ast_data(ef), ast_line(ef), ast_col(ef));
+                    w64(vals, ri * 8, r64(vals, 0));
                     ri = ri + 1;
                 }
                 ec = cnt;
@@ -580,12 +674,31 @@ fn parse_primary() -> int {
                 loop {
                     if !check(T_COMMA) { break; }
                     advance_tok();
-                    parse_expr();  // parse remaining elements
+                    if ec >= cap {
+                        ncap := cap * 2;
+                        nv := alloc(ncap * 8);
+                        _dyncpy(vals, cap * 8, nv);
+                        vals = nv;
+                        cap = ncap;
+                    }
+                    w64(vals, ec * 8, parse_expr());  // 元素值（子树自占若干槽）
                     ec = ec + 1;
                 }
             }
         }
         advance_tok();
+        ef : ., mut = -1;
+        ei2 : ., mut = 0;
+        loop {
+            if ei2 >= ec { break; }
+            vn := r64(vals, ei2 * 8);
+            ln : ., mut = tok_ln(t);
+            cl : ., mut = tok_cl(t);
+            if vn >= 0 { ln = ast_line(vn); cl = ast_col(vn); }
+            wl := ast_alloc(EXPR_NONE, vn, 0, 0, 0, 0, 0, ln, cl);
+            if ei2 == 0 { ef = wl; }
+            ei2 = ei2 + 1;
+        }
         return alloc_node(EXPR_ARRAY, ef, ec, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
     }
     add_error("Unexpected token in expression");
@@ -766,6 +879,28 @@ fn parse_new_var_decl() -> int {
     return first_node;
 }
 
+// 跳过整段嵌套函数声明（P021 已报错，仅错误恢复路径）：`fn name(params) -> T {body}`
+// 按花括号配平跳过整段；`= expr;` 形式（含 extern 无体形式）遇分号收尾。起始 token 可为
+// `pub`。花括号配平从函数体的 `{` 起算（depth 0→1），体内嵌套块/struct 字面量的花括号
+// 成对计入，不会在 depth 归零前误判结束。
+fn skip_nested_fn() {
+    depth : ., mut = 0;
+    seen_brace : ., mut = 0;
+    loop {
+        k := tok_k(cur_tok());
+        if k == T_EOF { return; }
+        if k == T_LBRACE { depth = depth + 1; seen_brace = 1; advance_tok(); continue; }
+        if k == T_RBRACE {
+            advance_tok();
+            depth = depth - 1;
+            if depth <= 0 { return; }
+            continue;
+        }
+        if k == T_SEMI && seen_brace == 0 { advance_tok(); return; }
+        advance_tok();
+    }
+}
+
 fn parse_stmt() -> int {
     // Drain batch extras from previous call
     if g_extra_let_count > 0 {
@@ -774,6 +909,25 @@ fn parse_stmt() -> int {
     }
 
     t := cur_tok();
+    // 嵌套 `fn`/`flow` 声明不属语言面——grammar/core.ebnf 的 Statement 不含 FunctionDecl
+    // （函数声明仅顶层 TopLevelDecl），bootstrap 参考实现亦以 positioned error 拒绝。
+    // 修复前此处落回 parse_primary 的「Unexpected token in expression」通用兜底：只消费
+    // `fn` 一个 token，解析失步后 `IDENT {` 进入 struct 字面量循环并把外层 `}` 当字段吃掉，
+    // 至 EOF 后因该循环只认 `}` 且 advance_tok 在 EOF 是空操作而自旋——每轮分配 AST 节点，
+    // 直到 bump allocator 耗尽返回 NULL、grow_ast 向 NULL 拷贝（rc=139 SIGSEGV，TODO #16）。
+    // 现显式报 P021 并整段跳过该声明：错误定位到声明处，且后续语句恢复正常解析。
+    if tok_k(t) == T_FN || tok_k(t) == T_FLOW
+       || (tok_k(t) == T_PUB && (tok_k(t + 1) == T_FN || tok_k(t + 1) == T_FLOW)) {
+        fnt : ., mut = t;
+        if tok_k(fnt) == T_PUB { fnt = fnt + 1; }
+        msg : ., mut = "Nested function declaration is not supported; declare it at top level";
+        if tok_k(fnt + 1) == T_IDENT {
+            msg = "Nested function declaration '" + tok_lx(fnt + 1) + "' is not supported; declare it at top level";
+        }
+        check_error(EC_P_NESTED_FN, msg, tok_ln(fnt), tok_cl(fnt));
+        skip_nested_fn();
+        return 0;
+    }
     // New variable declaration syntax
     if tok_k(t) == T_IDENT && is_new_var_decl() {
         return parse_new_var_decl();
@@ -894,19 +1048,9 @@ fn parse_pattern() -> int {
         advance_tok();
         return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t));
     }
-    if tok_k(t) == T_INT || (tok_k(t) >= T_INT_I8 && tok_k(t) <= T_INT_U64) {
+    if tok_k(t) == T_INT {
         advance_tok();
-        kn := tok_k(t);
-        w : ., mut = 0;
-        if kn == T_INT_I8 { w = W_I8; }
-        else if kn == T_INT_I16 { w = W_I16; }
-        else if kn == T_INT_I32 { w = W_I32; }
-        else if kn == T_INT_I64 { w = W_I64; }
-        else if kn == T_INT_U8 { w = W_U8; }
-        else if kn == T_INT_U16 { w = W_U16; }
-        else if kn == T_INT_U32 { w = W_U32; }
-        else if kn == T_INT_U64 { w = W_U64; }
-        return alloc_node(EXPR_INT, 0, 0, 0, tok_iv(t), TY_INT, w, tok_ln(t), tok_cl(t));
+        return alloc_node(EXPR_INT, 0, 0, 0, tok_iv(t), TY_INT, 0, tok_ln(t), tok_cl(t));
     }
     if tok_k(t) == T_STRING {
         advance_tok();
@@ -973,21 +1117,42 @@ fn parse_pattern() -> int {
         }
         if check(T_LBRACE) {
             // Struct pattern: Name { field = pat, ... }
+            // 契约（F5 修复，与 struct 字面量分支同款）：EXPR_STRUCTPAT = a=名字 idx、b=首 wrapper、
+            // c=字段数；wrapper 在 g_ast 中**连续**（kind=EXPR_NONE，wrapper.a=子模式节点）。
+            // 复合子模式（嵌套 struct/enum/tuple 模式）子树占多槽，故两趟：先全部解析、后统建 wrapper。
             advance_tok();
-            ff := -1;
+            cap : ., mut = 8;
+            vals : string, mut = alloc(cap * 8);
             fc : ., mut = 0;
             loop {
-                if check(T_RBRACE) { break; }
+                if check(T_RBRACE) || check(T_EOF) { break; }
                 ft := advance_tok();
                 fni := str_intern(tok_lx(ft));
                 advance_tok(); // =
-                fp := parse_pattern();
-                ast_alloc(0, fp, 0, 0, 0, 0, 0, tok_ln(ft), tok_cl(ft));
-                if fc == 0 { ff = g_ast_count - 1; }
+                if fc >= cap {
+                    ncap := cap * 2;
+                    nv := alloc(ncap * 8);
+                    _dyncpy(vals, cap * 8, nv);
+                    vals = nv;
+                    cap = ncap;
+                }
+                w64(vals, fc * 8, parse_pattern());
                 fc = fc + 1;
                 if check(T_COMMA) { advance_tok(); }
             }
             advance_tok();
+            ff : ., mut = -1;
+            fi2 : ., mut = 0;
+            loop {
+                if fi2 >= fc { break; }
+                vn := r64(vals, fi2 * 8);
+                ln : ., mut = tok_ln(t);
+                cl : ., mut = tok_cl(t);
+                if vn >= 0 { ln = ast_line(vn); cl = ast_col(vn); }
+                wl := ast_alloc(EXPR_NONE, vn, 0, 0, 0, 0, 0, ln, cl);
+                if fi2 == 0 { ff = wl; }
+                fi2 = fi2 + 1;
+            }
             return alloc_node(EXPR_STRUCTPAT, ni, ff, fc, 0, 0, 0, tok_ln(t), tok_cl(t));
         }
         if is_upper_first(name) {
@@ -1081,6 +1246,53 @@ fn save_func_gen_constrs(fi: int, constrs: string, count: int) {
     }
 }
 
+// ─── R2 P3 Task 5（Step 2）：结构/枚举泛型约束登记（**索引空间分家** —— 键 = row*MAX_GENERICS+gi，
+// 与函数侧 g_generic_constr 不同缓冲；见 globals.cr 表注）───
+// **空槽预填 -1**（本批实测缺陷修复）：表是**稀疏**填的（只写有约束的槽），而缓冲零初值 ⇒
+// 高水位区内的「本行未写过的槽」读出 0——0 是**合法的名字 ni**（首个驻留串）⇒ 读取方
+// `c_ni >= 0` 会把空槽当有效约束名（把首个驻留串当接口/类型名查表）＝ 凭空约束。
+// 故本三函数一律先整行（MAX_GENERICS 槽）写 -1 再覆盖有约束的槽——行的语义 = 「本行全部
+// 形参位都有明确值」。读取器的越界闸（idx ≥ count）仍保留（整行未登记时的兜底）。
+fn save_struct_gen_constrs(si: int, constrs: string, count: int) {
+    grow_sgen_constr(si * MAX_GENERICS + MAX_GENERICS);
+    if si * MAX_GENERICS + MAX_GENERICS > g_sgen_constr_count { g_sgen_constr_count = si * MAX_GENERICS + MAX_GENERICS; }
+    zi : ., mut = 0;
+    loop {
+        if zi >= MAX_GENERICS { break; }
+        w64(g_sgen_constr, (si * MAX_GENERICS + zi) * 8, -1);
+        zi = zi + 1;
+    }
+    gi : ., mut = 0;
+    loop {
+        if gi >= count { break; }
+        if gi >= MAX_GENERICS { break; }
+        if r64(constrs, gi * 8) >= 0 {
+            w64(g_sgen_constr, (si * MAX_GENERICS + gi) * 8, r64(constrs, gi * 8));
+        }
+        gi = gi + 1;
+    }
+}
+
+fn save_enum_gen_constrs(ei: int, constrs: string, count: int) {
+    grow_egen_constr(ei * MAX_GENERICS + MAX_GENERICS);
+    if ei * MAX_GENERICS + MAX_GENERICS > g_egen_constr_count { g_egen_constr_count = ei * MAX_GENERICS + MAX_GENERICS; }
+    zi : ., mut = 0;
+    loop {
+        if zi >= MAX_GENERICS { break; }
+        w64(g_egen_constr, (ei * MAX_GENERICS + zi) * 8, -1);
+        zi = zi + 1;
+    }
+    gi : ., mut = 0;
+    loop {
+        if gi >= count { break; }
+        if gi >= MAX_GENERICS { break; }
+        if r64(constrs, gi * 8) >= 0 {
+            w64(g_egen_constr, (ei * MAX_GENERICS + gi) * 8, r64(constrs, gi * 8));
+        }
+        gi = gi + 1;
+    }
+}
+
 fn add_func(name: string, pc: int, rt: int, an: int) -> int {
     idx := g_func_count;
     grow_funcs(idx + 1);
@@ -1106,6 +1318,8 @@ fn add_struct(name: string) -> int {
         zi = zi + 1;
     }
     w64(g_structs, base + OFF_SI_NAME, ni);
+    // 容量批 T3：字段区基址 = 侧表高水位（字段写入点按 base + 下标寻址；体尾 si_commit_fields 提交）
+    si_set_field_base(idx, g_si_f_used);
     g_struct_count = idx + 1;
     return idx;
 }
@@ -1123,6 +1337,8 @@ fn add_enum(name: string) -> int {
         zi = zi + 1;
     }
     w64(g_enums, base + OFF_EI_NAME, ni);
+    // 容量批 T3：变体区基址 = 侧表高水位（体尾 ei_commit_variants 提交）
+    ei_set_variant_base(idx, g_ei_v_used);
     g_enum_count = idx + 1;
     return idx;
 }
@@ -1233,10 +1449,20 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
     }
 
     fn_node := alloc_node(EXPR_FN, fn_ni, pf, pc, rtv + hotpatch_ver * 256, rt, body, fn_line, fn_col);
+    // 形参上限硬错（防御面，TODO #8）：FuncInfo.param_types 是定长内嵌槽区
+    // （MAX_FN_PARAMS 槽），超限签名无法表示 ⇒ 拒绝编译（rc=1）而非截断/越界写。
+    // 形参表容纳不下时**必须**在这条路径上停住：静默越界写曾踩 ast_node 致
+    // name_idx/param_count 归零 + TF01 误归 + rc=0 产物崩。
+    if pc > MAX_FN_PARAMS {
+        check_error(EC_P_TOO_MANY_PARAMS,
+            "Function has too many parameters (" + int_str(pc) + " > " + int_str(MAX_FN_PARAMS) + ")",
+            fn_line, fn_col);
+    }
     fi := add_func(fn_name, pc, rtv, fn_node);
     if fi >= 0 && gc > 0 { save_func_generics(fi, gnames, gc); save_func_gen_constrs(fi, gconstrs, gc); }
-    // Store param types in FuncInfo
-    if fi >= 0 { pstore_i : ., mut = 0; pstore_n : ., mut = pf;
+    // Store param types in FuncInfo（pc > MAX_FN_PARAMS 已被上方硬错拒绝；
+    // 此处再显式跳过 + fi_set_param_type 内槽区护栏 = 双保险，未来新调用点亦不越过界）
+    if fi >= 0 && pc <= MAX_FN_PARAMS { pstore_i : ., mut = 0; pstore_n : ., mut = pf;
         loop { if pstore_i >= pc { break; } if pstore_n < 0 { break; }
             if ast_kind(pstore_n) == EXPR_PARAM {
                 fi_set_param_type(fi, pstore_i, ast_type_val(pstore_n));
@@ -1378,9 +1604,9 @@ fn parse_declaration() {
         name := tok_lx(nt);
         sg_names : string, mut;    sg_names_cap : int, mut;
     sg_names = alloc(64 * 8); sg_names_cap = 64;
-        sg_dummy : string, mut;    sg_dummy_cap : int, mut;
-    sg_dummy = alloc(64 * 8); sg_dummy_cap = 64;
-        sg_count := parse_generics_into(sg_names, sg_dummy);
+        sg_constrs : string, mut;    sg_constrs_cap : int, mut;
+    sg_constrs = alloc(64 * 8); sg_constrs_cap = 64;
+        sg_count := parse_generics_into(sg_names, sg_constrs);
         advance_tok(); // {
 
         si := add_struct(name);
@@ -1393,21 +1619,29 @@ fn parse_declaration() {
                     w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + sgi * 8, str_intern(r64(sg_names, sgi * 8)));
                     sgi = sgi + 1;
                 }
+                // R2 P3 Task 5（Step 2）：约束**不再丢弃**（旧态 = 写进 dummy 缓冲后随作用域
+                // 消失 ⇒ `struct Box[T: I]` 静默无约束）。登记到 struct 侧表，实例化点
+                // （res_type_node 的 EXPR_GENERIC_APPLY 分支）消费。
+                save_struct_gen_constrs(si, sg_constrs, sg_count);
             }
             fc : ., mut = 0;
             loop {
-                if check(T_RBRACE) { break; }
+                if check(T_RBRACE) || check(T_EOF) { break; }
                 ft := advance_tok();
                 fn2 := tok_lx(ft);
-                w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES + fc * 8, str_intern(fn2));
+                fni := str_intern(fn2);
+                // 容量批 T3（裁-CAP-2 (a)）：字段**无硬上限**（侧表；第 17 字段起照常写入）
+                // ⇒ 旧 P023 闸与槽上限分支一并删除（不再存在越界写对象）。
+                si_set_field_name(si, fc, fni);
                 advance_tok();
                 fty := parse_type();
-                w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES + fc * 8, unpack_type(fty));
-                w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES + fc * 8, fty);
+                si_set_field_type(si, fc, unpack_type(fty));
+                si_set_field_type_node(si, fc, fty);
                 fc = fc + 1;
                 if check(T_COMMA) { advance_tok(); }
             }
             w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, fc);
+            si_commit_fields(si, fc);   // 提交字段区（高水位 = base + fc）
         }
         advance_tok();
         return;
@@ -1420,9 +1654,9 @@ fn parse_declaration() {
         name := tok_lx(nt);
         eg_names : string, mut;    eg_names_cap : int, mut;
     eg_names = alloc(64 * 8); eg_names_cap = 64;
-        eg_dummy : string, mut;    eg_dummy_cap : int, mut;
-    eg_dummy = alloc(64 * 8); eg_dummy_cap = 64;
-        eg_count := parse_generics_into(eg_names, eg_dummy);
+        eg_constrs : string, mut;    eg_constrs_cap : int, mut;
+    eg_constrs = alloc(64 * 8); eg_constrs_cap = 64;
+        eg_count := parse_generics_into(eg_names, eg_constrs);
         advance_tok();
 
         ei := add_enum(name);
@@ -1435,31 +1669,41 @@ fn parse_declaration() {
                     w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + egi * 8, str_intern(r64(eg_names, egi * 8)));
                     egi = egi + 1;
                 }
+                // R2 P3 Task 5（Step 2）：同 struct 分支——枚举泛型约束登记（旧态同款丢弃）
+                save_enum_gen_constrs(ei, eg_constrs, eg_count);
             }
             vc : ., mut = 0;
             loop {
-                if check(T_RBRACE) { break; }
+                if check(T_RBRACE) || check(T_EOF) { break; }
                 vt := advance_tok();
                 vname := tok_lx(vt);
-                w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vc * OFF_EV_SIZE + OFF_EV_NAME, str_intern(vname));
+                vni := str_intern(vname);
+                // 容量批 T3（裁-CAP-2 (a)）：变体**无硬上限**（侧表）⇒ 旧 P022 闸与槽上限
+                // 分支一并删除（不再存在越界写对象）
+                ei_set_variant_name(ei, vc, vni);
                 tc : ., mut = 0;
                 if check(T_LPAREN) {
                     advance_tok();
                     loop {
                         if check(T_RPAREN) { break; }
                         fty := parse_type();
-                        w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vc * OFF_EV_SIZE + OFF_EV_TYPES + tc * 8, unpack_type(fty));
+                        ei_set_variant_type(ei, vc, tc, unpack_type(fty));
+                        // R2 P3 Task 4（T0 交接 ①）：载荷类型**节点**随裸码同写（照 struct 的
+                        // OFF_SI_FIELD_TYPE_NODES 先例）——裸码把非基型载荷塌缩成 0 = TY_INT，
+                        // 节点是载荷面（泛型形参代入 / 满足判定）的唯一忠实来源。
+                        ei_set_variant_type_node(ei, vc, tc, fty);
                         tc = tc + 1;
                         if !check(T_COMMA) { break; }
                         advance_tok();
                     }
                     advance_tok();
                 }
-                w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANTS + vc * OFF_EV_SIZE + OFF_EV_TYPE_COUNT, tc);
+                ei_set_variant_type_count(ei, vc, tc);
                 vc = vc + 1;
                 if check(T_COMMA) { advance_tok(); }
             }
             w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, vc);
+            ei_commit_variants(ei, vc);   // 提交变体区（高水位 = base + vc）
         }
         advance_tok();
         return;
@@ -1489,7 +1733,7 @@ fn parse_declaration() {
         method_count : ., mut = 0;
 
         loop {
-            if check(T_RBRACE) { break; }
+            if check(T_RBRACE) || check(T_EOF) { break; }
             if check(T_FN) {
                 advance_tok(); // fn
                 mt := advance_tok(); // method name
@@ -1502,23 +1746,36 @@ fn parse_declaration() {
     param_tis = alloc(128 * 8); param_tis_cap = 128;
                 pi2 : ., mut = 0;
                 loop { if pi2 >= 8 { break; } w64(param_tis, pi2 * 8, TY_UNIT); pi2 = pi2 + 1; }
+                // R2 P3b Task 6（Step 1）：签名**类型节点**槽（与裸码槽并行写，照 struct/enum
+                // 的 code+node 双写先例）。self 接收者槽恒无节点（两侧同约定，见 OFF_IFM_SELF_MODE）。
+                param_nodes : string, mut;    param_nodes_cap : int, mut;
+    param_nodes = alloc(128 * 8); param_nodes_cap = 128;
+                pni2 : ., mut = 0;
+                loop { if pni2 >= 8 { break; } w64(param_nodes, pni2 * 8, -1); pni2 = pni2 + 1; }
+                self_mode : ., mut = 0;
                 if !check(T_RPAREN) {
                     loop {
                         fst := cur_tok();
                         // Handle &self / &mut self / self
                         if tok_k(fst) == T_AMPERSAND || tok_k(fst) == T_SELF {
+                            self_mode_t : ., mut = 1;                 // self
                             if tok_k(fst) == T_AMPERSAND {
                                 advance_tok(); // &
-                                if check(T_MUT) { advance_tok(); } // mut
+                                self_mode_t = 2;                       // &self
+                                if check(T_MUT) { advance_tok(); self_mode_t = 3; } // &mut self
                             }
                             nt2 := advance_tok(); // self
                             if pc < 8 { w64(param_tis, pc * 8, 0); }  // match function's default for &self
+                            if pc == 0 { self_mode = self_mode_t; }   // 首参 = 接收者才记模式
                             pc = pc + 1;
                         } else {
                             advance_tok(); // param name
                             advance_tok(); // :
                             ptype := parse_type();
-                            if pc < 8 { w64(param_tis, pc * 8, unpack_type(ptype)); }
+                            if pc < 8 {
+                                w64(param_tis, pc * 8, unpack_type(ptype));
+                                w64(param_nodes, pc * 8, ptype);
+                            }
                             pc = pc + 1;
                         }
                         if !check(T_COMMA) { break; }
@@ -1529,15 +1786,19 @@ fn parse_declaration() {
 
                 // Parse return type
                 ret_ti : ., mut = TY_UNIT;
+                ret_node : ., mut = -1;
                 if check(T_ARROW) {
                     advance_tok();
-                    ret_node := parse_type();
-                    ret_ti = unpack_type(ret_node);
+                    rn2 := parse_type();
+                    ret_node = rn2;
+                    ret_ti = unpack_type(rn2);
                 }
                 advance_tok(); // ;
 
                 // Store method in interface entry (with overflow checks)
-                if method_count >= 16 {
+                // R2 P3b Task 6（Step 1）：上限**显式登记保留**（单源常量 MAX_IFACE_METHODS）——
+                // 超限 = 硬错 rc=1（非静默截断），解除面（侧表迁移）见 dyn_arr.cr 常量注。
+                if method_count >= MAX_IFACE_METHODS {
                     grow_diags(g_diag_count + 1);
                     w64(g_diags, g_diag_count * DIAG_REC_SIZE, EC_P_FIELD_SYNTAX);
                     store_str_ptr(g_diags, g_diag_count * DIAG_REC_SIZE + 8, "interface '" + iface_name + "' exceeds max 16 methods");
@@ -1549,9 +1810,12 @@ fn parse_declaration() {
                     w64(g_ifaces, mbase + OFF_IFM_NAME, method_ni);
                     w64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT, pc);
                     w64(g_ifaces, mbase + OFF_IFM_RET_TI, ret_ti);
+                    w64(g_ifaces, mbase + OFF_IFM_RET_NODE, ret_node);
+                    w64(g_ifaces, mbase + OFF_IFM_SELF_MODE, self_mode);
                     pj : ., mut = 0;
                     loop { if pj >= 8 || pj >= pc { break; }
                         w64(g_ifaces, mbase + OFF_IFM_PARAM_TYPES + pj * 8, r64(param_tis, pj * 8));
+                        w64(g_ifaces, mbase + OFF_IFM_PARAM_NODES + pj * 8, r64(param_nodes, pj * 8));
                         pj = pj + 1; }
                     if pc > 8 {
                         grow_diags(g_diag_count + 1);
@@ -1589,7 +1853,7 @@ fn parse_declaration() {
         }
         advance_tok(); // {
         loop {
-            if check(T_RBRACE) { break; }
+            if check(T_RBRACE) || check(T_EOF) { break; }
             if check(T_FN) {
                 ft := advance_tok();
                 method_nt := advance_tok();

@@ -334,6 +334,98 @@ fn cir_text_dump() -> string {
     return dump_buf_finish();
 }
 
+// ─── R2 P5 Task 2 测试通道（corec 侧 hidden flag `cir --dump-tk-terms`）───
+// 用途 = 单槽化的**逐节点**观察面：两槽（OFF_DF_TK = 类型项引用、OFF_DF_AUX = 辅码）
+// + **派生码**（sh_dfn_code_of_slots——与 iri_tk / .ccr NOD / .cir 盘记录同源）+ 项结构
+// （tag/a/b/c，直读 g_type_terms）——冷路径（emit 填槽）与暖路径（`.cir` 快照读回 +
+// 重派生）两态用同一通道 dump 后逐行对拍。`tk` 列 = 派生码 ⇒ 与单槽化前同名通道的
+// `tk` 列**逐字节可比**（D22-① 的直方图判据就建在这上面）。
+// 只读：不改任何全局、不产产物（与 --dump-types/--dump-ifaces 同纪律）。
+// 行格式（制表分隔；头行含计数与越界项计数）：
+//   [df-tk-terms] nodes=N with_term=M bad_term=B aux_nonzero=A face_fail=F terms=K rows=R mint=1,2,4,6,10,49,50
+//   <node>\t<opcode>\t<tk>\t<term>\t<tag>\t<a>\t<b>\t<c>\t<aux>
+// term < 0（无项）或项行号越出项表（bad_term，跨进程索引空间分歧的暴露面——不得
+// 静默读越界内存）：tag/a/b/c 一律 -1。aux_nonzero = 辅码非零节点数（互斥不变量
+// D22-② 的观察面）；face_fail = D23 建项失败计数（0 = 全语料无不可译类型面行）；
+// rows = 当前进程类型表行数（冷/暖比对用：暖态可小于冷态——见 sh_tk_split_load 注）。
+fn df_tk_term_dump() -> string {
+    dump_buf_reset();
+    total := g_df_node_count;
+    with_term : ., mut = 0;
+    bad_term : ., mut = 0;
+    auxn : ., mut = 0;
+    n0 : ., mut = 0;
+    loop {
+        if n0 >= total { break; }
+        t0 := r64(g_df_nodes, n0 * ESZ_DFNODE + OFF_DF_TK);
+        if t0 >= 0 { with_term = with_term + 1; }
+        if t0 >= tt_count() { bad_term = bad_term + 1; }
+        if r64(g_df_nodes, n0 * ESZ_DFNODE + OFF_DF_AUX) != 0 { auxn = auxn + 1; }
+        n0 = n0 + 1;
+    }
+    dump_buf_append("[df-tk-terms] nodes=");
+    dump_buf_append(int_str(total));
+    dump_buf_append(" with_term=");
+    dump_buf_append(int_str(with_term));
+    dump_buf_append(" bad_term=");
+    dump_buf_append(int_str(bad_term));
+    dump_buf_append(" aux_nonzero=");
+    dump_buf_append(int_str(auxn));
+    dump_buf_append(" face_fail=");
+    dump_buf_append(int_str(g_tk_face_fail));
+    dump_buf_append(" terms=");
+    dump_buf_append(int_str(tt_count()));
+    dump_buf_append(" rows=");
+    dump_buf_append(int_str(g_type_count));
+    dump_buf_append(" mint=");
+    dump_buf_append(int_str(IR_CONST));
+    dump_buf_append(",");
+    dump_buf_append(int_str(IR_BINARY));
+    dump_buf_append(",");
+    dump_buf_append(int_str(IR_ALLOC));
+    dump_buf_append(",");
+    dump_buf_append(int_str(IR_CALL));
+    dump_buf_append(",");
+    dump_buf_append(int_str(IR_LOAD));
+    dump_buf_append(",");
+    dump_buf_append(int_str(IR_I2F));
+    dump_buf_append(",");
+    dump_buf_append(int_str(IR_F2I));
+    dump_buf_append("\n");
+    n : ., mut = 0;
+    loop {
+        if n >= total { break; }
+        op := r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE);
+        t := r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK);
+        ax := r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_AUX);
+        tk := sh_dfn_code_of_slots(t, ax);
+        dump_buf_append(int_str(n));
+        dump_buf_append("\t");
+        dump_buf_append(int_str(op));
+        dump_buf_append("\t");
+        dump_buf_append(int_str(tk));
+        dump_buf_append("\t");
+        dump_buf_append(int_str(t));
+        dump_buf_append("\t");
+        if t >= 0 && t < tt_count() {
+            dump_buf_append(int_str(tt_tag(t)));
+            dump_buf_append("\t");
+            dump_buf_append(int_str(tt_a(t)));
+            dump_buf_append("\t");
+            dump_buf_append(int_str(tt_b(t)));
+            dump_buf_append("\t");
+            dump_buf_append(int_str(tt_c(t)));
+        } else {
+            dump_buf_append("-1\t-1\t-1\t-1");
+        }
+        dump_buf_append("\t");
+        dump_buf_append(int_str(ax));
+        dump_buf_append("\n");
+        n = n + 1;
+    }
+    return dump_buf_finish();
+}
+
 fn cmd_cir(src_path: string) -> int {
     g_source = read_file(src_path);
     if str_len(g_source) == 0 {

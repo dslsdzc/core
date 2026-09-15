@@ -1,0 +1,7 @@
+(* === io.corespec —— 2026-09-06 退役 ===
+.corespec 独立格式取消（与 .crasm 同构）：规约只有一种表达 = Core 语言
+（.cr 内 requires/ensures/where + 编译进图 TagNode）。本文件内容作为
+组件行为契约迁移至对应实现注释/.cr 契约文档（先例：src/compiler/
+regalloc-consistency.cr），不再演进。
+*)
+

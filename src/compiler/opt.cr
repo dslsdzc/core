@@ -1,7 +1,9 @@
 // === opt.cr ===
-// AST-level optimization passes.
-// Runs after check_all(), before ir_gen_all().
-// Only transforms AST nodes (g_ast), never touches IR or backend.
+// Corec 侧语义优化（2026-09-07 regalloc 移后端后剩件——编码层资源决策
+// 数据面/分配/判定已迁 src/arch/x86_64/regalloc.cr）：
+//  - AST 常量折叠（ast_optimize_body 族——AST 层）
+//  - 线性流 CSE（pass_cse——IR 层，main.cr O≥1 调用）
+//  - optimize_all（历史编排入口——无调用者，见函数内注记）
 
 
 // ------------------------------------------------------------------
@@ -124,11 +126,22 @@ fn ast_optimize_body(body: int) {
         loop { if ai >= ac { break; } if an >= 0 { ast_optimize_body(an); an = an + 1; } ai = ai + 1; }
         return;
     }
-    // EXPR_STRUCT: optimize field values
+    // EXPR_STRUCT: a=type_name_ni, b=first wrapper（连续）, c=field_count；wrapper.a=字段值节点
+    // （F5 契约，见 parser.cr struct 字面量分支）。旧代码直接对 wrapper 递归，而 wrapper 的
+    // kind=EXPR_NONE 在本函数无分支 ⇒ 常量折叠静默空转（字段值从不被优化）。
     if bk == EXPR_STRUCT {
         fn2 := ast_b(body); fc := ast_c(body);
         i : ., mut = 0;
-        loop { if i >= fc { break; } if fn2 >= 0 { ast_optimize_body(fn2); fn2 = fn2 + 1; } i = i + 1; }
+        loop {
+            if i >= fc { break; }
+            if fn2 >= 0 {
+                vn : ., mut = -1;
+                if ast_kind(fn2) == EXPR_NONE { vn = ast_a(fn2); }
+                if vn >= 0 { ast_optimize_body(vn); }
+                fn2 = fn2 + 1;
+            }
+            i = i + 1;
+        }
         return;
     }
     // EXPR_LET: optimize value expression
@@ -171,11 +184,37 @@ fn ast_optimize_body(body: int) {
         if ast_a(body) >= 0 { ast_optimize_body(ast_a(body)); }
         return;
     }
-    // EXPR_ARRAY, EXPR_TUPLE: optimize elements
-    if bk == EXPR_ARRAY || bk == EXPR_TUPLE {
-        an := ast_b(body); ac := ast_c(body);
+    // EXPR_ARRAY: a=first wrapper（连续）, b=elem_count；wrapper.a=元素值节点
+    // （F5 契约，见 parser.cr 下标分支）；旧代码直接对 wrapper 递归 = 空转（EXPR_NONE 无分支）。
+    if bk == EXPR_ARRAY {
+        an := ast_a(body); ac := ast_b(body);
         i : ., mut = 0;
-        loop { if i >= ac { break; } if an >= 0 { ast_optimize_body(an); an = an + 1; } i = i + 1; }
+        loop {
+            if i >= ac { break; }
+            if an >= 0 {
+                vn : ., mut = -1;
+                if ast_kind(an) == EXPR_NONE { vn = ast_a(an); }
+                if vn >= 0 { ast_optimize_body(vn); }
+                an = an + 1;
+            }
+            i = i + 1;
+        }
+        return;
+    }
+    // EXPR_TUPLE: a=first wrapper（连续）, b=elem_count；wrapper.a=元素值节点（F5 契约）
+    if bk == EXPR_TUPLE {
+        an := ast_a(body); ac := ast_b(body);
+        i : ., mut = 0;
+        loop {
+            if i >= ac { break; }
+            if an >= 0 {
+                vn : ., mut = -1;
+                if ast_kind(an) == EXPR_NONE { vn = ast_a(an); }
+                if vn >= 0 { ast_optimize_body(vn); }
+                an = an + 1;
+            }
+            i = i + 1;
+        }
         return;
     }
     // EXPR_AS: optimize both sides
@@ -184,220 +223,6 @@ fn ast_optimize_body(body: int) {
         return;
     }
     // EXPR_BINARY already handled above; fallthrough for EXPR_INDEX etc.
-}
-
-// ------------------------------------------------------------------
-// Register allocation: rewrite IR operands to encode physical regs
-// ------------------------------------------------------------------
-// Rewrites g_ir_instrs operand fields: operands pointing to IR vars
-// that should go in registers are replaced with negative register
-// encodings (-1=rax, -2=rcx, -3=rdx, ...).
-// Backend g2_slot() checks v < 0 and returns v directly as reg num.
-// No backend decision-making needed — pure mechanical translation.
-
-fn alloc_registers() {
-    if g_opt_level < 1 { return; }
-    fi : ., mut = 0;
-    loop {
-        if fi >= g_ir_func_count { break; }
-        ic := r64(g_ir_func_instr_count, fi * 8);
-        ist := r64(g_ir_func_instr_start, fi * 8);
-        vc := r64(g_ir_func_var_count, fi * 8);
-        vs := r64(g_ir_func_var_start, fi * 8);
-        if vc <= 0 { fi = fi + 1; continue; }
-
-        // Build live intervals: [first_ref, last_ref] per var
-        iv_buf := alloc(vc * 16);
-        vi : ., mut = 0;
-        loop { if vi >= vc { break; } w64(iv_buf, vi*16, -1); w64(iv_buf, vi*16+8, -1); vi = vi + 1; }
-
-        ii : ., mut = 0;
-        loop {
-            if ii >= ic { break; }
-            inst := ist + ii;
-            op := iri_op(inst); d := iri_dest(inst); s1 := iri_s1(inst); s2 := iri_s2(inst);
-            vc2 : ., mut = 0;
-            vars : string, mut = alloc(64 * 8);    vars_cap : int, mut = 64;
-            if vars_cap == 0 { vars = alloc(64); vars_cap = 8; }
-            if d >= vs && d < vs + vc { if vc2 < vars_cap { w64(vars, vc2 * 8, d - vs); vc2 = vc2 + 1; } }
-            if s1 >= vs && s1 < vs + vc { if vc2 < vars_cap { w64(vars, vc2 * 8, s1 - vs); vc2 = vc2 + 1; } }
-            if s2 >= vs && s2 < vs + vc { if vc2 < vars_cap { w64(vars, vc2 * 8, s2 - vs); vc2 = vc2 + 1; } }
-            vj : ., mut = 0;
-            loop { if vj >= vc2 { break; }
-                lv := r64(vars, vj * 8);
-                if r64(iv_buf, lv*16) < 0 { w64(iv_buf, lv*16, ii); }
-                w64(iv_buf, lv*16+8, ii);
-                vj = vj + 1; }
-            ii = ii + 1;
-        }
-
-        // Use only callee-saved registers (preserved across function calls)
-        // rbx(3), r12(12), r13(13), r14(14), r15(15) = 5 registers
-        // (rsp/rbp excluded; caller-saved regs get clobbered by function calls)
-        MAX_REGS : int = 5;
-        reg_idx : ., mut = 0;
-        reg_phys : string, mut = alloc(5 * 8);
-        w64(reg_phys, 0, 3); w64(reg_phys, 8, 12);
-        w64(reg_phys, 16, 13); w64(reg_phys, 24, 14); w64(reg_phys, 32, 15);
-
-        // Map local var index → physical register (-1 = stack)
-        var_reg : string, mut;    var_reg_cap : int, mut;
-        vrc : ., mut = 64; if vc * 2 > vrc { vrc = vc * 2; }
-        var_reg = alloc(vrc * 8); var_reg_cap = vrc;
-        vr_clear : ., mut = 0;
-        loop { if vr_clear >= vrc { break; } w64(var_reg, vr_clear * 8, -1); vr_clear = vr_clear + 1; }
-
-        // Simple linear scan: for each instruction, allocate regs for dest
-        ii = 0;
-        loop {
-            if ii >= ic { break; }
-            inst := ist + ii;
-            op := iri_op(inst); d := iri_dest(inst); s1 := iri_s1(inst); s2 := iri_s2(inst);
-
-            // Free regs for vars that end before this instruction
-            vi = 0;
-            loop { if vi >= vc { break; }
-                if r64(var_reg, vi * 8) >= 0 {
-                    last_ref := r64(iv_buf, vi*16+8);
-                    if last_ref < ii {
-                        // Return reg to pool
-                        w64(var_reg, vi * 8, -1);
-                    }
-                }
-                vi = vi + 1; }
-
-            // Allocate reg for dest if it has a live range
-            if d >= vs && d < vs + vc {
-                lvi := d - vs;
-                if r64(var_reg, lvi * 8) < 0 {
-                    first_ref := r64(iv_buf, lvi*16);
-                    last_ref := r64(iv_buf, lvi*16+8);
-                    if first_ref >= 0 && last_ref >= 0 && reg_idx < MAX_REGS {
-                        w64(var_reg, lvi * 8, r64(reg_phys, reg_idx * 8));
-                        reg_idx = reg_idx + 1;
-                    }
-                }
-            }
-            // (operands NOT rewritten — metadata stored separately)
-            // Register assignments collected into g_opt_meta below.
-            ii = ii + 1;
-        }
-
-        // Write register assignments to g_opt_meta (flat array of var_idx+reg_num pairs)
-        // Store register assignments in g_opt_meta (simple format: var_idx,reg pairs)
-        rc : ., mut = 0;
-        vi = 0;
-        loop { if vi >= vc { break; }
-            if r64(var_reg, vi * 8) >= 0 { rc = rc + 1; }
-        vi = vi + 1; }
-        if rc > 0 {
-            ei : ., mut = g_opt_meta_count;
-            grow_opt_meta(ei + 1);
-            // Write key(u32) + data_len(u32) header using store8
-            eo := ei * OPT_META_STRIDE;
-            store8(g_opt_meta, eo, 0); store8(g_opt_meta, eo+1, 0);
-            store8(g_opt_meta, eo+2, 0); store8(g_opt_meta, eo+3, 0);  // OPT_KEY_REG_ASSIGN=0
-            dl : ., mut = 4 + rc * 8;
-            store8(g_opt_meta, eo+4, dl%256); store8(g_opt_meta, eo+5, (dl/256)%256);
-            store8(g_opt_meta, eo+6, (dl/65536)%256); store8(g_opt_meta, eo+7, (dl/16777216)%256);
-            // Write count
-            store8(g_opt_meta, eo+8, rc%256); store8(g_opt_meta, eo+9, (rc/256)%256);
-            store8(g_opt_meta, eo+10, (rc/65536)%256); store8(g_opt_meta, eo+11, (rc/16777216)%256);
-            // Write pairs: [var_idx(u32), reg(u32)]...
-            di : ., mut = 12;  // after header(8) + count(4)
-            vi = 0;
-            loop { if vi >= vc { break; }
-                rn := r64(var_reg, vi * 8);
-                if rn >= 0 {
-                    vw := vs + vi;
-                    store8(g_opt_meta, eo+di, vw%256); store8(g_opt_meta, eo+di+1, (vw/256)%256);
-                    store8(g_opt_meta, eo+di+2, (vw/65536)%256); store8(g_opt_meta, eo+di+3, (vw/16777216)%256);
-                    store8(g_opt_meta, eo+di+4, rn%256); store8(g_opt_meta, eo+di+5, (rn/256)%256);
-                    store8(g_opt_meta, eo+di+6, (rn/65536)%256); store8(g_opt_meta, eo+di+7, (rn/16777216)%256);
-                    di = di + 8;
-                }
-            vi = vi + 1; }
-            g_opt_meta_count = ei + 1;
-        }
-        fi = fi + 1;
-    }
-}
-
-fn pass_stack_share() {
-    if g_ir_func_count <= 0 { return; }
-
-    // Allocate g_stack_map with -1 for all IR vars
-    g_stack_map = alloc(g_ir_var_count * 8);
-    svi : ., mut = 0;
-    loop { if svi >= g_ir_var_count { break; } w64(g_stack_map, svi * 8, -1); svi = svi + 1; }
-
-    fi : ., mut = 0;
-    loop {
-        if fi >= g_ir_func_count { break; }
-        ic := r64(g_ir_func_instr_count, fi * 8);
-        ist := r64(g_ir_func_instr_start, fi * 8);
-        vc := r64(g_ir_func_var_count, fi * 8);
-        vs := r64(g_ir_func_var_start, fi * 8);
-        if vc <= 0 || ic <= 0 { fi = fi + 1; continue; }
-
-        // Build intervals for all vars (as in reg alloc)
-        iv := alloc(vc * 16);
-        zz : ., mut = 0;
-        loop { if zz >= vc { break; } w64(iv, zz*16, -1); w64(iv, zz*16+8, -1); zz = zz + 1; }
-        ii : ., mut = 0;
-        loop {
-            if ii >= ic { break; }
-            inst := ist + ii;
-            d := iri_dest(inst); s1 := iri_s1(inst); s2 := iri_s2(inst);
-            vn : ., mut = 0;
-            va : string, mut = alloc(24);    va_cap : int, mut = 3;
-            if va_cap == 0 { va = alloc(24); va_cap = 3; }
-            if d >= vs && d < vs+vc { if vn < va_cap { w64(va, vn * 8, d-vs); vn=vn+1; } }
-            if s1 >= vs && s1 < vs+vc { if vn < va_cap { w64(va, vn * 8, s1-vs); vn=vn+1; } }
-            if s2 >= vs && s2 < vs+vc { if vn < va_cap { w64(va, vn * 8, s2-vs); vn=vn+1; } }
-            vi2 : ., mut = 0;
-            loop { if vi2 >= vn { break; }
-                lv := r64(va, vi2 * 8);
-                if r64(iv, lv*16) < 0 { w64(iv, lv*16, ii); }
-                w64(iv, lv*16+8, ii);
-                vi2 = vi2 + 1; }
-            ii = ii + 1; }
-
-        // For each stack var, try to find another to share with
-        vj1 : ., mut = 0;
-        loop { if vj1 >= vc { break; }
-            global_v1 := vs + vj1;
-            // Skip if this var is in a register (negative encoding in IR means register)
-            is_reg : ., mut = 0;
-            // Check first instruction that uses this var
-            first_ref := r64(iv, vj1*16);
-            if first_ref >= 0 {
-                inst_chk := ist + first_ref;
-                if iri_dest(inst_chk) == global_v1 {
-                    if iri_dest(inst_chk) < 0 { is_reg = 1; }
-                } else if iri_s1(inst_chk) == global_v1 {
-                    if iri_s1(inst_chk) < 0 { is_reg = 1; }
-                } else if iri_s2(inst_chk) == global_v1 {
-                    if iri_s2(inst_chk) < 0 { is_reg = 1; }
-                }
-            }
-            if is_reg != 0 { vj1 = vj1 + 1; continue; }
-
-            s1_start := r64(iv, vj1*16);
-            s1_end := r64(iv, vj1*16+8);
-            vj2 : ., mut = 0;
-            loop { if vj2 >= vj1 { break; }
-                s2_start := r64(iv, vj2*16);
-                s2_end := r64(iv, vj2*16+8);
-                // Check disjoint: s1 ends before s2 starts, or s2 ends before s1 starts
-                if (s1_end < s2_start || s2_end < s1_start) && s1_start >= 0 && s2_start >= 0 {
-                    // Map vj1 to use vj2's slot
-                    w64(g_stack_map, (vs+vj1)*8, vs+vj2);
-                    break;
-                }
-                vj2 = vj2 + 1; }
-        vj1 = vj1 + 1; }
-        fi = fi + 1; }
 }
 
 // ------------------------------------------------------------------
@@ -517,10 +342,10 @@ fn optimize_all() {
         ast_optimize_body(body);
         fi = fi + 1;
     }
-    // pass_cse skipped — causes GPF in self-compiled binary
+    // 注（2026-09-07 regalloc 移后端）：alloc_registers/pass_stack_share 已迁
+    // corearch（src/arch/x86_64/regalloc.cr——.ccr 不再传 REG_ASSIGN/ENT）。
+    // 本函数无调用者（main.cr 直调各 pass），保留为历史编排入口。
     if g_opt_level >= 2 {
         pass_cse();
-        alloc_registers();
-        pass_stack_share();
     }
 }

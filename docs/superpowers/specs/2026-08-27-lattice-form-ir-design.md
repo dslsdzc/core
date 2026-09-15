@@ -1,7 +1,7 @@
 # 格形态 IR 设计：.ccr 升级为格形态（C 路线）
 
 日期：2026-08-27
-状态：**设计定稿（方向）**——执行成本交由第二维护者（TODO 横向扩展），验证闭环归 DslsDZC。关联：`docs/regalloc-cache-mapping.md`、`docs/memory-model-capability-lattice.md` v4。
+状态：**方向定稿 → 已实质化实施（2026-09）**——v6 格式与数据面落地（`specs/2026-09-05-lattice-ir-v6-format.md` 格式定稿 + `plans/2026-09-05-lattice-ir-v6.md` 实施计划 Task 1-5 完成：存在区间/条目版本化/共存推导/段表 IO/判定自检）；v5→v6 一次性转换按定稿取消（.ccr 中间产物零生态，v6-only）。关联：`docs/regalloc-cache-mapping.md`、`docs/memory-model-capability-lattice.md` v4。
 
 ## 1. 背景与动机
 

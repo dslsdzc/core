@@ -227,11 +227,17 @@ def test_nested_loop_run():
                        capture_output=True, text=True, cwd=BASE, timeout=30)
     assert r.returncode == 9, f"nested loop expected 9 (3x3), got exit={r.returncode} stdout={r.stdout!r} stderr={r.stderr!r}"
 
-# --- Serialization v2 (.ccr SG section + edge kind) ---
+# --- v7 serialization (.ccr segment-table layout + REG segment; Task 1 机械更新) ---
 
 def ccr_walk(path: str):
-    """Walk the .ccr binary layout (mirrors load_ccr reading order) and return
-    (version, sg_count, file_size, end_pos). Raises if the layout is invalid."""
+    """Walk the v7 .ccr binary layout (mirrors load_ccr reading order) and return
+    (version, sg_count, file_size, end_pos). Raises if the layout is invalid.
+
+    v7 (Task 1 机械更新): Header 16B + 段表 6×12B {tag, offset, size}（规范序
+    tag 1..6）+ 段体 STR/SYM/NOD/ENT/REG/EDG。NOD（tag 3）= 40B×nod_count（32B
+    语义字段 + first_edge/edge_count 邻接）、EDG（tag 6）= 8B×edg_count 必落。
+    REG（tag 5）= 24B×sg_count（坐标化字段序 kind/parent/enter/exit/
+    first_ent/last_ent，记录宽不变）。见 ccr_io.cr 头注释（v7 布局权威）。"""
     with open(path, 'rb') as fh:
         d = fh.read()
     pos = 0
@@ -243,42 +249,56 @@ def ccr_walk(path: str):
     assert struct.unpack_from('<I', d, pos)[0] == 0x31524343, "bad magic"  # "CCR1"
     pos += 4
     ver = u32()
-    func_cnt, instr_cnt, var_cnt, str_cnt, str_const_cnt, struct_cnt, enum_cnt = \
-        [u32() for _ in range(7)]
-    for _ in range(str_cnt):
-        sl = u32()
-        pos += sl
-    pos += func_cnt * 28
-    # Each instruction stores opcode/dest (8B), 64-bit s1 (8B), s2/s3/tk
-    # (12B): 28 bytes total.  Keep this walk in sync with ccr_io.cr's wire
-    # format so malformed offsets do not masquerade as a serializer failure.
-    pos += instr_cnt * 28
-    pos += var_cnt * 12
-    pos += str_const_cnt * 4
-    for _ in range(struct_cnt):
-        u32(); fc = u32()
-        pos += fc * 8
-    for _ in range(enum_cnt):
-        u32(); vc = u32()
-        for _ in range(vc):
-            u32(); tc = u32()
-            pos += tc * 4
+    seg_count = u32()
+    reserved = u32()
+    assert reserved == 0
+    # Segment table: canonical order (STR SYM NOD ENT REG EDG TYPE IFACE),
+    # contiguous bodies（R2 P4 Task 1 起 8 段——TYPE/IFACE 空壳）
+    segs = {}
+    cur = 16 + seg_count * 12  # first body follows the whole table
+    for tag in (1, 2, 3, 4, 5, 6, 7, 8):
+        t = u32()
+        off = u32()
+        size = u32()
+        assert t == tag, f"segment row: expected tag {tag}, got {t}"
+        assert off == cur, f"segment tag {tag}: offset {off} != {cur}"
+        segs[tag] = (off, size)
+        cur = off + size
+    # Walk each segment body (each starts with its own count)
     sg_count = None
-    if ver >= 2:
-        gc = u32()
-        pos += gc * 16
-    if ver >= 3:
-        mc = u32()
-        for _ in range(mc):
-            u32(); dl = u32()
-            pos += dl
-    if ver >= 5:
-        sg_count = u32()
-        pos += sg_count * 24
-    return ver, sg_count, len(d), pos
+    def body(tag):
+        off, size = segs[tag]
+        return d[off:off + size]
+    # STR (tag 1): str_count + strings
+    b = body(1)
+    (n,) = struct.unpack_from('<I', b, 0)
+    p = 4
+    for _ in range(n):
+        sl = struct.unpack_from('<I', b, p)[0]
+        p += 4 + sl
+    assert p == len(b), "STR walk mismatch"
+    # NOD (tag 3): nodes, 40B each (v7 spec §3.3: 32B 语义字段 [R2 P6 T3 起含
+    # +28 项索引 i32] + 邻接索引)
+    b = body(3)
+    (instr_cnt,) = struct.unpack_from('<I', b, 0)
+    assert 4 + instr_cnt * 40 == len(b), "NOD walk mismatch"
+    # EDG (tag 6): edges, 8B each (v7 必落)
+    b = body(6)
+    (edg_cnt,) = struct.unpack_from('<I', b, 0)
+    assert 4 + edg_cnt * 8 == len(b), "EDG walk mismatch"
+    # ENT (tag 4): entries, 28B each
+    b = body(4)
+    (ent_cnt,) = struct.unpack_from('<I', b, 0)
+    assert 4 + ent_cnt * 28 == len(b), "ENT walk mismatch"
+    # REG (tag 5): sgs, 24B each
+    b = body(5)
+    sg_count = struct.unpack_from('<I', b, 0)[0]
+    assert 4 + sg_count * 24 == len(b), "REG walk mismatch"
+    return ver, sg_count, len(d), cur
 
-def test_ccr_v2_sg_section():
-    """.ccr 序列化 v2：version==5，文件尾追加 SG 段（func+for 两个 region）"""
+def test_ccr_v6_reg_section():
+    """.ccr 序列化 v7 段表架构（Task 1 机械更新；R2 P6 Task 3 起 version==9，
+    8 段）：REG 段（tag 5）含 func+for 两个 region"""
     src = "fn main() -> int {\n    s : ., mut = 0;\n    for i in 0..3 { s = s + i; }\n    return s;\n}\n"
     with tempfile.NamedTemporaryFile('w', suffix='.cr', delete=False) as f:
         f.write(src)
@@ -293,9 +313,9 @@ def test_ccr_v2_sg_section():
     os.unlink(path)
     assert r.returncode == 0, f"ccr failed: {r.stderr}"
     ver, sg_count, fsize, end = ccr_walk(ccr_path)
-    assert ver == 5, f"expected .ccr version 5, got {ver}"
+    assert ver == 9, f"expected .ccr version 9, got {ver}"
     assert sg_count is not None and sg_count >= 2, \
-        f"expected SG section with >=2 regions (func+for), got {sg_count}"
+        f"expected REG segment with >=2 regions (func+for), got {sg_count}"
     assert end == fsize, f"format walk ended at {end} of {fsize} bytes"
 
 
@@ -311,7 +331,7 @@ def test_ccr_writer_rejects_i32_overflow_inputs():
     assert "if ccr_validate_i32_fields() == 0 { return -1; }" in text
 
 def test_ccr_roundtrip_v2():
-    """save→load 往返守卫：v2 文件经 corearch 加载后 ELF 输出行为不变。
+    """save→load 往返守卫：v6 文件经 corearch 加载后 ELF 输出行为不变。
     程序计算 0+1+2+3=6，ELF 运行时以 main 返回值为退出码。"""
     src = "fn main() -> int {\n    s : ., mut = 0;\n    for i in 0..4 { s = s + i; }\n    return s;\n}\n"
     with tempfile.NamedTemporaryFile('w', suffix='.cr', delete=False) as f:
@@ -432,7 +452,7 @@ if __name__ == '__main__':
              test_inline_callee_while_run, test_inline_callee_for_run,
              test_break_continue_run,
               test_nested_loop_run,
-              test_ccr_v2_sg_section, test_ccr_writer_rejects_i32_overflow_inputs,
+              test_ccr_v6_reg_section, test_ccr_writer_rejects_i32_overflow_inputs,
               test_ccr_roundtrip_v2,
              test_region_check_pointer_escape, test_region_check_cache_hit,
              test_nested_regions_cache_persist, test_state_edges_cache_persist]

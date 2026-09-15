@@ -81,29 +81,22 @@ fn sg_pop() {
     // Loop termination dependency: the region exit node (last node created in
     // the region, i.e. the exit label) must happen after the region's last
     // side effect — a VSDG state edge enforcing loop-exit ordering.
-    kind := r64(g_sgs, idx * ESZ_SG + OFF_SG_KIND);
-    if kind == SG_LOOP || kind == SG_FOR {
-        last_node := g_df_node_count - 1;
-        if last_node >= r64(g_sgs, idx * ESZ_SG + OFF_SG_NSTART) {
-            // The termination-edge source must be inside the region. When the
-            // loop body is pure, g_last_state_node is a pre-loop store
-            // (created before the region) — linking it would claim the loop
-            // exit follows a side effect the region does not contain.
-            if g_last_state_node >= r64(g_sgs, idx * ESZ_SG + OFF_SG_NSTART) {
-                df_add_edge_kind(g_last_state_node, last_node, 1);  // termination dependency
-            }
-            // Advance the state-chain head to the region exit node: side
-            // effects after the loop must depend on loop termination (spec
-            // §4.2: a loop that never terminates must terminate the graph).
-            g_last_state_node = last_node;
-        }
-    }
+    // 循环终止依赖（kind=1）与链头推进**不在本处连接**——state 链统一在
+    // 全部 IR 生成结束后重建（df_replay_state_chain；时点理由见该函数头注）：
+    // 被调函数真纯度只有拿到全程序 IR 体才能算，链不能再边生成边连。
     g_cur_sg = r64(g_sgs, idx * ESZ_SG + OFF_SG_PARENT);
 }
 
 // --- Node creation ---
 
-fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, type_kind: int) -> int {
+// R2 P5 Task 2（D19 单槽化）：`tk_term` = 类型项引用（g_type_terms 行号；-1 = 无项）、
+// `tk_aux` = 辅码（旗标/宽度/计数/不可入项的原始行码；0 = 无），由**调用方**
+// （唯一调用点 = ir_gen.cr 的 emit）经 `sh_tk_split` 派生后传入。本函数仍属 corec
+// 侧（build_selfhost_native.py 的 corec_files），但**不引用任何前端/桥接符号**
+// ——按「共享文件零前端依赖」纪律留余量（dataflow.cr 若某日并入 corearch 清单，
+// 本函数零改动即可链接）。参数语义 = 「存储」：本函数只落槽，不解释、不校验、
+// 不派生（派生规则单源 = ty_shadow.cr 的 sh_tk_split；码由 sh_dfn_code_of_slots 派生）。
+fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, tk_term: int, tk_aux: int) -> int {
     nid := g_df_node_count;
     grow_df_nodes(nid + 1);
     grow_df_node_region(nid + 1);
@@ -113,7 +106,8 @@ fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, type_
     w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_S1, src1);
     w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_S2, src2);
     w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_S3, src3);
-    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_TK, type_kind);
+    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_TK, tk_term);   // R2 P5 Task 2：类型项引用
+    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_AUX, tk_aux);   // R2 P5 Task 2：辅码
     w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_FIRST_EDGE, -1);
     w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_EDGE_COUNT, 0);
     g_df_node_count = nid + 1;
@@ -125,9 +119,11 @@ fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, type_
     }
 
     // Add edges for src fields that are IR variables (based on opcode)
-    df_connect_srcs(nid, opcode, src1, src2, src3, type_kind);
-    // VSDG state chain: side-effecting nodes are ordered by state edges
-    df_connect_state(nid, opcode, src3);
+    // 第 6 参 = 辅码（IR_BOUNDS_CHECK 的 `!= 0` = 动态上限旗标——单槽化后旗标在
+    // 辅码槽；见 df_connect_srcs 的 IR_BOUNDS_CHECK 分支）。
+    df_connect_srcs(nid, opcode, src1, src2, src3, tk_aux);
+    // VSDG state chain（kind=1）不在此连接——见 df_replay_state_chain 头注
+    // （时点：真纯度需要全程序 IR 体 ⇒ 链统一在 IR 生成结束后重建）。
     return nid;
 }
 
@@ -154,15 +150,16 @@ fn df_add_edge(from_id: int, to_id: int) {
 }
 
 // VSDG state chain: keep the ordering of side-effecting operations in program
-// order. Called for every created DFNode; only nodes that mutate memory or
-// call impure functions enter the chain (each links to the previous one via a
-// kind=1 state edge).
+// order. 只有改内存或调不纯函数的节点入链（各自与前一节点以 kind=1 状态边相连）。
+// 时点（效应/纯度修正 Task 1）：**不再逐节点即时连接**——改由 df_replay_state_chain
+// 在全部 IR 生成结束后对成品图重放调用；入链判据未变，仍是本函数。
 fn df_connect_state(node_id: int, opcode: int, s3: int) {
     is_side_effect : ., mut = 0;
-    if opcode == IR_STORE          { is_side_effect = 1; }
-    if opcode == IR_STORE_FIELD    { is_side_effect = 1; }
-    if opcode == IR_STORE_INDEX    { is_side_effect = 1; }
-    if opcode == IR_STORE_INDEX_VAR { is_side_effect = 1; }
+    // opcode 级效应清单的**唯一真源** = purity_op_effect（checker.cr；D7「效应清单
+    // 收敛为一份」——链分类与纯度判定同表，两条判据才不会各自漂移）。历史两处
+    // 缺失即由此收敛：① IR_CALL_EXTERN 两侧皆缺（extern 调用既被乐观标纯、又不在
+    // 本表）；② IR_STORE_PTR/IR_AWAIT 只进了纯度侧（裸指针写、spawn 同步）。
+    if purity_op_effect(opcode) != 0 { is_side_effect = 1; }
     if opcode == IR_CALL {
         // s3 = func name idx; resolve to func index for purity. Unknown/external
         // functions are conservatively treated as side-effecting.
@@ -174,6 +171,99 @@ fn df_connect_state(node_id: int, opcode: int, s3: int) {
         if g_last_state_node >= 0 { df_add_edge_kind(g_last_state_node, node_id, 1); }
         g_last_state_node = node_id;
     }
+}
+
+// ─── state 链重建（效应/纯度修正 Task 1）──────────────────────────────
+// 出处：链原在 df_create_node 内逐节点即时连接。改为「全部 IR 生成结束后重放」的
+// 唯一理由 = **纯度时点**：入链判据含「调不纯函数」（df_connect_state 的 IR_CALL
+// 分支），而「被调者是否纯」只能由全程序 IR 体算出（compute_all_purity——IR 体
+// 逐函数生成，调用者先于被调者生成是常态，且递归/前向引用无解）⇒ 生成期恒无
+// 全程序事实。链与发射面无关（NOD 序 = 节点创建序，与边无关；corearch 三轴不读
+// EDG）⇒ 时点后移零发射影响。
+// 重放保真：节点创建序 = 程序序；每函数链头重置（与 df_begin_func 同语义）；
+// 循环终止规则按「区关闭位 = 该区 OFF_SG_EXIT」逐句复刻原 sg_pop 语义。
+fn df_state_close_regions_at(head: string, next: string, pos: int) {
+    sg := r64(head, pos * 8);
+    loop {
+        if sg < 0 { break; }
+        // 原 sg_pop 的链语义（spec region-cfg §4.2）逐句复刻：关闭位 = 该区最后一个
+        // 节点 + 1（当时 g_df_node_count）⇒ last_node = pos - 1。
+        last_node := pos - 1;
+        nstart := r64(g_sgs, sg * ESZ_SG + OFF_SG_NSTART);
+        if last_node >= nstart {
+            // 终止边源必须在区内（循环体无副作用时链头是区前的 store——连过去等于
+            // 宣称循环退出依赖于该区不含的副作用）。
+            if g_last_state_node >= nstart {
+                df_add_edge_kind(g_last_state_node, last_node, 1);  // termination dependency
+            }
+            // 链头推进到区退出节点：循环之后的副作用必须依赖循环终止
+            // （spec §4.2：不终止的循环必须终止整图）。
+            g_last_state_node = last_node;
+        }
+        sg = r64(next, sg * 8);
+    }
+}
+
+fn df_replay_state_chain() {
+    if g_ir_func_count <= 0 { return; }
+    // 位置 → 关闭区（只收 SG_LOOP/SG_FOR——链规则只对这两族生效）：head[pos] 与
+    // next[sg] 两条 i64 链，按区号升序头插 ⇒ 同位置读出为区号降序 = sg_pop 的关闭序。
+    // alloc 不保证清零（rt.s bump 分配器）⇒ head 逐项显式置 -1。
+    head := alloc((g_df_node_count + 1) * 8);
+    next := alloc((g_sg_count + 1) * 8);
+    i : ., mut = 0;
+    loop {
+        if i > g_df_node_count { break; }
+        w64(head, i * 8, -1);
+        i = i + 1;
+    }
+    si : ., mut = 0;
+    loop {
+        if si >= g_sg_count { break; }
+        k := r64(g_sgs, si * ESZ_SG + OFF_SG_KIND);
+        if k == SG_LOOP || k == SG_FOR {
+            ex := r64(g_sgs, si * ESZ_SG + OFF_SG_EXIT);
+            if ex >= 0 && ex <= g_df_node_count {
+                w64(next, si * 8, r64(head, ex * 8));
+                w64(head, ex * 8, si);
+            }
+        }
+        si = si + 1;
+    }
+    irf : ., mut = 0;
+    loop {
+        if irf >= g_ir_func_count { break; }
+        start := r64(g_df_func_node_start, irf * 8);
+        cnt := r64(g_df_func_node_count, irf * 8);
+        g_last_state_node = -1;   // 每函数独立链（与 df_begin_func 同语义）
+        n : ., mut = 0;
+        loop {
+            if n >= cnt { break; }
+            if n > 0 { df_state_close_regions_at(head, next, start + n); }
+            pos := start + n;
+            df_connect_state(pos, r64(g_df_nodes, pos * ESZ_DFNODE + OFF_DF_OPCODE),
+                r64(g_df_nodes, pos * ESZ_DFNODE + OFF_DF_S3));
+            n = n + 1;
+        }
+        // 函数末端关闭位（SG_FUNC 恒在此；循环落在函数末句时该环也在此）——只在此
+        // 处理：下一函数走 n=0 时跳过 start ⇒ 每个关闭位恰好处理一次。函数 0 的
+        // start（位 0）无人处理，但那里 last_node = -1 < nstart ≥ 0 ⇒ 规则恒 no-op。
+        df_state_close_regions_at(head, next, start + cnt);
+        irf = irf + 1;
+    }
+}
+
+// 链最终化（唯一入口）：真纯度 + 链重建。两个调用点均在「IR 生成结束、任何链
+// 消费者之前」——run 路径 = ir_gen_all 尾；文件路径 = main.cr IR 循环之后
+// （cir 转储 / 区域检查 / lower_to_ccr / 保存 .ccr 之前）。
+fn df_state_finalize() {
+    // 幂等护栏（Task 4 终审 Minor #5）：重复调用会**二次连链**（同一图再加一遍
+    // kind=1 边 + 重算纯度）。当前两调用点互斥故不触发，属潜在坑；旗标随
+    // reset_frontend_state 复位（长驻进程每编译一次重建）。
+    if g_df_state_finalized != 0 { return; }
+    g_df_state_finalized = 1;
+    compute_all_purity();
+    df_replay_state_chain();
 }
 
 fn df_use_var(consumer_node: int, var_idx: int) {
@@ -191,7 +281,7 @@ fn df_use_var(consumer_node: int, var_idx: int) {
 
 // Connect source operands based on opcode semantics.
 // Only fields that carry IR variable indices create dataflow edges.
-fn df_connect_srcs(node_id: int, opcode: int, s1: int, s2: int, s3: int, type_kind: int) {
+fn df_connect_srcs(node_id: int, opcode: int, s1: int, s2: int, s3: int, tk_aux: int) {
     if opcode == IR_CONST { return; }  // all srcs are scalar values/labels
 
     if opcode == IR_BINARY {
@@ -267,7 +357,9 @@ fn df_connect_srcs(node_id: int, opcode: int, s1: int, s2: int, s3: int, type_ki
     }
     if opcode == IR_BOUNDS_CHECK {
         df_use_var(node_id, s1);
-        if type_kind != 0 { df_use_var(node_id, s2); }
+        // 单槽化（P5 T2）：旗标已从混用 tk 槽移入**辅码**槽 ⇒ 读 tk_aux（值域不变：
+        // 1 = 动态上限 ⇒ 上限变量 s2 也是数据依赖；0 = 字面量上限 ⇒ 不连）。
+        if tk_aux != 0 { df_use_var(node_id, s2); }
         return;
     }
     if opcode == IR_REF {
@@ -365,7 +457,13 @@ fn lower_to_ccr() {
         iri_set_s1(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1));
         iri_set_s2(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2));
         iri_set_s3(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3));
-        iri_set_tk(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_TK));
+        // R2 P5 Task 2（D19）：iri_tk = **派生码**（不是槽值）——单槽化后 40 槽存的是
+        // 类型项引用，码一律经 sh_dfn_code_of_slots 派生（派生码逐节点 ≡ 单槽化前的
+        // 混用码 ⇒ .ccr 字节不变）。本文件对桥接符号的依赖仅此一处（df_create_node
+        // 本身保持零前端依赖；lower_to_ccr 本就引 checker 侧 purity_op_effect）。
+        iri_set_tk(idx, sh_dfn_code_of_slots(
+            r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_TK),
+            r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_AUX)));
         g_ir_instr_count = idx + 1;
         ni = ni + 1;
     }
@@ -384,6 +482,10 @@ fn lower_to_ccr() {
 
     // After lowering, compute per-variable usage counts for optimization passes
     compute_usage_counts();
+
+    // regalloc 移后端（2026-09-07，D-1=Y）：数据面（区间/条目）随分配归位
+    // corearch——.ccr ENT 恒空，不再在此无条件计算；corearch load 后自算自检
+    // （regalloc.cr compute_live_ranges/compute_entries，载入 NOD 流坐标同源）。
 }
 
 // --- Mark function boundary in graph ---

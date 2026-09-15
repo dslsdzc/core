@@ -53,9 +53,9 @@ ESZ_ASTNODE  : int = 72;    // kind,a,b,c,int_val,type_val,data,line,col = 9×8
 ESZ_SYMENTRY : int = 32;    // name_idx,kind,type_idx,node_idx = 4×8
 ESZ_IRVAR    : int = 24;    // name_idx,id,type_kind = 3×8
 ESZ_IRINSTR  : int = 48;    // opcode,dest,src1,src2,src3,type_kind = 6×8
-ESZ_FUNCINFO : int = 208;
+ESZ_FUNCINFO : int = 688;
 ESZ_STRUCTINFO : int = 440;
-ESZ_ENUMINFO : int = 2360;  // name+variants[16]+variant_count+generic_names[4]+generic_count
+ESZ_ENUMINFO : int = 4408;  // name+variants[16]（含载荷类型节点槽，P3 Task 4）+variant_count+generic_names[4]+generic_count
 
 // Token field offsets
 OFF_TK_KIND : int = 0; OFF_TK_LEXEME : int = 8;
@@ -79,29 +79,68 @@ OFF_IRI_S1 : int = 16; OFF_IRI_S2 : int = 24;
 OFF_IRI_S3 : int = 32; OFF_IRI_TK : int = 40;
 
 // FuncInfo offsets
+// 形参槽上限：param_types 是**定长内嵌槽区**（跟在 param_count 之后、return_type
+// 之前），槽数即硬上限。修复前槽数 = 16 且写入无界 → 第 17 个形参起改写
+// return_type/ast_node（TY_INT=0 恰把 ast_node 写成 0 = 节点表首项）→
+// 「TF01 误归 + .ccr name_idx/param_count=0 + rc=0 产物崩」静默误编译
+// （TODO #8，2026-09-11）。64 = 与 ast.cr FuncInfo 镜像 `[int; 64]` 对齐，
+// 并覆盖 ≥22（16 栈参 + 6 寄存器参，SysV）的栈清理形。越界 = parser 硬错
+// P020（rc=1）+ 下方访问器护栏双保险——**任何情况下不得静默越界写**。
+MAX_FN_PARAMS : int = 64;
 OFF_FI_NAME : int = 0; OFF_FI_PARAM_COUNT : int = 8;
-OFF_FI_PARAM_TYPES : int = 16;
-OFF_FI_RETURN_TYPE : int = 144; OFF_FI_AST_NODE : int = 152;
-OFF_FI_GENERIC_NAMES : int = 160; OFF_FI_GENERIC_COUNT : int = 192;
-OFF_FI_ISPURE : int = 200;  // 1 = pure (no side effects), 0 = impure
+OFF_FI_PARAM_TYPES : int = 16;                        // 64 槽 × 8B = 512 → 至 527
+OFF_FI_RETURN_TYPE : int = 528; OFF_FI_AST_NODE : int = 536;
+OFF_FI_GENERIC_NAMES : int = 544; OFF_FI_GENERIC_COUNT : int = 672;
+OFF_FI_ISPURE : int = 680;  // 1 = pure (no side effects), 0 = impure
 
 // StructInfo offsets
-OFF_SI_NAME : int = 0; OFF_SI_FIELD_NAMES : int = 8;
-OFF_SI_FIELD_TYPES : int = 136; OFF_SI_FIELD_TYPE_NODES : int = 264;
+// 容量批 T3（裁-CAP-2 (a)）：字段槽区**迁侧表**——本槽（原 field_names 首槽）改义为
+// `field_base`（侧表起始行）；`OFF_SI_FIELD_TYPES`/`OFF_SI_FIELD_TYPE_NODES` 保留为
+// **未用填充**（记录尺寸不变 ⇒ 盘面与外部算术零改动）。
+OFF_SI_NAME : int = 0; OFF_SI_FIELD_BASE : int = 8;
+OFF_SI_FIELD_TYPES : int = 136; OFF_SI_FIELD_TYPE_NODES : int = 264;   // 保留未用
 OFF_SI_FIELD_COUNT : int = 392;
 OFF_SI_GENERIC_NAMES : int = 400; OFF_SI_GENERIC_COUNT : int = 432;
 
 // DFNode sizes and offsets
-ESZ_DFNODE : int = 64;   // opcode,dest_var,src1,src2,src3,type_kind,first_edge,edge_count = 8x8
+// R2 P5 Task 2（D19 单槽化 α = 槽语义对调 + 辅码显式分离）：类型面**单源**。
+//   OFF_DF_TK  (40) = **类型项引用**（g_type_terms 行号；-1 = 无项）= 类型面唯一真源；
+//   OFF_DF_AUX (64) = **辅码**（旗标/宽度/计数 + 不可入项的原始类型行码；0 = 无）。
+// 契约（四条，缺一即静默类）：
+//   ① **字节零变化**：ESZ_DFNODE 保持 72B，两槽只是**语义对调**（原 40 = 混用码、
+//      原 64 = 项引用）⇒ `.ccr`（NOD 36B）与 `.cir` 快照（节点 64B）布局零改动，
+//      `CCR_VERSION=8` / `CIR_CACHE_VER=17` 均不 bump。
+//   ② **互斥**（D22-②）：辅码 ≠ 0 ⇒ 项 = -1；项 ≥ 0 ⇒ 辅码 = 0（由拆分器构造保证）。
+//   ③ **码 = 派生量**（D22-①/D23）：`iri_tk` / `.ccr` NOD / `.cir` 快照里的类型码
+//      一律由 `sh_dfn_code_of_slots(项, 辅码)` 派生，**不得**当独立真源存储或读回
+//      （派生码逐节点 ≡ 单槽化前的混用码；`.ccr`/`.cir` 面因此逐字节不变）。
+//   ④ 写点 = df_create_node（dataflow.cr，本文件不引用桥接符号）+ `.cir` 快照装载
+//      侧的**重派生**（cir_cache.cr——盘面只承载派生码，不入项/辅码槽：进程内项
+//      引用不得跨进程，D20）。
+// 拆分器（(opcode, tk) → (项, 辅码)）单源 = ty_shadow.cr 的 sh_tk_split；既有消费者
+// （instr.cr/regalloc/lower_to_core/dump/ccr_io）读的是**派生码**，零改动。
+ESZ_DFNODE : int = 72;   // opcode,dest_var,src1,src2,src3,tk_term,first_edge,edge_count,tk_aux = 9x8
 OFF_DF_OPCODE : int = 0;     OFF_DF_DEST : int = 8;
 OFF_DF_S1 : int = 16;        OFF_DF_S2 : int = 24;
-OFF_DF_S3 : int = 32;        OFF_DF_TK : int = 40;
+OFF_DF_S3 : int = 32;        OFF_DF_TK : int = 40;   // ★语义（P5 T2）：类型项引用（-1 = 无项）
 OFF_DF_FIRST_EDGE : int = 48; OFF_DF_EDGE_COUNT : int = 56;
+OFF_DF_AUX : int = 64;   // P5 T2（D19，原 OFF_DF_TK_TERM 槽位）：辅码（0 = 无）
 
 // DFEdge sizes and offsets
 ESZ_DFEDGE : int = 32;   // from_node,to_node,next_out,kind = 4x8
 OFF_DFE_FROM : int = 0;  OFF_DFE_TO : int = 8;  OFF_DFE_NEXT : int = 16;
 OFF_DFE_KIND : int = 24; // 0=data (def-use), 1=state (ordering/termination)
+
+// Entry record (v6 条目版本段：变量 × 定值点切分版本条目，compute_entries 填充)。
+// 内存布局 = .ccr v6 落盘格式逐字节一致（24B/条，六字段各 4B，w32/r32 LE 存取）：
+// var_idx u32, def_instr i32, live_start i32, live_end i32, home i32, flags u32。
+ESZ_ENTRY   : int = 24;
+OFF_ENTRY_VAR   : int = 0;    // 全局 IR 变量索引
+OFF_ENTRY_DEF   : int = 4;    // 定值指令全局索引（-1 = 无定值）
+OFF_ENTRY_LS    : int = 8;    // 版本存在区间起点（全局指令序）
+OFF_ENTRY_LE    : int = 12;   // 版本存在区间终点（全局指令序）
+OFF_ENTRY_HOME  : int = 16;   // 分配槽位（-1 = 未分配）
+OFF_ENTRY_FLAGS : int = 20;   // 位 0 预留：无配方（条款 4b）
 
 // Subgraph entry (48 bytes each)
 ESZ_SG   : int = 48;
@@ -120,23 +159,92 @@ SG_UNSAFE : int = 4;
 SG_IF     : int = 5;  // conditional region: covers [condition, merge)
 
 // InterfaceInfo: fixed-size entry per interface
-// Header(24) + methods[16] * method_entry(88) = 1432 total
-ESZ_IFACEINFO : int = 1432;
+// Header(24) + methods[16] * method_entry(240) = 3864 total（R2 P4 Task 3：168 → 240，
+//   + 类型项槽 72B——见下 OFF_IFM_PARAM_TERMS/OFF_IFM_RET_TERM 注）
+ESZ_IFACEINFO : int = 3864;
 OFF_IF_NAME : int = 0; OFF_IF_METHOD_COUNT : int = 8; OFF_IF_GENERIC_COUNT : int = 16;
 OFF_IF_METHODS : int = 24;  // first method entry
-// Each method entry: name_idx(8) + param_count(8) + ret_ti(8) + param_types[8](64) = 88 bytes
-ESZ_IFMETHOD : int = 88;
+// Each method entry: name_idx(8) + param_count(8) + ret_ti(8) + param_types[8](64)
+//   + param_nodes[8](64) + ret_node(8) + self_mode(8) + param_terms[8](64) + ret_term(8) = 240 bytes
+// R2 P3b Task 6（Step 1 签名类型项化）：**裸码槽保留**（`param_types` / `ret_ti`）——
+//   S6 站点（checker 的泛型方法调用返回型映射）的值域 = 映射层编码（TY_*），P2b Task 6 已把
+//   该域**显式化钉住**（t6_S6_* 行为用例）⇒ 不得改；新增**类型节点**槽 = 签名的忠实来源
+//   （裸码把非原生类型一律塌缩为 0 = TY_INT，与 int 不可区分）——供 Step 3 的签名项比较
+//   （满足判定 / impl 声明面）与 `sh_iface_shape_term` 建项。-1 = 无节点（哨兵；不用 0——
+//   节点 0 是合法下标，用 0 会与「首个分配节点」混同）。接收者槽两侧皆无节点（parser 的
+//   self 约定，见 self_mode）。
+ESZ_IFMETHOD : int = 240;
 OFF_IFM_NAME : int = 0; OFF_IFM_PARAM_COUNT : int = 8; OFF_IFM_RET_TI : int = 16;
-OFF_IFM_PARAM_TYPES : int = 24;  // first of up to 8 param types (each 8 bytes)
+OFF_IFM_PARAM_TYPES : int = 24;   // first of up to 8 param types (each 8 bytes)   → 24..87
+OFF_IFM_PARAM_NODES : int = 88;   // first of up to 8 param type nodes (8B each)  → 88..151
+OFF_IFM_RET_NODE : int = 152;     // return type node（-1 = 无，= unit）
+OFF_IFM_SELF_MODE : int = 160;    // 接收者模式：0 = 无接收者（首参为普通形参）/ 1 = self /
+                                  //   2 = &self / 3 = &mut self（照 EXPR_PARAM 的 int_val 约定）
+// R2 P4 Task 3（IFACE 段签名项化）——**类型项槽**（-1 = 不可建/无）：
+//   param_terms[8] = 各形参的签名类型项（`sh_iface_sig_param_term`；接收者槽 = unit 占位项）
+//   ret_term       = 返回签名类型项（`sh_iface_sig_ret_term`）
+// 与 param_nodes/ret_node 的关系：节点槽 = **corec 侧**的签名来源（AST 节点，判定路径消费）；
+// 项槽 = **载体面**（IFACE(8) 段落盘 + corearch 读回）——corearch 侧无 AST ⇒ 节点槽恒 -1，
+// 项槽是签名在载入侧的唯一忠实表示（二者不同域，不得互相复用）。写侧 = ccr_types.cr 的
+// ccr_iface_populate 填充（与段体同一读点）；读侧 = load_ccr 由段填充。**不入 .cir 快照**
+// （快照字段清单不含 g_ifaces——见 Task 3 报告 §布局影响面）。
+OFF_IFM_PARAM_TERMS : int = 168;  // first of up to 8 param terms (8B each)       → 168..231
+OFF_IFM_RET_TERM : int = 232;     // return signature term (-1 = 不可建)
 MAX_IFACE_METHOD_PARAMS : int = 8;
+// R2 P3b Task 6（Step 1）：方法上限单源化（旧态 = parser 内联字面量 16，与 ESZ_IFACEINFO
+// 的槽数隐式绑定）。**本任务显式登记保留**（不解除）：解除需把方法表迁到侧表（全部读点换位），
+// 按 B.4-7 的 MAX_* 统一口径「先加护栏、再评估解除」；护栏现状 = 超限**硬错 rc=1**（非静默
+// 截断——实测），本任务加钉子用例（test_impl_iface.py 的 limit 组）。
+MAX_IFACE_METHODS : int = 16;
+
+// ─── 本质条目表布局（R2 P4 Task 3：自 iface_registry.cr **迁入**）───
+// 迁入理由 = IFACE(8) 段的 loader（corearch 侧，ccr_io.cr）要重建 `g_iface_entries`
+// 并校验 `native_count == IFACE_ENTRY_COUNT`，而 iface_registry.cr **不入 corearch
+// 清单**（corec-only：内含 checker 耦合的 iface_kind_of 之邻）⇒ 布局常量必须在双
+// concat 共享面（本文件 = 共享层；与 ESZ_IFACEINFO/ESZ_IFMETHOD 同居一处的先例）。
+// 迁入只放宽声明序（dyn_arr.cr < checker.cr < iface_registry.cr），零语义变化。
+//   {ak, ti_row, name_ni, lit_code, ops}：ak = 原子类（AK_*）；ti_row = 规范 checker
+//   类型行（8 原生 = TI_* 常量；结构/命名 = -1）；name_ni = 名字 ni（显示/查询用，
+//   R2 P4 Task 3 起在注册面 str_intern 填充——裁决 1 接受 STR 段增长）；lit_code =
+//   字面量定型（AST kind；-1 = 无）；ops = 操作许可位集。
+ESZ_IFACE_ENTRY : int = 40;
+OFF_IE_AK : int = 0;  OFF_IE_TI : int = 8;  OFF_IE_NAME : int = 16;
+OFF_IE_LIT : int = 24; OFF_IE_OPS : int = 32;
+// R2 P4 Task 3（裁决 3+7）：13 → 16（+AK_NULL 原生第九员 + AK_SUM + AK_FN——纯信息面，
+// ops = 0 = 无操作许可；判定面零变化由全类型行枚举守门）。
+IFACE_ENTRY_COUNT : int = 16;
+
+// 形状条目表 grow（R2 P4 Task 3：自 iface_registry.cr **迁入**——同 IFACE 段 loader
+// 读回面：corearch 侧重建 g_iface_shape_* 需表增长；本文件 = grow 助手统一宿主，
+// 零依赖（alloc/_dyncpy 皆共享层））。语义/布局零变化（逐字搬迁）。
+fn iface_shape_grow(needed: int) {
+    if needed <= g_iface_shape_cap { return; }
+    nc : ., mut = g_iface_shape_cap * 2;
+    if nc < 8 { nc = 8; }
+    if nc < needed { nc = needed + 8; }
+    nb := alloc(nc * 8);
+    _dyncpy(g_iface_shape_names, g_iface_shape_cap * 8, nb);
+    g_iface_shape_names = nb;
+    nt := alloc(nc * 8);
+    _dyncpy(g_iface_shape_terms, g_iface_shape_cap * 8, nt);
+    g_iface_shape_terms = nt;
+    g_iface_shape_cap = nc;
+}
 
 // EnumInfo offsets
-OFF_EI_NAME : int = 0; OFF_EI_VARIANTS : int = 8;
-OFF_EI_VARIANT_COUNT : int = 2312;
-OFF_EI_GENERIC_NAMES : int = 2320; OFF_EI_GENERIC_COUNT : int = 2352;
-// EnumVariant within variants[N]: name(8) + types[16](128) + type_count(8)
+// R2 P3 Task 4（T0 交接 ①）：变体载荷**类型节点**槽（照 struct 先例 OFF_SI_FIELD_TYPE_NODES）
+// ——裸码槽 OFF_EV_TYPES 的非基型载荷一律塌缩为 0 = TY_INT（parser 的 unpack_type），
+// 「载荷是 int」与「载荷是 string/命名类型/泛型形参」不可区分 ⇒ 载荷面（泛型代入/满足判定）
+// 在裸码表上不可能忠实。nodes 槽 = parse_type 的产物节点（-1/0 = 无信息）。
+// 布局：EnumVariant = name(8) + types[16](128) + type_count(8) + type_nodes[16](128) = 272
+// 容量批 T3（裁-CAP-2 (a)）：变体槽区**迁侧表**——`OFF_EI_VARIANTS` 槽改义为 `variant_base`
+// （侧表起始行）；`OFF_EV_*` 与 272B 槽区保留为**未用填充**（记录尺寸不变 ⇒ 外部算术零改动）。
+OFF_EI_NAME : int = 0; OFF_EI_VARIANTS : int = 8;    // = variant_base
+OFF_EI_VARIANT_COUNT : int = 4360;
+OFF_EI_GENERIC_NAMES : int = 4368; OFF_EI_GENERIC_COUNT : int = 4400;
 OFF_EV_NAME : int = 0; OFF_EV_TYPES : int = 8; OFF_EV_TYPE_COUNT : int = 136;
-OFF_EV_SIZE : int = 144;
+OFF_EV_TYPE_NODES : int = 144;
+OFF_EV_SIZE : int = 272;
 
 // ============================================================
 // Copy helper
@@ -175,7 +283,9 @@ fn grow_syms(needed: int) {
 fn grow_types(needed: int) {
     if needed < g_type_cap { return; }
     nc : ., mut = g_type_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := alloc(nc * 24); _dyncpy(g_types, g_type_cap * 24, nb);
+    // R2 P4 Task 2：行尺寸经 ESZ_TYPE_ROW 单源（globals.cr——与 alloc_type/
+    // TYPE 段序列化同源；原为字面量 24）。
+    nb := alloc(nc * ESZ_TYPE_ROW); _dyncpy(g_types, g_type_cap * ESZ_TYPE_ROW, nb);
     g_types = nb; g_type_cap = nc; }
 
 fn grow_funcs(needed: int) {
@@ -297,10 +407,19 @@ fn ast_alloc(kind: int, a: int, b: int, c: int, iv: int, tv: int, d: int, line: 
     return idx; }
 
 // Accessor helpers for SymEntry
-fn sym_name(n: int) -> int { return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_NAME); }
-fn sym_kind(n: int) -> int { return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_KIND); }
-fn sym_type(n: int) -> int { return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_TYPE); }
-fn sym_node(n: int) -> int { return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_NODE); }
+// ─── R2 P3 Task 4：读取面护栏（n ∉ [0, g_sym_count) ⇒ -1，不触内存）───
+// 触发链（本任务实测）：① 本任务退役了内建 Option 注册（collect_decls 早期的一次 def_sym）
+// ⇒ 「无类型声明的源文件」在函数注册循环处 g_syms 仍为 **NULL**（首个 def_sym 尚未发生，
+// 这是合法状态）；② `collect_decls` 的重复函数检查写的是 `existing_si >= 0 && sym_kind(existing_si)`
+// （checker.cr:1202），而 **bootstrap 构建的编译器二进制不求值短路**（T0 §5-③ 实测：`&&`
+// 两侧无条件求值）⇒ `sym_kind(-1)` 被求值 → `r64(NULL, 负偏移)` → SIGSEGV（实测 d0 类
+// 「只有 fn、无类型声明」的源 rc=139）。修法 = 访问器自身带范围闸（与类型表访问器
+// get_type_kind/get_type_data 同款）；合法读零变化，越界/未分配返回 -1（哨兵语义与
+// find_gsym 的 -1 一致）。根因（bootstrap 不短路）仍归 T0 §5-③ 登记，不在本任务面内。
+fn sym_name(n: int) -> int { if n < 0 || n >= g_sym_count { return -1; } return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_NAME); }
+fn sym_kind(n: int) -> int { if n < 0 || n >= g_sym_count { return -1; } return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_KIND); }
+fn sym_type(n: int) -> int { if n < 0 || n >= g_sym_count { return -1; } return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_TYPE); }
+fn sym_node(n: int) -> int { if n < 0 || n >= g_sym_count { return -1; } return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_NODE); }
 fn sym_set_name(n: int, v: int) { w64(g_syms, n * ESZ_SYMENTRY + OFF_SY_NAME, v); }
 fn sym_set_kind(n: int, v: int) { w64(g_syms, n * ESZ_SYMENTRY + OFF_SY_KIND, v); }
 fn sym_set_type(n: int, v: int) { w64(g_syms, n * ESZ_SYMENTRY + OFF_SY_TYPE, v); }
@@ -328,17 +447,31 @@ fn iri_set_s2(n: int, v: int) { w64(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_S2, v
 fn iri_set_s3(n: int, v: int) { w64(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_S3, v); }
 fn iri_set_tk(n: int, v: int) { w64(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_TK, v); }
 
+// 变量名查询（原定义于 ir_gen.cr——2026-09-07 regalloc 移后端随迁本文件：
+// corearch 闭包不含 ir_gen.cr，regalloc.cr 判定/注入打印消费本函数；双侧共享）
+fn get_ir_var_name(var_idx: int) -> string {
+    if var_idx >= 0 && var_idx < g_ir_var_count {
+        ni := irv_name(var_idx);
+        return istr_get(ni);
+    }
+    return "";
+}
+
 // FuncInfo helpers
 fn fi_name(n: int) -> int { return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_NAME); }
 fn fi_param_count(n: int) -> int { return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_COUNT); }
 fn fi_return_type(n: int) -> int { return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_RETURN_TYPE); }
 fn fi_ast_node(n: int) -> int { return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_AST_NODE); }
 fn fi_generic_count(n: int) -> int { return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_GENERIC_COUNT); }
-fn fi_param_type(n: int, pi: int) -> int { return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_TYPES + pi * 8); }
+fn fi_param_type(n: int, pi: int) -> int {
+    if pi < 0 || pi >= MAX_FN_PARAMS { return 0; }  // 越界 = 槽区外（读护栏；写侧同护栏 + parser 硬错）
+    return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_TYPES + pi * 8); }
 fn fi_generic_name(n: int, gi: int) -> int { return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gi * 8); }
 fn fi_set_name(n: int, v: int) { w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_NAME, v); }
 fn fi_set_param_count(n: int, v: int) { w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_COUNT, v); }
-fn fi_set_param_type(n: int, pi: int, v: int) { w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_TYPES + pi*8, v); }
+fn fi_set_param_type(n: int, pi: int, v: int) {
+    if pi < 0 || pi >= MAX_FN_PARAMS { return; }  // 槽区护栏：越界写会踩 return_type/ast_node/generic_*/ispure（TODO #8 根源）
+    w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_TYPES + pi*8, v); }
 fn fi_set_return_type(n: int, v: int) { w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_RETURN_TYPE, v); }
 fn fi_set_ast_node(n: int, v: int) { w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_AST_NODE, v); }
 fn fi_set_generic_name(n: int, gi: int, v: int) { w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gi*8, v); }
@@ -351,9 +484,48 @@ fn fi_set_ispure(n: int, v: int) { w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_ISPURE
 fn si_name(n: int) -> int { return r64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_NAME); }
 fn si_field_count(n: int) -> int { return r64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT); }
 fn si_generic_count(n: int) -> int { return r64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT); }
-fn si_field_name(n: int, fi: int) -> int { return r64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_FIELD_NAMES + fi*8); }
-fn si_field_type(n: int, fi: int) -> int { return r64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_FIELD_TYPES + fi*8); }
-fn si_field_type_node(n: int, fi: int) -> int { return r64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_FIELD_TYPE_NODES + fi*8); }
+// ─── 容量批 T3（裁-CAP-2 (a)）：结构体字段**侧表**（无硬上限）───
+// 布局：记录内 `OFF_SI_FIELD_BASE` = 本记录字段在侧表的起始行；`OFF_SI_FIELD_COUNT` = 计数
+// （真值）。三条扁平表按「记录基数 + 字段下标」寻址；高水位 `g_si_f_used` 由
+// `si_commit_fields` 提交（记录字段区一次性占用，不重叠）。
+fn grow_si_fields(needed: int) {
+    if needed <= g_si_f_cap { return; }
+    nc := g_si_f_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+    nb := alloc(nc * 8); _dyncpy(g_si_f_names, g_si_f_cap * 8, nb); g_si_f_names = nb;
+    tb := alloc(nc * 8); _dyncpy(g_si_f_types, g_si_f_cap * 8, tb); g_si_f_types = tb;
+    ob := alloc(nc * 8); _dyncpy(g_si_f_nodes, g_si_f_cap * 8, ob); g_si_f_nodes = ob;
+    g_si_f_cap = nc;
+}
+fn si_field_base(n: int) -> int { return r64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_FIELD_BASE); }
+fn si_set_field_base(n: int, v: int) { w64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_FIELD_BASE, v); }
+// 提交字段区（base + 计数 ⇒ 高水位）；parser 与 ccr_io 装载共用
+fn si_commit_fields(n: int, fc: int) {
+    b := si_field_base(n);
+    if b < 0 { return; }
+    if fc < 0 { return; }
+    if b + fc > g_si_f_used { g_si_f_used = b + fc; }
+}
+// 读护栏（R2 P4 Task 6 / TODO #35 的**计数为界**版本）：fi 越界（< 0 或 ≥ count）⇒ 回哨兵
+// -1（不越读）；在界读 = 侧表取值。
+fn si_field_row(n: int, fi: int) -> int {
+    if fi < 0 { return -1; }
+    if fi >= si_field_count(n) { return -1; }
+    b := si_field_base(n);
+    if b < 0 { return -1; }
+    return b + fi;
+}
+fn si_field_name(n: int, fi: int) -> int {
+    r := si_field_row(n, fi);
+    if r < 0 { return -1; }
+    return r64(g_si_f_names, r * 8); }
+fn si_field_type(n: int, fi: int) -> int {
+    r := si_field_row(n, fi);
+    if r < 0 { return -1; }
+    return r64(g_si_f_types, r * 8); }
+fn si_field_type_node(n: int, fi: int) -> int {
+    r := si_field_row(n, fi);
+    if r < 0 { return -1; }
+    return r64(g_si_f_nodes, r * 8); }
 fn si_generic_name(n: int, gi: int) -> int { return r64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + gi*8); }
 
 // EnumInfo helpers
@@ -361,9 +533,143 @@ fn ei_name(n: int) -> int { return r64(g_enums, n * ESZ_ENUMINFO + OFF_EI_NAME);
 fn ei_variant_count(n: int) -> int { return r64(g_enums, n * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT); }
 fn ei_generic_count(n: int) -> int { return r64(g_enums, n * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT); }
 fn ei_generic_name(n: int, gi: int) -> int { return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + gi*8); }
-fn ei_variant_name(n: int, vi: int) -> int { return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_NAME); }
-fn ei_variant_type(n: int, vi: int, ti: int) -> int { return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPES + ti*8); }
-fn ei_variant_type_count(n: int, vi: int) -> int { return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_VARIANTS + vi*OFF_EV_SIZE + OFF_EV_TYPE_COUNT); }
+// 读护栏（R2 P4 Task 6 / TODO #35）：越界 = 槽区外（读会取到 variant_count/generic 槽或邻
+// 记录）⇒ 回哨兵（名字/类型码/类型节点 = -1；计数 = 0）。在界调用点（count ≤ 16）行为不变。
+// ─── 容量批 T3：枚举变体**侧表**（无硬上限；同 struct 字段形态）───
+fn grow_ei_variants(needed: int) {
+    if needed <= g_ei_v_cap { return; }
+    nc := g_ei_v_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+    a := alloc(nc * 8); _dyncpy(g_ei_v_names, g_ei_v_cap * 8, a); g_ei_v_names = a;
+    b := alloc(nc * 8); _dyncpy(g_ei_v_tbase, g_ei_v_cap * 8, b); g_ei_v_tbase = b;
+    c := alloc(nc * 8); _dyncpy(g_ei_v_tcount, g_ei_v_cap * 8, c); g_ei_v_tcount = c;
+    z : ., mut = g_ei_v_cap;
+    loop { if z >= nc { break; } w64(b, z * 8, -1); z = z + 1; }   // tbase 新槽 = -1 哨兵
+    g_ei_v_cap = nc;
+}
+fn grow_ei_vtypes(needed: int) {
+    if needed <= g_ei_vt_cap { return; }
+    nc := g_ei_vt_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+    a := alloc(nc * 8); _dyncpy(g_ei_vt_types, g_ei_vt_cap * 8, a); g_ei_vt_types = a;
+    b := alloc(nc * 8); _dyncpy(g_ei_vt_nodes, g_ei_vt_cap * 8, b); g_ei_vt_nodes = b;
+    g_ei_vt_cap = nc;
+}
+fn ei_variant_base(n: int) -> int { return r64(g_enums, n * ESZ_ENUMINFO + OFF_EI_VARIANTS); }
+fn ei_set_variant_base(n: int, v: int) { w64(g_enums, n * ESZ_ENUMINFO + OFF_EI_VARIANTS, v); }
+fn ei_commit_variants(n: int, vc: int) {
+    b := ei_variant_base(n);
+    if b < 0 { return; }
+    if vc < 0 { return; }
+    if b + vc > g_ei_v_used { g_ei_v_used = b + vc; }
+}
+fn ei_variant_row(n: int, vi: int) -> int {
+    if vi < 0 { return -1; }
+    if vi >= ei_variant_count(n) { return -1; }
+    b := ei_variant_base(n);
+    if b < 0 { return -1; }
+    return b + vi;
+}
+fn ei_variant_name(n: int, vi: int) -> int {
+    r := ei_variant_row(n, vi);
+    if r < 0 { return -1; }
+    return r64(g_ei_v_names, r * 8); }
+fn ei_variant_type_count(n: int, vi: int) -> int {
+    r := ei_variant_row(n, vi);
+    if r < 0 { return 0; }
+    return r64(g_ei_v_tcount, r * 8); }
+fn ei_variant_type(n: int, vi: int, ti: int) -> int {
+    r := ei_variant_row(n, vi);
+    if r < 0 { return -1; }
+    if ti < 0 || ti >= r64(g_ei_v_tcount, r * 8) { return -1; }
+    tb := r64(g_ei_v_tbase, r * 8);
+    if tb < 0 { return -1; }
+    return r64(g_ei_vt_types, (tb + ti) * 8); }
+// R2 P3 Task 4（T0 交接 ①）：载荷第 ti 个的**类型节点**（-1/0 = 无信息——.ccr 不落本列，
+// 序列化读回侧该列恒 0；消费者须以 type_count 为界，不得据 0 反推「节点 0」）。
+fn ei_variant_type_node(n: int, vi: int, ti: int) -> int {
+    r := ei_variant_row(n, vi);
+    if r < 0 { return -1; }
+    if ti < 0 || ti >= r64(g_ei_v_tcount, r * 8) { return -1; }
+    tb := r64(g_ei_v_tbase, r * 8);
+    if tb < 0 { return -1; }
+    return r64(g_ei_vt_nodes, (tb + ti) * 8); }
+
+// ─── 枚举/结构体记录**受护访问器**（R2 P4 Task 6；TODO #35 收口，#8 同族形态）───
+// 背景（TODO #35 代码级定位；**容量批 T3 起该定长槽区已退役**——字段/变体迁侧表）：EnumVariant 槽区（旧 `MAX_ENUM_VARIANTS` 槽 × `OFF_EV_SIZE`）与
+// StructInfo 字段槽区（旧 `MAX_STRUCT_FIELDS` 槽）曾是**定长内嵌槽区**——其后紧跟记录自身的
+// count/generic 槽，再往后是**下一条记录**（同一 buffer）⇒ 无界写入既踩自身记录尾也踩邻记录
+// （实测：第 17 变体槽起点 = `OFF_EI_VARIANT_COUNT` 自身、槽尾越过 `ESZ_ENUMINFO` 224B）。
+// 修复形态**照 TODO #8 收口**（`fi_param_type`/`fi_set_param_type`）：
+//   ① **唯一受护写点** = 本组 setter（parser 全改走它们 ⇒ 未来新调用点亦不可能越界写）；
+//   ② 读护栏 = 越界回哨兵（名字/类型节点 = -1 = 无效下标；计数 = 0），**不越读**；
+//   ③ 面向用户的拒绝由 parser 的 P022/P023 硬错承担（本层只做内存安全兜底，不代替诊断）。
+// count 槽（`ei_variant_count`/`si_field_count` 的写）**不设护栏**——真值是诊断依据，照
+// P020 的 `add_func(pc)` 先例（计数保持真实值，超限由硬错拒绝；越界读由②兜底）。
+fn ei_set_variant_name(n: int, vi: int, v: int) {
+    if vi < 0 { return; }
+    b := ei_variant_base(n);
+    if b < 0 { return; }
+    grow_ei_variants(b + vi + 1);
+    if b + vi + 1 > g_ei_v_used { g_ei_v_used = b + vi + 1; }
+    w64(g_ei_v_names, (b + vi) * 8, v); }
+// 载荷基址**惰性分配**（首个载荷写入时占用高水位；后续增量推进）
+
+fn ei_variant_tbase_ensure(n: int, vi: int) -> int {
+    b := ei_variant_base(n);
+    if b < 0 { return -1; }
+    grow_ei_variants(b + vi + 1);
+    r := b + vi;
+    tb := r64(g_ei_v_tbase, r * 8);
+    if tb < 0 {
+        tb = g_ei_vt_used;
+        w64(g_ei_v_tbase, r * 8, tb);
+    }
+    return tb;
+}
+fn ei_set_variant_type(n: int, vi: int, ti: int, v: int) {
+    if vi < 0 || ti < 0 { return; }
+    tb := ei_variant_tbase_ensure(n, vi);
+    if tb < 0 { return; }
+    grow_ei_vtypes(tb + ti + 1);
+    w64(g_ei_vt_types, (tb + ti) * 8, v);
+    if tb + ti + 1 > g_ei_vt_used { g_ei_vt_used = tb + ti + 1; } }
+fn ei_set_variant_type_count(n: int, vi: int, v: int) {
+    if vi < 0 { return; }
+    b := ei_variant_base(n);
+    if b < 0 { return; }
+    grow_ei_variants(b + vi + 1);
+    w64(g_ei_v_tcount, (b + vi) * 8, v);
+    if v > 0 {
+        tb := ei_variant_tbase_ensure(n, vi);   // 申报区间整体占位（未写槽亦不与他人重叠）
+        if tb >= 0 && tb + v > g_ei_vt_used { g_ei_vt_used = tb + v; }
+    } }
+fn ei_set_variant_type_node(n: int, vi: int, ti: int, v: int) {
+    if vi < 0 || ti < 0 { return; }
+    tb := ei_variant_tbase_ensure(n, vi);
+    if tb < 0 { return; }
+    grow_ei_vtypes(tb + ti + 1);
+    w64(g_ei_vt_nodes, (tb + ti) * 8, v);
+    if tb + ti + 1 > g_ei_vt_used { g_ei_vt_used = tb + ti + 1; } }
+fn si_set_field_name(n: int, fi: int, v: int) {
+    if fi < 0 { return; }
+    b := si_field_base(n);
+    if b < 0 { return; }
+    grow_si_fields(b + fi + 1);
+    if b + fi + 1 > g_si_f_used { g_si_f_used = b + fi + 1; }
+    w64(g_si_f_names, (b + fi) * 8, v); }
+fn si_set_field_type(n: int, fi: int, v: int) {
+    if fi < 0 { return; }
+    b := si_field_base(n);
+    if b < 0 { return; }
+    grow_si_fields(b + fi + 1);
+    if b + fi + 1 > g_si_f_used { g_si_f_used = b + fi + 1; }
+    w64(g_si_f_types, (b + fi) * 8, v); }
+fn si_set_field_type_node(n: int, fi: int, v: int) {
+    if fi < 0 { return; }
+    b := si_field_base(n);
+    if b < 0 { return; }
+    grow_si_fields(b + fi + 1);
+    if b + fi + 1 > g_si_f_used { g_si_f_used = b + fi + 1; }
+    w64(g_si_f_nodes, (b + fi) * 8, v); }
 
 // ============================================================
 // String table helpers (dynamic byte buffer)
@@ -496,7 +802,19 @@ fn grow_df_arrays(needed: int) {
     if needed < g_df_cap { return; }
     nc : ., mut = g_df_cap * 2; if nc < 128 { nc = 128; } if nc < needed { nc = needed + 128; }
     sz := nc * 8;
-    n1 := alloc(sz); _dyncpy(g_df_var_producer, g_df_cap * 8, n1); g_df_var_producer = n1;
+    n1 := alloc(sz); _dyncpy(g_df_var_producer, g_df_cap * 8, n1);
+    // 幽灵边修复（v7 Task 0 注 A 裁决 = 播种修复，dataflow.cr/cir_cache.cr 同款）：
+    // producer 槽必须对全部 var 下标恒 -1——alloc 新段（零页/复用页）不可依赖，
+    // 未定值 var（全局/参数/0 字面量槽）若留 0 =「节点 0」→ df_use_var 产幽灵边
+    // 0→X + 自环 (0,0)。增长区显式播种 -1；既有区由 _dyncpy 保留（定值由
+    // df_create_node 覆写、缓存放回路径同走本函数 → 未产出 var 保持 -1）。
+    zi : ., mut = g_df_cap;
+    loop {
+        if zi >= nc { break; }
+        w64(n1, zi * 8, -1);
+        zi = zi + 1;
+    }
+    g_df_var_producer = n1;
     n2 := alloc(sz); _dyncpy(g_df_func_node_start, g_df_cap * 8, n2); g_df_func_node_start = n2;
     n3 := alloc(sz); _dyncpy(g_df_func_node_count, g_df_cap * 8, n3); g_df_func_node_count = n3;
     g_df_cap = nc; }
@@ -653,6 +971,44 @@ fn grow_func_cp(needed: int) {
     nb := alloc(nc * 8); _dyncpy(g_x86_func_cp, g_x86_func_cp_cap * 8, nb);
     g_x86_func_cp = nb; g_x86_func_cp_cap = nc; }
 
+fn grow_mw_tag_off(needed: int) {
+    if needed < g_x86_mw_tag_off_cap { return; }
+    nc : ., mut = g_x86_mw_tag_off_cap * 2; if nc < 128 { nc = 128; } if nc < needed { nc = needed + 128; }
+    nb := alloc(nc * 8); _dyncpy(g_x86_mw_tag_off, g_x86_mw_tag_off_cap * 8, nb);
+    g_x86_mw_tag_off = nb; g_x86_mw_tag_off_cap = nc; }
+
+fn grow_mw_jo_patch(needed: int) {
+    if needed < g_x86_mw_jo_cap { return; }
+    nc : ., mut = g_x86_mw_jo_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+    nb := alloc(nc * 8); _dyncpy(g_x86_mw_jo_pos, g_x86_mw_jo_cap * 8, nb);
+    g_x86_mw_jo_pos = nb;
+    nb2 := alloc(nc * 8); _dyncpy(g_x86_mw_jo_dest, g_x86_mw_jo_cap * 8, nb2);
+    g_x86_mw_jo_dest = nb2;
+    nb3 := alloc(nc * 8); _dyncpy(g_x86_mw_jo_is_sub, g_x86_mw_jo_cap * 8, nb3);
+    g_x86_mw_jo_is_sub = nb3;
+    nb4 := alloc(nc * 8); _dyncpy(g_x86_mw_jo_resume, g_x86_mw_jo_cap * 8, nb4);
+    g_x86_mw_jo_resume = nb4;
+    g_x86_mw_jo_cap = nc; }
+
+fn grow_mw_oc_patch(needed: int) {
+    if needed < g_x86_mw_oc_cap { return; }
+    nc : ., mut = g_x86_mw_oc_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+    nb := alloc(nc * 8); _dyncpy(g_x86_mw_oc_pos1, g_x86_mw_oc_cap * 8, nb);
+    g_x86_mw_oc_pos1 = nb;
+    nb2 := alloc(nc * 8); _dyncpy(g_x86_mw_oc_pos2, g_x86_mw_oc_cap * 8, nb2);
+    g_x86_mw_oc_pos2 = nb2;
+    nb3 := alloc(nc * 8); _dyncpy(g_x86_mw_oc_s1, g_x86_mw_oc_cap * 8, nb3);
+    g_x86_mw_oc_s1 = nb3;
+    nb4 := alloc(nc * 8); _dyncpy(g_x86_mw_oc_s2, g_x86_mw_oc_cap * 8, nb4);
+    g_x86_mw_oc_s2 = nb4;
+    nb5 := alloc(nc * 8); _dyncpy(g_x86_mw_oc_dest, g_x86_mw_oc_cap * 8, nb5);
+    g_x86_mw_oc_dest = nb5;
+    nb6 := alloc(nc * 8); _dyncpy(g_x86_mw_oc_op, g_x86_mw_oc_cap * 8, nb6);
+    g_x86_mw_oc_op = nb6;
+    nb7 := alloc(nc * 8); _dyncpy(g_x86_mw_oc_resume, g_x86_mw_oc_cap * 8, nb7);
+    g_x86_mw_oc_resume = nb7;
+    g_x86_mw_oc_cap = nc; }
+
 fn grow_opt_meta(needed: int) {
     if needed <= g_opt_meta_cap { return; }
     nc : ., mut = g_opt_meta_cap * 2;
@@ -762,6 +1118,41 @@ fn grow_gen_constr(needed: int) {
     nc : ., mut = g_generic_constr_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
     nb := alloc(nc * 8); _dyncpy(g_generic_constr, g_generic_constr_cap * 8, nb);
     g_generic_constr = nb; g_generic_constr_cap = nc; }
+
+// R2 P3 Task 5：结构/枚举泛型约束侧表（键 = row * MAX_GENERICS + gi；索引空间与函数侧分家，
+// 见 globals.cr 表注）。增长式样逐字照 grow_gen_constr（同族第三/第四份，语义同构）。
+fn grow_sgen_constr(needed: int) {
+    if needed < g_sgen_constr_cap { return; }
+    nc : ., mut = g_sgen_constr_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
+    nb := alloc(nc * 8); _dyncpy(g_sgen_constr, g_sgen_constr_cap * 8, nb);
+    g_sgen_constr = nb; g_sgen_constr_cap = nc; }
+
+fn grow_egen_constr(needed: int) {
+    if needed < g_egen_constr_cap { return; }
+    nc : ., mut = g_egen_constr_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
+    nb := alloc(nc * 8); _dyncpy(g_egen_constr, g_egen_constr_cap * 8, nb);
+    g_egen_constr = nb; g_egen_constr_cap = nc; }
+
+// R2 P3 Task 5（Step 4）：调用点绑定侧表增长（i64 顺序追加，无洞——与上面两张稀疏表不同）
+fn grow_gen_binds(needed: int) {
+    if needed < g_gen_binds_cap { return; }
+    nc : ., mut = g_gen_binds_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+    nb := alloc(nc * 8); _dyncpy(g_gen_binds, g_gen_binds_cap * 8, nb);
+    g_gen_binds = nb; g_gen_binds_cap = nc; }
+
+// 结构/枚举第 gi 个泛型形参的约束名 ni（-1 = 无约束/越界）。读取面护栏（照 SI 访问器惯例：
+// 越界不越读——gi 上限 MAX_GENERICS、行下标上限计数）。
+fn si_gen_constr(n: int, gi: int) -> int {
+    if n < 0 || gi < 0 || gi >= MAX_GENERICS { return -1; }
+    idx := n * MAX_GENERICS + gi;
+    if idx >= g_sgen_constr_count { return -1; }
+    return r64(g_sgen_constr, idx * 8); }
+
+fn ei_gen_constr(n: int, gi: int) -> int {
+    if n < 0 || gi < 0 || gi >= MAX_GENERICS { return -1; }
+    idx := n * MAX_GENERICS + gi;
+    if idx >= g_egen_constr_count { return -1; }
+    return r64(g_egen_constr, idx * 8); }
 
 fn grow_sg(n: int) {
     if n < g_sg_cap { return; }

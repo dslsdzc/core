@@ -81,17 +81,9 @@ T_MINUS_EQ : int = 74;
 T_STAR_EQ : int = 75;
 T_SLASH_EQ : int = 76;
 
-// Suffixed integer/float token kinds (lexer emits these when suffix like _i32, _u64, _f32 is found)
-T_INT_I8 : int = 77;
-T_INT_I16 : int = 78;
-T_INT_I32 : int = 79;
-T_INT_I64 : int = 80;
-T_INT_U8 : int = 81;
-T_INT_U16 : int = 82;
-T_INT_U32 : int = 83;
-T_INT_U64 : int = 84;
-T_FLOAT_F32 : int = 85;
-T_FLOAT_F64 : int = 86;
+// 77-86 原为宽度后缀 token kind（T_INT_I8..T_INT_U64 / T_FLOAT_F32 / T_FLOAT_F64）。
+// 2026-09-10 语言面收窄 §2 删除：lexer 从不发射这些 kind（宽度后缀已退役，改响亮报错），
+// parser 侧引用同步移除。**勿重编号**——编号空间稳定（先例：T_FLOAT_TYPE 91 已删除）。
 T_NONE : int = 87;
 T_SOME : int = 88;
 T_LET : int = 89;
@@ -106,17 +98,8 @@ T_REF : int = 96;
 T_DYN : int = 99;  // dynamic type
 T_EXTERN : int = 100;  // extern "C" / foreign function declaration
 
-// Width constants (stored in EXPR_INT/EXPR_DEX data field)
-W_I8 : int = 1;
-W_I16 : int = 2;
-W_I32 : int = 3;
-W_I64 : int = 4;
-W_U8 : int = 5;
-W_U16 : int = 6;
-W_U32 : int = 7;
-W_U64 : int = 8;
-W_F32 : int = 9;
-W_F64 : int = 10;
+// W_I8..W_F64（1..10）原为「宽度标注」值域，仅供宽度后缀 token 分支使用。
+// 2026-09-10 语言面收窄 §2 随死分支一并删除。**勿重编号**。
 
 // Type constants
 TY_INT : int = 0;
@@ -130,9 +113,9 @@ TY_GENERIC_PARAM : int = 7;  // special sentinel for generic type params
 TY_DEX_S : int = 8;  // dex 定点形式（TI_DEX_S）的类型表占位 data（终审 M1：占住表项
                      // 下标 8，用户类型从 9 起；占位项永不参与解析/运算）
 MAX_GENERICS : int = 4;      // max generic params per declaration (language limit)
-MAX_STRUCT_FIELDS : int = 16; // max fields per struct (struct info size limit)
-MAX_ENUM_VARIANTS : int = 16; // max variants per enum (enum info size limit)
-MAX_VARIANT_TYPES : int = 16; // max payload types per variant
+// 容量批 T3（裁-CAP-2 (a)）：`MAX_STRUCT_FIELDS` / `MAX_ENUM_VARIANTS` / `MAX_VARIANT_TYPES`
+// **已退役**（记录布局迁侧表 ⇒ 三面上限解除，P022/P023 硬错随之停发）。数值 16 不再具有
+// 语义（旧定长内嵌槽区的容量）；布局真源 = `dyn_arr.cr` 的 OFF_SI_*/OFF_EI_* 与侧表访问器。
 
 // Token struct
 struct Token {
@@ -143,44 +126,10 @@ struct Token {
     col: int,
 }
 
-// Function signature (for call resolution)
-struct FuncInfo {
-    name: string,
-    param_count: int,
-    param_types: [int; 64],
-    return_type: int,
-    ast_node: int,  // index into ast array for the fn body
-    generic_names: [string; 16],
-    generic_count: int,
-}
-
-// Struct layout
-struct StructInfo {
-    name: string,
-    field_names: [string; 64],
-    field_types: [int; 64],
-    field_type_nodes: [int; 64],  // original type node indices (for generic resolution)
-    field_count: int,
-    generic_names: [string; 16],
-    generic_count: int,
-}
-
-// Enum variant description
-struct EnumVariant {
-    name: string,
-    types: [int; 64],  // TY_* for each field
-    type_count: int,
-}
-
-// Enum layout
-struct EnumInfo {
-    name: string,
-    variants: [EnumVariant; 16],
-    variant_count: int,
-    generic_names: [string; 16],
-    generic_count: int,
-}
-
+// ── 记录镜像声明（旧）：容量批 T3 起**删除**——`FuncInfo`/`StructInfo`/`EnumInfo`/
+// `EnumVariant` 三个镜像结构在全仓**零类型使用点**（仅注释命中），且其定长槽区（`[.;64]`
+// 等）与运行期布局早已不一致（旧布局 = 内存字节缓冲 + 定长内嵌槽区，T3 起字段/变体迁
+// 侧表）。布局真源 = `dyn_arr.cr`（ESZ_*/OFF_* 常量 + 侧表访问器）。
 // Loop context (for break/continue)
 struct LoopInfo {
     start_label: string,
@@ -215,6 +164,11 @@ EXPR_UNARY : int = 6;    // a=operand, c=opcode
 EXPR_CALL : int = 7;     // a=func, b=first arg idx, c=arg count, type_val=CALL_FLAG_*
 CALL_FLAG_MODULE : int = 1;
 CALL_FLAG_INLINE : int = 2;
+// R2 P3b Task 6（Step 3，mangling 退役）：接口方法调用（泛型形参接收者，`fn f[T: I]` 体内
+// `x.m()`）——data = **泛型形参名 ni**（不是合成的 "T.m" 串）；实例化时由 monomorph 按
+// 具体类型查方法表（`iface_find_method`）解析为真实函数名。旧态 = 名字拼接 + 克隆期文本替换，
+// 实例体内调用目标悬空（产物运行 rc=139，实测）。
+CALL_FLAG_IFACE_METHOD : int = 4;
 EXPR_BLOCK : int = 8;    // a=g_block_stmts start, b=stmt count
 EXPR_IF : int = 9;       // a=cond, b=then, c=else (-1 if none)
 EXPR_LOOP : int = 10;    // a=body
@@ -223,9 +177,14 @@ EXPR_RETURN : int = 12;  // a=value expr (-1 if none)
 EXPR_FIELD : int = 13;   // a=object, int_val=field name idx
 EXPR_INDEX : int = 14;   // a=object, b=index
 EXPR_ASSIGN : int = 15;  // a=target, b=value
-EXPR_STRUCT : int = 16;  // a=type name idx, b=first field, c=field count
+EXPR_STRUCT : int = 16;  // a=type name idx, b=first wrapper（g_ast 中连续；wrapper kind=EXPR_NONE 且 a=字段值节点、b=字段名 idx（TODO #29 ①；-1 = 无名字信息，按位序回落））, c=field count (struct literal)
 EXPR_FN : int = 17;      // a=name idx, b=first param, c=param count, d=body, data=return_type
 EXPR_PARAM : int = 18;   // a=name idx, int_val=type
+// 表示层概念（2026-09-10 语言面收窄裁决 §1）：`[T; N]` 的类型构造器身份已退役——
+// 语义归处 = product（N 元聚合）/ 序列接口 + 长度 where（N 长序列）/ F11 图（长度事实，
+// 可表达依赖长度）。本语法保留为「内联容量存储」表示提示（映射参数层，与 hw-map 同层；
+// 随实例选择生效或退化，非经典范式映射可忽略）。见
+// docs/superpowers/specs/2026-09-10-language-surface-narrowing-design.md §1
 EXPR_ARRAY : int = 19;   // a=first elem, b=elem count
 EXPR_BREAK : int = 20;
 EXPR_CONTINUE : int = 21;
@@ -242,7 +201,7 @@ EXPR_MOVE : int = 32;     // a=expr being moved
 EXPR_ENUM_CONSTRUCTOR : int = 37; // a=name idx, b=first arg, c=arg count
 EXPR_REFTYPE : int = 38;   // a=inner type node, data=mut flag (for &T / &mut T in type position)
 EXPR_GENERIC_APPLY : int = 39; // a=base name idx, b=first arg type node, c=arg count
-EXPR_TUPLE : int = 40;         // a=first elem, b=elem count (tuple literal)
+EXPR_TUPLE : int = 40;         // a=first wrapper（g_ast 中连续；wrapper kind=EXPR_NONE 且 a=元素值节点）, b=elem count (tuple literal)
 EXPR_ARG : int = 41;            // a=expr, b=next arg node or -1 (argument linked list)
 EXPR_GO : int = 42;             // go expr: a=-1, b=body;  go var start..end expr: a=-1, b=body, c=iter_ni, data=range_node
 EXPR_FLOW : int = 43;           // flow fn — a=fn_name_ni, b=param_count, c=first_param, data=body
@@ -253,10 +212,14 @@ EXPR_AT : int = 46;             // @builtin: a=name_ni, b=args_node, c=0, iv=0, 
 // Desugared constructs
 EXPR_TRY : int = 33;      // a=expr being tried (? operator)
 EXPR_UNSAFE : int = 34;   // a=block body
-EXPR_STRUCTPAT : int = 35; // struct pattern: a=name ni, b=first field pat, c=field count
+EXPR_STRUCTPAT : int = 35; // struct pattern: a=name ni, b=first wrapper（连续；wrapper kind=EXPR_NONE 且 a=子模式节点）, c=field count
 EXPR_AS : int = 36;        // a=expr, b=type node (cast: expr as Type)
 EXPR_PTRTYPE : int = 47;  // a=inner_type (for *T in type position)
 EXPR_EXTERN : int = 48;  // a=name_ni, b=first_param, c=param_count, data=ffi_lang_ni
+// R2 P3 Task 4：`T?` 的目标形态（退役「T? → EXPR_GENERIC_APPLY(Option, T)」的**名字依赖**：
+// 旧形态要求内建 Option 名注册在符号表里，且 §5.4 的「T? = T ∪ null」无法表达）。
+// a = 内层类型节点。-1 内层 / 非法形态 → res_type_node 落 TI_UNIT（照各类型节点分支同款）。
+EXPR_OPTIONAL : int = 49;  // a=inner type node (T? 类型位置)
 
 // Field representation in struct literal: two consecutive AST nodes
 // (name_idx, value_idx, line=line, col=col)
@@ -313,14 +276,23 @@ TI_DEX_S : int = 8;
 // Type table entry kinds
 TYP_BASE : int = 0;   // data = TY_* constant
 TYP_NAMED : int = 1;  // data = name string index
+// 表示层概念（2026-09-10 语言面收窄裁决 §1）：`[T; N]` 退役为「内联容量存储」表示提示（语义归处 = product / 序列+长度约束 / F11）——完整注记见本文件 EXPR_ARRAY 常量处，spec 见 docs/superpowers/specs/2026-09-10-language-surface-narrowing-design.md §1
 TYP_ARRAY : int = 2;  // data = element type idx, extra = size
 TYP_REF : int = 3;    // data = inner type idx, extra = mut flag
 TYP_PTR : int = 4;    // data=pointee_type, extra=address_space (0=tracked, 1=external)
 TYP_GENERIC_PARAM : int = 7;  // data = name string index (unresolved generic param)
 TYP_GENERIC_APPLY : int = 8;  // data = base type idx, extra = arg list start in g_gen_apply_data
+// 表示层概念（2026-09-10 语言面收窄裁决 §1）：`[T; N]` 退役为「内联容量存储」表示提示（语义归处 = product / 序列+长度约束 / F11）——完整注记见本文件 EXPR_ARRAY 常量处，spec 见 docs/superpowers/specs/2026-09-10-language-surface-narrowing-design.md §1
 TYP_SLICE : int = 9;   // data = element type idx (dynamic-length view into array)
 TYP_TUPLE : int = 10;  // data = element_count, extra = elem types start in g_gen_apply_data
 TYP_DYN : int = 11;  // data = type set bitmap (0 = single known type)
+// R2 P3 Task 4（联合/可选）：`T?` = `T ∪ null`（spec §5.4）——不再是「内建 Option[T] 命名类型」。
+// data = 内层类型行；桥接侧译作 union(内层项, null 原子项)（ty_shadow.cr 的 TYP_OPTIONAL 分支）。
+// 引擎面 = 联合项（非原子类）⇒ `iface_kind_of` 对之行回 -1（不得按单一原子处理）。
+TYP_OPTIONAL : int = 12;  // data = inner type idx（T? = T ∪ null）
+// `null` 的类型（`None` 值的类型；spec §5.4 的「T ∪ null」里的 null）。值域单点 ⇒ 引擎侧
+// AK_NULL 原子（原生第九员）；行不带参数（None 无载荷）。与 AK_UNIT/AK_NEVER 均不相交。
+TYP_NULL : int = 13;  // 无字段（data/extra 恒 0）
 
 // Error codes: category * 1000 + number, matching docs/error-codes.md
 // Category 0 = unclassified (000-)
@@ -361,6 +333,10 @@ EC_P_IMPORT_PATH  : int = 1016; // P016  Invalid import path
 EC_P_FILEID       : int = 1017; // P017  Invalid fileid declaration
 EC_P_VAR_DECL     : int = 1018; // P018  Invalid var declaration
 EC_P_LIT_OVERFLOW : int = 1019; // P019  Numeric literal overflow
+EC_P_TOO_MANY_PARAMS : int = 1020; // P020  Too many function parameters (FuncInfo 参数槽区容量)
+EC_P_NESTED_FN    : int = 1021; // P021  Nested function declaration (函数声明仅限顶层)
+EC_P_ENUM_LIMIT   : int = 1022; // P022  **已退役**（容量批 T3：变体/载荷上限解除，零 raise）
+EC_P_STRUCT_LIMIT : int = 1023; // P023  **已退役**（容量批 T3：字段上限解除，零 raise）
 
 // N0xx — Name Resolution
 EC_N_UNDEFINED     : int = 2001; // N001  Undefined name
@@ -505,6 +481,10 @@ EC_E_CCR_OPEN     : int = 15004; // E004  Cannot open CCR
 EC_ICE_UNEXPECTED : int = 16001; // ICE01  Unexpected
 EC_ICE_OVERFLOW   : int = 16002; // ICE02  Buffer overflow
 EC_ICE_UNSUPPORTED : int = 16003; // ICE03  Unsupported
+// R2 P5 Task 4（P-A）：类型判定不可判（引擎 -1 = 未覆盖面/预算耗尽，或桥接缺口 = 该行译不成
+// 类型项）。三态纪律：**未知不得当 0/1** ⇒ 硬错（legacy 回落面已删，D24）。反例（两侧类型项
+// 文本）随诊断输出；判定点无 AST 位置 ⇒ line/col = 0。
+EC_ICE_TY_INDET   : int = 16004; // ICE04  Type judgment indeterminate
 
 // Diagnostic entry
 struct Diag {

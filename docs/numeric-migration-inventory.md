@@ -4,6 +4,8 @@
 依据：[2026-08-16-numeric-types-design.md](superpowers/specs/2026-08-16-numeric-types-design.md)（已批准）
 用途：Task 5/6 的迁移契约——每个站点按本表逐点执行，**禁止机械替换（sed/全局替换）**。
 
+> **追记（2026-09-10，语言面收窄 R1）**：本盘点为 2026-08-16 历史快照——下述分类结论按当时约束固化，**不在本文件改写历史**（原文保留）。R1（计划 `docs/superpowers/plans/2026-09-10-language-surface-narrowing-r1.md`）对其中**宽度三项**改判并落实：`T_FLOAT_F32/T_FLOAT_F64`（与 `T_INT_I8..T_INT_U64` 同族）及 `W_I8..W_F64` **删除**（ce3e541c——编号保留勿复用）、`_f32`/`_f64` 后缀**退役 + 响亮报错**（51d74be3——宽度 = 机器形状，归映射层）。故本表原标 `保留` 的三处（`ast.cr:93-94`、`ast.cr:117-118`、分类规则表「`_f32`/`_f64` 后缀 → 保留」行）**以本次改判为准**；下文相关行逐点标注 R1 落点与一处实测修正（`analysis.cr:895` 行）。
+
 ## 分类规则
 
 | 分类 | 含义 | 判定标准 |
@@ -26,10 +28,10 @@
 |---|---|---|---|
 | ast.cr:8 `T_FLOAT : int = 3` | 字面量令牌 kind | `dex` | `3.14` 字面量默认语义 → 精确 dex；令牌更名/改义（T_DEX），默认路径不再产 binary64 位模式 |
 | ast.cr:84 注释 | 注释 | `保留` | 后缀令牌说明（`_i32/_u64/_f32`），历史注释 |
-| ast.cr:93-94 `T_FLOAT_F32/T_FLOAT_F64 = 85/86` | 后缀字面量令牌 | `保留` | `_f32/_f64` 后缀 → apx CPU 位宽标注，令牌保留 |
+| ast.cr:93-94 `T_FLOAT_F32/T_FLOAT_F64 = 85/86` | 后缀字面量令牌 | `保留` | `_f32/_f64` 后缀 → apx CPU 位宽标注，令牌保留。**2026-09-10 R1 改判 = 删除**（ce3e541c——lexer 从不发射，宽度后缀退役改响亮报错，编号 85/86 保留勿复用；见行首追记） |
 | ast.cr:99 `T_FLOAT_TYPE : int = 91` | 类型关键字令牌 kind | `删除` | float 关键字消亡；该常量**从未被 lexer 发射**（类型名按 lexeme 匹配，见 parser.cr:84）——死常量残留。删除时勿重编号（保持 LSP 连续区间 90..95 语义，见 analysis.cr:895 说明） |
 | ast.cr:108 注释 | 注释 | `保留` | 宽度常量说明（EXPR_INT/EXPR_FLOAT） |
-| ast.cr:117-118 `W_F32/W_F64 = 9/10` | 位宽常量 | `保留` | `_f32/_f64` → apx CPU 位宽标注 |
+| ast.cr:117-118 `W_F32/W_F64 = 9/10` | 位宽常量 | `保留` | `_f32/_f64` → apx CPU 位宽标注。**2026-09-10 R1 改判 = 删除**（ce3e541c——`W_I8..W_F64` 全族随宽度分支一并清） |
 | ast.cr:122 `TY_FLOAT : int = 1` | 核心类型常量 | `dex` | 类型本身更名 TY_DEX，默认精确（语义变更）；设计 §5：float 类型名删除、类型迁为 dex |
 | ast.cr:206 `EXPR_FLOAT : int = 27` | 字面量 AST 节点 kind | `dex` | 字面量节点语义 → dex；注释已预示"int_val = value (as scaled int)"（缩放整数 = dex 表示） |
 | ast.cr:296 `TI_FLOAT : int = 1` | IR 类型索引 | `dex` | 随类型更名 TI_DEX；单一类型（dex 永远是 dex，apx 只是附注） |
@@ -48,7 +50,7 @@
 | 站点 | 角色 | 分类 | 理由 |
 |---|---|---|---|
 | parser.cr:84 `lex == "float"` → TY_FLOAT | 类型名解析 | `dex` | 用户可见类型名；`float` → `dex`（默认精确，语义变更） |
-| parser.cr:405-411 `T_FLOAT/T_FLOAT_F32/F64` 字面量解析 | 字面量节点构建 | `dex` | 字面量节点 EXPR_FLOAT 语义 → dex（默认精确）；其中 409-410 的 W_F32/W_F64 宽度传递保留（后缀标注不动，parser 404 行的 T_FLOAT_F32/F64 分支配对保留） |
+| parser.cr:405-411 `T_FLOAT/T_FLOAT_F32/F64` 字面量解析 | 字面量节点构建 | `dex` | 字面量节点 EXPR_FLOAT 语义 → dex（默认精确）；其中 409-410 的 W_F32/W_F64 宽度传递保留（后缀标注不动，parser 404 行的 T_FLOAT_F32/F64 分支配对保留）。**2026-09-10 R1 更新**（ce3e541c）：T_FLOAT_F32/F64 分支配对与 W_* 宽度传递**已删除**——现 `parse_primary` 只认 `T_DEX`，`data` 槽恒 0（后缀退役改响亮报错，51d74be3） |
 
 ### src/compiler/checker.cr（12 处，全部 `dex`）
 
@@ -145,7 +147,7 @@
 | analysis.cr:312 `analysis_type_of_expr` EXPR_FLOAT → "float" | 字面量类型显示 | `dex` | 字面量语义 → dex，显示 "dex" |
 | analysis.cr:848 注释（"运算符与 int/float 字面量令牌的 lexeme = -1"） | 注释 | `保留` | 注释（令牌跨度扫描说明） |
 | analysis.cr:864-881 注释块（tokenType 映射表：864 含 T_FLOAT_F64、865 内置类型名 int/float/…、881 "number (7): T_INT T_FLOAT"） | 注释 | `保留` | 映射表注释；legend 结构本身不改（number 类保留） |
-| analysis.cr:895 `(k >= T_INT_I8 && k <= T_FLOAT_F64)` 区间 | semanticTokens legend 分派 | `保留` | 区间含 T_FLOAT_F32/F64（后缀令牌保留 → 区间保持有效，无需改动）；另含 T_INT_TYPE..T_AUTO_TYPE 区间——若 T_FLOAT_TYPE 删除但不重编号，区间仍正确（见 ast.cr:99 行理由） |
+| ~~analysis.cr:895 `(k >= T_INT_I8 && k <= T_FLOAT_F64)` 区间~~ | semanticTokens legend 分派 | ~~`保留`~~ **该行本身即过时（实测不存在）** | **2026-09-10 R1 实测修正**：`src/lsp/analysis.cr` 中 `T_INT_I8` / `T_FLOAT_F32` / `T_FLOAT_F64` **零出现**（grep 实证），原表所引区间不存在——该处实际只有 `(k >= T_INT_TYPE && k <= T_AUTO_TYPE)`（analysis.cr:981，90..95 类型关键字区间），与宽度令牌无关；且 analysis.cr:864 处原称含 T_FLOAT_F64 的注释块同样已不存在。宽度令牌删除对 LSP 零影响（本行可按「不适用」结案）。 |
 | analysis.cr:900 `k == T_FLOAT` → number legend(7) | 令牌→legend 分派 | `dex` | T_FLOAT 令牌更名 T_DEX 后同步（仍映射 number） |
 | analysis.cr:908 `str_eq(s, "float")` 内置类型名判定 | 内置类型名清单 | `dex` | 名字改 "dex"（与 parser.cr:84 同源清单） |
 | analysis.cr:955 `k == T_FLOAT` 令牌跨度扫描 | 令牌长度计算（镜像 lexer） | `dex` | 随令牌更名同步；后缀令牌分支（956 起小数扫描）保留 |
@@ -187,7 +189,7 @@
 | 层 | dex（默认精确，语义变更） | apx（授权近似，binary64 快路径保留） | 涉及站点 |
 |---|---|---|---|
 | 字面量 | `3.14` → 缩放整数常量（精确解析，新路径） | `3.14` → binary64 位模式（str_to_f64_bits 保留） | lexer:121/331、ir_gen:482-483、parser:405-411、ast:8/206 |
-| 词法令牌 | T_FLOAT → T_DEX（字面量令牌） | T_FLOAT_F32/F64 保留（apx CPU 位宽标注） | ast:8/93-94 |
+| 词法令牌 | T_FLOAT → T_DEX（字面量令牌） | ~~T_FLOAT_F32/F64 保留（apx CPU 位宽标注）~~ **2026-09-10 R1 退役**（字母后缀一律响亮报错；编号 85/86 保留勿复用） | ast:8/93-94 |
 | 类型系统 | TY_FLOAT→TY_DEX、TI_FLOAT→TI_DEX（单一类型，dex 永远是 dex） | —（apx 是变量级标签，不进类型） | ast:122/296、checker:22 |
 | 类型名解析 | "float"→"dex"（parser/monomorph/ir_gen/module/LSP 清单同源改） | — | parser:84、monomorph:101、ir_gen:291、module:366/380、lsp:908 |
 | 检查器 | 算术规则 int\|dex、消息更新、推断 TI_DEX；apx 标签透传零规则 | — | checker 12 处 |
@@ -229,6 +231,8 @@ grep -rn "EXPR_FLOAT" src/                        # ast:206、parser:411、check
 grep -rn "IR_I2F\|IR_F2I" src/                    # ast:576-577、ir_gen:691/696、instr:418/426 ✓
 grep -rn "T_FLOAT_F32\|T_FLOAT_F64" src/          # ast:93-94、parser:405/409-410、lsp:864(注)/895 ✓
 grep -rn "W_F32\|W_F64" src/                      # ast:117-118、parser:409-410 ✓
+# 2026-09-10 R1 复跑（同上两条 grep）：src/ 仅剩 ast.cr 墓碑注释两行（77-86 / 1..10 编号说明）；
+# parser 与 lsp 面零命中（lsp 原声称的区间实测本就不存在——见主表 analysis.cr:895 行修正）。
 grep -rn "_f32\|_f64" src/ tests/ grammar/        # 3 处：ast.cr:84（注释）、lexer.cr:121（str_to_f64_bits）、lexer.cr:331（str_to_f64_bits 调用）——后两者已入主表（lexer 行），原"仅 ast.cr:84"断言修正 ✓
 grep -rn "FLOAT_LIT" grammar/                     # tokens.ebnf:24、core.ebnf:57/59——全大写，原大小写敏感 "float" grep 不命中，本轮补入表（保留×3）✓
 grep -rn "float" tests/suite/ examples/ vscode-core/ spec/ src/runtime/   # 0 命中 ✓
@@ -241,13 +245,13 @@ grep -rn "float\|FLOAT_LIT" bootstrap/corec/ | wc -l   # 22——附录 8 文件
 
 ## 分类争议点
 
-1. **parser.cr:405-411（字面量节点）标 `dex`**：该行同时含后缀宽度传递（W_F32/W_F64，保留）与 T_FLOAT 分支（dex 语义）。按"节点语义归属"标 dex，后缀部分在理由中注明不动。
+1. **parser.cr:405-411（字面量节点）标 `dex`**：该行同时含后缀宽度传递（W_F32/W_F64，保留）与 T_FLOAT 分支（dex 语义）。按"节点语义归属"标 dex，后缀部分在理由中注明不动。**2026-09-10 R1 结案**：后缀宽度传递（及 T_FLOAT_F32/F64 分支）已删除（ce3e541c），本争议点消解——该处现为单一 dex 字面量节点构建（`data` 槽恒 0）。
 2. **ir_gen.cr:482-483（字面量→IR_CONST）标 `dex,apx`**：发射的 binary64 位模式是 apx 表示（保留），但 TI_FLOAT→TI_DEX 更名属 dex 侧。若执行时希望整体按语义层处理可改 `dex`——建议以"位模式保留 = 快路径"为准标 dex,apx。
 3. **ast.cr:99 T_FLOAT_TYPE 标 `删除`**：从未被发射的死常量（float 关键字实际按 lexeme 匹配）。唯一风险是 LSP 连续区间 `T_INT_TYPE..T_AUTO_TYPE`（90..95）——删除不重编号则区间语义不变，故删除安全。若保守处理可标保留，但契约建议删除。
 4. **计划文件 Task 5 的括号示例把 monomorph/module/dump/ccr_io/parser/lexer 列为 `dex,apx` 站点**：本表按 Global Constraints 逐点判定——这些文件的**类型名/常量更名**站点属用户可见类型语义（`dex`），仅其**binary64 机制**部分（lexer 位转换、ir_gen 运算生成）为 `dex,apx`。计划原文"按分类表逐点执行"，以本表为准。
 5. **module.cr:361/366 编码表注释与代码不符**（注释 float=2、代码 =3）：既有 bug，非本任务修复项；Task 5 改注释时需核对实际 ABI 编码。
 6. **bootstrap 范围外但构建关键**（见附录）：若 Task 5 按表迁移 src/compiler 而 bootstrap 未先支持 dex，`build_selfhost_native.py` 自举失败——需在计划层面确认 bootstrap 的 dex 落地任务归属。
-7. **T_FLOAT_TYPE 删除 vs T_FLOAT_F32/F64 保留的判据对称性**：三者同为"从未被发射"的令牌常量——lexer **只发 `T_FLOAT`**（lexer.cr:330-331 唯一发射点：小数点或 `f32/f64` 后缀一律汇入 `add_tok_int(T_FLOAT, str_to_f64_bits(...))`）；parser.cr:409-410 的 `T_FLOAT_F32→W_F32 / T_FLOAT_F64→W_F64` 宽度分支是**死代码**（两个后缀令牌从未到达 parser，`w` 恒为 0）；`_f32/_f64` 后缀在 lexer 即被消费（num_str 已剔除后缀，见 lexer.cr:325-327），位宽信息在词法层丢失。分类差异的判据：`保留` 是约束原文（"_f32/_f64 后缀 → 保留"）的明确要求，且后缀令牌在设计中有迁移后指称（apx CPU 位宽标注角色）；T_FLOAT_TYPE 无任何迁移后指称（float 关键字消亡、从未发射），故标 `删除`。**风险提示**：当前 `_f32/_f64` 后缀标注实际不生效（宽度丢失、w=0）——apx 位宽标注需在 lexer 增加发射路径（suffix 分支发射 T_FLOAT_F32/F64 或等价标注令牌），属 Task 5/6 实现项；本表分类仅按约束原文执行，不改变此实现缺口。
+7. **T_FLOAT_TYPE 删除 vs T_FLOAT_F32/F64 保留的判据对称性**（**2026-09-10 R1 结案：两者殊途同归——T_FLOAT_F32/F64 及 `W_*` 全族一并删除（ce3e541c），`_f32/_f64` 后缀退役改响亮报错（51d74be3）；下述"保留 = 约束原文要求"的判据被 R1 用户裁决（宽度 = 机器形状，归映射层）覆盖，"宽度丢失需 lexer 新发射路径"的实现缺口随之消解——不再需要发射路径**）：三者同为"从未被发射"的令牌常量——lexer **只发 `T_FLOAT`**（lexer.cr:330-331 唯一发射点：小数点或 `f32/f64` 后缀一律汇入 `add_tok_int(T_FLOAT, str_to_f64_bits(...))`）；parser.cr:409-410 的 `T_FLOAT_F32→W_F32 / T_FLOAT_F64→W_F64` 宽度分支是**死代码**（两个后缀令牌从未到达 parser，`w` 恒为 0）；`_f32/_f64` 后缀在 lexer 即被消费（num_str 已剔除后缀，见 lexer.cr:325-327），位宽信息在词法层丢失。分类差异的判据：`保留` 是约束原文（"_f32/_f64 后缀 → 保留"）的明确要求，且后缀令牌在设计中有迁移后指称（apx CPU 位宽标注角色）；T_FLOAT_TYPE 无任何迁移后指称（float 关键字消亡、从未发射），故标 `删除`。**风险提示**：当前 `_f32/_f64` 后缀标注实际不生效（宽度丢失、w=0）——apx 位宽标注需在 lexer 增加发射路径（suffix 分支发射 T_FLOAT_F32/F64 或等价标注令牌），属 Task 5/6 实现项；本表分类仅按约束原文执行，不改变此实现缺口。
 
 ## Task 6 执行补记（2026-08-16，float 移除收尾 + 测试迁移）
 

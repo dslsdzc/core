@@ -39,7 +39,7 @@ compcert/
 |---|---|---|
 | `backend/RTL.v` | 3 地址 IR | `src/compiler/dataflow.cr`（HDFG） |
 | `backend/Allocation.v` + `Allocproof.v` | 寄存器分配 + 正确性证明 | `src/compiler/opt.cr`（寄存器分配器） |
-| `backend/Linearize.v` | 图 → 线性序列 | `src/compiler/ccr_io.cr` 的格层线性投影（v5；C 路线升级格形态 v6） |
+| `backend/Linearize.v` | 图 → 线性序列 | `src/compiler/ccr_io.cr` 的格形态 .ccr（v6：段表架构 + ENT 存在结构段；v6-only，见 `specs/2026-09-05-lattice-ir-v6-format.md`） |
 | `x86/Asm.v` | 每条机器指令的语义模型 | `src/arch/linux/ld/instr.cr`（指令编码） |
 | `x86/Asmgen.v` + `Asmgenproof.v` | 指令生成 + 生成正确性 | `corearch.cr` 的发射逻辑 |
 | `x86/TargetPrinter.ml` | 汇编文本打印 | `src/arch/linux/ld/elf.cr`（ELF 输出） |

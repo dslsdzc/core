@@ -73,7 +73,7 @@ python3 build_selfhost_native.py       # Produces build/corec + build/corearch
 # Dataflow graph dump
 ./build/corec cir FILE.cr
 
-# 格形态 IR dump（现 v5 = 格层线性投影）
+# 格形态 IR dump（v8 = 段表 8 段：STR/SYM/NOD/ENT/REG/EDG + TYPE(7)/IFACE(8)）
 ./build/corec ccr FILE.cr
 ```
 
@@ -95,6 +95,8 @@ python3 tests/selfhost/test_borrow.py      # Self-hosted borrow checker (7 rules
 
 Integration tests in `tests/suite/` are `.cr` source files — run through `./build/corec`.
 
+**行为探针语料**（`tests/probes/`，29 档 `check` 面负例为主，**非编译单元**）与**回归网配方**（`tools/baseline/`：冻结基线重建 + sha 白名单 + 两条 runner）见 `tools/baseline/REBUILD.md`——判定面回归网 = 冻结基线同源对拍 + 行为探针 + 突变控制 + 三态纪律（R2 P6 Task 1 起；影子通道已下线，不得引用其计数）。
+
 ## Architecture
 
 ### Python Bootstrap Compiler
@@ -114,7 +116,7 @@ bootstrap/corec/frontend/type_checker.py → Type inference + checking + borrow 
 bootstrap/corec/frontend/ir_gen.py     → AST → Core IR
 
 bootstrap/corec/ir/cir.py              → Dataflow graph IR definitions
-bootstrap/corec/ir/ccr.py              → 格形态 IR（现 v5 线性指令定义；C 路线：升级格形态 v6，见 specs/2026-08-27-lattice-form-ir-design.md）
+bootstrap/corec/ir/ccr.py              → 格形态 IR（注：该文件实际不存在——.ccr 仅由 self-hosted ccr_io.cr 读写；现行 = v8 八段段表，见 specs/2026-09-09-lattice-ir-v7-format.md；v6 版历史设计见 specs/2026-09-05-lattice-ir-v6-format.md）
 bootstrap/corec/ir/base.py             → IRNode base class, IRVar, VarKind
 bootstrap/corec/ir/symbol_table.py     → Scoped symbol table
 
@@ -157,17 +159,16 @@ src/compiler/
 └── _import.cr      → Shared imports for all compiler modules
 ```
 
-### ELF Backend (`src/arch/linux/ld/`)
+### Backend（x86 实例化三轴布局：架构 × 格式 × OS；`src/arch/linux/ld/` 已退役）
 
-Direct ELF binary output for x86-64, used by `corearch`:
+Direct ELF binary output for x86-64, used by `corearch`. 三轴目录 = 跨轴 import 的
+唯一通道（`module.cr` 回退链），组合根 = `src/targets/x86_64-linux/`（target triple 命名）：
 
 ```
-src/arch/linux/ld/
-├── elf.cr      → ELF header + program header generation, _start emission
-├── instr.cr    → Instruction encoding: REX, ModRM, SIB, all IR opcode emitters
-├── sizes.cr    → Instruction byte size helpers (sz_* functions)
-├── resolve.cr  → Label resolution pass (res_labels)
-└── ld.cr       → Dynamic linking (PLT/GOT, .so loading)
+src/arch/x86_64/          → regalloc.cr（CAG 寄存器分配）· sizes.cr（指令字节尺寸单源）· instr.cr（指令编码 REX/ModRM/SIB + 全 IR opcode 发射 + e2_* 原语）· frame.cr（帧布局/序言尾声——帧公式单入口 pf_frame_size）· tag2l.cr（int 多字 M1 tag/2L 编码族）· core-x86.toml（HIT 表数据）
+src/format/elf/           → elf.cr（ELF 头/phdr/段发射 + elf_gen）· resolve.cr（标签解析 res_labels）· ld.cr（动态链接 PLT/GOT/.so 装载）
+src/os/linux/             → entry.cr（_start 发射序 emit_start/emit_start_size）· callseq.cr（SysV AMD64 参数/栈/返回/调用序列）· syscall.cr（syscall3/4 内置体——rax 号 + rdi/rsi/rdx(/r10) 参数序）（三件均波 1 落位：Task 2/5/6）
+src/targets/x86_64-linux/ → 组合根（target triple）：main.cr + _import.cr + Core.toml（`corec build <dir>` 的 project-mode 入口）
 ```
 
 ### Standard Library (`src/stdlib/`)
@@ -263,11 +264,11 @@ Design documents (Chinese):
 
 ## Key Conventions
 
-- File extensions: `.cr` (source), `.cir` (dataflow graph IR / 图形态), `.ccr` (格形态 IR，现 v5 = 格层线性投影，v6 演进中), `.corespec` (spec)
+- File extensions: `.cr` (source), `.cir` (dataflow graph IR / 图形态), `.ccr`（格形态 IR，**v8 = 段表架构 8 段**：STR/SYM/NOD/ENT/REG/EDG + TYPE(7)/IFACE(8)（R2 P4 载体批；文件名/测试名保留「v7」= 段表架构代号，见 specs/2026-09-09-lattice-ir-v7-format.md））, `.corespec`（已退役 2026-09-06——规约并入 .cr 语法，见 grammar/core.ebnf 迁移事项）
 - Tests in `tests/bootstrap/` and `tests/selfhost/` define inline Core source strings and compare output
 - Python bootstrap: `sys.path.insert(0, 'bootstrap')` to import compiler modules
 - VS Code extension in `vscode-core/`
-- Spec files in `spec/` (`.corespec`) for formal verifier
+- Spec files in `spec/`（.corespec 已退役——规约语法并入 .cr，图即验证承载于 TagNode/.csr）
 - Examples in `examples/`
 
 ## Known Issues & TODO

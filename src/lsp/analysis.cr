@@ -109,6 +109,13 @@ fn analysis_type_node_name(node: int, depth: int) -> string {
         out = out + analysis_type_node_name(ast_a(node), depth + 1);
         return out;
     }
+    if k == EXPR_OPTIONAL {
+        // R2 P3 Task 4：`T?` 的悬停/补全显示（内层名 + "?"）
+        out : string, mut = "";
+        out = out + analysis_type_node_name(ast_a(node), depth + 1);
+        out = out + "?";
+        return out;
+    }
     if k == EXPR_ARRAY {
         out : string, mut = "[";
         out = out + analysis_type_node_name(ast_a(node), depth + 1);

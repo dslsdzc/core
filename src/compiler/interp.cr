@@ -5,10 +5,31 @@
 //
 // Limitations:
 // - String constants: 解释器不调用 syscall3，alloc/print/syscall 相关函数返回 0
-// - 递归/跨函数调用：inline 执行不支持 IR_CALL，只处理 main→callee 的单层调用
-// - for 循环：dataflow 图按顺序执行，label/branch 机制不与 for 循环兼容
+// - 递归/跨函数调用：callee 图内联执行（ir_interp_run_fn），支持嵌套/递归/互递归；
+//   深度上限 IR_INTERP_MAX_DEPTH（超限响亮报错，不挂死）
+// - 动态分发/外部函数（IR_DYN_DISPATCH/IR_CALL_EXTERN，见 ir_interp_call）与
+//   binary64 转换（IR_I2F/IR_F2I）：解释器无对应语义——响亮报错 + 非零退出码，
+//   绝不静默落 0（TODO #11 的静默分叉类）
+// - 主循环与 callee 内联路径共用同一份 opcode 分派（ir_interp_call/ir_interp_run_fn），
+//   双路径一致性由 tests/selfhost/test_interp_parity.py 钉死（interp callee ≡
+//   interp main ≡ ELF oracle）
 
 g_ir_vals : string, mut;    g_ir_vals_cap : int, mut;
+
+// === 调用分派 / callee 内联执行（主循环与 callee 路径的唯一实现）===
+// ir_interp_abort：解释器中止码（0 = 正常；非 0 = ir_interpret 应立即返回的
+// 值）。callee（含嵌套层）里的响亮失败——越界陷阱（-1）/ 动态分发·extern（2）/
+// binary64 转换（-1）——沿调用链上抛到 ir_interpret，绝不静默落 0
+// （TODO #11 的静默分叉类：主循环有、callee 路径无 → 双路径分叉）。
+g_interp_abort : int, mut;
+// 嵌套内联深度（callee 内再调用用户函数 = 递归内联）。超限响亮报错，不挂死、
+// 不静默——Python 参照解释器无此概念，深度上限取足够覆盖正常递归用例。
+g_interp_call_depth : int, mut;
+IR_INTERP_MAX_DEPTH : int = 400;
+// 活动函数栈（g_interp_stack[d] = 第 d 层内联执行的函数索引）——用于重入（递归/
+// 互递归）检测：同一函数再次进入时必须逐帧保存/恢复其槽区（扁平槽模型里同一
+// 函数的形参/局部只有一份槽，不保存则外层帧被内层调用覆写 → 静默错值）。
+g_interp_stack : string, mut;
 
 // IR_BINARY 统一分派（主循环与 callee 内联循环共用）：
 // 整数路径（模 2⁶⁴）。dex 为缩放整数——同走整数路径（数值迁移 #48 定稿）；
@@ -64,6 +85,364 @@ fn ir_interp_str_sub(a: int, start: int, len: int) -> int {
     return str_intern(str_sub(istr_get(a), start, len));
 }
 
+// IR_CALL (4) / IR_SPAWN (27) 统一分派——d=结果槽，s1=实参首槽，s2=实参数，
+// s3=函数名驻留索引。内置函数近似与原主循环分支逐条同语义同守卫；用户函数经
+// ir_interp_run_fn 内联执行（callee 内再调用 = 嵌套内联，深度守卫见 MAX_DEPTH）。
+fn ir_interp_call(d: int, s1: int, s2: int, s3: int) {
+    fn_ni := s3;
+    fn_name := istr_get(fn_ni);
+    sfi := find_so_fn(fn_ni);
+    if sfi >= 0 && s2 >= 1 {
+        tf := sym_type(sfi);
+        if tf == 1 || tf == 3 {  // TAG_VARIADIC: print/println — NOOP (syscall3 returns 0)
+        } else if tf == 2 || tf == 3 {  // TAG_AUTO_STR: print_i/println_i — NOOP (syscall3 returns 0)
+        }
+    }
+    // syscall3/syscall4 — interpreter returns 0
+    if str_eq(fn_name, "syscall3") != 0 || str_eq(fn_name, "syscall4") != 0 {
+        if d >= 0 { w64(g_ir_vals, d * 8, 0); }
+    }
+    if str_eq(fn_name, "str_len") != 0 {
+        if d >= 0 && s2 >= 1 { w64(g_ir_vals, d * 8, istr_len(r64(g_ir_vals, s1 * 8))); }
+    }
+    if str_eq(fn_name, "str_eq") != 0 {
+        if d >= 0 && s2 >= 2 {
+            left_s := istr_get(r64(g_ir_vals, s1 * 8));
+            right_s := istr_get(r64(g_ir_vals, (s1 + 1) * 8));
+            w64(g_ir_vals, d * 8, str_eq(left_s, right_s));
+        }
+    }
+    if str_eq(fn_name, "concat") != 0 {
+        if d >= 0 && s2 >= 2 {
+            w64(g_ir_vals, d * 8, ir_interp_str_concat(
+                r64(g_ir_vals, s1 * 8), r64(g_ir_vals, (s1 + 1) * 8)));
+        }
+    }
+    if str_eq(fn_name, "int_str") != 0 {
+        if d >= 0 && s2 >= 1 { w64(g_ir_vals, d * 8, str_intern(int_str(r64(g_ir_vals, s1 * 8)))); }
+    }
+    if str_eq(fn_name, "chr") != 0 {
+        if d >= 0 && s2 >= 1 { w64(g_ir_vals, d * 8, str_intern(chr(r64(g_ir_vals, s1 * 8)))); }
+    }
+    if str_eq(fn_name, "get_char") != 0 {
+        if d >= 0 && s2 >= 2 { w64(g_ir_vals, d * 8, ir_interp_str_char(r64(g_ir_vals, s1 * 8), r64(g_ir_vals, (s1 + 1) * 8))); }
+    }
+    if str_eq(fn_name, "str_sub") != 0 {
+        if d >= 0 && s2 >= 3 { w64(g_ir_vals, d * 8, ir_interp_str_sub(r64(g_ir_vals, s1 * 8), r64(g_ir_vals, (s1 + 1) * 8), r64(g_ir_vals, (s1 + 2) * 8))); }
+    }
+    if str_eq(fn_name, "load_str_ptr") != 0 {
+        if d >= 0 && s2 >= 2 {
+            b := r64(g_ir_vals, s1 * 8); p := r64(g_ir_vals, s1 + 1 * 8);
+            lo := load8(b, p) + load8(b, p+1)*256 +
+                  load8(b, p+2)*65536 + load8(b, p+3)*16777216;
+            hi := load8(b, p+4) + load8(b, p+5)*256 +
+                  load8(b, p+6)*65536 + load8(b, p+7)*16777216;
+            if hi < 0 { hi = hi + 4294967296; }
+            w64(g_ir_vals, d * 8, lo + hi * 4294967296);
+        }
+    }
+    if str_eq(fn_name, "store_str_ptr") != 0 {
+        if s2 >= 3 {
+            b := r64(g_ir_vals, s1 * 8); p := r64(g_ir_vals, s1 + 1 * 8); v := r64(g_ir_vals, s1 + 2 * 8);
+            lo : ., mut = v % 4294967296; hi : ., mut = v / 4294967296;
+            if v < 0 { lo = v; hi = -1; }
+            store8(b, p, lo%256);     store8(b, p+1, (lo/256)%256);
+            store8(b, p+2, (lo/65536)%256); store8(b, p+3, (lo/16777216)%256);
+            store8(b, p+4, hi%256);   store8(b, p+5, (hi/256)%256);
+            store8(b, p+6, (hi/65536)%256); store8(b, p+7, (hi/16777216)%256);
+        }
+        if d >= 0 { w64(g_ir_vals, d * 8, 0); }
+    }
+    // 字符串内置已处理 → 不再走用户函数查找（对照主循环的 ip+1;continue）
+    if str_eq(fn_name, "str_len") != 0 || str_eq(fn_name, "str_eq") != 0 ||
+       str_eq(fn_name, "concat") != 0 || str_eq(fn_name, "int_str") != 0 ||
+       str_eq(fn_name, "chr") != 0 || str_eq(fn_name, "get_char") != 0 ||
+       str_eq(fn_name, "str_sub") != 0 { return; }
+    // 用户函数内联执行（单层 / 嵌套递归）
+    if d < 0 { return; }
+    cfi : ., mut = 0;
+    loop {
+        if cfi >= g_ir_func_count { break; }
+        if r64(g_ir_func_name_idx, cfi * 8) == fn_ni {
+            f_start := r64(g_df_func_node_start, cfi * 8);
+            f_count := r64(g_df_func_node_count, cfi * 8);
+            if f_start >= 0 && f_count > 0 {
+                rval := ir_interp_run_fn(cfi, s1, s2);
+                if g_interp_abort == 0 { w64(g_ir_vals, d * 8, rval); }
+            }
+            break;
+        }
+        cfi = cfi + 1;
+    }
+}
+
+// callee 图内联执行（唯一实现）：主循环的 IR_CALL 与 callee 内的 IR_CALL 都走
+// 这里——两路径不再各有一份分派。建标签表 → 拷实参 → 顺序执行 f_count 节点 →
+// 恢复标签表 → 返回 IR_RETURN 值（无值返回 = 0，与主循环 ret_slot 清零同语义）。
+// 深度守卫：嵌套超过 IR_INTERP_MAX_DEPTH 响亮报错 + 中止（不挂死、不静默）。
+fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int {
+    f_start := r64(g_df_func_node_start, cfi * 8);
+    f_count := r64(g_df_func_node_count, cfi * 8);
+    if f_start < 0 || f_count <= 0 { return 0; }
+    if g_interp_call_depth >= IR_INTERP_MAX_DEPTH {
+        println("interpreter error: IR_INTERP_MAX_DEPTH exceeded — corec run cannot execute this recursion; build & run natively (corec build) instead");
+        g_interp_abort = -1;
+        return 0;
+    }
+    // 重入检测（递归 / 互递归）：本函数已在活动栈上 → 外层帧与本层共用同一份
+    // 槽区（扁平槽模型），必须在入口保存、出口恢复，否则外层帧被覆写（静默错值）。
+    reentrant : ., mut = 0;
+    si3 : ., mut = 0;
+    loop { if si3 >= g_interp_call_depth { break; }
+        if r64(g_interp_stack, si3 * 8) == cfi { reentrant = 1; break; }
+    si3 = si3 + 1; }
+    vs := r64(g_ir_func_var_start, cfi * 8);
+    vc := r64(g_ir_func_var_count, cfi * 8);
+    frame : string, mut = ""; has_frame : ., mut = 0;
+    if reentrant != 0 && vc > 0 && vs >= 0 {
+        frame = alloc(vc * 8);
+        has_frame = 1;
+        fi4 : ., mut = 0;
+        loop { if fi4 >= vc { break; }
+            w64(frame, fi4 * 8, r64(g_ir_vals, (vs + fi4) * 8));
+        fi4 = fi4 + 1; }
+    }
+    // 实参先入缓冲再落形参槽：递归调用时实参槽与形参槽同属本函数槽区，直接
+    // 逐个搬运可能被己方写覆盖（缓冲后行为与原子搬移一致）。
+    args_buf : string, mut = "";
+    if argc > 0 {
+        args_buf = alloc(argc * 8);
+        pai : ., mut = 0;
+        loop { if pai >= argc { break; }
+            w64(args_buf, pai * 8, r64(g_ir_vals, (arg_base + pai) * 8));
+        pai = pai + 1; }
+    }
+    // 压栈（重入检测在上；深度守卫已在入口）
+    w64(g_interp_stack, g_interp_call_depth * 8, cfi);
+    g_interp_call_depth = g_interp_call_depth + 1;
+    rval : ., mut = 0;  // callee 无值返回（IR_RETURN s1<0，如裸 return）→ 0
+    // Save label state（递归安全：每层帧在局部变量里保存/恢复）
+    old_lc := g_label_count;
+    old_poses := g_label_poses;
+    old_poses_cap := g_label_cap;
+    g_label_poses = alloc(64 * 8); g_label_cap = 64;
+    // Build label map for callee
+    li2 : ., mut = 0;
+    loop { if li2 >= f_count { break; }
+        n_op := r64(g_df_nodes, (f_start + li2) * ESZ_DFNODE + OFF_DF_OPCODE);
+        n_s1 := r64(g_df_nodes, (f_start + li2) * ESZ_DFNODE + OFF_DF_S1);
+        if n_op == 21 { if n_s1 >= 0 {
+            grow_label_poses(n_s1 + 1);
+            w64(g_label_poses, n_s1 * 8, li2);
+            if n_s1 + 1 > g_label_count { g_label_count = n_s1 + 1; }
+        }}
+    li2 = li2 + 1; }
+    // Copy args from buffer to callee param vars
+    pstart := vs;
+    pai2 : ., mut = 0;
+    loop { if pai2 >= argc { break; }
+        w64(g_ir_vals, (pstart + pai2) * 8, r64(args_buf, pai2 * 8));
+    pai2 = pai2 + 1; }
+    // Execute callee graph (inline)
+    ip2 : ., mut = 0;
+    loop {
+        if ip2 >= f_count { break; }
+        if g_interp_abort != 0 { break; }
+        op2 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_OPCODE);
+        d2 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_DEST);
+        t1 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S1);
+        t2 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S2);
+        t3 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S3);
+        // R2 P5 Task 2（D19）：这里是**派生码**（不是槽）——单槽化后 40 槽 = 类型项
+        // 引用。`ir_interp_binary` 当前不消费该参（槽 3 的 op 码决定运算），值仍与
+        // 单槽化前逐字节相同（派生码 ≡ 旧混用码）。
+        t4 := sh_dfn_code_of_slots(r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_TK),
+                                   r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_AUX));
+        if op2 == 1 && d2 >= 0 { w64(g_ir_vals, d2 * 8, t1); }
+        if op2 == 2 && t1 >= 0 && t2 >= 0 { ir_interp_binary(d2, t1, t2, t3, t4); }
+        if op2 == 49 || op2 == 50 {
+            println("interpreter error: IR_I2F/IR_F2I needs binary64 semantics (apx dex) — `corec run` cannot execute apx dex arithmetic; build & run natively (corec build) instead");
+            g_interp_abort = -1; break;
+        }
+        if op2 == 3 && t1 >= 0 {
+            ov2 := r64(g_ir_vals, t1 * 8);
+            if t3 == 1 { w64(g_ir_vals, d2 * 8, -ov2); }
+            else if t3 == 2 { if ov2 == 0 { w64(g_ir_vals, d2 * 8, 1); } else { w64(g_ir_vals, d2 * 8, 0); } } }
+        // Keep callee locals in the shared value store.
+        // The old inline path skipped these opcodes, so
+        // loop-carried assignments never changed state.
+        if op2 == 6 && d2 >= 0 { w64(g_ir_vals, d2 * 8, 0); }  // IR_ALLOC
+        if op2 == 9 && t1 >= 0 && t2 >= 0 { w64(g_ir_vals, t1 * 8, r64(g_ir_vals, t2 * 8)); }  // IR_STORE
+        if op2 == 10 && d2 >= 0 && t1 >= 0 { w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8)); }  // IR_LOAD
+        // 聚合族（与主循环 IR_ALLOC_ARRAY/IR_ALLOC_STRUCT/LOAD|STORE_INDEX
+        // /LOAD|STORE_FIELD/ADDR_INDEX 同语义）：此前外函数内联路径缺这组
+        // opcode——callee 里读写聚合全局（数组/结构体）静默落 0。本批
+        // §1.3 让这类全局在 main 序言获得运行期存储（ir_gen.cr），callee
+        // 侧的读路径必须同批补齐，否则双路径语义仍分叉。
+        if op2 == 8 && d2 >= 0 {  // IR_ALLOC_ARRAY
+            cnt2 := t1; esz2 := t2;
+            if esz2 <= 0 { esz2 = 8; }
+            need3 := cnt2 * esz2 + 8;
+            bp2 := alloc(need3);
+            vi3 : ., mut = 0;
+            loop { if vi3 >= need3 { break; } store8(bp2, vi3, 0); vi3 = vi3 + 1; }
+            w64(g_ir_vals, d2 * 8, bp2);
+        }
+        if op2 == 13 && d2 >= 0 && t1 >= 0 {  // IR_LOAD_INDEX: t1=arr_var, t3=literal_idx
+            av2 := r64(g_ir_vals, t1 * 8);
+            if irv_type(t1) == TI_STR { w64(g_ir_vals, d2 * 8, str_load8(av2, t3)); }
+            else { w64(g_ir_vals, d2 * 8, r64(av2, t3 * 8)); }
+        }
+        if op2 == 14 && t1 >= 0 && t2 >= 0 {  // IR_STORE_INDEX: t1=arr_var, t2=val_var
+            av2 := r64(g_ir_vals, t1 * 8);
+            if irv_type(t1) == TI_STR { store8(istr_get(av2), t3, r64(g_ir_vals, t2 * 8)); }
+            else { w64(av2, t3 * 8, r64(g_ir_vals, t2 * 8)); }
+        }
+        if op2 == 15 && d2 >= 0 && t1 >= 0 && t2 >= 0 {  // IR_LOAD_INDEX_VAR: t1=arr_var, t2=idx_var
+            av2 := r64(g_ir_vals, t1 * 8);
+            ix2 := r64(g_ir_vals, t2 * 8);
+            if irv_type(t1) == TI_STR { w64(g_ir_vals, d2 * 8, str_load8(av2, ix2)); }
+            else { w64(g_ir_vals, d2 * 8, r64(av2, ix2 * 8)); }
+        }
+        if op2 == 16 && d2 >= 0 && t1 >= 0 && t2 >= 0 {  // IR_STORE_INDEX_VAR: d2=val_var, t1=arr_var, t2=idx_var
+            av2 := r64(g_ir_vals, t1 * 8);
+            ix2 := r64(g_ir_vals, t2 * 8);
+            if irv_type(t1) == TI_STR { store8(istr_get(av2), ix2, r64(g_ir_vals, d2 * 8)); }
+            else { w64(av2, ix2 * 8, r64(g_ir_vals, d2 * 8)); }
+        }
+        if op2 == 31 && d2 >= 0 && t1 >= 0 && t2 >= 0 {  // IR_ADDR_INDEX: &arr[i]
+            w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8) + r64(g_ir_vals, t2 * 8) * 8);
+        }
+        if op2 == 11 && d2 >= 0 && t1 >= 0 {  // IR_LOAD_FIELD: t1=struct_var, t3=field_idx
+            pf2 := r64(g_ir_vals, t1 * 8);
+            if pf2 != 0 { w64(g_ir_vals, d2 * 8, r64(pf2, t3 * 8)); }
+            else { w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8)); }
+        }
+        if op2 == 12 && t1 >= 0 && t2 >= 0 {  // IR_STORE_FIELD: t1=struct_var, t2=val_var, t3=field_idx
+            pf2 := r64(g_ir_vals, t1 * 8);
+            if pf2 != 0 { w64(pf2, t3 * 8, r64(g_ir_vals, t2 * 8)); }
+            else { w64(g_ir_vals, t1 * 8, r64(g_ir_vals, t2 * 8)); }
+        }
+        if op2 == 7 && d2 >= 0 {  // IR_ALLOC_STRUCT
+            si2 := find_struct(t3);
+            fc2 : ., mut = 0;
+            if si2 >= 0 { fc2 = si_field_count(si2); }
+            need3 := fc2 * 8 + 8;
+            bp2 := alloc(need3);
+            vi3 : ., mut = 0;
+            loop { if vi3 >= need3 { break; } store8(bp2, vi3, 0); vi3 = vi3 + 1; }
+            w64(g_ir_vals, d2 * 8, bp2);
+        }
+        if op2 == 32 && d2 >= 0 { w64(g_ir_vals, d2 * 8, 0); }  // IR_ARENA_NEW
+        if op2 == 33 { }  // IR_ARENA_RESET
+        if op2 == 46 || op2 == 47 {
+            if d2 >= 0 && t1 >= 0 { w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8)); }
+        }
+        // —— TODO #11：以下 18 族与主循环同语义同守卫补齐（此前内联路径静默落空）——
+        // IR_MAKE_ENUM (17)：d := alloc(8·(1+s2))；M[d+0] := s1（tag = 变体名索引）——
+        // 与 ELF 布局 [tag][payload...] 一致的堆镜像（payload 由后续 IR_STORE_FIELD 写堆）
+        if op2 == 17 {
+            if d2 >= 0 {
+                need3 := 8 + t2 * 8;
+                bp2 := alloc(need3);
+                vi3 : ., mut = 0;
+                loop { if vi3 >= need3 { break; } store8(bp2, vi3, 0); vi3 = vi3 + 1; }
+                w64(bp2, 0, t1);
+                w64(g_ir_vals, d2 * 8, bp2);
+            }
+        }
+        // IR_LOAD_ENUM_TAG (23)：d := M[ρ(s1)+0]
+        if op2 == 23 {
+            if d2 >= 0 && t1 >= 0 {
+                p23 := r64(g_ir_vals, t1 * 8);
+                if p23 != 0 { w64(g_ir_vals, d2 * 8, r64(p23, 0)); }
+            }
+        }
+        // IR_REF (18)：d := &ρ(s1)——槽模型近似：槽号即「地址」（ir_interp_deref_* 同规则）
+        if op2 == 18 { if d2 >= 0 && t1 >= 0 { w64(g_ir_vals, d2 * 8, t1); } }
+        // IR_DEREF (25)：d := M[ρ(s1)]（栈槽间接或堆读取，见 ir_interp_deref_read）
+        if op2 == 25 {
+            if d2 >= 0 && t1 >= 0 {
+                w64(g_ir_vals, d2 * 8, ir_interp_deref_read(r64(g_ir_vals, t1 * 8)));
+            }
+        }
+        // IR_SLICE (24): d := arr + low*8（与 ELF 编码一致）
+        if op2 == 24 {
+            if d2 >= 0 && t1 >= 0 && t2 >= 0 {
+                w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8) + r64(g_ir_vals, t2 * 8) * 8);
+            }
+        }
+        // IR_BOUNDS_CHECK (30): s1=index var, s2=max_len 字面量（ti=1 = 动态上限）——
+        // index < 0 或 index >= max → 陷阱（中止码 -1，与主循环 return -1 同语义）
+        if op2 == 30 && t2 >= 0 {
+            iv30 := r64(g_ir_vals, t1 * 8);
+            lim30 : ., mut = t2;
+            if t4 == 1 { lim30 = r64(g_ir_vals, t2 * 8); }
+            if iv30 < 0 || iv30 >= lim30 { g_interp_abort = -1; break; }
+        }
+        // IR_STORE_PTR (26)：M[ρ(s1)] := ρ(s2)（与 ELF 操作数一致；d=-1 发射态不再影响）
+        if op2 == 26 { if t1 >= 0 && t2 >= 0 { ir_interp_deref_write(r64(g_ir_vals, t1 * 8), r64(g_ir_vals, t2 * 8)); } }
+        // IR_YIELD (28)：eager 值传递近似（d ← ρ(s1)，同 IR_AWAIT）
+        if op2 == 28 {
+            if d2 >= 0 && t1 >= 0 { w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8)); }
+        }
+        // IR_AWAIT (29)
+        if op2 == 29 { if d2 >= 0 { w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8)); } }
+        // IR_FNADDR (48) — no real addresses in the interpreter; dest = 0
+        if op2 == 48 { if d2 >= 0 { w64(g_ir_vals, d2 * 8, 0); } }
+        // IR_APPROX (51) — pure annotation, skip（无运算语义，不能崩）
+        if op2 == 51 { }
+        // IR_DYN_PACK (43)：dyn 变量双槽 [value, tag]——slot[d]=值、slot[d+1]=tag
+        if op2 == 43 {
+            if d2 >= 0 && t1 >= 0 {
+                w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8));
+                w64(g_ir_vals, (d2 + 1) * 8, t2);
+            }
+        }
+        // IR_DYN_TAG (41)：d := slot[ρ(s1)+1]（读 +8 槽）
+        if op2 == 41 { if d2 >= 0 && t1 >= 0 { w64(g_ir_vals, d2 * 8, r64(g_ir_vals, (t1 + 1) * 8)); } }
+        // IR_DYN_VAL (42)：d := slot[ρ(s1)]（读 +0 槽）
+        if op2 == 42 { if d2 >= 0 && t1 >= 0 { w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8)); } }
+        // IR_DYN_DISPATCH (44)：响亮报错（与主循环同文案同码；不再静默落空）
+        if op2 == 44 {
+            println("error: interp 不支持动态分发（IR_DYN_DISPATCH）");
+            g_interp_abort = 2; break;
+        }
+        // IR_CALL_EXTERN (45)：响亮报错（ELF 静态构建同样拒绝，见 F16）
+        if op2 == 45 {
+            print("error: interp 无法调用外部函数："); println(istr_get(t1));
+            g_interp_abort = 2; break;
+        }
+        // IR_CALL (4) / IR_SPAWN (27)：与主循环同一分派（嵌套内联 / 内置近似）
+        if op2 == 4 || op2 == 27 { ir_interp_call(d2, t1, t2, t3); }
+        if op2 == 5 {
+            if t1 >= 0 { rval = r64(g_ir_vals, t1 * 8); }
+            ip2 = f_count;  // return exits the callee immediately
+        }  // IR_RETURN
+        if op2 == 19 && t1 >= 0 {
+            cv2 := r64(g_ir_vals, t1 * 8);
+            if cv2 != 0 { if t2 >= 0 && t2 < g_label_count { ip2 = r64(g_label_poses, t2 * 8); } }
+            else { if t3 >= 0 && t3 < g_label_count { ip2 = r64(g_label_poses, t3 * 8); } } }
+        if op2 == 20 { if t1 >= 0 && t1 < g_label_count { ip2 = r64(g_label_poses, t1 * 8); } }
+        ip2 = ip2 + 1;
+    }
+    // Restore label state
+    g_label_count = old_lc;
+    g_label_poses = old_poses;
+    g_label_cap = old_poses_cap;
+    // 重入帧恢复：外层帧的形参/局部/临时槽回到调用前（返回结果经局部 rval 传递，
+    // 不占本槽区，故恢复不丢返回值）
+    if has_frame != 0 {
+        fi5 : ., mut = 0;
+        loop { if fi5 >= vc { break; }
+            w64(g_ir_vals, (vs + fi5) * 8, r64(frame, fi5 * 8));
+        fi5 = fi5 + 1; }
+    }
+    g_interp_call_depth = g_interp_call_depth - 1;
+    if g_interp_abort != 0 { return 0; }
+    return rval;
+}
+
 fn ir_interpret() -> int {
     // Find main function in the dataflow graph
     main_idx : ., mut = -1;
@@ -79,6 +458,14 @@ fn ir_interpret() -> int {
     node_count := r64(g_df_func_node_count, main_idx * 8);
     if node_start < 0 || node_count <= 0 { return -1; }
 
+    // 解释器状态复位（同一进程内可多次调用 ir_interpret）。
+    // 注：callee 返回值不再经「暂存槽」传递（原 ret_slot = g_ir_var_count，
+    // 更早的 g_ir_vals[0] 约定会静默覆写首个全局）——现由 ir_interp_run_fn 的
+    // 局部返回值传递，该缺陷类结构性消失。
+    g_interp_abort = 0;
+    g_interp_call_depth = 0;
+    g_interp_stack = alloc(IR_INTERP_MAX_DEPTH * 8);  // 活动函数栈（重入检测）
+
     // Initialize value store (size = node_count + padding for destinations)
     need := g_ir_var_count + 64;
     if g_ir_vals_cap < need {
@@ -90,6 +477,20 @@ fn ir_interpret() -> int {
         if vi >= need { break; }
         w64(g_ir_vals, vi * 8, 0);
         vi = vi + 1;
+    }
+
+    // 编译期标量常量全局初始化阶段——与 ELF _start 的常量初始化循环
+    // （os/linux/entry.cr 的 g_ir_globals +16 环）同语义、同数据源。此前解释器
+    // 无此阶段：可变标量全局读回 0（不可变标量因 find_global_const_node 折叠
+    // 而侥幸正确）。运行期初始化的聚合/非常量全局不在此——它们在 main 序言以
+    // IR 序列注入（ir_gen.cr inject_global_inits，主循环执行）。
+    gi2 : ., mut = 0;
+    loop {
+        if gi2 >= g_ir_global_count { break; }
+        iv2 := r64(g_ir_globals, gi2 * 24 + 16);
+        gv2 := r64(g_ir_globals, gi2 * 24 + 8);
+        if iv2 != 0 && gv2 >= 0 && gv2 < need { w64(g_ir_vals, gv2 * 8, iv2); }
+        gi2 = gi2 + 1;
     }
 
     // Pre-scan: build label→node mapping (for branches)
@@ -146,7 +547,9 @@ fn ir_interpret() -> int {
         s1 := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_S1);
         s2 := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_S2);
         s3 := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_S3);
-        ti := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_TK);
+        // R2 P5 Task 2（D19）：派生码（同上一处；IR_BINARY 传参，当前不消费）。
+        ti := sh_dfn_code_of_slots(r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_TK),
+                                   r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_AUX));
 
         if op == 1  { if d >= 0 { w64(g_ir_vals, d * 8, s1); } }  // IR_CONST（dex 的 s1 为缩放整数）
         if op == 5  { if s1 >= 0 { return r64(g_ir_vals, s1 * 8); } return 0; }  // IR_RETURN
@@ -391,158 +794,12 @@ fn ir_interpret() -> int {
         // IR_AWAIT
         if op == 29 { if d >= 0 { w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8)); } }
 
-        // IR_CALL or IR_SPAWN — only handles direct calls from main's graph
-        // Inline-executed callee graphs do NOT support nested calls.
+        // IR_CALL (4) / IR_SPAWN (27) —— 统一分派（ir_interp_call；与 callee 内联
+        // 路径共用同一实现：内置近似 / 用户函数内联 / 嵌套递归 / 中止码上抛全在此一处）。
+        // 原实现把这段分派复制在主循环里，callee 路径无对应物 → 双路径静默分叉（TODO #11）。
         if op == 4 || op == 27 {
-            fn_ni := s3;
-            fn_name := istr_get(fn_ni);
-            sfi := find_so_fn(fn_ni);
-            if sfi >= 0 && s2 >= 1 {
-                tf := sym_type(sfi);
-                if tf == 1 || tf == 3 {  // TAG_VARIADIC: print/println — NOOP (syscall3 returns 0)
-                } else if tf == 2 || tf == 3 {  // TAG_AUTO_STR: print_i/println_i — NOOP (syscall3 returns 0)
-                }
-            }
-            // syscall3/syscall4 — interpreter returns 0
-            if str_eq(fn_name, "syscall3") != 0 || str_eq(fn_name, "syscall4") != 0 {
-                if d >= 0 { w64(g_ir_vals, d * 8, 0); }
-            }
-            if str_eq(fn_name, "str_len") != 0 {
-                if d >= 0 && s2 >= 1 { w64(g_ir_vals, d * 8, istr_len(r64(g_ir_vals, s1 * 8))); }
-            }
-            if str_eq(fn_name, "str_eq") != 0 {
-                if d >= 0 && s2 >= 2 {
-                    left_s := istr_get(r64(g_ir_vals, s1 * 8));
-                    right_s := istr_get(r64(g_ir_vals, (s1 + 1) * 8));
-                    w64(g_ir_vals, d * 8, str_eq(left_s, right_s));
-                }
-            }
-            if str_eq(fn_name, "concat") != 0 {
-                if d >= 0 && s2 >= 2 {
-                    w64(g_ir_vals, d * 8, ir_interp_str_concat(
-                        r64(g_ir_vals, s1 * 8), r64(g_ir_vals, (s1 + 1) * 8)));
-                }
-            }
-            if str_eq(fn_name, "int_str") != 0 {
-                if d >= 0 && s2 >= 1 { w64(g_ir_vals, d * 8, str_intern(int_str(r64(g_ir_vals, s1 * 8)))); }
-            }
-            if str_eq(fn_name, "chr") != 0 {
-                if d >= 0 && s2 >= 1 { w64(g_ir_vals, d * 8, str_intern(chr(r64(g_ir_vals, s1 * 8)))); }
-            }
-            if str_eq(fn_name, "get_char") != 0 {
-                if d >= 0 && s2 >= 2 { w64(g_ir_vals, d * 8, ir_interp_str_char(r64(g_ir_vals, s1 * 8), r64(g_ir_vals, (s1 + 1) * 8))); }
-            }
-            if str_eq(fn_name, "str_sub") != 0 {
-                if d >= 0 && s2 >= 3 { w64(g_ir_vals, d * 8, ir_interp_str_sub(r64(g_ir_vals, s1 * 8), r64(g_ir_vals, (s1 + 1) * 8), r64(g_ir_vals, (s1 + 2) * 8))); }
-            }
-            if str_eq(fn_name, "load_str_ptr") != 0 {
-                if d >= 0 && s2 >= 2 {
-                    b := r64(g_ir_vals, s1 * 8); p := r64(g_ir_vals, s1 + 1 * 8);
-                    lo := load8(b, p) + load8(b, p+1)*256 +
-                          load8(b, p+2)*65536 + load8(b, p+3)*16777216;
-                    hi := load8(b, p+4) + load8(b, p+5)*256 +
-                          load8(b, p+6)*65536 + load8(b, p+7)*16777216;
-                    if hi < 0 { hi = hi + 4294967296; }
-                    w64(g_ir_vals, d * 8, lo + hi * 4294967296);
-                }
-            }
-            if str_eq(fn_name, "store_str_ptr") != 0 {
-                if s2 >= 3 {
-                    b := r64(g_ir_vals, s1 * 8); p := r64(g_ir_vals, s1 + 1 * 8); v := r64(g_ir_vals, s1 + 2 * 8);
-                    lo : ., mut = v % 4294967296; hi : ., mut = v / 4294967296;
-                    if v < 0 { lo = v; hi = -1; }
-                    store8(b, p, lo%256);     store8(b, p+1, (lo/256)%256);
-                    store8(b, p+2, (lo/65536)%256); store8(b, p+3, (lo/16777216)%256);
-                    store8(b, p+4, hi%256);   store8(b, p+5, (hi/256)%256);
-                    store8(b, p+6, (hi/65536)%256); store8(b, p+7, (hi/16777216)%256);
-                }
-                if d >= 0 { w64(g_ir_vals, d * 8, 0); }
-            }
-            if str_eq(fn_name, "str_len") != 0 || str_eq(fn_name, "str_eq") != 0 ||
-               str_eq(fn_name, "concat") != 0 || str_eq(fn_name, "int_str") != 0 ||
-               str_eq(fn_name, "chr") != 0 || str_eq(fn_name, "get_char") != 0 ||
-               str_eq(fn_name, "str_sub") != 0 { ip = ip + 1; continue; }
-            // Regular function call (single level — no recursive/nested call support)
-            if d >= 0 {
-                cfi : ., mut = 0;
-                loop {
-                    if cfi >= g_ir_func_count { break; }
-                    if r64(g_ir_func_name_idx, cfi * 8) == fn_ni {
-                        f_start := r64(g_df_func_node_start, cfi * 8);
-                        f_count := r64(g_df_func_node_count, cfi * 8);
-                        if f_start >= 0 && f_count > 0 {
-                            // Save label state
-                            old_lc := g_label_count;
-                            old_poses := g_label_poses;
-                            old_poses_cap := g_label_cap;
-                            g_label_poses = alloc(64 * 8); g_label_cap = 64;
-                            // Build label map for callee
-                            li2 : ., mut = 0;
-                            loop { if li2 >= f_count { break; }
-                                n_op := r64(g_df_nodes, (f_start + li2) * ESZ_DFNODE + OFF_DF_OPCODE);
-                                n_s1 := r64(g_df_nodes, (f_start + li2) * ESZ_DFNODE + OFF_DF_S1);
-                                if n_op == 21 { if n_s1 >= 0 {
-                                    grow_label_poses(n_s1 + 1);
-                                    w64(g_label_poses, n_s1 * 8, li2);
-                                    if n_s1 + 1 > g_label_count { g_label_count = n_s1 + 1; }
-                                }}
-                            li2 = li2 + 1; }
-                            // Copy args from caller positions to callee param vars
-                            pstart := r64(g_ir_func_var_start, cfi * 8);
-                            pai : ., mut = 0;
-                            loop { if pai >= s2 { break; }
-                                w64(g_ir_vals, (pstart + pai) * 8, r64(g_ir_vals, (s1 + pai) * 8));
-                            pai = pai + 1; }
-                            // Execute callee graph (inline)
-                            ip2 : ., mut = 0;
-                            loop {
-                                if ip2 >= f_count { break; }
-                                op2 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_OPCODE);
-                                d2 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_DEST);
-                                t1 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S1);
-                                t2 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S2);
-                                t3 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S3);
-                                t4 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_TK);
-                                if op2 == 1 && d2 >= 0 { w64(g_ir_vals, d2 * 8, t1); }
-                                if op2 == 2 && t1 >= 0 && t2 >= 0 { ir_interp_binary(d2, t1, t2, t3, t4); }
-                                if op2 == 49 || op2 == 50 { println("interpreter error: IR_I2F/IR_F2I needs binary64 semantics (apx dex)"); return -1; }
-                                if op2 == 3 && t1 >= 0 {
-                                    ov2 := r64(g_ir_vals, t1 * 8);
-                                    if t3 == 1 { w64(g_ir_vals, d2 * 8, -ov2); }
-                                    else if t3 == 2 { if ov2 == 0 { w64(g_ir_vals, d2 * 8, 1); } else { w64(g_ir_vals, d2 * 8, 0); } } }
-                                // Keep callee locals in the shared value store.
-                                // The old inline path skipped these opcodes, so
-                                // loop-carried assignments never changed state.
-                                if op2 == 6 && d2 >= 0 { w64(g_ir_vals, d2 * 8, 0); }  // IR_ALLOC
-                                if op2 == 9 && t1 >= 0 && t2 >= 0 { w64(g_ir_vals, t1 * 8, r64(g_ir_vals, t2 * 8)); }  // IR_STORE
-                                if op2 == 10 && d2 >= 0 && t1 >= 0 { w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8)); }  // IR_LOAD
-                                if op2 == 32 && d2 >= 0 { w64(g_ir_vals, d2 * 8, 0); }  // IR_ARENA_NEW
-                                if op2 == 33 { }  // IR_ARENA_RESET
-                                if op2 == 46 || op2 == 47 {
-                                    if d2 >= 0 && t1 >= 0 { w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8)); }
-                                }
-                                if op2 == 5 {
-                                    if t1 >= 0 { w64(g_ir_vals, 0, r64(g_ir_vals, t1 * 8)); }
-                                    ip2 = f_count;  // return exits the callee immediately
-                                }  // IR_RETURN
-                                if op2 == 19 && t1 >= 0 {
-                                    cv2 := r64(g_ir_vals, t1 * 8);
-                                    if cv2 != 0 { if t2 >= 0 && t2 < g_label_count { ip2 = r64(g_label_poses, t2 * 8); } }
-                                    else { if t3 >= 0 && t3 < g_label_count { ip2 = r64(g_label_poses, t3 * 8); } } }
-                                if op2 == 20 { if t1 >= 0 && t1 < g_label_count { ip2 = r64(g_label_poses, t1 * 8); } }
-                                ip2 = ip2 + 1;
-                            }
-                            rval := r64(g_ir_vals, 0 * 8);
-                            // Restore label state
-                            g_label_count = old_lc;
-                            g_label_poses = old_poses;
-                            g_label_cap = old_poses_cap;
-                            w64(g_ir_vals, d * 8, rval);
-                        }
-                        break;
-                    }
-                cfi = cfi + 1; }
-            }
+            ir_interp_call(d, s1, s2, s3);
+            if g_interp_abort != 0 { return g_interp_abort; }
         }
 
         ip = ip + 1;
