@@ -61,6 +61,24 @@ diff -rq /tmp/parity_frozen/logs /tmp/parity_post/logs                        # 
 **行为探针（腿 ②）**：`bash tools/baseline/probes_run.sh <corec> <outdir>`（语料 = `tests/probes/`，29 档；
 `rc=1` 多为**预期负例**，判据是两态零差异而非全 0 —— 见 `tests/probes/README.md`）。
 
+**暖态腿（腿 ③，#60 T3）**：`tools/baseline/warm_leg.sh` —— 逐档「**同路径二跑**」× `ccr` 面
+（冷 = `clean-cache` 后首跑；暖 = 紧接二跑），断言 rc + 诊断码集一致，并报「**暖态生效
+（≥1 真命中）档数**」（0 = 空洞警报：腿绿但没走到暖态）。两层：
+
+```bash
+bash tools/baseline/warm_run.sh ./build/corec /tmp/warm_now   # 牙齿层（语料 tests/probes/warm/，7 档，期望值断言）
+```
+
+- **广度层**：`parity_run.sh` / `probes_run.sh` 默认附带（清单单一真源 = `<outdir>/corpus.tsv`；
+  结果落 `<outdir>/warm/`，**`logs/` 格式不变** ⇒ 历史对拍可比性保持）。`WARM_LEG=0` 关闭。
+  对 **pre-fix 冻结基线预期绿**（既有 72/29 语料不含 `as *T` 形态；实测 M1 二进制 72 档 FAIL=0）。
+- **牙齿层**：`tests/probes/warm/`（**定路径**是该语料的设计要点；拷到唯一 temp 路径 ⇒ 腿恒绿而
+  空洞 —— 突变 M3 实证）。**pre-fix 二进制在本层必红**（缺陷本体）⇒ 对**冻结基线**调用
+  `warm_run.sh` 时预期 rc=1，**不是**基线不合规（判据 = 突变 M1，见 `warm-task3-report.md`）。
+- 时长实测（2026-09-15，本机）：牙齿层 **0.9s** · probes 广度层 **+3.5s** · parity 广度层
+  **+125s**（72 档 ×2 次 `ccr`，大文件为主）⇒ **CI 只挂最小面**（`tests/selfhost/test_warm_cache_gate.py`，0.5s），
+  广度层留手工判据。
+
 ## 换代纪律（**只在此处更新白名单**）
 
 1. 白名单换代 = 「基线世代」变更（例如尾批收官后，下一批以本批收官为 pre-侧）。

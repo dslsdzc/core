@@ -29,6 +29,7 @@ CC="nice -n 19 $CCBIN"
 PROBE_TOTAL=29   # = p5t0 11 + p5t3 18（R2 P6 T0 表 C / U-4 正式清点值）
 
 : >| "$OUT/rc.txt"
+: >| "$OUT/corpus.tsv"
 {
   for f in tests/probes/*.cr; do
     tag=$(echo "$f" | tr '/' '_')
@@ -36,6 +37,7 @@ PROBE_TOTAL=29   # = p5t0 11 + p5t3 18（R2 P6 T0 表 C / U-4 正式清点值）
     $CC check "$f" >| "$OUT/${tag}.log" 2>&1
     rc=$?
     printf '%s\trc=%s\n' "$tag" "$rc" >> "$OUT/rc.txt"
+    printf 'probe\t%s\n' "$f" >> "$OUT/corpus.tsv"   # 暖态腿清单（单一真源）
     printf '%s\trc=%s\n' "$tag" "$rc"
   done
 } >| "$OUT/probes.out"
@@ -48,3 +50,9 @@ fi
 n0=$(grep -c 'rc=0$' "$OUT/rc.txt" || true)
 n1=$(grep -c 'rc=1$' "$OUT/rc.txt" || true)
 echo "PROBES DONE（$OUT）：$n 档 · rc 分布 $n0×0 / $n1×1"
+
+# #60 T3 暖态腿（广度层）：同路径二跑 —— rc/诊断码集一致性 + 暖态生效档数（见 warm_leg.sh 头注）。
+if [ "${WARM_LEG:-1}" != "0" ]; then
+  bash "$SCRIPT_DIR/warm_leg.sh" "$CCBIN" "$OUT/warm" < "$OUT/corpus.tsv" \
+    || { echo "WARM LEG FAILED（暖态腿：冷/暖两态分歧）" >&2; exit 1; }
+fi

@@ -36,9 +36,11 @@ run_one() {   # $1 tier tag, $2 file
   $CC check "$f" >| "$OUT/logs/${tag}_${base}.log" 2>&1
   local rc=$?
   echo "$rc" >| "$OUT/logs/${tag}_${base}.rc"
+  printf '%s\t%s\n' "$tag" "$f" >> "$OUT/corpus.tsv"   # 暖态腿清单（单一真源）
   printf '%s\t%s\trc=%s\n' "$tag" "$f" "$rc"
 }
 
+: >| "$OUT/corpus.tsv"
 {
   echo "=== Tier 1: tests/suite/*.cr ==="
   for f in tests/suite/*.cr; do run_one t1 "$f"; done
@@ -70,3 +72,11 @@ if [ "$n_rc" -ne "$CORPUS_TOTAL" ]; then
   exit 1
 fi
 echo "PARITY DONE（$OUT）：$n_rc 档 · rc 分布 $n0×0 / $n1×1"
+
+# #60 T3 暖态腿（广度层）：同路径二跑 —— rc/诊断码集一致性 + 暖态生效档数。
+# 本层对 pre-fix 冻结基线**预期绿**（既有语料不含 TU03 形态，T1 E4）；缺陷面的「牙齿」在
+# `tools/baseline/warm_run.sh`（入仓语料 tests/probes/warm/）。`WARM_LEG=0` 关闭。
+if [ "${WARM_LEG:-1}" != "0" ]; then
+  bash "$SCRIPT_DIR/warm_leg.sh" "$CCBIN" "$OUT/warm" < "$OUT/corpus.tsv" \
+    || { echo "WARM LEG FAILED（暖态腿：冷/暖两态分歧）" >&2; exit 1; }
+fi
