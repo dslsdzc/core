@@ -54,7 +54,9 @@ tests/                → 三套：
   selfhost/*.py       → 自举/后端/原生回归：test_compile / test_backend_bootstrap / test_borrow /
                         test_impl / test_pointer_safety 等
   suite/*.cr          → 集成用例源码，经 ./build/corec 运行
-grammar/              → 语言语法 EBNF 唯一真源：core.ebnf（全语言）/ corespec.ebnf（规约）/ tokens.ebnf
+grammar/              → 语言语法 EBNF：core.ebnf（全语言 = 唯一真源）/ tokens.ebnf（词法）；
+                        corespec.ebnf = **已退役**（2026-09-06，ADR-0001）——规约语法并入 core.ebnf 属
+                        **迁移事项**（尚未并入，见 TODO「规约语法并入 .cr」）⇒ **勿引**（2026-09-16 文档审计修订）
 docs/                 → 文档分类树（language 用户向 / design 定稿 / proposals 提案 / archive 归档 /
                         maintainer 手册 / adr 决策记录），导航索引 = [docs/README.md](../README.md)
 ```
