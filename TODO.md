@@ -738,7 +738,7 @@
 - **现象（读码判定；证据 = `docs/superpowers/specs/2026-09-16-apx-conversion-audit.md` §1 ③b/④b/⑤/⑥b/⑧）**：结构体字段读 `ir_gen.cr:2520`（`new_ir_var("field", TI_INT)` + `IR_LOAD_FIELD`）、数组/切片元素读 `:2583`（`IR_LOAD_INDEX`）/`:2591`（`IR_LOAD_INDEX_VAR`）——**读结果的 IR 型恒为 `TI_INT`**，字段/元素的**声明型信息丢失**。
 - **为何是「总闸」（不低 apx 批本身）**：任何**按 IR 值型触发**的下游判定都会在「经聚合读入」的值上失效——已知三类：① **dex 形式转换**（apx 审计：转换分支按 `TI_DEX`/`TI_DEX_S` 判 ⇒ 不触发 ⇒ 静默错值，见审计表 A 行 ⑧/③b/④b）；② **(A) 批的可选表示面**（声明面登记 `/` 解包分派若按值型判 ⇒ 同类失效面）；③ 其它「类型驱动」的算子选择（字符串拼接、指针宽度等，未逐一枚举）。⇒ **单点修好可同时收敛多条静默错值线**。
 - **修法方向（读码建议，非裁）**：读点定型改取**声明面/元素面**（字段 ⇒ `field_ti_of_node` 同源；元素 ⇒ `elem_ti_of` 同源），或在读点后**补登记**声明型侧表（照 (A) 批 `irv_set_decl_ti` 先例，零布局变更）。
-- **状态**：**登记，未修**（本轮**只读审计**，零构建/零源码改动）。**判据（修复时）**：① 审计表 B 的 B-2/B-3/B-4/B-5/B-6/B-8 由「静默错值」转**精确值**；② canary/`.ccr` 四条**不变**（门控面须审）；③ 聚合读的 `irv_type` 断言进自测（新用例 ≥6）。
+- **状态**：**✅ 已修（2026-09-16 #78 批 2 T3）**——读点定型改**声明面形式**（`ir_gen.cr` 新增 4 个**节点级零 alloc** helper：`agg_read_form_is_dex`/`agg_field_read_form`/`agg_elem_read_form`/`agg_payload_read_form`；接线 3 读点 = 字段读 · 元素读 · match 载荷绑定；非 dex 恒 `TI_INT` ⇒ 零足迹），并 **`CIR_CACHE_VER` 17→18**（旧快照读槽型 `TI_INT` 与新语义不等价 ⇒ cache miss = 无害重建）。**判据（全绿）**：腿 A R1/R2/R3/R5 `elf=7`（改前全 1）· 腿 B 四条界面见证（`_dxt`=0 · `_dxdiv`=恰好 1 · extern 调用点前有转换）· 腿 C 钉子 · **canary 5/5 IDENTICAL**（非 dex 零足迹）· 74 档/29 探针 rc 全同 · 五 CI job rc=0 · 自举链 `corec2≡corec3` · **腿 D① 突变**（关 apx hack 后通用机制独立成立 ⇒ hack 冗余）。**未覆盖面（本批登记）**：元组数字下标 + 切片产物元素读 ⇒ 见 **`TODO #98`**；match 结果槽/泛型见裁-AGG-2/-4。**报告** = `docs/superpowers/specs/2026-09-16-agg-read-type-batch-report.md`（计划含 §11–§13 各阶段记录）。
 - **关联**：apx 批次（表 B 的 RED 语料）· (A) 批 T3「声明面登记」修法（**正交**，勿混：T3 修的是**写点**的登记来源，本条修的是**读点**的定型）· `ptr_analysis.cr` 型面消费者（交叉核对面）。
 - **【apx 批交叉引用（2026-09-16 裁-APX-8）】**：① **RED 语料** = apx 批探针表 B-3a/B-3b/B-4a/B-4b/B-4c/B-5/B-6/B-8 的子集（现全部转正，**但那是 apx 批的写点漏斗 + 比较点声明面查表做到的，本条未修**）；② **修复本条时须同改点** = `ir_gen.cr:2513`（字段读）/ `:2578`（元素读）/ `:2316`（match 绑定）/ **`:2222`（match 结果槽——apx 批 T2 新增，本条原未列）** + 消费者（二元对齐 `:1249` 邻域 · `ptr_analysis.cr` · `regalloc.cr:680-681` 类型门 · 可选表示面）；③ **注意**：apx 批已用 `dex_decl_form_of_expr`（**节点级零 alloc**）在**比较点**做了作用域替代——修本条时可复用它，但**不得**把 `res_type_node`/`alloc_type` 引入 ir_gen 路径（apx 批 Global Constraint 12 不变量：warm 命中跳过 `ir_gen_func` ⇒ 新增 `alloc_type` 站点会破坏暖缓存不变式）。
 
@@ -957,6 +957,18 @@
 - ~~**BC-CONST**：interp TI_STR 字符串表索引近似~~（2026-08-29 已修：解释器统一用驻留索引传递字符串，补齐 `str_len`/`str_eq`/`concat`/`int_str`/`chr`/`get_char`/`str_sub` 与字节索引路径）
 
 ## 架构规划
+
+### 98. ⚠ **【未覆盖家族·聚合读声明面】元组数字下标与切片产物元素读：读槽拿不到声明形式**（2026-09-16 #78 批 2 T3 登记；**裁-AGG-3 维持「登记不纳入」**）
+
+- **现象（实核）**：两条通道都**取不到**「声明面 dex 形式」，因此 #78 批 2 的读点定型（`agg_*_read_form`）覆盖不到它们：
+  1. **元组数字下标**（`t . 0`）：`EXPR_TUPLE` 分支给元组 var 定型 **`TI_INT`**（`ir_gen.cr` 的 `new_ir_var("tuple", TI_INT)` + `IR_ALLOC_ARRAY`），**不携带元素 ti** ⇒ 数字下标是 `EXPR_FIELD` 但 `ast_type_val > 0`（无结构体声明面）⇒ `agg_field_read_form` 返回 `TI_INT`。实测：`t := (d, 1.0); (t . 0) * 2.0` ⇒ rc=1（期望 7），`check` 0 error（**静默**）。
+  2. **`IR_SLICE` 产物的元素读**：切片 var 的 IR 型恒 **`TI_INT`**（`ir_gen.cr` 的 `new_ir_var("slice", TI_INT)`），元素形式**无处寄存**；且**不可**用「给切片 var 定型 `TI_DEX_S`」的办法——`is_ptr_var:626-627` 对 `TI_DEX_S` **早退 0**（哨兵守卫），而 `TI_INT` 会继续按 producer op（`IR_SLICE` 面）判 ⇒ 改型会**改指针判断**（判据面混类）。
+- **最小机制（元组侧，供实施批参考；**需先裁**）**：元组构造点按「**全元素同形**」把该形式登记进**既有声明侧表**：`irv_set_decl_ti(tv, TI_DEX_S)`（**2 行、零 alloc**；混型元组不登记 ⇒ 保守回退 `TI_INT`），数字下标读再查 `slot_decl_ti(obj_var)`。
+- **代价与待实证项**：`slot_decl_ti(tv)` 变 `TI_DEX_S` 会波及**唯一取址面** `ir_gen.cr:1530`（`&tuple` 的 pointee 型行身份 `TYP_PTR(TI_INT)` → `TYP_PTR(TI_DEX_S)`）⇒ **须一条实证**（`&t` / `*p` 往返 + 产物字节）；且属**新机制**（与「最小改动」口径相抵）。
+- **切片侧的候选**：① 新增一张「var → 元素形式」侧表（零 alloc，但增一套 grow/读写面）；② 在 `IR_SLICE` 产物的 producer 面记元素形式（需实证不碰 `is_ptr_var` 判定）；③ 维持未覆盖。
+- **同族互引**：`TODO #97`（实参位泛型**退化实例键**——同属「聚合读声明面」家族）· `TODO #91`（可选 dex 整族）· 本批计划 §10（U 表）与 §13.4/§13.7（登记与处置）。
+- **判据（修复时）**：① `tests/selfhost/test_agg_read_type.py` 的 **R4 从 `[GAP]` 组移进 `CASES`** 并转绿（期望 `elf=7`）；② 切片形新增一例（`a := arr[0..2]; @raw_int(a[0])` 语义下的**算术**面，非仅 raw）；③ 非 dex 元组/切片（int 元素）**逐字节不变**（腿 E 口径）。
+- **状态**：**登记，未修**（#78 批 2 T3 结束时登记；维护者 2026-09-16 裁 **R4 维持裁-AGG-3**：不纳入本批——理由 = 二次改生成面 + 判据面混类风险，且元组属既有未覆盖家族，应与 #97/本条并族处理而非单开机制）。
 
 ### 指针安全模型
 见 `docs/maintainer/design/pointer-model.md`。裸指针 + HDFG provenance 推导，编译器自动验证，退路 `unsafe`。

@@ -557,3 +557,36 @@ R1 的 IR 证据（§11.4）给出**判据形状**：
 - T3-2：R4 的取裁（§13.4）。
 - T3-3：腿 D①「连绿两批」的第二次（下批复跑本套件 + apx 套件且 hack 仍关）⇒ 达成后可删 hack（TODO #78 追记）。
 - T3-4：`.cn`/`.cir` 之外是否有第三处落 per-var 型的产物（本轮扫描：`ccr_io.cr:631/:690` 与 `cir_cache.cr:259` 两处，未见第三处）。
+
+---
+
+## 14. §T5 记录（2026-09-16 —— 收官）
+
+### 14.1 交付
+
+- **`TODO #98`**（新条目；编号按 develop `66eb9589` 现状取 = 最大 #97 + 1）：**元组数字下标 + `IR_SLICE` 产物元素读**合成一条
+  （现象 · 最小机制（元组构造点按「全元素同形」登记 `irv_set_decl_ti`，2 行零 alloc）· 代价与待实证（`&tuple` pointee 型行身份）·
+  切片侧三候选 · 同族互引（#97/#91）· 修复时判据 · 状态登记未修）。
+- **`TODO #78` 状态 → ✅ 已修**（修法 + 判据 + 未覆盖面指向 #98）。
+- **批报告**：`docs/superpowers/specs/2026-09-16-agg-read-type-batch-report.md`（§0 一行结论 · §1 提交链 · §2 根因修法 ·
+  §3 判据 · §4 腿 D① 突变 · §5 二进制同一性论证 · §6 镜像教训 · §7 GC12 顺序 · §8 陷阱落仓 · §9 换代重锁 ·
+  §10 R4 的 `[GAP]` 处置与裁决出处 · §11 判据可行性经验 · §12 未覆盖面 · §13 诚实边界）。
+- 提交：`5a245777`（TODO）· `9de1c4c0`（报告）· 本记录。
+
+### 14.2 收官判据复跑（**全绿**）
+
+| 判据 | 结果 |
+|---|---|
+| canary | **PASS 5/5**（ELF + `.ccr` 四条 IDENTICAL）|
+| `check` | rc=0（corearch/corelsp `build log clean (error[ = 0, undefined = 0)`）|
+| `bootstrap-tests` | rc=0 |
+| `selfhost-tests` | rc=0（含本批套件已挂点 · 49/49 ccr_types · 23/23 interp_parity）|
+| `suite` | rc=0（23 档 ALL PASS）|
+| `full-bootstrap` | rc=0（`cmp corec2 corec3` **恒等** 2904726 B）|
+| **二进制同一性** | T5 重建 = `64c8a7d6…` 与判据二进制**逐字节同** ⇒ canary/parity/probes 结论对终态成立（§5 论证）|
+
+### 14.3 批终态一行结论
+
+**修好**（同报告 §0）：聚合读结果槽硬定 `TI_INT` ⇒ 总闸级连锁失明 —— 读点定型改**声明面形式**（零 alloc 节点判）+
+`CIR_CACHE_VER` 17→18；**腿 A 4/5 转绿（R4 按裁-AGG-3 登记 `[GAP]`）· 腿 B 四条见证 · 腿 C 钉子 · canary 5/5 IDENTICAL ·
+74 档/29 探针 rc 全同 · 五 CI job rc=0 · 自举链恒等 · 腿 D① 突变通过（hack 冗余确认）**。
