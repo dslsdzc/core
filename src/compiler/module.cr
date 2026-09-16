@@ -381,17 +381,49 @@ fn reg_so_funcs(index_content: string, so_name: string) {
         else if ret_type == "bool" { ret_code = 4; }
         type_encoding : ., mut = param_count * 1000000000000 + param_type_bits * 100 + ret_code;
 
-        // Register in symbol table
-        fni := str_intern(func_name);
-        // Manually set symbol entry
-        si := g_sym_count;
-        grow_syms(si + 1);
-        sym_set_name(si, fni);
-        sym_set_kind(si, SYM_SO_FN);
-        sym_set_type(si, tag_flags);
-        sym_set_node(si, type_encoding);
-        g_sym_count = si + 1;
+        // 落**侧表**（第 4 批 #82/#83），**不**进串表/符号表：
+        //   ① 本函数在 `import` 解析期被调用，而「该名字是否被程序引用」要到检查期才知道
+        //      ⇒ 此刻 `str_intern` + 追加 SYM 会把**宿主 HOME 里的元数据**写进产物面，
+        //      哪怕程序**从未引用**它（前批 PR #80 红档：canary 语料 +28B；且符号索引平移
+        //      ⇒ STR/SYM/NOD/IFACE 四段扰动，良性索引亦然）。
+        //   ② 元数据仍是**合法输入**：被引用的名字由 `so_materialize` 在**首次查找**时物化
+        //      ⇒ 承重面（`print_int` 等只在索引里存在的名字）不变。
+        //   ③ 侧表**动态增长**（grow_so_side）⇒ 不再有 `check_all` 里那份 128 容量硬编码、
+        //      写入无界的保全缓冲（TODO #98 的越界写堆面随本改动消失，见 checker.cr:check_all 注）。
+        ssi : ., mut = g_so_side_count;
+        grow_so_side(ssi + 1);
+        store_str_ptr(g_so_side_name, ssi * 8, func_name);
+        w64(g_so_side_tags, ssi * 8, tag_flags);
+        w64(g_so_side_type, ssi * 8, type_encoding);
+        g_so_side_count = ssi + 1;
     }
+}
+
+// 侧表按名字查找（返回侧表下标；-1 = 未命中）。名字**尚未 intern**（存的是原始串），
+// 故按串比较——这是「未引用不物化」的代价面，只在查找未命中主表时走一次。
+fn find_so_side(name_idx: int) -> int {
+    i : ., mut = 0;
+    loop {
+        if i >= g_so_side_count { return -1; }
+        if str_eq(istr_get(name_idx), load_str_ptr(g_so_side_name, i * 8)) != 0 { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// 把侧表条目**物化**进符号表（首次被查找时调用）。返回新落的符号索引。
+// 调用点约定（裁-HR-2「.cr 声明优先」）：只有主表**完全没有**该名字时才可调用
+// —— 否则宿主家目录里的一个索引文件会**覆盖用户源码里的声明**。
+fn so_materialize(side_i: int) -> int {
+    fni := str_intern(load_str_ptr(g_so_side_name, side_i * 8));
+    si := g_sym_count;
+    grow_syms(si + 1);
+    sym_set_name(si, fni);
+    sym_set_kind(si, SYM_SO_FN);
+    sym_set_type(si, r64(g_so_side_tags, side_i * 8));
+    sym_set_node(si, r64(g_so_side_type, side_i * 8));
+    g_sym_count = si + 1;
+    return si;
 }
 
 fn res_imports() {
@@ -522,12 +554,24 @@ fn res_imports() {
                         }
                         // Try .so extension index: $HOME/.core/lib/<name>/index
                         // Loads metadata (tags). The .cr file still provides runtime implementation.
+                        // 第 4 批 #83：**不再**兜底到硬编码家目录。原实现把空 HOME 兜底为
+                        //   一个写死的开发者家目录常量（字面已从源码移除，判据 J4 要求
+                        //   `src/` 内该串零命中 ⇒ 此处亦不得回引）
+                        // ⇒ HOME 未设/为空时去读**原开发者**的家目录：他人机器上读一个不存在的
+                        //   路径（或更糟——读到**别人的** `~/.core/lib`，进而按 #82 改变产物）。
+                        // 裁-HR-5 的边界：索引缺席属「可选输入不存在」⇒ **静默降级到确定态**
+                        // （不注册）；而**真正用到**索引独有名字时仍**响亮失败**——那条由
+                        //   查找侧的「查不到 ⇒ -1 ⇒ Undefined/N06」保证（见 checker.cr find_gsym 注），
+                        //   **不在此处放行**（放行会把响亮失败退化为静默错值 = 本批红线）。
+                        // 注：嵌套 if 而非 `home_dir != "" && …`——bootstrap 构建的 corec 对
+                        //   `&&` 两侧**无条件求值**（仓内既有纪律）。
                         home_dir : ., mut = get_env("HOME");
-                        if str_len(home_dir) == 0 { home_dir = "/home/DslsDZC"; }
-                        so_idx_path : ., mut = home_dir + "/.core/lib/" + fs_path + "/index";
-                        so_idx := read_file(so_idx_path);
-                        if str_len(so_idx) > 0 {
-                            reg_so_funcs(so_idx, fs_path);
+                        if str_len(home_dir) > 0 {
+                            so_idx_path : ., mut = home_dir + "/.core/lib/" + fs_path + "/index";
+                            so_idx := read_file(so_idx_path);
+                            if str_len(so_idx) > 0 {
+                                reg_so_funcs(so_idx, fs_path);
+                            }
                         }
                         // Always load .cr for runtime implementation
                         // （module_get_source：打开文档优先，未打开读盘）
