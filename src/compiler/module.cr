@@ -389,7 +389,7 @@ fn reg_so_funcs(index_content: string, so_name: string) {
         //   ② 元数据仍是**合法输入**：被引用的名字由 `so_materialize` 在**首次查找**时物化
         //      ⇒ 承重面（`print_int` 等只在索引里存在的名字）不变。
         //   ③ 侧表**动态增长**（grow_so_side）⇒ 不再有 `check_all` 里那份 128 容量硬编码、
-        //      写入无界的保全缓冲（TODO #98 的越界写堆面随本改动消失，见 checker.cr:check_all 注）。
+        //      写入无界的保全缓冲（TODO #2026-09-17-1 的越界写堆面随本改动消失，见 checker.cr:check_all 注）。
         ssi : ., mut = g_so_side_count;
         grow_so_side(ssi + 1);
         store_str_ptr(g_so_side_name, ssi * 8, func_name);

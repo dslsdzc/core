@@ -11,7 +11,8 @@
   J2 **无悬空**：每处 `#YYYY-MM-DD-N` 引用都能在 `TODO.md` 找到对应标题（双向：标题集合
      ⊇ 被引集合）；另**报告**「零引用标题」清单（非失败——无人引用 ≠ 悬空）。
   J3 **映射完备**：`TODO.md` 迁移对照表覆盖 `#1..#98` 每个号（`#66` 为空号须显式注记），
-     表行数 == 99（`#1..#98` 去空号 97 + 架构规划段同号 `#6`/`#7` 两条），且新 id 全局唯一。
+     表行数 == 新 id 数 == 标题数（**自洽计数，不写死绝对值**——条目会持续新增，
+    写死必然过期：2026-09-17 第 4 批新增三条即触发过一次），且新 id 全局唯一。
   J4 **突变自证**：内存内把一处新 id 引用**还原成旧号** ⇒ J1 的判定函数必须转红；
      还原前（真实现状）⇒ 绿。证明 J1 有牙（不是恒绿的空判据）。
   J5 **零源码语义改动**（静态面）：`.cr` 文件里不出现任何 `TODO #<旧号>` 形态（含于 J1），
@@ -139,12 +140,13 @@ def check_j2(verbose=True):
 
 
 def check_j3(verbose=True):
-    """映射完备：覆盖 1..98（#66 空号注记）+ 表行数 99 + 新 id 唯一。"""
+    """映射完备：覆盖 1..max（#66 空号注记，max 由表自派生）+ 行数自洽 + 新 id 唯一。"""
     todo_text = read(TODO)
     table = mapping_from_todo(todo_text)
     heads = headings_from_todo(todo_text)
     probs = []
-    missing = [n for n in range(1, 99) if n not in table and n != 66]
+    max_old = max(table) if table else 0
+    missing = [n for n in range(1, max_old + 1) if n not in table and n != 66]
     if missing:
         probs.append(f"映射缺号: {missing}")
     if 66 in table:
@@ -152,8 +154,9 @@ def check_j3(verbose=True):
     elif not re.search(r"#66.*空号|空号.*#66", todo_text):
         probs.append("#66 空号缺显式注记")
     n_rows = sum(1 for l in todo_text.splitlines() if TABLE_ROW.match(l))
-    if n_rows != 99:
-        probs.append(f"映射表行数 {n_rows} != 99（#1..#98 去空号 97 + 架构规划段 #6/#7 两条）")
+    news_early = [v for vs in table.values() for v in vs]
+    if n_rows != len(news_early):
+        probs.append(f"映射表行数 {n_rows} != 新 id 数 {len(news_early)}（自洽计数）")
     news = [v for vs in table.values() for v in vs]
     dup = [v for v in set(news) if news.count(v) > 1]
     if dup:

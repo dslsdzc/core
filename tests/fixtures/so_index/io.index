@@ -4,7 +4,7 @@
 // 注释里若含冒号会被误解析，故一律用 `//`）。
 //
 // 本档要点：**含两条 io.cr 未声明的名字**（print_int / println_int，见 src/stdlib/io.cr:19,23
-// 声明的是 print_i / println_i）——它们正是前批 PR #80 红档 +28B 的来源（TODO #99）。
+// 声明的是 print_i / println_i）——它们正是前批 PR #80 红档 +28B 的来源（TODO #2026-09-17-1）。
 print: string, variadic, auto_str
 println: string, variadic, auto_str
 print_int: int

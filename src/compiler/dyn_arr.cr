@@ -921,7 +921,7 @@ fn grow_rip_patch(needed: int) {
     g_x86_rip_patch_cap = nc; }
 
 // `.so` 扩展索引侧表（第 4 批 #82/#83）：**动态增长**（本仓约定：All arrays are dynamic
-// byte buffers, no MAX_* limits——这正是 TODO #98「容量硬编码 128 + 写入无界」要消灭的形态）。
+// byte buffers, no MAX_* limits——这正是 TODO #2026-09-17-1「容量硬编码 128 + 写入无界」要消灭的形态）。
 fn grow_so_side(needed: int) {
     if needed < g_so_side_cap { return; }
     nc : ., mut = g_so_side_cap * 2; if nc < 32 { nc = 32; } if nc < needed { nc = needed + 32; }

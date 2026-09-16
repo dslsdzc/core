@@ -184,13 +184,13 @@ case "$CI_JOB_NAME" in
     # `--require-compiler`：本 job 已构建 ⇒ 缺编译器不得静默跳过真牙腿（fail-closed）。
     python3 tests/harness/test_canary_carrier.py --require-compiler
     # ─── 第 4 批（home-repro，2026-09-17）：`.so` 扩展索引的**可复现性/承重面/内存安全** ───
-    # 缘起（TODO #82）：编译器解析 `import` 时读 `$HOME/.core/lib/<模块>/index` 并把其中的
+    # 缘起（TODO #2026-09-16-20）：编译器解析 `import` 时读 `$HOME/.core/lib/<模块>/index` 并把其中的
     # 名字驻留进产物 ⇒ 同一提交同编译器、**换台机器产物就变**（前批判据载体化的 CI 红档即此，
     # `generics_test` ±28B）。本批改「侧表 + 首次引用物化」⇒ 未引用条目零产物足迹。
     # 判据（8 例全绿；**夹具入仓** = 判据自己可复现，两态索引取 tests/fixtures/so_index/）：
     # 两态 `.ccr` 两条口径逐字节同 · 良性索引零足迹 · **承重面**（索引独有名字：有索引 rc=0、
     # 无索引 rc=1 + `error[N06]` 响亮）· **索引行数不再是行为分界**（N=2/200/2000 三档产物同
-    # 且进程 rc 正常——TODO #99 的越界写堆随本批删块消除，**必须留判据证明「已消除」**）·
+    # 且进程 rc 正常——TODO #2026-09-17-1 的越界写堆随本批删块消除，**必须留判据证明「已消除」**）·
     # `HOME` unset ≡ 空 HOME（#83）· ELF 跨两态同 · 静态零命中硬编码家目录字面量。
     # 挂本 job 的理由同载体（需已构建编译器）。成本实测 ≈ 12s（含 2000 行大索引档）。
     python3 tests/selfhost/test_so_index_repro.py
