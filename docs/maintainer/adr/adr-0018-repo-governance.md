@@ -5,7 +5,7 @@
 - 决策者:DslsDZC(维护者)
 
 ## 背景
-自举进入协作期(第二维护者 RhineIris 参与 PR #9/#14),需要分支保护、审批流与 CI;早期直接提交 main 的流程不可持续。
+自举进入协作期(第二维护者 RhineIris 参与 PR #9/#2026-09-10-10),需要分支保护、审批流与 CI;早期直接提交 main 的流程不可持续。
 
 ## 决策
 - **分支模型 feature → develop → main**:main = 正式版线(仅维护者可合入,update 规则 + 无管理员绕过);develop = 集成分支(PR + 审批 + merge queue + CI 门槛);feature 分支每改动独立

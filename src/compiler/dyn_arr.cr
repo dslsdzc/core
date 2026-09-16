@@ -593,7 +593,7 @@ fn ei_variant_type_node(n: int, vi: int, ti: int) -> int {
     if tb < 0 { return -1; }
     return r64(g_ei_vt_nodes, (tb + ti) * 8); }
 
-// ─── 枚举/结构体记录**受护访问器**（R2 P4 Task 6；TODO #2026-09-12-2 收口，#8 同族形态）───
+// ─── 枚举/结构体记录**受护访问器**（R2 P4 Task 6；TODO #2026-09-12-2 收口，#2026-09-10-4 同族形态）───
 // 背景（TODO #2026-09-12-2 代码级定位；**容量批 T3 起该定长槽区已退役**——字段/变体迁侧表）：EnumVariant 槽区（旧 `MAX_ENUM_VARIANTS` 槽 × `OFF_EV_SIZE`）与
 // StructInfo 字段槽区（旧 `MAX_STRUCT_FIELDS` 槽）曾是**定长内嵌槽区**——其后紧跟记录自身的
 // count/generic 槽，再往后是**下一条记录**（同一 buffer）⇒ 无界写入既踩自身记录尾也踩邻记录

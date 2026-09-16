@@ -503,7 +503,7 @@ fn diag_type_incompatible(verdict: int, code: int, what: string, line: int, col:
 // 判定 = `type_compat_strict`（身份 + 长度档 + 可选目标注入），照赋值位点（EXPR_ASSIGN）
 // 与返回位点（TF01）同款组合函数；参序归一（P3 T1 §3.1）=（源 = 初始化值, 目标 = 注解行）。
 // 两个调用点共用本函数：① `infer_expr` 的 `EXPR_LET` 分支（局部）；② `check_global_let`
-// （全局初始化器——同形缺口，一并在 #32 划界内收口）。
+// （全局初始化器——同形缺口，一并在 #2026-09-11-14 划界内收口）。
 // 豁免（逐条对齐邻站，各附理由；无豁免即无判定）：
 //   ① 无注解 / `: .` / `: auto`（type_node < 0）或无初值（val_node < 0）⇒ 无契约可核；
 //   ② 注解 = `dyn` ⇒ 不判（dyn 槽按值追踪；照赋值位点 `tt == TI_DYN` 分支与本站下行
@@ -1036,7 +1036,7 @@ fn res_type_node(node: int) -> int {
             return TI_UNIT;
         }
         base_ti := sym_type(si);
-        // 两趟（照 #25 元组第二根因同款）：实参类型解析**自身也会向
+        // 两趟（照 #2026-09-16-2 元组第二根因同款）：实参类型解析**自身也会向
         // g_gen_apply_data 追加**（嵌套应用如 Box[Box[int]] 的内层载荷）——
         // 先解析进暂存，后一次性认领连续块。修复前「先认领块再逐参解析」会让
         // 内层 append 冲掉外层的 count 槽与后续载荷槽（终点 count 截断），
@@ -1795,7 +1795,7 @@ fn type_node_mentions_struct_param(si: int, tn: int) -> int {
 // 未识别 → "?"（不伪造名字）。
 fn type_display(ti: int) -> string {
     k := get_type_kind(ti);
-    // 泛型应用**先于** get_type_name 捷径处理（#29 评审 Minor #2）：后者对
+    // 泛型应用**先于** get_type_name 捷径处理（#2026-09-11-11 评审 Minor #2）：后者对
     // TYP_GENERIC_APPLY 只返回基名 ⇒ 实参全丢（「expected Box, got Box」——
     // 真正不匹配的那个类型实参恰是读者最需要的），且使本函数下方的实参分支
     // 成死码。此处展开成 `Box[int]` / `Pair[Box[int], string]` 形式。
@@ -2995,11 +2995,11 @@ fn infer_expr(node: int) -> int {
     if ast_kind(node) == EXPR_GO {
         // a=-1, b=body;  c=iter_ni (>=0 for range mode)
         body := ast_b(node);
-        // **range-go 迭代变量绑定**（2026-09-16 #93 批 T4；维护者裁 (i)）：`go i a..b body` 的
+        // **range-go 迭代变量绑定**（2026-09-16 #2026-09-16-31 批 T4；维护者裁 (i)）：`go i a..b body` 的
         // 语义**就是绑定 `i`**（ir_gen 侧按 `EXPR_GO.c` 使用该名），而本分支此前**不绑** ⇒
         // checker 与语言语义不一致（checker 缺口，非误报豁免问题）。
         // **修前不可见**：body 常为 `f(i)` 形（已解析直调的实参）⇒ 实参从不被推断（TODO #2026-09-16-31）
-        // ⇒ `i` 从未被查、无诊断；#93 修好后**暴露为 N01 误报**（命中载体 = 29 探针之一的
+        // ⇒ `i` 从未被查、无诊断；#2026-09-16-31 修好后**暴露为 N01 误报**（命中载体 = 29 探针之一的
         // `tests/probes/p_spawn.cr` + 已挂 CI 的 `tests/selfhost/test_interp_parity.py`）。
         // 绑定语义与 `for` **同源**（先例 `checker.cr:3039-3051`）：**int 局部**（与 ir_gen 的
         // `iter_var_ni` 用法一致）+ **作用域严格限 body**（进前绑、出后恢复）；

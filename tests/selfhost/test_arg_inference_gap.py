@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""✅ **已修（#93 批 T3）—— 本套件已挂 CI**（TODO #2026-09-16-31；详见
+"""✅ **已修（#2026-09-16-31 批 T3）—— 本套件已挂 CI**（TODO #2026-09-16-31；详见
 `docs/superpowers/specs/2026-09-16-arg-inference-gap.md`）。
 
 被测缺陷 = **「已解析直调的实参推断缺失」**（不是「一个 139」）：
@@ -261,7 +261,7 @@ fn main() -> int { p : ., mut = P { v = 1 }; return ieq(idf(p), 7); }
 def main():
     report = "--report" in sys.argv
     fails = []
-    print("=== #93 实参推断缺失 —— RED 语料现状观测（修复后应全绿）===")
+    print("=== #2026-09-16-31 实参推断缺失 —— RED 语料现状观测（修复后应全绿）===")
     for name, kind, want, src in CASES:
         chk, codes, bld, elf = observe(src)
         if kind == "crash":

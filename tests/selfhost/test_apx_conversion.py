@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """apx（dex）形式转换缺口族回归套件（apx 批 T5；自举编译器 build/corec）。
 
-覆盖 = TODO #2026-09-16-17（方法调用实参不转换）· #81（第 9 个 binary64 栈参）· ⑦a（全局运行期初值）
+覆盖 = TODO #2026-09-16-17（方法调用实参不转换）· #2026-09-16-18（第 9 个 binary64 栈参）· ⑦a（全局运行期初值）
       + apx 批 T2 新增两活点：**模块限定调用** `m.f(x)` 与**指针写** `*p = d`
       + 聚合四类写点（字段 / 元素 / 元组 / 枚举载荷）+ 比较点声明面查表（L10）
 
@@ -86,14 +86,14 @@ def build_and_run(source, tag):
 
 
 # ── 探针表：name, source, 期望 ELF rc, 备注 ──
-# 期望值 7（或 1）= 该形态「正确」；期望 15 = **#91 零足迹哨兵**（见该条注释）。
+# 期望值 7（或 1）= 该形态「正确」；期望 15 = **#2026-09-16-29 零足迹哨兵**（见该条注释）。
 CASES = [
-    # ── #80：非直调调用形态 ──
+    # ── #2026-09-16-17：非直调调用形态 ──
     ("method_arg_apx", """
 struct S1 { v: int }
 impl S1 { fn m(self: S1, x: dex) -> int { return @raw_int(x) / 1000000; } }
 fn main() -> int { d : dex, apx = 7.0; s : ., mut = S1 { v = 0 }; return s.m(d); }
-""", 7, "方法调用实参（#80 原形）"),
+""", 7, "方法调用实参（#2026-09-16-17 原形）"),
     ("method_arg_self_offset", """
 struct S2 { v: int }
 impl S2 { fn m(self: S2, k: int, x: dex) -> int { return @raw_int(x) / 1000000; } }
@@ -110,7 +110,7 @@ fn main() -> int {
     return 7;
 }
 """, 7, "模块限定调用 m.f(x)（apx 批 T2 新增活点；rc=4 即该形态未转换）"),
-    # ── #81：第 9 个 binary64 栈参（= #80 同一修复）──
+    # ── #2026-09-16-18：第 9 个 binary64 栈参（= #2026-09-16-17 同一修复）──
     ("stack_arg_9th_method", """
 struct S9 { v: int }
 impl S9 {
@@ -131,7 +131,7 @@ fn main() -> int {
     lx : dex, apx = 7.0;
     return s.m(a1, a2, a3, a4, a5, a6, a7, a8, lx);
 }
-""", 7, "#81 第 9 个 binary64 栈参（方法形）"),
+""", 7, "#2026-09-16-18 第 9 个 binary64 栈参（方法形）"),
     ("stack_arg_9th_direct", """
 fn f9(a: dex, b: dex, c: dex, e: dex, f: dex, g: dex, h: dex, i: dex, x: dex) -> int {
     return @raw_int(x) / 1000000;
@@ -148,7 +148,7 @@ fn main() -> int {
     lx : dex, apx = 7.0;
     return f9(a1, a2, a3, a4, a5, a6, a7, a8, lx);
 }
-""", 7, "直调同形对照（#81 机理裁定用：同形只差调用形态）"),
+""", 7, "直调同形对照（#2026-09-16-18 机理裁定用：同形只差调用形态）"),
     # ── 聚合四类写点 ──
     ("struct_literal_field", """
 struct S3 { f: dex }

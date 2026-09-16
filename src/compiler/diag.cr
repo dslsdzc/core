@@ -171,12 +171,12 @@ fn print_parse_errors() {
 fn diag_gate_exempt(code: int, scope: int) -> int {
     // ── scope = BUILD（6 条；build/ccr/cir/run 面）────────────────────────
     // TF01 · 位点 = tests/suite/{chan,conc,go_e2e,go_final,go_parallel}_test.cr（5 档 build）
-    //        理由 = 并发族既有误报（同族两条已修先例：#40 lits_copy / ty_memo_slot_no_grow）
+    //        理由 = 并发族既有误报（同族两条已修先例：#2026-09-13-1 lits_copy / ty_memo_slot_no_grow）
     //        退出 = 逐档归因 + 修前端根因后撤
     if scope == GATE_SCOPE_BUILD && code == EC_TF_RETURN { return 1; }
     // TF07 · 位点 = tests/suite/ptr_ref_first.cr:8（@raw_int）+ tests/selfhost/test_ccr_types.py:1805
     //        理由 = EC_TF_ARG_TYPE 全仓唯一 raise 点在 @raw_int 内建位（checker.cr:3727），非调用位点
-    //        退出 = #20/F3 调用位点收口后撤
+    //        退出 = #2026-09-16-1/F3 调用位点收口后撤
     if scope == GATE_SCOPE_BUILD && code == EC_TF_ARG_TYPE { return 1; }
     // TB01 · 位点 = ptr_ref_first（TF07 级联）+ t3/t4 库单元 8 档（N 族级联）
     //        理由 = **级联码**：ANY 门（checker.cr:2473-2474）仅在**双侧**非 int/dex 时报，

@@ -32,7 +32,7 @@ IR_INTERP_MAX_DEPTH : int = 400;
 g_interp_stack : string, mut;
 
 // IR_BINARY 统一分派（主循环与 callee 内联循环共用）：
-// 整数路径（模 2⁶⁴）。dex 为缩放整数——同走整数路径（数值迁移 #48 定稿）；
+// 整数路径（模 2⁶⁴）。dex 为缩放整数——同走整数路径（数值迁移 #2026-09-13-9 定稿）；
 // IR_I2F/IR_F2I 在 dispatch 入口显式报错（interp 无 binary64 语义）。
 fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int) {
     if d < 0 { return; }
@@ -744,7 +744,7 @@ fn ir_interpret() -> int {
             return 2;
         }
 
-        // IR_I2F(49)/IR_F2I(50) 在 dispatch 入口已被显式报错拦截（#48 定稿：interp 无 binary64）
+        // IR_I2F(49)/IR_F2I(50) 在 dispatch 入口已被显式报错拦截（#2026-09-13-9 定稿：interp 无 binary64）
 
         // Branch (node-index based)
         if op == 19 {

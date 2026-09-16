@@ -3,7 +3,7 @@
 
 RED（修复前 = P5 起点基线 `/tmp/p5t0/base/corec`，同病；P4 T5 §7-5 首次登记）：
     `corec build src/compiler/main.cr -O 0`  冷态 rc=0 / **暖态 rc=139**
-    gdb: #0 load64(rdi=0, rsi=-8) ← #1 str_len ← #2 load_cir_cache
+    gdb: #0 load64(rdi=0, rsi=-8) ← #2026-07-31-1 str_len ← #2026-07-27-1 load_cir_cache
 根因链（本任务实测；数字见 `.superpowers/sdd/p5-task1-report.md`）：
     ① 装载侧逐函数 `read_file` = `alloc(fsize+1)`，而 bump 分配器（rt.s `alloc`）**不回收**
        ⇒ 各函数读缓冲**累计驻留**（本单根因：瞬态载荷驻留于无回收分配器）
@@ -173,7 +173,7 @@ def entry_stamp(p: pathlib.Path):
 # 冷=1811B / 暖=1703B——暖态不重放 ir_gen 临时名（`_eq0`/`bin` 等）的 intern ⇒
 # STR 表更短；其余七段逐字节同）。本套件因此钉**段级契约**：SYM/NOD/ENT/REG/
 # EDG/TYPE/IFACE 必须冷=暖。
-# **B4/#87 修复（2026-09-16 判据网加固批）**：STR 段原判据只**登记尺寸**
+# **B4/#2026-09-16-25 修复（2026-09-16 判据网加固批）**：STR 段原判据只**登记尺寸**
 # （`STR {len(a)}B→{len(b)}B（预存口径，不入判据）`）——暖态 STR「多写/漏写
 # 一条、同尺寸改内容」都无判据（只有 ELF 全字节等间接兜底，且仅当该串进发射
 # 面才咬）。现补**结构判据**（str_contract_equal，见下）：暖态条目序列必须是
@@ -208,7 +208,7 @@ def str_entries(seg: bytes):
 
 
 def str_contract_equal(cold_seg: bytes, warm_seg: bytes):
-    """STR 段冷/暖**结构**判据（B4/#87 修复，2026-09-16 判据网加固批）。
+    """STR 段冷/暖**结构**判据（B4/#2026-09-16-25 修复，2026-09-16 判据网加固批）。
 
     契约（预存口径的精确化）：暖态不重放 ir_gen 临时名（`_eq0`/`bin` 等）的
     intern ⇒ **暖态条目 = 冷态条目的前缀**（同 index ⇒ 同字节；冷态多出的是

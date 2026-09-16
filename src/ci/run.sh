@@ -65,7 +65,7 @@ case "$CI_JOB_NAME" in
     python3 tests/bootstrap/test_generics.py
     # TODO #2026-09-11-7：铁律 #2 机械执行钩子的加固判据（BLOCK 19 + ALLOW 11；纯 python，无需编译器）
     python3 tests/harness/test_block_git.py
-    # R2 P7 非构建小批（CI 挂点审计 #9）：**挂点覆盖率机械判据**——枚举
+    # R2 P7 非构建小批（CI 挂点审计 #2026-09-10-5）：**挂点覆盖率机械判据**——枚举
     # tests/{selfhost,bootstrap,harness}/*.py 与 run.sh 挂点做差集，未挂项必须逐条登记
     # 白名单（tests/harness/ci_hook_allowlist.txt，带理由；含范围外登记段）；含**内存内
     # 突变自证**（摘掉一个真挂点 ⇒ 必红）。纯 python、毫秒级、无需编译器 ⇒ 挂本 job。
@@ -77,7 +77,7 @@ case "$CI_JOB_NAME" in
     # 0.05s）⇒ 挂本 job（bootstrap-tests 不构建）。挂前缺口登记见 allowlist 原 `:23` 条。
     python3 tests/selfhost/test_ent_kernel_neutrality.py
     # 判据网加固批：**突变自证**（纯 python、内存内、零副作用）——对本批改强的
-    # 六条判据（#84/#85/#86/#87/#88/#90）各构造「能骗过旧形态」的坏输入，
+    # 六条判据（#2026-09-16-22/#2026-09-16-23/#2026-09-16-24/#2026-09-16-25/#2026-09-16-26/#2026-09-16-28）各构造「能骗过旧形态」的坏输入，
     # 断言「旧形态绿 ∧ 新形态红」。这才是「判据够强」的机械证据（不是注释里的
     # 自我声明）。实测 21/21（18 突变体 + 3 正控）。
     python3 tests/harness/test_criteria_mutations.py
@@ -112,10 +112,10 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_global_seams.py   # 全局行 operand seam（2026-09-16 批）：B1/B2/B4/B5 全局 vs 局部同形对拍（mut 全局 + 期望值）+ B6(b) 发射字节级（静态无 .so 无运行期腿）+ B7 非回归；配套 suite 语料 tests/suite/global_seam_test.cr
     python3 tests/selfhost/test_tuple_slots.py
     python3 tests/selfhost/test_agg_read_type.py # TODO #2026-09-16-16「聚合读丢型」批 2（T3 已修）：腿 A 语义值（LET 中转 / match 载荷 / 局部数组元素 / 写回 apx 槽）· 腿 B 界面见证（`_dxt` 反方向 0 · `_dxdiv` 正方向恰好 1 · extern 调用点前须有转换）· 腿 C 钉子（Core 实参 / apx 已转正形）。**元组数字下标 = 裁-AGG-3登记未覆盖**（[GAP] 只观测不计判据）
-    python3 tests/selfhost/test_arg_inference_gap.py # #93 批（实参推断缺失）：**腿 A**（9 例，原 139 → 精确值）· **腿 B**（`g(nosuchfn(1))` 零诊断 → **error[N06]**，**正据**）· **腿 D**（实参位泛型得**精确键** `idf[P]`，非退化键 `idf[unit]`——TODO #2026-09-16-33 的既有缺陷 = 本批附带修复）· 对照 9 例（含外层模块/方法调用的 **oracle 对照**）。**背景**：门 `checker.cr` 的直调分支曾在「被调已解析为 Core fn」时提前 return ⇒ 实参**从不被推断** ⇒ ① 实参位 `EXPR_FIELD` 被调名未回填 ⇒ 伪名 `import` ⇒ SIGSEGV 139 ② 未定义函数静默通过。修法 = `infer_call_args()` 在**四处**「已解析」return 前统一调用（完备性枚举见计划 §3ter）
+    python3 tests/selfhost/test_arg_inference_gap.py # #2026-09-16-31 批（实参推断缺失）：**腿 A**（9 例，原 139 → 精确值）· **腿 B**（`g(nosuchfn(1))` 零诊断 → **error[N06]**，**正据**）· **腿 D**（实参位泛型得**精确键** `idf[P]`，非退化键 `idf[unit]`——TODO #2026-09-16-33 的既有缺陷 = 本批附带修复）· 对照 9 例（含外层模块/方法调用的 **oracle 对照**）。**背景**：门 `checker.cr` 的直调分支曾在「被调已解析为 Core fn」时提前 return ⇒ 实参**从不被推断** ⇒ ① 实参位 `EXPR_FIELD` 被调名未回填 ⇒ 伪名 `import` ⇒ SIGSEGV 139 ② 未定义函数静默通过。修法 = `infer_call_args()` 在**四处**「已解析」return 前统一调用（完备性枚举见计划 §3ter）
     python3 tests/selfhost/test_agg_slots.py      # TODO #2026-09-16-2 姊妹条目：struct/struct 模式/数组字面量槽位（同 F5 契约）
     python3 tests/selfhost/test_agg_checks.py     # TODO #2026-09-11-11 聚合字面量「名/型/同质性」三校验（名字绑定 + TS01-04/TK02 硬错误）
-    python3 tests/selfhost/test_apx_conversion.py # apx 形式转换缺口族（2026-09-16 apx 批 T5）：**23 例** = TODO #2026-09-16-17（方法调用实参）/ #81（第 9 个 binary64 栈参）/ ⑦a（全局运行期初值）+ T2 新增两活点（**模块限定调用 `m.f(x)`** / **指针写 `*p = d`**）+ 聚合四类写点 + 比较点声明面查表（L10）+ 非回归 + **`dex?` 零足迹哨兵**（⚠ 其期望值 15 **不是**期望语义，只是绊线——见套件内刺眼标注与 TODO #2026-09-16-29）+ **两条自证腿**（声明形自证：显式形建 apx 槽/推断形不建 + 解释器拒收反证；C1 双形对拍通用腿）。**判据分工**：本套件是 apx 面载荷判据——ELF canary + `.ccr` 四条对 apx 面**零覆盖**（T3 突变双向实测），详见 `2026-09-16-criteria-strength-audit.md` §0ter；配套 suite 语料 `tests/suite/apx_conversion_test.cr`
+    python3 tests/selfhost/test_apx_conversion.py # apx 形式转换缺口族（2026-09-16 apx 批 T5）：**23 例** = TODO #2026-09-16-17（方法调用实参）/ #2026-09-16-18（第 9 个 binary64 栈参）/ ⑦a（全局运行期初值）+ T2 新增两活点（**模块限定调用 `m.f(x)`** / **指针写 `*p = d`**）+ 聚合四类写点 + 比较点声明面查表（L10）+ 非回归 + **`dex?` 零足迹哨兵**（⚠ 其期望值 15 **不是**期望语义，只是绊线——见套件内刺眼标注与 TODO #2026-09-16-29）+ **两条自证腿**（声明形自证：显式形建 apx 槽/推断形不建 + 解释器拒收反证；C1 双形对拍通用腿）。**判据分工**：本套件是 apx 面载荷判据——ELF canary + `.ccr` 四条对 apx 面**零覆盖**（T3 突变双向实测），详见 `2026-09-16-criteria-strength-audit.md` §0ter；配套 suite 语料 `tests/suite/apx_conversion_test.cr`
     python3 tests/selfhost/test_nested_fn.py      # TODO #2026-09-10-12 嵌套 fn 声明段错误 → 定位诊断回归
     python3 tests/selfhost/test_interp_parity.py  # TODO #2026-09-10-7 解释器 callee 内联 ≡ 主循环 ≡ ELF
     python3 tests/selfhost/test_cache_identity.py # TODO #2026-09-10-1 cir 缓存编译器身份（跨重建失效）
@@ -132,20 +132,20 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_named_dedup.py    # R2 P2a Task 3（C-4）：侧表 ↔ res_type_node 管线内断言（`--verify-named-dedup`；**非影子通道**——判据 = 真实流水线上三组一致性，影子期亦无耦合）
     python3 tests/selfhost/test_let_check.py      # R2 P5 Task 6（TODO #2026-09-11-14）：`EXPR_LET` 站点值/注解兼容判定——TA02 定位硬错（值非兼容 + 数组长度档）+ 无产物 + 前端拒绝（不进入 lower/写 .ccr/ELF）+ 全局声明面（check_global_let 同款）+ 批量/丢弃名 + 级联抑制（TI_NEVER 错误标记只发原诊断）+ 正控（无注解/auto/dyn/泛型 T 与 [T;N]/可选注入/无初值）；23 例〔**注释陈旧自纠**：T4a 前实读 = 24（23 为 P5 期旧值，差 1 未同步）〕+ R2 P6 Task 4a 增 5（never 调用声明位 / near-miss 负控 / 强负控调用返回型不符仍拒 / 语句位宽面 / 赋值位登记钉）＝ **29 例**
     python3 tests/selfhost/test_diag_gate.py      # FC 批 T2：fail-closed 闸门（默认阻断 + 豁免登记表 9 条）——正控 9（表内 6 个 build 面码仍放行 + scope=check 3 条 check rc=1 不变）+ 负控 6（语法面 P21 / 类型面 TA02·R02·TM03·TK05 / 安全检查面 TU03：仍阻断 + **零产物**）+ 零产物 3（前端失败无半成品 / corearch 失败删本次 .ccr [stub 仿真] / 旧哨兵原样仍在）＝ **17 例**
-    python3 tests/selfhost/test_warm_cache_gate.py # #60 批 T2+T3：暖缓存两态回归（**CI 暖态最小面**；广度层 = tools/baseline/warm_leg.sh 手工判据）——缓存命中跳过 `ir_gen_func` ⇒ ir_gen 期 `alloc_type` 行不重建（T1 实锤：warm 缺 `TYP_PTR extra=1` ⇒ `provenance_verify.cr:66` TU03 静默失效）。修法 = 生成期对「快照不载的共享面」有副作用 ⇒ 该条目**不可写**（下次必 miss 重放副作用）；判据 ① `as *int` 解引用 load/store **冷/暖同**（都 rc=1 + TU03）② 机制钉：副作用函数 `::main.cir` **无条目** ③ 正控：普通程序条目在 + 二跑真命中（size/mtime 不变）④ TK01 冷/暖同 ⑤ `ccr` 面同判；**同路径重复编译 = 缺陷真触发场景（定路径是本设计的要点）**＝ **10 例**（**本批机械核对同步**：实测 10/10；注释旧值 6）
+    python3 tests/selfhost/test_warm_cache_gate.py # #2026-09-15-5 批 T2+T3：暖缓存两态回归（**CI 暖态最小面**；广度层 = tools/baseline/warm_leg.sh 手工判据）——缓存命中跳过 `ir_gen_func` ⇒ ir_gen 期 `alloc_type` 行不重建（T1 实锤：warm 缺 `TYP_PTR extra=1` ⇒ `provenance_verify.cr:66` TU03 静默失效）。修法 = 生成期对「快照不载的共享面」有副作用 ⇒ 该条目**不可写**（下次必 miss 重放副作用）；判据 ① `as *int` 解引用 load/store **冷/暖同**（都 rc=1 + TU03）② 机制钉：副作用函数 `::main.cir` **无条目** ③ 正控：普通程序条目在 + 二跑真命中（size/mtime 不变）④ TK01 冷/暖同 ⑤ `ccr` 面同判；**同路径重复编译 = 缺陷真触发场景（定路径是本设计的要点）**＝ **10 例**（**本批机械核对同步**：实测 10/10；注释旧值 6）
     python3 tests/selfhost/test_tc02_branch.py    # TC02 收口：`if` 分支相容判定的**发散豁免**（P3 不对称——else 支发散 ⇒ 不报；then 支发散 ⇒ 仍报真信号；谓词 `stmt_diverges`，checker.cr，只服务本判定点）+ 既有 NEVER 豁免（loop{} 收尾）零扰动 + TF01/TA02/TB01 面钉子（TF01 仍报 / 落空豁免不变 / 声明位 TA02 不变 / TB01 真错负控 ×2）+ 端到端 build+run（`test_native_float` 两源同形）＝ **15 例**
     # ─── 判据网加固批（criteria-harden，2026-09-16）：**弱判据改强 + 挂点扩容** ───
     # 审计依据 = docs/superpowers/specs/2026-09-16-criteria-strength-audit.md §4（挂载成本序
-    # 低 → 中 → 高）与 §2 表 B（B1-B6 弱判据 → TODO #2026-09-16-22-#88/#90）。本批在 #89 成本序下挂
+    # 低 → 中 → 高）与 §2 表 B（B1-B6 弱判据 → TODO #2026-09-16-22-#2026-09-16-26/#2026-09-16-28）。本批在 #2026-09-16-27 成本序下挂
     # **低/中成本档**（下列四档；各档时长实测见行内注）；`test_mw_task1-6` 属**口径换代**
     # （零 diff 腿的基线须在**改动前**编译器上产 ⇒ CI 参照物结构性不可得）⇒ **本批不挂**，
     # 结论 + 替代口径登记于 tests/harness/ci_hook_allowlist.txt。
-    # 注：本批同时把四档的**弱判据改强**：#84 事件 1-4 全字段模板（test_hit_table）、
-    # #85/#90 慢路径块体逐指令模板 + 零 diff 腿指令边界锁步（test_mw_task2，#90 因基线
-    # 不可得仍不挂，见 allowlist）、#86 dump 值域白名单（test_hit_table）、#87 STR 段冷/暖
-    # 前缀契约（test_cir_warm_path，已挂上行）、#88 剔除面白名单 + 计数（test_ccr_types，已挂上行）。
-    python3 tests/selfhost/test_slice_bounds.py   # 低（TODO #2026-09-11-13/#89 点名档）：F11 切片越界守卫回归钉（越界读/写/变量下标/空切片 trap + 合法访问）；本批实测 1.4s（7/7）
-    python3 tests/selfhost/test_hit_table.py      # 中（allowlist:25 + 审计「漏检面最大」同族）：HIT 表模式合成层——v2 walker/夹具拒绝面/事件注入逐字节对照 + **事件 1-4 全字段模板（本批 #84 改强）** + dump 值域白名单（本批 #86）；本批实测 2.3s（24/24）
+    # 注：本批同时把四档的**弱判据改强**：#2026-09-16-22 事件 1-4 全字段模板（test_hit_table）、
+    # #2026-09-16-23/#2026-09-16-28 慢路径块体逐指令模板 + 零 diff 腿指令边界锁步（test_mw_task2，#2026-09-16-28 因基线
+    # 不可得仍不挂，见 allowlist）、#2026-09-16-24 dump 值域白名单（test_hit_table）、#2026-09-16-25 STR 段冷/暖
+    # 前缀契约（test_cir_warm_path，已挂上行）、#2026-09-16-26 剔除面白名单 + 计数（test_ccr_types，已挂上行）。
+    python3 tests/selfhost/test_slice_bounds.py   # 低（TODO #2026-09-11-13/#2026-09-16-27 点名档）：F11 切片越界守卫回归钉（越界读/写/变量下标/空切片 trap + 合法访问）；本批实测 1.4s（7/7）
+    python3 tests/selfhost/test_hit_table.py      # 中（allowlist:25 + 审计「漏检面最大」同族）：HIT 表模式合成层——v2 walker/夹具拒绝面/事件注入逐字节对照 + **事件 1-4 全字段模板（本批 #2026-09-16-22 改强）** + dump 值域白名单（本批 #2026-09-16-24）；本批实测 2.3s（24/24）
     python3 tests/selfhost/test_region_cfg.py     # 中（allowlist:39）：`.ccr`/`.cir` 区域结构 + **段表/版本断言**（与 test_ccr_v7/ccr_types 同族 ⇒ 格式批的漏检面）；本批实测 0.9s（22/22）
     python3 tests/selfhost/test_live_ranges.py    # 中（allowlist:28）：存在区间 + 条目版本化 + O1/O2 冒烟；本批实测 1.4s（13/13）
     # 高（**allowlist 自标最高危**：唯一拦「清单双注册漂移 ⇒ project-mode `error[N06]`

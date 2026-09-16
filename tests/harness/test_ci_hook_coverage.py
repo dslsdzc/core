@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CI 挂点覆盖率机械判据（R2 P7 非构建小批；CI 挂点审计 #9 的落地）。
+"""CI 挂点覆盖率机械判据（R2 P7 非构建小批；CI 挂点审计 #2026-09-10-5 的落地）。
 
 背景（审计实证，2026-09-16）：`tests/selfhost/test_backend_bootstrap.py` 长期
 「自称已挂」（TODO.md 登记句）而 `src/ci/run.sh` **零命中**——它是唯一能拦

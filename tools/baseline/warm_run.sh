@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# #60 批 T3：入仓暖态语料专用 runner（**牙齿层**）—— 等价 `warm_leg.sh --with-corpus`（空清单）。
+# #2026-09-15-5 批 T3：入仓暖态语料专用 runner（**牙齿层**）—— 等价 `warm_leg.sh --with-corpus`（空清单）。
 #
 # 用法: bash tools/baseline/warm_run.sh <corec二进制> <outdir>
 # 语料: `tests/probes/warm/*.cr`（7 档；**定路径** = 本语料的设计要点，见其 README）

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """枚举/结构体容量面回归（TODO #2026-09-12-2 → **容量批 T3 解除**）。
 
-**旧态（#35 修复，2026-09-12）**：`EnumVariant` 槽区（`MAX_ENUM_VARIANTS=16` 槽 × `OFF_EV_SIZE=272`）
+**旧态（#2026-09-12-2 修复，2026-09-12）**：`EnumVariant` 槽区（`MAX_ENUM_VARIANTS=16` 槽 × `OFF_EV_SIZE=272`）
 与 `StructInfo` 字段槽区（`MAX_STRUCT_FIELDS=16` 槽）是**定长内嵌槽区** ⇒ >16 越界写（踩 count/邻记录）
 ⇒ parser 写点护栏 + `error[P022]`/`error[P023]` 定位硬错（rc=1 + 无产物）。
 
