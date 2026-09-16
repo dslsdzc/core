@@ -5,6 +5,11 @@
 # 注意：本地长时间编译请遵守 CLAUDE.md 铁律 6（cpulimit/nice 限速）。
 #
 # 模板来源：rust-lang/rust src/ci/run.sh（configure/make 部分替换为 Core 构建命令）。
+#
+# 编号约定（2026-09-17 起）：下方注释里的 `TODO #YYYY-MM-DD-N` = 「日期 + 序号」新标识
+# （旧全局单调号 `#NN` 已废弃、永久封存）。规则与旧号对照表（旧号解析真源）见
+# `TODO.md` 头部「编号约定」/「编号迁移对照表」；迁移计划与分类依据见
+# `docs/superpowers/plans/2026-09-17-todo-id-migration.md`。新增引用一律用新格式。
 
 CI_JOB_NAME="${CI_JOB_NAME:-}"
 set -euo pipefail
