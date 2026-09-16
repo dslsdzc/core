@@ -51,7 +51,7 @@ n0=$(grep -c 'rc=0$' "$OUT/rc.txt" || true)
 n1=$(grep -c 'rc=1$' "$OUT/rc.txt" || true)
 echo "PROBES DONE（$OUT）：$n 档 · rc 分布 $n0×0 / $n1×1"
 
-# #60 T3 暖态腿（广度层）：同路径二跑 —— rc/诊断码集一致性 + 暖态生效档数（见 warm_leg.sh 头注）。
+# #2026-09-15-5 T3 暖态腿（广度层）：同路径二跑 —— rc/诊断码集一致性 + 暖态生效档数（见 warm_leg.sh 头注）。
 if [ "${WARM_LEG:-1}" != "0" ]; then
   bash "$SCRIPT_DIR/warm_leg.sh" "$CCBIN" "$OUT/warm" < "$OUT/corpus.tsv" \
     || { echo "WARM LEG FAILED（暖态腿：冷/暖两态分歧）" >&2; exit 1; }

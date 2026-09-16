@@ -39,7 +39,7 @@ R2 P4 Task 4（DFNode.TK 迁升）+ R2 P5 Task 2（单槽化）见文件末同�
 内存 DF 记录 72B = 9 槽；P5 T2 起两槽语义对调并分离——`OFF_DF_TK`(40) = **类型项引用**
 （类型面唯一真源）、`OFF_DF_AUX`(64) = **辅码**（旗标/宽度/不可逆行的原码）。
 `.ccr` NOD **40B**（R2 P6 Task 3：32B 语义区 + 8B 邻接；+28 = 项索引 i32——TYPE 段
-文件空间项索引，-1 = 无项；`tk` 槽仍是派生码）与 `.cir` 快照布局**不变**（**P4 当时**未 bump；**本仓版本位此后由 TODO #78 批 2 从 17 → 18**——旧值 17 / 新值 18 / 归因 = 聚合读结果槽型 `TI_INT` → 声明面形式、旧快照与新语义不等价 / 出处 = `docs/superpowers/plans/2026-09-16-agg-read-type.md` §12.4 · §13；盘面只承载
+文件空间项索引，-1 = 无项；`tk` 槽仍是派生码）与 `.cir` 快照布局**不变**（**P4 当时**未 bump；**本仓版本位此后由 TODO #2026-09-16-16 批 2 从 17 → 18**——旧值 17 / 新值 18 / 归因 = 聚合读结果槽型 `TI_INT` → 声明面形式、旧快照与新语义不等价 / 出处 = `docs/superpowers/plans/2026-09-16-agg-read-type.md` §12.4 · §13；盘面只承载
 **派生码**——两槽都是 (opcode, 码) 的纯函数，落盘 = 第二真源 + 进程内索引悬空，
 实测见 cir_cache.cr 头注）。派生码逐节点 ≡ 单槽化前的混用码（D22-①）。
 
@@ -824,7 +824,7 @@ def test_p4t2_cold_warm_type_segment():
     ② ptr_arith（ir_gen 在冷路径新增行：&arr[2]/&x 的 ptr/array 行）⇒ 热态行表 =
        冷态行表**前缀**、项表与 probe 逐位同；热态 SYM 中引用被跳过行的编号
        （≥ 热态行数）数量实测登记——根因 = `.cir` 缓存命中路径跳过 ir_gen 的
-       alloc_type（前端行分配），**既有已登记面**（TODO #5 末条同族），本任务不修；
+       alloc_type（前端行分配），**既有已登记面**（TODO #2026-09-10-1 末条同族），本任务不修；
        不变量：两侧 SYM 引用都不超出**冷态**行表（悬挂仅为「缺后缀行」所致）。"""
     cache_dir = os.path.join(BASE, '.core', 'cache')
     src_path, ccr_path = _shell_fixture('t2cw')
@@ -1438,7 +1438,7 @@ fn main() -> int {
 }
 """
 
-# #60 T2：**可缓存**夹具（无 ir_gen 期类型行分配 ⇒ `main` 有条目）——㊲ 重钉用
+# #2026-09-15-5 T2：**可缓存**夹具（无 ir_gen 期类型行分配 ⇒ `main` 有条目）——㊲ 重钉用
 # （复合行的可达性见 ㊲ 注：复合 mint 行的唯一来源 = ir_gen 分配行 ⇒ 见证下不落盘）。
 PLAIN_FIXTURE = """// R2 P5 Task 2 disk-code probe (T2 重钉：可缓存形态)
 fn add(a: int, b: int) -> int { return a + b; }
@@ -1757,7 +1757,7 @@ def test_p4t4_cold_warm_term_slot_symmetry():
 
 
 def dump_strip_face_problems(out_flag: str, out_plain: str):
-    """`--dump-tk-terms` 剔除面判据 → (问题列表, stats dict)（B5/#88 修复）。
+    """`--dump-tk-terms` 剔除面判据 → (问题列表, stats dict)（B5/#2026-09-16-26 修复）。
 
     原判据「剔除 dump 节后比对」**未断言被剔面是什么**——多打印一行 `123\\t…`
     形态数据行会被静默吃掉（黑盒逐行过滤 ⇒ 绿）。现把剔除面显式化为
@@ -1822,9 +1822,9 @@ def dump_strip_face_problems(out_flag: str, out_plain: str):
 def test_p4t4_dump_flag_zero_artifact_effect():
     """㉚ `--dump-tk-terms` 只读：带/不带 flag 两次**冷**运行的产物与 stdout（剔除
     dump 节）逐字节同（新增通道不泄入产物/输出面）。两轮之间清缓存 = 避开既有的
-    冷/热渲染差异（TODO #5 末条，非本任务面）。
+    冷/热渲染差异（TODO #2026-09-10-1 末条，非本任务面）。
 
-    B5/#88 修复（2026-09-16 判据网加固批）：剔除面从**黑盒逐行过滤**改为
+    B5/#2026-09-16-26 修复（2026-09-16 判据网加固批）：剔除面从**黑盒逐行过滤**改为
     **白名单（唯一头行 + 9 字段数据行，连续一段）+ 计数断言**（剔除行数 ==
     1 + 头行自报 rows）——被剔面不再能吞下未计数的输出行。"""
     src = tk_fixture('flag')
@@ -1846,7 +1846,7 @@ def test_p4t4_dump_flag_zero_artifact_effect():
 
 
 def test_p4t4_cir_snapshot_layout_unbumped():
-    """㉛ `.cir` 快照**布局**未变（**P4 当时**未 bump 的证据面；**17 → 18 由 TODO #78 批 2 换代**——
+    """㉛ `.cir` 快照**布局**未变（**P4 当时**未 bump 的证据面；**17 → 18 由 TODO #2026-09-16-16 批 2 换代**——
     旧值 17 / 新值 18 / 归因 = 聚合读结果槽型改声明面形式（旧快照与新语义不等价）/ 出处 = 计划 §12.4·§13）：
     条目版本位 == 当前版本；
     节点小节 = 8B 计数 + n×64B（8 字段）——即「项槽不落盘、装载侧重派生」的格式
@@ -1862,7 +1862,7 @@ def test_p4t4_cir_snapshot_layout_unbumped():
         total_nodes = 0
         for f in entries:
             ver, nodes, ok = cir_entry_nodes(os.path.join(cache_dir, f))
-            assert ver == 18, f"{f}: CIR_CACHE_VER {ver} != 18 (TODO #78 批 2 换代后值)"
+            assert ver == 18, f"{f}: CIR_CACHE_VER {ver} != 18 (TODO #2026-09-16-16 批 2 换代后值)"
             assert ok, f"{f}: node section (64B stride) runs past EOF"
             total_nodes += len(nodes)
         assert total_nodes > 0, "vacuous: no nodes parsed from snapshots"
@@ -1966,11 +1966,11 @@ def test_p5t2_cold_warm_composite_symmetry():
                 seen_missing += 1
             else:
                 assert rw_[3] == rc_[3], f"warm-only item: {rc_} vs {rw_}"
-        # #60 T2 收口：上述「暖态丢项」局限的**成因**（命中跳过 ir_gen 而该函数 alloc_type
+        # #2026-09-15-5 T2 收口：上述「暖态丢项」局限的**成因**（命中跳过 ir_gen 而该函数 alloc_type
         # 新行）已由见证规则消除（分配行的函数不再有条目 ⇒ 必重放）。本夹具实测 0 —— 钉死，
         # 防回退（若再出现，说明见证被绕过或行表分叉，属 T2 面回归）。
         assert seen_missing == 0, \
-            f"warm run lost {seen_missing} term(s): 行表分叉（#60 T2 见证规则应已闭合）"
+            f"warm run lost {seen_missing} term(s): 行表分叉（#2026-09-15-5 T2 见证规则应已闭合）"
         comp = [r for r in rows_c if r[1] in MINT_OPS and r[3] == -1 and r[8] > 0]
         assert comp, "vacuous: no composite row in cold dump"
     finally:
@@ -2001,13 +2001,13 @@ def test_p5t2_snapshot_disk_code_preserved():
     """㊲ `.cir` 快照盘面承载**派生码**（不是项引用、不是辅码）：盘上 mint 行的 (op, tk)
     必须全部落在活体 dump 的派生码集内（若盘上落的是 -1 项槽或 0，这里必红）。
 
-    **#60 T2 重钉（死亡证据 = 本批能力变更，非放宽判据）**：原判据对象 = **复合行**
+    **#2026-09-15-5 T2 重钉（死亡证据 = 本批能力变更，非放宽判据）**：原判据对象 = **复合行**
     （mint ∧ aux>0）。实核（101 档全语料扫描 + 夹具矩阵）：复合 mint 行的唯一来源 =
     ir_gen 期分配复合类型行的函数（ir_gen.cr:1403/1409/2584/2641/2951）⇒ 依 T2 见证
     规则（main.cr miss 分支：分配过类型行 ⇒ 不写条目）这类函数**结构上不落盘** ⇒ 原判据
     在见证下**可达主体为空**（原夹具 COMPOSITE_FIXTURE 实测：comp={(2,13)} 全缺）。重钉
     为可达形态：夹具改为**可缓存**（PLAIN_FIXTURE），断言对象 = 「带码 mint 行」全集；
-    复合子面待 (c)/(d)（快照承载类型行）恢复可缓存后按原判据复位 —— 见 TODO #60。
+    复合子面待 (c)/(d)（快照承载类型行）恢复可缓存后按原判据复位 —— 见 TODO #2026-09-15-5。
     抑制面**不在此处静默放宽**：由紧随其后的 ㊳ 单独钉住。"""
     cache_dir = os.path.join(BASE, '.core', 'cache', 'cir')
     src = tk_fixture('snapc', PLAIN_FIXTURE)
@@ -2019,7 +2019,7 @@ def test_p5t2_snapshot_disk_code_preserved():
         disk = []
         for f in sorted(os.listdir(cache_dir)):
             ver, nodes, ok = cir_entry_nodes(os.path.join(cache_dir, f))
-            assert ver == 18 and ok, f"{f}: version/stride drifted（期望 18 = TODO #78 批 2 换代后值）"
+            assert ver == 18 and ok, f"{f}: version/stride drifted（期望 18 = TODO #2026-09-16-16 批 2 换代后值）"
             disk += [(nd[0], nd[5]) for nd in nodes]
         assert disk, "vacuous: no nodes parsed from snapshots"
         mint = set((r[1], r[2]) for r in rows if r[1] in MINT_OPS and r[2] > 0)
@@ -2032,7 +2032,7 @@ def test_p5t2_snapshot_disk_code_preserved():
 
 
 def test_p5t2_row_allocating_fn_not_snapshotted():
-    """㊳（#60 T2 能力变更钉）**见证规则**：ir_gen 期对「快照**不载**的共享面」（类型行表）
+    """㊳（#2026-09-15-5 T2 能力变更钉）**见证规则**：ir_gen 期对「快照**不载**的共享面」（类型行表）
     有副作用的函数 ⇒ **不写快照条目** ⇒ 下跑必 miss ⇒ 重放全部生成期副作用（「宁可 miss
     不可静默」，main.cr miss 分支）。夹具 = 原 ㊲ 的 COMPOSITE_FIXTURE（数组字面量 + 取址：
     ir_gen.cr:2584 / :1403 / :1409 分配复合行 ⇒ main 命中见证）。

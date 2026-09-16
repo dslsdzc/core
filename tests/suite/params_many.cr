@@ -1,4 +1,4 @@
-// TODO #8 收口（波 1 Task 5 Minor 4）：≥18 形参静默误编译修复后的 runtime 用例。
+// TODO #2026-09-10-4 收口（波 1 Task 5 Minor 4）：≥18 形参静默误编译修复后的 runtime 用例。
 //
 // 修复前 ≥18 形参的函数在 .ccr 中 name_idx=0/param_count=0（FuncInfo 形参槽区
 // 16 槽被无界写越界踩掉 return_type/ast_node），同源 checker 发 TF01 误归、IR

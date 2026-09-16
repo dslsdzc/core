@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TODO #8 回归：≥18 形参静默误编译 + FuncInfo 形参槽区上界（2026-09-11 修复）。
+"""TODO #2026-09-10-4 回归：≥18 形参静默误编译 + FuncInfo 形参槽区上界（2026-09-11 修复）。
 
 背景（RED，修复前实测）：FuncInfo.param_types 是定长内嵌槽区（原 16 槽 =
 OFF_FI_PARAM_TYPES 16 → 16+16×8 = 144 = OFF_FI_RETURN_TYPE），而 parser 的

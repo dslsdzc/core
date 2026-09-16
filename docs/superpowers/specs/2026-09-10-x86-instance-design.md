@@ -59,12 +59,12 @@ src/runtime/                      ← 运行时（rt.s——OS 轴补充）
 
 - **序列算法文件化** = 本设计的实质内容之一（现散在 elf.cr/instr.cr 巨型文件里的帧/调用/syscall 序列显式成文件——C2/C3"实例算法"的目录化）
 - 平铺不设子目录（文件规模 10 级——concat/导入机制成本不值；文件增多再分）
-- ld project-mode 入口（main.cr）随迁 OS 轴或架构轴——**实施计划定夺点**（其 flag 注册分歧 = TODO #6 的处置并入本设计实施波）
+- ld project-mode 入口（main.cr）随迁 OS 轴或架构轴——**实施计划定夺点**（其 flag 注册分歧 = TODO #2026-09-10-2 的处置并入本设计实施波）
 
 ## 3. 构建清单分段（按轴组织）
 
 - `build_selfhost_native.py` 清单重构为分段组合：`common_files`（shared：globals/dyn_arr/ast/ccr_io 等）+ `kernel_files`（lattice 内核）+ `non_x86` 无关面（corec 前端）+ `arch_x86_64_files` + `format_elf_files` + `os_linux_files` + hit 引擎段——concat = 按确定顺序组合
-- 守卫（吸收 ld 单元静默缺陷教训）：①清单文件存在性断言（防路径漂）；②"目录新文件未入清单"检查（构建设置期提示）；③构建日志 `error[` 计数非零 = 失败门（TODO #6 建议③的落地）
+- 守卫（吸收 ld 单元静默缺陷教训）：①清单文件存在性断言（防路径漂）；②"目录新文件未入清单"检查（构建设置期提示）；③构建日志 `error[` 计数非零 = 失败门（TODO #2026-09-10-2 建议③的落地）
 - corelsp 等其余 concat = 同一分段机制复用
 
 ## 4. 寄存器分配切分（CAG 五阶段侧归属）与能力演进预留
@@ -98,7 +98,7 @@ src/runtime/                      ← 运行时（rt.s——OS 轴补充）
 ## 5. 演进波次（实施另立）
 
 1. ~~**波 1 结构**：三轴目录重组（文件迁移）+ 序列算法文件化（frame/callseq/tag2l/syscall/entry 抽取）+ 表数据迁架构轴 + 构建清单分段 + 守卫——判据 = 行为零变化（纯搬移）~~ ✅ **完成（2026-09-10，plan `2026-09-10-x86-instance-wave1.md` Tasks 1-7，提交 29d177ac49a5 / b23f008000cf / b0ba8c1c9b01 / d65fc1b8f3c3 / 3ab39f6eaa16 / 94d1cac15359 + 各自 docs 提交；执行注记 = §8）**——三轴目录（`src/arch/x86_64/` + `src/format/elf/` + `src/os/linux/`）+ 组合根 `src/targets/x86_64-linux/` 落位；序列算法文件化五件（entry 整搬 / frame 抽取含帧公式双源合流 / tag2l 整搬 / callseq 抽取含 SysV 三处同源合流 / syscall 抽取）；表数据 `core-x86.toml` 迁架构轴（hit 引擎留原位）；清单八段化 + 存在性守卫 + `error[` 计数门。判据：**行为零变化全绿**（每任务 stage 链 byte-identical + 收官全量回归逐套计数 + full-bootstrap guard corec2/corec3 cmp 同 + N06=0）+ 自举重建冒烟 + syscall4 套件持久覆盖（`tests/suite/syscall4_test.cr`）
-2. **波 2 参数化**：序列算法按实例边界参数化/整理（C2/C3 实例算法形态——含 TODO #6 双入口处置）
+2. **波 2 参数化**：序列算法按实例边界参数化/整理（C2/C3 实例算法形态——含 TODO #2026-09-10-2 双入口处置）
 3. **波 3 能力**（后置独立）：spill/驱逐 + 判定③④ 激活 + 双向契约第三段落地 + M2 复启（判据按 C4 修订）
 4. 远期：实例 B（arm64 或非经典）——三轴组合验证（换轴零内核改动 = 规则封闭验收）
 
@@ -106,16 +106,16 @@ src/runtime/                      ← 运行时（rt.s——OS 轴补充）
 
 - **M2 交互**：HIT 表数据迁架构轴（波 1）与 M2 挂起状态——搬迁判据 = 全回归（表路径测试 hit_table 24/24 保持）；M2 复启时表定位（引擎/数据分离）已由本设计解决。**波 1 已实施**：表数据 `src/arch/x86_64/core-x86.toml` + 引擎 `src/arch/hit/` 分离落位，hit_table **24/24 保持** ✓（M2 挂起态未动——本波只搬定位面）
 - **rc/cmp 判据**：文件移动不改产物（asm 后端无 .loc——评审曾实测注释变化 asm byte-identical）；stage 链 run 内 byte-identical 判据保持
-- **main.cr 双入口**（TODO #6）：波 2 处置（注册收敛或显式分歧留档）。**波 1 已搬未收敛**——双入口之一随 Task 1 迁入组合根（`src/arch/linux/ld/main.cr` → `src/targets/x86_64-linux/main.cr`），分歧本体（ld project-mode 入口缺 HIT/表旗标注册）逐字保持、`test_backend_bootstrap` stage 链仍走该入口；按 H7 纪律——波 1 只同步注记措辞、flag 面收敛留波 2
+- **main.cr 双入口**（TODO #2026-09-10-2）：波 2 处置（注册收敛或显式分歧留档）。**波 1 已搬未收敛**——双入口之一随 Task 1 迁入组合根（`src/arch/linux/ld/main.cr` → `src/targets/x86_64-linux/main.cr`），分歧本体（ld project-mode 入口缺 HIT/表旗标注册）逐字保持、`test_backend_bootstrap` stage 链仍走该入口；按 H7 纪律——波 1 只同步注记措辞、flag 面收敛留波 2
 - **架构特化参数位**（格式层的 machine/reloc）：波 1 仅搬迁不建参数机制；交叉适配机制 = 波 2 或实例 B 时定
-- **波 1 评审裁决遗留**（全部登记 TODO，**均不改波 1 结构面**）：TODO #8 = 前端 ≥18 形参静默误编译类（高优先级——根因前端参数表/AST bookkeeping，本波零接触；其 ④ 项「22 参 runtime 用例入 tests/suite」= 该项缺陷修复后才可达，**非波 1 收口条件**）；TODO #9 = `IR_CALL_EXTERN` >6 int 参语义缺口（callseq.cr 指针落地——波 1 按"零变化"逐字保留预存不对称，修复 = 波 2 FFI 面）；TODO #10 = `src/format/elf/elf.cr` 三处手写 syscall 序列（mmap/clone/exit，syscall1/5/6 形）留在格式轴 = **实例 B「换轴零改动」承诺的证伪面**，收编 `src/os/linux/` = 波 2 / 实例 B 前置（Task 6 只抽 syscall3/4 内置体发射面，未扩面）
+- **波 1 评审裁决遗留**（全部登记 TODO，**均不改波 1 结构面**）：TODO #2026-09-10-4 = 前端 ≥18 形参静默误编译类（高优先级——根因前端参数表/AST bookkeeping，本波零接触；其 ④ 项「22 参 runtime 用例入 tests/suite」= 该项缺陷修复后才可达，**非波 1 收口条件**）；TODO #2026-09-10-5 = `IR_CALL_EXTERN` >6 int 参语义缺口（callseq.cr 指针落地——波 1 按"零变化"逐字保留预存不对称，修复 = 波 2 FFI 面）；TODO #2026-09-10-6 = `src/format/elf/elf.cr` 三处手写 syscall 序列（mmap/clone/exit，syscall1/5/6 形）留在格式轴 = **实例 B「换轴零改动」承诺的证伪面**，收编 `src/os/linux/` = 波 2 / 实例 B 前置（Task 6 只抽 syscall3/4 内置体发射面，未扩面）
 - **本设计不承诺**：需求推导上收（§4.1 内核候选——按需）、spill/驱逐实施（§4.2 预留）、格式轴跨 OS 全面参数化（PE 出现前 YAGNI）
 
 ## 7. 关联同步项
 
 - 蓝图 §1.2/§3 步骤 3 → 本设计为其定稿实现（波 1 已实施，见 §5 波 1/§8）
-- TODO #6（双入口分歧）→ 波 2 处置（波 1 已搬未收敛，见 §6）；TODO #4/#5 不受影响
-- TODO #8/#9/#10（波 1 评审裁决登记）→ 全属波 2 / 后续专项，本波只登记不改结构面（见 §6 末条）
+- TODO #2026-09-10-2（双入口分歧）→ 波 2 处置（波 1 已搬未收敛，见 §6）；TODO #2026-09-09-1/#5 不受影响
+- TODO #2026-09-10-4/#9/#10（波 1 评审裁决登记）→ 全属波 2 / 后续专项，本波只登记不改结构面（见 §6 末条）
 - M2 计划/spec：复启时按本设计表归属 + C4 判据修订执行
 - 目录分层先例（src/lattice 搬迁 712946a0）机制复用（module.cr 回退链/清单/守卫）
 
@@ -142,7 +142,7 @@ src/runtime/                      ← 运行时（rt.s——OS 轴补充）
 - **OS 轴** `src/os/linux/`：`entry.cr`（`emit_start`/`emit_start_size` 整搬）——Task 2；
   `callseq.cr`（`cs_args_dispatch`/`cs_arg_on_stack`/`cs_stack_count`/`cs_stack_args`/
   `cs_stack_cleanup`/`cs_ret_value`/`cs_call_direct`——SysV 三处同源合流，per-slice
-  字节比对核对后合并；`IR_CALL_EXTERN` 预存不对称**未合并未顺手修** = TODO #9）——Task 5；
+  字节比对核对后合并；`IR_CALL_EXTERN` 预存不对称**未合并未顺手修** = TODO #2026-09-10-5）——Task 5；
   `syscall.cr`（`sys_syscall3_stub`/`sys_syscall4_stub`，r10 第四参约定）——Task 6。
 - **组合根** `src/targets/x86_64-linux/`：`main.cr` + `_import.cr` + `Core.toml`
   （target triple 命名；project-mode 入口链，不入 concat）——Task 1。stage0 硬编码点
@@ -150,7 +150,7 @@ src/runtime/                      ← 运行时（rt.s——OS 轴补充）
 - **清单分段 + 守卫**（`build_selfhost_native.py`）：八段化（`common_files`/`hit_engine_files`/
   `kernel_files`/`arch_x86_64_files`/`format_elf_files`/`os_linux_files`/`backend_support_files`/
   `x86_linux_target_files`）；守卫 = 清单文件存在性断言 + 构建日志 `error[` 计数非零 = 失败门
-  （TODO #6 ③ 建议的构建面落地）+ project-mode 面 `run_checked` 同门（`test_backend_bootstrap.py`，
+  （TODO #2026-09-10-2 ③ 建议的构建面落地）+ project-mode 面 `run_checked` 同门（`test_backend_bootstrap.py`，
   Task 1 补正 c927525baf35）。
 
 ### 8.2 收官判据（Task 7——逐套计数）
@@ -182,9 +182,9 @@ src/runtime/                      ← 运行时（rt.s——OS 轴补充）
 
 ### 8.3 本波**未**做（范围克制——波 2 起）
 
-- `IR_CALL_EXTERN` 栈参/栈清理不对称未修（TODO #9）；前端 ≥18 形参缺陷未修（TODO #8）——
+- `IR_CALL_EXTERN` 栈参/栈清理不对称未修（TODO #2026-09-10-5）；前端 ≥18 形参缺陷未修（TODO #2026-09-10-4）——
   两者皆预存、与结构波正交，按「零变化」纪律不混入。
-- `src/format/elf/elf.cr` 三处手写 syscall 序列未收编（TODO #10）；内置体名索引扫描段留原位
+- `src/format/elf/elf.cr` 三处手写 syscall 序列未收编（TODO #2026-09-10-6）；内置体名索引扫描段留原位
   加注（`elf.cr` 877-886）——整段参数化 = 波 2。
 - `pf_frame_overhead` 预存双计（无发射影响）未清；`sizes.cr` tag2l 同源化声称已软化（值一致
   尚未同源）——Task 4 评审注记，波 2 清。

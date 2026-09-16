@@ -881,7 +881,7 @@ fn elf_gen(buf: string) -> int {
     // sys_syscall4_stub：rax 号 + rdi/rsi/rdx(/r10) 参数序 + 0F 05 + 回存）；
     // 本段只负责"名字 → 索引"，与发射面解耦。**注**：本段 ≠ syscall 序全集
     // ——elf.cr 另有三处手写 syscall 序列（emit_heap_expand mmap / worker
-    // exit / clone，syscall1/5/6 形，非内置体径）= OS 轴收编面，见 TODO #10
+    // exit / clone，syscall1/5/6 形，非内置体径）= OS 轴收编面，见 TODO #2026-09-10-6
     // （波 2 / 实例 B 前必办——实例 B 承诺"换轴零改动"要求 Linux ABI 字节
     // 不留在格式轴）。
     g_ni_syscall3 = -1; g_ni_syscall4 = -1; g_ni_load8 = -1; g_ni_store8 = -1; g_ni_load64 = -1;

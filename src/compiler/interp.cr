@@ -9,7 +9,7 @@
 //   深度上限 IR_INTERP_MAX_DEPTH（超限响亮报错，不挂死）
 // - 动态分发/外部函数（IR_DYN_DISPATCH/IR_CALL_EXTERN，见 ir_interp_call）与
 //   binary64 转换（IR_I2F/IR_F2I）：解释器无对应语义——响亮报错 + 非零退出码，
-//   绝不静默落 0（TODO #11 的静默分叉类）
+//   绝不静默落 0（TODO #2026-09-10-7 的静默分叉类）
 // - 主循环与 callee 内联路径共用同一份 opcode 分派（ir_interp_call/ir_interp_run_fn），
 //   双路径一致性由 tests/selfhost/test_interp_parity.py 钉死（interp callee ≡
 //   interp main ≡ ELF oracle）
@@ -20,7 +20,7 @@ g_ir_vals : string, mut;    g_ir_vals_cap : int, mut;
 // ir_interp_abort：解释器中止码（0 = 正常；非 0 = ir_interpret 应立即返回的
 // 值）。callee（含嵌套层）里的响亮失败——越界陷阱（-1）/ 动态分发·extern（2）/
 // binary64 转换（-1）——沿调用链上抛到 ir_interpret，绝不静默落 0
-// （TODO #11 的静默分叉类：主循环有、callee 路径无 → 双路径分叉）。
+// （TODO #2026-09-10-7 的静默分叉类：主循环有、callee 路径无 → 双路径分叉）。
 g_interp_abort : int, mut;
 // 嵌套内联深度（callee 内再调用用户函数 = 递归内联）。超限响亮报错，不挂死、
 // 不静默——Python 参照解释器无此概念，深度上限取足够覆盖正常递归用例。
@@ -32,7 +32,7 @@ IR_INTERP_MAX_DEPTH : int = 400;
 g_interp_stack : string, mut;
 
 // IR_BINARY 统一分派（主循环与 callee 内联循环共用）：
-// 整数路径（模 2⁶⁴）。dex 为缩放整数——同走整数路径（数值迁移 #48 定稿）；
+// 整数路径（模 2⁶⁴）。dex 为缩放整数——同走整数路径（数值迁移 #2026-09-13-9 定稿）；
 // IR_I2F/IR_F2I 在 dispatch 入口显式报错（interp 无 binary64 语义）。
 fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int) {
     if d < 0 { return; }
@@ -338,7 +338,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int {
         if op2 == 46 || op2 == 47 {
             if d2 >= 0 && t1 >= 0 { w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8)); }
         }
-        // —— TODO #11：以下 18 族与主循环同语义同守卫补齐（此前内联路径静默落空）——
+        // —— TODO #2026-09-10-7：以下 18 族与主循环同语义同守卫补齐（此前内联路径静默落空）——
         // IR_MAKE_ENUM (17)：d := alloc(8·(1+s2))；M[d+0] := s1（tag = 变体名索引）——
         // 与 ELF 布局 [tag][payload...] 一致的堆镜像（payload 由后续 IR_STORE_FIELD 写堆）
         if op2 == 17 {
@@ -744,7 +744,7 @@ fn ir_interpret() -> int {
             return 2;
         }
 
-        // IR_I2F(49)/IR_F2I(50) 在 dispatch 入口已被显式报错拦截（#48 定稿：interp 无 binary64）
+        // IR_I2F(49)/IR_F2I(50) 在 dispatch 入口已被显式报错拦截（#2026-09-13-9 定稿：interp 无 binary64）
 
         // Branch (node-index based)
         if op == 19 {
@@ -796,7 +796,7 @@ fn ir_interpret() -> int {
 
         // IR_CALL (4) / IR_SPAWN (27) —— 统一分派（ir_interp_call；与 callee 内联
         // 路径共用同一实现：内置近似 / 用户函数内联 / 嵌套递归 / 中止码上抛全在此一处）。
-        // 原实现把这段分派复制在主循环里，callee 路径无对应物 → 双路径静默分叉（TODO #11）。
+        // 原实现把这段分派复制在主循环里，callee 路径无对应物 → 双路径静默分叉（TODO #2026-09-10-7）。
         if op == 4 || op == 27 {
             ir_interp_call(d, s1, s2, s3);
             if g_interp_abort != 0 { return g_interp_abort; }

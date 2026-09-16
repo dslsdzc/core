@@ -14,7 +14,7 @@
 **Tech Stack:** Core 自举栈；P0 引擎（`type_terms.cr`/`type_engine.cr` 的 `AK_*` + `tt_atom` + 判定 API）；P1/P2a 桥接与影子通道（`ty_shadow.cr`：`sh_native_ak`/`sh_base_ak`/`sh_map_*`/`--type-shadow`/分类计数）；P2a 判定替换面（`type_equal_engine`/`type_equal_legacy`/`type_compat_strict`/`array_len_constraint_ok`）；检查器 `checker.cr`；自测通道 `type_selftest.cr`（`corec selftest-types`）。
 
 **Spec:** `docs/superpowers/specs/2026-09-10-type-interface-unification-design.md` §2（双轴注册表：本质轴字段表 / §2.4 衔接 / §2.5 查询 API）+ §4 步 3（逐点替换：`infer_expr` 公理区 → `iface_ops`；`res_type_node` 两表合一）+ §9 P2 行 (b) 部分。方向设计：`docs/superpowers/specs/2026-08-30-type-system-direction-design.md` 定案 2/3（int/dex/string/bool/dyn = **原生接口条目**（规则内建、用户不可实现）；一张 interface 注册表；检查器删类型特判、统一查表验证；**发射层原语映射不动**）。
-**P2a 交接**：`docs/superpowers/specs/2026-09-10-type-shadow-findings.md` §11（P2a 后复跑：26989/26989 agree、站点 1/2/4/6 零命中、N 面须行为探针）+ TODO #24（P5 继承项 / 未覆盖面）。
+**P2a 交接**：`docs/superpowers/specs/2026-09-10-type-shadow-findings.md` §11（P2a 后复跑：26989/26989 agree、站点 1/2/4/6 零命中、N 面须行为探针）+ TODO #2026-09-11-8（P5 继承项 / 未覆盖面）。
 
 **范围**：本批 = **P2b**（注册表建层 + 公理区三面接线 + 双份 TY→TI 合一 + 收官）。
 - **不做**（明记，避免范围蔓延）：① 收紧任何现状宽松面（= P3）；② 横切轴（序列/可索引/可迭代接口）与用户轴（`impl`/`interface` 语义重定义、mangling 废弃）= P3（spec §2.2/§2.3）；③ `iface_size/iface_align`（尺寸/对齐 = 映射层/hw-map 领域，spec §2.1 明标「非语义」，且 `ir_gen.cr:279/462-463/514-515` 的 `type_size`/`type_align` 是发射面消费点）；④ `iface_satisfies`（三类统一满足判定——**零调用者**，P3 落地 impl 语义时才有对象）；⑤ 发射层：`ir_gen.cr` 的算子降级/字符串比较降级（`ir_gen.cr:904` 起）与 `type_size/type_align` **一律不动**（方向设计定案 3：`+` → addq 是机器知识，归 hw-map 编码层）；⑥ `AK_SUM`/`AK_FN` 条目（checker 侧无对应原子：enum = `TYP_NAMED`，见侦查 §4.1）。
@@ -29,7 +29,7 @@
 - **保语义（本批的语义口径，硬性）**：表的每一格 = 现状代码的**逐格转录**，格注必须给出对应现状 `file:line`。现状的**宽松面**（侦查 §2 清单：比较不校验操作数、算术门「任一侧数值即可」、一元透传、索引类型不校验、字段落空静默、转换无校验）**原样保留为表的「全许可」格**——它们由本批**登记为 P3 收紧面**，不得在接线时顺手收紧/放宽（spec §4 裁决 6：收紧 = 改源码 + 逐处记录 + 语义争议停下上报）。
 - **AK/TI 下标不 1:1（血泪，硬性）**：`AK_STRING=2` 而 `TI_STR=3`、`AK_BOOL=3` 而 `TI_BOOL=2`（`ty_shadow.cr:18-26`；P1 事故：照下标直传会把 bool↔string 静默错标且两侧同错自洽）。**注册表内任何「原子类 ↔ 类型行」的对应都必须按语义逐项分派，禁止数值直传**；守卫 = `bridge.str_ak`/`bridge.bool_ak`（`type_selftest.cr:208-209`）+ 本批新增逐条目用例。
 - **表全局放 `globals.cr`**（bootstrap 名字解析对**变量**按声明序、跨文件前向引用不成立——`globals.cr:290-292` 的 `g_purity_inst` 先例）；**函数**的跨文件前向引用成立（既有事实：`checker.cr` 调后置文件 `ty_shadow.cr`/`type_engine.cr` 的函数）。
-- **本语言无三元运算符、无移位运算符**；取模须非负；位集构造照既有乘 2 循环（`checker.cr:1830/1841/1853-1854` 的 `dyn_set_type` 惯例）；键比较不得依赖 i64 回绕；noclobber（用 `>|`）；比较 `.ccr` 前必须 `clean-cache`（TODO #5 家族：冷/热缓存态分歧）。
+- **本语言无三元运算符、无移位运算符**；取模须非负；位集构造照既有乘 2 循环（`checker.cr:1830/1841/1853-1854` 的 `dyn_set_type` 惯例）；键比较不得依赖 i64 回绕；noclobber（用 `>|`）；比较 `.ccr` 前必须 `clean-cache`（TODO #2026-09-10-1 家族：冷/热缓存态分歧）。
 - **文件永久不允许还原；不得绕过。**
 - **CI 挂点**：新测试须挂 `src/ci/run.sh` 的 `selfhost-tests`（该 job 是「已跑集」的唯一真源；不挂 = 不进判据）。
 
@@ -53,7 +53,7 @@
 | 2 | **二元算术/指针/拼接** | `:1935`（组门）`:1937`（串拼接）`:1939-1941`（`*T±int→*T`）`:1942-1944`（`int+*T→*T`）`:1946-1948`（`*T−*T→int`）`:1950-1952`（合法性门）`:1953-1954`（dex 支配→DEX 否则 INT）`:1965`（兜底 INT） | 8 | 见侦查 §2 的宽松面 ①② |
 | 3 | **比较** | `:1956-1958` | 1 | 6 个比较 op **恒返回 `TI_BOOL`、不校验操作数** |
 | 4 | **逻辑** | `:1959-1964` | 1 | 两侧各须 `bool\|int`（**每侧独立**）→ `TI_BOOL` |
-| 5 | **赋值** | `:1922-1932`（`OP_ASSIGN`）`:2638-2660`（`EXPR_ASSIGN`） | 2 | 站点 6（无生产点，TODO #17）/ 站点 8 |
+| 5 | **赋值** | `:1922-1932`（`OP_ASSIGN`）`:2638-2660`（`EXPR_ASSIGN`） | 2 | 站点 6（无生产点，TODO #2026-09-11-1）/ 站点 8 |
 | 6 | **一元** | `:1970-1972`（NEG/NOT 透传）`:1973-1993`（`UOP_REF`→`TYP_PTR`）`:1994-2006`（`UOP_DEREF` 三种分支）`:2007`（兜底透传） | 4 | `&x` 产 `TYP_PTR` 而类型位 `&T` 产 `TYP_REF` = **双表示并存**（spec §11 同记） |
 | 7 | **条件/区间** | `:2265`（if 须 bool\|int）`:2376`（while 须 bool）`:2402-2403`（range 两端须 int） | 3 | |
 | 8 | **索引** | `:2586-2603`（range→`TYP_SLICE` + F11 界）`:2605-2615`（ARRAY→元素 + F2 越界）`:2616-2618`（SLICE→元素）`:2619-2633`（STR→`TI_INT` + 字面量越界）`:2634`（`EC_TK_INDEX` 拒绝） | 5 | `idx_ti`（`:2583`）**推断后从未被使用** ⇒ 索引**类型**不校验 |
@@ -116,8 +116,8 @@
 | `.ccr` 结构 | `tests/selfhost/test_ccr_v7.py` 27 例 | 见 `src/ci/run.sh:72` |
 | 自举链 | `src/ci/run.sh full-bootstrap`（corec→corec2→corec3 `cmp` IDENTICAL + 两段 `error[N06]=0` + `--help` rc=1） | `src/ci/run.sh:90-101` |
 | 冒烟 | `corec run 'fn main()->int{return 42;}'` rc=42 | 见 spec §4「每步判据」行 |
-| 套件 | 38（7 bootstrap + 31 selfhost，TODO #27 收官实测）+ `tests/suite` 20 语料 | `src/ci/run.sh` |
-| **判据重定（TODO #26）不适用** | 本批**不触** state 边/纯度（`dataflow.cr`/`purity_op_effect`/`ccr_io` 的 EDG/NOD 零改动）⇒ **不套用**边集断言；仍适用「ELF 逐字节 + `.ccr` 实测 + 自举稳定」 | TODO #26 适用面＝state 链/纯度类改动 |
+| 套件 | 38（7 bootstrap + 31 selfhost，TODO #2026-09-11-10 收官实测）+ `tests/suite` 20 语料 | `src/ci/run.sh` |
+| **判据重定（TODO #2026-09-11-9）不适用** | 本批**不触** state 边/纯度（`dataflow.cr`/`purity_op_effect`/`ccr_io` 的 EDG/NOD 零改动）⇒ **不套用**边集断言；仍适用「ELF 逐字节 + `.ccr` 实测 + 自举稳定」 | TODO #2026-09-11-9 适用面＝state 链/纯度类改动 |
 
 ### 6. 待实现者实测确认的两项（本计划**未**测，不得当已知）
 
@@ -283,7 +283,7 @@ fn sh_base_ak(ty: int) -> int { return iface_by_ty_code(ty); }
     total = total + 1; fails = fails + ts_check("iface.dispatch_no_index_shortcut",
         (iface_ti_of(AK_STRING) != AK_STRING), 1);                // 若哪天有人"按下标直传"，本行必红
 ```
-- [ ] **Step 2: 实现**：① 原体改名为 `sh_base_ak_legacy`/`sh_native_ak_legacy`（**保留**，供对拍 + 报告引用；P5 删，登记入 TODO #24 的 P5 继承项）；② `sh_base_ak`/`sh_native_ak` 改为委托 `iface_by_ty_code`（**显式保留** `ti < 0` 与 `get_type_kind(ti) != TYP_BASE → -1` 两个门）；③ 跑 Step 1 用例，`*_all_codes`/`*_all_rows` 必须为 0 mismatches。
+- [ ] **Step 2: 实现**：① 原体改名为 `sh_base_ak_legacy`/`sh_native_ak_legacy`（**保留**，供对拍 + 报告引用；P5 删，登记入 TODO #2026-09-11-8 的 P5 继承项）；② `sh_base_ak`/`sh_native_ak` 改为委托 `iface_by_ty_code`（**显式保留** `ti < 0` 与 `get_type_kind(ti) != TYP_BASE → -1` 两个门）；③ 跑 Step 1 用例，`*_all_codes`/`*_all_rows` 必须为 0 mismatches。
 - [ ] **Step 3: 判据**：`selftest-types` 全绿 + **影子语料复跑数字与基线逐项相同**（71 文件 / 26989 / agree 26989 / 0 / 0 / 0；**必须同报站点直方图**——P1 交接硬性要求）+ ELF/`.ccr` 逐字节 + `test_lsp.py`（桥接缓存重置面，P2a 评审 Critical 的守卫）。
 - [ ] **Step 4: 提交**：`refactor: R2 P2b Task 2——iface_kind_of 与桥接分派（sh_native_ak/sh_base_ak）单源化（逐 case 对拍含 DYN/GENERIC_PARAM/DEX_S 三条灰格；影子语料数字逐项不变）`
 
@@ -425,7 +425,7 @@ fn ty_code_to_ti(ty: int) -> int
 - [ ] **Step 3: 自举链**：`src/ci/run.sh full-bootstrap`（`corec2/corec3` `cmp` IDENTICAL + 两段 `error[N06]=0` + `--help` rc=1）+ 冒烟 `run 'fn main()->int{return 42;}'` rc=42。
 - [ ] **Step 4: 收紧清单**：本批「旧接受 → 新拒绝」逐条记录——**预期为空**（保语义口径）；若非空 → 逐条登记文件/用例/旧判定/新判定/处置，并说明为何属于「接线必然而非收紧」。
 - [ ] **Step 5: 事实表**：侦查 §2 九条宽松面 → 表格的**逐条落格记录**（现状行号 / 表中格 / 是否有诊断 / P3 收紧建议），落 `docs/superpowers/specs/2026-09-10-type-shadow-findings.md` 新增一节「P2b 后：公理区事实表」，供 P3 直接消费。
-- [ ] **Step 6: 文档/TODO**：spec §9 P2 行标 (b) 部分 ✅（含落点/提交链/未覆盖面）；TODO #24 的「P2b 待办」划销、新增「P2b 落地」条目（落点 + 未覆盖面登记：`iface_satisfies`/横切轴/用户轴/尺寸对齐未做、`AK_SUM`/`AK_FN` 无 checker 对应、dyn 64 上限、P3 收紧面清单）；`src/ci/run.sh` 挂 `test_iface_ops.py`。
+- [ ] **Step 6: 文档/TODO**：spec §9 P2 行标 (b) 部分 ✅（含落点/提交链/未覆盖面）；TODO #2026-09-11-8 的「P2b 待办」划销、新增「P2b 落地」条目（落点 + 未覆盖面登记：`iface_satisfies`/横切轴/用户轴/尺寸对齐未做、`AK_SUM`/`AK_FN` 无 checker 对应、dyn 64 上限、P3 收紧面清单）；`src/ci/run.sh` 挂 `test_iface_ops.py`。
 - [ ] **Step 7: 提交**（路径限定）。
 
 ---

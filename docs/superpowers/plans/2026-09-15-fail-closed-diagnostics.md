@@ -9,7 +9,7 @@
 **Tech Stack / 锚点（本实例实读，行号 = 当前工作树）：** 闸门三处 + 一处已收紧面——① **语法面闸**：`src/compiler/main.cr:134`（`parse_all()` 后 `g_diag_count > 0 ⇒ print_diagnostics(); return 1`）+ `:135`（`g_error_count > 0 ⇒ print_parse_errors(); return 1`）；② **类型面闸（本批的对象）**：`main.cr:146-179`（`if g_diag_count > 0 { 硬名单扫描 }`；**6 条语句行** `:152`/`:153`/`:154`/`:160`/`:166`/`:174` 覆盖 **11 个码常量**；`if hard != 0 { return 1; }` 在 **`:178`**）；③ **安全检查面闸（已 fail-closed）**：`main.cr:594-603`（`base_diags` 快照 → `ptr_analysis_all()` / `region_check_all()` / `provenance_verify_all()` → `g_diag_count > base_diags ⇒ return 1`，**无码过滤 = 任意诊断阻断**）；④ **`check` 面闸（已 fail-closed）**：`main.cr:443-451`（`if g_diag_count > 0 { return 1; }`）。
 其余落点：`main.cr:399-402`（`run` 走同一 `run_frontend` 闸）· `:431-438`（`--static` 前置 `rt.cr`）· `:440-441`（`fe_rc` 唯一入口）· `:473`（`make_cir_cache_dir`）· `:565-591`（`cir`，**不过**安全检查面）· `:620-662`（`ccr`）· `:665-703`（`build`：`:671` `.ccr` 路径 / `:674-679` `save_ccr` / `:682-702` 拼 `corearch` 命令行并 `system()` / `:702` `return exit_code`）· `diag.cr:122-150`（`print_diagnostics`，码面 = `cat = ec/1000` + `num = ec%1000`，`diag.cr:86-104` 前缀表 + `:106-110` 补零）· `checker.cr:820-828`（`check_error` 唯一写入器，记录 40B = `globals.cr:182` `DIAG_REC_SIZE`）· `checker.cr:490-495`（`diag_type_incompatible` 组合判定）· `globals.cr:463-500`（`reset_frontend_state` 清 `g_diag_count`；`check_all` 自身亦在 `checker.cr:3805` 清零）· `src/ci/run.sh:31-33`（check job）/`:36-54`（suite job：`:44` `*_mini*.cr` SKIP、`:46` 空文件 SKIP）/`:119-130`（full-bootstrap）· `tools/baseline/parity_run.sh:30`（`CORPUS_TOTAL=72`）/`:32-40`（逐档 `clean-cache` + `check`）/`:68-71`（计数硬断言）· `tools/baseline/probes_run.sh`（`PROBE_TOTAL=29`）。
 
-**Spec / 依据：** ① **维护者 2026-09-14 裁定「要改、方向 = fail-closed」**（本批成立的前提；裁定文本经协调者转述，**无独立文件载体 —— 须 T0 向维护者核一句原文并落报告**）；② **P6 裁决门 裁-P6-2 的 (b)(c) 两问**（`docs/superpowers/plans/2026-09-14-r2-p6-tail.md:58`：**(b)** 非硬名单诊断是否收紧到 `build` 面；**(c)** 新硬错入闸判据是否成文化为「判定继续 ⇒ 产出静默错产物」）——**本批 = 该两问的最强形式，未取裁前的方向性背书不成立**；③ **P5 已落政策**：P-A（ICE04 硬错，`plans/2026-09-13-r2-p5-cleanup.md` + `main.cr:161-166` 注）、TA02（TODO #32 + `main.cr:167-174` 注）——**本批不得回退这两条**；④ **`docs/error-codes.md`**（码族/消息模板/统计）；⑤ **E-14 的活证据**（P6 T0 报告 §6-5：`tests/suite/ptr_arith.cr` `check` rc=1（B04 `12:8`）而 `build --static` rc=0 且产出 canary ELF）。
+**Spec / 依据：** ① **维护者 2026-09-14 裁定「要改、方向 = fail-closed」**（本批成立的前提；裁定文本经协调者转述，**无独立文件载体 —— 须 T0 向维护者核一句原文并落报告**）；② **P6 裁决门 裁-P6-2 的 (b)(c) 两问**（`docs/superpowers/plans/2026-09-14-r2-p6-tail.md:58`：**(b)** 非硬名单诊断是否收紧到 `build` 面；**(c)** 新硬错入闸判据是否成文化为「判定继续 ⇒ 产出静默错产物」）——**本批 = 该两问的最强形式，未取裁前的方向性背书不成立**；③ **P5 已落政策**：P-A（ICE04 硬错，`plans/2026-09-13-r2-p5-cleanup.md` + `main.cr:161-166` 注）、TA02（TODO #2026-09-11-14 + `main.cr:167-174` 注）——**本批不得回退这两条**；④ **`docs/error-codes.md`**（码族/消息模板/统计）；⑤ **E-14 的活证据**（P6 T0 报告 §6-5：`tests/suite/ptr_arith.cr` `check` rc=1（B04 `12:8`）而 `build --static` rc=0 且产出 canary ELF）。
 
 ---
 
@@ -53,7 +53,7 @@
 |---|---|---|---|---|---|---|---|
 | 1 | TA01 | `EC_TA_ASSIGN`（:407） | `checker.cr:3376` | 赋值号两侧类型不匹配 | 0（未见于首条诊断表） | **①阻断** | 与 TA02 同族（声明位/赋值位同形）；符号类型与实际值分歧 ⇒ 静默错值 |
 | 2 | TA02 | `EC_TA_DECL`（:408） | `checker.cr:530` | 声明注解 vs 初值 | 0（P5 T6 report-only 全语料零命中） | **①阻断（已在名单）** | P5 政策，不得回退 |
-| 3 | TF01 | `EC_TF_RETURN`（:417） | `checker.cr:1525`/`:2240` | 返回型不匹配 | **5**（`chan_test`/`conc_test`/`go_e2e_test`/`go_final_test`/`go_parallel_test`，P6 T0 §3.1「TF01 返回型不匹配（并发/goroutine 族）」） | **②豁免（待裁，须逐档归因）** | 命中面 = CI `suite` job **实际 build 的 21 档中 5 档**（`run.sh:36-54`）⇒ 直接入闸 = 套件 job 转红 + 可能改写 ELF canary 族判据。**同码先例 = 已修的假阳性**（`src/compiler` 内两条 TF01 系误报已由 P6 TF01 清理批修，TODO #40 ⇒ `check src/compiler` rc=0）⇒ 本批须先判这 5 档是同族误报还是真错 |
+| 3 | TF01 | `EC_TF_RETURN`（:417） | `checker.cr:1525`/`:2240` | 返回型不匹配 | **5**（`chan_test`/`conc_test`/`go_e2e_test`/`go_final_test`/`go_parallel_test`，P6 T0 §3.1「TF01 返回型不匹配（并发/goroutine 族）」） | **②豁免（待裁，须逐档归因）** | 命中面 = CI `suite` job **实际 build 的 21 档中 5 档**（`run.sh:36-54`）⇒ 直接入闸 = 套件 job 转红 + 可能改写 ELF canary 族判据。**同码先例 = 已修的假阳性**（`src/compiler` 内两条 TF01 系误报已由 P6 TF01 清理批修，TODO #2026-09-13-1 ⇒ `check src/compiler` rc=0）⇒ 本批须先判这 5 档是同族误报还是真错 |
 | 4 | TF07 | `EC_TF_ARG_TYPE`（:423） | `checker.cr:3727`（**唯一 raise**，`@raw_int` 内建位；非调用位点——#20 登记的「调用位点判定点不存在」实读 = 已知 `SYM_FN` 非泛型分支 `checker.cr:2766-2797` **连实参推断都不走**（直接 `return sym_type(si)`；T4a 报告锚 `:2744-2753` 为打补丁前行号，本实例实读漂移 **+22**）） | 实参类型不匹配 | **1**（`ptr_ref_first.cr`，P6 T0 §3.1「TF07 实参类型 1」） | **②豁免（待裁）** | 同行 3：命中档在 suite job 的 build 集内 |
 | 5 | TF08 | `EC_TF_METHOD_NOT_FOUND`（:424） | `checker.cr:2277` | impl 缺接口方法 | 0 | **①阻断** | 接口契约未履行 ⇒ 表项/调用面不可信（同 TG02 族） |
 | 6 | TF09 | `EC_TF_METHOD_ARG_CNT`（:425） | `checker.cr:2288` | 方法实参个数 | 0 | **①阻断** | 同上 |
@@ -65,7 +65,7 @@
 | 12 | TM03 | `EC_TM_EXHAUST`（:463） | `checker.cr:3097` | match 非穷尽 | 0（P3 Task 3 report-only 零命中） | **①阻断（已在名单）** | 未匹配值静默得 0（`main.cr:155-159` 注） |
 | 13 | TM04 | `EC_TM_REDUNDANT`（:464） | `checker.cr:3100` | 冗余臂 | 0 | **②豁免（政策既定）** | `main.cr:159` 原文：「TM04（冗余臂）**不入**本名单 = 软面登记（同 Rust unreachable-pattern 的警告口径）」⇒ 默认全阻断会**推翻该裁定**，须登记豁免或改判为真 warning |
 | 14 | TK01 | `EC_TK_INDEX`（:472） | `checker.cr:3353` + `provenance_verify.cr:91`/`:99`/`:126` | 非可索引类型 / 指针越界 | 0 | **①阻断** | 索引兜底门（P3b Task 2 接线）；后三处属安全检查面（已阻断） |
-| 15 | TK02 | `EC_TK_ELEM_TYPE`（:473） | `checker.cr:3567` | 数组元素异型 | 0 | **①阻断（已在名单）** | TODO #29 三校验 |
+| 15 | TK02 | `EC_TK_ELEM_TYPE`（:473） | `checker.cr:3567` | 数组元素异型 | 0 | **①阻断（已在名单）** | TODO #2026-09-11-11 三校验 |
 | 16 | TK05 | `EC_TK_SLICE_BOUNDS`（:476） | `checker.cr:3304` | 常量档切片越界 | 0 | **①阻断（已在名单）** | F2：修复前静默生成越界二进制 |
 | 17 | TK06 | `EC_TK_SLICE_LEN`（:477） | `checker.cr:3306` | 切片长度负 | 0 | **①阻断（已在名单）** | 同上 |
 | 18 | R002 | `EC_R_OOB`（:504） | `checker.cr:3320`/`:3335` | 常量档越界索引（数组/字符串） | 0 | **①阻断（已在名单）** | 同上 |
@@ -79,7 +79,7 @@
 | 26 | B002 | `EC_B_BORROW_IMMUT`（:493） | `checker.cr:2512` | 对可变借用者取共享借用 | 0（同上） | **①阻断（待 T1 实测复核）** | 同上 |
 | 27 | B004 | `EC_B_USE_WHILE_BORROWED`（:495） | `checker.cr:2427` | 借用存续期内使用被借用变量 | **1**（`tests/suite/ptr_arith.cr` `12:8`，P6 T0 §3.1 + §6-5 活证据） | **②豁免（必选之一，见裁-FC-3）** | **该档 = ELF canary 硬闸的唯一载体**（canary 命令即 `build tests/suite/ptr_arith.cr --static`，P6 T0 §2#7）⇒ 入闸 = **canary 不可产** ⇒ 三选一（修 B04 假阳性 / 登记豁免 / 换 canary 载体） |
 | 28 | ICE04 | `EC_ICE_TY_INDET`（:521） | `checker.cr:559` | 类型判定不可判（引擎 -1/桥接缺口） | 0 | **①阻断（已在名单）** | P-A 政策，不得回退 |
-| 29 | TS01 | `EC_TS_MISSING_FIELD`（:482） | `checker.cr:3449` | 缺字段 | 0 | **①阻断（已在名单）** | TODO #29 |
+| 29 | TS01 | `EC_TS_MISSING_FIELD`（:482） | `checker.cr:3449` | 缺字段 | 0 | **①阻断（已在名单）** | TODO #2026-09-11-11 |
 | 30 | TS02 | `EC_TS_UNKNOWN_FIELD`（:483） | `checker.cr:3433` | 未知字段 | 0 | **①阻断（已在名单）** | 同上 |
 | 31 | TS03 | `EC_TS_FIELD_TYPE`（:484） | `checker.cr:3478`/`:3502` | 字段类型不符 | 0 | **①阻断（已在名单）** | 同上 |
 | 32 | TS04 | `EC_TS_FIELD_DUP`（:485） | `checker.cr:3436` | 字段重复初始化 | 0 | **①阻断（已在名单）** | 同上 |
@@ -117,7 +117,7 @@
 | **裁-FC-1** | `check` 面与 `build` 面**是否用同一闸门**？**(A)** 现状（check 严 / build 宽）+ 本批只反转 build 面；**(B)** 两面同闸同表（check 也走豁免表 ⇒ 72 档 rc 分布换代、parity 基线重锁）；**(C)** 两面同闸但豁免表带**生效范围**字段（`build`/`check`/`both`），初始绝大多数条 = `build` 范围 ⇒ check 基线不动。 | 表 0 全行；72 档 + 探针两条对拍腿的可用性 | **(C)**（同机制、显式登记差异、check 基线零扰动；(B) 会让 ≈25 档 rc 1→0，parity 腿从「零差异」退化为「大面 diff」，丧失回归网价值） | 按 (A) 执行：只动 build/ccr/cir/run 四面，check 不动；差异显式登记 |
 | **裁-FC-2** | **豁免表的载体与粒度**，以及**软面码（TM04）**的处置：**(a) 粒度** = 码级 / 码×语料位点级（`file:line`）/ 码×范围级；**(b) 载体** = 源码内静态表（照 `corearch.cr` 的 `g_instance_decl` 表先例）/ 仓库配置文件 / CI 白名单；**(c) 换代纪律** = 只减不增 + 撤除须带根因证据 + 新增须维护者批？**(d)** TM04 是登记豁免还是改为**真 warning 通道**（`warning[...]` 前缀，不阻断）？ | T3 的实现形态与全批的「豁免可审计性」 | **(a) 码级 + 位点列作证据字段**（位点级更窄但脆弱：语料一行漂移即失效；码级简单但允许同码在别处静默 ⇒ 用「每次开新面必重跑 report-only」补偿）；**(b) 源码内静态表**（Core 无配置文件读取面、CI 不跑本地判据）；**(c) 只减不增**；**(d) 登记豁免**（引入 warning 通道 = 新诊断类别，超本批章程） | 表形态 = 源码内 `code → {scope, locus, reason}` 静态表；TM04 登记豁免 |
 | **裁-FC-3** | **B004（`ptr_arith.cr:12:8`）与 ELF canary 硬闸的冲突**：B004 入闸 ⇒ canary 不可产。三选一：**(i) 修 B004 假阳性**（实现末次使用/NLL 级借用收缩——**语义变更，工作量未估**）；**(ii) 登记豁免 B004**（canary 保住，但「check rc=1 / build rc=0」的活证据继续存在）；**(iii) 换 canary 载体**（判据换代：canary sha 全链作废、须重建白名单与全部历史比对基线）。 | ELF canary 判据（本批硬闸）+ suite job | **(ii) 本批登记豁免 + 同批开 TODO 条目把 (i) 立为独立批**（(i) 是语义变更不是闸门变更；(iii) 代价 = 判据换代，不能由实施者自裁） | T5 不实施 B004 阻断；B004 豁免条目标「退出条件 = 借用收缩落地」 |
-| **裁-FC-4** | **命中语料（≥7 档）的处置**：TF01×5（并发族）/ TF07×1（`ptr_ref_first`）/ B04×1 —— **修前端假阳性 / 修语料（删除或改判负例）/ 登记豁免**？（修语料涉 `tests/` 面改动，且 `tests/suite` 是 CI 正例集；改 neg 例会动 `run.sh:36-54` 的 SKIP 语义） | CI `suite` job 转红面 | **先逐档归因（T1）再判**：真误报 ⇒ 修前端（照 P6 TF01 清理批先例 `p3-task3-report`/TODO #40）；真错误 ⇒ 语料归为负例（照 `*_mini*` SKIP 先例，**须维护者批**）；**本批不预判** | 全部登记豁免 + CI 保持绿；修复批次另立 |
+| **裁-FC-4** | **命中语料（≥7 档）的处置**：TF01×5（并发族）/ TF07×1（`ptr_ref_first`）/ B04×1 —— **修前端假阳性 / 修语料（删除或改判负例）/ 登记豁免**？（修语料涉 `tests/` 面改动，且 `tests/suite` 是 CI 正例集；改 neg 例会动 `run.sh:36-54` 的 SKIP 语义） | CI `suite` job 转红面 | **先逐档归因（T1）再判**：真误报 ⇒ 修前端（照 P6 TF01 清理批先例 `p3-task3-report`/TODO #2026-09-13-1）；真错误 ⇒ 语料归为负例（照 `*_mini*` SKIP 先例，**须维护者批**）；**本批不预判** | 全部登记豁免 + CI 保持绿；修复批次另立 |
 | **裁-FC-5** | **与 P6 待裁项的接口**：**(a)** 本批是否即为 裁-P6-2**(b)**（非硬名单诊断收紧）与 **(c)**（入闸判据成文化）的**最强形式**？若维护者只取 (b) 的「`build` 面汇总告警」档（不阻断），本批**降级为 report-only**（T3 只落采集器、不落闸）；**(b)** 裁-P6-2**(d)**（`*T ← 0/None`）/**(e)**（`--verify-named-dedup`）与本批无耦合（(d) 是规则语义、(e) 是调试通道）——**本批不动**，确认？ | 全批章程 | **(a) 取最强形式**（否则本批无对象）；**(b) 确认无耦合、不动** | 本批降级为「report-only 常设」：T3 落采集器 + 清单，**不反转默认闸**；命中表交维护者处置 |
 | **裁-FC-6** | **「零产物」的边界**：失败时 **(a)** 是否删除**本次**写入的 `<out>.ccr`（`main.cr:678` 写在 `corearch` 之前 ⇒ corearch 失败即留半成品；纯静态路径的 ELF 在 `ctx_emit_static` 末尾一次性写（`ld.cr:525-529`），本身不留半成品）？**(b)** `.core/cache/cir/*.cir` 过程缓存与 `.core/cache/cir/` 目录（`main.cr:473`）是否算产物？ | T5 的实现面 | **(a) 删除**（仅限本次 `save_ccr` 成功且 `corearch` rc≠0 的路径；**已存在的旧产物不动**——不删用户文件）；**(b) 登记为口径豁免**（过程缓存非交付产物；且 frontend 闸在 IR gen 之前 ⇒ 闸触发时不产生任何缓存） | 按推荐执行（不外扩删除面） |
 
@@ -146,7 +146,7 @@
 - **ELF canary（硬闸，全批）**：`clean-cache` → `build tests/suite/ptr_arith.cr --static` → sha256 `95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475`（28822B）。**本批的 canary 语义有变体**：T5 开门后若 B04 豁免生效，canary 应**逐字节同**（豁免 = 不阻断，发射面零变化）；**若 canary 不可产 ⇒ 立即停下**（= 裁-FC-3 未取裁或取 (i)/(iii) 的信号）。
 - **发射面声明（本批必须显式声明）**：**本批声明发射面零变更**（闸门 = 前端 rc 语义；不触 `ir_gen`/`lower_to_ccr`/`emit`）。任何 canary/`--dump-objects`/`.ccr` 逐字节差异 ⇒ 停下（越界信号）。
 - **`.ccr` 记录值引用口径（D28 继承）**：一律带**命令口径**（`corec ccr F -o O` vs `corec build F -o O --static`，差恒 143B）+ **缓存态**（冷/热；非可选程序冷≠热为**预存**豁免）；比较任何 `.ccr`/缓存态产物前 `clean-cache`。
-- **判据口径按 TODO #26**：不采用「与旧版逐字节同」当语义证据；结构性断言 + 语义零变化 + 自举稳定为本仓主判据；「≥N 例」= 下限（可增不可减）；**自测用例只增不减**（重钉/改名允许，删除须给死亡证据）。
+- **判据口径按 TODO #2026-09-11-9**：不采用「与旧版逐字节同」当语义证据；结构性断言 + 语义零变化 + 自举稳定为本仓主判据；「≥N 例」= 下限（可增不可减）；**自测用例只增不减**（重钉/改名允许，删除须给死亡证据）。
 - **三态纪律（不得稀释）**：引擎 -1 不得当 0/1 用；载入失败/段缺失/行不可译/项不可建 ⇒ **拒绝**。**新硬错先 report-only**：本批新增的任何 rc=1 门（含闸门反转本身）必须先在**全语料**（72 档 + `tests/selfhost` **内联源** + `src/stdlib` + `examples` + `src/compiler` 自指 + **58 套件全枚举**）report-only 跑一遍，清单审查后才开门。
 - **清单三面同核（B.6，硬性）**：任何清单/段表改动必须三面同核——`build_selfhost_native.py`（`corec_files`/`corearch_files`/`corelsp_files`）↔ `src/targets/x86_64-linux/_import.cr` ↔ `src/compiler/_import.cr`；每任务回归面**必含** `tests/selfhost/test_backend_bootstrap.py`（rc=0 + 构建日志 `error[` = 0）。本批新增的 runner/语料（`tools/baseline/*`、`tests/probes/*`）**不进**任何编译清单。
 - **不得回退既有收纳**：TS01-04/TK02 硬门（#29）、TM03/TG02 门（#31/#33）、F2 常量档拒绝语义与「N 不回身份」、F5 槽位契约（#25/#28）、效应/纯度判据（#26/#27）、`iface_satisfies` 轴序 A>C>B、P4 全批、P5 全批（ICE04/TA02/影子下线）、P6 全批（β/¬ 面/never/文档）——**一律不动**；冲突 → 停下上报。
@@ -283,7 +283,7 @@ tools/baseline/build_gate_run.sh <corec二进制> <outdir>
 **Files:** 按 T1 归因表逐条定；预期面 = `src/compiler/checker.cr`（若修前端假阳性：如 TF01 并发族、TF07 `@raw_int` 位、B004 末次使用）+ `tests/suite/*.cr`（若语料转负例，**须裁-FC-4 批准**）+ `src/ci/run.sh`（SKIP 语义若改）+ `tests/selfhost/test_*.py`（重钉）+ 本计划（豁免表终稿）。
 
 - [ ] **Step 1: 逐条归因复核**（每条：RED 复现 → 冻结基线复证 → 机制定位 → 处置判定）。判据：每条有 `file:line` + 触发语料 + 机制。
-- [ ] **Step 2: 假阳性根因修复**（照 P6 TF01 清理批先例：`stmt_cannot_fall_through` + `lits_copy` 类型洗白，TODO #40）。判据：修复后该码在全语料零命中 + 原用例转绿 + **反例仍红**（强负控）。
+- [ ] **Step 2: 假阳性根因修复**（照 P6 TF01 清理批先例：`stmt_cannot_fall_through` + `lits_copy` 类型洗白，TODO #2026-09-13-1）。判据：修复后该码在全语料零命中 + 原用例转绿 + **反例仍红**（强负控）。
 - [ ] **Step 3: 语料处置**（**仅限裁-FC-4 批准面**）。判据：语料改动逐条有维护者批复 + 语料只增不减纪律的例外声明。
 - [ ] **Step 4: 豁免表终稿**（撤除已修条；每条保留 `exit` 条件）。判据：表内条目全部有 T1 实测命中支撑（**不得有空条**）。
 - [ ] **Step 5: 判据**：同 T3 Step 5 全套 + **命中档逐档转绿（或登记明确）的对照表**。
@@ -376,7 +376,7 @@ tools/baseline/build_gate_run.sh <corec二进制> <outdir>
   5. **新套件** = `tests/selfhost/test_diag_gate.py`（**17 例**：正控 9 + 负控 6 + 零产物 3）+ `run.sh` 挂点（设计稿写 ≥14；实际 17）。
 - **对表结论**：**无表外命中**（T1 `would_block.tsv` 的 7 条 build 面行全部放行、34 条 check 面行逐条不变；T1 的 6 档红套件全绿）。**豁免表 = 9 条**（10 − TC02；TC02 已在 `7f53305d` 修掉）。
 - **72 档差异口径（先例继承）**：日志差异 **2 档 = 纯行号偏移 +53**（编辑编译器自身源码 ⇒ 语料含编译器 ⇒ 行号位移；先例 = P6 T2 的 +146）；rc 分布两侧 34×0/38×1 零差异。
-- **新登记（本批施工中发现，另批）**：**安全面诊断随 `.cir` 暖缓存静默消失**（冷 rc=1 / 暖 rc=0 出 ELF；P6 期二进制同病 ⇒ 预存）⇒ TODO #60（含派生建议：两条 runner 加「暖态腿」，**本批不实施**）。
+- **新登记（本批施工中发现，另批）**：**安全面诊断随 `.cir` 暖缓存静默消失**（冷 rc=1 / 暖 rc=0 出 ELF；P6 期二进制同病 ⇒ 预存）⇒ TODO #2026-09-15-5（含派生建议：两条 runner 加「暖态腿」，**本批不实施**）。
 
 ## 勘误与进展（2026-09-15，FC 批 T3 落地后回填）
 
@@ -400,7 +400,7 @@ tools/baseline/build_gate_run.sh <corec二进制> <outdir>
 |---|---|---|---|---|
 | 1 | **T1 report-only 全语料扫面**（零源码改动） | 无提交（工作区报告 + `/tmp/fct1/**`） | `hits.tsv` 203 · `would_block.tsv` 41 · `exemption_draft.tsv` 10 · 影子树 + 闸门包装器法（`GATE=bare/exempt7/9/10/off`）· 伪影对照（`test_cache_identity`/`test_optional`） | 裸反转 ⇒ 2 CI job 红（`suite` 7/21 档 · `selfhost-tests` 6 套件）；`exempt10` ⇒ 套件面全清 |
 | 2 | **T2 闸门反转 + 豁免表 + 零产物** | **`b01a948c`** | `main.cr` 反转（旧 11 码名单退役）+ 进度行保真 · `diag.cr::diag_gate_exempt`（**9 条**）· `globals.cr` scope 常量 · 零产物删除点 · 新套件 `test_diag_gate.py`（**17 例**）+ `run.sh` 挂点 | 五 CI 5/5 · 枚举 60/60 · selftest 415/415 · canary IDENTICAL · `.ccr` 四条同 · 链 `5154425478…` · 72 档 rc 零差异 · 对表无表外命中 · 突变 4/4 |
-| 3 | **T3 隐藏通道 `--diag-gate-report`** | **`3990a0a5`** | `main.cr` 只读报告行（默认关；同 `--verify-*` 纪律）· TODO #61 · 计划勘误 | **默认关两态零差异**（72 档 + 探针 `diff -rq` 零）· 开态 rc/产物 sha 逐字节同（仅多一行）· 101 档重放对表无表外命中 · 五 CI 5/5 · 枚举 60/60 · 链 `24802386a1…` |
+| 3 | **T3 隐藏通道 `--diag-gate-report`** | **`3990a0a5`** | `main.cr` 只读报告行（默认关；同 `--verify-*` 纪律）· TODO #2026-09-15-4 · 计划勘误 | **默认关两态零差异**（72 档 + 探针 `diff -rq` 零）· 开态 rc/产物 sha 逐字节同（仅多一行）· 101 档重放对表无表外命中 · 五 CI 5/5 · 枚举 60/60 · 链 `24802386a1…` |
 
 ### 2. **T4/T5 折入 T2 声明**（维护者 2026-09-15 批准）
 
@@ -431,9 +431,9 @@ tools/baseline/build_gate_run.sh <corec二进制> <outdir>
 
 | # | 件 | 归属 | 状态 |
 |---|---|---|---|
-| 1 | **TODO #59** FC 批 T2 落地（含判据全套与对表结论） | 本批 | 已落 TODO |
-| 2 | **TODO #60** 【高危·预存】安全面诊断随 `.cir` 暖缓存静默消失（冷 rc=1 / 暖 rc=0 出 ELF；P6 期二进制同病）+ **派生建议：runner 加暖态腿（本批不实施）** | 独立批候选 | 已落 TODO |
-| 3 | **TODO #61** FC 批 T3 隐藏通道（形态/判据/对表/口径注/登记） | 本批 | 已落 TODO |
+| 1 | **TODO #2026-09-15-2** FC 批 T2 落地（含判据全套与对表结论） | 本批 | 已落 TODO |
+| 2 | **TODO #2026-09-15-5** 【高危·预存】安全面诊断随 `.cir` 暖缓存静默消失（冷 rc=1 / 暖 rc=0 出 ELF；P6 期二进制同病）+ **派生建议：runner 加暖态腿（本批不实施）** | 独立批候选 | 已落 TODO |
+| 3 | **TODO #2026-09-15-4** FC 批 T3 隐藏通道（形态/判据/对表/口径注/登记） | 本批 | 已落 TODO |
 | 4 | **环境干扰事件**：`build/` 被外部删两次 + `examples/*.{ccr,cir,o}` 等 **12 个 tracked 文件**被删（工作副本 `D`） | **待维护者处置** | 未提交、未还原（铁律 #3） |
 
 ### 6. 偏差（6 条；逐条 = 现象 / 处置）
@@ -444,7 +444,7 @@ tools/baseline/build_gate_run.sh <corec二进制> <outdir>
 | 2 | **探针 1 档差异**（`n05_recursive` 多一行 `[5/5] frontend done`） | 其 `TS03` 属旧硬名单 ⇒ S0 提前返回无该行；本批改为「诊断后、返回前一律打印」后补上；rc/诊断同 |
 | 3 | **进度行保真修正（设计稿外）**：`[5/5]` 首版移至闸门**前** ⇒ 25 档顺序差；二次修正为**同址打印** | 差异降至「2+1」（见偏差 1/2）；首版问题已在本报告留痕 |
 | 4 | **corearch sha 口径澄清**：lead 给的 `f69240ae…` = **自举链** sha（非 corearch） | 已核；本批 corearch = `22e96d03…` |
-| 5 | **B6 项（安全面负控）如实保留**：冷态 PASS / **暖态受预存缺陷影响**（诊断消失 ⇒ rc=0 出 ELF） | **未加豁免、未改判据**；归 TODO #60 |
+| 5 | **B6 项（安全面负控）如实保留**：冷态 PASS / **暖态受预存缺陷影响**（诊断消失 ⇒ rc=0 出 ELF） | **未加豁免、未改判据**；归 TODO #2026-09-15-5 |
 | 6 | **T3 测量期环境干扰**：`build/` 与 `examples/*` 被外部删 ⇒ 首轮 parity/probe 腿作废（rc=127 满屏）；`/tmp/fct3/parity_*/parity.out` 被删 | 重建（corec sha 两次复原 `308f06a3…` + 冒烟 42 ⇒ 干扰不改构建产物）后**全部重跑取有效值**；证据目录未删（本批自用仅 11MB，`/tmp` 95% 占用非本批所致） |
 
 ### 7. 口径注（T3 引入；对表/复放须按此解读）
@@ -468,4 +468,4 @@ tools/baseline/build_gate_run.sh <corec二进制> <outdir>
 
 **二、已裁定面**：裁-FC-1 = **(C) 终局**（同机制 + scope 字段；check 基线不换代；(B) 非活选项）· 裁-FC-2 = 码级表 + 位点作证据 + 源码内载体 · 裁-FC-3 = **销项**（保持 `ptr_arith` 载体 + B04 带退出条件豁免——数据自解：B04 不豁免则 `test_ccr_types` 必红）· 裁-FC-4 = 逐档归因（豁免表清账）· 裁-FC-5 = (b)(c) 最强形式 · 裁-FC-6 = 零产物只删本次写下者（**报告写明边界**）。
 
-**三、剩余登记面**：**TODO #60**（缓存静默缺陷 + runner 暖态腿建议——**独立批候选**，维护者已采信）· **环境干扰事件**（12 个 tracked `D`，**待维护者处置**，不得擅自还原）· 豁免表 9 条的**退出条件**（逐条在表内；撤条须带根因证据、加条须维护者批）· T3 报告面口径注（P21/TU03 不在报告行）。
+**三、剩余登记面**：**TODO #2026-09-15-5**（缓存静默缺陷 + runner 暖态腿建议——**独立批候选**，维护者已采信）· **环境干扰事件**（12 个 tracked `D`，**待维护者处置**，不得擅自还原）· 豁免表 9 条的**退出条件**（逐条在表内；撤条须带根因证据、加条须维护者批）· T3 报告面口径注（P21/TU03 不在报告行）。

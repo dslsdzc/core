@@ -280,13 +280,13 @@ jj commit -m "feat: explicit DFNode→region mapping (g_df_node_region) + DOT cl
 - Consumes: `g_sgs`（SG 表）；`g_df_node_region`（Task 2）；`g_df_func_node_start/node_count`（main 函数图区间）；`g_label_poses`（label→node 偏移，interp.cr:42-57 预扫描已有）
 - Produces: `g_loop_regions[]`（每循环 region 的 enter/exit 图内偏移）；循环执行不再依赖 label 回跳查找
 
-- [ ] **Step 1: 写失败测试（复现 TODO#3 for 循环 bug）**
+- [ ] **Step 1: 写失败测试（复现 TODO #2026-07-25-1 for 循环 bug）**
 
 追加到 `tests/selfhost/test_region_cfg.py`：
 
 ```python
 def test_for_loop_run():
-    """for 循环在解释器中正确执行并返回累加和（TODO#3 回归用例）"""
+    """for 循环在解释器中正确执行并返回累加和（TODO #2026-07-25-1 回归用例）"""
     with tempfile.NamedTemporaryFile('w', suffix='.cr', delete=False) as f:
         f.write("fn main() -> int {\n    s : ., mut = 0;\n    for i in 0..4 { s = s + i; }\n    return s;\n}\n")
         path = f.name
@@ -313,7 +313,7 @@ def test_break_continue_run():
 - [ ] **Step 2: 运行确认失败**
 
 Run: `nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
-Expected: test_for_loop_run FAIL（stdout 无 `6`——解释器 for 循环不兼容，即 TODO#3）
+Expected: test_for_loop_run FAIL（stdout 无 `6`——解释器 for 循环不兼容，即 TODO #2026-07-25-1）
 
 - [ ] **Step 3: 实现循环 region 预扫描**
 
@@ -406,7 +406,7 @@ Expected: 全绿（解释器改动不影响编译管线；若有失败属解释�
 - [ ] **Step 7: 提交**
 
 ```bash
-jj commit -m "fix: interpreter loop execution via region iteration (TODO#3)"
+jj commit -m "fix: interpreter loop execution via region iteration (TODO #2026-07-25-1)"
 ```
 
 ---

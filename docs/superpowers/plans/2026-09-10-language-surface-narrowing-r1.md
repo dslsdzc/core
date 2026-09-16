@@ -431,13 +431,13 @@ jj commit -m 'fix: 语言面收窄 R1 Task 3——数字词法收窄（_ 分隔�
 
 - [x] **Step 2: 运行确认「红」（两路径）**
 
-**前置（必须先做）——清增量缓存**：`inject_global_inits` 的注入点在 `ir_gen_func` 内（`main.cr:480` 调用），而**函数命中 cir 缓存时根本不走 `ir_gen_func`**（`main.cr:483` 的 cache-hit 分支）——叠加已知缺陷 TODO #5（缓存键不含编译器身份，跨重建不失效），**旧缓存会让本次修复看起来"没生效"**。故每次判据前：
+**前置（必须先做）——清增量缓存**：`inject_global_inits` 的注入点在 `ir_gen_func` 内（`main.cr:480` 调用），而**函数命中 cir 缓存时根本不走 `ir_gen_func`**（`main.cr:483` 的 cache-hit 分支）——叠加已知缺陷 TODO #2026-09-10-1（缓存键不含编译器身份，跨重建不失效），**旧缓存会让本次修复看起来"没生效"**。故每次判据前：
 
 ```bash
 nice -n 19 ./build/corec clean-cache      # 若子命令不可用：rm -rf .core/cache（先 ls 确认路径）
 ```
 
-并在报告里记录该交互（缓存键/失效面 = TODO #5，不在本批修）。测试脚本自身不必清缓存，但**判据运行必须在清缓存后进行**。
+并在报告里记录该交互（缓存键/失效面 = TODO #2026-09-10-1，不在本批修）。测试脚本自身不必清缓存，但**判据运行必须在清缓存后进行**。
 
 ```bash
 nice -n 19 python3 tests/selfhost/test_global_init.py
@@ -628,7 +628,7 @@ nice -n 19 ./build/corec run 'fn main()->int{return 42;}'   # rc=42
 - `TODO.md` **新登记（Task 4 评审发现）**：
   - **Important（既有缺口，双路径分叉）**：解释器 callee 内联路径仍缺枚举族 opcode（如 `IR_MAKE_ENUM(17)`）——枚举值在 callee 内构造时 interp 与 ELF 结果分叉（复现件：`build/review_t4/p14_enum_in_callee.cr` interp 0 vs ELF 33；`p15_enum_split.cr` interp -11 vs ELF 33）；本批 15 例未覆盖。建议按 Task 4 §6.2 同款「与主循环同语义同守卫」补齐
   - **Minor**：类型别名仅**一层**解析（`type A = [int;2]; type B = A; g : B;` 仍双路径 SIGSEGV；有初值形态工作）——`agg_elem_count_of` 需递归/迭代至底
-  - **Minor（测试卫生，随本任务修）**：`tests/selfhost/test_global_init.py` 的 `clean_cache()` 返回码未检查（清缓存失败 + TODO #5 旧缓存 = 判据被静默污染——正是本项目大忌）→ 改为断言 rc=0；另删未用的 `import sys`
+  - **Minor（测试卫生，随本任务修）**：`tests/selfhost/test_global_init.py` 的 `clean_cache()` 返回码未检查（清缓存失败 + TODO #2026-09-10-1 旧缓存 = 判据被静默污染——正是本项目大忌）→ 改为断言 rc=0；另删未用的 `import sys`
   - **Minor（记录，不修）**：Task 4 报告 §6.5 称注入在 `g_cur_ret_ti = ret_ti` **之后**，实际在**之前**（`ir_gen.cr:2282`，= brief 指定位置）——报告措辞与代码不符（读码无歧义）；`alloc_type(TYP_ARRAY, TI_INT, cnt)` 硬编码元素类型 TI_INT（无观测差异，元素尺寸恒 8）
 - **Task 2 评审遗留（Minor）随本步清账**：
   - M1：`parser.cr` dex 分支恢复被替换文本丢掉的**行尾注释** `// 词素串下标（-1 = 无）`（信息有损、零行为——纯注释恢复）

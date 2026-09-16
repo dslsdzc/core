@@ -14,7 +14,7 @@
 
 > **⚠ 影子通道已下线（R2 P5 Task 5，2026-09-13）**：本文件记录的通道（`--type-shadow` / `[type-shadow]` 摘要 / 差异转储 / 站点直方图 / `sh_compare`）**已整体删除**——对照物 `type_equal_legacy` 在 P5 Task 4 删除后对拍停摆（全语料 `decisions=0`），P5 Task 5 按 D24/D26 下线（§15 = 终态基线记录）。判定面回归网自此 = **冻结基线同源对拍 + 行为探针 + 突变控制 + 三态纪律（ICE04）**；**后续批次不得引用本文件的计数/摘要/站点直方图作为判据**（它们只在通道存活期可复现）。
 >
-> **本清单已闭环（2026-09-11 注记）**：P1 的两条硬项 F1（硬前置）/F2（裁决）已在 **R2 P2a** 实施（用户裁决 = 建表去重根治 / 落常量档长度约束），`type_equal` 判定权已移交引擎。**替换后复跑见 §11**（26,989/26,989 agree、`old_looser`/`old_stricter`/`unknown` 全 0、站点覆盖口径不变）。§1-§10 保留为 **P1 时点**记录（数字随自指语料漂移，跨提交不可逐字复现）；未结项 = F3/F4（TODO #20/#21）与 F5（TODO #25，P2a 新发现）。
+> **本清单已闭环（2026-09-11 注记）**：P1 的两条硬项 F1（硬前置）/F2（裁决）已在 **R2 P2a** 实施（用户裁决 = 建表去重根治 / 落常量档长度约束），`type_equal` 判定权已移交引擎。**替换后复跑见 §11**（26,989/26,989 agree、`old_looser`/`old_stricter`/`unknown` 全 0、站点覆盖口径不变）。§1-§10 保留为 **P1 时点**记录（数字随自指语料漂移，跨提交不可逐字复现）；未结项 = F3/F4（TODO #2026-09-16-1/#21）与 F5（TODO #2026-09-16-2，P2a 新发现）。
 
 1. **真收紧面 = 0**：三档语料（+2 档扩面）共 **67 个有效文件 / 26,704 次判定**（71 个候选中 4 个排除，见 §2），`old_looser=0`、`old_stricter=0`。
    全部 9 条差异条目（**去重后仅 3 个类型对**）都落在 `unknown` 桶的 **engine 侧**。
@@ -97,7 +97,7 @@ $ sha256sum /tmp/r1t4_base_bin /tmp/p1t3_off2 /tmp/p1t3_on2
 
 | 档 | 内容 | 文件数 | 有摘要 | 排除（原因） |
 |---|---|---|---|---|
-| ① | `tests/suite/*.cr` | 31 | 27 | `test_control_flow.cr` / `test_generics.cr` = **0 字节空文件**（`error: cannot read`；Task 2 报告曾记为「预期失败 fixture」，实为空文件——勘误）；`at_test_mini4.cr` / `at_test_mini6.cr` = rc=139（**函数体内嵌套 fn 声明**，既有缺陷，TODO #16 已登记，非本批回归） |
+| ① | `tests/suite/*.cr` | 31 | 27 | `test_control_flow.cr` / `test_generics.cr` = **0 字节空文件**（`error: cannot read`；Task 2 报告曾记为「预期失败 fixture」，实为空文件——勘误）；`at_test_mini4.cr` / `at_test_mini6.cr` = rc=139（**函数体内嵌套 fn 声明**，既有缺陷，TODO #2026-09-10-12 已登记，非本批回归） |
 | ② | `src/compiler/main.cr` + `src/compiler/_import.cr` | 2 | 2 | 无。**注意**：`src/compiler/*` 任一文件的 check 都会经该目录 `_import.cr` 加载**整个编译器**（前端 + stdlib + lattice），故两行是**同一语料**的两次运行（`main.cr` 额外汇总 main.cr 自身的重复贡献 ~120 判定）；「纯整编译器」数取 `_import.cr` 行 |
 | ③ | `src/compiler/ccr_io.cr` + 后端/内核单元（`src/format/elf/*` `src/os/linux/*` `src/arch/x86_64/*` `src/lattice/*` `src/targets/x86_64-linux/*`） | 15 | 15 | 无（`src/compiler/elf.cr` 在本轮单独扫描中 rc=0 但 2 个 parse error、decisions=0——**陈旧遗留文件**，不在本档命令内） |
 | ④（扩面） | `src/stdlib/*.cr` | 19 | 19 | 无 |
@@ -259,7 +259,7 @@ $ sha256sum /tmp/r1t4_base_bin /tmp/p1t3_off2 /tmp/p1t3_on2
 **其他已登记项（非本任务范围）**：
 - 站点 6（`assign-binary`）不可达：parser 已把 `=` 一律降为 `EXPR_ASSIGN`（`parser.cr:222-224`），挂点保留但无样本 → **Task 4 裁决（终审 M-1）：保留挂点，去留归 P2**（零成本、留证据面；不删——删须同步本节与 `ty_shadow.cr` 站点表）；
 - 站点 4 的分类行为（§5(c)）需在 P2 语料里补定向样例；
-- `tests/suite/test_control_flow.cr` / `test_generics.cr` 为 0 字节空文件（勘误 Task 2 的「预期失败 fixture」措辞）；`at_test_mini4/6` rc=139 属 TODO #16（嵌套 fn）；
+- `tests/suite/test_control_flow.cr` / `test_generics.cr` 为 0 字节空文件（勘误 Task 2 的「预期失败 fixture」措辞）；`at_test_mini4/6` rc=139 属 TODO #2026-09-10-12（嵌套 fn）；
 - `src/compiler/elf.cr`（566 行）在本轮 rc=0 但 2 个 parse error、0 判定 → 陈旧遗留文件，建议单开清理；
 - `src/compiler/linker.cr` 为 0 字节空文件。
 
@@ -311,7 +311,7 @@ rsync -a --exclude .jj --exclude .git --exclude build --exclude .core ./ /tmp/r2
 
 **通道差异（与 §1-§5 的关键区别）**：影子对照物的「旧」侧已从 `type_equal_core` 切到 **`type_equal_legacy`**（同一函数体，改名后降级为对照物 + 回落实现）。故分类语义 = **引擎 vs 旧结构判等**——正是替换门要的对账。§3 的 `unknown` 拆因字段（`unknown_bridge` / `unknown_engine*`）保留；另增 `replace_bridge` / `replace_unknown`（**判定路径**的回落计数，与影子侧计数器互为交叉证据：逐文件相等）。
 
-**条件**：cwd = 仓库根；**每文件先 `clean-cache`**（**必须**——`.ccr`/缓存态会让同一二进制二次运行产出不同中间态，见 TODO #5 同族第二实例）；71 候选中 67 有摘要（4 排除同 §2）。
+**条件**：cwd = 仓库根；**每文件先 `clean-cache`**（**必须**——`.ccr`/缓存态会让同一二进制二次运行产出不同中间态，见 TODO #2026-09-10-1 同族第二实例）；71 候选中 67 有摘要（4 排除同 §2）。
 
 | 指标 | P1（§3.1，Task 3 时点） | **P2a 后（Task 4 复核，final 产物重算）** |
 |---|---|---|
@@ -325,11 +325,11 @@ rsync -a --exclude .jj --exclude .git --exclude build --exclude .core ./ /tmp/r2
 
 **站点覆盖（与差异数同报——P1 交接硬性要求）**：直方图（final 重算）= `fn-body-ret=4949 · if-branch=1919 · assign-node=20119 · generic-apply-base=2 · hotpatch-ret/generic-arg/unify-fallback/assign-binary = 0`，合计 26,989 = decisions（逐文件恒等，独立重算 67 行 0 违例；**原运行脚本不做该校验**，见 Task 3 报告 §5.3 更正）。
 - **覆盖面 = 站点 5（返回位）/ 7（if 分支）/ 8（赋值）**；站点 3 仅 2 次（`generics_test`）；**站点 1/2/4/6 语料零命中（同 P1）**。
-- ⇒ 「差异归零」的效力范围**仍是赋值/返回/if 面**（口径与 §9.1 一致，未因替换扩大）；站点 1/2/4 面由定向探针承担，站点 6 无生产点（TODO #17）。
+- ⇒ 「差异归零」的效力范围**仍是赋值/返回/if 面**（口径与 §9.1 一致，未因替换扩大）；站点 1/2/4 面由定向探针承担，站点 6 无生产点（TODO #2026-09-11-1）。
 
-**N 面口径（Task 2 评审裁决，硬性）**：F2 之后影子对 **N 面已「失明」**——对照物 `type_equal_legacy` 的数组分支自身已 N-free ⇒ `old_stricter` 在 N 面**必为 0**（同义反复、无诊断力；P1 探针 D 的 `old_stricter=1` 已随 F2 消失）。故**本节的「对拍归零」不得作为 N 面证据**；N 面验收 = **行为探针**（异长拒绝 / 同长通过），覆盖位：顶层数组、嵌套元素位、泛型实参位、指针元素位、元组字段位（单节点元素）+ **元组字段位（复合表达式元素）= 漏检，登记 F5 衍生**（见 §6.1 / TODO #25）。探针在 `--type-shadow` 下同时跑：影子全 agree（证明「N 不入身份」）而 rc=1（证明「拒绝只来自 `array_len_constraint_ok`」）= 该面正确的证据形态。
+**N 面口径（Task 2 评审裁决，硬性）**：F2 之后影子对 **N 面已「失明」**——对照物 `type_equal_legacy` 的数组分支自身已 N-free ⇒ `old_stricter` 在 N 面**必为 0**（同义反复、无诊断力；P1 探针 D 的 `old_stricter=1` 已随 F2 消失）。故**本节的「对拍归零」不得作为 N 面证据**；N 面验收 = **行为探针**（异长拒绝 / 同长通过），覆盖位：顶层数组、嵌套元素位、泛型实参位、指针元素位、元组字段位（单节点元素）+ **元组字段位（复合表达式元素）= 漏检，登记 F5 衍生**（见 §6.1 / TODO #2026-09-16-2）。探针在 `--type-shadow` 下同时跑：影子全 agree（证明「N 不入身份」）而 rc=1（证明「拒绝只来自 `array_len_constraint_ok`」）= 该面正确的证据形态。
 
-**残留与交 P5**：① 命名类型 / 泛型应用面的等价判定**仍由 legacy 承担**（`AK_NAMED`/`TYP_GENERIC_APPLY` 不展开 → 引擎 -1 → 回落+计数）；**P5 删 `type_equal_legacy` 的前提 = 引擎命名展开落地 + `replace_unknown` 清零**（否则「回落」变「未判定」）；② 站点 6 挂点去留随 P5 站点面清理；③ F3/F4（调用位点无诊断 / 泛型后续形参类型不生效）仍未接线（TODO #20/#21）。
+**残留与交 P5**：① 命名类型 / 泛型应用面的等价判定**仍由 legacy 承担**（`AK_NAMED`/`TYP_GENERIC_APPLY` 不展开 → 引擎 -1 → 回落+计数）；**P5 删 `type_equal_legacy` 的前提 = 引擎命名展开落地 + `replace_unknown` 清零**（否则「回落」变「未判定」）；② 站点 6 挂点去留随 P5 站点面清理；③ F3/F4（调用位点无诊断 / 泛型后续形参类型不生效）仍未接线（TODO #2026-09-16-1/#21）。
 
 ---
 
@@ -352,7 +352,7 @@ rsync -a --exclude .jj --exclude .git --exclude build --exclude .core ./ /tmp/r2
 | 9 | dyn = ⊤ 近似 + **逐行**方法表判定 `:1870-1893` ←`:1865-1888`（64 钳位 `:1834-1843`） | `d.nosuch()` → `error[N08]`——**int/string 候选行也报**（名拼接方法表判定，非类级） | `IP_METHOD` 恰 {dyn, named}（类级位表达不了逐行谓词；装上 = 抑制既有 N08 = 放宽） | 不接线 | ① (方法名 × 类型行) 二维判定；② 解除位图 64 上限（spec §3.3） |
 | 10 | **range 索引非数组落空静默** `:2637` ←`:2611-2628` | 串/切片/int 的 range 索引 **rc=0 静默**（落空 `return TI_UNIT` 无诊断） | `IP_INDEX_RANGE` 恰 {sequence}（未接线） | 不接线（无诊断 ⇒ 门恒真） | 落空分支加诊断，或把「串 range」定为 slice 语义（**语义裁决**，须先有全语料证据） |
 
-**P2b 收紧清单（「旧接受 → 新拒绝」）= 空**（零条；反向「旧拒绝 → 新接受」亦零条）。证据 = 同源双编译器对拍（旧二进制 × 新源 == 新二进制 × 新源）：21 档 `tests/suite` 语料 check 输出（stdout+stderr+rc）逐字节同 · 自源 `check src/compiler` 逐字节同（仅既有 2 条 TF01 误报 `lits_copy`/`ty_memo_slot_no_grow`，两侧一致）【**2026-09-13 更新（TODO #40 TF01 收口）**：`lits_copy` 为真·类型洗白（返回型改 `string`），`ty_memo_slot_no_grow` 为 checker 落空分析缺失（`stmt_cannot_fall_through` 落空分析入 checker.cr）⇒ `check src/compiler` 现 rc=0；本句为当期实跑记录】· 4 档 `.ccr` 逐字节同（`ecd7a9df…`/`891377232b…`/`35cf0f26…`/`dfb82d2b…`）· 32 档影子通道逐字节同 · ELF canary `95084e7b…d475`（开/关两态同）；逐任务另有各自的前一任务基线对拍（Task 1~6 报告 §判据）。**站点台账（31 个未接线站点 + 接线面清单 + P3 裁决点）见 `docs/superpowers/plans/2026-09-11-r2-p3-capabilities.md` 附录 A。**
+**P2b 收紧清单（「旧接受 → 新拒绝」）= 空**（零条；反向「旧拒绝 → 新接受」亦零条）。证据 = 同源双编译器对拍（旧二进制 × 新源 == 新二进制 × 新源）：21 档 `tests/suite` 语料 check 输出（stdout+stderr+rc）逐字节同 · 自源 `check src/compiler` 逐字节同（仅既有 2 条 TF01 误报 `lits_copy`/`ty_memo_slot_no_grow`，两侧一致）【**2026-09-13 更新（TODO #2026-09-13-1 TF01 收口）**：`lits_copy` 为真·类型洗白（返回型改 `string`），`ty_memo_slot_no_grow` 为 checker 落空分析缺失（`stmt_cannot_fall_through` 落空分析入 checker.cr）⇒ `check src/compiler` 现 rc=0；本句为当期实跑记录】· 4 档 `.ccr` 逐字节同（`ecd7a9df…`/`891377232b…`/`35cf0f26…`/`dfb82d2b…`）· 32 档影子通道逐字节同 · ELF canary `95084e7b…d475`（开/关两态同）；逐任务另有各自的前一任务基线对拍（Task 1~6 报告 §判据）。**站点台账（31 个未接线站点 + 接线面清单 + P3 裁决点）见 `docs/superpowers/plans/2026-09-11-r2-p3-capabilities.md` 附录 A。**
 
 ---
 
@@ -393,7 +393,7 @@ rsync -a --exclude .jj --exclude .git --exclude build --exclude .core ./ /tmp/r2
 
 **收紧/放宽台账（P3a 汇总）**：收紧 **18** 条（T0 0 / T1 6 / T3 6 / T4 3 / T5 3；其中 1 条 rc 不变、仅诊断码集合扩张）+ 诊断面新增 1（TM04 软）+ 放宽 **8** 条（T4 7 含 1 条非语义放宽 / T5 1）+ 实例名忠实化 6（T5）+ 挂死修复 2 端（T4）；**全语料零命中** ⇒ 自举源码零改造。逐条 = `docs/superpowers/plans/2026-09-11-r2-p3-capabilities.md` **附录 B.2**；报告 = `.superpowers/sdd/p3-task{0,1,3,4,5,7}-report.md`。
 
-**新登记面（P3a 引入/更新；详版 = 附录 B.4）**：非枚举域不判穷尽 · 空枚举域 = 空洞穷尽（判据 1）· 空递归保守 -1 · MAX_* 族处置（MAX_GENERICS / MAX_ENUM_VARIANTS / MAX_VARIANT_TYPES）· 运行期可选表示未统一 · witness 空析取支（反例走覆盖位）· `EXPR_ENUMPAT` 名字槽 = `ast_a` · bootstrap `&&`/`||` 短路根因（T4 只关触发链）· `EXPR_LET` 无检查（TODO #32）· 符号档长度约束（VC 义务，显式登记不实现）。
+**新登记面（P3a 引入/更新；详版 = 附录 B.4）**：非枚举域不判穷尽 · 空枚举域 = 空洞穷尽（判据 1）· 空递归保守 -1 · MAX_* 族处置（MAX_GENERICS / MAX_ENUM_VARIANTS / MAX_VARIANT_TYPES）· 运行期可选表示未统一 · witness 空析取支（反例走覆盖位）· `EXPR_ENUMPAT` 名字槽 = `ast_a` · bootstrap `&&`/`||` 短路根因（T4 只关触发链）· `EXPR_LET` 无检查（TODO #2026-09-11-14）· 符号档长度约束（VC 义务，显式登记不实现）。
 
 **残差与交 P5**：同 §11 尾（`type_equal_legacy` / `sh_*_ak_legacy` / 站点 6 / 影子层下线）——**状态更新**：T0 的展开层按设计只服务满足判定/域查询 ⇒ §11 的「unknown 清零前提 = 引擎命名展开」**不会被满足**（等价面展开属裁决）；P5 须裁「接受命名展开（推翻 P2a 对拍基线）」或「legacy 长期化」（见计划附录 B.5）。
 

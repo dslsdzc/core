@@ -743,7 +743,7 @@ fn sh_enum_variant_index(ea: int, name_ni: int) -> int {
 // 其余（非形参 / 非应用形态 / 实参缺位）→ 经 res_type_node 解析字段类型节点。
 // 注：非应用形态下泛型形参保持**名义**（res_type_node 取该形参的类型行 ⇒ AK_NAMED 原子）——
 // 不假装知道实参是什么（EXPR_FIELD 的落空路径同款）。嵌套代入（`Box[Box[T]]`）现状不可达：
-// 形参只做**一层**代入（与 checker 现状一致；F4 同族缺陷，TODO #21 / Task 5 收口）。
+// 形参只做**一层**代入（与 checker 现状一致；F4 同族缺陷，TODO #2026-09-11-4 / Task 5 收口）。
 fn sh_struct_field_term(sa: int, fi: int, ga: int) -> int {
     fnode := si_field_type_node(sa, fi);
     if fnode < 0 { return -1; }
@@ -1332,7 +1332,7 @@ fn sh_match_opt_term(scrut_ti: int, part: int) -> int {
 // 0 = TY_INT ⇒ 「载荷是 int」与「载荷是 string/命名类型/泛型形参」**不可区分**。本任务按
 // struct 先例补 **OFF_EV_TYPE_NODES 列**（parser 随裸码同写类型节点；见 parser.cr 枚举分支），
 // 本函数即该列的忠实读取点：泛型形参按泛型应用行的实参**代入**（照 sh_struct_field_term 的
-// 路径——一层代入，嵌套代入属 F4 同族缺陷/TODO #21）。
+// 路径——一层代入，嵌套代入属 F4 同族缺陷/TODO #2026-09-11-4）。
 // 返回：单载荷 = 该载荷项；多载荷 = AK_PRODUCT 链（**声明序**，逆序构造）；**0 载荷（tag 变体）→ -1**
 // （语义域外登记：载荷为空 ≠ 载荷 unit——不发明「tag 变体 = 单点」的项，Task 5/6 若需要另裁）。
 // -1 = 不可展开（非枚举行 / 无此变体名 / 无载荷 / 载荷节点缺失 / 任一载荷不可译 / 预算耗尽）。

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TODO #32 回归：`EXPR_LET` 站点**无任何兼容检查**（R2 P5 Task 6 修复）。
+"""TODO #2026-09-11-14 回归：`EXPR_LET` 站点**无任何兼容检查**（R2 P5 Task 6 修复）。
 
 背景（RED，修复前实测——(a) 冻结基线 `/tmp/p5t0/base/corec`（pre-P5）；(b) 本批起点
 `2342fd03…`；两代二进制同值 ⇒ 预存洞，非本批引入）：

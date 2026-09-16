@@ -53,10 +53,10 @@
 | P017 | fileid 声明格式 | `Invalid fileid declaration` |
 | P018 | 变量声明语法 | `Invalid variable declaration syntax` |
 | P019 | 字面量后缀溢出 | `Numeric literal overflow` |
-| P020 | 形参数目超上限（> `MAX_FN_PARAMS=64`） | `too many parameters`（TODO #8 修复：修复前 ≥18 形参静默误编译——越界写踩 return_type/ast_node） |
-| P021 | 函数体内嵌套 `fn` 声明（不属语言面） | 定位拒绝（TODO #16 修复：修复前 parse 失步 → bump allocator 耗尽 → `rep movsb` 向 NULL 拷 → rc=139） |
-| P022 | 枚举变体数 / 变体载荷类型数超上限（> `MAX_ENUM_VARIANTS=16` / `MAX_VARIANT_TYPES=16`） | `Enum has too many variants (17 > 16)` / `Enum variant has too many payload types (17 > 16)`（TODO #35 修复：修复前写入侧**无界**——第 17 变体槽起点 = `variant_count` 自身、槽尾越记录尾 224B 的静默越界写） |
-| P023 | 结构体字段数超上限（> `MAX_STRUCT_FIELDS=16`） | `Struct has too many fields (17 > 16)`（TODO #35 同族：第 17 字段踩 `OFF_SI_FIELD_COUNT`/泛型槽与邻记录；修复前 check rc=0 零诊断） |
+| P020 | 形参数目超上限（> `MAX_FN_PARAMS=64`） | `too many parameters`（TODO #2026-09-10-4 修复：修复前 ≥18 形参静默误编译——越界写踩 return_type/ast_node） |
+| P021 | 函数体内嵌套 `fn` 声明（不属语言面） | 定位拒绝（TODO #2026-09-10-12 修复：修复前 parse 失步 → bump allocator 耗尽 → `rep movsb` 向 NULL 拷 → rc=139） |
+| P022 | 枚举变体数 / 变体载荷类型数超上限（> `MAX_ENUM_VARIANTS=16` / `MAX_VARIANT_TYPES=16`） | `Enum has too many variants (17 > 16)` / `Enum variant has too many payload types (17 > 16)`（TODO #2026-09-12-2 修复：修复前写入侧**无界**——第 17 变体槽起点 = `variant_count` 自身、槽尾越记录尾 224B 的静默越界写） |
+| P023 | 结构体字段数超上限（> `MAX_STRUCT_FIELDS=16`） | `Struct has too many fields (17 > 16)`（TODO #2026-09-12-2 同族：第 17 字段踩 `OFF_SI_FIELD_COUNT`/泛型槽与邻记录；修复前 check rc=0 零诊断） |
 
 ## N0xx — 名字解析 (Name Resolution)
 
@@ -97,7 +97,7 @@
 
 ## TA0xx — 类型检查：赋值与绑定
 
-> TA02 自 2026-09-13（R2 P5 Task 6 / TODO #32）起**实现**并列入 run_frontend 硬错误名单
+> TA02 自 2026-09-13（R2 P5 Task 6 / TODO #2026-09-11-14）起**实现**并列入 run_frontend 硬错误名单
 > （rc=1 且不产出产物）：修复前 `EXPR_LET` 站点**无任何兼容检查**（符号取注解行、后端按注解
 > 行发射 = 静默错产物；`EC_TA_DECL` 定义零 raise）。判定点 = `checker.cr::check_let_annot_compat`
 > （局部 `EXPR_LET` + 全局 `check_global_let` 两调用点共用），组合函数 = `type_compat_strict`
@@ -190,7 +190,7 @@
 | 码 | 检查点 | 消息模板 |
 |----|--------|---------|
 | TK01 | 下标索引非数组 | `Cannot index type {T}` |
-| TK02 | 数组元素类型不一致（2026-09-11 TODO #29 起字面量处**实现**：元素类型取首元素，后续逐个比对；硬错误） | `Expected array element type {T1}, got {T2}` |
+| TK02 | 数组元素类型不一致（2026-09-11 TODO #2026-09-11-11 起字面量处**实现**：元素类型取首元素，后续逐个比对；硬错误） | `Expected array element type {T1}, got {T2}` |
 | TK03 | 数组大小不是整数 | `Array size must be `int`` |
 | TK04 | 数组大小为负数 | `Array size must be positive, got {size}` |
 | TK05 | 切片越界 | `Slice start {N} is out of bounds (length {L})` |
@@ -200,7 +200,7 @@
 
 ## TS0xx — 类型检查：结构体字面量
 
-> 四码自 2026-09-11（TODO #29）起**全部实现**并列入 run_frontend 硬错误名单（rc=1 且不产出
+> 四码自 2026-09-11（TODO #2026-09-11-11）起**全部实现**并列入 run_frontend 硬错误名单（rc=1 且不产出
 > 产物）：修复前字段名被丢弃（值按声明位序绑定 = 静默错值），四校验均不存在。字段值现按
 > **名字**绑定（与 Python bootstrap 的 gen_struct_lit 同语义；求值顺序仍为源序）。
 

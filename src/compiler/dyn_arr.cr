@@ -83,7 +83,7 @@ OFF_IRI_S3 : int = 32; OFF_IRI_TK : int = 40;
 // 之前），槽数即硬上限。修复前槽数 = 16 且写入无界 → 第 17 个形参起改写
 // return_type/ast_node（TY_INT=0 恰把 ast_node 写成 0 = 节点表首项）→
 // 「TF01 误归 + .ccr name_idx/param_count=0 + rc=0 产物崩」静默误编译
-// （TODO #8，2026-09-11）。64 = 与 ast.cr FuncInfo 镜像 `[int; 64]` 对齐，
+// （TODO #2026-09-10-4，2026-09-11）。64 = 与 ast.cr FuncInfo 镜像 `[int; 64]` 对齐，
 // 并覆盖 ≥22（16 栈参 + 6 寄存器参，SysV）的栈清理形。越界 = parser 硬错
 // P020（rc=1）+ 下方访问器护栏双保险——**任何情况下不得静默越界写**。
 MAX_FN_PARAMS : int = 64;
@@ -109,7 +109,7 @@ OFF_SI_GENERIC_NAMES : int = 400; OFF_SI_GENERIC_COUNT : int = 432;
 // 契约（四条，缺一即静默类）：
 //   ① **字节零变化**：ESZ_DFNODE 保持 72B，两槽只是**语义对调**（原 40 = 混用码、
 //      原 64 = 项引用）⇒ `.ccr`（NOD 36B）与 `.cir` 快照（节点 64B）布局零改动，
-//      `CCR_VERSION=8` 不 bump；`CIR_CACHE_VER` 当时为 17（**此后由 TODO #78 批 2 升级到 18**——聚合读结果槽型改声明面形式，旧快照与新语义不等价）。
+//      `CCR_VERSION=8` 不 bump；`CIR_CACHE_VER` 当时为 17（**此后由 TODO #2026-09-16-16 批 2 升级到 18**——聚合读结果槽型改声明面形式，旧快照与新语义不等价）。
 //   ② **互斥**（D22-②）：辅码 ≠ 0 ⇒ 项 = -1；项 ≥ 0 ⇒ 辅码 = 0（由拆分器构造保证）。
 //   ③ **码 = 派生量**（D22-①/D23）：`iri_tk` / `.ccr` NOD / `.cir` 快照里的类型码
 //      一律由 `sh_dfn_code_of_slots(项, 辅码)` 派生，**不得**当独立真源存储或读回
@@ -470,7 +470,7 @@ fn fi_generic_name(n: int, gi: int) -> int { return r64(g_funcs, n * ESZ_FUNCINF
 fn fi_set_name(n: int, v: int) { w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_NAME, v); }
 fn fi_set_param_count(n: int, v: int) { w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_COUNT, v); }
 fn fi_set_param_type(n: int, pi: int, v: int) {
-    if pi < 0 || pi >= MAX_FN_PARAMS { return; }  // 槽区护栏：越界写会踩 return_type/ast_node/generic_*/ispure（TODO #8 根源）
+    if pi < 0 || pi >= MAX_FN_PARAMS { return; }  // 槽区护栏：越界写会踩 return_type/ast_node/generic_*/ispure（TODO #2026-09-10-4 根源）
     w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_TYPES + pi*8, v); }
 fn fi_set_return_type(n: int, v: int) { w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_RETURN_TYPE, v); }
 fn fi_set_ast_node(n: int, v: int) { w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_AST_NODE, v); }
@@ -505,7 +505,7 @@ fn si_commit_fields(n: int, fc: int) {
     if fc < 0 { return; }
     if b + fc > g_si_f_used { g_si_f_used = b + fc; }
 }
-// 读护栏（R2 P4 Task 6 / TODO #35 的**计数为界**版本）：fi 越界（< 0 或 ≥ count）⇒ 回哨兵
+// 读护栏（R2 P4 Task 6 / TODO #2026-09-12-2 的**计数为界**版本）：fi 越界（< 0 或 ≥ count）⇒ 回哨兵
 // -1（不越读）；在界读 = 侧表取值。
 fn si_field_row(n: int, fi: int) -> int {
     if fi < 0 { return -1; }
@@ -533,7 +533,7 @@ fn ei_name(n: int) -> int { return r64(g_enums, n * ESZ_ENUMINFO + OFF_EI_NAME);
 fn ei_variant_count(n: int) -> int { return r64(g_enums, n * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT); }
 fn ei_generic_count(n: int) -> int { return r64(g_enums, n * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT); }
 fn ei_generic_name(n: int, gi: int) -> int { return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + gi*8); }
-// 读护栏（R2 P4 Task 6 / TODO #35）：越界 = 槽区外（读会取到 variant_count/generic 槽或邻
+// 读护栏（R2 P4 Task 6 / TODO #2026-09-12-2）：越界 = 槽区外（读会取到 variant_count/generic 槽或邻
 // 记录）⇒ 回哨兵（名字/类型码/类型节点 = -1；计数 = 0）。在界调用点（count ≤ 16）行为不变。
 // ─── 容量批 T3：枚举变体**侧表**（无硬上限；同 struct 字段形态）───
 fn grow_ei_variants(needed: int) {
@@ -593,12 +593,12 @@ fn ei_variant_type_node(n: int, vi: int, ti: int) -> int {
     if tb < 0 { return -1; }
     return r64(g_ei_vt_nodes, (tb + ti) * 8); }
 
-// ─── 枚举/结构体记录**受护访问器**（R2 P4 Task 6；TODO #35 收口，#8 同族形态）───
-// 背景（TODO #35 代码级定位；**容量批 T3 起该定长槽区已退役**——字段/变体迁侧表）：EnumVariant 槽区（旧 `MAX_ENUM_VARIANTS` 槽 × `OFF_EV_SIZE`）与
+// ─── 枚举/结构体记录**受护访问器**（R2 P4 Task 6；TODO #2026-09-12-2 收口，#2026-09-10-4 同族形态）───
+// 背景（TODO #2026-09-12-2 代码级定位；**容量批 T3 起该定长槽区已退役**——字段/变体迁侧表）：EnumVariant 槽区（旧 `MAX_ENUM_VARIANTS` 槽 × `OFF_EV_SIZE`）与
 // StructInfo 字段槽区（旧 `MAX_STRUCT_FIELDS` 槽）曾是**定长内嵌槽区**——其后紧跟记录自身的
 // count/generic 槽，再往后是**下一条记录**（同一 buffer）⇒ 无界写入既踩自身记录尾也踩邻记录
 // （实测：第 17 变体槽起点 = `OFF_EI_VARIANT_COUNT` 自身、槽尾越过 `ESZ_ENUMINFO` 224B）。
-// 修复形态**照 TODO #8 收口**（`fi_param_type`/`fi_set_param_type`）：
+// 修复形态**照 TODO #2026-09-10-4 收口**（`fi_param_type`/`fi_set_param_type`）：
 //   ① **唯一受护写点** = 本组 setter（parser 全改走它们 ⇒ 未来新调用点亦不可能越界写）；
 //   ② 读护栏 = 越界回哨兵（名字/类型节点 = -1 = 无效下标；计数 = 0），**不越读**；
 //   ③ 面向用户的拒绝由 parser 的 P022/P023 硬错承担（本层只做内存安全兜底，不代替诊断）。
@@ -921,7 +921,7 @@ fn grow_rip_patch(needed: int) {
     g_x86_rip_patch_cap = nc; }
 
 // `.so` 扩展索引侧表（第 4 批 #82/#83）：**动态增长**（本仓约定：All arrays are dynamic
-// byte buffers, no MAX_* limits——这正是 TODO #98「容量硬编码 128 + 写入无界」要消灭的形态）。
+// byte buffers, no MAX_* limits——这正是 TODO #2026-09-17-1「容量硬编码 128 + 写入无界」要消灭的形态）。
 fn grow_so_side(needed: int) {
     if needed < g_so_side_cap { return; }
     nc : ., mut = g_so_side_cap * 2; if nc < 32 { nc = 32; } if nc < needed { nc = needed + 32; }

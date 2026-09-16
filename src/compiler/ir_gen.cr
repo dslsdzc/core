@@ -402,7 +402,7 @@ fn enum_payload_ti(name_ni: int, pos: int) -> int {
     return -1;
 }
 
-// ── 聚合读**结果槽的声明面形式**（TODO #78 批 2 T3 · 裁-AGG-1 ①）──────────────────────
+// ── 聚合读**结果槽的声明面形式**（TODO #2026-09-16-16 批 2 T3 · 裁-AGG-1 ①）──────────────────────
 // 聚合槽的规范存储形式**恒为精确（scaled）**（apx 批不变量「聚合面不存在 apx 形式」；写点漏斗
 // `dex_slot_norm:1059` 与 :2725/:2688/:2774/:2902 各写点均按此规范化）⇒ 只要**声明面**是 dex
 // （类型节点 `TY_DEX`），读槽就应当定型 `TI_DEX_S`；其余形态**一律保持 `TI_INT`**（零足迹：
@@ -1120,7 +1120,7 @@ fn dex_slot_norm(val: int) -> int {
 }
 
 // 聚合读的**声明面** dex-ness（apx 批 T3 · 比较/相等点专用）：
-// #78 未修 ⇒ 聚合读的结果槽 IR 型恒 TI_INT、**声明型被抹** ⇒ 下游「按值型触发」的
+// #2026-09-16-16 未修 ⇒ 聚合读的结果槽 IR 型恒 TI_INT、**声明型被抹** ⇒ 下游「按值型触发」的
 // 形式分流看不到 dex。本函数在**节点级**把声明面取回来（**零 alloc_type**；先例
 // agg_elem_count_of:3004），供比较点判断操作数的**规范槽形式**：
 //   EXPR_FIELD ⇒ 结构体字段的声明类型节点（数字元组下标 ast_type_val>0 不判——元组无声明面）
@@ -1335,10 +1335,10 @@ fn gen_expr(node: int) -> int {
             }
         }
         // apx 批 T3（L10 · 比较/运算点的**声明面**查表）：聚合读的结果槽 IR 型恒 TI_INT
-        // （#78：读点定型丢失声明型）⇒ 当操作数节点是聚合读**且声明面为 dex** 时，槽内
+        // （#2026-09-16-16：读点定型丢失声明型）⇒ 当操作数节点是聚合读**且声明面为 dex** 时，槽内
         // 规范形式 = **精确（scaled）**（由本批写点保证）⇒ 按 TI_DEX_S 参与分流——否则
         // 会落「TI_INT 操作数 I2F」支，把 scaled 整数当整数升 double（实测 b8 红 0）。
-        // **作用域**：只覆盖本分流点；**不改读点定型**（那是 #78 的爆炸半径，#91/#78 另批）。
+        // **作用域**：只覆盖本分流点；**不改读点定型**（那是 #2026-09-16-16 的爆炸半径，#2026-09-16-29/#2026-09-16-16 另批）。
         if lt == TI_INT && dex_decl_form_of_expr(left) != 0 { lt = TI_DEX_S; }
         if rt == TI_INT && dex_decl_form_of_expr(right) != 0 { rt = TI_DEX_S; }
         fti : int = TI_INT;
@@ -2448,7 +2448,7 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                 loop {
                     if fi >= sub_count { break; }
                     fv := new_ir_var("fld", TI_INT);
-                    // TODO #78 批 2：载荷读定型取**声明面形式**（dex 载荷 ⇒ TI_DEX_S）
+                    // TODO #2026-09-16-16 批 2：载荷读定型取**声明面形式**（dex 载荷 ⇒ TI_DEX_S）
                     irv_set_type(fv, agg_payload_read_form(arm_pat, fi));
                     if rep_v < 0 {
                         emit(IR_LOAD_FIELD, fv, match_val, 0, fi + 1, 0);  // +1 for tag offset
@@ -2653,7 +2653,7 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
         } else {
             fi = ast_data(node);   // struct field index (from checker)
         }
-        // TODO #78 批 2：读点定型取**声明面形式**（dex 声明 ⇒ TI_DEX_S）——零 alloc 节点判，
+        // TODO #2026-09-16-16 批 2：读点定型取**声明面形式**（dex 声明 ⇒ TI_DEX_S）——零 alloc 节点判，
         // 非 dex 形态恒 TI_INT ⇒ 零足迹。**必须在 fi 解出之后**（字段位序）。
         irv_set_type(v, agg_field_read_form(node, fi));
         emit(IR_LOAD_FIELD, v, obj_var, 0, fi, 0);
@@ -2715,7 +2715,7 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             return v;
         }
         v := new_ir_var("elem", TI_INT);
-        // TODO #78 批 2：元素读定型取**声明面形式**（元素 ti 为 dex ⇒ TI_DEX_S；纯表读）
+        // TODO #2026-09-16-16 批 2：元素读定型取**声明面形式**（元素 ti 为 dex ⇒ TI_DEX_S；纯表读）
         irv_set_type(v, agg_elem_read_form(arr_var));
         if idx_kind == EXPR_INT {
             emit_string_lit_bounds(arr_var, ast_int_val(idx_node));
@@ -2762,7 +2762,7 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
         // F5 契约（见 parser.cr struct 分支）：a=name idx、b=首 wrapper（连续）、c=字段数；
         // wrapper.a=字段值节点（gen_expr 对 EXPR_NONE 前向）。逐 wrapper 解引用，不得按偏移
         // 直取相邻节点当字段值——复合字段值子树占多槽会错位（静默错误值）。
-        // TODO #29 ①（名字绑定）：wrapper.b=字段名 idx（parser 写入；-1 = 无名字信息 → 位序
+        // TODO #2026-09-11-11 ①（名字绑定）：wrapper.b=字段名 idx（parser 写入；-1 = 无名字信息 → 位序
         // 回落）。**存字段位按名字解出**（与 Python bootstrap 的 gen_struct_lit 同语义）——
         // 修复前按 wrapper 序直取 fi = 声明位序绑定 ⇒ P{b:11, a:22} 静默得 a=11。发出顺序
         // 仍是**源序**（求值顺序 = 源码书写顺序，与 bootstrap 一致）。

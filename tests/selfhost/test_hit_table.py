@@ -52,7 +52,7 @@ MEM_RC = 5  # 6+3-4（链式加减 + 内存读写，与 tests/hit/smoke_mem.cr �
 
 MOD_SRC = "fn main() -> int {\n    a := 7;\n    b := 3;\n    return a % b;\n}\n"
 
-# `--dump-events` 事件行白名单形态（B3/#86 修复）：`  ev <name> dst=<v> s1=<v> s2=<v>`；
+# `--dump-events` 事件行白名单形态（B3/#2026-09-16-24 修复）：`  ev <name> dst=<v> s1=<v> s2=<v>`；
 # v ∈ `\d+` 或 `pool\d+`（池引用）。emit 侧格式见 corearch.cr `dump_ev` 分支。
 _EV_DUMP_RE = re.compile(r"ev (\S+) dst=(\S+) s1=(\S+) s2=(\S+)$")
 
@@ -285,7 +285,7 @@ def test_dump_sentinel_clean(tmp: Path) -> bool:
     旧实现存 −1：自持 x86 截断除法写回单字节 0xFF → 读回 255；Python 解释地板
     除四字节全 0xFF → 读回 0xFFFFFFFF——实现分裂，未用字段应恒存 0。
 
-    **B3/#86 修复（2026-09-16 判据网加固批）**：原判据 = **4 字面量黑名单**
+    **B3/#2026-09-16-24 修复（2026-09-16 判据网加固批）**：原判据 = **4 字面量黑名单**
     `("dst=255","s2=255","dst=-1","s2=-1")`——未用字段写 1 / 0xFE(−2) /
     0xFFFFFFFF / 00 都能骗过（黑名单只枚举了两种形态）。现改为**结构化解析
     + 白名单形态断言**：每条 `ev` 行必须整体匹配
@@ -330,7 +330,7 @@ def test_dump_sentinel_clean(tmp: Path) -> bool:
 def dump_sentinel_problems(out: str):
     """`--dump-events` 文本 → (问题列表, 事件行数, store 行数, load 行数)。
 
-    **B3/#86 修复（2026-09-16 判据网加固批）**：原判据 = **4 字面量黑名单**
+    **B3/#2026-09-16-24 修复（2026-09-16 判据网加固批）**：原判据 = **4 字面量黑名单**
     `("dst=255","s2=255","dst=-1","s2=-1")`——未用字段写 1 / 0xFE(−2) /
     0xFFFFFFFF / `00` 都骗得过（黑名单只枚举了两种形态）。现改为**结构化解析
     + 白名单形态断言**：每条 `ev` 行必须整体匹配 `ev <name> dst=<v> s1=<v>
@@ -1272,7 +1272,7 @@ def v2_walk(text: str) -> list:
 def ev14_template_problems(events) -> list:
     """事件 1-4 的 **M1 全字段模板 + legacy 字节全等**判据 → 问题字符串列表。
 
-    **B2/#84 修复（2026-09-16 判据网加固批）**：原判据 `chk(stream[:2] == want)`
+    **B2/#2026-09-16-22 修复（2026-09-16 判据网加固批）**：原判据 `chk(stream[:2] == want)`
     只比**前 2 字节**——modrm 角色 / rm_mode / opcode 尾追加字节全无判据
     （改 TOML 的 `modrm_reg_role "dst"→"src1"`、`rm_mode 0→1`、或
     `opcode = [0x29, 0x90]` 都骗得过）。现改为：
@@ -1349,7 +1349,7 @@ def test_v2_walker_real_table() -> bool:
             print(f"[FAIL] walker: {msg}")
             ok = False
 
-    # 事件 1-4：M1 全字段模板 + legacy 字节全等（B2/#84 改强；纯函数见
+    # 事件 1-4：M1 全字段模板 + legacy 字节全等（B2/#2026-09-16-22 改强；纯函数见
     # ev14_template_problems —— 突变自证可直接驱动它，故抽出）
     for p in ev14_template_problems(events):
         chk(False, p)

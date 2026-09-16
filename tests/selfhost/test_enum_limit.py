@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""枚举/结构体容量面回归（TODO #35 → **容量批 T3 解除**）。
+"""枚举/结构体容量面回归（TODO #2026-09-12-2 → **容量批 T3 解除**）。
 
-**旧态（#35 修复，2026-09-12）**：`EnumVariant` 槽区（`MAX_ENUM_VARIANTS=16` 槽 × `OFF_EV_SIZE=272`）
+**旧态（#2026-09-12-2 修复，2026-09-12）**：`EnumVariant` 槽区（`MAX_ENUM_VARIANTS=16` 槽 × `OFF_EV_SIZE=272`）
 与 `StructInfo` 字段槽区（`MAX_STRUCT_FIELDS=16` 槽）是**定长内嵌槽区** ⇒ >16 越界写（踩 count/邻记录）
 ⇒ parser 写点护栏 + `error[P022]`/`error[P023]` 定位硬错（rc=1 + 无产物）。
 
@@ -83,7 +83,7 @@ def case_reject(name, source, needles, cmd="build", forbid=()):
     与「越界写已发生」并不因此消失。
     forbid = 流水线阶段串（如 `save .ccr`）——钉「拒绝发生在**前端**（parse 阶段诊断闸，
     `main.cr` 的 `[3/5] parse...` 之后），**不进入** lower/写 .ccr/ELF」：护栏在读回侧
-    （读回闸兜底）≠ 护栏在写入侧（TODO #35 的原话）。
+    （读回闸兜底）≠ 护栏在写入侧（TODO #2026-09-12-2 的原话）。
     """
     src = _write(source)
     out = src[:-3]

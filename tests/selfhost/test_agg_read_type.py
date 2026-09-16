@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""✅ **已修（#78 批 2 T3）—— 本套件已挂 CI**（TODO #78；计划 §11/§12/§13）。
+"""✅ **已修（#2026-09-16-16 批 2 T3）—— 本套件已挂 CI**（TODO #2026-09-16-16；计划 §11/§12/§13）。
 
 被测缺陷 = **聚合读丢型**：四个读点把结果槽**硬定 `TI_INT`**，而聚合槽的规范存储形式是
 **精确（scaled）**（apx 批不变量：「聚合面不存在 apx 形式」）⇒ 「按 IR 值型触发」的下游
@@ -33,7 +33,7 @@ LET 继承 / 泛型键名串）。
 （`tests/suite/ffi_test.cr:8-11` 头注明载）⇒ 按先例 `test_dex_arith.py::test_extern_dex_arg_cir`
 用 **IR 断言**判定（本文件 `leg_b` 的 B4 即该断言的最小形态）。
 
-**挂点（照 #93 批三件套，T3 已完成）**：`src/ci/run.sh` 的 `selfhost-tests` job 已挂本套件 +
+**挂点（照 #2026-09-16-31 批三件套，T3 已完成）**：`src/ci/run.sh` 的 `selfhost-tests` job 已挂本套件 +
 `ci_hook_allowlist.txt` 条目**已删** + 本头注已转正（判据 = `test_ci_hook_coverage.py` PASS）。
 
 **修后实测（T3）**：R1/R2/R3/R5 **elf=7 全绿**（改前全 1）· 腿 B 四条见证**全绿** · 腿 C 钉子在位。
@@ -252,7 +252,7 @@ def main():
     report = "--report" in sys.argv
     fails = []
     print("=" * 78)
-    print("聚合读丢型（TODO #78）—— RED 语料（批 2 T2；修复后应转绿）")
+    print("聚合读丢型（TODO #2026-09-16-16）—— RED 语料（批 2 T2；修复后应转绿）")
     print("=" * 78)
     for name, expect, src, kind in CASES:
         chk, codes, bld, elf = compile_and_run(src, name)

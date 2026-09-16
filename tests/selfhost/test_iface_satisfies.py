@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """R2 P3b Task 0（P2b 交接面回补）：`iface_satisfies` 契约的行为覆盖集。
 
-契约（P3 计划「与 P2b 的交接面」① + 附录 B.1 #1）：`iface_satisfies(t_ti, iface_ni) -> int`
+契约（P3 计划「与 P2b 的交接面」① + 附录 B.1 #2026-07-31-1）：`iface_satisfies(t_ti, iface_ni) -> int`
 三态（1 = 判定满足 / 0 = 判定违反 / -1 = 不判）——**-1 不得被读成 0/1**。本批交付：
   · 轴分派：A 横切形状名（表由 Task 2 注册；本批空表 ⇒ 恒 -1）→ C 用户接口名 → B 本质轴
     （原生/已声明类型名，= P3a `gen_constr_satisfied` 的窄化口径，逐字保持）；

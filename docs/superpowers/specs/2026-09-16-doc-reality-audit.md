@@ -39,7 +39,7 @@
 
 - **断言**：树形清单 **20 条 `.cr`**（`CLAUDE.md` §Self-Hosted Compiler）。
 - **实核**：`ls src/compiler/*.cr | wc -l` → **38**；缺 `ty_shadow/type_engine/type_terms/ccr_types/cir_cache/iface_axis/iface_registry/monomorph/ptr_analysis/provenance_verify/region_check/ext_mgr/ext_safety/type_selftest/purity_selftest/regalloc-consistency/dump/interp/opt/pass` 等（原 20 条之外共 **18 个**）。
-- **修订去向**：**全 38 条**重写（每条带**单元归属**，按全路径核 `corec_files(45)/corelsp_files(31)/backend_support_files(9)/common_files(9)`）+ 死件显式标注（`elf.cr` 死文件 TODO #7；`linker.cr` **0 字节空文件**；`regalloc-consistency.cr` 文档载体不入清单）。→ `820648bc`。
+- **修订去向**：**全 38 条**重写（每条带**单元归属**，按全路径核 `corec_files(45)/corelsp_files(31)/backend_support_files(9)/common_files(9)`）+ 死件显式标注（`elf.cr` 死文件 TODO #2026-09-10-3；`linker.cr` **0 字节空文件**；`regalloc-consistency.cr` 文档载体不入清单）。→ `820648bc`。
 
 ### D4 `CLAUDE.md` 的 `src/stdlib/` 清单缺 11 文件
 

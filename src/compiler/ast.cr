@@ -177,7 +177,7 @@ EXPR_RETURN : int = 12;  // a=value expr (-1 if none)
 EXPR_FIELD : int = 13;   // a=object, int_val=field name idx
 EXPR_INDEX : int = 14;   // a=object, b=index
 EXPR_ASSIGN : int = 15;  // a=target, b=value
-EXPR_STRUCT : int = 16;  // a=type name idx, b=first wrapper（g_ast 中连续；wrapper kind=EXPR_NONE 且 a=字段值节点、b=字段名 idx（TODO #29 ①；-1 = 无名字信息，按位序回落））, c=field count (struct literal)
+EXPR_STRUCT : int = 16;  // a=type name idx, b=first wrapper（g_ast 中连续；wrapper kind=EXPR_NONE 且 a=字段值节点、b=字段名 idx（TODO #2026-09-11-11 ①；-1 = 无名字信息，按位序回落））, c=field count (struct literal)
 EXPR_FN : int = 17;      // a=name idx, b=first param, c=param count, d=body, data=return_type
 EXPR_PARAM : int = 18;   // a=name idx, int_val=type
 // 表示层概念（2026-09-10 语言面收窄裁决 §1）：`[T; N]` 的类型构造器身份已退役——

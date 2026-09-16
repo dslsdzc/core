@@ -14,7 +14,7 @@
 // 调 build_linear_schedule）。内核抽取 Task 4 原注记「零 concat 引用 → 实际入口
 // = corearch.cr → 删除挂账」仅核对 concat 清单而误判 project-mode 入口；两入口
 // 未来如需合并/删除，须同步双入口接线与 _import.cr 导入集（现 load 后行为同构；
-// 表模式/调试通道的 flag 注册分歧 = TODO #6，留波 2 收敛——本注记仅措辞同步）。
+// 表模式/调试通道的 flag 注册分歧 = TODO #2026-09-10-2，留波 2 收敛——本注记仅措辞同步）。
 
 fn init_backend_arrays() {
     g_x86_var_count = 0; g_x86_stack_size = 0; g_x86_func_idx = 0; g_x86_is_enum_count = 0;

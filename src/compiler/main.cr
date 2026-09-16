@@ -137,8 +137,8 @@ fn run_frontend() -> int {
     check_all();
     // Type-check diagnostics：**fail-closed（FC 批 T2；维护者裁）= 默认阻断 + 豁免登记表**。
     // 判据（成文化）= 「判定继续 ⇒ 产出静默错产物」——五组先例：R002 常量档越界（F2）·
-    // TS01-04+TK02 聚合字面量三校验（TODO #29）· TM03 match 非穷尽（#31，修复前缺臂 ⇒ 未匹配值
-    // 静默得 0）· ICE04 判定不可判（P-A 三态纪律）· TA02 声明位点不兼容（#32，修复前符号取注解行、
+    // TS01-04+TK02 聚合字面量三校验（TODO #2026-09-11-11）· TM03 match 非穷尽（#2026-09-11-13，修复前缺臂 ⇒ 未匹配值
+    // 静默得 0）· ICE04 判定不可判（P-A 三态纪律）· TA02 声明位点不兼容（#2026-09-11-14，修复前符号取注解行、
     // 值按注解行发射 ⇒ 静默错值）。**旧正向名单（11 码）整体退役**：新语义下它们本就在闸内。
     // 豁免表 = `diag.cr::diag_gate_exempt`（码级 + 位点证据/理由/退出条件三字段；只减不增）。
     // `scope`（裁-FC-1 = (C)）：本处**只以 GATE_SCOPE_BUILD 调用**；`check` 分支的 rc 规则
@@ -247,7 +247,7 @@ fn corec_main() -> int {
     cli_flag_bool("dump-ifaces", "", "Hidden debug: dump IFACE segment content (entry table + shapes + user ifaces + impls + method table + cross-segment term probe) after populate (R2 P4 Task 3 test channel)");
     cli_flag_bool("dump-tk-terms", "", "Hidden debug: dump per-DFNode tk + type-term slot (cir; R2 P4 Task 4 test channel — cold/warm snapshot symmetry)");
     // **R2 P5 Task 5 删除**：`--type-shadow` / `--type-shadow-dump`（R2 P1 影子对拍的两个隐藏
-    // 通道）随影子层整体下线（D27/TODO #24 同族清偿）；判定路径不再有开关（无条件经引擎）。
+    // 通道）随影子层整体下线（D27/TODO #2026-09-11-8 同族清偿）；判定路径不再有开关（无条件经引擎）。
     cli_flag_bool("verify-named-dedup", "", "R2 P2a: assert side-table == res_type_node for all named types (debug)");
     cli_flag_bool("verify-evp-nodes", "", "R2 P3 T4: assert enum variant payload type nodes recorded (debug)");
     cli_flag_bool("diag-gate-report", "", "FC T2: report fail-closed gate verdicts per compile (debug; default off — 不改 rc/产物)");
@@ -549,7 +549,7 @@ fn corec_main() -> int {
             df_end_func(ir_func_idx);
         } else {
             // Cache miss: do full frontend IR gen
-            // TODO #60（裁-W1 = (b) 先行，**见证式**一般化）：缓存命中会**跳过本函数的生成期
+            // TODO #2026-09-15-5（裁-W1 = (b) 先行，**见证式**一般化）：缓存命中会**跳过本函数的生成期
             // 副作用**——凡该副作用落在「快照**不携带**的共享空间」上，命中后该空间与冷路径
             // **分叉**，读它的判定即静默失效（首例 = TU03：ir_gen 期 alloc_type 出的 TYP_PTR
             // extra=1 行不随快照 ⇒ 暖态 get_type_extra 判定落空；见 /tmp/fct4/task1-report.md E1）。

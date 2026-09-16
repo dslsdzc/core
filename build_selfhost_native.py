@@ -171,7 +171,7 @@ def guard_manifest(files, label):
     print(f"[GUARD] {label}: manifest OK ({len(files)} files)")
 
 
-# 守卫②：**bootstrap-concat 日志**诊断计数非零 = 失败门（TODO #6 建议③的
+# 守卫②：**bootstrap-concat 日志**诊断计数非零 = 失败门（TODO #2026-09-10-2 建议③的
 # concat 面落地）。背景：project-mode 单元曾以 rc=0 + 产物正常 + 全套互测
 # byte-identical 通过而**静默吞掉** 34 行 error[（N06 未定义函数 / N01 未定义名）。
 # 计数面 = `error[`（self-hosted corec 诊断前缀，src/compiler/diag.cr:134）
@@ -179,7 +179,7 @@ def guard_manifest(files, label):
 # 前缀，其 checker 的未定义名消息 = 同一类静默未定义信号）。
 # **作用域限制**：本门只见本文件 concat 源经 Python bootstrap 管线的日志
 # （compile_and_assemble 的 _LogTee 缓冲）——self-hosted corec 的 project-mode
-# 构建（`corec build <dir>`，**TODO #6 ③ 的真正事发层**）不走此路径，故本门
+# 构建（`corec build <dir>`，**TODO #2026-09-10-2 ③ 的真正事发层**）不走此路径，故本门
 # 对它零覆盖；该面的同类门 = tests/selfhost/test_backend_bootstrap.py 的
 # run_checked（rc=0 时扫 stdout+stderr 的 `error[`）——test_backend_bootstrap
 # 的 stage 链（含各核心单元 project-mode 构建）正是该门的被执行面。两门互补，

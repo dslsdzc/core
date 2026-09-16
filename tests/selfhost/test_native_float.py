@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Native ELF dex 运算回归测试（原 wave-2 float 时代：F7 I2F REX.W + F8 NaN 比较）。
 
-dex 迁移（#48）后 float 类型与 IEEE-754 NaN/Inf 语义退役（0 除按整数陷阱
+dex 迁移（#2026-09-13-9）后 float 类型与 IEEE-754 NaN/Inf 语义退役（0 除按整数陷阱
 SIGFPE）——NaN 用例已删除；保留经 dex 缩放算术仍有效的 i2f/比较/四则用例。
 """
 import os

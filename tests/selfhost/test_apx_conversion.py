@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """apx（dex）形式转换缺口族回归套件（apx 批 T5；自举编译器 build/corec）。
 
-覆盖 = TODO #80（方法调用实参不转换）· #81（第 9 个 binary64 栈参）· ⑦a（全局运行期初值）
+覆盖 = TODO #2026-09-16-17（方法调用实参不转换）· #2026-09-16-18（第 9 个 binary64 栈参）· ⑦a（全局运行期初值）
       + apx 批 T2 新增两活点：**模块限定调用** `m.f(x)` 与**指针写** `*p = d`
       + 聚合四类写点（字段 / 元素 / 元组 / 枚举载荷）+ 比较点声明面查表（L10）
 
@@ -21,7 +21,7 @@
 承担**，不得以「canary 还绿着」代替（详见 `2026-09-16-criteria-strength-audit.md` §0ter）。
 
 **期望值一律经 `@raw_int` 锚定**（唯一显式形式通道，`ir_gen.cr:1699-1708`）——直接比较
-decimal 会踩 `TODO #92`：apx 字面量走 lexer 位模式（~2ulp 截断），与聚合槽里的精确 scaled
+decimal 会踩 `TODO #2026-09-16-30`：apx 字面量走 lexer 位模式（~2ulp 截断），与聚合槽里的精确 scaled
 值在 binary64 下**可不相等**。
 """
 
@@ -65,7 +65,7 @@ def build_and_run(source, tag):
         chk = subprocess.run([str(COREC), "check", path], cwd=BASE,
                              capture_output=True, text=True, timeout=180)
         if chk.returncode != 0:
-            # 已知**软诊断**容忍（体例照 TODO #76：把现状固化成判据）：
+            # 已知**软诊断**容忍（体例照 TODO #2026-09-16-14：把现状固化成判据）：
             #   B04「Cannot use 'x' while it is borrowed」= borrow checker 无 NLL 的既有面，
             #   是**软**诊断（`build` 仍 rc=0、产物照出）⇒ 只容忍「**恰 {B04}**」；
             #   出现任何其它诊断码 ⇒ 仍按失败处理（防它掩盖真回归）。
@@ -86,14 +86,14 @@ def build_and_run(source, tag):
 
 
 # ── 探针表：name, source, 期望 ELF rc, 备注 ──
-# 期望值 7（或 1）= 该形态「正确」；期望 15 = **#91 零足迹哨兵**（见该条注释）。
+# 期望值 7（或 1）= 该形态「正确」；期望 15 = **#2026-09-16-29 零足迹哨兵**（见该条注释）。
 CASES = [
-    # ── #80：非直调调用形态 ──
+    # ── #2026-09-16-17：非直调调用形态 ──
     ("method_arg_apx", """
 struct S1 { v: int }
 impl S1 { fn m(self: S1, x: dex) -> int { return @raw_int(x) / 1000000; } }
 fn main() -> int { d : dex, apx = 7.0; s : ., mut = S1 { v = 0 }; return s.m(d); }
-""", 7, "方法调用实参（#80 原形）"),
+""", 7, "方法调用实参（#2026-09-16-17 原形）"),
     ("method_arg_self_offset", """
 struct S2 { v: int }
 impl S2 { fn m(self: S2, k: int, x: dex) -> int { return @raw_int(x) / 1000000; } }
@@ -110,7 +110,7 @@ fn main() -> int {
     return 7;
 }
 """, 7, "模块限定调用 m.f(x)（apx 批 T2 新增活点；rc=4 即该形态未转换）"),
-    # ── #81：第 9 个 binary64 栈参（= #80 同一修复）──
+    # ── #2026-09-16-18：第 9 个 binary64 栈参（= #2026-09-16-17 同一修复）──
     ("stack_arg_9th_method", """
 struct S9 { v: int }
 impl S9 {
@@ -131,7 +131,7 @@ fn main() -> int {
     lx : dex, apx = 7.0;
     return s.m(a1, a2, a3, a4, a5, a6, a7, a8, lx);
 }
-""", 7, "#81 第 9 个 binary64 栈参（方法形）"),
+""", 7, "#2026-09-16-18 第 9 个 binary64 栈参（方法形）"),
     ("stack_arg_9th_direct", """
 fn f9(a: dex, b: dex, c: dex, e: dex, f: dex, g: dex, h: dex, i: dex, x: dex) -> int {
     return @raw_int(x) / 1000000;
@@ -148,7 +148,7 @@ fn main() -> int {
     lx : dex, apx = 7.0;
     return f9(a1, a2, a3, a4, a5, a6, a7, a8, lx);
 }
-""", 7, "直调同形对照（#81 机理裁定用：同形只差调用形态）"),
+""", 7, "直调同形对照（#2026-09-16-18 机理裁定用：同形只差调用形态）"),
     # ── 聚合四类写点 ──
     ("struct_literal_field", """
 struct S3 { f: dex }
@@ -182,7 +182,7 @@ fn main() -> int {
     *p = d;
     return @raw_int(x) / 1000000;
 }
-""", 7, "指针写 `*p = d`（apx 批 T2 新增活点；check 另发 B04 软诊断 = TODO #76 既有面）"),
+""", 7, "指针写 `*p = d`（apx 批 T2 新增活点；check 另发 B04 软诊断 = TODO #2026-09-16-14 既有面）"),
     # ── ⑦a：全局运行期初值 ──
     ("global_runtime_init_apx", """
 fn sc() -> dex { return 7.0; }
@@ -230,13 +230,13 @@ enum E1 { V(dex) }
 fn main() -> int { d : dex = 7.0; e := V(d); return match e { V(x) => { return @raw_int(x) / 1000000; } }; }
 """, 7, "精确形对照（枚举载荷）"),
     # ══════════════════════════════════════════════════════════════════════════
-    # ⚠⚠ **零足迹哨兵（TODO #91）—— 下面这一行的期望值 15 不是期望语义！**
+    # ⚠⚠ **零足迹哨兵（TODO #2026-09-16-29）—— 下面这一行的期望值 15 不是期望语义！**
     #   · 该值 15 = 「`dex?`（可选 dex）整族未被形式转换覆盖」的**现状绊线**，
     #     根因 = `dex_store_adjust` 触发门是 `declared_ti == TI_DEX`，而 `dex?` 的
     #     `declared_ti` 是 `TYP_OPTIONAL` 类型索引（`ir_gen.cr:2389-2393`/`:2423-2424`）
     #     ⇒ LET/赋值写点整段跳过转换 ⇒ bits 原样入载荷槽。
     #   · **作用**：若本批的漏斗实现**意外**改动了 `dex?` 行为，本行当场变红（防「顺手改坏」）。
-    #   · **谁修 `dex?`（TODO #91）谁负责改它**：修复落地时它**必然变值**，须按 canary 那套
+    #   · **谁修 `dex?`（TODO #2026-09-16-29）谁负责改它**：修复落地时它**必然变值**，须按 canary 那套
     #     「**显式归因 + 同批重锁 + 旧值留痕**」纪律处理。
     #   · ⛔ **不得把 15 当成「正确基线」抄走**（本仓已两次栽在「抄错形/抄错值」上）。
     # ══════════════════════════════════════════════════════════════════════════

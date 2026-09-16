@@ -545,9 +545,9 @@ def main():
         case_dual("cap_global_bare_init", CAP_GLOBAL_INIT_BARE, 10),
         # match 结果（裁决 (i) 表示位案）：条件写两表示共存
         case_dual("cap_matchres_cond_bare_arm", CAP_MATCHRES_COND, 11),
-        # 枚举载荷（B 类 #10 实证可达 ⇒ 升 A）
+        # 枚举载荷（B 类 #2026-09-10-6 实证可达 ⇒ 升 A）
         case_dual("cap_enum_payload_bare", CAP_ENUM_PAYLOAD, 12),
-        # 元组元素（B 类 #11 实证可达 ⇒ 升 A；读语法须带空格 `t . 0`）
+        # 元组元素（B 类 #2026-09-10-7 实证可达 ⇒ 升 A；读语法须带空格 `t . 0`）
         case_dual("cap_tuple_elem_bare", CAP_TUPLE_ELEM, 13),
         # 负控：非可选聚合槽不受本律影响
         case_dual("cap_nonopt_field_unaffected", CAP_NONOPT_FIELD, 16),

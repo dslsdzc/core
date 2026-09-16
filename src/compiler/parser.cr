@@ -480,7 +480,7 @@ fn parse_primary() -> int {
             // **不连续**（子树自占多槽），故必须分两趟：先解析全部字段值，再统建连续 wrapper。
             // 旧写法「逐值后随建 wrapper」交错分配：复合值子树夹在相邻 wrapper 之间 ⇒ 第 2 个
             // 起字段槽位整体错位，读到子节点（实测 P{a:11, b:g()} 的 b 静默得 0，rc=0）。
-            // TODO #29 ①：wrapper.b = 字段名 idx（**名字绑定**，-1 = 无名字信息）——旧代码取
+            // TODO #2026-09-11-11 ①：wrapper.b = 字段名 idx（**名字绑定**，-1 = 无名字信息）——旧代码取
             // `fni` 后从未写入 ⇒ 值按声明位序绑定（P{b:11,a:22} 静默得 a=11）。名字随 wrapper
             // 同行（与值并列的平行表，两趟结构不变，仍无交错分配）。
             cap : ., mut = 8;
@@ -488,7 +488,7 @@ fn parse_primary() -> int {
             names : string, mut = alloc(cap * 8);
             fc : ., mut = 0;
             loop {
-                // EOF 护栏（TODO #16 根因面）：本循环只认 `}`，而 advance_tok 在 EOF 是空操作
+                // EOF 护栏（TODO #2026-09-10-12 根因面）：本循环只认 `}`，而 advance_tok 在 EOF 是空操作
                 // ⇒ 解析失步至 EOF 后自旋，每轮分配 AST 节点直至 OOM（alloc 失败返回 NULL →
                 // grow_ast 向 NULL 拷贝 SIGSEGV）。同族 6 处循环统一补 EOF 退出。
                 if check(T_RBRACE) || check(T_EOF) { break; }
@@ -914,7 +914,7 @@ fn parse_stmt() -> int {
     // 修复前此处落回 parse_primary 的「Unexpected token in expression」通用兜底：只消费
     // `fn` 一个 token，解析失步后 `IDENT {` 进入 struct 字面量循环并把外层 `}` 当字段吃掉，
     // 至 EOF 后因该循环只认 `}` 且 advance_tok 在 EOF 是空操作而自旋——每轮分配 AST 节点，
-    // 直到 bump allocator 耗尽返回 NULL、grow_ast 向 NULL 拷贝（rc=139 SIGSEGV，TODO #16）。
+    // 直到 bump allocator 耗尽返回 NULL、grow_ast 向 NULL 拷贝（rc=139 SIGSEGV，TODO #2026-09-10-12）。
     // 现显式报 P021 并整段跳过该声明：错误定位到声明处，且后续语句恢复正常解析。
     if tok_k(t) == T_FN || tok_k(t) == T_FLOW
        || (tok_k(t) == T_PUB && (tok_k(t + 1) == T_FN || tok_k(t + 1) == T_FLOW)) {
@@ -1449,7 +1449,7 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
     }
 
     fn_node := alloc_node(EXPR_FN, fn_ni, pf, pc, rtv + hotpatch_ver * 256, rt, body, fn_line, fn_col);
-    // 形参上限硬错（防御面，TODO #8）：FuncInfo.param_types 是定长内嵌槽区
+    // 形参上限硬错（防御面，TODO #2026-09-10-4）：FuncInfo.param_types 是定长内嵌槽区
     // （MAX_FN_PARAMS 槽），超限签名无法表示 ⇒ 拒绝编译（rc=1）而非截断/越界写。
     // 形参表容纳不下时**必须**在这条路径上停住：静默越界写曾踩 ast_node 致
     // name_idx/param_count 归零 + TF01 误归 + rc=0 产物崩。

@@ -2,7 +2,7 @@
 """Interpreter (corec run) dex/enum/dyn/pointer regression tests.
 
 原为 wave-2 float 时代测试（F9 interp TI_FLOAT 分派 + IEEE binary64 软件实现、
-F7 I2F REX.W、F8 NaN 比较）。dex 迁移（#48）后 float 类型与 IEEE-754 NaN/Inf
+F7 I2F REX.W、F8 NaN 比较）。dex 迁移（#2026-09-13-9）后 float 类型与 IEEE-754 NaN/Inf
 语义退役（0/0 按整数除法陷阱 SIGFPE，不再产生 NaN/Inf）——相关用例已删除，
 保留经 dex 缩放算术仍有效的运算用例与 F12 (STORE_PTR)/F13 (枚举 payload)/
 BC11 (dyn 双槽/ADDR_INDEX) 部分。
