@@ -189,6 +189,20 @@
 | **裁-S11** | **新语料入仓位置** | 两腿计数 / CI 挂点 | **新目录 `tests/spec/`**（`#` 语料）+ **新套件 `tests/selfhost/test_spec_grammar.py`**；**不进** `tests/probes/`（否则 `PROBE_TOTAL 29→30`）**也不进** `tests/suite/`（否则 `CORPUS_TOTAL 74→75`）——理由：两腿是**既有行为回归网**，其**计数不变**本身就是「旧面零扰动」的最强证据 | 按推荐（若坚持进 `tests/suite/` ⇒ 须同批改 `parity_run.sh:31` 计数 + 分层注释 + `REBUILD.md`，并把 74→75 记入台账） |
 | **裁-S12** | **零足迹强度**：只要求「无 `#` 的程序不变」，还是**更强**的「同程序 ± 注解，产物逐字节同」？ | 判据强度 / 实施约束 | **强式**（推荐）：`corec build` 同一程序 ① 无注解 ② 加 `#check` ③ 加 `#ensure` ⇒ **ELF + `.ccr` 逐字节同**。理由：① 构造性可判（无需新工具，sha256 即可）；② 它把裁-V4「零运行时语义」**变成机器判据**而不是口号；③ 它**当场堵死**裁-S4 的「编图」近路（编图必然违反） | 退路 = 只做弱式（无 `#` 的不变），强式转下一刀 |
 
+### 3.2.1 取裁记录（**维护者 2026-09-17 已裁；本节为最终裁定，覆盖上表「未取裁时」列**）
+
+| 门 | **裁定** | 理由要点 / 落实点 |
+|---|---|---|
+| **裁-S4** | **出列（C1 不编图）** | 三条依据（编图 ⇒ 写 `g_ir_instrs` ⇒ `.ccr` NOD/REG 变 ⇒ ELF 变 · DFNode 逐条由 `emit()` 建**无旁路** · scratch 方案**生成期副作用不可回滚**）判**决定性**；**另加与前门的一致性论证**：裁-V4（零足迹）+ 裁-S12（强式）与编图**直接冲突**。将来编图 = **独立批 + 独立判据**，前置 = 先解决「生成期副作用不可回滚」。⇒ T4 **不含**编图；编图归 T7 的 **C1b** |
+| **裁-S7** | **同批做「最小一致」（bounded）** | 理由：「一方拒收合法语法」是**最坏那类**两编译器分歧（不是意见不同，是一边直接打断）。**边界钉死**：bootstrap 侧**只需「接受并跳过」（零语义）**——能词法化、不报错、**不影响产物**；**不要求**实现 VC/三态；完整 bootstrap VC 面**登记后续**。**判据**：① 一份最小带 `#` 语料在**两侧都 rc=0 且产物逐字节同**；② 既有语料两侧行为不变 |
+| **裁-S12** | **取强式** | 同程序 ± 注解 ⇒ ELF + `.ccr` **逐字节同**；它把「`#` 没碰任何下游」从**声明**变成**判据** |
+| 裁-S1 / S2 / S3 / S5 / S6 / S8 / S9 / S10 / S11 | **按推荐** | 逐条见上表「推荐」列。附带：S9 的 `result != None` 示例**不在 C1 子集内** ⇒ T6 标注/改写；S11 的「两腿计数不变」= 旧面零扰动的最强证据（维护者确认） |
+
+**三条提醒（维护者；已逐条落进任务卡正文）**：
+1. **T0 的 RED 复现是「预测」** ⇒ **不得当已有证据用**，须实测后替换（T0 卡）。
+2. §1.10 文档计数陈旧面 ⇒ **T6 顺带修，但改计数前先实测**（不得再写一个过期数）。
+3. **实施者不得声称「已处理纯度时序陷阱」**——裁-V5 是**绕开**不是解决（T3 卡内明令保留）。
+
 ---
 
 ## 4. 任务表（T0..T7；**每卡含：前置 / 改动面 / 判据 / 停条件**）
@@ -197,13 +211,13 @@
 
 ### **T0 — 前置（冻结基线 + 起点判据 + 六门落纸）**
 - **前置**：无（本卡即前置）。
-- **动作**：① `jj workspace add` 独立工作区（本批 = `core-veri-ws` @ `feature/spec-grammar`，已建）；② **冻结基线重建**（`bash tools/baseline/rebuild.sh /tmp/spec-baseline`，配方 = `REBUILD.md`；**须重跑自证**：三 sha = 白名单 + 确定性 ×2 + 冒烟 42）；③ **起点判据表**（腿①74 冷态 rc+日志落 `/tmp/spec-t0/parity_pre`；腿②29 + warm 7；`canary_check.sh` 全绿）；④ **六门落纸**（§3.1 表入本文件）；⑤ **本批新门取裁**（§3.2，维护者裁）；⑥ **锚点重取**（§1 全部 `file:line` 在开工 revision 上重核一遍——**行号漂移即更新本节**）；⑦ **RED 复现（本计划未跑，须在 T0 跑）**：`fn f() -> int #check(1<0) { return 1; }` 今天的行为（**预测**：`#` 被静默丢弃 ⇒ cur token = `check` IDENT ⇒ `parse_body:1445-1448` 走 `=` 分支把 `check(1<0)` 误当 body 表达式 + `advance_tok()` 吃掉 `{` ⇒ 后续顶层 token 报 P0xx 错）。**这是「今天没有规约语法」的红态证据**，须实测记录（rc + 日志原文）。
+- **动作**：① `jj workspace add` 独立工作区（本批 = `core-veri-ws` @ `feature/spec-grammar`，**已建**）；② **冻结基线重建**（`bash tools/baseline/rebuild.sh /tmp/spec-baseline`，配方 = `REBUILD.md`；**须重跑自证**：三 sha = 白名单 + 确定性 ×2 + 冒烟 42）；③ **起点判据表**（腿①74 冷态 rc+日志落 `/tmp/spec-t0/parity_pre`；腿②29 + warm 7；`canary_check.sh` 全绿）；④ **六门落纸**（§3.1）+ **十二门取裁落纸**（§3.2.1，**已完成**）；⑤ **锚点重取**（§1 全部 `file:line` 在开工 revision 上重核一遍——**行号漂移即更新本节**）；⑥ **RED 复现（**预测，须实测——不得当已有证据用**）**：`fn f() -> int #check(1<0) { return 1; }` 今天的行为（**预测**：`#` 被静默丢弃 ⇒ cur token = `check` IDENT ⇒ `parse_body:1445-1448` 走 `=` 分支把 `check(1<0)` 误当 body 表达式 + `advance_tok()` 吃掉 `{` ⇒ 后续顶层 token 报 P0xx 错）。**这是「今天没有规约语法」的红态证据**，须实测记录（rc + 日志原文），实测后**替换**本段预测文本。
 - **判据**：基线三 sha 命中 + 起点两腿落盘 + 六门/新门入纸 + RED 实测记录。
 - **停条件**：基线 sha 不符 ⇒ 停（`REBUILD.md` 换代纪律 1：**不得改白名单对齐**）。
 
 ### **T1 — 词法面（`#` token）+ 零足迹构造性判据**
 - **前置**：T0（尤其裁-S7）。
-- **改动面**：`src/compiler/ast.cr`（`T_HASH : int = 101`，注释写明「空洞外首个自由号；勿重编号」）；`src/compiler/lexer.cr`（单字符分支加 `#`；**不动**注释分支）；**bootstrap** 侧（若裁-S7=同批）：`bootstrap/corec/syntax/tokens.py` + `bootstrap/corec/frontend/lexer.py`（**不得**动 `:287` 的未知字符报错——那是最后一道响亮防线）。
+- **改动面**：`src/compiler/ast.cr`（`T_HASH : int = 101`，注释写明「空洞外首个自由号；勿重编号」）；`src/compiler/lexer.cr`（单字符分支加 `#`；**不动**注释分支）；**bootstrap 侧（裁-S7 = 同批「最小一致」，bounded）**：`bootstrap/corec/syntax/tokens.py` + `bootstrap/corec/frontend/lexer.py` + `bootstrap/corec/frontend/parser.py:240 parse_function_decl` —— **只做「接受并跳过」（零语义）**：能词法化、不报错、**不影响产物**；**不要求** VC/三态（完整 bootstrap VC 面**登记后续**）。**不得**动 `lexer.py:287` 的未知字符报错（那是最后一道响亮防线，`#` 之外仍需它）。
 - **判据**（**四条，缺一不可**）：
   1. **静态**：`T_HASH == 101` ∧ 既有 token 常量 0..100 值**一字不动**（脚本比对改动前后的常量表快照）；`T_HASH` 不与任何既有 token 号相撞。
   2. **构造性零扰动**：全仓 `.cr` 裸 `#` 扫描断言（T0 的脚本入仓为 `tests/spec/scan_bare_hash.py` 或并入 T5 套件）——**182 档 0 命中**；此断言使「加 token 改了既有语料」变成**不可能**而非「没观察到」。
@@ -227,18 +241,19 @@
 ### **T4 — VC 记录 + dump 通道**
 - **前置**：T3（裁-S3/S4/S10）。
 - **改动面**：VC 记录结构（函数 / 种类 / AST 节点索引 / 行 / 列 / 状态 / 规范化文本）；规范化 printer（新函数，**只服务 dump**，不参与判定）；`main.cr` 注册 `--dump-vcs` + 在**全部分支**（`check` / `ccr` / `cir` / `build` / `run`）的既有 dump 家族位置打印（照 `main.cr:240-253` 纪律：**只打印、不改 rc/产物**）；`dump.cr` 加 `vcs_text_dump()`（复用 `dump_buf_*`）。
-- **判据**：① **源序确定**（同一源两次编译 dump **逐字节同**）；② **冷/暖同**（`clean-cache` 前后 + 缓存命中路径——**构造性成立**，§1.8）；③ **零产物影响**（开/关 `--dump-vcs` ⇒ ELF/`.ccr` sha 同）；④ **三态齐全**（green/yellow 各 ≥1 例，red 走诊断）；⑤ **强式零足迹**（裁-S12）：同程序 无注解/`#check`/`#ensure` 三态 ELF+`.ccr` 逐字节同。
+- **判据**：① **源序确定**（同一源两次编译 dump **逐字节同**）；② **冷/暖同**（`clean-cache` 前后 + 缓存命中路径——**构造性成立**，§1.8）；③ **零产物影响**（开/关 `--dump-vcs` ⇒ ELF/`.ccr` sha 同）；④ **三态齐全**（green/yellow 各 ≥1 例，red 走诊断）；⑤ **强式零足迹（裁-S12 已裁：取强式）**：同程序 无注解/`#check`/`#ensure` 三态 ELF+`.ccr` **逐字节同**（sha256 全等；**这是本批的判据脊梁**——把「`#` 没碰任何下游」从声明变成判据）。
 - **停条件**：dump 开/关导致产物变 ⇒ 停（dump 必须零副作用）。
 
 ### **T5 — 判据三件套（语料 + 套件 + 挂点）**
 - **前置**：T4（裁-S11）。
 - **改动面**：`tests/spec/*.cr` 语料（正/负/边界，**目录独立于两腿**）+ `tests/selfhost/test_spec_grammar.py`（照 `tests/selfhost/test_params_limit.py` 的 harness 体例：`_compile` / `case_run` / `case_reject`）；**挂点**：`src/ci/run.sh` 的 `selfhost-tests` job 加一行（`python3 tests/selfhost/test_spec_grammar.py`）+ 实测时长入注释；`tests/harness/ci_hook_allowlist.txt` **不加条目**（挂上即不属未挂项）——但**须跑** `tests/harness/test_ci_hook_coverage.py` 自证覆盖率判据仍绿（**三件套 = `run.sh` 挂点 + 白名单 + 覆盖率判据**）。
 - **判据**：新套件全绿；覆盖率判据绿（非空转下限 `MIN_SCOPE=50/MIN_HOOKED=30` 仍满足：实测 71/50）；**两腿计数不变**（74/29 硬断言仍过 = 旧面零扰动的机械证据）。
+- **裁-S7 的判据（bounded，两条）**：① 一份最小带 `#` 语料在 **corec 与 bootstrap 两侧都 rc=0，且产物逐字节同**（`clean-cache` + 同源同参）；② **既有语料两侧行为不变**（bootstrap 侧 = `build_selfhost_native.py` 的 `error[`/未定义符号守卫仍 0；corec 侧 = 两腿）。**bootstrap 侧不做 VC/三态**——判据只认「接受并跳过」。
 - **停条件**：不得为「让新语料进来」而放宽两腿的 `CORPUS_TOTAL`/`PROBE_TOTAL`（放宽即销毁「计数不变」这条证据）。
 
 ### **T6 — 收官（回归 + 台账 + 文档）**
 - **前置**：T1-T5 全绿。
-- **动作**：五 CI job 全跑（`check`/`bootstrap-tests`/`selfhost-tests`/`suite`/`full-bootstrap`）；自举链 `corec2==corec3` + `N06=0` + 冒烟 42；`selftest-types` + 全套件枚举（59 → 60）；**文档**：`spec-design.md`（示例标 C1 子集 + §十七 里程碑打勾）、`docs/developer/syntax.md`（§二 词法/§四 标注位置加 `#check`/`#ensure`）、`docs/developer/errors.md`（V 家族）、`grammar/core.ebnf`（已在 T2）、**§1.10 的陈旧面逐条修**（`REBUILD.md` 72→74、`parity_run.sh:33` 分层注释、`run.sh:106` 73→74、`ci_hook_allowlist.txt` 头注刷新）；`TODO.md` 新条目（当日号 + 登记未修项）；**统一台账**（本批各任务判据汇总）。
+- **动作**：五 CI job 全跑（`check`/`bootstrap-tests`/`selfhost-tests`/`suite`/`full-bootstrap`）；自举链 `corec2==corec3` + `N06=0` + 冒烟 42；`selftest-types` + 全套件枚举（59 → 60）；**文档**：`spec-design.md`（示例标 C1 子集 + §十七 里程碑打勾）、`docs/developer/syntax.md`（§二 词法/§四 标注位置加 `#check`/`#ensure`）、`docs/developer/errors.md`（V 家族）、`grammar/core.ebnf`（已在 T2）、**§1.10 的陈旧面逐条修**（`REBUILD.md` 72→74、`parity_run.sh:33` 分层注释、`run.sh:106` 73→74、`ci_hook_allowlist.txt` 头注刷新）——**改计数前先实测**，不得再写一个过期数（维护者提醒 2）；`TODO.md` 新条目（当日号 + 登记未修项）；**统一台账**（本批各任务判据汇总）。
 - **判据**：全绿 + 文档 diff 逐条可核。
 - **停条件**：任一 job 红 ⇒ 停下定位（**不得**以「本批是文档批」为由跳过）。
 
