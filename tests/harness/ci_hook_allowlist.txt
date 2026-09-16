@@ -65,3 +65,4 @@ tests/bootstrap/test_modules.py	未挂（历史缺口）：bootstrap import alia
 #   tools/baseline/rebuild.sh	同上（冻结基线重建）
 #   tools/baseline/warm_leg.sh / warm_run.sh	未挂（手工暖态广度腿；CI 暖态最小面 = test_warm_cache_gate.py 已挂）
 #   tools/pseudocode_check.py	未挂（文档质量守卫；可选挂）
+tests/selfhost/test_agg_read_type.py	**RED 语料，勿挂**（TODO #78「聚合读丢型」批 2 T2）：7 例断言的是**修复后**行为（腿 A R1–R5 语义值 + 腿 C R7/N1 钉子）+ 腿 B 界面见证（`_dxt` 计数 0 / `_dxdiv` 计数 1 / extern 调用点前须有转换）——**改前 5 红 2 绿**。修复批（T3）**必须同时**：删本条目 + 挂 `src/ci/run.sh` selfhost-tests + 改头注为「已修」（判据 = `tests/harness/test_ci_hook_coverage.py` PASS）。
