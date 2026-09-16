@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""第 4 批（TODO #82/#83/#98/#99）：`.so` 扩展索引的**可复现性 / 承重面 / 内存安全**判据。
+"""第 4 批（TODO #82/#83/#99/#100）：`.so` 扩展索引的**可复现性 / 承重面 / 内存安全**判据。
 
 被验对象：编译器解析 `import` 时读 `$HOME/.core/lib/<模块>/index` 的行为
 （`src/compiler/module.cr` 的原读点 + 侧表 + `find_gsym`/`find_so_fn` 回退）。
@@ -149,7 +149,7 @@ def main() -> int:
                 fails.append(f"C4/J9 N={n} 产物与空 HOME 不同（{len(bn or b'')} vs {len(bref or b'')}）")
                 ok9 = False
         if ok9:
-            passes.append("C4/J9 N=2/200/2000 三档产物逐字节同 + rc 均正常（#98 越界面已消除）")
+            passes.append("C4/J9 N=2/200/2000 三档产物逐字节同 + rc 均正常（#99 越界面已消除）")
 
         # ── C5 = J5 HOME unset vs 空目录 ──
         o_u = os.path.join(tmp, "j5u.ccr")
