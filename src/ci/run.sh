@@ -104,6 +104,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_tuple_slots.py
     python3 tests/selfhost/test_agg_slots.py      # TODO #25 姊妹条目：struct/struct 模式/数组字面量槽位（同 F5 契约）
     python3 tests/selfhost/test_agg_checks.py     # TODO #29 聚合字面量「名/型/同质性」三校验（名字绑定 + TS01-04/TK02 硬错误）
+    python3 tests/selfhost/test_apx_conversion.py # apx 形式转换缺口族（2026-09-16 apx 批 T5）：**23 例** = TODO #80（方法调用实参）/ #81（第 9 个 binary64 栈参）/ ⑦a（全局运行期初值）+ T2 新增两活点（**模块限定调用 `m.f(x)`** / **指针写 `*p = d`**）+ 聚合四类写点 + 比较点声明面查表（L10）+ 非回归 + **`dex?` 零足迹哨兵**（⚠ 其期望值 15 **不是**期望语义，只是绊线——见套件内刺眼标注与 TODO #91）+ **两条自证腿**（声明形自证：显式形建 apx 槽/推断形不建 + 解释器拒收反证；C1 双形对拍通用腿）。**判据分工**：本套件是 apx 面载荷判据——ELF canary + `.ccr` 四条对 apx 面**零覆盖**（T3 突变双向实测），详见 `2026-09-16-criteria-strength-audit.md` §0ter；配套 suite 语料 `tests/suite/apx_conversion_test.cr`
     python3 tests/selfhost/test_nested_fn.py      # TODO #16 嵌套 fn 声明段错误 → 定位诊断回归
     python3 tests/selfhost/test_interp_parity.py  # TODO #11 解释器 callee 内联 ≡ 主循环 ≡ ELF
     python3 tests/selfhost/test_cache_identity.py # TODO #5 cir 缓存编译器身份（跨重建失效）
