@@ -27,7 +27,6 @@
 
 # ─── tests/selfhost（18 条；未挂）───
 tests/selfhost/test_apx_tag.py	未挂（历史缺口）：需 corec 端到端；挂点属构建面 ⇒ 与其它编译器型未挂档同批评估
-tests/selfhost/test_arg_inference_gap.py	**RED 语料，勿挂**（TODO #93「已解析直调的实参推断缺失」）：19 例断言的是**修复后**行为（腿A 139→精确值；腿B 零诊断→error[N06]）⇒ 修复落地前挂上去只会**恒红**。修复批次须同时：① 删本条目 ② 在 run.sh 挂本套件 ③ 改文件头注为「已修」
 tests/selfhost/test_dex_arith.py	未挂（历史缺口）：dex 定点语义；需 corec
 tests/selfhost/test_dex_type.py	未挂（历史缺口）：dex 类型核心；需 corec
 tests/selfhost/test_directory_build.py	未挂（历史缺口）：目录路径工程构建；需 corec+corearch

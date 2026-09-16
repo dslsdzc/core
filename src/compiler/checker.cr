@@ -2424,6 +2424,46 @@ fn validate_dyn_method(si: int, method_ni: int, line: int, col: int) {
 
 // --- Type inference ---
 
+// 推实参（TODO #93「已解析直调的实参推断缺失」修复）：EXPR_CALL 的**所有**「已解析」
+// 路径在 return 之前**必须**调用本函数——否则实参表达式**完全不被类型检查**，后果两重：
+//   ① 实参位的内层调用若是 `EXPR_FIELD` 被调（方法/模块限定），其 `ast_data`（被调名索引）
+//      只能由 `infer_expr` 的模块/方法分支回填 ⇒ 从没回填 ⇒ 保持 parser 初值 0 ⇒ ir_gen 读
+//      `istr_get(0)` = 文件首个 interned 串（有 `import` 时恰为 "import"）⇒ 后端查不到 ⇒ **SIGSEGV 139**；
+//   ② 实参里的未定义函数/变量、常量越界**静默通过**（零诊断）。
+// 调用点（4 处，完备性枚举见计划 §3ter）：`:2811`（never 返回型）· `:2817`（已注册 Core fn，
+// 主病灶）· `:2824`（runtime builtin）· `:2831`（EC_N_FUNC 未定义函数）；函数尾的
+// `func_ni < 0` 路径本就用同一循环（已改为调用本函数，单一真源）。
+// 注：泛型直调（`:2791` → `infer_gen_call`）内部**已推**（`:2020`/`:2023`），无需在此重复。
+fn infer_call_args(first_arg: int) {
+    an : ., mut = first_arg;
+    loop {
+        if an < 0 { break; }
+        anode := ast_a(an);
+        infer_expr(anode);
+        // (b) fail-closed 护栏（维护者裁-ARG-2；TODO #93）：实参位的调用若是 `EXPR_FIELD`
+        // 被调而 `ast_data` 仍为 0 ⇒ **被调名从未被回填**（模块/方法分支没跑到）⇒ ir_gen 会读出
+        // 伪函数名（`istr_get(0)` = 文件首个 interned 串，有 `import` 时恰为 "import"）⇒ 后端
+        // 按名解析失败 ⇒ 外部位重定向 ⇒ **SIGSEGV 139**。
+        // 此处**响亮拒绝**（硬错 ⇒ 走既有 fail-closed 闸门 ← `main.cr:146-175` 位于 check_all
+        // 之后、ir_gen 之前 ⇒ 在 checker 侧报错才被该闸门覆盖），**绝不静默产坏产物**。
+        // **正常路径下恒不触发**（(a) 已让所有已解析路径推实参；dyn 方法调用的名字由 dyn 分支
+        // 回填，实测 `dyn_dispatch` 正常 ⇒ 不误伤）——其价值 = **防未来同类回归**。
+        if anode >= 0 {
+            if ast_kind(anode) == EXPR_CALL {
+                fnode := ast_a(anode);
+                if fnode >= 0 {
+                    if ast_kind(fnode) == EXPR_FIELD {
+                        if ast_data(anode) <= 0 {
+                            check_error(EC_N_FUNC, "Unresolved module/method call in argument position", ast_line(anode), ast_col(anode));
+                        }
+                    }
+                }
+            }
+        }
+        an = ast_b(an);
+    }
+}
+
 fn infer_expr(node: int) -> int {
     if node < 0 { return TI_UNIT; }
 
@@ -2808,12 +2848,14 @@ fn infer_expr(node: int) -> int {
                             fnd := fi_ast_node(fi);
                             if fnd >= 0 {
                                 if ast_kind(fnd) == EXPR_FN {
+            infer_call_args(first_arg);   // TODO #93：实参必须被推断（本 return 路径原先跳过）
                                     return TI_NEVER;
                                 }
                             }
                         }
                     }
                 }
+            infer_call_args(first_arg);   // TODO #93：实参必须被推断（本 return 路径原先跳过）
                 return sym_type(si);  // return type
             }
             // Check runtime builtins (no .cr body, implemented in rt.s)
@@ -2821,6 +2863,7 @@ fn infer_expr(node: int) -> int {
             loop {
                 if bi >= g_rt_builtin_count { break; }
                 if r64(g_rt_builtin_names, bi * 8) == func_ni {
+            infer_call_args(first_arg);   // TODO #93：实参必须被推断（本 return 路径原先跳过）
                     return r64(g_rt_builtin_ret_types, bi * 8);
                 }
                 bi = bi + 1;
@@ -2828,15 +2871,10 @@ fn infer_expr(node: int) -> int {
             // Not found in symbol table or builtins — report error
             name := istr_get(func_ni);
             check_error(EC_N_FUNC, "Undefined function '" + name + "'", ast_line(node), ast_col(node));
+            infer_call_args(first_arg);   // TODO #93：实参必须被推断（本 return 路径原先跳过）
             return TI_NEVER;
         }
-        // Infer arg types (for side effects)
-        an : ., mut = first_arg;
-        loop {
-            if an < 0 { break; }
-            infer_expr(ast_a(an));
-            an = ast_b(an);
-        }
+        infer_call_args(first_arg);   // 单一真源（与上述 4 处同一函数）
         return TI_INT;  // external/unknown functions
     }
 
@@ -2943,8 +2981,25 @@ fn infer_expr(node: int) -> int {
     if ast_kind(node) == EXPR_GO {
         // a=-1, b=body;  c=iter_ni (>=0 for range mode)
         body := ast_b(node);
+        // **range-go 迭代变量绑定**（2026-09-16 #93 批 T4；维护者裁 (i)）：`go i a..b body` 的
+        // 语义**就是绑定 `i`**（ir_gen 侧按 `EXPR_GO.c` 使用该名），而本分支此前**不绑** ⇒
+        // checker 与语言语义不一致（checker 缺口，非误报豁免问题）。
+        // **修前不可见**：body 常为 `f(i)` 形（已解析直调的实参）⇒ 实参从不被推断（TODO #93）
+        // ⇒ `i` 从未被查、无诊断；#93 修好后**暴露为 N01 误报**（命中载体 = 29 探针之一的
+        // `tests/probes/p_spawn.cr` + 已挂 CI 的 `tests/selfhost/test_interp_parity.py`）。
+        // 绑定语义与 `for` **同源**（先例 `checker.cr:3039-3051`）：**int 局部**（与 ir_gen 的
+        // `iter_var_ni` 用法一致）+ **作用域严格限 body**（进前绑、出后恢复）；
+        // `ast_c(node) <= 0`（单发形 `go f(x)`）**不绑、完全不受影响**（硬条件 1）。
+        iter_ni := ast_c(node);
+        scoped : ., mut = 0;
         push_borrow_scope();
+        if iter_ni > 0 {
+            push_scope();
+            def_sym(iter_ni, SYM_LOCAL, TI_INT, -1);
+            scoped = 1;
+        }
         body_ti := infer_expr(body);
+        if scoped != 0 { pop_scope(); }
         pop_borrow_scope();
         rn := ast_data(node);
         if rn <= 0 {
