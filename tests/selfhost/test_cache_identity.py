@@ -20,7 +20,7 @@
   （编译器内容驱动）——两者都必须匹配才命中。
 
 判据（5 组 7 例）：
-  ① identity_semantics：条目身份字段 == FNV-1(运行中编译器 ELF 全文件) 且 ver==17
+  ① identity_semantics：条目身份字段 == FNV-1(运行中编译器 ELF 全文件) 且 ver==VER_EXPECTED（**#78 批 2 起 = 18**）
   ② same_identity_hit：同身份条目仍命中（正常路径无退化）——改条目内**被装载
      跳过**的“函数名字节”（canary），重跑后字节原样留存（命中 = 从不重写）
   ③ foreign_identity_rejected：身份字段被改（+载荷 name_ni 互换，模拟异序）→
@@ -46,7 +46,12 @@ BASE = pathlib.Path(__file__).resolve().parents[2]
 COREC = BASE / "build" / "corec"
 CACHE_DIR = BASE / ".core" / "cache" / "cir"
 
-VER_EXPECTED = 17
+# 17 → 18：TODO #78「聚合读丢型」批 2（裁-AGG-7）换代——旧值 17 / 新值 18 /
+# 归因 = 聚合读结果槽型由 TI_INT 改为声明面形式（旧快照与新语义不等价，命中旧条目会把
+# 「丢型」的坏 IR 复活）/ 出处 = docs/superpowers/plans/2026-09-16-agg-read-type.md §12.4·§13。
+# **布局未变**（v18 与 v17 同构：magic/ver/identity/fp/sig/name_len/name…）⇒ layout() 的
+# v17 分支按 VER_EXPECTED 复用。
+VER_EXPECTED = 18
 FNV_OFFSET = -3750763034362895579   # FNV-1 64 offset basis（signed i64）
 FNV_PRIME = 1099511628211
 M64 = 1 << 64
@@ -201,7 +206,7 @@ def main():
         expect_id = identity_of(COREC)
         cleanup_cache()
 
-        # ① 身份语义：条目身份 = 运行中编译器 ELF 全文件哈希 + 版本 v17
+        # ① 身份语义：条目身份 = 运行中编译器 ELF 全文件哈希 + 版本 VER_EXPECTED（#78 批 2 起 = 18）
         r = run_corec(COREC, src, dot)
         if r.returncode != 0 or not alpha.exists():
             print(f"[FAIL] 探针首次编译失败 rc={r.returncode} alpha_exists={alpha.exists()}\n{r.stdout}{r.stderr}")

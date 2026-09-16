@@ -402,6 +402,63 @@ fn enum_payload_ti(name_ni: int, pos: int) -> int {
     return -1;
 }
 
+// ── 聚合读**结果槽的声明面形式**（TODO #78 批 2 T3 · 裁-AGG-1 ①）──────────────────────
+// 聚合槽的规范存储形式**恒为精确（scaled）**（apx 批不变量「聚合面不存在 apx 形式」；写点漏斗
+// `dex_slot_norm:1059` 与 :2725/:2688/:2774/:2902 各写点均按此规范化）⇒ 只要**声明面**是 dex
+// （类型节点 `TY_DEX`），读槽就应当定型 `TI_DEX_S`；其余形态**一律保持 `TI_INT`**（零足迹：
+// 非 dex 程序逐字节不变）。
+// **零 alloc（GC12′）**：只做**节点判**（`ast_kind(tn)==0 && ast_type_val(tn)==TY_DEX`）与
+// **纯表读**（`elem_ti_of_decl`/`get_type_kind`/`get_type_data`）——**不调** `res_type_node`/
+// `alloc_type`（那会新增可能 alloc 的站点，破坏暖缓存不变式）。
+// **覆盖面（本批）** = 结构体字段读 / 数组·切片元素读（元素 ti 可由数组型取得）/ match 臂载荷绑定。
+// **未覆盖面（登记，见计划 §10）** = 元组数字下标（裁-AGG-3：元组无声明面）· match 结果槽
+// （裁-AGG-2：多臂可异型）· 泛型字段/元素（裁-AGG-4：声明型 = 类型参数）· `IR_SLICE` 产物的
+// 元素读（切片 var 的 IR 型恒 `TI_INT`，元素形式无处寄存）。
+fn agg_read_form_is_dex(tn: int) -> int {
+    if tn < 0 { return 0; }
+    if ast_kind(tn) != 0 { return 0; }
+    if ast_type_val(tn) == TY_DEX { return 1; }
+    return 0;
+}
+
+// 结构体字段读（`EXPR_FIELD`；数字元组下标形态 `ast_type_val > 0` 无声明面 ⇒ 不判）
+fn agg_field_read_form(field_node: int, fi: int) -> int {
+    if field_node < 0 || fi < 0 { return TI_INT; }
+    if ast_type_val(field_node) > 0 { return TI_INT; }
+    si := find_struct(ast_c(field_node));
+    if si < 0 { return TI_INT; }
+    if agg_read_form_is_dex(si_field_type_node(si, fi)) != 0 { return TI_DEX_S; }
+    return TI_INT;
+}
+
+// 数组/切片元素读：元素 ti 由**数组 var 的型**取得（纯表读）；`TI_DEX`（apx 声明形态的
+// 元素 ti）与 `TI_DEX_S` 都归一到**精确**读槽（聚合存储 = scaled）。
+fn agg_elem_read_form(arr_var: int) -> int {
+    et := elem_ti_of_decl(slot_decl_ti(arr_var));
+    if et == TI_DEX || et == TI_DEX_S { return TI_DEX_S; }
+    return TI_INT;
+}
+
+// match 臂载荷绑定读（`EXPR_ENUMPAT`：a=变体名 ni、b=首子模式、c=子模式数）
+fn agg_payload_read_form(pat_node: int, pos: int) -> int {
+    if pat_node < 0 || pos < 0 { return TI_INT; }
+    name_ni := ast_a(pat_node);
+    si := find_gsym(name_ni);
+    if si < 0 { return TI_INT; }
+    ei := find_enum_row_of(sym_type(si));
+    if ei < 0 { return TI_INT; }
+    vi : ., mut = 0;
+    loop {
+        if vi >= ei_variant_count(ei) { return TI_INT; }
+        if ei_variant_name(ei, vi) == name_ni {
+            if agg_read_form_is_dex(ei_variant_type_node(ei, vi, pos)) != 0 { return TI_DEX_S; }
+            return TI_INT;
+        }
+        vi = vi + 1;
+    }
+    return TI_INT;
+}
+
 // 元素表达式（元组/数组字面量的元素槽无声明面）的可选性：**保守 = 不可选 ⇒ 不装箱**
 // 覆盖面 = ident（声明侧表）/ 调用（被调返回类型可选）；其余形态登记为未覆盖面。
 fn elem_node_optional(node: int) -> int {
@@ -2391,6 +2448,8 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                 loop {
                     if fi >= sub_count { break; }
                     fv := new_ir_var("fld", TI_INT);
+                    // TODO #78 批 2：载荷读定型取**声明面形式**（dex 载荷 ⇒ TI_DEX_S）
+                    irv_set_type(fv, agg_payload_read_form(arm_pat, fi));
                     if rep_v < 0 {
                         emit(IR_LOAD_FIELD, fv, match_val, 0, fi + 1, 0);  // +1 for tag offset
                     } else {
@@ -2594,6 +2653,9 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
         } else {
             fi = ast_data(node);   // struct field index (from checker)
         }
+        // TODO #78 批 2：读点定型取**声明面形式**（dex 声明 ⇒ TI_DEX_S）——零 alloc 节点判，
+        // 非 dex 形态恒 TI_INT ⇒ 零足迹。**必须在 fi 解出之后**（字段位序）。
+        irv_set_type(v, agg_field_read_form(node, fi));
         emit(IR_LOAD_FIELD, v, obj_var, 0, fi, 0);
         return v;
     }
@@ -2653,6 +2715,8 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             return v;
         }
         v := new_ir_var("elem", TI_INT);
+        // TODO #78 批 2：元素读定型取**声明面形式**（元素 ti 为 dex ⇒ TI_DEX_S；纯表读）
+        irv_set_type(v, agg_elem_read_form(arr_var));
         if idx_kind == EXPR_INT {
             emit_string_lit_bounds(arr_var, ast_int_val(idx_node));
             emit_slice_lit_bounds(arr_var, ast_int_val(idx_node));

@@ -109,7 +109,7 @@ OFF_SI_GENERIC_NAMES : int = 400; OFF_SI_GENERIC_COUNT : int = 432;
 // 契约（四条，缺一即静默类）：
 //   ① **字节零变化**：ESZ_DFNODE 保持 72B，两槽只是**语义对调**（原 40 = 混用码、
 //      原 64 = 项引用）⇒ `.ccr`（NOD 36B）与 `.cir` 快照（节点 64B）布局零改动，
-//      `CCR_VERSION=8` / `CIR_CACHE_VER=17` 均不 bump。
+//      `CCR_VERSION=8` 不 bump；`CIR_CACHE_VER` 当时为 17（**此后由 TODO #78 批 2 升级到 18**——聚合读结果槽型改声明面形式，旧快照与新语义不等价）。
 //   ② **互斥**（D22-②）：辅码 ≠ 0 ⇒ 项 = -1；项 ≥ 0 ⇒ 辅码 = 0（由拆分器构造保证）。
 //   ③ **码 = 派生量**（D22-①/D23）：`iri_tk` / `.ccr` NOD / `.cir` 快照里的类型码
 //      一律由 `sh_dfn_code_of_slots(项, 辅码)` 派生，**不得**当独立真源存储或读回

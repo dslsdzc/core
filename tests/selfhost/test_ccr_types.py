@@ -39,7 +39,7 @@ R2 P4 Task 4（DFNode.TK 迁升）+ R2 P5 Task 2（单槽化）见文件末同�
 内存 DF 记录 72B = 9 槽；P5 T2 起两槽语义对调并分离——`OFF_DF_TK`(40) = **类型项引用**
 （类型面唯一真源）、`OFF_DF_AUX`(64) = **辅码**（旗标/宽度/不可逆行的原码）。
 `.ccr` NOD **40B**（R2 P6 Task 3：32B 语义区 + 8B 邻接；+28 = 项索引 i32——TYPE 段
-文件空间项索引，-1 = 无项；`tk` 槽仍是派生码）与 `.cir` 快照布局**不变**（`CIR_CACHE_VER` 保持 17；盘面只承载
+文件空间项索引，-1 = 无项；`tk` 槽仍是派生码）与 `.cir` 快照布局**不变**（**P4 当时**未 bump；**本仓版本位此后由 TODO #78 批 2 从 17 → 18**——旧值 17 / 新值 18 / 归因 = 聚合读结果槽型 `TI_INT` → 声明面形式、旧快照与新语义不等价 / 出处 = `docs/superpowers/plans/2026-09-16-agg-read-type.md` §12.4 · §13；盘面只承载
 **派生码**——两槽都是 (opcode, 码) 的纯函数，落盘 = 第二真源 + 进程内索引悬空，
 实测见 cir_cache.cr 头注）。派生码逐节点 ≡ 单槽化前的混用码（D22-①）。
 
@@ -1846,7 +1846,9 @@ def test_p4t4_dump_flag_zero_artifact_effect():
 
 
 def test_p4t4_cir_snapshot_layout_unbumped():
-    """㉛ `.cir` 快照布局未变（CIR_CACHE_VER 保持 17 的证据面）：条目版本位 == 17；
+    """㉛ `.cir` 快照**布局**未变（**P4 当时**未 bump 的证据面；**17 → 18 由 TODO #78 批 2 换代**——
+    旧值 17 / 新值 18 / 归因 = 聚合读结果槽型改声明面形式（旧快照与新语义不等价）/ 出处 = 计划 §12.4·§13）：
+    条目版本位 == 当前版本；
     节点小节 = 8B 计数 + n×64B（8 字段）——即「项槽不落盘、装载侧重派生」的格式
     事实；>0 节点保证非空转。"""
     src = tk_fixture('snap')
@@ -1860,7 +1862,7 @@ def test_p4t4_cir_snapshot_layout_unbumped():
         total_nodes = 0
         for f in entries:
             ver, nodes, ok = cir_entry_nodes(os.path.join(cache_dir, f))
-            assert ver == 17, f"{f}: CIR_CACHE_VER {ver} != 17 (unbumped expected)"
+            assert ver == 18, f"{f}: CIR_CACHE_VER {ver} != 18 (TODO #78 批 2 换代后值)"
             assert ok, f"{f}: node section (64B stride) runs past EOF"
             total_nodes += len(nodes)
         assert total_nodes > 0, "vacuous: no nodes parsed from snapshots"
@@ -2017,7 +2019,7 @@ def test_p5t2_snapshot_disk_code_preserved():
         disk = []
         for f in sorted(os.listdir(cache_dir)):
             ver, nodes, ok = cir_entry_nodes(os.path.join(cache_dir, f))
-            assert ver == 17 and ok, f"{f}: version/stride drifted"
+            assert ver == 18 and ok, f"{f}: version/stride drifted（期望 18 = TODO #78 批 2 换代后值）"
             disk += [(nd[0], nd[5]) for nd in nodes]
         assert disk, "vacuous: no nodes parsed from snapshots"
         mint = set((r[1], r[2]) for r in rows if r[1] in MINT_OPS and r[2] > 0)

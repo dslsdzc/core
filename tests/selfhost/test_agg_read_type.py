@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""⚠ **RED 语料（TODO #78「聚合读丢型」批 2 T2 落盘）——未挂 CI，白名单有条目**。
+"""✅ **已修（#78 批 2 T3）—— 本套件已挂 CI**（TODO #78；计划 §11/§12/§13）。
 
 被测缺陷 = **聚合读丢型**：四个读点把结果槽**硬定 `TI_INT`**，而聚合槽的规范存储形式是
 **精确（scaled）**（apx 批不变量：「聚合面不存在 apx 形式」）⇒ 「按 IR 值型触发」的下游
@@ -33,8 +33,12 @@ LET 继承 / 泛型键名串）。
 （`tests/suite/ffi_test.cr:8-11` 头注明载）⇒ 按先例 `test_dex_arith.py::test_extern_dex_arg_cir`
 用 **IR 断言**判定（本文件 `leg_b` 的 B4 即该断言的最小形态）。
 
-**挂点（照 #93 批三件套）**：修复批（T3）**必须同时**——删 `ci_hook_allowlist.txt` 条目 +
-挂 `src/ci/run.sh` 的 `selfhost-tests` job + 改本头注为「已修」。
+**挂点（照 #93 批三件套，T3 已完成）**：`src/ci/run.sh` 的 `selfhost-tests` job 已挂本套件 +
+`ci_hook_allowlist.txt` 条目**已删** + 本头注已转正（判据 = `test_ci_hook_coverage.py` PASS）。
+
+**修后实测（T3）**：R1/R2/R3/R5 **elf=7 全绿**（改前全 1）· 腿 B 四条见证**全绿** · 腿 C 钉子在位。
+**R4（元组）不在此列**：见下方 `KNOWN_GAP` —— 按**裁-AGG-3**「元组无声明面 ⇒ 登记，不纳入本批」，
+本套件对它**只观测、不计入判据**（[GAP] 行），后续批修复时须把它移进 `CASES`。
 
 **探针纪律**（照 apx 批 §0bis/§0ter）：涉全局必须 `mut`；apx 探针**一律显式形**
 （`d : dex, apx = 7.0`——类型位写 `.` 会让 apx 槽压根不建立 ⇒ 假绿）。
@@ -143,10 +147,18 @@ CASES = [
     ("R1_let_relay", 7, R1, "red"),
     ("R2_match_payload", 7, R2, "red"),
     ("R3_local_arr_elem", 7, R3, "red"),
-    ("R4_tuple_elem", 7, R4, "red"),
     ("R5_write_apx_slot", 7, R5, "red"),
     ("R7_core_arg_nail", 7, R7, "nail"),
     ("N1_apx_batch_green_nail", 7, N1, "nail"),
+]
+
+# **已知未覆盖面（裁-AGG-3：登记，不在本批）**——元组数字下标（`t . 0`）。
+# 元组**无声明面**（`ir_gen.cr` 的 EXPR_TUPLE 分支给元组 var 定型 `TI_INT`，不携带元素 ti；
+# `agg_field_read_form` 对 `ast_type_val > 0` 的数字下标形态显式返回 `TI_INT`）⇒ 本批的
+# 「声明面形式」通道取不到它 ⇒ **期望值不变**（仍是错值）。**本组只观测、不计入判据**：
+# 它在此是为了「不静默」——后续批要修时，这里的观测值就是起点（并且届时须把它移进 CASES）。
+KNOWN_GAP = [
+    ("R4_tuple_elem", 7, R4, "gap"),
 ]
 
 
@@ -250,6 +262,12 @@ def main():
         tag = "PASS" if ok else "FAIL"
         print(f"[{tag}] {name:<26} kind={kind:<4} 观测: check={chk} codes={codes} "
               f"build={bld} elf={elf}  | 期望 elf={expect}")
+    print()
+    for name, expect, src, _kind in KNOWN_GAP:
+        chk, codes, bld, elf = compile_and_run(src, name)
+        print(f"[GAP ] {name:<26} kind=gap  观测: check={chk} codes={codes} "
+              f"build={bld} elf={elf}  | 期望（修复后）elf={expect} "
+              f"【裁-AGG-3 登记未覆盖：元组无声明面 ⇒ 本批不改；不计入判据】")
     print()
     bfails = leg_b_interface()
     fails.extend(bfails)
