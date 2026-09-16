@@ -86,6 +86,13 @@ case "$CI_JOB_NAME" in
     # 断言「旧形态绿 ∧ 新形态红」。这才是「判据够强」的机械证据（不是注释里的
     # 自我声明）。实测 21/21（18 突变体 + 3 正控）。
     python3 tests/harness/test_criteria_mutations.py
+    # 2026-09-17 TODO 标识迁移批：**迁移判据**（纯 python、毫秒级、无编译器依赖）——
+    # J1 无残留（全仓旧形态 `TODO #N` = 0；防「以后又有人写 #NN」这类回归）· J2 无悬空
+    # （新 id ↔ TODO.md 标题双向一致）· J3 映射完备（覆盖 #1..#98 + 空号 #66 注记）·
+    # J4 突变自证（把一处新 id 引用还原成旧号 ⇒ J1 必红）。**范围由维护者扩展**：
+    # 该判据原按「本批只动文档+注释」登记于白名单，维护者裁示「不挂 = 几周内腐烂成没人跑的
+    # 脚本」⇒ 挂本 job（同 test_block_git / test_ci_hook_coverage 的位置与体例）。
+    python3 tests/harness/test_todo_id_migration.py
     ;;
 
   selfhost-tests)
