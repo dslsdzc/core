@@ -172,7 +172,12 @@ def entry_stamp(p: pathlib.Path):
 # 冷/暖**全文件**逐字节同**不成立**且**预存**（P4 T1 用例已定口径：`STR` 段
 # 冷=1811B / 暖=1703B——暖态不重放 ir_gen 临时名（`_eq0`/`bin` 等）的 intern ⇒
 # STR 表更短；其余七段逐字节同）。本套件因此钉**段级契约**：SYM/NOD/ENT/REG/
-# EDG/TYPE/IFACE 必须冷=暖，STR 只登记尺寸（真产物 = ELF，恒逐字节同）。
+# EDG/TYPE/IFACE 必须冷=暖。
+# **B4/#87 修复（2026-09-16 判据网加固批）**：STR 段原判据只**登记尺寸**
+# （`STR {len(a)}B→{len(b)}B（预存口径，不入判据）`）——暖态 STR「多写/漏写
+# 一条、同尺寸改内容」都无判据（只有 ELF 全字节等间接兜底，且仅当该串进发射
+# 面才咬）。现补**结构判据**（str_contract_equal，见下）：暖态条目序列必须是
+# 冷态的**前缀**（同 index ⇒ 同字节），且条数不增。
 SEG_NAMES = {1: "STR", 2: "SYM", 3: "NOD", 4: "ENT", 5: "REG",
              6: "EDG", 7: "TYPE", 8: "IFACE"}
 CONTRACT_TAGS = (2, 3, 4, 5, 6, 7, 8)
@@ -188,12 +193,64 @@ def ccr_segments(path: pathlib.Path):
     return segs
 
 
+def str_entries(seg: bytes):
+    """STR 段 → 条目 bytes 列表（格式 = `[count u32] × {len u32, data}`，见
+    ccr_io.cr:604-610 写侧；尾部有残字节 ⇒ AssertionError（形态自检））。"""
+    n = struct.unpack_from("<I", seg, 0)[0]
+    out, off = [], 4
+    for _ in range(n):
+        ln = struct.unpack_from("<I", seg, off)[0]
+        off += 4
+        out.append(seg[off:off + ln])
+        off += ln
+    assert off == len(seg), f"STR 段尾残 {len(seg) - off}B（声明 {n} 条）"
+    return out
+
+
+def str_contract_equal(cold_seg: bytes, warm_seg: bytes):
+    """STR 段冷/暖**结构**判据（B4/#87 修复，2026-09-16 判据网加固批）。
+
+    契约（预存口径的精确化）：暖态不重放 ir_gen 临时名（`_eq0`/`bin` 等）的
+    intern ⇒ **暖态条目 = 冷态条目的前缀**（同 index ⇒ 同字节；冷态多出的是
+    尾部若干条）。断言 ① `n_warm ≤ n_cold`（暖态不得增长）；② `warm ==
+    cold[:n_warm]`（同 index 逐条字节相等——**同尺寸改内容**在此必红）；
+    ③ 非空转：`n_cold ≥ 1` 且 `n_warm ≥ 1`（否则判据空转，判红）。
+
+    **反例自检（audit §0）：什么坏实现能骗过本断言？**——原「只登记尺寸」
+    判据下：让暖态 STR 多写/漏写一条（尺寸同步变化）或**同尺寸改内容**（把
+    某条名字写坏）都全绿（ELF 面仅在串进发射面时才咬）。本断言下：漏写 ⇒
+    ②在某 index 上字节不等（错位）；改写内容 ⇒ ②同 index 不等；多写 ⇒ 既
+    违 ①（条数增长）也违 ②。剩余面 = 冷态自身被改坏（两侧同错）——那由产物
+    面（A4 ELF 全字节等）+ 语料对拍覆盖。
+
+    **探针触发自检（audit §0bis）**：③ 断言两侧条目数 ≥1（BASE_PROBE 多串
+    语料必产 ≥1 名字），且本批实测冷/暖条数差 >0（正是本判据要约束的差异
+    面）——明细随 detail 打印，空转即判红。
+    """
+    c = str_entries(cold_seg)
+    w = str_entries(warm_seg)
+    if len(c) == 0 or len(w) == 0:
+        return False, f"STR 判据空转：冷 {len(c)} 条 / 暖 {len(w)} 条"
+    if len(w) > len(c):
+        return False, (f"暖态 STR 条数 {len(w)} > 冷态 {len(c)}——暖态不得新增条目"
+                       f"（预存口径：暖态只是不重放 ir_gen 临时名）")
+    for i, (wc, cc) in enumerate(zip(w, c)):
+        if wc != cc:
+            return False, (f"STR 第 {i} 条冷/暖异：暖 {wc!r} != 冷 {cc!r}"
+                           f"（同 index 必须同字节——同尺寸改内容在此必红）")
+    tail = ", ".join(repr(x[:24]) for x in c[len(w):][:4])
+    return True, (f"STR {len(c)} 条→{len(w)} 条（暖 = 冷前缀，逐条字节同；"
+                  f"冷多出 {len(c) - len(w)} 条: {tail}"
+                  f"{'…' if len(c) - len(w) > 4 else ''}）")
+
+
 def ccr_contract_equal(cold_path: pathlib.Path, warm_path: pathlib.Path):
     a, b = ccr_segments(cold_path), ccr_segments(warm_path)
     bad = [SEG_NAMES[t] for t in CONTRACT_TAGS if a[t] != b[t]]
-    detail = (f"STR {len(a[1])}B→{len(b[1])}B（预存口径，不入判据）；"
+    ok_str, str_detail = str_contract_equal(a[1], b[1])
+    detail = (str_detail + "；"
               + ("其余七段逐字节同" if not bad else "契约段异: " + ",".join(bad)))
-    return (not bad), detail
+    return (not bad) and ok_str, detail
 
 
 def sha16(data: bytes) -> str:

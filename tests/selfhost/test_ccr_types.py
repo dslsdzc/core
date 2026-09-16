@@ -1756,10 +1756,77 @@ def test_p4t4_cold_warm_term_slot_symmetry():
         shutil.rmtree(cache_dir, ignore_errors=True)
 
 
+def dump_strip_face_problems(out_flag: str, out_plain: str):
+    """`--dump-tk-terms` 剔除面判据 → (问题列表, stats dict)（B5/#88 修复）。
+
+    原判据「剔除 dump 节后比对」**未断言被剔面是什么**——多打印一行 `123\\t…`
+    形态数据行会被静默吃掉（黑盒逐行过滤 ⇒ 绿）。现把剔除面显式化为
+    **白名单 + 计数 + 序数断言**：
+      ① 被剔行必须是**连续一段**，且以 `[df-tk-terms]` 头行起始、头行唯一；
+      ② 被剔行数 == 1（头行）+ 头行自报 `nodes=`（dump.cr:367 起：每 DF 节点
+         一行，行首字段 = 节点序数）——多印一行而未同步 nodes ⇒ 红；
+      ③ 每条数据行必须是 9 个十进制字段（parse_tk_dump 的结构契约），且
+         **首字段 == 该行在 dump 节内的序数 0..nodes-1**（重复/乱序/插入 ⇒ 红）；
+      ④ 非空转：nodes ≥ 1。
+    **口径修正（本批实测驱动，2026-09-16）**：头行 `rows=` 是**类型表行数**
+    （`g_type_count`，dump.cr:388-389），**不是**数据行数——本判据初版误把
+    `rows` 当数据行数 ⇒ 真跑当场红（`剔除行数 1355 != 1 + rows=16`）。修正为
+    `nodes=` 并加序数断言（比原设想更强：序数面能抓「同数量但换了行」）。
+    反例自检（audit §0）：什么坏实现能骗过本断言？——「多打一行数据行」旧判据
+    吃掉即绿；现在 ②③ 必红。「把非 dump 内容混进剔除面」旧判据也吃掉；现在
+    ① 连续段 + ③ 行形态把它限制成「9 字段数据行且紧邻 dump 节」⇒ 不再静默。
+    突变自证见 tests/harness/test_criteria_mutations.py（驱动本函数）。
+    """
+    probs = []
+    lines_flag = out_flag.splitlines()
+    lines_plain = out_plain.splitlines()
+    is_dump = [l.startswith('[df-tk-terms]') or bool(re.match(r'^-?\d+\t', l))
+               for l in lines_flag]
+    removed = [i for i, v in enumerate(is_dump) if v]
+    if not removed:
+        probs.append("dump flag emitted no dump section (判据空转)")
+        return probs, {"removed": 0}
+    if removed != list(range(removed[0], removed[0] + len(removed))):
+        probs.append(f"剔除面不连续（被剔行位置 {removed}）——非 dump 行混进剔除面")
+    if not lines_flag[removed[0]].startswith('[df-tk-terms]'):
+        probs.append(f"剔除面首行非 dump 头行: {lines_flag[removed[0]]!r}")
+    n_hdr = sum(1 for i in removed if lines_flag[i].startswith('[df-tk-terms]'))
+    if n_hdr != 1:
+        probs.append(f"dump 头行不唯一（{n_hdr} 行）")
+    try:
+        hdr_f, rows_f = parse_tk_dump(out_flag)
+    except AssertionError as e:
+        probs.append(f"dump 节不可解析: {e}")
+        return probs, {"removed": len(removed)}
+    if len(removed) != 1 + hdr_f['nodes']:
+        probs.append(f"剔除行数 {len(removed)} != 1 + 头行自报 nodes={hdr_f['nodes']}"
+                     f"——被剔面有未计数的行（判据不得静默吃掉输出）")
+    if hdr_f['nodes'] < 1:
+        probs.append(f"头行 nodes={hdr_f['nodes']} < 1（判据空转）")
+    for i, row in enumerate(rows_f):
+        if len(row) != 9:
+            probs.append(f"数据行 {i} 字段数 {len(row)} != 9")
+            break
+        if row[0] != i:
+            probs.append(f"数据行 {i} 首字段（节点序数）= {row[0]} != {i}"
+                         f"（重复/乱序/插入行）")
+            break
+    if len(rows_f) != hdr_f['nodes']:
+        probs.append(f"解析出的数据行 {len(rows_f)} != 头行 nodes={hdr_f['nodes']}")
+    keep = [l for i, l in enumerate(lines_flag) if not is_dump[i]]
+    if "\n".join(keep) != "\n".join(lines_plain):
+        probs.append("dump flag changed stdout beyond the dump section")
+    return probs, {"removed": len(removed), "nodes": hdr_f['nodes']}
+
+
 def test_p4t4_dump_flag_zero_artifact_effect():
     """㉚ `--dump-tk-terms` 只读：带/不带 flag 两次**冷**运行的产物与 stdout（剔除
     dump 节）逐字节同（新增通道不泄入产物/输出面）。两轮之间清缓存 = 避开既有的
-    冷/热渲染差异（TODO #5 末条，非本任务面）。"""
+    冷/热渲染差异（TODO #5 末条，非本任务面）。
+
+    B5/#88 修复（2026-09-16 判据网加固批）：剔除面从**黑盒逐行过滤**改为
+    **白名单（唯一头行 + 9 字段数据行，连续一段）+ 计数断言**（剔除行数 ==
+    1 + 头行自报 rows）——被剔面不再能吞下未计数的输出行。"""
     src = tk_fixture('flag')
     dot = os.path.join(BASE, 'build', 'test_p4t4_flag.cir')
     cache_root = os.path.join(BASE, '.core', 'cache')
@@ -1771,11 +1838,8 @@ def test_p4t4_dump_flag_zero_artifact_effect():
         out_plain = corec_cir(src, dot)
         dot_plain = open(dot, 'rb').read()
         assert dot_flag == dot_plain, "dump flag changed the .cir artifact"
-        stripped = "\n".join(l for l in out_flag.splitlines()
-                             if not l.startswith('[df-tk-terms]')
-                             and not re.match(r'^-?\d+\t', l))
-        assert stripped == "\n".join(out_plain.splitlines()), \
-            "dump flag changed stdout beyond the dump section"
+        probs, stats = dump_strip_face_problems(out_flag, out_plain)
+        assert not probs, "剔除面判据失败: " + " | ".join(probs)
     finally:
         _cleanup(src, dot)
         shutil.rmtree(cache_root, ignore_errors=True)
