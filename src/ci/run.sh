@@ -111,6 +111,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_params_limit.py   # TODO #8 形参上限/≥18 形参静默误编译回归
     python3 tests/selfhost/test_global_seams.py   # 全局行 operand seam（2026-09-16 批）：B1/B2/B4/B5 全局 vs 局部同形对拍（mut 全局 + 期望值）+ B6(b) 发射字节级（静态无 .so 无运行期腿）+ B7 非回归；配套 suite 语料 tests/suite/global_seam_test.cr
     python3 tests/selfhost/test_tuple_slots.py
+    python3 tests/selfhost/test_agg_read_type.py # TODO #78「聚合读丢型」批 2（T3 已修）：腿 A 语义值（LET 中转 / match 载荷 / 局部数组元素 / 写回 apx 槽）· 腿 B 界面见证（`_dxt` 反方向 0 · `_dxdiv` 正方向恰好 1 · extern 调用点前须有转换）· 腿 C 钉子（Core 实参 / apx 已转正形）。**元组数字下标 = 裁-AGG-3登记未覆盖**（[GAP] 只观测不计判据）
     python3 tests/selfhost/test_arg_inference_gap.py # #93 批（实参推断缺失）：**腿 A**（9 例，原 139 → 精确值）· **腿 B**（`g(nosuchfn(1))` 零诊断 → **error[N06]**，**正据**）· **腿 D**（实参位泛型得**精确键** `idf[P]`，非退化键 `idf[unit]`——TODO #95 的既有缺陷 = 本批附带修复）· 对照 9 例（含外层模块/方法调用的 **oracle 对照**）。**背景**：门 `checker.cr` 的直调分支曾在「被调已解析为 Core fn」时提前 return ⇒ 实参**从不被推断** ⇒ ① 实参位 `EXPR_FIELD` 被调名未回填 ⇒ 伪名 `import` ⇒ SIGSEGV 139 ② 未定义函数静默通过。修法 = `infer_call_args()` 在**四处**「已解析」return 前统一调用（完备性枚举见计划 §3ter）
     python3 tests/selfhost/test_agg_slots.py      # TODO #25 姊妹条目：struct/struct 模式/数组字面量槽位（同 F5 契约）
     python3 tests/selfhost/test_agg_checks.py     # TODO #29 聚合字面量「名/型/同质性」三校验（名字绑定 + TS01-04/TK02 硬错误）

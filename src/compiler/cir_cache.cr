@@ -27,7 +27,7 @@
 // identity/fp/sig/name_len/name…（相对 v16 整体后移 8B），旧条目读取即错位 ⇒
 // 必须 bump。v16→v17 的手工 bump 本身只覆盖「本仓旧条目」；身份字段起自动
 // 覆盖面（重建即失效）。
-// v18（不 bump——R2 P4 Task 4 / D15 的实测修正，见下）：DF 节点内存记录
+// [曾议 v18 而未 bump]（R2 P4 Task 4 / D15 的实测修正，见下）：DF 节点内存记录
 // 64 → 72B 新增该项槽，但**快照盘记录仍 64B/节点**（第 9 槽不落盘）⇒ 格式
 // 与布局零变化 ⇒ 版本位不动。
 // 计划 D15 原写「`.cir` 快照入项槽并 CIR_CACHE_VER 17→18」，其前提 = 「不入槽
@@ -48,7 +48,12 @@
 // sh_dfn_code_of_slots 产出），装载侧由它同时重派生**两槽**（项引用 + 辅码）——
 // 盘面布局/版本位与 P4 逐字节相同（单槽化只在内存语义面）。
 CIR_CACHE_MAGIC : int = -4485090715960753727;
-CIR_CACHE_VER   : int = 17;
+// 18：TODO #78「聚合读丢型」批 2 —— 聚合读结果槽型由 `TI_INT` 改为**声明面形式**
+//     （dex 声明 ⇒ `TI_DEX_S`；见 ir_gen.cr 的 agg_*_read_form）。**旧快照里读槽型 = `TI_INT`，
+//     与修复后语义不等价** ⇒ 命中旧条目会把「丢型」的坏 IR 原样复活成产物（rc=0 的静默类）
+//     ⇒ bump 使旧条目整体失效，cache miss = **无害重建**。与 TODO #8（缓存键缺编译器身份）
+//     同族；`.ccr` 侧不 bump（交付格式、无快照复用语义），但**内容会变**（dex 程序）。
+CIR_CACHE_VER   : int = 18;
 
 g_cir_write_buf : string, mut;
 g_cir_write_pos : int, mut;

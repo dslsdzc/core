@@ -472,3 +472,88 @@ R1 的 IR 证据（§11.4）给出**判据形状**：
 - T2-1：`.ccr` SYM per-var 型解析（可选加固，见 12.3 注）。
 - T2-2：`run.sh` 挂点与头注转正（**T3 修复后**的三件套第二步）。
 - T2-3：R6 的断言在 T3 实施后需**按实际 cir 形态复核**（转换序列可能随实现口径变化）。
+
+---
+
+## 13. §T3 记录（2026-09-16 —— 实施 + 判据 + 突变 + 换代重锁）
+
+> 维护者 T3 放行（2026-09-16）：① 事故「我担一半」+ 正确配方入派单口径；② 门控见证设计获肯定（「先确认工具链能不能表达 X」）；
+> ③ 实施口径 = 声明面形式判定 + 3 读点定型 + `CIR_CACHE_VER` 17→18 + 腿 A/B 转绿 + 挂点三件套；判据 = 腿 A 5/5（**见 §13.4 冲突**）·
+> 腿 B 四条见证 · 腿 C 钉子 · **停条件①**（非 dex 任何字节变化 ⇒ 停）· **停条件②**（关 hack 后腿 A 红 ⇒ 停）。
+
+### 13.1 实施（**零 alloc 通道**；3 读点 + 1 处 bump + 挂点三件套）
+
+| # | 位置 | 改动 |
+|---|---|---|
+| ① | `ir_gen.cr`（`enum_payload_ti` 之后新增）| **4 个节点级 helper**：`agg_read_form_is_dex`（`ast_kind(tn)==0 && ast_type_val(tn)==TY_DEX`——**不调** `res_type_node`）· `agg_field_read_form`（`si_field_type_node` + 节点判；数字元组下标 `ast_type_val>0` ⇒ `TI_INT`）· `agg_elem_read_form`（`elem_ti_of_decl(slot_decl_ti(arr))` **纯表读**；`TI_DEX`/`TI_DEX_S` 都归一到 `TI_DEX_S`——聚合存储恒 scaled）· `agg_payload_read_form`（`find_gsym`+`find_enum_row_of`+`ei_variant_type_node` + 节点判）|
+| ② | 字段读（`:2647` 邻域）| `irv_set_type(v, agg_field_read_form(node, fi))`——**在 `fi` 解出之后**（位序无关，但语义要 fi）；非 dex ⇒ `TI_INT` = 原值 ⇒ **零足迹** |
+| ③ | 元素读（`:2717` 邻域）| `irv_set_type(v, agg_elem_read_form(arr_var))` |
+| ④ | match 载荷绑定（`:2450` 邻域）| `irv_set_type(fv, agg_payload_read_form(arm_pat, fi))`（`EXPR_ENUMPAT`：`a`=变体名 ni）|
+| ⑤ | `cir_cache.cr:51` | `CIR_CACHE_VER` **17 → 18** + 注释（旧快照读槽型 `TI_INT` 与新语义**不等价** ⇒ 命中旧条目会复活坏 IR；与 TODO #8 同族；cache miss = 无害重建）；并把历史条目「v18（不 bump——R2 P4 Task 4…）」改标题为「**[曾议 v18 而未 bump]**」避免与本次撞号 |
+| ⑥ | 挂点三件套 | `run.sh` `selfhost-tests` **+1 行** · `ci_hook_allowlist.txt` **−1 条** · 套件头注转「已修」 |
+
+### 13.2 判据（终态全绿）
+
+| 判据 | 结果 |
+|---|---|
+| **腿 A**（语义值） | R1 LET 中转 · R2 match 载荷 · R3 局部数组元素 · R5 写回 apx 槽 —— **elf=7 全绿**（改前全 = 1）· R4 见 §13.4 |
+| **腿 B**（界面见证） | B1 反方向 `_dxt`=**0** · B2 反方向 `_dxt`=**0** · B3 正方向 `_dxdiv`=**恰好 1** · B4 extern `load_field…call_extern` 之间有转换 —— **四条全绿**（改前四条全红）|
+| **腿 C**（钉子） | R7（Core 实参）· N1（apx 已转正形）**全绿** |
+| **停条件①**（非 dex 零足迹） | canary **5/5 IDENTICAL**（ELF `95084e7b…d475` 28822B + `.ccr` 四条）——`generics_test` 含 int/str 字段读而**零 dex** ⇒ 这条同时是「非 dex 读槽恒 `TI_INT`」的**行为证据** |
+| 74 档 parity | rc **逐档全同**（35×0 / 39×1）· 暖腿 **FAIL=0**（41 档真命中）|
+| 29 行为探针 | rc **与基线全同** |
+| 挂点 harness | `test_ci_hook_coverage.py` **PASS**（scope=69 hooked=48 unhooked=21）|
+| 五 CI job / 自举链 | §13.5 |
+| **二进制同一性论证** | 注释/测试改动后**重建 = `64c8a7d6…` 与判据二进制逐字节同** ⇒ 已跑的 canary/parity/probes 结论对**终态**成立（不是「大概没变」）|
+
+### 13.3 腿 D① 突变（**关掉 apx hack**）——**通过**
+
+把 `:1342-1343` 两行 hack 注释化 → 重建 → 跑判据：**apx 批套件 23 例全绿 + 本批 6 例 + 腿 B 全绿**
+⇒ **通用机制独立成立**（hack 的覆盖面被声明面机制完全接管）⇒ **hack 冗余确认**（退役判据「腿 D① 连绿两批」第一步达成）；
+随后恢复源码 + 重建 + 复验（全绿）。
+
+### 13.4 ⚠ R4（元组）与 T3 口径的**冲突**（须你裁）
+
+- 你的 T3 口径写「腿 A **5/5** 转绿（R1–R5）」，但 **裁-AGG-3** 已裁「**元组**（无声明面）**登记，不纳入本批**」。
+- 实测事实：元组构造（`ir_gen.cr` 的 `EXPR_TUPLE` 分支）给元组 var 定型 `TI_INT`、**不携带元素 ti** ⇒ 数字下标读（`t . 0`）**取不到声明面** ⇒ 本批的通道覆盖不到它（R4 修后仍 = 1）。
+- **我的处置（按裁-AGG-3 执行，不静默）**：3 读点实施**不含元组**；套件把 R4 移入 **`[GAP]` 组**——**只观测、不计入判据**（打印期望值与实测值，注明裁决与出处）；后续批修复时须把它移回 `CASES`。
+- **若要现在就覆盖元组**（最小机制，供你裁）：在元组构造点按「**全元素同形**」把该形式登记进**既有声明侧表**（`irv_set_decl_ti(tv, TI_DEX_S)`，2 行、零 alloc）；数字下标读再查 `slot_decl_ti(obj_var)`。
+  **代价/风险**：`slot_decl_ti(tv)` 变 `TI_DEX_S` 会波及唯一取址面 `ir_gen.cr:1530`（`&tuple` 的 pointee 型行身份：`TYP_PTR(TI_INT)` → `TYP_PTR(TI_DEX_S)`）⇒ 需一条实证；且这是**新机制**，与「最小改动」口径相抵。**推荐：维持裁-AGG-3（登记）**。
+
+### 13.5 五 CI job / 自举链（回填 · 全部 rc=0）
+
+| job | rc | 关键内证 |
+|---|---|---|
+| `check` | **0** | corearch / corelsp `build log clean (error[ = 0, undefined = 0)`；`check src/compiler` 0 error |
+| `bootstrap-tests` | **0** | bootstrap 套件全绿 |
+| `selfhost-tests` | **0** | `test_ccr_types.py` **49/49** · `interp_parity` **23/23** · 本批套件（挂点后随 job 跑）全绿 |
+| `suite` | **0** | **23 档 ALL PASS**（含 `apx_conversion_test.cr`）|
+| `full-bootstrap` | **0** | `cmp /tmp/corec2 /tmp/corec3` **恒等**（2904726 B · sha256 `b8e4298ad0d7…`）|
+
+> 命令口径：`CI_JOB_NAME=<job> bash src/ci/run.sh`（**argv 写法 = 假红**，见 `tools/baseline/REBUILD.md` 的命令层陷阱段）。
+
+**二进制同一性论证**（§13.2 末行）：终态源码（注释/测试改动后）重建 = `64c8a7d6…` 与判据二进制**逐字节同** ⇒ 已在 T3 中期跑出的 canary/parity/probes 三组结论**对终态继续成立**（不是「大概没变」）。
+
+### 13.6 换代重锁清单（**裁-AGG-7 的四要素**：旧值 · 新值 · 归因 · 出处）
+
+| 载体 | 旧 → 新 | 处置 |
+|---|---|---|
+| `cir_cache.cr:51` | `CIR_CACHE_VER` 17 → **18** | 改常量 + 注释（归因写清）|
+| `tests/selfhost/test_ccr_types.py` ㉛/㊲ + 模块头注 | 断言 `ver == 17` → **18** | 断言改 18 + 三处注释写明「旧值 17 / 新值 18 / 归因 / 出处」|
+| `tests/selfhost/test_cache_identity.py` | `VER_EXPECTED` 17 → **18** | 同上（**布局未变** ⇒ `layout()` 的 v17 分支按 `VER_EXPECTED` 复用，无需新分支）|
+| `src/compiler/dyn_arr.cr:112` · `src/compiler/ccr_io.cr:137` | 陈旧注释「CIR_CACHE_VER=17 不 bump」 | 注释更新 + 指向本批（**注释-only，零行为**）|
+| `.ccr`（`CCR_VERSION=9`） | **不 bump** | 交付格式、无快照复用语义；但**报告须写明「dex 程序的 `.ccr` 内容会变」**（防「版本没 bump」被读成「内容没变」）|
+
+> **重锁过程留痕**：首轮 `selfhost-tests` **rc=1**，两例因版本位（`test_p4t4_cir_snapshot_layout_unbumped` / `test_p5t2_snapshot_disk_code_preserved`）；重锁后**复跑又红**——但那次是**环境 flake**（同套件在干净缓存下 49/49 通过；改前二进制对照跑 47/49 = 恰为该两例版本断言，属预期）；第三次红 = `test_cache_identity.py` 的 `VER_EXPECTED` 未同步（本表第 3 行）⇒ 一并重锁后 **rc=0**。
+
+### 13.7 未覆盖面（本批登记，供后续批）
+
+- **U7 · `IR_SLICE` 产物的元素读**：切片 var 的 IR 型恒 `TI_INT`（且 `is_ptr_var:627` 对 `TI_DEX_S` **早退 0** ⇒ 改切片 var 型会改指针判断，**不可**用「给切片 var 定型」的办法）⇒ 切片元素的声明形式**无处寄存**（若要覆盖需新增侧表或换寄存面）。
+- **U1** match 结果槽（裁-AGG-2）· **U2/U4 元组与泛型**（裁-AGG-3/-4）——已在 §10 登记，本批未动。
+
+### 13.8 T3 未决（转 T4/T5）
+
+- T3-1：`.ccr` SYM per-var 型的直接断言（可选加固；本批用门控见证 + canary/parity 覆盖）。
+- T3-2：R4 的取裁（§13.4）。
+- T3-3：腿 D①「连绿两批」的第二次（下批复跑本套件 + apx 套件且 hack 仍关）⇒ 达成后可删 hack（TODO #78 追记）。
+- T3-4：`.cn`/`.cir` 之外是否有第三处落 per-var 型的产物（本轮扫描：`ccr_io.cr:631/:690` 与 `cir_cache.cr:259` 两处，未见第三处）。
