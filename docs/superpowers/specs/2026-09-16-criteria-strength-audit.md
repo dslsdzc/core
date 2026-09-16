@@ -148,7 +148,7 @@ apx 审计（`2026-09-16-apx-conversion-audit.md`）表 B 的十条探针源**�
 **落地要求（与 §0/§0bis/§0ter 并列的第四条）**：
 > **凡是「改判定触发面」的批次，判据必须**把「新增诊断」默认按**回归嫌疑**处理**，逐条归因到「本来就该报」才计入修好；**且必须有「原载体回归」这一腿**（本例 = 29 探针 + 已挂套件的 rc 基线），因为**新形态的钉子不等价于原载体的钉子**。
 
-**出处**：`docs/superpowers/plans/2026-09-16-arg-inference-fix.md` §3ter/§3quinquies/§3sexies · `TODO.md #93` 追记 4。
+**出处**：`docs/superpowers/plans/2026-09-16-arg-inference-fix.md` §3ter · §3quater · §3quinquies · `TODO.md #93` 追记 4。
 
 ## 1. 表 A：字节级/序列级断言清单（22 条；坐标为**当前**实读）
 
