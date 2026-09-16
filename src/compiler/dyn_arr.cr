@@ -920,6 +920,17 @@ fn grow_rip_patch(needed: int) {
     nb2 := alloc(nc * 8); _dyncpy(g_x86_rip_patch_globals, g_x86_rip_patch_cap * 8, nb2); g_x86_rip_patch_globals = nb2;
     g_x86_rip_patch_cap = nc; }
 
+// `.so` 扩展索引侧表（第 4 批 #82/#83）：**动态增长**（本仓约定：All arrays are dynamic
+// byte buffers, no MAX_* limits——这正是 TODO #98「容量硬编码 128 + 写入无界」要消灭的形态）。
+fn grow_so_side(needed: int) {
+    if needed < g_so_side_cap { return; }
+    nc : ., mut = g_so_side_cap * 2; if nc < 32 { nc = 32; } if nc < needed { nc = needed + 32; }
+    sz := nc * 8;
+    n1 := alloc(sz); _dyncpy(g_so_side_name, g_so_side_cap*8, n1); g_so_side_name = n1;
+    n2 := alloc(sz); _dyncpy(g_so_side_tags, g_so_side_cap*8, n2); g_so_side_tags = n2;
+    n3 := alloc(sz); _dyncpy(g_so_side_type, g_so_side_cap*8, n3); g_so_side_type = n3;
+    g_so_side_cap = nc; }
+
 fn grow_ext_rel(needed: int) {
     if needed < g_x86_ext_rel_cap { return; }
     nc : ., mut = g_x86_ext_rel_cap * 2; if nc < 32 { nc = 32; } if nc < needed { nc = needed + 32; }

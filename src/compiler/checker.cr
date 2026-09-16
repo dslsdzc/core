@@ -815,23 +815,37 @@ fn find_sym(name_idx: int) -> int {
 fn find_gsym(name_idx: int) -> int {
     i : ., mut = g_sym_count - 1;
     loop {
-        if i < 0 { return -1; }
+        if i < 0 { break; }   // 主表未命中 ⇒ 落到下方侧表回退
         if sym_name(i) == name_idx && sym_kind(i) >= SYM_FN && sym_kind(i) <= SYM_SO_FN { return i; }
         i = i - 1;
     }
-    return -1;
+    // 侧表回退（第 4 批 #82/#83）：索引元数据只在名字**被引用**（走到这里）且主表**没有**
+    // 同名条目时才物化 ⇒ 未引用条目零产物足迹；且同名 `.cr` 声明优先（裁-HR-2：
+    // 宿主家目录里的文件**不得**悄悄改写用户源码声明的含义）。
+    // **查不到时做了什么**：主表无 + 侧表无 ⇒ 返回 -1，由调用点报 Undefined（响亮）。
+    // **绝不**在此放行——那是「响亮失败 → 静默错值」的退化（本批红线）。
+    ssi := find_so_side(name_idx);
+    if ssi < 0 { return -1; }
+    return so_materialize(ssi);
 }
 
 fn find_so_fn(name_idx: int) -> int {
-    i : ., mut = 0;  // forward scan — SYM_SO_FN entries are before SYM_FN
+    i : ., mut = 0;
     loop {
-        if i >= g_sym_count { return -1; }
-        if sym_name(i) == name_idx && sym_kind(i) == SYM_SO_FN {
-            return i;
+        if i >= g_sym_count { break; }
+        if sym_name(i) == name_idx {
+            if sym_kind(i) == SYM_SO_FN { return i; }
+            // 同名 `.cr` 声明优先（裁-HR-2）⇒ 不物化 SO_FN（`print`/`println` 走声明面）。
+            // 注：原先此处注释称「SO_FN 在 SYM_FN 之前」——那是**改造前**的现状描述
+            // （导入期注册 + check_all 复位后追加）；改造后物化发生在**首次查找**，
+            // 物化条目追加在表尾，且「有声明则不物化」⇒ 该顺序假设已不存在。
+            return -1;
         }
         i = i + 1;
     }
-    return -1;
+    ssi := find_so_side(name_idx);
+    if ssi < 0 { return -1; }
+    return so_materialize(ssi);
 }
 
 
@@ -3867,22 +3881,15 @@ fn infer_expr(node: int) -> int {
 
 fn check_all() {
     init_types();
-    // Save SYM_SO_FN entries before g_sym_count reset destroys them
-    so_count : ., mut = 0;
-    so_names : string, mut = alloc(128 * 8);
-    so_types : string, mut = alloc(128 * 8);
-    so_nodes : string, mut = alloc(128 * 8);
-    si_scan : ., mut = 0;
-    loop {
-        if si_scan >= g_sym_count { break; }
-        if sym_kind(si_scan) == SYM_SO_FN {
-            w64(so_names, so_count * 8, sym_name(si_scan));
-            w64(so_types, so_count * 8, sym_type(si_scan));
-            w64(so_nodes, so_count * 8, sym_node(si_scan));
-            so_count = so_count + 1;
-        }
-        si_scan = si_scan + 1;
-    }
+    // 【已删除：SYM_SO_FN 保全缓冲】（第 4 批 #82/#83 T3，2026-09-17）
+    // 原实现在此把 `SYM_SO_FN` 条目搬进 `alloc(128*8)` 三个临时数组、复位后再追加回去。
+    // 它随「`import` 期即注册 SO_FN」而存在；本批改为**侧表 + 首次引用时物化**后：
+    //   · 物化发生在 `g_sym_count` 复位**之后**（检查期首次查找）⇒ 复位前表内无 SO_FN
+    //     ⇒ 存取皆为 0 ⇒ 本块成为**死码**；
+    //   · 因而一并删除。**TODO #98 的越界写堆随之从根上消失**（那三条 `alloc(128*8)`
+    //     配合无上界的 `w64(so_names, so_count*8, …)`：索引 >128 行时越界，实测 N=2000
+    //     时对合法声明 `src/stdlib/io.cr:27 read_file` 报假诊断；N=200 时**产物不变但堆已坏**）。
+    //   ⚠ 该缺陷的历史不得随代码删除而消失：#98 条目保留，状态记「随本批消除」。
     g_sym_count = 0;
     g_scope_depth = 0; g_scope_bounds_cap = 0;
     g_diag_count = 0; g_diag_cap = 0;
@@ -3896,19 +3903,8 @@ fn check_all() {
     collect_decls();
     init_builtins();
 
-    // Restore SYM_SO_FN entries lost by g_sym_count reset
-    ri : ., mut = 0;
-    loop {
-        if ri >= so_count { break; }
-        si := g_sym_count;
-        grow_syms(si + 1);
-        sym_set_name(si, r64(so_names, ri * 8));
-        sym_set_kind(si, SYM_SO_FN);
-        sym_set_type(si, r64(so_types, ri * 8));
-        sym_set_node(si, r64(so_nodes, ri * 8));
-        g_sym_count = si + 1;
-        ri = ri + 1;
-    }
+    // 【已删除：SYM_SO_FN 回填循环】（同上 T3）——与上方保全缓冲同生共死；
+    // 物化改由 `find_gsym`/`find_so_fn` 的侧表回退承担（首次引用时追加，天然在复位之后）。
 
     // Register runtime builtins as proper SYM_FN (no .cr body, implemented in rt.s)
     // These must come after collect_decls so user-defined funcs take priority.

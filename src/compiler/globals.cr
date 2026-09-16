@@ -250,6 +250,14 @@ g_next_label : int, mut;
 g_x86_str_offs : string, mut;           g_x86_str_count : int, mut;     g_x86_str_cap : int, mut;
 g_x86_ext_rel_pos : string, mut;        g_x86_ext_rel_name : string, mut;
 g_x86_ext_rel_count : int, mut;         g_x86_ext_rel_cap : int, mut;
+
+// `.so` 扩展索引**侧表**（第 4 批 #82/#83）：索引解析结果先落此处，**不**直接进串表/符号表。
+// 只有被程序**引用**的名字才由 `so_materialize`（module.cr）物化 ⇒ 未引用条目零产物足迹。
+// name 存**原始串**（不能存 intern 索引——注册期 intern 正是 #82 的泄漏本身）；
+// tags/type 存 int（与符号表 SO_FN 条目的 sym_type/sym_node 同义）。
+g_so_side_name : string, mut;           g_so_side_tags : string, mut;
+g_so_side_type : string, mut;
+g_so_side_count : int, mut;             g_so_side_cap : int, mut;
 g_x86_rip_patch_pos : string, mut;      g_x86_rip_patch_globals : string, mut;
 g_x86_rip_patch_count : int, mut;       g_x86_rip_patch_cap : int, mut;
 g_x86_vars : string, mut;               g_x86_var_count : int, mut;     g_x86_var_cap : int, mut;
