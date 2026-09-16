@@ -155,7 +155,7 @@ src/compiler/     （**全 38 个 .cr**；2026-09-16 文档审计修订：原清
 ├── diag.cr         → Compiler diagnostics（corec+corelsp；含 fail-closed 豁免表 `diag_gate_exempt`）
 ├── dump.cr         → Debug dump utilities（corec）
 ├── dyn_arr.cr      → Dynamic array grow helpers + string interning（common+corec+corelsp）
-├── elf.cr          → ⚠ **死文件**（566 行、零 importer、三面清单皆无——TODO #7；**勿引**）
+├── elf.cr          → ⚠ **死文件**（566 行、零 importer、三面清单皆无——TODO #2026-09-10-3；**勿引**）
 ├── entry.cr        → project-mode 入口 shim（`fn main() { return compiler_main(); }`）
 ├── ext_mgr.cr      → 编译器扩展管理器——插件注册表 + 钩子调度（corec）
 ├── ext_safety.cr   → 运行时安全检查插件（经 ext_mgr 注册到编译钩子）（corec）

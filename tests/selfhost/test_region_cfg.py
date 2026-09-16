@@ -168,12 +168,12 @@ def test_while_region_and_termination_edge():
     assert any(f == exit_node for f, _ in states), \
         f"post-while side effect does not depend on loop exit node {exit_node}:\n{out}"
 
-# --- Interpreter loop execution (TODO#3) ---
+# --- Interpreter loop execution (TODO #2026-07-25-1) ---
 # `corec run` compiles and interprets inline code; main()'s return value
 # becomes the process exit code.
 
 def test_for_loop_run():
-    """for 循环在解释器中正确执行并返回累加和（TODO#3 回归用例）"""
+    """for 循环在解释器中正确执行并返回累加和（TODO #2026-07-25-1 回归用例）"""
     r = subprocess.run(['./build/corec', 'run',
                         'fn main() -> int { s : ., mut = 0; for i in 0..4 { s = s + i; } return s; }'],
                        capture_output=True, text=True, cwd=BASE, timeout=30)

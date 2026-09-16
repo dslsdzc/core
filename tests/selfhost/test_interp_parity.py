@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TODO #11 判据：解释器 callee 内联路径 ≡ 主循环路径（≡ ELF oracle）。
+"""TODO #2026-09-10-7 判据：解释器 callee 内联路径 ≡ 主循环路径（≡ ELF oracle）。
 
 R1 终审实测：`interp.cr` 的 callee 内联分派相对主循环缺 18 个 opcode
 （4/17/18/23/24/25/26/27/28/29/30/41/42/43/44/45/48/51）——同一段源码写在
@@ -26,7 +26,7 @@ N01/TA01）属于前端既有行为，不属本判据判域。
 ELF 侧 SIGILL/SIGSEGV 在 subprocess.returncode 里是负信号号（-4 / -11）；解释器
 侧越界陷阱与深度守卫的 rc 是 255（main 返回 -1，低 8 位）。
 
-判据前清 cir 缓存（缓存键不含编译器身份，TODO #5）：否则旧 IR 冒充新编译器，
+判据前清 cir 缓存（缓存键不含编译器身份，TODO #2026-09-10-1）：否则旧 IR 冒充新编译器，
 本判据会被静默污染（见 test_global_init.py 同款说明）。
 """
 
@@ -77,7 +77,7 @@ CASES = [
     ),
     # —— 裸指针族（18 REF / 25 DEREF / 26 STORE_PTR / 31 ADDR_INDEX）——
     (
-        # TODO #11 复现原件：g:[int;3]=[5,6,7]; fn f(){ p:=&g[2]; return *p; }
+        # TODO #2026-09-10-7 复现原件：g:[int;3]=[5,6,7]; fn f(){ p:=&g[2]; return *p; }
         "bare_ptr_deref_callee",
         "g : [int;3] = [5,6,7];",
         "p := &g[2]; return *p;",
@@ -222,7 +222,7 @@ LOUD_MARKERS = {
 # 内联路径只执行 probe() 的节点区（g_df_func_node_start..+count），故节点区
 # 里没有目标 opcode 的用例等于没测（空转）——写法错（如 `apx dex`）或前端
 # 不再发射该 opcode 时，用例会静默失去判据价值，此处用 `corec cir` 钉死。
-# TODO #11 清单里唯一无法覆盖的是 41 IR_DYN_TAG：ir_gen.cr 无发射点
+# TODO #2026-09-10-7 清单里唯一无法覆盖的是 41 IR_DYN_TAG：ir_gen.cr 无发射点
 # （regalloc/instr/sizes/dataflow/opt/interp 均已有处理器）——该 opcode 当前
 # 不可达，内联路径的处理器是纯防御性对齐，不列入下表。
 EXPECT_OPS = {
@@ -253,7 +253,7 @@ EXPECT_OPS = {
 
 
 def clean_cache() -> None:
-    """cir 缓存键不含编译器身份（TODO #5）——判据前清缓存，失败即报错退出。"""
+    """cir 缓存键不含编译器身份（TODO #2026-09-10-1）——判据前清缓存，失败即报错退出。"""
     result = subprocess.run(
         ["nice", "-n", "19", str(COREC), "clean-cache"],
         cwd=BASE, capture_output=True, text=True,

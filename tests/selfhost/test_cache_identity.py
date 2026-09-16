@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TODO #5 回归：cir 缓存缺编译器身份 ⇒ 跨编译器重建不失效（2026-09-11 修复）。
+"""TODO #2026-09-10-1 回归：cir 缓存缺编译器身份 ⇒ 跨编译器重建不失效（2026-09-11 修复）。
 
 背景（RED，修复前实测，pre-fix 二进制 sha256 f0f00d7d…）：
   缓存键 = 源路径::函数名，头部指纹 = magic/格式版本/纯 AST 指纹（只覆盖目标源）
@@ -9,7 +9,7 @@
   互换（=「另一个编译器写下的」索引序）后重跑——条目原样未被重写（命中），
   dump 通道随之错位：`binary 24 = a + b` → `24 = 20 + b`、`dest=22` → `dest=a`，
   rc=0 静默污染。（同族第二实例 = 同一二进制冷/热缓存 dump 渲染差异，见
-  TODO #5 末条，非本单。）
+  TODO #2026-09-10-1 末条，非本单。）
 
 修复：缓存头写入**运行中编译器自身 ELF 的内容哈希**（/proc/self/exe 全文件
   单趟乘加哈希，cir_cache.cr cir_compiler_identity/cir_hash_running_binary），
@@ -46,7 +46,7 @@ BASE = pathlib.Path(__file__).resolve().parents[2]
 COREC = BASE / "build" / "corec"
 CACHE_DIR = BASE / ".core" / "cache" / "cir"
 
-# 17 → 18：TODO #78「聚合读丢型」批 2（裁-AGG-7）换代——旧值 17 / 新值 18 /
+# 17 → 18：TODO #2026-09-16-16「聚合读丢型」批 2（裁-AGG-7）换代——旧值 17 / 新值 18 /
 # 归因 = 聚合读结果槽型由 TI_INT 改为声明面形式（旧快照与新语义不等价，命中旧条目会把
 # 「丢型」的坏 IR 复活）/ 出处 = docs/superpowers/plans/2026-09-16-agg-read-type.md §12.4·§13。
 # **布局未变**（v18 与 v17 同构：magic/ver/identity/fp/sig/name_len/name…）⇒ layout() 的

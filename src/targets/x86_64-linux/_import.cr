@@ -21,7 +21,7 @@ import lower_to_core
 // 与 concat 面同一证据：monomorph 在 corearch 链接集**零代码引用**（全部定义符只出现在
 // globals.cr 的注释里），单态化本就是前端 ir_gen 期动作。删除本行 = 两面清单重新对齐；
 // 该缺陷的机械守卫 = tests/selfhost/test_backend_bootstrap.py 的 project-mode error[ 门
-// （TODO #31：该套件未挂 CI，收官全量枚举才跑到）。若将来自复活本文件，须先让它不依赖
+// （TODO #2026-09-11-13：该套件未挂 CI，收官全量枚举才跑到）。若将来自复活本文件，须先让它不依赖
 // checker/parser 层符号。
 // R2 P4 Task 2（TYPE 段内容面读回）：ccr_io.cr 的 load 侧重建类型项表——调
 // tt_hash5/grow_tt_index/tt_reindex/tt_layer_reset（type_terms.cr）与 --dump-types

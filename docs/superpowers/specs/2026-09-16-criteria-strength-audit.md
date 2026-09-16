@@ -195,7 +195,7 @@ apx 审计（`2026-09-16-apx-conversion-audit.md`）表 B 的十条探针源**�
 | # | 兜底 | 覆盖不到 |
 |---|---|---|
 | C1 | ELF canary `95084e7b…d475`（> `tests/suite/ptr_arith.cr`）——**已改机器闸门**（canary_check.sh + canary_values.tsv + test_canary_carrier.py；run.sh:137,142）| 非 canary 语料（含全部新写测试点）|
-| C2 | `.ccr` 四条锁定值——**同上机器闸门**（值表 5 条；「环境归一化（空 HOME）」口径）| 非 pa/gt 语料。**⚠ 值表已换代**：旧代 G2 值（`fb4a3b59…`/`592afa31…`/`ddec1ce6…`/`cd2af565…`）**自本批起作废**，且揭示「锁定值跨机不可复现」效力范围（**TODO #82**）——**引用不得沿用旧代** |
+| C2 | `.ccr` 四条锁定值——**同上机器闸门**（值表 5 条；「环境归一化（空 HOME）」口径）| 非 pa/gt 语料。**⚠ 值表已换代**：旧代 G2 值（`fb4a3b59…`/`592afa31…`/`ddec1ce6…`/`cd2af565…`）**自本批起作废**，且揭示「锁定值跨机不可复现」效力范围（**TODO #2026-09-16-20**）——**引用不得沿用旧代** |
 | C3 | `test_hit_table.py:465` 注入逐字节等（强）| 事件 1-4（不可达）；**未挂 CI**（allowlist:25）|
 | C4 | `test_backend_bootstrap.py:106` | 非 corearch 单元；**未挂 CI**（allowlist:19 自标「最高危」）|
 | C5 | `test_mw_task1..6` 的 ELF 字节判据（A2/A3/A6）| 未入语料形态；**全部未挂 CI**（allowlist:30-35）|

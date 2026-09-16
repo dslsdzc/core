@@ -14,7 +14,7 @@ docs/superpowers/specs/2026-09-10-type-interface-unification-design.md §5.2）�
      （措辞/去重/rc 逐字未动；0 → 新措辞的切换归 Task 6 Step 3）。「不判」（-1）仍存在但
      域收窄 = 非命名实参 / 泛型形参实参 / 签名编码不可判面（登记；覆盖集 =
      test_iface_satisfies.py）。
-  D. F4（形参链导航，TODO #21）：`infer_gen_call` 的 `pn = pn + 1` 落在**类型节点**上
+  D. F4（形参链导航，TODO #2026-09-11-4）：`infer_gen_call` 的 `pn = pn + 1` 落在**类型节点**上
      （每个形参的类型节点在其形参节点之前分配）⇒ 后续形参的声明类型被绕过、未绑定形参被
      凭空绑定。本批修为「前扫到下一个 EXPR_PARAM」——正控 = 旧态假拒现通过；负控 = 真不适配仍拒。
   E. monomorph 实例键**类型项化**：键由「实参名串（非原生 → "int" 兜底）」改为类型行规范结构名

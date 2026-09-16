@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""F5 同族（TODO #25 姊妹条目）：EXPR_STRUCT / EXPR_STRUCTPAT / EXPR_ARRAY 聚合字面量槽位。
+"""F5 同族（TODO #2026-09-16-2 姊妹条目）：EXPR_STRUCT / EXPR_STRUCTPAT / EXPR_ARRAY 聚合字面量槽位。
 
 根因（与已修的 EXPR_TUPLE 同源——一处槽契约、三处分支实例）：
   parser 的 struct 字面量 / struct 模式 / 数组字面量三分支曾把「字段值（元素）节点在 g_ast

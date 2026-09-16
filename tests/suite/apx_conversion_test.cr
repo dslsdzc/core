@@ -5,7 +5,7 @@
 // （suite 档跑红会拖挂整个 suite job）。
 //
 // 判据：全部经 **`@raw_int`** 锚定 scaled 整数（唯一显式形式通道）——不直接比 decimal，
-// 否则会踩 TODO #92（apx 字面量走 lexer 位模式，~2ulp 截断；与聚合槽里的精确 scaled 值
+// 否则会踩 TODO #2026-09-16-30（apx 字面量走 lexer 位模式，~2ulp 截断；与聚合槽里的精确 scaled 值
 // 在 binary64 下可不相等）。
 //
 // 两条硬约束（见 py 套件头注）：涉全局探针**必须 `mut`**；apx 探针**一律显式形**
@@ -23,7 +23,7 @@ g_apx : dex, apx, mut = scaled7();
 g_exact : dex, mut = scaled7();
 
 fn main() -> int {
-    // 1. 方法调用实参（TODO #80 原形）
+    // 1. 方法调用实参（TODO #2026-09-16-17 原形）
     d : dex, apx = 7.0;
     s : ., mut = S3 { f = 0.0 };
     if s.m(d) != 7 { return 1; }
@@ -31,7 +31,7 @@ fn main() -> int {
     // 2. 模块限定调用（apx 批 T2 新增活点；与直调同值对拍）
     //    ⚠ **必须先绑定到变量**：模块限定调用**直接作实参**（`str_eq(m.f(x), "y")`）在
     //    本批起点即 **SIGSEGV 139**——**既有缺陷，非本批引入**（T3/T5 实测：T3 二进制、
-    //    预变更二进制、**冻结基线 97f4394f** 三者同崩）⇒ 见 TODO #93；本档走绑定形。
+    //    预变更二进制、**冻结基线 97f4394f** 三者同崩）⇒ 见 TODO #2026-09-16-31；本档走绑定形。
     ma := dex.dex_str(d);
     me := dex_str(d);
     if !str_eq(ma, me) { return 2; }

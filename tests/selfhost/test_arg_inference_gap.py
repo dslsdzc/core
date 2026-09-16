@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""✅ **已修（#93 批 T3）—— 本套件已挂 CI**（TODO #93；详见
+"""✅ **已修（#93 批 T3）—— 本套件已挂 CI**（TODO #2026-09-16-31；详见
 `docs/superpowers/specs/2026-09-16-arg-inference-gap.md`）。
 
 被测缺陷 = **「已解析直调的实参推断缺失」**（不是「一个 139」）：
@@ -232,7 +232,7 @@ def cir_of(src):
 
 def test_leg_d_generic_instance_key():
     """腿 D（裁-ARG-8 H4）：同一泛型调用在**实参位**必须得**精确键**（`idf[P]`），
-    不得是退化键（`idf[unit]`）—— **TODO #95 的既有缺陷 = 本批附带修复**。
+    不得是退化键（`idf[unit]`）—— **TODO #2026-09-16-33 的既有缺陷 = 本批附带修复**。
     与腿 B 同性质：**「修好了」的正据**（改前实参位必得 `idf[unit]`）。"""
     let_src = """
 struct P { v: int }

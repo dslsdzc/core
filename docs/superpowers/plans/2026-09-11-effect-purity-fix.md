@@ -87,7 +87,7 @@ fn fi_ispure_of(name: str_ni: int) -> int
 - [ ] Step 1 全量回归（已跑集 + 全仓 38 套件）
 - [ ] Step 2 **ELF 逐字节复验** + `.ccr` 变更实测报告 + **自举稳定**（连续两次编译产物一致）
 - [ ] Step 3 自举链（`corec2/corec3` `cmp` IDENTICAL + N06=0 + 冒烟 42）
-- [ ] Step 4 文档：TODO #25 家族更新（fi_ispure 修毕；**lazy use_count 时序缺陷保持独立**；`IR_DYN_DISPATCH` 间接调用覆盖）；spec（S-C/S-E/S-B5）里"纯度事实不可靠"的措辞改为"已于 <commit> 修复"，切片门禁相应恢复
+- [ ] Step 4 文档：TODO #2026-09-16-2 家族更新（fi_ispure 修毕；**lazy use_count 时序缺陷保持独立**；`IR_DYN_DISPATCH` 间接调用覆盖）；spec（S-C/S-E/S-B5）里"纯度事实不可靠"的措辞改为"已于 <commit> 修复"，切片门禁相应恢复
 - [ ] Step 5 提交（路径限定）
 
 ---

@@ -5,7 +5,7 @@
 # 判据（tests/harness/test_ci_hook_coverage.py）：枚举 tests/{selfhost,bootstrap,harness}/*.py
 # 与 run.sh 的可执行挂点做差集 ⇒ **差集必须逐条在此**；反向亦查（已挂/已删条目 = 白名单腐烂 ⇒ FAIL）。
 # 增减纪律：**删条目 = 该守卫已挂**（判据会要求同步删）；**加条目 = 显式登记一个新缺口**
-# （须写理由，最好在 TODO #31 同批登记）。
+# （须写理由，最好在 TODO #2026-09-11-13 同批登记）。
 #
 # 审计基线（2026-09-16 **判据网加固批**当场重算；本行 = criteria-harden 分支树）：
 #   scope 66（selfhost 56 · bootstrap 7 · harness 4——harness +1 = 本批新增
@@ -33,9 +33,9 @@ tests/selfhost/test_directory_build.py	未挂（历史缺口）：目录路径�
 tests/selfhost/test_global_init.py	未挂（历史缺口）：全局初始化语义双路径；需 corec
 tests/selfhost/test_interp_float.py	未挂（历史缺口）：解释器 dex/enum/dyn/pointer；需 corec
 tests/selfhost/test_lexer_parity.py	未挂（历史缺口）：词法对照（两编译器均拒 `_`/宽度后缀）；需 corec
-tests/selfhost/test_lsp.py	未挂（**TODO #31 点名**）：corelsp 八组集成；进程级 ⇒ 挂点须实测时长
+tests/selfhost/test_lsp.py	未挂（**TODO #2026-09-11-13 点名**）：corelsp 八组集成；进程级 ⇒ 挂点须实测时长
 tests/selfhost/test_mw_task1.py	未挂（历史缺口）：int 多字 M1 边界套件族；需 corec
-tests/selfhost/test_mw_task2.py	未挂（同族）。**现状（判据载体化批 2026-09-16 实核）**：其零 diff 断言（`:284-303`）原先「基线不在就 [SKIP]」而基线在 build/（不入库）+ run.sh 从不传 --snapshot ⇒ **判据可整体静默消失**（新克隆/CI 恒 SKIP 且 rc=0）。本批已改为**默认 fail-closed**（缺基线 ⇒ FAIL；仅显式 --allow-skip/--skip-zdiff 才降级）。**为何仍未挂 CI**：零 diff 腿的基线必须在**改动前**编译器上产（--snapshot），CI 每次都是改动后的树 ⇒ 该腿的**参照物结构性不可得**，挂上去只会恒 FAIL 或被迫 --allow-skip（= 挂了等于没挂）。若要机器化，需把基线**入仓**（二进制不入库纪律冲突，须先取裁）或改为「结构断言 + 语义零变化」口径（TODO #26 口径）⇒ **成本 = 中高，且属口径换代不是挂点扩容**。
+tests/selfhost/test_mw_task2.py	未挂（同族）。**现状（判据载体化批 2026-09-16 实核）**：其零 diff 断言（`:284-303`）原先「基线不在就 [SKIP]」而基线在 build/（不入库）+ run.sh 从不传 --snapshot ⇒ **判据可整体静默消失**（新克隆/CI 恒 SKIP 且 rc=0）。本批已改为**默认 fail-closed**（缺基线 ⇒ FAIL；仅显式 --allow-skip/--skip-zdiff 才降级）。**为何仍未挂 CI**：零 diff 腿的基线必须在**改动前**编译器上产（--snapshot），CI 每次都是改动后的树 ⇒ 该腿的**参照物结构性不可得**，挂上去只会恒 FAIL 或被迫 --allow-skip（= 挂了等于没挂）。若要机器化，需把基线**入仓**（二进制不入库纪律冲突，须先取裁）或改为「结构断言 + 语义零变化」口径（TODO #2026-09-11-9 口径）⇒ **成本 = 中高，且属口径换代不是挂点扩容**。
 tests/selfhost/test_mw_task3.py	未挂（同族）
 tests/selfhost/test_mw_task4.py	未挂（同族）
 tests/selfhost/test_mw_task5.py	未挂（同族）

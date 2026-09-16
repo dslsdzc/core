@@ -612,7 +612,7 @@ fn gen_clone_tree(node: int) -> int {
     if k == EXPR_LET { b2 := gen_clone_tree(b); c2 := gen_clone_tree(c); n := ast_alloc(k, a, b2, c2, iv, tv, d, ln, cl); gen_dedup_add(node, n); return n; }
 
     // ── EXPR_STRUCT: a=type_name_ni(NOT), b=first wrapper(YES, consecutive), c=field_count(NOT)；
-    //    wrapper.a = field value node、wrapper.b = 字段名 idx（TODO #29 ①；-1 = 无名字信息）
+    //    wrapper.a = field value node、wrapper.b = 字段名 idx（TODO #2026-09-11-11 ①；-1 = 无名字信息）
     //    （F5 契约，见 parser.cr struct 字面量分支）──
     if k == EXPR_STRUCT {
         if b >= 0 && c > 0 {

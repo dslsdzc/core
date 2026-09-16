@@ -505,7 +505,7 @@ class X86_64StackAsmGen:
         for blk in blocks:
             if blk != func.entry:
                 self.emit(f"{blk.name}:")
-            # TODO #29 附带修复：ReturnInstr 是**块终结符**——其后同块指令是死代码，既不得
+            # TODO #2026-09-11-11 附带修复：ReturnInstr 是**块终结符**——其后同块指令是死代码，既不得
             # 继续发射（否则其 `mov rax, ...` 会把该函数返回值覆盖成**最后**一个 return 的
             # 值：死代码赢，静默错值——实测 checker.cr 的 unify_types `return true; return
             # false;` 被编成恒返 false），也不得让执行流落入下一个块。修复前仅在「块的最后

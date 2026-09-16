@@ -1,8 +1,8 @@
-# TODO #60 批实施计划：暖缓存诊断静默（warm-cache diagnostics）+ 判据网暖态腿
+# TODO #2026-09-15-5 批实施计划：暖缓存诊断静默（warm-cache diagnostics）+ 判据网暖态腿
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 消灭**暖 `.cir` 缓存命中后安全检查面诊断静默消失**这一类缺陷（不安全程序**第二次编译起静默通过**），并把「判据网对该面失明」这一**元缺陷**一并收口（给两条 runner 加**暖态腿**）。范围 = 两条腿：**主腿 = TODO #60 缺陷**；**派生腿 = 判据网暖态腿**。
+**Goal:** 消灭**暖 `.cir` 缓存命中后安全检查面诊断静默消失**这一类缺陷（不安全程序**第二次编译起静默通过**），并把「判据网对该面失明」这一**元缺陷**一并收口（给两条 runner 加**暖态腿**）。范围 = 两条腿：**主腿 = TODO #2026-09-15-5 缺陷**；**派生腿 = 判据网暖态腿**。
 
 **Architecture:** 五段：① **前置侦查 + 冻结基线 + 侧表面全集清点**（T0，源码零改动）；② **根因实证**（T1：冷/暖两态 + 装载期不变量探针，把「疑似」变「实锤」）；③ **修法落地**（T2，按裁决门取向；候选 a/b/c/d 见 §2）；④ **判据网暖态腿**（T3：`parity_run.sh`/`probes_run.sh` 加「同源二次构建」腿）；⑤ **判据复验 + 文档 + 台账**（T4）。
 
@@ -78,7 +78,7 @@
 | 10 | `g_ir_globals` / `g_x86_is_global` | `ir_gen_globals`（**循环前一次**） | 不载 | 全局寻址 | ✓（循环前跑，与命中无关） |
 | 11 | 前端族（`g_syms`/`g_funcs`/`g_structs`/`g_enums`/`g_ifaces`/`g_impl_for`/`g_methods`/`g_type_aliases`/`g_gen_*`/`g_borrow_*`/`g_global_lets`/`g_cov_bits`/`g_purity_inst_*`/`g_line_fileid`/`g_segs`） | `tokenize`/`check_all`（**每次构建**） | 不载（且不需） | 各前端消费者 | ✓ 前端每次全跑（`main.cr:440` `run_frontend` 在缓存循环之前） |
 | 12 | `g_ccr_type_seg`/`g_ccr_iface_seg`/`g_ccr_nod_item`（段体缓冲） | `ccr_seg_prepare_save`（save 前） | 不载（且不需） | `save_ccr` | ✓ |
-| 13 | `g_strs`/`g_str_hash`（驻留表） | 全流程 | 不载 | 一切名字索引 | ✓ **由编译器身份字段覆盖**（v17 / TODO #5） |
+| 13 | `g_strs`/`g_str_hash`（驻留表） | 全流程 | 不载 | 一切名字索引 | ✓ **由编译器身份字段覆盖**（v17 / TODO #2026-09-10-1） |
 | 14 | `g_dyn_type_sets` / `g_gen_map` / `g_gen_apply_data` | 前端 | 不载 | 前端 | ✓ |
 | 15 | `g_hotpatch_*` / `g_rt_builtin_*` | 前端注册 | 不载 | 调用/注册面 | ✓ |
 
@@ -137,7 +137,7 @@
 | **T1** | **根因实证**（E1–E5）：冷/暖 dump 通道 + 归因钳位 + 证伪项 + **暖态静默面全语料对拍清单**（先量后改） | T0 |
 | **T2** | 修法落地（按裁-W1；b 先行 → d 视证据）+ 用例（冷/暖两态行为钉 + 负控「不安全程序不得静默通过」） | T1 + 裁-W1 |
 | **T3** | **判据网暖态腿**：`parity_run.sh`/`probes_run.sh` 加「同源二次构建」腿（冷/暖 rc + 诊断对拍）；CI 面按裁-W2 | T2 |
-| **T4** | 判据复验（五 CI/枚举/selftest/canary/`.ccr` 四条/自举链/`backend_bootstrap`）+ 文档（TODO #60 收口 + `cir_cache.cr` 版本族注 + 本计划台账）+ 批终态 | 全部 |
+| **T4** | 判据复验（五 CI/枚举/selftest/canary/`.ccr` 四条/自举链/`backend_bootstrap`）+ 文档（TODO #2026-09-15-5 收口 + `cir_cache.cr` 版本族注 + 本计划台账）+ 批终态 | 全部 |
 
 ---
 
@@ -150,7 +150,7 @@
 - **三态纪律**：装载期任何「不可证」⇒ **拒绝**（= miss），不得静默采用。
 - **先量后改**：T1 的 E4 清单未出、裁决门未取裁 ⇒ **不得落修法**（report-only 先行）。
 - **测试只增不减**；用例带「冷/暖两态」维度；**`.cir` 缓存条目不是交付产物**（口径豁免，照 FC 批裁-FC-6）。
-- **不得回退既有收纳**：v12–v18 的版本族处理、`sh_tk_split_load` 重派生、编译器身份字段（TODO #5）、FC 批闸门（默认阻断 + 豁免表 9 条）——一律不动。
+- **不得回退既有收纳**：v12–v18 的版本族处理、`sh_tk_split_load` 重派生、编译器身份字段（TODO #2026-09-10-1）、FC 批闸门（默认阻断 + 豁免表 9 条）——一律不动。
 
 ---
 
@@ -237,7 +237,7 @@
 消费者未构造出 ⇒ (c)/(d) 是未判面的最终归宿但触发条件未达。**维护者裁（2026-09-15）：本批不实施**，挂
 **两个可证伪触发条件**：**(i)** 任一未判面构造出暖态消费者；**(ii)** 缓存命中率成实测瓶颈。触发后**先试
 「加一行见证」的廉价路径**（`main.cr` miss 分支扩展点），不够再转「快照承载类型行」（格式变更 +
-`CIR_CACHE_VER` bump，与 TODO #5 编译器身份字段同批评估）。
+`CIR_CACHE_VER` bump，与 TODO #2026-09-10-1 编译器身份字段同批评估）。
 
 ### 8.4 判据网盲区三因（本缺陷为何从未现身）
 

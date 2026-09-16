@@ -108,7 +108,7 @@
 | **S-B4** | `2026-09-11-policy-resource-confinement-design.md` | 围栏族：`Path<Root>` / capability-scoped namespace；`../..` = 无法构造目标 capability | S-A + provenance/asp | namespace 判定 + 与 pointer-model 的 reuse + TOCTOU 衔接（**根声明治理 = 装载期校验 + policy 授权，D6**；派生链判定的 owner 归 S-B2，D22） |
 | **S-B5** | `2026-09-11-policy-state-version-toctou-design.md` | 状态版本族：check/use 分离版本 = 图上两版本；handle 绑定身份而非 pathname 重查 | S-A | 版本等价判定（κ 粒度 = **对象身份 + 版本见证**，D13）+ 与 state edges/条目的 reuse + 模式清单 + **与 S-E 的执法分界（D23：按变更源身份可判定）** |
 | **S-C** | `2026-09-11-performance-without-commitment-design.md` | 性能无实现承诺 + 可移植：纯度/效应/依赖/局部性/精度标注 → 优化器 → 目标描述（**成本模型**接 hw-map）；收纳 TODO 性能自动化家族 | hw-map + **R3/实例化波 2-3 合批** | 标注面 + 成本模型接口 + 「不把机器写进程序意义」的可迁移判据 |
-| **S-D** | `2026-09-11-explain-predict-incremental-design.md` | 可解释（`core explain` 决策通道：图→源码 + 映射决策）+ 可预测（内存/任务/通信/deadline 上界）+ 语义增量（ΔSource→ΔGraph→ΔProof→ΔBinary）**+ §1.4 的报告面（`core analyze --determinism` + 不确定性 provenance 链）** | engine + LSP 基建 + 现有 cir cache | 三者各自的可实施切片 + explain 输出契约 + 增量失效面（含 TODO #5 缓存键家族） |
+| **S-D** | `2026-09-11-explain-predict-incremental-design.md` | 可解释（`core explain` 决策通道：图→源码 + 映射决策）+ 可预测（内存/任务/通信/deadline 上界）+ 语义增量（ΔSource→ΔGraph→ΔProof→ΔBinary）**+ §1.4 的报告面（`core analyze --determinism` + 不确定性 provenance 链）** | engine + LSP 基建 + 现有 cir cache | 三者各自的可实施切片 + explain 输出契约 + 增量失效面（含 TODO #2026-09-10-1 缓存键家族） |
 | **S-E** | `2026-09-11-merge-semantics-design.md` | **汇合语义定稿**：`merge_deterministic` / `merge_ordered` / `race` / `select_any` 四形态的**图级**定义 + **物理⇏语义降级义务**（lowering/调度不得引入未声明的不确定）+ `select` 现语义（最早到达）的**迁移路径**（用户定性＝待修）+ 与「自动并发」TODO（可判定性）的接口 | **S-A（轴/四档）；被 S-A 的 determinism 轴族引用** | 四形态语义 + 每形态的义务落档 + `select` 重定与兼容窗口 + 正/负控判据（隐式竞争必须 reject） |
 
 ## 3. 起草与实施节奏（用户裁决：全部起草；S-B 一族一份）
@@ -118,7 +118,7 @@
    - **S-A 先定稿并实施最小切片**（属性轴 + 四档 + 义务判定走引擎）——它是其余 8 份的地基，没有它每族都会退化成特判。
    - **S-B×5**：S-A 定稿后**逐族**出实施计划（每族独立验收；不并行开工，避免语义争议交叉）。
    - **S-C**：与 x86 实例化波 2/3、R3 映射侧**合批**（同一件事的两个名字）。
-   - **S-D**：可解释面可先做（用户可见收益直接）；语义增量依赖缓存键修复（TODO #5 家族）。
+   - **S-D**：可解释面可先做（用户可见收益直接）；语义增量依赖缓存键修复（TODO #2026-09-10-1 家族）。
 3. **与在飞工作线的关系**：本路线图**不打断** R2 剩余批（P2b：`iface_ops` 查表接线 + `res_type_node` 两表合一；R3：映射侧/载体）——S-A 的实施排在 R2 收线之后。
 
 ---

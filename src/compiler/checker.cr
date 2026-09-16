@@ -495,7 +495,7 @@ fn diag_type_incompatible(verdict: int, code: int, what: string, line: int, col:
     }
 }
 
-// ─── R2 P5 Task 6（TODO #32）：声明位点的值/注解兼容判定 ───
+// ─── R2 P5 Task 6（TODO #2026-09-11-14）：声明位点的值/注解兼容判定 ───
 // 背景：`EXPR_LET` 站点自 P3 Task 1 实测起为**无任何兼容检查**的洞（`checker.cr` 该分支
 // 只登记符号，ti = 注解行 ⇒ 后端按注解行发射 = 静默错产物）。实测（旧/新二进制同值）：
 // `x : int = "s"` / `x : [int;3] = s`（切片）/ `x : [int;4] = [1,2,3]`（异长常量档）/
@@ -1706,7 +1706,7 @@ fn find_func(name_idx: int) -> int {
     return -1;
 }
 
-// ─── TODO #29 ①②：struct 字面量的名字绑定 / 类型比对 辅助 ───
+// ─── TODO #2026-09-11-11 ①②：struct 字面量的名字绑定 / 类型比对 辅助 ───
 
 // 字段名 idx → 声明下标（-1 = 该名字不在声明中）。名字 idx 来自 parser 写入的 wrapper.b
 // （EXPR_STRUCT 契约，见 ast.cr / parser.cr struct 字面量分支）。
@@ -2038,12 +2038,12 @@ fn infer_gen_call(fi: int, call_node: int, first_arg: int, arg_count: int) -> in
         }
 
         pi = pi + 1;
-        // ─── R2 P3 Task 5（Step 1）：F4 形参链导航修复（TODO #21）───
+        // ─── R2 P3 Task 5（Step 1）：F4 形参链导航修复（TODO #2026-09-11-4）───
         // 旧态 `pn = pn + 1` 假设 EXPR_PARAM 在节点表里**连续**——不成立：每个形参的类型
         // 节点由 parse_type 在**该形参节点之前**分配（parser.cr 的 `pty := parse_type()` →
         // `alloc_node(EXPR_PARAM, …, pty, …)`），且**每个**类型（含基类型）都占一节点
         // （parse_type 尾部 `alloc_node(0,…,ty,0,…)`）⇒ 第 i+1 个形参不是 pn+1。
-        // 实测症状（TODO #21 原始探针的机制，本批实读）：`fn take[T](a: T, n: int)` 的
+        // 实测症状（TODO #2026-09-11-4 原始探针的机制，本批实读）：`fn take[T](a: T, n: int)` 的
         // param1 落到 `int` 的类型节点上——`ast_data(基类型节点) = 0` ⇒ res_call_type(0) 读
         // **AST 节点 0**（= 本文件首个类型节点；若它恰是 `EXPR_IDENT(T)` 则回 gparam(T)）：
         // 非泛型形参的**声明类型约束**在调用推断中被绕过，且 gparam(T) 分支会给**未绑定**的
@@ -2359,7 +2359,7 @@ fn check_global_let(node: int) {
     if val_node >= 0 {
         val_ti = infer_expr(val_node);
     }
-    // R2 P5 Task 6（TODO #32）：全局初始化器的值/注解兼容检查（局部站点同款；
+    // R2 P5 Task 6（TODO #2026-09-11-14）：全局初始化器的值/注解兼容检查（局部站点同款；
     // 全局符号类型在注册趟（check_global_lets）即取注解行 ⇒ 不查同样静默错产物）。
     ti := val_ti;
     if type_node >= 0 { ti = res_type_node(type_node); }
@@ -2438,7 +2438,7 @@ fn validate_dyn_method(si: int, method_ni: int, line: int, col: int) {
 
 // --- Type inference ---
 
-// 推实参（TODO #93「已解析直调的实参推断缺失」修复）：EXPR_CALL 的**所有**「已解析」
+// 推实参（TODO #2026-09-16-31「已解析直调的实参推断缺失」修复）：EXPR_CALL 的**所有**「已解析」
 // 路径在 return 之前**必须**调用本函数——否则实参表达式**完全不被类型检查**，后果两重：
 //   ① 实参位的内层调用若是 `EXPR_FIELD` 被调（方法/模块限定），其 `ast_data`（被调名索引）
 //      只能由 `infer_expr` 的模块/方法分支回填 ⇒ 从没回填 ⇒ 保持 parser 初值 0 ⇒ ir_gen 读
@@ -2454,7 +2454,7 @@ fn infer_call_args(first_arg: int) {
         if an < 0 { break; }
         anode := ast_a(an);
         infer_expr(anode);
-        // (b) fail-closed 护栏（维护者裁-ARG-2；TODO #93）：实参位的调用若是 `EXPR_FIELD`
+        // (b) fail-closed 护栏（维护者裁-ARG-2；TODO #2026-09-16-31）：实参位的调用若是 `EXPR_FIELD`
         // 被调而 `ast_data` 仍为 0 ⇒ **被调名从未被回填**（模块/方法分支没跑到）⇒ ir_gen 会读出
         // 伪函数名（`istr_get(0)` = 文件首个 interned 串，有 `import` 时恰为 "import"）⇒ 后端
         // 按名解析失败 ⇒ 外部位重定向 ⇒ **SIGSEGV 139**。
@@ -2862,14 +2862,14 @@ fn infer_expr(node: int) -> int {
                             fnd := fi_ast_node(fi);
                             if fnd >= 0 {
                                 if ast_kind(fnd) == EXPR_FN {
-            infer_call_args(first_arg);   // TODO #93：实参必须被推断（本 return 路径原先跳过）
+            infer_call_args(first_arg);   // TODO #2026-09-16-31：实参必须被推断（本 return 路径原先跳过）
                                     return TI_NEVER;
                                 }
                             }
                         }
                     }
                 }
-            infer_call_args(first_arg);   // TODO #93：实参必须被推断（本 return 路径原先跳过）
+            infer_call_args(first_arg);   // TODO #2026-09-16-31：实参必须被推断（本 return 路径原先跳过）
                 return sym_type(si);  // return type
             }
             // Check runtime builtins (no .cr body, implemented in rt.s)
@@ -2877,7 +2877,7 @@ fn infer_expr(node: int) -> int {
             loop {
                 if bi >= g_rt_builtin_count { break; }
                 if r64(g_rt_builtin_names, bi * 8) == func_ni {
-            infer_call_args(first_arg);   // TODO #93：实参必须被推断（本 return 路径原先跳过）
+            infer_call_args(first_arg);   // TODO #2026-09-16-31：实参必须被推断（本 return 路径原先跳过）
                     return r64(g_rt_builtin_ret_types, bi * 8);
                 }
                 bi = bi + 1;
@@ -2885,7 +2885,7 @@ fn infer_expr(node: int) -> int {
             // Not found in symbol table or builtins — report error
             name := istr_get(func_ni);
             check_error(EC_N_FUNC, "Undefined function '" + name + "'", ast_line(node), ast_col(node));
-            infer_call_args(first_arg);   // TODO #93：实参必须被推断（本 return 路径原先跳过）
+            infer_call_args(first_arg);   // TODO #2026-09-16-31：实参必须被推断（本 return 路径原先跳过）
             return TI_NEVER;
         }
         infer_call_args(first_arg);   // 单一真源（与上述 4 处同一函数）
@@ -2998,7 +2998,7 @@ fn infer_expr(node: int) -> int {
         // **range-go 迭代变量绑定**（2026-09-16 #93 批 T4；维护者裁 (i)）：`go i a..b body` 的
         // 语义**就是绑定 `i`**（ir_gen 侧按 `EXPR_GO.c` 使用该名），而本分支此前**不绑** ⇒
         // checker 与语言语义不一致（checker 缺口，非误报豁免问题）。
-        // **修前不可见**：body 常为 `f(i)` 形（已解析直调的实参）⇒ 实参从不被推断（TODO #93）
+        // **修前不可见**：body 常为 `f(i)` 形（已解析直调的实参）⇒ 实参从不被推断（TODO #2026-09-16-31）
         // ⇒ `i` 从未被查、无诊断；#93 修好后**暴露为 N01 误报**（命中载体 = 29 探针之一的
         // `tests/probes/p_spawn.cr` + 已挂 CI 的 `tests/selfhost/test_interp_parity.py`）。
         // 绑定语义与 `for` **同源**（先例 `checker.cr:3039-3051`）：**int 局部**（与 ir_gen 的
@@ -3217,7 +3217,7 @@ fn infer_expr(node: int) -> int {
         }
         ti := val_ti;
         if type_node >= 0 { ti = res_type_node(type_node); }
-        // R2 P5 Task 6（TODO #32）：值/注解兼容检查（豁免面见 check_let_annot_compat 头注）
+        // R2 P5 Task 6（TODO #2026-09-11-14）：值/注解兼容检查（豁免面见 check_let_annot_compat 头注）
         check_let_annot_compat(node, val_node, val_ti, ti);
         if istr_get(var_ni) != "_" {
             def_sym(var_ni, SYM_LOCAL, ti, -1);
@@ -3481,7 +3481,7 @@ fn infer_expr(node: int) -> int {
         // F5 契约（见 parser.cr struct 分支）：wrapper 在 g_ast 中连续、wrapper.a=字段值节点；
         // 逐 wrapper 解引用（infer_expr 对 EXPR_NONE 前向）——直接按偏移取「下一个节点」当字段值
         // 只在字段值单槽时成立，复合字段值（调用/字面量）会整体错位（静默错误值）。
-        // TODO #29 ①②（名字绑定 + 类型比对）：wrapper.b = 字段名 idx（parser 写入；-1 = 无名字
+        // TODO #2026-09-11-11 ①②（名字绑定 + 类型比对）：wrapper.b = 字段名 idx（parser 写入；-1 = 无名字
         // 信息 → 不校验、按既有位序语义回落）。新增 = 未知字段（TS02）/ 重复字段（TS04）/
         // 缺字段（TS01）三校验 + 字段类型 vs 声明比对（TS03，走 type_compat_strict 引擎判定）。
         // **值按名字绑定**（与 Python bootstrap 的 gen_struct_lit 同语义；名字 → 声明下标，
@@ -3643,7 +3643,7 @@ fn infer_expr(node: int) -> int {
         // Array literal（F5 契约，见 parser.cr 下标分支）：a = first wrapper（连续）,
         // b = elem count；wrapper.a=元素值节点（infer_expr 对 EXPR_NONE 前向）——不得按偏移
         // 直取相邻节点当元素，复合元素子树占多槽会整体错位（静默错型/错值）。
-        // TODO #29 ③：元素**同质性**检查——旧代码逐个覆盖 elem_ti（最终 = **最后一个**元素的
+        // TODO #2026-09-11-11 ③：元素**同质性**检查——旧代码逐个覆盖 elem_ti（最终 = **最后一个**元素的
         // 类型），异质字面量 [1, "x", 3] 静默通过且类型随末元素漂移。现取首元素类型为元素类型
         // （与 Python bootstrap 的 ArrayLit 同语义），后续元素逐个与首元素比对（TK02）。
         elem_ti := TI_INT;   // 空字面量 []：沿用旧默认

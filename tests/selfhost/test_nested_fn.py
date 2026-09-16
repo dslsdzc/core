@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TODO #16 回归：函数体内嵌套 `fn` 声明 → 编译段错误 rc=139（2026-09-11 修复）。
+"""TODO #2026-09-10-12 回归：函数体内嵌套 `fn` 声明 → 编译段错误 rc=139（2026-09-11 修复）。
 
 语言面判定（为何修成「定位报错」而非「支持嵌套 fn」）：
   * grammar/core.ebnf：`TopLevelDecl = FunctionDecl | ...` 且
@@ -56,7 +56,7 @@ COREC = BASE / "build" / "corec"
 BOUND_SEC = 5.0
 PROC_TIMEOUT = 30
 
-# 嵌套 fn 的最小件（TODO #16 原文形态）
+# 嵌套 fn 的最小件（TODO #2026-09-10-12 原文形态）
 NESTED_MIN = """fn outer() -> int {
     fn inner(a: int) -> int { return a + 1; }
     return inner(1);
@@ -162,7 +162,7 @@ def main() -> int:
     failures = []
     checks = 0
 
-    # ① 主判据：TODO #16 最小复现形态（修复前 rc=139）
+    # ① 主判据：TODO #2026-09-10-12 最小复现形态（修复前 rc=139）
     checks += 1
     f = case_reject_nested("nested_min_todo16", NESTED_MIN, "inner")
     if f:

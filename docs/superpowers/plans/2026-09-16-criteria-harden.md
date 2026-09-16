@@ -10,7 +10,7 @@
 | 档 | 时长实测 | 结果 | job | 依据 |
 |---|---|---|---|---|
 | `test_ent_kernel_neutrality.py` | 0.05s | PASS（A/B clean） | `bootstrap-tests` | 纯 python 静态 guard，无编译器依赖 |
-| `test_slice_bounds.py` | 1.4s | 7/7 | `selfhost-tests` | 低（TODO #31/#89 点名） |
+| `test_slice_bounds.py` | 1.4s | 7/7 | `selfhost-tests` | 低（TODO #2026-09-11-13/#89 点名） |
 | `test_region_cfg.py` | 0.9s | 22/22 | `selfhost-tests` | 中（与格式批同族 ⇒ 漏检面） |
 | `test_live_ranges.py` | 1.4s | 13/13 | `selfhost-tests` | 中 |
 | `test_hit_table.py` | 2.3s | 24/24 | `selfhost-tests` | 中 + 本批 #84/#86 改强落在其中 |

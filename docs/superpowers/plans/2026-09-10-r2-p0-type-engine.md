@@ -199,7 +199,7 @@ fn grow_tt_index(needed: int) {
 
 > **Task 1 落地确认的三条实现约定（Task 2/3/4 必须沿用，勿回退）**：
 > ① **键 = 五字段全比，哈希不入键**（哈希只负责槽位定位）——「存储哈希 == 重算哈希」只在 i64 回绕下成立，而 bootstrap 解释器为任意精度整数 ⇒ 该等式恒假、引擎静默退化为「只插不查」（Task 1 实证）。
-> ② **惰性 memo 用零初值 + ready 位**（`g_tt_top_ok`/`g_tt_nil_ok`）——全局 `= -1` 初值被 bootstrap 后端降级为 0（`bootstrap/corec/frontend/ir_gen.py:68-74`：`constant_value` 只对 `Literal` 赋值 → 其余 `.quad 0`；见 TODO #14）。
+> ② **惰性 memo 用零初值 + ready 位**（`g_tt_top_ok`/`g_tt_nil_ok`）——全局 `= -1` 初值被 bootstrap 后端降级为 0（`bootstrap/corec/frontend/ir_gen.py:68-74`：`constant_value` 只对 `Literal` 赋值 → 其余 `.quad 0`；见 TODO #2026-09-10-10）。
 > ③ **本语言无位异或算子** → 哈希用 FNV-1 加法折叠（照 `dyn_arr.cr` 的 `hash_bytes` 家族），不用 FNV-1a 的 `^`。
 
 ```core

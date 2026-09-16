@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""✅ **已修（#78 批 2 T3）—— 本套件已挂 CI**（TODO #78；计划 §11/§12/§13）。
+"""✅ **已修（#78 批 2 T3）—— 本套件已挂 CI**（TODO #2026-09-16-16；计划 §11/§12/§13）。
 
 被测缺陷 = **聚合读丢型**：四个读点把结果槽**硬定 `TI_INT`**，而聚合槽的规范存储形式是
 **精确（scaled）**（apx 批不变量：「聚合面不存在 apx 形式」）⇒ 「按 IR 值型触发」的下游
@@ -252,7 +252,7 @@ def main():
     report = "--report" in sys.argv
     fails = []
     print("=" * 78)
-    print("聚合读丢型（TODO #78）—— RED 语料（批 2 T2；修复后应转绿）")
+    print("聚合读丢型（TODO #2026-09-16-16）—— RED 语料（批 2 T2；修复后应转绿）")
     print("=" * 78)
     for name, expect, src, kind in CASES:
         chk, codes, bld, elf = compile_and_run(src, name)

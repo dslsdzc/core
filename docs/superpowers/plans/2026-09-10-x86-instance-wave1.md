@@ -20,7 +20,7 @@
 - **抽取纪律（H1）**：每抽一段 = 独立提交 + stage 链验证；抽段时 cp/pos/buf 三参数显式传递；**帧公式双源（H2）必须单入口**——`sizes.cr:4-10` 头注明令「NEVER hardcode byte counts」；`test_mw_task1.py` 的 sub rsp 立即数断言 = 帧专项判据
 - 归属裁决（H3）：`g2_tag_off`/`mw_frame_size` 归 `frame.cr`；`tag2l.cr` 依赖 frame（同轴内）；mw 族 e2_mw_* 纯编码归 tag2l；e2_* 通用编码原语（640-985）**留 instr.cr**
 - stage0 硬编码点 `test_backend_bootstrap.py:13` 必须先改后搬（H6）
-- TODO #6（双入口 flag 分歧）**不与波 1 混合**——结构波只搬移 + 同步改「两入口行为同构」注记措辞（H7）；flag 收敛留波 2
+- TODO #2026-09-10-2（双入口 flag 分歧）**不与波 1 混合**——结构波只搬移 + 同步改「两入口行为同构」注记措辞（H7）；flag 收敛留波 2
 
 ---
 
@@ -36,7 +36,7 @@
 **Files:**
 - Move: `src/arch/linux/ld/{elf.cr,resolve.cr,ld.cr}` → `src/format/elf/`；`{instr.cr,sizes.cr,regalloc.cr}` → `src/arch/x86_64/`；`core-x86.toml`（自 `src/arch/hit/`）→ `src/arch/x86_64/`；`{main.cr,_import.cr,Core.toml}` → `src/targets/x86_64-linux/`（组合根裁决——target triple 命名）
 - Modify: `src/compiler/module.cr`（回退链 +4：`src/format/elf`、`src/arch/x86_64`、`src/os/linux`、`src/targets/x86_64-linux`——锚点 §2.3；置放序在既有条目前后保持既有命中不漂）
-- Modify: `build_selfhost_native.py`（corearch 清单 6 行路径改 + **分段重构**：`common_files`/`kernel_files`/`arch_x86_64_files`/`format_elf_files`/`os_linux_files`/hit 段/`x86_linux_target_files`——组合序确定；**守卫**：清单文件存在性断言 + 构建日志 `error[` 计数非零 = 失败门（TODO #6 建议③））
+- Modify: `build_selfhost_native.py`（corearch 清单 6 行路径改 + **分段重构**：`common_files`/`kernel_files`/`arch_x86_64_files`/`format_elf_files`/`os_linux_files`/hit 段/`x86_linux_target_files`——组合序确定；**守卫**：清单文件存在性断言 + 构建日志 `error[` 计数非零 = 失败门（TODO #2026-09-10-2 建议③））
 - Modify: `tests/selfhost/test_backend_bootstrap.py:13`（BACKEND_SOURCE → 组合根——先改后搬）+ `tests/selfhost/test_hit_table.py:28`（TABLE → src/arch/x86_64/core-x86.toml）+ `tools/pseudocode_extract.py:6-7`（ROOTS 替换 ld → 三轴目录）
 - Modify: 注释同步（`instr.cr:2189` 表路径注、`src/arch/hit/hit.cr:2`、`lower_to_core.cr:44`、`src/stdlib/toml.cr:163`、`ld/main.cr:11-15` 两入口注记措辞（H7））
 - Test: 全回归快子集 + stage 链
@@ -112,7 +112,7 @@
 
 **Files:**
 - Test: 全量回归（compile/backend_bootstrap/hit_table/region_cfg/mw1-6/slice_bounds/live_ranges/ccr_v7/bootstrap 三套 + full-bootstrap guard + 中立性 guard）
-- Modify: 设计 spec（`2026-09-10-x86-instance-design.md` 状态 → 波 1 已实施 + 执行注记）+ 计划状态行 + TODO #6 注记同步（波 1 已搬未收敛）
+- Modify: 设计 spec（`2026-09-10-x86-instance-design.md` 状态 → 波 1 已实施 + 执行注记）+ 计划状态行 + TODO #2026-09-10-2 注记同步（波 1 已搬未收敛）
 - Test: `nice -n 19 python3 build_selfhost_native.py` 重建 + 冒烟
 - 判据: 全绿 + 文档同步
 - [ ] **Step 1:** 全量回归；**Step 2:** 重建 + 冒烟；**Step 3:** 文档同步；**Step 4:** 提交 `refactor: x86 实例化波 1 收官——全量回归 + 自举 + 文档同步`
@@ -125,7 +125,7 @@
 - H2 帧公式双源（Task 3）：pf_frame_size 单源合流 = 首步单独验证；mw_task1 sub rsp 立即数断言 = 专项判据
 - H5 跨轴缝 6 处（elf → arch）：回退链是唯一通道——Task 1 Step 1 先落
 - H6 stage0 硬编码先改后搬
-- H7 TODO #6 不与波 1 混合（仅注记措辞同步）
+- H7 TODO #2026-09-10-2 不与波 1 混合（仅注记措辞同步）
 - 文件内容零改动判据：搬迁任务（Task 1/2/4/6）应 R 重命名（内容 verbatim）；抽取任务（Task 3/5）内容进新文件 + 调用点替换——diff 可读性 = 评审锚
 
 ---

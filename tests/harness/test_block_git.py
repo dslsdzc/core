@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TODO #23：`.claude/hooks/block-git.py`（铁律 #2 机械执行）的加固判据。
+"""TODO #2026-09-11-7：`.claude/hooks/block-git.py`（铁律 #2 机械执行）的加固判据。
 
 原缺口：hook 只拦「整条命令以 git 开头」⇒ `cd x && git …` / `bash -c 'git …'` /
 `… | git …` / `$(git …)` 全能绕过（2026-09-11 R2 P1 Task 3 评审登记）。

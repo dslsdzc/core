@@ -31,7 +31,7 @@
 
 1. 新增 `SG_IF`（条件 region）
 2. `g_df_node_region[]` 显式 DFNode→region 映射
-3. 解释器循环按 region 迭代执行（根治 TODO#3）
+3. 解释器循环按 region 迭代执行（根治 TODO #2026-07-25-1）
 4. state edges（副作用链 + 循环终止依赖）
 5. 序列化 v2（SG 段 + edge kind 进 .cir/.ccr，v1 兼容）
 6. RegionCheck 迁移到显式映射；三 pass 回归
@@ -113,7 +113,7 @@
 | 阶段 | 内容 | 验收 |
 |---|---|---|
 | P1 | SG_IF 生成 + `g_df_node_region[]` + DOT 按 region 分组 | `cir` dump 断言 if/loop 的 region 结构与归属正确 |
-| P2 | 解释器 region 迭代执行 | 现有循环测试全过 + TODO#3 for 用例通过 |
+| P2 | 解释器 region 迭代执行 | 现有循环测试全过 + TODO #2026-07-25-1 for 用例通过 |
 | P3 | state edges | 图断言：STORE 序列有 state 链、loop exit 有终止边 |
 | P4 | 序列化 v2 + v1 兼容 | save→load 往返一致；旧 .ccr 可加载 |
 | P5 | RegionCheck 显式映射 + 全量回归 + 自举 O0/O1 | bootstrap 回归全绿 |

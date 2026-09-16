@@ -15,7 +15,7 @@
 - **jj only**；**提交必须路径限定**（多 agent 共用工作副本）。
 - 所有编译/测试命令 `nice -n 19` 前缀；改编译器源码后**必须重建**。
 - **P1 行为零变化（强判据）**：`--type-shadow` **关**（默认）= 产物与 P0 基线逐字节相同；**开** = 产物**同样**逐字节相同（影子只观察、不改判定、不写产物）。两态都要过。
-- **判据前清缓存**：`nice -n 19 ./build/corec clean-cache`（TODO #5），且 cwd = 仓库根。
+- **判据前清缓存**：`nice -n 19 ./build/corec clean-cache`（TODO #2026-09-10-1），且 cwd = 仓库根。
 - 文件永久不允许还原；不得绕过；**引擎 UNKNOWN（-1）不得计入差异**（未覆盖面 ≠ 收紧面，单列统计）。
 - diff 校验式样：`jj diff --git <paths...> | grep '^[+]' | grep -v -e '^[+][+][+]'`；环境陷阱：noclobber（用 `>|`）、变量不分词。
 - 新文件三处注册（`src/compiler/_import.cr` / `build_selfhost_native.py` 的 **corec 清单**（checker 段后）/ `tests/selfhost/test_compile.py`）。
@@ -351,7 +351,7 @@ nice -n 19 ./build/corec check src/compiler/ccr_io.cr --type-shadow >> /tmp/p1_c
 - [ ] **Step 4b: 挂账清零**（按 Task 1/Task 2 评审实际状态更新）：
   - ~~① `build_selfhost_native.py:309` 注释更正~~ ——**已被 Task 2 提交完成，核销即可**（Task 2 评审 M2 提示勿重复劳动）
   - ② Task 1 评审「>1024 条目第二次重建无实测」——补一条守门用例或如实登记
-  - ③ **既有缺陷登记（最小复现已由 Task 2 评审更正）**：**函数体内嵌套 `fn` 声明 → 编译 rc=139**（min4/min6 同族；mini6 **无** `@inline`——原报告措辞有误）；崩点在 parse→checker 之间（日志止于 `[3/5] parse...`）；**两版编译器均复现**（非影子层引入）→ TODO #16
+  - ③ **既有缺陷登记（最小复现已由 Task 2 评审更正）**：**函数体内嵌套 `fn` 声明 → 编译 rc=139**（min4/min6 同族；mini6 **无** `@inline`——原报告措辞有误）；崩点在 parse→checker 之间（日志止于 `[3/5] parse...`）；**两版编译器均复现**（非影子层引入）→ TODO #2026-09-10-12
   - ④ **Task 2 评审 M3**：`src/compiler/type_terms.cr:73` 头注「corearch/corelsp 不受影响」半句陈旧（corelsp 自 Task 2 起必须链接引擎层）→ 更正
   - ⑤ Task 2 评审 M5：站点 4 因 `res_call_type` 无 `EXPR_ARRAY`/tuple 分支将**恒 agree** → Task 3 findings 中不得据「站点 4 零差异」判该面收敛（写入 findings 文档的限制说明）
 - [ ] **Step 5: 提交**（路径限定）

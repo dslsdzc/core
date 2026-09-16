@@ -81,7 +81,7 @@ bash tools/baseline/warm_run.sh ./build/corec /tmp/warm_now   # 牙齿层（语�
 - **腿本体不进 CI**（维护者裁定 2026-09-15）：与套件**同语料**、覆盖重叠，收益仅「校验 runner 自身」。
 - **口径限制（W3 批实测登记，2026-09-15）**：本腿现比对 = **rc + 诊断码集 + 产物 sha**（`ccr`/ELF/DOT 三面），
   **不覆盖 DOT label / 日志文本**——实测存在「暖态名字面」分歧（`ir_gen` 期合成名字串在暖态缺席 ⇒
-  DOT 变量名标签掉前缀；**非静默面、不传导产物**，见 TODO #65）。**若将来要把名字面纳入腿**，须扩比对口径
+  DOT 变量名标签掉前缀；**非静默面、不传导产物**，见 TODO #2026-09-15-8）。**若将来要把名字面纳入腿**，须扩比对口径
   （例如 DOT 逐行 diff 或 name 面专用通道）——**本批不实施**。
 - **口径限制（跨二进制暖态腿，2026-09-16 (A) 批登记）**：暖态腿现比对 = **rc + 诊断码集 + 产物 sha**，
   **不覆盖日志文本**——**跨二进制**比日志会把 frozen 侧 `lower to ccr…` 与当前侧（FC 批硬闸 `main.cr:616-621`
@@ -129,7 +129,7 @@ bash tools/baseline/warm_run.sh ./build/corec /tmp/warm_now   # 牙齿层（语�
 - **`examples/` 不在任何 CI job 的覆盖面内**（`suite` job 只跑 `tests/suite`）——但本对拍面含之
   （4 档），故对拍是 examples 的**唯一**行为证据来源。
 - **`.ccr`/`.cir` 缓存态**：比较任何产物前 `clean-cache`（runner 已逐档做）；`.ccr` 记录值引用须带
-  命令口径 + 缓存态（TODO #26 / P4 附录 D-1）。
+  命令口径 + 缓存态（TODO #2026-09-11-9 / P4 附录 D-1）。
 - **`.ccr` 记录值还依赖 `$HOME` 内容（2026-09-16 判据载体化批 CI 红档实锤）**：编译器解析 `import`
   时会读 `$HOME/.core/lib/<模块>/index` 并把这些名字驻留进 `.ccr`（`src/compiler/module.cr:523-530`）
   ⇒ **同一提交、同一编译器，换台机器产物就变**（`tests/suite/generics_test.cr` 在本机
@@ -137,7 +137,7 @@ bash tools/baseline/warm_run.sh ./build/corec /tmp/warm_now   # 牙齿层（语�
   的 `.ccr` 记录值**自本批起**锁定「环境归一化（受控空 `HOME`）下的产物」——载体
   `canary_check.sh` 已把 `HOME` 钉到采集目录内的空 `home/`；**手工复跑时也须同样归一化**，
   否则会得到本机态的假红（**不得** unset/置空 `HOME`：`module.cr:526` 有硬编码 `/home/DslsDZC`
-  兜底，置空反会去读原开发者家目录）。根因已独立登记（TODO #82/#83，与「缓存键缺编译器身份」同族）。
+  兜底，置空反会去读原开发者家目录）。根因已独立登记（TODO #2026-09-16-20/#83，与「缓存键缺编译器身份」同族）。
   注：本条的**两档语料**中 `ptr_arith` 零 import ⇒ 不受影响；受影响的只有 `generics_test`（两口径）。
   **2026-09-17 更新（第 4 批 `home-repro` 已修，TODO #82/#83）**：索引**不再影响产物**——
   `import` 期只落**侧表**（不 `str_intern`/不追加 SYM），仅**被引用**的名字在首次查找时物化，

@@ -67,7 +67,7 @@ g_ir_var_rep : string, mut;     g_ir_var_rep_cap : int, mut;
 //   （`a : [int?;2]`）忠实给出（字面量推出的元素类型对可选元素退化为对象占位）。
 //   仅进程内状态，零布局变更；非可选程序不读取本表（零足迹）。
 g_ir_var_decl_ti : string, mut; g_ir_var_decl_cap : int, mut;
-// (A) 批（TODO #56 / 裁-REP-1 (iii)）：**取址名侧表**——`EXPR_UNARY+UOP_REF` 的 ident 操作数
+// (A) 批（TODO #2026-09-16-4 / 裁-REP-1 (iii)）：**取址名侧表**——`EXPR_UNARY+UOP_REF` 的 ident 操作数
 // 的**名字索引**集合（预扫收集；进程内、零布局）。标记面按名字索引判 ⇒ **同名字在别处出现
 // 会被一并标记 = 保守方向**（多标记只增装箱、不损失正确性；不会欠标记）。
 g_addr_taken_names : string, mut; g_addr_taken_cap : int, mut; g_addr_taken_count : int, mut;
