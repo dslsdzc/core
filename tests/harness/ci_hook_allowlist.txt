@@ -44,6 +44,8 @@ tests/selfhost/test_native_float.py	未挂（历史缺口）：Native ELF dex �
 tests/selfhost/test_native_memory.py	未挂（历史缺口）：Native ELF 聚合寻址
 tests/selfhost/test_native_strings.py	未挂（历史缺口）：Native ELF 字符串头
 
+tests/harness/test_todo_id_migration.py	未挂（**本批新增**，2026-09-17 TODO 标识迁移）：纯 python、无编译器依赖（毫秒级）；判据 J1-J4 = 无残留/无悬空/映射完备/突变自证。**为何未挂**：本批范围 = 「只动文档 + 源文件注释」（零 CI 配置变更）⇒ 挂点由后续批裁量
+
 # ─── tests/bootstrap（4 条；未挂）───
 tests/bootstrap/test_apx_tag.py	未挂（历史缺口）：bootstrap 面 apx 标签（与 selfhost 同名档配对）
 tests/bootstrap/test_dex_arith.py	未挂（历史缺口）：bootstrap dex 精确运算
