@@ -17,6 +17,7 @@ Task 3 = 合成层：IR 直线子集 → 4 核事件流（sub/nand/load/store）
 需先重建自举编译器：nice -n 19 python3 build_selfhost_native.py
 """
 
+import re
 import subprocess
 import sys
 import tempfile
@@ -50,6 +51,23 @@ MEM_SRC = """fn main() -> int {
 MEM_RC = 5  # 6+3-4（链式加减 + 内存读写，与 tests/hit/smoke_mem.cr 同源同期望）
 
 MOD_SRC = "fn main() -> int {\n    a := 7;\n    b := 3;\n    return a % b;\n}\n"
+
+# `--dump-events` 事件行白名单形态（B3/#86 修复）：`  ev <name> dst=<v> s1=<v> s2=<v>`；
+# v ∈ `\d+` 或 `pool\d+`（池引用）。emit 侧格式见 corearch.cr `dump_ev` 分支。
+_EV_DUMP_RE = re.compile(r"ev (\S+) dst=(\S+) s1=(\S+) s2=(\S+)$")
+
+# 事件 1-4 的 M1 模板（step 全字段 / legacy 字节；判据与突变自证共用）
+_EV14_STEP = {
+    1: {"rex_w": 1, "rex_r": 1, "rex_b": 1, "opcode": [0x29],
+        "modrm_reg_role": "src2", "modrm_rm_role": "dst", "rm_mode": 0},
+    2: {"rex_w": 1, "rex_r": 1, "rex_b": 1, "opcode": [0x21],
+        "modrm_reg_role": "src2", "modrm_rm_role": "dst", "rm_mode": 0},
+    3: {"rex_w": 1, "rex_r": 1, "opcode": [0x8B],
+        "modrm_reg_role": "dst", "modrm_rm_role": "addr", "rm_mode": 1},
+    4: {"rex_w": 1, "rex_r": 1, "opcode": [0x89],
+        "modrm_reg_role": "val", "modrm_rm_role": "addr", "rm_mode": 1},
+}
+_EV14_BYTES = {1: [0x4D, 0x29], 2: [0x4D, 0x21], 3: [0x4C, 0x8B], 4: [0x4C, 0x89]}
 
 
 def run_bin(binary, args):
@@ -266,6 +284,26 @@ def test_dump_sentinel_clean(tmp: Path) -> bool:
 
     旧实现存 −1：自持 x86 截断除法写回单字节 0xFF → 读回 255；Python 解释地板
     除四字节全 0xFF → 读回 0xFFFFFFFF——实现分裂，未用字段应恒存 0。
+
+    **B3/#86 修复（2026-09-16 判据网加固批）**：原判据 = **4 字面量黑名单**
+    `("dst=255","s2=255","dst=-1","s2=-1")`——未用字段写 1 / 0xFE(−2) /
+    0xFFFFFFFF / 00 都能骗过（黑名单只枚举了两种形态）。现改为**结构化解析
+    + 白名单形态断言**：每条 `ev` 行必须整体匹配
+    `ev <name> dst=<v> s1=<v> s2=<v>`（拒绝行内多余/缺失字段），其值必须匹配
+    `\\d+` 或 `pool\\d+`（拒绝 `-2` / `0x..` / 空），未用字段（store 的 dst、
+    load 的 s2——由事件语义定：store outputs=0、load inputs=1 无第二操作数）
+    必须**逐字符等于 "0"**（不是「数值 0」——顺带排除 `0x0` / `00` / `-0`）。
+
+    **反例自检（audit §0）：什么坏实现能骗过本断言？**——把未用字段写成
+    1 / 0xFE / 0xFFFFFFFF / `00` 的实现，旧黑名单全绿；现在因「文本 ≠ "0"」
+    必红。**口径边界（勿夸大）**：用于字段（该事件真的消费 s1/s2 时）取任何
+    `\d+` 值都**不是**哨兵伪影、本判据不主张覆盖（契约只管未用字段 = 0）；
+    本判据新增的第二个维度是**行形态白名单**（多字段/尾随垃圾/缺字段 ⇒ 行不
+    匹配 ⇒ 红，旧黑名单看不到）。
+
+    **探针触发自检（audit §0bis）**：非空转由**事件行计数**保证——
+    `n_store ≥ 1 且 n_load ≥ 1`（MEM_SRC 必产 store：`a = ...` 赋值；必产
+    load：`a` 的槽读回）；计数不足 ⇒ 判红（否则本断言在空转）。实测计数打印。
     """
     try:
         ccr = compile_ccr(tmp, "dump_sentinel", MEM_SRC)
@@ -278,13 +316,62 @@ def test_dump_sentinel_clean(tmp: Path) -> bool:
     if "hit pool entries: " not in out:
         print("[FAIL] dump/sentinel: missing pool summary")
         return False
-    bad = [s for s in ("dst=255", "s2=255", "dst=-1", "s2=-1") if s in out]
-    if bad:
-        print(f"[FAIL] dump/sentinel: unused-field readback artifacts {bad} in dump")
+    probs, n_ev, n_store, n_load = dump_sentinel_problems(out)
+    if probs:
+        for p in probs:
+            print(f"[FAIL] dump/sentinel: {p}")
         print(out)
         return False
-    print("[PASS] dump/sentinel: unused fields (store dst / load s2) = 0, no 255/-1 artifacts")
+    print(f"[PASS] dump/sentinel: 结构化 dump 解析 {n_ev} 事件行（store {n_store} / "
+          f"load {n_load}）：未用字段（store dst / load s2）恒 \"0\"，值域白名单干净")
     return True
+
+
+def dump_sentinel_problems(out: str):
+    """`--dump-events` 文本 → (问题列表, 事件行数, store 行数, load 行数)。
+
+    **B3/#86 修复（2026-09-16 判据网加固批）**：原判据 = **4 字面量黑名单**
+    `("dst=255","s2=255","dst=-1","s2=-1")`——未用字段写 1 / 0xFE(−2) /
+    0xFFFFFFFF / `00` 都骗得过（黑名单只枚举了两种形态）。现改为**结构化解析
+    + 白名单形态断言**：每条 `ev` 行必须整体匹配 `ev <name> dst=<v> s1=<v>
+    s2=<v>`（多余/缺失字段 ⇒ 行不匹配 ⇒ 红），值必须匹配 `\\d+` 或 `pool\\d+`，
+    未用字段（store 的 dst、load 的 s2）必须**逐字符等于 "0"**（不是数值 0——
+    顺带排除 `0x0`/`00`/`-0`）。
+    **反例自检（audit §0）**：把未用字段写成 1/0xFE/0xFFFFFFFF 的实现，旧黑名单
+    全绿，现在必红；把哨兵挪进别的键（`ev store s1=255`）旧黑名单看不到，现在被
+    形态白名单 + 未用字段全查覆盖。突变自证见
+    tests/harness/test_criteria_mutations.py（驱动本函数）。
+    **探针触发自检（audit §0bis）**：调用方对 n_ev/n_store/n_load 之和为 0 判红
+    （计数不足 ⇒ 本断言在空转）。"""
+    probs = []
+    n_ev = n_store = n_load = 0
+    for line in out.splitlines():
+        s = line.strip()
+        m = _EV_DUMP_RE.match(s)
+        if not m:
+            if s.startswith("ev "):
+                probs.append(f"ev 行超出白名单形态: {line!r}")
+            continue
+        n_ev += 1
+        name, dst, s1, s2 = m.groups()
+        for fld, v in (("dst", dst), ("s1", s1), ("s2", s2)):
+            bare = v[4:] if v.startswith("pool") else v
+            if not re.fullmatch(r"\d+", bare):
+                probs.append(f"ev {name} {fld}={v} 非 `\\d+`/`pool\\d+` 白名单形态"
+                             f"（哨兵/溢出读数形态）")
+        if name == "store":
+            n_store += 1
+            if dst != "0":   # store 无 dest（outputs=0）⇒ 该字段恒 0
+                probs.append(f"store 未用字段 dst={dst!r} 非 \"0\""
+                             f"（哨兵读回伪影：旧实现读回 255/0xFFFFFFFF）")
+        elif name == "load":
+            n_load += 1
+            if s2 != "0":    # load 单操作数（inputs=1）⇒ s2 恒 0
+                probs.append(f"load 未用字段 s2={s2!r} 非 \"0\"（哨兵读回伪影）")
+    if n_ev == 0 or n_store == 0 or n_load == 0:
+        probs.append(f"判据空转——事件行 {n_ev}（store {n_store} / load {n_load}）；"
+                     f"未用字段断言未被走到")
+    return probs, n_ev, n_store, n_load
 
 
 def test_table_bad_opcode_range(tmp: Path) -> bool:
@@ -1182,6 +1269,64 @@ def v2_walk(text: str) -> list:
     return probs
 
 
+def ev14_template_problems(events) -> list:
+    """事件 1-4 的 **M1 全字段模板 + legacy 字节全等**判据 → 问题字符串列表。
+
+    **B2/#84 修复（2026-09-16 判据网加固批）**：原判据 `chk(stream[:2] == want)`
+    只比**前 2 字节**——modrm 角色 / rm_mode / opcode 尾追加字节全无判据
+    （改 TOML 的 `modrm_reg_role "dst"→"src1"`、`rm_mode 0→1`、或
+    `opcode = [0x29, 0x90]` 都骗得过）。现改为：
+      ① 该 step 的字段集与取值必须**逐键相等**（opcode 全字节 + 全部 rex 位 +
+         modrm 两角色 + rm_mode）——多键/少键也红；
+      ② 重建的 legacy 字节流必须与 M1 模板**全等**（不是前缀）。
+    **反例自检（audit §0）：什么坏实现能骗过本断言？**——上述三类 TOML 改动在
+    旧判据下全绿（前 2B 未变）；本断言下分别落在「键值不等」（角色/rm_mode）与
+    「全等失败」（opcode 多一字节）上 ⇒ 必红。突变自证见
+    tests/harness/test_criteria_mutations.py（驱动本函数）。
+    **不可达性披露（B2 兜底 = 无 的根据）**：事件 1(sub)/2(nand) 对真 IR 不可达
+    （mw 门：int add/sub dest 恒 tagged ⇒ 整条落旧路径，见本文件事件注入节注），
+    注入逐字节对照与运行闭环都碰不到它们 ⇒ 本表断言是其**唯一**字节证据。
+    该前提此处**显式断言**（防将来有人以为「有行为腿兜底」而放松本判据）。
+    """
+    probs = []
+    inj_names = {ln.split()[1] for ln in
+                 (JUMP_EVENTS + DISP_EVENTS + BIG_EVENTS + IMM_EVENTS + POOL_EVENTS)}
+    overlap = inj_names & {"sub", "nand"}
+    if overlap:
+        probs.append(f"注入语料意外覆盖 sub/nand（{sorted(overlap)}）——事件 1-4 "
+                     f"「不可达、只能靠表断言」的前提已变，须重估本判据的兜底面")
+    str_keys = {"modrm_reg_role", "modrm_rm_role", "disp_src", "rel_role",
+                "cond_role", "modrm_base_role", "sib_base_role", "sib_index_role"}
+    for eid, want in _EV14_BYTES.items():
+        ev = _ev(events, eid)
+        sf = ev["projs"][0]["steps"][0]
+        got = {}
+        for k in sf:
+            if k in ("opcode", "prefix"):
+                got[k] = _tbl_int_list(sf[k])
+            elif k in str_keys:
+                got[k] = _tbl_str(sf[k])
+            else:
+                got[k] = _tbl_int(sf[k])
+        if got != _EV14_STEP[eid]:
+            probs.append(f"event {eid} step 模板 {got} != {_EV14_STEP[eid]}"
+                         f"（M1 全字段等价：opcode 全字节 + REX 全位 + modrm 角色 "
+                         f"+ rm_mode）")
+        rb = 0x40
+        for bit, k in ((8, "rex_w"), (4, "rex_r"), (2, "rex_x"), (1, "rex_b")):
+            if k in sf:
+                rb |= bit * _tbl_int(sf[k])
+        stream = ([_tbl_int(b) for b in _tbl_int_list(sf.get("prefix", "[]"))]
+                  if "prefix" in sf else [])
+        if rb != 0x40:
+            stream.append(rb)
+        stream += _tbl_int_list(sf["opcode"])
+        if stream != want:
+            probs.append(f"event {eid} legacy stream {stream} != {want}"
+                         f"（M1 字节全等——非前缀）")
+    return probs
+
+
 def test_v2_walker_real_table() -> bool:
     """真实 core-x86.toml（v2 迁移后）walker 全字段 + 事件 5-9 存在性/形态断言。"""
     text = TABLE.read_text()
@@ -1204,20 +1349,10 @@ def test_v2_walker_real_table() -> bool:
             print(f"[FAIL] walker: {msg}")
             ok = False
 
-    # 事件 1-4 迁移后 legacy 字节视区 = M1 模板字节（REX 组装 + opcode 拼接序）
-    for eid, want in ((1, [0x4D, 0x29]), (2, [0x4D, 0x21]), (3, [0x4C, 0x8B]), (4, [0x4C, 0x89])):
-        ev = _ev(events, eid)
-        sf = ev["projs"][0]["steps"][0]
-        rb = 0x40
-        for bit, k in ((8, "rex_w"), (4, "rex_r"), (2, "rex_x"), (1, "rex_b")):
-            if k in sf:
-                rb |= bit * _tbl_int(sf[k])
-        stream = ([_tbl_int(b) for b in _tbl_int_list(sf.get("prefix", "[]"))]
-                  if "prefix" in sf else [])
-        if rb != 0x40:
-            stream.append(rb)
-        stream += _tbl_int_list(sf["opcode"])
-        chk(stream[:2] == want, f"event {eid} legacy stream {stream[:2]} != {want} (M1 字节等价)")
+    # 事件 1-4：M1 全字段模板 + legacy 字节全等（B2/#84 改强；纯函数见
+    # ev14_template_problems —— 突变自证可直接驱动它，故抽出）
+    for p in ev14_template_problems(events):
+        chk(False, p)
     # 5 jump：E9 rel32 kind=event
     ev = _ev(events, 5)
     st = ev["projs"][0]["steps"][0]

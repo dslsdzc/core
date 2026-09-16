@@ -72,6 +72,15 @@ case "$CI_JOB_NAME" in
     # 根因：`test_backend_bootstrap.py` 曾「自称已挂」而 run.sh 零命中——该门是唯一能拦
     # 「清单双注册漂移（project-mode error[N06] 静默）」的守卫，已致 P3a 33×N06 跨 5 任务漏检。
     python3 tests/harness/test_ci_hook_coverage.py
+    # 判据网加固批（2026-09-16，TODO #89 低成本档）：ent_kernel 中立性**静态守卫**——
+    # 纯 python 文本扫描（剥注释/字符串后查禁内核实例 token），**无编译器依赖**（实测
+    # 0.05s）⇒ 挂本 job（bootstrap-tests 不构建）。挂前缺口登记见 allowlist 原 `:23` 条。
+    python3 tests/selfhost/test_ent_kernel_neutrality.py
+    # 判据网加固批：**突变自证**（纯 python、内存内、零副作用）——对本批改强的
+    # 六条判据（#84/#85/#86/#87/#88/#90）各构造「能骗过旧形态」的坏输入，
+    # 断言「旧形态绿 ∧ 新形态红」。这才是「判据够强」的机械证据（不是注释里的
+    # 自我声明）。实测 21/21（18 突变体 + 3 正控）。
+    python3 tests/harness/test_criteria_mutations.py
     ;;
 
   selfhost-tests)
@@ -123,6 +132,25 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_diag_gate.py      # FC 批 T2：fail-closed 闸门（默认阻断 + 豁免登记表 9 条）——正控 9（表内 6 个 build 面码仍放行 + scope=check 3 条 check rc=1 不变）+ 负控 6（语法面 P21 / 类型面 TA02·R02·TM03·TK05 / 安全检查面 TU03：仍阻断 + **零产物**）+ 零产物 3（前端失败无半成品 / corearch 失败删本次 .ccr [stub 仿真] / 旧哨兵原样仍在）＝ **17 例**
     python3 tests/selfhost/test_warm_cache_gate.py # #60 批 T2+T3：暖缓存两态回归（**CI 暖态最小面**；广度层 = tools/baseline/warm_leg.sh 手工判据）——缓存命中跳过 `ir_gen_func` ⇒ ir_gen 期 `alloc_type` 行不重建（T1 实锤：warm 缺 `TYP_PTR extra=1` ⇒ `provenance_verify.cr:66` TU03 静默失效）。修法 = 生成期对「快照不载的共享面」有副作用 ⇒ 该条目**不可写**（下次必 miss 重放副作用）；判据 ① `as *int` 解引用 load/store **冷/暖同**（都 rc=1 + TU03）② 机制钉：副作用函数 `::main.cir` **无条目** ③ 正控：普通程序条目在 + 二跑真命中（size/mtime 不变）④ TK01 冷/暖同 ⑤ `ccr` 面同判；**同路径重复编译 = 缺陷真触发场景（定路径是本设计的要点）**＝ **10 例**（**本批机械核对同步**：实测 10/10；注释旧值 6）
     python3 tests/selfhost/test_tc02_branch.py    # TC02 收口：`if` 分支相容判定的**发散豁免**（P3 不对称——else 支发散 ⇒ 不报；then 支发散 ⇒ 仍报真信号；谓词 `stmt_diverges`，checker.cr，只服务本判定点）+ 既有 NEVER 豁免（loop{} 收尾）零扰动 + TF01/TA02/TB01 面钉子（TF01 仍报 / 落空豁免不变 / 声明位 TA02 不变 / TB01 真错负控 ×2）+ 端到端 build+run（`test_native_float` 两源同形）＝ **15 例**
+    # ─── 判据网加固批（criteria-harden，2026-09-16）：**弱判据改强 + 挂点扩容** ───
+    # 审计依据 = docs/superpowers/specs/2026-09-16-criteria-strength-audit.md §4（挂载成本序
+    # 低 → 中 → 高）与 §2 表 B（B1-B6 弱判据 → TODO #84-#88/#90）。本批在 #89 成本序下挂
+    # **低/中成本档**（下列四档；各档时长实测见行内注）；`test_mw_task1-6` 属**口径换代**
+    # （零 diff 腿的基线须在**改动前**编译器上产 ⇒ CI 参照物结构性不可得）⇒ **本批不挂**，
+    # 结论 + 替代口径登记于 tests/harness/ci_hook_allowlist.txt。
+    # 注：本批同时把四档的**弱判据改强**：#84 事件 1-4 全字段模板（test_hit_table）、
+    # #85/#90 慢路径块体逐指令模板 + 零 diff 腿指令边界锁步（test_mw_task2，#90 因基线
+    # 不可得仍不挂，见 allowlist）、#86 dump 值域白名单（test_hit_table）、#87 STR 段冷/暖
+    # 前缀契约（test_cir_warm_path，已挂上行）、#88 剔除面白名单 + 计数（test_ccr_types，已挂上行）。
+    python3 tests/selfhost/test_slice_bounds.py   # 低（TODO #31/#89 点名档）：F11 切片越界守卫回归钉（越界读/写/变量下标/空切片 trap + 合法访问）；本批实测 1.4s（7/7）
+    python3 tests/selfhost/test_hit_table.py      # 中（allowlist:25 + 审计「漏检面最大」同族）：HIT 表模式合成层——v2 walker/夹具拒绝面/事件注入逐字节对照 + **事件 1-4 全字段模板（本批 #84 改强）** + dump 值域白名单（本批 #86）；本批实测 2.3s（24/24）
+    python3 tests/selfhost/test_region_cfg.py     # 中（allowlist:39）：`.ccr`/`.cir` 区域结构 + **段表/版本断言**（与 test_ccr_v7/ccr_types 同族 ⇒ 格式批的漏检面）；本批实测 0.9s（22/22）
+    python3 tests/selfhost/test_live_ranges.py    # 中（allowlist:28）：存在区间 + 条目版本化 + O1/O2 冒烟；本批实测 1.4s（13/13）
+    # 高（**allowlist 自标最高危**：唯一拦「清单双注册漂移 ⇒ project-mode `error[N06]`
+    # 静默」之门——rc=0 但日志带 error[ 判红；已致 P3a 33×N06 跨 5 任务漏检）。本批
+    # 先实测时长 = **22.5s**（stage0→1→2 冒烟 + O2 元数据读回；内含 nice -n 19）⇒ 判定
+    # **可挂**（成本远低于审计担心的「构建面」量级）。挂点理由记录：allowlist 原 `:19`。
+    python3 tests/selfhost/test_backend_bootstrap.py
     # ─── 判据载体化批（criteria-carrier，2026-09-16）：**ELF canary + `.ccr` 四条 = 机器闸门** ───
     # 缘起（实核）：这两条判据的锁定值——canary `95084e7b…d475`（28822B）与 `.ccr` 四条
     # 96015/96158/142793/142936——此前**只活在 docs/ 与 .superpowers/ 的文字里**，本仓
