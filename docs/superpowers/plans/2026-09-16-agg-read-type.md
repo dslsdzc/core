@@ -266,3 +266,142 @@ apx 批已转正的 B-3/B-4/B-5/B-6/B-8 探针（`tests/selfhost/test_apx_conver
 - **U4**：**extern 实参**（R6）——extern 的 dex 语义有历史契约（①b「apx 实参原样保留恰合 C ABI」）⇒ 本批改动是否**应当**影响 extern 形**需维护者确认**（否则 R6 应从腿 A 移除、改列「语义待定」）。
 - **U5**：**`.cir`/`.ccr` 是否 bump**（裁-AGG-7）：口径 A = 不 bump（理由：锁定 5 条不变、且变化只落在 dex 聚合读程序）；口径 B = bump `.cir` 17→18（理由：旧 `.cir` 快照里读槽型是 `TI_INT`，与新建的 `TI_DEX_S` **不等价** ⇒ 同一源文件在修复前后会命中不同语义的旧快照，**这正是 #8 缓存事故的同族**）。**建议口径 B**（bump `.cir`）+ **`.ccr` 侧**同步给出结论（`.ccr` 无「快照复用」语义 ⇒ 可只留痕不 bump，但须写成显式声明）。
 - **U6**：**超大 scaled 值的 tag 语义**（§3.2）：读槽掉出 tag 闭包后，若该值参与 2L（多字）路径的算术，语义是否仍正确 —— 需一条**边界探针**（构造 |scaled| 接近 2⁶² 的 dex 字段值 + ADD/MUL）实证；不成立 ⇒ tag2l 需要把 `TI_DEX_S` 纳入闭包（届时**改面扩大**，须回取裁）。
+
+---
+
+## 11. §T1 记录（2026-09-16 —— 前置 + 冻结基线 + R1–R7 **改前实测**）
+
+> 维护者裁决（2026-09-16）：八门**全按推荐**（裁-AGG-1=① · -2/-3/-4 登记 · -5 hack 不删（退役判据=腿 D① 连绿两批）· -6 不改 `IR_ALLOC` tk/`IR_DYN_PACK` tag · -7 **bump `CIR_CACHE_VER` 17→18** 且四要素齐 · -8 突变固化）· **U4 裁：extern 边界 = 规范化成 ABI binary64**（⇒ R6 进腿 A，期望 = 转换）。
+
+### 11.1 前置与冻结基线（实核）
+
+- 起点 `develop = 99ae6bdd`；分支 `feature/agg-read-type`（本记录 = 该链首个提交）。
+- **冻结基线（改前二进制）** = 现成 `build/corec` + `build/corearch`；**同源证明**：`jj diff --from e7243955 --to develop --stat -- src/compiler src/arch src/os src/format build_selfhost_native.py` = **0 files changed**（该二进制所建源面与 `develop 99ae6bdd` 逐字节同）⇒ 即「改前基线」。
+- 备份 + sha256：`/tmp/agg-t1/pre/corec` = `a689de9a205a2c1f…` · `/tmp/agg-t1/pre/corearch` = `8dd89647971f6af3…`。
+- **命令纪律（本轮踩到，留痕）**：① `corec build` 必须在**仓库根**跑（否则 `error: cannot locate src/runtime/rt.cr`）；② 重定向到**已存在**日志文件被 noclobber 拦 ⇒ 命令根本没跑、读到的是上一轮旧日志 ⇒ **假红**（本轮首轮 8/8「失败」即此）⇒ 改用 `>|` + 新路径。
+
+### 11.2 探针源（8 档 · T1 实测稿；入仓/挂点见 T2）
+
+```core
+// R1 · LET 中转丢型
+struct S { f: dex }
+fn main() -> int {
+    d : dex, apx = 7.0;
+    s : ., mut = S { f = d };
+    x := s.f;
+    if x * 2.0 != 14.0 { return 1; }
+    return 7;
+}
+
+// R2 · match 臂载荷绑定
+enum E { V(dex) }
+fn main() -> int {
+    d : dex, apx = 7.0;
+    e : ., mut = V(d);
+    return match e { V(x) => { if x * 2.0 != 14.0 { return 1; } return 7; } };
+}
+
+// R3 · 局部数组元素读
+fn main() -> int {
+    d : dex, apx = 7.0;
+    a : [dex; 2] = [d, 1.0];
+    if a[0] * 2.0 != 14.0 { return 1; }
+    return 7;
+}
+
+// R4 · 元组元素读（数字下标无声明面）
+fn main() -> int {
+    d : dex, apx = 7.0;
+    t := (d, 1.0);
+    if (t . 0) * 2.0 != 14.0 { return 1; }
+    return 7;
+}
+
+// R5 · 聚合读写回 apx（binary64）槽
+g : dex, apx, mut = 1.0;
+struct S { f: dex }
+fn main() -> int {
+    d : dex, apx = 7.0;
+    s : ., mut = S { f = d };
+    g = s.f;
+    if g != 7.0 { return 1; }
+    return 7;
+}
+
+// R6 · extern 实参（判定形态 = IR 断言，见 11.6）
+struct S { f: dex }
+extern fn dex_agg_arg_check(d: dex) -> int;
+fn main() -> int {
+    d : dex, apx = 7.0;
+    s : ., mut = S { f = d };
+    r := dex_agg_arg_check(s.f);
+    return r;
+}
+
+// R7（非回归钉子）· Core 调用实参
+struct S { f: dex }
+fn dbl(x: dex) -> dex { return x * 2.0; }
+fn main() -> int {
+    d : dex, apx = 7.0;
+    s : ., mut = S { f = d };
+    y := dbl(s.f);
+    if y != 14.0 { return 1; }
+    return 7;
+}
+
+// N1（非回归钉子）· apx 批已转正的比较/raw 形
+struct S { f: dex }
+fn main() -> int {
+    d : dex, apx = 7.0;
+    s : ., mut = S { f = d };
+    if @raw_int(s.f) / 1000000 != 7 { return 1; }
+    if s.f != 7.0 { return 2; }
+    return 7;
+}
+```
+
+### 11.3 改前实测（冻结基线编译 + `--static` 产物运行）
+
+| 探针 | 期望 | **改前实测** | 判定 |
+|---|---|---|---|
+| R1 LET 中转 | 7 | **1** | **RED**（静默错值） |
+| R2 match 载荷 | 7 | **1** | **RED** |
+| R3 局部数组元素 | 7 | **1** | **RED** |
+| R4 元组元素 | 7 | **1** | **RED** |
+| R5 写回 apx 槽 | 7 | **1** | **RED** |
+| R6 extern 实参 | （IR 断言，§11.6） | **run_rc = 139**（静态链既有崩溃面） | **RED**（正据 = IR 面，§11.4） |
+| R7 Core 实参（钉子） | 7 | **7** | **绿**（与读码判定一致 ⇒ 归类修正，§11.6） |
+| N1 apx 批已转正形（钉子） | 7 | **7** | **绿** |
+
+全部 8 档 `check` = 0 error（**无诊断**：这正是「静默」的实测证据）。
+
+### 11.4 IR 级机理正据（比 rc 更强的钉子）
+
+| 探针 | cir 证据（改前） | 读法 |
+|---|---|---|
+| **R1** | `load_field field = s.0` → `const _dsc = 1000000` → `binary _dxt = x * _dsc` → `binary _dxm = _dxt * dex` | **读槽被当 int 二次缩放**（`dex_scale_int` 的 ×S）⇒ 值放大 10⁶ |
+| **R3** | `--dump-entries`：`var 40 name=elem kind=LOAD_INDEX` 之后依次 `_dsc`(1e6 常量) → `_dxt`(BINARY) → `_dxm`(BINARY) | 同上，另一读点 |
+| **R6** | `load_field field = s.0` → `call_extern dest=call s1=6 s2=36 s3=1` ——**中间零转换**（既无 scaled→bits，亦无位模式常量重发射） | extern 契约破坏的**正据**（今天为空序列） |
+| **R7**（钉子） | `load_field field = s.0` → `call dbl(field)` ——零转换**且正确** | Core 形参物化 scaled ↔ 读值 scaled **同形** ⇒ 直传正确 |
+
+### 11.5 两条「需实证」的实核结论
+
+1. **tag 面（§3.2 ①）——收窄（T1 结论）**：读槽**从不作 `IR_BINARY ADD/SUB` 的 dest**（dest 恒是新槽 `bin`/`_dx*`），而 tag 规则 A（`tag2l.cr:117`）只标 ADD/SUB **dest**；且精确路径的结果槽 `_dxm`/`bin` 在**改前/改后同为 `TI_DEX_S`**（`ir_gen.cr:1338/1342` 硬编码）⇒ **R1/R3/R4 预期无 tag 差异**；tag 足迹只可能出现在「非 dex 聚合读」的整数路径，而那条路径被声明面门控 ⇒ **预期零 tag 足迹**。最终以 T3/T4 改前/改后对拍为准（帧尺寸 + `.ccr` 尺寸）。
+2. **regalloc 面（§3.2 ②）——读码确证、足迹待对拍**：`regalloc.cr:680-681` 对 `TI_DEX_S` 不建候选（读码确证）；读槽今天 `TI_INT` ⇒ 有资格进候选（是否真命中窗口/无 hazard 位需 T3 对拍）。**预期足迹** = 该槽由「可能驻寄存器」变「恒栈驻留」。
+
+### 11.6 归类修正（T1 实测结论 ⇒ 改口径）
+
+- **R7：「RED 候选」→「非回归钉子」**（读码 + 实测双证：今日 rc=7）。**修后必须仍绿**。
+- **R6：判定形态「运行值」→「IR 级断言」**：extern dex 调用的**静态链运行路径既有崩溃**（`tests/suite/ffi_test.cr:8-11` 头注明载「运行时 FFI 被 corearch `--link` 静态路径既有崩溃阻塞」⇒ 该档只声明不调用），实测 `run_rc = 139`。⇒ 照既有先例 `tests/selfhost/test_dex_arith.py::test_extern_dex_arg_cir` 用 **cir 断言**判定；本批断言 = 「`load_field` 与 `call_extern` 之间**必须出现**转换序列」（**改前为空 ⇒ RED 正据已取，见 §11.4**）。
+- **U4 裁后口径**：extern 边界 = **规范化成 ABI binary64**（`ir_gen.cr:1900-1907` 只做 `TI_DEX_S → bits`）⇒ R6 期望 = **转换**（不是「不变」、也不是「转 scaled」）。
+
+### 11.7 批报告必写条目（维护者指定；T5 不得遗漏）
+
+1. **镜像教训**：「`.ccr` 没变 ≠ 生成面没变」（#93 批）↔「**`.ccr` 没变 ≠ 这个面被覆盖了**」（本批）——两句合起来才完整：**判据的「绿」只在它的覆盖域内有意义**。
+2. **GC12 的自我修正顺序**：先查出 `res_type_node` 对**基类型节点**是纯查表零 alloc、把规则**改准**，再决定**不用它**（本批一律不调）——「先把规则改准，再决定用不用」。
+
+### 11.8 T1 未决（转 T2/T3）
+
+- T1-1：R1–R7 的**入仓形态**（py 套件内联源 + 白名单登记 + 挂点）——T2 做。
+- T1-2：R6 的 cir 断言**精确正则**（转换序列在 computed 值下的实际指令形态）——T3 实施时按实际 cir 落地。
+- T1-3：`CIR_CACHE_VER` 17→18 的**注释文本**与 `.ccr` 显式结论的落点（报告 + 代码注释）——T3/T5。
