@@ -250,6 +250,9 @@ class Parser:
             ret = self.parse_type()
         else:
             ret = BaseType('unit')
+        # 批 6（裁-S7，bounded）：规约标注链 `#check(...)` / `#ensure(...)`——**接受并跳过**。
+        # 位置与 self-hosted 侧一一对应（签名之后、body 之前）；**零语义**。
+        self._skip_spec_annotations()
         if self.check(TokenType.EQ):
             self.advance()
             body = self.parse_expr()
@@ -260,7 +263,29 @@ class Parser:
             body = Flow(body)
         return FunctionDecl(is_pub, name, generics, params, ret, body)
 
-    def _parse_generics(self):
+    def _skip_spec_annotations(self):
+        """批 6（裁-S7，bounded）：消费 `#` IDENT `(` … `)` 标注链并**丢弃**（零语义）。
+
+        边界（维护者裁定）：bootstrap 侧**只**保证「能词法化、不报错、不影响产物」——
+        不建 VC、不做三态、不做名字域/类型检查（完整 bootstrap 规约面登记后续）。
+        消费 = 平衡括号扫描（不解析表达式）⇒ 对内部形态（含 `result` 等 bootstrap 关键字）
+        一律容忍；形状错（缺 IDENT/缺括号/未闭合）**响亮报错**（fail-loud，不静默）。
+        """
+        while self.check(TokenType.HASH):
+            self.advance()                      # '#'
+            if not self.check(TokenType.IDENT):
+                self.error("expected annotation name after '#'")
+            self.advance()                      # check / ensure
+            self.expect(TokenType.LPAREN)
+            depth = 1
+            while depth > 0:
+                if self.check(TokenType.EOF):
+                    self.error("unterminated annotation: missing ')'")
+                if self.check(TokenType.LPAREN):
+                    depth += 1
+                elif self.check(TokenType.RPAREN):
+                    depth -= 1
+                self.advance()    def _parse_generics(self):
         if self.check(TokenType.LBRACK):
             self.advance()
             names = []

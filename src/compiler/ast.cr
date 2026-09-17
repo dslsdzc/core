@@ -97,6 +97,13 @@ T_AUTO_TYPE : int = 95;
 T_REF : int = 96;
 T_DYN : int = 99;  // dynamic type
 T_EXTERN : int = 100;  // extern "C" / foreign function declaration
+// 101：批 6「正式规约语法」（T1 词法面）——`#` 标注 sigil 的 token。
+// **取号 = T_ 空间空洞外的下一个自由号**（已用 0..100；空洞 6 / 77-86 / 91 **不占**——
+// 占空洞会与「勿重编号」的既存约定混淆）。**既有 0..100 一个不动**（T1 判据①）。
+// 语义约束：`#` 后必须跟 IDENT（`check`/`ensure` **不做关键字**——本仓已有 `fn check`
+// （parser.cr:30）与 CLI 子命令 `"check"`（main.cr:235），做关键字会当场打断自源）。
+T_HASH : int = 101;
+
 
 // W_I8..W_F64（1..10）原为「宽度标注」值域，仅供宽度后缀 token 分支使用。
 // 2026-09-10 语言面收窄 §2 随死分支一并删除。**勿重编号**。

@@ -159,11 +159,17 @@ class Lexer:
             start_line, start_col = self.line, self.col
 
             # 单字符 token
+            # 批 6（裁-S7，bounded）：`#` = 规约标注 sigil（`#check(...)` / `#ensure(...)`）。
+            # 修复前 `#` 走末尾 `self.error("Unexpected character")`（**响亮拒收**）——
+            # 而 self-hosted 侧是**静默丢弃**（`lexer.cr` Unknown 分支）⇒ 两前端分歧；
+            # 现两侧同判：都产出一个 `#` token，语义面由各自的 parser 消费（**接受并跳过**）。
+            # 注：`:287` 的未知字符报错**保留**——`#` 之外仍需它做最后一道响亮防线。
             single_char_map = {
                 '+': TokenType.PLUS, '-': TokenType.MINUS,
                 '*': TokenType.STAR, '/': TokenType.SLASH,
                 '%': TokenType.PERCENT, ',': TokenType.COMMA,
                 ';': TokenType.SEMI, '@': TokenType.AT,
+                '#': TokenType.HASH,
                 '(': TokenType.LPAREN, ')': TokenType.RPAREN,
                 '[': TokenType.LBRACK, ']': TokenType.RBRACK,
                 '{': TokenType.LBRACE, '}': TokenType.RBRACE,
