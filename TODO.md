@@ -1188,7 +1188,7 @@
 
 - **现象（读码实核）**：`src/compiler/ptr_analysis.cr:213` 的 `if g_pa_alloc_count < 64 {` —— 每个 `IR_ALLOC_STRUCT` / `IR_ALLOC_ARRAY` 节点按序取一位 pts 位号（`:216` `pa_set_bit(0, g_pa_alloc_count)`，位号写入 `g_pa_alloc_nodes`）；**达到 64 后该分支恒假** ⇒ 第 65 个及其后的分配**不登记**（无映射表项、该 dst var 的 `pts` 不置位），且**零诊断、零产物差异**。
 - **后果链（读码推断，非本轮实测）**：该分配的 pts 恒空 ⇒ ① `region_check` 的 DEREF/返回逃逸检查走 `pts != 0` 分支（`region_check.cr:122-143`）⇒ **跳过**；② `provenance_verify` 的越界检查同样遍历 pts（`provenance_verify.cr:77-129`）⇒ **跳过**，且运行期边界检查回填（`:117-129` 需 `runtime_targets == 1`）也不发生 ⇒ **安全网在该分配上静默失效**（形态 = **漏检**，非错值）。
-- **第二个面（同源）**：`g_pa_alloc_count`（`globals.cr:351`）只增不减，**`reset_frontend_state`（`globals.cr:509-540`）不复位它**（同函数复位了 `g_alloc_pts_cap:538`，未复位本计数器）⇒ 64 的额度**按进程累计**：长驻进程（LSP）/ 多文件 project 模式连续编译时被**跨编译消耗** ⇒ 同一条目在不同编译序下行为不同（**非确定性面**）。
+- **第二个面（同源）**：`g_pa_alloc_count`（`globals.cr:351`）只增不减，**`reset_frontend_state`（`globals.cr:509-540`）不复位它**（同函数复位了 `g_alloc_pts_cap:538`，未复位本计数器）⇒ 64 的额度**按进程累计**：长驻进程（LSP）/ 多文件 project 模式连续编译时被**跨编译消耗** ⇒ **同一源在同进程内的第 N 次编译与首次编译可给出不同诊断**（**非确定性面**——team-lead 2026-09-17 定性：**本面比 64 上限本身更严重**，同属本仓最忌的静默类）。
 - **判定**：**S（静默）**——安全网静默失效属本仓最忌类；第二面附带**非确定性**（依赖编译序）。
 - **裁定（G3）**：**pts 表示升级**（不选「接受退化」）。理由：G1 裁定「可观察语义含时间（预算等价）」⇒ 分析精度是预算可证明的前提；且本条本身即静默缺陷。
 - **判据要件（修复时；**RED 本轮未跑**——只读规划轮零构建）**：① **RED 实测**：构造 >64 个分配的语料（第 65 个分配上带可被判定的越界/逃逸形态）+ ≤64 的同形对照 ⇒ 修复前应观测「对照有诊断 / ≥65 无诊断」的静默差；② 表示升级：`pts` 由「单 int 64 位位图」改为可增长表示（或多字分摊），消除 `g_pa_alloc_count` 上限；③ 计数器随 `reset_frontend_state` 复位（或明确限定为编译单元作用域）；④ 回归：`check src/compiler` rc=0 + 三点 pass 既有判据（`tests/selfhost/test_pointer_safety.py` 等）逐项不变；⑤ ELF canary 按批口径重定（表示升级可能改动发射面时）。
