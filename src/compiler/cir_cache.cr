@@ -48,6 +48,23 @@
 // sh_dfn_code_of_slots 产出），装载侧由它同时重派生**两槽**（项引用 + 辅码）——
 // 盘面布局/版本位与 P4 逐字节相同（单槽化只在内存语义面）。
 CIR_CACHE_MAGIC : int = -4485090715960753727;
+// 20：缓存膨胀批（2026-09-17 · `plans/2026-09-17-cir-cache-bloat.md`）——**段粒度按函数收窄 +
+//     边端点改相对 id + 尾部基线见证 trailer**（结构变更，非语义变更）：
+//       ① **边段只写本函数** `[edge_start, g_df_edge_count)`（写侧 O(1) 取界：df_begin_func 记
+//          `g_df_func_edge_start`），盘记录 24B/条 = {rel_from, rel_to, kind}（相对 node_start 的
+//          **有符号**偏移；`next` 不落盘，装载期由 df_add_edge_kind 前插重建）。旧格式写**全图边表**
+//          ⇒ 全缓存 O(函数数 × 累计图)：实测单条 2.38MB 中 98.6% 是别人的边、全档 97.0% 的字节是边记录。
+//       ② 节点盘记录**仍 64B**（裁-4），但 `first_edge/edge_count` **装载期不信任**：归零后由重放重建，
+//          盘值降格为**逐节点见证**（不符 ⇒ miss）。
+//       ③ 尾部 +16B trailer = {var_start, node_start}（**基线见证**）：装载期**先校验后恢复**
+//          （var_start 恒校验；node_start 仅当快照含越界 rel 时条件见证）。trailer 定位于**结构扫描
+//          终点**：`p + 16 <= dlen` 才可读（**截断** ⇒ fail-closed miss，P4：不得落 139/垃圾），
+//          但**容忍尾随字节**（既有契约：装载历来忽略条目尾随字节；`test_cir_warm_path` D5 补零
+//          条目仍须命中——本批首版误用 `dlen−16` 定位曾使 D5 红，既有判据网抓到的）。
+//     **为什么必须 bump**：旧条目按「绝对节点 id + 全量覆盖」写 ⇒ 新装载器读到的边段计数/步长与
+//     旧格式完全不同（旧计数 = 全图边数、步长 32B/含 next；新 = 本函数边数、24B/无 next）⇒ 命中旧
+//     条目即「错图」而非「错值」，且与 #8 事故同族（坏 IR 原样复活成产物 rc=0）。cache miss = 无害重建。
+//     与前 19 代同族（每一代都是「快照携带了会随进程态/格式漂移的量」）；`.ccr` 侧不 bump（交付格式）。
 // 19：批 5（opt-dex，2026-09-17 · TODO #2026-09-16-29）——**可选 dex（`dex?`）载荷形式规范化**：
 //     写点门/槽型/形参槽/返回门/读点定型一律改「按**声明面**定形式」（G1 裁决 = scaled；见
 //     ir_gen.cr 的 dex_opt_type_node/dex_opt_slot_ti）。**旧快照里 `dex?` 的槽仍是修复前的形态
@@ -60,7 +77,7 @@ CIR_CACHE_MAGIC : int = -4485090715960753727;
 //     与修复后语义不等价** ⇒ 命中旧条目会把「丢型」的坏 IR 原样复活成产物（rc=0 的静默类）
 //     ⇒ bump 使旧条目整体失效，cache miss = **无害重建**。与 TODO #2026-09-10-4（缓存键缺编译器身份）
 //     同族；`.ccr` 侧不 bump（交付格式、无快照复用语义），但**内容会变**（dex 程序）。
-CIR_CACHE_VER   : int = 19;
+CIR_CACHE_VER   : int = 20;
 
 g_cir_write_buf : string, mut;
 g_cir_write_pos : int, mut;
@@ -229,7 +246,14 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int {
     // first_edge,edge_count}；第 9 槽 OFF_DF_AUX 不落盘——两槽装载时按派生码重派生，
     // 见文件头 v18 注）。
     total_size = total_size + 8 + node_count * 64;
-    total_size = total_size + 8 + g_df_edge_count * 32;  // v5: 4 fields incl. kind
+    // 缓存收窄批（CIR_CACHE_VER 20）：**只写本函数的边**（[edge_start, g_df_edge_count)），
+    // 盘记录 24B/条 = {rel_from, rel_to, kind}（相对 node_start 的**有符号**偏移；`next` 不落盘，
+    // 装载期由 df_add_edge_kind 前插重建）。旧格式写**全图边表** ⇒ 全缓存 O(函数数 × 累计图)
+    // = 二次膨胀（实测 97.0% 的缓存字节是边记录、其中 99.70% 属于别的函数）。
+    edge_start := r64(g_df_func_edge_start, ir_fi * 8);
+    own_edge_count : ., mut = g_df_edge_count - edge_start;
+    if own_edge_count < 0 { own_edge_count = 0; }
+    total_size = total_size + 8 + own_edge_count * 24;
     total_size = total_size + 8 + instr_count * 48;
     total_size = total_size + 8;
     size_si : ., mut = 0;
@@ -242,6 +266,8 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int {
     // v13: nested SG records (kind/enter/exit/parent/nstart/ncount).
     sg_count := cir_cache_sg_count(node_start, node_count);
     total_size = total_size + 8 + sg_count * 48;
+    // v20 尾部 trailer = {var_start, node_start}（**基线见证**；装载期先校验后恢复）
+    total_size = total_size + 16;
     if total_size > g_cir_write_cap {
         new_cap := g_cir_write_cap * 2;
         if new_cap < 4096 { new_cap = 4096; }
@@ -314,17 +340,19 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int {
         sg_i = sg_i + 1;
     }
 
-    // Write edges (all edges for this function's nodes)
-    // For simplicity, write ALL edges (they're few compared to nodes)
-    // v5: 4×8B per edge — from/to/next + kind (state edges survive cache hits)
-    w64_cir(fd, g_df_edge_count);
+    // Write this function's edges only (v20)。
+    // 历史注（v5–v19）：此处写的是**全图边表**，注释原文「For simplicity, write ALL edges
+    // (they're few compared to nodes)」——该「边比节点少」的前提**早已失效**（实测 4,314 万条边
+    // 记录 vs 20.6 万节点记录），它正是本条二次膨胀的起点（见计划 §1.1 的「假设已失效」注）。
+    // v20：只写 [edge_start, g_df_edge_count) 且端点存**相对 node_start 的有符号偏移**。
+    w64_cir(fd, own_edge_count);
     ei : ., mut = 0;
     loop {
-        if ei >= g_df_edge_count { break; }
-        w64_cir(fd, r64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_FROM));
-        w64_cir(fd, r64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_TO));
-        w64_cir(fd, r64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_NEXT));
-        w64_cir(fd, r64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_KIND));
+        if ei >= own_edge_count { break; }
+        e := edge_start + ei;
+        w64_cir(fd, r64(g_df_edges, e * ESZ_DFEDGE + OFF_DFE_FROM) - node_start);
+        w64_cir(fd, r64(g_df_edges, e * ESZ_DFEDGE + OFF_DFE_TO) - node_start);
+        w64_cir(fd, r64(g_df_edges, e * ESZ_DFEDGE + OFF_DFE_KIND));
         ei = ei + 1;
     }
 
@@ -358,6 +386,11 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int {
         vi = vi + 1; }
         si = si + 1;
     }
+
+    // v20 尾部 trailer（**基线见证**）：{var_start, node_start}。装载期**先校验后恢复**：
+    // var 域恒校验（唯一不可低成本重映射的镜像域）；node 域仅在快照含越界 rel 时作条件见证。
+    w64_cir(fd, var_start);
+    w64_cir(fd, node_start);
 
     written := syscall3(1, fd, g_cir_write_buf, g_cir_write_pos);
     syscall3(3, fd, 0, 0);
@@ -484,6 +517,93 @@ fn load_cir_cache(path: string, func_idx: int) -> int {
     // Skip name string (we already know which function we tried to load)
     pos = pos + name_len;
 
+    // === v20 尾部 trailer = 基线见证（**先校验后恢复**）===
+    // 最短合法条目 = 头 48 + trailer 16（上方 dlen < 56 的粗检已过 ⇒ 此处再按 64 收紧）。
+    if dlen < 64 { return -1; }
+
+    // === 结构预扫（**只读，不动全局**）===
+    // 为什么先扫后恢复：装载的破坏性写在半途失败会污染全局数组（随后回归生成会**叠加**到
+    // 半恢复的图上）⇒ 所有校验必须在**任何写之前**完成（P4：截断/越界 ⇒ rc=0/miss，不得 139/垃圾）。
+    p : ., mut = pos;
+    var_p := p;
+    p_var_count := r64(data, p); p = p + 8 + p_var_count * 24;
+    if p > dlen { return -1; }
+    node_p := p;
+    p_node_count := r64(data, p); p = p + 8 + p_node_count * 64;
+    if p > dlen { return -1; }
+    sg_p := p;
+    p_sg_count := r64(data, p); p = p + 8 + p_sg_count * 48;
+    if p > dlen { return -1; }
+    edge_p := p;
+    p_edge_count := r64(data, p); p = p + 8 + p_edge_count * 24;
+    if p > dlen { return -1; }
+    instr_p := p;
+    p_instr_count := r64(data, p); p = p + 8 + p_instr_count * 48;
+    if p > dlen { return -1; }
+    str_p := p;
+    p_str_count := r64(data, p); p = p + 8;
+    p_si : ., mut = 0;
+    loop {
+        if p_si >= p_str_count { break; }
+        sl_p := r64(data, p); p = p + 8 + sl_p;
+        if p > dlen { return -1; }
+        p_si = p_si + 1;
+    }
+    // trailer 定位于**扫描终点 p**（而非 dlen−16）：**尾随字节容忍**——装载历来忽略条目尾随字节
+    // （既有契约：`test_cir_warm_path.py` 的 D5 用例即其钉子——补零条目仍须**命中**），故只要求
+    // `p + 16 <= dlen`；**截断**（p+16 > dlen，含「恰缺 trailer」「trailer 半截」）仍 fail-closed miss。
+    if p + 16 > dlen { return -1; }
+    var_start_w := r64(data, p);
+    node_start_w := r64(data, p + 8);
+    // var 域是**唯一无法低成本重映射**的镜像域（var 下标出现在节点 dest/s1..s3 与指令 s1..s3）
+    // ⇒ 恒校验：不符 = 读者与写者不同态 ⇒ miss（无害重建；「宁可 miss 不可静默」）。
+    if g_ir_var_count != var_start_w { return -1; }
+
+    // 边端点合法性 + **条件见证**：常态（rel 全在 [0, node_count)）下节点基线平移**不**影响相对 id
+    // 的正确性 ⇒ 不校验 node_start（否则每次编辑都会让「被编辑函数之后的所有条目」集体 miss）；
+    // 仅当出现**越界 rel**（全档实测 1/1618 档：from 指向更早函数/全局的节点）时，才要求节点基线一致。
+    base_node_v := g_df_node_count;
+    need_node_witness : ., mut = 0;
+    ei_v : ., mut = 0;
+    loop {
+        if ei_v >= p_edge_count { break; }
+        eo_v := edge_p + 8 + ei_v * 24;
+        rf_v := r64(data, eo_v);
+        rt_v := r64(data, eo_v + 8);
+        if rf_v >= p_node_count { return -1; }   // 前向引用 = 异常（写侧 from 恒 ≤ 当前节点）⇒ 拒
+        if rt_v >= p_node_count { return -1; }   // to 越界 = 异常 ⇒ 拒
+        if rf_v < 0 || rt_v < 0 {
+            need_node_witness = 1;
+            if base_node_v + rf_v < 0 { return -1; }
+            if base_node_v + rt_v < 0 { return -1; }
+        }
+        ei_v = ei_v + 1;
+    }
+    if need_node_witness != 0 { if g_df_node_count != node_start_w { return -1; } }
+
+    // **逐节点见证**（v20；盘值降格为校验）：盘上 node.edge_count 必须等于「该节点在边表里的
+    // 出边条数」——链由重放重建，重建前先把盘值与重放应得值对齐，不符即拒（半恢复不允许）。
+    // 缓冲区按 p_node_count 现取（bump 分配器不回收；全档累计 Σnode ≈ 20.6 万槽 ≈ 1.6MB，可忽略）。
+    if p_node_count > 0 {
+        tally := alloc(p_node_count * 8);
+        tz : ., mut = 0;
+        loop { if tz >= p_node_count { break; } w64(tally, tz * 8, 0); tz = tz + 1; }
+        ei_t : ., mut = 0;
+        loop {
+            if ei_t >= p_edge_count { break; }
+            rf_t := r64(data, edge_p + 8 + ei_t * 24);
+            if rf_t >= 0 { w64(tally, rf_t * 8, r64(tally, rf_t * 8) + 1); }
+            ei_t = ei_t + 1;
+        }
+        nj : ., mut = 0;
+        loop {
+            if nj >= p_node_count { break; }
+            ec_disk := r64(data, node_p + 8 + nj * 64 + 56);
+            if ec_disk != r64(tally, nj * 8) { return -1; }
+            nj = nj + 1;
+        }
+    }
+
     // Restore vars
     var_count := r64(data, pos); pos = pos + 8;
     vi : ., mut = 0;
@@ -533,8 +653,11 @@ fn load_cir_cache(path: string, func_idx: int) -> int {
         sh_tk_split_load(r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE), tk_disk);
         w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK, g_sh_slot_term);
         w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_AUX, g_sh_slot_aux);
-        w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_FIRST_EDGE, r64(data, pos)); pos = pos + 8;
-        w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_EDGE_COUNT, r64(data, pos)); pos = pos + 8;
+        // v20：盘上 first_edge/edge_count **不信任**（边下标随新基线平移）——两槽归零后由
+        // 下方的 df_add_edge_kind 重放**重建**；盘值已在预扫中作**逐节点见证**校验过。
+        w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_FIRST_EDGE, -1);
+        w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_EDGE_COUNT, 0);
+        pos = pos + 16;   // 跳过盘上两字段
         // Record var producer. 幽灵边修复（v7 注 A 裁决）缓存面：grow_df_arrays
         // 对新增长区播种 -1（dyn_arr.cr 同款注释）——快照内未产出 var（参数等）
         // 的 producer 槽恒 -1（修复前零页 = 0 =「节点 0」→ 缓存命中函数保留
@@ -586,21 +709,19 @@ fn load_cir_cache(path: string, func_idx: int) -> int {
         sg_i = sg_i + 1;
     }
 
-    // Restore edges (v5: 4×8B per edge — from/to/next/kind)
-    edge_count := r64(data, pos); pos = pos + 8;
-    grow_df_edges(edge_count);
-    g_df_edge_count = edge_count;
+    // Restore this function's edges (v20): 3×8B = {rel_from, rel_to, kind}，`next` 不落盘。
+    // 逐条经 **df_add_edge_kind** 重放（与冷路径同一函数、同一前插序）⇒ 逐节点链序与
+    // edge_count 与写者同态；且相对 id 在**节点基线平移**（部分 rebuild）时仍指向正确节点
+    // ——这正是 R3（绝对 id + 全量覆盖的「未声明同态」）的根因级闭合。
+    own_edge_count := r64(data, pos); pos = pos + 8;
     ei : ., mut = 0;
     loop {
-        if ei >= edge_count { break; }
-        e_from := r64(data, pos); pos = pos + 8;
-        e_to := r64(data, pos); pos = pos + 8;
-        e_next := r64(data, pos); pos = pos + 8;
+        if ei >= own_edge_count { break; }
+        rel_from := r64(data, pos); pos = pos + 8;
+        rel_to := r64(data, pos); pos = pos + 8;
         e_kind := r64(data, pos); pos = pos + 8;
-        w64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_FROM, e_from);
-        w64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_TO, e_to);
-        w64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_NEXT, e_next);
-        w64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_KIND, e_kind);
+        // 有符号映射（rel<0 = 指向更早函数/全局的节点；界与基线见证已在预扫校验）
+        df_add_edge_kind(base_node + rel_from, base_node + rel_to, e_kind);
         ei = ei + 1;
     }
 

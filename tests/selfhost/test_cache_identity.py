@@ -54,7 +54,7 @@ CACHE_DIR = BASE / ".core" / "cache" / "cir"
 # （未规范化装箱 bits / 读槽 TI_INT），与新语义不等价，命中即「坏 IR 复活成活产物 rc=0」。
 # **布局未变**（v19 与 v18/v17 同构：magic/ver/identity/fp/sig/name_len/name…）⇒ layout() 的
 # v17 分支按 VER_EXPECTED 复用。
-VER_EXPECTED = 19
+VER_EXPECTED = 20
 FNV_OFFSET = -3750763034362895579   # FNV-1 64 offset basis（signed i64）
 FNV_PRIME = 1099511628211
 M64 = 1 << 64

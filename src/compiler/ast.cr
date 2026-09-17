@@ -634,6 +634,9 @@ struct DFEdge {
 g_df_nodes : string, mut;               g_df_node_count : int, mut;     g_df_node_cap : int, mut;
 g_df_edges : string, mut;               g_df_edge_count : int, mut;     g_df_edge_cap : int, mut;
 g_df_var_producer : string, mut;        g_df_func_node_start : string, mut;  g_df_func_node_count : string, mut;
+// 缓存收窄批（CIR_CACHE_VER 20）：每函数**边**起点——df_begin_func 记 g_df_edge_count，
+// 该函数的边 = [edge_start, g_df_edge_count)（写侧 O(1) 取界，取代「写全图边表」）。
+g_df_func_edge_start : string, mut;
 g_df_cap : int, mut;
 
 // Usage count: how many consumers each IR variable has
