@@ -1545,10 +1545,20 @@
 >   而产物**逐字节同、运行值同** ⇒ 安全来自**消费侧结构**（`resolve.cr::res_labels` 逐函数两趟：pass 1 以本函数 LABEL 覆写全局 `g_label_poses`、
 >   pass 2 才就地改写 BRANCH/JUMP 为解析偏移）。**成立条件 = 「label id 只在本函数内消费」且跳转编码恒 32 位宽**；
 >   若将来新增直接消费 label id 的点，或改成按距离选短/长跳编码 ⇒ **本域立即升级为同病实例**（须重跑该实验）。
-> - **留档（可复跑，`/tmp` 会被清理 ⇒ 修复批应把 runner 收编进 `tests/`）**：`/tmp/cachedef/t1/probes/reproA.cr`（复现）·
->   `/tmp/cachedef/scope/*/probes/probe.cr`（7 档范围矩阵）· `/tmp/cachedef/run_scope.sh`（冷/暖矩阵）· `/tmp/cachedef/age_probe.sh`（年龄四代）·
->   `/tmp/cachedef/labels/`（label 撞车实验）。
-> - **修法计划**：`docs/superpowers/plans/2026-09-18-cir-cache-str-domain.md`（三案取舍 + 影响面 + 判据要件；**未实施**）。
+> - **证据包已入仓**（原来是 `/tmp` 临时件，会随清理消失）：`tools/cir-str-domain/`——7 档冷/暖矩阵 runner（`run_scope.sh`，
+>   `--assert` 即**判据原型**：修复后行为，缺陷未修时按定义必红 ⇒ 挂点随修复批落 `tests/selfhost/test_cir_str_domain_warm.py`、
+>   挂 `run.sh selfhost-tests`）· `age_probe.sh`（年龄四代 + 读回各二进制自写的 `CIR_CACHE_VER`）·
+>   `probes/`：`repro_6line` · `scope_{lit,concat,interp,typeinfo,fields,firstintern,partial}` · `label_collision` · `undefined_name`。
+> - **`locals/scope` 已收口（判出边界，不留「未证」）**：① `.cir` 段表**无 locals 段**（结构性无跨进程恢复面）；
+>   ② 唯一消费者 `find_local` 只在**生成期**调用（`ir_gen.cr` 468/498/580/606/1398/1698），命中函数整段跳过生成；
+>   ③ **未定义名是硬错误**（实测 `probes/undefined_name.cr`：`build` rc=1、无产物）⇒ 合法程序不以未绑定名落入 `find_local`。
+>   残余「前一函数残留绑定」面属**既有面**（与缓存无关，冷态同样存在），如需处置**另立条目**。
+> - **修法计划**：`docs/superpowers/plans/2026-09-18-cir-cache-str-domain.md`——**三案并列**（(a) 内容为键重映射 /
+>   (b) 串域恒校验见证 fail-closed / (c) 照 `sh_tk_split_load`（v18）先例**装载期按结构重建**）+
+>   **换代分案推理**（判据 = 旧条目会不会被新装载器**错误解释**：(a) 原设想「纯装载侧可不 bump」**实测前提为假**——
+>   盘面无 id↔内容对应（位置 ≠ id：str 段 4 条 vs 操作数 id `14/193/17/194`）⇒ 也要改盘面；(b)/(c) 加字段/改值语义
+>   ⇒ 必然 bump；**三案一律 bump**）+ **判据要件**（三注入路径**各一探针**：指令/节点操作数 · var 名 `irv_name`（.ccr 观测面）·
+>   str 段重 intern 序（删条目回归）· 突变自证且断言命中目标 · 两腿同判 + 锚定值 · 对拍两侧各自 clean-cache）。**未实施**。
 
 - **最小复现（6 行、确定性、零依赖）**：
   ```core
