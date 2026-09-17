@@ -14,8 +14,10 @@
 ③ `Some(x)==None` 必假 · ④ **同源自比较 `x==x` 必真（bare/boxed 两表示都测）** ·
 ⑤ 非可选 `==` 语义与产物零变化。
 
-**位码打包（rc 可读）**：`bit0 = n==Some(7)` · `bit1 = n==None` · `bit2 = n==m`（两 None）·
-`bit3 = a==b`（两 bare 7）· `bit4 = n==7`。修复前 = **8** · 修复后 = **14**（ELF 与 interp 同值）。
+**位码打包（rc 可读；lead 2026-09-18 裁定「以运行退出码为准、改前五读数 0/0/0/1/1」）**：
+`bit0 = n==Some(7)` · `bit1 = n==None` · `bit2 = n==m`（两 None）· `bit3 = a==b`（两 bare 7）·
+`bit4 = a==7`（可选 vs 内层值，**present**）· `bit5 = n==7`（None vs 内层值）。
+修复前 = **24**（bit3+bit4 ⇒ 五读数 0/0/0/1/1）· 修复后 = **30**（②③④⑤ 置位；① 与 bit5 不置位）。
 
 **突变自证（批级留痕，2026-09-17 实测）**：把比较点分派门退回不触发 ⇒ 位码回 **8**（②③ 回红）。
 
@@ -45,11 +47,11 @@ fn main() -> int {
     a : int? = 7;
     b : int? = 7;
     return b2i(n == Some(7)) + b2i(n == None) * 2 + b2i(n == m) * 4
-         + b2i(a == b) * 8 + b2i(n == 7) * 16;
+         + b2i(a == b) * 8 + b2i(a == 7) * 16 + b2i(n == 7) * 32;
 }
 """
-BITCODE_PRE = 8    # 修复前实测（ELF 与 interp 同值）
-BITCODE_POST = 14  # 修复后期望：②③④ 置位（①⑤ 不置位）
+BITCODE_PRE = 24   # 修复前实测（= 五读数 0/0/0/1/1 ⇒ bit3+bit4；lead 2026-09-18 裁定锚）
+BITCODE_POST = 30  # 修复后期望：②③④⑤ 置位（① 与 bit5 不置位）
 
 
 def _run(cmd, timeout):
