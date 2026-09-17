@@ -5,8 +5,10 @@
 
 > **fail-closed 语义（2026-09-15，FC 批 T2 起）**：**默认阻断**——任何**不在豁免登记表**内的
 > 类型面诊断 ⇒ `rc=1` + **零产物**（不落目标 ELF、不落本次 `<out>.ccr`）。豁免表 =
-> `src/compiler/diag.cr::diag_gate_exempt`（码级 9 条：TF01 · TF07 · TB01 · TM04 · TK01 · B04
+> `src/compiler/diag.cr::diag_gate_exempt`（码级 **8** 条：TF07 · TB01 · TM04 · TK01 · B04
 > [build 面] + N01 · N06 · N11 [check 面，仅登记]；每条带位点证据/理由/退出条件，**只减不增**）。
+> **TF01 已撤条（2026-09-18，批 8 A₂）**：真因 = `alloc: () -> string` 模型 vs 三处 handle 返回型 `-> int`
+> （`chan_make` / `g_new` / `sched_go`）⇒ 按 (A) 对齐语料（+ 5 处 handle 形参）后 5 档并发语料不再产 TF01。
 > 语法面（P/L 族）与安全检查面（B11/TU03…）本就「任一即 rc=1」；`check` 面的 rc 规则
 > （计数 > 0）不消费豁免表 ⇒ check 基线不换代（裁-FC-1 = (C)）。
 

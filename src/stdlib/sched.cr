@@ -61,7 +61,7 @@ fn sched_current_m_idx() -> int {
     return g_current_m_idx;
 }
 
-fn sched_enqueue(g: int) {
+fn sched_enqueue(g: string) {
     // Add to the CURRENT M's local queue (no shared global queue → no
     // cross-thread contention; each M only touches its own list).
     m_idx := sched_current_m_idx();
@@ -168,7 +168,7 @@ fn sched_worker_run(m_idx: int) {
 // sched_go: spawn a goroutine that calls fn_ptr(arg), return a channel for the result.
 // fn_ptr is the function's address (resolved by the backend at link time).
 // arg is the single argument passed to the spawned function.
-fn sched_go(fn_ptr: int, arg: int) -> int {
+fn sched_go(fn_ptr: int, arg: int) -> string {
     // Create a 1-element channel for collecting the result
     ch := chan_make(8, 1);
 

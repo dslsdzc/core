@@ -30,7 +30,7 @@ fn _chan_ensure_init() {
 //  72: temp_val   — temporary value storage for handoff (offset 56 is
 //      saved_fn — never write it from channel code)
 
-fn chan_make(elemsize: int, cap: int) -> int {
+fn chan_make(elemsize: int, cap: int) -> string {
     _chan_ensure_init();
     ch := alloc(64);
     buf := alloc(cap * elemsize);
@@ -45,7 +45,7 @@ fn chan_make(elemsize: int, cap: int) -> int {
     return ch;
 }
 
-fn chan_send(ch: int, val: int) {
+fn chan_send(ch: string, val: int) {
     _chan_ensure_init();
     buf := r64(ch, 0);
     cap := r64(ch, 8);
@@ -97,7 +97,7 @@ fn chan_send(ch: int, val: int) {
     sched_yield();
 }
 
-fn chan_recv(ch: int) -> int {
+fn chan_recv(ch: string) -> int {
     _chan_ensure_init();
     buf := r64(ch, 0);
     cap := r64(ch, 8);
@@ -153,7 +153,7 @@ fn chan_recv(ch: int) -> int {
     return val;
 }
 
-fn chan_close(ch: int) {
+fn chan_close(ch: string) {
     _chan_ensure_init();
     w64(ch, 56, 1);  // closed = true
 
