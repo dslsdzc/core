@@ -153,6 +153,8 @@
 | — | `#2026-09-18-5` | 2026-09-18 | 批 8 Q2 实测 | 【静默·fail-closed 缺口】checker 对 `EXPR_EXTERN` 声明早退 ⇒ **非可选** extern 实参/返回型不匹配仍静默（check=0 · build=0 · run SIGSEGV） |
 | — | `#2026-09-18-6` | 2026-09-18 | 批 8 三形态实测 | 【静默】模块限定泛型调用不进重定向块（门只认 `EXPR_IDENT`）⇒ 实例不具体化：check=1（TF01 误报）· build=0（豁免表内）· run=139 |
 | — | `#2026-09-18-7` | 2026-09-18 | 批 8 实测登记 | 【语料状态·预存】`tests/suite` 腿 6 档异常（BUILDFAIL 5 + RUNFAIL 1；`test_control_flow`/`test_generics` = **0 字节**）⇒ 纳入 PR 门前必须先清 |
+| — | `#2026-09-18-8` | 2026-09-18 | suite 清障批产出 | 【语料卫生·登记】`at_test_mini*` 族 = 调试残料，建议整族收敛 + 更正 b8 分支「6 档异常」登记口径（run_suite 本就 SKIP）；本批已修 2 档 + 收紧 skip |
+| — | `#2026-09-18-9` | 2026-09-18 | suite 清障批实测 | ⚠⚠【缓存·静默错值】`.cir` 快照**暖态重放** ⇒ 同源二次构建得到**不同 IR**（`@fields` 暖态取到 `arena_reset`）；含 6 行最小复现 + 判据要件 |
 
 
 ## 触发器约定（2026-09-18 立；存量扫描产出）
@@ -1510,6 +1512,37 @@
 - **与 `#2026-09-18-4` 的因果链**：该腿属 `suite` job、**不在 PR 门内** ⇒ 这类状态**无人看见**（`-4` 讲「为什么没人看见」，本条讲「看见了也没人管」——互为因果、对象不同，故**不合并**）。
 - **触发器（若纳入 PR 门）**：**一旦把 `suite` 纳入 PR 门，会立刻多出 6 档红** ⇒ **纳入前必须先清这 6 档**，否则一次改动会带来无法归因的红。
 - **状态**：**登记，未修**（批 8 实测产出；零源码改动）。
+
+### 2026-09-18-8. **【语料卫生·登记】`at_test_mini*` 族 = 调试残料，建议整族收敛；并更正「tests/suite 6 档异常」口径**（2026-09-18 suite 清障批产出）
+
+- **族源（实核）**：`at_test*` 族（9 个 `mini*` + `at_test.cr` + `at_test_struct.cr`）**同出一批** = `471ed1bc8b05`（07-29，#19「Arena 模型 + @内建原语 + 增量缓存 + @hotpatch 滚动更新」）⇒ 该批**逐内建的极小复现语料**，**非**某套件被拆分（指认不出原套件）。
+- **口径更正（本批最重要的发现之一）**：在飞分支（b8）上那条「**6 档异常**」登记，是**朴素枚举循环**（`for f in tests/suite/*.cr; do corec build/run`）的读数，**不是 `run_suite` 腿的读数**——真实 runner **本就跳过**它们（`src/ci/run.sh::run_suite`：① mini 族负例 SKIP ② `[ ! -s "$f" ]` 0 字节 SKIP）⇒ 「6 档异常」**在套件腿上从未出现**。该登记号在未合入分支上，本条目只记录更正、不替其改写。
+- **逐档实测（本批，编译器 = 本批 `build/corec`；**均逐档 clean-cache**）**：`at_test_mini` = 改前 `error[N06]: Undefined function 'print'`（**缺 `import io`**）· `at_test_mini9` = `check` rc=0、**运行 rc=1**；**冷态** `@fields(Point)` 实测 = `"x,y"`（**3 字符**）⇒ 旧断言 `< 4` 是过期期望（**且**暖态另有一层缺陷，见 `#2026-09-18-4`）· `at_test_mini4`/`mini6` = `error[P21]: Nested function declaration … declare it at top level`（**负例**；判据已在 `tests/selfhost/test_nested_fn.py`，挂 selfhost-tests）· 两个 0 字节档 = `error: cannot read <path>`（**读入侧**报错，非解析错）。
+- **本批处置**：① `mini`（补 `import io`）与 `mini9`（断言改 `!= 3`）**修好并移出 skip** ⇒ `@sizeOf` / `@fields` 两内建**在套件腿真跑**（净增 2 档正例覆盖；**档数 35 不变**）；② `run_suite` 的 `*_mini*.cr` 通配**收紧为显式两档负例**（模式须**全路径锚定** `*/at_test_mini4.cr`——裸文件名不匹配 `$f`，曾致负例漏进正例循环、`set -e` 下整腿中止）；③ `run_suite` 增**逐档 clean-cache**（理由见 `#2026-09-18-4`：暖态重放缺陷 ⇒ 否则本腿结论依赖上一轮缓存状态；与 `parity_run.sh` 既有做法一致）；④ **不删**任何档。
+- **建议（待维护者裁）**：**整族收敛** —— 保留被维护过的 `at_test.cr` + `at_test_mini7.cr`，其余合并进一个正式 `at_builtins_test.cr`（或删除）。**理由**：语言面每次收紧都会再产同族红（本次 2 档正是 P21 收紧的产物）。
+- **删除类动作的耦合（若将来裁删）**：`tests/suite/*.cr` 档数 **35 是硬不变量** ⇒ 删档必须同批改 `tools/baseline/parity_run.sh:31` 的 `CORPUS_TOTAL=75`（→73）**及其注释**、`tools/baseline/REBUILD.md:6` 的枚举串，否则 runner 硬失败。**本批不删 ⇒ `CORPUS_TOTAL` / `REBUILD.md` 全未动（35 档不变）。**
+- **状态**：**登记；本批已修两档 + 收紧 skip + 逐档 clean-cache**；删除与整族收敛**待裁**。
+
+### 2026-09-18-9. ⚠⚠ **【缓存·静默错值·预存】`.cir` 快照暖态重放 ⇒ 同一源二次构建得到**不同 IR**（字符串常量取到别的函数）**（2026-09-18 suite 清障批实测挖出——**非本批引入**，疑与 `#2026-09-17-16/#-17` 同批的缓存改造面相关）
+
+- **最小复现（6 行、确定性、零依赖）**：
+  ```core
+  import io
+  struct Point { x: int, y: int }
+  fn main() -> int { f := @fields(Point); println(f); println(int_str(str_len(f))); return 0; }
+  ```
+  ```bash
+  ./build/corec clean-cache
+  ./build/corec build P.cr -o /tmp/a --static && /tmp/a    # 冷：x,y / 3
+  ./build/corec build P.cr -o /tmp/b --static && /tmp/b    # 暖：**arena_reset / 11**（取到别的函数的串）
+  cmp /tmp/a /tmp/b                                        # 差异（第 25 字节起）
+  ```
+- **实测读数**（本批 `build/corec`，`@fields` 例）：冷 = `x,y`(3) · 暖 = **`arena_reset`(11)** · 产物 `cmp` 不同；**rc 冷 0 / 暖 1**（同一源，同一文件）。含 `str_len` 断言的 `tests/suite/at_test_mini9.cr` 即因此冷绿暖红（本批为它加了 clean-cache）。
+- **影响面（保守判定）**：任何**二次构建**（暖态）都可能取到错常量 ⇒ ① 判据面污染：`suite` 腿、任何「构建→再构建」的本地复核**结论依赖缓存状态**；② **`@fields` 类内建字符串**可复现；其余形态**未穷举**（本批只实测该例 + `@sizeOf` 例正常）。
+- **疑似根因（读码推断，未定）**：暖态重放路径的**字符串/常量索引**在「段粒度按函数收窄 + 相对 id」（批 7 缓存改造）后**按错基址解析** ⇒ 取到邻近函数的 interned 串；`g_alloc_pts`/`track_str` 类侧表**不在快照内**时更易错位。
+- **判据要件（修复时）**：① 上列最小复现**冷/暖产物逐字节同 + 行为 rc 同**；② 全语料冷/暖对拍（`parity_run.sh` 暖态腿 + suite 腿——后者在 b8 分支登记为「6 档异常」那条）零分歧；③ 反证：去掉 clean-cache 也应稳定（缺陷消除后 `run_suite` 的逐档 clean-cache **可留可撤**）；④ `CIR_CACHE_VER` 按既有纪律 bump（缓存内容语义变更）。
+- **状态**：**登记，未修**（本批只做「让腿可复现」的 clean-cache，**不修缓存本体**）。
+- **关联**：`#2026-09-17-17`（缓存键缺环境/命令形态 ⇒ 逐字节判据同族）· `#2026-09-17-16`（快照固定开销）· 本批 `#2026-09-18-3`（mini 族清障，其 `mini9` 的暖态红即本例）· `docs/superpowers/plans/2026-09-17-cir-cache-bloat.md`。
 
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 

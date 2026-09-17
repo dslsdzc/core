@@ -19,6 +19,8 @@
      「为何放松」留痕于 `j3_problems` 头注。
   J4 **突变自证**：内存内把一处新 id 引用**还原成旧号** ⇒ J1 的判定函数必须转红；
      还原前（真实现状）⇒ 绿。证明 J1 有牙（不是恒绿的空判据）。
+  J6 **同日段内 id 唯一**：`### YYYY-MM-DD-N.` 标题中同一 id 不得出现两次
+     （2026-09-18 补：两个 PR 各写一个 `2026-09-18-3` 而 J1–J5 全绿 ⇒ 该缺口由本判据机械拦）；
   J5 **零源码语义改动**（静态面）：`.cr` 文件里不出现任何 `TODO #<旧号>` 形态（含于 J1），
      且本判据不依赖编译器 ⇒ 可在最便宜的 CI job 跑。
 
@@ -307,9 +309,39 @@ def check_j4(verbose=True):
     return ok
 
 
+def j6_duplicates(todo_text):
+    """同日段内重复标题 id（`### YYYY-MM-DD-N.`）：返回 {id: 次数>1}。"""
+    counts = {}
+    for m in re.finditer(r"(?m)^### (\d{4}-\d{2}-\d{2}-\d+)\.", todo_text):
+        counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+    return {k: v for k, v in counts.items() if v > 1}
+
+
+def check_j6(verbose=True):
+    """J6 同日段内 id 唯一（2026-09-18 补：本条缺口由两个 PR 各写一个 `2026-09-18-3` 而 J1–J5 全绿暴露）。
+
+    为何需要：同一 id 出现两次 ⇒ J2 的「引用 ↔ 标题」双向匹配退化为多对一（引用指向哪一个不可判），
+    且落地后必与《编号约定》「N 按标题行行号升序、当日最大 +1」冲突 ⇒ 属结构性可机械拦的一类。
+    判据 = 标题集合内不得有重复；含**突变自证**（内存内复制一条标题 ⇒ 必红；真实现状 ⇒ 绿）。
+    """
+    txt = read(TODO)
+    dup = j6_duplicates(txt)
+    m = re.search(r"(?m)^### (\d{4}-\d{2}-\d{2}-\d+)\.", txt)
+    nid = m.group(1) if m else "2026-01-01-1"
+    mutated = txt + f"\n### {nid}. 突变体（内存内复制，不入盘）\n"
+    red_mut = len(j6_duplicates(mutated)) > 0
+    green_real = not dup
+    ok = red_mut and green_real
+    if verbose:
+        print(f"  突变样本 = 复制 `### {nid}.` ⇒ 真实现状绿={green_real} · 突变后红={red_mut}")
+    extra = f"（重复 = {sorted(dup)}）" if dup else ""
+    print(f"[{'PASS' if not dup else 'FAIL'}] J6 同日段内 id 唯一：重复 {len(dup)} 个{extra}")
+    return ok
+
+
 def main():
-    print("=== TODO 标识迁移判据（J1-J5）===")
-    results = [check_j1(), check_j2(), check_j3(), check_j3_mutations(), check_j4()]
+    print("=== TODO 标识迁移判据（J1-J6）===")
+    results = [check_j1(), check_j2(), check_j3(), check_j3_mutations(), check_j4(), check_j6()]
     print(f"{sum(results)}/{len(results)} 通过")
     return 0 if all(results) else 1
 
