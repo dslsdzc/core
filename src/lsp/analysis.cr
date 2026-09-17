@@ -702,6 +702,7 @@ fn analysis_at_items(prefix: string) -> string {
     if analysis_has_prefix("hasField", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("hasField", 3); first = 0; }
     if analysis_has_prefix("field", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("field", 3); first = 0; }
     if analysis_has_prefix("typeInfo", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("typeInfo", 3); first = 0; }
+    if analysis_has_prefix("raw_int", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("raw_int", 3); first = 0; }
     if analysis_has_prefix("comptime", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("comptime", 3); first = 0; }
     if analysis_has_prefix("inline", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("inline", 3); first = 0; }
     if analysis_has_prefix("NoBoundsCheck", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("NoBoundsCheck", 3); first = 0; }
