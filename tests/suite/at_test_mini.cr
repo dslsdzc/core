@@ -1,3 +1,5 @@
+import io
+
 fn test_sizeof_int() -> int {
     sz := @sizeOf(int);
     if sz != 8 { return 1; }

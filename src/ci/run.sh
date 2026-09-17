@@ -41,16 +41,25 @@ check_compiler_sources() {
 run_suite() {
   for f in tests/suite/*.cr; do
     case "$f" in
-      # mini* 语料整体 SKIP（历史遗留：其中 at_test_mini4/6 为**函数体内嵌套 fn 声明**，
-      # TODO #2026-09-10-12 —— 该构造不属语言面（grammar/core.ebnf：Statement 不含 FunctionDecl），
-      # 修复前编译 rc=139 段错误；现由 corec 以 error[P21] 定位诊断拒绝（rc=1），
-      # 属**负例**而非可运行正例，故仍不进正例套件；回归见 tests/selfhost/test_nested_fn.py
-      # （同族扁平正例 at_test_mini5.cr / at_test.cr 已在套件内）。
-      *_mini*.cr) continue ;;
+      # 负例 SKIP（**显式两档**；2026-09-18 suite 清障批由 `*_mini*.cr` 通配收紧而来）：
+      # `at_test_mini4.cr` / `at_test_mini6.cr` = **函数体内嵌套 `fn` 声明**（TODO #2026-09-10-12）——
+      # 该构造不属语言面（grammar/core.ebnf：Statement 不含 FunctionDecl），corec 以 `error[P21]` 拒收
+      # （rc=1）⇒ 属**负例**而非可运行正例。判据 = tests/selfhost/test_nested_fn.py（挂 selfhost-tests，
+      # 断言 rc=1 + P21 + 定位行号 + 无 139，且**点名这两档 fixture**）。
+      # 收紧理由：原通配把**整族 9 档**一起跳过，其中 `at_test_mini.cr`（`@sizeOf`）与
+      # `at_test_mini9.cr`（`@fields`）是**可修好的正例**（前者缺 `import io`、后者断言过期；
+      # 已在本批修好）⇒ 移出 skip 列表，让这两个内建在套件腿**真跑**。
+      */at_test_mini4.cr|*/at_test_mini6.cr) continue ;;   # 注意：`$f` 是**全路径**，模式必须带 `*/` 前缀（原 `*_mini*.cr` 靠前置 `*` 命中）
     esac
     if [ ! -s "$f" ]; then
       continue
     fi
+    # 逐档 clean-cache（2026-09-18 suite 清障批新增）：`.cir` 快照**暖态重放**今日实测会给出
+    # **不同的 IR**（同一源、同一文件：冷 build ⇒ `@fields` = `"x,y"`；暖 build ⇒ 取到**别的函数的串**
+    # `"arena_reset"` ⇒ 行为 rc 冷 0 / 暖 1、产物逐字节不同）⇒ 不清缓存时**本腿的结论依赖上一轮缓存状态**，
+    # 不可复现。做法与 `tools/baseline/parity_run.sh` 的逐档 `clean-cache` 一致（既有先例）。
+    # 该缺陷本体另立条目（见 TODO 当日段「`.cir` 暖态重放静默错值」），**不在本批修**。
+    ./build/corec clean-cache >/dev/null 2>&1
     echo "suite: $f"
     ./build/corec build "$f" -o /tmp/core_suite_bin --static
     chmod +x /tmp/core_suite_bin
@@ -139,6 +148,11 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_agg_checks.py     # TODO #2026-09-11-11 聚合字面量「名/型/同质性」三校验（名字绑定 + TS01-04/TK02 硬错误）
     python3 tests/selfhost/test_apx_conversion.py # apx 形式转换缺口族（2026-09-16 apx 批 T5）：**23 例** = TODO #2026-09-16-17（方法调用实参）/ #2026-09-16-18（第 9 个 binary64 栈参）/ ⑦a（全局运行期初值）+ T2 新增两活点（**模块限定调用 `m.f(x)`** / **指针写 `*p = d`**）+ 聚合四类写点 + 比较点声明面查表（L10）+ 非回归 + **`dex?` 零足迹哨兵**（⚠ 其期望值 15 **不是**期望语义，只是绊线——见套件内刺眼标注与 TODO #2026-09-16-29）+ **两条自证腿**（声明形自证：显式形建 apx 槽/推断形不建 + 解释器拒收反证；C1 双形对拍通用腿）。**判据分工**：本套件是 apx 面载荷判据——ELF canary + `.ccr` 四条对 apx 面**零覆盖**（T3 突变双向实测），详见 `2026-09-16-criteria-strength-audit.md` §0ter；配套 suite 语料 `tests/suite/apx_conversion_test.cr`
     python3 tests/selfhost/test_nested_fn.py      # TODO #2026-09-10-12 嵌套 fn 声明段错误 → 定位诊断回归
+    # 2026-09-18 suite 清障批：**suite 语料卫生判据**（`suite` 腿不在 PR 门内 ⇒ 把本批的四处期望搬进门内）——
+    # H1 修好的两档正例 build+run rc=0 · H2 两档负例 check rc≠0+P21+**零产物** · H3 正控（断言有辨别力）·
+    # H4 run_suite 跳过集合 == 两档负例且模式**全路径锚定** · H5 0 字节档集合钉；**逐档 clean-cache**
+    # （理由 = TODO #2026-09-18-9 的暖态重放缺陷 ⇒ 否则结论依赖上一轮缓存状态）。
+    python3 tests/selfhost/test_suite_hygiene.py
     python3 tests/selfhost/test_interp_parity.py  # TODO #2026-09-10-7 解释器 callee 内联 ≡ 主循环 ≡ ELF
     python3 tests/selfhost/test_cache_identity.py # TODO #2026-09-10-1 cir 缓存编译器身份（跨重建失效）
     python3 tests/selfhost/test_cir_warm_path.py  # R2 P5 Task 1：.cir 暖态 SIGSEGV 根因修复回归——冷/暖 rc 双 0 + ELF 逐字节同 + .ccr 段级契约（STR 冷≠暖为预存口径）+ 暖态真命中（条目 size/mtime 不变）+ 变体（多串/0 串/大串/多函数）+ 可选面零条目 + **累计装载复现例**（400 条目补零至 3MB ⇒ Σ=1.2GB > 1GB 堆，暖态 rc=0 + 峰值 RSS < 512MB；修复前 rc=139 红态实测）= 19 例（COREC_WARM_SELF=1 另开 2 例自源语料，~3 分钟）
