@@ -579,3 +579,91 @@ fn main() -> int { return f(); }
 两条腿在新锚点上**零差异**。（同教训的另一处实例：缓存批 rebase 后 `jj diff` 显示其树少了批 5 report 的 24 行 —— **develop 一前进，比较基就失效**。）
 
 **未做（转 T4）**：VC 记录结构 + `--dump-vcs` 通道（三态输出：green/yellow/red）。
+
+---
+
+## 14. T4 实施记录（VC 清单 + `--dump-vcs` 通道；2026-09-17）
+
+**改动面**：`src/compiler/globals.cr` + `dyn_arr.cr`（侧表**加 `g_spec_status` 状态列**；`spec_set_status` **red 粘性**——
+已判红不被后续 green 覆盖，否则「有硬错」会被「常量真」抹掉）· `src/compiler/ast.cr`（`SPEC_ST_{YELLOW,GREEN,RED}`）·
+`src/compiler/checker.cr`（4 处状态写入：折叠真 ⇒ green / 折叠假 ⇒ red / V04·V05·V06 ⇒ red）·
+`src/compiler/dump.cr`（`spec_expr_text` 规范化文本 + `vcs_dump`）· `src/compiler/main.cr`（注册 `--dump-vcs` +
+**打印点 = `run_frontend` 的 fail-closed 闸门之前**）。
+
+**★ 样例输出（三态一屏；`check` 面，无 `--static` ⇒ 行号即源码行）**：
+
+```
+[vcs] count=3
+[vcs] vc 0 fn=f kind=check status=green line=2 col=5 expr=(1 > 0)
+[vcs] vc 1 fn=f kind=check status=yellow line=3 col=5 expr=(a >= 0)
+[vcs] vc 2 fn=f kind=check status=red line=4 col=5 expr=(1 < 0)
+error[V01]: #check(...) is statically false
+```
+
+**★ 样例输出（跨 impl 同名方法 —— 侧表键 `g_spec_fnode` 的判据）**：
+
+```
+[vcs] count=2
+[vcs] vc 0 fn=A.get kind=check status=yellow line=4 col=37 expr=(alpha >= 0)
+[vcs] vc 1 fn=B.get kind=check status=yellow line=7 col=36 expr=(beta >= 0)
+```
+
+**判据（T4 电池 16 项全绿）**：
+
+| # | 判据 | 实测 |
+|---|---|---|
+| 1 | 三态齐全 + **红也列**（不静默省略）+ 红 ⇒ 诊断通道 rc=1 | ✅（green/yellow/red 同屏 + `error[V01]`） |
+| 2 | **红的 line/col 与诊断自洽** | ✅ dump `19:5` ≡ 诊断 `--> 19:5`（`--static` 形态） |
+| 3 | **源序确定**（两次 dump 逐字节同） | ✅ |
+| 4 | **开关不改产物**（有/无 `--dump-vcs` ⇒ ELF 与 `.ccr` sha 同） | ✅（黄态语料；红态无产物，判据口径另定） |
+| 5 | **冷/暖 dump 逐字节同** | ✅ |
+| 6 | **五分支可用**（`check`/`ccr`/`cir`/`run`/`build` 均经 `run_frontend`） | ✅ |
+| 7 | **侧表键防串台**：两个 impl 的同名方法各带不同注解 ⇒ 各自独立、rc=0（**无伪 N01**） | ✅（`A.get`/`B.get` 分列，参数各为 `alpha`/`beta`） |
+
+**四点钉死的落实**：① stdout、零新产物、开关不改 rc/产物 ✅ · ② 三态分流（红走诊断 / 绿黄进 dump）✅ ·
+③ **红也列**（打印点在闸门之前 ⇒ 红态照样列出；「没列出来」与「列出来是红的」可区分）✅ ·
+④ **只读侧表**（`vcs_dump` 直接读 `g_spec_*`，不另起状态 ⇒ 无第二真源）✅。
+
+**回归闸门**：canary **5/5** · **腿② 零差异** · T2 电池 **13/13** · T3 电池 **11/11** · Δ 判据 **2/2** · J 判据 **5/5** ·
+**腿①（75 档）**：rc 分布不变，**两档日志差异经机械归因 = 纯行号平移**（`_import.cr` 4 行 · `ccr_io.cr` 156 行，
+**全为 `--> L:C` 与源码回显形态**；**剥行号后逐字节同**；两档 rc 逐档相同）——根因 = 批 6 给编译器源累计加了行，
+而对拍语料**含编译器自身源**；属**预期内**差异（同 T2 的归因，见 §12）。
+
+**顺带实核（登记，非本批）**：`src/compiler/dump.cr` 的 `cmd_cir`（`:429`）**全仓零调用者**（死码，同 `elf.cr`/`linker.cr` 家族）；
+本批未动（不扩面）。
+
+**未做（转 T5/T6）**：判据入仓（`tests/spec/` 语料 + `tests/selfhost/test_spec_grammar.py` + `run.sh` 挂点 + 覆盖率判据）·
+文档面（`syntax.md` / `spec-design.md` 示例 / `REBUILD.md` 计数勘误）· 全量回归与台账。
+
+---
+
+## 15. T5 实施记录（判据入仓：语料 + 套件 + 挂点；2026-09-17）
+
+**交付物三件**：
+
+| # | 路径 | 内容 |
+|---|---|---|
+| 1 | `tests/spec/`（**33 档 .cr + README.md**） | 四组语料：`t2_*` 语法面 15 · `t3_*` 检查面 11 · `t4_*` dump 通道 3 · `delta_*` 零足迹对拍 4（两对，**成对使用不可拆**）。**独立目录**：不进腿①（parity 75 档）与腿②（probes 29 档）——两腿计数不变 = 旧面零扰动的证据 |
+| 2 | `tests/selfhost/test_spec_grammar.py`（**48 项**） | A 语法面 16 · B 检查面 11 · C dump 通道 15（含**红也列**/自洽/源序/开关不改产物/冷热同/五分支/防串台）· D **`.ccr` 零足迹三段式** 6（含 Δ 公式与**零 Δ 用例**） |
+| 3 | `src/ci/run.sh`（`selfhost-tests` job 尾） | 挂点 + 行内注释（四组构成 + **Δ 公式价值** + 语料位置 + 实测时长） |
+
+**维护者三条要求**：
+1. **独立可跑** ✅：`BASE = Path(__file__).resolve().parents[2]`（不依赖调用者 cwd）· 所有产物落 `tempfile` 并在 `finally` 清理 ·
+   **唯一外部依赖 = 「`cwd` 必须是仓库根」**——这是**既有**依赖（`--static` 要读 `src/runtime/rt.cr`，`main.cr:112-122` 只按 cwd/exe 相对找），
+   套件内部对每条 `corec` 调用都显式传 `cwd=BASE` ⇒ **对调用者无要求**。
+2. **时长写进注释** ✅：**1.8s**（本机，2026-09-17，含 swap 抖动；CI 关键路径无影响）。
+3. **Δ 公式入仓** ✅：`delta_case()` 把公式算在**判据里**（`4 + len("check")` 与 `0` 两种期望值），
+   机制注（`add_tok_str` 的 `str_intern` 是**既有行为**）+ 「多一字节即红」+ 「零 Δ 用例必须绿」全部写进
+   套件头注与 `tests/spec/README.md`。
+
+**挂点三件套自证**：`python3 tests/harness/test_ci_hook_coverage.py` ⇒ **PASS**（`scope=73 · hooked=52 · unhooked(allowlisted)=21`）——
+新套件**已挂**故不进白名单 ✓。
+
+**五 CI job 面**：本套件挂 **`selfhost-tests`**（需已构建编译器）；**不进** `suite`（该 job 只跑 `tests/suite/*.cr` 正例）
+与 `full-bootstrap`（自举链）——**不改任何 job 的语料计数**。`check` job 跑 `corec check src/compiler`，本批给编译器源加的行会进该语料，
+但**零诊断增量**（T5 本轮实测：J 5/5 + 构建 rc=0 + 冒烟 42；`check src/compiler` 的增量判定见 T6 全量回归）。
+
+**顺带登记**：`TODO #2026-09-17-12`（`dump.cr::cmd_cir` 零调用者 = 死码，与 `elf.cr`/`linker.cr` 同族；**不与 `#2026-09-10-3` 重复**）。
+
+**未做（转 T6）**：五 job 全量回归 + 自举链（`corec2==corec3` + N06=0 + 冒烟 42）· 文档面（`syntax.md` / `spec-design.md` 示例 /
+`REBUILD.md` 计数勘误「72/73 → 75」）· 统一台账 · TODO 收口。

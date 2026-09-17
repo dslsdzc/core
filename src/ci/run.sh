@@ -209,6 +209,12 @@ case "$CI_JOB_NAME" in
     # 配套 suite 语料 `tests/suite/opt_dex_test.cr`（常规腿；返回码 1..14 = 首个失败面编号）。
     # 计划 = docs/superpowers/plans/2026-09-17-opt-dex.md · 报告 = 收官批报告。
     python3 tests/selfhost/test_opt_dex.py
+    # ─── 批 6（验证内核正式接入 = 正式规约语法 `#check`/`#ensure`；2026-09-17）───
+    # 四组 48 项：A 语法面（16）· B 检查面（11）· C `--dump-vcs` 通道（15）· D `.ccr` 零足迹三段式（6，含 Δ 公式）。
+    # **Δ 公式 = 本批最有价值的判据**（T3 首轮当场抓到实现自身的 `str_intern("result")` 泄漏：两用例 STR Δ 凭空 +10B），
+    # 必须留仓。语料 = `tests/spec/`（33 档，独立目录，**不进**腿①/腿②语料——两腿计数不变 = 旧面零扰动的证据）。
+    # 时长实测（2026-09-17 本机，含 swap 抖动）：**1.8s** ⇒ 不影响 CI 关键路径。
+    python3 tests/selfhost/test_spec_grammar.py
     ;;
 
   suite)
