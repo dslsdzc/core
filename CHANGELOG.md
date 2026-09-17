@@ -3,6 +3,19 @@
 > 说明：本文档记录里程碑级变更。近期每日开发流水、预存 bug 与架构规划以 `TODO.md` 为准。
 > 2026-06-21 至 2026-07-23 之间曾存在文档缺失期，以下条目按提交历史与 TODO.md 补齐。
 
+## 2026-09-17
+### [change] `@no_bounds_check` 更名为 `@NoBoundsCheck`
+- 维护者 2026-09-17 指示的重命名。**干净重命名，不留别名**：旧名 `@no_bounds_check` 从此**不是内建**——
+  必须**响亮失败**（`error[N01] unknown @ builtin`：rc=1 + 文件:行:列定位 + 零产物），**不得静默接受**。
+- 名分派四处同步：`src/compiler/checker.cr`（EXPR_AT 名分派）· `src/compiler/ir_gen.cr`（注解发射）·
+  `src/compiler/dataflow.cr`（`.cir` 显示名）· `src/lsp/analysis.cr`（`@` 补全表）。语料/探针同步：
+  `tests/suite/at_test.cr` · `tests/suite/at_test_mini7.cr` · `tests/probes/p_annots{,2}.cr`（+ 探针 README 表）。
+- **IR 操作码常量 `IR_NO_BOUNDS_CHECK(35)` 不变**（内部标识、非语言面名字；改名 = 无谓 churn）。
+  发射面零变化：改名前后的语料 ELF **逐字节同**（仅 `.ccr` 的 STR 段因源文本标识符驻留而变）。
+- 回归判据 = `tests/selfhost/test_at_rename.py`（14 例，已挂 `selfhost-tests`）：旧名三面（build/check/run）
+  响亮失败 + 新名两形态等价 + 两条入仓语料运行 + `.cir` 显示名（括号形态有行 / 语句形态零 IR = F4 语义保持）
+  + 分派点四处同步守门 + 操作码 35 钉。
+
 ## 2026-07-31
 ### [feat] concurrency end-to-end — goroutine spawn, function address, result channels
 - `go f(args)` 端到端打通：`sched_go(@addr(f), arg)` → g_new 存 saved_fn/saved_arg → ELF 后端内联发射 fiber_init/fiber_switch/goroutine_entry_wrapper → wrapper 调用 saved_fn(saved_arg) → 结果经 result_ch 回传。

@@ -121,6 +121,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_borrow.py
     python3 tests/selfhost/test_pointer_safety.py
     python3 tests/selfhost/test_params_limit.py   # TODO #2026-09-10-4 形参上限/≥18 形参静默误编译回归
+    python3 tests/selfhost/test_at_rename.py      # `@no_bounds_check` → `@NoBoundsCheck` 更名（维护者 2026-09-17）：旧名**响亮失败**（build/check/run 三面 rc=1 + 定位 + 零产物，绝不静默）+ 新名两形态等价 + 两条入仓语料运行 + `.cir` 显示名（括号形态有行/语句形态零 IR = F4 语义保持）+ 分派点四处同步守门 + IR 常量 35 钉 = 14 例
     python3 tests/selfhost/test_global_seams.py   # 全局行 operand seam（2026-09-16 批）：B1/B2/B4/B5 全局 vs 局部同形对拍（mut 全局 + 期望值）+ B6(b) 发射字节级（静态无 .so 无运行期腿）+ B7 非回归；配套 suite 语料 tests/suite/global_seam_test.cr
     python3 tests/selfhost/test_tuple_slots.py
     python3 tests/selfhost/test_agg_read_type.py # TODO #2026-09-16-16「聚合读丢型」批 2（T3 已修）：腿 A 语义值（LET 中转 / match 载荷 / 局部数组元素 / 写回 apx 槽）· 腿 B 界面见证（`_dxt` 反方向 0 · `_dxdiv` 正方向恰好 1 · extern 调用点前须有转换）· 腿 C 钉子（Core 实参 / apx 已转正形）。**元组数字下标 = 裁-AGG-3登记未覆盖**（[GAP] 只观测不计判据）
