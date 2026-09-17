@@ -410,6 +410,86 @@ for f in sorted(glob.glob('.core/cache/cir/*')):
 
 ---
 
+## 11. 实施记录（2026-09-18）
+
+### 11.1 变更清单（提交）
+
+| 提交 | 内容 |
+|---|---|
+| `e05676ca` | **A1**（`monomorph.cr::gen_create_instance` 形参链克隆 + `type_val` 重算）+ **`--dump-params`**（`globals.cr`/`main.cr`/`ir_gen.cr`，隐藏通道：rc 中性 + 零产物 + 纯表读零 alloc） |
+| `3d4712f3` | 判据套件 `tests/selfhost/test_generic_param_erasure.py`（C1–C7）+ `src/ci/run.sh` **selfhost-tests 挂钩**（门内）+ `COREC_BIN` 突变通道（CI 不设） |
+| `45b0f85c` | 载体重锁 `tools/baseline/canary_values.tsv`（`gt_ccr`/`gt_static_ccr`，旧值留痕 + 归因） |
+
+A2a **无需改代码**：develop `f57815ec` 已含 `dex_align_call_args` 与重定向后的第二遍（`ir_gen.cr:2249`）；
+A1 让实例形参链具体化后，该第二遍的门（`ast_type_val(cpn) == TI_DEX` / `dex_opt_type_node`）才第一次为真。
+
+### 11.2 实测读数（改前 = `/tmp/ge-pre/corec` `08821a51…`；**两侧各自 clean-cache**）
+
+| 项 | 改前 | 改后 |
+|---|---|---|
+| C1 · bits 源 ELF | **21**（正控过、被测败） | **0** |
+| C1 · bits 源 interp | 255 | **255**（= 能力边界 = 期望值） |
+| C2 · scaled 源 ELF / interp | **41 / 41**（一致地错） | **0 / 0** |
+| 槽型 `g1[dex]`（T 形态） | `slot=0 decl=0` | **`slot=8 decl=1`** |
+| 槽型 `g2[dex]`（T? 形态） | `slot=0 decl=0` | **`slot=8 decl=0`** |
+| 调用点 | `call g1[dex](d)`（零 `_dx*`） | **`call g1[dex](_dxsc)`** |
+| 幂等 · `mixed` bits | 0 条 `dest=_dxsc` | **恰 2 条**（每 dex 族实参一次） |
+| 幂等 · `mixed` scaled | 0 条 | **0 条**（两遍都无操作） |
+| ELF canary `pa`×3 | — | **逐字节不变**（`95084e7b…` / `680a6f98…` / `76f36e6a…`） |
+| `generics_test` ELF | — | **逐字节不变**（`f1f78686…b20b5`） |
+| `gt_ccr` / `gt_static_ccr` | `d92a2727…` / `a1f7b99c…` | `2b364cf1…` / `cd85fd05…`（**仅 3 字节**，见 11.5） |
+
+**gt 归因的机械证据**：① `cmp -l` 差异字节 = **3**（offset 12274/12446/12574：`0→3`/`0→3`/`0→2` = TI_STR/TI_STR/TI_BOOL），
+尺寸逐条相同（142765/142908）；② `corec cir` 的**逐指令文本 dump 两版逐字节相同**（发射面零足迹）；
+③ 同语料 ELF sha 逐字节相同；④ 两版运行 `ALL PASS` rc=0；⑤ 与测量②的实例枚举对表（标量形参槽恰 3 处）。
+
+### 11.3 突变矩阵（**独立 workspace** 构建；每突变一次全量构建；对拍两侧各自 clean-cache）
+
+| 突变 | 变的是什么 | 判据红项 | 「命中目标」证据 |
+|---|---|---|---|
+| **M-α** | 只回退 `type_val` 重算（保留形参链克隆） | C3 **T 形态** + C1/C2/C4/C5（**T? 形态仍绿**） | 两形态分列 ⇒ T 与 T? 路径**各自可判** |
+| **M-β** | 只关 `dex_opt_type_node` 分支（断 T? 路径） | **仅 C3 T? 形态（1 项）** | 单点隔离：T? 判据非空转 |
+| **M-γ** | 回退 A1 整体 | 10 项（C1/C2/C3×2/C4×3/C5） | 回到 RED 基线读数（21/41） |
+| **M-δ** | 只回退 A2a（第二遍） | C1 + C4×3 + C5（**C3 仍绿**） | 仪器（槽型）与值判据**分工**：槽型已具体化但调用点无转换 |
+| **M-ε** | 让 dump 打 `decl` 当 `slot`（仪器自证） | C3×3（**值判据全绿**） | 证明 C3 抓的是**槽型**而非声明面 |
+
+**M-δ 顺带抓出判据自身缺陷（已修）**：值探针原为「正控在前」——正控的 bits→scaled 转换把 `7000000`
+留在某个 GP 寄存器，被测读点**靠寄存器残留**读到正确值 ⇒ C1 **假绿**。已改为「被测调用在前」并写入套件注释；
+复跑 M-δ ⇒ C1 红（ELF rc=21 / interp rc=21）。**这条与批 7 的 D5 同类：判据网修正的是判据自身。**
+
+### 11.4 换代判定：**不换代**（`CIR_CACHE_VER` 保持 20）
+
+- 结构门：含泛型声明的单元整体关缓存（`main.cr:484-490` `fi_generic_count`；`:495-497` `g_optrep_on`）+ 身份哈希自动失效（`cir_cache.cr:142-168` / `:500-502`）；
+- 结构性零影响面：`src/` + `examples/` 泛型声明 **0**（§10/测量②）⇒ 自举链不产生实例；
+- **实测条目数**（改后，逐档 clean-cache）：非泛型语料（ptr_arith）**15 条 / 实例名（含 `[`）0 条**；含泛型语料 **0 条**。
+- ⇒ **无复活通道，故不换代**（判据与口径照 §3.3；**与 `canary_values.tsv` 的载体重锁是两回事**）。
+
+### 11.5 XMM=0 零覆盖（**写死**）
+
+全语料 104 档（parity 75 + probes 29）实例枚举 = **8 实例 / 3 档**，**dex 族类型实参实例 = 0**
+⇒ **表示面缺陷在现有语料零覆盖**；本批 ABI 面载荷**全部**由 `test_generic_param_erasure.py` 的新探针承担。
+**语料绿 ≠ 表示面已验**——后续任何批次不得以「语料全绿」推断本面已覆盖。
+
+### 11.6 回归结果（验于 develop `f57815ec` + 本链；对拍两侧各自 clean-cache）
+
+| 判据 | 读数 |
+|---|---|
+| CI `check` / `bootstrap-tests` / `selfhost-tests` / `suite` | **rc=0 / 0 / 0 / 0**（suite = ALL PASS） |
+| CI `full-bootstrap` | 见报告（corec2 == corec3 判定） |
+| canary（`canary_check.sh`，重锁后） | **5/5 PASS** |
+| `probes_run.sh`（29 档 + 暖态腿） | **FAIL=0**（暖态真命中 15 档） |
+| 新套件 | C1–C7 **ALL PASS** |
+
+### 11.7 遗留 / 未覆盖面（本批**不修**，各自登记）
+
+- **返回面擦除（本次新发现，兄弟面）**：`fn gid[T](x: T) -> T` 的实例**返回槽型**仍是声明的擦除码
+  （`fi_return_type` 逐位拷贝，`monomorph.cr:850`）⇒ 实测 bits 源 rc=**55**、scaled 源 rc=**56**（**两源皆错**）。
+  属同一根因族的**另一字段**（本批范围 = 形参链）⇒ 登记 TODO（编号见提交），**不夹带**。
+- 泛型**结构体**实例（`Box[T]`，语料 7 档）· 复合形参（`[T;N]`/`&T`/元组）——裁 3 不入批；
+- 模块限定形（`ml.g(…)`）——§10 已登记不覆盖；`fi_param_type`（无读取点）——裁 4 不碰。
+
+---
+
 ## 附录 A：本轮实读锚点清单（file:line，develop = 3e461edd）
 
 - `src/compiler/monomorph.cr:600`（EXPR_FN 克隆：只深克隆 `d`）· `:604`（EXPR_PARAM 分支，实例路径不可达）
