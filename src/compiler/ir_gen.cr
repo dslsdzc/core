@@ -1538,10 +1538,12 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             ptr_var = force_if_thunk(ptr_var);
             // (A) 批（INV-2）：**指针写且 pointee 可选 ⇒ 装箱**——一致性由 INV-1（取址槽恒装箱）
             // 与 E-2（聚合恒装箱）保证；越界面 = REP-2（指针算术）/ extern（登记）
+            // 批 5（opt-dex · R2 序修正）：**先归形式、后可选装箱**——装箱载荷须为规范形式；
+            // 反序时 `dex_slot_norm` 落在箱对象（TI_INT）上 = 空转（可选 dex 载荷留 bits）。
+            val_var = dex_slot_norm(val_var);   // apx 批 T3：pointee 槽恒精确（`*p = d` 实测 RED）
             if g_optrep_on != 0 && ti_is_optional(ptr_pointee_type(ptr_var)) != 0 {
                 val_var = box_for_slot_flag(val_node, val_var, 1);
             }
-            val_var = dex_slot_norm(val_var);   // apx 批 T3：pointee 槽恒精确（`*p = d` 实测 RED）
             emit(IR_STORE_PTR, -1, ptr_var, val_var, 0, ptr_access_width(ptr_var));
             return val_var;
         }
@@ -2748,8 +2750,9 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             val_var = force_if_thunk(val_var);
             // 容量批 T2：可选载荷写点规范化（载荷类型 = 变体声明面；`Some`/`None` 关键字
             // 形不带变体行 ⇒ enum_payload_ti 返回 -1 ⇒ 原样，不装箱）
-            if g_optrep_on != 0 { val_var = box_for_optional_slot(ast_a(an), val_var, enum_payload_ti(name_idx, ai)); }
+            // 批 5（opt-dex · R2 序修正）：先归形式、后装箱（同上——反序 = 漏斗空转）
             val_var = dex_slot_norm(val_var);   // apx 批 T3：载荷槽恒精确
+            if g_optrep_on != 0 { val_var = box_for_optional_slot(ast_a(an), val_var, enum_payload_ti(name_idx, ai)); }
             emit(IR_STORE_FIELD, -1, s, val_var, ai + 1, 0);  // +1 for tag offset
             an = ast_b(an);
             ai = ai + 1;
@@ -2785,8 +2788,9 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                     if jdi >= 0 { field_idx = jdi; }
                 }
                 // 容量批 T2：可选字段写点规范化（字面量形；元素值节点 = wrapper.a）
-                if g_optrep_on != 0 { val_var = box_for_optional_slot(ast_a(fn2), val_var, struct_row_field_ti(si, field_idx)); }
+                // 批 5（opt-dex · R2 序修正）：先归形式、后装箱（同上）
                 val_var = dex_slot_norm(val_var);   // apx 批 T3：字段槽恒精确
+                if g_optrep_on != 0 { val_var = box_for_optional_slot(ast_a(fn2), val_var, struct_row_field_ti(si, field_idx)); }
                 emit(IR_STORE_FIELD, -1, s, val_var, field_idx, 0);
                 fn2 = fn2 + 1;
             }
@@ -2830,12 +2834,13 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                 // 表达式可选性保守判定——ident/调用覆盖面，其余形态登记）。
                 // 注意：数组字面量的 en 是 **wrapper** 节点（值在 ast_a）——须解引用后判定。
                 // (A) T3：数组级可选（预扫得）⇒ 逐元素判定亦须为真（裸元素装箱）。
+                // 批 5（opt-dex · R2 序修正）：先归形式、后装箱（同上）
+                e_var = dex_slot_norm(e_var);   // apx 批 T3：元素槽恒精确
                 if g_optrep_on != 0 {
                     eo := elem_node_optional(ast_a(en));
                     if elem_opt_ti >= 0 { eo = 1; }
                     e_var = box_for_slot_flag(ast_a(en), e_var, eo);
                 }
-                e_var = dex_slot_norm(e_var);   // apx 批 T3：元素槽恒精确
                 emit(IR_STORE_INDEX, -1, v, e_var, ei, 0);
                 en = en + 1;
             }
@@ -3238,8 +3243,9 @@ fn inject_global_inits() {
                 if v >= 0 {
                     // 容量批 T2：可选全局槽**初值**写点规范化（与赋值点 :1155 是两处独立
                     // 代码点——初值走 inject_global_inits，赋值走 EXPR_ASSIGN）
-                    if g_optrep_on != 0 { v = box_for_optional_slot(vn, v, global_decl_ti(name_idx)); }
+                    // 批 5（opt-dex · R2 序修正）：先归形式、后装箱（同上——反序 = 漏斗空转）
                     v = dex_store_adjust(gv, v, vn);   // apx 批 T3：全局初值按槽声明型（含 apx 全局）
+                    if g_optrep_on != 0 { v = box_for_optional_slot(vn, v, global_decl_ti(name_idx)); }
                     emit(IR_STORE, -1, gv, v, 0, 0);
                 }
             }
