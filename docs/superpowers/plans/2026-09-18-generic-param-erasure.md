@@ -85,6 +85,9 @@
 - 【推断·未验证】`-O 1` 与 `run` 两形态下同一实例的行为是否与 `build` 一致（对齐环只在 `build`/`run` 共用的 ir_gen 路径上，理论上同源，未测）。
 - 【推断·未验证】`.ccr` TYPE 段是否新增行（实例代入出的类型行多半**已由调用点存在**；须实测段计数）。
 
+> **§1.4 追加（2026-09-18，见 §10）**：**模块限定调用形**（`ml.g(1,d)`）由「未验证」转 **【实测·转述】**；
+> **方法形**（`impl X[T]`）= **排除性证据**（全仓 0 处）⇒ 属「**不可表达**」而非「没测」。
+
 ---
 
 ## 2. 修法候选（≥2）与影响面矩阵
@@ -104,6 +107,9 @@
     ⇒ 换序对键无影响【读码】；但换序会改动**所有调用**的路径（面大、回归风险高）。
 
 **A 的代价**：A1 增 AST 节点（每实例每形参 + 类型子树）；A2 触及调用发射前的公共段。**A1 单独无效**——调用点仍按声明面判门 ⇒ 实参仍以 `TI_DEX` 走 XMM（§1.1-5/6），失配只是**换向而不是消失**。
+
+> **A2a 覆盖面限定（2026-09-18，见 §10）**：A2a 只覆盖**直调形**（`g(1,d)` ⇒ `EXPR_IDENT`）；
+> **模块限定形**（`ml.g(1,d)` ⇒ `EXPR_FIELD` ∧ `is_module_call`）**不进重定向块** ⇒ **本批不覆盖**（显式登记，见 §10-1）。
 
 ### 候选 B：消费点按实例绑定解析（不改 AST）
 
@@ -371,6 +377,39 @@ for f in sorted(glob.glob('.core/cache/cir/*')):
 
 ---
 
+## 10. 三形态实测通报（2026-09-18；来源 `plan-optdex` T0，**lead 转述【实测·转述】**；本节锚点本轮实读）
+
+### 10.1 读数（【实测·转述】，本轮未复核运行面）
+
+| 泛型调用形态 | 路径判据 | check | build | run |
+|---|---|---|---|---|
+| 直调 `g(1,d)` | `EXPR_IDENT` ⇒ **进**重定向块 | 0 | 0 | ELF 漂移 / interp 15 |
+| **模块限定 `ml.g(1,d)`** | `EXPR_FIELD` + `is_module_call` ⇒ **不进该块** | 1（TF01 误报） | **0**（TF01 在构建豁免表内） | **139** |
+| 方法形 | **不可表达**（`impl X[T]` 全仓 0 处） | — | — | — |
+
+**本轮实读锚点（判据面）**：
+- 重定向块条件 = `ir_gen.cr:2015`：`if func_ni >= 0 && (ast_kind(func_node) == EXPR_IDENT) {` ⇒ **只认 `EXPR_IDENT`**；
+  模块限定形在 `ir_gen.cr:1926`（`if !is_module_call`）另走分支；`is_module_call` 定义 = `ir_gen.cr:1735`（`call_flags == CALL_FLAG_MODULE || …+ CALL_FLAG_INLINE`）。
+- TF01 = `EC_TF_RETURN`，已在**构建豁免表**内（`diag.cr:172` `diag_gate_exempt`，TF01 条目见 `:174-176`；**粒度 = 码级**、加条须维护者批、换代纪律「只减不增」见 `:165-171` 头注）⇒ 模块限定形是**已登代码的新位点**，不是表外新码。
+- 方法形排除性证据（本轮只读实测，可复现）：`grep -rn "^impl .*\[" --include='*.cr' src/ tests/ examples/ | wc -l` = **0**（另测 `impl [A-Za-z_]*\[` 亦 = 0）⇒ 属「**不可表达**」，**不是**「没测」。
+
+### 10.2 对 (乙) 的四条（全部落为约束，不留隐含假设）
+
+1. **A2a 覆盖面收窄（硬）**：A2a = 「重定向后跑第二遍环」，而**模块限定形压根不进重定向块** ⇒ **第二遍在那里不会发生**。
+   ⇒ 本节登记：**本批 A2a 覆盖 = 直调形**；**模块限定形 = 本批不覆盖**，承接方 = **独立条目**（编号由 lead 在其台账取，本文不取号）。
+   **不得**留成隐含假设（M4 同类：共用探针 ⇒ 误读）。
+2. **§1.4 迁移**：模块限定形由「未验证」转 **【实测·转述】**（§1.4 已加指针）；方法形按**排除性证据**写（见 10.1）。
+3. **§6 边界判据收紧（机械可分辨）**：同一探针**双形态**跑（`g(1,d)` vs `ml.g(1,d)`），看「实例是否生成 / `IR_CALL` 目标名是否含 `[`」——
+   走 `EXPR_IDENT` ⇒ 归 **(乙)**；走 `EXPR_FIELD` ∧ `CALL_FLAG_MODULE` ⇒ 归**模块限定条目**（承接方）。两批各自可独立红/绿自证。
+4. **不在 (乙) 里重复研究 TF01 链**：`check=1（TF01 误报）→ build 豁免 ⇒ rc=0 坏产物 → run 139` 是**条目 6 的活体正控**（lead 已令 `plan-optdex` 写成其真实可达路径）⇒ **与 (乙) 无关，本批不研究**（显式写死，防后代重复踩）。
+
+### 10.3 时序（不变，等待更长）
+
+- PR-A 的完成度延后（条目 5、6 未做，lead 已令 `plan-optdex` 先做完再开 PR-A）⇒ (乙) 等待时间**再长一点是有意顺序**。
+- (乙) 仍**只等 PR-A 合入**；开工序不变：A2a 前置实测（第一遍是否整个被门跳过）→ 全语料影响面扫面 → **报 lead** → 才进 A1/A2a。
+
+---
+
 ## 附录 A：本轮实读锚点清单（file:line，develop = 3e461edd）
 
 - `src/compiler/monomorph.cr:600`（EXPR_FN 克隆：只深克隆 `d`）· `:604`（EXPR_PARAM 分支，实例路径不可达）
@@ -393,3 +432,9 @@ for f in sorted(glob.glob('.core/cache/cir/*')):
 - `src/compiler/main.cr:250-252`（`--dump-types`/`--dump-ifaces`/`--dump-tk-terms`）· `:255-258`（`verify-named-dedup`/`verify-evp-nodes`/`--diag-gate-report`/`--dump-vcs`）——**无「IR 变量槽型」直读**
 - `tools/baseline/canary_values.tsv:16`（语料 B = `tests/suite/generics_test.cr`）· `:73-74`（含泛型 ⇒ `cache_enabled=0` ⇒ 冷≡暖按构造）· `:83-86`（换代纪律：归因不出 = 停下上报）· `:91-92`（`gt_ccr`/`gt_static_ccr` 锁定值）· `:13`（语料 A = `tests/suite/ptr_arith.cr`）
 - `tests/suite/generics_test.cr:11/17/23/29`（`identity[T]` / `struct Box[T]` / `get_val[T]` / `pair[A,B]`）· `tests/harness/ci_hook_allowlist.txt`（只登记**未挂**项）
+
+**附录 A 追加二（2026-09-18 §10 三形态通报轮实读，同一 develop = 3e461edd）**
+
+- `src/compiler/ir_gen.cr:2015`（重定向块条件 `if func_ni >= 0 && (ast_kind(func_node) == EXPR_IDENT)`）· `:1926`（`if !is_module_call` 分支）· `:1735`（`is_module_call := call_flags == CALL_FLAG_MODULE || call_flags == CALL_FLAG_MODULE + CALL_FLAG_INLINE`）
+- `src/compiler/diag.cr:172`（`diag_gate_exempt`）· `:174-176`（TF01 = `EC_TF_RETURN` 构建豁免条目）· `:165-171`（豁免表语义 + 换代纪律「只减不增 / 加条须维护者批 / 表外命中 ⇒ 停」）
+- 排除性证据命令（本轮只读实测）：`grep -rn "^impl .*\[" --include='*.cr' src/ tests/ examples/ | wc -l` = **0**
