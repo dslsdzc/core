@@ -281,6 +281,46 @@ fn main() -> int {
 fn g(x: dex) -> int { return @raw_int(x) / 1000000; }
 fn main() -> int { d : dex, apx = 7.0; return g(d); }
 """, 7, "bits", "非可选 dex 直调（apx 批已覆盖面；非回归钉）"),
+    # ── M1 tag 对改判的**行为钉**（维护者 2026-09-17 附加判据）──
+    # 机理：`dex?` 槽型由 `TI_INT`（改前）→ `TI_DEX_S`（改后），而 M1 tag 闭包（`tag2l.cr:117/126/128/135/137`）
+    # 与序言 tag 卫生（`frame.cr:160`）**同判定式**（`== TI_INT`）⇒ 该槽的 tag 编码随槽型移开。
+    # **要求 = 行为往返一致**（不是断言「不再编码」——那是把实现细节当判据）：
+    # 同一函数内**共置**「会走 M1 tag 编码的 int 链」（ADD/SUB 种子 + 拷贝元）与 `dex?` 值
+    # （形参 + 局部），断言**两侧各自往返无损**。出现任何新行为差异 ⇒ 报 lead（不得用「分类变化」一句带过）。
+    ("mw_tag_coexist_bits", """
+fn mw_coexist_bits(e: dex?) -> int {
+    a := 2000000000;
+    b := 2000000000;
+    c := a + b;
+    s := c;
+    x : dex? = e;
+    r := match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
+    if r != 7 { return 1; }
+    if s != 4000000000 { return 2; }
+    return 0;
+}
+fn main() -> int {
+    d : dex, apx = 7.0;
+    return mw_coexist_bits(d);
+}
+""", 0, "bits", "M1 tag 对行为钉（bits 形）：int 多字链与 `dex?` 共置 ⇒ 两侧往返一致（0 全过 / 1 dex 侧坏 / 2 int 侧坏）"),
+    ("mw_tag_coexist_scaled", """
+fn mw_coexist_scaled(e: dex?) -> int {
+    a := 2000000000;
+    b := 2000000000;
+    c := a + b;
+    s := c;
+    x : dex? = e;
+    r := match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
+    if r != 7 { return 1; }
+    if s != 4000000000 { return 2; }
+    return 0;
+}
+fn main() -> int {
+    e : dex = 7.0;
+    return mw_coexist_scaled(e);
+}
+""", 0, "scaled", "M1 tag 对行为钉·精确形对照（解释器腿可跑：ELF == interp == 0）"),
     # ── 非 dex 对照（零足迹面：不得被本批改动）──
     ("int_opt_lit", """
 fn g(x: int?) -> int {
