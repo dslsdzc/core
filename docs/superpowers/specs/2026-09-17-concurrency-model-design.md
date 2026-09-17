@@ -1,9 +1,10 @@
 # Core 并发模型设计（语义层规格）
 
-日期：2026-09-17
-状态：**设计定稿**（维护者 2026-09-17 裁决）——§1–§12 为维护者原文主体，逐字落纸；**规划代理不改设计**
-范围：本文 §1–§12 = 设计权威；§13（不变量条目化）/§14（术语表）/§15（仓库对接与缺口）/§16（裁门与开放问题）= 规划代理新增分析面，**不含设计裁决**。发现的内部张力一律进 §16，不自行裁
-纪律：本轮只读——零构建、零源码改动；§15 全部结论以读码 + `file:line` 为据，推断处显式标注
+日期：2026-09-17（第二轮：**裁定落纸版**）
+状态：**设计定稿**（维护者 2026-09-17 裁决）——§1–§12 为维护者原文主体，逐字落纸，**裁定不覆写原文**；裁定一律落 §11.1 / §13.0 / §16 裁定表
+范围：本文 §1–§12 = 设计权威；§11.1（次序修订）· §13（不变量条目化，含 §13.0 = G1 具体化）· §14（术语表）· §15（仓库对接与缺口）· §16（裁门**裁定表**）= 裁定与新增分析面
+纪律：**只读**——零构建、零源码改动；§15 全部结论以读码 + `file:line` 为据，推断处显式标注
+裁定来源：**维护者**（G1 / G2 / G8 / G9——经 team-lead 转达）· **team-lead**（G3 / G4 / G5 / G6 / G7 / G10 / G11 / G12 / G13）——13 门全部已裁，逐条见 §16.0 裁定总表
 
 ## 0. 关联与定位
 
@@ -224,6 +225,22 @@
 | 9 | Deadlock certificate（没有 deadlock proof 就不能启用该方案） | 7 |
 | 10 | Adaptive mapping（profile-guided：COPY vs shared、mutex vs rwlock、atomic vs transaction、chunk size） | 5/6/7 |
 
+### 11.1 实施次序（裁定修订，2026-09-17；承 G9 裁定）
+
+**裁定（维护者 2026-09-17，经 team-lead 转达）**：地基三项**提到步 1 之前**——「先补地基再起步 1」。
+
+| 序 | 项 | 内容 | 依据 |
+|---|---|---|---|
+| **0a** | 多 M 打通 | `sched_spawn_workers` 接线 + 多 M 下的 runq / 唤醒面（今日恒 1 M：`sched.cr:28-35`） | G9 |
+| **0b** | 消息表示 | 跨执行体消息 = 子区域/句柄 + 值搬运面（今日只有 8 字节字 + `sched_go` 的 1 个 arg） | G9 / G10-a |
+| **0c** | 并发运行时验证 | wait list「无锁」正确性在**多 M**下成立（现假设仅单 M 成立：`sched.cr:2-3`） | G9 + `TODO #2026-07-31-1` |
+
+内部次序建议：**0b ∥ 0a → 0c**（0c 同时覆盖二者）。
+
+**理由（裁定依据，逐条可核）**：步 1（Transfer Analysis）的**输入面**是「跨执行体边界 + 消息」——今日二者都不存在（§15.3 事实 1/5）；且 §6 的 `Cost(copy) vs Cost(shared+sync)` 与 Copy Scheduler 的 async/prefetch 都预设**真并行**（今日恒 1 M）⇒ 在单 M 上做出的等价性证明与 deadlock 证书**不覆盖真并行** = 假背书（违 I5）。
+
+**0 未完成前，步 1 无从落地**；其后 = §11 原文 1..10 步次序不变。
+
 ---
 
 ## 12. 最终定位（原文）
@@ -236,18 +253,68 @@
 
 > 由原文导出，**不改设计**。每条给「可检验形式」与「取证面」；标 **[待定]** 者依赖 §16 裁门。
 
+### 13.0 G1 裁定落纸：可观察语义 = 值 / 效应 / 控制去向 / 终止类别 + **预算向量（含时间）**
+
+**裁定（维护者 2026-09-17，经 team-lead 转达）**：可观察语义**包含时间**，走**预算等价（budget equivalence）**路线。**注意：这强于规划代理原推荐**（原推荐曾倾向「性能不进语义」）。
+
+#### 13.0.1 时间以什么形式进语义（三形态；**逐微秒显式排除**）
+
+**显式排除**：逐微秒 / 绝对墙钟时间**不进语义**——不可实现（无时基模型）、不可复现（同产物两次运行必然不同）、不可测（无覆盖全部目标平台的测量协议）。**任何以绝对时间为判据的条款一律不成立**；`modeled`（模型量）不得升格为语义条款本身（其地位见 13.0.2）。
+
+进语义的时间量 = **预算条目（budget entry）**，逐条取三形态之一：
+
+| 形态 | 判据式（示意） | 判定方式 |
+|---|---|---|
+| **B-渐进**（量级约束） | 可见延迟对 payload 的阶不超过声明阶：`T_visible(n) ∈ O(f(n))`；默认律取 f = 常数（即「可见延迟不随 payload 线性增长」的强形式） | **编译期可判**：由 transfer plan 的形状（chunk 序列 / 同步点位置）推出，不由测量 |
+| **B-计数**（次数 / 字节上界） | `CopiedBytes ≤ B`、`copy ops ≤ K`、`sync waits ≤ W`、`内存上界 ≤ M` | **编译期可判**：§3.2 消除瀑布每级的产物即计数 |
+| **B-等待**（同步等待上界） | 最长同步等待 ≤ 声明量级（默认 = **0**：默认无锁 ⇒ 无同步等待；shared mapping 下由同步 planner 六档输出各自的界给出） | **编译期可判**：由 sync plan 档位给出 |
+
+**三条共同性质（缺一不可）**：
+1. **声明性**：每条预算必须有来源 = 默认律 / 程序内显式标注 / policy 档。承共享契约 §1.4「不确定性 = 显式请求」——**要更强的预算必须显式声明**，编译器不替用户猜。
+2. **可判定**：达成必须**编译期可判**（由 plan 推出）；判不出 ⇒ `unknown`（落 ③proof-required 或按 policy 降级），**不得**以测量充当达成证据（G4 裁定：禁运行时见证顶替）。
+3. **违例不静默**：预算不满足 ⇒ 编译期诊断 / 拒绝编译（按 policy 档）；**绝不产出**「未标注却超预算」的产物（= 新不变量 **I9**）。
+
+**默认律（默认档最小集）**：
+
+| 条目 | 默认值 | 依据 |
+|---|---|---|
+| B-渐进 · 可见延迟 | 不随 payload 线性增长（COPY 流水化生效；纯同步全量 materialization 违反默认律 ⇒ 需显式声明接受） | §3.3 原文目标 |
+| B-计数 · 同步等待 | 0（默认无锁） | §1.2 原文 |
+| B-计数 · copied bytes | 由 plan 给出（不设额外常数上界；常数上界属显式声明） | §3.2 原文「physical copy 最小化」 |
+
+#### 13.0.2 `explain` 的 `modeled` 值 = **待检主张**（性质变更） + 证书形态
+
+裁定前「modeled 3.1us」是描述性输出；裁定后它**是对语义的主张（claim）** ⇒ 必须有证书形态：
+
+- **谁证**：编译期 **prove**（Transfer / Copy planner 自身产出预算义务，判定走 S-A 四档）；**测量不得作为义务解除凭证**（G4），只作报告面证据与回归判据。
+- **什么形式**：预算证书条目 = `{budget_id, kind(B-渐进|B-计数|B-等待), declared_by(默认律|标注|policy), plan_evidence(transfer/sync plan 引用), value(class 或 bound), status(proved|unknown|violated|measured), model_ver}`；三态呈现不得把 `unknown` 渲染成通过（**未证明必须可见**）。
+- **在哪落盘**：决策记录**旁路表**（G5 裁定：不新开通道、等 S-D；G6 裁定：**不进 `.ccr`**），随缓存条目存取（S-D L8）。
+
+#### 13.0.3 三问的判定形态（收口）
+
+| 问 | 裁定形态 |
+|---|---|
+| ④ 终止 / panic | **可观察，且取类别形式**：{正常终止, 显式 panic/abort, 不终止}。mapping **不得**改变类别——尤其不得把「会终止」变成「可能不终止」（这正是 §9 deadlock 证明要挡的），反之亦然 |
+| ⑤ 内存占用 / 分配点 | **分级**：分配**点 / 地址 / 次数**不可观察（承 cache 语义条款 2 order-free）；**内存上界**作为**预算条目**可观察（B-计数族） |
+| ⑥ 性能 | **进语义**（本次裁定），但仅以 13.0.1 的三形态出现；**绝对时间与逐微秒排除** |
+
+> ⑥ 的落法顺带解决了 §1 不变量与 §3 性能目标之间的结构性张力：`VisibleCopyLatency` 以**预算条目**（而非实测微秒）进语义 ⇒ Copy Scheduler 的自由度以「不使已声明预算由满足变不满足」为界（= I5 的强化形态）。
+
 | # | 不变量（原文依据） | 可检验形式 | 取证面 |
 |---|---|---|---|
-| **I1** | **确定性**：任何**未显式声明**的调度差异，不得改变可观察语义（§1） | ∀ 合法调度选择 s₁,s₂：`obs(P, s₁) = obs(P, s₂)`（`obs` 定义见 §14 与 G1） | 差分执行（同产物多次运行 + 强制不同调度）+ `core analyze --determinism` 报告（§10） |
-| **I2** | **零用户锁**：源语言不新增 lock / mutex / atomic / ownership 语法（§1） | 关键字表 / grammar / 语法面新增零项；**例外**：`move` 已在册但零语义（G8） | `src/compiler/lexer.cr` 关键字表 + `grammar/core.ebnf` 逐条核对 |
+| **I1** | **确定性（预算等价，G1 裁定）**：任何**未显式声明**的调度差异，不得改变可观察语义；**可观察语义 = `(值输出, 效应, 控制去向, 终止类别, 预算向量)`**（§1 + §13.0） | ∀ 合法调度选择 s₁,s₂：五项**逐项**相等；**预算向量按声明粒度比较**（同一声明条目 ⇒ 两次运行都必须满足该条目），**不含绝对墙钟时间** | 差分执行（同产物多次运行 + 强制不同调度 + payload 标度律检查）+ 报告面逐条 `proved/unknown/violated` 状态（§10 / S-D） |
+| **I2** | **零用户锁**：源语言不新增 lock / mutex / atomic / ownership 语法（§1） | 关键字表 / grammar / 语法面**新增零项**；存量 `move` 由 **G8 裁定（维护者）= 删除**消解（`TODO #2026-09-17-8`）⇒ 本不变量无例外、无待定 | `src/compiler/lexer.cr` 关键字表 + `grammar/core.ebnf` 逐条核对 |
 | **I3** | **默认 share-nothing**：默认 mapping 下跨执行体无共享可变状态（§1.2） | 默认配置下，不存在「同一可变 subregion 同时落入两个执行体访问集」的实例——由 Transfer Planning 的义务面给出 | Transfer Analysis 输出 + 义务台账 |
-| **I4** | **保守性单向**：COPY 永可行；分析不精确只亏性能，**不得**产生错误拒绝（§3.2 第 9 项 + 2026-09-04 spec §设计原则 3） | 任意分析精度档下：取消分析 ⇒ 结果不变（全 COPY 语义等价）；无「分析失败 ⇒ 编译错误」路径 | 行为探针：强制全 COPY 与精细计划对拍 |
-| **I5** | **语义优先**：同步实现永远不能反过来定义语义（§5） | 任何 mapping 选项（含 scheduler 选择）翻转 ⇒ `obs` 不变 | 同上 I1 |
+| **I4** | **保守性单向**：COPY 永可行；分析不精确只亏性能，**不得**产生错误拒绝（§3.2 第 9 项 + 2026-09-04 spec §设计原则 3） | 任意分析精度档下：取消分析 ⇒ **非预算分量**结果不变（全 COPY 语义等价）；分析失败 ⇒ 只允许落「预算 `unknown` → ③proof-required / 按 policy 降级」，**不得**产生错误拒绝，**也不得**静默放过预算违例（见 I9） | 行为探针：强制全 COPY 与精细计划对拍 |
+| **I5** | **语义优先（强化）**：同步实现 / mapping 选择永远不能反过来定义语义（§5） | 任何 mapping 选项（copy chunk/order、锁种类、调度器选择）翻转 ⇒ ①**非预算分量不变**；②**不使已声明的预算条目由满足变不满足** | 同上 I1（含预算条目逐条状态） |
 | **I6** | **锁不进 IR**：高层只产生约束，不产生 `IR instruction: LOCK`（§7） | IR opcode 表零新增锁类；`.ccr` 的 NOD 面零新增（G6） | `src/compiler/ast.cr` opcode 表 + `.ccr` 逐字节判据 |
 | **I7** | **fail-closed**：潜在 deadlock 不得扔给用户（§9） | 无法证明无环 ⇒ 该 mapping 不启用（回落 COPY / 序列化），或拒绝编译；无「warning 后照常生成」路径 | lock dependency graph 证书 + 负控用例 |
 | **I8** | **状态语义不可篡改**：shared mapping 不得冒充 COPY（§6 硬规则） | 「两个长期独立、分别可变的版本」的语义要求 ⇒ 必须产生两个真实状态（shared+lock 方案在此处必须被拒） | 等价性证明面（G4）+ 负控用例 |
+| **I9** | **预算不静默**（G1 裁定的推论，新增）：预算条目未达成（`violated`）或未证明（`unknown`）**必须可见** | 任意编译产物：不存在「未标注却超预算」的路径；`unknown` 必须在报告面显式呈现，**不得**渲染为通过；高安全/policy 档可升为拒绝编译 | 预算证书条目（§13.0.2）+ 报告面 + 负控用例 |
 
-> **I1 是本设计的头号开放问题**：它的一切力量都压在「可观察语义」的定义上，而**该定义不在原文中**。见 §16 **G1**。
+> **G1 已裁（维护者 2026-09-17）**：可观察语义**包含时间**，走**预算等价**——形式化落 §13.0（时间量的三形态 + 排除逐微秒 + 三问判定形态）。**13 门全部已裁**，逐条见 §16.0 裁定总表。
+>
+> **头号残余风险**（裁定后仍存）：预算条目的**默认律**是设计选择而非原文，其强弱直接决定 Copy Scheduler / shared mapping 的自由度；首批实施须以「默认律可满足性实测」为判据（见 §16 G10-b）。
 
 ---
 
@@ -259,9 +326,9 @@
 |---|---|---|
 | **执行体（execution body）** | 拥有独立 region/arena、可与其他执行体并行的执行单位。今日实现 = goroutine（G） | 原文 + `src/stdlib/goroutine.cr` |
 | **region** | ⚠ **两义，须先判语境**：(a) 控制流嵌套（SG_FUNC/SG_IF/SG_LOOP/SG_FOR/SG_UNSAFE，`g_sgs`）；(b) 内存字节域（区域/Arena）。既有文档已显式登记此歧义 | 仓内既有：`docs/maintainer/design/region-model.md:60-62` |
-| **subregion** | 原文字面："R → R1 + R2 + … + Rn"（SPLIT）、"最小 subregion"（COPY）、"CopySet 精确到 subregion"（§11 步 1）。**粒度/边界判据/表示均未定义** | **待定** → G3 |
-| **Live_sender** | CopySet 第一项（发送侧仍存活的部分） | **待定** → G3 |
-| **Needed_receiver** | CopySet 第二项（接收侧真正需要的部分） | **待定** → G3 |
+| **subregion** | 原文字面："R → R1 + R2 + … + Rn"（SPLIT）、"最小 subregion"（COPY）、"CopySet 精确到 subregion"（§11 步 1）。**粒度/边界判据/表示仍为设计细节**；**G3 裁定 = 分析表示先升级**（pts 动态化，不选「接受退化」——理由：G1 取含时间立场 ⇒ 预算可证明性依赖分析精度） | 原文 + G3 裁定（`TODO #2026-09-17-9`） |
+| **Live_sender** | CopySet 第一项（发送侧仍存活的部分） | 定义待设计；分析地基由 G3 裁定固定（pts 表示升级） |
+| **Needed_receiver** | CopySet 第二项（接收侧真正需要的部分） | 同上 |
 | **NonTransferable** | CopySet 第三项（无法经 MOVE/LOAN/SPLIT/FILL 消除的部分）。**注意**：既有 2026-09-04 spec 有一组近似概念——「无配方条目（不可重算，必须有 home，永不重建材料）」，语义不完全相同（那是**身份**不可复制，这里更像**可转移性**） | **待定** → G3 / G7 |
 | **CopySet** | `Live_sender ∩ Needed_receiver ∩ NonTransferable`（原文逐字） | 原文 |
 | **transfer obligation** | 由「跨执行体数据关系」导出的、必须被处置的判定要求（处置 = 五 primitive 之一；处置不了 ⇒ COPY）。**形态未定**（图标注 / 义务表 / 证书） | 原文 + 推断（S-A 义务阶梯词汇） |
@@ -271,12 +338,16 @@
 | **CopiedBytes / VisibleCopyLatency / BandwidthPressure** | COPY 的三个目标量（§3.1） | 原文（**度量模型待定** → G10-b） |
 | **STREAM** | **scheduling strategy**，不是 ownership mode（§4） | 原文 |
 | **shared mapping** | 实验特性：经等价性证明后允许 shared region + 自动同步（§6） | 原文 |
-| **可观察语义（observable semantics）** | ⚠ **本文头号开放问题**。仓库既有最接近的定义 = S-E L3 的 `obs(·)`：①值输出 ②效应（STORE / 通道 send / extern 调用 / YIELD）③控制去向；并明言「唯一不在观测面内的量 = 到达位置/到达时刻/到达顺序本身」 | **待定** → G1（推荐以 S-E L3 为起点） |
-| **显式声明的调度差异** | ⚠ 原文不变量只保护「**未**显式声明」的差异；`go`/`chan` 是否属于「显式声明」未定 | **待定** → G2 |
+| **可观察语义（observable semantics）** | **裁定定义（G1，维护者 2026-09-17）**：= **①值输出 ②效应（STORE / 通道 send / extern 调用 / YIELD）③控制去向 ④终止类别（正常/显式 panic/不终止）⑤预算向量（含时间，预算等价）**。前三项承 S-E L3；「到达位置/时刻/顺序本身」仍**不在**观测面内——时间只以**预算条目**（量级/计数/等待上界）进语义，**绝对墙钟与逐微秒排除** | 指定稿 + §13.0 |
+| **显式声明的调度差异** | **裁定（G2，维护者 2026-09-17）分层**：(a) `go` 声明「存在并发执行体」= 显式声明；(b) 交叉**执行顺序**未声明 ⇒ 不属显式声明；(c) **通道 FIFO 升格为语义序**（单产单消面；多产/多消面须写明「无跨发送者全局序」或给 `ordered(src)` 标注）；(d) 未标注且顺序可观察 ⇒ **reject**（承 S-E L2 执法点，迁移承 S-E W1 模板） | 裁定（G2） |
 | **顺序源（σ）** | 图上显式定序对象。S-E L5 白名单（首版即终版）= **state 边链 ∪ region 迭代序**；白名单外一律不算 | 仓内既有：S-E L5 |
 | **deadlock certificate** | lock dependency graph + 无环证明（§9）。**载体未定**（判定产物 / 决策记录） | 原文 + G5 |
 | **decision record** | 决策旁路载体（pass 产出 → 记录表 → 落盘），`explain` 只查不重算 | 仓内既有：S-D L1/L2 |
-| **compiler locks** | 「compiler locks = none」（§1.2 原文）——读法二义（不生成锁 / 编译过程不持锁） | **待定** → G11 |
+| **compiler locks** | **裁定（G11，team-lead 2026-09-17）**：取「**编译器不为用户数据生成锁**」——默认档下对用户数据**零锁生成**；**编译器自身内部的同步不受此限**（两条是不同层：前者是语言/语义承诺，后者是实现细节，**文档与 spec 必须写明此区分**，不得混述） | 裁定（G11） |
+| **预算等价（budget equivalence）** | G1 裁定的等价路线：两个调度/mapping 等价 = 非预算分量逐项相等 **且** 各自满足**同一声明**的预算条目集 | §13.0 |
+| **预算条目（budget entry）** | 进语义的时间/资源量的最小单位；三形态 = B-渐进（量级）/ B-计数（上界）/ B-等待（同步等待上界）；性质 = 声明性 + 可判定 + 违例不静默 | §13.0.1 |
+| **待检主张（modeled claim）** | `explain` 输出的模型量（如 `modeled 3.1us`）的**新性质**：它是对语义的主张，须有证书与状态（`proved/unknown/violated/measured`），不得作描述性输出混过 | §13.0.2 |
+| **预算证书** | 待检主张的证明/证据载体：`{budget_id, kind, declared_by, plan_evidence, value, status, model_ver}`；落**决策记录旁路**（不进 `.ccr`） | §13.0.2 + G5/G6 裁定 |
 
 ---
 
@@ -294,7 +365,7 @@
 | 4 | arena | `src/stdlib/arena.cr` | 每子图一 arena；`arena_init/new/reset`；`g_current_arena` 路由 `alloc()`；free list 复用；嵌套 parent 记录 | 无 size class、无 split（子区域）、无跨 arena 迁移/换基址、无页权限（COW/冻结）、无预留（FILL 需要的 destination reserve） |
 | 5 | 图与 region | `src/compiler/dataflow.cr` | SG 记录（kind/enter/exit/parent/nstart/ncount）+ `g_df_node_region` 显式归属（`subgraph_containing` O(1)）；`SG_FUNC/SG_IF/SG_LOOP/SG_FOR/SG_UNSAFE` 有产生点；**`SG_FLOW` 无任何产生点**（S-E B-N1 实测） | region 是**控制流**嵌套，不是内存区域；无「内存子区域」表 |
 | 6 | state edges | `src/compiler/dataflow.cr:156-266` | 副作用链：`df_connect_state`（opcode 级效应清单唯一真源 = `purity_op_effect`）+ 循环终止依赖；**全部 IR 生成后重建**（`df_replay_state_chain`）——因为入链判据依赖 `compute_all_purity`；`kind=1` | 只有「序」没有「交换性」；无 ReadSet/WriteSet |
-| 7 | 指针分析 | `src/compiler/ptr_analysis.cr` | Andersen 式：Addr/Copy/Store/Load 四规则；pts 表 `g_pts`；offset 表 `g_offsets`（单标量，-1=未知）；alloc→节点映射 `g_pa_alloc_nodes` | **intra-procedural**：`IR_CALL` 分支"leave pts=0 for now (conservative)"（`:316-319`）——头注声称 "interprocedural function summaries"，**代码无该实现**；pts 是**单 int 64 位位图**（`pa_merge_pts` 循环 `bi<64`）；**全程序 alloc 追踪上限 64**（`:213` `if g_pa_alloc_count < 64`）⇒ 第 65 个分配起静默不追踪；unsafe 块整块跳过（`:201`） |
+| 7 | 指针分析 | `src/compiler/ptr_analysis.cr` | Andersen 式：Addr/Copy/Store/Load 四规则；pts 表 `g_pts`；offset 表 `g_offsets`（单标量，-1=未知）；alloc→节点映射 `g_pa_alloc_nodes` | **intra-procedural**：`IR_CALL` 分支"leave pts=0 for now (conservative)"（`:316-319`）——头注声称 "interprocedural function summaries"，**代码无该实现**；pts 是**单 int 64 位位图**（`pa_merge_pts` 循环 `bi<64`）；**全程序 alloc 追踪上限 64**（`:213` `if g_pa_alloc_count < 64`）⇒ 第 65 个分配起静默不追踪；**且计数器从不复位**（`reset_frontend_state` `globals.cr:509-540` 复位了 `g_alloc_pts_cap:538` 却未含它）⇒ 额度**按进程累计**、随编译序漂移；unsafe 块整块跳过（`:201`）。⇒ 已立 `TODO #2026-09-17-9` |
 | 8 | 区域检查 | `src/compiler/region_check.cr` | DEREF 目标分配的 subgraph 是否已 exit（`ni > alloc_exit` 节点序比较，`:34-57`）；返回逃逸（`:59-92`）；存储逃逸调 `rc_pts_has_escaped` 但**丢弃返回结果**（`:102`）⇒ 无诊断路径 | 无 liveness/use 集（仓内无该 pass）；无跨执行体概念 |
 | 9 | provenance 校验 | `src/compiler/provenance_verify.cr` | offset vs alloc size 界限；运行期检查回填 s2/s3（`:117-129`） | 与 transfer 无关；alloc size 只覆盖 `IR_ALLOC_ARRAY`/`IR_ALLOC_STRUCT`（`:17-26`） |
 | 10 | `.ccr` 载体 | `src/compiler/ccr_io.cr` | EDG 段每条 `{to_nod u32, kind u32}`，kind **只允许 ∈ {0 def-use, 1 state}**，`>1` 直接拒绝落盘（`:412`/`:428`）；`CCR_VERSION = 9`（`:135`，load 严格 `==9`） | 无第 3 类边、无标注段（S-E 说 determinism 标注要与 R2 P4 同波进 `.ccr` 段——**尚未落**） |
@@ -318,6 +389,9 @@
 | 8 | **Commutativity + determinism proof** | **S-E 已定四形态语义**（`merge_deterministic`/`ordered`/`race`/`select_any`）+ 观测面定义（L3）+ 顺序源白名单（L5）+ 「未证明未标注 ⇒ reject」（L2）；purity（`compute_all_purity`） | 交换性判定本身（无 pass）；与 S-E 的接线（S-E 覆盖「汇合点」，本文覆盖「并行 transition」——**同一判据的两个投影，须裁归口**，G12） | **无** |
 | 9 | **Deadlock certificate** | 判定产物先例：`existence-structure.md:111`「证书等判定产物独立于 `.ccr`，不落本文件」；决策记录（S-D，设计态） | lock dependency graph 生成 + 无环证明 + 证书载体 + fail-closed 出口 | **无** |
 | 10 | **Adaptive mapping** | TODO「PGO 自动剖析」（2026-08-30 记）——**仅登记，无实现** | profile 采集/反馈面 | **无** |
+
+> **次序修订（G9 裁定，维护者 2026-09-17）**：上表按维护者**原文**次序；**实施次序已由 §11.1 修订**——步 1 之前插入地基三项（0a 多 M / 0b 消息表示 / 0c 并发运行时验证）。
+> **G3 裁定（team-lead 2026-09-17）**：步 1 的 Live/Needed 分析**先做 pts 表示升级**（不选「接受退化」）；64 上限静默截断已立 `TODO #2026-09-17-9`。
 
 ### 15.3 `go` / `chan` 现状的语义定位（读码事实，不含推断）
 
@@ -356,13 +430,37 @@
 2. **`ptr_analysis.cr` 头注与实现不符**：头注第 6 行写 "Call: function summary propagation + arg conservatism"，实现是 `IR_CALL` → pts=0 保守（`:316-319`）。CLAUDE.md 记该 pass 为「过程间 Andersen 式」——**代码是过程内**。
 3. **`SG_FLOW` 无产生点**（S-E B-N1 已实测）——`docs/maintainer/proposals/concurrency.md` 的 `flow` 设计与 region 面尚未接线。
 
+> 以上三处已登记为 **`TODO #2026-09-17-10`**（登记批，未修；零源码语义）。
+
 ---
 
-## 16. 裁门与开放问题（C 节；每条带推荐）
+## 16. 裁门裁定表（C 节）
 
-> 格式：**问题 / 事实 / 推荐 / 影响面**。规划代理**不自行裁**；「推荐」是给维护者的决策输入。
+> 格式：**问题 / 事实 / 推荐（决策输入，留痕）** / **裁定**。**13 门全部已裁**（2026-09-17）：维护者裁 G1 / G2 / G8 / G9（经 team-lead 转达）；team-lead 裁 G3 / G4 / G5 / G6 / G7 / G10 / G11 / G12 / G13。
+
+### 16.0 裁定总表
+
+| 门 | 裁定人 | 裁定值 | 落点 |
+|---|---|---|---|
+| **G1** | 维护者 | **含时间——预算等价**（**强于**代理推荐：原推荐倾向「性能不进语义」） | **§13.0**（新建）、§13 I1/I4/I5/**I9**、§14 术语 |
+| **G2** | 维护者 | **分层**：`go` 声明并发不声明顺序 · **通道 FIFO 升格为语义序** · 未标注的可观察顺序 ⇒ **reject** | §14 术语「显式声明的调度差异」、§13 I1 |
+| **G3** | team-lead | **pts 表示升级**（不选「接受退化」）；64 上限静默截断立 TODO | §15.2 注、`TODO #2026-09-17-9` |
+| **G4** | team-lead | **静态证明 + 证书；禁运行时见证顶替** | §13.0.2 |
+| **G5** | team-lead | **不新开通道、等 S-D** | §13.0.2 |
+| **G6** | team-lead | **`.ccr` 三分法**：语义标注可入；**transfer/sync 决策与证书不进**；copy scheduler 输出纯后端 | G6 条内 |
+| **G7** | team-lead | **SHARE 降级为 mapping 优化、不扩 primitive** | G7 条内 |
+| **G8** | 维护者 | **删掉 `move` 关键字** | `TODO #2026-09-17-8`、§13 I2 |
+| **G9** | 维护者 | **地基三项提到步 1 之前**（先补地基再起步 1） | **§11.1**（新建） |
+| **G10** | team-lead | **两前置照立**（chunk handoff 复用通道语义；模型量 vs 实测划界） | G10 条内、§13.0.2 |
+| **G11** | team-lead | 取「**编译器不为用户数据生成锁**」；**编译器自身内部同步不受此限**（spec 须写明区分） | §14 术语「compiler locks」 |
+| **G12** | team-lead | **S-E 为唯一执法点** | G12 条内 |
+| **G13** | team-lead | **五小项全部登记** | G13 条内 |
+
+### 16.1 逐门详录（含裁定）
 
 ### G1 可观察语义的定义（**头号开放问题**）
+
+**裁定（维护者 2026-09-17，经 team-lead 转达）**：**含时间——预算等价**（**强于**本代理推荐；原推荐曾倾向「性能不进语义」）。四项具体化全部落 **§13.0**：① 时间量的三形态（B-渐进 / B-计数 / B-等待；**逐微秒显式排除**——既不可实现也不可测）；② `modeled` 值 = **待检主张** + 证书形态（与 G4/G5 合流）；③ I1/I4/I5 **重写** + 新增 **I9**；④ 三问判定形态（终止 = 类别可观察；内存 = 仅上界作预算条目；性能 = 进语义但仅三形态）。
 
 - **问题**：I1 的全部力量压在「可观察语义」上，而原文未给定义。等价性判据（CopySet 正确性、shared mapping 等价证明、copy scheduler 自由度上界、deadlock fallback 的可接受性）全部以它为界。
 - **事实**：仓内已有两份可直接复用的材料——S-E L3 的 `obs(·)` = ①值输出 ②效应（STORE / 通道 send / extern 调用 / YIELD）③控制去向，且明言「唯一不在观测面内的量 = 到达位置/到达时刻/到达顺序本身」；cache-semantics 条款 2「驱逐不变量 = order-free」同形态。
@@ -370,6 +468,8 @@
 - **影响**：全部下游判据。
 
 ### G2 `go` / `chan` 是否属于「显式声明的调度差异」
+
+**裁定（维护者 2026-09-17，经 team-lead 转达）**：**分层**——(a) `go` 声明的是「**存在并发执行体**」= 显式声明；**交叉执行顺序未声明** ⇒ 不属显式声明；(b) **通道 FIFO 升格为语义序**（单产单消面：消息序 = 发送序；多产/多消面须写明「无跨发送者全局序」或给 `ordered(src)` 标注）；(c) **未标注且顺序可观察 ⇒ reject**（执法点归 S-E，承 G12）。推荐中的 (d) 迁移模板（S-E W1：默认 1 个发布周期 lenient + 具名诊断）保留为迁移细节。
 
 - **问题**：不变量只保护**未**显式声明的差异；`go`/`chan` 是显式语法，但「显式并发」≠「显式调度」。
 - **事实**：§15.3 事实 2/3/6/7——执行序是调度产物且无书面承诺；通道 FIFO 是数据结构序；`select`（最早到达）已被判为「物理序泄进语义」的待修缺陷并给了迁移模板。
@@ -382,6 +482,8 @@
 
 ### G3 CopySet 的 `Live` / `Needed` / `NonTransferable` 从哪来
 
+**裁定（team-lead 2026-09-17）**：**pts 表示升级**（不选「接受退化」）——理由：G1 取强立场（含时间）⇒ **分析精度是预算可证明性的前提**；且「第 65 个 alloc 起静默不追踪」本身即**静默缺陷**（本仓最忌类）⇒ 已立 **`TODO #2026-09-17-9`**（含 `ptr_analysis.cr:213` 与「64 上限」的**实测**判据要件；本轮只读未跑 RED）。
+
 - **问题**：三项均无定义、无产出面。
 - **事实**：`ptr_analysis` 是**过程内** + call 保守 + pts 单 int 64 位 + 全程序 alloc 上限 **64**（`:213`）；offset 是单标量；**无 liveness/use 集 pass**（仓内 grep 无）；`region_check` 只有 outlives 序判定。
 - **推荐**：**新 pass 不可避免**（Transfer Analysis = 独立后置 pass，落在 state 链重建之后），但**分级落地**：
@@ -393,6 +495,8 @@
 
 ### G4 实验 shared mapping 的「语义等价证明」由谁做、什么形态
 
+**裁定（team-lead 2026-09-17）**：**静态证明 + 证书；禁运行时见证顶替** ✓（= 代理推荐）。证明主体 = 编译期 prove（Transfer/Copy planner 产义务，判定走 S-A 四档）；形态 = 证书条目（§13.0.2）；测量只作报告证据。
+
 - **问题**：§6 只写「若能证明…则允许」——主体、形态、失败出口均未定。
 - **事实**：S-A 四档义务已就位（设计态）；S-E **L8 明确确定性族无 enforce 档**（事后检测太晚，不得用「插运行时检查」充数）；证书先例 = `existence-structure.md:111`（判定产物独立于 `.ccr`）。
 - **推荐**：**静态证明为主 + 证书旁路**，三态输出（proved / unknown / refuted）与 R2 引擎一致：proved ⇒ 启用该 mapping；unknown ⇒ 落 ③proof-required（要求声明/合同）**或回落 COPY**；refuted ⇒ 回落 COPY。**不得**用「运行时见证」顶替证明（= 把语义交还调度，违 I5）。
@@ -400,12 +504,16 @@
 
 ### G5 deadlock 证书与 `explain` / `--dump-vcs` 合流
 
+**裁定（team-lead 2026-09-17）**：**不新开通道、等 S-D** ✓——deadlock 证书 = decision record 之一种（`qclass = concurrency.deadlock`），随 S-D 的 L8（记录随缓存条目存取）落地；在 S-D 落地前**不落任何新 dump 旗标**。
+
 - **问题**：证书载体与报告通道未定。
 - **事实**：`--dump-vcs` **不在 develop**（仅 plan + 在飞分支 T4）；决策记录**仅设计**（S-D L1/L2/L8）；explain spec §1 明确反对「再造一个无锚点 dump 旗标」。
 - **推荐**：**不新开通道**——deadlock 证书 = decision record 的一种（`qclass = concurrency.deadlock`），随 S-D 的 L8（记录随缓存条目存取）一起落地；dump 面等 `--dump-vcs`/`explain` 合入后按同一记录表接线。**在 S-D 落地前，不落任何新 dump 旗标**。
 - **影响**：与在飞分支 `feature/spec-grammar` 的接口顺序。
 
 ### G6 与既有 `.ccr` / canary 判定面的关系
+
+**裁定（team-lead 2026-09-17）**：**`.ccr` 三分法** ✓——① 语义标注可入（须 bump 版本）；② **transfer/sync 决策与证书不进**；③ copy scheduler 输出纯后端。判据面随之重定：`.ccr` 逐字节不变 = **语义层未被 mapping 污染**（强判据）；ELF canary 在 mapping 批落地时**按既定流程重冻**（不是「必须不变」）。**并入**：§13.0.2 的预算证书同受 ② 约束（落决策记录旁路）。
 
 - **问题**：transfer/sync 都在 mapping 面 ⇒ 是否应完全不进 `.ccr`？
 - **事实**：`.ccr` EDG 只许 kind∈{0,1}，`CCR_VERSION=9`，load 严格等值；S-E L1 说 determinism **标注**「与 R2 P4 同波进 `.ccr` 段」；`existence-structure.md:111` 说**证书**不落 `.ccr`；判据网 = `.ccr` 逐字节 + ELF canary（冻结 sha）。
@@ -418,12 +526,16 @@
 
 ### G7 新模型与 2026-09-04 边界标签 spec 的对齐（SHARE 消失）
 
+**裁定（team-lead 2026-09-17）**：**SHARE 降级为 mapping 优化、不扩 primitive** ✓——实施前须出**对齐表**（标签 ↔ primitive + 义务逐条对照 + 「无配方条目/身份重指」归入 NonTransferable 还是独立面）；`2026-09-04` spec 状态行随实施批标「被本文修订」。
+
 - **问题**：两份活跃 spec 的 primitive/标签集不一致。
 - **事实**：2026-09-04 spec 的标签集 = {COPY, MOVE, SHARE}（SHARE = 双侧只读共享、永久冻结、引用计数）；新模型 = {MOVE, LOAN, SPLIT, FILL, COPY}——**SHARE 无对应物**；两边的 MOVE 定义一致（永久转移、0 copy）。
 - **推荐**：**以新模型为准**；SHARE 降级为**mapping 面可选优化**（多消费者只读可由「MOVE 到共享只读区 + 引用计数」表达），**不得**作为第六 primitive（§4 原文反对扩集合）；实施前出一份**对齐表**（标签↔primitive + 义务逐条对照 + 「无配方条目/身份重指」归入 NonTransferable 还是独立面）。
 - **影响**：避免双轨并行；`docs/superpowers/specs/2026-09-04-*.md` 的状态行需标「被本文修订」。
 
 ### G8 `move` 关键字已存在且零语义
+
+**裁定（维护者 2026-09-17，经 team-lead 转达）**：**删掉 `move` 关键字**（独立小批）⇒ 本门「先裁再动」已满足；实施锚点（词法/语法/AST + 6 处消费者）与**负控判据**（删后 `move := 1` 类「此前非法、删后合法」形态必须有用例锁定，防语法错误变静默接受）落 **`TODO #2026-09-17-8`**。
 
 - **问题**：`move x` 今日是 no-op，而 MOVE 是新模型的第一个 primitive。
 - **事实**：`lexer.cr:102`（T_MOVE）、`grammar/core.ebnf:42`（`Move = 'move' IDENT '='`）、`ast.cr:200`（EXPR_MOVE）、checker 透传（`checker.cr:3679-3680`）、ir_gen 透传（`ir_gen.cr:2878-2879`）⇒ **写与不写完全等价**。
@@ -432,6 +544,8 @@
 
 ### G9 多 M 与 shared mapping 的前提
 
+**裁定（维护者 2026-09-17，经 team-lead 转达）**：**先补地基再起步 1**——地基三项（**多 M / 消息表示 / 并发运行时验证**）**提到步 1 之前** ⇒ 落 **§11.1**（含内部次序建议 0b ∥ 0a → 0c）。理由（裁定依据）：单 M 上做出的等价性证明与 deadlock 证书**不覆盖真并行** = 假背书（违 I5）。
+
 - **问题**：§6 的 `Cost(copy) vs Cost(shared+sync)` 比较、以及 Copy Scheduler 的 async/prefetch 都预设真并行，而运行时今日恒 1 M。
 - **事实**：`sched_init` 恒建 1 M（`sched.cr:28-35`）；`sched_spawn_workers` 未被静态构建接线（TODO #2026-07-31-1）；wait list 的无锁正确性依赖单 M（`sched.cr:2-3`）。
 - **推荐**：把「多 M 打通 + 并发运行时验证」列为 **§11 步 6 的硬前置**（不是步 6 内部子任务）——理由：锁/原子的收益与 deadlock 风险都在真并行下才出现；单 M 下「shared+lock」无意义，做出来的等价性证明也不覆盖真并行（假的 I5 背书）。
@@ -439,11 +553,15 @@
 
 ### G10 Copy Scheduler 的两个前置
 
+**裁定（team-lead 2026-09-17）**：**两前置照立** ✓——G10-a 取「chunk 序列**复用现有通道语义**」（与 §4 原文一致 ⇒ 不需新运行时原语）；G10-b 定「**模型量 vs 实测**」界限，`model_ver` 随**预算证书**（§13.0.2）与 S-D 记录 schema 的既有字段位。
+
 - **G10-a（chunk handoff 的表示）**：§3.3 要求「copy R7 → start receiver → 继续 copy」，需要「部分就绪的接收」。**推荐**：先按 §4 原文 lowering 成 `chunk0..n` 的 MOVE/FILL 序列**复用现有通道语义**（则 Copy Scheduler 无需新运行时原语，只是 lowering 策略）。若裁「需要新原语」⇒ 得先做 15.1#2 缺的「消息」概念。
 - **G10-b（三目标量可测吗）**：CopiedBytes / VisibleCopyLatency / BandwidthPressure 今日**无度量面**（解释器/ELF 无计时、无带宽模型）。**推荐**：先定「模型量（modeled）」与「实测」的界限（§10 原文的 "modeled 3.1 us" 已暗示模型量），并把 `model_ver` 纳入 S-D 记录 schema 的既有字段位；**不得**把模型量当实测输出（否则 I1/I5 的报告面会撒谎）。
 - **影响**：步 4/5 的验收判据设计。
 
 ### G11 「compiler locks = none」的读法
+
+**裁定（team-lead 2026-09-17）**：取「**编译器不为用户数据生成锁**」——默认档下对用户数据**零锁生成**；**编译器自身内部的同步不受此限**（如编译期数据结构的并发访问属实现细节）。**spec 必须写明这层区分**——已落 §14 术语表「compiler locks」行。
 
 - **问题**：§1.2 三项「无」中，「compiler locks = none」二义（不生成任何锁 / 编译过程不持锁）。
 - **推荐**：按上下文（与 "shared mutable state" / "user-visible locks" 并列）读作 **(a) 编译器不生成锁**，并建议原文改为「compiler-generated locks = none」以免读者误读为编译期并发。另注：`compiler.lock` 类文件锁在 CI/构建面是否存在，须另查（本轮未核）。
@@ -451,12 +569,16 @@
 
 ### G12 §5 确定性与 S-E 的归口
 
+**裁定（team-lead 2026-09-17）**：**S-E 为唯一执法点** ✓——本文只声明「并发关系产生 determinism 义务」这一**来源**；判定 / 执法 / 报告全走 S-A / S-E / S-D 既有机制（§5 判据表保留为 S-E 判定序在「transition 对」上的实例化文本）。
+
 - **问题**：本文 §5（并行 transition 的交换性/reject）与 S-E（汇合点四形态 + 「未证明未标注 ⇒ reject」）是**同一判据的两个投影**，谁定义、谁消费未定。
 - **事实**：S-E L2「未证明且未标注 → reject（唯一执法点——并发面）」；S-E L7「自动并发只搬运已证明的 `merge_deterministic`」；本文 §5 判据面 = 「两个并行 transition」。
 - **推荐**：**归口 S-E**——本文只声明「并发关系产生 determinism 义务」这一**来源**，判定/执法/报告全部走 S-A/S-E/S-D 既有机制（避免两套 reject 面）。本文 §5 的表格作为 S-E 判定序在「transition 对」上的实例化文本保留。
 - **影响**：实现批只需一套判定核。
 
 ### G13 其它待定（较小，一并列出）
+
+**裁定（team-lead 2026-09-17）**：**五小项全部登记** ✓——(a) FILL reserve 与 arena 生命周期、(b) LOAN 与 borrow checker 关系、(c) `explain concurrency` 冷热两态一致（前置 = 记录随缓存条目存取，S-D L8 / `cir_cache.cr` 键今日不含记录）、(d) `[concurrency]` 配置面（`project.cr` 无段解析）、(e) 存量 6 个 go/chan 测试重锁（待 G2 的通道 FIFO 语义定义落地后统一处理）。
 
 | # | 项 | 推荐 |
 |---|---|---|
@@ -505,10 +627,13 @@
 | 消息边界标签 spec（SHARE） | `docs/superpowers/specs/2026-09-04-message-copy-elision-design.md:37-45, 90-98` |
 | GMP ADR | `docs/maintainer/adr/adr-0017-concurrency-gmp.md` |
 | TODO 并发条（含过时注记） | `TODO.md:221-226` |
+| alloc 计数器生命周期（从不复位） | `src/compiler/globals.cr:351`（声明）· `:509-540`（`reset_frontend_state` 未含它，仅复位 `g_alloc_pts_cap:538`）· `src/compiler/ptr_analysis.cr:213-217`（唯一写点） |
+| 本轮登记的三条 TODO | `TODO.md` → `#2026-09-17-8`（`move` 删除）· `#2026-09-17-9`（64 上限静默截断 + 计数器不复位）· `#2026-09-17-10`（文档漂移三处） |
 
 ## 附录 B：本轮方法与边界
 
 - **只读**：零构建、零源码改动；未跑任何编译/测试命令（所有事实来自读码）。
 - **不改设计**：全文对维护者原文的处理 = 落纸 + 条目化 + 对接 + 提问；**无一处**改写、补充或缩减原设计。
 - **推断标注**：§15 中标「推断」的仅 15.2 少数行（可复用性判断），事实行均可回溯到附录 A 锚点。
-- **未覆盖面（本轮显式不做）**：多 M 运行时的实测行为、`go`/`chan` 语料的运行时行为验证、性能量级评估、`.ccr`/ELF canary 的实跑复核。
+- **未覆盖面（本轮显式不做）**：多 M 运行时的实测行为、`go`/`chan` 语料的运行时行为验证、性能量级评估、`.ccr`/ELF canary 的实跑复核、`TODO #2026-09-17-9` 的 64 上限 **RED 实测**（判据要件已列，未跑）。
+- **裁定轮边界**：13 门裁定值由维护者 / team-lead 给出，本文只做**落纸与落点**（§11.1 / §13.0 / §14 / §16.0）；裁定值本身未经本文复核，若与裁决原文有出入以裁决原文为准。
