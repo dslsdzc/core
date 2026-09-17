@@ -257,6 +257,9 @@ for f in sorted(glob.glob('.core/cache/cir/*')):
 4. **建议**：若批 8 先合入 develop ⇒ 以 develop 上的形态为基线，只补 A1；若未合 ⇒ **在新链上重做等价抽取**（不带 DBG），
    并**不**把 `aaa054fe` 当依赖 cherry-pick（跨链 + 未过判据）。两条路线都须在计划里登记**批次顺序依赖**。
 
+> **更新（2026-09-18）**：上述第 4 条的「批次顺序依赖」已被 **§9「§7 更新」** 取代——批 8 已切成两个 PR，
+> **PR-A（含环抽 + 判据网）** 合入后 (乙) 才开链；本节主体作为**历史评估**保留。
+
 ---
 
 ## 8. 未决（交维护者裁）
@@ -294,6 +297,80 @@ for f in sorted(glob.glob('.core/cache/cir/*')):
 
 ---
 
+## 9. 复核修正（2026-09-18，对抗复核 → lead 裁定；**原文一字不动**，本节为修正层）
+
+> 落纸纪律同 §8：原文保留、本节叠加；凡本节与原文冲突，**以本节为准**。
+
+### M1｜P1 三态化（dex 家族三态纪律；修正 §4.2-P1）
+
+- **依据（本轮实读）**：`interp.cr:264-266` 与 `interp.cr:705-707`——`IR_I2F(49)`/`IR_F2I(50)` 在解释器里**显式报错 + 中止**（"needs binary64 semantics (apx dex)"）；
+  批 5 已把该读数**制度化**（`src/ci/run.sh:207-210`）：bits 源 interp 腿 **= 255 是期望值**（能力边界），**出现第三个值一律判红**，且 **不许单腿绿结案**（ELF 绿 ∧ interp 第三态 ⇒ 仍红）。
+- **修正**：P1 由「两腿都必须 = 锚定值」改为**三态**——
+  ① bits 源主探针：interp ∈ {**255**，锚定值}，**第三值才红**；
+  ② **另列 scaled 源探针**（该源 interp 可执行 ⇒ **两腿均须 = 锚定值**，严格判）。
+- **与 D3-② 的张力（两者并存，不互斥）**：突变论证要求主探针**必须用 apx(bits) 源**（否则环空转与否同结果 ⇒ 恒绿）。
+  ⇒ **主探针 = bits（三态判）**；**补充探针 = scaled（两腿严格判）**。
+
+### M2｜A1 换锚 + `T` / `T?` 两形态分列（修正 §2-A1 及其陷阱 3）
+
+- **原引锚点错误**（本轮实读确认）：`parser.cr:1472-1476` 是 **FuncInfo 写点**（`fi_set_param_type(fi, …, ast_type_val(pstore_n))`——只**读**节点字段，不写 `param.type_val`）。
+- **真锚点**：`parser.cr:1427`（普通形参）/ `parser.cr:1612`（方法形参）的
+  `alloc_node(EXPR_PARAM, pn, 0, 0, 0, unpack_type(pty), pty, …)`；`unpack_type` 定义 = `parser.cr:150-153`（`if ast_kind(typ) == 0 { return ast_type_val(typ); } return 0;`）。
+- **`T` / `T?` 生效路径不同（新落纸推论）**：`t: T?` 代入为 `dex?` 后，`unpack_type(EXPR_OPTIONAL)` **仍返 0**
+  ⇒ 该形参槽型**不由 `type_val` 决定**，而由 `ir_gen.cr:3080` 的 `dex_opt_type_node(ast_data(pn))` 分支决定。
+  ⇒ **`T`：靠 `type_val` 重算**；**`T?`：靠类型节点代入**（两者缺一即有一形态不回绿）。
+- **裁定**：判据（P1/P2）与突变（§4.2-P5）**按 `T` / `T?` 两形态分列**：
+  突变 M-α = 只回退 `type_val` 重算（应只让 `T` 形态红）· 突变 M-β = 只回退类型节点代入（应只让 `T?` 形态红）。
+- 旁注：原文 `monomorph.cr:604` 实为 **`:603`**（符号锚对、行号 ±1）；EXPR_FN 分支仍为 `:600`。
+
+### M3｜既有承重锁点名（修正 §4.1/§4.3）
+
+- **实读**：`tools/baseline/canary_values.tsv:16`（语料 B = **`tests/suite/generics_test.cr`**；该语料含 `:11 fn identity[T]` · `:17 struct Box[T]` · `:23 fn get_val[T]` · `:29 fn pair[A,B]`）
+  + `:91-92`（`gt_ccr` = `d92a2727…`/142765B · `gt_static_ccr` = `a1f7b99c…`/142908B）。
+  ⇒ A1 重写实例形参链 ⇒ **这两条值大概率变**。
+- **闸门形态（实读 `:83-86`）**：值变 ⇒ **归因成立才换代**（记「旧值 + 新值 + 归因 + 出处提交」，旧值留痕）；**归因不出 = 按回归处理、停下上报（默认动作）** ⇒ 实施轮**必被此 fail-closed 闸拦下**。
+- **裁定**：① **`gt_ccr` / `gt_static_ccr` 显式列入「预期重锁」清单**（按 `:85` 口径留痕 + 归因）；
+  ② **ELF canary `pa` / `pa_static` 不受影响**（语料 A = `tests/suite/ptr_arith.cr`：零 import、非泛型）；
+  ③ **`suite` job 在 PR 门之外**（PR 门只 3/5：`check` / `bootstrap-tests` / `selfhost-tests`）⇒ **改完必须手动派发完整层**：
+  `gh workflow run .github/workflows/core-ci.yml --ref <branch>`（**必须给文件路径**，见重名 workflow 陷阱）。
+- **第三方背书**：`canary_values.tsv:73-74` 自注「`generics_test` 含泛型 ⇒ `main.cr:480-486`（`:484` 置 0）`cache_enabled = 0` ⇒ **冷≡暖按构造**」
+  ⇒ 这两条锁**无「暖态读旧 IR」的假绿通道**。
+
+### M4｜探针与甲面解耦 + 判据三态（修正 §6 与 §4.2-P1）
+
+- **问题**：原文探针用 `h[dex]` 体内 `@raw_int(t)` ⇒ 该构造报 `error[TF07]`（**甲面**现象）；若甲落地为硬诊断 ⇒ 语料**编不过** ⇒ 乙的 P1（要求 check 零诊断 + 两腿取值）**连运行都进不去**。
+- **裁定**：① 乙的主探针**避开甲面构造**（**不用** `@raw_int`；改 dex 算术/比较 + `match` 解包）；
+  ② §6 改为「同一**族**语料、**两个独立探针**」（不是共用一个探针）；
+  ③ 判据三态 = **`绿 / 红-值分歧 / 红-不可运行`**；
+  ④ 停条件补 **S6**：若甲先落地 ⇒ P1 的「check 零诊断」条款须**重述**（否则乙被甲的诊断误红）。
+
+### 中项 1｜P2 仪器待定（修正 §4.2-P2）
+
+- **实读**：现 CLI 的 dump 面 = `main.cr:250/251/252`（`--dump-types` / `--dump-ifaces` / `--dump-tk-terms`）+ `:255-258`（`verify-named-dedup` / `verify-evp-nodes` / `--diag-gate-report` / `--dump-vcs`）——
+  **无「IR 变量槽型」直读**；最接近的 `--dump-tk-terms` 是 **DFNode.TK = 派生面**，**不是槽型本体**。
+- **裁定**：P2 **不得**以「TK 面绿」结案。实现前二选一：① **写明**读回命令 + 断言字段（新增隐藏 dump，或复用既有面并**证明其承载槽型**）；② 证明代理 **≡** 槽型（附反例搜索）。
+  **未落定前，P2 记为「仪器待定」**（不得进实施）。
+
+### 中项 2｜D3 突变矩阵按 {形态 × 实参形态} 分格（修正 §4.2-P5）
+
+- 已知「退回仍绿」的四条通道：① 只回退 `type_val` 重算 + 探针只用 `T?`（恒绿）；② 只回退 A2 + 只用 scaled 实参（恒绿）；
+  ③ 只回退 A1 + `T` 代入 int/string（恒绿）；④ 原文突变②（去 A2）与「完全不修」等价 ⇒ **不证明 A1 有效**。
+- **补一条突变**：**只改 A2 不改 A1**（槽型仍 `TI_INT`、实参变 `TI_DEX_S` ⇒ **寄存器类一致但语义错**）。
+  复核判断它**很可能不红** ⇒ 必须**显式设计值语义断言**（两腿 + 锚定值）抓住它；**不红即停**（S5 纪律已有）。
+
+### 中项 3｜D4 入仓与挂点
+
+- 新增 `tests/selfhost/test_generic_param_erasure.py`，挂 `src/ci/run.sh` 的 **`selfhost-tests`** 腿
+  （`tests/harness/ci_hook_allowlist.txt` 只登记**未挂**项 ⇒ **挂钩即无需白名单**）。
+
+### §7 更新（时序依赖已解；取代 §7 第 4 条的「批次顺序依赖」表述）
+
+- 批 8 在 F3 处**切成两个 PR**：**PR-A = 条目 2/3/4/5/6**——**含环抽 `dex_align_call_args`**（摘掉 `aaa054fe:1276` 的 DBG `println`），
+  `tests/selfhost/test_opt_eq.py`（+174）与 `run.sh`（+12）**随 PR-A 一起进 develop**。
+- ⇒ (乙) **只等 PR-A 合入**：**不自复制**环抽、**不会丢**判据网（原「若未合则新链重做等价抽取」的备选**作废**）。
+
+---
+
 ## 附录 A：本轮实读锚点清单（file:line，develop = 3e461edd）
 
 - `src/compiler/monomorph.cr:600`（EXPR_FN 克隆：只深克隆 `d`）· `:604`（EXPR_PARAM 分支，实例路径不可达）
@@ -305,3 +382,14 @@ for f in sorted(glob.glob('.core/cache/cir/*')):
 - `src/compiler/main.cr:484-490`（泛型关缓存）· `:495-497`（optrep 关缓存）· `:539`/`:573`（读/写调用点）
 - `src/compiler/cir_cache.cr:80`（`CIR_CACHE_VER = 20`）· `:142-168`（身份 = 全文件 FNV-1）· `:500-502`（身份拒绝）
 - `aaa054fe`：`src/compiler/ir_gen.cr:1254-1300`（环抽）· `:1276`（DBG println）· `:2178` / `:2246`（两遍调用点）
+
+**附录 A 追加（2026-09-18 §9 复核修正轮实读，同一 develop = 3e461edd）**
+
+- `src/compiler/parser.cr:1427`（普通形参 `alloc_node(EXPR_PARAM, …, unpack_type(pty), pty, …)`）· `:1612`（方法形参同构）
+- `src/compiler/parser.cr:150-153`（`unpack_type` 定义：非 kind-0 返 0）· `:1472-1476`（**FuncInfo 写点**：只读 `ast_type_val(pstore_n)`）
+- `src/compiler/monomorph.cr:603`（EXPR_PARAM 克隆分支；EXPR_FN 仍 `:600`）
+- `src/compiler/interp.cr:264-266` / `:705-707`（`IR_I2F(49)`/`IR_F2I(50)` 报错 + 中止）
+- `src/ci/run.sh:207-210`（三态纪律：bits 源 interp = 255 是期望值；第三值判红；不许单腿绿结案）
+- `src/compiler/main.cr:250-252`（`--dump-types`/`--dump-ifaces`/`--dump-tk-terms`）· `:255-258`（`verify-named-dedup`/`verify-evp-nodes`/`--diag-gate-report`/`--dump-vcs`）——**无「IR 变量槽型」直读**
+- `tools/baseline/canary_values.tsv:16`（语料 B = `tests/suite/generics_test.cr`）· `:73-74`（含泛型 ⇒ `cache_enabled=0` ⇒ 冷≡暖按构造）· `:83-86`（换代纪律：归因不出 = 停下上报）· `:91-92`（`gt_ccr`/`gt_static_ccr` 锁定值）· `:13`（语料 A = `tests/suite/ptr_arith.cr`）
+- `tests/suite/generics_test.cr:11/17/23/29`（`identity[T]` / `struct Box[T]` / `get_val[T]` / `pair[A,B]`）· `tests/harness/ci_hook_allowlist.txt`（只登记**未挂**项）
