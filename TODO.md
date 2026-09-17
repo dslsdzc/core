@@ -143,6 +143,9 @@
 | — | `#2026-09-17-12` | 2026-09-17 | 批 6 | 【卫生】`dump.cr::cmd_cir` 零调用者（死码；与 `elf.cr`/`linker.cr` 同族） |
 | — | `#2026-09-17-16` | 2026-09-17 | 缓存膨胀批 T1 实测登记 | ⚠【性能·实测触发条件】`.cir` 每条目固定开销 ≈0.13–0.24 s × 1011 条 ≈ 150 s 地板——候选 ③（单文件/打包缓存）立项依据；本批只消字节项 |
 | — | `#2026-09-17-17` | 2026-09-17 | 缓存膨胀批 T4 实测登记 | ⚠【判据·逐字节同失效】`.cir` 缓存键缺「环境/命令形态」分量 ⇒ 跨缓存态字节比对可被打破（`full-bootstrap` A 残留态 corec2≠corec3，差 17,408 B 内嵌串；代码布局同） |
+| — | `#2026-09-17-8` | 2026-09-17 | 并发模型规格 G8 裁定 | 【语言面·零语义存量】`move` 关键字删除（独立小批） |
+| — | `#2026-09-17-9` | 2026-09-17 | 并发模型规格 G3 裁定 | ⚠⚠【静默·安全网失效】`ptr_analysis` 全程序 alloc 追踪上限 64（第 65 个起静默不追踪）+ 计数器从不复位 |
+| — | `#2026-09-17-10` | 2026-09-17 | 并发模型规格 §15.5 实读 | 文档/注释漂移三处（`#2026-07-31-1` offset 56 注记过时 · `ptr_analysis` 头注 vs 实现 · `SG_FLOW` 无产生点） |
 
 
 ## 已完成
@@ -1335,6 +1338,38 @@
 - **关联**：`plans/2026-09-17-cir-cache-bloat.md` §6.2（A/B/C 三重对照 + 干净缓存三重自证）· TODO
   `#2026-09-10-1`（键缺编译器身份）· `#2026-09-16-20`/`#2026-09-16-21`（`$HOME` 影响 `.ccr`）· `#2026-09-17-14`
   （`full-bootstrap` 固定 `/tmp/corec2`、`/tmp/corec3` ⇒ 并行覆盖面）。
+
+### 2026-09-17-8. **【语言面·零语义存量】`move` 关键字删除**（2026-09-17 并发模型规格 **G8 裁定**：维护者裁「删掉」——独立小批）
+
+- **现象（实核）**：`move x` 是合法表达式但**零语义**——checker 与 ir_gen 双向**原样透传**：
+  - 词法：`src/compiler/lexer.cr:102`（`if s == "move" { return T_MOVE; }`）
+  - 语法：`grammar/core.ebnf:42`（`Move = 'move' IDENT '=' ;`）· `:52`（`Primary` 含 `'move' Primary`）
+  - AST：`src/compiler/ast.cr:200`（`EXPR_MOVE : int = 32;  // a=expr being moved`）
+  - 消费者 6 处：`parser.cr:257-260`（构造）· `checker.cr:697`（表达式判据白名单）· `checker.cr:3679-3680`（`return infer_expr(ast_a(node));` 原样透传）· `ir_gen.cr:2878-2879`（`return gen_expr(ast_a(node));` 原样透传）· `ir_gen.cr:3568`（节点表项）· `monomorph.cr:543`（克隆）
+  - ⇒ **写与不写 `move` 完全等价**（观察不到任何差别）。
+- **裁定**：维护者 2026-09-17（经 team-lead 转达；落点 = 并发模型规格 §16 G8）：**删掉 `move` 关键字**。理由：新模型的 MOVE 是**编译器内部 transfer 计划**（零用户标注），留一个零语义关键字与「源语言不新增 ownership 语法」相抵。
+- **判据要件（实施时）**：① 上列 6 处消费者 + 关键字表 + grammar 产生式（含 `Primary` 引用；`grammar/tokens.ebnf` 若有 `T_MOVE` 条目须同步）**逐条清点删净**；② **负控（关键）**：删除后 `move x` 必须是**语法错误**（rc≠0 + 诊断），且 `move := 1` 这类**「此前非法、删关键字后变合法」**的形态必须显式用例锁定——删关键字 = 该拼写进入普通名字域，可能把语法错误变成**静默接受**（本仓最忌类）；③ 语料清点：`tests/` 与 `src/` 中 `move` 的使用面若存在须同批改；④ 判据面：`check src/compiler` rc=0 + 全枚举 + ELF canary 逐字节不变（语料无使用面时应当逐字节不变）。
+- **状态**：**登记，未修**（独立小批；2026-09-17 只读规划轮登记）。
+- **关联**：`docs/superpowers/specs/2026-09-17-concurrency-model-design.md` §13 I2 / §16 G8。
+
+### 2026-09-17-9. ⚠⚠ **【静默·安全网失效】`ptr_analysis` 全程序 alloc 追踪上限 64（第 65 个起静默不追踪）+ 计数器从不复位**（2026-09-17 并发模型规格 **G3 裁定**：先裁「pts 表示升级」；本条为必立的静默缺陷）
+
+- **现象（读码实核）**：`src/compiler/ptr_analysis.cr:213` 的 `if g_pa_alloc_count < 64 {` —— 每个 `IR_ALLOC_STRUCT` / `IR_ALLOC_ARRAY` 节点按序取一位 pts 位号（`:216` `pa_set_bit(0, g_pa_alloc_count)`，位号写入 `g_pa_alloc_nodes`）；**达到 64 后该分支恒假** ⇒ 第 65 个及其后的分配**不登记**（无映射表项、该 dst var 的 `pts` 不置位），且**零诊断、零产物差异**。
+- **后果链（读码推断，非本轮实测）**：该分配的 pts 恒空 ⇒ ① `region_check` 的 DEREF/返回逃逸检查走 `pts != 0` 分支（`region_check.cr:122-143`）⇒ **跳过**；② `provenance_verify` 的越界检查同样遍历 pts（`provenance_verify.cr:77-129`）⇒ **跳过**，且运行期边界检查回填（`:117-129` 需 `runtime_targets == 1`）也不发生 ⇒ **安全网在该分配上静默失效**（形态 = **漏检**，非错值）。
+- **第二个面（同源）**：`g_pa_alloc_count`（`globals.cr:351`）只增不减，**`reset_frontend_state`（`globals.cr:509-540`）不复位它**（同函数复位了 `g_alloc_pts_cap:538`，未复位本计数器）⇒ 64 的额度**按进程累计**：长驻进程（LSP）/ 多文件 project 模式连续编译时被**跨编译消耗** ⇒ 同一条目在不同编译序下行为不同（**非确定性面**）。
+- **判定**：**S（静默）**——安全网静默失效属本仓最忌类；第二面附带**非确定性**（依赖编译序）。
+- **裁定（G3）**：**pts 表示升级**（不选「接受退化」）。理由：G1 裁定「可观察语义含时间（预算等价）」⇒ 分析精度是预算可证明的前提；且本条本身即静默缺陷。
+- **判据要件（修复时；**RED 本轮未跑**——只读规划轮零构建）**：① **RED 实测**：构造 >64 个分配的语料（第 65 个分配上带可被判定的越界/逃逸形态）+ ≤64 的同形对照 ⇒ 修复前应观测「对照有诊断 / ≥65 无诊断」的静默差；② 表示升级：`pts` 由「单 int 64 位位图」改为可增长表示（或多字分摊），消除 `g_pa_alloc_count` 上限；③ 计数器随 `reset_frontend_state` 复位（或明确限定为编译单元作用域）；④ 回归：`check src/compiler` rc=0 + 三点 pass 既有判据（`tests/selfhost/test_pointer_safety.py` 等）逐项不变；⑤ ELF canary 按批口径重定（表示升级可能改动发射面时）。
+- **状态**：**登记，未修**；**RED 未跑**（2026-09-17 只读规划轮：零构建、零源码改动）。
+- **关联**：并发模型规格 `docs/superpowers/specs/2026-09-17-concurrency-model-design.md` §15.2 步 1 / §16 G3 · `TODO #2026-09-17-1`（静默内存类邻域，**非同根因**）。
+
+### 2026-09-17-10. **文档/注释漂移三处**（2026-09-17 并发模型规格 §15.5 实读发现——登记批）
+
+- **(a) `TODO #2026-07-31-1` 的 G 字段重叠注记已过时**：该条（本文件「预存 Bug」段）写「G 结构 offset 56 同时用作 saved_fn（`goroutine.cr`）与 temp_val（`chan.cr` 等待队列 handoff）」；**现行代码 temp_val 在 offset 72**，且 `src/stdlib/chan.cr:29-31` 明确警告「offset 56 is saved_fn — never write it from channel code」（`goroutine.cr:16-26` 布局注释同）⇒ 该注记描述的重叠**已不存在**。处置：改标「已修（temp_val 移至 72）」，保留留痕、不删史。
+- **(b) `ptr_analysis.cr` 头注 vs 实现不符**：头注（`src/compiler/ptr_analysis.cr:7-13`）声称 "Call: function summary propagation + arg conservatism"，实现是 `IR_CALL` → `pts = 0` 保守（`:316-319`），**无函数摘要**；`CLAUDE.md` 亦记该 pass 为「过程间 Andersen 式约束求解」。事实 = **过程内**。处置：头注 + `CLAUDE.md` 同步为「过程内 + 调用点保守」。
+- **(c) `SG_FLOW` 无产生点**：`sg_push` 产生点只有 `SG_FUNC` / `SG_IF` / `SG_LOOP` / `SG_FOR` / `SG_UNSAFE`（S-E §1.0 B-N1 实测；`dataflow.cr` 内 `SG_FLOW` 仅出现在 dump 命名分支 `:529`）⇒ `flow` 设计（`docs/maintainer/proposals/concurrency.md`）与 region 面**未接线**。处置：文档标注「flow 未落地」，或在产生点补齐前不给 flow 语料面承诺。
+- **状态**：**登记，未修**（三处均属文档/注释面，零源码语义改动）。
+- **关联**：`docs/superpowers/specs/2026-09-17-concurrency-model-design.md` §15.5。
 
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
