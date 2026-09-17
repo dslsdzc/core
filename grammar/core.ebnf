@@ -10,6 +10,7 @@ TopLevelDecl = FunctionDecl | FlowDecl | StructDecl | EnumDecl | InterfaceDecl |
 
 (*** 函数 ***)
 FunctionDecl = [ 'pub' ] 'fn' IDENT [ GenericParams ] '(' [ ParamList ] ')' '->' Type
+               { Annotation }
                ( FunctionBody | '=' Expr ';' ) ;
 
 GenericParams = '[' IDENT { ',' IDENT } ']' ;
@@ -19,7 +20,19 @@ Param = IDENT ':' Type ;
 FunctionBody = Block ;
 
 FlowDecl = 'flow' IDENT [ GenericParams ] '(' [ ParamList ] ')' '->' Type
+            { Annotation }
             ( FunctionBody | '=' Expr ';' ) ;
+
+(*** 规约标注（批 6；2026-09-17 正式接入）***)
+(* 位置 = **签名之后、body 之前**（spec-design §四）；可多条，按源序。
+   终结符 `ANNOT_HASH` = 词法 `#`（self-hosted `T_HASH = 101`；bootstrap `TokenType.HASH`）。
+   **`check`/`ensure` 是普通 IDENT 而非关键字**（本仓已有 `fn check`（parser.cr:30）与 CLI
+   子命令 "check"（main.cr:235）⇒ 做成关键字会当场打断自源）——故产生式里写 IDENT，
+   具体比对 `#check` / `#ensure` 由 parser 按词素做，未知标签 = error[V02]。
+   语义：标注**不影响运行时**（不产 IR；裁-S4「不编图」）——本刀只登记 + 常量折叠判定，
+   未证（yellow）不阻断编译；唯一硬错 = `#check(常量假)` ⇒ error[V01]。见
+   docs/superpowers/plans/2026-09-17-spec-grammar.md。 *)
+Annotation = ANNOT_HASH IDENT '(' Expr ')' ;
 
 (*** 类型 ***)
 Type = BaseType | PathType | RefType | OptionalType | TupleType | ArrayType | SliceType ;

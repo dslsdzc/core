@@ -586,6 +586,12 @@ fn tokenize(_src: string) {
         if c == 95   { _pos = _pos + 1; add_tok(T_UNDERSCORE, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
         if c == 64      { _pos = _pos + 1; add_tok(T_AT, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
         if c == 63    { _pos = _pos + 1; add_tok(T_QUESTION, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
+        // 批 6（T1 词法面）：`#` = 规约标注 sigil（`#check(expr)` / `#ensure(expr)` 的首字符）。
+        // **有意的行为变更**：修复前 `#` 走下方 Unknown 分支被**静默丢弃**（本函数尾），
+        // 带标注的源会被 parse_body 误解析成静默错产物（T0 §10.2 实测：build rc=0 + 运行返回错值）。
+        // 零足迹依据（T0 实测）：全仓 182 个 .cr 的**裸 `#` = 0**（注释/字符串内的 `#` 不达本行）
+        // ⇒ 本分支对既有语料**构造性零扰动**。后随字符由 parser 校验（必须 IDENT）。
+        if c == 35 { _pos = _pos + 1; add_tok(T_HASH, -1, start_line, start_col); _pos = skip_ws(_src, _pos, _slen); continue; }
 
         // Unknown
         _pos = _pos + 1;

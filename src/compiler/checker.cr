@@ -2276,7 +2276,84 @@ fn check_func(fi: int) {
             }
         }
     }
+    // 批 6（T3）：规约标注面——**在 pop_scope 之前**（形参仍在作用域内，`#check(a > 0)` 才能定型）
+    spec_check_func(fn_node, return_type);
     pop_scope();
+}
+
+// 批 6（T3）：**每函数标注检查** —— bool 型 + `#ensure` 的 `result` 域 + C1 子集（禁调用）。
+// 时点 = `check_func` 尾部（形参已入作用域）；`result` 用**嵌套作用域**绑定 ⇒ 不泄进函数体。
+// 三态纪律：`infer_expr` 给不出 bool（含未覆盖面）⇒ 一律 **V05 硬错**（**不得**「未知当通过」）。
+// 域检查的第二重来源 = `infer_expr` 对未定义名的既有诊断（N06/N01，build 面非豁免 ⇒ 阻断）。
+fn spec_check_func(fn_node: int, return_type: int) {
+    if g_spec_count == 0 { return; }
+    hit : ., mut = 0;
+    i : ., mut = 0;
+    loop {
+        if i >= g_spec_count { break; }
+        if spec_fnode(i) == fn_node { hit = 1; break; }
+        i = i + 1;
+    }
+    if hit == 0 { return; }
+    push_scope();
+    // `#ensure` 的 `result` 绑定（裁-S8）：与既有作用域名冲突 ⇒ **硬错**（不静默择一、不静默遮蔽）
+    // ⚠ **零足迹纪律**：`str_intern("result")` **只能在确需绑定时调用**——无条件调用会让
+    // STR 段凭空 +10B（T3 首轮被 Δ 判据当场抓住：d0 用例期望 Δ=0、实测 10；根因即此）。
+    ri : ., mut = -1;
+    j : ., mut = 0;
+    loop {
+        if j >= g_spec_count { break; }
+        if spec_fnode(j) == fn_node && spec_kind(j) == 1 { ri = j; break; }
+        j = j + 1;
+    }
+    if ri >= 0 {
+        res_ni := str_intern("result");
+        if find_sym(res_ni) >= 0 {
+            spec_set_status(ri, SPEC_ST_RED);
+            check_error(EC_V_RESULT_SHADOW,
+                "'result' is already bound in this scope (#ensure binding would shadow it)",
+                spec_line(ri), spec_col(ri));
+        } else {
+            def_sym(res_ni, SYM_LOCAL, ty_code_to_ti(return_type), -1);
+        }
+    }
+    // 逐条：① 禁调用（裁-V5 的 C1 子集；避开纯度时序坑——本批**未**解决该时序，只绕开）
+    //       ② 表达式必须恰为 bool
+    k : ., mut = 0;
+    loop {
+        if k >= g_spec_count { break; }
+        if spec_fnode(k) == fn_node {
+            if spec_has_call(spec_expr(k)) != 0 {
+                spec_set_status(k, SPEC_ST_RED);
+                check_error(EC_V_CALL_BANNED,
+                    "annotation expression must not contain calls (C1 subset)",
+                    spec_line(k), spec_col(k));
+            } else {
+                t := infer_expr(spec_expr(k));
+                if t != TI_BOOL {
+                    spec_set_status(k, SPEC_ST_RED);
+                    check_error(EC_V_NOT_BOOL, "annotation expression must be bool",
+                        spec_line(k), spec_col(k));
+                }
+            }
+        }
+        k = k + 1;
+    }
+    pop_scope();
+}
+
+// 标注表达式的**调用扫描**（C1 子集：禁调用）。只走 C1 允许的节点形（字面量/标识符/一元/二元），
+// 遇到调用即返回 1；未知节点形 = 不判定（返回 0，由 bool 型那一关兜住）。
+fn spec_has_call(e: int) -> int {
+    if e < 0 { return 0; }
+    k := ast_kind(e);
+    if k == EXPR_CALL { return 1; }
+    if k == EXPR_BINARY {
+        if spec_has_call(ast_a(e)) != 0 { return 1; }
+        return spec_has_call(ast_b(e));
+    }
+    if k == EXPR_UNARY { return spec_has_call(ast_a(e)); }
+    return 0;
 }
 
 fn check_impl_for() {
@@ -3943,6 +4020,87 @@ fn check_all() {
 
     // Check impl-for relationships
     check_impl_for();
+
+    // 批 6（T2/T3）：规约标注面检查（形态 + 常量折叠的唯一判定面）。见 spec_check_all 头注。
+    spec_check_all();
+}
+
+// ─── 批 6：规约标注面（`#check` / `#ensure`）────────────────────────────────────
+// 本批边界（裁-V5/V6 + 裁-S4/S5/S9）：
+//   · **判定面 = 只做常量折叠**（唯一「红」= `#check(常量假)`）；其余一律「未证」= **不报错**。
+//   · **未证绝不走诊断通道**——绿/黄只进 `--dump-vcs`（T4）；否则 fail-closed 闸门
+//     （main.cr:146-175，默认阻断）会把「没证明」变成 rc=1，违反裁-V6。
+//   · **表达式子集 = 无调用**（裁-V5）⇒ 纯度项**空转**；纯度时序陷阱**未被解决、只被绕开**
+//     （生成期 `fi_ispure` 是乐观默认值，见本文件 3968-3977 头注）——**不得**声称已处理。
+//   · 折叠器为**纯函数式**（不改 AST、不建 IR、不写任何图/表）⇒ 零足迹。
+
+// 折叠结果侧信道：`g_spec_fold_ok` = 0 表示「本次折叠不可用（含子表达式不可折叠）」。
+// 显式侧信道而非哨兵值（int 全域都是合法值 ⇒ 哨兵必然歧义）。
+g_spec_fold_ok : int, mut;
+
+// 常量折叠（int/bool 域；不可折叠 ⇒ g_spec_fold_ok = 0）。
+// 覆盖 = C1 子集里**字面量闭合**的形态：int/bool 字面量 · 一元 `-`/`!` · 二元 算术/比较/逻辑。
+// **不做代数化简**（如 `x*0`）——只折字面量，避免把「未证」误升为「已证」。
+fn spec_fold_val(e: int) -> int {
+    g_spec_fold_ok = 0;
+    if e < 0 { return 0; }
+    k := ast_kind(e);
+    if k == EXPR_INT { g_spec_fold_ok = 1; return ast_int_val(e); }
+    if k == EXPR_BOOL { g_spec_fold_ok = 1; return ast_int_val(e); }
+    if k == EXPR_UNARY {
+        op := ast_c(e);
+        v := spec_fold_val(ast_a(e));
+        if g_spec_fold_ok == 0 { return 0; }
+        if op == UOP_NEG { g_spec_fold_ok = 1; return 0 - v; }
+        if op == UOP_NOT { g_spec_fold_ok = 1; if v == 0 { return 1; } return 0; }
+        g_spec_fold_ok = 0; return 0;
+    }
+    if k == EXPR_BINARY {
+        op := ast_c(e);
+        l := spec_fold_val(ast_a(e));
+        if g_spec_fold_ok == 0 { return 0; }
+        r := spec_fold_val(ast_b(e));
+        if g_spec_fold_ok == 0 { return 0; }
+        if op == OP_ADD { g_spec_fold_ok = 1; return l + r; }
+        if op == OP_SUB { g_spec_fold_ok = 1; return l - r; }
+        if op == OP_MUL { g_spec_fold_ok = 1; return l * r; }
+        if op == OP_DIV { if r == 0 { g_spec_fold_ok = 0; return 0; } g_spec_fold_ok = 1; return l / r; }
+        if op == OP_MOD { if r == 0 { g_spec_fold_ok = 0; return 0; } g_spec_fold_ok = 1; return l % r; }
+        if op == OP_EQ { g_spec_fold_ok = 1; if l == r { return 1; } return 0; }
+        if op == OP_NE { g_spec_fold_ok = 1; if l != r { return 1; } return 0; }
+        if op == OP_LT { g_spec_fold_ok = 1; if l < r { return 1; } return 0; }
+        if op == OP_GT { g_spec_fold_ok = 1; if l > r { return 1; } return 0; }
+        if op == OP_LE { g_spec_fold_ok = 1; if l <= r { return 1; } return 0; }
+        if op == OP_GE { g_spec_fold_ok = 1; if l >= r { return 1; } return 0; }
+        if op == OP_AND { g_spec_fold_ok = 1; if l != 0 && r != 0 { return 1; } return 0; }
+        if op == OP_OR { g_spec_fold_ok = 1; if l != 0 || r != 0 { return 1; } return 0; }
+        g_spec_fold_ok = 0; return 0;
+    }
+    return 0;   // 变量 / 调用 / 字段 / 下标 / 字面量外一切 ⇒ 未证
+}
+
+// 规约标注面检查：逐条走侧表；**唯一硬错 = `#check(常量假)`**（`EC_V_CHECK_FALSE` = V01）。
+// `#ensure` 本批不做常量红判定（后置条件在编译期无输入 ⇒ 常量假同样可判，但**留 T3 收口**：
+// 本条**只判 `#check`**，避免在 T2 扩大红面）。
+fn spec_check_all() {
+    i : ., mut = 0;
+    loop {
+        if i >= g_spec_count { break; }
+        // T3：`#ensure` 的常量假同样可判定且必错 ⇒ 与 `#check` 同判（T2 只判了 #check）。
+        ex := spec_expr(i);
+        v := spec_fold_val(ex);
+        if g_spec_fold_ok != 0 {
+            if v == 0 {
+                spec_set_status(i, SPEC_ST_RED);
+                nm : ., mut = "#check(...)";
+                if spec_kind(i) == 1 { nm = "#ensure(...)"; }
+                check_error(EC_V_CHECK_FALSE, nm + " is statically false", spec_line(i), spec_col(i));
+            } else {
+                spec_set_status(i, SPEC_ST_GREEN);
+            }
+        }
+        i = i + 1;
+    }
 }
 
 // ─── 效应/纯度修正 Task 1（P0 插队批）：真纯度计算 ─────────────────────────

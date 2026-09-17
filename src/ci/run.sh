@@ -103,7 +103,9 @@ case "$CI_JOB_NAME" in
     # `decisions=0`）。判定面回归网 = ① **冻结基线同源对拍**：冻结基线（**由
     # `tools/baseline/rebuild.sh` 从 pinned revision 重建**——配方 + 三 sha 白名单见
     # `tools/baseline/REBUILD.md`；R2 P6 Task 1 起可复现，二进制仍不入库）× 当前源 vs
-    # 当前二进制 × 当前源，73 档语料（runner `tools/baseline/parity_run.sh`，逐档 clean-cache；2026-09-16 全局 seam 批 +1 = `tests/suite/global_seam_test.cr`）
+    # 当前二进制 × 当前源，**75 档**语料（runner `tools/baseline/parity_run.sh`，逐档 clean-cache；
+    # 档数 = 实读枚举 35+2+15+19+4（suite/compiler/后端内核/stdlib/examples）= 与 runner 的 `CORPUS_TOTAL=75` 硬断言一致；
+    # 2026-09-17 批 6 T6 实测重数）
     # `check` rc + 日志逐档 diff（手工判据，本 job 内不跑——CI 为浅检出且无 jj）；② **行为探针**：
     # 下列套件（test_named_face / test_named_dedup / test_type_engine / test_optional /
     # test_match_exhaust …）+ **入仓探针语料 `tests/probes/`（29 档；runner
@@ -209,6 +211,14 @@ case "$CI_JOB_NAME" in
     # 配套 suite 语料 `tests/suite/opt_dex_test.cr`（常规腿；返回码 1..14 = 首个失败面编号）。
     # 计划 = docs/superpowers/plans/2026-09-17-opt-dex.md · 报告 = 收官批报告。
     python3 tests/selfhost/test_opt_dex.py
+    # ─── 批 6（验证内核正式接入 = 正式规约语法 `#check`/`#ensure`；2026-09-17）───
+    # 四组 48 项：A 语法面（16）· B 检查面（11）· C `--dump-vcs` 通道（15）· D `.ccr` 零足迹三段式（6，含 Δ 公式）。
+    # **Δ 公式 = 本批最有价值的判据**（T3 首轮当场抓到实现自身的 `str_intern("result")` 泄漏：两用例 STR Δ 凭空 +10B），
+    # 必须留仓。语料 = `tests/spec/`（33 档，独立目录，**不进**腿①/腿②语料——两腿计数不变 = 旧面零扰动的证据）。
+    # 时长实测（2026-09-17 本机）：**1.8s（空载）～ 34.5s（机器 swap 抖动时）**——两者相差近 20×，
+    # 根因 = 系统级 I/O 饱和（非本套件），故**以区间记**；即便取上界也不影响 CI 关键路径。
+    # （同批实测：`loadavg ≈ 11–16`（4 核）· swap 已用 ≈ 5.8GB 时取上界值。）
+    python3 tests/selfhost/test_spec_grammar.py
     ;;
 
   suite)

@@ -931,6 +931,51 @@ fn grow_so_side(needed: int) {
     n3 := alloc(sz); _dyncpy(g_so_side_type, g_so_side_cap*8, n3); g_so_side_type = n3;
     g_so_side_cap = nc; }
 
+// ─── 批 6 T2：规约标注侧表（动态增长；照本仓「no MAX_* limits」约定）────────────────
+fn grow_spec_side(needed: int) {
+    if needed < g_spec_cap { return; }
+    nc : ., mut = g_spec_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
+    sz := nc * 8;
+    n1 := alloc(sz); _dyncpy(g_spec_fn, g_spec_cap*8, n1); g_spec_fn = n1;
+    n6 := alloc(sz); _dyncpy(g_spec_fnode, g_spec_cap*8, n6); g_spec_fnode = n6;
+    n7 := alloc(sz); _dyncpy(g_spec_status, g_spec_cap*8, n7); g_spec_status = n7;
+    n2 := alloc(sz); _dyncpy(g_spec_kind, g_spec_cap*8, n2); g_spec_kind = n2;
+    n3 := alloc(sz); _dyncpy(g_spec_expr, g_spec_cap*8, n3); g_spec_expr = n3;
+    n4 := alloc(sz); _dyncpy(g_spec_line, g_spec_cap*8, n4); g_spec_line = n4;
+    n5 := alloc(sz); _dyncpy(g_spec_col, g_spec_cap*8, n5); g_spec_col = n5;
+    g_spec_cap = nc; }
+
+// 追加一条标注记录（**唯一写点**；源序 ⇒ 索引即源序）。
+fn spec_add(fn_ni: int, kind: int, expr: int, line: int, col: int) {
+    grow_spec_side(g_spec_count + 1);
+    i := g_spec_count;
+    w64(g_spec_fn, i * 8, fn_ni);
+    w64(g_spec_fnode, i * 8, -1);   // 由 parser 在 EXPR_FN 分配后回填（spec_set_fnode）
+    w64(g_spec_status, i * 8, SPEC_ST_YELLOW);
+    w64(g_spec_kind, i * 8, kind);
+    w64(g_spec_expr, i * 8, expr);
+    w64(g_spec_line, i * 8, line);
+    w64(g_spec_col, i * 8, col);
+    g_spec_count = i + 1;
+}
+
+// 读访问器（**受护**：越界回哨兵，绝不读邻记录——照 fi_param_type 的护栏体例）。
+fn spec_fn(i: int) -> int { if i < 0 || i >= g_spec_count { return -1; } return r64(g_spec_fn, i * 8); }
+fn spec_fnode(i: int) -> int { if i < 0 || i >= g_spec_count { return -1; } return r64(g_spec_fnode, i * 8); }
+fn spec_status(i: int) -> int { if i < 0 || i >= g_spec_count { return -1; } return r64(g_spec_status, i * 8); }
+// 三态写入：**red 粘性**（已判红不被后续 green 覆盖——否则「有硬错」会被「常量真」抹掉）。
+fn spec_set_status(i: int, st: int) {
+    if i < 0 || i >= g_spec_count { return; }
+    cur := r64(g_spec_status, i * 8);
+    if cur == SPEC_ST_RED { return; }
+    w64(g_spec_status, i * 8, st);
+}
+fn spec_set_fnode(i: int, v: int) { if i < 0 || i >= g_spec_count { return; } w64(g_spec_fnode, i * 8, v); }
+fn spec_kind(i: int) -> int { if i < 0 || i >= g_spec_count { return -1; } return r64(g_spec_kind, i * 8); }
+fn spec_expr(i: int) -> int { if i < 0 || i >= g_spec_count { return -1; } return r64(g_spec_expr, i * 8); }
+fn spec_line(i: int) -> int { if i < 0 || i >= g_spec_count { return -1; } return r64(g_spec_line, i * 8); }
+fn spec_col(i: int) -> int { if i < 0 || i >= g_spec_count { return -1; } return r64(g_spec_col, i * 8); }
+
 fn grow_ext_rel(needed: int) {
     if needed < g_x86_ext_rel_cap { return; }
     nc : ., mut = g_x86_ext_rel_cap * 2; if nc < 32 { nc = 32; } if nc < needed { nc = needed + 32; }

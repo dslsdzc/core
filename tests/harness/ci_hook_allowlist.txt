@@ -7,12 +7,14 @@
 # 增减纪律：**删条目 = 该守卫已挂**（判据会要求同步删）；**加条目 = 显式登记一个新缺口**
 # （须写理由，最好在 TODO #2026-09-11-13 同批登记）。
 #
-# 审计基线（2026-09-16 **判据网加固批**当场重算；本行 = criteria-harden 分支树）：
-#   scope 66（selfhost 56 · bootstrap 7 · harness 4——harness +1 = 本批新增
-#   `test_criteria_mutations.py`）· 挂点 45（本批 +7：见下「本批已挂」）
-#   ⇒ 差集 = 18 selfhost + 4 bootstrap = 22 条（下方逐条）。**注**：同一天的 seam 分支树另有
-#   一个 `test_global_seams.py` ⇒ 计数**随分支/在场提交漂移**，一律以当场重算
-#   为准（本判据非空转下限 = scope ≥50 / hooked ≥30，留余量不追平）。
+# 审计基线（**2026-09-17 批 6 T6 当场重算** = 最新；旧行留痕在下方「历史基线」）：
+#   `python3 tests/harness/test_ci_hook_coverage.py` ⇒ **PASS**，实测
+#   `scope=73 · hooked=52 · unhooked(allowlisted)=21`（批 6 +1 挂点 = `test_spec_grammar.py` → `selfhost-tests`，
+#   按纪律「删条目 = 该守卫已挂」不入白名单）。**注**：计数**随分支/在场提交漂移**，
+#   一律以当场重算为准（本判据非空转下限 = scope ≥50 / hooked ≥30，留余量不追平）。
+#
+# 历史基线（2026-09-16 判据网加固批）：scope 66（selfhost 56 · bootstrap 7 · harness 4）· 挂点 45
+#   ⇒ 差集 = 18 selfhost + 4 bootstrap = 22 条。
 # 计数自 2026-09-11 的 #2026-09-11-13 登记（15/39 + 3/7）持续漂移，本条机制即为此而设。
 #
 # **本批已挂（2026-09-16 criteria-harden；条目自下方删除，按纪律「删条目 = 该守卫已挂」）**：

@@ -92,6 +92,10 @@ class TokenType(Enum):
     AT = auto()
     QUESTION = auto()
     UNDERSCORE = auto()
+    # 批 6（裁-S7，bounded）：规约标注 sigil `#`（`#check(...)` / `#ensure(...)`）。
+    # bootstrap 侧只做「**接受并跳过**」（零语义）：能词法化、不报错、**不影响产物**；
+    # **不**实现 VC/三态（完整 bootstrap 规约面登记后续）。对应 self-hosted 的 `T_HASH = 101`。
+    HASH = auto()
 
     EOF = auto()
 

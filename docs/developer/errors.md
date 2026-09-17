@@ -271,6 +271,23 @@
 | ICE03 | IR 生成缺实现 | `Unsupported expression: {kind}` |
 | ICE04 | 类型判定不可判（引擎 `-1`：未覆盖面/预算耗尽；或桥接缺口 = 该行译不成类型项）——R2 P5 Task 4 的 P-A 政策：**未知不当 0/1**（legacy 回落面已删），硬错拒绝落盘；反例（两侧类型项文本）随消息，判定点无 AST 位置 ⇒ `--> 0:0` | `type judgment indeterminate: {term_a} vs {term_b} ({cause})` / `type judgment indeterminate: no type term for type row {t1} / {t2} (bridge gap)` |
 
+## V0xx — 规约语法 / 验证面（批 6「正式规约语法」开族；2026-09-17）
+
+> **语义边界（裁-V6 / 裁-S5）**：本族**只收「可判定且必错」**的规约错误。
+> **未证（yellow）不是错误**——它只进 `corec … --dump-vcs` 通道（T4），**绝不走诊断**：
+> fail-closed 闸门（`main.cr:146-175`）默认阻断 ⇒ 若把「没证明」报成诊断，会把
+> 「未证不阻断编译」直接变成 rc=1（违反裁-V6）。
+> 码值真源 = `src/compiler/ast.cr` 的 `EC_V_*`（17xxx；`error_cat_prefix` 的 `cat == 17 ⇒ "V"`）。
+
+| 码 | 检查点 | 消息模板 |
+|----|--------|---------|
+| V01 | `#check(常量假)`——**本批唯一「红」**：常量折叠判为假（可判定且必错） | `#check(...) is statically false` |
+| V02 | 未知 `#` 标签 / `#` 后非 IDENT（本批只认 `#check` / `#ensure`；`check`/`ensure` 是**普通 IDENT**，非关键字——见 `grammar/core.ebnf` 的 `Annotation` 注） | `Expected annotation name after '#'` / `Unknown annotation '#{name}' (expected '#check' or '#ensure')` |
+| V03 | 标注形态错：缺 `(` / 未闭合 `)` | `Expected '(' after '#{name}'` / `Expected ')' to close '#{name}' annotation` |
+| V04 | `#ensure` 的 `result` 绑定与既有作用域名冲突（裁-S8：**硬错**，不静默择一/不静默遮蔽） | `'result' is already bound in this scope (#ensure binding would shadow it)` |
+| V05 | 标注表达式类型**非 bool**（本批子集：须**恰为** `TI_BOOL`；三态纪律——`infer_expr` 给不出 bool 一律硬错，**不得**「未知当通过」） | `annotation expression must be bool` |
+| V06 | 标注表达式**含调用**（裁-V5：C1 子集**先禁调用**——避开纯度时序坑；本批**未解决**该时序，只绕开） | `annotation expression must not contain calls (C1 subset)` |
+
 ---
 
 ## 统计

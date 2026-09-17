@@ -97,6 +97,13 @@ T_AUTO_TYPE : int = 95;
 T_REF : int = 96;
 T_DYN : int = 99;  // dynamic type
 T_EXTERN : int = 100;  // extern "C" / foreign function declaration
+// 101：批 6「正式规约语法」（T1 词法面）——`#` 标注 sigil 的 token。
+// **取号 = T_ 空间空洞外的下一个自由号**（已用 0..100；空洞 6 / 77-86 / 91 **不占**——
+// 占空洞会与「勿重编号」的既存约定混淆）。**既有 0..100 一个不动**（T1 判据①）。
+// 语义约束：`#` 后必须跟 IDENT（`check`/`ensure` **不做关键字**——本仓已有 `fn check`
+// （parser.cr:30）与 CLI 子命令 `"check"`（main.cr:235），做关键字会当场打断自源）。
+T_HASH : int = 101;
+
 
 // W_I8..W_F64（1..10）原为「宽度标注」值域，仅供宽度后缀 token 分支使用。
 // 2026-09-10 语言面收窄 §2 随死分支一并删除。**勿重编号**。
@@ -485,6 +492,22 @@ EC_ICE_UNSUPPORTED : int = 16003; // ICE03  Unsupported
 // 类型项）。三态纪律：**未知不得当 0/1** ⇒ 硬错（legacy 回落面已删，D24）。反例（两侧类型项
 // 文本）随诊断输出；判定点无 AST 位置 ⇒ line/col = 0。
 EC_ICE_TY_INDET   : int = 16004; // ICE04  Type judgment indeterminate
+
+// V0xx — **规约语法/验证面**（批 6「正式规约语法」开族；17xxx 为空闲段，`error_cat_prefix`
+// 的 `cat == 17 ⇒ "V"` 同步）。本批只落「形态错」与「常量假」两类可判定错误：
+// **未证（yellow）不是错误**——它只进 `--dump-vcs` 通道，绝不走诊断（否则 fail-closed
+// 闸门会把「没证明」变成 rc=1，违反裁-V6）。
+EC_V_CHECK_FALSE  : int = 17001; // V01  `#check(常量假)`——可判定且必错（本批唯一「红」）
+EC_V_BAD_TAG      : int = 17002; // V02  未知 `#` 标签 / `#` 后非 IDENT
+EC_V_ANN_SYNTAX   : int = 17003; // V03  标注形态错（缺 `(` / 未闭合 `)`）
+EC_V_RESULT_SHADOW : int = 17004; // V04  `#ensure` 的 `result` 绑定与形参/作用域名冲突（裁-S8：硬错，不静默择一）
+EC_V_NOT_BOOL     : int = 17005; // V05  标注表达式类型非 bool（本批子集：须恰为 TI_BOOL）
+EC_V_CALL_BANNED  : int = 17006; // V06  标注表达式含调用（裁-V5：C1 子集**先禁调用**，避开纯度时序坑）
+
+// 规约标注**三态**（裁-S5：绿/黄只在 `--dump-vcs` 通道；红走诊断通道）
+SPEC_ST_YELLOW : int = 0;   // 未证（默认；不阻断编译）
+SPEC_ST_GREEN  : int = 1;   // 常量折叠为真（可判定）
+SPEC_ST_RED    : int = 2;   // 有硬错（V01/V04/V05/V06 任一命中；**粘性**）
 
 // Diagnostic entry
 struct Diag {

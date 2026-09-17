@@ -1439,6 +1439,12 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
         rtv = unpack_type(rt);
     }
 
+    // 批 6（T2，裁-S2）：规约标注链——**签名之后、body 之前**（spec-design §四）。
+    // T3：记录起点，`alloc_node(EXPR_FN, …)` 之后把本函数的标注行回填为 **fn_node 索引**
+    //（唯一键——按函数名会串台：同名方法/多 impl）。
+    spec_start := g_spec_count;
+    parse_spec_annotations(fn_ni);
+
     body : ., mut = -1;
     if check(T_LBRACE) {
         body = parse_block();
@@ -1447,8 +1453,10 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
         body = parse_expr();
         advance_tok(); // ;
     }
-
     fn_node := alloc_node(EXPR_FN, fn_ni, pf, pc, rtv + hotpatch_ver * 256, rt, body, fn_line, fn_col);
+    // T3：标注行回填 fn_node（本函数新增的行 = [spec_start, g_spec_count)）
+    spec_patch : ., mut = spec_start;
+    loop { if spec_patch >= g_spec_count { break; } spec_set_fnode(spec_patch, fn_node); spec_patch = spec_patch + 1; }
     // 形参上限硬错（防御面，TODO #2026-09-10-4）：FuncInfo.param_types 是定长内嵌槽区
     // （MAX_FN_PARAMS 槽），超限签名无法表示 ⇒ 拒绝编译（rc=1）而非截断/越界写。
     // 形参表容纳不下时**必须**在这条路径上停住：静默越界写曾踩 ast_node 致
@@ -1468,6 +1476,56 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
                 fi_set_param_type(fi, pstore_i, ast_type_val(pstore_n));
                 pstore_i = pstore_i + 1; }
             pstore_n = pstore_n + 1; } }
+}
+
+// 批 6（T2，裁-S1/S2）：规约标注链 `#check(expr)` / `#ensure(expr)` —— **签名与 body 之间**。
+// 位置真源 = docs/maintainer/design/spec-design.md §四（`fn f(...) -> T` 之后、body 之前）。
+//
+// **`check`/`ensure` 不是关键字**（裁-S1，判据性证据）：本仓已有 `fn check`（parser.cr:30）
+// 与 CLI 子命令 `"check"`（main.cr:235）⇒ 若做成关键字，自源当场语法错。故只按**词素**比对，
+// `#` 后一律走 `T_IDENT`。
+//
+// 表达式复用 `parse_expr` ⇒ 节点落 `g_ast`，但**不被 body 引用**（不进 EXPR_FN 的 a/b/c 槽，
+// 也不进 `g_block_stmts`）⇒ ir_gen 走不到它 ⇒ **发射面零足迹**（裁-S4：本批不编图）。
+// 记录落**侧表**（`spec_add`）供 checker（T3）/dump（T4）消费。
+//
+// 形态错一律**响亮**（EC_V_*：17xxx 家族，fail-closed 默认阻断 ⇒ rc=1 + 零产物；
+// 照「未知字符不得静默」的既有口径）。错误后**不消费残余**、直接返回 ⇒ 由外层继续解析并
+// 给出第二重信号（不静默、不猜）。
+fn parse_spec_annotations(fn_ni: int) {
+    loop {
+        if !check(T_HASH) { break; }
+        at_line := tok_ln(cur_tok());
+        at_col := tok_cl(cur_tok());
+        advance_tok();  // '#'
+        if tok_k(cur_tok()) != T_IDENT {
+            check_error(EC_V_BAD_TAG, "Expected annotation name after '#'", at_line, at_col);
+            return;
+        }
+        an_name := tok_lx(cur_tok());
+        kind : ., mut = -1;
+        if str_eq(an_name, "check") != 0 { kind = 0; }
+        else if str_eq(an_name, "ensure") != 0 { kind = 1; }
+        if kind < 0 {
+            check_error(EC_V_BAD_TAG,
+                "Unknown annotation '#" + an_name + "' (expected '#check' or '#ensure')", at_line, at_col);
+            return;
+        }
+        advance_tok();  // 标注名
+        if !check(T_LPAREN) {
+            check_error(EC_V_ANN_SYNTAX, "Expected '(' after '#" + an_name + "'", at_line, at_col);
+            return;
+        }
+        advance_tok();  // '('
+        expr := parse_expr();
+        if !check(T_RPAREN) {
+            check_error(EC_V_ANN_SYNTAX,
+                "Expected ')' to close '#" + an_name + "' annotation", at_line, at_col);
+            return;
+        }
+        advance_tok();  // ')'
+        spec_add(fn_ni, kind, expr, at_line, at_col);
+    }
 }
 
 fn parse_ffi_annotation() -> int {
@@ -1956,6 +2014,18 @@ fn parse_declaration() {
         return;
     }
 
+    // 批 6（T2）：`#` 出现在**非标注位置**（声明之前 / body 之后 / 顶层任意处）⇒ **响亮拒绝**。
+    // 本仓的顶层兜底 = 下方 `advance_tok()`（**静默丢弃一个 token、不报错**）——`#` 走它
+    // 就会被逐 token 吞净（T2 首轮实测：`#check(1>0) fn f()…` 与 `… } #check(1>0)` 均 rc=0 +
+    // 产物照出）。这与 T0 §10.2 的静默误编译**同源**（`#` 被静默丢弃），必须此点转响亮。
+    // 合法位置**唯一** = 签名与 body 之间（parse_spec_annotations，spec-design §四）。
+    if check(T_HASH) {
+        check_error(EC_V_BAD_TAG,
+            "'#' annotation is only allowed between the function signature and its body",
+            tok_ln(cur_tok()), tok_cl(cur_tok()));
+        advance_tok();   // 吞掉 `#` 本身，避免 parse_all 空转；残余由后续解析按既有规则处理
+        return;
+    }
     advance_tok();
 }
 
