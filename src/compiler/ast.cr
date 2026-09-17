@@ -493,6 +493,14 @@ EC_ICE_UNSUPPORTED : int = 16003; // ICE03  Unsupported
 // 文本）随诊断输出；判定点无 AST 位置 ⇒ line/col = 0。
 EC_ICE_TY_INDET   : int = 16004; // ICE04  Type judgment indeterminate
 
+// V0xx — **规约语法/验证面**（批 6「正式规约语法」开族；17xxx 为空闲段，`error_cat_prefix`
+// 的 `cat == 17 ⇒ "V"` 同步）。本批只落「形态错」与「常量假」两类可判定错误：
+// **未证（yellow）不是错误**——它只进 `--dump-vcs` 通道，绝不走诊断（否则 fail-closed
+// 闸门会把「没证明」变成 rc=1，违反裁-V6）。
+EC_V_CHECK_FALSE  : int = 17001; // V01  `#check(常量假)`——可判定且必错（本批唯一「红」）
+EC_V_BAD_TAG      : int = 17002; // V02  未知 `#` 标签 / `#` 后非 IDENT
+EC_V_ANN_SYNTAX   : int = 17003; // V03  标注形态错（缺 `(` / 未闭合 `)`）
+
 // Diagnostic entry
 struct Diag {
     code: int,

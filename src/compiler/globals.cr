@@ -262,6 +262,16 @@ g_x86_ext_rel_count : int, mut;         g_x86_ext_rel_cap : int, mut;
 g_so_side_name : string, mut;           g_so_side_tags : string, mut;
 g_so_side_type : string, mut;
 g_so_side_count : int, mut;             g_so_side_cap : int, mut;
+// 批 6（T2）**规约标注侧表**：`#check(expr)` / `#ensure(expr)` 的登记面（源序追加；8B/条）。
+// 设计要点（裁-S2/S3）：① 标注**不挤 `EXPR_FN` 的 a/b/c 槽**（parser.cr:1451 槽语义不变）；
+// ② 表达式 AST 节点落 `g_ast` 但**不被 body 引用** ⇒ ir_gen 走不到它 ⇒ 发射面零足迹；
+// ③ 侧表随前端复位（与 `g_func_count` 同生命周期——fi/ni 下标跨编译复用，不清会命中陈旧条目）。
+g_spec_fn : string, mut;                // 函数名 str idx（= parse_body 的 fn_ni）
+g_spec_kind : string, mut;              // 0=#check  1=#ensure（留宽：C2 的 #pure/#tag 等）
+g_spec_expr : string, mut;              // 标注表达式的 AST 节点索引
+g_spec_line : string, mut;              // 标注 `#` 所在行
+g_spec_col : string, mut;               // 标注 `#` 所在列
+g_spec_count : int, mut;                g_spec_cap : int, mut;
 g_x86_rip_patch_pos : string, mut;      g_x86_rip_patch_globals : string, mut;
 g_x86_rip_patch_count : int, mut;       g_x86_rip_patch_cap : int, mut;
 g_x86_vars : string, mut;               g_x86_var_count : int, mut;     g_x86_var_cap : int, mut;
@@ -522,6 +532,9 @@ fn reset_frontend_state() {
     // R2 P3b Task 0：形状条目表与声明表同生命周期（注册名 = 驻留 ni，跨编译复用会命中陈旧条目
     // ⇒ 静默错判；照 g_sgen_constr_count 同址同因）。`g_strs` 驻留表本身不重置（名字 ni 稳定）。
     g_iface_shape_count = 0;
+    // 批 6 T2：规约标注侧表与声明表同生命周期（函数名 ni/ast 下标跨编译复用 ⇒ 不清会命中
+    // 陈旧标注；照 g_iface_shape_count 同址同因；`g_strs` 驻留表不重置——名字 ni 稳定）。
+    g_spec_count = 0;
     g_global_let_count = 0;
     g_loop_depth = 0; g_scope_depth = 0;
     g_borrow_count = 0; g_holder_count = 0;

@@ -100,6 +100,7 @@ fn error_cat_prefix(cat: int) -> string {
     if cat == 14 { return "R"; }
     if cat == 15 { return "E"; }
     if cat == 16 { return "ICE"; }
+    if cat == 17 { return "V"; }   // 批 6：规约语法/验证面（EC_V_*，17xxx）
     return "E";
 }
 
