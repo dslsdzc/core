@@ -86,7 +86,9 @@ def build_and_run(source, tag):
 
 
 # ── 探针表：name, source, 期望 ELF rc, 备注 ──
-# 期望值 7（或 1）= 该形态「正确」；期望 15 = **#2026-09-16-29 零足迹哨兵**（见该条注释）。
+# 期望值 7（或 1）= 该形态「正确」。**期望 15 已退役**（2026-09-17 批 5 重锁：`dex?` 整族修复后
+# 无「期望 15」行；旧值留痕见 CASES 中 `relocked_optional_dex_pinch` 上注；退役断言见
+# `test_sentinel_annotation_present`）。
 CASES = [
     # ── #2026-09-16-17：非直调调用形态 ──
     ("method_arg_apx", """
@@ -230,23 +232,25 @@ enum E1 { V(dex) }
 fn main() -> int { d : dex = 7.0; e := V(d); return match e { V(x) => { return @raw_int(x) / 1000000; } }; }
 """, 7, "精确形对照（枚举载荷）"),
     # ══════════════════════════════════════════════════════════════════════════
-    # ⚠⚠ **零足迹哨兵（TODO #2026-09-16-29）—— 下面这一行的期望值 15 不是期望语义！**
-    #   · 该值 15 = 「`dex?`（可选 dex）整族未被形式转换覆盖」的**现状绊线**，
-    #     根因 = `dex_store_adjust` 触发门是 `declared_ti == TI_DEX`，而 `dex?` 的
-    #     `declared_ti` 是 `TYP_OPTIONAL` 类型索引（`ir_gen.cr:2389-2393`/`:2423-2424`）
-    #     ⇒ LET/赋值写点整段跳过转换 ⇒ bits 原样入载荷槽。
-    #   · **作用**：若本批的漏斗实现**意外**改动了 `dex?` 行为，本行当场变红（防「顺手改坏」）。
-    #   · **谁修 `dex?`（TODO #2026-09-16-29）谁负责改它**：修复落地时它**必然变值**，须按 canary 那套
-    #     「**显式归因 + 同批重锁 + 旧值留痕**」纪律处理。
-    #   · ⛔ **不得把 15 当成「正确基线」抄走**（本仓已两次栽在「抄错形/抄错值」上）。
+    # ✅ **已重锁（2026-09-17 批 5 / opt-dex；TODO #2026-09-16-29 = 原 #91）—— 旧值 15 留痕**
+    #   · **旧值（留痕，不得复活）**：本行原期望 **15**（= `4619567317775286272 / 10⁶` 低 8 位），
+    #     作为「`dex?` 整族未被形式转换覆盖」的**零足迹绊线**存在于 apx 批（#2026-09-16-29 段）。
+    #   · **归因（显式）**：批 5 把 `dex?` 的写点门/槽型/形参槽/返回门/读点定型一律改为
+    #     **按声明面定形式**（G1 裁决 = scaled；`ir_gen.cr` 的 `dex_opt_type_node`/`dex_opt_slot_ti`）
+    #     ⇒ LET 写点不再把 bits 原样入槽 ⇒ 本行**必然变值**（15 → 7）。
+    #   · **重锁（同批）**：期望值改为 **7**（= 7000000 / 10⁶）；改名 `relocked_optional_dex_pinch`
+    #     （原 `SENTINEL_optional_dex_pinch`——「哨兵」语义已随修复退役，名字留痕在注释里）。
+    #   · ⛔ **不得把 15 抄回来**（本仓已两次栽在「抄错形/抄错值」上）；判据网侧另设
+    #     `test_sentinel_annotation_present` 的**退役断言**（无「期望 15」行）双保险。
+    #   · 覆盖面（本批新增的完整判据网）见 `tests/selfhost/test_opt_dex.py`（30 例 + 四态对拍）。
     # ══════════════════════════════════════════════════════════════════════════
-    ("SENTINEL_optional_dex_pinch", """
+    ("relocked_optional_dex_pinch", """
 fn main() -> int {
     d : dex, apx = 7.0;
     x : dex? = d;
     return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
 }
-""", 15, "SENTINEL"),
+""", 7, "重锁（批 5 · 原哨兵值 15 已退役；留痕见上注）"),
 ]
 
 
@@ -272,14 +276,18 @@ def test_cases():
 
 
 def test_sentinel_annotation_present():
-    """哨兵行的刺眼标注必须在（防后人把它当正确基线抄走）。"""
+    """哨兵判据（**两态口径**，2026-09-17 批 5 重锁后更新）：
+      · 若存在「期望 15」的行 ⇒ 必须带 SENTINEL 标记（旧规则保留：将来某面若再需绊线仍适用）；
+      · **本档现状**（`dex?` 已修）⇒ 断言「**无任何期望 15 的行**」= 绊线已退役。
+        若有人把 15 抄回来（或把修复回退）⇒ 本断言红 + 用例读数红（双保险）。"""
     for name, _s, want, note in CASES:
         if want == 15:
             assert note == "SENTINEL", f"{name} 期望 15 但未标 SENTINEL"
             print("[PASS] sentinel 标注在位（期望 15 的行必须带 SENTINEL 标记）")
-            return
-    print("[FAIL] 未找到哨兵行")
-    sys.exit(1)
+            return 0
+    assert all(w != 15 for _n, _s, w, _nt in CASES), "仍有「期望 15」行"
+    print("[PASS] 零足迹哨兵**已退役**（批 5：`dex?` 修复后无「期望 15」行；旧值 15 留痕于 CASES 上注）")
+    return 0
 
 
 def test_decl_form_selfcheck():
@@ -342,7 +350,8 @@ fn main() -> int { d : D = DVAL; t := (d, 1.0); return @raw_int(t . 0) / 1000000
 def main():
     fails = []
     fails += test_cases()
-    test_sentinel_annotation_present()
+    if test_sentinel_annotation_present() != 0:
+        fails.append("sentinel_annotation")
     rc = test_decl_form_selfcheck()
     if rc != 0:
         fails.append("decl_form_selfcheck")
