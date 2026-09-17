@@ -296,18 +296,27 @@ def test_decl_form_selfcheck():
     explicit = ("// x\nfn main() -> int { d : dex, apx = 7.0; return @raw_int(d) / 1000000; }\n")
     inferred = ("// x\nfn main() -> int { d : ., apx = 7.0; return @raw_int(d) / 1000000; }\n")
     r1 = run_corec(["cir"], explicit)
-    r2 = run_corec(["cir"], inferred)
     import re
     def max_const(txt):
         vals = [int(m) for m in re.findall(r"const\s+dex\s*=\s*(\d+)", txt)]
         return max(vals) if vals else -1
-    v1, v2 = max_const(r1.stdout + r1.stderr), max_const(r2.stdout + r2.stderr)
+    v1 = max_const(r1.stdout + r1.stderr)
     if v1 < 10**10:
         print(f"[FAIL] 显式形未建立 apx 槽（.cir 无 bits 常量；最大 dex 常量 = {v1}）")
         return 1
-    if v2 >= 10**10:
-        print(f"[FAIL] 推断形竟含 bits 常量（{v2}）—— 校正 C 前提变了，须重审")
+    # ── 推断形（`.` + apx）：**批 8 条目 5（裁定 (B)）后转硬错**（`error[P26]` + 零产物）──
+    # **旧值留痕（本套件原判据）**：`check` rc=0 且 `.cir` **无** bits 常量（推断形不建立 apx 槽 ⇒ 探针退化）。
+    # 该「无 bits 常量」的判据在硬错下**不再可达**（源根本不编译）⇒ 按「显式归因 + 同批重锁 + 旧值留痕」重锁为**拒收断言**。
+    chk_inf = run_corec(["check"], inferred)
+    bld_inf = run_corec(["build", "--static", "-o", "/tmp/_apx_conv_inf.bin"], inferred)
+    art_inf = os.path.exists("/tmp/_apx_conv_inf.bin") or os.path.exists("/tmp/_apx_conv_inf.bin.ccr")
+    if art_inf:
+        os.unlink("/tmp/_apx_conv_inf.bin") if os.path.exists("/tmp/_apx_conv_inf.bin") else None
+    if chk_inf.returncode != 1 or "error[P26]" not in chk_inf.stdout or bld_inf.returncode != 1 or art_inf:
+        print(f"[FAIL] 推断形 `. + apx` 未按条目 5 拒收：check={chk_inf.returncode} "
+              f"P26={'error[P26]' in chk_inf.stdout} build={bld_inf.returncode} 产物={art_inf}")
         return 1
+    v2 = -1
     # 反向自证：显式形在解释器下必被拒收（IR_F2I 无 binary64 语义）
     it = subprocess.run([str(COREC), "run",
                          "fn main() -> int { d : dex, apx = 7.0; return @raw_int(d) / 1000000; }"],
