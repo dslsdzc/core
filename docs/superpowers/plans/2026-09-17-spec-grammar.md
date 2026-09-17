@@ -211,7 +211,7 @@
 
 ### **T0 — 前置（冻结基线 + 起点判据 + 六门落纸）**
 - **前置**：无（本卡即前置）。
-- **动作**：① `jj workspace add` 独立工作区（本批 = `core-veri-ws` @ `feature/spec-grammar`，**已建**）；② **冻结基线重建**（`bash tools/baseline/rebuild.sh /tmp/spec-baseline`，配方 = `REBUILD.md`；**须重跑自证**：三 sha = 白名单 + 确定性 ×2 + 冒烟 42）；③ **起点判据表**（腿①74 冷态 rc+日志落 `/tmp/spec-t0/parity_pre`；腿②29 + warm 7；`canary_check.sh` 全绿）；④ **六门落纸**（§3.1）+ **十二门取裁落纸**（§3.2.1，**已完成**）；⑤ **锚点重取**（§1 全部 `file:line` 在开工 revision 上重核一遍——**行号漂移即更新本节**）；⑥ **RED 复现（**预测，须实测——不得当已有证据用**）**：`fn f() -> int #check(1<0) { return 1; }` 今天的行为（**预测**：`#` 被静默丢弃 ⇒ cur token = `check` IDENT ⇒ `parse_body:1445-1448` 走 `=` 分支把 `check(1<0)` 误当 body 表达式 + `advance_tok()` 吃掉 `{` ⇒ 后续顶层 token 报 P0xx 错）。**这是「今天没有规约语法」的红态证据**，须实测记录（rc + 日志原文），实测后**替换**本段预测文本。
+- **动作**：① `jj workspace add` 独立工作区（本批 = `core-veri-ws` @ `feature/spec-grammar`，**已建**）；② **冻结基线重建**（`bash tools/baseline/rebuild.sh /tmp/spec-baseline`，配方 = `REBUILD.md`；**须重跑自证**：三 sha = 白名单 + 确定性 ×2 + 冒烟 42）；③ **起点判据表**（腿①74 冷态 rc+日志落 `/tmp/spec-t0/parity_pre`；腿②29 + warm 7；`canary_check.sh` 全绿）；④ **六门落纸**（§3.1）+ **十二门取裁落纸**（§3.2.1，**已完成**）；⑤ **锚点重取**（§1 全部 `file:line` 在开工 revision 上重核一遍——**行号漂移即更新本节**）；⑥ **RED 复现**：**已实测（2026-09-17），结论见 §10.2——实测结果与本节原「预测」**不符且更严重**（预测 = 报 P0xx 语法错；实测 = **无解析错**，标注表达式被误当函数体 ⇒ `error[TF01]`（**build 面豁免码**）⇒ `build` **rc=0 + 产物**，运行返回 0（应返回 1）= **静默误编译**）。预测文本已由 §10.2 取代，**保留此注否证痕**。
 - **判据**：基线三 sha 命中 + 起点两腿落盘 + 六门/新门入纸 + RED 实测记录。
 - **停条件**：基线 sha 不符 ⇒ 停（`REBUILD.md` 换代纪律 1：**不得改白名单对齐**）。
 
@@ -341,3 +341,65 @@
 - **与既有裁决的一致性**：ADR-0001（规约并入 `.cr`）· spec-design §六（`#` 与 `@` 分工）/§十二（unproven 不拦）· 裁-V1..V6 · `TODO #2026-09-11-9` 判据口径（结构性断言 + 语义零变化 + 自举稳定）· 三态纪律 · P4 T5「零足迹」先例（裁-V4）· P6 事故护栏（含「先裁」入卡）。
 - **占位符扫描**：无 TBD；§3.2 十二门逐条「推荐 + 未取裁时」；§8 九条未决项全部指向具体文件/行或明确「须裁」。
 - **最大风险（本计划判定）**：**① 绿/黄误走诊断通道**（会与 fail-closed 闸门耦合出「未证即 rc=1」，直接违反裁-V6）——缓解 = §5.2 的**通道断言** + 突变 M3；**② 实施者顺手「编图」**（会把 `.ccr`/ELF 改坏）——缓解 = 裁-S4 + 裁-S12 强式判据；**③ bootstrap 面被遗忘**（分歧升级）——缓解 = 裁-S7 + 突变 M4。
+
+---
+
+## 10. T0 实施记录（**2026-09-17 实施轮**；工作区 `core-veri-ws` @ `feature/spec-grammar`）
+
+> **口径**：本节全部数字 = **当场实测**（非引用文档）；命令与产物路径逐条给出，可复跑。
+
+### 10.1 冻结基线（**本批 pre-side**）与构建确定性
+
+| 项 | 实测值 |
+|---|---|
+| 构建命令 | `nice -n 19 python3 build_selfhost_native.py`（cwd = 工作区根） |
+| 耗时 | **25.6s**（real；user 12.0s；4 核机） |
+| **确定性 ×2** | 两次构建逐字节同：`corec` = `899e3090ad8d6f84787f5cbb245af997269585e045fb9b4d11f054cf194a5036` · `corearch` = `072f2c7ccc243cc2a23fb5a0ad8dd97046bbd38c4f1a0aaafd137b660a1617be` |
+| 冒烟 | `./build/corec run 'fn main()->int{return 42;}'` ⇒ **rc=42** |
+| pre-side 存档 | `/tmp/spec-t0/pre/{corec,corearch}` + `SHA256.txt`（= **本批 leg-① 的「pre-批」二进制**） |
+| 起点 revision | `develop = dbadb8d649ba`（**未动** ⇒ §1 全部 `file:line` 锚点**有效**，无须重取） |
+
+**口径声明**：本批 leg-① 的 pre-side = **上表自建二进制**（本批起点树、确定性 ×2 已证）。
+`tools/baseline/rebuild.sh` 的 pinned `97f4394f`（P6 终态）复现属 **E-13 配方自检**，与本批判定面无关
+（该 pin 之后源已多次变更 ⇒ 其产物**不代表**本批起点）——单独跑，结论见 §10.5。
+
+### 10.2 RED 实测（**取代 §4 T0 卡的预测；预测被否证**）
+
+**探针** `/tmp/spec-t0/red_annot.cr`：
+
+```core
+fn f() -> int #check(1 < 0) { return 1; }
+fn main() -> int { return f(); }
+```
+
+| 命令 | **实测结果** |
+|---|---|
+| `corec check /tmp/spec-t0/red_annot.cr` | **rc=1** + `error[TF01]: Function return type mismatch --> 1:1`（**误归位点**：报在 fn 声明行） |
+| `corec build … --static` | **rc=0**（**打印了 `error[TF01]` 却照常产出**）⇒ ELF `013b43df89fa253d2ce74f6e05b840cdad62fcb99066387e70137428f89a4659`（28822B）+ `.ccr` 均落盘 |
+| 运行该 ELF | **rc=0**（**应为 1**）⇒ **静默误编译**（零提示） |
+| bootstrap 侧（同源，`Lexer` 直调） | `SyntaxError: <unknown>:1:15: Unexpected character: '#'` ⇒ **响亮拒收** |
+
+**根因（实测修正版，三环）**：
+1. `#` 被词法器**静默丢弃**（`src/compiler/lexer.cr:590-592`）⇒ cur token 变 `check`（IDENT）；
+2. `parse_body`（`src/compiler/parser.cr:1442-1449`）因 cur token ≠ `{` 走 **`=` 分支**：`advance_tok()` 吃掉 `check`、`parse_expr()` 把标注的括号表达式 `(1 < 0)` **当成函数体**、再 `advance_tok()` 吃掉 `{`；
+3. 于是 `f` 的体 = `1 < 0`（bool）⇒ 与 `-> int` 冲突 ⇒ `TF01`；而 **`EC_TF_RETURN` 在 build 面豁免表内**（`src/compiler/diag.cr:176`）⇒ fail-closed `hard=0` ⇒ **产物照出**。
+
+**⇒ 结论（比原预测严重一级）**：今天带标注的源不是「不支持」，是**静默误编译成 rc=0 的错产物**——
+正是本仓最要消灭的形态。**T2 的负控必须覆盖此条**（`#` 成 token 后，该路径必变语法错或正确解析，二者皆可判）。
+
+### 10.3 起点判据（canary + 腿①；腿②/③ 见 §10.4）
+
+| 判据 | 命令 | **实测** |
+|---|---|---|
+| **canary 五条** | `nice -n 19 bash tools/baseline/canary_check.sh` | **PASS 5/5**：ELF `95084e7b…d475`（28822B）· `pa_ccr 680a6f98…`（96015）· `pa_static_ccr 76f36e6a…`（96158）· `gt_ccr d92a2727…`（142765）· `gt_static_ccr a1f7b99c…`（142908） |
+| **腿① 74 档** | `bash tools/baseline/parity_run.sh /tmp/spec-t0/pre/corec /tmp/spec-t0/parity_pre` | **PARITY DONE（74 档）· rc 分布 35×0 / 39×1**（基线日志 `/tmp/spec-t0/parity_pre/logs/`） |
+
+**39×1 的构成（本批实测，取代 `REBUILD.md:126` 的「38」旧账）**：
+空 fixture ×2（`tests/suite/test_control_flow.cr` / `test_generics.cr`，实测日志 = `error: cannot read`）·
+P21 嵌套 fn ×3（`at_test_mini{,.4,.6}.cr`；**旧账记 2**）· examples 解析错 ×2 · 库单元单独 check ×25
+（t1 `apx_conversion_test` 1 + t2 `_import.cr` 1 + t3 13 + t4 10）· TF01 并发族 ×5 · TF07 ×1（`ptr_ref_first`）·
+B04 ×2（`ptr_arith` **= canary 载体本人** + `apx_conversion_test`）= **39**。
+诊断码直方图（全部 rc=1 档）：`N06 ×1889 · N01 ×1426 · TA01 ×202 · N11 ×71 · TF01 ×18 · TB01 ×10 · TF07 ×2 · P21 ×2 · B04 ×2`
+（**N 族占绝对多数 = 库单元单独 check 的 concat 语境缺失，属既有语义**）。
+⇒ **T6 修 `REBUILD.md:126` 时须用本节的实测构成**（不得沿用 38 的旧账）。
+
