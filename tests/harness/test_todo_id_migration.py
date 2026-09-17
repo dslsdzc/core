@@ -33,7 +33,15 @@ import sys
 BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 TODO = os.path.join(BASE, "TODO.md")
 PLAN = os.path.join(BASE, "docs", "superpowers", "plans", "2026-09-17-todo-id-migration.md")
-EX_DIRS = {".git", ".jj", "build", ".superpowers", "__pycache__", "node_modules"}
+EX_DIRS = {".git", ".jj", "build", ".superpowers", "__pycache__", "node_modules",
+           # 2026-09-17 批 5 实测补入：`.core/` = 编译器**增量缓存**（`.core/cache/cir/*.cir`
+           # 二进制快照；构建后在仓根生成）。原集合漏了它 ⇒ 本判据的 J1/J2 全仓扫描会**逐个读**
+           # 这些快照——实测（本工作区 1.4GB / 1657 条）令本判据**卡死 14+ 分钟**（判据进程
+           # `rchar` 2.4GB+、CPU 0.7%，`/proc/<pid>/fd` 显示打开 `…/cache/cir/src_compiler_main.cr::dirname.cir`）。
+           # **排除是判定中立的**：快照 = 编译产物（二进制），非仓库文本内容；与已排除的 `build/`
+           # 同类。**两态对照证据**：排除前后本判据 J1=0 残留 / J2=0 悬空 / 标题 103 / J3 PASS 逐项相同
+           # （见 `docs/superpowers/specs/2026-09-17-opt-dex-batch-report.md` §9）。
+           ".core"}
 
 OLD_FORM = re.compile(r"TODO\s*#(\d+)(?![\d-])")          # 旧形态：数字后不接 `-MM-DD-`
 NEW_FORM = re.compile(r"#(\d{4}-\d{2}-\d{2}-\d+)")
