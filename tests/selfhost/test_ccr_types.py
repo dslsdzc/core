@@ -1862,7 +1862,7 @@ def test_p4t4_cir_snapshot_layout_unbumped():
         total_nodes = 0
         for f in entries:
             ver, nodes, ok = cir_entry_nodes(os.path.join(cache_dir, f))
-            assert ver == 20, f"{f}: CIR_CACHE_VER {ver} != 20 (2026-09-17 缓存膨胀批「段粒度按函数收窄 + 相对 id + 尾部 trailer」换代后值；前代 = 19 批 5（opt-dex）、18 = TODO #2026-09-16-16 批 2)"
+            assert ver == 21, f"{f}: CIR_CACHE_VER {ver} != 21（2026-09-18 串域批 v21；前代 20 = 2026-09-17 缓存膨胀批「段粒度按函数收窄 + 相对 id + 尾部 trailer」换代后值；前代 = 19 批 5（opt-dex）、18 = TODO #2026-09-16-16 批 2)"
             assert ok, f"{f}: node section (64B stride) runs past EOF"
             total_nodes += len(nodes)
         assert total_nodes > 0, "vacuous: no nodes parsed from snapshots"
@@ -2019,7 +2019,7 @@ def test_p5t2_snapshot_disk_code_preserved():
         disk = []
         for f in sorted(os.listdir(cache_dir)):
             ver, nodes, ok = cir_entry_nodes(os.path.join(cache_dir, f))
-            assert ver == 20 and ok, f"{f}: version/stride drifted（期望 20 = 2026-09-17 缓存膨胀批换代后值；节点 stride 仍 64B / 头偏移不变（裁-4 + 尾部 trailer）；前代 19 = 批 5（opt-dex）、18 = TODO #2026-09-16-16 批 2）"
+            assert ver == 21 and ok, f"{f}: version/stride drifted（期望 21 = 2026-09-18 串域批 v21（前代 20 = 2026-09-17 缓存膨胀批换代后值；节点 stride 仍 64B / 头偏移不变（裁-4 + 尾部 trailer）；前代 19 = 批 5（opt-dex）、18 = TODO #2026-09-16-16 批 2）"
             disk += [(nd[0], nd[5]) for nd in nodes]
         assert disk, "vacuous: no nodes parsed from snapshots"
         mint = set((r[1], r[2]) for r in rows if r[1] in MINT_OPS and r[2] > 0)

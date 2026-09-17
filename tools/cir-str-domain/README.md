@@ -1,27 +1,30 @@
 # `tools/cir-str-domain/` — `.cir` 快照「串域跨进程 id」缺陷的证据复现包
 
-**性质**：**证据复现工具，不是判据**（判据见计划 §3，由修复批落在 `tests/selfhost/test_cir_str_domain_warm.py` 并挂
-`run.sh selfhost-tests`）。本目录随只读调查轮入库，动机 = 「可复跑的证据别只活在 `/tmp`」。
+**性质**：**证据复现 + 判据载体**。本目录随只读调查轮入库（动机 = 可复跑的证据别只活在 `/tmp`），
+**修复批（`CIR_CACHE_VER 20→21`）已把 `run_scope.sh --assert` 挂进门内**（`src/ci/run.sh` 的
+`selfhost-tests`），与 `tests/selfhost/test_cir_str_domain_warm.py`（17 例：入口/判别/三路径/混合态/突变自证/日志段结构）
+并列。
 
-- **登记条目**：`TODO.md` 的 `#2026-09-18-9`
+- **登记条目**：`TODO.md` 的 `#2026-09-18-9`（缺陷）与对应修复段
 - **修法计划**：`docs/superpowers/plans/2026-09-18-cir-cache-str-domain.md`
 - **一句话**：`.cir` 快照把串操作数存成**写侧进程的绝对 intern id**、装载侧**原样恢复且不重映射** ⇒ 凡
   **首次 intern 发生在 IR 生成期**的串（多字段 `@fields`、合成变量名…）在暖态解析到别的串（可到垃圾字节），
-  两次 `build` 均 `rc=0`。
+  两次 `build` 均 `rc=0`。**修法** = 生成期 intern 日志 + 装载期按序重放（读侧串表与写侧同态 ⇒ id 原样有效）。
 
 ## 用法
 
 ```bash
 # 1) 范围矩阵（7 档：lit/concat/interp/typeinfo/fields/firstintern/partial）——报告模式，恒 rc=0
 CORE_BIN=./build/corec bash tools/cir-str-domain/run_scope.sh
-# 2) 判据模式（冷=暖才通过）——**缺陷未修时必然红**，这是判据语义，不是脚本故障
+# 2) 判据模式（冷=暖才通过；已挂 CI）——**缺陷未修时必然红**，这是判据语义，不是脚本故障
 CORE_BIN=./build/corec bash tools/cir-str-domain/run_scope.sh --assert
 # 3) 年龄判定（对历史二进制；读回其自写的 CIR_CACHE_VER）
 bash tools/cir-str-domain/age_probe.sh /path/to/old/bin_dir [tag]
 ```
 
 `run_scope.sh` 每档**独立目录、先冷后暖**（`/tmp/cir-str-domain-run`，可 `WORK_DIR=` 覆盖）；`CORE_BIN` 缺省
-`<repo>/build/corec`。
+`<repo>/build/corec`。**基线既有红**：`known-baseline-red.txt` 列出的档（当前 = `interp`）只上报不判红——
+其红先于本修复存在、与本缺陷无关，文件内含证据与**移除触发器**。
 
 ## 探针清单（`probes/`）
 

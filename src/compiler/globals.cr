@@ -50,6 +50,21 @@ g_ir_locals : string, mut;   g_ir_local_count : int, mut; g_ir_local_cap : int, 
 g_ir_globals : string, mut;  g_ir_global_count : int, mut; g_ir_global_cap : int, mut;
 g_ir_str_consts : string, mut; g_ir_str_const_count : int, mut; g_ir_str_const_cap : int, mut;
 
+// ── 生成期 intern 日志（CIR_CACHE_VER 21 · 串域跨进程 id 修复；TODO #2026-09-18-9）──
+// `g_strs`（intern 表）+ `g_str_count` 是 main.cr 缓存循环那份「快照不载 + 生成期写 +
+// 生成后被读」清单的**实例**（见 main.cr 的见证面清单注）：生成期每次新 intern 都会
+// 推进它，而缓存命中跳过生成 ⇒ 读侧编号与写侧分叉 ⇒ 快照内既存的**绝对 intern id**
+// 被按错编号解释（实测：暖态 `@fields` 取到别的函数的串/垃圾字节，rc=0 静默）。
+// 修法（载进快照分支）：**生成窗口内把每一次新 intern 记进日志，装载期按序重放**
+// ⇒ 读侧表与写侧同态 ⇒ 全部 id 原样有效（无需解释任何跨进程量、无需槽位判定表）。
+// 记录点 = `dyn_arr.cr::str_intern` 的**唯一插入路径**（单点保证：不存在「表漏点」）。
+g_cir_rec_on      : int, mut;   // 1 = 正在记录（仅 corec 的缓存生成窗口内打开）
+g_cir_rec_ids     : string, mut; // 本窗口新 intern 的 id 序列（8B/条；落盘时解析为内容）
+g_cir_rec_count   : int, mut;
+g_cir_rec_cap     : int, mut;
+g_cir_rec_base    : int, mut;   // 窗口开始时的 g_str_count（落盘为**基线见证**）
+g_cir_skip_journal : int, mut;  // 隐藏 debug（仅判据用）：1 = 装载期跳过重放（突变自证）
+
 // ── 可选运行期表示面（R2 P4 Task 5；裁决 5「解包侧判表示」，附录 B.7）──
 // 事实：`Some(1)`/`None` 走 IR_MAKE_ENUM 对象（[tag][payload…]），而 `T?` 槽里的
 // **裸值**仍是裸值 ⇒ 同一 `T?` 值两种表示；`Some` 臂的载荷解包把裸值当对象解引用

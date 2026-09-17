@@ -746,6 +746,10 @@ fn str_intern(s: string) -> int {
     store_str_ptr(g_strs, g_str_count * 8, s);
     g_str_count = g_str_count + 1;
 
+    // 生成期 intern 日志（CIR_CACHE_VER 21）：**唯一插入路径**在此 ⇒ 单点保证
+    // 「gen 期新 intern 必进日志」（不存在「判定表漏点」这一失效面）。见 globals.cr 注。
+    if g_cir_rec_on != 0 { cir_rec_push(g_str_count - 1); }
+
     // Insert into hash table (pos is the empty slot we found)
     w64(g_str_hash, pos * 8, g_str_count - 1);
 
@@ -753,6 +757,21 @@ fn str_intern(s: string) -> int {
     if g_str_count * 10 > g_str_hash_cap * 7 {
         _grow_str_hash(g_str_hash_cap * 2); }
     return g_str_count - 1; }
+
+// 生成期 intern 日志的写入端（唯一调用点 = str_intern 的插入路径）。
+// 只记 **id**（本进程载体）；落盘时由 cir_cache.cr 解析为**内容**——跨进程 id 不可跨进程解释。
+fn cir_rec_push(si: int) {
+    if g_cir_rec_count >= g_cir_rec_cap {
+        nc := g_cir_rec_cap * 2;
+        if nc < 64 { nc = 64; }
+        nb := alloc(nc * 8);
+        _dyncpy(g_cir_rec_ids, g_cir_rec_cap * 8, nb);
+        g_cir_rec_ids = nb;
+        g_cir_rec_cap = nc;
+    }
+    w64(g_cir_rec_ids, g_cir_rec_count * 8, si);
+    g_cir_rec_count = g_cir_rec_count + 1;
+}
 
 fn istr_get(idx: int) -> string {
     if idx < 0 || idx >= g_str_count { return ""; }

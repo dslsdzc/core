@@ -3593,6 +3593,14 @@ fn ir_gen_globals() {
     reg_one_global(str_intern("g_cir_write_buf"));
     reg_one_global(str_intern("g_cir_write_pos"));
     reg_one_global(str_intern("g_cir_write_cap"));
+    // v21 生成期 intern 日志（cir_cache.cr/dyn_arr.cr/globals.cr 共用；**新增编译器侧全局
+    // 必须在此登记**——parser 的 file-scope 自动发现已知会漏，漏登记 ⇒ 赋值静默丢弃/错槽）。
+    reg_one_global(str_intern("g_cir_rec_on"));
+    reg_one_global(str_intern("g_cir_rec_ids"));
+    reg_one_global(str_intern("g_cir_rec_count"));
+    reg_one_global(str_intern("g_cir_rec_cap"));
+    reg_one_global(str_intern("g_cir_rec_base"));
+    reg_one_global(str_intern("g_cir_skip_journal"));
     // Runtime globals needed by emit_alloc_body and emit_start.
     // These MUST exist in BSS for every program, even without rt.cr included.
     reg_one_global(str_intern("g_heap_ptr"));

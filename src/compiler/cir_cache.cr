@@ -48,6 +48,27 @@
 // sh_dfn_code_of_slots 产出），装载侧由它同时重派生**两槽**（项引用 + 辅码）——
 // 盘面布局/版本位与 P4 逐字节相同（单槽化只在内存语义面）。
 CIR_CACHE_MAGIC : int = -4485090715960753727;
+// 21：**串域跨进程 id 修复**（2026-09-18 · TODO #2026-09-18-9 · 计划
+//     `docs/superpowers/plans/2026-09-18-cir-cache-str-domain.md`）——快照内既存的
+//     **绝对 intern id**（指令/节点槽、var 名）在命中装载时被按**读侧**编号解释，
+//     而读侧编号取决于「哪些函数被生成、哪些被装载」⇒ 凡**首次 intern 发生在 IR
+//     生成期**的串（多字段 `@fields`、合成变量名、未点名的 `Some`/`None` 标签…）
+//     取到**别的串**（实测可到含 NUL 的垃圾字节；`@fields(Pair)` 冷 `a,b` → 暖
+//     `goroutine_entry_wrapper`+垃圾），两次 build 均 rc=0、ELF/.ccr 静默不同
+//     （VER 17/18/19/20 四代全复现 ⇒ **非本代引入**）。
+//     修法 = **载进快照**（生成期 intern 日志）：写侧在函数生成窗口内把 `str_intern`
+//     **唯一插入路径**上的每一次**新** intern 记进日志（只存**内容**，不存 id），
+//     装载侧**按序重放** ⇒ 读侧串表与写侧**同态** ⇒ 全部 id 原样有效。
+//     **为何不用重映射 / 恒校验见证**：(a) 重映射与 (c) 按 `(op,tk)` 重建都需一张
+//     「哪些槽是串」的判定表，而该表**原理上不可完备**——反例：`IR_CONST.s1` 在
+//     `tk=TI_INT` 下可携带**变体名 id**（`str_intern("None")` 的 tag 值，见
+//     ir_gen.cr 的 `opt_cmp_extract_boxed`），与整数立即数在盘面**不可区分**；
+//     (b) 恒校验见证因读侧**永远缺**未经 `track_str` 的 gen 期 intern（实测：
+//     冷态 `.ccr` 有 `_fields`/`_cat0`，暖态没有）而**恒不合** ⇒ 等于关缓存。
+//     **为何必须 bump**：旧条目无日志段亦无基线见证——若容忍缺失而继续按旧编号
+//     解释，正是本代要消灭的静默类 ⇒ 整体失效，cache miss = **无害重建**。
+//     与 20 代同族——**每一代都是「快照携带了会随进程态漂移的量」**；本代是首次
+//     把这类量**从盘上彻底拿掉**（盘只存内容，编号由两侧同序重建）。
 // 20：缓存膨胀批（2026-09-17 · `plans/2026-09-17-cir-cache-bloat.md`）——**段粒度按函数收窄 +
 //     边端点改相对 id + 尾部基线见证 trailer**（结构变更，非语义变更）：
 //       ① **边段只写本函数** `[edge_start, g_df_edge_count)`（写侧 O(1) 取界：df_begin_func 记
@@ -77,7 +98,7 @@ CIR_CACHE_MAGIC : int = -4485090715960753727;
 //     与修复后语义不等价** ⇒ 命中旧条目会把「丢型」的坏 IR 原样复活成产物（rc=0 的静默类）
 //     ⇒ bump 使旧条目整体失效，cache miss = **无害重建**。与 TODO #2026-09-10-4（缓存键缺编译器身份）
 //     同族；`.ccr` 侧不 bump（交付格式、无快照复用语义），但**内容会变**（dex 程序）。
-CIR_CACHE_VER   : int = 20;
+CIR_CACHE_VER   : int = 21;
 
 g_cir_write_buf : string, mut;
 g_cir_write_pos : int, mut;
@@ -266,6 +287,14 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int {
     // v13: nested SG records (kind/enter/exit/parent/nstart/ncount).
     sg_count := cir_cache_sg_count(node_start, node_count);
     total_size = total_size + 8 + sg_count * 48;
+    // v21 生成期 intern 日志段 = {基线见证, 条数, × (len, bytes)}
+    total_size = total_size + 16;
+    size_ri : ., mut = 0;
+    loop {
+        if size_ri >= g_cir_rec_count { break; }
+        total_size = total_size + 8 + str_len(istr_get(r64(g_cir_rec_ids, size_ri * 8)));
+        size_ri = size_ri + 1;
+    }
     // v20 尾部 trailer = {var_start, node_start}（**基线见证**；装载期先校验后恢复）
     total_size = total_size + 16;
     if total_size > g_cir_write_cap {
@@ -385,6 +414,26 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int {
             w8_cir(fd, load8(s, vi));
         vi = vi + 1; }
         si = si + 1;
+    }
+
+    // v21 生成期 intern 日志（**只存内容，不存 id**——跨进程 id 不可跨进程解释；装载侧按序重放
+    // 即把读侧串表推到与写侧同态，故盘上不需要任何编号）。
+    // 首字段 = **基线见证**：本函数生成窗口开始时的 `g_str_count`（写侧）。装载侧在重放**之前**
+    // 要求读侧 `g_str_count` 与之相等——不等 = 两侧不同态（如：本进程在更早的函数处走了不同
+    // 的生成/装载路径）⇒ 拒绝（cache miss = 无害重建），绝不带着错编号继续。
+    w64_cir(fd, g_cir_rec_base);
+    w64_cir(fd, g_cir_rec_count);
+    ri : ., mut = 0;
+    loop {
+        if ri >= g_cir_rec_count { break; }
+        rs := istr_get(r64(g_cir_rec_ids, ri * 8));
+        rl := str_len(rs);
+        w64_cir(fd, rl);
+        rj : ., mut = 0;
+        loop { if rj >= rl { break; }
+            w8_cir(fd, load8(rs, rj));
+        rj = rj + 1; }
+        ri = ri + 1;
     }
 
     // v20 尾部 trailer（**基线见证**）：{var_start, node_start}。装载期**先校验后恢复**：
@@ -549,6 +598,17 @@ fn load_cir_cache(path: string, func_idx: int) -> int {
         if p > dlen { return -1; }
         p_si = p_si + 1;
     }
+    // v21 生成期 intern 日志段（**只读扫描**）：{基线见证, 条数, × (len, bytes)}
+    j_p := p;
+    p_j_base := r64(data, p); p = p + 8;
+    p_j_count := r64(data, p); p = p + 8;
+    p_ji : ., mut = 0;
+    loop {
+        if p_ji >= p_j_count { break; }
+        jl_p := r64(data, p); p = p + 8 + jl_p;
+        if p > dlen { return -1; }
+        p_ji = p_ji + 1;
+    }
     // trailer 定位于**扫描终点 p**（而非 dlen−16）：**尾随字节容忍**——装载历来忽略条目尾随字节
     // （既有契约：`test_cir_warm_path.py` 的 D5 用例即其钉子——补零条目仍须**命中**），故只要求
     // `p + 16 <= dlen`；**截断**（p+16 > dlen，含「恰缺 trailer」「trailer 半截」）仍 fail-closed miss。
@@ -601,6 +661,26 @@ fn load_cir_cache(path: string, func_idx: int) -> int {
             ec_disk := r64(data, node_p + 8 + nj * 64 + 56);
             if ec_disk != r64(tally, nj * 8) { return -1; }
             nj = nj + 1;
+        }
+    }
+
+    // === v21 串域修复：按序重放「生成期 intern 日志」（**必须先于任何 id 消费**）===
+    // 为什么先于恢复：快照内一切 id（var 名 / 指令与节点槽 / str 段引用者）都是**写侧编号**；
+    // 只有把读侧串表推到与写侧同态，这些编号才成立。重放序 = 记录序 = 写侧生成序（两侧同序，
+    // 见 §顺序确定性），故逐条 `str_intern` 后编号逐一同位。
+    // 基线见证：读侧此刻的 g_str_count 必须等于写侧窗口开始时的值——不等 = 两侧不同态
+    // （更早的函数走了不同的生成/装载路径）⇒ 拒绝（cache miss = 无害重建），绝不带错编号继续。
+    // `--inject-cir-skip-journal`（隐藏 debug，仅判据突变自证用）= 跳过重放 ⇒ 本缺陷原样复现。
+    if g_cir_skip_journal == 0 {
+        if g_str_count != p_j_base { return -1; }
+        jp : ., mut = j_p + 16;
+        ji : ., mut = 0;
+        loop {
+            if ji >= p_j_count { break; }
+            jl2 := r64(data, jp); jp = jp + 8;
+            js := str_sub(data, jp, jl2); jp = jp + jl2;
+            str_intern(js);
+            ji = ji + 1;
         }
     }
 
@@ -757,6 +837,19 @@ fn load_cir_cache(path: string, func_idx: int) -> int {
 
     return 0;
 }
+
+// === v21 生成期 intern 日志：窗口开闭（main.cr 在 ir_gen_func 前后成对调用；仅缓存启用时）===
+// 顺序确定性论证（判据 §顺序）：① 跨函数 = main.cr 的函数循环**一个序**（写侧在该循环里生成、
+// 读侧在同一循环里装载）；② 函数内 = 两侧共用**唯一插入路径** `str_intern`（`dyn_arr.cr`），
+// 记录序即插入序；③ 窗口外的插入（parse/check 等）两侧同源同序 ⇒ 不进日志也不需要进。
+// ⇒ 装载侧按记录序重放即逐条复现写侧编号（归纳：前序函数同态 ⇒ 本篇起点同态）。
+fn cir_rec_begin() {
+    g_cir_rec_on = 1;
+    g_cir_rec_count = 0;
+    g_cir_rec_base = g_str_count;
+}
+
+fn cir_rec_end() { g_cir_rec_on = 0; }
 
 // Ensure cache directory exists.
 fn make_cir_cache_dir() {
