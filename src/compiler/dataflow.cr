@@ -494,6 +494,10 @@ fn df_begin_func(func_idx: int) {
     if func_idx >= 0 {
         grow_df_arrays(func_idx + 1);
         w64(g_df_func_node_start, func_idx * 8, g_df_node_count);
+        // 缓存收窄批（CIR_CACHE_VER 20）：记边起点——本函数的边 = [edge_start, g_df_edge_count)。
+        // 时点与 df_end_func 的节点计数同构：**df_begin_func 之后产生的边皆属本函数**
+        // （节点亦然；df_begin/df_end 自身不建边，state 链在全部 save 之后才重放）。
+        w64(g_df_func_edge_start, func_idx * 8, g_df_edge_count);
         sg_push(SG_FUNC);
     }
     g_last_state_node = -1;  // fresh state chain per function
