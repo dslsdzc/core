@@ -147,6 +147,17 @@
   `tests/probes/p_ffi2.cr`（`putchar`）。
   语料实核：全仓 `extern fn` 12 处声明（`.cr` 6 + py 内嵌 6）中**含 `?` 者 = 0** ⇒ 本硬错零语料代价；其余 extern 形态
   （`-> char` / `-> never` / `dex -> dex`）**必须继续被接受**。
+- **✅ 2026-09-18 实测更正（原文照旧不动；批 8 PR-A₁ 落地后补）**：判据要件 ① 的**范围**——原文只写「含可选**形参**」，
+  而**实现宽于原要件**：**返回类型节点一并拒**。实测锚点（`develop` 实读）= `src/compiler/parser.cr:1635`（`extern_opt` 置位）·
+  `:1642`（形参：`if pty >= 0 && ast_kind(pty) == EXPR_OPTIONAL { extern_opt = 1; }`）· **`:1656`（返回：`if ret_node >= 0 && ast_kind(ret_node) == EXPR_OPTIONAL { … }`）**·
+  `:1659-1660`（两者**共用**一条 `check_error(EC_P_EXTERN_OPTIONAL, …)`）⇒ 「形参/返回」**同判同码**（要件 ③ 的形态自动成立）。
+  **方向经复核确认正确**：依据 = **C ABI 无可表示**（可选**返回**与可选形参同理，C 侧无载体）；
+  且**与上方「实施硬边界」不冲突**——该边界约束的是「**不得**扩大为**广义**『C ABI 可表示性』校验」，本项仍在「**可选面**」内。
+  **判据要件据此同步为**：① `extern` 声明**含可选形参或可选返回** ⇒ `check` rc=1 + 专属诊断 + **零产物**
+  （`check` 面「零产物」恒真 ⇒ 该断言实际须落在 **`build` rc=1 且 `-o` 与 `<out>.ccr` 均不存在**）；②③ 不变。
+  **套件已覆盖返回形两例** ✓：`tests/selfhost/test_extern_opt.py` 的 `reject_optdex_ret`（`-> dex?`）与 `reject_optint_ret`（`-> int?`）
+  （同档另有形参 4 例 + 非可选对照 + 守卫语料）。**突变自证不变**（撤校验 ⇒ 拒收例回 `check=0`）。
+  **边界声明（与上方 +7 的预备扫描注逐条一致）**：**`P24` 只覆盖 `?` 面**（形参 + 返回两处），**未**推广为**广义 C-ABI 校验** —— 三档守卫语料（`test_iface_ops.py` / `ffi_test.cr` / `p_ffi2.cr`）的接受面**不受影响**。
 
 ### 4. ⚠ **【S】顶层兜底静默吞 token**（分诊/登记面；`parse_declaration` 裸 `advance_tok()`）
 
