@@ -4,6 +4,14 @@
 > **计划**：`docs/superpowers/plans/2026-09-17-opt-dex.md`（含 §4bis 十门取裁、§7bis T0 记录、§7ter G7 载体清单、§7quater 分步实施记录）。
 > **工作区/书签**：`core-optdex-ws` / `feature/opt-dex`（基点 develop `dbadb8d649ba`）。
 > **性质**：**预存静默错值族**（修复前即存在；非本批引入）——本批**修复 + 建判据网**。
+>
+> **合入记录（2026-09-17）**：PR **#95** → develop，**squash 合并 = `dc2c72d2`**。合并方式 = **管理员合并**
+> （`gh pr merge 95 --squash --admin`）。**为何走 admin**：仓库规则集要求审批，而本仓为**单维护者**场景——
+> `gh pr review --approve` 对本人 PR 返回 `Can not approve your own pull request`（GitHub 禁自审），
+> 且仓库**未启用 auto-merge**（两条路都实测试过）⇒ 常规合并通道对单人维护者**结构性不可达**，
+> 由维护者授权走 admin。**建议**：为 develop 增加**第二审批人**，或放宽 develop 的审批要求
+> （否则该门形同不存在——它挡不住任何东西，只会把合并推向 `--admin`）。
+> **跟进 PR**（本报告 §5bis 之后追加的 CI 覆盖域记录）：`feature/opt-dex-followup`。
 
 ---
 
@@ -98,6 +106,16 @@
 | 自举链 + N06 | `corec2 == corec3` IDENTICAL（`c0f1cbf5…`）· `[GUARD] … build log clean（error[ = 0, undefined = 0）` ×3（corec/corearch/corelsp） |
 | 冒烟 / 自测 | `corec run 'fn main()->int{return 42;}'` = **42** · `selftest-types` **415/415** · `check src/compiler` rc=0 |
 
+> **⚠ CI 覆盖域 ≠ 判据全集（2026-09-17 补记）**：`.github/workflows/core-ci.yml` 的 **`pr` 作业矩阵只覆盖 3/5 档**
+> （`check` / `bootstrap-tests` / `selfhost-tests`）；**`suite` 与 `full-bootstrap` 属 `full` 作业**，其触发面 =
+> `merge_group`（**免费计划无 merge queue ⇒ 休眠**）或 `workflow_dispatch`。⇒ 对**值语义 / ABI 分类类**改动
+> （正是本批的性质），**「PR CI 绿」天然覆盖不到行为承载档**，必须**手动派发全量层**：
+> `gh workflow run .github/workflows/core-ci.yml --ref <branch>`（**必须给文件路径**——本仓 GitHub 侧注册着
+> **仓库里已不存在的同名 workflow**，只给名字会歧义）。
+> **本批实测**：派发 run **`35213394732`**（`feature/opt-dex`）⇒ 五档全绿（check · bootstrap-tests ·
+> selfhost-tests · **suite** · **full-bootstrap**），其中 `full-bootstrap` 日志含 `-> /tmp/corec2` +
+> 作业 success（`cmp corec2 corec3` 成功静默）⇒ 自举链恒等在 CI 侧复现。
+
 ---
 
 ## §5bis 判定面回归网（腿① + 探针 29 + 暖态腿；**本批隔离口径**）
@@ -190,6 +208,12 @@ grep -rn "CIR_CACHE_VER\s*:\s*int\s*=\|VER_EXPECTED = \|ver == 1[89]" src/ tests
    - **副作用（好）**：修好后立刻抓出一条**真悬空**——本报告原引用了批 6 在**自己分支**上登记的一条缓存膨胀条目（其 id 在本树**无对应标题**）⇒ J2 报「悬空: …:167: #2026-09-17-N」⇒ 本报告已改为**描述性引用**（**不**引用未落在本树的 id——这正是 J2 该有的牙）。
    - **教训**：**全仓扫描类判据必须显式排除生成物目录**（缓存/构建产物）；否则判据的耗时随缓存的 O(函数数 × 串表) 膨胀而爆掉（同源问题见 TODO `#2026-09-17-1` 家族与批 6 的缓存条目）。
 7. **操作陷阱（本批实测）**：`corec build --static` 定位 `src/runtime/rt.cr` 只有 **cwd 相对 / exe 目录相对**两条（`main.cr:112-122`）⇒ 冻结二进制放 `/tmp` 时必须以 `cwd=仓库根` 运行，否则 `error: cannot locate src/runtime/rt.cr`（build rc=1 **假红**）；py 套件用 `cwd=BASE` 即正解。
+8. **bookmark 不随提交前进（本批实测命中）**：jj 的 bookmark 是**手动指针**——本批 Step 0 设的 `feature/opt-dex` 停在**链基点** `a37236aa`，链尖已是 `d4a44b25`。**推前必须核 `jj bookmark list` 与链尖一致**（不一致 ⇒ `jj bookmark set <bm> -r <链尖>`），并在 **push 后 `jj git fetch` 复核 `<bm>@origin` == 链尖**。
+   - **若不核**：推上去只有旧顶端 ⇒ PR 内容不全（本仓此前踩过同款），且「推成功」的输出**不会**报错。
+9. **合并后本工作区的处置顺序（stale 修复）**：PR 被 squash 合入后，本工作区 `@` 的父提交仍是**旧 develop** ⇒ 工作副本 stale。
+   **正确顺序 = 先落盘守卫（确认无未快照文件）→ 再 `jj workspace update-stale`**（本批由协调者按上次事故教训执行，0 个未快照文件、无损失）。
+   **接着不要在新基上提旧链**：`jj new develop` 起新链 + 新 bookmark（本批的跟进 PR 即如此起链）；旧链内容已进 develop，属**冗余**，不是丢失。
+   - 附：远端分支被「合并后自动删分支」删除后，本地 bookmark 会随之 prune ⇒ `jj log -r <bm>` 报「doesn't exist」是**预期**，不是数据丢失。
 
 ---
 
