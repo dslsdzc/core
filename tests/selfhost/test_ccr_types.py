@@ -1862,7 +1862,7 @@ def test_p4t4_cir_snapshot_layout_unbumped():
         total_nodes = 0
         for f in entries:
             ver, nodes, ok = cir_entry_nodes(os.path.join(cache_dir, f))
-            assert ver == 18, f"{f}: CIR_CACHE_VER {ver} != 18 (TODO #2026-09-16-16 批 2 换代后值)"
+            assert ver == 19, f"{f}: CIR_CACHE_VER {ver} != 19 (批 5（opt-dex）2026-09-17 换代后值；前代 = 18，TODO #2026-09-16-16 批 2)"
             assert ok, f"{f}: node section (64B stride) runs past EOF"
             total_nodes += len(nodes)
         assert total_nodes > 0, "vacuous: no nodes parsed from snapshots"
@@ -2019,7 +2019,7 @@ def test_p5t2_snapshot_disk_code_preserved():
         disk = []
         for f in sorted(os.listdir(cache_dir)):
             ver, nodes, ok = cir_entry_nodes(os.path.join(cache_dir, f))
-            assert ver == 18 and ok, f"{f}: version/stride drifted（期望 18 = TODO #2026-09-16-16 批 2 换代后值）"
+            assert ver == 19 and ok, f"{f}: version/stride drifted（期望 19 = 批 5（opt-dex）2026-09-17 换代后值；前代 18 = TODO #2026-09-16-16 批 2）"
             disk += [(nd[0], nd[5]) for nd in nodes]
         assert disk, "vacuous: no nodes parsed from snapshots"
         mint = set((r[1], r[2]) for r in rows if r[1] in MINT_OPS and r[2] > 0)
