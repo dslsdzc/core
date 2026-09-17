@@ -2036,7 +2036,18 @@ fn parse_declaration() {
         advance_tok();   // 吞掉 `#` 本身，避免 parse_all 空转；残余由后续解析按既有规则处理
         return;
     }
-    advance_tok();
+    // 批 8（静默面收口 · 条目 4）：**顶层兜底不再静默吞 token**——修复前此处为裸 `advance_tok()`：
+    // 无法识别的顶层 token（typo 的 `stuct` / 多余 `}` / 游离 token）被**无声消费**，既不诊断也不定位；
+    // 紧随其后的声明会被误归（计划 §1 条目 4 现象③「静默丢弃 ⇒ 后续 TF01 误报」与条目 6 同族）。
+    // 全语料实核（批 8 预备扫描；括号深度感知）：179 档 `.cr` 顶层非法首 token = **0** ⇒ 零语料代价。
+    // 先例 = 批 6 T2 的 `#` 非标注位在同一兜底点转响亮（上方 `EC_V_BAD_TAG`）。
+    // EOF 不报（`parse_all` 已先判；此处仅为防御），且**必定推进**一个 token（错误恢复）。
+    if tok_k(cur_tok()) != T_EOF {
+        check_error(EC_P_TOPLEVEL_TOKEN,
+            "unexpected top-level token '" + tok_lx(cur_tok()) + "'",
+            tok_ln(cur_tok()), tok_cl(cur_tok()));
+        advance_tok();
+    }
 }
 
 fn parse_all() {
@@ -2069,7 +2080,30 @@ fn parse_all() {
             tk := tok_k(cur_tok());
             if tk == T_EOF { return; }
             if tk != T_IMPORT && tk != T_FILEID { break; }
+            is_fileid := tk == T_FILEID;
             advance_tok();
+            // 批 8（静默面收口 · 条目 4 前置）：**消费整条 import 语句**。
+            // 修复前只吞 `import` 关键字本身，其后的路径/别名 token 落进 `parse_declaration` 尾部兜底被
+            // **静默吞**——全语料（含 `_import.cr` 与注入的运行时源）普遍如此 ⇒ 条目 4 的顶层硬错若
+            // 不先补这里，会把**每一条合法 import** 判成「意外顶层 token」（实测：`import io` 的 `io`）。
+            // 形状与 `module.cr` res_imports 的扫描**逐字一致**：`[@proj] [a(::b)*] [: alias] [;]`。
+            // ⚠ **不得**放宽成「吞到分号」或「吞任意 IDENT」：那会把紧随其后的下一条声明头也吃掉
+            // （本轮实测：`import arena_globals` 后无分号 ⇒ 误吞 `g_rt_argc : int` ⇒ 余下 `mut` 触发 P25）。
+            if check(T_AT) { advance_tok(); if check(T_IDENT) { advance_tok(); } }
+            if check(T_IDENT) {
+                advance_tok();
+                loop {
+                    if check(T_PATHSEP) {
+                        advance_tok();
+                        if check(T_IDENT) { advance_tok(); }
+                        continue;
+                    }
+                    break;
+                }
+            }
+            if check(T_COLON) { advance_tok(); if check(T_IDENT) { advance_tok(); } }
+            if is_fileid && check(T_INT) { advance_tok(); }
+            if check(T_SEMI) { advance_tok(); }
         }
         t_cur := cur_tok();
         t_kind := tok_k(t_cur);

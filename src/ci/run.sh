@@ -232,6 +232,18 @@ case "$CI_JOB_NAME" in
     # 落点 = parser 的 extern 分支（签名规则位，同 P020 先例；返回类型节点在 parser 内可用）。
     # 突变自证（批级留痕）：撤掉该检查 ⇒ 6 条拒收例回 `check=0`。
     python3 tests/selfhost/test_extern_opt.py
+    # ─── 批 8 条目 4（静默面收口）：顶层兜底不再静默吞 token ⇒ P25（2026-09-18）───
+    # **12 例** = 拒收 5（顶层多余 `}` / typo 声明 / typo 声明+使用 / 游离 `;` / typo 关键字）+ 合法对照 7
+    # （import ×2 / **无初值全局**（= 注入运行时源 `rt.cr:4` 同形）/ 有初值全局 / `mod` / `type` / `@` 注解）。
+    # 判据：拒收 ⇒ check rc=1 + `error[P25]` + 定位 + build rc=1 + **零产物**；合法 ⇒ check/build/run 三面 0；
+    # **不挂起**（P6：报错路径仍消费 token；套件内每例限时 60s、超时即红——CI 超时不是红）。
+    # ⚠ 同批前置修（本轮实测暴露）：`parse_all` 原只吞 `import` 关键字本身，路径/别名 token 一直靠兜底
+    # 静默吞（全语料普遍）⇒ 新硬错会误伤**每一条合法 import**（实测 `import io` 的 `io` 与注入源
+    # `import arena_globals`）。修复 = 按 res_imports 形状逐字消费 `[@proj] [a(::b)*] [: alias] [;]`。
+    # 全语料对拍（212 档 × `check`；前态二进制 vs 本修复）：差异 **7 档且全部本就 rc=1**（spec 负例 5 ·
+    # 探针 1 · 旧 fixture 1；期望码 V02/V03 仍在）⇒ 合法语料零差异。
+    # 突变自证（批级留痕）：兜底退回裸 `advance_tok()` ⇒ 拒收 5 例回 `check=0`。
+    python3 tests/selfhost/test_toplevel_reject.py
     # ─── 批 6（验证内核正式接入 = 正式规约语法 `#check`/`#ensure`；2026-09-17）───
     # 四组 48 项：A 语法面（16）· B 检查面（11）· C `--dump-vcs` 通道（15）· D `.ccr` 零足迹三段式（6，含 Δ 公式）。
     # **Δ 公式 = 本批最有价值的判据**（T3 首轮当场抓到实现自身的 `str_intern("result")` 泄漏：两用例 STR Δ 凭空 +10B），
