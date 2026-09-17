@@ -495,9 +495,27 @@ fn tokenize(_src: string) {
                     }
                     else { str_val = str_val + chr(esc); }
                 } else if cc == 36 && peek_at(_src, _pos, _slen) == 123 {
-                    // Interpolation: skip for now
-                    _pos = _pos + 2;
-                    loop { if cur_char_at(_src, _pos, _slen) == 125 { _pos = _pos + 1; break; } _pos = _pos + 1; }
+                    // 插值 `${...}`：本前端**不展开**（与 bootstrap 词法一致——原文**逐字进串值**）。
+                    // ⚠ 修复（2026-09-18）：原实现为 `_pos = _pos + 2` + 跳至 `}` 的 skip 循环，
+                    //   但**循环尾还有一句通用 `_pos = _pos + 1`** ⇒ **双推进**，吃掉 `}` 后第一个字符：
+                    //   ① 该字符静默丢失（`"A${7}B"` 曾得 `A`）；② 若那正是收尾引号 ⇒ 串**不以引号结束**、
+                    //   一路吞到行尾（`cc == 10` 才 break）⇒ 同行的 `;`/**`}`** 一并进串 ⇒ parser 停在
+                    //   嵌套态 ⇒ 其后每个顶层 `fn` 报 P21 级联（实测单行 `fn main() -> int { s := "x=${7}"; return 0; }`
+                    //   15 条 P21；把 `}` 换行则 0 条 = 判别实验）。引入点 = wqorlmrz(2026-07-09，本分支加入处；
+                    //   其父修订无 "Interpolation")。扫面契约见 `src/lsp/analysis.cr:1024`。
+                    //   ⇒ 本分支**自行推进到位**并以 `continue` 收口（**绝不落到循环尾的 `_pos += 1`**）。
+                    // 扫描规则与旧实现一致（跳至**首个** `}` 含它；换行/EOF 终止未闭合插值），
+                    // 差别只在**把扫过的原文原样进串值**、且不多吃一字节。
+                    str_val = str_val + "$";
+                    _pos = _pos + 1;                    // 指向 `{`
+                    loop {
+                        ic := cur_char_at(_src, _pos, _slen);
+                        if ic == 0 || ic == 10 { break; }   // 未闭合：与字符串同规则（换行终止）
+                        str_val = str_val + chr(ic);
+                        _pos = _pos + 1;
+                        if ic == 125 { break; }             // 含收尾 `}`
+                    }
+                    continue;
                 } else {
                     str_val = str_val + chr(cc);
                 }
