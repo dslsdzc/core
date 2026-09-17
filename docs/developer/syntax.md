@@ -639,5 +639,5 @@ unsafe {
 **安全检查**——unsafe 范畴，调用方自己保证：
 
 ```core
-@no_bounds_check      // 跳过边界检查
+@NoBoundsCheck        // 跳过边界检查
 ```

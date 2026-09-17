@@ -1,7 +1,7 @@
 import io
 
 fn test_no_bounds_check() -> int {
-    @no_bounds_check;
+    @NoBoundsCheck;
     return 0;
 }
 

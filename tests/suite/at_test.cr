@@ -41,7 +41,7 @@ fn test_sizeof_3field_struct() -> int {
 }
 
 fn test_no_bounds_check() -> int {
-    @no_bounds_check;
+    @NoBoundsCheck;
     return 0;  // just verifies it compiles
 }
 

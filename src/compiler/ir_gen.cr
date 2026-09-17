@@ -1877,8 +1877,8 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                 return fn_var;
             }
 
-            // @no_bounds_check: emit annotation (no args)
-            if str_eq(name, "no_bounds_check") != 0 {
+            // @NoBoundsCheck: emit annotation (no args)
+            if str_eq(name, "NoBoundsCheck") != 0 {
                 emit(IR_NO_BOUNDS_CHECK, -1, 0, 0, 0, 0);
                 return -1;
             }

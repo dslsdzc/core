@@ -53,7 +53,7 @@ extern fn read_file(path: *const u8) -> *mut u8;
 @ 分类：
 ├─ 元数据查询     → @typeInfo, @field, @hasField
 ├─ 编译控制       → @inline, @unroll, @section, @comptime, @ffi
-└─ 安全检查       → @no_bounds_check
+└─ 安全检查       → @NoBoundsCheck
 ```
 
 `@ffi` 是编译控制——不改变语义，只改变编译方式。

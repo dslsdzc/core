@@ -171,7 +171,7 @@
 - `@typeInfo(T)` — 类型名称字符串
 - `@comptime(expr)` — 透传 IR gen
 - `@inline(fn)` — IR_INLINE(34)
-- `@no_bounds_check` — IR_NO_BOUNDS_CHECK(35)
+- `@NoBoundsCheck` — IR_NO_BOUNDS_CHECK(35)（2026-09-17 由 `@no_bounds_check` 更名，旧名报错不兼容）
 - `@fast` — IR_FAST(36)
 - `@unroll(n)` — IR_UNROLL(37)
 - `@section(name)` — IR_SECTION(38)
