@@ -1,6 +1,6 @@
 fn add(a: int, b: int) -> int { return a + b; }
 fn main() -> int {
-    @no_bounds_check;
+    @NoBoundsCheck;
     @fast;
     @unroll(4);
     @section("hot");

@@ -622,7 +622,7 @@ fn df_opcode_name(opcode: int, s3: int) -> string {
     if opcode == IR_ARENA_NEW { return "arena_new"; }
     if opcode == IR_ARENA_RESET { return "arena_reset"; }
     if opcode == IR_INLINE { return "inline"; }
-    if opcode == IR_NO_BOUNDS_CHECK { return "no_bounds_check"; }
+    if opcode == IR_NO_BOUNDS_CHECK { return "NoBoundsCheck"; }
     if opcode == IR_FAST { return "fast"; }
     if opcode == IR_UNROLL { return "unroll"; }
     if opcode == IR_APPROX { return "approx"; }

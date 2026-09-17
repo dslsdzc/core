@@ -29,8 +29,8 @@ diff -rq /tmp/probes_now /tmp/probes_base                                # 两�
 
 | # | 入仓文件 | 原路径（`/tmp`） | 出处 | 形态 | P6 起点 rc |
 |---|---|---|---|---|---|
-| 1 | `p_annots.cr` | `/tmp/p5t0/probes/p_annots.cr` | P5 T0 §2（表 A 探针） | `@no_bounds_check` **语句**形态（`IR_NO_BOUNDS_CHECK`/`IR_FAST` **零 IR** — F4 登记） | 0 |
-| 2 | `p_annots2.cr` | 同目录 | P5 T0 §2.3（F4） | `@no_bounds_check()` **括号**形态（唯一可达形态） | 0 |
+| 1 | `p_annots.cr` | `/tmp/p5t0/probes/p_annots.cr` | P5 T0 §2（表 A 探针） | `@NoBoundsCheck` **语句**形态（`IR_NO_BOUNDS_CHECK`/`IR_FAST` **零 IR** — F4 登记） | 0 |
+| 2 | `p_annots2.cr` | 同目录 | P5 T0 §2.3（F4） | `@NoBoundsCheck()` **括号**形态（唯一可达形态） | 0 |
 | 3 | `p_dex.cr` | 同目录 | P5 T0 §2（表 A） | dex 算术 + `as int`（`IR_I2F`/`IR_F2I`/`IR_BINARY` 行值为 `TI_FLOAT`） | 0 |
 | 4 | `p_dyn.cr` | 同目录 | 同上 | `dyn` 槽（`TYP_DYN` 行面） | 0 |
 | 5 | `p_enum.cr` | 同目录 | 同上 | 枚举构造 + match（`IR_MAKE_ENUM`/`IR_LOAD_ENUM_TAG`） | 0 |

@@ -3843,8 +3843,8 @@ fn infer_expr(node: int) -> int {
             return v;
         }
 
-        // @no_bounds_check — no args, unit
-        if str_eq(name, "no_bounds_check") != 0 {
+        // @NoBoundsCheck — no args, unit
+        if str_eq(name, "NoBoundsCheck") != 0 {
             return TI_UNIT;
         }
 

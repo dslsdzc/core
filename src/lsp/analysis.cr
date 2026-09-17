@@ -704,7 +704,7 @@ fn analysis_at_items(prefix: string) -> string {
     if analysis_has_prefix("typeInfo", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("typeInfo", 3); first = 0; }
     if analysis_has_prefix("comptime", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("comptime", 3); first = 0; }
     if analysis_has_prefix("inline", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("inline", 3); first = 0; }
-    if analysis_has_prefix("no_bounds_check", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("no_bounds_check", 3); first = 0; }
+    if analysis_has_prefix("NoBoundsCheck", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("NoBoundsCheck", 3); first = 0; }
     if analysis_has_prefix("fast", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("fast", 3); first = 0; }
     if analysis_has_prefix("unroll", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("unroll", 3); first = 0; }
     if analysis_has_prefix("section", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("section", 3); first = 0; }

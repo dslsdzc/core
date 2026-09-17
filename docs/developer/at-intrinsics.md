@@ -8,7 +8,7 @@
 |------|------|---------|
 | 元数据查询 | `@typeInfo` `@field` `@hasField` `@fields` `@sizeOf` `@alignOf` | 泛型、序列化、反射 |
 | 编译控制 | `@comptime` `@inline` `@unroll` `@section` | 性能调优、底层控制 |
-| 安全检查 | `@no_bounds_check` `@fast` | unsafe 优化 |
+| 安全检查 | `@NoBoundsCheck` `@fast` | unsafe 优化 |
 
 ## 元数据查询
 
@@ -52,7 +52,7 @@ fn serialize(buf: &[u8], obj: any) {
 跳过硬性安全检查。unsafe 范畴，调用方自己保证安全。
 
 ```core
-@no_bounds_check      // 跳过边界检查
+@NoBoundsCheck        // 跳过边界检查
 @fast                 // 优化性能提示(行为零变化;精度换速度 = apx 语义级授权,见 syntax.md dex/apx 节)
 ```
 

@@ -133,6 +133,9 @@
 | — | `#2026-09-17-5` | 2026-09-17 | 批 5 §10 分诊登记 | ⚠【静默·双路径分歧】泛型实例化后 `dex?`：调用侧环按泛型声明、callee 槽按实例 ⇒ 口径不一致 |
 | — | `#2026-09-17-6` | 2026-09-17 | 批 5 §10 分诊登记 | ⚠⚠【静默·通用】可选值 `==` 恒假（含 `None == None`）——非 dex 引入 |
 | — | `#2026-09-17-7` | 2026-09-17 | 批 5 §10 分诊登记 | 【fail-closed 缺口】`extern` 形参不校验可选（`check=0` ⇒ 运行期 139） |
+| — | `#2026-09-17-13` | 2026-09-17 | at-rename 批实测登记 | ⚠【判据·假红】`parity_run.sh` 暖态广度段在 `PARITY DONE` 之后仍同步跑 20+ 分钟且持续重写 `.core/cache/cir` ⇒ 同工作区跑测试读到冻结基线的 v17 条目 = 假红（须写成纪律） |
+| — | `#2026-09-17-14` | 2026-09-17 | at-rename 批实测登记 | 【并行安全】`run.sh` full-bootstrap 用固定 `/tmp/corec2`、`/tmp/corec3` ⇒ 多代理并行跑该 job 互相覆盖（判据读数可能对应混合产物） |
+| — | `#2026-09-17-15` | 2026-09-17 | at-rename 批（更名）附带发现 | 【漂移·既有】LSP `@` 补全表缺 `addr`/`raw_int`（字面量镜像 vs `checker.cr` EXPR_AT 真源 ⇒ 补全面与语言面漂移） |
 
 
 ## 已完成
@@ -171,7 +174,7 @@
 - `@typeInfo(T)` — 类型名称字符串
 - `@comptime(expr)` — 透传 IR gen
 - `@inline(fn)` — IR_INLINE(34)
-- `@no_bounds_check` — IR_NO_BOUNDS_CHECK(35)
+- `@NoBoundsCheck` — IR_NO_BOUNDS_CHECK(35)（2026-09-17 由 `@no_bounds_check` 更名，旧名报错不兼容）
 - `@fast` — IR_FAST(36)
 - `@unroll(n)` — IR_UNROLL(37)
 - `@section(name)` — IR_SECTION(38)
@@ -1167,6 +1170,32 @@
 - **判据要件（修复时）**：① `extern` 声明含可选形参 ⇒ `check` rc=1 + 专属诊断 + **零产物**；② 非可选 `extern` 行为**逐字节不变**；③ `dex?` 与 `int?` **同一拒收路径**（同判）。
 - **状态**：**登记，未修**；**不做根因定位**。
 - **关联**：批 5 报告 §10 分诊「附带发现 2」· `TODO #2026-09-16-14`（软诊断族）邻域。
+
+### 2026-09-17-13. ⚠ **【判据·假红】`parity_run.sh` 暖态广度段在 `PARITY DONE` 之后仍同步跑 20+ 分钟且持续重写 `.core/cache/cir` ⇒ 同工作区跑测试 = 读到冻结基线的旧版本条目 = 假红**（2026-09-17 at-rename 批实测登记）
+
+- **现象（实锤）**：`bash tools/baseline/parity_run.sh <corec> <outdir>` 在打印 `PARITY DONE（…）` **之后**才进入 `if [ "${WARM_LEG:-1}" != "0" ]` 段，**同步**调用 `warm_leg.sh`（本机实测：22:13 打印 DONE，22:39 仍未结束 ⇒ 我的暖态段被 SIGTERM 中止；机器同时处于内存压力 + I/O ~1.8MB/s · 缓存目录 855MB，历史注记值 `+125s` 不适用）。该段逐档 `clean-cache` + `ccr` 两跑 ⇒ **持续重写**同工作区 `.core/cache/cir`。
+- **后果（本次实测链）**：我在「已打印 DONE」的窗口内跑 `CI_JOB_NAME=selfhost-tests src/ci/run.sh` ⇒ `test_ccr_types` 的缓存断言读到**冻结基线（`/tmp/optdex-baseline/corec`，v17 写入者）落的条目**（期望 19）= **2 例假红 · job rc=1（47/49）**。处置与验证：停暖态段 → `rm -rf .core/cache/cir` → 重跑 ⇒ **49/49 · job rc=0 · 0 FAIL**（结论以重跑为准）。
+- **性质**：与「全语料/重建/测试互斥」**同族**的第三个触发面（前两个：扫描期间不构建 / 不改源）。根因面 = ① runner 的完成信号不覆盖暖态段（**打印 DONE ≠ 腿结束**）；② `.core/cache` 是**按工作区共享**且缓存键不含编译器身份（`TODO #2026-09-10-1`）⇒ 冻结基线与当前二进制的条目在同一目录里混放。
+- **纪律（建议成文）**：`parity_run.sh` / `probes_run.sh`（含暖态段）**未真正结束前**，同工作区**禁跑构建/测试**；以「runner 进程退出」为唯一结束信号，**不得**以 `PARITY DONE` 行为准。改进方向（择一）：暖态段前移/后移由 `WARM_LEG` 显式控制并在文首标注实测时长；或 runner 结束时写哨兵文件（含 PID + 时间戳）；或暖态段用独立输出目录 + 独立缓存目录。
+- **⚠ 防误读注**：被 SIGTERM 的暖态段会让 runner 打印 `WARM LEG FAILED（暖态腿：冷/暖两态分歧）`——那是**中止信号、不是冷/暖分歧**（本次 `/tmp/atr_par_{frozen,post}.out` 即此形态）；判据面以 `logs/`（rc + 日志，主判据）为准。
+- **状态**：**登记，未修**（runner 本体改动属 `tools/baseline/*`，须单独批 + 突变自证）。
+- **关联**：`TODO #2026-09-10-1`（缓存键缺编译器身份）· `tools/baseline/REBUILD.md`（暖态腿口径与时长注）· `TODO #2026-09-16-33`（腿① 暖广度腿 stats 差异，同一 runner）。
+
+### 2026-09-17-14. **【并行安全】`run.sh` 的 full-bootstrap 用固定路径 `/tmp/corec2`、`/tmp/corec3` ⇒ 多代理/多工作区并行跑该 job 互相覆盖（判据读数可能对应混合产物）**（2026-09-17 at-rename 批实测登记）
+
+- **现象（实锤）**：`src/ci/run.sh` 的 `full-bootstrap` job 以固定路径落 `corec2`/`corec3`（`./build/corec build … -o /tmp/corec2` → `/tmp/corec2 build … -o /tmp/corec3` → `cmp`）。本机多代理并发下实测：我 22:12 取完 `cmp + sha256sum` 读数后，22:44 `pgrep` 仍见 `1549056 /tmp/corec2 build src/compiler/main.cr -o /tmp/corec3 …`（**他批正在重写同一对路径**）。
+- **后果**：① 并行窗口内 `cmp` 可能比较到「他人的 corec3」；② 事后复核 sha 会得到与当时不符的值（**读数不可复现**，且无从分辨是谁的阶段产物）；③ 两个 job 交错时 `corec2` 可能被他人的 `corec3` 覆盖 ⇒ 假红/假绿双面。
+- **修法（择一）**：路径带 PID/时间戳（`/tmp/corec2.$$`）；或对本 job 加文件锁（`flock`）；或至少在 job 内**同时打印** sha + 产物路径 + 时间戳，使事后归因可能。
+- **状态**：**登记，未修**（CI 脚本改动 + 复验属独立小批）。
+- **关联**：本批实测读数（corec2≡corec3 sha `18f67af9…`，2026-09-17 22:12）**带时间戳有效、事后 /tmp 值不可作复核依据**。
+
+### 2026-09-17-15. **【漂移·既有】LSP `@` 补全表缺 `addr`/`raw_int`**（补全面与语言面漂移；字面量镜像 vs `checker.cr` EXPR_AT 真源）（2026-09-17 at-rename 批（更名）附带发现）
+
+- **现象**：`src/lsp/analysis.cr` 的 `@` 内建补全链（`analysis_has_prefix(...)` + `analysis_citem(..., 3)`）含 `sizeOf/alignOf/fields/hasField/field/typeInfo/comptime/inline/NoBoundsCheck/fast/unroll/section/hotpatch/ffi`，**缺 `addr`**（`ir_gen.cr` 有 `IR_FNADDR` 发射分支）与 **`raw_int`**（`ir_gen.cr:1847` 分支；`checker.cr` 同名分派）⇒ 键入 `@ad`/`@raw` 得不到候选，而两名字**实际可用**。
+- **机理**：补全表是**字面量镜像**（`analysis.cr` 已注释「名单唯一来源 = `checker.cr` EXPR_AT 分发的 str_eq 名字」，但无机械守卫）⇒ 新增/更名内建时该表**只能靠人记得同步**（本批更名 `@NoBoundsCheck` 即手工同步两处字面量）。
+- **判据要件（修复时）**：① 补全项集合 == `checker.cr` EXPR_AT 的 `str_eq(name, "…")` 名单集合（**静态守门**：两文件文本扫描做差集，双向为空；可挂 `bootstrap-tests`，纯 python）；② 补 `addr`/`raw_int` 后与 `@sizeOf` 同款候选（kind=3）且**排序/拼接格式不变**；③ 负控：真不存在的名字（如 `nosuchbuiltin`）仍不得出现。
+- **状态**：**登记，未修**（本批只同步 `NoBoundsCheck` 两处字面量；差集面未动）。
+- **关联**：`docs/superpowers/specs/2026-08-08-lsp-design.md:125`（补全面设计）· `tests/selfhost/test_lsp.py`（行为面，未挂 CI）· 本批 `#2026-09-17-13`（同为「runner/表与真源漂移」类）。
 
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
