@@ -93,6 +93,13 @@ case "$CI_JOB_NAME" in
     # 该判据原按「本批只动文档+注释」登记于白名单，维护者裁示「不挂 = 几周内腐烂成没人跑的
     # 脚本」⇒ 挂本 job（同 test_block_git / test_ci_hook_coverage 的位置与体例）。
     python3 tests/harness/test_todo_id_migration.py
+    # 判据接线批（2026-09-18，TODO #2026-09-17-15 / #2026-09-16-15）：两条**静态守卫**（纯 python、
+    # 无编译器依赖）——① LSP `@` 内建补全表 ↔ 语言面**双真源**（checker EXPR_AT ∪ `@` 面注解解析器）
+    # 双向差集为空；含**真源枚举守卫**（新增注解解析器 ⇒ 必红，防「第三真源」静默失效）+ 四项突变自证。
+    # ② `IR_REF` 发射点形状绊线（恒 1 处 + dest 紧邻局部）——**廉价版**：只证形状，语义版（dest 非全局）
+    # 需构建 + 新增 dump 通道（`g_x86_is_global` 今日无 dump 打印），见该条。
+    python3 tests/harness/test_lsp_builtin_table.py
+    python3 tests/harness/test_ir_ref_sites.py
     ;;
 
   selfhost-tests)
