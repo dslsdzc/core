@@ -132,7 +132,7 @@ grep -n "IR_APPROX" src/compiler/ast.cr ; grep -n "CCR_VERSION\|CCR_SEG_COUNT" s
 # S3/S4
 sed -n '127,131p' src/ci/run.sh ; ls tests/selfhost/test_*.py | wc -l
 # ✓10
-sed -n "$(grep -n 'fn diag_gate_exempt' src/compiler/diag.cr | cut -d: -f1),+40p" src/compiler/diag.cr | grep -oE "EC_[A-Z_]+" | sort -u | wc -l   # → 9
+sed -n "$(grep -n 'fn diag_gate_exempt' src/compiler/diag.cr | cut -d: -f1),+40p" src/compiler/diag.cr | grep -oE "EC_[A-Z_]+" | sort -u | wc -l   # → 8（2026-09-18 批 8 A₂ 撤 TF01 后；旧值 9 留痕）
 # S5
 python3 - <<'EOF'
 import re

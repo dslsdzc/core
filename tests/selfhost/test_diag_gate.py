@@ -2,7 +2,10 @@
 """fail-closed 判据线（FC 批 T2）：闸门反转 = 默认阻断 + 豁免登记表。
 
 判据面（源 = `src/compiler/diag.cr::diag_gate_exempt`；消费点 = `main.cr` 的硬判定循环）：
-  · 正控（9）：表内 6 条 build 面豁免码（TF01/TF07/TB01/TM04/TK01/B04）⇒ 仍放行（build rc=0 + 产物）；
+  · 正控（8）：表内 **5** 条 build 面豁免码（TF07/TB01/TM04/TK01/B04）⇒ 仍放行（build rc=0 + 产物）；
+    **TF01 已于 2026-09-18（批 8 A₂）撤条**——原「chan_test 产 TF01 且被豁免」的**正控改为**：
+    ① 根因正控 = 5 档并发语料**干净构建**（rc=0 + 产物 + **无 TF01**）；② **负控** = 真 TF01（string 值返
+    int 声明）**仍阻断**（rc=1 + 零产物）——即「撤条 ≠ 放行」。
     `scope=check` 3 条（N01/N06/N11）⇒ **check 面 rc=1 不变**（(C) 终局：本表对 check 面惰性）。
   · 负控（6）：三类面各覆盖——语法面 P21 · 类型面 TA02/R002/TM03/TK05 · 安全检查面 TU03
     ⇒ 仍阻断（rc=1 **且零产物**）。
@@ -74,7 +77,13 @@ def build_ok(name, src_path, want_codes=()):
          f"rc={r.returncode} art={out.exists()} codes={[c for c in want_codes]}")
 
 
-build_ok("tf01", "tests/suite/chan_test.cr", ("TF01",))
+# ── TF01（A₂ 撤条；2026-09-18）：根因正控 + 负控（「撤条 ≠ 放行」）────────────
+clean()
+_r = cc(["check", "tests/suite/chan_test.cr"])
+t.ok("pos_tf01_root_fixed",
+     _r.returncode == 0 and "error[TF01]" not in (_r.stdout + _r.stderr),
+     f"check rc={_r.returncode} TF01={'error[TF01]' in (_r.stdout + _r.stderr)}")
+build_ok("tf01_build_clean", "tests/suite/chan_test.cr")
 build_ok("tf07_tb01", "tests/suite/ptr_ref_first.cr", ("TF07", "TB01"))
 tm04 = write("tm04", "enum Color { Red, Green, Blue }\n"
                      "fn main() -> int { c := Red(); "
@@ -115,6 +124,8 @@ neg("type_tk05", write("tk05", "fn main() -> int {\n    arr := [1, 2, 3];\n"
                                "    s := arr[0..5];\n    return 0;\n}\n"), "TK05")
 neg("safety_tu03", write("tu03", "fn main() -> int {\n    p := 4096 as *int;\n"
                                  "    return *p;\n}\n"), "TU03")
+# TF01 撤条后的**负控**（A₂）：真 TF01（string 值返 int 声明）⇒ 仍阻断（rc=1 + 零产物）——「撤条 ≠ 放行」
+neg("type_tf01", write("tf01", 'fn main() -> int {\n    s := "x";\n    return s;\n}\n'), "TF01")
 
 # ── 零产物 1：前端失败（P21）⇒ 无 ELF / 无 .ccr（并入 neg_syntax_p21 断言）──
 # ── 零产物 2：corearch 失败（stub）⇒ 本次 .ccr 被删 ─────────────────────

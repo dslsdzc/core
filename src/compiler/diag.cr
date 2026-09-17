@@ -170,11 +170,20 @@ fn print_parse_errors() {
 // 粒度 = 码级；每条附「位点证据 / 理由 / 退出条件」三字段（证据字段不参与判定）。
 // **不得**把本表写成「默认放行」形态（那会把静默错产物制度化）。
 fn diag_gate_exempt(code: int, scope: int) -> int {
-    // ── scope = BUILD（6 条；build/ccr/cir/run 面）────────────────────────
-    // TF01 · 位点 = tests/suite/{chan,conc,go_e2e,go_final,go_parallel}_test.cr（5 档 build）
-    //        理由 = 并发族既有误报（同族两条已修先例：#2026-09-13-1 lits_copy / ty_memo_slot_no_grow）
-    //        退出 = 逐档归因 + 修前端根因后撤
-    if scope == GATE_SCOPE_BUILD && code == EC_TF_RETURN { return 1; }
+    // ── scope = BUILD（5 条；build/ccr/cir/run 面）────────────────────────
+    // **TF01 已于 2026-09-18（批 8 A₂）撤销**——撤条归因（带根因证据，合「只减不增」纪律）：
+    //   真因 = 类型模型冲突：`alloc` 的模型是 `() -> string`（`checker.cr` 的 `bi_add("alloc", TI_STR)`），
+    //   而 `src/stdlib/{chan,goroutine,sched}.cr` 的 3 处 handle 返回型写作 `-> int`（`chan_make` / `g_new` /
+    //   透传的 `sched_go`）⇒ 返回位 `type_compat_strict(string, int) != 1` ⇒ TF01（**不是误报**：上一批
+    //   `lits_copy` 同因已修，本次是**同族未清实例**）。修法 = **(A) 语料/stdlib 向模型对齐**（3 处返回型 +
+    //   5 处 handle 形参：`chan_send/chan_recv/chan_close(ch: string)` · `sched_enqueue/g_free(g: string)`）。
+    //   判据 = 5 档并发语料 `check` **rc=0 且无 TF01**、`build` rc=0、`run` rc=0（前后读数 2→0）；
+    //   **负控** = 真 TF01（string 值返 int 声明）仍**阻断**（rc=1 + 零产物）——见 `test_diag_gate.py`。
+    //   ⇒ 豁免**不再需要**（撤条 = 「不再用豁免盖住真冲突」；条目 6 的收口形态）。
+    // TF07 · 位点 = tests/suite/ptr_ref_first.cr:8（@raw_int）+ tests/selfhost/test_ccr_types.py:1805
+    //        理由 = EC_TF_ARG_TYPE 全仓唯一 raise 点在 @raw_int 内建位（checker.cr:3727），非调用位点
+    //        退出 = #2026-09-16-1/F3 调用位点收口后撤
+    if scope == GATE_SCOPE_BUILD && code == EC_TF_ARG_TYPE { return 1; }
     // TF07 · 位点 = tests/suite/ptr_ref_first.cr:8（@raw_int）+ tests/selfhost/test_ccr_types.py:1805
     //        理由 = EC_TF_ARG_TYPE 全仓唯一 raise 点在 @raw_int 内建位（checker.cr:3727），非调用位点
     //        退出 = #2026-09-16-1/F3 调用位点收口后撤

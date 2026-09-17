@@ -154,7 +154,15 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_named_face.py     # R2 P5 Task 3：命名面判定化（身份链：同链 1 / 链异 0 / 域外 -1）行为覆盖集——受 10 例（命名互赋 / 泛型应用两实例化 / 嵌套应用 / 实参含命名 / 容器元组 / 递归 *Node / 形参 T / 别名透明 / 函数边界）+ 拒 8 例（异名同形 / 异实参应用 / 命名 vs 原生 / 命名 vs 应用 / 可选异名 / T 赋 int / 不变槽残留 ×2）；**不依赖影子通道**（影子通道已于 P5 T5 下线 ⇒ 本套件 = 下线后的判定面行为网主力）；18 例
     python3 tests/selfhost/test_named_dedup.py    # R2 P2a Task 3（C-4）：侧表 ↔ res_type_node 管线内断言（`--verify-named-dedup`；**非影子通道**——判据 = 真实流水线上三组一致性，影子期亦无耦合）
     python3 tests/selfhost/test_let_check.py      # R2 P5 Task 6（TODO #2026-09-11-14）：`EXPR_LET` 站点值/注解兼容判定——TA02 定位硬错（值非兼容 + 数组长度档）+ 无产物 + 前端拒绝（不进入 lower/写 .ccr/ELF）+ 全局声明面（check_global_let 同款）+ 批量/丢弃名 + 级联抑制（TI_NEVER 错误标记只发原诊断）+ 正控（无注解/auto/dyn/泛型 T 与 [T;N]/可选注入/无初值）；23 例〔**注释陈旧自纠**：T4a 前实读 = 24（23 为 P5 期旧值，差 1 未同步）〕+ R2 P6 Task 4a 增 5（never 调用声明位 / near-miss 负控 / 强负控调用返回型不符仍拒 / 语句位宽面 / 赋值位登记钉）＝ **29 例**
-    python3 tests/selfhost/test_diag_gate.py      # FC 批 T2：fail-closed 闸门（默认阻断 + 豁免登记表 9 条）——正控 9（表内 6 个 build 面码仍放行 + scope=check 3 条 check rc=1 不变）+ 负控 6（语法面 P21 / 类型面 TA02·R02·TM03·TK05 / 安全检查面 TU03：仍阻断 + **零产物**）+ 零产物 3（前端失败无半成品 / corearch 失败删本次 .ccr [stub 仿真] / 旧哨兵原样仍在）＝ **17 例**
+    python3 tests/selfhost/test_diag_gate.py      # FC 批 T2：fail-closed 闸门（默认阻断 + 豁免登记表 **8 条**——TF01 于批 8 A₂ 撤条）——正控 8（表内 5 个 build 面码仍放行 + scope=check 3 条 check rc=1 不变）+ **TF01 撤条对：根因正控（chan_test check rc=0 无 TF01 + build 干净）+ 负控（真 TF01 ⇒ rc=1 + 零产物，即「撤条 ≠ 放行」）** + 负控 6（语法面 P21 / 类型面 TA02·R02·TM03·TK05 / 安全检查面 TU03：仍阻断 + **零产物**）+ 零产物 3（前端失败无半成品 / corearch 失败删本次 .ccr [stub 仿真] / 旧哨兵原样仍在）＝ **19 例**
+    # ─── 批 8 A₂（条目 6）：并发 handle 类型模型对齐 —— **自门内 e2e 判据**（2026-09-18）───
+    # **11 例** = 5 档并发语料 × （check 干净且**无 TF01** + build+run rc=0）+ 1 形态自证（`chan_make→string`
+    # 赋值 + `chan_send/recv/close(string)`）。
+    # ⚠ **为何必须挂这里**：5 档语料在 `tests/suite/`，而 **`suite` 腿不在 PR 门内**（台账「PR 门覆盖域陷阱」条：
+    # glob 收编 ≠ 进门）⇒ 本套件把该证据编进 `selfhost-tests`（门内），使其**不悬空**。
+    # 根因 = `alloc: () -> string` 模型 vs 3 处 handle 返回型 `-> int`（`chan_make`/`g_new`/`sched_go`）+ 5 处
+    # handle 形参；修法 = **(A) 语料/stdlib 向模型对齐**（裁定 (A)；(C) handle 兼容明令禁止）。
+    python3 tests/selfhost/test_chan_handle_model.py
     python3 tests/selfhost/test_warm_cache_gate.py # #2026-09-15-5 批 T2+T3：暖缓存两态回归（**CI 暖态最小面**；广度层 = tools/baseline/warm_leg.sh 手工判据）——缓存命中跳过 `ir_gen_func` ⇒ ir_gen 期 `alloc_type` 行不重建（T1 实锤：warm 缺 `TYP_PTR extra=1` ⇒ `provenance_verify.cr:66` TU03 静默失效）。修法 = 生成期对「快照不载的共享面」有副作用 ⇒ 该条目**不可写**（下次必 miss 重放副作用）；判据 ① `as *int` 解引用 load/store **冷/暖同**（都 rc=1 + TU03）② 机制钉：副作用函数 `::main.cir` **无条目** ③ 正控：普通程序条目在 + 二跑真命中（size/mtime 不变）④ TK01 冷/暖同 ⑤ `ccr` 面同判；**同路径重复编译 = 缺陷真触发场景（定路径是本设计的要点）**＝ **10 例**（**本批机械核对同步**：实测 10/10；注释旧值 6）
     python3 tests/selfhost/test_tc02_branch.py    # TC02 收口：`if` 分支相容判定的**发散豁免**（P3 不对称——else 支发散 ⇒ 不报；then 支发散 ⇒ 仍报真信号；谓词 `stmt_diverges`，checker.cr，只服务本判定点）+ 既有 NEVER 豁免（loop{} 收尾）零扰动 + TF01/TA02/TB01 面钉子（TF01 仍报 / 落空豁免不变 / 声明位 TA02 不变 / TB01 真错负控 ×2）+ 端到端 build+run（`test_native_float` 两源同形）＝ **15 例**
     # ─── 判据网加固批（criteria-harden，2026-09-16）：**弱判据改强 + 挂点扩容** ───
