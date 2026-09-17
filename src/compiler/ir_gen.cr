@@ -1247,6 +1247,10 @@ fn dex_opt_slot_ti(ti: int) -> int {
 }
 
 // 批 8（静默面收口 · 条目 1）：dex 实参按**被调方**形参链对齐——**可复用版**（泛型实例化后按实例再跑）。
+// ⚠ **本抽取在本批（批 8）未生效**：实例形参链未替换（`monomorph.cr` 的 `EXPR_FN` 克隆只克隆体 ⇒ 门恒假）
+//   ⇒ 实测零效果（3 二进制 × 4 探针矩阵 + 32 档隔离对拍确认行为中性）。**不得当死码删除**：
+//   `TODO #2026-09-18-3`（(乙) 泛型实例形参擦除）的 **A2a 依赖此抽取**（`cfi` 参数化 + 幂等 +
+//   重定向后第二遍的缝）——下游批次直接复用，删掉会让 (乙) 重做一遍。
 // 锁步契约：`arg_vars`/`arg_nodes` 与形参链**同索引**取用——直调（无接收者）1:1；方法调用接收者占
 // `arg_vars[0]`，而 `self` 在方法形参链中亦占第 0 位（parser 物化 EXPR_PARAM，parser.cr `self` 分支）
 // ⇒ 同对齐。**幂等**：转换只对 `irv_type(av) == TI_DEX` 生效 ⇒ 已转换（TI_DEX_S）者不会被二次转换
@@ -1273,7 +1277,6 @@ fn dex_align_call_args(cfi: int, ac: int, arg_vars: string, arg_nodes: string, a
         // 用**实例**形参链（inner = 具体 dex）再跑一遍本环。
         if ast_type_val(cpn) == TI_DEX ||
            (cfn_ext == 0 && dex_opt_type_node(ast_data(cpn)) != 0) {
-            println("DBG gate cpi=" + int_str(cpi) + " pn=" + int_str(cpn) + " pnkind=" + int_str(ast_kind(cpn)) + " pntv=" + int_str(ast_type_val(cpn)) + " pdata=" + int_str(ast_data(cpn)) + " dk=" + int_str(ast_kind(ast_data(cpn))) + " dov=" + int_str(dex_opt_type_node(ast_data(cpn))));
             av := r64(arg_vars, cpi * 8);
             if av >= 0 {
                 if cfn_ext != 0 {
