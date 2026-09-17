@@ -224,6 +224,14 @@ case "$CI_JOB_NAME" in
     # 机理：`==` 通用二元路径逐槽比原始值——裸(rep=0)比载荷 ✓、装箱比指针 ⇒ 恒假；
     # 修复 = 比较点归一 `(absent, payload)` 后按值比（`ir_gen.cr` opt_cmp_* 三函数 + 分派块）。
     python3 tests/selfhost/test_opt_eq.py
+    # ─── 批 8 条目 3（静默面收口）：extern 声明含可选（`?`）⇒ 硬错 P24（2026-09-17）───
+    # **12 例** = 拒收面 6（`dex?`/`int?` 形参 · `dex?`/`int?` 返回 · 混合形参 · `string?`）+ 非可选对照 4
+    # （`dex` / `int` / `never` / `char`——守卫 `test_iface_ops.py` 同形态的编译面）+ 守卫语料 2
+    # （`tests/suite/ffi_test.cr` · `tests/probes/p_ffi2.cr` check rc=0）。
+    # 判据要件：① 含可选 ⇒ rc=1 + `error[P24]` + 定位 + **零产物**；② 非可选逐字节不变；③ `dex?`/`int?` 同路径。
+    # 落点 = parser 的 extern 分支（签名规则位，同 P020 先例；返回类型节点在 parser 内可用）。
+    # 突变自证（批级留痕）：撤掉该检查 ⇒ 6 条拒收例回 `check=0`。
+    python3 tests/selfhost/test_extern_opt.py
     # ─── 批 6（验证内核正式接入 = 正式规约语法 `#check`/`#ensure`；2026-09-17）───
     # 四组 48 项：A 语法面（16）· B 检查面（11）· C `--dump-vcs` 通道（15）· D `.ccr` 零足迹三段式（6，含 Δ 公式）。
     # **Δ 公式 = 本批最有价值的判据**（T3 首轮当场抓到实现自身的 `str_intern("result")` 泄漏：两用例 STR Δ 凭空 +10B），

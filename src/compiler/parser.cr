@@ -1602,12 +1602,18 @@ fn parse_declaration() {
         advance_tok(); // (
         first_param : ., mut = -1;
         param_count : ., mut = 0;
+        // 批 8（静默面收口 · 条目 3）：C ABI 无可选表示 ⇒ extern 声明的**形参/返回不得为可选**
+        // （修复前 checker 对 extern 声明整段早退（`checker.cr` EXPR_EXTERN 分支）⇒ `extern fn e(x: int?)`
+        //  check=0/build=0、运行期垃圾值；两条早退路径都不报）。判据 = rc=1 + 定位 + 零产物（P024）；
+        // **非可选 extern 不受影响**（判据 ②，守卫档 = test_iface_ops.py / ffi_test.cr / p_ffi2.cr）。
+        extern_opt : ., mut = 0;
         if !check(T_RPAREN) {
             loop {
                 pt := advance_tok();
                 pn := str_intern(tok_lx(pt));
                 advance_tok(); // :
                 pty := parse_type();
+                if pty >= 0 && ast_kind(pty) == EXPR_OPTIONAL { extern_opt = 1; }
                 if first_param < 0 { first_param = g_ast_count; }
                 alloc_node(EXPR_PARAM, pn, 0, 0, 0, unpack_type(pty), pty, tok_ln(pt), tok_cl(pt));
                 param_count = param_count + 1;
@@ -1621,7 +1627,11 @@ fn parse_declaration() {
         if check(T_ARROW) {
             advance_tok();
             ret_node := parse_type();
+            if ret_node >= 0 && ast_kind(ret_node) == EXPR_OPTIONAL { extern_opt = 1; }
             ret_type = unpack_type(ret_node);
+        }
+        if extern_opt != 0 {
+            check_error(EC_P_EXTERN_OPTIONAL, "extern declaration cannot use optional type ('?') - no C ABI representation", tok_ln(t), tok_cl(t));
         }
         // Create EXPR_EXTERN node (no body)
         node : ., mut = alloc_node(EXPR_EXTERN, fn_name_ni, first_param, param_count, 0, ret_type, ffi_lang_ni, tok_ln(t), tok_cl(t));

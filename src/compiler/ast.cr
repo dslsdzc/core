@@ -344,6 +344,7 @@ EC_P_TOO_MANY_PARAMS : int = 1020; // P020  Too many function parameters (FuncIn
 EC_P_NESTED_FN    : int = 1021; // P021  Nested function declaration (函数声明仅限顶层)
 EC_P_ENUM_LIMIT   : int = 1022; // P022  **已退役**（容量批 T3：变体/载荷上限解除，零 raise）
 EC_P_STRUCT_LIMIT : int = 1023; // P023  **已退役**（容量批 T3：字段上限解除，零 raise）
+EC_P_EXTERN_OPTIONAL : int = 1024; // P024  extern 声明含可选形参/返回（C ABI 无可选表示；批 8 条目 3）
 
 // N0xx — Name Resolution
 EC_N_UNDEFINED     : int = 2001; // N001  Undefined name
