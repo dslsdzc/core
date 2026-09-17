@@ -285,7 +285,9 @@ class Parser:
                     depth += 1
                 elif self.check(TokenType.RPAREN):
                     depth -= 1
-                self.advance()    def _parse_generics(self):
+                self.advance()
+
+    def _parse_generics(self):
         if self.check(TokenType.LBRACK):
             self.advance()
             names = []
