@@ -255,8 +255,10 @@ fn corec_main() -> int {
     cli_flag_bool("verify-evp-nodes", "", "R2 P3 T4: assert enum variant payload type nodes recorded (debug)");
     cli_flag_bool("diag-gate-report", "", "FC T2: report fail-closed gate verdicts per compile (debug; default off — 不改 rc/产物)");
     cli_flag_bool("dump-vcs", "", "批 6 T4: dump spec VC list (#check/#ensure) — hidden debug channel; stdout only, no artifact, rc untouched");
+    cli_flag_bool("dump-params", "", "(乙) A1: dump per-param slot type at prologue (`PARAM fn p<i> name slot=<ti> decl=<tv>`) — hidden debug channel; stdout only, no artifact, rc untouched");
 
     if cli_parse() != 0 { return 1; }
+    if cli_has("dump-params") != 0 { g_dump_params_on = 1; }
     // Parse -O flag (default O1)
     g_opt_level = 1;
     ol : ., mut = cli_get("opt-level");

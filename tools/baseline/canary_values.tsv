@@ -49,6 +49,18 @@
 #     gt_ccr        `41e9d84578ce2ca41934373ec0f96a2ec53e04422509147e05324b122e9f77eb` 142793
 #     gt_static_ccr `704316c81aecd6ad9ce7f04417ec9a786243b74df62e8178e8a2bc064132f1cb` 142936
 #
+# ── 【本批重锁 2026-09-18】(乙) 泛型实例形参擦除：gt 两条 **sha 变、size 不变**（142765/142908）──
+#   归因（**闭环**，本批实测）：A1 让泛型实例形参链**具体化** ⇒ 实例形参槽型从 `TI_INT` 变为代入后的型
+#   （`identity[string]` / `pair` 的 string、`identity[bool]` 的 bool）⇒ `.ccr` 内**仅 3 字节**变
+#   （offset 12274 / 12446 / 12574：`0→3` / `0→3` / `0→2` = TI_STR / TI_STR / TI_BOOL）。
+#   证据五条：① `cmp -l` 差异字节数 = **3** 且尺寸逐条相同；② `corec cir` 的**逐指令文本 dump 两版逐字节相同**
+#   （发射面零足迹）；③ 同语料 ELF 两版 sha 逐字节相同（`f1f78686…b20b5`）；④ 运行两版均 `ALL PASS` rc=0；
+#   ⑤ 全语料实例枚举（(乙) 测量② = 104 档）= 8 实例 / 3 档，其中**标量**形参槽在本语料内恰 3 处。
+#   出处提交：`e05676ca`（A1 + `--dump-params`）· 计划 = `docs/superpowers/plans/2026-09-18-generic-param-erasure.md` §11。
+#   旧值留痕（**自本批起作废**）：
+#     gt_ccr        `d92a2727d0c51aa887d7053305a26bdf85451303e08d268898cf1de76bae2c95` 142765
+#     gt_static_ccr `a1f7b99c68c7d433834593100a776b74f883de291482f20762fe7399ec5182ea` 142908
+#
 #   ⚠ **判据效力范围（重要，且超出本批）**：旧的 142793/142936 **从来不是跨机可复现的值**——
 #   它们是「本机 `~/.core/lib/io/index` 在场」时测得的。G3（P6 T3）起至本批的**每一次「锁定值
 #   命中」都隐含依赖该文件在场**；在没有该文件的机器（如 CI runner）上，本判据必然红。
@@ -88,5 +100,5 @@
 canary_elf	pa	95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475	28822
 pa_ccr	pa.ccr	680a6f9843747b521213c3bcca1cf8724657943410f182e97ed63dcc11c7cd7a	96015
 pa_static_ccr	pa_st.bin.ccr	76f36e6a6b6eb2f18fa5541550d09e5e73bb0e8dfc7df2ebbe3d747c382f329c	96158
-gt_ccr	gt.ccr	d92a2727d0c51aa887d7053305a26bdf85451303e08d268898cf1de76bae2c95	142765
-gt_static_ccr	gt_st.bin.ccr	a1f7b99c68c7d433834593100a776b74f883de291482f20762fe7399ec5182ea	142908
+gt_ccr	gt.ccr	2b364cf1530900d13f43dea6878c4d58df78867f7de5d197d5cf6edf533b0fd9	142765
+gt_static_ccr	gt_st.bin.ccr	cd85fd05c2d9bff1910af08dc3bcb298054014de710138c3515dfd5063506d58	142908

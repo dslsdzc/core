@@ -3255,6 +3255,20 @@ fn ir_gen_func(fi: int) {
         pvar := new_ir_var(pname, param_type);
         // Bind param name
         bind_local(pname_idx, pvar);
+        // (乙) A1 判据通道（`--dump-params`，隐藏）：**槽型直读** = 判据 P2 的仪器
+        // （现 CLI 无 IR 变量槽型直读：`cir` 文本 dump 只有逐指令、`--dump-tk-terms` 是
+        // DFNode.TK **派生面**、`alloc d : unit` 那行是 decl 面）。纯表读
+        // （`irv_type`/`ast_type_val`/`istr_get` + `int_str`）⇒ 零 alloc 副作用、
+        // **rc 中性 + 零产物**（用不用该 flag 产物逐字节不变）。
+        // `decl` = 声明面节点 `type_val`：泛型形参 = 0 ⇒ 与 `slot` 并排即「擦除」的直接证据。
+        if g_dump_params_on != 0 {
+            print("PARAM "); print(istr_get(name_idx));
+            print(" p"); print(int_str(pi));
+            print(" "); print(pname);
+            print(" slot="); print(int_str(irv_type(pvar)));
+            print(" decl="); print(int_str(ast_type_val(pn)));
+            print("\n");
+        }
         // 可选表示（R2 P4 Task 5）：形参表示位——**序言最早处**从实参信道读（先于任何
         // 可能改写信道的调用；调用点在 IR_CALL 前写）。形参类型节点 = EXPR_PARAM.data。
         ptn := ast_data(pn);

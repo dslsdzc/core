@@ -90,6 +90,11 @@ g_cov_bits : string, mut;  g_cov_cap : int, mut;  g_cov_len : int, mut;
 // g_optrep_on：本编译单元是否启用表示面（AST 预扫：EXPR_OPTIONAL / `Some` / `None`）。
 //   关 = **零足迹**（不注册隐藏全局、不发任何表示指令）⇒ 非可选程序的发射面逐字节不变。
 g_optrep_on : int, mut;
+// g_dump_params_on：(乙) A1 判据通道（`--dump-params`，隐藏调试）：形参序言创建槽时打一行
+//   `PARAM <函数名> p<i> <形参名> slot=<槽型码> decl=<节点 type_val>` 到 **stdout**。
+//   **rc 中性 + 零产物**（用不用该 flag，rc 与产物逐字节不变；不新增 alloc/str_intern 副作用——
+//   只读 `irv_type` 与 `ast_type_val` 两个纯表读，函数名走既有 `istr_get`）。
+g_dump_params_on : int, mut;
 // g_optrep_ret_cell：返回表示的信道单元（IR 全局 var；-1 = 未注册）。返回点写、
 //   调用点读（读点紧跟 IR_CALL ⇒ 跨嵌套调用不被覆写；写点为值求值完成后 → 语义确定）。
 g_optrep_ret_cell : int, mut;
