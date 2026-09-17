@@ -588,6 +588,109 @@ fn rep_enc_of_expr(node: int, val_var: int) -> int {
     return oe_boxed();
 }
 
+// 批 8（静默面收口 · 条目 2）：操作数是否**确定可选**——保守触发面，**纯节点/表读、零 alloc_type**
+// （先例 `rep_enc_of_expr` / `elem_ti_of_node`）：
+//   ① var 带表示位（可选槽/形参/调用结果）；② `Some`/`None` 构造子；③ 可选声明面（局部槽型 / 全局）。
+// 非可选一律 0 ⇒ 比较走原路径（产物零变化 = 条目 2 判据 ⑤）。
+fn opt_cmp_optish(node: int, var: int) -> int {
+    if var >= 0 && irv_rep(var) >= 0 { return 1; }
+    if node < 0 { return 0; }
+    k := ast_kind(node);
+    if k == EXPR_ENUM_CONSTRUCTOR {
+        nm := istr_get(ast_a(node));
+        if str_eq(nm, "Some") != 0 || str_eq(nm, "None") != 0 { return 1; }
+        return 0;
+    }
+    if k == EXPR_IDENT {
+        ni := ast_int_val(node);
+        lv := find_local(ni);
+        if lv >= 0 {
+            if ti_is_optional(slot_decl_ti(lv)) != 0 { return 1; }
+            return 0;
+        }
+        gv := find_global(ni);
+        if gv >= 0 && global_decl_optional(ni) != 0 { return 1; }
+        return 0;
+    }
+    // 解引用可选指针：解引用结果**不配表示位**（`ir_gen.cr` UOP_DEREF 只发 IR_DEREF），
+    // 但 **INV-1** 保证「取址的可选槽恒装箱」⇒ 所指即装箱对象（`match *p` 走同一假定）。
+    if k == EXPR_UNARY && ast_c(node) == UOP_DEREF {
+        if var >= 0 && ti_is_optional(irv_type(var)) != 0 { return 1; }
+        return 0;
+    }
+    return 0;
+}
+
+// 批 8（条目 2）：比较点的**有效表示** = `rep_enc_of_expr` + 一条解引用规则——
+// 解引用「可选指针」的槽 ⇒ 装箱对象（INV-1；`rep_enc_of_expr` 对 EXPR_UNARY 按 OE_BARE
+// 回落会把装箱对象当裸值 ⇒ 必须在此覆盖）。
+fn opt_cmp_enc(node: int, var: int) -> int {
+    if node >= 0 && ast_kind(node) == EXPR_UNARY && ast_c(node) == UOP_DEREF {
+        if var >= 0 && ti_is_optional(irv_type(var)) != 0 { return oe_boxed(); }
+    }
+    return rep_enc_of_expr(node, var);
+}
+
+// 批 8（条目 2）：装箱对象的 (absent, payload) 提取——tag == "None" ⇒ (1, 0)；
+// 否则 (0, 字段1)。**字段读只在非 None 分支发射**（None 对象无载荷字段 ⇒ 避免越界读）。
+fn opt_cmp_extract_boxed(var: int, out_absent: int, out_val: int, zero: int) {
+    tag := new_ir_var("otag", TI_INT);
+    emit(IR_LOAD_ENUM_TAG, tag, var, 0, 0, 0);
+    nv := new_ir_var("onone", TI_INT);
+    emit(IR_CONST, nv, str_intern("None"), 0, 0, TI_INT);
+    isnone := new_ir_var("isnone", TI_INT);
+    emit(IR_BINARY, isnone, tag, nv, OP_EQ, 0);
+    none_lbl := new_label();
+    some_lbl := new_label();
+    xend_lbl := new_label();
+    emit(IR_BRANCH, -1, isnone, none_lbl, some_lbl, 0);
+    emit(IR_LABEL, -1, none_lbl, 0, 0, 0);
+    one := new_ir_var("_o1", TI_INT);
+    emit(IR_CONST, one, 1, 0, 0, TI_INT);
+    emit(IR_STORE, -1, out_absent, one, 0, 0);
+    emit(IR_STORE, -1, out_val, zero, 0, 0);
+    emit(IR_JUMP, -1, xend_lbl, 0, 0, 0);
+    emit(IR_LABEL, -1, some_lbl, 0, 0, 0);
+    emit(IR_STORE, -1, out_absent, zero, 0, 0);
+    pti : ., mut = TI_INT;
+    if var >= 0 { pti = irv_type(var); }
+    fv := new_ir_var("opay", pti);
+    emit(IR_LOAD_FIELD, fv, var, 0, 1, 0);
+    emit(IR_STORE, -1, out_val, fv, 0, 0);
+    emit(IR_LABEL, -1, xend_lbl, 0, 0, 0);
+}
+
+// 批 8（条目 2）：归一为 (absent, payload) 二元组（写进调用点预建的 out 槽）——
+//   裸（OE_BARE）   ⇒ (0, 槽值)；装箱（OE_BOXED）⇒ 见 `opt_cmp_extract_boxed`；
+//   运行期表示位（≥0）⇒ 分支判裸/装箱（裸 ⇒ (0, 槽值)）。
+fn opt_cmp_norm(node: int, var: int, out_absent: int, out_val: int) {
+    enc := opt_cmp_enc(node, var);
+    zero := new_ir_var("_oz", TI_INT);
+    emit(IR_CONST, zero, 0, 0, 0, TI_INT);
+    if enc == oe_bare() {
+        emit(IR_STORE, -1, out_absent, zero, 0, 0);
+        if var >= 0 { emit(IR_STORE, -1, out_val, var, 0, 0); }
+        return;
+    }
+    if enc >= 0 {
+        bare_lbl := new_label();
+        boxed_lbl := new_label();
+        nend_lbl := new_label();
+        isb := new_ir_var("rep_isbare", TI_INT);
+        emit(IR_BINARY, isb, enc, zero, OP_EQ, 0);
+        emit(IR_BRANCH, -1, isb, bare_lbl, boxed_lbl, 0);
+        emit(IR_LABEL, -1, bare_lbl, 0, 0, 0);
+        emit(IR_STORE, -1, out_absent, zero, 0, 0);
+        if var >= 0 { emit(IR_STORE, -1, out_val, var, 0, 0); }
+        emit(IR_JUMP, -1, nend_lbl, 0, 0, 0);
+        emit(IR_LABEL, -1, boxed_lbl, 0, 0, 0);
+        opt_cmp_extract_boxed(var, out_absent, out_val, zero);
+        emit(IR_LABEL, -1, nend_lbl, 0, 0, 0);
+        return;
+    }
+    opt_cmp_extract_boxed(var, out_absent, out_val, zero);
+}
+
 fn emit(opcode: int, dest: int, src1: int, src2: int, src3: int, type_kind: int) {
     // Build linear IR (.ccr) — consumed by x86-64 backend
     idx := g_ir_instr_count;
@@ -1143,6 +1246,61 @@ fn dex_opt_slot_ti(ti: int) -> int {
     return 0;
 }
 
+// 批 8（静默面收口 · 条目 1）：dex 实参按**被调方**形参链对齐——**可复用版**（泛型实例化后按实例再跑）。
+// 锁步契约：`arg_vars`/`arg_nodes` 与形参链**同索引**取用——直调（无接收者）1:1；方法调用接收者占
+// `arg_vars[0]`，而 `self` 在方法形参链中亦占第 0 位（parser 物化 EXPR_PARAM，parser.cr `self` 分支）
+// ⇒ 同对齐。**幂等**：转换只对 `irv_type(av) == TI_DEX` 生效 ⇒ 已转换（TI_DEX_S）者不会被二次转换
+// （这是「重定向前后各跑一遍」安全的前提）。**本函数不得重分配 arg_vars**（只写元素；句柄按值传入）。
+fn dex_align_call_args(cfi: int, ac: int, arg_vars: string, arg_nodes: string, arg_nodes_cap: int) {
+    cfn := fi_ast_node(cfi);
+    cfn_ext : ., mut = 0;
+    if cfn >= 0 && ast_kind(cfn) == EXPR_EXTERN { cfn_ext = 1; }
+    if cfn < 0 { return; }
+    if cfn_ext == 0 && ast_kind(cfn) != EXPR_FN { return; }
+    cpi : ., mut = 0;
+    cpn : ., mut = ast_b(cfn);
+    // 实参节点与实参 var **同表锁步**取（`arg_nodes[cpi]` 与 `arg_vars[cpi]` 同索引写入，
+    // 接收者亦在内）——方法调用下 EXPR_ARG 链**不含接收者**，若按链另走游标会滞后一位
+    // （批 5 实测：node 仅服务于 extern 字面量重发射，Core 分支不用；仍按锁步改正以免埋雷）。
+    loop {
+        if cpi >= ac { break; }
+        if cpn < 0 { break; }
+        dd := ast_data(cpn);
+        // 批 5（opt-dex · R3）：`dex?` 形参也进环——修复前门只认基类型节点（`type_val == TI_DEX`），
+        // `dex?` 的 `type_val` = 0 ⇒ apx 实参不转换 ⇒ 与 callee 槽型（本批已改 TI_DEX_S）口径一致；
+        // extern 侧不扩（C ABI 无可选表示，`.so` 面登记未覆盖面）。
+        // 批 8（条目 1）：泛型声明的 `T?`（inner = 泛型参数）判据为**假** ⇒ 调用点在**重定向后**
+        // 用**实例**形参链（inner = 具体 dex）再跑一遍本环。
+        if ast_type_val(cpn) == TI_DEX ||
+           (cfn_ext == 0 && dex_opt_type_node(ast_data(cpn)) != 0) {
+            println("DBG gate cpi=" + int_str(cpi) + " pn=" + int_str(cpn) + " pnkind=" + int_str(ast_kind(cpn)) + " pntv=" + int_str(ast_type_val(cpn)) + " pdata=" + int_str(ast_data(cpn)) + " dk=" + int_str(ast_kind(ast_data(cpn))) + " dov=" + int_str(dex_opt_type_node(ast_data(cpn))));
+            av := r64(arg_vars, cpi * 8);
+            if av >= 0 {
+                if cfn_ext != 0 {
+                    // extern：scaled → bits（字面量直接重发射位模式常量）
+                    if irv_type(av) == TI_DEX_S {
+                        arg_node : ., mut = -1;
+                        if cpi < arg_nodes_cap { arg_node = r64(arg_nodes, cpi * 8); }
+                        av = dex_scaled_to_bits(av, arg_node);
+                        w64(arg_vars, cpi * 8, av);
+                    }
+                } else if irv_type(av) == TI_DEX {
+                    // Core 函数：apx bits → scaled
+                    av = dex_bits_to_scaled(av);
+                    w64(arg_vars, cpi * 8, av);
+                }
+            }
+        }
+        cpi = cpi + 1;
+        cpn = cpn + 1;
+        loop {
+            if cpn >= g_ast_count { break; }
+            if ast_kind(cpn) == EXPR_PARAM { break; }
+            cpn = cpn + 1;
+        }
+    }
+}
+
 // 聚合读的**声明面** dex-ness（apx 批 T3 · 比较/相等点专用）：
 // #2026-09-16-16 未修 ⇒ 聚合读的结果槽 IR 型恒 TI_INT、**声明型被抹** ⇒ 下游「按值型触发」的
 // 形式分流看不到 dex。本函数在**节点级**把声明面取回来（**零 alloc_type**；先例
@@ -1326,6 +1484,59 @@ fn gen_expr(node: int) -> int {
             emit(IR_DYN_VAL, uv, right_var, 0, 0, 0);
             right_var = uv;
             rt = irv_type(right_var);
+        }
+
+        // 批 8（静默面收口 · 条目 2）：可选值 `==`/`!=` **按值比较**（表示透明）。
+        // 修复前走通用二元路径逐槽比**原始值**：裸（rep=0，槽值=载荷）⇒ 比载荷（正确）；
+        // 装箱（Some/None 对象）⇒ 比**指针** ⇒ `n==None` / 两个 None / `Some(7)==Some(7)` **恒假**（静默错值）。
+        // 本点把两侧归一为 (absent, payload) 后按值比：缺省性不同 ⇒ 不等；同缺省 ⇒ 相等；同在 ⇒ 比载荷。
+        // 触发面**保守**（`opt_cmp_optish`：带表示位 / Some|None 构造子 / 可选声明面）⇒ 非可选比较零变化（判据 ⑤）。
+        if (op == OP_EQ || op == OP_NE) && g_optrep_on != 0 {
+            lo := opt_cmp_optish(left, left_var);
+            ro := opt_cmp_optish(right, right_var);
+            if lo != 0 || ro != 0 {
+                lt2 : ., mut = TI_INT;
+                if left_var >= 0 { lt2 = irv_type(left_var); }
+                rt2 : ., mut = TI_INT;
+                if right_var >= 0 { rt2 = irv_type(right_var); }
+                abs_l := new_ir_var("absl", TI_INT);
+                val_l := new_ir_var("vall", lt2);
+                abs_r := new_ir_var("absr", TI_INT);
+                val_r := new_ir_var("valr", rt2);
+                opt_cmp_norm(left, left_var, abs_l, val_l);
+                opt_cmp_norm(right, right_var, abs_r, val_r);
+                zb := new_ir_var("_cz", TI_INT);
+                emit(IR_CONST, zb, 0, 0, 0, TI_INT);
+                // peq = 载荷相等（两侧皆缺省时其值无意义——由 both_abs 兜底）
+                peq : ., mut = -1;
+                if lt2 == TI_STR || rt2 == TI_STR {
+                    eq0 := new_ir_var("_eq0", lt2);
+                    eq1 := new_ir_var("_eq1", rt2);
+                    emit(IR_STORE, -1, eq0, val_l, 0, 0);
+                    emit(IR_STORE, -1, eq1, val_r, 0, 0);
+                    peq = new_ir_var("str_eq", TI_BOOL);
+                    emit(IR_CALL, peq, eq0, 2, str_intern("str_eq"), TI_BOOL);
+                } else {
+                    peq = new_ir_var("peq", TI_INT);
+                    emit(IR_BINARY, peq, val_l, val_r, OP_EQ, 0);
+                }
+                both_abs := new_ir_var("bothz", TI_INT);
+                emit(IR_BINARY, both_abs, abs_l, abs_r, OP_AND, 0);
+                eqv := new_ir_var("eqv", TI_INT);
+                emit(IR_BINARY, eqv, both_abs, peq, OP_OR, 0);
+                abs_eq := new_ir_var("abeq", TI_INT);
+                emit(IR_BINARY, abs_eq, abs_l, abs_r, OP_EQ, 0);
+                eqi := new_ir_var("eqi", TI_INT);
+                emit(IR_BINARY, eqi, abs_eq, eqv, OP_AND, 0);
+                if op == OP_EQ {
+                    res := new_ir_var("optcmp", TI_BOOL);
+                    emit(IR_BINARY, res, eqi, zb, OP_NE, TI_BOOL);
+                    return res;
+                }
+                res := new_ir_var("optcmp", TI_BOOL);
+                emit(IR_BINARY, res, eqi, zb, OP_EQ, TI_BOOL);
+                return res;
+            }
         }
 
         // String equality compares contents, not pointer values.
@@ -1961,55 +2172,10 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
         //     `find_func` 落空（func_ni < 0 / 名字非函数）⇒ 无声明面 ⇒ 环不进（零变化）。
         //   · 实测依据：方法调用 b1/b1b 红 49/15 · 模块限定调用 m1b 红（ELF=4，期望 7）
         //     —— 二者同因（旧门的 `EXPR_IDENT` 硬限制）。
+        // 批 8（条目 1）：环已抽为 `dex_align_call_args`（可复用——重定向后按实例签名再跑一遍）
         if func_ni >= 0 {
             cfi := find_func(func_ni);
-            if cfi >= 0 {
-                cfn := fi_ast_node(cfi);
-                cfn_ext : ., mut = 0;
-                if cfn >= 0 && ast_kind(cfn) == EXPR_EXTERN { cfn_ext = 1; }
-                if cfn >= 0 && (cfn_ext != 0 || ast_kind(cfn) == EXPR_FN) {
-                    cpi : ., mut = 0;
-                    cpn : ., mut = ast_b(cfn);
-                    // 实参节点与实参 var **同表锁步**取（`arg_nodes[cpi]` 与 `arg_vars[cpi]`
-                    // 同索引写入，接收者亦在内）——方法调用下 EXPR_ARG 链**不含接收者**，
-                    // 若按链另走游标会滞后一位（本批实测：node 仅服务于 extern 字面量
-                    // 重发射，Core 分支不用；仍按锁步改正以免埋雷）。
-                    loop {
-                        if cpi >= ac { break; }
-                        if cpn < 0 { break; }
-                        // 批 5（opt-dex · R3）：`dex?` 形参也进环——修复前门只认基类型节点
-                        // （`type_val == TI_DEX`），`dex?` 的 `type_val` = 0 ⇒ apx 实参不转换
-                        // ⇒ 与 callee 槽型（本批已改 TI_DEX_S）口径一致；extern 侧不扩
-                        // （C ABI 无可选表示，`.so` 面登记未覆盖面）。
-                        if ast_type_val(cpn) == TI_DEX ||
-                           (cfn_ext == 0 && dex_opt_type_node(ast_data(cpn)) != 0) {
-                            av := r64(arg_vars, cpi * 8);
-                            if av >= 0 {
-                                if cfn_ext != 0 {
-                                    // extern：scaled → bits（字面量直接重发射位模式常量）
-                                    if irv_type(av) == TI_DEX_S {
-                                        arg_node : ., mut = -1;
-                                        if cpi < arg_nodes_cap { arg_node = r64(arg_nodes, cpi * 8); }
-                                        av = dex_scaled_to_bits(av, arg_node);
-                                        w64(arg_vars, cpi * 8, av);
-                                    }
-                                } else if irv_type(av) == TI_DEX {
-                                    // Core 函数：apx bits → scaled
-                                    av = dex_bits_to_scaled(av);
-                                    w64(arg_vars, cpi * 8, av);
-                                }
-                            }
-                        }
-                        cpi = cpi + 1;
-                        cpn = cpn + 1;
-                        loop {
-                            if cpn >= g_ast_count { break; }
-                            if ast_kind(cpn) == EXPR_PARAM { break; }
-                            cpn = cpn + 1;
-                        }
-                    }
-                }
-            }
+            if cfi >= 0 { dex_align_call_args(cfi, ac, arg_vars, arg_nodes, arg_nodes_cap); }
         }
         // Generic function: redirect to monomorphized (specialized) version
         if func_ni >= 0 && (ast_kind(func_node) == EXPR_IDENT) {
@@ -2073,6 +2239,11 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                 else { spec_ni = gen_find_or_create(gen_fi, type_args); }
                 if spec_ni >= 0 {
                     func_ni = fi_name(spec_ni);
+                    // 批 8（条目 1）：泛型声明的形参是 `T?`（inner = 泛型参数 ⇒ 判据**假**）⇒ 上面的环
+                    // 对泛型实参空转；重定向后用**实例**形参链（inner = 具体 dex ⇒ 判据真）再跑一遍。
+                    // 幂等性见 `dex_align_call_args` 头注（已转换者 IR 型 = TI_DEX_S ⇒ 不重转）。
+                    cfi_i := find_func(func_ni);
+                    if cfi_i >= 0 { dex_align_call_args(cfi_i, ac, arg_vars, arg_nodes, arg_nodes_cap); }
                     // Fall through to normal IR_CALL emission
                 }
             }
