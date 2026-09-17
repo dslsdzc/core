@@ -1305,6 +1305,11 @@
 - **判据（修复时）**：两侧关键字表**逐条相等**（机械判据 = 从两处抽集合做差集为空），或 bootstrap 侧**显式登记**「退役残留、故意保留」。
 - **关联**：`tests/selfhost/test_lexer_parity.py`（既有「两前端同判」判据的同族面）· `docs/maintainer/adr/adr-0001-corespec-crasm-retired.md` · `docs/superpowers/plans/2026-09-17-spec-grammar.md` §3.2.1（裁-S7）。
 - **状态**：**登记，未修**（本批边界外；`syntax.md`/`tokens.ebnf` 侧未核，修复时一并核）。
+- **同族扩面（2026-09-18 · 批 8 条目 5 (B) 附注；纠 lead 先前「(B) 下无需登记」之判断）**：**标签适用性**也是两前端分歧面——
+  `bootstrap/corec/frontend/parser.py` 的标签白名单**只查标签名**（`mut`/`pub`/`apx`）、**无适用性校验**，而 self-hosted 侧批 8 起
+  按白名单（仅显式 `dex` + 显式 `int`）**拒** `dex?` / `.` / `auto` / `string` / `bool` + `apx`（`error[P26]`，`parser.cr` 实施点）
+  ⇒ **同族接受集分歧**。**形态为预存**（bootstrap 从未校验适用性），**分歧面因 (B) 显性化**；收敛方向 = bootstrap 侧补同款白名单（另批）。
+  判据（修复时）：两侧对同一组 `apx` 形态**接受/拒收集合逐条相等**（机械判据 = 差集为空）——与上行关键字表判据同法。
 
 ### 2026-09-17-11. ⚠ **【静默】`parse_declaration` 顶层兜底 = 静默吞一个 token（无诊断）**——`#` 只是其中一个受害者（批 6 T2 首轮实测挖出；该批只修了 `#` 一支）
 

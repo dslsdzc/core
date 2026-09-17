@@ -871,6 +871,12 @@ fn parse_new_var_decl() -> int {
         // `IR_APPROX` ⇒ **只带标签不给表示** = 语义谎）。判据 = rc=1 + 定位 + build 零产物。
         // ⛔ 裁 (A)（连 `int, apx` 一并拒）已否：那会**改契约**（须重定 test_apx_tag + 登记两前端接受集
         // 分歧），而 `int, apx` **不是静默面**。判据原则：「**有契约 ⇒ 有意设计；无契约 ⇒ 静默谎**」。
+        // ⚠ **（B）的残留两前端分歧（2026-09-18 复核指出；纠 lead 先前「(B) 下无需登记」之判断）**：
+        // `bootstrap/corec/frontend/parser.py` 的标签白名单**只查标签名**（`mut`/`pub`/`apx`）、
+        // **无适用性校验** ⇒ 本检查落地后 `dex?, apx` · `. + apx` · `auto + apx` · `string`/`bool + apx`
+        // 在 **bootstrap 侧仍被接受**、self-hosted 侧**拒**（`error[P26]`）⇒ **接受集分歧**（同族
+        // `TODO #2026-09-17-10` 的两前端分歧家族）。**形态为预存**（bootstrap 从未校验适用性），
+        // 但**分歧面因 (B) 而显性化**；收敛方向 = bootstrap 侧补同款白名单（另批，不在本 PR 范围）。
         if is_apx != 0 {
             apx_ok : ., mut = 0;
             if typ >= 0 && ast_kind(typ) == 0 {
