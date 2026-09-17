@@ -667,3 +667,52 @@ error[V01]: #check(...) is statically false
 
 **未做（转 T6）**：五 job 全量回归 + 自举链（`corec2==corec3` + N06=0 + 冒烟 42）· 文档面（`syntax.md` / `spec-design.md` 示例 /
 `REBUILD.md` 计数勘误「72/73 → 75」）· 统一台账 · TODO 收口。
+
+---
+
+## 16. T6 收官：五 CI job 全量回归 + 台账 + 文档勘误（2026-09-17）
+
+**基**：`develop bf346a31`（批 6 链 rebase 后 · 0 冲突）；**pre 侧**沿用 `/tmp/spec-t3/pre/corec`（sha `19155c4c…`）——
+**引证豁免**：`jj diff --from c1546f9b --to develop --stat` 此后仅动 4 个文档文件（TODO/计划/报告），**零 `src/**`** ⇒ 语料面未变（§13 方法论照用）。
+
+### 16.1 五 job（**本轮实测**；`CI_JOB_NAME=<job> bash src/ci/run.sh`，逐 job 串行、`nice -n 19`）
+
+| job | rc | WALL | 关键读数 |
+|---|---|---|---|
+| `check` | **0** | 44s | `corec check src/compiler` ⇒ **0 条 `error[`**、**V 家族 0 命中**（「自源即语料」陷阱自查） |
+| `bootstrap-tests` | **0** | 125s | J 判据 **5/5**（含 M-a/M-b/M-c 三突变）+ `test_ci_hook_coverage` PASS（scope 73/hooked 52） |
+| `selfhost-tests` | **0** | 170s | 含新套件 **48/48** · `test_ccr_types` **49/49** · `so_index_repro` 8/8 … |
+| `suite` | **0** | 27s | `ALL PASS` |
+| `full-bootstrap` | **0** | 685s | 三阶段链 **`cmp corec2 corec3` 成功**（静默）+ 两处守卫 **`error[ = 0, undefined = 0`**（= **N06=0**）+ `corec3 --help` 正常 |
+
+**⚠ 两次「假红」的归因（**过程错误，非代码回归**；如实入台账）**：
+1. 首轮 `full-bootstrap` rc=2 + `run.sh:244 未预期的记号 ";;"` ⇒ 根因 = **我在该 job 运行期间编辑了 `src/ci/run.sh`**（bash 读到半改文件）；
+2. 同时段 `test_ccr_types` 出现 2–3 例失败（含 **0 字节 `.cir` 读到一半**）⇒ 根因 = **同一 job 残留的 `corec2` 进程与我的复跑共用 `.core/cache/cir`**（我违反了「同工作区禁并发构建」）。
+**判定依据**：干净 develop 检出（`jj workspace add -r develop`）上 `test_ccr_types` **49/49 ×3 稳定绿**；清理后本支单跑亦 **49/49**；
+两 job 在**不编辑任何文件**的重跑中全绿 ⇒ **非本批代码回归**。
+
+### 16.2 文档勘误（**先实测再改；写清「怎么数出来的」**）
+
+| 面 | 旧值 | **实测值 + 数法** |
+|---|---|---|
+| 腿① 语料 | `REBUILD.md:6/74/79/126` 与 `run.sh:106` 写「72 档/73 档」 | **75 档** = `tests/suite/*.cr` **35** + `src/compiler/{main,_import}.cr` 2 + 后端/内核单元 15 + `src/stdlib/*.cr` 19 + `examples/*.cr` 4（**逐层枚举**，与 `parity_run.sh:31` 的 `CORPUS_TOTAL=75` 硬断言一致）；**rc 分布 36×0 / 39×1**（构成 = 空 fixture ×2 · P21 ×3 · examples ×2 · 库单元 ×25 · TF01 并发 ×5 · TF07 ×1 · B04 ×2） |
+| `parity_run.sh:31` 分层注释 | 算术和 = 74（t1 记 34） | **t1 = 35**（R2 P6 T0 记 32，其后 global_seam/apx/批 5 三次 +1）⇒ 注释改为逐层实数 + 注明「档数变化必须同批改本行与本注释」 |
+| `ci_hook_allowlist.txt` 头注 | scope 66 / hooked 45 | **scope 73 / hooked 52 / allowlisted 21**（批 6 +1 挂点） |
+
+### 16.3 本批台账（一处看全）
+
+| T | 交付 | 主判据 |
+|---|---|---|
+| T0 | 起点基线 + RED 实测 | 构建确定性 ×2 · canary 5/5 · 腿① 74 档 · 腿② 29 档 · **RED = 静默误编译（build rc=0 + 运行返回错值）** |
+| T1 | 词法 `T_HASH=101` + bootstrap 最小一致 | 常量静态断言 · 全仓裸 `#` 扫描 182 档 0 命中 · 非 `.cr` 面 24/24+8/8 · 两腿零差异 |
+| T2 | 语法面（标注链 + 侧表 + EBNF + V 家族） | 13/13 · **撞名漏洞闭合**（rc=1+V01+零产物）· 零足迹（ELF 同 + STR Δ 公式） |
+| T3 | 检查面（bool/域/禁调用/常量红） | 11/11 · Δ **2/2**（**判据当场抓到实现自身的 `str_intern` 泄漏**） |
+| T4 | VC 清单 + `--dump-vcs` | 16/16（**红也列** / 只读侧表 / 五分支 / 防串台） |
+| T5 | 判据入仓 | 套件 48/48 · 1.8s · 挂点自证 PASS |
+| T6 | 五 job + 勘误 + 台账 | **五 job 全 rc=0** · 文档勘误先实测 |
+
+**本批登记条目**：`#2026-09-17-8`（快照二次膨胀）· `#9`（TF01 豁免对）· `#10`（bootstrap 关键字残留）· `#11`（顶层吞 token）· `#12`（`cmd_cir` 死码）。
+**TODO 收口**：`#2026-09-16-5`（验证切片轮立项）状态由「立项/草案」改为「**已实施（批 6）**」（含落地面 + 判据 + 下一刀指向）。
+
+**口径修正共两处**（均经维护者准）：① 「两侧产物逐字节同」不可构造 ⇒ 改「两侧都接受 + **各自**零足迹」；
+② `.ccr` 逐字节同不可达（注解词素必然进 STR）⇒ 改「ELF 同 + 除 STR 外逐段同 + **STR Δ 恰为公式值**（多一字节即红）」。

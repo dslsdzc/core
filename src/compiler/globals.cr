@@ -273,6 +273,8 @@ g_spec_kind : string, mut;              // 0=#check  1=#ensure（留宽：C2 的
 g_spec_expr : string, mut;              // 标注表达式的 AST 节点索引
 g_spec_line : string, mut;              // 标注 `#` 所在行
 g_spec_col : string, mut;               // 标注 `#` 所在列
+g_spec_status : string, mut;            // 三态：0=yellow（未证，默认）  1=green（常量真）  2=red（有硬错）
+                                        // **red 粘性**（spec_set_status）：红色不被后续 green 覆盖
 g_spec_count : int, mut;                g_spec_cap : int, mut;
 g_x86_rip_patch_pos : string, mut;      g_x86_rip_patch_globals : string, mut;
 g_x86_rip_patch_count : int, mut;       g_x86_rip_patch_cap : int, mut;

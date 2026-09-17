@@ -28,7 +28,9 @@ cd "$REPO_ROOT" || exit 1
 mkdir -p "$OUT/logs"
 CC="nice -n 19 $CCBIN"
 
-CORPUS_TOTAL=75   # = t1 34 + t2 2 + t3 15 + t4 19 + t5 4（R2 P6 T0 表 C 实核；2026-09-16 全局 seam 批 t1 32→33）+ apx 批 +1（tests/suite/apx_conversion_test.cr）+ 批 5 +1（tests/suite/opt_dex_test.cr）
+CORPUS_TOTAL=75   # = t1 **35** + t2 2 + t3 15 + t4 19 + t5 4（**2026-09-17 批 6 T6 实测逐层枚举**，
+                  #   非沿用旧账：R2 P6 T0 表 C 记 t1=32，其后 global_seam(+1)/apx(+1)/批 5 opt_dex(+1) 三次 +1 ⇒ 35。
+                  #   ⇒ 与 `ls tests/suite/*.cr | wc -l` 一致；**档数变化必须同批改本行与本注释**，否则 runner 硬失败。）
 
 run_one() {   # $1 tier tag, $2 file
   local tag="$1" f="$2" base

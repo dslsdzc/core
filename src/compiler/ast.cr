@@ -504,6 +504,11 @@ EC_V_RESULT_SHADOW : int = 17004; // V04  `#ensure` 的 `result` 绑定与形参
 EC_V_NOT_BOOL     : int = 17005; // V05  标注表达式类型非 bool（本批子集：须恰为 TI_BOOL）
 EC_V_CALL_BANNED  : int = 17006; // V06  标注表达式含调用（裁-V5：C1 子集**先禁调用**，避开纯度时序坑）
 
+// 规约标注**三态**（裁-S5：绿/黄只在 `--dump-vcs` 通道；红走诊断通道）
+SPEC_ST_YELLOW : int = 0;   // 未证（默认；不阻断编译）
+SPEC_ST_GREEN  : int = 1;   // 常量折叠为真（可判定）
+SPEC_ST_RED    : int = 2;   // 有硬错（V01/V04/V05/V06 任一命中；**粘性**）
+
 // Diagnostic entry
 struct Diag {
     code: int,

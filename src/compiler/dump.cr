@@ -471,3 +471,66 @@ fn cmd_cir(src_path: string) -> int {
     println(" instrs)");
     return 0;
 }
+
+// ─── 批 6（T4）：规约标注的 VC 清单 dump（`--dump-vcs`）──────────────────────────
+// 表达式**规范化文本**（只服务 dump；**不参与判定**——判定面在 checker.cr 的 spec_check_all/spec_check_func）。
+// C1 子集：int/bool 字面量 · 标识符 · 一元 `-`/`!` · 二元（算术/比较/逻辑）· 括号（显式加括号 ⇒ 无歧义）。
+// 子集外节点形 ⇒ `(?)` 兜底（由 V05/V06 在检查面拦截，不在此处判）。
+fn spec_expr_text(e: int) -> string {
+    if e < 0 { return "?"; }
+    k := ast_kind(e);
+    if k == EXPR_INT { return int_str(ast_int_val(e)); }
+    if k == EXPR_BOOL { if ast_int_val(e) != 0 { return "true"; } return "false"; }
+    if k == EXPR_IDENT { return istr_get(ast_int_val(e)); }
+    if k == EXPR_UNARY {
+        op := ast_c(e);
+        if op == UOP_NEG { return "(-" + spec_expr_text(ast_a(e)) + ")"; }
+        if op == UOP_NOT { return "!" + spec_expr_text(ast_a(e)); }
+        return "(?)";
+    }
+    if k == EXPR_BINARY {
+        return "(" + spec_expr_text(ast_a(e)) + " " + binop_name(ast_c(e)) + " " + spec_expr_text(ast_b(e)) + ")";
+    }
+    return "(?)";
+}
+
+// VC 清单 dump（隐藏通道 `--dump-vcs`；维护者 2026-09-17 四点钉死）：
+//   ① **stdout、零新产物**；开关**不改 rc/产物**（只打印）。
+//   ② 三态**分流**：红走诊断通道（V01/V04/V05/V06 ⇒ rc=1 + 定位），绿/黄进本通道。
+//   ③ **红也列**（`status=red`）——「**没列出来**」与「**列出来是红的**」必须可区分，**不得静默省略**；
+//      且本 dump 打印点位于 `main.cr::run_frontend` 的 **fail-closed 闸门之前** ⇒ 红态下也照样列出。
+//   ④ **只读侧表**（`g_spec_*`，与判定同源）——不另起一份状态，杜绝「dump 与判定分叉」（第二真源）。
+// 序 = 侧表序 = **源序**（构造性确定）；且与 `.cir` 缓存状态**无关**（dump 全在 parse/check 期算）⇒ 冷/暖恒同。
+fn vcs_dump() -> string {
+    dump_buf_reset();
+    dump_buf_append("[vcs] count=");
+    dump_buf_append(int_str(g_spec_count));
+    dump_buf_append("\n");
+    i : ., mut = 0;
+    loop {
+        if i >= g_spec_count { break; }
+        st : ., mut = "yellow";
+        s := spec_status(i);
+        if s == SPEC_ST_GREEN { st = "green"; }
+        else if s == SPEC_ST_RED { st = "red"; }
+        kn : ., mut = "check";
+        if spec_kind(i) == 1 { kn = "ensure"; }
+        dump_buf_append("[vcs] vc ");
+        dump_buf_append(int_str(i));
+        dump_buf_append(" fn=");
+        dump_buf_append(istr_get(spec_fn(i)));
+        dump_buf_append(" kind=");
+        dump_buf_append(kn);
+        dump_buf_append(" status=");
+        dump_buf_append(st);
+        dump_buf_append(" line=");
+        dump_buf_append(int_str(spec_line(i)));
+        dump_buf_append(" col=");
+        dump_buf_append(int_str(spec_col(i)));
+        dump_buf_append(" expr=");
+        dump_buf_append(spec_expr_text(spec_expr(i)));
+        dump_buf_append("\n");
+        i = i + 1;
+    }
+    return dump_buf_finish();
+}

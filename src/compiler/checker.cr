@@ -2309,6 +2309,7 @@ fn spec_check_func(fn_node: int, return_type: int) {
     if ri >= 0 {
         res_ni := str_intern("result");
         if find_sym(res_ni) >= 0 {
+            spec_set_status(ri, SPEC_ST_RED);
             check_error(EC_V_RESULT_SHADOW,
                 "'result' is already bound in this scope (#ensure binding would shadow it)",
                 spec_line(ri), spec_col(ri));
@@ -2323,12 +2324,14 @@ fn spec_check_func(fn_node: int, return_type: int) {
         if k >= g_spec_count { break; }
         if spec_fnode(k) == fn_node {
             if spec_has_call(spec_expr(k)) != 0 {
+                spec_set_status(k, SPEC_ST_RED);
                 check_error(EC_V_CALL_BANNED,
                     "annotation expression must not contain calls (C1 subset)",
                     spec_line(k), spec_col(k));
             } else {
                 t := infer_expr(spec_expr(k));
                 if t != TI_BOOL {
+                    spec_set_status(k, SPEC_ST_RED);
                     check_error(EC_V_NOT_BOOL, "annotation expression must be bool",
                         spec_line(k), spec_col(k));
                 }
@@ -4086,10 +4089,15 @@ fn spec_check_all() {
         // T3：`#ensure` 的常量假同样可判定且必错 ⇒ 与 `#check` 同判（T2 只判了 #check）。
         ex := spec_expr(i);
         v := spec_fold_val(ex);
-        if g_spec_fold_ok != 0 && v == 0 {
-            nm : ., mut = "#check(...)";
-            if spec_kind(i) == 1 { nm = "#ensure(...)"; }
-            check_error(EC_V_CHECK_FALSE, nm + " is statically false", spec_line(i), spec_col(i));
+        if g_spec_fold_ok != 0 {
+            if v == 0 {
+                spec_set_status(i, SPEC_ST_RED);
+                nm : ., mut = "#check(...)";
+                if spec_kind(i) == 1 { nm = "#ensure(...)"; }
+                check_error(EC_V_CHECK_FALSE, nm + " is statically false", spec_line(i), spec_col(i));
+            } else {
+                spec_set_status(i, SPEC_ST_GREEN);
+            }
         }
         i = i + 1;
     }

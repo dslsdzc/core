@@ -3,7 +3,9 @@
 ## 这是什么
 
 「**冻结基线**」= 判定面回归网**腿 ①（冻结基线同源对拍）** 里的那个「pre-批」编译器二进制：
-拿它乘**当前源**，与**当前二进制**乘**当前源**逐档比（72 档 `check` 的 rc + 日志），
+拿它乘**当前源**，与**当前二进制**乘**当前源**逐档比（**75 档** `check` 的 rc + 日志；档数=**实读枚举**：
+`tests/suite/*.cr` **35** + `src/compiler/{main,_import}.cr` 2 + 后端/内核单元 15 + `src/stdlib/*.cr` 19 +
+`examples/*.cr` 4 = 75，与 `parity_run.sh:31` 的 `CORPUS_TOTAL=75` 硬断言一致；2026-09-17 批 6 T6 实测），
 差异 = 该批对判定面的**行为变更**（预期内 = 收紧/放宽，须逐条入台账；预期外 = 回归）。
 
 **二进制不入库**（维护者裁定，2026-09-13）——入库的是**配方 + sha 白名单**：
@@ -71,12 +73,13 @@ bash tools/baseline/warm_run.sh ./build/corec /tmp/warm_now   # 牙齿层（语�
 
 - **广度层**：`parity_run.sh` / `probes_run.sh` 默认附带（清单单一真源 = `<outdir>/corpus.tsv`；
   结果落 `<outdir>/warm/`，**`logs/` 格式不变** ⇒ 历史对拍可比性保持）。`WARM_LEG=0` 关闭。
-  对 **pre-fix 冻结基线预期绿**（既有 72/29 语料不含 `as *T` 形态；实测 M1 二进制 72 档 FAIL=0）。
+  对 **pre-fix 冻结基线预期绿**（既有 75/29 语料不含 `as *T` 形态；实测 M1 二进制 75 档 FAIL=0）。
 - **牙齿层**：`tests/probes/warm/`（**定路径**是该语料的设计要点；拷到唯一 temp 路径 ⇒ 腿恒绿而
   空洞 —— 突变 M3 实证）。**pre-fix 二进制在本层必红**（缺陷本体）⇒ 对**冻结基线**调用
   `warm_run.sh` 时预期 rc=1，**不是**基线不合规（判据 = 突变 M1，见 `warm-task3-report.md`）。
 - 时长实测（2026-09-15，本机）：牙齿层 **0.9s** · probes 广度层 **+3.5s** · parity 广度层
-  **+125s**（72 档 ×2 次 `ccr`，大文件为主）⇒ **CI 只挂最小面**（`tests/selfhost/test_warm_cache_gate.py`，0.5s），
+  **+125s**（**75 档** ×2 次 `ccr`，大文件为主；**⚠ 该值对含 `src/compiler/main.cr` 的大文件档不成立**——
+  见 `TODO #2026-09-17-8`：实测该层在含大文件的清单上 ≥7× 且未跑完）⇒ **CI 只挂最小面**（`tests/selfhost/test_warm_cache_gate.py`，0.5s），
   广度层留手工判据。
 - **腿本体不进 CI**（维护者裁定 2026-09-15）：与套件**同语料**、覆盖重叠，收益仅「校验 runner 自身」。
 - **口径限制（W3 批实测登记，2026-09-15）**：本腿现比对 = **rc + 诊断码集 + 产物 sha**（`ccr`/ELF/DOT 三面），
@@ -123,8 +126,9 @@ bash tools/baseline/warm_run.sh ./build/corec /tmp/warm_now   # 牙齿层（语�
 - **CI 内不跑**：`.github/workflows/core-ci.yml` 用 `actions/checkout` + `fetch-depth: 2`（浅检出，
   无 `jj`）⇒ pinned revision 在 CI 环境**不可得**。本腿为**手工判据**（每任务/每批收尾跑），
   故入仓的是**可复现性**而非 CI 挂钩（R2 P6 Task 1 §Step 4 评估结论）。
-- **72 档语料的既有 rc=1 不是回归**：0 字节 fixture ×2 / P21 嵌套 fn 负例 ×2 / examples 解析错 ×2 /
-  库单元单独 check（N01/N06/N11）×25 / TF01 并发族 ×5 / TF07 ×1 / B04 借用 ×1 —— 划界见
+- **75 档语料的既有 rc=1 不是回归**（2026-09-17 批 6 T6 **实测**：`36×0 / 39×1`）：
+  空 fixture ×2（`tests/suite/{test_control_flow,test_generics}.cr`，日志 = `error: cannot read`）·
+  P21 嵌套 fn ×**3** · examples 解析错 ×2 · 库单元单独 check ×25 · TF01 并发族 ×5 · TF07 ×1 · **B04 ×2** —— 划界见
   `p6-task0-report.md` §3.1（跑之前先读，勿把既有失败当回归）。
 - **`examples/` 不在任何 CI job 的覆盖面内**（`suite` job 只跑 `tests/suite`）——但本对拍面含之
   （4 档），故对拍是 examples 的**唯一**行为证据来源。

@@ -135,6 +135,9 @@ fn run_frontend() -> int {
     if g_error_count > 0 { print_parse_errors(); return 1; }
     println("[4/5] type check...");
     check_all();
+    // 批 6（T4）：VC 清单 dump——**位置 = fail-closed 闸门之前**：红态下也照常列出（红条目显式标 red，
+    // 不静默省略；「没列出来」与「列出来是红的」可区分）。只打印 ⇒ 不改 rc/产物。
+    if cli_has("dump-vcs") != 0 { print(vcs_dump()); }
     // Type-check diagnostics：**fail-closed（FC 批 T2；维护者裁）= 默认阻断 + 豁免登记表**。
     // 判据（成文化）= 「判定继续 ⇒ 产出静默错产物」——五组先例：R002 常量档越界（F2）·
     // TS01-04+TK02 聚合字面量三校验（TODO #2026-09-11-11）· TM03 match 非穷尽（#2026-09-11-13，修复前缺臂 ⇒ 未匹配值
@@ -251,6 +254,7 @@ fn corec_main() -> int {
     cli_flag_bool("verify-named-dedup", "", "R2 P2a: assert side-table == res_type_node for all named types (debug)");
     cli_flag_bool("verify-evp-nodes", "", "R2 P3 T4: assert enum variant payload type nodes recorded (debug)");
     cli_flag_bool("diag-gate-report", "", "FC T2: report fail-closed gate verdicts per compile (debug; default off — 不改 rc/产物)");
+    cli_flag_bool("dump-vcs", "", "批 6 T4: dump spec VC list (#check/#ensure) — hidden debug channel; stdout only, no artifact, rc untouched");
 
     if cli_parse() != 0 { return 1; }
     // Parse -O flag (default O1)
