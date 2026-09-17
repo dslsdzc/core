@@ -826,6 +826,44 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int {
     g_gen_dedup_count = 0; g_gen_dedup_cap = 0;
     new_fn_node := gen_clone_tree(orig_fn_node);
 
+    // ── (乙) A1：实例形参链**具体化**（2026-09-18）──────────────────────────────
+    // 根因：上方 `gen_clone_tree` 的 EXPR_FN 分支只深克隆 `d`（函数体），`b/c`（首形参/
+    // 形参数）**原样复制** ⇒ 实例与声明**共用形参节点链** ⇒ 形参序言（ir_gen.cr:3071）
+    // 读 `ast_type_val(pn)` = 0 ⇒ 槽型恒 `TI_INT`（GP 类）；调用点对齐环按声明面判门
+    // （ir_gen.cr:1984 的两个子判据对泛型形参恒假）⇒ 表示面失配（GB/XMM 读错寄存器）。
+    // 本段：逐形参克隆「形参节点 + 其类型子树」——类型子树经 `gen_clone_tree` 的
+    // EXPR_IDENT / EXPR_OPTIONAL 分支**按当前实例代入**（ti 路径优先，见该函数头注）；
+    // 并**重算 type_val**：契约照 parser.cr:1427 的 `unpack_type(pty)`——基类型节点 ⇒
+    // 取该节点 `type_val`；非基类型（`T?`/命名/复合）⇒ 0。
+    // **重算不可省**：EXPR_PARAM 克隆分支原样拷贝 `tv`（= 声明的 0）⇒ 不重算则
+    // `ast_type_val(pn)` 仍是 0、槽型仍 `TI_INT`（本修复白做）。两形态回绿路径**不同**：
+    // `T` 靠本行（`type_val`），`T?` 靠类型节点代入（序言走 `dex_opt_type_node` 分支）。
+    // 布局契约（与 parser 同形）：每个形参的类型子树**先于**其形参节点分配 ⇒ 「从
+    // `pn+1` 向前扫到下一个 EXPR_PARAM」的游标语义（序言与对齐环共用）逐字保持。
+    pc_src := ast_c(orig_fn_node);
+    if pc_src > 0 {
+        opn : ., mut = ast_b(orig_fn_node);
+        first_np : ., mut = -1;
+        pi_src : ., mut = 0;
+        loop {
+            if pi_src >= pc_src { break; }
+            if opn < 0 { break; }
+            if ast_kind(opn) == EXPR_PARAM {
+                nd := ast_data(opn);
+                nd2 : ., mut = -1;
+                if nd >= 0 { nd2 = gen_clone_tree(nd); }
+                ntv : ., mut = 0;
+                if nd2 >= 0 && ast_kind(nd2) == 0 { ntv = ast_type_val(nd2); }
+                np := ast_alloc(EXPR_PARAM, ast_a(opn), ast_b(opn), ast_c(opn), ast_int_val(opn), ntv, nd2, ast_line(opn), ast_col(opn));
+                gen_dedup_add(opn, np);
+                if first_np < 0 { first_np = np; }
+                pi_src = pi_src + 1;
+            }
+            opn = opn + 1;
+        }
+        if first_np >= 0 { ast_set_b(new_fn_node, first_np); }
+    }
+
     // Compute mangled name: "orig_name[type_args]" for unique identification
     orig_name := istr_get(fi_name(func_ni));
     mangled_name : ., mut = orig_name + "[" + type_args + "]";
