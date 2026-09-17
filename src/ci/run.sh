@@ -244,6 +244,17 @@ case "$CI_JOB_NAME" in
     # 探针 1 · 旧 fixture 1；期望码 V02/V03 仍在）⇒ 合法语料零差异。
     # 突变自证（批级留痕）：兜底退回裸 `advance_tok()` ⇒ 拒收 5 例回 `check=0`。
     python3 tests/selfhost/test_toplevel_reject.py
+    # ─── 批 8 条目 5（静默面收口）：`apx` 标签**适用性白名单** ⇒ P26（2026-09-18）───
+    # **7 例** = 拒收 5（`dex?` · `.` 推断 · `auto` · `string` · `bool`）+ 白名单 2（`dex, apx` 表示路径 ·
+    # `int, apx` 既有契约纯注解；两者 `.cir` 各恰一条 `approx` = 机制钉）。
+    # 判据：拒收 ⇒ check rc=1 + `error[P26]` + 定位 + build rc=1 + **零产物**；白名单 ⇒ check/build/run 三面 0。
+    # 裁定依据（lead 2026-09-18 = (B)）：白名单 = 显式 `dex` + 显式 `int`（**有契约**：`test_apx_tag.py`
+    # 钉语法合法/语义不变/`.cir` 携 `approx`，bootstrap 同向 ApproxInstr ⇒ 两前端对齐）；其余（`dex?`/`.`/`auto`/
+    # `string`/`bool`…）**零文档 / 零测试 / 值面无路** = 静默谎。⛔ 裁 (A)（连 `int, apx` 一并拒）已否：
+    # 那会**改契约**（须重定 test_apx_tag + 登记两前端接受集分歧）——判据原则「有契约 ⇒ 有意设计；无契约 ⇒ 静默谎」。
+    # 白名单两形的产物**逐字节不变**（前态二进制 vs 本链实测 IDENTICAL）· 契约套件 `test_apx_tag.py` 2/2 复跑绿。
+    # 突变自证（批级留痕）：撤掉该检查 ⇒ 拒收 5 例回 `check=0`。
+    python3 tests/selfhost/test_apx_tag_scope.py
     # ─── 批 6（验证内核正式接入 = 正式规约语法 `#check`/`#ensure`；2026-09-17）───
     # 四组 48 项：A 语法面（16）· B 检查面（11）· C `--dump-vcs` 通道（15）· D `.ccr` 零足迹三段式（6，含 Δ 公式）。
     # **Δ 公式 = 本批最有价值的判据**（T3 首轮当场抓到实现自身的 `str_intern("result")` 泄漏：两用例 STR Δ 凭空 +10B），

@@ -863,6 +863,26 @@ fn parse_new_var_decl() -> int {
         if i >= nc { break; }
         ni := str_intern(r64(names, i * 8));
         nv := r64(values, i * 8);
+        // 批 8（静默面收口 · 条目 5；lead 2026-09-18 裁 **(B) 白名单**）：`apx` 仅适用于
+        // **显式 `dex`**（有表示路径）与 **显式 `int`**（既有契约的纯注解：`tests/selfhost/test_apx_tag.py`
+        // 钉「语法合法 + 语义不变 + `.cir` 携 `approx`」，`tests/bootstrap/test_apx_tag.py` 同向 ApproxInstr
+        // ⇒ 两前端对齐）。**其余一律硬错**：`dex?` · `.`（推断）· `auto` · `string`/`bool`/… ——
+        // 这三形「零文档 / 零测试 / **值面无路**」：用户要 apx 表示而实现无路可走（`.cir` 仍多一条
+        // `IR_APPROX` ⇒ **只带标签不给表示** = 语义谎）。判据 = rc=1 + 定位 + build 零产物。
+        // ⛔ 裁 (A)（连 `int, apx` 一并拒）已否：那会**改契约**（须重定 test_apx_tag + 登记两前端接受集
+        // 分歧），而 `int, apx` **不是静默面**。判据原则：「**有契约 ⇒ 有意设计；无契约 ⇒ 静默谎**」。
+        if is_apx != 0 {
+            apx_ok : ., mut = 0;
+            if typ >= 0 && ast_kind(typ) == 0 {
+                tv := ast_type_val(typ);
+                if tv == TY_DEX || tv == TY_INT { apx_ok = 1; }
+            }
+            if apx_ok == 0 {
+                check_error(EC_P_APX_TAG,
+                    "'apx' tag is only allowed on an explicit 'dex' or 'int' declaration",
+                    tok_ln(t), tok_cl(t));
+            }
+        }
         node := alloc_node(EXPR_LET, ni, typ, nv, is_apx, 0, is_mut, tok_ln(t), tok_cl(t));
         if i == 0 {
             first_node = node;

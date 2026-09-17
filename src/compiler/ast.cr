@@ -346,6 +346,7 @@ EC_P_ENUM_LIMIT   : int = 1022; // P022  **已退役**（容量批 T3：变体/�
 EC_P_STRUCT_LIMIT : int = 1023; // P023  **已退役**（容量批 T3：字段上限解除，零 raise）
 EC_P_EXTERN_OPTIONAL : int = 1024; // P024  extern 声明含可选形参/返回（C ABI 无可选表示；批 8 条目 3）
 EC_P_TOPLEVEL_TOKEN  : int = 1025; // P025  Unrecognized top-level token（顶层兜底不再静默吞；批 8 条目 4）
+EC_P_APX_TAG         : int = 1026; // P026  `apx` 标签不适用于该声明（白名单 = 显式 dex / int；批 8 条目 5）
 
 // N0xx — Name Resolution
 EC_N_UNDEFINED     : int = 2001; // N001  Undefined name
