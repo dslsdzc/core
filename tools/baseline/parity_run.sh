@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# R2 P6 Task 1（E-13）：语料同源对拍 runner —— 74 档 × `check`，逐档 clean-cache。
+# R2 P6 Task 1（E-13）：语料同源对拍 runner —— 75 档 × `check`，逐档 clean-cache。
 #
 # 用法: bash tools/baseline/parity_run.sh <corec二进制> <outdir>
 # 产物: <outdir>/logs/<tag>_<path>.{log,rc}（与迁移期 runner 同名同格式）+ <outdir>/parity.out
@@ -8,7 +8,8 @@
 #   · 语料分层 / 命名 / 逐档 clean-cache 逐字继承（可 `diff -rq` 互证）；
 #   · **影子模式整体剥除**——`--type-shadow` / `--type-shadow-dump` 两旗标已随 R2 P5 Task 5
 #     删除，原 `shadow` 分支为死码（不移植）；
-#   · `shopt -s nullglob` + 计数断言 **74**（2026-09-16 全局 seam 批 +1 = `global_seam_test.cr`；同日 apx 批 +1 = `apx_conversion_test.cr`）：未匹配 glob 不再产生**字面 glob 伪条目**
+#   · `shopt -s nullglob` + 计数断言 **75**（2026-09-16 全局 seam 批 +1 = `global_seam_test.cr`；同日 apx 批 +1 = `apx_conversion_test.cr`；
+#     2026-09-17 批 5（opt-dex）+1 = `opt_dex_test.cr`——Tier 1 为 `tests/suite/*.cr` 通配 ⇒ 新语料自动入档，**只须同步本计数**）：未匹配 glob 不再产生**字面 glob 伪条目**
 #     （R2 P6 T0 §3.2 的 `_tmp_p5t3b_probes_*.cr` 教训）；语料数变化 ⇒ 硬失败（须显式改本文件）。
 #
 # 判定用法（同源对拍）：同一二进制跑本 runner 与在位的 `/tmp/p3t0_run.sh check`，
@@ -27,7 +28,7 @@ cd "$REPO_ROOT" || exit 1
 mkdir -p "$OUT/logs"
 CC="nice -n 19 $CCBIN"
 
-CORPUS_TOTAL=74   # = t1 33 + t2 2 + t3 15 + t4 19 + t5 4（R2 P6 T0 表 C 实核；2026-09-16 全局 seam 批 t1 32→33）+ apx 批 +1（tests/suite/apx_conversion_test.cr）
+CORPUS_TOTAL=75   # = t1 34 + t2 2 + t3 15 + t4 19 + t5 4（R2 P6 T0 表 C 实核；2026-09-16 全局 seam 批 t1 32→33）+ apx 批 +1（tests/suite/apx_conversion_test.cr）+ 批 5 +1（tests/suite/opt_dex_test.cr）
 
 run_one() {   # $1 tier tag, $2 file
   local tag="$1" f="$2" base

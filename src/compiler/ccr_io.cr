@@ -134,7 +134,7 @@
 CCR_MAGIC : int = 827474755;  // "CCR1" (0x31524343)
 CCR_VERSION : int = 9;        // v9-only（load 校验 ==9；拒 version≠9——D10 先例：v8 及更早整类拒收，**不得**静默当「段/字段缺席 = 空表」）。
 //                              R2 P6 Task 3（β）：v8→v9 = NOD 记录 36→40B（+28 项索引 i32、邻接域顺移 +32/+36）——旧文件在版本闸整类拒收
-//                              （cache miss 语义 = 使用者重编；.cir 快照面零改动 ⇒ CIR_CACHE_VER 当时为 17——**该值此后由 TODO #2026-09-16-16 批 2 升到 18**，见该批计划 §12.4；`.ccr` 侧仍不 bump）
+//                              （cache miss 语义 = 使用者重编；.cir 快照面零改动 ⇒ CIR_CACHE_VER 当时为 17——**该值此后由 TODO #2026-09-16-16 批 2 升到 18**（见该批计划 §12.4），**再于 2026-09-17 由批 5（opt-dex，TODO #2026-09-16-29）升到 19**（`dex?` 载荷形式规范化）；`.ccr` 侧仍不 bump）
 CCR_SEG_COUNT : int = 8;      // STR SYM NOD ENT REG EDG TYPE IFACE（规范序 tag 1..8；预留 9+ 不占空间——D9：原 7/8 预留段顺移）
 CCR_SEG_TYPE : int = 7;       // TYPE 段 tag（数值权威 = 段序；D9）
 CCR_SEG_IFACE : int = 8;      // IFACE 段 tag（D9）

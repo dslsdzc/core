@@ -194,6 +194,20 @@ case "$CI_JOB_NAME" in
     # `HOME` unset ≡ 空 HOME（#83）· ELF 跨两态同 · 静态零命中硬编码家目录字面量。
     # 挂本 job 的理由同载体（需已构建编译器）。成本实测 ≈ 12s（含 2000 行大索引档）。
     python3 tests/selfhost/test_so_index_repro.py
+    # ─── 批 5（opt-dex，2026-09-17；TODO #2026-09-16-29 = 原 #91）：可选 dex（`dex?`）整族 ───
+    # 缘起：四态（裸/装箱 × bits/scaled）与家族面（映射表 9 列）。根因三条（实读）：① 写点门
+    # `declared_ti == TI_DEX` 对 `dex?` 不触发 + 槽型「随值」（ir_gen.cr:2525/:2559/:2577-2579）；
+    # ② 装箱序倒置 5 处（:1541/:2751/:2788/:2836/:3241 先装箱后规范 ⇒ 漏斗落箱对象 = 空转）；
+    # ③ 声明面在 `unpack_type` 塌陷（parser.cr:150-153/1427）⇒ `dex?` 形参槽型 TI_INT + 实参环/返回/
+    # 全局门全失效 ⇒ **ABI 失配**（按 XMM 传、按 GP 读）= 垃圾值 + **双路径分歧**（本族最严重形态）。
+    # 判据（维护者 2026-09-17 裁决 G10 三条纪律全部写进套件）：① 四态对拍（四格互等 + **锚定格** == 7）；
+    # ② **禁第三态**——bits 源的 interp 腿必须是 **255**（= bits→scaled 转换在场时 `IR_I2F/IR_F2I`
+    # 的解释器能力边界拒收，255 是**期望值**）；出现第三个值一律判红；③ **不许单腿绿结案**
+    # （ELF 绿 ∧ interp 第三态 ⇒ 仍红）。另含：编译期拒绝面（`[dex?;2]` 字面量 ⇒ TK02/TA02 + 零产物）
+    # 与 **apx 槽自证腿**（bits 源 `.cir` 必须有 binary64 位模式常量、scaled 源必须没有 ⇒ 防「探针不触发」）。
+    # 配套 suite 语料 `tests/suite/opt_dex_test.cr`（常规腿；返回码 1..14 = 首个失败面编号）。
+    # 计划 = docs/superpowers/plans/2026-09-17-opt-dex.md · 报告 = 收官批报告。
+    python3 tests/selfhost/test_opt_dex.py
     ;;
 
   suite)

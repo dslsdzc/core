@@ -1119,6 +1119,30 @@ fn dex_slot_norm(val: int) -> int {
     return dex_bits_to_scaled(val);
 }
 
+// 声明类型**节点**是否 `dex?`（可选 dex）——**节点级零 alloc**（先例 `agg_read_form_is_dex:417` /
+// `reg_one_global` 的 `ast_kind(ltn)==0 && ast_type_val(ltn)==TY_DEX`）。`dex?` 的类型节点 =
+// `EXPR_OPTIONAL`，其内层是基类型节点 `dex`（`ast_kind==0 && ast_type_val==TY_DEX`）。
+// 用途（批 5 · R1）：写点/槽型按**声明**定形式（G1 裁决 = scaled），而非按值型反推。
+fn dex_opt_type_node(tn: int) -> int {
+    if tn < 0 { return 0; }
+    if ast_kind(tn) != EXPR_OPTIONAL { return 0; }
+    inner := ast_a(tn);
+    if inner < 0 || ast_kind(inner) != 0 { return 0; }
+    if ast_type_val(inner) == TY_DEX { return 1; }
+    return 0;
+}
+
+// 类型**行**是否 `dex?`（`TYP_OPTIONAL` ∧ `data == TI_DEX`）——**纯表读零 alloc**（先例
+// `ti_is_optional:328` / `elem_ti_of_decl:343`）。用途（批 5 · G2 读点定型）：optional 声明的
+// 载荷读槽取**声明面**形式——`agg_payload_read_form` 只认枚举行，内建 `Some` 面无行 ⇒ 恒 TI_INT
+// （`dex?` 载荷按值参与 dex 运算会被当 int 再 ×S）。G2 红线：**不得**调 `res_type_node`/`alloc_type`。
+fn dex_opt_slot_ti(ti: int) -> int {
+    if ti < 0 || ti >= g_type_count { return 0; }
+    if get_type_kind(ti) != TYP_OPTIONAL { return 0; }
+    if get_type_data(ti) == TI_DEX { return 1; }
+    return 0;
+}
+
 // 聚合读的**声明面** dex-ness（apx 批 T3 · 比较/相等点专用）：
 // #2026-09-16-16 未修 ⇒ 聚合读的结果槽 IR 型恒 TI_INT、**声明型被抹** ⇒ 下游「按值型触发」的
 // 形式分流看不到 dex。本函数在**节点级**把声明面取回来（**零 alloc_type**；先例
@@ -1538,10 +1562,12 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             ptr_var = force_if_thunk(ptr_var);
             // (A) 批（INV-2）：**指针写且 pointee 可选 ⇒ 装箱**——一致性由 INV-1（取址槽恒装箱）
             // 与 E-2（聚合恒装箱）保证；越界面 = REP-2（指针算术）/ extern（登记）
+            // 批 5（opt-dex · R2 序修正）：**先归形式、后可选装箱**——装箱载荷须为规范形式；
+            // 反序时 `dex_slot_norm` 落在箱对象（TI_INT）上 = 空转（可选 dex 载荷留 bits）。
+            val_var = dex_slot_norm(val_var);   // apx 批 T3：pointee 槽恒精确（`*p = d` 实测 RED）
             if g_optrep_on != 0 && ti_is_optional(ptr_pointee_type(ptr_var)) != 0 {
                 val_var = box_for_slot_flag(val_node, val_var, 1);
             }
-            val_var = dex_slot_norm(val_var);   // apx 批 T3：pointee 槽恒精确（`*p = d` 实测 RED）
             emit(IR_STORE_PTR, -1, ptr_var, val_var, 0, ptr_access_width(ptr_var));
             return val_var;
         }
@@ -1951,7 +1977,12 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                     loop {
                         if cpi >= ac { break; }
                         if cpn < 0 { break; }
-                        if ast_type_val(cpn) == TI_DEX {
+                        // 批 5（opt-dex · R3）：`dex?` 形参也进环——修复前门只认基类型节点
+                        // （`type_val == TI_DEX`），`dex?` 的 `type_val` = 0 ⇒ apx 实参不转换
+                        // ⇒ 与 callee 槽型（本批已改 TI_DEX_S）口径一致；extern 侧不扩
+                        // （C ABI 无可选表示，`.so` 面登记未覆盖面）。
+                        if ast_type_val(cpn) == TI_DEX ||
+                           (cfn_ext == 0 && dex_opt_type_node(ast_data(cpn)) != 0) {
                             av := r64(arg_vars, cpi * 8);
                             if av >= 0 {
                                 if cfn_ext != 0 {
@@ -2449,7 +2480,16 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                     if fi >= sub_count { break; }
                     fv := new_ir_var("fld", TI_INT);
                     // TODO #2026-09-16-16 批 2：载荷读定型取**声明面形式**（dex 载荷 ⇒ TI_DEX_S）
-                    irv_set_type(fv, agg_payload_read_form(arm_pat, fi));
+                    // 批 5（opt-dex · G2）：optional 声明的载荷（内建 `Some` 面无枚举行 ⇒
+                    // `agg_payload_read_form` 恒 TI_INT）改由 **scrutinee 的声明行**补判——
+                    // `irv_decl_ti(match_val)` 是 LET 期登记的 `TYP_OPTIONAL` 行（`:2573`），
+                    // `dex_opt_slot_ti` 纯表读（**零 alloc_type** = G2 红线）。否则 `dex?`
+                    // 载荷入 dex 运算会被当 int 再 ×S（`dex_scale_int`）。
+                    fv_ti : ., mut = agg_payload_read_form(arm_pat, fi);
+                    if fv_ti == TI_INT && match_val >= 0 {
+                        if dex_opt_slot_ti(irv_decl_ti(match_val)) != 0 { fv_ti = TI_DEX_S; }
+                    }
+                    irv_set_type(fv, fv_ti);
                     if rep_v < 0 {
                         emit(IR_LOAD_FIELD, fv, match_val, 0, fi + 1, 0);  // +1 for tag offset
                     } else {
@@ -2522,10 +2562,19 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
         // `dex` is the source-level type; its IR slot has two forms. Only an
         // explicitly tagged `apx` declaration uses binary64 bits.
         target_ti : ., mut = declared_ti;
+        // 批 5（opt-dex · R1）：`dex?` 声明的**规范槽形式 = scaled**（G1 裁决：装箱对象是聚合类
+        // 载体、无形式位可挂；rep 位 1 比特承载不了 2 位信息）⇒ 槽型由**声明**给定。
+        // 修复前：门 `declared_ti == TI_DEX` 对 `dex?`（TYP_OPTIONAL 行）不触发，槽型退化为
+        // 「随值」（:2577-2579 的值型采纳）⇒ apx 源直接把 bits 存进槽（实测 ELF/interp 15）。
+        dex_opt : ., mut = 0;
+        if type_node >= 0 { dex_opt = dex_opt_type_node(type_node); }
         if declared_ti == TI_DEX {
             if is_apx != 0 { target_ti = TI_DEX; }
             else { target_ti = TI_DEX_S; }
             irv_set_type(var, target_ti);
+        } else if dex_opt != 0 {
+            target_ti = TI_DEX_S;
+            irv_set_type(var, TI_DEX_S);
         }
         is_arr : ., mut = 0;
         if type_node >= 0 && val_node < 0 {
@@ -2558,6 +2607,11 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             // binary operations inspect its type.
             if declared_ti == TI_DEX {
                 val_var = dex_store_adjust(var, val_var, val_node);
+            } else if dex_opt != 0 {
+                // 批 5（opt-dex · R1）：`dex?` 初值入箱/入槽前先归规范形式（bits → scaled）。
+                // 后续所有写点（赋值 / 指针写 / 聚合 / 装箱）都是「目标槽型驱动」⇒ 槽型定为
+                // TI_DEX_S 后既有的 dex_store_adjust 路径自动生效（无需逐点补接线）。
+                val_var = dex_slot_norm(val_var);
             } else if declared_ti == TI_UNIT {
                 target_ti = irv_type(val_var);
                 irv_set_type(var, target_ti);
@@ -2574,7 +2628,10 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             }
              // Preserve the initializer type so later operations can select
              // type-specific lowering (notably string + -> concat()).
-              if declared_ti != TI_DEX {
+             // 批 5（opt-dex · R1）：`dex?` 槽**不**采纳值型（槽型由声明给定 TI_DEX_S）——
+             // 否则 `x : dex? = Some(...)`（值 = 箱对象 TI_INT）会把槽型改回 TI_INT，
+             // 令「裸载荷 = scaled」这一规范面在下游再次丢失。
+              if declared_ti != TI_DEX && dex_opt == 0 {
                   irv_set_type(var, irv_type(val_var));
               }
             // F11：切片长度沿 LET 初始化传播（s := arr[0..2] → s 带长度 2；
@@ -2627,7 +2684,10 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             val_var = force_if_thunk(val_var);
             // dex 边界规则（数值迁移 Task 4）：函数返回一律精确形式（缩放整数）——
             // apx 位模式在返回点转 scaled（F2I(bits×S)，按定点 6 位舍入）
-            if g_cur_ret_ti == TI_DEX && irv_type(val_var) == TI_DEX {
+            // 批 5（opt-dex · R3）：`-> dex?` 的 `g_cur_ret_ti` 亦为 0（`unpack_type` 塌陷）
+            // ⇒ 追加**返回类型节点**判据（`g_cur_ret_dex_opt`，由 ir_gen_func 设置）——
+            // 否则 apx 源经 `-> dex?` 返回时不转换（实测 ELF/interp 双路径 15）。
+            if (g_cur_ret_ti == TI_DEX || g_cur_ret_dex_opt != 0) && irv_type(val_var) == TI_DEX {
                 val_var = dex_bits_to_scaled(val_var);
             }
             // 可选表示（R2 P4 Task 5）：返回点写返回信道——值求值**完成后**、IR_RETURN
@@ -2748,8 +2808,9 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             val_var = force_if_thunk(val_var);
             // 容量批 T2：可选载荷写点规范化（载荷类型 = 变体声明面；`Some`/`None` 关键字
             // 形不带变体行 ⇒ enum_payload_ti 返回 -1 ⇒ 原样，不装箱）
-            if g_optrep_on != 0 { val_var = box_for_optional_slot(ast_a(an), val_var, enum_payload_ti(name_idx, ai)); }
+            // 批 5（opt-dex · R2 序修正）：先归形式、后装箱（同上——反序 = 漏斗空转）
             val_var = dex_slot_norm(val_var);   // apx 批 T3：载荷槽恒精确
+            if g_optrep_on != 0 { val_var = box_for_optional_slot(ast_a(an), val_var, enum_payload_ti(name_idx, ai)); }
             emit(IR_STORE_FIELD, -1, s, val_var, ai + 1, 0);  // +1 for tag offset
             an = ast_b(an);
             ai = ai + 1;
@@ -2785,8 +2846,9 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                     if jdi >= 0 { field_idx = jdi; }
                 }
                 // 容量批 T2：可选字段写点规范化（字面量形；元素值节点 = wrapper.a）
-                if g_optrep_on != 0 { val_var = box_for_optional_slot(ast_a(fn2), val_var, struct_row_field_ti(si, field_idx)); }
+                // 批 5（opt-dex · R2 序修正）：先归形式、后装箱（同上）
                 val_var = dex_slot_norm(val_var);   // apx 批 T3：字段槽恒精确
+                if g_optrep_on != 0 { val_var = box_for_optional_slot(ast_a(fn2), val_var, struct_row_field_ti(si, field_idx)); }
                 emit(IR_STORE_FIELD, -1, s, val_var, field_idx, 0);
                 fn2 = fn2 + 1;
             }
@@ -2830,12 +2892,13 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                 // 表达式可选性保守判定——ident/调用覆盖面，其余形态登记）。
                 // 注意：数组字面量的 en 是 **wrapper** 节点（值在 ast_a）——须解引用后判定。
                 // (A) T3：数组级可选（预扫得）⇒ 逐元素判定亦须为真（裸元素装箱）。
+                // 批 5（opt-dex · R2 序修正）：先归形式、后装箱（同上）
+                e_var = dex_slot_norm(e_var);   // apx 批 T3：元素槽恒精确
                 if g_optrep_on != 0 {
                     eo := elem_node_optional(ast_a(en));
                     if elem_opt_ti >= 0 { eo = 1; }
                     e_var = box_for_slot_flag(ast_a(en), e_var, eo);
                 }
-                e_var = dex_slot_norm(e_var);   // apx 批 T3：元素槽恒精确
                 emit(IR_STORE_INDEX, -1, v, e_var, ei, 0);
                 en = en + 1;
             }
@@ -3009,6 +3072,12 @@ fn ir_gen_func(fi: int) {
         if param_type < 0 { param_type = TI_INT; }
         // dex 边界规则（数值迁移 Task 4）：参数一律精确形式（缩放整数，整数寄存器传递）
         if param_type == TI_DEX { param_type = TI_DEX_S; }
+        // 批 5（opt-dex · R3）：`dex?` 形参槽型 —— 修复前 `unpack_type(EXPR_OPTIONAL)` 返 0
+        // （parser.cr:150-153）⇒ `EXPR_PARAM.type_val` = 0 = `TI_INT` ⇒ 槽型按 int 建、
+        // 而调用点按实参 var 的 `TI_DEX` 分类为 binary64（XMM）⇒ **ABI 失配**（按 XMM 传、
+        // 按 GP 读 = 垃圾值 + 双路径分歧）。槽型按**声明面节点**定 = `TI_DEX_S`（GP 类，
+        // 与调用点转换后的实参一致）。
+        else if dex_opt_type_node(ast_data(pn)) != 0 { param_type = TI_DEX_S; }
         pvar := new_ir_var(pname, param_type);
         // Bind param name
         bind_local(pname_idx, pvar);
@@ -3070,6 +3139,12 @@ fn ir_gen_func(fi: int) {
 
     // Generate body（记录返回 TI——EXPR_RETURN 的 dex 边界转换用）
     g_cur_ret_ti = ret_ti;
+    // 批 5（opt-dex · R3）：返回类型节点是否 `dex?`（节点级零 alloc）。`-> dex?` 的
+    // `ret_ti`（= `fi_return_type` 裸码）与 `type_val` 均为 0（`unpack_type(EXPR_OPTIONAL)`）
+    // ⇒ 返回点 dex 转换门 `g_cur_ret_ti == TI_DEX` 恒假 ⇒ 需本标志补位。
+    g_cur_ret_dex_opt = 0;
+    rtn_d := ast_type_val(fn_node);
+    if rtn_d >= 0 && dex_opt_type_node(rtn_d) != 0 { g_cur_ret_dex_opt = 1; }
     // 可选表示（R2 P4 Task 5）：本函数返回可选时，返回点写返回信道（见 EXPR_RETURN）。
     // 判据走**返回类型节点**（ast_type_val(fn_node) = 返回类型节点下标——见上方 ret_ti
     // 注释）而非 fi_return_type 裸码（`T?` 的类型节点 type_val = 0 ⇒ 恒判否）。
@@ -3086,6 +3161,7 @@ fn ir_gen_func(fi: int) {
     }
     g_cur_ret_ti = -1;
     g_cur_ret_opt = 0;
+    g_cur_ret_dex_opt = 0;
 
     // Patch arena size and reset before return
     total := r64(g_sg_alloc_total, (g_sg_count - 1) * 8);
@@ -3238,8 +3314,9 @@ fn inject_global_inits() {
                 if v >= 0 {
                     // 容量批 T2：可选全局槽**初值**写点规范化（与赋值点 :1155 是两处独立
                     // 代码点——初值走 inject_global_inits，赋值走 EXPR_ASSIGN）
-                    if g_optrep_on != 0 { v = box_for_optional_slot(vn, v, global_decl_ti(name_idx)); }
+                    // 批 5（opt-dex · R2 序修正）：先归形式、后装箱（同上——反序 = 漏斗空转）
                     v = dex_store_adjust(gv, v, vn);   // apx 批 T3：全局初值按槽声明型（含 apx 全局）
+                    if g_optrep_on != 0 { v = box_for_optional_slot(vn, v, global_decl_ti(name_idx)); }
                     emit(IR_STORE, -1, gv, v, 0, 0);
                 }
             }
@@ -3270,6 +3347,12 @@ fn reg_one_global(name_idx: int) {
                 if ltn >= 0 && ast_kind(ltn) == 0 && ast_type_val(ltn) == TY_DEX {
                     if ast_int_val(lnode) != 0 { gtype = TI_DEX; } else { gtype = TI_DEX_S; }
                     is_dex_global = 1;
+                } else if ltn >= 0 && dex_opt_type_node(ltn) != 0 {
+                    // 批 5（opt-dex · R1）：`dex?` 全局槽 = **规范形式 scaled**（G1 裁决）。
+                    // 修复前本门只认基类型节点 `dex` ⇒ `dex?` 全局落 TI_INT 槽，
+                    // 赋值/初值的 dex_store_adjust 因目标型不匹配而空转（实测 15）。
+                    // is_dex_global 不置 1：其唯一消费者（:3320）只服务 apx 位模式全局。
+                    gtype = TI_DEX_S;
                 }
                 break;
             }
