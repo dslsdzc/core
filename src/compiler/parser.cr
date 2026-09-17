@@ -863,6 +863,32 @@ fn parse_new_var_decl() -> int {
         if i >= nc { break; }
         ni := str_intern(r64(names, i * 8));
         nv := r64(values, i * 8);
+        // 批 8（静默面收口 · 条目 5；lead 2026-09-18 裁 **(B) 白名单**）：`apx` 仅适用于
+        // **显式 `dex`**（有表示路径）与 **显式 `int`**（既有契约的纯注解：`tests/selfhost/test_apx_tag.py`
+        // 钉「语法合法 + 语义不变 + `.cir` 携 `approx`」，`tests/bootstrap/test_apx_tag.py` 同向 ApproxInstr
+        // ⇒ 两前端对齐）。**其余一律硬错**：`dex?` · `.`（推断）· `auto` · `string`/`bool`/… ——
+        // 这三形「零文档 / 零测试 / **值面无路**」：用户要 apx 表示而实现无路可走（`.cir` 仍多一条
+        // `IR_APPROX` ⇒ **只带标签不给表示** = 语义谎）。判据 = rc=1 + 定位 + build 零产物。
+        // ⛔ 裁 (A)（连 `int, apx` 一并拒）已否：那会**改契约**（须重定 test_apx_tag + 登记两前端接受集
+        // 分歧），而 `int, apx` **不是静默面**。判据原则：「**有契约 ⇒ 有意设计；无契约 ⇒ 静默谎**」。
+        // ⚠ **（B）的残留两前端分歧（2026-09-18 复核指出；纠 lead 先前「(B) 下无需登记」之判断）**：
+        // `bootstrap/corec/frontend/parser.py` 的标签白名单**只查标签名**（`mut`/`pub`/`apx`）、
+        // **无适用性校验** ⇒ 本检查落地后 `dex?, apx` · `. + apx` · `auto + apx` · `string`/`bool + apx`
+        // 在 **bootstrap 侧仍被接受**、self-hosted 侧**拒**（`error[P26]`）⇒ **接受集分歧**（同族
+        // `TODO #2026-09-17-10` 的两前端分歧家族）。**形态为预存**（bootstrap 从未校验适用性），
+        // 但**分歧面因 (B) 而显性化**；收敛方向 = bootstrap 侧补同款白名单（另批，不在本 PR 范围）。
+        if is_apx != 0 {
+            apx_ok : ., mut = 0;
+            if typ >= 0 && ast_kind(typ) == 0 {
+                tv := ast_type_val(typ);
+                if tv == TY_DEX || tv == TY_INT { apx_ok = 1; }
+            }
+            if apx_ok == 0 {
+                check_error(EC_P_APX_TAG,
+                    "'apx' tag is only allowed on an explicit 'dex' or 'int' declaration",
+                    tok_ln(t), tok_cl(t));
+            }
+        }
         node := alloc_node(EXPR_LET, ni, typ, nv, is_apx, 0, is_mut, tok_ln(t), tok_cl(t));
         if i == 0 {
             first_node = node;
@@ -1602,12 +1628,18 @@ fn parse_declaration() {
         advance_tok(); // (
         first_param : ., mut = -1;
         param_count : ., mut = 0;
+        // 批 8（静默面收口 · 条目 3）：C ABI 无可选表示 ⇒ extern 声明的**形参/返回不得为可选**
+        // （修复前 checker 对 extern 声明整段早退（`checker.cr` EXPR_EXTERN 分支）⇒ `extern fn e(x: int?)`
+        //  check=0/build=0、运行期垃圾值；两条早退路径都不报）。判据 = rc=1 + 定位 + 零产物（P024）；
+        // **非可选 extern 不受影响**（判据 ②，守卫档 = test_iface_ops.py / ffi_test.cr / p_ffi2.cr）。
+        extern_opt : ., mut = 0;
         if !check(T_RPAREN) {
             loop {
                 pt := advance_tok();
                 pn := str_intern(tok_lx(pt));
                 advance_tok(); // :
                 pty := parse_type();
+                if pty >= 0 && ast_kind(pty) == EXPR_OPTIONAL { extern_opt = 1; }
                 if first_param < 0 { first_param = g_ast_count; }
                 alloc_node(EXPR_PARAM, pn, 0, 0, 0, unpack_type(pty), pty, tok_ln(pt), tok_cl(pt));
                 param_count = param_count + 1;
@@ -1621,7 +1653,11 @@ fn parse_declaration() {
         if check(T_ARROW) {
             advance_tok();
             ret_node := parse_type();
+            if ret_node >= 0 && ast_kind(ret_node) == EXPR_OPTIONAL { extern_opt = 1; }
             ret_type = unpack_type(ret_node);
+        }
+        if extern_opt != 0 {
+            check_error(EC_P_EXTERN_OPTIONAL, "extern declaration cannot use optional type ('?') - no C ABI representation", tok_ln(t), tok_cl(t));
         }
         // Create EXPR_EXTERN node (no body)
         node : ., mut = alloc_node(EXPR_EXTERN, fn_name_ni, first_param, param_count, 0, ret_type, ffi_lang_ni, tok_ln(t), tok_cl(t));
@@ -2026,7 +2062,18 @@ fn parse_declaration() {
         advance_tok();   // 吞掉 `#` 本身，避免 parse_all 空转；残余由后续解析按既有规则处理
         return;
     }
-    advance_tok();
+    // 批 8（静默面收口 · 条目 4）：**顶层兜底不再静默吞 token**——修复前此处为裸 `advance_tok()`：
+    // 无法识别的顶层 token（typo 的 `stuct` / 多余 `}` / 游离 token）被**无声消费**，既不诊断也不定位；
+    // 紧随其后的声明会被误归（计划 §1 条目 4 现象③「静默丢弃 ⇒ 后续 TF01 误报」与条目 6 同族）。
+    // 全语料实核（批 8 预备扫描；括号深度感知）：179 档 `.cr` 顶层非法首 token = **0** ⇒ 零语料代价。
+    // 先例 = 批 6 T2 的 `#` 非标注位在同一兜底点转响亮（上方 `EC_V_BAD_TAG`）。
+    // EOF 不报（`parse_all` 已先判；此处仅为防御），且**必定推进**一个 token（错误恢复）。
+    if tok_k(cur_tok()) != T_EOF {
+        check_error(EC_P_TOPLEVEL_TOKEN,
+            "unexpected top-level token '" + tok_lx(cur_tok()) + "'",
+            tok_ln(cur_tok()), tok_cl(cur_tok()));
+        advance_tok();
+    }
 }
 
 fn parse_all() {
@@ -2059,7 +2106,30 @@ fn parse_all() {
             tk := tok_k(cur_tok());
             if tk == T_EOF { return; }
             if tk != T_IMPORT && tk != T_FILEID { break; }
+            is_fileid := tk == T_FILEID;
             advance_tok();
+            // 批 8（静默面收口 · 条目 4 前置）：**消费整条 import 语句**。
+            // 修复前只吞 `import` 关键字本身，其后的路径/别名 token 落进 `parse_declaration` 尾部兜底被
+            // **静默吞**——全语料（含 `_import.cr` 与注入的运行时源）普遍如此 ⇒ 条目 4 的顶层硬错若
+            // 不先补这里，会把**每一条合法 import** 判成「意外顶层 token」（实测：`import io` 的 `io`）。
+            // 形状与 `module.cr` res_imports 的扫描**逐字一致**：`[@proj] [a(::b)*] [: alias] [;]`。
+            // ⚠ **不得**放宽成「吞到分号」或「吞任意 IDENT」：那会把紧随其后的下一条声明头也吃掉
+            // （本轮实测：`import arena_globals` 后无分号 ⇒ 误吞 `g_rt_argc : int` ⇒ 余下 `mut` 触发 P25）。
+            if check(T_AT) { advance_tok(); if check(T_IDENT) { advance_tok(); } }
+            if check(T_IDENT) {
+                advance_tok();
+                loop {
+                    if check(T_PATHSEP) {
+                        advance_tok();
+                        if check(T_IDENT) { advance_tok(); }
+                        continue;
+                    }
+                    break;
+                }
+            }
+            if check(T_COLON) { advance_tok(); if check(T_IDENT) { advance_tok(); } }
+            if is_fileid && check(T_INT) { advance_tok(); }
+            if check(T_SEMI) { advance_tok(); }
         }
         t_cur := cur_tok();
         t_kind := tok_k(t_cur);

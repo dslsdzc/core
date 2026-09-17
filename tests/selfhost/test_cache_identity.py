@@ -279,6 +279,37 @@ def main():
               f"A写={a_ident} → B读后={after_b['identity']}(=B身份, canary "
               f"{'gone' if after_b['name'] != canary else 'KEPT!'}) → A读后={after_a['identity']}")
 
+        # ⑥ **含可选程序 ⇒ 缓存整体关闭**（`g_optrep_on ⇒ cache_enabled = 0`，`main.cr`；批 5 起策略，
+        #    批 8 条目 2 的换代判据依赖它）——**可机械复跑的不变量**：编译含可选语料后，
+        #    该探针 key 的 `.cir` 条目数**保持 0**（即「无复活通道」由推理降为机检）。
+        #    正控（防真空）= 上方 ① 已断言非可选探针**确实**写出 `alpha` 条目。
+        opt_fd, opt_name = tempfile.mkstemp(suffix="_cacheid_opt.cr")
+        opt_src = pathlib.Path(opt_name)
+        with os.fdopen(opt_fd, "w") as f:
+            f.write("// optional-using probe (batch 8; cache must stay OFF)\n"
+                    "fn alpha(x: int?, y: int) -> int {\n"
+                    "    return match x { Some(v) => { return v + y; } None => { return y; } };\n"
+                    "}\n"
+                    "fn main() -> int { return alpha(None, 1) - 1; }\n")
+        opt_prefix = str(opt_src).replace("/", "_")
+        try:
+            before = len(list(CACHE_DIR.glob(f"{opt_prefix}::*.cir")))
+            r_opt = run_corec(COREC, opt_src, dot)
+            after = len(list(CACHE_DIR.glob(f"{opt_prefix}::*.cir")))
+            check("optional_disables_cache",
+                  r_opt.returncode == 0 and before == 0 and after == 0,
+                  f"rc={r_opt.returncode} 条目数 {before}→{after}（含可选 ⇒ 恒 0 = 无复活通道）")
+        finally:
+            for p in CACHE_DIR.glob(f"{opt_prefix}::*.cir"):
+                try:
+                    p.unlink()
+                except FileNotFoundError:
+                    pass
+            try:
+                opt_src.unlink()
+            except FileNotFoundError:
+                pass
+
         print(f"{checks - len(failures)}/{checks} passed")
         for f in failures:
             print(f"  FAILED: {f}")

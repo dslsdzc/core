@@ -21,9 +21,17 @@
 的**最小坏实现**式改写；M5/M6 的字节取自本仓真实产物（来源逐条注明）。
 
 判据自身失败即 rc=1（CI 挂 bootstrap-tests；见 src/ci/run.sh）。
+
+**批 8 追加（2026-09-18 复核 Important）**：M1–M6 为**纯内存**突变；批 8 的四条突变是「改编译器源码 ⇒
+重建 ⇒ 探针读数反向」形态，无法内存复刻 ⇒ 此处接机检其可机械验证的两半（**锚点仍唯一命中** + **期望值
+与判据常数一致**，见 `main()` 的 M7–M10 段）；**真跑腿**（重建 + 探针）以 `COREC_MUT_SELF=1` 开启。
 """
 
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parents[2]
@@ -149,6 +157,62 @@ def mut_block_dest_reg_swap(block: bytes) -> bytes:
     out = bytearray(block)
     out[k + 2] = 0x18
     return bytes(out)
+
+
+def mut_self_item2():
+    """M7 **真跑腿**（`COREC_MUT_SELF=1`；默认关）：在 /tmp 副本上把条目 2 的分派块**失效化** ⇒ 重建
+    ⇒ 六位位码探针须回 **24**（= 修复前读数；2026-09-18 复核重跑实测）；同时**原树正控**同探针须为 **30**。
+    成本 ≈ 1 次重建（~1 min）+ 2 次探针编译。用途：把「突变能命中目标」从文档承诺变成**机检**。"""
+    probe = ("fn b2i(x: bool) -> int { if x { return 1; } return 0; }\n"
+             "fn main() -> int {\n"
+             "    n : int? = None;\n    m : int? = None;\n    a : int? = 7;\n    b : int? = 7;\n"
+             "    return b2i(n == Some(7)) + b2i(n == None) * 2 + b2i(n == m) * 4 + b2i(a == b) * 8"
+             " + b2i(a == 7) * 16 + b2i(n == 7) * 32;\n}\n")
+    tmp = Path(tempfile.mkdtemp(prefix="mutself_"))
+    try:
+        for item in ("src", "tools", "tests", "bootstrap"):
+            src = BASE / item
+            if src.is_dir():
+                shutil.copytree(src, tmp / item, dirs_exist_ok=True)
+        for item in ("build_selfhost_native.py",):
+            src = BASE / item
+            if src.is_file():
+                shutil.copy2(src, tmp / item)
+        p = tmp / "src" / "compiler" / "ir_gen.cr"
+        s = p.read_text()
+        old = ("if (op == OP_EQ || op == OP_NE) && g_optrep_on != 0 {\n"
+               "            lo := opt_cmp_optish(left, left_var);")
+        new = ("if (op == OP_EQ || op == OP_NE) && g_optrep_on != 0 && g_optrep_on == 999 {\n"
+               "            lo := opt_cmp_optish(left, left_var);")
+        if s.count(old) != 1:
+            return False, "突变锚点漂移（副本内未唯一命中）"
+        p.write_text(s.replace(old, new))
+        b = subprocess.run([sys.executable, "build_selfhost_native.py"], cwd=tmp,
+                           capture_output=True, text=True, timeout=1200)
+        if b.returncode != 0:
+            return False, f"副本重建失败 rc={b.returncode}"
+        pf = tmp / "probe6.cr"
+        pf.write_text(probe)
+        r = subprocess.run([str(tmp / "build" / "corec"), "build", str(pf), "--static",
+                            "-o", str(tmp / "p.bin")], cwd=BASE, capture_output=True,
+                           text=True, timeout=300)
+        if r.returncode != 0:
+            return False, f"突变体探针编译失败 rc={r.returncode}"
+        rc = subprocess.run([str(tmp / "p.bin")], capture_output=True, timeout=120).returncode
+        pf2 = BASE / "build" / "_mutself_probe.cr"
+        out2 = BASE / "build" / "_mutself_p.bin"
+        pf2.write_text(probe)
+        r2 = subprocess.run([str(BASE / "build" / "corec"), "build", str(pf2), "--static",
+                             "-o", str(out2)], cwd=BASE, capture_output=True, text=True, timeout=300)
+        rc2 = -1
+        if r2.returncode == 0:
+            rc2 = subprocess.run([str(out2)], capture_output=True, timeout=120).returncode
+        for f in (pf2, out2, Path(str(out2) + ".ccr")):
+            if f.exists():
+                f.unlink()
+        return (rc == 24 and rc2 == 30), f"突变体位码={rc}（期望 24）· 原树正控={rc2}（期望 30）"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def main() -> int:
@@ -305,6 +369,55 @@ def main() -> int:
         cases.append((f"M6/#2026-09-16-23 块体模板：{label}",
                       old_block_prefix_ok(mtext, [16]), probs))
 
+    # ── M7–M10（批 8，2026-09-18 复核 Important ②③）：四条批级突变的**锚点与期望一致性** ──
+    # 四条突变都是「改编译器源码 ⇒ 重建 ⇒ 探针读数反向」的形态 ⇒ **无法**用本档纯内存体例复刻；
+    # 故接机检其**可机械验证的两半**：① 突变锚点在源码中**仍存在且唯一**（锚漂移 = 突变打空而无人知）；
+    # ② 记录的期望值与被测判据（套件常量 / run.sh 注）**一致**（防「文档期望 ≠ 判据常数」）。
+    # **真·重建复跑**（可选、默认关）：`COREC_MUT_SELF=1 python3 tests/harness/test_criteria_mutations.py`
+    #   —— 在 /tmp 副本上做 M7 突变（分派块失效化）⇒ 重建 ⇒ 运行六位位码探针 ⇒ 期望 **24**。
+    batch8 = []
+
+    def _once(path, needle):
+        txt = (BASE / path).read_text()
+        return txt.count(needle)
+
+    # M7：条目 2（可选 == 表示透明）——突变 = 分派块失效化 ⇒ 位码回 **24**（2026-09-18 复核重跑实测）
+    n1 = _once("src/compiler/ir_gen.cr", "if (op == OP_EQ || op == OP_NE) && g_optrep_on != 0 {")
+    n2 = _once("src/compiler/ir_gen.cr", "lo := opt_cmp_optish(left, left_var);")
+    opt_eq = (BASE / "tests/selfhost/test_opt_eq.py").read_text()
+    pre = "BITCODE_PRE = 24" in opt_eq
+    post = "BITCODE_POST = 30" in opt_eq
+    runsh = (BASE / "src/ci/run.sh").read_text()
+    rs = ("修复前 = 24" in runsh and "修复后 = 30" in runsh)
+    batch8.append(("M7/批8-条目2 分派块失效化", n1 == 1 and n2 == 1 and pre and post and rs,
+                   f"锚点×2={n1}/{n2}（各自须 =1）· BITCODE_PRE/POST 24/30={pre}/{post} · run.sh 注 24/30={rs}"))
+
+    # M8：条目 3（extern 可选 ⇒ P24）——突变 = 撤 parser 的 extern_opt 检查 ⇒ 4 拒收例回 check=0
+    n1 = _once("src/compiler/parser.cr", "extern_opt : ., mut = 0;")
+    n2 = _once("src/compiler/parser.cr", "if extern_opt != 0 {")
+    n3 = _once("src/compiler/ast.cr", "EC_P_EXTERN_OPTIONAL : int = 1024;")
+    ext = (BASE / "tests/selfhost/test_extern_opt.py").read_text()
+    batch8.append(("M8/批8-条目3 extern 可选 P24", n1 == 1 and n2 == 1 and n3 == 1 and "error[P24]" in ext,
+                   f"锚点={n1}/{n2} · 码 1024={n3} · 套件期望 error[P24]={'error[P24]' in ext}"))
+
+    # M9：条目 4（顶层兜底 ⇒ P25）——突变 = 兜底退回裸 advance_tok() ⇒ 5 拒收例回 check=0
+    n1 = _once("src/compiler/parser.cr", "if tok_k(cur_tok()) != T_EOF {")
+    n2 = _once("src/compiler/parser.cr", "EC_P_TOPLEVEL_TOKEN")
+    n3 = _once("src/compiler/parser.cr", "is_fileid := tk == T_FILEID;")
+    n4 = _once("src/compiler/ast.cr", "EC_P_TOPLEVEL_TOKEN  : int = 1025;")
+    tlr = (BASE / "tests/selfhost/test_toplevel_reject.py").read_text()
+    batch8.append(("M9/批8-条目4 顶层兜底 P25", n1 == 1 and n2 >= 1 and n3 == 1 and n4 == 1
+                   and "error[P25]" in tlr,
+                   f"兜底锚={n1} · 码锚={n2} · import 整句消费锚={n3} · 码 1025={n4} · 套件 error[P25]={'error[P25]' in tlr}"))
+
+    # M10：条目 5（apx 白名单 ⇒ P26）——突变 = 撤白名单检查 ⇒ 5 拒收例回 check=0
+    n1 = _once("src/compiler/parser.cr", "apx_ok : ., mut = 0;")
+    n2 = _once("src/compiler/parser.cr", "if apx_ok == 0 {")
+    n3 = _once("src/compiler/ast.cr", "EC_P_APX_TAG         : int = 1026;")
+    ats = (BASE / "tests/selfhost/test_apx_tag_scope.py").read_text()
+    batch8.append(("M10/批8-条目5 apx 白名单 P26", n1 == 1 and n2 == 1 and n3 == 1 and "error[P26]" in ats,
+                   f"锚点={n1}/{n2} · 码 1026={n3} · 套件 error[P26]={'error[P26]' in ats}"))
+
     # ── 汇总 ───────────────────────────────────────────────────────────
     bad_cases = []
     for c in cases:
@@ -321,10 +434,21 @@ def main() -> int:
         print(f"[{'PASS' if good else 'FAIL'}] {name} —— {why}")
         if not good:
             bad_cases.append(name)
+    for name, ok, detail in batch8:
+        print(f"[{'PASS' if ok else 'FAIL'}] {name} —— {detail}")
+        if not ok:
+            bad_cases.append(name)
+    if os.environ.get("COREC_MUT_SELF") == "1":
+        ok, detail = mut_self_item2()
+        print(f"[{'PASS' if ok else 'FAIL'}] M7/批8-条目2 **真跑**（重建 + 探针）—— {detail}")
+        if not ok:
+            bad_cases.append("M7 真跑")
     n_mut = sum(1 for c in cases if not (len(c) > 3 and c[3]))
-    print(f"[criteria-mutations] {len(cases) - len(bad_cases)}/{len(cases)} PASS"
+    total = len(cases) + len(batch8)
+    print(f"[criteria-mutations] {total - len(bad_cases)}/{total} PASS"
           f"（突变体 {n_mut} 例 + 正控 {len(cases) - n_mut} 例；"
-          f"每例 = 旧形态绿 ∧ 新形态红）")
+          f"每例 = 旧形态绿 ∧ 新形态红）· 批 8 锚点/期望一致性 {len(batch8)} 例"
+          f"（真跑腿 {'开' if os.environ.get('COREC_MUT_SELF') == '1' else '关（COREC_MUT_SELF=1 开启）'}）")
     return 0 if not bad_cases else 1
 
 

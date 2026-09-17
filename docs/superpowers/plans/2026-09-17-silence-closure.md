@@ -130,6 +130,13 @@
   ③ `dex?` 与 `int?` **同一拒收路径**。
 - **突变自证**：撤掉新校验（或放行该形态）⇒ 探针回 `check=0` ⇒ **必红**。
 - **停条件**：若实测发现 C ABI 实际支持某可选形态（e.g. 指针型可选）⇒ 停下报 lead 再定粒度。
+- ⚠ **实施硬边界（2026-09-17 批 8 预备扫描实核；lead 裁定入册）**：新硬错**只钉「可选面」**（形参/返回含 `?` 的
+  `extern` 声明），⛔ **不得**推广为广义「C ABI 可表示性」校验——否则会打红下列语料。
+  **守卫档（判据 ② 的「逐字节不变」对象，三档）**：`tests/selfhost/test_iface_ops.py`（内嵌 `extern fn f() -> char;`
+  与 `extern fn f() -> never;`）· `tests/suite/ffi_test.cr`（`getchar`/`putchar`/`dex_floor`）·
+  `tests/probes/p_ffi2.cr`（`putchar`）。
+  语料实核：全仓 `extern fn` 12 处声明（`.cr` 6 + py 内嵌 6）中**含 `?` 者 = 0** ⇒ 本硬错零语料代价；其余 extern 形态
+  （`-> char` / `-> never` / `dex -> dex`）**必须继续被接受**。
 
 ### 4. ⚠ **【S】顶层兜底静默吞 token**（分诊/登记面；`parse_declaration` 裸 `advance_tok()`）
 

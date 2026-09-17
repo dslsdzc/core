@@ -105,6 +105,30 @@ def run_interp(source):
     return p.returncode
 
 
+def build_and_reject(source, tag):
+    """**拒收面**（kind == "reject"，批 8 条目 5 追加）：check 必须
+    rc=1 + `error[P26]` + 定位，build rc=1 且**零产物**。返回 (check_rc, diag, loc, build_rc, artifact)。"""
+    src = f"// opt-dex-{uuid.uuid4()}\n" + source
+    with tempfile.NamedTemporaryFile("w", suffix=".cr", delete=False) as f:
+        f.write(src)
+        path = f.name
+    out = str(BASE / "build" / f"_optdex_rej_{tag}_{uuid.uuid4().hex[:8]}")
+    try:
+        chk = subprocess.run([str(COREC), "check", path], cwd=BASE,
+                             capture_output=True, text=True, timeout=180)
+        diag = "error[P26]" in chk.stdout
+        loc = " -->" in chk.stdout
+        bld = subprocess.run([str(COREC), "build", path, "-o", out, "--static"],
+                             cwd=BASE, capture_output=True, text=True, timeout=300)
+        art = os.path.exists(out) or os.path.exists(out + ".ccr")
+        return chk.returncode, diag, loc, bld.returncode, art
+    finally:
+        os.unlink(path)
+        for p in (out, out + ".ccr"):
+            if os.path.exists(p):
+                os.unlink(p)
+
+
 MATCH_BODY = """    return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
 """
 
@@ -241,7 +265,9 @@ fn main() -> int {
     x : dex?, apx = 7.0;
     return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
 }
-""", 7, "scaled", "`dex?, apx`：标签**被静默忽略** ⇒ 落精确世界（`TODO #2026-09-17-4` 登记面；钉子）"),
+""", 0, "reject", "`dex?, apx`：**批 8 条目 5（裁定 (B)）后转硬错**（`error[P26]` + 零产物）。"
+     "**旧值留痕（批 5–批 7）**：`check=0 · ELF=interp=7`（kind=`scaled`，标签被静默忽略 ⇒ 落精确世界，"
+     "`TODO #2026-09-17-4` 登记面）——本批按计划条目 5 判据要件③「显式归因 + 同批重锁 + 旧值留痕」重锁。"),
     ("param_scaled", """
 fn g(x: dex?) -> int {
     return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
@@ -427,6 +453,14 @@ def test_cases():
     """家族面逐例：check/build 严格 + ELF == 期望 + interp 按 kind 的纪律（禁第三态）。"""
     fails = []
     for name, src, want, kind, note in CASES:
+        if kind == "reject":
+            chk, diag, loc, bld, art = build_and_reject(src, name)
+            ok = chk == 1 and diag and loc and bld == 1 and not art
+            line = (f"check={chk} P26={diag} 定位={loc} build={bld} 产物={art}")
+            print(f"[{'PASS' if ok else 'FAIL'}] {name}: {line} — {note}")
+            if not ok:
+                fails.append(f"{name}: 拒收面失败（{line}）— {note}")
+            continue
         chk, bld, elf = build_and_run(src, name)
         if chk != 0:
             fails.append(f"{name}: check rc={chk}（期望 0；任何诊断码 = 失败——{note}）")
@@ -455,8 +489,8 @@ def test_apx_slot_witness():
     （`const dex = <大整数>`）；scaled 源**不得**出现（否则分类错了 ⇒ 判据面被污染）。"""
     bad = 0
     for name, src, _want, kind, _note in CASES:
-        if kind == "int":
-            continue
+        if kind == "int" or kind == "reject":
+            continue   # reject 形**不再编译**（条目 5 硬错）⇒ 无 `.cir` 可查，自证面不适用
         r = run_corec(["cir"], src)
         vals = [int(m) for m in re.findall(r"const\s+dex\s*=\s*(\d+)", r.stdout + r.stderr)]
         mx = max(vals) if vals else -1

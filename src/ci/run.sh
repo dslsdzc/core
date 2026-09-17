@@ -219,6 +219,53 @@ case "$CI_JOB_NAME" in
     # 配套 suite 语料 `tests/suite/opt_dex_test.cr`（常规腿；返回码 1..14 = 首个失败面编号）。
     # 计划 = docs/superpowers/plans/2026-09-17-opt-dex.md · 报告 = 收官批报告。
     python3 tests/selfhost/test_opt_dex.py
+    # ─── 批 8 条目 2（静默面收口）：可选值 `==`/`!=` 表示透明（2026-09-17）───
+    # **19 例**：判据 ① `Some(x)==Some(x)` 真 · ② `None==None` 真 · ③ `Some(x)==None` 假 ·
+    # ④ 同源自比较真（裸/装箱两表示；装箱取 `*p` 形态绕开软诊断 B04，同批 5 体例）·
+    # ⑤ 非可选比较逐值钉子（零变化面）。
+    # 另有：表示透明三例（裸/装箱/混合同判）· `!=` 两面 · 合成 bool 面 ·
+    # **六位位码总钉**（`bit0..bit5` 打包，rc 可读；**修复前 = 24 · 修复后 = 30**，两腿同判）
+    # 锚更正留痕（2026-09-18 复核）：本行原文写「修复前 = 8 · 修复后 = 14」= **旧探针形状**读数
+    # （bit4 用 `n == 7`、`n = None` ⇒ 0）；`0186427f` 重定 bit4 为 `a == 7`（present 形）+ 补 bit5 后真值 = 24/30
+    # （前态二进制实测 24/24；本链 30/30）。
+    # · 未覆盖面抽样一例。
+    # 判据模型：**以运行退出码为准**（rc 即读数；不依赖 stdout）；两腿同判（ELF 与 interp）。
+    # 突变自证（批级留痕；**已接机检**：`tests/harness/test_criteria_mutations.py`）：把新增分派块退回
+    # 不触发（= 修复前路径）⇒ 位码回 **24**（两腿；2026-09-18 复核重跑：旧值 8 = 旧探针形状，已更正）。
+    # 机理：`==` 通用二元路径逐槽比原始值——裸(rep=0)比载荷 ✓、装箱比指针 ⇒ 恒假；
+    # 修复 = 比较点归一 `(absent, payload)` 后按值比（`ir_gen.cr` opt_cmp_* 三函数 + 分派块）。
+    python3 tests/selfhost/test_opt_eq.py
+    # ─── 批 8 条目 3（静默面收口）：extern 声明含可选（`?`）⇒ 硬错 P24（2026-09-17）───
+    # **12 例** = 拒收面 6（`dex?`/`int?` 形参 · `dex?`/`int?` 返回 · 混合形参 · `string?`）+ 非可选对照 4
+    # （`dex` / `int` / `never` / `char`——守卫 `test_iface_ops.py` 同形态的编译面）+ 守卫语料 2
+    # （`tests/suite/ffi_test.cr` · `tests/probes/p_ffi2.cr` check rc=0）。
+    # 判据要件：① 含可选 ⇒ rc=1 + `error[P24]` + 定位 + **零产物**；② 非可选逐字节不变；③ `dex?`/`int?` 同路径。
+    # 落点 = parser 的 extern 分支（签名规则位，同 P020 先例；返回类型节点在 parser 内可用）。
+    # 突变自证（批级留痕）：撤掉该检查 ⇒ 6 条拒收例回 `check=0`。
+    python3 tests/selfhost/test_extern_opt.py
+    # ─── 批 8 条目 4（静默面收口）：顶层兜底不再静默吞 token ⇒ P25（2026-09-18）───
+    # **12 例** = 拒收 5（顶层多余 `}` / typo 声明 / typo 声明+使用 / 游离 `;` / typo 关键字）+ 合法对照 7
+    # （import ×2 / **无初值全局**（= 注入运行时源 `rt.cr:4` 同形）/ 有初值全局 / `mod` / `type` / `@` 注解）。
+    # 判据：拒收 ⇒ check rc=1 + `error[P25]` + 定位 + build rc=1 + **零产物**；合法 ⇒ check/build/run 三面 0；
+    # **不挂起**（P6：报错路径仍消费 token；套件内每例限时 60s、超时即红——CI 超时不是红）。
+    # ⚠ 同批前置修（本轮实测暴露）：`parse_all` 原只吞 `import` 关键字本身，路径/别名 token 一直靠兜底
+    # 静默吞（全语料普遍）⇒ 新硬错会误伤**每一条合法 import**（实测 `import io` 的 `io` 与注入源
+    # `import arena_globals`）。修复 = 按 res_imports 形状逐字消费 `[@proj] [a(::b)*] [: alias] [;]`。
+    # 全语料对拍（212 档 × `check`；前态二进制 vs 本修复）：差异 **7 档且全部本就 rc=1**（spec 负例 5 ·
+    # 探针 1 · 旧 fixture 1；期望码 V02/V03 仍在）⇒ 合法语料零差异。
+    # 突变自证（批级留痕）：兜底退回裸 `advance_tok()` ⇒ 拒收 5 例回 `check=0`。
+    python3 tests/selfhost/test_toplevel_reject.py
+    # ─── 批 8 条目 5（静默面收口）：`apx` 标签**适用性白名单** ⇒ P26（2026-09-18）───
+    # **7 例** = 拒收 5（`dex?` · `.` 推断 · `auto` · `string` · `bool`）+ 白名单 2（`dex, apx` 表示路径 ·
+    # `int, apx` 既有契约纯注解；两者 `.cir` 各恰一条 `approx` = 机制钉）。
+    # 判据：拒收 ⇒ check rc=1 + `error[P26]` + 定位 + build rc=1 + **零产物**；白名单 ⇒ check/build/run 三面 0。
+    # 裁定依据（lead 2026-09-18 = (B)）：白名单 = 显式 `dex` + 显式 `int`（**有契约**：`test_apx_tag.py`
+    # 钉语法合法/语义不变/`.cir` 携 `approx`，bootstrap 同向 ApproxInstr ⇒ 两前端对齐）；其余（`dex?`/`.`/`auto`/
+    # `string`/`bool`…）**零文档 / 零测试 / 值面无路** = 静默谎。⛔ 裁 (A)（连 `int, apx` 一并拒）已否：
+    # 那会**改契约**（须重定 test_apx_tag + 登记两前端接受集分歧）——判据原则「有契约 ⇒ 有意设计；无契约 ⇒ 静默谎」。
+    # 白名单两形的产物**逐字节不变**（前态二进制 vs 本链实测 IDENTICAL）· 契约套件 `test_apx_tag.py` 2/2 复跑绿。
+    # 突变自证（批级留痕）：撤掉该检查 ⇒ 拒收 5 例回 `check=0`。
+    python3 tests/selfhost/test_apx_tag_scope.py
     # ─── 批 6（验证内核正式接入 = 正式规约语法 `#check`/`#ensure`；2026-09-17）───
     # 四组 48 项：A 语法面（16）· B 检查面（11）· C `--dump-vcs` 通道（15）· D `.ccr` 零足迹三段式（6，含 Δ 公式）。
     # **Δ 公式 = 本批最有价值的判据**（T3 首轮当场抓到实现自身的 `str_intern("result")` 泄漏：两用例 STR Δ 凭空 +10B），
