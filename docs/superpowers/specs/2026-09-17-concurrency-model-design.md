@@ -305,7 +305,7 @@
 | # | 不变量（原文依据） | 可检验形式 | 取证面 |
 |---|---|---|---|
 | **I1** | **确定性（预算等价，G1 裁定）**：任何**未显式声明**的调度差异，不得改变可观察语义；**可观察语义 = `(值输出, 效应, 控制去向, 终止类别, 预算向量)`**（§1 + §13.0） | ∀ 合法调度选择 s₁,s₂：五项**逐项**相等；**预算向量按声明粒度比较**（同一声明条目 ⇒ 两次运行都必须满足该条目），**不含绝对墙钟时间** | 差分执行（同产物多次运行 + 强制不同调度 + payload 标度律检查）+ 报告面逐条 `proved/unknown/violated` 状态（§10 / S-D） |
-| **I2** | **零用户锁**：源语言不新增 lock / mutex / atomic / ownership 语法（§1） | 关键字表 / grammar / 语法面**新增零项**；存量 `move` 由 **G8 裁定（维护者）= 删除**消解（`TODO #2026-09-17-16`）⇒ 本不变量无例外、无待定 | `src/compiler/lexer.cr` 关键字表 + `grammar/core.ebnf` 逐条核对 |
+| **I2** | **零用户锁**：源语言不新增 lock / mutex / atomic / ownership 语法（§1） | 关键字表 / grammar / 语法面**新增零项**；存量 `move` 由 **G8 裁定（维护者）= 删除**消解（`TODO #2026-09-17-18`）⇒ 本不变量无例外、无待定 | `src/compiler/lexer.cr` 关键字表 + `grammar/core.ebnf` 逐条核对 |
 | **I3** | **默认 share-nothing**：默认 mapping 下跨执行体无共享可变状态（§1.2） | 默认配置下，不存在「同一可变 subregion 同时落入两个执行体访问集」的实例——由 Transfer Planning 的义务面给出 | Transfer Analysis 输出 + 义务台账 |
 | **I4** | **保守性单向**：COPY 永可行；分析不精确只亏性能，**不得**产生错误拒绝（§3.2 第 9 项 + 2026-09-04 spec §设计原则 3） | 任意分析精度档下：取消分析 ⇒ **非预算分量**结果不变（全 COPY 语义等价）；分析失败 ⇒ 只允许落「预算 `unknown` → ③proof-required / 按 policy 降级」，**不得**产生错误拒绝，**也不得**静默放过预算违例（见 I9） | 行为探针：强制全 COPY 与精细计划对拍 |
 | **I5** | **语义优先（强化）**：同步实现 / mapping 选择永远不能反过来定义语义（§5） | 任何 mapping 选项（copy chunk/order、锁种类、调度器选择）翻转 ⇒ ①**非预算分量不变**；②**不使已声明的预算条目由满足变不满足** | 同上 I1（含预算条目逐条状态） |
@@ -330,7 +330,7 @@
 |---|---|---|
 | **执行体（execution body）** | 拥有独立 region/arena、可与其他执行体并行的执行单位。今日实现 = goroutine（G） | 原文 + `src/stdlib/goroutine.cr` |
 | **region** | ⚠ **两义，须先判语境**：(a) 控制流嵌套（SG_FUNC/SG_IF/SG_LOOP/SG_FOR/SG_UNSAFE，`g_sgs`）；(b) 内存字节域（区域/Arena）。既有文档已显式登记此歧义 | 仓内既有：`docs/maintainer/design/region-model.md:60-62` |
-| **subregion** | 原文字面："R → R1 + R2 + … + Rn"（SPLIT）、"最小 subregion"（COPY）、"CopySet 精确到 subregion"（§11 步 1）。**粒度/边界判据/表示仍为设计细节**；**G3 裁定 = 分析表示先升级**（pts 动态化，不选「接受退化」——理由：G1 取含时间立场 ⇒ 预算可证明性依赖分析精度） | 原文 + G3 裁定（`TODO #2026-09-17-17`） |
+| **subregion** | 原文字面："R → R1 + R2 + … + Rn"（SPLIT）、"最小 subregion"（COPY）、"CopySet 精确到 subregion"（§11 步 1）。**粒度/边界判据/表示仍为设计细节**；**G3 裁定 = 分析表示先升级**（pts 动态化，不选「接受退化」——理由：G1 取含时间立场 ⇒ 预算可证明性依赖分析精度） | 原文 + G3 裁定（`TODO #2026-09-17-19`） |
 | **Live_sender** | CopySet 第一项（发送侧仍存活的部分） | 定义待设计；分析地基由 G3 裁定固定（pts 表示升级） |
 | **Needed_receiver** | CopySet 第二项（接收侧真正需要的部分） | 同上 |
 | **NonTransferable** | CopySet 第三项（无法经 MOVE/LOAN/SPLIT/FILL 消除的部分）。**注意**：既有 2026-09-04 spec 有一组近似概念——「无配方条目（不可重算，必须有 home，永不重建材料）」，语义不完全相同（那是**身份**不可复制，这里更像**可转移性**） | **待定** → G3 / G7 |
@@ -369,7 +369,7 @@
 | 4 | arena | `src/stdlib/arena.cr` | 每子图一 arena；`arena_init/new/reset`；`g_current_arena` 路由 `alloc()`；free list 复用；嵌套 parent 记录 | 无 size class、无 split（子区域）、无跨 arena 迁移/换基址、无页权限（COW/冻结）、无预留（FILL 需要的 destination reserve） |
 | 5 | 图与 region | `src/compiler/dataflow.cr` | SG 记录（kind/enter/exit/parent/nstart/ncount）+ `g_df_node_region` 显式归属（`subgraph_containing` O(1)）；`SG_FUNC/SG_IF/SG_LOOP/SG_FOR/SG_UNSAFE` 有产生点；**`SG_FLOW` 无任何产生点**（S-E B-N1 实测） | region 是**控制流**嵌套，不是内存区域；无「内存子区域」表 |
 | 6 | state edges | `src/compiler/dataflow.cr:156-266` | 副作用链：`df_connect_state`（opcode 级效应清单唯一真源 = `purity_op_effect`）+ 循环终止依赖；**全部 IR 生成后重建**（`df_replay_state_chain`）——因为入链判据依赖 `compute_all_purity`；`kind=1` | 只有「序」没有「交换性」；无 ReadSet/WriteSet |
-| 7 | 指针分析 | `src/compiler/ptr_analysis.cr` | Andersen 式：Addr/Copy/Store/Load 四规则；pts 表 `g_pts`；offset 表 `g_offsets`（单标量，-1=未知）；alloc→节点映射 `g_pa_alloc_nodes` | **intra-procedural**：`IR_CALL` 分支"leave pts=0 for now (conservative)"（`:316-319`）——头注声称 "interprocedural function summaries"，**代码无该实现**；pts 是**单 int 64 位位图**（`pa_merge_pts` 循环 `bi<64`）；**全程序 alloc 追踪上限 64**（`:213` `if g_pa_alloc_count < 64`）⇒ 第 65 个分配起静默不追踪；**且计数器从不复位**（`reset_frontend_state` `globals.cr:509-540` 复位了 `g_alloc_pts_cap:538` 却未含它）⇒ 额度**按进程累计**、随编译序漂移；unsafe 块整块跳过（`:201`）。⇒ 已立 `TODO #2026-09-17-17` |
+| 7 | 指针分析 | `src/compiler/ptr_analysis.cr` | Andersen 式：Addr/Copy/Store/Load 四规则；pts 表 `g_pts`；offset 表 `g_offsets`（单标量，-1=未知）；alloc→节点映射 `g_pa_alloc_nodes` | **intra-procedural**：`IR_CALL` 分支"leave pts=0 for now (conservative)"（`:316-319`）——头注声称 "interprocedural function summaries"，**代码无该实现**；pts 是**单 int 64 位位图**（`pa_merge_pts` 循环 `bi<64`）；**全程序 alloc 追踪上限 64**（`:213` `if g_pa_alloc_count < 64`）⇒ 第 65 个分配起静默不追踪；**且计数器从不复位**（`reset_frontend_state` `globals.cr:509-540` 复位了 `g_alloc_pts_cap:538` 却未含它）⇒ 额度**按进程累计**、随编译序漂移；unsafe 块整块跳过（`:201`）。⇒ 已立 `TODO #2026-09-17-19` |
 | 8 | 区域检查 | `src/compiler/region_check.cr` | DEREF 目标分配的 subgraph 是否已 exit（`ni > alloc_exit` 节点序比较，`:34-57`）；返回逃逸（`:59-92`）；存储逃逸调 `rc_pts_has_escaped` 但**丢弃返回结果**（`:102`）⇒ 无诊断路径 | 无 liveness/use 集（仓内无该 pass）；无跨执行体概念 |
 | 9 | provenance 校验 | `src/compiler/provenance_verify.cr` | offset vs alloc size 界限；运行期检查回填 s2/s3（`:117-129`） | 与 transfer 无关；alloc size 只覆盖 `IR_ALLOC_ARRAY`/`IR_ALLOC_STRUCT`（`:17-26`） |
 | 10 | `.ccr` 载体 | `src/compiler/ccr_io.cr` | EDG 段每条 `{to_nod u32, kind u32}`，kind **只允许 ∈ {0 def-use, 1 state}**，`>1` 直接拒绝落盘（`:412`/`:428`）；`CCR_VERSION = 9`（`:135`，load 严格 `==9`） | 无第 3 类边、无标注段（S-E 说 determinism 标注要与 R2 P4 同波进 `.ccr` 段——**尚未落**） |
@@ -395,7 +395,7 @@
 | 10 | **Adaptive mapping** | TODO「PGO 自动剖析」（2026-08-30 记）——**仅登记，无实现** | profile 采集/反馈面 | **无** |
 
 > **次序修订（G9 裁定，维护者 2026-09-17）**：上表按维护者**原文**次序；**实施次序已由 §11.1 修订**——步 1 之前插入地基三项（0a 多 M / 0b 消息表示 / 0c 并发运行时验证）。
-> **G3 裁定（team-lead 2026-09-17）**：步 1 的 Live/Needed 分析**先做 pts 表示升级**（不选「接受退化」）；64 上限静默截断已立 `TODO #2026-09-17-17`。
+> **G3 裁定（team-lead 2026-09-17）**：步 1 的 Live/Needed 分析**先做 pts 表示升级**（不选「接受退化」）；64 上限静默截断已立 `TODO #2026-09-17-19`。
 
 ### 15.3 `go` / `chan` 现状的语义定位（读码事实，不含推断）
 
@@ -434,7 +434,7 @@
 2. **`ptr_analysis.cr` 头注与实现不符**：头注第 6 行写 "Call: function summary propagation + arg conservatism"，实现是 `IR_CALL` → pts=0 保守（`:316-319`）。CLAUDE.md 记该 pass 为「过程间 Andersen 式」——**代码是过程内**。
 3. **`SG_FLOW` 无产生点**（S-E B-N1 已实测）——`docs/maintainer/proposals/concurrency.md` 的 `flow` 设计与 region 面尚未接线。
 
-> 以上三处已登记为 **`TODO #2026-09-17-18`**（登记批，未修；零源码语义）。
+> 以上三处已登记为 **`TODO #2026-09-17-20`**（登记批，未修；零源码语义）。
 
 ---
 
@@ -448,12 +448,12 @@
 |---|---|---|---|
 | **G1** | 维护者 | **含时间——预算等价**（**强于**代理推荐：原推荐倾向「性能不进语义」） | **§13.0**（新建）、§13 I1/I4/I5/**I9**、§14 术语 |
 | **G2** | 维护者 | **分层**：`go` 声明并发不声明顺序 · **通道 FIFO 升格为语义序** · 未标注的可观察顺序 ⇒ **reject** | §14 术语「显式声明的调度差异」、§13 I1 |
-| **G3** | team-lead | **pts 表示升级**（不选「接受退化」）；64 上限静默截断立 TODO | §15.2 注、`TODO #2026-09-17-17` |
+| **G3** | team-lead | **pts 表示升级**（不选「接受退化」）；64 上限静默截断立 TODO | §15.2 注、`TODO #2026-09-17-19` |
 | **G4** | team-lead | **静态证明 + 证书；禁运行时见证顶替** | §13.0.2 |
 | **G5** | team-lead | **不新开通道、等 S-D** | §13.0.2 |
 | **G6** | team-lead | **`.ccr` 三分法**：语义标注可入；**transfer/sync 决策与证书不进**；copy scheduler 输出纯后端 | G6 条内 |
 | **G7** | team-lead | **SHARE 降级为 mapping 优化、不扩 primitive** | G7 条内 |
-| **G8** | 维护者 | **删掉 `move` 关键字** | `TODO #2026-09-17-16`、§13 I2 |
+| **G8** | 维护者 | **删掉 `move` 关键字** | `TODO #2026-09-17-18`、§13 I2 |
 | **G9** | 维护者 | **地基三项提到步 1 之前**（先补地基再起步 1） | **§11.1**（新建） |
 | **G10** | team-lead | **两前置照立**（chunk handoff 复用通道语义；模型量 vs 实测划界） | G10 条内、§13.0.2 |
 | **G11** | team-lead | 取「**编译器不为用户数据生成锁**」；**编译器自身内部同步不受此限**（spec 须写明区分） | §14 术语「compiler locks」 |
@@ -488,7 +488,7 @@
 
 ### G3 CopySet 的 `Live` / `Needed` / `NonTransferable` 从哪来
 
-**裁定（team-lead 2026-09-17）**：**pts 表示升级**（不选「接受退化」）——理由：G1 取强立场（含时间）⇒ **分析精度是预算可证明性的前提**；且「第 65 个 alloc 起静默不追踪」本身即**静默缺陷**（本仓最忌类）⇒ 已立 **`TODO #2026-09-17-17`**（含 `ptr_analysis.cr:213` 与「64 上限」的**实测**判据要件；本轮只读未跑 RED）。
+**裁定（team-lead 2026-09-17）**：**pts 表示升级**（不选「接受退化」）——理由：G1 取强立场（含时间）⇒ **分析精度是预算可证明性的前提**；且「第 65 个 alloc 起静默不追踪」本身即**静默缺陷**（本仓最忌类）⇒ 已立 **`TODO #2026-09-17-19`**（含 `ptr_analysis.cr:213` 与「64 上限」的**实测**判据要件；本轮只读未跑 RED）。
 
 - **问题**：三项均无定义、无产出面。
 - **事实**：`ptr_analysis` 是**过程内** + call 保守 + pts 单 int 64 位 + 全程序 alloc 上限 **64**（`:213`）；offset 是单标量；**无 liveness/use 集 pass**（仓内 grep 无）；`region_check` 只有 outlives 序判定。
@@ -541,7 +541,7 @@
 
 ### G8 `move` 关键字已存在且零语义
 
-**裁定（维护者 2026-09-17，经 team-lead 转达）**：**删掉 `move` 关键字**（独立小批）⇒ 本门「先裁再动」已满足；实施锚点（词法/语法/AST + 6 处消费者）与**负控判据**（删后 `move := 1` 类「此前非法、删后合法」形态必须有用例锁定，防语法错误变静默接受）落 **`TODO #2026-09-17-16`**。
+**裁定（维护者 2026-09-17，经 team-lead 转达）**：**删掉 `move` 关键字**（独立小批）⇒ 本门「先裁再动」已满足；实施锚点（词法/语法/AST + 6 处消费者）与**负控判据**（删后 `move := 1` 类「此前非法、删后合法」形态必须有用例锁定，防语法错误变静默接受）落 **`TODO #2026-09-17-18`**。
 
 - **问题**：`move x` 今日是 no-op，而 MOVE 是新模型的第一个 primitive。
 - **事实**：`lexer.cr:102`（T_MOVE）、`grammar/core.ebnf:42`（`Move = 'move' IDENT '='`）、`ast.cr:200`（EXPR_MOVE）、checker 透传（`checker.cr:3679-3680`）、ir_gen 透传（`ir_gen.cr:2878-2879`）⇒ **写与不写完全等价**。
@@ -634,12 +634,12 @@
 | GMP ADR | `docs/maintainer/adr/adr-0017-concurrency-gmp.md` |
 | TODO 并发条（含过时注记） | `TODO.md:221-226` |
 | alloc 计数器生命周期（从不复位） | `src/compiler/globals.cr:351`（声明）· `:509-540`（`reset_frontend_state` 未含它，仅复位 `g_alloc_pts_cap:538`）· `src/compiler/ptr_analysis.cr:213-217`（唯一写点） |
-| 本轮登记的三条 TODO | `TODO.md` → `#2026-09-17-16`（`move` 删除）· `#2026-09-17-17`（64 上限静默截断 + 计数器不复位）· `#2026-09-17-18`（文档漂移三处） |
+| 本轮登记的三条 TODO | `TODO.md` → `#2026-09-17-18`（`move` 删除）· `#2026-09-17-19`（64 上限静默截断 + 计数器不复位）· `#2026-09-17-20`（文档漂移三处） |
 
 ## 附录 B：本轮方法与边界
 
 - **只读**：零构建、零源码改动；未跑任何编译/测试命令（所有事实来自读码）。
 - **不改设计**：全文对维护者原文的处理 = 落纸 + 条目化 + 对接 + 提问；**无一处**改写、补充或缩减原设计。
 - **推断标注**：§15 中标「推断」的仅 15.2 少数行（可复用性判断），事实行均可回溯到附录 A 锚点。
-- **未覆盖面（本轮显式不做）**：多 M 运行时的实测行为、`go`/`chan` 语料的运行时行为验证、性能量级评估、`.ccr`/ELF canary 的实跑复核、`TODO #2026-09-17-17` 的 64 上限 **RED 实测**（判据要件已列，未跑）。
+- **未覆盖面（本轮显式不做）**：多 M 运行时的实测行为、`go`/`chan` 语料的运行时行为验证、性能量级评估、`.ccr`/ELF canary 的实跑复核、`TODO #2026-09-17-19` 的 64 上限 **RED 实测**（判据要件已列，未跑）。
 - **裁定轮边界**：13 门裁定值由维护者 / team-lead 给出，本文只做**落纸与落点**（§11.1 / §13.0 / §14 / §16.0）；裁定值本身未经本文复核，若与裁决原文有出入以裁决原文为准。
