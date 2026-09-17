@@ -266,7 +266,9 @@ g_so_side_count : int, mut;             g_so_side_cap : int, mut;
 // 设计要点（裁-S2/S3）：① 标注**不挤 `EXPR_FN` 的 a/b/c 槽**（parser.cr:1451 槽语义不变）；
 // ② 表达式 AST 节点落 `g_ast` 但**不被 body 引用** ⇒ ir_gen 走不到它 ⇒ 发射面零足迹；
 // ③ 侧表随前端复位（与 `g_func_count` 同生命周期——fi/ni 下标跨编译复用，不清会命中陈旧条目）。
-g_spec_fn : string, mut;                // 函数名 str idx（= parse_body 的 fn_ni）
+g_spec_fn : string, mut;                // 函数名 str idx（= parse_body 的 fn_ni；仅用于消息）
+g_spec_fnode : string, mut;             // **EXPR_FN 节点索引**（唯一键：同名函数/方法不串台；
+                                        // 由 parser 在 alloc_node 之后回填，见 parse_body 的 spec_start 补丁）
 g_spec_kind : string, mut;              // 0=#check  1=#ensure（留宽：C2 的 #pure/#tag 等）
 g_spec_expr : string, mut;              // 标注表达式的 AST 节点索引
 g_spec_line : string, mut;              // 标注 `#` 所在行

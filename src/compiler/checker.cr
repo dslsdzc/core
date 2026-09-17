@@ -2276,7 +2276,81 @@ fn check_func(fi: int) {
             }
         }
     }
+    // 批 6（T3）：规约标注面——**在 pop_scope 之前**（形参仍在作用域内，`#check(a > 0)` 才能定型）
+    spec_check_func(fn_node, return_type);
     pop_scope();
+}
+
+// 批 6（T3）：**每函数标注检查** —— bool 型 + `#ensure` 的 `result` 域 + C1 子集（禁调用）。
+// 时点 = `check_func` 尾部（形参已入作用域）；`result` 用**嵌套作用域**绑定 ⇒ 不泄进函数体。
+// 三态纪律：`infer_expr` 给不出 bool（含未覆盖面）⇒ 一律 **V05 硬错**（**不得**「未知当通过」）。
+// 域检查的第二重来源 = `infer_expr` 对未定义名的既有诊断（N06/N01，build 面非豁免 ⇒ 阻断）。
+fn spec_check_func(fn_node: int, return_type: int) {
+    if g_spec_count == 0 { return; }
+    hit : ., mut = 0;
+    i : ., mut = 0;
+    loop {
+        if i >= g_spec_count { break; }
+        if spec_fnode(i) == fn_node { hit = 1; break; }
+        i = i + 1;
+    }
+    if hit == 0 { return; }
+    push_scope();
+    // `#ensure` 的 `result` 绑定（裁-S8）：与既有作用域名冲突 ⇒ **硬错**（不静默择一、不静默遮蔽）
+    // ⚠ **零足迹纪律**：`str_intern("result")` **只能在确需绑定时调用**——无条件调用会让
+    // STR 段凭空 +10B（T3 首轮被 Δ 判据当场抓住：d0 用例期望 Δ=0、实测 10；根因即此）。
+    ri : ., mut = -1;
+    j : ., mut = 0;
+    loop {
+        if j >= g_spec_count { break; }
+        if spec_fnode(j) == fn_node && spec_kind(j) == 1 { ri = j; break; }
+        j = j + 1;
+    }
+    if ri >= 0 {
+        res_ni := str_intern("result");
+        if find_sym(res_ni) >= 0 {
+            check_error(EC_V_RESULT_SHADOW,
+                "'result' is already bound in this scope (#ensure binding would shadow it)",
+                spec_line(ri), spec_col(ri));
+        } else {
+            def_sym(res_ni, SYM_LOCAL, ty_code_to_ti(return_type), -1);
+        }
+    }
+    // 逐条：① 禁调用（裁-V5 的 C1 子集；避开纯度时序坑——本批**未**解决该时序，只绕开）
+    //       ② 表达式必须恰为 bool
+    k : ., mut = 0;
+    loop {
+        if k >= g_spec_count { break; }
+        if spec_fnode(k) == fn_node {
+            if spec_has_call(spec_expr(k)) != 0 {
+                check_error(EC_V_CALL_BANNED,
+                    "annotation expression must not contain calls (C1 subset)",
+                    spec_line(k), spec_col(k));
+            } else {
+                t := infer_expr(spec_expr(k));
+                if t != TI_BOOL {
+                    check_error(EC_V_NOT_BOOL, "annotation expression must be bool",
+                        spec_line(k), spec_col(k));
+                }
+            }
+        }
+        k = k + 1;
+    }
+    pop_scope();
+}
+
+// 标注表达式的**调用扫描**（C1 子集：禁调用）。只走 C1 允许的节点形（字面量/标识符/一元/二元），
+// 遇到调用即返回 1；未知节点形 = 不判定（返回 0，由 bool 型那一关兜住）。
+fn spec_has_call(e: int) -> int {
+    if e < 0 { return 0; }
+    k := ast_kind(e);
+    if k == EXPR_CALL { return 1; }
+    if k == EXPR_BINARY {
+        if spec_has_call(ast_a(e)) != 0 { return 1; }
+        return spec_has_call(ast_b(e));
+    }
+    if k == EXPR_UNARY { return spec_has_call(ast_a(e)); }
+    return 0;
 }
 
 fn check_impl_for() {
@@ -4009,13 +4083,13 @@ fn spec_check_all() {
     i : ., mut = 0;
     loop {
         if i >= g_spec_count { break; }
-        if spec_kind(i) == 0 {
-            ex := spec_expr(i);
-            v := spec_fold_val(ex);
-            if g_spec_fold_ok != 0 && v == 0 {
-                check_error(EC_V_CHECK_FALSE,
-                    "#check(...) is statically false", spec_line(i), spec_col(i));
-            }
+        // T3：`#ensure` 的常量假同样可判定且必错 ⇒ 与 `#check` 同判（T2 只判了 #check）。
+        ex := spec_expr(i);
+        v := spec_fold_val(ex);
+        if g_spec_fold_ok != 0 && v == 0 {
+            nm : ., mut = "#check(...)";
+            if spec_kind(i) == 1 { nm = "#ensure(...)"; }
+            check_error(EC_V_CHECK_FALSE, nm + " is statically false", spec_line(i), spec_col(i));
         }
         i = i + 1;
     }

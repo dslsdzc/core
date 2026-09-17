@@ -284,6 +284,9 @@
 | V01 | `#check(常量假)`——**本批唯一「红」**：常量折叠判为假（可判定且必错） | `#check(...) is statically false` |
 | V02 | 未知 `#` 标签 / `#` 后非 IDENT（本批只认 `#check` / `#ensure`；`check`/`ensure` 是**普通 IDENT**，非关键字——见 `grammar/core.ebnf` 的 `Annotation` 注） | `Expected annotation name after '#'` / `Unknown annotation '#{name}' (expected '#check' or '#ensure')` |
 | V03 | 标注形态错：缺 `(` / 未闭合 `)` | `Expected '(' after '#{name}'` / `Expected ')' to close '#{name}' annotation` |
+| V04 | `#ensure` 的 `result` 绑定与既有作用域名冲突（裁-S8：**硬错**，不静默择一/不静默遮蔽） | `'result' is already bound in this scope (#ensure binding would shadow it)` |
+| V05 | 标注表达式类型**非 bool**（本批子集：须**恰为** `TI_BOOL`；三态纪律——`infer_expr` 给不出 bool 一律硬错，**不得**「未知当通过」） | `annotation expression must be bool` |
+| V06 | 标注表达式**含调用**（裁-V5：C1 子集**先禁调用**——避开纯度时序坑；本批**未解决**该时序，只绕开） | `annotation expression must not contain calls (C1 subset)` |
 
 ---
 

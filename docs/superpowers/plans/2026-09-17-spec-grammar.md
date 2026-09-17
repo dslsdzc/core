@@ -542,3 +542,40 @@ fn main() -> int { return f(); }
 
 **待裁（T2 暴露的两处语义问题）**：① **注解链重复**（同一标签重复）本批判**合法**（设计稿未禁止；判「可判定且必错」不成立）——维护者若要求禁止，需另立语义（当前按合法实现）；② **`#check` 与 `#ensure` 的顺序**本批**不约束**（两者语义独立，先 `#ensure` 后 `#check` 亦可）。
 
+---
+
+## 13. T3 实施记录（检查面：bool 型 + 名字域 + 调用禁用 + `#ensure` 常量红；2026-09-17）
+
+**改动面**：`src/compiler/checker.cr`（`spec_check_func`：每函数标注检查，挂 `check_func` **尾部**（形参仍在域内）；
+`spec_has_call`：C1 子集禁调用扫描；`spec_check_all` 常量红**扩到 `#ensure`**）· `src/compiler/dyn_arr.cr` + `globals.cr`
+（侧表**加 `g_spec_fnode` 列** = **EXPR_FN 节点索引**，唯一键——按函数名会串台（同名方法/多 impl））·
+`src/compiler/parser.cr`（`spec_start` 记录 + `alloc_node` 后**回填 fn_node**）· `src/compiler/ast.cr`（V04/V05/V06）·
+`docs/developer/errors.md`（V0xx 三行）。
+
+**判据（T3 电池 11/11 + Δ 2/2）**：
+
+| 类 | 用例 | 实测 |
+|---|---|---|
+| 正控 ×4 | `#check(a >= 0)` · `#ensure(result >= 0)` · `#check(a>=0) #ensure(result>a)` · `#ensure(1 > 0)` | **rc=0 + 产物** |
+| 负控 ×7 | 非 bool（`#check(1)`）· `#ensure(result)` · **`#ensure` 常量假** · **`result` 撞形参** · 域外名 · **表达式含调用** · **重复链含假** | **rc=1 + 零产物**：V05 · V05 · **V01** · **V04** · N01（`infer_expr` 既有诊断，build 面非豁免 ⇒ 阻断）· **V06** · **V01** |
+
+**`.ccr` 零足迹判据（裁-S12 三段式；维护者三条要求全部落实）**：
+1. **ELF 逐字节同** ✅；2. **除 STR 外 7 段逐字节同** ✅；3. **STR Δ 恰为公式值**（`Δ = Σ(4+len(m))`，`m` = 注解独有词素）✅：
+   `#check(1 > 0)`（`check` 未在他处出现）⇒ **Δ=9**（4+5）；**零 Δ 用例**（注解词素已在程序别处驻留）⇒ **Δ=0 绿** ✅。
+   **机制注**（写进 `delta_check.py` 头注 + 本节）：`src/compiler/lexer.cr` 的 `add_tok_str` 对**每个** IDENT/关键字词素调
+   `str_intern` —— **既有行为、非本批引入**；只出现在注解里的词素必然进 STR。
+
+**⚠ 判据当场抓到本批自己的泄漏（T3 首轮）**：`spec_check_func` 里 `str_intern("result")` 写成**无条件调用**
+⇒ 两个用例的 STR Δ 各**凭空 +10B**（d0 期望 0、实测 10；d9 期望 9、实测 19）。**根因** = 未注解的函数也驻留了该串。
+**修法** = 把 `str_intern("result")` 移进「确需绑定」分支 ⇒ Δ 双双命中期望值。**这正是「零 Δ 用例必须绿」这条要求的价值**——
+没有它，一条纯编译期的实现细节会永久污染 `.ccr` 产物而无人察觉。
+
+**回归闸门（新基 = `c1546f9b`；pre 侧 = 该基自建，见下「重锚」）**：canary **5/5** · **腿① 75 档零差异** ·
+**腿② 零差异** · **T2 电池回归 13/13** · J 判据 5/5（未受 T3 影响）。
+
+**方法论点（本轮新增，须继承）**：**rebase 之后必须重锚 pre 侧**。判据的 pre 侧必须与新基同源——否则腿① 的差异里
+会混进**它批**的整批判定面变更，本批的「零足迹」就**无法证明**。本轮第二次 rebase 到 `c1546f9b` 后，
+按维护者裁定重建了 T0 起点二进制（`/tmp/spec-t3/pre/corec`，sha `19155c4c…`，`jj workspace add -r c1546f9b` + `nice -n 19` 构建 + 冒烟 42），
+两条腿在新锚点上**零差异**。（同教训的另一处实例：缓存批 rebase 后 `jj diff` 显示其树少了批 5 report 的 24 行 —— **develop 一前进，比较基就失效**。）
+
+**未做（转 T4）**：VC 记录结构 + `--dump-vcs` 通道（三态输出：green/yellow/red）。

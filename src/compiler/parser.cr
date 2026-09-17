@@ -1440,6 +1440,9 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
     }
 
     // 批 6（T2，裁-S2）：规约标注链——**签名之后、body 之前**（spec-design §四）。
+    // T3：记录起点，`alloc_node(EXPR_FN, …)` 之后把本函数的标注行回填为 **fn_node 索引**
+    //（唯一键——按函数名会串台：同名方法/多 impl）。
+    spec_start := g_spec_count;
     parse_spec_annotations(fn_ni);
 
     body : ., mut = -1;
@@ -1451,6 +1454,9 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
         advance_tok(); // ;
     }
     fn_node := alloc_node(EXPR_FN, fn_ni, pf, pc, rtv + hotpatch_ver * 256, rt, body, fn_line, fn_col);
+    // T3：标注行回填 fn_node（本函数新增的行 = [spec_start, g_spec_count)）
+    spec_patch : ., mut = spec_start;
+    loop { if spec_patch >= g_spec_count { break; } spec_set_fnode(spec_patch, fn_node); spec_patch = spec_patch + 1; }
     // 形参上限硬错（防御面，TODO #2026-09-10-4）：FuncInfo.param_types 是定长内嵌槽区
     // （MAX_FN_PARAMS 槽），超限签名无法表示 ⇒ 拒绝编译（rc=1）而非截断/越界写。
     // 形参表容纳不下时**必须**在这条路径上停住：静默越界写曾踩 ast_node 致

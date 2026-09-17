@@ -937,6 +937,7 @@ fn grow_spec_side(needed: int) {
     nc : ., mut = g_spec_cap * 2; if nc < 16 { nc = 16; } if nc < needed { nc = needed + 16; }
     sz := nc * 8;
     n1 := alloc(sz); _dyncpy(g_spec_fn, g_spec_cap*8, n1); g_spec_fn = n1;
+    n6 := alloc(sz); _dyncpy(g_spec_fnode, g_spec_cap*8, n6); g_spec_fnode = n6;
     n2 := alloc(sz); _dyncpy(g_spec_kind, g_spec_cap*8, n2); g_spec_kind = n2;
     n3 := alloc(sz); _dyncpy(g_spec_expr, g_spec_cap*8, n3); g_spec_expr = n3;
     n4 := alloc(sz); _dyncpy(g_spec_line, g_spec_cap*8, n4); g_spec_line = n4;
@@ -948,6 +949,7 @@ fn spec_add(fn_ni: int, kind: int, expr: int, line: int, col: int) {
     grow_spec_side(g_spec_count + 1);
     i := g_spec_count;
     w64(g_spec_fn, i * 8, fn_ni);
+    w64(g_spec_fnode, i * 8, -1);   // 由 parser 在 EXPR_FN 分配后回填（spec_set_fnode）
     w64(g_spec_kind, i * 8, kind);
     w64(g_spec_expr, i * 8, expr);
     w64(g_spec_line, i * 8, line);
@@ -957,6 +959,8 @@ fn spec_add(fn_ni: int, kind: int, expr: int, line: int, col: int) {
 
 // 读访问器（**受护**：越界回哨兵，绝不读邻记录——照 fi_param_type 的护栏体例）。
 fn spec_fn(i: int) -> int { if i < 0 || i >= g_spec_count { return -1; } return r64(g_spec_fn, i * 8); }
+fn spec_fnode(i: int) -> int { if i < 0 || i >= g_spec_count { return -1; } return r64(g_spec_fnode, i * 8); }
+fn spec_set_fnode(i: int, v: int) { if i < 0 || i >= g_spec_count { return; } w64(g_spec_fnode, i * 8, v); }
 fn spec_kind(i: int) -> int { if i < 0 || i >= g_spec_count { return -1; } return r64(g_spec_kind, i * 8); }
 fn spec_expr(i: int) -> int { if i < 0 || i >= g_spec_count { return -1; } return r64(g_spec_expr, i * 8); }
 fn spec_line(i: int) -> int { if i < 0 || i >= g_spec_count { return -1; } return r64(g_spec_line, i * 8); }

@@ -500,6 +500,9 @@ EC_ICE_TY_INDET   : int = 16004; // ICE04  Type judgment indeterminate
 EC_V_CHECK_FALSE  : int = 17001; // V01  `#check(常量假)`——可判定且必错（本批唯一「红」）
 EC_V_BAD_TAG      : int = 17002; // V02  未知 `#` 标签 / `#` 后非 IDENT
 EC_V_ANN_SYNTAX   : int = 17003; // V03  标注形态错（缺 `(` / 未闭合 `)`）
+EC_V_RESULT_SHADOW : int = 17004; // V04  `#ensure` 的 `result` 绑定与形参/作用域名冲突（裁-S8：硬错，不静默择一）
+EC_V_NOT_BOOL     : int = 17005; // V05  标注表达式类型非 bool（本批子集：须恰为 TI_BOOL）
+EC_V_CALL_BANNED  : int = 17006; // V06  标注表达式含调用（裁-V5：C1 子集**先禁调用**，避开纯度时序坑）
 
 // Diagnostic entry
 struct Diag {
