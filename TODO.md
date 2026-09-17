@@ -1591,8 +1591,18 @@
 >   vs intern 名 id」在盘面不可区分**（格式设计气味；反例即 `None` tag 的 tag 值）。
 > - **兜底 (e) 未采纳（待量化）**：写侧「窗口内有新 intern ⇒ 本条目不写」（照 `main.cr` 见证面清单 ① 的既有形态）
 >   是极廉价 fail-closed 形态，但**命中率代价未测**（须先量「多少函数的窗口内 `g_str_count` 会变」）——采纳前先出数字。
-> - **上游既有红（与本条无关，另行登记）**：`scope_interp` 档 = **插值解析崩**（develop `f7f23b83` 面；干净基线
->   二进制复现，非本批引入）⇒ 收录于 `tools/cir-str-domain/known-baseline-red.txt`（含证据与**移除触发器**）。
+> - **上游既有红（与本条无关，另行登记）**：`scope_interp` 档 = **插值解析崩**——口径 = **基线既有红
+>   （早于 `f57815ec`，引入点待定）**（team-lead 两独立二进制实核：干净 `f7f23b83` 与 **A₁ 时代构建**均 rc=1；
+>   隔离 = `println("plain")`/`println(int_str(n))` 正常、**只有插值崩** ⇒ 插值专属）。**本条目初版据「旧二进制 rc=0」
+>   写成「窗口引入」——该基点不可靠，已撤回**。收录于 `tools/cir-str-domain/known-baseline-red.txt`（含证据与移除触发器）；
+>   归因/二分另派（task #153）。
+> - **本批两条影响面实测（team-lead 要求入册）**：① **活体语料复现** = `tests/suite/at_test_mini9.cr`（含 `@fields`）：
+>   冷 `ALL PASS` rc=0 → 暖 `FAIL fields: 1` rc=1（develop `f7f23b83` 面）；**修复后复测 = 冷/暖均 `ALL PASS` rc=0 +
+>   ELF 逐字节同**（⇒ 该档从「暖态必红」回到正例，与先前「mini9 的暖态红不是断言过期」的结论对上）。
+>   ② **反例「潜在可达」而非「已证不发作」**：`tests/suite/opt_dex_test.cr`（可选族，走 `IR_MAKE_ENUM`/`IR_CONST`
+>   名字 id 路径）冷/暖**均 rc=0**——因 `Some`/`None` 在该源里点名 ⇒ 解析期已 intern；**但设计洞仍在且可达**：
+>   `src/stdlib/` 里**无** `Some`/`None` 标识符 ⇒ **隐式装箱且不点名这两个标识符的程序即可触达**（触达条件 =
+>   「源中不出现 `Some`/`None` 字面量/标识符 + 发生装箱或 tag 比较」）。
 
 - **最小复现（6 行、确定性、零依赖）**：
   ```core
