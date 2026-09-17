@@ -98,6 +98,10 @@ g_optrep_ret_cell : int, mut;
 g_optrep_arg_cell0 : int, mut;  g_optrep_arg_count : int, mut;
 // g_cur_ret_opt：当前函数的返回类型是否可选（ir_gen_func 设置；返回点写信道用）。
 g_cur_ret_opt : int, mut;
+// g_cur_ret_dex_opt：当前函数的返回类型是否 `dex?`（ir_gen_func 按**返回类型节点**设置，
+//   批 5 · R3）。`-> dex?` 的 `g_cur_ret_ti` 与 `type_val` 均为 0（`unpack_type(EXPR_OPTIONAL)`
+//   塌陷）⇒ 返回点的 dex 边界转换需本标志补位（否则 apx 源经 `-> dex?` 返回不转换）。
+g_cur_ret_dex_opt : int, mut;
 // 表示码（rep_enc_of_expr 的返回）：>= 0 = 从该表示位槽**拷贝**；oe_bare() = -1 = 裸值
 // 常量；oe_boxed() = -2 = 装箱常量。**用函数而非文件级常量**：Python bootstrap 的
 // gen_let_decl 只对**裸字面量**记 constant_value（`-1` 解析成 UnaryOp ⇒ 丢初值 ⇒

@@ -1132,6 +1132,17 @@ fn dex_opt_type_node(tn: int) -> int {
     return 0;
 }
 
+// 类型**行**是否 `dex?`（`TYP_OPTIONAL` ∧ `data == TI_DEX`）——**纯表读零 alloc**（先例
+// `ti_is_optional:328` / `elem_ti_of_decl:343`）。用途（批 5 · G2 读点定型）：optional 声明的
+// 载荷读槽取**声明面**形式——`agg_payload_read_form` 只认枚举行，内建 `Some` 面无行 ⇒ 恒 TI_INT
+// （`dex?` 载荷按值参与 dex 运算会被当 int 再 ×S）。G2 红线：**不得**调 `res_type_node`/`alloc_type`。
+fn dex_opt_slot_ti(ti: int) -> int {
+    if ti < 0 || ti >= g_type_count { return 0; }
+    if get_type_kind(ti) != TYP_OPTIONAL { return 0; }
+    if get_type_data(ti) == TI_DEX { return 1; }
+    return 0;
+}
+
 // 聚合读的**声明面** dex-ness（apx 批 T3 · 比较/相等点专用）：
 // #2026-09-16-16 未修 ⇒ 聚合读的结果槽 IR 型恒 TI_INT、**声明型被抹** ⇒ 下游「按值型触发」的
 // 形式分流看不到 dex。本函数在**节点级**把声明面取回来（**零 alloc_type**；先例
@@ -1966,7 +1977,12 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                     loop {
                         if cpi >= ac { break; }
                         if cpn < 0 { break; }
-                        if ast_type_val(cpn) == TI_DEX {
+                        // 批 5（opt-dex · R3）：`dex?` 形参也进环——修复前门只认基类型节点
+                        // （`type_val == TI_DEX`），`dex?` 的 `type_val` = 0 ⇒ apx 实参不转换
+                        // ⇒ 与 callee 槽型（本批已改 TI_DEX_S）口径一致；extern 侧不扩
+                        // （C ABI 无可选表示，`.so` 面登记未覆盖面）。
+                        if ast_type_val(cpn) == TI_DEX ||
+                           (cfn_ext == 0 && dex_opt_type_node(ast_data(cpn)) != 0) {
                             av := r64(arg_vars, cpi * 8);
                             if av >= 0 {
                                 if cfn_ext != 0 {
@@ -2464,7 +2480,16 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                     if fi >= sub_count { break; }
                     fv := new_ir_var("fld", TI_INT);
                     // TODO #2026-09-16-16 批 2：载荷读定型取**声明面形式**（dex 载荷 ⇒ TI_DEX_S）
-                    irv_set_type(fv, agg_payload_read_form(arm_pat, fi));
+                    // 批 5（opt-dex · G2）：optional 声明的载荷（内建 `Some` 面无枚举行 ⇒
+                    // `agg_payload_read_form` 恒 TI_INT）改由 **scrutinee 的声明行**补判——
+                    // `irv_decl_ti(match_val)` 是 LET 期登记的 `TYP_OPTIONAL` 行（`:2573`），
+                    // `dex_opt_slot_ti` 纯表读（**零 alloc_type** = G2 红线）。否则 `dex?`
+                    // 载荷入 dex 运算会被当 int 再 ×S（`dex_scale_int`）。
+                    fv_ti : ., mut = agg_payload_read_form(arm_pat, fi);
+                    if fv_ti == TI_INT && match_val >= 0 {
+                        if dex_opt_slot_ti(irv_decl_ti(match_val)) != 0 { fv_ti = TI_DEX_S; }
+                    }
+                    irv_set_type(fv, fv_ti);
                     if rep_v < 0 {
                         emit(IR_LOAD_FIELD, fv, match_val, 0, fi + 1, 0);  // +1 for tag offset
                     } else {
@@ -2659,7 +2684,10 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
             val_var = force_if_thunk(val_var);
             // dex 边界规则（数值迁移 Task 4）：函数返回一律精确形式（缩放整数）——
             // apx 位模式在返回点转 scaled（F2I(bits×S)，按定点 6 位舍入）
-            if g_cur_ret_ti == TI_DEX && irv_type(val_var) == TI_DEX {
+            // 批 5（opt-dex · R3）：`-> dex?` 的 `g_cur_ret_ti` 亦为 0（`unpack_type` 塌陷）
+            // ⇒ 追加**返回类型节点**判据（`g_cur_ret_dex_opt`，由 ir_gen_func 设置）——
+            // 否则 apx 源经 `-> dex?` 返回时不转换（实测 ELF/interp 双路径 15）。
+            if (g_cur_ret_ti == TI_DEX || g_cur_ret_dex_opt != 0) && irv_type(val_var) == TI_DEX {
                 val_var = dex_bits_to_scaled(val_var);
             }
             // 可选表示（R2 P4 Task 5）：返回点写返回信道——值求值**完成后**、IR_RETURN
@@ -3044,6 +3072,12 @@ fn ir_gen_func(fi: int) {
         if param_type < 0 { param_type = TI_INT; }
         // dex 边界规则（数值迁移 Task 4）：参数一律精确形式（缩放整数，整数寄存器传递）
         if param_type == TI_DEX { param_type = TI_DEX_S; }
+        // 批 5（opt-dex · R3）：`dex?` 形参槽型 —— 修复前 `unpack_type(EXPR_OPTIONAL)` 返 0
+        // （parser.cr:150-153）⇒ `EXPR_PARAM.type_val` = 0 = `TI_INT` ⇒ 槽型按 int 建、
+        // 而调用点按实参 var 的 `TI_DEX` 分类为 binary64（XMM）⇒ **ABI 失配**（按 XMM 传、
+        // 按 GP 读 = 垃圾值 + 双路径分歧）。槽型按**声明面节点**定 = `TI_DEX_S`（GP 类，
+        // 与调用点转换后的实参一致）。
+        else if dex_opt_type_node(ast_data(pn)) != 0 { param_type = TI_DEX_S; }
         pvar := new_ir_var(pname, param_type);
         // Bind param name
         bind_local(pname_idx, pvar);
@@ -3105,6 +3139,12 @@ fn ir_gen_func(fi: int) {
 
     // Generate body（记录返回 TI——EXPR_RETURN 的 dex 边界转换用）
     g_cur_ret_ti = ret_ti;
+    // 批 5（opt-dex · R3）：返回类型节点是否 `dex?`（节点级零 alloc）。`-> dex?` 的
+    // `ret_ti`（= `fi_return_type` 裸码）与 `type_val` 均为 0（`unpack_type(EXPR_OPTIONAL)`）
+    // ⇒ 返回点 dex 转换门 `g_cur_ret_ti == TI_DEX` 恒假 ⇒ 需本标志补位。
+    g_cur_ret_dex_opt = 0;
+    rtn_d := ast_type_val(fn_node);
+    if rtn_d >= 0 && dex_opt_type_node(rtn_d) != 0 { g_cur_ret_dex_opt = 1; }
     // 可选表示（R2 P4 Task 5）：本函数返回可选时，返回点写返回信道（见 EXPR_RETURN）。
     // 判据走**返回类型节点**（ast_type_val(fn_node) = 返回类型节点下标——见上方 ret_ti
     // 注释）而非 fi_return_type 裸码（`T?` 的类型节点 type_val = 0 ⇒ 恒判否）。
@@ -3121,6 +3161,7 @@ fn ir_gen_func(fi: int) {
     }
     g_cur_ret_ti = -1;
     g_cur_ret_opt = 0;
+    g_cur_ret_dex_opt = 0;
 
     // Patch arena size and reset before return
     total := r64(g_sg_alloc_total, (g_sg_count - 1) * 8);

@@ -24,6 +24,12 @@
 `enum_payload_opt_bits` 15 · **`param_bits` ELF 0 / interp 15（双路径分歧）** ·
 **`param_branch_bits` ELF 101 / interp 172（分歧）**；四态其余三格与全部 scaled 格已绿。
 
+**修复后（批 5 T2，2026-09-17）**：**30/30 全绿** = 四态对拍（互等 = 7）· 家族面（LET/赋值/取址 INV-1/
+指针写 INV-2/形参/返回/字段字面量/字段赋值/全局/枚举载荷）· `?` 解包 ×2 · G2 判别判据 ×2（载荷 +
+dex 算术，改前 193 → 8）· M1 tag 对行为钉 ×2（改前 1/1 → 0/255、0/0）· 非 dex 对照（`int?` ×4 ·
+`dex?, apx` 标签面）· apx 槽自证 · 编译期拒绝面。分步归因（R2 → R1 → R3 各修哪些）见
+`docs/superpowers/plans/2026-09-17-opt-dex.md` §7quater。
+
 **三条硬约束（承 apx 套件体例）**
   ① 涉全局探针**必须 `mut`**——不可变 + 字面量初值的全局被 `find_global_const_node` 折叠成
      `IR_CONST`（读点不碰全局行 ⇒ **假绿**）。
@@ -281,6 +287,25 @@ fn main() -> int {
 fn g(x: dex) -> int { return @raw_int(x) / 1000000; }
 fn main() -> int { d : dex, apx = 7.0; return g(d); }
 """, 7, "bits", "非可选 dex 直调（apx 批已覆盖面；非回归钉）"),
+    # ── G2（读点定型）判别判据：**载荷参与 dex 运算**（match 型载荷读槽的形式若丢，
+    #    `dex_scale_int` 会把已 scaled 的载荷再 ×S = 双倍缩放）。改前实测 ELF 193
+    #    （= 7000001 mod 256）、改后 8 ⇒ 该对探针有**判别力**（非「两态同值」的空判据）。
+    #    注：`?` 解包路径**不**具备判别力（其 dest 型 = `irv_type(inner)` = 槽型，本来自洽）
+    #    ⇒ 本判据必须走 **match 载荷绑定**这一读点。
+    ("g2_payload_dex_arith_scaled", """
+fn main() -> int {
+    e : dex = 7.0;
+    x : dex? = e;
+    return match x { Some(v) => { return @raw_int(v + 1.0) / 1000000; } None => { return 0; } };
+}
+""", 8, "scaled", "G2 判别判据·精确源：match 载荷 + dex 算术（7.0 + 1.0 = 8；改前 193 = 双倍缩放）"),
+    ("g2_payload_dex_arith_bits", """
+fn main() -> int {
+    d : dex, apx = 7.0;
+    x : dex? = d;
+    return match x { Some(v) => { return @raw_int(v + 1.0) / 1000000; } None => { return 0; } };
+}
+""", 8, "bits", "G2 判别判据·apx 源（写点归一 + 读点定型两段都得对才 = 8）"),
     # ── M1 tag 对改判的**行为钉**（维护者 2026-09-17 附加判据）──
     # 机理：`dex?` 槽型由 `TI_INT`（改前）→ `TI_DEX_S`（改后），而 M1 tag 闭包（`tag2l.cr:117/126/128/135/137`）
     # 与序言 tag 卫生（`frame.cr:160`）**同判定式**（`== TI_INT`）⇒ 该槽的 tag 编码随槽型移开。
