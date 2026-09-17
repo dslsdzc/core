@@ -159,6 +159,15 @@ g_gen_binds : string, mut;       g_gen_binds_count : int, mut;    g_gen_binds_ca
 g_constr_seen : string, mut;     g_constr_seen_cap : int, mut;    g_constr_seen_count : int, mut;
 g_gen_params : string, mut;     g_gen_param_count : int, mut;     g_gen_param_cap : int, mut;
 g_checker_current_fi : int, mut;
+// 批 8 PR-B · S1′ 打点开关（**默认 0 = 关**）：由 `main.cr` 读 `CORE_S1P=1` 置位；
+// 打开时 checker 的直调点打**数值**行（行/列/形参序/形参 TI/实参 TI/被调名）。
+// **为何要开关**：该打点会 `int_str`/`println` 生成新字符串 ⇒ 写进输出 `.ccr` 的 STR 段
+// ⇒ 破「产物逐字节不变」（实测 `opt_dex_test.cr` 的 `.ccr` 变而 ELF 同）。默认关 ⇒ 零足迹。
+g_s1p_on : int, mut;        // S1′ 打点开关：0 = 关（默认行为）· 1 = 开（`CORE_S1P=1`）
+g_s1p_seen : int, mut;      // 0 = 尚未读环境变量 —— **哨兵必须用零值**：全局的**非 Literal 初值**
+                            //   经 Python bootstrap 构建会被**静默丢成 0**（2026-09-18 实测，
+                            //   机理见 checker.cr S1′ 注）⇒ `= -1` 这类写法不可依赖。
+
 g_unsafe_depth : int, mut;
 g_alloc_pts : string, mut;     g_alloc_pts_cap : int, mut;
 g_borrow_vars : string, mut;          g_borrow_refs : string, mut;       g_borrow_muts : string, mut;
