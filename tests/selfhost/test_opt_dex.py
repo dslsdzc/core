@@ -294,7 +294,8 @@ fn mw_coexist_bits(e: dex?) -> int {
     c := a + b;
     s := c;
     x : dex? = e;
-    r := match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
+    y := x?;
+    r := @raw_int(y) / 1000000;
     if r != 7 { return 1; }
     if s != 4000000000 { return 2; }
     return 0;
@@ -311,7 +312,8 @@ fn mw_coexist_scaled(e: dex?) -> int {
     c := a + b;
     s := c;
     x : dex? = e;
-    r := match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
+    y := x?;
+    r := @raw_int(y) / 1000000;
     if r != 7 { return 1; }
     if s != 4000000000 { return 2; }
     return 0;
