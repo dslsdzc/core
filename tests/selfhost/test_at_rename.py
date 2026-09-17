@@ -174,12 +174,16 @@ def case_corpus(name, relpath, expect_rc=0):
 
 
 def _cir_dump(source: str):
+    # `cir` 除 stdout 文本 dump 外**还落盘 DOT**：无 `-o` 时写到源文件旁的 `<stem>.cir`
+    # （src/compiler/main.cr:588-593 实读）⇒ 显式给 `-o` 指向同目录临时名并随源一并清理，
+    # 免在语料目录/临时目录留产物。
     src = _write(source)
+    dot = src[:-3] + ".cir"
     try:
-        d = _run(["cir", src])
+        d = _run(["cir", src, "-o", dot])
         return d.stdout + d.stderr, d.returncode
     finally:
-        _cleanup(src)
+        _cleanup(src, dot)
 
 
 def main():
