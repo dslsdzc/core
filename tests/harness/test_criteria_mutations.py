@@ -11,7 +11,9 @@
 被测判据（→ TODO 条目 → 审计表 B 编号）：
   M1 事件 1-4 step 模板        → #2026-09-16-22 / B2（test_hit_table.ev14_template_problems）
   M2 dump 未用字段值域白名单    → #2026-09-16-24 / B3（test_hit_table.dump_sentinel_problems）
-  M3 STR 段冷/暖前缀契约        → #2026-09-16-25 / B4（test_cir_warm_path.str_contract_equal）
+  M3 STR 段冷/暖**同态**契约（v21 重定）→ #2026-09-16-25 / B4（test_cir_warm_path.str_contract_equal）
+     · v21（2026-09-18 串域批）前口径 = 「暖 = 冷**前缀**」且被当预存允许；该预存被证为缺陷本体
+       ⇒ 前缀样本由正控改列为**坏实现**，正控改为「冷 = 暖逐条相同」
   M4 `--dump-tk-terms` 剔除面白名单 → #2026-09-16-26 / B5（test_ccr_types.dump_strip_face_problems）
   M5 零 diff 腿指令边界锁步     → #2026-09-16-28 / B1（test_mw_task2.region_equal_mask_calls）
   M6 慢路径块体逐指令模板       → #2026-09-16-23 / B6（test_mw_task2.parse_slow_block）
@@ -281,17 +283,19 @@ def main() -> int:
     cold = mk_str([b"main", b"a", b"b", b"_eq0"])
     for label, warm in [
             ("同尺寸改内容", mk_str([b"main", b"a", b"XX", b"_eq0"])),
-            # 注：**尾部整段截短**（暖 = 冷前缀的更短前缀）正是预存口径允许的差异
-            # （暖态不重放 ir_gen 临时名）⇒ 不作突变样本；错位风险在**中间**漏条：
+            # v21 判据重定（2026-09-18 串域批 · TODO #2026-09-18-9）：旧口径「暖 = 冷前缀」
+            # 曾被当作**预存口径允许的差异**（老正控）；该「预存」已被证为**缺陷本体**
+            # ⇒ 本样本由正控**改列为坏实现**（新判据下必红；旧 size-only 形态下恒绿）。
+            ("暖态截短（旧口径「前缀」；v21 起必红）", mk_str([b"main", b"a", b"b"])),
             ("中间漏一条（后续条目错位）", mk_str([b"main", b"b", b"_eq0"])),
             ("暖态多一条", mk_str([b"main", b"a", b"b", b"_eq0", b"bin"]))]:
         ok_s, _det = CW.str_contract_equal(cold, warm)
         cases.append((f"M3/#2026-09-16-25 STR 契约：{label}",
                       old_str_size_only_ok(cold, warm), [] if ok_s else [label]))
-    # 正控：合法差异（暖 = 冷前缀）必须**仍绿**
-    ok_pfx, det_pfx = CW.str_contract_equal(cold, mk_str([b"main", b"a", b"b"]))
-    cases.append(("M3/#2026-09-16-25 正控：暖 = 冷前缀（预存口径允许）仍绿",
-                  ok_pfx, [] if ok_pfx else [det_pfx],
+    # 正控（v21 重定）：**冷 = 暖逐条相同**必须仍绿（新契约下唯一的合法形态；非空转锚）
+    ok_eq, det_eq = CW.str_contract_equal(cold, mk_str([b"main", b"a", b"b", b"_eq0"]))
+    cases.append(("M3/#2026-09-16-25 正控（v21 重定）：冷 = 暖逐条相同仍绿",
+                  ok_eq, [] if ok_eq else [det_eq],
                   {"expect_strong_clean": True}))
 
     # ── M4（#2026-09-16-26/B5）剔除面白名单 + 计数 + 序数：3 个坏实现 ──────────────
