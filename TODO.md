@@ -325,6 +325,7 @@
 - **机制/隐患**：`module.cr` 回退链序当前**恰好**保护它——三轴目录（`src/format/elf` 等）置于 `src/compiler/` **之前**（module.cr:544-553 注释明言：否则本文件遮蔽 `src/format/elf/elf.cr` → 目标单元解析漂移 → elf_gen 等 N06 静默未定义）。但这是**顺序依赖**而非结构保证：任何回退链重排或新增目录（波 1 Task 2-6 正在改 import 集与命中面）都可能翻转命中，而翻转后果 = `error[` 静默未定义类故障（先例见 #2026-09-10-2 ③ / c138c44c）。
 - **实证**：波 1 Task 1 评审（.superpowers/sdd/w1-task-1-report.md §2.1、§6.1）+ module.cr:548-553 注释推理；代码级引用 = 零（仅 plans 历史文档 `2026-08-08-pseudocode-tdd.md:400,413` 提及）；`tools/pseudocode_extract.py` ROOTS 含 `src/compiler` 整目录 glob，仍从该死文件抽取 ELF 写侧符号 → `docs/pseudocode/标识符对照表.md` **20 行**归属误导（且对照表整体未随波 1 重生成——212 行仍写已退役 `src/arch/linux/ld` 路径；重生成 = 修复方向二部分）。
 - **修复方向**：**删除**（首选——零 importer、零功能贡献；删除需用户明确许可，铁律 #3）并重生成伪代码对照表；备选 = 迁出活树（`legacy/` 等，避开 ROOTS glob）保留历史。删除后复跑 test_backend_bootstrap + full-bootstrap guard（预期零影响、byte-identical）。
+- **语法面实证（2026-09-17 批 8 预备扫描实核；lead 采纳入册）**：该文件含 **2 处缺 `)`**（`:375`/`:380`，`n := str_int(str_sub(t, 13, str_len(t)-13);`），**单文件 check ⇒ rc=1**（2× `Unexpected token in expression`），而 **CI 的 `./build/corec check src/compiler`（目录）⇒ rc=0 ok**、`build_selfhost_native.py` 三面清单亦无它（仅有同名不同的 `src/format/elf/elf.cr`）⇒ **不在 check 域/构建清单**：**语法错误长期无人发现 = 死文件的又一实证**（强于「零 importer」）。
 
 ### 2026-09-10-4. ~~前端 ≥18 形参静默误编译类（2026-09-10 x86 实例化波 1 Task 5 评审登记——高优先级：静默误编译）~~ —— **已核销（2026-09-16 分类账复核）**：`dyn_arr.cr:89` `MAX_FN_PARAMS=64` + `:467/:473` 读写护栏 + P020 硬错（提交 `d7ad71d3`/`68ffa1e8`） （原 #8）
 - **✅ 已修（2026-09-11，提交 `d7ad71d314cb` + 缓存面 `68ffa1e8`；工作区报告 `.superpowers/sdd/fix-params18-report.md`）**：
