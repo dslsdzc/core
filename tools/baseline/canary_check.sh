@@ -38,6 +38,15 @@
 #                  无归因的变化 = 红）。**本闸门禁止的不是变化，是无声变化。**
 #   **只锁冷态**（不得「补全」成冷暖双锁）——三条理由（记录值即冷态 / 非可选程序冷≠热是
 #     P4 已豁免的预存面 / 暖态在本两档零区分力且另有专属闸门）。
+#   **D1 确定性闸门（2026-09-19 新增）**：canary ELF **两次构建逐字节对拍**（`cmp`；不新增 job、
+#     挂在采集步内，成本 = +1 次 clean-cache + 1 次构建）。**与 F3 是两件事**：
+#       F3 = 「与表内**旧值**相同」（防无声变化）；D1 = 「与自己**再构建一次**相同」（防非确定性）。
+#     **⚠ 重锁前置（硬要求）**：维护者**重新锁定前必须先看到 D1 绿**——否则只比旧值的流程会在
+#     采**一次**样就把**非确定值**锁进表（此后 canary 全绿，而产物其实每次都不一样），
+#     D1 正是区分「确定但变了」与「不确定」的那一步。
+#     **覆盖面**：**5 个条目全做**（`canary_elf` + `.ccr` 四条）——`.ccr` 是**序列化/顺序面**
+#     （段序 · intern 序 · 侧表顺序），非确定性最可能在那里现形；只保 ELF 等于漏 4/5（team-lead 2026-09-19 裁）。
+#     **诊断点名条目**（`D1 <spec 名>: …`）。**边界**：只对 canary 两档语料的这 5 个条目，**不做全语料**。
 #   以上两条的完整论证 + 两套历史值的关系（旧 v8 四值 `fb4a3b59…` 等 = 同口径不同时代，
 #   非漂移）逐条见 tools/baseline/canary_values.tsv 头注与
 #   docs/superpowers/plans/2026-09-16-criteria-carrier.md §1/§6。
@@ -218,6 +227,26 @@ step_compile() {
   return 0
 }
 
+# D1 确定性闸门：两个产物**逐字节相同** ⇒ 绿；不同 ⇒ 红 + 打印两侧 sha/尺寸（红必须可诊断）。
+# 与 F3（比锁定值）**互补**：F3 管「与旧值相同」，D1 管「自己与自己相同」（两次构建）。
+determinism_gate() {
+  local a="$1" b="$2" label="$3" f
+  for f in "$a" "$b"; do
+    if [ ! -f "$f" ]; then
+      echo "[FAIL] D1 $label: 产物缺失 $f（fail-closed：不能空跑绿）"
+      return 1
+    fi
+  done
+  if cmp -s -- "$a" "$b"; then
+    echo "[PASS] D1 $label: 两次构建逐字节相同（$(sha256sum -- "$a" | cut -d' ' -f1)）"
+    return 0
+  fi
+  echo "[FAIL] D1 $label: 两次构建产物不同（**非确定性** ⇒ 不得据此重锁）"
+  echo "       A=$(sha256sum -- "$a" | cut -d' ' -f1) ($(wc -c < "$a" | tr -d ' ') B)  ${a##*/}"
+  echo "       B=$(sha256sum -- "$b" | cut -d' ' -f1) ($(wc -c < "$b" | tr -d ' ') B)  ${b##*/}"
+  return 1
+}
+
 collect_into() {
   local d="$1"
   D_CUR="$d"
@@ -232,6 +261,27 @@ collect_into() {
   step_compile pa_static_ccr  pa_st.log  build tests/suite/ptr_arith.cr   --static -o "$d/pa_st.bin" || return 1
   step_compile gt_ccr         gt_ccr.log ccr   tests/suite/generics_test.cr -o "$d/gt.ccr"       || return 1
   step_compile gt_static_ccr  gt_st.log  build tests/suite/generics_test.cr --static -o "$d/gt_st.bin" || return 1
+  # ── D1 确定性闸门（2026-09-19 新增；**覆盖全部 5 个条目**）──────────────────────────
+  # 为什么必须有它（与 F3 的「比锁定值」是**两件事**）：F3 只能证明「与表内旧值相同」；
+  # 若某批**合法地**改了码（须重锁）而同时**引入非确定性**，只比旧值 ⇒ 操作者采**一次**样
+  # 就把非确定值锁进表，此后 canary 全绿而产物其实**每次都不一样**。
+  # **两次构建对拍**才区分「确定但变了」与「不确定」——**重锁前必须先看到本条绿**（见值表头注）。
+  # 覆盖面 = **5 个条目全做**（team-lead 2026-09-19 裁）：`.ccr` 正是**序列化/顺序面**
+  # （段序 · intern 序 · 侧表顺序）——非确定性最可能在那里现形，而重锁覆盖全部 5 条 ⇒ 只保 ELF
+  # 等于漏掉 4/5。成本实测 ≈ **+0.25s**（5 × 单次 clean-cache+构建 0.05s），远低于「时长翻倍即停」。
+  # **诊断必须点名条目**（`D1 <spec 名>: …`）——否则一次红只说明「有非确定性」而不说去哪查。
+  # 覆盖边界：只对 canary **两档语料**的这 5 个条目做，**不做全语料**。
+  mkdir -p "$d/again"
+  step_compile canary_elf_again    pa_again.log     build tests/suite/ptr_arith.cr    --static -o "$d/again/pa"        || return 1
+  step_compile pa_ccr_again        pa_ccr_again.log ccr   tests/suite/ptr_arith.cr    -o "$d/again/pa.ccr"            || return 1
+  step_compile pa_static_ccr_again pa_st_again.log  build tests/suite/ptr_arith.cr    --static -o "$d/again/pa_st.bin"  || return 1
+  step_compile gt_ccr_again        gt_ccr_again.log ccr   tests/suite/generics_test.cr -o "$d/again/gt.ccr"            || return 1
+  step_compile gt_static_ccr_again gt_st_again.log  build tests/suite/generics_test.cr --static -o "$d/again/gt_st.bin" || return 1
+  determinism_gate "$d/pa"             "$d/again/pa"        "canary_elf"     || return 1
+  determinism_gate "$d/pa.ccr"         "$d/again/pa.ccr"    "pa_ccr"         || return 1
+  determinism_gate "$d/pa_st.bin.ccr"  "$d/again/pa_st.bin.ccr" "pa_static_ccr" || return 1
+  determinism_gate "$d/gt.ccr"         "$d/again/gt.ccr"    "gt_ccr"         || return 1
+  determinism_gate "$d/gt_st.bin.ccr"  "$d/again/gt_st.bin.ccr" "gt_static_ccr" || return 1
   return 0
 }
 
@@ -301,9 +351,30 @@ selftest() {
   mk_fixtures; mk_table "$TB" "0000000000000000000000000000000000000000000000000000000000000000"
   st "S6 假期望值⇒红" 1 "$TB" "$FX" "F3 pa_ccr: sha256 期望(expected)="
 
+  # S7 D1 确定性闸门自证（**两向**，团队约定 #11）：同文件 ⇒ 绿（防恒红）· 异文件 ⇒ 红（防恒绿）
+  printf 'det-a\n' >| "$FX/det_a"; cp "$FX/det_a" "$FX/det_b"
+  total=$((total + 1))
+  if determinism_gate "$FX/det_a" "$FX/det_b" "S7-fixture" >| "$OUT" 2>&1; then
+    echo "[PASS] selftest S7a 同文件⇒绿"
+  else
+    echo "[FAIL] selftest S7a 同文件⇒绿（期望 rc=0）"; sed -n '1,6p' "$OUT" | sed 's/^/       | /'
+    fails=$((fails + 1))
+  fi
+  printf 'X' | dd of="$FX/det_b" bs=1 seek=0 conv=notrunc status=none
+  total=$((total + 1))
+  if determinism_gate "$FX/det_a" "$FX/det_b" "S7-fixture" >| "$OUT" 2>&1; then
+    echo "[FAIL] selftest S7b 异文件⇒红（期望 rc=1，实得 0）"
+    fails=$((fails + 1))
+  elif grep -q "两次构建产物不同" "$OUT" && grep -q "D1 S7-fixture:" "$OUT"; then
+    echo "[PASS] selftest S7b 异文件⇒红 · 命中 两次构建产物不同 + 点名条目（D1 <label>:）"
+  else
+    echo "[FAIL] selftest S7b 红但输出缺诊断（红必须可诊断）"; sed -n '1,6p' "$OUT" | sed 's/^/       | /'
+    fails=$((fails + 1))
+  fi
+
   rm -rf "$tmp"
   if [ "$fails" -eq 0 ]; then
-    echo "[selftest] PASS $total/$total 子检按设计（绿路可达 + 5 类必红：改内容/改尺寸/缺产物/值表缩水/假期望）"
+    echo "[selftest] PASS $total/$total 子检按设计（绿路可达 + 5 类必红：改内容/改尺寸/缺产物/值表缩水/假期望 + D1 确定性两向）"
     return 0
   fi
   echo "[selftest] FAIL $(($total - $fails))/$total"

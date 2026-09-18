@@ -10,7 +10,8 @@
   A 机械（无编译器、毫秒级）：run.sh **真挂**本载体与本测试；值表 5 条、sha 为 64 位小写
     hex、集合与载体 spec **双向**相等。
   B 合成自证（无编译器、毫秒级）：`canary_check.sh --selftest` ⇒ 必须 rc=0
-    （S1 绿路可达 + S2–S6 五类必红：同尺寸改内容 / 改尺寸 / 缺产物 / 值表缩水 / 假期望）。
+    （S1 绿路可达 + S2–S6 五类必红：同尺寸改内容 / 改尺寸 / 缺产物 / 值表缩水 / 假期望
+     + **S7 D1 确定性两向**：同文件⇒绿 / 异文件⇒红——2026-09-19 新增，见 `canary_check.sh` 档头 D1 契约）。
   C **真产物篡改**（需 build/corec）：采集（若 build/canary_artifacts/ 已在则复用 ⇒ 零额外
     编译，因 run.sh 里载体先跑）→ `--verify-only` 必须**绿** → 翻一字节 → `--verify-only`
     必须**红**且**指名**该产物与「期望 vs 实际」；再验缺产物亦红。
@@ -128,9 +129,9 @@ def main() -> int:
     else:
         sub = (r.stdout + r.stderr).count("[PASS] selftest")
         if sub < 6:
-            fails.append(f"B --selftest 只报 {sub} 个子检（期望 6）——自证面缩水")
+            fails.append(f"B --selftest 只报 {sub} 个子检（期望 8）——自证面缩水")
         else:
-            passes.append(f"B 合成自证 {sub}/6（绿路可达 + 5 类必红）")
+            passes.append(f"B 合成自证 {sub}/8（绿路可达 + 5 类必红 + D1 确定性两向）")
 
     # ── C. 真产物篡改（需编译器） ──
     if not os.path.exists(COREC):
