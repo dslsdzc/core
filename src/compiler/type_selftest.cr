@@ -18,6 +18,20 @@ fn ts_check(name: string, got: int, want: int) -> int {
     return 1;
 }
 
+// bool 版（批 8 S2 · bool 类；维护者裁定「bool 不隐式转 int」⇒ 计数惯用式改**类型化 helper**）：
+// 语义与 `ts_check` 逐字一致，只把 `got`/`want` 换成 **bool** ⇒ 调用点无需 bool→int 隐式转换；
+// FAIL 分支打印 `bool_str`（与 int 版的 `int_str` 对应）。
+fn ts_check_b(name: string, got: bool, want: bool) -> int {
+    if got == want {
+        print("PASS "); println(name);
+        return 0;
+    }
+    print("FAIL "); print(name);
+    print(": got "); print(bool_str(got));
+    print(" want "); println(bool_str(want));
+    return 1;
+}
+
 // Task 4 端到端用例的诊断探针：check_error 只追加 g_diags（不打印），故「门是否报错」可由
 // 增量计数 + 首条新诊断码直接读——这是「接线后门真的在判」的行为证据（表侧用例只能证明表对）。
 fn ts_diag_code_at(idx: int) -> int {
@@ -184,48 +198,48 @@ fn ts_t5_run() -> int {
     t5_calln := alloc_node(EXPR_CALL, 0, t5_arg1, 2, 0, 0, 0, 0, 0);
     infer_gen_call(t5_fi, t5_calln, t5_arg1, 2);
     t5_ti_bound := ts_gen_map_ti(t5_t_ni);
-    fails = fails + ts_check("t5.f4_later_param_declared_type",
-        (t5_ti_bound == TI_STR && ts_gen_map_ti(t5_u_ni) == -1), 1);
-    fails = fails + ts_check("t5.f4_bind_seg_recorded",
+    fails = fails + ts_check_b("t5.f4_later_param_declared_type",
+        (t5_ti_bound == TI_STR && ts_gen_map_ti(t5_u_ni) == -1), true);
+    fails = fails + ts_check_b("t5.f4_bind_seg_recorded",
         (g_gen_binds_count == 2 && r64(g_gen_binds, 0 * 8) == 1 &&
-         r64(g_gen_binds, 1 * 8) == TI_STR && ast_int_val(t5_calln) == 1), 1);
+         r64(g_gen_binds, 1 * 8) == TI_STR && ast_int_val(t5_calln) == 1), true);
     // ② 约束名解析 + 本质轴三态
     t5_ni_int := str_intern("int");
     t5_ni_str := str_intern("string");
     t5_ni_nope := str_intern("T5_NoSuchTypeName");
-    fails = fails + ts_check("t5.constr_name_resolve",
+    fails = fails + ts_check_b("t5.constr_name_resolve",
         (gen_constr_type_ti(t5_ni_int) == TI_INT && gen_constr_type_ti(t5_ni_str) == TI_STR &&
          gen_constr_type_ti(str_intern("never")) == TI_NEVER && gen_constr_type_ti(t5_ni_nope) == -1 &&
-         gen_constr_type_ti(-1) == -1), 1);
-    fails = fails + ts_check("t5.constr_essence_three_state",
+         gen_constr_type_ti(-1) == -1), true);
+    fails = fails + ts_check_b("t5.constr_essence_three_state",
         (gen_constr_satisfied(t5_ni_int, TI_INT) == 1 &&
          // `never` **不**满足原生约束（引擎现状：AK_NEVER 是与 AK_INT 互斥的**原子**，不是 ⊥
          // ——P0 既有语义「never 行在引擎侧不是真 ⊥」（T4 报告 §7-⑨），本批如实钉住、不动）
          gen_constr_satisfied(t5_ni_int, TI_NEVER) == 0 &&
          gen_constr_satisfied(t5_ni_int, TI_STR) == 0 &&
          gen_constr_satisfied(t5_ni_str, TI_INT) == 0 &&
-         gen_constr_satisfied(t5_ni_nope, TI_INT) == -1), 1);
+         gen_constr_satisfied(t5_ni_nope, TI_INT) == -1), true);
     // ③ 用户接口约束 + **非命名实参** ⇒ -1（P3b Task 0 后仍 -1：域限定——接口方法表只对命名行
     //    可查，故 `int` 实参不判；**不是**「未交付」。命名实参的判定面见 isat.* 段与
     //    tests/selfhost/test_iface_satisfies.py）
     t5_if_ii := ts_t5_mk_iface("T5_Show");
-    fails = fails + ts_check("t5.constr_iface_non_named_unjudged",
+    fails = fails + ts_check_b("t5.constr_iface_non_named_unjudged",
         (find_iface(str_intern("T5_Show")) == t5_if_ii &&
-         gen_constr_satisfied(str_intern("T5_Show"), TI_INT) == -1), 1);
+         gen_constr_satisfied(str_intern("T5_Show"), TI_INT) == -1), true);
     // ④ 反例文本：失败非空、通过为空（**不谎报**）
-    fails = fails + ts_check("t5.constr_witness_text",
+    fails = fails + ts_check_b("t5.constr_witness_text",
         (str_len(gen_constr_witness_str(TI_STR, t5_ni_int)) > 0 &&
          str_len(gen_constr_witness_str(TI_INT, t5_ni_int)) == 0 &&
-         str_len(gen_constr_witness_str(TI_INT, t5_ni_nope)) == 0), 1);
+         str_len(gen_constr_witness_str(TI_INT, t5_ni_nope)) == 0), true);
     // ⑤⑥ 实例化点检查：结构/枚举约束经 parser 登记函数落侧表 + 判定 + 去重 + 正负控 + 接口面零动作
     t5_si := ts_t5_mk_constr_struct("T5BoxInt", "int");
     t5_ei := ts_t5_mk_constr_enum("T5EBoxInt", "int");
     t5_si2 := ts_t5_mk_constr_struct("T5BoxShow", "T5_Show");
-    fails = fails + ts_check("t5.constr_side_table_readback",
+    fails = fails + ts_check_b("t5.constr_side_table_readback",
         (si_generic_count(t5_si) == 1 && si_gen_constr(t5_si, 0) == t5_ni_int &&
          si_gen_constr(t5_si, 1) == -1 && si_gen_constr(-1, 0) == -1 &&
          ei_generic_count(t5_ei) == 1 && ei_gen_constr(t5_ei, 0) == t5_ni_int &&
-         ei_gen_constr(t5_ei, 4) == -1), 1);
+         ei_gen_constr(t5_ei, 4) == -1), true);
     t5_args := alloc(8);
     w64(t5_args, 0 * 8, TI_STR);
     t5_gnode := alloc_node(EXPR_GENERIC_APPLY, str_intern("T5BoxInt"), -1, 1, 0, 0, 0, 41, 3);
@@ -249,12 +263,12 @@ fn ts_t5_run() -> int {
     t5_gnode5 := alloc_node(EXPR_GENERIC_APPLY, str_intern("T5BoxShow"), -1, 1, 0, 0, 0, 45, 3);
     gen_inst_constr_check(t5_gnode5, t5_si2, -1, t5_args, 1);    // 接口约束 = 不判 → 零诊断
     t5_d6 := g_diag_count;
-    fails = fails + ts_check("t5.inst_check_dedup_and_controls",
+    fails = fails + ts_check_b("t5.inst_check_dedup_and_controls",
         (t5_d1 - t5_d0 == 1 && t5_d2 - t5_d1 == 0 && t5_d3 - t5_d2 == 1 &&
          t5_d4 - t5_d3 == 0 && t5_d5 - t5_d4 == 1 && t5_d6 - t5_d5 == 0 &&
          ts_diag_code_at(t5_d0) == EC_TG_BOUND &&
          // 末条记录下标 = **调用后计数 - 1**（d5 是调用后的 g_diag_count）
-         ts_diag_code_at(t5_d5 - 1) == EC_TG_BOUND), 1);
+         ts_diag_code_at(t5_d5 - 1) == EC_TG_BOUND), true);
     // ⑦ 实例键：异型异键（反折叠）+ 同名义同行同键 + 结构忠实（复合键含结构）
     t5_a_ti := alloc_named_type(str_intern("T5_A"));
     t5_b_ti := alloc_named_type(str_intern("T5_B"));
@@ -262,12 +276,12 @@ fn ts_t5_run() -> int {
     t5_arr_ti := alloc_type(TYP_ARRAY, TI_INT, 3);
     t5_ptr_ti := alloc_type(TYP_PTR, t5_a_ti, 0);
     t5_slice_ti := alloc_type(TYP_SLICE, TI_INT, 0);
-    fails = fails + ts_check("t5.inst_key_structural_faithful",
+    fails = fails + ts_check_b("t5.inst_key_structural_faithful",
         (str_eq(inst_key_of_ti(t5_a_ti), inst_key_of_ti(t5_b_ti)) == 0 &&
          str_eq(inst_key_of_ti(t5_a_ti), inst_key_of_ti(t5_a2_ti)) != 0 &&
          str_eq(inst_key_of_ti(TI_INT), "int") != 0 &&
          str_eq(inst_key_of_ti(t5_arr_ti), "[int; 3]") != 0 &&
-         str_eq(inst_key_of_ti(t5_ptr_ti), "*T5_A") != 0), 1);
+         str_eq(inst_key_of_ti(t5_ptr_ti), "*T5_A") != 0), true);
     // ⑧ ti 型替换端到端：克隆体内**泛型形参位**换成实参类型节点；异键异实例、同键缓存命中。
     // 夹具形参实参 = **切片** `[int]`（键 "[int]"）：ti 路径产出 EXPR_ARRAY 类型节点，名字路径
     // 只会产出 EXPR_IDENT("[int]")（非法声明名）⇒ 本判据对「ti 路径是否生效」有牙。
@@ -303,8 +317,8 @@ fn ts_t5_run() -> int {
             }
         }
     }
-    fails = fails + ts_check("t5.inst_ti_subst_in_clone",
-        (t5_f1 >= 0 && t5_f2 == t5_f1 && t5_f3 >= 0 && t5_f3 != t5_f1 && t5_cp_ok == 1), 1);
+    fails = fails + ts_check_b("t5.inst_ti_subst_in_clone",
+        (t5_f1 >= 0 && t5_f2 == t5_f1 && t5_f3 >= 0 && t5_f3 != t5_f1 && t5_cp_ok == 1), true);
 
     return fails;
 }
@@ -1002,22 +1016,22 @@ fn ts_t3n_run() -> int {
     ta := sh_term_of_ti(n_a);
     tb := sh_term_of_ti(n_b);
     // ① 链形态：b 槽 = 行号（标注；D21 的 atom_of 消费者），c = [令牌(name_ni)]
-    fails = fails + ts_check("t3n.chain_shape",
+    fails = fails + ts_check_b("t3n.chain_shape",
         (ta >= 0 && tt_a(ta) == AK_NAMED && tt_b(ta) == n_a &&
          tt_c(ta) >= 0 && tt_tag(tt_c(ta)) == TT_CONS &&
          tt_a(tt_c(ta)) == sh_name_token(na_ni) &&
-         tt_b(tt_c(ta)) >= 0 && tt_tag(tt_b(tt_c(ta))) == TT_NIL), 1);
+         tt_b(tt_c(ta)) >= 0 && tt_tag(tt_b(tt_c(ta))) == TT_NIL), true);
     // ① D21 契约不回退：atom_of 仍读 b（命名行 = 本行；应用行 = 基型行，规范形）
     // ② 同名 ⇒ 同行（named_dedup）⇒ 同节点 ⇒ 等价 1；异名 ⇒ 0（双向）
     n_a2 := alloc_named_type(str_intern("T3NA"));
-    fails = fails + ts_check("t3n.same_name_same_row",
-        (n_a2 == n_a && sh_term_of_ti(n_a2) == ta && ty_equiv(ta, sh_term_of_ti(n_a2)) == 1), 1);
-    fails = fails + ts_check("t3n.diff_name_diff",
-        (ty_sub(ta, tb) == 0 && ty_sub(tb, ta) == 0 && ty_equiv(ta, tb) == 0), 1);
+    fails = fails + ts_check_b("t3n.same_name_same_row",
+        (n_a2 == n_a && sh_term_of_ti(n_a2) == ta && ty_equiv(ta, sh_term_of_ti(n_a2)) == 1), true);
+    fails = fails + ts_check_b("t3n.diff_name_diff",
+        (ty_sub(ta, tb) == 0 && ty_sub(tb, ta) == 0 && ty_equiv(ta, tb) == 0), true);
     // ③ 混类：命名 × 原生 ⇒ 0（名义型与异类原子不交）
-    fails = fails + ts_check("t3n.named_vs_base_zero",
+    fails = fails + ts_check_b("t3n.named_vs_base_zero",
         (ty_equiv(ta, sh_term_of_ti(TI_INT)) == 0 && ty_equiv(ta, sh_term_of_ti(TI_STR)) == 0 &&
-         ty_equiv(sh_term_of_ti(TI_STR), ta) == 0), 1);
+         ty_equiv(sh_term_of_ti(TI_STR), ta) == 0), true);
     // ④ 域外：NEVER/DYN 混类 ⇒ -1 + 未覆盖面位置位（⊥/⊤ 语义未建模，登记）
     ty_budget_reset(200000);
     dn := ty_equiv(ta, sh_term_of_ti(TI_NEVER));
@@ -1025,22 +1039,22 @@ fn ts_t3n_run() -> int {
     ty_budget_reset(200000);
     dd := ty_equiv(ta, sh_term_of_ti(TI_DYN));
     unc2 := ty_uncovered();
-    fails = fails + ts_check("t3n.never_dyn_out_of_domain",
-        (dn == -1 && dd == -1 && unc1 == 1 && unc2 == 1), 1);
+    fails = fails + ts_check_b("t3n.never_dyn_out_of_domain",
+        (dn == -1 && dd == -1 && unc1 == 1 && unc2 == 1), true);
     // ④ 域外：空链（无身份 = 未覆盖面②原形态）⇒ -1
     ty_budget_reset(200000);
     dnc := ty_equiv(tt_atom(AK_NAMED, -1, -1), ta);
-    fails = fails + ts_check("t3n.no_chain_out_of_domain", (dnc == -1 && ty_uncovered() == 1), 1);
+    fails = fails + ts_check_b("t3n.no_chain_out_of_domain", (dnc == -1 && ty_uncovered() == 1), true);
     // ④ 域外：令牌位放类型项 ⇒ -1（位置错位不猜）
     ty_budget_reset(200000);
     mis1 := ty_equiv(tt_atom(AK_NAMED, -1, tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil())), ta);
-    fails = fails + ts_check("t3n.token_pos_mismatch_out", (mis1 == -1 && ty_uncovered() == 1), 1);
+    fails = fails + ts_check_b("t3n.token_pos_mismatch_out", (mis1 == -1 && ty_uncovered() == 1), true);
     // ④ 域外：实参位 μ 变元 ⇒ -1（实参位只收类型项；令牌位同节点 ⇒ 比较推进到实参位）
     bad_arg := tt_atom(AK_NAMED, n_a, tt_cons(sh_name_token(na_ni), tt_cons(tt_var(0), tt_nil())));
     good_arg := tt_atom(AK_NAMED, n_a, tt_cons(sh_name_token(na_ni), tt_cons(sh_term_of_ti(TI_INT), tt_nil())));
     ty_budget_reset(200000);
     mis2 := ty_equiv(bad_arg, good_arg);
-    fails = fails + ts_check("t3n.arg_var_out_of_domain", (mis2 == -1 && ty_uncovered() == 1), 1);
+    fails = fails + ts_check_b("t3n.arg_var_out_of_domain", (mis2 == -1 && ty_uncovered() == 1), true);
     // ⑤ 清零判据（二进制内）：命名面经 type_equal = **引擎自决**——R2 P5 Task 4 后回落计数
     //    本体已删（legacy 一并删除）⇒ 断言升级为「自决 + **零 ICE04 诊断**」：诊断缺席 = 引擎
     //    真判（0/1），而不是「未知被静默当 false」（P-A 的牙齿 = t4.ice04_* 三例）。
@@ -1049,7 +1063,7 @@ fn ts_t3n_run() -> int {
     if !type_equal(n_a, n_b) {
         if g_diag_count == t3n_d0 { eqf = 1; }
     }
-    fails = fails + ts_check("t3n.decided_no_indeterminate", (eqf == 1 && ty_sub(ta, tb) == 0), 1);
+    fails = fails + ts_check_b("t3n.decided_no_indeterminate", (eqf == 1 && ty_sub(ta, tb) == 0), true);
     // ② 泛型应用：规范形 b = 基型行 + 链 [基名令牌, 实参项…]
     grow_gen_apply_data(g_gen_apply_data_count + 2);
     gs1 := g_gen_apply_data_count;
@@ -1067,21 +1081,21 @@ fn ts_t3n_run() -> int {
     t_ga1 := sh_term_of_ti(ga1);
     t_ga2 := sh_term_of_ti(ga2);
     t_ga3 := sh_term_of_ti(ga3);
-    fails = fails + ts_check("t3n.apply_canonical_b",
+    fails = fails + ts_check_b("t3n.apply_canonical_b",
         (t_ga1 >= 0 && tt_a(t_ga1) == AK_NAMED && tt_b(t_ga1) == n_a &&
          tt_atom_of_term(t_ga1) == n_a &&
          tt_c(t_ga1) >= 0 && tt_tag(tt_c(t_ga1)) == TT_CONS &&
          tt_a(tt_c(t_ga1)) == sh_name_token(na_ni) &&
-         tt_a(tt_b(tt_c(t_ga1))) == sh_term_of_ti(TI_INT)), 1);
-    fails = fails + ts_check("t3n.apply_two_rows_same_args",
-        (ga1 != ga2 && t_ga1 == t_ga2 && ty_equiv(t_ga1, t_ga2) == 1), 1);
-    fails = fails + ts_check("t3n.apply_diff_args_zero",
-        (ty_sub(t_ga1, t_ga3) == 0 && ty_sub(t_ga3, t_ga1) == 0), 1);
-    fails = fails + ts_check("t3n.apply_vs_bare_diff",
-        (ty_sub(t_ga1, ta) == 0 && ty_sub(ta, t_ga1) == 0), 1);
+         tt_a(tt_b(tt_c(t_ga1))) == sh_term_of_ti(TI_INT)), true);
+    fails = fails + ts_check_b("t3n.apply_two_rows_same_args",
+        (ga1 != ga2 && t_ga1 == t_ga2 && ty_equiv(t_ga1, t_ga2) == 1), true);
+    fails = fails + ts_check_b("t3n.apply_diff_args_zero",
+        (ty_sub(t_ga1, t_ga3) == 0 && ty_sub(t_ga3, t_ga1) == 0), true);
+    fails = fails + ts_check_b("t3n.apply_vs_bare_diff",
+        (ty_sub(t_ga1, ta) == 0 && ty_sub(ta, t_ga1) == 0), true);
     // ② 双构造点逐位同构（计划停条件③守门）：同型两构造 ⇒ **同节点**
-    fails = fails + ts_check("t3n.two_points_isomorphic",
-        (sh_sig_term_of_ti(n_a) == ta && sh_sig_term_of_ti(ga1) == t_ga1), 1);
+    fails = fails + ts_check_b("t3n.two_points_isomorphic",
+        (sh_sig_term_of_ti(n_a) == ta && sh_sig_term_of_ti(ga1) == t_ga1), true);
     // ② 嵌套应用：Box[Box[int]] 两处（外层实参分别指向同实参的**不同行**）⇒ 同节点
     grow_gen_apply_data(g_gen_apply_data_count + 2);
     gs3 := g_gen_apply_data_count;
@@ -1095,19 +1109,19 @@ fn ts_t3n_run() -> int {
     w64(g_gen_apply_data, (gs4 + 1) * 8, ga2);
     g_gen_apply_data_count = gs4 + 2;
     ga5 := alloc_type(TYP_GENERIC_APPLY, n_a, gs4);
-    fails = fails + ts_check("t3n.nested_apply_same",
-        (ga4 != ga5 && sh_term_of_ti(ga4) == sh_term_of_ti(ga5)), 1);
+    fails = fails + ts_check_b("t3n.nested_apply_same",
+        (ga4 != ga5 && sh_term_of_ti(ga4) == sh_term_of_ti(ga5)), true);
     // ② 可选面（union）：NA ⊂ NA?（注入面）⇒ 1；NA? vs NB?（内层异名）⇒ 0
     opt_a := tt_union(ta, sh_null_term());
     opt_b := tt_union(tb, sh_null_term());
-    fails = fails + ts_check("t3n.optional_named",
-        (ty_sub(ta, opt_a) == 1 && ty_sub(opt_a, opt_b) == 0), 1);
+    fails = fails + ts_check_b("t3n.optional_named",
+        (ty_sub(ta, opt_a) == 1 && ty_sub(opt_a, opt_b) == 0), true);
     // ④ 域外：union 面含**无链**命名原子（未覆盖面②原形态）⇒ 仍 -1（加强不得把
     // 未范化/域外并集面误判成 0——计划 Step 1 的 union 负控）
     ty_budget_reset(200000);
     u_out := ty_equiv(tt_union(tt_atom(AK_NAMED, -1, -1), sh_null_term()),
                       tt_union(tt_atom(AK_NAMED, -2, -1), sh_null_term()));
-    fails = fails + ts_check("t3n.union_out_of_domain", (u_out == -1 && ty_uncovered() == 1), 1);
+    fails = fails + ts_check_b("t3n.union_out_of_domain", (u_out == -1 && ty_uncovered() == 1), true);
     // ⑥ 残留面**已关闭**（R2 P5 Task 3b：不变槽元素三态 te_elem_cmp）——断言迁移到
     // `t3b.inv_slot_seq_named_diff_zero`（本段不再钉「-1」；翻转向量见 p5-task3b 报告）
     // ⑥ 对照：同元素（不同行）⇒ 1（N 不入身份 + 同链 ⇒ 快路径）
@@ -1253,9 +1267,9 @@ fn ts_t4_run() -> int {
     if !type_equal(g_type_count + 100, TI_INT) { t4_b1 = 1; }
     t4_d1 := g_diag_count;
     t4_m_bridge := ts_diag_msg_at(t4_d0);
-    fails = fails + ts_check("t4.ice04_bridge_gap_hard_error",
+    fails = fails + ts_check_b("t4.ice04_bridge_gap_hard_error",
         (t4_b1 == 1 && t4_d1 == t4_d0 + 1 && ts_diag_code_at(t4_d0) == EC_ICE_TY_INDET &&
-         str_len(t4_m_bridge) > 0), 1);
+         str_len(t4_m_bridge) > 0), true);
     // ② 引擎 -1（未覆盖面）：命名原子（T3 身份链）× NEVER 原子 = **域外**（`te_named_pair`
     //    的 NEVER/DYN 守卫 ⇒ -1 + g_ty_uncovered，见 t3n.never_dyn_out_of_domain）——这是
     //    桥接**能译**（两条目皆 ≥ 0）但引擎判不了的形态：与 ① 的桥接缺口是**两个不同出口**。
@@ -1266,9 +1280,9 @@ fn ts_t4_run() -> int {
     if !type_equal(t4_na, TI_NEVER) { t4_b2 = 1; }
     t4_d3 := g_diag_count;
     t4_m_engine := ts_diag_msg_at(t4_d2);
-    fails = fails + ts_check("t4.ice04_engine_uncovered_hard_error",
+    fails = fails + ts_check_b("t4.ice04_engine_uncovered_hard_error",
         (t4_b2 == 1 && t4_d3 == t4_d2 + 1 && ts_diag_code_at(t4_d2) == EC_ICE_TY_INDET &&
-         str_len(t4_m_engine) > 0 && str_eq(t4_m_bridge, t4_m_engine) == 0), 1);
+         str_len(t4_m_engine) > 0 && str_eq(t4_m_bridge, t4_m_engine) == 0), true);
     // ③ 决定面零误报（引擎自决 0 与同一行快路径各自零诊断）
     t4_d4 := g_diag_count;
     t4_ok : ., mut = 0;
@@ -1638,10 +1652,10 @@ fn ts_ccr2_run() -> int {
     // （本断言 = 「init_types 尾部调用」的牙；若该调用缺失/被挪走 ⇒ 本条转红）。
     iface_shape_reset();
     init_types();                 // 干净类型表（9 原生行）+ 生产形状注册面
-    fails = fails + ts_check("ct2.shape_face_from_init_types",
+    fails = fails + ts_check_b("ct2.shape_face_from_init_types",
         (iface_shape_count() == 6 &&
          iface_shape_lookup(str_intern("sequence")) == sh_shape_seq() &&
-         iface_shape_lookup(str_intern("product")) == sh_shape_product()), 1);
+         iface_shape_lookup(str_intern("product")) == sh_shape_product()), true);
     g_iface_count = 0;            // 干净接口表（上游 ts_ifc_run 夹具含不可建面——不清零即拒装填）
     g_impl_for_count = 0;
     g_method_count = 0;
@@ -1676,8 +1690,8 @@ fn ts_ccr2_run() -> int {
         fails = fails + 3;   // 后续三例无法运行 ⇒ 计失败（不得静默少算）
     }
     fails = fails + ts_check("ct2.entry_table_16_named", ts_ccr2_entries_ok(), 1);
-    fails = fails + ts_check("ct2.kind_of_no_new_mapping",
-        (ts_ccr2_kind_domain_ok() == 1 && iface_kind_of(ct2_null) == -1 && iface_kind_of(ct2_opt) == -1), 1);
+    fails = fails + ts_check_b("ct2.kind_of_no_new_mapping",
+        (ts_ccr2_kind_domain_ok() == 1 && iface_kind_of(ct2_null) == -1 && iface_kind_of(ct2_opt) == -1), true);
     // ⑥ 不可建签名（dyn 位图行入签名：sh_sig_term_of_ti 对 TYP_DYN 回 -1）⇒ 装填拒绝
     //    （save 拒落盘——三态纪律：不得把缺项签名静默写成 -1 落盘）——**最后**（污染接口表）
     ct2_dyn_n := ts_ifc_base_node(TI_DYN);   // parser 对 `dyn` 正产 type_val = TI_DYN
@@ -1792,20 +1806,20 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("unit.bot_sub_int", ty_sub(tt_bot(), a_int), 1);
     total = total + 1; fails = fails + ts_check("unit.int_sub_str",  ty_sub(a_int, a_str), 0);
     total = total + 1; fails = fails + ts_check("unit.int_sub_int",  ty_sub(a_int, a_int), 1);
-    total = total + 1; fails = fails + ts_check("unit.dedup",       (tt_union(a_int, a_str) == tt_union(a_int, a_str)), 1);
-    total = total + 1; fails = fails + ts_check("unit.notnot",      (tt_not(tt_not(a_int)) == a_int), 1);
+    total = total + 1; fails = fails + ts_check_b("unit.dedup",       (tt_union(a_int, a_str) == tt_union(a_int, a_str)), true);
+    total = total + 1; fails = fails + ts_check_b("unit.notnot",      (tt_not(tt_not(a_int)) == a_int), true);
 
     // --- 规范化（Task 2）：De Morgan / 否定下推 / 分配律 / 幂等 ---
     // 探针：(int ∪ string) ∩ bool —— 分配律必须把它展成 union（两层分配）
     probe := tt_inter(tt_union(a_int, a_str), a_bool);
-    total = total + 1; fails = fails + ts_check("norm.demorgan",
-        (tt_norm(tt_not(tt_union(a_int, a_str))) == tt_norm(tt_inter(tt_not(a_int), tt_not(a_str)))), 1);
+    total = total + 1; fails = fails + ts_check_b("norm.demorgan",
+        (tt_norm(tt_not(tt_union(a_int, a_str))) == tt_norm(tt_inter(tt_not(a_int), tt_not(a_str)))), true);
     total = total + 1; fails = fails + ts_check("norm.nnf_neg_push",
         tt_tag(tt_norm(tt_not(tt_union(a_int, a_str)))), TT_INTER);
     total = total + 1; fails = fails + ts_check("norm.dnf_shape", tt_is_dnf(tt_norm(probe)), 1);
     total = total + 1; fails = fails + ts_check("norm.distributed", tt_tag(tt_norm(probe)), TT_UNION);
-    total = total + 1; fails = fails + ts_check("norm.idempotent",
-        (tt_norm(tt_norm(probe)) == tt_norm(probe)), 1);
+    total = total + 1; fails = fails + ts_check_b("norm.idempotent",
+        (tt_norm(tt_norm(probe)) == tt_norm(probe)), true);
 
     // --- 判定（Task 3）：子类型 / 等价 / 不相交 / 可空 / ⊤ₖ / 预算三态 ---
     u_is := tt_union(a_int, a_str);
@@ -1831,7 +1845,7 @@ fn type_selftest_run() -> int {
 
     // --- 反例（witness）+ 穷尽性（Task 4）---
     w := tt_witness(a_int, a_str);
-    total = total + 1; fails = fails + ts_check("witness.nonempty", (w >= 0), 1);
+    total = total + 1; fails = fails + ts_check_b("witness.nonempty", (w >= 0), true);
     total = total + 1; fails = fails + ts_check("witness.sub_of_a", ty_sub(w, a_int), 1);
     total = total + 1; fails = fails + ts_check("witness.not_sub_of_b", ty_sub(w, a_str), 0);
     total = total + 1; fails = fails + ts_check("witness.empty", tt_witness(a_int, a_int), -1);
@@ -1921,7 +1935,7 @@ fn type_selftest_run() -> int {
     g_tt_index_cap = 0;      // 直接逼出 grow_tt_index → 重建索引（tt_reindex）+ 重放插入
     grow_tt_index(2);
     after := tt_atom(AK_SEQUENCE, -1, tt_cons(a_int, tt_nil()));
-    total = total + 1; fails = fails + ts_check("grow.index_rebuilt", (after == ref), 1);
+    total = total + 1; fails = fails + ts_check_b("grow.index_rebuilt", (after == ref), true);
     d : ., mut = 0;
     loop {
         if d >= 40 { break; }
@@ -1938,9 +1952,9 @@ fn type_selftest_run() -> int {
         d4 = d4 + 1;
     }
     total = total + 1; fails = fails + ts_check("grow.dedup_40_idempotent", (tt_count() - c_after_first), 0);
-    total = total + 1; fails = fails + ts_check("grow.dedup_after_rebuild",
+    total = total + 1; fails = fails + ts_check_b("grow.dedup_after_rebuild",
         (tt_atom(AK_PRODUCT, -1, tt_cons(tt_mu(0, a_int), tt_nil())) ==
-         tt_atom(AK_PRODUCT, -1, tt_cons(tt_mu(0, a_int), tt_nil()))), 1);
+         tt_atom(AK_PRODUCT, -1, tt_cons(tt_mu(0, a_int), tt_nil()))), true);
 
     // --- P1 桥接（checker ti → 引擎项，R2 P1 Task 1；映射表 = 计划 Task 1 表）---
     // 前置：本通道不经 check_all()，g_types 未初始化 → 显式 init_types()（原生 9 项
@@ -1957,7 +1971,7 @@ fn type_selftest_run() -> int {
     t_arr3 := sh_term_of_ti(alloc_type(TYP_ARRAY, TI_INT, 4));
     total = total + 1; fails = fails + ts_check("bridge.len_not_identity",
         ty_equiv(t_arr, t_arr3), 1);            // N 不入身份（R1 裁决）——3 与 4 等价
-    total = total + 1; fails = fails + ts_check("bridge.cache_hit", (sh_term_of_ti(TI_INT) == t_int), 1);
+    total = total + 1; fails = fails + ts_check_b("bridge.cache_hit", (sh_term_of_ti(TI_INT) == t_int), true);
     // 原生序守门：checker 下标序 ≠ 引擎 AK 序——TI_BOOL=2/TI_STR=3 vs AK_STRING=2/AK_BOOL=3
     // （计划注释「AK_* 与 TI_* 前 7 项 1:1」**不成立**，按下标直通会 bool↔string 静默错标）
     total = total + 1; fails = fails + ts_check("bridge.str_ak", tt_a(sh_term_of_ti(TI_STR)), AK_STRING);
@@ -1989,11 +2003,11 @@ fn type_selftest_run() -> int {
         ri = ri + 1;
     }
     total = total + 1; fails = fails + ts_check("bridge.native_row_table", acc_nat, 1);
-    total = total + 1; fails = fails + ts_check("bridge.native_dyn_kind_branch",
-        (sh_native_ak(TI_DYN) == -1 && tt_a(sh_term_of_ti(TI_DYN)) == AK_DYN), 1);
+    total = total + 1; fails = fails + ts_check_b("bridge.native_dyn_kind_branch",
+        (sh_native_ak(TI_DYN) == -1 && tt_a(sh_term_of_ti(TI_DYN)) == AK_DYN), true);
     // TY_DEX_S 占位行（row 8）：M1 后走 native 路径（旧实现走通用路径），两侧同 = AK_DEX
-    total = total + 1; fails = fails + ts_check("bridge.native_dex_s",
-        (sh_native_ak(TI_DEX_S) == AK_DEX && tt_a(sh_term_of_ti(TI_DEX_S)) == AK_DEX), 1);
+    total = total + 1; fails = fails + ts_check_b("bridge.native_dex_s",
+        (sh_native_ak(TI_DEX_S) == AK_DEX && tt_a(sh_term_of_ti(TI_DEX_S)) == AK_DEX), true);
     // 参数链（内层项）+ 两份同类分支不得互串（PTR/REF 是两条独立分支）
     t_ptr := sh_term_of_ti(alloc_type(TYP_PTR, TI_INT, 0));
     // M2（Task 1 评审）：class 断言与参数链**并列**——原用例只断参数链，整支误译成
@@ -2005,45 +2019,45 @@ fn type_selftest_run() -> int {
     // 维度）⇒ 本用例守的「REF 链含元素项」改断链**第二项**（标记项由 t1.var_mut_* 单列）。
     // 旧断言（链首即元素）随 mut 入链的布局裁决更新——原因见 ty_shadow.cr 的 sh_ref_mut_marker。
     t_ref := sh_term_of_ti(alloc_type(TYP_REF, TI_STR, 0));
-    total = total + 1; fails = fails + ts_check("bridge.ref_inner",
-        (tt_a(t_ref) == AK_REF && tt_b(tt_c(t_ref)) == tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil())), 1);
+    total = total + 1; fails = fails + ts_check_b("bridge.ref_inner",
+        (tt_a(t_ref) == AK_REF && tt_b(tt_c(t_ref)) == tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil())), true);
     t_slice := sh_term_of_ti(alloc_type(TYP_SLICE, TI_STR, 0));
-    total = total + 1; fails = fails + ts_check("bridge.slice_seq",
-        (tt_a(t_slice) == AK_SEQUENCE && tt_c(t_slice) == tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil())), 1);
+    total = total + 1; fails = fails + ts_check_b("bridge.slice_seq",
+        (tt_a(t_slice) == AK_SEQUENCE && tt_c(t_slice) == tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil())), true);
 
     // --- R2 P5 Task 2（D19/D21/D22/D23）：DFNode 类型面**单槽化** ---
     // 形态 = 两槽（OFF_DF_TK 项引用 + OFF_DF_AUX 辅码）+ 派生码（sh_dfn_code_of_slots）；
     // P4 的 `t4.tk_*` 用例保留（语义未变者原地；清单扩大/复合行走辅码者重钉）。
     // 负控的牙齿 = 每个「本该 -1」的用例都同时断言**直译路径非 -1**（证明拒绝出自
     // 分类门而非「该行不可译」——否则门形同虚设也能绿）。
-    total = total + 1; fails = fails + ts_check("t4.tk_const_int",
+    total = total + 1; fails = fails + ts_check_b("t4.tk_const_int",
         (sh_tk_term_of_code(IR_CONST, TI_INT) == sh_term_of_ti(TI_INT) &&
-         tt_a(sh_tk_term_of_code(IR_CONST, TI_INT)) == AK_INT), 1);
-    total = total + 1; fails = fails + ts_check("t4.tk_binary_dex",
+         tt_a(sh_tk_term_of_code(IR_CONST, TI_INT)) == AK_INT), true);
+    total = total + 1; fails = fails + ts_check_b("t4.tk_binary_dex",
         (sh_tk_term_of_code(IR_BINARY, TI_DEX) == sh_term_of_ti(TI_DEX) &&
-         tt_a(sh_tk_term_of_code(IR_BINARY, TI_DEX)) == AK_DEX), 1);
-    total = total + 1; fails = fails + ts_check("t4.tk_const_dex_s_row8",
+         tt_a(sh_tk_term_of_code(IR_BINARY, TI_DEX)) == AK_DEX), true);
+    total = total + 1; fails = fails + ts_check_b("t4.tk_const_dex_s_row8",
         (sh_tk_term_of_code(IR_CONST, TI_DEX_S) == sh_term_of_ti(TI_DEX_S) &&
-         tt_a(sh_tk_term_of_code(IR_CONST, TI_DEX_S)) == AK_DEX), 1);
+         tt_a(sh_tk_term_of_code(IR_CONST, TI_DEX_S)) == AK_DEX), true);
     // 负控 ①：IR_BOUNDS_CHECK 的 tk 是旗标（1 = 动态上限），而 1 数值上 = TI_DEX 行
     // ——直译有值 ⇒ 只能靠分类门挡住（凭空安 dex 项 = 本用例钉死的形态）。
-    total = total + 1; fails = fails + ts_check("t4.tk_bounds_flag1_rejected",
-        (sh_tk_term_of_code(IR_BOUNDS_CHECK, 1) == -1 && sh_term_of_ti(1) >= 0), 1);
+    total = total + 1; fails = fails + ts_check_b("t4.tk_bounds_flag1_rejected",
+        (sh_tk_term_of_code(IR_BOUNDS_CHECK, 1) == -1 && sh_term_of_ti(1) >= 0), true);
     // 负控 ②：IR_DEREF 的 tk 是访问宽度（8B），8 数值上 = TI_DEX_S 行（同款陷阱）。
-    total = total + 1; fails = fails + ts_check("t4.tk_deref_width8_rejected",
-        (sh_tk_term_of_code(IR_DEREF, 8) == -1 && sh_term_of_ti(TI_DEX_S) >= 0), 1);
+    total = total + 1; fails = fails + ts_check_b("t4.tk_deref_width8_rejected",
+        (sh_tk_term_of_code(IR_DEREF, 8) == -1 && sh_term_of_ti(TI_DEX_S) >= 0), true);
     // 负控 ③（重钉：P5 T2 起 IR_CALL/IR_ALLOC 入类型行面 ⇒ 换成「面外」op）：
     // 「行合法（0 = TI_INT）但 op 不在任何类型/辅码面」——面外 op 不得因 tk 恰好合法而放行。
-    total = total + 1; fails = fails + ts_check("t4.tk_unlisted_op_valid_row_rejected",
+    total = total + 1; fails = fails + ts_check_b("t4.tk_unlisted_op_valid_row_rejected",
         (sh_tk_term_of_code(IR_STORE, TI_INT) == -1 &&
          sh_tk_term_of_code(IR_RETURN, TI_INT) == -1 &&
          sh_tk_term_of_code(IR_MAKE_ENUM, TI_INT) == -1 &&
-         sh_term_of_ti(TI_INT) >= 0), 1);
+         sh_term_of_ti(TI_INT) >= 0), true);
     // 负控 ④：行号越界 / 负值 ⇒ -1（不得当 0/1 用；不得读越界项表）。
-    total = total + 1; fails = fails + ts_check("t4.tk_row_range_rejected",
+    total = total + 1; fails = fails + ts_check_b("t4.tk_row_range_rejected",
         (sh_tk_term_of_code(IR_CONST, g_type_count) == -1 &&
          sh_tk_term_of_code(IR_BINARY, g_type_count + 7) == -1 &&
-         sh_tk_term_of_code(IR_CONST, -1) == -1), 1);
+         sh_tk_term_of_code(IR_CONST, -1) == -1), true);
     // 查询纯度（P5 T2 引入 / **P5 T5 重钉**：原断言 = 「本函数不扰动影子对账的 hits 计数」，
     // 影子通道下线后该计数已不存在 ⇒ 改钉**查询纯度**这一同源性质）：`sh_tk_term_of_code`
     // 是**纯查询**——不写槽出参、不置 D23 失败位（诊断调用不得污染落盘闸；有副作用的生产
@@ -2058,31 +2072,31 @@ fn type_selftest_run() -> int {
     t4_sent_a := g_sh_slot_aux;
     t4_fail_before := g_tk_face_fail;
     sk4 := sh_tk_term_of_code(IR_CONST, t4_dyn_row);   // 查询路径（缓存命中）
-    total = total + 1; fails = fails + ts_check("t4.tk_query_purity_and_cache_hit",
+    total = total + 1; fails = fails + ts_check_b("t4.tk_query_purity_and_cache_hit",
         ((t4_dyn_term >= 0 && sk4 == t4_dyn_term &&
           g_sh_slot_term == t4_sent_t && g_sh_slot_aux == t4_sent_a &&
-          g_tk_face_fail == t4_fail_before)), 1);
+          g_tk_face_fail == t4_fail_before)), true);
     g_tk_face_fail = t4_fail_0;                        // 复位（哨兵行的 D23 位 = 本用例产物，不留给后续）
 
     // ── R2 P5 Task 2 新例 ①：原子行契约（D21）──
     // TT_ATOM ∧ b ≥ 0 ⇒ b；union / cons / nil / 负 / 越界 ⇒ **-1**（显式，不得近似）。
     t5s_ptr_row := alloc_type(TYP_PTR, TI_INT, 0);
     t5s_ptr_term := sh_term_of_ti(t5s_ptr_row);
-    total = total + 1; fails = fails + ts_check("p5t2.atom_of_contract",
+    total = total + 1; fails = fails + ts_check_b("p5t2.atom_of_contract",
         (tt_atom_of_term(sh_term_of_ti(TI_INT)) == TI_INT &&
          tt_atom_of_term(t5s_ptr_term) == -1 &&            // 复合项：AK_PTR 的 b = -1
          tt_atom_of_term(tt_nil()) == -1 &&
          tt_atom_of_term(tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil())) == -1 &&
          tt_atom_of_term(-1) == -1 &&
-         tt_atom_of_term(tt_count() + 9) == -1), 1);
+         tt_atom_of_term(tt_count() + 9) == -1), true);
 
     // ── 新例 ②：类型行面 —— 改走 split，断言**两槽**（项 + 空辅码）+ 互斥 ──
     sh_tk_split(IR_BINARY, TI_STR);
     t5s_bin_str_term := g_sh_slot_term;
     t5s_bin_str_aux := g_sh_slot_aux;
-    total = total + 1; fails = fails + ts_check("p5t2.slot_type_face_atomic",
+    total = total + 1; fails = fails + ts_check_b("p5t2.slot_type_face_atomic",
         (t5s_bin_str_term == sh_term_of_ti(TI_STR) && t5s_bin_str_aux == 0 &&
-         sh_dfn_code_of_slots(t5s_bin_str_term, t5s_bin_str_aux) == TI_STR), 1);
+         sh_dfn_code_of_slots(t5s_bin_str_term, t5s_bin_str_aux) == TI_STR), true);
 
     // ── 新例 ③：类型行面扩面（Task 0 再裁的 5 个 op 正控）──
     sh_tk_split(IR_ALLOC, TI_UNIT); t5s_a1 := g_sh_slot_term; t5s_a1x := g_sh_slot_aux;
@@ -2090,27 +2104,27 @@ fn type_selftest_run() -> int {
     sh_tk_split(IR_LOAD, TI_INT); t5s_a3 := g_sh_slot_term; t5s_a3x := g_sh_slot_aux;
     sh_tk_split(IR_I2F, TI_DEX); t5s_a4 := g_sh_slot_term; t5s_a4x := g_sh_slot_aux;
     sh_tk_split(IR_F2I, TI_DEX); t5s_a5 := g_sh_slot_term; t5s_a5x := g_sh_slot_aux;
-    total = total + 1; fails = fails + ts_check("p5t2.slot_type_face_extended",
+    total = total + 1; fails = fails + ts_check_b("p5t2.slot_type_face_extended",
         (t5s_a1 == sh_term_of_ti(TI_UNIT) && t5s_a1x == 0 && tt_a(t5s_a1) == AK_UNIT &&
          t5s_a2 == sh_term_of_ti(TI_INT) && t5s_a2x == 0 &&
          t5s_a3 == sh_term_of_ti(TI_INT) && t5s_a3x == 0 &&
          t5s_a4 == sh_term_of_ti(TI_DEX) && t5s_a4x == 0 && tt_a(t5s_a4) == AK_DEX &&
-         t5s_a5 == sh_term_of_ti(TI_DEX) && t5s_a5x == 0 && tt_a(t5s_a5) == AK_DEX), 1);
+         t5s_a5 == sh_term_of_ti(TI_DEX) && t5s_a5x == 0 && tt_a(t5s_a5) == AK_DEX), true);
 
     // ── 新例 ④：复合行 ⇒ 走辅码（F2 裁决；码保真，派生码 ≡ 旧混用码）──
     // 牙齿：先证该行**可译**（sh_term_of_ti ≥ 0）——否则「term = -1」可能出自不可译，
     // 门形同虚设也能绿。
     sh_tk_split(IR_BINARY, t5s_ptr_row);
-    total = total + 1; fails = fails + ts_check("p5t2.slot_composite_row_to_aux",
+    total = total + 1; fails = fails + ts_check_b("p5t2.slot_composite_row_to_aux",
         (t5s_ptr_term >= 0 && g_sh_slot_term == -1 && g_sh_slot_aux == t5s_ptr_row &&
-         sh_dfn_code_of_slots(g_sh_slot_term, g_sh_slot_aux) == t5s_ptr_row), 1);
+         sh_dfn_code_of_slots(g_sh_slot_term, g_sh_slot_aux) == t5s_ptr_row), true);
     // 同款：数组行（AK_SEQUENCE 的 b = 长度或 -1 ⇒ 复合）。
     t5s_arr_row := alloc_type(TYP_ARRAY, TI_INT, 3);
     sh_tk_split(IR_CONST, t5s_arr_row);
-    total = total + 1; fails = fails + ts_check("p5t2.slot_array_row_to_aux",
+    total = total + 1; fails = fails + ts_check_b("p5t2.slot_array_row_to_aux",
         (sh_term_of_ti(t5s_arr_row) >= 0 && g_sh_slot_term == -1 &&
          g_sh_slot_aux == t5s_arr_row &&
-         sh_dfn_code_of_slots(g_sh_slot_term, g_sh_slot_aux) == t5s_arr_row), 1);
+         sh_dfn_code_of_slots(g_sh_slot_term, g_sh_slot_aux) == t5s_arr_row), true);
 
     // ── 新例 ⑤：辅码面 —— 旗标 / 宽度 / 计数（含负码）原码保真 ──
     sh_tk_split(IR_BOUNDS_CHECK, 1); t5s_f1t := g_sh_slot_term; t5s_f1a := g_sh_slot_aux;
@@ -2118,33 +2132,33 @@ fn type_selftest_run() -> int {
     sh_tk_split(IR_DEREF, 8); t5s_d8t := g_sh_slot_term; t5s_d8a := g_sh_slot_aux;
     sh_tk_split(IR_STORE_PTR, 4); t5s_d4t := g_sh_slot_term; t5s_d4a := g_sh_slot_aux;
     sh_tk_split(IR_SPAWN, -1); t5s_spt := g_sh_slot_term; t5s_spa := g_sh_slot_aux;
-    total = total + 1; fails = fails + ts_check("p5t2.slot_aux_face_codes",
+    total = total + 1; fails = fails + ts_check_b("p5t2.slot_aux_face_codes",
         (t5s_f1t == -1 && t5s_f1a == 1 && sh_dfn_code_of_slots(t5s_f1t, t5s_f1a) == 1 &&
          t5s_f0t == -1 && t5s_f0a == 0 && sh_dfn_code_of_slots(t5s_f0t, t5s_f0a) == 0 &&
          t5s_d8t == -1 && t5s_d8a == 8 && sh_dfn_code_of_slots(t5s_d8t, t5s_d8a) == 8 &&
          t5s_d4t == -1 && t5s_d4a == 4 &&
-         t5s_spt == -1 && t5s_spa == -1 && sh_dfn_code_of_slots(t5s_spt, t5s_spa) == -1), 1);
+         t5s_spt == -1 && t5s_spa == -1 && sh_dfn_code_of_slots(t5s_spt, t5s_spa) == -1), true);
     // 数值陷阱复证：辅码 1 / 8 直译确有其项（TI_DEX / TI_DEX_S 行）——分类门才是拦阻者。
-    total = total + 1; fails = fails + ts_check("p5t2.aux_trap_rows_translatable",
+    total = total + 1; fails = fails + ts_check_b("p5t2.aux_trap_rows_translatable",
         (sh_term_of_ti(1) >= 0 && tt_a(sh_term_of_ti(1)) == AK_DEX &&
          sh_term_of_ti(TI_DEX_S) >= 0 && tt_a(sh_term_of_ti(TI_DEX_S)) == AK_DEX &&
-         sh_tk_term_of_code(IR_STORE_PTR, TI_DEX_S) == -1), 1);
+         sh_tk_term_of_code(IR_STORE_PTR, TI_DEX_S) == -1), true);
 
     // ── 新例 ⑥：面外 op ⇒ 两槽皆空、派生码 0（含 LOAD_ENUM_TAG = Task 0 再裁「无」）──
     sh_tk_split(IR_STORE, 0); t5s_n1t := g_sh_slot_term; t5s_n1a := g_sh_slot_aux;
     sh_tk_split(IR_LOAD_ENUM_TAG, 0); t5s_n2t := g_sh_slot_term; t5s_n2a := g_sh_slot_aux;
     sh_tk_split(IR_LABEL, 0); t5s_n3t := g_sh_slot_term; t5s_n3a := g_sh_slot_aux;
-    total = total + 1; fails = fails + ts_check("p5t2.slot_none_face_empty",
+    total = total + 1; fails = fails + ts_check_b("p5t2.slot_none_face_empty",
         (t5s_n1t == -1 && t5s_n1a == 0 && sh_dfn_code_of_slots(t5s_n1t, t5s_n1a) == 0 &&
-         t5s_n2t == -1 && t5s_n2a == 0 && t5s_n3t == -1 && t5s_n3a == 0), 1);
+         t5s_n2t == -1 && t5s_n2a == 0 && t5s_n3t == -1 && t5s_n3a == 0), true);
 
     // ── 新例 ⑦：派生码契约（辅码优先 / 无项⇒0 / 不可逆⇒-1 显式）──
-    total = total + 1; fails = fails + ts_check("p5t2.code_derivation_contract",
+    total = total + 1; fails = fails + ts_check_b("p5t2.code_derivation_contract",
         (sh_dfn_code_of_slots(sh_term_of_ti(TI_STR), 0) == TI_STR &&
          sh_dfn_code_of_slots(-1, 0) == 0 &&
          sh_dfn_code_of_slots(-1, 7) == 7 &&
          sh_dfn_code_of_slots(t5s_ptr_term, 0) == -1 &&      // 复合项入项槽 = 无法派生（显式响亮）
-         sh_dfn_code_of_slots(sh_term_of_ti(TI_INT), 9) == 9), 1);   // 辅码优先（互斥由拆分器保证）
+         sh_dfn_code_of_slots(sh_term_of_ti(TI_INT), 9) == 9), true);   // 辅码优先（互斥由拆分器保证）
 
     // ── 新例 ⑧：互斥不变量（D22-②）逐 op 复核（面 0 / 面 1 / 面 2 各取代表）──
     sh_tk_split(IR_CONST, TI_STR); t5s_m1 := (g_sh_slot_term >= 0 && g_sh_slot_aux == 0);
@@ -2156,9 +2170,9 @@ fn type_selftest_run() -> int {
 
     // ── 新例 ⑨：F1 修正（IR_HOTPATCH_ROUTE 的类型面 = 无；显式 0 实参 ⇒ 两槽皆空）──
     sh_tk_split(IR_HOTPATCH_ROUTE, 0);
-    total = total + 1; fails = fails + ts_check("p5t2.hotpatch_route_no_face",
+    total = total + 1; fails = fails + ts_check_b("p5t2.hotpatch_route_no_face",
         (g_sh_slot_term == -1 && g_sh_slot_aux == 0 &&
-         sh_dfn_code_of_slots(g_sh_slot_term, g_sh_slot_aux) == 0), 1);
+         sh_dfn_code_of_slots(g_sh_slot_term, g_sh_slot_aux) == 0), true);
 
     // ── 新例 ⑩：D23 建项失败位（越界类型面行 ⇒ 计数 +1；复合行**不**置位）──
     t5s_fail_before := g_tk_face_fail;
@@ -2169,17 +2183,17 @@ fn type_selftest_run() -> int {
     sh_tk_split(IR_BINARY, t5s_ptr_row);      // 复合行 = 域内可译 ⇒ 不得置位
     t5s_fail_final := g_tk_face_fail;
     g_tk_face_fail = 0;                        // 复位（不污染后续落盘闸用例）
-    total = total + 1; fails = fails + ts_check("p5t2.d23_build_fail_bit",
+    total = total + 1; fails = fails + ts_check_b("p5t2.d23_build_fail_bit",
         (t5s_fail_after == t5s_fail_before + 1 && t5s_fail_final == t5s_fail_after &&
-         t5s_out_t == -1 && t5s_out_a == g_type_count), 1);
+         t5s_out_t == -1 && t5s_out_a == g_type_count), true);
     // TYP_NAMED：AK_NAMED + 行号存 b 槽（引擎不展开 → 判定 UNKNOWN = P1 预期未覆盖面）
     // ⚠️ 本行**刻意走裸分配**（P2a Task 1 后 8 个生产分配点已收敛到 alloc_named_type）：
     // 它构造的是人造 TYP_NAMED 行（键 1201 不对应任何真名），登记进生产侧表会用假键污染
     // name→ti 映射（自测将来若被并入编译路径即静默错型）。裸分配 = 不登记 = 不污染。
     named_ti := alloc_type(TYP_NAMED, 1201, 0);
     t_named := sh_term_of_ti(named_ti);
-    total = total + 1; fails = fails + ts_check("bridge.named_ak_b",
-        (tt_a(t_named) == AK_NAMED && tt_b(t_named) == named_ti), 1);
+    total = total + 1; fails = fails + ts_check_b("bridge.named_ak_b",
+        (tt_a(t_named) == AK_NAMED && tt_b(t_named) == named_ti), true);
     // TYP_TUPLE 实读布局（checker.cr:118 type_equal 分支 + :2041+ 字段访问 t.N）：
     //   data = 字段数，extra = 字段 ti 在 g_gen_apply_data 的起始下标（8B/元素）
     grow_gen_apply_data(g_gen_apply_data_count + 2);
@@ -2200,8 +2214,8 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("bridge.entries_delta", (sh_map_entries() - e_before), 1);
     e_hit_before := sh_map_entries();
     t_arr2b := sh_term_of_ti(arr_ti2);
-    total = total + 1; fails = fails + ts_check("bridge.cache_hit_same_term_no_new_entry",
-        (t_arr2b == t_arr2 && sh_map_entries() == e_hit_before), 1);
+    total = total + 1; fails = fails + ts_check_b("bridge.cache_hit_same_term_no_new_entry",
+        (t_arr2b == t_arr2 && sh_map_entries() == e_hit_before), true);
     // 缓存扩容/重建守门（P0「扩容路径判据不可达」教训同款）：上面仅 8 条 << 初始容量
     // 1024 → 装填因子守卫/重建路径**不可达**。用 600 个互异 ti（extra=N 各不同 = 互异
     // 类型表行，正是「N 不入身份」下 600 行同项的典型规模）逼出一次扩容重建（守卫
@@ -2214,9 +2228,9 @@ fn type_selftest_run() -> int {
         sh_term_of_ti(alloc_type(TYP_ARRAY, TI_INT, 1000 + gi));
         gi = gi + 1;
     }
-    total = total + 1; fails = fails + ts_check("bridge.grow_rehash",
-        (sh_map_entries() == g_before + 600 && sh_term_of_ti(arr_ti2) == t_arr2), 1);
-    total = total + 1; fails = fails + ts_check("bridge.grow_cap_doubled", (g_term_map_cap >= 2048), 1);
+    total = total + 1; fails = fails + ts_check_b("bridge.grow_rehash",
+        (sh_map_entries() == g_before + 600 && sh_term_of_ti(arr_ti2) == t_arr2), true);
+    total = total + 1; fails = fails + ts_check_b("bridge.grow_cap_doubled", (g_term_map_cap >= 2048), true);
     // 第二次重建守门（Step 4b ②，Task 1 评审挂账：「>1024 条目第二次重建无实测」）：
     // 上一例只推过第一条守卫线（entries=511 → cap 1024→2048）；本例再入 1100 条互异 ti
     // 把条目推过第二条守卫线（entries=1023 → cap 2048→4096）——断三件事：①重放守恒（恰
@@ -2229,8 +2243,8 @@ fn type_selftest_run() -> int {
         sh_term_of_ti(alloc_type(TYP_ARRAY, TI_INT, 5000 + gj));
         gj = gj + 1;
     }
-    total = total + 1; fails = fails + ts_check("bridge.grow_rehash2",
-        (sh_map_entries() == g2_before + 1100 && g_term_map_cap >= 4096 && sh_term_of_ti(arr_ti2) == t_arr2), 1);
+    total = total + 1; fails = fails + ts_check_b("bridge.grow_rehash2",
+        (sh_map_entries() == g2_before + 1100 && g_term_map_cap >= 4096 && sh_term_of_ti(arr_ti2) == t_arr2), true);
 
     // --- F1（R2 P2a Task 1）：同名 TYP_NAMED 归一行 —— P1 影子对拍 9/9 差异根因消除 ---
     // 根因：同一类型名（struct 字面量 / 泛型应用基型在不同**出现点**）各建一行 → 桥接按行
@@ -2238,13 +2252,13 @@ fn type_selftest_run() -> int {
     // 修法（用户裁决 = 根治）：建表去重，唯一分配点收敛到 alloc_named_type。
     n1 := alloc_named_type(str_intern("DedupProbe"));
     n2 := alloc_named_type(str_intern("DedupProbe"));
-    total = total + 1; fails = fails + ts_check("f1.same_name_one_row", (n1 == n2), 1);
+    total = total + 1; fails = fails + ts_check_b("f1.same_name_one_row", (n1 == n2), true);
     total = total + 1; fails = fails + ts_check("f1.row_count", named_dedup_rows(str_intern("DedupProbe")), 1);
     n3 := alloc_named_type(str_intern("DedupProbe2"));
-    total = total + 1; fails = fails + ts_check("f1.diff_name_diff_row", (n3 != n1), 1);
+    total = total + 1; fails = fails + ts_check_b("f1.diff_name_diff_row", (n3 != n1), true);
     // 引擎侧：同名两行归一后，桥接的同一性成立（P1 的 9 unknown 根因消除）
-    total = total + 1; fails = fails + ts_check("f1.bridge_same_term",
-        (sh_term_of_ti(n1) == sh_term_of_ti(n2)), 1);
+    total = total + 1; fails = fails + ts_check_b("f1.bridge_same_term",
+        (sh_term_of_ti(n1) == sh_term_of_ti(n2)), true);
     // 扩容/重建覆盖（P0/P1 血泪教训：装填守卫/重建重放路径判据不可达 = 挂死风险只靠读码）：
     // 入 1700 个互异**真名**（键域 = str_intern 分配的名字下标，与生产同域）推过**两道**
     // 守卫线——count=511 → cap 1024→2048，count=1023 → 2048→4096。断四件事：①两次重建都
@@ -2258,8 +2272,8 @@ fn type_selftest_run() -> int {
         alloc_named_type(str_intern("DedupGrow" + int_str(f1i)));
         f1i = f1i + 1;
     }
-    total = total + 1; fails = fails + ts_check("f1.dedup_rehash_survived",
-        (g_named_dedup_cap >= 4096 && g_named_dedup_count == c_before + 1700 && alloc_named_type(str_intern("DedupProbe")) == n1 && named_dedup_rows(str_intern("DedupProbe")) == 1), 1);
+    total = total + 1; fails = fails + ts_check_b("f1.dedup_rehash_survived",
+        (g_named_dedup_cap >= 4096 && g_named_dedup_count == c_before + 1700 && alloc_named_type(str_intern("DedupProbe")) == n1 && named_dedup_rows(str_intern("DedupProbe")) == 1), true);
 
     // --- F2（R2 P2a Task 2）：数组长度 N 迁为「常量档长度约束」 ---
     // 背景（P1 findings §6.F2）：身份判等曾把 N 与元素判等绑在一起（N 属身份）；引擎侧按
@@ -2283,8 +2297,8 @@ fn type_selftest_run() -> int {
     // ④ 元组字段位 `(int, [int;3])`。每例双断：同结构同长 → 1 / 同结构异长 → 0（防误拒）。
     f2_outer3 := alloc_type(TYP_ARRAY, f2_arr3, 2);
     f2_outer4 := alloc_type(TYP_ARRAY, f2_arr4, 2);
-    total = total + 1; fails = fails + ts_check("f2.nested_elem_reject",
-        (array_len_constraint_ok(f2_outer3, f2_outer3) == 1 && array_len_constraint_ok(f2_outer4, f2_outer3) == 0), 1);
+    total = total + 1; fails = fails + ts_check_b("f2.nested_elem_reject",
+        (array_len_constraint_ok(f2_outer3, f2_outer3) == 1 && array_len_constraint_ok(f2_outer4, f2_outer3) == 0), true);
     grow_gen_apply_data(g_gen_apply_data_count + 4);
     f2_ga_s1 := g_gen_apply_data_count;
     w64(g_gen_apply_data, f2_ga_s1 * 8, 1);
@@ -2297,12 +2311,12 @@ fn type_selftest_run() -> int {
     f2_base := alloc_type(TYP_NAMED, 1202, 0);
     f2_ga3 := alloc_type(TYP_GENERIC_APPLY, f2_base, f2_ga_s1);
     f2_ga4 := alloc_type(TYP_GENERIC_APPLY, f2_base, f2_ga_s2);
-    total = total + 1; fails = fails + ts_check("f2.genapply_arg_reject",
-        (array_len_constraint_ok(f2_ga3, f2_ga3) == 1 && array_len_constraint_ok(f2_ga4, f2_ga3) == 0), 1);
+    total = total + 1; fails = fails + ts_check_b("f2.genapply_arg_reject",
+        (array_len_constraint_ok(f2_ga3, f2_ga3) == 1 && array_len_constraint_ok(f2_ga4, f2_ga3) == 0), true);
     f2_pt3 := alloc_type(TYP_PTR, f2_arr3, 0);
     f2_pt4 := alloc_type(TYP_PTR, f2_arr4, 0);
-    total = total + 1; fails = fails + ts_check("f2.ptr_elem_reject",
-        (array_len_constraint_ok(f2_pt3, f2_pt3) == 1 && array_len_constraint_ok(f2_pt4, f2_pt3) == 0), 1);
+    total = total + 1; fails = fails + ts_check_b("f2.ptr_elem_reject",
+        (array_len_constraint_ok(f2_pt3, f2_pt3) == 1 && array_len_constraint_ok(f2_pt4, f2_pt3) == 0), true);
     grow_gen_apply_data(g_gen_apply_data_count + 4);
     f2_tp_s1 := g_gen_apply_data_count;
     w64(g_gen_apply_data, f2_tp_s1 * 8, TI_INT);
@@ -2313,11 +2327,11 @@ fn type_selftest_run() -> int {
     g_gen_apply_data_count = f2_tp_s2 + 2;
     f2_tup3 := alloc_type(TYP_TUPLE, 2, f2_tp_s1);
     f2_tup4 := alloc_type(TYP_TUPLE, 2, f2_tp_s2);
-    total = total + 1; fails = fails + ts_check("f2.tuple_field_reject",
-        (array_len_constraint_ok(f2_tup3, f2_tup3) == 1 && array_len_constraint_ok(f2_tup4, f2_tup3) == 0), 1);
+    total = total + 1; fails = fails + ts_check_b("f2.tuple_field_reject",
+        (array_len_constraint_ok(f2_tup3, f2_tup3) == 1 && array_len_constraint_ok(f2_tup4, f2_tup3) == 0), true);
     // 负控：非数组对（含单侧数组）长度面无约束 → 恒满足（防「一律拒绝」的退化实现）
-    total = total + 1; fails = fails + ts_check("f2.nonarray_no_constraint",
-        (array_len_constraint_ok(f2_arr3, TI_INT) == 1 && array_len_constraint_ok(TI_INT, f2_arr3) == 1), 1);
+    total = total + 1; fails = fails + ts_check_b("f2.nonarray_no_constraint",
+        (array_len_constraint_ok(f2_arr3, TI_INT) == 1 && array_len_constraint_ok(TI_INT, f2_arr3) == 1), true);
     // Task 4 Step 5c（Task 2 评审 M2 收口）：① 补齐约束的 REF / SLICE 两个递归位（此前已钉
     // 数组元素 / 泛型实参 / 指针元素 / 元组字段四位，下钻面 6 位里缺这两位）；② 把**站点接线**
     // 纳入自测面——站点的措辞由 type_compat_strict 的**三态**分派（1 = 兼容 / 0 = 身份不匹配
@@ -2326,12 +2340,12 @@ fn type_selftest_run() -> int {
     // REF 位注：约束只看 data（元素），**不**比 extra（mut）——mut 归身份判定（头注「同形」限定）。
     f2_rf3 := alloc_type(TYP_REF, f2_arr3, 0);
     f2_rf4 := alloc_type(TYP_REF, f2_arr4, 0);
-    total = total + 1; fails = fails + ts_check("f2.ref_elem_reject",
-        (array_len_constraint_ok(f2_rf3, f2_rf3) == 1 && array_len_constraint_ok(f2_rf4, f2_rf3) == 0), 1);
+    total = total + 1; fails = fails + ts_check_b("f2.ref_elem_reject",
+        (array_len_constraint_ok(f2_rf3, f2_rf3) == 1 && array_len_constraint_ok(f2_rf4, f2_rf3) == 0), true);
     f2_sl3 := alloc_type(TYP_SLICE, f2_arr3, 0);
     f2_sl4 := alloc_type(TYP_SLICE, f2_arr4, 0);
-    total = total + 1; fails = fails + ts_check("f2.slice_elem_reject",
-        (array_len_constraint_ok(f2_sl3, f2_sl3) == 1 && array_len_constraint_ok(f2_sl4, f2_sl3) == 0), 1);
+    total = total + 1; fails = fails + ts_check_b("f2.slice_elem_reject",
+        (array_len_constraint_ok(f2_sl3, f2_sl3) == 1 && array_len_constraint_ok(f2_sl4, f2_sl3) == 0), true);
     // 站点三态（type_compat_strict 恒「先 type_equal 再约束」，站点调用面不变）：
     // ① 同结构同长 → 1；② 异结构（数组 vs 基类型）→ 0（身份面否决，原措辞）；③ 同结构异长
     // → -1（**只有**这一路走长度措辞；且它证明 type_equal 已放行 = 引擎身份确实 N-free）。
@@ -2369,8 +2383,8 @@ fn type_selftest_run() -> int {
     if !type_equal(t3_na, t3_nb) {
         if g_diag_count == t3_d0 { t3_ub = 1; }
     }
-    total = total + 1; fails = fails + ts_check("t3.named_face_decided_no_indeterminate",
-        (t3_ub == 1 && ty_equiv(sh_term_of_ti(t3_na), sh_term_of_ti(t3_nb)) == 0), 1);
+    total = total + 1; fails = fails + ts_check_b("t3.named_face_decided_no_indeterminate",
+        (t3_ub == 1 && ty_equiv(sh_term_of_ti(t3_na), sh_term_of_ti(t3_nb)) == 0), true);
     // 桥接缺口（sh_term_of_ti 译不成项：行号越界）→ **P-A 硬错**（T4 重钉：旧行为 = 回落
     // legacy + g_replace_bridge 计数；现行为 = 判 false + ICE04 诊断恰 1 条）。措辞/成因面
     // 由 t4.ice04_* 段复核（本例只钉「行为 + 码」）。
@@ -2399,8 +2413,8 @@ fn type_selftest_run() -> int {
     t3c_entries_mid := sh_map_entries();
     init_types();                                    // 类型表 + 桥接缓存一并失效
     t3c_entries_after := sh_map_entries();
-    total = total + 1; fails = fails + ts_check("t3c.map_reset_clears_bridge",
-        (t3c_entries_mid >= 1 && t3c_entries_after == 0 && g_term_map_cap == 0), 1);
+    total = total + 1; fails = fails + ts_check_b("t3c.map_reset_clears_bridge",
+        (t3c_entries_mid >= 1 && t3c_entries_after == 0 && g_term_map_cap == 0), true);
     t3c_tiB := alloc_type(TYP_ARRAY, TI_BOOL, 2);    // 同一行号 T（复用）
     t3c_termB := sh_term_of_ti(t3c_tiB);
     t3c_ok : ., mut = 0;
@@ -2432,9 +2446,9 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("iface.char_ti", iface_ti_of(AK_CHAR), TI_CHAR);
     total = total + 1; fails = fails + ts_check("iface.dyn_ti", iface_ti_of(AK_DYN), TI_DYN);
     // 反向：结构/命名条目无「规范行」（类级）→ 恒 -1（若哪天被填成某行 = 类级/行级混同）
-    total = total + 1; fails = fails + ts_check("iface.struct_ti_none",
+    total = total + 1; fails = fails + ts_check_b("iface.struct_ti_none",
         (iface_ti_of(AK_PRODUCT) == -1 && iface_ti_of(AK_SEQUENCE) == -1 && iface_ti_of(AK_REF) == -1 &&
-         iface_ti_of(AK_PTR) == -1 && iface_ti_of(AK_NAMED) == -1), 1);
+         iface_ti_of(AK_PTR) == -1 && iface_ti_of(AK_NAMED) == -1), true);
     // 行号 → 原子类：8 原生经**类型表本体**（kind == TYP_BASE && data == TY_*）判，不按行号猜
     total = total + 1; fails = fails + ts_check("iface.kind_int", iface_kind_of(TI_INT), AK_INT);
     total = total + 1; fails = fails + ts_check("iface.kind_dex", iface_kind_of(TI_DEX), AK_DEX);
@@ -2449,32 +2463,32 @@ fn type_selftest_run() -> int {
     // 结构/命名行 → 类（逐 kind 一条构造子；配对着写以钉死「非同类混判」）
     ifc_ptr := alloc_type(TYP_PTR, TI_INT, 0);
     ifc_ref := alloc_type(TYP_REF, TI_STR, 0);
-    total = total + 1; fails = fails + ts_check("iface.kind_ptr_ref",
-        (iface_kind_of(ifc_ptr) == AK_PTR && iface_kind_of(ifc_ref) == AK_REF), 1);
+    total = total + 1; fails = fails + ts_check_b("iface.kind_ptr_ref",
+        (iface_kind_of(ifc_ptr) == AK_PTR && iface_kind_of(ifc_ref) == AK_REF), true);
     ifc_arr := alloc_type(TYP_ARRAY, TI_INT, 3);
     ifc_slice := alloc_type(TYP_SLICE, TI_INT, 0);
-    total = total + 1; fails = fails + ts_check("iface.kind_seq",
-        (iface_kind_of(ifc_arr) == AK_SEQUENCE && iface_kind_of(ifc_slice) == AK_SEQUENCE), 1);
+    total = total + 1; fails = fails + ts_check_b("iface.kind_seq",
+        (iface_kind_of(ifc_arr) == AK_SEQUENCE && iface_kind_of(ifc_slice) == AK_SEQUENCE), true);
     ifc_tup := alloc_type(TYP_TUPLE, 0, 0);
     total = total + 1; fails = fails + ts_check("iface.kind_product", iface_kind_of(ifc_tup), AK_PRODUCT);
     ifc_named := alloc_named_type(str_intern("IfaceNamedProbe"));
     ifc_gp := alloc_type(TYP_GENERIC_PARAM, str_intern("IfaceGP"), 0);
     ifc_ga := alloc_type(TYP_GENERIC_APPLY, ifc_named, 0);
-    total = total + 1; fails = fails + ts_check("iface.kind_named",
+    total = total + 1; fails = fails + ts_check_b("iface.kind_named",
         (iface_kind_of(ifc_named) == AK_NAMED && iface_kind_of(ifc_gp) == AK_NAMED &&
-         iface_kind_of(ifc_ga) == AK_NAMED), 1);
+         iface_kind_of(ifc_ga) == AK_NAMED), true);
     // 条目定位（含越界/负键：不得把「无此原子」与行 0 混同）
-    total = total + 1; fails = fails + ts_check("iface.entry_lookup",
+    total = total + 1; fails = fails + ts_check_b("iface.entry_lookup",
         (iface_entry(AK_INT) >= 0 && iface_entry(AK_INT) < iface_count() && iface_entry(AK_NAMED) >= 0 &&
-         iface_entry(-1) == -1 && iface_entry(9999) == -1), 1);
+         iface_entry(-1) == -1 && iface_entry(9999) == -1), true);
     // TY_* 码 → 原子类（逐项语义分派；含两条已裁决灰格：DEX_S 同值域不同表示、GENERIC_PARAM 哨兵）
-    total = total + 1; fails = fails + ts_check("iface.ty_code_natives",
+    total = total + 1; fails = fails + ts_check_b("iface.ty_code_natives",
         (iface_by_ty_code(TY_INT) == AK_INT && iface_by_ty_code(TY_DEX) == AK_DEX &&
          iface_by_ty_code(TY_BOOL) == AK_BOOL && iface_by_ty_code(TY_STRING) == AK_STRING &&
          iface_by_ty_code(TY_UNIT) == AK_UNIT && iface_by_ty_code(TY_NEVER) == AK_NEVER &&
-         iface_by_ty_code(TY_CHAR) == AK_CHAR), 1);
-    total = total + 1; fails = fails + ts_check("iface.ty_code_gray",
-        (iface_by_ty_code(TY_DEX_S) == AK_DEX && iface_by_ty_code(TY_GENERIC_PARAM) == AK_NAMED), 1);
+         iface_by_ty_code(TY_CHAR) == AK_CHAR), true);
+    total = total + 1; fails = fails + ts_check_b("iface.ty_code_gray",
+        (iface_by_ty_code(TY_DEX_S) == AK_DEX && iface_by_ty_code(TY_GENERIC_PARAM) == AK_NAMED), true);
     total = total + 1; fails = fails + ts_check("iface.ty_code_unknown", iface_by_ty_code(999), -1);
     // 字面量定型（查表入口 = 条目 lit_code 列；接线后 = infer_expr 的 5 处唯一真源，
     // 端到端对拍见本文件末段 `lit.infer_*`）
@@ -2484,10 +2498,10 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("iface.lit_bool", iface_lit_ti(EXPR_BOOL), TI_BOOL);
     total = total + 1; fails = fails + ts_check("iface.lit_char", iface_lit_ti(EXPR_CHAR), TI_CHAR);
     total = total + 1; fails = fails + ts_check("iface.lit_none", iface_lit_ti(EXPR_IDENT), -1);
-    total = total + 1; fails = fails + ts_check("iface.lit_ak",
+    total = total + 1; fails = fails + ts_check_b("iface.lit_ak",
         (iface_lit_ak(EXPR_INT) == AK_INT && iface_lit_ak(EXPR_DEX) == AK_DEX &&
          iface_lit_ak(EXPR_STRING) == AK_STRING && iface_lit_ak(EXPR_BOOL) == AK_BOOL &&
-         iface_lit_ak(EXPR_CHAR) == AK_CHAR), 1);
+         iface_lit_ak(EXPR_CHAR) == AK_CHAR), true);
     // 负键 = 条目的「无字面量」哨兵 ⇒ 必须先行拒绝（否则 -1 命中无字面量条目）
     total = total + 1; fails = fails + ts_check("iface.lit_neg", iface_lit_ak(-1), -1);
     // 类型项 → 原子类（单一原子 / ⊤ₖ；复合与越界 → -1）
@@ -2495,13 +2509,13 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("iface.of_term_atom", iface_of_term(ifc_term_atom), AK_INT);
     total = total + 1; fails = fails + ts_check("iface.of_term_topk", iface_of_term(tt_top_k(AK_SEQUENCE)), AK_SEQUENCE);
     total = total + 1; fails = fails + ts_check("iface.of_term_compound", iface_of_term(tt_union(a_int, a_str)), -1);
-    total = total + 1; fails = fails + ts_check("iface.of_term_oob",
-        (iface_of_term(-1) == -1 && iface_of_term(tt_count() + 9) == -1), 1);
+    total = total + 1; fails = fails + ts_check_b("iface.of_term_oob",
+        (iface_of_term(-1) == -1 && iface_of_term(tt_count() + 9) == -1), true);
     // 未知原子 → 空许可集（不得给「看起来有许可」的位）；位下标越界 → 0（不得回绕成全位命中）
     total = total + 1; fails = fails + ts_check("iface.ops_unknown", iface_ops(-1), 0);
     total = total + 1; fails = fails + ts_check("iface.ops_unknown_ak", iface_ops(9999), 0);
-    total = total + 1; fails = fails + ts_check("iface.permits_bad_op",
-        (iface_permits(AK_INT, -1) == 0 && iface_permits(AK_INT, 63) == 0 && iface_permits(9999, OP_ADD) == 0), 1);
+    total = total + 1; fails = fails + ts_check_b("iface.permits_bad_op",
+        (iface_permits(AK_INT, -1) == 0 && iface_permits(AK_INT, 63) == 0 && iface_permits(9999, OP_ADD) == 0), true);
 
     // --- R2 P2b Task 2：`iface_kind_of` 单源化——桥接分派（sh_native_ak/sh_base_ak）与注册表合一 ---
     // 判据 = **全表逐格**（非抽样）：生产入口对**冻结期望表**逐格相同。**R2 P5 Task 4 重定**：
@@ -2537,24 +2551,24 @@ fn type_selftest_run() -> int {
     // ③ **反真空哨兵**（两处 loop 是本 Task 的判据本体，不得空转假绿）：
     //    ⓐ 扫描计数：码面 10 个键全扫过（且解码真读回写入值）；行面恰为 g_type_count 行且 ≥ 9；
     //    ⓑ 比较是活的：两个**已知互补**的格必须给出**不同**结果（未映射码 → -1 而 TY_INT → AK_INT）。
-    total = total + 1; fails = fails + ts_check("iface.scan_coverage",
+    total = total + 1; fails = fails + ts_check_b("iface.scan_coverage",
         (t2_i == 10 && r64(t2_codes, 56) == TY_GENERIC_PARAM && r64(t2_codes, 64) == TY_DEX_S &&
-         t2_j == g_type_count && t2_j >= 9), 1);
-    total = total + 1; fails = fails + ts_check("iface.compare_is_live",
-        (iface_by_ty_code(999) == ts_t4_ak_expected(TY_INT)), 0);
+         t2_j == g_type_count && t2_j >= 9), true);
+    total = total + 1; fails = fails + ts_check_b("iface.compare_is_live",
+        (iface_by_ty_code(999) == ts_t4_ak_expected(TY_INT)), false);
     // ④ 生产入口**确实在委托**（逐项钉死；含两条灰格与未映射码）
-    total = total + 1; fails = fails + ts_check("iface.bridge_delegates",
+    total = total + 1; fails = fails + ts_check_b("iface.bridge_delegates",
         (sh_base_ak(TY_INT) == AK_INT && sh_base_ak(TY_STRING) == AK_STRING && sh_base_ak(TY_BOOL) == AK_BOOL &&
          sh_base_ak(TY_DEX_S) == AK_DEX && sh_base_ak(TY_GENERIC_PARAM) == AK_NAMED && sh_base_ak(999) == -1 &&
-         sh_native_ak(TI_INT) == AK_INT && sh_native_ak(TI_STR) == AK_STRING), 1);
+         sh_native_ak(TI_INT) == AK_INT && sh_native_ak(TI_STR) == AK_STRING), true);
     // ⑤ **原门保留**（委托不得把 sh_native_ak 变成 iface_kind_of）：DYN 行/结构行/负号 → -1，
     // 而同时注册表侧对 DYN 行回 AK_DYN——两函数契约不同，各自钉一条。
-    total = total + 1; fails = fails + ts_check("iface.bridge_gate_kept",
+    total = total + 1; fails = fails + ts_check_b("iface.bridge_gate_kept",
         (sh_native_ak(TI_DYN) == -1 && sh_native_ak(ifc_arr) == -1 && sh_native_ak(ifc_named) == -1 &&
-         sh_native_ak(-1) == -1 && iface_kind_of(TI_DYN) == AK_DYN), 1);
+         sh_native_ak(-1) == -1 && iface_kind_of(TI_DYN) == AK_DYN), true);
     // ⑥ 语义分派守卫（P1 血泪：AK/TI 下标不 1:1）——若哪天有人「按下标直传」，本行必红
-    total = total + 1; fails = fails + ts_check("iface.dispatch_no_index_shortcut",
-        (iface_ti_of(AK_STRING) != AK_STRING && iface_ti_of(AK_BOOL) != AK_BOOL && TI_STR != TI_BOOL), 1);
+    total = total + 1; fails = fails + ts_check_b("iface.dispatch_no_index_shortcut",
+        (iface_ti_of(AK_STRING) != AK_STRING && iface_ti_of(AK_BOOL) != AK_BOOL && TI_STR != TI_BOOL), true);
 
     // --- R2 P2b Task 3：字面量定型查表接线（infer_expr 的 5 个字面量分支 → iface_lit_ti）---
     // 判据 = **接线端到端**：用与 parser 同族的 `alloc_node` 构造 5 个字面量 AST 节点，逐 kind 比
@@ -2569,9 +2583,9 @@ fn type_selftest_run() -> int {
     li_bool := alloc_node(EXPR_BOOL, -1, -1, -1, 1, TY_BOOL, -1, 0, 0);
     li_char := alloc_node(EXPR_CHAR, -1, -1, -1, 65, TY_CHAR, -1, 0, 0);
     // 反真空哨兵：构造出的节点确实带预期 kind（防 alloc_node 参数错位 ⇒ 「拿错节点比错值」假绿）
-    total = total + 1; fails = fails + ts_check("lit.node_kinds",
+    total = total + 1; fails = fails + ts_check_b("lit.node_kinds",
         (ast_kind(li_int) == EXPR_INT && ast_kind(li_dex) == EXPR_DEX && ast_kind(li_str) == EXPR_STRING &&
-         ast_kind(li_bool) == EXPR_BOOL && ast_kind(li_char) == EXPR_CHAR), 1);
+         ast_kind(li_bool) == EXPR_BOOL && ast_kind(li_char) == EXPR_CHAR), true);
     total = total + 1; fails = fails + ts_check("lit.infer_int", infer_expr(li_int), TI_INT);
     total = total + 1; fails = fails + ts_check("lit.infer_dex", infer_expr(li_dex), TI_DEX);
     total = total + 1; fails = fails + ts_check("lit.infer_str", infer_expr(li_str), TI_STR);
@@ -2580,10 +2594,10 @@ fn type_selftest_run() -> int {
     // 端到端 ↔ 表 对拍：接线后 infer_expr 的结果必须**逐 kind 等于表查表结果**（表 = 唯一真源；
     // 若哪天有人把某行改回硬编码常量，本行仍绿但 `lit.infer_*` 亦绿——真正的守门是实施报告的
     // 突变控制：改表格 ⇒ infer_* 红 ⇒ 该行确在读表）
-    total = total + 1; fails = fails + ts_check("lit.infer_is_table",
+    total = total + 1; fails = fails + ts_check_b("lit.infer_is_table",
         (infer_expr(li_int) == iface_lit_ti(EXPR_INT) && infer_expr(li_dex) == iface_lit_ti(EXPR_DEX) &&
          infer_expr(li_str) == iface_lit_ti(EXPR_STRING) && infer_expr(li_bool) == iface_lit_ti(EXPR_BOOL) &&
-         infer_expr(li_char) == iface_lit_ti(EXPR_CHAR)), 1);
+         infer_expr(li_char) == iface_lit_ti(EXPR_CHAR)), true);
     // 短路顺序（接线硬口径：**逐字保持**）——EXPR_NONE 转发行夹在 EXPR_INT 与 EXPR_DEX 之间：
     // ① 带内层值的 wrapper：在 EXPR_INT 行不命中（kind=0）⇒ 走转发行 → 内层类型；
     // ② 空 wrapper（a = -1）：转发行不命中 ⇒ 落函数中部的 EXPR_NONE 分支 → TI_UNIT。
@@ -2700,16 +2714,16 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("ops.all_permit_eq_legacy", o4_all_bad, 0);
     total = total + 1; fails = fails + ts_check("ops.all_permit_count", o4_all_yes, 143);  // 13 × 11
     // ⑤ 容器/方法面（Task 5 的消费格；本批登记）：索引/字段/方法各恰两类
-    total = total + 1; fails = fails + ts_check("ops.index_permit_set",
+    total = total + 1; fails = fails + ts_check_b("ops.index_permit_set",
         (iface_permits(AK_SEQUENCE, IP_INDEX) == 1 && iface_permits(AK_STRING, IP_INDEX) == 1 &&
          iface_permits(AK_INT, IP_INDEX) == 0 && iface_permits(AK_REF, IP_INDEX) == 0 &&
-         iface_permits(AK_SEQUENCE, IP_INDEX_RANGE) == 1 && iface_permits(AK_STRING, IP_INDEX_RANGE) == 0), 1);
-    total = total + 1; fails = fails + ts_check("ops.field_permit_set",
+         iface_permits(AK_SEQUENCE, IP_INDEX_RANGE) == 1 && iface_permits(AK_STRING, IP_INDEX_RANGE) == 0), true);
+    total = total + 1; fails = fails + ts_check_b("ops.field_permit_set",
         (iface_permits(AK_NAMED, IP_FIELD) == 1 && iface_permits(AK_PRODUCT, IP_FIELD) == 1 &&
-         iface_permits(AK_INT, IP_FIELD) == 0 && iface_permits(AK_SEQUENCE, IP_FIELD) == 0), 1);
-    total = total + 1; fails = fails + ts_check("ops.method_permit_set",
+         iface_permits(AK_INT, IP_FIELD) == 0 && iface_permits(AK_SEQUENCE, IP_FIELD) == 0), true);
+    total = total + 1; fails = fails + ts_check_b("ops.method_permit_set",
         (iface_permits(AK_DYN, IP_METHOD) == 1 && iface_permits(AK_NAMED, IP_METHOD) == 1 &&
-         iface_permits(AK_INT, IP_METHOD) == 0 && iface_permits(AK_PTR, IP_METHOD) == 0), 1);
+         iface_permits(AK_INT, IP_METHOD) == 0 && iface_permits(AK_PTR, IP_METHOD) == 0), true);
     // ⑥ 条目面一致性（逐条目：`iface_ops(ak)` 必须回读该行的 ops 列；防「列未填/查错行」）。
     // R2 P4 Task 3 重定：扩列三行（AK_NULL/AK_SUM/AK_FN）= **纯信息面**（ops = 0 是设计值，
     // 非「空集残留」）⇒ 零 ops 行 = **恰三行且逐名可指**（允许集显式列举，其余行仍须非 0
@@ -2727,8 +2741,8 @@ fn type_selftest_run() -> int {
         }
         o4_r = o4_r + 1;
     }
-    total = total + 1; fails = fails + ts_check("ops.entry_row_consistent",
-        (o4_row_bad == 0 && o4_zero == 3), 1);
+    total = total + 1; fails = fails + ts_check_b("ops.entry_row_consistent",
+        (o4_row_bad == 0 && o4_zero == 3), true);
     // ⑦ 端到端（经真 infer_expr 走三个门；**行为证据**——表侧用例证明不了「线对」）：
     //    ptr 操作数 = `&int 字面量` 的构造节点（EXPR_UNARY/UOP_REF，非 ident 分支 ⇒ 不触借用检查）
     o4_ref := alloc_node(EXPR_UNARY, li_int, -1, UOP_REF, 0, 0, -1, 0, 0);
@@ -2744,9 +2758,9 @@ fn type_selftest_run() -> int {
     o4_b_logic_bad := alloc_node(EXPR_BINARY, li_dex, li_bool, OP_AND, 0, 0, -1, 0, 0);
     o4_b_eq := alloc_node(EXPR_BINARY, li_str, li_int, OP_EQ, 0, 0, -1, 0, 0);
     // 反真空哨兵：构造节点确实带预期 kind/op（防 alloc_node 参数错位 ⇒ 假绿）
-    total = total + 1; fails = fails + ts_check("ops.node_kinds",
+    total = total + 1; fails = fails + ts_check_b("ops.node_kinds",
         (ast_kind(o4_b_add_int) == EXPR_BINARY && ast_c(o4_b_add_int) == OP_ADD &&
-         ast_kind(o4_ref) == EXPR_UNARY && ast_c(o4_ref) == UOP_REF), 1);
+         ast_kind(o4_ref) == EXPR_UNARY && ast_c(o4_ref) == UOP_REF), true);
     // 正控：int 算术 / 串拼接（早退规则）/ 指针算术 + int / dex 支配 / 逻辑 int 侧 / 比较不校验
     o4_m0 := g_diag_count;
     o4_r_add := infer_expr(o4_b_add_int);
@@ -2824,9 +2838,9 @@ fn type_selftest_run() -> int {
     ix_idx_str_range := alloc_node(EXPR_INDEX, li_str, ix_range, -1, 0, 0, -1, 0, 0);
     ix_idx_arr_oob := alloc_node(EXPR_INDEX, ix_arr3, li_int, -1, 0, 0, -1, 0, 0);
     ix_idx_range_oob := alloc_node(EXPR_INDEX, ix_arr3, ix_range, -1, 0, 0, -1, 0, 0);
-    total = total + 1; fails = fails + ts_check("idx.node_kinds",
+    total = total + 1; fails = fails + ts_check_b("idx.node_kinds",
         (ast_kind(ix_idx_arr) == EXPR_INDEX && ast_kind(ix_arr3) == EXPR_ARRAY && ast_b(ix_idx_arr) == li_int &&
-         ast_kind(ix_range) == EXPR_RANGE && ast_kind(ix_idx_ptr) == EXPR_INDEX && ast_c(ix_ref) == UOP_REF), 1);
+         ast_kind(ix_range) == EXPR_RANGE && ast_kind(ix_idx_ptr) == EXPR_INDEX && ast_c(ix_ref) == UOP_REF), true);
     // ① 集等价（逐行）：perm == 1 ⟺ 该行**不**属于「结果分支已处理集」{kind ARRAY, kind SLICE, ti == TI_STR}
     ix_bad : ., mut = 0;
     ix_n_rows : ., mut = 0;
@@ -2861,11 +2875,11 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("idx.gate_deny_covers_fallback", ix_bad, 0);
     // ③ 反真空：扫满全表 + 每类至少一行 + **STR 行恰 1 行**（`ti == TI_STR` ⇔ AK_STRING 的等价性
     //    依赖「TYP_BASE 行唯一分配点 = init_types」——该行数若变，本例先红）
-    total = total + 1; fails = fails + ts_check("idx.scan_coverage",
+    total = total + 1; fails = fails + ts_check_b("idx.scan_coverage",
         (ix_n_rows == g_type_count && ix_n_rows >= 15 && ix_n_seq >= 2 && ix_n_str == 1 &&
          ix_n_named >= 1 && ix_n_prod >= 1 && ix_n_ref >= 1 && ix_n_ptr >= 1 && ix_n_dyn >= 1 &&
          get_type_kind(ix_row_ptr) == TYP_PTR && get_type_kind(ix_row_ref) == TYP_REF &&
-         get_type_kind(ix_row_tup) == TYP_TUPLE), 1);
+         get_type_kind(ix_row_tup) == TYP_TUPLE), true);
     // ② 端到端：结果分支保留（数组 → int、串 → int；含 OOB/F11 两个既有诊断仍发）
     ix_m0 := g_diag_count;
     ix_r_arr := infer_expr(ix_idx_arr);
@@ -2916,18 +2930,18 @@ fn type_selftest_run() -> int {
     //   ③ 反真空哨兵（构造节点 kind/tv 回读正确；负节点先行拒绝）＋ **两表唯一差异格** NEVER 的双向断言
     //      （A → TI_NEVER、B → TI_UNIT——探针实测该格在调用位点**可达**，差异显式保留不静默合一）。
     // 非真空性（表变 ⇒ ②段必变）由实施报告的突变控制承担：表侧用例只能证明表对，证明不了线对。
-    total = total + 1; fails = fails + ts_check("t6.ty_code_head",
+    total = total + 1; fails = fails + ts_check_b("t6.ty_code_head",
         (ty_code_to_ti(TY_INT) == TI_INT && ty_code_to_ti(TY_DEX) == TI_DEX &&
          ty_code_to_ti(TY_BOOL) == TI_BOOL && ty_code_to_ti(TY_STRING) == TI_STR &&
-         ty_code_to_ti(TY_UNIT) == TI_UNIT), 1);
-    total = total + 1; fails = fails + ts_check("t6.ty_code_tail",
-        (ty_code_to_ti(TY_NEVER) == TI_NEVER && ty_code_to_ti(TY_CHAR) == TI_CHAR), 1);
+         ty_code_to_ti(TY_UNIT) == TI_UNIT), true);
+    total = total + 1; fails = fails + ts_check_b("t6.ty_code_tail",
+        (ty_code_to_ti(TY_NEVER) == TI_NEVER && ty_code_to_ti(TY_CHAR) == TI_CHAR), true);
     // 码 7 = TY_GENERIC_PARAM 与 TI_DYN 的数值撞车格（spec §2.4 现场）：现状两表原文原样保留
-    total = total + 1; fails = fails + ts_check("t6.ty_code_dyn7",
-        (ty_code_to_ti(TI_DYN) == TI_DYN && ty_code_to_ti(TY_GENERIC_PARAM) == TI_DYN), 1);
+    total = total + 1; fails = fails + ts_check_b("t6.ty_code_dyn7",
+        (ty_code_to_ti(TI_DYN) == TI_DYN && ty_code_to_ti(TY_GENERIC_PARAM) == TI_DYN), true);
     // **表内不兜底**：TY_DEX_S(8) 不入表（计划注「不属两表并集」）+ 未知/负码 → -1
-    total = total + 1; fails = fails + ts_check("t6.ty_code_domain",
-        (ty_code_to_ti(TY_DEX_S) == -1 && ty_code_to_ti(-1) == -1 && ty_code_to_ti(999) == -1), 1);
+    total = total + 1; fails = fails + ts_check_b("t6.ty_code_domain",
+        (ty_code_to_ti(TY_DEX_S) == -1 && ty_code_to_ti(-1) == -1 && ty_code_to_ti(999) == -1), true);
     // ② 端到端：基型节点逐码（含 7 = dyn 码位——parser.cr:98 对 `dyn` 类型名正产此码）
     t6_int := alloc_node(0, 0, 0, 0, 0, TY_INT, 0, 0, 0);
     t6_dex := alloc_node(0, 0, 0, 0, 0, TY_DEX, 0, 0, 0);
@@ -2939,30 +2953,30 @@ fn type_selftest_run() -> int {
     t6_dyn := alloc_node(0, 0, 0, 0, 0, TI_DYN, 0, 0, 0);
     t6_dex_s := alloc_node(0, 0, 0, 0, 0, TY_DEX_S, 0, 0, 0);
     t6_oob := alloc_node(0, 0, 0, 0, 0, 999, 0, 0, 0);
-    total = total + 1; fails = fails + ts_check("t6.node_kinds",
+    total = total + 1; fails = fails + ts_check_b("t6.node_kinds",
         (ast_kind(t6_never) == 0 && ast_type_val(t6_never) == TY_NEVER &&
-         ast_type_val(t6_dyn) == TI_DYN && ast_type_val(t6_dex_s) == TY_DEX_S), 1);
-    total = total + 1; fails = fails + ts_check("t6.R_codes",
+         ast_type_val(t6_dyn) == TI_DYN && ast_type_val(t6_dex_s) == TY_DEX_S), true);
+    total = total + 1; fails = fails + ts_check_b("t6.R_codes",
         (res_type_node(t6_int) == TI_INT && res_type_node(t6_dex) == TI_DEX &&
          res_type_node(t6_bool) == TI_BOOL && res_type_node(t6_str) == TI_STR &&
          res_type_node(t6_unit) == TI_UNIT && res_type_node(t6_never) == TI_NEVER &&
-         res_type_node(t6_char) == TI_CHAR), 1);
-    total = total + 1; fails = fails + ts_check("t6.C_codes",
+         res_type_node(t6_char) == TI_CHAR), true);
+    total = total + 1; fails = fails + ts_check_b("t6.C_codes",
         (res_call_type(t6_int, -1) == TI_INT && res_call_type(t6_dex, -1) == TI_DEX &&
          res_call_type(t6_bool, -1) == TI_BOOL && res_call_type(t6_str, -1) == TI_STR &&
-         res_call_type(t6_unit, -1) == TI_UNIT && res_call_type(t6_char, -1) == TI_CHAR), 1);
+         res_call_type(t6_unit, -1) == TI_UNIT && res_call_type(t6_char, -1) == TI_CHAR), true);
     // **两表唯一语义差**：NEVER 格（A 有 / B 无 ⇒ B 落 TI_UNIT）——差异不得被合一抹平
-    total = total + 1; fails = fails + ts_check("t6.never_cell_diff",
-        (res_type_node(t6_never) == TI_NEVER && res_call_type(t6_never, -1) == TI_UNIT), 1);
+    total = total + 1; fails = fails + ts_check_b("t6.never_cell_diff",
+        (res_type_node(t6_never) == TI_NEVER && res_call_type(t6_never, -1) == TI_UNIT), true);
     // 两表**共有**的 7 码格（dyn）：均 → TI_DYN（B2 探针：`x : dyn = 5; x.nosuch()` 的 N08 依赖本格）
-    total = total + 1; fails = fails + ts_check("t6.dyn_cell_both",
-        (res_type_node(t6_dyn) == TI_DYN && res_call_type(t6_dyn, -1) == TI_DYN), 1);
+    total = total + 1; fails = fails + ts_check_b("t6.dyn_cell_both",
+        (res_type_node(t6_dyn) == TI_DYN && res_call_type(t6_dyn, -1) == TI_DYN), true);
     // 域外码（TY_DEX_S/未知）两表均落 TI_UNIT（= 改动前的尾回落；表内无兜底）
-    total = total + 1; fails = fails + ts_check("t6.dex_s_oob_unit",
+    total = total + 1; fails = fails + ts_check_b("t6.dex_s_oob_unit",
         (res_type_node(t6_dex_s) == TI_UNIT && res_call_type(t6_dex_s, -1) == TI_UNIT &&
-         res_type_node(t6_oob) == TI_UNIT && res_call_type(t6_oob, -1) == TI_UNIT), 1);
-    total = total + 1; fails = fails + ts_check("t6.neg_node_unit",
-        (res_type_node(-1) == TI_UNIT && res_call_type(-1, -1) == TI_UNIT), 1);
+         res_type_node(t6_oob) == TI_UNIT && res_call_type(t6_oob, -1) == TI_UNIT), true);
+    total = total + 1; fails = fails + ts_check_b("t6.neg_node_unit",
+        (res_type_node(-1) == TI_UNIT && res_call_type(-1, -1) == TI_UNIT), true);
 
     // ═══ R2 P3 Task 0：引擎展开层（named/struct/enum/generic-apply → 结构项）═══
     // 判据面 = ① 正向形态：字段**声明序** / 变体数 / 泛型实参代入；② **名义不变量双钉**
@@ -3004,13 +3018,13 @@ fn type_selftest_run() -> int {
     unf_ga_str := alloc_type(TYP_GENERIC_APPLY, unf_box_ti, unf_gas2);
     unf_ta := sh_struct_term(unf_ga_int);
     unf_tb := sh_struct_term(unf_ga_str);
-    total = total + 1; fails = fails + ts_check("unf.ga_arg_subst",
+    total = total + 1; fails = fails + ts_check_b("unf.ga_arg_subst",
         (tt_a(unf_ta) == AK_PRODUCT && tt_c(unf_ta) == tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil()) &&
-         tt_c(unf_tb) == tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil()) && unf_ta != unf_tb), 1);
+         tt_c(unf_tb) == tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil()) && unf_ta != unf_tb), true);
     // 未应用形态：泛型形参保持**名义**（res_type_node 取形参行 ⇒ AK_NAMED）——不得凭空代入 int
     unf_tbare := sh_struct_term(unf_box_ti);
-    total = total + 1; fails = fails + ts_check("unf.ga_unapplied_nominal",
-        (unf_tbare >= 0 && tt_a(unf_tbare) == AK_PRODUCT && tt_a(tt_a(tt_c(unf_tbare))) != AK_INT), 1);
+    total = total + 1; fails = fails + ts_check_b("unf.ga_unapplied_nominal",
+        (unf_tbare >= 0 && tt_a(unf_tbare) == AK_PRODUCT && tt_a(tt_a(tt_c(unf_tbare))) != AK_INT), true);
 
     // 夹具 ②：struct UnfP1U { a: int, b: string }（字段**声明序**；含基型两种）
     unf_p1_sa := add_struct("UnfP1U");
@@ -3023,9 +3037,9 @@ fn type_selftest_run() -> int {
     w64(g_structs, unf_p1_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, 2);
     unf_p1_ti := alloc_named_type(str_intern("UnfP1U"));
     unf_tp1 := sh_struct_term(unf_p1_ti);
-    total = total + 1; fails = fails + ts_check("unf.struct_field_order",
+    total = total + 1; fails = fails + ts_check_b("unf.struct_field_order",
         (tt_a(unf_tp1) == AK_PRODUCT &&
-         tt_c(unf_tp1) == tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil()))), 1);
+         tt_c(unf_tp1) == tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil()))), true);
     // 夹具 ③：struct UnfP2U { x: [int;2] }——字段**裸码槽 = 0（= TY_INT）而类型节点 = 数组**：
     // 「只读裸码槽」的实现会把该字段静默误判为 int（本用例即其守门；裸码塌缩 = parser 事实）
     unf_p2_sa := add_struct("UnfP2U");
@@ -3036,8 +3050,8 @@ fn type_selftest_run() -> int {
     w64(g_structs, unf_p2_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, 1);
     unf_p2_ti := alloc_named_type(str_intern("UnfP2U"));
     unf_tp2 := sh_struct_term(unf_p2_ti);
-    total = total + 1; fails = fails + ts_check("unf.struct_field_node_not_code",
-        (tt_a(unf_tp2) == AK_PRODUCT && tt_a(tt_a(tt_c(unf_tp2))) == AK_SEQUENCE), 1);
+    total = total + 1; fails = fails + ts_check_b("unf.struct_field_node_not_code",
+        (tt_a(unf_tp2) == AK_PRODUCT && tt_a(tt_a(tt_c(unf_tp2))) == AK_SEQUENCE), true);
 
     // 夹具 ④：两个**同形不同名** struct（UnfS1U{a:int} / UnfS2U{a:int}）——本 Task 的风险边界，
     // 三断 = 双钉：① 展开项（满足面）**结构相等**（同形 ⇒ 同项 = 满足判定的设计意图）；
@@ -3047,8 +3061,8 @@ fn type_selftest_run() -> int {
     unf_s2_ti := ts_unf_mk_int_struct("UnfS2U");
     unf_e1 := sh_struct_term(unf_s1_ti);
     unf_e2 := sh_struct_term(unf_s2_ti);
-    total = total + 1; fails = fails + ts_check("unf.nominal_structural_equal",
-        (unf_e1 >= 0 && unf_e2 >= 0 && ty_equiv(unf_e1, unf_e2) == 1), 1);
+    total = total + 1; fails = fails + ts_check_b("unf.nominal_structural_equal",
+        (unf_e1 >= 0 && unf_e2 >= 0 && ty_equiv(unf_e1, unf_e2) == 1), true);
     // **R2 P5 Task 3 重钉**（翻转向量表：`unf.nominal_equiv_atomic_unknown` →
     // `unf.nominal_equiv_atomic_decided`）：命名面接引擎身份链后，**异名同形**两个命名型的
     // 桥接项判 **0 = 确定不同**（旧断 -1 = 未覆盖面；legacy 同结论 = false ⇒ 行为同值，
@@ -3073,22 +3087,22 @@ fn type_selftest_run() -> int {
     w64(g_enums, unf_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 3);
     unf_col_ti := alloc_named_type(str_intern("UnfColorU"));
     unf_dom := sh_enum_domain_term(unf_col_ti);
-    total = total + 1; fails = fails + ts_check("unf.enum_domain_count",
-        (unf_dom >= 0 && ts_unf_union_leaves(unf_dom) == 3), 1);
+    total = total + 1; fails = fails + ts_check_b("unf.enum_domain_count",
+        (unf_dom >= 0 && ts_unf_union_leaves(unf_dom) == 3), true);
     unf_vr := sh_variant_term(unf_col_ti, str_intern("UnfRedU"));
     unf_vg := sh_variant_term(unf_col_ti, str_intern("UnfGreenU"));
     unf_vb := sh_variant_term(unf_col_ti, str_intern("UnfBlueU"));
-    total = total + 1; fails = fails + ts_check("unf.enum_variant_in_domain",
+    total = total + 1; fails = fails + ts_check_b("unf.enum_variant_in_domain",
         (ty_sub(unf_vr, unf_dom) == 1 && ty_sub(unf_vg, unf_dom) == 1 && ty_sub(unf_vb, unf_dom) == 1 &&
-         sh_variant_term(unf_col_ti, str_intern("UnfNoSuchVariantU")) == -1), 1);
+         sh_variant_term(unf_col_ti, str_intern("UnfNoSuchVariantU")) == -1), true);
     // 变体身份**含枚举名**（引擎只比 a/c 两槽 ⇒ 身份必须入参数链）：异枚举**同名变体**不得被判等价
     unf_dup_ei := add_enum("UnfDupU");
     ei_set_variant_name(unf_dup_ei, 0, str_intern("UnfRedU"));
     w64(g_enums, unf_dup_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 1);
     unf_dup_ti := alloc_named_type(str_intern("UnfDupU"));
     unf_vdup := sh_variant_term(unf_dup_ti, str_intern("UnfRedU"));
-    total = total + 1; fails = fails + ts_check("unf.enum_variant_identity_scoped",
-        (unf_vdup >= 0 && ty_sub(unf_vdup, unf_vr) != 1 && ty_sub(unf_vr, unf_vdup) != 1), 1);
+    total = total + 1; fails = fails + ts_check_b("unf.enum_variant_identity_scoped",
+        (unf_vdup >= 0 && ty_sub(unf_vdup, unf_vr) != 1 && ty_sub(unf_vr, unf_vdup) != 1), true);
     // 空枚举：域 = ⊥（无值可取——**登记语义**：空域在补集语义下恒穷尽，Task 3 须显式裁决）
     unf_emp_ei := add_enum("UnfEmptyU");
     w64(g_enums, unf_emp_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 0);
@@ -3117,8 +3131,8 @@ fn type_selftest_run() -> int {
     // 缺变体 witness：不可空且 ⊆ 缺失变体。**登记**：原始 witness = 各析取支之并（**含空析取支**
     // ——norm 不做空支净化）⇒ Task 3 若当「具体反例值」用，须先取有住户的支（或引擎加净化）。
     unf_w2 := ty_exhaust_witness(unf_odom, tt_cons(unf_onone, tt_nil()));
-    total = total + 1; fails = fails + ts_check("unf.exhaust_witness_subset",
-        (unf_w2 >= 0 && ty_inhabited(unf_w2) == 1 && ty_sub(unf_w2, unf_osome) == 1), 1);
+    total = total + 1; fails = fails + ts_check_b("unf.exhaust_witness_subset",
+        (unf_w2 >= 0 && ty_inhabited(unf_w2) == 1 && ty_sub(unf_w2, unf_osome) == 1), true);
 
     // 展开缓存：新 ti 恰入表 1 条；二次调用恰命中 1 次且返回**同项**；**失败不缓存**（-1 不入表）
     unf_fresh := ts_unf_mk_int_struct("UnfCacheU");
@@ -3129,23 +3143,23 @@ fn type_selftest_run() -> int {
     unf_ct2 := sh_struct_term(unf_fresh);
     unf_fail_e0 := sh_unf_entries();
     sh_struct_term(g_type_count + 7);
-    total = total + 1; fails = fails + ts_check("unf.cache_hit_and_no_neg_cache",
+    total = total + 1; fails = fails + ts_check_b("unf.cache_hit_and_no_neg_cache",
         ((unf_ce1 - unf_ce0) == 1 && (sh_unf_hits() - unf_ch0) == 1 && unf_ct2 == unf_ct1 &&
-         (sh_unf_entries() - unf_fail_e0) == 0), 1);
+         (sh_unf_entries() - unf_fail_e0) == 0), true);
 
     // 缺口上抛（**不得静默判否**）：行号越界 / 未声明的名字行 / 裸泛型形参行 / 非枚举变体名 → -1
     unf_plain_ti := alloc_named_type(str_intern("UnfNoDeclU"));
     unf_loose_gp := alloc_type(TYP_GENERIC_PARAM, str_intern("UnfLooseTU"), 0);
-    total = total + 1; fails = fails + ts_check("unf.neg_paths",
+    total = total + 1; fails = fails + ts_check_b("unf.neg_paths",
         (sh_struct_term(g_type_count + 7) == -1 && sh_enum_domain_term(g_type_count + 7) == -1 &&
          sh_struct_term(-1) == -1 && sh_variant_term(-1, 0) == -1 && sh_variant_term(unf_col_ti, -1) == -1 &&
          sh_struct_term(unf_plain_ti) == -1 && sh_enum_domain_term(unf_plain_ti) == -1 &&
-         sh_struct_term(unf_loose_gp) == -1), 1);
+         sh_struct_term(unf_loose_gp) == -1), true);
 
     // 接口面负键守门（P3b Task 0 后：`iface_satisfies` 已交付，本用例 = **域外输入守卫**——
     // 形状项构造仍为 Task 6 占位（-1），负键/未知名键一律三态 -1，**不得**被消费方当 0/1 用）
-    total = total + 1; fails = fails + ts_check("unf.iface_stub_three_state",
-        (sh_iface_shape_term(-1) == -1 && iface_satisfies(-1, 0) == -1 && iface_satisfies(TI_INT, 9999) == -1), 1);
+    total = total + 1; fails = fails + ts_check_b("unf.iface_stub_three_state",
+        (sh_iface_shape_term(-1) == -1 && iface_satisfies(-1, 0) == -1 && iface_satisfies(TI_INT, 9999) == -1), true);
 
     // ═══ R2 P3 Task 1：定长退役收口（array/slice 方向 + 变型表 + N 读取面守门）═══
     // 判据面 = ① 方向：`[T;N] <: [T]`（固定 → 视图 = 拓宽，放行）/ `[T] ⊄ [T;N]`（视图 → 固定，
@@ -3171,18 +3185,18 @@ fn type_selftest_run() -> int {
     total = total + 1; fails = fails + ts_check("t1.dir_slice_slice_ok",
         array_len_constraint_ok(t1_sl, t1_sl2), 1);
     // ② N 不入身份（同固定性异 N）：引擎等价 1 ∧ 常量档拒 0（双钉 = 「N 迁移」不变量）
-    total = total + 1; fails = fails + ts_check("t1.dir_fixed_two_lengths_identity",
+    total = total + 1; fails = fails + ts_check_b("t1.dir_fixed_two_lengths_identity",
         (ty_equiv(sh_term_of_ti(t1_arr3), sh_term_of_ti(t1_arr4)) == 1 &&
-         array_len_constraint_ok(t1_arr4, t1_arr3) == 0), 1);
+         array_len_constraint_ok(t1_arr4, t1_arr3) == 0), true);
     // ③ 嵌套位逐位同律（负控：反向拓宽必须仍放行——防「一律拒绝」的退化实现）
     t1_pt_sl := alloc_type(TYP_PTR, t1_sl, 0);
     t1_pt_arr := alloc_type(TYP_PTR, t1_arr3, 0);
-    total = total + 1; fails = fails + ts_check("t1.dir_nested_ptr",
-        (array_len_constraint_ok(t1_pt_sl, t1_pt_arr) == 0 && array_len_constraint_ok(t1_pt_arr, t1_pt_sl) == 1), 1);
+    total = total + 1; fails = fails + ts_check_b("t1.dir_nested_ptr",
+        (array_len_constraint_ok(t1_pt_sl, t1_pt_arr) == 0 && array_len_constraint_ok(t1_pt_arr, t1_pt_sl) == 1), true);
     t1_out_sl := alloc_type(TYP_ARRAY, t1_sl, 2);       // [[int];2]
     t1_out_arr := alloc_type(TYP_ARRAY, t1_arr3, 2);    // [[int;3];2]
-    total = total + 1; fails = fails + ts_check("t1.dir_nested_elem",
-        (array_len_constraint_ok(t1_out_sl, t1_out_arr) == 0 && array_len_constraint_ok(t1_out_arr, t1_out_sl) == 1), 1);
+    total = total + 1; fails = fails + ts_check_b("t1.dir_nested_elem",
+        (array_len_constraint_ok(t1_out_sl, t1_out_arr) == 0 && array_len_constraint_ok(t1_out_arr, t1_out_sl) == 1), true);
     grow_gen_apply_data(g_gen_apply_data_count + 4);
     t1_tp_s1 := g_gen_apply_data_count;
     w64(g_gen_apply_data, t1_tp_s1 * 8, TI_INT);
@@ -3193,8 +3207,8 @@ fn type_selftest_run() -> int {
     g_gen_apply_data_count = t1_tp_s2 + 2;
     t1_tup_sl := alloc_type(TYP_TUPLE, 2, t1_tp_s1);     // (int, [int])
     t1_tup_arr := alloc_type(TYP_TUPLE, 2, t1_tp_s2);    // (int, [int;3])
-    total = total + 1; fails = fails + ts_check("t1.dir_nested_tuple",
-        (array_len_constraint_ok(t1_tup_sl, t1_tup_arr) == 0 && array_len_constraint_ok(t1_tup_arr, t1_tup_sl) == 1), 1);
+    total = total + 1; fails = fails + ts_check_b("t1.dir_nested_tuple",
+        (array_len_constraint_ok(t1_tup_sl, t1_tup_arr) == 0 && array_len_constraint_ok(t1_tup_arr, t1_tup_sl) == 1), true);
     grow_gen_apply_data(g_gen_apply_data_count + 4);
     t1_ga_s1 := g_gen_apply_data_count;
     w64(g_gen_apply_data, t1_ga_s1 * 8, 1);
@@ -3206,51 +3220,51 @@ fn type_selftest_run() -> int {
     t1_base := alloc_type(TYP_NAMED, 1203, 0);           // 人造基型行（裸分配，防假键污染）
     t1_ga_sl := alloc_type(TYP_GENERIC_APPLY, t1_base, t1_ga_s1);
     t1_ga_arr := alloc_type(TYP_GENERIC_APPLY, t1_base, t1_ga_s2);
-    total = total + 1; fails = fails + ts_check("t1.dir_nested_genapply",
-        (array_len_constraint_ok(t1_ga_sl, t1_ga_arr) == 0 && array_len_constraint_ok(t1_ga_arr, t1_ga_sl) == 1), 1);
+    total = total + 1; fails = fails + ts_check_b("t1.dir_nested_genapply",
+        (array_len_constraint_ok(t1_ga_sl, t1_ga_arr) == 0 && array_len_constraint_ok(t1_ga_arr, t1_ga_sl) == 1), true);
     // ④ 站点三态（专属措辞 = -1 路）：拓宽 1；视图→固定 -1（身份放行、方向拒）；对称核 = 现状
     total = total + 1; fails = fails + ts_check("t1.strict_widen_ok",
         type_compat_strict(t1_arr3, t1_sl), 1);
     total = total + 1; fails = fails + ts_check("t1.strict_view_to_fixed",
         type_compat_strict(t1_sl, t1_arr3), -1);
-    total = total + 1; fails = fails + ts_check("t1.strict_sym_no_direction",
-        (type_compat_sym(t1_sl, t1_arr3) == 1 && type_compat_sym(t1_arr3, t1_sl) == 1), 1);
+    total = total + 1; fails = fails + ts_check_b("t1.strict_sym_no_direction",
+        (type_compat_sym(t1_sl, t1_arr3) == 1 && type_compat_sym(t1_arr3, t1_sl) == 1), true);
     // ⑤ 变型：只读协变通过 / 可写不变拒绝（AK_REF 槽 1 条件变型）；表外构造子默认不变
     t1_u := tt_union(tt_atom(AK_INT, TI_INT, -1), tt_atom(AK_STRING, TI_STR, -1));   // int ∪ string
     t1_rv_ro := tt_atom(AK_REF, -1, tt_cons(sh_ref_mut_marker(0), tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil())));
     t1_rv_ro_w := tt_atom(AK_REF, -1, tt_cons(sh_ref_mut_marker(0), tt_cons(t1_u, tt_nil())));
     t1_rv_mut := tt_atom(AK_REF, -1, tt_cons(sh_ref_mut_marker(1), tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil())));
     t1_rv_mut_w := tt_atom(AK_REF, -1, tt_cons(sh_ref_mut_marker(1), tt_cons(t1_u, tt_nil())));
-    total = total + 1; fails = fails + ts_check("t1.var_readonly_covariant",
-        (ty_sub(t1_rv_ro, t1_rv_ro_w) == 1 && ty_sub(t1_rv_ro_w, t1_rv_ro) == 0), 1);
+    total = total + 1; fails = fails + ts_check_b("t1.var_readonly_covariant",
+        (ty_sub(t1_rv_ro, t1_rv_ro_w) == 1 && ty_sub(t1_rv_ro_w, t1_rv_ro) == 0), true);
     // 不变槽非同形的判定**语义** = 「不是子类型」；引擎回 **-1**（未覆盖面登记——不变槽的
     // 「确定不等价 ⇒ 0」加强需先有「链元素皆类型项」不变量，见 type_engine.cr 注记）⇒ 断
     // 「两向皆不得判 1」= 不变性的可执行内容；生产面（checker type_equal）在此回落 legacy
     // 得 false = 实拒（pE 探针实测 rc=1）。
-    total = total + 1; fails = fails + ts_check("t1.var_mut_invariant_reject",
-        (ty_sub(t1_rv_mut, t1_rv_mut_w) != 1 && ty_sub(t1_rv_mut_w, t1_rv_mut) != 1), 1);
-    total = total + 1; fails = fails + ts_check("t1.var_seq_elem_invariant",
-        ty_sub(tt_atom(AK_SEQUENCE, -1, tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil())),
-               tt_atom(AK_SEQUENCE, -1, tt_cons(t1_u, tt_nil()))) != 1, 1);
+    total = total + 1; fails = fails + ts_check_b("t1.var_mut_invariant_reject",
+        (ty_sub(t1_rv_mut, t1_rv_mut_w) != 1 && ty_sub(t1_rv_mut_w, t1_rv_mut) != 1), true);
+    total = total + 1; fails = fails + ts_check_b("t1.var_seq_elem_invariant",
+        (ty_sub(tt_atom(AK_SEQUENCE, -1, tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil())),
+               tt_atom(AK_SEQUENCE, -1, tt_cons(t1_u, tt_nil()))) != 1), true);
     // ⑥ mut 标记入链 = 判定维度（走真实桥接）：`&T` ≢ `&mut T` 双向；同 mut 同元素仍等价
     t1_ref_ro := alloc_type(TYP_REF, TI_INT, 0);
     t1_ref_ro2 := alloc_type(TYP_REF, TI_INT, 0);
     t1_ref_mut := alloc_type(TYP_REF, TI_INT, 1);
-    total = total + 1; fails = fails + ts_check("t1.var_mut_marker_dimension",
+    total = total + 1; fails = fails + ts_check_b("t1.var_mut_marker_dimension",
         (ty_equiv(sh_term_of_ti(t1_ref_ro), sh_term_of_ti(t1_ref_mut)) == 0 &&
          ty_equiv(sh_term_of_ti(t1_ref_mut), sh_term_of_ti(t1_ref_ro)) == 0 &&
          ty_equiv(sh_term_of_ti(t1_ref_ro), sh_term_of_ti(t1_ref_ro2)) == 1 &&
-         tt_b(tt_a(tt_c(sh_term_of_ti(t1_ref_mut)))) == 1), 1);
+         tt_b(tt_a(tt_c(sh_term_of_ti(t1_ref_mut)))) == 1), true);
     // ⑦ N 读取面守门：身份路径（ty_equiv）+ **子类型路径（ty_sub）**零 N；唯一拒绝来源 = 常量档
-    total = total + 1; fails = fails + ts_check("t1.n_face_gate",
+    total = total + 1; fails = fails + ts_check_b("t1.n_face_gate",
         (type_equal(t1_arr3, t1_arr4) &&
          ty_sub(sh_term_of_ti(t1_arr3), sh_term_of_ti(t1_arr4)) == 1 &&
-         array_len_constraint_ok(t1_arr4, t1_arr3) == 0), 1);
+         array_len_constraint_ok(t1_arr4, t1_arr3) == 0), true);
     // ⑧ 动态档登记：切片运行期长度不可证 ⇒ 视图→固定是**决定**（0），不得回 -1 冒充未知；
     //    异长固定档同理（常量档拒绝也在决定面）。
-    total = total + 1; fails = fails + ts_check("t1.dyn_tier_decided",
+    total = total + 1; fails = fails + ts_check_b("t1.dyn_tier_decided",
         (array_len_constraint_ok(t1_sl, t1_arr3) == 0 && array_len_constraint_ok(t1_sl2, t1_arr4) == 0 &&
-         array_len_constraint_ok(t1_arr3, t1_arr4) == 0), 1);
+         array_len_constraint_ok(t1_arr3, t1_arr4) == 0), true);
     // ⑨ **嵌套位**的身份不变量 + 站点三态（本批实测发现的回归面：序列项的固定性位 b 会经
     //    嵌套元素位的**节点同一性**泄进身份 ⇒ 必须由引擎的「忽略 b 的序列项相等」挡住——
     //    type_engine.cr 的 tt_type_elem_same/tt_seq_same）。断三件事：
@@ -3263,12 +3277,12 @@ fn type_selftest_run() -> int {
     t1_d0 := g_diag_count;
     t1_nest_ok : ., mut = 0;
     if type_equal(t1_out_arr, t1_out_arr4) { if g_diag_count == t1_d0 { t1_nest_ok = 1; } }
-    total = total + 1; fails = fails + ts_check("t1.n_face_gate_nested",
-        (t1_nest_ok == 1 && array_len_constraint_ok(t1_out_arr4, t1_out_arr) == 0), 1);
+    total = total + 1; fails = fails + ts_check_b("t1.n_face_gate_nested",
+        (t1_nest_ok == 1 && array_len_constraint_ok(t1_out_arr4, t1_out_arr) == 0), true);
     total = total + 1; fails = fails + ts_check("t1.fixedness_not_identity_nested",
         ty_equiv(sh_term_of_ti(t1_out_sl), sh_term_of_ti(t1_out_arr)), 1);
-    total = total + 1; fails = fails + ts_check("t1.dir_nested_strict",
-        (type_compat_strict(t1_out_sl, t1_out_arr) == -1 && type_compat_strict(t1_out_arr, t1_out_sl) == 1), 1);
+    total = total + 1; fails = fails + ts_check_b("t1.dir_nested_strict",
+        (type_compat_strict(t1_out_sl, t1_out_arr) == -1 && type_compat_strict(t1_out_arr, t1_out_sl) == 1), true);
 
     // ═══ R2 P3 Task 3：match 穷尽性真判定（补集空性 + 具体变体反例）═══
     // 判据面 = ① 引擎三态：全覆盖 / 缺一 / 无臂 / 通配吸收 / 单变体；② **反例的具体值** =
@@ -3306,8 +3320,8 @@ fn type_selftest_run() -> int {
     // 结构比较落空）∧ ty_equiv = **-1**（**不是 0**：Task 0 报告记「不等」为 `== 0`，实测为
     // -1 = 未覆盖面，此处按实测钉死；-1 不得当 0 用的三态纪律在此具体化）∧ 可空 = 1。
     // 故「反例给具体值」由**覆盖位命名**承担（引擎 witness 项在其上不可作显示名）。
-    total = total + 1; fails = fails + ts_check("t3.counterexample_named_variant",
-        (t3_w >= 0 && ty_inhabited(t3_w) == 1 && ty_sub(t3_w, t3_b) == 1 && t3_cx_named), 1);
+    total = total + 1; fails = fails + ts_check_b("t3.counterexample_named_variant",
+        (t3_w >= 0 && ty_inhabited(t3_w) == 1 && ty_sub(t3_w, t3_b) == 1 && t3_cx_named), true);
     // ─── R2 P5 Task 3b 翻转钉（原合取式 `... && ty_equiv(t3_w, t3_b) == -1` 的拆解）───
     // 变体项 = AK_SUM 链 [枚举名令牌, 变体名令牌]（两枚**身份令牌**）⇒ 不变槽三态落地后，
     // 令牌按节点同一性判**确定不同 0**（改前 = -1 + 未覆盖面）。t3_w = 含两枚**空析取支**
@@ -3338,21 +3352,21 @@ fn type_selftest_run() -> int {
     t3_one := sh_match_variant_term(t3_only_ti, 0);
     total = total + 1; fails = fails + ts_check("t3.single_variant_covered",
         sh_match_exhaustive(t3_only_ti, tt_cons(t3_one, tt_nil()), 0), 1);
-    total = total + 1; fails = fails + ts_check("t3.no_arms_not_exhaustive",
-        (sh_match_exhaustive(t3_only_ti, tt_nil(), 0) == 0 && sh_match_first_missing(0, 1) == 0), 1);
+    total = total + 1; fails = fails + ts_check_b("t3.no_arms_not_exhaustive",
+        (sh_match_exhaustive(t3_only_ti, tt_nil(), 0) == 0 && sh_match_first_missing(0, 1) == 0), true);
     // ⑤ 域守卫与不可映射守卫：非枚举 scrutinee / 不可映射模式 ⇒ -1（**不判**，不得当 0/1）
     t3_s_ti := ts_unf_mk_int_struct("T3StrU");
-    total = total + 1; fails = fails + ts_check("t3.domain_guard_unknown",
+    total = total + 1; fails = fails + ts_check_b("t3.domain_guard_unknown",
         (sh_match_exhaustive(TI_INT, tt_nil(), 0) == -1 && sh_match_exhaustive(t3_s_ti, tt_nil(), 0) == -1 &&
-         sh_match_exhaustive(-1, tt_nil(), 0) == -1 && sh_enum_domain_term(t3_s_ti) == -1), 1);
+         sh_match_exhaustive(-1, tt_nil(), 0) == -1 && sh_enum_domain_term(t3_s_ti) == -1), true);
     total = total + 1; fails = fails + ts_check("t3.unmappable_guard_unknown",
         sh_match_exhaustive(t3_col_ti, tt_cons(t3_r, tt_cons(t3_g, tt_cons(t3_b, tt_nil()))), 1), -1);
     // ⑥ 空枚举域 = ⊥：补集语义下**空洞穷尽**（无值可漏 ⇒ 无反例；计划原文「= 0」的偏差登记）
     t3_emp_ei := add_enum("T3Empty");
     w64(g_enums, t3_emp_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 0);
     t3_emp_ti := alloc_named_type(str_intern("T3Empty"));
-    total = total + 1; fails = fails + ts_check("t3.empty_domain_vacuous",
-        (sh_match_exhaustive(t3_emp_ti, tt_nil(), 0) == 1 && sh_match_first_missing(0, 0) == -1), 1);
+    total = total + 1; fails = fails + ts_check_b("t3.empty_domain_vacuous",
+        (sh_match_exhaustive(t3_emp_ti, tt_nil(), 0) == 1 && sh_match_first_missing(0, 0) == -1), true);
     // ⑦ payload 变体与 tag 变体混合（payload 不入项 = 变体身份粒度；覆盖语义不受影响）
     t3_mix_ei := add_enum("T3Mix");
     ei_set_variant_name(t3_mix_ei, 0, str_intern("T3None"));
@@ -3363,11 +3377,11 @@ fn type_selftest_run() -> int {
     t3_mix_ti := alloc_named_type(str_intern("T3Mix"));
     t3_none := sh_match_variant_term(t3_mix_ti, 0);
     t3_some := sh_match_variant_term(t3_mix_ti, 1);
-    total = total + 1; fails = fails + ts_check("t3.payload_mixed_cover",
+    total = total + 1; fails = fails + ts_check_b("t3.payload_mixed_cover",
         (t3_none >= 0 && t3_some >= 0 && t3_none != t3_some &&
          sh_match_exhaustive(t3_mix_ti, tt_cons(t3_some, tt_cons(t3_none, tt_nil())), 0) == 1 &&
          sh_match_exhaustive(t3_mix_ti, tt_cons(t3_none, tt_nil()), 0) == 0 &&
-         sh_match_first_missing(sh_match_bit(0), 2) == 1), 1);
+         sh_match_first_missing(sh_match_bit(0), 2) == 1), true);
     // ⑧ 模式名字解析：限定名 `Enum.Variant` 与裸名同判；异枚举前缀 / 未声明名 ⇒ -1（不可映射）；
     //    类别分类：通配/绑定 = ⊤、枚举模式 = 变体、字面量/负节点 = 不可映射
     t3_pat_q := alloc_node(EXPR_ENUMPAT, str_intern("T3Color.T3Blue"), 0, 0, 0, 0, 0, 0, 0);
@@ -3377,19 +3391,19 @@ fn type_selftest_run() -> int {
     t3_pat_w := alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, 0, 0);
     t3_pat_l := alloc_node(EXPR_INT, 0, 0, 0, 5, TY_INT, 0, 0, 0);
     t3_pat_i := alloc_node(EXPR_IDENT, 0, 0, 0, str_intern("t3bind"), 0, 0, 0, 0);
-    total = total + 1; fails = fails + ts_check("t3.pat_name_resolution",
+    total = total + 1; fails = fails + ts_check_b("t3.pat_name_resolution",
         (sh_match_pat_variant(t3_col_ti, t3_pat_q) == 2 && sh_match_pat_variant(t3_col_ti, t3_pat_b) == 2 &&
          sh_match_pat_variant(t3_col_ti, t3_pat_f) == -1 && sh_match_pat_variant(t3_col_ti, t3_pat_n) == -1 &&
-         sh_match_pat_variant(t3_col_ti, t3_pat_w) == -1 && sh_match_pat_variant(t3_s_ti, t3_pat_b) == -1), 1);
-    total = total + 1; fails = fails + ts_check("t3.pat_kind_classification",
+         sh_match_pat_variant(t3_col_ti, t3_pat_w) == -1 && sh_match_pat_variant(t3_s_ti, t3_pat_b) == -1), true);
+    total = total + 1; fails = fails + ts_check_b("t3.pat_kind_classification",
         (sh_match_pat_kind(t3_pat_w) == 1 && sh_match_pat_kind(t3_pat_i) == 1 &&
          sh_match_pat_kind(t3_pat_q) == 2 && sh_match_pat_kind(t3_pat_l) == 0 &&
-         sh_match_pat_kind(-1) == 0), 1);
+         sh_match_pat_kind(-1) == 0), true);
     // ⑨ 重复臂：覆盖面无贡献（补集仍空 = 穷尽；覆盖位去重在 checker 侧收集时做——
     // 「位已置 ⇒ 该臂冗余」由行为集钉死）
-    total = total + 1; fails = fails + ts_check("t3.dup_arm_complement",
+    total = total + 1; fails = fails + ts_check_b("t3.dup_arm_complement",
         (sh_match_exhaustive(t3_only_ti, tt_cons(t3_one, tt_cons(t3_one, tt_nil())), 0) == 1 &&
-         sh_match_first_missing(sh_match_bit(0), 3) == 1), 1);
+         sh_match_first_missing(sh_match_bit(0), 3) == 1), true);
     // ⑩ 泛型应用行（`T3GOpt[int]`）：域可展开 + 全覆盖 = 1（变体身份与实参无关）
     t3_go_ei := add_enum("T3GOpt");
     w64(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 1);
@@ -3408,10 +3422,10 @@ fn type_selftest_run() -> int {
     t3_go_ga := alloc_type(TYP_GENERIC_APPLY, t3_go_ti, t3_gas);
     t3_gn := sh_match_variant_term(t3_go_ga, 0);
     t3_gs := sh_match_variant_term(t3_go_ga, 1);
-    total = total + 1; fails = fails + ts_check("t3.generic_apply_domain",
+    total = total + 1; fails = fails + ts_check_b("t3.generic_apply_domain",
         (t3_gn >= 0 && t3_gs >= 0 &&
          sh_match_exhaustive(t3_go_ga, tt_cons(t3_gn, tt_cons(t3_gs, tt_nil())), 0) == 1 &&
-         sh_match_exhaustive(t3_go_ga, tt_cons(t3_gn, tt_nil()), 0) == 0), 1);
+         sh_match_exhaustive(t3_go_ga, tt_cons(t3_gn, tt_nil()), 0) == 0), true);
 
     // ═══ R2 P3 Task 4：联合/可选（`T?` = `T ∪ null`；退役内建 Option 注册）═══
     // 判据面 = ① 项层：`T?` 行译作 union(内层项, null 原子项)——与**独立构造**的并项等价；
@@ -3432,36 +3446,36 @@ fn type_selftest_run() -> int {
     t4_nullt := sh_null_term();
     t4_optt := sh_term_of_ti(t4_int_opt);
     // ① 项层：`int?` 项 = int ∪ null（与独立构造的并项等价），且 **不等于** 裸 int
-    total = total + 1; fails = fails + ts_check("t4.opt_term_is_union",
+    total = total + 1; fails = fails + ts_check_b("t4.opt_term_is_union",
         (ty_equiv(t4_optt, tt_union(t4_intt, t4_nullt)) == 1 &&
-         ty_equiv(t4_optt, t4_intt) == 0 && ty_sub(t4_intt, t4_optt) == 1), 1);
+         ty_equiv(t4_optt, t4_intt) == 0 && ty_sub(t4_intt, t4_optt) == 1), true);
     // ② 子类型/不相交/可空
-    total = total + 1; fails = fails + ts_check("t4.none_sub_optional",
+    total = total + 1; fails = fails + ts_check_b("t4.none_sub_optional",
         (ty_sub(t4_nullt, t4_optt) == 1 && ty_sub(t4_nullt, sh_term_of_ti(t4_str_opt)) == 1 &&
-         ty_sub(t4_optt, t4_nullt) == 0 && ty_sub(t4_optt, t4_intt) == 0), 1);
-    total = total + 1; fails = fails + ts_check("t4.some_sub_optional",
-        (ty_equiv(sh_term_of_ti(alloc_type(TYP_OPTIONAL, TI_INT, 0)), t4_optt) == 1), 1);
-    total = total + 1; fails = fails + ts_check("t4.null_disjoint_and_inhabited",
+         ty_sub(t4_optt, t4_nullt) == 0 && ty_sub(t4_optt, t4_intt) == 0), true);
+    total = total + 1; fails = fails + ts_check_b("t4.some_sub_optional",
+        (ty_equiv(sh_term_of_ti(alloc_type(TYP_OPTIONAL, TI_INT, 0)), t4_optt) == 1), true);
+    total = total + 1; fails = fails + ts_check_b("t4.null_disjoint_and_inhabited",
         (ty_disjoint(t4_nullt, t4_intt) == 1 && ty_disjoint(t4_nullt, sh_term_of_ti(TI_UNIT)) == 1 &&
          ty_disjoint(t4_nullt, sh_term_of_ti(TI_NEVER)) == 1 && ty_disjoint(t4_nullt, t4_nullt) == 0 &&
-         ty_inhabited(t4_nullt) == 1), 1);
+         ty_inhabited(t4_nullt) == 1), true);
     // ③ null 行规范化：两个出现点译成**同一项**（节点同一），且互判包含
-    total = total + 1; fails = fails + ts_check("t4.null_row_canonical",
+    total = total + 1; fails = fails + ts_check_b("t4.null_row_canonical",
         (sh_term_of_ti(t4_null) == sh_term_of_ti(t4_null2) &&
-         ty_sub(sh_term_of_ti(t4_null), sh_term_of_ti(t4_null2)) == 1), 1);
+         ty_sub(sh_term_of_ti(t4_null), sh_term_of_ti(t4_null2)) == 1), true);
     // ④ 判定点注入（type_compat_strict）：T ⊆ T? 放行、反向拒绝、异型拒绝；同型走身份路径
-    total = total + 1; fails = fails + ts_check("t4.sub_injection_asymmetry",
+    total = total + 1; fails = fails + ts_check_b("t4.sub_injection_asymmetry",
         (type_compat_strict(TI_INT, t4_int_opt) == 1 && type_compat_strict(t4_int_opt, TI_INT) == 0 &&
          type_compat_strict(TI_STR, t4_int_opt) == 0 && type_compat_strict(t4_null, t4_int_opt) == 1 &&
-         type_compat_strict(t4_int_opt, t4_int_opt) == 1 && type_compat_strict(TI_INT, t4_str_opt) == 0), 1);
+         type_compat_strict(t4_int_opt, t4_int_opt) == 1 && type_compat_strict(TI_INT, t4_str_opt) == 0), true);
     // ⑤ 注册表/许可：null 与可选行都**不是**单一原子类 ⇒ -1（门全拒）。
     //    R2 P4 Task 3 重定（原判据「AK_NULL 无条目」随扩列翻转）：AK_NULL **有条目**
     //    （第 14 行，可查询性面）但 ops = 0 ⇒ 操作门仍全拒——保守面由「无条目」换位到
     //    「条目 + 零许可位」（同一行为、更可查询）；条目数 13 → 16（扩列硬值）。
-    total = total + 1; fails = fails + ts_check("t4.null_no_ops_no_entry",
+    total = total + 1; fails = fails + ts_check_b("t4.null_no_ops_no_entry",
         (iface_kind_of(t4_null) == -1 && iface_kind_of(t4_int_opt) == -1 &&
          iface_permits(-1, OP_ADD) == 0 && iface_entry(AK_NULL) >= 0 &&
-         iface_ops(AK_NULL) == 0 && iface_permits(AK_NULL, OP_ADD) == 0 && iface_count() == 16), 1);
+         iface_ops(AK_NULL) == 0 && iface_permits(AK_NULL, OP_ADD) == 0 && iface_count() == 16), true);
     // ⑥ AK_NULL 互斥公理全表（13 类逐类）：除 AK_DYN（⊤ 相容规则）与自身外皆不相交
     t4_dj : ., mut = 0;
     t4_k : ., mut = 0;
@@ -3479,8 +3493,8 @@ fn type_selftest_run() -> int {
         if ak_disjoint(AK_NULL, ka) != want { t4_dj = t4_dj + 1; }
         t4_k = t4_k + 1;
     }
-    total = total + 1; fails = fails + ts_check("t4.ak_null_disjoint_table",
-        (t4_dj == 0 && ak_disjoint(AK_NULL, AK_NULL) == 0 && ak_disjoint(AK_NULL, AK_NAMED) == 1), 1);
+    total = total + 1; fails = fails + ts_check_b("t4.ak_null_disjoint_table",
+        (t4_dj == 0 && ak_disjoint(AK_NULL, AK_NULL) == 0 && ak_disjoint(AK_NULL, AK_NAMED) == 1), true);
     // ⑦ match 域面：可选域 = 两分支（有值 = Some 模式 / null = None 模式）
     t4_some_pat := alloc_node(EXPR_ENUMPAT, str_intern("Some"), 0, 0, 0, 0, 0, 0, 0);
     t4_none_pat := alloc_node(EXPR_ENUMPAT, str_intern("None"), 0, 0, 0, 0, 0, 0, 0);
@@ -3489,27 +3503,27 @@ fn type_selftest_run() -> int {
     t4_some_t := sh_match_opt_term(t4_int_opt, sh_match_opt_pat(t4_int_opt, t4_some_pat));
     t4_none_t := sh_match_opt_term(t4_int_opt, sh_match_opt_pat(t4_int_opt, t4_none_pat));
     t4_full := tt_cons(t4_some_t, tt_cons(t4_none_t, tt_nil()));
-    total = total + 1; fails = fails + ts_check("t4.match_opt_two_branch_cover",
+    total = total + 1; fails = fails + ts_check_b("t4.match_opt_two_branch_cover",
         (t4_some_t == t4_intt && t4_none_t == t4_nullt &&
          sh_match_exhaustive(t4_int_opt, t4_full, 0) == 1 &&
          sh_match_exhaustive(t4_int_opt, tt_cons(t4_some_t, tt_nil()), 0) == 0 &&
-         sh_match_exhaustive(t4_int_opt, tt_cons(t4_none_t, tt_nil()), 0) == 0), 1);
-    total = total + 1; fails = fails + ts_check("t4.match_opt_counterexample_naming",
+         sh_match_exhaustive(t4_int_opt, tt_cons(t4_none_t, tt_nil()), 0) == 0), true);
+    total = total + 1; fails = fails + ts_check_b("t4.match_opt_counterexample_naming",
         (sh_match_first_missing(sh_match_bit(0), 2) == 1 &&
          sh_match_first_missing(sh_match_bit(1), 2) == 0 &&
-         sh_match_first_missing(0, 2) == 0), 1);
-    total = total + 1; fails = fails + ts_check("t4.match_opt_wildcard_and_guards",
+         sh_match_first_missing(0, 2) == 0), true);
+    total = total + 1; fails = fails + ts_check_b("t4.match_opt_wildcard_and_guards",
         (sh_match_exhaustive(t4_int_opt, tt_cons(tt_top(), tt_nil()), 0) == 1 &&
          sh_match_exhaustive(t4_int_opt, t4_full, 1) == -1 &&
          sh_match_exhaustive(TI_INT, t4_full, 0) == -1 &&
-         sh_match_domain_term(TI_INT) == -1 && sh_match_domain_term(t4_str_opt) >= 0), 1);
-    total = total + 1; fails = fails + ts_check("t4.opt_pat_mapping",
+         sh_match_domain_term(TI_INT) == -1 && sh_match_domain_term(t4_str_opt) >= 0), true);
+    total = total + 1; fails = fails + ts_check_b("t4.opt_pat_mapping",
         (sh_match_opt_pat(t4_int_opt, t4_some_pat) == 0 && sh_match_opt_pat(t4_int_opt, t4_none_pat) == 1 &&
          sh_match_opt_pat(t4_int_opt, t4_other_pat) == -1 && sh_match_opt_pat(t4_int_opt, t4_qual_pat) == -1 &&
-         sh_match_opt_pat(TI_INT, t4_none_pat) == -1), 1);
-    total = total + 1; fails = fails + ts_check("t4.opt_domain_leaf_count",
+         sh_match_opt_pat(TI_INT, t4_none_pat) == -1), true);
+    total = total + 1; fails = fails + ts_check_b("t4.opt_domain_leaf_count",
         (ts_unf_union_leaves(sh_match_domain_term(t4_int_opt)) == 2 &&
-         ts_unf_union_leaves(sh_match_domain_term(t4_str_opt)) == 2), 1);
+         ts_unf_union_leaves(sh_match_domain_term(t4_str_opt)) == 2), true);
     // ⑧ 枚举载荷类型节点列（T0 交接 ① 的消费面：sh_variant_payload_term）
     t4_p_ei := add_enum("T4Payload");
     ei_set_variant_name(t4_p_ei, 0, str_intern("T4Tag"));
@@ -3520,11 +3534,11 @@ fn type_selftest_run() -> int {
     ei_set_variant_type_node(t4_p_ei, 1, 0, alloc_node(0, 0, 0, 0, 0, TY_STRING, 0, 0, 0));
     w64(g_enums, t4_p_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 2);
     t4_p_ti := alloc_named_type(str_intern("T4Payload"));
-    total = total + 1; fails = fails + ts_check("t4.payload_node_beats_bare_code",
+    total = total + 1; fails = fails + ts_check_b("t4.payload_node_beats_bare_code",
         (sh_variant_payload_term(t4_p_ti, str_intern("T4Str")) == sh_term_of_ti(TI_STR) &&
          ty_disjoint(sh_variant_payload_term(t4_p_ti, str_intern("T4Str")), t4_intt) == 1 &&
          sh_variant_payload_term(t4_p_ti, str_intern("T4Tag")) == -1 &&
-         sh_variant_payload_term(t4_p_ti, str_intern("T4Nope")) == -1), 1);
+         sh_variant_payload_term(t4_p_ti, str_intern("T4Nope")) == -1), true);
     // ⑨ 载荷泛型代入：`enum T4GP[T] { T4S(T) }` 的 apply 行取实参项；两实例不同
     t4_g_ei := add_enum("T4GP");
     w64(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 1);
@@ -3547,13 +3561,13 @@ fn type_selftest_run() -> int {
     w64(g_gen_apply_data, (t4_gs2 + 1) * 8, TI_STR);
     g_gen_apply_data_count = t4_gs2 + 2;
     t4_g_ga2 := alloc_type(TYP_GENERIC_APPLY, t4_g_ti, t4_gs2);
-    total = total + 1; fails = fails + ts_check("t4.payload_generic_subst",
+    total = total + 1; fails = fails + ts_check_b("t4.payload_generic_subst",
         (sh_variant_payload_term(t4_g_ga, str_intern("T4GS")) == sh_term_of_ti(TI_INT) &&
          sh_variant_payload_term(t4_g_ga2, str_intern("T4GS")) == sh_term_of_ti(TI_STR) &&
-         sh_variant_payload_term(t4_g_ga, str_intern("T4GS")) != sh_variant_payload_term(t4_g_ga2, str_intern("T4GS"))), 1);
+         sh_variant_payload_term(t4_g_ga, str_intern("T4GS")) != sh_variant_payload_term(t4_g_ga2, str_intern("T4GS"))), true);
     // ⑩ 退役面：`Option` 名在类型表**零行**（内建注册已退役；用户声明才建行）
-    total = total + 1; fails = fails + ts_check("t4.option_not_registered",
-        (named_dedup_rows(str_intern("Option")) == 0 && find_gsym(str_intern("Option")) < 0), 1);
+    total = total + 1; fails = fails + ts_check_b("t4.option_not_registered",
+        (named_dedup_rows(str_intern("Option")) == 0 && find_gsym(str_intern("Option")) < 0), true);
 
     // R2 P3 Task 5 段（用例体在 ts_t5_run——见该函数头注「不得内联」）
     total = total + 9; fails = fails + ts_t5_run();
