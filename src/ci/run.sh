@@ -307,6 +307,18 @@ case "$CI_JOB_NAME" in
     # `globals.cr` 的 `mut = -1` 初值经 Python bootstrap 构建**静默丢成 0** ⇒ 开关恒关、探针 0 命中）。
     # 判据①（只发不阻断）的产物面在批级对拍：前态二进制 vs 本链 **37/37 逐字节 IDENTICAL**（两侧各自 clean-cache）。
     python3 tests/selfhost/test_s1p_liveness.py
+    # ─── 字符串插值 `${...}` 词法契约（2026-09-18 插队修复；引入点 wqorlmrz 2026-07-09）───
+    # **本特性此前全域零覆盖**：`tests/` 与 `examples/` 里 `grep '\${'` = **0 命中**，`src/` 唯一命中是
+    # `src/lsp/analysis.cr:1024` 的注释 ⇒ 它烂掉没人知道（**这条判据存在的理由**）。
+    # 修复前实测根因：lexer 插值分支**双推进**（skip 循环已到 `}` 之后，循环尾通用 `_pos += 1` 又吃一字节）
+    # ⇒ ① `}` 后首字符静默丢（`"A${7}B"`→`A`）；② 若那正是收尾引号 ⇒ 串吞到行尾 ⇒ 同行 `;`/**`}`** 进串
+    # ⇒ parser 停在嵌套态 ⇒ 顶层 `fn` **P21 级联**（单行样例实测 15 条；`}` 换行 = 0 条 = 判别实验）。
+    # 22 断言 = A 解析完整性（同行含 `}`/后续语句 ⇒ 不得 P21、rc 判据）· B 语义（本前端**不展开**：
+    # 原文逐字进串值；8 形态：对照/变量/表达式/多段/相邻/嵌套调用/嵌套花括号/转义混排）·
+    # C 与 bootstrap 词法 lexeme **跨前端对拍** · D 静默回退守卫（插值分支以 `continue` 收口）。
+    # **突变自证（可复跑）**：`COREC_BIN=<前缀二进制> python3 tests/selfhost/test_string_interp.py` ⇒ 必红
+    # （实测 **12 项失败** = A 组 P21/rc + B 组值）· 修复前后对拍：37 档 `.ccr`+ELF 逐字节 IDENTICAL + canary 5/5。
+    python3 tests/selfhost/test_string_interp.py
     ;;
 
   suite)
