@@ -30,7 +30,10 @@ from pathlib import Path
 
 BASE = Path(__file__).resolve().parents[2]
 COREC = BASE / "build" / "corec"
-HIT = re.compile(r"^(9917|9918) (\d+) (\d+) (\d+) (\d+) (\d+) (\S+)$")
+# 打点格式：`<码> <行> <列> <形参序> <形参TI> <实参TI> <被调名>` **+ 可选** ` @@ <该行源文本>`
+# （源行片段 = 2026-09-18 追加的定位通道；门后 ⇒ 默认位不出现）⇒ 正则必须**容忍可选后缀**，
+# 否则「打点活着」会被读成 0 命中（本套件在 CI 上正是这样红过一次）。
+HIT = re.compile(r"^(9917|9918) (\d+) (\d+) (\d+) (\d+) (\d+) (\S+)(?: @@ .*)?$")
 
 # 活性命中探针：`b := bool` 传给 `a: int` 形参（非字面量 ⇒ 不被护栏③跳过）
 MISMATCH = """fn f(a: int) -> int { return a; }
