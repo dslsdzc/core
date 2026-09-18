@@ -286,7 +286,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int {
             bp2 := alloc(need3);
             vi3 : ., mut = 0;
             loop { if vi3 >= need3 { break; } store8(bp2, vi3, 0); vi3 = vi3 + 1; }
-            w64(g_ir_vals, d2 * 8, bp2);
+            w64(g_ir_vals, d2 * 8, bp2 as int);   // 值槽存**裸指针**（alloc 结果按模型是 string）⇒ 显式
         }
         if op2 == 13 && d2 >= 0 && t1 >= 0 {  // IR_LOAD_INDEX: t1=arr_var, t3=literal_idx
             av2 := r64(g_ir_vals, t1 * 8);
@@ -331,7 +331,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int {
             bp2 := alloc(need3);
             vi3 : ., mut = 0;
             loop { if vi3 >= need3 { break; } store8(bp2, vi3, 0); vi3 = vi3 + 1; }
-            w64(g_ir_vals, d2 * 8, bp2);
+            w64(g_ir_vals, d2 * 8, bp2 as int);   // 值槽存**裸指针**（alloc 结果按模型是 string）⇒ 显式
         }
         if op2 == 32 && d2 >= 0 { w64(g_ir_vals, d2 * 8, 0); }  // IR_ARENA_NEW
         if op2 == 33 { }  // IR_ARENA_RESET
@@ -348,7 +348,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int {
                 vi3 : ., mut = 0;
                 loop { if vi3 >= need3 { break; } store8(bp2, vi3, 0); vi3 = vi3 + 1; }
                 w64(bp2, 0, t1);
-                w64(g_ir_vals, d2 * 8, bp2);
+                w64(g_ir_vals, d2 * 8, bp2 as int);   // 值槽存**裸指针**（alloc 结果按模型是 string）⇒ 显式
             }
         }
         // IR_LOAD_ENUM_TAG (23)：d := M[ρ(s1)+0]
@@ -573,7 +573,7 @@ fn ir_interpret() -> int {
                 bp := alloc(need2);
                 vi2 : ., mut = 0;
                 loop { if vi2 >= need2 { break; } store8(bp, vi2, 0); vi2 = vi2 + 1; }
-                w64(g_ir_vals, d * 8, bp);
+                w64(g_ir_vals, d * 8, bp as int);   // 同上：裸指针入槽（显式）
             }
         }
         if op == 8 {  // IR_ALLOC_ARRAY
@@ -584,7 +584,7 @@ fn ir_interpret() -> int {
                 bp := alloc(need2);
                 vi2 : ., mut = 0;
                 loop { if vi2 >= need2 { break; } store8(bp, vi2, 0); vi2 = vi2 + 1; }
-                w64(g_ir_vals, d * 8, bp);
+                w64(g_ir_vals, d * 8, bp as int);   // 同上：裸指针入槽（显式）
             }
         }
         if op == 9 { if s1 >= 0 && s2 >= 0 { w64(g_ir_vals, s1 * 8, r64(g_ir_vals, s2 * 8)); } }  // IR_STORE
@@ -642,7 +642,7 @@ fn ir_interpret() -> int {
                 vi2 : ., mut = 0;
                 loop { if vi2 >= need2 { break; } store8(bp, vi2, 0); vi2 = vi2 + 1; }
                 w64(bp, 0, s1);
-                w64(g_ir_vals, d * 8, bp);
+                w64(g_ir_vals, d * 8, bp as int);   // 同上：裸指针入槽（显式）
             }
         }
         // IR_LOAD_ENUM_TAG (23)：d := M[ρ(s1)+0]
