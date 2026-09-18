@@ -77,18 +77,18 @@ fn cli_init(prog: string, desc: string) {
 fn cli_cmd(name: string, desc: string) {
     grow_cli_cmds(g_cli_cmd_count + 1);
     off : ., mut = g_cli_cmd_count * 16;
-    w64(g_cli_cmds, off, name);
-    w64(g_cli_cmds, off + 8, desc);
+    w64(g_cli_cmds, off, name as int);          // 裸槽：串指针按 64 位存（**显式**转换）
+    w64(g_cli_cmds, off + 8, desc as int);
     g_cli_cmd_count = g_cli_cmd_count + 1;
 }
 
 fn cli_flag(long_name: string, short_name: string, desc: string) {
     grow_cli_flags(g_cli_flag_count + 1);
     off : ., mut = g_cli_flag_count * 48;
-    w64(g_cli_flags, off, long_name);
-    w64(g_cli_flags, off + 8, short_name);
-    w64(g_cli_flags, off + 16, desc);
-    w64(g_cli_flags, off + 24, "");       // value
+    w64(g_cli_flags, off, long_name as int);   // 裸槽：显式（批 8 S2）
+    w64(g_cli_flags, off + 8, short_name as int);
+    w64(g_cli_flags, off + 16, desc as int);
+    w64(g_cli_flags, off + 24, "" as int);  // value
     w64(g_cli_flags, off + 32, 0);         // has_value
     w64(g_cli_flags, off + 40, 0);         // is_bool
     g_cli_flag_count = g_cli_flag_count + 1;
@@ -97,10 +97,10 @@ fn cli_flag(long_name: string, short_name: string, desc: string) {
 fn cli_flag_bool(long_name: string, short_name: string, desc: string) {
     grow_cli_flags(g_cli_flag_count + 1);
     off : ., mut = g_cli_flag_count * 48;
-    w64(g_cli_flags, off, long_name);
-    w64(g_cli_flags, off + 8, short_name);
-    w64(g_cli_flags, off + 16, desc);
-    w64(g_cli_flags, off + 24, "");       // value
+    w64(g_cli_flags, off, long_name as int);   // 裸槽：显式（批 8 S2）
+    w64(g_cli_flags, off + 8, short_name as int);
+    w64(g_cli_flags, off + 16, desc as int);
+    w64(g_cli_flags, off + 24, "" as int);  // value
     w64(g_cli_flags, off + 32, 0);         // has_value
     w64(g_cli_flags, off + 40, 1);         // is_bool
     g_cli_flag_count = g_cli_flag_count + 1;
@@ -112,8 +112,8 @@ fn _cli_find_flag(name: string) -> int {
     i : ., mut = 0;
     loop {
         if i >= g_cli_flag_count { break; }
-        ln := r64(g_cli_flags, i * 48);
-        sn := r64(g_cli_flags, i * 48 + 8);
+        ln := r64(g_cli_flags, i * 48) as string;        // 裸槽读回：**显式**当串用
+        sn := r64(g_cli_flags, i * 48 + 8) as string;
         if str_len(ln) > 0 && str_eq(ln, name) != 0 { return i; }
         if str_len(sn) > 0 && str_eq(sn, name) != 0 { return i; }
         i = i + 1;
@@ -163,7 +163,7 @@ fn cli_parse() -> int {
         found_cmd : ., mut = 0;
         loop {
             if ci >= g_cli_cmd_count { break; }
-            if str_eq(r64(g_cli_cmds, ci * 16), first) != 0 {
+            if str_eq(r64(g_cli_cmds, ci * 16) as string, first) != 0 {
                 found_cmd = 1;
                 break;
             }
@@ -213,7 +213,7 @@ fn cli_parse() -> int {
             }
             if r64(g_cli_flags, fi * 48 + 40) != 0 {   // is_bool
                 w64(g_cli_flags, fi * 48 + 32, 1);       // has_value
-                w64(g_cli_flags, fi * 48 + 24, "1");     // value
+                w64(g_cli_flags, fi * 48 + 24, "1" as int);  // value（裸槽：显式）
             } else {
                 ai = ai + 1;
                 if ai >= argc_int {
@@ -229,7 +229,7 @@ fn cli_parse() -> int {
         } else {
             // Positional argument
             grow_cli_args(g_cli_arg_count + 1);
-            w64(g_cli_args, g_cli_arg_count * 8, arg);
+            w64(g_cli_args, g_cli_arg_count * 8, arg as int);   // 裸槽：显式
             g_cli_arg_count = g_cli_arg_count + 1;
         }
         ai = ai + 1;
@@ -289,7 +289,7 @@ fn cli_help() {
         loop {
             if ci >= g_cli_cmd_count { break; }
             if first == 0 { print(","); }
-            print(r64(g_cli_cmds, ci * 16));
+            print(r64(g_cli_cmds, ci * 16) as string);   // 裸槽读回：显式当串用（批 8 S2）
             first = 0;
             ci = ci + 1;
         }
@@ -312,7 +312,7 @@ fn cli_help() {
         loop {
             if ci >= g_cli_cmd_count { break; }
             if first == 0 { print(","); }
-            print(r64(g_cli_cmds, ci * 16));
+            print(r64(g_cli_cmds, ci * 16) as string);   // 裸槽读回：显式当串用（批 8 S2）
             first = 0;
             ci = ci + 1;
         }
@@ -320,8 +320,8 @@ fn cli_help() {
         ci = 0;
         loop {
             if ci >= g_cli_cmd_count { break; }
-            cmd_name_ni := r64(g_cli_cmds, ci * 16);
-            cmd_desc_ni := r64(g_cli_cmds, ci * 16 + 8);
+            cmd_name_ni := r64(g_cli_cmds, ci * 16) as string;      // 裸槽：名字（**串指针**，非 intern 下标）
+            cmd_desc_ni := r64(g_cli_cmds, ci * 16 + 8) as string;
             print("    ");
             print(cmd_name_ni);
             pad := str_len(cmd_name_ni);
@@ -343,9 +343,9 @@ fn cli_help() {
     fi : ., mut = 0;
     loop {
         if fi >= g_cli_flag_count { break; }
-        f_short_ni := r64(g_cli_flags, fi * 48 + 8);
+        f_short_ni := r64(g_cli_flags, fi * 48 + 8) as string;     // 裸槽：显式
         f_long_ni := r64(g_cli_flags, fi * 48);
-        f_desc_ni := r64(g_cli_flags, fi * 48 + 16);
+        f_desc_ni := r64(g_cli_flags, fi * 48 + 16) as string;
         print("  ");
         if str_len(f_short_ni) > 0 {
             print("-");
