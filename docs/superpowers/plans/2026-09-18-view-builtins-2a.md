@@ -206,3 +206,57 @@ CORE_S1P=1 ./build/corec check src/compiler/main.cr | grep -E '^991[78] ' > /tmp
 python3 -c "import sys;sys.path.insert(0,'bootstrap');from corec.frontend.lexer import Lexer;from corec.frontend.parser import Parser;Parser(Lexer('fn main() -> int { n := @sizeOf(int); return n; }').tokenize()).parse_compilation_unit()"
 # 自源 @ 触碰面（去注释去字符串后）实测 = 0 行
 ```
+
+---
+
+## §10 实施记录（2026-09-18；**已实施**）
+
+### §10.1 机制落地（A + 安全面 (ii)）
+
+- **bootstrap 面**（`bootstrap/corec/`）：`ast.py` 新增 `Builtin`；`parser.py` 表达式位 `@` 三形态分流
+  （`@name(args)` / `@name` / `@project file::symbol`，按**紧随 token** 判）；`type_checker.py` 新增
+  `_infer_builtin`（未知名 fail-closed · 实参类型 · **unsafe 区块判据**）与 `Unsafe` 分支 + `unsafe_depth`
+  ——**此前 bootstrap 对 `unsafe` 零支持**（实测旧行为：checker `Unsupported expression` + ir_gen `NotImplementedError`；
+  自源去注释去字符串后 `unsafe` 行数 = 0 ⇒ 从未触发）；`ir_gen.py` 两处直通。
+- **自托管面**：`checker.cr` EXPR_AT 链两条（`g_unsafe_depth == 0` ⇒ N01 硬错；实参类型 ⇒ TF07）；
+  `ir_gen.cr` **真直通**（`return force_if_thunk(gen_expr(arg))`，**零指令零新变量**）。
+- **为什么不用 `@raw_int` 的「新建变量 + IR_STORE」**：那换的是 dex↔int（XMM vs GP 两条真不同机器路径）；
+  int↔string 两腿都是同一 GP 字 ⇒ 搬运只会多一条 IR_STORE 并**破坏可擦除性**（实测该版本 ② 腿红）。
+
+### §10.2 迁移结果（68 → 0）
+
+| 档 | 点数 | 修法 |
+|---|---|---|
+| `src/stdlib/cli.cr` | 29 | 注册 `@ptr_of` · 读取 `@str_of` · `_cli_find_flag` 比较 `@str_of`；**另修 2 处返回位**（`cli_get`/`cli_arg`，台账不收——见 §10.4） |
+| `src/compiler/interp.cr` | 30 | 地址字当缓冲 ⇒ `@str_of(ptr)`；`alloc` 结果（string）当字存 ⇒ `@ptr_of(bp)` |
+| `src/compiler/parser.cr` | 9 | 名字表存 `tok_lx` ⇒ `@ptr_of`；读回 `str_intern(r64(...))` ⇒ `@str_of` |
+
+`CORE_S1P=1 corec check src/compiler/main.cr`：**68 → 0**（bool 桶保持 0）。
+**旁证（bootstrap 面 oracle）**：构建期 `Checker warnings (non-fatal)` 从 330 → **165**（本批视图点逐条消失）。
+
+### §10.3 关键实测（判据的实证基础）
+
+1. **擦除成立**：`@ptr_of(@str_of(p))` 与直写 `p` 的 ELF **逐字节一致**（int 与 string 两对；
+   ⚠ 对照必须**同处 unsafe 包络**——`unsafe` 本身带 +158B `.ccr` 区域元数据，跨包络对照测的是 `unsafe` 而非视图）。
+2. **`unsafe` 零成本（视图场景）**：后端仅当块内**有分配**时才发 `arena_new`（`arch/x86_64/instr.cr:1042` 的 `s1 > 0` 分支）
+   ⇒ 视图块（无 alloc）不产生任何运行期动作。
+3. **两面一致**：同一探针（值 42，既非有效指针也非有效 intern 索引）在 corec `check`/解释器/native 与 bootstrap 管线/解释器
+   五处读数一致。
+4. **解释器对裸内存是近似**（**预存**，非本批引入）：`alloc`+`w64/r64` 的程序在解释器腿不产出/给 0；
+   迁移前/后**同为 166B**（cli e2e 同源对拍）⇒ 与该分歧无关。
+5. **块内分号陷阱**（本批自伤一次，已修）：`unsafe { x; }` 块值 = unit ⇒ `return unsafe { x; };` 使该路径返回 unit；
+   bootstrap 面仅**非致命警告**（解释器仍按值跑），self-hosted 面 `TF01` 硬错 ⇒ **两面诊断面分歧**，已登记 `#2026-09-18-19(B)`。
+
+### §10.4 覆盖面发现（登记 `#2026-09-18-19(A)`）
+
+S1P 打点覆盖的是**直调/方法调用的实参**——**返回位不在覆盖内**：`cli_get`/`cli_arg` 声明 `-> string`
+却 `return r64(...)`，**68 点台账从未收录**（本批一并修）。⇒ **S3 升硬错前必须补返回位**，否则同类点仍静默。
+
+### §10.5 判据与证据
+
+- `tests/selfhost/test_view_builtins.py`（入 `selfhost-tests`）**15 项全绿**：① 两面一致（check/解释器/native/bootstrap 四读数）
+  ② 擦除逐字节（int/string 两对）③ 未知名两面 fail-closed ④ unsafe 块外两面硬错 ⑤ 实参类型两面拒绝 ⑥ **cli e2e**
+  （`tests/suite/cli_view_test.cr`：注册→帮助逐子串 + 查询面；cl i.cr 今日零覆盖的补网）。
+- **突变自证（两条，均断言命中目标）**：① 回退 `_cli_find_flag` 首视图点 ⇒ 台账 0→**2**（`str_len`/`str_eq` 复现）；
+  ② 移除 `checker.cr` 的 unsafe 守卫 ⇒ 块外探针 `check` 由 rc=1 变 **rc=0** ⇒ 判据④必红。
+- 全量层（canary 5/5 · selftest 双档逐字节 · 五 job）见 PR 描述。
