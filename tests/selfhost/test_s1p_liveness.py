@@ -103,9 +103,20 @@ fn main() -> int {
 }
 """
 
-# ⚠ 覆盖面实测（2026-09-18）：方法调用**不经过本点**（`s.m(b)` 异型 0 打点，而同一函数直调 1 打点）
-#   ⇒ ④「方法接收者偏移」代码在本点**不可达**（保留待 S2/S3 扩覆盖；**不得当死码删除**）。
-#   本档把该事实钉成判据：S2/S3 扩覆盖后此腿必须翻成 ≥1 打点。
+# ✅ 覆盖面（2026-09-18 批 8（甲）刀 2 扩覆盖后**已翻**）：方法调用 / 模块限定调用 / 枚举构造器
+#   **三者今均经过本点**（同一台账格式 `9917`）。
+#   历史（留痕）：本档原先钉的是「方法调用**不经过本点**」（`s.m(b)` 异型 0 打点 ⇒ ④ 接收者偏移代码
+#   不可达）——刀 2 接线后该断言按它**自己的指令**（「若此处非 0 ⇒ 方法面已覆盖，请同步更新档头注」）重锁为
+#   **覆盖腿**（恰 1 条 + 形参序/被调名逐字段）。⇒ 见下面 `method_call_covered` / `module_call_covered` /
+#   `enum_ctor_covered` 三条（**两向钉子**：条数恰 1，防重复打点与漏打）。
+# ⚠ 两腿均用**非嵌套**形态（let 位）：嵌套实参里的调用会被台账**打点两次**
+#   （**先于刀 2 存在**的既有缺陷：`g(f("hi"))` ⇒ ['f','f']，平铺 `g("hi")` ⇒ ['g']；pre/post 二进制同形 ⇒ 已登记）。
+MODULE_GAP = """import fmt
+fn main() -> int { x := fmt.int_str("hi"); return 0; }
+"""
+ENUM_GAP = """enum E { V(int) }
+fn main() -> int { e := V("hi"); return 0; }
+"""
 METHOD_GAP = """struct S { f: int }
 impl S {
     fn m(self: S, x: int) -> int { return x; }
@@ -207,9 +218,20 @@ def main():
            f"对照腿应恰 1 条且形参 TI=10（可选），得 {hits_nc}")
 
     rc_m, hits_m = run_check(METHOD_GAP, "1")
-    print(f"[⚠ 覆盖面]      方法调用 rc={rc_m} · 打点 {len(hits_m)}（**实测不可达**，见档头注）")
-    expect("method_call_not_covered", len(hits_m) == 0,
-           f"若此处非 0 ⇒ 方法面已覆盖，请同步更新档头注与 (ii) 覆盖面；得 {hits_m}")
+    print(f"[覆盖面]        方法调用 rc={rc_m} · 打点 {len(hits_m)}（刀 2 后应恰 1）")
+    expect("method_call_covered",
+           len(hits_m) == 1 and hits_m[0][3] == "1" and hits_m[0][6] == "S.m",
+           f"方法面应恰 1 条、形参序=1（self 已跳）、被调名=S.m；得 {hits_m}")
+    rc_mo, hits_mo = run_check(MODULE_GAP, "1")
+    print(f"[覆盖面]        模块限定 rc={rc_mo} · 打点 {len(hits_mo)}（刀 2 后应恰 1）")
+    expect("module_call_covered",
+           len(hits_mo) == 1 and hits_mo[0][6] == "int_str",
+           f"模块限定面应恰 1 条、被调名=int_str；得 {hits_mo}")
+    rc_e, hits_e = run_check(ENUM_GAP, "1")
+    print(f"[覆盖面]        枚举构造 rc={rc_e} · 打点 {len(hits_e)}（刀 2 后应恰 1）")
+    expect("enum_ctor_covered",
+           len(hits_e) == 1 and hits_e[0][3] == "0" and hits_e[0][6] == "V",
+           f"枚举构造面应恰 1 条、形参序=0、被调名=V；得 {hits_e}")
 
     # ⑤ 语料面：默认位全 tests/suite/*.cr 零打点（冷缓存逐档）
     corpus_hits = []

@@ -2628,6 +2628,154 @@ fn s1p_src_frag(line: int) -> string {
     return str_sub(g_source, start, end - start);
 }
 
+// ─── 批 8（甲）刀 2：S1P 台账三件（门 / 单实参判定 / 枚举环）——与 `s1p_arg_ring` 同一契约 ───
+// 门（懒初始化 + `CORE_S1P`）：**所有类型引擎调用都必须在门后**（默认位一步不执行 = 零足迹）。
+fn s1p_gate() -> int {
+    if g_s1p_seen == 0 {
+        // ⚠ **哨兵必须用零值**（详情见 `s1p_arg_ring` 内注 + TODO #2026-09-18-12）
+        g_s1p_seen = 1;
+        ev2 := get_env("CORE_S1P");
+        if str_len(ev2) > 0 && ev2 == "1" { g_s1p_on = 1; } else { g_s1p_on = 0; }
+    }
+    return g_s1p_on;
+}
+
+// 单实参：跳过规则（②`None`→`T?` / ③字面量多态 / 形参型不可得 / 未推断出形）⇒ 否则 `unify_types`
+//   判定 ⇒ 失配则**只打数值**台账一行（格式见 `s1p_arg_ring`；`call_ni` = 被调名 intern 下标）。
+fn s1p_arg_one(arg_n: int, pi2: int, pti: int, ati: int, is_ext: int, call_ni: int) {
+    skip : ., mut = 0;
+    if pti < 0 { skip = 1; }                                   // 形参型不可得
+    if ati == TI_UNIT { skip = 1; }                             // 未推断出形
+    if ast_kind(arg_n) == EXPR_INT || ast_kind(arg_n) == EXPR_DEX { skip = 1; }  // ③ 字面量多态
+    if ast_kind(arg_n) == EXPR_ENUM_CONSTRUCTOR {
+        nm2 := istr_get(ast_a(arg_n));
+        if str_eq(nm2, "None") != 0 {
+            // ② None→T?（**不用 `ti_is_optional`**：该符号不在 corelsp 单元 ⇒ 本文件为
+            //   corec+corelsp **共享**单元，只能用两侧皆有的符号）
+            if pti >= 0 && get_type_kind(pti) == TYP_OPTIONAL { skip = 1; }
+        }
+    }
+    if skip == 0 {
+        if !unify_types(pti, ati) {
+            println(int_str(9917 + is_ext) + " " + int_str(ast_line(arg_n))
+                    + " " + int_str(ast_col(arg_n))
+                    + " " + int_str(pi2)
+                    + " " + int_str(pti) + " " + int_str(ati)
+                    + " " + istr_get(call_ni)
+                    + " @@ " + s1p_src_frag(ast_line(arg_n)));
+        }
+    }
+}
+
+// 枚举构造器环：形参型来自**枚举声明**的变体载荷（变体**不注册 FuncInfo** ⇒ 不能用 `s1p_arg_ring`）。
+//   载荷类型节点 = `ei_variant_type_node(enum_i, vi, k)` ⇒ `res_type_node` 取类型项（**门后**执行）。
+fn s1p_enum_ring(name_idx: int, first_arg: int, arg_count: int) {
+    if name_idx < 0 { return; }
+    if s1p_gate() == 0 { return; }
+    i : ., mut = 0;
+    loop {
+        if i >= g_enum_count { break; }
+        vi : ., mut = 0;
+        loop {
+            if vi >= ei_variant_count(i) { break; }
+            if ei_variant_name(i, vi) == name_idx {
+                tc := ei_variant_type_count(i, vi);
+                if arg_count == tc {
+                    an2 : ., mut = first_arg;
+                    k2 : ., mut = 0;
+                    loop {
+                        if an2 < 0 { break; }
+                        if k2 >= tc { break; }
+                        arg_n := ast_a(an2);
+                        ati := infer_expr(arg_n);
+                        tn := ei_variant_type_node(i, vi, k2);
+                        pti : ., mut = -1;
+                        if tn >= 0 { pti = res_type_node(tn); }
+                        s1p_arg_one(arg_n, k2, pti, ati, 0, name_idx);
+                        k2 = k2 + 1;
+                        an2 = ast_b(an2);
+                    }
+                }
+                return;
+            }
+            vi = vi + 1;
+        }
+        i = i + 1;
+    }
+}
+
+// ─── 批 8（甲）刀 2：S1P 台账环（**可复用**——四调用形态共用一份，照 (乙) 批 `dex_align_call_args` 先例）───
+// 契约：
+//  · **只在 `CORE_S1P=1` 路径被调用**：门 `g_s1p_on != 0` 在环内 ⇒ 默认位**一步不执行**（零足迹，
+//    判据见 `tests/selfhost/test_s1p_liveness.py` 的对偶腿 + 本刀的逐字节对拍）；
+//  · **不改产物**：只 println **数值**、不新增 intern（`istr_get(fi_name(fi))` 只读既有串——
+//    台账注释见调用点：字符串与 `type_display` 会把新串写进 `.ccr` 的 STR 段）；
+//  · **格式继承**：`9917|9918 <line> <col> <param_idx> <param_ti> <arg_ti> <call> @@ <片段>`
+//    字段序/数量/前缀**一律照旧**（锚定套件 = `tests/selfhost/test_s1p_liveness.py`；扩字段须同批重锁该套件）。
+// 参数：
+//  · `fi` = 被调 FuncInfo（形参链来源）；`is_ext` = extern/C ABI ⇒ 单列前缀 `9918`；
+//  · `first_arg`/`arg_count` = **EXPR_ARG 链首/链长**——**链中不含接收者**（parser 实证：接收者属
+//    `EXPR_FIELD` 的被调对象位）⇒ `param_skip` 指明「形参链首需跳过的接收者位数」：
+//    **直调/extern/模块限定 = 0**（形参链无 self）· **方法 = 1**（形参链含 self，与实参链对齐时跳过）。
+// 元数口径（照旧）：`arg_count + param_skip != fi_param_count(fi)` ⇒ **静默跳过**（不打点、不据此判定）。
+fn s1p_arg_ring(fi: int, first_arg: int, arg_count: int, param_skip: int, is_ext: int) {
+    if fi < 0 { return; }
+    fnode := fi_ast_node(fi);
+    if fnode < 0 { return; }
+    fn_kind : ., mut = 0;
+    if ast_kind(fnode) == EXPR_FN { fn_kind = 1; }
+    if fn_kind == 0 && is_ext == 0 { return; }
+    pc := fi_param_count(fi);
+    if arg_count + param_skip != pc { return; }
+    pn2 : ., mut = ast_b(fnode);
+    // 跳过形参链首的接收者位（`param_skip` 个 EXPR_PARAM；按「下一个 EXPR_PARAM」游标语义——与 parser
+    //   的分配布局一致：形参的类型子树先于该形参节点分配 ⇒ 形参之间不连续，见 F4 形参链导航修复注）
+    k : ., mut = 0;
+    loop {
+        if k >= param_skip { break; }
+        if pn2 < 0 { return; }
+        pn2 = pn2 + 1;
+        loop { if pn2 >= g_ast_count { pn2 = -1; break; }
+               if ast_kind(pn2) == EXPR_PARAM { break; } pn2 = pn2 + 1; }
+        k = k + 1;
+    }
+    pi2 : ., mut = param_skip;
+    an2 : ., mut = first_arg;
+    loop {
+        if an2 < 0 { break; }
+        if pn2 < 0 { break; }
+        if pi2 >= pc { break; }
+        if g_s1p_seen == 0 {
+            // 懒初始化：`CORE_S1P=1` 才开（`os.cr` 的 `get_env` 在 corec/corelsp 两单元皆在）
+            // ⚠ **哨兵必须用零值**：2026-09-18 实测——`globals.cr` 里 `g_s1p_on : int, mut = -1;`
+            //   在 **Python bootstrap 构建 corec** 时**初值静默丢成 0**（`.quad 0`）⇒「未初始化 = -1」
+            //   判据恒假 ⇒ 懒初始化永不执行 ⇒ 开关恒关（活性自证抓出：探针 0 命中）。
+            //   面 = bootstrap 构出的 corec（self-hosted 正常）⇒ 已单独登记（TODO #2026-09-18-12）。
+            g_s1p_seen = 1;
+            ev2 := get_env("CORE_S1P");
+            if str_len(ev2) > 0 && ev2 == "1" { g_s1p_on = 1; } else { g_s1p_on = 0; }
+        }
+        // ⚠ **整块受门**（2026-09-18 实测）：仅把 print 受门**不够**——本块里的类型引擎调用
+        //   （`infer_expr`/`res_call_type`/`unify_types`）会向 TYPE(7) 段的项表里**留项**（memo）
+        //   ⇒ 输出 `.ccr` 的段 7 变长（实测：门只罩 print 时 `opt_dex_test.cr` 的 `.ccr`
+        //   187029→187053 **+24B**、ELF 同；其余 36/37 档零差）。故**默认位下本块一步都不执行**。
+        if g_s1p_on != 0 {
+            arg_n := ast_a(an2);
+            ati := infer_expr(arg_n);
+            ptn := ast_data(pn2);
+            pti : ., mut = -1;
+            if ptn >= 0 { pti = res_call_type(ptn, fi); }
+            // 单实参判定与打点（跳过规则 ②③ + `unify_types` + **只打数值**台账）——三件共用
+            s1p_arg_one(arg_n, pi2, pti, ati, is_ext, fi_name(fi));
+        }
+        pi2 = pi2 + 1;
+        an2 = ast_b(an2);
+        pn2 = pn2 + 1;
+        loop { if pn2 >= g_ast_count { pn2 = -1; break; }
+               if ast_kind(pn2) == EXPR_PARAM { break; } pn2 = pn2 + 1; }
+    }
+}
+
 fn infer_expr(node: int) -> int {
     if node < 0 { return TI_UNIT; }
 
@@ -2866,6 +3014,10 @@ fn infer_expr(node: int) -> int {
                     infer_expr(ast_a(an));
                     an = ast_b(an);
                 }
+                // 批 8（甲）刀 2：模块限定调用接入 S1P 台账（此前未覆盖——本分支同样早退）。
+                //   `param_skip = 0`：形参链无 self（模块函数是普通 fn）。
+                fi_mod := find_func(func_ni);
+                s1p_arg_ring(fi_mod, first_arg, arg_count, 0, 0);
                 if mod_found_mfi >= 0 {
                     return r64(g_mod_func_tis, mod_found_mfi * 8);
                 }
@@ -2985,6 +3137,10 @@ fn infer_expr(node: int) -> int {
                     //   （行为等价，非逐字镜像）。嵌套 if 同直调站点（`&&` 不短路 +
                     //   表读无护栏）。
                     fi_m := find_func(func_ni);
+                    // 批 8（甲）刀 2：方法调用接入 S1P 台账（此前**未覆盖**——本分支在 S1P 块之前
+                    //   早退 ⇒ 方法实参位是台账盲区）。`param_skip = 1`：实参链**不含**接收者，而
+                    //   形参链**含** self ⇒ 形参游标跳过 self 后与实参 1:1（元数口径 = arg_count + 1 == pc）。
+                    s1p_arg_ring(fi_m, first_arg, arg_count, 1, 0);
                     if fi_m >= 0 {
                         if fi_generic_count(fi_m) == 0 {
                             if sym_type(si) == TI_UNIT {
@@ -3087,111 +3243,18 @@ fn infer_expr(node: int) -> int {
                 //   ① 泛型 T↔T：本点 callee 非泛型（泛型已由上方早退）⇒ 天然排除；
                 //   ② `None`→`T?`：实参为 `None` 构造子且形参为可选 ⇒ 跳过；
                 //   ③ 整/小数字面量 → 数值形参：实参节点为字面量 ⇒ 跳过（字面量多态）；
-                //   ④ 方法接收者：`EXPR_FIELD` ∧ 非模块调用 ⇒ 实参[0] 是接收者 ⇒ 形参偏移 +1；
+                //   ④ 方法接收者：**实参链（EXPR_ARG）不含接收者**（parser 实证：接收者是被调
+                //      对象位 `EXPR_FIELD` 的 obj）而**形参链含 self**（第 0 位）⇒ **形参游标偏移 +1**
+                //      （`s1p_arg_ring(param_skip=1)`），**不是**实参偏移 +1（旧注写反，2026-09-18 刀 2 改）；
                 //   ⑤ extern/C ABI：callee = `EXPR_EXTERN` ⇒ **单列台账**（前缀 `9918`），不进主桶（`9917`）；
                 //   ⑥ 元数不齐（含变参面）：有效实参数 ≠ 形参数 ⇒ 静默跳过（**不打点**，不据此判定）。
                 // 台账格式（**扫面锚定用**，只认行首）：`9917|9918 <line> <col> <param_idx> <param_ti> <arg_ti> <call>`
                 //   ——**不得**只 grep `9917` 裸串（会命中源码回显，见 2026-09-18 扫面假阳教训）。
                 if fi >= 0 {
                     fnode := fi_ast_node(fi);
-                    is_ext : ., mut = 0;
-                    if fnode >= 0 && ast_kind(fnode) == EXPR_EXTERN { is_ext = 1; }
-                    fn_kind : ., mut = 0;
-                    if fnode >= 0 && ast_kind(fnode) == EXPR_FN { fn_kind = 1; }
-                    is_method : ., mut = 0;
-                    if ast_kind(ast_a(node)) == EXPR_FIELD {
-                        cf := ast_type_val(node);
-                        if cf != CALL_FLAG_MODULE && cf != CALL_FLAG_MODULE + CALL_FLAG_INLINE {
-                            is_method = 1;
-                        }
-                    }
-                    if fn_kind != 0 || is_ext != 0 {
-                        pc := fi_param_count(fi);
-                        eff := arg_count;
-                        if is_method != 0 { eff = eff - 1; }
-                        first_p := ast_b(fnode);
-                        if eff == pc {
-                            pi2 : ., mut = 0;
-                            pn2 : ., mut = first_p;
-                            an2 : ., mut = first_arg;
-                            ai2 : ., mut = 0;
-                            loop {
-                                if an2 < 0 { break; }
-                                if pn2 < 0 { break; }
-                                if pi2 >= pc { break; }
-                                if is_method != 0 && ai2 == 0 {
-                                    // 接收者位：跳过（并与形参链同步前移一位）
-                                    ai2 = ai2 + 1;
-                                    an2 = ast_b(an2);
-                                    pn2 = pn2 + 1;
-                                    loop { if pn2 >= g_ast_count { pn2 = -1; break; }
-                                           if ast_kind(pn2) == EXPR_PARAM { break; } pn2 = pn2 + 1; }
-                                    continue;
-                                }
-                                if g_s1p_seen == 0 {
-                                    // 懒初始化：`CORE_S1P=1` 才开（`os.cr` 的 `get_env` 在 corec/corelsp 两单元皆在）
-                                    // ⚠ **哨兵必须用零值**：2026-09-18 实测——`globals.cr` 里
-                                    //   `g_s1p_on : int, mut = -1;` 在 **Python bootstrap 构建 corec** 时
-                                    //   **初值静默丢成 0**（`build/corec.s` 里 `.quad 0`）⇒ 「未初始化 = -1」
-                                    //   判据恒假 ⇒ 懒初始化永不执行 ⇒ 开关恒关（活性自证抓出：探针 0 命中）。
-                                    //   **机理**：bootstrap 只在初值是 **Literal** 时记 `constant_value`
-                                    //   （`bootstrap/corec/frontend/ir_gen.py:71-76`），而 `-1` 解析为
-                                    //   `UnaryOp('-', Literal)`（实测）⇒ 落到 `.quad 0` 兜底
-                                    //   （`bootstrap/corec/backend/x86_64_stack_asm.py:622-628`）。
-                                    //   面 = **bootstrap 构出的 corec**（self-hosted corec 编译的程序
-                                    //   初值正常）⇒ 属「两前端接受集/行为分歧」族，已单独登记。
-                                    g_s1p_seen = 1;
-                                    ev2 := get_env("CORE_S1P");
-                                    if str_len(ev2) > 0 && ev2 == "1" { g_s1p_on = 1; } else { g_s1p_on = 0; }
-                                }
-                                // ⚠ **整块受门**（2026-09-18 实测）：仅把 print 受门**不够**——本块里的
-                                //   类型引擎调用（`infer_expr`/`res_call_type`/`unify_types`）会向 TYPE(7)
-                                //   段的项表里**留项**（memo）⇒ 输出 `.ccr` 的段 7 变长（实测：门只罩 print
-                                //   时 `opt_dex_test.cr` 的 `.ccr` 187029→187053 **+24B**、ELF 同；其余 36/37
-                                //   档零差）。故**默认位下本块一步都不执行** ⇒ 「被接受程序 rc/产物逐字节不变」
-                                //   在默认位成立（判据见 tests/selfhost/test_s1p_liveness.py 的对偶腿）。
-                                if g_s1p_on != 0 {
-                                    arg_n := ast_a(an2);
-                                    ati := infer_expr(arg_n);
-                                    ptn := ast_data(pn2);
-                                    pti := -1;
-                                    if ptn >= 0 { pti = res_call_type(ptn, fi); }
-                                    skip : ., mut = 0;
-                                    if pti < 0 { skip = 1; }                                   // 形参型不可得
-                                    if ati == TI_UNIT { skip = 1; }                             // 未推断出形
-                                    if ast_kind(arg_n) == EXPR_INT || ast_kind(arg_n) == EXPR_DEX { skip = 1; }  // ③ 字面量多态
-                                    if ast_kind(arg_n) == EXPR_ENUM_CONSTRUCTOR {
-                                        nm2 := istr_get(ast_a(arg_n));
-                                        if str_eq(nm2, "None") != 0 {
-                                            // ② None→T?（**不用 `ti_is_optional`**：该符号不在 corelsp 单元 ⇒
-                                            //   本文件（checker.cr）为 corec+corelsp **共享**单元，只能用两侧皆有的符号）
-                                            if pti >= 0 && get_type_kind(pti) == TYP_OPTIONAL { skip = 1; }
-                                        }
-                                    }
-                                    if skip == 0 {
-                                        if !unify_types(pti, ati) {
-                                            // 台账**只打数值**：字符串字面量与 `type_display`（内部拼串）
-                                            //   会把新串写进输出 `.ccr` 的 STR 段 ⇒ 破「产物逐字节不变」。
-                                            //   前缀码 `9917`（ARG）/ `9918`（EXT）· 行/列 · 形参序 ·
-                                            //   形参 TI · 实参 TI · 被调名（`istr_get` 只读既有 intern 串）。
-                                            println(int_str(9917 + is_ext) + " " + int_str(ast_line(arg_n))
-                                                    + " " + int_str(ast_col(arg_n))
-                                                    + " " + int_str(pi2)
-                                                    + " " + int_str(pti) + " " + int_str(ati)
-                                                    + " " + istr_get(fi_name(fi))
-                                                    + " @@ " + s1p_src_frag(ast_line(arg_n)));
-                                        }
-                                    }
-                                }
-                                pi2 = pi2 + 1;
-                                ai2 = ai2 + 1;
-                                an2 = ast_b(an2);
-                                pn2 = pn2 + 1;
-                                loop { if pn2 >= g_ast_count { pn2 = -1; break; }
-                                       if ast_kind(pn2) == EXPR_PARAM { break; } pn2 = pn2 + 1; }
-                            }
-                        }
-                    }
+                    is_ext2 : ., mut = 0;
+                    if fnode >= 0 && ast_kind(fnode) == EXPR_EXTERN { is_ext2 = 1; }
+                    s1p_arg_ring(fi, first_arg, arg_count, 0, is_ext2);
                 }
                 return sym_type(si);  // return type
             }
@@ -3573,6 +3636,9 @@ fn infer_expr(node: int) -> int {
                 infer_expr(ast_a(an));
                 an = ast_b(an);
             }
+            // 批 8（甲）刀 2：枚举构造器接入 S1P 台账（此前未覆盖——本分支同样早退）。
+            //   **变体不注册 FuncInfo** ⇒ 形参型取自**枚举声明的变体载荷**（`s1p_enum_ring`）。
+            s1p_enum_ring(name_idx, first_arg, arg_count);
             return sym_type(si); // enum type
         }
         name := istr_get(name_idx);
