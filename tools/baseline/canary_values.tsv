@@ -3,6 +3,9 @@
 # 消费者：tools/baseline/canary_check.sh（闸门本体）· tests/harness/test_canary_carrier.py（牙）
 # 格式：<name><TAB><artifact><TAB><sha256><TAB><size>
 #   artifact = 相对**采集目录**的产物路径（采集目录默认 build/canary_artifacts/）
+# **⚠ 重锁前置（2026-09-19 起）**：重新锁定本表**之前**，必须先跑 `bash tools/baseline/canary_check.sh`
+#   并确认 **D1 确定性闸门绿**（同一 canary ELF **两次构建逐字节相同**）——只比「与旧值相同」的流程
+#   会在**采一次样**时把**非确定值**锁进表（此后全绿而产物每次都不一样）。D1 红 ⇒ **不得重锁**，先查非确定性。
 # 口径（D28 继承）：一律**冷态**——每条编译前 `clean-cache`（= `rm -rf .core/cache/cir/`，
 #   相对 cwd；src/compiler/main.cr:408-414 实读）；cwd = 仓库根；源路径以 `tests/suite/...`
 #   相对形给出；不传 -O（用默认档）。
