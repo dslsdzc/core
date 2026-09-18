@@ -60,7 +60,7 @@ fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int) {
 // 其余 = 堆地址（alloc/ALLOC_ARRAY 产出的真实指针）→ 读写内存。
 fn ir_interp_deref_read(ptr: int) -> int {
     if ptr >= 0 && ptr < g_ir_var_count { return r64(g_ir_vals, ptr * 8); }
-    return unsafe { r64(@str_of(ptr), 0); }
+    unsafe { return r64(@str_of(ptr), 0); }
 }
 fn ir_interp_deref_write(ptr: int, val: int) {
     if ptr >= 0 && ptr < g_ir_var_count { w64(g_ir_vals, ptr * 8, val); }
