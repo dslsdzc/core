@@ -44,7 +44,9 @@
 #     **⚠ 重锁前置（硬要求）**：维护者**重新锁定前必须先看到 D1 绿**——否则只比旧值的流程会在
 #     采**一次**样就把**非确定值**锁进表（此后 canary 全绿，而产物其实每次都不一样），
 #     D1 正是区分「确定但变了」与「不确定」的那一步。
-#     **覆盖边界**：只对**已构建的那一档**（canary ELF）做，**不做全语料**；`.ccr` 四条**不在**本闸门内。
+#     **覆盖面**：**5 个条目全做**（`canary_elf` + `.ccr` 四条）——`.ccr` 是**序列化/顺序面**
+#     （段序 · intern 序 · 侧表顺序），非确定性最可能在那里现形；只保 ELF 等于漏 4/5（team-lead 2026-09-19 裁）。
+#     **诊断点名条目**（`D1 <spec 名>: …`）。**边界**：只对 canary 两档语料的这 5 个条目，**不做全语料**。
 #   以上两条的完整论证 + 两套历史值的关系（旧 v8 四值 `fb4a3b59…` 等 = 同口径不同时代，
 #   非漂移）逐条见 tools/baseline/canary_values.tsv 头注与
 #   docs/superpowers/plans/2026-09-16-criteria-carrier.md §1/§6。
@@ -259,15 +261,27 @@ collect_into() {
   step_compile pa_static_ccr  pa_st.log  build tests/suite/ptr_arith.cr   --static -o "$d/pa_st.bin" || return 1
   step_compile gt_ccr         gt_ccr.log ccr   tests/suite/generics_test.cr -o "$d/gt.ccr"       || return 1
   step_compile gt_static_ccr  gt_st.log  build tests/suite/generics_test.cr --static -o "$d/gt_st.bin" || return 1
-  # ── D1 确定性闸门（2026-09-19 新增；**只对 canary ELF 这一档**）─────────────────────
+  # ── D1 确定性闸门（2026-09-19 新增；**覆盖全部 5 个条目**）──────────────────────────
   # 为什么必须有它（与 F3 的「比锁定值」是**两件事**）：F3 只能证明「与表内旧值相同」；
   # 若某批**合法地**改了码（须重锁）而同时**引入非确定性**，只比旧值 ⇒ 操作者采**一次**样
   # 就把非确定值锁进表，此后 canary 全绿而产物其实**每次都不一样**。
   # **两次构建对拍**才区分「确定但变了」与「不确定」——**重锁前必须先看到本条绿**（见值表头注）。
-  # 覆盖边界：只对**已构建的那一档**（canary ELF）做，**不做全语料**（成本纪律：本步 = +1 次
-  # clean-cache + 1 次构建，量级与上面一条相同）。`.ccr` 四条**不在**本闸门覆盖面内（如需另议）。
-  step_compile canary_elf_again pa_again.log build tests/suite/ptr_arith.cr --static -o "$d/pa_again" || return 1
-  determinism_gate "$d/pa" "$d/pa_again" "canary_elf" || return 1
+  # 覆盖面 = **5 个条目全做**（team-lead 2026-09-19 裁）：`.ccr` 正是**序列化/顺序面**
+  # （段序 · intern 序 · 侧表顺序）——非确定性最可能在那里现形，而重锁覆盖全部 5 条 ⇒ 只保 ELF
+  # 等于漏掉 4/5。成本实测 ≈ **+0.25s**（5 × 单次 clean-cache+构建 0.05s），远低于「时长翻倍即停」。
+  # **诊断必须点名条目**（`D1 <spec 名>: …`）——否则一次红只说明「有非确定性」而不说去哪查。
+  # 覆盖边界：只对 canary **两档语料**的这 5 个条目做，**不做全语料**。
+  mkdir -p "$d/again"
+  step_compile canary_elf_again    pa_again.log     build tests/suite/ptr_arith.cr    --static -o "$d/again/pa"        || return 1
+  step_compile pa_ccr_again        pa_ccr_again.log ccr   tests/suite/ptr_arith.cr    -o "$d/again/pa.ccr"            || return 1
+  step_compile pa_static_ccr_again pa_st_again.log  build tests/suite/ptr_arith.cr    --static -o "$d/again/pa_st.bin"  || return 1
+  step_compile gt_ccr_again        gt_ccr_again.log ccr   tests/suite/generics_test.cr -o "$d/again/gt.ccr"            || return 1
+  step_compile gt_static_ccr_again gt_st_again.log  build tests/suite/generics_test.cr --static -o "$d/again/gt_st.bin" || return 1
+  determinism_gate "$d/pa"             "$d/again/pa"        "canary_elf"     || return 1
+  determinism_gate "$d/pa.ccr"         "$d/again/pa.ccr"    "pa_ccr"         || return 1
+  determinism_gate "$d/pa_st.bin.ccr"  "$d/again/pa_st.bin.ccr" "pa_static_ccr" || return 1
+  determinism_gate "$d/gt.ccr"         "$d/again/gt.ccr"    "gt_ccr"         || return 1
+  determinism_gate "$d/gt_st.bin.ccr"  "$d/again/gt_st.bin.ccr" "gt_static_ccr" || return 1
   return 0
 }
 
@@ -351,8 +365,8 @@ selftest() {
   if determinism_gate "$FX/det_a" "$FX/det_b" "S7-fixture" >| "$OUT" 2>&1; then
     echo "[FAIL] selftest S7b 异文件⇒红（期望 rc=1，实得 0）"
     fails=$((fails + 1))
-  elif grep -q "两次构建产物不同" "$OUT"; then
-    echo "[PASS] selftest S7b 异文件⇒红 · 命中 两次构建产物不同"
+  elif grep -q "两次构建产物不同" "$OUT" && grep -q "D1 S7-fixture:" "$OUT"; then
+    echo "[PASS] selftest S7b 异文件⇒红 · 命中 两次构建产物不同 + 点名条目（D1 <label>:）"
   else
     echo "[FAIL] selftest S7b 红但输出缺诊断（红必须可诊断）"; sed -n '1,6p' "$OUT" | sed 's/^/       | /'
     fails=$((fails + 1))
