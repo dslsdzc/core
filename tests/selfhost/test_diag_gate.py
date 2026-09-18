@@ -3,6 +3,8 @@
 
 判据面（源 = `src/compiler/diag.cr::diag_gate_exempt`；消费点 = `main.cr` 的硬判定循环）：
   · 正控（8）：表内 **5** 条 build 面豁免码（TF07/TB01/TM04/TK01/B04）⇒ 仍放行（build rc=0 + 产物）；
+    **TF07/TB01 的夹具于 2026-09-19（(i) 小批）更换**：原 `ptr_ref_first.cr` 因 `@raw_int` 放宽接受指针而
+    **不再产这两个码** ⇒ 改用仍被拒的串实参级联夹具（同形），原夹具另钉「放宽后干净通过」；
     **TF01 已于 2026-09-18（批 8 A₂）撤条**——原「chan_test 产 TF01 且被豁免」的**正控改为**：
     ① 根因正控 = 5 档并发语料**干净构建**（rc=0 + 产物 + **无 TF01**）；② **负控** = 真 TF01（string 值返
     int 声明）**仍阻断**（rc=1 + 零产物）——即「撤条 ≠ 放行」。
@@ -84,7 +86,15 @@ t.ok("pos_tf01_root_fixed",
      _r.returncode == 0 and "error[TF01]" not in (_r.stdout + _r.stderr),
      f"check rc={_r.returncode} TF01={'error[TF01]' in (_r.stdout + _r.stderr)}")
 build_ok("tf01_build_clean", "tests/suite/chan_test.cr")
-build_ok("tf07_tb01", "tests/suite/ptr_ref_first.cr", ("TF07", "TB01"))
+# (i) 小批（2026-09-19）：`@raw_int` 放宽接受**指针** ⇒ **原夹具 ptr_ref_first.cr 不再产 TF07/TB01**。
+# 本正控**换夹具、意图不变**（「build 面豁免码仍放行（rc=0 + 产物）**且仍被报出**」）：改用**仍被拒**的
+# 串实参级联（2×TF07 → 两侧 TI_NEVER → 1×TB01，与旧夹具**同形**）；原夹具改钉 (i) 的**新语义**
+# （零诊断 + 产物，即「放宽后指针形态在 build 面干净通过」）。
+# 实测（本批基点）：级联夹具 check rc=1 · TF07×2 · TB01×1；build rc=0 · 产物 ✓ · TF07×2 · TB01×1。
+build_ok("tf07_tb01", write("tf07_tb01_cascade",
+                            'fn main() -> int { s := "a"; t := "b"; return @raw_int(s) - @raw_int(t); }\n'),
+         ("TF07", "TB01"))
+build_ok("tf07_tb01_ptr_clean", "tests/suite/ptr_ref_first.cr")
 tm04 = write("tm04", "enum Color { Red, Green, Blue }\n"
                      "fn main() -> int { c := Red(); "
                      "return match c { Red => 1, Red => 2, Green => 3, Blue => 4, }; }\n")
