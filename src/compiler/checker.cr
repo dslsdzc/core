@@ -2584,6 +2584,26 @@ fn interp_bool_node(node: int, inner: int) -> int {
     return TI_STR;
 }
 
+// S1P 测量辅助（**只在 CORE_S1P=1 路径被调用**）：从 `g_source` 取第 line 行的前 48 字符。
+// 目的 = 把「合并流坐标」映射回**源文本**（跨文件定位：本仓的 S1P 打点原本只有合并流行号，
+// 反推文件归属两种假设均对不上）。**只用于测量**：默认位不被调用 ⇒ 产物零足迹不受影响；
+// `str_sub` 走 alloc（**不 intern**）⇒ 不污染 STR 段。
+fn s1p_src_frag(line: int) -> string {
+    p : ., mut = 0; ln : ., mut = 1; start : ., mut = -1; end : ., mut = -1;
+    loop {
+        if p >= g_source_len { break; }
+        c := load8(g_source, p);
+        if ln == line && start < 0 { start = p; }
+        if start >= 0 && c == 10 { end = p; break; }
+        if c == 10 { ln = ln + 1; }
+        p = p + 1;
+    }
+    if start < 0 { return ""; }
+    if end < 0 { end = p; }
+    if end - start > 48 { end = start + 48; }
+    return str_sub(g_source, start, end - start);
+}
+
 fn infer_expr(node: int) -> int {
     if node < 0 { return TI_UNIT; }
 
@@ -3134,7 +3154,8 @@ fn infer_expr(node: int) -> int {
                                                     + " " + int_str(ast_col(arg_n))
                                                     + " " + int_str(pi2)
                                                     + " " + int_str(pti) + " " + int_str(ati)
-                                                    + " " + istr_get(fi_name(fi)));
+                                                    + " " + istr_get(fi_name(fi))
+                                                    + " @@ " + s1p_src_frag(ast_line(arg_n)));
                                         }
                                     }
                                 }
