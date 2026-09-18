@@ -711,6 +711,10 @@ fn analysis_at_items(prefix: string) -> string {
     if analysis_has_prefix("section", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("section", 3); first = 0; }
     if analysis_has_prefix("hotpatch", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("hotpatch", 3); first = 0; }
     if analysis_has_prefix("ffi", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("ffi", 3); first = 0; }
+    // 2(a) 视图内建（`@ptr_of`/`@str_of`）：语言面新增内建必须同批进 LSP 表——
+    // 由 `tests/bootstrap/…` 的 L1/L2/L3（真源枚举 · 双向差集）机械拦：缺一名即 L2 红。
+    if analysis_has_prefix("ptr_of", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("ptr_of", 3); first = 0; }
+    if analysis_has_prefix("str_of", prefix) != 0 { if first == 0 { out = out + ","; } out = out + analysis_citem("str_of", 3); first = 0; }
     return out;
 }
 
