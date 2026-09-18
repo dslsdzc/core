@@ -166,7 +166,7 @@
 | — | `#2026-09-18-14` | 2026-09-18 | 批 8 插值展开现场 | 【静默·预存崩溃】`if` 表达式作拼接操作数 ⇒ rc=139（手写同形亦崩）⇒ 插值 bool 洞不能合成 if，改走 `bool_str` 调用面 |
 | — | `#2026-09-18-15` | 2026-09-18 | 批 8 插值展开实测 | 【自源编码约束】bootstrap 后端不支持按位 `|`/`&`（`NotImplementedError: Binary op |`）⇒ 编译器源码里写按位运算 = 构建期硬失败 |
 | — | `#2026-09-18-16` | 2026-09-18 | 对抗复核实证 | 【静默·防线单点】`.cir` 指纹不覆盖函数体（`func_fingerprint` 的 body walk 是 stub）⇒ **身份闸是唯一复活防线** |
-| — | `#2026-09-18-17` | 2026-09-18 | 批 8 S2 实测 | 【自源编码约束·**两机制须分开**】bootstrap 面缺的**不是一件事**：**语法层**（`as` = token 级 parse 失败；`\|`/`&` = parse 通过但**后端** `NotImplementedError`）与**内建形态面**（`@name(args)` = `Expected IDENT, got LPAREN`；自托管面**已支持**且未注册名 fail-closed）⇒ 判定程序与误读纠正见 `docs/superpowers/plans/2026-09-18-view-builtins-2a.md` §6；与 `-15` 同族 |
+| — | `#2026-09-18-17` | 2026-09-18 | 批 8 S2 实测 | 【自源编码约束·**两机制须分开**】**剩余两条（皆为语法层）**：`as` = token 级 parse 失败；`\|`/`&` = parse 通过但**后端** `NotImplementedError`。~~**内建形态面**（`@name(args)` = `Expected IDENT, got LPAREN`）~~ **已随 2(a) 闭合（bootstrap 补产生式；PR #132）**——该机制现只对**未注册名** fail-closed。⇒ 判定程序与误读纠正见 `docs/superpowers/plans/2026-09-18-view-builtins-2a.md` §6；与 `-15` 同族 |
 | — | `#2026-09-18-18` | 2026-09-18 | 批 8 2(a) 裁定登记 | 【机制·**登记备选**】裸字缓冲**改存 intern 索引**（机制 B，替代视图内建）——被裁**不并入 2(a)、不作子集夹带**；将来仅对「该字确实只在本档内往返」的具体站点逐个评估（须证该字从不被当指针消费：syscall/FFI/长度头；并评估 intern 表增长）。硬证据 = **string 值在原生 ELF 下是指针**（`str_len` 读 `s-8` 长度头）⇒ B 是**存储语义变更**而非等价替换 |
 | — | `#2026-09-18-19` | 2026-09-18 | 批 8 2(a) 实测 | 【判据覆盖面·两条】(A) **S1P 打点 = 直调实参面**，**返回位不在覆盖内**（本批实测：`cli_get`/`cli_arg` 声明 `-> string` 却 `return r64(...)` 同类点未被 68 点台账收录；已随 2(a) 修）⇒ S3 硬错若照现状只挂实参面，**返回位同类点仍会静默**；(B) **`unsafe { expr; }` 块内分号 ⇒ 块值 = unit**：`return unsafe { X; };` 让该路径返回 unit——**bootstrap 面**只出非致命警告且解释器仍按值执行（实测 42），**self-hosted 面** `error[TF01]` 硬错（两面**诊断面分歧**，与 `-12` 同族） |
 | — | `#2026-09-18-12` | 2026-09-18 | 批 8 PR-B₁ S1′ 活性自证 | 【静默·两前端分歧】非 Literal 全局初值经 Python bootstrap 构建 corec 时**静默丢成 0**（`= -1` 解析为 `UnaryOp`；self-hosted corec 正常） |
@@ -1790,17 +1790,18 @@
 |---|---|---|---|
 | **语法层（token）** | `as` 转换 | `SyntaxError: Expected SEMI, got TokenType.AS`（**无 `@`**、token 级） | 支持 |
 | **语法层（后端算子）** | `\|` / `&` 按位 | **parse 通过**；构建期 `NotImplementedError: Binary op \|`（**后端**而非 parser） | 支持 |
-| **内建形态面** | `@name` / `@name(args)` | `Expected TokenType.IDENT, got TokenType.LPAREN '('`（带括号）/ `got SEMI ';'`（无括号、表达式位） | `@name(args)` **已支持**；未注册名 **fail-closed**（`error[N01]: unknown @ builtin`，实测 rc=1） |
+| ~~**内建形态面**~~ **（已闭合）** | `@name` / `@name(args)` | ~~`Expected TokenType.IDENT, got TokenType.LPAREN '('`（带括号）/ `got SEMI ';'`（无括号、表达式位）~~ **已随 2(a) 闭合**：bootstrap 补 `@name(args)` 产生式（PR #132）⇒ 两面皆绿；**残留面 = 未注册名 fail-closed**（两面一致：bootstrap 报 `unknown @ builtin`，自托管报 `error[N01]`） | `@name(args)` **已支持**；未注册名 **fail-closed**（`error[N01]: unknown @ builtin`，实测 rc=1） |
 
 - **判定程序（两面各一次，30 秒）**：① 自托管面 `corec check <探针>` 绿 ⇒ 语言没缺、只是 bootstrap 缺；
   ② bootstrap 面直接调 `Parser(Lexer(src).tokenize()).parse_compilation_unit()`，记**异常形态**；
-  ③ 对号入座（`got AS` / `NotImplementedError` / `Expected IDENT, got LPAREN|SEMI`）。
+  ③ 对号入座（`got AS` / `NotImplementedError`）。**注（2(a) 后）**：原第三类信号 `Expected IDENT, got LPAREN|SEMI`（内建形态面）
+  **已随本批闭合**——bootstrap 现支持 `@name(args)`；若再见到该信号，说明动的是**别的** `@` 形态（如标记位），按新形态重新取证。
 - **最小对拍（把「名字」与「形态」分开）**：同名两档 `@name` 与 `@name(x)` —— **只有带括号档红** ⇒ 缺产生式（如 `@raw_int`/`@sizeOf`）；
   **两档皆红** ⇒ 该 `@` 在表达式位根本不成立（如 `@fast`）。
 - **误读纠正**：`@sizeOf(...)`/`@raw_int(...)` **在语料（自托管面）可用**（`tests/suite/opt_dex_test.cr` 15 处、`apx_conversion_test.cr` 13 处是活证），
   **只在编译器源码（bootstrap 面）不可用** ⇒ 「不可用」必须**带面**说。**佐证**：corec 清单 45 档去注释去字符串后含 `@` 的行 = **0**（实测）。
 - **后果面**：新增内建（如 `@ptr_of`/`@str_of`，见 2(a) 计划）= **bootstrap 侧必做项**（`parser.py` 产生式 + 未知名 fail-closed + 视图直通发射），
-  否则自源写不出、`check` job 当场红。
+  否则自源写不出、`check` job 当场红。**（已随 2(a) 落地：PR #132 —— 本条现为「下次新增内建时照做」的规则，不是待办。）**
 
 ### 2026-09-18-18. 【机制·登记备选】裸字缓冲**改存 intern 索引**（机制 B）——被裁**不并入 2(a)**（批 8 2(a) 裁定；取号基准 = develop 当天已有最大 N = 17）
 

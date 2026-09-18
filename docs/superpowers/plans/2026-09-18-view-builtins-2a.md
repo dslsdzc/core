@@ -129,6 +129,12 @@ S2 残桶 68 点全部是 **「同一个 64 位字的两种看法」**（不是�
 
 ⇒ bootstrap 表达式位的 `@` **只有** `@project file::symbol`（`parser.py:557` ProjectAccess）一种产生式：
 `@name` 后必须跟 IDENT，所以**任何** `@name(...)` 与裸 `@name` 都断在同一处。
+
+> **〔加注（2026-09-18 实施批；原文一字未改，只增不删）〕本节的「约束」已随本批解除**：`parser.py` 现有
+> **三种**形态分流（`@name(args)` / `@name` / `@project file::symbol`，按紧随 token 判）+ `Builtin` 节点 +
+> 未知名 fail-closed；上面三行实测信号（`got LPAREN`/`got SEMI`）**只对「本批之前的 bootstrap」成立**。
+> **同批新增能力面**：bootstrap 侧补了 `unsafe` 支持（此前**完全缺失**：checker `Unsupported expression` +
+> ir_gen `NotImplementedError`）——凡把「bootstrap 无 unsafe」当现状的陈述同样失效。
 **佐证（自源面）**：corec 清单 45 档**去注释去字符串后含 `@` 的行 = 0**（实测）⇒ 自源今天对 `@` 内建面**零触碰**，
 这也解释了为什么这个缺口一直不可见。
 
@@ -148,10 +154,14 @@ S2 残桶 68 点全部是 **「同一个 64 位字的两种看法」**（不是�
 | **语法层（后端算子）** | `\|` / `&` | **parse OK**，构建期 `NotImplementedError: Binary op \|`（**后端**，不是 parser） | 绿 |
 | **内建表/形态** | `@name` / `@name(args)` | `Expected IDENT, got LPAREN`（带括号）或 `got SEMI`（无括号）；**判定要点 = 与「同名不带括号」对照** | `@name(args)` 已支持；**未注册名 fail-closed**（`error[N01]: unknown @ builtin` rc=1，实测） |
 
+> **〔加注（2026-09-18 实施批；表内原文一字未改，只增不删）〕本行「内建表/形态」面已随本批（PR #132）闭合**：
+> bootstrap 侧补了 `@name(args)` 产生式 + `Builtin` 节点 + 未知名 fail-closed ⇒ **该信号不再是现状缺口**；
+> 本表**剩余有效行 = 上面两条语法层**（`as` token 级 / `|`&`&` 后端算子）。
+
 **判定程序（30 秒，两面各一次）**：
 1. **自托管面**：`./build/corec check <探针>` → 绿 ⇒ 语言没缺，只是 bootstrap 缺；
 2. **bootstrap 面**：`python3 -c` 直接用 `corec.frontend.parser.Parser(Lexer(src).tokenize()).parse_compilation_unit()`（模板见本批侦查脚本）→ 记**异常形态**；
-3. **对号**：`got AS` ⇒ 语法层；parse OK 而构建期 `NotImplementedError` ⇒ 后端算子；**`Expected IDENT, got LPAREN/SEMI` ⇒ 内建形态面**；
+3. **对号**：`got AS` ⇒ 语法层；parse OK 而构建期 `NotImplementedError` ⇒ 后端算子；**`Expected IDENT, got LPAREN/SEMI` ⇒ 内建形态面（⚠ 已随本批闭合，见上注）**；
 4. **最小对拍**（把「名字」与「形态」分开）：同名两档 `@name` / `@name(x)` —— **只有带括号档红** ⇒ 缺产生式；**两档皆红** ⇒ 该 `@` 在表达式位根本不成立（如 `@fast`）。
 
 **误读纠正（必须一并落纸）**：`@sizeOf(...)` **在语料（自托管面）可用**——`tests/suite/opt_dex_test.cr`（15 处 `@raw_int`）等档就是活证；
