@@ -4142,10 +4142,19 @@ fn infer_expr(node: int) -> int {
         if str_eq(name, "raw_int") != 0 {
             if args < 0 { check_error(EC_N_UNDEFINED, "@raw_int requires an expression", ast_line(node), ast_col(node)); return TI_NEVER; }
             av := infer_expr(ast_a(args));
-            // 参数校验：dex（或 int——int 原值即其缩放值）才可取其原值；其余类型报错
+            // 参数校验：**有「原值」语义的类型**才可取其原值——
+            //   · dex（缩放位原值）· int（原值即其缩放值）· **指针（地址字）**：
+            //     表达式 `&x` 由本文件一元取地址分支定为 `TYP_PTR`（`alloc_type(TYP_PTR, inner, 0)`），
+            //     语料形态 = `tests/suite/ptr_ref_first.cr`（`@raw_int(q) - @raw_int(p)` 取字节差）。
+            // 其余类型**仍报错**：`TYP_REF`/`TYP_SLICE`/`TYP_ARRAY` 等——聚合无「原值」概念，或语义未实测
+            //   ⇒ **没证据就不扩**（与「range 门零命中就不写退出条款」同一条纪律）。
+            // 注：类型表下标 0..8 = 标量/占位（`TI_INT`..`TI_DEX_S`）⇒ 仅当 `av > TI_DEX_S` 才查表，
+            //     否则会拿标量下标读到占位行的 kind（假阳性来源）。
             if av != TI_DEX && av != TI_INT && av != TI_NEVER {
-                check_error(EC_TF_ARG_TYPE, "@raw_int requires a dex (or int) expression", ast_line(node), ast_col(node));
-                return TI_NEVER;
+                if !(av > TI_DEX_S && get_type_kind(av) == TYP_PTR) {
+                    check_error(EC_TF_ARG_TYPE, "@raw_int requires a dex (or int) or pointer expression", ast_line(node), ast_col(node));
+                    return TI_NEVER;
+                }
             }
             return TI_INT;
         }
