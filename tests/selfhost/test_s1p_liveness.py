@@ -18,10 +18,11 @@ print 时 `opt_dex_test.cr` 的 `.ccr` 187029→187053（**+24B**，ELF 同）�
 **判据**：① 必命中探针在 `CORE_S1P=1` 下逐字段命中（活性）；② 同一探针在默认位/`CORE_S1P=0` 下**零行**；
 ③ 无失配程序在开位下**零行**（负控：打点只在真不匹配时发）；④ extern 形走 `9918`、默认位零行；
 ⑤ **全 `tests/suite/*.cr` 在默认位零打点**（「默认零足迹」的语料面；产物逐字节面见批级对拍）；
-⑦ **自源台账 bool 桶归零**：`check src/compiler/main.cr` 的台账里 `arg_ti=2`（bool ← int 形参）点必须为 0
-（bool 类 171 处已改 `ts_check_b`/`ps_check_b` 签名 helper，逐处留痕见
-`docs/superpowers/plans/2026-09-18-bool171-sites.tsv`；残桶 = string↔int，归 S2 路线 1）——
-**先断言台账非空**：否则「0 桶」与「打点根本没装」不可区分（本档存在的全部理由）。
+⑦ **自源台账归零**（`check src/compiler/main.cr`）：**总点必须为 0，bool 桶必须为 0**。
+口径变迁：2(a) 前为「非空 + bool 桶 0」（当时残 68 点 string↔int，bool 类 171 处已改签名 helper，
+逐处留痕见 `docs/superpowers/plans/2026-09-18-bool171-sites.tsv`）；2(a) 迁移把 68 点全部显式化
+（视图内建 + `istr_get`）后**总点合法归 0** ⇒ 断言升级为「总点 == 0」（更严）。
+**「0」的活性由判据①背书**（必命中探针恰 1 条命中）：没有①，「0 点」与「打点根本没装」不可区分。
 """
 
 import os
@@ -225,7 +226,11 @@ def main():
         print(f"    {name}: {bad}")
     expect("corpus_default_silent", not corpus_hits, corpus_hits[:3])
 
-    # ⑦ 自源台账：bool 桶必须归零（**先证扫面非空**——「0」与「没装」必须可区分）
+    # ⑦ 自源台账：**期望为 0**（2(a) 迁移完成后，68 点已全部显式化；bool 桶亦 0）。
+    #    「0」的活性由**判据①**背书（必命中探针在 `CORE_S1P=1` 下恰 1 条命中）——
+    #    没有①，「0」与「打点没装」不可区分；有了①，本档的 0 是真干净。
+    #    口径变迁（2026-09-18）：2(a) 前本档断言「非空 + bool 桶 0」（当时残 68 点）；
+    #    迁移后总点合法归 0 ⇒ 断言升级为「**总点 == 0**」（更严：任何新引入的实参面失配都会让它红）。
     clean_cache()
     env = dict(os.environ)
     env["CORE_S1P"] = "1"
@@ -234,9 +239,9 @@ def main():
     rows = [m.groups() for m in (HIT.match(l) for l in r.stdout.split("\n")) if m]
     bools = [x for x in rows if x[5] == "2"]
     print(f"[⑦ 自源台账] rc={r.returncode} · 总点 {len(rows)} · bool 桶 {len(bools)}"
-          + (f" ← {bools[:3]}" if bools else ""))
-    expect("selfsource_ledger_nonvacuous", len(rows) > 0,
-           "台账为空 ⇒ 扫面没生效（打点没装/锚定格式漂了）——此时 bool 桶=0 无意义")
+          + (f" ← {rows[:3]}" if rows else ""))
+    expect("selfsource_ledger_zero_total", not rows,
+           f"总点 {len(rows)}（2(a) 后应为 0）← {rows[:2]}")
     expect("selfsource_bool_bucket_zero", not bools, bools[:3])
 
     print(("S1P LIVENESS " + ("PASS" if ok else "FAIL")) + f" · 失败项 = {fails}")
