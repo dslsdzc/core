@@ -328,6 +328,10 @@ case "$CI_JOB_NAME" in
     # **未知名 fail-closed**（③：两面都报错）· **安全面 (ii)**（视图在 `unsafe` 块外 ⇒ 两面硬错）·
     # 实参类型两面拒绝。对照必须同处 `unsafe` 包络内（`unsafe` 本身带 +158B 区域元数据，与视图无关）。
     python3 tests/selfhost/test_view_builtins.py
+    # (i) 小批：`@raw_int` 放宽接受**指针**（两向钉子）——正控 = ptr_ref_first 诊断面转绿 + 两腿值面；
+    # 负控 = 6 类仍拒（string/bool/array/slice/ref_type/struct，check 面 rc=1 + TF07 + 文案含 or pointer）+ 既有 dex/int 仍受；
+    # **负控只写 check 面**：TF07 是 build-scope 豁免码 ⇒ 「build 面零产物」在本批恒假（豁免未撤，撤条归 (甲) 刀 4）。
+    python3 tests/selfhost/test_raw_int_ptr.py
     ;;
 
   suite)
