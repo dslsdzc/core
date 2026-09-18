@@ -405,7 +405,9 @@ def main() -> int:
                    f"锚点={n1}/{n2} · 码 1024={n3} · 套件期望 error[P24]={'error[P24]' in ext}"))
 
     # M9：条目 4（顶层兜底 ⇒ P25）——突变 = 兜底退回裸 advance_tok() ⇒ 5 拒收例回 check=0
-    n1 = _once("src/compiler/parser.cr", "if tok_k(cur_tok()) != T_EOF {")
+    # 锚点收紧（2026-09-18）：只用单行 `if tok_k(cur_tok()) != T_EOF {` 会被**无关新代码**撞形
+    # （插值展开批的 `interp_parse_holes` 曾加过同形行 ⇒ 本判据在 CI 假红）。改为**顶层兜底特有的两行合体**。
+    n1 = _once("src/compiler/parser.cr", "if tok_k(cur_tok()) != T_EOF {\n        check_error(EC_P_TOPLEVEL_TOKEN,")
     n2 = _once("src/compiler/parser.cr", "EC_P_TOPLEVEL_TOKEN")
     n3 = _once("src/compiler/parser.cr", "is_fileid := tk == T_FILEID;")
     n4 = _once("src/compiler/ast.cr", "EC_P_TOPLEVEL_TOKEN  : int = 1025;")

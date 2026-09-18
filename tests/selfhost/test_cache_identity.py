@@ -54,7 +54,7 @@ CACHE_DIR = BASE / ".core" / "cache" / "cir"
 # （未规范化装箱 bits / 读槽 TI_INT），与新语义不等价，命中即「坏 IR 复活成活产物 rc=0」。
 # **布局未变**（v19 与 v18/v17 同构：magic/ver/identity/fp/sig/name_len/name…）⇒ layout() 的
 # v17 分支按 VER_EXPECTED 复用。
-VER_EXPECTED = 21  # v21（2026-09-18 串域批 · 生成期 intern 日志）；前代 = 20（2026-09-17 缓存膨胀批）、19（批 5）、18（#2026-09-16-16 批 2）
+VER_EXPECTED = 22  # v21（2026-09-18 串域批 · 生成期 intern 日志）；前代 = 20（2026-09-17 缓存膨胀批）、19（批 5）、18（#2026-09-16-16 批 2）
 FNV_OFFSET = -3750763034362895579   # FNV-1 64 offset basis（signed i64）
 FNV_PRIME = 1099511628211
 M64 = 1 << 64
@@ -103,6 +103,7 @@ def identity_of(path: pathlib.Path) -> int:
 def layout(d: bytes):
     """按头部版本给出字段偏移（v17 = 本修复；v16 = 修复前布局，用于 RED 对照）。"""
     ver = struct.unpack_from("<q", d, 8)[0]
+    # v22（2026-09-18 插值展开批）：**布局与 v21 相同**（只是语义面换代）⇒ 同一组偏移
     if ver == VER_EXPECTED:          # magic/ver/identity/fp/sig/name_len
         return {"ver": ver, "ident_off": 16, "name_len_off": 40, "name_off": 48}
     if ver == 16:                    # magic/ver/fp/sig/name_len（无身份字段）

@@ -551,6 +551,10 @@ fn gen_clone_tree(node: int) -> int {
     //    形参代入由 EXPR_IDENT 分支承担（clone 时经 gen_lookup_subst），故此处只递归 a。
     //    **必配分支**：默认兜底会把 d（=0）当 AST 子节点克隆（读进节点 0）——显式分支消除该面。
     if k == EXPR_OPTIONAL { a2 := gen_clone_tree(a); n := ast_alloc(k, a2, b, c, iv, tv, d, ln, cl); gen_dedup_add(node, n); return n; }
+    // ── 插值洞（批 8 插值展开）：**理论不可达**（checker 已把洞就地改写为转换调用，早于本阶段的
+    //    克隆面）——但**必须显式分支**：默认兜底会把 `d` 当 AST 子节点（读进节点 0）或静默丢子树，
+    //    两者都是静默类。本分支 = 递归唯一的真子节点 `a`（洞表达式），并保留 `data`（洞文本）。
+    if k == EXPR_INTERP_HOLE { a2 := gen_clone_tree(a); n := ast_alloc(k, a2, b, c, 0, tv, d, ln, cl); gen_dedup_add(node, n); return n; }
 
     // ── Two children: `a` and `b` ──
     if k == EXPR_BINARY { a2 := gen_clone_tree(a); b2 := gen_clone_tree(b); n := ast_alloc(k, a2, b2, c, iv, tv, d, ln, cl); gen_dedup_add(node, n); return n; }

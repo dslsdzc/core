@@ -1384,6 +1384,17 @@ fn gen_expr(node: int) -> int {
         emit(IR_CONST, v, str_idx, 0, 0, TI_STR);
         return v;
     }
+    // 插值洞兜底（批 8 插值展开）：**洞应在 checker 就被就地改写**（见 checker.cr EXPR_INTERP_HOLE
+    // 分支：string 恒等 / int→int_str / bool→bool_str，其它 P028）。若仍有洞走到发射面，说明
+    // checker 漏走了某条路径（extern 早退 / 实例体 / 未来新路径）⇒ **响亮拒绝**（P029），
+    // **绝不**静默当空值或身份——那正是本批要消灭的静默类。
+    if ast_kind(node) == EXPR_INTERP_HOLE {
+        check_error(EC_P_INTERP_HOLE_LEAK, "internal: string interpolation hole reached codegen (checker rewrite missing)", ast_line(node), ast_col(node));
+        v := new_ir_var("interp_leak", TI_STR);
+        emit(IR_CONST, v, str_intern(""), 0, 0, TI_STR);
+        return v;
+    }
+
     if ast_kind(node) == EXPR_CHAR {
         v := new_ir_var("char", TI_CHAR);
         str_idx := ast_int_val(node);

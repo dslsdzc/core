@@ -1021,9 +1021,12 @@ fn analysis_token_type(ti: int) -> int {
 // 令牌索引 → 源文本字节跨度（从起始偏移 st 起按 kind 镜像 lexer 消耗规则）
 fn analysis_tok_span(ti: int, st: int, sl: int) -> int {
     k := r64(g_tokens, ti * ESZ_TOKEN + OFF_TK_KIND);
-    // 字符串/字符：开引号 → 未转义闭合引号（镜像 lexer：\x 转义 4 字节、
-    // 插值 ${...} 跳至 '}' 并多吃一字节、换行终止未闭合串）。未闭合
-    // 字符串末尾的反斜杠只能覆盖到源末，不能把 span 推出源缓冲区。
+    // 字符串/字符（镜像 lexer；批 8 插值展开后**词法把含洞字面量拆成 part** ⇒ 本函数按 part 计 span）：
+    //   · `T_STRING` = 字面**段**：开引号 → 未转义闭合引号 / **下一个 `${`**（段在此截断）/ 换行（未闭合）；
+    //   · `T_INTERP` = **洞** token：`${` + **花括号配平**（跳洞内字符串字面量与其转义）到配对 `}`，含 `}`。
+    // ⚠ 旧契约文字「跳至 `}` 并**多吃一字节**」= **把 bug 写成规格**（当时的镜像逐字复制了 lexer 的双推进，
+    //   实现在此已删）——2026-09-18 与 lexer 修复同批重定。未闭合串末尾的反斜杠只能覆盖到源末，
+    //   不能把 span 推出源缓冲区。
     if k == T_STRING || k == T_CHAR {
         q := analysis_source_byte(st, sl);
         p : ., mut = st + 1;
@@ -1036,16 +1039,34 @@ fn analysis_tok_span(ti: int, st: int, sl: int) -> int {
             }
             else if c == q { p = p + 1; break; }
             else if c == 10 { break; }
-            else if c == 36 && analysis_source_byte(p + 1, sl) == 123 {
-                p = p + 2;
+            else if c == 36 && analysis_source_byte(p + 1, sl) == 123 { break; }   // 段止于 `${`
+            else { p = p + 1; }
+        }
+        return p - st;
+    }
+    if k == T_INTERP {
+        // 洞 token 的源跨度 = `${` … 配对 `}`（配平；洞内字符串字面量与其转义整体跳过）
+        p : ., mut = st + 2;
+        depth : ., mut = 1;
+        loop {
+            if p >= sl { break; }
+            c := analysis_source_byte(p, sl);
+            if c == 10 { break; }
+            if c == 34 {
+                p = p + 1;
                 loop {
                     if p >= sl { break; }
-                    if analysis_source_byte(p, sl) == 125 { p = p + 1; break; }
+                    sc := analysis_source_byte(p, sl);
+                    if sc == 10 { break; }
+                    if sc == 92 { p = p + 2; continue; }
                     p = p + 1;
+                    if sc == 34 { break; }
                 }
-                if p < sl { p = p + 1; }   // 镜像 lexer 循环尾 _pos+1
+                continue;
             }
-            else { p = p + 1; }
+            if c == 123 { depth = depth + 1; }
+            if c == 125 { depth = depth - 1; if depth == 0 { p = p + 1; break; } }
+            p = p + 1;
         }
         return p - st;
     }

@@ -2570,6 +2570,20 @@ fn infer_call_args(first_arg: int) {
     }
 }
 
+// bool 洞的转换节点：改写为 `bool_str(x)` 调用（`fmt.cr`）。抽成函数是为了让 `infer_expr` 的
+// 分支保持单行、便于审计（转换表：string 恒等 · int→int_str · bool→bool_str · 其它 P028）。
+fn interp_bool_node(node: int, inner: int) -> int {
+    callee := alloc_node(EXPR_IDENT, 0, 0, 0, str_intern("bool_str"), 0, 0, ast_line(node), ast_col(node));
+    wrapper := alloc_node(EXPR_NONE, inner, -1, 0, 0, 0, 0, ast_line(node), ast_col(node));
+    ast_set_kind(node, EXPR_CALL);
+    ast_set_a(node, callee);
+    ast_set_b(node, wrapper);
+    ast_set_c(node, 1);
+    ast_set_data(node, 0);
+    ast_set_type_val(node, TY_STRING);
+    return TI_STR;
+}
+
 fn infer_expr(node: int) -> int {
     if node < 0 { return TI_UNIT; }
 
@@ -2599,6 +2613,64 @@ fn infer_expr(node: int) -> int {
         check_error(EC_N_UNDEFINED, "Undefined name '" + name + "'", ast_line(node), ast_col(node));
         return TI_NEVER;
     }
+    if ast_kind(node) == EXPR_INTERP_HOLE {
+        // 字符串插值洞（批 8 展开）：**就地改写**本节点为「带类型转换的表达式」——父节点只存索引
+        // ⇒ 无需父指针（扁平 AST 的天然便利）。转换表（维护者签字）：string 恒等 · int→`int_str` ·
+        // char→`chr` · bool→`if b {"true"} else {"false"}`（**不经 int**，遵「bool 不隐式转 int」裁定）；
+        // **其它类型（含 dex 两形态）⇒ P028 硬错**（fail-closed；dex 见下方实测注）。洞表达式由 parser
+        // 末尾统一解析到 a 槽；解析失败（a<0）⇒ 退化为空串（错误已由 parser 报过，不级联）。
+        inner := ast_a(node);
+        if inner < 0 || inner == node {
+            ast_set_kind(node, EXPR_STRING);
+            ast_set_a(node, 0); ast_set_b(node, 0); ast_set_c(node, 0);
+            ast_set_data(node, str_intern(""));
+            ast_set_type_val(node, TY_STRING);
+            return TI_STR;
+        }
+        hti := infer_expr(inner);
+        // 实测两条（2026-09-18，签名表的**落地更正**，逐条有实测）：
+        //   ① `bool` 洞**不**合成 `if` 表达式：分支需 `EXPR_BLOCK`、且实测 rc=139 ⇒ 改走 stdlib
+        //      `bool_str(b)`（`fmt.cr` 新增；**不经 int**，遵「bool 不隐式转 int」裁定，返回 "true"/"false"）。
+        //   ② `char` **本批不放开**（见下方 P028 注）：签名表原写 `char ⇒ chr`，但实测 char 的运行期值是
+        //      **字符串**（`ir_gen` EXPR_CHAR 发串常量），`chr(char)` 把串指针当码点 ⇒ 输出空；改走恒等则
+        //      触发**预存缺口** `string + char` = rc=139（`"c=" + ch` 独立复现）⇒ 须先修那条，属另案。
+        if hti == TI_STR {
+            // 恒等：把本节点改写成内层表达式的字段副本（父只存索引 ⇒ 副本即等价）
+            ast_set_kind(node, ast_kind(inner));
+            ast_set_a(node, ast_a(inner));
+            ast_set_b(node, ast_b(inner));
+            ast_set_c(node, ast_c(inner));
+            ast_set_int_val(node, ast_int_val(inner));
+            ast_set_type_val(node, ast_type_val(inner));
+            ast_set_data(node, ast_data(inner));
+            return infer_expr(node);
+        }
+        if hti == TI_BOOL { return interp_bool_node(node, inner); }
+        if hti == TI_INT {
+            cname := "int_str";
+            callee := alloc_node(EXPR_IDENT, 0, 0, 0, str_intern(cname), 0, 0, ast_line(node), ast_col(node));
+            wrapper := alloc_node(EXPR_NONE, inner, -1, 0, 0, 0, 0, ast_line(node), ast_col(node));
+            ast_set_kind(node, EXPR_CALL);
+            ast_set_a(node, callee);
+            ast_set_b(node, wrapper);
+            ast_set_c(node, 1);
+            ast_set_data(node, 0);
+            ast_set_type_val(node, TY_STRING);
+            return TI_STR;
+        }
+        // 不可插值类型（本批 fail-closed）：
+        //   · `dex`（TI_DEX / TI_DEX_S）：本仓 dex 有 bits 与 scaled 两表示，`dex_str` 只按其一工作 ⇒ 不猜；
+        //   · `char`：**预存缺口**——char 的运行期值虽是字符串，但 `string + char` 实测 **rc=139**
+        //     （`"c=" + ch` 独立复现，与本批无关）⇒ 洞路径必然踩同一坑，故本批不放开；
+        //   · 其它（struct/enum/optional/array/函数…）本就不该插值。
+        check_error(EC_P_INTERP_TYPE, "string interpolation supports string/int/bool here; for dex/char or other types convert explicitly (dex: int_str(@raw_int(d)); char: pre-existing 'string + char' defect, separately registered)", ast_line(node), ast_col(node));
+        ast_set_kind(node, EXPR_STRING);
+        ast_set_a(node, 0); ast_set_b(node, 0); ast_set_c(node, 0);
+        ast_set_data(node, str_intern(""));
+        ast_set_type_val(node, TY_STRING);
+        return TI_STR;
+    }
+
     if ast_kind(node) == EXPR_NONE {
         // Wrapper node in struct literal: forward to inner expression
         if ast_a(node) >= 0 && ast_a(node) != node { return infer_expr(ast_a(node)); }
