@@ -166,7 +166,7 @@
 | — | `#2026-09-18-14` | 2026-09-18 | 批 8 插值展开现场 | 【静默·预存崩溃】`if` 表达式作拼接操作数 ⇒ rc=139（手写同形亦崩）⇒ 插值 bool 洞不能合成 if，改走 `bool_str` 调用面 |
 | — | `#2026-09-18-15` | 2026-09-18 | 批 8 插值展开实测 | 【自源编码约束】bootstrap 后端不支持按位 `|`/`&`（`NotImplementedError: Binary op |`）⇒ 编译器源码里写按位运算 = 构建期硬失败 |
 | — | `#2026-09-18-16` | 2026-09-18 | 对抗复核实证 | 【静默·防线单点】`.cir` 指纹不覆盖函数体（`func_fingerprint` 的 body walk 是 stub）⇒ **身份闸是唯一复活防线** |
-| — | `#2026-09-18-17` | 2026-09-18 | 批 8 S2 实测 | 【自源编码约束】bootstrap 解析器不支持 `as` ⇒ 编译器源码用 `as` 会在 `check` job（bootstrap 构建面）断构建；与 `-15`（`|`/`&`）同族 |
+| — | `#2026-09-18-17` | 2026-09-18 | 批 8 S2 实测 | 【自源编码约束·**两机制须分开**】bootstrap 面缺的**不是一件事**：**语法层**（`as` = token 级 parse 失败；`\|`/`&` = parse 通过但**后端** `NotImplementedError`）与**内建形态面**（`@name(args)` = `Expected IDENT, got LPAREN`；自托管面**已支持**且未注册名 fail-closed）⇒ 判定程序与误读纠正见 `docs/superpowers/plans/2026-09-18-view-builtins-2a.md` §6；与 `-15` 同族 |
 | — | `#2026-09-18-12` | 2026-09-18 | 批 8 PR-B₁ S1′ 活性自证 | 【静默·两前端分歧】非 Literal 全局初值经 Python bootstrap 构建 corec 时**静默丢成 0**（`= -1` 解析为 `UnaryOp`；self-hosted corec 正常） |
 
 
@@ -1781,6 +1781,24 @@
   这与「自源即语料」同族，但方向相反：那边是**诊断面**（任一条诊断即红），这边是**语法面**（不支持的语法即断构建）。
 - **修法方向（备选）**：(a) 登记为编码约束（现状）；(b) bootstrap 解析器补 `as`（属 bootstrap 面，另批）；
   (c) 在 CI `check` 前置一条「编译器源码禁用 `as`」的字面扫描（注意假阳：注释/字符串里的 `as`；须锚定词法面）。
+
+#### 机制分流（2026-09-18 补；**「bootstrap 面不支持」必须说清是哪一种**）
+
+| 机制 | 形态 | bootstrap 实测信号（今日） | 自托管面 |
+|---|---|---|---|
+| **语法层（token）** | `as` 转换 | `SyntaxError: Expected SEMI, got TokenType.AS`（**无 `@`**、token 级） | 支持 |
+| **语法层（后端算子）** | `\|` / `&` 按位 | **parse 通过**；构建期 `NotImplementedError: Binary op \|`（**后端**而非 parser） | 支持 |
+| **内建形态面** | `@name` / `@name(args)` | `Expected TokenType.IDENT, got TokenType.LPAREN '('`（带括号）/ `got SEMI ';'`（无括号、表达式位） | `@name(args)` **已支持**；未注册名 **fail-closed**（`error[N01]: unknown @ builtin`，实测 rc=1） |
+
+- **判定程序（两面各一次，30 秒）**：① 自托管面 `corec check <探针>` 绿 ⇒ 语言没缺、只是 bootstrap 缺；
+  ② bootstrap 面直接调 `Parser(Lexer(src).tokenize()).parse_compilation_unit()`，记**异常形态**；
+  ③ 对号入座（`got AS` / `NotImplementedError` / `Expected IDENT, got LPAREN|SEMI`）。
+- **最小对拍（把「名字」与「形态」分开）**：同名两档 `@name` 与 `@name(x)` —— **只有带括号档红** ⇒ 缺产生式（如 `@raw_int`/`@sizeOf`）；
+  **两档皆红** ⇒ 该 `@` 在表达式位根本不成立（如 `@fast`）。
+- **误读纠正**：`@sizeOf(...)`/`@raw_int(...)` **在语料（自托管面）可用**（`tests/suite/opt_dex_test.cr` 15 处、`apx_conversion_test.cr` 13 处是活证），
+  **只在编译器源码（bootstrap 面）不可用** ⇒ 「不可用」必须**带面**说。**佐证**：corec 清单 45 档去注释去字符串后含 `@` 的行 = **0**（实测）。
+- **后果面**：新增内建（如 `@ptr_of`/`@str_of`，见 2(a) 计划）= **bootstrap 侧必做项**（`parser.py` 产生式 + 未知名 fail-closed + 视图直通发射），
+  否则自源写不出、`check` job 当场红。
 
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
