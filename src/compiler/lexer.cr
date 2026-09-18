@@ -468,10 +468,16 @@ fn tokenize(_src: string) {
             continue;
         }
 
-        // String interpolation
+        // 字符串字面量（含 `${...}` 插值）。含插值的字面量**分段发 token**：段 = T_STRING、洞 = T_INTERP，
+        // 由 parser 组装为 `seg + conv(hole)` 链、checker 按洞类型就地改写转换（见 ast.cr EXPR_INTERP_HOLE）。
+        // **无洞字面量与旧实现逐字相同**（单个 T_STRING、同 line/col、iv=0）⇒ 产物零足迹。
         if c == 34 {
             _pos = _pos + 1;
+            sp : ., mut = _pos;                     // 串内容起点（同行内换算列；串内不跨行）
+            seg_pos : ., mut = sp;                  // 当前段起点
+            run_start : ., mut = g_token_count;     // 本字面量首 token（末尾回填 iv）
             str_val : ., mut = "";
+            has_hole : ., mut = 0;
             loop {
                 cc := cur_char_at(_src, _pos, _slen);
                 if cc == 0 || cc == 10 { break; }
@@ -495,33 +501,102 @@ fn tokenize(_src: string) {
                     }
                     else { str_val = str_val + chr(esc); }
                 } else if cc == 36 && peek_at(_src, _pos, _slen) == 123 {
-                    // 插值 `${...}`：本前端**不展开**（与 bootstrap 词法一致——原文**逐字进串值**）。
-                    // ⚠ 修复（2026-09-18）：原实现为 `_pos = _pos + 2` + 跳至 `}` 的 skip 循环，
-                    //   但**循环尾还有一句通用 `_pos = _pos + 1`** ⇒ **双推进**，吃掉 `}` 后第一个字符：
-                    //   ① 该字符静默丢失（`"A${7}B"` 曾得 `A`）；② 若那正是收尾引号 ⇒ 串**不以引号结束**、
-                    //   一路吞到行尾（`cc == 10` 才 break）⇒ 同行的 `;`/**`}`** 一并进串 ⇒ parser 停在
-                    //   嵌套态 ⇒ 其后每个顶层 `fn` 报 P21 级联（实测单行 `fn main() -> int { s := "x=${7}"; return 0; }`
-                    //   15 条 P21；把 `}` 换行则 0 条 = 判别实验）。引入点 = wqorlmrz(2026-07-09，本分支加入处；
-                    //   其父修订无 "Interpolation")。扫面契约见 `src/lsp/analysis.cr:1024`。
-                    //   ⇒ 本分支**自行推进到位**并以 `continue` 收口（**绝不落到循环尾的 `_pos += 1`**）。
-                    // 扫描规则与旧实现一致（跳至**首个** `}` 含它；换行/EOF 终止未闭合插值），
-                    // 差别只在**把扫过的原文原样进串值**、且不多吃一字节。
-                    str_val = str_val + "$";
-                    _pos = _pos + 1;                    // 指向 `{`
-                    loop {
-                        ic := cur_char_at(_src, _pos, _slen);
-                        if ic == 0 || ic == 10 { break; }   // 未闭合：与字符串同规则（换行终止）
-                        str_val = str_val + chr(ic);
-                        _pos = _pos + 1;
-                        if ic == 125 { break; }             // 含收尾 `}`
+                    // ── 插值洞 `${...}` ────────────────────────────────────────────
+                    // 扫描 = **花括号配平**（`${S{f=1}}` 取到配对 `}`；旧「跳至首个 `}`」规则会截断），
+                    // 洞内字符串字面量（含转义）整体跳过；换行/EOF 终止 ⇒ 未闭合由 parser 报 P027。
+                    if str_len(str_val) > 0 {
+                        col : ., mut = start_col;
+                        if seg_pos != sp { col = start_col + 1 + (seg_pos - sp); }
+                        add_tok_str(T_STRING, str_val, start_line, col);
                     }
+                    str_val = "";
+                    has_hole = 1;
+                    hs : ., mut = _pos + 2;
+                    hp : ., mut = hs;
+                    depth : ., mut = 1;
+                    loop {
+                        hc := cur_char_at(_src, hp, _slen);
+                        if hc == 0 || hc == 10 { break; }
+                        if hc == 34 {
+                            hp = hp + 1;
+                            loop {
+                                sc := cur_char_at(_src, hp, _slen);
+                                if sc == 0 || sc == 10 { break; }
+                                if sc == 92 { hp = hp + 2; continue; }
+                                hp = hp + 1;
+                                if sc == 34 { break; }
+                            }
+                            continue;
+                        }
+                        // 洞内 **char 字面量** 整体跳过（`'{'` 里的 `{` 不得参与配平——对抗复核点名的漏点①）
+                        if hc == 39 {
+                            hp = hp + 1;
+                            loop {
+                                cc2 := cur_char_at(_src, hp, _slen);
+                                if cc2 == 0 || cc2 == 10 { break; }
+                                if cc2 == 92 { hp = hp + 2; continue; }
+                                hp = hp + 1;
+                                if cc2 == 39 { break; }
+                            }
+                            continue;
+                        }
+                        // 洞内 **行注释** 整体跳过（漏点②）
+                        if hc == 47 && cur_char_at(_src, hp + 1, _slen) == 47 {
+                            loop {
+                                cc3 := cur_char_at(_src, hp, _slen);
+                                if cc3 == 0 || cc3 == 10 { break; }
+                                hp = hp + 1;
+                            }
+                            continue;
+                        }
+                        // 洞内 **块注释** 整体跳过（漏点③）
+                        if hc == 47 && cur_char_at(_src, hp + 1, _slen) == 42 {
+                            hp = hp + 2;
+                            loop {
+                                cc4 := cur_char_at(_src, hp, _slen);
+                                if cc4 == 0 { break; }
+                                if cc4 == 42 && cur_char_at(_src, hp + 1, _slen) == 47 { hp = hp + 2; break; }
+                                hp = hp + 1;
+                            }
+                            continue;
+                        }
+                        if hc == 123 { depth = depth + 1; }
+                        if hc == 125 { depth = depth - 1; if depth == 0 { break; } }
+                        hp = hp + 1;
+                    }
+                    cflag : ., mut = 4;                          // iv bit2 = 洞已闭合
+                    if cur_char_at(_src, hp, _slen) != 125 { cflag = 0; }
+                    ti := g_token_count;
+                    add_tok_str(T_INTERP, str_sub(_src, hs, hp - hs), start_line, start_col + 1 + (hs - sp));
+                    w64(g_tokens, ti * ESZ_TOKEN + OFF_TK_INTVAL, cflag);
+                    _pos = hp;
+                    if cflag != 0 { _pos = _pos + 1; }
+                    seg_pos = _pos;
                     continue;
                 } else {
                     str_val = str_val + chr(cc);
                 }
                 _pos = _pos + 1;
             }
-            add_tok_str(T_STRING, str_val, start_line, start_col);
+            if str_len(str_val) > 0 || has_hole == 0 {
+                col2 : ., mut = start_col;
+                if seg_pos != sp { col2 = start_col + 1 + (seg_pos - sp); }
+                add_tok_str(T_STRING, str_val, start_line, col2);
+            }
+            if has_hole != 0 {
+                // 回填 run 内各 part 的 iv：+1 = 属插值字面量 · +2 = 其后还有 part（洞闭合位 4 保留）。
+                // ⚠ 用加法不用按位或：**bootstrap 后端不支持 `|`/`&`**（`NotImplementedError: Binary op |`，实测）。
+                // 目的：parser 只把**同一字面量**的 part 连成一条链（`"${x}" "y"` 是两个字面量，不连）。
+                ri : ., mut = run_start;
+                loop {
+                    if ri >= g_token_count { break; }
+                    iv : ., mut = r64(g_tokens, ri * ESZ_TOKEN + OFF_TK_INTVAL);
+                    iv = iv + 1;
+                    if ri + 1 < g_token_count { iv = iv + 2; }
+                    w64(g_tokens, ri * ESZ_TOKEN + OFF_TK_INTVAL, iv);
+                    ri = ri + 1;
+                }
+            }
             _pos = skip_ws(_src, _pos, _slen);
             continue;
         }

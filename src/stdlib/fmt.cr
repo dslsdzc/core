@@ -153,6 +153,17 @@ fn str_int(s: string) -> int {
 fn to_str(n: int) -> string {
     return int_str(n);
 }
+// 字符串插值用（批 8 插值展开）：`bool` 洞的转换。**不经 int**——遵维护者「bool 不隐式转 int」裁定，
+// 故不写 `int_str(b)`，而按真值给出 `"true"`/`"false"`。
+// ⚠ 为何必须是「函数」而非合成 `if` 表达式（实测）：`"v=" + if b { "true" } else { "false" }`
+// **rc=139**（手写同形亦崩 = 预存缺陷，另立条目）⇒ 转换只能走调用面，本函数即该调用面。
+// ⚠ 代价（实测、已上报）：本函数进 `fmt.cr` ⇒ **所有 `import fmt` 程序的产物变大**
+// （pa ELF 28822→28854 = +32B、`.ccr` +725B）⇒ canary 载体面变化，按 §6 纪律停下上报 + 同批重锁。
+fn bool_str(b: bool) -> string {
+    if b { return "true"; }
+    return "false";
+}
+
 
 // Format string: replace {} with args sequentially.
 // Example: format("x = {} and y = {}", int_str(x), int_str(y))

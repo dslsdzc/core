@@ -395,6 +395,64 @@ fn is_upper_first(s: string) -> bool {
     return false;
 }
 
+// ── 字符串插值展开（批 8 裁定 (b)）：词法已把含 `${...}` 的字面量拆成 part 序列 ─────────
+// part = T_STRING（字面段）或 T_INTERP（洞；lexeme = 洞内原文）。
+// iv 约定（lexer 回填，见 lexer.cr 字符串分支；**用加法不用按位或**——bootstrap 后端不支持 `|`/`&`）：
+// +1 = 属含插值的字面量 · +2 = 其后还有 part · 4（仅 T_INTERP）= 洞已闭合 ⇒ 判据 `iv >= 4` / `(iv % 4) >= 2`。⇒ parser 只把**同一字面量**的 part 串成链（`"${x}" "y"` 是两个字面量、
+// 不连；裸邻接字符串仍照旧报错），**无洞字面量 iv=0 ⇒ 单 part、节点形态与旧实现逐字相同**（产物零足迹）。
+// 洞表达式本体在 parse_all 末尾统一解析（那时 token 流已用毕）；类型转换由 checker 就地改写。
+fn parse_interp_run() -> int {
+    t := cur_tok();
+    left : ., mut = -1;
+    loop {
+        k := tok_k(t);
+        if k != T_STRING && k != T_INTERP { break; }
+        iv := tok_iv(t);
+        part : ., mut = -1;
+        if k == T_INTERP {
+            txt := tok_lx(t);
+            if iv < 4 {
+                check_error(EC_P_INTERP_UNCLOSED, "unclosed string interpolation: '\${' has no matching '}'", tok_ln(t), tok_cl(t));
+            } else if str_len(txt) == 0 {
+                check_error(EC_P_INTERP_UNCLOSED, "empty string interpolation: '\${}'", tok_ln(t), tok_cl(t));
+            }
+            part = alloc_node(EXPR_INTERP_HOLE, 0, 0, 0, 0, 0, str_intern(txt), tok_ln(t), tok_cl(t));
+        } else {
+            part = alloc_node(EXPR_STRING, 0, 0, 0, str_intern(tok_lx(t)), TY_STRING, 0, tok_ln(t), tok_cl(t));
+        }
+        if left < 0 { left = part; } else {
+            left = alloc_node(EXPR_BINARY, left, part, OP_ADD, 0, 0, 0, tok_ln(t), tok_cl(t));
+        }
+        advance_tok();
+        if (iv % 4) < 2 { break; }
+        t = cur_tok();
+    }
+    return left;
+}
+
+// 洞表达式统一解析（parse_all 末尾调用）：线性扫本文件新建 AST，遇 EXPR_INTERP_HOLE 即把
+// data 槽的洞文本重新词法化 + parse_expr，结果写回 a 槽。**必须在 token 流用毕后调用**（会覆盖 g_tokens）；
+// 洞内嵌套插值产生的新 HOLE 节点由本循环自然覆盖（上界 g_ast_count 随扫描增长）。
+fn interp_parse_holes() {
+    i : ., mut = 0;
+    loop {
+        if i >= g_ast_count { break; }
+        if ast_kind(i) == EXPR_INTERP_HOLE {
+            txt := istr_get(ast_data(i));
+            if str_len(txt) > 0 {
+                tokenize(txt);
+                g_token_pos = 0;
+                ast_set_a(i, parse_expr());
+                tk2 := cur_tok();                     // ⚠ 不写 `if tok_k(cur_tok()) != T_EOF {`——那会与 A₁ 顶层兜底的
+                if tok_k(tk2) != T_EOF {              //   突变锚点（tests/harness/test_criteria_mutations.py M9）撞形
+                    check_error(EC_P_INTERP_UNCLOSED, "trailing tokens in string interpolation hole", ast_line(i), ast_col(i));
+                }
+            }
+        }
+        i = i + 1;
+    }
+}
+
 fn parse_primary() -> int {
     t := cur_tok();
     if tok_k(t) == T_INT {
@@ -412,9 +470,8 @@ fn parse_primary() -> int {
         if tl >= 0 { bits = str_to_f64_bits(istr_get(tl)); }
         return alloc_node(EXPR_DEX, bits, 0, 0, tok_iv(t), TY_DEX, 0, tok_ln(t), tok_cl(t));
     }
-    if tok_k(t) == T_STRING {
-        advance_tok();
-        return alloc_node(EXPR_STRING, 0, 0, 0, str_intern(tok_lx(t)), TY_STRING, 0, tok_ln(t), tok_cl(t));
+    if tok_k(t) == T_STRING || tok_k(t) == T_INTERP {
+        return parse_interp_run();
     }
     if tok_k(t) == T_TRUE { advance_tok(); return alloc_node(EXPR_BOOL, 0, 0, 0, 1, TY_BOOL, 0, tok_ln(t), tok_cl(t)); }
     if tok_k(t) == T_FALSE { advance_tok(); return alloc_node(EXPR_BOOL, 0, 0, 0, 0, TY_BOOL, 0, tok_ln(t), tok_cl(t)); }
@@ -1078,9 +1135,8 @@ fn parse_pattern() -> int {
         advance_tok();
         return alloc_node(EXPR_INT, 0, 0, 0, tok_iv(t), TY_INT, 0, tok_ln(t), tok_cl(t));
     }
-    if tok_k(t) == T_STRING {
-        advance_tok();
-        return alloc_node(EXPR_STRING, 0, 0, 0, str_intern(tok_lx(t)), TY_STRING, 0, tok_ln(t), tok_cl(t));
+    if tok_k(t) == T_STRING || tok_k(t) == T_INTERP {
+        return parse_interp_run();
     }
     if tok_k(t) == T_CHAR {
         advance_tok();
@@ -2139,4 +2195,6 @@ fn parse_all() {
         if tok_k(cur_tok()) == T_EOF { break; }
         ci = ci + 1;
     }
+    // 插值洞表达式统一解析（token 流已用毕 ⇒ 可安全重新 tokenize；见 interp_parse_holes）
+    interp_parse_holes();
 }

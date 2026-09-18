@@ -234,7 +234,9 @@ def path_a_repro():
         entries = [e for e in leg.cache_entries() if "::fields_of_point.cir" in e]
         if entries:
             ver, (base, cnt) = journal_section(leg.dir / ".core/cache/cir" / entries[0])
-            check("F1 v21 条目日志段（count≥1）", ver == 21 and cnt >= 1,
+            # 版本钉改 `>= 21`（2026-09-18 插值展开批 v22）：**日志段布局自 v21 引入且其后各代未变**
+            # ⇒ 用下界（否则每次换代都会假红）；机制面（count ≥ 1 = 真走过日志路径）不变。
+            check("F1 v21+ 条目日志段（count≥1）", ver >= 21 and cnt >= 1,
                   f"ver={ver} base={base} journal_count={cnt}")
         else:
             check("F1 v21 条目日志段（count≥1）", False, "未找到 fields_of_point 条目")

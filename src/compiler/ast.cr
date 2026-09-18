@@ -103,6 +103,7 @@ T_EXTERN : int = 100;  // extern "C" / foreign function declaration
 // 语义约束：`#` 后必须跟 IDENT（`check`/`ensure` **不做关键字**——本仓已有 `fn check`
 // （parser.cr:30）与 CLI 子命令 `"check"`（main.cr:235），做关键字会当场打断自源）。
 T_HASH : int = 101;
+T_INTERP : int = 102;  // 字符串插值洞 token（批 8 插值展开）：lexeme = 洞内原文，iv bit0/bit1 = 同一字面量的 part 链，bit2 = 洞已闭合
 
 
 // W_I8..W_F64（1..10）原为「宽度标注」值域，仅供宽度后缀 token 分支使用。
@@ -228,6 +229,12 @@ EXPR_EXTERN : int = 48;  // a=name_ni, b=first_param, c=param_count, data=ffi_la
 // a = 内层类型节点。-1 内层 / 非法形态 → res_type_node 落 TI_UNIT（照各类型节点分支同款）。
 EXPR_OPTIONAL : int = 49;  // a=inner type node (T? 类型位置)
 
+// 字符串插值洞（批 8 插值展开）：`"a${expr}b"` 在 parser 处被拆成
+// `("a" + HOLE(int_str(expr))) + "b"` 形态；HOLE 节点由 parser 建、**checker 就地改写**为
+// 带类型转换的调用（`ast_set_kind/a/b/c`，父节点只存索引 ⇒ 无需父指针）。
+// data = 洞文本（interned），line/col = 洞在源中的位置（诊断用）。
+EXPR_INTERP_HOLE : int = 50;  // data=hole text ni（解析期）；checker 改写后本 kind 不再存在
+
 // Field representation in struct literal: two consecutive AST nodes
 // (name_idx, value_idx, line=line, col=col)
 struct FieldPair {
@@ -347,6 +354,9 @@ EC_P_STRUCT_LIMIT : int = 1023; // P023  **已退役**（容量批 T3：字段�
 EC_P_EXTERN_OPTIONAL : int = 1024; // P024  extern 声明含可选形参/返回（C ABI 无可选表示；批 8 条目 3）
 EC_P_TOPLEVEL_TOKEN  : int = 1025; // P025  Unrecognized top-level token（顶层兜底不再静默吞；批 8 条目 4）
 EC_P_APX_TAG         : int = 1026; // P026  `apx` 标签不适用于该声明（白名单 = 显式 dex / int；批 8 条目 5）
+EC_P_INTERP_UNCLOSED : int = 1027; // P027  **畸形插值**（`${` 无配对 `}` / `${}` 空洞 / 洞内尾随垃圾；此前静默吞到行尾）
+EC_P_INTERP_TYPE     : int = 1028; // P028  插值洞类型不可插值（白名单 = string/int/dex/bool/char；fail-closed）
+EC_P_INTERP_HOLE_LEAK : int = 1029; // P029  **内部不变量破坏**：插值洞到达发射面（checker 未改写；见 ir_gen 兜底）
 
 // N0xx — Name Resolution
 EC_N_UNDEFINED     : int = 2001; // N001  Undefined name
