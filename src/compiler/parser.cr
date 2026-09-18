@@ -823,7 +823,7 @@ fn parse_new_var_decl() -> int {
 
     // Parse name list
     nt := advance_tok();
-    w64(names, nc * 8, tok_lx(nt));
+    unsafe { w64(names, nc * 8, @ptr_of(tok_lx(nt))); }   // 2(a)：串字入裸字表
     nc = nc + 1;
     // Batch: a, b : type = ...
     if check(T_COMMA) {
@@ -831,7 +831,7 @@ fn parse_new_var_decl() -> int {
             if !check(T_COMMA) { break; }
             advance_tok(); // ,
             nt2 := advance_tok();
-            w64(names, nc * 8, tok_lx(nt2));
+            unsafe { w64(names, nc * 8, @ptr_of(tok_lx(nt2))); }
             nc = nc + 1;
         }
     }
@@ -918,7 +918,7 @@ fn parse_new_var_decl() -> int {
     i : ., mut = 0;
     loop {
         if i >= nc { break; }
-        ni := str_intern(r64(names, i * 8));
+        ni := str_intern(unsafe { @str_of(r64(names, i * 8)) });   // 2(a)：裸字读出按串用
         nv := r64(values, i * 8);
         // 批 8（静默面收口 · 条目 5；lead 2026-09-18 裁 **(B) 白名单**）：`apx` 仅适用于
         // **显式 `dex`**（有表示路径）与 **显式 `int`**（既有契约的纯注解：`tests/selfhost/test_apx_tag.py`
@@ -1285,7 +1285,7 @@ fn parse_generics_into(names: string, constrs: string) -> int {
             if check(close_tok) { break; }
             if gc >= MAX_GENERICS { break; }
             gt := advance_tok();
-            w64(names, gc * 8, tok_lx(gt));
+            unsafe { w64(names, gc * 8, @ptr_of(tok_lx(gt))); }
             // Check for constraint: T: Interface
             w64(constrs, gc * 8, -1);
             if check(T_COLON) {
@@ -1308,7 +1308,7 @@ fn save_func_generics(fi: int, names: string, count: int) {
     gi : ., mut = 0;
     loop {
         if gi >= count { break; }
-        ni := str_intern(r64(names, gi * 8));
+        ni := str_intern(unsafe { @str_of(r64(names, gi * 8)) });
         fi_set_generic_name(fi, gi, ni);
         gi = gi + 1;
     }
@@ -1766,7 +1766,7 @@ fn parse_declaration() {
                 sgi : ., mut = 0;
                 loop {
                     if sgi >= sg_count { break; }
-                    w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + sgi * 8, str_intern(r64(sg_names, sgi * 8)));
+                    unsafe { w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + sgi * 8, str_intern(@str_of(r64(sg_names, sgi * 8)))); }
                     sgi = sgi + 1;
                 }
                 // R2 P3 Task 5（Step 2）：约束**不再丢弃**（旧态 = 写进 dummy 缓冲后随作用域
@@ -1816,7 +1816,7 @@ fn parse_declaration() {
                 egi : ., mut = 0;
                 loop {
                     if egi >= eg_count { break; }
-                    w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + egi * 8, str_intern(r64(eg_names, egi * 8)));
+                    unsafe { w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + egi * 8, str_intern(@str_of(r64(eg_names, egi * 8)))); }
                     egi = egi + 1;
                 }
                 // R2 P3 Task 5（Step 2）：同 struct 分支——枚举泛型约束登记（旧态同款丢弃）

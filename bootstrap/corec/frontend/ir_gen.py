@@ -142,6 +142,19 @@ class IRGen:
             return val_var
         if isinstance(expr, Await):
             return self.gen_expr(expr.expr)
+        if isinstance(expr, Unsafe):
+            # 2(a)：bootstrap 侧 `unsafe` 支持（此前自源零使用 ⇒ 从未实现）。语义 = 块作用域；
+            # 视图内建的「允许区」判据在 type_checker 侧（本面与自托管面同款）。
+            return self.gen_block(expr.block)
+        if isinstance(expr, Builtin):
+            # 2(a) 视图内建 = **直通**（零代码生成）：`@ptr_of(s)` / `@str_of(p)` 不改变那个 64 位字，
+            # 只改变它在本语言里的看法 ⇒ 直接返回内层表达式的值本身（不发射指令、不建临时变量）。
+            # 未知名到此不该出现（type_checker 已 fail-closed；此面兜底为 0 以免静默崩溃）。
+            if expr.name in ('ptr_of', 'str_of') and expr.args:
+                return self.gen_expr(expr.args[0])
+            v = self.new_temp()
+            self.add_instr(ConstInstr(0, 'int', v))
+            return v
         raise NotImplementedError(type(expr))
 
     def gen_stmt(self, stmt): return self.gen_expr(stmt)

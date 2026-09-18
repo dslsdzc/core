@@ -60,11 +60,11 @@ fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int) {
 // 其余 = 堆地址（alloc/ALLOC_ARRAY 产出的真实指针）→ 读写内存。
 fn ir_interp_deref_read(ptr: int) -> int {
     if ptr >= 0 && ptr < g_ir_var_count { return r64(g_ir_vals, ptr * 8); }
-    return r64(ptr, 0);
+    unsafe { return r64(@str_of(ptr), 0); }
 }
 fn ir_interp_deref_write(ptr: int, val: int) {
     if ptr >= 0 && ptr < g_ir_var_count { w64(g_ir_vals, ptr * 8, val); }
-    else { w64(ptr, 0, val); }
+    else { unsafe { w64(@str_of(ptr), 0, val); } }
 }
 
 // Interpreter string values are intern-table indices (IR_CONST stores the
@@ -286,41 +286,41 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int {
             bp2 := alloc(need3);
             vi3 : ., mut = 0;
             loop { if vi3 >= need3 { break; } store8(bp2, vi3, 0); vi3 = vi3 + 1; }
-            w64(g_ir_vals, d2 * 8, bp2);
+            unsafe { w64(g_ir_vals, d2 * 8, @ptr_of(bp2)); }
         }
         if op2 == 13 && d2 >= 0 && t1 >= 0 {  // IR_LOAD_INDEX: t1=arr_var, t3=literal_idx
             av2 := r64(g_ir_vals, t1 * 8);
             if irv_type(t1) == TI_STR { w64(g_ir_vals, d2 * 8, str_load8(av2, t3)); }
-            else { w64(g_ir_vals, d2 * 8, r64(av2, t3 * 8)); }
+            else { unsafe { w64(g_ir_vals, d2 * 8, r64(@str_of(av2), t3 * 8)); } }
         }
         if op2 == 14 && t1 >= 0 && t2 >= 0 {  // IR_STORE_INDEX: t1=arr_var, t2=val_var
             av2 := r64(g_ir_vals, t1 * 8);
             if irv_type(t1) == TI_STR { store8(istr_get(av2), t3, r64(g_ir_vals, t2 * 8)); }
-            else { w64(av2, t3 * 8, r64(g_ir_vals, t2 * 8)); }
+            else { unsafe { w64(@str_of(av2), t3 * 8, r64(g_ir_vals, t2 * 8)); } }
         }
         if op2 == 15 && d2 >= 0 && t1 >= 0 && t2 >= 0 {  // IR_LOAD_INDEX_VAR: t1=arr_var, t2=idx_var
             av2 := r64(g_ir_vals, t1 * 8);
             ix2 := r64(g_ir_vals, t2 * 8);
             if irv_type(t1) == TI_STR { w64(g_ir_vals, d2 * 8, str_load8(av2, ix2)); }
-            else { w64(g_ir_vals, d2 * 8, r64(av2, ix2 * 8)); }
+            else { unsafe { w64(g_ir_vals, d2 * 8, r64(@str_of(av2), ix2 * 8)); } }
         }
         if op2 == 16 && d2 >= 0 && t1 >= 0 && t2 >= 0 {  // IR_STORE_INDEX_VAR: d2=val_var, t1=arr_var, t2=idx_var
             av2 := r64(g_ir_vals, t1 * 8);
             ix2 := r64(g_ir_vals, t2 * 8);
             if irv_type(t1) == TI_STR { store8(istr_get(av2), ix2, r64(g_ir_vals, d2 * 8)); }
-            else { w64(av2, ix2 * 8, r64(g_ir_vals, d2 * 8)); }
+            else { unsafe { w64(@str_of(av2), ix2 * 8, r64(g_ir_vals, d2 * 8)); } }
         }
         if op2 == 31 && d2 >= 0 && t1 >= 0 && t2 >= 0 {  // IR_ADDR_INDEX: &arr[i]
             w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8) + r64(g_ir_vals, t2 * 8) * 8);
         }
         if op2 == 11 && d2 >= 0 && t1 >= 0 {  // IR_LOAD_FIELD: t1=struct_var, t3=field_idx
             pf2 := r64(g_ir_vals, t1 * 8);
-            if pf2 != 0 { w64(g_ir_vals, d2 * 8, r64(pf2, t3 * 8)); }
+            if pf2 != 0 { unsafe { w64(g_ir_vals, d2 * 8, r64(@str_of(pf2), t3 * 8)); } }
             else { w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8)); }
         }
         if op2 == 12 && t1 >= 0 && t2 >= 0 {  // IR_STORE_FIELD: t1=struct_var, t2=val_var, t3=field_idx
             pf2 := r64(g_ir_vals, t1 * 8);
-            if pf2 != 0 { w64(pf2, t3 * 8, r64(g_ir_vals, t2 * 8)); }
+            if pf2 != 0 { unsafe { w64(@str_of(pf2), t3 * 8, r64(g_ir_vals, t2 * 8)); } }
             else { w64(g_ir_vals, t1 * 8, r64(g_ir_vals, t2 * 8)); }
         }
         if op2 == 7 && d2 >= 0 {  // IR_ALLOC_STRUCT
@@ -331,7 +331,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int {
             bp2 := alloc(need3);
             vi3 : ., mut = 0;
             loop { if vi3 >= need3 { break; } store8(bp2, vi3, 0); vi3 = vi3 + 1; }
-            w64(g_ir_vals, d2 * 8, bp2);
+            unsafe { w64(g_ir_vals, d2 * 8, @ptr_of(bp2)); }
         }
         if op2 == 32 && d2 >= 0 { w64(g_ir_vals, d2 * 8, 0); }  // IR_ARENA_NEW
         if op2 == 33 { }  // IR_ARENA_RESET
@@ -348,14 +348,14 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int {
                 vi3 : ., mut = 0;
                 loop { if vi3 >= need3 { break; } store8(bp2, vi3, 0); vi3 = vi3 + 1; }
                 w64(bp2, 0, t1);
-                w64(g_ir_vals, d2 * 8, bp2);
+                unsafe { w64(g_ir_vals, d2 * 8, @ptr_of(bp2)); }
             }
         }
         // IR_LOAD_ENUM_TAG (23)：d := M[ρ(s1)+0]
         if op2 == 23 {
             if d2 >= 0 && t1 >= 0 {
                 p23 := r64(g_ir_vals, t1 * 8);
-                if p23 != 0 { w64(g_ir_vals, d2 * 8, r64(p23, 0)); }
+                if p23 != 0 { unsafe { w64(g_ir_vals, d2 * 8, r64(@str_of(p23), 0)); } }
             }
         }
         // IR_REF (18)：d := &ρ(s1)——槽模型近似：槽号即「地址」（ir_interp_deref_* 同规则）
@@ -573,7 +573,7 @@ fn ir_interpret() -> int {
                 bp := alloc(need2);
                 vi2 : ., mut = 0;
                 loop { if vi2 >= need2 { break; } store8(bp, vi2, 0); vi2 = vi2 + 1; }
-                w64(g_ir_vals, d * 8, bp);
+                unsafe { w64(g_ir_vals, d * 8, @ptr_of(bp)); }
             }
         }
         if op == 8 {  // IR_ALLOC_ARRAY
@@ -584,7 +584,7 @@ fn ir_interpret() -> int {
                 bp := alloc(need2);
                 vi2 : ., mut = 0;
                 loop { if vi2 >= need2 { break; } store8(bp, vi2, 0); vi2 = vi2 + 1; }
-                w64(g_ir_vals, d * 8, bp);
+                unsafe { w64(g_ir_vals, d * 8, @ptr_of(bp)); }
             }
         }
         if op == 9 { if s1 >= 0 && s2 >= 0 { w64(g_ir_vals, s1 * 8, r64(g_ir_vals, s2 * 8)); } }  // IR_STORE
@@ -592,14 +592,14 @@ fn ir_interpret() -> int {
         if op == 11 {  // IR_LOAD_FIELD: s1=struct_var, s3=field_idx
             if d >= 0 && s1 >= 0 {
                 ptr := r64(g_ir_vals, s1 * 8);
-                if ptr != 0 { w64(g_ir_vals, d * 8, r64(ptr, s3 * 8)); }
+                if ptr != 0 { unsafe { w64(g_ir_vals, d * 8, r64(@str_of(ptr), s3 * 8)); } }
                 else { w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8)); }
             }
         }
         if op == 12 {  // IR_STORE_FIELD: s1=struct_var, s2=val_var, s3=field_idx
             if s1 >= 0 && s2 >= 0 {
                 ptr := r64(g_ir_vals, s1 * 8);
-                if ptr != 0 { w64(ptr, s3 * 8, r64(g_ir_vals, s2 * 8)); }
+                if ptr != 0 { unsafe { w64(@str_of(ptr), s3 * 8, r64(g_ir_vals, s2 * 8)); } }
                 else { w64(g_ir_vals, s1 * 8, r64(g_ir_vals, s2 * 8)); }
             }
         }
@@ -607,14 +607,14 @@ fn ir_interpret() -> int {
             if d >= 0 && s1 >= 0 {
                 arr_value := r64(g_ir_vals, s1 * 8);
                 if irv_type(s1) == TI_STR { w64(g_ir_vals, d * 8, str_load8(arr_value, s3)); }
-                else { w64(g_ir_vals, d * 8, r64(arr_value, s3 * 8)); }
+                else { unsafe { w64(g_ir_vals, d * 8, r64(@str_of(arr_value), s3 * 8)); } }
             }
         }
         if op == 14 {  // IR_STORE_INDEX: s1=arr_var, s2=val_var, s3=literal_idx
             if s1 >= 0 && s2 >= 0 {
                 arr_value := r64(g_ir_vals, s1 * 8);
                 if irv_type(s1) == TI_STR { store8(istr_get(arr_value), s3, r64(g_ir_vals, s2 * 8)); }
-                else { w64(arr_value, s3 * 8, r64(g_ir_vals, s2 * 8)); }
+                else { unsafe { w64(@str_of(arr_value), s3 * 8, r64(g_ir_vals, s2 * 8)); } }
             }
         }
         if op == 15 {  // IR_LOAD_INDEX_VAR: s1=arr_var, s2=idx_var
@@ -622,7 +622,7 @@ fn ir_interpret() -> int {
                 arr_value := r64(g_ir_vals, s1 * 8);
                 idx := r64(g_ir_vals, s2 * 8);
                 if irv_type(s1) == TI_STR { w64(g_ir_vals, d * 8, str_load8(arr_value, idx)); }
-                else { w64(g_ir_vals, d * 8, r64(arr_value, idx * 8)); }
+                else { unsafe { w64(g_ir_vals, d * 8, r64(@str_of(arr_value), idx * 8)); } }
             }
         }
         if op == 16 {  // IR_STORE_INDEX_VAR: d=val_var, s1=arr_var, s2=idx_var
@@ -630,7 +630,7 @@ fn ir_interpret() -> int {
                 arr_value := r64(g_ir_vals, s1 * 8);
                 idx := r64(g_ir_vals, s2 * 8);
                 if irv_type(s1) == TI_STR { store8(istr_get(arr_value), idx, r64(g_ir_vals, d * 8)); }
-                else { w64(arr_value, idx * 8, r64(g_ir_vals, d * 8)); }
+                else { unsafe { w64(@str_of(arr_value), idx * 8, r64(g_ir_vals, d * 8)); } }
             }
         }
         // IR_MAKE_ENUM (17)：d := alloc(8·(1+s2))；M[d+0] := s1（tag = 变体名索引）——
@@ -642,14 +642,14 @@ fn ir_interpret() -> int {
                 vi2 : ., mut = 0;
                 loop { if vi2 >= need2 { break; } store8(bp, vi2, 0); vi2 = vi2 + 1; }
                 w64(bp, 0, s1);
-                w64(g_ir_vals, d * 8, bp);
+                unsafe { w64(g_ir_vals, d * 8, @ptr_of(bp)); }
             }
         }
         // IR_LOAD_ENUM_TAG (23)：d := M[ρ(s1)+0]
         if op == 23 {
             if d >= 0 && s1 >= 0 {
                 ptr := r64(g_ir_vals, s1 * 8);
-                if ptr != 0 { w64(g_ir_vals, d * 8, r64(ptr, 0)); }
+                if ptr != 0 { unsafe { w64(g_ir_vals, d * 8, r64(@str_of(ptr), 0)); } }
             }
         }
         // IR_REF (18)：d := &ρ(s1)——槽模型近似：槽号即「地址」（ir_interp_deref_* 同规则）

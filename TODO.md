@@ -166,7 +166,9 @@
 | — | `#2026-09-18-14` | 2026-09-18 | 批 8 插值展开现场 | 【静默·预存崩溃】`if` 表达式作拼接操作数 ⇒ rc=139（手写同形亦崩）⇒ 插值 bool 洞不能合成 if，改走 `bool_str` 调用面 |
 | — | `#2026-09-18-15` | 2026-09-18 | 批 8 插值展开实测 | 【自源编码约束】bootstrap 后端不支持按位 `|`/`&`（`NotImplementedError: Binary op |`）⇒ 编译器源码里写按位运算 = 构建期硬失败 |
 | — | `#2026-09-18-16` | 2026-09-18 | 对抗复核实证 | 【静默·防线单点】`.cir` 指纹不覆盖函数体（`func_fingerprint` 的 body walk 是 stub）⇒ **身份闸是唯一复活防线** |
-| — | `#2026-09-18-17` | 2026-09-18 | 批 8 S2 实测 | 【自源编码约束】bootstrap 解析器不支持 `as` ⇒ 编译器源码用 `as` 会在 `check` job（bootstrap 构建面）断构建；与 `-15`（`|`/`&`）同族 |
+| — | `#2026-09-18-17` | 2026-09-18 | 批 8 S2 实测 | 【自源编码约束·**两机制须分开**】**剩余两条（皆为语法层）**：`as` = token 级 parse 失败；`\|`/`&` = parse 通过但**后端** `NotImplementedError`。~~**内建形态面**（`@name(args)` = `Expected IDENT, got LPAREN`）~~ **已随 2(a) 闭合（bootstrap 补产生式；PR #132）**——该机制现只对**未注册名** fail-closed。⇒ 判定程序与误读纠正见 `docs/superpowers/plans/2026-09-18-view-builtins-2a.md` §6；与 `-15` 同族 |
+| — | `#2026-09-18-18` | 2026-09-18 | 批 8 2(a) 裁定登记 | 【机制·**登记备选**】裸字缓冲**改存 intern 索引**（机制 B，替代视图内建）——被裁**不并入 2(a)、不作子集夹带**；将来仅对「该字确实只在本档内往返」的具体站点逐个评估（须证该字从不被当指针消费：syscall/FFI/长度头；并评估 intern 表增长）。硬证据 = **string 值在原生 ELF 下是指针**（`str_len` 读 `s-8` 长度头）⇒ B 是**存储语义变更**而非等价替换 |
+| — | `#2026-09-18-19` | 2026-09-18 | 批 8 2(a) 实测 | 【判据覆盖面·两条】(A) **S1P 打点 = 直调实参面**，**返回位不在覆盖内**（本批实测：`cli_get`/`cli_arg` 声明 `-> string` 却 `return r64(...)` 同类点未被 68 点台账收录；已随 2(a) 修）⇒ S3 硬错若照现状只挂实参面，**返回位同类点仍会静默**；(B) **`unsafe { expr; }` 块内分号 ⇒ 块值 = unit**：`return unsafe { X; };` 让该路径返回 unit——**bootstrap 面**只出非致命警告且解释器仍按值执行（实测 42），**self-hosted 面** `error[TF01]` 硬错（两面**诊断面分歧**，与 `-12` 同族） |
 | — | `#2026-09-18-12` | 2026-09-18 | 批 8 PR-B₁ S1′ 活性自证 | 【静默·两前端分歧】非 Literal 全局初值经 Python bootstrap 构建 corec 时**静默丢成 0**（`= -1` 解析为 `UnaryOp`；self-hosted corec 正常） |
 
 
@@ -1782,6 +1784,61 @@
 - **修法方向（备选）**：(a) 登记为编码约束（现状）；(b) bootstrap 解析器补 `as`（属 bootstrap 面，另批）；
   (c) 在 CI `check` 前置一条「编译器源码禁用 `as`」的字面扫描（注意假阳：注释/字符串里的 `as`；须锚定词法面）。
 
+#### 机制分流（2026-09-18 补；**「bootstrap 面不支持」必须说清是哪一种**）
+
+| 机制 | 形态 | bootstrap 实测信号（今日） | 自托管面 |
+|---|---|---|---|
+| **语法层（token）** | `as` 转换 | `SyntaxError: Expected SEMI, got TokenType.AS`（**无 `@`**、token 级） | 支持 |
+| **语法层（后端算子）** | `\|` / `&` 按位 | **parse 通过**；构建期 `NotImplementedError: Binary op \|`（**后端**而非 parser） | 支持 |
+| ~~**内建形态面**~~ **（已闭合）** | `@name` / `@name(args)` | ~~`Expected TokenType.IDENT, got TokenType.LPAREN '('`（带括号）/ `got SEMI ';'`（无括号、表达式位）~~ **已随 2(a) 闭合**：bootstrap 补 `@name(args)` 产生式（PR #132）⇒ 两面皆绿；**残留面 = 未注册名 fail-closed**（两面一致：bootstrap 报 `unknown @ builtin`，自托管报 `error[N01]`） | `@name(args)` **已支持**；未注册名 **fail-closed**（`error[N01]: unknown @ builtin`，实测 rc=1） |
+
+- **判定程序（两面各一次，30 秒）**：① 自托管面 `corec check <探针>` 绿 ⇒ 语言没缺、只是 bootstrap 缺；
+  ② bootstrap 面直接调 `Parser(Lexer(src).tokenize()).parse_compilation_unit()`，记**异常形态**；
+  ③ 对号入座（`got AS` / `NotImplementedError`）。**注（2(a) 后）**：原第三类信号 `Expected IDENT, got LPAREN|SEMI`（内建形态面）
+  **已随本批闭合**——bootstrap 现支持 `@name(args)`；若再见到该信号，说明动的是**别的** `@` 形态（如标记位），按新形态重新取证。
+- **最小对拍（把「名字」与「形态」分开）**：同名两档 `@name` 与 `@name(x)` —— **只有带括号档红** ⇒ 缺产生式（如 `@raw_int`/`@sizeOf`）；
+  **两档皆红** ⇒ 该 `@` 在表达式位根本不成立（如 `@fast`）。
+- **误读纠正**：`@sizeOf(...)`/`@raw_int(...)` **在语料（自托管面）可用**（`tests/suite/opt_dex_test.cr` 15 处、`apx_conversion_test.cr` 13 处是活证），
+  **只在编译器源码（bootstrap 面）不可用** ⇒ 「不可用」必须**带面**说。**佐证**：corec 清单 45 档去注释去字符串后含 `@` 的行 = **0**（实测）。
+- **后果面**：新增内建（如 `@ptr_of`/`@str_of`，见 2(a) 计划）= **bootstrap 侧必做项**（`parser.py` 产生式 + 未知名 fail-closed + 视图直通发射），
+  否则自源写不出、`check` job 当场红。**（已随 2(a) 落地：PR #132 —— 本条现为「下次新增内建时照做」的规则，不是待办。）**
+
+### 2026-09-18-18. 【机制·登记备选】裸字缓冲**改存 intern 索引**（机制 B）——被裁**不并入 2(a)**（批 8 2(a) 裁定；取号基准 = develop 当天已有最大 N = 17）
+
+- **形态**：S2 残桶 68 点里的「裸字/指针」类，不用新内建，改为**把裸字缓冲的载荷换成 intern 索引**：
+  写侧 `w64(buf, off, str_intern(s))`、读侧 `r64(...)` 出来后用 `istr_get(i)` 还原为串。
+- **为何不并入 2(a)**（team-lead 裁定，2026-09-18）：它**看着**是「不动语言面、更快」，实际改的是**存储语义**——
+  缓冲里不再存指针字。要用它必须**逐点**证明「该字从不被当指针消费」（syscall / FFI / **长度头**），
+  而「全部读出端」**不能用文本扫描枚举**（调用派生的传递闭包看不见，本仓栽过同族一次）；
+  另需评估 **intern 表增长**（长跑内存面）。⇒ **本质更大更险**，只是以省事的形态出现；
+  且同一份代码里并存两种存储约定 = **新接缝** ⇒ **不作子集夹带**。
+- **硬证据（把 B 的性质钉死）**：原生 ELF 路径下 **`string` 值 = 指针**——`fn str_len(s: string) -> int { hdr := load64(s, -8); … }`
+  （`src/stdlib/fmt.cr:4`，长度头在指针前 8 字节）；intern 表是**索引 → 指针**（`str_intern` 查表用 `load_str_ptr(g_strs, si * 8)`）。
+  另注：**解释器路径**里 string IR 值 = **intern 索引**（`src/compiler/interp.cr:70-72` 既有注释：interpreter 存索引、native ELF 存指针）
+  ⇒ 分类时必须**逐点判「哪套表示 + 哪条腿」**。
+- **适用条件（将来评估时）**：该缓冲的字**确实只在本档内往返**、且全部读出端可**机械枚举**（非文本扫描）⇒ 才可局部采用。
+- **状态**：**登记，未修**。参考：`docs/superpowers/plans/2026-09-18-view-builtins-2a.md` §2.2bis/§2.2ter/§4（A 为裁定机制、B 为本条）。
+
+### 2026-09-18-19. 【判据覆盖面·两条】S1P 只覆盖**调用实参**（返回位盲区）+ `unsafe { expr; }` 的分号语义（批 8 2(a) 实测；取号基准 = develop 当天已有最大 N = 17）
+
+**(A) 返回位不在 S1P 覆盖内（S3 前必须补）**
+- 现状：S1P 打点挂在**直调/方法调用的实参**解析尾 ⇒ 68 点台账全是**实参位**。
+- 实测同类点在**返回位**同样存在却从未被收录：`cli_get`/`cli_arg`（`src/stdlib/cli.cr`）声明 `-> string`
+  却 `return r64(...)`（裸字当串返回）⇒ **台账 0 收录**；本批随 2(a) 一并修（`unsafe { return @str_of(...); }`）。
+- 意义：**S3 若照现状只把实参面升硬错，返回位同类点仍会静默**（同族：`#2026-09-18-16` 指纹不覆盖函数体——
+  「防线单点」的又一例）。补法候选：① 在 `checker` 的**返回语句**处理点加同款打点（report-only → 硬错）；
+  ② 或先做一次**全仓返回位扫描**（oracle = bootstrap 面 `expected return type` 非致命警告清单，
+  本批实测迁移后该清单仅剩 1 条既有误报 `ty_memo_slot_no_grow`）。
+
+**(B) `unsafe { expr; }` 块内分号 ⇒ 块值 = unit（两面诊断面分歧）**
+- 形态：`fn f(p: int) -> int { return unsafe { p; }; }`——块内表达式带分号 ⇒ 块的值是 **unit** ⇒
+  `return` 把 unit 当 int 返回。**这是 C 习惯（语句尾分号）在本语言的陷阱**，本批迁移中我自己写错过一次。
+- **两面分歧（实测）**：**bootstrap 面** = 非致命警告（`expected return type int, got unit`）+ 解释器**仍按值执行**
+  （得 42）；**self-hosted 面** = `error[TF01]: Function return type mismatch` **硬错**（run rc=1）⇒
+  **同一程序两面诊断面不一致**（与 `#2026-09-18-12`「两前端分歧」同族）。
+- 处置：本批的**编码纪律 = 视图一律写语句形**（`unsafe { return @str_of(...); }` / `unsafe { w64(...); }`），
+  **不写** `return unsafe { X; };`；分歧本身登记待裁（升 bootstrap 面为硬错 or 降 self-hosted 面为警告，
+  二者都属改契约，须单独立项）。
 ## 第四轮 CompCert 对照遗留项（2026-08-17 记）
 
 来源：`docs/compcert-round4-findings.md`（F1-F20 修复后残留）+ 波 1-3 修复审查产出。F1-F20 已全部修复，以下为范围外/需 IR 形态演进的遗留项：

@@ -555,13 +555,29 @@ class Parser:
 
     def parse_primary(self) -> Expr:
         if self.check(TokenType.AT):
-            # ProjectAccess: @project file::symbol
+            # 三种形态（按下一 token 判，互不吞并）：
+            #   `@name(args)` / `@name`  → 内建（Builtin；2(a) 视图内建批新增）
+            #   `@project file::symbol` → ProjectAccess（原样保留）
+            # 注意：`@name(` 与 `@name name` 的判据是**紧随的 token 类型**，不是名字内容——
+            # 名字内容留给 type_checker 的 **fail-closed** 白名单（未知名 ⇒ 报错，不静默）。
             self.advance()
-            project = self.expect(TokenType.IDENT).lexeme
-            file_id = self.expect(TokenType.IDENT).lexeme
-            self.expect(TokenType.PATH_SEP)
-            symbol = self.expect(TokenType.IDENT).lexeme
-            return Ident(f"@{project}.{file_id}::{symbol}")
+            first = self.expect(TokenType.IDENT).lexeme
+            if self.check(TokenType.LPAREN):
+                self.advance()
+                args: List[Expr] = []
+                if not self.check(TokenType.RPAREN):
+                    args.append(self.parse_expr())
+                    while self.check(TokenType.COMMA):
+                        self.advance()
+                        args.append(self.parse_expr())
+                self.expect(TokenType.RPAREN)
+                return Builtin(first, args)
+            if self.check(TokenType.IDENT):
+                file_id = self.advance().lexeme
+                self.expect(TokenType.PATH_SEP)
+                symbol = self.expect(TokenType.IDENT).lexeme
+                return Ident(f"@{first}.{file_id}::{symbol}")
+            return Builtin(first, [])
         if self.check(TokenType.SOME) or self.check(TokenType.NONE) or self.check(TokenType.SELF):
             return Ident(self.advance().lexeme)
         if self.check(TokenType.INT_LIT):

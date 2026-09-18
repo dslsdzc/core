@@ -2142,6 +2142,22 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                 return -1;
             }
 
+            // ── 2(a) 视图内建：**真直通**（零指令、零新变量）——同一个 64 位字，只换看法 ──
+            //    为什么**不**沿用本项目 `@raw_int` 的「新建变量 + IR_STORE」写法：
+            //      `@raw_int` 换来换去的是 dex↔int（**XMM/精确路径 vs GP** 两条真正不同的机器路径），
+            //      所以必须把值搬进一个「定型 int」的变量，否则下游按 dex 分派。
+            //      而 `int ↔ string` 在两条运行期腿上都是**同一个 GP 字**（原生：string = 指针；
+            //      解释器：string = intern 索引）——搬运不改变任何东西，只会多出一条 IR_STORE，
+            //      从而破坏「视图可完全擦除」这条判据（见 test_view_builtins.py ②：往返写法与
+            //      直写产物的 ELF 必须**逐字节一致**；实测「新建变量 + IR_STORE」版本不成立）。
+            //    类型在哪换：**checker 侧**（`@str_of` 返回 TI_STR / `@ptr_of` 返回 TI_INT），
+            //      即「表达式的类型」而不是「变量的类型」；调用边界按**被调函数形参类型**编组，
+            //      int/string 同属 GP 字 ⇒ 两侧一致。
+            if str_eq(name, "str_of") != 0 || str_eq(name, "ptr_of") != 0 {
+                inner := gen_expr(ast_a(first_arg));
+                return force_if_thunk(inner);
+            }
+
             return -1;
         }
 

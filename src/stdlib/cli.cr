@@ -77,18 +77,24 @@ fn cli_init(prog: string, desc: string) {
 fn cli_cmd(name: string, desc: string) {
     grow_cli_cmds(g_cli_cmd_count + 1);
     off : ., mut = g_cli_cmd_count * 16;
-    w64(g_cli_cmds, off, name);
-    w64(g_cli_cmds, off + 8, desc);
+    // 裸字表（16B/条：name、desc）：串值以 64 位字存入 ⇒ 显式视图 `@ptr_of`（2(a)；
+    // 语义 = 同一个字，不改存储内容）。安全面 (ii)：视图必须出现在 unsafe 块内。
+    unsafe {
+        w64(g_cli_cmds, off, @ptr_of(name));
+        w64(g_cli_cmds, off + 8, @ptr_of(desc));
+    }
     g_cli_cmd_count = g_cli_cmd_count + 1;
 }
 
 fn cli_flag(long_name: string, short_name: string, desc: string) {
     grow_cli_flags(g_cli_flag_count + 1);
     off : ., mut = g_cli_flag_count * 48;
-    w64(g_cli_flags, off, long_name);
-    w64(g_cli_flags, off + 8, short_name);
-    w64(g_cli_flags, off + 16, desc);
-    w64(g_cli_flags, off + 24, "");       // value
+    unsafe {
+        w64(g_cli_flags, off, @ptr_of(long_name));
+        w64(g_cli_flags, off + 8, @ptr_of(short_name));
+        w64(g_cli_flags, off + 16, @ptr_of(desc));
+        w64(g_cli_flags, off + 24, @ptr_of(""));   // value
+    }
     w64(g_cli_flags, off + 32, 0);         // has_value
     w64(g_cli_flags, off + 40, 0);         // is_bool
     g_cli_flag_count = g_cli_flag_count + 1;
@@ -97,10 +103,12 @@ fn cli_flag(long_name: string, short_name: string, desc: string) {
 fn cli_flag_bool(long_name: string, short_name: string, desc: string) {
     grow_cli_flags(g_cli_flag_count + 1);
     off : ., mut = g_cli_flag_count * 48;
-    w64(g_cli_flags, off, long_name);
-    w64(g_cli_flags, off + 8, short_name);
-    w64(g_cli_flags, off + 16, desc);
-    w64(g_cli_flags, off + 24, "");       // value
+    unsafe {
+        w64(g_cli_flags, off, @ptr_of(long_name));
+        w64(g_cli_flags, off + 8, @ptr_of(short_name));
+        w64(g_cli_flags, off + 16, @ptr_of(desc));
+        w64(g_cli_flags, off + 24, @ptr_of(""));   // value
+    }
     w64(g_cli_flags, off + 32, 0);         // has_value
     w64(g_cli_flags, off + 40, 1);         // is_bool
     g_cli_flag_count = g_cli_flag_count + 1;
@@ -112,10 +120,13 @@ fn _cli_find_flag(name: string) -> int {
     i : ., mut = 0;
     loop {
         if i >= g_cli_flag_count { break; }
-        ln := r64(g_cli_flags, i * 48);
-        sn := r64(g_cli_flags, i * 48 + 8);
-        if str_len(ln) > 0 && str_eq(ln, name) != 0 { return i; }
-        if str_len(sn) > 0 && str_eq(sn, name) != 0 { return i; }
+        // 裸字读出 ⇒ 视图 `@str_of`（同一个字，只是按串用）。
+        unsafe {
+            ln := @str_of(r64(g_cli_flags, i * 48));
+            sn := @str_of(r64(g_cli_flags, i * 48 + 8));
+            if str_len(ln) > 0 && str_eq(ln, name) != 0 { return i; }
+            if str_len(sn) > 0 && str_eq(sn, name) != 0 { return i; }
+        }
         i = i + 1;
     }
     return -1;
@@ -163,7 +174,7 @@ fn cli_parse() -> int {
         found_cmd : ., mut = 0;
         loop {
             if ci >= g_cli_cmd_count { break; }
-            if str_eq(r64(g_cli_cmds, ci * 16), first) != 0 {
+            if unsafe { str_eq(@str_of(r64(g_cli_cmds, ci * 16)), first) } != 0 {
                 found_cmd = 1;
                 break;
             }
@@ -213,7 +224,7 @@ fn cli_parse() -> int {
             }
             if r64(g_cli_flags, fi * 48 + 40) != 0 {   // is_bool
                 w64(g_cli_flags, fi * 48 + 32, 1);       // has_value
-                w64(g_cli_flags, fi * 48 + 24, "1");     // value
+                unsafe { w64(g_cli_flags, fi * 48 + 24, @ptr_of("1")); }  // value（串字入裸字槽）
             } else {
                 ai = ai + 1;
                 if ai >= argc_int {
@@ -223,13 +234,13 @@ fn cli_parse() -> int {
                     return -1;
                 }
                 val := get_arg(ai);
-                w64(g_cli_flags, fi * 48 + 24, val);      // value
+                unsafe { w64(g_cli_flags, fi * 48 + 24, @ptr_of(val)); }  // value
                 w64(g_cli_flags, fi * 48 + 32, 1);         // has_value
             }
         } else {
             // Positional argument
             grow_cli_args(g_cli_arg_count + 1);
-            w64(g_cli_args, g_cli_arg_count * 8, arg);
+            unsafe { w64(g_cli_args, g_cli_arg_count * 8, @ptr_of(arg)); }
             g_cli_arg_count = g_cli_arg_count + 1;
         }
         ai = ai + 1;
@@ -251,7 +262,9 @@ fn cli_eq(cmd: string, expected: string) -> int {
 fn cli_get(name: string) -> string {
     fi := _cli_find_flag(name);
     if fi >= 0 && r64(g_cli_flags, fi * 48 + 32) != 0 {  // has_value
-        return r64(g_cli_flags, fi * 48 + 24);             // value
+        // 返回位同为裸字→串（S1P 只覆盖**调用实参**、不覆盖返回位 ⇒ 它不在 68 点里，
+        // 但同属一类；2(a) 一并收口）。
+        unsafe { return @str_of(r64(g_cli_flags, fi * 48 + 24)); }   // value
     }
     return "";
 }
@@ -266,7 +279,7 @@ fn cli_has(name: string) -> int {
 
 fn cli_arg(n: int) -> string {
     if n >= 0 && n < g_cli_arg_count {
-        return r64(g_cli_args, n * 8);
+        unsafe { return @str_of(r64(g_cli_args, n * 8)); }   // 返回位裸字→串（同族）
     }
     return "";
 }
@@ -289,7 +302,7 @@ fn cli_help() {
         loop {
             if ci >= g_cli_cmd_count { break; }
             if first == 0 { print(","); }
-            print(r64(g_cli_cmds, ci * 16));
+            print(unsafe { @str_of(r64(g_cli_cmds, ci * 16)) });
             first = 0;
             ci = ci + 1;
         }
@@ -312,7 +325,7 @@ fn cli_help() {
         loop {
             if ci >= g_cli_cmd_count { break; }
             if first == 0 { print(","); }
-            print(r64(g_cli_cmds, ci * 16));
+            print(unsafe { @str_of(r64(g_cli_cmds, ci * 16)) });
             first = 0;
             ci = ci + 1;
         }
@@ -320,17 +333,19 @@ fn cli_help() {
         ci = 0;
         loop {
             if ci >= g_cli_cmd_count { break; }
-            cmd_name_ni := r64(g_cli_cmds, ci * 16);
-            cmd_desc_ni := r64(g_cli_cmds, ci * 16 + 8);
-            print("    ");
-            print(cmd_name_ni);
-            pad := str_len(cmd_name_ni);
-            loop {
-                if pad >= 12 { break; }
-                print(" ");
-                pad = pad + 1;
+            unsafe {
+                cmd_name := @str_of(r64(g_cli_cmds, ci * 16));
+                cmd_desc := @str_of(r64(g_cli_cmds, ci * 16 + 8));
+                print("    ");
+                print(cmd_name);
+                pad := str_len(cmd_name);
+                loop {
+                    if pad >= 12 { break; }
+                    print(" ");
+                    pad = pad + 1;
+                }
+                println(cmd_desc);
             }
-            println(cmd_desc_ni);
             ci = ci + 1;
         }
         println("");
@@ -343,31 +358,33 @@ fn cli_help() {
     fi : ., mut = 0;
     loop {
         if fi >= g_cli_flag_count { break; }
-        f_short_ni := r64(g_cli_flags, fi * 48 + 8);
-        f_long_ni := r64(g_cli_flags, fi * 48);
-        f_desc_ni := r64(g_cli_flags, fi * 48 + 16);
-        print("  ");
-        if str_len(f_short_ni) > 0 {
-            print("-");
-            print(f_short_ni);
-            print(", ");
-        } else {
-            print("    ");
+        unsafe {
+            f_short := @str_of(r64(g_cli_flags, fi * 48 + 8));
+            f_long := @str_of(r64(g_cli_flags, fi * 48));
+            f_desc := @str_of(r64(g_cli_flags, fi * 48 + 16));
+            print("  ");
+            if str_len(f_short) > 0 {
+                print("-");
+                print(f_short);
+                print(", ");
+            } else {
+                print("    ");
+            }
+            print("--");
+            print(f_long);
+            // Pad to 24 chars total (prefix = "  " + short/"    " + "--")
+            total : ., mut = 8;
+            if str_len(f_short) > 0 {
+                total = 8;  // "  " + "-X, " + "--" = 2+4+2 = 8
+            }
+            total = total + str_len(f_long);
+            loop {
+                if total >= 24 { break; }
+                print(" ");
+                total = total + 1;
+            }
+            println(f_desc);
         }
-        print("--");
-        print(f_long_ni);
-        // Pad to 24 chars total (prefix = "  " + short/"    " + "--")
-        total : ., mut = 8;
-        if str_len(f_short_ni) > 0 {
-            total = 8;  // "  " + "-X, " + "--" = 2+4+2 = 8
-        }
-        total = total + str_len(f_long_ni);
-        loop {
-            if total >= 24 { break; }
-            print(" ");
-            total = total + 1;
-        }
-        println(f_desc_ni);
         fi = fi + 1;
     }
 }
