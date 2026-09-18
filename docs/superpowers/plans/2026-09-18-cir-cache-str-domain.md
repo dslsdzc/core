@@ -97,3 +97,45 @@
 ## §6 顺序
 
 计划落纸 + 证据入仓（本批） ⇒ 报 team-lead **裁 (a)/(b)/(c) 与换代** ⇒ 实施批（含 §3 判据与 §5 审计） ⇒ 回归（语料冷/暖对拍两侧 clean-cache）。
+
+---
+
+## §7 落地（2026-09-18 实施批；裁定 = **(d) 生成期 intern 日志 + 装载期按序重放** + bump）
+
+**裁定经过**：lead 先裁 **(c) 主案 + (b) 兜底**；实施第一步的**结构性槽位审计**给出**反例**——
+`IR_CONST.s1` 在 `tk=TI_INT` 下可携带**变体名 id**（`str_intern("None")` 的 tag 值，见
+`ir_gen.cr::opt_cmp_extract_boxed`），与整数立即数在盘面**不可区分** ⇒ 按 `(op,tk)` 判定串槽的表
+**原理上不可完备**（不是审计做不全）。据此**停手上报**，lead 改裁 **(d)**（(b) 仍作兜底）：
+(a)/(b)/(c) 都在**解释**跨进程量（解释需要表，表会漏），(d) 不解释——**复现写侧状态**。
+
+**实现（`CIR_CACHE_VER 20→21`）**：
+- `globals.cr`：`g_cir_rec_{on,ids,count,cap,base}` + `g_cir_skip_journal`（隐藏 debug）。
+- `dyn_arr.cr::str_intern`：**唯一插入路径**上 `cir_rec_push(g_str_count - 1)`（**单点保证**：
+  「gen 期新 intern 必进日志」，故不存在「判定表漏点」这一失效面）。
+- `main.cr`：`cir_rec_begin/end` 夹住 `ir_gen_func`（仅缓存启用时）；隐藏 flag
+  `--inject-cir-skip-journal`（仅判据突变自证用）；**见证面清单补 ④ 行**（`g_strs`+`g_str_count`
+  归位 + 「何时被漏/为何被漏」+ 触发器）。
+- `cir_cache.cr`：写侧新段 `{基线见证, 条数, ×(len, bytes)}`（**只存内容**）；装载侧**先校验基线
+  见证、再按序重放**（必须先于任何 id 消费者）；VER 20→21（v20 段原文保留）。
+- 载体重锁（grep 机械枚举 + 旧值留痕）：`CIR_CACHE_VER` · `test_cache_identity.py::VER_EXPECTED` ·
+  `test_ccr_types.py` 两处 `assert ver ==` · **`test_cir_warm_path.py` 判据重定**（STR 段由
+  「暖 = 冷**前缀**（预存口径）」改为「冷 == 暖**逐条逐字节同**」，`CONTRACT_TAGS` 7 段 → **全 8 段**）。
+
+**顺序确定性论证（对应 §5 要求 ④-1）**：① 跨函数 = `main.cr` 的函数循环**一个序**（写侧在该循环里
+生成、读侧在同一循环里装载）；② 函数内 = 两侧共用**唯一插入路径** `str_intern`（记录序 = 插入序）；
+③ 窗口外的插入（parse/check 等）两侧同源同序 ⇒ 不进日志也不必进。⇒ 归纳成立：前序函数同态 ⇒ 本篇
+起点同态（由**基线见证**把这条不变量变成运行时校验：不符即 miss）。
+
+**判据（17 例，`tests/selfhost/test_cir_str_domain_warm.py`，挂 `src/ci/run.sh` 的 `selfhost-tests`）**：
+A 入口（6 行复现：输出 + ELF + `.ccr` 三面同；锚定 `fields=[x,y] len=3`）· B 判别实验（两半暖态都必须对）·
+C **var 名路径**（`.ccr` 逐字节同，含合成名）· D **混合命中态**（删首/中/末/多条 ⇒ 输出+ELF 同；正式化 §5
+要求 ④-2）· E **突变自证**（`--inject-cir-skip-journal` ⇒ 暖态取回 `arena_reset`）+ **非真空控制**（无串槽
+语料上突变**不动输出**）· F 日志段结构（ver=21 · count≥1）。`tools/cir-str-domain/run_scope.sh --assert`
+一并挂门内（`known-baseline-red.txt` 收录**基线既有红** `interp` = 插值解析崩，非本缺陷面）。
+
+**落地时实测到的两条新观察（未修，另立）**：① 混合命中态 `.ccr` 的 **NOD 段**差异（20B 级；段级定位 =
+仅 NOD、TYPE 项索引随重生成顺序变化；ELF/行为不受影响）；② `IR_CONST.s1` 的「立即数 vs intern 名 id」
+在盘面**不可区分**（格式设计气味）。
+
+**兜底 (e)（写侧「窗口内有新 intern ⇒ 本条目不写」）**：未采纳；**命中率代价未测** ⇒ 若日后启用，先量
+「多少函数的窗口内 `g_str_count` 会变」。

@@ -246,6 +246,7 @@ fn corec_main() -> int {
     cli_flag_bool("static", "", "Static linking (embed runtime)");
     cli_flag("opt-level", "O", "Optimization level (0,1,2,3; default=1) — O1 CSE(corec 进程内)；O2 寄存器分配+判定在 corearch（corec build 透传 --opt-level，.ccr 不承载分配结果）");
     cli_flag_bool("inject-var-shift", "", "Hidden debug: shift func0 var decl block left by 1, then save (GC-4 test hook)");
+    cli_flag_bool("inject-cir-skip-journal", "", "Hidden debug: skip .cir intern-journal replay at load (v21 mutation hook; NOT for real builds)");
     cli_flag_bool("dump-types", "", "Hidden debug: dump TYPE segment content (row table + term DAG + cross-process judgment probe) after populate (R2 P4 Task 2 test channel)");
     cli_flag_bool("dump-ifaces", "", "Hidden debug: dump IFACE segment content (entry table + shapes + user ifaces + impls + method table + cross-segment term probe) after populate (R2 P4 Task 3 test channel)");
     cli_flag_bool("dump-tk-terms", "", "Hidden debug: dump per-DFNode tk + type-term slot (cir; R2 P4 Task 4 test channel — cold/warm snapshot symmetry)");
@@ -497,6 +498,9 @@ fn corec_main() -> int {
     if g_optrep_on != 0 {
         cache_enabled = 0;
     }
+    // 隐藏 debug（仅判据突变自证用；真构建路径永不注入）：跳过装载期 intern 日志重放
+    // ⇒ v21 缺陷原样复现（判据用它证明「修法确实是被测对象」——突变必须打中目标）。
+    if cli_has("inject-cir-skip-journal") != 0 { g_cir_skip_journal = 1; }
 
     // Generate IR for each function, checking cache first
     fi : ., mut = 0;
@@ -567,8 +571,23 @@ fn corec_main() -> int {
             //      可选表示侧表（optrep 程序已整体关缓存，main.cr 的 g_optrep_on 门）。
             //   ③ **未判**（T1 E5：未构造/未测）—— 内层 SG/`g_df_node_region`（装载有 Minor #4
             //      近似）· 外链重定位（探针未触发）⇒ 若日后证实，按同一形态加见证。
+            //   ④ **串面（v21 归位，= 本清单漏归的一员）**：`g_strs`（intern 表）+ `g_str_count`
+            //      ——「快照不载 + 生成期写（每次新 intern）+ 生成后被读（快照内一切 id 都是它的
+            //      下标）」**三条件全满足**，属 ①（TU03）同族。**处置 = 载进快照**（而非①的「不写
+            //      条目」）：写侧在生成窗口内把 `str_intern` 唯一插入路径上的每次新 intern 记入
+            //      日志（`cir_rec_begin/end`，v21 段），装载侧按序重放 ⇒ 读侧串表与写侧同态
+            //      （`CIR_CACHE_VER 20→21`；详见 cir_cache.cr 头注「21」段与 TODO #2026-09-18-9）。
+            //      **何时被漏 / 为何被漏**（旧文保留 + 追加）：串面**从未**进过这份清单——本清单
+            //      生于 TU03（`g_type_count`）一例，扩展点靠人记得加行；串面因**两侧各自自洽**
+            //      （写侧编号自洽、读侧编号也自洽）而不显形，直到把「同一源两次构建」的产物逐字节
+            //      对拍才暴露（VER 17/18/19/20 四代全复现，非本代引入）。⇒ **教训：本清单是
+            //      「已归位实例表」，不是「该类全表」——新增共享面时必须主动对照三条件，别等对拍。**
             tc0 := g_type_count;
+            // v21 生成期 intern 日志窗口（见 cir_cache.cr 头注「21」段）：本函数生成期间
+            // 每次新 intern 都记进日志 ⇒ 条目落盘时随之写入；命中装载时按序重放。
+            if cache_enabled != 0 { cir_rec_begin(); }
             ir_gen_func(fi);
+            if cache_enabled != 0 { cir_rec_end(); }
             df_end_func(ir_func_idx);
 
             // Save cache only when no side effect on snapshot-uncarried shared faces.

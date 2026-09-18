@@ -18,8 +18,10 @@ RED（修复前 = P5 起点基线 `/tmp/p5t0/base/corec`，同病；P4 T5 §7-5 
 
 判据（19 例；`COREC_WARM_SELF=1` 另开 2 例自源语料 ⇒ 共 21 例）：
     A 冷/暖判据（base 探针）7 例：rc 双 0 · 条目已落盘 · ELF 逐字节同 ·
-      `.ccr` **段级契约**（SYM..IFACE 七段冷=暖；STR 段冷≠暖为**预存**口径——
-      P4 T1 用例已钉：暖态不重放 ir_gen 临时名的 intern ⇒ STR 表更短）·
+      `.ccr` **段级契约**（SYM..IFACE 七段冷=暖；**STR 段自 `CIR_CACHE_VER 21`
+      （2026-09-18 串域批）起亦必须冷=暖**——旧口径「暖态 STR 更短（预存）」已被证为
+      缺陷本体：暖态不重放生成期 intern ⇒ 读侧串表短于写侧，快照内既有 id 被按错
+      编号解释。留痕：旧断言原文见 `str_contract_equal` 历史注）·
       暖态**真命中**（条目 size+mtime 不变）· 再暖确定性
     B 变体 4 例：多串 / 0 串 / 大串（4KB 字面量）/ 多函数（24 函数）
     C 可选程序 2 例：两跑产物同 + 缓存关（零条目——本修复不牵动可选面）
@@ -180,7 +182,12 @@ def entry_stamp(p: pathlib.Path):
 # 冷态的**前缀**（同 index ⇒ 同字节），且条数不增。
 SEG_NAMES = {1: "STR", 2: "SYM", 3: "NOD", 4: "ENT", 5: "REG",
              6: "EDG", 7: "TYPE", 8: "IFACE"}
-CONTRACT_TAGS = (2, 3, 4, 5, 6, 7, 8)
+# 【v21 判据重定（2026-09-18 串域批 · TODO #2026-09-18-9）；上述旧口径原文全部保留在上】
+# 「暖态 STR 更短」**不是预存口径，是缺陷本体**：读侧串表短于写侧 ⇒ 快照内一切既有
+# intern id 被按错编号解释（暖态取到别串/垃圾字节，rc=0 静默；VER 17–20 四代全复现）。
+# 修法 = 生成期 intern 日志 + 装载期按序重放（`cir_cache.cr` 头注「21」段）⇒ **STR 段
+# 自本代起并入恒定契约**（下表现含 tag 1）。判据函数见 `str_contract_equal`（重定版）。
+CONTRACT_TAGS = (1, 2, 3, 4, 5, 6, 7, 8)
 
 
 def ccr_segments(path: pathlib.Path):
@@ -208,40 +215,32 @@ def str_entries(seg: bytes):
 
 
 def str_contract_equal(cold_seg: bytes, warm_seg: bytes):
-    """STR 段冷/暖**结构**判据（B4/#2026-09-16-25 修复，2026-09-16 判据网加固批）。
+    """STR 段冷/暖**结构**判据（B4/#2026-09-16-25 加固；**CIR_CACHE_VER 21 判据重定**）。
 
-    契约（预存口径的精确化）：暖态不重放 ir_gen 临时名（`_eq0`/`bin` 等）的
-    intern ⇒ **暖态条目 = 冷态条目的前缀**（同 index ⇒ 同字节；冷态多出的是
-    尾部若干条）。断言 ① `n_warm ≤ n_cold`（暖态不得增长）；② `warm ==
-    cold[:n_warm]`（同 index 逐条字节相等——**同尺寸改内容**在此必红）；
-    ③ 非空转：`n_cold ≥ 1` 且 `n_warm ≥ 1`（否则判据空转，判红）。
+    **重定（2026-09-18 串域批，TODO #2026-09-18-9）**：本判据原契约为「**暖 = 冷前缀**」
+    ——即把「暖态 STR 更短」当成**预存口径**接受（P4 T1 定口径：暖态不重放 ir_gen 临时名
+    的 intern）。**该「预存」已被证明是缺陷本体**：v21 起读侧按序重放**生成期 intern
+    日志**，串表与写侧同态 ⇒ 正确契约 = **冷/暖 STR 逐条逐字节相同**（旧口径原文保留在
+    模块头注与下方历史注里，作留痕）。断言：① `n_warm == n_cold`；② 逐条字节相等；
+    ③ 非空转：两侧均 ≥1 条（BASE_PROBE 多串语料必产 ≥1 名字），否则判红。
 
-    **反例自检（audit §0）：什么坏实现能骗过本断言？**——原「只登记尺寸」
-    判据下：让暖态 STR 多写/漏写一条（尺寸同步变化）或**同尺寸改内容**（把
-    某条名字写坏）都全绿（ELF 面仅在串进发射面时才咬）。本断言下：漏写 ⇒
-    ②在某 index 上字节不等（错位）；改写内容 ⇒ ②同 index 不等；多写 ⇒ 既
-    违 ①（条数增长）也违 ②。剩余面 = 冷态自身被改坏（两侧同错）——那由产物
-    面（A4 ELF 全字节等）+ 语料对拍覆盖。
-
-    **探针触发自检（audit §0bis）**：③ 断言两侧条目数 ≥1（BASE_PROBE 多串
-    语料必产 ≥1 名字），且本批实测冷/暖条数差 >0（正是本判据要约束的差异
-    面）——明细随 detail 打印，空转即判红。
+    **反例自检（audit §0）**：① 少写/多写一条 ⇒ 违 ①（条数不等）；② 同尺寸改内容 ⇒
+    违 ②；③ 顺序漂移（同一集合不同序）⇒ 违 ②（同 index 不等）。**突变自证**：本批的
+    `--inject-cir-skip-journal`（跳过重放）下，本判据在 `fields`/`concat` 类语料上必红
+    （实测暖态 STR 条数少于冷态，正是旧口径的样子）——判据与被测面同源可证。
     """
     c = str_entries(cold_seg)
     w = str_entries(warm_seg)
     if len(c) == 0 or len(w) == 0:
         return False, f"STR 判据空转：冷 {len(c)} 条 / 暖 {len(w)} 条"
-    if len(w) > len(c):
-        return False, (f"暖态 STR 条数 {len(w)} > 冷态 {len(c)}——暖态不得新增条目"
-                       f"（预存口径：暖态只是不重放 ir_gen 临时名）")
+    if len(w) != len(c):
+        return False, (f"暖态 STR 条数 {len(w)} != 冷态 {len(c)}"
+                       f"（v21 起正确契约 = 逐条相同；暖态少/多条即读侧串表与写侧不同态）")
     for i, (wc, cc) in enumerate(zip(w, c)):
         if wc != cc:
             return False, (f"STR 第 {i} 条冷/暖异：暖 {wc!r} != 冷 {cc!r}"
-                           f"（同 index 必须同字节——同尺寸改内容在此必红）")
-    tail = ", ".join(repr(x[:24]) for x in c[len(w):][:4])
-    return True, (f"STR {len(c)} 条→{len(w)} 条（暖 = 冷前缀，逐条字节同；"
-                  f"冷多出 {len(c) - len(w)} 条: {tail}"
-                  f"{'…' if len(c) - len(w) > 4 else ''}）")
+                           f"（同 index 必须同字节——同尺寸改内容/顺序漂移在此必红）")
+    return True, f"STR 冷/暖各 {len(c)} 条，逐条字节同（v21 契约：同态串表）"
 
 
 def ccr_contract_equal(cold_path: pathlib.Path, warm_path: pathlib.Path):
