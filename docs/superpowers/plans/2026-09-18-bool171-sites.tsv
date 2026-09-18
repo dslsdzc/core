@@ -1,0 +1,187 @@
+# bool 类 171 处逐处留痕（批 8 · bool←int 静默面收口；2026-09-18）
+#
+# 判据来源：`CORE_S1P=1 ./build/corec check src/compiler/main.cr` 的 S1P 台账
+#   改前：bool 桶（列 6 = arg_ti == 2，即「形参 int ← 实参 bool」）171 点，总台账 239 点
+#   改后：bool 桶 0 点，总台账 68 点（残桶 = string↔int，归 S2 路线 1 单独批）
+# 语义依据：这 171 处的第二实参**本就是 bool 表达式**（谓词），旧形 `ts_check(name, <bool>, 1)` 靠
+#   bool 隐式当 int(0/1) 参与 `!=` 比较；改为签名 helper `ts_check_b(name, got: bool, want: bool)` 后
+#   比较在 bool 域内完成——**零行为变化**由 `selftest-types`（415/415）与 `selftest-purity`（26/26）
+#   运行输出**逐字节相同**背书（改前 421 行 / 28 行基线 ⇄ 改后逐字节 IDENTICAL，见本批报告）。
+# 期望值分布：第三实参 = true 170 处 · = false 1 处（后者为**负断言**——按既有语义保留，
+#   非笔误：`ts_check_b(..., false)` = 「期望该谓词为假」；已核改前形为 `..., 0)`，语义逐字对齐）。
+# 行号口径：**改后文件内行号**（改前的对应行用 case-name 列定位；本批已核无遗漏、无重复案名）。
+# 列：file 	 line 	 helper 	 case-name 	 第二实参（空白归一化；必为括号包裹的 bool 表达式）	 第三实参(true/false)
+# 行数：171（type_selftest 166 · purity_selftest 5）
+# 数据行 sha256（仅数据行，不含本元信息块）：6dfee7aa93cdb7e5664da60e89fc515adb40654ed13b042b3ad7efa7b8366e10
+# 复算：`CI_JOB_NAME=selfhost-tests` 内的 `tests/selfhost/test_s1p_liveness.py` 判据⑦（bool 桶归零 + 台账非空自证）。
+src/compiler/type_selftest.cr	201	ts_check_b	t5.f4_later_param_declared_type	(t5_ti_bound == TI_STR && ts_gen_map_ti(t5_u_ni) == -1)	true
+src/compiler/type_selftest.cr	203	ts_check_b	t5.f4_bind_seg_recorded	(g_gen_binds_count == 2 && r64(g_gen_binds, 0 * 8) == 1 && r64(g_gen_binds, 1 * 8) == TI_STR && ast_int_val(t5_calln) == 1)	true
+src/compiler/type_selftest.cr	210	ts_check_b	t5.constr_name_resolve	(gen_constr_type_ti(t5_ni_int) == TI_INT && gen_constr_type_ti(t5_ni_str) == TI_STR && gen_constr_type_ti(str_intern("never")) == TI_NEVER && gen_constr_type_ti(t5_ni_nope) == -1 && gen_constr_type_ti(-1) == -1)	true
+src/compiler/type_selftest.cr	214	ts_check_b	t5.constr_essence_three_state	(gen_constr_satisfied(t5_ni_int, TI_INT) == 1 && // `never` **不**满足原生约束（引擎现状：AK_NEVER 是与 AK_INT 互斥的**原子**，不是 ⊥ // ——P0 既有语义「never 行在引擎侧不是真 ⊥」（T4 报告 §7-⑨），本批如实钉住、不动） gen_constr_satisfied(t5_ni_int, TI_NEVER) == 0 && gen_constr_satisfied(t5_ni_int, TI_STR) == 0 && gen_constr_satisfied(t5_ni_str, TI_INT) == 0 && gen_constr_satisfied(t5_ni_nope, TI_INT) == -1)	true
+src/compiler/type_selftest.cr	226	ts_check_b	t5.constr_iface_non_named_unjudged	(find_iface(str_intern("T5_Show")) == t5_if_ii && gen_constr_satisfied(str_intern("T5_Show"), TI_INT) == -1)	true
+src/compiler/type_selftest.cr	230	ts_check_b	t5.constr_witness_text	(str_len(gen_constr_witness_str(TI_STR, t5_ni_int)) > 0 && str_len(gen_constr_witness_str(TI_INT, t5_ni_int)) == 0 && str_len(gen_constr_witness_str(TI_INT, t5_ni_nope)) == 0)	true
+src/compiler/type_selftest.cr	238	ts_check_b	t5.constr_side_table_readback	(si_generic_count(t5_si) == 1 && si_gen_constr(t5_si, 0) == t5_ni_int && si_gen_constr(t5_si, 1) == -1 && si_gen_constr(-1, 0) == -1 && ei_generic_count(t5_ei) == 1 && ei_gen_constr(t5_ei, 0) == t5_ni_int && ei_gen_constr(t5_ei, 4) == -1)	true
+src/compiler/type_selftest.cr	266	ts_check_b	t5.inst_check_dedup_and_controls	(t5_d1 - t5_d0 == 1 && t5_d2 - t5_d1 == 0 && t5_d3 - t5_d2 == 1 && t5_d4 - t5_d3 == 0 && t5_d5 - t5_d4 == 1 && t5_d6 - t5_d5 == 0 && ts_diag_code_at(t5_d0) == EC_TG_BOUND && // 末条记录下标 = **调用后计数 - 1**（d5 是调用后的 g_diag_count） ts_diag_code_at(t5_d5 - 1) == EC_TG_BOUND)	true
+src/compiler/type_selftest.cr	279	ts_check_b	t5.inst_key_structural_faithful	(str_eq(inst_key_of_ti(t5_a_ti), inst_key_of_ti(t5_b_ti)) == 0 && str_eq(inst_key_of_ti(t5_a_ti), inst_key_of_ti(t5_a2_ti)) != 0 && str_eq(inst_key_of_ti(TI_INT), "int") != 0 && str_eq(inst_key_of_ti(t5_arr_ti), "[int; 3]") != 0 && str_eq(inst_key_of_ti(t5_ptr_ti), "*T5_A") != 0)	true
+src/compiler/type_selftest.cr	320	ts_check_b	t5.inst_ti_subst_in_clone	(t5_f1 >= 0 && t5_f2 == t5_f1 && t5_f3 >= 0 && t5_f3 != t5_f1 && t5_cp_ok == 1)	true
+src/compiler/type_selftest.cr	1019	ts_check_b	t3n.chain_shape	(ta >= 0 && tt_a(ta) == AK_NAMED && tt_b(ta) == n_a && tt_c(ta) >= 0 && tt_tag(tt_c(ta)) == TT_CONS && tt_a(tt_c(ta)) == sh_name_token(na_ni) && tt_b(tt_c(ta)) >= 0 && tt_tag(tt_b(tt_c(ta))) == TT_NIL)	true
+src/compiler/type_selftest.cr	1027	ts_check_b	t3n.same_name_same_row	(n_a2 == n_a && sh_term_of_ti(n_a2) == ta && ty_equiv(ta, sh_term_of_ti(n_a2)) == 1)	true
+src/compiler/type_selftest.cr	1029	ts_check_b	t3n.diff_name_diff	(ty_sub(ta, tb) == 0 && ty_sub(tb, ta) == 0 && ty_equiv(ta, tb) == 0)	true
+src/compiler/type_selftest.cr	1032	ts_check_b	t3n.named_vs_base_zero	(ty_equiv(ta, sh_term_of_ti(TI_INT)) == 0 && ty_equiv(ta, sh_term_of_ti(TI_STR)) == 0 && ty_equiv(sh_term_of_ti(TI_STR), ta) == 0)	true
+src/compiler/type_selftest.cr	1042	ts_check_b	t3n.never_dyn_out_of_domain	(dn == -1 && dd == -1 && unc1 == 1 && unc2 == 1)	true
+src/compiler/type_selftest.cr	1047	ts_check_b	t3n.no_chain_out_of_domain	(dnc == -1 && ty_uncovered() == 1)	true
+src/compiler/type_selftest.cr	1051	ts_check_b	t3n.token_pos_mismatch_out	(mis1 == -1 && ty_uncovered() == 1)	true
+src/compiler/type_selftest.cr	1057	ts_check_b	t3n.arg_var_out_of_domain	(mis2 == -1 && ty_uncovered() == 1)	true
+src/compiler/type_selftest.cr	1066	ts_check_b	t3n.decided_no_indeterminate	(eqf == 1 && ty_sub(ta, tb) == 0)	true
+src/compiler/type_selftest.cr	1084	ts_check_b	t3n.apply_canonical_b	(t_ga1 >= 0 && tt_a(t_ga1) == AK_NAMED && tt_b(t_ga1) == n_a && tt_atom_of_term(t_ga1) == n_a && tt_c(t_ga1) >= 0 && tt_tag(tt_c(t_ga1)) == TT_CONS && tt_a(tt_c(t_ga1)) == sh_name_token(na_ni) && tt_a(tt_b(tt_c(t_ga1))) == sh_term_of_ti(TI_INT))	true
+src/compiler/type_selftest.cr	1090	ts_check_b	t3n.apply_two_rows_same_args	(ga1 != ga2 && t_ga1 == t_ga2 && ty_equiv(t_ga1, t_ga2) == 1)	true
+src/compiler/type_selftest.cr	1092	ts_check_b	t3n.apply_diff_args_zero	(ty_sub(t_ga1, t_ga3) == 0 && ty_sub(t_ga3, t_ga1) == 0)	true
+src/compiler/type_selftest.cr	1094	ts_check_b	t3n.apply_vs_bare_diff	(ty_sub(t_ga1, ta) == 0 && ty_sub(ta, t_ga1) == 0)	true
+src/compiler/type_selftest.cr	1097	ts_check_b	t3n.two_points_isomorphic	(sh_sig_term_of_ti(n_a) == ta && sh_sig_term_of_ti(ga1) == t_ga1)	true
+src/compiler/type_selftest.cr	1112	ts_check_b	t3n.nested_apply_same	(ga4 != ga5 && sh_term_of_ti(ga4) == sh_term_of_ti(ga5))	true
+src/compiler/type_selftest.cr	1117	ts_check_b	t3n.optional_named	(ty_sub(ta, opt_a) == 1 && ty_sub(opt_a, opt_b) == 0)	true
+src/compiler/type_selftest.cr	1124	ts_check_b	t3n.union_out_of_domain	(u_out == -1 && ty_uncovered() == 1)	true
+src/compiler/type_selftest.cr	1270	ts_check_b	t4.ice04_bridge_gap_hard_error	(t4_b1 == 1 && t4_d1 == t4_d0 + 1 && ts_diag_code_at(t4_d0) == EC_ICE_TY_INDET && str_len(t4_m_bridge) > 0)	true
+src/compiler/type_selftest.cr	1283	ts_check_b	t4.ice04_engine_uncovered_hard_error	(t4_b2 == 1 && t4_d3 == t4_d2 + 1 && ts_diag_code_at(t4_d2) == EC_ICE_TY_INDET && str_len(t4_m_engine) > 0 && str_eq(t4_m_bridge, t4_m_engine) == 0)	true
+src/compiler/type_selftest.cr	1655	ts_check_b	ct2.shape_face_from_init_types	(iface_shape_count() == 6 && iface_shape_lookup(str_intern("sequence")) == sh_shape_seq() && iface_shape_lookup(str_intern("product")) == sh_shape_product())	true
+src/compiler/type_selftest.cr	1693	ts_check_b	ct2.kind_of_no_new_mapping	(ts_ccr2_kind_domain_ok() == 1 && iface_kind_of(ct2_null) == -1 && iface_kind_of(ct2_opt) == -1)	true
+src/compiler/type_selftest.cr	1809	ts_check_b	unit.dedup	(tt_union(a_int, a_str) == tt_union(a_int, a_str))	true
+src/compiler/type_selftest.cr	1810	ts_check_b	unit.notnot	(tt_not(tt_not(a_int)) == a_int)	true
+src/compiler/type_selftest.cr	1815	ts_check_b	norm.demorgan	(tt_norm(tt_not(tt_union(a_int, a_str))) == tt_norm(tt_inter(tt_not(a_int), tt_not(a_str))))	true
+src/compiler/type_selftest.cr	1821	ts_check_b	norm.idempotent	(tt_norm(tt_norm(probe)) == tt_norm(probe))	true
+src/compiler/type_selftest.cr	1848	ts_check_b	witness.nonempty	(w >= 0)	true
+src/compiler/type_selftest.cr	1938	ts_check_b	grow.index_rebuilt	(after == ref)	true
+src/compiler/type_selftest.cr	1955	ts_check_b	grow.dedup_after_rebuild	(tt_atom(AK_PRODUCT, -1, tt_cons(tt_mu(0, a_int), tt_nil())) == tt_atom(AK_PRODUCT, -1, tt_cons(tt_mu(0, a_int), tt_nil())))	true
+src/compiler/type_selftest.cr	1974	ts_check_b	bridge.cache_hit	(sh_term_of_ti(TI_INT) == t_int)	true
+src/compiler/type_selftest.cr	2006	ts_check_b	bridge.native_dyn_kind_branch	(sh_native_ak(TI_DYN) == -1 && tt_a(sh_term_of_ti(TI_DYN)) == AK_DYN)	true
+src/compiler/type_selftest.cr	2009	ts_check_b	bridge.native_dex_s	(sh_native_ak(TI_DEX_S) == AK_DEX && tt_a(sh_term_of_ti(TI_DEX_S)) == AK_DEX)	true
+src/compiler/type_selftest.cr	2022	ts_check_b	bridge.ref_inner	(tt_a(t_ref) == AK_REF && tt_b(tt_c(t_ref)) == tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil()))	true
+src/compiler/type_selftest.cr	2025	ts_check_b	bridge.slice_seq	(tt_a(t_slice) == AK_SEQUENCE && tt_c(t_slice) == tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil()))	true
+src/compiler/type_selftest.cr	2033	ts_check_b	t4.tk_const_int	(sh_tk_term_of_code(IR_CONST, TI_INT) == sh_term_of_ti(TI_INT) && tt_a(sh_tk_term_of_code(IR_CONST, TI_INT)) == AK_INT)	true
+src/compiler/type_selftest.cr	2036	ts_check_b	t4.tk_binary_dex	(sh_tk_term_of_code(IR_BINARY, TI_DEX) == sh_term_of_ti(TI_DEX) && tt_a(sh_tk_term_of_code(IR_BINARY, TI_DEX)) == AK_DEX)	true
+src/compiler/type_selftest.cr	2039	ts_check_b	t4.tk_const_dex_s_row8	(sh_tk_term_of_code(IR_CONST, TI_DEX_S) == sh_term_of_ti(TI_DEX_S) && tt_a(sh_tk_term_of_code(IR_CONST, TI_DEX_S)) == AK_DEX)	true
+src/compiler/type_selftest.cr	2044	ts_check_b	t4.tk_bounds_flag1_rejected	(sh_tk_term_of_code(IR_BOUNDS_CHECK, 1) == -1 && sh_term_of_ti(1) >= 0)	true
+src/compiler/type_selftest.cr	2047	ts_check_b	t4.tk_deref_width8_rejected	(sh_tk_term_of_code(IR_DEREF, 8) == -1 && sh_term_of_ti(TI_DEX_S) >= 0)	true
+src/compiler/type_selftest.cr	2051	ts_check_b	t4.tk_unlisted_op_valid_row_rejected	(sh_tk_term_of_code(IR_STORE, TI_INT) == -1 && sh_tk_term_of_code(IR_RETURN, TI_INT) == -1 && sh_tk_term_of_code(IR_MAKE_ENUM, TI_INT) == -1 && sh_term_of_ti(TI_INT) >= 0)	true
+src/compiler/type_selftest.cr	2057	ts_check_b	t4.tk_row_range_rejected	(sh_tk_term_of_code(IR_CONST, g_type_count) == -1 && sh_tk_term_of_code(IR_BINARY, g_type_count + 7) == -1 && sh_tk_term_of_code(IR_CONST, -1) == -1)	true
+src/compiler/type_selftest.cr	2075	ts_check_b	t4.tk_query_purity_and_cache_hit	((t4_dyn_term >= 0 && sk4 == t4_dyn_term && g_sh_slot_term == t4_sent_t && g_sh_slot_aux == t4_sent_a && g_tk_face_fail == t4_fail_before))	true
+src/compiler/type_selftest.cr	2085	ts_check_b	p5t2.atom_of_contract	(tt_atom_of_term(sh_term_of_ti(TI_INT)) == TI_INT && tt_atom_of_term(t5s_ptr_term) == -1 && // 复合项：AK_PTR 的 b = -1 tt_atom_of_term(tt_nil()) == -1 && tt_atom_of_term(tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil())) == -1 && tt_atom_of_term(-1) == -1 && tt_atom_of_term(tt_count() + 9) == -1)	true
+src/compiler/type_selftest.cr	2097	ts_check_b	p5t2.slot_type_face_atomic	(t5s_bin_str_term == sh_term_of_ti(TI_STR) && t5s_bin_str_aux == 0 && sh_dfn_code_of_slots(t5s_bin_str_term, t5s_bin_str_aux) == TI_STR)	true
+src/compiler/type_selftest.cr	2107	ts_check_b	p5t2.slot_type_face_extended	(t5s_a1 == sh_term_of_ti(TI_UNIT) && t5s_a1x == 0 && tt_a(t5s_a1) == AK_UNIT && t5s_a2 == sh_term_of_ti(TI_INT) && t5s_a2x == 0 && t5s_a3 == sh_term_of_ti(TI_INT) && t5s_a3x == 0 && t5s_a4 == sh_term_of_ti(TI_DEX) && t5s_a4x == 0 && tt_a(t5s_a4) == AK_DEX && t5s_a5 == sh_term_of_ti(TI_DEX) && t5s_a5x == 0 && tt_a(t5s_a5) == AK_DEX)	true
+src/compiler/type_selftest.cr	2118	ts_check_b	p5t2.slot_composite_row_to_aux	(t5s_ptr_term >= 0 && g_sh_slot_term == -1 && g_sh_slot_aux == t5s_ptr_row && sh_dfn_code_of_slots(g_sh_slot_term, g_sh_slot_aux) == t5s_ptr_row)	true
+src/compiler/type_selftest.cr	2124	ts_check_b	p5t2.slot_array_row_to_aux	(sh_term_of_ti(t5s_arr_row) >= 0 && g_sh_slot_term == -1 && g_sh_slot_aux == t5s_arr_row && sh_dfn_code_of_slots(g_sh_slot_term, g_sh_slot_aux) == t5s_arr_row)	true
+src/compiler/type_selftest.cr	2135	ts_check_b	p5t2.slot_aux_face_codes	(t5s_f1t == -1 && t5s_f1a == 1 && sh_dfn_code_of_slots(t5s_f1t, t5s_f1a) == 1 && t5s_f0t == -1 && t5s_f0a == 0 && sh_dfn_code_of_slots(t5s_f0t, t5s_f0a) == 0 && t5s_d8t == -1 && t5s_d8a == 8 && sh_dfn_code_of_slots(t5s_d8t, t5s_d8a) == 8 && t5s_d4t == -1 && t5s_d4a == 4 && t5s_spt == -1 && t5s_spa == -1 && sh_dfn_code_of_slots(t5s_spt, t5s_spa) == -1)	true
+src/compiler/type_selftest.cr	2142	ts_check_b	p5t2.aux_trap_rows_translatable	(sh_term_of_ti(1) >= 0 && tt_a(sh_term_of_ti(1)) == AK_DEX && sh_term_of_ti(TI_DEX_S) >= 0 && tt_a(sh_term_of_ti(TI_DEX_S)) == AK_DEX && sh_tk_term_of_code(IR_STORE_PTR, TI_DEX_S) == -1)	true
+src/compiler/type_selftest.cr	2151	ts_check_b	p5t2.slot_none_face_empty	(t5s_n1t == -1 && t5s_n1a == 0 && sh_dfn_code_of_slots(t5s_n1t, t5s_n1a) == 0 && t5s_n2t == -1 && t5s_n2a == 0 && t5s_n3t == -1 && t5s_n3a == 0)	true
+src/compiler/type_selftest.cr	2156	ts_check_b	p5t2.code_derivation_contract	(sh_dfn_code_of_slots(sh_term_of_ti(TI_STR), 0) == TI_STR && sh_dfn_code_of_slots(-1, 0) == 0 && sh_dfn_code_of_slots(-1, 7) == 7 && sh_dfn_code_of_slots(t5s_ptr_term, 0) == -1 && // 复合项入项槽 = 无法派生（显式响亮） sh_dfn_code_of_slots(sh_term_of_ti(TI_INT), 9) == 9)	true
+src/compiler/type_selftest.cr	2173	ts_check_b	p5t2.hotpatch_route_no_face	(g_sh_slot_term == -1 && g_sh_slot_aux == 0 && sh_dfn_code_of_slots(g_sh_slot_term, g_sh_slot_aux) == 0)	true
+src/compiler/type_selftest.cr	2186	ts_check_b	p5t2.d23_build_fail_bit	(t5s_fail_after == t5s_fail_before + 1 && t5s_fail_final == t5s_fail_after && t5s_out_t == -1 && t5s_out_a == g_type_count)	true
+src/compiler/type_selftest.cr	2195	ts_check_b	bridge.named_ak_b	(tt_a(t_named) == AK_NAMED && tt_b(t_named) == named_ti)	true
+src/compiler/type_selftest.cr	2217	ts_check_b	bridge.cache_hit_same_term_no_new_entry	(t_arr2b == t_arr2 && sh_map_entries() == e_hit_before)	true
+src/compiler/type_selftest.cr	2231	ts_check_b	bridge.grow_rehash	(sh_map_entries() == g_before + 600 && sh_term_of_ti(arr_ti2) == t_arr2)	true
+src/compiler/type_selftest.cr	2233	ts_check_b	bridge.grow_cap_doubled	(g_term_map_cap >= 2048)	true
+src/compiler/type_selftest.cr	2246	ts_check_b	bridge.grow_rehash2	(sh_map_entries() == g2_before + 1100 && g_term_map_cap >= 4096 && sh_term_of_ti(arr_ti2) == t_arr2)	true
+src/compiler/type_selftest.cr	2255	ts_check_b	f1.same_name_one_row	(n1 == n2)	true
+src/compiler/type_selftest.cr	2258	ts_check_b	f1.diff_name_diff_row	(n3 != n1)	true
+src/compiler/type_selftest.cr	2260	ts_check_b	f1.bridge_same_term	(sh_term_of_ti(n1) == sh_term_of_ti(n2))	true
+src/compiler/type_selftest.cr	2275	ts_check_b	f1.dedup_rehash_survived	(g_named_dedup_cap >= 4096 && g_named_dedup_count == c_before + 1700 && alloc_named_type(str_intern("DedupProbe")) == n1 && named_dedup_rows(str_intern("DedupProbe")) == 1)	true
+src/compiler/type_selftest.cr	2300	ts_check_b	f2.nested_elem_reject	(array_len_constraint_ok(f2_outer3, f2_outer3) == 1 && array_len_constraint_ok(f2_outer4, f2_outer3) == 0)	true
+src/compiler/type_selftest.cr	2314	ts_check_b	f2.genapply_arg_reject	(array_len_constraint_ok(f2_ga3, f2_ga3) == 1 && array_len_constraint_ok(f2_ga4, f2_ga3) == 0)	true
+src/compiler/type_selftest.cr	2318	ts_check_b	f2.ptr_elem_reject	(array_len_constraint_ok(f2_pt3, f2_pt3) == 1 && array_len_constraint_ok(f2_pt4, f2_pt3) == 0)	true
+src/compiler/type_selftest.cr	2330	ts_check_b	f2.tuple_field_reject	(array_len_constraint_ok(f2_tup3, f2_tup3) == 1 && array_len_constraint_ok(f2_tup4, f2_tup3) == 0)	true
+src/compiler/type_selftest.cr	2333	ts_check_b	f2.nonarray_no_constraint	(array_len_constraint_ok(f2_arr3, TI_INT) == 1 && array_len_constraint_ok(TI_INT, f2_arr3) == 1)	true
+src/compiler/type_selftest.cr	2343	ts_check_b	f2.ref_elem_reject	(array_len_constraint_ok(f2_rf3, f2_rf3) == 1 && array_len_constraint_ok(f2_rf4, f2_rf3) == 0)	true
+src/compiler/type_selftest.cr	2347	ts_check_b	f2.slice_elem_reject	(array_len_constraint_ok(f2_sl3, f2_sl3) == 1 && array_len_constraint_ok(f2_sl4, f2_sl3) == 0)	true
+src/compiler/type_selftest.cr	2386	ts_check_b	t3.named_face_decided_no_indeterminate	(t3_ub == 1 && ty_equiv(sh_term_of_ti(t3_na), sh_term_of_ti(t3_nb)) == 0)	true
+src/compiler/type_selftest.cr	2416	ts_check_b	t3c.map_reset_clears_bridge	(t3c_entries_mid >= 1 && t3c_entries_after == 0 && g_term_map_cap == 0)	true
+src/compiler/type_selftest.cr	2449	ts_check_b	iface.struct_ti_none	(iface_ti_of(AK_PRODUCT) == -1 && iface_ti_of(AK_SEQUENCE) == -1 && iface_ti_of(AK_REF) == -1 && iface_ti_of(AK_PTR) == -1 && iface_ti_of(AK_NAMED) == -1)	true
+src/compiler/type_selftest.cr	2466	ts_check_b	iface.kind_ptr_ref	(iface_kind_of(ifc_ptr) == AK_PTR && iface_kind_of(ifc_ref) == AK_REF)	true
+src/compiler/type_selftest.cr	2470	ts_check_b	iface.kind_seq	(iface_kind_of(ifc_arr) == AK_SEQUENCE && iface_kind_of(ifc_slice) == AK_SEQUENCE)	true
+src/compiler/type_selftest.cr	2477	ts_check_b	iface.kind_named	(iface_kind_of(ifc_named) == AK_NAMED && iface_kind_of(ifc_gp) == AK_NAMED && iface_kind_of(ifc_ga) == AK_NAMED)	true
+src/compiler/type_selftest.cr	2481	ts_check_b	iface.entry_lookup	(iface_entry(AK_INT) >= 0 && iface_entry(AK_INT) < iface_count() && iface_entry(AK_NAMED) >= 0 && iface_entry(-1) == -1 && iface_entry(9999) == -1)	true
+src/compiler/type_selftest.cr	2485	ts_check_b	iface.ty_code_natives	(iface_by_ty_code(TY_INT) == AK_INT && iface_by_ty_code(TY_DEX) == AK_DEX && iface_by_ty_code(TY_BOOL) == AK_BOOL && iface_by_ty_code(TY_STRING) == AK_STRING && iface_by_ty_code(TY_UNIT) == AK_UNIT && iface_by_ty_code(TY_NEVER) == AK_NEVER && iface_by_ty_code(TY_CHAR) == AK_CHAR)	true
+src/compiler/type_selftest.cr	2490	ts_check_b	iface.ty_code_gray	(iface_by_ty_code(TY_DEX_S) == AK_DEX && iface_by_ty_code(TY_GENERIC_PARAM) == AK_NAMED)	true
+src/compiler/type_selftest.cr	2501	ts_check_b	iface.lit_ak	(iface_lit_ak(EXPR_INT) == AK_INT && iface_lit_ak(EXPR_DEX) == AK_DEX && iface_lit_ak(EXPR_STRING) == AK_STRING && iface_lit_ak(EXPR_BOOL) == AK_BOOL && iface_lit_ak(EXPR_CHAR) == AK_CHAR)	true
+src/compiler/type_selftest.cr	2512	ts_check_b	iface.of_term_oob	(iface_of_term(-1) == -1 && iface_of_term(tt_count() + 9) == -1)	true
+src/compiler/type_selftest.cr	2517	ts_check_b	iface.permits_bad_op	(iface_permits(AK_INT, -1) == 0 && iface_permits(AK_INT, 63) == 0 && iface_permits(9999, OP_ADD) == 0)	true
+src/compiler/type_selftest.cr	2554	ts_check_b	iface.scan_coverage	(t2_i == 10 && r64(t2_codes, 56) == TY_GENERIC_PARAM && r64(t2_codes, 64) == TY_DEX_S && t2_j == g_type_count && t2_j >= 9)	true
+src/compiler/type_selftest.cr	2557	ts_check_b	iface.compare_is_live	(iface_by_ty_code(999) == ts_t4_ak_expected(TY_INT))	false
+src/compiler/type_selftest.cr	2560	ts_check_b	iface.bridge_delegates	(sh_base_ak(TY_INT) == AK_INT && sh_base_ak(TY_STRING) == AK_STRING && sh_base_ak(TY_BOOL) == AK_BOOL && sh_base_ak(TY_DEX_S) == AK_DEX && sh_base_ak(TY_GENERIC_PARAM) == AK_NAMED && sh_base_ak(999) == -1 && sh_native_ak(TI_INT) == AK_INT && sh_native_ak(TI_STR) == AK_STRING)	true
+src/compiler/type_selftest.cr	2566	ts_check_b	iface.bridge_gate_kept	(sh_native_ak(TI_DYN) == -1 && sh_native_ak(ifc_arr) == -1 && sh_native_ak(ifc_named) == -1 && sh_native_ak(-1) == -1 && iface_kind_of(TI_DYN) == AK_DYN)	true
+src/compiler/type_selftest.cr	2570	ts_check_b	iface.dispatch_no_index_shortcut	(iface_ti_of(AK_STRING) != AK_STRING && iface_ti_of(AK_BOOL) != AK_BOOL && TI_STR != TI_BOOL)	true
+src/compiler/type_selftest.cr	2586	ts_check_b	lit.node_kinds	(ast_kind(li_int) == EXPR_INT && ast_kind(li_dex) == EXPR_DEX && ast_kind(li_str) == EXPR_STRING && ast_kind(li_bool) == EXPR_BOOL && ast_kind(li_char) == EXPR_CHAR)	true
+src/compiler/type_selftest.cr	2597	ts_check_b	lit.infer_is_table	(infer_expr(li_int) == iface_lit_ti(EXPR_INT) && infer_expr(li_dex) == iface_lit_ti(EXPR_DEX) && infer_expr(li_str) == iface_lit_ti(EXPR_STRING) && infer_expr(li_bool) == iface_lit_ti(EXPR_BOOL) && infer_expr(li_char) == iface_lit_ti(EXPR_CHAR))	true
+src/compiler/type_selftest.cr	2717	ts_check_b	ops.index_permit_set	(iface_permits(AK_SEQUENCE, IP_INDEX) == 1 && iface_permits(AK_STRING, IP_INDEX) == 1 && iface_permits(AK_INT, IP_INDEX) == 0 && iface_permits(AK_REF, IP_INDEX) == 0 && iface_permits(AK_SEQUENCE, IP_INDEX_RANGE) == 1 && iface_permits(AK_STRING, IP_INDEX_RANGE) == 0)	true
+src/compiler/type_selftest.cr	2721	ts_check_b	ops.field_permit_set	(iface_permits(AK_NAMED, IP_FIELD) == 1 && iface_permits(AK_PRODUCT, IP_FIELD) == 1 && iface_permits(AK_INT, IP_FIELD) == 0 && iface_permits(AK_SEQUENCE, IP_FIELD) == 0)	true
+src/compiler/type_selftest.cr	2724	ts_check_b	ops.method_permit_set	(iface_permits(AK_DYN, IP_METHOD) == 1 && iface_permits(AK_NAMED, IP_METHOD) == 1 && iface_permits(AK_INT, IP_METHOD) == 0 && iface_permits(AK_PTR, IP_METHOD) == 0)	true
+src/compiler/type_selftest.cr	2744	ts_check_b	ops.entry_row_consistent	(o4_row_bad == 0 && o4_zero == 3)	true
+src/compiler/type_selftest.cr	2761	ts_check_b	ops.node_kinds	(ast_kind(o4_b_add_int) == EXPR_BINARY && ast_c(o4_b_add_int) == OP_ADD && ast_kind(o4_ref) == EXPR_UNARY && ast_c(o4_ref) == UOP_REF)	true
+src/compiler/type_selftest.cr	2841	ts_check_b	idx.node_kinds	(ast_kind(ix_idx_arr) == EXPR_INDEX && ast_kind(ix_arr3) == EXPR_ARRAY && ast_b(ix_idx_arr) == li_int && ast_kind(ix_range) == EXPR_RANGE && ast_kind(ix_idx_ptr) == EXPR_INDEX && ast_c(ix_ref) == UOP_REF)	true
+src/compiler/type_selftest.cr	2878	ts_check_b	idx.scan_coverage	(ix_n_rows == g_type_count && ix_n_rows >= 15 && ix_n_seq >= 2 && ix_n_str == 1 && ix_n_named >= 1 && ix_n_prod >= 1 && ix_n_ref >= 1 && ix_n_ptr >= 1 && ix_n_dyn >= 1 && get_type_kind(ix_row_ptr) == TYP_PTR && get_type_kind(ix_row_ref) == TYP_REF && get_type_kind(ix_row_tup) == TYP_TUPLE)	true
+src/compiler/type_selftest.cr	2933	ts_check_b	t6.ty_code_head	(ty_code_to_ti(TY_INT) == TI_INT && ty_code_to_ti(TY_DEX) == TI_DEX && ty_code_to_ti(TY_BOOL) == TI_BOOL && ty_code_to_ti(TY_STRING) == TI_STR && ty_code_to_ti(TY_UNIT) == TI_UNIT)	true
+src/compiler/type_selftest.cr	2937	ts_check_b	t6.ty_code_tail	(ty_code_to_ti(TY_NEVER) == TI_NEVER && ty_code_to_ti(TY_CHAR) == TI_CHAR)	true
+src/compiler/type_selftest.cr	2940	ts_check_b	t6.ty_code_dyn7	(ty_code_to_ti(TI_DYN) == TI_DYN && ty_code_to_ti(TY_GENERIC_PARAM) == TI_DYN)	true
+src/compiler/type_selftest.cr	2943	ts_check_b	t6.ty_code_domain	(ty_code_to_ti(TY_DEX_S) == -1 && ty_code_to_ti(-1) == -1 && ty_code_to_ti(999) == -1)	true
+src/compiler/type_selftest.cr	2956	ts_check_b	t6.node_kinds	(ast_kind(t6_never) == 0 && ast_type_val(t6_never) == TY_NEVER && ast_type_val(t6_dyn) == TI_DYN && ast_type_val(t6_dex_s) == TY_DEX_S)	true
+src/compiler/type_selftest.cr	2959	ts_check_b	t6.R_codes	(res_type_node(t6_int) == TI_INT && res_type_node(t6_dex) == TI_DEX && res_type_node(t6_bool) == TI_BOOL && res_type_node(t6_str) == TI_STR && res_type_node(t6_unit) == TI_UNIT && res_type_node(t6_never) == TI_NEVER && res_type_node(t6_char) == TI_CHAR)	true
+src/compiler/type_selftest.cr	2964	ts_check_b	t6.C_codes	(res_call_type(t6_int, -1) == TI_INT && res_call_type(t6_dex, -1) == TI_DEX && res_call_type(t6_bool, -1) == TI_BOOL && res_call_type(t6_str, -1) == TI_STR && res_call_type(t6_unit, -1) == TI_UNIT && res_call_type(t6_char, -1) == TI_CHAR)	true
+src/compiler/type_selftest.cr	2969	ts_check_b	t6.never_cell_diff	(res_type_node(t6_never) == TI_NEVER && res_call_type(t6_never, -1) == TI_UNIT)	true
+src/compiler/type_selftest.cr	2972	ts_check_b	t6.dyn_cell_both	(res_type_node(t6_dyn) == TI_DYN && res_call_type(t6_dyn, -1) == TI_DYN)	true
+src/compiler/type_selftest.cr	2975	ts_check_b	t6.dex_s_oob_unit	(res_type_node(t6_dex_s) == TI_UNIT && res_call_type(t6_dex_s, -1) == TI_UNIT && res_type_node(t6_oob) == TI_UNIT && res_call_type(t6_oob, -1) == TI_UNIT)	true
+src/compiler/type_selftest.cr	2978	ts_check_b	t6.neg_node_unit	(res_type_node(-1) == TI_UNIT && res_call_type(-1, -1) == TI_UNIT)	true
+src/compiler/type_selftest.cr	3021	ts_check_b	unf.ga_arg_subst	(tt_a(unf_ta) == AK_PRODUCT && tt_c(unf_ta) == tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil()) && tt_c(unf_tb) == tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil()) && unf_ta != unf_tb)	true
+src/compiler/type_selftest.cr	3026	ts_check_b	unf.ga_unapplied_nominal	(unf_tbare >= 0 && tt_a(unf_tbare) == AK_PRODUCT && tt_a(tt_a(tt_c(unf_tbare))) != AK_INT)	true
+src/compiler/type_selftest.cr	3040	ts_check_b	unf.struct_field_order	(tt_a(unf_tp1) == AK_PRODUCT && tt_c(unf_tp1) == tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_cons(tt_atom(AK_STRING, TI_STR, -1), tt_nil())))	true
+src/compiler/type_selftest.cr	3053	ts_check_b	unf.struct_field_node_not_code	(tt_a(unf_tp2) == AK_PRODUCT && tt_a(tt_a(tt_c(unf_tp2))) == AK_SEQUENCE)	true
+src/compiler/type_selftest.cr	3064	ts_check_b	unf.nominal_structural_equal	(unf_e1 >= 0 && unf_e2 >= 0 && ty_equiv(unf_e1, unf_e2) == 1)	true
+src/compiler/type_selftest.cr	3090	ts_check_b	unf.enum_domain_count	(unf_dom >= 0 && ts_unf_union_leaves(unf_dom) == 3)	true
+src/compiler/type_selftest.cr	3095	ts_check_b	unf.enum_variant_in_domain	(ty_sub(unf_vr, unf_dom) == 1 && ty_sub(unf_vg, unf_dom) == 1 && ty_sub(unf_vb, unf_dom) == 1 && sh_variant_term(unf_col_ti, str_intern("UnfNoSuchVariantU")) == -1)	true
+src/compiler/type_selftest.cr	3104	ts_check_b	unf.enum_variant_identity_scoped	(unf_vdup >= 0 && ty_sub(unf_vdup, unf_vr) != 1 && ty_sub(unf_vr, unf_vdup) != 1)	true
+src/compiler/type_selftest.cr	3134	ts_check_b	unf.exhaust_witness_subset	(unf_w2 >= 0 && ty_inhabited(unf_w2) == 1 && ty_sub(unf_w2, unf_osome) == 1)	true
+src/compiler/type_selftest.cr	3146	ts_check_b	unf.cache_hit_and_no_neg_cache	((unf_ce1 - unf_ce0) == 1 && (sh_unf_hits() - unf_ch0) == 1 && unf_ct2 == unf_ct1 && (sh_unf_entries() - unf_fail_e0) == 0)	true
+src/compiler/type_selftest.cr	3153	ts_check_b	unf.neg_paths	(sh_struct_term(g_type_count + 7) == -1 && sh_enum_domain_term(g_type_count + 7) == -1 && sh_struct_term(-1) == -1 && sh_variant_term(-1, 0) == -1 && sh_variant_term(unf_col_ti, -1) == -1 && sh_struct_term(unf_plain_ti) == -1 && sh_enum_domain_term(unf_plain_ti) == -1 && sh_struct_term(unf_loose_gp) == -1)	true
+src/compiler/type_selftest.cr	3161	ts_check_b	unf.iface_stub_three_state	(sh_iface_shape_term(-1) == -1 && iface_satisfies(-1, 0) == -1 && iface_satisfies(TI_INT, 9999) == -1)	true
+src/compiler/type_selftest.cr	3188	ts_check_b	t1.dir_fixed_two_lengths_identity	(ty_equiv(sh_term_of_ti(t1_arr3), sh_term_of_ti(t1_arr4)) == 1 && array_len_constraint_ok(t1_arr4, t1_arr3) == 0)	true
+src/compiler/type_selftest.cr	3194	ts_check_b	t1.dir_nested_ptr	(array_len_constraint_ok(t1_pt_sl, t1_pt_arr) == 0 && array_len_constraint_ok(t1_pt_arr, t1_pt_sl) == 1)	true
+src/compiler/type_selftest.cr	3198	ts_check_b	t1.dir_nested_elem	(array_len_constraint_ok(t1_out_sl, t1_out_arr) == 0 && array_len_constraint_ok(t1_out_arr, t1_out_sl) == 1)	true
+src/compiler/type_selftest.cr	3210	ts_check_b	t1.dir_nested_tuple	(array_len_constraint_ok(t1_tup_sl, t1_tup_arr) == 0 && array_len_constraint_ok(t1_tup_arr, t1_tup_sl) == 1)	true
+src/compiler/type_selftest.cr	3223	ts_check_b	t1.dir_nested_genapply	(array_len_constraint_ok(t1_ga_sl, t1_ga_arr) == 0 && array_len_constraint_ok(t1_ga_arr, t1_ga_sl) == 1)	true
+src/compiler/type_selftest.cr	3230	ts_check_b	t1.strict_sym_no_direction	(type_compat_sym(t1_sl, t1_arr3) == 1 && type_compat_sym(t1_arr3, t1_sl) == 1)	true
+src/compiler/type_selftest.cr	3238	ts_check_b	t1.var_readonly_covariant	(ty_sub(t1_rv_ro, t1_rv_ro_w) == 1 && ty_sub(t1_rv_ro_w, t1_rv_ro) == 0)	true
+src/compiler/type_selftest.cr	3244	ts_check_b	t1.var_mut_invariant_reject	(ty_sub(t1_rv_mut, t1_rv_mut_w) != 1 && ty_sub(t1_rv_mut_w, t1_rv_mut) != 1)	true
+src/compiler/type_selftest.cr	3246	ts_check_b	t1.var_seq_elem_invariant	(ty_sub(tt_atom(AK_SEQUENCE, -1, tt_cons(tt_atom(AK_INT, TI_INT, -1), tt_nil())), tt_atom(AK_SEQUENCE, -1, tt_cons(t1_u, tt_nil()))) != 1)	true
+src/compiler/type_selftest.cr	3253	ts_check_b	t1.var_mut_marker_dimension	(ty_equiv(sh_term_of_ti(t1_ref_ro), sh_term_of_ti(t1_ref_mut)) == 0 && ty_equiv(sh_term_of_ti(t1_ref_mut), sh_term_of_ti(t1_ref_ro)) == 0 && ty_equiv(sh_term_of_ti(t1_ref_ro), sh_term_of_ti(t1_ref_ro2)) == 1 && tt_b(tt_a(tt_c(sh_term_of_ti(t1_ref_mut)))) == 1)	true
+src/compiler/type_selftest.cr	3259	ts_check_b	t1.n_face_gate	(type_equal(t1_arr3, t1_arr4) && ty_sub(sh_term_of_ti(t1_arr3), sh_term_of_ti(t1_arr4)) == 1 && array_len_constraint_ok(t1_arr4, t1_arr3) == 0)	true
+src/compiler/type_selftest.cr	3265	ts_check_b	t1.dyn_tier_decided	(array_len_constraint_ok(t1_sl, t1_arr3) == 0 && array_len_constraint_ok(t1_sl2, t1_arr4) == 0 && array_len_constraint_ok(t1_arr3, t1_arr4) == 0)	true
+src/compiler/type_selftest.cr	3280	ts_check_b	t1.n_face_gate_nested	(t1_nest_ok == 1 && array_len_constraint_ok(t1_out_arr4, t1_out_arr) == 0)	true
+src/compiler/type_selftest.cr	3284	ts_check_b	t1.dir_nested_strict	(type_compat_strict(t1_out_sl, t1_out_arr) == -1 && type_compat_strict(t1_out_arr, t1_out_sl) == 1)	true
+src/compiler/type_selftest.cr	3323	ts_check_b	t3.counterexample_named_variant	(t3_w >= 0 && ty_inhabited(t3_w) == 1 && ty_sub(t3_w, t3_b) == 1 && t3_cx_named)	true
+src/compiler/type_selftest.cr	3355	ts_check_b	t3.no_arms_not_exhaustive	(sh_match_exhaustive(t3_only_ti, tt_nil(), 0) == 0 && sh_match_first_missing(0, 1) == 0)	true
+src/compiler/type_selftest.cr	3359	ts_check_b	t3.domain_guard_unknown	(sh_match_exhaustive(TI_INT, tt_nil(), 0) == -1 && sh_match_exhaustive(t3_s_ti, tt_nil(), 0) == -1 && sh_match_exhaustive(-1, tt_nil(), 0) == -1 && sh_enum_domain_term(t3_s_ti) == -1)	true
+src/compiler/type_selftest.cr	3368	ts_check_b	t3.empty_domain_vacuous	(sh_match_exhaustive(t3_emp_ti, tt_nil(), 0) == 1 && sh_match_first_missing(0, 0) == -1)	true
+src/compiler/type_selftest.cr	3380	ts_check_b	t3.payload_mixed_cover	(t3_none >= 0 && t3_some >= 0 && t3_none != t3_some && sh_match_exhaustive(t3_mix_ti, tt_cons(t3_some, tt_cons(t3_none, tt_nil())), 0) == 1 && sh_match_exhaustive(t3_mix_ti, tt_cons(t3_none, tt_nil()), 0) == 0 && sh_match_first_missing(sh_match_bit(0), 2) == 1)	true
+src/compiler/type_selftest.cr	3394	ts_check_b	t3.pat_name_resolution	(sh_match_pat_variant(t3_col_ti, t3_pat_q) == 2 && sh_match_pat_variant(t3_col_ti, t3_pat_b) == 2 && sh_match_pat_variant(t3_col_ti, t3_pat_f) == -1 && sh_match_pat_variant(t3_col_ti, t3_pat_n) == -1 && sh_match_pat_variant(t3_col_ti, t3_pat_w) == -1 && sh_match_pat_variant(t3_s_ti, t3_pat_b) == -1)	true
+src/compiler/type_selftest.cr	3398	ts_check_b	t3.pat_kind_classification	(sh_match_pat_kind(t3_pat_w) == 1 && sh_match_pat_kind(t3_pat_i) == 1 && sh_match_pat_kind(t3_pat_q) == 2 && sh_match_pat_kind(t3_pat_l) == 0 && sh_match_pat_kind(-1) == 0)	true
+src/compiler/type_selftest.cr	3404	ts_check_b	t3.dup_arm_complement	(sh_match_exhaustive(t3_only_ti, tt_cons(t3_one, tt_cons(t3_one, tt_nil())), 0) == 1 && sh_match_first_missing(sh_match_bit(0), 3) == 1)	true
+src/compiler/type_selftest.cr	3425	ts_check_b	t3.generic_apply_domain	(t3_gn >= 0 && t3_gs >= 0 && sh_match_exhaustive(t3_go_ga, tt_cons(t3_gn, tt_cons(t3_gs, tt_nil())), 0) == 1 && sh_match_exhaustive(t3_go_ga, tt_cons(t3_gn, tt_nil()), 0) == 0)	true
+src/compiler/type_selftest.cr	3449	ts_check_b	t4.opt_term_is_union	(ty_equiv(t4_optt, tt_union(t4_intt, t4_nullt)) == 1 && ty_equiv(t4_optt, t4_intt) == 0 && ty_sub(t4_intt, t4_optt) == 1)	true
+src/compiler/type_selftest.cr	3453	ts_check_b	t4.none_sub_optional	(ty_sub(t4_nullt, t4_optt) == 1 && ty_sub(t4_nullt, sh_term_of_ti(t4_str_opt)) == 1 && ty_sub(t4_optt, t4_nullt) == 0 && ty_sub(t4_optt, t4_intt) == 0)	true
+src/compiler/type_selftest.cr	3456	ts_check_b	t4.some_sub_optional	(ty_equiv(sh_term_of_ti(alloc_type(TYP_OPTIONAL, TI_INT, 0)), t4_optt) == 1)	true
+src/compiler/type_selftest.cr	3458	ts_check_b	t4.null_disjoint_and_inhabited	(ty_disjoint(t4_nullt, t4_intt) == 1 && ty_disjoint(t4_nullt, sh_term_of_ti(TI_UNIT)) == 1 && ty_disjoint(t4_nullt, sh_term_of_ti(TI_NEVER)) == 1 && ty_disjoint(t4_nullt, t4_nullt) == 0 && ty_inhabited(t4_nullt) == 1)	true
+src/compiler/type_selftest.cr	3463	ts_check_b	t4.null_row_canonical	(sh_term_of_ti(t4_null) == sh_term_of_ti(t4_null2) && ty_sub(sh_term_of_ti(t4_null), sh_term_of_ti(t4_null2)) == 1)	true
+src/compiler/type_selftest.cr	3467	ts_check_b	t4.sub_injection_asymmetry	(type_compat_strict(TI_INT, t4_int_opt) == 1 && type_compat_strict(t4_int_opt, TI_INT) == 0 && type_compat_strict(TI_STR, t4_int_opt) == 0 && type_compat_strict(t4_null, t4_int_opt) == 1 && type_compat_strict(t4_int_opt, t4_int_opt) == 1 && type_compat_strict(TI_INT, t4_str_opt) == 0)	true
+src/compiler/type_selftest.cr	3475	ts_check_b	t4.null_no_ops_no_entry	(iface_kind_of(t4_null) == -1 && iface_kind_of(t4_int_opt) == -1 && iface_permits(-1, OP_ADD) == 0 && iface_entry(AK_NULL) >= 0 && iface_ops(AK_NULL) == 0 && iface_permits(AK_NULL, OP_ADD) == 0 && iface_count() == 16)	true
+src/compiler/type_selftest.cr	3496	ts_check_b	t4.ak_null_disjoint_table	(t4_dj == 0 && ak_disjoint(AK_NULL, AK_NULL) == 0 && ak_disjoint(AK_NULL, AK_NAMED) == 1)	true
+src/compiler/type_selftest.cr	3506	ts_check_b	t4.match_opt_two_branch_cover	(t4_some_t == t4_intt && t4_none_t == t4_nullt && sh_match_exhaustive(t4_int_opt, t4_full, 0) == 1 && sh_match_exhaustive(t4_int_opt, tt_cons(t4_some_t, tt_nil()), 0) == 0 && sh_match_exhaustive(t4_int_opt, tt_cons(t4_none_t, tt_nil()), 0) == 0)	true
+src/compiler/type_selftest.cr	3511	ts_check_b	t4.match_opt_counterexample_naming	(sh_match_first_missing(sh_match_bit(0), 2) == 1 && sh_match_first_missing(sh_match_bit(1), 2) == 0 && sh_match_first_missing(0, 2) == 0)	true
+src/compiler/type_selftest.cr	3515	ts_check_b	t4.match_opt_wildcard_and_guards	(sh_match_exhaustive(t4_int_opt, tt_cons(tt_top(), tt_nil()), 0) == 1 && sh_match_exhaustive(t4_int_opt, t4_full, 1) == -1 && sh_match_exhaustive(TI_INT, t4_full, 0) == -1 && sh_match_domain_term(TI_INT) == -1 && sh_match_domain_term(t4_str_opt) >= 0)	true
+src/compiler/type_selftest.cr	3520	ts_check_b	t4.opt_pat_mapping	(sh_match_opt_pat(t4_int_opt, t4_some_pat) == 0 && sh_match_opt_pat(t4_int_opt, t4_none_pat) == 1 && sh_match_opt_pat(t4_int_opt, t4_other_pat) == -1 && sh_match_opt_pat(t4_int_opt, t4_qual_pat) == -1 && sh_match_opt_pat(TI_INT, t4_none_pat) == -1)	true
+src/compiler/type_selftest.cr	3524	ts_check_b	t4.opt_domain_leaf_count	(ts_unf_union_leaves(sh_match_domain_term(t4_int_opt)) == 2 && ts_unf_union_leaves(sh_match_domain_term(t4_str_opt)) == 2)	true
+src/compiler/type_selftest.cr	3537	ts_check_b	t4.payload_node_beats_bare_code	(sh_variant_payload_term(t4_p_ti, str_intern("T4Str")) == sh_term_of_ti(TI_STR) && ty_disjoint(sh_variant_payload_term(t4_p_ti, str_intern("T4Str")), t4_intt) == 1 && sh_variant_payload_term(t4_p_ti, str_intern("T4Tag")) == -1 && sh_variant_payload_term(t4_p_ti, str_intern("T4Nope")) == -1)	true
+src/compiler/type_selftest.cr	3564	ts_check_b	t4.payload_generic_subst	(sh_variant_payload_term(t4_g_ga, str_intern("T4GS")) == sh_term_of_ti(TI_INT) && sh_variant_payload_term(t4_g_ga2, str_intern("T4GS")) == sh_term_of_ti(TI_STR) && sh_variant_payload_term(t4_g_ga, str_intern("T4GS")) != sh_variant_payload_term(t4_g_ga2, str_intern("T4GS")))	true
+src/compiler/type_selftest.cr	3569	ts_check_b	t4.option_not_registered	(named_dedup_rows(str_intern("Option")) == 0 && find_gsym(str_intern("Option")) < 0)	true
+src/compiler/purity_selftest.cr	256	ps_check_b	purity.generic_instance_eq_source	(inst_p == src_p)	true
+src/compiler/purity_selftest.cr	260	ps_check_b	purity.generic_effect_eq_source	(g_inst == ps_purity("gid"))	true
+src/compiler/purity_selftest.cr	295	ps_check_b	chain.extern_op_exists	(n_ex >= 0)	true
+src/compiler/purity_selftest.cr	300	ps_check_b	chain.spawn_op_exists	(n_sp >= 0)	true
+src/compiler/purity_selftest.cr	305	ps_check_b	chain.yield_op_exists	(n_yl >= 0)	true

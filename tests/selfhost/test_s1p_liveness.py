@@ -17,7 +17,11 @@ print 时 `opt_dex_test.cr` 的 `.ccr` 187029→187053（**+24B**，ELF 同）�
 
 **判据**：① 必命中探针在 `CORE_S1P=1` 下逐字段命中（活性）；② 同一探针在默认位/`CORE_S1P=0` 下**零行**；
 ③ 无失配程序在开位下**零行**（负控：打点只在真不匹配时发）；④ extern 形走 `9918`、默认位零行；
-⑤ **全 `tests/suite/*.cr` 在默认位零打点**（「默认零足迹」的语料面；产物逐字节面见批级对拍）。
+⑤ **全 `tests/suite/*.cr` 在默认位零打点**（「默认零足迹」的语料面；产物逐字节面见批级对拍）；
+⑦ **自源台账 bool 桶归零**：`check src/compiler/main.cr` 的台账里 `arg_ti=2`（bool ← int 形参）点必须为 0
+（bool 类 171 处已改 `ts_check_b`/`ps_check_b` 签名 helper，逐处留痕见
+`docs/superpowers/plans/2026-09-18-bool171-sites.tsv`；残桶 = string↔int，归 S2 路线 1）——
+**先断言台账非空**：否则「0 桶」与「打点根本没装」不可区分（本档存在的全部理由）。
 """
 
 import os
@@ -34,6 +38,17 @@ COREC = BASE / "build" / "corec"
 # （源行片段 = 2026-09-18 追加的定位通道；门后 ⇒ 默认位不出现）⇒ 正则必须**容忍可选后缀**，
 # 否则「打点活着」会被读成 0 命中（本套件在 CI 上正是这样红过一次）。
 HIT = re.compile(r"^(9917|9918) (\d+) (\d+) (\d+) (\d+) (\d+) (\S+)(?: @@ .*)?$")
+
+# ⓪ **正则自检**（钉在本档内，不依赖编译器）：格式漂移会让「活性探针 0 命中」与「打点没装」不可区分
+#   ——本档在 CI 上正是这样红过一次（@@ 源行片段追加后正则过窄）。⇒ 用**文档化格式的合成行**钉形状：
+#   必匹配（含可选后缀）+ 必不匹配（缺字段 / 行首带前导）。
+REGEX_SAMPLES = [
+    ("9917 12 5 0 0 2 f", True),
+    ("9918 3 7 1 10 2 putchar", True),
+    ("9917 12 5 0 0 2 f @@     b := true;", True),
+    ("9917 12 5 0 0", False),
+    ("  9917 12 5 0 0 2 f", False),
+]
 
 # 活性命中探针：`b := bool` 传给 `a: int` 形参（非字面量 ⇒ 不被护栏③跳过）
 MISMATCH = """fn f(a: int) -> int { return a; }
@@ -136,6 +151,11 @@ def main():
             ok = False
             fails.append(name)
 
+    # ⓪ 正则自检（不依赖编译器）：形状漂移 ⇒ 「0 命中」不再可解释为「打点死了」
+    bad_regex = [(s, want) for s, want in REGEX_SAMPLES if bool(HIT.match(s)) != want]
+    print(f"[⓪ 正则自检]  {len(REGEX_SAMPLES)} 例 · 不合形 = {len(bad_regex)}")
+    expect("hit_regex_shape_pinned", not bad_regex, bad_regex)
+
     # ① 活性：必命中探针（逐字段钉：`f` 第 0 形参 int(0) ← 实参 bool(2)）
     rc, hits = run_check(MISMATCH, "1")
     print(f"[① 活性]  rc={rc} · 打点 {len(hits)} 条：{hits}")
@@ -204,6 +224,20 @@ def main():
     for name, bad in corpus_hits[:5]:
         print(f"    {name}: {bad}")
     expect("corpus_default_silent", not corpus_hits, corpus_hits[:3])
+
+    # ⑦ 自源台账：bool 桶必须归零（**先证扫面非空**——「0」与「没装」必须可区分）
+    clean_cache()
+    env = dict(os.environ)
+    env["CORE_S1P"] = "1"
+    r = subprocess.run([str(COREC), "check", str(BASE / "src" / "compiler" / "main.cr")],
+                       cwd=BASE, env=env, capture_output=True, text=True, timeout=1800)
+    rows = [m.groups() for m in (HIT.match(l) for l in r.stdout.split("\n")) if m]
+    bools = [x for x in rows if x[5] == "2"]
+    print(f"[⑦ 自源台账] rc={r.returncode} · 总点 {len(rows)} · bool 桶 {len(bools)}"
+          + (f" ← {bools[:3]}" if bools else ""))
+    expect("selfsource_ledger_nonvacuous", len(rows) > 0,
+           "台账为空 ⇒ 扫面没生效（打点没装/锚定格式漂了）——此时 bool 桶=0 无意义")
+    expect("selfsource_bool_bucket_zero", not bools, bools[:3])
 
     print(("S1P LIVENESS " + ("PASS" if ok else "FAIL")) + f" · 失败项 = {fails}")
     return 0 if ok else 1

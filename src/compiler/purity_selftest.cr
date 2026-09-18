@@ -19,6 +19,18 @@ fn ps_check(name: string, got: int, want: int) -> int {
     return 1;
 }
 
+// bool 版（批 8 S2 · bool 类；同 `ts_check_b`，纯度自测表用）。
+fn ps_check_b(name: string, got: bool, want: bool) -> int {
+    if got == want {
+        print("PASS "); println(name);
+        return 0;
+    }
+    print("FAIL "); print(name);
+    print(": got "); print(bool_str(got));
+    print(" want "); println(bool_str(want));
+    return 1;
+}
+
 // 单次完整前端 + IR 生成（自测用；与 main.cr 的 run 路径同序，无文件缓存）。
 fn ps_compile(src: string) -> int {
     reset_frontend_state();
@@ -241,11 +253,11 @@ fn purity_selftest_run() -> int {
     inst_p := ps_purity("id[int]");
     src_p := ps_purity("id");
     total = total + 1; fails = fails + ps_check("purity.generic_instance_pure", inst_p, 1);
-    total = total + 1; fails = fails + ps_check("purity.generic_instance_eq_source", (inst_p == src_p), 1);
+    total = total + 1; fails = fails + ps_check_b("purity.generic_instance_eq_source", (inst_p == src_p), true);
     // 负控⑥b 有效应泛型（体内有 store）：实例与源同为 0（反向：防「实例恒纯」）
     g_inst := ps_purity("gid[int]");
     total = total + 1; fails = fails + ps_check("purity.generic_effect_instance", g_inst, 0);
-    total = total + 1; fails = fails + ps_check("purity.generic_effect_eq_source", (g_inst == ps_purity("gid")), 1);
+    total = total + 1; fails = fails + ps_check_b("purity.generic_effect_eq_source", (g_inst == ps_purity("gid")), true);
 
     // ── state 链面（Task 1 目的：效应调用重新进链；纯调用不入链；循环终止依赖）──
     // ① 效应调用被链穿过：调用节点既要有入边（前 store → call）又要有出边
@@ -280,17 +292,17 @@ fn purity_selftest_run() -> int {
     // ⑤ IR_CALL_EXTERN：extern 调用入链（前后 store 夹逼 ⇒ touch == 3）
     irf_ex := ps_ir_index_of("chain_extern_op");
     n_ex := ps_op_node(irf_ex, IR_CALL_EXTERN);
-    total = total + 1; fails = fails + ps_check("chain.extern_op_exists", (n_ex >= 0), 1);
+    total = total + 1; fails = fails + ps_check_b("chain.extern_op_exists", (n_ex >= 0), true);
     total = total + 1; fails = fails + ps_check("chain.extern_op_pierced", ps_state_touch(n_ex), 3);
     // ⑥ IR_SPAWN（range-go 每迭代发射）：入链
     irf_sp := ps_ir_index_of("chain_spawn_op");
     n_sp := ps_op_node(irf_sp, IR_SPAWN);
-    total = total + 1; fails = fails + ps_check("chain.spawn_op_exists", (n_sp >= 0), 1);
+    total = total + 1; fails = fails + ps_check_b("chain.spawn_op_exists", (n_sp >= 0), true);
     total = total + 1; fails = fails + ps_check("chain.spawn_op_in_chain", ps_has_state_in(n_sp), 1);
     // ⑦ IR_YIELD（flow 函数体）：入链
     irf_yl := ps_ir_index_of("chain_yield_op");
     n_yl := ps_op_node(irf_yl, IR_YIELD);
-    total = total + 1; fails = fails + ps_check("chain.yield_op_exists", (n_yl >= 0), 1);
+    total = total + 1; fails = fails + ps_check_b("chain.yield_op_exists", (n_yl >= 0), true);
     total = total + 1; fails = fails + ps_check("chain.yield_op_pierced", ps_state_touch(n_yl), 3);
 
     print(int_str(total - fails)); print("/"); print(int_str(total)); println(" purity cases passed");
