@@ -216,10 +216,16 @@ mutr  : &mut Point;         // 可变引用
 ```core
 count   : int, mut = 0;     // 可变
 pub_val : int, pub = 42;    // 公开字段
-speed   : ., apx = 3.14;    // apx：授权后端把 dex 运算降级为 binary64 快路径
+speed   : dex, apx = 3.14;  // apx：授权后端把 dex 运算降级为 binary64 快路径
 ```
 
 `apx` 与 `mut` / `pub` 同族。不带 `apx` 时 `dex` 恒精确。
+
+> **`apx` 的适用面（2026-09-18 起收紧）**：`apx` **只允许**出现在**显式 `dex`** 或**显式 `int`** 的声明上：
+> `x : dex, apx = 3.14;`（有表示路径）· `n : int, apx = 3;`（既有契约的**纯注解**形——语法合法、语义不变）。
+> 其余形——**推断位 `.` / `auto`**、`dex?`、`string`、`bool` 等 + `apx`——一律**前端硬错 `error[P26]`**
+> （`'apx' tag is only allowed on an explicit 'dex' or 'int' declaration`；检查点 = `src/compiler/parser.cr`）。
+> 这条于批 8（`#115`）落地：此前这些形是**静默忽略**（标签被吞掉、无诊断）。
 
 ### 4.4 推断占位：`auto` 与 `.`
 

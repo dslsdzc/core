@@ -59,6 +59,13 @@
 | P021 | 函数体内嵌套 `fn` 声明（不属语言面） | 定位拒绝（TODO #2026-09-10-12 修复：修复前 parse 失步 → bump allocator 耗尽 → `rep movsb` 向 NULL 拷 → rc=139） |
 | P022 | 枚举变体数 / 变体载荷类型数超上限（> `MAX_ENUM_VARIANTS=16` / `MAX_VARIANT_TYPES=16`） | `Enum has too many variants (17 > 16)` / `Enum variant has too many payload types (17 > 16)`（TODO #2026-09-12-2 修复：修复前写入侧**无界**——第 17 变体槽起点 = `variant_count` 自身、槽尾越记录尾 224B 的静默越界写） |
 | P023 | 结构体字段数超上限（> `MAX_STRUCT_FIELDS=16`） | `Struct has too many fields (17 > 16)`（TODO #2026-09-12-2 同族：第 17 字段踩 `OFF_SI_FIELD_COUNT`/泛型槽与邻记录；修复前 check rc=0 零诊断） |
+| P024 | `extern` 声明含**可选**（`?`）——形参或返回（C ABI 无可选表示） | `extern declaration cannot use optional type ('?') - no C ABI representation`（常量 `EC_P_EXTERN_OPTIONAL = 1024`（`ast.cr`）· 检查点 = `parser.cr` 的 extern 分支：**形参与返回同判同码**；修复前 check rc=0 零诊断、`build` rc=0、运行期 139） |
+| P025 | **无法识别的顶层 token**（顶层兜底不再静默吞） | `unexpected top-level token '{tok}'`（常量 `EC_P_TOPLEVEL_TOKEN = 1025` · 检查点 = `parser.cr` 的 `parse_declaration` 尾兜底：**报错后仍消费该 token**（避免 `parse_all` 空转），**EOF 不报**；修复前该 token 被无声吞掉 ⇒ 声明被无声丢弃 / 后续误归 `error[TF01]`） |
+| P026 | `apx` 标签**不适用于**该声明（白名单 = **显式 `dex`** / **显式 `int`**） | `'apx' tag is only allowed on an explicit 'dex' or 'int' declaration`（常量 `EC_P_APX_TAG = 1026` · 检查点 = `parser.cr` 的声明标签分支；修复前为**静默忽略**——`. + apx` / `auto` / `dex?` / `string` / `bool` + `apx` 的标签被吞、零诊断） |
+
+> **打印形**：上表三位族号（P024/P025/P026）供文档索引；实际输出为 `error[P24]` / `error[P25]` / `error[P26]`
+> （打印器取 `码 % 1000`）。三者均属**语法族（P 族）** ⇒ 按本文件开头的 fail-closed 语义：**前端任一即 `rc=1` + 零产物**
+> （不进入 lower / 不写 `.ccr` / 不产 ELF）。出处（本轮实读，`develop` = `662ff87d`）：`ast.cr` 常量三行 + `parser.cr` 三处 `check_error` 调用点。
 
 ## N0xx — 名字解析 (Name Resolution)
 
