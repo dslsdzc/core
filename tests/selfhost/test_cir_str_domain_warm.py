@@ -175,6 +175,29 @@ def bytes_equal(a: pathlib.Path, b: pathlib.Path):
     return False, f"不同（{len(da)}B vs {len(db)}B，{n} 字节差）"
 
 
+SEG_NAMES = {1: "STR", 2: "SYM", 3: "NOD", 4: "ENT", 5: "REG", 6: "EDG", 7: "TYPE", 8: "IFACE"}
+
+
+def ccr_diff_segments(a: pathlib.Path, b: pathlib.Path):
+    """两 `.ccr` 中**内容不同**的段名集合（段表 8×12B @16，格式同 `ccr_io.cr` 写侧）。
+
+    用途：混合命中态的**已知面**（NOD 段 TYPE 项索引随重生成顺序变化）必须**可判别**——
+    若差异溢出到其它段，本缺陷面即回归 ⇒ 判红（**不给已知面留「静默变绿」的口子**）。
+    """
+    def segs(p):
+        d = p.read_bytes()
+        out = {}
+        for i, tag in enumerate(sorted(SEG_NAMES)):
+            t, off, size = struct.unpack_from("<3I", d, 16 + i * 12)
+            assert t == tag, f"段表行 {i}: tag {t} != {tag}"
+            out[SEG_NAMES[tag]] = d[off:off + size]
+        return out
+    if not (a.exists() and b.exists()):
+        return set(SEG_NAMES.values())
+    sa, sb = segs(a), segs(b)
+    return {k for k in sa if sa[k] != sb.get(k)}
+
+
 def journal_section(entry: pathlib.Path):
     """解析 v21 条目，返回 (base, journal_count)。格式见 cir_cache.cr 写侧。"""
     d = entry.read_bytes()
@@ -281,7 +304,12 @@ def path_d_mixed():
                 check(f"D {label} 输出+ELF 同", ok_out and ok_elf,
                       f"out={ok_out} elf={elf_d} | .ccr: {ccr_d}")
                 if not ok_ccr:
-                    print(f"    [观测·非本缺陷面] {label} .ccr {ccr_d}（NOD TYPE 项索引）")
+                    # **已知面不许悄悄变绿**：`.ccr` 差异必须**局限于 NOD 段**（TYPE 项索引随重生成
+                    # 顺序变化）。若差异出现在 STR/SYM/ENT/REG/EDG/TYPE/IFACE 任一 ⇒ 本缺陷面回归 ⇒ 判红。
+                    seg_diffs = ccr_diff_segments(cold["ccr"], got["ccr"])
+                    check(f"D {label} .ccr 差异仅限 NOD（已知面）", seg_diffs == {"NOD"},
+                          f"差异段 = {sorted(seg_diffs)}")
+                    print(f"    [观测·非本缺陷面] {label} .ccr {ccr_d}（差异段 = {sorted(seg_diffs)}）")
         finally:
             shutil.rmtree(snapshot, ignore_errors=True)
     finally:
