@@ -14,6 +14,7 @@ class TypeChecker:
         self.borrow_holders = {}     # borrower_var -> [(borrowed_var, is_mut)]
         self.borrow_scope_stack = []  # stack of sets of borrower vars in each scope
         self.module_functions = {}
+        self.unsafe_depth = 0        # 2(a)：`unsafe` 块深度（视图内建的允许区判据）
 
     # --------------------------------------------------------------
     # Borrow checking helpers
@@ -97,6 +98,32 @@ class TypeChecker:
     # --------------------------------------------------------------
     # Built-in types
     # --------------------------------------------------------------
+    def _infer_builtin(self, expr) -> Type:
+        """`@name` / `@name(args)` 内建（2(a) 视图内建批）。
+
+        视图内建语义 = **同一个 64 位字的两种看法**（零转换、零拷贝、无运行期动作）：
+            `@ptr_of(s: string) -> int`   ·   `@str_of(p: int) -> string`
+        两条硬规则（与自托管面 `checker.cr` 同款，两面一致）：
+          · **安全面（裁 (ii)）**：必须出现在 `unsafe` 块内，块外 ⇒ 报错；
+          · **未知名 fail-closed**：不得静默当 0（本批硬要求③）。
+        """
+        if expr.name in ('ptr_of', 'str_of'):
+            if self.unsafe_depth == 0:
+                self.errors.append(f"@{expr.name} must appear inside an `unsafe` block")
+                return BaseType('never')
+            if len(expr.args) != 1:
+                self.errors.append(f"@{expr.name} expects exactly 1 argument")
+                return BaseType('never')
+            want = 'string' if expr.name == 'ptr_of' else 'int'
+            result = BaseType('int') if expr.name == 'ptr_of' else BaseType('string')
+            at = self._infer_expr(expr.args[0])
+            if self._type_name(at) != want:
+                self.errors.append(f"@{expr.name} expects a {want} expression, got {at}")
+                return BaseType('never')
+            return result
+        self.errors.append(f"unknown @ builtin: {expr.name}")
+        return BaseType('never')
+
     def _declare_builtins(self):
         """Register built-in generic types Option[T] and Result[T, E]."""
         if not self.symtab.lookup('Option'):
@@ -392,6 +419,16 @@ class TypeChecker:
                 return BaseType('int')
             self.errors.append("Indexing non-array type")
             return BaseType('never')
+        elif isinstance(expr, Builtin):
+            return self._infer_builtin(expr)
+        elif isinstance(expr, Unsafe):
+            # 2(a)：bootstrap 侧 `unsafe` 支持。此前自源**零使用**（实测 corec 清单去注释去字符串后
+            # `unsafe` 行数 = 0）⇒ 本面从未实现（旧行为：`Unsupported expression` + ir_gen NotImplementedError）。
+            # 语义 = 块作用域 + 「危险操作许可区」；本批只把它作为**视图内建的允许区**登记 ⇒ 直通。
+            self.unsafe_depth = self.unsafe_depth + 1
+            ret = self._infer_expr(expr.block)
+            self.unsafe_depth = self.unsafe_depth - 1
+            return ret
         elif isinstance(expr, Block):
             self.symtab.push_scope()
             self._push_borrow_scope()

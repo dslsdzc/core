@@ -322,6 +322,11 @@ case "$CI_JOB_NAME" in
     # （bootstrap lexer 仍**原文保留** ⇒ 两前端分歧，已登记）· E 回退守卫 4 条。
     # **突变自证（可复跑）**：`COREC_BIN=<展开前二进制> …` ⇒ B 组按「原文保留」全红；`<修复前二进制>` ⇒ A/B 皆红。
     python3 tests/selfhost/test_string_interp.py
+    # 2(a) 视图内建（`@ptr_of`/`@str_of`）：**两面一致性**（硬要求①：同一探针在 corec 与 bootstrap
+    # 两面的 rc/运行值一致）· **零代码生成**（②：往返写法与直写的 ELF **逐字节一致**）·
+    # **未知名 fail-closed**（③：两面都报错）· **安全面 (ii)**（视图在 `unsafe` 块外 ⇒ 两面硬错）·
+    # 实参类型两面拒绝。对照必须同处 `unsafe` 包络内（`unsafe` 本身带 +158B 区域元数据，与视图无关）。
+    python3 tests/selfhost/test_view_builtins.py
     ;;
 
   suite)

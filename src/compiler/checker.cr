@@ -4169,6 +4169,37 @@ fn infer_expr(node: int) -> int {
             return TI_UNIT;
         }
 
+        // ── 2(a) 视图内建：**同一个 64 位字的两种看法**（零转换、零拷贝、零运行期动作）──
+        //    `@ptr_of(s: string) -> int` · `@str_of(p: int) -> string`
+        //    语义：不改那个字，只改它在本语言里的看法（原生 ELF 路径下 string 值 = 指针；
+        //    解释器路径下 string 值 = intern 索引 ⇒ 视图对**两条腿**都是恒等 —— 见 2(a) 计划 §2.2bis/§2.2ter）。
+        //    安全面（team-lead 裁 (ii)）：**必须出现在 `unsafe` 块内**；块外 ⇒ 硬错（不做软约束——
+        //    没有机械判据的约定会腐烂）。`g_unsafe_depth` 由 EXPR_UNSAFE 分支压栈维护。
+        //    未知名仍走文件末尾的 fail-closed（EC_N_UNDEFINED），不得静默。
+        if str_eq(name, "ptr_of") != 0 || str_eq(name, "str_of") != 0 {
+            if g_unsafe_depth == 0 {
+                check_error(EC_N_UNDEFINED, "@" + name + " must appear inside an `unsafe` block", ast_line(node), ast_col(node));
+                return TI_NEVER;
+            }
+            if args < 0 {
+                check_error(EC_N_UNDEFINED, "@" + name + " requires exactly 1 argument", ast_line(node), ast_col(node));
+                return TI_NEVER;
+            }
+            av := infer_expr(ast_a(args));
+            if str_eq(name, "ptr_of") != 0 {
+                if av != TI_STR && av != TI_NEVER {
+                    check_error(EC_TF_ARG_TYPE, "@ptr_of requires a string expression", ast_line(node), ast_col(node));
+                    return TI_NEVER;
+                }
+                return TI_INT;
+            }
+            if av != TI_INT && av != TI_NEVER {
+                check_error(EC_TF_ARG_TYPE, "@str_of requires an int expression", ast_line(node), ast_col(node));
+                return TI_NEVER;
+            }
+            return TI_STR;
+        }
+
         check_error(EC_N_UNDEFINED, "unknown @ builtin: " + name, ast_line(node), ast_col(node));
         return TI_UNIT;
     }
