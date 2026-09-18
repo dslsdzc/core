@@ -1928,6 +1928,30 @@ fn unify_types(pattern: int, concrete: int) -> bool {
     pk := get_type_kind(pattern);
     ck := get_type_kind(concrete);
     if pk < 0 || ck < 0 { return false; }
+    // ─── 批 8（甲）批 1 刀 1：`T?` 模式（TYP_OPTIONAL）分支 ───────────────────────
+    // 根因：此前 `T?` 模式落**兜底** `type_compat_strict(concrete, pattern)` ⇒ 内层泛型参数
+    //   **不代入、不绑定、恒假** ⇒ 泛型调用里 `T?` 形参的实参**既不绑定也不校验**：
+    //   实例键由别的实参（或 ir_gen 回落）决定；S1-ARG 打点对 `T?` **恒报**（含**已正确编译**的
+    //   合法调用，如 `g(d, d)` / `g2(d)` —— 它们此前靠 ir_gen 的旧路径恰好正确）。
+    // 语义（与 `type_compat_strict` 的**可选目标分支**一致 = 「裸值入 `T?`」，`T ⊆ T?`）：
+    //   ① concrete 也是 optional ⇒ 内层对内层递归；
+    //   ② 否则（裸值入 `T?`）⇒ 内层 pattern 对 concrete 递归。
+    // 内层是泛型参数时，由下方既有的 `TYP_GENERIC_PARAM` 分支**绑定**（未绑定）或**比对**（已绑定）。
+    // 影响面（实读）：`unify_types` 全仓 3 个调用点——`infer_gen_call` 实参环（S1 打点）与
+    //   `infer_expr` 的 S1P 台账实参环**受影响**；`infer_expr` 的结构体泛型字段环**到不了本分支**
+    //   （其 pattern 恒为 `TYP_GENERIC_PARAM`——守卫要求字段类型节点是 `EXPR_IDENT` 泛型参数）。
+    // 纪律：**只加分支，不改既有三条规则的语义**（`pattern == concrete` / `TYP_GENERIC_PARAM` /
+    //   `TYP_GENERIC_APPLY` 逐字未动）；不改任何调用点。
+    if pk == TYP_OPTIONAL {
+        inner_p := get_type_data(pattern);
+        if inner_p < 0 { return false; }
+        if ck == TYP_OPTIONAL {
+            inner_c := get_type_data(concrete);
+            if inner_c < 0 { return false; }
+            return unify_types(inner_p, inner_c);
+        }
+        return unify_types(inner_p, concrete);
+    }
     if pk == TYP_GENERIC_PARAM {
         name_idx := get_type_data(pattern);
         mi : ., mut = 0;

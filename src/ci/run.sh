@@ -139,7 +139,8 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_borrow.py
     python3 tests/selfhost/test_pointer_safety.py
     python3 tests/selfhost/test_params_limit.py   # TODO #2026-09-10-4 形参上限/≥18 形参静默误编译回归
-    python3 tests/selfhost/test_generic_param_erasure.py # (乙) 泛型实例形参擦除（2026-09-18）：A1 形参链具体化 + A2a 第二遍。C1/C2 值判据（bits 三态 255 / scaled 两腿严格）· C3 槽型直读（--dump-params：T 形态 slot=8 decl=1 / T? 形态 slot=8 decl=0）· C4 调用点机械判据（call g1[dex](_dxsc)）· C5 幂等（bits 恰 2、scaled 恰 0 条 dest=_dxsc）· C6 --dump-params rc 中性/零产物 · C7 check 零诊断。**语料零覆盖声明**：全语料无「泛型 × dex」实例 ⇒ 表示面只能由本套件探针触达（见计划 §11）
+    python3 tests/selfhost/test_generic_param_erasure.py # (乙) 泛型实例形参擦除（2026-09-18）：A1 形参链具体化 + A2a 第二遍。C1/C2 值判据（bits 三
+    python3 tests/selfhost/test_topt_pattern.py   # 批 8（甲）批 1 刀 1：`unify_types` 的 `T?` 模式规则（2026-09-18）。**两向钉子**：C1 五例合法调用 `[S1-ARG]` 归零（改前各 1，防「一律报」）；C2 `g(1,d)` 真错仍恰 1 条（防「一律不报」）；C3 实例键/转换机械腿（`g[dex]`/`g2[dex]`/`call g2[dex](_dxsc)`）；C5 槽型直读（slot=8）；C4 非泛型面零足迹对照。**突变自证**：删回 `T?` 分支重建 ⇒ C1 五例必红（`COREC_BIN=` 通道）态 255 / scaled 两腿严格）· C3 槽型直读（--dump-params：T 形态 slot=8 decl=1 / T? 形态 slot=8 decl=0）· C4 调用点机械判据（call g1[dex](_dxsc)）· C5 幂等（bits 恰 2、scaled 恰 0 条 dest=_dxsc）· C6 --dump-params rc 中性/零产物 · C7 check 零诊断。**语料零覆盖声明**：全语料无「泛型 × dex」实例 ⇒ 表示面只能由本套件探针触达（见计划 §11）
     python3 tests/selfhost/test_at_rename.py      # `@no_bounds_check` → `@NoBoundsCheck` 更名（维护者 2026-09-17）：旧名**响亮失败**（build/check/run 三面 rc=1 + 定位 + 零产物，绝不静默）+ 新名两形态等价 + 两条入仓语料运行 + `.cir` 显示名（括号形态有行/语句形态零 IR = F4 语义保持）+ 分派点四处同步守门 + IR 常量 35 钉 = 14 例
     python3 tests/selfhost/test_global_seams.py   # 全局行 operand seam（2026-09-16 批）：B1/B2/B4/B5 全局 vs 局部同形对拍（mut 全局 + 期望值）+ B6(b) 发射字节级（静态无 .so 无运行期腿）+ B7 非回归；配套 suite 语料 tests/suite/global_seam_test.cr
     python3 tests/selfhost/test_tuple_slots.py
