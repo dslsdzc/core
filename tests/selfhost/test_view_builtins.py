@@ -285,6 +285,30 @@ def main():
         expect(f"argtype_{nm}_selfhost_rejected", rc_t == 1 and bool(diags_t), (rc_t, diags_t))
         expect(f"argtype_{nm}_bootstrap_rejected", bool(errs_tb), errs_tb)
 
+    # ── ⑥ cli.cr 值面 e2e（2(a) 计划 §2.3：该类今日零覆盖）──
+    # 原生腿：注册（`@ptr_of` 写裸字表）→ 帮助打印（`@str_of` 读裸字表）逐子串断言；
+    # 解释器腿：**只断言 rc**——`cli_help` 在解释器腿不产出（`alloc`+`w64/r64` 的裸内存路径
+    # 在解释器里是近似，`interp.cr:719` 自注）。已实测**迁移前/后同为 166B 输出**（无行为变化），
+    # 故此分歧与 2(a) 无关，不得当成本批引入的差异。
+    cli_src = BASE / "tests" / "suite" / "cli_view_test.cr"
+    cli_text = cli_src.read_text(encoding="utf-8")
+    out = Path(tempfile.mkdtemp()) / "cli_view"
+    subprocess.run([str(COREC), "clean-cache"], cwd=BASE, capture_output=True, timeout=120)
+    rb = subprocess.run([str(COREC), "build", str(cli_src), "-o", str(out), "--static"],
+                        cwd=BASE, capture_output=True, text=True, timeout=600)
+    rc_cli_native, cli_out = -1, ""
+    if rb.returncode == 0:
+        rp = subprocess.run([str(out)], capture_output=True, text=True, timeout=60)
+        rc_cli_native, cli_out = rp.returncode, rp.stdout
+    rc_cli_interp = corec_run(cli_text)
+    need = ["myprog", "my program", "{build,cir}", "build", "cir", "compile things",
+            "show graph", "-o, --output", "out path", "-v, --verbose", "more noise"]
+    missing = [s for s in need if s not in cli_out]
+    print(f"[⑥ cli e2e] 原生 rc={rc_cli_native} · 解释器 rc={rc_cli_interp} · 缺子串={missing}")
+    expect("cli_native_rc0", rc_cli_native == 0, rb.stderr[:200])
+    expect("cli_native_help_content", not missing, missing)
+    expect("cli_interp_rc0", rc_cli_interp == 0, rc_cli_interp)
+
     print(("VIEW BUILTINS " + ("PASS" if ok else "FAIL")) + f" · 失败项 = {fails}")
     return 0 if ok else 1
 
