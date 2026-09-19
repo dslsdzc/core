@@ -135,7 +135,9 @@ fn so_find(buf: string, name: string) -> int {
 fn so_find_any(name: string) -> int {
     si : ., mut = 0; loop { if si >= g_so_count { break; }
         if istr_len(r64(g_so_paths, si * 8)) > 0 {
-            b := read_file(r64(g_so_paths, si * 8));
+            // 裸字 → string 视图：表里存的是**串指针**（`ctx_add_so` 的 `@ptr_of` 写入面），
+            // 读回时必须显式还原视图（2(a) 范式；`@str_of` 必须在 `unsafe` 内）。
+            b := read_file(unsafe { @str_of(r64(g_so_paths, si * 8)) });
             if str_len(b) > 0 {
                 a := so_find(b, name);
                 if a >= 0 { return a; } }
@@ -337,7 +339,8 @@ fn patch_relocs() {
         if fn_name_ni >= 0 { fn_name = istr_get(fn_name_ni); }
         plt_idx : ., mut = -1;
         si : ., mut = 0; loop { if si >= g_plt_count { break; }
-            if str_eq(r64(g_plts, si * 16), fn_name) != 0 { plt_idx = si; break; }
+            // 同上：`g_plts` 第 0 列存的是 PLT 名**串指针**（`ctx_add_plt` 的 `@ptr_of` 写入面）
+            if str_eq(unsafe { @str_of(r64(g_plts, si * 16)) }, fn_name) != 0 { plt_idx = si; break; }
             si = si + 1; }
         if plt_idx >= 0 {
             call_va := uv + code_off;
@@ -355,9 +358,11 @@ fn ctx_init() {
     g_text_base = 4194304; g_user_code = ""; g_user_size = 0; }
 
 fn ctx_set_user_code(data: string, sz: int) { g_user_code = data; g_user_size = sz; }
-fn ctx_add_so(path: string) { dyn_grow_so(g_so_count + 1); w64(g_so_paths, g_so_count * 8, path); g_so_count = g_so_count + 1; }
+// 表里存的是**串指针**（裸字表）：写入面必须显式取指针（2(a) 范式；`@ptr_of` 必须在 `unsafe` 内）。
+// 读回面对称地还原视图（见 `so_find_any` / `ctx_emit_static` / 上面的 `g_plts` 查找）。
+fn ctx_add_so(path: string) { dyn_grow_so(g_so_count + 1); w64(g_so_paths, g_so_count * 8, unsafe { @ptr_of(path) }); g_so_count = g_so_count + 1; }
 fn ctx_add_plt(name: string, so_idx: int) {
-    dyn_grow_plts(g_plt_count + 1); w64(g_plts, g_plt_count * 16, name); w64(g_plts, g_plt_count * 16 + 8, so_idx); g_plt_count = g_plt_count + 1; }
+    dyn_grow_plts(g_plt_count + 1); w64(g_plts, g_plt_count * 16, unsafe { @ptr_of(name) }); w64(g_plts, g_plt_count * 16 + 8, so_idx); g_plt_count = g_plt_count + 1; }
 
 // Produce dynamically-linked ELF executable
 fn ctx_emit_dyn(buf: string, path: string) -> int {
@@ -445,8 +450,9 @@ fn ctx_emit_static(buf: string, path: string) -> int {
     si : ., mut = 0;
     loop { if si >= g_so_count { break; }
         sp := r64(g_so_paths, si * 8);
-        if str_len(sp) > 0 {
-            b := read_file(sp);
+        // `sp` 是表里的**串指针**（裸字）⇒ 用前显式还原视图（2(a) 范式；两处用法各自在 `unsafe` 内还原）
+        if str_len(unsafe { @str_of(sp) }) > 0 {
+            b := read_file(unsafe { @str_of(sp) });
             if str_len(b) > 0 && so_parse_text(b) == 0 { so_buf = b; break; }
         }
         si = si + 1; }
