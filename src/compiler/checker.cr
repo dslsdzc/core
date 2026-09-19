@@ -4201,7 +4201,11 @@ fn infer_expr(node: int) -> int {
         if str_eq(name, "typeInfo") != 0 {
             if args < 0 { check_error(EC_N_UNDEFINED, "@typeInfo requires a type argument", ast_line(node), ast_col(node)); return TI_NEVER; }
             ti := res_type_node(args);
-            return TI_INT;  // placeholder — returns handle
+            // 返回型 = **类型名串**（与 ir_gen 的发射面一致：该分支构造 `"int"`/`"bool"`/… 或命名行名字）。
+            // 契约出处 = `TODO.md` 的 `@` 内建清单「`@typeInfo(T)` — 类型名称字符串」。
+            // 修复前此处恒 `TI_INT`（原注释自承「placeholder — returns handle」）⇒ **声明 int、产物 string**
+            // ⇒ 消费点（`str_len(@typeInfo(X))` / `println(@typeInfo(X))`）在台账面被记为 p=3 vs a=0 的「异型」。
+            return TI_STR;
         }
 
         // @raw_int(expr) — dex 表达式 → 缩放整数原值（显式转换，数值迁移 Task 4）
