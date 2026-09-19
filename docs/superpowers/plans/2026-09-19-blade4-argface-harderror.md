@@ -142,6 +142,22 @@
 
 `src/compiler` 全闭包在实参面 **0 点**（四形态下实测）⇒ 硬错**不应**自伤自举。**但必须实测**：`check src/compiler`（rc=0 且仍 0 点）· `check src/targets/x86_64-linux` · **`full-bootstrap`**（三阶段 `cmp` 逐字节；串行化 + 跑完清 `/tmp/corec2`、`/tmp/corec3`）。
 
+### §5.1 ⚠ **工作区 stale 处置：强制前置（2026-09-19 由「配方」升为「前置」）**
+
+**凡本计划涉及的任何 worktree，stale 处置一律：先 `cp -a`（或逐档 `cp`）到仓库外 ⇒ 再 `update-stale` ⇒ 再复核 sha。**
+- **依据（当日第三次实证）**：`update-stale` 实测 `modified 1 files, removed 1 files`——**它会把工作副本里未快照的内容换掉**；那次正是**守卫副本接住**（`/tmp/guard-blade4-plan-v2.md` 213 行，恢复后 sha 逐字相同）。
+- **判据**：`update-stale` 之后，**逐档 sha256 与守卫副本对拍**（不是「文件还在盘上」——本仓有四次前科）。
+- ⇒ 这条**同样适用于 §8 施工序的每一步**（改判期间会频繁切基点）。
+
+### §5.2 ⚠ **独立验收项：「安全面不得净减」**（裁定二专属，**不是附注**）
+
+> **改判前生效的检查，改判后要么仍生效，要么显式登记为「已知不再生效」并给理由。**
+
+- **背景**：`region_check`（`rc_return_escape` / `rc_store_escape` / `region_check_func`）与 `provenance_verify`（TU03 门）**只认 `TYP_PTR`** ⇒ 裁定二后**对 `&x` 派生的值不再生效且不报（静默）**。
+- **为什么必须独立立项**：**「减少检查」不会红**——它是**静默面**，正是本批一路在收的形态（用一次静默换一次不对称）。
+- **判据**：逐处列出「改判前是否生效 / 改判后是否生效」，**任一处从「生效」变「不生效」且无显式登记 ⇒ 本项红**。
+- **处置二选一**：**(a)** 扩展该处接受 `TYP_REF`（等价检查）；**(b)** 显式登记「已知不再生效 + 理由 + 覆盖面损失」，并在批报告写明。
+
 ---
 
 ## §6 回退条件（满足任一 ⇒ 停，不上报为完成）
@@ -150,7 +166,8 @@
 2. `src/compiler` 出现任何新点；
 3. canary 五条任一变（且非「D1 绿 + 真实码面变化」的正当重锁路径）；
 4. 语料点集与预测不符 ⇒ **不符本身不是回退理由，是归因对象**（多出的点逐个读，判「真缺陷」还是「排除漏了一条」；**不许把新增点一律当修好的证据**）；
-5. **B/C 未合** ⇒ 不得开硬错（`targets` 会炸）。
+5. **B/C 未合** ⇒ 不得开硬错（`targets` 会炸）；
+6. **§5.2 安全面出现净减且未登记**。
 
 ---
 
@@ -171,39 +188,58 @@
 
 ---
 
-## §8 裁定二（`&x` → `TYP_REF`）落地面清单
+## §8 施工序（裁定二：`&x` → `TYP_REF`）——**可执行**（先动这条）
 
-### §8.1 五层逐处（lead 已列，此处补符号锚）
+**顺序图**：`F0 → S1 → S2 →（S3 决策）→ S4 → S5 → S6 → S7 → S8`
+**⚠ S6（安全面）的处置必须在 S1 之前就定好**——它是**静默面**，事后补等于没补（§5.2）。
+**⚠ 每一步都适用 §5.1 的 stale 强制前置**（改判期间会频繁切基点）。
 
-| 层 | 现址 | 改判后 |
-|---|---|---|
-| **契约本体** | `checker.cr::infer_expr` 的 `UOP_REF` 分支（`alloc_ptr_type(inner, 0)`） | 改为 `alloc_type(TYP_REF, inner, mut)`（`mut` 已有 `ast_int_val`） |
-| **`obj.field` 自动解引用** | 只解 `TYP_REF` | (A) 后 `&x` 取值语义**翻转**——须逐点读 |
-| **指针算术门** | `checker.cr::infer_expr` 的 `ptr±int` / `ptr-ptr` 三点**只认 `TYP_PTR`** | (A) 后 `&x + 1` **失效**（`ptr_ref_first.cr` 正是测这个） |
-| **引擎身份类 + 变型表** | `iface_kind_of`：`TYP_PTR→AK_PTR` / `TYP_REF→AK_REF`；**变型表不同**（`AK_PTR` 槽 0 恒不变 vs `AK_REF` 槽 0 = mut 标记、槽 1 只读协变） | **子类型行为会变，不只是标签** |
-| **两道安全门** | `provenance_verify` 的 TU03 门（`TYP_PTR && extra != 0`）· `region_check` 三处（`rc_return_escape` / `rc_store_escape` / `region_check_func`） | **⚠ 改判后这些 pass 对 `&x` 派生的值不再生效（静默）** ⇒ 见 §B 的保留 |
+### F0 冻结基线（先写死，再取数）
+存档 `build/corec`（pre）· `--dump-types` 读数（`&x` 的 kind、`p := &x` 的变量行）· 台账基线（**F 面 2 点逐点**）· 三处载体现状（`ptr_ref_first.cr` / `test_diag_gate.py` / `test_ccr_types.py` 的 rc + 产物）。
+**判据** = 上述四项读数**先写死**；后续每步与此对拍。
 
-### §8.2 三处**将转红**的载体（已实测）
+### S1 定型点改判
+- **改动**：`checker.cr::infer_expr` 的 `UOP_REF` 分支 `alloc_ptr_type(inner, 0)` → `alloc_type(TYP_REF, inner, mut)`（`mut` 取 `ast_int_val(node)`；**先读该处现有语义**再定 extra 槽）。
+- **判据**：`--dump-types` 中 `&x` 的 kind = `TYP_REF`；**台账 F 面 2 → 0**（`n19_ref_named.cr`）。
+- **失败 ⇒ 停**（这是本裁定的本体）。
 
-1. `tests/suite/ptr_ref_first.cr` —— 头注**自证双依赖**（`PTR_ADD 按 8 字节缩放` + `@raw_int 取地址原值`）；
-2. `tests/selfhost/test_diag_gate.py` —— (i) 小批刚换过夹具；
-3. `tests/selfhost/test_ccr_types.py` —— ㉜ F2 面语料引用（`IR_BINARY` 指针行，三处）。
+### S2 `(i)` 白名单**整体重写**（**裁 1**：不是加一行常量）
+- **现状**：`checker.cr:4239` 的 `if !(av > TI_DEX_S && get_type_kind(av) == TYP_PTR)`，**其注释理由 = 「`&x` 解析到 `TYP_PTR`」**；`tests/suite/ptr_ref_first.cr` 的头注**自证依赖它**。
+- **要做三件**：① 加 `TYP_REF`；② **重新论证语义**——原语义「**只认指针**」已站不住，候选新语义 = 「**只认地址型**（REF 与 PTR 皆是）」，**按实现定、但理由必须重写**；③ **显式登记「原前提已死」**（`&x` 不再是 `TYP_PTR`）。
+- **两向钉子（同批，缺一不算）**：
+  - **正（防误杀）**：`@raw_int(&x)`（**传 REF**）**必须仍被接受** ⇒ `ptr_ref_first.cr` 仍 rc=0；
+  - **反（防漏放）**：`(i)` 当初拒的那些——**`string` / `bool` / `array` / `slice`**——**必须仍被拒** ⇒ 逐类各一探针，断言 **`error[TF07]` + rc=1**；
+  - **对照（防「一律」）**：`@raw_int(n : int)` 与 `@raw_int(d : dex)` 仍接受。
 
-### §8.3 ⚠ **`(i)` 白名单**（lead 补的那条，必写）
+### S3 指针算术门（**决策点，须先读语料意图**）
+- **现状**：`checker.cr::infer_expr` 的 `ptr±int` / `ptr-ptr` 三点**只认 `TYP_PTR`**。
+- **两条处置**：**(a)** 纳入 `TYP_REF`（语义 = REF 也支持算术）；**(b)** 保持只认 PTR（后果 = `&x + 1` 失效 ⇒ **`ptr_ref_first.cr` 转红**）。
+- **先读**：该档头注说它测的是「**占位表项占住下标 8 ⇒ `PTR_ADD` 按 8 字节缩放**」⇒ **若改判后 REF 不走 PTR_ADD，该档的前提整体消失** ⇒ 须与 (i) 同批重定它的语料或判据。
+- **判据**：`&x + 1` 的 `--dump-types` 行 + 该档 rc/产物。
 
-`checker.cr:4239`：`if !(av > TI_DEX_S && get_type_kind(av) == TYP_PTR) { check_error(EC_TF_ARG_TYPE, "@raw_int requires a dex (or int) or pointer expression", …) }`
+### S4 自动解引用（`obj.field`）
+- **现状**：自动解引用**只解 `TYP_REF`** ⇒ 改判后 `&x` 的取值语义**翻转**（原本是 PTR、不自动解）。
+- **要做**：逐点读 `EXPR_FIELD` 的解引用分支，**列出「改判后行为变化的点」**（不许笼统说「语义翻转」）。
+- **判据**：逐点探针（`p := &x; p.f` 形）。
 
-⇒ 改判后 `@raw_int(&x)` 传的是 **`TYP_REF`** ⇒ **不再被接受** ⇒ 两条路：
-- **不加 `TYP_REF`** ⇒ `@raw_int(&x)` **转红** ⇒ `ptr_ref_first.cr`（依赖它）当场红；
-- **加 `TYP_REF`** ⇒ 与 `(i)` 的**判据语义**（「**只加 `TYP_PTR`**」，理由 = 「`&x` 解析到 `TYP_PTR`」）**冲突** ⇒ 该理由**已随改判消失** ⇒ **须同批重写 `(i)` 的判据与理由**（不是偷偷加一行）。
+### S5 引擎身份 / 变型
+- `iface_kind_of` 的 `TYP_REF → AK_REF` **已有**（无需新映射）；**但变型语义变**（`AK_REF` 槽 0 = mut 标记、槽 1 只读协变；`AK_PTR` 槽 0 恒不变）⇒ 核 `&x` 的 `mut` 标记来源正确。
+- **判据**：`selftest-types` 全绿——⚠ **`type_selftest.cr` 里有一条同一断言同时钉 `TYP_PTR` 与 `TYP_REF`（`:2881`）⇒ 此处必翻面**，须同批改。
 
-**⇒ 推荐**：**加 `TYP_REF` 并同批重写 `(i)` 的判据**——因为 `(i)` 的原文理由（「`&x` 解析到 `TYP_PTR`」）**已被裁定二作废**，保留它等于把一条**前提已死的判据**留在仓里。
+### S6 **安全面**（**裁 4 · 独立验收项 = §5.2「安全面不得净减」**）
+- **现状**：`region_check::{rc_return_escape, rc_store_escape, region_check_func}` 三处 + `provenance_verify::provenance_verify_func` 一处**只认 `TYP_PTR`** ⇒ 改判后**对 `&x` 派生的值不再生效且不报**。
+- **逐处二选一**：**(a)** 扩展接受 `TYP_REF`（等价检查）；**(b)** 显式登记「**已知不再生效** + 理由 + 覆盖面损失」。
+- **判据** = §5.2（任一处「生效 → 不生效」且未登记 ⇒ **本项红**）。
 
-### §8.4 拆的条件
+### S7 三处转红载体的处置
+`tests/suite/ptr_ref_first.cr`（头注自证双依赖 ⇒ 视 S2/S3 抉择改写语料**或**其判据）· `tests/selfhost/test_diag_gate.py`（夹具）· `tests/selfhost/test_ccr_types.py` ㉜（三处）。
+**判据**：三处**全转绿**，且**改的是它们的前提、不是把断言删掉**（删断言 = 把判据固化的旧前提留下）。
 
-裁定二落地 ⇒ **F 的临时排除不存在了**（§2.2）⇒ 刀 4 的未落环排除**只剩 A**。
+### S8 收尾判据
+**F 面 2 → 0** · 两个 project 单元 **0 / 6** · 语料逐档与 §3 预测比对 · **canary 5/5**（对未改动值表）· **逐字节 pre/post**（`out` + `out.ccr`）· `full-bootstrap` · `selftest-types` / `test_diag_gate.py` / `test_ccr_types.py` / `test_todo_id_migration.py` 全绿。
 
----
+### 拆的条件
+裁定二落地 ⇒ **F 的「临时排除」不存在了**（§2.2）⇒ 刀 4 的未落环排除**只剩 A**（A 归裁定一）。
 
 ## §9 两句裁定各自的**两向钉子**（改契约类尤其要防误杀）
 
