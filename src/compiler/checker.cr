@@ -2647,6 +2647,21 @@ fn s1p_arg_one(arg_n: int, pi2: int, pti: int, ati: int, is_ext: int, call_ni: i
     if pti < 0 { skip = 1; }                                   // 形参型不可得
     if ati == TI_UNIT { skip = 1; }                             // 未推断出形
     if ast_kind(arg_n) == EXPR_INT || ast_kind(arg_n) == EXPR_DEX { skip = 1; }  // ③ 字面量多态
+    // ─── 哨兵/不可判定值族（2026-09-19 小刀）：**未知 ≠ 异型** ───────────────────────
+    // 三条**同族但分属两个空间**的判定——⚠ **不得互换**（见下）：
+    //   · `ati == TI_NEVER` —— 判**实参类型项下标**：类型**不可得**（未解析名等）⇒ 不是「不匹配」；
+    //   · `ati == TI_DYN`   —— 判**下标**：`dyn` = ⊤，与一切相容；
+    //   · `get_type_kind(ati) == TYP_GENERIC_PARAM` —— 判**kind**：泛型形参**声明期不可验证** ⇒ 不判。
+    // ⚠⚠ **索引空间 vs kind 空间**：`TI_DYN`(下标常量 = 7) 与 `TYP_GENERIC_PARAM`(kind 码 = 7)
+    //     **数值相同、空间不同** ⇒ 把 `ati == TI_DYN` 写成 `ati == TYP_GENERIC_PARAM`（或把 kind 判定
+    //     写成 `get_type_kind(ati) == TI_DYN`）**能编过、且可能蒙对一部分用例**（两条 skip 在同一屏、
+    //     都让同一批输入不再报）⇒ **判据必须能区分「空间写错」与「规则缺一条」**：见
+    //     `tests/selfhost/test_s1p_sentinel_skips.py` 的**逐条突变自证**（本刀硬性要求）。
+    if ati == TI_NEVER { skip = 1; }                            // 类型不可得 ⇒ 未知 ≠ 异型
+    if ati == TI_DYN { skip = 1; }                              // dyn = ⊤
+    // 前缀条 `ati > TI_DEX_S` **必需**：类型表下标 0..8 = 标量/占位 ⇒ 直接查表会读到**占位行的 kind**
+    //   （**假阳性来源**；同 `@raw_int` 分支 `:4217-4218` 同款护栏）。泛型形参行下标 ≥ 10。
+    if ati > TI_DEX_S && get_type_kind(ati) == TYP_GENERIC_PARAM { skip = 1; }  // 泛型形参：声明期不可验证
     if ast_kind(arg_n) == EXPR_ENUM_CONSTRUCTOR {
         nm2 := istr_get(ast_a(arg_n));
         if str_eq(nm2, "None") != 0 {

@@ -310,6 +310,13 @@ case "$CI_JOB_NAME" in
     # `globals.cr` 的 `mut = -1` 初值经 Python bootstrap 构建**静默丢成 0** ⇒ 开关恒关、探针 0 命中）。
     # 判据①（只发不阻断）的产物面在批级对拍：前态二进制 vs 本链 **37/37 逐字节 IDENTICAL**（两侧各自 clean-cache）。
     python3 tests/selfhost/test_s1p_liveness.py
+    # ─── 台账「哨兵/不可判定值族」三条 skip（2026-09-19 小刀）：`TI_NEVER` / `TI_DYN` / 泛型形参 ───
+    # 为什么必须门内：硬错与台账**共用同一条环**（`s1p_arg_one` 是两面公共谓词）⇒ 只登记不改环
+    #   ⇒ 硬错一打开这两类会红。本档钉：A dyn 不记 · B 泛型形参不记 · **C 真异型仍记（非真空锚）**
+    #   · D 未定义名不记；并含 **⑤ 空间守卫**（`TI_DYN` 下标 vs `TYP_GENERIC_PARAM` kind **数值同为 7
+    #   而空间不同**）+ 其**突变自证**（错空间写法必红、删前缀条必红、剥注释承重、防「一律红」反向钉）。
+    # ⚠ 阳性对照一律用**已定义的 int 变量**——D 落地后「未定义名」类输入已不可见，拿它当正控会真空绿。
+    python3 tests/selfhost/test_s1p_sentinel_skips.py
     # ─── 字符串插值 `${...}`：词法契约 + **展开语义**（2026-09-18 插队修复 + 裁定 (b) 同批）───
     # **本特性此前全域零覆盖**：`tests/` 与 `examples/` 里 `grep '\${'` = **0 命中**，`src/` 唯一命中是
     # `src/lsp/analysis.cr` 的注释 ⇒ 它烂掉约两个月没人知道（**这条判据存在的理由**）。
