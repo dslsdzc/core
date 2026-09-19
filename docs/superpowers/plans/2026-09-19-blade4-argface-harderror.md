@@ -198,6 +198,9 @@
 - **第四处为什么不能 blanket（且是个好消息）**：它是四处里**唯一读 `extra` 的**。若做成 `kind == TYP_PTR || kind == TYP_REF`，而改判按自然落法写 `alloc_type(TYP_REF, inner, is_mut)`（**`is_mut` 今天已在 `checker.cr:2949` 在手、并在 `:2966` 被丢弃** ⇒ 那正是 `TYP_REF` 的 `extra` 槽存在的意义；**此落法待确认**），则 **`&mut x` 的 `extra` = 1** ⇒ **每一个 `&mut` 解引用都会报「external pointer dereference requires unsafe」**（`tests/suite/ptr_arith.cr` 的 `*q = 99`、`opt_dex_test.cr` 的 `*p = d` **当场红**）。
 - **两个失效模态不同**（须分别定钉）：一~三处 = **静默**失去覆盖；第四处 naive 扩 = **高声假阳**（更好抓，**但不能因此就扩**）。
 - **两向钉子**：① 三处 (a) **正钉** = 改判后「返回 `&local` / 存 ref / 解引用 ref」**仍报**（防 (a) 落空）；② 第四处 **反钉** = naive 扩 ⇒ **`&mut` 解引用假阳**（红态钉，钉住「不得 blanket」）。
+- **语料侧确证（2026-09-20）**：`tests/selfhost/test_pointer_safety.py`（305 行 / 21 例）里打 `EC_TU_DEREF` 的**恰 4 例**——`:132`（`p := 4096 as *int; return *p;`）· `:142`（同形 + `*p = 1;`）· `:153`（**变量中介**：`address := 4096; p := address as *int;`）· `:165`（**算术后仍带地址空间**：`p := (4096 as *int) + 1;`）——**全部是 `as *T` 转换形，无一处用 `&x`** ⇒ **该门的活覆盖 100% 在 cast 面** ⇒ **第四处改判后覆盖率不可能减少**（由「读码推出」升级为「**语料确证**」）；该 4 例**改判后照旧绿**（它们不碰 `&x`）。
+- **两钉的落点**：**就在该档**（这面既有的套件，**不另开**）——正钉（三处 (a) 改判后仍报）与反钉（naive 扩 ⇒ `&mut` 假阳）都落 `test_pointer_safety.py`。
+- **顺带登记（不属本批）**：同档 `:173` `test_alloc_buffer_cast_remains_tracked` 用的是 **`alloc(8)`** ⇒ 属 **§7.3（`alloc` → `Buf`）** 批的爆心，**改判批勿顺手动它**。
 
 **类 2 的实据（代码里自带教条 + 受害者点名）**：`checker.cr:4239` 的分支注释原文写着「`TYP_REF`/`TYP_SLICE`/`TYP_ARRAY` 等**仍报错**……⇒ **没证据就不扩**」，并在注释里点名 `tests/suite/ptr_ref_first.cr`（`@raw_int(q) - @raw_int(p)` 取字节差）。
 - **逐档实读（2026-09-20）**：该档 = `p := &x; q := p + 1; …@raw_int(q) - @raw_int(p)…` ⇒ **确证会硬错**（`p` 改判后是 REF）。其 `q := p + 1` 另落空 `checker.cr:2903-2910` 的 PTR 分支——**那半条归 S3 裁决（指针算术纳入 REF）**，而 `@raw_int` 这半条**无人认领**。
