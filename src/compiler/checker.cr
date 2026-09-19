@@ -2963,7 +2963,11 @@ fn infer_expr(node: int) -> int {
             } else {
                 inner = infer_expr(operand);
             }
-            return alloc_type(TYP_PTR, inner, 0);
+            // S1（2026-09-20，裁定二）：`&x` 由 `TYP_PTR` 改判 **`TYP_REF`**，
+            // 且 `extra` 由写死的 0 改取 **`is_mut`**（`:2949` 已在手，此前被丢弃）——
+            // **两个实参必须同批**：只换 kind 不写 extra ⇒ REF 的 extra 恒 0 ⇒ 与
+            // 引擎侧 `AK_REF` 槽 0（mut，**参与身份**）不一致（§8 S1）。
+            return alloc_type(TYP_REF, inner, is_mut);
         }
         if op == UOP_DEREF {
             inner := infer_expr(ast_a(node));
