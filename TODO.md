@@ -2029,7 +2029,7 @@
 
 ### 2026-09-19-8. **【`(甲)` 刀 4 前置②：63 点逐类处置表】**（批 8 (甲) 刀 3；取号基准 = develop 当天已有最大 N = 7；**「排除」= 落纸 + 带钉子；没写进刀 4 触发条件的排除 = 静默，不算过**）
 
-- **口径**：真面 = **63 点 / 6 类**（权威口径见 `#2026-09-19-3` 的追加段：project 单元 0 / 6 + 闭包外清洁档 57）。**每类必须落到「修」或「显式排除 + 钉子」二者之一，不许有第三态（= 静默）。**
+- **口径**：真面 = **63 点 / 6 类**（权威口径见 `#2026-09-19-3` 的追加段：project 单元 0 / 6 + 闭包外清洁档 57）。**⚠ 现为 `57`**：`63 → 61`（E-skip 落环，PR `#142` / `c1044645`）→ `57`（D 修复，PR `#140` / `1ea9c47e`）——见下表 **D 行后的〔留痕更正〕**。**每类必须落到「修」或「显式排除 + 钉子」二者之一，不许有第三态（= 静默）。**
 
 | 类 | 点 | 处置 | 载体（逐处） | 钉子（若排除） |
 |---|---|---|---|---|
@@ -2037,6 +2037,7 @@
 | **B 裸字表写串值** | 2 | **迁移**（2(a) `@ptr_of` 范式） | `src/format/elf/ld.cr::ctx_add_so`（`w64(g_so_paths, g_so_count*8, path)`）· `::ctx_add_plt`（`w64(g_plts, g_plt_count*16, name)`）—— 在 `targets` project 单元里即此 2 点 | 不适用（**修**而非排除）；迁移后**须仍能编过 `targets` 单元** |
 | **C 裸地址当 string** | 4 | **迁移**（2(a) `@str_of` 范式） | `ld.cr::ctx_emit_static`（`str_len(sp)` · `read_file(sp)`）· `ld.cr`（`str_eq(r64(g_plts, si*16), fn_name)`）· 同族 `read_file(r64(g_so_paths, si*8))` | 同上 |
 | **D `@typeInfo` 两面分歧** | 4 | **显式排除 + 登记**（与 `#2026-09-19-5` 同族） | **4 点全部是 `@typeInfo`**：`tests/suite/at_test_struct.cr:29`（`str_len(ti)`）· `:31`（`str_len(ti2)`）· `tools/cir-str-domain/probes/scope_typeinfo.cr:6`（`println(@typeInfo(Point))`）· `:7`（`println(@typeInfo(int))`） | 见下「D 的两条现成对照」 |
+| **〔2026-09-19 留痕更正（只增不删）〕** | — | **上一条 D 行原写「D 显式排除 + 登记」，与 team-lead 的裁定相反**——D 的定性**自始为「真缺陷 ⇒ 修」**，且已由 **PR #140**（merge commit `1ea9c47e`）修为 `@typeInfo` 返回型 `TI_INT` → `TI_STR`。**D 行原处置作废。** 真面位移：**63 → 61**（E-skip 落环，PR #142 / `c1044645`）→ **57**（D 修复，PR #140 / `1ea9c47e`）；现类分解 = **A 49 · B 2 · C 4 · D 0（已修）· E 0（已排除）· F 2 = 57**；两个 project 单元仍 `0` / `6`。 | **证据两条**：① lead 对 #140 的合前核验（单档 `+5/−1` · 链根父 · 区间内容等价核）；② **本代理（`b8-e1`）的独立读数**——`tests/suite/at_test_struct.cr` 与 `tools/cir-str-domain/probes/scope_typeinfo.cr` **各 2 → 0**，**只用台账面、未改任何代码** ⇒ 与 #140 自己的判据**互补**（独立效果证据，非转述）。 | — |
 | **E dyn / 泛型形参** | 2 | **显式排除 + 落在环上**（见下「E 的落法」） | `tests/suite/dyn_test.cr:14`（`x : dyn` ⇒ `a=7` `TI_DYN`）· `tests/suite/generics_test.cr:31`（`fn pair[A,B](a:A,b:B)` 体内 `str_len(b)` ⇒ `a=19` 泛型形参型） | **反**：`dyn` 变量 / 泛型形参作实参 ⇒ **不得**记（现各 1 行 ⇒ 应 0 行）· **正**：`string` 形参 ← **int 变量** ⇒ **必须仍记**（**两颗钉子一律变量形**） |
 | **F 指针 REF/PTR** | 2 | **显式排除 + 登记**（`#2026-09-19-1`） | `tests/probes/n19_ref_named.cr:9`（`g(p, q)` 两点：`p_ti=15 a_ti=13` / `p_ti=16 a_ti=14`） | 挂 `#2026-09-19-1`（语义待裁 ⇒ 该面不入硬错） |
 
