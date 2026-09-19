@@ -1855,7 +1855,12 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                     }
                 }
             }
-            v := new_ir_var("ref", alloc_type(TYP_PTR, pti, 0));
+            // S1 同批（2026-09-20）：**IR 变量型也必须一起改**——`checker` 侧只决定语义视图，
+            // 而 `region_check` / `provenance_verify` / `ptr_analysis` 读的是 **`irv_type()`**
+            // （本行）。只改 `checker.cr:2966` ⇒ 三道安全门看到的仍是 `TYP_PTR` ⇒
+            // S6 的 (a) 扩法会**对着一个永远不出现的 kind 生效**（静默空转）。
+            // `extra` 同 checker：取 `is_mut`（即下面 emit 的 s2 实参，同一个值）。
+            v := new_ir_var("ref", alloc_type(TYP_REF, pti, ast_int_val(node)));
             emit(IR_REF, v, op_var, ast_int_val(node), 0, 0);
             return v;
         }
