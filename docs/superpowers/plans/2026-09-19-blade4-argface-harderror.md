@@ -170,7 +170,7 @@
 
 > **改判前生效的检查，改判后要么仍生效，要么显式登记为「已知不再生效」并给理由。**
 
-- **背景**：`region_check`（`rc_return_escape` / `rc_store_escape` / `region_check_func`）与 `provenance_verify`（TU03 门）**只认 `TYP_PTR`** ⇒ 裁定二后**对 `&x` 派生的值不再生效且不报（静默）**。
+- **背景**：`region_check`（`rc_return_escape` / `rc_store_escape` / `region_check_func`）与 `provenance_verify`（TU03 门）**只认 `TYP_PTR`**。**⚠ 但「四处同类」是初判、已被逐处实读推翻**——见 **§5.3.1**：前三处 = **真·静默失去覆盖**；**第四处（TU03）对 `&x` 从未生效**（其 `extra` 恒 0）⇒ **零损失**，正确表述是「**本处不适用**」而非「不再生效」。
 - **为什么必须独立立项**：**「减少检查」不会红**——它是**静默面**，正是本批一路在收的形态（用一次静默换一次不对称）。
 - **判据**：逐处列出「改判前是否生效 / 改判后是否生效」，**任一处从「生效」变「不生效」且无显式登记 ⇒ 本项红**。
 - **处置二选一**：**(a)** 扩展该处接受 `TYP_REF`（等价检查）；**(b)** 显式登记「已知不再生效 + 理由 + 覆盖面损失」，并在批报告写明。
@@ -181,9 +181,23 @@
 
 | 类 | 处数 | 站点（符号锚） | 改判后 | 可否「登记了事」 |
 |---|---|---|---|---|
-| **1 安全门** | 4 | `region_check.cr:63`（`rc_return_escape`）· `:99`（`rc_store_escape`，变量名 `val_ti`，非 `ptr_ti`）· `:119`（`region_check_func`）· `provenance_verify.cr:67`（TU03 门） | 早退 ⇒ **静默**失去覆盖 | **可以**（= §5.2 的 (a)/(b)） |
+| **1 安全门** | **3 真损失 + 1 不适用** | `region_check.cr:63`（`rc_return_escape`）· `:99`（`rc_store_escape`，变量名 `val_ti`，非 `ptr_ti`）· `:119`（`region_check_func`）· `provenance_verify.cr:67`（TU03 门） | 前三：早退 ⇒ **静默**失去覆盖；第四：**前后皆不生效** | **见 §5.3.1**（不是四个同类问题） |
 | **2 `@raw_int` 实参门** | 1 | `checker.cr:4239` | **硬错**（非静默） | **不可以**——归刀 4 实参面家族 |
 | **3 类型身份 / 实例键 / mangling** | 见下 | `monomorph.cr:207`/`:214` · `ty_shadow.cr:349`/`:903` · `iface_axis.cr:206`/`:207` | 类型项变 ⇒ **产物字节变** | **不可以**——须一次 byte 对拍 |
+
+#### §5.3.1 类 1 **逐处定论**（2026-09-20 逐处实读；**四站点不是四个同类问题**）
+
+| 站点 | 判据形态 | 改判后 | 处置 |
+|---|---|---|---|
+| `region_check.cr:63` `rc_return_escape` | `ptr_ti < 0 \|\| kind != TYP_PTR ⇒ return` | **真·静默失去覆盖**（返回 `&local` 不再查子图逃逸） | **(a)** 加 `\|\| kind == TYP_REF` |
+| `region_check.cr:99` `rc_store_escape`（`val_ti`） | 同上 | **真·静默失去覆盖**（存 ref 不再查寿命） | **(a)** 同上 |
+| `region_check.cr:119` `region_check_func`（`IR_DEREF` 分支） | 同上 | **真·静默失去覆盖**（解引用 ref 不再查子图寿命） | **(a)** 同上 |
+| `provenance_verify.cr:67`（TU03） | `kind == TYP_PTR && extra != 0 ⇒ 报 EC_TU_DEREF`（**条件触发硬错，不是早退跳过**） | **零损失**：`&x` 的 `extra` 恒 0（`checker.cr:2966` 写死）⇒ **该门对 `&x` 从未生效**，前后一致 | **(b′)** 登记「**本处不适用**」（非「不再生效」）+ **反向钉子** |
+
+- **三处 (a) 安全的原因**：这三处**只判 kind、不读 `extra`** ⇒ 不触碰「REF 的 `extra` = mut 标记」那个坑；加一个 `|| kind == TYP_REF` 即**等价扩**。
+- **第四处为什么不能 blanket（且是个好消息）**：它是四处里**唯一读 `extra` 的**。若做成 `kind == TYP_PTR || kind == TYP_REF`，而改判按自然落法写 `alloc_type(TYP_REF, inner, is_mut)`（**`is_mut` 今天已在 `checker.cr:2949` 在手、并在 `:2966` 被丢弃** ⇒ 那正是 `TYP_REF` 的 `extra` 槽存在的意义；**此落法待确认**），则 **`&mut x` 的 `extra` = 1** ⇒ **每一个 `&mut` 解引用都会报「external pointer dereference requires unsafe」**（`tests/suite/ptr_arith.cr` 的 `*q = 99`、`opt_dex_test.cr` 的 `*p = d` **当场红**）。
+- **两个失效模态不同**（须分别定钉）：一~三处 = **静默**失去覆盖；第四处 naive 扩 = **高声假阳**（更好抓，**但不能因此就扩**）。
+- **两向钉子**：① 三处 (a) **正钉** = 改判后「返回 `&local` / 存 ref / 解引用 ref」**仍报**（防 (a) 落空）；② 第四处 **反钉** = naive 扩 ⇒ **`&mut` 解引用假阳**（红态钉，钉住「不得 blanket」）。
 
 **类 2 的实据（代码里自带教条 + 受害者点名）**：`checker.cr:4239` 的分支注释原文写着「`TYP_REF`/`TYP_SLICE`/`TYP_ARRAY` 等**仍报错**……⇒ **没证据就不扩**」，并在注释里点名 `tests/suite/ptr_ref_first.cr`（`@raw_int(q) - @raw_int(p)` 取字节差）。
 - **逐档实读（2026-09-20）**：该档 = `p := &x; q := p + 1; …@raw_int(q) - @raw_int(p)…` ⇒ **确证会硬错**（`p` 改判后是 REF）。其 `q := p + 1` 另落空 `checker.cr:2903-2910` 的 PTR 分支——**那半条归 S3 裁决（指针算术纳入 REF）**，而 `@raw_int` 这半条**无人认领**。
