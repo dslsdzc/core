@@ -1,7 +1,7 @@
 # 图锚定区域:存在格语义的经典映射(区域/Arena/权限)
 
 > 定位:受众 = 维护者/贡献者(内存管理实现与验证);状态 = active(arena 层已实现;区域机制部分设计态,状态见 §六)。
-> 本文件 = **存在格 / Materialization Space**(层定义 = docs/maintainer/design/materialization-space.md)的语义在经典字节硬件上的**映射实例**详细设计——正确性标准 = 保持条款 1–6 的可观测语义(条款 7;规则权威 = docs/academic/cache-semantics.md)。
+> 本文件 = 缓存语义(权威 = docs/academic/cache-semantics.md)在经典字节硬件上的**映射实例**详细设计——正确性标准 = 保持七条条款的可观测语义(条款 7)。
 > 设计谱系:2026-07-28 多 Arena(已实现,分配器面)→ 2026-08-13 图锚定区域(语义面升级,本文档);设计依据 specs 见 §七。
 
 ---

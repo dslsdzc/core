@@ -54,7 +54,7 @@
 > 完整条款 + 字节权限层/home/存在区间/驱逐配对等扩展术语:maintainer/design/memory-model.md。
 > **层本体 = 存在格**(四问/七字段/归类表/划界):maintainer/design/materialization-space.md。
 
-## 五、寄存器分配(存在格的一类映射实例:寄存器行 / 缓存映射)
+## 五、寄存器分配(缓存语义映射实例)
 
 一致性判定/共存互斥/读点无陈旧/调用点失效契约/remat/共存偏序 width/order-free/
 上下文贪心 CAG/spill/栈槽/装载存储/写回——全部术语定义与论证见

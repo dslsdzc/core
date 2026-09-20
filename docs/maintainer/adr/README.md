@@ -47,3 +47,4 @@
 | ADR-0019 | 项目启动与自举路线(Python bootstrap + 自托管) | accepted | 2026-04~07 |
 | ADR-0020 | IR 双形态确立(.cir 图 / .ccr 格) | accepted | 2026-05-28 |
 | ADR-0021 | 格层本体 = 存在格(Materialization / Existence Space)——缓存降为该层一类映射实例 | accepted | 2026-09-20 |
+| ADR-0022 | ADR-0005「层规则 = 缓存语义七条」的框定收窄(条款数不变、零新增规则) | accepted | 2026-09-20 |

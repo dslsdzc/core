@@ -48,7 +48,7 @@
 
 ## 四、相关文档
 
-- 寄存器分配 = 存在格的一类映射实例:docs/maintainer/design/regalloc-cache-mapping.md(判定四条)
+- 寄存器分配 = 缓存语义的映射实例:docs/maintainer/design/regalloc-cache-mapping.md(判定四条)
 - 指针模型(provenance 三 pass):docs/maintainer/design/pointer-model.md
 - 控制流 region(与内存"区域"区分):execution-model.md §二、existence-structure.md REG
 - 术语表:docs/glossary.md §二(三层映射)/§四(存在格与缓存映射术语)
