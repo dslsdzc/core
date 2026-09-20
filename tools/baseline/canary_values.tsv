@@ -178,8 +178,8 @@
 #   这是**固有代价**，不是回归——但按本文件两级纪律，**必须显式声明 + 同批重锁 + 旧值留痕**。
 
 canary_elf	pa	f113727526bafbde95f40d3c4e3cee7dd1dd0a9486ddd5fe27e961e330bf4dde	28854
-pa_ccr	pa.ccr	f06bf45bcd9de1951190ec8ccee6f28684390beee5d3ccca811a8079add988f3	96945
-pa_static_ccr	pa_st.bin.ccr	76df0adf92d63a7fe986af2f0c6bd3149ec512287ab936a7159e35013a5dd15d	97088
+pa_ccr	pa.ccr	d6ebe3d175dea7322b39e3ca51366d854b6cb2e4b6efb47a05b0ed4fc21c1b10	96985
+pa_static_ccr	pa_st.bin.ccr	041b6e3e83d915690324c5e453b49652207e9f919080e53d2ddec1060d595f62	97128
 gt_ccr	gt.ccr	edfd8e98d7b64fdb3a99e62bffc99954879432a48390bedbe98171348a49dd22	143687
 gt_static_ccr	gt_st.bin.ccr	bbfe47897c8fb97f9cc38ffbfe6043577604ef86595760db55cd7ac0781b0c97	143830
 # ⚠ **本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
@@ -192,3 +192,37 @@ gt_static_ccr	gt_st.bin.ccr	bbfe47897c8fb97f9cc38ffbfe6043577604ef86595760db55cd
 #   每条编译前 `clean-cache`、不传 `-O`，与 canary_check.sh 的采集口径逐条一致）；**CI 同值**——
 #   同一提交（head `d84ac055e600`）的 `selfhost-tests` 档在 CI 内跑同一 canary 闸门 **5/5 PASS**
 #   ⇒ 本机与 CI 两环境一致，无一处的隐含环境依赖。
+
+# ── 【本批重锁 2026-09-20】裁定二（`&x` → `TYP_REF`）实施批（PR #153）——**维护者显式授权** ──
+# **性质 = 内容形状演进，非回归、非发射面泄漏**（本表判据契约里 `.ccr` 那条正是「格式+内容形状检测器」）。
+# **两阶段分开量、分开归因**（team-lead 要求：重锁必须量分支**最终状态**，不是中间态）：
+#   阶段①（S1+S3，`dff1c93d`）与阶段②（S2+S6，`6045d1e6`）的闸门读数**逐字节相同**
+#   ⇒ **S2（`@raw_int` 门加 `TYP_REF`）与 S6（安全面三处扩 kind 谓词）对 canary 零影响**——
+#      两者都只作用于**诊断面**（S6 被点名确认：扩 kind 谓词不改类型表、不改发射面）。
+#   ⇒ 故**合并为一次重锁**，但归因记为「**阶段①引起、阶段②无增**」。
+# **归因（段 → 项，逐层实测）**：
+#   ① **八段表逐段比：唯一变化 = TYPE(7) `1248 → 1288`（+40B）**；其余七段偏移/尺寸/内容**逐字节不变**。
+#   ② 段体 = `4 + rc×24 + 4 + tc×40`（`globals.cr` `ESZ_TYPE_ROW=24` · `type_terms.cr` `ESZ_TYPE_TERM_DISK=40`）
+#      ⇒ 实测 **`rc` 15→15（不变）· `tc` 22→23（+1）** ⇒ **+40 ≡ 恰好 1 条类型项**。
+#   ③ 那一条 = **`TT_CONS` —— `AK_REF` 链相对 `AK_PTR` 链多出的「槽 0 mut 标记格」**：
+#      `ty_shadow.cr` 的 `AK_PTR` 链 = `tt_cons(元素, nil)`（**1** 个 cons）；`AK_REF` 链 =
+#      `tt_cons(mut标记, tt_cons(元素, nil))`（**2** 个）⇒ **REF 多一格**。
+#      **⚠ 措辞纪律**：**不得**写成「多一个 REF 项节点」——若真如此 `tc` 应 **+2**（新原子 + 新链）而非 +1；
+#      实际 = **原子项一进一出（PTR 原子消失、REF 原子出现）+ 链上多一格 CONS** ⇒ 净 **+1**。
+#      （提交 `b63208e2` 的说明里曾写作「1 个 REF 项节点」，**此处为更正版，以本表为准**。）
+#   ④ 同段另有 **4 条类型行 `PTR→REF`**（行 10/11/13/14，皆 `data=int行 / extra=0`）——**行条数不变**（15→15）
+#      ⇒ +40 **全部来自项层**那条 `TT_CONS`，不是新增类型行。`extra=0` 是**设计**：两处 `&` 位点都写 `&`（无 `mut`），
+#      与 `ir_gen.cr` 的 `alloc_type(TYP_REF, pti, ast_int_val(node))` 同源。
+#   ⑤ **对照（同类但不该报）**：`gt` 两条**逐字节不变**，而 `tests/suite/generics_test.cr` **零个 `&`**
+#      （实测 `grep -c '&'` = 0）⇒ 变化是 **`&` 位点驱动，不是全局 intern 移位**
+#      （与 #123「新增编译器全局 ⇒ id 顺移」机制不同）。
+#   ⑥ **数量自洽**：两个位点（`&arr[2]` / `&x`）**共享同一条 REF 链**（DAG 去重）⇒ 只 +1 条项
+#      （若每点各建一条应是 +80，与实测不符）。
+# **发射面零足迹 ✓**：`canary_elf` **逐字节不变**（28854B · `f1137275…`）+ 其余七段逐字节不变。
+# **D1 确定性闸门 5/5 PASS**（`pa_ccr` / `pa_static_ccr` 两次构建逐字节相同 ⇒ 重锁前置已绿）。
+# **取数环境声明**：本机冷态实测（cwd = 仓库根、逐档 `clean-cache`、不传 `-O`，与 `canary_check.sh` 口径逐条一致）；
+#   两条独立链（本工作区 ×2 · team-lead 的独立探针工作区 `/tmp/canary-probe`）**读数逐字节相同**。
+# **旧值留痕（自本批起作废）**：
+#   pa_ccr        `f06bf45bcd9de1951190ec8ccee6f28684390beee5d3ccca811a8079add988f3` 96945
+#   pa_static_ccr `76df0adf92d63a7fe986af2f0c6bd3149ec512287ab936a7159e35013a5dd15d` 97088
+# **出处**：PR #153 · 提交 `dff1c93d`（S1+S3，**引起**）· `6045d1e6`（S2+S6，**无增**）· 本表重锁与其同批。

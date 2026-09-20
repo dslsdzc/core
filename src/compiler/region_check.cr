@@ -60,7 +60,12 @@ fn rc_return_escape(ni: int, s1: int, nstart: int) {
     // Siebert: check if a returned pointer escapes its region
     if s1 < 0 { return; }
     ptr_ti := irv_type(s1);
-    if ptr_ti < 0 || get_type_kind(ptr_ti) != TYP_PTR { return; }
+    // S6 (a)（2026-09-20，维护者裁）：**地址型 = `TYP_PTR` ∪ `TYP_REF`**。
+    // 裁定二把 `&x` 改判 `TYP_REF` ⇒ 只认 PTR 会让本门对 `&x` 派生的值**静默失效**
+    // （实测红：`test_region_check_pointer_escape` 的 `return &x;` 不再报 B010）。
+    // 本处**只判 kind、不读 `extra`** ⇒ 加一个 `|| TYP_REF` 是**等价扩**
+    // （不触碰「REF 的 `extra` = mut 标记」那个坑——那是 `provenance_verify` 独有的问题，见其 (b′)）。
+    if ptr_ti < 0 || (get_type_kind(ptr_ti) != TYP_PTR && get_type_kind(ptr_ti) != TYP_REF) { return; }
     pts := r64(g_pts, s1 * 8);
     if pts == 0 { return; }
     cur_sg := subgraph_containing(ni);
@@ -96,7 +101,8 @@ fn rc_store_escape(ni: int, ptr_var: int, val_var: int) {
     // *ptr = val — val's target allocations must have lifetime >= ptr's
     if val_var < 0 { return; }
     val_ti := irv_type(val_var);
-    if val_ti < 0 || get_type_kind(val_ti) != TYP_PTR { return; }
+    // S6 (a)：同上——地址型 = `TYP_PTR` ∪ `TYP_REF`（本处只判 kind、不读 `extra`）。变量名是 `val_ti`。
+    if val_ti < 0 || (get_type_kind(val_ti) != TYP_PTR && get_type_kind(val_ti) != TYP_REF) { return; }
     val_pts := r64(g_pts, val_var * 8);
     if val_pts == 0 { return; }
     rc_pts_has_escaped(val_pts, ni, 0);  // simplified check
@@ -116,7 +122,8 @@ fn region_check_func(nstart: int, ncount: int) {
             // Only pointer-typed values carry provenance. An integer loaded
             // through a pointer is ordinary data, not another pointer.
             ptr_ti := irv_type(s1);
-            if ptr_ti < 0 || get_type_kind(ptr_ti) != TYP_PTR {
+            // S6 (a)：同上——地址型 = `TYP_PTR` ∪ `TYP_REF`（`IR_DEREF` 的被解引用者）。
+            if ptr_ti < 0 || (get_type_kind(ptr_ti) != TYP_PTR && get_type_kind(ptr_ti) != TYP_REF) {
                 ni = ni + 1; continue;
             }
             pts := r64(g_pts, s1 * 8);

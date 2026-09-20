@@ -352,14 +352,43 @@ def test_ccr_roundtrip_v2():
         f"expected exit 6 (sum of 0..4), got {run.returncode} stdout={run.stdout!r}"
 
 def test_region_check_pointer_escape():
-    """嵌套 region 下的指针逃逸检测（RegionCheck 走显式映射后仍正确）"""
+    """嵌套 region 下的指针逃逸检测（RegionCheck 走显式映射后仍正确）
+
+    ⚠ **2026-09-20 重定（裁定二配套）：原断言的**第一支从来没有内容**。**
+
+    **原断言（逐字保留）**：
+        assert 'B010' in r.stdout or 'error' in r.stdout, f"expected escape error, got {r.stdout!r}"
+
+    **为什么它一直是空壳**：`EC_B_ESCAPE`(B010) **全仓零 raise 点**（`grep -rn EC_B_ESCAPE src/`
+    只命中 `ast.cr:482` 的**定义行**；`region_check.cr` 实际报的是 `EC_B_LIFETIME`(B011)）
+    ⇒ **第一支永不可能成立**；本用例长期靠**第二支**通过，而那时命中的是 **`TF01`**
+    （`&x` 当时是 `TYP_PTR`、而返回型声明 `&int` ⇒ 返回型不符）——**与逃逸检测毫无关系**。
+    且该源**原理上不可能逃逸**：`rc_return_escape` 对 `SG_FUNC` 直接放行
+    （源码注释原文 `// function-level alloc = ok to return`——函数级 alloc **明确允许**返回）。
+
+    **是裁定二（`&x` → `TYP_REF`）把它照出来的**：`&x` 变成 REF ⇒ 与 `&int` **同 kind** ⇒ TF01 消失
+    ⇒ 该判据暴露为空壳。**这不是改判弄坏的**，是改判把一个从来没测过东西的判据照了出来。
+
+    **逃逸面零覆盖的完整登记 = TODO `#2026-09-20-1`**（含同面第二处：存储逃逸点
+    `region_check.cr:108` **丢弃返回值**，与 `docs/maintainer/design/pointer-model.md` §五
+    把它写成「已实现的三点之一」不一致）。
+
+    **本用例现在钉什么**：一条**真实成立**的性质——**`&x` 的 kind 与 `&int` 声明位一致**（裁定二的目标）
+    ⇒ 该源 `check` 通过且**不再报 TF01**。
+    **⚠ 它不覆盖逃逸面**（该面零活覆盖，见上）——**勿据此断言「逃逸被检测」**；
+    也**不写**「输出 == ok」那种把「逃逸不报」固化成预期的断言（本仓纪律禁止）。
+    """
     src = "fn bad() -> &int {\n    x := 42;\n    return &x;\n}\nfn main() -> int { return 0; }\n"
     with tempfile.NamedTemporaryFile('w', suffix='.cr', delete=False) as f:
         f.write(src); path = f.name
     r = subprocess.run(['./build/corec', 'check', path], capture_output=True, text=True,
                        cwd=BASE, timeout=30)
     os.unlink(path)
-    assert 'B010' in r.stdout or 'error' in r.stdout, f"expected escape error, got {r.stdout!r}"
+    out = r.stdout + r.stderr
+    # 真实成立的性质：`&x`(REF) 与 `&int` 声明位**同 kind** ⇒ 无返回型不符
+    assert 'TF01' not in out and 'error[TA02]' not in out, \
+        f"`&x` 与 `&int` 应同 kind（裁定二）⇒ 不应有 TF01/TA02；got {out!r}"
+    assert r.returncode == 0, f"check 应无诊断通过；rc={r.returncode} got {out!r}"
 
 def test_region_check_cache_hit():
     """RegionCheck 在缓存命中路径不回归：同路径第二次 build（全函数 cache hit）

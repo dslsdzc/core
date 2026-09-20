@@ -2772,13 +2772,31 @@ fn type_selftest_run() -> int {
         o4_r_cat * 100 + (g_diag_count - o4_m1), TI_STR * 100);
     o4_m2 := g_diag_count;
     o4_r_pa := infer_expr(o4_b_ptradd);
-    // 结果 = `*T` 行本身（T = int）：**不**与另一次 `infer_expr(o4_ref)` 的行号比——alloc_type
+    // 结果 = 地址型行本身（T = int）：**不**与另一次 `infer_expr(o4_ref)` 的行号比——alloc_type
     // 是裸分配器（不去重，每次调用追加新行）⇒ 两次推断的行号必然不同（比行号 = 永久红）。
+    // ⚠ **前提已改（2026-09-20，随 S3 裁定；改前提、不删断言）**：
+    //   · **原契约** = 算术结果为 `TYP_PTR`（改判前 `o4_ref` 自己就是 PTR，故断言 `kind == TYP_PTR`）；
+    //   · **新契约** = **结果保持操作数 kind** ⇒ `o4_ref`（现为 REF）进 ⇒ **结果 `TYP_REF`**。
+    //   ⇒ 本行同时充任**正钉**：证明门**真的接受 REF**（不是「算术整条被关掉」——门若被关，
+    //     这里会因 `g_diag_count` 变化而红）。
     o4_pa_ok : ., mut = 0;
-    if get_type_kind(o4_r_pa) == TYP_PTR && get_type_data(o4_r_pa) == TI_INT {
+    if get_type_kind(o4_r_pa) == TYP_REF && get_type_data(o4_r_pa) == TI_INT {
         if g_diag_count - o4_m2 == 0 { o4_pa_ok = 1; }
     }
     total = total + 1; fails = fails + ts_check("ops.infer_ptr_add_int", o4_pa_ok, 1);
+    // S3 附加钉（2026-09-20）：**`int + 地址型` 方向**——覆盖本门**第 2 个谓词**
+    // （`lt == TI_INT && rt 为地址型`）；上一例只覆盖第 1 个谓词（地址型在左）。
+    // **同时是「门真的接受 REF」的独立第二例**：`li_int + o4_ref2` ⇒ 结果 = `o4_ref2` 的 kind（REF）。
+    // **反面对照**由既有 `ops.infer_add_int`（`int + int` ⇒ `TI_INT` 且 **0 错误**，F0 已写死）承担
+    // ⇒ 两例合起来满足「**放得对**（门没被一律关掉）+ **没一律放**（非地址型照旧）」。
+    o4_b_intaddr := alloc_node(EXPR_BINARY, li_int, o4_ref2, OP_ADD, 0, 0, -1, 0, 0);
+    o4_m2b := g_diag_count;
+    o4_r_ia := infer_expr(o4_b_intaddr);
+    o4_ia_ok : ., mut = 0;
+    if get_type_kind(o4_r_ia) == TYP_REF && get_type_data(o4_r_ia) == TI_INT {
+        if g_diag_count - o4_m2b == 0 { o4_ia_ok = 1; }
+    }
+    total = total + 1; fails = fails + ts_check("ops.infer_int_add_addr", o4_ia_ok, 1);
     o4_m3 := g_diag_count;
     o4_r_dx := infer_expr(o4_b_dex);
     total = total + 1; fails = fails + ts_check("ops.infer_dex_add",
@@ -2806,7 +2824,10 @@ fn type_selftest_run() -> int {
     o4_r_bad3 := infer_expr(o4_b_logic_bad);
     total = total + 1; fails = fails + ts_check("ops.infer_logic_dex_diag", g_diag_count - o4_m8, 1);
     total = total + 1; fails = fails + ts_check("ops.infer_logic_dex_code", ts_diag_code_at(o4_m8), EC_TC_IF_COND);
-    // 早退规则保留（结果规则）：指针差 = `*T - *T` → int（不经门、不报错）
+    // 早退规则保留（结果规则）：指针差 = 地址型 − 地址型 → int（不经门、不报错）
+    // ⚠ **前提随 S3 恢复成立（2026-09-20）**：`o4_ref` 现为 REF ⇒ 改判后一度**落空算术门而报诊断**
+    //   （这正是 S1 落地后本档转红的原因）；S3 把 REF 纳入本门后，**「结果 = `TI_INT` 且 0 诊断」
+    //   在新契约下同样成立** ⇒ **期望值不变，只是它重新成立**（不是改断言）。
     o4_m9 := g_diag_count;
     o4_r_pd := infer_expr(o4_b_ptrdiff);
     total = total + 1; fails = fails + ts_check("ops.infer_ptr_diff",

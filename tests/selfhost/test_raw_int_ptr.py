@@ -2,9 +2,17 @@
 """`(i)` 小批：`@raw_int` 放宽接受**指针**——判据（两向钉子 + 值面 + 既有形态不动）。
 
 **改动**（`src/compiler/checker.cr` 的 `@raw_int` 守卫，符号锚 = `str_eq(name, "raw_int")`）：
-白名单由「dex / int」扩到「dex / int / **指针**」，加入标准 = **该类型的原值有语义**
+白名单由「dex / int」扩到「dex / int / **地址型**」，加入标准 = **该类型的原值有语义**
+（dex 缩放位 · int 原值 · 地址字）。
+
+**【原文保留 · 已被裁定二取代（2026-09-20，S2）】** 原写：
+「白名单由「dex / int」扩到「dex / int / **指针**」，加入标准 = 该类型的原值有语义
 （dex 缩放位 · int 原值 · 指针地址字）。`TYP_REF` / `TYP_SLICE` / `TYP_ARRAY` 等**仍拒绝**——
-聚合无「原值」概念、`TYP_REF` 语义未实测 ⇒ **没证据就不扩**（与「range 门零命中就不写退出条款」同一条纪律）。
+聚合无「原值」概念、`TYP_REF` 语义未实测 ⇒ **没证据就不扩**（与「range 门零命中就不写退出条款」同一条纪律）。」
+⇒ **该前提已死**：裁定二把 `&x` 改判 `TYP_REF` ⇒ 「只认指针」这条线站不住（实测：`ptr_ref_first.cr`
+由 rc=0 转 rc=1，**TF07×2 + TB01 级联**）⇒ 门重写为「**只认地址型 = `TYP_PTR` ∪ `TYP_REF`**」。
+⇒ 本档随之重定：**改前提、不删断言**（旧期望文本逐处保留在注释里）。
+⇒ **本门还会第三次改写**：`(i)` 的最终语义已列为与「拆 `string`」批的联合决策。
 
 **类型定名（实测定名，非假设）**：只加 `TYP_PTR` 后正控即绿 ⇒ `&x` 表达式解析到的就是 `TYP_PTR` 行；
 补充证据（突变 M2）= 把放宽面扩到 `TYP_REF` 时，`ref_type` 负控（形参 `&int`）**恰好翻红** ⇒
@@ -18,7 +26,8 @@
 
 **负控的面（教训，2026-09-18 team-lead 纠）**：TF07 是 **build-scope 豁免码**（`diag.cr::diag_gate_exempt`）
 ⇒ 「build 面零产物」在本批**恒假**（豁免未撤，撤条归 `(甲)` 刀 4）⇒ **负控只写 `check` 面**：
-`rc=1` + 恰 1 条 `error[TF07]` + 文案含 `or pointer`。build 面本批仍 rc=0 + 照出产物，**不得当负控**。
+`rc=1` + 恰 1 条 `error[TF07]` + 文案含 **`or address`**（2026-09-20 S2 重定；**旧期望 = 文案含 `or pointer`**，随门文案重写而失效）。
+build 面本批仍 rc=0 + 照出产物，**不得当负控**。
 
 **安全面边界（明写；team-lead 2026-09-19 裁）**：`@raw_int` **现状不要求 `unsafe`**——它本就接受
 `TI_DEX`（取缩放位原值），**指针只是同一「取原值」类别里的又一个类型** ⇒ **本批不引入新类别**，
@@ -27,7 +36,7 @@
 **不在本小批解决**；若将来裁定要求，该条改动会同时影响 `dex`/`int` 既有形态 ⇒ 属改契约批，须单独立项。
 
 **文案单点**：该码的文案全仓**仅 1 处**（`checker.cr` 的 `@raw_int` 守卫；bootstrap 侧不认识 `raw_int`，
-fail-closed、无第二份文案）——本档 B 腿断言文案含 `or pointer`，即钉住这个单点。
+fail-closed、无第二份文案）——本档 B 腿断言文案含 **`or address`**（**S2 重定后**；旧为 `or pointer`），即钉住这个单点。
 """
 
 import os
@@ -41,16 +50,24 @@ COREC = BASE / "build" / "corec"
 
 POS = BASE / "tests" / "suite" / "ptr_ref_first.cr"
 
-# 负控（check 面 rc=1 + TF07）；`ref_type` 的直测形态 = 形参类型位 `&int`（EXPR_REFTYPE ⇒ TYP_REF）
+# 负控（check 面 rc=1 + TF07）。
+# ⚠ **2026-09-20（S2）重定**：原 `ref_type` 条目**已移出负控**——它的形态是**形参类型位 `&int`**
+#   （`EXPR_REFTYPE` ⇒ `TYP_REF`），而 S2 的目标**正是让 `TYP_REF` 被接受**（实测：该源 `check` = **rc=0**）
+#   ⇒ 它的前提被**直接推翻**。按「改前提、不删断言」：**同形源码改判为正钉**（见下 `REF_OK`），
+#   **并补一个真该被拒的形态填空**（`optional` = `int?`，实测 `rc=1 TF07×1` ✓；`tuple` 亦实测被拒，取一即可）。
 NEG = {
     "string": 'fn main() -> int { s := "hi"; return @raw_int(s); }\n',
     "bool": "fn main() -> int { b := true; return @raw_int(b); }\n",
     "array": "fn main() -> int { a := [1,2,3]; return @raw_int(a); }\n",
     "slice": "fn main() -> int { a := [1,2,3]; s := a[0..2]; return @raw_int(s); }\n",
-    "ref_type": "fn f(r: &int) -> int { return @raw_int(r); }\n"
-                "fn main() -> int { x : ., mut = 1; return f(&x); }\n",
+    "optional": "fn main() -> int { x : int? = None; return @raw_int(x); }\n",
     "struct": "struct S { v: int }\n"
               "fn main() -> int { s : ., mut = S { v = 1 }; return @raw_int(s); }\n",
+}
+# **正钉（S2 新增）**：原 `ref_type` 负控的**同形源码**改判——`TYP_REF` **必须被接受**。
+REF_OK = {
+    "ref_type": "fn f(r: &int) -> int { return @raw_int(r); }\n"
+                "fn main() -> int { x : ., mut = 1; return f(&x); }\n",
 }
 # 既有被接受形态（放宽不得把它们弄坏；两向钉子）
 POS_FORMS = {
@@ -125,12 +142,22 @@ def main():
     expect("pos_value_interp", rc_interp == 0, rc_interp)
 
     # ── B 负控（check 面；build 面因豁免未撤不得当负控） ──
+    # ⚠ **文案断言随 S2 重定（改前提、不删断言）**：
+    #   旧期望 = `"or pointer" in tf07[0]`（旧文案 `…or pointer expression`）；
+    #   S2 把门重写为「只认地址型」⇒ 新文案 = `…or address (pointer/reference) expression`
+    #   ⇒ 断言改钉**新文案的单点串** `"or address"`（该码全仓仍仅 1 处，单点性质不变）。
     for name, src in NEG.items():
         rc, d = _check_src(src)
         tf07 = [x for x in d if x.startswith("error[TF07]")]
         print(f"[B 负控·{name}] rc={rc} TF07×{len(tf07)}")
         expect(f"neg_{name}_rejected", rc == 1 and len(tf07) == 1 and len(d) == 1, f"rc={rc} {d}")
-        expect(f"neg_{name}_message", bool(tf07) and "or pointer" in tf07[0], tf07)
+        expect(f"neg_{name}_message", bool(tf07) and "or address" in tf07[0], tf07)
+
+    # ── B'' 正钉（S2 新增）：原 `ref_type` 负控**同形源码改判**——`TYP_REF` 必须被接受 ──
+    for name, src in REF_OK.items():
+        rc, d = _check_src(src)
+        print(f"[B'' 地址型接受·{name}] rc={rc} 诊断×{len(d)}")
+        expect(f"ok_{name}_accepted", rc == 0 and not d, f"rc={rc} {d}")
 
     # ── B' 既有形态仍被接受（放宽的两向钉子之一：不得误伤） ──
     for name, src in POS_FORMS.items():

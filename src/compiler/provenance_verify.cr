@@ -64,6 +64,19 @@ fn provenance_verify_func(nstart: int, ncount: int) {
             if pv_is_in_unsafe(ni) != 0 { ni = ni + 1; continue; }
 
             ptr_ti := irv_type(s1);
+            // ── S6 (b′) **登记「本处不适用」**（2026-09-20 维护者裁）——**不给它写 REF 谓词** ──
+            // **为什么不用改**：本门是**条件触发硬错**（`kind == TYP_PTR && extra != 0` ⇒ 报 EC_TU_DEREF），
+            //   而 `&x` 的型在改判前由 `checker.cr` 写死 `extra = 0` ⇒ **该门对 `&x` 从来就没生效过**，
+            //   改判前后一致 ⇒ **零覆盖损失**（不在「安全面净减」面上）。
+            // **为什么不写谓词**：`TYP_REF.extra` = **mut 标记** ≠ `TYP_PTR.extra` = **地址空间**
+            //   （`ast.cr:295-296`）⇒ 若照抄成 `kind == TYP_PTR || kind == TYP_REF`，则 **`&mut x` 的
+            //   `extra = 1` 会被误读成「external 地址空间」** ⇒ **每一个 `&mut` 解引用当场假阳**
+            //   （载体：`tests/suite/ptr_arith.cr` 的 `*q = 99`、`opt_dex_test.cr` 的 `*p = d`）。
+            //   ⇒ **对不生效的门写谓词 = 凭空造检查**，故取 (b′) 而非 (a)。
+            // **语料侧佐证**（非「读码认为」）：打 `EC_TU_DEREF` 的**恰 4 例**全在
+            //   `tests/selfhost/test_pointer_safety.py`（`:132`/`:142`/`:153`/`:165`），**全部是
+            //   `as *T` 转换形，无一处用 `&x`** ⇒ 该门活覆盖 100% 在 cast 面。
+            // **反向钉**：naive 扩 ⇒ `&mut` 解引用假阳（见上，两处现成载体）。
             if ptr_ti >= 0 && get_type_kind(ptr_ti) == TYP_PTR && get_type_extra(ptr_ti) != 0 {
                 check_error(EC_TU_DEREF,
                     "external pointer dereference requires unsafe",

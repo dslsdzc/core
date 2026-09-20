@@ -1823,7 +1823,12 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                         }
                     }
                 }
-                v := new_ir_var("addr", alloc_type(TYP_PTR, elem_ti, 0));
+                // S3 同批（2026-09-20，裁 (甲)）：`&arr[i]` 与 `&x` 是**同一种语法现象（取址）** ⇒ 同判
+                // **`TYP_REF`**。两套模型并存（`&x`=REF 而 `&arr[i]`=PTR）= 本批在收的「声明与事实不符」的变体。
+                // **checker 侧已被 S1 覆盖**（`UOP_REF` 对非 `EXPR_IDENT` 操作数走 `else` 分支后同样
+                // `return alloc_type(TYP_REF, inner, is_mut)`）⇒ **本处是 ir_gen 侧唯一剩下的点**。
+                // `extra` 同 `&x`：取 `is_mut`（`&mut arr[i]` 与 `&arr[i]` 须同 `&x`/`&mut x` 一样可分）。
+                v := new_ir_var("addr", alloc_type(TYP_REF, elem_ti, ast_int_val(node)));
                 emit(IR_ADDR_INDEX, v, arr_var, idx_var, 3, 0);
                 return v;
             }
@@ -1855,7 +1860,12 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                     }
                 }
             }
-            v := new_ir_var("ref", alloc_type(TYP_PTR, pti, 0));
+            // S1 同批（2026-09-20）：**IR 变量型也必须一起改**——`checker` 侧只决定语义视图，
+            // 而 `region_check` / `provenance_verify` / `ptr_analysis` 读的是 **`irv_type()`**
+            // （本行）。只改 `checker.cr:2966` ⇒ 三道安全门看到的仍是 `TYP_PTR` ⇒
+            // S6 的 (a) 扩法会**对着一个永远不出现的 kind 生效**（静默空转）。
+            // `extra` 同 checker：取 `is_mut`（即下面 emit 的 s2 实参，同一个值）。
+            v := new_ir_var("ref", alloc_type(TYP_REF, pti, ast_int_val(node)));
             emit(IR_REF, v, op_var, ast_int_val(node), 0, 0);
             return v;
         }
