@@ -165,6 +165,23 @@ replicability = forbidden      ⟹  authority = single           # 多份不合�
 反向**不成立**:`recomputable` 的 materialization 也可能带 `transfer-required` 的副作用状态
 (例:持锁的临时物——值可重算,但锁必须在消失前转移)。这正是新式子比旧式子宽的地方(§四)。
 
+**这两条蕴含 = 可机械检查的交叉约束(2026-09-20 定,本处为权威侧)**:
+
+```
+recipe = unrecomputable   ⇒  persistence ≠ free        (即 ∈ {transfer-required, externally-owned})
+replicability = forbidden ⇒  authority = single
+```
+
+- **判据**:两式**均可机械检查**(逐条比对字段值即可,无需语义推理);
+- **违反 = 硬错,不是退化**——不许静默接受、不许降级为警告(与 §4.4 的 fail-closed 同族);
+- **来源**:由本表两条蕴含直接导出,不是新发明;执行映射侧的推导见该档 §3.4.2 末
+  (本条已按 lead 2026-09-20 转达**标进权威侧**,以免它只活在消费者那份里)。
+
+> 📌 **主从留痕(2026-09-20)**:`docs/maintainer/design/execution-mapping-design.md` §3.4.2
+> 已自行声明「**取值域权威 = 本文件 §2.3**」「本表不另立取值域」「冲突时以本文件为准」——
+> 即该档七字段表是**消费者视图**,取值域以**本处为唯一来源**。本文件不复制该档独有的
+> 实例取值列(缓存/MMIO 两个映射实例的取值 + 该档三态列),避免反向重叠。
+
 **关于 `evictable`**:原文把 `evictable` 列为缓存的判定条件之一(`recipe=yes/replicable=yes/evictable=yes/authority 可转移`),
 **但它不是第八个字段**——它是**派生量**:`evictable = (recipe=recomputable) ∨ (persistence 已满足)`(§四)。
 本文件不把它列为字段,以免与不变量重复陈述。
