@@ -3,7 +3,7 @@
 > 定位：受众 = 维护者；状态 = superseded(由 execution-model.md 取代,留档)
 
 > **注(2026-08-15)**:本文档为 HDFG 的早期设计(07-22 前);v2 执行模型已演进为 region 嵌套 + state edges(RVSDG 风格结构化控制流,见 [execution-model.md](execution-model.md) 与 docs/superpowers/specs/2026-08-08-region-cfg-design.md)。本文档的 HDFG 基本结构(节点/边/子图)仍成立,region 化细节以 v2 为准。
-> **留档范围(2026-09)**:§1-7 与 §结论 = 早期设计稿(§7 指针安全已由 [pointer-model.md](pointer-model.md) 取代);**§8 环语义标注(ITER/FIXPT/超图灵/模糊/共归纳)= 仍权威**——执行标注空间是 cache-semantics 条款 4b「图内不可重算」与 glossary 的出处,修改需先改条款。
+> **留档范围(2026-09)**:§1-7 与 §结论 = 早期设计稿(§7 指针安全已由 [pointer-model.md](pointer-model.md) 取代);**§8 环语义标注(ITER/FIXPT/超图灵/模糊/共归纳)= 仍权威**——执行标注空间是 `docs/academic/cache-semantics.md` 条款 4b「图内不可重算」(`recipe = unrecomputable`)与 glossary 的出处,修改需先改条款。
 
 ---
 
@@ -232,7 +232,7 @@ FUZZY 标注 = {
 
 - **与概率的边界**：概率是可加测度（测度论），模糊是格值隶属度（格论，min/max 结构）——两个独立语义
 - **无专属硬件**：历史模糊芯片（Fujitsu/Togai，80-90 年代）已消亡；模糊无物理动机（对比量子/模拟），执行 = 通用设备软件实现——同概率先例（语义标注的价值不依赖专属硬件，模糊控制/推理程序在通用 CPU 上运行）
-- **存储侧对应（2026-08-27 v4）**：本节不可重算标注（FIXPT / 神谕 / BSS / 模糊融合）= **图内无配方条目**——统一规则见 `docs/academic/cache-semantics.md` 条款 4b（必须有 home、驱逐必写回、身份 = 图节点；不按范式枚举）；映射实例侧（寄存器分配 = 缓存语义映射实例）见 `docs/maintainer/design/regalloc-cache-mapping.md` §三
+- **存储侧对应（2026-08-27 v4）**：本节不可重算标注（FIXPT / 神谕 / BSS / 模糊融合）= **图内无配方条目**（`recipe = unrecomputable`）——统一规则见 `docs/academic/cache-semantics.md` 条款 4b + 2′（必须有 home、驱逐必走 `PreserveRequiredState` 支、身份 = 图节点；不按范式枚举）；映射实例侧（寄存器分配 = 缓存语义映射实例）见 `docs/maintainer/design/regalloc-cache-mapping.md` §三 / §三.1
 
 ### 共归纳/非良基语义（CORE 标注——已存在的范式，非预留）
 

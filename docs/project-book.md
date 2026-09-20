@@ -106,7 +106,7 @@ Core 只有一种执行语义：HDFG（Holographic Dataflow Graph，全息数据
 - loop、recv → 带反馈环的图——迭代语义，region 边界表达迭代与终止。
 - flow、go、yield、select → 运行时动态图——节点创建与并发语义。
 
-图是执行语义的载体，**不是执行方式的决定者**：执行方式（串行、并行、调度策略）由部署配置决定——同一张 DAG，单核串行、多核并行、无 OS 抢占式时间片。图只约束语义（依赖、迭代、并发结构），不决定物理执行。同样，图也是存储语义的载体——值即条目（配方可重算），存储即缓存（范式无关），内存只是经典映射（见 `docs/maintainer/design/memory-model.md`）。
+图是执行语义的载体，**不是执行方式的决定者**：执行方式（串行、并行、调度策略）由部署配置决定——同一张 DAG，单核串行、多核并行、无 OS 抢占式时间片。图只约束语义（依赖、迭代、并发结构），不决定物理执行。同样，图也是存储语义的载体——值即条目（配方可重算），存储 = 语义对象在**存在格（Materialization / Existence Space）**中的物化（范式无关），缓存与字节内存都只是该层的映射实例（见 `docs/maintainer/design/materialization-space.md`）。
 
 **三层映射（2026-08-27 正式晋升）**：语义 → 图 → 格 → 编码——**图负责表达计算**（关系空间），**格负责承载计算**（内存模型 = 中间存在空间），**编码负责实现计算**（物理编码空间；2026-08-27 更名：原「二进制」硬编码经典惯例）。跨范式发生在图层，超图灵性属于图不属于格；格的价值 = 表达空间未被有限范式封顶——不同范式各找自己的格映射（见 `docs/memory-model-capability-lattice.md` §四；v4 定稿：规则封闭对象开放 / 无格承诺 / 能力不提升一等公民 / 寄存器分配 = 缓存语义映射实例，`docs/regalloc-cache-mapping.md`）。
 
@@ -213,7 +213,7 @@ I/O 等平台接口与部署目标属性同属物理层，遵循同一原则线�
 
 Core 的指针安全完全建立在HDFG上，不引入 borrow checker、Arena tag、RawRef 等独立概念层。编译器从图中推导每个指针的来源（provenance）和偏移，在解引用点自动验证。详见 `docs/maintainer/design/pointer-model.md`。
 
-存储语义本体为**缓存语义**（值 = 配方、条目可驱逐可再生、图边界为唯一不可再生来源）；字节内存是其在经典硬件上的映射实例——见 `docs/maintainer/design/memory-model.md`。
+存储语义本体为**存在格 / Materialization Space**——格层回答四问：哪些 materialization 合法、哪些可以共存、哪些代表同一 Entry/version、哪些转换保持语义（主套见 `docs/maintainer/design/materialization-space.md` §2.1）；**缓存语义是该层的一类映射实例**（最直接实现条款 1–7 的那一类），不是本体的名字。层定义与七字段模型（recipe/identity/version/authority/location/persistence/replicability）见 `docs/maintainer/design/materialization-space.md`；条款 1–7 见 `docs/academic/cache-semantics.md`；字节内存是经典映射实例——总览见 `docs/maintainer/design/memory-model.md`。
 
 ### 4.7 形式化验证工具（外部系统）
 

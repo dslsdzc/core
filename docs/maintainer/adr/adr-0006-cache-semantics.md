@@ -1,7 +1,7 @@
 # ADR-0006: 缓存语义 = 存储语义本体(2026-08-15 纠偏)
 
 - 日期:2026-08-15
-- 状态:accepted
+- 状态:superseded by ADR-0021(2026-09-20:格层本体改称存在格 / Materialization Space,缓存降为该层一类映射实例;本 ADR 正文保留原文不改)
 - 决策者:DslsDZC
 
 ## 背景

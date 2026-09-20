@@ -1,7 +1,8 @@
 # 存在结构:v6 格形态 IR 的语义承载(ENT/NOD/REG)
 
 > 定位:受众 = 维护者(ccr_io/分配器/验证器实现者);状态 = active(设计定稿,实现推进中)。
-> 本文件从**语义视角**讲 v6 存在结构——七条缓存语义条款(权威 = docs/academic/cache-semantics.md)如何在 .ccr 中落成 IR 一等结构;字节级布局(段表/字段宽/对齐)的最终规格在 docs/ir-schema/coreir-schema.md(实现期并入),格式设计草案与实施状态以 docs/superpowers/specs/2026-09-05-lattice-ir-v6-format.md 与实施计划为准。
+> 本文件从**语义视角**讲 v6 存在结构——条款 1–7(权威 = docs/academic/cache-semantics.md)如何在 .ccr 中落成 IR 一等结构;字节级布局(段表/字段宽/对齐)的最终规格在 docs/ir-schema/coreir-schema.md(实现期并入),格式设计草案与实施状态以 docs/superpowers/specs/2026-09-05-lattice-ir-v6-format.md 与实施计划为准。
+> **2026-09-20 层定义修订(ADR-0021)**:条款所属的层本体 = **存在格 / Materialization Space**(层定义与七字段模型 = docs/maintainer/design/materialization-space.md)——本文件的载体结构不变,变的只是条款的层归属称谓。
 > 决策:adr/adr-0002(.ccr v6 段表架构)。
 
 ---
@@ -33,7 +34,11 @@
 
 ## 三、ENT:条目表
 
-ENT 记录字段与缓存条款的对应:
+ENT 记录字段与条款 1–7 的对应:
+
+> 2026-09-20 层定义修订:本表列名原为「与缓存条款的对应」。条款 1–7 内容未变,
+> 只是该层不再以「缓存」命名(层本体 = 存在格,见 materialization-space.md)。
+> **注意**上表 `flags` 行的「bit0 无配方」是**位预留、语义未实现**——见本节末实现状态注。
 
 | 字段 | 语义 | 条款 |
 |---|---|---|
@@ -56,7 +61,16 @@ Core IR 非 SSA——变量每次定值切分一个新版本条目,相邻版本�
 
 ### 无配方条目(条款 4/4b)
 
-ENT flags bit0 = 无配方(图内不可重算)——必须有 home。匿名常量条目(var_id = -1)仅当被判定消费时物化,否则常量内联于 NOD src1——避免条目爆炸。
+ENT flags bit0 = 无配方(`recipe = unrecomputable`,图内不可重算)——必须有 home。
+
+> ⚠ **实现状态(2026-09-20 实核)**:该位**已按此语义预留,但尚未实现**——两个写侧
+> 硬编码 0(`src/lattice/ent_kernel.cr:295`、`:318`),读侧纯直通/回环
+> (`src/compiler/ccr_io.cr:473`→`:811`/`:820`→`:1431`/`:1447`),全仓零语义消费者;
+> 源码自述 `src/compiler/ccr_io.cr:85`「flags 恒 0(…零实例——位语义保留)」,
+> 挂账见 TODO.md:2159。**位就位 ≠ 语义就位**:`recipe=unrecomputable` 的生产者
+> (边界/执行标注)与判定目前都不存在。详见 materialization-space.md §7.1。
+
+匿名常量条目(var_id = -1)仅当被判定消费时物化,否则常量内联于 NOD src1——避免条目爆炸。(同属**未实现**设计面:该形态在 `src/` 下零命中。)
 
 ---
 
@@ -117,13 +131,17 @@ REG 的 first_ent/last_ent 使"子图边界 = 存在域边界"成为直接查询
 1. NOD 显式边表是否必须(v6.0 可省略,v6.1 按需)——编码层问题
 2. 变长记录/对齐/校验规则——编码层问题
 3. ENT home 回填方式(原地改写 vs 内存态)
-4. 预留段 tag 6+(驱逐标注段 v6.1、证书段)
+4. 预留段 tag **9+**(驱逐标注段 v6.1、证书段)
+   ——数值权威 = `docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md:50`
+   (「`9+` 预留顺移:驱逐标注段 v6.1 延续、证书段」;R2 P4 Task 1 D9 段集合扩至 8 段后顺移)。
+   **2026-09-20 校正**:本节原写「tag 6+」为 v6 期快照,已陈旧。
 
 ---
 
 ## 九、关联
 
-- 条款权威:docs/academic/cache-semantics.md(七条)
+- 层定义(存在格 / 七字段 / 归类 / 不变量):docs/maintainer/design/materialization-space.md
+- 条款权威:docs/academic/cache-semantics.md(条款 1–7)
 - 格式字节级:docs/superpowers/specs/2026-09-05-lattice-ir-v6-format.md(设计定稿)
 - 方向:docs/superpowers/specs/2026-08-27-lattice-form-ir-design.md
 - 决策:docs/maintainer/adr/adr-0002-ccr-v6-segment-table.md

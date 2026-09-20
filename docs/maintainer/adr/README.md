@@ -30,8 +30,8 @@
 | ADR-0002 | .ccr v6 段表架构 + ENT 存在结构段 + REG 坐标化 | accepted | 2026-09-05 |
 | ADR-0003 | 自举后端 x86-64 ELF 直出 | accepted | 2026-08 |
 | ADR-0004 | corec/corearch 前后端拆分(.ccr 为接口契约) | accepted | 2026-05-28(8 月自举定格) |
-| ADR-0005 | 内存模型分层定稿(图 → 格 → 编码)+ 能力定位 v4 | accepted | 2026-08-26/27 |
-| ADR-0006 | 缓存语义 = 存储语义本体(2026-08-15 纠偏) | accepted | 2026-08-15 |
+| ADR-0005 | 内存模型分层定稿(图 → 格 → 编码)+ 能力定位 v4 | accepted(部分框定被 ADR-0021 收窄) | 2026-08-26/27 |
+| ADR-0006 | 缓存语义 = 存储语义本体(2026-08-15 纠偏) | superseded by ADR-0021 | 2026-08-15 |
 | ADR-0007 | 图锚定区域内存模型 + 逃逸 outlives 修订 | accepted | 2026-08-13 |
 | ADR-0008 | 执行模型 region 化(RVSDG 嵌套 + state edges) | accepted | 2026-08-08 |
 | ADR-0009 | 规约系统 v2(CIC 内核 + SMT 证书架构) | accepted | 2026-08-11 |
@@ -46,3 +46,5 @@
 | ADR-0018 | 仓库治理——GitFlow + 双 ruleset + CI | accepted | 2026-08-09 |
 | ADR-0019 | 项目启动与自举路线(Python bootstrap + 自托管) | accepted | 2026-04~07 |
 | ADR-0020 | IR 双形态确立(.cir 图 / .ccr 格) | accepted | 2026-05-28 |
+| ADR-0021 | 格层本体 = 存在格(Materialization / Existence Space)——缓存降为该层一类映射实例 | accepted | 2026-09-20 |
+| ADR-0022 | ADR-0005「层规则 = 缓存语义七条」的框定收窄(条款数不变、零新增规则) | accepted | 2026-09-20 |

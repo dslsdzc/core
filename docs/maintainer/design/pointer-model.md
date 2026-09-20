@@ -1,7 +1,7 @@
 # Core 指针模型:图上的三点验证 pass
 
 > 定位:受众 = 维护者(改/验证三点 pass 的人);状态 = active;真源 = 源码(src/compiler/ptr_analysis.cr、region_check.cr、provenance_verify.cr)——本文描述的是已实现行为,文档与源码冲突时以源码为准,并请更新本文。
-> 语义定位:指针安全建立在 HDFG 上,不引入 borrow checker/生命周期标注。存储语义本体(条目标识 + 偏移)见 docs/academic/cache-semantics.md 条款 6;经典映射见 docs/maintainer/design/region-model.md。
+> 语义定位:指针安全建立在 HDFG 上,不引入 borrow checker/生命周期标注。地址语义(条目标识 + 偏移)见条款 6(docs/academic/cache-semantics.md);层本体 = 存在格(docs/maintainer/design/materialization-space.md);经典映射见 docs/maintainer/design/region-model.md。
 > 本文 2026-09 重写:三 pass 描述与实现对齐(Andersen 约束求解、逃逸三点检查、双路径边界验证)。
 
 ---
@@ -45,7 +45,7 @@ unsafe {
 }
 ```
 
-类型双关(`*(dex*)&i`)不需要 unsafe——存储语义是条目标识 + 偏移(cache-semantics 条款 6),经典映射是"字节序列 + 宽度 + 边界",provenance/offset/alloc_size 与类型无关;cast 保留值流,provenance 边不断。判据 = 边界 + 宽度。
+类型双关(`*(dex*)&i`)不需要 unsafe——地址语义是条目标识 + 偏移(条款 6),经典映射是"字节序列 + 宽度 + 边界",provenance/offset/alloc_size 与类型无关;cast 保留值流,provenance 边不断。判据 = 边界 + 宽度。
 
 ## 四、Pass 1:PointerAnalysis(ptr_analysis.cr)
 
