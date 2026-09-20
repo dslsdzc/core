@@ -3,7 +3,7 @@
 > 定位：受众 = 维护者；状态 = superseded(由 execution-model.md 取代,留档)
 
 > **注(2026-08-15)**:本文档为 HDFG 的早期设计(07-22 前);v2 执行模型已演进为 region 嵌套 + state edges(RVSDG 风格结构化控制流,见 [execution-model.md](execution-model.md) 与 docs/superpowers/specs/2026-08-08-region-cfg-design.md)。本文档的 HDFG 基本结构(节点/边/子图)仍成立,region 化细节以 v2 为准。
-> **留档范围(2026-09)**:§1-7 与 §结论 = 早期设计稿(§7 指针安全已由 [pointer-model.md](pointer-model.md) 取代);**§8 环语义标注(ITER/FIXPT/超图灵/模糊/共归纳)= 仍权威**——执行标注空间是条款 4b「图内不可重算」(`recipe = unrecomputable`)与 glossary 的出处,修改需先改条款。
+> **留档范围(2026-09)**:§1-7 与 §结论 = 早期设计稿(§7 指针安全已由 [pointer-model.md](pointer-model.md) 取代);**§8 环语义标注(ITER/FIXPT/超图灵/模糊/共归纳)= 仍权威**——执行标注空间是 `docs/academic/cache-semantics.md` 条款 4b「图内不可重算」(`recipe = unrecomputable`)与 glossary 的出处,修改需先改条款。
 
 ---
 

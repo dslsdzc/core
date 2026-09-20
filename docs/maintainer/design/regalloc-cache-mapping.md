@@ -63,7 +63,7 @@
 判据(与条款 2′ 同形):
 
 ```
-Evictable(x)  ⟺  Recoverable(x) ∨ PreserveRequiredState(x)
+Evictable(x)  ⟺  Recoverable(x) ∨ PreserveRequiredState(x)      # 式的主副本 = cache-semantics.md 条款 2′
 
 recipe = recomputable   ⇒ 走 Recoverable 支:回收 = 驱逐 + 按需再生(条款 3/remat),零额外义务
 recipe = unrecomputable ⇒ 必须走 PreserveRequiredState 支:回收前材料已保有或被合法转移

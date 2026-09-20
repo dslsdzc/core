@@ -213,7 +213,7 @@ I/O 等平台接口与部署目标属性同属物理层，遵循同一原则线�
 
 Core 的指针安全完全建立在HDFG上，不引入 borrow checker、Arena tag、RawRef 等独立概念层。编译器从图中推导每个指针的来源（provenance）和偏移，在解引用点自动验证。详见 `docs/maintainer/design/pointer-model.md`。
 
-存储语义本体为**存在格 / Materialization Space**——语义对象如何存在、在哪里存在、哪些存在形式可共存、哪些转换保持语义；**缓存语义是该层的一类映射实例**（最直接实现条款 1–7 的那一类），不是本体的名字。层定义与七字段模型（recipe/identity/version/authority/location/persistence/replicability）见 `docs/maintainer/design/materialization-space.md`；条款 1–7 见 `docs/academic/cache-semantics.md`；字节内存是经典映射实例——总览见 `docs/maintainer/design/memory-model.md`。
+存储语义本体为**存在格 / Materialization Space**——格层回答四问：哪些 materialization 合法、哪些可以共存、哪些代表同一 Entry/version、哪些转换保持语义（主套见 `docs/maintainer/design/materialization-space.md` §2.1）；**缓存语义是该层的一类映射实例**（最直接实现条款 1–7 的那一类），不是本体的名字。层定义与七字段模型（recipe/identity/version/authority/location/persistence/replicability）见 `docs/maintainer/design/materialization-space.md`；条款 1–7 见 `docs/academic/cache-semantics.md`；字节内存是经典映射实例——总览见 `docs/maintainer/design/memory-model.md`。
 
 ### 4.7 形式化验证工具（外部系统）
 

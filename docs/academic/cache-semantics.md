@@ -13,7 +13,7 @@
 
 ## 零、为什么是缓存——以及它是哪一类
 
-Core 的存储语义本体是**存在格(Materialization / Existence Space)**——范式无关的存储抽象,不是字节内存,也不是寄存器。它回答:一个语义对象如何"存在"、在哪里存在、哪些存在形式可以同时成立、哪些可以被替换或重新构造(四问详见 materialization-space.md §2.1)。
+Core 的存储语义本体是**存在格(Materialization / Existence Space)**——范式无关的存储抽象,不是字节内存,也不是寄存器。它回答:哪些 materialization 合法、哪些可以共存、哪些代表同一 Entry/version、哪些转换保持语义(四问主套见 materialization-space.md §2.1;维护者原话另有**同义表述**「如何'存在'、在哪里存在、哪些存在形式可同时成立、哪些可被替换或重新构造」——其中「在哪里存在」= `location` 字段,是否入格层**待裁**,见该档 §九-C)。
 
 **缓存是这个层里最直接的一类映射实例,不是这个层的名字:**
 
@@ -42,6 +42,10 @@ Core 的存储语义本体是**存在格(Materialization / Existence Space)**—
 7. **映射实例正确性**。区域/arena/字节权限(CompCert v2)是经典映射实例,其正确性标准 = 保持条款 1–6 的可观测语义。
 
 **2′. 驱逐的完整判据(2026-09-20 补;把条款 4b 从「例外」并入同一条判据)**
+
+> 📌 **本式为主副本(2026-09-20 定)**。另四处引用——`adr-0021:31` · `materialization-space.md §4.2/§4.5` ·
+> `regalloc-cache-mapping.md §三.1` · `glossary.md:46`——**均以本处为准**;
+> 改式先改本处,其余各处仅作引用,不另立措辞。
 
 ```
 Evictable(x)  ⟺  Recoverable(x) ∨ PreserveRequiredState(x)

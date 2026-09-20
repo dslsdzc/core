@@ -43,7 +43,7 @@
 | 物化(materialization) | 一条 Entry 的一次具体存在(位置 + 存在方式);一条 Entry 可有多份或暂无 | 层定义 |
 | 条目(entry)/ 配方(recipe) | 存储的一项 = (产生它的图节点, 输入边);配方 = 值的产生方式 | 1 |
 | 驱逐不变量 | ⟦G ∖ storage(e)⟧ = ⟦G⟧——**对可再生条目**驱逐不改变可观测语义(order-free) | 2 |
-| 驱逐完整判据 | `Evictable(x) ⟺ Recoverable(x) ∨ PreserveRequiredState(x)`——2 与 4b 本是同一判据的两支 | 2′ |
+| 驱逐完整判据 | `Evictable(x) ⟺ Recoverable(x) ∨ PreserveRequiredState(x)`——2 与 4b 本是同一判据的两支（式的主副本 = cache-semantics.md 条款 2′） | 2′ |
 | 再生(regeneration) | 重跑配方节点产生可观测等价的值 | 3 |
 | 边界(boundary) | 图边界无配方条目(MMIO/FFI/输入/测量);语法层 = unsafe | 4 |
 | 无配方条目 | `recipe = unrecomputable`:边界 + 图内不可重算;必须保有/合法转移材料,不可再生 | 4b |

@@ -28,7 +28,7 @@ ADR-0006(2026-08-15)把存储语义本体定为**缓存语义七条**,并沿用�
 - **条款 1–7 内容不变**(条款 2 的适用范围显式收窄到 `recipe = recomputable` 的条目),并新增 **2′** 把条款 4b 从「例外」并入同一条判据:
 
   ```
-  Evictable(x)  ⟺  Recoverable(x) ∨ PreserveRequiredState(x)
+  Evictable(x)  ⟺  Recoverable(x) ∨ PreserveRequiredState          (式的主副本 = cache-semantics.md 条款 2′)(x)
   ```
 
   判不出归属 ⇒ **不可驱逐**(fail-closed)。
@@ -54,7 +54,11 @@ ADR-0006(2026-08-15)把存储语义本体定为**缓存语义七条**,并沿用�
   - **「其余各有 4B 槽」不成立**:ENT 内存 `ESZ_ENTRY = 24`(6×4B)**六槽全命名**、盘面 `ESZ_ENTRY_DISK = 28`(7×4B)**七槽全命名**(`version` 已占)——**没有空闲 4B 槽**。
   - **`MAP` 归 REG 段,而 REG 记录全满**:盘面 `ESZ_SG_DISK = 24`(6×i32)、内存 `ESZ_SG = 48`(6×u64)亦满 ⇒ **加 MAP 要动 REG 布局 ⇒ 要 bump `CCR_VERSION`**。
   - ⇒ **「不需要加段」不得作为结论写入**。本次修订只动文档、不动 `.ccr`;**施工面与 `CCR_VERSION` 一并单独立项**。
-  - ⚠ 其中 **`MAP` 一条的来源 = 经 lead 转达的复核结论,未经我本人复核**(本仓 `docs/` 下 grep `MAP 段|MAP 记录|MAP 表` **零命中**——应在尚未合入的映射设计稿中)。ENT/REG 槽位与 `location` 两条**已由我逐处读源码/文档实核**,见 §关联。
+  - ⚠ 其中 **`MAP` 一条的来源 = 经 lead 转达的复核结论,未经我本人复核**:在核验基线 `38e6c992` 的
+    `docs/` 上该 pattern **零命中**(ⓘ 断言带基线,否则本行自己含 pattern⇒自我证伪);
+    该对象现由同批 mapdoc 的 `execution-mapping-design.md` 承载(§3.10「MAP 段条目」/ §9.2 / C-3,
+    据转达 16 命中)——**该文件不在本工作区,指针未经我复核**。
+    ENT/REG 槽位与 `location` 两条**已由我逐处读源码/文档实核**,见 §关联。
 
 ## 关联
 

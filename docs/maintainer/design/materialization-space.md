@@ -100,6 +100,15 @@ residency 的既有结论全部保留(与原文「之前已经做出的设计基
 
 ### 2.1 格层回答的四问(原文逐条)
 
+> **⚠ 两套措辞的权威标注(2026-09-20 复核)**:维护者原话里出现过**两套并列的四项表述**,
+> **两套都是原话**,不是矛盾——缺的是「哪套是四问」的标注。本表的编号四项 = **主套**
+> (出处 `/tmp/briefs/materialization-space-raw.md:165-168`,即原话「格层只需要描述」那段)。
+> **另有一套同义表述**(`raw.md:83-84`):「一个语义对象如何'存在'、**在哪里存在**、
+> 哪些存在形式可以同时成立、哪些可以被替换或重新构造」——`cache-semantics.md` /
+> `project-book.md` / `z-vision.md` 三处用的是这套,现均已**改标「同义表述」并指向本表**。
+> **⚠ 该套里的「在哪里存在」半句 = `location` 字段,而 `location` 是否入格层正是 §九-C 的
+> 待裁项(本文件倾向「不入」)** ⇒ 读该半句时**一律按待裁处理,不得当既成事实**。
+
 格层只回答这四个问题,**不回答别的**:
 
 1. **哪些 materialization 合法** —— 对某一条 Entry,允许存在什么形态的存在物?
@@ -131,7 +140,7 @@ Semantic Entry  ──带一组字段──▶  Materialization(存在物)
 >(`docs/superpowers/plans/2026-09-17-home-repro.md:209` 等)。
 > 本文的「materialization / 存在物」与之**无关**;合入时须择一改名或加限定语。
 
-### 2.3 字段级定稿(七字段)
+### 2.3 字段级模型(七字段)
 
 原文只给了字段名;下表把每个字段**穷尽化**为:语义 · 取值域 · 谁写 · 谁读。
 **本表整体 = [提案]**——原文未规定取值域与读写方,**这是本文档的补全,不是原文的转述**。
@@ -142,7 +151,7 @@ Semantic Entry  ──带一组字段──▶  Materialization(存在物)
 | `identity` | 这是哪一条 Entry(同一性) | Entry 标识 = (变量标识, 版本序);匿名条目 = 产生节点身份 | **编译器**(条目生成期) | 所有消费方:共存判定、去重、跨边界身份重指 |
 | `version` | 该 Entry 在同一 identity 版本序列中的位置 | 1-based 组内序(现行实现口径) | **编译器**(版本切分) | **mapper**(共存判定必须同版本)+ 调试通道 |
 | `authority` | 同一 Entry/version 有多份 materialization 时,**哪一份在语义上算数** | `{single(ref), shared-readonly, unresolved}` | **runtime / mapper**(外部/分布式情形协商后写);图内单体情形由编译器写「单一权威 = 本 materialization」 | **验证器**(可观测语义以哪份为准)+ 一致性判定 |
-| `location` | 当前在哪里存在 | mapper 的位置域(**格层不定义位置代数**——现行口径:位置域 = 实例侧声明) | **mapper**(分配/放置决策) | mapper(emit)+ 验证器(location 无关性判定的输入) |
+| `location` | 当前在哪里存在 | mapper 的位置域(**格层不定义位置代数**——现行口径:位置域 = 实例侧声明) | **mapper**(分配/放置决策) | mapper(emit)+ 验证器(location 无关性判定的输入)。⚠ **本字段是否入格层 = §九-C 待裁项(本文件倾向「不入」)**——读本行须按待裁处理 |
 | `persistence` | 该 materialization 消失前,**其状态是否必须被转移到某个合法载体** | `{free, transfer-required, externally-owned}` | **编译器**(由 `recipe` + 边界标注推导)+ **外部**(设备/OS 拥有的资源) | **mapper**(驱逐决策)+ 验证器 |
 | `replicability` | 该 materialization 是否允许存在多份 | `{free, readonly-share, forbidden}` | **编译器**(线性/仿射分析)+ **runtime**(外部资源) | **mapper**(跨边界传递/优化)+ 验证器 |
 
@@ -276,6 +285,8 @@ replicability = forbidden      ⟹  authority = single           # 多份不合�
 Evictable(x)  ⟺  Recoverable(x) ∨ PreserveRequiredState(x)
 ```
 
+> 📌 **式的主副本 = `docs/academic/cache-semantics.md` 条款 2′**(本处为引用;改式先改主副本)。
+
 **新式子多涵盖什么**——具体反例形态(只满足新式子、不满足旧式子):
 
 | # | 反例形态 | 为什么不满足旧式子 | 新式子怎么覆盖 |
@@ -329,6 +340,7 @@ Evictable(x)  ⟺  Recoverable(x) ∨ PreserveRequiredState(x)
 **这条不是本文件的发明——它来自条款 4b 的义务面**(`docs/academic/cache-semantics.md:28`:
 「其存储必须持久(home 保有材料),驱逐必须写回」;`:59`:「无配方条目必须有 home(持久位置),
 驱逐必写回」),本文件只是把它写成**可执行的显式约束**。
+(式的**主副本 = cache-semantics.md 条款 2′**;下表是它的分档展开,非另立一式。)
 
 ```
 recipe = recomputable    ⇒ Evictable 走 Recoverable 支
@@ -742,7 +754,11 @@ Core 是**版本化赋值模型**(条款 5:`X = X + 1` ≙ `x₁ 创建、x₀ �
 `ESZ_SG = 48`(6×u64,同六项)——**加 MAP 必须动 REG 布局** ⇒ **须 bump `CCR_VERSION`**。
 
 > ⚠ **来源标注**:`MAP` 一条 = **经 lead 转达的复核结论,未经我本人复核**——
-> 本仓 `docs/` 下 `grep 'MAP 段|MAP 记录|MAP 表'` **零命中**,应在尚未合入的映射设计稿中。
+> **基线声明**:在核验基线 `38e6c992` 的 `docs/` 上,该 pattern **零命中**。
+> ⚠ 此断言**必须带基线**——本行自己就含该 pattern,**不带基线落盘即自我证伪**
+> (本仓纪律:断言要写清基线)。且该对象**现已有承载**:据 lead 转达,同批 mapdoc 的
+> `execution-mapping-design.md` 同 pattern 16 命中,含专节 §3.10「MAP 段条目」,
+> 另见该档 §9.2 与 C-3 —— **该文件不在本工作区,此三处指针未经我复核**。
 > ENT/REG 槽位表(上两表)与 `location` 不可打包两条**已由我逐处读源码/文档实核**。
 
 **4) 结论(替代原「不需要新段」)**
@@ -778,8 +794,10 @@ Core 是**版本化赋值模型**(条款 5:`X = X + 1` ≙ `x₁ 创建、x₀ �
 6. **`authority` / `replicability` 的「零命中」**:基于 `grep -rni` 于 `src/` 与
    `docs/maintainer/design/` 与 `docs/academic/`;未扫全 `docs/superpowers/`。
    故只能说「**在这两个目录内零命中**」,不能说「全仓零命中」。
-7. **`MAP` 的段归属**:**经 lead 转达,未经我本人复核**——本仓 `docs/` 下
-   `grep 'MAP 段|MAP 记录|MAP 表'` **零命中**,该对象应在尚未合入的映射设计稿中。
+7. **`MAP` 的段归属**:**经 lead 转达,未经我本人复核**——在核验基线 `38e6c992` 的
+   `docs/` 上该 pattern **零命中**(ⓘ 该断言带基线:本行自己含 pattern,不带基线即自我证伪);
+   该对象现由同批 mapdoc 的 `execution-mapping-design.md` 承载(§3.10「MAP 段条目」/ §9.2 / C-3,
+   据转达 16 命中)——**该文件不在本工作区,指针未经我复核**。
    §7.4 第 3 条(「MAP 归 REG 段 ⇒ 加 MAP 要动 REG 布局 ⇒ 要 bump `CCR_VERSION`」)
    **整条依赖这一转达**;ENT/REG 槽位表与 `location` 不可打包两条**已由我实核**,不依赖它。
 
