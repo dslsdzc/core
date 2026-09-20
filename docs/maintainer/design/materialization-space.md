@@ -451,7 +451,7 @@ recipe = unrecomputable  ⇒ Evictable **只能**走 PreserveRequiredState 支
 | `regalloc-cache-mapping.md:4` 定位行 | **改权威半句** | **含**「权威 = docs/academic/cache-semantics.md」⇒ 重指;「映射实例」框定**保留** |
 | `dataflow-design.md:235` | **不动**(已回退) | 「映射实例侧(寄存器分配 = 缓存语义映射实例)见 …」= 纯描述 |
 | `glossary.md` §五 标题 | **不动**(已回退) | 「寄存器分配(缓存语义映射实例)」= 纯描述 |
-| `region-model.md:4` | **改权威半句** | **含**「权威 = docs/academic/cache-semantics.md」⇒ 重指;「映射实例」框定保留 |
+| `region-model.md:4` | **改权威半句 + 对齐标题** | **含**「权威 = docs/academic/cache-semantics.md」⇒ 重指;「映射实例」框定保留。**另**:该档标题首轮已改为「存在格语义的经典映射」而正文主语仍是「缓存语义」⇒ **同档自相矛盾**,故正文主语一并改为 **存在格 / Materialization Space**(与标题一致),两个权威指针都留 |
 | `region-model.md:102` | **不动**(已回退我的改动) | 「权限层不是语义本体,是缓存语义在…的权限投影」= 否定式纯描述,无权威指向 |
 | `region-model.md:156` | **保留我的改动** | 原句「**语义本体**:docs/academic/cache-semantics.md(七条…)」**含权威宣告** ⇒ 须重指;改后 = 「层定义:materialization-space.md」+「条款权威:cache-semantics.md」 |
 | `regalloc-cache-mapping.md:29` | **保留**(三层图行) | 「(cache-semantics **本体**;v6 ENT 编码)」**含权威宣告** ⇒ 改「存在格本体」 |
