@@ -1,7 +1,7 @@
 # 寄存器分配:缓存语义映射实例
 
 > 定位:受众 = 维护者(分配器/opt.cr/一致性自检);状态 = active。
-> 本文是寄存器分配在 Core 架构中的正式参考文档——缓存语义(权威 = docs/academic/cache-semantics.md)的寄存器映射实例;存在区间载体 = v6 ENT(docs/maintainer/design/existence-structure.md)。
+> 本文是寄存器分配在 Core 架构中的正式参考文档——缓存语义(条款权威 = docs/academic/cache-semantics.md;层定义 = docs/maintainer/design/materialization-space.md)的寄存器映射实例;存在区间载体 = v6 ENT(docs/maintainer/design/existence-structure.md)。
 > 设计决策记录(日期/排除方向/讨论):docs/superpowers/specs/2026-08-27-regalloc-cache-mapping-design.md;分配器逻辑契约文档 = src/compiler/regalloc-consistency.cr(v6 分支)。
 > 本文 2026-09 重写:v6 对齐(ENT 区间/home/sweep 共存)+ 实现状态分线(develop vs lattice-ir-v6)。
 

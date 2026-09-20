@@ -119,7 +119,7 @@ Evictable(x)  ⟺  Recoverable(x) ∨ PreserveRequiredState(x)
 ## 四、关联
 
 - **层定义(存在格 / 七字段 / 归类 / 划界)**:docs/maintainer/design/materialization-space.md
-- 语义本体总览:docs/maintainer/design/memory-model.md
+- 存储语义总览:docs/maintainer/design/memory-model.md
 - 层定义修订决策:docs/maintainer/adr/adr-0021-existence-space-layer-definition.md
 - IR 载体:v6 存在结构(ENT/NOD/REG)— docs/maintainer/design/existence-structure.md
 - 经典映射:docs/maintainer/design/region-model.md(区域/arena/权限)
