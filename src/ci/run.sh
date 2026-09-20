@@ -138,6 +138,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_impl.py
     python3 tests/selfhost/test_borrow.py
     python3 tests/selfhost/test_pointer_safety.py
+    python3 tests/selfhost/test_region_escape.py  # TODO #2026-09-20-1：RegionCheck 三条逃逸检查的真触发判据。**两向钉子**——正钉 P1 循环内分配+紧邻解引用（修前 rc=0 静默通过，根因 = 半开区间 [NSTART, EXIT) 被当成闭区间，`ni > EXIT` 漏掉紧邻格）· P2 隔句同形 · P3 返回逃逸=**B10**（修前误用 B11）· P4 存储逃逸（修前判定值被整行丢弃 ⇒ 检查从不触发）· P5 if 内分配按父链归到外层循环 · P6 重赋值清除的负控；反向对照必须 rc=0：if 型（修前误报 rc=1，R2 附 build+run 反证「内存没释放」）· 函数级返回型 · 重赋值型（修前误报 rc=1）· 循环内使用型 · 非指针面 · 存活指针 · 无堆分配。**面 = `ccr`/`build`**（`check` 面在 IR 生成前早退，region_check 根本不跑 ⇒ 旧 test_region_cfg 那条「逃逸」断言靠 `or 'error'` 兜底，不是钉子）= 14 例
     python3 tests/selfhost/test_params_limit.py   # TODO #2026-09-10-4 形参上限/≥18 形参静默误编译回归
     python3 tests/selfhost/test_generic_param_erasure.py # (乙) 泛型实例形参擦除（2026-09-18）：A1 形参链具体化 + A2a 第二遍。C1/C2 值判据（bits 三
     python3 tests/selfhost/test_topt_pattern.py   # 批 8（甲）批 1 刀 1：`unify_types` 的 `T?` 模式规则（2026-09-18）。**两向钉子**：C1 五例合法调用 `[S1-ARG]` 归零（改前各 1，防「一律报」）；C2 `g(1,d)` 真错仍恰 1 条（防「一律不报」）；C3 实例键/转换机械腿（`g[dex]`/`g2[dex]`/`call g2[dex](_dxsc)`）；C5 槽型直读（slot=8）；C4 非泛型面零足迹对照。**突变自证**：删回 `T?` 分支重建 ⇒ C1 五例必红（`COREC_BIN=` 通道）态 255 / scaled 两腿严格）· C3 槽型直读（--dump-params：T 形态 slot=8 decl=1 / T? 形态 slot=8 decl=0）· C4 调用点机械判据（call g1[dex](_dxsc)）· C5 幂等（bits 恰 2、scaled 恰 0 条 dest=_dxsc）· C6 --dump-params rc 中性/零产物 · C7 check 零诊断。**语料零覆盖声明**：全语料无「泛型 × dex」实例 ⇒ 表示面只能由本套件探针触达（见计划 §11）

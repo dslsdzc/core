@@ -373,6 +373,11 @@ def test_region_check_pointer_escape():
     `region_check.cr:108` **丢弃返回值**，与 `docs/maintainer/design/pointer-model.md` §五
     把它写成「已实现的三点之一」不一致）。
 
+    ⚠ **上述「零 raise 点 / 零命中」是 2026-09-20 收口前的状态描述**（本 docstring 保留它作为
+    归因记录）。**该面已于 2026-09-20 修复**：`EC_B_ESCAPE` 现有 raise 点（返回逃逸改报
+    `B10`）、`B11` 有活判据 —— 见 `tests/selfhost/test_region_escape.py`（15 例，两向钉子）
+    与 `TODO #2026-09-20-1` 的「状态（2026-09-20 收口）」段。**本用例自身仍不覆盖逃逸面。**
+
     **本用例现在钉什么**：一条**真实成立**的性质——**`&x` 的 kind 与 `&int` 声明位一致**（裁定二的目标）
     ⇒ 该源 `check` 通过且**不再报 TF01**。
     **⚠ 它不覆盖逃逸面**（该面零活覆盖，见上）——**勿据此断言「逃逸被检测」**；
