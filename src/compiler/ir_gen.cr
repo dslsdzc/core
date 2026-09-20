@@ -1823,7 +1823,12 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
                         }
                     }
                 }
-                v := new_ir_var("addr", alloc_type(TYP_PTR, elem_ti, 0));
+                // S3 同批（2026-09-20，裁 (甲)）：`&arr[i]` 与 `&x` 是**同一种语法现象（取址）** ⇒ 同判
+                // **`TYP_REF`**。两套模型并存（`&x`=REF 而 `&arr[i]`=PTR）= 本批在收的「声明与事实不符」的变体。
+                // **checker 侧已被 S1 覆盖**（`UOP_REF` 对非 `EXPR_IDENT` 操作数走 `else` 分支后同样
+                // `return alloc_type(TYP_REF, inner, is_mut)`）⇒ **本处是 ir_gen 侧唯一剩下的点**。
+                // `extra` 同 `&x`：取 `is_mut`（`&mut arr[i]` 与 `&arr[i]` 须同 `&x`/`&mut x` 一样可分）。
+                v := new_ir_var("addr", alloc_type(TYP_REF, elem_ti, ast_int_val(node)));
                 emit(IR_ADDR_INDEX, v, arr_var, idx_var, 3, 0);
                 return v;
             }

@@ -2899,15 +2899,20 @@ fn infer_expr(node: int) -> int {
         if op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV || op == OP_MOD {
             // String concatenation for OP_ADD
             if op == OP_ADD && (lt == TI_STR || rt == TI_STR) { return TI_STR; }
-            // Pointer arithmetic: *T + n or n + *T → *T
-            if (op == OP_ADD || op == OP_SUB) && (get_type_kind(lt) == TYP_PTR && rt == TI_INT) {
-                return lt;  // return the pointer type unchanged
+            // S3（2026-09-20，维护者裁）：指针算术门**纳入 `TYP_REF`**——与 S1（`&x → TYP_REF`）配套。
+            // **不改本门 ⇒ `&x + 1` 落空 ⇒ 报诊断**（S1 落地后 `selftest-types` 恰 2 例红即此）。
+            // **结果 kind = 保持操作数 kind**（`return lt` / `return rt`）：REF 进 ⇒ REF 出。
+            // 裁定理由：S3 的语义是「**让 REF 能进门**」，不是「把结果降级成 PTR」——降级会让
+            // 引用性在算术后**静默丢失**（一个新的语义跳变，而本批在收的正是这种跳变）。
+            // Pointer arithmetic: *T + n or n + *T → *T（PTR/REF 皆可，结果随左/右操作数）
+            if (op == OP_ADD || op == OP_SUB) && ((get_type_kind(lt) == TYP_PTR || get_type_kind(lt) == TYP_REF) && rt == TI_INT) {
+                return lt;  // return the address type unchanged（PTR 进 PTR 出 · REF 进 REF 出）
             }
-            if (op == OP_ADD || op == OP_SUB) && (lt == TI_INT && get_type_kind(rt) == TYP_PTR) {
+            if (op == OP_ADD || op == OP_SUB) && (lt == TI_INT && (get_type_kind(rt) == TYP_PTR || get_type_kind(rt) == TYP_REF)) {
                 return rt;
             }
-            // Pointer difference: *T - *T → int
-            if op == OP_SUB && get_type_kind(lt) == TYP_PTR && get_type_kind(rt) == TYP_PTR {
+            // Pointer difference: *T - *T → int（PTR/REF 皆可；**两侧不必同 kind**——与既有宽松面一致）
+            if op == OP_SUB && (get_type_kind(lt) == TYP_PTR || get_type_kind(lt) == TYP_REF) && (get_type_kind(rt) == TYP_PTR || get_type_kind(rt) == TYP_REF) {
                 return TI_INT;
             }
             // Check: arithmetic ops require int or dex —— R2 P2b Task 4：查表（门形状 = ANY：
