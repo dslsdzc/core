@@ -1,12 +1,16 @@
 # 执行映射设计（Execution Mapping Design）
 
 > 定位：受众 = 维护者/贡献者；状态 = **设计定稿（未实现）**——全文除显式标注 `[已实现]` 处外，**均无仓库对应物**。
-> 设计意图真源 = 维护者 2026-09-20 口述输入（`/tmp/briefs/execution-mapping-raw.md`，**本文档不改写它**）；
-> 本文档 = 其**形式化展开 + 仓库锚定 + 不变量收紧 + 冲突登记**。
+> 设计意图真源 = **两份**维护者 2026-09-20 口述输入（**本文档均不改写它们**）：
+> - `/tmp/briefs/execution-mapping-raw.md` —— 主输入（30 节 + 能力格 + M0–M11）；本文 = 其**形式化展开 + 仓库锚定 + 不变量收紧 + 冲突登记**。
+> - `/tmp/briefs/materialization-space-raw.md` —— **对已定稿教义的修订**（「格 = 缓存」→「格 = Materialization / Existence Space，缓存是其中一类映射实例」）。本文 §三/§六/§八 已按其重述；**既有「定稿」文档一律不改**，只登记（§十一 C-11/C-12/C-13）。
 > 核验基线 = `develop@origin` @ `38e6c9923ea4`（**所有 file:line 以该修订为准**，非手边检出）。
 > 关联：
+> - **层定义本体（不由本文承担）**：`docs/maintainer/design/materialization-space.md`（存在格 / Materialization Space 的**本体定义**，另一写手 `existdoc` 负责）。**本文引用它、不重复定义它**；本文只承担「计算 → 执行域放置」这一面。
+>   ⚠ **该文件在核验基线上尚不存在**——本条交叉引用是**预定锚点**，待其落盘后双向对齐（本文只加本行，不改那份文件）。
+> - [existence-structure.md](existence-structure.md) —— **存在格的 IR 承载**（ENT/NOD/REG）；本文 §3.4/§13.3 的字段距离实核以它为准。
 > - 同层设计：[execution-model.md](execution-model.md)（图/region/并发）、[region-model.md](region-model.md)（图锚定区域 = 内存字节域）、[memory-model.md](memory-model.md)（存储语义导航）
-> - 语义权威：[cache-semantics.md](../../academic/cache-semantics.md)（七条条款——本文 §六 的直接依据）
+> - **缓存语义**：[cache-semantics.md](../../academic/cache-semantics.md)（七条条款）—— ⚠ **本文起不再称其为"存储语义本体"**：按新输入它是**「缓存」这一映射实例的规律**（"经典可再生值的一种映射规律"），层本体归 `materialization-space.md`。既有的"本体"措辞**保持原样不改**（§十一 C-11）。
 > - **最紧的兄弟 spec**：[2026-09-11-performance-without-commitment-design.md](../../superpowers/specs/2026-09-11-performance-without-commitment-design.md)（S-C，下称 **S-C**）——本文 §五/§七/§八③ 与它**同构**，且受其裁决约束
 > - 编码层：[2026-09-05-hardware-interface-table.md](../../superpowers/specs/2026-09-05-hardware-interface-table.md)（HIT）、[2026-08-23-hw-map-design.md](../../superpowers/specs/2026-08-23-hw-map-design.md)（MMIO 设备表）
 > - **交叉引用（勿混）**：`docs/superpowers/plans/2026-09-20-mapping-layer-separation.md` —— 那份是**字节偏移抽象**（语义 → 布局的投影，`offset ∈ extent(entry)`），管的是**同一执行域内**「值落在哪几个字节」；本文是**计算 → 执行域放置**，管的是「这段计算在哪个域发生、跨域怎么物化」。按维护者管线图两者同落 `Lattice → Mapping → Encoding` 的 Mapping 格，**分工 = 投影面 vs 放置面**，粒度/语义/消费方均不同，不得合并、不得互相覆盖。
@@ -26,15 +30,31 @@
 
 **默认必须是 `[提案]`**：核不到行号的句子一律不得标前两档。三态计数见 §十三。
 
-### 〇.1 三个必须先立的术语护栏
+### 〇.1 四个必须先立的术语护栏
 
-本文档与既有文档存在**三处同名不同义**，开工前必须钉死，否则后续所有讨论都会串线：
+本文档与既有文档存在**四处同名不同义**，开工前必须钉死，否则后续所有讨论都会串线：
 
 | 词 | 本文档的义 | 仓库既有文档的义 | 处置 |
 |---|---|---|---|
 | **Region** | **Execution Region** = 放置单位（`flow`/`loop`/`fn` 对应的语义区域） | [region-model.md](region-model.md) 的**图锚定区域** = **内存字节域**（arena），"区域是子图节点的字节域，不是词法作用域的影子" `[已实现]` 分配器面 | **本文一律写全称 `ExecutionRegion`**，不写裸 `Region`；裸 `Region` 保留给内存义 |
 | **HIT** | 原文假定 = **baseline universal execution target**（一个执行域） | **Hardware Interface Table** = 表驱动**编码**机制（`src/arch/hit/hit.cr:2`），`[已实现]`；其"替换表 = 换目标平台"（HIT spec §1）表明 HIT 是**机制**不是**域** | 见 §十一 冲突 C-1；本文凡引用原文假设处写 **`HIT`（原文假设义）**，引用仓库物处写 **`HIT（表机制）`** |
-| **格 / Lattice** | **Capability Lattice**（能力偏序，mapper 内部组织参数） | [memory-model-capability-lattice.md](../../archive/memory-model-capability-lattice.md)（archive，v4 定稿）的「**无格承诺**」：格不进入语义本体，是映射实例的**组织参数** | **两者相容**（本文的能力格正是"组织参数"），但见 §十一 约束 C-6：能力格**不得进入语义本体** |
+| **格 / Lattice** | ⚠ **两义并存，必须分写**：<br>① **存在格 / Materialization Space** = 格层**本体**（本文 §六 用它，本体定义归 `materialization-space.md`）<br>② **Capability Lattice** = **mapper 内部**的能力偏序组织参数（本文 §四） | [memory-model-capability-lattice.md](../../archive/memory-model-capability-lattice.md)（archive，v4 定稿）的「**无格承诺**」：格代数不进入语义本体，是映射实例的**组织参数** | ① 本文写「**存在格**」；② 本文写「**能力格**」，**永不同用一"格"字**。两者都受「无格承诺」约束（§十一 C-6） |
+| **缓存 / cache** | ⚠ **本批降级**：「缓存」= **存在格在经典机器上的一类映射实例**（"经典可再生值的一种映射规律"），**不是层本体** | 既有**定稿**措辞：`project-book.md:216`「存储语义**本体**为**缓存语义**」；`z-vision.md:15`「存储半边已定稿（语义本体 = 缓存语义）」；`cache-semantics.md:4`「本文件是 Core 存储语义**本体**的**唯一权威**」 | **既有文档一律不改**（§十一 C-11 逐条行号）。本文**不再写**"缓存 = 存储语义本体"；凡须指既有条款处写「**缓存语义条款**（映射实例规律）」并给出处 |
+
+### 〇.2 层归属：格层不承担 policy（本批新增的硬边界）
+
+新输入明确划出的一条界，**本文全程遵守**：
+
+```
+格层（存在格）只回答四问：          全部给 mapper（本文 §五）：
+  ① 哪些 materialization 合法          · 什么时候驱逐
+  ② 哪些可以共存                        · 放寄存器还是 RAM
+  ③ 哪些代表同一 Entry/version          · GPU 是否保留 residency
+  ④ 哪些转换保持语义                    · LRU / write-back / write-through / prefetch
+```
+
+⇒ **LRU / write-back / write-through / prefetch / 「GPU 是否保留 residency」一律是 `mapping strategy`，既不属格层、也不属本文的执行域层。**
+⇒ 本文 §5.2 的 `Cost(R,D)`、§5.5 的调度算法、§5.7 的动态 mapper 全部落在 **mapper** 侧——这一点在旧稿里是隐含的，本批**显式划界**（见 §八 不变量 ⑨）。
 
 ---
 
@@ -51,8 +71,9 @@ Source
   ↓
 Semantic HDFG                    ← 语义真源；不知道 CPU/GPU
   ↓
-Lattice / Existence              ← 不知道 CPU/GPU
-  ↓
+存在格 / Materialization Space    ← 不知道 CPU/GPU；**本体定义归 materialization-space.md**
+  ↓                                （旧稿此行写 `Lattice / Existence` —— 本批具体化为「存在格」，
+  ↓                                 层名与既有「图 → 格 → 编码」的「格」同一，见 §十一 C-12）
 Execution Mapping                ← 本文档
   ├─ region partition
   ├─ execution placement
@@ -329,55 +350,108 @@ NPU ─┘
 
 ### 3.4 Materialization
 
-原文 §28 初版 `ResidencyState{memoryDomain, version, valid}`；论文核查后升级为 **materialization graph**：
+> ⚠ **本批重写**：旧稿此处是 `Entry X: DDR valid / VRAM valid`（**缓存副本**措辞——隐含"有权威值 / 可复制 / 副本同值"三假设）。按新输入 `/tmp/briefs/materialization-space-raw.md` 升级为**两级结构 + 七字段**（`Semantic Entry → Materialization`）。
+> **本体定义不在此处**——归 `docs/maintainer/design/materialization-space.md`（另一写手）。本节只写**本文消费到的字段面**与**仓库距离实核**。
+
+#### 3.4.1 两级结构（不是"Entry 的两份副本"）
 
 ```
-Entry X
+Semantic Entry                      ← 语义对象（身份 + 版本），不是存储物
     │
-    ├── Materialization M0 @ DDR
-    │       version = X3
-    │       valid
+    ├── Materialization M0 @ location
+    │       recipe / identity / version / authority / persistence / replicability
     │
-    └── Materialization M1 @ VRAM
-            version = X3
-            valid
+    └── Materialization M1 @ location
+            recipe / identity / version / authority / persistence / replicability
 ```
+
+⚠ **与旧稿的措辞差异（本文批次要点）**：旧稿写 `Entry X` 直接挂 `DDR valid / VRAM valid`——那是**把 Entry 当存储物**。新结构里 **Entry 是语义对象，`location` 才在 Materialization 上**；且**没有全局 `valid` 位**（"哪份新鲜"的判据被 `authority` 取代）。
+
+#### 3.4.2 字段定稿（新输入 §"一个 Entry 可以有"七项）
+
+| # | 字段 | 类型 | 含义 | 缓存实例取值 | MMIO 实例取值 |
+|---|---|---|---|---|---|
+| 1 | `recipe` | 0/1 | **是否可再生**（有配方 ⇒ 可重算） | `yes` | `no` |
+| 2 | `identity` | 下标 | **语义身份** | 产生节点 | 产生节点（= 设备读数节点） |
+| 3 | `version` | u64 | **哪个版本** | 版本序数 | 版本序数 |
+| 4 | `authority` | 枚举 | **哪份 materialization 有权威性** | 可转移 / 可重建 | `device`（设备侧权威） |
+| 5 | `location` | 下标 | **当前在哪里存在** | DDR / VRAM / 寄存器 | 设备寄存器窗口 |
+| 6 | `persistence` | 枚举 | **是否必须持久保留** | 否（可驱逐） | `external`（外部持久） |
+| 7 | `replicability` | 枚举 | **能不能复制** | `yes` | `no/limited` |
+
+原文给的两个实例（照录，供对照）：
+
+```
+缓存：  recipe = yes   replicable = yes   evictable = yes   authority 可转移/可重建
+MMIO：  recipe = no    replicable = no/limited   persistent = external   authority = device
+```
+
+#### 3.4.3 本文的 mapper 侧附加槽（`[提案]`，非格层）
+
+以下两槽**不属存在格**，是本设计为 mapper 加的（§〇.2 划界；本体字段以上表七项为准）：
 
 | 槽 | 名 | 类型 | 含义 |
 |---|---|---|---|
-| 0 | `mt_entry` | 下标 | Entry 标识 |
-| 8 | `mt_version` | u64 | **Entry Version**（回答唯一问题：这是哪个版本的物化） |
-| 16 | `mt_memd` | 下标 | 所在 MemoryDomain |
-| 24 | `mt_valid` | 0/1 | 该 materialization 的存续位 |
-| 32 | `mt_home` | 下标 | 持久位置（无配方条目必填；见 §六） |
-| 40 | `mt_materialize_op` | 下标 | 可调度 operation 句柄（§六） |
+| `mt_materialize_op` | 下标 | **可调度 operation 句柄** —— 使 materialization 可 prefetch/async/overlap（§6.4） |
+| `mt_memd` | 下标 | 所在 **MemoryDomain** —— 域归属，属放置层（§3.2） |
 
-**核心性质**：一个 materialization **只需要回答「它是哪一个 Entry Version 的物化」**，而不是猜「哪块内存最新」（§八 不变量 ④）。
+⚠ `location`（格层，语义位置）与 `mt_memd`（放置层，具体内存域）**不是同一槽**：前者回答"存在形式"，后者回答"在哪个域"。合并会把格层与放置层搅在一起。
 
-**与仓库的锚定（本节最强）**：
+#### 3.4.4 「缓存」降级为特例（六个假设 + 反例）
 
-- `[已实现]` **`version` 字段已存在于 `.ccr` 盘面**：ENT 记录 = 28B = 7×i32 `{var_id, version, def_nod, live_start, live_end, home, flags}`，见 `src/compiler/ccr_io.cr:173-176`。
-  ⚠ **注意盘面/内存不同构**（同注释）：内存 `ESZ_ENTRY` = 24B，**无 version 字段**（"the per-var ordinal is derivable from group order"）。
-- `[已实现]` **`home` 字段已在盘面**（同上）——与 cache-semantics 条款 4b 的「必须有 home（持久位置）」直接对应。
-- `[已实现]` 语义基础：cache-semantics **条款 5「赋值 = 版本化」**（`docs/academic/cache-semantics.md:29`，细读 `:61-67`）：`x = x + 1` = "x₁ 创建、x₀ 失效、绑定移动"，不是修改内存单元；顺序约束属 state edges。
+新输入点名的、被"缓存"一词偷偷带进的**六个假设**——它们在经典 CPU/GPU 内存/寄存器分配/异构 residency 上成立，但在列举的反例上**不成立**：
+
+| # | 假设 | 反例（新输入列举，含既有文档佐证） |
+|---|---|---|
+| 1 | 有一个原始/权威值 | **分布式唯一 authority**（无单点权威） |
+| 2 | 可以复制 | **一次性 token** / **线性资源**（复制本身非法） |
+| 3 | 可以驱逐 | **事务中的临时状态** |
+| 4 | 可以重新物化 | **不可重复 oracle** / **随机数** / **量子测量**（重跑 ≠ 原结果） |
+| 5 | 通常存在 backing store | **MMIO read** / **外部输入** |
+| 6 | 不同副本原则上表示同一个值 | 同上第 2/4 条的反例 |
+
+`[提案]`。⚠ **仓库侧已有独立佐证**：cache-semantics **条款 4b** 已把「图内不可重算」条目单列，并规定「驱逐不变量/再生等价**对其不成立**」（`docs/academic/cache-semantics.md:28`；细读 `:50-59` 给两类：边界 MMIO/FFI/输入/测量、图内不可重算 神谕/BSS/FIXPT/模糊融合）。
+⇒ **本批的新框架把条款 4b 从"例外条款"升格为"一般规则的支柱"**：条款 2/3（可驱逐/可再生）成了 `recipe = yes` 那一档的**特例**。
+
+#### 3.4.5 与仓库的锚定（**逐字段距离实核**——本批最有价值的结果）
+
+⚠ 先纠正一个**容易误判**的说法：`recipe` **不是**"实现里已经是一个真 bit"。**精确结论 = 「预留位 + 恒零值」**：
+
+| # | 字段 | 设计文档对应物 | **实现对应物** | 三态 |
+|---|---|---|---|---|
+| 1 | `recipe` | `existence-structure.md:45` flags `bit0 无配方`；`:59` 规范陈述「bit0 = 无配方（图内不可重算）——**必须有 home**」 | ⚠ **槽位在、值恒零**：`OFF_ENTRY_FLAGS : int = 20;   // 位 0 **预留**：无配方（条款 4b）`（`dyn_arr.cr:143`）；`flags(20) u32 = 0（位 0 预留：无配方，条款 4b）`（`globals.cr:232`）；`flags **恒 0**（无配方/参数/全局/驱逐位**零实例**——位语义保留）`（`ccr_io.cr:85`） | **`[已设计未实现]`** |
+| 2 | `identity` | 条款 4b「**身份 = 产生节点**」（`cache-semantics.md:28,59`）；`existence-structure.md:42`「`def_nod` = 定值节点 id」 | `OFF_ENTRY_DEF : int = 4`（`dyn_arr.cr:139`）；盘面 28B 第 3 字段（`ccr_io.cr:173-176`） | **`[已实现]`** |
+| 3 | `version` | 条款 5（`cache-semantics.md:29,61-67`）；`existence-structure.md:41` | 盘面 `version`（`ccr_io.cr:173-176`，同 var 组内 1-based 序数，`ccr_io.cr:82-83`）；⚠ **内存态无该槽**（24B，靠组序推导，`ccr_io.cr:175`） | **`[已实现]`（盘面）/ 推导（内存态）** |
+| 4 | `authority` | 条款 4b 的"home 保有材料"**隐含**权威，但**无该名词** | ⚠ **零命中**：全仓 `authority` 在 `src/` 与 `docs/maintainer/design/`、`docs/academic/` **无任何出现**（本会话 grep 实测） | **`[提案]`** |
+| 5 | `location` | [region-model.md](region-model.md) 的字节域归属（`g_df_node_region`）；REG 段存在区间 | ⚠ **ENT 无 location 字段**；最近物 = `home`（槽位）+ REG 段存在区间（`existence-structure.md:73-86`） | **`[提案]`** |
+| 6 | `persistence` | 条款 4b + `home`（`existence-structure.md:44`「条款 4b + 条款 7 的接口」） | ⚠ **槽位在、值恒默认**：`OFF_ENTRY_HOME : int = 16`（`dyn_arr.cr:142`），但 **`home 恒 -1`**（`ccr_io.cr:83-84`「home 恒 -1（实例注记——**分配决策不写回格式**，字节 spec §3.5）」） | **`[已设计未实现]`** |
+| 7 | `replicability` | **无对应物** | **零命中** | **`[提案]`** |
+
+**两条由本表得出的结构性结论**（本文分析，非原文）：
+
+1. **`recipe` 与 `persistence` 是同一形态**：**槽位已预留、值恒为默认**——`flags = 0` / `home = -1`。且**原因同一**，`ccr_io.cr:83-84` 明写："**分配决策不写回格式**"。⇒ 二者**不是"未设计"，而是"设计了槽位但写侧不做决策回填"**。
+   ⚠ 这对实施批的含义：`recipe` 若要变成活位，**不需要改布局**（位已预留），需要的是**一个写点 + 一个消费点**；`persistence` 同理（`home` 回填的既有计划见 `existence-structure.md` §八开放点 3「ENT home 回填方式」）。
+2. **七个字段里四个落在 `[提案]`/`[已设计未实现]`，只有 `identity` / `version` 两字段是实打实的 `[已实现]`**。⇒ 新框架**不是对既有实现的重新描述**，而是一次**真实的抽象升级**——不要把"ENT 里已经有 version 和 home 了"读成"新框架已实现"。
+
 - `[已实现]` state edges 本体：`DFEdge` 的 `kind=1` 边 = state edge（`docs/maintainer/design/execution-model.md:36,57`）——"副作用链与循环终止依赖"。
-
-⇒ **本节的版本化不是新本体**，而是条款 5 在**多内存域**下的展开。原文自称"这和缓存语义高度一致"——**核实结论：成立，且比原文说的更强**（version + home 都已在盘面上）。
+- ⚠ **`version` 的既有解释须改口**：旧稿此处写"本节的版本化…是**条款 5** 在**多内存域**下的展开"。按新输入，条款 5 属**缓存映射实例**的规律 ⇒ 正确措辞 = "**存在格的版本性**在缓存实例上的投影恰好是条款 5"。**结论（版本化成立）不变，归属变了**（§十一 C-11）。
 
 ### 3.5 ResidencyState
 
+**本批重写**（旧稿是 `{memoryDomain, version, valid}`——`valid` 是**缓存假设 #6「不同副本同值」**的残留）：
+
 ```
 ResidencyState {
-    memoryDomain
-    version
-    valid
+    entry                      // 语义对象
+    materializations[]         // 该 Entry 在当前时刻的物化集合
 }
 ```
 
-= Materialization 的**索引视图**（`entry → [materialization]`），不另立结构。原文 §28 的
-`X1: DDR valid / VRAM valid` 与 `X2: DDR valid / VRAM stale` 两例都是该视图的行。
+= **`Materialization` 的索引视图**（`entry → [materialization]`），不另立本体结构。每个元素带 §3.4.2 的七字段。
 
-`[提案]`；版本代数 `[已实现]`（§3.4）。
+⚠ **`valid` 位被删除**（本批要点）：旧稿的 `X2: DDR valid / VRAM stale` 是"哪份新鲜"的**副本有效性**模型；新框架用 **`authority`** 取代它（"哪份有权威性"）——因为对**无配方条目**（`recipe = no`），"VRAM 那份比 DDR 那份旧"这句话**没有意义**（两份可能都不是可再生的；且 `replicability = no` 时根本不该有两份）。
+
+`[提案]`；`version` 面 `[已实现]`（盘面，§3.4.5）；`authority` 面**零命中**（§3.4.5 第 4 行）。
 
 ### 3.6 RegionRequirement
 
@@ -843,22 +917,24 @@ objective = "performance"      # 以后可：performance / latency / energy / ba
 
 ### 6.1 数据不属于 CPU 或 GPU
 
-假设 Entry X：语义仍然只有 `X`，**不存在** `X_cpu` / `X_gpu`：
+假设 Entry X：语义仍然只有 `X`，**不存在** `X_cpu` / `X_gpu`。
+
+⚠ **本批措辞升级**（旧稿此处写 `DDR -> valid / VRAM -> valid`——**那是缓存副本措辞**，隐含"有权威值 + 可复制 + 副本同值"三假设）。新形态：
 
 ```
-Entry X
-Materialization:
-    MemoryDomain DDR   -> valid
-    MemoryDomain VRAM  -> valid
+Semantic Entry X                ← 语义对象：identity + version（不挂在任何域上）
+    │
+    ├── Materialization @ DDR    recipe / identity / version / authority / location / persistence / replicability
+    └── Materialization @ VRAM   同上七字段
 ```
 
 ⇒ CPU → GPU 数据迁移的语义**不是** `copy X into another X`，而是 **materialize X in target memory domain**。
 ⇒ **源码永远不应该出现 `copyToGpu()` / `copyToCpu()` / `cudaMemcpy()`。**
+⇒ ⚠ **并且**：新框架下还需检查 **`replicability`**——若该 Entry `replicability = no`（一次性 token / 线性资源），则"在 VRAM 再物化一份"本身**非法**，不是"贵"。旧稿的 `valid` 位模型**无法表达这一档**（它默认副本总是允许的）。
 
 ### 6.2 自动 transfer
 
-图 `Region A → Region B`，placement `A → CPU` / `B → GPU`：
-mapper 检查依赖 Entry（`A produces X` / `B consumes X`），若 `X residency = DDR` ⇒ 自动规划 `materialize X in VRAM`。
+图 `Region A → Region B`，placement `A → CPU` / `B → GPU`：mapper 检查依赖 Entry（`A produces X` / `B consumes X`）⇒ 自动规划 `materialize X in VRAM`。
 最终后端可能下降成 DMA / PCIe transfer / shared memory mapping / zero-copy / unified memory——**这些都不是 Core 语义**。
 
 ### 6.3 Materialization 是可调度 operation（不是成本项）
@@ -876,40 +952,96 @@ CPU compute
 ⇒ materialization 可以 **prefetch / async / overlap compute / pipeline**。
 ⇒ 未来不是 `T = Compute + Transfer` 这么简单，而可能 `T ≈ max(Compute_A, Transfer)`（若二者能 overlap）——**这会极大影响 mapper**。
 
-### 6.4 接缓存语义（原文 §8「应该直接和 Core 已经有的 cache semantics 接起来」）
+⚠ **本批划界**：`prefetch` / `async` / `overlap` 是 **mapper strategy**（§〇.2），**不属格层**。格层只回答"这个 materialization 合法吗 / 与谁可共存 / 代表哪个 Entry+version / 这个转换保语义吗"；**"要不要预取"是 mapper 的决定**。
 
-**核实结论：完全成立，且本节可整体改写成 cache-semantics 的推论。** 逐条对表：
+### 6.4 驱逐不变量的改写（新输入的核心修订）
 
-| 本文概念 | cache-semantics 条款 | 状态 |
+**旧表述（本文旧稿，照 cache-semantics 条款 2/3）**：
+
+> 所有东西都可以驱逐，只要能**重算**或**写回**。
+
+**新表述**：
+
+```
+Evictable(x)  ⟺  Recoverable(x) ∨ PreserveRequiredState(x)
+```
+
+即一个 materialization 能消失，当且仅当：
+
+- 之后能**重新得到等价状态**（`Recoverable` = 缓存实例里的"有配方可重算"）；**或者**
+- 消失前**已经把必须保留的状态转移到其他合法 materialization**（`PreserveRequiredState`）。
+
+`[提案]`。**这比"缓存驱逐"更一般**——它不预设"有 backing store"（假设 5）也不预设"副本同值"（假设 6）。
+
+**与既有条款的关系（本文分析）**：旧条款 2/3（驱逐不变量 `⟦G ∖ storage(e)⟧ = ⟦G⟧` / 再生等价）对应新式的**第一支 `Recoverable`**；条款 4b 的"驱逐必写回"对应**第二支 `PreserveRequiredState`**。
+⇒ **条款 2/3/4b 并未被推翻**——它们是新式在**缓存实例**上的取值。**这正是"缓存降级为特例"在驱逐面上的落点。**
+⇒ 且旧稿 §6.5 登记的那条"实质张力"（条款 4b vs 副本模型）**在新框架下消解**：条款 4b 是第二支的正例，不是例外条款。见 §十一 C-2（状态由"待裁"改为"已被新框架涵盖，仅待维护者确认"）。
+
+### 6.5 接缓存语义 —— ⚠ **方向反转（本批最重要的改写）**
+
+原文 §8 说"应该直接和 Core 已经有的 cache semantics 接起来"。**旧稿的解释是错的**——它把 cache-semantics 条款当成**层本体**，于是写成"本文的 Materialization 模型 = 条款 5 + 条款 6 的展开，不是新本体"。
+
+**新输入下的正确方向**：
+
+```
+旧（错）：  materialization 模型  ⊂  缓存语义条款        （缓存 = 本体，materialization 是它的实例）
+新（对）：  缓存语义条款  ⊂  存在格 / Materialization Space（缓存 = 映射实例，materialization 是本体）
+```
+
+原文的直接引语：
+
+> 图 → 存在格 / Materialization Space → 编码
+> **缓存语义 = 经典可再生值的一种映射规律**
+
+**因此本文旧稿 §6.4 的"逐条对表"必须反向读**——那些条款**不是本文的语义依据，而是缓存这一映射实例的规律**。改写后的对照表（列序已反转，并标出**哪些条款在新框架里不再是普遍的**）：
+
+| 缓存语义条款（**映射实例规律**） | 在存在格中的位置 | 出处 |
 |---|---|---|
-| Entry 不加后缀、`X` 唯一 | 条款 1 值 = 配方 | `[已实现]` 文档面（`cache-semantics.md:24`） |
-| materialization 可丢弃（只影响性能） | 条款 2 驱逐不变量 `⟦G ∖ storage(e)⟧ = ⟦G⟧` | `[已实现]` 文档面（`:25`） |
-| 域间重新物化 | 条款 3 再生等价 | `[已实现]` 文档面（`:26`） |
-| `mt_home`（持久位置） | 条款 4/4b：**无配方条目必须有 home，驱逐必写回** | `[已实现]` 文档面（`:27-28,59`）；盘面 `home` 字段亦在（`ccr_io.cr:173-176`） |
-| `mt_version` | 条款 5 赋值 = 版本化 | `[已实现]` 文档面（`:29,61-67`）+ 盘面 `version` |
-| MemoryDomain 是"哪块内存" | 条款 6 地址 = 映射（字节地址只是经典投影） | `[已实现]` 文档面（`:30,69-71`） |
-| 换域不改变语义 | 条款 7 映射实例正确性 | `[已实现]` 文档面（`:31,73-75`） |
-| 新增 CPU/GPU/NPU 域行 | §三 范式映射表（经典/寄存器/量子 | `[已实现]` 文档面（`:79-87`）——**表中加行的机制已存在** |
+| 条款 1 值 = 配方 | 对应 `recipe = yes` 一档的**身份来源**；`recipe = no` 档**不适用** | `cache-semantics.md:24` |
+| 条款 2 驱逐不变量 | `Evictable` 的**第一支** `Recoverable` 的一个实例 | `:25` |
+| 条款 3 再生等价 | 同上（`Recoverable` 的机制保证） | `:26` |
+| 条款 4 边界公理 | 对应 `recipe = no` + `authority = device/external` | `:27` |
+| 条款 4b 图内不可重算 | 对应 `recipe = no` + `persistence = 必须` + `authority` 不可转移 | `:28,50-59` |
+| 条款 5 赋值 = 版本化 | 存在格的**版本性**在缓存实例上的投影（§3.4.5 末注） | `:29,61-67` |
+| 条款 6 地址 = 映射 | 属**编码/映射**面，不入存在格 | `:30,69-71` |
+| 条款 7 映射实例正确性 | **正是"缓存是映射实例"这条的既有条款形态**——它本来就是"任何映射实例的正确性标准" | `:31,73-75` |
 
-⇒ **本文的 Materialization 模型 = 条款 5 + 条款 6 在"多内存域"下的展开**，不是新本体。
+⇒ **条款 7 是新旧框架的接缝**：它早已写成"**任何**映射实例（区域/arena/字节权限/寄存器）的正确性标准是同一个"，而不是"缓存是本体"。**新输入把这个早已写下的普遍性提到了层名上。**
 ⇒ 条款 7 已给出 `mapping preservation proof` 的**既有定理形态**（"映射正确性定理"）——原文说"甚至可以以后接形式化验证"，**仓库已经把这条通路写成条款了**。
+⇒ 本文旧稿"本文的 Materialization 模型**不是新本体**"这句**已作废**：按新输入，存在格**就是**本体层，而**缓存才是实例**。
 
-### 6.5 ⚠ 但有一处实质张力（登记，不裁决）
+### 6.6 缓存 = 特例（七字段取值表）
 
-原文 §28 的 `X2: DDR valid / VRAM stale` 是个**副本有效性**模型（"哪份新鲜"）。
+新输入给的判据（照录）：缓存只是
 
-cache-semantics **条款 4b** `[已实现]` 文档面（`:28,50-59`）说：**图内不可重算**条目（神谕 / BSS 实数 / FIXPT 声明 / 模糊融合）**驱逐不变量与再生等价对其不成立**：
+```
+recipe = yes
+replicable = yes
+evictable = yes
+authority 可转移/可重建
+```
 
-> 其存储必须**持久**（home 保有材料），**驱逐必须写回**；身份 = 产生节点。
+的特例。MMIO 例：`recipe = no / replicable = no|limited / persistent = external / authority = device`。
 
-⇒ 对**无配方条目**，"VRAM 这份可以由 DDR 那份再生"是**错的**（重跑神谕 ≠ 原结果）；且存在**权威副本（home）**概念，而原文的模型里没有"权威副本"这一位。
+完整取值对照见 §3.4.2；六个被"缓存"带进的假设及其反例见 §3.4.4。
 
-**待裁点**：Residency 是否要按 Entry 的**配方类别**（有配方 / 无配方）分两套规则？
-（原文 §"无配方条目"未被提及；条款 4b 是 M4 才并入条款集的新条款，两者可能只是**尚未对齐**。）
+### 6.7 policy 不属格层、也不属执行域层（本批显式划界）
 
-→ 见 §十一 冲突 C-2；§八 不变量 ④ 的判据必须**按类别分档**才能不误判。
+新输入点名**四类 mapping strategy**——LRU / write-back / write-through / prefetch——以及问题"GPU 是否保留 residency"：
 
-### 6.6 与并发的统一（原文 §29）
+> 这些都应该是 **mapping strategy**，不是格层语义。
+
+⇒ 本文的归属：
+
+| 事项 | 归属 |
+|---|---|
+| 哪些 materialization 合法 / 哪些可共存 / 哪些代表同一 Entry+version / 哪些转换保持语义 | **存在格**（本体，归 `materialization-space.md`） |
+| 什么时候驱逐 · 放寄存器还是 RAM · GPU 是否保留 residency · LRU / write-back / write-through / prefetch | **mapper**（本文 §五） |
+| 换域要付多少代价 | **mapper cost model**（§5.2，S-C §2.3 契约） |
+
+⇒ 见 §八 不变量 ⑨。**旧稿把这四类策略混在 §六 里叙述**（例如 §6.3 原文的 prefetch/overlap 段落），**本批已划出**。
+
+### 6.8 与并发的统一（原文 §29）
 
 `go f()` 和 execution mapping **不应该冲突**。动态 HDFG 产生的新 region 依然可以 runtime placement：
 
@@ -918,6 +1050,9 @@ spawn region R → mapper → CPU1 / CPU2 / GPU
 ```
 
 ⇒ 异构 execution model 与现有动态图模型**统一**，而不是另造 GPU concurrency。
+
+⚠ **本批重述**（旧稿此处写"缓存语义"作为统一依据——按 §6.5 的层归属已过时）：统一所依据的**不是缓存语义**，而是**存在格**——`spawn` 产生的新 region 只是**新的语义对象**，其 Entry 的物化/迁移与静态 region 走**同一套** `materialization` 规则（§3.4 七字段对两者一视同仁：`recipe` / `authority` / `replicability` 与"是否并发产生"无关）。
+⇒ 这正是新框架的收益之一：**并发不是缓存的特殊情形**，因此不需要"GPU 专用并发模型"。
 
 `[提案]`。**最近既有物** `[已实现]`：并发 = Go 风格 GMP 简化（P 并入 M，M 数量 = CPU 核数；`docs/maintainer/design/execution-model.md:75-77`）；`go f(args)` 语义 = 分配 G + 16KB 栈 + 新 arena → 状态 `_Grunnable` → **投递到 M 的 local run queue**（同文档 §三 3.2）；实现 = `sched_go`（`src/stdlib/sched.cr:171`）= `g_new + sched_enqueue`。
 ⇒ **接线点 = `sched_enqueue`**（放置决策的插入位置），但**队列是 per-M 而非 per-domain** ⇒ 距离 = "队列键从 M 换成 ExecutionDomain"，不是新增调度器。
@@ -1075,38 +1210,46 @@ S-C §2.2 表（`[已设计未实现]`）：
 - **违反后果**：击穿 S-C L3；且把"能否正确执行"与"哪个更快"混成一个数 ⇒ 引入**静默错误映射**（非法域被选中）——这是本设计最危险的失效形态（静默 rc=0 类）。
 - **反向钉子**：见腿 3。
 
-### 不变量 ④：materialization 只回答「是哪个 Entry Version 的物化」
+### 不变量 ④：materialization 只回答「是哪个 Entry Version 的物化」＋ 七字段完备
+
+- **本批加强**：旧稿此条只有 `(entry, version, memory_domain, home?, valid)`。按新输入升级为**七字段**（§3.4.2），并**删除 `valid`**（它是缓存假设 #6 的残留，被 `authority` 取代）。
 
 - **形式陈述**
   ```
-  Materialization := (entry_id, version, memory_domain, home?, valid)
+  Materialization := (recipe, identity, version, authority, location, persistence, replicability)
+                     + mapper 侧附加（mt_materialize_op, mt_memd —— 不属格层，§〇.2）
 
   必须（正）：
-    每个 Materialization 携带精确的 (entry_id, version)
+    每个 Materialization 携带精确的 (identity, version)
     每个 consumer 的读必须**指定 version**（版本来自图，不来自运行期比较）
-    version 是**定义性字段**（由条款 5 的版本代数给出），不是被观测出来的
+    version 是**定义性字段**（存在格的版本性），不是被观测出来的
+    authority 唯一确定：任一时刻至多一个 authoritative materialization（或其权威在 device/external）
 
   禁止（负）：
     ¬∃ 谓词 newer(m₁, m₂)   ——不存在"哪份更新"的全局比较
     ¬∃ 查询 latest(entry)   ——不存在"取最新副本"的接口
+    ¬∃ valid 位             ——"新鲜度"不是格层谓词（authority 取代之）
     ¬∃ 消费者按「值相等」判定可复用（值比较不是版本代数）
+    ¬∃ 对 replicability = no 的 Entry 生成第二份 materialization（复制本身非法，§3.4.4 #2）
 
-  驱逐/再生语义按配方案别分档（cache-semantics 条款 2/3 vs 条款 4b）：
-    有配方条目：可驱逐、可跨域再生
-    无配方条目：home 必填、驱逐必写回、不可再生
+  驱逐/再生语义**按字段分档**（旧稿写"按配方案别"，本批改为字段驱动）：
+    recipe = yes            → 可跨域再生（Recoverable，§6.4 第一支）
+    recipe = no  ∧ persistence = 必须 → home 必填、驱逐必写回（PreserveRequiredState，第二支）
+    replicability = no      → 不得复制；迁移若非"移动"语义则非法
   ```
 - **可执行判据的形状**
   1. **正腿（原子性）**：构造 `X1@DDR` 与 `X2@VRAM` **同时存在**，断言 GPU 消费 `X2` 时**必须**产生 `materialize(X2 → VRAM)`——**不得**复用 `X2@DDR`（域错）也**不得**误用 `X1@VRAM`（版本错）。两向都给期望值（域错与版本错各一条档）。
-  2. **接口腿（结构性）**：静态扫消费面，断言**不存在** `latest()` / `newest()` / 跨域 `max(version)` 之类的查询点。⚠ 判据须**限定为"跨 MemoryDomain 的比较"**——**同域内**的版本推进比较（那是条款 5 的版本代数）**不违反**本条。**不加限定 = 判据会对合法实现恒红（过判）。**
-  3. **分档腿（防 C-2 误判）**：对**无配方条目**（`unsafe` 边界 / 神谕 / BSS 实数 / FIXPT / 模糊融合——见 cache-semantics `:50-59`）断言：`home` 必填；跨域"再生"路径**不可用**（必须有写回而非重跑）；**反向**对**有配方条目**断言可驱逐可再生。**两向钉子**：只写前一条会把所有条目都当不可再生（过判）。
-  4. **版本可折叠（防过判）**：`X1` 与 `X2` 在**版本代数**上可证等价（如 `x = x + 0` 类）⇒ **允许**复用。⚠ 但**不得**靠值比较实现——判据要能区分"按代数折叠"与"按值相等折叠"（后者须红）。
-  5. **逐字节腿**：物化动作的注入**不得**改变语义图（与不变量 ① 共用正腿）。
+  2. **接口腿（结构性）**：静态扫消费面，断言**不存在** `latest()` / `newest()` / **`valid` 位** / 跨域 `max(version)` 之类的查询点。⚠ 判据须**限定为"跨 MemoryDomain 的比较"**——**同域内**的版本推进比较（存在格的版本性）**不违反**本条。**不加限定 = 判据会对合法实现恒红（过判）。**
+  3. **分档腿（本批按字段重述）**：对 `recipe = no` 条目断言：`persistence` 必填、跨域"再生"路径**不可用**（必须写回而非重跑）；**反向**对 `recipe = yes` 断言可驱逐可再生。**两向钉子**：只写前一条会把所有条目都当不可再生（过判）。
+  4. **`authority` 腿（本批新增）**：断言**至多一个** authoritative materialization（或权威显式落在 `device`/`external`）；反向：构造两份都标 authoritative ⇒ 必须**硬错**。⚠ 这是唯一能抓住"副本同值"假设回归的判据。
+  5. **`replicability` 腿（本批新增）**：对 `replicability = no` 的 Entry，断言"再物化一份"路径**不存在/被拒**（而不仅是"贵"）；反向：对 `replicability = yes` 断言复制合法。**这是旧框架完全无法表达的一档**（旧 `valid` 位模型默认副本总是允许）。
+  6. **版本可折叠（防过判）**：`X1` 与 `X2` 在**版本代数**上可证等价（如 `x = x + 0` 类）⇒ **允许**复用。⚠ 但**不得**靠值比较实现——判据要能区分"按代数折叠"与"按值相等折叠"（后者须红）。
+  7. **逐字节腿**：物化动作的注入**不得**改变语义图（与不变量 ① 共用正腿）。
 
-- **三态**：核心字段 `[已实现]` 级锚定——`version` 与 `home` **都在 `.ccr` ENT 盘面 28B 记录里**（`{var_id, version, def_nod, live_start, live_end, home, flags}`，`src/compiler/ccr_io.cr:173-176`）；语义基础 = 条款 5「赋值 = 版本化」`[已实现]` 文档面（`docs/academic/cache-semantics.md:29,61-67`）。
-  `(entry, version, memory_domain)` 的三元组形态与"禁止 newest 查询"是 `[提案]`。
-  ⚠ 盘面/内存不同构（同注：内存 `ESZ_ENTRY` = 24B **无 version 字段**）——实施批须显式处理这个不对称。
-- **违反后果**：退回"哪块内存最新"的 mutable-memory reasoning（原文自己的话："这比传统…干净很多"）⇒ 跨域读错版本 = **静默错误值**。
-- **反向钉子**：见腿 3 的双向与腿 4。
+- **三态（本批实核修正）**：⚠ **不是**"核心字段都已实现"——逐字段距离见 §3.4.5。摘要：七字段中 `identity`（`def_nod`，`dyn_arr.cr:139`）与 `version`（**仅盘面**，`ccr_io.cr:173-176`）是 `[已实现]`；`recipe` 与 `persistence` 是 **`[已设计未实现]`（槽位预留、值恒默认）**；`authority` / `location` / `replicability` **零命中 → `[提案]`**。
+  ⚠ 盘面/内存不同构（`ccr_io.cr:175`：内存 `ESZ_ENTRY` = 24B **无 version 字段**）——实施批须显式处理这个不对称。
+- **违反后果**：退回"哪块内存最新"的 mutable-memory reasoning ⇒ 跨域读错版本 = **静默错误值**；或对不可复制资源生成第二份副本 = **语义非法却 rc=0**。
+- **反向钉子**：见腿 3 的双向、腿 4、腿 5。
 
 ### 不变量 ⑤：hard constraint 不可静默降级
 
@@ -1133,6 +1276,52 @@ S-C §2.2 表（`[已设计未实现]`）：
 - **三态**：`[提案]`。⚠ **依赖 C-1 的裁决**——若通用路径不是 HIT（表机制），则本条的"通用域"身份待定。
 
 ---
+
+### 不变量 ⑧：`Evictable(x) ⟺ Recoverable(x) ∨ PreserveRequiredState(x)`（本批新增）
+
+- **形式陈述**
+  ```
+  Evictable(x) ⟺ Recoverable(x) ∨ PreserveRequiredState(x)
+
+  Recoverable(x)           := recipe(x) = yes ∧ 存在合法路径重新得到等价状态
+  PreserveRequiredState(x) := 在 x 消失前，必须保留的状态已转移到其他**合法** materialization
+                              （"合法"由不变量 ④ 的七字段判定——尤其 authority 与 replicability）
+
+  推论（负向，必须同时成立）：
+    ¬Recoverable(x) ∧ ¬PreserveRequiredState(x) ⇒ ¬Evictable(x)   —— 驱逐**非法**，不是"昂贵"
+  ```
+  ⚠ 关键：**`Evictable` 是合法性谓词，不是性能谓词**（与不变量 ③ 同族）。"驱逐它可以，但很慢"与"驱逐它不合法"是**两个不同档**，不得混。
+
+- **可执行判据的形状**
+  1. **两向钉子**：(a) 构造 `recipe = no` 且 state 未转移的条目 ⇒ 断言驱逐**被拒**（硬错/零产物），**不是**"执行了但慢"；(b) 构造 `recipe = yes` ⇒ 断言驱逐**合法**。只写 (a) 会把所有条目当不可驱逐。
+  2. **第二支专项钉**：构造 `recipe = no` 但 state **已**转移到合法 materialization ⇒ 断言驱逐**合法**。⚠ 这条是"第二支"的唯一钉子；**缺它则第二支形同虚设**（实现可以永远只走第一支而判据全绿）。
+  3. **合法性 ≠ 性能 的分离钉**：构造 `Evictable = 真` 但成本极高 ⇒ 断言决策仍是 **mapper** 的选择（可能选择不驱逐），而**不是**格层把它标为非法。**反向**：`Evictable = 假` ⇒ 断言**任何**成本都不能让它被驱逐（与不变量 ③ 腿 (a) 同形）。
+  4. **与旧条款的一致性腿**：对 `recipe = yes` 条目，断言新式与条款 2/3 的判定**逐条一致**（防"新式松到把缓存实例判错"）；对 `recipe = no`，断言与条款 4b 的"必写回"一致。
+
+- **三态**：`[提案]`。既有条款 2/3/4b 是它在**缓存实例**上的取值 `[已设计未实现]`（文档面 `cache-semantics.md:25-28`）。
+- **违反后果**：把"非法驱逐"实现成"合法但慢" ⇒ **不可再生状态被丢弃** = 静默语义破坏（本仓最重视的失效形态）。
+- **反向钉子**：见腿 2（第二支）与腿 3（合法性/性能分离）。
+
+### 不变量 ⑨：格层不承担 policy（本批新增）
+
+- **形式陈述**
+  ```
+  格层判定的值域 ⊆ {合法 / 可共存 / 同一 Entry+version / 保语义}      —— 四问，全是**判定性**问题
+  mapper 决定   ⊇ {何时驱逐, 放寄存器还是 RAM, 是否保留 residency,
+                    LRU, write-back, write-through, prefetch}          —— 全是有向退化的**策略**
+
+  禁止（负）：
+    格层的判定输出**不得**依赖任何 policy 参数（阈值/历史/负载/时钟）
+    格层**不得**出现 "preferred" / "hot" / "recently used" 之类策略谓词
+    policy 缺失**不得**改变格层判定结果（可缺席性）
+  ```
+- **可执行判据的形状**
+  1. **可缺席性腿**：清空全部 policy 配置（无 `objective`、无阈值、无 PGO 数据）⇒ 断言**格层判定结果逐条不变**（与带 policy 时对拍）。**这是本条的承重钉**——若格层判定随 policy 变，则 policy 泄漏进了格层。
+  2. **策略词零命中腿**：静态扫格层面（`materialization-space.md` 的规则 + §3.4 字段 + §八①④⑧），断言无 `LRU` / `prefetch` / `hot` / `recent` / `write-back` 等策略词。⚠ 判据须**限定在格层面**——mapper 侧（§五）**必然**有这些词，不加限定会恒红。
+  3. **两向钉**：反向构造一个**必须**靠 policy 才能决定的问题（如"这两份等价 materialization 该保留哪份"）⇒ 断言格层**拒绝回答**（返回"二者皆合法"），把选择留给 mapper。**这说明格层没有越界。**
+- **三态**：`[提案]`。**既有同型纪律** `[已设计未实现]`：S-C **L5**「成本模型 = 数据 + 可替换组件…不进表；HIT spec §3.3「优化不走表」」——本条是它的姊妹条款（"策略不进格"）。
+- **违反后果**：policy 进格层 ⇒ 换部署改语义判定的**可观测部分** ⇒ 击穿不变量 ① 与 S-C L2。
+- **反向钉子**：见腿 3。
 
 ## 九、承载：IR 与 `.ccr` 格式（代价实核）
 
@@ -1181,7 +1370,7 @@ S-C §2.2 表（`[已设计未实现]`）：
 
 | # | 里程碑 | 内容 | 判据形状（本文补） | 依赖 |
 |---|---|---|---|---|
-| **M0** | **Specification** | 定义 ExecutionDomain · MemoryDomain · TopologyLink · Residency · AUTO/PREFER/REQUIRE；明确 placement 非语义本体 | 本文档 §三/§八 落盘（**本文即 M0 产物**） | — |
+| **M0** | **Specification** | 定义 ExecutionDomain · MemoryDomain · TopologyLink · Residency · AUTO/PREFER/REQUIRE；明确 placement 非语义本体。<br>**〔本批追加〕** 存在格本体（Materialization 七字段 + `Evictable` 改写）归 `materialization-space.md`；本文只承担**放置面** | 本文档 §三/§八 落盘（**本文即 M0 的放置面产物**）<br>**并列产物** = `docs/maintainer/design/materialization-space.md`（本体面） | — |
 | **M1** | **Syntax** | `@preferredDomain(name)` · `@executionDomain(name)`；支持 `fn`/`flow`/`loop`/`region`；**parser/checker 只做名字与结构处理** | 正：四类位置各一档，注解被解析进侧表；负：未知域名/非法位置 ⇒ rc=1 + 码 + 零产物（`check` 面）；**结构腿**：注解**不产生任何 IR**（`--dump-*` 前后逐字节同） | M0 |
 | **M2** | **IR metadata** | annotation → region mapping metadata；**HDFG byte/semantic identity 不因 placement 改变**；dump 支持显示 domain constraint | **= 不变量 ① 的四条腿**（含"摘除 MAP 段后逐字节同"的限定口径） | M1 |
 | **M3** | **Logical domain config** | 部署配置定义 execution domains；domain alias → backend/device；**默认域** | 配置解析单元档：别名解析/未知别名硬错/默认域回退；`Core.toml` 现只有 `name`（`src/compiler/project.cr:56` 全文仅读 name）⇒ **须扩 schema** | M0 |
@@ -1245,7 +1434,11 @@ S-C §2.2 表（`[已设计未实现]`）：
   1. 两者**不是矛盾**，但原文的**统一 `valid` 位模型不覆盖**无配方条目——对它们"VRAM 那份可由 DDR 再生"是**错的**（条款 3 不成立），且存在**权威副本（home）**概念，原文模型里**没有这一位**。
   2. **仓库侧是更强的要求**：条款 4b 对无配方条目给的是**义务**（必须有 home、驱逐必写回），而原文把 residency 整体当**优化**。⇒ 若不区分，实施批会把"必写回"实现成"可丢"= **静默语义破坏**。
   3. `home` 字段**已在 `.ccr` ENT 盘面上**（`ccr_io.cr:173-176`）⇒ 承载面已存在，缺的是模型侧的**分档规则**。
-- **待裁点（不裁决）**：Residency 的 `valid` 语义是否**按配方案别分档**（有配方 = 可驱逐可再生 / 无配方 = home 必有 + 驱逐必写回 + 不可再生）？若是，§八 不变量 ④ 须按类别分档给判据（已在判据腿 3 预留）。
+- **⚠ 本批状态变更（materialization-space 输入后）**：本条**由"待裁"改为"已被新框架涵盖"**。
+  理由：新输入的 `Evictable(x) ⟺ Recoverable(x) ∨ PreserveRequiredState(x)`（§6.4）**第二支**正是条款 4b 的位置——条款 4b 不再是"例外条款"，而是第二支的**正例**。
+  且新框架用 **`authority`** 取代 `valid`（§3.5），"权威副本"这个概念**已在七字段里有位**（§3.4.5 第 4 行）。
+  ⇒ 本文已按此**重写** §3.5（删 `valid`）、§6.4（`Evictable` 新式）、§6.5（方向反转）、§八④（按字段分档 + 新增 `authority`/`replicability` 判据）、§八⑧（新不变量）。
+- **剩余待裁点（**只剩一条**，不裁决）**：**条款 4b 自身的措辞是否要改**——它现在写在 `cache-semantics.md`（被定位为"缓存映射实例的规律"）里，而它讲的其实是**存在格的一般规则**（any `recipe = no`）。⇒ 是"条款 4b 应**上移**到 `materialization-space.md`"，还是"保留在原处、由存在格文档引用它"？**本批不裁决，也不改那份文件**（C-11）。
 
 ### C-3 `.ccr` 段位主张冲突：MAP 段 vs 驱逐标注段 vs 证书段
 
@@ -1310,6 +1503,54 @@ S-C §2.2 表（`[已设计未实现]`）：
 - **我的核实结论**：原文"部署策略不进源码"与 L5/§1 **同向**。但**边界待钉**：`objective` 属于**部署配置**（原文）→ 而 L5 说"放置策略不进**表**"——**部署配置 ≠ 表**吗？在仓库的术语里 `Core.toml` 是**部署配置**、HIT 表文件是**表**，二者是不同物 `[已实现]`（前者 `project.cr` 读，后者 `--table` 传入，`hit.cr:4`）。⇒ **不冲突**，但文档须显式写"部署配置与目标描述表是两处，L5 只约束后者"。
 - **待裁点**：`objective` 是否应落**部署配置**（原文）还是**目标描述表**（S-C §3.1 的"目标描述"三轴 + 表）？若落表，则与 L5"策略不进表"直接冲突，须先裁 L5 的适用范围。
 
+### C-11 ⚠ 「格 = 缓存」教义的既有落点（**逐条列出，一律不改**）
+
+- **新输入断言**（`materialization-space-raw.md`）：把「格 = 缓存」当**本体定义**「可能太窄」；正确的层关系是 `格层 = Materialization / Existence Space`，**缓存只是其中一类映射实例**；「"缓存"这个词都可以降级，不再作为整个层的总名字」。
+- **仓库现状（既有「定稿」措辞，本会话逐条实核行号）**：
+
+| # | 位置 | 原句（节录） | 与输入的冲突点 |
+|---|---|---|---|
+| 1 | `docs/academic/cache-semantics.md:4` | 「本文件是 Core 存储语义**本体**的**唯一权威**」 | 把缓存条款**升为本体**；新输入要把本体归 Materialization Space |
+| 2 | `docs/project-book.md:216` | 「存储语义**本体**为**缓存语义**（值 = 配方、条目可驱逐可再生、图边界为唯一不可再生来源）；字节内存是其在经典硬件上的**映射实例**」 | ① 本体 = 缓存（要改）；② **但"字节内存 = 映射实例"这半句方向正确**，是新旧框架**共有的** |
+| 3 | `docs/project-book.md:109` | 「图也是存储语义的载体——值即条目（配方可重算），**存储即缓存（范式无关）**，内存只是经典映射」；同段「**格负责承载计算**（内存模型 = 中间存在空间）」 | 「存储即缓存（**范式无关**）」是**最强的冲突句**——新输入恰恰指出缓存**是**范式相关的（那六个假设在别的范式不成立）；同段的「中间存在空间」**反而**与新层名同向 |
+| 4 | `docs/z-vision.md:15` | 「范式映射表——**存储半边已定稿**（语义本体 = 缓存语义，字节内存 = 经典映射实例）」 | 「已定稿」= 本批要修订的对象本身 |
+| 5 | `docs/maintainer/design/memory-model.md`（标题 + §一分工表） | 「存储语义总览:**缓存** → 存在结构 → 经典映射」；「条款权威 = cache-semantics.md」 | 层名以「缓存」起头；分工表把 cache-semantics 列为「条款权威」 |
+| 6 | `docs/maintainer/design/existence-structure.md`（标题 + §三表头） | 「存在结构:v6 **格形态** IR 的语义承载」；「ENT 记录字段与**缓存条款**的对应」 | ⚠ **标题里已经是「存在结构」**——与新层名**同向**；但字段表以「缓存条款」为列标题（要改列名，不改字段） |
+| 7 | `docs/maintainer/design/region-model.md:3-5` | 「本文件 = 缓存语义（权威 = docs/academic/cache-semantics.md）在经典字节硬件上的**映射实例**详细设计」 | ✅ **方向已经正确**（"映射实例"）——**唯一无需修订的一处**，可作为其余各处的改写范本 |
+
+- **我的核实结论**：`[已设计未实现]`。冲突**不是全仓一致性的问题**——**7 处里至少 2 处（#2 后半、#7）方向已对，且 #6 标题已用「存在结构」**。⇒ 修订面比输入预估的**窄**：核心是 **#1/#2/#3/#4/#5 的"本体"一词**与**层名**，而不是整套语义。
+- **待裁点（不裁决，且本批一律不改这些文件）**：
+  - (a) `cache-semantics.md` 的**文件名**是否改（它是 7 条的**条款权威**不变，但标题「缓存语义:存储语义**本体**」要改）？
+  - (b) `memory-model.md` 标题的「**缓存** → 存在结构 → 经典映射」是否改为「**存在格** → 存在结构 → 缓存映射」？
+  - (c) `existence-structure.md` §三表头「与**缓存条款**的对应」是否改为「与**存在格规则**的对应」（字段与取值**不动**）？
+  - (d) 三步修订的**顺序与同批性**——既有纪律「修了前置能力的批次必须同批清点把该缺口当现状写的陈述」，故 (a)–(c) 宜**一批同改**。
+
+### C-12 三层映射链的**层名**（不是层定义）
+
+- **新输入断言**：`图 → 存在格 / Materialization Space → 编码`；`缓存语义 = 经典可再生值的一种映射规律`。
+- **仓库现状**（两处现行层名，措辞几乎相同）：
+  - `docs/project-book.md:109`：「三层映射（2026-08-27 正式晋升）：语义 → 图 → 格 → 编码——图负责表达计算（关系空间），**格负责承载计算（内存模型 = 中间存在空间）**，编码负责实现计算（物理编码空间）」
+  - `docs/z-vision.md:15`：「范式 → 图 → 格 → 编码——图 = 关系空间…**格 = 状态/存储空间（内存模型 = 中间存在空间）**…编码 = 物理编码空间」
+- **我的核实结论**：⚠ **层名早已是「格」，不是「缓存」**——两处都写「图 → **格** → 编码」，且都注明「**中间存在空间**」「**状态/存储空间**」。
+  ⇒ **新输入要的层名（"存在格 / Materialization Space"）与既有层名（"格 / 存在空间"）几乎重合**，差别只在**具体化**：既有写"格"，新输入写"**存在格**"并给英名。**这是术语具体化，不是层结构变更。**
+  ⇒ 真正变更的是**层内本体**（C-11 的"缓存 → Materialization"），**不是层的数量或位置**（四段链 `语义→图→格→编码` 不动）。
+- **待裁点**：层名是否统一为「**存在格**」（中文正式名）+ `Materialization Space`（英文）；`格` 作为简称保留。**建议但不裁决**：保留 `格` 作简称可避免全仓改动（`z-vision.md`/`project-book.md` 数十处"格"字）。
+
+### C-13 `ENT flags` 位语义（设计文档）vs 恒零值（实现）
+
+- **设计文档断言**：`existence-structure.md:45`「`flags` | **bit0 无配方 / bit1 参数 / bit2 全局 / bit3 驱逐候选(v6.1)** | 条款 4b / 条款 2」；`:59`「ENT flags bit0 = 无配方(图内不可重算)——**必须有 home**」。
+- **仓库现状**（本会话逐行实核）：
+  - **槽位**：`OFF_ENTRY_FLAGS : int = 20;   // 位 0 **预留**：无配方（条款 4b）`（`dyn_arr.cr:143`）
+  - **值（内存态）**：`flags(20) u32 = **0**（位 0 预留：无配方，条款 4b）`（`globals.cr:232`）
+  - **值（盘面）**：`flags **恒 0**（无配方/参数/全局/驱逐位**零实例**——位语义保留）`（`ccr_io.cr:85`）
+  - **写点穷举**：`OFF_ENTRY_FLAGS` 全仓仅三处——`dyn_arr.cr:143`（常量）、`ccr_io.cr:473`（读）、`ccr_io.cr:1447`（loader 回写**从盘面读到的** `efl`，即往返，**非新决策**）。⇒ **无任何一处写入非零值。**
+- **我的核实结论**：⚠ **设计文档的措辞与实现有可观测落差**：文档写「bit0 = 无配方」（**陈述式**，读起来像已生效），实现是「位 0 **预留**」（`dyn_arr.cr:143` 原文用词）+「**零实例**、位语义保留」（`ccr_io.cr:85`）。
+  ⇒ **`recipe` 的正确三态 = `[已设计未实现]`（预留槽位 + 恒零值），不是 `[已实现]`**。
+  ⇒ 这不是缺陷——**是"写侧不做决策回填"的有意设计**（同注：`home 恒 -1`，理由「分配决策不写回格式」）。
+- **待裁点**：
+  - (a) `existence-structure.md:45/59` 是否应把「bit0 = 无配方」改述为「**bit0 预留**（位语义已定，零实例）」以对齐实现？（**本批不改**）
+  - (b) `recipe` 要变成**活位**时，是否确认**不需改布局**（位已预留）——只需**一个写点 + 一个消费点**？（本文 §3.4.5 结论 1 倾向"是"，但**未核**写点的插入位置，见 §十二）
+
 ---
 
 ## 十二、未核实清单（**宁可交白卷也不猜**）
@@ -1324,8 +1565,16 @@ S-C §2.2 表（`[已设计未实现]`）：
 6. **`@executionDomain` 硬错是否已与 fail-closed 门/豁免表兼容**——本会话核到门与豁免表**存在**（`diag.cr` 头注 + `diag_gate_exempt`）与 `test_diag_gate.py` 的存在，**未核**新增码族的注册流程细节。
 7. **`grammar/core.ebnf` 的 `Statement` 全文**——只核到 `FlowDecl`（`:22`）与"Statement 不含 FunctionDecl"（来自 `parser.cr:995-996` 的**注**，**非** EBNF 原文）。放开 `flow` 块须以 EBNF 原文为准。
 8. **`docs/maintainer/design/dataflow-design.md` §8 的"执行标注空间"**——原文 §"无配方条目"与 S-C §1 都引它（神谕/BSS 实数/FIXPT/模糊融合），本会话**未读该节**；§3.6 的 `storage`/`dynamism` 推导可能与之强相关。
-9. **`docs/maintainer/design/existence-structure.md` 的 ENT/NOD/REG 语义视角**——§3.4/§3.5 的 version/home 只核到 `.ccr` 盘面字段与 cache-semantics 条款，**未读**该文档对"存在区间（live range）是版本级别的"（`cache-semantics.md:67` 指向它）的展开。这对 §3.5 ResidencyState 的 live range 承载**可能是必需的**。
-10. **`src/stdlib/goroutine.cr`（70 行）的 G 结构体字段全集**——`execution-model.md` §3.2 给了设计态 `struct Goroutine {…}`，**未与实现核对**（§6.6 的 per-domain 队列改动面取决于此）。
+9. **`docs/maintainer/design/existence-structure.md` 的 ENT/NOD/REG 语义视角**——§3.4/§3.5 的 version/home 只核到 `.ccr` 盘面字段与 cache-semantics 条款，**未读**该文档对"存在区间（live range）是版本级别的"（`cache-semantics.md:67` 指向它）的展开。这对 §3.5 ResidencyState 的 live range 承载**可能是必需的**。（⚠ **本批部分补核**：§三 ENT 字段表 `:36-46`、无配方节 `:57-59`、开放点 `:115-123` 已读；**§四–§九 仍未读**。）
+10. **`src/stdlib/goroutine.cr`（70 行）的 G 结构体字段全集**——`execution-model.md` §3.2 给了设计态 `struct Goroutine {…}`，**未与实现核对**（§6.8 的 per-domain 队列改动面取决于此）。
+
+**本批（materialization-space 输入）新增的未核实项**：
+
+11. **`recipe` 变活位所需的写点位置**——§3.4.5 结论 1 说"位已预留、只需一写点 + 一消费点"，但**未核**该写点应插在哪（`compute_entries` 内核？`ccr_io` 写侧？还是 `checker` 的类别判定处），也**未核**谁在编译期知道"这条目无配方"（最接近 = cache-semantics 条款 4 的边界标注 `unsafe`，及 `dataflow-design.md` §8 的执行标注——**后者本会话未读**，见第 8 项）。⇒ **`recipe` 的"只差一个写点"这个判断，其可行性未验证。**
+12. **`authority` 的仓库侧最近物**——本批只做了**零命中**核验（`authority` 在 `src/` 与 `docs/maintainer/design/`、`docs/academic/` 无出现）。**未核**它是否以**别的词**存在（候选：`home`／`SG_UNSAFE` 的边界通道／`IR_CALL_EXTERN` 的返回值语义／`volatile` 类标注）。⇒ 若它其实以别名词存在，§3.4.5 第 4 行的 `[提案]` 判定**须下调**。
+13. **`replicability` 的仓库侧最近物**——同第 12 项，只做零命中核验。**未核**是否有等价约束（候选：`Linear`/一次性类型的既有设计、`chan` 的单产单消边语义 `chan.cr`、arena 的 `share` 规则 `region-model.md` §3.2 推论 B）。
+14. **`location` 与 `mt_memd` 的区分是否有既有实现阻力**——§3.4.3 断言二者是不同槽（格层 vs 放置层）。**未核**现有 ENT/REG 面是否**已经**把两者混用（若 `home` 同时被当"槽位"与"域"，实施批会撞上既有消费者）。
+15. **`docs/maintainer/design/materialization-space.md`（existdoc 的产物）落盘后的接口面**——本文按**预定名**交叉引用（§文档头 / §〇.1 / §一）。**未核**该文档实际用的字段名/层名是否与本文 §3.4.2 的七字段一致。⚠ **两侧命名若不一致，本文 §3.4.2 与 §八④ 须同批改名**（本文**不重复定义**本体，故**以那份为准**）。
 
 ---
 
@@ -1341,15 +1590,21 @@ S-C §2.2 表（`[已设计未实现]`）：
 | 口径 | 定义 | 复现方式 |
 |---|---|---|
 | **A. 内联标记出现次数** | 全文**方括号形态**标记的出现次数（**同一主张在表内 + 行内会各记一次**） | `grep -o '\[已实现\]' <file> \| wc -l` |
-| **B. 去重主张条数** | 下方索引表的行数（一行 = 一条独立主张） | `sed -n '/逐条索引/,/^$/p' <file> \| grep -c '^| [0-9]'` |
+| **B. 去重主张条数** | 下方索引表的行数（一行 = 一条独立主张 **且该行本身不带标记**） | `a=$(grep -n '^〔已实现〕逐条索引' <file> \| cut -d: -f1); b=$(grep -n '^〔已设计未实现〕逐条索引' <file> \| cut -d: -f1); sed -n "$a,${b}p" <file> \| grep -c '^| [0-9]'`（⚠ **必须带 `^` 锚**：否则会先匹配到**本节说明行自身**里的同一串，范围起点前移 ⇒ 读数虚高——本会话实测过 55 vs 真值 14） |
 
 | 档 | A（出现次数） | B（去重条数） | 说明 |
 |---|---|---|---|
-| 〔已实现〕 | **46** | **34** | B 档每条带 `file:line`，见下清单 |
-| 〔已设计未实现〕 | **19** | **11** | B 档每条带出处文件 |
-| 〔提案〕 | **36** | 其余全部（**默认档**） | A 口径只数**显式写出**的标记；**未含**默认推断档（散落各处、无标记即为提案） |
+| 〔已实现〕 | **39** | **41** | B 档每条带 `file:line`，见下清单 |
+| 〔已设计未实现〕 | **28** | **14** | B 档每条带出处文件 |
+| 〔提案〕 | **45** | 其余全部（**默认档**） | A 口径只数**显式写出**的标记；**未含**默认推断档（散落各处、无标记即为提案） |
 
-**读数口径（实测，可复现）**：本节改写为全角括号前 A 读数 = 49 / 22 / 38；改写后 = **46 / 19 / 36**（§13.1 索引表头亦归一为全角后）——差额恰为**本节方法论自身**曾含的方括号标记数（自指，非文档内容变化）。⇒ **计数必须写明"含不含方法论段"**，否则同一文件两次读数不同（既有纪律「计数不可执行时把导出清单写成显式子步，不得反推凑旧数」）。
+**读数的三条口径纪律（实测确立，缺任一条则数不可复现）**：
+
+1. **自指**：本节方法论若含**方括号形态**的标记，会被自己的 `grep` 计入 ⇒ 本节内一律写全角 `〔〕`。本节改写前的 A 读数为 49 / 22 / 38，改写后为 46 / 19 / 36（那两次），差额恰为方法论自身所含量——**非文档内容变化**。
+2. **`A < B` 是正常的**（本批起）：索引表的行**本身不带标记**（只有主张文本 + 位置），故 §13.1 曾把索引表头写成方括号时 A 会虚高；归一为全角后，**一个主张在全文中可以只有索引行、没有行内标记** ⇒ `A < B` 成立。**不要据此认为漏标**。
+3. **不得反推凑旧数**（既有纪律）：本批新增了 C-11…C-13、不变量 ⑧⑨、15 项未核实清单，**计数上升是内容增加的必然**；若某档数字与本批之前的读数接近或相同，须核**是否真未新增**，而不是照抄旧值。
+
+> 三态计数**随细看只会变多**（既有纪律）⇒ 上表读作「**至少**」；**权威 = 下方索引清单**，非本表数字。
 **A 与 B 的差额来源**（可复现，不是错）：同一主张常在一处表格 + 一处行内各标一次；索引表本身也是标记出处。**差额不是计数错误**，是两种口径的定义差。
 
 〔已实现〕逐条索引（便于复核；**每条均可 `jj file show -r develop@origin <path>` 复现**）：
@@ -1390,6 +1645,13 @@ S-C §2.2 表（`[已设计未实现]`）：
 | 32 | CLI dump 面（`cir`/`ccr`/`--dump-types`/`--dump-ifaces`/`--dump-params`） | `src/compiler/main.cr:237-240,262,608-609,687` |
 | 33 | 错误码分块 + `EC_*` 常量块 + P0xx 号段 | `docs/developer/errors.md`（分节）；`src/compiler/ast.cr:331-357` |
 | 34 | cache-semantics 七条 + 范式映射表 | `docs/academic/cache-semantics.md:24-31,79-87` |
+| 35 | ENT **内存**布局 24B + `OFF_ENTRY_*` 六槽 | `src/compiler/dyn_arr.cr:135-143` |
+| 36 | ⚠ `flags 恒 0` / `home 恒 -1`（**零实例**；理由 = 分配决策不写回格式） | `src/compiler/ccr_io.cr:83-85`；`src/compiler/globals.cr:232` |
+| 37 | ENT 字段↔条款对应表 + 无配方条目节（`flags bit0 = 无配方` 的**设计文档**陈述） | `docs/maintainer/design/existence-structure.md:36-46,57-59` |
+| 38 | 存在结构的三段总览 + ENT 为"存在结构核心" | `docs/maintainer/design/existence-structure.md:20-34` |
+| 39 | 纯度函数真值（`compute_all_purity` / `purity_op_effect`）——§3.6 推导原料 | `src/compiler/checker.cr:4555,4508` |
+| 40 | ⚠ **零命中核验**：`authority` / `replicability` 在 `src/` + `docs/maintainer/design/` + `docs/academic/` **无任何出现** | 本会话 grep 实测（负结果也是实核结果） |
+| 41 | ⚠ **零命中核验**：`ExecutionDomain` / `MemoryDomain` / `TopologyLink` 全仓无出现 | 本会话 grep 实测 |
 
 〔已设计未实现〕逐条索引：
 
@@ -1406,13 +1668,21 @@ S-C §2.2 表（`[已设计未实现]`）：
 | 9 | `.ccr` tag `9+` 既有主张 = 驱逐标注段 / 证书段 | `docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md:50` |
 | 10 | execution-model §5.1/§5.3/§六 部署配置原则 | `docs/maintainer/design/execution-model.md:180-183,199-201,203` |
 | 11 | archive「无格承诺」v4 定稿 | `docs/archive/memory-model-capability-lattice.md:11,14,15` |
+| 12 | **〔本批新增〕**「格 = 缓存」教义的 7 处既有落点（C-11 表逐条行号） | `cache-semantics.md:4`；`project-book.md:109,216`；`z-vision.md:15`；`memory-model.md`（标题 + §一）；`existence-structure.md`（标题 + §三表头）；`region-model.md:3-5` |
+| 13 | **〔本批新增〕**三层映射链的既有层名「图 → **格** → 编码」+「中间存在空间」 | `docs/project-book.md:109`；`docs/z-vision.md:15` |
+| 14 | **〔本批新增〕**`existence-structure.md` 的 `flags` 位语义（bit0–bit3）——**陈述式**，与实现的「预留 + 零实例」有落差 | `docs/maintainer/design/existence-structure.md:45,59` |
 
 ### 13.2 自查
 
-- **不变量表**：①–④ 齐（§八），另补 ⑤⑥⑦。每条含**形式陈述 + 判据形状 + 三态 + 违反后果 + 反向钉子**。① 的判据**已显式处理 STR 段陷阱**（否则判据会假红）；③④ 给的是**两向钉子**而非单向。
-- **数据结构定稿**：§三 十节，字段级（槽偏移 + 类型 + 含义），全部 `[提案]`。
-- **三态标注**：§13.1 计数；默认 `[提案]`；`[已实现]` 34 条全带 `file:line`。
-- **冲突登记**：C-1…C-10 十条，每条给原文断言 / 仓库现状 / 我的结论 / 待裁点，**未替维护者裁决**。
-- **未核实清单**：§十二 十条。
-- **交叉引用**：文档头已加 `mapping-layer-separation` 一行（投影面 vs 放置面），并注明该文件在基线上尚不存在、**未修改它**。
-- **本文档未修改任何既有文件**（新增单文件）。
+- **不变量表**：①–④ 齐（§八），另补 ⑤⑥⑦ + **〔本批新增〕⑧（`Evictable` 定义）⑨（格层不承担 policy）**。每条含**形式陈述 + 判据形状 + 三态 + 违反后果 + 反向钉子**。① 的判据**已显式处理 STR 段陷阱**（否则判据会假红）；③④⑧⑨ 给的是**两向钉子**而非单向。
+  ⚠ ④ 本批**加强**：七字段完备 + **删除 `valid` 位** + 新增 `authority`/`replicability` 两条专项判据（这两条是旧框架**无法表达**的档）。
+  ⑧ 的关键钉子 = **第二支 `PreserveRequiredState` 的单独判据**（缺它则第二支形同虚设）。
+  ⑨ 的关键钉子 = **可缺席性**（清空 policy 后格层判定逐条不变）。
+- **数据结构定稿**：§三 十节，字段级（槽偏移 + 类型 + 含义）。§3.4 **本批重写**为**两级结构 + 七字段 + 逐字段距离实核**；§3.5 删除 `valid` 位。
+- **三态标注**：§13.1 计数；默认 `[提案]`；`[已实现]` 全带 `file:line`。
+  ⚠ **本批最重要的一条三态修正**：`recipe` **不标 `[已实现]`**——精确结论 = **「预留槽位 + 恒零值」→ `[已设计未实现]`**（§3.4.5 / §十一 C-13）。七字段里只有 `identity` / `version` 是 `[已实现]`（且 `version` 仅盘面）。
+- **冲突登记**：C-1…C-10 + **〔本批新增〕C-11（「格 = 缓存」7 处落点）/ C-12（层名）/ C-13（flags 位语义 vs 零实例）**，每条给断言 / 仓库现状 / 我的结论 / 待裁点，**未替维护者裁决**；**既有「定稿」文档一律未改**。
+- **未核实清单**：§十二 十五条（本批新增 11–15，其中第 15 项 = **与 `materialization-space.md` 的命名对齐义务**）。
+- **交叉引用**：文档头三处——① `materialization-space.md`（**本体定义归它，本文不重复定义**，并注明该文件尚不存在）；② `mapping-layer-separation.md`（投影面 vs 放置面，亦注明尚不存在）；③ `existence-structure.md`（存在格的 IR 承载）。
+- **层归属（本批新增）**：§〇.2 + §6.7 + §八⑨ 三处**同口径**划界「格层只答四问 / policy 全归 mapper」。
+- **本文档未修改任何既有文件**（新增单文件；`/tmp/briefs/*` 两份真源亦未动）。
