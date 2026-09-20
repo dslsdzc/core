@@ -1,7 +1,7 @@
-# 寄存器分配:缓存语义映射实例
+# 寄存器分配:存在格的一类映射实例(寄存器行;缓存映射)
 
 > 定位:受众 = 维护者(分配器/opt.cr/一致性自检);状态 = active。
-> 本文是寄存器分配在 Core 架构中的正式参考文档——缓存语义(权威 = docs/academic/cache-semantics.md)的寄存器映射实例;存在区间载体 = v6 ENT(docs/maintainer/design/existence-structure.md)。
+> 本文是寄存器分配在 Core 架构中的正式参考文档——**存在格 / Materialization Space**(层定义 = docs/maintainer/design/materialization-space.md)的寄存器映射实例(缓存映射一族);规则权威 = 条款 1–7(docs/academic/cache-semantics.md);存在区间载体 = v6 ENT(docs/maintainer/design/existence-structure.md)。
 > 设计决策记录(日期/排除方向/讨论):docs/superpowers/specs/2026-08-27-regalloc-cache-mapping-design.md;分配器逻辑契约文档 = src/compiler/regalloc-consistency.cr(v6 分支)。
 > 本文 2026-09 重写:v6 对齐(ENT 区间/home/sweep 共存)+ 实现状态分线(develop vs lattice-ir-v6)。
 
@@ -26,7 +26,7 @@
 
 ```
 图(HDFG)    关系空间:值流、配方、图活性
-格(存在)    条目存在:版本、共存、驱逐(cache-semantics 本体;v6 ENT 编码)
+格(存在)    条目存在:版本、共存、驱逐(**存在格本体**;v6 ENT 编码)
 编码(物理)  映射实例:寄存器(缓存层)/ 栈槽(home)/ 字节
 ```
 
@@ -38,7 +38,7 @@
 
 ## 二、语义基座:驱逐不变量 = 语义保持定理
 
-公理 = 缓存七条(docs/academic/cache-semantics.md)。其中:
+公理 = 条款 1–7(docs/academic/cache-semantics.md)。其中:
 
 - **驱逐不变量(条款 2)**:⟦G ∖ storage(e)⟧ = ⟦G⟧——驱逐任意条目不改变可观测语义
 - 分配器放寄存器还是栈、放多久 = 放置/替换策略——**算法零证明**,语义保持不依赖具体贪心(生成器 + 验证器分离;VeriLocc 同构先例)
@@ -54,7 +54,29 @@
 | 共存 | 存在区间相交 | 不落盘——sweep 推导(existence-structure.md §六) |
 | home | 栈槽 | ENT home(分配器回填;-1 = 寄存器候选) |
 
-**无配方条目**(边界 + 图内不可重算,cache-semantics 条款 4/4b):必须有 home、驱逐必写回——不按范式枚举。v6 载体 = ENT flags bit0(无配方)。
+**无配方条目**(边界 + 图内不可重算,条款 4/4b):必须有 home、驱逐必写回——不按范式枚举。v6 载体 = ENT flags bit0(无配方)。
+
+### 三.1 显式约束:驱逐判定必须先查 `recipe`(2026-09-20 补)
+
+**这条来自条款 4b 的义务面,不是新发明**——4b 对无配方条目给的是**义务**(材料必须保有/转移、不可再生),而寄存器文件只是一份 materialization。若把 residency(物化在哪)整体当纯优化处理、不按 `recipe` 分档,实现出来就是「**可丢**」——**静默语义破坏**,正是本仓要收的那一类缺陷。
+
+判据(与条款 2′ 同形):
+
+```
+Evictable(x)  ⟺  Recoverable(x) ∨ PreserveRequiredState(x)
+
+recipe = recomputable   ⇒ 走 Recoverable 支:回收 = 驱逐 + 按需再生(条款 3/remat),零额外义务
+recipe = unrecomputable ⇒ 必须走 PreserveRequiredState 支:回收前材料已保有或被合法转移
+                          (写回 home / 身份重指);**不得**按「可重算」处理
+判不出 recipe           ⇒ 不可驱逐(fail-closed)
+```
+
+**与「算法零证明」的关系(§二)**:「分配器放寄存器还是栈、放多久 = 放置策略,算法零证明」这一条**只在 `recipe = recomputable` 的条目上成立**。对无配方条目,放置/回收**不是**自由策略——它受 4b 义务约束,必须由判定拦截(§四 规则 ③)。
+
+> ⚠ **实现状态(2026-09-20 实核)**:该分档目前**没有实现**——`ENT flags` bit0 恒 0
+> (两个写侧硬编码,见 materialization-space.md §7.1),即**当前没有任何条目被标记为
+> 无配方**,判定也就无从分档。这不构成现存缺陷(边界/执行标注尚未进入 `.ccr`),
+> 但**生产者落地时必须与本节同批**,否则该形态一进 IR 就是静默可丢。
 
 ## 四、判定(验证):一致性四条
 
@@ -62,7 +84,7 @@
 
 1. **共存互斥**:每时刻每寄存器至多一个条目的材料(共存条目不同寄存器)
 2. **读点无陈旧**:读到的材料与条目当前版本对齐(条款 5)
-3. **驱逐配对**:寄存器回收(驱逐)时材料不丢——写回 home,或配方可再生(条款 3 = remat);无配方条目必写回
+3. **驱逐配对**:寄存器回收(驱逐)时材料不丢——**按 `recipe` 分档**(§三.1):`recomputable` ⇒ 写回 home 或配方可再生(条款 3 = remat);`unrecomputable` ⇒ **必走 PreserveRequiredState 支**(材料保有/合法转移),不得按可再生处理;判不出 ⇒ 不可驱逐
 4. **调用点失效契约**:调用点 = 缓存失效边界——caller-saved 失效(材料归 home)、callee-saved 保留(ABI = 缓存保留契约)
 
 **算法零证明**:正确性由判定保证,与分配算法无关。分配算法 = 上下文贪心(§五,定案)。

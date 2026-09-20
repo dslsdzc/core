@@ -1,7 +1,7 @@
 # 三层映射理论:图 → 格 → 编码(定稿)
 
 > 定位:受众 = 学术(验证/理论读者,兼维护者);状态 = active(v3 立、v4 晋升定稿,2026-08-27 第三层更名)。
-> 本文件 = 三层映射理论的**定稿提炼**;原始论证与演进(抽象升华系列/v1-v4 讨论)见 docs/archive/memory-model-capability-lattice.md;存储半边条款(cache-semantics 七条)见 docs/academic/cache-semantics.md;执行标注空间见 docs/maintainer/design/dataflow-design.md §8。
+> 本文件 = 三层映射理论的**定稿提炼**;原始论证与演进(抽象升华系列/v1-v4 讨论)见 docs/archive/memory-model-capability-lattice.md;存储半边的**层定义**(存在格 / Materialization Space)见 docs/maintainer/design/materialization-space.md、**条款 1–7** 见 docs/academic/cache-semantics.md;执行标注空间见 docs/maintainer/design/dataflow-design.md §8。
 
 ---
 
@@ -45,7 +45,7 @@
 
 ### 规则封闭、对象开放(v4 定稿)
 
-- **规则(封闭,永不新建)**:缓存语义七条 + 最弱理论(关系层面)。新范式出现时层本体一字不改——**规则封闭 = 维护有界**
+- **规则(封闭,永不新建)**:条款 1–7 + 最弱理论(关系层面)。新范式出现时层本体一字不改——**规则封闭 = 维护有界**(2026-09-20 层定义修订只换了层名与框定词:本体 = 存在格,缓存 = 该类映射实例;条款数不变、规则不增)
 - **对象(开放,无界)**:条目、配方、标注。任何范式的值都装得下(量子振幅、FIXPT 不动点、模糊隶属度)——**对象开放 = 表达无界**
 - 一切结构是图层导出或映射参数:共存关系是图层导出(图活性),不是格层承诺;格代数、区域、字节、寄存器都是映射实例
 
@@ -67,24 +67,25 @@
 
 ## 五、范式映射表(推论)
 
-范式映射表 = 映射正确性定理表(cache-semantics 条款 7 的推论):
+范式映射表 = 映射正确性定理表(条款 7 的推论):
 
 | 行 | 映射实例 | 正确性定理 |
 |---|---|---|
-| 经典 | 字节内存 + 权限 | 缓存语义 ⊇ 字节内存实现 |
+| 经典 | 字节内存 + 权限 | 条款 1–6 ⊇ 字节内存实现 |
 | 寄存器 | 寄存器缓存 + home | 判定四条(regalloc-cache-mapping) |
-| 量子(将来) | 量子存储 | 缓存语义 ⊇ 量子存储实现 |
+| 量子(将来) | 量子存储 | 条款 1–6 ⊇ 量子存储实现 |
 
 每行定理共享七条——新范式不需要新的存储语义,只需要新映射与新证明。
 
 ## 六、验证主线
 
-Graph → Lattice 映射通用性清单(每项通过 = 三层链成立的证据;原始清单见 archive 备忘 §十二):寄存器分配判定以纯格对象写出(无路径结构)= "格不重引入顺序"判据的实例化;存储半边(缓存七条)已定稿,执行半边(执行标注空间 = dataflow-design §8)为对应物。
+Graph → Lattice 映射通用性清单(每项通过 = 三层链成立的证据;原始清单见 archive 备忘 §十二):寄存器分配判定以纯格对象写出(无路径结构)= "格不重引入顺序"判据的实例化;存储半边(条款 1–7)已定稿,执行半边(执行标注空间 = dataflow-design §8)为对应物。
 
 ## 七、关联
 
 - 原始论证与演进:docs/archive/memory-model-capability-lattice.md(v1-v4 备忘,讨论过程档案)
-- 存储半边条款:docs/academic/cache-semantics.md(七条权威)
+- 存储半边**层定义**:docs/maintainer/design/materialization-space.md(存在格 / Materialization Space / 七字段)
+- 存储半边条款:docs/academic/cache-semantics.md(条款 1–7 权威)
 - 执行标注空间:docs/maintainer/design/dataflow-design.md §8(仍权威)
 - IR 载体:docs/maintainer/design/existence-structure.md(v6 ENT/NOD/REG)
 - 映射实例:docs/maintainer/design/region-model.md(经典映射)、regalloc-cache-mapping.md(寄存器行)

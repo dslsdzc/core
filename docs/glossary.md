@@ -17,10 +17,11 @@
 | 术语 | 含义 | 出处 |
 |---|---|---|
 | 图(HDFG) | 关系空间:发生什么——节点/边/region/state edges;超图灵性属于图 | maintainer/design/execution-model.md |
-| 格(层) | 存在空间:如何存在——条目、配方、驱逐、再生 | maintainer/design/memory-model.md |
+| 格(层) / 存在格 | 存在空间(**Materialization / Existence Space**):如何存在——物化、配方、共存、驱逐、再生;**缓存是该层的一类映射实例,不是本体的名字** | maintainer/design/materialization-space.md |
 | 编码(层) | 物理编码空间:如何实现(2026-08-27 更名,原「二进制」) | maintainer/design/memory-model.md |
 | 格(Lattice) | 层内组织代数成分——映射参数,非层本体承诺(无格承诺) | maintainer/design/memory-model.md |
-| 范式映射表 | 映射正确性定理表——证明缓存语义 ⊇ 该实现;寄存器映射实例为其一行 | maintainer/design/memory-model.md |
+| 存在格七字段 | recipe/identity/version/authority/location/persistence/replicability——一条 Entry 的物化描述 | maintainer/design/materialization-space.md |
+| 范式映射表 | 映射正确性定理表——证明条款 1–6 ⊇ 该实现;寄存器映射实例为其一行 | maintainer/design/memory-model.md |
 
 ## 三、IR 形态
 
@@ -35,21 +36,25 @@
 
 > 注:.corespec/.csr 独立规约形态已退役(2026-09-06)——规约 = .cr 语法内约束,见 maintainer/adr/adr-0001。
 
-## 四、缓存语义(核心七条 + 边界)
+## 四、存在格条款(1–7 + 2′)+ 边界
 
 | 术语 | 含义 | 条款 |
 |---|---|---|
+| 物化(materialization) | 一条 Entry 的一次具体存在(位置 + 存在方式);一条 Entry 可有多份或暂无 | 层定义 |
 | 条目(entry)/ 配方(recipe) | 存储的一项 = (产生它的图节点, 输入边);配方 = 值的产生方式 | 1 |
-| 驱逐不变量 | ⟦G ∖ storage(e)⟧ = ⟦G⟧——驱逐任意条目不改变可观测语义(order-free) | 2 |
+| 驱逐不变量 | ⟦G ∖ storage(e)⟧ = ⟦G⟧——**对可再生条目**驱逐不改变可观测语义(order-free) | 2 |
+| 驱逐完整判据 | `Evictable(x) ⟺ Recoverable(x) ∨ PreserveRequiredState(x)`——2 与 4b 本是同一判据的两支 | 2′ |
 | 再生(regeneration) | 重跑配方节点产生可观测等价的值 | 3 |
 | 边界(boundary) | 图边界无配方条目(MMIO/FFI/输入/测量);语法层 = unsafe | 4 |
+| 无配方条目 | `recipe = unrecomputable`:边界 + 图内不可重算;必须保有/合法转移材料,不可再生 | 4b |
 | 版本化 | 赋值 = 版本化:x₁ 创建、x₀ 失效、绑定移动 | 5 |
 | 地址 = 映射 | `&x` = (条目标识, 偏移);字节地址只是经典投影 | 6 |
 | 映射实例正确性 | 映射实例保持条款 1-6 = 范式映射表的行定理 | 7 |
 
-> 完整七条 + 字节权限层/home/存在区间/驱逐配对等扩展术语:maintainer/design/memory-model.md。
+> 完整条款 + 字节权限层/home/存在区间/驱逐配对等扩展术语:maintainer/design/memory-model.md。
+> **层本体 = 存在格**(四问/七字段/归类表/划界):maintainer/design/materialization-space.md。
 
-## 五、寄存器分配(缓存语义映射实例)
+## 五、寄存器分配(存在格的一类映射实例:寄存器行 / 缓存映射)
 
 一致性判定/共存互斥/读点无陈旧/调用点失效契约/remat/共存偏序 width/order-free/
 上下文贪心 CAG/spill/栈槽/装载存储/写回——全部术语定义与论证见

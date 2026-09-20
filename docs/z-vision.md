@@ -12,7 +12,7 @@
 
 **Core 的路径**：语义保鲜——IR（HDFG）保留全部语义信息，与执行硬件解耦。范式迁移时**语义不动，只换后端映射**；验证器、优化器、未来后端都从同一张图读取完整语义。
 
-**状态**：语义保鲜已实现（HDFG + region/state edge/provenance）；范式映射表——**存储半边已定稿**（语义本体 = 缓存语义，字节内存 = 经典映射实例，见 `docs/maintainer/design/memory-model.md` §一），执行半边设计态（每范式一张表）。
+**状态**：语义保鲜已实现（HDFG + region/state edge/provenance）；范式映射表——**存储半边已定稿**（语义本体 = **存在格 / Materialization Space**——语义对象如何存在、在哪里存在、哪些存在形式可共存、哪些转换保持语义；**缓存语义与字节内存均为该层的映射实例**，见 `docs/maintainer/design/materialization-space.md`），执行半边设计态（每范式一张表）。
 
 **三层映射链（2026-08-27 正式晋升）**：范式 → 图 → 格 → 编码——**图 = 关系空间**（跨范式统一中轴：非因果、模糊分支、超图灵标注，见 `docs/maintainer/design/dataflow-design.md` §8），**格 = 状态/存储空间**（内存模型 = 中间存在空间，见 `docs/maintainer/design/memory-model.md` 与 `docs/archive/memory-model-capability-lattice.md` §四），**编码 = 物理编码空间**（把格编码到具体实现；2026-08-27 更名：原「二进制」硬编码经典惯例，违反零硬件惯例——量子/模拟/光学皆非二进制）。跨范式发生在图层；**超图灵性属于图，不属于格**；格的价值 = 表达空间未被有限范式封顶——不同范式各找自己的格映射，格本身不需要知道范式是什么。v4 定稿原则（`docs/archive/memory-model-capability-lattice.md`）：**规则封闭对象开放**（层规则零签名）、**无格承诺**（格代数 = 映射参数）、**能力不提升一等公民**（语义还原图上，授权归治理层）、**寄存器分配 = 缓存语义映射实例**（`docs/maintainer/design/regalloc-cache-mapping.md`）。
 

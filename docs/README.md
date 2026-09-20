@@ -24,7 +24,7 @@
 
 **设计参考**(maintainer/design/):
 - 执行模型 / 图与 region:[execution-model.md](maintainer/design/execution-model.md)、[dataflow-design.md](maintainer/design/dataflow-design.md)(早期稿,已被取代,留档)
-- 存储语义:[memory-model.md](maintainer/design/memory-model.md)(总览)、[cache-semantics.md](academic/cache-semantics.md)(七条权威,跨 academic)、[existence-structure.md](maintainer/design/existence-structure.md)(v6 承载)、[region-model.md](maintainer/design/region-model.md)(经典映射)
+- 存储语义:[materialization-space.md](maintainer/design/materialization-space.md)(**层定义 = 存在格 / Materialization Space**)、[memory-model.md](maintainer/design/memory-model.md)(总览)、[cache-semantics.md](academic/cache-semantics.md)(条款 1–7 权威;缓存映射一类,该层的一个实例)、[existence-structure.md](maintainer/design/existence-structure.md)(v6 承载)、[region-model.md](maintainer/design/region-model.md)(经典映射)
 - 指针与验证 pass:[pointer-model.md](maintainer/design/pointer-model.md)、[regalloc-cache-mapping.md](maintainer/design/regalloc-cache-mapping.md)
 - 规约系统:[spec-design.md](maintainer/design/spec-design.md);IR 操作语义:[ir-op-semantics.md](maintainer/design/ir-op-semantics.md);corelsp:[corelsp.md](maintainer/design/corelsp.md);已废弃:[crasm.md](maintainer/design/crasm.md)
 
@@ -34,7 +34,7 @@
 
 ## 学术(academic/)——验证/理论读者
 
-- [cache-semantics.md](academic/cache-semantics.md)— 缓存语义七条(存储语义本体,权威)
+- [cache-semantics.md](academic/cache-semantics.md)— 条款 1–7(权威条款;**缓存映射一类**;层本体 = 存在格,见 [maintainer/design/materialization-space.md](maintainer/design/materialization-space.md))
 - [lattice-theory.md](academic/lattice-theory.md)— 三层映射理论定稿(图 → 格 → 编码)
 - [verifier-kernel.md](academic/verifier-kernel.md)— 验证内核选型(CIC 信任根)
 
