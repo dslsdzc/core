@@ -30,7 +30,7 @@
 | ADR-0002 | .ccr v6 段表架构 + ENT 存在结构段 + REG 坐标化 | accepted | 2026-09-05 |
 | ADR-0003 | 自举后端 x86-64 ELF 直出 | accepted | 2026-08 |
 | ADR-0004 | corec/corearch 前后端拆分(.ccr 为接口契约) | accepted | 2026-05-28(8 月自举定格) |
-| ADR-0005 | 内存模型分层定稿(图 → 格 → 编码)+ 能力定位 v4 | accepted | 2026-08-26/27 |
+| ADR-0005 | 内存模型分层定稿(图 → 格 → 编码)+ 能力定位 v4 | accepted(部分框定被 ADR-0021 收窄) | 2026-08-26/27 |
 | ADR-0006 | 缓存语义 = 存储语义本体(2026-08-15 纠偏) | superseded by ADR-0021 | 2026-08-15 |
 | ADR-0007 | 图锚定区域内存模型 + 逃逸 outlives 修订 | accepted | 2026-08-13 |
 | ADR-0008 | 执行模型 region 化(RVSDG 嵌套 + state edges) | accepted | 2026-08-08 |
