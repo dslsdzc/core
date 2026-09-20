@@ -108,6 +108,47 @@ t.ok("pos_tf07_tb01_ptr_check_clean",
      f"check rc={_r.returncode} TF07={'error[TF07]' in (_r.stdout + _r.stderr)} "
      f"TB01={'error[TB01]' in (_r.stdout + _r.stderr)}")
 build_ok("tf07_tb01_ptr_clean", "tests/suite/ptr_ref_first.cr")
+
+# ── S2 钉子（2026-09-20）：`@raw_int` 门按「**只认地址型**」重写（PTR 与 REF 皆收）──────
+# 背景：S1 把 `&x` 改判 `TYP_REF` ⇒ 原谓词（只认 `TYP_PTR`）把 `@raw_int(&x)` 判成 TF07
+#   （实测：`ptr_ref_first.cr` 由 rc=0 转 rc=1）⇒ 与「`&x` 与 `&T` 同 kind」的裁定二目标冲突。
+# **三向钉（缺一不算）**：正（`&x` 受）· 反（**四类各一颗**仍拒，断言到码）· 对照（int/dex 受）。
+# ⚠ **面选 `check`**：TF07 在 **build scope 被豁免**（`diag.cr`）⇒ build 面恒 rc=0
+#   ⇒ 反钉写在 build 面会**恒绿**（本仓「面 × 豁免表」纪律：负控须写 `check` 面 rc=1 + 含码）。
+def neg_check(name, src_path, want_code):
+    clean()
+    r = cc(["check", str(src_path)])
+    txt = r.stdout + r.stderr
+    hit = f"error[{want_code}]" in txt
+    t.ok(f"neg_{name}", r.returncode == 1 and hit,
+         f"check rc={r.returncode} 含码={hit}")
+
+
+# 正钉：`@raw_int(&x)`（**传 REF**）必须受 —— 这条是 S1 落地后转红、S2 修好的那一处
+# ⚠ 探针形态：**直接把 `@raw_int(...)` 当返回值**（`int` 函数）。写成 `@raw_int(x) != 0` 会得到
+#   `bool` ⇒ 与 `-> int` 冲突 ⇒ **TF01**（我第一版就这么写，三条正/对照钉全红——**是探针错，不是门错**）。
+_s2_addr = write("s2_addr_ok",
+                 "fn main() -> int {\n    x : ., mut = 7;\n    return @raw_int(&x);\n}\n")
+clean()
+_r = cc(["check", str(_s2_addr)])
+t.ok("s2_raw_int_ref_accepted", _r.returncode == 0,
+     f"check rc={_r.returncode}（正钉：地址型 = PTR ∪ REF ⇒ REF 必须受）")
+
+# 反钉（防漏放）：**四类各一颗**，逐类断言 `error[TF07]` + rc=1（不是只断 rc）
+neg_check("s2_raw_int_string", write("s2_str", 'fn main() -> int { s := "a"; return @raw_int(s); }\n'), "TF07")
+neg_check("s2_raw_int_bool", write("s2_bool", "fn main() -> int { b := true; return @raw_int(b); }\n"), "TF07")
+neg_check("s2_raw_int_array", write("s2_arr", "fn main() -> int { a := [1, 2, 3]; return @raw_int(a); }\n"), "TF07")
+neg_check("s2_raw_int_slice", write("s2_slice", "fn main() -> int { a := [1, 2, 3]; s := a[0..2]; return @raw_int(s); }\n"), "TF07")
+
+# 对照钉（防「一律放」）：int / dex 仍受
+_s2_int = write("s2_int_ok", "fn main() -> int { n := 5; return @raw_int(n); }\n")
+clean()
+_r = cc(["check", str(_s2_int)])
+t.ok("s2_raw_int_int_ok", _r.returncode == 0, f"check rc={_r.returncode}")
+_s2_dex = write("s2_dex_ok", 'fn main() -> int { d : dex, apx = 7.0; return @raw_int(d); }\n')
+clean()
+_r = cc(["check", str(_s2_dex)])
+t.ok("s2_raw_int_dex_ok", _r.returncode == 0, f"check rc={_r.returncode}")
 tm04 = write("tm04", "enum Color { Red, Green, Blue }\n"
                      "fn main() -> int { c := Red(); "
                      "return match c { Red => 1, Red => 2, Green => 3, Blue => 4, }; }\n")

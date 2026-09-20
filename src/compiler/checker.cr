@@ -4237,16 +4237,32 @@ fn infer_expr(node: int) -> int {
             if args < 0 { check_error(EC_N_UNDEFINED, "@raw_int requires an expression", ast_line(node), ast_col(node)); return TI_NEVER; }
             av := infer_expr(ast_a(args));
             // 参数校验：**有「原值」语义的类型**才可取其原值——
-            //   · dex（缩放位原值）· int（原值即其缩放值）· **指针（地址字）**：
-            //     表达式 `&x` 由本文件一元取地址分支定为 `TYP_PTR`（`alloc_type(TYP_PTR, inner, 0)`），
-            //     语料形态 = `tests/suite/ptr_ref_first.cr`（`@raw_int(q) - @raw_int(p)` 取字节差）。
-            // 其余类型**仍报错**：`TYP_REF`/`TYP_SLICE`/`TYP_ARRAY` 等——聚合无「原值」概念，或语义未实测
-            //   ⇒ **没证据就不扩**（与「range 门零命中就不写退出条款」同一条纪律）。
+            //   · dex（缩放位原值）· int（原值即其缩放值）· **地址型（地址字）**。
+            //
+            // ⚠ **契约变更（2026-09-20，裁定二配套 / S2）。旧理由保留在下方，不删**——本仓「只增不删」；
+            //   且「旧理由已死」本身是资产：它记录了本门当初**为什么只认 PTR**。
+            //
+            // 【旧契约 · 已失效】原文（2026-09-20 之前，逐字）：
+            //   「· **指针（地址字）**：表达式 `&x` 由本文件一元取地址分支定为 `TYP_PTR`
+            //     （`alloc_type(TYP_PTR, inner, 0)`），语料形态 = `tests/suite/ptr_ref_first.cr`
+            //     （`@raw_int(q) - @raw_int(p)` 取字节差）。
+            //     其余类型**仍报错**：`TYP_REF`/`TYP_SLICE`/`TYP_ARRAY` 等——聚合无「原值」概念，
+            //     或语义未实测 ⇒ **没证据就不扩**（与「range 门零命中就不写退出条款」同一条纪律）。」
+            //   ⇒ **该前提已死**：S1 把 `&x` 改为 `TYP_REF` ⇒ 原谓词（只认 `TYP_PTR`）把
+            //     `@raw_int(&x)` 判成 TF07 硬错（实测：`ptr_ref_first.cr` 由 rc=0 转 rc=1，
+            //     TF07×2 + TB01 级联）⇒ 与「`&x` 与 `&T` 同 kind」的裁定二目标直接冲突。
+            //
+            // 【新契约（2026-09-20）】**语义 = 「只认地址型」**：`TYP_PTR` **与** `TYP_REF` 皆收
+            //   ——两者都是「地址字」，而 `@raw_int` 的语义（取该处地址原值）对二者**相同**。
+            //   ⇒ **扩的是同一个语义类，不是无原则放宽**：`TYP_SLICE` / `TYP_ARRAY` 等**仍拒**。
+            //   ⚠ **本门还会再改一次**：`(i)` 的最终语义已列为**联合决策**，与「拆 `string`」批的
+            //     `Buf` 一起定（§7.3 连锁 3）——届时**本门理由会第三次改写**，判据与理由各自漂移
+            //     正是该联合决策要避免的。
             // 注：类型表下标 0..8 = 标量/占位（`TI_INT`..`TI_DEX_S`）⇒ 仅当 `av > TI_DEX_S` 才查表，
             //     否则会拿标量下标读到占位行的 kind（假阳性来源）。
             if av != TI_DEX && av != TI_INT && av != TI_NEVER {
-                if !(av > TI_DEX_S && get_type_kind(av) == TYP_PTR) {
-                    check_error(EC_TF_ARG_TYPE, "@raw_int requires a dex (or int) or pointer expression", ast_line(node), ast_col(node));
+                if !(av > TI_DEX_S && (get_type_kind(av) == TYP_PTR || get_type_kind(av) == TYP_REF)) {
+                    check_error(EC_TF_ARG_TYPE, "@raw_int requires a dex (or int) or address (pointer/reference) expression", ast_line(node), ast_col(node));
                     return TI_NEVER;
                 }
             }
