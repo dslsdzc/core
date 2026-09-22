@@ -323,7 +323,7 @@ grep -rn '^fn .*(\(handle\|chan_\|g_new\|g_free\|sched_go\|sched_enqueue\|fiber_
 | 载体 `opt_dex_test.cr` | check **rc=0，0 诊断** |
 | 载体 `ptr_arith.cr` | check **rc=1，1× `error[B04]` @ `12:8`**（`if x != 99`，借仍活）⇒ **非「0 诊断」**；全语料 B04 扫面 = **恰 2 档**（+`apx_conversion_test.cr`），**与 `REBUILD.md` 登记的「B04 ×2」逐档吻合**（**不是新缺陷**） |
 
-- **⚠ sha 约定**：这三个**不等于** `REBUILD.md` 白名单（`ae01de75…` @ `97f4394f`）——那是**历史冻结基线**的 pre-侧（P6 终态）；**本批 pre-侧 = 当前 develop** ⇒ **不同是预期**；白名单属另一条腿，**本批不换代**。
+- **⚠ sha 约定**：这三个**不等于** `REBUILD.md` 白名单（`ae01de75…` @ `97f4394f`）——那是**历史冻结基线**的 pre-侧（P6 终态）；**本批 pre-侧 = 当前 develop** ⇒ **不同是预期**；白名单属另一条判据，**本批不换代**。
 - **⚠ 命令形式**：`--dump-types` 须用 **`corec ccr <file> --dump-types`**（`build` **不吐段表**——已试错一次）。
 
 ### S1 定型点改判
@@ -414,7 +414,7 @@ grep -rn '^fn .*(\(handle\|chan_\|g_new\|g_free\|sched_go\|sched_enqueue\|fiber_
 
 ### §8.10 S1/S2 判据档骨架（**先清单不写码**；与 S3/§7.3 无关，故可先行）
 
-**档名（拟）**：`tests/selfhost/test_ref_retype.py`（挂 `selfhost-tests` 门内——`suite` 腿不在 PR 门内，本仓有「glob 收编 ≠ 进门」前科）。
+**档名（拟）**：`tests/selfhost/test_ref_retype.py`（挂 `selfhost-tests` 门内——`suite` 判据不在 PR 门内，本仓有「glob 收编 ≠ 进门」前科）。
 
 **S1（定型点改判）判据**
 | # | 用例 | 期望 | 反例（防真空） |

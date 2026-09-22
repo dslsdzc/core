@@ -478,8 +478,8 @@ load：**先校验后恢复**——结构预扫/载荷恰长/`var_start` 恒校�
 | 1 | `canary_check.sh`（ELF canary + `.ccr` 四条 = **五条机器闸门**） | **PASS 5/5** ✓ |
 | 2 | `selftest-types` | **415/415** ✓ |
 | 3 | 腿③ 牙齿层 `warm_run`（7 档，定路径） | **FAIL=0**（暖态生效档数 **7/7**）✓ |
-| 4 | 腿② `probes_run`（29 档 + 暖腿） | **FAIL=0**（暖态生效 **15** 档）✓ |
-| 5 | 腿① `parity_run`（75 档 + 暖腿） | **FAIL=0**（暖态生效 **41** 档）✓ |
+| 4 | 腿② `probes_run`（29 档 + 暖态判据） | **FAIL=0**（暖态生效 **15** 档）✓ |
+| 5 | 腿① `parity_run`（75 档 + 暖态判据） | **FAIL=0**（暖态生效 **41** 档）✓ |
 | 6 | CI `bootstrap-tests` | **5/5 通过** ✓ |
 | 7 | CI `selfhost-tests`（全套件） | **19/19**（首跑 18/19：**D5 红**——见下）✓ |
 | 8 | CI `suite` | **ALL PASS** ✓ |

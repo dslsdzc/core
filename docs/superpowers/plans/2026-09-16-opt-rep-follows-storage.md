@@ -250,7 +250,7 @@ W1–W6 全部首判 `g_optrep_on`（并可再判「标记面非空」）⇒ **�
 `g2_slot` 是**帧外伪偏移**（与 `IR_LOAD_FIELD` 已修同型）⇒ `&g` 取栈上垃圾：写读经指针**自洽**
 （故被掩盖）但与全局槽**脱钩**。**冻结基线实证**（`/tmp/capt6/base/corec`）：`g_mut` ELF **1** /
 interp 5 · `g_refread` ELF **36** / interp 1 ⇒ **预存缺陷**。修法 = 全局源 `lea r10,[rip+rel32]` +
-RIP 补丁（照 `IR_STORE` 全局分支）。**形态③ 的 ELF 腿在此外修复前不可能正确**（T1 的
+RIP 补丁（照 `IR_STORE` 全局分支）。**形态③ 的 ELF 判据在此外修复前不可能正确**（T1 的
 `ELF 0 / interp 139` 分歧即此）。语料面：canary（`ptr_arith`）不含 `&全局` ⇒ 发射面零变化。
 
 **§4 pointee 声见面（W5 的前提件）**：`UOP_REF` ident 分支按 `slot_decl_ti` → `irv_type` →
@@ -272,7 +272,7 @@ canary **`95084e7b…d475`（28822B）IDENTICAL**（改动后 6 次复测）· `
 `error[N06]=0`（五 job 日志全 0）+ `--help` rc=1 + 冒烟 rc=**42**。
 
 **§7 偏差与约定**
-- 五 CI job 的 `suite` 腿按 `IFS` SKIP 规则排除 `*_mini*.cr`（既有约定，非本批）。
+- 五 CI job 的 `suite` 判据按 `IFS` SKIP 规则排除 `*_mini*.cr`（既有约定，非本批）。
 - 探针**暖态腿跨二进制**日志差异（frozen 打印 `lower to ccr…` / 当前不打印）= **FC 批的早停**
   （`main.cr:616-621` 诊断硬闸 ⇒ 负例探针不再进入 lowering），**与本批无关**（本批不触
   `main.cr`/诊断面）；判据标准 = 冷态逐档 + 暖态自洽（FAIL=0）。

@@ -41,7 +41,7 @@ if av != TI_DEX && av != TI_INT && av != TI_NEVER {
 
 ## §3 判据（`tests/selfhost/test_raw_int_ptr.py`，挂 `selfhost-tests`，19 项）
 
-A 正控（诊断面零诊断 + 两腿值面）· B 负控 6 类（string/bool/array/slice/**ref_type（形参 `&int`）**/struct ⇒
+A 正控（诊断面零诊断 + 两条判据值面）· B 负控 6 类（string/bool/array/slice/**ref_type（形参 `&int`）**/struct ⇒
 `check` 面 rc=1 + **恰 1 条** TF07 + 文案含 `or pointer`）· B' 既有 `dex`/`int` 形态仍受 · C 同源两次构建 ELF 一致。
 
 **类型定名 = 实测定名（不假设）**：**只加 `TYP_PTR`** 后正控即绿 ⇒ `&x` 表达式解析到的就是 `TYP_PTR` 行

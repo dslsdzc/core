@@ -39,7 +39,7 @@
 
 | 判据 | 结果 |
 |---|---|
-| 探针套件 `tests/selfhost/test_apx_conversion.py` | **23 例 + 2 条自证腿 + 3 组双形对拍 全绿** |
+| 探针套件 `tests/selfhost/test_apx_conversion.py` | **23 例 + 2 条自证判据 + 3 组双形对拍 全绿** |
 | 原 12 静态活点 | **全部由「静默错值」转精确值**（b1 49→7 · b1b 15→7 · b3a/b3b/b4a/b4b/b4c/b5/b6 15→7 · b8b 0→1 · b11 0→7 · b13 49→7 · b9_method 0→7 · m1b→7 · p1 15→7） |
 | **零足迹** | ELF canary `95084e7b…d475`(28822B) + `.ccr` 四条 **5/5 IDENTICAL** |
 | 自源 | `check src/compiler` rc=0 |

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 消灭**暖 `.cir` 缓存命中后安全检查面诊断静默消失**这一类缺陷（不安全程序**第二次编译起静默通过**），并把「判据网对该面失明」这一**元缺陷**一并收尾（给两条 runner 加**暖态腿**）。范围 = 两条腿：**主腿 = TODO #2026-09-15-5 缺陷**；**派生腿 = 判据网暖态腿**。
+**Goal:** 消灭**暖 `.cir` 缓存命中后安全检查面诊断静默消失**这一类缺陷（不安全程序**第二次编译起静默通过**），并把「判据网对该面失明」这一**元缺陷**一并收尾（给两条 runner 加**暖态腿**）。范围 = 两条判据：**主判据 = TODO #2026-09-15-5 缺陷**；**派生判据 = 判据网暖态腿**。
 
-**Architecture:** 五段：① **前置侦查 + 冻结基线 + 侧表面全集清点**（T0，源码零改动）；② **根因实证**（T1：冷/暖两态 + 装载期不变量探针，把「疑似」变「实锤」）；③ **修法落地**（T2，按裁决门取向；候选 a/b/c/d 见 §2）；④ **判据网暖态腿**（T3：`parity_run.sh`/`probes_run.sh` 加「同源二次构建」腿）；⑤ **判据复验 + 文档 + 清单**（T4）。
+**Architecture:** 五段：① **前置侦查 + 冻结基线 + 侧表面全集清点**（T0，源码零改动）；② **根因实证**（T1：冷/暖两态 + 装载期不变量探针，把「疑似」变「实锤」）；③ **修法落地**（T2，按裁决门取向；候选 a/b/c/d 见 §2）；④ **判据网暖态腿**（T3：`parity_run.sh`/`probes_run.sh` 加「同源二次构建」判据）；⑤ **判据复验 + 文档 + 清单**（T4）。
 
 **Tech Stack / 锚点（本实例实读，行号 = 当前树 `1592a1b5`）：**
 - **缓存面**：`src/compiler/cir_cache.cr`（`CIR_CACHE_VER = 17` `:51` · `save_cir_cache` `:187` · `load_cir_cache` `:436` · `cir_read_snapshot` `:401` · `cir_compiler_identity` `:95` · `make_cir_cache_dir` `:629`）；快照段 = 头（magic/ver/identity/fp/sig/name，v17）++ **vars/24B**（`name/id/type` 三字段全载）++ **nodes/64B**（op/dest/s1/s2/s3/**派生码**/first_edge/edge_count；两槽装载期重派生）++ **edges/32B** ++ **instrs/48B** ++ 字符串段 ++ **SG 记录/48B**（v13）。
@@ -15,7 +15,7 @@
 - **判据网**：`tools/baseline/parity_run.sh:32-40`（逐档 `clean-cache` + `check`）· `tools/baseline/probes_run.sh`（同款）· `src/ci/run.sh:68-113`（selfhost-tests 挂点）。
 - **既有同族先例（必须继承）**：`cir_cache.cr:1-50` 的 v12–v18 版本注——每一版都是「**快照携带了会随进程态漂移的量 ⇒ 静默类** ⇒ bump 或改设计」；**本缺陷 = 同族第 N 例**（v18 注已把「项表」按「不落盘、装载期重派生」收尾；**类型行空间尚无同等处理**）。
 
-**Spec / 依据：** TODO **#60**（本批主腿；含「派生建议：runner 加暖态腿」）· FC 批报告 `.superpowers/sdd/fc-task2-report.md` §7（冷/暖对照表：P6 期 `ae01de75…` 与本批 `d107b34b…` **同病 ⇒ 预存**）· `cir_cache.cr` 版本族注（v14/v16/v17/v18 的「静默类」判据）· FC 批 Global Constraints 的 **fail-closed 精神**（「宁可 miss 不可静默」）。
+**Spec / 依据：** TODO **#60**（本批主判据；含「派生建议：runner 加暖态腿」）· FC 批报告 `.superpowers/sdd/fc-task2-report.md` §7（冷/暖对照表：P6 期 `ae01de75…` 与本批 `d107b34b…` **同病 ⇒ 预存**）· `cir_cache.cr` 版本族注（v14/v16/v17/v18 的「静默类」判据）· FC 批 Global Constraints 的 **fail-closed 精神**（「宁可 miss 不可静默」）。
 
 ---
 
@@ -136,7 +136,7 @@
 | **T0** | 前置侦查 + 冻结基线（`rebuild.sh`）+ 起点判据 + **侧表面全集逐条做实**（§1.3 的 15 条 × {建立期/是否载/消费者/判定}）+ 复现源归档 | — |
 | **T1** | **根因实证**（E1–E5）：冷/暖 dump 通道 + 归因钳位 + 证伪项 + **暖态静默面全语料对拍清单**（先量后改） | T0 |
 | **T2** | 修法落地（按裁-W1；b 先行 → d 视证据）+ 用例（冷/暖两态行为锁定 + 负控「不安全程序不得静默通过」） | T1 + 裁-W1 |
-| **T3** | **判据网暖态腿**：`parity_run.sh`/`probes_run.sh` 加「同源二次构建」腿（冷/暖 rc + 诊断对拍）；CI 面按裁-W2 | T2 |
+| **T3** | **判据网暖态腿**：`parity_run.sh`/`probes_run.sh` 加「同源二次构建」判据（冷/暖 rc + 诊断对拍）；CI 面按裁-W2 | T2 |
 | **T4** | 判据复验（五 CI/枚举/selftest/canary/`.ccr` 四条/自举链/`backend_bootstrap`）+ 文档（TODO #2026-09-15-5 收尾 + `cir_cache.cr` 版本族注 + 本计划清单）+ 批终态 | 全部 |
 
 ---
@@ -164,7 +164,7 @@
 | 4 | canary / `.ccr` 四条 | `95084e7b…d475`（28822B）/ 96015·96158·142793·142936（差恒 143B） | FC T6 报告 §1 |
 | 5 | 72 档 / 探针 29 | 34×0/38×1 / 17×0/12×1 | FC T6 报告 §1 |
 | 6 | 自举链 / `backend_bootstrap` | `24802386a1…` IDENTICAL + N06=0 + 冒烟 42 / rc=0 | FC T6 报告 §1 |
-| 7 | **暖态缺陷证据** | 冷 rc=1 无产物 / 暖 rc=0 出 ELF（`build --static` 与 `ccr` 同病；P6 期二进制同值） | FC T2 报告 §7（本批主腿的 RED 起点） |
+| 7 | **暖态缺陷证据** | 冷 rc=1 无产物 / 暖 rc=0 出 ELF（`build --static` 与 `ccr` 同病；P6 期二进制同值） | FC T2 报告 §7（本批主判据的 RED 起点） |
 
 ---
 
@@ -252,7 +252,7 @@
 - **`check` 面写 0 条缓存条目**（`ccr` 面 15）⇒ 暖态腿**必须走 `ccr` 面**；只给既有 runner 加「同路径二跑」
   = 恒绿空洞（T3 §2/§5）。
 - **关键性实证（T3 突变）**：**M3** 把暖跑改成唯一 temp 路径 ⇒ 缺陷在场仍 FAIL=0（**定路径是关键设计**）；
-  **M4** 断言致盲 ⇒ 缺陷不可见（**断言是关键件**）。另 M1（去见证 ⇒ 牙齿腿 FAIL=2 红）/ M2（不变量过宽 ⇒
+  **M4** 断言致盲 ⇒ 缺陷不可见（**断言是关键件**）。另 M1（去见证 ⇒ 牙齿判据 FAIL=2 红）/ M2（不变量过宽 ⇒
   FAIL=0 但**暖态生效 0 = 空洞警报**）。
 
 ### 8.6 遗留未判面（4 条，登记不猜）
@@ -263,11 +263,11 @@ TA01/TU03 ⇒ 未构造）。**处置** = 任一构造出暖态消费者即触�
 
 ### 8.7 自纠登记（三件，均如实入报告）
 
-① 腿首跑快照取在**冷跑前**（条目=0 假读数）⇒ 修为冷跑后取；② M3 突变脚本 `$RANDOM` 用两次 ⇒ `cp` 与
+① 判据首跑快照取在**冷跑前**（条目=0 假读数）⇒ 修为冷跑后取；② M3 突变脚本 `$RANDOM` 用两次 ⇒ `cp` 与
 `f` 指向不同文件（假红）⇒ 修为单一变量；③ M3 首跑未重定向 stdin ⇒ 广度层 `read` 挂起 10 分钟 ⇒ kill 后
 以 `< /dev/null` 重跑。三件均**不影响最终读数**（修正后全量重跑）。
 
-### 8.8 腿本体不进 CI（维护者裁 2026-09-15）
+### 8.8 判据本体不进 CI（维护者裁 2026-09-15）
 
 理由：与套件**同语料**、覆盖重叠，收益仅「校验 runner 自身」⇒ **手工判据**；「**何时该跑**」四条已写入
 `tools/baseline/REBUILD.md`（改 runner / 改缓存面 / 关·降级缓存 / 改语料）。CI 最小面 = 套件

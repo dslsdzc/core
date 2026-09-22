@@ -130,7 +130,7 @@
 > 实测四条冷=暖（`cap-task1-report.md:84`），且 `generics_test` 是**构造性**的（含泛型 ⇒
 > `src/compiler/main.cr:480-486`（`:484` 置 0）`cache_enabled = 0` ⇒ 冷≡暖）。暖态面**另有专属
 > 机器闸门**（`tests/selfhost/test_warm_cache_gate.py` 已挂 CI + `tools/baseline/warm_leg.sh`
-> 手工广度腿）⇒ **此处不锁 ≠ 无人守**。⚠ 若将来本两档出现冷≠热：**冷锁仍成立**（冷是记录约定），
+> 手工广度判据）⇒ **此处不锁 ≠ 无人守**。⚠ 若将来本两档出现冷≠热：**冷锁仍成立**（冷是记录约定），
 > 暖侧分歧归暖态闸门抓，**不并到这里**。
 
 ### 1.4 起点值现状（**历史快照**——写进文档时构建槽被占；**实测结论见 §9.1 / §9.2**）
@@ -221,7 +221,7 @@ bash tools/baseline/canary_check.sh --selftest             # 合成夹具自证�
 **为何挂 `selfhost-tests` 而非 `bootstrap-tests`**：本闸门需要**已构建的** `build/corec/corearch`
 （且 `build` 路径要 corearch 同目录），而 `selfhost-tests` 首行即 `build_selfhost`
 （`src/ci/run.sh:78`）。`bootstrap-tests` 不构建编译器。**成本 = 1 档 canary ELF + 4 次 `.ccr`
-（2 语料 × 2 约定），语料 240B / 2.5KB，均为秒级；`--selftest` 与机械腿毫秒级。**
+（2 语料 × 2 约定），语料 240B / 2.5KB，均为秒级；`--selftest` 与机械判据毫秒级。**
 
 > **成本实测（2026-09-16，构建槽静默期实跑）**：载体独立 **1.04s**（5 条采集 + 校验全含）；
 > 牙独立 **2.24s**（其中 C 层复用载体刚落盘的 `build/canary_artifacts/` ⇒ **零额外编译**）；
@@ -292,8 +292,8 @@ bash tools/baseline/canary_check.sh --selftest             # 合成夹具自证�
 | U5 | `test_mw_task1/3/4/5/6.py`（M1 多字族） | 未挂（白名单同族） | 中：需 corec；`test_mw_task2` 修完后同批评估 |
 | U6 | `test_hit_table.py` / `test_lsp.py` / `test_live_ranges.py` 等 23 selfhost 档 | 未挂（白名单逐条） | 逐档不同（多为需 corec 的中成本）；**根因 = 无「挂点扩容批」**，本批不扩 |
 | U7 | `selftest-types 415/415` | 已挂 `selfhost-tests`（`run.sh:94`）但**计数下限**由套件内 `MIN_CASES` 守——两处约定靠人同步 | 低：可机械断言「run.sh 注释计数 == `test_type_engine.py:MIN_CASES`」 |
-| U8 | `tools/baseline/parity_run.sh` / `probes_run.sh` / `warm_leg.sh` 广度腿 | 未挂（**CI 不可行**：需 jj + 完整历史，CI 浅检出无 jj） | 不可挂（登记即终态） |
-| U9 | `test_mw_task2.py` 零 diff 断言 | 本批 T3 修「缺失即 FAIL」后仍是**本地腿** | 低-中：挂它需在**改动前编译器**上先产基线 ⇒ CI 结构性不可挂（基线段不可得）；T3 修法与白名单理由承担诚实性 |
+| U8 | `tools/baseline/parity_run.sh` / `probes_run.sh` / `warm_leg.sh` 广度判据 | 未挂（**CI 不可行**：需 jj + 完整历史，CI 浅检出无 jj） | 不可挂（登记即终态） |
+| U9 | `test_mw_task2.py` 零 diff 断言 | 本批 T3 修「缺失即 FAIL」后仍是**本地判据** | 低-中：挂它需在**改动前编译器**上先产基线 ⇒ CI 结构性不可挂（基线段不可得）；T3 修法与白名单理由承担诚实性 |
 
 ---
 
@@ -301,7 +301,7 @@ bash tools/baseline/canary_check.sh --selftest             # 合成夹具自证�
 
 - **T1**：`bash tools/baseline/canary_check.sh --selftest` rc=0（S1–S6 全按设计）；
   `python3 tests/harness/test_canary_carrier.py` rc=0。
-- **T1 真腿（待实测，等构建槽）**：`bash tools/baseline/canary_check.sh` rc=0（5/5）。
+- **T1 真判据（待实测，等构建槽）**：`bash tools/baseline/canary_check.sh` rc=0（5/5）。
 - **T2**：`python3 tests/harness/test_ci_hook_coverage.py` rc=0（新挂点不改差集；白名单不腐烂）。
 - **T3**：`python3 tests/selfhost/test_mw_task2.py` 在**无基线**时 **rc=1**（改前为 rc=0）；
   带 `--allow-skip` 时 rc=0。
