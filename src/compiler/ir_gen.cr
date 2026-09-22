@@ -2917,6 +2917,21 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
     if ast_kind(node) == EXPR_FIELD {
         obj_var := gen_expr(ast_a(node));
         obj_var = force_if_thunk(obj_var);
+        // ── S4（2026-09-21）：**镜像 checker 的 REF 自动解引用**（`checker.cr:3725`）──
+        // checker 对 `TYP_REF` 对象解包后按结构体查字段 ⇒ **接受** `p.v`；而本分支此前
+        // **不发解引用** ⇒ `IR_LOAD_FIELD` 把「地址」当聚合读 ⇒ **静默错值**
+        // （实测：`p := &s; p.v` 得 **8** 而非 42；`(*p).v` 得 42 ⇒ 缺陷就在缺这一条）。
+        //
+        // **只对 `TYP_REF`**：`PTR` **不解** —— 与 checker 一致（实测 `p as *S` 后 `p.v` = **check=1 拒绝**）。
+        // `&mut x` 同为 `TYP_REF`（仅 `extra` = mut 标记不同）⇒ 本判定**按 kind、不看 extra** ⇒ 一并覆盖。
+        //
+        // 发射序**逐字镜像** `UOP_DEREF` 分支（`IR_DEREF` + `ptr_pointee_type` + `ptr_access_width`）
+        // ——该序已被 `(*p).v`（实测 **42** ✓）证明正确 ⇒ 不自创新序。
+        if get_type_kind(irv_type(obj_var)) == TYP_REF {
+            dv := new_ir_var("autoderef", ptr_pointee_type(obj_var));
+            emit(IR_DEREF, dv, obj_var, -1, 0, ptr_access_width(obj_var));
+            obj_var = dv;
+        }
         v := new_ir_var("field", TI_INT);
         fi : ., mut = ast_type_val(node);
         if fi > 0 {
@@ -3289,6 +3304,26 @@ fn ir_gen_func(fi: int) {
         // 按 GP 读 = 垃圾值 + 双路径分歧）。槽型按**声明面节点**定 = `TI_DEX_S`（GP 类，
         // 与调用点转换后的实参一致）。
         else if dex_opt_type_node(ast_data(pn)) != 0 { param_type = TI_DEX_S; }
+        // ── S4 形参半（2026-09-21）：`&T` 形参槽型按**声明面节点**定（照上行 `dex?` 先例同形）──
+        // **背景（预存缺陷）**：`ast_type_val(pn)` 对 `&T` = **0**（`EXPR_REFTYPE` 节点未填写类型索引；
+        //   上面 `if param_type < 0` 护栏拦不住 0）⇒ 槽型退化成 `TI_INT` ⇒ **REF 身份在 IR 形参定型处丢失**
+        //   ⇒ `r.f` 在 `EXPR_FIELD` 看不到 REF ⇒ **静默错值**（实测 `fn f(r: &S){r.v}` 得 **8** 而非 42；
+        //   pre/post 两代同值 ⇒ 存在早于裁定二）。
+        // **只查不建**：`checker` 解析签名时**已**为该 `&T` 建过 REF 行（实测类型表中存在 `kind 3`）
+        //   ⇒ 线性查找即可 ⇒ **零新增类型行**。⚠ `alloc_type` 是**裸分配器、不去重**（`checker.cr:10` 注）
+        //   ⇒ 若在此另分配一行，会写进 TYPE 段 ⇒ 动产物字节 ⇒ 那正是本笔要避免的。
+        else if ast_kind(ast_data(pn)) == EXPR_REFTYPE {
+            rinner := ti_from_type_expr(ast_a(ast_data(pn)));
+            rmf := ast_int_val(ast_data(pn));
+            ri : ., mut = 0;
+            loop { if ri >= g_type_count { break; }
+                if get_type_kind(ri) == TYP_REF && get_type_data(ri) == rinner && get_type_extra(ri) == rmf {
+                    param_type = ri;
+                    break;
+                }
+                ri = ri + 1;
+            }
+        }
         pvar := new_ir_var(pname, param_type);
         // Bind param name
         bind_local(pname_idx, pvar);
