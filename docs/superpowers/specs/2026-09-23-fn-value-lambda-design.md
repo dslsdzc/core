@@ -88,7 +88,7 @@
 ### 不变量 5 — **不新增「第二种函数类型」：异步/协程面全部自动推导**
 （2026-09-23 维护者追加；**与不变量 1 同侧**：函数类型**仍然只有** `fn(T...) -> R`）
 
-**明确不加**（7 名，逐条理由见 §4.3）：`flow fn(...) -> ...`（**类型位**）· `async fn` · `Future[T]` ·
+**明确不加**（7 名，逐条理由见 §4.4）：`flow fn(...) -> ...`（**类型位**）· `async fn` · `Future[T]` ·
 `Coroutine[T]` · `GeneratorState` · `Suspend` · `FnAsync`。
 
 **理由（原文）**：`fn(...) -> Future<Data>` / `async fn` / `await` 这类东西**很多是在暴露某种实现模型**——
@@ -118,8 +118,8 @@ stackful/stackless 或其他 realization。
 
 **现状锚点（`[已实现]`）**：`go f(a)` 今日的 lowering = `IR_CALL sched_go(@addr(f), arg)`
 （`src/compiler/ir_gen.cr:1921` + `:1933-1934`）；`sched_go` 建 G + 1 元素 result channel
-（`src/stdlib/sched.cr:171`）；range-go 另发 `IR_SPAWN`。**不变量④已定**：并发接口的演进**不得反向决定**
-函数值的类型模型 ⇒ 与本条同侧，**两处判断各自保留**。
+（`src/stdlib/sched.cr:171`）；range-go 另发 `IR_SPAWN`（`src/compiler/ir_gen.cr:1958`）。**不变量 4 已定**：
+并发接口的演进**不得反向决定**函数值的类型模型 ⇒ 与本条同侧，**两处判断各自保留**。
 
 #### 5.2 与块三总原则的关系（**同一条，原文要求并排**）
 
