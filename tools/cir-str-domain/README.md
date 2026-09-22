@@ -39,7 +39,7 @@ bash tools/cir-str-domain/age_probe.sh /path/to/old/bin_dir [tag]
 | `scope_firstintern.cr` | **判别实验**：单字段 `One{x}` vs 双字段 `Two{x,y}` | 暖态 `ONE=x`（对）/**`TWO=chan_send`（错）** |
 | `scope_partial.cr` | 单函数 `@fields` | 冷≠暖 |
 | `label_collision.cr` | 6 个含 loop/if 的函数（**无字符串**） | 冷=暖（⇒ 用于证明 label 域**结构自保**） |
-| `undefined_name.cr` | 引用未定义名 | `build` rc=1 + 无产物（⇒ locals 域收口依据） |
+| `undefined_name.cr` | 引用未定义名 | `build` rc=1 + 无产物（⇒ locals 域收尾依据） |
 
 ## 为什么暂不挂 CI job
 
