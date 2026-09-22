@@ -250,7 +250,7 @@ W1–W6 全部首判 `g_optrep_on`（并可再判「标记面非空」）⇒ **�
 `g2_slot` 是**帧外伪偏移**（与 `IR_LOAD_FIELD` 已修同型）⇒ `&g` 取栈上垃圾：写读经指针**自洽**
 （故被掩盖）但与全局槽**脱钩**。**冻结基线实证**（`/tmp/capt6/base/corec`）：`g_mut` ELF **1** /
 interp 5 · `g_refread` ELF **36** / interp 1 ⇒ **预存缺陷**。修法 = 全局源 `lea r10,[rip+rel32]` +
-RIP 补丁（照 `IR_STORE` 全局分支）。**形态③ 的 ELF 判据在此外修复前不可能正确**（T1 的
+RIP 补丁（照 `IR_STORE` 全局分支）。**形态③ 的 ELF 侧判据在此外修复前不可能正确**（T1 的
 `ELF 0 / interp 139` 分歧即此）。语料面：canary（`ptr_arith`）不含 `&全局` ⇒ 发射面零变化。
 
 **§4 pointee 声见面（W5 的前提件）**：`UOP_REF` ident 分支按 `slot_decl_ti` → `irv_type` →

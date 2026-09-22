@@ -252,7 +252,7 @@ python3 -c "import sys;sys.path.insert(0,'bootstrap');from corec.frontend.lexer 
    ⇒ 视图块（无 alloc）不产生任何运行期动作。
 3. **两面一致**：同一探针（值 42，既非有效指针也非有效 intern 索引）在 corec `check`/解释器/native 与 bootstrap 管线/解释器
    五处读数一致。
-4. **解释器对裸内存是近似**（**预存**，非本批引入）：`alloc`+`w64/r64` 的程序在解释器判据不产出/给 0；
+4. **解释器对裸内存是近似**（**预存**，非本批引入）：`alloc`+`w64/r64` 的程序在解释器侧判据不产出/给 0；
    迁移前/后**同为 166B**（cli e2e 同源对拍）⇒ 与该分歧无关。
 5. **块内分号陷阱**（本批自伤一次，已修）：`unsafe { x; }` 块值 = unit ⇒ `return unsafe { x; };` 使该路径返回 unit；
    bootstrap 面仅**非致命警告**（解释器仍按值跑），self-hosted 面 `TF01` 硬错 ⇒ **两面诊断面分歧**，已登记 `#2026-09-18-19(B)`。
