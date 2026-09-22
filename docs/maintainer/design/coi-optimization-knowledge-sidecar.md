@@ -49,6 +49,38 @@
 
 ---
 
+## ⭐ 关键现状（一屏速览——本文的立论硬支撑）
+
+> 这三条是本文全部论证的地基。**读本文前先读这一屏**。全部在 `develop@origin` @ `0eb1efd3` 实核。
+
+### K-1 `.ccr` 的 `opt_meta` 子节是**版本化的空壳载体**（`[已实现]` + 实测）
+
+- `.ccr` 的 **SYM 段第 6 子节**承载 `g_opt_meta`（`src/compiler/ccr_io.cr:749` 写 / `:1269` 读），
+  键表在 `src/compiler/ast.cr:659-663`，声明在 `src/compiler/globals.cr:378`。
+- **产物实测**：**1872 个 `ver=9` 的 `.ccr` 产物**（口径：glob `build/**/*.ccr` + `/tmp/**/*.ccr`，按头 `magic==827474755 && version==9` 筛选，脚本自行走 SYM 子节序；mtime 2026-09-15…09-22）
+  **`opt_count` 全部为 0**，且 SYM 段走查 `tail` 全 0（1872/1872，解析自洽）。
+- **两条独立证据**：
+  1. **写侧清单**——唯一写入者是 `src/arch/x86_64/regalloc.cr`，而它在 `backend_support_files`（`build_selfhost_native.py:65`）、
+     **不在 `corec_files`（`:311-374`）** ⇒ **corec 写 `.ccr` 时 `g_opt_meta_count == 0`**；
+  2. **产物实测**——上条所载的 1872/1872。
+- ⇒ **含义**：该子节**占了格式位置、参与 load 校验、名字叫 metadata**，但在 corec→corearch 的传输上
+  **不携带任何信息**——一个**静默的**位置。详 §三.1。
+
+### K-2 现行教义已声明「分配决策不写回格式」，而 `g_opt_meta` 恰是分配决策的落盘载体
+
+- 教义 `[已实现]`：`ccr_io.cr:84`「`home` 恒 -1（实例注记——**分配决策不写回格式**）」；
+  v7 规格 `:106` / `:183` / `:200` 同结论。
+- 事实 `[已实现]`：`OPT_KEY_REG_ASSIGN`（`var_idx → 物理寄存器`）**就是分配决策**，而它**就在 `.ccr` 里**。
+- ⇒ **自相矛盾**；且 v7 规格的「**开放点 3**」原文留着「未来实例层选择写回（**非传输中间物用途**）时重议」
+  ⇒ 本文主张 **`.coi` 就是那个用途**（⚠ 该读法是**本文展开**，非维护者原话——见 §二十五 U9）。详 §三.3。
+
+### K-3 `.coi` 在本仓**零对应物**
+
+- 全仓 `grep -i '\.coi\b'`（`*.cr`/`*.md`/`*.py`/`*.sh`）= **0 行**。
+- ⇒ **本文主体全为 `[提案]`**；**不得把本文的任何设计条目读成现状**。
+
+---
+
 ## 〇、术语护栏（开工前必须钉死）
 
 本文与既有文档存在**四处同名不同义**。不钉死则后续所有讨论串线。
@@ -236,7 +268,7 @@ Forbidden direction:   .ccr -> required .coi
 
 | 角色 | 位置 | 说明 |
 |---|---|---|
-| **写**（唯一） | `src/arch/x86_64/regalloc.cr` | 写点 26 处（实测 `w32/w64/store8(g_opt_meta` 计数）。`alloc_registers()` 阶段 5 终分配（`regalloc.cr:768-824`）+ 注入钩子（`:199-215`） |
+| **写**（唯一） | `src/arch/x86_64/regalloc.cr` | **26 行**（口径：匹配式 `w32\(g_opt_meta\|w64\(g_opt_meta\|store8\(g_opt_meta` · 单位 = **行** · 范围 = 后端三轴；`instr.cr`/`corearch.cr` 均为 0 ⇒ 二者**纯读**）。`alloc_registers()` 阶段 5 终分配（`regalloc.cr:768-824`）+ 注入钩子（`:199-215`） |
 | **写**（装载侧） | `src/compiler/ccr_io.cr` | load 时从 `.ccr` 重建（`:1269-1292`） |
 | **读** | `src/arch/x86_64/instr.cr:34` `fn get_reg_for_var` | 发射面消费（`g2_slot` 路径） |
 | **读** | `src/compiler/corearch.cr:186-201`（`--dump-regassign`）· `:210`（`--check-regalloc` 看门狗） | 诊断/测试通道 |
@@ -257,12 +289,30 @@ Forbidden direction:   .ccr -> required .coi
 > ⇒ **结论**：SYM 段第 6 子节今天是一个**版本化了的空壳载体**——它占了格式位置、参与了校验、
 > 但在 corec→corearch 的传输上**不携带任何信息**。
 >
-> ⚠ **口径声明**：`g_opt_meta` 的**枚举计数随细看只会变多**（本仓纪律）。实测（`develop@origin`）：
-> - 含 `g_opt_meta` 的**行数**：全仓 **93** 行；其中后端三轴（`src/arch/*` + `src/compiler/corearch.cr`）**67** 行
->   （`regalloc.cr` 54 · `instr.cr` 7 · `corearch.cr` 6）。
-> - **读侧表达式**（`r32|r64|load8(g_opt_meta`）计数：**19** 处。
-> - ⚠ 另一名写手报「后端 **71** 处直读」——**本文未能复现该数**（19 ≠ 67 ≠ 71 ≠ 93）。
->   ⇒ 本文一律采用**自己的实测口径并注明**，不转抄未经复现的计数。该差异列入 §二十五。
+> #### ⚠ 口径表（**每个数都要带「怎么数的」**——本仓纪律）
+>
+> `g_opt_meta` 的枚举计数随细看只会变多。下表把**数法**与**数**并列——**脱离数法的计数不得引用**。
+
+| 数法（**匹配式 · 单位 · 文件范围**） | 数 | 逐档分解 |
+|---|---|---|
+| **行数**：`grep -c 'g_opt_meta'` · 行 · 全仓 `*.cr` | **97** | `regalloc.cr` 54 · `ccr_io.cr` 12 · `ent_kernel.cr` 10 · `instr.cr` 7 · `corearch.cr` 6 · `dyn_arr.cr` 4 · `regalloc-consistency.cr` 2 · `globals.cr` 2 |
+| **行数**：同上 · 行 · 后端三轴（`src/arch/*` + `src/compiler/corearch.cr`） | **67** | `regalloc.cr` 54 · `instr.cr` 7 · `corearch.cr` 6 |
+| **读侧表达式（按行）**：`r32\(g_opt_meta\|r64\(g_opt_meta\|load8\(g_opt_meta` · 行 · 后端三轴 | **18** | `regalloc.cr` 10 · `instr.cr` 4 · `corearch.cr` 4 |
+| **读侧表达式（按出现次数）**：同上匹配式 · 出现次数 · 后端三轴 | **19** | `regalloc.cr` 11 · `instr.cr` 4 · `corearch.cr` 4（一行可含 2 次 ⇒ 与「按行」不同） |
+| **写侧表达式（按行）**：`w32\(g_opt_meta\|w64\(g_opt_meta\|store8\(g_opt_meta` · 行 · 后端三轴 | **26** | 全在 `regalloc.cr`（`instr.cr`/`corearch.cr` = **0** ⇒ 二者**纯读**） |
+| **三档行数和**：`grep -c` · 行 · `regalloc.cr` + `instr.cr` + `ent_kernel.cr` | **71** | 54 + 7 + 10 |
+
+> ⚠ **两处更正（本文自查，2026-09-23）**：
+> 1. **本文先前报的「全仓 93 行」是算错**——本文自己打印的逐档数（54+12+10+7+6+4+2+2）**和就是 97**。
+>    ⇒ 正确值 = **97**（与转述方一致）。**不是文件范围差异，是加法错误**。
+> 2. **转述方的「71 处直读」**：其数**可复现**，但复现出来的数法是
+>    **「`regalloc.cr` + `instr.cr` + `ent_kernel.cr` 三档含 `g_opt_meta` 的**行数**之和」**（54+7+10）。
+>    ⚠ 两点必须写清：① 它**不是**「读侧表达式」——按行数读侧表达式 = 18，按出现次数 = 19；
+>    ② 其中 `ent_kernel.cr` 的 **10 行全部是注释**（实测：该档读侧/写侧表达式均为 **0**）
+>    ⇒ 这 10 行**不构成任何读点**。
+>    ⇒ **结论：71 = 「三档行数和」（一个真实、可复现的量），但它的名字不该叫「读侧表达式」。**
+>    **两处都不改数、只改数法**——上表即最终口径。
+> ⇒ **本文此后一律用上表的数法引用**，不再写「N 处直读」这类**无口径**的说法。
 
 ### 3.2 `.ccr` 的段表与版本闸——`.coi` 要引用的「身份」今天怎么表达
 
@@ -1374,7 +1424,9 @@ For future unknown hardware:
 
 | # | 未核实项 | 为什么未核实 | 补核方式 |
 |---|---|---|---|
-| **U1** | 「后端 **71** 处直读 `g_opt_meta`」这一计数 | **本文未能复现**。本文实测：含 `g_opt_meta` 的**行数** = 全仓 93 / 后端三轴 67；**读侧表达式** = 19。三者皆 ≠ 71 | 明确计数口径（token / 行 / 表达式 / 直读位点），重数并统一 |
+| **U1** | ~~「后端 71 处直读 `g_opt_meta`」这一计数~~ → **已解决（2026-09-23）** | ✅ **已澄清**：**71** 可复现 = `regalloc.cr` 54 + `instr.cr` 7 + `ent_kernel.cr` 10 的**行数和**；
+  ⚠ 但该**数法名**（「读侧表达式」）**对不上**——按行数读侧表达式 = 18、按出现次数 = 19；且 `ent_kernel.cr` 那 10 行**全是注释**（该档读/写表达式均 = 0）。
+  **本文先前报的「全仓 93 行」经查是本文的加法错误**（自打印逐档数之和 = 97）。⇒ **正确值 = 97（全仓）/ 67（后端三轴）**，见 §三.1 口径表 | 两处**都不改数、只写清数法**；已落地为 §三.1 的**口径表**（匹配式 · 单位 · 文件范围三列齐全） |
 | **U2** | `g_opt_meta` 在 **corec 侧**是否**真的**恒空 | 本文有**两级证据**（写侧清单：`regalloc.cr` 不在 `corec_files`；产物实测：1872/1872 `opt_count=0`），但**未在 corec 上加计数器实测**「写 `.ccr` 前 `g_opt_meta_count == 0`」 | 在 `save_ccr` 入口加一条诊断打印（或一次性探针），跑 `corec build` 实读 |
 | **U3** | 产物实测样本的**编译器代次** | 1872 个 `ver=9` 产物的 mtime ∈ 2026-09-15…2026-09-22，**未逐一核对**其由哪个编译器修订产生（只核了 `ver=9`） | 用当前 `develop@origin` 重建 `corec` 后**新产一个 `.ccr`**，重跑本解析器 |
 | **U4** | **能力谓词词汇表**的真源（A5） | `core-x86.toml` 的键**是否足以表达** §11.1 的七个维度（尤其 `implementation family` / `min|max revision` / `backend ABI`）**未逐键核对** | 逐键对拍 `core-x86.toml` 与原文 §8 的七维度 |
@@ -1415,9 +1467,9 @@ For future unknown hardware:
 
 | 标记 | 计数 | 说明 |
 |---|---|---|
-| `[已实现]` | 见下逐项 | 本文全部 `[已实现]` 均带 `develop@origin` @ `0eb1efd3` 的 `file:line` 或实测口径 |
-| `[已设计未实现]` | 见下逐项 | 有设计档、无实现 |
-| `[提案]` | **本文主体** | `.coi` 整体（实测：全仓 `grep '\.coi'` = **0 行**） |
+| `[已实现]` | **33** | 口径：`grep -o '\[已实现\]' <this file> \| wc -l`（**按出现次数**）。本文全部 `[已实现]` 均带 `develop@origin` @ `0eb1efd3` 的 `file:line` 或实测口径 |
+| `[已设计未实现]` | **8** | 口径同上行（按出现次数）；逐项见下 |
+| `[提案]` | 2（**显式标记**） | 口径同上行（按出现次数）。⚠ **本档是默认档**：未被标记的设计陈述**一律按 `[提案]` 读** ⇒ **实际覆盖 = 本文主体**；依据 = 全仓 `grep -i '\.coi\b'` = **0 行** |
 
 **`[已实现]` 逐项**（本文引用的全部现状锚点）：
 
@@ -1427,7 +1479,7 @@ For future unknown hardware:
 | opt_meta 键表 | `src/compiler/ast.cr:659-663` |
 | opt_meta 分配器 | `src/compiler/dyn_arr.cr:1090` |
 | opt_meta 写 / 读 / 上界闸 | `src/compiler/ccr_io.cr:749` · `:1269` · `:1278` |
-| opt_meta 唯一写侧 | `src/arch/x86_64/regalloc.cr`（写点 26 处；终分配 `:768-824`；注入 `:199-215`） |
+| opt_meta 唯一写侧 | `src/arch/x86_64/regalloc.cr`（写点 **26 行**；口径见 §三.1 口径表；终分配 `:768-824`；注入 `:199-215`） |
 | opt_meta 读侧 | `src/arch/x86_64/instr.cr:34` · `src/compiler/corearch.cr:186-201` · `:210` |
 | 单元归属 | `build_selfhost_native.py:65` · `:311-374` · `:388-390` |
 | `.ccr` 常量与段表 | `src/compiler/ccr_io.cr:134-140` · `:32-36`（头注布局） |
@@ -1439,7 +1491,7 @@ For future unknown hardware:
 | `.cir` 指纹 stub 负面前例 | `src/compiler/cir_cache.cr:104-116`（注）→ **实际** `ir_gen.cr:4001-4035` / `:4037`（注内标 `:3964-3996` **已陈旧**） |
 | HIT 表 / 引擎 | `src/arch/x86_64/core-x86.toml` · `src/arch/hit/hit.cr` |
 | 越界守卫先例 | `src/arch/x86_64/regalloc.cr:17-23`（注） |
-| **产物实测** | 1872 个 `ver=9` `.ccr`，`opt_count` 全 0 / SYM `tail` 全 0（口径见 §三.1） |
+| **产物实测** | 1872 个 `ver=9` `.ccr`，`opt_count` 全 0 / SYM `tail` 全 0（**口径见 §三.1 口径表**） |
 
 **`[已设计未实现]` 逐项**：V8 Entity/Relation/metadata（`ccr-v8-open-relational-lattice.md`）·
 `CapabilityDomain` / `PerformanceProfile` / `RuntimeState` / `Cost Model`（`execution-mapping-design.md` §3.7/§3.8/§3.9/§5.2）·
