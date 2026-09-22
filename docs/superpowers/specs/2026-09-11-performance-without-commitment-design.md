@@ -211,7 +211,7 @@
 
 ## 5. 可解释性接口（与 S-D）
 
-前置说明：S-D spec（`2026-09-11-explain-predict-incremental-design.md`）**已落盘**——本节只写接口需求（本 spec 承诺的**产出侧**），不预设其内部设计；成本模型接口与声明面（`band`/`model_id`/`model_ver`/`assumptions[]`、三层不可混报）**以 S-D §1.7.3 / §2.6 / §2.1 为准**；记录表 schema 的**唯一真源 = S-D §1.3**。
+前置说明：S-D spec（`2026-09-11-explain-predict-incremental-design.md`）**已落盘**——本节只写接口需求（本 spec 承诺的**产出侧**），不预设其内部设计；成本模型接口与声明面（`band`/`model_id`/`model_ver`/`assumptions[]`、三层不可混报）**以 S-D §1.7.3 / §2.6 / §2.1 为准**；记录表 schema 的**唯一依据 = S-D §1.3**。
 
 - **R1 记录 = 数据**（结构化，非文本日志）：**字段集 = S-D §1.3**（`id`（内容寻址）/ `kind` / `subject` / `phase` / `choice` / `cause` / `alternatives` / `evidence` / `determinism`）；**本线补充一项** = 变换/模型版本（`model_id` / `model_ver`，经 `evidence` 与 `phase_ver` 承载）。本 spec **不另立 schema**（S-D §4.1 明文禁止双源漂移——本项为其境内实例，B 线 M1/★D27 已合流）。
 - **R2 覆盖双向**：已做决策与**未做决策**都有记录——「为何这里没优化」的三类理由之一（缺前提 / 成本不划算 / 无候选）必有落点。决策不静默（L7）。

@@ -331,7 +331,7 @@
 ### 2. 删除 / 迁移
 | # | 件 | 任务 | 证据 |
 |---|---|---|---|
-| 1 | **删除**：`ast.cr` 四个死镜像结构（`FuncInfo`/`StructInfo`/`EnumInfo`/`EnumVariant`） | T3 | 全仓零类型使用点（仅注释命中）；`[.;64]` 与实际布局本已不一致；布局真源 = `dyn_arr.cr` |
+| 1 | **删除**：`ast.cr` 四个死镜像结构（`FuncInfo`/`StructInfo`/`EnumInfo`/`EnumVariant`） | T3 | 全仓零类型使用点（仅注释命中）；`[.;64]` 与实际布局本已不一致；布局出处 = `dyn_arr.cr` |
 | 2 | **删除**：`P022`/`P023` 两闸 + `MAX_STRUCT_FIELDS`/`MAX_ENUM_VARIANTS`/`MAX_VARIANT_TYPES` 三常量退役 | T3 | 上限解除 ⇒ 无越界写对象；错误码保留编号并标「已退役、零 raise」 |
 | 3 | **迁移**：结构体字段三条 + 枚举变体/载荷五条**侧表**（记录尺寸与 `OFF_*` 不变 ⇒ **110 个访问器调用点零改动**） | T3 | 记录面判据全绿 + 突变 MA/MB 转红 |
 

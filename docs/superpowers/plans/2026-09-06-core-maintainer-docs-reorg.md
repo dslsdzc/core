@@ -216,7 +216,7 @@ jj commit -m "docs: docs/README.md 导航索引(分类规则 + 目录树)"   # �
 
 - [ ] **Step 1: 起草内容(章节固定,每节 3-10 行,链接真实路径)**
 
-1. 定位声明块:受众 maintainers;状态 active;真源 = 源码 + CLAUDE.md
+1. 定位声明块:受众 maintainers;状态 active;出处 = 源码 + CLAUDE.md
 2. 仓库地图:`src/compiler/*.cr` 各模块一句话职责(ast/lexer/parser/checker/ir_gen/dataflow/ccr_io/opt/pass/diag/module/project/interp/dump/dyn_arr/globals/entry/main/corearch/_import);`src/arch/linux/ld/`(elf/instr/sizes/resolve/ld);`src/stdlib/`、`src/runtime/`(rt.s/rt.cr);`bootstrap/corec/` 定位;tests 三套;grammar/;docs/ 分类树(链接 README.md)
 3. 构建管线:三条命令(build_selfhost_native.py → build/corec+corearch;./build/corec build FILE.cr;./build/corearch FILE.ccr)+ 三级自举 Stage0/1/2 含义
 4. 分支模型与 jj 速查:feature → develop → main;`jj bookmark create feature/x`、`jj git push -b feature/x`、`jj git fetch && jj bookmark move develop -r develop@origin`;SSH 自动签名说明
@@ -249,7 +249,7 @@ jj commit -m "docs: maintainer/onboarding.md——新维护者入门(仓库地�
 
 - [ ] **Step 2: 起草 testing.md**(章节固定)
 
-1. 定位声明:受众 maintainers;状态 active;真源 = 源码
+1. 定位声明:受众 maintainers;状态 active;出处 = 源码
 2. 测试三套定位:tests/bootstrap(test_pipeline/test_borrow/test_generics,Python 驱动内联源码)、tests/selfhost(test_compile/test_impl/test_borrow,自举管线)、tests/suite(.cr 集成走 ./build/corec)
 3. 跑法命令清单(逐条真实命令,自 CLAUDE.md Build & Test)
 4. 回归流程:自举三阶段 + 字节一致验证(corec→corec2→corec3,corearch 逐字节一致);CPU 限制:`cpulimit -l 10`/`nice -n 19`(铁律 #6)
@@ -369,7 +369,7 @@ jj commit -m "docs: project-book.md 重写——定位导航化(≤150 行,愿�
 
 - [ ] **Step 1: 校准 glossary.md**
 
-读全篇,逐节核对:术语定义与 design/ 定稿文档(execution-model/memory-model/pointer-model/spec-design)表述一致;关键字类术语与 `src/compiler/lexer.cr` 核对(唯一真源惯例);失效条目删或标注 archive;演进记录节(十七)压缩为一行指向 ADR 与 git 历史。目标体积:较现 241 行只减不增,头部加定位声明(受众 maintainers;状态 active;真源 = design/ 各文档 + src/compiler/lexer.cr)。
+读全篇,逐节核对:术语定义与 design/ 定稿文档(execution-model/memory-model/pointer-model/spec-design)表述一致;关键字类术语与 `src/compiler/lexer.cr` 核对(唯一依据惯例);失效条目删或标注 archive;演进记录节(十七)压缩为一行指向 ADR 与 git 历史。目标体积:较现 241 行只减不增,头部加定位声明(受众 maintainers;状态 active;出处 = design/ 各文档 + src/compiler/lexer.cr)。
 
 - [ ] **Step 2: 压缩 crasm.md → 废弃收尾版**
 

@@ -66,7 +66,7 @@ corearch 在 `src/compiler/corearch.cr:590-592` 读它）—— **与 SYM 段无
 
 ## 2. 候选方案（逐案：改动面 / 风险 / 判据 / 对 canary 与五条出处的影响）
 
-> 五条真源 = `tools/baseline/canary_values.tsv`（`canary_elf` + `.ccr` 四条）。
+> 五条出处 = `tools/baseline/canary_values.tsv`（`canary_elf` + `.ccr` 四条）。
 
 ### 方案 A —— **声音最小**：只删硬编码兜底（#83），#82 登记为「已知不可复现」
 

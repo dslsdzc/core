@@ -502,7 +502,7 @@ T1 执行期间**共享默认工作副本被并发操作移走**（`jj op log` �
 ## §8 Global Constraints（判据清单，**逐条必须全绿**）
 
 1. **ELF canary IDENTICAL**：`95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475`（**28822B**）。
-2. **`.ccr` 四条当前锁值**（真源 = `tools/baseline/canary_values.tsv`，**本批实读**；**勿抄旧值**）：
+2. **`.ccr` 四条当前锁值**（出处 = `tools/baseline/canary_values.tsv`，**本批实读**；**勿抄旧值**）：
    | name | artifact | sha256 | size |
    |---|---|---|---|
    | `pa_ccr` | `pa.ccr` | `680a6f9843747b521213c3bcca1cf8724657943410f182e97ed63dcc11c7cd7a` | 96015 |
@@ -514,7 +514,7 @@ T1 执行期间**共享默认工作副本被并发操作移走**（`jj op log` �
 **本批预判 = 四条全 IDENTICAL**（实读依据：`tests/suite/ptr_arith.cr` 与 `tests/suite/generics_test.cr` **零 `dex`/`apx` 命中** ⇒ 漏斗恒早退、环不触发）。**若变且归因不出 ⇒ 红**（两级纪律：值变须「显式归因 + 同批重锁 + 旧值留痕」）。
 3. **腿① 冻结基线同源对拍 73 档**（`tools/baseline/parity_run.sh`；本批若新增 suite 语料 ⇒ **74**，须显式更新计数）。
 4. **行为探针 29 档**（`tools/baseline/probes_run.sh`）。
-5. **枚举 62/62**（口径 = 上批台账计数；**真源 = 当批实测重算**，见 U7）。
+5. **枚举 62/62**（口径 = 上批台账计数；**出处 = 当批实测重算**，见 U7）。
 6. **`selftest-types` 415/415**。
 7. **五 CI job 全 rc=0**（`check` / `bootstrap-tests` / `selfhost-tests` / `suite` / `full-bootstrap`）。
 8. **自举链**：`corec2 == corec3` IDENTICAL + **N06=0** + 冒烟 42。
