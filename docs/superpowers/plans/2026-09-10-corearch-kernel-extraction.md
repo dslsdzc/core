@@ -96,7 +96,7 @@
 
 ---
 
-## Task 4: 收官——全量回归 + 自举重建 + 文档/台账
+## Task 4: 收官——全量回归 + 自举重建 + 文档/清单
 
 **Files:**
 - Test: 全量回归面（compile/backend_bootstrap/hit_table/region_cfg/mw1-6/slice_bounds/live_ranges/ccr_v7 + bootstrap 三套 + full-bootstrap stage：`./build/corec build src/compiler/main.cr -o /tmp/corec2 --static -O 0` 输出 N06-free 且 /tmp/corec2 冒烟绿——src/compiler 单源自编译单元含内核的守护断言）
@@ -106,7 +106,7 @@
 
 **Interfaces:**
 - Consumes: Task 1-3 全部
-- 验证: 全量回归绿 + 自举重建冒烟;文档同步（蓝图步骤 2 完成、裁决表状态、双转录收敛注记 R5 消除）;progress 台账
+- 验证: 全量回归绿 + 自举重建冒烟;文档同步（蓝图步骤 2 完成、裁决表状态、双转录收敛注记 R5 消除）;progress 清单
 
 - [ ] **Step 1:** 全量回归跑批
 - [ ] **Step 2:** 自举重建 + 冒烟

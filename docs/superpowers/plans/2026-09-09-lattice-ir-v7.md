@@ -30,7 +30,7 @@
 **Files:** 分析产出（无代码改动）
 - 核对 g_df_edges/g_df_var_producer 完备性：df_connect_srcs 按 op 的连边语义表（dataflow.cr:195-315）对照 ast.cr op 全集（0-51）——哪些 op 无数据边（LABEL/JUMP/PHI/ALLOC/编译期标记 = 0 出边正常）；state 链覆盖（df_connect_state 纯函数判定表——find_func + fi_ispure）；**产出 = EDG 预期内容清单**（每 op 类的出边类别/数量，供 Task 1 测试期望）
 - CSE 时序 byte 级实测：`corec ccr -O0/-O1` 同源产物的 NOD 区 diff（pass_cse 是否被 lower_to_ccr 回滚）——注记（非修复项）
-- regalloc.cr:180 `compute_entries` 与 v6 §4.1 规则逐条对照（定值点 = IR_STORE 的 s1 ∪ 其余 dest≥0；版本切分；收口 end=min(def-1,last_ref)；参数/无定值 def=-1）——**Task 2 corec 侧 ENT builder 的镜像基**（corec 二进制不含 regalloc.cr——须独立实现同规则；对照产出 = 规则差异清单）
+- regalloc.cr:180 `compute_entries` 与 v6 §4.1 规则逐条对照（定值点 = IR_STORE 的 s1 ∪ 其余 dest≥0；版本切分；收尾 end=min(def-1,last_ref)；参数/无定值 def=-1）——**Task 2 corec 侧 ENT builder 的镜像基**（corec 二进制不含 regalloc.cr——须独立实现同规则；对照产出 = 规则差异清单）
 - 落盘序核对：NOD 落盘源 = lower_to_ccr 后的 g_ir_instrs = g_df_nodes 镜像（1:1）——EDG 节点 id 引用与 NOD 文件序一致的前提确认
 - 交付：清单并入本 plan 附注（文末「Task 0 盘点结果」节）；差异 → Task 1/2 执行前修正
 
@@ -95,7 +95,7 @@
 - [ ] **Step 1:** test_ccr_v7.py 全量合并（V7File walker + 全用例——删 v6 专属断言：version-5-reject → version≠7-reject；ent_optmeta_absent → ent 实记录 shape；roundtrip/build 链用例改 v7 期望）
 - [ ] **Step 2:** 全量回归跑批（面 = Global Constraints 回归面全项）
 - [ ] **Step 3:** 自举重建 + 冒烟（新 corec/corearch：backend_bootstrap stage 链 + corec check src/compiler）
-- [ ] **Step 4:** 文档同步（ir-schema 三形态列修订、v6 format spec 状态注记、progress 台账）
+- [ ] **Step 4:** 文档同步（ir-schema 三形态列修订、v6 format spec 状态注记、progress 清单）
 - [ ] **Step 5:** 提交 `feat: v7 收官——测试族迁移（V7File walker 全量）+ 全量回归 + 自举重建 + 文档同步`
 
 ---
@@ -163,10 +163,10 @@
 | # | v6 §4.1 / 计划文字规则 | regalloc.cr 实现 | 差异 / Task 2 对齐项 |
 |---|---|---|---|
 | 1 | 定值点 = IR_STORE 的 s1 ∪ 其余 dest≥0（carve-out：STORE_INDEX_VAR/STORE_PTR/DYN_DISPATCH 排除） | :206-212 逐条一致（STORE 先判 s1；三 op else-if 排除；其余 dest）；追加约束：目标 var 须 ∈ [vs, vs+vc) 本函数 var 窗口 | 无差异——corec 侧同窗口约束；坐标 = NOD id 全局序（= 实现侧 `inst = ist + ii` 的全局坐标；corec 侧 ist 同源 = df func start，ii 序 = NOD 序） |
-| 2 | 版本切分；收口 end = min(def−1, last_ref) | :218-224 收口上一版本 `pend = min(inst−1, last_global)`，last_global = var 级 last_ref（含定值自身——dest 列计入引用，恒 ≥ 次定值 → min 恒取 def−1，数学与 spec 截断式等价）；末版 le 直接 = last_ref | 无差异（版本号不落盘：save 侧 vcnt 计数槽 :561-587 已实现，Task 2 激活） |
+| 2 | 版本切分；收尾 end = min(def−1, last_ref) | :218-224 收尾上一版本 `pend = min(inst−1, last_global)`，last_global = var 级 last_ref（含定值自身——dest 列计入引用，恒 ≥ 次定值 → min 恒取 def−1，数学与 spec 截断式等价）；末版 le 直接 = last_ref | 无差异（版本号不落盘：save 侧 vcnt 计数槽 :561-587 已实现，Task 2 激活） |
 | 3 | 参数/全局条目 def_nod = -1，区间 = [函数首节点, last_ref+1) | :240-262 只对**函数窗口内从未定值但有引用**的 var 产 def=-1 条目，区间 = **[first_ref, last_ref] 闭区间**（live_start = 首引用指令非函数首节点） | **差异①（文档面）**：v6 §4.1 ③ 文字「区间 = [函数首节点…]」与实现不符——实测 pure_add 参数 a/b 条目 live 1..1（首引用 = BINARY @n1，函数首节点 = 0）。Task 2 镜像按实现（loader 只校验 els < ele ≤ instr_cnt、def≥0 时 ed == els——两语义都过，但「双写对照一致」要求两侧同规则）；测试手算期望按实现语义 |
 | 4 | 参数/全局 def_nod = -1 | 全局 var（SYM 前缀 0..G−1）**不在任何函数 var 窗口 → 恒无条目**（flags bit2「全局」永不落） | **差异②（文档面）**：v6 spec §3.2/§4.1 的「全局条目」面在实现中不存在——SYM globals 记录是全局的唯一存在面。Task 2 同实现（v7 字节 spec §3.5 flags bit2 语义保留 = 零实例声明） |
-| 5 | 活区间（first/last_ref 扫描）为收口前提 | compute_live_ranges :48-111：逐函数逐指令扫 d/s1/s2 三列 ∈ 窗口 → [first_ref, last_ref]（未用 = 双 -1） | **对齐项（实现前提）**：corec 二进制无 regalloc.cr——`compute_entries_v7` 须自含同规则引用扫描（或等价的 df 出边反扫——注意 df 边有幽灵缺陷表一注 A，**不得**以 df 边替代三列扫描） |
+| 5 | 活区间（first/last_ref 扫描）为收尾前提 | compute_live_ranges :48-111：逐函数逐指令扫 d/s1/s2 三列 ∈ 窗口 → [first_ref, last_ref]（未用 = 双 -1） | **对齐项（实现前提）**：corec 二进制无 regalloc.cr——`compute_entries_v7` 须自含同规则引用扫描（或等价的 df 出边反扫——注意 df 边有幽灵缺陷表一注 A，**不得**以 df 边替代三列扫描） |
 | 6 | 条目按函数升序成块；函数块界由 loader 按 var 窗口切 | :105-110 compute_live_ranges 尾部逐函数调 compute_entries（func_i==0 整表重置）；块内序 = 定值指令序，尾部 def=-1 补丁按 var 序扫 | 无差异（loader 分块 :1114-1145：pv ∈ [fvs, fvs+fvc)，fvc≤0 块断 → pcnt=0 对照 ffe==-1；与 SYM func first/last 双写对照已实现） |
 | 7 | home/flags | 恒 home=-1、flags=0（:232/:255） | 无差异（v7 字节 spec：home 恒 -1 直通、无配方/参数/全局/驱逐位零实例） |
 

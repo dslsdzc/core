@@ -174,4 +174,4 @@ diag 记录当前为 32 字节（error_code / msg_ptr / line / col），**无文
 - [ ] 驻留表内存增长（接受，上限 ≈ 会话唯一字符串总量）
 - [ ] 中文注释错误列偏移（UTF-16 转换后补）
 - [ ] 同名符号跨文件跳转可能不准（作用域精确化后补）
-- [ ] **仓库文档部分已过时**（CHANGELOG 止于 2026-06-21、DEBUG_REPORT 止于 2026-07-06、grammar/tokens.ebnf 关键字表与 lexer.cr 不符且无 @ 内建覆盖、pointer-model 等"当前状态"段与实现不符）——实现时以源码为准（关键字表唯一真源 `lexer.cr lookup_keyword()`；@ 内建名单唯一真源 `checker.cr` EXPR_AT 分发），文档仅作设计参考
+- [ ] **仓库文档部分已过时**（CHANGELOG 止于 2026-06-21、DEBUG_REPORT 止于 2026-07-06、grammar/tokens.ebnf 关键字表与 lexer.cr 不符且无 @ 内建覆盖、pointer-model 等"当前状态"段与实现不符）——实现时以源码为准（关键字表唯一依据 `lexer.cr lookup_keyword()`；@ 内建名单唯一依据 `checker.cr` EXPR_AT 分发），文档仅作设计参考

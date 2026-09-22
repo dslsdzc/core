@@ -18,7 +18,7 @@
 | `test_criteria_mutations.py`（**本批新增**） | <1s | 22/22 | `bootstrap-tests` | 突变自证载体（§3） |
 
 - `tests/harness/ci_hook_allowlist.txt` 同步删除 6 条（纪律：删条目 = 已挂）+ 头注重算（`scope 66 / hooked 45 / 差集 21`）。
-- **未挂登记**：`test_mw_task1-6`（**口径换代**：零 diff 基线须在**改动前**编译器上产 ⇒ CI 参照物结构性不可得；机器化需「基线入仓」取裁或改口径）· `test_lsp`（进程级，未实测）· 其余历史缺口档（差集逐条带理由）。
+- **未挂登记**：`test_mw_task1-6`（**标准换代**：零 diff 基线须在**改动前**编译器上产 ⇒ CI 参照物结构性不可得；机器化需「基线入仓」取裁或改约定）· `test_lsp`（进程级，未实测）· 其余历史缺口档（差集逐条带理由）。
 - **过程证据（覆盖判据的牙）**：先挂 `run.sh`、未删白名单条目时，`test_ci_hook_coverage.py` **当场转红**并逐条指名 5 个「已挂但白名单未删」；新增 harness 档未挂时同样转红。⇒ 该判据不是纸面机制（本仓曾因「自称已挂」吃 33×N06 漏检）。
 - **终态**：`[PASS] ci_hook_coverage: scope=66 hooked=45 unhooked(allowlisted)=21`（含内存内「摘挂点必红」自证）。
 
@@ -27,11 +27,11 @@
 | # | 旧形态（弱因） | **新断言形态** |
 |---|---|---|
 | **#84** `test_hit_table` 事件 1-4 | `stream[:2] == want`（只比 REX+opcode） | `ev14_template_problems`：① step **全字段模板**（键集+取值逐键相等：opcode 全字节 + REX 全位 + modrm 两角色 + rm_mode）；② 重建流与 M1 模板**全等**（非前缀）；③ **不可达前提显式断言**（注入语料不得覆盖 sub/nand——事件 1/2 对真 IR 不可达 ⇒ 本表断言是其唯一字节证据） |
-| **#86** `test_hit_table` 哨兵 | 4 字面量黑名单 | `dump_sentinel_problems`：结构化解析 + **白名单形态**（`ev <n> dst=<v> s1=<v> s2=<v>$`；值 `\d+`/`pool\d+`）+ 未用字段**逐字符 == "0"** + store/load 计数非空转。**口径边界**：用于字段取任何 `\d+`（含 255）不是伪影、不主张覆盖 |
+| **#86** `test_hit_table` 标记值 | 4 字面量黑名单 | `dump_sentinel_problems`：结构化解析 + **白名单形态**（`ev <n> dst=<v> s1=<v> s2=<v>$`；值 `\d+`/`pool\d+`）+ 未用字段**逐字符 == "0"** + store/load 计数非空转。**适用范围**：用于字段取任何 `\d+`（含 255）不是伪影、不主张覆盖 |
 | **#87** `test_cir_warm_path` STR | 只登记尺寸（预存豁免） | `str_contract_equal`：**暖 STR = 冷 STR 前缀**（`n_warm ≤ n_cold`、同 index 逐条字节同、非空转）。**先实测后定判据**：A5 181→169 条 / D4 574→562 条，冷多出的正是 ir_gen 临时名（`_arena`/`bin`/`str`/`call`/`_lazy`…） |
-| **#88** `test_ccr_types` 剔除面 | 黑盒逐行过滤后比对 | `dump_strip_face_problems`：连续段 + 唯一头行 + 剔除行数 == 1 + 头行自报 **`nodes=`** + 数据行 9 字段且**首字段 == 行序数** + `nodes ≥ 1`。**口径修正（实测驱动）**：`rows=` 是类型表行数不是数据行数——初版按 `rows` 计数**真跑当场红**，改 `nodes=` 并加序数断言（比原设想更强） |
+| **#88** `test_ccr_types` 剔除面 | 黑盒逐行过滤后比对 | `dump_strip_face_problems`：连续段 + 唯一头行 + 剔除行数 == 1 + 头行自报 **`nodes=`** + 数据行 9 字段且**首字段 == 行序数** + `nodes ≥ 1`。**约定修正（实测驱动）**：`rows=` 是类型表行数不是数据行数——初版按 `rows` 计数**真跑当场红**，改 `nodes=` 并加序数断言（比原设想更强） |
 | **#90** `test_mw_task2` E8 盲窗 | 遇 `0xE8` 字节即跳 5B | 判据侧**独立 x86-64 长度解码器**（fail-closed：未登记形态 ⇒ 判红）+ `region_equal_mask_calls` **指令边界锁步**（两侧边界序列逐条一致；非 call 全字节比；call 仅放行 4B rel32 且目标断言落在本 text 内） |
-| **#85** `test_mw_task2` 块体 | 2B 前缀锚 + 目标序 | `parse_slow_block` **逐指令模板**（除 alloc 位移/dest 槽偏移/回跳位移三字段外全字节钉死）+ `tag 立即数 == 1` + 回跳落**真指令边界** + 块间**连续** + 各站点 alloc 目标**唯一** |
+| **#85** `test_mw_task2` 块体 | 2B 前缀锚 + 目标序 | `parse_slow_block` **逐指令模板**（除 alloc 位移/dest 槽偏移/回跳位移三字段外全字节固定）+ `tag 立即数 == 1` + 回跳落**真指令边界** + 块间**连续** + 各站点 alloc 目标**唯一** |
 
 **真跑证据（全部本机实测）**：`test_hit_table` 24/24 · `test_ccr_types` 49/49 · `test_cir_warm_path` 19/19 · `test_mw_task2` ALL PASS（z 用例零 diff 9/9、豁免面计数 1/1/2、t3 250 站点、新增 `t4_sub_overflow` 三档）；解码器与 `objdump --insn-width=16` 对拍 17 个真实 region（含 t3 3272 条指令）**逐指令边界一致**。
 
@@ -60,6 +60,6 @@ M1 #84（角色换向/opcode 尾加 1B/rm_mode）· M2 #86（1 / 0xFE / 0xFFFFFF
 
 ## 6. 未覆盖面 / 交接
 
-- `test_mw_task1-6` 仍**未挂**（口径换代，需取裁）；`#90` 的判据虽已改强，但该腿仍靠手工跑（同因）。
+- `test_mw_task1-6` 仍**未挂**（标准换代，需取裁）；`#90` 的判据虽已改强，但该腿仍靠手工跑（同因）。
 - 本批新增 `t4_sub_overflow` 为**行为覆盖用例**（不改源码语义）；`t3` 的 250 站点块体模板断言随语料规模线性增长（实测可接受）。
 - 判据侧解码器（`x86_insn_len`）为**判据专用**：发射器新增指令形态时它会**判红**（fail-closed），需按新形态登记——这是有意的维护点，勿改回「未知即跳过」。

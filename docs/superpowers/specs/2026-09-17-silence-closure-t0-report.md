@@ -1,4 +1,4 @@
-# 批 8（静默面收口）T0 实测报告（**独立文件**；计划文件归 `plan-verikernel` 独占）
+# 批 8（静默面收尾）T0 实测报告（**独立文件**；计划文件归 `plan-verikernel` 独占）
 
 > **性质**：T0 侦查（只读 + 最小件探针）与实施期**实测反证**的汇总。计划 `2026-09-17-silence-closure.md`
 > 的原文**不在此改动**（其更正轮由 `plan-verikernel` 承担）；本文件与其并列，供交叉引用。
@@ -115,7 +115,7 @@ fn main() -> int { d : dex, apx = 7.0; return g(1, d); }
 - 判据改**条件式**（`is_apx != 0 && declared_ti != TI_DEX ⇒ 硬错`）+ 补 `. + apx` / `auto + apx` 探针（期望 rc=1）；
   ⚠ 登记：bootstrap 侧 `int, apx` **有语义**（`ApproxInstr`）⇒ 两前端接受集分歧（`#2026-09-17-10` 家族）。
 - **本报告未独立复跑该条**（避免与 `plan-verikernel` 的更正轮重复构建）；实施时按**实测三处**落点，
-  机制钉 = `.cir`/dump 里 `approx` 的**有无**。
+  机制断言 = `.cir`/dump 里 `approx` 的**有无**。
 
 ---
 

@@ -100,7 +100,7 @@
 `tests/selfhost/test_arg_inference_gap.py` —— **19 例**：腿 A（139 面）**9 例**、腿 B（静默面）**1 例**、对照 **9 例**。
 **⚠ 未挂 CI**（`tests/harness/ci_hook_allowlist.txt` 有对应条目，注明理由）；**修复批次落地时必须同时**：① 删该白名单条目 ② 在 `src/ci/run.sh` 挂本套件 ③ 改文件头注为「已修」。
 
-**当前观测矩阵（本文件落纸时，`build/corec` = develop `0808a8ca`）**：
+**当前观测矩阵（本文件写进文档时，`build/corec` = develop `0808a8ca`）**：
 
 | # | 探针 | 观测 | 修后期望 |
 |---|---|---|---|

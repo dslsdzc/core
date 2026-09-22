@@ -127,7 +127,7 @@ Task 5 消费点 = 发射侧 g2_slot/get_reg_for_var，非 opt.cr——见 Task 
   往返）；e3 下边界邻域（−(2^63−1)+−1 = −2^63 **快值不溢出**——负 OF 只发生在 < −2^63，
   字面量 −2^63 被 lexer 拒故须此构造）+ add/sub 连续越界 + 回升降级；e4 sub 形式
   （i64max − −1）；e5 上下边界同函数双站 + 2L vs 2L 高 limb 判别；e6 i64max 边界
-  fast↔2L 比较真值表（LT/GT 双分派 + EQ/GE 假性 −10 哨兵）；e7 −2^63 快 vs
+  fast↔2L 比较真值表（LT/GT 双分派 + EQ/GE 假性 −10 标记值）；e7 −2^63 快 vs
   −2^63−1 2L 同 hi 低 limb 无符号判别；e8 循环携带越上边界。期望值 = Python 独立
   计算（limb_bytes），16B 通道验全 128 + exit 数学低字节。
 - **收官全量回归**（本任务一次性全套）：mw task1-6 + hit_table + compile +

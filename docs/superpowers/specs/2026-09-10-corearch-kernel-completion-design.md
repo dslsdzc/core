@@ -192,7 +192,7 @@
   实例配对只负责与 g_opt_meta 同步）。
 - 实例写点成对实证 = phase 5 尾逐函数登记 + meta_set_reg/meta_remove_var 辅助
   （reg_assign_var_entries/reg_clear_var_entries——全条目登记/清除）；注入钩子
-  try_inject_read_gap 经登记表等价读（判定与探针单真源）。
+  try_inject_read_gap 经登记表等价读（判定与探针单出处）。
 - 实证判据：判定通道输出逐字节同 28/28 对（4 程序 × 7 通道，含注入红路径 "loc" 违规行——
   Task 3 基线/对照语料 .superpowers/sdd/kc-task-3-base|post）+ test_live_ranges 13/13
   （check_regalloc_violations 规则 1/1/2 红 + read_gap_nonfunc0 + 绿路径全过 + watchdog 93

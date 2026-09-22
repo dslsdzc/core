@@ -14,7 +14,7 @@
 
 1. 版本控制只用 `jj`(禁 `git`,铁律 #2);提交必须经用户许可,计划中的提交步骤执行前先向用户确认工作副本 src 改动的归属
 2. 文件永久不允许还原(铁律 #3)——移动不复制,mv 前确认目标不存在
-3. 每份文档头部强制加定位声明:受众(users/maintainers/contributors)+ 状态(active/superseded/deprecated/archive/proposal)+ 真源声明
+3. 每份文档头部强制加定位声明:受众(users/maintainers/contributors)+ 状态(active/superseded/deprecated/archive/proposal)+ 出处声明
 4. 一份文档一个职责;状态与内容冲突时更新文档,不添加免责段
 5. docs/README.md 为唯一导航索引,与目录树一致
 6. docs/pseudocode/ 与 docs/superpowers/ 不动;coq/ ir-schema/ verifier/ 原样只加头注

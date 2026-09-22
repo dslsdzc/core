@@ -55,7 +55,7 @@ docs/
 
 **规则(每份文档强制):**
 
-1. 头部加定位声明块:受众(users/maintainers/contributors)+ 状态(active/superseded/deprecated/archive/proposal)+ 真源声明(源码/grammar/本文件)
+1. 头部加定位声明块:受众(users/maintainers/contributors)+ 状态(active/superseded/deprecated/archive/proposal)+ 出处声明(源码/grammar/本文件)
 2. 一份文档一个职责;状态与内容冲突时更新文档,不添加免责段
 3. 分类树 + 定位声明双轨,README.md 为唯一导航索引
 
@@ -95,7 +95,7 @@ docs/
 
 ### 6.2 glossary.md — 校准示范
 
-- 术语条目与源码逐一对照(lexer.cr 关键字唯一真源等既有惯例)
+- 术语条目与源码逐一对照(lexer.cr 关键字唯一依据等既有惯例)
 - 头注定位声明:受众 maintainers + 状态 active
 - 失效条目删除或标 archive,不保留"冲突时以源码为准"的免责式堆叠
 

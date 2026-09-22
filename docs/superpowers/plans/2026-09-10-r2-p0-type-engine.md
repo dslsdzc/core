@@ -869,12 +869,12 @@ jj commit src/compiler/type_engine.cr src/compiler/type_selftest.cr \
 
 ---
 
-## Task 5: 收官（回归 + 自举 + 零产物变化 + 文档/台账）
+## Task 5: 收官（回归 + 自举 + 零产物变化 + 文档/清单）
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-09-10-type-interface-unification-design.md`（§9 P0 标记完成）
 - Modify: `TODO.md`（登记 P0 落点 + 未覆盖面）
-- Modify: `.superpowers/sdd/progress.md`（台账）
+- Modify: `.superpowers/sdd/progress.md`（清单）
 
 - [ ] **Step 1: 全量回归**
 
@@ -918,7 +918,7 @@ nice -n 19 ./build/corec run 'fn main()->int{return 42;}'   # rc=42
 ```
 Expected: `CMP_IDENTICAL` + rc=42 + 无 `error[`/N06。
 
-- [ ] **Step 4: 文档与台账**
+- [ ] **Step 4: 文档与清单**
 
 - spec §9 表 P0 行标 ✅ 已完成 + 记录落点（提交哈希）
 - `TODO.md` 新增条目：**P0 未覆盖面登记**（`AK_NAMED` 具体行不展开 → 判定返回 unknown；参数变型规则 = P3；用户接口/载体 = P2/P4）

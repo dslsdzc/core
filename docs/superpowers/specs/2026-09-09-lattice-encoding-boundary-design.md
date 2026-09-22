@@ -13,7 +13,7 @@
 
 ### 0.1 起因
 
-HIT M2 实施（表驱动发射收口）在 Task 3 停摆：branch 模板形态（spec 两步 cmp+jcc vs 旧发射器实际四原子 load+test+je+jmp）、ret 事件（裸 C3 vs 旧路径 IR_RETURN = 值序列+jmp→epilogue+ret_patch）连续撞出计划级矛盾。排查结论：**矛盾是症状**——模板在逐字节复刻一个本身经典形状的旧发射器。这暴露了更上层的问题：转换编码层（corearch）与经典计算机绑定太深。
+HIT M2 实施（表驱动发射收尾）在 Task 3 停摆：branch 模板形态（spec 两步 cmp+jcc vs 旧发射器实际四原子 load+test+je+jmp）、ret 事件（裸 C3 vs 旧路径 IR_RETURN = 值序列+jmp→epilogue+ret_patch）连续撞出计划级矛盾。排查结论：**矛盾是症状**——模板在逐字节复刻一个本身经典形状的旧发射器。这暴露了更上层的问题：转换编码层（corearch）与经典计算机绑定太深。
 
 ### 0.2 定性（2026-09-09 用户确认）
 

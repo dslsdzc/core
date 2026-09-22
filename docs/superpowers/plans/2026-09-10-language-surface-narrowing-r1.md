@@ -581,12 +581,12 @@ jj commit -m 'fix: 语言面收窄 R1 Task 4——全局初始化修复（聚合
 
 ---
 
-## Task 5: 收官（回归 + 自举 + 文档 + 台账）
+## Task 5: 收官（回归 + 自举 + 文档 + 清单）
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-09-10-language-surface-narrowing-design.md`（状态行 + §3 波 R1 标记）
 - Modify: `TODO.md`（宽度清理三项划销 + 定长裁决挂账处置 + 定长全局修复记录）
-- Modify: `.superpowers/sdd/progress.md`（台账）
+- Modify: `.superpowers/sdd/progress.md`（清单）
 - Modify: `tests/selfhost/test_compile.py:20-38`（陈旧清单路径——见 Step 5）
 
 - [x] **Step 1: 全量回归**
@@ -617,7 +617,7 @@ nice -n 19 ./build/corec build src/compiler/main.cr -o /tmp/corec2 --static -O 0
 cmp /tmp/corec2 /tmp/corec3                        # 期望 IDENTICAL
 nice -n 19 ./build/corec run 'fn main()->int{return 42;}'   # rc=42
 ```
-（口径修正来源 = Task 5 实现者实测：计划原写「由 test_backend_bootstrap 覆盖」不实，已按 run.sh 同款。）
+（约定修正来源 = Task 5 实现者实测：计划原写「由 test_backend_bootstrap 覆盖」不实，已按 run.sh 同款。）
 
 - [x] **Step 3: 文档同步**
 
@@ -635,7 +635,7 @@ nice -n 19 ./build/corec run 'fn main()->int{return 42;}'   # rc=42
   - M3：**文档面随迁**（Task 2 只动 `src/`）——`docs/pseudocode/compiler/parser-2.md:167-205,729-740`、`docs/pseudocode/compiler/ast.md:87-118,445-490`、`docs/numeric-migration-inventory.md:29,32,51,148,190,230-231,244` 中引用已删条目处逐条更新/标注（其中 `:148` 声称 `src/lsp/analysis.cr:895` 有 `(k >= T_INT_I8 && k <= T_FLOAT_F64)` 区间——**实测不存在**，该行本身即过时，按实测修正）
   - Info（不处理，仅记录）：`build/all.cr`、`build/bootstrap_self.cr`、`build/selfhost_compiler.cr` = 陈旧拼接产物（忽略项，不入树）
 
-- [x] **Step 4: 台账**
+- [x] **Step 4: 清单**
 
 `.superpowers/sdd/progress.md` 追加 R1 段（各任务提交哈希 + 判据结果）。
 

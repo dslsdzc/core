@@ -108,7 +108,7 @@ src/runtime/                      ← 运行时（rt.s——OS 轴补充）
 - **rc/cmp 判据**：文件移动不改产物（asm 后端无 .loc——评审曾实测注释变化 asm byte-identical）；stage 链 run 内 byte-identical 判据保持
 - **main.cr 双入口**（TODO #2026-09-10-2）：波 2 处置（注册收敛或显式分歧留档）。**波 1 已搬未收敛**——双入口之一随 Task 1 迁入组合根（`src/arch/linux/ld/main.cr` → `src/targets/x86_64-linux/main.cr`），分歧本体（ld project-mode 入口缺 HIT/表旗标注册）逐字保持、`test_backend_bootstrap` stage 链仍走该入口；按 H7 纪律——波 1 只同步注记措辞、flag 面收敛留波 2
 - **架构特化参数位**（格式层的 machine/reloc）：波 1 仅搬迁不建参数机制；交叉适配机制 = 波 2 或实例 B 时定
-- **波 1 评审裁决遗留**（全部登记 TODO，**均不改波 1 结构面**）：TODO #2026-09-10-4 = 前端 ≥18 形参静默误编译类（高优先级——根因前端参数表/AST bookkeeping，本波零接触；其 ④ 项「22 参 runtime 用例入 tests/suite」= 该项缺陷修复后才可达，**非波 1 收口条件**）；TODO #2026-09-10-5 = `IR_CALL_EXTERN` >6 int 参语义缺口（callseq.cr 指针落地——波 1 按"零变化"逐字保留预存不对称，修复 = 波 2 FFI 面）；TODO #2026-09-10-6 = `src/format/elf/elf.cr` 三处手写 syscall 序列（mmap/clone/exit，syscall1/5/6 形）留在格式轴 = **实例 B「换轴零改动」承诺的证伪面**，收编 `src/os/linux/` = 波 2 / 实例 B 前置（Task 6 只抽 syscall3/4 内置体发射面，未扩面）
+- **波 1 评审裁决遗留**（全部登记 TODO，**均不改波 1 结构面**）：TODO #2026-09-10-4 = 前端 ≥18 形参静默误编译类（高优先级——根因前端参数表/AST bookkeeping，本波零接触；其 ④ 项「22 参 runtime 用例入 tests/suite」= 该项缺陷修复后才可达，**非波 1 收尾条件**）；TODO #2026-09-10-5 = `IR_CALL_EXTERN` >6 int 参语义缺口（callseq.cr 指针落地——波 1 按"零变化"逐字保留预存不对称，修复 = 波 2 FFI 面）；TODO #2026-09-10-6 = `src/format/elf/elf.cr` 三处手写 syscall 序列（mmap/clone/exit，syscall1/5/6 形）留在格式轴 = **实例 B「换轴零改动」承诺的证伪面**，收编 `src/os/linux/` = 波 2 / 实例 B 前置（Task 6 只抽 syscall3/4 内置体发射面，未扩面）
 - **本设计不承诺**：需求推导上收（§4.1 内核候选——按需）、spill/驱逐实施（§4.2 预留）、格式轴跨 OS 全面参数化（PE 出现前 YAGNI）
 
 ## 7. 关联同步项
