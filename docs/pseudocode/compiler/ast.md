@@ -123,7 +123,7 @@
 | 单元类型 | TY_UNIT | （全局常量节） |
 | 永无类型 | TY_NEVER | （全局常量节） |
 | 字符类型 | TY_CHAR | （全局常量节） |
-| 泛型参数哨兵 | TY_GENERIC_PARAM | （全局常量节） |
+| 泛型参数标记值 | TY_GENERIC_PARAM | （全局常量节） |
 | 最大泛型参数数 | MAX_GENERICS | （全局常量节） |
 | 最大结构体字段数 | MAX_STRUCT_FIELDS | （全局常量节） |
 | 最大枚举变体数 | MAX_ENUM_VARIANTS | （全局常量节） |
@@ -504,7 +504,7 @@
 | 单元类型（TY_UNIT） | 4 | 空元组，无返回值 |
 | 永无类型（TY_NEVER） | 5 | 永不返回（发散类型） |
 | 字符类型（TY_CHAR） | 6 | 单个 Unicode 码点 |
-| 泛型参数哨兵（TY_GENERIC_PARAM） | 7 | 标记泛型参数节点的特殊值 |
+| 泛型参数标记值（TY_GENERIC_PARAM） | 7 | 标记泛型参数节点的特殊值 |
 | 最大泛型参数数（MAX_GENERICS） | 4 | 每个声明允许的最大泛型参数数 |
 | 最大结构体字段数（MAX_STRUCT_FIELDS） | 16 | 每个结构体最大字段数 |
 | 最大枚举变体数（MAX_ENUM_VARIANTS） | 16 | 每个枚举最大变体数 |
