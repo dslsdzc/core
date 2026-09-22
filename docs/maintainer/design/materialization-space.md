@@ -2,7 +2,7 @@
 
 > 定位:受众 = 维护者/贡献者;**状态 = active(已合入)**。
 > 决策记录 = `docs/maintainer/adr/adr-0021-existence-space-layer-definition.md`(2026-09-20,维护者裁定);
-> 设计意图真源 = 维护者原话逐字稿(`/tmp/briefs/materialization-space-raw.md`;本文件是它的工程化展开)。
+> 设计意图出处 = 维护者原话逐字稿(`/tmp/briefs/materialization-space-raw.md`;本文件是它的工程化展开)。
 > **本文件 = 格层本体的层定义**——格层回答的四问、`Semantic Entry → Materialization` 对象模型、
 > 七字段、归类表、不变量改写、划界。**条款 1–7 的内容仍以 `docs/academic/cache-semantics.md` 为权威**
 > (本次修订只改它们的外层框定,不改条款内容);本节不复制条款正文,避免第二权威。
@@ -149,9 +149,9 @@ Semantic Entry  ──带一组字段──▶  Materialization(存在物)
 |---|---|---|---|---|
 | `recipe` | 该 Entry 的存在能否**由图内配方重新导出**等价状态 | `{recomputable, unrecomputable}`(二元) | **编译器前端**(唯一持有图的一方):判定 = 定值节点链是否终止于边界/不可重算标注;Entry 无配方(参数、外部输入)⇒ unrecomputable | **mapper**(驱逐决策)+ **验证器**(驱逐不变量的适用性) |
 | `identity` | 这是哪一条 Entry(同一性) | Entry 标识 = (变量标识, 版本序);匿名条目 = 产生节点身份 | **编译器**(条目生成期) | 所有消费方:共存判定、去重、跨边界身份重指 |
-| `version` | 该 Entry 在同一 identity 版本序列中的位置 | 1-based 组内序(现行实现口径) | **编译器**(版本切分) | **mapper**(共存判定必须同版本)+ 调试通道 |
+| `version` | 该 Entry 在同一 identity 版本序列中的位置 | 1-based 组内序(现行实现的做法) | **编译器**(版本切分) | **mapper**(共存判定必须同版本)+ 调试通道 |
 | `authority` | 同一 Entry/version 有多份 materialization 时,**哪一份在语义上算数** | `{single(ref), shared-readonly, unresolved}` | **runtime / mapper**(外部/分布式情形协商后写);图内单体情形由编译器写「单一权威 = 本 materialization」 | **验证器**(可观测语义以哪份为准)+ 一致性判定 |
-| `location` | 当前在哪里存在 | mapper 的位置域(**格层不定义位置代数**——现行口径:位置域 = 实例侧声明) | **mapper**(分配/放置决策) | mapper(emit)+ 验证器(location 无关性判定的输入)。⚠ **本字段是否入格层 = §九-C 待裁项(本文件倾向「不入」)**——读本行须按待裁处理 |
+| `location` | 当前在哪里存在 | mapper 的位置域(**格层不定义位置代数**——现行约定:位置域 = 实例侧声明) | **mapper**(分配/放置决策) | mapper(emit)+ 验证器(location 无关性判定的输入)。⚠ **本字段是否入格层 = §九-C 待裁项(本文件倾向「不入」)**——读本行须按待裁处理 |
 | `persistence` | 该 materialization 消失前,**其状态是否必须被转移到某个合法载体** | `{free, transfer-required, externally-owned}` | **编译器**(由 `recipe` + 边界标注推导)+ **外部**(设备/OS 拥有的资源) | **mapper**(驱逐决策)+ 验证器 |
 | `replicability` | 该 materialization 是否允许存在多份 | `{free, readonly-share, forbidden}` | **编译器**(线性/仿射分析)+ **runtime**(外部资源) | **mapper**(跨边界传递/优化)+ 验证器 |
 
@@ -190,7 +190,7 @@ replicability = forbidden ⇒  authority = single
 
 ## 三、归类表:把原文点名的形态放进同一模型
 
-### 3.1 判定口径
+### 3.1 判定标准
 
 每个形态给一个七元组读数。约定:
 - `—` = 该形态下该字段无意义/不适用;
@@ -257,7 +257,7 @@ replicability = forbidden ⇒  authority = single
   - 权威可能**暂时无人担任**(分区/脑裂)——模型无法说「当前权威未知」;
   - 权威是**协商/收敛的结果**,不是物化的固有属性;
   - `replicability` 的合法性可能是**有条件的**(「有 quorum 时允许复制」),而取值域 `{free, readonly-share, forbidden}` 是无条件的二/三值。
-- 本仓现行口径已把这件事放在**别处**:`authority` 的**授权**归治理层
+- 本仓现行做法已把这件事放在**别处**:`authority` 的**授权**归治理层
   (`consult/assume/measure/pass`)——v4 定稿「**能力不提升一等公民**」条
   (`docs/maintainer/adr/adr-0005-memory-model-layers-v4.md:15`:
   `身份 = 图节点、无配方 = 标注、授权归治理层`)。
@@ -320,19 +320,19 @@ Evictable(x)  ⟺  Recoverable(x) ∨ PreserveRequiredState(x)
 
 ### 4.3 怎么测(判据形状)
 
-三向钉子(缺一不可):
+三条断言(缺一不可):
 
-1. **正向钉(Recoverable 侧)** —— 构造 `recipe=recomputable` 的 Entry,
+1. **正向断言(Recoverable 侧)** —— 构造 `recipe=recomputable` 的 Entry,
    驱逐其 materialization、重新物化,断言两态**可观测等价**。
    形状:同基 pre/post 对拍(产物逐字节 / 观测读数相同)。
    > [已实现] 该形状的既有资产:自举链 `corec2 == corec3` 逐字节对拍、
    > ELF canary 冻结 sha(`docs/maintainer/design/` 各批判据),可直接复用为对拍骨架。
-2. **反向钉(PreserveRequiredState 侧)** —— 构造 `recipe=unrecomputable` 的 Entry,
+2. **反向断言(PreserveRequiredState 侧)** —— 构造 `recipe=unrecomputable` 的 Entry,
    驱逐其 materialization **且不做状态转移**,断言**必须拒绝**(rc≠0 或硬错),
    **绝不允许静默通过**。
    > 这是新增判据。旧不变量下该形态不存在,**所以现行判据网对此的覆盖为零**
    > ——一个不会红、只会腐烂的判据面。
-3. **边界钉(归属判定,决定前两条怎么用)** —— 对每个进入判定的对象,
+3. **归属断言(归属判定,决定前两条怎么用)** —— 对每个进入判定的对象,
    必须**机械地**判定它落在 `Recoverable` 侧还是 `PreserveRequiredState` 侧:
    - 存在一条从该 materialization 到 Entry 配方、且**全在图内**的重算路径 ⇒ `Recoverable`;
    - 存在一条**显式登记的状态转移记录** ⇒ `PreserveRequiredState`;
@@ -348,7 +348,7 @@ Evictable(x)  ⟺  Recoverable(x) ∨ PreserveRequiredState(x)
 ```
 
 理由:`PreserveRequiredState` 是义务,义务的**未满足**与**未被检查**在观测上不可区分
-——这正是本仓反复收口的「静默类」缺陷的形状(`docs/maintainer/design/` 各批的
+——这正是本仓多批修复反复针对的「静默类」缺陷的形状(`docs/maintainer/design/` 各批的
 「静默面收口」)。所以判据必须是:归属判定返回「未知」时,**判为不可驱逐**,
 而不是判为可驱逐。
 
@@ -396,12 +396,12 @@ recipe = unrecomputable  ⇒ Evictable **只能**走 PreserveRequiredState 支
 
 ### 5.2 可检验的划界判据
 
-原文给的判据形状:**格层描述里出现「何时/多久/顺序」这类词 = 越界**。
+原文给的判据形状:**格层描述里出现「何时/多久/顺序」这类词 = 格层管了该归 mapper 的事**。
 
 **这条判据有一个反例,必须先处理掉,否则判据是假的**:
 `.ccr` 的 ENT 里有 `live_start` / `live_end`(存在区间)——**它就是一个「何时」**,
 而且它 [已实现] 在格层载体里(`src/lattice/ent_kernel.cr:217-218` 访问器;
-填充 = `compute_live_ranges`)。若照字面用原判据,现行实现自己就越界了。
+填充 = `compute_live_ranges`)。若照字面用原判据,现行实现自己就先违规了。
 
 **修正后的判据(本文件提议)**:
 
@@ -417,7 +417,7 @@ recipe = unrecomputable  ⇒ Evictable **只能**走 PreserveRequiredState 支
 ```
 
 判据形态:**「能否由图上已确定的事实唯一决定」**——
-比「有没有出现『何时』二字」可检验,且不会把现行实现判成越界。
+比「有没有出现『何时』二字」可检验,且不会把现行实现判成违规。
 
 > 补充检验 [已实现]:现行实现已按此划界——
 > `home`(放置决策)**恒 -1 不写回格式**(`src/compiler/ccr_io.cr:85`:
@@ -431,7 +431,7 @@ recipe = unrecomputable  ⇒ Evictable **只能**走 PreserveRequiredState 支
 
 ### 6.0 实际执行记录(2026-09-20)
 
-**处置口径**:逐处判类别,**不做机械替换**——「宣布权威」类必改;「引用条款 N」类
+**处置办法**:逐处判类别,**不做机械替换**——「宣布权威」类必改;「引用条款 N」类
 **指针仍然有效**(条款 1–7 内容未变),只改外层框定词;**plans/specs/archive 不动**(历史留痕)。
 
 **同批就地改动(12 个既有文件 + 1 新增 ADR)**:
@@ -460,7 +460,7 @@ recipe = unrecomputable  ⇒ Evictable **只能**走 PreserveRequiredState 支
 **明确不动**:`docs/superpowers/plans/**`、`docs/superpowers/specs/**`(≥8 份引用,历史设计稿)、
 `docs/archive/**`(归档即历史、`adr/README.md` 规则)、`docs/developer/concepts/memory.md:39`(纯链接,无权威宣告)。
 
-### 6.0.1 收窄口径与回退(2026-09-20 二次校订)
+### 6.0.1 收窄标准与回退(2026-09-20 二次校订)
 
 维护者随后把范围**收窄**,并给出**最终判据**——**不按「类」判,按「这句话有没有宣告权威」判**:
 
@@ -488,7 +488,7 @@ recipe = unrecomputable  ⇒ Evictable **只能**走 PreserveRequiredState 支
 
 **合计**:回退 **6 处**（5 处首轮过改 + `region-model.md:102` 二次回退）· 保留/新改 **4 处**（`regalloc:4` · `region-model:4` · `region-model:156` · `cache-semantics:122`；另 `regalloc:29` 首轮已改对）。
 
-**一致性回归**:回退后全仓**纯描述**类陈述口径统一为「缓存语义映射实例」
+**一致性回归**:回退后全仓**纯描述**类陈述统一为「缓存语义映射实例」
 (与原本未动的 `project-book.md:111`、`TODO.md:2161/2313` 一致);**权威宣告**类则一律已重指到新权威。
 
 **经判断**不属本次修订范围、**未改**的一处(列此备查):`adr-0005:13`「层规则 = 缓存语义七条,永不新建」——
@@ -501,11 +501,11 @@ recipe = unrecomputable  ⇒ Evictable **只能**走 PreserveRequiredState 支
   排除:纯路径引用/链接、目录列表、计划条目编号、无关 `cache`(.cir 缓存 / `cir_cache.cr` / 编译缓存);
 - 命中规模:**约 150 行 / 约 46 个文件**;
 - **本账的可靠性边界**:§6.3 与 §6.4 中标注「✓实核」的行由我**逐字复核**过 line 与摘句;
-  其余行按同一 grep 口径登记,**未逐行复核**。
+  其余行按同一 grep 条件登记,**未逐行复核**。
 
 ### 6.2 甲类:已就地改(把缓存当**本体定义**说的)
 
-这些位置删除「本体/定义」措辞后语义**不变**——改动是措辞收口,零行为变化。
+这些位置删除「本体/定义」措辞后语义**不变**——改动只是措辞修改,零行为变化。
 
 | file:line | 现行措辞(逐字摘句) | 新定义下该怎么读 | 建议处置 |
 |---|---|---|---|
@@ -520,7 +520,7 @@ recipe = unrecomputable  ⇒ Evictable **只能**走 PreserveRequiredState 支
 | `docs/project-book.md:109` ✓实核 | `值即条目(配方可重算),存储即缓存(范式无关),内存只是经典映射` | 「存储即缓存」→「存储即存在格的物化」;「值即条目」仍成立 | 就地改 |
 | `docs/project-book.md:216` ✓实核 | `存储语义本体为**缓存语义**(值 = 配方、条目可驱逐可再生、图边界为唯一不可再生来源)` | 「本体为缓存语义」→「本体为存在格;缓存语义是经典映射的理论面」 | 就地改 |
 | `docs/z-vision.md:15` ✓实核 | `存储半边已定稿(语义本体 = 缓存语义,字节内存 = 经典映射实例…)` | 「语义本体 = 缓存语义」→「语义本体 = 存在格」 | 就地改 |
-| `docs/glossary.md:20` ✓实核 | `\| 格(层) \| 存在空间:如何存在——条目、配方、驱逐、再生 \|` | 定义已正确(「存在空间」),**但四要素列的是缓存四要素**——须换成七字段口径 | 就地改 |
+| `docs/glossary.md:20` ✓实核 | `\| 格(层) \| 存在空间:如何存在——条目、配方、驱逐、再生 \|` | 定义已正确(「存在空间」),**但四要素列的是缓存四要素**——须换成七字段的表述 | 就地改 |
 | `docs/README.md:37` ✓实核 | `[cache-semantics.md]— 缓存语义七条(存储语义本体,权威)` | 「存储语义本体」→「缓存映射条款」 | 就地改 |
 | `docs/maintainer/adr/README.md:34` ✓实核 | `\| ADR-0006 \| 缓存语义 = 存储语义本体(2026-08-15 纠偏) \| accepted \|` | ADR 标题是**历史决策的记录** | **加注**(见下) |
 | `docs/maintainer/adr/adr-0006-cache-semantics.md:1,11` ✓实核 | `# ADR-0006: 缓存语义 = 存储语义本体(2026-08-15 纠偏)` / `语义本体 = **缓存语义七条**` | **不改正文**——ADR 是决策记录,改写它是篡改历史 | **加修订注 / 新 ADR 标 `superseded-by`** |
@@ -538,7 +538,7 @@ recipe = unrecomputable  ⇒ Evictable **只能**走 PreserveRequiredState 支
 这些位置引用的是**条款本身**(配方/驱逐/再生/无配方),而条款 1/3/4/4b/5/6/7
 在新定义下**原样成立**(§1.3),因此**不需要改**,只需在权威文档处加一条修订注让读者找到本文档。
 
-代表行(非穷举,完整清单见 §6.4 的 grep 口径复跑):
+代表行(非穷举,完整清单见 §6.4 的 grep 条件复跑):
 
 | file:line | 现行措辞摘句 | 性质 |
 |---|---|---|
@@ -564,7 +564,7 @@ recipe = unrecomputable  ⇒ Evictable **只能**走 PreserveRequiredState 支
 
 ### 6.5 本账的已知边界(必读)
 
-- 本账是 **grep 口径的产物**,不是「穷尽性证明」:
+- 本账是 **grep 条件的产物**,不是「穷尽性证明」:
   同义措辞若不在 §6.0 的 pattern 里,**会漏**(§八 列了已知的可疑漏网方向);
 - 「必改/加注/不动」是**本文档的建议**,**不是裁定**(§九 B);
 - **archive/ 与已执行计划被归入「不动」的判据 = 本仓「归档即历史」的既有惯例**,非本文档发明。
@@ -606,7 +606,7 @@ recipe = unrecomputable  ⇒ Evictable **只能**走 PreserveRequiredState 支
 | 诊断 dump | `src/lattice/ent_kernel.cr:415` | `print(" flags "); println(int_str(ent_flags(e)));`——**只打印** |
 | 语义消费 | **全仓无** | 无任何 pass 对 `flags` 分支 |
 
-**源码自己的口径(两句自述,互相印证)**:
+**源码自己的说法(两句自述,互相印证)**:
 
 - `src/compiler/ccr_io.cr:85`:
   `home 恒 -1(实例注记——分配决策不写回格式,字节 spec §3.5);flags 恒 0(无配方/参数/全局/驱逐位零实例——位语义保留)`;
@@ -722,16 +722,16 @@ Core 是**版本化赋值模型**(条款 5:`X = X + 1` ≙ `x₁ 创建、x₀ �
 
 `grep -i flag src/compiler/ccr_io.cr` 的全部命中(6 处)都在 ENT 语境:`:76,85,174,473,811,820,1431`。
 
-**位占用(两种口径,须并列给出)**:
+**位占用(两个来源,须并列给出)**:
 
-| 口径 | 已占位 | 剩余 | 依据 |
+| 来源 | 已占位 | 剩余 | 依据 |
 |---|---|---|---|
-| **代码口径**(实核) | **1 位**(bit0) | **31 位** | `src/compiler/dyn_arr.cr:143` 只声明 bit0;`globals.cr:232` 同 |
-| **设计文档口径** | **4 位**(bit0 无配方 / bit1 参数 / bit2 全局 / bit3 驱逐候选(v6.1)) | **28 位** | `docs/maintainer/design/existence-structure.md:45` |
+| **代码里的实际情况**(实核) | **1 位**(bit0) | **31 位** | `src/compiler/dyn_arr.cr:143` 只声明 bit0;`globals.cr:232` 同 |
+| **设计文档里的分配** | **4 位**(bit0 无配方 / bit1 参数 / bit2 全局 / bit3 驱逐候选(v6.1)) | **28 位** | `docs/maintainer/design/existence-structure.md:45` |
 
-> ⚠ **两口径不一致本身是一个登记项**:bit1/bit2/bit3 在**设计文档里被分配**、
-> 在**代码里连注释都没有**。这不是矛盾(代码口径更保守),但意味着:
-> 若照设计文档口径规划新字段,会**误以为**已有 3 位在用。
+> ⚠ **两个来源不一致本身是一个登记项**:bit1/bit2/bit3 在**设计文档里被分配**、
+> 在**代码里连注释都没有**。这不是矛盾(代码里的实际情况更保守),但意味着:
+> 若照设计文档的分配规划新字段,会**误以为**已有 3 位在用。
 
 **这决定了新字段是「塞进 flag」还是「加段」——分层结论(2026-09-20 独立复核后重写)**:
 
@@ -802,7 +802,7 @@ Core 是**版本化赋值模型**(条款 5:`X = X + 1` ≙ `x₁ 创建、x₀ �
    但 CLAUDE.md 的 `src/compiler/` 清单里**没有它**;它在 `build_selfhost_native.py` 的哪个清单
    ——**未核**。
 4. **§6 修订账**:抽检 11 处(file:line + 逐字摘句)**全部通过**;
-   其余约 139 行按同一 grep 口径登记,**未逐行复核**。
+   其余约 139 行按同一 grep 条件登记,**未逐行复核**。
 5. **可能的漏网方向**(§6.0 的 pattern 覆盖不到,未展开扫):
    英文表述(`cache semantics` 作为层名的用法)、
    `docs/developer/concepts/memory.md`(仅 1 命中,疑为纯链接)、
@@ -822,7 +822,7 @@ Core 是**版本化赋值模型**(条款 5:`X = X + 1` ≙ `x₁ 创建、x₀ �
 「**本次修订不需要加段**」,最早是**经 lead 转达的结论性技术判断**,我在**未于 REG/MAP 侧
 自行复核**的情况下写成了自己的结论。撤稿与重写见 §7.4。
 **今后凡转述他人给出的结论性技术判断,要么自己核,要么显式标「据 X 转达,未复核」**——
-本文件 §7.4 第 3 条与 §九-F 已按此口径标注。
+本文件 §7.4 第 3 条与 §九-F 已按此约定标注。
 
 **本次扫面的方法学声明**:
 
@@ -847,7 +847,7 @@ Core 是**版本化赋值模型**(条款 5:`X = X + 1` ≙ `x₁ 创建、x₀ �
 | **G** | **`recipe` 的施工**:§7.1 已证「位就位、语义未实现」;是否本批一并实现生产者与消费者? | ⏳ **待裁**。倾向**分开**:文档修订与语义实现是两个批次,混批会让「文档变了但行为没变」不可判别。落地时必须与 §4.5 同批 |
 | **H** | **术语冲突**:`物化` 一词已被 `so_materialize`(模块系统符号物化)占用 | ⏳ **待裁**:须择一改名或加限定语 |
 | **I** | **`adr-0005:13`「层规则 = 缓存语义七条,永不新建」的框定词** | ✅ **已裁 = 出路 ①**:维护者裁定**再起一份 ADR 记录收窄** ⇒ **ADR-0022**(2026-09-20)承载;`adr-0005` **正文不动**,状态行注「部分框定被 ADR-0021 收窄」,索引表补行 |
-| **K** | **`TODO.md:2137`**「v4 定稿:…层规则零签名 = **缓存七条**…」 | ✅ **已裁 = 不动 + 登记指针**。它是**历史 v4 定稿的引用,不是权威宣告** ⇒ 按判据(纯描述/历史引用 ⇒ 不动)不改原文;**已在 ADR-0022 §关联 立一条登记**(指针在、原文不动),读者据该条即知现口径读法 |
+| **K** | **`TODO.md:2137`**「v4 定稿:…层规则零签名 = **缓存七条**…」 | ✅ **已裁 = 不动 + 登记指针**。它是**历史 v4 定稿的引用,不是权威宣告** ⇒ 按判据(纯描述/历史引用 ⇒ 不动)不改原文;**已在 ADR-0022 §关联 立一条登记**(指针在、原文不动),读者据该条即知现在的读法 |
 | **J** | 本次修订**只改文档、不改行为**——判据面影响 = 零 | ✅ **已确认**:全仓改动仅 `.md`,无源码/产物/判据面改动 |
 
 ---
@@ -861,7 +861,7 @@ Core 是**版本化赋值模型**(条款 5:`X = X + 1` ≙ `x₁ 创建、x₀ �
 
 | 既有定稿 | 新定义下的地位 | 依据 |
 |---|---|---|
-| 寄存器分配 = 缓存语义映射实例 | **不受影响,原文保留**(该类陈述已是「实例」框架,方向与新定义一致 ⇒ 按收窄口径**不动**;见 §6.0 注) | `docs/maintainer/design/regalloc-cache-mapping.md` |
+| 寄存器分配 = 缓存语义映射实例 | **不受影响,原文保留**(该类陈述已是「实例」框架,方向与新定义一致 ⇒ 按收窄后的标准**不动**;见 §6.0 注) | `docs/maintainer/design/regalloc-cache-mapping.md` |
 | 图锚定区域 / Arena / 字节权限 = 经典映射 | 不受影响(条款 7 原样成立) | `docs/maintainer/design/region-model.md` |
 | 判定四条(共存互斥/版本/读点无陈旧/调用点失效) | 不受影响 | `src/lattice/ent_kernel.cr`;`docs/maintainer/design/regalloc-cache-mapping.md` §三 |
 | 条款 1 值 = 配方 / 条款 3 再生等价 / 条款 5 赋值 = 版本化 / 条款 6 地址 = 映射 | **原样成立** | `docs/academic/cache-semantics.md:24,26,29,30` |

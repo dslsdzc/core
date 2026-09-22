@@ -7,9 +7,9 @@
 **Architecture:** 三块，逐块独立可验收：
 1. **注册表（新建 `iface_registry.cr`）**——13 条本质条目（8 原生 + product/sequence/ref/ptr/named）+ 操作许可位集 + 字面量定型码 + `iface_*` 查询 API。表是**静态数据**（不新增 `g_types` 行 ⇒ 不动 `.ccr` 类型段）。
 2. **接线（`checker.cr` 三个面）**——① 字面量定型 5 处；② 操作许可（二元 11 条 / 一元 4 条 / 条件 3 条）；③ 容器面（索引 5 条 / 字段 4 条 / 转换 1 条 / dyn）。
-3. **两表合一**——`res_type_node` 与 `res_call_type` 的基型分支合为 `ty_code_to_ti(ty)`；**顺带**把同族 6 处 TY→TI 内联链与「checker 行号 → 原子类」映射（现散在桥接层 `sh_base_ak`/`sh_native_ak`）也收敛到同一处，避免 P2b 自己制造新重复。
+3. **两表合一**——`res_type_node` 与 `res_call_type` 的基型分支合为 `ty_code_to_ti(ty)`；**顺带**把同族 6 处 TY→TI 内联链与「checker 行号 → 原子类」映射（现散在判定衔接层 `sh_base_ak`/`sh_native_ak`）也收敛到同一处，避免 P2b 自己制造新重复。
 
-**接线口径 = 保语义（零行为变化）**：本批**只换寻址方式，不换判定结果**——表的每一格都是从现状代码**逐格转录**而来，且每格注上现状 `file:line`。任何「旧接受 → 新拒绝/新放宽」都**不在本批**（spec §4 裁决 6 的收紧处置属 P3 能力落地批，见 Global Constraints 第 4 条）。
+**接线约定 = 保语义（零行为变化）**：本批**只换寻址方式，不换判定结果**——表的每一格都是从现状代码**逐格转录**而来，且每格注上现状 `file:line`。任何「旧接受 → 新拒绝/新放宽」都**不在本批**（spec §4 裁决 6 的收紧处置属 P3 能力落地批，见 Global Constraints 第 4 条）。
 
 **Tech Stack:** Core 自举栈；P0 引擎（`type_terms.cr`/`type_engine.cr` 的 `AK_*` + `tt_atom` + 判定 API）；P1/P2a 桥接与影子通道（`ty_shadow.cr`：`sh_native_ak`/`sh_base_ak`/`sh_map_*`/`--type-shadow`/分类计数）；P2a 判定替换面（`type_equal_engine`/`type_equal_legacy`/`type_compat_strict`/`array_len_constraint_ok`）；检查器 `checker.cr`；自测通道 `type_selftest.cr`（`corec selftest-types`）。
 
@@ -26,18 +26,18 @@
 - **jj only（含只读与复合命令一律不用 `git`）**；**提交必须路径限定**（多 agent 并行下全员含协调者）；所有命令 `nice -n 19`；判据前 `clean-cache` 且 **cwd = 仓库根**。
 - **行为零变化面（P2b 的硬判据）**：接线前后 **ELF 产物逐字节相同**（`tests/suite/ptr_arith.cr` vs 基线，sha256 `95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475`）；影子开/关两态亦逐字节相同。
 - **`.ccr` 面**：注册表是**静态数据表，不 alloc `g_types` 行、不改既有行号**（先例：`init_builtins` 的 `g_rt_builtin_*` 旁表不占类型行）⇒ `.ccr` **预期逐字节不变**（强于 P2a 的「允许变须实测」）。**必须实测并报告**（冷缓存）；若变 → **停下上报**（说明类型信息泄进了编码层/行号被扰动）。
-- **保语义（本批的语义口径，硬性）**：表的每一格 = 现状代码的**逐格转录**，格注必须给出对应现状 `file:line`。现状的**宽松面**（侦查 §2 清单：比较不校验操作数、算术门「任一侧数值即可」、一元透传、索引类型不校验、字段落空静默、转换无校验）**原样保留为表的「全许可」格**——它们由本批**登记为 P3 收紧面**，不得在接线时顺手收紧/放宽（spec §4 裁决 6：收紧 = 改源码 + 逐处记录 + 语义争议停下上报）。
+- **保语义（本批的语义约定，硬性）**：表的每一格 = 现状代码的**逐格转录**，格注必须给出对应现状 `file:line`。现状的**宽松面**（侦查 §2 清单：比较不校验操作数、算术门「任一侧数值即可」、一元透传、索引类型不校验、字段落空静默、转换无校验）**原样保留为表的「全许可」格**——它们由本批**登记为 P3 收紧面**，不得在接线时顺手收紧/放宽（spec §4 裁决 6：收紧 = 改源码 + 逐处记录 + 语义争议停下上报）。
 - **AK/TI 下标不 1:1（血泪，硬性）**：`AK_STRING=2` 而 `TI_STR=3`、`AK_BOOL=3` 而 `TI_BOOL=2`（`ty_shadow.cr:18-26`；P1 事故：照下标直传会把 bool↔string 静默错标且两侧同错自洽）。**注册表内任何「原子类 ↔ 类型行」的对应都必须按语义逐项分派，禁止数值直传**；守卫 = `bridge.str_ak`/`bridge.bool_ak`（`type_selftest.cr:208-209`）+ 本批新增逐条目用例。
 - **表全局放 `globals.cr`**（bootstrap 名字解析对**变量**按声明序、跨文件前向引用不成立——`globals.cr:290-292` 的 `g_purity_inst` 先例）；**函数**的跨文件前向引用成立（既有事实：`checker.cr` 调后置文件 `ty_shadow.cr`/`type_engine.cr` 的函数）。
 - **本语言无三元运算符、无移位运算符**；取模须非负；位集构造照既有乘 2 循环（`checker.cr:1830/1841/1853-1854` 的 `dyn_set_type` 惯例）；键比较不得依赖 i64 回绕；noclobber（用 `>|`）；比较 `.ccr` 前必须 `clean-cache`（TODO #2026-09-10-1 家族：冷/热缓存态分歧）。
 - **文件永久不允许还原；不得绕过。**
-- **CI 挂点**：新测试须挂 `src/ci/run.sh` 的 `selfhost-tests`（该 job 是「已跑集」的唯一真源；不挂 = 不进判据）。
+- **CI 挂点**：新测试须挂 `src/ci/run.sh` 的 `selfhost-tests`（该 job 是「已跑集」的唯一依据；不挂 = 不进判据）。
 
 ---
 
 ## 侦查底座（2026-09-11 实测；行号 = 本计划起草时点工作副本，**非 spec 时点**）
 
-> **行号口径警告**：spec §11 的行号指修订 `a9d991908910`（`checker.cr` **2483 行**，已用 `jj file show` 核对）。工作副本现为 **3376 行**（P2a/P0/#25/#28/#29/纯度批等已落），**偏移逐段不同**（+521 于 `infer_expr` 头部、+648 于 `EXPR_AS`）。本计划**一律用实测行号**，需要跨文档对读处另注 spec 时点行号。
+> **行号约定警告**：spec §11 的行号指修订 `a9d991908910`（`checker.cr` **2483 行**，已用 `jj file show` 核对）。工作副本现为 **3376 行**（P2a/P0/#25/#28/#29/纯度批等已落），**偏移逐段不同**（+521 于 `infer_expr` 头部、+648 于 `EXPR_AS`）。本计划**一律用实测行号**，需要跨文档对读处另注 spec 时点行号。
 
 ### 0. 交付物现状：`iface_*` **不存在**（硬前置）
 
@@ -45,7 +45,7 @@
 
 ### 1. 公理区全量枚举（`infer_expr` = `checker.cr:1888-3061`，1174 行）
 
-口径：**一条 = 一处决定「操作是否许可」或「结果是什么类型」的硬编码判定**。家族 × 条数 = **66 条**（下表逐条；= 5+8+1+1+2+4+3+5+5+5+1+4+4+15+3）。量度代理（同口径的可复核计数）：`return TI_<非 unit>` **49** 处 · `== TI_*`/`!= TI_*` **28** 处 · `get_type_kind(...)` 调用 **20 点/21 次** · `check_error` **36** 处 · `TYP_*` 提及面 PTR 9 / GENERIC_APPLY 6 / ARRAY 5 / TUPLE 3 / REF 3 / NAMED 3 / GENERIC_PARAM 3 / SLICE 2。
+约定：**一条 = 一处决定「操作是否许可」或「结果是什么类型」的硬编码判定**。家族 × 条数 = **66 条**（下表逐条；= 5+8+1+1+2+4+3+5+5+5+1+4+4+15+3）。量度代理（同一标准的可复核计数）：`return TI_<非 unit>` **49** 处 · `== TI_*`/`!= TI_*` **28** 处 · `get_type_kind(...)` 调用 **20 点/21 次** · `check_error` **36** 处 · `TYP_*` 提及面 PTR 9 / GENERIC_APPLY 6 / ARRAY 5 / TUPLE 3 / REF 3 / NAMED 3 / GENERIC_PARAM 3 / SLICE 2。
 
 | # | 家族 | 现状行号 | 条数 | 内容（现状语义） |
 |---|---|---|---|---|
@@ -92,16 +92,16 @@
 
 - **两表唯一的语义差 = `TY_NEVER` 单元格**（`:740` 有 / `:1388-1391` 缺，缺则落 `TI_UNIT`）。`never` **是**可解析的类型位（`parser.cr:94` `else if lex == "never" { … TY_NEVER … }`）⇒ 该差异**并非文法不可达**，合一必须显式处置（Task 6 Step 2 的探针）。
 - `tv == TI_DYN`（`:742`/`:1390`）比的是 **TY 值域**而常量取自 **TI 命名**（值 7）——这正是 spec §2.4 记的**纯数字撞车** `TY_GENERIC_PARAM=7 == TI_DYN=7` 的现场；下行字面量节点不受影响（parser 从不产 `type_val=7`），但合一表时**必须原样保留该格语义**（枚举 §2.4 的「按命名空间分家」= P4/P5 面，本批不改）。
-- **同族另有 6 处 TY→TI 内联链**（不在 spec 两表口径内，但同属「同一映射抄了多份」的病；Task 6 一并合并，逐处给出等价判据）：
+- **同族另有 6 处 TY→TI 内联链**（不在 spec 两表约定内，但同属「同一映射抄了多份」的病；Task 6 一并合并，逐处给出等价判据）：
   `:1055-1061`（hotpatch 返回）｜`:1080-1085`（hotpatch 首版返回）｜`:1133-1140`（extern 返回）｜`:1671-1675`（`check_func` 形参；**缺 UNIT/NEVER**，落 `TI_UNIT`）｜`:1724-1730`（`check_func` 返回）｜`:2129-2134`（iface 返回；**`iface_ret2` 与 `TY_*` 比较而值域是 TI_*，靠 `TY_INT==TI_INT==0 … TY_CHAR==TI_CHAR==6` 的数值撞车成立**——合一时须显式化）。
   另有 2 处不同性质、**不入合并**仅登记：`:241-248`（`init_types` 位置公理，8 行顺序分配）与 `:859-865`（`get_type_name` **反向** TY→名字）。
 - 实测计数：`checker.cr` 内含 `TY_*` 常量的代码行 **61** 行（含注释共 65 次提及）。
-- **spec 数字勘误（诚实声明）**：spec §11 记「`== TI_*` 比较 **72 处**」——本计划四种口径均**未复现**（spec 时点修订实测：`checker.cr` 含 TI_ 判等的行 19 / `== TI_` 10 / 与 `ir_gen.cr` 合计 75 行；工作副本 `checker.cr` 19 行、`ir_gen.cr` 56 行）。本计划一律引用上述自测口径，**不沿用 72**。
+- **spec 数字勘误（诚实声明）**：spec §11 记「`== TI_*` 比较 **72 处**」——本计划四种约定均**未复现**（spec 时点修订实测：`checker.cr` 含 TI_ 判等的行 19 / `== TI_` 10 / 与 `ir_gen.cr` 合计 75 行；工作副本 `checker.cr` 19 行、`ir_gen.cr` 56 行）。本计划一律引用上述自测约定，**不沿用 72**。
 
 ### 4. 可贴合的既有结构（新表必须照抄的形态）
 
 1. **checker 侧原子宇宙 = 13 类**（不是引擎的 14）：`TYP_BASE`→8 原生（经 `TY_*` 码）、`TYP_NAMED`/**`TYP_GENERIC_PARAM`**/**`TYP_GENERIC_APPLY`**→`AK_NAMED`、`TYP_ARRAY`/`TYP_SLICE`→`AK_SEQUENCE`、`TYP_REF`→`AK_REF`、`TYP_PTR`→`AK_PTR`、`TYP_TUPLE`→`AK_PRODUCT`、`TYP_DYN`→`AK_DYN`。**无 `AK_SUM`/`AK_FN` 对应**（enum 类型 = `TYP_NAMED` 行，`checker.cr:982`；checker 无函数类型行）。
-2. **「行号 → 原子类」的既有唯一实现 = 桥接层** `sh_native_ak`（`ty_shadow.cr:67-71`）+ `sh_base_ak`（`:75-88`）——**这就是 `iface_kind_of` 的原型**（含 `TY_DEX_S→AK_DEX`、`TY_GENERIC_PARAM→AK_NAMED` 两条已裁决格）。⇒ Task 2 的合一不是新建，是**单源化**（否则 P2b 会亲手造出第二份映射 = 本批要治的病）。
+2. **「行号 → 原子类」的既有唯一实现 = 判定衔接层** `sh_native_ak`（`ty_shadow.cr:67-71`）+ `sh_base_ak`（`:75-88`）——**这就是 `iface_kind_of` 的原型**（含 `TY_DEX_S→AK_DEX`、`TY_GENERIC_PARAM→AK_NAMED` 两条已裁决格）。⇒ Task 2 的合一不是新建，是**单源化**（否则 P2b 会亲手造出第二份映射 = 本批要治的病）。
 3. **「名字 → 结果类型」的表驱动先例** = `init_builtins`/`bi_add`（`checker.cr:261-303`，`g_rt_builtin_names` + `g_rt_builtin_ret_types` 两条平行 i64 缓冲）——本质条目表的形态参照（**扁平 i64 缓冲 + 偏移常量**，非对象树）。
 4. **类型行 24B/条**（`g_types`，`checker.cr:9-16`）；引擎原子项 48B/条（`ESZ_TYPE_TERM`，`type_terms.cr:22-24`）；桥接缓存 16B/条（`g_shadow_map`）。新条目表取 **40B/条 × 5 字段**（下 Task 1）。
 5. **iface 既有表（P3 面，本批不动）**：`g_ifaces` 1432B/条 ×16 方法×88B（`dyn_arr.cr:143-149`）+ `g_impl_for` 16B（`:830-833`）；查询 `find_iface`（`checker.cr:844`）/`type_has_method`（`:873`，**名字拼接**）/`check_iface`（`:881`）/`check_impl_for`（`:1746`）。
@@ -199,7 +199,7 @@ fn iface_of_term(t: int) -> int                      // 类型项 → AK_*（单
 
 - [ ] **Step 3: 实现**（`iface_registry.cr` + `globals.cr` + 清单一/二/三处）
   - 表用**两条平行 i64 缓冲**（照 `bi_add` 先例）还是单 40B 缓冲？**取单缓冲**（40B/条，`alloc(13 * 40)`，`w64(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_*)`）——理由是「13 条 × 5 字段」有 4 个异构字段，平行表会产生四份偏移表（`bi_add` 式只有「名字/返回型」两列才划算）。
-  - `iface_kind_of(ti)`：`k := get_type_kind(ti)`；`k == TYP_BASE` → `iface_by_ty_code(get_type_data(ti))`；`k == TYP_DYN` → `AK_DYN`；`TYP_NAMED|TYP_GENERIC_PARAM|TYP_GENERIC_APPLY` → `AK_NAMED`；`TYP_ARRAY|TYP_SLICE` → `AK_SEQUENCE`；`TYP_REF` → `AK_REF`；`TYP_PTR` → `AK_PTR`；`TYP_TUPLE` → `AK_PRODUCT`；`k < 0` → `-1`。**本步先在本文件内实现 `iface_by_ty_code`（= `sh_base_ak` 的语义，含 `TY_DEX_S→AK_DEX`、`TY_GENERIC_PARAM→AK_NAMED` 两条已裁决格）；Task 2 再把桥接层改成委托它。**
+  - `iface_kind_of(ti)`：`k := get_type_kind(ti)`；`k == TYP_BASE` → `iface_by_ty_code(get_type_data(ti))`；`k == TYP_DYN` → `AK_DYN`；`TYP_NAMED|TYP_GENERIC_PARAM|TYP_GENERIC_APPLY` → `AK_NAMED`；`TYP_ARRAY|TYP_SLICE` → `AK_SEQUENCE`；`TYP_REF` → `AK_REF`；`TYP_PTR` → `AK_PTR`；`TYP_TUPLE` → `AK_PRODUCT`；`k < 0` → `-1`。**本步先在本文件内实现 `iface_by_ty_code`（= `sh_base_ak` 的语义，含 `TY_DEX_S→AK_DEX`、`TY_GENERIC_PARAM→AK_NAMED` 两条已裁决格）；Task 2 再把判定衔接层改成委托它。**
   - `iface_lit_ti/lit_ak`：按条目表的 `lit_code` 反向扫（13 条线性扫，AST kind 面只有 5 个命中项）。
   - `iface_of_term(t)`：`tt_tag(t) == TT_ATOM` → `tt_a(t)`；`tt_tag(t) == TT_TOP_K` → `tt_a(t)`；其余（union/inter/not/bot/top/mu/var/nil/cons）→ `-1`。
   - `iface_registry_init()`：由 `init_types()` 调用（**尾部**，`:253` 原生 9 行 alloc 之后——表要读 `get_type_kind`）；幂等（`g_iface_registry_ok`）；照 `named_dedup_reset()`（`checker.cr:233`）/`sh_map_reset()`（`:237`）的重置先例挂同处。
@@ -356,7 +356,7 @@ fn iface_bit(n: int) -> int { b : ., mut = 1; k : ., mut = n; loop { if k <= 0 {
 
 > **勘误（P2b 阶段评审 Important #1-A 回填；实测见 `.superpowers/sdd/p2b-review` 结论）**：上表原为 `AK_INT`/`AK_DEX` **合并一行**，把 `AND/OR`（`:1960` 允许 bool\|int）与 `IP_COND`（`:2265` 收 int）记在合并行上——**错**，这两格属 `AK_INT` **独有**；`AK_DEX` 的 `AND/OR` = 0、`IP_COND` = 0、`IP_COND_BOOL` = 0（`1.5 && true` / `1.5 || false` / `if 1.5` 实测 `error[TC01]`）。已拆为两行；交付真值 = `src/compiler/iface_registry.cr:114`（`AK_INT = o_base + o_arith + o_logic + o_cond`）与 `:116`（`AK_DEX = o_base + o_arith`；in-code 裁决注记 `:98-100`）。
 
-（**「比较/一元/转换面全许可」的口径**：`:1956` 比较不校验 ⇒ 6 个比较位对**全部 13 类**置 1；`:1970` 一元透传、`:1994-2005` 解引用兜底、`:2904` 转换无校验 ⇒ `NEG/NOT`/`DEREF`/`AS` 对**全部 13 类**置 1；`UOP_REF`：`:1973` 对任意操作数产 `TYP_PTR` ⇒ 亦全许可。**这四组「全 1 列」是现状宽松面的集中体现**，报告须单列其 P3 收紧建议。）
+（**「比较/一元/转换面全许可」的约定**：`:1956` 比较不校验 ⇒ 6 个比较位对**全部 13 类**置 1；`:1970` 一元透传、`:1994-2005` 解引用兜底、`:2904` 转换无校验 ⇒ `NEG/NOT`/`DEREF`/`AS` 对**全部 13 类**置 1；`UOP_REF`：`:1973` 对任意操作数产 `TYP_PTR` ⇒ 亦全许可。**这四组「全 1 列」是现状宽松面的集中体现**，报告须单列其 P3 收紧建议。）
 
 - [ ] **Step 1: 红态（现状行为探针先行，`tests/selfhost/test_iface_ops.py` 新建）**——先跑出 §2 九条宽松面的**现状事实**（本计划未测，须由实现者实测确证），再接线：
   - 正控（许可）：`fn main()->int{ x:=1+2; return x; }` rc=0；`"a"+"b"` rc=0；`p+1`/`1+p`（`*int`）rc=0；`s[0]`（string）rc=0；`t.0`（元组）rc=0。
@@ -423,7 +423,7 @@ fn ty_code_to_ti(ty: int) -> int
 - [ ] **Step 1: 全量回归**：38 套件（7 bootstrap + 31 selfhost）+ `tests/suite` 20 语料 + `tests/selfhost/test_iface_ops.py`（新）。
 - [ ] **Step 2: 零变化复验**：ELF 逐字节（`ptr_arith`，clean-cache）+ 影子开/关两态逐字节 + `.ccr` **实测变更报告**（预期零变化；变则逐段说明）+ 影子语料复跑（数字 + 站点直方图同报）。
 - [ ] **Step 3: 自举链**：`src/ci/run.sh full-bootstrap`（`corec2/corec3` `cmp` IDENTICAL + 两段 `error[N06]=0` + `--help` rc=1）+ 冒烟 `run 'fn main()->int{return 42;}'` rc=42。
-- [ ] **Step 4: 收紧清单**：本批「旧接受 → 新拒绝」逐条记录——**预期为空**（保语义口径）；若非空 → 逐条登记文件/用例/旧判定/新判定/处置，并说明为何属于「接线必然而非收紧」。
+- [ ] **Step 4: 收紧清单**：本批「旧接受 → 新拒绝」逐条记录——**预期为空**（保语义约定）；若非空 → 逐条登记文件/用例/旧判定/新判定/处置，并说明为何属于「接线必然而非收紧」。
 - [ ] **Step 5: 事实表**：侦查 §2 九条宽松面 → 表格的**逐条落格记录**（现状行号 / 表中格 / 是否有诊断 / P3 收紧建议），落 `docs/superpowers/specs/2026-09-10-type-shadow-findings.md` 新增一节「P2b 后：公理区事实表」，供 P3 直接消费。
 - [ ] **Step 6: 文档/TODO**：spec §9 P2 行标 (b) 部分 ✅（含落点/提交链/未覆盖面）；TODO #2026-09-11-8 的「P2b 待办」划销、新增「P2b 落地」条目（落点 + 未覆盖面登记：`iface_satisfies`/横切轴/用户轴/尺寸对齐未做、`AK_SUM`/`AK_FN` 无 checker 对应、dyn 64 上限、P3 收紧面清单）；`src/ci/run.sh` 挂 `test_iface_ops.py`。
 - [ ] **Step 7: 提交**（路径限定）。
@@ -441,6 +441,6 @@ fn ty_code_to_ti(ty: int) -> int
 - **风险 / 退路**：
   1. **最大风险 = 接线时「顺手收紧」**（侦查 §2 的九格都是「看起来像 bug」的现状）⇒ 后果：自举源码或语料出现新诊断（rc 变/ELF 变），且收紧面**无全语料证据**。缓解 = 逐格转录 + 格注行号 + 三类探针（正控/负控/**登记面**）+ 收紧清单预期空。
   2. **AK/TI 下标事故复发**（P1 已发生过一次，且本批要新建「原子类 ↔ 类型行」双向映射）⇒ 缓解 = `bridge.str_ak`/`bridge.bool_ak` 既有守卫 + `iface.dispatch_no_index_shortcut` + 逐条目 `iface.*_ti` 用例。
-  3. **桥接层改动动摇影子证据链**（P1/P2a 的数字是跨批可比性基线）⇒ 缓解 = Task 2 单列 + **全表逐行对拍** + 语料数字逐项相同 + 退路 = 若评审否决该合并，**登记为 P5 项**（不静默、不删除重复）。
+  3. **判定衔接层改动动摇影子证据链**（P1/P2a 的数字是跨批可比性基线）⇒ 缓解 = Task 2 单列 + **全表逐行对拍** + 语料数字逐项相同 + 退路 = 若评审否决该合并，**登记为 P5 项**（不静默、不删除重复）。
   4. **`.ccr` 意外变化**（若某处接线扰动类型行号或误 alloc 行）⇒ 缓解 = 表**不 alloc 类型行**、判据要求冷缓存实测 `.ccr`；变则**停下上报**。
   5. **新文件的清单/顺序**（bootstrap 单遍解析；三份清单 + `_import.cr` 四处同步点）⇒ 缓解 = `guard_manifest` + `test_compile.py` 的存在性断言（清单漂移 = resolver 报 `Undefined name`）。

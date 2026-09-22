@@ -4,7 +4,7 @@
 状态：~~格式设计定稿（待实现）~~ → **已实施（2026-09-10，`plans/2026-09-09-lattice-ir-v7.md` Task 1-3 收官）**——v7 段表架构时代，字节状态以此为准；实施期裁决回填见 §4 规则 4 / §6 开放点 3、5。
 **2026-09-12 追加（R2 P4 Task 1，D9/D10）**：**版本 7 → 8** + 段集合 +TYPE(7)/IFACE(8)（Task 1 落空壳；内容面归 Task 2/3）。文件名保留「v7」= 段表架构代号（改名引用面 40+ 处、收益为零）；**v8 = v7 的加法扩展**：前六段字节布局不变，加段 + 版本 bump。旧 v7 六段文件由版本闸**整类拒收**（不静默当「两段缺席 = 空表」）——本条为现行字节权威（§1/§2/§3.7/§3.8/§4 已同步）。
 **2026-09-14 追加（R2 P5 Task 2/7）**：**版本 / 段集合 / 记录布局零变化**——单槽化只在**内存面**（DFNode `OFF_DF_TK` = 类型项引用 / `OFF_DF_AUX` = 辅码，72B 不变）；`.ccr` 面 `tk` 语义定为**派生码**（§3.3 的「`tk` 字段语义」块，含 D20 稳定引用形态规范）；`version` 保持 8、`CIR_CACHE_VER` 保持 17；`test_ccr_types` 34 → **40** 例。
-**2026-09-15 追加（#60 批 T2/T3：暖缓存静默缺陷修复 + 判据网暖态腿）**：`.cir` 快照**格式零变化**（`CIR_CACHE_VER` 保持 17）。修复落在**保存侧策略**：生成期对「快照**不载**的共享面」（实锤面 = `g_types` 类型行表；`checker.cr:10-19` 只追加不去重、快照只载 var 的 `type` 行号）有副作用的函数**不写条目** ⇒ 下跑必 miss ⇒ 重放全部生成期副作用（「宁可 miss 不可静默」）；实现 = `main.cr` miss 分支 `tc0 := g_type_count` 比对。代价实测 **0.3%**（语料 101 档 989→986 条目）/ **0.9%**（编译器自源 110→109）。**§3.3 的「暖态缺行 ⇒ 写 `-1`」支因此收窄**：分配行的函数不再被命中（复合 mint 行在见证下**结构上不落盘**，实核 101 档扫描仅 `ptr_ref_first.cr` 有复合行且全缺 ⇒ 原盘面判据不可达，重钉见 `tests/selfhost/test_ccr_types.py` ㊲ + `/tmp/fct4/task2-report.md` §3.2）。**判据网补齐暖态腿**（本缺陷长期不可见 = 判据面对暖态零覆盖）：入仓语料 `tests/probes/warm/`（7 档，**定路径**是该语料的设计要点）+ `tools/baseline/warm_leg.sh`（两层）/`warm_run.sh`（牙齿层）；**实核：`check` 面写 0 条缓存条目 ⇒ 暖态腿必须走 `ccr` 面**。口径/预期值/时长见 `tools/baseline/REBUILD.md`；根因链与统一台账见 `docs/superpowers/plans/2026-09-15-warm-cache-diagnostics.md` §8-9 与 `.superpowers/sdd/warm-task4-report.md`。
+**2026-09-15 追加（#60 批 T2/T3：暖缓存静默缺陷修复 + 判据网暖态腿）**：`.cir` 快照**格式零变化**（`CIR_CACHE_VER` 保持 17）。修复落在**保存侧策略**：生成期对「快照**不载**的共享面」（实锤面 = `g_types` 类型行表；`checker.cr:10-19` 只追加不去重、快照只载 var 的 `type` 行号）有副作用的函数**不写条目** ⇒ 下跑必 miss ⇒ 重放全部生成期副作用（「宁可 miss 不可静默」）；实现 = `main.cr` miss 分支 `tc0 := g_type_count` 比对。代价实测 **0.3%**（语料 101 档 989→986 条目）/ **0.9%**（编译器自源 110→109）。**§3.3 的「暖态缺行 ⇒ 写 `-1`」支因此收窄**：分配行的函数不再被命中（复合 mint 行在见证下**结构上不落盘**，实核 101 档扫描仅 `ptr_ref_first.cr` 有复合行且全缺 ⇒ 原盘面判据不可达，重新锁定见 `tests/selfhost/test_ccr_types.py` ㊲ + `/tmp/fct4/task2-report.md` §3.2）。**判据网补齐暖态腿**（本缺陷长期不可见 = 判据面对暖态零覆盖）：入仓语料 `tests/probes/warm/`（7 档，**定路径**是该语料的设计要点）+ `tools/baseline/warm_leg.sh`（两层）/`warm_run.sh`（牙齿层）；**实核：`check` 面写 0 条缓存条目 ⇒ 暖态腿必须走 `ccr` 面**。约定/预期值/时长见 `tools/baseline/REBUILD.md`；根因链与统一清单见 `docs/superpowers/plans/2026-09-15-warm-cache-diagnostics.md` §8-9 与 `.superpowers/sdd/warm-task4-report.md`。
 **2026-09-14 追加（R2 P6 Task 3，D20-② 兑现 = β）**：**版本 8 → 9** + **NOD 记录 36 → 40B**（语义区 28 → 32B：+28 新增 `item i32` = **TYPE 段文件空间项索引**，-1 = 无项；邻接域顺移 +32/+36）——前六段其余字段布局与 `tk` 槽语义/字节零变化；旧 v8 及更早文件由版本闸**整类拒收**（D10 先例）。`.cir` 快照面**零改动**（`CIR_CACHE_VER` 保持 17——项索引只在 TYPE 段重建后的文件空间成立，`.cir` 写点早于该空间 ⇒ 落盘只能得到进程内索引 = D20-③ 禁令；保存期由派生码重派生即得）。写侧装填 = `ccr_types.cr:ccr_nod_item_populate`（保存期单遍）；读侧 = `load_ccr` 的 TYPE 段后**一致性硬校验**（域外 / `atom_of(项) ≠ 盘上码` ⇒ 拒绝）+ corearch `--dump-nod-items` 读回通道。`test_ccr_types` 40 → **48** 例。
 性质：两段式第二段（字节格式）；语义定义 = `2026-09-09-lattice-ir-v7-carrier-design.md`（权威）；本文件 = 字节怎么排。
 
@@ -77,7 +77,7 @@ v6 其余字节惯例沿用：小端、i32/u32、offset/size u32、`ccr_i32_fits
 
 邻接约定：节点出边在 EDG 段**连续**（节点 i+1 的 first_edge = 节点 i 的 first_edge + edge_count）——重建流式零索引（cir_cache v13 同款）。文件序 = 节点 id 序 = 生产者选择的合法拓扑调度。
 
-**`item` 字段语义（R2 P6 Task 3 起 = β 兑现；`tk` 槽字节零变化）**：`item` = **TYPE 段文件空间项索引**（D20-② 唯一许可跨边界形态；D13 确定性装填 ⇒ 文件内索引稳定）。写侧 = `ccr_types.cr:ccr_nod_item_populate`（**保存期**由盘上派生码经桥接层 `sh_tk_face_of_code`/`sh_term_of_ti` 重派生——**不得**沿用 emit 期活表索引：`ccr_type_populate` 的 `tt_layer_reset` 在 save 前作废活表引用，D20-③/`bad_term=329`）。读侧 = `load_ccr` 的TYPE 段后**一致性硬校验**（`item < -1` / `≥ tt_count()` / `atom_of(项) ≠ tk` ⇒ 拒绝 rc=1，**不得**静默当无项）+ corearch `--dump-nod-items` 读回通道。暖态缺行（缓存命中跳过 ir_gen）⇒ 写 `-1`（码仍由 `tk` 保真；暖态项面登记为部分）。
+**`item` 字段语义（R2 P6 Task 3 起 = β 兑现；`tk` 槽字节零变化）**：`item` = **TYPE 段文件空间项索引**（D20-② 唯一许可跨边界形态；D13 确定性装填 ⇒ 文件内索引稳定）。写侧 = `ccr_types.cr:ccr_nod_item_populate`（**保存期**由盘上派生码经判定衔接层 `sh_tk_face_of_code`/`sh_term_of_ti` 重派生——**不得**沿用 emit 期活表索引：`ccr_type_populate` 的 `tt_layer_reset` 在 save 前作废活表引用，D20-③/`bad_term=329`）。读侧 = `load_ccr` 的TYPE 段后**一致性硬校验**（`item < -1` / `≥ tt_count()` / `atom_of(项) ≠ tk` ⇒ 拒绝 rc=1，**不得**静默当无项）+ corearch `--dump-nod-items` 读回通道。暖态缺行（缓存命中跳过 ir_gen）⇒ 写 `-1`（码仍由 `tk` 保真；暖态项面登记为部分）。
 
 **`tk` 字段语义（R2 P5 Task 2 起 = 现行；字节/偏移零变化——R2 P6 Task 3 后仍为派生码）**：`tk` = **派生码**——类型面 op → 类型行（`IR_CONST`/`IR_BINARY` ∪ `{IR_ALLOC, IR_CALL, IR_LOAD, IR_I2F, IR_F2I}`）；辅码面 op → 旗标/宽度/计数（`IR_BOUNDS_CHECK`/`IR_DEREF`/`IR_STORE_PTR`/`IR_SPAWN`/`IR_HOTPATCH_ROUTE`）；其余 → 0。由 `sh_dfn_code_of_slots(类型项, 辅码)` **单源派生**（emit / `lower_to_ccr` / `.cir` 装载侧三处同源；分类表 = `ty_shadow.cr` 的 `sh_tk_face_of_code`）。**盘面不承载进程内项引用**——D20 禁令：进程内项表索引不得跨进程/跨复位边界（P4 `bad_term=329` 红证）；未来跨边界唯一许可形态 = **TYPE 段文件内项索引**（**β 已兑现** = 上方 `item` 槽，R2 P6 Task 3）。P5 单槽化只在**内存面**（DFNode 72B 不变：`OFF_DF_TK` = 类型项引用 / `OFF_DF_AUX` = 辅码），NOD `.ccr` 面实测与 P4 逐字节同（`ptr_arith`/`generics_test`；`--dump-objects` 同）——详见 `plans/2026-09-13-r2-p5-cleanup.md` Task 2。
 
@@ -140,7 +140,7 @@ Task 2 报告，本 spec 只记段面。）
 逐点同值证据）——跨进程行格式对拍载体（tests/selfhost/test_ccr_types.py）。
 **未覆盖面**：判定原语（`ty_sub`/`ty_equiv`/`ty_disjoint` 族，`type_engine.cr`）
 跨进程同值未覆盖——该文件不入 corearch 清单（两条既有 TF01 诊断触发 project-mode
-`error[`=0 门），归 Task 3/4/P5 收口（T2 报告登记）。
+`error[`=0 门），归 Task 3/4/P5 收尾（T2 报告登记）。
 
 ### 3.8 IFACE — 接口面（tag 8；R2 P4 Task 3 内容面落地）
 
@@ -166,7 +166,7 @@ method_count ≤ `MAX_IFACE_METHODS`、param_count ≤ `MAX_IFACE_METHOD_PARAMS`
 self_mode ∈ 0..3）+ **跨段引用域**：`name_ni`/`type_ni`/`method_ni`/`mangled_ni` ∈
 [0, STR 串数)、`ti_row` ∈ {-1} ∪ [0, TYPE 行数)、`term` ∈ {-1} ∪ [0, TYPE 项数)
 （TYPE(7) 先于 IFACE(8) 解析 ⇒ 两域已建立）。载入 = 重建 `g_iface_entries`
-（`g_iface_registry_ok = 1`——**段 = corearch 侧真源**）/ `g_iface_shape_*` /
+（`g_iface_registry_ok = 1`——**段 = corearch 侧出处**）/ `g_iface_shape_*` /
 `g_ifaces`（corearch 无 AST ⇒ 节点槽恒 -1，**项槽** = 段值）/ `g_impl_for` /
 `g_methods`；失败整体拒绝（**不得**静默当空表）。
 
@@ -182,7 +182,7 @@ self_mode ∈ 0..3）+ **跨段引用域**：`name_ni`/`type_ni`/`method_ni`/`ma
 3. `edg_count` == Σ edge_count；NOD/ENT/REG 引用 id 界内（NOD id < nod_count 等）
 4. 段表 offset/size 界、ENT home/flags 读入放行——**裁决（2026-09-10 Task 2 review R3）**：loader 对 home≠-1 / flags≠0 **接受不拒绝**——home = 实例映射注记，.ccr = corec→corearch 传输中间物，实例层（分配/缓存映射）决策不写回格式；非 -1/非 0 值不构成损坏证据（无消费方依赖恒 -1/0 前提之外的安全面）。开放点 3 保留：未来实例层选择写回（非传输中间物用途）时重议
 5. magic/version（**`version == 9`**——R2 P6 Task 3 起；`version ≠ 9` 整类拒收，含全部 v7 六段/v8 八段文件——D10 先例）；`ccr_i32_fits` 沿用（中间产物 < 4GB）
-6. **段集合完备性（R2 P4 Task 1，D11）**：`seg_cnt` 未满 / 缺任一必备段（STR/SYM/NOD/REG/EDG/**TYPE/IFACE**）⇒ 拒绝；ENT 仍可缺（v5 精神：旧段缺失 = 空表，`ccr_io.cr` 既有口径）。**「缺段 = 空表」仅适用于 ENT**——TYPE/IFACE 缺席必须响亮拒绝（可选段 = 两种 `.ccr` 在野 = 静默降级面）
+6. **段集合完备性（R2 P4 Task 1，D11）**：`seg_cnt` 未满 / 缺任一必备段（STR/SYM/NOD/REG/EDG/**TYPE/IFACE**）⇒ 拒绝；ENT 仍可缺（v5 精神：旧段缺失 = 空表，`ccr_io.cr` 既有约定）。**「缺段 = 空表」仅适用于 ENT**——TYPE/IFACE 缺席必须响亮拒绝（可选段 = 两种 `.ccr` 在野 = 静默降级面）
 7. **~~空壳期段体校验（R2 P4 Task 1）~~（已退役——R2 P4 Task 3）**：TYPE 段自 Task 2 起、IFACE 段自 Task 3 起皆为内容面，校验 = §3.7/§3.8 的逐条不变量（含跨段引用域）；两段**必备**（规则 6）不变
 
 ## 5. 消费方影响
@@ -191,7 +191,7 @@ self_mode ∈ 0..3）+ **跨段引用域**：`name_ni`/`type_ni`/`method_ni`/`ma
 - **corearch（载）**：段表寻址 → NOD/EDG/ENT 载入 → 校验（§4）→ 图 → 线性调度重建（载体设计 §3：文件序 + 沿边合法性校验 + REG 展开）→ 发射（现路径语义）
 - 判定/证书：共存 sweep（v6 §4.2）消费 ENT 区间；图语义消费（验证/优化）直接消费 NOD+EDG
 - **TYPE/IFACE 段（R2 P4 Task 1 起）**：Task 1 = 空壳，**零消费者**（loader 仅做存在性/空壳校验）；内容面（Task 2/3）落地后由 corearch 载入**重建**类型行表/类型项表与接口表（统一设计 spec §6.3 的 `atom_of` 承接面）——纯信息面，**不参与 ELF 发射**（发射面零泄漏判据 = ELF canary 不变）
-- 测试族：test_ccr_v7.py 27/27（2026-09-10 Task 3 迁移收官；2026-09-12 R2 P4 Task 1 结构断言重定 = 8 段/`HEADER_TABLE=112`/`seg_count==8`/坏版本 (8,7,6,5)）+ test_ccr_types.py **48/48**（T1 新建 9 例 = 段机制/loader 负分支/旧 v7 文件拒收；T2 内容面 +10（行表/项 DAG 序列化 + 确定性装填 + corearch 读回对拍 + 拓扑/标注槽负分支）；T3 IFACE 内容面 +10（五小节/扩列 16/形状命名化/签名项化/impl 边与方法表/跨段引用域）；T4 DFNode.TK 项槽 +6（逐节点允许清单规则/dex 语料/NOD 36B 同序/冷·暖快照对称/dump 零产物影响/`.cir` 布局未变）；**P5 T2 单槽化 +6**（复合行走辅码 / 互斥不变量 / F1 hotpatch 无面 / 复合行冷·暖对称 / 复合行 NOD 同序 / 快照盘面派生码保真）；**P6 T3 项索引 +8**（版本闸 v8 拒收 / NOD 40B 字段序 / 项索引落盘读回对拍（非退化）/ 两通道面一致 / 辅码面与复合行保真 / 项索引越界与不一致 ⇒ 拒绝（三子例）/ 段界检 / D18 纯度静态；**突变 M1–M5 逐条转红**）；机制面随批重定）——v6 测试族已合并退役；无版本链对照（v8-only 世界，行为判据 = 全量回归 + stage 链 byte-identical，见载体设计 §3.3 注记）。**判据口径（TODO #2026-09-11-9，T1 起）**：不以「与旧版逐字节同」为准 = 结构断言全绿 + 语义零变化 + 自举稳定。
+- 测试族：test_ccr_v7.py 27/27（2026-09-10 Task 3 迁移收官；2026-09-12 R2 P4 Task 1 结构断言重定 = 8 段/`HEADER_TABLE=112`/`seg_count==8`/坏版本 (8,7,6,5)）+ test_ccr_types.py **48/48**（T1 新建 9 例 = 段机制/loader 负分支/旧 v7 文件拒收；T2 内容面 +10（行表/项 DAG 序列化 + 确定性装填 + corearch 读回对拍 + 拓扑/标注槽负分支）；T3 IFACE 内容面 +10（五小节/扩列 16/形状命名化/签名项化/impl 边与方法表/跨段引用域）；T4 DFNode.TK 项槽 +6（逐节点允许清单规则/dex 语料/NOD 36B 同序/冷·暖快照对称/dump 零产物影响/`.cir` 布局未变）；**P5 T2 单槽化 +6**（复合行走辅码 / 互斥不变量 / F1 hotpatch 无面 / 复合行冷·暖对称 / 复合行 NOD 同序 / 快照盘面派生码保真）；**P6 T3 项索引 +8**（版本闸 v8 拒收 / NOD 40B 字段序 / 项索引落盘读回对拍（非退化）/ 两通道面一致 / 辅码面与复合行保真 / 项索引越界与不一致 ⇒ 拒绝（三子例）/ 段界检 / D18 纯度静态；**突变 M1–M5 逐条转红**）；机制面随批重定）——v6 测试族已合并退役；无版本链对照（v8-only 世界，行为判据 = 全量回归 + stage 链 byte-identical，见载体设计 §3.3 注记）。**判据标准（TODO #2026-09-11-9，T1 起）**：不以「与旧版逐字节同」为准 = 结构断言全绿 + 语义零变化 + 自举稳定。
 
 ## 6. 开放点（实施期定夺）
 

@@ -7,7 +7,7 @@
 
 ## 1. 归属论证
 
-**寄存器是物理资源——分配是编码层决策**（与 int 多字表示、指令发射同层）。现状分配器在 corec（opt.cr）纯属历史（v5 时代后端无决策能力）；「g2_slot 负编码 = 纯机械翻译分配结果」的表述把后端钉成执行者——分配归位后此表述取消：后端自己做分配，g2_slot 是后端的槽解析 seam（决策的一部分），非机械翻译。
+**寄存器是物理资源——分配是编码层决策**（与 int 多字表示、指令发射同层）。现状分配器在 corec（opt.cr）纯属历史（v5 时代后端无决策能力）；「g2_slot 负编码 = 纯机械翻译分配结果」的表述把后端固定成执行者——分配归位后此表述取消：后端自己做分配，g2_slot 是后端的槽解析 seam（决策的一部分），非机械翻译。
 
 ```
 现状：corec（数据面+分配+判定）→ .ccr 传 REG_ASSIGN → corearch 机械消费负编码
@@ -53,4 +53,4 @@ tagged 识别在 corearch（instr.cr mw_setup_tags）——分配移入后与 ta
 - main.cr O2 门/判定触发移除 + `cir` 调试通道摘除
 - 「纯机械映射」表述清除（regalloc.cr/instr.cr/globals.cr/regalloc-consistency.cr 注记更新）
 - regalloc-consistency.cr（参考实现指针 → regalloc.cr + 停用/缺口注记更新）
-- 多字 mw 测试（REG_ASSIGN 元数据通道 → corearch `--dump-regassign`；test_mw_task5 哨兵更新绿）
+- 多字 mw 测试（REG_ASSIGN 元数据通道 → corearch `--dump-regassign`；test_mw_task5 标记值更新绿）

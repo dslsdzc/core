@@ -28,13 +28,13 @@
 
 ## 3. 修法（纯 IR，零布局变更）
 
-- **裁-REP-1 (iii)「逃逸域化的恒装箱」**：W1 取址预扫（`g_addr_taken_names` + `optrep_addr_prescan`，收**操作数**名索引）· W2/W3 写点（赋值/LET）装箱 + **表示位钉 1** · W4 形参序言**条件装箱** + 钉 1 · W5 `IR_STORE_PTR` 按 pointee 可选性装箱 · W6 零足迹门（全部首判 `g_optrep_on`）。
+- **裁-REP-1 (iii)「逃逸域化的恒装箱」**：W1 取址预扫（`g_addr_taken_names` + `optrep_addr_prescan`，收**操作数**名索引）· W2/W3 写点（赋值/LET）装箱 + **表示位锁定为 1** · W4 形参序言**条件装箱** + 锁定 1 · W5 `IR_STORE_PTR` 按 pointee 可选性装箱 · W6 零足迹门（全部首判 `g_optrep_on`）。
 - **第二根因修复**：`IR_REF` 全局源改走 `lea r10,[rip+rel32]` + RIP 补丁（照 `IR_STORE`/`e2_load_var` 全局分支先例）。
 - **T3 审计证伪出的漏点（裁-T3-1）**：**推断（无标注）可选数组/切片**的元素写点不装箱（7 形态 139/139；根因 = 元素写点取**声明表**而声明表只在**带注解** LET 登记；字面量 `Some(x)` 的 IR var 是 `TI_UNIT` 占位、`IR_SLICE` 切片 var 是 `TI_INT`）⇒ 字面量**预扫数组级可选性** + 登记、切片源可选 ⇒ 登记、**LET/全局初值把值面登记继承到绑定 var**（值 var ≠ 绑定 var；写点零改动）。
 
 ## 4. 判据（两轮全绿；canary **无豁免**）
 
-构建确定性 ×2 IDENTICAL · `selftest-types` **415/415** · `check src/compiler` rc=0 · 全枚举 **61/61** · 五 CI job **5/5 rc=0** · **ELF canary `95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475`（28822B）IDENTICAL**（全程多次复测）· `.ccr` 两口径四条命中锁定值（`ptr_arith` 96015 `680a6f98…` / 96158 `76f36e6a…`；`generics_test` 142793 `41e9d845…` / 142936 `704316c8…`）· **腿① 72 档逐档零差异** · 探针 29 档**冷态零差异**（rc 零差异）· 暖态腿 FAIL=0 · 自举链 `corec2 == corec3` + `error[N06]=0` + `--help` rc=1 + 冒烟 **42** · 用例 `tests/selfhost/test_optional.py` **48 → 66 → 80 例** · **突变 6 条全红 + 精确回滚**（T2：M1 预扫 / M2 W5 / M3 门控 ⇒ canary+`.ccr` 复红；T3：字面量登记 / 切片登记 / LET 继承 ⇒ 71–77/80）。
+构建确定性 ×2 IDENTICAL · `selftest-types` **415/415** · `check src/compiler` rc=0 · 全枚举 **61/61** · 五 CI job **5/5 rc=0** · **ELF canary `95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475`（28822B）IDENTICAL**（全程多次复测）· `.ccr` 两种形式四条命中锁定值（`ptr_arith` 96015 `680a6f98…` / 96158 `76f36e6a…`；`generics_test` 142793 `41e9d845…` / 142936 `704316c8…`）· **腿① 72 档逐档零差异** · 探针 29 档**冷态零差异**（rc 零差异）· 暖态腿 FAIL=0 · 自举链 `corec2 == corec3` + `error[N06]=0` + `--help` rc=1 + 冒烟 **42** · 用例 `tests/selfhost/test_optional.py` **48 → 66 → 80 例** · **突变 6 条全红 + 精确回滚**（T2：M1 预扫 / M2 W5 / M3 门控 ⇒ canary+`.ccr` 复红；T3：字面量登记 / 切片登记 / LET 继承 ⇒ 71–77/80）。
 
 ## 5. 登记与未覆盖面（全部已落 `TODO.md`）
 
@@ -46,10 +46,10 @@
 | **#73** | 本批收官（交付/判据/一行结论/提交链） | 收官条目 |
 | **#74** | **REP-3**：`&s.a` 字段取址写入丢失（须新增 `IR_ADDR_FIELD`） | 登记（另一缺陷面） |
 | **#75** | **REP-2**：指针算术伪造地址（不可 IR-gen 期分类的唯一边界；探针记录现实行为） | 登记（边界面） |
-| **#76** | **B04** 软诊断（`&x` 借出后读 x；无 NLL）——用例钉「恰 {B04}」 | 登记（未修） |
+| **#76** | **B04** 软诊断（`&x` 借出后读 x；无 NLL）——用例锁定「恰 {B04}」 | 登记（未修） |
 | **#77** | `IR_REF` **目标侧**是否可能为全局（未实测断言） | 登记（不写进结论） |
 
-**判据口径**（非缺陷）：探测暖态腿**跨二进制**日志文本差异 = frozen 侧 `lower to ccr…` vs 当前侧 FC 批硬闸早停 ⇒ 已入 `tools/baseline/REBUILD.md`「口径限制」段（与 TODO #2026-09-15-8 同条，不另立）。
+**判据标准**（非缺陷）：探测暖态腿**跨二进制**日志文本差异 = frozen 侧 `lower to ccr…` vs 当前侧 FC 批硬闸早停 ⇒ 已入 `tools/baseline/REBUILD.md`「适用范围限制」段（与 TODO #2026-09-15-8 同条，不另立）。
 
 ## 6. 过程事故与教训
 
@@ -60,6 +60,6 @@
 ## 7. 交付物
 
 - 代码：`src/compiler/ir_gen.cr`（+202 区）· `src/compiler/globals.cr`（+4）· `src/arch/x86_64/instr.cr`（+19）· `tests/selfhost/test_optional.py`（48 → 80 例）
-- 判据/侧表：`docs/superpowers/plans/2026-09-16-opt-rep-follows-storage.md`（裁-REP-1..4 · 裁-T3-1..3 · T1–T5 实施记录 · 任务总表回填 · 批终态）· 本文件 · spec §9 (A) 批行 · `tools/baseline/REBUILD.md`（口径限制）
+- 判据/侧表：`docs/superpowers/plans/2026-09-16-opt-rep-follows-storage.md`（裁-REP-1..4 · 裁-T3-1..3 · T1–T5 实施记录 · 任务总表回填 · 批终态）· 本文件 · spec §9 (A) 批行 · `tools/baseline/REBUILD.md`（约定限制）
 - 提交：`deab3862` · `a140340d` · `1e11353c`（#74）· `c5056b2d`/`5d36af98`/`7b006ef5`（#75）· T4/T5 文档（#76）· 本报告（跟进提交）
 - 证据：`/tmp/capt6/**`（T1/T2）· `/tmp/capt7/**`（T3/T5：probes · mut · crit/crit2/crit3 · 报告）

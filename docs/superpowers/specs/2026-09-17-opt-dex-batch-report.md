@@ -24,7 +24,7 @@
 | **主判据 = 四态对拍** | `{fs_bare_bits 7, fs_bare_scaled 7, fs_boxed_bits 7, fs_boxed_scaled 7}` ⇒ **四格互等 = 7（含锚定格）** | ✅ |
 | **禁第三态**（G10 纪律 ②） | bits 源 interp = **255**（F2I 能力边界 = 转换在场正据）· scaled 源 interp = 锚定值 | ✅ |
 | 家族面（12 红 → **0**） | 逐条归因见 §2 | ✅ |
-| 本批套件 | **30/30 全绿**（四态 + 家族 + G2 判别 ×2 + M1 行为钉 ×2 + 自证 + 拒绝面） | ✅ |
+| 本批套件 | **30/30 全绿**（四态 + 家族 + G2 判别 ×2 + M1 行为锁定 ×2 + 自证 + 拒绝面） | ✅ |
 | suite 语料 `tests/suite/opt_dex_test.cr` | build rc=0 · **运行 rc=0**（改前 = 1） | ✅ |
 | canary ELF | `95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475` **28822B** IDENTICAL | ✅ |
 | `.ccr` 四条 | `pa_ccr 680a6f98…` 96015 · `pa_static_ccr 76f36e6a…` 96158 · `gt_ccr d92a2727…` 142765 · `gt_static_ccr a1f7b99c…` 142908 —— 全 IDENTICAL | ✅ |
@@ -32,8 +32,8 @@
 | 判定面回归网 | 腿① 本批隔离 **零差异**（75 档）· 探针 29 本批隔离 **零差异** · 暖态腿两侧 FAIL=0（见 §5bis） | ✅ |
 | 自举链 | `corec2 == corec3` **IDENTICAL**（`c0f1cbf528c066db860428830227a1e727daf2cedfac6b5590c0d637f13d8a5a`）· `[GUARD] build log clean（error[ = 0）` ×3（corec/corearch/corelsp）· 冒烟 42 | ✅ |
 | 类型引擎自测 / 自源 check | `selftest-types` **415/415** · `check src/compiler` rc=0 | ✅ |
-| apx 批套件（跨批核对） | **23 例 + 自证 + 双形对拍全绿**（哨兵重锁后无转红 = 无「真发现」） | ✅ |
-| J3 判据口径换代（跨批裁定） | J3 PASS（旧号 100 / `—` 1 / 新 id 103 / 标题 103）+ **M-a/M-b/M-c 三条突变全红** | ✅ |
+| apx 批套件（跨批核对） | **23 例 + 自证 + 双形对拍全绿**（标记值重锁后无转红 = 无「真发现」） | ✅ |
+| J3 判据标准换代（跨批裁定） | J3 PASS（旧号 100 / `—` 1 / 新 id 103 / 标题 103）+ **M-a/M-b/M-c 三条突变全红** | ✅ |
 
 ---
 
@@ -46,7 +46,7 @@
 |---|---|---|---|---|
 | 1 | `fs_bare_bits`（裸 + apx） | **15 / 15** | **7 / 255** | **R1**（LET 槽型按声明 + 初值归一） |
 | 2 | `fs_bare_scaled` | 7 / 7 | 7 / 7 | —（锚定格，起点即绿） |
-| 3 | `fs_boxed_bits` | 7 / 255 | 7 / 255 | —（`Some(...)` 由 apx 批漏斗覆盖，钉子） |
+| 3 | `fs_boxed_bits` | 7 / 255 | 7 / 255 | —（`Some(...)` 由 apx 批漏斗覆盖，断言） |
 | 4 | `fs_boxed_scaled` | 7 / 7 | 7 / 7 | —（锚定格） |
 | 5 | `assign_bits`（赋值写点） | **15 / 15** | **7 / 255** | **R1**（槽型改后，`dex_store_adjust` 自动生效） |
 | 6 | `ptr_write_bits`（指针写 · INV-2） | **15 / 15** | **7 / 255** | **R2**（序修正） |
@@ -57,8 +57,8 @@
 | 11 | `field_lit_bits`（结构体字面量字段） | **15 / 15** | **7 / 255** | **R2**（序修正） |
 | 12 | `global_bits`（全局槽） | **15 / 15** | **7 / 255** | **R1**（`reg_one_global` 的 `dex?` 分支） |
 | 13 | `enum_payload_opt_bits`（用户枚举载荷） | **15 / 15** | **7 / 255** | **R2**（序修正） |
-| 14 | `mw_tag_coexist_bits`（M1 tag 对行为钉） | **1 / 1**（同判 ≠ 正确） | **0 / 255** | **R3**（其 dex 侧走形参面） |
-| 15 | `field_assign_bits` · `try_unpack_bits` · `try_to_dex_bits` · `dexopt_apx_tag` · `param_scaled` · `param_branch_scaled` · `ret_scaled` · `param_some_bits` · `nonopt_direct_bits` · `int_opt_{lit,var,some,none}` | 全绿 | 全绿 | —（非回归钉子，改法未改坏） |
+| 14 | `mw_tag_coexist_bits`（M1 tag 对行为锁定） | **1 / 1**（同判 ≠ 正确） | **0 / 255** | **R3**（其 dex 侧走形参面） |
+| 15 | `field_assign_bits` · `try_unpack_bits` · `try_to_dex_bits` · `dexopt_apx_tag` · `param_scaled` · `param_branch_scaled` · `ret_scaled` · `param_some_bits` · `nonopt_direct_bits` · `int_opt_{lit,var,some,none}` | 全绿 | 全绿 | —（非回归断言，改法未改坏） |
 | 16 | `g2_payload_dex_arith_{scaled,bits}`（G2 判别判据，本批新增） | **193** / 193（= 7000001 mod 256，双倍缩放） | **8** / 255 | **G2**（读点定型） |
 
 **总计**：R2 修 3 · R1 修 4 · R3 修 4 · G2 修 1（判别面） ⇒ 12 红清零。
@@ -86,12 +86,12 @@
 
 | 载体 | 内容 | 判据形态 |
 |---|---|---|
-| `tests/selfhost/test_opt_dex.py`（新档，挂 `selfhost-tests`） | 四态对拍 + 家族 12 条 + 钉子 13 条 + G2 判别 ×2 + M1 行为钉 ×2 + 非 dex 对照 ×4 + 编译期拒绝面 | **四态对拍（关系式）+ 禁第三态 + 不许单腿绿**（G10 三条纪律全部写进断言） |
-| `tests/suite/opt_dex_test.cr`（新档，suite 自动枚举） | 14 面正例 + 返回码 1..14 定位 | 常规腿（改前 rc=1 → 改后 rc=0） |
-| `tests/selfhost/test_apx_conversion.py`（改） | 哨兵 `SENTINEL_optional_dex_pinch` 15 → `relocked_optional_dex_pinch` **7** | 三件套：显式归因 + 同批重锁 + 旧值留痕；`test_sentinel_annotation_present` 改**两态口径**（无 15 行 = 退役断言 ⇒ 抄回 15 时断言 + 读数双红） |
+| `tests/selfhost/test_opt_dex.py`（新档，挂 `selfhost-tests`） | 四态对拍 + 家族 12 条 + 断言 13 条 + G2 判别 ×2 + M1 行为锁定 ×2 + 非 dex 对照 ×4 + 编译期拒绝面 | **四态对拍（关系式）+ 禁第三态 + 不许单条判据绿**（G10 三条纪律全部写进断言） |
+| `tests/suite/opt_dex_test.cr`（新档，suite 自动枚举） | 14 面正例 + 返回码 1..14 定位 | 常规判据（改前 rc=1 → 改后 rc=0） |
+| `tests/selfhost/test_apx_conversion.py`（改） | 标记值 `SENTINEL_optional_dex_pinch` 15 → `relocked_optional_dex_pinch` **7** | 三件套：显式归因 + 同批重锁 + 旧值留痕；`test_sentinel_annotation_present` 改**两态约定**（无 15 行 = 退役断言 ⇒ 抄回 15 时断言 + 读数双红） |
 | **M1 tag 对行为判据**（新） | 同函数共置「走 M1 tag 编码的多字 int 链」与 `dex?` 值（形参 + 局部），断言**两侧往返一致**（int 侧精确 `4000000000`、dex 侧锚定 7） | **行为往返**（不是「不再编码」）；改前 `1/1` → 改后 `0/255`；精确形对照 `0/0` |
 | **G2 判别判据**（新） | match 载荷 + dex 算术（`v + 1.0`） | 改前 **193** → 改后 **8**（判别力自证见 §2 要点） |
-| `tests/harness/test_todo_id_migration.py`（改，J3 口径） | 见 §7 | 三条突变自证（M-a/M-b/M-c 全红） |
+| `tests/harness/test_todo_id_migration.py`（改，J3 约定） | 见 §7 | 三条突变自证（M-a/M-b/M-c 全红） |
 
 **探针自纠（如实登记）**：M1 判据初版写 `r := match x { Some(v) => { return … } }`——臂内 `return` 使函数**提前返回**，读数失效（ELF 7/7 假绿，属「探针不触发」族）。已改 `?` 解包 + 顺序断言并**单独提交**（`ed34ba3f`）。判据网可信度依赖这类自纠的登记。
 
@@ -102,7 +102,7 @@
 | 面 | 读数 |
 |---|---|
 | canary ELF | `95084e7b…d475`（28822B）**IDENTICAL** |
-| `.ccr` 四条（真源 `tools/baseline/canary_values.tsv`） | `pa_ccr 680a6f9843747b521213c3bcca1cf8724657943410f182e97ed63dcc11c7cd7a` 96015 · `pa_static_ccr 76f36e6a6b6eb2f18fa5541550d09e5e73bb0e8dfc7df2ebbe3d747c382f329c` 96158 · `gt_ccr d92a2727d0c51aa887d7053305a26bdf85451303e08d268898cf1de76bae2c95` 142765 · `gt_static_ccr a1f7b99c68c7d433834593100a776b74f883de291482f20762fe7399ec5182ea` 142908 —— 全 IDENTICAL |
+| `.ccr` 四条（出处 `tools/baseline/canary_values.tsv`） | `pa_ccr 680a6f9843747b521213c3bcca1cf8724657943410f182e97ed63dcc11c7cd7a` 96015 · `pa_static_ccr 76f36e6a6b6eb2f18fa5541550d09e5e73bb0e8dfc7df2ebbe3d747c382f329c` 96158 · `gt_ccr d92a2727d0c51aa887d7053305a26bdf85451303e08d268898cf1de76bae2c95` 142765 · `gt_static_ccr a1f7b99c68c7d433834593100a776b74f883de291482f20762fe7399ec5182ea` 142908 —— 全 IDENTICAL |
 | **`corearch` 逐字节同**（正交性证据） | 构建后 `corearch` sha 恒为 `072f2c7ccc243cc2a23fb5a0ad8dd97046bbd38c4f1a0aaafd137b660a1617be`（**后端源码未动** ⇒ dex 规范化不碰后端）；同轮 `corec` sha 变（源码变） |
 | 五 CI job | check 0 · bootstrap-tests 0 · selfhost-tests 0 · suite 0 · full-bootstrap 0 |
 | 自举链 + N06 | `corec2 == corec3` IDENTICAL（`c0f1cbf5…`）· `[GUARD] … build log clean（error[ = 0, undefined = 0）` ×3（corec/corearch/corelsp） |
@@ -120,14 +120,14 @@
 
 ---
 
-## §5bis 判定面回归网（腿① + 探针 29 + 暖态腿；**本批隔离口径**）
+## §5bis 判定面回归网（腿① + 探针 29 + 暖态腿；**本批隔离约定**）
 
-> **口径说明（为何要「本批隔离」）**：冻结基线 = pinned `97f4394f`（**P6 终态**，2026-09-14）。任何 P6 之后的批用「冻结基线 × 当前源 vs 当前二进制 × 当前源」都会看到**自 pin 起各批累积的**判定面演进，**不是本批的**。⇒ 本批另加一条隔离腿：**改前二进制**（`/tmp/optdex-pre/corec`，= 起点树 `dbadb8d649ba` 构建，sha `899e3090ad8d…`）**vs 改后二进制**（`c0f1cbf5…` 之构建）。
+> **约定说明（为何要「本批隔离」）**：冻结基线 = pinned `97f4394f`（**P6 终态**，2026-09-14）。任何 P6 之后的批用「冻结基线 × 当前源 vs 当前二进制 × 当前源」都会看到**自 pin 起各批累积的**判定面演进，**不是本批的**。⇒ 本批另加一条隔离判据：**改前二进制**（`/tmp/optdex-pre/corec`，= 起点树 `dbadb8d649ba` 构建，sha `899e3090ad8d…`）**vs 改后二进制**（`c0f1cbf5…` 之构建）。
 
-| 腿 | 命令（`cwd=仓库根`） | 读数 | 判定 |
+| 判据 | 命令（`cwd=仓库根`） | 读数 | 判定 |
 |---|---|---|---|
 | **①-A 本批隔离（决定性）** | `parity_run.sh /tmp/optdex-pre/corec /tmp/parity_pre` vs `… ./build/corec /tmp/parity_post`；`diff -rq …/logs` | **零差异**（75 档 rc + 日志） | ✅ **本批判定面零变化** |
-| ①-B 冻结基线对照（累积面） | `parity_run.sh /tmp/optdex-baseline/corec /tmp/parity_frozen` vs post；`diff -rq` | 11 档不同（`t3` 后端/OS/格式/格核 9 档 + `t4` hotpatch 1 档 + …） | ✅ 归因为**自 pin 起的累积演进**（由 ①-A 零差异反证非本批）——**逐条不入本批台账**，按本仓惯例归「冻结基线与当前树的历史差」 |
+| ①-B 冻结基线对照（累积面） | `parity_run.sh /tmp/optdex-baseline/corec /tmp/parity_frozen` vs post；`diff -rq` | 11 档不同（`t3` 后端/OS/格式/格核 9 档 + `t4` hotpatch 1 档 + …） | ✅ 归因为**自 pin 起的累积演进**（由 ①-A 零差异反证非本批）——**逐条不入本批清单**，按本仓惯例归「冻结基线与当前树的历史差」 |
 | **探针 29-A 本批隔离（决定性）** | `probes_run.sh /tmp/optdex-pre/corec /tmp/probes_pre` vs `… ./build/corec /tmp/probes_post`；冷态 `diff` | **0 处冷态日志差异**（29 档） | ✅ **本批对探针面零变化** |
 | 探针 29-B 冻结基线对照 | `probes_base` vs `probes_post` | **1 档**：`n05_recursive.cr` 多一行 `[5/5] frontend done`（新编译器打印流程行） | ✅ 累积/日志面差异（非语义），由 29-A 反证非本批 |
 | 暖态腿（广度层） | `warm_leg.sh`（由 runner 内嵌调用） | **pre 侧 DONE：75 档 · 真命中档数 39 · FAIL=0**；**post 侧 DONE：75 档 · 38 · FAIL=0**；探针侧 23 / 15 · FAIL=0 | ✅ 两侧自判均 FAIL=0；档数差（39↔38 · 23↔15）= **缓存命中计数**（`stats.tsv` 的 hits 列），非语义（warm 日志差异实测 = 临时目录名 + 命中计数） |
@@ -148,20 +148,20 @@
 grep -rn "CIR_CACHE_VER\s*:\s*int\s*=\|VER_EXPECTED = \|ver == 1[89]" src/ tests/ --include="*.cr" --include="*.py"
 ```
 ⇒ **写死点 4 处**（`cir_cache.cr:63` 常量 · `test_cache_identity.py:57` `VER_EXPECTED` · `test_ccr_types.py:1865` 与 **`:2022`** 两处断言）+ **历史注 2 处**（`ccr_io.cr:137` · `dyn_arr.cr:112`）= **6 处全部重锁**；18 代说明保留（**旧值留痕**）。
-> `:2022` 是 T0 清单**之外**的第三载体（T0 手列 4 处时漏了它）——由「grep 全量枚举」在推进中抓到并补锁；§7ter 已写入新口径。
+> `:2022` 是 T0 清单**之外**的第三载体（T0 手列 4 处时漏了它）——由「grep 全量枚举」在推进中抓到并补锁；§7ter 已写入新约定。
 
 **`.ccr` 不 bump**：`CCR_VERSION` 仍 9（交付格式；段布局/字段序未动，内容仅 `dex?` 程序变）⇒ `.ccr` 四条预期不变，实测 IDENTICAL ✓。
 
 ---
 
-## §7 J3 判据口径换代（维护者 2026-09-17 跨批裁定；批 5 落地）
+## §7 J3 判据标准换代（维护者 2026-09-17 跨批裁定；批 5 落地）
 
-**冲突**：`#2026-09-17-4`（本批 G3 登记条目）**从未有过旧号**（编号迁移已生效）⇒ 旧 J3（`max_old = max(table)` + 只数数字行式 + 表新 id 集合 == 标题集合）**必红且无法用合法数据修**（塞数字 = 造历史不存在的号 = 新假引用类，维护者否决「台账槽号」方案）。
+**冲突**：`#2026-09-17-4`（本批 G3 登记条目）**从未有过旧号**（编号迁移已生效）⇒ 旧 J3（`max_old = max(table)` + 只数数字行式 + 表新 id 集合 == 标题集合）**必红且无法用合法数据修**（塞数字 = 造历史不存在的号 = 新假引用类，维护者否决「清单槽号」方案）。
 
-**新口径（`j3_problems` 纯函数）**：① **总体性不放松**（表新 id 集合含 `—` 行 == 标题集合）② 旧号列 ∈ {数字, `—`}，数字部分仍须 `#1..#101`（`SEALED_MAX`）全覆盖（`#66` 空号例外）③ 越过封存上界的数字 ⇒ 红 ④ 行数自洽 + 新 id 唯一 + 行式可解析（`malformed`）。
-**旧口径原文 + 「为何放松」留痕于 `j3_problems` 头注**（不静默改史）；J1/J2/J4 语义未动。
+**新约定（`j3_problems` 纯函数）**：① **总体性不放松**（表新 id 集合含 `—` 行 == 标题集合）② 旧号列 ∈ {数字, `—`}，数字部分仍须 `#1..#101`（`SEALED_MAX`）全覆盖（`#66` 空号例外）③ 越过封存上界的数字 ⇒ 红 ④ 行数自洽 + 新 id 唯一 + 行式可解析（`malformed`）。
+**旧约定原文 + 「为何放松」留痕于 `j3_problems` 头注**（不静默改史）；J1/J2/J4 语义未动。
 
-**三条突变自证（承重件；缺一不可）**：
+**三条突变自证（关键件；缺一不可）**：
 
 | 突变 | 期望 | 实测 |
 |---|---|---|
@@ -198,13 +198,13 @@ grep -rn "CIR_CACHE_VER\s*:\s*int\s*=\|VER_EXPECTED = \|ver == 1[89]" src/ tests
 
 1. **锚点/常量类改动：人工清单会漏、手抄会错 ⇒ 必须「机械枚举（grep）+ 编辑后 diff 复核」双保险**（**同一条教训的两个实例**——分开写会被读成两件小事，实为一件事：**凡「清单/常量」必有漂移，只有机械源可依赖**）。
    - **实例 A（清单漂移）**：T0 手列 G7 载体（5 处）**漏了 `test_ccr_types.py:2022`**（同文件第二处断言、与 `:1865` 相隔 157 行）⇒ 由落地推进中的 **grep 全量枚举**抓出并**同批补锁**（代码侧最终 = **6 处全部重锁**）；**但计划 §7ter 表当时未同步**（代码改了、手抄表没跟上）⇒ 该表在跟进 PR 补齐第 6 行 + 诚实注记。
-     ⇒ **口径：载体清单以 `grep` 输出为准，不以手抄为准**——每代应由命令重跑生成（命令原文见 §6）。
+     ⇒ **约定：载体清单以 `grep` 输出为准，不以手抄为准**——每代应由命令重跑生成（命令原文见 §6）。
    - **实例 B（常量抄错）**：编辑中**误截断** `CIR_CACHE_MAGIC`（`-4485090715960753727` → `-5090715960753727`）⇒ 当场发现 + 复原 + `jj diff` 复核确认 magic **逐字节未动**（仅注释与 `VER` 变更）。
    - **共同动作**：改锚点/常量前后各跑一次机械枚举；编辑后**必须** `jj diff` 逐字复核改动面。
    - 这条防的是**以后每一批**。
-2. **「同判 ≠ 正确」**：`mw_tag_coexist_bits` 改前 `ELF 1 / interp 1` 是**两条腿同错**；判据必须写成「**期望值 + 禁第三态**」（本批 = `0/255`，不翻即上报）。
+2. **「同判 ≠ 正确」**：`mw_tag_coexist_bits` 改前 `ELF 1 / interp 1` 是**两条判据同错**；判据必须写成「**期望值 + 禁第三态**」（本批 = `0/255`，不翻即上报）。
 3. **判别力自证**：G2 那条判据若走 `?` 解包路径，**改前改后同值**（空判据）⇒ 判据必须自问「**什么坏实现能骗过这条断言**」。
-4. **哨兵换代 = 两态口径**：不是「改成新值就完」，而是「**旧值出现即红**」（本批 = 断言无「期望 15」行）。
+4. **标记值换代 = 两态约定**：不是「改成新值就完」，而是「**旧值出现即红**」（本批 = 断言无「期望 15」行）。
 5. **孤儿进程 + 互斥**：上一轮死会话遗留的后台构建曾与新构建重叠（本批已如实登记）；维护者随后把互斥规则改为「**非空最多等 2 分钟**，否则直接开跑并注明并发」，并新增「**CPU<2% 且 >3 分钟无进展 ⇒ 判已知缓存膨胀（批 6 登记的条目）⇒ 杀 + 清缓存 + 重跑**」。
 6. **判据自身的可伸缩性缺陷（本批实测挖出并修复）**：`tests/harness/test_todo_id_migration.py` 的 `EX_DIRS` **漏了 `.core/`**（编译器增量缓存在仓根生成，本工作区实测 **1.4GB / 1657 条**）⇒ J1/J2 的**全仓扫描会逐个读这些二进制快照**（判据进程 `rchar` 2.4GB+、CPU 0.7%、打开 fd = `…/cache/cir/src_compiler_main.cr::dirname.cir`）⇒ **判据卡死 14+ 分钟**（远超它自述的「毫秒级」定位）。
    - **修复**：`EX_DIRS` 补 `.core`（与已排除的 `build/` 同类：编译产物、非仓库文本）。
@@ -236,9 +236,9 @@ grep -rn "CIR_CACHE_VER\s*:\s*int\s*=\|VER_EXPECTED = \|ver == 1[89]" src/ tests
 | U4 | 比较面：`x == Some(d)` / `x == None` | 登记（走比较点声明面查表面，本批不扩） |
 | U5 | `??`/`?` 于**装箱**载荷的形式一致性 | 本批已复测（`try_unpack_bits` 绿）；其余形态登记 |
 | U6 | `dex?` 数组字面量元素类型推断（`[dex?;2] = [d, None]` ⇒ TK02/TA02） | 登记为新条目候选（元素类型推断面，非本批） |
-| U7 | `dex?, apx` 标签语义（**静默忽略**） | **已立 `TODO #2026-09-17-4`**（G3 裁决：应收敛为 fail-closed，本批不改）+ 判据钉 |
+| U7 | `dex?, apx` 标签语义（**静默忽略**） | **已立 `TODO #2026-09-17-4`**（G3 裁决：应收敛为 fail-closed，本批不改）+ 判据锁定 |
 
-> **⚠ U1 更正注（2026-09-18；批 8（静默面收口）T0 实测推翻本表登记的机理——原文逐字保留不删）**：
+> **⚠ U1 更正注（2026-09-18；批 8（静默面收尾）T0 实测推翻本表登记的机理——原文逐字保留不删）**：
 > 本表 U1 所指向的 `TODO #2026-09-17-5`，其**机理段不成立**——`monomorph.cr:600` 的实例化**只深克隆函数体 `d`**，
 > `a`/`b`/`c` 槽原样复制 ⇒ **实例与泛型声明共用形参节点** ⇒ 实例形参槽型**恒为 `TI_INT`(GP)**，
 > 不存在「callee 按实例判 ⇒ 槽 = `TI_DEX_S`」这一半边（该半边是分诊期**读码推断**，未实测）。
@@ -248,8 +248,8 @@ grep -rn "CIR_CACHE_VER\s*:\s*int\s*=\|VER_EXPECTED = \|ver == 1[89]" src/ tests
 
 > **〔补注（2026-09-18 · `plan-verikernel` 核查）〕上句「`ELF 142` … 期望 7/7 为实测有效，保留」已作废**：**`ELF 142` 是分布样本**
 > （97 次运行命中 1 次；复跑 60 次 0 次；关 ASLR 稳定 `rc=208`）⇒ **不得作锚定值**；且 **「期望 7/7」作废**——`g(1, d)` 的 `T` 由首实参绑为 `int`，
-> 第二实参 `dex` 与 `int?` 不符 ⇒ **应拒**（要「得 7」需另裁推断方向）。现行口径 = 计划 §1-1 T0 回填块 ②：
-> **Ⅰ 确定性腿为主**（interp `15` + `.cir` 调用点机械判据 + `--dump-params` 槽型）/ **Ⅱ ELF 腿降为弱腿**（仅「≠7」+ N≥10 次采样不复现 7）；
+> 第二实参 `dex` 与 `int?` 不符 ⇒ **应拒**（要「得 7」需另裁推断方向）。现行约定 = 计划 §1-1 T0 回填块 ②：
+> **Ⅰ 确定性判据为主**（interp `15` + `.cir` 调用点机械判据 + `--dump-params` 槽型）/ **Ⅱ ELF 侧判据降为弱判据**（仅「≠7」+ N≥10 次采样不复现 7）；
 > 「禁第三态」对非确定值域不适用 ⇒ 改判「**必须可复现**」。
 
 ---

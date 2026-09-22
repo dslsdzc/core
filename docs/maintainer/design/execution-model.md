@@ -1,7 +1,7 @@
 # Core 执行模型
 
 > 定位:受众 = 维护者/贡献者/用户;状态 = active。
-> 真源:语义设计以本文件为准;实现以源码为准——图/region:src/compiler/dataflow.cr;并发:src/stdlib/sched.cr、goroutine.cr、chan.cr;执行器:src/compiler/interp.cr;语法:grammar/core.ebnf。
+> 语义设计以本文件为准;实现以源码为准——图/region:src/compiler/dataflow.cr;并发:src/stdlib/sched.cr、goroutine.cr、chan.cr;执行器:src/compiler/interp.cr;语法:grammar/core.ebnf。
 > 本文 2026-09 全量重写:并发部分废弃旧"OS 线程/抢占式"设计,改为与实现一致的 Go 风格 GMP 简化模型;实现与设计的差距以"设计态/已实现"标注,不删设计意图。
 
 ---

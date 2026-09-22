@@ -40,7 +40,7 @@
 - 迁移顺序：数据面（compute_live_ranges/entries/共存）→ 分配（alloc_registers + meta）→ 判定（verify）——依赖全局表（g_ir_*）corearch load 后已有
 - 触发点：corearch load 后、emit 前（O2 时）——替代 corec 传输
 - 验证：O2 行为等价（后端自算 vs 原 corec 算——迁移期间可双跑对照 exit/产物行为）——后端分配结果 = corec 原结果（逐变量 reg 对照——过渡期测试）
-- test_mw_task5 哨兵（REG_ASSIGN 元数据通道）——corearch 侧同进程消费（tag 表直接可读）
+- test_mw_task5 标记值（REG_ASSIGN 元数据通道）——corearch 侧同进程消费（tag 表直接可读）
 
 ### Task 3: .ccr opt_meta 出格式（R2）
 
@@ -60,7 +60,7 @@
 
 ### Task 6: 回归 + 文档收尾
 
-- 全套回归（含 mw1-6 哨兵更新确认、backend_bootstrap、O2 自举可运行）
+- 全套回归（含 mw1-6 标记值更新确认、backend_bootstrap、O2 自举可运行）
 - spec 状态（R1-R5 拍板记录 + 实施完成）+ TODO 挂账（如有残余）
 
 ---
@@ -70,7 +70,7 @@
 - opt.cr 拆分依赖图遗漏（迁入函数引用未迁符号 → 编译错——Task 1 清单完备性关键）
 - 行为等价验证（迁移过渡双跑——corec 分配停用瞬间 O2 行为依赖 corearch 正确）
 - .ccr opt_meta 移除的 walker/测试联动面
-- 多字 tagged 分配同侧整合（Task 5 哨兵 → corearch 内断言）
+- 多字 tagged 分配同侧整合（Task 5 标记值 → corearch 内断言）
 
 ---
 

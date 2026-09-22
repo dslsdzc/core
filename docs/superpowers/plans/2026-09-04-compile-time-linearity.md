@@ -112,7 +112,7 @@
 
 ## 4. 上界定理清单（承诺升级版——code review 对照）
 
-> **2026-09-16 注**：本表的**现行权威副本 = `specs/2026-09-16-compile-time-theorems.md`**（含机检口径与「改动须同步」纪律）；本表保留为历史审计原貌（其 `pass_stack_share` 行已失效，见 §8.1-E1）。
+> **2026-09-16 注**：本表的**现行版本以 `specs/2026-09-16-compile-time-theorems.md` 为准**（含机检约定与「改动须同步」纪律）；本表保留为历史审计原貌（其 `pass_stack_share` 行已失效，见 §8.1-E1）。
 
 形式：每行一条定理。N 按 pass 定义；「期望」= hash 表随机种子假设；总量界 = 平摊严格线性。
 
@@ -177,7 +177,7 @@
 |---|---|---|---|
 | **E1 已失效** | `opt.cr:367 pass_stack_share`（O(V²)） | **不存在**（`opt.cr:345` 注 + `regalloc-consistency.cr:53`「2026-09-07 regalloc 移后端 D-3=b 已停用」） | §2.1/§3 已就地划销；定理表不含它 |
 | **E2 行号漂移（8 条）** | `checker.cr:215 find_sym` · `:225 find_gsym` · `:845 find_func` · `ir_gen.cr:283 track_str` · `ir_gen.cr:672-684 EXPR_IDENT` · `opt.cr:417 pass_cse` · `module.cr:442-605 res_imports` · `instr.cr:67 g2_str_off` / `:26 get_reg_for_var` | `checker.cr:805` · `:815` · `:1685` · `ir_gen.cr:678` · `ir_gen.cr:535-556`（find_local/find_global） · `opt.cr:231` · `module.cr:397+`（重 tokenize `:424/:649/:660`） · `instr.cr:75` · `:34` | 开工按**现址**定位；O(·) 结论全部仍成立 |
-| **E3 位置迁移（2 条）** | `instr.cr:802 IR_CALL 发射` · `opt.cr:258 alloc_registers` | **`src/os/linux/callseq.cr:202`**（`cs_call_direct` 一行 `str_eq` 全表扫） · **`src/arch/x86_64/regalloc.cr:406`**（触发面 = corearch opt 路径，非 corec） | 修法落点改新址；scaling 样本**必须含 corearch 腿** |
+| **E3 位置迁移（2 条）** | `instr.cr:802 IR_CALL 发射` · `opt.cr:258 alloc_registers` | **`src/os/linux/callseq.cr:202`**（`cs_call_direct` 一行 `str_eq` 全表扫） · **`src/arch/x86_64/regalloc.cr:406`**（触发面 = corearch opt 路径，非 corec） | 修法落点改新址；scaling 样本**必须含 corearch 路径** |
 | **E4 后端目录退役** | §2.2 全部 7 行写 `src/arch/linux/ld/{elf,instr,ld}.cr` | 现为 **`src/format/elf/{elf,ld,resolve}.cr`** + **`src/arch/x86_64/instr.cr`** + **`src/os/linux/{callseq,entry,syscall}.cr`**（三轴布局） | §2.2 路径**全部作废**，按新址复核（`patch_relocs` `ld.cr:328` 行号恰好未漂） |
 | **E5 疑似升确定（2 条）** | `module.cr:177 reg_fileid`「疑似」 · `instr.cr:1260 IR_LABEL`「疑似」 | `module.cr:177-189` 全表扫；`instr.cr:1196-1211` 每 label 全扫 `g_pending_count` | 两条**均为确定**（O(K²) / O(L×P)），纳入相应 phase |
 | **E6 须开工首日定位（2 条）** | `elf.cr:1475 前向 call 补丁` · `elf.cr:1200 Phase 3 回扫 O(F²)` | 前者：`src/format/elf/elf.cr` 内未见独立循环（`elf.cr:559` 注释证明「Phase 3 patch loop」存在） · 后者：未读到显式 O(F²)；但 `instr.cr:486 → g2_str_off` 的累积 O(S²) 已确认 | **T1 精确定位后再改**（不许按原文行号猜改） |
@@ -185,20 +185,20 @@
 
 ### 8.2 任务表（T1..T10）
 
-通则：每任务收尾 = 判据全绿 + 定理清单对应行复核 + 台账一行；改 pass ⇒ 同批改定理行（§5.3）。铁律 6 与 canary 硬闸（无豁免）全程适用。**行号一律取 §8.1 现址**。
+通则：每任务收尾 = 判据全绿 + 定理清单对应行复核 + 在总清单里记一行；改 pass ⇒ 同批改定理行（§5.3）。铁律 6 与 canary 硬闸（无豁免）全程适用。**行号一律取 §8.1 现址**。
 
 | 任务 | 关键 Files | 步骤（摘要） | 判据 | 停条件 | 依赖 |
 |---|---|---|---|---|---|
-| **T1 前置** | 只读 + `tools/baseline/`；定理清单（**已落** spec） | ① 复核 §8.1-E6/E7；② 冻结基线重建（`rebuild.sh`，白名单换代）；③ 起点判据；④ 定理清单落纸（已落）；⑤ **修复前 scaling 基线**（×1/×2/×4 时间 + 峰值 RSS，×3 中位数） | 三 sha 入白名单 · canary `95084e7b…d475`(28822B) · `.ccr` 四条冷态 · 五 CI job rc=0 · 枚举（计数以实读为准）· 定理 12 行齐 · **基线数值入台账（须实测，不得预填）** | 起点判据任一红；基线三次离散 >20% | — |
+| **T1 前置** | 只读 + `tools/baseline/`；定理清单（**已落** spec） | ① 复核 §8.1-E6/E7；② 冻结基线重建（`rebuild.sh`，白名单换代）；③ 起点判据；④ 定理清单写进文档（已落）；⑤ **修复前 scaling 基线**（×1/×2/×4 时间 + 峰值 RSS，×3 中位数） | 三 sha 入白名单 · canary `95084e7b…d475`(28822B) · `.ccr` 四条冷态 · 五 CI job rc=0 · 枚举（计数以实读为准）· 定理 12 行齐 · **基线数值记入清单（须实测，不得预填）** | 起点判据任一红；基线三次离散 >20% | — |
 | **T2 护栏①证书** | `globals.cr`/`main.cr`（flag）+ 插桩点 + `tools/cert/check_cert.py` | ① `--emit-ops-cert`（默认关）；② 先「零开销可得」类；③ TSV `(pass,N,ops,bounds,ok)`；④ 判定器；⑤ **开销实测** | 证书代表样本全绿 · 开关两态时间差 ≤1% · canary/四条零变化 | 开销 >1% 且退化被否 ⇒ 停（重开裁-CTL-1） | T1 |
-| **T3 护栏②scaling** | `tools/complexity/{gen_scaled.py,run_scaling.sh}` | ① 六维同源缩放生成器；② runner（×3 中位数 + RSS）；③ 修复后/前比值表；④ 断言 ×2≤2.4 / ×4≤6.0 | 脚手架可复现 · 修复前基线比入台账（若不超线性须**如实标注**）· CI 时长实测 | 样本不稳（>20% 离散） | T1 |
+| **T3 护栏②scaling** | `tools/complexity/{gen_scaled.py,run_scaling.sh}` | ① 六维同源缩放生成器；② runner（×3 中位数 + RSS）；③ 修复后/前比值表；④ 断言 ×2≤2.4 / ×4≤6.0 | 脚手架可复现 · 修复前基线比记入清单（若不超线性须**如实标注**）· CI 时长实测 | 样本不稳（>20% 离散） | T1 |
 | **T4 Phase A-前端** | `checker.cr`（find_sym/find_gsym/find_func/borrow）· `ir_gen.cr`（find_local/find_global/track_str/slice_len_*/调用发射）· `monomorph.cr` · `dataflow.cr` | 逐点 hash/缓存化，逐点保语义（遮蔽顺序/mangled 名/dedup） | 五 CI job rc=0 · canary/四条/DOT/dump 同锁值 · 证书 scan_steps ≤ C·N · scaling 该维 ×4 ≤6.0 · 枚举全绿 · 自举链 IDENTICAL | canary/四条变化（语义泄漏）；单点 >300 行 ⇒ 拆 | T2,T3 |
 | **T5 Phase A-后端** | `callseq.cr:202` · `instr.cr:75/:1196/:34` · `format/elf/elf.cr`（Phase 3 + 补丁解析，**先定位**）· `format/elf/ld.cr:328/:108` | ① name→id 表；② call 补丁/发射/Phase 3 改直寻；③ g2_str_off 单遍偏移表；④ IR_LABEL pending 建桶；⑤ get_reg_for_var 直查 | **ELF 逐字节 canary IDENTICAL（硬闸）** · `.ccr` 四条不变 · 冻结基线 72 档零差异 · 证书 ≤ C·N · 自举链 IDENTICAL | ELF 任一字节变化 ⇒ 停 | T4 |
 | **T6 Phase B** | `ptr_analysis.cr:15` · `region_check.cr:13` · `provenance_verify.cr:36/:6` · `dataflow.cr`（映射预计算点） | ① 线性预计算 unsafe 位图（复用 `g_df_node_region`）；② 三 pass O(1) 查；③ get_alloc_size struct 名→序号 hash | 三 pass `sg_scan_steps` 归零 · canary/四条/枚举全绿 · 安全类套件全绿 · 证书 ≤ C·N（指针 ≤ C·轮数·N） | 任一安全类诊断集合变化 ⇒ 停（语义面） | T2,T3 |
 | **T7 Phase C** | `opt.cr:231 pass_cse` · `arch/x86_64/regalloc.cr:406` | ① 定位 replace_map 全部应用点；② CSE seen 哈希化 + replace 版本化；③ regalloc 活性区间排序（后端） | `-O0` 产物逐字节不变（零扰动）· 证书 cse_* ≤ C·N | `-O1/-O2` 产物非预期变化 ⇒ 停 | T2,T3 |
 | **T8 Phase D** | `module.cr:397+ res_imports` · `:177 reg_fileid` | ① 单轮收集 + 每文件独立 tokenize + 已加载 hash set；② 累积缓冲预分配；③ reg_fileid hash | **import 解析语义零变化**（72 档 + 29 探针零差异 · `corec build <dir>` 逐字节同）· 证书 ≤ C·T_total | 任一档 import 计数/顺序变化 ⇒ 停 | T2,T3 |
 | **T9 Phase E** | `lexer.cr:472-524` · `diag.cr:7` · `dump.cr:281-284` · `interp.cr:520/:91` | 逐点小改（char buffer 倍增 / 行偏移表 / 一次分区 / 顺手） | lexer 逐字节等价 · dump 同值 · canary/四条不变 | lexer 语义差异 ⇒ 停 | T2,T3 |
-| **T10 收官** | `src/ci/run.sh` · 本计划 · 台账 | ① 全量回归（五 CI job + 枚举 + 自举链 + canary + 四条 + 72/29 + 暖态腿）；② 定理逐条复核；③ scaling 进 CI（时长而定）；④ 台账 + 终态 + TODO | 判据全套与批前逐项比对（**逐项标同/异 + 原因**）· scaling 全绿 · 证书全绿 · 内存比 ≤2.4/6.0 | 任一判据红 ⇒ 收官不成立 | T1..T9 |
+| **T10 收官** | `src/ci/run.sh` · 本计划 · 清单 | ① 全量回归（五 CI job + 枚举 + 自举链 + canary + 四条 + 72/29 + 暖态腿）；② 定理逐条复核；③ scaling 进 CI（时长而定）；④ 清单 + 终态 + TODO | 判据全套与批前逐项比对（**逐项标同/异 + 原因**）· scaling 全绿 · 证书全绿 · 内存比 ≤2.4/6.0 | 任一判据红 ⇒ 收官不成立 | T1..T9 |
 
 **顺序建议（裁-CTL-6）**：**先 B（T6）后 A（T4/T5）**——T6 是**无条件**安全 pass（任何程序都踩），收益最快；T4 依赖点最多、风险最大。
 

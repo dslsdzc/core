@@ -92,10 +92,10 @@ python3 tests/selfhost/test_compile.py     # Self-compilation pipeline test
 python3 tests/selfhost/test_impl.py        # Impl/method tests
 python3 tests/selfhost/test_borrow.py      # Self-hosted borrow checker (7 rules)
 ```
-> **清单口径（2026-09-16 文档审计修订）**：上面三行只是**入口示例**，不是全集——
+> **清单以什么为准（2026-09-16 文档审计修订）**：上面三行只是**入口示例**，不是全集——
 > `tests/selfhost/test_*.py` 实为 **50+** 套件、`tests/bootstrap/*.py` **7** 套件。
-> **套件全集真源 = `ls tests/selfhost/test_*.py tests/bootstrap/*.py`；CI 挂点真源 = `src/ci/run.sh`
-> 的 `selfhost-tests` / `bootstrap-tests` job**（逐档挂点 + 计数注）。全枚举口径见
+> **套件全集以 `ls tests/selfhost/test_*.py tests/bootstrap/*.py` 为准；CI 挂点以 `src/ci/run.sh`
+> 的 `selfhost-tests` / `bootstrap-tests` job 为准**（逐档挂点 + 计数注）。完整枚举见
 > `src/ci/run.sh`（每档 rc 汇总）与 `.superpowers/sdd/` 各批报告。
 
 Integration tests in `tests/suite/` are `.cr` source files — run through `./build/corec`.
@@ -179,7 +179,7 @@ src/compiler/     （**全 38 个 .cr**；2026-09-16 文档审计修订：原清
 ├── purity_selftest.cr → 真纯度计算自测通道（`corec selftest-purity`）（corec）
 ├── regalloc-consistency.cr → 分配器（CAG 贪心放置）逻辑正确性契约——**文档载体，不入任何清单**
 ├── region_check.cr → RegionCheck pass——DEREF 目标须在活子图（corec）
-├── ty_shadow.cr    → 判定桥接层/类型项构造（R2 P2a 起；**P5 T5 后不含影子层**，`sh_` = 历史前缀）（corec+corelsp）
+├── ty_shadow.cr    → 类型判定衔接 + 类型项构造（R2 P2a 起；**P5 T5 后并行的对照实现已下线**，`sh_` = 历史前缀）（corec+corelsp）
 ├── type_engine.cr  → R2 P0 类型项判定引擎（语义包含；spec §1/§3）（backend_support+corec+corelsp）
 ├── type_selftest.cr → 类型引擎判定用例表 + `corec selftest-types`（corec）
 └── type_terms.cr   → R2 P0 类型项表（集合语义 DAG）（backend_support+corec+corelsp）
@@ -223,7 +223,7 @@ src/stdlib/       （**全 19 个 .cr**；2026-09-16 文档审计修订：原清
 ├── 平台桥抽象设计：I/O 流 / 随机 / 哈希 / 时钟（语义接口 + 后端实现，程序 IO = 流转导器）——设计定案待实现（docs/superpowers/specs/2026-08-16-platform-abstract-design.md）
 └── 注：`assert.cr`/`collections.cr`/`dex.cr`/`math.cr`/`scheduler.cr`/`trace.cr`/`variadic.cr`
         **不在 build_selfhost_native.py 的任何清单**（corec_files/corelsp_files/backend_support_files…）
-        ——单元归属真源 = 该脚本按**全路径**核定的清单（2026-09-16 审计实核）
+        ——单元归属以该脚本按**全路径**核定的清单为准（2026-09-16 审计实核）
 ```
 
 ### Runtime (`src/runtime/`)
@@ -310,7 +310,7 @@ Design documents (Chinese):
 
 ## Key Conventions
 
-- File extensions: `.cr` (source), `.cir` (dataflow graph IR / 图形态), `.ccr`（格形态 IR，**v9 = 段表架构 8 段**：STR/SYM/NOD/ENT/REG/EDG + TYPE(7)/IFACE(8)（R2 P4 载体批起；R2 P6 T3 起 **v9**——NOD 40B 承载 TYPE 段项索引；版本真源 = `src/compiler/ccr_io.cr::CCR_VERSION`；文件名/测试名保留「v7」= 段表架构代号，见 specs/2026-09-09-lattice-ir-v7-format.md）。**2026-09-16 审计修订：原文写 v8（陈旧）**）, `.corespec`（已退役 2026-09-06——规约并入 .cr 语法，见 grammar/core.ebnf 迁移事项）
+- File extensions: `.cr` (source), `.cir` (dataflow graph IR / 图形态), `.ccr`（格形态 IR，**v9 = 段表架构 8 段**：STR/SYM/NOD/ENT/REG/EDG + TYPE(7)/IFACE(8)（R2 P4 载体批起；R2 P6 T3 起 **v9**——NOD 40B 承载 TYPE 段项索引；版本以 `src/compiler/ccr_io.cr::CCR_VERSION` 为准；文件名/测试名保留「v7」= 段表架构代号，见 specs/2026-09-09-lattice-ir-v7-format.md）。**2026-09-16 审计修订：原文写 v8（陈旧）**）, `.corespec`（已退役 2026-09-06——规约并入 .cr 语法，见 grammar/core.ebnf 迁移事项）
 - Tests in `tests/bootstrap/` and `tests/selfhost/` define inline Core source strings and compare output
 - Python bootstrap: `sys.path.insert(0, 'bootstrap')` to import compiler modules
 - VS Code extension in `vscode-core/`

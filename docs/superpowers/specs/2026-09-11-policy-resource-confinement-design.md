@@ -4,7 +4,7 @@
 状态：**设计起草（2026-09-11 收敛批 v3）**——论题/裁决/判定形状/切片定稿；**D6(a)/D12/D22/D30 已随动**，§7.2 Q1-Q9 全部给裁定；实现计划后立（承路线图 §3 节奏：S-B 各族在 S-A 定稿后逐族出实施计划）。**收敛批 v3 变更**：本地裁决编号 `D-1…D-7` → **`L1…L7`**、**层名 `L-1`/`L-2` → `LV-1`/`LV-2`**（消除与本地裁决号的同形混淆——B 线 N2；对照表见路线图 §4）· §3 的 S-B5 状态行更新（A 线 N4）· Q9 栏位改 `kind=mint`（B 线 N2）
 性质：路线图 §2 S-B4 行的展开。本文只填本族范围，**不重定义**共享契约的 §1.1 术语 / §1.2 原则 / §1.3 不承诺（逐字遵守）。
 关联：
-- `docs/superpowers/specs/2026-09-11-semantic-safety-roadmap.md`（**共享契约**——术语/原则/不承诺的唯一真源）
+- `docs/superpowers/specs/2026-09-11-semantic-safety-roadmap.md`（**共享契约**——术语/原则/不承诺的唯一依据）
 - `docs/pointer-model.md`（provenance / asp / 条目标识+偏移；本族与之同构）
 - `docs/memory-model-capability-lattice.md` v4（能力成分 ⟨身份符号, 授权集, 域约束, 派生源⟩ / 能力树 / M1 定论 / 无格承诺）
 - `docs/superpowers/specs/2026-08-30-type-system-direction-design.md`（定案 1/4/5/8/14）

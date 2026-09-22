@@ -1,6 +1,6 @@
 # 判据载体化批（criteria-carrier）：ELF canary + `.ccr` 四条 = 机器闸门
 
-**日期**：2026-09-16 · **状态**：T0 侦查已实测落纸 → T1/T2/T3 实施中（**本批零构建**；
+**日期**：2026-09-16 · **状态**：T0 侦查已实测写进文档 → T1/T2/T3 实施中（**本批零构建**；
 凡「实测」均标出处，凡需二进制者标「待实测（等构建槽）」）
 
 **缘起（已实核）**：一份只读审计发现并经复核——ELF canary sha
@@ -27,12 +27,12 @@
 | 出处 | `docs/superpowers/plans/2026-09-16-global-operand-seams.md:325`（本批在途计划）· `docs/superpowers/plans/2026-09-15-fail-closed-diagnostics.md:101` · `docs/superpowers/plans/2026-09-12-r2-p4-carrier.md:74` |
 | 可执行原文 | `/tmp/capt1/t1b_criteria.sh:34-38`（`$CC clean-cache` → `$CC build tests/suite/ptr_arith.cr --static -o "$O/pa"` → `sha256sum` + `stat -c 'size=%s'`，并打印期望值） |
 
-**口径限制**：canary 覆盖 = **该一档语料的发射面**。它是「发射面零泄漏」证据，**不是**新语义
+**约定限制**：canary 覆盖 = **该一档语料的发射面**。它是「发射面零泄漏」证据，**不是**新语义
 正确性证据（`plans/2026-09-12-r2-p4-carrier.md:74` 明文：该语料对类型层不敏感）。
 
-### 1.2 `.ccr` 四条（两语料 × 两口径，冷态）
+### 1.2 `.ccr` 四条（两语料 × 两种形式，冷态）
 
-| 名 | 语料 | 口径（命令） | sha256 | 字节 |
+| 名 | 语料 | 约定（命令） | sha256 | 字节 |
 |---|---|---|---|---|
 | `pa_ccr` | `tests/suite/ptr_arith.cr` | `clean-cache` → `ccr <src> -o <D>/pa.ccr` | `680a6f9843747b521213c3bcca1cf8724657943410f182e97ed63dcc11c7cd7a` | 96015 |
 | `pa_static_ccr` | 同上 | `clean-cache` → `build <src> -o <D>/pa_st.bin --static`（产物 = `<D>/pa_st.bin.ccr`） | `76f36e6a6b6eb2f18fa5541550d09e5e73bb0e8dfc7df2ebbe3d747c382f329c` | 96158 |
@@ -44,15 +44,15 @@
 > **自本批起作废**，留痕见 `tools/baseline/canary_values.tsv` 头注）。
 
 **出处（配方原文）**：`.superpowers/sdd/cap-task1-report.md:82`——
-`| 8 | .ccr 两口径四条（冷态） | ccr F -o O / build F -o O --static（各 clean-cache；static 取 O.ccr） | … |`。
+`| 8 | .ccr 两种形式四条（冷态） | ccr F -o O / build F -o O --static（各 clean-cache；static 取 O.ccr） | … |`。
 **可执行原文**：`/tmp/capt1/t1b_criteria.sh:41-53`（四条逐条 `clean-cache` 前置 + `cp "$O/pa_st.bin.ccr" "$O/pa_st.ccr"`）。
 **值来源**：`.superpowers/sdd/p6-task3-report.md:62`（P6 T3 **重锁**：`delta = 4B × 节点数`，pa +5192 = 4×1298 · gt +7452 = 4×1863）+ `.superpowers/sdd/p6-task4-report.md:81`（P6 T4 复验「四条逐字节同」）。
 
-**口径限制（三条，逐条实测）**：
+**约定限制（三条，逐条实测）**：
 1. **必须 `clean-cache` 前置且逐条独立**——`clean-cache` = `rm -rf .core/cache/cir/`
    （`src/compiler/main.cr:408-414` 实读），**相对 cwd** ⇒ 本载体必须 `cd` 仓库根
    （记忆 `judgment_run_traps`：cir 缓存跨重建不失效、cwd 决定 import 解析）。
-2. **两口径不可互推**：`ccr` 口径与 `build` 口径的 `.ccr` **内容不同**（差恒 143B）。本实例
+2. **两种形式不可互推**：`ccr` 约定与 `build` 约定的 `.ccr` **内容不同**（差恒 143B）。本实例
    解码段表实测（`/tmp/capt6/{pa.ccr,pa_st.ccr}`，下表）：差异**只在 STR 段 +79B 与 SYM 段
    +64B**，NOD/ENT/REG/EDG/TYPE/IFACE 六段尺寸逐字节相同。
    ⇒ 143B 是**接口面语义差**，**不是** 输出路径长度差（见下条）。
@@ -65,7 +65,7 @@
    `/tmp/capt1`（2026-09-14，容量批 T1）· `/tmp/capt6`（2026-09-16，全局 seam 批在途）·
    `/tmp/fct3`（2026-09-15，fail-closed T3）。⇒ 本闸门在 CI（任意临时目录）可复现。
 
-| 段（tag） | pa `ccr` 口径 | pa `build` 口径 | 差 |
+| 段（tag） | pa `ccr` 约定 | pa `build` 约定 | 差 |
 |---|---|---|---|
 | STR(1) | 1711 | 1790 | **+79** |
 | SYM(2) | 6452 | 6516 | **+64** |
@@ -79,16 +79,16 @@
 
 （段表解码 = 本实例实跑：头 16B（`CCR1` magic + version 9 + seg_count 8 + 保留），
 随后 8×12B `{tag u32, offset u32, size u32}`，与 `src/compiler/ccr_io.cr:32-36` 头注一致。
-版本真源 `ccr_io.cr:135` `CCR_VERSION = 9`。）
+版本出处 `ccr_io.cr:135` `CCR_VERSION = 9`。）
 
 ### 1.3 两套历史值的关系（**T0 追加项结案：(甲) 之「同口径不同时代」，非漂移**）
 
 `criteria-strength-audit` 表 C 第 2 条给出的四值与各批提交信息/本表**对不上**——已查清：
-**不是同一对象的两个面，而是同一口径的两个时代**，且换代是**显式的、有归因的、旧值留痕的**。
+**不是同一对象的两个面，而是同一约定的两个时代**，且换代是**显式的、有归因的、旧值留痕的**。
 
 实为**三代链**（非两代），逐代出处实挖：
 
-| 代 | 时点 / 格式 | 值（语料 A `ptr_arith` / 语料 B `generics_test` × 口径 ①②） | 出处（`file:line`） | 代内变化是否有显式归因 |
+| 代 | 时点 / 格式 | 值（语料 A `ptr_arith` / 语料 B `generics_test` × 约定 ①②） | 出处（`file:line`） | 代内变化是否有显式归因 |
 |---|---|---|---|---|
 | **G1** | P4 T7 收官 2026-09-13 / v8（NOD **36B**） | pa 90823B `fb4a3b59…` / 90966B `592afa31…`；gt 134701B `cafb4278…` / 134844B `ec8413ec…` | `docs/superpowers/plans/2026-09-12-r2-p4-carrier.md` **附录 D-1 表**（T7 实测 + 复测逐条复现）· `TODO.md:474` · `TODO.md:444` | — （起点） |
 | **G2** | P5 T7 2026-09-14 / v8 | pa **不变** 90823B `fb4a3b59…` / 90966B `592afa31…`；gt **+640B** ⇒ 135341B `ddec1ce6…` / 135484B `cd2af565…` | `TODO.md:521`（P5 T7 复验）· `TODO.md:376`（P5 T5-era） | ⚠ **本批未挖到「原→新」式显式重锁声明**（P5 复验只记新值）——登记为**留痕缺口**（不影响本载体：G2 已被 G3 取代） |
@@ -124,16 +124,16 @@
 > **本闸门禁止的不是变化，是无声变化。**
 >
 > **只锁冷态**（**不得**「补全」成冷暖双锁——否则在已知豁免面上引入假红）：① 一切记录值都是
-> 冷态（`cap-task1-report.md:82` 明标「冷态」）⇒ 载体复现的就是记录口径；② P4 附录 D-1 明载
+> 冷态（`cap-task1-report.md:82` 明标「冷态」）⇒ 载体复现的就是记录约定；② P4 附录 D-1 明载
 > **非可选程序的冷≠热是预存面**（pre-P4 二进制同病 89086/88954）并被**豁免**（TODO #2026-09-10-1 末条家族）
 > ⇒ 锁暖态 = 把「已登记豁免的已知分歧面」变成红闸门；③ 暖态在本两档**零区分力**——T1 表 B 8c
 > 实测四条冷=暖（`cap-task1-report.md:84`），且 `generics_test` 是**构造性**的（含泛型 ⇒
 > `src/compiler/main.cr:480-486`（`:484` 置 0）`cache_enabled = 0` ⇒ 冷≡暖）。暖态面**另有专属
 > 机器闸门**（`tests/selfhost/test_warm_cache_gate.py` 已挂 CI + `tools/baseline/warm_leg.sh`
-> 手工广度腿）⇒ **此处不锁 ≠ 无人守**。⚠ 若将来本两档出现冷≠热：**冷锁仍成立**（冷是记录口径），
+> 手工广度判据）⇒ **此处不锁 ≠ 无人守**。⚠ 若将来本两档出现冷≠热：**冷锁仍成立**（冷是记录约定），
 > 暖侧分歧归暖态闸门抓，**不并到这里**。
 
-### 1.4 起点值现状（**历史快照**——落纸时构建槽被占；**实测结论见 §9.1 / §9.2**）
+### 1.4 起点值现状（**历史快照**——写进文档时构建槽被占；**实测结论见 §9.1 / §9.2**）
 
 四条 + canary 的**最近一次**同源实测 = 在途批计划
 `docs/superpowers/plans/2026-09-16-global-operand-seams.md:325-326`（该批声明 canary 必须
@@ -151,7 +151,7 @@ canary（发射面）⇒ 停下上报；`.ccr` 四条 ⇒ 归因成立才可同�
 
 | 文件 | 角色 |
 |---|---|
-| `tools/baseline/canary_values.tsv` | **锁定值单一真源**：`name<TAB>artifact<TAB>sha256<TAB>size`，5 条。带文件头注（配方 + 出处 + 口径） |
+| `tools/baseline/canary_values.tsv` | **锁定值单一依据**：`name<TAB>artifact<TAB>sha256<TAB>size`，5 条。带文件头注（配方 + 出处 + 约定） |
 | `tools/baseline/canary_check.sh` | **闸门本体**：按 §1 配方产出 5 件产物 → 与值表逐条比对（sha **与** 尺寸） |
 | `tests/harness/test_canary_carrier.py` | **牙**：机械挂点断言 + 合成自测（无编译器）+ 真产物篡改（有编译器时） |
 
@@ -186,7 +186,7 @@ bash tools/baseline/canary_check.sh --selftest             # 合成夹具自证�
 是构建产物目录（`build/` 已不入库），且每步 `clean-cache` 只作用于相对 cwd 的
 `.core/cache/cir/`（`main.cr:408-414`）——不写源树、不写判据面。
 
-### 2.5 本载体自己怎么自证（**「闸门能变红」钉死**）
+### 2.5 本载体自己怎么自证（**「闸门能变红」固定**）
 
 `canary_check.sh --selftest` 在临时目录造合成夹具 + 派生值表，逐条断言**判据函数本身**：
 
@@ -215,13 +215,13 @@ bash tools/baseline/canary_check.sh --selftest             # 合成夹具自证�
 |---|---|
 | `src/ci/run.sh` `selfhost-tests` job | 尾部追加 `bash tools/baseline/canary_check.sh`（真闸）+ `python3 tests/harness/test_canary_carrier.py`（牙）|
 | `tests/harness/ci_hook_allowlist.txt` | 新测试文件已挂 ⇒ **不进白名单**；`test_mw_task2.py` 条目理由列按 T3 实况改写 |
-| `tests/harness/test_ci_hook_coverage.py` | 无需改口径（新测试文件在 SCOPE 内且已挂 ⇒ 差集不变）；注释里的实测基线计数同步 |
-| `src/ci/run.sh` 注释 | 挂点旁按「注释即判据」体例写明：值表真源、两口径、为何挂 selfhost-tests（需已验证编译器）|
+| `tests/harness/test_ci_hook_coverage.py` | 无需改约定（新测试文件在 SCOPE 内且已挂 ⇒ 差集不变）；注释里的实测基线计数同步 |
+| `src/ci/run.sh` 注释 | 挂点旁按「注释即判据」体例写明：值表出处、两种形式、为何挂 selfhost-tests（需已验证编译器）|
 
 **为何挂 `selfhost-tests` 而非 `bootstrap-tests`**：本闸门需要**已构建的** `build/corec/corearch`
 （且 `build` 路径要 corearch 同目录），而 `selfhost-tests` 首行即 `build_selfhost`
 （`src/ci/run.sh:78`）。`bootstrap-tests` 不构建编译器。**成本 = 1 档 canary ELF + 4 次 `.ccr`
-（2 语料 × 2 口径），语料 240B / 2.5KB，均为秒级；`--selftest` 与机械腿毫秒级。**
+（2 语料 × 2 约定），语料 240B / 2.5KB，均为秒级；`--selftest` 与机械判据毫秒级。**
 
 > **成本实测（2026-09-16，构建槽静默期实跑）**：载体独立 **1.04s**（5 条采集 + 校验全含）；
 > 牙独立 **2.24s**（其中 C 层复用载体刚落盘的 `build/canary_artifacts/` ⇒ **零额外编译**）；
@@ -286,14 +286,14 @@ bash tools/baseline/canary_check.sh --selftest             # 合成夹具自证�
 | # | 判据 | 现状 | 挂它是机器闸门的成本估算 |
 |---|---|---|---|
 | U1 | `test_backend_bootstrap.py`（N06 静默唯一门） | **未挂 CI**（白名单「最高危」条） | 中：需 corec+目录 project-mode 构建一次；时长未实测 ⇒ 须先量 |
-| U2 | `.cir` DOT 165915B / `b1bdf480…` | 纯纪律（无载体） | **低**：与 `.ccr` 同为单档 `ccr cir` 产物，可仿本批加进 `canary_values.tsv`（**但 DOT 面含行号/名字**⇒ 随编译器自身源码改动漂移风险高，须先裁口径） |
+| U2 | `.cir` DOT 165915B / `b1bdf480…` | 纯纪律（无载体） | **低**：与 `.ccr` 同为单档 `ccr cir` 产物，可仿本批加进 `canary_values.tsv`（**但 DOT 面含行号/名字**⇒ 随编译器自身源码改动漂移风险高，须先裁约定） |
 | U3 | `--dump-objects` 3521 行 | 纯纪律 | 低-中：`corearch <ccr> --dump-objects \| wc -l`；**行数面**同 U2 的漂移风险 |
 | U4 | 自举链 `corec2 == corec3` + N06=0 + 冒烟 42 + `--help` rc=1 | **已挂** `full-bootstrap`（`run.sh:132-143`）——但 `full` 层在免费计划下仅 `workflow_dispatch` 可达 | 0（已机器；缺的是**触发**） |
 | U5 | `test_mw_task1/3/4/5/6.py`（M1 多字族） | 未挂（白名单同族） | 中：需 corec；`test_mw_task2` 修完后同批评估 |
 | U6 | `test_hit_table.py` / `test_lsp.py` / `test_live_ranges.py` 等 23 selfhost 档 | 未挂（白名单逐条） | 逐档不同（多为需 corec 的中成本）；**根因 = 无「挂点扩容批」**，本批不扩 |
-| U7 | `selftest-types 415/415` | 已挂 `selfhost-tests`（`run.sh:94`）但**计数下限**由套件内 `MIN_CASES` 守——两处口径靠人同步 | 低：可机械断言「run.sh 注释计数 == `test_type_engine.py:MIN_CASES`」 |
-| U8 | `tools/baseline/parity_run.sh` / `probes_run.sh` / `warm_leg.sh` 广度腿 | 未挂（**CI 不可行**：需 jj + 完整历史，CI 浅检出无 jj） | 不可挂（登记即终态） |
-| U9 | `test_mw_task2.py` 零 diff 断言 | 本批 T3 修「缺失即 FAIL」后仍是**本地腿** | 低-中：挂它需在**改动前编译器**上先产基线 ⇒ CI 结构性不可挂（基线段不可得）；T3 修法与白名单理由承担诚实性 |
+| U7 | `selftest-types 415/415` | 已挂 `selfhost-tests`（`run.sh:94`）但**计数下限**由套件内 `MIN_CASES` 守——两处约定靠人同步 | 低：可机械断言「run.sh 注释计数 == `test_type_engine.py:MIN_CASES`」 |
+| U8 | `tools/baseline/parity_run.sh` / `probes_run.sh` / `warm_leg.sh` 广度判据 | 未挂（**CI 不可行**：需 jj + 完整历史，CI 浅检出无 jj） | 不可挂（登记即终态） |
+| U9 | `test_mw_task2.py` 零 diff 断言 | 本批 T3 修「缺失即 FAIL」后仍是**本地判据** | 低-中：挂它需在**改动前编译器**上先产基线 ⇒ CI 结构性不可挂（基线段不可得）；T3 修法与白名单理由承担诚实性 |
 
 ---
 
@@ -301,7 +301,7 @@ bash tools/baseline/canary_check.sh --selftest             # 合成夹具自证�
 
 - **T1**：`bash tools/baseline/canary_check.sh --selftest` rc=0（S1–S6 全按设计）；
   `python3 tests/harness/test_canary_carrier.py` rc=0。
-- **T1 真腿（待实测，等构建槽）**：`bash tools/baseline/canary_check.sh` rc=0（5/5）。
+- **T1 真判据（待实测，等构建槽）**：`bash tools/baseline/canary_check.sh` rc=0（5/5）。
 - **T2**：`python3 tests/harness/test_ci_hook_coverage.py` rc=0（新挂点不改差集；白名单不腐烂）。
 - **T3**：`python3 tests/selfhost/test_mw_task2.py` 在**无基线**时 **rc=1**（改前为 rc=0）；
   带 `--allow-skip` 时 rc=0。
@@ -341,7 +341,7 @@ parity/probes/warm 链静默后才开工，未与其并行）
 | **E18** | **CI 挂点端到端** `CI_JOB_NAME=selfhost-tests bash src/ci/run.sh` | **rc=0 · 78s**；日志内**确凿出现**载体 5/5 与牙 7/7（`[canary] PASS 5/5` + `[canary-carrier] PASS — pass=7 skip=0`）⇒ 挂点**真接线**，非「注释里自称已挂」 | 实测（真编译） |
 | **E19** | **五 CI job 全 rc=0** | `bootstrap-tests` **rc=0**（含 hook-coverage：scope=65 hooked=38 unhooked=27 · BLOCK 20/ALLOW 16 = 36/36）· `check` **rc=0 · 30s** · `suite` **rc=0 · 19s** · `selfhost-tests` **rc=0 · 78s** · `full-bootstrap` **rc=0 · 676s** | 实测（真编译） |
 | **E20** | `full-bootstrap`（自举链） | rc=0 · **676s** · N06 计数 **0** · `corec2 == corec3` `cmp` **IDENTICAL**（双 **2892374B**，sha256 双 `093ba2305c204fdd1ce1ad892af21ade75fb79dfcb3957fdc897affd73d9c814`） | 实测（真编译） |
-| **E21** | **T3 自证（A5 修复的 fail-closed）**——在**隔离树**跑（`/tmp/mw_nobase`：仅 `build/corec`/`corearch` 软链，无 `mw_task2_zdiff` 基线），**零风险于共享 build/** | 默认口径 **rc=1 · 9 条 `[FAIL] … zero-diff baseline missing … 默认 fail-closed`**（改前同情形 = `[SKIP]` 且 rc=0）· `--allow-skip` ⇒ **rc=0** + 显式 `[SKIP]`（带补救命令）· 有基线树内 ⇒ **ALL PASS rc=0** | 实测（真编译） |
+| **E21** | **T3 自证（A5 修复的 fail-closed）**——在**隔离树**跑（`/tmp/mw_nobase`：仅 `build/corec`/`corearch` 软链，无 `mw_task2_zdiff` 基线），**零风险于共享 build/** | 默认约定 **rc=1 · 9 条 `[FAIL] … zero-diff baseline missing … 默认 fail-closed`**（改前同情形 = `[SKIP]` 且 rc=0）· `--allow-skip` ⇒ **rc=0** + 显式 `[SKIP]`（带补救命令）· 有基线树内 ⇒ **ALL PASS rc=0** | 实测（真编译） |
 | **E22** | 全枚举（套件全集 = `tests/selfhost/test_*.py` 55 + `tests/bootstrap/test_*.py` 7） | **62/62 rc=0 · 207s**（零 FAIL——判据 = 无任何 `FAIL:` 行写入，非仅计数） | 实测（真编译） |
 
 **零足迹结论（实测）**：本批只新增 3 文件 + 改注释/挂点，**零 `.cr` 源码改动** ⇒
@@ -364,7 +364,7 @@ CI 无该文件 ⇒ 少这 28B。**`ptr_arith.cr` 零 import ⇒ 从不读 `$HOM
 
 **决定性复现**：本机 `HOME=<空目录>` ⇒ **CI 的 size 与 sha 逐条相同**（`d92a2727…`/`a1f7b99c…`）。
 
-**修复（裁 (A)，本批实施）**：载体把 `HOME` 钉到**采集目录内的空 `home/`**（+ `CORE_SAFE=1`），
+**修复（裁 (A)，本批实施）**：载体把 `HOME` 锁定到**采集目录内的空 `home/`**（+ `CORE_SAFE=1`），
 并在输出打印实际值；`.ccr` 四条中 gt 两条**同批重锁**为 142765/142908（旧值留痕 + 效力范围注）。
 **不得 unset/置空 `HOME`**——`module.cr:526` 有硬编码 `/home/DslsDZC` 兜底（已独立登记 TODO #2026-09-16-21）。
 
@@ -382,7 +382,7 @@ CI 无该文件 ⇒ 少这 28B。**`ptr_arith.cr` 零 import ⇒ 从不读 `$HOM
 > **载体自身的受控 `HOME` 是判据输入的一部分**：每次采集 `rm -rf` 重建为空 ⇒ 既不可被外部
 > 在运行中污染，也**不假装对它不敏感**——V2a/V2b 证：往里放索引产物真变 ⇒ **闸门红才是
 > 正确行为**（那是**改输入**，不是环境噪声）。
-> 若将来需要「索引在场」的覆盖面，**另立语料/口径，绝不放宽本闸门**。
+> 若将来需要「索引在场」的覆盖面，**另立语料/约定，绝不放宽本闸门**。
 >
 > （原条件 4 把「与外部环境解耦」与「对自己的受控输入不敏感」混为一谈；后者不成立——
 > 受控 `HOME` 就是编译器的**有效** `HOME`。此更正为双方确认。）

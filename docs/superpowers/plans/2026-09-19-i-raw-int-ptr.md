@@ -41,13 +41,13 @@ if av != TI_DEX && av != TI_INT && av != TI_NEVER {
 
 ## §3 判据（`tests/selfhost/test_raw_int_ptr.py`，挂 `selfhost-tests`，19 项）
 
-A 正控（诊断面零诊断 + 两腿值面）· B 负控 6 类（string/bool/array/slice/**ref_type（形参 `&int`）**/struct ⇒
+A 正控（诊断面零诊断 + 两条判据值面）· B 负控 6 类（string/bool/array/slice/**ref_type（形参 `&int`）**/struct ⇒
 `check` 面 rc=1 + **恰 1 条** TF07 + 文案含 `or pointer`）· B' 既有 `dex`/`int` 形态仍受 · C 同源两次构建 ELF 一致。
 
 **类型定名 = 实测定名（不假设）**：**只加 `TYP_PTR`** 后正控即绿 ⇒ `&x` 表达式解析到的就是 `TYP_PTR` 行
 （代码路径佐证：一元取地址分支 `alloc_type(TYP_PTR, inner, 0)`；**类型位** `&T` 则是 `TYP_REF`）。
 **交叉证据（突变 M2）**：把放宽面扩到 `TYP_REF` 时，`ref_type` 负控**恰好翻红**，而 slice/array/string 仍拒
-⇒ 该负控钉的确实是 `TYP_REF`，且钉子**按类特异**。
+⇒ 该负控锁定的确实是 `TYP_REF`，且断言**按类特异**。
 
 **负控的面（纪律）**：`TF07` 是 **build-scope 豁免码**（`diag.cr::diag_gate_exempt`）⇒ **「build 面零产物」在本批恒假**
 （豁免未撤）⇒ 负控只写 `check` 面。**凡写「零产物」先问「这个面上有没有豁免」**。
@@ -55,7 +55,7 @@ A 正控（诊断面零诊断 + 两腿值面）· B 负控 6 类（string/bool/a
 ## §4 突变自证（均断言命中目标）
 
 - **M1（回退放宽）**：正控回到 pre 读数（rc=1 · TF07×2 · TB01×1）⇒ 正控有牙。
-- **M2（放宽过头 = +`TYP_REF`）**：`ref_type` 负控翻红；slice/array/string 仍拒 ⇒ 钉子按类特异。
+- **M2（放宽过头 = +`TYP_REF`）**：`ref_type` 负控翻红；slice/array/string 仍拒 ⇒ 断言按类特异。
 
 **实测红项计数（本批唯一权威读数，team-lead 复核认可）**：
 `test_diag_gate.py` **1 项**（`pos_tf07_tb01_ptr_check_clean`）· `test_raw_int_ptr.py` **1 项**（`pos_check_clean`）⇒ **合计 2**。
@@ -71,13 +71,13 @@ A 正控（诊断面零诊断 + 两腿值面）· B 负控 6 类（string/bool/a
 ## §5 既有判据的重定（换夹具保意图、不删断言）
 
 `tests/selfhost/test_diag_gate.py` 的 build 面正控原写
-`build_ok("tf07_tb01", "tests/suite/ptr_ref_first.cr", ("TF07","TB01"))`——把「该夹具产 TF07+TB01 且被豁免放行」钉成契约；
+`build_ok("tf07_tb01", "tests/suite/ptr_ref_first.cr", ("TF07","TB01"))`——把「该夹具产 TF07+TB01 且被豁免放行」固定成契约；
 本批**合法地**改变了该行为 ⇒ 实测红（`pos_tf07_tb01`）。
 
-- **改法**：改用**仍被拒**的串实参级联夹具（2×TF07 → 两侧 `TI_NEVER` → 1×TB01，与旧夹具**同形**）继续钉
-  「豁免码仍放行（rc=0 + 产物）**且仍被报出**」；**原夹具另钉新语义**，且按复核意见**拆成两条**：
+- **改法**：改用**仍被拒**的串实参级联夹具（2×TF07 → 两侧 `TI_NEVER` → 1×TB01，与旧夹具**同形**）继续锁定
+  「豁免码仍放行（rc=0 + 产物）**且仍被报出**」；**原夹具另锁定新语义**，且按复核意见**拆成两条**：
   - **`check` 面** `pos_tf07_tb01_ptr_check_clean`：rc=0 且**无 TF07、无 TB01**（**只有 check 面有意义**）；
-  - **`build` 面** `build_ok("tf07_tb01_ptr_clean", …)`：钉「能过 + 有产物」那一半。
+  - **`build` 面** `build_ok("tf07_tb01_ptr_clean", …)`：锁定「能过 + 有产物」那一半。
   两条**合起来**才是「放宽后指针形态干净通过」；**单留 build 面那条 = 注释强于代码**（见 §7）。
 - **自查（同档其它裸 `build_ok`）**：`tf01_build_clean` 已有 check 面缺席断言配对 ✓；`b04` 注释只声称
   「仍放行（rc=0 + 产物）」与代码一致、无越权声称 ✓ ⇒ 无同类落差。
@@ -94,5 +94,5 @@ A 正控（诊断面零诊断 + 两腿值面）· B 负控 6 类（string/bool/a
 
 1. **「面 × 豁免」先于结论**：凡判据写「零产物 / rc=1」，先查 `diag_gate_exempt` 在该**面 × 码**上的取值——
    `check` 面「零产物」**恒真**；被 build-scope 豁免的码在 build 面「零产物」**恒假**。
-2. **断言弱于注释**：写完断言回头逐词读注释——**注释写「零诊断」而代码只钉「能过」**就属此类（§4.1 是其实证）。
+2. **断言弱于注释**：写完断言回头逐词读注释——**注释写「零诊断」而代码只锁「能过」**就属此类（§4.1 是其实证）。
    **「缺席类」断言必须落在不在豁免内的面**，并与「能过类」**成对**。

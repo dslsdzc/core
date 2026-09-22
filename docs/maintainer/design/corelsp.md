@@ -1,6 +1,6 @@
 # corelsp 架构（语言服务器设计）
 
-> 定位：受众 = maintainers；状态 = active；真源 = [src/lsp/](../../../src/lsp/) + [build_selfhost_native.py](../../../build_selfhost_native.py)（corelsp 段）；实现与文档冲突时以源码为准。
+> 定位：受众 = maintainers；状态 = active；出处 = [src/lsp/](../../../src/lsp/) + [build_selfhost_native.py](../../../build_selfhost_native.py)（corelsp 段）；实现与文档冲突时以源码为准。
 > 用户接入（Neovim/VS Code/Zed 配置步骤）见 [developer/editors.md](../../developer/editors.md)。
 > 早期设计稿（历史，细节以源码为准）：2026-08-08 [lsp-design](../../superpowers/specs/2026-08-08-lsp-design.md)、2026-08-28 [lsp-production-design](../../superpowers/specs/2026-08-28-lsp-production-design.md)。
 

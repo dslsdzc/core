@@ -37,7 +37,7 @@ CI 与本地跑同一套命令（`src/ci/run.sh`，按 `CI_JOB_NAME` 分发）�
 - 全部数组为动态字节缓冲（`string` + grow 函数），无 `MAX_*` 上限
 - 扁平 AST / 扁平 IR（每节点为 `{kind, a, b, c, ...}` 结构）
 - 每个目录的 `_import.cr` 集中管理共享导入
-- 关键字唯一真源：`src/compiler/lexer.cr`
+- 关键字以 `src/compiler/lexer.cr` 为准（唯一）
 - 文档（`docs/`）更新与实现同步；伪代码文档（`docs/pseudocode/`）由源码生成，改源码后须重跑 `tools/pseudocode_check.py`
 
 ## 审查标准

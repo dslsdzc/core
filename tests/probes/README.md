@@ -21,7 +21,7 @@ diff -rq /tmp/probes_now /tmp/probes_base                                # 两�
 
 ## 清点（**29 档** = `/tmp/p5t0/probes` 11 + `/tmp/p5t3/probes` 18）
 
-> **U-4 收口**：P5 台账曾记「30 档」——**这是假象**：迁移期 runner 的
+> **U-4 收尾**：P5 清单曾记「30 档」——**这是假象**：迁移期 runner 的
 > `for f in /tmp/p5t3b/probes/*.cr` 在零匹配目录上迭代**字面 glob**，产生伪条目
 > `_tmp_p5t3b_probes_*.cr`（rc=1，log = `error: cannot read …/*.cr`），两态恒等 ⇒ 该条对拍是
 > **空洞证据**。**正式值 = 29**（R2 P6 T0 §3.2）；`/tmp/p5t3b/probes` 是 T3b 的**输出**目录

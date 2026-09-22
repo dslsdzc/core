@@ -4,7 +4,7 @@
 
 **Goal:** 把 P0 的类型项引擎以**影子模式**挂到检查器的类型判定上（旧判定照常生效），对真实语料并跑两套判定、产出**分类差异清单**——收紧面（旧接受→新拒绝 / 旧拒绝→新接受）在 P1 暴露，而不改任何行为。
 
-**Architecture:** 三件新东西 + 一处包装：① 桥接层 `ty_shadow.cr`（checker 的 `ti` → 引擎类型项）；② 影子判定核心（翻译 → `ty_equiv` → 分类：`AGREE` / `OLD_STRICTER`（旧拒新受）/ `OLD_LOOSER`（旧受新拒）/ `UNKNOWN`（引擎 -1，单列不计差异））；③ 通道（CLI `--type-shadow` 开关 + 摘要行 + 转储文件）；挂点 = `type_equal` 包装（原函数改名 `type_equal_core` 供内部递归，外部 8 个决策点经包装自动覆盖）。
+**Architecture:** 三件新东西 + 一处包装：① 判定衔接层 `ty_shadow.cr`（checker 的 `ti` → 引擎类型项）；② 影子判定核心（翻译 → `ty_equiv` → 分类：`AGREE` / `OLD_STRICTER`（旧拒新受）/ `OLD_LOOSER`（旧受新拒）/ `UNKNOWN`（引擎 -1，单列不计差异））；③ 通道（CLI `--type-shadow` 开关 + 摘要行 + 转储文件）；挂点 = `type_equal` 包装（原函数改名 `type_equal_core` 供内部递归，外部 8 个决策点经包装自动覆盖）。
 
 **Tech Stack:** Core 自举栈；P0 引擎（`src/compiler/type_terms.cr` / `type_engine.cr` / `type_selftest.cr`）；检查器 `src/compiler/checker.cr`；CLI `src/compiler/main.cr`。
 
@@ -22,7 +22,7 @@
 
 ---
 
-## Task 1: 桥接层（checker `ti` → 引擎类型项）+ 单元自测
+## Task 1: 判定衔接层（checker `ti` → 引擎类型项）+ 单元自测
 
 **Files:**
 - Create: `src/compiler/ty_shadow.cr`
@@ -42,7 +42,7 @@ fn sh_map_entries() -> int     // 已翻译条目数
 
 | checker | 引擎项 |
 |---|---|
-| `TYP_BASE` + `TY_INT/TY_DEX/TY_STRING/TY_BOOL/TY_UNIT/TY_NEVER/TY_CHAR` | `AK_INT/AK_DEX/AK_STRING/AK_BOOL/AK_UNIT/AK_NEVER/AK_CHAR`（`ti` 存 `b` 槽）——**⚠️ 必须按语义逐项分派，不得按数值直传**：`TI_BOOL=2/TI_STR=3` 与 `AK_STRING=2/AK_BOOL=3` **下标互换**（Task 1 实测：照抄数值直传会把 bool↔string 静默错标，且两侧同错自洽 → 差异清单全成假信号）；`TY_DEX_S`（精确缩放 dex，占位哨兵行）同样归 `AK_DEX` |
+| `TYP_BASE` + `TY_INT/TY_DEX/TY_STRING/TY_BOOL/TY_UNIT/TY_NEVER/TY_CHAR` | `AK_INT/AK_DEX/AK_STRING/AK_BOOL/AK_UNIT/AK_NEVER/AK_CHAR`（`ti` 存 `b` 槽）——**⚠️ 必须按语义逐项分派，不得按数值直传**：`TI_BOOL=2/TI_STR=3` 与 `AK_STRING=2/AK_BOOL=3` **下标互换**（Task 1 实测：照抄数值直传会把 bool↔string 静默错标，且两侧同错自洽 → 差异清单全成假信号）；`TY_DEX_S`（精确缩放 dex，占位标记值行）同样归 `AK_DEX` |
 | `TYP_DYN` | `AK_DYN` |
 | `TYP_ARRAY`（data=元素, extra=N） | `AK_SEQUENCE`，参数链 `[elem]`（**N 不入身份**——R1 裁决） |
 | `TYP_SLICE` | `AK_SEQUENCE`，参数链 `[elem]` |
@@ -69,7 +69,7 @@ fn sh_map_entries() -> int     // 已翻译条目数
 
 - [ ] **Step 2: 运行确认红**（`sh_term_of_ti` 未定义 → 构建失败/用例挂）
 
-- [ ] **Step 3: 实现 `ty_shadow.cr`（桥接层）**
+- [ ] **Step 3: 实现 `ty_shadow.cr`（判定衔接层）**
 
 ```core
 // === ty_shadow.cr ===
@@ -219,7 +219,7 @@ g_shadow_buf_count : int, mut;     g_shadow_buf_cap : int, mut;
 ```bash
 nice -n 19 python3 build_selfhost_native.py && nice -n 19 ./build/corec selftest-types   # 期望 49+N 全 PASS
 ```
-提交（路径限定）：`feat: R2 P1 Task 1——影子桥接层（checker ti → 引擎类型项，含 N 不入身份断言）`
+提交（路径限定）：`feat: R2 P1 Task 1——影子判定衔接层（checker ti → 引擎类型项，含 N 不入身份断言）`
 
 ---
 
@@ -334,12 +334,12 @@ nice -n 19 ./build/corec check src/compiler/ccr_io.cr --type-shadow >> /tmp/p1_c
 
 ---
 
-## Task 4: 收官（回归 + 自举 + 文档/台账）
+## Task 4: 收官（回归 + 自举 + 文档/清单）
 
 - [ ] **Step 1: 全量回归**（同 P0 Task 5 的 13 项清单 + `selftest-types`）
 - [ ] **Step 2: 两态零变化复验**（Task 2 Step 5 的命令，含 `check` 与 `build` 两条路径）
 - [ ] **Step 3: 自举链**（`corec2`→`corec3` `cmp` IDENTICAL + N06=0 + 冒烟 rc=42）
-- [ ] **Step 4: 文档**：spec §9 P1 行标 ✅ + 落点；TODO 登记（影子模式开关的默认值与产物影响、差异清单的后续裁决归属）；台账
+- [ ] **Step 4: 文档**：spec §9 P1 行标 ✅ + 落点；TODO 登记（影子模式开关的默认值与产物影响、差异清单的后续裁决归属）；清单
 - [ ] **Step 4c: Task 3 评审遗留（4 Minor + 5 登记，随本步一并办）**：
   - **M1 文档精度**：`type-shadow-findings.md` TL;DR「71 个文件」→「67 有效（71 候选 − 4 排除）」；§3.1「不变式在全部 71 行成立」→「67 条摘要行」。**注意：工作副本里已有 2 行未提交修正（`jj diff` 可见）——先核其正确性，与其余修正一并提交**。
   - **M2**：report §1.1 / findings §1.1 / 源码注释的「前 6 字段前缀不变」→「**前 5 组 key=value**」（评审从 `28fed09` 的 `sh_report` 逐字比对）。
@@ -351,7 +351,7 @@ nice -n 19 ./build/corec check src/compiler/ccr_io.cr --type-shadow >> /tmp/p1_c
 - [ ] **Step 4b: 挂账清零**（按 Task 1/Task 2 评审实际状态更新）：
   - ~~① `build_selfhost_native.py:309` 注释更正~~ ——**已被 Task 2 提交完成，核销即可**（Task 2 评审 M2 提示勿重复劳动）
   - ② Task 1 评审「>1024 条目第二次重建无实测」——补一条守门用例或如实登记
-  - ③ **既有缺陷登记（最小复现已由 Task 2 评审更正）**：**函数体内嵌套 `fn` 声明 → 编译 rc=139**（min4/min6 同族；mini6 **无** `@inline`——原报告措辞有误）；崩点在 parse→checker 之间（日志止于 `[3/5] parse...`）；**两版编译器均复现**（非影子层引入）→ TODO #2026-09-10-12
+  - ③ **既有缺陷登记（最小复现已由 Task 2 评审更正）**：**函数体内嵌套 `fn` 声明 → 编译 rc=139**（min4/min6 同族；mini6 **无** `@inline`——原报告措辞有误）；崩点在 parse→checker 之间（日志止于 `[3/5] parse...`）；**两版编译器均复现**（非并行的对照实现引入）→ TODO #2026-09-10-12
   - ④ **Task 2 评审 M3**：`src/compiler/type_terms.cr:73` 头注「corearch/corelsp 不受影响」半句陈旧（corelsp 自 Task 2 起必须链接引擎层）→ 更正
   - ⑤ Task 2 评审 M5：站点 4 因 `res_call_type` 无 `EXPR_ARRAY`/tuple 分支将**恒 agree** → Task 3 findings 中不得据「站点 4 零差异」判该面收敛（写入 findings 文档的限制说明）
 - [ ] **Step 5: 提交**（路径限定）

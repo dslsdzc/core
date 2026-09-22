@@ -20,7 +20,7 @@
 4. **无「类型系统」概念**：类型 = 图标注、接口 = 图上契约；文档只描写「类型标注语法」，不设类型系统章、不使用「类型系统」表述。
 5. **要点解释标准**：设计要点与语义解释以格形态为标准框架（三层映射：图 `.cir` = 关系空间 / 格 `.ccr` = 存在空间 / 编码 = hw-map 领域；语义保鲜 = 格全量承载类型/语义信息；正确性对全部可能执行成立），不用 CFG/编译器视角。
 6. **风格**：参考手册式为主，教程式为辅。每个语法构造 = 语法形式 + 说明 + 示例。
-7. **真源原则**：关键字表以 `src/compiler/lexer.cr lookup_keyword()` 为准；优先级与语法形式以 `grammar/core.ebnf` 为准；冲突时 lexer.cr / parser.cr 优先于 EBNF。
+7. **出处原则**：关键字表以 `src/compiler/lexer.cr lookup_keyword()` 为准；优先级与语法形式以 `grammar/core.ebnf` 为准；冲突时 lexer.cr / parser.cr 优先于 EBNF。
 8. **变更范围**：仅改 `docs/language-syntax.md` 一个文件。grammar/*.ebnf、源码、其他文档不动。
 9. **提交**：全部用 `jj`（`jj commit -m "..." <path>`）。会话开始前已有未跟踪文件 `logs_90275072099.zip`，任何提交不得包含它。
 

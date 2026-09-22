@@ -1,6 +1,6 @@
 # 新维护者入门手册（onboarding）
 
-> 定位：受众 = maintainers；状态 = active；真源 = 源码 + [CLAUDE.md](../../CLAUDE.md)（实现与文档冲突时以源码为准，既有惯例）。
+> 定位：受众 = maintainers；状态 = active；出处 = 源码 + [CLAUDE.md](../../CLAUDE.md)（实现与文档冲突时以源码为准，既有惯例）。
 > 文档导航见 [docs/README.md](../README.md)（分类规则：主题 × 读者 × 状态）。本文档聚焦仓库结构、构建、工作流与雷区。
 
 ## 一、仓库地图
@@ -54,7 +54,7 @@ tests/                → 三套：
   selfhost/*.py       → 自举/后端/原生回归：test_compile / test_backend_bootstrap / test_borrow /
                         test_impl / test_pointer_safety 等
   suite/*.cr          → 集成用例源码，经 ./build/corec 运行
-grammar/              → 语言语法 EBNF：core.ebnf（全语言 = 唯一真源）/ tokens.ebnf（词法）；
+grammar/              → 语言语法 EBNF：core.ebnf（全语言只以它为准）/ tokens.ebnf（词法）；
                         corespec.ebnf = **已退役**（2026-09-06，ADR-0001）——规约语法并入 core.ebnf 属
                         **迁移事项**（尚未并入，见 TODO「规约语法并入 .cr」）⇒ **勿引**（2026-09-16 文档审计修订）
 docs/                 → 文档分类树（language 用户向 / design 定稿 / proposals 提案 / archive 归档 /
