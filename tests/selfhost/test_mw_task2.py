@@ -133,7 +133,7 @@ def x86_insn_len(buf, i):
 
     def need(k, what):
         if i + k > n:
-            raise InsnDecodeError(f"@{start}: {what} 越界（opcode {op:#2026-09-09-1x}）")
+            raise InsnDecodeError(f"@{start}: {what} 越界（opcode {op:#04x}）")
 
     if op == 0x0F:
         need(1, "第二字节")
@@ -204,7 +204,7 @@ def x86_insn_len(buf, i):
         need(1, "modrm")
         i, _ = _modrm_end(buf, i)
         return i - start, False
-    raise InsnDecodeError(f"@{start}: 未登记的 opcode {op:#2026-09-09-1x}")
+    raise InsnDecodeError(f"@{start}: 未登记的 opcode {op:#04x}")
 
 
 def x86_walk(buf, base=0):
@@ -259,6 +259,42 @@ SRCS = {
 SRCS["t3_bigfunc"] = ("fn main() -> int {\n    x : ., mut = 0;\n"
                       + "\n".join("    x = x + 1;" for _ in range(250))
                       + "\n    return x;\n}\n")
+
+
+def _selftest_failclosed_paths():
+    """fail-closed 自检：**未登记 opcode 的两条 raise 路径必须抛 InsnDecodeError，
+    且不得抛 ValueError。**
+
+    缘起（2026-09-23 实测；**非本档引入的缺陷，但本档承受它**）：TODO 标识迁移
+    （#94，`#NN` → `#YYYY-MM-DD-N`）把本档两处 `{op:#04x}` 误改写成
+    `{op:#2026-09-09-1x}` ⇒ 构造异常消息时抛 `ValueError: Invalid format specifier`
+    ⇒ `InsnDecodeError` 根本没被构造出来、调用方 `except InsnDecodeError` 接不住
+    ⇒ **判据从「带诊断的红」退化成「未捕获崩溃」**。
+
+    为什么必须主动走：格式串**只在未登记形态下才被求值** ⇒ 该损坏是**休眠**的，
+    正常跑不触发、套件照常绿。所以判据不能是「跑一遍看红不红」，必须**主动扫过
+    全部 opcode** 把那两条 raise 路径走到。两个命中计数是**空转守卫**：=0 ⇒
+    探针没走到路径 ⇒ 判红（判据空转比判据缺失更危险）。
+
+    返回 (ok, detail)。
+    """
+    hits = {}
+    for label, bufs in (("单字节", [bytes([op]) for op in range(256)]),
+                        ("0F 双字节", [bytes([0x0F, op2]) for op2 in range(256)])):
+        cnt = 0
+        for b in bufs:
+            try:
+                x86_insn_len(b, 0)
+            except InsnDecodeError as e:
+                if "未登记" in str(e):
+                    cnt += 1
+            except ValueError as e:
+                return False, (f"{label} {b.hex()}: 抛了 ValueError（{e}）——"
+                               f"raise 行的消息格式化坏了（`#04x` 被改写过？）")
+        hits[label] = cnt
+    if any(v == 0 for v in hits.values()):
+        return False, f"探针空转：未走到 raise 路径 {hits}（判据空转 ⇒ 判红）"
+    return True, f"两条 fail-closed raise 路径均抛 InsnDecodeError（命中 {hits}）"
 
 
 def jo_sites_oracle(funcs, var_types):
@@ -506,6 +542,11 @@ def main() -> int:
     ap.add_argument("--allow-skip", action="store_true",
                     help="基线缺失时降级为 [SKIP]（默认 **FAIL**——见文件头 A5 修复注）")
     args = ap.parse_args()
+    # fail-closed 自检先行（不依赖 build/ ——纯解码器面）
+    _sok, _sdetail = _selftest_failclosed_paths()
+    print(f"[{'PASS' if _sok else 'FAIL'}] fail-closed raise 路径: {_sdetail}")
+    if not _sok:
+        return 1
     if not COREC.exists():
         print("build/corec missing; run build_selfhost_native.py")
         return 1
