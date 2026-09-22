@@ -3304,6 +3304,26 @@ fn ir_gen_func(fi: int) {
         // 按 GP 读 = 垃圾值 + 双路径分歧）。槽型按**声明面节点**定 = `TI_DEX_S`（GP 类，
         // 与调用点转换后的实参一致）。
         else if dex_opt_type_node(ast_data(pn)) != 0 { param_type = TI_DEX_S; }
+        // ── S4 形参半（2026-09-21）：`&T` 形参槽型按**声明面节点**定（照上行 `dex?` 先例同形）──
+        // **背景（预存缺陷）**：`ast_type_val(pn)` 对 `&T` = **0**（`EXPR_REFTYPE` 节点未填写类型索引；
+        //   上面 `if param_type < 0` 护栏拦不住 0）⇒ 槽型退化成 `TI_INT` ⇒ **REF 身份在 IR 形参定型处丢失**
+        //   ⇒ `r.f` 在 `EXPR_FIELD` 看不到 REF ⇒ **静默错值**（实测 `fn f(r: &S){r.v}` 得 **8** 而非 42；
+        //   pre/post 两代同值 ⇒ 存在早于裁定二）。
+        // **只查不建**：`checker` 解析签名时**已**为该 `&T` 建过 REF 行（实测类型表中存在 `kind 3`）
+        //   ⇒ 线性查找即可 ⇒ **零新增类型行**。⚠ `alloc_type` 是**裸分配器、不去重**（`checker.cr:10` 注）
+        //   ⇒ 若在此另分配一行，会写进 TYPE 段 ⇒ 动产物字节 ⇒ 那正是本笔要避免的。
+        else if ast_kind(ast_data(pn)) == EXPR_REFTYPE {
+            rinner := ti_from_type_expr(ast_a(ast_data(pn)));
+            rmf := ast_int_val(ast_data(pn));
+            ri : ., mut = 0;
+            loop { if ri >= g_type_count { break; }
+                if get_type_kind(ri) == TYP_REF && get_type_data(ri) == rinner && get_type_extra(ri) == rmf {
+                    param_type = ri;
+                    break;
+                }
+                ri = ri + 1;
+            }
+        }
         pvar := new_ir_var(pname, param_type);
         // Bind param name
         bind_local(pname_idx, pvar);
