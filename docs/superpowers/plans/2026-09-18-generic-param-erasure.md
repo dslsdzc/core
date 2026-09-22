@@ -477,7 +477,7 @@ A1 让实例形参链具体化后，该第二遍的门（`ast_type_val(cpn) == T
 | CI `check` / `bootstrap-tests` / `selfhost-tests` / `suite` | **rc=0 / 0 / 0 / 0**（suite = ALL PASS） |
 | CI `full-bootstrap` | 见报告（corec2 == corec3 判定） |
 | canary（`canary_check.sh`，重锁后） | **5/5 PASS** |
-| `probes_run.sh`（29 档 + 暖态腿） | **FAIL=0**（暖态真命中 15 档） |
+| `probes_run.sh`（29 档 + 暖态判据） | **FAIL=0**（暖态真命中 15 档） |
 | 新套件 | C1–C7 **ALL PASS** |
 
 ### 11.7 遗留 / 未覆盖面（本批**不修**，各自登记）

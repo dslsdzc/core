@@ -61,7 +61,7 @@
 | #35 | 枚举/结构体写入侧无护栏（≥17 越界写） | T0 守门复验实跑：17 变体 ⇒ `error[P22]` rc=1 无产物；17 字段 ⇒ `error[P23]`；`test_enum_limit.py` 13/13（P4 T6；**容量批 E-3 起三 MAX_* 退役**） |
 | #40 | TF01 收尾（`lits_copy` 洗白 + `ty_memo_slot_no_grow` 误报） | `checker.cr:728` `stmt_cannot_fall_through` 在位 + `check src/compiler` rc=0（T0 实测） |
 | #55 | TC02 `if` 分支发散豁免 | `checker.cr:759` `stmt_diverges` 在位 + `test_tc02_branch.py` 挂 CI（15/15） |
-| #60 (+#63) | 安全面诊断随 `.cir` 暖缓存**静默消失**（冷 rc=1 → 暖 rc=0 + 出 ELF） | `main.cr:564` `tc0 := g_type_count` 见证 + `:570` `if g_type_count == tc0 { save_cir_cache(…) }` 在位；`test_warm_cache_gate.py` 挂 CI；T3 暖态腿入仓（`tools/baseline/warm_leg.sh`） |
+| #60 (+#63) | 安全面诊断随 `.cir` 暖缓存**静默消失**（冷 rc=1 → 暖 rc=0 + 出 ELF） | `main.cr:564` `tc0 := g_type_count` 见证 + `:570` `if g_type_count == tc0 { save_cir_cache(…) }` 在位；`test_warm_cache_gate.py` 挂 CI；T3 暖态判据入仓（`tools/baseline/warm_leg.sh`） |
 
 ### 1.4 落地登记 / 非缺陷（28 条；维持，不构成待修项）
 

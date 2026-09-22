@@ -29,7 +29,7 @@
 | canary ELF | `95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475` **28822B** IDENTICAL | ✅ |
 | `.ccr` 四条 | `pa_ccr 680a6f98…` 96015 · `pa_static_ccr 76f36e6a…` 96158 · `gt_ccr d92a2727…` 142765 · `gt_static_ccr a1f7b99c…` 142908 —— 全 IDENTICAL | ✅ |
 | 五 CI job | check / bootstrap-tests / selfhost-tests / suite / full-bootstrap = **全 rc=0** | ✅ |
-| 判定面回归网 | 腿① 本批隔离 **零差异**（75 档）· 探针 29 本批隔离 **零差异** · 暖态腿两侧 FAIL=0（见 §5bis） | ✅ |
+| 判定面回归网 | 腿① 本批隔离 **零差异**（75 档）· 探针 29 本批隔离 **零差异** · 暖态判据两侧 FAIL=0（见 §5bis） | ✅ |
 | 自举链 | `corec2 == corec3` **IDENTICAL**（`c0f1cbf528c066db860428830227a1e727daf2cedfac6b5590c0d637f13d8a5a`）· `[GUARD] build log clean（error[ = 0）` ×3（corec/corearch/corelsp）· 冒烟 42 | ✅ |
 | 类型引擎自测 / 自源 check | `selftest-types` **415/415** · `check src/compiler` rc=0 | ✅ |
 | apx 批套件（跨批核对） | **23 例 + 自证 + 双形对拍全绿**（标记值重锁后无转红 = 无「真发现」） | ✅ |
@@ -120,7 +120,7 @@
 
 ---
 
-## §5bis 判定面回归网（腿① + 探针 29 + 暖态腿；**本批隔离约定**）
+## §5bis 判定面回归网（腿① + 探针 29 + 暖态判据；**本批隔离约定**）
 
 > **约定说明（为何要「本批隔离」）**：冻结基线 = pinned `97f4394f`（**P6 终态**，2026-09-14）。任何 P6 之后的批用「冻结基线 × 当前源 vs 当前二进制 × 当前源」都会看到**自 pin 起各批累积的**判定面演进，**不是本批的**。⇒ 本批另加一条隔离判据：**改前二进制**（`/tmp/optdex-pre/corec`，= 起点树 `dbadb8d649ba` 构建，sha `899e3090ad8d…`）**vs 改后二进制**（`c0f1cbf5…` 之构建）。
 
@@ -130,8 +130,8 @@
 | ①-B 冻结基线对照（累积面） | `parity_run.sh /tmp/optdex-baseline/corec /tmp/parity_frozen` vs post；`diff -rq` | 11 档不同（`t3` 后端/OS/格式/格核 9 档 + `t4` hotpatch 1 档 + …） | ✅ 归因为**自 pin 起的累积演进**（由 ①-A 零差异反证非本批）——**逐条不入本批清单**，按本仓惯例归「冻结基线与当前树的历史差」 |
 | **探针 29-A 本批隔离（决定性）** | `probes_run.sh /tmp/optdex-pre/corec /tmp/probes_pre` vs `… ./build/corec /tmp/probes_post`；冷态 `diff` | **0 处冷态日志差异**（29 档） | ✅ **本批对探针面零变化** |
 | 探针 29-B 冻结基线对照 | `probes_base` vs `probes_post` | **1 档**：`n05_recursive.cr` 多一行 `[5/5] frontend done`（新编译器打印流程行） | ✅ 累积/日志面差异（非语义），由 29-A 反证非本批 |
-| 暖态腿（广度层） | `warm_leg.sh`（由 runner 内嵌调用） | **pre 侧 DONE：75 档 · 真命中档数 39 · FAIL=0**；**post 侧 DONE：75 档 · 38 · FAIL=0**；探针侧 23 / 15 · FAIL=0 | ✅ 两侧自判均 FAIL=0；档数差（39↔38 · 23↔15）= **缓存命中计数**（`stats.tsv` 的 hits 列），非语义（warm 日志差异实测 = 临时目录名 + 命中计数） |
-| 暖态腿（冻结基线侧） | 同上 | **运行中卡死（21:30 elapsed / CPU 0.0% / I/O 冻结）⇒ 按卡死规则杀死** | ⚠ **如实登记：该侧判定行「WARM LEG FAILED」是「被 kill」的产物，不是检测到冷/暖分歧**（不得读成分歧） |
+| 暖态判据（广度层） | `warm_leg.sh`（由 runner 内嵌调用） | **pre 侧 DONE：75 档 · 真命中档数 39 · FAIL=0**；**post 侧 DONE：75 档 · 38 · FAIL=0**；探针侧 23 / 15 · FAIL=0 | ✅ 两侧自判均 FAIL=0；档数差（39↔38 · 23↔15）= **缓存命中计数**（`stats.tsv` 的 hits 列），非语义（warm 日志差异实测 = 临时目录名 + 命中计数） |
+| 暖态判据（冻结基线侧） | 同上 | **运行中卡死（21:30 elapsed / CPU 0.0% / I/O 冻结）⇒ 按卡死规则杀死** | ⚠ **如实登记：该侧判定行「WARM LEG FAILED」是「被 kill」的产物，不是检测到冷/暖分歧**（不得读成分歧） |
 
 **冻结基线可复现性复核**：`rebuild.sh` 重跑 ⇒ 三 sha 与白名单逐条同（`corec ae01de75…` · `corearch 228f82e9…` · `corelsp 90eb19c6…`）+ 冒烟 42 ⇒ 配方可复现 ✓。
 **runner 计数同步**：本批新增 suite 语料 ⇒ `parity_run.sh` 硬失败报「CORPUS COUNT 75 != 74」⇒ 已显式更新 `CORPUS_TOTAL=75` + 层清单注（t1 33→34）后重跑通过（该硬失败本身即「语料构成不得静默漂移」的正据）。

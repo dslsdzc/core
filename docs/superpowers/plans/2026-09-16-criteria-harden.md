@@ -50,7 +50,7 @@ M1 #84（角色换向/opcode 尾加 1B/rm_mode）· M2 #86（1 / 0xFE / 0xFFFFFF
 | 判据 | 结果 |
 |---|---|
 | ELF canary + `.ccr` **四条** | **5/5 PASS**（值源 `tools/baseline/canary_values.tsv`）：`95084e7b…d475`(28822B) · `680a6f98…cd7a`(96015) · `76f36e6a…f329c`(96158) · `d92a2727…2c95`(142765) · `a1f7b99c…82ea`(142908) |
-| 腿① 冻结基线同源对拍 | **冷态（`check` 面）73 档日志 + `parity.out` 逐档 `diff -rq` 空 = 零差异**（冻结基线 = `/tmp/apx-t1/baseline/corec`，sha 与 REBUILD 白名单 `ae01de75…` 一致）。**暖广度腿备注**：`stats.tsv` 有 2/73 档差异（`at_test_mini.cr` build 面 rc 0→1 + 条目 17→0；`global_seam_test.cr` 条目 16→15）——均为**跨批 delta（PINNED `97f4394f` → 本基点 `f7798197`）**，非本批所致（本批零编译器输入 diff）；其中 N06 build 面阻断正是 FC 批裁-FC-1(A) 的**显式登记**变更（`docs/superpowers/plans/2026-09-15-fail-closed-diagnostics.md:117`） |
+| 腿① 冻结基线同源对拍 | **冷态（`check` 面）73 档日志 + `parity.out` 逐档 `diff -rq` 空 = 零差异**（冻结基线 = `/tmp/apx-t1/baseline/corec`，sha 与 REBUILD 白名单 `ae01de75…` 一致）。**暖广度判据备注**：`stats.tsv` 有 2/73 档差异（`at_test_mini.cr` build 面 rc 0→1 + 条目 17→0；`global_seam_test.cr` 条目 16→15）——均为**跨批 delta（PINNED `97f4394f` → 本基点 `f7798197`）**，非本批所致（本批零编译器输入 diff）；其中 N06 build 面阻断正是 FC 批裁-FC-1(A) 的**显式登记**变更（`docs/superpowers/plans/2026-09-15-fail-closed-diagnostics.md:117`） |
 | 行为探针 | **29 档 · FAIL=0**（暖态生效 ≥1 真命中 = 15 档） |
 | `selftest-types` | **415/415** |
 | 五 CI job（`check` / `bootstrap-tests` / `selfhost-tests` / `suite` / `full-bootstrap`） | **全部 rc=0**（31s / 4s / 142s / 29s / 237s）——新挂 6 档在 job 日志内逐档留痕；`full-bootstrap` 含 `cmp corec2 corec3`（静默 = 逐字节同）+ `corec3 --help` |

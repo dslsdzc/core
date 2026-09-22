@@ -112,7 +112,7 @@
 |---|---|---|
 | **腿① 冻结基线同源对拍** | **74 档**（硬断言 `CORPUS_TOTAL=74`） | `tools/baseline/parity_run.sh:31`；分层**实测** = t1 `tests/suite/*.cr` **34** + t2 **2** + t3 **15** + t4 `src/stdlib/*.cr` **19** + t5 `examples/*.cr` **4** = 74 |
 | 腿② 行为探针 | **29 档**（硬断言 `PROBE_TOTAL=29`）+ `probes/warm/` **7 档**（另一层） | `tools/baseline/probes_run.sh:29` / `tests/probes/README.md` |
-| 腿③ 暖态腿 | 牙齿层 7 档 + 广度层随两 runner 附带 | `tools/baseline/warm_leg.sh` / `REBUILD.md:64-96` |
+| 腿③ 暖态判据 | 牙齿层 7 档 + 广度层随两 runner 附带 | `tools/baseline/warm_leg.sh` / `REBUILD.md:64-96` |
 | **canary 五条 = 单一依据** | ELF `95084e7b…d475`（**28822B**）· `pa_ccr 680a6f98…`（96015）· `pa_static_ccr 76f36e6a…`（96158）· `gt_ccr d92a2727…`（142765）· `gt_static_ccr a1f7b99c…`（142908） | `tools/baseline/canary_values.tsv`（末 5 行数据行；闸门 = `canary_check.sh`，fail-closed F1-F4） |
 | 五 CI job | `check` / `bootstrap-tests` / `selfhost-tests` / `suite` / `full-bootstrap` | `src/ci/run.sh:61 / :67 / :98 / :199 / :204` |
 | 套件面计数 | selfhost **59** · bootstrap **7** · harness **5** · run.sh 可执行挂点 **50** | 本计划现场 `ls` / `grep -c "^    python3 " src/ci/run.sh` |
