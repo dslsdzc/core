@@ -4,6 +4,8 @@
 > ③ 能推/不能推分类表 ④ 表示方案裁决）的**形式化展开 + 仓库锚定**。原文逐字件 = `/tmp/briefs/fnvalue-raw.md`
 > （**未入库**，本档不复制其全文；引用处标注「原文」）。文末「附」的批次切分与三件已确认决定
 > 同样来自该件（team-lead 转述、维护者确认）。
+> **2026-09-23 追加（维护者）**：**不变量 5**（不新增第二种函数类型；异步/协程面全自动推导）+ 其
+> **必须保留的边界**（「产生新的并发执行关系」是程序语义，不许与 realization 合并）——落 §〇 5 / §4.1 D13–D24 / §4.2 / §4.3。
 >
 > **本文不做的事**：不实现、不改任何既有文件、不提 PR。
 > **三态标注**：`[已实现]`（在 `develop@origin` 上 file:line 实核）· `[已设计未实现]`（有裁决/设计文档、零实现）·
@@ -18,7 +20,8 @@
 
 ## 〇、不变量（**放最显眼处；四段全部受其约束**）
 
-四条来自块四裁决。**任何实现者若发现某段设计与本节冲突，停下来上报，不得就地改动这四条。**
+**不变量 1–4** 来自块四裁决；**不变量 5** 为 2026-09-23 维护者追加（异步/协程收缩 + 其边界）。
+**任何实现者若发现某段设计与本节冲突，停下来上报，不得就地改动这五条。**
 
 ### 不变量 1 — `fn(T...) -> R` 是**统一 callable 类型**
 
@@ -82,6 +85,50 @@
 > 并：块三的**乙不合适**（同一个 `fn(T)->R` 会出现两种 runtime representation）、**丙不合适**
 > （把环境依赖藏到调用点之外，生命周期与并发都会变麻烦）——**甲 = 语义统一 callable；CPU realization 暂用 `(code, env)`**。
 
+### 不变量 5 — **不新增「第二种函数类型」：异步/协程面全部自动推导**
+（2026-09-23 维护者追加；**与不变量 1 同侧**：函数类型**仍然只有** `fn(T...) -> R`）
+
+**明确不加**（7 名，逐条理由见 §4.3）：`flow fn(...) -> ...`（**类型位**）· `async fn` · `Future[T]` ·
+`Coroutine[T]` · `GeneratorState` · `Suspend` · `FnAsync`。
+
+**理由（原文）**：`fn(...) -> Future<Data>` / `async fn` / `await` 这类东西**很多是在暴露某种实现模型**——
+与 Core 的取向相反。
+
+**编译器自动推导的是**（12 项，落 §4.1 的 D13–D24）：是否可能 suspend · suspend point 在哪 · 是否需要
+coroutine frame · frame 保存哪些状态 · frame 生命周期/region · 是否 escape · 何时 resume ·
+是否可直接同步执行 · 能否消除 suspend/resume · 调用是否需要 scheduler · continuation 如何形成 ·
+stackful/stackless 或其他 realization。
+
+#### ⚠ 5.1 **必须保留的边界（不可与上条合并）**
+
+> **原文**：**异步 realization 可以自动推导；程序是否要求「产生新的并发执行关系」，是另一回事。**
+> 「`a(); b();` 能不能自动并行，**可由 dependency / state relation 判断并优化**；但如果某种语法
+> **明确表示『我要产生一个独立并发任务并获得其生命周期/结果』**，那是**程序语义**，不只是 coroutine
+> 实现细节。**现有 `go` 如果承担的是这个意义，就和『async/await 要不要暴露』是两件事**——两件都要
+> 保留各自的判断，**不许合并**。」
+
+**⇒ 操作化（写手展开）**：
+
+| 问题 | 归属 | 判定者 |
+|---|---|---|
+| 「能否 suspend / frame 怎么放 / resume 何时发生 / 能否消除」 | **realization** ⇒ 自动推导，**不产生新语法、不进类型** | 编译器（不变量 5 主体）|
+| 「`a(); b();` 能否自动并行」 | **优化** ⇒ 由 dependency / state relation 判断 | 编译器（与上同侧）|
+| 「我要**产生一个独立并发任务**并拿到它的**生命周期/结果**」 | **程序语义** ⇒ 是语言表面，**不得**降级成 realization 细节 | 用户意图（**不猜**）|
+| 现有 `go` 属于哪一栏 | **既有表面的归属判定** | **维护者**（本档**不替**其合并，见下）|
+
+**现状锚点（`[已实现]`）**：`go f(a)` 今日的 lowering = `IR_CALL sched_go(@addr(f), arg)`
+（`src/compiler/ir_gen.cr:1921` + `:1933-1934`）；`sched_go` 建 G + 1 元素 result channel
+（`src/stdlib/sched.cr:171`）；range-go 另发 `IR_SPAWN`。**不变量④已定**：并发接口的演进**不得反向决定**
+函数值的类型模型 ⇒ 与本条同侧，**两处判断各自保留**。
+
+#### 5.2 与块三总原则的关系（**同一条，原文要求并排**）
+
+> **块三原文**：「由现有关系唯一确定的，自动推导；涉及用户意图选择的，不猜。」
+>
+> **不变量 5 是这句话的又一次应用**：异步面的全部属性都是「由现有关系（调用图 / 状态依赖 / region /
+> scheduler 绑定）唯一确定的」⇒ 自动推导；而「是否产生新的并发执行关系」是**用户意图选择** ⇒ 不猜、
+> 必须由语法表达。**两条并排读，不得只留一条**。
+
 ---
 
 ## 一、现状锚点（**全部在 `develop@origin` 上实核**）
@@ -142,7 +189,7 @@
 |---|---|---|---|---|
 | D-1 | `2026-09-20-safety-verification-plan.md:88`、`:276` 引「`checker.cr:4180` 注明 function address, type int」 | `:4180` | `:4189-4191`（`:4180` 现为**空行**）| +9 行号漂移 |
 | D-2 | 同件 `:88` 引「`ir_gen.cr:2133`」 | `:2133` | `:2144-2149` | +11 行号漂移 |
-| D-3 | `2026-09-17-concurrency-model-design.md:390`、`:427` 引 go lowering「`ir_gen.cr:1672-1673` / `:1697`」 | `:1672`/`:1697` | `sched_go` 调用 = `:1933-1934`；`IR_FNADDR` = `:1921` | +261 / +236 行号漂移 |
+| D-3 | `2026-09-17-concurrency-model-design.md:390`、`:427` 引 go lowering「`ir_gen.cr:1672-1673` / `:1697`」；`:400` 引「`ast.cr:546-548`」 | `:1672`/`:1697`/`ast.cr:546` | `sched_go` 调用 = **`:1933-1934`**；`IR_FNADDR` = **`:1921`**；range-go 的 `IR_SPAWN` = **`:1958`**；`IR_SPAWN=27`/`IR_YIELD=28`/`IR_AWAIT=29` = **`ast.cr:582-584`** | +261 / +261 / +36 行号漂移 |
 | D-4 | 多份文档引 `df_connect_state` 在 `dataflow.cr:146`（如 `2026-09-11-merge-semantics-design.md:101`）| `:146` | **`:156`** | +10 行号漂移 |
 | D-5 | `src/compiler/diag.cr:184`、`:188` 的豁免理由：「`EC_TF_ARG_TYPE` **全仓唯一 raise 点**在 `@raw_int` 内建位（**`checker.cr:3727`**）」| 唯一 / `:3727` | raise 点 = **3 处**：`checker.cr:4265`（`@raw_int`）· `:4334`（`@ptr_of`）· `:4340`（`@str_of`）；`:3727` 现为 `EXPR_FIELD` 分支 | **计数 + 行号双漂移**；且该条目在 `diag.cr` 内**文本重复两条**（`:186` 与 `:190` 全同）|
 | D-6 | `tools/baseline/canary_values.tsv` 头注：「**不得** unset 或置空 `HOME`——`module.cr:526` 有硬编码 `/home/DslsDZC` 兜底」| 「有硬编码兜底」 | **该兜底已被移除**（第 4 批 #83）：`src/compiler/module.cr:557-566` 原文「**不再**兜底到硬编码家目录 … 字面已从源码移除，判据 J4 要求 `src/` 内该串零命中 ⇒ 此处亦不得回引」；现路径读取**以 `HOME` 非空为前提**（`:568-575` 嵌套 if）| **机制已变**（纪律本身见 §8.2 第 5 条）|
@@ -221,6 +268,29 @@ Primary += LambdaExpr
 | 与 `CallOrField` 的关系 | 块二原文用例 `f: fn(int) -> int` · `[fn(int) -> int]` · `(fn(int) -> int, int)` 均落在 `Type` 位 ⇒ 不经过 `CallOrField` |
 | `LambdaParam` 的 `[: Type]` | 「可选类型」= 由 expected type 推导（块一）⇒ **推导失败即新诊断码**（§七），**不得**退化成 `auto`/`dyn` |
 | `LambdaExpr` 的块形 `'->' Type Block` | 与 `FunctionDecl` 的 `'->' Type FunctionBody`（`:12-14`）同形；块 lambda **本体是 `Block`**，`{` 一出现即与表达式形（`=>`）分派 |
+
+### 2.4 `flow` 的撞名分离（**三义**；不变量 5 的直接前置）
+
+> **为什么单列**：不变量 5 否决了一个名为 `flow fn(...)` 的候选，而本仓**已经有 `flow`**。
+> 若不分开写明，读者会以为 `flow` 这个词被动了。
+
+| 义 | 是什么 | 现状（`develop@origin` 实核）| 本次收缩的影响 |
+|---|---|---|---|
+| **① region 种类** | 数据流图里的 region kind `SG_FLOW` | `src/compiler/dataflow.cr:533`（DOT 名 = `"flow"`）；种类常量族 = `src/compiler/dyn_arr.cr:155-159`（`SG_LOOP=1`/`SG_FOR=2`/**`SG_FLOW=3`**/`SG_UNSAFE=4`/`SG_IF=5`）| **不在收缩范围**（既有、不动）|
+| **② 声明前缀** | `flow` 作**顶层声明**关键字 | ① 文法：`FlowDecl = 'flow' IDENT [GenericParams] '(' [ParamList] ')' '->' Type {Annotation} (FunctionBody \| '=' Expr ';')`（`grammar/core.ebnf:22-24`），且在 `TopLevelDecl`（`:9`）；② **parser 另接受 `flow fn name()` 拼写**（`src/compiler/parser.cr:1726-1748`，注释原文「F5c：`flow fn name()` 语法」，`is_flow` 置位后由 checker 按 body 内 `yield` 处理——`src/compiler/checker.cr:2310-2313`）；③ 关键字 = `T_FLOW : int = 66`（`src/compiler/ast.cr:70`）· `lexer.cr:94` | **不在收缩范围**。⚠ **`flow fn name(...) -> R { … }` 是既有声明，不得读成「被取消」**；被否决的只是**它在类型位**的用法 |
+| **③ 函数类型前缀** | 类型位上的 `flow fn(T) -> R` | **今日零实现**：`parse_type()`（`src/compiler/parser.cr:41`）的分支只有 `[` / `(` / `&` / `*` / …，**无 `T_FN` 也无 `T_FLOW` 分支** | **本次收缩 = 否决该候选**（它从未存在过 ⇒ 这条收缩是**对未来候选的否决**，不是移除既有能力）|
+
+**三条结论**：
+
+1. **块二的「最小语法增量」不变**——本来只有那三个产生式（`FunctionType`/`FunctionRef`/`LambdaExpr`），
+   收缩**不增不减**（不变量 5 的 7 个「不加」项**从未进入**该增量）。
+2. **`flow` 的 ①② 义与本轮正交**：它们属**声明面/图面**，不是类型面。
+3. ⚠ **`yield` 面的既存事实（须与实现者对齐，见 §十 T-10）**：`yield` 已是关键字（`T_YIELD : int = 67`，
+   `ast.cr:71`；`lexer.cr:95`），`IR_YIELD = 28`（`ast.cr:583`，注释「emit value from flow to consumer
+   channel」）在 `ir_gen.cr:2878` 发射；但后端与解释器都是**近似/空操作**（`src/arch/x86_64/sizes.cr:77`
+   原文「no-op (for now)」⇒ 尺寸 **0**；`interp.cr:385`「eager 值传递近似」）；语料
+   `tests/test_flow.cr`（`flow counter()` + `yield` + `go counter();`）**在 `tests/` 根、未被任何
+   runner 引用**（已 grep：仅一份报告提到它）⇒ 属**半实现表面 + 无 CI 挂点**。
 
 ---
 
@@ -391,6 +461,22 @@ Primary += LambdaExpr
 | D11 | 泛型/约束唯一确定的部分 | 上下文能唯一确定就直接推，不要求重复写类型 | ①②③ |
 | D12 | 可调用性约束 | 由已有语义关系推出，不要求用户选 callable 类别 | ③ ④ |
 
+**D13–D24（异步/协程面，2026-09-23 追加）**——**全部自动推导、全部不产生新语法、全部不进函数类型**
+（不变量 5 主体）。原文列名逐条落档：
+
+| # | 自动推导项 | # | 自动推导项 |
+|---|---|---|---|
+| D13 | 是否可能 suspend | D19 | 是否 escape |
+| D14 | suspend point 在哪 | D20 | 何时 resume |
+| D15 | 是否需要 coroutine frame | D21 | 是否可直接同步执行 |
+| D16 | frame 保存哪些状态 | D22 | 能否消除 suspend/resume |
+| D17 | frame 生命周期 / region | D23 | 调用是否需要 scheduler |
+| D18 | continuation 如何形成 | D24 | stackful / stackless 或其他 realization |
+
+> ⚠ **与不变量 5.1 的边界**：D13–D24 是 **realization 面**；「是否**产生新的并发执行关系**」
+> **不在此表内**（它是程序语义 ⇒ 由语法表达、由用户意图决定，见 §〇 5.1）。
+> 也正因如此，`go` 的归属**不得**由本表推出。
+
 ### 4.2 分类表（块三 —— **全表落档**）
 
 | 项目 | 能否自动推导 | 结论 |
@@ -404,6 +490,7 @@ Primary += LambdaExpr
 | 复杂 capture list | ✅ | capture 集合、方式、生命周期等都可以自动分析 |
 | Operator sections | ❌ | 纯语法糖，用户意图不能从普通表达式自动猜 |
 | 专门函数组合语法 | ❌ | 也是语法糖，不是可推导属性 |
+| **异步/协程 realization** | ✅ | （2026-09-23 追加，原文）**可从调用图 / 状态依赖 / region / scheduler 绑定唯一推出** ⇒ **不进函数类型**（不变量 5）|
 
 原文的压缩表（**逐字**）：
 
@@ -436,6 +523,22 @@ Primary += LambdaExpr
 | **Operator sections** | 原文：「纯语法糖，用户意图不能从普通表达式自动猜」 |
 | **专门函数组合语法** | 原文：「也是语法糖，不是可推导属性」 |
 | **Partial application**（半非目标） | 原文：「**以后视使用频率决定**」。原文并给了**明确的否决理由**：即便技术上做上下文转换（`f: fn(int)->int = add(1);` ⇒ `fn(x) => add(1, x)`），也「**不建议第一版这么干**」——会让 `add(1)` 同时意味着参数数量错误/partial application/某种 overload，增加隐式规则、反而提高学习成本 |
+
+### 4.4 「不新增第二种函数类型」的 7 个名字（2026-09-23 追加；**逐个列，各给一句为什么**）
+
+> **共同理由（原文）**：`fn(...) -> Future<Data>` / `async fn` / `await` 这类东西**很多是在暴露某种实现模型**
+> ——与 Core 的取向相反。**不加入 ≠ 没想到**：7 个名字都是**讨论中被点名否决**的，不是遗漏。
+> ⚠ **边界**：本表的否决**不触及** §2.4 的 `flow` ①②义（region kind / 声明前缀）——那是既有的。
+
+| # | 不加入的名字 | 一句为什么 |
+|---|---|---|
+| N1 | **`flow fn(...) -> ...`**（**类型位**）| 这就是「第二种函数类型」本体：同一个可调用体会有两个类型（`fn(T)->R` 与 `flow fn(T)->R`）⇒ 直接违反不变量 1「一个类型」。⚠ 与 §2.4 义② 的**声明** `flow fn name(...)` 是两件事 |
+| N2 | **`async fn`** | 同上（Rust/JS 形）：把「可能挂起」编码进**声明/类型** ⇒ 暴露实现模型；且会连锁要求 `await` 表面 |
+| N3 | **`Future[T]`** | 把「尚未完成的结果」提为**一等类型构造器** ⇒ 结果是用户必须显式 `await`/poll；而「何时 resume」本可由关系推导（D20）|
+| N4 | **`Coroutine[T]`** | 同上，且更重：把 coroutine frame 的**存在**变成类型的一部分；而 frame 是否需要、存什么状态本可自动定（D15/D16）|
+| N5 | **`GeneratorState`** | 把生成器的**内部状态机**摆到类型面上 ⇒ 直接暴露 realization；状态集应由编译器生成（照 D10「不暴露 closure object」的同侧纪律）|
+| N6 | **`Suspend`** | 把「挂起能力」做成**标记/类型**（≈ `Fn`/`FnMut`/`FnOnce` 的反面教材）：块一已裁定 callable 类别**自动推导**，挂起面同理（D13）|
+| N7 | **`FnAsync`** | 与 N6 同类，且是**第二套 callable 类别体系**的入口 ⇒ 违反块三「根本可以不建立第二套概念」（Callable trait 同判）|
 
 ---
 
@@ -580,6 +683,9 @@ Primary += LambdaExpr
 | R4 | `docs/superpowers/plans/2026-09-20-safety-verification-plan.md:88-90`（CFI 前置缺失）| 段④是其**前置载体** | 段④ 落地后回头更新该件 §1.3/§4（**另一批**；本档登记义务）|
 | R5 | `docs/superpowers/specs/2026-09-17-concurrency-model-design.md:390`、`:427`（`sched_go` 事实面）| **一致**（不变量④：并发接口自己的演进）| 无需改；其行号已漂移（§1.2）|
 | R6 | 解引用/视图/类型引擎诸批（`TYP_OPTIONAL`/`TYP_NULL` 先例）| **方法先例**：新增行 kind 的完整接线面 = AST 常量 + 建行点 + 双构造点桥接 + `iface_kind_of` + selftest 重定 + `.ccr` 足迹 | 照此清单逐项落 |
+| R7 | `flow` 作 **region kind** `SG_FLOW`（`dataflow.cr:533`）与作 **声明前缀** `FlowDecl`（`grammar/core.ebnf:22-24`；parser 另接受 `flow fn name()`，`parser.cr:1726-1748`）| **既有、与本轮正交**（不是类型面）| **不动**；但 §2.4 已写明「被否决的只是类型位」，防读者误读为 `flow` 被移除 |
+| R8 | `flow`/`yield` 的**半实现**状态（`IR_YIELD = 28` 发射于 `ir_gen.cr:2878`，但后端 `sizes.cr:77` = 0 字节 no-op、`interp.cr:385` = eager 近似；语料 `tests/test_flow.cr` **无 runner 引用**）| **先于本轮的既存面**；不变量 5 的收缩**不清理也不扩大**它 | 登记为**待裁 T-10 / 未核实 U-11**（本档不改其语义）|
+| R9 | `docs/superpowers/specs/2026-09-17-concurrency-model-design.md`（`go` 的 lowering 与事实面：单 M 协作、`sched_go` 只传 1 个 8 字节 arg、「今日无跨执行体值通道语义」）| 与不变量 5.1 的边界**同侧**（并发接口的判断独立保留，不许与 async/await 合并）| 无需改；引用为**边界依据** |
 
 ---
 
@@ -599,6 +705,8 @@ Primary += LambdaExpr
 | **T-7** | 段③逃逸判定的**落点 pass**：`region_check.cr` 能否承载「callable 值逃出外层栈帧」判定（其现状对象 = DEREF 目标在活子图）| **本档未核**（U-3）⇒ 需一次针对性复核后再定 | 段③ 判据面 |
 | **T-8** | `FunctionType` 的**结合性与组合规则**：`fn(int) -> fn(int) -> int` 结合方向；裸形 `fn(int) -> int?` 是否一律要求括号 | 建议：`->` **右结合**；组合（`?`/`[...]`/元组）**必须加括号**（与原文用例的写法一致）| 文法 + parser |
 | **T-9** | D8 静态化的**判据形态**：是否需要「强制动态」开关以证明「两态行为相同」 | 建议需要（否则 D8 无法被判据覆盖；只测一态无法区分「静态化正确」与「动态化正确」）| 段④ 判据 |
+| **T-10** | **`flow` 声明面在新体系下的类型身份**：`flow counter()` 的函数**类型**是什么？被 `fn.counter` 取用时（段②）得到什么类型？现状 `checker.cr:2310-2313` 对 flow 函数**跳过返回型检查**、`checker.cr:3443`「In a flow, the yield type is the flow's result type」⇒ 类型位语义**未定** | **本档不选**。可选：(甲) flow 函数的类型 = `fn(T...) -> R`（`R` = yield 型）⇒ 与不变量 1 一致，`fn.counter` 可用；(乙) flow 函数**不可**作 callable value（段② 拒绝 `fn.counter`）。**维护者裁**（与不变量 5.1 的「`go` 归属」相邻，但**是另一问**：那问是语义归属，这问是类型身份）| 段② + §2.4 义② |
+| **T-11** | `flow fn name(...)`（parser 接受）与 `flow name(...)`（grammar 形、语料实形）两种拼写的**规范形**：grammar `:22` 只写 `'flow' IDENT`；per-parser 两者皆通；语料只用后者 | 建议：**规范形 = `flow name(...)`**（与 grammar 一致）；`flow fn name(...)` 按本仓 fail-closed 纪律**要么升级为规范形并同时补 grammar，要么响亮拒绝**——**不得**保持「两者皆通而 grammar 只写一个」 | §2.4 义② + 文法一致性 |
 
 ---
 
@@ -618,6 +726,9 @@ Primary += LambdaExpr
 | **U-8** | 是否有**其它工作区/分支**已在做函数值（防撞车） | 本档只在自己的工作区核 `develop@origin` | `jj bookmark list --all-remotes` + 各工作区 `@` 的描述扫一遍 |
 | **U-9** | `@addr` 是否有**第三个**语义站点（除 `checker.cr:4190` / `ir_gen.cr:2144` 之外）| 已全仓 grep `"addr"` 字面量，命中 3 处（含 `ir_gen.cr:1831` 的 `&x` 路径变量命名，语义无关）⇒ 判定为 2 处语义站点 | 复核 `@raw_int`/`@ptr_of`/`@str_of` 家族是否有同类站点——**已核**：三者的 `TF07` raise 点 = `checker.cr:4265`/`:4334`/`:4340`（§1.2 D-5）|
 | **U-10** | §1.2 的七条陈旧陈述是否已有人登记（避免重复登记/撞车）| 本档只在 `develop@origin` 上核了**陈述本身**，未查 TODO.md / 各工作区是否已有同项登记 | 查 `TODO.md` 与各工作区 `@` 描述 |
+| **U-11** | `flow`/`yield` 的**实跑**状态（`tests/test_flow.cr` 是否 `check`/`build`/`run` 三面 rc=0；`go counter()` 是否真跑得动）| 零构建（U-1 同因）；且该语料**无 runner 引用**（已 grep：仅一份报告提到它）⇒ 现状 = **无 CI 挂点** | 构建后跑三面 + 记 rc/产物；若确认可用，**同批补挂点**（否则它是「不进门的语料」）|
+| **U-12** | 不变量 5.1 里「`a(); b();` 可由 dependency / state relation 判断并优化」的**实现面**：现状是否已有任何自动并行/合并的实现或判据 | 本档只核了 state 链的**分类表**（`checker.cr:4533-4546` + `dataflow.cr:156 df_connect_state`）与 merge-semantics 设计件，**未核实现**（不构建、不读全 `opt.cr`）| 读 `opt.cr`/`dataflow.cr` 的合并面 + `2026-09-11-merge-semantics-design.md` 的实现状态节 |
+| **U-13** | 「异步 realization 自动推导」的 12 项（D13–D24）需要哪些**前置载体**（scheduler 绑定 / continuation 表示 / frame 布局是否已有承载）| 本档未核（只核了 `IR_YIELD`/`IR_SPAWN`/`IR_AWAIT` 三个 opcode 的现状与 `sched_go` 接口）| 读 `2026-09-17-concurrency-model-design.md` 的「前置载体」节 + `src/stdlib/scheduler.cr` |
 
 ---
 
@@ -633,6 +744,8 @@ src/compiler/ast.cr:291-309 TYP_* 全表（5/6 空）  :284-288 占位先例注
 src/compiler/ast.cr:554-604 IR_* 号段（IR_CALL=4 :558 · IR_CALL_EXTERN=45 :598 ·
                             IR_FNADDR=48 :601 · IR_DYN_DISPATCH=44 :597 · IR_APPROX=51 :604）
 src/compiler/ast.cr:311-328 错误码族注释表（17 族）
+src/compiler/ast.cr:70-71    T_FLOW = 66 · T_YIELD = 67（flow/yield 关键字码）
+src/compiler/lexer.cr:94-95  "flow" / "yield" 关键字
 src/compiler/checker.cr:10-18   alloc_type（裸分配器）
 src/compiler/checker.cr:20-33   TYP_NAMED 建表去重先例
 src/compiler/checker.cr:231/248-260  init_types（8 原生行 + 1 占位行）
@@ -663,6 +776,14 @@ src/compiler/ccr_types.cr:9-14  TYPE 段体结构   :197/211-217 IFACE 原生条
 src/compiler/cir_cache.cr:135   CIR_CACHE_VER = 22
 src/compiler/module.cr:557-575  $HOME 索引读取（硬编码兜底已移除，见 §1.2 D-6）
 src/compiler/dataflow.cr:156    df_connect_state   :307/:402 use 面   :638-639 opcode→名
+src/compiler/dataflow.cr:533    SG_FLOW → DOT 名 "flow"（region 三义之①）
+src/compiler/parser.cr:1726-1748 flow fn name() 拼写（is_flow 置位；checker 按 body 内 yield 处理）
+src/compiler/checker.cr:2310-2313 scan_for_yield → is_flow_fn（跳过返回型检查）  :3443 flow 的 yield 型 = 结果型
+src/compiler/ir_gen.cr:2878    emit(IR_YIELD, -1, val_var, …)   ast.cr:583 IR_YIELD = 28
+src/compiler/ir_gen.cr:1958    emit(IR_SPAWN, …)（range-go）  :2887 emit(IR_AWAIT, …)
+src/compiler/ast.cr:582-584    IR_SPAWN = 27 · IR_YIELD = 28 · IR_AWAIT = 29
+src/arch/x86_64/sizes.cr:77    IR_YIELD = 0 字节「no-op (for now)」  interp.cr:385「eager 值传递近似」
+tests/test_flow.cr             flow counter() + yield + go counter()（**无 runner 引用**）
 src/compiler/interp.cr:406-411/736-741  未支持 op 响亮报错
 src/compiler/opt.cr:271-275     跳过模式
 src/compiler/region_check.cr:1-3 判定面（DEREF 目标在活子图）  main.cr:639 接线
