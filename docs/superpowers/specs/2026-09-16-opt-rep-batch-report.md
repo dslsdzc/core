@@ -34,7 +34,7 @@
 
 ## 4. 判据（两轮全绿；canary **无豁免**）
 
-构建确定性 ×2 IDENTICAL · `selftest-types` **415/415** · `check src/compiler` rc=0 · 全枚举 **61/61** · 五 CI job **5/5 rc=0** · **ELF canary `95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475`（28822B）IDENTICAL**（全程多次复测）· `.ccr` 两种形式四条命中锁定值（`ptr_arith` 96015 `680a6f98…` / 96158 `76f36e6a…`；`generics_test` 142793 `41e9d845…` / 142936 `704316c8…`）· **腿① 72 档逐档零差异** · 探针 29 档**冷态零差异**（rc 零差异）· 暖态判据 FAIL=0 · 自举链 `corec2 == corec3` + `error[N06]=0` + `--help` rc=1 + 冒烟 **42** · 用例 `tests/selfhost/test_optional.py` **48 → 66 → 80 例** · **突变 6 条全红 + 精确回滚**（T2：M1 预扫 / M2 W5 / M3 门控 ⇒ canary+`.ccr` 复红；T3：字面量登记 / 切片登记 / LET 继承 ⇒ 71–77/80）。
+构建确定性 ×2 IDENTICAL · `selftest-types` **415/415** · `check src/compiler` rc=0 · 全枚举 **61/61** · 五 CI job **5/5 rc=0** · **ELF canary `95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475`（28822B）IDENTICAL**（全程多次复测）· `.ccr` 两种形式四条命中锁定值（`ptr_arith` 96015 `680a6f98…` / 96158 `76f36e6a…`；`generics_test` 142793 `41e9d845…` / 142936 `704316c8…`）· **腿① 72 档逐档零差异** · 探针 29 档**冷态零差异**（rc 零差异）· 暖态腿 FAIL=0 · 自举链 `corec2 == corec3` + `error[N06]=0` + `--help` rc=1 + 冒烟 **42** · 用例 `tests/selfhost/test_optional.py` **48 → 66 → 80 例** · **突变 6 条全红 + 精确回滚**（T2：M1 预扫 / M2 W5 / M3 门控 ⇒ canary+`.ccr` 复红；T3：字面量登记 / 切片登记 / LET 继承 ⇒ 71–77/80）。
 
 ## 5. 登记与未覆盖面（全部已落 `TODO.md`）
 
@@ -49,7 +49,7 @@
 | **#76** | **B04** 软诊断（`&x` 借出后读 x；无 NLL）——用例锁定「恰 {B04}」 | 登记（未修） |
 | **#77** | `IR_REF` **目标侧**是否可能为全局（未实测断言） | 登记（不写进结论） |
 
-**判据标准**（非缺陷）：探测暖态判据**跨二进制**日志文本差异 = frozen 侧 `lower to ccr…` vs 当前侧 FC 批硬闸早停 ⇒ 已入 `tools/baseline/REBUILD.md`「适用范围限制」段（与 TODO #2026-09-15-8 同条，不另立）。
+**判据标准**（非缺陷）：探测暖态腿**跨二进制**日志文本差异 = frozen 侧 `lower to ccr…` vs 当前侧 FC 批硬闸早停 ⇒ 已入 `tools/baseline/REBUILD.md`「适用范围限制」段（与 TODO #2026-09-15-8 同条，不另立）。
 
 ## 6. 过程事故与教训
 

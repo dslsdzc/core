@@ -198,7 +198,7 @@
 | **T7 Phase C** | `opt.cr:231 pass_cse` · `arch/x86_64/regalloc.cr:406` | ① 定位 replace_map 全部应用点；② CSE seen 哈希化 + replace 版本化；③ regalloc 活性区间排序（后端） | `-O0` 产物逐字节不变（零扰动）· 证书 cse_* ≤ C·N | `-O1/-O2` 产物非预期变化 ⇒ 停 | T2,T3 |
 | **T8 Phase D** | `module.cr:397+ res_imports` · `:177 reg_fileid` | ① 单轮收集 + 每文件独立 tokenize + 已加载 hash set；② 累积缓冲预分配；③ reg_fileid hash | **import 解析语义零变化**（72 档 + 29 探针零差异 · `corec build <dir>` 逐字节同）· 证书 ≤ C·T_total | 任一档 import 计数/顺序变化 ⇒ 停 | T2,T3 |
 | **T9 Phase E** | `lexer.cr:472-524` · `diag.cr:7` · `dump.cr:281-284` · `interp.cr:520/:91` | 逐点小改（char buffer 倍增 / 行偏移表 / 一次分区 / 顺手） | lexer 逐字节等价 · dump 同值 · canary/四条不变 | lexer 语义差异 ⇒ 停 | T2,T3 |
-| **T10 收官** | `src/ci/run.sh` · 本计划 · 清单 | ① 全量回归（五 CI job + 枚举 + 自举链 + canary + 四条 + 72/29 + 暖态判据）；② 定理逐条复核；③ scaling 进 CI（时长而定）；④ 清单 + 终态 + TODO | 判据全套与批前逐项比对（**逐项标同/异 + 原因**）· scaling 全绿 · 证书全绿 · 内存比 ≤2.4/6.0 | 任一判据红 ⇒ 收官不成立 | T1..T9 |
+| **T10 收官** | `src/ci/run.sh` · 本计划 · 清单 | ① 全量回归（五 CI job + 枚举 + 自举链 + canary + 四条 + 72/29 + 暖态腿）；② 定理逐条复核；③ scaling 进 CI（时长而定）；④ 清单 + 终态 + TODO | 判据全套与批前逐项比对（**逐项标同/异 + 原因**）· scaling 全绿 · 证书全绿 · 内存比 ≤2.4/6.0 | 任一判据红 ⇒ 收官不成立 | T1..T9 |
 
 **顺序建议（裁-CTL-6）**：**先 B（T6）后 A（T4/T5）**——T6 是**无条件**安全 pass（任何程序都踩），收益最快；T4 依赖点最多、风险最大。
 

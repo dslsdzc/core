@@ -500,7 +500,7 @@ R1 的 IR 证据（§11.4）给出**判据形状**：
 | **腿 B**（界面见证） | B1 反方向 `_dxt`=**0** · B2 反方向 `_dxt`=**0** · B3 正方向 `_dxdiv`=**恰好 1** · B4 extern `load_field…call_extern` 之间有转换 —— **四条全绿**（改前四条全红）|
 | **腿 C**（断言） | R7（Core 实参）· N1（apx 已转正形）**全绿** |
 | **停条件①**（非 dex 零足迹） | canary **5/5 IDENTICAL**（ELF `95084e7b…d475` 28822B + `.ccr` 四条）——`generics_test` 含 int/str 字段读而**零 dex** ⇒ 这条同时是「非 dex 读槽恒 `TI_INT`」的**行为证据** |
-| 74 档 parity | rc **逐档全同**（35×0 / 39×1）· 暖态判据 **FAIL=0**（41 档真命中）|
+| 74 档 parity | rc **逐档全同**（35×0 / 39×1）· 暖态腿 **FAIL=0**（41 档真命中）|
 | 29 行为探针 | rc **与基线全同** |
 | 挂点 harness | `test_ci_hook_coverage.py` **PASS**（scope=69 hooked=48 unhooked=21）|
 | 五 CI job / 自举链 | §13.5 |

@@ -51,7 +51,7 @@ fail-closed 验证 + 格式换代）；④ **条件项**（T3：字符串段 del
 - 判据脊梁：ELF canary + `.ccr` 四条 = **五条**（`tools/baseline/canary_values.tsv`：`95084e7b…d475`(28822B) ·
   `pa.ccr 680a6f98…`(96015) · `pa_st.bin.ccr 76f36e6a…`(96158) · `gt.ccr d92a2727…`(142765) ·
   `gt_st.bin.ccr a1f7b99c…`(142908)，**冷态 + 受控空 HOME**）· 腿① `parity_run.sh`（冻结基线同源对拍）·
-  腿② `probes_run.sh`（29 探针）· 腿③ 暖态判据 `warm_leg.sh`/`warm_run.sh`（`tests/probes/warm/` 7 档，**定路径**）·
+  腿② `probes_run.sh`（29 探针）· 腿③ 暖态腿 `warm_leg.sh`/`warm_run.sh`（`tests/probes/warm/` 7 档，**定路径**）·
   `selftest-types` · 五 CI job（`src/ci/run.sh`）· 自举链 `corec2≡corec3`。
 - **批 5 已合入**（`dc2c72d2` / PR #95）⇒ 树实值 `CIR_CACHE_VER = 19`（`cir_cache.cr:63`）；其 §7ter 载体清单
   与本计划 §6.1 的**交叉核对结果 + 行号漂移（+7/+3）** = §6.1 末段（**本批 bump 19→20**）。
@@ -362,7 +362,7 @@ in=1/out=0）、跨出 **0 条**、kind≠0 边 **0 条**、含任何跨边界�
 | ELF canary + `.ccr` 四条 | `bash tools/baseline/canary_check.sh`（**冷态 + 受控空 HOME**） | **五条逐字节同**（`95084e7b…d475`(28822) / 680a6f98…(96015) / 76f36e6a…(96158) / d92a2727…(142765) / a1f7b99c…(142908)） |
 | 腿① 冻结基线同源对拍 | `bash tools/baseline/parity_run.sh <frozen-corec> /tmp/p_cur` + 当前二进制同跑 + `diff -rq logs/` | 逐档 rc + 日志**零差异**（既有红档划界不变） |
 | 腿② 行为探针 | `bash tools/baseline/probes_run.sh <corec> /tmp/pr_cur` | 两态零差异（29 档） |
-| 腿③ 暖态判据（**本批正靶**） | `bash tools/baseline/warm_run.sh ./build/corec /tmp/warm_now` + `warm_leg.sh` 广度层 | FAIL=0 且**暖态生效档数 > 0**（0 = 空洞警报） |
+| 腿③ 暖态腿（**本批正靶**） | `bash tools/baseline/warm_run.sh ./build/corec /tmp/warm_now` + `warm_leg.sh` 广度层 | FAIL=0 且**暖态生效档数 > 0**（0 = 空洞警报） |
 | `selftest-types` / 五 CI job / 自举链 | `./build/corec selftest-types`；`src/ci/run.sh` 五 job；`corec2≡corec3` | 全绿 / rc=0 / `cmp` IDENTICAL + N06=0 + 冒烟 42 |
 
 ### 5.2 本批新增判据（**修法可自证**，入套件）
@@ -478,8 +478,8 @@ load：**先校验后恢复**——结构预扫/载荷恰长/`var_start` 恒校�
 | 1 | `canary_check.sh`（ELF canary + `.ccr` 四条 = **五条机器闸门**） | **PASS 5/5** ✓ |
 | 2 | `selftest-types` | **415/415** ✓ |
 | 3 | 腿③ 牙齿层 `warm_run`（7 档，定路径） | **FAIL=0**（暖态生效档数 **7/7**）✓ |
-| 4 | 腿② `probes_run`（29 档 + 暖态判据） | **FAIL=0**（暖态生效 **15** 档）✓ |
-| 5 | 腿① `parity_run`（75 档 + 暖态判据） | **FAIL=0**（暖态生效 **41** 档）✓ |
+| 4 | 腿② `probes_run`（29 档 + 暖态腿） | **FAIL=0**（暖态生效 **15** 档）✓ |
+| 5 | 腿① `parity_run`（75 档 + 暖态腿） | **FAIL=0**（暖态生效 **41** 档）✓ |
 | 6 | CI `bootstrap-tests` | **5/5 通过** ✓ |
 | 7 | CI `selfhost-tests`（全套件） | **19/19**（首跑 18/19：**D5 红**——见下）✓ |
 | 8 | CI `suite` | **ALL PASS** ✓ |

@@ -55,7 +55,7 @@
 | **腿 B**（界面见证） | B1/B2 反方向 `_dxt`=**0** · B3 正方向 `_dxdiv`=**恰好 1** · B4 extern 调用点前**有**转换 —— 四条全绿（改前四条全红）|
 | **腿 C**（非回归断言） | R7（Core 实参，**改前已正确**）· N1（apx 批已转正形）全绿 |
 | **停条件①**（非 dex 零足迹） | **canary 5/5 IDENTICAL**（ELF `95084e7b…d475` 28822B + `.ccr` 四条 96015/96158/142765/142908）|
-| 74 档 parity | rc **逐档全同**（35×0 / 39×1）· 暖态判据 **FAIL=0**（41 档真命中）|
+| 74 档 parity | rc **逐档全同**（35×0 / 39×1）· 暖态腿 **FAIL=0**（41 档真命中）|
 | 29 行为探针 | rc **与基线全同** |
 | 挂点 harness | `test_ci_hook_coverage.py` **PASS**（scope=69 hooked=48 unhooked=21）|
 | 五 CI job | **全 rc=0**：check / bootstrap-tests / selfhost-tests（49/49 ccr_types · 23/23 interp_parity）/ suite（23 档 ALL PASS）/ full-bootstrap（`cmp corec2 corec3` **恒等** 2904726B · sha256 `b8e4298ad0d7…`）|
