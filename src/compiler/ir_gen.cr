@@ -2917,6 +2917,21 @@ emit(IR_STORE, -1, lv, val_var, 0, 0);
     if ast_kind(node) == EXPR_FIELD {
         obj_var := gen_expr(ast_a(node));
         obj_var = force_if_thunk(obj_var);
+        // ── S4（2026-09-21）：**镜像 checker 的 REF 自动解引用**（`checker.cr:3725`）──
+        // checker 对 `TYP_REF` 对象解包后按结构体查字段 ⇒ **接受** `p.v`；而本分支此前
+        // **不发解引用** ⇒ `IR_LOAD_FIELD` 把「地址」当聚合读 ⇒ **静默错值**
+        // （实测：`p := &s; p.v` 得 **8** 而非 42；`(*p).v` 得 42 ⇒ 缺陷就在缺这一条）。
+        //
+        // **只对 `TYP_REF`**：`PTR` **不解** —— 与 checker 一致（实测 `p as *S` 后 `p.v` = **check=1 拒绝**）。
+        // `&mut x` 同为 `TYP_REF`（仅 `extra` = mut 标记不同）⇒ 本判定**按 kind、不看 extra** ⇒ 一并覆盖。
+        //
+        // 发射序**逐字镜像** `UOP_DEREF` 分支（`IR_DEREF` + `ptr_pointee_type` + `ptr_access_width`）
+        // ——该序已被 `(*p).v`（实测 **42** ✓）证明正确 ⇒ 不自创新序。
+        if get_type_kind(irv_type(obj_var)) == TYP_REF {
+            dv := new_ir_var("autoderef", ptr_pointee_type(obj_var));
+            emit(IR_DEREF, dv, obj_var, -1, 0, ptr_access_width(obj_var));
+            obj_var = dv;
+        }
         v := new_ir_var("field", TI_INT);
         fi : ., mut = ast_type_val(node);
         if fi > 0 {
