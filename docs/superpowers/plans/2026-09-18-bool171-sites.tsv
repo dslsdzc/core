@@ -1,19 +1,19 @@
-# bool 类 171 处逐处留痕（批 8 · bool←int 静默面收口；2026-09-18）
+# bool 类 171 处逐处留痕（批 8 · bool←int 静默面收尾；2026-09-18）
 #
-# 判据来源：`CORE_S1P=1 ./build/corec check src/compiler/main.cr` 的 S1P 台账
-#   改前：bool 桶（列 6 = arg_ti == 2，即「形参 int ← 实参 bool」）171 点，总台账 239 点
-#   改后：bool 桶 0 点，总台账 68 点（残桶 = string↔int，归 S2 路线 1 单独批）
+# 判据来源：`CORE_S1P=1 ./build/corec check src/compiler/main.cr` 的 S1P 清单
+#   改前：bool 桶（列 6 = arg_ti == 2，即「形参 int ← 实参 bool」）171 点，总清单 239 点
+#   改后：bool 桶 0 点，总清单 68 点（残桶 = string↔int，归 S2 路线 1 单独批）
 # 语义依据：这 171 处的第二实参**本就是 bool 表达式**（谓词），旧形 `ts_check(name, <bool>, 1)` 靠
 #   bool 隐式当 int(0/1) 参与 `!=` 比较；改为签名 helper `ts_check_b(name, got: bool, want: bool)` 后
 #   比较在 bool 域内完成——**零行为变化**由 `selftest-types`（415/415）与 `selftest-purity`（26/26）
 #   运行输出**逐字节相同**背书（改前 421 行 / 28 行基线 ⇄ 改后逐字节 IDENTICAL，见本批报告）。
 # 期望值分布：第三实参 = true 170 处 · = false 1 处（后者为**负断言**——按既有语义保留，
 #   非笔误：`ts_check_b(..., false)` = 「期望该谓词为假」；已核改前形为 `..., 0)`，语义逐字对齐）。
-# 行号口径：**改后文件内行号**（改前的对应行用 case-name 列定位；本批已核无遗漏、无重复案名）。
+# 行号约定：**改后文件内行号**（改前的对应行用 case-name 列定位；本批已核无遗漏、无重复案名）。
 # 列：file 	 line 	 helper 	 case-name 	 第二实参（空白归一化；必为括号包裹的 bool 表达式）	 第三实参(true/false)
 # 行数：171（type_selftest 166 · purity_selftest 5）
 # 数据行 sha256（仅数据行，不含本元信息块）：6dfee7aa93cdb7e5664da60e89fc515adb40654ed13b042b3ad7efa7b8366e10
-# 复算：`CI_JOB_NAME=selfhost-tests` 内的 `tests/selfhost/test_s1p_liveness.py` 判据⑦（bool 桶归零 + 台账非空自证）。
+# 复算：`CI_JOB_NAME=selfhost-tests` 内的 `tests/selfhost/test_s1p_liveness.py` 判据⑦（bool 桶归零 + 清单非空自证）。
 src/compiler/type_selftest.cr	201	ts_check_b	t5.f4_later_param_declared_type	(t5_ti_bound == TI_STR && ts_gen_map_ti(t5_u_ni) == -1)	true
 src/compiler/type_selftest.cr	203	ts_check_b	t5.f4_bind_seg_recorded	(g_gen_binds_count == 2 && r64(g_gen_binds, 0 * 8) == 1 && r64(g_gen_binds, 1 * 8) == TI_STR && ast_int_val(t5_calln) == 1)	true
 src/compiler/type_selftest.cr	210	ts_check_b	t5.constr_name_resolve	(gen_constr_type_ti(t5_ni_int) == TI_INT && gen_constr_type_ti(t5_ni_str) == TI_STR && gen_constr_type_ti(str_intern("never")) == TI_NEVER && gen_constr_type_ti(t5_ni_nope) == -1 && gen_constr_type_ti(-1) == -1)	true
