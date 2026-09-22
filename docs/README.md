@@ -1,9 +1,9 @@
 # Core 文档中心
 
 > 定位:受众 = 所有读者(入口);状态 = active。
-> 分类规则:一级 = **受众**(developer/maintainer/academic),二级 = 主题;每份文档头部有定位声明(受众/状态/真源)。
+> 分类规则:一级 = **受众**(developer/maintainer/academic),二级 = 主题;每份文档头部有定位声明(受众/状态/出处)。
 > 一份文档一个职责。
-> **判据层级(计划优先,代码兜底)**:设计定稿与计划(specs/plans)优先于代码——实现未跟上设计时文档保持定稿、标注"设计态/按计划推进";仅在计划未覆盖的细节(记号/关键字等实现真源类内容)以源码为准。
+> **判据层级(计划优先,代码兜底)**:设计定稿与计划(specs/plans)优先于代码——实现未跟上设计时文档保持定稿、标注"设计态/按计划推进";仅在计划未覆盖的细节(记号/关键字等实现层细节)以源码为准。
 > **演进义务**:语言或实现变化时,相关文档头部状态与正文随之更新(active 变 superseded、设计态转已实现等);开发者文档随语言演进迭代。
 
 ## 开发者(developer/)——用 Core 写程序
@@ -24,7 +24,7 @@
 
 **设计参考**(maintainer/design/):
 - 执行模型 / 图与 region:[execution-model.md](maintainer/design/execution-model.md)、[dataflow-design.md](maintainer/design/dataflow-design.md)(早期稿,已被取代,留档)
-- 存储语义:[materialization-space.md](maintainer/design/materialization-space.md)(**层定义 = 存在格 / Materialization Space**)、[memory-model.md](maintainer/design/memory-model.md)(总览)、[cache-semantics.md](academic/cache-semantics.md)(条款 1–7 权威;缓存映射一类,该层的一个实例)、[existence-structure.md](maintainer/design/existence-structure.md)(v6 承载)、[region-model.md](maintainer/design/region-model.md)(经典映射)
+- 存储语义:[materialization-space.md](maintainer/design/materialization-space.md)(**层定义 = 存在格 / Materialization Space**)、[memory-model.md](maintainer/design/memory-model.md)(总览)、[cache-semantics.md](academic/cache-semantics.md)(条款 1–7 以该文为准;缓存映射一类,该层的一个实例)、[existence-structure.md](maintainer/design/existence-structure.md)(v6 承载)、[region-model.md](maintainer/design/region-model.md)(经典映射)
 - 指针与验证 pass:[pointer-model.md](maintainer/design/pointer-model.md)、[regalloc-cache-mapping.md](maintainer/design/regalloc-cache-mapping.md)
 - 规约系统:[spec-design.md](maintainer/design/spec-design.md);IR 操作语义:[ir-op-semantics.md](maintainer/design/ir-op-semantics.md);corelsp:[corelsp.md](maintainer/design/corelsp.md);已废弃:[crasm.md](maintainer/design/crasm.md)
 
@@ -34,7 +34,7 @@
 
 ## 学术(academic/)——验证/理论读者
 
-- [cache-semantics.md](academic/cache-semantics.md)— 条款 1–7(权威条款;**缓存映射一类**;层本体 = 存在格,见 [maintainer/design/materialization-space.md](maintainer/design/materialization-space.md))
+- [cache-semantics.md](academic/cache-semantics.md)— 条款 1–7(以该文为准;**缓存映射一类**;层本体 = 存在格,见 [maintainer/design/materialization-space.md](maintainer/design/materialization-space.md))
 - [lattice-theory.md](academic/lattice-theory.md)— 三层映射理论定稿(图 → 格 → 编码)
 - [verifier-kernel.md](academic/verifier-kernel.md)— 验证内核选型(CIC 信任根)
 

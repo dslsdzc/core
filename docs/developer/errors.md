@@ -1,7 +1,7 @@
 # Core 错误码参考
 
 > 定位:受众 = 开发者;状态 = active。
-> 真源:错误码数值与注释名 = src/compiler/ast.cr 的 EC_* 常量(每码唯一检查点,注释带本文编号,如 `EC_P_EXPECTED = 1001 // P001`);**词法族(L 族)例外**——lexer.cr 的 add_error 只传消息文本不带码,L 码为本文档侧编号,以消息文本为真源。改码须同步 ast.cr 注释与本文。
+> 出处:错误码数值与注释名 = src/compiler/ast.cr 的 EC_* 常量(每码唯一检查点,注释带本文编号,如 `EC_P_EXPECTED = 1001 // P001`);**词法族(L 族)例外**——lexer.cr 的 add_error 只传消息文本不带码,L 码为本文档侧编号,以消息文本为准。改码须同步 ast.cr 注释与本文。
 
 > **fail-closed 语义（2026-09-15，FC 批 T2 起）**：**默认阻断**——任何**不在豁免登记表**内的
 > 类型面诊断 ⇒ `rc=1` + **零产物**（不落目标 ELF、不落本次 `<out>.ccr`）。豁免表 =
@@ -16,7 +16,7 @@
 
 ## L0xx — 词法 (Lexer)
 
-> 注:本族码无数值常量(lexer add_error 不带码)——以消息模板为真源,码为文档侧编号。
+> 注:本族码无数值常量(lexer add_error 不带码)——以消息模板为准,码为文档侧编号。
 
 | 码 | 检查点 | 消息模板 | 触发条件 |
 |----|--------|---------|---------|
@@ -55,9 +55,9 @@
 | P017 | fileid 声明格式 | `Invalid fileid declaration` |
 | P018 | 变量声明语法 | `Invalid variable declaration syntax` |
 | P019 | 字面量后缀溢出 | `Numeric literal overflow` |
-| P020 | 形参数目超上限（> `MAX_FN_PARAMS=64`） | `too many parameters`（TODO #2026-09-10-4 修复：修复前 ≥18 形参静默误编译——越界写踩 return_type/ast_node） |
+| P020 | 形参数目超上限（> `MAX_FN_PARAMS=64`） | `too many parameters`（TODO #2026-09-10-4 修复：修复前 ≥18 形参静默误编译——写入超出参数槽区、覆盖 return_type/ast_node） |
 | P021 | 函数体内嵌套 `fn` 声明（不属语言面） | 定位拒绝（TODO #2026-09-10-12 修复：修复前 parse 失步 → bump allocator 耗尽 → `rep movsb` 向 NULL 拷 → rc=139） |
-| P022 | 枚举变体数 / 变体载荷类型数超上限（> `MAX_ENUM_VARIANTS=16` / `MAX_VARIANT_TYPES=16`） | `Enum has too many variants (17 > 16)` / `Enum variant has too many payload types (17 > 16)`（TODO #2026-09-12-2 修复：修复前写入侧**无界**——第 17 变体槽起点 = `variant_count` 自身、槽尾越记录尾 224B 的静默越界写） |
+| P022 | 枚举变体数 / 变体载荷类型数超上限（> `MAX_ENUM_VARIANTS=16` / `MAX_VARIANT_TYPES=16`） | `Enum has too many variants (17 > 16)` / `Enum variant has too many payload types (17 > 16)`（TODO #2026-09-12-2 修复：修复前写入侧**无界**——第 17 变体槽起点 = `variant_count` 自身、槽尾超出记录尾 224B，写入无任何诊断） |
 | P023 | 结构体字段数超上限（> `MAX_STRUCT_FIELDS=16`） | `Struct has too many fields (17 > 16)`（TODO #2026-09-12-2 同族：第 17 字段踩 `OFF_SI_FIELD_COUNT`/泛型槽与邻记录；修复前 check rc=0 零诊断） |
 | P024 | `extern` 声明含**可选**（`?`）——形参或返回（C ABI 无可选表示） | `extern declaration cannot use optional type ('?') - no C ABI representation`（常量 `EC_P_EXTERN_OPTIONAL = 1024`（`ast.cr`）· 检查点 = `parser.cr` 的 extern 分支：**形参与返回同判同码**；修复前 check rc=0 零诊断、`build` rc=0、运行期 139） |
 | P025 | **无法识别的顶层 token**（顶层兜底不再静默吞） | `unexpected top-level token '{tok}'`（常量 `EC_P_TOPLEVEL_TOKEN = 1025` · 检查点 = `parser.cr` 的 `parse_declaration` 尾兜底：**报错后仍消费该 token**（避免 `parse_all` 空转），**EOF 不报**；修复前该 token 被无声吞掉 ⇒ 声明被无声丢弃 / 后续误归 `error[TF01]`） |
@@ -202,7 +202,7 @@
 | TK02 | 数组元素类型不一致（2026-09-11 TODO #2026-09-11-11 起字面量处**实现**：元素类型取首元素，后续逐个比对；硬错误） | `Expected array element type {T1}, got {T2}` |
 | TK03 | 数组大小不是整数 | `Array size must be `int`` |
 | TK04 | 数组大小为负数 | `Array size must be positive, got {size}` |
-| TK05 | 切片越界 | `Slice start {N} is out of bounds (length {L})` |
+| TK05 | 切片起点超出范围 | `Slice start {N} is out of bounds (length {L})` |
 | TK06 | 切片长度非法 | `Slice length must be non-negative` |
 | TK07 | `for` 迭代目标不是数组或范围 | `Cannot iterate over type {T}` |
 | TK08 | `for` 迭代变量与元素类型不匹配 | ``for` variable type {T1} does not match element type {T2}` |
@@ -258,7 +258,7 @@
 | 码 | 检查点 | 消息模板 |
 |----|--------|---------|
 | R001 | 编译期除零 | `Division by zero in constant expression` |
-| R002 | 编译期越界 | `Index {idx} out of bounds for array of length {len}` |
+| R002 | 编译期下标超出数组长度 | `Index {idx} out of bounds for array of length {len}` |
 | R003 | 编译期整数溢出 | `Integer overflow in constant expression: {expr}` |
 | R004 | 数值转换损失精度 | `Conversion from {T1} to {T2} loses precision` |
 
@@ -286,7 +286,7 @@
 > **未证（yellow）不是错误**——它只进 `corec … --dump-vcs` 通道（T4），**绝不走诊断**：
 > fail-closed 闸门（`main.cr:146-175`）默认阻断 ⇒ 若把「没证明」报成诊断，会把
 > 「未证不阻断编译」直接变成 rc=1（违反裁-V6）。
-> 码值真源 = `src/compiler/ast.cr` 的 `EC_V_*`（17xxx；`error_cat_prefix` 的 `cat == 17 ⇒ "V"`）。
+> 码值以 `src/compiler/ast.cr` 的 `EC_V_*` 为准（17xxx；`error_cat_prefix` 的 `cat == 17 ⇒ "V"`）。
 
 | 码 | 检查点 | 消息模板 |
 |----|--------|---------|
@@ -320,10 +320,10 @@
 | R | R001–R004 | 4 | 运行时 |
 | E | E001–E004 | 4 | I/O |
 | ICE | ICE01–ICE04 | 4 | 编译器内部 |
-| **总计** | | **150** | 口径见下注（2026-09-16 文档审计修正：原写「~146」，与本表加和不符） |
+| **总计** | | **150** | 计数约定见下注（2026-09-16 文档审计修正：原写「~146」，与本表加和不符） |
 
-> **计数口径注（2026-09-16 文档审计）**——本仓「错误码数量」有**三个不同口径**，引用时**必须带口径**：
+> **计数约定注（2026-09-16 文档审计）**——本仓「错误码数量」有**三种不同数法**，引用时**必须说明按哪种数法**：
 > ① **本表加和 = 150**（17 族「编号容量」之和）；② **本文档明细码行 = 149**；
 > ③ **`src/compiler/ast.cr` 实际定义的 `EC_*` 常量 = 137**（`grep -cE '^EC_[A-Z_]+ *: *int *='`）。
 > 三者不等的**已知成因**：**L 族（11）无数值常量**（`lexer.cr::add_error` 只传消息文本，见本文件头部「L 族例外」）
-> + 其余族个别编号在文档侧占位而未落常量。**真源关系**：码值的真源 = `ast.cr`；**文档侧编号**的真源 = 本文件。
+> + 其余族个别编号在文档侧占位而未落常量。**两者的出处**：码值以 `ast.cr` 为准；**文档侧编号**以本文件为准。

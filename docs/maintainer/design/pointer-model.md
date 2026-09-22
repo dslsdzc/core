@@ -1,6 +1,6 @@
 # Core 指针模型:图上的三点验证 pass
 
-> 定位:受众 = 维护者(改/验证三点 pass 的人);状态 = active;真源 = 源码(src/compiler/ptr_analysis.cr、region_check.cr、provenance_verify.cr)——本文描述的是已实现行为,文档与源码冲突时以源码为准,并请更新本文。
+> 定位:受众 = 维护者(改/验证三点 pass 的人);状态 = active;出处 = 源码(src/compiler/ptr_analysis.cr、region_check.cr、provenance_verify.cr)——本文描述的是已实现行为,文档与源码冲突时以源码为准,并请更新本文。
 > 语义定位:指针安全建立在 HDFG 上,不引入 borrow checker/生命周期标注。地址语义(条目标识 + 偏移)见条款 6(docs/academic/cache-semantics.md);层本体 = 存在格(docs/maintainer/design/materialization-space.md);经典映射见 docs/maintainer/design/region-model.md。
 > 本文 2026-09 重写:三 pass 描述与实现对齐(Andersen 约束求解、逃逸三点检查、双路径边界验证)。
 
@@ -77,10 +77,10 @@ unsafe {
 3. **存储逃逸**(`IR_STORE_PTR`,`rc_store_escape`)→ `B011`。**2026-09-20 前该检查从不可触发**:判定值被整行丢弃(`rc_pts_has_escaped(val_pts, ni, 0);` 同行注 `// simplified check`),而 `rc_pts_has_escaped` 体内无 `check_error`(只 `return 1/0`)⇒ 无任何可观察效果(引入提交 `92eec5a7` 起即如此)
 4. **传参逃逸**(把 alloc 指针作参数传给外部)→ **设计未实现**(登记,非"已实现")。`region_check_func` 无 `IR_CALL` 分支,`region_check.cr` 全历史(`jj log` 逐提交核过)从未出现 `IR_CALL`。**为什么不是"接一下就行"**:有意义的传参逃逸(被调者把指针存到更长命位置)需要函数摘要,而 `ptr_analysis.cr` 的 CALL 分支是 `pts = 0`(`:250`,头注声称的 summary propagation 未实现)⇒ 该语义在当前架构下不可达;单侧近似(检"传入已死指针")与存储逃逸同判定、无独立检出能力
 
-判定的图活性语义(实现口径,2026-09-20 修订):
+判定的图活性语义(实现的做法,2026-09-20 修订):
 - **半开区间**:SG 区间 = `[OFF_SG_NSTART, OFF_SG_EXIT)`;`OFF_SG_EXIT` 由 `sg_pop()` 写成当时 `g_df_node_count` = **区域关闭后第一个节点**的下标(`dataflow.cr:78-82`)⇒ "使用点在区域外" = `ni >= EXIT`。与 `adr-0007` 记的 `cur_seq < exit_seq`(在内)取非一致。**2026-09-20 前写 `ni > EXIT`** ⇒ 漏掉"使用点紧跟区域"这一格(= 最典型的逃逸形状:循环后第一句即解引用/返回/存储)
 - **只有出口归还内存的区域才算逃逸点**:`SG_LOOP`/`SG_FOR`/`SG_UNSAFE`(出口发射 `IR_ARENA_RESET`;后端 `src/arch/x86_64/instr.cr` 真调 `arena_new`/`arena_reset`)。`SG_IF` 只 `sg_push/sg_pop`、不建 arena(`ir_gen.cr:2414/2437`);`SG_FUNC` 的 arena 在函数出口才重置(返回给调用者仍有效)⇒ **两者都不是归还点**。分配点在 `if` 内时按父链(`OFF_SG_PARENT`)上溯到真正归还它的那个区域。**2026-09-20 前把"任何区域关闭"当归还点** ⇒ `if x { arr := [..]; p = &arr[0]; } *p` 这类合法程序被误报 rc=1(运行期重读仍是原值 = 内存没释放)
-- **类型门 = `TYP_PTR` ∪ `TYP_REF`（S6 裁定二并入）**，且**在该面上 PTR 半边当前是惰性的**：裁定二把 `&x` 改判 `TYP_REF` 后，`&局部` 一律是 REF，而 `&局部 as *T`（REF→PTR cast）本身即 TF01（实测，基线与本批同）⇒ **由 `&局部` 构造不出 `TYP_PTR` 的区域局部形状**，活的是 REF 半边。并集保留（PTR 侧对 `alloc()`/FFI 派生值仍有效）；**不得为凑 PTR 形状编造判据**（会是假钉）。
+- **类型门 = `TYP_PTR` ∪ `TYP_REF`（S6 裁定二并入）**，且**在该面上 PTR 半边当前是惰性的**：裁定二把 `&x` 改判 `TYP_REF` 后，`&局部` 一律是 REF，而 `&局部 as *T`（REF→PTR cast）本身即 TF01（实测，基线与本批同）⇒ **由 `&局部` 构造不出 `TYP_PTR` 的区域局部形状**，活的是 REF 半边。并集保留（PTR 侧对 `alloc()`/FFI 派生值仍有效）；**不得为凑 PTR 形状编造判据**（会是假断言）。
 - **重赋值清除**:`pts` 是流不敏感并集,`[EXIT, ni)` 内若对该指针变量有重赋值且写入值本身不含已死分配 ⇒ 并集已失效 ⇒ 不报。**已知不完整(登记)**:值为跨调用结果时 `pts` 为空(同 4 的 CALL 缺口)⇒ 会被当作"明确不逃逸"而清除,该类真阳性转漏检 —— 根因是 `pts` 流不敏感,非本批引入
 
 ## 六、Pass 3:ProvenanceVerify(provenance_verify.cr)

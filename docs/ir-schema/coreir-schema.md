@@ -1,9 +1,9 @@
 # Core IR Schema — HDFG (.cir / .csr)
 
-> 定位:受众 = 维护者(后端/ccr_io 实现者);状态 = active(实现期规格);真源 = src/compiler/ccr_io.cr 与 ast.cr。
+> 定位:受众 = 维护者(后端/ccr_io 实现者);状态 = active(实现期规格);出处 = src/compiler/ccr_io.cr 与 ast.cr。
 >
-> ⚠ **修订（2026-09-16 文档审计）**：上述「真源」对本文件的两半**效力不同**——`.cir`/`.ccr` 半**成立**
-> （`ccr_io.cr`/`ast.cr` 为实现真源）；**`.csr` 半不成立**（`.csr` 全仓**零实现**，见 `corespecir-schema.md`
+> ⚠ **修订（2026-09-16 文档审计）**：上述「出处」对本文件的两半**效力不同**——`.cir`/`.ccr` 半**成立**
+> （这两半以 `ccr_io.cr`/`ast.cr` 为准）；**`.csr` 半不成立**（`.csr` 全仓**零实现**，见 `corespecir-schema.md`
 > 头部修订注）。另：`.ccr` 的**现行版本 = 9**（`ccr_io.cr:135`）——本文件「六、线性化」节的 `v7` 为
 > **段表架构代号**（沿用 `lattice-ir-v7-format.md` 命名），与原文字面 `version=7` 的差异已在节内修订注标明。
 
@@ -14,7 +14,7 @@ Core 编译器使用两种中间表示：
 | 格式 | 全称 | 用途 | 生产者 | 消费者 |
 |------|------|------|--------|--------|
 | `.cir` | Core IR Graph | HDFG + 规约约束（验证 IR） | `corec`（前端） | 验证工具 / `corearch` / 解释器 |
-| `.ccr` | Core Region Representation（C 路线：格形态，v7 = 真图载体） | 格层**图载体**——NOD+EDG（节点 + 数据/state 边）+ ENT（条目 × 版本）+ REG（区域），存在结构与图语义落盘；文件序 = 合法拓扑调度，**执行序 = 投影**（字节权威 = `docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md`） | `corec`（前端） | `corearch`（后端） |
+| `.ccr` | Core Region Representation（C 路线：格形态，v7 = 真图载体） | 格层**图载体**——NOD+EDG（节点 + 数据/state 边）+ ENT（条目 × 版本）+ REG（区域），存在结构与图语义落盘；文件序 = 合法拓扑调度，**执行序 = 投影**（字节布局以 `docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md` 为准） | `corec`（前端） | `corearch`（后端） |
 
 **`.cir` 是 Core 的验证核心。** 它承载程序的完整语义（HDFG）。验证工具消费 `.cir` + `.csr`（规约约束元数据）进行验证。
 
@@ -259,9 +259,9 @@ struct 类型关联布局描述符。**默认由编译器推导自然布局**（
 
 ### `.ccr` 二进制序列化（v7，2026-09；v7-only——v6 中间态已退役）
 
-> ⚠ **修订（2026-09-16 文档审计）**：本节「v7」= **段表架构代号**（沿用 `lattice-ir-v7-format.md` 的命名），**不等于现行版本字段值**——现行 `version = 9`（`src/compiler/ccr_io.cr:135` `CCR_VERSION = 9`），段数 **8**（`:138` `CCR_SEG_COUNT = 8`；R2 P4 T1 由 6 段扩为 8：+TYPE(7)/IFACE(8)；R2 P6 T3 由 v8 升至 **v9**：NOD 记录 36B→40B 承载 TYPE 段项索引）。**版本真源 = `ccr_io.cr`，本节所列 `version=7`/`seg_count=6` 为 2026-09 快照，勿据以对拍产物**（load 对 `version != 9` **整类拒收**，照 D10 先例）。
+> ⚠ **修订（2026-09-16 文档审计）**：本节「v7」= **段表架构代号**（沿用 `lattice-ir-v7-format.md` 的命名），**不等于现行版本字段值**——现行 `version = 9`（`src/compiler/ccr_io.cr:135` `CCR_VERSION = 9`），段数 **8**（`:138` `CCR_SEG_COUNT = 8`；R2 P4 T1 由 6 段扩为 8：+TYPE(7)/IFACE(8)；R2 P6 T3 由 v8 升至 **v9**：NOD 记录 36B→40B 承载 TYPE 段项索引）。**版本以 `ccr_io.cr` 为准，本节所列 `version=7`/`seg_count=6` 为 2026-09 快照，勿据以对拍产物**（load 对 `version != 9` **整类拒收**，照 D10 先例）。
 
-`.ccr` 文件头 magic 为 `0x31524343`（ASCII `CCR1`）。v7 = 段表架构 + 真图载体（字节权威 = `docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md` + `ccr_io.cr` 头注释）：
+`.ccr` 文件头 magic 为 `0x31524343`（ASCII `CCR1`）。v7 = 段表架构 + 真图载体（字节布局以 `docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md` + `ccr_io.cr` 头注释为准）：
 
 ```
 [header 16B]: magic u32="CCR1" | version u32=7 | seg_count u32=6 | reserved u32=0

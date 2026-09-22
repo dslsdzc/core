@@ -1,8 +1,8 @@
 # 验证切片轮（verification slice）实施计划（草案）
 
 > **状态**：纸面草案**已落仓**（2026-09-16，R0-B；原稿在 `/tmp/verslice/`，落仓 = 全文 + 本节头部）。**开工前置 = 裁-V1..V6**（§四）；**未实施任何一行**。
-> **定位（受众/状态/真源）**：受众 = maintainer（规约层 = 设计态）；状态 = **草案（待裁）**；真源 = 本文（切片边界与任务表）+ `maintainer/design/spec-design.md`（规约设计权威）。
-> **诚实边界**：本草案写作时**未跑任何构建/编译/测试**（只读 grep/sed/Read；`ps` 实查；**未跑 `jj`**）⇒ 行号 = 草案写作时工作树实读值，**T1 须重取**（与本仓「纸面成果只对当轮 revision 有效」的口径一致）。
+> **定位（受众/状态/以哪份为准）**：受众 = maintainer（规约层 = 设计态）；状态 = **草案（待裁）**；以本文（切片边界与任务表）与 `maintainer/design/spec-design.md`（规约设计稿）为准。
+> **诚实边界**：本草案写作时**未跑任何构建/编译/测试**（只读 grep/sed/Read；`ps` 实查；**未跑 `jj`**）⇒ 行号 = 草案写作时工作树实读值，**T1 须重取**（与本仓「纸面成果只对当轮 revision 有效」的约定一致）。
 > **体例**：照本仓 SSDD（Goal / Architecture / 切片边界 / 分诊表 / 裁决门 / 任务总表 / Global Constraints / 停条件 / 未决项 / 自检记录）。
 
 **Goal**：兑现「语义保鲜」旗帜下**规约层从 0 到 1**——设计已定（`docs/maintainer/design/spec-design.md`，556 行，v2 CIC 内核 + SMT 证书架构）、实现为零（parser/lexer/checker **无任何规约面**）。本切片**只切第一刀**：把「用户写下的 `#check`/`#ensure` ⇒ 编译产出的**可打印/可检查 VC 清单**」这条端到端链打通；**不接求解器、不接 CIC 内核、不做 spec fn/量化/翻译桥**。
@@ -17,7 +17,7 @@
   → VC 注册表 + 输出通道（按裁-V2：`--dump-vcs` dump 或 `.csr` v1）
   → 消费者：`corec` 自带读回 dump / 第三方按 schema 读
 ```
-**关键边界**：VC 的**真值判定一律不做**（唯一例外 = 常量折叠出的「常量假 ⇒ 红」）；「未证明」**不拦编译**（spec-design §十二 定稿口径）。
+**关键边界**：VC 的**真值判定一律不做**（唯一例外 = 常量折叠出的「常量假 ⇒ 红」）；「未证明」**不拦编译**（spec-design §十二 已定稿）。
 
 **Tech Stack（实读锚）**：`src/compiler/lexer.cr`（`#` 零词法）· `src/compiler/parser.cr`（`:30 fn check` = token 谓词助手，非规约）· `src/compiler/checker.cr`（`compute_all_purity` `:3975`）· `src/compiler/dataflow.cr`（`df_create_node` `:99` / `df_connect_state` `:156` / `df_graph_to_dot` `:512`）· `src/compiler/ccr_io.cr`（`CCR_VERSION = 9` `:135` / `CCR_SEG_COUNT = 8` `:138` / TYPE=`7` `:139` / IFACE=`8` `:140`）· `src/lattice/ent_kernel.cr`（`ESZ_NOD_SEM = 32` `:1010` / `OFF_NS_ITEM = 28` `:1022`）· `src/compiler/main.cr`（`cli_cmd("cir")` `:236` / cir 分支 `:583` / `region_check_all(); provenance_verify_all();` `:614-615`）· `src/compiler/{region_check,provenance_verify,ptr_analysis}.cr` · `grammar/core.ebnf:12`（`FunctionDecl`，**无标注槽**）· `docs/ir-schema/corespecir-schema.md`（117 行，`.csr` v1 设计：头 32B + TagNode 40B + magic `CSR1`）· `src/stdlib/assert.cr`（panic 基元）。
 
@@ -57,8 +57,8 @@
 | **检查（类型/纯度/作用域）** | 判定引擎在位（`type_engine.cr`，三态）；纯度**已有真计算**（`checker.cr:3975 compute_all_purity`）但**无**「注解表达式必须 bool/纯/在域」的门；⚠ **时序陷阱**：生成期 `fi_ispure` 是**冻结的乐观默认值**（TODO「性能自动化」节明注：消费侧须在 `compute_all_purity` **之后**读） | 小-中：三查（`type_compat_strict` 判 bool · 纯度查禁用生成期旗标 · 名字域查 `def_sym`/形参表） | 解析；**纯度读点必须在 IR 生成之后** | 实施（**风险点**，见停条件④） |
 | **VC 生成** | **零**。最接近资产 = **HDFG**（`dataflow.cr`：`df_create_node :99`/`df_connect_state :156`）+ 三个**已接线**的图 pass（`main.cr:614-615` 调 `region_check_all` `region_check.cr:160` / `provenance_verify_all` `provenance_verify.cr:135`；另有 `ptr_analysis.cr`） | 中：注解表达式编为**普通条件子图** + **VC 注册表**（函数/种类/节点 id/行列/状态） | 解析 + 检查 | 实施（C1 核心；**只生成不判定**） |
 | **载体（`.csr` vs dump）** | **零实现**：`.csr`/TagNode 在 `src/` **零命中**（`grep csr\|CSR1\|TagNode --include='*.cr' src/` = **0**）；`docs/ir-schema/corespecir-schema.md` 称「真源 = `src/compiler/ccr_io.cr`」**不成立**（`ccr_io.cr` 对该面 0 命中）⇒ 纯设计；`.ccr` 现行 = **v9 八段**（`ccr_io.cr:135/:138`），**不含** purity/provenance（`ccr_io.cr` 对该面 0 命中） | 小（dump 通道）/ 中（`.csr` v1：头 32B + TagNode 40B，照 schema） | **裁-V2**（先 dump 还是先 `.csr`） | **裁决门** |
-| **求解器接口** | **零**（无 SMT 依赖）；设计口径 = **证书经 CIC 内核**（spec-design §十一，SMTCoq 模式：求解器不可信、健全性只在内核）；内核选型 **Rocq vs Lean 4 挂起**（§十八） | **C1 明确不做** | — | 转后续切片（C4+） |
-| **反例呈现** | 间接资产：`assert`/`panic`（`src/stdlib/assert.cr`）· 解释器（`interp.cr`）· 诊断体系（`diag.cr`，`-->` 定位）；**求解器级反例**零。设计口径 = 绿/黄/红三态 + **unproven 不拦编译**（§十二） | 小-中（C3 运行时版；C1 仅常量假 = 红） | 运行时插桩须**显式开关**（`#` 默认零足迹）+ **裁-V4** | C1 只落「常量假」；C3 另切 |
+| **求解器接口** | **零**（无 SMT 依赖）；设计约定 = **证书经 CIC 内核**（spec-design §十一，SMTCoq 模式：求解器不可信、健全性只在内核）；内核选型 **Rocq vs Lean 4 挂起**（§十八） | **C1 明确不做** | — | 转后续切片（C4+） |
+| **反例呈现** | 间接资产：`assert`/`panic`（`src/stdlib/assert.cr`）· 解释器（`interp.cr`）· 诊断体系（`diag.cr`，`-->` 定位）；**求解器级反例**零。设计约定 = 绿/黄/红三态 + **unproven 不拦编译**（§十二） | 小-中（C3 运行时版；C1 仅常量假 = 红） | 运行时插桩须**显式开关**（`#` 默认零足迹）+ **裁-V4** | C1 只落「常量假」；C3 另切 |
 | **自动标签**（C2 面） | **事实在、载体不在**：纯度 = `compute_all_purity`（内存）；region = `region_check` + `.ccr` **REG 段**（在载体）；provenance/points-to = `ptr_analysis`/`provenance_verify`（pass 内部，**不入载体**）；state 边 = **EDG 段**（kind=1，在载体）；类型项 = **TYPE 段 + NOD 项索引**（v9，在载体） | 小 | 裁-V2 | C2（C1 之后） |
 
 ---
@@ -111,7 +111,7 @@
 | **T2** | 检查面：三查（bool/纯/域）+ 时序陷阱处置（纯度读点后移或读 state 链）+ 诊断码分配 + 用例 ≥8 | T1 |
 | **T3** | VC 生成 + 载体：注解表达式编图 + VC 注册表 + dump 通道（`--dump-vcs`）/`.csr` v1（按裁-V2）+ 常量折叠三态 | T2、裁-V2 |
 | **T4** | 消费/读回 + 判据：读回 dump/`.csr` + **对拍**（同一 `.cr` 两次编译 VC 清单逐字节同 / 冷热态）+ 突变控制 | T3 |
-| **T5** | 收官：全量回归 + 统一台账 + 文档（spec-design 里程碑打勾 / TODO `:844` 节收口 / schema 文档勘误）+ 本 batch 终态与下一刀指向（C2/C3/C4） | 全部 |
+| **T5** | 收官：全量回归 + 统一清单 + 文档（spec-design 里程碑打勾 / TODO `:844` 节收尾 / schema 文档勘误）+ 本 batch 终态与下一刀指向（C2/C3/C4） | 全部 |
 
 ---
 
@@ -120,13 +120,13 @@
 - **canary 硬闸（全批）**：`clean-cache` → `build tests/suite/ptr_arith.cr --static` ⇒ sha256 `95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475`（28822B）。**`#` 标注默认零足迹 ⇒ canary 一律 IDENTICAL**；**变即停下上报**（说明注解泄进发射面）。
 - **`#` 零运行时语义**（设计定稿）· **未证明不拦编译**（spec-design §十二）· 硬错仅限「可判定且必错」（常量假）。
 - **载体版本位**：`.ccr` **v9**（`ccr_io.cr:135`）/`CIR_CACHE_VER = 17`（`cir_cache.cr:51`）**本批不动**；若裁-V2 落 `.csr` ⇒ **新格式独立版本族**（`CSR1` + version 1，照 `docs/ir-schema/corespecir-schema.md`），**不得**挤进 `.ccr` 段表（无裁不得动版本位）。
-- **判据口径按 TODO #2026-09-11-9**（结构性断言 + 语义零变化 + 自举稳定，非「与旧版逐字节同」）· 三态纪律 · 新硬错先 **report-only** 全语料 · 清单三面同核 + `test_backend_bootstrap`（`error[`=0）。
+- **判据以 TODO #2026-09-11-9 为准**（结构性断言 + 语义零变化 + 自举稳定，非「与旧版逐字节同」）· 三态纪律 · 新硬错先 **report-only** 全语料 · 清单三面同核 + `test_backend_bootstrap`（`error[`=0）。
 - **工具/纪律**：`nice -n 19` · 一构建一编译串行 · cwd = 仓库根 · 比较前 `clean-cache` · `jj` only + 提交路径限定（禁 git）· 自测用例只增不减 · 多 agent 下不并发构建。
 - **不得回退既有收纳**：TS01-04/TK02/R002/TM03/ICE04/TA02 硬门 · P4/P5/P6 全批（段机制/单槽化/ICE04/影子下线/β 项索引）· 容量批与 fail-closed 批的既有裁决 — 本批一律不动。
 
 ## 七、停条件
 
-1. **canary 变化** ⇒ 停下（注解泄进发射面）；2. **72 档同源对拍出现非章程 diff** ⇒ 停下（新检查若改变既有语料 rc ⇒ 先 report-only + 裁决）；3. **新增硬错（裁-V6 的常量假）全语料命中非空** ⇒ 停下上报；4. **纯度时序**：若在生成期读到乐观值而无法在不改既有产物面的前提下收口 ⇒ 停下（须先修时序或用 state 链替代）；5. **被迫动 `.ccr` 段表/版本位或 `.cir` 快照** ⇒ 停下（单独裁决 + 失效面登记）；6. **被迫引入外部依赖**（SMT 库/CIC 内核）⇒ 停下（越出 C1）；7. 主树工作副本不干净或他方在途改动 ⇒ 停下（照 P6 事故护栏：**含「先裁」的任务把护栏写进任务卡正文**）。
+1. **canary 变化** ⇒ 停下（注解泄进发射面）；2. **72 档同源对拍出现非章程 diff** ⇒ 停下（新检查若改变既有语料 rc ⇒ 先 report-only + 裁决）；3. **新增硬错（裁-V6 的常量假）全语料命中非空** ⇒ 停下上报；4. **纯度时序**：若在生成期读到乐观值而无法在不改既有产物面的前提下解决 ⇒ 停下（须先修时序或用 state 链替代）；5. **被迫动 `.ccr` 段表/版本位或 `.cir` 快照** ⇒ 停下（单独裁决 + 失效面登记）；6. **被迫引入外部依赖**（SMT 库/CIC 内核）⇒ 停下（越出 C1）；7. 主树工作副本不干净或他方在途改动 ⇒ 停下（照 P6 事故护栏：**含「先裁」的任务把护栏写进任务卡正文**）。
 
 ## 八、未决项（**不猜**；须实证/须裁）
 
@@ -142,6 +142,6 @@
 
 - **根因 vs 止血**：本切片不做「先接个 SMT 出绿勾」式的假兑现——C1 **明确不判定**（唯一判定 = 常量折叠），把「没证明」如实标黄，符合 spec-design §十二 与仓内三态纪律。
 - **诚实边界**：**本草案未跑任何构建/测试**（只读 grep/sed/Read；`ps` 实查；**未跑 `jj`** ⇒ 无提交锚、行号须 T1 重取）；凡「须实证」一律标注（U-1..U-5）；代价估计为**相对量级**（小/中/大），非工时承诺。
-- **与既有裁决的一致性**：ADR-0001（规约并入 `.cr`）· spec-design §十二（unproven 不拦）· §十三（只有 proven 进优化器）· P4 T5 的「零足迹」先例（裁-V4）· TODO #2026-09-11-9 判据口径 · P6 事故护栏（含「先裁」入卡）。
+- **与既有裁决的一致性**：ADR-0001（规约并入 `.cr`）· spec-design §十二（unproven 不拦）· §十三（只有 proven 进优化器）· P4 T5 的「零足迹」先例（裁-V4）· TODO #2026-09-11-9 判据标准 · P6 事故护栏（含「先裁」入卡）。
 - **占位符扫描**：无 TBD；六条裁决门逐条给「推荐 + 未取裁时行为」；未决项 7 条全部指向具体文件/行或明确「须实证」。
 - **风险面（最大者）**：**载体与消费面未定就动语法** ⇒ 整刀返工（缓解 = 裁-V2/V3 前置）；**纯度时序陷阱**（生成期乐观值）⇒ 误判「纯」并把非纯调用放进 VC（缓解 = 停条件④）；**`.csr` 格式包袱**（第一刀背格式 = 重）⇒ 缓解 = dump 先行。

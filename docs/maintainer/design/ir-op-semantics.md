@@ -4,20 +4,20 @@
 
 > 用途：CompCert 对照审查第四轮（2026-08-16）的**契约文档**——Task 2 后端审查逐 opcode 三方对照
 > （本表定义语义 vs `src/arch/linux/ld/instr.cr` ELF 编码 vs `src/compiler/interp.cr` 解释执行）以本表为准。
-> 本任务纯只读：**不修改任何 Core 代码**；`~/compcert/` 为只读真源，绝不修改。
+> 本任务纯只读：**不修改任何 Core 代码**；`~/compcert/` 为只读来源，绝不修改。
 > 差异标注约定：**D** = Core 有意不同于 CompCert（附设计理由）；**BC** = 可疑/bug 候选（Task 2 核实对象）。
 > **状态（2026-08-17 → 2026-09）**：第四轮修复已完成并合入（F1-F20）——本表已同步修复后状态
 > （「[ok] 已修复」标记），BC 表转为修复记录参考；D 表为设计差异，不受修复影响。
 > **2026-09 更新注记**：① int 语义定稿为无上限数学整数(2026-08-23 起)——§1 的 64 位契约是**编码层快路径投影**,超界 = 编码层事务(见 adr/adr-0002 语境与 plans/2026-09-06-int-multiword-m1);② .ccr v6 NOD 坐标化(本表 instr 引用 = v5 线性形态,语义不变);③ 规约语法定稿 #check/#ensure。
 > 修复记录见 `docs/archive/compcert-reference.md`「第四轮修复记录（2026-08-17）」；本表末尾「修复记录」小节汇总。
 
-## 0. 真源与引用
+## 0. 来源与引用
 
-> ⚠ **修订（2026-09-16 文档审计）**：下表真源为**仓外树**（`~/compcert/…`，CompCert 对照用）——
+> ⚠ **修订（2026-09-16 文档审计）**：下表来源为**仓外树**（`~/compcert/…`，CompCert 对照用）——
 > **无版本锚**（未记 commit/发布号）⇒ 本表的 `Op.v:Lxxx` 式行号引用**跨机/跨会话不可复现**，
 > 且 CompCert 侧更新后行号会**静默漂移**（对照结论仍可能成立，但「同源」需重核）。
-> 复核口径 = 「以本机 `~/compcert` 树为准 + 结论面（语义对照）与行号面（引用）分开判定」。
-> （同类问题另见 `docs/verifier/kernel-spec.md` 的 `~/mctt` 真源。）
+> 复核方式 = 「以本机 `~/compcert` 树为准 + 结论面（语义对照）与行号面（引用）分开判定」。
+> （同类问题另见 `docs/verifier/kernel-spec.md` 的 `~/mctt` 来源。）
 
 | 文件 | 内容 | 引用格式 |
 |---|---|---|
@@ -177,7 +177,7 @@ Core 侧只读来源：`src/compiler/ast.cr`（opcode 常量，L527-580）、`sr
 ### 2.3 转换（对照 Op.v 转换族）
 
 - **IR_I2F**（49）：`d := float(int64(a))`。对照 `Ofloatoflong`（Op.v:L169, L438）→ `Val.floatoflong` = `Float.of_long`（Floats.v:L318-320：`BofZ` 53 位二进制浮点，就近舍入）。ELF 编码现状：`F2 48 0F 2A`（`cvtsi2sd`，**REX.W 已补——BC-I2F [ok] 已修复（2026-08-17，第四轮 F7）**，`e2_sd_cvt` instr.cr L378-389）。修复前为 `F2 0F 2A`（32 位操作数）只转换低 32 位符号扩展，`|a| ≥ 2³¹` 时结果错误（如 `2⁴⁰ → 0.0`），与 `IR_F2I` 的 `cvttsd2si` `F2 48 0F 2C`（REX.W ✓）不对称。迁移后语义：int→dex = `d := a·10⁶`（精确，无舍入）。
-- **IR_F2I**（50）：`d := trunc(f)`（向零截断）。对照 `Olongoffloat`（Op.v:L167, L437）→ `Val.longoffloat` = `Float.to_long`（Floats.v:L308-309：`ZofB_range` 向零截断，**越界 → None**）。当前 ELF 用 `cvttsd2si`：向零截断 ✓，但**越界结果是硬件哨兵 0x8000000000000000**（Intel SDM：异常掩码默认下越界 `cvttsd2si` 返回不定值 INT64_MIN——文档化行为）——CompCert 定义为 `None`（Stuck）。**BC-F2I（死路径已确认，第四轮 §2）：IR_F2I 无发射方（语言级 float→int 转换不存在），当前不可触发**；若将来启用需定越界语义。迁移后语义：dex→int = `d := trunc(a/10⁶)`（有损转换，`EC_R_LOSSY_CONVERT` R004 检查点）。
+- **IR_F2I**（50）：`d := trunc(f)`（向零截断）。对照 `Olongoffloat`（Op.v:L167, L437）→ `Val.longoffloat` = `Float.to_long`（Floats.v:L308-309：`ZofB_range` 向零截断，**越界 → None**）。当前 ELF 用 `cvttsd2si`：向零截断 ✓，但**越界结果是硬件返回的特殊值 0x8000000000000000**（Intel SDM：异常掩码默认下越界 `cvttsd2si` 返回不定值 INT64_MIN——文档化行为）——CompCert 定义为 `None`（Stuck）。**BC-F2I（死路径已确认，第四轮 §2）：IR_F2I 无发射方（语言级 float→int 转换不存在），当前不可触发**；若将来启用需定越界语义。迁移后语义：dex→int = `d := trunc(a/10⁶)`（有损转换，`EC_R_LOSSY_CONVERT` R004 检查点）。
 - interp：op 49/50 **已实现**（`i64_to_f64`/`f64_to_i64`，f64.cr 软件路径，BC11 已修）——原「静默跳过」见 BC11（已修复）。
 
 ### 2.4 内存与地址（对照 Memory.v 模型 + Asm.v 访问指令）
@@ -311,7 +311,7 @@ load/store（对照 `Mem.load`/`Mem.store` Memory.v:L428/L531 + `valid_access` L
 - [x] 每个 opcode 均有数学形式语义（输入操作数 → 状态变化 → 输出）
 - [x] 无「待定」项（OP_SHL/OP_SHR 标注为「无发射方、契约悬空」并列入 BC3——是明确状态而非待定）
 - [x] 差异点均有理由（D1-D11）或标注 bug 候选（BC1-BC17——2026-08-17 修复后逐条标注状态，转为记录参考）
-- [x] CompCert 引用均为真源核实（Op.v/Asm.v/Values.v/Integers.v/Floats.v/Memory.v，附文件:行号），未杜撰
+- [x] CompCert 引用均按原文核实（Op.v/Asm.v/Values.v/Integers.v/Floats.v/Memory.v，附文件:行号），未杜撰
 - [x] dex（S=10⁶ 定点）与 apx（binary64）语义已覆盖（§4）
 - [x] 只读性：本任务未修改任何 Core 代码与 ~/compcert/
 - [x] 质量审查修正（2026-08-16 复核后）：Mem.alloc 行号更正（Memory.v:L348，非 L531）；BC14 零扩展措辞更正；S=10⁶ 标注为契约显式决策；D11 短路措辞更正；BC-F2I Intel SDM 措辞更正；Ccompf NaN 补 Op.v 层 None 与 Asmgen.v:L260 `Cond_and Cond_np Cond_e` 引用；Onotl/Values.v shll/shrl/ext_mgr 行号与引用归属校正

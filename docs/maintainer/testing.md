@@ -1,6 +1,6 @@
 # 测试与回归操作手册（testing）
 
-> 定位：受众 = maintainers；状态 = active；真源 = [tests/](../../tests/) 与 [src/ci/run.sh](../../src/ci/run.sh)（命令以仓库现状为准，有出入先改源码注释/本文）。
+> 定位：受众 = maintainers；状态 = active；出处 = [tests/](../../tests/) 与 [src/ci/run.sh](../../src/ci/run.sh)（命令以仓库现状为准，有出入先改源码注释/本文）。
 > 仓库地图/构建/分支见 [onboarding.md](onboarding.md)；命令速览另见 [CLAUDE.md](../../CLAUDE.md) Build & Test 段；未竟项见 [TODO.md](../../TODO.md)。
 
 ## 一、三套测试的定位与跑法
@@ -61,7 +61,7 @@ chmod +x /tmp/core_suite_bin && /tmp/core_suite_bin
   run_test("add", "fn add(a: int, b: int) -> int { return a + b; } fn main() -> int { return add(2, 3); }", 5)
   ```
   借用错误类用 `check_errors(src, desc, expect_errors)`（断言错误数有无）。
-- **selfhost 借用检查**（test_borrow.py）：向 `CASES` 加元组 `(名称, 内联源码, 期望是否报借用错)`。7 规则现状（以 CASES 用例名为准，每条含放行/报错两个方向的样本；规则语义真源 = [src/compiler/checker.cr](../../src/compiler/checker.cr) 的 check_borrow 等）：
+- **selfhost 借用检查**（test_borrow.py）：向 `CASES` 加元组 `(名称, 内联源码, 期望是否报借用错)`。7 规则现状（以 CASES 用例名为准，每条含放行/报错两个方向的样本；规则语义以 [src/compiler/checker.cr](../../src/compiler/checker.cr) 的 check_borrow 等为准）：
   1. immutable borrow then use original
   2. mutable borrow then use original
   3. multiple immutable borrows allowed

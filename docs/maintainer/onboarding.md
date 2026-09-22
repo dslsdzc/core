@@ -1,6 +1,6 @@
 # 新维护者入门手册（onboarding）
 
-> 定位：受众 = maintainers；状态 = active；真源 = 源码 + [CLAUDE.md](../../CLAUDE.md)（实现与文档冲突时以源码为准，既有惯例）。
+> 定位：受众 = maintainers；状态 = active；出处 = 源码 + [CLAUDE.md](../../CLAUDE.md)（实现与文档冲突时以源码为准，既有惯例）。
 > 文档导航见 [docs/README.md](../README.md)（分类规则：主题 × 读者 × 状态）。本文档聚焦仓库结构、构建、工作流与雷区。
 
 ## 一、仓库地图
