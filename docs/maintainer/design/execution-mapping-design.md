@@ -458,7 +458,7 @@ MMIO：  recipe = no    replicable = no/limited   persistent = external   author
 | 6 | 不同副本原则上表示同一个值 | 同上第 2/4 条的反例 |
 
 `[提案]`。⚠ **仓库侧已有独立佐证**：cache-semantics **条款 4b** 已把「图内不可重算」条目单列，并规定「驱逐不变量/再生等价**对其不成立**」（`docs/academic/cache-semantics.md:28`；细读 `:50-59` 给两类：边界 MMIO/FFI/输入/测量、图内不可重算 神谕/BSS/FIXPT/模糊融合）。
-⇒ **本批的新框架把条款 4b 从"例外条款"变成"一般规则的组成部分"**：条款 2/3（可驱逐/可再生）成了 `recipe = recomputable` 那一档的**特例**。
+⇒ **本批的新框架把条款 4b 从"例外条款"升格为"一般规则的支柱"**：条款 2/3（可驱逐/可再生）成了 `recipe = recomputable` 那一档的**特例**。
 
 #### 3.4.5 与仓库的锚定（**逐字段距离——主副本在权威侧，本处只留执行映射侧结论**）
 
