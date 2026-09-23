@@ -1,10 +1,16 @@
 # Core comptime / 元编程方向 · 工程可行性评估
 
 > 定位：受众 = 维护者；状态 = **评估档（一次性产出，不含实施承诺）**。
-> 输入 = `/tmp/briefs/comptime-directions-raw.md`（维护者转来的三块 AI 讨论）+ 维护者指令
-> 「反正目前来看方向是正确的评估一下工程可行性，例如编译速度等考虑，如果可行的话就写计划」。
+> 输入 = **两份**（**第二份是本档的主要目标**）：
+> ① `/tmp/briefs/comptime-directions-raw.md` —— 维护者转来的三块 AI 讨论，**分解与前置**；
+> ② `/tmp/briefs/metaprog-model-raw.md` —— 第四块，**总方向 = typed semantic metaprogramming（八项）**，
+>    评估见 **§八–§十一**。
+> 维护者指令（两份共用）：「反正目前来看方向是正确的评估一下工程可行性，例如编译速度等考虑，
+> 如果可行的话就写计划」。
 > 基线修订 = `develop@origin` = **`6b54107e`**（2026-09-23 核对）。评估日期 = 2026-09-23。
 > **本档不改任何既有文件的正文**；同目录的 `comptime.md`（推导策略蓝图）**未改动**。
+>
+> **读法建议**：只想看结论 ⇒ §6.0 + **§九**；想知道哪句是量的 ⇒ §7.2 / §十一；想知道卡在哪 ⇒ §6.2 / §6.3 / §9.2 / §9.3。
 
 ---
 
@@ -705,6 +711,8 @@ BTA 是对**绑定时间格**（`{Static, Dynamic}` 或含 `⊥` 的三点格）
 
 ### 7.2 `[实测]` 与 `[推理]` 的逐条归属（供复核）
 
+> **本轮（第四块输入）新增的归属见 §十一 末尾**——本小节只覆盖 §一–§七。
+
 **`[实测]`（我跑出来的数字）**：
 §2.1 全表 · §2.2 全表 · §2.3 全表（min-of-3，clean-cache，nice -n 19） · §2.4 全表（`.ccr` 段解析 +
 opcode 直方图 + `item` 覆盖率自解析） · §2.5 全表（`.core/cache/cir` 文件统计） ·
@@ -728,9 +736,260 @@ opcode 直方图 + `item` 覆盖率自解析） · §2.5 全表（`.core/cache/c
 | 「`comptime.md` 自述『多数单元格未落地』」 | 该档头部 | `[实测]` **比"多数未落地"更弱**：其**设计原则第 1 条（自动推导）实现度 = 0**，且**「可编译时执行的条件」表的两列标记位在文件里是空的**（`cat -A` 逐字节核）。 |
 | 「CIC+SMT 通道 0 实现，C1 切片已落地」 | 另一份文档 | `[实测]` **成立但要打折**：C1 定义里的"编图"被裁掉转 C1b（`TODO.md:856`）⇒ 落地的是 C1 的**语法/检查/dump 部分**。**另加两条该说法未提的事实**：`coq/` 与规约系统无关（其 README 自明）；`src/kernel/` 有 1287 行真内核但是 **MLTT 的 Π+ℕ 片段、未接线、未入 CI**。 |
 
+> **本清单在 §十 有本轮补充（三条）。**
+
 ---
 
-## 八、附录：复现命令
+## 八、总方向（typed semantic metaprogramming）八项逐项评估
+
+> 输入 = `/tmp/briefs/metaprog-model-raw.md`（第四块，**team-lead 指定为本档的主要目标**；
+> 前三块是它的分解与前置）。该稿自述读 `main` 的 `docs/comptime.md` / `docs/at-intrinsics.md` /
+> `docs/spec-design.md`——**前两条路径不在该位置**（实际 = `docs/maintainer/proposals/comptime.md`、
+> `docs/developer/at-intrinsics.md`），且 `main` **不是 `develop` 当前点** ⇒ **现状断言我逐条重核**。
+> **本节的所有"现状"句一律以 §三/§3.5/§8.5 的重核为准，不采信该稿的自述。**
+
+### 8.0 前言「不新增任何语言」的现状核 `[实测]`
+
+| 检索 | 结果 |
+|---|---|
+| `grammar/core.ebnf`（**67 条产生式**）里的 macro / hygien / quote / splice / comptime 产生式 | **0** |
+| `src/` 中 `macro` / `quote` / `splice` / `egraph` / `equality saturation` / `saturation` | **均 0 个文件命中** |
+| `src/` 中 `hygien` | 1 命中 = `src/ci/run.sh:158` 的 `test_suite_hygiene.py`（**测试套件卫生**，与宏卫生**无关**，假阳性） |
+| `Fragment` / `Goal<` / `Proof<` / `Rewrite<` 作为**语言类型** | `src/` `bootstrap/` `grammar/` **全 0**；`docs/` 的命中全是本档自身或 `Rewrite:` 任务标签 |
+| `e-graph` | `docs/` 仅 2 命中，**都在 `.coi` 档里作为"不该落盘的临时物"举例**（`coi-…:536` / `:680`） |
+
+**⇒ 两条结论**：
+① `[实测]` 提案「不新增 macro/template/tactic 语言」的取向**与本仓现状天然一致**（本仓本来就没有）；
+② `[实测]` 但它要建立的**全部一等对象**（`Fragment` / `Decl` / `Relation` / `SemanticEnv` / `Goal` /
+`Proof` / `Rewrite` / `Syntax`）**今天一个都不存在**，且 `E`/`S`/`D` 三个维度**没有数据源**（见 §8.1 ①）。
+
+### 8.1 八项逐项表（同一张四栏表）
+
+**判据口径同 §5.0**（分母 = `[实测]` 自编译冷启 41.3 s，其中分析面 ≈30.0 s 且**已超线性**）。
+
+| # | 项 | 编译期成本 | 膨胀风险 | 缓解手段（代价） | 判定 |
+|---|---|---|---|---|---|
+| **①** | **`Fragment⟨Γ,T,E,S,D⟩` 表示与推导（五个维度全自动）** | `[推理]` **×1.5–×3**：Γ（自由绑定）与 T 可在前端线性面推；但 **E** 的数据源 `func_ispure` **今天是"生成期乐观默认值"**（`checker.cr:4526-4531` 逐字：「`fi_set_ispure(..., 1)`（乐观默认）**有意保留**」）、真纯度只在 `df_state_finalize` 之后可得；**S**（stage）与 **D**（semantic domain）的数据源 = Target Model / `.coi`，**两者 `[实测]` 零实现**（§8.5） | `[推理]` **高**：Γ 要求"片段携带自己的语义上下文"⇒ 上下文本身要成为图的一部分，而 `[实测]` 片段当前**唯一的边界是函数**（§3.5 表） | 只推 Γ/T，E/S/D 退化为保守默认。**代价**：`E` 一旦退化，第八项（effect-aware staging）的整个卖点消失——而该稿自己说 `E`「**不是装饰**」 | ❌ **不可行**（E/S/D **无数据源**；且这是**设计级**缺失，不是工程量） |
+| **②** | **反射三层（syntax / elaborated / semantic）** | syntax 层 = 前端面，`[实测]` **前端是线性的**（§2.3 第 1 条）⇒ ×1.1–1.3；elaborated 层 ≈ 今天的 `@typeInfo` 面（×1.0）；**semantic 层 = 全程序查询 ⇒ 见 §8.3** | `[推理]` 低（查询不复制代码） | 只做 syntax + elaborated 两层。**代价**：semantic 层正是该稿自评"Core 最容易形成辨识度的地方"——砍掉它等于砍掉提案的核心 | ⚠ **半可行**：syntax/elaborated **有条件可行**；**semantic 层见 §8.3** |
+| **③** | **semantic pattern matching**（`for` 与 `map` 进 HDFG 同构即同时匹配） | `[推理]` **无法给出可用量级**：一般形的"语义结构匹配" = **子图同构**，最坏 NP-hard（子图同构的经典结果）。本仓规模 `[实测]` 169,418 节点 / 156,217 边 / 7,638 区段 | `[推理]` 低 | 限制 pattern 形状（只允许线性/树形/带根可达的 pattern）。**代价**：限形之后「`for` 与 `map` 同构」这类**非线性**匹配目标恰好落在被限掉的那一类 | ❌ **不可行**（一般形是子图同构；限形则削掉该稿自己举的核心例子） |
+| **④** | **`Rewrite<T> = (before, after, obligations)` —— 元程序无最终决定权** | 生成成本低；**验证成本 = 义务交给 checker / CIC / SMT** ⇒ **见 §8.4** | `[推理]` 中（before+after 两份图） | — | ❌ **不可行，卡在未实现的前置**（§8.4） |
+| **⑤** | **`Goal<P>` / `Proof<P>`**（复用既有 spec/CIC/SMT，不造 tactic 语言） | 与 ④ 同源 ⇒ **见 §8.4** | — | — | ❌ **不可行，卡在未实现的前置**（§8.4） |
+| **⑥** | **equality saturation（egg 方向 Core 化）** | `[推理]` **经典爆炸源**：饱和 = 在带等价类的图上跑**不动点**，e-graph 节点数**无先验上界**；且它与 §5.4 的 PE/BTA **落在同一条已超线性的分析面上** ⇒ 见 §8.3 | `[推理]` **极高**（本项最著名的问题） | 迭代上限 / e-graph 节点上限 / 只跑用户点名的规则。**代价**：撞顶后的语义 = ？本仓**禁止静默降级** ⇒ 必须硬错（新错误类） | ❌ **不可行** |
+| **⑦** | **阶段不止 compile/runtime（含 target-bind / load / JIT）** | `[推理]` **每多一个 stage ≈ 一次完整编译**：`[实测]` 一次自编译冷启 **41.27 s**、三 stage 全链 **98.0 s** | `[推理]` 高 | 无 | ❌ **不可行**（数量级冲突；且 `[实测]` target-bind/load/JIT **在本仓零实现**，见 §8.5） |
+| **⑧** | **`E`（effects）进 `Fragment` 类型** | 同 ①（E 无真值源） | — | — | ❌ **不可行**（前置 = `fi_ispure` 真值化，本仓自述该时序**未解决、只被绕开**） |
+
+### 8.2 【新评估对象】`Fragment<T>` 的表示与推导
+
+**这是 team-lead 指定的新评估对象，也是该提案的核心。判定 = ❌ 不可行（当前），卡在"表示面"而非"速度面"。**
+
+**该稿的要求**（`metaprog-model-raw.md:65-83` 逐字）：`Fragment<T>` = 「**已经类型化、已经解析 binding、
+已经建立 semantic identity 的 HDFG 子图**。**不是字符串，也不是裸 AST。**」
+
+**与 `.cir` / `.ccr` / V8 的关系** `[实测 + 推理]`：
+
+| 面 | `[实测]` 事实 | `[推理]` 判断 |
+|---|---|---|
+| **`.cir`（函数快照缓存）** | 粒度 = **函数**（`save_cir_cache(path, source_fi, ir_fi)`，三个取界全来自函数级数组 `cir_cache.cr:291-294/308`）；`:225-226` 逐字「The function SG is recreated by `df_begin_func` on a cache hit, so only nested records are stored」 | **`.cir` 已经实现了 `Fragment` 想要的约 80 %——但只对"整函数形状"成立。** 缺的 8 项见 §3.5 表 |
+| **`.ccr`（存在格载体）** | `CCR_VERSION = 9` / 8 段（`ccr_io.cr:135/138`）；NOD 40 B，`item` 槽 = 类型项索引，`[实测]` **覆盖率 36.09 %** | 承载面够，**语义面不够**：`Fragment<T>` 的 `<T>` 要落在项表上，而项表全文 **23 行 / 61 项** |
+| **V8（team-lead 特别问的那条）** | `docs/maintainer/design/ccr-v8-open-relational-lattice.md:5-6` 逐字「状态 = **设计定稿（未实现）· 第二版（v2）**」；`:112-115`「**V8 几乎全是 `[提案]`**」；`:288`「**CCR 再成为第四门完整语言是非常糟糕的工程选择。**」 | **答案 = "相反"，且比"相反"更弱**：<br>① **V8 是提案**（不可作为可用前置）；<br>② 它的取向是**收窄** `.ccr` 的语义职责（`:288`），而 `Fragment<T>` 要的是**扩展**；<br>③ team-lead 转述的「有限的关系理论**呈现**」**该字符串在仓库中不存在**——最接近的是 v1 的「有限的关系理论**描述**」（`:67`），且 `:338` 的裁定是**删除**该承诺（此后唯一合法写法 = 「`.ccr` 本身有限，但 relation universe 是开放的」）。**⇒ 拿 V8 当 `Fragment` 的承载依据，方向是反的。** |
+
+**`[推理]` 结论**：`Fragment<T>` 的**最省前身不是 V8，是 `.cir` 快照**——把函数边界抽象成
+任意 `(node_start, node_count)`，**并接受 var 域不可平移**（＝片段只能用于同一次编译内的重排）。
+这条不需节点身份、不需类型项跨进程，判据可复用 v20/v21 既有骨架。**但它给不出该稿要的
+"携带 Γ/E/S/D 的开放代码"。**
+
+### 8.3 ②（全程序查询）与 ⑥（equality saturation）的成本量级 `[推理]`
+
+**②semantic 层 / whole-program query：**
+
+- `[实测]` **本仓已有一次同类的实战错误**：`.cir` 快照曾把**全程序边表**随**每函数**落盘
+  ——`cir_cache.cr:406-410` 逐字：「实测 **4,314 万条边记录 vs 20.6 万节点记录**」「它正是本条
+  二次膨胀的**起点**」。修法（v20）= 收窄到本函数。
+- `[实测]` 今天规模：6,238 串 · 156,217 边 · 169,418 节点 · 7,638 区段 · 15,244 调用点。
+- `[推理]` **无索引 ⇒ 每次查询 O(全图)**；N 次查询 ⇒ O(N × 全图)。**量级 = ×1.5–×3**，
+  且要为索引付一次全图遍历（又一次落在 §2.3 的超线性面上）。
+- ⚠ `[实测]` 另一个致命细节：查询要的语义事实**大部分在但有一半是假的**——
+  `fi_ispure` 是"生成期乐观默认值"（`checker.cr:4526-4531`），`item` 覆盖只有 36.09 %。
+  **拿它做查询 ⇒ 静默缺格**，而本仓对静默零容忍。
+
+**⑥equality saturation：**
+
+- `[推理]` 饱和 = 在带等价类的图上跑**不动点**；e-graph 大小**无先验上界**（这是该技术最著名的
+  性质，也是 egg 论文自己承认的工程约束）。本仓基数：`[实测]` **15,244 个调用点**、
+  **40.8 % 是结构骨架节点**、**14.3 % 是 lazy thunk/force**。
+- `[推理]` 即使每次重写只新增 1 个等价类，收敛也要一遍全图迭代 ⇒ **与 §5.4 的 PE/BTA 是
+  同一条已超线性面上的不动点**。分母不是 41 s，是那 **30 s × 迭代数**。
+- **缓解的代价**：设节点/迭代上限 ⇒ 撞顶后的语义必须是硬错；而 equality saturation 的
+  价值恰恰来自"跑到收敛"。**限上限 = 削掉该方法的核心。**
+
+### 8.4 ④⑤ 的前置：CIC + SMT 现状（**二次实核**）
+
+team-lead 要求我自己再核一遍。**我核了两轮，并另让一份独立检索复核，三处一致：**
+
+| 检索（`[实测]`，本轮二次执行） | 结果 |
+|---|---|
+| `grep -rnwE 'smt\|z3\|cvc5\|veriT' src/ bootstrap/ tools/ grammar/` | **0 命中** |
+| `grep -rnwE 'CIC\|cic' src/ bootstrap/` | **0 命中** |
+| `grep -rn 'src/kernel\|kernel/' src/ci/run.sh build_selfhost_native.py src/compiler/*.cr` | **0 命中**（零引用） |
+| `ls src/kernel/` | 9 个 `.cr`（`nbe.cr` 13,205 B · `term_io.cr` 11,898 B · `kernel_main.cr` 7,897 B …）= **1287 行真代码** |
+| `ls build/` | **只有 corec / corearch / corelsp**——**无 `build/kernel`**（从未构建） |
+
+**旁证（两份仓库自有文档，逐字）**：
+- `docs/maintainer/adr/adr-0009-spec-system-v2.md:4` `- 状态:accepted(设计定稿,未实现)`；`:18`
+  `- 负面:全链未实现(解析/翻译桥/SMT 通道/内核绑定);CIC 内核选择挂起(Rocq vs Lean 4,等社区)`
+- `docs/superpowers/specs/2026-08-28-lsp-production-design.md:76` 表格行
+  `| 验证管线（翻译桥/CIC，0 实现） | spec-aware LSP 依赖 | P2，随主线 |`
+- ⚠ **另加两条该稿与 team-lead 转述都未提的事实**（我核到）：
+  ① `coq/fmt_int.v` 是**用外部 Coq 验证 stdlib 函数**（`Theorem roundtrip`），
+     `docs/coq/README.md:6` 自明「**这不是规约系统**」⇒ 它**不构成 CIC 通道的任何实现**；
+  ② `src/kernel/` 那 1287 行是 **McTT 移植的 MLTT 内核**，
+     `docs/superpowers/specs/2026-08-15-mctt-core-kernel-design.md:42` 逐字
+     「**没有 Σ、没有 Id、没有 W-类型**——唯一归纳方案是 ℕ + natrec」⇒ **是 MLTT 的 Π+ℕ 片段，不是 CIC**；
+     且最新评估 `plans/2026-09-20-safety-verification-plan.md:193` 对它**零提及**、直书
+     「（`spec-design.md:526-532`）五里程碑**全部未启动**」。
+
+**⇒ ④⑤ 的判定（按 team-lead 要求明写）**：
+
+> ## ❌ **不可行 —— 卡在未实现的前置。**
+> 「不可行」的理由**不是"难"**，是：④⑤ 的**全部机制**就是把 `Rewrite` 的 obligations 交给
+> **CIC / SMT / translation validator** 去验（该稿 `:118-126` 自述「由 Core 的正常 checker /
+> CIC / SMT / translation validator 检查」）。而这三者在本仓的现状是
+> **CIC = 0 实现 · SMT = 0 实现 · translation validator 不存在**。
+> **⇒ ④⑤ 今天不是"实现一个功能"，是"实现之后再去实现它的验证器"。**
+
+### 8.5 ⑦⑧ 与 `.ccr` / Target Model / `.coi` 三层 —— **核实结论：三层不成立**
+
+该稿 `:164` 逐字自称：「这样 staging 与既有的 **CCR / Target Model / COI 分层完全一致**」。
+team-lead 要求核"是否**真的**一致"。**核实结论：该前提不成立，逐条如下。**
+
+**(a) 仓库里没有这个"三层"。** `[实测]` 全仓**没有任何一句话**把
+`.ccr`(target-independent) / Target Model / `.coi`(target-specific) 并列成三层。
+仓库**真实的"三层映射链"是另一条**：
+- `docs/z-vision.md:17` 逐字：「**三层映射链（2026-08-27 正式晋升）**：范式 → 图 → 格 → 编码」
+- `docs/project-book.md:111` 逐字：「**三层映射**（2026-08-27 正式晋升）：语义 → 图 → 格 → 编码」
+- `docs/glossary.md` `## 二、三层映射`（表体列 **图(HDFG) / 格(层) / 编码(层)**）
+⇒ **提案把一条链（图→格→编码）与一份 2026-09-23 的口述管线图混为一谈。**
+
+**(b) 三层里只有一层是真的。** `[实测]`：
+
+| 层 | 设计文档 | 源码 | 判定 |
+|---|---|---|---|
+| **`.ccr`** | 有权威（`specs/2026-09-09-lattice-ir-v7-format.md`） | `ccr_io.cr` 完整实现（v9 / 8 段 / 版本闸 / 段号闸） | ✅ **真实存在，已实现** |
+| **Target Model** | **不是仓库术语**——只在维护者口述原文的管线图里出现一次框名（`coi-…:197`），被同档 `:224` 标 `[已设计未实现]`；仓库自有最近物 = `execution-mapping-design.md` §3.8 `PerformanceProfile`（`:3` 状态行「设计定稿（未实现）」） | **零**（无任何 `.cr` 符号） | ❌ **仅提案，零实现** |
+| **`.coi`** | `docs/maintainer/design/coi-optimization-knowledge-sidecar.md:4` 逐字「状态 = **设计定稿（未实现）**」；同档 `:77-80` 自设 `K-3` 条：「`.coi` 在本仓**零对应物**」 | **`[实测]` `grep -rIl coi src/ tools/ tests/` = 0 命中** | ❌ **不存在，纯提案** |
+
+**(c) ⑦⑧ 赖以立论的两句话，与仓库现状的关系：**
+
+| 提案的规则 | `[实测]` 核实 |
+|---|---|
+| 「**target-bound metaprogram 不允许回写 target-independent 的 CCR semantics**」 | **仓库里没有等价表述**：`target_bind` / `target-bind` / `target bound` 全仓 **0 命中**。最接近的是**同族但不同物**的一条——`specs/2026-09-09-lattice-encoding-boundary-design.md:175-176` 逐字：「事件流与表数据 = **编码层事务**（x86 实例的投影内容），**不入格形态段**——格形态携带语义对象，不携带任何目标机的投影中间物」。**主体是"实例数据/编码层事务"，不是"target-bound metaprogram"。** |
+| 「`.ccr` 仍然只保存 **target-independent** program relations」 | ❌ **该定性在本仓没有权威出处**：全仓 `target-independent` 仅 **3 处命中，全在 `.coi` 档转述**维护者口述原文的引文块内（`:144` / `:150` / `:1463`）。**仓库自有的定性恰好相反**：`lattice-encoding-boundary-design.md:21` 逐字「**`.ccr 局部不纯`**」，`:96-99` 点名 ①②③ 三类经典机泄漏（含 ③「**tag/2L 相关 op 与帧 tag 语义在 op/类型码面**」= x86 编码选择），`:128-131` 列 P1–P4 不纯点。 |
+
+**(d) `[实测]` 一条该稿与转述都没提、且方向更微妙的事实** —— `.ccr` 格式里**已经有**一个
+**target-specific 载荷槽**：
+
+- 键定义：`src/compiler/ast.cr:660` `OPT_KEY_REG_ASSIGN : int = 0;  // [var_idx:u32, reg_num:u8]...`
+- 写侧：`src/arch/x86_64/regalloc.cr`（`g_opt_meta` 写点；`meta_reg_pair_off` 读回）
+- 落盘：`src/compiler/ccr_io.cr:749-750`（SYM 段末 `opt_meta` 子节，`:59` 布局 `[opt_count][opt_count×{key,len,data}]`）
+- 读侧：`src/compiler/corearch.cr:190`
+- **但是** `[实测]` **今天发出的文件里它是空的**：同一源文件 `-O 0` 与 `-O 2` 的 `.ccr`
+  **逐字节相同**（3,245,935 B / `cmp` 无差异）；且 `[实测]` **corearch 从不回写 `.ccr`**
+  （`grep save_ccr|write_file src/compiler/corearch.cr` = 0 命中）。
+  ⇒ 与仓库注释「regalloc 移后端（2026-09-07）…`.ccr` 不承载分配结果」(`main.cr:650`) 一致。
+
+> **8.5 的净结论**：提案的**规则方向**（不把 target 绑定回写 target-independent 层）与仓库**教义**
+> 大体同向（`lattice-encoding-boundary-design.md:175-176` 是它的同族先例）；但
+> ① 它用来立论的"**既有三层**"**不存在**；② `.ccr` 的 "target-independent" 定性**没有仓库权威出处**，
+> 而格式里**留着**一个 target-specific 槽（当前恰好为空）。
+> ⇒ **"完全一致"这个自评不成立**，必须重述为：**"与仓库的「编码层事务不入格形态段」教义同向，
+> 但该教义今天靠的是"没人写"而不是"格式禁止写"。**
+
+### 8.6 ⑦⑧ 的 stage 现状 `[实测]`
+
+| 概念 | 现状 |
+|---|---|
+| 编译 **stage 链**（stage0/1/2/3） | ✅ **真实存在且是实现级判据**（`src/ci/run.sh:351`「Three-stage frontend bootstrap. corec2 and corec3 must be byte-identical.」） |
+| 元编程意义的 **staging** | ❌ `[实测]` `src/` 里 `staging` **0 命中**；`stage` 一词的 12 处命中**全部**指自举链 |
+| **`target-bind`** | ❌ 全仓 **0 命中** |
+| **`load time`** | ❌ `load time` / `load-time` 全仓 **0 命中**；`加载时/装载时` 仅 2 处且非机制 |
+| **`link time`** | ⚠ 真实存在但是**链接期重定位/地址回填**（`ast.cr:601` `IR_FNADDR … link-time patch`），**与元编程无关** |
+| **JIT** | ❌ **0 实现**（5 处命中全是安全设计文档里的举例） |
+| `src/stdlib/hotpatch.cr` | ❌ **不是 load-time 机制**：它是 `SIGHUP` 触发的**运行期**配置热重载（`:11-17` `hp_load_config` 重读 `.hotpatch.toml`）+ in-flight 计数 |
+
+---
+
+## 九、总判定（team-lead 指定的单独一句）
+
+> **问题：这八项里，哪几项现在就能做、哪几项卡在未实现的前置、哪几项在自举约束下代价不可接受？**
+
+### 9.1 **现在就能做**：**0 项**
+
+`[实测]` 八项**共同的**最小前置——**"编译期元对象"这一层的表示**——在本仓**一个都不存在**
+（§8.0：`Fragment`/`Decl`/`Goal`/`Proof`/`Rewrite` 在 `src/`+`grammar/` **全 0 命中**；
+`grammar/core.ebnf` 67 条产生式里**零**元编程面）。
+`[推理]` 因此八项里**没有任何一项**可以在不先建这一层的前提下开工。
+
+**⇒ 与 §6.1 的关系**：§6.1 的 T0–T4 是**前三块**的前置小切片（且 T0/T1/T2/T3 **不需要元对象层**），
+它们**仍然成立、仍然可立即开工**；但它们**不构成本节八项的任何一项**。
+
+### 9.2 **卡在未实现的前置**：**⑤ 项**
+
+| 项 | 前置 | 前置的现状 `[实测]` |
+|---|---|---|
+| **①** `Fragment⟨Γ,T,E,S,D⟩` | **E** 的真值源 | `fi_ispure` = "生成期乐观默认值"（`checker.cr:4526-4531`），本仓自述该时序**未解决、只被绕开** |
+| **①**（续） | **S / D** 的真值源 | **Target Model = 非仓库术语、零实现**；**`.coi` = 零对应物**（§8.5） |
+| **④** `Rewrite<T>` | **CIC / SMT / translation validator** | **三者皆 0 实现**（§8.4，两轮实核） |
+| **⑤** `Goal<P>`/`Proof<P>` | 同上 | 同上 |
+| **⑧** `E` 进类型 | 同 ① 的 E | 同上 |
+
+### 9.3 **在自举约束下代价不可接受**：**③ 项**
+
+| 项 | 卡住它的约束 |
+|---|---|
+| **③** semantic pattern matching | 「问题本身是子图同构」（NP-hard 一般形）——**不是自举约束，是问题本身的复杂度**；限形则削掉提案自己举的核心例子（`for` 与 `map` 同构） |
+| **⑥** equality saturation | **编译速度**：不动点 + e-graph 无先验上界，落在 §2.3 的**已超线性**面上；`[实测]` 该面已占自编译 **72.7 %** |
+| **⑦** 多 stage（target-bind / load / JIT） | **编译速度**：每 stage ≈ 一次完整编译（`[实测]` 41.27 s 冷）；且 `[实测]` 该三项**在本仓零实现** |
+
+### 9.4 **八项之外，但必须先做的一件事** `[推理]`
+
+> 八项里有 **6 项**（①③⑥⑦⑧ + ④⑤ 的验证面）的落点都在**同一个面上**：对整张 HDFG 做
+> **全程序 / 不动点 / 同构**级分析。而 `[实测]` 那个面**今天已经是自编译成本的 72.7 % 且已超线性**。
+> **⇒ 无论最终做哪几项，§6.4 的 S0（把 `pa_in_unsafe`/`is_in_unsafe` 改 O(1)）都是前置中的前置。**
+
+---
+
+## 十、更正清单（对前文的补充）
+
+接 §7.3，本轮新增三条：
+
+| 说法 | 出处 | `[实测]` 核实 |
+|---|---|---|
+| 「staging 与既有的 **CCR / Target Model / COI 分层完全一致**」 | 第四块讨论稿 `:164` | ❌ **不成立**：「三层」在本仓不存在；真实的三层是**范式→图→格→编码**（`z-vision.md:17`）。三层里**只有 `.ccr` 是真的**（Target Model 非仓库术语、`.coi` 零对应物）。见 §8.5 |
+| 「`.ccr` 仍然只保存 **target-independent** program relations」 | 第四块讨论稿 `:148` | ❌ **该定性无仓库权威出处**：全仓 `target-independent` 仅 3 处，全在转述口述原文的引文块里。仓库自有定性相反 = 「**`.ccr 局部不纯`**」（`lattice-encoding-boundary-design.md:21`），且格式里**留着** target-specific 槽 `opt_meta`/`OPT_KEY_REG_ASSIGN`（`[实测]` 当前为空）。见 §8.5(d) |
+| 该稿自述读了 `docs/comptime.md` / `docs/at-intrinsics.md` / `docs/spec-design.md` | 第四块讨论稿 `:4` | ⚠ **前两条路径不在该位置**（实际 = `docs/maintainer/proposals/comptime.md` / `docs/developer/at-intrinsics.md`）；且它读的 `main` **不是 `develop` 当前点**。本档现状断言**一律以重核为准** |
+
+---
+
+## 十一、未能核实清单（本轮补充）
+
+接 §7.1。本轮新增：
+
+| # | 未核实项 | 为什么 | 影响 |
+|---|---|---|---|
+| 11 | **`opt_meta` 在"最重"的构建路径上是否真为空** | 我只测了 `-O 0` vs `-O 2`（同源、`ccr` 子命令）逐字节同；**未**逐 opt-level × 全 build 路径穷举。 | §8.5(d) 的"当前为空"是**实测于该条件**，不可外推为"任何条件下恒空"。 |
+| 12 | **`fi_ispure` 乐观默认值的实际误导率** | 未跑探针量化"有多少函数的纯度被误标为 1"。 | §8.1 ①/⑧ 的"E 无真值源"是**结构性**断言（源码头注自承），**未量化后果**。 |
+| 13 | **semantic pattern matching 的可判定子类边界** | 未做文献调研（本档不对论文内容做判断）。 | §9.3 ③ 的"子图同构 ⇒ NP-hard 一般形"是**复杂度常识推理**，**不是**对本仓某个具体 pattern 语言的实测。 |
+| 14 | **`.coi` 的两份文档是否已被维护者采纳为方向** | 超出我的核实范围（我只核它们的内容与状态行）。 | §8.5 只断言"`.coi` 零实现"，**未断言**"该方向不应做"。 |
+| 15 | **§8.1 的八栏成本量级** | 与 §五 同性质：**全部是 `[推理]`**，无一项是本轮新跑的数字。分母沿用 §2 的实测基线。 | 八项的 ×N 只作**量级**用。 |
+
+**本轮 `[实测]` 的新增项**（供复核）：§8.0 的元编程面 grep 表 · §8.4 的两轮 CIC/SMT 实核（含 `ls src/kernel/` 与 `ls build/`）·
+§8.5 的 `.coi` 零命中与三层链原文 · §8.5(d) 的 `OPT_KEY_REG_ASSIGN` 四处接线 + **`-O 0` vs `-O 2` 的 `.ccr` 逐字节相同** ·
+§8.6 的 stage/load-time/JIT/hotpatch 检索表。
+**本轮 `[推理]`**：§8.1 全表 · §8.3 · §9 全节。
+
+---
+
+## 十二、附录：复现命令
 
 ```bash
 # 环境
@@ -753,6 +1012,29 @@ rm -rf .core/cache && nice -n 19 ./build/corec ccr <FILE> -o /tmp/o.ccr
 # §3.1/§3.2 现状探针（**未折** = 图上仍是 const+binary / const+call）
 ./build/corec cir <FILE.cr>          # 看 main 的 region
 ./build/corec check <FILE.cr>        # 看 @comptime 是否报错
+
+# §8.0 元编程面现状（全部应为 0 命中）
+grep -rIl -e macro -e splice -e egraph -e 'equality saturation' src/ grammar/
+grep -in 'macro\|hygien\|quote' grammar/core.ebnf
+
+# §8.4 CIC/SMT 二次实核（应全为空）
+grep -rnwE 'smt|z3|cvc5|veriT' src/ bootstrap/ tools/ grammar/
+grep -rnwE 'CIC|cic' src/ bootstrap/
+grep -rn 'src/kernel' src/ci/run.sh build_selfhost_native.py src/compiler/*.cr
+ls src/kernel/                       # 9 个 .cr；ls build/ 应只有 corec/corearch/corelsp
+
+# §8.5(a) 真实的"三层"是范式→图→格→编码（不是 .ccr/Target Model/.coi）
+sed -n '17p' docs/z-vision.md ; sed -n '111p' docs/project-book.md ; sed -n '15,19p' docs/glossary.md
+
+# §8.5(d) .ccr 的 target-specific 槽当前为空（两产物应逐字节相同）
+rm -rf .core/cache && nice -n 19 ./build/corec ccr <FILE.cr> -o /tmp/o0.ccr -O 0
+rm -rf .core/cache && nice -n 19 ./build/corec ccr <FILE.cr> -o /tmp/o2.ccr -O 2
+cmp /tmp/o0.ccr /tmp/o2.ccr
+grep -n 'save_ccr\|write_file' src/compiler/corearch.cr   # 应 0 命中 = corearch 不回写
+
+# §8.6 stage / load-time / JIT / hotpatch 检索
+grep -rnw stage src/ ; grep -rn 'load.time' docs/ src/ ; grep -rn 'target.bind' docs/ src/
+sed -n '1,17p' src/stdlib/hotpatch.cr   # = SIGHUP 运行期配置重载，非 load-time
 ```
 
 **工件位置**（本次评估的现场证据，不在仓库内）：
