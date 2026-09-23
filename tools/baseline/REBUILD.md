@@ -134,6 +134,8 @@ bash tools/baseline/warm_run.sh ./build/corec /tmp/warm_now   # 牙齿层（语�
   跑计数腿 ⇒ **PASS，76 档 · rc 分布 `44×0 / 32×1`**。⚠ **该分布属于那枚二进制，不得当基线**；
   与上行旧值的差（rc=0 从 36 升到 44、rc=1 从 39 降到 32，语料净 +1）⇒ **7 档由 rc=1 翻为 rc=0**（能力变更，非回归），
   **划界清单须用 develop 自建二进制重划后才能当「既有失败」用**。
+  **⇒ 本文档他处出现的「75 档」同属 76 档之前的实测值**（牙齿层的「既有 75/29 语料」`+125s（75 档 ×2 次 ccr）`）——
+  **不得当当前语料数**；`src/ci/run.sh` 里那处同款引用已于 2026-09-24 一并补正。
   空 fixture ×2（`tests/suite/{test_control_flow,test_generics}.cr`，日志 = `error: cannot read`）·
   P21 嵌套 fn ×**3** · examples 解析错 ×2 · 库单元单独 check ×25 · TF01 并发族 ×5 · TF07 ×1 · **B04 ×2** —— 划界见
   `p6-task0-report.md` §3.1（跑之前先读，勿把既有失败当回归）。

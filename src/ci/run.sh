@@ -119,9 +119,10 @@ case "$CI_JOB_NAME" in
     # `decisions=0`）。判定面回归网 = ① **冻结基线同源对拍**：冻结基线（**由
     # `tools/baseline/rebuild.sh` 从 pinned revision 重建**——配方 + 三 sha 白名单见
     # `tools/baseline/REBUILD.md`；R2 P6 Task 1 起可复现，二进制仍不入库）× 当前源 vs
-    # 当前二进制 × 当前源，**75 档**语料（runner `tools/baseline/parity_run.sh`，逐档 clean-cache；
-    # 档数 = 实读枚举 35+2+15+19+4（suite/compiler/后端内核/stdlib/examples）= 与 runner 的 `CORPUS_TOTAL=75` 硬断言一致；
-    # 2026-09-17 批 6 T6 实测重数）
+    # 当前二进制 × 当前源，**76 档**语料（runner `tools/baseline/parity_run.sh`，逐档 clean-cache；
+    # 档数 = 实读枚举 36+2+15+19+4（suite/compiler/后端内核/stdlib/examples）= 与 runner 的 `CORPUS_TOTAL=76` 硬断言一致；
+    # 2026-09-17 批 6 T6 实测重数 t1=35；**2026-09-18 批8 2(a)（#132）加 `tests/suite/cli_view_test.cr` ⇒ t1=36；
+    # 本处由 2026-09-24 补正（#170 只改了 runner 与 REBUILD.md，漏了本处 ⇒ 该句曾短暂为假）**）
     # `check` rc + 日志逐档 diff（手工判据，本 job 内不跑——CI 为浅检出且无 jj）；② **行为探针**：
     # 下列套件（test_named_face / test_named_dedup / test_type_engine / test_optional /
     # test_match_exhaust …）+ **入仓探针语料 `tests/probes/`（29 档；runner
