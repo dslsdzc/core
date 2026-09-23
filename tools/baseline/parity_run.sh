@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# R2 P6 Task 1（E-13）：语料同源对拍 runner —— 75 档 × `check`，逐档 clean-cache。
+# R2 P6 Task 1（E-13）：语料同源对拍 runner —— 76 档 × `check`，逐档 clean-cache。
 #
 # 用法: bash tools/baseline/parity_run.sh <corec二进制> <outdir>
 # 产物: <outdir>/logs/<tag>_<path>.{log,rc}（与迁移期 runner 同名同格式）+ <outdir>/parity.out
@@ -8,8 +8,9 @@
 #   · 语料分层 / 命名 / 逐档 clean-cache 逐字继承（可 `diff -rq` 互证）；
 #   · **影子模式整体剥除**——`--type-shadow` / `--type-shadow-dump` 两旗标已随 R2 P5 Task 5
 #     删除，原 `shadow` 分支为死码（不移植）；
-#   · `shopt -s nullglob` + 计数断言 **75**（2026-09-16 全局 seam 批 +1 = `global_seam_test.cr`；同日 apx 批 +1 = `apx_conversion_test.cr`；
-#     2026-09-17 批 5（opt-dex）+1 = `opt_dex_test.cr`——Tier 1 为 `tests/suite/*.cr` 通配 ⇒ 新语料自动入档，**只须同步本计数**）：未匹配 glob 不再产生**字面 glob 伪条目**
+#   · `shopt -s nullglob` + 计数断言 **76**（2026-09-16 全局 seam 批 +1 = `global_seam_test.cr`；同日 apx 批 +1 = `apx_conversion_test.cr`；
+#     2026-09-17 批 5（opt-dex）+1 = `opt_dex_test.cr`；**2026-09-18 批8 2(a)（#132）+1 = `cli_view_test.cr`——该次未同步本计数
+#     ⇒ 计数自 2026-09-18 起失配（76≠75），第一腿硬失败至 2026-09-24 本批同步**——Tier 1 为 `tests/suite/*.cr` 通配 ⇒ 新语料自动入档，**只须同步本计数**）：未匹配 glob 不再产生**字面 glob 伪条目**
 #     （R2 P6 T0 §3.2 的 `_tmp_p5t3b_probes_*.cr` 教训）；语料数变化 ⇒ 硬失败（须显式改本文件）。
 #
 # 判定用法（同源对拍）：同一二进制跑本 runner 与在位的 `/tmp/p3t0_run.sh check`，
@@ -28,8 +29,10 @@ cd "$REPO_ROOT" || exit 1
 mkdir -p "$OUT/logs"
 CC="nice -n 19 $CCBIN"
 
-CORPUS_TOTAL=75   # = t1 **35** + t2 2 + t3 15 + t4 19 + t5 4（**2026-09-17 批 6 T6 实测逐层枚举**，
-                  #   非沿用旧账：R2 P6 T0 表 C 记 t1=32，其后 global_seam(+1)/apx(+1)/批 5 opt_dex(+1) 三次 +1 ⇒ 35。
+CORPUS_TOTAL=76   # = t1 **36** + t2 2 + t3 15 + t4 19 + t5 4（**2026-09-17 批 6 T6 实测逐层枚举**，
+                  #   非沿用旧账：R2 P6 T0 表 C 记 t1=32，其后 global_seam(+1)/apx(+1)/批 5 opt_dex(+1) 三次 +1 ⇒ 35；
+                  #   **2026-09-18 批8 2(a)（#132）+1 = `cli_view_test.cr` ⇒ 36**——该次**未同步本行**，
+                  #   本计数自 2026-09-18 起与实数失配（76≠75），第一腿 `exit 1` 硬失败至 2026-09-24 本批同步。
                   #   ⇒ 与 `ls tests/suite/*.cr | wc -l` 一致；**档数变化必须同批改本行与本注释**，否则 runner 硬失败。）
 
 run_one() {   # $1 tier tag, $2 file
