@@ -58,7 +58,7 @@ fn main() -> int {
 | tests/ | 测试三套(bootstrap/selfhost/suite) |
 
 > 注:examples/hello/ 目前是空骨架——用 add/ 或自建文件开始。
-> 注:本表原列 `src/arch/linux/ld/`(ELF 后端),该目录**已退役**——后端现按三轴分目录,组合根在 `src/targets/x86_64-linux/`(2026-09-24 更正)。
+> 注:`src/arch/linux/ld/`(原来的 ELF 后端)**已退役**,后端现在按三轴分目录,组合根在 `src/targets/x86_64-linux/`(2026-09-24 更正)。
 
 ## 五、下一步
 
