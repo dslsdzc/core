@@ -266,10 +266,20 @@ def split_concat_lines(files, read, sep_fmt="// === {f} ===",
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+class ProbeError(Exception):
+    """Hard failure: the probe could not obtain its input.
+
+    Never swallowed into a PASS.  A criterion that finds no input must go RED
+    (fail-closed), otherwise a lagging or empty checkout reads as success --
+    the "empty shell green" failure mode.
+    """
+
+
 class Reader:
     def __init__(self, rev=None):
         self.rev = rev
         self.cache = {}
+        self._file_list = None
 
     def __call__(self, path):
         if path in self.cache:
@@ -279,15 +289,65 @@ class Reader:
                 ["jj", "file", "show", "-r", self.rev, path],
                 cwd=REPO, capture_output=True, text=True)
             if p.returncode != 0:
-                raise SystemExit("jj file show failed for %s: %s"
-                                 % (path, p.stderr.strip()))
+                raise ProbeError(
+                    "cannot read %s at rev %s: %s\n"
+                    "  (a stale working copy makes every jj command fail; "
+                    "the criterion must NOT pass on missing input)"
+                    % (path, self.rev, p.stderr.strip().splitlines()[0]
+                       if p.stderr.strip() else "no stderr"))
             txt = p.stdout
         else:
-            with open(os.path.join(REPO, path), encoding="utf-8",
-                      errors="replace") as fh:
-                txt = fh.read()
+            try:
+                with open(os.path.join(REPO, path), encoding="utf-8",
+                          errors="replace") as fh:
+                    txt = fh.read()
+            except OSError as exc:
+                raise ProbeError("cannot read %s: %s" % (path, exc))
         self.cache[path] = txt
         return txt
+
+    def list_cr(self, prefixes=("",)):
+        """List .cr paths, coherent with the source of the file CONTENTS.
+
+        `prefixes` are literal path prefixes; the default ("",) matches every
+        relative path.  With --rev the list comes from `jj file list -r <rev>`,
+        NOT from the working tree: a lagging checkout must not silently shrink
+        the corpus (the file list and the contents have to come from the same
+        revision).
+        """
+        if self.rev:
+            if self._file_list is None:
+                p = subprocess.run(
+                    ["jj", "file", "list", "-r", self.rev],
+                    cwd=REPO, capture_output=True, text=True)
+                if p.returncode != 0:
+                    raise ProbeError(
+                        "cannot list files at rev %s: %s\n"
+                        "  (a stale working copy makes every jj command fail)"
+                        % (self.rev, p.stderr.strip().splitlines()[0]
+                           if p.stderr.strip() else "no stderr"))
+                self._file_list = sorted(p.stdout.split("\n"))
+            out = []
+            for rel in self._file_list:
+                if not rel.endswith(".cr"):
+                    continue
+                if not any(rel.startswith(x) for x in prefixes):
+                    continue
+                if rel.startswith(("build/", ".jj/", ".core/")):
+                    continue
+                out.append(rel)
+            return sorted(out)
+        out = []
+        for dp, dn, fn in os.walk(REPO):
+            dn[:] = [d for d in dn if d not in (".jj", ".git", "build", ".core")]
+            for f in fn:
+                if not f.endswith(".cr"):
+                    continue
+                rel = os.path.relpath(os.path.join(dp, f), REPO)
+                if not any(rel.startswith(x) for x in prefixes):
+                    continue
+                out.append(rel)
+        return sorted(out)
 
     def abspath(self, path):
         return os.path.join(REPO, path)
@@ -439,6 +499,10 @@ def parse_spec_sites(text):
 def cmd_semi_resolvers(a):
     read = Reader(a.rev)
     sites = scan_semi_sites(read)
+    if not sites:
+        print("PROBE ERROR: no T_SEMI/SEMI occurrence found in %s -- "
+              "cannot pass on empty input" % ", ".join(PARSER_FILES))
+        return 1
     print("=" * 72)
     print("J-T0-2 ';'-dependent resolver sites")
     print("=" * 72)
@@ -566,24 +630,16 @@ def check_struct_lit_guard(read):
 
 def cmd_struct_lit_forms(a):
     read = Reader(a.rev)
-    root = REPO
-    targets = []
-    for dp, dn, fn in os.walk(root):
-        dn[:] = [d for d in dn if d not in
-                 (".jj", ".git", "build", ".core", "legacy_asm_backend")]
-        for f in fn:
-            if f.endswith(".cr"):
-                rel = os.path.relpath(os.path.join(dp, f), root)
-                targets.append(rel)
-    targets.sort()
+    targets = [p for p in read.list_cr()
+               if not p.startswith("legacy_asm_backend/")]
+    if not targets:
+        print("PROBE ERROR: no .cr source found -- cannot pass on empty input")
+        return 1
 
     texts = {}
     struct_table = {}
     for rel in targets:
-        try:
-            txt = read(rel)
-        except SystemExit:
-            continue
+        txt = read(rel)          # ProbeError propagates: never a silent skip
         texts[rel] = txt
         struct_table.update(parse_struct_table(txt))
 
@@ -699,34 +755,64 @@ TOKENIZE_RE = re.compile(r"tokenize\s*\(")
 
 
 def cmd_tokenize_sites(a):
+    """J-T0-5 static half, with the scope breakdown the count depends on.
+
+    The count is scope-sensitive, so report every scope explicitly:
+      raw lines matching in src/compiler/*.cr       (includes def + comments)
+      - the definition line
+      - pure comment mentions
+      = real call sites in src/compiler/
+      + real call sites elsewhere under src/ (src/lsp/lsp.cr)
+      = real call sites in src/**
+    """
     read = Reader(a.rev)
     hits = []
-    for dp, dn, fn in os.walk(os.path.join(REPO, "src")):
-        dn[:] = [d for d in dn if d not in (".jj", ".git", "build", ".core")]
-        for f in fn:
-            if not f.endswith(".cr"):
+    mentions = []
+    raw = 0
+    srcs = read.list_cr(("src/",))
+    if not srcs:
+        print("PROBE ERROR: no .cr source under src/ -- "
+              "cannot pass on empty input")
+        return 1
+    for rel in srcs:
+        for i, line in enumerate(read(rel).split("\n"), start=1):
+            if not TOKENIZE_RE.search(line):
                 continue
-            full = os.path.join(dp, f)
-            rel = os.path.relpath(full, REPO)
-            for i, line in enumerate(read(rel).split("\n"), start=1):
-                code = line.split("//")[0]
-                if not TOKENIZE_RE.search(code):
-                    continue
-                if re.search(r"fn\s+tokenize\s*\(", code):
-                    kind = "DEFINITION"
-                else:
-                    kind = "call"
-                hits.append((rel, i, kind, line.strip()))
+            if rel.startswith("src/compiler/"):
+                raw += 1
+            code = line.split("//")[0]
+            if not TOKENIZE_RE.search(code):
+                mentions.append((rel, i, "COMMENT", line.strip()))
+                continue
+            if re.search(r"fn\s+tokenize\s*\(", code):
+                kind = "DEFINITION"
+            else:
+                kind = "call"
+            hits.append((rel, i, kind, line.strip()))
+
+    if not hits:
+        print("PROBE ERROR: no tokenize() found under src/ -- "
+              "cannot pass on empty input")
+        return 1
 
     print("=" * 72)
     print("J-T0-5 tokenize() call sites (static half)")
     print("=" * 72)
     print("source: %s" % ("rev " + a.rev if a.rev else "working tree"))
     calls = [h for h in hits if h[2] == "call"]
-    for (rel, ln, kind, txt) in hits:
-        print("  %-8s %-32s %5d  %s" % (kind, rel, ln, txt[:70]))
-    print("\ncall sites: %d   definition(s): %d"
-          % (len(calls), len(hits) - len(calls)))
+    defs = [h for h in hits if h[2] == "DEFINITION"]
+    for (rel, ln, kind, txt) in sorted(hits + mentions):
+        print("  %-10s %-32s %5d  %s" % (kind, rel, ln, txt[:68]))
+    c_compiler = [h for h in calls if h[0].startswith("src/compiler/")]
+    c_other = [h for h in calls if not h[0].startswith("src/compiler/")]
+    print("")
+    print("  raw lines matching in src/compiler/*.cr : %d" % raw)
+    print("  minus definition line(s)                : %d" % len(defs))
+    print("  minus pure comment mention(s)           : %d" % len(mentions))
+    print("  = real calls in src/compiler/           : %d" % len(c_compiler))
+    for (rel, ln, _k, _t) in c_other:
+        print("  + real call elsewhere (%s:%d)" % (rel, ln))
+    print("  = real calls in src/**                  : %d" % len(calls))
 
     rc = 0
     if a.require_bypass:
@@ -970,19 +1056,15 @@ def cmd_colon_positions(a):
 
     # A2: zero annotation-at-line-end over the scanned corpus (+ injection)
     print("\n-- A2 zero annotation-at-line-end")
-    srcs = []
     if a.fixture_only:
         srcs = [(label, src) for (label, src, _w) in COLON_FIXTURES]
     else:
-        for dp, dn, fn in os.walk(REPO):
-            dn[:] = [d for d in dn if d not in (".jj", ".git", "build", ".core")]
-            for f in fn:
-                if f.endswith(".cr"):
-                    rel = os.path.relpath(os.path.join(dp, f), REPO)
-                    try:
-                        srcs.append((rel, read(rel)))
-                    except SystemExit:
-                        pass
+        rels = read.list_cr()
+        if not rels:
+            print("PROBE ERROR: no .cr source found -- "
+                  "cannot pass on empty input")
+            return 1
+        srcs = [(rel, read(rel)) for rel in rels]   # ProbeError propagates
     if a.mutate == "annotation-line-end":
         srcs = list(srcs) + list(COLON_BAD_FIXTURES)
     n_end = n_open = n_cand = 0
@@ -1074,7 +1156,13 @@ def main(argv=None):
     if not getattr(a, "func", None):
         ap.print_help()
         return 2
-    return a.func(a)
+    try:
+        return a.func(a)
+    except ProbeError as exc:
+        print("PROBE ERROR: %s" % exc)
+        print("=> rc=1 (fail-closed: a criterion must never pass on "
+              "unreadable or empty input)")
+        return 1
 
 
 if __name__ == "__main__":

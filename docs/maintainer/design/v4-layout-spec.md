@@ -373,11 +373,24 @@ advance_tok();          // ← 返回值被丢弃：`=` 与 `:` 两形今天都�
 
 | 格 | 改前 | 改后 | 出处 |
 |---|---|---|---|
-| **块**花括号 | 15,771（含后两格） | **0** | 计划 §2.5 L2 |
-| **字面量**花括号（`src/compiler` 内） | `[T0·实核]` **2 个**（唯一一处 = `src/compiler/elf.cr:45` 的 `ElfCtx { … }`） | **2**（不退场） | §6.4 的探针逐处清单 |
+| **块**花括号 | 15,771（含后三格） | **0** | 计划 §2.5 L2 |
+| **真字面量**花括号（`src/compiler` 内） | **1 处**（该处含 `{` `}` 共 **2 个字符**）= `src/compiler/elf.cr:45` 的 `ElfCtx { buf = buf, pos = 0, code_start = 0 }` | **1 处**（不退场） | §6.4 的探针逐处清单 |
+| **注释里提及**的字面量花括号 | **1 处** = `src/compiler/parser.cr:1201` | 不适用（注释） | 见下 |
 | **字符串字面量内**的花括号 | 计划写 **77 个不动** | **不动** | 计划 §2.5 L2 |
 
-⇒ **本档给出的字面量格实测值 = 2**（不是 15,771、也不是 0）。T4 的 L2 计数表按本表拆格。
+**数法（必带）**：`[A-Z][A-Za-z0-9_]* \{ [a-z_]+ = ` 且排除 `if/else/loop/while/for` 块
+⇒ `src/compiler` 内命中 **1 处真字面量**（`elf.cr:45`）+ **1 处注释提及**。
+探针的数法更严（剥注释/串 + **与 struct 声明表求交**，含字段名核对），得同一结果：
+`struct-lit-forms --subset src/compiler/` ⇒ **1 处 / 1 档**。
+
+> ⚠ **那处注释提及不是字面量，是 struct 模式**：`src/compiler/parser.cr:1201` 逐字
+> `// Struct pattern: Name { field = pat, ... }` —— 它在**注释**里，且描述的是
+> `EXPR_STRUCTPAT`（`:1202` 逐字 `EXPR_STRUCTPAT = a=名字 idx…`）。
+> ⇒ **T4 不得把它算进「要改的字面量」**，也**不得**把它算进「不退场的字面量花括号」
+> ——它是**零字符**（注释内容）。
+
+⇒ **本档给出的字面量格实测值 = 1 处（= 2 个花括号字符）**（不是 15,771、也不是 0）。
+T4 的 L2 计数表按本表拆格，并按上面的数法复核。
 
 ### 4.5 消解器的退场（J-T0-2 的一行结论，详见 §6.2）
 
@@ -428,21 +441,44 @@ advance_tok();          // ← 返回值被丢弃：`=` 与 `:` 两形今天都�
 
 ### 5.4 调用点清单（必须逐点给判定）
 
-`[T0·实核]` `src/` 下 `tokenize(` **调用点 = 10 处**（+ 定义 1 处）：
+**真调用 = 9 处**（`src/compiler/*.cr`；维护者独立复现 · 本档探针逐条复现）：
 
 ```text
-src/compiler/module.cr:456,693,704   src/compiler/dump.cr:232,438
-src/compiler/main.cr:129,758         src/compiler/parser.cr:443   ← 唯一的重入点
-src/compiler/purity_selftest.cr:40   src/lsp/lsp.cr:173
-定义: src/compiler/lexer.cr:362
+src/compiler/dump.cr:232    src/compiler/dump.cr:438
+src/compiler/main.cr:129    src/compiler/main.cr:758
+src/compiler/module.cr:456  src/compiler/module.cr:693  src/compiler/module.cr:704
+src/compiler/parser.cr:443  ← 唯一的重入点（洞内）
+src/compiler/purity_selftest.cr:40
 ```
 
-> **对计划的更正（登记）**：计划 §7.2 与 `mech.md §2.3` 都写「**12 处**」。
-> `[T0·实核]` 实际 **10 处**（`mech.md` 自己括号里列的也正是这 10 个行号）。
-> 本档按「**至少 10**」写入并附上面的清单；「12」这个数没有出处支持。
+**数法（必带，否则这个数复现不出来）**：
 
-**唯一的重入点 = `src/compiler/parser.cr:443`**（洞内）。其余 9 处按 §5.2 的规则逐点判定，
+```bash
+grep -rnE '\btokenize\(' src/compiler/*.cr | grep -v 'fn tokenize'   # ⇒ 11
+# 再逐条剔除纯注释提及 ⇒ 9
+```
+
+| 步 | 数 | 说明 |
+|---|---|---|
+| 裸 grep `src/compiler/*.cr` | **12** | 含定义行 + 2 处纯注释提及 |
+| − 定义行（`src/compiler/lexer.cr:362`） | 11 | `fn tokenize(_src: string) {` |
+| − 纯注释提及（`src/compiler/lexer.cr:6` · `:49`） | **9** | 两行都是注释里提到 `tokenize()`，**不是调用** |
+| + `src/compiler/` 之外的真调用 | **10** | `src/lsp/lsp.cr:173`（`tokenize(g_source);`，真调用） |
+
+⇒ **两个口径都写死，因为它们各自有用**：
+**`src/compiler/` 面 = 9 处**（T1/T2/T5 的复核面）；**`src/**` 全域 = 10 处**（含 LSP 一处，
+**T5 不得漏它** —— 计划 §7.2 要求的就是逐点复核）。
+
+> **对计划的更正（登记）**：计划 §7.2 写「**12 处**」。
+> 12 = **裸 grep 的命中行数**（含定义行与 2 处注释提及）—— 这是它的可复现出处；
+> 但计划同一段的括号里**只列了 10 个行号**（正是 9 + LSP 那一处）⇒ 计划自身的数与清单不是同一口径。
+> 本档按「**9（`src/compiler/`）/ 10（`src/**`）**」写入并附上面两段清单与逐步数法。
+
+**唯一的重入点 = `src/compiler/parser.cr:443`**（洞内）。其余 8 处（`src/compiler/`）按 §5.2 的规则逐点判定，
 判定的产物 = T5 的 J-T5-1（计划 §7.2 已把「逐处给出是否需要改 + 理由」定为 T5 的交付）。
+
+**探针自证**：`tokenize-sites` 子命令**逐条打印上面每一步**（裸命中 / 定义 / 注释提及 / 分口径合计），
+⇒ 规格里的数不许手抄，必须由探针现算。
 
 ### 5.5 J-T0-5 的用例（含嵌套插值）
 
@@ -755,8 +791,8 @@ nice -n 19 ./build/corec selftest-layout    # T5 新增自测通道（先例：s
 | # | 对象 | 计划/报告原文 | 本档实测 | 处置 |
 |---|---|---|---|---|
 | 1 | 计划 §3.1 的反向对照 | 「分隔符改成带缩进 ⇒ 该判据**必须红**」 | **不红**（rc=0）：该行仍是注释行 ⇒ 判定 ①-2 使其为 no-op | §6.1：保留该格并断言 **GREEN**（改作判定 ①-2 的正控），另立两族有鉴别力的反向对照 |
-| 2 | 计划 §7.2 / `mech.md §2.3` | `tokenize()` 调用点「**12 处**」 | **10 处**（附逐点清单，§5.4） | 按「至少 10」写入；「12」无出处支持 |
-| 3 | 计划 §2.5 L2 计数表 | 「`src/compiler` 花括号 15,771 ⇒ 改后应为 **0**」 | 由判定 ④，`{ }` 保留作字面量定界符 ⇒ **`src/compiler` 内另有 2 个字面量花括号不退场**（唯一一处 `elf.cr:45`） | §4.4：该格拆成三格（块 / 字面量 / 串内），字面量格实测 **2** |
+| 2 | 计划 §7.2 / `mech.md §2.3` | `tokenize()` 调用点「**12 处**」 | **12 = 裸 grep 的命中行数**（含定义行 + 2 处纯注释提及）；**真调用 = 9 处**（`src/compiler/`）· **10 处**（`src/**`，含 `src/lsp/lsp.cr:173`） | §5.4：两口径 + 逐步数法 + 逐条清单；探针 `tokenize-sites` 逐步现算 |
+| 3 | 计划 §2.5 L2 计数表 | 「`src/compiler` 花括号 15,771 ⇒ 改后应为 **0**」 | 由判定 ④，`{ }` 保留作字面量定界符 ⇒ **`src/compiler` 内有 1 处真字面量花括号不退场**（`elf.cr:45`；该处含 `{` `}` 共 2 个字符）；另 1 处是**注释里的 struct 模式**（`parser.cr:1201`，不算） | §4.4：该格拆成四格（块 / 真字面量 / 注释提及 / 串内），真字面量格实测 **1 处** |
 | 4 | 计划 §十一 U-7 | 「`tests/probes` 的 `PROBE_TOTAL=29` 与实际 36 档的关系」未核 | glob `tests/probes/*.cr` = **29** ⇒ `PROBE_TOTAL=29` **正确**；「36」= 29 + `warm/` 7 档（不被该 glob 收） | §6.4 注明；**U-7 可结** |
 | 5 | 裁定 (b) 的连带后果 ①（本档扫描发现） | 计划未提 | 形参标注断行（`fn f(a:` ＋ 续行 `int):`）与头部终结（`fn f() -> int:`）**在 lexer 层不可区分**（都是「`fn` 开头 + 行尾 `:`」） | §2.2 点明；判据 J-T0-2b 的族一**必须包含这一格并红**（它是本判定唯一的盲点，靠语法面兜住） |
 | 6 | 判定 ② 与判定 ① 的一致性 | 计划未提 | **无冲突**（同源于「注释不是 token」）；但引出**一条实现约束**：两处必须共用同一个注释/字符串扫描器 | §2.3 写死该约束，并写死 `catch` 的「紧邻」按 ① 计数 |
@@ -824,6 +860,19 @@ python3 tools/v4_layout_probe.py tokenize-sites --rev develop@origin --require-b
 # nice -n 19 ./build/corec selftest-layout
 ```
 
+**探针的两条行为约定（写死，防止误读成假绿/假红）**：
+
+1. **`--rev` 取数 = 修订；不带 `--rev` = 工作副本。** 带 `--rev` 时**文件清单与文件内容同源**
+   （清单走 `jj file list -r`，内容走 `jj file show -r`）——工作副本落后时**不会**静默缩小语料。
+2. **fail-closed（无输入 ⇒ 必红，不是必绿）**：读不到文件、清单为空、或扫到的语料为 0 时，
+   探针打印 `PROBE ERROR` 并 **`rc=1`**，**绝不返回 0**。
+   ⇒ 直接推论：**工作副本 stale 时 jj 全部命令失败** ⇒ 带 `--rev` 的判据一律 `rc=1`
+   （**这是正确行为，不是判据坏了**）；此时若要看真实读数，去掉 `--rev` 读工作副本，
+   或先让工作副本脱离 stale。
+   **这条约定本身就是一次实测教训**：探针早期版本在工作副本 stale 时
+   因「清单走工作副本 walk、内容走 jj show」而把读失败吞成空输入 ⇒
+   J-T0-4 的 `--form` 断言**假绿**（`0 == 0`）。已修（本次修订）。
+
 ---
 
 ## 附：本档引用的实核锚点（逐条带命令）
@@ -838,7 +887,8 @@ python3 tools/v4_layout_probe.py tokenize-sites --rev develop@origin --require-b
 | `EXPR_STMT` 契约 | `src/compiler/ast.cr:204` | `jj file show -r develop@origin src/compiler/ast.cr \| sed -n '204p'` |
 | `EC_P_SEMI` 零 raise 点 | 只有 `ast.cr:337` | `grep -rn 'EC_P_SEMI' src/compiler/*.cr` |
 | 解析器码表上界 | `EC_P_INTERP_HOLE_LEAK = 1029`（`ast.cr:359`） | `jj file show -r develop@origin src/compiler/ast.cr \| sed -n '335,359p'` |
-| `tokenize()` 调用点 = 10 | §5.4 清单 | `grep -rn 'tokenize(' src/` |
+| `tokenize()` 真调用 = **9**（`src/compiler/`）· **10**（`src/**`） | §5.4 清单 + 数法 | `python3 tools/v4_layout_probe.py tokenize-sites --rev develop@origin`（逐步现算） |
+| `src/compiler` 真字面量花括号 = **1 处** | `elf.cr:45`（含 `{` `}` 共 2 个字符） | `python3 tools/v4_layout_probe.py struct-lit-forms --subset src/compiler/` |
 | `g_parse_no_struct_literal` 先例 | `parser.cr:11` + 9 处 | `grep -rn 'g_parse_no_struct_literal' src/compiler/*.cr` |
 | `_is_struct_lit` 的 `;` 位 | `bootstrap/corec/frontend/parser.py:714` | `jj file show -r develop@origin bootstrap/corec/frontend/parser.py \| sed -n '684,716p'` |
 | `_scan_constants` 六元组 | `bootstrap/corec/frontend/parser.py:41-61` | 同上 `sed -n '41,61p'` |
