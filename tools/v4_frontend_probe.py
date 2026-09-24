@@ -12,13 +12,14 @@ T0 探针判「规格自洽」，本探针判「**实现与规格相符**」+ J-
     python3 tools/v4_frontend_probe.py colon               # 裁定 ②（J-T0-2b 的 bootstrap 侧，含 §2.3 四格）
     python3 tools/v4_frontend_probe.py structlit           # 判定 ④：`=` 收 / `:` 响亮拒绝（P030）
     python3 tools/v4_frontend_probe.py typenames           # v4 关键字化类型名的解析面
+    python3 tools/v4_frontend_probe.py semi                # J-T0-2：A4 正控 + C 类存活面
     python3 tools/v4_frontend_probe.py ast-freeze [--rev R]  # J-T1-1
     python3 tools/v4_frontend_probe.py keywords              # J-T1-2
     python3 tools/v4_frontend_probe.py mutations             # 反向对照（改坏一处 ⇒ 必红）
     python3 tools/v4_frontend_probe.py all
 
 **当前预期（T1/T2 落地时点，不得粉饰）**：
-  - `features` / `layout` / `colon` / `structlit` / `ast-freeze` / `mutations` ⇒ **rc=0**；
+  - `features` / `layout` / `colon` / `structlit` / `typenames` / `semi` / `ast-freeze` / `mutations` ⇒ **rc=0**；
   - `keywords` ⇒ **rc=1**（J-T1-2 是**批末**判据：自源侧 36 → 39 属 T5，本步只改
     bootstrap 侧 ⇒ 差集非空是**设计使然**，实报见该子命令的输出）。
 
@@ -44,15 +45,29 @@ from corec.backend.interpreter import Interpreter           # noqa: E402
 from corec.syntax.tokens import KEYWORDS, TokenType         # noqa: E402
 
 FAILS = []
+CHECKS = 0
 
 
 def check(cond, label, detail=''):
+    """记一次判据。**空转防护**：`main` 收尾断言 `CHECKS` 有下限 ——
+    判据面若因夹具/抽取变空而「0 == 0 通过」，等于没判（本仓 2026-09-24 #174 在
+    姊妹档 `tools/v4_layout_probe.py` 里实测到过这一形态，故本档把它写成机械闸）。"""
+    global CHECKS
+    CHECKS += 1
     if cond:
         print('  PASS  %s' % label)
     else:
         print('  FAIL  %s%s' % (label, ('  —— ' + detail) if detail else ''))
         FAILS.append(label)
     return cond
+
+
+# 判据条数下限（**非空转下限**，不是「跑到就够了」的计数）：逐子命令留余量、不追平。
+# 触发场景：夹具列表被删空 / 抽取正则失配 ⇒ 判据跑了 0 条却「全绿」。
+CHECK_FLOOR = {
+    'features': 25, 'layout': 8, 'colon': 17, 'structlit': 3, 'typenames': 7,
+    'semi': 5, 'ast-freeze': 5, 'keywords': 5, 'mutations': 4, 'all': 60,
+}
 
 
 # ── 全管线（与 tests/bootstrap/test_pipeline.py 同体例）────────────────────
@@ -523,10 +538,8 @@ def cmd_structlit():
 
     # 反向对照：把守卫去掉（还原成改前的盲跳）⇒ 该格必红
     orig = Parser.parse_primary
-    src_fields_guard = "struct literal field separator must be '=' [P030]"
     try:
         # 内存内把守卫替换成盲跳：模拟改前实现
-        import types
         def blind(self):
             if self.check(TokenType.IDENT):
                 name = self.advance().lexeme
@@ -557,7 +570,6 @@ def cmd_structlit():
             check(False, '[反向] 还原成盲跳后仍报错 ⇒ 红的不是那条守卫（判据无鉴别力）')
     finally:
         Parser.parse_primary = orig
-        del src_fields_guard
     return not FAILS
 
 
@@ -602,6 +614,48 @@ def cmd_typenames():
     return not FAILS
 
 
+# ── semi：J-T0-2 的两条（A4 静默面 + C 类存活面）─────────────────────────
+
+def _find_array_size(src):
+    """取 main 里第一个 `x : [int; N] = …` 声明的**声明面数组长度**。"""
+    ast = Parser(Lexer(src).tokenize()).parse_compilation_unit()
+    for d in ast.declarations:
+        if type(d).__name__ != 'FunctionDecl':
+            continue
+        for st in getattr(d.body, 'stmts', []):
+            if type(st).__name__ == 'LetStmt':
+                return getattr(st.type_, 'size', None)
+    return None
+
+
+def cmd_semi():
+    print('[semi] J-T0-2：A4 的静默面（正控）+ C 类存活面（`;` 只在 `[T; N]` / `[v; N]`）')
+    src = 'M : int = 3\n\nfn main() -> int:\n    a : [int; M] = [0; 3]\n    return 1\n'
+    n = _find_array_size(src)
+    # A4 的「漏改即静默错答案」正控：`M` 必须**真的取到 3**（不是兜底的 0）
+    check(n == 3, 'A4 正控：具名常量 `M` 真取到 3（不是 `.get(name, 0)` 兜底的 0）', 'size=%r' % n)
+
+    # 反向对照：把常量预扫的终止元改回 `;`（= 改前形态）⇒ 扫描落空 ⇒ M 解成 0
+    # 注意 `;` 在 v4 只在 `[T;N]` 存活 ⇒ 改前形态在新语法下**扫不到任何常量**。
+    real = Parser._scan_constants
+    try:
+        Parser._scan_constants = lambda self: None      # 突变体：预扫整体失效
+        n2 = _find_array_size(src)
+    finally:
+        Parser._scan_constants = real
+    check(n2 == 0, '[反向] 预扫失效 ⇒ `M` 静默解成 0（**且不报错** —— 这就是 A4 的危险形态）',
+          'size=%r' % n2)
+    check(n != n2, '[反向] 正控与突变体读数不同 ⇒ 本格真有鉴别力（不是恒 3）')
+
+    # C 类存活面：`;` 在 `[v; N]` 仍然合法
+    k = kinds('fn f() -> int:\n    a := [0; 3]\n    return 1\n')
+    check('SEMI' in k, 'C2 存活：`[v; N]` 的 `;` 仍是 SEMI token', repr([x for x in k if x == 'SEMI']))
+    k = kinds('fn f() -> int:\n    a : [int; 3] = [0; 3]\n    return 1\n')
+    check(k.count('SEMI') == 2, 'C1+C2 存活：`[T; N]` 与 `[v; N]` 各一个 `;`',
+          repr(k.count('SEMI')))
+    return not FAILS
+
+
 # ── ast-freeze：J-T1-1 ──────────────────────────────────────────────────
 
 CLASS_RE = re.compile(r'^class\s+([A-Za-z_]\w*)', re.M)
@@ -626,6 +680,12 @@ def cmd_ast_freeze(rev):
     print('[ast-freeze] J-T1-1：`bootstrap/corec/syntax/ast.py` 的节点类集合冻结')
     cur = ast_classes(read_file('bootstrap/corec/syntax/ast.py'))
     base = ast_classes(read_file('bootstrap/corec/syntax/ast.py', rev))
+    # **空转闸**：抽取若变空，`∅ == ∅` 会假绿（#174 在姊妹档实测到的正是这一形态）
+    check(len(base) >= 50 and len(cur) >= 50,
+          '抽取非空转：两侧各 ≥ 50 个 class（防 ∅==∅ 假绿）',
+          'base=%d cur=%d' % (len(base), len(cur)))
+    check('Ident' in base and 'Literal' in base,
+          '抽取哨兵：已知节点 `Ident`/`Literal` 在集合里（防正则失配后的空集）')
     print('  基线 %s：%d 个 class' % (rev, len(base)))
     print('  工作副本  ：%d 个 class' % len(cur))
     check(cur == base, '类集合逐元素相同（迁移前后 cmp 为空）',
@@ -666,6 +726,12 @@ def cmd_keywords(rev=None):
     print('[keywords] J-T1-2：两套前端关键字表逐元素一致（**批末**判据）')
     boot = bootstrap_keywords(read_file('bootstrap/corec/syntax/tokens.py', rev))
     sh = selfhost_keywords(read_file('src/compiler/lexer.cr', rev))
+    # **空转闸**：两侧抽取若同时变空，差集也空 ⇒ J-T1-2 会假绿
+    check(len(boot) >= 30 and len(sh) >= 30,
+          '抽取非空转：两侧各 ≥ 30 个关键字（防 ∅==∅ 假绿）',
+          'bootstrap=%d 自源=%d' % (len(boot), len(sh)))
+    check('fn' in boot and 'struct' in boot and 'fn' in sh and 'struct' in sh,
+          '抽取哨兵：已知关键字 `fn`/`struct` 在两侧集合里（防截取失配后的空集）')
     print('  bootstrap tokens.py KEYWORDS : %d' % len(boot))
     print('  自源 lexer.cr lookup_keyword : %d' % len(sh))
     print('  v4 目标集                    : %d' % len(V4_KEYWORDS))
@@ -673,6 +739,10 @@ def cmd_keywords(rev=None):
     check(boot == V4_KEYWORDS, 'bootstrap 侧 == v4 的 39（T1 的可交付面）',
           '差集 boot-v4=%r v4-boot=%r' % (sorted(boot - V4_KEYWORDS), sorted(V4_KEYWORDS - boot)))
     check(len(V4_KEYWORDS) == 39, 'v4 目标集计数 == 39', str(len(V4_KEYWORDS)))
+    # 两法互证：文本抽取（正则）↔ 运行时 `KEYWORDS` 字典键。两条独立路径须吻合，
+    # 否则「抽出来的集合」只是正则的产物，不是表本身（本仓纪律：两份独立方法吻合才可信）。
+    check(boot == set(KEYWORDS.keys()), '文本抽取 == 运行时 `KEYWORDS` 字典键（两法互证）',
+          '差集 %r' % sorted(boot ^ set(KEYWORDS.keys())))
 
     d1, d2 = sorted(boot - sh), sorted(sh - boot)
     print('  差集 bootstrap−自源: %r' % d1)
@@ -737,6 +807,8 @@ def main(argv):
         ok = cmd_structlit() and ok
     if sub in ('typenames', 'all'):
         ok = cmd_typenames() and ok
+    if sub in ('semi', 'all'):
+        ok = cmd_semi() and ok
     if sub in ('ast-freeze', 'all'):
         ok = cmd_ast_freeze(rev) and ok
     if sub in ('keywords', 'all'):
@@ -746,6 +818,12 @@ def main(argv):
         ok = cmd_mutations() and ok
 
     print()
+    floor = CHECK_FLOOR.get(sub, 0)
+    if CHECKS < floor:
+        print('VACUOUS: 判据只跑了 %d 条（`%s` 的下限 %d）—— 判据面变空了，本轮的绿不算数'
+              % (CHECKS, sub, floor))
+        return 1
+    print('判据条数 = %d（`%s` 下限 %d）' % (CHECKS, sub, floor))
     if ok:
         print('ALL PASS')
         return 0
