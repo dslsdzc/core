@@ -1,6 +1,6 @@
 # 示例集
 
-> 定位:受众 = 开发者;状态 = active。仓库 examples/ 的可跑程序,按复杂度排列。
+> 定位：受众 = 开发者；状态 = active。仓库 `examples/` 的可跑程序，按复杂度排列。
 
 ## 运行方式
 
@@ -9,7 +9,7 @@
 /tmp/<name>
 ```
 
-或先检查:`./build/corec check examples/<name>/main.cr`
+或先检查：`./build/corec check examples/<name>/main.cr`
 
 ## 示例清单
 
@@ -20,11 +20,11 @@
 | [pi](../../examples/pi/main.cr) | 圆周率计算 | 数值循环(带 deploy.toml 的部署配置示例) |
 | [load_balancer](../../examples/load_balancer/main.cr) | 负载均衡器 | 并发/任务分发方向(含 spec/ 规约骨架) |
 
-> 注:examples/hello/ 目前是空骨架(未填 main)——忽略或用 add/ 起步。
+> 注：`examples/hello/` 目前是空骨架（未填 `main`）——忽略或用 `add/` 起步。
 
-## 更多示例:测试套件(tests/suite/)
+## 更多示例：测试套件（tests/suite/）
 
-仓库测试套件的 .cr 文件是按主题组织的可跑示例(覆盖更广):
+仓库测试套件的 `.cr` 文件是按主题组织的可跑示例（覆盖更广）：
 
 | 主题 | 文件 |
 |---|---|
@@ -35,14 +35,14 @@
 | 内存/指针 | ptr_arith.cr、ptr_ref_first.cr、arena_test.cr |
 | FFI/热补丁/惰性 | ffi_test.cr、hotpatch_test.cr、lazy_test.cr |
 
-> 注:套件文件可能依赖测试驱动(检查点/期望输出)——作示例阅读时关注语言用法,运行请走测试入口(见 `../maintainer/testing.md`)。
+> 注：套件文件可能依赖测试驱动（检查点/期望输出）——作示例阅读时关注语言用法，运行请走测试入口（见 `../maintainer/testing.md`）。
 
 ## 配套
 
-- 每个示例目录可能带 `.cir`/`.ccr`/`.s`/`prog`——构建副产物,手工分步调试时对照用
-- 完整编译产物链:`.cr` →(corec)→ `.cir`(图形态)+ `.ccr`(格形态)→(corearch)→ ELF
+- 每个示例目录可能带 `.cir`/`.ccr`/`.s`/`prog`——构建副产物，手工分步调试时对照用
+- 完整编译产物链：`.cr` →（corec）→ `.cir`（图形态）+ `.ccr`（格形态）→（corearch）→ ELF
 
 ## 建议下一步
 
-写自己的程序时:类型检查循环(`check`)先行,`run` 试小段,`build` 出产物。
-语法速查见 [syntax.md](syntax.md);构建与命令见 [quickstart.md](quickstart.md)。
+写自己的程序时：类型检查循环（`check`）先行，`run` 试小段，`build` 出产物。
+语法速查见 [syntax.md](syntax.md)；构建与命令见 [quickstart.md](quickstart.md)。

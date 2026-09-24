@@ -2,25 +2,25 @@
 
 > 定位：受众 = 开发者；状态 = active
 
-本文档是 Core 语言**本体**的语法参考：词法、类型标注、声明、表达式、控制流、接口与泛型、规约、并发。语法形式以 `grammar/core.ebnf` 与 `src/compiler/` 源码为准（冲突时以源码为准）。设计理念与术语见 [concepts.md](concepts.md);深入(IR/验证/理论)从 concepts 的链接走。
+本文档是 Core 语言**本体**的语法参考：词法、类型标注、声明、表达式、控制流、接口与泛型、规约、并发。语法形式以 `grammar/core.ebnf` 与 `src/compiler/` 源码为准（冲突时以源码为准）。设计理念与术语见 [concepts.md](concepts.md)；深入（IR/验证/理论）从 concepts 的链接走。
 
 ---
 
 ## 一、设计要点
 
-Core 是"数据流图 + 语义保鲜"的语言——代码编译为图,图保留全部语义(形式验证直接消费)。给语法带来的要点：
+Core 是「数据流图 + 语义保鲜」的语言——代码编译为图，图保留全部语义（形式验证直接消费）。给语法带来的要点：
 
 - **无 `let` 关键字**：变量用 `:=` 或 `: Type =` 声明。
 - **无生命周期标注**：引用有效性由编译器自动验证。
-- **一切自动推断,零标注负担**：
-  - **类型推断**：`:=` / `auto` / `.` 推断,标注可选
-  - **所有权**：默认借用,显式 `move` 转移
-  - **编译时执行**：全常量输入自动求值,`@comptime` 兜底
-  - **惰性分支**：控制流自动惰性(未走路径不求值),无 `lazy()` 关键字
-  - **指针安全**：裸指针自由,超出范围的访问/悬垂引用由编译器自动拦截
+- **一切自动推断，零标注负担**：
+  - **类型推断**：`:=` / `auto` / `.` 推断，标注可选
+  - **所有权**：默认借用，显式 `move` 转移
+  - **编译时执行**：全常量输入自动求值，`@comptime` 兜底
+  - **惰性分支**：控制流自动惰性（未走路径不求值），无 `lazy()` 关键字
+  - **指针安全**：裸指针自由，超出范围的访问/悬垂引用由编译器自动拦截
   - **动态类型**：`dyn` 边界自动转换
 - **并发 = 流的构造**：`go` / `await` / `flow` / `yield` 构成数据流网络。
-- **规约内联**：`#check`/`#ensure` 写在函数上(设计态,见第 10 章)。
+- **规约内联**：`#check`/`#ensure` 写在函数上（设计态，见第 10 章）。
 
 ---
 
@@ -45,7 +45,7 @@ IDENT = LETTER { LETTER | DIGIT | '_' | '\'' }
 
 ### 2.3 关键字
 
-共 36 个（以 `src/compiler/lexer.cr lookup_keyword()` 为准,2026-09 核对）：
+共 36 个（以 `src/compiler/lexer.cr lookup_keyword()` 为准，2026-09 核对）：
 
 ```
 fn mut return if else loop while for break continue
@@ -55,9 +55,9 @@ auto fileid move self in None Some unit
 ```
 
 - `self` 是词法关键字，用于方法接收者（`self` / `&self` / `&mut self`）。
-- `Self` 不是词法关键字——它是接口/方法签名中的上下文类型名，按标识符解析,由编译器按上下文处理。
+- `Self` 不是词法关键字——它是接口/方法签名中的上下文类型名，按标识符解析，由编译器按上下文处理。
 - `comptime` 不是关键字（`@comptime` 是 @ 内建原语）。
-- `#check`/`#ensure`/`#tag`/`spec fn` 不是词法关键字——规约是标注层语法(第 10 章;设计定稿 = maintainer/design/spec-design.md;实现态:parser 未支持)。
+- `#check`/`#ensure`/`#tag`/`spec fn` 不是词法关键字——规约是标注层语法（第 10 章；设计定稿 = maintainer/design/spec-design.md；实现态：parser 未支持）。
 
 ### 2.4 字面量
 
@@ -199,11 +199,11 @@ ref   : &Point;             // 引用
 mutr  : &mut Point;         // 可变引用
 ```
 
-> 类型形态以 2026-09-01 语法重写定稿为准(计划优先);切片类型的运行时边界完整化(high 界进值)按 TODO 推进,当前编译器的切片操作语义以源码为准。
+> 类型形态以 2026-09-01 语法重写定稿为准（计划优先）；切片类型的运行时边界完整化（high 界进值）按 TODO 推进，当前编译器的切片操作语义以源码为准。
 
 **接口作类型**：任何接口名可作为类型标注（`PathType`），见第 9 章。
 
-**机器形状不在语言内**：整数位宽、浮点格式等机器形状由目标平台决定,不进入类型/标签体系。
+**机器形状不在语言内**：整数位宽、浮点格式等机器形状由目标平台决定，不进入类型/标签体系。
 
 ### 4.2 标注位置
 
@@ -504,7 +504,7 @@ type Point3 = (dex, dex, dex);
 
 ## 十、规约
 
-规约(#check/#ensure 标注,2026-09 语法定稿——与 #pure/#terminating 自动推导标签同族)与函数体并列,可选编写。设计定稿见 docs/maintainer/design/spec-design.md;语法归口 grammar/core.ebnf(并入为迁移事项;.corespec 独立格式已退役,见 docs/maintainer/adr/adr-0001-corespec-crasm-retired.md)。**实现状态:设计态——lexer/parser 尚未实现规约语法**,示例为定稿形态。
+规约（`#check`/`#ensure` 标注，2026-09 语法定稿——与 #pure/#terminating 自动推导标签同族）与函数体并列，可选编写。设计定稿见 docs/maintainer/design/spec-design.md；语法归口 grammar/core.ebnf（并入为迁移事项；.corespec 独立格式已退役，见 docs/maintainer/adr/adr-0001-corespec-crasm-retired.md）。**实现状态：设计态——lexer/parser 尚未实现规约语法**，示例为定稿形态。
 
 ### 10.1 #check / #ensure
 
@@ -521,12 +521,12 @@ fn divide(a: int, b: int) -> int?
 ```
 
 - `#check(...)` —— 调用方必须满足的前提条件
-- `#ensure(...)` —— 保证的后置条件;`result` 指返回值,`old(expr)` 指函数入口时表达式的值
-- `spec fn` —— 用 Core 写的纯检查函数(验证标准,见 maintainer/design/spec-design.md §七)
+- `#ensure(...)` —— 保证的后置条件；`result` 指返回值，`old(expr)` 指函数入口时表达式的值
+- `spec fn` —— 用 Core 写的纯检查函数（验证标准，见 maintainer/design/spec-design.md §七）
 
 ### 10.2 where 值约束
 
-`where` 实现内联轻量前置条件(行内形态,与 #check 同层;定稿形态以 spec-design 为准):
+`where` 实现内联轻量前置条件（行内形态，与 #check 同层；定稿形态以 spec-design 为准）：
 
 ```core
 fn sqrt(x: dex) -> dex where x >= 0 {
@@ -534,7 +534,7 @@ fn sqrt(x: dex) -> dex where x >= 0 {
 }
 ```
 
-值约束按表达式形态分三档语义(编译期求值 / 生成验证义务 / 运行时检查):
+值约束按表达式形态分三档语义（编译期求值 / 生成验证义务 / 运行时检查）：
 
 | 约束形态 | 语义 |
 |----------|------|
@@ -542,7 +542,7 @@ fn sqrt(x: dex) -> dex where x >= 0 {
 | 符号约束 | 生成 VC（验证义务），由验证管线消费 |
 | 动态约束 | 运行时检查——「证明不了也不静默」 |
 
-与规约前置条件互相映射(规约 = .cr 语法内约束,独立 .corespec 格式已退役,见 ADR-0001)。
+与规约前置条件互相映射（规约 = .cr 语法内约束，独立 .corespec 格式已退役，见 ADR-0001）。
 
 ---
 

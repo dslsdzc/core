@@ -8,9 +8,9 @@
 
 ## 核心原则
 
-- **每个 @ 有对应 IR 语义节点**（IR_CONST 带 provenance 标注），验证工具能从 IR 图看到原始操作
-- **元数据查询在 IR gen 时已算出值**，emit 为 IR_CONST，不引入运行时指令
-- **@comptime 在编译期调解释器执行**，不留任何运行时痕迹
+- **每个 `@` 有对应 IR 语义节点**（`IR_CONST` 带 provenance 标注），验证工具能从 IR 图看到原始操作
+- **元数据查询在 IR gen 时已算出值**，emit 为 `IR_CONST`，不引入运行时指令
+- **`@comptime` 在编译期调解释器执行**，不留任何运行时痕迹
 - **编译控制/安全检查 emit 标注指令**，被 pass 或后端消费
 
 ## IR 指令
@@ -50,7 +50,7 @@ T_AT → advance
 
 ## 类型检查器
 
-在 checker 中识别 `EXPR_AT`，根据 `name_ni` 分发：
+在 `checker` 中识别 `EXPR_AT`，根据 `name_ni` 分发：
 
 ```core
 fn check_expr_at(node):
@@ -161,7 +161,7 @@ TY_TYPEINFO : int = ...;  // struct { name: string, size: int, align: int, field
 TY_FIELDINFO : int = ...;  // struct { name: string, offset: int, type: int }
 ```
 
-具体实现方案：在 checker/ir_gen 中使用编译期已知的 struct layout 来构造返回值。因为 @typeInfo 和 @field 返回的结构体在编译期构造，不需要运行时定义。
+具体实现方案：在 `checker`/`ir_gen` 中使用编译期已知的 struct layout 来构造返回值。`@typeInfo` 和 `@field` 返回的结构体在编译期构造，不需要运行时定义。
 
 ## @comptime 实现
 
@@ -187,7 +187,7 @@ TY_FIELDINFO : int = ...;  // struct { name: string, offset: int, type: int }
 | 7 | `src/arch/linux/ld/instr.cr` | IR_INLINE 等（仅标注，emit NOP） |
 | 8 | `tests/suite/at_test.cr` | 测试 @ 内建 |
 
-## 不包含
+## 不包含的功能
 
 - walk/step（属于并发模型）
 - `@unroll` / `@section`（编译控制后续扩展）

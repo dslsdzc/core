@@ -2,9 +2,14 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把 P0 的类型项引擎以**影子模式**挂到检查器的类型判定上（旧判定照常生效），对真实语料并跑两套判定、产出**分类差异清单**——收紧面（旧接受→新拒绝 / 旧拒绝→新接受）在 P1 暴露，而不改任何行为。
+**Goal:** 把 P0 的类型项引擎以**影子模式**挂到检查器的类型判定上，旧判定照常生效。对真实语料并跑两套判定，产出**分类差异清单**，使收紧面（旧接受→新拒绝 / 旧拒绝→新接受）在 P1 暴露，而不改任何行为。
 
-**Architecture:** 三件新东西 + 一处包装：① 判定衔接层 `ty_shadow.cr`（checker 的 `ti` → 引擎类型项）；② 影子判定核心（翻译 → `ty_equiv` → 分类：`AGREE` / `OLD_STRICTER`（旧拒新受）/ `OLD_LOOSER`（旧受新拒）/ `UNKNOWN`（引擎 -1，单列不计差异））；③ 通道（CLI `--type-shadow` 开关 + 摘要行 + 转储文件）；挂点 = `type_equal` 包装（原函数改名 `type_equal_core` 供内部递归，外部 8 个决策点经包装自动覆盖）。
+**Architecture:** 本批共三件新东西加一处包装。
+
+- ① 判定衔接层 `ty_shadow.cr`，负责把 checker 的 `ti` 翻译为引擎类型项。
+- ② 影子判定核心，流程为翻译 → `ty_equiv` → 分类，分类取值为 `AGREE` / `OLD_STRICTER`（旧拒新受）/ `OLD_LOOSER`（旧受新拒）/ `UNKNOWN`（引擎 -1，单列不计差异）。
+- ③ 通道，由 CLI `--type-shadow` 开关、摘要行与转储文件组成。
+- 挂点 = `type_equal` 包装：原函数改名 `type_equal_core` 供内部递归，外部 8 个决策点经包装自动覆盖。
 
 **Tech Stack:** Core 自举栈；P0 引擎（`src/compiler/type_terms.cr` / `type_engine.cr` / `type_selftest.cr`）；检查器 `src/compiler/checker.cr`；CLI `src/compiler/main.cr`。
 
@@ -12,13 +17,13 @@
 
 ## Global Constraints
 
-- **jj only**；**提交必须路径限定**（多 agent 共用工作副本）。
-- 所有编译/测试命令 `nice -n 19` 前缀；改编译器源码后**必须重建**。
-- **P1 行为零变化（强判据）**：`--type-shadow` **关**（默认）= 产物与 P0 基线逐字节相同；**开** = 产物**同样**逐字节相同（影子只观察、不改判定、不写产物）。两态都要过。
-- **判据前清缓存**：`nice -n 19 ./build/corec clean-cache`（TODO #2026-09-10-1），且 cwd = 仓库根。
+- **jj only**。**提交必须路径限定**（多 agent 共用工作副本）。
+- 所有编译/测试命令加 `nice -n 19` 前缀。改编译器源码后**必须重建**。
+- **P1 行为零变化（强判据）**：`--type-shadow` **关**（默认）时，产物与 P0 基线逐字节相同；**开**时产物**同样**逐字节相同（影子只观察、不改判定、不写产物）。两态都要过。
+- **判据前清缓存**：执行 `nice -n 19 ./build/corec clean-cache`（TODO #2026-09-10-1），且 cwd = 仓库根。
 - 文件永久不允许还原；不得绕过；**引擎 UNKNOWN（-1）不得计入差异**（未覆盖面 ≠ 收紧面，单列统计）。
-- diff 校验式样：`jj diff --git <paths...> | grep '^[+]' | grep -v -e '^[+][+][+]'`；环境陷阱：noclobber（用 `>|`）、变量不分词。
-- 新文件三处注册（`src/compiler/_import.cr` / `build_selfhost_native.py` 的 **corec 清单**（checker 段后）/ `tests/selfhost/test_compile.py`）。
+- diff 校验式样：`jj diff --git <paths...> | grep '^[+]' | grep -v -e '^[+][+][+]'`。环境陷阱：noclobber（用 `>|`）、变量不分词。
+- 新文件三处注册：`src/compiler/_import.cr`、`build_selfhost_native.py` 的 **corec 清单**（checker 段后）、`tests/selfhost/test_compile.py`。
 
 ---
 
@@ -257,7 +262,7 @@ fn type_equal(t1: int, t2: int) -> bool {
 ```
 （`r ? 1 : 0`：**本语言无三元运算符**——用 `ok : ., mut = 0; if r { ok = 1; }` 显式写。）
 
-- [ ] **Step 2: 站点标注**：在 8 个外部调用点（`checker.cr:711/947/959/973/1212/1405/1796/2127`）调用前 `sh_site_begin(<id>)`。
+- [ ] **Step 2: 站点标注**：在 8 个外部调用点（`checker.cr:711/947/959/973/1212/1405/1796/2127`）调用前执行 `sh_site_begin(<id>)`。
   **实读修正（Task 2 落地，取代初稿标签）**：8 个外部点**无一是 match 路径**；站点 4 = 泛型匹配（pattern 侧恒 `TI_UNIT` → 难产差异）；站点 6 = `EXPR_BINARY+OP_ASSIGN` 遗留路径（**当前不可达**——parser 已把 `=` 统一降为 `EXPR_ASSIGN`，挂点保留但永不产样本，去留待 P2 裁决）；站点 8 = `EXPR_ASSIGN` 节点（**非「索引」**）。站点 ↔ 语义以 `ty_shadow.cr` 头注（实读表）为准。
 
 - [ ] **Step 3: 分类核心（`ty_shadow.cr`）**

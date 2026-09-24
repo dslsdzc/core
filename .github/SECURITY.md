@@ -2,7 +2,7 @@
 
 ## 报告漏洞
 
-请通过 GitHub 的 **私有漏洞报告**（仓库页 → Security → Report a vulnerability）提交，
+请通过 GitHub 的**私有漏洞报告**（仓库页 → Security → Report a vulnerability）提交，
 不要公开披露。
 
 ## 响应
@@ -11,5 +11,5 @@
 
 ## 范围
 
-编译器本身（`src/compiler/`）、运行时（`src/runtime/`）、生成代码的正确性。
-生成代码/编译器的安全问题按严重程度处理。
+范围为编译器本身（`src/compiler/`）、运行时（`src/runtime/`）与生成代码的正确性。
+生成代码与编译器的安全问题按严重程度处理。

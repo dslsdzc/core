@@ -1,6 +1,6 @@
 # 图锚定区域:存在格语义的经典映射(区域/Arena/权限)
 
-> 定位:受众 = 维护者/贡献者(内存管理实现与验证);状态 = active(arena 层已实现;区域机制部分设计态,状态见 §六)。
+> 定位：受众 = 维护者/贡献者（内存管理实现与验证）；状态 = active（arena 层已实现；区域机制部分设计态，状态见 §六）。
 > 本文件 = **存在格 / Materialization Space**(层定义 = docs/maintainer/design/materialization-space.md;条款权威 = docs/academic/cache-semantics.md)在经典字节硬件上的**映射实例**详细设计——正确性标准 = 保持条款 1–6 的可观测语义(条款 7)。
 > 设计谱系:2026-07-28 多 Arena(已实现,分配器面)→ 2026-08-13 图锚定区域(语义面升级,本文档);设计依据 specs 见 §七。
 
@@ -8,11 +8,11 @@
 
 ## 一、方案概述
 
-Core 采用**图锚定区域**的统一内存管理:区域(Region)锚定在 HDFG 上——**区域是子图节点的字节域**,不是词法作用域的影子。堆按 HDFG 子图划分独立区域,区域内线性指针碰撞分配(bump allocation),回收 = 游标重置(格式化清空)。
+Core 采用**图锚定区域**的统一内存管理:区域(Region)锚定在 HDFG 上——**区域是子图节点的字节域**,不是词法作用域的影子。堆按 HDFG 子图划分独立区域;区域内做线性指针碰撞分配(bump allocation),回收 = 游标重置(格式化清空)。
 
-传统区域内存管理(Tofte-Talpin 区域栈、Cyclone、Verona)锚定词法作用域(LIFO 嵌套);Core 的执行模型是 HDFG,区域与图同构——这是与经典区域模型的分野,也是非 LIFO 生命周期(go/flow)可行的原因。
+传统区域内存管理(Tofte-Talpin 区域栈、Cyclone、Verona)锚定词法作用域(LIFO 嵌套)。Core 的执行模型是 HDFG,区域与图同构——这是与经典区域模型的分野,也是非 LIFO 生命周期(go/flow)可行的原因。
 
-不可放弃的两个核心价值:
+两个不可放弃的核心价值:
 
 1. **无碎片**——静态已知大小的分配路径保持纯 bump,零碎片
 2. **动态模式下工程可控的极低碎片**——动态大小分配路径走分档子区域,浪费上界由 size class 表决定(档位越细上界越低:pow2 档约 50%,细分档约 12.5%)
@@ -21,7 +21,7 @@ Core 采用**图锚定区域**的统一内存管理:区域(Region)锚定在 HDFG
 
 ---
 
-## 二、设计动机(为什么区域)
+## 二、设计动机(区域方案)
 
 | 方案 | 问题 |
 |---|---|
@@ -30,7 +30,12 @@ Core 采用**图锚定区域**的统一内存管理:区域(Region)锚定在 HDFG
 | 跟踪式 GC | 停顿不可预测、内存开销不确定、不适合硬实时 |
 | RAII + 所有权(Rust) | 静态正确,但复杂数据结构需精细设计借用关系,运行期开销 |
 
-区域方案优势:分配 O(1)(指针碰撞)、回收 O(1)(整体重置)、区域内无碎片、可预测(无 GC 停顿)、cache 友好(同子图数据同区域,空间局部性好)。
+区域方案的优势:
+- 分配 O(1)(指针碰撞)
+- 回收 O(1)(整体重置)
+- 区域内无碎片
+- 可预测(无 GC 停顿)
+- cache 友好(同子图数据同区域,空间局部性好)
 
 论文依据:Tofte & Talpin 区域推断(POPL'94,泄漏弱点需显式提前释放)、Gay & Aiken 显式区域(PLDI'98,提前释放工程可用)、Verona/snmalloc(Oopsla'24,size class 分档)、CompCert v2(每字节权限层 = 经典映射的权限面)。细节见 graph-anchored-regions-design。
 
@@ -88,10 +93,10 @@ Core 采用**图锚定区域**的统一内存管理:区域(Region)锚定在 HDFG
 实现要点(已落地):
 - stdlib arena.cr 完整生命周期(init/new/reset)、动态元数据、free list、嵌套
 - IR 子图绑定:函数/loop/for/unsafe 自动 arena lifecycle + 编译期大小预计算(ir_gen.cr)
-- ELF 后端双路径 alloc:arena 感知(g_current_arena 检查)+ 全局 bump 回退;mmap 堆扩展(BSS 打满自动 mmap)
-- emit_alloc_body 零初始化 + 链式扩容
+- ELF 后端双路径 alloc:arena 感知(`g_current_arena` 检查)+ 全局 bump 回退;mmap 堆扩展(BSS 打满自动 mmap)
+- `emit_alloc_body` 零初始化 + 链式扩容
 
-运行时:每区域单线程访问,bump pointer 无需原子操作(无锁分配);go 创建独立区域(G 的 arena),返回值拷贝到父区域;区域池制——活跃区域数 = 当前并发子图数,上限 = MAX_CONCURRENCY,耗尽时新 go/flow 阻塞等待;无 GC。
+运行时:每区域单线程访问,`bump pointer` 无需原子操作(无锁分配);go 创建独立区域(G 的 arena),返回值拷贝到父区域;区域池制——活跃区域数 = 当前并发子图数,上限 = `MAX_CONCURRENCY`,耗尽时新 go/flow 阻塞等待;无 GC。
 
 ---
 
@@ -101,7 +106,7 @@ Core 采用**图锚定区域**的统一内存管理:区域(Region)锚定在 HDFG
 
 经典映射 = 图 + 字节权限层(CompCert v2):权限层不是语义本体,是缓存语义在字节寻址机器上的权限投影(条款 7)。每字节权限序:**Freeable > Writable > Readable > Nonempty > Empty**。
 
-- 区域树 = 图的子图结构;布局元数据、ALLOC_AT 边界、outlives 结论全部从图导出——验证器消费图即消费全部内存语义
+- 区域树 = 图的子图结构;布局元数据、`ALLOC_AT` 边界、`outlives` 结论全部从图导出——验证器消费图即消费全部内存语义
 
 ### 5.2 布局与放置(用户面,零管理负担)
 
@@ -129,7 +134,7 @@ mmio := alloc_at(0x7fff0000, 4096, align(4096));
 ```
 
 - 不提供显式区域/回收语法(YAGNI)
-- 0x 字面量仍是 unsafe 外部入口;alloc_at 是声明式进图(获得 provenance 的节点)——声明是唯一信任点,之后全图追踪
+- 0x 字面量仍是 unsafe 外部入口;`alloc_at` 是声明式进图(获得 provenance 的节点)——声明是唯一信任点,之后全图追踪
 
 ---
 

@@ -109,8 +109,11 @@ def compile_selfhost():
 # ── Test 1: Basic interpreter run ──
 print("=== Test 1: Basic Interpreter Run ===")
 src1 = '''
-fn add(a: int, b: int) -> int { return a + b; }
-fn main() -> int { return add(3, 4); }
+fn add(a: int, b: int) -> int:
+    return a + b
+
+fn main() -> int:
+    return add(3, 4)
 '''
 lex = Lexer(src1)
 ast = Parser(lex.tokenize()).parse_compilation_unit()
@@ -156,7 +159,33 @@ for p in [test_src, test_bin, test_bin + '.ccr']:
         os.remove(p)
 
 with open(test_src, 'w') as f:
-    f.write("fn main() -> int { return 42; }\n")
+    f.write("""struct Point:
+    x: int
+    y: int
+
+enum Mode:
+ | Sum
+ | Zero
+
+impl Point:
+    fn sum(&self) -> int:
+        return self.x + self.y
+
+fn main() -> int:
+    #check(1 < 2)
+    #ensure(result == 42)
+    point := Point { x = 20, y = 22 }
+    mode := Sum
+    empty : int? = none
+    ignored := match empty:
+     | none => 0
+     | value => value
+    return match mode:
+     | Sum =>
+        value : typeof(point.x) = point.sum()
+        value
+     | Zero => 0
+""")
 
 r = subprocess.run(
     [os.path.join(build_dir, 'corec'), 'build', test_src, '-o', test_bin, '--static'],

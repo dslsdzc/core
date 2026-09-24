@@ -1,12 +1,12 @@
 # Core 泛型
 
-> 定位:受众 = 维护者/贡献者;状态 = **active(已实现)**——泛型函数/struct + 跨模块实例化(monomorph.cr)已纳入自举;本设计文档留作机制参考,细节见 checker.cr/monomorph.cr/tests/suite/generics_test.cr
+> 定位：受众 = 维护者/贡献者；状态 = **active（已实现）**——泛型函数/struct + 跨模块实例化（monomorph.cr）已纳入自举；本设计文档留作机制参考，细节见 checker.cr/monomorph.cr/tests/suite/generics_test.cr。
 
 ## 设计原则
 
 - **尽量靠图推导，不需要用户标注约束。**
 - 泛型函数的每次实例化在图上产生独立子图，互不干扰。
-- 学习成本：用户只需要会写 `<T>`，不需要学 trait bounds、where 子句、关联类型。
+- 学习成本：用户只需掌握 `<T>` 写法，不需要学 trait bounds、where 子句、关联类型。
 
 ## 语法
 
@@ -56,7 +56,7 @@ print_size("hello");     //  string 有 .len()，编译器推导约束匹配
 
 ### 隐式约束推导
 
-尝试使用泛型类型时，编译器关注实际传入的类型是否满足函数内部的操作。规则是从使用点推导约束，而不是在定义点声明约束。
+使用泛型类型时，编译器检查实际传入的类型是否满足函数内部的操作。约束从使用点推导，不在定义点声明。
 
 ```core
 fn add<T>(a: T, b: T) -> T {
@@ -162,6 +162,6 @@ make_array<int, user_input>();  //  编译错误：泛型参数 N 需要编译�
 
 ## 当前状态
 
-泛型函数和泛型 struct 已在 checker 和 ir_gen 中实现（`infer_gen_call`、`fi_generic_count`）。
+泛型函数和泛型 struct 已在 `checker` 和 `ir_gen` 中实现（`infer_gen_call`、`fi_generic_count`）。
 跨模块泛型实例化由 `src/compiler/monomorph.cr` 承担（已纳入自举构建）。
 具体实现进度以 `TODO.md` 与源码为准。已知局限：解释器不支持泛型函数（类型检查通过但返回 255，见 TODO.md 预存 bug 3）。

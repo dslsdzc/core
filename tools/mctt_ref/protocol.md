@@ -1,6 +1,6 @@
 # 共享格式协议（McTT→Core 内核移植 M1 术语级差分）
 
-> 本协议由 Task 3 定死，是 Task 4（语料生成器 `tests/kernel/gen_corpus.py`）、
+> 本协议由 Task 3 确定，是 Task 4（语料生成器 `tests/kernel/gen_corpus.py`）、
 > Task 5（`src/kernel/term_io.cr`）、Task 6（Core 内核移植）与 Task 7（差分）
 > 的唯一格式基准。任何实现与本文不符即为协议违反。
 > 语义基准 = McTT 提取代码（`~/mctt/driver/extracted/`，icfp25 分支），
@@ -10,7 +10,7 @@
 
 - 每行一条查询；**`#` 开头的行（允许前导空白）是注释行，读取时必须跳过**，
   不产生输出。空行同样跳过。
-- 每行由命令名 + 若干 S-表达式组成，空白分隔：
+- 每行由命令名与若干 S-表达式组成，以空白分隔：
   - `check   <ctx> <exp> <exp>`   判定第二项 : 第三项（项在前、类型在后）
   - `infer   <ctx> <exp>`         推断类型
   - `convert <ctx> <exp> <exp> <exp>`  第二、三项在第四项类型下可转换性
@@ -58,7 +58,7 @@ subtype: yes | no
 
 ## 5. 语义约定（总化规则）
 
-判定语义 = **McTT 提取算法直译**（`TypeCheck.type_check/type_infer`、
+判定语义为 **McTT 提取算法的直译**（`TypeCheck.type_check/type_infer`、
 `Subtyping.subtyping_impl`、`NbE.nbe_impl` + `Syntax.nf_eq_dec`），并约定
 「判定前提不满足」的处理：
 

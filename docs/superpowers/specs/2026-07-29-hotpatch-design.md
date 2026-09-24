@@ -11,7 +11,7 @@ Core 编译器的滚动更新（hotpatch）机制。通过 `@hotpatch` 注解支
 - **同名函数多版本共存**：`@hotpatch(ver=N)` 标记的函数允许同名，签名必须一致
 - **编译期路由节点**：调用点 emit `IR_HOTPATCH_ROUTE`，运行时根据配置选择版本
 - **运行时配置**：`.hotpatch.toml` 配置文件，SIGHUP 信号重读
-- **排水安全**：in_flight 计数追踪进行中请求，drain 完成后回收旧版本
+- **排水安全**：`in_flight` 计数追踪进行中请求，drain 完成后回收旧版本
 
 ## IR 指令
 
@@ -69,7 +69,7 @@ g_hp_config  : string, mut;  // 序列化配置表
 g_hp_inflight : string, mut;  // in_flight 计数数组
 ```
 
-### 配置格式（.hotpatch.toml）
+### 配置格式（`.hotpatch.toml`）
 
 ```toml
 [hotpatch.handle]

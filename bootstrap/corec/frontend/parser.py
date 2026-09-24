@@ -39,26 +39,65 @@ class Parser:
         self.const_values = {}
 
     def _scan_constants(self):
-        """Pre-scan for 'NAME: TYPE = VALUE;' declarations to resolve array sizes."""
+        """Pre-scan for 'NAME: TYPE = VALUE' declarations to resolve array sizes.
+
+        v4 改判（T0 布局规格 §6.2 A4）：终止元由 `;` 改为**行边界** ⇒ 六元组收为五元组。
+        ⚠ **漏改即静默错答案**：具名长度会落到 `parse_type` 的 `.get(name, 0)` 兜底
+        （解成 0），既不报错也不可辨。⇒ 判据必须含**正控**（真取到非 0 的值）。
+        """
         save = self.pos
         while not self.check(TokenType.EOF):
             matched = False
-            # New syntax: NAME: TYPE = VALUE; (starts with IDENT)
+            # v4: NAME : TYPE = VALUE 〈行边界〉
             if (self.check(TokenType.IDENT) and
-                  self._check_seq([TokenType.IDENT, TokenType.COLON,
-                                   TokenType.IDENT, TokenType.EQ, TokenType.INT_LIT,
-                                   TokenType.SEMI])):
+                  self._check_seq([TokenType.IDENT, TokenType.COLON_DECL,
+                                   TokenType.IDENT, TokenType.EQ, TokenType.INT_LIT])):
                 name = self.advance().lexeme  # NAME
                 self.advance()  # :
-                type_name = self.advance().lexeme  # int/dex/bool
+                self.advance()  # TYPE name (int/dex/bool)
                 self.advance()  # =
                 val = int(self.advance().lexeme)  # VALUE
-                self.const_values[name] = val
-                self.advance()  # ; (skip to keep pos consistent)
+                if self._at_line_end():
+                    self.const_values[name] = val
                 matched = True
             if not matched:
                 self.advance()
         self.pos = save
+
+    # ── v4 行边界（`;` 退场后的统一终止面）──────────────────────────────
+    # 出处 = T0 布局规格 §2.5（`;` 只在 `[T; N]` / `[v; N]` 存活）+ §6.2 的 A/B 两类逐点判定。
+    def _at_line_end(self):
+        """当前位置是否处于行边界：NEWLINE / DEDENT / EOF。
+
+        `DEDENT` 与 `EOF` **不消费**——它们是 region 收尾信号，由块产生式处理。
+        """
+        return (self.check(TokenType.NEWLINE) or self.check(TokenType.DEDENT)
+                or self.check(TokenType.EOF))
+
+    def _consume_newlines(self):
+        while self.check(TokenType.NEWLINE):
+            self.advance()
+
+    def _end_decl(self):
+        """消费语句/声明的行边界；**非行边界即响亮报错**。
+
+        本函数取代原 `expect(SEMI)`（T0 布局规格 §6.2 B 类 8 处）——保留其**严格性**：
+        少了这条，「同行两条声明」会被静默接受（与 `;` 时代行为不一致）。
+        """
+        if not self._at_line_end():
+            self.error(f"expected end of line, got '{self.cur().lexeme}'")
+        self._consume_newlines()
+
+    def _expect_region(self):
+        """吃 region 头：`COLON_BLOCK` 行尾冒号 + 其后的 NEWLINE + `INDENT`。
+
+        token 次序由 lexer 的 `_layout_break` 决定：NEWLINE 先于 INDENT/DEDENT。
+        **行内 `:`（`COLON_DECL`）在此被响亮拒绝** —— 这正是 T0 布局规格 §2.2 要的
+        「行尾类型标注不是合法文本」的兜住点。
+        """
+        self.expect(TokenType.COLON_BLOCK)
+        self._consume_newlines()
+        self.expect(TokenType.INDENT)
 
     def _check_seq(self, types):
         """Check if the next tokens match the given type sequence."""
@@ -93,7 +132,12 @@ class Parser:
         return self.cur().type == typ
 
     def _is_var_decl_start(self):
-        """Check if current position starts a new-style variable declaration (no 'let' keyword)."""
+        """Check if current position starts a new-style variable declaration (no 'let' keyword).
+
+        v4 改判（T0 布局规格 §6.2 A3）：本消解器**不读 `;`**（今天也不读），但 `:` 改判
+        `COLON_DECL`——裁定 ② 使两种 `:` 互斥且穷尽 ⇒ 本处**零前瞻**，
+        `COLON_BLOCK` 不进声明分支（进不去 ⇒ 在语句位会响亮报错，正是 §2.2 要的）。
+        """
         if not self.check(TokenType.IDENT):
             return False
         save = self.pos
@@ -104,11 +148,11 @@ class Parser:
             self.advance()
             if self.check(TokenType.IDENT):
                 self.advance()
-                if self.check(TokenType.COLON):
+                if self.check(TokenType.COLON_DECL):
                     result = True
         elif self.check(TokenType.COLON_EQ):
             result = True
-        elif self.check(TokenType.COLON):
+        elif self.check(TokenType.COLON_DECL):
             result = True  # x : type ... — commit to declaration
         self.pos = save
         return result
@@ -126,7 +170,7 @@ class Parser:
             self.advance()
             values = [self.parse_expr()]
             return names, tags, None, values
-        self.expect(TokenType.COLON)
+        self.expect(TokenType.COLON_DECL)
         if self.check(TokenType.AUTO) or self.check(TokenType.DOT):
             typ = None  # auto-deduced
             self.advance()
@@ -134,17 +178,18 @@ class Parser:
             typ = self.parse_type()
         if self.check(TokenType.COMMA):
             self.advance()
-            while not self.check(TokenType.EQ) and not self.check(TokenType.SEMI) and not self.check(TokenType.EOF):
-                # Accept IDENT or any keyword as a tag (anything that's not a structural token)
-                tt = self.cur().type
-                if tt not in (TokenType.EQ, TokenType.SEMI, TokenType.COMMA, TokenType.COLON, TokenType.EOF):
-                    tag = self.advance().lexeme
-                    # 已知标签：mut / pub / apx（与自举编译器一致，未知标签报错）
-                    if tag not in ('mut', 'pub', 'apx'):
-                        self.error(f"unknown declaration tag '{tag}'")
-                    tags.append(tag)
-                else:
-                    break
+            # 标签表终止面（T0 布局规格 §6.2 A8 + A9 的对齐目标）：
+            # **行边界** + `EQ`（`x : int, mut, pub = e` 的 `=` 仍保留）。
+            # ⚠ A9：自源 `parser.cr:871` 今天的终止符集 = EQ/SEMI/EOF，
+            #   而本侧曾是 EQ/SEMI/COMMA/COLON/EOF —— **两套前端此处不同形**。
+            #   v4 下两侧一律取「行边界 + EQ」⇒ 本步把 COMMA/COLON 从终止符集移除
+            #   （COMMA 仍是标签**分隔符**，见下方 advance；收进终止符集是过去的兜底）。
+            while not self._at_line_end() and not self.check(TokenType.EQ):
+                tag = self.advance().lexeme
+                # 已知标签：mut / pub / apx（与自举编译器一致，未知标签报错）
+                if tag not in ('mut', 'pub', 'apx'):
+                    self.error(f"unknown declaration tag '{tag}'")
+                tags.append(tag)
                 if self.check(TokenType.COMMA):
                     self.advance()
                 else:
@@ -165,6 +210,11 @@ class Parser:
         modules, imports = self._parse_module_and_imports()
         declarations = []
         while not self.check(TokenType.EOF):
+            self._consume_newlines()
+            if self.check(TokenType.EOF):
+                break
+            if self.check(TokenType.DEDENT):
+                self.error("unexpected dedent at top level")
             declarations.append(self.parse_top_level_decl())
         return CompilationUnit(modules, imports, declarations, fileid)
 
@@ -172,7 +222,7 @@ class Parser:
         if self.check(TokenType.FILEID):
             self.advance()
             name = self.expect(TokenType.STRING_LIT).lexeme
-            self.expect(TokenType.SEMI)
+            self._end_decl()
             return name
         return None
 
@@ -188,7 +238,7 @@ class Parser:
     def parse_module_decl(self):
         self.expect(TokenType.MOD)
         path = self.parse_path()
-        self.expect(TokenType.SEMI)
+        self._end_decl()
         return ModuleDecl(path)
 
     def parse_import_decl(self):
@@ -199,10 +249,11 @@ class Parser:
             project = self.expect(TokenType.IDENT).lexeme
         file_id = self.expect(TokenType.IDENT).lexeme
         alias = None
-        if self.check(TokenType.AS) or self.check(TokenType.COLON):
+        # D7（T0 布局规格 §2.2）：`import math : m` 的别名 `:` 后**必有**后继 token ⇒ COLON_DECL
+        if self.check(TokenType.AS) or self.check(TokenType.COLON_DECL):
             self.advance()
             alias = self.expect(TokenType.IDENT).lexeme
-        self.expect(TokenType.SEMI)
+        self._end_decl()
         return ImportDecl([file_id], alias, project)
 
     def parse_path(self):
@@ -256,8 +307,12 @@ class Parser:
         if self.check(TokenType.EQ):
             self.advance()
             body = self.parse_expr()
-            self.expect(TokenType.SEMI)
+            self._end_decl()
             return FunctionDecl(is_pub, name, generics, params, ret, body)
+        # D9/D10（T0 布局规格 §2.2）：有体 ⇒ 行尾 `:`（COLON_BLOCK）开 region；
+        # 无体（`extern fn read(fd: int) -> int`）⇒ 行边界，无 `:`。
+        if self._at_line_end():
+            return FunctionDecl(is_pub, name, generics, params, ret, None)
         body = self.parse_block()
         if is_flow:
             body = Flow(body)
@@ -297,7 +352,7 @@ class Parser:
                     self.expect(TokenType.COMMA)
                 first = False
                 names.append(self.expect(TokenType.IDENT).lexeme)
-                if self.check(TokenType.COLON):
+                if self.check(TokenType.COLON_DECL):
                     self.advance()  # :
                     self.expect(TokenType.IDENT)  # constraint name (skip)
             self.expect(TokenType.RBRACK)
@@ -327,7 +382,7 @@ class Parser:
         if self.check(TokenType.SELF):
             name = self.advance().lexeme
             typ = None
-            if self.check(TokenType.COLON):
+            if self.check(TokenType.COLON_DECL):
                 self.advance()
                 typ = self.parse_type()
             return (name, typ)
@@ -335,11 +390,11 @@ class Parser:
         if self.check(TokenType.DOT_DOT_DOT):
             self.advance()
             name = self.expect(TokenType.IDENT).lexeme
-            self.expect(TokenType.COLON)
+            self.expect(TokenType.COLON_DECL)
             typ = self.parse_type()
             return (name, typ)
         name = self.expect(TokenType.IDENT).lexeme
-        self.expect(TokenType.COLON)
+        self.expect(TokenType.COLON_DECL)
         typ = self.parse_type()
         return (name, typ)
 
@@ -385,10 +440,21 @@ class Parser:
                 self.advance()
             return RefType(mut, self.parse_type())
         # dex = 精确小数（数值迁移 Task 5：float 类型名已移除，与自举侧同步）
-        base_types = {'int','dex','bool','string','char','unit','never'}
-        if self.check(TokenType.SELF_TYPE):
+        # v4：`never` / `dyn` 从「词素比对」**提升为关键字**（计划 §一.5 注 1 / §7.1 项 8）
+        # ⇒ 必须在此显式收下，否则它们会掉进 `parse_path()` 的 `expect(IDENT)` 而响亮报错。
+        # 语义与自源原生名表一致（`checker.cr:1186` 的 8 个基类型名含 never/dyn ⇒ TY_NEVER / TI_DYN）。
+        if self.check(TokenType.NEVER):
             self.advance()
-            return BaseType('Self')
+            return BaseType('never')
+        if self.check(TokenType.DYN):
+            self.advance()
+            return BaseType('dyn')
+        # v4：`Self` 不再进关键字表（计划 §一.5 的 `bootstrap − v4` 差集含 `Self`）
+        # ⇒ 它以 IDENT 到达；保留「`&Self` 是原生名不是泛型形参」的既有行为
+        # （先例：`never` 今天也走这条 base_types 路径）。**若漏掉本格**，
+        # `&Self` 会变成 `PathType(['Self'])`，而 type_checker 的 `_is_generic_type`
+        # 把「单元素 PathType」当泛型形参 ⇒ 静默错判（不是报错）。
+        base_types = {'int','dex','bool','string','char','unit','never','Self'}
         if self.check(TokenType.IDENT) and self.cur().lexeme in base_types:
             return BaseType(self.advance().lexeme)
         if self.check(TokenType.UNIT):
@@ -418,12 +484,8 @@ class Parser:
         return left
 
     def parse_assignment(self):
-        if self.check(TokenType.MOVE):
-            self.advance()
-            name = self.expect(TokenType.IDENT).lexeme
-            self.expect(TokenType.EQ)
-            val = self.parse_expr()
-            return Move(name, val)
+        # `move` 已退役（计划 §一.5：bootstrap − v4 差集含 `move`）⇒ 原 MOVE 分支删除。
+        # v4 下 `move x = e` 会响亮报错（`move` 落 T_IDENT ⇒ 变成两条语句/未知名），不静默。
         left = self.parse_logical_or()
         if self.check(TokenType.EQ):
             self.advance()
@@ -578,7 +640,7 @@ class Parser:
                 symbol = self.expect(TokenType.IDENT).lexeme
                 return Ident(f"@{first}.{file_id}::{symbol}")
             return Builtin(first, [])
-        if self.check(TokenType.SOME) or self.check(TokenType.NONE) or self.check(TokenType.SELF):
+        if self.check(TokenType.NONE) or self.check(TokenType.SELF):
             return Ident(self.advance().lexeme)
         if self.check(TokenType.INT_LIT):
             return Literal(int(self.advance().lexeme), 'int')
@@ -598,17 +660,18 @@ class Parser:
             self.advance(); return Literal(None, 'unit')
         if self.check(TokenType.IDENT):
             ident_name = self.advance().lexeme
-            if ident_name[0].isupper() and self.check(TokenType.LBRACE) and self._is_struct_lit(self.pos):
+            # v4（T0 布局规格 §4.5）：块花括号不存在 ⇒ `Name {` 之后**必**是字面量，
+            # 原 `_is_struct_lit` 消解器整体退场（它靠「深度 1 的 `;`」判块）。
+            if ident_name[0].isupper() and self.check(TokenType.LBRACE):
                 self.advance()  # consume {
                 fields = []
                 while not self.check(TokenType.RBRACE):
                     fname = self.expect(TokenType.IDENT).lexeme
-                    if self.check(TokenType.EQ):
-                        self.advance()
-                    elif self.check(TokenType.COLON):
-                        self.advance()
-                    else:
-                        self.expect(TokenType.EQ)
+                    # §4.2 写死：分隔符必须是 `=`；未选定的 `:` 形**响亮拒绝**（码 P030）。
+                    # 修复前是**盲跳**（`elif check(COLON): advance()`）⇒ 两形同收 = 判据无鉴别力。
+                    if not self.check(TokenType.EQ):
+                        self.error("struct literal field separator must be '=' [P030]")
+                    self.advance()
                     val = self.parse_expr()
                     fields.append((fname, val))
                     if self.check(TokenType.COMMA):
@@ -641,7 +704,9 @@ class Parser:
             self.expect(TokenType.RPAREN)
             return e
         if self.check(TokenType.LBRACE):
-            return self.parse_block()
+            # v4：`{ }` 只作结构体字面量定界符（`{` 的唯一合法位置，T0 布局规格 §4.3），
+            # 块结构由 `:` + 缩进取代 ⇒ 表达式位的裸 `{` 无产生式，响亮报错。
+            self.error("'{' is only valid as a struct literal delimiter in v4 (blocks use ':' + indent)")
         if self.check(TokenType.IF):
             return self.parse_if_expr()
         if self.check(TokenType.MATCH):
@@ -681,45 +746,20 @@ class Parser:
             self.advance(); return Unsafe(self.parse_block())
         self.error(f"Unexpected token: {self.cur().lexeme}")
 
-    def _is_struct_lit(self, brace_pos):
-        """Check if at brace_pos we have a struct literal rather than a block.
-
-        Scans for ';' inside the braces — a semicolon at depth 1 means block,
-        not struct literal. Also requires first field to start with IDENT =/:."""
-        pos = brace_pos + 1
-        if pos >= len(self.tokens):
-            return False
-        # Empty braces {}
-        if self.tokens[pos].type == TokenType.RBRACE:
-            return True
-        # Must start with IDENT = or IDENT :
-        if self.tokens[pos].type != TokenType.IDENT:
-            return False
-        if pos + 1 >= len(self.tokens):
-            return False
-        nxt = self.tokens[pos + 1].type
-        if nxt != TokenType.EQ and nxt != TokenType.COLON:
-            return False
-        # Scan for ; at depth 1 (top level), tracking all bracket types
-        depth = 1
-        limit = min(brace_pos + 100, len(self.tokens))
-        for i in range(brace_pos + 1, limit):
-            tt = self.tokens[i].type
-            if tt in (TokenType.LBRACE,): depth += 1
-            elif tt in (TokenType.RBRACE,): depth -= 1
-            elif tt in (TokenType.LBRACK, TokenType.LPAREN): depth += 1
-            elif tt in (TokenType.RBRACK, TokenType.RPAREN): depth -= 1
-            if depth == 0:
-                break
-            if tt == TokenType.SEMI and depth == 1:
-                return False  # ; at top level -> block
-        return True
-
     def parse_block(self) -> Block:
-        self.expect(TokenType.LBRACE)
+        """v4 region：吃 `INDENT` … `DEDENT`（取代原 `{` … `}`）。
+
+        尾表达式判定（T0 布局规格 §6.2 A1）：**region 的最后一项 = 该 region 的值**，
+        其余各项按语句处理 —— 即原 `parse_block` 的「暂定尾表达式」逻辑原样保留，
+        只是「还有下一项」的判据由「不是 `}`」变成「不是 DEDENT」。
+        """
+        self._expect_region()
         stmts = []
         expr = None
-        while not self.check(TokenType.RBRACE) and not self.check(TokenType.EOF):
+        while True:
+            self._consume_newlines()
+            if self.check(TokenType.DEDENT) or self.check(TokenType.EOF):
+                break
             item = self.parse_stmt()
             if isinstance(item, Stmt):
                 if expr is not None:
@@ -732,38 +772,34 @@ class Parser:
                 if expr is not None:
                     stmts.append(ExprStmt(expr))
                 expr = item
-        self.expect(TokenType.RBRACE)
+        self.expect(TokenType.DEDENT)
         return Block(stmts, expr)
 
     def parse_stmt(self):
         if self.check(TokenType.IDENT) and self._is_var_decl_start():
             names, tags, typ, values = self._parse_var_decl_names_tags_type()
-            self.expect(TokenType.SEMI)
+            self._end_decl()
             return LetStmt(names=names, tags=tags, type_=typ, values=values)
         elif self.check(TokenType.RETURN):
             self.advance()
             val = None
-            if not self.check(TokenType.SEMI) and not self.check(TokenType.RBRACE):
+            # A6：关键字之后**同一逻辑行内**无 token ⇒ 无值（行边界取代 `;`/`}`）
+            if not self._at_line_end():
                 val = self.parse_expr()
-            if self.check(TokenType.SEMI):
-                self.advance()
+            self._consume_newlines()
             return ReturnStmt(val)
         elif self.check(TokenType.BREAK):
             self.advance()
-            if self.check(TokenType.SEMI):
-                self.advance()
+            self._consume_newlines()
             return BreakStmt()
         elif self.check(TokenType.CONTINUE):
             self.advance()
-            if self.check(TokenType.SEMI):
-                self.advance()
+            self._consume_newlines()
             return ContinueStmt()
         else:
-            e = self.parse_expr()
-            if self.check(TokenType.SEMI):
-                self.advance()
-                return ExprStmt(e)
-            return e
+            # A1：裸表达式**暂定**为 region 尾值；块循环在「后面还有一项」时再包成 ExprStmt。
+            # v4 无 `;` ⇒ 不再有「显式语句」形态（原 `if check(SEMI): return ExprStmt(e)` 分支淘汰）。
+            return self.parse_expr()
 
     def parse_if_expr(self):
         self.expect(TokenType.IF)
@@ -781,18 +817,33 @@ class Parser:
     def parse_match_expr(self):
         self.expect(TokenType.MATCH)
         expr = self.parse_expr()
-        self.expect(TokenType.LBRACE)
+        self._expect_region()
         arms = []
-        while not self.check(TokenType.RBRACE) and not self.check(TokenType.EOF):
+        while True:
+            self._consume_newlines()
+            if self.check(TokenType.DEDENT) or self.check(TokenType.EOF):
+                break
+            # 臂前缀 `|`（v4 目标形，维护者原话 `/tmp/briefs/v4-syntax-raw.md:81,119-138`：
+            # `|` = alternative / pattern arm，且同组臂必须**列对齐**）。
+            # **本侧接受「有 `|`」与「无 `|`」两形**，理由写实（不是偷懒）：
+            #   ① v3 语料的臂**没有** `|`（`tests/suite/apx_conversion_test.cr:89`
+            #      逐字 `match e { V(x) => …, None => … }`），而 T4 是**机械改写**
+            #      （计划 §六.1：形状只有 `{}`→缩进、`;`→换行两类）⇒ 它**不会**补 `|`
+            #      ⇒ 本批自己的产物必须仍可解析；
+            #   ② v4 目标形有 `|` ⇒ 不收它就解析不了维护者原话里的 match 例。
+            # ⚠ 二者**不是「两形都收」的静默歧义**：改前 `|` 在臂首是**解析错误**，
+            #   故本放宽**不改变任何既有可解析程序的含义**（纯增量）。
+            #   「`|` 是否**强制**」留待 T5 决定（先例：struct 字面量分隔符守卫，T0 §4.2）。
+            if self.check(TokenType.PIPE):
+                self.advance()
             pat = self.parse_pattern()
             self.expect(TokenType.FAT_ARROW)   # 使用 =>
             body = self.parse_expr()
             arms.append(MatchArm(pat, body))
             if self.check(TokenType.COMMA):
                 self.advance()
-        self.expect(TokenType.RBRACE)
+        self.expect(TokenType.DEDENT)
         return Match(expr, arms)
-
     def parse_pattern(self) -> Pattern:
         if self.check(TokenType.UNDERSCORE) or self.cur().lexeme == '_':
             self.advance(); return Wildcard()
@@ -810,8 +861,18 @@ class Parser:
                     pats.append(self.parse_pattern())
             self.expect(TokenType.RPAREN)
             return TuplePattern(pats)
-        # 标识符或关键字作为模式
-        if self.check(TokenType.IDENT) or self.check(TokenType.SOME) or self.check(TokenType.NONE):
+        # v4 的 `none`（小写，v4 关键字）与既有 canonical 变体名 `None` 指**同一个**变体。
+        # ⚠ canonical 名此处仍写 `None`：改它 = 全局重命名，属 **T5** 的 `None`→`none` 语义面
+        #   （计划 §2.3 R3 逐字「`none` ↔ `None` … 是语义面，见 T1/T5」），
+        #   与 T4 的机械形状改写不同批。`EnumPattern` 的 path[-1] 会被 desugar 直接当
+        #   `__variant` 的**标签串**比较（`desugar.py:86-92`）⇒ 必须与枚举声明的变体名一致。
+        #   **漏掉本格** ⇒ 小写 `none` 会掉进下方的 IdentPattern（那是**变量绑定**，不是匹配）
+        #   ⇒ 语义静默改变（模式永远命中）——正是要防的形态。
+        if self.check(TokenType.NONE):
+            self.advance()
+            return EnumPattern(['None'], None)
+        # 标识符或关键字作为模式（v4：`Some` 已是普通 IDENT，走下行）
+        if self.check(TokenType.IDENT):
             name = self.advance().lexeme
             path = [name]
             if self.check(TokenType.LPAREN):
@@ -871,25 +932,29 @@ class Parser:
         self.expect(TokenType.STRUCT)
         name = self.expect(TokenType.IDENT).lexeme
         generics = self._parse_generics()
-        self.expect(TokenType.LBRACE)
+        self._expect_region()
         fields = []
-        while not self.check(TokenType.RBRACE):
+        while True:
+            self._consume_newlines()
+            if self.check(TokenType.DEDENT) or self.check(TokenType.EOF):
+                break
             fname = None
             if self.check(TokenType.IDENT):
                 fname = self.advance().lexeme
             elif self.cur().type in (TokenType.TYPE, TokenType.MUT, TokenType.PUB, TokenType.MOD,
                                      TokenType.STRUCT, TokenType.ENUM,
-                                     TokenType.IMPL, TokenType.SELF, TokenType.SELF_TYPE,
+                                     TokenType.IMPL, TokenType.SELF,
                                      TokenType.MATCH, TokenType.FOR, TokenType.LOOP,
                                      TokenType.WHILE, TokenType.IF, TokenType.ELSE,
                                      TokenType.RETURN, TokenType.BREAK, TokenType.CONTINUE,
-                                     TokenType.GO, TokenType.AWAIT, TokenType.MOVE,
+                                     TokenType.GO, TokenType.AWAIT,
                                      TokenType.TRUE, TokenType.FALSE, TokenType.UNIT,
                                      TokenType.AUTO, TokenType.INTERFACE, TokenType.AS):
                 fname = self.advance().lexeme  # keyword as field name
             else:
                 fname = self.expect(TokenType.IDENT).lexeme
-            self.expect(TokenType.COLON)
+            # D4（T0 布局规格 §2.2）：字段形 `id: int` 的 `:` 后必有类型 ⇒ COLON_DECL
+            self.expect(TokenType.COLON_DECL)
             ftype = self.parse_type()
             # field tags: consume optional tags like `, mut`, `, pub` after type
             while self.check(TokenType.COMMA) and self.peek().type in (TokenType.MUT, TokenType.PUB):
@@ -898,18 +963,22 @@ class Parser:
             fields.append((fname, ftype))
             if self.check(TokenType.COMMA):
                 self.advance()
-        self.expect(TokenType.RBRACE)
+        self.expect(TokenType.DEDENT)
         return StructDecl(is_pub, name, generics, fields)
 
     def parse_enum_decl(self, is_pub):
         self.expect(TokenType.ENUM)
         name = self.expect(TokenType.IDENT).lexeme
         generics = self._parse_generics()
-        self.expect(TokenType.LBRACE)
+        self._expect_region()
         variants = []
-        while not self.check(TokenType.RBRACE):
-            vname = None
-            if self.check(TokenType.SOME) or self.check(TokenType.NONE):
+        while True:
+            self._consume_newlines()
+            if self.check(TokenType.DEDENT) or self.check(TokenType.EOF):
+                break
+            # `None` ⇒ `none` 是关键字 ⇒ 变体名仍收 NONE（保留今日「以 None 为变体名」的接受面）；
+            # `Some` 已退休成 IDENT ⇒ 走 expect(IDENT)。
+            if self.check(TokenType.NONE):
                 vname = self.advance().lexeme
             else:
                 vname = self.expect(TokenType.IDENT).lexeme
@@ -925,16 +994,19 @@ class Parser:
             variants.append((vname, types))
             if self.check(TokenType.COMMA):
                 self.advance()
-        self.expect(TokenType.RBRACE)
+        self.expect(TokenType.DEDENT)
         return EnumDecl(is_pub, name, generics, variants)
 
     def parse_interface_decl(self, is_pub):
         self.expect(TokenType.INTERFACE)
         name = self.expect(TokenType.IDENT).lexeme
         generics = self._parse_generics()
-        self.expect(TokenType.LBRACE)
+        self._expect_region()
         methods = []
-        while not self.check(TokenType.RBRACE):
+        while True:
+            self._consume_newlines()
+            if self.check(TokenType.DEDENT) or self.check(TokenType.EOF):
+                break
             self.expect(TokenType.FN)
             mname = self.expect(TokenType.IDENT).lexeme
             self.expect(TokenType.LPAREN)
@@ -942,9 +1014,12 @@ class Parser:
             self.expect(TokenType.RPAREN)
             self.expect(TokenType.ARROW)
             ret = self.parse_type()
-            self.expect(TokenType.SEMI)
+            # D11（T0 布局规格 §2.2）：接口方法**无 `:`** ⇒ 行边界收尾。
+            # ⚠ 带默认体的接口方法**本批不支持**：它要在 `InterfaceDecl.methods` 的
+            #   三元组里加一个 body 槽 ⇒ 动 `ast.py` ⇒ 违 J-T1-1 冻结。此处**响亮报错**（不静默吞体）。
+            self._end_decl()
             methods.append((mname, params, ret))
-        self.expect(TokenType.RBRACE)
+        self.expect(TokenType.DEDENT)
         return InterfaceDecl(is_pub, name, generics, methods)
 
     def parse_impl_decl(self):
@@ -956,11 +1031,14 @@ class Parser:
             self.advance()
             trait = for_type
             for_type = self.parse_path()
-        self.expect(TokenType.LBRACE)
+        self._expect_region()
         methods = []
-        while not self.check(TokenType.RBRACE):
+        while True:
+            self._consume_newlines()
+            if self.check(TokenType.DEDENT) or self.check(TokenType.EOF):
+                break
             methods.append(self.parse_function_decl(False))
-        self.expect(TokenType.RBRACE)
+        self.expect(TokenType.DEDENT)
         return ImplDecl(generics, trait, for_type, methods)
 
     def parse_type_alias(self):
@@ -968,11 +1046,11 @@ class Parser:
         name = self.expect(TokenType.IDENT).lexeme
         self.expect(TokenType.EQ)
         typ = self.parse_type()
-        self.expect(TokenType.SEMI)
+        self._end_decl()
         return TypeAliasDecl(name, typ)
 
     def _parse_new_let_decl(self):
         from corec.syntax.ast import LetDecl
         names, tags, typ, values = self._parse_var_decl_names_tags_type()
-        self.expect(TokenType.SEMI)
+        self._end_decl()
         return LetDecl(names=names, tags=tags, type_=typ, values=values)

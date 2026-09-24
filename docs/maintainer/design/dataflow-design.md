@@ -1,6 +1,6 @@
 # Core HDFG 设计
 
-> 定位：受众 = 维护者；状态 = superseded(由 execution-model.md 取代,留档)
+> 定位：受众 = 维护者；状态 = superseded（由 execution-model.md 取代，留档）。
 
 > **注(2026-08-15)**:本文档为 HDFG 的早期设计(07-22 前);v2 执行模型已演进为 region 嵌套 + state edges(RVSDG 风格结构化控制流,见 [execution-model.md](execution-model.md) 与 docs/superpowers/specs/2026-08-08-region-cfg-design.md)。本文档的 HDFG 基本结构(节点/边/子图)仍成立,region 化细节以 v2 为准。
 > **留档范围(2026-09)**:§1-7 与 §结论 = 早期设计稿(§7 指针安全已由 [pointer-model.md](pointer-model.md) 取代);**§8 环语义标注(ITER/FIXPT/超图灵/模糊/共归纳)= 仍权威**——执行标注空间是 `docs/academic/cache-semantics.md` 条款 4b「图内不可重算」(`recipe = unrecomputable`)与 glossary 的出处,修改需先改条款。
@@ -9,8 +9,8 @@
 
 ## 1. 核心抽象
 
-Core 将一切执行抽象为HDFG。
-程序员编写顺序的函数调用与并发启动，编译器自动构建并优化对应的HDFG。
+Core 将一切执行抽象为 HDFG。
+程序员编写顺序的函数调用与并发启动，编译器自动构建并优化对应的 HDFG。
 
 | 编程概念 | HDFG映射 |
 |----------|--------------|
@@ -31,12 +31,12 @@ Core 将一切执行抽象为HDFG。
 
 ---
 
-## 2. 静态与动态HDFG
+## 2. 静态与动态 HDFG
 
 ### 2.1 静态图
 
-编译时已知：函数调用关系、模块连接。
-等价于传统的数据流程序图。
+编译期已知的信息 = 函数调用关系、模块连接。
+该图等价于传统的数据流程序图。
 
 ```core
 fn transform(x: int) -> int { x * 2 }
@@ -51,12 +51,12 @@ fn main() {
 ```
 
 图结构：data → transform 节点（多个实例） → display 节点（多个实例）。
-for 展开为扇出，go 为每个实例创建执行流节点。
+`for` 展开为扇出；`go` 为每个实例创建执行流节点。
 
 ### 2.2 动态图
 
 运行时图拓扑可变：产生新节点、删除节点、重新连线。
-这是 Core 应对长期运行服务和自适应系统的关键能力。
+该能力是 Core 应对长期运行服务与自适应系统的关键。
 
 ```core
 flow load_balancer() {
@@ -74,22 +74,22 @@ flow load_balancer() {
 }
 ```
 
-load_balancer 节点不断创建/移除 worker 节点，HDFG在运行时动态演化。
+`load_balancer` 节点不断创建与移除 `worker` 节点，HDFG 在运行时动态演化。
 
 ---
 
 ## 3. 执行流与数据流节点的统一视图
 
-一个 flow 实例既是：
+一个 `flow` 实例同时具备三种身份：
 
 - 执行流：拥有自己的栈和指令指针。
-- 数据流节点：通过 recv 消费输入，通过 yield 或 return 产出输出。
+- 数据流节点：通过 `recv` 消费输入，通过 `yield` 或 `return` 产出输出。
 - 图中的顶点：可以连接到其他节点（通道/句柄）。
 
-这种统一性使得：
+统一性带来两点结果：
 
 - 并发推理无需关心线程/协程的底层差异。
-- 静态分析工具可以提取完整的数据依赖图用于形式化验证。
+- 静态分析工具可以提取完整的数据依赖图，用于形式化验证。
 
 ---
 
@@ -137,16 +137,16 @@ fn main() {
 
 图结构：
 
-- 8 个 worker 节点，每个独立运行，产出 dex 令牌。
-- orchestrator 节点通过 recv() 从 8 条边收集令牌，累加后输出。
-- 所有边是缓冲通道，允许生产者/消费者异步执行。
-- 循环构成反馈：worker 每次 yield 后继续计算下一块。
+- 8 个 worker 节点各自独立运行，产出 `dex` 令牌。
+- `orchestrator` 节点通过 `recv()` 从 8 条边收集令牌，累加后输出。
+- 所有边是缓冲通道，允许生产者与消费者异步执行。
+- 循环构成反馈：worker 每次 `yield` 后继续计算下一块。
 
 ---
 
 ## 6. 形式化验证视角
 
-从这张HDFG可以直接导出：
+从这张 HDFG 可以直接导出四类结论：
 
 - 数据依赖：边定义了节点间的偏序关系。
 - 吞吐量/延迟分析：节点执行时间 + 通道缓冲。
@@ -157,7 +157,7 @@ fn main() {
 
 ## 7. 与硬件执行模型的映射
 
-Core 的HDFG可以高效映射到多种底层硬件：
+Core 的 HDFG 可以高效映射到多种底层硬件：
 
 - 多核 CPU：节点映射为线程/协程，边用无锁队列或共享内存。
 - GPU：节点映射为 kernel，边映射为 global memory + 同步。
@@ -174,7 +174,7 @@ Core 的 HDFG 将并发原语（go、await、flow、recv、yield）统一为图�
 
 ## 7. 指针安全
 
-HDFG的另一个消费端是指针安全验证。图中每个值的出生节点记录了它的来源（provenance）。
+HDFG 的另一个消费端是指针安全验证。图中每个值的出生节点记录了它的来源（provenance）。
 
 ```
 ALLOC(arr[16]) ──→ ADDR(&arr[0]) ──→ ADD(p + n) ──→ DEREF(*p)

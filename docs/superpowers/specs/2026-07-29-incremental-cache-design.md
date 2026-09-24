@@ -1,7 +1,7 @@
 # 增量缓存设计
 
 
-> **术语注记（2026-08-15）**：本规格为历史设计记录，其中「数据流图」（及「RVSDG 式」）为当时术语；该结构后定名为 **HDFG（Holographic Dataflow Graph，全息数据流图）**，术语演进见 docs/project-book.md。正文保留历史原样。
+> **术语注记（2026-08-15）**：本规格为历史设计记录，其中「数据流图」（及「RVSDG 式」）为当时术语；该结构后定名为 **HDFG（Holographic Dataflow Graph，全息数据流图）**，术语演进见 `docs/project-book.md`。正文保留历史原样。
 
 ## 概述
 
@@ -66,7 +66,7 @@ fn function_fingerprint(func_node: int) -> int {
 }
 ```
 
-使用现有 `str_hash` 函数（Fowler-Noll-Vo 或类似），已经存在于 `dyn_arr.cr`。
+使用现有 `str_hash` 函数（Fowler-Noll-Vo 或同类算法），该函数已存在于 `dyn_arr.cr`。
 
 ### 签名指纹
 

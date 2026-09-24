@@ -2,43 +2,54 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 落实 `docs/superpowers/specs/2026-09-10-language-surface-narrowing-design.md` 的波 R1 三项：定长数组「表示层概念」注记、宽度死条目移除 + 词法面对齐（`1_000` / 宽度后缀退役）、全局初始化修复（定长数组全局 SIGSEGV + 静默丢初始化）。
+**Goal:** 本文落实 `docs/superpowers/specs/2026-09-10-language-surface-narrowing-design.md` 的波 R1 三项。第一项为定长数组的「表示层概念」注记。第二项为宽度死条目移除加词法面对齐，其中 `1_000` 与宽度后缀一并退役。第三项为全局初始化修复，覆盖定长数组全局 SIGSEGV 与静默丢初始化两种表现。
 
-**Architecture:** 三类正交改动——(a) **注释层**（零行为，Task 1）；(b) **词法/语法面收窄**（死 token kind 与死分支移除 + 两编译器对齐 + grammar 同步，Task 2/3）；(c) **全局初始化修复**（前端把当前被静默丢弃/崩溃的全局初始化降级为运行期 IR 序列、解释器补「标量常量初始化」阶段，Task 4）。
+**Architecture:** 本批改动共三类，彼此正交。
 
-**Tech Stack:** Core 自举栈 —— Python bootstrap（`bootstrap/corec/`，构建工具链）+ self-hosted 编译器（`src/compiler/`，用户面编译器）+ x86-64 ELF 后端（`src/arch/x86_64/` × `src/format/elf/` × `src/os/linux/`）+ 解释器（`src/compiler/interp.cr`）。
+- (a) **注释层**：零行为，对应 Task 1。
+- (b) **词法/语法面收窄**：死 token kind 与死分支移除，两编译器对齐并同步 grammar，对应 Task 2 与 Task 3。
+- (c) **全局初始化修复**：前端把当前被静默丢弃或崩溃的全局初始化降级为运行期 IR 序列，解释器补「标量常量初始化」阶段，对应 Task 4。
+
+**Tech Stack:** Core 自举栈，由四部分组成。
+
+- Python bootstrap（`bootstrap/corec/`）：构建工具链。
+- self-hosted 编译器（`src/compiler/`）：用户面编译器。
+- x86-64 ELF 后端：由 `src/arch/x86_64/`、`src/format/elf/`、`src/os/linux/` 三轴组成。
+- 解释器（`src/compiler/interp.cr`）。
 
 ## Global Constraints
 
-- **jj only**：版本控制一律 `jj`（git 被 hook 机械拦截）；提交 = `jj commit -m '...'`。禁止 `git` 命令。
-- **CPU 限速**：所有编译/测试命令必须 `nice -n 19` 前缀（CLAUDE.md 铁律 #6）。
-- **文件永久不允许还原**：任何回滚须用户明确许可（铁律 #3）。
-- **根因修复**：不得用绕过/变通掩盖问题（铁律 #1/#4）。
-- **勿重编号**：`src/compiler/ast.cr` 常量编号空间稳定——删除条目**留墓碑注释**，绝不重排后续编号（先例：`// T_FLOAT_TYPE 91 已删除…`）。
-- **行为零变化面**：Task 1（注释）、Task 2（死代码移除）必须输出等价——判据 = 同命令前后输出逐字节相同。
-- **行为变化面仅限两处**：Task 3（`_` 分隔符与宽度后缀**均由静默改为响亮报错**——用户裁决 2026-09-10：数字字面量不支持 `_`）、Task 4（原先 SIGSEGV / 静默 0 的全局初始化场景）。**其余一切行为不得变化**。
-- **自举守护**：`nice -n 19 python3 tests/selfhost/test_backend_bootstrap.py` 必须 stage 链全 `[PASS]` + `corec2`/`corec3` `cmp` IDENTICAL + N06 = 0。
-- **run 门**：任何 `run`/`build` 输出中 `error[` 计数 = 0（不许「rc=0 就算过」）。
-- **提交粒度**：每任务一次提交，中文提交信息，前缀 `docs:` / `refactor:` / `fix:` / `test:`。
-- **diff 校验命令（Task 1 实现者实测教训，2026-09-10）**：本机 `jj diff` 默认 color-words 输出**新增行不带 `+` 前缀**，任何 `jj diff | grep '^+'` 形式的校验**恒真空通过、零校验力**；且本机 `grep` = ugrep，`'^+ *//'` 这类式样会直接报错（rc=2）。规范式样：
+- **jj only**：版本控制一律使用 `jj`，`git` 被 hook 机械拦截；提交命令为 `jj commit -m '...'`。禁止执行 `git` 命令。
+- **CPU 限速**：所有编译与测试命令必须加 `nice -n 19` 前缀（CLAUDE.md 铁律 #6）。
+- **文件永久不允许还原**：任何回滚均须取得用户明确许可（铁律 #3）。
+- **根因修复**：不得用绕过或变通手段掩盖问题（铁律 #1/#4）。
+- **勿重编号**：`src/compiler/ast.cr` 的常量编号空间稳定。删除条目时**留墓碑注释**，绝不重排后续编号（先例：`// T_FLOAT_TYPE 91 已删除…`）。
+- **行为零变化面**：Task 1（注释）与 Task 2（死代码移除）必须输出等价。判据为同命令前后输出逐字节相同。
+- **行为变化面仅限两处**：其一为 Task 3（`_` 分隔符与宽度后缀**均由静默改为响亮报错**，用户裁决 2026-09-10：数字字面量不支持 `_`）；其二为 Task 4（原先 SIGSEGV 或静默 0 的全局初始化场景）。**其余一切行为不得变化**。
+- **自举守护**：`nice -n 19 python3 tests/selfhost/test_backend_bootstrap.py` 必须 stage 链全 `[PASS]`，且 `corec2`/`corec3` 的 `cmp` 结果为 IDENTICAL、N06 = 0。
+- **run 门**：任何 `run`/`build` 输出中的 `error[` 计数必须为 0，不允许以「rc=0 就算过」充当判据。
+- **提交粒度**：每任务一次提交，提交信息用中文，前缀取 `docs:` / `refactor:` / `fix:` / `test:` 之一。
+- **diff 校验命令（Task 1 实现者实测教训，2026-09-10）**：本机 `jj diff` 默认 color-words 输出中，**新增行不带 `+` 前缀**，因此任何 `jj diff | grep '^+'` 形式的校验**恒真空通过、零校验力**。本机 `grep` 等于 ugrep，`'^+ *//'` 这类式样会直接报错（rc=2）。规范式样如下：
+
   ```bash
   jj diff --git <paths...> | grep '^[+]' | grep -v -e '^[+][+][+]' -e '^[+][[:space:]]*//' -e '^[+][[:space:]]*$'   # 期望空
   jj diff --git <paths...> | grep -c '^[-]'    # 期望 0（无删除行）
   ```
-  并按需加**非真空控制组**（故意构造一条应命中的输入验证该命令真会报）。fish 环境另有 noclobber（`>` 覆盖已存在文件会静默失败）——重定向用 `>|` 或先删目标文件。
+
+  校验时按需加入**非真空控制组**，即故意构造一条应命中的输入，用于验证该命令确实会报出结果。fish 环境另有 noclobber 行为（`>` 覆盖已存在文件会静默失败），因此重定向须用 `>|`，或先删除目标文件。
 
 ---
 
 ## 背景与判据（侦查已定，实现者不需要重新论证）
 
-### 定长数组全局崩溃 — root cause（2026-09-10 全链侦查结论）
+### 定长数组全局崩溃的 root cause（2026-09-10 全链侦查结论）
 
-**类别 = 初始化缺失（storage/pointer 未生成），不是尺寸算错。** 证据链：
+结论：**类别 = 初始化缺失（storage/pointer 未生成），不是尺寸算错**。证据链如下。
 
-1. `src/compiler/ir_gen.cr:2349`（`gtype : ., mut = TI_INT;`）+ `:2365`（`new_ir_var(name, gtype)`）—— 全局一律登记为 `TI_INT`，数组类型/长度不进 IR；`:2336`（`global_init_val` 尾部 `return 0`）对数组字面量静默返回 0（初值丢弃）。
-2. `src/os/linux/entry.cr:72-98` `_start` 常量初始化循环只写「`init_val != 0` 的标量」；数组 init_val = 0 → 不发射。全局槽 = BSS 零。
-3. `src/arch/x86_64/instr.cr:428-438` `e2_load_var` global 分支 = `lea r11,[rip+slot]; mov reg,[r11]`（取槽**内容**当基指针）→ 槽为 0 时后续 `[r10+idx*8]` 解引用 NULL → SIGSEGV。
-4. `src/compiler/interp.cr:67-93` `ir_interpret()` 只跑 main 的 node 区间，**无任何全局初始化阶段**（全文零引用 `g_ir_globals`）→ 解释器同因崩溃；且**可变标量全局也丢初始化**（`x : int, mut = 5` 读回 0）。
+1. `src/compiler/ir_gen.cr:2349`（`gtype : ., mut = TI_INT;`）与 `:2365`（`new_ir_var(name, gtype)`）把全局一律登记为 `TI_INT`，数组类型与长度均不进 IR；`:2336`（`global_init_val` 尾部 `return 0`）对数组字面量静默返回 0，初值就此丢弃。
+2. `src/os/linux/entry.cr:72-98` 的 `_start` 常量初始化循环只写「`init_val != 0` 的标量」；数组的 init_val 等于 0，因此不发射，全局槽保持 BSS 零。
+3. `src/arch/x86_64/instr.cr:428-438` 的 `e2_load_var` global 分支为 `lea r11,[rip+slot]; mov reg,[r11]`，即取槽**内容**当基指针；槽为 0 时，后续 `[r10+idx*8]` 解引用 NULL，导致 SIGSEGV。
+4. `src/compiler/interp.cr:67-93` 的 `ir_interpret()` 只跑 main 的 node 区间，**无任何全局初始化阶段**（全文零引用 `g_ir_globals`），解释器因此同样崩溃；此外，**可变标量全局也丢初始化**（`x : int, mut = 5` 读回 0）。
 
 ### 修复前行为基线（实现者须复现确认，作为 TDD 的「红」）
 
@@ -61,16 +72,17 @@
 | `0x1_0` | 16 ✓（十六进制路径早已吃 `_`） | 16 ✓ |
 | `10f32` / `1.5f32` | 静默：后缀消费 + dex 路由 hack（`suffix == "f32"` → 走 T_DEX），宽度值从不落地（`W_F32` 分支不可达） | 后缀并入词素（`INT_LIT '10f32'`）→ parser `int()` 抛 `ValueError` |
 
-**裁决（2026-09-10 用户拍板，本批落实）**：数字字面量**不支持 `_` 分隔符**——两编译器**统一响亮报错**（现状双向皆错：self-hosted 静默 0、bootstrap 静默接受；grammar 原注记「以实现为准取不支持」方向正确但两实现均未落实）；**宽度后缀（`f32`/`f64`/`i8..u8`…）退出语言面**，同样**响亮报错**（grammar 早已注明它是「apx CPU 位宽标注」= 机器形状，且全仓 `src/`+`tests/` 零使用）。
+**裁决（2026-09-10 用户拍板，本批落实）**：数字字面量**不支持 `_` 分隔符**，两编译器**统一响亮报错**。现状双向皆错：self-hosted 静默 0，bootstrap 静默接受；grammar 原注记「以实现为准取不支持」方向正确，但两实现均未落实。**宽度后缀（`f32`/`f64`/`i8..u8`…）退出语言面**，同样**响亮报错**；grammar 早已注明它是「apx CPU 位宽标注」即机器形状，且全仓 `src/` 与 `tests/` 零使用。
 
-全仓数字下划线使用点（精确 grep：`(^|[^A-Za-z0-9_.])[0-9]+_[0-9]+`）**仅一处**：`tests/bootstrap/test_pipeline.py:329` `check_integer_literals`（bootstrap lexer 测试断言 `1_000`→1000）——随裁决改为断言报错。`src/` 与 `tests/` 其余为零，（自举构建不依赖该形态）。
+按精确 grep 式 `(^|[^A-Za-z0-9_.])[0-9]+_[0-9]+` 检索，全仓数字下划线的使用点**仅一处**：`tests/bootstrap/test_pipeline.py:329` 的 `check_integer_literals`（bootstrap lexer 测试断言 `1_000`→1000）。该断言随裁决改为断言报错。`src/` 与 `tests/` 其余位置为零，自举构建不依赖该形态。
 
 ### 关键既有机制（Task 4 复用，不新造）
 
-- `IR_ALLOC_ARRAY(8)`：ELF 侧 `src/arch/x86_64/instr.cr:939-957` → 调运行期 `alloc`；解释器侧 `src/compiler/interp.cr:176-186` → `alloc` + 显式清零。运行期 `alloc`（`src/runtime/rt.s:72-98`）**自带 `rep stosb` 清零** → 两路径语义一致（分配即零初始化）。
-- `IR_STORE(9)`：`interp.cr:187` —— `s1`(目标 var) ← `s2`(值 var)；数组字面量 lowering = `src/compiler/ir_gen.cr:2107-2127`（`IR_ALLOC_ARRAY` + 逐元素 `IR_STORE_INDEX` + `irv_set_type(v, alloc_type(TYP_ARRAY, elem_ti, n))`）。
-- 全局 var 注册 = `ir_gen_globals()`（`ir_gen.cr:2390`），调用点 `src/compiler/main.cr:408`（**先于**逐函数生成 `main.cr:480 ir_gen_func(fi)` → 序言注入时 `g_ir_globals` 已就绪）。
-- 手工验证过的等价形态（可作 oracle）：把初始化写进 main 体内——`fn main()->int{ g = [10,20,30,40]; return g[2]; }` → 现网 rc=30（两路径均正常）。本任务 = 把这段序列**自动化地**搬到序言。
+- `IR_ALLOC_ARRAY(8)`：ELF 侧位于 `src/arch/x86_64/instr.cr:939-957`，实现为调运行期 `alloc`；解释器侧位于 `src/compiler/interp.cr:176-186`，实现为 `alloc` 加显式清零。
+- 运行期 `alloc`（`src/runtime/rt.s:72-98`）**自带 `rep stosb` 清零**，因此两路径语义一致（分配即零初始化）。
+- `IR_STORE(9)`：定义在 `interp.cr:187`，语义为 `s1`（目标 var）← `s2`（值 var）。数组字面量的 lowering 位于 `src/compiler/ir_gen.cr:2107-2127`，由 `IR_ALLOC_ARRAY`、逐元素 `IR_STORE_INDEX` 与 `irv_set_type(v, alloc_type(TYP_ARRAY, elem_ti, n))` 组成。
+- 全局 var 注册由 `ir_gen_globals()`（`ir_gen.cr:2390`）承担，调用点在 `src/compiler/main.cr:408`，**先于**逐函数生成（`main.cr:480 ir_gen_func(fi)`）；因此序言注入时 `g_ir_globals` 已就绪。
+- 手工验证过的等价形态可作 oracle：把初始化写进 main 体内，即 `fn main()->int{ g = [10,20,30,40]; return g[2]; }`，现网 rc=30，两路径均正常。本任务就是把这段序列**自动化地**搬到序言。
 
 ---
 
@@ -82,8 +94,8 @@
 - Modify: `src/compiler/parser.cr:44-58`（`parse_type` 的 `[T; N]` / `[T]` 分支）
 
 **Interfaces:**
-- Consumes: 无（纯注释）
-- Produces: 无（零行为）；注记短语供后续 R2（接口化）检索：关键字 `表示层概念`
+- Consumes：无（纯注释）
+- Produces：无（零行为）。注记短语供后续 R2（接口化）检索，关键字为 `表示层概念`
 
 - [x] **Step 1: 捕获基线输出**
 
@@ -98,7 +110,7 @@ Expected: `check` 输出 `ok`（rc=0）；`build` rc=0；`/tmp/r1t1_bin_before` 
 
 - [x] **Step 2: 逐处贴入注记**
 
-在下列每个位置各贴一段（紧邻被标注代码，同一文件内可共用一次完整注记 + 其余位置一行式引用）：
+注记贴入下列每个位置。贴入时紧邻被标注代码；同一文件内可共用一次完整注记，其余位置用一行式引用：
 
 ```core
 // 表示层概念（2026-09-10 语言面收窄裁决 §1）：`[T; N]` 的类型构造器身份已退役——
@@ -124,7 +136,7 @@ nice -n 19 ./build/corec check /tmp/r1t1_sample.cr > /tmp/r1t1_check_after.txt 2
 nice -n 19 ./build/corec cir   /tmp/r1t1_sample.cr > /tmp/r1t1_cir_after.txt 2>&1
 diff /tmp/r1t1_check_before.txt /tmp/r1t1_check_after.txt && diff /tmp/r1t1_cir_before.txt /tmp/r1t1_cir_after.txt && echo IDENTICAL
 ```
-Expected: `IDENTICAL`（`build`/`bin` 不必重跑——注释不进二进制；如需，比对 `cmp /tmp/r1t1_bin_before <新产物>`）。
+Expected: `IDENTICAL`。`build`/`bin` 不必重跑，因为注释不进二进制；如需比对，执行 `cmp /tmp/r1t1_bin_before <新产物>`。
 
 - [x] **Step 5: 提交**
 
@@ -142,15 +154,15 @@ jj commit -m 'docs: 语言面收窄 R1 Task 1——定长数组「表示层概�
 - Modify: `src/compiler/parser.cr:392-403`、`:406-411`、`:897-908`（唯一引用面 = 死分支）
 
 **Interfaces:**
-- Consumes: 无
-- Produces: 无（lexer 从不发射这些 token kind——`parser.cr` 的 `kn == T_INT_I8 …` 链与 `tok_k(t) >= T_INT_I8 && tok_k(t) <= T_INT_U64` 判定**永不可达**；`W_*` 仅被这些链引用）
+- Consumes：无
+- Produces：无（lexer 从不发射这些 token kind，`parser.cr` 的 `kn == T_INT_I8 …` 链与 `tok_k(t) >= T_INT_I8 && tok_k(t) <= T_INT_U64` 判定**永不可达**；`W_*` 仅被这些链引用）
 
 - [x] **Step 1: 引用面核实（必须只有 parser.cr 死分支）**
 
 ```bash
 nice -n 19 grep -rn "T_INT_I8\|T_INT_I16\|T_INT_I32\|T_INT_I64\|T_INT_U8\|T_INT_U16\|T_INT_U32\|T_INT_U64\|T_FLOAT_F32\|T_FLOAT_F64\|W_I8\|W_I16\|W_I32\|W_I64\|W_U8\|W_U16\|W_U32\|W_U64\|W_F32\|W_F64" src/ --include='*.cr' | grep -v '^src/compiler/ast.cr'
 ```
-Expected: 命中仅 `src/compiler/parser.cr` 第 392-411 / 897-908 行（若出现其它文件/行号 → **停下并上报**，不得继续）。
+Expected: 命中仅 `src/compiler/parser.cr` 第 392-411 / 897-908 行。若出现其它文件或行号，则**停下并上报**，不得继续。
 
 - [x] **Step 2: parser.cr 死分支移除**
 
@@ -202,7 +214,7 @@ Expected: 命中仅 `src/compiler/parser.cr` 第 392-411 / 897-908 行（若出�
 nice -n 19 grep -rn "T_INT_I8\|T_INT_I16\|T_INT_I32\|T_INT_I64\|T_INT_U8\|T_INT_U16\|T_INT_U32\|T_INT_U64\|T_FLOAT_F32\|T_FLOAT_F64\|W_I8\|W_I16\|W_I32\|W_I64\|W_U8\|W_U16\|W_U32\|W_U64\|W_F32\|W_F64" src/ --include='*.cr'
 nice -n 19 grep -n "T_INT_I64\|W_I64" bootstrap/ -r
 ```
-Expected: **过滤注释行后**零命中（**代码引用面**归零）——注意墓碑注释正文本身含这些标识符字样，故原始 grep 不会全空（Task 2 实现者实测指出此点，判据按「代码引用零命中」执行）：`grep ... | grep -v '^[^:]*:[0-9]*: *//'` 或等价过滤后 rc=1/无输出。
+Expected: **过滤注释行后**零命中（**代码引用面**归零）。注意墓碑注释正文本身含这些标识符字样，故原始 grep 不会全空（Task 2 实现者实测指出此点，判据按「代码引用零命中」执行）：`grep ... | grep -v '^[^:]*:[0-9]*: *//'` 或等价过滤后 rc=1/无输出。
 
 - [x] **Step 5: 重建 + 冒烟 + 回归**
 
@@ -230,8 +242,8 @@ jj commit -m 'refactor: 语言面收窄 R1 Task 2——宽度死条目移除（a
 - Create: `tests/selfhost/test_lexer_parity.py`
 
 **Interfaces:**
-- Consumes: Task 2 已删掉宽度 token kind（本任务不再产生它们）
-- Produces: 词法契约——数字字面量**不接受** `_` 分隔符、**不接受**任何字母后缀，二者均**响亮报错**；合法形态（十进制/小数/`0x`/`0o`/`0b`/负号）行为不变
+- Consumes：Task 2 已删掉宽度 token kind，本任务不再产生它们
+- Produces：词法契约——数字字面量**不接受** `_` 分隔符、**不接受**任何字母后缀，二者均**响亮报错**；合法形态（十进制/小数/`0x`/`0o`/`0b`/负号）行为不变
 
 - [x] **Step 1: 写失败测试 `tests/selfhost/test_lexer_parity.py`**
 
@@ -286,11 +298,11 @@ if __name__ == '__main__':
 ```bash
 nice -n 19 python3 tests/selfhost/test_lexer_parity.py
 ```
-Expected: 两条 FAIL + 一条对照 PASS —— `test_bootstrap_rejects`（bootstrap 接受 `1_000`）/ `test_selfhost_rejects`（无我们的诊断文本，只有既有 TF01）/ `test_legal_forms_unchanged`（PASS，对照组）。记录实际输出到报告。
+Expected: 两条 FAIL + 一条对照 PASS。`test_bootstrap_rejects` 因 bootstrap 接受 `1_000` 而失败；`test_selfhost_rejects` 因无我们的诊断文本、只有既有 TF01 而失败；`test_legal_forms_unchanged` 作对照组 PASS。记录实际输出到报告。
 
 - [x] **Step 3: self-hosted lexer 改造（`src/compiler/lexer.cr`）**
 
-(a) 十进制数码循环（`:421-423`）与小数部分循环（`:445`）**保持只吃 digit**（不加 `_`）；hex/oct/bin 三条循环（`:428-430`）各**删除** `|| hc == 95`、`|| oc == 95`、`|| bc == 95`（不再接受 `_`）。
+(a) 十进制数码循环（`:421-423`）与小数部分循环（`:445`）**保持只吃 digit**，不加 `_`。hex/oct/bin 三条循环（`:428-430`）各**删除** `|| hc == 95`、`|| oc == 95`、`|| bc == 95`，不再接受 `_`。
 
 (b) 后缀段落（`:452-468`）整段替换为：
 
@@ -409,12 +421,12 @@ jj commit -m 'fix: 语言面收窄 R1 Task 3——数字词法收窄（_ 分隔�
 - Create: `tests/selfhost/test_global_init.py`
 
 **Interfaces:**
-- Consumes: `g_global_lets`（`{a=name_idx, b=type_node, c=value_node, int_val=apx 位模式|null}`）；`g_ir_globals`（每 24B：`+0 name_idx`、`+8 ir_var`、`+16 init_val`，已由 `main.cr:408 ir_gen_globals()` 填充）；`IR_ALLOC_ARRAY(8)`、`IR_STORE(9)`、`IR_STORE_INDEX`；`gen_expr(node)`、`new_ir_var`、`irv_set_type`、`emit`
-- Produces: 全局初始化语义——(1) 聚合全局（`[T;N]`/`[T]`）无论有无初值都在运行期分配 + 写槽（存储持久，`alloc` 语义）；(2) 非常量初值的全局在运行期求值并写槽；(3) 编译期标量常量初始化保持既有通道（ELF `_start` 常量循环），解释器补同语义阶段
+- Consumes：`g_global_lets`（`{a=name_idx, b=type_node, c=value_node, int_val=apx 位模式|null}`）；`g_ir_globals`（每 24B：`+0 name_idx`、`+8 ir_var`、`+16 init_val`，已由 `main.cr:408 ir_gen_globals()` 填充）；`IR_ALLOC_ARRAY(8)`、`IR_STORE(9)`、`IR_STORE_INDEX`；`gen_expr(node)`、`new_ir_var`、`irv_set_type`、`emit`
+- Produces：全局初始化语义，含三点：(1) 聚合全局（`[T;N]`/`[T]`）无论有无初值都在运行期分配并写槽，存储持久，遵循 `alloc` 语义；(2) 非常量初值的全局在运行期求值并写槽；(3) 编译期标量常量初始化保持既有通道（ELF `_start` 常量循环），解释器补同语义阶段。
 
 - [x] **Step 1: 写失败测试 `tests/selfhost/test_global_init.py`**
 
-覆盖下表（解释器 `run` 与 ELF `build --static` + 运行二进制**双路径**；ELF 调用模式照抄 `tests/selfhost/test_native_memory.py:110-130`）：
+覆盖下表，解释器 `run` 与 ELF `build --static` 加运行二进制**双路径**均在内；ELF 调用模式照抄 `tests/selfhost/test_native_memory.py:110-130`：
 
 | # | 源 | 期望 rc |
 |---|---|---|
@@ -427,11 +439,11 @@ jj commit -m 'fix: 语言面收窄 R1 Task 3——数字词法收窄（_ 分隔�
 | 7 | `g : [int;2] = [3,4];\nfn get()->int{return g[1];}\nfn main()->int{return get();}`（跨函数访问） | 4 |
 | 8 | `a : [int;2] = [8,9];\nb : [int;2] = a;\nfn main()->int{return a[0]+b[1];}` | 17 |
 
-每例两条断言：**无 `error[`** + rc 精确值。
+每例两条断言：**无 `error[`**，且 rc 为精确值。
 
 - [x] **Step 2: 运行确认「红」（两路径）**
 
-**前置（必须先做）——清增量缓存**：`inject_global_inits` 的注入点在 `ir_gen_func` 内（`main.cr:480` 调用），而**函数命中 cir 缓存时根本不走 `ir_gen_func`**（`main.cr:483` 的 cache-hit 分支）——叠加已知缺陷 TODO #2026-09-10-1（缓存键不含编译器身份，跨重建不失效），**旧缓存会让本次修复看起来"没生效"**。故每次判据前：
+**前置步骤（必须先做）为清增量缓存。** `inject_global_inits` 的注入点在 `ir_gen_func` 内（`main.cr:480` 调用），而**函数命中 cir 缓存时根本不走 `ir_gen_func`**（`main.cr:483` 的 cache-hit 分支）。叠加已知缺陷 TODO #2026-09-10-1（缓存键不含编译器身份，跨重建不失效），**旧缓存会让本次修复看起来「没生效」**。故每次判据前执行：
 
 ```bash
 nice -n 19 ./build/corec clean-cache      # 若子命令不可用：rm -rf .core/cache（先 ls 确认路径）
@@ -454,7 +466,7 @@ sha256sum /tmp/r1t4_base_bin | tee /tmp/r1t4_base_sha
 
 - [x] **Step 4: 前端修复（`src/compiler/ir_gen.cr`）**
 
-新增（建议置于 `global_init_val` 之后）：
+新增下列三个函数，建议置于 `global_init_val` 之后：
 
 ```core
 // 文件级 let 是否需要「运行期初始化」（2026-09-10 语言面收窄 §1.3 / R1 ②）。
@@ -571,7 +583,7 @@ cmp /tmp/r1t4_base_bin /tmp/r1t4_head_bin && echo BYTE-IDENTICAL
 nice -n 19 python3 tests/selfhost/test_compile.py
 nice -n 19 python3 tests/bootstrap/test_pipeline.py
 ```
-Expected: `BYTE-IDENTICAL`（无运行期初始化全局的程序 ELF 产物逐字节不变）。
+Expected: `BYTE-IDENTICAL`，即无运行期初始化全局的程序 ELF 产物逐字节不变。
 
 - [x] **Step 7: 提交**
 
@@ -641,11 +653,11 @@ nice -n 19 ./build/corec run 'fn main()->int{return 42;}'   # rc=42
 
 - [x] **Step 5: 测试清单陈旧路径核对（`tests/selfhost/test_compile.py:20-38`）**
 
-`concat_sources()` 的 `if os.path.exists(path)` 会**静默跳过**缺失文件——现清单含三条已搬迁路径（`src/compiler/backend/x86_64.cr`、`src/compiler/backend/x86_64/instr.cr`、`src/compiler/backend/resolve.cr` 均已不存在；波 1 三轴搬迁后为 `src/arch/x86_64/*.cr` + `src/format/elf/*.cr` + `src/os/linux/*.cr`）。
+`concat_sources()` 的 `if os.path.exists(path)` 会**静默跳过**缺失文件。现清单含三条已搬迁路径（`src/compiler/backend/x86_64.cr`、`src/compiler/backend/x86_64/instr.cr`、`src/compiler/backend/resolve.cr` 均已不存在；波 1 三轴搬迁后为 `src/arch/x86_64/*.cr` + `src/format/elf/*.cr` + `src/os/linux/*.cr`）。
 
-处理：把条目更新为三轴现状路径（对照 `build_selfhost_native.py` 的 `corearch_files`/`arch_x86_64_files`/`format_elf_files`/`os_linux_files`），并把 `exists` 静默跳过改为**存在性断言**（`build_selfhost_native.py:144-152 guard_manifest` 同款）。复跑 `test_compile.py` 必须仍全绿。
+处理方式：把条目更新为三轴现状路径（对照 `build_selfhost_native.py` 的 `corearch_files`/`arch_x86_64_files`/`format_elf_files`/`os_linux_files`），并把 `exists` 静默跳过改为**存在性断言**（`build_selfhost_native.py:144-152 guard_manifest` 同款）。复跑 `test_compile.py` 必须仍全绿。
 
-若补入后测试失败 → 说明原清单是刻意裁剪：改为在原处加**显式注释**说明裁剪意图（保 `exists` 语义）+ 在 `TODO.md` 登记本次发现——**不得**用还原/静默跳过掩盖。
+若补入后测试失败，则说明原清单是刻意裁剪：改为在原处加**显式注释**说明裁剪意图（保 `exists` 语义），并在 `TODO.md` 登记本次发现。**不得**用还原/静默跳过掩盖。
 
 - [x] **Step 6: 提交**
 
@@ -657,7 +669,7 @@ jj commit -m 'docs: 语言面收窄 R1 收官——全量回归 + 自举守护�
 
 ## 自检记录（写完计划后复核）
 
-- **spec 覆盖**：§1（定长裁决）→ Task 1（注记）+ Task 4（全局路径修复）；§1.3「checker 落实时点 = R2」→ 明确不在本批；§2（宽度三项）→ Task 2（死条目）+ Task 3（后缀/`1_000`）；§3 波 R1 判据 → Task 5。**无遗漏，无越界**（表示提示机制留 R3、checker 类型判定重构留 R2）。
+- **spec 覆盖**：§1（定长裁决）对应 Task 1（注记）与 Task 4（全局路径修复）；§1.3「checker 落实时点 = R2」明确不在本批；§2（宽度三项）对应 Task 2（死条目）与 Task 3（后缀/`1_000`）；§3 波 R1 判据对应 Task 5。**无遗漏，无越界**（表示提示机制留 R3、checker 类型判定重构留 R2）。
 - **占位符扫描**：无 TBD/TODO；所有代码块为可落地的具体代码；所有命令带期望输出。
 - **类型/命名一致性**：`global_needs_runtime_init` / `global_var_of` / `inject_global_inits` 三名在 Task 4 内自洽；`IR_ALLOC_ARRAY`=8、`IR_STORE`=9 与 `interp.cr:176-187` 一致；`emit(IR_STORE, d, s1, s2, …)` 参数序与 `interp.cr:187` 一致（`s1` 目标、`s2` 值）。
-- **风险注记**：Task 4 的序言注入只对「需要运行期初始化」的全局生效 → 其余程序 IR 不变（Step 3/6 的 byte-identical 判据即此保证）；注入点选择 main 序言的理由（无新 IR 函数/无 .ccr 段变更/无 `_start` 字节扰动）已写明，若未来出现非 main 入口或库形态，需迁移到独立 init 区（已记入 TODO）。
+- **风险注记**：Task 4 的序言注入只对「需要运行期初始化」的全局生效，其余程序 IR 不变（Step 3/6 的 byte-identical 判据即此保证）；注入点选择 main 序言的理由（无新 IR 函数、无 .ccr 段变更、无 `_start` 字节扰动）已写明，若未来出现非 main 入口或库形态，需迁移到独立 init 区（已记入 TODO）。

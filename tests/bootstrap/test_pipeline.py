@@ -98,6 +98,57 @@ fn main() -> int {
 }
 ''', 42)
 
+test('V4 layout and contracts have zero runtime footprint', '''
+fn bounded(x: int) -> int:
+    #check(x >= 0)
+    #ensure(result >= x)
+    return x + 1
+
+fn main() -> int:
+    value := bounded(41)
+    if value == 42:
+        return value
+    else:
+        return 0
+''', 42)
+
+test('V4 layout struct and impl', '''
+struct Point:
+    x: int
+    y: int
+
+impl Point:
+    fn sum(&self) -> int:
+        return self.x + self.y
+
+fn main() -> int:
+    p := Point { x = 20, y = 22 }
+    return p.sum()
+''', 42)
+
+test('V4 layout enum and multiline match arm', '''
+enum Mode:
+ | Server
+ | Client
+
+fn main() -> int:
+    mode := Server
+    value := match mode:
+     | Server =>
+        base := 40
+        base + 2
+     | Client => 0
+    return value
+''', 42)
+
+test('V4 lowercase none', '''
+fn main() -> int:
+    value := none
+    return match value:
+     | none => 42
+     | _ => 0
+''', 42)
+
 # ── Loop & Break ──
 test('Loop & Break', '''
 fn sum(n: int) -> int {
@@ -271,6 +322,14 @@ fn main() -> int {
     }
 }
 ''', 99)
+
+# ── V4 relational type expression ──
+test('V4 typeof(expr)', '''
+fn main() -> int:
+    source := 40
+    copy : typeof(source) = source
+    return copy + 2
+''', 42)
 
 # ── If without else (regression: two-variable comparison) ──
 test('If No Else (gt, true)', '''

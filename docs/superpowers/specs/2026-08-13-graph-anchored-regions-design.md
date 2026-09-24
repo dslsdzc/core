@@ -1,7 +1,7 @@
 # 图锚定区域内存模型设计（Graph-Anchored Regions）
 
 
-> **术语注记（2026-08-15）**：本规格为历史设计记录，其中「数据流图」（及「RVSDG 式」）为当时术语；该结构后定名为 **HDFG（Holographic Dataflow Graph，全息数据流图）**，术语演进见 docs/project-book.md。正文保留历史原样。
+> **术语注记（2026-08-15）**：本规格为历史设计记录，其中「数据流图」（及「RVSDG 式」）为当时术语；该结构后定名为 **HDFG（Holographic Dataflow Graph，全息数据流图）**，术语演进见 `docs/project-book.md`。正文保留历史原样。
 
 ## 概述
 
@@ -43,31 +43,31 @@ fn f() {                             ┌─ SG_IF ─┐
 
 ## 核心概念：图锚定区域
 
-区域 = 子图节点（DFNode）的字节域。现有设计的「每个 DFNode 可关联一个 Arena」「子图绑定」「Arena 嵌套」原样继承，概念升级为区域。
+区域 = 子图节点（`DFNode`）的字节域。现有设计的「每个 `DFNode` 可关联一个 Arena」「子图绑定」「Arena 嵌套」原样继承，概念升级为区域。
 
-### 推论 A：生命周期 = 图活性，不是 LIFO
+### 推论 A：生命周期 = 图活性（非 LIFO）
 
-RegionCheck 的 `cur_seq < exit_seq` 判定（pointer-model.md Pass 2）就是图版本的生命周期定义。这天然支持 flow/go 的独立区域（区域栈做不到非 LIFO 生命周期），也天然给出跨区域引用的合法性判据（outlives 的图形式）。
+RegionCheck 的 `cur_seq < exit_seq` 判定（`pointer-model.md` Pass 2）就是图版本的生命周期定义。这天然支持 `flow`/`go` 的独立区域（区域栈做不到非 LIFO 生命周期），也天然给出跨区域引用的合法性判据（`outlives` 的图形式）。
 
-### 推论 B：区域操作沿图边
+### 推论 B：沿图边的区域操作
 
 区域不仅嵌套（树），还能沿数据流边操作：
 
-- **split**：一块字节沿边划给子消费者（= 字节块独立回收；子区域 = 图边的子块，自己的游标 + 自己的重置点）
-- **merge**：汇合点两个子区域的数据汇入（拷贝或区域合并）
-- **share**：分叉点一个区域被多个消费者只读共享（共享者必须 outlive 引用）
+- **`split`**：一块字节沿边划给子消费者（= 字节块独立回收；子区域 = 图边的子块，自己的游标 + 自己的重置点）
+- **`merge`**：汇合点两个子区域的数据汇入（拷贝或区域合并）
+- **`share`**：分叉点一个区域被多个消费者只读共享（共享者必须 `outlive` 引用）
 
-### 推论 C：每字节归属 = 图的 provenance 边
+### 推论 C：每字节归属 = 图的 `provenance` 边
 
-pointer-model.md 已定义记忆模型为「字节序列 + 宽度 + 边界」，provenance（归属）、offset（字节偏移）、alloc_size（字节大小）全部与类型无关。"控制每一个字节"不是新语法，是图上本来就有的信息。
+`pointer-model.md` 已定义记忆模型为「字节序列 + 宽度 + 边界」，`provenance`（归属）、`offset`（字节偏移）、`alloc_size`（字节大小）全部与类型无关。"控制每一个字节"不是新语法，是图上本来就有的信息。
 
 ### 与传统的关系
 
 区域树是图区域的特例（无汇合/分叉的图 = 树 = 词法嵌套）；Tofte-Talpin 的区域栈是更窄的特例（树 + LIFO）。本设计是推广，不是发明。
 
-### 术语注意
+### 术语注记
 
-dataflow 模块已有「region」一词指控制流嵌套（SG_IF/LOOP/FOR/FLOW/UNSAFE）。本文的「区域」指**内存字节域**。文档中按上下文区分；若需精确，内存区域全称「内存区域」。
+`dataflow` 模块已有「region」一词指控制流嵌套（`SG_IF`/`LOOP`/`FOR`/`FLOW`/`UNSAFE`）。本文的「区域」指**内存字节域**。文档中按上下文区分；若需精确，内存区域全称「内存区域」。
 
 ## 机制总图
 
@@ -115,7 +115,7 @@ mmio := alloc_at(0x7fff0000, 4096, align(4096));
 ```
 
 - v1 **不提供**显式区域/回收语法（YAGNI）。「指定回收」是编译器内部机制（IR 层生成回收点 = Cyclone early deallocation 的自动版）。
-- 与 pointer-model.md 2026-08-10 定论的关系：0x 字面量仍是 unsafe 外部入口；`alloc_at` 是**声明式进图**（获得 provenance 的节点），不冲突——声明是唯一信任点，之后全图追踪。
+- 与 `pointer-model.md` 2026-08-10 定论的关系：0x 字面量仍是 `unsafe` 外部入口；`alloc_at` 是**声明式进图**（获得 `provenance` 的节点），不冲突——声明是唯一信任点，之后全图追踪。
 
 ## 语义面（验证器）
 
@@ -123,7 +123,7 @@ mmio := alloc_at(0x7fff0000, 4096, align(4096));
 
 - 每字节内容 = 字节序列（已有）
 - 每字节权限 = **Freeable > Writable > Readable > Nonempty > Empty**（新加）
-- 区域树 = 图的子图结构；布局元数据、ALLOC_AT 边界、outlives 结论全部从图导出——**验证器消费图即消费全部内存语义**
+- 区域树 = 图的子图结构；布局元数据、`ALLOC_AT` 边界、`outlives` 结论全部从图导出——**验证器消费图即消费全部内存语义**
 - 前置缺口：宽度检查（`off + width <= alloc_size`）待补（对应 TODO 预存 bug 7）
 
 ## 分配器面（实现）

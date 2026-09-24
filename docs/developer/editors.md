@@ -1,7 +1,7 @@
 # 编辑器接入配置（corelsp）
 
 > 定位：受众 = 开发者；状态 = active；corelsp 行为以 [maintainer/design/corelsp.md](../maintainer/design/corelsp.md) 为准（实现与文档冲突时以源码为准）；仓库内编辑器素材见 [editor/](../../editor/)（扩展源码与说明）。
-> 本文是纯用户向接入指南——各编辑器怎么接 corelsp；corelsp 的架构（检查管线/诊断通道/能力契约）见 [maintainer/design/corelsp.md](../maintainer/design/corelsp.md)。
+> 本文是纯用户向接入指南——各编辑器的 corelsp 接入步骤；corelsp 的架构（检查管线/诊断通道/能力契约）见 [maintainer/design/corelsp.md](../maintainer/design/corelsp.md)。
 
 corelsp 是 Core 语言的语言服务器（标准 LSP 协议，stdio 管道）。接入后编辑器可获得：
 
@@ -32,7 +32,7 @@ vim.lsp.start({
 })
 ```
 
-### 健壮版（任意 cwd，自动定位项目根）
+### 健壮形态（任意 cwd，自动定位项目根）
 
 ```lua
 -- after/ftplugin/core.lua
@@ -79,7 +79,7 @@ code --install-extension editor/vscode-core/
 1. Zed → Extensions（扩展）面板 → **Install Dev Extension（安装开发扩展）** → 选择 `~/core-plugin-zed`
 2. 打开 `.cr` 文件：语法高亮 + 诊断 + 悬停 + F12 跳转 + `@` 补全 + 语义着色全部生效
 
-扩展结构：`extension.toml`（`[lib]` + `language_servers` 段）、`src/lib.rs`（`language_server_command` → corelsp 绝对路径）、`languages/core/config.toml`（`language_servers = ["corelsp"]`）、`grammars/`（语法）。**命令路径在 Rust 代码里**（`~/core-plugin-zed/src/lib.rs`）——纯 TOML 无法指定，这是 Zed 扩展的机制约束。构建：`cargo build --release --target wasm32-wasip1` → `extension.wasm`。
+扩展结构：`extension.toml`（`[lib]` + `language_servers` 段）、`src/lib.rs`（`language_server_command` → corelsp 绝对路径）、`languages/core/config.toml`（`language_servers = ["corelsp"]`）、`grammars/`（语法）。**命令路径位于 Rust 代码中**（`~/core-plugin-zed/src/lib.rs`）——纯 TOML 无法指定，这是 Zed 扩展的机制约束。构建：`cargo build --release --target wasm32-wasip1` → `extension.wasm`。
 
 ### 方式二：settings.json（无扩展时的 LSP 兜底）
 

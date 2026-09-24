@@ -1,20 +1,20 @@
 # 概率编程 pass 实现设计
 
 
-> **术语注记（2026-08-15）**：本规格为历史设计记录，其中「数据流图」（及「RVSDG 式」）为当时术语；该结构后定名为 **HDFG（Holographic Dataflow Graph，全息数据流图）**，术语演进见 docs/project-book.md。正文保留历史原样。
+> **术语注记（2026-08-15）**：本规格为历史设计记录，其中「数据流图」（及「RVSDG 式」）为当时术语；该结构后定名为 **HDFG（Holographic Dataflow Graph，全息数据流图）**，术语演进见 `docs/project-book.md`。正文保留历史原样。
 
 ## 概述
 
-在 Core 编译器中实现 ProbabilityPass——一个在数据流图上运行的概率推导 pass。不需要新语法、不需要运行时系统、不需要 CPS 变换。全部在编译期完成。
+在 Core 编译器中实现 ProbabilityPass——一个在数据流图上运行的概率推导 pass。该 pass 不需要新语法、不需要运行时系统、不需要 CPS 变换，全部工作在编译期完成。
 
-参考 Mappl (PLDI 2024) 的变量消元编译方法，但利用 Core 已有数据流图简化实现。
+参考 Mappl (PLDI 2024) 的变量消元编译方法，并利用 Core 已有的数据流图简化实现。
 
 ## 核心原则
 
-- **概率不是新特性——是一个 pass。**
-- **数据流图天然记录了所有依赖关系。** Mappl 用信息流类型系统+CPS 变换才能分析的东西，Core 的图上已经有了。
-- **`random()` 是库函数。** 编译器不特殊对待——pass 看到的是 `IR_CALL random` 节点。
-- **观测是条件分支。** `if sensor > 30` — pass 在这条边上标注观察约束。
+- **概率以 pass 形态实现，而非新增语言特性。**
+- **数据流图天然记录了所有依赖关系。** Mappl 需借助信息流类型系统与 CPS 变换才能分析的信息，Core 的数据流图上已经具备。
+- **`random()` 是库函数。** 编译器不做特殊对待——pass 看到的是 `IR_CALL random` 节点。
+- **观测即条件分支。** `if sensor > 30` — pass 在该分支边上标注观察约束。
 
 ## ProbabilityPass 架构
 
@@ -38,7 +38,7 @@ pass 流程:
 无运行时开销: 全部信息在编译期走完。
 ```
 
-## Step 1: 识别 random() 节点
+## Step 1：`random()` 节点识别
 
 ```core
 fn scan_random_calls() {
@@ -59,9 +59,9 @@ fn scan_random_calls() {
 }
 ```
 
-## Step 2: 分支概率标注
+## Step 2：分支概率标注
 
-`random() < p` 模式在图中是 `IR_BRANCH s1=condition`。如果 condition 的上游是 `IR_BINARY(OP_LT, random_call, IR_CONST(p))`，则：
+`random() < p` 模式在图中是 `IR_BRANCH s1=condition`。如果 `condition` 的上游是 `IR_BINARY(OP_LT, random_call, IR_CONST(p))`，则：
 
 ```core
 fn tag_branch_weights() {
@@ -83,9 +83,9 @@ random() ──→ IR_CONST(0.3)
           → false_edge (weight=0.7)
 ```
 
-## Step 3: 权重传播
+## Step 3：权重传播
 
-沿值流传播概率权重。原理和数据流分析一样——每个值的"可能概率"从分支边沿数据边传播：
+沿值流传播概率权重。原理与数据流分析相同——每个值的"可能概率"沿分支边与数据边传播：
 
 ```core
 fn propagate_weights() {
@@ -108,9 +108,9 @@ fn propagate_weights() {
 }
 ```
 
-## Step 4: 观测约束
+## Step 4：观测约束
 
-`if sensor > 30 { ... }` — 条件分支同时也是一个观测。pass 在这里标注：
+`if sensor > 30 { ... }` — 条件分支同时也是一个观测。pass 在该处标注：
 
 ```core
 fn apply_observations() {
@@ -121,7 +121,7 @@ fn apply_observations() {
 }
 ```
 
-## Step 5: 图标注
+## Step 5：图标注
 
 概率信息附加到 DF 节点上供优化器和验证器消费：
 
@@ -131,7 +131,7 @@ fn apply_observations() {
 // EXTENDED_ESZ_DFNODE: int = 72  (原本 64 + 8)
 ```
 
-或更简单：用独立的 `g_node_probs[]` 数组（8 bytes per node），不修改 DFNODE 结构。
+替代方案：使用独立的 `g_node_probs[]` 数组（8 bytes per node），不修改 `DFNODE` 结构。
 
 ## 与 Mappl 的对比
 

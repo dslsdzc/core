@@ -93,7 +93,8 @@ This produces `build/corec` (frontend) and `build/corearch` (backend).
 
 - [Project Book](docs/project-book.md) — design and rationale
 - [Developer documentation](docs/developer/) — syntax reference and internals
-- [Execution Model](docs/maintainer/design/execution-model.md) · [Memory Model](docs/maintainer/design/memory-model.md)
+- [Execution Model](docs/maintainer/design/execution-model.md)
+- [Memory Model](docs/maintainer/design/memory-model.md)
 - [Error codes](docs/developer/errors.md)
 
 ## Contributing

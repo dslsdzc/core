@@ -88,7 +88,8 @@ python3 build_selfhost_native.py
 
 - [Project Book](docs/project-book.md) —— 设计与理由
 - [开发者文档](docs/developer/) —— 语法参考与内部实现
-- [Execution Model](docs/maintainer/design/execution-model.md) · [Memory Model](docs/maintainer/design/memory-model.md)
+- [Execution Model](docs/maintainer/design/execution-model.md)
+- [Memory Model](docs/maintainer/design/memory-model.md)
 - [错误码](docs/developer/errors.md)
 
 ## 贡献
