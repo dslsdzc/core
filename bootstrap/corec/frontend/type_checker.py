@@ -130,6 +130,12 @@ class TypeChecker:
             opt = EnumDecl(True, 'Option', ['T'],
                            [('Some', [PathType(['T'])]), ('None', [])])
             self._declare_enum(opt)
+            # ⚠ v4 的 `none` 拼写**不在此注册**（曾经试过，已撤）：本函数的符号表注册
+            # **不可达** —— 裸 `none` 在表达式位会先被 `NameResolver` 以 `Undefined name` 拦下
+            # （`name_resolver.py:98`，其内建表里没有 none/None）。半接线 = 「看着支持、其实永不生效」
+            # 的空壳，比不接线更坏。⇒ 拼写面（`None`→`none`）是 **T5** 的重命名面；
+            # 今日现状（改前改后一致）：裸 `none`/`None` 作**值**未实现，**响亮失败**。
+            # 语料影响 = 0：`src/**` 的 74 处 `None` 全在注释/字符串里，无代码面裸 None。
         if not self.symtab.lookup('Result'):
             res = EnumDecl(True, 'Result', ['T', 'E'],
                            [('Ok', [PathType(['T'])]), ('Err', [PathType(['E'])])])
