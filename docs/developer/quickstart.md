@@ -52,12 +52,13 @@ fn main() -> int {
 | 路径 | 内容 |
 |---|---|
 | src/compiler/ | 编译器源码(用 Core 写)——前端 |
-| src/arch/linux/ld/ | ELF 后端(指令编码/链接) |
+| src/arch/ · src/format/ · src/os/ | 后端三轴(架构 × 格式 × OS):指令编码/寄存器分配/帧 · ELF 发射/链接 · 入口/调用序列/系统调用 |
 | src/stdlib/ | 标准库(io/fmt/collections/arena/…) |
 | examples/ | 示例程序(add/complex/pi/load_balancer 等,见 examples.md) |
 | tests/ | 测试三套(bootstrap/selfhost/suite) |
 
 > 注:examples/hello/ 目前是空骨架——用 add/ 或自建文件开始。
+> 注:本表原列 `src/arch/linux/ld/`(ELF 后端),该目录**已退役**——后端现按三轴分目录,组合根在 `src/targets/x86_64-linux/`(2026-09-24 更正)。
 
 ## 五、下一步
 
