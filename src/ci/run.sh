@@ -109,6 +109,15 @@ case "$CI_JOB_NAME" in
     # 需构建 + 新增 dump 通道（`g_x86_is_global` 今日无 dump 打印），见该条。
     python3 tests/harness/test_lsp_builtin_table.py
     python3 tests/harness/test_ir_ref_sites.py
+    # 文档风格审查批（2026-09-24）：**受保护面判据的牙**（纯 python、毫秒级、零编译器、零 jj、
+    # 零网络 ⇒ 挂本 job）。被验对象 = `tools/doc_protected_surface.py`（文档编辑的「非散文面」
+    # 抽取 + 多重集对拍）。理由同 test_criteria_mutations：该脚本自己「PASS」只说明两侧抽取相同，
+    # **不说明它抓得住东西**——一条恒 PASS 的空判据与真判据读数一样（本仓「空壳绿」前科：
+    # 析取断言里一腿恒假，绿全来自另一腿）。本档逐类打突变，实测 9 类受保护面**逐类必真红**
+    # + 散文自检（改散文不入面）+ fail-closed（围栏不成对 ⇒ 拒绝出数）+ 下限闸（削薄语料必拦）。
+    # 刻意不读 jj 修订（只读文档目录）⇒ CI 浅检出 + 无 jj 亦可行（对比 parity_run.sh 因需 jj
+    # 而登记为不可挂）。突变从 manifest **自动派生**（非写死串）⇒ 文档改动不致本档腐烂。
+    python3 tests/harness/test_doc_protected_surface.py
     ;;
 
   selfhost-tests)
