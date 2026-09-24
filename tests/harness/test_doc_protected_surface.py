@@ -13,6 +13,14 @@ test_ci_hook_coverage / test_criteria_mutations 的体例与位置）。**刻意
 
 四层（逐层独立可诊断）：
 
+  E **类别真源双向对账（静态）**：工具**源码**里的类别集（全部 `add('<NAME>'` 调用点）
+    ↔ 本档 `COVERED ∪ LEDGER` 双向差集必须为空。防的是本仓一类固定失效形态
+    ——**「覆盖为零」：判据不会红、只会悄悄腐烂**。工具新增一类而本档两表皆无 ⇒ 本档
+    静默少覆盖一类，**读数完全一样**；故：加进 `COVERED` 打突变，或登记进 `LEDGER` 带理由。
+    真源取**源码**不取 manifest 的 `# categories:`——后者只列本语料命中过的类，新增一类
+    若在本语料零命中就不会出现，拿它当真源恰好漏掉要防的那种情况。
+    反向腿 = **内存内注入一类 ⇒ 对账必失配**（零副作用；只写正向那句则「两边同时漏掉
+    一类」恒绿）。
   A 正控：同一份语料抽两次 ⇒ compare 必 PASS（下限按本仓数法当场算：冻结读数 × 0.9）。
   B **反向（本档的核心）**：9 类受保护面**各打一个突变** ⇒ 逐类必须「真红」
     （rc=1 且首行「受保护面有差异」）。
@@ -75,6 +83,13 @@ MIN_CATEGORIES = 9
 # 覆盖率类别：B 层逐类打突变、逐类必须真红。少一类 ⇒ FAIL（防「某类其实抓不住」静默）。
 COVERED = ("ANCHOR", "FENCE_LINE", "FENCE_OPEN", "INLINE", "LINKTARGET",
            "NUM", "TODOID", "TROW", "URL")
+
+# 工具里存在、但**不由 B 层打突变**的类别——每条**必须带理由**。E 层拿本表做双向对账：
+# 工具新增一类而两表皆无 ⇒ 必红（防「覆盖为零」：判据不会红、只会悄悄腐烂，**读数完全一样**）。
+LEDGER = {
+    "FENCE_CLOSE": "走 C 层——缺陷形态是「围栏失衡」而非「改值」，判据是拒绝出数（rc≠0）",
+    "MARKER": "本批语料零命中（原文保留/加注 记录标记）；无可突变对象 ⇒ 挂空，见 B 层零命中闸",
+}
 
 NUM_RE = re.compile(r"\d+")
 ANCHOR_TAIL_RE = re.compile(r":(\d+)(?:[-–](\d+))?$")
@@ -209,6 +224,24 @@ def prose_probe(text):
     return None
 
 
+# ────────────────────────────────────────────────────────────── E 层：类别真源双向对账
+def tool_categories(src_text):
+    """工具**源码**里的类别集 = 全部 `add('<NAME>'` 调用点。
+    从源码取（不是从 manifest 的 `# categories:` 取）：后者只列**本语料命中过**的类，
+    新增一类若在本语料零命中就不会出现 ⇒ 拿它当真源会漏掉正是要防的那种情况。"""
+    return set(re.findall(r"add\('([A-Z_]+)'", src_text))
+
+
+def category_audit(src_text):
+    """返回 (forward 问题, reverse 问题)。forward = 工具 ⊇ COVERED∪LEDGER；
+    reverse = COVERED∪LEDGER 里有没有工具已经不存在的（防表腐烂）。双向都要空才 PASS。"""
+    have = tool_categories(src_text)
+    want = set(COVERED) | set(LEDGER)
+    forward = sorted(have - want)      # 工具里多出来的 ⇒ 本档静默少覆盖一类（腐烂方向）
+    reverse = sorted(want - have)      # 表里有、工具里没了 ⇒ 表腐烂
+    return forward, reverse
+
+
 # ────────────────────────────────────────────────────────────── 主流程
 def main():
     if not os.path.isfile(TOOL):
@@ -249,6 +282,31 @@ def main():
         print("语料: %d 项 / %d 档；类别 %s；下限 floor=%d per-file-floor=%d"
               % (total, nfiles,
                  " ".join("%s=%d" % (c, cats[c]) for c in sorted(cats)), fl, pff))
+
+        # ── E 类别真源双向对账（静态；防「覆盖为零」——新增一类而本档静默少覆盖）
+        src_text = open(TOOL, encoding="utf-8").read()
+        fwd, rev = category_audit(src_text)
+        if fwd:
+            fails.append("[E 类别真源] 工具里有本档既未打突变、也未登记的类 %s ⇒ 覆盖为零"
+                         "（判据不会红、只会悄悄腐烂）。二选一：加进 COVERED 打突变，"
+                         "或登记进 LEDGER 带理由" % fwd)
+        if rev:
+            fails.append("[E 类别真源] 本档表里有、工具源码里已不存在的类 %s ⇒ 表腐烂"
+                         "（该类被删/改名，本档在为一个不存在的目标打突变）" % rev)
+        if not fwd and not rev:
+            # ── E 的反向自证：**往工具里多加一类但不改本档** ⇒ 对账必须立刻失配
+            #    （内存内突变，零副作用；正控「对账通过」与「对账根本没在看」读数一样，
+            #     故必须有这一腿才能证明 E 有牙）
+            injected = src_text.replace("def extract(", "add('SYNTHETIC_PROBE', '')\n\n\ndef extract(", 1)
+            if injected == src_text:
+                fails.append("[E 自证] 注入点失效（工具源码结构已变）⇒ E 的反向腿未覆盖")
+            else:
+                f2, r2 = category_audit(injected)
+                if "SYNTHETIC_PROBE" in f2:
+                    print("[E 类别真源] OK  %d 类双向对账通过；反向自证：注入一类 ⇒ 必红"
+                          % len(set(COVERED) | set(LEDGER)))
+                else:
+                    fails.append("[E 自证] 注入一类后对账**未**失配（fwd=%s）⇒ E 无牙" % f2)
 
         # ── A 正控
         p2 = extract(base, os.path.join(tmp, "base2.txt"))
@@ -409,7 +467,7 @@ def main():
         for f in fails:
             print("  - " + f)
         return 1
-    print("\nPASS  A/B(%d 类)/B2/C/D 全绿" % len(COVERED))
+    print("\nPASS  E 真源对账 + A/B(%d 类)/B2/C/D 全绿" % len(COVERED))
     return 0
 
 
