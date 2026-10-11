@@ -897,3 +897,65 @@ python3 tools/v4_layout_probe.py tokenize-sites --rev develop@origin --require-b
 | 裁定 (b) 的 `:` 双 token | 本档 §2.1（维护者裁定） | — |
 | 现行语料行尾 `:` = 0 | 227 档 · 0 处 | `python3 tools/v4_layout_probe.py colon-positions --rev develop@origin` |
 | v4 目标行尾 `:` = 57 处，全是 region 开启 | 77 个 core 代码块 | 同上（`--fixture-only` 不含语料；v4 侧扫描见 §2.2 表） |
+
+---
+
+## 10. T4 施工期补遗（本档 §1–§5 五条判定**未覆盖**的三面）
+
+> **本节的来历**：§1–§5 是从「语料里已有的 `{}` 形状」反推 layout 规则；三面都不在
+> `{}` 的射程内，因此 T4 落地时才现形。**本节的每一条都带施工期实测读数**（标注口径同 §0.2：
+> `[T4·实核]` = T4 施工时实测）。
+> **地位**：本节是 §1–§5 的**补遗**，不是替代；与 §1–§5 冲突时以本节的裁定为准（维护者已裁）。
+
+### 10.1 括号外的续行在 v4 **不合法**（`[T4·实核]`）
+
+v4 的换行只在**括号外**构成 layout 断点：`()` / `[]` / 结构体字面量的 `{}` 内是隐式续行
+（`bootstrap/corec/frontend/lexer.py` 的 `bracket_depth == 0` 判据）。**括号外**把一条语句
+拆成两行（行尾是二元运算符，或次行以二元运算符开头）⇒ 次行首 token 列更深 ⇒ 发 INDENT ⇒
+parse 当场失败。实测：
+
+```
+if a == 0 ||            ← 行尾 `||`
+   b == 0:              → SyntaxError: Unexpected token
+```
+
+⇒ **语料迁移（T4/T6）必须把这类续行并成一行**。语料里有真站点（如
+`src/compiler/project.cr`、`src/compiler/module.cr` 的条件式；`[T4·实核]` 逐档计）。
+
+### 10.2 空 region 在 v4 **无法表达**（`[T4·实核]`）
+
+region 的语法要求至少一个 token（`_expect_region` 吃 COLON_BLOCK → NEWLINE → **INDENT**），
+所以「`{ }`」与「只含注释的块」在 token 面**不可区分**，都是「region 无 token」⇒ parse 失败：
+
+```
+fn f() -> int:
+    // nothing          → SyntaxError: Expected INDENT, got EOF
+```
+
+**维护者裁定（2026-10-11）= 逐处改写，不扩语法面**：
+- 无 `else`、且条件无副作用的 `if … { }` ⇒ **整条删掉**（`src/compiler/interp.cr` 的
+  `if op2 == 33 { }` 一类即此类：条件只读局部量）；
+- 函数体只含注释 ⇒ 保留注释 + **补一条与声明返回类型匹配的显式 `return`**；
+- 其余形态（循环体空、`else` 分支空、声明体内的空 region）⇒ 逐处上报裁定，**不得自行拍**。
+
+**不予采纳的两条**（留痕，防后人重走）：① region 内塞一个 `unit` 占位——`unit` 是**类型名**，
+当 no-op 语句用是 v4 文档没有的面；实测 `Parser(Lexer(...))` 虽接受 `unit` 作语句，但语义上是
+「一个类型引用」而不是「空操作」，属绕过；② 把「region 可空」写进规格并改两个前端——改动面最大。
+
+### 10.3 region 作**声明右值**：已裁定支持（`[T4·实核]`）
+
+`unsafe` 在语料里有「作实参/右值」的用法（`b := read_file(unsafe { @str_of(...) })`）。
+v4 里 `unsafe` 是 region（语句位），而**实参位是表达式位** ⇒ 直接塞进去不是合法文本
+（lexer 在括号内不发 layout，region 永远等不到 INDENT）。实测 `f(unsafe: …)` 必 FAIL。
+
+**维护者裁定（2026-10-11）= 支持「region 作声明右值」**：声明的右值可以是一个 region，
+其值取该 region 的尾值（与函数体同规则：只有最后一项是值）。于是
+`x := unsafe: <E>` 成立，语料侧的 `f(unsafe { E })` 由 T4 **机械上提**：
+先 `t := unsafe: <E>`，再把原处的 `unsafe { E }` 换成 `t`。
+
+- 落地 = `bootstrap/corec/frontend/parser.py` 的 `_at_line_end()` 增加**第三态**：
+  「prev == DEDENT 即行边界」（region 收尾后 lexer 已把下一行首 token 接在 DEDENT 之后）。
+  少了这条，`x := unsafe: …` 会在 `_end_decl` 处被误判成「同行还有 token」（`[T4·实核]` 复现：
+  `expected end of line, got 'return'`）。
+- **反向仍不成立**：`f(unsafe: …)`（region 进实参位）依然不是合法文本；需要时先绑名字。
+- 目标语法文档同步：`docs/core-language-syntax_v4.md` §4.1。

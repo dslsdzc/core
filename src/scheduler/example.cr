@@ -6,18 +6,16 @@
 
 import io
 
-fn hello(name: string) {
-    print("hello ");
-    println(name);
-}
+fn hello(name: string):
+    print("hello ")
+    println(name)
 
-fn add(a: int, b: int) -> int {
-    return a + b;
-}
+fn add(a: int, b: int) -> int:
+    return a + b
 
-fn main() -> int {
+fn main() -> int:
     // 创建调度表（2 个条目）
-    table := sched_create(2);
+    table := sched_create(2)
 
     // 注册函数（把函数指针写入表）
     // 注意：Core 没有函数指针类型，需要用 load_str_ptr + store_str_ptr
@@ -32,10 +30,9 @@ fn main() -> int {
     //   sched_call_1(table.entries, 0, "world");
     //   result := sched_call_2(table.entries, 1, 3, 5);
 
-    println("scheduler example");
+    println("scheduler example")
 
     // 目前只演示表操作，不实际调用
     //（函数指针在 Core 层面不可达，待编译器支持）
 
-    return 0;
-}
+    return 0

@@ -70,7 +70,15 @@ class Parser:
         """当前位置是否处于行边界：NEWLINE / DEDENT / EOF。
 
         `DEDENT` 与 `EOF` **不消费**——它们是 region 收尾信号，由块产生式处理。
+
+        第三态：**刚吃掉 DEDENT**（= region 收尾）也构成行边界。`_expect_region` 的
+        反向操作由块产生式完成（`expect(DEDENT)`），此时 lexer 已把下一行的首 token
+        接在 DEDENT 之后（token 次序 NEWLINE → DEDENT → 下一行首 token），所以
+        「prev == DEDENT」等价于「站在新一行的行首」。少了这条，`x := unsafe: …`
+        这类**以 region 收尾的声明/表达式**会在 `_end_decl` 处被误判为「同行还有 token」。
         """
+        if self.pos > 0 and self.tokens[self.pos - 1].type == TokenType.DEDENT:
+            return True
         return (self.check(TokenType.NEWLINE) or self.check(TokenType.DEDENT)
                 or self.check(TokenType.EOF))
 

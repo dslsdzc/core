@@ -43,16 +43,19 @@
 // `ty_budget_reset`、返回前再复位——memo 跨查询命中会让结果依赖预算历史（P0 终审 Critical 3）。
 // 本常量 = 与 `gen_constr_satisfied` 同值（两处同为「一遍桥接 + 一次包含判定」的规模；
 // 常量定义在本文件（调用面在其后），`globals.cr` 无 IFACE_* 预算位）。
-IFACE_SAT_BUDGET : int = 200000;
+IFACE_SAT_BUDGET : int = 200000
 
-fn iface_satisfies(t_ti: int, iface_ni: int) -> int {
-    if t_ti < 0 { return -1; }
-    if iface_ni < 0 { return -1; }
+fn iface_satisfies(t_ti: int, iface_ni: int) -> int:
+    if t_ti < 0:
+        return -1
+    if iface_ni < 0:
+        return -1
     // ── 轴 A：横切形状名（空表 ⇒ 未命中，落下方轴）──
-    st := iface_shape_lookup(iface_ni);
-    if st >= 0 { return iface_satisfies_term(t_ti, st); }
+    st := iface_shape_lookup(iface_ni)
+    if st >= 0:
+        return iface_satisfies_term(t_ti, st)
     // ── 轴 C：用户接口（`find_iface` 命中 ⇒ 用户轴；不得再落本质轴）──
-    if find_iface(iface_ni) >= 0 {
+    if find_iface(iface_ni) >= 0:
         // 形状项路由（R2 P3b Task 6 Step 1/3 已落地）：形状项 = 接口方法集（product of fn，
         // 建项见 ty_shadow.cr 的 sh_iface_shape_term），判定 = **逐成员包含**（下述
         // iface_user_satisfies：方法名经 impl 方法表查表 + 成员 fn 项经引擎 ty_sub）。
@@ -62,39 +65,42 @@ fn iface_satisfies(t_ti: int, iface_ni: int) -> int {
         //   ② product 的引擎比较是**不变槽链结构相等**而非子集包含 ⇒ 方法集 ⊇ 形状集
         //      （实现方带额外方法，常态）会被误拒。
         // ⇒ 整形状 ty_sub 路由**不可用**（登记为未覆盖面）；形状项作为签名载体由逐成员判定消费。
-        return iface_user_satisfies(t_ti, iface_ni);
-    }
+        return iface_user_satisfies(t_ti, iface_ni)
     // ── 轴 B：本质轴（原生/已声明类型名；非类型名 ⇒ -1 = 不判，不发明诊断）──
-    cti := gen_constr_type_ti(iface_ni);
-    if cti < 0 { return -1; }
-    return iface_satisfies_ti(t_ti, cti);
-}
+    cti := gen_constr_type_ti(iface_ni)
+    if cti < 0:
+        return -1
+    return iface_satisfies_ti(t_ti, cti)
 
 // ─── 引擎面原语（Task 2 的无名字消费点可直接用 `iface_satisfies_term`）───
 // `实参行 <: 形状项`：桥接失败（行不可译）⇒ -1；否则 `ty_sub` 三态**直传**（-1 上抛）。
-fn iface_satisfies_term(t_ti: int, shape: int) -> int {
-    if t_ti < 0 { return -1; }
-    if shape < 0 { return -1; }
-    a := sh_term_of_ti(t_ti);
-    if a < 0 { return -1; }
-    ty_budget_reset(IFACE_SAT_BUDGET);
-    s := ty_sub(a, shape);
-    ty_budget_reset(IFACE_SAT_BUDGET);
-    return s;
-}
+fn iface_satisfies_term(t_ti: int, shape: int) -> int:
+    if t_ti < 0:
+        return -1
+    if shape < 0:
+        return -1
+    a := sh_term_of_ti(t_ti)
+    if a < 0:
+        return -1
+    ty_budget_reset(IFACE_SAT_BUDGET)
+    s := ty_sub(a, shape)
+    ty_budget_reset(IFACE_SAT_BUDGET)
+    return s
 
 // `实参行 <: 约束行`（本质轴；= gen_constr_satisfied 的引擎面）
-fn iface_satisfies_ti(t_ti: int, cti: int) -> int {
-    if t_ti < 0 { return -1; }
-    if cti < 0 { return -1; }
-    a := sh_term_of_ti(t_ti);
-    b := sh_term_of_ti(cti);
-    if a < 0 || b < 0 { return -1; }
-    ty_budget_reset(IFACE_SAT_BUDGET);
-    s := ty_sub(a, b);
-    ty_budget_reset(IFACE_SAT_BUDGET);
-    return s;
-}
+fn iface_satisfies_ti(t_ti: int, cti: int) -> int:
+    if t_ti < 0:
+        return -1
+    if cti < 0:
+        return -1
+    a := sh_term_of_ti(t_ti)
+    b := sh_term_of_ti(cti)
+    if a < 0 || b < 0:
+        return -1
+    ty_budget_reset(IFACE_SAT_BUDGET)
+    s := ty_sub(a, b)
+    ty_budget_reset(IFACE_SAT_BUDGET)
+    return s
 
 // 方法行查找：`(类型名 ni, 方法名 ni) → mangled 函数名 ni`（-1 = 无此方法）。
 // 数据面 = parser 在 impl 块登记的 `g_methods`（24B/条 {type_ni, method_ni, mangled_ni}，
@@ -104,19 +110,20 @@ fn iface_satisfies_ti(t_ti: int, cti: int) -> int {
 // ⚠ 本函数**零 str_intern**：查名走表、不构造串——方法缺失（= 判定 0 的路径）不得往 g_strs
 // 追加新串（.ccr STR 段硬判据；`type_has_method` 的 str_intern 只对**已存在**方法名幂等，
 // 对缺失方法名会增长驻留表——本层刻意避开该形态）。
-fn iface_find_method(type_ni: int, method_ni: int) -> int {
-    if type_ni < 0 { return -1; }
-    if method_ni < 0 { return -1; }
-    i : ., mut = 0;
-    loop {
-        if i >= g_method_count { return -1; }
-        if r64(g_methods, i * 24) == type_ni {
-            if r64(g_methods, i * 24 + 8) == method_ni { return r64(g_methods, i * 24 + 16); }
-        }
-        i = i + 1;
-    }
-    return -1;
-}
+fn iface_find_method(type_ni: int, method_ni: int) -> int:
+    if type_ni < 0:
+        return -1
+    if method_ni < 0:
+        return -1
+    i : ., mut = 0
+    loop:
+        if i >= g_method_count:
+            return -1
+        if r64(g_methods, i * 24) == type_ni:
+            if r64(g_methods, i * 24 + 8) == method_ni:
+                return r64(g_methods, i * 24 + 16)
+        i = i + 1
+    return -1
 
 // ─── 轴 C：用户接口的满足谓词（**与 check_iface 同源**；R2 P3b Task 6 Step 3 重写）───
 // 语义（spec §2.3）：`interface I` 的形状类型项 = 方法集（product of fn，建项 =
@@ -136,40 +143,55 @@ fn iface_find_method(type_ni: int, method_ni: int) -> int {
 // 接口侧不产生该形态（`interface I[T]` 的形参被 parser 丢弃，登记）；`dyn` 位图行不参与
 // 规范形 ⇒ 含 dyn 的签名 = -1 不判。
 // 预算隔离：每次引擎查询前后 `ty_budget_reset`（照本文件其它入口同款）。
-fn iface_user_satisfies(t_ti: int, iface_ni: int) -> int {
-    ii := find_iface(iface_ni);
-    if ii < 0 { return -1; }
+fn iface_user_satisfies(t_ti: int, iface_ni: int) -> int:
+    ii := find_iface(iface_ni)
+    if ii < 0:
+        return -1
     // 域限定：仅命名行（TYP_NAMED / TYP_GENERIC_APPLY 的基名）有方法表身份；其余 ⇒ 不判。
     // 用 decl_name_of_ti（展开层的行→声明入口）而非 get_type_name：后者对 TYP_BASE 行会
     // str_intern 基类型名（本层禁止驻留表增长，见 iface_find_method 注）。
-    tname_ni := decl_name_of_ti(t_ti);
-    if tname_ni < 0 { return -1; }
-    return iface_user_satisfies_ii(tname_ni, ii);
-}
+    tname_ni := decl_name_of_ti(t_ti)
+    if tname_ni < 0:
+        return -1
+    return iface_user_satisfies_ii(tname_ni, ii)
 
 // 名字面核心（`iface_user_satisfies` 与 checker 的 `check_iface` 的**共同实现**——两侧
 // 同源由构造保证，selftest `isat.predicate_same_as_check_iface` 仍逐例对拍）。
-fn iface_user_satisfies_ii(tname_ni: int, ii: int) -> int {
-    if tname_ni < 0 || ii < 0 { return -1; }
-    mc := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT);
-    if mc < 0 || mc > MAX_IFACE_METHODS { return -1; }
-    shp := sh_iface_shape_term(r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_NAME));
-    if shp < 0 { return -1; }
-    mi : ., mut = 0;
-    loop {
-        if mi >= mc { return 1; }
-        mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD;
-        m_ni := r64(g_ifaces, mbase + OFF_IFM_NAME);
-        f_ni := iface_find_method(tname_ni, m_ni);
-        if f_ni < 0 { return 0; }                    // 无此方法 = 可证违反（名字面忠实）
-        fi := find_func(f_ni);
-        if fi < 0 { return -1; }                     // 表内不一致 ⇒ 不判（不发明违反）
-        if sh_iface_self_mode(ii, mi) != sh_func_self_mode(fi) { return 0; }   // 接收者模式
+fn iface_user_satisfies_ii(tname_ni: int, ii: int) -> int:
+    if tname_ni < 0 || ii < 0:
+        return -1
+    mc := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
+    if mc < 0 || mc > MAX_IFACE_METHODS:
+        return -1
+    shp := sh_iface_shape_term(r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_NAME))
+    if shp < 0:
+        return -1
+    mi : ., mut = 0
+    loop:
+        if mi >= mc:
+            return 1
+        mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD
+        m_ni := r64(g_ifaces, mbase + OFF_IFM_NAME)
+        f_ni := iface_find_method(tname_ni, m_ni)
+        if f_ni < 0:
+            return 0
+        // 无此方法 = 可证违反（名字面忠实）
+        fi := find_func(f_ni)
+        if fi < 0:
+            return -1
+        // 表内不一致 ⇒ 不判（不发明违反）
+        if sh_iface_self_mode(ii, mi) != sh_func_self_mode(fi):
+            return 0
+        // 接收者模式
 
-        ifm := sh_shape_member_at(shp, mi);
-        if ifm < 0 { return -1; }                    // 形状项与方法表失同步 ⇒ 不判
-        implf := sh_func_sig_term(fi);
-        if implf < 0 { return -1; }                  // impl 侧签名项不可建 ⇒ 不判
+        ifm := sh_shape_member_at(shp, mi)
+        if ifm < 0:
+            return -1
+        // 形状项与方法表失同步 ⇒ 不判
+        implf := sh_func_sig_term(fi)
+        if implf < 0:
+            return -1
+        // impl 侧签名项不可建 ⇒ 不判
         // 判定 = 引擎的**不变槽结构比较原语** `tt_list_same`（0/1 **全域**）——**不是**
         // 直接 `ty_sub`：引擎在不变槽上把「确定不同」上抛为 -1（type_engine 的
         // tt_list_variance_at 分支：`tt_type_elem_same != 1 → g_ty_uncovered = 1; return -1`，
@@ -179,11 +201,10 @@ fn iface_user_satisfies_ii(tname_ni: int, ii: int) -> int {
         // 正确判据。**比的是 fn 项的链**（`tt_c`）：fn 原子的 b 槽 = 方法名（接口侧标注；
         // impl 侧为 -1）是元数据不入签名——整项同一是 `tt_list_same` 的「非 CONS ⇒ 节点同一」
         // 规则下的假不等（实测命中）。本原语不计步（不动预算/memo）⇒ 无需预算隔离。
-        if tt_list_same(tt_c(implf), tt_c(ifm)) != 1 { return 0; }
-        mi = mi + 1;
-    }
-    return 1;
-}
+        if tt_list_same(tt_c(implf), tt_c(ifm)) != 1:
+            return 0
+        mi = mi + 1
+    return 1
 
 // checker 类型行号 → AK_*（-1 = 越界/负）。
 // 分派表 = 侦查 §4.1 的 checker 侧原子宇宙 13 类，与条目表的 ak 列同源。
@@ -193,18 +214,29 @@ fn iface_user_satisfies_ii(tname_ni: int, ii: int) -> int {
 // TYP_DYN 行回 AK_DYN、对结构/命名行回其类，而 sh_native_ak 对同样这些行回 -1——「单源化」
 // = 两入口共用**逐项分派表**，不是把两个入口合并成同一语义（type_selftest.cr 的
 // `iface.bridge_gate_kept` 把该差异钉在红）。
-fn iface_kind_of(ti: int) -> int {
-    k := get_type_kind(ti);
-    if k < 0 { return -1; }                       // 负值/越界行（get_type_kind 已做范围闸）
-    if k == TYP_BASE { return iface_by_ty_code(get_type_data(ti)); }
-    if k == TYP_DYN { return AK_DYN; }
-    if k == TYP_NAMED { return AK_NAMED; }
-    if k == TYP_GENERIC_PARAM { return AK_NAMED; }
-    if k == TYP_GENERIC_APPLY { return AK_NAMED; }
-    if k == TYP_ARRAY { return AK_SEQUENCE; }
-    if k == TYP_SLICE { return AK_SEQUENCE; }
-    if k == TYP_REF { return AK_REF; }
-    if k == TYP_PTR { return AK_PTR; }
-    if k == TYP_TUPLE { return AK_PRODUCT; }
-    return -1;                                     // 未知 kind（当前类型表无此情形）
-}
+fn iface_kind_of(ti: int) -> int:
+    k := get_type_kind(ti)
+    if k < 0:
+        return -1
+    // 负值/越界行（get_type_kind 已做范围闸）
+    if k == TYP_BASE:
+        return iface_by_ty_code(get_type_data(ti))
+    if k == TYP_DYN:
+        return AK_DYN
+    if k == TYP_NAMED:
+        return AK_NAMED
+    if k == TYP_GENERIC_PARAM:
+        return AK_NAMED
+    if k == TYP_GENERIC_APPLY:
+        return AK_NAMED
+    if k == TYP_ARRAY:
+        return AK_SEQUENCE
+    if k == TYP_SLICE:
+        return AK_SEQUENCE
+    if k == TYP_REF:
+        return AK_REF
+    if k == TYP_PTR:
+        return AK_PTR
+    if k == TYP_TUPLE:
+        return AK_PRODUCT
+    return -1                                     // 未知 kind（当前类型表无此情形）

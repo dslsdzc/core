@@ -385,6 +385,26 @@ count += 1
 
 v4 不使用显式 `move`。region、借用有效性、escape、capture 与存储 realization 由程序关系推导。
 
+### 4.1 region 作声明右值
+
+声明的右值可以是一个 region。region 的值 = 它最后一项的值（与函数体一致：只有最后一项是值，其余按语句处理）：
+
+```core
+raw := unsafe:
+    @str_of(buf)
+
+total := if ready:
+    compute()
+else:
+    0
+```
+
+这条形式的用途是把**只能以 region 书写**的构造（`unsafe`、带 region 的分支）放进一个值的位置。
+它不引入新的表达式种类：region 仍是 region，只是在右值位被读取其尾值。
+
+⚠ 反向不成立：`f(unsafe: …)` —— 把 region 直接塞进**实参位** —— 不是合法文本（实参位是表达式位，
+region 不是表达式）。需要时先把 region 的值绑定到一个名字，再把名字传进去。
+
 ---
 
 ## 五、表达式与运算符

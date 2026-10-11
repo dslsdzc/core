@@ -710,9 +710,16 @@ import pub go await unsafe flow yield interface type mod as auto fileid self in 
 
 
 def selfhost_keywords(text):
-    """自源 `src/compiler/lexer.cr` 的 `lookup_keyword` 表（抽法沿用施工计划 §十二 的脚本）。"""
+    """自源 `src/compiler/lexer.cr` 的 `lookup_keyword` 表（抽法沿用施工计划 §十二 的脚本）。
+
+    ⚠ T4 后该档已是 **v4 形**：函数体以 DEDENT 收尾、**没有列 0 的 `}`**。故块边界
+    改判「下一个列 0 的顶层 `fn `」——原 `blk.index('\\n}\\n')` 在 v4 文本上找不到，
+    会当场 ValueError（T4 落地时实测撞上）。
+    """
     blk = text[text.index('fn lookup_keyword'):]
-    blk = blk[:blk.index('\n}\n') + 3]
+    nxt = re.search(r'\nfn ', blk)
+    if nxt:
+        blk = blk[:nxt.start()]
     return set(re.findall(r'if s == "([^"]+)"', blk))
 
 
