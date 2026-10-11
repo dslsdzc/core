@@ -485,32 +485,46 @@ class Parser:
         # v4：`never` / `dyn` 从「词素比对」**提升为关键字**（计划 §一.5 注 1 / §7.1 项 8）
         # ⇒ 必须在此显式收下，否则它们会掉进 `parse_path()` 的 `expect(IDENT)` 而响亮报错。
         # 语义与自源原生名表一致（`checker.cr:1186` 的 8 个基类型名含 never/dyn ⇒ TY_NEVER / TI_DYN）。
-        if self.check(TokenType.NEVER):
-            self.advance()
-            return BaseType('never')
-        if self.check(TokenType.DYN):
-            self.advance()
-            return BaseType('dyn')
         # v4：`Self` 不再进关键字表（计划 §一.5 的 `bootstrap − v4` 差集含 `Self`）
         # ⇒ 它以 IDENT 到达；保留「`&Self` 是原生名不是泛型形参」的既有行为
         # （先例：`never` 今天也走这条 base_types 路径）。**若漏掉本格**，
         # `&Self` 会变成 `PathType(['Self'])`，而 type_checker 的 `_is_generic_type`
         # 把「单元素 PathType」当泛型形参 ⇒ 静默错判（不是报错）。
         base_types = {'int','dex','bool','string','char','unit','never','Self'}
-        if self.check(TokenType.IDENT) and self.cur().lexeme in base_types:
-            return BaseType(self.advance().lexeme)
-        if self.check(TokenType.UNIT):
+        # ⚠ 基本类型**不早退**（2026-10-11 修；出处 = docs/core-language-syntax_v4.md §3.2
+        #   的两行原文 `parent : User? = none` / `value : int? = 5`）。
+        #   修前：本格直接 `return BaseType(...)`，而 `?` 的处理在函数**尾部**、只管 `PathType`
+        #   ⇒ `int?` 落到「expected end of line, got '?'」（`Foo?` 却正常）——基本类型与路径类型
+        #   **两条不同的收尾路**，两前端在这一格分歧，且卡 T6 语料（`g : dex?, mut = None` /
+        #   `struct SOpt { f: dex? }` / `enum EOpt { V(dex?) }` / `empty : int? = none`）。
+        #   **选「并入同一条尾部」而不是「在早退前再写一份 `?` 处理」**：后者 = 同一判定两份实现
+        #   （本仓 T0 §2.3 明令禁止的形态，必然漂）；前者 `?` 处理**只有一处**，基本类型与路径类型
+        #   共用，新增接受面恰好是 `T?`（含 `unit?`/`never?`——自源同收）。
+        # `never`/`dyn` 是**关键字令牌**（上方 base_types 那格看不到它们）⇒ 同链并列一格。
+        # 自源对 `never?`/`dyn?` 与 `int?` 同判（实测 `fn f(a: never?) -> int` ⇒ rc=0）
+        # ⇒ 本侧必须同收，否则留残余分歧。
+        if self.check(TokenType.NEVER):
             self.advance()
-            return BaseType('unit')
-        typ = PathType(self.parse_path())
-        if self.check(TokenType.LBRACK):
+            typ = BaseType('never')
+        elif self.check(TokenType.DYN):
             self.advance()
-            args = [self.parse_type()]
-            while self.check(TokenType.COMMA):
+            typ = BaseType('dyn')
+        elif self.check(TokenType.IDENT) and self.cur().lexeme in base_types:
+            typ = BaseType(self.advance().lexeme)
+        elif self.check(TokenType.UNIT):
+            self.advance()
+            typ = BaseType('unit')
+        else:
+            typ = PathType(self.parse_path())
+            if self.check(TokenType.LBRACK):
                 self.advance()
-                args.append(self.parse_type())
-            self.expect(TokenType.RBRACK)
-            return GenericApplyType(typ.path, args)
+                args = [self.parse_type()]
+                while self.check(TokenType.COMMA):
+                    self.advance()
+                    args.append(self.parse_type())
+                self.expect(TokenType.RBRACK)
+                typ = GenericApplyType(typ.path, args)
+        # `T?` 的唯一处理点（基本类型与路径类型同路）
         if self.check(TokenType.QUESTION):
             self.advance()
             return OptionalType(typ)
@@ -682,7 +696,14 @@ class Parser:
                 symbol = self.expect(TokenType.IDENT).lexeme
                 return Ident(f"@{first}.{file_id}::{symbol}")
             return Builtin(first, [])
-        if self.check(TokenType.NONE) or self.check(TokenType.SELF):
+        if self.check(TokenType.NONE):
+            # v4（docs/core-language-syntax_v4.md §1.4/§59）：`none` 是 `T?` 的**无值形态**关键字，
+            # canonical 变体名 = `None`。归一到 canonical 名（与自源 `parser.cr` 的
+            # `T_NONE` → `EXPR_ENUM_CONSTRUCTOR(str_intern("None"))` **同语义**）；零载荷。
+            # ⚠ 拼写面归一必须在此**单点**完成：`None`（旧大写）已退役为普通标识符，两者不同判。
+            self.advance()
+            return EnumConstructor(['None'], [])
+        if self.check(TokenType.SELF):
             return Ident(self.advance().lexeme)
         if self.check(TokenType.INT_LIT):
             return Literal(int(self.advance().lexeme), 'int')
