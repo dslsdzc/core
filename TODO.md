@@ -187,6 +187,8 @@
 | — | `#2026-09-22-2` | 2026-09-22 | 批 8 裁定二 S4 · `b8-e1` 实测 | ⚠【**预存缺陷 · 静默错值 · 本批修复**】`&S` / `&mut S` **形参形态**的 `r.v` 误编译：**根因 = REF 身份在 IR 形参定型处丢失**——`ir_gen.cr:3296` 取 `ast_type_val(pn)`，而 `&S` 节点（`EXPR_REFTYPE`）**`type_val = 0`** ⇒ 槽型退化成 `TI_INT`（`if param_type < 0` 护栏**拦不住 0**）⇒ `EXPR_FIELD` 看不到 REF ⇒ 静默错值（实测 `fn f(r: &S){r.v}` 得 **8** 而非 42；`--dump-params` 实证 `PARAM f p0 r slot=0 decl=0`，对照 `string` 参数 `slot=3` ✓）。**两代皆错**（pre/post 均 run=8）⇒ **存在早于裁定二、裁定二未触及形参面**。**修法有先例**：`ir_gen.cr:3305`（批 5 `dex?` 同形特判——某形态 `unpack_type` 返 0 ⇒ 槽型退化 ⇒ **按声明面节点另定槽型**），注释原文照引。**ABI 零影响（实测）**：`callseq.cr`/`frame.cr` 全部 **9 处**分类点皆为 `== TI_DEX ⇒ xmm 类，其余 ⇒ GP 类` 恒等式，而 **`TI_DEX = 1`**、**REF 行下标 ≥ 9** ⇒ **REF 天然落 GP** ⇒ 改槽型**不改 ABI 类**。**实现取「只查不建」**：checker 解析签名时已建过该 REF 行（实测类型表中存在 `kind 3`）⇒ 线性查找即可 ⇒ **零新增类型行**（⚠ `alloc_type` 是**裸分配器、不去重**，另分配会写进 TYPE 段）。**禁止事项**：在**无 ABI 判据**时凭「补一支特判」直接改槽型（会造出 `dex?` 那次的同形失配）。**与 `#2026-09-22-1` 互指，根因不同不合并**。 |
 | — | `#2026-09-24-1` | 2026-09-24 | v4 迁移差距分析 + 协调者实测 | 【**声明但不校验 / 有码但不 raise**】前端静默面清单（**5 处，均实测**）：① **`EC_TF_MISSING_RET`(TF02, `ast.cr:404`) 零 raise 点**（全仓 1 命中）⇒ 缺 return 由 TF01「Function return type mismatch」拦住，**消息不指真实原因**（实测四档：空体 / 以 unit 调用收尾 / `if` 无 `else` / `loop` 里 `break` 出走 ⇒ **全 `check` rc=1 报 TF01，`build` rc=1 + 零产物**）——**非健全性漏洞，是诊断不精确**；② **`pub` 零读点**（`parser.cr:840` 声明 + `:875` 赋值，无读取点）⇒ 写了不生效且**不报错**；③ **match 臂的 `=>` 不校验**（`parser.cr:1115` 裸 `advance_tok()`）⇒ 分隔符写什么都收；④ **struct 字面量字段分隔符盲跳**（`parser.cr:552-554`，第二个 `advance_tok()` 返回值丢弃）⇒ `=` 与 `:` 两形都收（**已由 v4 迁移 T0 规格覆盖（T5 修），本条目不另立修法**）；⑤ **类型位的 `.`/`auto` 全拒且消息错**（六档实测：形参 / 字段 / 枚举载荷 / 切片元素 / 返回位皆 rc=1，报 `expected type after '->'`，而那句是**返回型的模板**，形参位也报）。**本条目只登记，未修**（④ 除外，见上）。 |
 | — | `#2026-10-11-1` | 2026-10-11 | v4 迁移施工期 + 维护者口述 | 【**设计·未决**】v4 规约的战术「策略定义」语法（现形 `#tag`）待重设计——维护者裁定 `#` 族**只有使用面**（`#simp`/`#induct(x)` 都读作「在这里用一个战术」），而 `#tag` 是**唯一一个「用 `#` 声明新东西」的构造** ⇒ 范畴错误，**该删而非改名**；连带「策略体是竖排序列、而语义是**集合**」的形状说谎、以及可复用名被关在标签族里（不能 `import`/文档化/单测）。两个候选方向（维护者未拍）：**不留** = §10.8 整节删、复用只走库（`import std::proof::arithmetic` 后 `#arithmetic`，名字解析走 import 作用域）+ `spec fn`；**留** = 必须长成一个**非 `#`** 的声明形。**本条目只登记，未改 `docs/core-language-syntax_v4.md` §10.8**。 |
+| — | `#2026-10-11-5` | 2026-10-11 | v4 迁移 T5 施工期实测 | 【**既有缺陷 · 运行期 SIGSEGV**（代 0 同病）】`enum E: V(int?)`（带可选载荷的枚举变体）**能编过但运行 rc=139**；代 0 编译器（`/tmp/v3ws`，revision `920b1cbb`）对 v3 形 `enum E { V(int?) }` **同样 139** ⇒ **非 v4 迁移引入**。★ **但会卡 T6**：`tests/suite/opt_dex_test.cr:20` 逐字 `enum EOpt { V(dex?) }`。（T5 侧另有 `struct SOpt { f: dex? }` / `g : dex?, mut = None` 等真实用法 ⇒ 该档是可选面的集中语料。） |
+| — | `#2026-10-11-4` | 2026-10-11 | v4 迁移 T5 施工期实测 | 【**能力面缺口**】bootstrap（Python 前端）**完全没有 `T?` 的语义面**：`grep -rn 'OptionalType' bootstrap/` ⇒ 只有 `parser.py:527`（构造）与 `syntax/ast.py:13`（类定义），**`type_checker.py` 零命中**。⇒ `T?` 现在**语法面已通**（T5 施工期把四族并入同一条尾部、`?` 唯一处理点，接受矩阵 10/10 与自源逐格一致），但**语义面全缺**：无 `T ⊆ T?` 注入、无 `none : T?` 的类型、无可选值 match 面 ⇒ 四格（标注位/形参位/字段位/枚举载荷位）**解析全过、check 全不过**。修法 = 把自源 R2 P3 Task 4 的可选表示机制（`TYP_NULL`/`TYP_OPTIONAL`/`g_optrep_on`/`IR_MAKE_ENUM`/match 两分支面）搬到 Python —— **一笔独立的批**。**当前不阻塞**：`tests/bootstrap/**` 的 `T?` 用量 = 0，`src/**` 代码面 = 0。 |
 | — | `#2026-10-11-3` | 2026-10-11 | v4 迁移 T5 施工期实测 | 【**未覆盖面 · 类型引擎**】`never ⊆ X` 在 `ty_sub` 里返回 **-1** ⇒ `error[ICE04] type judgment indeterminate: never vs named#21 (uncovered face)`（引擎 -1 ⇒ 硬错）。⇒ **组合层与引擎层对「`never` 作子类型」的认定不一致**：组合层（`type_compat_strict` / `_compat`）按 2026-10-11 裁定**收**（任一侧 never ⇒ 相容）；引擎层（`type_terms.cr`/`type_engine.cr` 的 `ty_sub`）**判不出**。当前 `src/**` 零命中（`check src/compiler` / `corec2==corec3` / T1-T2 探针 146 条三绿即证），但属**潜在缺口**——任何绕过组合函数直接问引擎的路径（如 `ti_subsumes` 的 OPTIONAL 注入面、`type_equal_engine` 的采样面）对 `never` 仍可能得 -1。**本批只在组合层兑现语义，未碰 `ty_sub`**（那一层属 R2 类型项引擎本体，有自己的语义与判据网，须单开一笔）。 |
 | — | `#2026-10-11-2` | 2026-10-11 | v4 迁移 T4 施工期实测 | 【**既有缺陷 · 发射面**】块值 `if` 取不到值——`bootstrap/corec/frontend/ir_gen.py` 的 `gen_if` **无条件 `return None`**（函数体 `cond = gen_expr(...)` → 两支 `gen_expr` → 建 merge 块 → `return None`，从不把分支值物化到槽位）⇒ `x := if c: 1 else: 2` 运行期得 `None`。**与 v4 迁移无关**：同一片段走改前 parser 同样得 `None`。旁证（可运行的表达式位 region 载体）：`t := unsafe:` + `7` + `return t` ⇒ 运行期 **7**（`gen_block` 尾值直通，`ir_gen.py:438-444`）。⇒ `docs/core-language-syntax_v4.md` §4.1 的 `total := if ready: …` 例子已降为**「设计态/未实现」**并注明根因；**未修**。 |
 
@@ -2162,6 +2164,48 @@ fn f(x: int) -> int { loop { if x > 0 { break; } } }  // loop 里 break 出走
 - **留**：必须有一个**非 `#`** 的声明形来承载「用户自定义一档、起名、到处引用」——那时才需要讨论该叫什么词、体写成 region 还是别的。**`#` 侧一个字不动（纯使用）**。
 
 **这条卡住的面**：`docs/core-language-syntax_v4.md` §10.8 的措辞、`docs/maintainer/design/spec-design.md:203` 的旧形（`#tag sorted = { … }`，与 §10.8 已经不一致，属同一面的两个形）。
+
+### 2026-10-11-5. 【既有缺陷 · 运行期 SIGSEGV】带可选载荷的枚举变体 `enum E: V(int?)` 运行 rc=139（**代 0 同病**；★ 会卡 T6；取号基准 = 4）
+
+**现象**：`enum E: V(int?)` **能编过（build rc=0）但运行 rc=139（SIGSEGV）**。
+
+**非 v4 迁移引入（对拍实证）**：
+```
+自源（v4 形 enum E: V(int?)）        build rc=0 → run rc=139
+代 0（v3 形 enum E { V(int?), N }）  build rc=0 → run rc=139   ← /tmp/v3ws 的 920b1cbb 编译器
+```
+⇒ 两代同病，属**既有缺陷**。
+
+**★ 但它会卡 T6**：`tests/suite/opt_dex_test.cr:20` 逐字 `enum EOpt { V(dex?) }`。该档同时含
+`g : dex?, mut = None`、`struct SOpt { f: dex? }` ⇒ 是**可选面的集中语料**，T6 迁移到它时必然撞上。
+
+**与 `#2026-10-11-4` 的关系**：那条是 **bootstrap（Python 前端）**缺 `T?` 语义；本条是**自源/代 0 编译器**在
+「可选载荷的枚举变体」上的**运行期**缺陷。两者**不同层**（前端 vs 后端/IR），不合并。
+
+### 2026-10-11-4. 【能力面缺口】bootstrap（Python 前端）完全没有 `T?` 的语义面（语法面已通、语义面全缺；取号基准 = 3）
+
+**怎么发现的**：v4 迁移 T5 施工期修「基本类型 `T?`」的**语法面**时（依据 = v4 文档 §3.2 原文 `value : int? = 5`），
+四格（标注位 / 形参位 / 字段位 / 枚举载荷位）**解析全过了，但 check 全不过**。
+
+**一命令可复现的根因**：
+```
+grep -rn "OptionalType" bootstrap/
+→ bootstrap/corec/frontend/parser.py:527   （构造）
+→ bootstrap/corec/syntax/ast.py:13         （类定义）
+→ type_checker.py：0 处                    ← 语义面全缺
+```
+
+**缺的三件**（对照自源已有的 R2 P3 Task 4）：
+1. **`T ⊆ T?` 注入**（`x : int? = 5` 现在报 `declared type OptionalType(int) but initialized with BaseType(int)`）；
+2. **`none : T?` 的类型**（现在报 `… initialized with PathType(['Option'])`）；
+3. **可选值的 match 面**（两分支判定）。
+
+**修法**：把自源的可选表示机制（`TYP_NULL`/`TYP_OPTIONAL`/`g_optrep_on`/`IR_MAKE_ENUM`/match 两分支面）
+搬到 Python 侧 —— **一笔独立的批**，不是「补几行」。
+
+**当前是否阻塞**：**否**。`tests/bootstrap/**` 的 `T?` 用量 = **0**（实测 grep 空）；`src/**` 的 Core 代码面 = **0**
+（57 条命中全在注释/字符串）。⇒ 属**能力面差距**，不影响本批任何判据。
+**为什么另案**：它与「v4 迁移」不是同一件事——迁移要的是**同语义**，而这条是**一整块尚未移植的能力**。
 
 ### 2026-10-11-3. 【未覆盖面 · 类型引擎】`never ⊆ X` 在 `ty_sub` 返回 -1 ⇒ ICE04；组合层与引擎层对「`never` 作子类型」的认定不一致（v4 迁移 T5 施工期实名；本批只在组合层兑现；取号基准 = 2）
 
