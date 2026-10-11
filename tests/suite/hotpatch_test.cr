@@ -5,15 +5,18 @@ import io
 import toml
 
 // Test: basic @hotpatch(ver=1) annotation compiles
-@hotpatch(ver=1) fn test_hotpatch_ver1() -> int:
+@hotpatch(ver=1)
+fn test_hotpatch_ver1() -> int:
     return 42
 
 // Test: @hotpatch(ver=2) with different version
-@hotpatch(ver=2) fn test_hotpatch_ver2() -> int:
+@hotpatch(ver=2)
+fn test_hotpatch_ver2() -> int:
     return 99
 
 // Test: @hotpatch shorthand (defaults to ver=1)
-@hotpatch fn test_hotpatch_shorthand() -> int:
+@hotpatch
+fn test_hotpatch_shorthand() -> int:
     return 7
 
 // Test: hotpatch config loading via toml

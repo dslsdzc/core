@@ -14,12 +14,24 @@ set -euo pipefail
 # 换代（2026-09-14，容量批 CAP Task 1）：PINNED_REV 9bcb7083（P4 收官）→ 97f4394f（P6 终态 /
 # 本批起点）。依据 = `REBUILD.md`「换代纪律」1/2（下一批以本批收官为 pre-侧；旧值留痕）。
 # 旧代三 sha（9bcb7083）：corec 5d2b15ad… · corearch 493dc490… · corelsp 18b94bd9…（全值见 REBUILD.md 历史表）。
-PINNED_REV="97f4394f"          # P6 终态（R2 P6 Task 6 收官）/ 容量批起点
+#
+# 换代（2026-10-11，v4 语法迁移 T7）：PINNED_REV 97f4394f → **25e70197**（v4 迁移 T6 收官 / T7 起点）。
+# **依据 = v4 可读性硬约束**（本批与历次换代不同，必须写清）：`97f4394f` 是 **v4 之前**的修订，
+# 其 corec **只认 v3 形**；而本脚本第 71 行起的冒烟已改 **v4 形**（T6b）⇒ 换代前该步**必红**（已知窗口态）。
+# 新 rev 的唯一硬要求 = **含本批 v4 工作的提交**（能读 v4 形）。取 `25e70197`（= 迁移批 T6 收官，
+# = 本 T7 的起点）承接「下一批以本批收官为 pre-侧」的既有口径。
+# ⚠ **启用条件（换代纪律 3）**：本条生效时其源修订须**在仓内可达**——本批经 develop 合入时**若为
+# squash**，`25e70197` 这条 jj 提交不进 develop 历史（仅本地 object store 暂存）⇒ 换人/换机重建会失败。
+# 故合入方式若非「保留提交」（merge commit / rebase-merge），须**同批把 PINNED_REV 重指到 develop 上
+# 含 v4 工作的提交**并同批重锁三 sha（**留痕**：本条即旧值出处）。
+# 旧代三 sha（97f4394f = v3 末代）：corec `ae01de75…` · corearch `228f82e9…` · corelsp `90eb19c6…`
+#   （全值见 `REBUILD.md` 历史表）。
+PINNED_REV="25e70197"          # v4 迁移 T6 收官 / T7 起点（**首枚可读 v4 形的基线**）
 WS_NAME="p6-baseline-build"    # 临时 workspace 名（收工 forget）
 
-WHITELIST_COREC="ae01de7534ea8428e3e062fccbc5fef5d45abfc5d3dafb90b3c85e08f354cce2"
-WHITELIST_COREARCH="228f82e948cfaf8170ada982d80f1ebddfd3847e71cdf04ca4b42d9226373d2e"
-WHITELIST_CORELSP="90eb19c6d3bd4e3234b4328d8b8f3284cca6d1644d3959bb83f07b7e71473032"
+WHITELIST_COREC="701a319f52696e9b098eac03b0e85ecbd6514e8d2ad05c9c30f662f62e402cdc"
+WHITELIST_COREARCH="bd6b1c6af5e64d20eca120e3188f05d02ee4a6f6de510516b19d47861f522e30"
+WHITELIST_CORELSP="2c1da86fc5c0044fb059d8d759a20a6167be18645eea43101948594949703661"
 
 usage() { echo "usage: bash tools/baseline/rebuild.sh <outdir>" >&2; exit 2; }
 [ $# -eq 1 ] || usage

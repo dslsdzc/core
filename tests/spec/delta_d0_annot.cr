@@ -2,7 +2,8 @@ fn check(x: bool) -> bool:
     return x
 fn g() -> bool:
     return true
-fn f(a: int) -> int #check(true):
+fn f(a: int) -> int:
+    #check(true)
     return a
 fn main() -> int:
     if check(g()):
