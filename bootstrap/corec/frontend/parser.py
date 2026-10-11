@@ -46,13 +46,16 @@ class Parser:
         #
         # 规则（唯一措辞）：
         #   ① **语句位** region（函数体、if/else 语句体、loop/for/while 体、独立的
-        #      `unsafe:`/`flow:` 语句）末项裸表达式 ⇒ 包 ExprStmt（等价 v3 带 `;`），region 无值。
-        #      **例外 = 块状末项**（`if`/`match`/`loop`/`for`/`unsafe`/`flow`）：v3 的 `;` 只终止
-        #      普通表达式语句，块状语句在 v3 里**从不带 `;`** ⇒ 当时就是「暂定尾表达式」⇒
-        #      保持 Block.expr。T4 是机械形状改写（只有 `{}`→缩进、`;`→换行）⇒ 它不该改变这一点；
-        #      一律包 ExprStmt 等于凭空补一个 v3 没有的 `;`（实证见 `parse_block` 的例外注释）。
+        #      `unsafe:`/`flow:` 语句）的末项收尾 = **按节点种类**：
+        #        · 控制流类（`If`/`Loop`/`For`/`Match`/`Unsafe`，另含 `Flow`）⇒ **保留
+        #          `Block.expr`（尾值）**——v3 里控制流语句本来就不带 `;`（以 `}` 收尾）⇒
+        #          本来就是块的尾值；
+        #        · 其余（赋值/调用/二元/一元/字面量/`Ident`/索引…）⇒ 包 `ExprStmt`
+        #          （等价 v3 带 `;` 的表达式语句），region 视为无值。
+        #      判据 = **v3 逐形等价**（维护者四格实测），详见 `_is_block_like` 的 docstring。
         #   ② **表达式位** region（声明/赋值右值、return 值、调用实参、括号内、索引、
-        #      二元/一元操作数、match 臂 `=> Expr`）⇒ 保留 Block.expr；
+        #      二元/一元操作数、match 臂 `=> Expr`）⇒ 一律保留 Block.expr；
+        #      ⇒ 收尾最终由 **位置标志 ∧ 节点种类** 两个条件共同决定。
         #   ③ 递归：`if`/`unsafe`/`flow` 的 region 位置 = **该表达式自身**的位置
         #      （`x := if c: a else: b` 两臂在表达式位；语句位 `if c: … else: …` 两臂在语句位）。
         #
@@ -818,23 +821,40 @@ class Parser:
         self.expect(TokenType.DEDENT)
         self.want_value = want
         if not want and expr is not None and not self._is_block_like(expr):
-            # 语句位 region + 末项是**普通**裸表达式 ⇒ 包 ExprStmt（等价 v3 的 `expr;`），
-            # region 视为无值。
-            #
-            # ⚠ 例外（**不是放宽，是 v3 等价性的忠实面**）：v3 的 `;` 只终止**普通**表达式
-            # 语句；块状语句（`if`/`match`/`loop`/`for`/`unsafe`/`flow`）在 v3 里**从不带 `;`**
-            # ⇒ 它们当时就是 parse_stmt 的「暂定尾表达式」⇒ 保持 Block.expr。T4 是**机械形状
-            # 改写**（只有 `{}`→缩进、`;`→换行两类）⇒ 它无法、也不该改变这一点。
-            # 若在此一律包 ExprStmt，等于凭空给 v3 的块状语句补一个它没有的 `;` ⇒ 语义漂移
-            # （实证：`tools/v4_frontend_probe.py features` 的 `if / else`、`enum + match`×2、
-            # `unsafe region` 四例会立刻报 `expected return type …, got unit`）。
+            # 语句位 region + 末项是**普通**裸表达式（赋值/调用/二元/一元/字面量/`Ident`/索引…）
+            # ⇒ 包 ExprStmt（等价 v3 的 `expr;`），region 视为无值。
             stmts.append(ExprStmt(expr))
             expr = None
         return Block(stmts, expr)
 
     @staticmethod
     def _is_block_like(expr: Expr) -> bool:
-        """块状（v3 里不带 `;` 的）语句形态——判据见 `parse_block` 的例外注释。"""
+        """语句位 region 的**控制流**尾项 —— 判据 = **v3 逐形等价**（维护者裁定）。
+
+        口径（唯一措辞）：收尾判定 = **位置标志 ∧ 节点种类**两个条件共同决定 ——
+        位置为语句位时，**控制流类**尾项（`If`/`Loop`/`For`/`Match`/`Unsafe`）**保留为
+        `Block.expr`（尾值）**；其余一律包 `ExprStmt`。表达式位（`want_value=True`）则一切照旧
+        保留尾值（`x := if c: a else: b` 的分支尾值必须是值）。
+
+        依据 = v3 的**实际形态**：v3 里控制流语句本来就不带 `;`（`if`/`loop`/`while`/`for`/
+        `match`/`unsafe` 以 `}` 收尾）⇒ 它们在 v3 里**本来就是块的尾值**；真正分叉的只是
+        「**带 `;` 的表达式语句**」——那才是 v3 的 `ExprStmt`。`;` 退场后，唯一能复原这层区分
+        的判据就是**节点种类**。T4 是机械形状改写（只有 `{}`→缩进、`;`→换行两类）⇒ 它不该、
+        也无法改变这层区分。
+
+        维护者四格实测（v3 前端 @ bb8cb3537584 + v3 文本 / v4 前端 + v4 文本）：
+            v3: 尾随 `if 1 > 0 { return 1; } else { return 2; }` → **0 条**类型告警
+            v3: 尾随 `y = y + 1;`                          → **1 条**（expected int, got unit）
+            v4: 尾随 `if …`                                → **0 条**（同上）
+            v4: 尾随 `y = y + 1`                           → **1 条**（同上）
+        一律包 ExprStmt（不看种类）会打破第一格：尾随 `if` 变 1 条 = **回归**，且
+        `tools/v4_frontend_probe.py features` 的 `if / else`、`enum + match`×2、`unsafe region`
+        四例立刻转红（实测 94 条里 5 FAIL）。
+
+        `Flow` 一并纳入：同为「开 region、以 `}`/DEDENT 收尾」的块状形，v3 亦不带 `;`。
+        （实测 `src/**` 无任何 `flow:` 语句 ⇒ 本项对现行语料零影响，仅为形状自洽。）
+        `while` 无独立节点（`parse_while_expr` 直接 desugar 成 `Loop`）⇒ 已被覆盖。
+        """
         return isinstance(expr, (If, Match, Loop, For, Unsafe, Flow))
 
     def parse_stmt(self):
