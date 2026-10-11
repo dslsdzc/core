@@ -903,7 +903,6 @@ fn ir_interpret() -> int:
             if d >= 0:
                 w64(g_ir_vals, d * 8, 0)
 
-
         // IR_DYN_PACK (43)：dyn 变量双槽 [value, tag]——slot[d]=值、slot[d+1]=tag（对照 ELF slot+0/+8）
         if op == 43:
             if d >= 0 && s1 >= 0:

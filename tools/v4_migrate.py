@@ -274,11 +274,12 @@ def pre_transform(src, filename):
         toks[-1].start = len(src)
         toks[-1].end = len(src)
     brace_kind, semi_kind, brace_match, _ = classify(toks)
-    recs = {'deleted_if': [], 'return_filled': [], 'hoisted': []}
+    recs = {'deleted_if': [], 'deleted_else': [], 'return_filled': [], 'hoisted': [], 'blank_collapsed': []}
     unresolved = []
 
     # ── 裁定 1：空 region ──
     ops = []            # (start, end, replacement) —— 所有裁定 1/2 的文本编辑统一走这里
+    seams = []          # 裁定 1 的**删除缝**起点（供末尾那段「≥2 空行收成 1」定位）
     chain_done = set()  # 链只需处置一次（同一 `if` 的每个空分支都指向同一 statement 起点）
     for i, tk in enumerate(toks):
         if brace_kind.get(i) != 'block' or brace_match.get(i) != i + 1:
@@ -316,6 +317,7 @@ def pre_transform(src, filename):
                     continue
                 ops.append((toks[ifs].start, tk.end, ''))             # 删 `if … {`
                 ops.append((toks[i + 1].start, toks[i + 1].end, ''))  # 删配对 `}`
+                seams.append(toks[ifs].start)
                 recs['deleted_if'].append('%s:%d' % (filename, tk.line))
             else:
                 if stmt in chain_done:
@@ -328,6 +330,7 @@ def pre_transform(src, filename):
                 chain_done.add(stmt)
                 for a, b in rngs:
                     ops.append((a, b, ''))
+                seams.append(rngs[0][0])
                 recs['deleted_if'].append('%s:%d (整条 if/else-if 链，%d 段)'
                                           % (filename, tk.line, len(rngs)))
         elif act == 'delete-else':
@@ -339,6 +342,7 @@ def pre_transform(src, filename):
                 continue
             ops.append((toks[e].start, tk.end, ''))                   # 删 `else … {`
             ops.append((toks[i + 1].start, toks[i + 1].end, ''))      # 删配对 `}`
+            seams.append(toks[e].start)
             recs.setdefault('deleted_else', []).append('%s:%d' % (filename, tk.line))
         elif act == 'return':
             ops.append((tk.end, tk.end, ' return; '))            # `{` 之后补 `return;`
@@ -401,7 +405,65 @@ def pre_transform(src, filename):
     # 保证先落的（更靠后）不会挪动后落的（更靠前）的偏移。
     for start, end, rep in sorted(ops, key=lambda e: -e[0]):
         src = src[:start] + rep + src[end:]
+
+    # ── 收拢「被删整条语句」在**同一 region 内**留下的**连续 ≥2 个空行**（协调者 2026-10-11 答 Q1）──
+    # 只收**裁定 1 的删除缝**处那一段；**不做全档「≥2 空行 → 1」的全局收拢**
+    # ——语料里本来就有大量「连续 2 空行」的原有写法（实测 11 档：corearch/ast/checker/
+    # fmt/frame/regalloc/instr/ld/term_io/elf/opt），全局收拢会**平白吃掉原文的空行**、
+    # 让 V4b 假性下降。⇒ 只在删除缝那一处收，且只在缝本身确实≥2 时才收。
+    if seams:
+        src, collapsed = _collapse_blank_runs_at(
+            src, [_map_pos(x, ops) for x in seams])
+        recs['blank_collapsed'] = collapsed
     return src, recs, unresolved
+
+
+def _map_pos(x, ops):
+    """把**编辑前**的偏移 `x` 映射到**编辑后**的偏移（`ops` = 全部 (start,end,rep)）。"""
+    shift = 0
+    for s, e, r in sorted(ops, key=lambda o: o[0]):
+        if s >= x:
+            break
+        if e <= x:
+            shift += len(r) - (e - s)
+    return x + shift
+
+
+def _collapse_blank_runs_at(text, positions):
+    """把 `positions` 各自所在的那一段**连续空行**（长度 ≥2 时）收成 1 行。
+
+    返回 `(新文本, 收拢点行号表)`。**只在这些位置收**——不动别处的原有空行。
+    """
+    lines = text.split('\n')
+    sentinel = len(lines) - 1 if lines and lines[-1] == '' else len(lines)
+    starts, pos = [], 0
+    for l in lines:
+        starts.append(pos)
+        pos += len(l) + 1
+    import bisect
+    touched, drop = set(), set()
+    for p in positions:
+        i = bisect.bisect_right(starts, p) - 1
+        j = i
+        if not (0 <= j < sentinel) or lines[j].strip():
+            j = i - 1                      # 缝落在非空行上 ⇒ 看它前面那一行
+        if not (0 <= j < sentinel) or lines[j].strip():
+            continue
+        a = j
+        while a > 0 and a - 1 < sentinel and not lines[a - 1].strip():
+            a -= 1
+        b = j
+        while b + 1 < sentinel and not lines[b + 1].strip():
+            b += 1
+        if b in touched:
+            continue
+        for k in range(a, b + 1):
+            touched.add(k)
+        if b - a + 1 >= 2:                 # ≥2 才收；孤立的 1 行不动
+            for k in range(a + 1, b + 1):
+                drop.add(k)
+    kept = [l for k, l in enumerate(lines) if k not in drop]
+    return '\n'.join(kept), ['line %d' % (k + 1) for k in sorted(drop)]
 
 
 # ── 改写 ──────────────────────────────────────────────────────────────────────

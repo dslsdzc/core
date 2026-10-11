@@ -20,7 +20,6 @@ fn read_source_file(path: string) -> string:
     g_source_dir = dirname(path)
     source := read_file(path)
 
-
     return source
 
 fn read_project_dir(dir: string) -> string:

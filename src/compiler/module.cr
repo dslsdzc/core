@@ -169,7 +169,6 @@ fn load_imports(dir_path: string) -> string:
     imp_path : ., mut = dir_path + "_import.cr"
     content := module_get_source(imp_path)
 
-
     return content
 
 fn reg_fileid(fileid_str: string, path: string) -> int:

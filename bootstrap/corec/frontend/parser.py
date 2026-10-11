@@ -37,6 +37,34 @@ class Parser:
         self.tokens = tokens
         self.pos = 0
         self.const_values = {}
+        # `want_value` = **位置语义**标志（v4 权威依据 `docs/core-language-syntax_v4.md`
+        # §7.4「函数没有 implicit tail return」+ §4.1「region 作声明右值取尾值」）。
+        #
+        # 起因：v4 无 `;` ⇒ v3 里 `x = 1;` 的 ExprStmt 形态消失，语句末的裸表达式会被
+        # parse_block 一律当**尾值**（Block.expr）⇒ 块类型由 unit 变 int ⇒ 函数推断返回
+        # 类型漂移 ⇒ checker 刷 `expected return type` / `If branches have different types`。
+        #
+        # 规则（唯一措辞）：
+        #   ① **语句位** region（函数体、if/else 语句体、loop/for/while 体、独立的
+        #      `unsafe:`/`flow:` 语句）末项裸表达式 ⇒ 包 ExprStmt（等价 v3 带 `;`），region 无值。
+        #      **例外 = 块状末项**（`if`/`match`/`loop`/`for`/`unsafe`/`flow`）：v3 的 `;` 只终止
+        #      普通表达式语句，块状语句在 v3 里**从不带 `;`** ⇒ 当时就是「暂定尾表达式」⇒
+        #      保持 Block.expr。T4 是机械形状改写（只有 `{}`→缩进、`;`→换行）⇒ 它不该改变这一点；
+        #      一律包 ExprStmt 等于凭空补一个 v3 没有的 `;`（实证见 `parse_block` 的例外注释）。
+        #   ② **表达式位** region（声明/赋值右值、return 值、调用实参、括号内、索引、
+        #      二元/一元操作数、match 臂 `=> Expr`）⇒ 保留 Block.expr；
+        #   ③ 递归：`if`/`unsafe`/`flow` 的 region 位置 = **该表达式自身**的位置
+        #      （`x := if c: a else: b` 两臂在表达式位；语句位 `if c: … else: …` 两臂在语句位）。
+        #
+        # 机制：表达式位入口置 True（`_want_value_expr()`），语句位入口（`parse_stmt`）置 False；
+        # `parse_block` 进入时读该标志决定尾值去留，并把标志复位为 False（嵌套 region 默认语句位），
+        # 退出时**恢复**为进入值（同层兄弟 region 位置不变）。
+        self.want_value = False
+
+    def _want_value_expr(self) -> Expr:
+        """表达式位入口：置 `want_value` 后解析一个表达式（region 在此保尾值）。"""
+        self.want_value = True
+        return self.parse_expr()
 
     def _scan_constants(self):
         """Pre-scan for 'NAME: TYPE = VALUE' declarations to resolve array sizes.
@@ -176,7 +204,7 @@ class Parser:
         if self.check(TokenType.COLON_EQ):
             # x := expr  →  x : auto = expr
             self.advance()
-            values = [self.parse_expr()]
+            values = [self._want_value_expr()]   # 声明右值 = 表达式位（规则 ②）
             return names, tags, None, values
         self.expect(TokenType.COLON_DECL)
         if self.check(TokenType.AUTO) or self.check(TokenType.DOT):
@@ -205,10 +233,10 @@ class Parser:
         values = []
         if self.check(TokenType.EQ):
             self.advance()
-            values.append(self.parse_expr())
+            values.append(self._want_value_expr())   # 声明右值 = 表达式位（规则 ②）
             while self.check(TokenType.COMMA):
                 self.advance()
-                values.append(self.parse_expr())
+                values.append(self._want_value_expr())
         return names, tags, typ, values
 
     # ─── 顶层 ───
@@ -314,13 +342,16 @@ class Parser:
         self._skip_spec_annotations()
         if self.check(TokenType.EQ):
             self.advance()
-            body = self.parse_expr()
+            body = self._want_value_expr()   # `fn f() = expr` 的值 = 表达式位（规则 ②）
             self._end_decl()
             return FunctionDecl(is_pub, name, generics, params, ret, body)
         # D9/D10（T0 布局规格 §2.2）：有体 ⇒ 行尾 `:`（COLON_BLOCK）开 region；
         # 无体（`extern fn read(fd: int) -> int`）⇒ 行边界，无 `:`。
         if self._at_line_end():
             return FunctionDecl(is_pub, name, generics, params, ret, None)
+        # 规则 ①：函数体 region **恒为语句位**（§7.4「函数没有 implicit tail return」）⇒
+        # 末项裸表达式包 ExprStmt，块类型 unit ⇒ 返回值只经显式 `return`。
+        self.want_value = False
         body = self.parse_block()
         if is_flow:
             body = Flow(body)
@@ -497,7 +528,7 @@ class Parser:
         left = self.parse_logical_or()
         if self.check(TokenType.EQ):
             self.advance()
-            right = self.parse_assignment()
+            right = self._want_value_expr()   # 赋值右值 = 表达式位（规则 ②）
             return BinaryOp(left, "=", right)
         return left
 
@@ -578,20 +609,20 @@ class Parser:
                     self.advance()
                     args = []
                     if not self.check(TokenType.RPAREN):
-                        args.append(self.parse_expr())
+                        args.append(self._want_value_expr())   # 实参 = 表达式位（规则 ②）
                         while self.check(TokenType.COMMA):
                             self.advance()
-                            args.append(self.parse_expr())
+                            args.append(self._want_value_expr())
                     self.expect(TokenType.RPAREN)
                     node = EnumConstructor([node.name], args)
                 else:
                     self.advance()
                     args = []
                     if not self.check(TokenType.RPAREN):
-                        args.append(self.parse_expr())
+                        args.append(self._want_value_expr())   # 实参 = 表达式位（规则 ②）
                         while self.check(TokenType.COMMA):
                             self.advance()
-                            args.append(self.parse_expr())
+                            args.append(self._want_value_expr())
                     self.expect(TokenType.RPAREN)
                     node = Call(node, args)
             elif self.check(TokenType.DOT):
@@ -603,17 +634,17 @@ class Parser:
                 # Distinguish between index expression and array literal
                 if self.check(TokenType.RBRACK) or (self.cur().type in (TokenType.INT_LIT, TokenType.STRING_LIT, TokenType.IDENT, TokenType.LPAREN, TokenType.MINUS, TokenType.BANG)):
                     # index expression: node[idx]
-                    idx = self.parse_expr()
+                    idx = self._want_value_expr()   # 下标 = 表达式位（规则 ②）
                     self.expect(TokenType.RBRACK)
                     node = Index(node, idx)
                 else:
                     # array literal [e1, e2, ...]
                     elements = []
                     if not self.check(TokenType.RBRACK):
-                        elements.append(self.parse_expr())
+                        elements.append(self._want_value_expr())
                         while self.check(TokenType.COMMA):
                             self.advance()
-                            elements.append(self.parse_expr())
+                            elements.append(self._want_value_expr())
                     self.expect(TokenType.RBRACK)
                     node = ArrayLit(elements)
             elif self.check(TokenType.QUESTION):
@@ -636,10 +667,10 @@ class Parser:
                 self.advance()
                 args: List[Expr] = []
                 if not self.check(TokenType.RPAREN):
-                    args.append(self.parse_expr())
+                    args.append(self._want_value_expr())   # 实参 = 表达式位（规则 ②）
                     while self.check(TokenType.COMMA):
                         self.advance()
-                        args.append(self.parse_expr())
+                        args.append(self._want_value_expr())
                 self.expect(TokenType.RPAREN)
                 return Builtin(first, args)
             if self.check(TokenType.IDENT):
@@ -680,7 +711,7 @@ class Parser:
                     if not self.check(TokenType.EQ):
                         self.error("struct literal field separator must be '=' [P030]")
                     self.advance()
-                    val = self.parse_expr()
+                    val = self._want_value_expr()   # 字段值 = 表达式位（规则 ②）
                     fields.append((fname, val))
                     if self.check(TokenType.COMMA):
                         self.advance()
@@ -692,7 +723,7 @@ class Parser:
             if self.check(TokenType.RBRACK):
                 self.advance()
                 return ArrayLit([])
-            first = self.parse_expr()
+            first = self._want_value_expr()   # 数组元素 = 表达式位（规则 ②）
             if self.check(TokenType.SEMI):
                 # [value; count] — repeated array
                 self.advance()
@@ -703,12 +734,12 @@ class Parser:
             elements = [first]
             while self.check(TokenType.COMMA):
                 self.advance()
-                elements.append(self.parse_expr())
+                elements.append(self._want_value_expr())
             self.expect(TokenType.RBRACK)
             return ArrayLit(elements)
         if self.check(TokenType.LPAREN):
             self.advance()
-            e = self.parse_expr()
+            e = self._want_value_expr()   # 括号内 = 表达式位（规则 ②）
             self.expect(TokenType.RPAREN)
             return e
         if self.check(TokenType.LBRACE):
@@ -761,6 +792,10 @@ class Parser:
         其余各项按语句处理 —— 即原 `parse_block` 的「暂定尾表达式」逻辑原样保留，
         只是「还有下一项」的判据由「不是 `}`」变成「不是 DEDENT」。
         """
+        # 位置语义（§7.4 + §4.1，见 `__init__` 的 `want_value`）：本 region 的尾值去留
+        # 由**进入时**的标志决定；体内嵌套 region 一律先复位为语句位，退出时恢复。
+        want = self.want_value
+        self.want_value = False
         self._expect_region()
         stmts = []
         expr = None
@@ -781,9 +816,31 @@ class Parser:
                     stmts.append(ExprStmt(expr))
                 expr = item
         self.expect(TokenType.DEDENT)
+        self.want_value = want
+        if not want and expr is not None and not self._is_block_like(expr):
+            # 语句位 region + 末项是**普通**裸表达式 ⇒ 包 ExprStmt（等价 v3 的 `expr;`），
+            # region 视为无值。
+            #
+            # ⚠ 例外（**不是放宽，是 v3 等价性的忠实面**）：v3 的 `;` 只终止**普通**表达式
+            # 语句；块状语句（`if`/`match`/`loop`/`for`/`unsafe`/`flow`）在 v3 里**从不带 `;`**
+            # ⇒ 它们当时就是 parse_stmt 的「暂定尾表达式」⇒ 保持 Block.expr。T4 是**机械形状
+            # 改写**（只有 `{}`→缩进、`;`→换行两类）⇒ 它无法、也不该改变这一点。
+            # 若在此一律包 ExprStmt，等于凭空给 v3 的块状语句补一个它没有的 `;` ⇒ 语义漂移
+            # （实证：`tools/v4_frontend_probe.py features` 的 `if / else`、`enum + match`×2、
+            # `unsafe region` 四例会立刻报 `expected return type …, got unit`）。
+            stmts.append(ExprStmt(expr))
+            expr = None
         return Block(stmts, expr)
 
+    @staticmethod
+    def _is_block_like(expr: Expr) -> bool:
+        """块状（v3 里不带 `;` 的）语句形态——判据见 `parse_block` 的例外注释。"""
+        return isinstance(expr, (If, Match, Loop, For, Unsafe, Flow))
+
     def parse_stmt(self):
+        # 语句位入口（规则 ①）：本语句整体在语句位 ⇒ 先复位；语句内的表达式位由各入口重
+        # 置 True（声明的右值 / return 值 / 实参 / 括号 / 索引 …）。
+        self.want_value = False
         if self.check(TokenType.IDENT) and self._is_var_decl_start():
             names, tags, typ, values = self._parse_var_decl_names_tags_type()
             self._end_decl()
@@ -793,7 +850,7 @@ class Parser:
             val = None
             # A6：关键字之后**同一逻辑行内**无 token ⇒ 无值（行边界取代 `;`/`}`）
             if not self._at_line_end():
-                val = self.parse_expr()
+                val = self._want_value_expr()   # 表达式位：return 的值（规则 ②）
             self._consume_newlines()
             return ReturnStmt(val)
         elif self.check(TokenType.BREAK):
@@ -810,21 +867,30 @@ class Parser:
             return self.parse_expr()
 
     def parse_if_expr(self):
+        # 规则 ③：两臂 region 的位置 = **本 if 表达式自身**的位置（进入时捕获，逐臂沿用；
+        # `else if` 递归时同样把该位置传下去）。条件恒为表达式位。
+        want = self.want_value
         self.expect(TokenType.IF)
-        cond = self.parse_expr()
+        cond = self._want_value_expr()
+        self.want_value = want
         then = self.parse_block()
         else_branch = None
         if self.check(TokenType.ELSE):
             self.advance()
+            self.want_value = want
             if self.check(TokenType.IF):
                 else_branch = self.parse_if_expr()
             else:
                 else_branch = self.parse_block()
+        self.want_value = want
         return If(cond, then, else_branch)
 
     def parse_match_expr(self):
+        # 被匹配的值与臂体 `=> Expr` 恒为表达式位（规则 ②）；臂体不是 region（此处只吃
+        # 单行表达式），故其内嵌 region 按表达式位保留尾值。
+        want = self.want_value
         self.expect(TokenType.MATCH)
-        expr = self.parse_expr()
+        expr = self._want_value_expr()
         self._expect_region()
         arms = []
         while True:
@@ -846,11 +912,12 @@ class Parser:
                 self.advance()
             pat = self.parse_pattern()
             self.expect(TokenType.FAT_ARROW)   # 使用 =>
-            body = self.parse_expr()
+            body = self._want_value_expr()
             arms.append(MatchArm(pat, body))
             if self.check(TokenType.COMMA):
                 self.advance()
         self.expect(TokenType.DEDENT)
+        self.want_value = want
         return Match(expr, arms)
     def parse_pattern(self) -> Pattern:
         if self.check(TokenType.UNDERSCORE) or self.cur().lexeme == '_':
@@ -912,14 +979,24 @@ class Parser:
                 return IdentPattern(name)        # 变量绑定
         self.error(f"Unexpected token in pattern: {self.cur().lexeme}")
     def parse_loop_expr(self):
+        # 规则 ①：loop 体恒为**语句位** region（v3 里体末语句必带 `;` ⇒ 块类型 unit；
+        # 本解析器无 `break value`，循环亦无值通道）⇒ 末项裸表达式包 ExprStmt。
+        # 标志 save/restore：同层兄弟 region（如 `a + <loop> + <unsafe>`）位置不受影响。
+        want = self.want_value
         self.expect(TokenType.LOOP)
-        return Loop(self.parse_block())
+        self.want_value = False
+        blk = self.parse_block()
+        self.want_value = want
+        return Loop(blk)
 
     def parse_while_expr(self):
         """Desugar: while cond { body } → loop { if !cond { break; } body }"""
+        want = self.want_value
         self.expect(TokenType.WHILE)
-        cond = self.parse_expr()
+        cond = self._want_value_expr()
+        self.want_value = False
         body = self.parse_block()
+        self.want_value = want
         # Build: if !cond { break; }
         not_cond = UnaryOp("!", cond)
         break_block = Block([BreakStmt()], None)
@@ -930,11 +1007,16 @@ class Parser:
         return Loop(new_block)
 
     def parse_for_expr(self):
+        # 规则 ①：for 体恒为语句位 region；被迭代表达式恒为表达式位。
+        want = self.want_value
         self.expect(TokenType.FOR)
         var = self.expect(TokenType.IDENT).lexeme
         self.expect(TokenType.IN)
-        iter = self.parse_expr()
-        return For(var, iter, self.parse_block())
+        iter = self._want_value_expr()
+        self.want_value = False
+        blk = self.parse_block()
+        self.want_value = want
+        return For(var, iter, blk)
 
     def parse_struct_decl(self, is_pub):
         self.expect(TokenType.STRUCT)

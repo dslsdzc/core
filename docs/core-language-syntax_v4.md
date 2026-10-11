@@ -392,15 +392,15 @@ v4 不使用显式 `move`。region、借用有效性、escape、capture 与存�
 ```core
 raw := unsafe:
     @str_of(buf)
-
-total := if ready:
-    compute()
-else:
-    0
 ```
 
-这条形式的用途是把**只能以 region 书写**的构造（`unsafe`、带 region 的分支）放进一个值的位置。
+这条形式的用途是把**只能以 region 书写**的构造（`unsafe` 等）放进一个值的位置。
 它不引入新的表达式种类：region 仍是 region，只是在右值位被读取其尾值。
+
+⚠ **实现态（2026-10-11 实测）**：目前只有 `unsafe` region 作右值能真正取到值（运行期验证过）。
+`total := if ready: … else: …` 这类**块值 `if`** 能解析、能过检，但**发射面丢值**——
+`bootstrap/corec/frontend/ir_gen.py` 的 `gen_if` 无条件 `return None`（既有缺陷，与 v4 迁移无关）。
+⇒ 该形在文档里按**设计态**记，未实现前不要依赖。
 
 ⚠ 反向不成立：`f(unsafe: …)` —— 把 region 直接塞进**实参位** —— 不是合法文本（实参位是表达式位，
 region 不是表达式）。需要时先把 region 的值绑定到一个名字，再把名字传进去。
