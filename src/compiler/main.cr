@@ -122,7 +122,7 @@ fn read_static_runtime_source() -> string:
 fn run_frontend() -> int:
     g_error_count = 0  // 会话起点清词法/语法错误（tokenize 多轮累积，见 lexer.cr）
     println("[1/5] tokenize...")
-    tokenize(g_source)
+    tokenize(g_source, 0)
     println("[2/5] resolve imports...")
     res_imports()
     println("[3/5] parse...")
@@ -737,7 +737,7 @@ fn corec_main() -> int:
 // Full compilation: source -> assembly (used by tests and programmatic API)
 fn compile_source(source: string) -> string:
     g_source = source
-    tokenize(g_source)
+    tokenize(g_source, 0)
     res_imports()
     parse_all()
     check_all()

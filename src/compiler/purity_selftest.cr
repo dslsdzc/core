@@ -41,7 +41,7 @@ fn ps_compile(src: string) -> int:
     g_source = src
     g_error_count = 0
     g_source_dir = ""
-    tokenize(g_source)
+    tokenize(g_source, 0)
     res_imports()
     parse_all()
     if g_error_count > 0:

@@ -8,8 +8,8 @@ g_extra_lets : string, mut
 g_extra_lets_cap : int, mut
 g_extra_let_count : int, mut
 
-// Flag: when set, IDENT { is NOT parsed as struct literal
-g_parse_no_struct_literal : int, mut
+// v4（T0 布局规格 §4.5）：原 `g_parse_no_struct_literal` 旗标**已删除** —— 块花括号不存在
+// ⇒ `IDENT {` 之后**必**是结构体字面量，歧义（靠「深度 1 的 `;`」判块）随之消失。
 
 fn alloc_node(kind: int, a: int, b: int, c: int, iv: int, tv: int, d: int, line: int, col: int) -> int:
     return ast_alloc(kind, a, b, c, iv, tv, d, line, col)
@@ -44,6 +44,95 @@ fn expect(k: int) -> int:
     if tok_k(t) == k:
         return advance_tok()
     return t
+
+// ── v4 位置语义（T5；逐条等价于 bootstrap/corec/frontend/parser.py 的 `want_value`）──────
+// 表达式位（声明/赋值右值、return 的值、实参、下标、括号内、元组/数组元素、字面量字段值）
+// ⇒ region 末项**保尾值**；语句位（语句、函数体、if/else 语句体、loop/while/for 体）
+// ⇒ 末项裸表达式**包 EXPR_STMT**（等价 v3 带 `;` 的表达式语句）；**例外 = 块状末项**
+// （if/match/loop/while/for/unsafe）**保尾值** —— v3 的 `;` 只终止普通表达式语句，
+// 控制流语句本来就以 `}` 收尾（本来就是块的尾值）。判据 = v3 逐形等价。
+g_want_value : int, mut
+
+// 行边界（`;` 退场后的统一终止面，T0 布局规格 §2.5 + §6.2 的 A/B 两类逐点判定）：
+// NEWLINE / DEDENT / EOF 三态；其中 **DEDENT 与 EOF 不消费** —— 它们是 region 收尾信号，
+// 由块产生式处理。
+// 第三态：**刚吃掉 DEDENT**（= region 收尾）也构成行边界。块产生式消费 DEDENT 后，
+// lexer 已把下一行的首 token 接在 DEDENT 之后（token 次序 NEWLINE → DEDENT → 下一行首 token）
+// ⇒ 「prev == DEDENT」等价于「站在新一行的行首」。少了这条，`x := unsafe: …` 这类
+// **以 region 收尾的声明/表达式**会在 end_decl 处被误判为「同行还有 token」。
+fn at_line_end() -> int:
+    if g_token_pos > 0 && tok_k(g_token_pos - 1) == T_DEDENT:
+        return 1
+    k := tok_k(cur_tok())
+    if k == T_NEWLINE || k == T_DEDENT || k == T_EOF:
+        return 1
+    return 0
+
+fn skip_newlines():
+    loop:
+        if tok_k(cur_tok()) != T_NEWLINE:
+            break
+        advance_tok()
+
+// 语句/声明的行边界收尾（取代原 `expect(T_SEMI)`）：保留其**严格性** ——
+// 少了这条，「同行两条声明」会被静默接受。
+fn end_decl():
+    if at_line_end() == 0:
+        add_error("expected end of line, got '" + tok_lx(cur_tok()) + "'")
+    skip_newlines()
+
+// region 头：`T_COLON_BLOCK`（行尾冒号）+ 其后的 NEWLINE + `T_INDENT`。
+// token 次序由 lexer 的 layout_break 决定：NEWLINE 先于 INDENT/DEDENT。
+// **行内 `:`（T_COLON_DECL）在此被响亮拒绝** —— 正是 T0 布局规格 §2.2 要的
+// 「行尾类型标注不是合法文本」的兜住点；形参标注断行（`fn f(a:` ＋ 续行 `int):`）
+// 在 lexer 层与头部终结不可区分，正是靠这里兜住。
+fn expect_region_head():
+    if tok_k(cur_tok()) == T_COLON_BLOCK:
+        advance_tok()
+    else:
+        add_error("expected ':' to open a region, got '" + tok_lx(cur_tok()) + "'")
+        return
+    skip_newlines()
+    if tok_k(cur_tok()) == T_INDENT:
+        advance_tok()
+    else:
+        add_error("expected an indented region after ':'")
+
+// region 收尾：消费 `T_DEDENT`；非 DEDENT（如 EOF）⇒ 响亮报错（不静默吞）。
+fn close_region():
+    if tok_k(cur_tok()) == T_DEDENT:
+        advance_tok()
+    else:
+        add_error("expected end of region (missing DEDENT)")
+
+// 语句位 region 的**控制流**末项：位置标志为语句位时，控制流类尾项保留为**块的尾值**；
+// 其余一律包 EXPR_STMT（等价 v3 带 `;` 的表达式语句）。
+//
+// ⚠ **本清单两套前端**本来就不一样**，判据锚在语义（v3 逐形等价），**不锚在 kind 名机械一致**
+//   —— 见维护者裁定（2026-10-11）：
+//   · 自源侧 **`while` 有独立 kind `EXPR_WHILE`**（`parse_while_expr` 直接建它，`checker.cr`/
+//     `ir_gen.cr` 都有该分支）⇒ **必须入列**。少了它，`while` 作 region 尾项会被包 `EXPR_STMT`
+//     ⇒ `unit`，与 v3（`while c { … }` 不带 `;` ⇒ 本就是块的值）**漂移**。
+//   · Python 侧 `while` **desugar 成 `Loop`** ⇒ 那边只需 `Loop`，**不要**去给它补一个 while 项。
+//   · `Flow`：Python 侧是表达式节点（入列）；自源侧 **`flow` 只是顶层声明修饰符、不是表达式
+//     节点**（`parse_primary` 无 `T_FLOW` 分支）⇒ **不入列**。
+//   ⇒ **禁止**为「两边 kind 清单长得一样」而增删本行——那会把语义正确的差异抹平成错。
+fn is_block_like(n: int) -> int:
+    if n < 0:
+        return 0
+    k := ast_kind(n)
+    if k == EXPR_IF || k == EXPR_MATCH || k == EXPR_LOOP || k == EXPR_WHILE || k == EXPR_FOR || k == EXPR_UNSAFE:
+        return 1
+    return 0
+
+// 块内的「语句类」节点（Python 侧的 Stmt 族）：let / return / break / continue。
+fn is_stmt_node(n: int) -> int:
+    if n < 0:
+        return 1
+    k := ast_kind(n)
+    if k == EXPR_LET || k == EXPR_RETURN || k == EXPR_BREAK || k == EXPR_CONTINUE:
+        return 1
+    return 0
 
 // --- Type parsing ---
 fn parse_type() -> int:
@@ -88,6 +177,15 @@ fn parse_type() -> int:
     else if tok_k(t) == T_UNIT:
         advance_tok()
         res = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, line, col)
+    else if tok_k(t) == T_NEVER:
+        // v4（施工计划 §四.1 项 8）：`never` 由**词素比对提升进关键字表** ⇒ 走独立 token 分支
+        // （升格后它不再可能是标识符）。语义不变：TY_NEVER。
+        advance_tok()
+        res = alloc_node(0, 0, 0, 0, 0, TY_NEVER, 0, line, col)
+    else if tok_k(t) == T_DYN:
+        // 同上：`dyn` 升格为关键字（复用既有 token kind T_DYN=99）。语义不变：TI_DYN。
+        advance_tok()
+        res = alloc_node(0, 0, 0, 0, 0, TI_DYN, 0, line, col)
     else if tok_k(t) == T_IDENT || tok_k(t) == T_SELF || tok_k(t) == T_UNDERSCORE:
         lex := tok_lx(t)
         advance_tok()
@@ -102,10 +200,6 @@ fn parse_type() -> int:
             res = alloc_node(0, 0, 0, 0, 0, TY_STRING, 0, line, col)
         else if lex == "char":
             res = alloc_node(0, 0, 0, 0, 0, TY_CHAR, 0, line, col)
-        else if lex == "never":
-            res = alloc_node(0, 0, 0, 0, 0, TY_NEVER, 0, line, col)
-        else if lex == "dyn":
-            res = alloc_node(0, 0, 0, 0, 0, TI_DYN, 0, line, col)
         else:
             ni := str_intern(lex)
             // Check for generic args: Box[int,...] or Box<int,...>
@@ -242,6 +336,10 @@ fn parse_binary(mp: int) -> int:
         if p < mp:
             break
         advance_tok()
+        if p == 1:
+            // 赋值/复合赋值的右值 = 表达式位（bootstrap 侧 `parse_assignment` 同判：
+            // `x = <region 收尾>` 的尾值必须保留 —— 见 g_want_value 头注规则 ②）。
+            g_want_value = 1
         right := parse_binary(p + 1)
         op := tok2op(k)
         // Compound assignment: += -= *= /=  →  a = a op b
@@ -278,10 +376,8 @@ fn parse_unary() -> int:
         advance_tok()
         op := parse_unary()
         return alloc_node(EXPR_UNARY, op, 0, UOP_NOT, 0, 0, 0, tok_ln(t), tok_cl(t))
-    if tok_k(t) == T_MOVE:
-        advance_tok()
-        op := parse_unary()
-        return alloc_node(EXPR_MOVE, op, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+    // v4（§一.5）：`move` 已从关键字表退场 ⇒ lexer 不再发射 T_MOVE，本分支一并删除
+    // （原 EXPR_MOVE 构造在 v4 下**不可达**；`move x` 现按普通标识符解析并响亮报错，不静默）。
     if tok_k(t) == T_STAR:
         advance_tok()
         op := parse_unary()
@@ -316,6 +412,7 @@ fn parse_postfix() -> int:
             ac : ., mut = 0
             if !check(T_RPAREN):
                 // Wrap each argument in EXPR_ARG(a=expr, b=next_arg) linked list
+                g_want_value = 1   // 实参 = 表达式位
                 first_expr := parse_expr()
                 af = alloc_node(EXPR_ARG, first_expr, -1, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
                 ac = 1
@@ -324,6 +421,7 @@ fn parse_postfix() -> int:
                     if !check(T_COMMA):
                         break
                     advance_tok()
+                    g_want_value = 1
                     next_expr := parse_expr()
                     new_arg := alloc_node(EXPR_ARG, next_expr, -1, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
                     ast_set_b(prev_arg, new_arg)
@@ -379,6 +477,7 @@ fn parse_postfix() -> int:
             continue
         if tok_k(t) == T_LBRACKET:
             advance_tok()
+            g_want_value = 1   // 下标 = 表达式位
             idx := parse_expr()
             advance_tok()
             node = alloc_node(EXPR_INDEX, node, idx, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
@@ -441,7 +540,15 @@ fn interp_parse_holes():
         if ast_kind(i) == EXPR_INTERP_HOLE:
             txt := istr_get(ast_data(i))
             if str_len(txt) > 0:
-                tokenize(txt)
+                // 洞内重入（**全仓唯一的重入点**，T0 布局规格 §5.2/§5.4）：洞是从源里切出的
+                // 一小段表达式，**没有 layout 上下文** ⇒ 必须**显式旁路** layout 发射
+                // （否则会伪造缩进状态并改写外层缩进栈；嵌套插值还会递归重入）。
+                // 规则（规格 §5.2）：调用后 token 流不由 parse_all/parse_expr 消费 ⇒ 必传旁路。
+                // 旁路以**显式实参**给出（形参 = `layout_bypass`），使调用点原文即判据载体
+                // （J-T0-5 零构建半逐字读本行的 `g_layout_bypass`）。
+                g_layout_bypass = 1
+                tokenize(txt, g_layout_bypass)
+                g_layout_bypass = 0
                 g_token_pos = 0
                 ast_set_a(i, parse_expr())
                 tk2 := cur_tok()                     // ⚠ 不写 `if tok_k(cur_tok()) != T_EOF {`——那会与 A₁ 顶层兜底的
@@ -475,40 +582,16 @@ fn parse_primary() -> int:
         advance_tok()
         return alloc_node(EXPR_BOOL, 0, 0, 0, 0, TY_BOOL, 0, tok_ln(t), tok_cl(t))
     if tok_k(t) == T_NONE:
+        // v4（§一.5 + docs/core-language-syntax_v4.md:59/264）：`none` 是**关键字**，
+        // 空可选值（`T?` 的无值形态）即此拼写。canonical 变体名仍是 `None`（desugar/checker/
+        // ty_shadow 按标签串 `None` 比较，见 ty_shadow.cr:1457）⇒ 此处映射到 canonical 名。
+        // ⚠ `None`（大写）已**退役为普通标识符** —— 作值用会走 EXPR_IDENT 的未定义名硬错（响亮），
+        //   与「拼写面重命名」的意图一致（不静默改判）。
         advance_tok()
         return alloc_node(EXPR_ENUM_CONSTRUCTOR, str_intern("None"), -1, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
-    if tok_k(t) == T_SOME:
-        advance_tok()
-        ni := str_intern("Some")
-        if check(T_LPAREN):
-            // Parse Some(expr[, expr…]) —— R2 P3 Task 4 修复：**实参须照通用枚举构造器分支
-            // （下方 parse_postfix 的路径）建 EXPR_ARG 链**。旧实现把值节点直接放 b 槽，
-            // 而 checker/ir_gen 的 EXPR_ENUM_CONSTRUCTOR 消费点按 EXPR_ARG 链走
-            // （`an := ast_b(node); ast_a(an); an = ast_b(an)`）⇒ 旧形态令该链读进值节点自身
-            // 的 a/b 槽（节点 0 当实参、按 ast_b 前行）——实测（本任务开工前）：
-            // `enum Option[T] { None, Some(T) }` + `x: int? = Some(5)` **checker 死循环**
-            // （`corec check` rc=124 超时）。链一修，消费点契约恢复（parser.cr:300-312 同款）。
-            advance_tok()
-            af : ., mut = -1
-            ac : ., mut = 0
-            if !check(T_RPAREN):
-                first_expr := parse_expr()
-                af = alloc_node(EXPR_ARG, first_expr, -1, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
-                ac = 1
-                prev_arg : ., mut = af
-                loop:
-                    if !check(T_COMMA):
-                        break
-                    advance_tok()
-                    next_expr := parse_expr()
-                    new_arg := alloc_node(EXPR_ARG, next_expr, -1, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
-                    ast_set_b(prev_arg, new_arg)
-                    prev_arg = new_arg
-                    ac = ac + 1
-            advance_tok()  // consume )
-            return alloc_node(EXPR_ENUM_CONSTRUCTOR, ni, af, ac, 0, 0, 0, tok_ln(t), tok_cl(t))
-        // Some without parens → treat as identifier (will be resolved by uppercase → enum constructor)
-        return alloc_node(EXPR_IDENT, 0, 0, 0, ni, 0, 0, tok_ln(t), tok_cl(t))
+    // `Some` 已退场为关键字（T_SOME 不再由 lexer 发射）：`Some(x)` 走 parse_postfix 的
+    // 「IDENT + `(` + 首字母大写 ⇒ EXPR_ENUM_CONSTRUCTOR」分支（与旧 T_SOME 分支同契约：
+    // 实参建 EXPR_ARG 链），裸 `Some` 走 EXPR_IDENT。
     if tok_k(t) == T_AT:
         advance_tok()
         if tok_k(cur_tok()) == T_IDENT:
@@ -522,7 +605,9 @@ fn parse_primary() -> int:
         advance_tok()
         name := tok_lx(t)
         ni := str_intern(name)
-        if check(T_LBRACE) && g_parse_no_struct_literal == 0:
+        // v4（T0 布局规格 §4.5）：块花括号不存在 ⇒ `Name {` 之后**必**是字面量，
+        // 原 `_is_struct_lit` 消解器与 `g_parse_no_struct_literal` 旗标一并退场（无需前瞻）。
+        if check(T_LBRACE):
             advance_tok()
             // 契约（F5 修复，与元组分支同款）：EXPR_STRUCT = a=类型名 idx、b=首 wrapper、c=字段数；
             // wrapper 在 g_ast 中**连续**（kind=EXPR_NONE，wrapper.a=该字段的值节点）→ 消费者
@@ -545,7 +630,15 @@ fn parse_primary() -> int:
                     break
                 ft := advance_tok()
                 fni := str_intern(tok_lx(ft))
-                advance_tok()
+                // T0 布局规格 §4.2 写死：**字段分隔符必须是 `=`**（v4 单形语言），未选定的
+                // `:` 形**响亮拒绝**（码 P030）。修复前是**盲跳一个 token**（返回值丢弃）⇒
+                // `=` 与 `:` 两形都收 = 判据无鉴别力，而 v4 是单形语言。
+                if check(T_EQ):
+                    advance_tok()
+                else:
+                    check_error(EC_P_STRUCT_LIT_SEP,
+                        "struct literal field separator must be '=' (':' is not valid in v4)",
+                        tok_ln(cur_tok()), tok_cl(cur_tok()))
                 if fc >= cap:
                     ncap := cap * 2
                     nv := alloc(ncap * 8)
@@ -555,6 +648,7 @@ fn parse_primary() -> int:
                     _dyncpy(names, cap * 8, nn)
                     names = nn
                     cap = ncap
+                g_want_value = 1                 // 字段值 = 表达式位
                 w64(vals, fc * 8, parse_expr())  // 字段值（子树自占若干槽）
                 w64(names, fc * 8, fni)          // 字段名 idx（① 名字绑定）
                 fc = fc + 1
@@ -580,10 +674,8 @@ fn parse_primary() -> int:
         return alloc_node(EXPR_IDENT, 0, 0, 0, ni, 0, 0, tok_ln(t), tok_cl(t))
     if tok_k(t) == T_LPAREN:
         advance_tok()
-        saved_nsl := g_parse_no_struct_literal
-        g_parse_no_struct_literal = 0
+        g_want_value = 1   // 括号内 = 表达式位
         e := parse_expr()
-        g_parse_no_struct_literal = saved_nsl
         if check(T_COMMA):
             // Tuple: (e1, e2, ...)
             // 契约（F5 修复）：EXPR_TUPLE = a=首 wrapper、b=元素个数；wrapper 在 g_ast 中
@@ -604,6 +696,7 @@ fn parse_primary() -> int:
                     _dyncpy(vals, cap * 8, nv)
                     vals = nv
                     cap = ncap
+                g_want_value = 1                 // 元组元素 = 表达式位
                 w64(vals, ec * 8, parse_expr())  // 元素值（子树自占若干槽）
                 ec = ec + 1
                 if !check(T_COMMA):
@@ -631,7 +724,13 @@ fn parse_primary() -> int:
         advance_tok()
         return alloc_node(EXPR_CHAR, 0, 0, 0, str_intern(tok_lx(t)), TY_CHAR, 0, tok_ln(t), tok_cl(t))
     if tok_k(t) == T_LBRACE:
-        return parse_block()
+        // v4（T0 布局规格 §4.3）：`{ }` **只**作结构体字面量定界符（`{` 的唯一合法位置）；
+        // 块结构由 `:` + 缩进取代 ⇒ 表达式位的裸 `{` 无产生式，**响亮报错**（不静默按块解）。
+        check_error(EC_P_EXPR,
+            "'{' is only valid as a struct literal delimiter in v4 (blocks use ':' + indent)",
+            tok_ln(t), tok_cl(t))
+        advance_tok()
+        return alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, tok_ln(t), tok_cl(t))
     if tok_k(t) == T_IF:
         return parse_if_expr()
     if tok_k(t) == T_WHILE:
@@ -642,7 +741,9 @@ fn parse_primary() -> int:
         return parse_for_expr()
     if tok_k(t) == T_GO:
         t2 := advance_tok()
-        if check(T_SEMI) || check(T_RBRACE) || check(T_EOF):
+        // A7（T0 布局规格 §6.2）：`;`/`}` 的紧跟判定换成**行边界** —— `go` 之后
+        // **同一逻辑行内**无 token ⇒ 响亮报错。
+        if at_line_end() != 0:
             add_error("Expected expression after `go`")
             return 0
         // go [N] expr  or  go var start end expr → desugared to for loop
@@ -697,6 +798,7 @@ fn parse_primary() -> int:
         vals : string, mut = alloc(cap * 8)
         ec : ., mut = 0
         if !check(T_RBRACKET):
+            g_want_value = 1            // 数组元素 = 表达式位
             w64(vals, 0, parse_expr())  // 元素值（子树自占若干槽）
             ec = 1
             if check(T_SEMI):
@@ -728,6 +830,7 @@ fn parse_primary() -> int:
                         _dyncpy(vals, cap * 8, nv)
                         vals = nv
                         cap = ncap
+                    g_want_value = 1                 // 数组元素 = 表达式位
                     w64(vals, ec * 8, parse_expr())  // 元素值（子树自占若干槽）
                     ec = ec + 1
         advance_tok()
@@ -751,37 +854,83 @@ fn parse_primary() -> int:
     advance_tok()  // consume the unexpected token to avoid infinite loop
     return 0
 
+// 块体收集缓冲（局部语句表；每层 region 一段，退出时整体并入 g_block_stmts）。
+g_pb_stmts : string, mut
+g_pb_cap : int, mut
+g_pb_count : int, mut
+
+fn block_push(n: int):
+    if g_pb_count >= g_pb_cap:
+        ncap : ., mut = g_pb_cap * 2
+        if ncap < 16:
+            ncap = 16
+        nv := alloc(ncap * 8)
+        if g_pb_cap > 0:
+            _dyncpy(g_pb_stmts, g_pb_cap * 8, nv)
+        g_pb_stmts = nv
+        g_pb_cap = ncap
+    w64(g_pb_stmts, g_pb_count * 8, n)
+    g_pb_count = g_pb_count + 1
+
 fn parse_block() -> int:
-    t := advance_tok()
-    local_stmts : string, mut
-    local_stmts_cap : int, mut
-    local_stmts = alloc(256 * 8)
-    local_stmts_cap = 256
-    sc : ., mut = 0
+    // v4 region：吃 `T_COLON_BLOCK` + NEWLINE + `T_INDENT` … `T_DEDENT`（取代原 `{` … `}`）。
+    // 尾表达式判定（T0 布局规格 §6.2 A1）：**region 的最后一项 = 该 region 的值**，
+    // 其余各项按语句处理 —— 「还有下一项」的判据由「不是 `}`」变成「不是 DEDENT」。
+    // 位置语义见 g_want_value 的头注：进入时读标志决定尾值去留，**体内嵌套 region 一律
+    // 先复位为语句位**（parse_stmt / 各 region 产生式各自复位），退出时恢复为进入值。
+    t := cur_tok()
+    want := g_want_value
+    g_want_value = 0
+    expect_region_head()
+    g_pb_stmts = alloc(256 * 8)
+    g_pb_cap = 256
+    g_pb_count = 0
+    have_expr : ., mut = -1
     loop:
-        if check(T_RBRACE) || check(T_EOF):
+        skip_newlines()
+        if tok_k(cur_tok()) == T_DEDENT || tok_k(cur_tok()) == T_EOF:
             break
+        // 收集缓冲的 save/restore：`parse_stmt` 会递归进入嵌套 region（**每个 region 各自
+        // 重置本组全局**）⇒ 不复原本层已收集的语句会被内层覆盖（静默丢语句）。
+        // 保存/恢复的必须是**本层**的状态（不是外层）——否则语句会被推给外层缓冲。
+        my_stmts := g_pb_stmts
+        my_cap := g_pb_cap
+        my_count := g_pb_count
         st := parse_stmt()
-        if sc >= local_stmts_cap:
-            new_cap := local_stmts_cap * 2
-            new_stmts := alloc(new_cap * 8)
-            _dyncpy(local_stmts, local_stmts_cap * 8, new_stmts)
-            local_stmts = new_stmts
-            local_stmts_cap = new_cap
-        w64(local_stmts, sc * 8, st)
-        sc = sc + 1
-    advance_tok()
+        g_pb_stmts = my_stmts
+        g_pb_cap = my_cap
+        g_pb_count = my_count
+        if is_stmt_node(st) != 0:
+            // 语句类项：其前的裸表达式不是末项 ⇒ 包 EXPR_STMT（等价 v3 带 `;`）
+            if have_expr >= 0:
+                block_push(alloc_node(EXPR_STMT, have_expr, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t)))
+                have_expr = -1
+            block_push(st)
+        else:
+            // 裸表达式：**暂定**为 region 尾值（后面还有一项时再包成 EXPR_STMT）
+            if have_expr >= 0:
+                block_push(alloc_node(EXPR_STMT, have_expr, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t)))
+            have_expr = st
+    close_region()
+    g_want_value = want
+    if want == 0 && have_expr >= 0 && is_block_like(have_expr) == 0:
+        // 语句位 region + 末项是**普通**裸表达式（赋值/调用/二元/一元/字面量/标识符/下标…）
+        // ⇒ 包 EXPR_STMT（等价 v3 的 `expr;`），region 视为无值。
+        block_push(alloc_node(EXPR_STMT, have_expr, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t)))
+        have_expr = -1
+    if have_expr >= 0:
+        block_push(have_expr)
     // Flush to global block_stmts array (isolated from nested blocks)
     si := g_block_stmt_count
     i : ., mut = 0
     loop:
-        if i >= sc:
+        if i >= g_pb_count:
             break
         grow_block_stmts(g_block_stmt_count + 1)
-        w64(g_block_stmts, g_block_stmt_count * 8, r64(local_stmts, i * 8))
+        w64(g_block_stmts, g_block_stmt_count * 8, r64(g_pb_stmts, i * 8))
         g_block_stmt_count = g_block_stmt_count + 1
         i = i + 1
-    return alloc_node(EXPR_BLOCK, si, sc, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+    return alloc_node(EXPR_BLOCK, si, g_pb_count, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
 
 fn is_new_var_decl() -> bool:
     p := cur_tok()
@@ -790,8 +939,10 @@ fn is_new_var_decl() -> bool:
     // x := expr
     if tok_k(p + 1) == T_COLON_EQ:
         return true
-    // x : type ...
-    if tok_k(p + 1) == T_COLON:
+    // x : type ...（T0 布局规格 §6.2 A3：改判 T_COLON_DECL —— 裁定 (b) 使两种 `:` 互斥且
+    // 穷尽 ⇒ `T_COLON_BLOCK` 不进声明分支（进不去 ⇒ 在语句位由 expect_region_head 响亮报错）。
+    // `:=` 仍走 T_COLON_EQ，批量仍走 T_COMMA ⇒ 本消解器零前瞻、比 `;` 时代更简单）
+    if tok_k(p + 1) == T_COLON_DECL:
         return true
     // a, b, ... : type ... or a, b, ... := ... (batch, any count)
     if tok_k(p + 1) == T_COMMA:
@@ -800,7 +951,7 @@ fn is_new_var_decl() -> bool:
             if tok_k(p + i) == T_IDENT && tok_k(p + i + 1) == T_COMMA:
                 i = i + 2
                 continue
-            if tok_k(p + i) == T_IDENT && (tok_k(p + i + 1) == T_COLON || tok_k(p + i + 1) == T_COLON_EQ):
+            if tok_k(p + i) == T_IDENT && (tok_k(p + i + 1) == T_COLON_DECL || tok_k(p + i + 1) == T_COLON_EQ):
                 return true
             break
     return false
@@ -843,12 +994,14 @@ fn parse_new_var_decl() -> int:
 
     if check(T_COLON_EQ):
         advance_tok()
+        g_want_value = 1   // 声明右值 = 表达式位
         w64(values, vc * 8, parse_expr())
         vc = vc + 1
         loop:
             if !check(T_COMMA):
                 break
             advance_tok()
+            g_want_value = 1
             w64(values, vc * 8, parse_expr())
             vc = vc + 1
     else:
@@ -865,7 +1018,9 @@ fn parse_new_var_decl() -> int:
         if check(T_COMMA):
             advance_tok()
             loop:
-                if check(T_EQ) || check(T_SEMI) || check(T_EOF):
+                // 标签表终止面（T0 布局规格 §6.2 A8 + A9 的对齐目标）：**行边界** + `EQ`
+                // （`x : int, mut, pub = e` 的 `=` 仍保留）。A9：与 bootstrap 侧取同一形。
+                if check(T_EQ) || at_line_end() != 0:
                     break
                 tag_t := advance_tok()
                 tag := tok_lx(tag_t)
@@ -899,18 +1054,18 @@ fn parse_new_var_decl() -> int:
         w64(values, 0 * 8, -1)
         if check(T_EQ):
             advance_tok()
+            g_want_value = 1   // 声明右值 = 表达式位
             w64(values, vc * 8, parse_expr())
             vc = vc + 1
             loop:
                 if !check(T_COMMA):
                     break
                 advance_tok()
+                g_want_value = 1
                 w64(values, vc * 8, parse_expr())
                 vc = vc + 1
 
-    if check(T_SEMI):
-        advance_tok()
-    // optional ;
+    // v4：语句末可选 `;` 退场（T0 布局规格 §6.2 B1）——收尾统一由 end_decl 的行边界完成。
 
     // Emit LET nodes. First returned directly, extras go to g_extra_lets (dynamic grow).
     first_node : ., mut = -1
@@ -965,29 +1120,40 @@ fn parse_new_var_decl() -> int:
 // `pub`。花括号配平从函数体的 `{` 起算（depth 0→1），体内嵌套块/struct 字面量的花括号
 // 成对计入，不会在 depth 归零前误判结束。
 fn skip_nested_fn():
+    // v4：体的两种形态都以**行边界**收尾 —— `:` + INDENT…DEDENT 的 region，或 `= expr` 行内体。
+    // 花括号配平换成缩进配平（T0 布局规格 §6.2 A5：原 `;` 收尾 ⇒ region 收尾）。
     depth : ., mut = 0
-    seen_brace : ., mut = 0
     loop:
         k := tok_k(cur_tok())
         if k == T_EOF:
             return
-        if k == T_LBRACE:
-            depth = depth + 1
-            seen_brace = 1
-            advance_tok()
-            continue
-        if k == T_RBRACE:
-            advance_tok()
-            depth = depth - 1
-            if depth <= 0:
+        if depth == 0:
+            if k == T_NEWLINE:
+                advance_tok()
                 return
-            continue
-        if k == T_SEMI && seen_brace == 0:
+            if k == T_COLON_BLOCK:
+                advance_tok()
+                skip_newlines()
+                if tok_k(cur_tok()) == T_INDENT:
+                    depth = 1
+                    advance_tok()
+                else:
+                    return
+                continue
             advance_tok()
-            return
+            continue
+        if k == T_INDENT:
+            depth = depth + 1
+        else if k == T_DEDENT:
+            depth = depth - 1
         advance_tok()
+        if depth == 0:
+            return
 
 fn parse_stmt() -> int:
+    // 语句位入口（位置语义规则 ①）：本语句整体在语句位 ⇒ 先复位；语句内的表达式位由
+    // 各入口重置为 1（声明/赋值右值、return 值、实参、下标、括号内、字面量字段值…）。
+    g_want_value = 0
     // Drain batch extras from previous call
     if g_extra_let_count > 0:
         g_extra_let_count = g_extra_let_count - 1
@@ -1017,98 +1183,110 @@ fn parse_stmt() -> int:
     if tok_k(t) == T_RETURN:
         advance_tok()
         val : ., mut = -1
-        if !check(T_SEMI) && !check(T_RBRACE):
+        // A6（T0 布局规格 §6.2）：关键字之后**同一逻辑行内**无 token ⇒ 无值（行边界取代 `;`）
+        if at_line_end() == 0:
+            g_want_value = 1   // return 的值 = 表达式位
             val = parse_expr()
-        if check(T_SEMI):
-            advance_tok()
+        skip_newlines()
         return alloc_node(EXPR_RETURN, val, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
     if tok_k(t) == T_YIELD:
         advance_tok()
         val : ., mut = -1
-        if !check(T_SEMI) && !check(T_RBRACE):
+        if at_line_end() == 0:
+            g_want_value = 1
             val = parse_expr()
-        if check(T_SEMI):
-            advance_tok()
+        skip_newlines()
         return alloc_node(EXPR_YIELD, val, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
     if tok_k(t) == T_BREAK:
         advance_tok()
-        if check(T_SEMI):
-            advance_tok()
+        skip_newlines()   // B5：语句末可选 `;` 退场
         return alloc_node(EXPR_BREAK, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
     if tok_k(t) == T_CONTINUE:
         advance_tok()
-        if check(T_SEMI):
-            advance_tok()
+        skip_newlines()
         return alloc_node(EXPR_CONTINUE, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
-    e := parse_expr()
-    if check(T_SEMI):
-        advance_tok()
-        return alloc_node(EXPR_STMT, e, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
-    return e
+    // A1：裸表达式**暂定**为 region 尾值；块循环在「后面还有一项」时再包成 EXPR_STMT。
+    // v4 无 `;` ⇒ 不再有「显式语句」形态（原 `if check(T_SEMI): return EXPR_STMT(e)` 分支淘汰）。
+    return parse_expr()
 
 fn parse_if_expr() -> int:
     t := advance_tok()
-    // Disable struct literal parsing in condition context
-    saved_nsl := g_parse_no_struct_literal
-    g_parse_no_struct_literal = 1
+    want := g_want_value
+    g_want_value = 1   // 条件恒为表达式位
     cond := parse_expr()
-    g_parse_no_struct_literal = saved_nsl
-    tb := parse_block()
+    g_want_value = want
+    tb := parse_block()   // 两臂 region 的位置 = 本 if 表达式自身的位置
     eb : ., mut = -1
     if check(T_ELSE):
         advance_tok()
+        g_want_value = want
         if check(T_IF):
             eb = parse_if_expr()
         else:
             eb = parse_block()
+    g_want_value = want
     return alloc_node(EXPR_IF, cond, tb, eb, 0, 0, 0, tok_ln(t), tok_cl(t))
 
 fn parse_loop_expr() -> int:
+    // 规则 ①：loop 体恒为**语句位** region（v3 里体末语句必带 `;` ⇒ 块类型 unit）。
     t := advance_tok()
+    want := g_want_value
+    g_want_value = 0
     body := parse_block()
+    g_want_value = want
     return alloc_node(EXPR_LOOP, body, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
 
 fn parse_while_expr() -> int:
+    // 条件恒为表达式位；体恒为语句位 region。
     t := advance_tok()
+    want := g_want_value
+    g_want_value = 1
     cond := parse_expr()
+    g_want_value = 0
     body := parse_block()
+    g_want_value = want
     return alloc_node(EXPR_WHILE, cond, body, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
 
 fn parse_for_expr() -> int:
+    // for var in iter: <region>。被迭代表达式恒为表达式位；体恒为语句位 region。
+    // C 风格 `for a; b; c` 不支持（`;` 在 v4 只活在 `[T; N]`）。
     t := advance_tok()
     vt := advance_tok()
     vn := str_intern(tok_lx(vt))
-    advance_tok()
+    advance_tok()   // in
+    want := g_want_value
+    g_want_value = 1
     iter := parse_expr()
-    body : ., mut = -1
-    // Core supports: for var := range_expr { body }
-    // C-style (for var := init ; cond ; post) is NOT supported;
-    // skip to the first '{' to avoid consuming subsequent statements.
-    if !check(T_LBRACE):
-        loop:
-            if check(T_LBRACE):
-                break
-            if check(T_EOF):
-                break
-            advance_tok()
-    if check(T_LBRACE):
-        body = parse_block()
+    g_want_value = 0
+    body := parse_block()
+    g_want_value = want
     return alloc_node(EXPR_FOR, vn, iter, body, 0, 0, 0, tok_ln(t), tok_cl(t))
 
 fn parse_match_expr() -> int:
+    // 被匹配的值恒为表达式位；臂体 `=> Expr` 恒为表达式位（单行，不是 region）。
     t := advance_tok()
-    g_parse_no_struct_literal = 1
+    want := g_want_value
+    g_want_value = 1
     expr := parse_expr()
-    g_parse_no_struct_literal = 0
-    advance_tok()
+    g_want_value = 0
+    expect_region_head()
     af := -1
     al : ., mut = -1  // last arm index
     ac : ., mut = 0
     loop:
-        if check(T_RBRACE) || check(T_EOF):
+        skip_newlines()
+        if tok_k(cur_tok()) == T_DEDENT || tok_k(cur_tok()) == T_EOF:
             break
+        // 臂前缀 `|`（v4 目标形）——与 bootstrap 侧同判：**有 `|` 与无 `|` 两形都收**。
+        // 改前 `|` 在臂首是解析错误 ⇒ 本放宽不改变任何既有可解析程序的含义（纯增量）。
+        if check(T_PIPE):
+            advance_tok()
         pat := parse_pattern()
-        advance_tok()
+        if check(T_FATARROW):
+            advance_tok()
+        else:
+            add_error("expected '=>' in match arm")
+        g_want_value = 1
         body := parse_expr()
         if check(T_COMMA):
             advance_tok()
@@ -1120,7 +1298,8 @@ fn parse_match_expr() -> int:
         // link previous arm to this one
         al = n
         ac = ac + 1
-    advance_tok()
+    close_region()
+    g_want_value = want
     return alloc_node(EXPR_MATCH, expr, af, ac, 0, 0, 0, tok_ln(t), tok_cl(t))
 
 fn parse_pattern() -> int:
@@ -1142,7 +1321,15 @@ fn parse_pattern() -> int:
     if tok_k(t) == T_FALSE:
         advance_tok()
         return alloc_node(EXPR_BOOL, 0, 0, 0, 0, TY_BOOL, 0, tok_ln(t), tok_cl(t))
-    if tok_k(t) == T_IDENT || tok_k(t) == T_NONE || tok_k(t) == T_SOME:
+    if tok_k(t) == T_NONE:
+        // v4（bootstrap parse_pattern 同判）：小写 `none` 是关键字，映射到 **canonical 变体名
+        // `None`**（EnumPattern 的 path[-1] 会被当**标签串**比较，见 desugar/ty_shadow:1457）。
+        // **漏掉本格** ⇒ `none` 掉进下方 `is_upper_first` 为假的 EXPR_IDENT（那是**变量绑定**，
+        // 不是匹配）⇒ 模式永远命中 = 语义静默改变。`Some` 已退场为普通 IDENT，
+        // 走下方 IDENT 分支的「首字母大写 ⇒ EXPR_ENUMPAT」（与旧 T_SOME 同形）。
+        advance_tok()
+        return alloc_node(EXPR_ENUMPAT, str_intern("None"), 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+    if tok_k(t) == T_IDENT:
         advance_tok()
         name := tok_lx(t)
         ni := str_intern(name)
@@ -1198,7 +1385,13 @@ fn parse_pattern() -> int:
                     break
                 ft := advance_tok()
                 fni := str_intern(tok_lx(ft))
-                advance_tok() // =
+                // 同 struct 字面量的字段分隔符守卫（T0 布局规格 §4.2）：struct **模式**取单形 `=`。
+                if check(T_EQ):
+                    advance_tok()
+                else:
+                    check_error(EC_P_STRUCT_LIT_SEP,
+                        "struct pattern field separator must be '='",
+                        tok_ln(cur_tok()), tok_cl(cur_tok()))
                 if fc >= cap:
                     ncap := cap * 2
                     nv := alloc(ncap * 8)
@@ -1289,7 +1482,7 @@ fn parse_generics_into(names: string, constrs: string) -> int:
                 w64(names, gc * 8, @ptr_of(tok_lx(gt)))
             // Check for constraint: T: Interface
             w64(constrs, gc * 8, -1)
-            if check(T_COLON):
+            if check(T_COLON_DECL):
                 advance_tok()
                 ct := advance_tok()
                 w64(constrs, gc * 8, str_intern(tok_lx(ct)))
@@ -1461,7 +1654,7 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
                     pf = g_ast_count
                 alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 1, 0, 0, tok_ln(pt), tok_cl(pt))
                 pc = pc + 1
-                if check(T_COLON):
+                if check(T_COLON_DECL):
                     advance_tok()
                     parse_type()
                 if !check(T_COMMA):
@@ -1476,7 +1669,7 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
                     pf = g_ast_count
                 alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 3, 0, 0, tok_ln(pt), tok_cl(pt))
                 pc = pc + 1
-                if check(T_COLON):
+                if check(T_COLON_DECL):
                     advance_tok()
                     parse_type()
                 if !check(T_COMMA):
@@ -1490,7 +1683,7 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
                     pf = g_ast_count
                 alloc_node(EXPR_PARAM, str_intern("self"), 0, 0, 2, 0, 0, tok_ln(pt), tok_cl(pt))
                 pc = pc + 1
-                if check(T_COLON):
+                if check(T_COLON_DECL):
                     advance_tok()
                     parse_type()
                 if !check(T_COMMA):
@@ -1538,12 +1731,20 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
     parse_spec_annotations(fn_ni)
 
     body : ., mut = -1
-    if check(T_LBRACE):
-        body = parse_block()
-    else:
-        advance_tok() // =
+    // D9/D10（T0 布局规格 §2.2）：有体 ⇒ 行尾 `:`（T_COLON_BLOCK）开 region；
+    // 无体（`extern fn read(fd: int) -> int`）⇒ 行边界，无 `:`。
+    // 规则 ①：函数体 region **恒为语句位** ⇒ 末项裸表达式包 EXPR_STMT，块类型 unit
+    // ⇒ 返回值只经显式 `return`（v4 §7.4「函数没有 implicit tail return」）。
+    if at_line_end() != 0:
+        body = -1
+    else if check(T_EQ):
+        // `fn f() = expr`（表达式体）——声明右值 = 表达式位
+        advance_tok()
+        g_want_value = 1
         body = parse_expr()
-        advance_tok() // ;
+    else:
+        g_want_value = 0
+        body = parse_block()
     fn_node := alloc_node(EXPR_FN, fn_ni, pf, pc, rtv + hotpatch_ver * 256, rt, body, fn_line, fn_col)
     // T3：标注行回填 fn_node（本函数新增的行 = [spec_start, g_spec_count)）
     spec_patch : ., mut = spec_start
@@ -1739,9 +1940,8 @@ fn parse_declaration():
             check_error(EC_P_EXTERN_OPTIONAL, "extern declaration cannot use optional type ('?') - no C ABI representation", tok_ln(t), tok_cl(t))
         // Create EXPR_EXTERN node (no body)
         node : ., mut = alloc_node(EXPR_EXTERN, fn_name_ni, first_param, param_count, 0, ret_type, ffi_lang_ni, tok_ln(t), tok_cl(t))
-        // Consume semicolon
-        if check(T_SEMI):
-            advance_tok()
+        // v4（T0 布局规格 §6.2 B2）：extern 声明末的可选 `;` 退场 ⇒ 收尾 = 行边界。
+        end_decl()
         return
 
     // fn / flow fn
@@ -1780,7 +1980,7 @@ fn parse_declaration():
         sg_constrs = alloc(64 * 8)
         sg_constrs_cap = 64
         sg_count := parse_generics_into(sg_names, sg_constrs)
-        advance_tok() // {
+        expect_region_head()
 
         si := add_struct(name)
         if si >= 0:
@@ -1799,7 +1999,8 @@ fn parse_declaration():
                 save_struct_gen_constrs(si, sg_constrs, sg_count)
             fc : ., mut = 0
             loop:
-                if check(T_RBRACE) || check(T_EOF):
+                skip_newlines()
+                if tok_k(cur_tok()) == T_DEDENT || tok_k(cur_tok()) == T_EOF:
                     break
                 ft := advance_tok()
                 fn2 := tok_lx(ft)
@@ -1807,7 +2008,10 @@ fn parse_declaration():
                 // 容量批 T3（裁-CAP-2 (a)）：字段**无硬上限**（侧表；第 17 字段起照常写入）
                 // ⇒ 旧 P023 闸与槽上限分支一并删除（不再存在越界写对象）。
                 si_set_field_name(si, fc, fni)
-                advance_tok()
+                if check(T_COLON_DECL):
+                    advance_tok()
+                else:
+                    add_error("expected ':' after struct field name")
                 fty := parse_type()
                 si_set_field_type(si, fc, unpack_type(fty))
                 si_set_field_type_node(si, fc, fty)
@@ -1816,7 +2020,7 @@ fn parse_declaration():
                     advance_tok()
             w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, fc)
             si_commit_fields(si, fc)   // 提交字段区（高水位 = base + fc）
-        advance_tok()
+        close_region()
         return
 
     // enum
@@ -1833,7 +2037,7 @@ fn parse_declaration():
         eg_constrs = alloc(64 * 8)
         eg_constrs_cap = 64
         eg_count := parse_generics_into(eg_names, eg_constrs)
-        advance_tok()
+        expect_region_head()
 
         ei := add_enum(name)
         if ei >= 0:
@@ -1850,7 +2054,8 @@ fn parse_declaration():
                 save_enum_gen_constrs(ei, eg_constrs, eg_count)
             vc : ., mut = 0
             loop:
-                if check(T_RBRACE) || check(T_EOF):
+                skip_newlines()
+                if tok_k(cur_tok()) == T_DEDENT || tok_k(cur_tok()) == T_EOF:
                     break
                 vt := advance_tok()
                 vname := tok_lx(vt)
@@ -1881,7 +2086,7 @@ fn parse_declaration():
                     advance_tok()
             w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, vc)
             ei_commit_variants(ei, vc)   // 提交变体区（高水位 = base + vc）
-        advance_tok()
+        close_region()
         return
 
     // interface declaration
@@ -1899,7 +2104,7 @@ fn parse_declaration():
         ig_dummy = alloc(64 * 8)
         ig_dummy_cap = 64
         ig_count := parse_generics_into(ig_names, ig_dummy)
-        advance_tok() // {
+        expect_region_head()
 
         // Allocate interface entry
         grow_ifaces(g_iface_count + 1)
@@ -1916,7 +2121,8 @@ fn parse_declaration():
         method_count : ., mut = 0
 
         loop:
-            if check(T_RBRACE) || check(T_EOF):
+            skip_newlines()
+            if tok_k(cur_tok()) == T_DEDENT || tok_k(cur_tok()) == T_EOF:
                 break
             if check(T_FN):
                 advance_tok() // fn
@@ -1991,7 +2197,8 @@ fn parse_declaration():
                     rn2 := parse_type()
                     ret_node = rn2
                     ret_ti = unpack_type(rn2)
-                advance_tok() // ;
+                // D11（T0 布局规格 §2.2）：接口方法**无体**、**无 `:`** ⇒ 收尾 = 行边界（原 `;`）。
+                end_decl()
 
                 // Store method in interface entry (with overflow checks)
                 // R2 P3b Task 6（Step 1）：上限**显式登记保留**（单源常量 MAX_IFACE_METHODS）——
@@ -2031,10 +2238,10 @@ fn parse_declaration():
                 advance_tok()
         w64(g_ifaces, iface_base + OFF_IF_METHOD_COUNT, method_count)
         g_iface_count = g_iface_count + 1
-        advance_tok() // }
+        close_region()
         return
 
-    // impl block (impl Type { ... } or impl Interface for Type { ... })
+    // impl block (impl Type: ... or impl Interface for Type: ...)
     if check(T_IMPL):
         t := advance_tok()
         first_nt := advance_tok()
@@ -2049,9 +2256,10 @@ fn parse_declaration():
             type_nt := advance_tok()
             type_name = tok_lx(type_nt)
             type_ni = str_intern(type_name)
-        advance_tok() // {
+        expect_region_head()
         loop:
-            if check(T_RBRACE) || check(T_EOF):
+            skip_newlines()
+            if tok_k(cur_tok()) == T_DEDENT || tok_k(cur_tok()) == T_EOF:
                 break
             if check(T_FN):
                 ft := advance_tok()
@@ -2069,7 +2277,7 @@ fn parse_declaration():
                 g_method_count = g_method_count + 1
             else:
                 advance_tok()
-        advance_tok() // }
+        close_region()
         // Store impl-for relationship after processing all methods
         if trait_ni >= 0:
             grow_impl_for(g_impl_for_count + 1)
@@ -2083,9 +2291,12 @@ fn parse_declaration():
         advance_tok()
         nt := advance_tok()
         name_idx := str_intern(tok_lx(nt))
-        advance_tok()
+        if check(T_EQ):
+            advance_tok()
+        else:
+            add_error("expected '=' in type alias")
         type_node := parse_type()
-        advance_tok() // ;
+        end_decl()
         grow_type_aliases(g_type_alias_count + 1)
         w64(g_type_aliases, g_type_alias_count * 16, name_idx)
         w64(g_type_aliases, g_type_alias_count * 16 + 8, type_node)
@@ -2110,23 +2321,26 @@ fn parse_declaration():
         grow_mod_paths(g_mod_path_count + 1)
         w64(g_mod_path_names, g_mod_path_count * 8, mod_ni)
         g_mod_path_count = g_mod_path_count + 1
-        if check(T_LBRACE):
-            // mod name { ... } — consume block contents
-            push_scope()
+        // v4：`mod path` 以行边界收尾；`mod path:` + region 形式**跳过**整段 region 内容。
+        if tok_k(cur_tok()) == T_COLON_BLOCK:
             advance_tok()
+            skip_newlines()
+        else:
+            end_decl()
+        if tok_k(cur_tok()) == T_INDENT:
+            push_scope()
             depth : ., mut = 1
+            advance_tok()
             loop:
                 if depth <= 0:
                     break
-                tk := advance_tok()
-                if tok_k(tk) == T_RBRACE:
-                    depth = depth - 1
-                else if tok_k(tk) == T_LBRACE:
-                    depth = depth + 1
-                else if tok_k(tk) == T_EOF:
+                tk := tok_k(cur_tok())
+                if tk == T_EOF:
                     break
-        else:
-            if check(T_SEMI):
+                if tk == T_DEDENT:
+                    depth = depth - 1
+                else if tk == T_INDENT:
+                    depth = depth + 1
                 advance_tok()
         return
 
@@ -2149,6 +2363,7 @@ fn parse_declaration():
             w64(g_global_lets, g_global_let_count * 8, r64(g_extra_lets, g_extra_let_count * 8))
             g_global_let_count = g_global_let_count + 1
             _drained = _drained + 1
+        end_decl()   // v4：全局声明以行边界收尾（原可选 `;` 退场）
         return
 
     // 批 6（T2）：`#` 出现在**非标注位置**（声明之前 / body 之后 / 顶层任意处）⇒ **响亮拒绝**。
@@ -2205,13 +2420,24 @@ fn parse_all():
     g_gen_param_count = 0
     g_gen_param_cap = 0
 
+    g_want_value = 0
     ci : ., mut = 0
     loop:
-        // Skip import/fileid tokens
+        // 顶层行边界（v4，T0 布局规格 §1）：NEWLINE 是 no-op；DEDENT 出现在顶层 = 缩进失衡
+        // （lexer 的 layout_break 已报错），此处再给一重带位置的响亮信号，**不静默吞**。
+        // ⚠ 本跳过必须出现在**每次** import 消费之后（v4 的 import 声明以行边界收尾，`;` 已退场）
+        //   ⇒ 故它同时是下面 import 循环的循环头（否则 import 之后残留的 NEWLINE 会直达
+        //   `parse_declaration` 的顶层兜底 = 假 P25 硬错）。
         loop:
+            skip_newlines()
             tk := tok_k(cur_tok())
             if tk == T_EOF:
                 return
+            if tk == T_DEDENT:
+                check_error(EC_P_TOPLEVEL, "unexpected dedent at top level",
+                    tok_ln(cur_tok()), tok_cl(cur_tok()))
+                advance_tok()
+                continue
             if tk != T_IMPORT && tk != T_FILEID:
                 break
             is_fileid := tk == T_FILEID
@@ -2236,14 +2462,13 @@ fn parse_all():
                             advance_tok()
                         continue
                     break
-            if check(T_COLON):
+            if check(T_COLON_DECL):
                 advance_tok()
                 if check(T_IDENT):
                     advance_tok()
             if is_fileid && check(T_INT):
                 advance_tok()
-            if check(T_SEMI):
-                advance_tok()
+            // v4：import/fileid 声明末的可选 `;` 退场（T0 布局规格 §6.2 B4）⇒ 收尾 = 行边界。
         t_cur := cur_tok()
         t_kind := tok_k(t_cur)
         if t_kind == T_EOF:

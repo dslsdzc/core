@@ -176,7 +176,7 @@ fn lsp_check_file(path: string, src: string):
     g_source = src
     g_source_dir = dirname(path)
     reset_frontend_state()
-    tokenize(g_source)
+    tokenize(g_source, 0)
     res_imports()
     // res_imports 把主文件注册到 g_files[0] 时路径为空串——补上真实路径
     // （供 publishDiagnostics 的 file_id → uri 映射；path 为稳定堆字符串）。

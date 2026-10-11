@@ -232,7 +232,7 @@ class TypeChecker:
             self.symtab.define(name, SymbolKind.PARAM, typ)
         if decl.body:
             inferred = self._infer_expr(decl.body)
-            if not self._type_equal(inferred, decl.return_type):
+            if not self._compat(inferred, decl.return_type):
                 # Relaxed check: try to unify unresolved generic params
                 if not self._unify_return_type(inferred, decl.return_type):
                     self.errors.append(f"Function {decl.name}: expected return type {decl.return_type}, got {inferred}")
@@ -461,7 +461,7 @@ class TypeChecker:
                 else_t = self._infer_expr(expr.else_branch)
                 self._pop_borrow_scope()
                 self.symtab.pop_scope()
-                if not self._type_equal(then_t, else_t):
+                if not self._compat(then_t, else_t):
                     self.errors.append(f"If branches have different types: {then_t} vs {else_t}")
                     return BaseType('never')
                 return then_t
@@ -504,15 +504,16 @@ class TypeChecker:
             if arm_types:
                 first = arm_types[0]
                 for t in arm_types[1:]:
-                    if not self._type_equal(first, t):
+                    if not self._compat(first, t):
                         self.errors.append("Match arms have different types")
                         return BaseType('never')
                 return first
             return BaseType('unit')
         elif isinstance(expr, ReturnStmt):
+            # v4 裁定：发散出口 ⇒ never（值仍须推断，否则返回值内的诊断整段消失）
             if expr.value:
-                return self._infer_expr(expr.value)
-            return BaseType('unit')
+                self._infer_expr(expr.value)
+            return BaseType('never')
         elif isinstance(expr, ExprStmt):
             self._infer_expr(expr.expr)  # check for side effects
             return BaseType('unit')
@@ -543,7 +544,7 @@ class TypeChecker:
                         self._record_borrow_holder(name, borrowed_name, expr.values[i].op == '&mut')
             return BaseType('unit')
         elif isinstance(expr, BreakStmt) or isinstance(expr, ContinueStmt):
-            return BaseType('unit')
+            return BaseType('never')   # v4 裁定：发散出口 ⇒ never（原 unit）
         elif isinstance(expr, Go):
             self._infer_expr(expr.expr)
             return BaseType('unit')
@@ -725,6 +726,19 @@ class TypeChecker:
             args = [self._substitute_type(a, mapping) for a in typ.args]
             return GenericApplyType(typ.path, args)
         return typ
+
+    def _is_never(self, t) -> bool:
+        return isinstance(t, BaseType) and t.name == 'never'
+
+    def _compat(self, t1, t2) -> bool:
+        """分支合一/返回位相容判定（v4 裁定 2026-10-11）：
+        两侧类型相同 **或** 任一侧为 `never` ⇒ 相容（`never` 作子类型）。
+        依据 = docs/core-language-syntax_v4.md §3.1：`never`（发散类型）是基本类型，
+        且以发散语句（return/break/continue）收尾的路径其类型即 `never`。
+        """
+        if self._is_never(t1) or self._is_never(t2):
+            return True
+        return self._type_equal(t1, t2)
 
     def _type_equal(self, t1, t2) -> bool:
         if t1 is None or t2 is None:

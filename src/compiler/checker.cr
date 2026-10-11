@@ -455,6 +455,14 @@ fn array_len_constraint_sym(ti_a: int, ti_b: int) -> int:
 // P5 Task 5 下线，本条 = 判定面单点纪律的继承）。
 // 参序 =（源，目标）——见 array_len_walk 上方的归一说明。
 fn type_compat_strict(ti_a: int, ti_b: int) -> int:
+    // v4（维护者裁定 2026-10-11）：**`never` 与任何类型相容**（`never` 作子类型）。
+    // 依据 = docs/core-language-syntax_v4.md §3.1 把 `never`（发散类型）列为基本类型，
+    // 且「以发散语句（`return`/`break`/`continue`/`fail`）收尾的路径」其类型即 `never`
+    // （见 infer_expr 的 EXPR_RETURN/EXPR_BREAK/EXPR_CONTINUE 格）⇒ 分支合一处的
+    // 「unit vs never」「int vs never」必须放行，否则「一支赋值、一支 return」这类
+    // **完全正常**的语句位 if 会被误报 TC02（实测：本仓 src/compiler/main.cr 的 is_decl_stmt）。
+    if ti_a == TI_NEVER || ti_b == TI_NEVER:
+        return 1
     if !type_equal(ti_a, ti_b):
         // ─── R2 P3 Task 4：**可选目标的子类型注入**（`T ⊆ T?`、`null ⊆ T?`）───
         // 语义（spec §5.4）：`T?` = `T ∪ null` ⇒ 裸 T 值与 None 值**本来就该**流进 T? 的槽
@@ -3664,9 +3672,12 @@ fn infer_expr(node: int) -> int:
         return TI_UNIT
 
     if ast_kind(node) == EXPR_RETURN:
+        // v4（裁定 2026-10-11）：以发散语句收尾的路径，其类型 = **never**（**不再是**所返回
+        // 值的类型）。值仍**必须推断** —— 否则 `return foo()` 里的未定义名/类型错等诊断会
+        // 整段消失（那是把一个响亮面换成静默面）；推断结果只是不参与本节点类型。
         if ast_a(node) >= 0:
-            return infer_expr(ast_a(node))
-        return TI_UNIT
+            infer_expr(ast_a(node))
+        return TI_NEVER
 
     if ast_kind(node) == EXPR_ENUM_CONSTRUCTOR:
         name_idx := ast_a(node)
@@ -4055,9 +4066,9 @@ fn infer_expr(node: int) -> int:
         return alloc_type(TYP_ARRAY, elem_ti, ast_b(node))
 
     if ast_kind(node) == EXPR_BREAK:
-        return TI_UNIT
+        return TI_NEVER   // v4 裁定：发散出口 ⇒ never（原 TI_UNIT）
     if ast_kind(node) == EXPR_CONTINUE:
-        return TI_UNIT
+        return TI_NEVER   // 同上
     if ast_kind(node) == EXPR_WILDCARD:
         return TI_UNIT
     if ast_kind(node) == EXPR_MOVE:

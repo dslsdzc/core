@@ -105,6 +105,33 @@ T_EXTERN : int = 100  // extern "C" / foreign function declaration
 T_HASH : int = 101
 T_INTERP : int = 102  // 字符串插值洞 token（批 8 插值展开）：lexeme = 洞内原文，iv bit0/bit1 = 同一字面量的 part 链，bit2 = 洞已闭合
 
+// ── v4 布局（layout）与 `:` 双义（T5；出处 = 施工计划 §四.1 项 1/2 + T0 布局规格 §1/§2）──
+// 取号同 T_HASH：**既有 0..102 一个不动**，从 103 起取空洞外的下一个自由号。
+// T_NEWLINE：一个「有 token 的逻辑行」结束时发出（纯空行/纯注释行**不发**，规格 §1.1 ①-1/①-2）。
+// T_INDENT ：换行后首个 token 的列**深于**缩进栈顶 ⇒ 压栈并发出。
+// T_DEDENT ：更浅 ⇒ 逐层弹出并各发一个；不匹配任何外层列 ⇒ 响亮报错（不静默对齐）。
+// 括号 `( ) [ ] { }` 内不参与布局（隐式续行；`{ }` 是字面量定界符，规格 §4.1）。
+T_NEWLINE : int = 103
+T_INDENT : int = 104
+T_DEDENT : int = 105
+// `:` 的行内/行尾由**词法位置**决定（裁 (b)，T0 布局规格 §2.1）——二者互斥且穷尽 ⇒ parser 侧零前瞻。
+//   T_COLON_BLOCK：`:` 之后到该**物理行行尾**无任何 token（空白/注释不计，§2.3）⇒ region 开启。
+//   T_COLON_DECL ：行内 `:` = 类型标注 / import 别名 / 字段 / 形参 / 泛型约束分隔符。
+// 原 T_COLON(30) 由这两个 token 取代（**保留编号、不再发射**——「勿重编号」）。
+T_COLON_BLOCK : int = 106
+T_COLON_DECL : int = 107
+// v4 关键字 36 → 39 的新增五员（T5；出处 = 施工计划 §一.5 的三表机械差集 + §四.1 项 7/8）。
+// `never`/`dyn` 由**词素比对提升进关键字表**（v4 要求它们是关键字，不是可重名的词素）——
+// `dyn` 复用既有的 T_DYN(99)（该号此前定义为 token kind 但零发射点）；`never` 取新号。
+T_NEVER : int = 108
+T_CATCH : int = 109
+T_FAIL : int = 110
+T_SPEC : int = 111
+// v4 的 `|`（match 臂前缀 / alternative）：原自源 lexer **无单竖线分支** ⇒ `|` 落 Unknown 被
+// 静默丢弃（`||` 走 T_PIPEPIPE，不受影响）。v4 目标形的臂前缀 = `|`（docs/core-language-syntax_v4.md
+// 的 match 例）⇒ 必须有真 token 才可判；与 bootstrap 的 TokenType.PIPE 对齐（T5 新增）。
+T_PIPE : int = 112
+
 
 // W_I8..W_F64（1..10）原为「宽度标注」值域，仅供宽度后缀 token 分支使用。
 // 2026-09-10 语言面收窄 §2 随死分支一并删除。**勿重编号**。
@@ -353,6 +380,8 @@ EC_P_APX_TAG         : int = 1026 // P026  `apx` 标签不适用于该声明（�
 EC_P_INTERP_UNCLOSED : int = 1027 // P027  **畸形插值**（`${` 无配对 `}` / `${}` 空洞 / 洞内尾随垃圾；此前静默吞到行尾）
 EC_P_INTERP_TYPE     : int = 1028 // P028  插值洞类型不可插值（白名单 = string/int/dex/bool/char；fail-closed）
 EC_P_INTERP_HOLE_LEAK : int = 1029 // P029  **内部不变量破坏**：插值洞到达发射面（checker 未改写；见 ir_gen 兜底）
+EC_P_STRUCT_LIT_SEP  : int = 1030 // P030  结构体字面量/模式的字段分隔符必须是 `=`（v4 单形；`:` 形响亮拒绝）
+                                  //       出处 = T0 布局规格 §4.2（该条**指定**新码为 1030）。
 
 // N0xx — Name Resolution
 EC_N_UNDEFINED     : int = 2001 // N001  Undefined name

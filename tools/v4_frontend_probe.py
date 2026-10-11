@@ -26,11 +26,16 @@ T0 探针判「规格自洽」，本探针判「**实现与规格相符**」+ J-
 反向对照纪律（本仓既有）：每条判据都要有一条「改坏一处 ⇒ 必红」的机械证据；
 `mutations` 子命令即为此而设（内存内突变，不落盘、不改 runner 计数）。
 """
+import dataclasses
+import inspect
 import io
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, 'bootstrap'))
@@ -43,6 +48,7 @@ from corec.frontend.type_checker import TypeChecker         # noqa: E402
 from corec.frontend.ir_gen import IRGen                     # noqa: E402
 from corec.backend.interpreter import Interpreter           # noqa: E402
 from corec.syntax.tokens import KEYWORDS, TokenType         # noqa: E402
+from corec.syntax.ast import Block                          # noqa: E402
 
 FAILS = []
 CHECKS = 0
@@ -66,7 +72,8 @@ def check(cond, label, detail=''):
 # 触发场景：夹具列表被删空 / 抽取正则失配 ⇒ 判据跑了 0 条却「全绿」。
 CHECK_FLOOR = {
     'features': 25, 'layout': 8, 'colon': 17, 'structlit': 3, 'typenames': 7,
-    'semi': 5, 'ast-freeze': 5, 'keywords': 5, 'mutations': 4, 'all': 60,
+    'semi': 5, 'ast-freeze': 5, 'keywords': 5, 'mutations': 4,
+    'positions': 48, 'all': 140,
 }
 
 
@@ -768,6 +775,438 @@ def cmd_keywords(rev=None):
     return ok
 
 
+# ── positions：位置语义（语句位尾值 vs 语句）──────────────────────────────
+#
+# **本组判据的存在理由**：v4 无 `;` ⇒ 语句末的裸表达式一度被一律当 region 尾值
+# （`Block.expr`）⇒ 块类型由 unit 变 int ⇒ 全量构建刷出 **758 条**类型告警
+# （`expected return type` 450 + `If branches` 308），而**当时全部既有判据都是绿的**——
+# token 级判据（`layout`/`colon`/`semi`）天然看不见 AST 位置语义。漂移已修（见
+# `bootstrap/corec/frontend/parser.py` 的 `want_value` 位置标志 ∧ `_is_block_like` 节点种类），
+# 但该修复此前只活在代码注释里 ⇒ 本组是它的机械看门人。
+#
+# 口径（v3 逐形等价，维护者裁定）：**位置标志 ∧ 节点种类** ——
+#   · 语句位 region 的块状尾项（`If`/`Match`/`Loop`/`For`/`Unsafe`/`Flow`）⇒ 保 `Block.expr`；
+#   · 语句位 region 的其余尾项（赋值/调用/二元/字面量/`Ident`/索引…）⇒ 包 `ExprStmt`；
+#   · 表达式位 region（`x := if …` 等）⇒ 一律保尾值。
+# 依据：v3 的 `;` **只终止普通表达式语句**，块状语句在 v3 里从不带 `;` ⇒ 本来就是尾值。
+
+# v3 前端锚点 = T1/T2 提交 `03884bb8d56b` 的父（最后一份 `{`/`;` 前端）。commit id 不可变。
+POSITION_V3_REV = 'bb8cb3537584'
+
+# 夹具：(名, v3 源, v4 源, 期望块清单)。**两侧源必须表达同一程序** ⇒ 块清单须逐行相同。
+# 期望块清单 = 逐个 `Block` 一行 `路径 | 语句种类表 | 尾值种类`（`-` = 无尾值/空语句表）。
+# ⚠ 期望值是**按口径手写的判据**，不是「跑出来是什么就记什么」——若实现与之不符，那是
+#   要上报的发现，不许改判据去附和实现。
+POSITION_FIXTURES = [
+    # ── ① 语句位 · 块状尾项 ⇒ 保尾值 ──
+    ('语句位尾随 `if` ⇒ 保尾值（两臂各自成 region）', '''
+fn main() -> int { if 1 > 0 { return 1; } else { return 2; } }
+''', '''
+fn main() -> int:
+    if 1 > 0:
+        return 1
+    else:
+        return 2
+''', [
+        'main.body | - | If',
+        'main.body.expr.else_branch | ReturnStmt | -',
+        'main.body.expr.then_branch | ReturnStmt | -',
+    ]),
+    ('语句位尾随 `loop` ⇒ 保尾值', '''
+fn f() -> int { loop { break; } }
+''', '''
+fn f() -> int:
+    loop:
+        break
+''', [
+        'f.body | - | Loop',
+        'f.body.expr.block | BreakStmt | -',
+    ]),
+    ('语句位尾随 `for` ⇒ 保尾值', '''
+fn f() -> int { x : ., mut = 0; for i in 0..3 { x = x + 1; } }
+''', '''
+fn f() -> int:
+    x : ., mut = 0
+    for i in 0..3:
+        x = x + 1
+''', [
+        'f.body | LetStmt | For',
+        'f.body.expr.block | ExprStmt | -',
+    ]),
+    ('语句位尾随 `unsafe` ⇒ 保尾值', '''
+fn f() -> int { unsafe { return 1; } }
+''', '''
+fn f() -> int:
+    unsafe:
+        return 1
+''', [
+        'f.body | - | Unsafe',
+        'f.body.expr.block | ReturnStmt | -',
+    ]),
+    ('语句位尾随 `match` ⇒ 保尾值（臂体是表达式，非 region）', '''
+enum Mode { Off, On(int) }
+
+fn main() -> int { m := On(7); match m { Off => 0, On(n) => n } }
+''', '''
+enum Mode:
+    Off
+    On(int)
+
+fn main() -> int:
+    m := On(7)
+    match m:
+        Off => 0
+        On(n) => n
+''', [
+        'main.body | LetStmt | Match',
+    ]),
+    ('语句位尾随 `flow` ⇒ 保尾值（裁定 1：`Flow` 与其余块状形同列）', '''
+fn f() -> int { flow { 1; } }
+''', '''
+fn f() -> int:
+    flow:
+        1
+''', [
+        'f.body | - | Flow',
+        'f.body.expr.block | ExprStmt | -',
+    ]),
+    # ── ② 语句位 · 普通尾项 ⇒ 包 ExprStmt（region 无值）──
+    ('语句位尾随赋值 ⇒ 包 `ExprStmt`（region 无值）', '''
+fn f(x: int) -> int { y := x; y = y + 1; }
+''', '''
+fn f(x: int) -> int:
+    y := x
+    y = y + 1
+''', [
+        'f.body | LetStmt,ExprStmt | -',
+    ]),
+    ('语句位尾随调用 ⇒ 包 `ExprStmt`', '''
+fn f() -> unit { println("x"); }
+''', '''
+fn f():
+    println("x")
+''', [
+        'f.body | ExprStmt | -',
+    ]),
+    ('语句位尾随字面量 ⇒ 包 `ExprStmt`', '''
+fn f() -> int { 1; }
+''', '''
+fn f() -> int:
+    1
+''', [
+        'f.body | ExprStmt | -',
+    ]),
+    ('语句位尾随二元 ⇒ 包 `ExprStmt`', '''
+fn f() -> int { x : ., mut = 0; x + 1; }
+''', '''
+fn f() -> int:
+    x : ., mut = 0
+    x + 1
+''', [
+        'f.body | LetStmt,ExprStmt | -',
+    ]),
+    # ── ③ 表达式位 ⇒ 一律保尾值 ──
+    ('表达式位 `x := if …` ⇒ 两臂保尾值（值必须取到）', '''
+fn pick(c: bool) -> int { x := if c { 1 } else { 2 }; return x; }
+''', '''
+fn pick(c: bool) -> int:
+    x := if c:
+        1
+    else:
+        2
+    return x
+''', [
+        'pick.body | LetStmt,ReturnStmt | -',
+        'pick.body.stmts[0].values[0].else_branch | - | Literal',
+        'pick.body.stmts[0].values[0].then_branch | - | Literal',
+    ]),
+    ('表达式位 `t := unsafe …` ⇒ 保尾值', '''
+fn f() -> int { t := unsafe { 7 }; return t; }
+''', '''
+fn f() -> int:
+    t := unsafe:
+        7
+    return t
+''', [
+        'f.body | LetStmt,ReturnStmt | -',
+        'f.body.stmts[0].values[0].block | - | Literal',
+    ]),
+    # ── ④ 既有逻辑不动 + 规则 ③ 递归 ──
+    ('非末项裸表达式 ⇒ 仍包 `ExprStmt`（既有「还有下一项」逻辑不动）', '''
+fn f() -> int { println("a"); return 1; }
+''', '''
+fn f() -> int:
+    println("a")
+    return 1
+''', [
+        'f.body | ExprStmt,ReturnStmt | -',
+    ]),
+    ('规则 ③ 递归：语句位 `if` 的体内再嵌语句位 `if`', '''
+fn f() -> int { x : ., mut = 0; if true { x = 1; if false { x = 2; } } return x; }
+''', '''
+fn f() -> int:
+    x : ., mut = 0
+    if true:
+        x = 1
+        if false:
+            x = 2
+    return x
+''', [
+        # 外层 `if` 是语句位 ⇒ 其 then 体是语句位 region；体内 `x = 1` 非末项 ⇒ 包 ExprStmt，
+        # 内层 `if false` 是**末项且块状** ⇒ 保尾值（规则 ① + 规则 ③ 递归）。
+        'f.body | LetStmt,ExprStmt,ReturnStmt | -',
+        'f.body.stmts[1].expr.then_branch | ExprStmt | If',
+        'f.body.stmts[1].expr.then_branch.expr.then_branch | ExprStmt | -',
+    ]),
+]
+
+
+def position_lines(unit, block_cls):
+    """〈位置语义〉块清单：AST 里**每个 `Block`** 一行 `路径 | 语句种类表 | 尾值种类`。
+
+    路径 = `声明名.字段链`（含 `stmts[i]`/`values[i]` 下标）；尾值种类 `-` = 无尾值。
+    **签名不多不少正好是这一层**：位置语义的全部可观测量就是「每个 region 的尾值去留」。
+
+    通用 dataclass 遍历（不写死字段名）；v3/v4 两份 `ast.py` 的类名与字段名逐字相同
+    （实测：Block/If/Loop/For/Unsafe/Flow/ExprStmt/FunctionDecl/CompilationUnit 全同），
+    故同一份函数两侧通用。⚠ **本函数经 `inspect.getsource` 注入 v3 侧 runner 脚本**
+    ⇒ 必须自包含（只依赖入参 + `dataclasses`），不许引用本档其它符号。
+    """
+    lines = []
+
+    def walk(node, path):
+        if node is None:
+            return
+        if isinstance(node, (list, tuple)):
+            for i, x in enumerate(node):
+                walk(x, '%s[%d]' % (path, i))
+            return
+        if isinstance(node, block_cls):
+            kinds = ','.join(type(s).__name__ for s in node.stmts)
+            tail = type(node.expr).__name__ if node.expr is not None else '-'
+            lines.append('%s | %s | %s' % (path, kinds or '-', tail))
+            walk(node.stmts, path + '.stmts')
+            walk(node.expr, path + '.expr')
+            return
+        try:
+            names = [f.name for f in dataclasses.fields(node)]
+        except TypeError:
+            return
+        for n in names:
+            walk(getattr(node, n), '%s.%s' % (path, n))
+
+    for i, d in enumerate(getattr(unit, 'declarations', None) or []):
+        walk(d, getattr(d, 'name', None) or 'decl[%d]' % i)
+    return sorted(lines)
+
+
+def v4_position_lines(src):
+    """v4 侧：当前前端解析 → 块清单。"""
+    return position_lines(Parser(Lexer(src).tokenize()).parse_compilation_unit(), Block)
+
+
+def _v3_tree(err):
+    """把 v3 前端树抽到临时目录（按 rev 缓存——rev 不可变 ⇒ 缓存恒有效）。
+
+    返回 `<临时目录>/bootstrap`（可直接进 `sys.path`）；失败返回 `None` 并把原因写进 `err`
+    （调用方转成**响亮的 FAIL**，不静默跳过 —— 静默跳过等于等价面变空还报绿）。
+    """
+    cache = os.path.join(tempfile.gettempdir(), 'core-v4probe-v3tree-%s' % POSITION_V3_REV)
+    probe_file = os.path.join(cache, 'bootstrap', 'corec', 'frontend', 'parser.py')
+    if not os.path.exists(probe_file):
+        tmp = cache + '.tmp'
+        if os.path.isdir(tmp):
+            shutil.rmtree(tmp)
+        try:
+            r = subprocess.run(['jj', 'file', 'list', '-r', POSITION_V3_REV, 'bootstrap/'],
+                               cwd=BASE, capture_output=True, text=True)
+        except OSError as e:
+            err.append('调用 jj 失败（本机无 jj / 不在 PATH？）: %s' % e)
+            return None
+        if r.returncode != 0:
+            err.append('jj file list -r %s 失败（浅检出无 jj / rev 不可达？）: %s'
+                       % (POSITION_V3_REV, r.stderr.strip()[:200]))
+            return None
+        files = [x for x in r.stdout.splitlines() if x.strip()]
+        if not files:
+            err.append('jj file list 返回空 ⇒ v3 基线不可得（等价面会退化成 vacuous）')
+            return None
+        for f in files:
+            try:
+                rr = subprocess.run(['jj', '--ignore-working-copy', 'file', 'show',
+                                     '-r', POSITION_V3_REV, f],
+                                    cwd=BASE, capture_output=True, text=True)
+            except OSError as e:
+                err.append('调用 jj 失败: %s' % e)
+                return None
+            if rr.returncode != 0:
+                err.append('jj file show -r %s %s 失败: %s'
+                           % (POSITION_V3_REV, f, rr.stderr.strip()[:200]))
+                return None
+            dst = os.path.join(tmp, f)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with io.open(dst, 'w', encoding='utf-8') as fh:
+                fh.write(rr.stdout)
+        if os.path.isdir(cache):
+            shutil.rmtree(cache)
+        shutil.move(tmp, cache)
+    return os.path.join(cache, 'bootstrap')
+
+
+def v3_position_lines(tree, srcs, err):
+    """v3 侧：`{夹具名: v3 源}` → `{夹具名: 块清单}`（逐夹具，失败记 `'ERROR: …'` 文本）。
+
+    跑法 = 在临时目录里起**新解释器 + 独立 `sys.path`** 的自包含 runner：已导入的 v4
+    `corec.*` 不能被换掉，而同进程里换不了模块树 ⇒ 只能换进程。编码器经
+    `inspect.getsource(position_lines)` **注入**（不是复制）⇒ 两侧单真源，不会各自漂移。
+    """
+    script = os.path.join(os.path.dirname(tree), '_positions_runner.py')
+    body = '\n'.join([
+        'import dataclasses',
+        'import json',
+        'import sys',
+        'sys.path.insert(0, %r)' % tree,
+        'from corec.frontend.lexer import Lexer',
+        'from corec.frontend.parser import Parser',
+        'from corec.syntax.ast import Block',
+        inspect.getsource(position_lines),
+        'SRCS = %r' % srcs,
+        'out = {}',
+        'for _name, _src in SRCS.items():',
+        # 逐夹具兜错：单个夹具的 v3 源解析失败不该拖垮整个等价面（转成可见的 FAIL 文本）
+        '    try:',
+        '        out[_name] = position_lines(',
+        '            Parser(Lexer(_src).tokenize()).parse_compilation_unit(), Block)',
+        '    except Exception as _e:',
+        '        out[_name] = "ERROR: %s: %s" % (type(_e).__name__, _e)',
+        'print(json.dumps(out))',
+        '',
+    ])
+    with io.open(script, 'w', encoding='utf-8') as fh:
+        fh.write(body)
+    r = subprocess.run([sys.executable, script], cwd=os.path.dirname(tree),
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        err.append('v3 runner 退出码 %d: %s' % (r.returncode, r.stderr.strip()[-400:]))
+        return None
+    try:
+        return json.loads(r.stdout)
+    except ValueError as e:
+        err.append('v3 runner 输出非 JSON: %s' % e)
+        return None
+
+
+def cmd_positions():
+    print('[positions] 位置语义：语句位尾值 vs 语句（含 v3 前端逐形对拍）')
+    v3_err = []
+    tree = _v3_tree(v3_err)
+
+    # **非空转闸 ①**：夹具面本身要有鉴别力（两侧判定类都要出现），否则「全绿」是空绿。
+    check(len(POSITION_FIXTURES) >= 12,
+          '夹具面非空转：≥ 12 组（实得 %d）' % len(POSITION_FIXTURES))
+    tails = set()
+    for _n, _v3, _v4, gold in POSITION_FIXTURES:
+        for line in gold:
+            tails.add(line.rsplit(' | ', 1)[-1])
+    check('-' in tails and len(tails) >= 4,
+          '期望面非空转：既有无尾值（`-`）也有多种尾值种类（实得 %r）' % sorted(tails))
+
+    # **非空转闸 ②**：v3 基线必须**真是 v3**，否则等价面退化成 v4-vs-v4 的空绿。
+    if tree:
+        with io.open(os.path.join(tree, 'corec', 'frontend', 'parser.py'),
+                     encoding='utf-8') as fh:
+            v3_src = fh.read()
+        check('RBRACE' in v3_src and 'want_value' not in v3_src,
+              'v3 基线哨兵：`%s` 的 parser.py 含 `RBRACE` 且不含 `want_value`（防 v4-vs-v4 空绿）'
+              % POSITION_V3_REV)
+        # 反向：同一哨兵判据作用到**当前 v4** 的 parser.py 上 ⇒ 必假（证明哨兵不是恒真）
+        with io.open(os.path.join(BASE, 'bootstrap', 'corec', 'frontend', 'parser.py'),
+                     encoding='utf-8') as fh:
+            v4_txt = fh.read()
+        check(not ('RBRACE' in v4_txt and 'want_value' not in v4_txt),
+              '[反向] 同一哨兵判据作用在 v4 的 parser.py 上 ⇒ 假（哨兵能识破「基线其实是 v4」）',
+              'v4 文本: 含 RBRACE=%r / 不含 want_value=%r'
+              % ('RBRACE' in v4_txt, 'want_value' not in v4_txt))
+
+    v3_inv = None
+    if tree:
+        v3_inv = v3_position_lines(
+            tree, {n: v3 for n, v3, _v4, _g in POSITION_FIXTURES}, v3_err)
+    if tree and v3_inv is None:
+        check(False, 'v3 侧对拍可用（抽取/运行成功）', '；'.join(v3_err)[:300])
+    elif tree:
+        check(True, 'v3 侧对拍可用（抽取/运行成功）')
+    else:
+        check(False, 'v3 侧对拍可用（抽取/运行成功）', '；'.join(v3_err)[:300])
+
+    n_blocks = 0
+    for name, _v3_src, v4_src, gold in POSITION_FIXTURES:
+        try:
+            v4_lines = v4_position_lines(v4_src)
+        except SyntaxError as e:
+            check(False, name, 'v4 解析失败: %s' % e)
+            continue
+        n_blocks += len(v4_lines)
+        ok_shape = check(v4_lines == list(gold), '%s —— v4 形状与手写判据相符' % name,
+                         '期望 %r 得 %r' % (list(gold), v4_lines))
+        if v3_inv is not None:
+            got3 = v3_inv.get(name)
+            if isinstance(got3, str):
+                check(False, '%s —— v3 侧解析失败' % name, got3[:200])
+                continue
+            check(got3 == list(gold), '%s —— v3 前端同判（逐形等价）' % name,
+                  'v3 %r vs 判据 %r' % (got3, list(gold)))
+            check(got3 == v4_lines, '%s —— v3/v4 两侧块清单逐行相同（直対拍）' % name,
+                  'v3 %r vs v4 %r' % (got3, v4_lines))
+        if not ok_shape:
+            continue
+
+    # **非空转闸 ③**：逐块断言数下限（夹具被删空 ⇒ 条数掉下来必红）。
+    check(n_blocks >= 25, '逐块断言数非空转：≥ 25 个 Block（实得 %d）' % n_blocks)
+    # **抽取哨兵**：已知块路径必须在清单里（防走查/抽取整体失配后的空表）。
+    probe_sig = v4_position_lines('fn f() -> int:\n    y := 1\n')
+    check('f.body | LetStmt | -' in probe_sig,
+          '抽取哨兵：已知块路径 `f.body` 出现在清单里', repr(probe_sig))
+
+    # ── 反向对照（**必须有牙**）──
+    # ⚠ `_is_block_like` 是 staticmethod ⇒ 必须取**描述符**再还原，否则还原成普通函数后
+    #   会被当实例方法调用（`takes 1 positional argument but 2 were given`，本档实测撞过）。
+    real_block_like = Parser.__dict__['_is_block_like']
+    real_want = Parser._want_value_expr
+
+    def _mutate_lines(src, attr, value):
+        Parser._is_block_like = value
+        try:
+            return v4_position_lines(src)
+        finally:
+            Parser._is_block_like = real_block_like
+
+    if_src = POSITION_FIXTURES[0][2]
+    asg_src = [f for f in POSITION_FIXTURES if '语句位尾随赋值' in f[0]][0][2]
+    expr_src = [f for f in POSITION_FIXTURES if 'x := if' in f[0]][0][2]
+
+    # R1（**那次的真回归**）：收尾判据改回「一律包 ExprStmt」⇒ 尾随 `if` 的尾值消失 ⇒ 必红
+    got = _mutate_lines(if_src, '_is_block_like', staticmethod(lambda expr: False))
+    check(got != list(POSITION_FIXTURES[0][3]),
+          '[反向] 把收尾判据改回「一律包 ExprStmt」⇒ 尾随 `if` 的尾值消失 ⇒ 判据当场红',
+          '得 %r' % got)
+    # R2：反方向——块状判定恒真 ⇒ 普通尾项不再包 ExprStmt ⇒ 必红
+    got = _mutate_lines(asg_src, '_is_block_like', staticmethod(lambda expr: True))
+    check(got != list([f for f in POSITION_FIXTURES if '语句位尾随赋值' in f[0]][0][3]),
+          '[反向] 块状判定恒真 ⇒ 尾随赋值不再包 `ExprStmt` ⇒ 判据当场红', '得 %r' % got)
+    # R3：表达式位标志失效（`_want_value_expr` 退回语句位）⇒ 声明右值的 region 丢尾值 ⇒ 必红
+    gold_expr = list([f for f in POSITION_FIXTURES if 'x := if' in f[0]][0][3])
+    try:
+        Parser._want_value_expr = lambda self: self.parse_expr()
+        got = v4_position_lines(expr_src)
+    finally:
+        Parser._want_value_expr = real_want
+    check(got != gold_expr,
+          '[反向] 表达式位标志失效 ⇒ `x := if …` 两臂丢尾值 ⇒ 判据当场红', '得 %r' % got)
+
+    return not FAILS
+
+
 # ── mutations：反向对照汇总 ─────────────────────────────────────────────
 
 def cmd_mutations():
@@ -821,6 +1260,8 @@ def main(argv):
     if sub in ('keywords', 'all'):
         kw = cmd_keywords()
         ok = kw and ok
+    if sub in ('positions', 'all'):
+        ok = cmd_positions() and ok
     if sub in ('mutations', 'all'):
         ok = cmd_mutations() and ok
 

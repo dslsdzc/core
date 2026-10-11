@@ -1180,12 +1180,14 @@ fn analysis_document_symbol() -> string:
 // rpc_send_initialize 声明，顺序必须与这里一致）：
 //   keyword  (0): T_FN T_MUT T_IF T_ELSE T_LOOP T_WHILE T_FOR T_IN
 //                 T_RETURN T_BREAK T_CONTINUE T_STRUCT T_ENUM T_IMPL T_PUB
-//                 T_TRUE T_FALSE T_MOVE T_SELF T_MATCH T_TYPE T_MOD
+//                 T_TRUE T_FALSE T_SELF T_MATCH T_TYPE T_MOD
 //                 T_IMPORT T_AS T_GO T_AWAIT T_FLOW T_YIELD T_UNSAFE
-//                 T_INTERFACE T_AUTO T_FILEID T_NONE T_SOME T_EXTERN
+//                 T_INTERFACE T_AUTO T_FILEID T_EXTERN T_CATCH T_FAIL T_SPEC
+//                 （v4 关键字 36→39，T5：去 T_MOVE/T_SOME；T_NONE 保留——它现在是
+//                  **小写 `none`** 的令牌，仍是关键字；T_NEVER 归 type(1)，见下）
 //   type     (1): T_UNIT（unit 关键字令牌——parser 产 TY_UNIT）
 //                 T_INT_TYPE..T_AUTO_TYPE
-//                 T_REF T_DYN；以及 T_IDENT 且（内置类型名 int/float/
+//                 T_REF T_DYN T_NEVER（v4：never/dyn 已升格为关键字令牌）；以及 T_IDENT 且（内置类型名 int/float/
 //                 bool/string/char/never/dyn——parser.cr parse_type
 //                 T_IDENT 分支字面量清单，唯一真源——或 find_struct_by_
 //                 name / find_enum 命中的结构体/枚举名）
@@ -1205,9 +1207,9 @@ fn analysis_document_symbol() -> string:
 
 // kind → legend 下标；T_IDENT 返回 -1（需按名字分类，见 analysis_token_type）
 fn analysis_kind_type(k: int) -> int:
-    if k == T_FN || k == T_MUT || k == T_IF || k == T_ELSE || k == T_LOOP || k == T_WHILE || k == T_FOR || k == T_IN || k == T_RETURN || k == T_BREAK || k == T_CONTINUE || k == T_STRUCT || k == T_ENUM || k == T_IMPL || k == T_PUB || k == T_TRUE || k == T_FALSE || k == T_MOVE || k == T_SELF || k == T_MATCH || k == T_TYPE || k == T_MOD || k == T_IMPORT || k == T_AS || k == T_GO || k == T_AWAIT || k == T_FLOW || k == T_YIELD || k == T_UNSAFE || k == T_INTERFACE || k == T_AUTO || k == T_FILEID || k == T_NONE || k == T_SOME || k == T_EXTERN:
+    if k == T_FN || k == T_MUT || k == T_IF || k == T_ELSE || k == T_LOOP || k == T_WHILE || k == T_FOR || k == T_IN || k == T_RETURN || k == T_BREAK || k == T_CONTINUE || k == T_STRUCT || k == T_ENUM || k == T_IMPL || k == T_PUB || k == T_TRUE || k == T_FALSE || k == T_SELF || k == T_MATCH || k == T_TYPE || k == T_MOD || k == T_IMPORT || k == T_AS || k == T_GO || k == T_AWAIT || k == T_FLOW || k == T_YIELD || k == T_UNSAFE || k == T_INTERFACE || k == T_AUTO || k == T_FILEID || k == T_NONE || k == T_EXTERN || k == T_CATCH || k == T_FAIL || k == T_SPEC:
         return 0
-    if k == T_UNIT || (k >= T_INT_TYPE && k <= T_AUTO_TYPE) || k == T_REF || k == T_DYN:
+    if k == T_UNIT || (k >= T_INT_TYPE && k <= T_AUTO_TYPE) || k == T_REF || k == T_DYN || k == T_NEVER:
         return 1
     if k == T_STRING || k == T_CHAR:
         return 5
