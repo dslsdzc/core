@@ -58,8 +58,11 @@ VALUES = [
 
 
 def build_run(lit, extra_prelude="", extra_body=""):
+    # ⚠ v4 迁移修复：`%s` **前不得有空格**——契约是「`extra_body` 自带缩进」（v3 形即
+    # `'%s'` 独占一行无缩进）。T6 迁移把它折成单行时误加了 4 空格 ⇒ `extra_body=""`（B 组
+    # 主路径）生成 8 空格缩进的 `return 0` ⇒ `error[P02]: unexpected dedent at top level`。
     src = (PRELUDE + extra_prelude +
-           'fn main() -> int:\n    n := 7\n    b := true\n    str := "S"\n    s := "%s"\n    println(s)\n    %s    return 0\n') % (lit, extra_body)
+           'fn main() -> int:\n    n := 7\n    b := true\n    str := "S"\n    s := "%s"\n    println(s)\n%s    return 0\n') % (lit, extra_body)
     with tempfile.NamedTemporaryFile("w", suffix=".cr", delete=False) as fh:
         fh.write(src)
         path = fh.name
@@ -124,7 +127,8 @@ def main():
         expect(f"B.{name}.value", val == want, f"得 {val!r}（build_rc={rc}）")
 
     # B' 实参位 / let 初值（位置形态）
-    rc, val, p21, out = build_run("v=${n}", extra_body='    println(int_str(g(s)));\n')
+    # ⚠ v4 迁移修复：载荷去 v3 语句分号（v4 语句尾 `;` ⇒ `Unexpected token in expression`）。
+    rc, val, p21, out = build_run("v=${n}", extra_body='    println(int_str(g(s)))\n')
     last = (val or "").splitlines()[-1] if val else None
     print(f"[B arg_position] 串作实参 g(s) ⇒ 末行={last}（整输出=[{val}]）build_rc={rc}")
     expect("B.arg_position", last == "3", f"得 {val!r}（期望末行 3 = 'v=7' 长度）")
