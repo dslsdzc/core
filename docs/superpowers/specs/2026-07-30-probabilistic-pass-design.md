@@ -41,22 +41,19 @@ pass 流程:
 ## Step 1：`random()` 节点识别
 
 ```core
-fn scan_random_calls() {
+fn scan_random_calls():
     // 遍历所有 DF 节点
-    ni := 0;
-    loop {
-        if ni >= g_df_node_count { break; }
-        op := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE);
-        if op == IR_CALL {
-            fn_ni := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3);
-            fn_name := istr_get(fn_ni);
-            if str_eq(fn_name, "random") != 0 {
-                mark_random_node(ni);
-            }
-        }
-        ni = ni + 1;
-    }
-}
+    ni := 0
+    loop:
+        if ni >= g_df_node_count:
+            break
+        op := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        if op == IR_CALL:
+            fn_ni := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
+            fn_name := istr_get(fn_ni)
+            if str_eq(fn_name, "random") != 0:
+                mark_random_node(ni)
+        ni = ni + 1
 ```
 
 ## Step 2：分支概率标注
@@ -64,12 +61,11 @@ fn scan_random_calls() {
 `random() < p` 模式在图中是 `IR_BRANCH s1=condition`。如果 `condition` 的上游是 `IR_BINARY(OP_LT, random_call, IR_CONST(p))`，则：
 
 ```core
-fn tag_branch_weights() {
+fn tag_branch_weights():
     // 对每个 BRANCH 节点:
     //   检查 condition 是否来自 random() < const
     //   如果是: 在分支边上标注 probability = p
     //   如果不是: 标记为 unknown (不做优化)
-}
 ```
 
 图上的表示：
@@ -88,7 +84,7 @@ random() ──→ IR_CONST(0.3)
 沿值流传播概率权重。原理与数据流分析相同——每个值的"可能概率"沿分支边与数据边传播：
 
 ```core
-fn propagate_weights() {
+fn propagate_weights():
     // 对每个 PHI 节点（值汇合点）:
     //   从汇合的两个分支取权重
     //   权重相乘后作为该值的分布概率
@@ -96,16 +92,15 @@ fn propagate_weights() {
     // 示例:
     //   result := if random() < 0.05 { "rare" } else { "common" }
     //   → result 的分布: {5% "rare", 95% "common"}
-    
+
     // 迭代直到不动点（和 PointerAnalysis 一样的模式）
-    changed := 1;
-    loop {
-        if changed == 0 { break; }
-        changed = 0;
+    changed := 1
+    loop:
+        if changed == 0:
+            break
+        changed = 0
         // 遍历所有 PHI/BINARY 节点
         // 更新权重
-    }
-}
 ```
 
 ## Step 4：观测约束
@@ -113,12 +108,11 @@ fn propagate_weights() {
 `if sensor > 30 { ... }` — 条件分支同时也是一个观测。pass 在该处标注：
 
 ```core
-fn apply_observations() {
+fn apply_observations():
     // 找到条件分支中涉及 random() 返回值的
     // 在分支边上标注后验约束
     //   P(true_temp | sensor > 30)
     // 之后的 PHI 节点使用后验而不是先验
-}
 ```
 
 ## Step 5：图标注

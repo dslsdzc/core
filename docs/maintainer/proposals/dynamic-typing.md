@@ -11,11 +11,11 @@
 ## 声明
 
 ```core
-x : dyn = 42;       // 动态类型
-x : dyn = "hello";  // 同一个变量，类型变了
+x : dyn = 42       // 动态类型
+x : dyn = "hello"  // 同一个变量，类型变了
 
-y : int = 42;        // 静态类型，不能变
-z : auto = 42;       // 自动推导，仍然是静态
+y : int = 42        // 静态类型，不能变
+z : auto = 42       // 自动推导，仍然是静态
 ```
 
 `dyn` 是类型关键字，与 `int`、`string` 平级。
@@ -42,16 +42,16 @@ y := x + 1;
 编译器看图可知两边的类型，在边界自动插入转换代码。
 
 ```core
-x := "42";
-y := x + 1;
+x := "42"
+y := x + 1
 // 图：x 是 string，+1 需要 int
 // 编译器：string_to_int 插在加法之前
 // 运行时 x 全程是裸 string，没有装箱
 ```
 
 ```core
-x := 42;
-z := x + "hello";
+x := 42
+z := x + "hello"
 // 图：x 是 int，"hello" 是 string
 // int + string → int_to_string + 拼接
 ```
@@ -69,8 +69,8 @@ z := x + "hello";
 图全量已知所有分支的类型，为每种可能生成对应的调用路径。
 
 ```core
-x : dyn = cond ? "hello" : 42;
-x.len();
+x : dyn = cond ? "hello" : 42
+x.len()
 // 路径 A: string → 有 .len()，直接调
 // 路径 B: int → 无 .len()，编译错误
 // 全路径都有 → 编译期决议，零开销
@@ -86,7 +86,7 @@ x.len();
 当编译器需要为同一个变量生成不同路径的代码时，为这个变量生成一个 `(tag, value)` 栈上对：
 
 ```core
-x : dyn = cond ? 42 : "hello";
+x : dyn = cond ? 42 : "hello"
 // 编译器：x 可能是 int 或 string
 // x 在栈上是 { tag: int|string, value: 8字节 }
 // 后续代码根据 tag 分派
@@ -101,16 +101,16 @@ x : dyn = cond ? 42 : "hello";
 ### 声明
 
 ```core
-@hotpatch(canary="5%") fn handle(x: dyn) -> dyn;
+@hotpatch(canary="5%") fn handle(x: dyn) -> dyn
 // 新版本先收 5% 流量
 
-@hotpatch(rollout="50%") fn handle(x: dyn) -> dyn;
+@hotpatch(rollout="50%") fn handle(x: dyn) -> dyn
 // 确认稳定后扩到 50%
 
-@hotpatch(rollout="100%") fn handle(x: dyn) -> dyn;
+@hotpatch(rollout="100%") fn handle(x: dyn) -> dyn
 // 全量
 
-@hotpatch(drain="true") fn handle(x: dyn) -> dyn;
+@hotpatch(drain="true") fn handle(x: dyn) -> dyn
 // 旧版本排水完成后回收
 ```
 

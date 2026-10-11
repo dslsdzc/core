@@ -21,12 +21,10 @@ python3 build_selfhost_native.py
 `examples/add/main.cr` 是最小完整程序：
 
 ```core
-fn add(a: int, b: int) -> int {
-    return a + b;
-}
-fn main() -> int {
-    return add(3, 4);
-}
+fn add(a: int, b: int) -> int:
+    return a + b
+fn main() -> int:
+    return add(3, 4)
 ```
 
 `main` 的返回值 = 进程退出码（因此该程序「运行成功」 = 退出码 7）。

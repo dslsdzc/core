@@ -88,8 +88,8 @@ git commit -m "feat: add arena BSS globals (g_current_arena, g_arena_pool_data, 
 定位 IR opcode 段（约第 526-530 行），在 `IR_YIELD` 之后新增：
 
 ```core
-IR_ARENA_NEW   : int = 32;   // dest=arena_var, src1=size_estimate
-IR_ARENA_RESET : int = 33;   // src1=arena_id (dest=-1)
+IR_ARENA_NEW   : int = 32   // dest=arena_var, src1=size_estimate
+IR_ARENA_RESET : int = 33   // src1=arena_id (dest=-1)
 ```
 
 - [ ] **步骤 2：在 dataflow.cr 的 df_opcode_name 中登记**
@@ -215,105 +215,124 @@ git commit -m "feat: save/load IR_ARENA_NEW and IR_ARENA_RESET in ccr_io"
 // alloc() checks g_current_arena and uses the arena chunk when set.
 
 // ── Globals (accessed by emit_alloc_body ELF code) ──
-g_current_arena : int, mut = -1;
+g_current_arena : int, mut = -1
 
 // Arena metadata — dynamic arrays (no fixed limit, grows like g_df_nodes)
-g_arena_cursors : string, mut;     // int[] — bump cursor offset per arena
-g_arena_sizes   : string, mut;     // int[] — chunk capacity per arena
-g_arena_parents : string, mut;     // int[] — parent arena ID (for nesting restore)
+g_arena_cursors : string, mut     // int[] — bump cursor offset per arena
+g_arena_sizes   : string, mut     // int[] — chunk capacity per arena
+g_arena_parents : string, mut     // int[] — parent arena ID (for nesting restore)
 
-g_arena_pool_data : string, mut;   // pool base address (from alloc)
-g_arena_max_size : int, mut;       // default chunk size per arena
-g_arena_free_list : int, mut = -1; // free list head (-1 = empty)
-g_arena_count : int, mut = 0;      // total slots allocated
-g_arena_cap : int, mut = 0;        // metadata array capacity
+g_arena_pool_data : string, mut   // pool base address (from alloc)
+g_arena_max_size : int, mut       // default chunk size per arena
+g_arena_free_list : int, mut = -1 // free list head (-1 = empty)
+g_arena_count : int, mut = 0      // total slots allocated
+g_arena_cap : int, mut = 0        // metadata array capacity
 
 // ── Internal: grow metadata arrays ──
-fn _grow_arena_meta(needed: int) {
-    if needed < g_arena_cap { return; }
-    nc : ., mut = g_arena_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
+fn _grow_arena_meta(needed: int):
+    if needed < g_arena_cap:
+        return
+    nc : ., mut = g_arena_cap * 2
+    if nc < 64:
+        nc = 64
+    if nc < needed:
+        nc = needed + 64
     // cursors
-    nb := alloc(nc * 8);
-    zi : ., mut = 0; loop { if zi >= nc * 8 { break; } store8(nb, zi, 0); zi = zi + 1; }
-    if g_arena_cap > 0 { _dyncpy(g_arena_cursors, g_arena_cap * 8, nb); }
-    g_arena_cursors = nb;
+    nb := alloc(nc * 8)
+    zi : ., mut = 0
+    loop:
+        if zi >= nc * 8:
+            break
+        store8(nb, zi, 0)
+        zi = zi + 1
+    if g_arena_cap > 0:
+        _dyncpy(g_arena_cursors, g_arena_cap * 8, nb)
+    g_arena_cursors = nb
     // sizes
-    nb2 := alloc(nc * 8);
-    zi = 0; loop { if zi >= nc * 8 { break; } store8(nb2, zi, 0); zi = zi + 1; }
-    if g_arena_cap > 0 { _dyncpy(g_arena_sizes, g_arena_cap * 8, nb2); }
-    g_arena_sizes = nb2;
+    nb2 := alloc(nc * 8)
+    zi = 0
+    loop:
+        if zi >= nc * 8:
+            break
+        store8(nb2, zi, 0)
+        zi = zi + 1
+    if g_arena_cap > 0:
+        _dyncpy(g_arena_sizes, g_arena_cap * 8, nb2)
+    g_arena_sizes = nb2
     // parents
-    nb3 := alloc(nc * 8);
-    zi = 0; loop { if zi >= nc * 8 { break; } store8(nb3, zi, 0); zi = zi + 1; }
-    if g_arena_cap > 0 { _dyncpy(g_arena_parents, g_arena_cap * 8, nb3); }
-    g_arena_parents = nb3;
-    g_arena_cap = nc;
-}
+    nb3 := alloc(nc * 8)
+    zi = 0
+    loop:
+        if zi >= nc * 8:
+            break
+        store8(nb3, zi, 0)
+        zi = zi + 1
+    if g_arena_cap > 0:
+        _dyncpy(g_arena_parents, g_arena_cap * 8, nb3)
+    g_arena_parents = nb3
+    g_arena_cap = nc
 
 // ── Public API ──
 
-fn arena_init(pool_size: int, arena_size: int) {
-    g_arena_pool_data = alloc(pool_size);
-    g_arena_max_size = arena_size;
-    g_arena_free_list = -1;
-    g_arena_count = 0;
-    g_arena_cap = 0;
-    g_current_arena = -1;
-}
+fn arena_init(pool_size: int, arena_size: int):
+    g_arena_pool_data = alloc(pool_size)
+    g_arena_max_size = arena_size
+    g_arena_free_list = -1
+    g_arena_count = 0
+    g_arena_cap = 0
+    g_current_arena = -1
 
-fn arena_new() -> int {
-    ai : ., mut = -1;
+fn arena_new() -> int:
+    ai : ., mut = -1
 
     // Try free list first
-    if g_arena_free_list >= 0 {
-        ai = g_arena_free_list;
-        g_arena_free_list = r64(g_arena_parents, ai * 8);  // pop head
-    }
+    if g_arena_free_list >= 0:
+        ai = g_arena_free_list
+        g_arena_free_list = r64(g_arena_parents, ai * 8)  // pop head
 
-    if ai < 0 {
+    if ai < 0:
         // Allocate new slot (grow metadata arrays)
-        need := g_arena_count + 1;
-        _grow_arena_meta(need);
-        ai = g_arena_count;
-        g_arena_count = need;
-    }
+        need := g_arena_count + 1
+        _grow_arena_meta(need)
+        ai = g_arena_count
+        g_arena_count = need
 
     // Initialize slot
-    w64(g_arena_cursors, ai * 8, 0);
-    w64(g_arena_sizes, ai * 8, g_arena_max_size);
-    w64(g_arena_parents, ai * 8, -1);
+    w64(g_arena_cursors, ai * 8, 0)
+    w64(g_arena_sizes, ai * 8, g_arena_max_size)
+    w64(g_arena_parents, ai * 8, -1)
 
     // Set parent = previous current arena
-    if g_current_arena >= 0 {
-        w64(g_arena_parents, ai * 8, g_current_arena);
-    }
+    if g_current_arena >= 0:
+        w64(g_arena_parents, ai * 8, g_current_arena)
 
     // Activate
-    g_current_arena = ai;
-    return ai;
-}
+    g_current_arena = ai
+    return ai
 
-fn arena_reset(ai: int) {
-    if ai < 0 || ai >= g_arena_count { return; }
+fn arena_reset(ai: int):
+    if ai < 0 || ai >= g_arena_count:
+        return
 
     // Save parent BEFORE free list overwrites g_arena_parents[ai]
-    parent := r64(g_arena_parents, ai * 8);
+    parent := r64(g_arena_parents, ai * 8)
 
     // Push to free list
-    w64(g_arena_parents, ai * 8, g_arena_free_list);
-    g_arena_free_list = ai;
+    w64(g_arena_parents, ai * 8, g_arena_free_list)
+    g_arena_free_list = ai
 
     // Restore parent
-    if parent >= 0 { g_current_arena = parent; }
-    else { g_current_arena = -1; }
-}
+    if parent >= 0:
+        g_current_arena = parent
+    else:
+        g_current_arena = -1
 
-fn arena_avail(ai: int) -> int {
-    if ai < 0 || ai >= g_arena_count { return 0; }
-    cursor := r64(g_arena_cursors, ai * 8);
-    limit := r64(g_arena_sizes, ai * 8);
-    return limit - cursor;
-}
+fn arena_avail(ai: int) -> int:
+    if ai < 0 || ai >= g_arena_count:
+        return 0
+    cursor := r64(g_arena_cursors, ai * 8)
+    limit := r64(g_arena_sizes, ai * 8)
+    return limit - cursor
 ```
 
 - [ ] **步骤 2：类型检查**
@@ -343,45 +362,57 @@ git commit -m "feat: arena lifecycle allocator — init/new/reset with dynamic m
 
 ```core
 // Subgraph-level arena tracking for compile-time size estimation
-g_sg_alloc_total : string, mut;    // per-sg: cumulative alloc size
-g_sg_alloc_cap   : int, mut;
-g_sg_arena_var   : string, mut;    // per-sg: IR var for arena ID
-g_sg_arena_var_cap : int, mut;
+g_sg_alloc_total : string, mut    // per-sg: cumulative alloc size
+g_sg_alloc_cap   : int, mut
+g_sg_arena_var   : string, mut    // per-sg: IR var for arena ID
+g_sg_arena_var_cap : int, mut
 
-fn grow_sg_alloc(needed: int) {
-    if needed < g_sg_alloc_cap { return; }
-    nc := g_sg_alloc_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := alloc(nc * 8); _dyncpy(g_sg_alloc_total, g_sg_alloc_cap * 8, nb); g_sg_alloc_total = nb; g_sg_alloc_cap = nc; }
+fn grow_sg_alloc(needed: int):
+    if needed < g_sg_alloc_cap:
+        return
+    nc := g_sg_alloc_cap * 2
+    if nc < 64:
+        nc = 64
+    if nc < needed:
+        nc = needed + 64
+    nb := alloc(nc * 8)
+    _dyncpy(g_sg_alloc_total, g_sg_alloc_cap * 8, nb)
+    g_sg_alloc_total = nb
+    g_sg_alloc_cap = nc
 
-fn grow_sg_arena_var(needed: int) {
-    if needed < g_sg_arena_var_cap { return; }
-    nc := g_sg_arena_var_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := alloc(nc * 8); _dyncpy(g_sg_arena_var, g_sg_arena_var_cap * 8, nb); g_sg_arena_var = nb; g_sg_arena_var_cap = nc; }
+fn grow_sg_arena_var(needed: int):
+    if needed < g_sg_arena_var_cap:
+        return
+    nc := g_sg_arena_var_cap * 2
+    if nc < 64:
+        nc = 64
+    if nc < needed:
+        nc = needed + 64
+    nb := alloc(nc * 8)
+    _dyncpy(g_sg_arena_var, g_sg_arena_var_cap * 8, nb)
+    g_sg_arena_var = nb
+    g_sg_arena_var_cap = nc
 ```
 
 - [ ] **步骤 2：添加 sg_alloc_push/pop 与 track_alloc_size**
 
 ```core
-fn sg_alloc_push(kind: int) {
-    grow_sg_alloc(g_sg_count + 1);
-    grow_sg_arena_var(g_sg_count + 1);
-    w64(g_sg_alloc_total, g_sg_count * 8, 0);
-    sg_push(kind);
-}
+fn sg_alloc_push(kind: int):
+    grow_sg_alloc(g_sg_count + 1)
+    grow_sg_arena_var(g_sg_count + 1)
+    w64(g_sg_alloc_total, g_sg_count * 8, 0)
+    sg_push(kind)
 
-fn sg_alloc_pop() {
-    total := r64(g_sg_alloc_total, (g_sg_count - 1) * 8);
-    arena_var := r64(g_sg_arena_var, (g_sg_count - 1) * 8);
-    sg_pop();
-    emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0);
-}
+fn sg_alloc_pop():
+    total := r64(g_sg_alloc_total, (g_sg_count - 1) * 8)
+    arena_var := r64(g_sg_arena_var, (g_sg_count - 1) * 8)
+    sg_pop()
+    emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
 
-fn track_alloc_size(size: int) {
-    if g_sg_count > 0 {
-        old := r64(g_sg_alloc_total, (g_sg_count - 1) * 8);
-        w64(g_sg_alloc_total, (g_sg_count - 1) * 8, old + size);
-    }
-}
+fn track_alloc_size(size: int):
+    if g_sg_count > 0:
+        old := r64(g_sg_alloc_total, (g_sg_count - 1) * 8)
+        w64(g_sg_alloc_total, (g_sg_count - 1) * 8, old + size)
 ```
 
 - [ ] **步骤 3：在 ir_gen_func 的函数入口与出口接入 arena**
@@ -474,13 +505,14 @@ UNSAFE（约第 1005 行）：
 
 ```core
     // Track allocation size for subgraph arena size estimation
-    if opcode == IR_ALLOC && src1 > 0 { track_alloc_size(src1); }
-    if opcode == IR_ALLOC_STRUCT {
-        // struct size = field_count * 8 (from name_ni in s3)
-        // For now, just track as default — refined in future passes
-        track_alloc_size(64);
-    }
-    if opcode == IR_ALLOC_ARRAY && src1 > 0 { track_alloc_size(src1 * 8); }
+    if opcode == IR_ALLOC && src1 > 0:
+        track_alloc_size(src1)
+    if opcode == IR_ALLOC_STRUCT:
+            // struct size = field_count * 8 (from name_ni in s3)
+            // For now, just track as default — refined in future passes
+        track_alloc_size(64)
+    if opcode == IR_ALLOC_ARRAY && src1 > 0:
+        track_alloc_size(src1 * 8)
 ```
 
 - [ ] **步骤 6：提交**
@@ -709,32 +741,33 @@ git commit -m "feat: emit_alloc_body dual-path arena alloc + chain expansion fal
 // This is a placeholder that expands into:
 //   call arena_new   (via PLT if available, or direct reloc)
 // We emit a call instruction that gets patched similarly to alloc calls.
-fn emit_arena_new_impl(buf: string, pos: int) -> int {
+fn emit_arena_new_impl(buf: string, pos: int) -> int:
     // mov edi, 0 (no size hint for now)
-    e2_w8(buf, pos, 191); e2_w32(buf, pos+1, 0);  // mov edi, 0
+    e2_w8(buf, pos, 191)
+    e2_w32(buf, pos+1, 0)  // mov edi, 0
     // call arena_new — placeholder, patched at link time
-    grow_alloc_patch(g_x86_alloc_patch_count + 1);
-    w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + 5);
-    g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1;
-    e2_w8(buf, pos+5, 232); e2_w32(buf, pos+6, 0);  // call placeholder
+    grow_alloc_patch(g_x86_alloc_patch_count + 1)
+    w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + 5)
+    g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1
+    e2_w8(buf, pos+5, 232)
+    e2_w32(buf, pos+6, 0)  // call placeholder
     // ret
-    e2_w8(buf, pos+10, 195);  // ret
-    return 11;
-}
+    e2_w8(buf, pos+10, 195)  // ret
+    return 11
 
 // Emit arena_reset_impl — resets an arena slot.
 // Called from IR_ARENA_RESET. Takes arena ID in edi, void return.
-fn emit_arena_reset_impl(buf: string, pos: int) -> int {
+fn emit_arena_reset_impl(buf: string, pos: int) -> int:
     // edi already contains arena_id from caller
     // call arena_reset — placeholder, patched at link time
-    grow_alloc_patch(g_x86_alloc_patch_count + 1);
-    w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos);
-    g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1;
-    e2_w8(buf, pos, 232); e2_w32(buf, pos+1, 0);  // call placeholder
+    grow_alloc_patch(g_x86_alloc_patch_count + 1)
+    w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos)
+    g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1
+    e2_w8(buf, pos, 232)
+    e2_w32(buf, pos+1, 0)  // call placeholder
     // ret
-    e2_w8(buf, pos+5, 195);  // ret
-    return 6;
-}
+    e2_w8(buf, pos+5, 195)  // ret
+    return 6
 ```
 
 - [ ] **步骤 5：在 elf_gen 中登记 arena_new_impl / arena_reset_impl**
@@ -790,83 +823,108 @@ git commit -m "feat: ELF backend arena_new/reset opcode encoding + impl stubs"
 // Arena memory model test suite
 // Tests basic arena lifecycle, nesting, and alloc integration
 
-fn test_arena_basic() -> int {
-    arena_init(1048576, 65536);  // 1MB pool, 64KB chunks
+fn test_arena_basic() -> int:
+    arena_init(1048576, 65536)  // 1MB pool, 64KB chunks
 
     // Create arena
-    a1 := arena_new();
-    if a1 < 0 { return 1; }       // arena_new failed
-    if g_current_arena != a1 { return 2; }  // not activated
+    a1 := arena_new()
+    if a1 < 0:
+        return 1
+    // arena_new failed
+    if g_current_arena != a1:
+        return 2
+    // not activated
 
     // Alloc should now use arena
-    p := alloc(64);
-    if p == 0 { return 3; }       // alloc failed
+    p := alloc(64)
+    if p == 0:
+        return 3
+    // alloc failed
 
     // Reset
-    arena_reset(a1);
-    if g_current_arena >= 0 { return 4; }  // should be -1 after reset
+    arena_reset(a1)
+    if g_current_arena >= 0:
+        return 4
+    // should be -1 after reset
 
     // Re-use arena from free list
-    a2 := arena_new();
-    if a2 != a1 { return 5; }     // should reuse same ID
+    a2 := arena_new()
+    if a2 != a1:
+        return 5
+    // should reuse same ID
 
-    arena_reset(a2);
-    return 0;  // pass
-}
+    arena_reset(a2)
+    return 0  // pass
 
-fn test_arena_nesting() -> int {
-    arena_init(1048576, 65536);
+fn test_arena_nesting() -> int:
+    arena_init(1048576, 65536)
 
-    a1 := arena_new();    // parent
-    p1 := alloc(32);
-    if p1 == 0 { return 1; }
+    a1 := arena_new()    // parent
+    p1 := alloc(32)
+    if p1 == 0:
+        return 1
 
-    a2 := arena_new();    // child (arena in loop)
-    if g_current_arena != a2 { return 2; }
-    p2 := alloc(64);
-    if p2 == 0 { return 3; }
+    a2 := arena_new()    // child (arena in loop)
+    if g_current_arena != a2:
+        return 2
+    p2 := alloc(64)
+    if p2 == 0:
+        return 3
 
     // Child reset should restore parent
-    arena_reset(a2);
-    if g_current_arena != a1 { return 4; }
+    arena_reset(a2)
+    if g_current_arena != a1:
+        return 4
 
     // Parent still works
-    p3 := alloc(16);
-    if p3 == 0 { return 5; }
+    p3 := alloc(16)
+    if p3 == 0:
+        return 5
 
-    arena_reset(a1);
-    return 0;
-}
+    arena_reset(a1)
+    return 0
 
-fn test_arena_free_list_reuse() -> int {
-    arena_init(1048576, 65536);
+fn test_arena_free_list_reuse() -> int:
+    arena_init(1048576, 65536)
 
     // Allocate multiple arenas
-    a1 := arena_new(); arena_reset(a1);
-    a2 := arena_new(); arena_reset(a2);
-    a3 := arena_new(); arena_reset(a3);
+    a1 := arena_new()
+    arena_reset(a1)
+    a2 := arena_new()
+    arena_reset(a2)
+    a3 := arena_new()
+    arena_reset(a3)
 
     // Next new should reuse a3 (LIFO free list)
-    a4 := arena_new();
-    if a4 != a3 { return 1; }  // should reuse most recently freed
+    a4 := arena_new()
+    if a4 != a3:
+        return 1
+    // should reuse most recently freed
 
-    arena_reset(a4);
-    return 0;
-}
+    arena_reset(a4)
+    return 0
 
-fn main() -> int {
-    r1 := test_arena_basic();
-    if r1 != 0 { print("FAIL basic: "); println(int_str(r1)); return r1; }
+fn main() -> int:
+    r1 := test_arena_basic()
+    if r1 != 0:
+        print("FAIL basic: ")
+        println(int_str(r1))
+        return r1
 
-    r2 := test_arena_nesting();
-    if r2 != 0 { print("FAIL nesting: "); println(int_str(r2)); return r2; }
+    r2 := test_arena_nesting()
+    if r2 != 0:
+        print("FAIL nesting: ")
+        println(int_str(r2))
+        return r2
 
-    r3 := test_arena_free_list_reuse();
-    if r3 != 0 { print("FAIL freelist: "); println(int_str(r3)); return r3; }
+    r3 := test_arena_free_list_reuse()
+    if r3 != 0:
+        print("FAIL freelist: ")
+        println(int_str(r3))
+        return r3
 
-    println("ALL PASS");
-    return 0;
-}
+    println("ALL PASS")
+    return 0
 ```
 
 - [ ] **步骤 2：以解释器运行测试**

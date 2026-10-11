@@ -11,20 +11,22 @@
 import cli
 import io
 
-fn main() -> int {
-    cli_init("myprog", "my program");
-    cli_cmd("build", "compile things");
-    cli_cmd("cir", "show graph");
-    cli_flag("output", "o", "out path");
-    cli_flag_bool("verbose", "v", "more noise");
+fn main() -> int:
+    cli_init("myprog", "my program")
+    cli_cmd("build", "compile things")
+    cli_cmd("cir", "show graph")
+    cli_flag("output", "o", "out path")
+    cli_flag_bool("verbose", "v", "more noise")
 
     // 查询面：`cli_get` 读回「value」槽（初值经 `@ptr_of("")` 写入）⇒ 必须是空串
-    if cli_get("output") != "" { return 11; }
+    if cli_get("output") != "":
+        return 11
     // `cli_has` 读 has_value 槽（int 语义，不经视图）⇒ 未解析前 = 0
-    if cli_has("output") != 0 { return 12; }
+    if cli_has("output") != 0:
+        return 12
     // 不存在旗标 ⇒ -1 分支（走 `_cli_find_flag` 的视图比较路径）
-    if cli_has("nope") != 0 { return 13; }
+    if cli_has("nope") != 0:
+        return 13
 
-    cli_help();
-    return 0;
-}
+    cli_help()
+    return 0

@@ -5,17 +5,17 @@
 docs/superpowers/specs/2026-09-10-type-interface-unification-design.md §5.4）：
 
   正（**解释器 + ELF 双路径同值**）：`T ⊆ T?`（裸值 `return 5` 入 `int?` 返回位）/
-      `null ⊆ T?`（`return None`）/ `Some(1)` 入 `int?` / `T?` 形参位 / `?` 解包回 T /
-      `Some(x)` 与 `None` 的 match 两臂（运行时 tag 分派）
+      `null ⊆ T?`（`return none`）/ `Some(1)` 入 `int?` / `T?` 形参位 / `?` 解包回 T /
+      `Some(x)` 与 `none` 的 match 两臂（运行时 tag 分派）
   负：`T? ⊄ T`（`fn f(x: int?) -> int { return x; }` ⇒ TF01——**方向性**：可选不是 T 的子类型）/
       `Option` 名退役（`Option[int]` 作类型 = 未定义泛型应用 rc=1——退役前该名由内建注册）
-  硬门：`T?` 的 match 缺臂 ⇒ TM03 rc=1 + 具体反例名（'None' / 'Some'）+ 无产物
+  硬门：`T?` 的 match 缺臂 ⇒ TM03 rc=1 + 具体反例名（'none' / 'Some'）+ 无产物
   登记：载荷**类型节点列**（T0 交接 ①）：`--verify-evp-nodes` 断言每槽有节点（bad=0），
       并数出裸码列丢失真实类型的槽数（collapses>0 = 节点列携带的信息量；旧布局裸码把
       非基型塌缩为 0 = TY_INT）
   表示面（R2 P4 Task 5，裁决 5「解包侧判表示」——本套件下半段）：可选槽配**表示位**
-      （0 = 裸值 / 1 = 装箱，运行期值）：写点置位、解包点（`match` 的 Some/None 臂、
-      `?`）分派——裸值路径**值即载荷**（Some 臂直取、不读 tag；None 臂不命中），装箱
+      （0 = 裸值 / 1 = 装箱，运行期值）：写点置位、解包点（`match` 的 Some/none 臂、
+      `?`）分派——裸值路径**值即载荷**（Some 臂直取、不读 tag；none 臂不命中），装箱
       路径沿用既有 tag 分派 + 字段 fi+1。跨函数面（返回/形参）走隐藏全局信道（纯 IR）。
       **前置红态（B.7 一等条目）**：裸值 + `Some` 臂 = 双路径 SIGSEGV（check/build rc=0
       零诊断）——修复前后 rc 逐形态见任务报告。
@@ -208,138 +208,388 @@ def case_evp(name, source, needles):
 # ── 源形 ──────────────────────────────────────────────────────────────
 
 # 裸值入 T?（`int ⊆ int ∪ null`）：判定点注入面（type_compat_strict 的可选目标分支）
-PLAIN_INTO_OPT = """fn g() -> int? { return 5; }
-fn main() -> int { return 42; }
+PLAIN_INTO_OPT = """fn g() -> int?:
+    return 5
+fn main() -> int:
+    return 42
 """
-NONE_INTO_OPT = """fn g() -> int? { return None; }
-fn main() -> int { return 42; }
+NONE_INTO_OPT = """fn g() -> int?:
+    return none
+fn main() -> int:
+    return 42
 """
-SOME_INTO_OPT = """fn g() -> int? { return Some(1); }
-fn main() -> int { return 42; }
+SOME_INTO_OPT = """fn g() -> int?:
+    return Some(1)
+fn main() -> int:
+    return 42
 """
 # T? 形参位 + `?` 解包（EXPR_TRY 按类型项结构）
-UNWRAP_SRC = """fn f(x: int?) -> int { return x?; }
-fn main() -> int { return f(3); }
+UNWRAP_SRC = """fn f(x: int?) -> int:
+    return x?
+fn main() -> int:
+    return f(3)
 """
 # 运行时两形态：Some 值（枚举对象 + tag）与 None
-SOME_FLOW = """fn g() -> int? { return Some(1); }
-fn main() -> int { v := g(); return match v { Some(x) => x + 100, None => 0, }; }
+SOME_FLOW = """fn g() -> int?:
+    return Some(1)
+fn main() -> int:
+    v := g()
+    return match v:
+        Some(x) => x + 100, none => 0,
 """
-NONE_FLOW = """fn g() -> int? { return None; }
-fn main() -> int { v := g(); return match v { Some(x) => x + 100, None => 7, }; }
+NONE_FLOW = """fn g() -> int?:
+    return none
+fn main() -> int:
+    v := g()
+    return match v:
+        Some(x) => x + 100, none => 7,
 """
 
 # ── R2 P4 Task 5（裁决 5：解包侧判表示）：B.7 四形态 + 跨函数面 ──────────────
 # 语义口径：裸值入 `T?` = 该值本身（`T ⊆ T?`）⇒ Some 臂**命中**且载荷 = 裸值。
-BARE_SOME_ARM = """fn main() -> int { x : int? = 5; return match x { Some(v) => { return v; } None => { return 0; } }; }
+BARE_SOME_ARM = """fn main() -> int:
+    x : int? = 5
+    return match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-BARE_SOME_WILDCARD = """fn main() -> int { x : int? = 5; return match x { Some(v) => { return v; } _ => { return 6; } }; }
+BARE_SOME_WILDCARD = """fn main() -> int:
+    x : int? = 5
+    return match x:
+        Some(v) =>:
+            return v
+        _ =>:
+            return 6
 """
-BARE_MATCH_EXPR = """fn main() -> int { x : int? = 5; y := match x { Some(v) => v, None => 0, }; return y; }
+BARE_MATCH_EXPR = """fn main() -> int:
+    x : int? = 5
+    y := match x:
+        Some(v) => v, none => 0,
+    return y
 """
-BARE_WILDCARD = """fn main() -> int { x : int? = 5; return match x { _ => { return 7; } }; }
+BARE_WILDCARD = """fn main() -> int:
+    x : int? = 5
+    return match x:
+        _ =>:
+            return 7
 """
-BARE_THEN_BOXED_WRITE = """fn main() -> int { x : int? = 5; x = Some(7); return match x { Some(v) => { return v; } None => { return 0; } }; }
+BARE_THEN_BOXED_WRITE = """fn main() -> int:
+    x : int? = 5
+    x = Some(7)
+    return match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-BOXED_THEN_BARE_WRITE = """fn main() -> int { x : int? = Some(7); x = 3; return match x { Some(v) => { return v; } None => { return 0; } }; }
+BOXED_THEN_BARE_WRITE = """fn main() -> int:
+    x : int? = Some(7)
+    x = 3
+    return match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
 # 条件写：同一槽两条路径两种表示 ⇒ 表示位必须是**运行期值**（静态收窄无法覆盖）
-COND_ON = """fn main() -> int { x : int? = 5; c := 1; if c > 0 { x = Some(4); } return match x { Some(v) => { return v; } None => { return 0; } }; }
+COND_ON = """fn main() -> int:
+    x : int? = 5
+    c := 1
+    if c > 0:
+        x = Some(4)
+    return match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-COND_OFF = """fn main() -> int { x : int? = 5; c := 0; if c > 0 { x = Some(4); } return match x { Some(v) => { return v; } None => { return 0; } }; }
+COND_OFF = """fn main() -> int:
+    x : int? = 5
+    c := 0
+    if c > 0:
+        x = Some(4)
+    return match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
 # 跨函数面（返回信道 / 形参信道）
-BARE_RET_SOME_ARM = """fn g() -> int? { return 5; }
-fn main() -> int { v := g(); return match v { Some(x) => { return x; } None => { return 0; } }; }
+BARE_RET_SOME_ARM = """fn g() -> int?:
+    return 5
+fn main() -> int:
+    v := g()
+    return match v:
+        Some(x) =>:
+            return x
+        none =>:
+            return 0
 """
-BOXED_RET_SOME_ARM = """fn g() -> int? { return Some(9); }
-fn main() -> int { v := g(); return match v { Some(x) => { return x; } None => { return 0; } }; }
+BOXED_RET_SOME_ARM = """fn g() -> int?:
+    return Some(9)
+fn main() -> int:
+    v := g()
+    return match v:
+        Some(x) =>:
+            return x
+        none =>:
+            return 0
 """
-BARE_RET_WILDCARD = """fn g() -> int? { return 5; }
-fn main() -> int { v := g(); return match v { _ => { return 11; } }; }
+BARE_RET_WILDCARD = """fn g() -> int?:
+    return 5
+fn main() -> int:
+    v := g()
+    return match v:
+        _ =>:
+            return 11
 """
-BARE_PARAM_SOME_ARM = """fn f(x: int?) -> int { return match x { Some(v) => { return v; } None => { return 0; } }; }
-fn main() -> int { return f(5); }
+BARE_PARAM_SOME_ARM = """fn f(x: int?) -> int:
+    return match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
+fn main() -> int:
+    return f(5)
 """
-BOXED_PARAM_SOME_ARM = """fn f(x: int?) -> int { return match x { Some(v) => { return v; } None => { return 0; } }; }
-fn main() -> int { return f(Some(6)); }
+BOXED_PARAM_SOME_ARM = """fn f(x: int?) -> int:
+    return match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
+fn main() -> int:
+    return f(Some(6))
 """
-BARE_PARAM_TRY = """fn f(x: int?) -> int { return x?; }
-fn main() -> int { return f(3); }
+BARE_PARAM_TRY = """fn f(x: int?) -> int:
+    return x?
+fn main() -> int:
+    return f(3)
 """
 # `?` 解包装箱值：修复前 ELF 返回指针、解释器返回内部地址（**双路径分歧的静默错值**）
-BOXED_PARAM_TRY = """fn g() -> int? { return Some(7); }
-fn f(x: int?) -> int { return x?; }
-fn main() -> int { return f(g()); }
+BOXED_PARAM_TRY = """fn g() -> int?:
+    return Some(7)
+fn f(x: int?) -> int:
+    return x?
+fn main() -> int:
+    return f(g())
 """
 # 混合返回（同函数两条 return 两种表示；表示位运行期分派 ⇒ 两条路径各自正确）
-MIXED_RET_BARE = """fn g(c: int) -> int? { if c > 0 { return 5; } return Some(4); }
-fn main() -> int { v := g(1); return match v { Some(x) => { return x; } None => { return 0; } }; }
+MIXED_RET_BARE = """fn g(c: int) -> int?:
+    if c > 0:
+        return 5
+    return Some(4)
+fn main() -> int:
+    v := g(1)
+    return match v:
+        Some(x) =>:
+            return x
+        none =>:
+            return 0
 """
-MIXED_RET_BOXED = """fn g(c: int) -> int? { if c > 0 { return 5; } return Some(4); }
-fn main() -> int { v := g(0); return match v { Some(x) => { return x; } None => { return 0; } }; }
+MIXED_RET_BOXED = """fn g(c: int) -> int?:
+    if c > 0:
+        return 5
+    return Some(4)
+fn main() -> int:
+    v := g(0)
+    return match v:
+        Some(x) =>:
+            return x
+        none =>:
+            return 0
 """
 # 装箱值 + 通配臂（既有语义保持）
-BOXED_WILDCARD = """fn main() -> int { x : int? = Some(9); return match x { _ => { return 12; } }; }
+BOXED_WILDCARD = """fn main() -> int:
+    x : int? = Some(9)
+    return match x:
+        _ =>:
+            return 12
 """
 # 未覆盖面（登记，非本任务面）：结构体字段裸值 + Some 臂 ⇒ 既有装箱假定 ⇒ 响亮失败
 # （rc=139 双路径**同**：钉「未覆盖面不静默分歧」，不钉错误值本身）
-UNCOVERED_FIELD_BARE = """struct S { a: int? }
-fn main() -> int { s : ., mut = S { a: 5 }; return match s.a { Some(v) => { return v; } None => { return 0; } }; }
+UNCOVERED_FIELD_BARE = """struct S:
+    a: int?
+fn main() -> int:
+    s : ., mut = S { a= 5 }
+    return match s.a:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
 # 未覆盖面之装箱形态：照常正确（登记双面）
-UNCOVERED_FIELD_BOXED = """struct S { a: int? }
-fn main() -> int { s : ., mut = S { a: Some(5) }; return match s.a { Some(v) => { return v; } None => { return 0; } }; }
+UNCOVERED_FIELD_BOXED = """struct S:
+    a: int?
+fn main() -> int:
+    s : ., mut = S { a= Some(5) }
+    return match s.a:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
 # 全局槽（无表示位 = 未覆盖面，走既有装箱假定）：装箱形态照常正确（**前提 = tag 读取
 # 源支持全局行**——修复前 ELF 读帧外伪偏移 ⇒ 静默走空臂返回 0，与解释器 5 分歧）
-UNCOVERED_GLOBAL_BOXED = """g : int? = Some(5);
-fn main() -> int { return match g { Some(v) => { return v; } None => { return 0; } }; }
+UNCOVERED_GLOBAL_BOXED = """g : int? = Some(5)
+fn main() -> int:
+    return match g:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-UNCOVERED_GLOBAL_NONE = """g : int? = None;
-fn main() -> int { return match g { Some(v) => { return v; } None => { return 9; } }; }
+UNCOVERED_GLOBAL_NONE = """g : int? = none
+fn main() -> int:
+    return match g:
+        Some(v) =>:
+            return v
+        none =>:
+            return 9
 """
 
 # ── 容量批 T2：聚合面存储边界规范化（裁-CAP-1 (a)）——A 类 8 写点逐点覆盖 ──────────
 # 每例 = 裸值写入可选聚合槽后解包（修复前 139；现须给精确值）；装箱/None 形为对照。
-CAP_FIELD_ASSIGN = """struct S { a: int? }
-fn main() -> int { s : ., mut = S { a: Some(0) }; s.a = 5; return match s.a { Some(v) => { return v; } None => { return 0; } }; }
+CAP_FIELD_ASSIGN = """struct S:
+    a: int?
+fn main() -> int:
+    s : ., mut = S { a= Some(0) }
+    s.a = 5
+    return match s.a:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-CAP_FIELD_LITERAL = """struct S { a: int? }
-fn main() -> int { s : ., mut = S { a: 6 }; return match s.a { Some(v) => { return v; } None => { return 0; } }; }
+CAP_FIELD_LITERAL = """struct S:
+    a: int?
+fn main() -> int:
+    s : ., mut = S { a= 6 }
+    return match s.a:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-CAP_FIELD_NONE = """struct S { a: int? }
-fn main() -> int { s : ., mut = S { a: None }; return match s.a { Some(v) => { return v; } None => { return 3; } }; }
+CAP_FIELD_NONE = """struct S:
+    a: int?
+fn main() -> int:
+    s : ., mut = S { a= none }
+    return match s.a:
+        Some(v) =>:
+            return v
+        none =>:
+            return 3
 """
-CAP_ARR_ASSIGN_LIT = """fn main() -> int { a : [int?;2] = [Some(0), None]; a[0] = 7; return match a[0] { Some(v) => { return v; } None => { return 0; } }; }
+CAP_ARR_ASSIGN_LIT = """fn main() -> int:
+    a : [int?;2] = [Some(0), none]
+    a[0] = 7
+    return match a[0]:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-CAP_ARR_ASSIGN_DYN = """fn main() -> int { a : [int?;2] = [Some(1), None]; i := 1; a[i] = 8; return match a[i] { Some(v) => { return v; } None => { return 0; } }; }
+CAP_ARR_ASSIGN_DYN = """fn main() -> int:
+    a : [int?;2] = [Some(1), none]
+    i := 1
+    a[i] = 8
+    return match a[i]:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-CAP_ARR_LITERAL_IDENT = """fn main() -> int { x : int? = 5; a : [int?;2] = [x, None]; return match a[0] { Some(v) => { return v; } None => { return 0; } }; }
+CAP_ARR_LITERAL_IDENT = """fn main() -> int:
+    x : int? = 5
+    a : [int?;2] = [x, none]
+    return match a[0]:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-CAP_ARR_BOXED_LITERAL = """fn main() -> int { a : [int?;2] = [Some(4), None]; return match a[0] { Some(v) => { return v; } None => { return 0; } }; }
+CAP_ARR_BOXED_LITERAL = """fn main() -> int:
+    a : [int?;2] = [Some(4), none]
+    return match a[0]:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-CAP_GLOBAL_ASSIGN = """g : int? = None;
-fn main() -> int { g = 9; return match g { Some(v) => { return v; } None => { return 0; } }; }
+CAP_GLOBAL_ASSIGN = """g : int? = none
+fn main() -> int:
+    g = 9
+    return match g:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-CAP_GLOBAL_INIT_BARE = """g : int? = 10;
-fn main() -> int { return match g { Some(v) => { return v; } None => { return 0; } }; }
+CAP_GLOBAL_INIT_BARE = """g : int? = 10
+fn main() -> int:
+    return match g:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-CAP_MATCHRES_COND = """fn f(c: int) -> int? { return match c { 0 => 11, _ => None, }; }
-fn main() -> int { v := f(0); return match v { Some(x) => { return x; } None => { return 0; } }; }
+CAP_MATCHRES_COND = """fn f(c: int) -> int?:
+    return match c:
+        0 => 11, _ => none,
+fn main() -> int:
+    v := f(0)
+    return match v:
+        Some(x) =>:
+            return x
+        none =>:
+            return 0
 """
-CAP_ENUM_PAYLOAD = """enum E { V(int?), W }
-fn main() -> int { e := V(12); return match e { V(x) => { return match x { Some(v) => { return v; } None => { return 0; } }; } W => { return 1; } }; }
+CAP_ENUM_PAYLOAD = """enum E:
+    V(int?), W
+fn main() -> int:
+    e := V(12)
+    return match e:
+        V(x) =>:
+            return match x:
+                Some(v) =>:
+                    return v
+                none =>:
+                    return 0
+        W =>:
+            return 1
 """
-CAP_TUPLE_ELEM = """fn main() -> int { x : int? = 13; t := (x, 3); return match t . 0 { Some(v) => { return v; } None => { return 0; } }; }
+CAP_TUPLE_ELEM = """fn main() -> int:
+    x : int? = 13
+    t := (x, 3)
+    return match t . 0:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-CAP_FIELD_BARE_CROSSFN = """struct S { a: int? }
-fn f(s: S) -> int { return match s.a { Some(v) => { return v; } None => { return 0; } }; }
-fn main() -> int { s : ., mut = S { a: Some(0) }; s.a = 14; return f(s); }
+CAP_FIELD_BARE_CROSSFN = """struct S:
+    a: int?
+fn f(s: S) -> int:
+    return match s.a:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
+fn main() -> int:
+    s : ., mut = S { a= Some(0) }
+    s.a = 14
+    return f(s)
 """
 # 负控：非可选聚合槽不受本律影响（值形态不变）
-CAP_NONOPT_FIELD = """struct S { a: int }
-fn main() -> int { s : ., mut = S { a: 15 }; s.a = 16; return s.a; }
+CAP_NONOPT_FIELD = """struct S:
+    a: int
+fn main() -> int:
+    s : ., mut = S { a= 15 }
+    s.a = 16
+    return s.a
 """
 
 
@@ -350,58 +600,206 @@ fn main() -> int { s : ., mut = S { a: 15 }; s.a = 16; return s.a; }
 # `case_dual`（check 零诊断面：数组元素 / 非可选对照），`case_dual_rc`（登记面：REP-2/REP-3）。
 # **形态③（全局）另钉第二根因**：ELF 后端 `IR_REF` 全局取址修复（`&g` 曾取帧外伪偏移 ⇒
 # 与全局槽脱钩）——负控 `a_neg_nonopt_global_ptr` 即其钉子（修复前 ELF 恒初值）。
-A_LOCAL_BARE = """fn main() -> int { x : int? = Some(0); p := &x; *p = 7; return match x { Some(v) => { return v; } None => { return 0; } }; }
+A_LOCAL_BARE = """fn main() -> int:
+    x : int? = Some(0)
+    p := &x
+    *p = 7
+    return match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-A_LOCAL_BOXED = """fn main() -> int { x : int? = Some(0); p := &x; *p = Some(8); return match x { Some(v) => { return v; } None => { return 0; } }; }
+A_LOCAL_BOXED = """fn main() -> int:
+    x : int? = Some(0)
+    p := &x
+    *p = Some(8)
+    return match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-A_LOCAL_NONE_WRITE = """fn main() -> int { x : int? = Some(0); p := &x; *p = None; return match x { Some(v) => { return v; } None => { return 3; } }; }
+A_LOCAL_NONE_WRITE = """fn main() -> int:
+    x : int? = Some(0)
+    p := &x
+    *p = none
+    return match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 3
 """
-A_LOCAL_COND = """fn main() -> int { x : int? = None; p := &x; c := 1; if c > 0 { *p = 5; } else { *p = Some(6); } return match x { Some(v) => { return v; } None => { return 0; } }; }
+A_LOCAL_COND = """fn main() -> int:
+    x : int? = none
+    p := &x
+    c := 1
+    if c > 0:
+        *p = 5
+    else:
+        *p = Some(6)
+    return match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-A_ARR_BARE = """fn main() -> int { a : [int?;2] = [Some(0), None]; p := &a[0]; *p = 7; return match a[0] { Some(v) => { return v; } None => { return 0; } }; }
+A_ARR_BARE = """fn main() -> int:
+    a : [int?;2] = [Some(0), none]
+    p := &a[0]
+    *p = 7
+    return match a[0]:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-A_ARR_COND = """fn main() -> int { a : [int?;2] = [Some(1), None]; p := &a[0]; c := 0; if c > 0 { *p = 5; } else { *p = 9; } return match a[0] { Some(v) => { return v; } None => { return 0; } }; }
+A_ARR_COND = """fn main() -> int:
+    a : [int?;2] = [Some(1), none]
+    p := &a[0]
+    c := 0
+    if c > 0:
+        *p = 5
+    else:
+        *p = 9
+    return match a[0]:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-A_GLOBAL_BARE = """g : int? = None;
-fn main() -> int { p := &g; *p = 5; return match g { Some(v) => { return v; } None => { return 0; } }; }
+A_GLOBAL_BARE = """g : int? = none
+fn main() -> int:
+    p := &g
+    *p = 5
+    return match g:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-A_GLOBAL_BOXED = """g : int? = None;
-fn main() -> int { p := &g; *p = Some(5); return match g { Some(v) => { return v; } None => { return 0; } }; }
+A_GLOBAL_BOXED = """g : int? = none
+fn main() -> int:
+    p := &g
+    *p = Some(5)
+    return match g:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-A_GLOBAL_NONE_WRITE = """g : int? = Some(1);
-fn main() -> int { p := &g; *p = None; return match g { Some(v) => { return v; } None => { return 4; } }; }
+A_GLOBAL_NONE_WRITE = """g : int? = Some(1)
+fn main() -> int:
+    p := &g
+    *p = none
+    return match g:
+        Some(v) =>:
+            return v
+        none =>:
+            return 4
 """
-A_GLOBAL_COND = """g : int? = None;
-fn main() -> int { p := &g; c := 1; if c > 0 { *p = 5; } else { *p = Some(6); } return match g { Some(v) => { return v; } None => { return 0; } }; }
+A_GLOBAL_COND = """g : int? = none
+fn main() -> int:
+    p := &g
+    c := 1
+    if c > 0:
+        *p = 5
+    else:
+        *p = Some(6)
+    return match g:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
 # ④ 结构体字段取址：**裁-REP-3 维持登记**（`UOP_REF` 无字段分支 ⇒ 取临时量地址 ⇒ 写入丢失；
 # 属另一缺陷，须新增 `IR_ADDR_FIELD` 面才能修）——本例只钉「双路径同 rc（响亮同态）**不静默分歧**」，
 # 不钉错值本身（修好后本例会照常通过：rc=0 面两支同）。
-A_FIELD_ADDR = """struct S { a: int? }
-fn main() -> int { s : ., mut = S { a: Some(0) }; p := &s.a; *p = 5; return match s.a { Some(v) => { return v; } None => { return 0; } }; }
+A_FIELD_ADDR = """struct S:
+    a: int?
+fn main() -> int:
+    s : ., mut = S { a= Some(0) }
+    p := &s.a
+    *p = 5
+    return match s.a:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
 # ①d 形参槽（W4：形参序言**条件装箱** + 表示位钉 1）——裸值经信道入形参后被取址
-A_PARAM_BARE = """fn f(x: int?) -> int { p := &x; *p = 7; return match x { Some(v) => { return v; } None => { return 0; } }; }
-fn main() -> int { return f(3); }
+A_PARAM_BARE = """fn f(x: int?) -> int:
+    p := &x
+    *p = 7
+    return match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
+fn main() -> int:
+    return f(3)
 """
 # 三子形态（T1 记录：c1 正确但脆弱 / c2 139 双路径 / c3 双路径分歧静默错值）
-A_C1_BIT0_BARE = """fn main() -> int { x : int? = 5; p := &x; *p = 7; return match x { Some(v) => { return v; } None => { return 0; } }; }
+A_C1_BIT0_BARE = """fn main() -> int:
+    x : int? = 5
+    p := &x
+    *p = 7
+    return match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-A_C2_BIT1_BARE = """fn main() -> int { x : int? = Some(5); p := &x; *p = 7; return match x { Some(v) => { return v; } None => { return 0; } }; }
+A_C2_BIT1_BARE = """fn main() -> int:
+    x : int? = Some(5)
+    p := &x
+    *p = 7
+    return match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
 # c3 转正判据按 T1 修正：**断言「= 正确值」不钉历史观测数值**（T1 实测 ELF 8 / interp 96，
 # 数值随状态漂移）——判据内置：写入载荷 = 9 ⇒ 解包值须 == 9（自证，非外部钉数）。
-A_C3_BIT0_BOXED_SELFCHECK = """fn main() -> int { x : int? = 5; p := &x; *p = Some(9); return match x { Some(v) => { if v == 9 { return 1; } return 0; } None => { return 0; } }; }
+A_C3_BIT0_BOXED_SELFCHECK = """fn main() -> int:
+    x : int? = 5
+    p := &x
+    *p = Some(9)
+    return match x:
+        Some(v) =>:
+            if v == 9:
+                return 1
+            return 0
+        none =>:
+            return 0
 """
 # REP-2 边界（指针算术伪造地址，裁-REP-2 登记 + 探针）：`p + 1` 落**非取址**槽——记录现实
 # 行为（当前布局下 y 未受影响 ⇒ 6，双路径同）。本律不覆盖该面；
-A_REP2_PTRADD = """fn main() -> int { x : int? = 5; y : int? = 6; p := &x; q := p + 1; *q = 7; return match y { Some(v) => { return v; } None => { return 0; } }; }
+A_REP2_PTRADD = """fn main() -> int:
+    x : int? = 5
+    y : int? = 6
+    p := &x
+    q := p + 1
+    *q = 7
+    return match y:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
 # 负控：**非可选**取址槽不受本律影响（不装箱、值形态不变）；第二例同时钉 ELF 全局取址修复
-A_NEG_NONOPT_LOCAL = """fn main() -> int { n : int, mut = 1; p := &n; *p = 5; return n; }
+A_NEG_NONOPT_LOCAL = """fn main() -> int:
+    n : int, mut = 1
+    p := &n
+    *p = 5
+    return n
 """
-A_NEG_NONOPT_GLOBAL = """g : int, mut = 1;
-fn main() -> int { p := &g; *p = 5; return g; }
+A_NEG_NONOPT_GLOBAL = """g : int, mut = 1
+fn main() -> int:
+    p := &g
+    *p = 5
+    return g
 """
 
 
@@ -411,36 +809,139 @@ fn main() -> int { p := &g; *p = 5; return g; }
 # 修法 = 字面量/切片两站点按「元素可选性」登记声明面 + LET/全局初值处**继承到绑定 var**
 #（登记在**值 var** 上、写点读**绑定 var**——本修的关键一环）；**写点零改动**。
 # 全部 `g_optrep_on` 门控 + 仅可选元素登记 ⇒ 非可选程序/既有语料零足迹。
-T3_INFERRED_ARR_BARE = """fn main() -> int { a := [Some(1), None]; a[0] = 5; return match a[0] { Some(v) => { return v; } None => { return 0; } }; }
+T3_INFERRED_ARR_BARE = """fn main() -> int:
+    a := [Some(1), none]
+    a[0] = 5
+    return match a[0]:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-T3_INFERRED_ARR_LIT_IDX = """fn main() -> int { a := [Some(1), None]; a[1] = 5; return match a[1] { Some(v) => { return v; } None => { return 0; } }; }
+T3_INFERRED_ARR_LIT_IDX = """fn main() -> int:
+    a := [Some(1), none]
+    a[1] = 5
+    return match a[1]:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-T3_INFERRED_IDENT_ELEM = """fn main() -> int { x : int? = 5; a := [x, None]; a[0] = 7; return match a[0] { Some(v) => { return v; } None => { return 0; } }; }
+T3_INFERRED_IDENT_ELEM = """fn main() -> int:
+    x : int? = 5
+    a := [x, none]
+    a[0] = 7
+    return match a[0]:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-T3_MIXED_LIT = """fn main() -> int { a := [Some(1), 2]; a[0] = 7; return match a[0] { Some(v) => { return v; } None => { return 0; } }; }
+T3_MIXED_LIT = """fn main() -> int:
+    a := [Some(1), 2]
+    a[0] = 7
+    return match a[0]:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-T3_NONE_SLOT = """fn main() -> int { a := [Some(1), None]; a[1] = 8; return match a[1] { Some(v) => { return v; } None => { return 0; } }; }
+T3_NONE_SLOT = """fn main() -> int:
+    a := [Some(1), none]
+    a[1] = 8
+    return match a[1]:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-T3_INFERRED_SLICE = """fn main() -> int { a := [Some(1), None, Some(3), Some(4)]; s := a[0..4]; s[0] = 5; return match s[0] { Some(v) => { return v; } None => { return 0; } }; }
+T3_INFERRED_SLICE = """fn main() -> int:
+    a := [Some(1), none, Some(3), Some(4)]
+    s := a[0..4]
+    s[0] = 5
+    return match s[0]:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-T3_ANNOT_ARR_SLICE = """fn main() -> int { a : [int?;4] = [Some(0), None, Some(2), Some(3)]; s := a[0..4]; s[0] = 5; return match s[0] { Some(v) => { return v; } None => { return 0; } }; }
+T3_ANNOT_ARR_SLICE = """fn main() -> int:
+    a : [int?;4] = [Some(0), none, Some(2), Some(3)]
+    s := a[0..4]
+    s[0] = 5
+    return match s[0]:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-T3_INFERRED_ARR_PTR = """fn main() -> int { a := [Some(1), None]; p := &a[0]; *p = 6; return match a[0] { Some(v) => { return v; } None => { return 0; } }; }
+T3_INFERRED_ARR_PTR = """fn main() -> int:
+    a := [Some(1), none]
+    p := &a[0]
+    *p = 6
+    return match a[0]:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-T3_SLICE_OF_SLICE = """fn main() -> int { a : [int?;4] = [Some(0), None, Some(2), Some(3)]; s := a[0..4]; t := s[1..3]; t[0] = 5; return match t[0] { Some(v) => { return v; } None => { return 0; } }; }
+T3_SLICE_OF_SLICE = """fn main() -> int:
+    a : [int?;4] = [Some(0), none, Some(2), Some(3)]
+    s := a[0..4]
+    t := s[1..3]
+    t[0] = 5
+    return match t[0]:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
 # 对照（修复前即正确，防回退）：标注数组动态下标 / 标注切片形参 / 装箱写 / 只读
-T3_ANNOT_ARR_DYN = """fn main() -> int { a : [int?;2] = [Some(1), None]; i := 0; a[i] = 5; return match a[i] { Some(v) => { return v; } None => { return 0; } }; }
+T3_ANNOT_ARR_DYN = """fn main() -> int:
+    a : [int?;2] = [Some(1), none]
+    i := 0
+    a[i] = 5
+    return match a[i]:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-T3_PARAM_SLICE = """fn f(s: [int?;4]) -> int { s[0] = 5; return match s[0] { Some(v) => { return v; } None => { return 0; } }; }
-fn main() -> int { a : [int?;4] = [Some(0), None, Some(2), Some(3)]; return f(a[0..4]); }
+T3_PARAM_SLICE = """fn f(s: [int?;4]) -> int:
+    s[0] = 5
+    return match s[0]:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
+fn main() -> int:
+    a : [int?;4] = [Some(0), none, Some(2), Some(3)]
+    return f(a[0..4])
 """
-T3_SLICE_BOXED = """fn main() -> int { a : [int?;4] = [Some(0), None, Some(2), Some(3)]; s := a[0..4]; s[0] = Some(6); return match s[0] { Some(v) => { return v; } None => { return 0; } }; }
+T3_SLICE_BOXED = """fn main() -> int:
+    a : [int?;4] = [Some(0), none, Some(2), Some(3)]
+    s := a[0..4]
+    s[0] = Some(6)
+    return match s[0]:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
 """
-T3_READ_ONLY = """fn main() -> int { a := [Some(1), None, Some(3), Some(4)]; s := a[1..3]; return match s[0] { Some(v) => { return v; } None => { return 9; } }; }
+T3_READ_ONLY = """fn main() -> int:
+    a := [Some(1), none, Some(3), Some(4)]
+    s := a[1..3]
+    return match s[0]:
+        Some(v) =>:
+            return v
+        none =>:
+            return 9
 """
 # 负控：**非可选**推断数组写点不受本律影响（不装箱、值形态不变）
-T3_NEG_NONOPT = """fn main() -> int { a := [1, 2]; a[0] = 5; return a[0]; }
+T3_NEG_NONOPT = """fn main() -> int:
+    a := [1, 2]
+    a[0] = 5
+    return a[0]
 """
 
 
@@ -462,32 +963,31 @@ def main():
         # 口径：TF01 是**软诊断**（本仓库硬门名单只含 R002/TK05-06/TS01-04/TK02/TM03，
         # build 路径 rc=0 + 产物照出）⇒ 判据走 `check`（有诊断即 rc=1）+ 措辞断言。
         case_reject("optional_not_assignable_to_plain",
-                    "fn f(x: int?) -> int { return x; }\nfn main() -> int { return f(1); }\n",
+                    "fn f(x: int?) -> int:\n    return x\nfn main() -> int:\n    return f(1)\n",
                     ["error[TF01]"], cmd="check"),
         # 硬门：T? 的 match 缺 None 臂 ⇒ TM03 + 具体反例名（'None'）+ 无产物
         case_reject("optional_match_missing_none",
-                    "fn main() -> int { x: int? = Some(3); return match x { Some(v) => v, }; }\n",
+                    "fn main() -> int:\n    x: int? = Some(3)\n    return match x:\n        Some(v) => v,\n",
                     ["error[TM03]", "missing variant 'None'"]),
         # 硬门：T? 的 match 缺 Some 臂 ⇒ TM03 + 'Some'
         case_reject("optional_match_missing_some",
-                    "fn main() -> int { x: int? = Some(3); return match x { None => 0, }; }\n",
+                    "fn main() -> int:\n    x: int? = Some(3)\n    return match x:\n        none => 0,\n",
                     ["error[TM03]", "missing variant 'Some'"]),
         # 正：通配臂吸收 ⇒ 穷尽（零诊断）
         case_dual("optional_match_wildcard",
-                  "fn main() -> int { x: int? = None; return match x { _ => 9, }; }\n", 9),
+                  "fn main() -> int:\n    x: int? = none\n    return match x:\n        _ => 9,\n", 9),
         # 负：退役内建 Option 注册——`Option` 不再是语言内建类型名。
         # 旧行为：collect_decls 自动注册命名行 ⇒ `Option[int]` 零诊断通过；新行为：该名未声明
         # ⇒ `Undefined type in generic application`（EC_N_GENERIC_TYPE，**软诊断**：rc 面
         # build 仍 0——故判据走 `check` 的 rc=1 + 措辞）。用户自声明 `enum Option` 时按普通
         # 枚举解析（Task 3 的 p20 语义保持，见 test_match_exhaust.py）。
         case_reject("builtin_option_name_retired",
-                    "fn f(x: Option[int]) -> int { return 0; }\nfn main() -> int { return f(0); }\n",
+                    "fn f(x: Option[int]) -> int:\n    return 0\nfn main() -> int:\n    return f(0)\n",
                     ["Undefined type in generic application"], cmd="check"),
         # 登记：载荷类型节点列入库（每槽有节点 = bad=0）+ 裸码列丢失真实类型的信息量
         # （`V(S)` 命名类型载荷与 `Some(T)` 泛型形参载荷在裸码列都塌缩为 0 = TY_INT）
         case_evp("payload_type_nodes_recorded",
-                 "struct S { a: int }\nenum E { V(S), W(int) }\nenum Opt[T] { N, Some(T) }\n"
-                 "fn main() -> int { return 0; }\n",
+                 "struct S:\n    a: int\nenum E:\n    V(S), W(int)\nenum Opt[T]:\n    N, Some(T)\nfn main() -> int:\n    return 0\n",
                  ["[enum-payload-verify]", "slots=3", "collapses=2", "bad=0"]),
 
         # ── R2 P4 Task 5：解包侧判表示（B.7 四形态；修复前多个形态双路径 139）──

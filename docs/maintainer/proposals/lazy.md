@@ -11,12 +11,11 @@
 编译器看图决定一个节点是否需要惰性求值：
 
 ```core
-result := if cond {
+result := if cond:
     expensive1()     // 只在 cond=true 时用到
-} else {
+else:
     0                // cond=false 时到这里
-}
-print(result);
+print(result)
 ```
 
 | 条件 | 策略 |
@@ -31,8 +30,8 @@ print(result);
 惰性推导与此前的指针验证、编译期求值、概率推导一致：由编译器看图自动完成，不引入 `lazy` 关键字。
 
 ```core
-x := expensive();       // 编译器 auto: eager 或 lazy
-y := cond ? x : 0;      // 如果 x 只用在这里且无副作用 → 自动惰性
+x := expensive()       // 编译器 auto: eager 或 lazy
+y := cond ? x : 0      // 如果 x 只用在这里且无副作用 → 自动惰性
 ```
 
 ## 副作用标记
@@ -49,9 +48,9 @@ y := cond ? x : 0;      // 如果 x 只用在这里且无副作用 → 自动惰
 ## 惰性节点被多处使用
 
 ```core
-x := expensive();   // 编译器决定惰性
-y := cond ? x : 0;
-z := x + 1;         // x 这里也被用了 → 必须求值
+x := expensive()   // 编译器决定惰性
+y := cond ? x : 0
+z := x + 1         // x 这里也被用了 → 必须求值
 ```
 
 若编译器发现标注为惰性的节点实际有多条路径需要它，则自动升级为 eager；用户不感知。

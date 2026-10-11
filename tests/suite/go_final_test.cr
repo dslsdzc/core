@@ -7,15 +7,16 @@ import io
 import sched
 import chan
 
-fn square(n: int) -> int {
-    return n * n;
-}
+fn square(n: int) -> int:
+    return n * n
 
-fn main() -> int {
-    sched_init();
-    ch := go square(21);
-    result := chan_recv(ch);
-    if result != 441 { print("FAIL: "); println(int_str(result)); return 1; }
-    println("ALL PASS");
-    return 0;
-}
+fn main() -> int:
+    sched_init()
+    ch := go square(21)
+    result := chan_recv(ch)
+    if result != 441:
+        print("FAIL: ")
+        println(int_str(result))
+        return 1
+    println("ALL PASS")
+    return 0

@@ -34,12 +34,13 @@ BOOTSTRAP = BASE / "bootstrap"
 # ── 探针 ─────────────────────────────────────────────────────────────────────
 # ok 腿：视图往返。42 既不是有效指针、也不是有效 intern 索引 ⇒ 「视图 = 换看法」成立才可能 = 42。
 # （若实现里偷偷做了解引用/查表，本腿在任一运行期腿都会崩或给别的值。）
-VIEW_ROUNDTRIP = """fn main() -> int {
-    p : ., mut = 42;
-    q : ., mut = 0;
-    unsafe { s := @str_of(p); q = @ptr_of(s); }
-    return q;
-}
+VIEW_ROUNDTRIP = """fn main() -> int:
+    p : ., mut = 42
+    q : ., mut = 0
+    unsafe:
+        s := @str_of(p)
+        q = @ptr_of(s)
+    return q
 """
 
 # 零代码生成（擦除）：两侧**除函数体首行外逐字相同**，函数名/签名也相同
@@ -47,55 +48,58 @@ VIEW_ROUNDTRIP = """fn main() -> int {
 # ⚠ 对照必须**同处 `unsafe` 包络内**：实测 `unsafe { return p; }` 与 `return p;` 的 ELF **不同**
 #   （`.ccr` 差 +158B = SG_UNSAFE 区域元数据；那是区域面既有效应，与视图无关）⇒
 #   跨包络对照测的是 `unsafe` 而不是视图。字符串侧同理用「往返三跳」对照「单跳」。
-ERASE_INT_VIEW = """fn f(p: int) -> int {
-    unsafe { return @ptr_of(@str_of(p)); }
-}
-fn main() -> int { return f(42); }
+ERASE_INT_VIEW = """fn f(p: int) -> int:
+    unsafe:
+        return @ptr_of(@str_of(p))
+fn main() -> int:
+    return f(42)
 """
-ERASE_INT_PLAIN = """fn f(p: int) -> int {
-    unsafe { return p; }
-}
-fn main() -> int { return f(42); }
+ERASE_INT_PLAIN = """fn f(p: int) -> int:
+    unsafe:
+        return p
+fn main() -> int:
+    return f(42)
 """
-ERASE_STR_VIEW = """fn f(s: string) -> int {
-    unsafe { return @ptr_of(@str_of(@ptr_of(s))); }
-}
-fn main() -> int { return f("hi") / 1000000000; }
+ERASE_STR_VIEW = """fn f(s: string) -> int:
+    unsafe:
+        return @ptr_of(@str_of(@ptr_of(s)))
+fn main() -> int:
+    return f("hi") / 1000000000
 """
-ERASE_STR_ONE = """fn f(s: string) -> int {
-    unsafe { return @ptr_of(s); }
-}
-fn main() -> int { return f("hi") / 1000000000; }
+ERASE_STR_ONE = """fn f(s: string) -> int:
+    unsafe:
+        return @ptr_of(s)
+fn main() -> int:
+    return f("hi") / 1000000000
 """
 
 # 安全面 (ii)：块外 ⇒ 两面都硬错
-OUTSIDE_UNSAFE = """fn main() -> int {
-    p : ., mut = 42;
-    s := @str_of(p);
-    return 0;
-}
+OUTSIDE_UNSAFE = """fn main() -> int:
+    p : ., mut = 42
+    s := @str_of(p)
+    return 0
 """
 
 # fail-closed③：未知名 ⇒ 两面都报错
-UNKNOWN_BUILTIN = """fn main() -> int {
-    p : ., mut = 42;
-    unsafe { q := @view_of(p); }
-    return 0;
-}
+UNKNOWN_BUILTIN = """fn main() -> int:
+    p : ., mut = 42
+    unsafe:
+        q := @view_of(p)
+    return 0
 """
 
 # 实参类型：`@ptr_of` 只收 string、`@str_of` 只收 int
-ARG_TYPE_PTR = """fn main() -> int {
-    p : ., mut = 42;
-    unsafe { n := @ptr_of(p); }
-    return 0;
-}
+ARG_TYPE_PTR = """fn main() -> int:
+    p : ., mut = 42
+    unsafe:
+        n := @ptr_of(p)
+    return 0
 """
-ARG_TYPE_STR = """fn main() -> int {
-    s := "hi";
-    unsafe { n := @str_of(s); }
-    return 0;
-}
+ARG_TYPE_STR = """fn main() -> int:
+    s := "hi"
+    unsafe:
+        n := @str_of(s)
+    return 0
 """
 
 

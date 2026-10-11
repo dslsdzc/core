@@ -27,24 +27,28 @@ y := first(arr);       // T = 元素类型
 ### 泛型结构体
 
 ```core
-struct Box<T> { val: T }
-struct Pair<A, B> { first: A; second: B }
+struct Box<T>:
+    val: T
+struct Pair<A, B>:
+    first: A
+    second: B
 
 // 构造时推导
-b := Box{val=42};                // T = int
-p := Pair{first=1, second="hi"}; // A=int, B=string
+b := Box{val=42}                // T = int
+p := Pair{first=1, second="hi"} // A=int, B=string
 ```
 
 ### 泛型方法
 
 ```core
-impl<T> Box<T> {
-    fn get(self) -> T { return self.val; }
-    fn set(self, val: T) { self.val = val; }
-}
+impl<T> Box<T>:
+    fn get(self) -> T:
+        return self.val
+    fn set(self, val: T):
+        self.val = val
 
-b := Box{val=42};
-x := b.get();  // T = int
+b := Box{val=42}
+x := b.get()  // T = int
 ```
 
 ## 实现架构
@@ -98,23 +102,21 @@ x := b.get();  // T = int
 
 ```core
 // 实例表
-g_gen_instances : string, mut;   // 缓存已特化的函数索引
-g_gen_instance_count : int, mut;
+g_gen_instances : string, mut   // 缓存已特化的函数索引
+g_gen_instance_count : int, mut
 
 // 查找或创建实例
-fn gen_find_instance(func_ni: int, type_args: string) -> int {
+fn gen_find_instance(func_ni: int, type_args: string) -> int:
     // 扫描 g_gen_instances 查找已缓存的实例
     // 如果找到，返回函数索引
     // 如果没找到，创建新实例
-}
 
 // 生成特化版本
-fn gen_monomorphize(func_ni: int, type_args: string) -> int {
+fn gen_monomorphize(func_ni: int, type_args: string) -> int:
     // 1. 复制函数 AST
     // 2. 将 T 替换为具体类型
     // 3. 注册新函数到 g_funcs
     // 4. 返回新函数索引
-}
 ```
 
 ### 4. IR 生成（`ir_gen.cr`）

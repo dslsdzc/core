@@ -44,54 +44,75 @@ BASE = Path(__file__).resolve().parents[2]
 COREC = Path(os.environ.get("COREC_BIN", str(BASE / "build" / "corec")))
 
 # ── 探针（自包含；dex 两源：bits = `dex, apx` / scaled = `dex`）───────────────────
-PROBE_FORMS = """fn h(x: dex) -> int { return 1; }
-fn g1[T](x: T) -> int { return 1; }
-fn g2[T](x: T?) -> int { return 1; }
-fn gi[T](x: T) -> int { return 1; }
-fn main() -> int {
-    d : dex, apx = 7.0;
-    e : dex = 7.0;
-    a := h(d);
-    b := g1(d);
-    c := g1(e);
-    f := g2(d);
-    k := gi(1);
-    return a + b + c + f + k;
-}
+PROBE_FORMS = """fn h(x: dex) -> int:
+    return 1
+fn g1[T](x: T) -> int:
+    return 1
+fn g2[T](x: T?) -> int:
+    return 1
+fn gi[T](x: T) -> int:
+    return 1
+fn main() -> int:
+    d : dex, apx = 7.0
+    e : dex = 7.0
+    a := h(d)
+    b := g1(d)
+    c := g1(e)
+    f := g2(d)
+    k := gi(1)
+    return a + b + c + f + k
 """
 
-PROBE_VALUES_BITS = """fn h(x: dex) -> int { if x == 7.0 { return 1; } return 0; }
-fn gp[T](x: T) -> int { if x == 7.0 { return 1; } return 0; }
-fn main() -> int {
-    d : dex, apx = 7.0;
-    if gp(d) != 1 { return 21; }
-    if h(d) != 1 { return 11; }
-    return 0;
-}
+PROBE_VALUES_BITS = """fn h(x: dex) -> int:
+    if x == 7.0:
+        return 1
+    return 0
+fn gp[T](x: T) -> int:
+    if x == 7.0:
+        return 1
+    return 0
+fn main() -> int:
+    d : dex, apx = 7.0
+    if gp(d) != 1:
+        return 21
+    if h(d) != 1:
+        return 11
+    return 0
 """
 
-PROBE_VALUES_SCALED = """fn h(x: dex) -> int { if x == 7.0 { return 1; } return 0; }
-fn gp[T](x: T) -> int { if x == 7.0 { return 1; } return 0; }
-fn main() -> int {
-    e : dex = 7.0;
-    if h(e) != 1 { return 31; }
-    if gp(e) != 1 { return 41; }
-    return 0;
-}
+PROBE_VALUES_SCALED = """fn h(x: dex) -> int:
+    if x == 7.0:
+        return 1
+    return 0
+fn gp[T](x: T) -> int:
+    if x == 7.0:
+        return 1
+    return 0
+fn main() -> int:
+    e : dex = 7.0
+    if h(e) != 1:
+        return 31
+    if gp(e) != 1:
+        return 41
+    return 0
 """
 
-PROBE_MIXED_BITS = """fn mixed[T](t: T, x: dex) -> int { if t == x { return 1; } return 0; }
-fn main() -> int {
-    d : dex, apx = 7.0;
-    return mixed(d, d) + 0;
-}
+PROBE_MIXED_BITS = """fn mixed[T](t: T, x: dex) -> int:
+    if t == x:
+        return 1
+    return 0
+fn main() -> int:
+    d : dex, apx = 7.0
+    return mixed(d, d) + 0
 """
 
-PROBE_MIXED_SCALED = """fn mixed[T](t: T, x: dex) -> int { if t == x { return 1; } return 0; }
-fn main() -> int {
-    e : dex = 7.0;
-    return mixed(e, e) + 0;
-}
+PROBE_MIXED_SCALED = """fn mixed[T](t: T, x: dex) -> int:
+    if t == x:
+        return 1
+    return 0
+fn main() -> int:
+    e : dex = 7.0
+    return mixed(e, e) + 0
 """
 
 

@@ -56,49 +56,17 @@ def run_corec(args, source):
 
 
 EXACT_SRC = (
-    "fn main() -> int {\n"
-    "    a := 3.14 + 2.86;\n"
-    "    if a != 6.0 { return 1; }\n"
-    "    b := 0.1 + 0.2;\n"
-    "    if b != 0.3 { return 2; }\n"
-    "    c := 1.0 / 10.0;\n"
-    "    if c != 0.1 { return 3; }\n"
-    "    d := 1.5 * 2.0;\n"
-    "    if d != 3.0 { return 4; }\n"
-    "    e := 0.3 - 1.0;\n"
-    "    if e != -0.7 { return 5; }\n"
-    "    f := 1 + 0.5;\n"
-    "    if f != 1.5 { return 6; }\n"
-    "    g : dex = 0.1;\n"
-    "    h : dex = 0.2;\n"
-    "    if g + h != 0.3 { return 7; }\n"
-    "    r := dex_add_fn(0.1, 0.2);\n"
-    "    if r != 0.3 { return 8; }\n"
-    "    q := 1.0 / 3.0;\n"
-    "    if q != 0.3333333 { return 9; }\n"
-    "    return 0;\n"
-    "}\n"
-    "fn dex_add_fn(a: dex, b: dex) -> dex { return a + b; }\n"
+    "fn main() -> int:\n    a := 3.14 + 2.86\n    if a != 6.0:\n        return 1\n    b := 0.1 + 0.2\n    if b != 0.3:\n        return 2\n    c := 1.0 / 10.0\n    if c != 0.1:\n        return 3\n    d := 1.5 * 2.0\n    if d != 3.0:\n        return 4\n    e := 0.3 - 1.0\n    if e != -0.7:\n        return 5\n    f := 1 + 0.5\n    if f != 1.5:\n        return 6\n    g : dex = 0.1\n    h : dex = 0.2\n    if g + h != 0.3:\n        return 7\n    r := dex_add_fn(0.1, 0.2)\n    if r != 0.3:\n        return 8\n    q := 1.0 / 3.0\n    if q != 0.3333333:\n        return 9\n    return 0\nfn dex_add_fn(a: dex, b: dex) -> dex:\n    return a + b\n"
 )
 
 # 同一程序 + apx 标签：x/y 是 binary64 位模式 → z = 1.0b/3.0b = 0.3333333333333333 != 0.3333333
 # （1/3 判别子：binary64 与定点 6 位结果必然不同——精确世界 z == 0.3333333 为真）
 APX_SRC = (
-    "fn main() -> int {\n"
-    "    x : dex, apx = 1.0;\n"
-    "    y : dex, apx = 3.0;\n"
-    "    z := x / y;\n"
-    "    if z == 0.3333333 { return 1; }\n"
-    "    return 0;\n"
-    "}\n"
+    "fn main() -> int:\n    x : dex, apx = 1.0\n    y : dex, apx = 3.0\n    z := x / y\n    if z == 0.3333333:\n        return 1\n    return 0\n"
 )
 
 APX_LIT_SRC = (
-    "fn main() -> int {\n"
-    "    x : dex, apx = 1.0;\n"
-    "    if x / 3.0 == 0.3333333 { return 1; }\n"
-    "    return 0;\n"
-    "}\n"
+    "fn main() -> int:\n    x : dex, apx = 1.0\n    if x / 3.0 == 0.3333333:\n        return 1\n    return 0\n"
 )
 
 # LET 边界转换回归（审查发现）：`y : dex = x`（x 为 apx 变量，存 binary64 bits）时
@@ -106,29 +74,13 @@ APX_LIT_SRC = (
 # 修复前：y 原样存 bits 且被定型 TI_DEX（无 apx 标签却永久走 binary64），
 # 1.0/y 得到垃圾（bits 当缩放整数用）→ != 0.3333333（修复后为真——精确）。
 LET_APX_EXACT_SRC = (
-    "fn main() -> int {\n"
-    "    x : dex, apx = 3.0;\n"
-    "    y : dex = x;\n"
-    "    z := 1.0 / y;\n"
-    "    if z != 0.3333333 { return 1; }\n"
-    "    return 0;\n"
-    "}\n"
+    "fn main() -> int:\n    x : dex, apx = 3.0\n    y : dex = x\n    z := 1.0 / y\n    if z != 0.3333333:\n        return 1\n    return 0\n"
 )
 
 # % 截断恒等式（5 指令序列：a - trunc(a/b)·b）——含负数：
 #   7.0%2.5=2.0、-7.0%2.5=-2.0、1.0%0.3=0.1、-1.0%0.3=-0.1
 MOD_SRC = (
-    "fn main() -> int {\n"
-    "    a := 7.0 % 2.5;\n"
-    "    if a != 2.0 { return 1; }\n"
-    "    b := -7.0 % 2.5;\n"
-    "    if b != -2.0 { return 2; }\n"
-    "    c := 1.0 % 0.3;\n"
-    "    if c != 0.1 { return 3; }\n"
-    "    d := -1.0 % 0.3;\n"
-    "    if d != -0.1 { return 4; }\n"
-    "    return 0;\n"
-    "}\n"
+    "fn main() -> int:\n    a := 7.0 % 2.5\n    if a != 2.0:\n        return 1\n    b := -7.0 % 2.5\n    if b != -2.0:\n        return 2\n    c := 1.0 % 0.3\n    if c != 0.1:\n        return 3\n    d := -1.0 % 0.3\n    if d != -0.1:\n        return 4\n    return 0\n"
 )
 
 # apx 打印定稿（Task 6）：apx 变量经 dex_str 打印 = 6 位定点舍入（四舍五入半进，
@@ -136,22 +88,7 @@ MOD_SRC = (
 # 判别点：u = 1.0000006 → bits×1e6 ≈ 1000000.6 → 舍入 1000001（"1.000001"）；
 # 截断实现会得 1000000（"1"）。负半进：-0.5 → -1。
 APX_PRINT_SRC = (
-    "import io\n"
-    "import fmt\n"
-    "import dex\n"
-    "fn main() -> int {\n"
-    "    w : dex, apx = 0.1;\n"
-    "    if !str_eq(dex_str(w), \"0.1\") { return 1; }\n"
-    "    x : dex, apx = 1.0;\n"
-    "    y : dex, apx = 3.0;\n"
-    "    if !str_eq(dex_str(x / y), \"0.333333\") { return 2; }\n"
-    "    u : dex, apx = 1.0000006;\n"
-    "    if !str_eq(dex_str(u), \"1.000001\") { return 3; }\n"
-    "    n : dex, apx = 0.1;\n"
-    "    v : dex, apx = 0.0 - n;\n"
-    "    if !str_eq(dex_str(v), \"-0.1\") { return 4; }\n"
-    "    return 0;\n"
-    "}\n"
+    "import io\nimport fmt\nimport dex\nfn main() -> int:\n    w : dex, apx = 0.1\n    if !str_eq(dex_str(w), \"0.1\"):\n        return 1\n    x : dex, apx = 1.0\n    y : dex, apx = 3.0\n    if !str_eq(dex_str(x / y), \"0.333333\"):\n        return 2\n    u : dex, apx = 1.0000006\n    if !str_eq(dex_str(u), \"1.000001\"):\n        return 3\n    n : dex, apx = 0.1\n    v : dex, apx = 0.0 - n\n    if !str_eq(dex_str(v), \"-0.1\"):\n        return 4\n    return 0\n"
 )
 
 # apx 跨函数边界转换（b1/b2 场景）：
@@ -159,19 +96,7 @@ APX_PRINT_SRC = (
 #   b2 返回点：apx 计算结果（binary64 bits）→ 返回处转 scaled（caller 收精确形式）
 # 断言均须为真（精确）——缺任一转换则 bits 被当缩放整数用，断言失败。
 APX_BOUNDARY_SRC = (
-    "fn main() -> int {\n"
-    "    x : dex, apx = 3.0;\n"
-    "    r := dex_double_fn(x);\n"
-    "    if r != 6.0 { return 1; }\n"
-    "    s := dex_apx_ret_fn();\n"
-    "    if s != 0.5 { return 2; }\n"
-    "    return 0;\n"
-    "}\n"
-    "fn dex_double_fn(a: dex) -> dex { return a * 2.0; }\n"
-    "fn dex_apx_ret_fn() -> dex {\n"
-    "    v : dex, apx = 1.0;\n"
-    "    return v / 2.0;\n"
-    "}\n"
+    "fn main() -> int:\n    x : dex, apx = 3.0\n    r := dex_double_fn(x)\n    if r != 6.0:\n        return 1\n    s := dex_apx_ret_fn()\n    if s != 0.5:\n        return 2\n    return 0\nfn dex_double_fn(a: dex) -> dex:\n    return a * 2.0\nfn dex_apx_ret_fn() -> dex:\n    v : dex, apx = 1.0\n    return v / 2.0\n"
 )
 
 
@@ -215,7 +140,7 @@ def test_apx_binary64_elf():
 
 def test_exact_literal_scaled_in_cir():
     # cir dump：精确字面量 3.14 → 缩放整数常量 3140000（非 binary64 位模式）
-    src = "fn main() -> int { a := 3.14; return 1; }\n"
+    src = "fn main() -> int:\n    a := 3.14\n    return 1\n"
     r = run_corec(["cir"], src)
     out = r.stdout + r.stderr
     if re.search(r"const\s+dex\s*=\s*3140000", out) is None:
@@ -228,7 +153,7 @@ def test_exact_literal_scaled_in_cir():
 
 def test_dex_run_interp():
     # corec run 解释器：精确运算（裸 64 位整数路径）——run 取内联代码，非文件
-    code = "fn main() -> int { a := 0.1 + 0.2; if a == 0.3 { return 42; } return 1; }"
+    code = "fn main() -> int:\n    a := 0.1 + 0.2\n    if a == 0.3:\n        return 42\n    return 1\n"
     r = subprocess.run(
         [str(COREC), "run", code],
         cwd=BASE,
@@ -294,7 +219,7 @@ def test_apx_print_rounding():
 def test_interp_rejects_apx_dex():
     # The interpreter has no binary64 conversion instructions. Reject the
     # path explicitly instead of returning a stale or silently truncated value.
-    src = "fn main() -> int { x : dex, apx = 0.1; return @raw_int(x); }"
+    src = "fn main() -> int:\n    x : dex, apx = 0.1\n    return @raw_int(x)\n"
     r = subprocess.run(
         [str(COREC), "run", src],
         cwd=BASE,
@@ -321,11 +246,7 @@ def test_extern_dex_arg_cir():
     断言，确认转换发生在调用点。
     """
     src = (
-        "extern fn dex_ffi_bits_check(d: dex) -> int;\n"
-        "fn main() -> int {\n"
-        "    r := dex_ffi_bits_check(3.14);\n"
-        "    return r;\n"
-        "}\n"
+        "extern fn dex_ffi_bits_check(d: dex) -> int\nfn main() -> int:\n    r := dex_ffi_bits_check(3.14)\n    return r\n"
     )
     r = run_corec(["cir"], src)
     out = r.stdout + r.stderr
@@ -353,8 +274,7 @@ def test_extern_dex_arg_cir():
 def test_extern_dex_static_link():
     """Static --link must relocate an extern call after embedding .so text."""
     src = (
-        "extern fn dex_ffi_bits_check(d: dex) -> int;\n"
-        "fn main() -> int { return dex_ffi_bits_check(3.14); }\n"
+        "extern fn dex_ffi_bits_check(d: dex) -> int\nfn main() -> int:\n    return dex_ffi_bits_check(3.14)\n"
     )
     ccr = BASE / "build" / "dex_ffi_runtime.ccr"
     binary = BASE / "build" / "dex_ffi_runtime"

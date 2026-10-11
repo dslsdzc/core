@@ -17,19 +17,16 @@ is represented as relations first, state/storage is mapped separately, and machi
 representation comes last.
 
 ```core
-import io;
+import io
 
-fn fib(n: int) -> int {
-    if n < 2 {
-        return n;
-    }
-    return fib(n - 1) + fib(n - 2);
-}
+fn fib(n: int) -> int:
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
 
-fn main() -> int {
-    io.println_i(fib(10));   // 55
-    return 0;
-}
+fn main() -> int:
+    io.println_i(fib(10))   // 55
+    return 0
 ```
 
 Core is under active development.

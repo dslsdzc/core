@@ -26,12 +26,10 @@
 示例——无运行时反射的序列化：
 
 ```core
-fn serialize(buf: &[u8], obj: any) {
-    for name in @fields(typeof(obj)) {
-        val := @field(typeof(obj), name).get(obj);
-        write_field(buf, name, val);
-    }
-}
+fn serialize(buf: &[u8], obj: any):
+    for name in @fields(typeof(obj)):
+        val := @field(typeof(obj), name).get(obj)
+        write_field(buf, name, val)
 // 编译期展开，不涉及运行时反射调用
 ```
 

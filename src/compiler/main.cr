@@ -19,7 +19,10 @@ fn is_cr_file(path: string) -> int:
 fn read_source_file(path: string) -> string:
     g_source_dir = dirname(path)
     source := read_file(path)
-
+    // 回流（2026-10-11）：T4 施工期按**旧政策**（空 region 不可表达）把本处整条删掉，
+    // **连带删掉了一次内存读** ⇒ 列为「已知偏差」。现政策已改（region 可为空，⑤ 规格化）
+    // ⇒ 回流成 `if …:` + **空 region**（下一行同级 ⇒ 零项 region），把那处偏差消掉。
+    if str_len(source) > 0:
     return source
 
 fn read_project_dir(dir: string) -> string:

@@ -33,7 +33,7 @@
 新增 `EXPR_AT` AST 节点：
 
 ```core
-EXPR_AT : int = 46;  // @内建: a=name_ni, b=args_node, c=0, iv=0, tv=0, data=0
+EXPR_AT : int = 46  // @内建: a=name_ni, b=args_node, c=0, iv=0, tv=0, data=0
 ```
 
 在 `parse_primary` 中识别 `T_AT`：

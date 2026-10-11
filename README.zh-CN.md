@@ -15,19 +15,16 @@ Core 的编译模型围绕 **graph → lattice → encoding** 组织：计算先
 状态/存储单独映射，机器表示最后落地。
 
 ```core
-import io;
+import io
 
-fn fib(n: int) -> int {
-    if n < 2 {
-        return n;
-    }
-    return fib(n - 1) + fib(n - 2);
-}
+fn fib(n: int) -> int:
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
 
-fn main() -> int {
-    io.println_i(fib(10));   // 55
-    return 0;
-}
+fn main() -> int:
+    io.println_i(fib(10))   // 55
+    return 0
 ```
 
 Core 仍在积极开发中。

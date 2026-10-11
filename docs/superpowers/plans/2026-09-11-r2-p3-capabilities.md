@@ -566,14 +566,14 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 **复现（最小 8 行）**：
 
 ```
-fn main() -> int {
-    x : int? = 5;
-    match x {
-        Some(v) => { return v; }
-        None => { return 0; }
-    }
-    return 0;
-}
+fn main() -> int:
+    x : int? = 5
+    match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
+    return 0
 ```
 
 **实测 rc（P3a 收官二进制 `./build/corec`，2026-09-12；cwd = 仓库根——`/tmp` cwd 会触发 import 解析假失败，勿用）**：

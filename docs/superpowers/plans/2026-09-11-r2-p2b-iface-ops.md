@@ -146,9 +146,12 @@
 //   lit_code = **字面量定型**：AST 字面量 kind（EXPR_INT/EXPR_DEX/EXPR_STRING/EXPR_BOOL/EXPR_CHAR）
 //              → 本条目（查表入口 = `iface_lit_ti`/`iface_lit_ak` 的**字典**，本字段为其中一项）；-1 = 无字面量
 //   ops      = 操作许可位集（bit(OP_*)/bit(UOP_*+20)/bit(IP_*)；见 Task 4 的位下标约定）
-ESZ_IFACE_ENTRY : int = 40;
-OFF_IE_AK : int = 0;  OFF_IE_TI : int = 8;  OFF_IE_NAME : int = 16;
-OFF_IE_LIT : int = 24; OFF_IE_OPS : int = 32;
+ESZ_IFACE_ENTRY : int = 40
+OFF_IE_AK : int = 0
+OFF_IE_TI : int = 8
+OFF_IE_NAME : int = 16
+OFF_IE_LIT : int = 24
+OFF_IE_OPS : int = 32
 
 fn iface_registry_init()            // 幂等；由 init_types() 调用（尾部，原生 9 行 alloc 之后；表内容 = 常量，不缓存行号）
 fn iface_count() -> int             // 条目数（恒 13；自测断言用）
@@ -232,12 +235,15 @@ nice -n 19 python3 tests/selfhost/test_ccr_v7.py   # 结构判据全绿
 **Interfaces：**
 ```core
 // ty_shadow.cr 保留原签名（影子证据链的可比性依赖调用点不变），实现改委托：
-fn sh_native_ak(ti: int) -> int {
-    if ti < 0 { return -1; }
-    if get_type_kind(ti) != TYP_BASE { return -1; }        // **原门保留**（见下）
-    return iface_by_ty_code(get_type_data(ti));
-}
-fn sh_base_ak(ty: int) -> int { return iface_by_ty_code(ty); }
+fn sh_native_ak(ti: int) -> int:
+    if ti < 0:
+        return -1
+    if get_type_kind(ti) != TYP_BASE:
+        return -1
+    // **原门保留**（见下）
+    return iface_by_ty_code(get_type_data(ti))
+fn sh_base_ak(ty: int) -> int:
+    return iface_by_ty_code(ty)
 ```
 （**`sh_native_ak` 不可直接换成 `iface_kind_of`**：原实现要求 `get_type_kind(ti) == TYP_BASE` 才回 AK，否则 -1（`ty_shadow.cr:67-71`）；而 `iface_kind_of` 对 `TYP_DYN` 行回 `AK_DYN`、对结构行回 `AK_SEQUENCE` 等。原 `sh_native_ak(TI_DYN)` 回 **-1**，`TI_DYN` 由 `sh_term_of_ti` 的 `TYP_DYN` 分支另行处理（`:212-216`）⇒ 两者只在 `TYP_BASE` 行上重合，委托必须**显式保留该门**。）
 
@@ -316,11 +322,24 @@ fn sh_base_ak(ty: int) -> int { return iface_by_ty_code(ty); }
 //                   / IP_COND=30（真值性，`if` 现状收 bool|int）
 //                   / IP_COND_BOOL=31（严格 bool，`while` 现状**只收 bool**——两条规则现状不同，
 //                     **不得合并为一个「更统一」的位**：合并 = 收紧 `if` 或放宽 `while`）
-IP_UOP_BIAS : int = 20;
-IP_INDEX : int = 25;  IP_INDEX_RANGE : int = 26;  IP_FIELD : int = 27;
-IP_METHOD : int = 28; IP_AS : int = 29;  IP_COND : int = 30;  IP_COND_BOOL : int = 31;
+IP_UOP_BIAS : int = 20
+IP_INDEX : int = 25
+IP_INDEX_RANGE : int = 26
+IP_FIELD : int = 27
+IP_METHOD : int = 28
+IP_AS : int = 29
+IP_COND : int = 30
+IP_COND_BOOL : int = 31
 // 位构造照 dyn_set_type 的乘 2 循环（本语言无移位运算符）：
-fn iface_bit(n: int) -> int { b : ., mut = 1; k : ., mut = n; loop { if k <= 0 { break; } b = b * 2; k = k - 1; } return b; }
+fn iface_bit(n: int) -> int:
+    b : ., mut = 1
+    k : ., mut = n
+    loop:
+        if k <= 0:
+            break
+        b = b * 2
+        k = k - 1
+    return b
 ```
 
 **站点侧的三种「门形状」（现状各异，**必须逐字保留**；表只出「原子类 × op」的单侧许可）：**
@@ -406,8 +425,9 @@ fn ty_code_to_ti(ty: int) -> int
 - [ ] **Step 2: `never` 单元格探针（**本计划未测**，须实测才可裁决）**：
   ```core
   // 探针 A：调用位点的 never 形参
-  fn f[T](a: T, b: never) -> int { return 1; }
-  // 探针 B/C/D：嵌套位 [never;3] / *never / G[never]——经 res_call_type 递归
+  fn f[T](a: T, b: never) -> int:
+      return 1
+    // 探针 B/C/D：嵌套位 [never;3] / *never / G[never]——经 res_call_type 递归
   ```
   - 结果 **不可达** ⇒ 合一后 `res_call_type` 直接用 `if ti < 0 { ti = TI_UNIT; }`（与另表同形），差异消失，报告登记「不可达」。
   - 结果 **可达** ⇒ **保留现状**：`res_call_type` 处显式 `|| tv == TY_NEVER`（一行 + 注记 + 探针文件），并把「`never` 形参在调用位点被当作 unit」登记为**待裁决项**（交 P3；语义争议按 spec §4 裁决 6 **停下上报**）。

@@ -1239,10 +1239,16 @@
 - **现象（实测；批 5 终态构建 `build/corec`，只读分诊 12 探针之一）**：`g[T](t: T, x: T?)` 以 `T = dex` 实例化、实参为 **apx** 源时 ⇒ `check` rc=0 · `build` rc=0 · **ELF rc=142 / interp rc=15**（**期望 7/7**；`scaled` 实参对照 = **7/7**）⇒ **静默错值 + ELF≠interp（双路径分歧）**，与 `TODO #2026-09-16-29` 原始 RED（u11）**同严重级**；缺陷是 **apx 源特有**（与主族同形）。
 - **最小复现（<10 行，可直接入探针）**：
   ```core
-  fn g[T](t: T, x: T?) -> int {
-      return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-  }
-  fn main() -> int { d : dex, apx = 7.0; return g(1, d); }   // 期望 7；实测 ELF 142 / interp 15
+  fn g[T](t: T, x: T?) -> int:
+      return match x:
+          Some(v) =>:
+              return @raw_int(v) / 1000000
+          none =>:
+              return 0
+  fn main() -> int:
+      d : dex, apx = 7.0
+      return g(1, d)
+  // 期望 7；实测 ELF 142 / interp 15
   ```
 - **机理（`file:line`，读码）**：**调用侧环按「泛型声明」取形参型、callee 槽按「实例」取型** ⇒ 说法不一致：
   - 调用侧：`ir_gen.cr:1965` `cfi := find_func(func_ni)` → `fi_ast_node`（= **泛型声明**节点）；转换门在 `:1985`（`dex_opt_type_node(ast_data(cpn))`）——而泛型声明的形参类型节点是 `T?`（inner = 泛型参数 `T` ⇒ 判据**假**）⇒ **实参不转换**（bits 原样传递）；
@@ -1262,8 +1268,18 @@
 - **现象（实测）**：`n : int? = 7; if n == Some(7) { return 1; }` ⇒ **ELF rc=0**（未命中）；`n : int? = None; if n == None { return 1; }` ⇒ **ELF rc=0**（**连 `None == None` 都不命中**）；`n : int? = Some(7); if n == Some(7) {…}` ⇒ **ELF 0**。⇒ **`==` 对可选值恒假**（ELF 与 interp 同判 ⇒ 非双路径分歧，是**一致地错**）。
 - **最小复现（两条，各 <5 行）**：
   ```core
-  fn main() -> int { n : int? = 7;    if n == Some(7) { return 1; } return 0; }   // 期望 1；实测 0
-  fn main() -> int { n : int? = None; if n == None    { return 1; } return 0; }   // 期望 1；实测 0
+  fn main() -> int:
+      n : int? = 7
+      if n == Some(7):
+          return 1
+      return 0
+  // 期望 1；实测 0
+  fn main() -> int:
+      n : int? = none
+      if n == none:
+          return 1
+      return 0
+  // 期望 1；实测 0
   ```
 - **机理**：**未定位**（本条目只登记，不做根因定位）。观测事实 = 可选值的 `==` 在「值与 `Some(...)`」「值与 `None`」两种形态下**均不成立**；未排除与可选表示（rep/装箱面）或 `EXPR_ENUM_CONSTRUCTOR` 比较路径相关——**勿据本条推断根因**。
 - **判定**：**S（通用静默）**；作用面 = **所有可选（`int?` / `dex?` / 任意 `T?`）**，且 `if x == None` 是最自然写法 ⇒ 危害面**大于** `dex?` 专属面（分诊结论：本条比 `#2026-09-17-5` 更严重）。
@@ -1276,8 +1292,11 @@
 - **现象（实测）**：`extern fn e_opt(x: dex?) -> int;` ⇒ **`check` rc=0（零诊断）**、`build` rc=0；运行期 **139**（未解析符号）；对照 `extern fn e_int(x: int?) -> int;` ⇒ **同形同判**（check=0 / ELF 139）⇒ **非 dex 特有**。
 - **最小复现（<5 行）**：
   ```core
-  extern fn e_opt(x: dex?) -> int;
-  fn main() -> int { d : dex, apx = 7.0; return e_opt(d); }   // check=0（应拒未拒）；运行期 139
+  extern fn e_opt(x: dex?) -> int
+  fn main() -> int:
+      d : dex, apx = 7.0
+      return e_opt(d)
+  // check=0（应拒未拒）；运行期 139
   ```
 - **机理**：**未定位**（只登记）。可确认面 = 「`extern` 声明的形参类型不做可适用性校验」（C ABI **无可选表示**）；`W4` 环对 extern 侧**显式不扩**（`ir_gen.cr:1985` 的 `cfn_ext == 0` 守卫）⇒ 即使要支持也无约定 —— 属**语义层面不应存在**的形态。
 - **判定**：**L（运行期响亮 139）**，但**编译期零诊断 = fail-closed 缺口**（「不诊断」本身是洞；建议收敛为编译期硬错）。
@@ -1679,8 +1698,13 @@
 - **最小复现（6 行、确定性、零依赖）**：
   ```core
   import io
-  struct Point { x: int, y: int }
-  fn main() -> int { f := @fields(Point); println(f); println(int_str(str_len(f))); return 0; }
+  struct Point:
+      x: int, y: int
+  fn main() -> int:
+      f := @fields(Point)
+      println(f)
+      println(int_str(str_len(f)))
+      return 0
   ```
   ```bash
   ./build/corec clean-cache
@@ -2130,10 +2154,20 @@
 **① 的实测四档**（`nice -n 19 ./build/corec check`；对照腿 = 正常带 `return` 的函数 rc=0）：
 
 ```core
-fn f(x: int) -> int {}                                // 空体
-fn f(x: int) -> int { g(x); }                         // 以 unit 调用收尾
-fn f(x: int) -> int { if x > 0 { return 1; } }        // if 无 else，分支缺 return
-fn f(x: int) -> int { loop { if x > 0 { break; } } }  // loop 里 break 出走
+fn f(x: int) -> int:
+// 空体
+fn f(x: int) -> int:
+    g(x)
+// 以 unit 调用收尾
+fn f(x: int) -> int:
+    if x > 0:
+        return 1
+// if 无 else，分支缺 return
+fn f(x: int) -> int:
+    loop:
+        if x > 0:
+            break
+// loop 里 break 出走
 ```
 
 四档皆 `check` rc=1，报的是 **TF01「Function return type mismatch」**；`build` rc=1 **+ 零产物**（门有效）。**注意报的不是 TF02** —— 那正是本条要登记的：TF02 有码、无人 raise。

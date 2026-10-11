@@ -93,12 +93,11 @@
 
 **空函数 `tokenize` 验证：**
 ```core
-fn tokenize() {
-    g_token_count = 0;
-    g_pos = 0;
-    add_token(T_EOF);
-    return;
-}
+fn tokenize():
+    g_token_count = 0
+    g_pos = 0
+    add_token(T_EOF)
+    return
 ```
 将 `tokenize` 替换为空函数后，`corec2` **完全正常工作**——`tokenize` → `parse` → `check` → `IRgen` 全部通过，exit 0。确认问题仅在 `tokenize` 循环体内。
 
@@ -179,9 +178,9 @@ read-back 确认均写入正确值，然后 return
 同时在 `corearch_main` 中 `elf_gen` 返回后、`syscall3(write)` 前再加标记：
 
 ```core
-sz := elf_gen(g_elf_buf);
-w32(g_elf_buf, 74717, 0xCAFEBABE);  // 标记 3
-syscall3(1, fd, g_elf_buf, sz);
+sz := elf_gen(g_elf_buf)
+w32(g_elf_buf, 74717, 0xCAFEBABE)  // 标记 3
+syscall3(1, fd, g_elf_buf, sz)
 ```
 
 **最终二进制文件中的值：**
@@ -214,21 +213,19 @@ syscall3(1, fd, g_elf_buf, sz);
 
 ```core
 // emit_instr (instr.cr:299)
-fn emit_instr(instr_idx, buf, pos) {
-    cp := 0;
+fn emit_instr(instr_idx, buf, pos):
+    cp := 0
     ...
-    if op == IR_LOAD && d >= 0 {
-        w64(g_x86_rip_patch_pos, ..., pos + cp + 3);  // <= ppos 在这里注册
-        cp = cp + e2_lr(buf, pos+cp, 0);               // <= LEA 在这里发射
+    if op == IR_LOAD && d >= 0:
+        w64(g_x86_rip_patch_pos, ..., pos + cp + 3)  // <= ppos 在这里注册
+        cp = cp + e2_lr(buf, pos+cp, 0)               // <= LEA 在这里发射
         ...
-    }
-}
 ```
 
 调用方（elf.cr:545）：
 ```core
-sz := emit_instr(inst_idx, buf, cp);  // pos = cp (当前 buffer 位置)
-cp = cp + sz;
+sz := emit_instr(inst_idx, buf, cp)  // pos = cp (当前 buffer 位置)
+cp = cp + sz
 ```
 
 **可能的原因：**

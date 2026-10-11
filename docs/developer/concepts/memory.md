@@ -15,13 +15,13 @@ Core 的内存管理与 Rust 不同路：Rust 用类型层的借用规则（需�
 - 子图结束 → 区域整体重置回收，O(1)，无 GC 停顿
 
 ```core
-fn process_batch(items: [int]) -> int {
+fn process_batch(items: [int]) -> int:
     // 本函数内的临时数据都活在函数区域
     // 函数返回 → 整块回收,无需 free
-    total := 0;
-    for x in items { total = total + x; }
-    return total;
-}
+    total := 0
+    for x in items:
+        total = total + x
+    return total
 ```
 
 `go` 启动的并发子图各有独立区域，退出整块回收。

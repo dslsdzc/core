@@ -16,7 +16,7 @@ Core 编译器的滚动更新（hotpatch）机制。通过 `@hotpatch` 注解支
 ## IR 指令
 
 ```core
-IR_HOTPATCH_ROUTE : int = 39;  // dest=result_var, s1=fn_name_ni, s2=first_arg, s3=arg_count
+IR_HOTPATCH_ROUTE : int = 39  // dest=result_var, s1=fn_name_ni, s2=first_arg, s3=arg_count
 ```
 
 `IR_HOTPATCH_ROUTE` 在调用点替代 `IR_CALL`。后端将其编译为：
@@ -32,8 +32,10 @@ IR_HOTPATCH_ROUTE : int = 39;  // dest=result_var, s1=fn_name_ni, s2=first_arg, 
 **新增关键字**：`@hotpatch` 作为 `@` 内建原语扩展。
 
 ```core
-@hotpatch(ver=1) fn handle(x: dyn) -> dyn { body1 }
-@hotpatch(ver=2) fn handle(x: dyn) -> dyn { body2 }
+@hotpatch(ver=1) fn handle(x: dyn) -> dyn:
+    body1
+@hotpatch(ver=2) fn handle(x: dyn) -> dyn:
+    body2
 ```
 
 解析器：

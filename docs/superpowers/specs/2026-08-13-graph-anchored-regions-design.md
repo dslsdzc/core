@@ -103,15 +103,14 @@ RegionCheck 的 `cur_seq < exit_seq` 判定（`pointer-model.md` Pass 2）就是
 // 1. 布局声明（例外入口）——默认布局全自动：编译器按类型推导自然布局
 //    （字段顺序 + 自然对齐），用户不写任何东西。
 //    layout(...) 仅当默认布局不合用时才需要：packed（FFI）、强制对齐、硬件结构。
-struct PackedHeader layout(packed, align(4)) {
+struct PackedHeader layout(packed, align(4)):
     a: u8,       // 偏移 0
     b: u32,      // 偏移 4
     c: u16,      // 偏移 8
-}
 
 // 2. 放置声明——地址是物理事实，只有用户知道。
 //    声明式进图（地址+大小+对齐），之后全图追踪，ProvenanceVerify 照常验证。
-mmio := alloc_at(0x7fff0000, 4096, align(4096));
+mmio := alloc_at(0x7fff0000, 4096, align(4096))
 ```
 
 - v1 **不提供**显式区域/回收语法（YAGNI）。「指定回收」是编译器内部机制（IR 层生成回收点 = Cyclone early deallocation 的自动版）。

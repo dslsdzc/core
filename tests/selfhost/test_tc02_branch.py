@@ -50,54 +50,45 @@ def check_src(src: str):
 # ── 正控：期望**无诊断**（rc=0） ──────────────────────────────────────
 CASES_OK = [
     ("tc02_else_return_silenced",
-     "fn main() -> int {\n    if 1 < 2 { } else { return 1; }\n    return 0;\n}\n"),
+     "fn main() -> int:\n    if 1 < 2:\n    else:\n        return 1\n    return 0\n"),
     ("tc02_else_return_after_stmt",
-     "fn main() -> int {\n    if 1 < 2 { } else { x := 1; return x; }\n    return 0;\n}\n"),
+     "fn main() -> int:\n    if 1 < 2:\n    else:\n        x := 1\n        return x\n    return 0\n"),
     ("tc02_loop_control_unchanged",
-     "fn main() -> int {\n    if 1 < 2 { } else { loop { } }\n    return 0;\n}\n"),
+     "fn main() -> int:\n    if 1 < 2:\n    else:\n        loop:\n    return 0\n"),
     ("tc02_bare_return_unchanged",
-     "fn main() -> int {\n    if 1 < 2 { } else { return; }\n    return 0;\n}\n"),
+     "fn main() -> int:\n    if 1 < 2:\n    else:\n        return\n    return 0\n"),
     ("tf01_fallthrough_still_exempt",
-     "fn f() -> int { loop { } }\nfn main() -> int { return f(); }\n"),
+     "fn f() -> int:\n    loop:\nfn main() -> int:\n    return f()\n"),
     ("tc02_stmt_position_multi",
-     "fn main() -> int {\n" +
-     "".join(f"    if 1.5 < 2.5 {{ }} else {{ return {i}; }}\n" for i in range(1, 7)) +
-     "    return 0;\n}\n"),
+     "fn main() -> int:\n" +
+     "".join(f"    if 1.5 < 2.5:\n    else:\n        return {i}\n" for i in range(1, 7)) +
+     "    return 0\n"),
 ]
 
 # ── 负控/钉子：期望**仍报**（码 + rc=1） ─────────────────────────────
 CASES_DIAG = [
     ("tc02_then_return_kept",
-     "fn main() -> int {\n    if 1 < 2 { return 1; } else { }\n    return 0;\n}\n", ["TC02"]),
+     "fn main() -> int:\n    if 1 < 2:\n        return 1\n    else:\n    return 0\n", ["TC02"]),
     ("tc02_true_mismatch_kept",
-     "fn main() -> int {\n    if 1 < 2 { 1 } else { \"s\" }\n    return 0;\n}\n", ["TC02"]),
+     "fn main() -> int:\n    if 1 < 2:\n        1\n    else:\n        \"s\"\n    return 0\n", ["TC02"]),
     ("tf01_still_reported",
-     "fn f() -> int { return \"s\"; }\nfn main() -> int { return f(); }\n", ["TF01"]),
+     "fn f() -> int:\n    return \"s\"\nfn main() -> int:\n    return f()\n", ["TF01"]),
     ("ta02_still_reported",
-     "fn main() -> int {\n    x : int = \"s\";\n    return 0;\n}\n", ["TA02"]),
+     "fn main() -> int:\n    x : int = \"s\"\n    return 0\n", ["TA02"]),
     ("ta02_never_exempt_still",
-     "fn main() -> int {\n    x : int = nosuchname;\n    return 0;\n}\n", ["N01"]),
+     "fn main() -> int:\n    x : int = nosuchname\n    return 0\n", ["N01"]),
     ("tb01_negative_ptr_add",
-     "fn main() -> int {\n    x : ., mut = 1;\n    p := &x;\n    q := &x;\n    return p + q;\n}\n", ["TB01"]),
+     "fn main() -> int:\n    x : ., mut = 1\n    p := &x\n    q := &x\n    return p + q\n", ["TB01"]),
     ("tb01_negative_str_sub",
-     "fn main() -> int {\n    return \"a\" - \"b\";\n}\n", ["TB01"]),
+     "fn main() -> int:\n    return \"a\" - \"b\"\n", ["TB01"]),
 ]
 
 # ── 端到端：期望 build 成功 + 运行 rc=0（= test_native_float 两源同形） ──
 CASES_RUN = [
     ("tc02_end2end_cmp",
-     "fn main() -> int {\n"
-     "    if 1.5 < 2.5 { } else { return 1; }\n"
-     "    if 2.5 > 1.5 { } else { return 2; }\n"
-     "    if 1.5 <= 1.5 { } else { return 3; }\n"
-     "    return 0;\n}\n"),
+     "fn main() -> int:\n    if 1.5 < 2.5:\n    else:\n        return 1\n    if 2.5 > 1.5:\n    else:\n        return 2\n    if 1.5 <= 1.5:\n    else:\n        return 3\n    return 0\n"),
     ("tc02_end2end_arith",
-     "fn main() -> int {\n"
-     "    x := 1.5;\n"
-     "    y := 2.5;\n"
-     "    if x + y == 4.0 { } else { return 1; }\n"
-     "    if x * y == 3.75 { } else { return 2; }\n"
-     "    return 0;\n}\n"),
+     "fn main() -> int:\n    x := 1.5\n    y := 2.5\n    if x + y == 4.0:\n    else:\n        return 1\n    if x * y == 3.75:\n    else:\n        return 2\n    return 0\n"),
 ]
 
 

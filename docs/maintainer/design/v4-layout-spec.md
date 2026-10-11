@@ -341,9 +341,9 @@ fn g():
 `[T0·实核]` `src/compiler/parser.cr:552-554`：
 
 ```core
-ft := advance_tok();
-fni := str_intern(tok_lx(ft));
-advance_tok();          // ← 返回值被丢弃：`=` 与 `:` 两形今天都收
+ft := advance_tok()
+fni := str_intern(tok_lx(ft))
+advance_tok()          // ← 返回值被丢弃：`=` 与 `:` 两形今天都收
 ```
 
 ⇒ 若 T5 不把这一行改成带校验的消费，v4 下「两形都收」会**静默保留**，而 v4 是单形语言。

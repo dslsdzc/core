@@ -123,14 +123,13 @@ Core 采用**图锚定区域**的统一内存管理:区域(Region)锚定在 HDFG
 ```core
 // 1. 布局声明(例外入口)——默认布局全自动(字段顺序 + 自然对齐),用户不写任何东西;
 //    layout(...) 仅当默认布局不合用时:packed(FFI)、强制对齐、硬件结构
-struct PackedHeader layout(packed, align(4)) {
+struct PackedHeader layout(packed, align(4)):
     a: u8,       // 偏移 0
     b: u32,      // 偏移 4
     c: u16,      // 偏移 8
-}
 
 // 2. 放置声明——地址是物理事实,只有用户知道;声明式进图,之后全图追踪
-mmio := alloc_at(0x7fff0000, 4096, align(4096));
+mmio := alloc_at(0x7fff0000, 4096, align(4096))
 ```
 
 - 不提供显式区域/回收语法(YAGNI)

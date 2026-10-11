@@ -181,30 +181,39 @@ g_ty_uncovered : int, mut;         // 未覆盖面命中位（如 AK_NAMED 具�
 追加内容照 `grow_types` 先例：
 
 ```core
-fn grow_type_terms(needed: int) {
-    if needed < g_type_term_cap { return; }
-    nc : ., mut = g_type_term_cap * 2;
-    if nc < 256 { nc = 256; }
-    if nc < needed { nc = needed + 64; }
-    nb := alloc(nc * ESZ_TYPE_TERM);
-    _dyncpy(g_type_terms, g_type_term_cap * ESZ_TYPE_TERM, nb);
-    g_type_terms = nb;
-    g_type_term_cap = nc;
-}
+fn grow_type_terms(needed: int):
+    if needed < g_type_term_cap:
+        return
+    nc : ., mut = g_type_term_cap * 2
+    if nc < 256:
+        nc = 256
+    if nc < needed:
+        nc = needed + 64
+    nb := alloc(nc * ESZ_TYPE_TERM)
+    _dyncpy(g_type_terms, g_type_term_cap * ESZ_TYPE_TERM, nb)
+    g_type_terms = nb
+    g_type_term_cap = nc
 
-fn grow_tt_index(needed: int) {
+fn grow_tt_index(needed: int):
     // 开放寻址索引：容量取 2 的幂、≥ 2×项数（重建式扩容，见 type_terms.cr 的 tt_reindex）
-    if needed < g_tt_index_cap { return; }
-    nc : ., mut = 1024;
-    loop { if nc >= needed { break; } nc = nc * 2; }
-    nb := alloc(nc * 8);
-    i : ., mut = 0;
-    loop { if i >= nc { break; } w64(nb, i * 8, -1); i = i + 1; }
-    g_tt_index = nb;
-    g_tt_index_cap = nc;
-    g_tt_index_count = 0;
-    tt_reindex();
-}
+    if needed < g_tt_index_cap:
+        return
+    nc : ., mut = 1024
+    loop:
+        if nc >= needed:
+            break
+        nc = nc * 2
+    nb := alloc(nc * 8)
+    i : ., mut = 0
+    loop:
+        if i >= nc:
+            break
+        w64(nb, i * 8, -1)
+        i = i + 1
+    g_tt_index = nb
+    g_tt_index_cap = nc
+    g_tt_index_count = 0
+    tt_reindex()
 ```
 
 - [ ] **Step 5: 类型项表 + 构造 API（`src/compiler/type_terms.cr`）**
@@ -360,35 +369,45 @@ fn tt_atom(ak: int, ti: int, params: int) -> int { return tt_term(TT_ATOM, ak, t
 // 判据：corec selftest-types → 每例一行 PASS/FAIL，末行 "N/M type-engine cases passed"，rc=0 全过。
 // 说明：本文件只依赖 type_terms.cr / type_engine.cr 的公开 API（签名见计划 Task 1/Task 3）。
 
-fn ts_check(name: string, got: int, want: int) -> int {
-    if got == want {
-        print("PASS "); println(name);
-        return 0;
-    }
-    print("FAIL "); print(name);
-    print(": got "); print(int_str(got));
-    print(" want "); println(int_str(want));
-    return 1;
-}
+fn ts_check(name: string, got: int, want: int) -> int:
+    if got == want:
+        print("PASS ")
+        println(name)
+        return 0
+    print("FAIL ")
+    print(name)
+    print(": got ")
+    print(int_str(got))
+    print(" want ")
+    println(int_str(want))
+    return 1
 
-fn type_selftest_run() -> int {
-    fails : ., mut = 0;
-    total : ., mut = 0;
+fn type_selftest_run() -> int:
+    fails : ., mut = 0
+    total : ., mut = 0
 
     // --- P0 最小用例（Task 3/4 扩充为 spec §8 全类：子类型/等价/不相交/可空/反例/穷尽性/递归/参数化/预算）---
-    a_int := tt_atom(AK_INT, TI_INT, -1);
-    a_str := tt_atom(AK_STRING, TI_STR, -1);
+    a_int := tt_atom(AK_INT, TI_INT, -1)
+    a_str := tt_atom(AK_STRING, TI_STR, -1)
 
-    total = total + 1; fails = fails + ts_check("unit.bot_sub_int", ty_sub(tt_bot(), a_int), 1);
-    total = total + 1; fails = fails + ts_check("unit.int_sub_str",  ty_sub(a_int, a_str), 0);
-    total = total + 1; fails = fails + ts_check("unit.int_sub_int",  ty_sub(a_int, a_int), 1);
-    total = total + 1; fails = fails + ts_check("unit.dedup",       (tt_union(a_int, a_str) == tt_union(a_int, a_str)), 1);
-    total = total + 1; fails = fails + ts_check("unit.notnot",      (tt_not(tt_not(a_int)) == a_int), 1);
+    total = total + 1
+    fails = fails + ts_check("unit.bot_sub_int", ty_sub(tt_bot(), a_int), 1)
+    total = total + 1
+    fails = fails + ts_check("unit.int_sub_str",  ty_sub(a_int, a_str), 0)
+    total = total + 1
+    fails = fails + ts_check("unit.int_sub_int",  ty_sub(a_int, a_int), 1)
+    total = total + 1
+    fails = fails + ts_check("unit.dedup",       (tt_union(a_int, a_str) == tt_union(a_int, a_str)), 1)
+    total = total + 1
+    fails = fails + ts_check("unit.notnot",      (tt_not(tt_not(a_int)) == a_int), 1)
 
-    print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
-    if fails != 0 { return 1; }
-    return 0;
-}
+    print(int_str(total - fails))
+    print("/")
+    print(int_str(total))
+    println(" type-engine cases passed")
+    if fails != 0:
+        return 1
+    return 0
 ```
 
 - [ ] **Step 7: `type_engine.cr` 最小桩（供 Step 6 编译通过；Task 3 补全判定）**
@@ -396,17 +415,31 @@ fn type_selftest_run() -> int {
 ```core
 // R2 P0：类型项判定引擎（语义包含）。
 // 本文件在 Task 3 补全；Task 1 只放原子类常量 + ty_sub 桩（保证骨架可编译可跑）。
-AK_INT : int = 0;      AK_DEX : int = 1;     AK_STRING : int = 2;   AK_BOOL : int = 3;
-AK_UNIT : int = 4;     AK_NEVER : int = 5;   AK_CHAR : int = 6;     AK_DYN : int = 7;
-AK_PRODUCT : int = 8;  AK_SUM : int = 9;     AK_SEQUENCE : int = 10;
-AK_REF : int = 11;     AK_PTR : int = 12;    AK_FN : int = 13;      AK_NAMED : int = 14;
+AK_INT : int = 0
+AK_DEX : int = 1
+AK_STRING : int = 2
+AK_BOOL : int = 3
+AK_UNIT : int = 4
+AK_NEVER : int = 5
+AK_CHAR : int = 6
+AK_DYN : int = 7
+AK_PRODUCT : int = 8
+AK_SUM : int = 9
+AK_SEQUENCE : int = 10
+AK_REF : int = 11
+AK_PTR : int = 12
+AK_FN : int = 13
+AK_NAMED : int = 14
 
-fn ty_sub(a: int, b: int) -> int {   // 桩：Task 3 替换为真判定（三态 1/0/-1）
-    if a == b { return 1; }
-    if tt_tag(b) == TT_TOP { return 1; }
-    if tt_tag(a) == TT_BOT { return 1; }
-    return 0;
-}
+fn ty_sub(a: int, b: int) -> int:
+    // 桩：Task 3 替换为真判定（三态 1/0/-1）
+    if a == b:
+        return 1
+    if tt_tag(b) == TT_TOP:
+        return 1
+    if tt_tag(a) == TT_BOT:
+        return 1
+    return 0
 ```
 
 - [ ] **Step 8: CLI 注册（`src/compiler/main.cr`）**
@@ -489,29 +522,42 @@ nice -n 19 python3 build_selfhost_native.py && nice -n 19 ./build/corec selftest
 
 ```core
 // NNF：否定下推（De Morgan + 双重否定消除）；μ 体内照推
-fn tt_nnf(i: int) -> int {
-    t := tt_tag(i);
-    if t == TT_BOT { return tt_top(); }
-    if t == TT_TOP { return tt_bot(); }
-    if t == TT_NOT { return tt_nnf_neg(tt_a(i)); }
-    if t == TT_UNION { return tt_union(tt_nnf(tt_a(i)), tt_nnf(tt_b(i))); }
-    if t == TT_INTER { return tt_inter(tt_nnf(tt_a(i)), tt_nnf(tt_b(i))); }
-    if t == TT_MU { return tt_mu(tt_a(i), tt_nnf(tt_b(i))); }
-    if t == TT_CONS { return tt_cons(tt_nnf(tt_a(i)), tt_nnf(tt_b(i))); }
-    if t == TT_ATOM { return tt_atom(tt_a(i), tt_b(i), tt_nnf_list(tt_c(i))); }
-    return i;   // 字面：ATOM 参数已推 / VAR / NIL
-}
+fn tt_nnf(i: int) -> int:
+    t := tt_tag(i)
+    if t == TT_BOT:
+        return tt_top()
+    if t == TT_TOP:
+        return tt_bot()
+    if t == TT_NOT:
+        return tt_nnf_neg(tt_a(i))
+    if t == TT_UNION:
+        return tt_union(tt_nnf(tt_a(i)), tt_nnf(tt_b(i)))
+    if t == TT_INTER:
+        return tt_inter(tt_nnf(tt_a(i)), tt_nnf(tt_b(i)))
+    if t == TT_MU:
+        return tt_mu(tt_a(i), tt_nnf(tt_b(i)))
+    if t == TT_CONS:
+        return tt_cons(tt_nnf(tt_a(i)), tt_nnf(tt_b(i)))
+    if t == TT_ATOM:
+        return tt_atom(tt_a(i), tt_b(i), tt_nnf_list(tt_c(i)))
+    return i   // 字面：ATOM 参数已推 / VAR / NIL
 
-fn tt_nnf_neg(i: int) -> int {   // 计算 ¬i 的 NNF（负位置）
-    t := tt_tag(i);
-    if t == TT_BOT { return tt_top(); }
-    if t == TT_TOP { return tt_bot(); }
-    if t == TT_NOT { return tt_nnf(tt_a(i)); }
-    if t == TT_UNION { return tt_inter(tt_nnf_neg(tt_a(i)), tt_nnf_neg(tt_b(i))); }
-    if t == TT_INTER { return tt_union(tt_nnf_neg(tt_a(i)), tt_nnf_neg(tt_b(i))); }
-    if t == TT_MU { return tt_mu(tt_a(i), tt_nnf_neg(tt_b(i))); }
-    return tt_not(i);   // 字面取反：¬ATOM / ¬VAR
-}
+fn tt_nnf_neg(i: int) -> int:
+    // 计算 ¬i 的 NNF（负位置）
+    t := tt_tag(i)
+    if t == TT_BOT:
+        return tt_top()
+    if t == TT_TOP:
+        return tt_bot()
+    if t == TT_NOT:
+        return tt_nnf(tt_a(i))
+    if t == TT_UNION:
+        return tt_inter(tt_nnf_neg(tt_a(i)), tt_nnf_neg(tt_b(i)))
+    if t == TT_INTER:
+        return tt_union(tt_nnf_neg(tt_a(i)), tt_nnf_neg(tt_b(i)))
+    if t == TT_MU:
+        return tt_mu(tt_a(i), tt_nnf_neg(tt_b(i)))
+    return tt_not(i)   // 字面取反：¬ATOM / ¬VAR
 ```
 （`tt_nnf_list` 是新增的小工具函数，对 CONS 链逐元素调用 `tt_nnf`。）
 
@@ -521,48 +567,48 @@ fn tt_nnf_neg(i: int) -> int {   // 计算 ¬i 的 NNF（负位置）
 // DNF：把 NNF 形态分配到「union of inter-of-literals」。
 // 入口先 tt_nnf；分配律在 INTER 节点上做（左右各自 DNF 后笛卡尔积）。
 // 简化：单元素 union/inter 不建节点；∩ 左/右为 union 时展开（分配律）；结果项去重靠 tt_term 的 DAG。
-fn tt_norm(i: int) -> int { return tt_dnf(tt_nnf(i)); }
+fn tt_norm(i: int) -> int:
+    return tt_dnf(tt_nnf(i))
 
-fn tt_dnf(i: int) -> int {
-    t := tt_tag(i);
-    if t == TT_UNION { return tt_union(tt_dnf(tt_a(i)), tt_dnf(tt_b(i))); }
-    if t == TT_INTER {
-        l := tt_dnf(tt_a(i)); r := tt_dnf(tt_b(i));
+fn tt_dnf(i: int) -> int:
+    t := tt_tag(i)
+    if t == TT_UNION:
+        return tt_union(tt_dnf(tt_a(i)), tt_dnf(tt_b(i)))
+    if t == TT_INTER:
+        l := tt_dnf(tt_a(i))
+        r := tt_dnf(tt_b(i))
         // 分配律**两支都展开**：(A∪B)∩C → (A∩C) ∪ (B∩C)
         // （本计划初稿只展开一支 = 静默丢项；P0 Task 2 自测 norm.distributed 实证 got INTER want UNION）
-        if tt_tag(l) == TT_UNION {
-            return tt_union(tt_dnf(tt_inter(tt_a(l), r)), tt_dnf(tt_inter(tt_b(l), r)));
-        }
-        if tt_tag(r) == TT_UNION {
-            return tt_union(tt_dnf(tt_inter(l, tt_a(r))), tt_dnf(tt_inter(l, tt_b(r))));
-        }
-        return tt_inter(l, r);   // 已规范化（∩-链扁平）
-    }
-    if t == TT_MU { return tt_mu(tt_a(i), tt_dnf(tt_b(i))); }
-    return i;   // 字面
-}
+        if tt_tag(l) == TT_UNION:
+            return tt_union(tt_dnf(tt_inter(tt_a(l), r)), tt_dnf(tt_inter(tt_b(l), r)))
+        if tt_tag(r) == TT_UNION:
+            return tt_union(tt_dnf(tt_inter(l, tt_a(r))), tt_dnf(tt_inter(l, tt_b(r))))
+        return tt_inter(l, r)   // 已规范化（∩-链扁平）
+    if t == TT_MU:
+        return tt_mu(tt_a(i), tt_dnf(tt_b(i)))
+    return i   // 字面
 
 // DNF 形态判定：UNION 的每个子项必须是「product 或 literal」（不得再嵌 UNION）；
 // INTER 链的叶子必须全是 literal；literal = ATOM / ¬ATOM / VAR / ¬VAR / TOP_K / ⊥
-fn tt_is_dnf(i: int) -> int {
-    t := tt_tag(i);
-    if t == TT_UNION {
-        if tt_is_dnf(tt_a(i)) == 0 { return 0; }
-        return tt_is_dnf(tt_b(i));
-    }
+fn tt_is_dnf(i: int) -> int:
+    t := tt_tag(i)
+    if t == TT_UNION:
+        if tt_is_dnf(tt_a(i)) == 0:
+            return 0
+        return tt_is_dnf(tt_b(i))
     // 非 UNION 位置：不许出现 UNION（上面已递归剥掉），检查 product/literal 形态
-    if t == TT_INTER { return tt_is_product_chain(i); }
-    return tt_is_literal(i);
-}
+    if t == TT_INTER:
+        return tt_is_product_chain(i)
+    return tt_is_literal(i)
 
-fn tt_is_product_chain(i: int) -> int {
-    if tt_tag(i) == TT_INTER {
-        if tt_tag(tt_a(i)) == TT_UNION || tt_tag(tt_b(i)) == TT_UNION { return 0; }
-        if tt_is_product_chain(tt_a(i)) == 0 { return 0; }
-        return tt_is_product_chain(tt_b(i));
-    }
-    return tt_is_literal(i);
-}
+fn tt_is_product_chain(i: int) -> int:
+    if tt_tag(i) == TT_INTER:
+        if tt_tag(tt_a(i)) == TT_UNION || tt_tag(tt_b(i)) == TT_UNION:
+            return 0
+        if tt_is_product_chain(tt_a(i)) == 0:
+            return 0
+        return tt_is_product_chain(tt_b(i))
+    return tt_is_literal(i)
 ```
 （`tt_is_literal` 已在 Task 3 Step 3 定义，**依赖顺序**如下：Task 2 落地时先补一个最小 `tt_is_literal`，其语义同 Task 3 版本；Task 3 再替换为最终版。两版语义必须一致。）
 
@@ -612,37 +658,49 @@ fn ak_disjoint(x: int, y: int) -> int
 
 ```core
     // 深递归探针：μX₀. product<μX₁. product<… int>>（深度 256）——判定展开会耗尽小预算
-    // （放在 type_selftest.cr 内，仅自测使用）
-    fn tt_mu_probe_deep() -> int {
-        acc : ., mut = tt_atom(AK_INT, TI_INT, -1);
-        d : ., mut = 0;
-        loop {
-            if d >= 256 { break; }
-            acc = tt_mu(0, tt_atom(AK_PRODUCT, -1, tt_cons(acc, tt_nil())));
-            d = d + 1;
-        }
-        return acc;
-    }
+        // （放在 type_selftest.cr 内，仅自测使用）
+    fn tt_mu_probe_deep() -> int:
+        acc : ., mut = tt_atom(AK_INT, TI_INT, -1)
+        d : ., mut = 0
+        loop:
+            if d >= 256:
+                break
+            acc = tt_mu(0, tt_atom(AK_PRODUCT, -1, tt_cons(acc, tt_nil())))
+            d = d + 1
+        return acc
 
-    // --- 判定（Task 3）---
-    u_is := tt_union(a_int, a_str);
-    total = total + 1; fails = fails + ts_check("sub.union_right", ty_sub(a_int, u_is), 1);
-    total = total + 1; fails = fails + ts_check("sub.union_left_neg", ty_sub(u_is, a_int), 0);
-    total = total + 1; fails = fails + ts_check("sub.inter", ty_sub(tt_inter(a_int, a_str), a_int), 1);
-    total = total + 1; fails = fails + ts_check("equiv.absorb", ty_equiv(tt_union(a_int, a_int), a_int), 1);
-    total = total + 1; fails = fails + ts_check("disjoint.atoms", ty_disjoint(a_int, a_str), 1);
-    total = total + 1; fails = fails + ts_check("disjoint.same", ty_disjoint(a_int, a_int), 0);
-    total = total + 1; fails = fails + ts_check("inh.atom", ty_inhabited(a_int), 1);
-    total = total + 1; fails = fails + ts_check("inh.contra", ty_inhabited(tt_inter(a_int, tt_not(a_int))), 0);
-    total = total + 1; fails = fails + ts_check("inh.mixed_atoms",
-        ty_inhabited(tt_inter(a_int, tt_atom(AK_SEQUENCE, -1, -1))), 0);
-    total = total + 1; fails = fails + ts_check("topk.sub", ty_sub(a_int, tt_top_k(AK_INT)), 1);
-    total = total + 1; fails = fails + ts_check("topk.neg", ty_sub(a_str, tt_top_k(AK_INT)), 0);
-    // 预算守卫（深递归爆炸项 + 极小预算 → 三态 -1，且不与"不成立"混淆）
-    ty_budget_reset(64);
-    total = total + 1; fails = fails + ts_check("budget.unknown", ty_sub(tt_mu_probe_deep(), a_int), -1);
-    total = total + 1; fails = fails + ts_check("budget.flag", ty_exhausted(), 1);
-    ty_budget_reset(200000);
+        // --- 判定（Task 3）---
+    u_is := tt_union(a_int, a_str)
+    total = total + 1
+    fails = fails + ts_check("sub.union_right", ty_sub(a_int, u_is), 1)
+    total = total + 1
+    fails = fails + ts_check("sub.union_left_neg", ty_sub(u_is, a_int), 0)
+    total = total + 1
+    fails = fails + ts_check("sub.inter", ty_sub(tt_inter(a_int, a_str), a_int), 1)
+    total = total + 1
+    fails = fails + ts_check("equiv.absorb", ty_equiv(tt_union(a_int, a_int), a_int), 1)
+    total = total + 1
+    fails = fails + ts_check("disjoint.atoms", ty_disjoint(a_int, a_str), 1)
+    total = total + 1
+    fails = fails + ts_check("disjoint.same", ty_disjoint(a_int, a_int), 0)
+    total = total + 1
+    fails = fails + ts_check("inh.atom", ty_inhabited(a_int), 1)
+    total = total + 1
+    fails = fails + ts_check("inh.contra", ty_inhabited(tt_inter(a_int, tt_not(a_int))), 0)
+    total = total + 1
+    fails = fails + ts_check("inh.mixed_atoms",
+        ty_inhabited(tt_inter(a_int, tt_atom(AK_SEQUENCE, -1, -1))), 0)
+    total = total + 1
+    fails = fails + ts_check("topk.sub", ty_sub(a_int, tt_top_k(AK_INT)), 1)
+    total = total + 1
+    fails = fails + ts_check("topk.neg", ty_sub(a_str, tt_top_k(AK_INT)), 0)
+        // 预算守卫（深递归爆炸项 + 极小预算 → 三态 -1，且不与"不成立"混淆）
+    ty_budget_reset(64)
+    total = total + 1
+    fails = fails + ts_check("budget.unknown", ty_sub(tt_mu_probe_deep(), a_int), -1)
+    total = total + 1
+    fails = fails + ts_check("budget.flag", ty_exhausted(), 1)
+    ty_budget_reset(200000)
 ```
 
 - [ ] **Step 2: 运行确认「红」**（桩返回 0，断言 1 或 -1 的用例必然失败）
@@ -652,36 +710,42 @@ fn ak_disjoint(x: int, y: int) -> int
 ```core
 // 原子类互斥（P0 公理表）：不同原子类两两不相交；AK_DYN = ⊤（与所有类相交）。
 // 例外：AK_NAMED 的具体行可能展开为其它类——P0 不展开（登记为未覆盖面），按未知处理。
-fn ak_disjoint(x: int, y: int) -> int {
-    if x == y { return 0; }
-    if x == AK_DYN || y == AK_DYN { return 0; }
-    if x == AK_NEVER || y == AK_NEVER { return 1; }
-    return 1;
-}
+fn ak_disjoint(x: int, y: int) -> int:
+    if x == y:
+        return 0
+    if x == AK_DYN || y == AK_DYN:
+        return 0
+    if x == AK_NEVER || y == AK_NEVER:
+        return 1
+    return 1
 
-fn tt_is_literal(i: int) -> int {
-    t := tt_tag(i);
-    if t == TT_ATOM || t == TT_VAR || t == TT_TOP_K || t == TT_BOT { return 1; }
-    if t == TT_NOT {
-        it := tt_tag(tt_a(i));
-        if it == TT_ATOM || it == TT_VAR || it == TT_TOP_K { return 1; }
-    }
-    return 0;
-}
+fn tt_is_literal(i: int) -> int:
+    t := tt_tag(i)
+    if t == TT_ATOM || t == TT_VAR || t == TT_TOP_K || t == TT_BOT:
+        return 1
+    if t == TT_NOT:
+        it := tt_tag(tt_a(i))
+        if it == TT_ATOM || it == TT_VAR || it == TT_TOP_K:
+            return 1
+    return 0
 
 // 字面覆盖：literal p 是否蕴含 literal q（q 的语义包含 p 的）
-fn lit_covers(p: int, q: int) -> int {
-    if p == q { return 1; }
-    pt := tt_tag(p); qt := tt_tag(q);
+fn lit_covers(p: int, q: int) -> int:
+    if p == q:
+        return 1
+    pt := tt_tag(p)
+    qt := tt_tag(q)
     // ⊤ₖ 覆盖同类原子
-    if qt == TT_TOP_K {
-        if pt == TT_ATOM { return ty_ak_of(p) == tt_a(q); }
-        if pt == TT_TOP_K { return tt_a(p) == tt_a(q); }
-        return 0;
-    }
-    if pt == TT_NOT && qt != TT_NOT { return 0; }   // ¬A 不蕴含正字面（除 A=B 已排除）
-    return 0;   // 其余一律不覆盖（⊥ 早退由调用方 lits_contradictory 处理）
-}
+    if qt == TT_TOP_K:
+        if pt == TT_ATOM:
+            return ty_ak_of(p) == tt_a(q)
+        if pt == TT_TOP_K:
+            return tt_a(p) == tt_a(q)
+        return 0
+    if pt == TT_NOT && qt != TT_NOT:
+        return 0
+    // ¬A 不蕴含正字面（除 A=B 已排除）
+    return 0   // 其余一律不覆盖（⊥ 早退由调用方 lits_contradictory 处理）
 ```
 （`ty_ak_of(lit)` 的规则：ATOM 取 `tt_a(lit)`；`¬ATOM` 取 `tt_a(tt_a(lit))`。）
 
@@ -689,75 +753,95 @@ fn lit_covers(p: int, q: int) -> int {
 
 ```core
 // 顶层入口：每次重置步数/耗尽位，规范化两侧，逐 product 覆盖判定
-fn ty_sub(a: int, b: int) -> int {
-    if a == b { return 1; }
-    nav := tt_norm(a); nbv := tt_norm(b);
-    if nav == nbv { return 1; }
-    if tt_tag(nbv) == TT_TOP { return 1; }
-    if tt_tag(nav) == TT_BOT { return 1; }
+fn ty_sub(a: int, b: int) -> int:
+    if a == b:
+        return 1
+    nav := tt_norm(a)
+    nbv := tt_norm(b)
+    if nav == nbv:
+        return 1
+    if tt_tag(nbv) == TT_TOP:
+        return 1
+    if tt_tag(nav) == TT_BOT:
+        return 1
     // A = ⋃ products；每个 product 必须被 B 的某个 product 覆盖
-    r := sub_union_covered(nav, nbv, 0);
-    if g_ty_exhausted != 0 { return -1; }
-    return r;
-}
+    r := sub_union_covered(nav, nbv, 0)
+    if g_ty_exhausted != 0:
+        return -1
+    return r
 
 // products 分解：DNF 形态下按 UNION 拆分，叶子 = product（∩-链）或字面
-fn prod_covered(p: int, b: int) -> int {
+fn prod_covered(p: int, b: int) -> int:
     // b 拆 union：任一 product 覆盖即可
-    if tt_tag(b) == TT_UNION { if prod_covered(p, tt_a(b)) == 1 { return 1; } return prod_covered(p, tt_b(b)); }
+    if tt_tag(b) == TT_UNION:
+        if prod_covered(p, tt_a(b)) == 1:
+            return 1
+        return prod_covered(p, tt_b(b))
     // p 与 b 均为 product/字面：收集双方字面集后做覆盖（b ⊆ p）
     //   —— p 是待检查的「更小集合」，b 是候选「更大集合」：需要 b 的每个字面被 p 的某字面蕴含
-    plits := lit_collect(p); blits := lit_collect(b);
-    bi : ., mut = 0;
-    loop {
-        if bi >= blits_count { break; }
-        bq := blits[bi];
+    plits := lit_collect(p)
+    blits := lit_collect(b)
+    bi : ., mut = 0
+    loop:
+        if bi >= blits_count:
+            break
+        bq := blits[bi]
         // ⊥ 早退：p 的字面集内部矛盾 → 空集，覆盖一切
-        if lits_contradictory(plits) != 0 { return 1; }
-        if !lit_set_covers(plits, bq) { return 0; }
-        bi = bi + 1;
-    }
-    return 1;
-}
+        if lits_contradictory(plits) != 0:
+            return 1
+        if !lit_set_covers(plits, bq):
+            return 0
+        bi = bi + 1
+    return 1
 ```
 （实现者按此语义实现：`lit_collect` 把 product 拆成字面数组，µ 展开点见下；`lit_set_covers` 用 `lit_covers` 扫描；`lits_contradictory` 检查 `ATOM(k1)` 与 `ATOM(k2)`（k1≠k2 且互斥），或检查 `X` 与 `¬X`。）
 
 ```core
 // μ 展开 + memo（假设-判定，最大不动点）：遇到 MU 单步展开，并在假设集中登记 (子项对)
 // 预算：每次 sub 调用 g_ty_steps += 1；超 g_ty_budget_max → g_ty_exhausted = 1，返回 -1
-fn sub_step(a: int, b: int) -> int {
-    g_ty_steps = g_ty_steps + 1;
-    if g_ty_steps > g_ty_budget_max { g_ty_exhausted = 1; return -1; }
-    mk := ty_memo_find(a, b);
-    if mk >= 0 { return r64(g_ty_memo_vals, mk * 8); }
+fn sub_step(a: int, b: int) -> int:
+    g_ty_steps = g_ty_steps + 1
+    if g_ty_steps > g_ty_budget_max:
+        g_ty_exhausted = 1
+        return -1
+    mk := ty_memo_find(a, b)
+    if mk >= 0:
+        return r64(g_ty_memo_vals, mk * 8)
     ...   // 1) a 为 MU → 展开（tt_subst(a 的 var, a 的 body)）后递归
           // 2) b 为 MU → 展开后递归
           // 3) 结果写 memo（三态值）
-    return r;
-}
+    return r
 ```
 
 - [ ] **Step 5: 实现 `ty_equiv` / `ty_disjoint` / `ty_inhabited` / 预算重置**
 
 ```core
-fn ty_equiv(a: int, b: int) -> int {
-    x := ty_sub(a, b); if x != 1 { return x; }
-    y := ty_sub(b, a); if y != 1 { return y; }
-    return 1;
-}
-fn ty_disjoint(a: int, b: int) -> int {
-    x := ty_inhabited(tt_inter(a, b));
-    if x == -1 { return -1; }   // 三态传播：未知不得降级为 0
-    if x == 0 { return 1; }
-    return 0;
-}
-fn ty_inhabited(a: int) -> int {
-    n := tt_norm(a);
+fn ty_equiv(a: int, b: int) -> int:
+    x := ty_sub(a, b)
+    if x != 1:
+        return x
+    y := ty_sub(b, a)
+    if y != 1:
+        return y
+    return 1
+fn ty_disjoint(a: int, b: int) -> int:
+    x := ty_inhabited(tt_inter(a, b))
+    if x == -1:
+        return -1
+    // 三态传播：未知不得降级为 0
+    if x == 0:
+        return 1
+    return 0
+fn ty_inhabited(a: int) -> int:
+    n := tt_norm(a)
     // DNF 下：存在一个 product，其字面集不矛盾且所有原子类两两相容
-    return prod_inhabited_any(n);
-}
-fn ty_budget_reset(limit: int) { g_ty_steps = 0; g_ty_budget_max = limit; g_ty_exhausted = 0; }
-fn ty_exhausted() -> int { return g_ty_exhausted; }
+    return prod_inhabited_any(n)
+fn ty_budget_reset(limit: int):
+    g_ty_steps = 0
+    g_ty_budget_max = limit
+    g_ty_exhausted = 0
+fn ty_exhausted() -> int:
+    return g_ty_exhausted
 ```
 （`prod_inhabited_any`：UNION 拆分 + 每个 product 做 `lits_contradictory` 检查；`AK_NAMED` 具体行 P0 不展开——**登记为未覆盖面**，遇到即 `g_ty_exhausted` 语义之外的 `unknown`：返回 -1 并置一个 `g_ty_uncovered` 位，自测里不出现。）
 
@@ -829,30 +913,32 @@ fn ty_exhaustive(domain: int, patterns: int) -> int   // patterns = CONS 链；1
 
 ```core
 // 反例 = A\B 的规范化项；不可满足（= ⊥）→ -1（无遗漏/无反例值）
-fn tt_witness(a: int, b: int) -> int {
-    r := tt_norm(tt_inter(a, tt_not(b)));
-    if ty_inhabited(r) != 1 { return -1; }
-    if tt_tag(r) == TT_BOT { return -1; }
-    return r;
-}
+fn tt_witness(a: int, b: int) -> int:
+    r := tt_norm(tt_inter(a, tt_not(b)))
+    if ty_inhabited(r) != 1:
+        return -1
+    if tt_tag(r) == TT_BOT:
+        return -1
+    return r
 
 // 穷尽性：¬(⋃patterns) ∩ domain 可满足 → 有遗漏；witness = 遗漏的具体类型项
-fn ty_exhaust_witness(domain: int, patterns: int) -> int {
-    acc : ., mut = tt_bot();
-    p : ., mut = patterns;
-    loop {
-        if tt_tag(p) != TT_CONS { break; }
-        acc = tt_union(acc, tt_a(p));
-        p = tt_b(p);
-    }
-    return tt_witness(domain, acc);   // domain \ ⋃patterns
-}
-fn ty_exhaustive(domain: int, patterns: int) -> int {
-    w := ty_exhaust_witness(domain, patterns);
-    if g_ty_exhausted != 0 { return -1; }
-    if w < 0 { return 1; }   // 补集空 = 穷尽
-    return 0;
-}
+fn ty_exhaust_witness(domain: int, patterns: int) -> int:
+    acc : ., mut = tt_bot()
+    p : ., mut = patterns
+    loop:
+        if tt_tag(p) != TT_CONS:
+            break
+        acc = tt_union(acc, tt_a(p))
+        p = tt_b(p)
+    return tt_witness(domain, acc)   // domain \ ⋃patterns
+fn ty_exhaustive(domain: int, patterns: int) -> int:
+    w := ty_exhaust_witness(domain, patterns)
+    if g_ty_exhausted != 0:
+        return -1
+    if w < 0:
+        return 1
+    // 补集空 = 穷尽
+    return 0
 ```
 
 - [ ] **Step 4: 跑测试（用例表到 spec §8 全类）**

@@ -185,17 +185,17 @@ CASES = [
 ]
 
 SRCS = {
-    "s1_noarith": "fn main() -> int {\n    return 7;\n}\n",
-    "s2_intadd": "fn main() -> int {\n    a := 2000000000;\n    b := 2000000000;\n    c := a + b;\n    return c;\n}\n",
-    "s3_sub": "fn main() -> int {\n    a := 10;\n    b := 3;\n    c := a - b;\n    return c;\n}\n",
-    "s4_addcopy": "fn main() -> int {\n    a := 1;\n    b := 2;\n    c := a + b;\n    d := c;\n    e := d + c;\n    f := e;\n    return f;\n}\n",
-    "s5_loop": "fn main() -> int {\n    sum := 0;\n    i := 0;\n    while i < 10 {\n        sum = sum + i;\n        i = i + 1;\n    }\n    return sum;\n}\n",
+    "s1_noarith": "fn main() -> int:\n    return 7\n",
+    "s2_intadd": "fn main() -> int:\n    a := 2000000000\n    b := 2000000000\n    c := a + b\n    return c\n",
+    "s3_sub": "fn main() -> int:\n    a := 10\n    b := 3\n    c := a - b\n    return c\n",
+    "s4_addcopy": "fn main() -> int:\n    a := 1\n    b := 2\n    c := a + b\n    d := c\n    e := d + c\n    f := e\n    return f\n",
+    "s5_loop": "fn main() -> int:\n    sum := 0\n    i := 0\n    while i < 10:\n        sum = sum + i\n        i = i + 1\n    return sum\n",
     # 评审场景：snap 的拷贝点线性先于 tag 源（x = x + k）的定值——运行时
     # x 的 tag 态沿回边携带，迭代 ≥2 的 snap = x as int 拷贝的是 2-limb x。
-    "s6_loopcopy": "fn main() -> int {\n    x : ., mut = 0;\n    i : ., mut = 0;\n    snap := 0;\n    while i < 3 {\n        snap = x as int;\n        x = x + 1;\n        i = i + 1;\n    }\n    return snap;\n}\n",
+    "s6_loopcopy": "fn main() -> int:\n    x : ., mut = 0\n    i : ., mut = 0\n    snap := 0\n    while i < 3:\n        snap = x as int\n        x = x + 1\n        i = i + 1\n    return snap\n",
     # 8 个 add 定值点（旧规则 tag 数 = 8）后跟一个拷贝变量行 s（新规则 +2）：
     # vc*8 = 160 时 O1/O2 帧 168（旧）vs 184（新）——二进制级可观测差。
-    "s7_framediff": "fn main() -> int {\n    r : ., mut = 0;\n    r = r + 1;\n    r = r + 1;\n    r = r + 1;\n    r = r + 1;\n    r = r + 1;\n    r = r + 1;\n    r = r + 1;\n    r = r + 1;\n    s := r;\n    return s;\n}\n",
+    "s7_framediff": "fn main() -> int:\n    r : ., mut = 0\n    r = r + 1\n    r = r + 1\n    r = r + 1\n    r = r + 1\n    r = r + 1\n    r = r + 1\n    r = r + 1\n    r = r + 1\n    s := r\n    return s\n",
 }
 
 EXPECTED_EXIT = {"s1_noarith": 7, "s2_intadd": 0, "s3_sub": 7,

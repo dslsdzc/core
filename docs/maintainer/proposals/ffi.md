@@ -14,26 +14,26 @@
 ### C FFI（默认，省略 `@ffi` 时等价）
 
 ```core
-extern fn read_file(path: *const u8) -> *mut u8;
+extern fn read_file(path: *const u8) -> *mut u8
 // 等价于 C 的 char* read_file(const char* path)
 ```
 
 ### 指定语言
 
 ```core
-@ffi("Python") extern fn py_call(obj: dyn, method: string) -> dyn;
+@ffi("Python") extern fn py_call(obj: dyn, method: string) -> dyn
 // 编译器：参数转 PyObject*，refcount 管理，返回值转回 dyn
 
-@ffi("Java") extern fn java_call(env: dyn, obj: dyn, method: string) -> dyn;
+@ffi("Java") extern fn java_call(env: dyn, obj: dyn, method: string) -> dyn
 // 编译器：绑定当前线程 JNIEnv，exception 检查
 
-@ffi("Lua") extern fn lua_call(state: dyn, fn_name: string) -> dyn;
+@ffi("Lua") extern fn lua_call(state: dyn, fn_name: string) -> dyn
 // 编译器：Lua stack 操作包装
 
-@ffi("Rust") extern fn process(data: *mut u8, len: i32);
+@ffi("Rust") extern fn process(data: *mut u8, len: i32)
 // 等价于 C ABI，不需要额外处理
 
-@ffi("C") extern fn write(fd: i32, buf: *const u8, len: i32) -> i32;
+@ffi("C") extern fn write(fd: i32, buf: *const u8, len: i32) -> i32
 // 显式指定，和省略时一样
 ```
 

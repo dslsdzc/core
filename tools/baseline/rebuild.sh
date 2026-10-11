@@ -68,7 +68,14 @@ mkdir -p "$OUTDIR"
 cp "$WS_DIR/build/corec" "$WS_DIR/build/corearch" "$WS_DIR/build/corelsp" "$OUTDIR/"
 
 set +e
-nice -n 19 "$OUTDIR/corec" run 'fn main()->int{return 42;}' >"$TMPBASE/smoke.out" 2>&1
+# v4 迁移 T6b：内联 Core 冒烟改 v4 形（`:` + layout 缩进 + 换行分隔）。旧形
+# `fn main()->int{return 42;}` 在 v4 前端下是 `error[P03]`（`{` 只作结构体字面量定界符）。
+# ⚠ 与 `PINNED_REV` 的**换代耦合**：白名单里的三 sha 出自 `97f4394f`（2026-09-14，
+# **v4 之前**）⇒ 那枚 corec 只认 v3 形。本行改 v4 后，**必须**由 T7 把 `PINNED_REV`
+# 一并换到 v4 可读的修订（计划 §九 J-T7-2/J-T7-3 的重锁对象 #4），否则重建的冒烟步会红。
+nice -n 19 "$OUTDIR/corec" run 'fn main() -> int:
+    return 42
+' >"$TMPBASE/smoke.out" 2>&1
 smoke_rc=$?
 set -e
 if [ "$smoke_rc" -ne 42 ]; then

@@ -34,7 +34,7 @@ P — 不分离，合并到 M
 ### G 结构
 
 ```core
-struct Goroutine {
+struct Goroutine:
     id: int,
     status: int,
     stack_ptr: int,    // 栈指针（固定 16KB 栈）
@@ -42,19 +42,17 @@ struct Goroutine {
     arena_id: int,     // 绑定的 arena
     chan_wait: int,    // 阻塞在此 channel 上（_Gwaiting 时）
     next: int,         // 链表（run queue / wait queue）
-}
 ```
 
 ### M 结构
 
 ```core
-struct Machine {
+struct Machine:
     id: int,
     cur_g: int,        // 当前运行的 G
     runq_head: int,    // local run queue 头
     runq_tail: int,    // local run queue 尾
     g0: int,           // 系统 G（M 本身的栈）
-}
 ```
 
 ## Channel
@@ -62,16 +60,16 @@ struct Machine {
 ### `chan T` 语法
 
 ```core
-ch := make(chan int, 10);  // 缓冲 channel，容量 10
-send(ch, 42);              // 发送
-val := recv(ch);            // 接收
-close(ch);                 // 关闭
+ch := make(chan int, 10)  // 缓冲 channel，容量 10
+send(ch, 42)              // 发送
+val := recv(ch)            // 接收
+close(ch)                 // 关闭
 ```
 
 ### channel 结构
 
 ```core
-struct Channel {
+struct Channel:
     buf: string,          // 环形缓冲区
     cap: int,             // 容量
     len: int,             // 当前元素数
@@ -80,7 +78,6 @@ struct Channel {
     send_wait: int,       // 等待发送的 G 链表头
     recv_wait: int,       // 等待接收的 G 链表头
     closed: int,          // 是否已关闭
-}
 ```
 
 ### Channel 操作
@@ -119,8 +116,8 @@ go f(args);
 **返回值**：`go f()` 返回一个 channel，用于接收 `f` 的返回值：
 
 ```core
-ch := go f(args);
-result := recv(ch);  // 等待 f 完成并获取结果
+ch := go f(args)
+result := recv(ch)  // 等待 f 完成并获取结果
 ```
 
 ## 调度器
@@ -164,8 +161,8 @@ ret
 ## IR 指令
 
 ```core
-IR_SPAWN : int = 27;  // 已有: dest=chan, s1=fn_ni, s2=first_arg, s3=arg_count
-IR_YIELD : int = 28;  // 已有: s1=value_var
+IR_SPAWN : int = 27  // 已有: dest=chan, s1=fn_ni, s2=first_arg, s3=arg_count
+IR_YIELD : int = 28  // 已有: s1=value_var
 ```
 
 上列编号保持不变。`IR_SPAWN` 在后端编译为 fiber 创建 + 队列投递。`IR_YIELD` 编译为 fiber 切换。

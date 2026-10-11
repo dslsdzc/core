@@ -306,80 +306,90 @@ apx 批已转正的 B-3/B-4/B-5/B-6/B-8 探针（`tests/selfhost/test_apx_conver
 
 ```core
 // R1 · LET 中转丢型
-struct S { f: dex }
-fn main() -> int {
-    d : dex, apx = 7.0;
-    s : ., mut = S { f = d };
-    x := s.f;
-    if x * 2.0 != 14.0 { return 1; }
-    return 7;
-}
+struct S:
+    f: dex
+fn main() -> int:
+    d : dex, apx = 7.0
+    s : ., mut = S { f = d }
+    x := s.f
+    if x * 2.0 != 14.0:
+        return 1
+    return 7
 
 // R2 · match 臂载荷绑定
-enum E { V(dex) }
-fn main() -> int {
-    d : dex, apx = 7.0;
-    e : ., mut = V(d);
-    return match e { V(x) => { if x * 2.0 != 14.0 { return 1; } return 7; } };
-}
+enum E:
+    V(dex)
+fn main() -> int:
+    d : dex, apx = 7.0
+    e : ., mut = V(d)
+    return match e:
+        V(x) =>:
+            if x * 2.0 != 14.0:
+                return 1
+            return 7
 
 // R3 · 局部数组元素读
-fn main() -> int {
-    d : dex, apx = 7.0;
-    a : [dex; 2] = [d, 1.0];
-    if a[0] * 2.0 != 14.0 { return 1; }
-    return 7;
-}
+fn main() -> int:
+    d : dex, apx = 7.0
+    a : [dex; 2] = [d, 1.0]
+    if a[0] * 2.0 != 14.0:
+        return 1
+    return 7
 
 // R4 · 元组元素读（数字下标无声明面）
-fn main() -> int {
-    d : dex, apx = 7.0;
-    t := (d, 1.0);
-    if (t . 0) * 2.0 != 14.0 { return 1; }
-    return 7;
-}
+fn main() -> int:
+    d : dex, apx = 7.0
+    t := (d, 1.0)
+    if (t . 0) * 2.0 != 14.0:
+        return 1
+    return 7
 
 // R5 · 聚合读写回 apx（binary64）槽
-g : dex, apx, mut = 1.0;
-struct S { f: dex }
-fn main() -> int {
-    d : dex, apx = 7.0;
-    s : ., mut = S { f = d };
-    g = s.f;
-    if g != 7.0 { return 1; }
-    return 7;
-}
+g : dex, apx, mut = 1.0
+struct S:
+    f: dex
+fn main() -> int:
+    d : dex, apx = 7.0
+    s : ., mut = S { f = d }
+    g = s.f
+    if g != 7.0:
+        return 1
+    return 7
 
 // R6 · extern 实参（判定形态 = IR 断言，见 11.6）
-struct S { f: dex }
-extern fn dex_agg_arg_check(d: dex) -> int;
-fn main() -> int {
-    d : dex, apx = 7.0;
-    s : ., mut = S { f = d };
-    r := dex_agg_arg_check(s.f);
-    return r;
-}
+struct S:
+    f: dex
+extern fn dex_agg_arg_check(d: dex) -> int
+fn main() -> int:
+    d : dex, apx = 7.0
+    s : ., mut = S { f = d }
+    r := dex_agg_arg_check(s.f)
+    return r
 
 // R7（非回归钉子）· Core 调用实参
-struct S { f: dex }
-fn dbl(x: dex) -> dex { return x * 2.0; }
-fn main() -> int {
-    d : dex, apx = 7.0;
-    s : ., mut = S { f = d };
-    y := dbl(s.f);
-    if y != 14.0 { return 1; }
-    return 7;
-}
+struct S:
+    f: dex
+fn dbl(x: dex) -> dex:
+    return x * 2.0
+fn main() -> int:
+    d : dex, apx = 7.0
+    s : ., mut = S { f = d }
+    y := dbl(s.f)
+    if y != 14.0:
+        return 1
+    return 7
 
 // N1（非回归钉子）· apx 批已转正的比较/raw 形
-struct S { f: dex }
-fn main() -> int {
-    d : dex, apx = 7.0;
-    s : ., mut = S { f = d };
-    if @raw_int(s.f) / 1000000 != 7 { return 1; }
-    if s.f != 7.0 { return 2; }
-    return 7;
-}
+struct S:
+    f: dex
+fn main() -> int:
+    d : dex, apx = 7.0
+    s : ., mut = S { f = d }
+    if @raw_int(s.f) / 1000000 != 7:
+        return 1
+    if s.f != 7.0:
+        return 2
+    return 7
 ```
 
 ### 11.3 改前实测（冻结基线编译 + `--static` 产物运行）

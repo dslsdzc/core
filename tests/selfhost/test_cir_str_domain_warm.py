@@ -43,76 +43,81 @@ COREC = pathlib.Path(os.environ.get("COREC_BIN", str(BASE / "build" / "corec")))
 # ── 语料 ────────────────────────────────────────────────────────────────────
 REPRO = """import io
 
-struct Point { x: int, y: int }
+struct Point:
+    x: int, y: int
 
-fn fields_of_point() -> int {
-    f := @fields(Point);
-    print("fields=[");
-    print(f);
-    print("] len=");
-    println(int_str(str_len(f)));
-    return str_len(f);
-}
+fn fields_of_point() -> int:
+    f := @fields(Point)
+    print("fields=[")
+    print(f)
+    print("] len=")
+    println(int_str(str_len(f)))
+    return str_len(f)
 
-fn main() -> int {
-    r := fields_of_point();
-    return r - 3;
-}
+fn main() -> int:
+    r := fields_of_point()
+    return r - 3
 """
 
 FIRSTINTERN = """import io
 
-struct One { x: int }
-struct Two { x: int, y: int }
+struct One:
+    x: int
+struct Two:
+    x: int, y: int
 
-fn main() -> int {
-    print("ONE="); println(@fields(One));
-    print("TWO="); println(@fields(Two));
-    return 0;
-}
+fn main() -> int:
+    print("ONE=")
+    println(@fields(One))
+    print("TWO=")
+    println(@fields(Two))
+    return 0
 """
 
 VARNAME = """import io
 
-fn cat_helper(a: string, b: string) -> int {
-    print("CAT="); println(a + b);
-    return 0;
-}
+fn cat_helper(a: string, b: string) -> int:
+    print("CAT=")
+    println(a + b)
+    return 0
 
-fn main() -> int {
-    cat_helper("ab", "cd");
-    return 0;
-}
+fn main() -> int:
+    cat_helper("ab", "cd")
+    return 0
 """
 
 MIX = """import io
 
-fn f1(n: int) -> int {
-    s : ., mut = 0;
-    i : ., mut = 0;
-    loop {
-        if i >= n { break; }
-        if i % 3 == 0 { s = s + i * 2; } else { s = s + 1; }
-        i = i + 1;
-    }
-    return s;
-}
+fn f1(n: int) -> int:
+    s : ., mut = 0
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        if i % 3 == 0:
+            s = s + i * 2
+        else:
+            s = s + 1
+        i = i + 1
+    return s
 
-fn f2(n: int) -> int {
-    s : ., mut = 1;
-    i : ., mut = 0;
-    loop {
-        if i >= n { break; }
-        if i % 2 == 0 { s = s * 2; } else { s = s + 3; }
-        i = i + 1;
-    }
-    return s;
-}
+fn f2(n: int) -> int:
+    s : ., mut = 1
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        if i % 2 == 0:
+            s = s * 2
+        else:
+            s = s + 3
+        i = i + 1
+    return s
 
-fn main() -> int {
-    print("R="); println(int_str(f1(10) + f2(9)));
-    return 0;
-}
+fn main() -> int:
+    print("R=")
+    println(int_str(f1(10) + f2(9)))
+    return 0
 """
 
 

@@ -481,13 +481,11 @@ Note: The actual implementation needs to adapt to the existing `ir_gen_all_funcs
 If needed, add helper to get the source file path for function ID construction.
 
 ```core
-fn get_source_path() -> string {
-    return g_source_path;  // already set during file loading
-}
+fn get_source_path() -> string:
+    return g_source_path  // already set during file loading
 
-fn fi_name_ni(fi: int) -> int {
-    return r64(g_ir_func_name_idx, fi * 8);
-}
+fn fi_name_ni(fi: int) -> int:
+    return r64(g_ir_func_name_idx, fi * 8)
 ```
 
 - [ ] **Step 3: Verify compilation**
@@ -552,23 +550,24 @@ jj commit -m "feat: clean-cache subcommand"
 // Compiles a simple program twice, verifies the second run is faster
 // (or at least produces the same output).
 
-fn test_cache_basic() -> int {
+fn test_cache_basic() -> int:
     // First compilation creates cache
     // Second compilation should hit cache
     // This test verifies the mechanism works end-to-end
-    
+
     // For now, just verify the cache directory was created
     // by printing the cache status
-    print("cache dir: .core/cache/cir/\n");
-    return 0;
-}
+    print("cache dir: .core/cache/cir/\n")
+    return 0
 
-fn main() -> int {
-    r1 := test_cache_basic();
-    if r1 != 0 { print("FAIL: "); println(int_str(r1)); return r1; }
-    println("ALL PASS");
-    return 0;
-}
+fn main() -> int:
+    r1 := test_cache_basic()
+    if r1 != 0:
+        print("FAIL: ")
+        println(int_str(r1))
+        return r1
+    println("ALL PASS")
+    return 0
 ```
 
 - [ ] **Step 2: Verify type-check**

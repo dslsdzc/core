@@ -262,6 +262,98 @@ def _statement_start(toks, idx):
     return s
 
 
+# ── T6a：`src/` 之外语料的追加改写（**逐条记进报告**）────────────────────────
+# 背景：T4 的改写面是 `src/**`，那份语料**没有** match / enum 臂体块 / 规约标注独立行 /
+# `@hotpatch` 独立行，且 struct 字面量全部是 `=` 形（计划 §6.1/§6.2 实核）。`tests/`·`examples/`
+# 四条面各有这些形态 ⇒ 需要三条**纯形状**追加规则（都不是语义改动）：
+#   E1 struct 字面量分隔符 `:` → `=`：T0 §3.4 裁定 (a)，v4 唯一合法形是 `T { f = v }`；
+#   E2 规约标注 `#check`/`#ensure` 独立行 ⇒ 并入签名行尾：v4 `parse_spec_annotations`
+#      只在**签名行内**可见（parser.cr:1799 `check(T_HASH)`），独立行会被当顶层 token
+#      ⇒ `error[P25]` + `error[V02]`（实测）；
+#   E3 `@hotpatch(...)` 独立行 ⇒ 并入其后声明行：`parse_declaration`（parser.cr:1860）
+#      要求注解与声明**同行**（`parse_expr()` 之后立刻 `check(T_FN)`），独立行 ⇒ `error[P25]`。
+#
+# ⚠ 三条都**按行形精确匹配**，命中不了就**原样不动**（负例语料里的错位标注因此不被误改），
+#   只有「看起来是要改、但形态不在口径内」才进 `unresolved`（fail-closed）。
+_ANNOT_LINE_RE = re.compile(r'^#(check|ensure)\s*\(')
+_HOTPATCH_LINE_RE = re.compile(r'^@hotpatch(\(.*\))?$')
+
+
+def _line_offsets(src):
+    offs, p = [], 0
+    for ln in src.split('\n'):
+        offs.append(p)
+        p += len(ln) + 1
+    return offs
+
+
+def _t6_extra_ops(toks, brace_kind, brace_match, src, filename, recs, unresolved, ops):
+    """E1/E2/E3 的文本编辑（追加到 `ops`）。arm 块的多语句面另在 E4 里查。"""
+    # ── E1：struct 字面量分隔符 `:` → `=` ──
+    for i, tk in enumerate(toks):
+        if brace_kind.get(i) != 'struct':
+            continue
+        m = brace_match.get(i)
+        if m is None:
+            continue
+        depth = 0
+        for j in range(i + 1, m):
+            t = toks[j].type
+            if t in (T.LBRACE, T.LPAREN, T.LBRACK):
+                depth += 1
+            elif t in (T.RBRACE, T.RPAREN, T.RBRACK):
+                depth -= 1
+            elif t == T.COLON and depth == 0 and j > 0 and toks[j - 1].type == T.IDENT:
+                ops.append((toks[j].start, toks[j].end, '='))
+                recs.setdefault('struct_lit_eq', []).append('%s:%d' % (filename, tk.line))
+
+    # ── E5：`None` → `none`（v4 关键字拼写；**本批唯一的非形状改写**）──
+    # 依据：v4 关键字表（docs/core-language-syntax_v4.md:38）含 `none`，无 `None`；
+    # 实测 `z : int? = None` ⇒ `error[N01] Undefined name 'None'`，`= none` ⇒ rc=0。
+    # T4 工具头注 R3 明写「`none` ↔ `None` 的关键字化不参与本变换」——那是因为 `src/**`
+    # **零处**使用（实核：`grep -n '\bNone\b' src/**/*.cr` 只命中注释），T4 面从不需要它。
+    # T6a 面有 2 档使用 ⇒ 必须同批改，否则这两档的 `T?` 语义面在 v4 下当场 N01。
+    # 只改**裸 IDENT token**（字符串/注释不是 token，天然不误伤）。
+    for tk in toks:
+        if tk.type in (T.NONE,) or (tk.type == T.IDENT and tk.lexeme == 'None'):
+            ops.append((tk.start, tk.end, 'none'))
+            recs.setdefault('none_rename', []).append('%s:%d' % (filename, tk.line))
+
+    # ── E2：规约标注独立行 ⇒ 并入签名行尾 ──
+    lines = src.split('\n')
+    offs = _line_offsets(src)
+    i = 1
+    while i < len(lines):
+        if not _ANNOT_LINE_RE.match(lines[i].strip()):
+            i += 1
+            continue
+        j = i
+        anns = []
+        while j < len(lines) and _ANNOT_LINE_RE.match(lines[j].strip()):
+            anns.append(lines[j].strip())
+            j += 1
+        prev = lines[i - 1].strip()
+        nxt = lines[j].strip() if j < len(lines) else ''
+        if prev.startswith('fn ') and nxt == '{':
+            ops.append((offs[i - 1] + len(lines[i - 1]), offs[j],
+                        ' ' + ' '.join(anns) + ' '))
+            recs.setdefault('annot_inline', []).append('%s:%d' % (filename, i))
+        i = j
+
+    # ── E3：`@hotpatch(...)` 独立行 ⇒ 并入其后声明行 ──
+    for i in range(len(lines) - 1):
+        if not _HOTPATCH_LINE_RE.match(lines[i].strip()):
+            continue
+        if lines[i].strip() == '' or not lines[i + 1].strip():
+            continue
+        nxt = lines[i + 1].strip()
+        if not (nxt.startswith('fn ') or nxt.startswith('pub fn ')):
+            unresolved.append('%s:%d (@hotpatch 独立行，后随非 fn 声明)' % (filename, i + 1))
+            continue
+        ops.append((offs[i] + len(lines[i]), offs[i + 1], ' '))
+        recs.setdefault('hotpatch_inline', []).append('%s:%d' % (filename, i + 1))
+
+
 def pre_transform(src, filename):
     """裁定 1/2 的**逐处**预处理（纯文本层），返回 `(new_src, records, unresolved)`。
 
@@ -400,6 +492,9 @@ def pre_transform(src, filename):
         ops.append((toks[stmt].start, toks[stmt].start,
                     '%s := unsafe {%s}; ' % (name, inner_txt)))             # 语句前插声明
         recs['hoisted'].append('%s:%d -> `%s`' % (filename, tk.line, name))
+
+    # ── T6a 追加三条规则（E1/E2/E3）与 E4 守卫 ──
+    _t6_extra_ops(toks, brace_kind, brace_match, src, filename, recs, unresolved, ops)
 
     # 统一**降序**下沉：所有替换/插入一次性按起点从大到小落，
     # 保证先落的（更靠后）不会挪动后落的（更靠前）的偏移。
@@ -589,8 +684,28 @@ def transform_text(src, filename='<unknown>', empty_policy='table'):
                 split_pending = True
         elif t == T.LBRACE:
             if brace_kind[idx] == 'block':
-                cur = cur.rstrip() + ':'
-                flush()
+                # ── Allman 形（块 `{` 独占行首）修复（协调者 2026-10-11 裁定 2）──────────
+                # 修复前：`cur` 为空时也 `cur = '' + ':'` ⇒ 发射出一行**孤零零的 `:`**，
+                # 该行既不接上文、也不开 region（实测 `tests/spec/t2_pos_check.cr` 等 9 档
+                # 变成 `fn f() -> int` / `#check(1 >= 0)` / `:` 三行 ⇒ 自源报 {P02,P25,V02}）。
+                # 修复后：`{` 独占行首 ⇒ `:` 落到**上一个非空输出行**末尾（该行本就是它
+                # 逻辑上的头部行），`{` 那一行随之消失。纯 layout、零 token 变更。
+                # ⚠ 边界：若该行是注释行，追加 `:` 会被注释吞掉 ⇒ 不追加，退化为独立 `:` 行，
+                #    并**响亮登记**（不静默）。
+                if cur.strip():
+                    cur = cur.rstrip() + ':'
+                    flush()
+                else:
+                    j = len(out) - 1
+                    while j >= 0 and not out[j].strip():
+                        j -= 1
+                    if j >= 0 and not out[j].lstrip().startswith('//') \
+                            and '//' not in out[j]:
+                        out[j] = out[j].rstrip() + ':'
+                        report.setdefault('allman_join', []).append('line %d' % tk.line)
+                    else:
+                        out.append(':')
+                        report.setdefault('allman_orphan_colon', []).append('line %d' % tk.line)
                 region_stack.append(indent)
                 indent += 1
                 if idx in empty_braces:
@@ -645,7 +760,59 @@ def transform_text(src, filename='<unknown>', empty_policy='table'):
 
 
 # ── V1：v4 前端解析 ───────────────────────────────────────────────────────────
+V1_ENGINE = 'py'      # 由 --v1-engine 覆盖（T6a 追加，见下）
+REPO_ROOT = os.path.dirname(_HERE)
+
+
+def _v4_parse_ok_native(text, filename):
+    """用**本仓自源编译器**（`build/corec check`）做 v4 解析读数。
+
+    T6a 追加的理由（实测，逐条可复现）：`bootstrap/` 的 Python 前端**落后于**自源前端，
+    在本批语料上至少四处误报（自源 rc=0 而 Python 前端语法错）：
+      · 语句位 `as` 转换（`n := d as int`）——Python 前端「expected end of line, got 'as'」；
+      · `extern fn` 顶层声明；· `go i 0..3 f(i)`（并行 for）；· `*T` 作结构体字段类型 / 元组类型。
+    ⇒ 对 `src/` 之外这批语料，**判据的目标前端是自源编译器**（T5 已落地）；Python 前端只作补充。
+    临时落盘路径保留相对路径（import 解析靠文件所在目录），cwd = 仓根（prelude 取自 `src/stdlib/`）。
+    """
+    import subprocess
+    import shutil
+    rel = filename if not os.path.isabs(filename) else os.path.basename(filename)
+    tmp = os.path.join('/tmp/v4_migrate_v1', rel)
+    os.makedirs(os.path.dirname(tmp), exist_ok=True)
+    with open(tmp, 'w', encoding='utf-8') as fh:
+        fh.write(text)
+    cc = os.path.join(REPO_ROOT, 'build', 'corec')
+    if not os.path.exists(cc):
+        return None, 'native engine unavailable (no build/corec)'
+    p = subprocess.run(['nice', '-n', '19', cc, 'check', tmp],
+                       cwd=REPO_ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    out = p.stdout.decode('utf-8', 'replace')
+    if p.returncode == 0:
+        return True, None
+    # **只把 parse 相（[3/5] 与 [4/5] 之间）的 error 算 V1 失败**。
+    # 理由：本批一半语料是**负例**（probes/spec/suite 的 rc=1 是**预期**），`check` 的 rc
+    # 把「解析失败」与「语义/负例报错」混在一个数里 ⇒ 直接拿 rc 当 V1 会把负例全部误判。
+    # 空文件（`cannot read`，出现在 [1/5] 之前）不计失败（T6a 面有 4 档 0 字节档）。
+    lines = out.splitlines()
+    i0 = next((k for k, l in enumerate(lines) if l.startswith('[3/5]')), len(lines))
+    i1 = next((k for k, l in enumerate(lines) if l.startswith('[4/5]')), len(lines))
+    errs = [l for l in lines[i0:i1] if l.startswith('error')]
+    if errs:
+        return False, ('native parse error (rc=%d): %s' % (p.returncode, '; '.join(errs[:3])))
+    return True, None
+
+
 def v4_parse_ok(text, filename='<in-memory>'):
+    eng = V1_ENGINE
+    if eng in ('both', 'native'):
+        ok, err = _v4_parse_ok_native(text, filename)
+        if err is not None and err.startswith('native engine unavailable'):
+            if eng == 'native':
+                return ok, err
+        elif ok:
+            return True, None
+        elif eng == 'native':
+            return False, err
     from corec.frontend.lexer import Lexer
     from corec.frontend.parser import Parser
     try:
@@ -773,6 +940,23 @@ V4B_BLANK_DROP_EXEMPT = {
 }
 
 
+def _has_v3_markers(src):
+    """输入里是否还有 v3 专属形状（**块** `{}` / **语句** `;`）。
+
+    T6a 追加（协调者第 2 条裁定）：本工具是**一次性 v3→v4** 工具。对**已经是 v4 的文本**
+    再跑一次，vendored v3 词法器会把它当 v3 读，发射器产出错形——实测重跑
+    `tests/spec/t2_pos_check.cr`（已是 v4）得到 `fn f() -> int #check(1 >= 0):` +
+    **缩进被吃的** `return 1`。⇒ **无 v3 形状标记却会改动文本 ⇒ 拒写**（fail-closed）。
+    `[T; N]` 的 `;` 与 struct 字面量的 `{}` **不算标记**（它们 v3/v4 同形）。
+    """
+    try:
+        toks = [t for t in V3.Lexer(src, '<probe>').tokenize()]
+        bk, sk, _bm, _n = classify(toks)
+    except MigrateError:
+        return True                      # 读不动 ⇒ 交正常路径响亮报错
+    return any(v == 'block' for v in bk.values()) or any(v == 'stmt' for v in sk.values())
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 def gather(paths, all_under):
     out = []
@@ -791,7 +975,7 @@ def cmd_transform(args):
     if not files:
         print('no files', file=sys.stderr)
         return 2
-    n_ok = n_abort = n_fail = 0
+    n_ok = n_abort = n_fail = n_forced = n_refuse = 0
     for p in files:
         src = open(p, encoding='utf-8').read()
         try:
@@ -805,12 +989,19 @@ def cmd_transform(args):
             n_abort += 1
             continue
         ok, err = v4_parse_ok(out, p)
-        if not ok:
+        if out != src and not _has_v3_markers(src):
+            print('REFUSE %-45s 输入无 v3 形状标记（已是 v4？）⇒ 拒写；重跑本工具会 mangle' % p)
+            n_refuse += 1
+            continue
+        if not ok and not args.force:
             print('V1FAIL %-45s %s' % (p, err))
             n_fail += 1
             if args.dry_run:
                 print(out)
             continue
+        if not ok:
+            print('V1FAIL(force) %-45s %s' % (p, err))
+            n_forced += 1
         if args.dry_run:
             sys.stdout.write(out)
             print('--- %s OK ---' % p, file=sys.stderr)
@@ -823,7 +1014,8 @@ def cmd_transform(args):
                     extra += ' | %s=%s' % (k, ','.join(rep[k]))
             print('OK     %-45s%s' % (p, extra))
         n_ok += 1
-    print('=== transform: ok=%d skip=%d fail=%d ===' % (n_ok, n_abort, n_fail))
+    print('=== transform: ok=%d skip=%d fail=%d forced=%d refuse=%d ==='
+          % (n_ok, n_abort, n_fail, n_forced, n_refuse))
     return 1 if n_fail else 0
 
 
@@ -895,6 +1087,12 @@ def main():
     t.add_argument('files', nargs='*')
     t.add_argument('--all-under', nargs='*', default=None)
     t.add_argument('--dry-run', action='store_true')
+    t.add_argument('--force', action='store_true',
+                   help='T6a 追加：V1 失败仍写盘。**只对「解析失败是预期结果」的负例语料用**'
+                        '（tests/spec/t2_neg_* 等）；正例档用它是掩盖回归，不得使用。')
+    t.add_argument('--v1-engine', default='py', choices=['py', 'native', 'both'],
+                   help='V1 解析读数用哪个前端（T6a 追加）：py=bootstrap Python 前端（原行为）· '
+                        'native=本仓 build/corec · both=优先 native')
     t.add_argument('--empty-policy', default='table',
                    choices=['table', 'skip', 'unit'],
                    help='空 region 的处置：table=逐处裁定表(默认) · skip=中止 · unit=补 unit 占位(调试用)')
@@ -903,11 +1101,14 @@ def main():
     c = sub.add_parser('check')
     c.add_argument('files', nargs='*')
     c.add_argument('--all-under', nargs='*', default=None)
+    c.add_argument('--v1-engine', default='py', choices=['py', 'native', 'both'])
     c.add_argument('--baseline', default=None,
                    help='改前原文快照目录（同相对路径）')
     c.set_defaults(func=cmd_check)
 
     args = ap.parse_args()
+    global V1_ENGINE
+    V1_ENGINE = getattr(args, 'v1_engine', 'py')
     return args.func(args)
 
 

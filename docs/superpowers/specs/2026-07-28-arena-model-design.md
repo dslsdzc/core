@@ -67,13 +67,15 @@ alloc(size):
 
 嵌套示例：
 ```
-fn main() {                    // arena_new() → ai=0, g_current_arena=0
-    x := alloc(32);            // 从 arena 0 分配
-    loop {                     // arena_new() → ai=1, g_current_arena=1, parent=0
-        y := alloc(64);        // 从 arena 1 分配
-    }                          // arena_reset(1) → g_current_arena=0, cursor[1]=0
-    z := alloc(16);            // 从 arena 0 分配
-}                              // arena_reset(0) → g_current_arena=-1, cursor[0]=0
+fn main():
+    // arena_new() → ai=0, g_current_arena=0
+    x := alloc(32)            // 从 arena 0 分配
+    loop:
+        // arena_new() → ai=1, g_current_arena=1, parent=0
+        y := alloc(64)        // 从 arena 1 分配
+    // arena_reset(1) → g_current_arena=0, cursor[1]=0
+    z := alloc(16)            // 从 arena 0 分配
+// arena_reset(0) → g_current_arena=-1, cursor[0]=0
 ```
 
 ## 组件设计
@@ -82,47 +84,43 @@ fn main() {                    // arena_new() → ai=0, g_current_arena=0
 
 ```core
 // === 全局变量 ===
-g_current_arena : int, mut = -1;
+g_current_arena : int, mut = -1
 
 // Arena metadata arrays (allocated in arena_init, accessed by emit_alloc_body)
-g_arena_cursors : string, mut;     // int[] — element = cursor offset
-g_arena_sizes   : string, mut;     // int[] — element = chunk max size
-g_arena_parents : string, mut;     // int[] — element = parent arena ID
+g_arena_cursors : string, mut     // int[] — element = cursor offset
+g_arena_sizes   : string, mut     // int[] — element = chunk max size
+g_arena_parents : string, mut     // int[] — element = parent arena ID
 
-g_arena_pool_data : string, mut;   // pool base pointer (from alloc)
-g_arena_max_size : int, mut;
-g_arena_free_list : int, mut = -1;
-g_arena_count : int, mut = 0;
-g_arena_cap   : int, mut = 0;    // metadata 数组容量
+g_arena_pool_data : string, mut   // pool base pointer (from alloc)
+g_arena_max_size : int, mut
+g_arena_free_list : int, mut = -1
+g_arena_count : int, mut = 0
+g_arena_cap   : int, mut = 0    // metadata 数组容量
 
 // === API ===
-fn arena_init(pool_size: int, arena_size: int) {
+fn arena_init(pool_size: int, arena_size: int):
     // 从全局 bump heap 分配 pool 数据区。
     // 此时 g_current_arena = -1，alloc() 走全局 bump 路径
-    g_arena_pool_data = alloc(pool_size);
-    g_arena_max_size = arena_size;
-    g_arena_free_list = -1;
-    g_arena_count = 0;
-    g_arena_cap = 0;
-}
+    g_arena_pool_data = alloc(pool_size)
+    g_arena_max_size = arena_size
+    g_arena_free_list = -1
+    g_arena_count = 0
+    g_arena_cap = 0
 
-fn arena_new() -> int {
+fn arena_new() -> int:
     // 从 free list 取，或创建新 slot
     // 设置 parent = g_current_arena
     // 设置 g_current_arena = new_id
     // cursor = 0
     // 返回 new_id
-}
 
-fn arena_reset(ai: int) {
+fn arena_reset(ai: int):
     // cursor = 0
     // g_current_arena = parent
     // 推入 free list
-}
 
-fn arena_avail(ai: int) -> int {
+fn arena_avail(ai: int) -> int:
     // 返回剩余可用字节数
-}
 ```
 
 `arena_alloc` 不需要作为独立的 Core 函数——现有 `alloc()` 已经 arena-aware。
@@ -166,8 +164,8 @@ heap_end:
 ### 4. 编译器 — 新增 IR 指令（`src/compiler/ast.cr`）
 
 ```core
-IR_ARENA_NEW   : int = 30;   // arena_new dest, src1(size_estimate)
-IR_ARENA_RESET : int = 31;   // arena_reset src1
+IR_ARENA_NEW   : int = 30   // arena_new dest, src1(size_estimate)
+IR_ARENA_RESET : int = 31   // arena_reset src1
 ```
 
 `IR_ARENA_NEW` 的 `src1` 是编译器预估的 arena 大小（编译期常量或 0=默认）。后端的 `arena_new_impl` 用此值选取合适 chunk 大小或触发链式扩容。
@@ -226,28 +224,26 @@ IR_ARENA_RESET : int = 31;   // arena_reset src1
 
 ```core
 // ir_gen.cr 新增
-g_sg_alloc_total : string, mut;  // per-subgraph allocation total
-g_sg_alloc_cap   : int, mut;
+g_sg_alloc_total : string, mut  // per-subgraph allocation total
+g_sg_alloc_cap   : int, mut
 
-fn sg_alloc_push(kind: int) {
-    grow_sg_alloc(g_sg_count + 1);
-    w64(g_sg_alloc_total, g_sg_count * 8, 0);
-    sg_push(kind);
-}
+fn sg_alloc_push(kind: int):
+    grow_sg_alloc(g_sg_count + 1)
+    w64(g_sg_alloc_total, g_sg_count * 8, 0)
+    sg_push(kind)
 
-fn sg_alloc_pop() {
-    total := r64(g_sg_alloc_total, (g_sg_count - 1) * 8);
-    if total == 0 { total = 65536; }  // default 64KB for dynamic-only
-    emit(IR_ARENA_NEW, arena_var, total, 0, 0, 0);
-    sg_pop();
-}
+fn sg_alloc_pop():
+    total := r64(g_sg_alloc_total, (g_sg_count - 1) * 8)
+    if total == 0:
+        total = 65536
+    // default 64KB for dynamic-only
+    emit(IR_ARENA_NEW, arena_var, total, 0, 0, 0)
+    sg_pop()
 
-fn track_alloc_size(size: int) {
-    if g_sg_count > 0 {
-        old := r64(g_sg_alloc_total, (g_sg_count - 1) * 8);
-        w64(g_sg_alloc_total, (g_sg_count - 1) * 8, old + size);
-    }
-}
+fn track_alloc_size(size: int):
+    if g_sg_count > 0:
+        old := r64(g_sg_alloc_total, (g_sg_count - 1) * 8)
+        w64(g_sg_alloc_total, (g_sg_count - 1) * 8, old + size)
 ```
 
 `track_alloc_size` 在每个 `emit(IR_ALLOC_X, ...)` 处调用。

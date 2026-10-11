@@ -255,14 +255,12 @@ region 边界，供验证工具证明终止性和循环正确性（终止性依�
 以下代码：
 
 ```core
-fn add(x: int, y: int) -> int {
-    return x + y;
-}
+fn add(x: int, y: int) -> int:
+    return x + y
 
-fn main() {
-    result := add(3, 4);
-    println(result);
-}
+fn main():
+    result := add(3, 4)
+    println(result)
 ```
 
 - 部署为单核嵌入式 → 编译器生成串行机器码，静态分配，零运行时。

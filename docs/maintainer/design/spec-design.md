@@ -73,19 +73,16 @@ CIC 提供 Coq 级别的全部表达力，逐项对应：
 ```core
 // 简单的范围
 fn divide(a: int, b: int) -> int
-    #check(b != 0)
-    #ensure(result != None)
-{
-    if b == 0 { return None; }
-    return Some(a / b);
-}
+#check(b != 0)
+#ensure(result != None):
+    if b == 0:
+        return None
+    return Some(a / b)
 
 // 引用外部检查函数
 fn sort(a: [int]) -> [int]
-    #ensure(auto::sort_check(a, result))
-{
+#ensure(auto::sort_check(a, result)):
     // 冒泡排序实现
-}
 ```
 
 ### `.csp` — 规约源(设计稿,见上方退役同步注记)
@@ -107,21 +104,20 @@ fn sort(a: [int]) -> [int]
 #ensure(/* 用户填写后置条件 */)
 
 // 检查函数 —— 用 Core 语言写规约
-spec fn sort_check(input: [int], result: [int]) -> bool {
+spec fn sort_check(input: [int], result: [int]) -> bool:
     // 编译器生成的骨架：已从图模式推导部分性质
     // ① 长度守恒（已从图结构推导）
-    if result.len() != |input| { return false; }
+    if result.len() != |input|:
+        return false
     // ② 有序性（图有比较+交换模式，但需要用户确认）
     // TODO: 填写有序性检查
     // ③ 排列性质（编译器无法完全推导，需要用户补全）
     // TODO: 填写排列检查
-    return true;
-}
+    return true
 
 // 类型不变量
-spec fn vec_invariant[T](v: Vec[T]) -> bool {
-    return v.len <= v.cap && v.data != null;
-}
+spec fn vec_invariant[T](v: Vec[T]) -> bool:
+    return v.len <= v.cap && v.data != null
 ```
 
 生成规则：
@@ -196,13 +192,12 @@ fn transfer(from: &mut Account, to: &mut Account, amt: int)
 ```core
 // 在 .cr 中使用(设计定稿:规约内联于 .cr)
 fn foo() -> int
-    #pure
-    #check(x > 0)
+#pure
+#check(x > 0)
 
 // 自定义标签
-#tag sorted = {
+#tag sorted =:
     forall i: 0 <= i < result.len() - 1 -> result[i] <= result[i+1]
-}
 ```
 
 `#` 风格：
@@ -495,28 +490,23 @@ verify file.csr
 内核级别的代码：
 
 ```core
-spec fn pagetable_invariant(pt: &PageTable) -> bool {
-    for virt in pt.mappings {
-        entry := pt.mappings[virt];
+spec fn pagetable_invariant(pt: &PageTable) -> bool:
+    for virt in pt.mappings:
+        entry := pt.mappings[virt]
         // 虚拟地址到物理地址的映射
-        if entry.present {
+        if entry.present:
             // 物理地址必须在有效范围
-            if entry.phys < PHYS_START || entry.phys >= PHYS_END {
-                return false;
-            }
+            if entry.phys < PHYS_START || entry.phys >= PHYS_END:
+                return false
             // 用户态不能映射内核页
-            if virt < USER_END && entry.privilege == KERNEL {
-                return false;
-            }
-        }
-    }
-    return true;
-}
+            if virt < USER_END && entry.privilege == KERNEL:
+                return false
+    return true
 
 fn map_page(pt: &mut PageTable, virt: Addr, phys: Addr, flags: u64)
-    #check(PHYS_START <= phys && phys < PHYS_END)
-    #check(virt < USER_END)   // 用户态进程不能映射内核地址
-    #ensure(pagetable_invariant(pt))
+#check(PHYS_START <= phys && phys < PHYS_END)
+#check(virt < USER_END)   // 用户态进程不能映射内核地址
+#ensure(pagetable_invariant(pt))
 ```
 
 即使在内核场景，规约仍是 Core 代码——变量、循环、分支。不是公式，是既能读也能写的代码。

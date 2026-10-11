@@ -102,35 +102,42 @@ Expected: `0/1 passed (placeholder)`，exit 1
 // 与 alloc_registers 共用——后者改读本表。
 // 表布局：每函数一段，段内每「函数内 var」16B（段偏移 = 前缀 var 数累计，见
 // live_range_slot——func_i 段起始 = Σ var_count[0..func_i)，不乘固定稠密系数）。
-g_ir_live_ranges : string, mut;
-g_live_range_cap : int, mut;
+g_ir_live_ranges : string, mut
+g_live_range_cap : int, mut
 
-fn grow_live_ranges(needed: int) {
-    if needed < g_live_range_cap { return; }
-    nc := g_live_range_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := alloc(nc * 16); _dyncpy(g_ir_live_ranges, g_live_range_cap * 16, nb);
-    g_ir_live_ranges = nb; g_live_range_cap = nc;
-}
+fn grow_live_ranges(needed: int):
+    if needed < g_live_range_cap:
+        return
+    nc := g_live_range_cap * 2
+    if nc < 64:
+        nc = 64
+    if nc < needed:
+        nc = needed + 64
+    nb := alloc(nc * 16)
+    _dyncpy(g_ir_live_ranges, g_live_range_cap * 16, nb)
+    g_ir_live_ranges = nb
+    g_live_range_cap = nc
 
-fn live_range_slot(func_i: int, var_i: int) -> int {
+fn live_range_slot(func_i: int, var_i: int) -> int:
     // 函数内 var 索引 = var_i − var_start[func_i]；func_i 段起始 = 前缀 var_count 累计
-    off : ., mut = 0;
-    fi : ., mut = 0;
-    loop { if fi >= func_i { break; }
-        off = off + r64(g_ir_func_var_count, fi * 8);
-        fi = fi + 1; }
-    return (off + (var_i - r64(g_ir_func_var_start, func_i * 8))) * 16;
-}
+    off : ., mut = 0
+    fi : ., mut = 0
+    loop:
+        if fi >= func_i:
+            break
+        off = off + r64(g_ir_func_var_count, fi * 8)
+        fi = fi + 1
+    return (off + (var_i - r64(g_ir_func_var_start, func_i * 8))) * 16
 
-fn live_first(func_i: int, var_i: int) -> int {
-    if func_i < 0 || var_i < 0 { return -1; }
-    return r64(g_ir_live_ranges, live_range_slot(func_i, var_i));
-}
+fn live_first(func_i: int, var_i: int) -> int:
+    if func_i < 0 || var_i < 0:
+        return -1
+    return r64(g_ir_live_ranges, live_range_slot(func_i, var_i))
 
-fn live_last(func_i: int, var_i: int) -> int {
-    if func_i < 0 || var_i < 0 { return -1; }
-    return r64(g_ir_live_ranges, live_range_slot(func_i, var_i) + 8);
-}
+fn live_last(func_i: int, var_i: int) -> int:
+    if func_i < 0 || var_i < 0:
+        return -1
+    return r64(g_ir_live_ranges, live_range_slot(func_i, var_i) + 8)
 ```
 
 `compute_live_ranges()` 实现：先按 Σ var_count 总量 grow 并首遍写 -1（区间未知 = -1，沿用 alloc_registers 的 iv_buf 初始化语义）；再逐函数逐指令扫描：op/dest/s1/s2 落在 `[var_start, var_start+var_count)` 内则扩展区间（首见写 first，之后推进 last——与 opt.cr:210-241 逻辑逐行一致）。末尾把 `alloc_registers` 的重复扫描删除并改读 `live_first/live_last`。
@@ -239,14 +246,17 @@ jj commit -m 'feat: 条目版本化——STORE/ALLOC 定值切分版本条目（
 - [ ] **Step 2: 实现 entries_coexist**
 
 ```core
-fn entries_coexist(func_i: int, e1: int, e2: int) -> int {
+fn entries_coexist(func_i: int, e1: int, e2: int) -> int:
     // 存在区间 [s1,e1) 与 [s2,e2) 相交 ⟺ s1 < e2 && s2 < e1（半开区间）
-    s1 := <e1 的 live_start>; en1 := <e1 的 live_end>;
-    s2 := <e2 的 live_start>; en2 := <e2 的 live_end>;
-    if s1 < 0 || s2 < 0 { return 0; }
-    if s1 < en2 && s2 < en1 { return 1; }
-    return 0;
-}
+    s1 := <e1 的 live_start>
+    en1 := <e1 的 live_end>
+    s2 := <e2 的 live_start>
+    en2 := <e2 的 live_end>
+    if s1 < 0 || s2 < 0:
+        return 0
+    if s1 < en2 && s2 < en1:
+        return 1
+    return 0
 ```
 
 - [ ] **Step 3: 跑测试 + 提交**

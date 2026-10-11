@@ -79,24 +79,24 @@ def run_case(name, source, expect_reject):
 
 
 REJECTS = [
-    ("stray_rbrace", "fn main() -> int { return 0; }\n}\n", "① 顶层多余 `}`（修前 check=0·build=0·运行 7）"),
-    ("typo_struct", "stuct S { f: int }\nfn main() -> int { return 0; }\n", "② typo 声明（修前被无声丢弃）"),
-    ("typo_struct_used", "stuct S { f: int }\nfn main() -> int { s := S { f: 1 }; return s.f; }\n",
+    ("stray_rbrace", "fn main() -> int:\n    return 0\n}\n", "① 顶层多余 `}`（修前 check=0·build=0·运行 7）"),
+    ("typo_struct", "stuct S:\n    f: int\nfn main() -> int:\n    return 0\n", "② typo 声明（修前被无声丢弃）"),
+    ("typo_struct_used", "stuct S:\n    f: int\nfn main() -> int:\n    s := S { f = 1 }\n    return s.f\n",
      "③ 同上 + 使用（修前 TF01 误报 + 运行 139）"),
-    ("stray_semi", ";\nfn main() -> int { return 0; }\n", "游离 `;`"),
-    ("bogus_kw", "fnn main() -> int { return 0; }\n", "typo 关键字 `fnn`"),
+    ("stray_semi", ";\nfn main() -> int:\n    return 0\n", "游离 `;`"),
+    ("bogus_kw", "fnn main() -> int:\n    return 0\n", "typo 关键字 `fnn`"),
 ]
 
 ACCEPTS = [
-    ("import_io", 'import io\nfn main() -> int { println("hi"); return 0; }\n',
+    ("import_io", 'import io\nfn main() -> int:\n    println("hi")\n    return 0\n',
      "合法 import（**本轮新修**：路径/别名 token 此前靠静默吞）"),
-    ("import_alias", "import io : i\nfn main() -> int { return 0; }\n", "带别名 import"),
-    ("global_no_init", "g : int, mut;\nfn main() -> int { g = 1; return g - 1; }\n",
+    ("import_alias", "import io : i\nfn main() -> int:\n    return 0\n", "带别名 import"),
+    ("global_no_init", "g : int, mut\nfn main() -> int:\n    g = 1\n    return g - 1\n",
      "无初值全局声明（注入运行时源 `rt.cr:4` 同形；此前靠静默吞）"),
-    ("global_init", "g : int, mut = 2;\nfn main() -> int { return g - 2; }\n", "有初值全局声明"),
-    ("mod_decl", "mod m;\nfn main() -> int { return 0; }\n", "`mod` 声明"),
-    ("type_alias", "type T = int;\nfn main() -> int { x : T = 0; return x; }\n", "type 别名"),
-    ("hotpatch_ann", "@hotpatch(ver=1)\nfn f() -> int { return 0; }\nfn main() -> int { return f(); }\n",
+    ("global_init", "g : int, mut = 2\nfn main() -> int:\n    return g - 2\n", "有初值全局声明"),
+    ("mod_decl", "mod m\nfn main() -> int:\n    return 0\n", "`mod` 声明"),
+    ("type_alias", "type T = int\nfn main() -> int:\n    x : T = 0\n    return x\n", "type 别名"),
+    ("hotpatch_ann", "@hotpatch(ver=1) fn f() -> int:\n    return 0\nfn main() -> int:\n    return f()\n",
      "`@` 注解 + 函数"),
 ]
 

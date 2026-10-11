@@ -309,6 +309,15 @@ TI_DYN : int = 7    // dynamic type
 // TI_DEX_S 仍不查类型表（type_size/type_align/is_ptr_var 处保留显式守卫，见 ir_gen.cr），
 // 值永远以 8 字节槽存储。
 TI_DEX_S : int = 8
+// **错误恢复哨兵**（2026-10-11 裁定 (c)，与 `TI_NEVER` 分家）：`infer_expr` 的**错误路径**
+// （未定义名 / 未定义函数 / `@` 内建形错…）一律返回它，**不再复用 `TI_NEVER`**。
+// 动机：`TI_NEVER` 一名两用（真类型 `never` ／ 错误哨兵）⇒ 「`never` 与任何类型相容」这条
+// 规则会把**错误**也放过（实测：`undef_x = 0` 的 TA01 静默丢失；两前端不一致）。
+// **取负数**（不占 `TI_` 的表项空间——0..8 已占、9 起是用户类型）：所有读表入口对负数都有
+// 守卫（`get_type_kind`/`get_type_data`/`get_type_extra` 的 `ti >= 0` 检查；`sh_term_of_ti`
+// 的 `if ti < 0: return -1`）⇒ **不会越界读**；且 `type_equal_engine` 已加哨兵早退，
+// 不会把负数灌进引擎的 `ty_indeterminate_report`（ICE04）。
+TI_ERROR : int = -2
 
 // Type table entry kinds
 TYP_BASE : int = 0   // data = TY_* constant

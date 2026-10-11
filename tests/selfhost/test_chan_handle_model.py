@@ -83,14 +83,7 @@ def main():
                 if os.path.exists(p):
                     os.unlink(p)
     # ── ④ 对齐形态自证（handle 可作 string 流经：赋值 + 传参）──────────────
-    probe = ("import chan\n"
-             "fn main() -> int {\n"
-             "    ch : string = chan_make(8, 1);\n"          # 返回型 = string（模型）
-             "    chan_send(ch, 1);\n"                       # 形参 = string
-             "    v := chan_recv(ch);\n"
-             "    chan_close(ch);\n"
-             "    return v - 1;\n"
-             "}\n")
+    probe = ("import chan\nfn main() -> int:\n    ch : string = chan_make(8, 1)\n    chan_send(ch, 1)\n    v := chan_recv(ch)\n    chan_close(ch)\n    return v - 1\n")
     r = run_corec(["check"], probe)
     if r.returncode == 0:
         print("[PASS] aligned_forms: chan_make→string 赋值 + chan_send/recv/close(string) 通过")

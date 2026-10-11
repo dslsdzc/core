@@ -51,28 +51,27 @@ CASES = [
     # —— 枚举族（17 MAKE_ENUM / 23 LOAD_ENUM_TAG / payload 走 11/12）——
     (
         "enum_payload_in_callee",
-        "enum Choice { First(int), Second(int), Third(int) }",
-        "c := Third(33); return match c { First(x) => x, Second(x) => x, Third(x) => x, };",
+        "enum Choice:\n    First(int), Second(int), Third(int)\n",
+        "c := Third(33)\nreturn match c:\n    First(x) => x, Second(x) => x, Third(x) => x,\n",
         "parity", 33, 33,
     ),
     (
         # 构造在 callee（MAKE_ENUM）、match 在 main（LOAD_ENUM_TAG 跨函数）
         "enum_construct_callee_match_main",
-        "enum Choice { First(int), Second(int), Third(int) }\n"
-        "fn make()->Choice { return Third(33); }",
-        "c := make(); return match c { First(x) => x, Second(x) => x, Third(x) => x, };",
+        "enum Choice:\n    First(int), Second(int), Third(int)\nfn make()->Choice:\n    return Third(33)\n",
+        "c := make()\nreturn match c:\n    First(x) => x, Second(x) => x, Third(x) => x,\n",
         "parity", 33, 33,
     ),
     (
         "enum_tag_variant_in_callee",
-        "enum Color { Red, Green, Blue }",
-        "c := Green(); return match c { Red => 1, Green => 2, Blue => 3, };",
+        "enum Color:\n    Red, Green, Blue\n",
+        "c := Green()\nreturn match c:\n    Red => 1, Green => 2, Blue => 3,\n",
         "parity", 2, 2,
     ),
     (
         "enum_payload_tag_only_in_callee",
-        "enum Choice { First(int), Second(int), Third(int) }",
-        "c := Third(33); return match c { First(x) => 1, Second(x) => 2, Third(x) => 3, };",
+        "enum Choice:\n    First(int), Second(int), Third(int)\n",
+        "c := Third(33)\nreturn match c:\n    First(x) => 1, Second(x) => 2, Third(x) => 3,\n",
         "parity", 3, 3,
     ),
     # —— 裸指针族（18 REF / 25 DEREF / 26 STORE_PTR / 31 ADDR_INDEX）——
@@ -80,19 +79,19 @@ CASES = [
         # TODO #2026-09-10-7 复现原件：g:[int;3]=[5,6,7]; fn f(){ p:=&g[2]; return *p; }
         "bare_ptr_deref_callee",
         "g : [int;3] = [5,6,7];",
-        "p := &g[2]; return *p;",
+        "p := &g[2]\nreturn *p\n",
         "parity", 7, 7,
     ),
     (
         "ptr_store_callee",
         "",
-        "x : ., mut = 5; p := &x; *p = 42; return x;",
+        "x : ., mut = 5\np := &x\n*p = 42\nreturn x\n",
         "parity", 42, 42,
     ),
     (
         "addr_index_deref_callee",
         "",
-        "a := [10,20,30]; p := &a[1]; return *p;",
+        "a := [10,20,30]\np := &a[1]\nreturn *p\n",
         "parity", 20, 20,
     ),
     # —— 切片 / 边界检查族（24 SLICE / 30 BOUNDS_CHECK）——
@@ -120,48 +119,47 @@ CASES = [
     (
         "dyn_pack_val_callee",
         "",
-        "x : dyn = 42; if x != 42 { return 1; } return 0;",
+        "x : dyn = 42\nif x != 42:\n    return 1\nreturn 0\n",
         "parity", 0, 0,
     ),
     (
         # 动态分发：interp 响亮报错（rc 2 + 诊断，与主循环同文案）；ELF 占位 no-op
         "dyn_dispatch_callee_loud",
-        "struct Counter { n: int }\nimpl Counter {\n    fn bump(self) { }\n}\n",
-        "c : Counter = Counter { n = 7 }; d : dyn = c; d.bump(); return 3;",
+        "struct Counter:\n    n: int\nimpl Counter:\n    fn bump(self):\n",
+        "c : Counter = Counter { n = 7 }\nd : dyn = c\nd.bump()\nreturn 3\n",
         "loud", 2, 3,
     ),
     # —— 调用族（4 CALL：嵌套内联 / 递归 / 互递归）——
     (
         "nested_call_callee",
-        "fn g2()->int { return 7; }\n",
+        "fn g2()->int:\n    return 7\n",
         "return g2();",
         "parity", 7, 7,
     ),
     (
         "recursion_fib_callee",
-        "fn fib(n: int)->int { if n < 2 { return n; } return fib(n-1) + fib(n-2); }\n",
+        "fn fib(n: int)->int:\n    if n < 2:\n        return n\n    return fib(n-1) + fib(n-2)\n",
         "return fib(10);",
         "parity", 55, 55,
     ),
     (
         "mutual_recursion_callee",
-        "fn is_even(n: int)->int { if n == 0 { return 1; } return is_odd(n - 1); }\n"
-        "fn is_odd(n: int)->int { if n == 0 { return 0; } return is_even(n - 1); }\n",
+        "fn is_even(n: int)->int:\n    if n == 0:\n        return 1\n    return is_odd(n - 1)\nfn is_odd(n: int)->int:\n    if n == 0:\n        return 0\n    return is_even(n - 1)\n",
         "return is_even(10);",
         "parity", 1, 1,
     ),
     (
         # 深度守卫：无界递归必须响亮中止（rc 255 + 诊断），不挂死
         "depth_guard_runaway_loud",
-        "fn r(n: int)->int { return r(n + 1); }\n",
+        "fn r(n: int)->int:\n    return r(n + 1)\n",
         "return r(0);",
         "loud", 255, SIGSEGV,
     ),
     # —— 并发族（27 SPAWN：range go；28 YIELD / 29 AWAIT eager 近似）——
     (
         "range_go_spawn_callee",
-        "fn square(x: int) -> int { return x * x; }\n",
-        "arr := go i 0..3 square(i); return arr[0] + arr[1] + arr[2];",
+        "fn square(x: int) -> int:\n    return x * x\n",
+        "arr := go i 0..3 square(i)\nreturn arr[0] + arr[1] + arr[2]\n",
         "parity", 5, 5,
     ),
     (
@@ -169,7 +167,7 @@ CASES = [
         # callee 路径只用 label_poses——两条机制各走各的，必须同值）
         "loop_in_callee",
         "",
-        "s : ., mut = 0; for i := 0..5 { s = s + i; } return s;",
+        "s : ., mut = 0\nfor i := 0..5:\n    s = s + i\nreturn s\n",
         "parity", 10, 10,
     ),
     (
@@ -181,14 +179,14 @@ CASES = [
     (
         "await_in_callee",
         "",
-        "x := await 5; return x;",
+        "x := await 5\nreturn x\n",
         "parity", 5, 5,
     ),
     # —— 45 CALL_EXTERN：响亮报错（interp rc 2 + 诊断；ELF 静态构建运行期
     # SIGSEGV——两侧都非静默）——
     (
         "extern_call_callee_loud",
-        "extern fn putchar(c: int) -> int;\n",
+        "extern fn putchar(c: int) -> int\n",
         "return putchar(65);",
         "loud", 2, SIGSEGV,
     ),
@@ -196,8 +194,8 @@ CASES = [
     (
         # 解释器无真实地址（FNADDR 恒 0）——显式近似：只断言 callee ≡ main
         "fnaddr_callee_approx",
-        "fn square(x: int) -> int { return x * x; }\n",
-        "p := @addr(square); if p == 0 { return 1; } return 0;",
+        "fn square(x: int) -> int:\n    return x * x\n",
+        "p := @addr(square)\nif p == 0:\n    return 1\nreturn 0\n",
         "approx", 1, 0,
     ),
     (
@@ -206,7 +204,7 @@ CASES = [
         # 根本未发射，判据形同虚设（两形态的诊断奇偶断言也掩盖了它）。
         "approx_apx_dex_callee",
         "",
-        "d : dex, apx = 2.0; return 7;",
+        "d : dex, apx = 2.0\nreturn 7\n",
         "parity", 7, 7,
     ),
 ]
@@ -313,14 +311,20 @@ def run_native(name: str, source: str):
                 pass
 
 
+def _indent_body(body: str) -> str:
+    """函数体片段（多行、自带**相对**缩进）⇒ v4 region 体：逐行 +4 空格。"""
+    return "\n".join(("    " + ln) if ln.strip() else ln for ln in body.split("\n"))
+
+
 def callee_src(prelude: str, body: str) -> str:
     """内联路径：函数体包进 probe()，main 调 probe()。"""
-    return f"{prelude}\nfn probe()->int {{ {body} }}\nfn main()->int {{ return probe(); }}"
+    return (f"{prelude}\nfn probe()->int:\n{_indent_body(body)}\n"
+            f"fn main()->int:\n    return probe()")
 
 
 def main_src(prelude: str, body: str) -> str:
     """主循环路径：同一段函数体直接内联进 main。"""
-    return f"{prelude}\nfn main()->int {{ {body} }}"
+    return f"{prelude}\nfn main()->int:\n{_indent_body(body)}"
 
 
 def probe_ops(name: str, source: str):

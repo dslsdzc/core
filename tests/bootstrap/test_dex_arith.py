@@ -54,91 +54,92 @@ def run_test(name, src, expected):
 def main():
     results = [
         run_test('Exact Add 0.1+0.2==0.3', '''
-fn main() -> int {
-    a := 0.1 + 0.2;
-    if a == 0.3 { return 1; }
-    return 0;
-}
+fn main() -> int:
+    a := 0.1 + 0.2
+    if a == 0.3:
+        return 1
+    return 0
 ''', 1),
         run_test('Exact Add 3.14+2.86==6.0', '''
-fn main() -> int {
-    a := 3.14 + 2.86;
-    if a == 6.0 { return 1; }
-    return 0;
-}
+fn main() -> int:
+    a := 3.14 + 2.86
+    if a == 6.0:
+        return 1
+    return 0
 ''', 1),
         run_test('Exact Div 1/10==0.1', '''
-fn main() -> int {
-    a := 1.0 / 10.0;
-    if a == 0.1 { return 1; }
-    return 0;
-}
+fn main() -> int:
+    a := 1.0 / 10.0
+    if a == 0.1:
+        return 1
+    return 0
 ''', 1),
         run_test('Exact Mul 1.5*2.0==3.0', '''
-fn main() -> int {
-    a := 1.5 * 2.0;
-    if a == 3.0 { return 1; }
-    return 0;
-}
+fn main() -> int:
+    a := 1.5 * 2.0
+    if a == 3.0:
+        return 1
+    return 0
 ''', 1),
         run_test('Exact Sub Neg 0.3-1.0==-0.7', '''
-fn main() -> int {
-    a := 0.3 - 1.0;
-    if a == -0.7 { return 1; }
-    return 0;
-}
+fn main() -> int:
+    a := 0.3 - 1.0
+    if a == -0.7:
+        return 1
+    return 0
 ''', 1),
         run_test('Int Participates 1+0.5==1.5', '''
-fn main() -> int {
-    a := 1 + 0.5;
-    if a == 1.5 { return 1; }
-    return 0;
-}
+fn main() -> int:
+    a := 1 + 0.5
+    if a == 1.5:
+        return 1
+    return 0
 ''', 1),
         run_test('Dex Var Add', '''
-fn main() -> int {
-    x : dex = 0.1;
-    y : dex = 0.2;
-    if x + y == 0.3 { return 1; }
-    return 0;
-}
+fn main() -> int:
+    x : dex = 0.1
+    y : dex = 0.2
+    if x + y == 0.3:
+        return 1
+    return 0
 ''', 1),
         run_test('Fn Dex Boundary', '''
-fn add2(a: dex, b: dex) -> dex { return a + b; }
-fn main() -> int {
-    r := add2(0.1, 0.2);
-    if r == 0.3 { return 1; }
-    return 0;
-}
+fn add2(a: dex, b: dex) -> dex:
+    return a + b
+fn main() -> int:
+    r := add2(0.1, 0.2)
+    if r == 0.3:
+        return 1
+    return 0
 ''', 1),
         # 模运算截断恒等式（a - trunc(a/b)·b），含负数
         run_test('Mod Trunc 7.0%2.5==2.0', '''
-fn main() -> int {
-    a := 7.0 % 2.5;
-    if a == 2.0 { return 1; }
-    return 0;
-}
+fn main() -> int:
+    a := 7.0 % 2.5
+    if a == 2.0:
+        return 1
+    return 0
 ''', 1),
         run_test('Mod Trunc -7.0%2.5==-2.0', '''
-fn main() -> int {
-    a := -7.0 % 2.5;
-    if a == -2.0 { return 1; }
-    return 0;
-}
+fn main() -> int:
+    a := -7.0 % 2.5
+    if a == -2.0:
+        return 1
+    return 0
 ''', 1),
         run_test('Mod Trunc 1.0%0.3==0.1', '''
-fn main() -> int {
-    a := 1.0 % 0.3;
-    if a == 0.1 { return 1; }
-    return 0;
-}
+fn main() -> int:
+    a := 1.0 % 0.3
+    if a == 0.1:
+        return 1
+    return 0
 ''', 1),
         run_test('Mod Trunc -1.0%0.3==-0.1', '''
-fn main() -> int {
-    a := -1.0 % 0.3;
-    if a == -0.1 { return 1; }
-    return 0;
-}
+fn main() -> int:
+    a := -1.0 % 0.3
+    if a == -0.1:
+        return 1
+    return 0
 ''', 1),
     ]
     # 打印格式（定点 → 十进制，去尾零）——直接断言格式函数（bootstrap 无 stdlib，

@@ -461,6 +461,17 @@ fn type_compat_strict(ti_a: int, ti_b: int) -> int:
     // （见 infer_expr 的 EXPR_RETURN/EXPR_BREAK/EXPR_CONTINUE 格）⇒ 分支合一处的
     // 「unit vs never」「int vs never」必须放行，否则「一支赋值、一支 return」这类
     // **完全正常**的语句位 if 会被误报 TC02（实测：本仓 src/compiler/main.cr 的 is_decl_stmt）。
+    // 错误哨兵（裁定 (c)）——**定向**处置：
+    //   · 源侧是错误 ⇒ **放行**（「错误值」不再级联出第二条诊断：`x : int = nosuchname`
+    //     只报 N01，不叠 TA02——与 `tests/selfhost/test_tc02_branch.py::ta02_never_exempt_still`
+    //     的期望同向）；
+    //   · 目标侧是错误 ⇒ **不放行**（目标类型取不到就是真差异 ⇒ `undef_x = 0` 的 TA01 回来）。
+    //   这是「`TI_ERROR` 与 `TI_NEVER` 分家」的**全部收益点**：旧实现把两者混为一体，
+    //   于是「源侧要放行、目标侧要拒绝」这对矛盾需求不可能同时满足。
+    if ti_a == TI_ERROR:
+        return 1
+    if ti_b == TI_ERROR:
+        return 0
     if ti_a == TI_NEVER || ti_b == TI_NEVER:
         return 1
     if !type_equal(ti_a, ti_b):
@@ -596,6 +607,11 @@ fn ty_indeterminate_report(kind: int, t1: int, t2: int, a: int, b: int, unc: int
 fn type_equal_engine(t1: int, t2: int) -> bool:
     if t1 == t2:
         return true
+    // 错误哨兵**不进引擎**（裁定 (c)）：`TI_ERROR` 取负数、无类型行 ⇒ 若放它下去，
+    // `sh_term_of_ti` 回 -1 会触发 `ty_indeterminate_report`（**ICE04 硬错**，fail-closed）
+    // ⇒ 任何「错误值参与等价判定」都会变成新诊断。此处早退 = 等价判否（且**不报**）。
+    if t1 == TI_ERROR || t2 == TI_ERROR:
+        return false
     // 快路径：同一行
     a := sh_term_of_ti(t1)
     b := sh_term_of_ti(t2)
@@ -891,6 +907,16 @@ fn find_so_fn(name_idx: int) -> int:
 // --- Error tracking ---
 // Uses g_diags, g_diag_count from globals.cr (and ast.cr)
 // Old g_check_errors is replaced by structured g_diags.
+
+// ── nail3（2026-10-11 裁定）：逐 `return` 核对「返回值 vs **当前函数**的声明返回型」──
+// 为什么需要**新通道**：`return` 的类型被裁定为 `never`（见 infer_expr 的 EXPR_RETURN 格）
+// ⇒ 体类型恒 `never` ⇒ 与声明返回型恒相容 ⇒ **类型通道里不留任何可比信息**。
+// 故在 `EXPR_RETURN` 处**额外**取一次「当前函数的声明返回型」做比对（诊断面，不参与节点类型）。
+// 承载：save/restore 两个全局（与 `g_unsafe_depth` 同款的显式上下文约定；嵌套函数声明已被
+// P21 拒绝 ⇒ 无需真栈）。`g_cur_fn_ret_checked == 0` ⇒ **不判**（flow 函数 / 声明返回型是
+// 泛型形参 —— 与既有 TF01 体检查的守卫同口径）。
+g_cur_fn_ret_ti : int, mut
+g_cur_fn_ret_checked : int, mut
 
 fn check_error(code: int, msg: string, line: int, col: int):
     grow_diags(g_diag_count + 1)
@@ -2333,7 +2359,6 @@ fn check_func(fi: int):
             pn = pn + 1
     // Check body
     if body >= 0:
-        body_ti := infer_expr(body)
         ret_ti : ., mut = TI_UNIT
         // First check for named type via the stored type node (kind != 0)
         type_node := ast_type_val(fn_node)
@@ -2345,6 +2370,21 @@ fn check_func(fi: int):
             ret_ti_mapped := ty_code_to_ti(return_type)
             if ret_ti_mapped >= 0 && ret_ti_mapped != TI_DYN:
                 ret_ti = ret_ti_mapped
+        // nail3：**先算 ret_ti / flow 守卫，再推体** —— 逐 `return` 核对需要这两个值在手。
+        // ⚠ 次序改动是安全的：`res_type_node`/`ty_code_to_ti`/`scan_for_yield` 都只看
+        //   **声明与 AST**，不依赖 `infer_expr(body)` 的结果。
+        is_flow_fn : ., mut = 0
+        if scan_for_yield(body) != 0:
+            is_flow_fn = 1
+        saved_ret_ti := g_cur_fn_ret_ti
+        saved_ret_ok := g_cur_fn_ret_checked
+        g_cur_fn_ret_ti = ret_ti
+        g_cur_fn_ret_checked = 0
+        if is_flow_fn == 0 && get_type_kind(ret_ti) != TYP_GENERIC_PARAM:
+            g_cur_fn_ret_checked = 1
+        body_ti := infer_expr(body)
+        g_cur_fn_ret_ti = saved_ret_ti
+        g_cur_fn_ret_checked = saved_ret_ok
         compat := type_compat_strict(body_ti, ret_ti)
         // 落空分析（TF01 收口，见 stmt_cannot_fall_through 头注）：体确定不能落空（如以
         // 无 break 的 loop 收尾）⇒ 「块类型 = 末语句类型」推出的 unit 不是缺返回值的证据，
@@ -2352,9 +2392,6 @@ fn check_func(fi: int):
         if compat != 1 && body_ti != TI_NEVER && stmt_cannot_fall_through(body) == 0:
             // Skip check if return type is generic param (can't verify at declaration)
             // Skip check for flow functions (yield instead of return)
-            is_flow_fn : ., mut = 0
-            if body >= 0 && scan_for_yield(body) != 0:
-                is_flow_fn = 1
             if !is_flow_fn && get_type_kind(ret_ti) != TYP_GENERIC_PARAM:
                 diag_type_incompatible(compat, EC_TF_RETURN, "Function return type mismatch", ast_line(fn_node), ast_col(fn_node))
     // 批 6（T3）：规约标注面——**在 pop_scope 之前**（形参仍在作用域内，`#check(a > 0)` 才能定型）
@@ -2914,7 +2951,7 @@ fn infer_expr(node: int) -> int:
             return sym_type(si)
         name := istr_get(name_idx)
         check_error(EC_N_UNDEFINED, "Undefined name '" + name + "'", ast_line(node), ast_col(node))
-        return TI_NEVER
+        return TI_ERROR
     if ast_kind(node) == EXPR_INTERP_HOLE:
         // 字符串插值洞（批 8 展开）：**就地改写**本节点为「带类型转换的表达式」——父节点只存索引
         // ⇒ 无需父指针（扁平 AST 的天然便利）。转换表（维护者签字）：string 恒等 · int→`int_str` ·
@@ -3231,7 +3268,7 @@ fn infer_expr(node: int) -> int:
                         if fi_generic_count(fi_m) == 0:
                             if sym_type(si) == TI_UNIT:
                                 if fi_return_type(fi_m) == TY_NEVER:
-                                    return TI_NEVER
+                                    return TI_ERROR
                     return sym_type(si)
             return TI_UNIT
 
@@ -3307,7 +3344,7 @@ fn infer_expr(node: int) -> int:
                             if fnd >= 0:
                                 if ast_kind(fnd) == EXPR_FN:
                                     infer_call_args(first_arg)   // TODO #2026-09-16-31：实参必须被推断（本 return 路径原先跳过）
-                                    return TI_NEVER
+                                    return TI_ERROR
                 infer_call_args(first_arg)   // TODO #2026-09-16-31：实参必须被推断（本 return 路径原先跳过）
                 // ── 批 8 PR-B · S1′（report-only；**新点 = 直调/方法调用解析尾**，2026-09-18）────
                 // 目的：测 (ii)「直调实参类型不校验」的**真实面**（旧 S1 接在 `infer_gen_call` 的泛型
@@ -3345,7 +3382,7 @@ fn infer_expr(node: int) -> int:
             name := istr_get(func_ni)
             check_error(EC_N_FUNC, "Undefined function '" + name + "'", ast_line(node), ast_col(node))
             infer_call_args(first_arg)   // TODO #2026-09-16-31：实参必须被推断（本 return 路径原先跳过）
-            return TI_NEVER
+            return TI_ERROR
         infer_call_args(first_arg)   // 单一真源（与上述 4 处同一函数）
         return TI_INT  // external/unknown functions
 
@@ -3437,9 +3474,25 @@ fn infer_expr(node: int) -> int:
             // = 所返回值类型）⇒ 相容判定无对象 ⇒ 不报。
             // **不对称是有意的**：then 支发散时 then_ti 本身即幻影（模型面，另案）⇒ 该形态继续报
             // TC02（保留真信号）。谓词 = stmt_diverges（头注：只服务本判定点）。
-            if compat != 1 && then_ti != TI_NEVER && else_ti != TI_NEVER:
+            // 错误哨兵豁免（裁定 (c)）：原来这条豁免由 `TI_NEVER` 兼职承担，分家后
+            // **错误**由 `TI_ERROR` 表示 ⇒ 必须补上，否则「then 支有错」会叠一条 TC02（级联）。
+            if compat != 1 && then_ti != TI_NEVER && else_ti != TI_NEVER && then_ti != TI_ERROR && else_ti != TI_ERROR:
                 if stmt_diverges(else_node) == 0:
                     diag_type_incompatible(compat, EC_TC_IF_BRANCH, "If branches have different types", ast_line(node), ast_col(node))
+            else if then_ti == TI_NEVER && ast_kind(else_node) == EXPR_BLOCK && ast_b(else_node) == 0:
+                // ── nail1 判别式（2026-10-11 裁定；设计已过目）──────────────────────────
+                // **then 支发散（`never`）+ else 支是「零项 region」** ⇒ 报 TC02（保留真信号）。
+                // 为什么必须用**非类型**维度：本形与 `src/compiler/main.cr` 的 if#2
+                // （`else if c2b == 58:` 那层）在 (a) 位置规则 + (b) `never` 裁定下**类型逐格相同**
+                // —— `(then_ti, else_ti)` 都是 `(never, unit)` —— 类型通道里没有任何可分之处。
+                // 唯一可分者是 else 的**节点形态**：本形的 else 是 `EXPR_BLOCK` 且 items 数 `b == 0`
+                // （⑤「region 可为空」新引入的合法形）；if#2 的 else 是 `EXPR_IF`，谓词**恒假**
+                // ⇒ **构造性地**不改变它的诊断集（硬门可直接验证）。
+                // 语义依据：零项 region 是**能执行到终点、产出 unit** 的路径（只是没有语句），
+                // `return` 支是**执行不到终点**的路径 ⇒ 两者值语义不同 ⇒ 保留真信号。
+                // **非对称是刻意的**：不加镜像（then 零项 + else 发散 ⇒ 报）——那正是 `k2`
+                // （`tc02_end2end_cmp` 一族，期望 rc=0）⇒ 必须静默；与既有守卫的既有非对称同向。
+                diag_type_incompatible(compat, EC_TC_IF_BRANCH, "If branches have different types", ast_line(node), ast_col(node))
             return then_ti
         return TI_UNIT
 
@@ -3676,7 +3729,30 @@ fn infer_expr(node: int) -> int:
         // 值的类型）。值仍**必须推断** —— 否则 `return foo()` 里的未定义名/类型错等诊断会
         // 整段消失（那是把一个响亮面换成静默面）；推断结果只是不参与本节点类型。
         if ast_a(node) >= 0:
-            infer_expr(ast_a(node))
+            vt := infer_expr(ast_a(node))
+            // nail3：逐 `return` 核对返回值 vs **当前函数**的声明返回型（新通道，见全局注释）。
+            // 码 = TF01（`EC_TF_RETURN`，与体检查同码——措辞区分成因）。
+            // 三个**假红风险面**的处置（裁定要求逐条打夹具）：
+            //  ① 泛型返回：`g_cur_fn_ret_checked == 0` 时不判（声明返回型是泛型形参）；
+            //  ② 错误传播：值侧是 `TI_ERROR` ⇒ `type_compat_strict` 源侧放行（不叠第二诊断）；
+            //  ③ `never` 值侧（如 `return boom()`）：never 作源 ⇒ 放行（底类型）。
+            // ④ **既存语料的 `bool`↔`int` 惯用法**（实测逼出来的第四格，非设计预列）：
+            //    `fn lit_implies(...) -> int: return tt_tag(lq) == TT_TOP` 一类 —— 比较表达式
+            //    的类型是 `bool`，而声明返回型写 `int`。自源里这类**成片存在**（首轮实测 3 处，
+            //    全在 `type_engine.cr`）。改前它被 `return ⇒ never` 的体类型恒相容**掩盖**着，
+            //    体检查从未看见过这层差异 ⇒ 若本检查照判，自源当场 3 条假红。
+            //    本检查的**目标面 = 类型族不匹配**（`string` vs `int` 一类，如 nail3 的正控），
+            //    不覆盖这个 0/1 惯用法 ⇒ 此处**显式豁免**（`bool` 与 `int` 互不为对方判错）。
+            //    ⚠ 豁免面**只限这一对**，不放宽任何其它组合（放宽它 = 把检查做成空壳）。
+            bool_int_idiom : ., mut = 0
+            if (vt == TI_BOOL && g_cur_fn_ret_ti == TI_INT) || (vt == TI_INT && g_cur_fn_ret_ti == TI_BOOL):
+                bool_int_idiom = 1
+            if g_cur_fn_ret_checked != 0 && bool_int_idiom == 0:
+                c := type_compat_strict(vt, g_cur_fn_ret_ti)
+                if c != 1:
+                    diag_type_incompatible(c, EC_TF_RETURN,
+                        "Returned value type does not match the function's declared return type",
+                        ast_line(node), ast_col(node))
         return TI_NEVER
 
     if ast_kind(node) == EXPR_ENUM_CONSTRUCTOR:
@@ -4155,11 +4231,11 @@ fn infer_expr(node: int) -> int:
         if str_eq(name, "sizeOf") != 0:
             if args < 0:
                 check_error(EC_N_UNDEFINED, "@sizeOf requires a type argument", ast_line(node), ast_col(node))
-                return TI_NEVER
+                return TI_ERROR
             ti := res_type_node(args)
             if ti < 0:
                 check_error(EC_N_UNDEFINED, "@sizeOf: unknown type", ast_line(node), ast_col(node))
-                return TI_NEVER
+                return TI_ERROR
             return TI_INT
 
         // @addr(fn) — function address, type int
@@ -4171,18 +4247,18 @@ fn infer_expr(node: int) -> int:
         if str_eq(name, "alignOf") != 0:
             if args < 0:
                 check_error(EC_N_UNDEFINED, "@alignOf requires a type argument", ast_line(node), ast_col(node))
-                return TI_NEVER
+                return TI_ERROR
             ti := res_type_node(args)
             if ti < 0:
                 check_error(EC_N_UNDEFINED, "@alignOf: unknown type", ast_line(node), ast_col(node))
-                return TI_NEVER
+                return TI_ERROR
             return TI_INT
 
         // @fields(T) — 1 type argument, returns []string
         if str_eq(name, "fields") != 0:
             if args < 0:
                 check_error(EC_N_UNDEFINED, "@fields requires a type argument", ast_line(node), ast_col(node))
-                return TI_NEVER
+                return TI_ERROR
             ti := res_type_node(args)
             return TI_STR
 
@@ -4190,7 +4266,7 @@ fn infer_expr(node: int) -> int:
         if str_eq(name, "hasField") != 0:
             if args < 0 || ast_b(args) < 0:
                 check_error(EC_N_UNDEFINED, "@hasField requires 2 args", ast_line(node), ast_col(node))
-                return TI_NEVER
+                return TI_ERROR
             ti := res_type_node(ast_a(args))
             return TI_BOOL
 
@@ -4198,7 +4274,7 @@ fn infer_expr(node: int) -> int:
         if str_eq(name, "field") != 0:
             if args < 0 || ast_b(args) < 0:
                 check_error(EC_N_UNDEFINED, "@field requires 2 args", ast_line(node), ast_col(node))
-                return TI_NEVER
+                return TI_ERROR
             ti := res_type_node(ast_a(args))
             return TI_INT
 
@@ -4206,7 +4282,7 @@ fn infer_expr(node: int) -> int:
         if str_eq(name, "typeInfo") != 0:
             if args < 0:
                 check_error(EC_N_UNDEFINED, "@typeInfo requires a type argument", ast_line(node), ast_col(node))
-                return TI_NEVER
+                return TI_ERROR
             ti := res_type_node(args)
             // 返回型 = **类型名串**（与 ir_gen 的发射面一致：该分支构造 `"int"`/`"bool"`/… 或命名行名字）。
             // 契约出处 = `TODO.md` 的 `@` 内建清单「`@typeInfo(T)` — 类型名称字符串」。
@@ -4218,7 +4294,7 @@ fn infer_expr(node: int) -> int:
         if str_eq(name, "raw_int") != 0:
             if args < 0:
                 check_error(EC_N_UNDEFINED, "@raw_int requires an expression", ast_line(node), ast_col(node))
-                return TI_NEVER
+                return TI_ERROR
             av := infer_expr(ast_a(args))
             // 参数校验：**有「原值」语义的类型**才可取其原值——
             //   · dex（缩放位原值）· int（原值即其缩放值）· **地址型（地址字）**。
@@ -4247,14 +4323,14 @@ fn infer_expr(node: int) -> int:
             if av != TI_DEX && av != TI_INT && av != TI_NEVER:
                 if !(av > TI_DEX_S && (get_type_kind(av) == TYP_PTR || get_type_kind(av) == TYP_REF)):
                     check_error(EC_TF_ARG_TYPE, "@raw_int requires a dex (or int) or address (pointer/reference) expression", ast_line(node), ast_col(node))
-                    return TI_NEVER
+                    return TI_ERROR
             return TI_INT
 
         // @comptime(expr) — force compile-time eval
         if str_eq(name, "comptime") != 0:
             if args < 0:
                 check_error(EC_N_UNDEFINED, "@comptime requires an expression", ast_line(node), ast_col(node))
-                return TI_NEVER
+                return TI_ERROR
             v := infer_expr(ast_a(args))
             ast_set_type_val(node, v)
             return v
@@ -4263,7 +4339,7 @@ fn infer_expr(node: int) -> int:
         if str_eq(name, "inline") != 0:
             if args < 0:
                 check_error(EC_N_UNDEFINED, "@inline requires a function argument", ast_line(node), ast_col(node))
-                return TI_NEVER
+                return TI_ERROR
             v := infer_expr(ast_a(args))
             ast_set_type_val(node, v)
             return v
@@ -4304,19 +4380,19 @@ fn infer_expr(node: int) -> int:
         if str_eq(name, "ptr_of") != 0 || str_eq(name, "str_of") != 0:
             if g_unsafe_depth == 0:
                 check_error(EC_N_UNDEFINED, "@" + name + " must appear inside an `unsafe` block", ast_line(node), ast_col(node))
-                return TI_NEVER
+                return TI_ERROR
             if args < 0:
                 check_error(EC_N_UNDEFINED, "@" + name + " requires exactly 1 argument", ast_line(node), ast_col(node))
-                return TI_NEVER
+                return TI_ERROR
             av := infer_expr(ast_a(args))
             if str_eq(name, "ptr_of") != 0:
                 if av != TI_STR && av != TI_NEVER:
                     check_error(EC_TF_ARG_TYPE, "@ptr_of requires a string expression", ast_line(node), ast_col(node))
-                    return TI_NEVER
+                    return TI_ERROR
                 return TI_INT
             if av != TI_INT && av != TI_NEVER:
                 check_error(EC_TF_ARG_TYPE, "@str_of requires an int expression", ast_line(node), ast_col(node))
-                return TI_NEVER
+                return TI_ERROR
             return TI_STR
 
         check_error(EC_N_UNDEFINED, "unknown @ builtin: " + name, ast_line(node), ast_col(node))

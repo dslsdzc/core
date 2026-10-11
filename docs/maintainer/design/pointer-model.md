@@ -33,16 +33,15 @@ C 风格裸指针表达力强但无保障;Rust 用 borrow checker 换安全,代�
 开发者视角的语法与保证见 docs/developer/syntax.md 指针节;此处只列 pass 输入形状:
 
 ```core
-p := &arr[0];          // REF/ADDR_INDEX → self-pointer
-p = p + n;             // 偏移(不影响 pts;偏移入 g_offsets)
-x := *p;               // DEREF → 读 alloc content
-*p = v;                // STORE_PTR → v 的 pts 写入 alloc content
-q := cast<int*>(p);    // 类型转换(pts 不变,视图变化)
+p := &arr[0]          // REF/ADDR_INDEX → self-pointer
+p = p + n             // 偏移(不影响 pts;偏移入 g_offsets)
+x := *p               // DEREF → 读 alloc content
+*p = v                // STORE_PTR → v 的 pts 写入 alloc content
+q := cast<int*>(p)    // 类型转换(pts 不变,视图变化)
 
-unsafe {
-    mmio := 0x7fff0000 as *int;   // 图边界入口:整数转指针,asp=1
-    *mmio = 42;
-}
+unsafe:
+    mmio := 0x7fff0000 as *int   // 图边界入口:整数转指针,asp=1
+    *mmio = 42
 ```
 
 类型双关(`*(dex*)&i`)不需要 unsafe——地址语义是条目标识 + 偏移(条款 6),经典映射是"字节序列 + 宽度 + 边界",provenance/offset/alloc_size 与类型无关;`cast` 保留值流,provenance 边不断。判据 = 边界 + 宽度。
@@ -107,9 +106,9 @@ unsafe {
 **ALLOC_AT(声明式放置,2026-08-13 定稿)**:`alloc_at(addr, size, align)` 是声明式进图节点——固定地址区域以(地址+大小+对齐)声明,与 ALLOC 同路径获得 provenance,之后全图追踪、照常验证:
 
 ```core
-mmio := alloc_at(0x7fff0000, 4096, align(4096));  // MMIO 页
-*mmio = 42;              // safe 代码即可,边界内照常验证
-p := mmio + 4096;        // 越界 → 编译错误或运行时 check
+mmio := alloc_at(0x7fff0000, 4096, align(4096))  // MMIO 页
+*mmio = 42              // safe 代码即可,边界内照常验证
+p := mmio + 4096        // 越界 → 编译错误或运行时 check
 ```
 
 声明是唯一信任点(等价受控图边界入口);与 2026-08-10 定论不冲突(0x 字面量仍只作 unsafe 外部入口)。

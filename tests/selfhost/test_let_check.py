@@ -147,109 +147,95 @@ def case_reject(name, source, needles, cmd="build", forbid=STAGES, want_no_artif
 
 
 # ─── 语料 ───
-SLICE_SRC = ("fn h(s: [int]) -> int { x : [int;3] = s; return 0; }\n"
-             "fn main() -> int { return h([1,2,3]); }\n")
+SLICE_SRC = ("fn h(s: [int]) -> int:\n    x : [int;3] = s\n    return 0\nfn main() -> int:\n    return h([1,2,3])\n")
 
 
 def main():
     ok = [
         # ── 拒绝面（RED 三形态 + 同族扩展）──
-        case_reject("let_int_string_build_rejected", 'fn main() -> int { x : int = "s"; return 0; }\n',
+        case_reject("let_int_string_build_rejected", 'fn main() -> int:\n    x : int = "s"\n    return 0\n',
                     ["error[TA02]", "Variable declared as int, got string"]),
-        case_reject("let_int_string_check_rejected", 'fn main() -> int { x : int = "s"; return 0; }\n',
+        case_reject("let_int_string_check_rejected", 'fn main() -> int:\n    x : int = "s"\n    return 0\n',
                     ["error[TA02]"], cmd="check"),
         case_reject("let_slice_to_fixed_rejected", SLICE_SRC,
                     ["error[TA02]", "Array length constraint not satisfied"], cmd="check"),
         case_reject("let_arr_len_literal_rejected",
-                    "fn main() -> int { x : [int;4] = [1,2,3]; return 0; }\n",
+                    "fn main() -> int:\n    x : [int;4] = [1,2,3]\n    return 0\n",
                     ["error[TA02]", "Array length constraint not satisfied"]),
         case_reject("let_optional_narrow_rejected",
-                    "fn main() -> int { x : int? = 5; y : int = x; return y; }\n",
+                    "fn main() -> int:\n    x : int? = 5\n    y : int = x\n    return y\n",
                     ["error[TA02]", "Variable declared as int, got int?"]),
         case_reject("let_int_from_struct_rejected",
-                    "struct P { a: int }\nfn main() -> int { p := P { a: 1 }; i : int = p; return i; }\n",
+                    "struct P:\n    a: int\nfn main() -> int:\n    p := P { a= 1 }\n    i : int = p\n    return i\n",
                     ["error[TA02]"], cmd="check"),
         case_reject("let_struct_from_int_rejected",
-                    "struct P { a: int }\nfn main() -> int { p : P = 5; return 0; }\n",
+                    "struct P:\n    a: int\nfn main() -> int:\n    p : P = 5\n    return 0\n",
                     ["error[TA02]", "Variable declared as P, got int"], cmd="check"),
         # 全局声明面（同形缺口：注册趟即取注解行）——本任务显式划界覆盖
-        case_reject("let_global_rejected", 'g : int = "s";\nfn main() -> int { return 0; }\n',
+        case_reject("let_global_rejected", 'g : int = "s"\nfn main() -> int:\n    return 0\n',
                     ["error[TA02]", "Variable declared as int, got string"]),
         # 批量声明（`a, b : int = ...`——每个名字一个 LET 节点，逐名判）
-        case_reject("let_batch_rejected", 'fn main() -> int { a, b : int = 1, "s"; return a; }\n',
+        case_reject("let_batch_rejected", 'fn main() -> int:\n    a, b : int = 1, "s"\n    return a\n',
                     ["error[TA02]", "Variable declared as int, got string"], cmd="check"),
         # 丢弃名（`_ : int = ...`）同样受判
-        case_reject("let_discard_rejected", 'fn main() -> int { _ : int = "s"; return 0; }\n',
+        case_reject("let_discard_rejected", 'fn main() -> int:\n    _ : int = "s"\n    return 0\n',
                     ["error[TA02]"], cmd="check"),
         # ── 级联抑制（值 = TI_NEVER 错误标记）：只发原诊断，不叠 TA02 ──
         case_reject("let_error_marker_no_cascade_ident",
-                    "fn main() -> int { x : int = nosuchname; return 0; }\n",
+                    "fn main() -> int:\n    x : int = nosuchname\n    return 0\n",
                     ["error[N01]"], cmd="check", forbid=(), exact_diags=1),
         case_reject("let_error_marker_no_cascade_call",
-                    "fn main() -> int { x : int = nosuchfn(); return 0; }\n",
+                    "fn main() -> int:\n    x : int = nosuchfn()\n    return 0\n",
                     ["error[N06]"], cmd="check", forbid=(), exact_diags=1),
         # ── R2 P6 Task 4a（E-11）：`-> never` 调用的返回型透传（TA02 面）──
         # 改前（RED 实测）：`boom()` 推断 = unit（声明注册域守卫 checker.cr:1491 钳位）⇒
         #   声明位豁免③（:526 `val_ti == TI_NEVER`）不触发 ⇒ 误发 TA02。
         # 改后：调用推断 = never ⇒ 豁免③ 生效 ⇒ rc=0。
         case_accept_check("let_never_call_ok",
-                          "fn boom() -> never { loop { } }\n"
-                          "fn main() -> int { x : int = boom(); return 0; }\n"),
+                          "fn boom() -> never:\n    loop:\nfn main() -> int:\n    x : int = boom()\n    return 0\n"),
         # near-miss 负控（突变 Mu2 的稳定牙齿）：普通 int 调用的注解位仍判，
         #   守卫不得退化成「一律透传 never」。
         case_accept_check("let_ordinary_call_unchanged",
-                          "fn f2() -> int { return 1; }\n"
-                          "fn main() -> int { x : int = f2(); return 0; }\n"),
+                          "fn f2() -> int:\n    return 1\nfn main() -> int:\n    x : int = f2()\n    return 0\n"),
         # 强负控（Mu2 的**转红**牙齿）：**普通调用**的返回型若真不符仍须拒——
         #   守卫退化为「无条件 return TI_NEVER」时本例转绿（= 抑制面被误开）。
         case_reject("call_result_mismatch_still_rejected",
-                    "fn f2() -> int { return 1; }\n"
-                    "fn main() -> int { x : char = f2(); return 0; }\n",
+                    "fn f2() -> int:\n    return 1\nfn main() -> int:\n    x : char = f2()\n    return 0\n",
                     ["error[TA02]"], cmd="check", forbid=(), exact_diags=1),
         # 宽面负控（C5）：语句位调用本无 TA/TF 判定面，改动不得新开抑制/新开诊断。
         case_accept_check("never_stmt_position_unchanged",
-                          "fn boom() -> never { loop { } }\n"
-                          "fn main() -> int { if 1 > 2 { boom(); } return 0; }\n"),
+                          "fn boom() -> never:\n    loop:\nfn main() -> int:\n    if 1 > 2:\n        boom()\n    return 0\n"),
         # 登记钉（裁③）：赋值位无 never 豁免（EXPR_ASSIGN，checker.cr:3314-3336）——
         #   改前（源 = unit）改后（源 = never）**都**报 TA01；既有缺口、非本改动引入，
         #   入 TODO 登记（E-T4-5）；同族豁免已在声明位/返回位/if 合并三处，赋值位是剩余缺口。
         case_reject("assign_never_still_ta01",
-                    "fn boom() -> never { loop { } }\n"
-                    "fn main() -> int { busy : int, mut = 0; busy = boom(); return 0; }\n",
+                    "fn boom() -> never:\n    loop:\nfn main() -> int:\n    busy : int, mut = 0\n    busy = boom()\n    return 0\n",
                     ["error[TA01]"], cmd="check", forbid=(), exact_diags=1),
         # ── 正控：合法注解 / 无注解 / auto / 泛型 / 可选注入 / 无初值 / 索引形态 ──
-        case_run("let_exact_ok", "fn main() -> int { x : int = 5; return x; }\n", 5),
+        case_run("let_exact_ok", "fn main() -> int:\n    x : int = 5\n    return x\n", 5),
         case_run("let_no_annot_ok",
-                 "fn main() -> int { x := 5; y : . = 6; z : auto = 7; return x + y + z; }\n", 18),
+                 "fn main() -> int:\n    x := 5\n    y : . = 6\n    z : auto = 7\n    return x + y + z\n", 18),
         case_run("let_generic_param_ok",
-                 "fn f[T](v: T) -> T { x : T = v; return x; }\n"
-                 "fn main() -> int { return f(3); }\n", 3),
+                 "fn f[T](v: T) -> T:\n    x : T = v\n    return x\nfn main() -> int:\n    return f(3)\n", 3),
         case_run("let_generic_array_ok",
-                 "fn f[T](v: T) -> T { x : [T; 2] = [v, v]; return x[0]; }\n"
-                 "fn main() -> int { return f(4); }\n", 4),
+                 "fn f[T](v: T) -> T:\n    x : [T; 2] = [v, v]\n    return x[0]\nfn main() -> int:\n    return f(4)\n", 4),
         case_run("let_optional_target_injection_ok",
-                 "fn main() -> int { x : int? = 5; y : int? = None; return 0; }\n", 0),
-        case_accept_check("let_dyn_annotation_ok", "fn main() -> int { x : dyn = 5; return 0; }\n"),
-        case_accept_check("let_no_init_ok", "fn main() -> int { x : int; return 0; }\n"),
+                 "fn main() -> int:\n    x : int? = 5\n    y : int? = none\n    return 0\n", 0),
+        case_accept_check("let_dyn_annotation_ok", "fn main() -> int:\n    x : dyn = 5\n    return 0\n"),
+        case_accept_check("let_no_init_ok", "fn main() -> int:\n    x : int\n    return 0\n"),
         case_run("let_slice_ann_from_literal_ok",
-                 "fn f(s: [int]) -> int { x : [int] = [1,2,3]; return x[0]; }\n"
-                 "fn main() -> int { return f([1]); }\n", 1),
+                 "fn f(s: [int]) -> int:\n    x : [int] = [1,2,3]\n    return x[0]\nfn main() -> int:\n    return f([1])\n", 1),
         case_run("let_fixed_ann_exact_literal_ok",
-                 "fn f(s: [int]) -> int { x : [int;3] = [1,2,3]; return s[0]; }\n"
-                 "fn main() -> int { return f([7]); }\n", 7),
+                 "fn f(s: [int]) -> int:\n    x : [int;3] = [1,2,3]\n    return s[0]\nfn main() -> int:\n    return f([7])\n", 7),
         case_run("let_named_and_string_ok",
-                 'struct P { a: int }\n'
-                 'fn main() -> int { p := P { a: 1 }; q : P = p; s := "hi"; t : string = s; return q.a; }\n',
+                 'struct P:\n    a: int\nfn main() -> int:\n    p := P { a= 1 }\n    q : P = p\n    s := "hi"\n    t : string = s\n    return q.a\n',
                  1),
         case_accept_check("let_generic_element_param_ok",
-                          "fn f[T](v: T) -> T { x : [T] = [v]; return x[0]; }\n"
-                          "fn main() -> int { return f(2); }\n", expect_rc=0),
+                          "fn f[T](v: T) -> T:\n    x : [T] = [v]\n    return x[0]\nfn main() -> int:\n    return f(2)\n", expect_rc=0),
         # 泛型形参注解**不判**（豁免④）——与返回位点既有策略同款同证：`return 5` 在
         # `-> T` 函数体内今天即 rc=0（返回位点的 TYP_GENERIC_PARAM 豁免）⇒ 声明位点同策略。
         case_accept_check("let_generic_param_annotation_not_judged",
-                          "fn f[T](v: T) -> T { return 5; }\n"          # 返回位点（既有策略）
-                          "fn g[T](v: T) -> T { x : T = 5; return x; }\n"  # 声明位点（本检查同策略）
-                          "fn main() -> int { return 0; }\n", expect_rc=0),
+                          "fn f[T](v: T) -> T:\n    return 5\nfn g[T](v: T) -> T:\n    x : T = 5\n    return x\nfn main() -> int:\n    return 0\n", expect_rc=0),
     ]
     passed = sum(ok)
     print(f"{passed}/{len(ok)} passed")

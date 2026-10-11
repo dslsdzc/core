@@ -31,7 +31,7 @@ flow counter() -> int {
 激活一个 flow 实例，产生一个新的图节点，与调用者并行。
 
 ```core
-c := go counter();
+c := go counter()
 // 图上：counter 子图被实例化，新节点加入图
 // 有 OS：新线程
 // 无 OS：新节点加入就绪队列
@@ -60,10 +60,10 @@ flow numbers() {
 等待一个 flow 实例的输出。
 
 ```core
-c := go counter();
-v := await c;       // 等待 counter 输出一个值
+c := go counter()
+v := await c       // 等待 counter 输出一个值
 // v = 0
-v = await c;        // 等待 counter 输出下一个值
+v = await c        // 等待 counter 输出下一个值
 // v = 1
 ```
 

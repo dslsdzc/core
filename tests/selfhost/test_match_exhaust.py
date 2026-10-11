@@ -145,78 +145,65 @@ def case_soft(name, source, needle):
 
 # ── 源形 ──────────────────────────────────────────────────────────────
 
-COLOR = "enum Color { Red, Green, Blue }\n"
-CHOICE = "enum Choice { First(int), Second(int), Third(int) }\n"
+COLOR = "enum Color:\n    Red, Green, Blue\n"
+CHOICE = "enum Choice:\n    First(int), Second(int), Third(int)\n"
 
 
 def missing_arm_src(scrutinee="Blue"):
-    return COLOR + f"""fn main() -> int {{
-    c := {scrutinee}();
-    v := match c {{
+    return COLOR + f"""fn main() -> int:
+    c := {scrutinee}()
+    v := match c:
         Red => 1,
         Green => 2,
-    }};
-    return v + 100;
-}}
+    return v + 100
 """
 
 
 def main():
     ok = [
         # 正：全覆盖 ELF 路径（Green ⇒ 2）
-        case_run("exhaustive_elf", COLOR + "fn main() -> int { c := Green(); "
-                 "return match c { Red => 1, Green => 2, Blue => 3, }; }\n", 2),
+        case_run("exhaustive_elf", COLOR + "fn main() -> int:\n    c := Green()\n    return match c:\n        Red => 1, Green => 2, Blue => 3,\n", 2),
         # 正：同源解释器路径（Blue ⇒ 3；与 ELF 路径共享判定面）
         case_interp("interp_exhaustive",
-                    COLOR + "fn main() -> int { c := Blue(); return match c { Red => 1, Green => 2, Blue => 3, }; }\n", 3),
+                    COLOR + "fn main() -> int:\n    c := Blue()\n    return match c:\n        Red => 1, Green => 2, Blue => 3,\n", 3),
         # 正：通配臂吸收（⊤）
-        case_run("wildcard_absorbs", COLOR + "fn main() -> int { c := Blue(); "
-                 "return match c { Red => 1, _ => 7, }; }\n", 7),
+        case_run("wildcard_absorbs", COLOR + "fn main() -> int:\n    c := Blue()\n    return match c:\n        Red => 1, _ => 7,\n", 7),
         # 正：绑定臂吸收
-        case_run("binding_absorbs", COLOR + "fn main() -> int { c := Red(); "
-                 "return match c { x => 9, }; }\n", 9),
+        case_run("binding_absorbs", COLOR + "fn main() -> int:\n    c := Red()\n    return match c:\n        x => 9,\n", 9),
         # 正：限定名模式（Enum.Variant）
-        case_run("qualified_pattern", COLOR + "fn main() -> int { c := Blue(); "
-                 "return match c { Color.Red => 1, Color.Green => 2, Color.Blue => 3, }; }\n", 3),
+        case_run("qualified_pattern", COLOR + "fn main() -> int:\n    c := Blue()\n    return match c:\n        Color.Red => 1, Color.Green => 2, Color.Blue => 3,\n", 3),
         # 正：payload 变体（三臂全列）
-        case_run("payload_exhaustive", CHOICE + "fn main() -> int { c := Third(33); "
-                 "return match c { First(v) => v, Second(v) => v, Third(v) => v, }; }\n", 33),
+        case_run("payload_exhaustive", CHOICE + "fn main() -> int:\n    c := Third(33)\n    return match c:\n        First(v) => v, Second(v) => v, Third(v) => v,\n", 33),
         # 正：泛型枚举实例（Opt[int]）
         case_run("generic_enum_exhaustive",
-                 "enum Opt[T] { N, S(T) }\nfn main() -> int { c := S(5); "
-                 "return match c { N => 1, S(x) => x, }; }\n", 5),
+                 "enum Opt[T]:\n    N, S(T)\nfn main() -> int:\n    c := S(5)\n    return match c:\n        N => 1, S(x) => x,\n", 5),
         # 正：单变体枚举（域最小边界）
         case_run("single_variant_exhaustive",
-                 "enum Only { One }\nfn main() -> int { c := One(); "
-                 "return match c { One => 4, }; }\n", 4),
+                 "enum Only:\n    One\nfn main() -> int:\n    c := One()\n    return match c:\n        One => 4,\n", 4),
         # 正：枚举形参位（scrutinee 来自形参 ti 而非构造器）
-        case_run("enum_param_exhaustive", COLOR + "fn f(c: Color) -> int { "
-                 "return match c { Red => 1, Green => 2, Blue => 3, }; }\n"
-                 "fn main() -> int { return f(Green()); }\n", 2),
+        case_run("enum_param_exhaustive", COLOR + "fn f(c: Color) -> int:\n    return match c:\n        Red => 1, Green => 2, Blue => 3,\nfn main() -> int:\n    return f(Green())\n", 2),
         # 负：缺臂 ⇒ rc=1 + TM03（含具体缺失变体名）+ 无产物
         case_reject("missing_arm_rejected", missing_arm_src(),
                     ["error[TM03]", "Non-exhaustive match", "missing variant 'Blue'"]),
         # 负：无臂（空 match 体）⇒ 同上（未覆盖面 = 全域，首个变体即反例）
         case_reject("no_arms_rejected",
-                    COLOR + "fn main() -> int { c := Red(); return match c { }; }\n",
+                    COLOR + "fn main() -> int:\n    c := Red()\n    return match c:\n",
                     ["error[TM03]", "missing variant 'Red'"]),
         # 负：check 子命令同拒（判定在共享前端，非 ELF 路径专属）
         case_reject("check_path_rejected", missing_arm_src(), ["error[TM03]"], cmd="check"),
         # 负：run（解释器）路径同拒（同一 run_frontend ⇒ 同一判定面）
         case_run_reject("run_path_rejected",
-                        COLOR + "fn main() -> int { c := Blue(); return match c { Red => 1, Green => 2, }; }\n",
+                        COLOR + "fn main() -> int:\n    c := Blue()\n    return match c:\n        Red => 1, Green => 2,\n",
                         ["error[TM03]", "missing variant 'Blue'"]),
         # 登记：非枚举域不判穷尽（int 字面量匹配 ⇒ 零诊断，rc=0）
         case_run("non_enum_domain_not_judged",
-                 "fn main() -> int { n := 3; return match n { 1 => 10, 2 => 20, }; }\n", 0),
+                 "fn main() -> int:\n    n := 3\n    return match n:\n        1 => 10, 2 => 20,\n", 0),
         # 登记：不可映射模式（枚举匹配混字面量臂）不判穷尽（-1 = 不判，不得当「不穷尽」）
         case_run("unmappable_pattern_not_judged",
-                 "enum Color2 { Red2, Green2, Blue2 }\nfn main() -> int { c := Blue2(); "
-                 "return match c { Red2 => 1, 5 => 2, }; }\n", 0),
+                 "enum Color2:\n    Red2, Green2, Blue2\nfn main() -> int:\n    c := Blue2()\n    return match c:\n        Red2 => 1, 5 => 2,\n", 0),
         # 软面：重复臂 ⇒ TM04 非硬门（rc=0 + 产物照出）
         case_soft("redundant_arm_soft",
-                  COLOR + "fn main() -> int { c := Red(); "
-                  "return match c { Red => 1, Red => 2, Green => 3, Blue => 4, }; }\n",
+                  COLOR + "fn main() -> int:\n    c := Red()\n    return match c:\n        Red => 1, Red => 2, Green => 3, Blue => 4,\n",
                   "error[TM04]"),
     ]
     passed = sum(1 for x in ok if x is True)

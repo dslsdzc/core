@@ -92,144 +92,214 @@ def build_and_run(source, tag):
 CASES = [
     # ── #2026-09-16-17：非直调调用形态 ──
     ("method_arg_apx", """
-struct S1 { v: int }
-impl S1 { fn m(self: S1, x: dex) -> int { return @raw_int(x) / 1000000; } }
-fn main() -> int { d : dex, apx = 7.0; s : ., mut = S1 { v = 0 }; return s.m(d); }
+struct S1:
+    v: int
+impl S1:
+    fn m(self: S1, x: dex) -> int:
+        return @raw_int(x) / 1000000
+fn main() -> int:
+    d : dex, apx = 7.0
+    s : ., mut = S1 { v = 0 }
+    return s.m(d)
 """, 7, "方法调用实参（#2026-09-16-17 原形）"),
     ("method_arg_self_offset", """
-struct S2 { v: int }
-impl S2 { fn m(self: S2, k: int, x: dex) -> int { return @raw_int(x) / 1000000; } }
-fn main() -> int { d : dex, apx = 7.0; s : ., mut = S2 { v = 0 }; return s.m(1, d); }
+struct S2:
+    v: int
+impl S2:
+    fn m(self: S2, k: int, x: dex) -> int:
+        return @raw_int(x) / 1000000
+fn main() -> int:
+    d : dex, apx = 7.0
+    s : ., mut = S2 { v = 0 }
+    return s.m(1, d)
 """, 7, "方法调用 + self/形参偏移（接收者占 arg_vars[0]）"),
     ("module_qualified_call", """
 import dex
-fn main() -> int {
-    d : dex, apx = 7.0;
-    a := dex_str(d);
-    if !str_eq(a, "7") { return 3; }
-    b := dex.dex_str(d);
-    if !str_eq(b, "7") { return 4; }
-    return 7;
-}
+fn main() -> int:
+    d : dex, apx = 7.0
+    a := dex_str(d)
+    if !str_eq(a, "7"):
+        return 3
+    b := dex.dex_str(d)
+    if !str_eq(b, "7"):
+        return 4
+    return 7
 """, 7, "模块限定调用 m.f(x)（apx 批 T2 新增活点；rc=4 即该形态未转换）"),
     # ── #2026-09-16-18：第 9 个 binary64 栈参（= #2026-09-16-17 同一修复）──
     ("stack_arg_9th_method", """
-struct S9 { v: int }
-impl S9 {
-    fn m(self: S9, a: dex, b: dex, c: dex, e: dex, f: dex, g: dex, h: dex, i: dex, x: dex) -> int {
-        return @raw_int(x) / 1000000;
-    }
-}
-fn main() -> int {
-    s : ., mut = S9 { v = 0 };
-    a1 : dex, apx = 1.0;
-    a2 : dex, apx = 2.0;
-    a3 : dex, apx = 3.0;
-    a4 : dex, apx = 4.0;
-    a5 : dex, apx = 5.0;
-    a6 : dex, apx = 6.0;
-    a7 : dex, apx = 7.0;
-    a8 : dex, apx = 8.0;
-    lx : dex, apx = 7.0;
-    return s.m(a1, a2, a3, a4, a5, a6, a7, a8, lx);
-}
+struct S9:
+    v: int
+impl S9:
+    fn m(self: S9, a: dex, b: dex, c: dex, e: dex, f: dex, g: dex, h: dex, i: dex, x: dex) -> int:
+        return @raw_int(x) / 1000000
+fn main() -> int:
+    s : ., mut = S9 { v = 0 }
+    a1 : dex, apx = 1.0
+    a2 : dex, apx = 2.0
+    a3 : dex, apx = 3.0
+    a4 : dex, apx = 4.0
+    a5 : dex, apx = 5.0
+    a6 : dex, apx = 6.0
+    a7 : dex, apx = 7.0
+    a8 : dex, apx = 8.0
+    lx : dex, apx = 7.0
+    return s.m(a1, a2, a3, a4, a5, a6, a7, a8, lx)
 """, 7, "#2026-09-16-18 第 9 个 binary64 栈参（方法形）"),
     ("stack_arg_9th_direct", """
-fn f9(a: dex, b: dex, c: dex, e: dex, f: dex, g: dex, h: dex, i: dex, x: dex) -> int {
-    return @raw_int(x) / 1000000;
-}
-fn main() -> int {
-    a1 : dex, apx = 1.0;
-    a2 : dex, apx = 2.0;
-    a3 : dex, apx = 3.0;
-    a4 : dex, apx = 4.0;
-    a5 : dex, apx = 5.0;
-    a6 : dex, apx = 6.0;
-    a7 : dex, apx = 7.0;
-    a8 : dex, apx = 8.0;
-    lx : dex, apx = 7.0;
-    return f9(a1, a2, a3, a4, a5, a6, a7, a8, lx);
-}
+fn f9(a: dex, b: dex, c: dex, e: dex, f: dex, g: dex, h: dex, i: dex, x: dex) -> int:
+    return @raw_int(x) / 1000000
+fn main() -> int:
+    a1 : dex, apx = 1.0
+    a2 : dex, apx = 2.0
+    a3 : dex, apx = 3.0
+    a4 : dex, apx = 4.0
+    a5 : dex, apx = 5.0
+    a6 : dex, apx = 6.0
+    a7 : dex, apx = 7.0
+    a8 : dex, apx = 8.0
+    lx : dex, apx = 7.0
+    return f9(a1, a2, a3, a4, a5, a6, a7, a8, lx)
 """, 7, "直调同形对照（#2026-09-16-18 机理裁定用：同形只差调用形态）"),
     # ── 聚合四类写点 ──
     ("struct_literal_field", """
-struct S3 { f: dex }
-fn main() -> int { d : dex, apx = 7.0; s : ., mut = S3 { f = d }; return @raw_int(s.f) / 1000000; }
+struct S3:
+    f: dex
+fn main() -> int:
+    d : dex, apx = 7.0
+    s : ., mut = S3 { f = d }
+    return @raw_int(s.f) / 1000000
 """, 7, "结构体字面量字段写点"),
     ("struct_field_assign", """
-struct S3 { f: dex }
-fn main() -> int { d : dex, apx = 7.0; s : ., mut = S3 { f = 1.0 }; s.f = d; return @raw_int(s.f) / 1000000; }
+struct S3:
+    f: dex
+fn main() -> int:
+    d : dex, apx = 7.0
+    s : ., mut = S3 { f = 1.0 }
+    s.f = d
+    return @raw_int(s.f) / 1000000
 """, 7, "字段赋值写点"),
     ("array_literal_elem", """
-fn main() -> int { d : dex, apx = 7.0; a : [dex; 2] = [d, 1.0]; return @raw_int(a[0]) / 1000000; }
+fn main() -> int:
+    d : dex, apx = 7.0
+    a : [dex; 2] = [d, 1.0]
+    return @raw_int(a[0]) / 1000000
 """, 7, "数组字面量元素写点"),
     ("index_assign_dynamic", """
-fn main() -> int { d : dex, apx = 7.0; a : [dex; 2] = [1.0, 1.0]; i : ., mut = 0; a[i] = d; return @raw_int(a[i]) / 1000000; }
+fn main() -> int:
+    d : dex, apx = 7.0
+    a : [dex; 2] = [1.0, 1.0]
+    i : ., mut = 0
+    a[i] = d
+    return @raw_int(a[i]) / 1000000
 """, 7, "动态下标赋值写点"),
     ("slice_elem_assign", """
-fn main() -> int { d : dex, apx = 7.0; a : [dex; 3] = [1.0, 1.0, 1.0]; s := a[0..2]; s[1] = d; return @raw_int(s[1]) / 1000000; }
+fn main() -> int:
+    d : dex, apx = 7.0
+    a : [dex; 3] = [1.0, 1.0, 1.0]
+    s := a[0..2]
+    s[1] = d
+    return @raw_int(s[1]) / 1000000
 """, 7, "切片元素写点"),
     ("tuple_elem", """
-fn main() -> int { d : dex, apx = 7.0; t := (d, 1.0); return @raw_int(t . 0) / 1000000; }
+fn main() -> int:
+    d : dex, apx = 7.0
+    t := (d, 1.0)
+    return @raw_int(t . 0) / 1000000
 """, 7, "元组元素写点（数字下标须写 `t . 0`，带空格——`t.0` 会被词法器读成 dex 字面量）"),
     ("enum_payload", """
-enum E1 { V(dex) }
-fn main() -> int { d : dex, apx = 7.0; e := V(d); return match e { V(x) => { return @raw_int(x) / 1000000; } }; }
+enum E1:
+    V(dex)
+fn main() -> int:
+    d : dex, apx = 7.0
+    e := V(d)
+    return match e:
+        V(x) =>:
+            return @raw_int(x) / 1000000
 """, 7, "枚举载荷写点"),
     ("pointer_write", """
-fn main() -> int {
-    d : dex, apx = 7.0;
-    x : dex, mut = 1.0;
-    p := &x;
-    *p = d;
-    return @raw_int(x) / 1000000;
-}
+fn main() -> int:
+    d : dex, apx = 7.0
+    x : dex, mut = 1.0
+    p := &x
+    *p = d
+    return @raw_int(x) / 1000000
 """, 7, "指针写 `*p = d`（apx 批 T2 新增活点；check 另发 B04 软诊断 = TODO #2026-09-16-14 既有面）"),
     # ── ⑦a：全局运行期初值 ──
     ("global_runtime_init_apx", """
-fn sc() -> dex { return 7.0; }
-g11 : dex, apx, mut = sc();
-fn main() -> int { return @raw_int(g11) / 1000000; }
+fn sc() -> dex:
+    return 7.0
+g11 : dex, apx, mut = sc()
+fn main() -> int:
+    return @raw_int(g11) / 1000000
 """, 7, "⑦a 全局运行期初值（apx 全局，mut 必写）"),
     ("global_apx_as_method_arg", """
-struct S1 { v: int }
-impl S1 { fn m(self: S1, x: dex) -> int { return @raw_int(x) / 1000000; } }
-g13 : dex, apx, mut = 7.0;
-fn main() -> int { s : ., mut = S1 { v = 0 }; return s.m(g13); }
+struct S1:
+    v: int
+impl S1:
+    fn m(self: S1, x: dex) -> int:
+        return @raw_int(x) / 1000000
+g13 : dex, apx, mut = 7.0
+fn main() -> int:
+    s : ., mut = S1 { v = 0 }
+    return s.m(g13)
 """, 7, "apx 全局作方法实参（全局 vs 局部同形对拍）"),
     # ── 比较点声明面查表（L10）──
     ("compare_agg_read_vs_exact", """
-struct S3 { f: dex }
-fn main() -> int {
-    e : dex = 1.5;
-    s : ., mut = S3 { f = 1.5 };
-    if s.f == e { return 1; }
-    return 0;
-}
+struct S3:
+    f: dex
+fn main() -> int:
+    e : dex = 1.5
+    s : ., mut = S3 { f = 1.5 }
+    if s.f == e:
+        return 1
+    return 0
 """, 1, "聚合读 vs 精确值比较（L10；无声明面查表 ⇒ 0）"),
     # ── 非回归（修法不得改坏已覆盖面）──
     ("nonreg_direct_call", """
-fn g(x: dex) -> int { return @raw_int(x) / 1000000; }
-fn main() -> int { d : dex, apx = 7.0; return g(d); }
+fn g(x: dex) -> int:
+    return @raw_int(x) / 1000000
+fn main() -> int:
+    d : dex, apx = 7.0
+    return g(d)
 """, 7, "直调实参（已覆盖面）"),
     ("nonreg_return_site", """
-fn f() -> dex { d : dex, apx = 7.0; return d; }
-fn main() -> int { v := f(); return @raw_int(v) / 1000000; }
+fn f() -> dex:
+    d : dex, apx = 7.0
+    return d
+fn main() -> int:
+    v := f()
+    return @raw_int(v) / 1000000
 """, 7, "返回点（已覆盖面；apx 审计 ②a「恒不触发」已被证伪）"),
     ("nonreg_generic_dex_param", """
-fn g12[T](t: T, x: dex) -> int { return @raw_int(x) / 1000000; }
-fn main() -> int { d : dex, apx = 7.0; return g12(1, d); }
+fn g12[T](t: T, x: dex) -> int:
+    return @raw_int(x) / 1000000
+fn main() -> int:
+    d : dex, apx = 7.0
+    return g12(1, d)
 """, 7, "泛型实例化后 dex 形参（非回归钉）"),
     ("nonreg_exact_struct", """
-struct S3 { f: dex }
-fn main() -> int { d : dex = 7.0; s : ., mut = S3 { f = d }; return @raw_int(s.f) / 1000000; }
+struct S3:
+    f: dex
+fn main() -> int:
+    d : dex = 7.0
+    s : ., mut = S3 { f = d }
+    return @raw_int(s.f) / 1000000
 """, 7, "精确形对照（结构体字段）"),
     ("nonreg_exact_array", """
-fn main() -> int { d : dex = 7.0; a : [dex; 2] = [d, 1.0]; return @raw_int(a[0]) / 1000000; }
+fn main() -> int:
+    d : dex = 7.0
+    a : [dex; 2] = [d, 1.0]
+    return @raw_int(a[0]) / 1000000
 """, 7, "精确形对照（数组元素）"),
     ("nonreg_exact_enum", """
-enum E1 { V(dex) }
-fn main() -> int { d : dex = 7.0; e := V(d); return match e { V(x) => { return @raw_int(x) / 1000000; } }; }
+enum E1:
+    V(dex)
+fn main() -> int:
+    d : dex = 7.0
+    e := V(d)
+    return match e:
+        V(x) =>:
+            return @raw_int(x) / 1000000
 """, 7, "精确形对照（枚举载荷）"),
     # ══════════════════════════════════════════════════════════════════════════
     # ✅ **已重锁（2026-09-17 批 5 / opt-dex；TODO #2026-09-16-29 = 原 #91）—— 旧值 15 留痕**
@@ -245,11 +315,14 @@ fn main() -> int { d : dex = 7.0; e := V(d); return match e { V(x) => { return @
     #   · 覆盖面（本批新增的完整判据网）见 `tests/selfhost/test_opt_dex.py`（30 例 + 四态对拍）。
     # ══════════════════════════════════════════════════════════════════════════
     ("relocked_optional_dex_pinch", """
-fn main() -> int {
-    d : dex, apx = 7.0;
-    x : dex? = d;
-    return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+fn main() -> int:
+    d : dex, apx = 7.0
+    x : dex? = d
+    return match x:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 """, 7, "重锁（批 5 · 原哨兵值 15 已退役；留痕见上注）"),
 ]
 
@@ -293,8 +366,8 @@ def test_sentinel_annotation_present():
 def test_decl_form_selfcheck():
     """**覆盖面自证（防「探针不触发」假绿）**：显式形建立 apx 槽、推断形不建立。
     判别法 = `.cir` 里是否出现 binary64 位模式常量（`const dex = <大整数>`）。"""
-    explicit = ("// x\nfn main() -> int { d : dex, apx = 7.0; return @raw_int(d) / 1000000; }\n")
-    inferred = ("// x\nfn main() -> int { d : ., apx = 7.0; return @raw_int(d) / 1000000; }\n")
+    explicit = ("// x\nfn main() -> int:\n    d : dex, apx = 7.0\n    return @raw_int(d) / 1000000\n")
+    inferred = ("// x\nfn main() -> int:\n    d : ., apx = 7.0\n    return @raw_int(d) / 1000000\n")
     r1 = run_corec(["cir"], explicit)
     import re
     def max_const(txt):
@@ -319,7 +392,7 @@ def test_decl_form_selfcheck():
     v2 = -1
     # 反向自证：显式形在解释器下必被拒收（IR_F2I 无 binary64 语义）
     it = subprocess.run([str(COREC), "run",
-                         "fn main() -> int { d : dex, apx = 7.0; return @raw_int(d) / 1000000; }"],
+                         "fn main() -> int:\n    d : dex, apx = 7.0\n    return @raw_int(d) / 1000000\n"],
                         cwd=BASE, capture_output=True, text=True, timeout=120)
     if it.returncode != 255:
         print(f"[FAIL] 显式形解释器未拒收（rc={it.returncode}，期望 255）")
@@ -332,14 +405,24 @@ def test_double_form_parity():
     """C1 双形对拍（通用腿）：同一形态的 **apx 形 vs 精确形** 结果必须一致。"""
     pairs = [
         ("field", """
-struct S3 { f: dex }
-fn main() -> int { d : D = DVAL; s : ., mut = S3 { f = d }; return @raw_int(s.f) / 1000000; }
+struct S3:
+    f: dex
+fn main() -> int:
+    d : D = DVAL
+    s : ., mut = S3 { f = d }
+    return @raw_int(s.f) / 1000000
 """),
         ("elem", """
-fn main() -> int { d : D = DVAL; a : [dex; 2] = [d, 1.0]; return @raw_int(a[0]) / 1000000; }
+fn main() -> int:
+    d : D = DVAL
+    a : [dex; 2] = [d, 1.0]
+    return @raw_int(a[0]) / 1000000
 """),
         ("tuple", """
-fn main() -> int { d : D = DVAL; t := (d, 1.0); return @raw_int(t . 0) / 1000000; }
+fn main() -> int:
+    d : D = DVAL
+    t := (d, 1.0)
+    return @raw_int(t . 0) / 1000000
 """),
     ]
     bad = 0

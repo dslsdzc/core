@@ -25,14 +25,12 @@ fn first<T>(arr: [T]) -> T {
 ### 泛型 struct
 
 ```core
-struct Box<T> {
+struct Box<T>:
     val: T,
-}
 
-struct Pair<A, B> {
+struct Pair<A, B>:
     first: A,
     second: B,
-}
 ```
 
 ### 泛型参数约束
@@ -91,13 +89,12 @@ add("a", "b");       //  string 支持 +
 
 ```core
 // lib.cr
-pub fn wrap<T>(x: T) -> (T, T) {
-    return (x, x);
-}
+pub fn wrap<T>(x: T) -> (T, T):
+    return (x, x)
 
 // main.cr
-import lib;
-p := lib.wrap(42);   // lib 的泛型函数 main 中实例化
+import lib
+p := lib.wrap(42)   // lib 的泛型函数 main 中实例化
                      // 实例化发生在 main 的 ccr 中
 ```
 

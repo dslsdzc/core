@@ -6,12 +6,12 @@
 
 import io
 
-fn square(n: int) -> int {
-    return n * n;
-}
+fn square(n: int) -> int:
+    return n * n
 
-fn main() -> int {
-    addr := @addr(square);
-    if addr == 0 { return 1; }  // address should be non-zero
-    return 0;
-}
+fn main() -> int:
+    addr := @addr(square)
+    if addr == 0:
+        return 1
+    // address should be non-zero
+    return 0

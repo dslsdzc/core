@@ -86,36 +86,16 @@ def dump_regassign(ccr_path, opt_level) -> dict:
 CASES = [
     # h4 同形：参数行 2L 态 + 跨调用帧复用（O2 下 fb 的 p/q 驻 callee-saved）
     ("t5_param_2l_reg",
-     "fn fb(p: int) -> int {\n"
-     "    p = p + 4611686018427387904;\n"          # 2^62+6 → 2^63+6（2L，tag=1）
-     "    q : ., mut = p - p;\n"                   # 2L − 2L 同值 = 0 → 降级快值
-     "    return q;\n}\n"
-     "fn main() -> int {\n"
-     "    r1 := fb(4611686018427387910);\n"
-     "    r2 := fb(4611686018427387910);\n"
-     "    return r1 + r2;\n}\n",
+     "fn fb(p: int) -> int:\n    p = p + 4611686018427387904\n    q : ., mut = p - p\n    return q\nfn main() -> int:\n    r1 := fb(4611686018427387910)\n    r2 := fb(4611686018427387910)\n    return r1 + r2\n",
      ["fb"], None, 0, "O2 元断言目标：fb 的 p/q tagged 且驻寄存器；2 次调用绿"),
     # a7 同形：循环携带 2L 态跨迭代驻 reg（每轮 jo 慢路径 + alloc 新对象）
     ("t5_loop_carry_2l_reg",
-     "fn main() -> int {\n"
-     "    x : ., mut = 0;\n"
-     "    i : ., mut = 0;\n"
-     "    while i < 6 {\n"
-     "        x = x + 4611686018427387904;\n"      # 每轮 +2^62：→2^63(2L)…
-     "        i = i + 1;\n"
-     "    }\n"                                     # 6 轮 = 2^64+2^63（hi=1）
-     "    r := syscall3(1, 1, x, 16);\n    return r;\n}\n",
+     "fn main() -> int:\n    x : ., mut = 0\n    i : ., mut = 0\n    while i < 6:\n        x = x + 4611686018427387904\n        i = i + 1\n    r := syscall3(1, 1, x, 16)\n    return r\n",
      ["main"], limb_bytes((1 << 64) + (1 << 63)), 16,
      "O2 元断言目标：循环携带 x 驻 reg 且运行时达 2L 态（hi=1）——16B 通道验证"),
     # c5 同形：双 2L 对象比较（a/b 各自溢出生 2L 堆对象，比较读 tag 解指针）
     ("t5_two2l_cmp_reg",
-     "fn main() -> int {\n"
-     "    a : ., mut = 4611686018427387904;\n"
-     "    a = a + 4611686018427387904;\n"          # 2^63（2-limb 对象 1）
-     "    b : ., mut = 4611686018427387904;\n"
-     "    b = b + 4611686018427387904;\n"          # 2^63（2-limb 对象 2）
-     "    if a >= b && a <= b { return 1; }\n"
-     "    return 2;\n}\n",
+     "fn main() -> int:\n    a : ., mut = 4611686018427387904\n    a = a + 4611686018427387904\n    b : ., mut = 4611686018427387904\n    b = b + 4611686018427387904\n    if a >= b && a <= b:\n        return 1\n    return 2\n",
      ["main"], None, 1, "O2 元断言目标：a/b 2L 态驻 reg；128 位比较绿"),
 ]
 

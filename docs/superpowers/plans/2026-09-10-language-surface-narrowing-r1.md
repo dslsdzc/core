@@ -473,77 +473,75 @@ sha256sum /tmp/r1t4_base_bin | tee /tmp/r1t4_base_sha
 // 判据（与 global_init_val 互补——它只认编译期标量常量，其余静默归 0）：
 //   ① 声明类型是聚合（语法节点 EXPR_ARRAY，含 `[T; N]` 与 `[T]`）→ 必须运行期分配存储；
 //   ② 初值存在且不是 int/bool/dex 字面量（含负号字面量）→ 必须运行期求值。
-fn global_needs_runtime_init(name_idx: int) -> int {
-    i : ., mut = g_global_let_count - 1;
-    loop {
-        if i < 0 { break; }
-        node := r64(g_global_lets, i * 8);
-        if ast_a(node) == name_idx {
-            tn := ast_b(node);
-            if tn >= 0 && ast_kind(tn) == EXPR_ARRAY { return 1; }
-            vn := ast_c(node);
-            if vn < 0 { return 0; }
-            vk := ast_kind(vn);
-            if vk == EXPR_INT || vk == EXPR_BOOL || vk == EXPR_DEX { return 0; }
-            if vk == EXPR_UNARY && ast_c(vn) == UOP_NEG {
-                inner := ast_a(vn);
-                ik := ast_kind(inner);
-                if ik == EXPR_INT || ik == EXPR_BOOL || ik == EXPR_DEX { return 0; }
-            }
-            return 1;
-        }
-        i = i - 1;
-    }
-    return 0;
-}
+fn global_needs_runtime_init(name_idx: int) -> int:
+    i : ., mut = g_global_let_count - 1
+    loop:
+        if i < 0:
+            break
+        node := r64(g_global_lets, i * 8)
+        if ast_a(node) == name_idx:
+            tn := ast_b(node)
+            if tn >= 0 && ast_kind(tn) == EXPR_ARRAY:
+                return 1
+            vn := ast_c(node)
+            if vn < 0:
+                return 0
+            vk := ast_kind(vn)
+            if vk == EXPR_INT || vk == EXPR_BOOL || vk == EXPR_DEX:
+                return 0
+            if vk == EXPR_UNARY && ast_c(vn) == UOP_NEG:
+                inner := ast_a(vn)
+                ik := ast_kind(inner)
+                if ik == EXPR_INT || ik == EXPR_BOOL || ik == EXPR_DEX:
+                    return 0
+            return 1
+        i = i - 1
+    return 0
 
 // 按 name_idx 查已注册的全局 IR var（未注册 = -1）。
-fn global_var_of(name_idx: int) -> int {
-    gi : ., mut = 0;
-    loop {
-        if gi >= g_ir_global_count { break; }
-        if r64(g_ir_globals, gi * 24) == name_idx { return r64(g_ir_globals, gi * 24 + 8); }
-        gi = gi + 1;
-    }
-    return -1;
-}
+fn global_var_of(name_idx: int) -> int:
+    gi : ., mut = 0
+    loop:
+        if gi >= g_ir_global_count:
+            break
+        if r64(g_ir_globals, gi * 24) == name_idx:
+            return r64(g_ir_globals, gi * 24 + 8)
+        gi = gi + 1
+    return -1
 
 // 把需要运行期初始化的文件级 let 降级为 IR 序列（写进当前函数 = main 序言）。
 // 顺序 = g_global_lets 源序（跨全局依赖如 `b : [int;2] = a;` 因此正确）。
-fn inject_global_inits() {
-    i : ., mut = 0;
-    loop {
-        if i >= g_global_let_count { break; }
-        lnode := r64(g_global_lets, i * 8);
-        name_idx := ast_a(lnode);
-        if global_needs_runtime_init(name_idx) != 0 {
-            gv := global_var_of(name_idx);
-            if gv >= 0 {
-                vn := ast_c(lnode);
-                v : ., mut = -1;
-                if vn >= 0 {
-                    v = gen_expr(vn);
-                    v = force_if_thunk(v);
-                } else {
+fn inject_global_inits():
+    i : ., mut = 0
+    loop:
+        if i >= g_global_let_count:
+            break
+        lnode := r64(g_global_lets, i * 8)
+        name_idx := ast_a(lnode)
+        if global_needs_runtime_init(name_idx) != 0:
+            gv := global_var_of(name_idx)
+            if gv >= 0:
+                vn := ast_c(lnode)
+                v : ., mut = -1
+                if vn >= 0:
+                    v = gen_expr(vn)
+                    v = force_if_thunk(v)
+                else:
                     // 无初值聚合：整流分配（零初始化由 alloc 语义保证——rt.s:94-98 rep stosb；
                     // 解释器 IR_ALLOC_ARRAY 显式清零 interp.cr:197-207）。
                     // 仅 `[T; N]`（N ≥ 1）注入；`[T]`（切片无长度，ast_int_val = 0）**不注入**
                     // ——保持 BSS 零 = 空切片/哑指针，空切片解引用属独立 null 陷阱类，不在本批。
-                    tn := ast_b(lnode);
-                    cnt : ., mut = 0;
-                    if tn >= 0 { cnt = ast_int_val(tn); }
-                    if cnt > 0 {
-                        v = new_ir_var("ginit", TI_UNIT);
-                        emit(IR_ALLOC_ARRAY, v, cnt, 0, 0, 0);
-                        irv_set_type(v, alloc_type(TYP_ARRAY, TI_INT, cnt));
-                    }
-                }
-                if v >= 0 { emit(IR_STORE, -1, gv, v, 0, 0); }
-            }
-        }
-        i = i + 1;
-    }
-}
+                    tn := ast_b(lnode)
+                    cnt : ., mut = 0
+                    if tn >= 0:
+                        cnt = ast_int_val(tn)
+                    if cnt > 0:
+                        v = new_ir_var("ginit", TI_UNIT)
+                        emit(IR_ALLOC_ARRAY, v, cnt, 0, 0, 0)
+                        irv_set_type(v, alloc_type(TYP_ARRAY, TI_INT, cnt))
+                if v >= 0:
+                    emit(IR_STORE, -1, gv, v, 0, 0)
+        i = i + 1
 ```
 
 在 `ir_gen_func`（`ir_gen.cr:2222`）内、`emit(IR_ARENA_NEW, …)`（`:2269-2271`）之后、`gen_expr(body)` 之前插入：

@@ -51,13 +51,13 @@ w := fibonacci(user_input); // 参数运行时才确定 → 留给运行时
 标记为 `comptime fn` 的函数，要求所有调用点在编译时可求值：
 
 ```core
-comptime fn fibonacci(n: int) -> int {
-    if n <= 1 { return n; }
-    return fibonacci(n - 1) + fibonacci(n - 2);
-}
+comptime fn fibonacci(n: int) -> int:
+    if n <= 1:
+        return n
+    return fibonacci(n - 1) + fibonacci(n - 2)
 
-x := fibonacci(40);              //  编译时算
-y := fibonacci(user_input);      //  编译错误：comptime fn 需要已知参数
+x := fibonacci(40)              //  编译时算
+y := fibonacci(user_input)      //  编译错误：comptime fn 需要已知参数
 ```
 
 ## 可编译时执行的条件

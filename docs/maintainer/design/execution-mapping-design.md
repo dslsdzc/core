@@ -184,14 +184,14 @@ flow compute { ... }                    // automatic
 原文支持：`fn` · `flow` · `loop`/`for` · 显式 region。
 
 ```core
-fn pipeline(...) {
-    prepare();
+fn pipeline(...):
+    prepare()
 
     @executionDomain(gpu)
-    flow compute { ... }
+    flow compute:
+        ...
 
-    finish();
-}
+    finish()
 ```
 
 产出：
@@ -222,11 +222,12 @@ finish
 
 ```
 @preferredDomain(gpu)
-fn foo() {
+fn foo():
     ...
     @executionDomain(bigCpu)
-    flow x { ... }        // 生效 = bigCpu，不继承 gpu
-}
+    flow x:
+        ...
+    // 生效 = bigCpu，不继承 gpu
 ```
 
 **规则**：
@@ -238,10 +239,11 @@ fn foo() {
 
 ```core
 @executionDomain(gpu)
-fn foo() {
+fn foo():
     @executionDomain(cpu)
-    flow x { ... }        // 合法；自动产生 gpu→cpu 的 materialization
-}
+    flow x:
+        ...
+    // 合法；自动产生 gpu→cpu 的 materialization
 ```
 
 ⚠ 规则 3 与既有 `region_check` 的「活子图」义务**可能交互**（跨域后 Entry 的 kind 属性是否随域改变）——**未核实**，登记在 §十二。

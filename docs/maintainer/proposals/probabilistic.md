@@ -23,11 +23,10 @@ if random() < 0.3 {
 pass 沿值流传播权重，任何变量的分布信息均自动推导。
 
 ```core
-result := if random() < 0.05 {
+result := if random() < 0.05:
     "rare"      // 5%
-} else {
+else:
     "common"    // 95%
-};
 
 // 图中下游使用 result 的节点知道：
 // result 是 {5% "rare", 95% "common"}
@@ -38,9 +37,9 @@ result := if random() < 0.05 {
 `random()` 接受一个分布参数并返回样本。它与 `read_file()` 等价：编译器不做特殊对待，属库函数。
 
 ```core
-x := random(normal(0, 1));      // 标准正态分布
-y := random(uniform(0, 10));    // 均匀分布
-z := random(binomial(10, 0.5)); // 二项分布
+x := random(normal(0, 1))      // 标准正态分布
+y := random(uniform(0, 10))    // 均匀分布
+z := random(binomial(10, 0.5)) // 二项分布
 ```
 
 运行时 `random(normal(0, 1))` 返回一个 double。编译期的概率 pass 观察 `random(...)` 返回值的后续使用，但不影响运行时。
@@ -50,12 +49,11 @@ z := random(binomial(10, 0.5)); // 二项分布
 观测是贝叶斯更新。在 Core 中它不发生在运行时，而发生在编译期的图分析。约束可以写在规约中(.cr 内联,独立 `.corespec` 格式已退役,见 ADR-0001),也可以直接在条件分支中表达：
 
 ```core
-sensor := random(normal(true_temp, 0.1));
-if sensor > 30 {
+sensor := random(normal(true_temp, 0.1))
+if sensor > 30:
     // 编译器知道：sensor 的值 > 30
     // 同时知道 sensor 服从 normal(true_temp, 0.1)
     // 后验：P(true_temp | sensor > 30) 在图上可推导
-}
 ```
 
 不引入 `@observe`，也不引入新语法，只用条件分支 + 规约。

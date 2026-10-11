@@ -41,62 +41,99 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parents[2]
 COREC = Path(os.environ.get("COREC_BIN", str(BASE / "build" / "corec")))
 
-PROBE_C6 = """fn g[T](t: T, x: T?) -> int { return 1; }
-fn main() -> int { d : dex, apx = 7.0; return g(d, d); }
+PROBE_C6 = """fn g[T](t: T, x: T?) -> int:
+    return 1
+fn main() -> int:
+    d : dex, apx = 7.0
+    return g(d, d)
 """
 
-PROBE_C7 = """fn g2[T](x: T?) -> int { return 1; }
-fn main() -> int { d : dex, apx = 7.0; return g2(d); }
+PROBE_C7 = """fn g2[T](x: T?) -> int:
+    return 1
+fn main() -> int:
+    d : dex, apx = 7.0
+    return g2(d)
 """
 
-PROBE_J = """fn g[T](x: T?, t: T) -> int { return 1; }
-fn main() -> int { d : dex, apx = 7.0; return g(d, d); }
+PROBE_J = """fn g[T](x: T?, t: T) -> int:
+    return 1
+fn main() -> int:
+    d : dex, apx = 7.0
+    return g(d, d)
 """
 
-PROBE_K = """fn g[T](x: T?, t: T) -> int { return 1; }
-fn main() -> int { d : dex, apx = 7.0; return g(Some(d), d); }
+PROBE_K = """fn g[T](x: T?, t: T) -> int:
+    return 1
+fn main() -> int:
+    d : dex, apx = 7.0
+    return g(Some(d), d)
 """
 
-PROBE_M = """fn g2[T](x: T?) -> int { return 1; }
-fn main() -> int { x : int = 3; return g2(x); }
+PROBE_M = """fn g2[T](x: T?) -> int:
+    return 1
+fn main() -> int:
+    x : int = 3
+    return g2(x)
 """
 
-PROBE_P0 = """fn g[T](t: T, x: T?) -> int {
-    return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
-fn main() -> int { d : dex, apx = 7.0; return g(1, d); }
+PROBE_P0 = """fn g[T](t: T, x: T?) -> int:
+    return match x:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
+fn main() -> int:
+    d : dex, apx = 7.0
+    return g(1, d)
 """
 
-PROBE_G12 = """fn g12[T](t: T, x: dex) -> int { return @raw_int(x) / 1000000; }
-fn main() -> int { d : dex, apx = 7.0; return g12(1, d); }
+PROBE_G12 = """fn g12[T](t: T, x: dex) -> int:
+    return @raw_int(x) / 1000000
+fn main() -> int:
+    d : dex, apx = 7.0
+    return g12(1, d)
 """
 
 # C7：T0 登记的同族 TF01 三例（根因 = 本刀；变异体 rc=1）
-PROBE_L = """fn g2[T](x: T?) -> int { return 1; }
-fn main() -> int { return g2(Some(3)); }
+PROBE_L = """fn g2[T](x: T?) -> int:
+    return 1
+fn main() -> int:
+    return g2(Some(3))
 """
 
-PROBE_B = """fn g2[T](x: T?) -> int { return 1; }
-fn main() -> int { x : int = 3; f := g2(x); return f; }
+PROBE_B = """fn g2[T](x: T?) -> int:
+    return 1
+fn main() -> int:
+    x : int = 3
+    f := g2(x)
+    return f
 """
 
-PROBE_E = """fn g2[T](x: T?) -> int { return 1; }
-fn main() -> int { x : int = 3; return g2(x); }
+PROBE_E = """fn g2[T](x: T?) -> int:
+    return 1
+fn main() -> int:
+    x : int = 3
+    return g2(x)
 """
 
-PROBE_F2 = """fn g2[T](x: T?) -> int { return 1; }
-fn main() -> int { x : int = 3; f := g2(x); return 0; }
+PROBE_F2 = """fn g2[T](x: T?) -> int:
+    return 1
+fn main() -> int:
+    x : int = 3
+    f := g2(x)
+    return 0
 """
 
 # 实例键机械腿：C6 与 M 合用一档（`g[dex]` + `g2[int]`）；C7 单档（`g2[dex]` + `_dxsc`）
-PROBE_KEYS = """fn g[T](t: T, x: T?) -> int { return 1; }
-fn g2[T](x: T?) -> int { return 1; }
-fn main() -> int {
-    d : dex, apx = 7.0;
-    a := g(d, d);
-    b := g2(d);
-    return a + b;
-}
+PROBE_KEYS = """fn g[T](t: T, x: T?) -> int:
+    return 1
+fn g2[T](x: T?) -> int:
+    return 1
+fn main() -> int:
+    d : dex, apx = 7.0
+    a := g(d, d)
+    b := g2(d)
+    return a + b
 """
 
 

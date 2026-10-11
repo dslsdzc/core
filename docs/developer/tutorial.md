@@ -32,11 +32,11 @@ Core 是少数不能归入「第一门语言」或「第 N 门语言」二元分
 - 数学程序：数列、阶乘、质数检测（函数 + 循环）
 
 ```core
-fn sum(a: [int]) -> int {
-    total : ., mut = 0;
-    for x in a { total = total + x; }
-    return total;
-}
+fn sum(a: [int]) -> int:
+    total : ., mut = 0
+    for x in a:
+        total = total + x
+    return total
 ```
 
 **关联**：`docs/developer/syntax.md`、`docs/maintainer/design/execution-model.md` §一（唯一执行模型：HDFG）
@@ -65,14 +65,13 @@ fn sum(a: [int]) -> int {
 - 简易 REPL：读取-求值-循环（read + process + loop）
 
 ```core
-fn counter() -> int {
-    i : ., mut = 0;
-    loop {
-        if i >= 5 { break; }
-        i = i + 1;
-    }
-    return i;
-}
+fn counter() -> int:
+    i : ., mut = 0
+    loop:
+        if i >= 5:
+            break
+        i = i + 1
+    return i
 ```
 
 **关联**：`docs/maintainer/design/execution-model.md` §三（深入：执行模型与图的实现）
@@ -102,15 +101,13 @@ fn counter() -> int {
 - 布局查询：结构体大小/对齐/字段偏移（@sizeOf/@alignOf/@fields——序列化与协议实现的基础）
 
 ```core
-fn deref(arr: [int], i: int) -> int {
-    p := &arr[i];      // 来源 = arr,偏移 = i(编译器自动记录)
-    return *p;         // 越界 → 编译期拦截或运行时检查
-}
+fn deref(arr: [int], i: int) -> int:
+    p := &arr[i]      // 来源 = arr,偏移 = i(编译器自动记录)
+    return *p         // 越界 → 编译期拦截或运行时检查
 
-unsafe {
-    mmio := 0x7fff0000 as *int;   // 外部地址：图边界入口
-    *mmio = 42;
-}
+unsafe:
+    mmio := 0x7fff0000 as *int   // 外部地址：图边界入口
+    *mmio = 42
 ```
 
 **关联**：`docs/maintainer/design/pointer-model.md`、`docs/maintainer/design/memory-model.md`
@@ -141,15 +138,13 @@ unsafe {
 - 并发任务池：批量独立任务并发执行（go + 结果通道聚合）
 
 ```core
-flow worker(id: int) -> int {
-    yield id * 2;
-}
+flow worker(id: int) -> int:
+    yield id * 2
 
-fn main() -> int {
-    w := go worker(21);
-    v := await w;
-    return v;   // 42
-}
+fn main() -> int:
+    w := go worker(21)
+    v := await w
+    return v   // 42
 ```
 
 **关联**：`docs/maintainer/proposals/concurrency.md`、`docs/maintainer/design/execution-model.md` §三（并发 GMP）
@@ -177,12 +172,8 @@ fn main() -> int {
 **里程碑**：能给函数写前置/后置条件，用检查函数表达性质（有序性、排列性、不变量）。
 
 ```core
-fn divide(a: int, b: int) -> int
-    #check(b != 0)
-    #ensure(result * b <= a)
-{
-    return a / b;
-}
+fn divide(a: int, b: int) -> int #check(b != 0) #ensure(result * b <= a):
+    return a / b
 ```
 
 **关联**：`docs/maintainer/design/spec-design.md`、`docs/developer/syntax.md` 第十章、`docs/maintainer/adr/adr-0001-corespec-crasm-retired.md`（格式退役决策）、`docs/superpowers/specs/`（验证管线设计稿）

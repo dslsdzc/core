@@ -108,9 +108,9 @@ auto fileid move self in None Some unit
 默认使用文件名（不含 `.cr`）作为标识符，可在文件头部覆盖：
 
 ```core
-fileid "my_helper";
+fileid "my_helper"
 
-fn greet(name: string) -> string = "hi " + name;
+fn greet(name: string) -> string = "hi " + name
 ```
 
 同一项目内标识符必须唯一，重复报错。
@@ -126,10 +126,10 @@ mod examples::pi;
 ### 3.3 导入
 
 ```core
-import math;              // 同一项目的文件（文件标识符）
-import math : m;          // 重命名，之后用 m.符号
-import @acme math;        // 外部项目 acme 中的 math 文件
-import @acme math : m;    // 并重命名
+import math              // 同一项目的文件（文件标识符）
+import math : m          // 重命名，之后用 m.符号
+import @acme math        // 外部项目 acme 中的 math 文件
+import @acme math : m    // 并重命名
 ```
 
 `@项目名` 前缀区分本地符号与外部项目符号，不可省略。项目名在项目根的 `Core.toml` 中声明（`name = "acme"`）。
@@ -137,9 +137,9 @@ import @acme math : m;    // 并重命名
 ### 3.4 符号访问
 
 ```core
-import math : m;
+import math : m
 
-result := m.add(3, 5);    // 点号访问导入符号
+result := m.add(3, 5)    // 点号访问导入符号
 ```
 
 未导入时可用完整路径 `math::add(3, 5)` 直接访问（不推荐）。
@@ -150,16 +150,15 @@ result := m.add(3, 5);    // 点号访问导入符号
 
 ```core
 // _import.cr
-import @acme math : m;
-import @std io;
+import @acme math : m
+import @std io
 ```
 
 ```core
 // main.cr——无需重复 import
-fn main() {
-    result := m.add(3, 5);
-    io.println("result = {result}");
-}
+fn main():
+    result := m.add(3, 5)
+    io.println("result = {result}")
 ```
 
 `_import.cr` 本身不生成代码，只起导入声明作用。
@@ -214,9 +213,9 @@ mutr  : &mut Point;         // 可变引用
 变量与字段可带标签，`mut`（可变）/ `pub`（公开）/ `apx`（近似授权）：
 
 ```core
-count   : int, mut = 0;     // 可变
-pub_val : int, pub = 42;    // 公开字段
-speed   : dex, apx = 3.14;  // apx：授权后端把 dex 运算降级为 binary64 快路径
+count   : int, mut = 0     // 可变
+pub_val : int, pub = 42    // 公开字段
+speed   : dex, apx = 3.14  // apx：授权后端把 dex 运算降级为 binary64 快路径
 ```
 
 `apx` 与 `mut` / `pub` 同族。不带 `apx` 时 `dex` 恒精确。
@@ -232,10 +231,10 @@ speed   : dex, apx = 3.14;  // apx：授权后端把 dex 运算降级为 binary6
 类型推断占位，两者完全等价，可用于变量声明与返回类型：
 
 ```core
-x : auto = 42;              // 推断为 int
-y : . = 3.14;               // 推断为 dex
-z : ., mut = 20;
-a, b, c : auto, mut = 0;
+x : auto = 42              // 推断为 int
+y : . = 3.14               // 推断为 dex
+z : ., mut = 20
+a, b, c : auto, mut = 0
 ```
 
 `auto` 更显式、`.` 更简洁——注意 `: ., mut` 模式中 `.` 是类型占位。
@@ -247,18 +246,18 @@ a, b, c : auto, mut = 0;
 无 `let` 关键字。声明即语句，`:=` 推断类型（不可变），`: Type =` 显式类型：
 
 ```core
-x := 42;                    // 推断为 int，不可变
-name : string = "Core";     // 显式类型
-count : int, mut = 0;       // 显式 + 可变
-shared : auto, pub, mut = 42;   // 全局公开可变
-a, b : int = 1, 2;          // 批量声明
+x := 42                    // 推断为 int，不可变
+name : string = "Core"     // 显式类型
+count : int, mut = 0       // 显式 + 可变
+shared : auto, pub, mut = 42   // 全局公开可变
+a, b : int = 1, 2          // 批量声明
 ```
 
 `move` 显式移动所有权（默认借用语义，见第 1 章设计要点——无生命周期标注，引用有效性编译器全权推断）：
 
 ```core
-b := move a;                // a 的所有权转移到 b，a 失效
-consume(move b);            // 参数移动传入
+b := move a                // a 的所有权转移到 b，a 失效
+consume(move b)            // 参数移动传入
 ```
 
 复制类型（`int`、`dex`、`bool` 等实现 Copy 接口的类型）赋值时自动复制，不需 `move`。
@@ -309,17 +308,17 @@ category := if x > 0 { "positive"; } else { "not positive"; };
 ### 6.3 调用、字段与下标
 
 ```core
-result := m.add(3, 5);      // 函数调用
-p.x;                        // 字段访问
-arr[0];                     // 下标
+result := m.add(3, 5)      // 函数调用
+p.x                        // 字段访问
+arr[0]                     // 下标
 ```
 
 ### 6.4 转换 `as`
 
 ```core
-x : int = 3;
-d : dex = x as dex;         // 显式转换
-ptr : RawRef<int> = addr as RawRef<int>;
+x : int = 3
+d : dex = x as dex         // 显式转换
+ptr : RawRef<int> = addr as RawRef<int>
 ```
 
 ### 6.5 错误传播 `?`
@@ -327,10 +326,9 @@ ptr : RawRef<int> = addr as RawRef<int>;
 `?` 后缀：表达式失败时立即从当前函数返回错误，只能用于返回可传播错误类型（如 `Result`）的函数中：
 
 ```core
-fn fetch() -> Result<string, IoError> {
-    data := read_file("config.txt")?;   // 出错则立刻返回 Err
+fn fetch() -> Result<string, IoError>:
+    data := read_file("config.txt")?   // 出错则立刻返回 Err
     Ok(data)
-}
 ```
 
 ### 6.6 @ 内建调用
@@ -338,7 +336,7 @@ fn fetch() -> Result<string, IoError> {
 `@` 开头是编译器内建原语（见第 13 章）：
 
 ```core
-n := @sizeOf(Point);
+n := @sizeOf(Point)
 ```
 
 ---
@@ -406,9 +404,8 @@ match cmd {
 ### 7.4 返回
 
 ```core
-fn add(a: int, b: int) -> int {
-    return a + b;           // 显式返回
-}
+fn add(a: int, b: int) -> int:
+    return a + b           // 显式返回
 ```
 
 ### 7.5 不安全块
@@ -429,11 +426,10 @@ unsafe {
 ### 8.1 函数定义
 
 ```core
-fn add(a: int, b: int) -> int {
-    return a + b;
-}
+fn add(a: int, b: int) -> int:
+    return a + b
 
-fn pi() -> auto = 3.14159;  // 单行形式；返回类型推断
+fn pi() -> auto = 3.14159  // 单行形式；返回类型推断
 ```
 
 `FunctionDecl = [ 'pub' ] 'fn' IDENT [ GenericParams ] '(' [ ParamList ] ')' '->' Type ( FunctionBody | '=' Expr ';' )`。参数 `Param = IDENT ':' Type`；末位参数可变参：`...name: Type`（收集剩余实参，见 stdlib variadic）。返回类型可以是 `auto`（或 `.`），由函数体推导。
@@ -443,16 +439,13 @@ fn pi() -> auto = 3.14159;  // 单行形式；返回类型推断
 `impl` 为类型挂接方法，接收者 `self` 是第一个参数：
 
 ```core
-impl Point {
-    fn norm(&self) -> dex {
+impl Point:
+    fn norm(&self) -> dex:
         (self.x * self.x + self.y * self.y).sqrt()
-    }
 
-    fn move_by(&mut self, dx: dex, dy: dex) {
-        self.x += dx;
-        self.y += dy;
-    }
-}
+    fn move_by(&mut self, dx: dex, dy: dex):
+        self.x += dx
+        self.y += dy
 ```
 
 接收者形式：`self`（按值）/ `&self`（借用）/ `&mut self`（可变借用）。
@@ -466,15 +459,12 @@ impl Point {
 ### 9.1 接口声明与实现
 
 ```core
-interface Eq {
-    fn eq(&self, other: &Self) -> bool;
-}
+interface Eq:
+    fn eq(&self, other: &Self) -> bool
 
-impl Eq for Point {
-    fn eq(&self, other: &Self) -> bool {
+impl Eq for Point:
+    fn eq(&self, other: &Self) -> bool:
         self.x == other.x && self.y == other.y
-    }
-}
 ```
 
 接口签名中的 `Self` 指实现类型本身。基础类型（`int` / `dex` / `string` 等）对标准接口（`Eq`、`Copy`、`Hash` 等）内建实现。
@@ -484,12 +474,10 @@ impl Eq for Point {
 泛型参数 `[T]` 声明，接口绑定 `[T: Eq]` 约束 T 必须实现该接口：
 
 ```core
-fn first[T: Eq](list: &[T]) -> T? {
-    if list.len() > 0 {
-        return Some(list[0]);
-    }
-    None
-}
+fn first[T: Eq](list: &[T]) -> T?:
+    if list.len() > 0:
+        return Some(list[0])
+    none
 ```
 
 实例化时检查类型参数满足接口绑定，**编译期具体化**——无运行期字典。
@@ -509,15 +497,10 @@ type Point3 = (dex, dex, dex);
 ### 10.1 #check / #ensure
 
 ```core
-fn divide(a: int, b: int) -> int?
-    #check(b != 0)
-    #ensure(result.is_some() implies (a / b) == result.unwrap())
-{
-    if b == 0 {
-        return None;
-    }
-    return Some(a / b);
-}
+fn divide(a: int, b: int) -> int? #check(b != 0) #ensure(result.is_some() implies (a / b) == result.unwrap()):
+    if b == 0:
+        return none
+    return Some(a / b)
 ```
 
 - `#check(...)` —— 调用方必须满足的前提条件
@@ -529,9 +512,8 @@ fn divide(a: int, b: int) -> int?
 `where` 实现内联轻量前置条件（行内形态，与 #check 同层；定稿形态以 spec-design 为准）：
 
 ```core
-fn sqrt(x: dex) -> dex where x >= 0 {
+fn sqrt(x: dex) -> dex where x >= 0:
     // ...
-}
 ```
 
 值约束按表达式形态分三档语义（编译期求值 / 生成验证义务 / 运行时检查）：
@@ -551,19 +533,19 @@ fn sqrt(x: dex) -> dex where x >= 0 {
 ### 11.1 异步启动 `go`
 
 ```core
-handle := go some_work(arg1, arg2);   // handle: Flow<T>
+handle := go some_work(arg1, arg2)   // handle: Flow<T>
 ```
 
 ### 11.2 等待 `await`
 
 ```core
-result := await handle;   // 阻塞直到完成
+result := await handle   // 阻塞直到完成
 ```
 
 按需自动等待——当值被需要时自动等待：
 
 ```core
-val := go fetch(url) + go fetch(other);   // 两个 flow 自动等待
+val := go fetch(url) + go fetch(other)   // 两个 flow 自动等待
 ```
 
 ### 11.3 长期执行流 `flow` / `yield` / `recv`
@@ -593,10 +575,10 @@ for i in 0..5 {
 指针是裸地址，与 C 同级自由，编译器通过格/图自动验证安全（详见 `docs/maintainer/design/pointer-model.md`）：
 
 ```core
-p := &arr[0];     // 取地址,编译器自动记录来源与偏移
-p = p + n;        // 偏移，随便算
-x := *p;          // 解引用，编译器验证 offset ∈ [0, len)
-ptr := addr as RawRef<int>;   // 显式转换
+p := &arr[0]     // 取地址,编译器自动记录来源与偏移
+p = p + n        // 偏移，随便算
+x := *p          // 解引用，编译器验证 offset ∈ [0, len)
+ptr := addr as RawRef<int>   // 显式转换
 ```
 
 ### 12.2 unsafe 块

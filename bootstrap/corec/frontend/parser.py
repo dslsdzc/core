@@ -128,15 +128,24 @@ class Parser:
         self._consume_newlines()
 
     def _expect_region(self):
-        """吃 region 头：`COLON_BLOCK` 行尾冒号 + 其后的 NEWLINE + `INDENT`。
+        """吃 region 头：`COLON_BLOCK` 行尾冒号 + 其后的 NEWLINE + （可选）`INDENT`。
+        返回 True = 吃到 `INDENT`（region 有 items）；**False = 空 region**（无 INDENT、无 items）。
 
         token 次序由 lexer 的 `_layout_break` 决定：NEWLINE 先于 INDENT/DEDENT。
         **行内 `:`（`COLON_DECL`）在此被响亮拒绝** —— 这正是 T0 布局规格 §2.2 要的
         「行尾类型标注不是合法文本」的兜住点。
+
+        v4 裁定（2026-10-11，**推翻** T0 布局规格 §10.2 的「空 region 无法表达 + 逐处改写」）：
+        **region 可以为空**。用途实证（T6b 报来、维护者采纳）：`loop { }`（**永不返回**，与
+        `loop:` + 裸 `return` **不等价**）与 `interface Empty { }`（**零方法接口**，合法且有意义）
+        在「逐处改写」下无等价形。**只放宽零项这一格**：非零项 region 的缩进规则一个字不动。
         """
         self.expect(TokenType.COLON_BLOCK)
         self._consume_newlines()
-        self.expect(TokenType.INDENT)
+        if self.check(TokenType.INDENT):
+            self.advance()
+            return True
+        return False
 
     def _check_seq(self, types):
         """Check if the next tokens match the given type sequence."""
@@ -303,7 +312,47 @@ class Parser:
         return parts
 
     # ─── 顶层声明 ───
+    # v4 文档 §13：**声明前导** `@` 注解的白名单（§13 全量扫描的结果）。
+    # §13.5 `@ffi("…")` → `extern fn`；§13.6 `@hotpatch(ver=N)` → `fn`；
+    # §13.7 `@preferredDomain(name)` → `fn`、`@executionDomain(name)` → `flow`。
+    # 其余 `@` 名（§13.2 的 `@inline`/`@unroll`/`@section`/`@comptime`/`@fast`、
+    # §13.3 `@addr`、§13.4 `@NoBoundsCheck`、§13.1 的查询族）在文档里**只作表达式/语句位**
+    # 出现（语料同：`tests/suite/at_test.cr:46` 的 `@NoBoundsCheck` 是 region 内语句，
+    # 走 parse_stmt→parse_expr）⇒ **不入白名单**（在声明前导位出现即响亮报错）。
+    _LEAD_AT_NAMES = ('hotpatch', 'ffi', 'preferredDomain', 'executionDomain')
+
+    def _skip_leading_at_annotations(self):
+        """消费顶层声明的**前导 `@` 注解链**（一至多条，各自独占一行；v4 §13 的声明前导形）。
+
+        **语义面 = 接受并跳过**：bootstrap 侧没有 hotpatch 版本表 / FFI 语言槽 / 执行域数据面
+        （自源侧的 `@hotpatch` 版本进 `EXPR_FN` 的 iv 槽、`@ffi` 进 `ffi_lang_ni`）⇒ 本侧只保证
+        「能词法化、不报错、不影响产物」，与既有 `_skip_spec_annotations` 同口径。
+        **不知名名字**与**未闭合括号**一律响亮报错 —— 「放宽 = 吞错」是静默面
+        （`@hotpach(ver=1)` 的笔误若不报，注解就被静默丢弃）。
+        """
+        while self.check(TokenType.AT):
+            self.advance()                      # '@'
+            if not self.check(TokenType.IDENT):
+                self.error("expected annotation name after '@'")
+            name = self.advance().lexeme
+            if name not in self._LEAD_AT_NAMES:
+                self.error(f"Unknown top-level '@{name}' annotation (expected '@hotpatch' / "
+                           f"'@ffi' / '@preferredDomain' / '@executionDomain')")
+            if self.check(TokenType.LPAREN):
+                depth = 1
+                self.advance()
+                while depth > 0:
+                    if self.check(TokenType.EOF):
+                        self.error("unterminated '@' annotation: missing ')'")
+                    if self.check(TokenType.LPAREN):
+                        depth += 1
+                    elif self.check(TokenType.RPAREN):
+                        depth -= 1
+                    self.advance()
+            self._consume_newlines()            # 注解之间可换行（文档形）
+
     def parse_top_level_decl(self):
+        self._skip_leading_at_annotations()
         is_pub = False
         if self.check(TokenType.PUB):
             is_pub = True
@@ -330,6 +379,14 @@ class Parser:
     def parse_function_decl(self, is_pub, is_flow=False):
         if not is_flow:
             self.expect(TokenType.FN)
+        elif self.check(TokenType.FN):
+            # v4 文档形（2026-10-11 裁：文档是目标语法 ⇒ 改实现）：
+            # `docs/core-language-syntax_v4.md:1232` `flow counter(start: int) -> int:`、
+            # `:1406` `flow encode(input: Frame) -> Packet:` —— **无 `fn`**。
+            # 本侧原先**只**认文档形；此处补收旧形 `flow fn name(...)` 为**兼容**
+            # （语料 `src/compiler/purity_selftest.cr:231` 用它；文档不写它、不为它新增用例）。
+            # ⇒ 改后与自源**同收两形**（自源原先只认 `flow fn`，同批补齐文档形）。
+            self.advance()
         name = self.expect(TokenType.IDENT).lexeme
         generics = self._parse_generics()
         self.expect(TokenType.LPAREN)
@@ -342,7 +399,7 @@ class Parser:
             ret = BaseType('unit')
         # 批 6（裁-S7，bounded）：规约标注链 `#check(...)` / `#ensure(...)`——**接受并跳过**。
         # 位置与 self-hosted 侧一一对应（签名之后、body 之前）；**零语义**。
-        self._skip_spec_annotations()
+        self._skip_spec_annotations()   # inline 形（兼容）：注解后紧跟 `:`，不要求行尾
         if self.check(TokenType.EQ):
             self.advance()
             body = self._want_value_expr()   # `fn f() = expr` 的值 = 表达式位（规则 ②）
@@ -355,12 +412,21 @@ class Parser:
         # 规则 ①：函数体 region **恒为语句位**（§7.4「函数没有 implicit tail return」）⇒
         # 末项裸表达式包 ExprStmt，块类型 unit ⇒ 返回值只经显式 `return`。
         self.want_value = False
-        body = self.parse_block()
+        # v4 文档 §10.1（**文档形**）：规约注解位于函数 layout region 的**开头**（statements 之前）
+        # ⇒ 此处自己吃 region 头，先收 `#check`/`#ensure`，再进 statements。
+        # inline 形（签名与 `:` 之间，见上方 `_skip_spec_annotations()` 的第 1 个调用点）
+        # **保留为兼容**：不在文档里，但 `tests/spec` 的干净档有工具产出。
+        if not self._expect_region():
+            # 空函数体（§10.2 裁定推翻后合法）：零项 ⇒ 值 = 无值（块类型 unit）。
+            body = Block([], None)
+        else:
+            self._skip_spec_annotations(need_eol=True)   # 文档形：注解独占一行
+            body = self.parse_block_items()
         if is_flow:
             body = Flow(body)
         return FunctionDecl(is_pub, name, generics, params, ret, body)
 
-    def _skip_spec_annotations(self):
+    def _skip_spec_annotations(self, need_eol=False):
         """批 6（裁-S7，bounded）：消费 `#` IDENT `(` … `)` 标注链并**丢弃**（零语义）。
 
         边界（维护者裁定）：bootstrap 侧**只**保证「能词法化、不报错、不影响产物」——
@@ -368,11 +434,22 @@ class Parser:
         消费 = 平衡括号扫描（不解析表达式）⇒ 对内部形态（含 `result` 等 bootstrap 关键字）
         一律容忍；形状错（缺 IDENT/缺括号/未闭合）**响亮报错**（fail-loud，不静默）。
         """
+        # 循环**末尾**的 `_consume_newlines()` 让注解链跨行成立（文档形 §10.1：每条独占一行）。
+        # ⚠ 只跳「注解之间」，**不跳第一条之前** —— 首条之前若有 NEWLINE（无体声明的收尾），
+        #   在循环头吞掉它会让调用点的 `_at_line_end()` 误判「非行边界」（回归面）。
         while self.check(TokenType.HASH):
             self.advance()                      # '#'
             if not self.check(TokenType.IDENT):
                 self.error("expected annotation name after '#'")
-            self.advance()                      # check / ensure
+            an_name = self.advance().lexeme      # check / ensure
+            # 名字白名单与自源同判（自源 = `parse_spec_annotations` 的 kind 分派 ⇒ 非此二者
+            # 一律 EC_V_BAD_TAG/V02）。**这不是新增限制**：文档 §10.1 只给 `#check`/`#ensure`
+            # 两形；而「放宽 = 吞错」是静默面（`#foo(1)` 这类误写若不报，注解被静默丢弃）。
+            # 语料实核：`src/**`+`tests/**` 的真代码里 `#` 注解**只有** check/ensure
+            # （`#include`/`#tag`/`#x` 全在注释、C 文件或 python f-string 内；唯一例外
+            # `tests/spec/t2_neg_unknowntag.cr` 本就是**负例**，期望报错）。
+            if an_name not in ('check', 'ensure'):
+                self.error(f"Unknown annotation '#{an_name}' (expected '#check' or '#ensure')")
             self.expect(TokenType.LPAREN)
             depth = 1
             while depth > 0:
@@ -383,6 +460,13 @@ class Parser:
                 elif self.check(TokenType.RPAREN):
                     depth -= 1
                 self.advance()
+            # 文档形：注解必须**独占一行**（v4 行语义 = 一条语句一行）⇒
+            # `#check(1 > 0) return 1` 同行是**非法文本**（负例档
+            # `tests/spec/t2_neg_inbody.cr` 逐字如此，必须 rc=1）。
+            # inline 形那侧（need_eol=False）注解后紧跟 `:` ⇒ 不能要行尾。
+            if need_eol and not self._at_line_end():
+                self.error(f"Expected end of line after '#{an_name}' annotation")
+            self._consume_newlines()            # 注解之间可换行（文档形，见上方注）
 
     def _parse_generics(self):
         if self.check(TokenType.LBRACK):
@@ -810,7 +894,17 @@ class Parser:
         self.error(f"Unexpected token: {self.cur().lexeme}")
 
     def parse_block(self) -> Block:
-        """v4 region：吃 `INDENT` … `DEDENT`（取代原 `{` … `}`）。
+        """region 头 + 体（**所有** region 的通用入口）。空 region ⇒ `Block([], None)`。"""
+        if not self._expect_region():
+            want = self.want_value
+            self.want_value = want
+            return Block([], None)      # 空 region：零 items、无 DEDENT 可吃
+        return self.parse_block_items()
+
+    def parse_block_items(self) -> Block:
+        """体（**region 头已吃掉**）。拆出本函数只为「函数体 region 的**开头若干项** =
+        规约注解」（v4 文档 §10.1，见 `parse_function_decl` 的调用点）——那里必须在
+        statements 之前先把 `#check`/`#ensure` 收干净（`parse_block` 那条通用路做不到）。
 
         尾表达式判定（T0 布局规格 §6.2 A1）：**region 的最后一项 = 该 region 的值**，
         其余各项按语句处理 —— 即原 `parse_block` 的「暂定尾表达式」逻辑原样保留，
@@ -820,7 +914,6 @@ class Parser:
         # 由**进入时**的标志决定；体内嵌套 region 一律先复位为语句位，退出时恢复。
         want = self.want_value
         self.want_value = False
-        self._expect_region()
         stmts = []
         expr = None
         while True:
@@ -878,10 +971,56 @@ class Parser:
         """
         return isinstance(expr, (If, Match, Loop, For, Unsafe, Flow))
 
+    # 语句前导位 `@` 注解的白名单（与自源 `parser.cr::is_stmt_at_annotation` **逐名一致**）。
+    # 实证清单 = 文档或语料在**语句/region 前导位**实际出现过的名字：
+    #   §13.7 `preferredDomain` / `executionDomain`、§13.4 `NoBoundsCheck`、
+    #   §13.2 `fast` / `unroll` / `section`。
+    # **不收** §13.1 查询族 / §13.3 `addr` / §13.2 `inline`（文档里都在**表达式位**）。
+    # ⚠ **判据 = 「文档释文 + 语料实证」，不是「章号范围」**（维护者 2026-10-11 采纳；
+    #   与自源 `parser.cr::is_stmt_at_annotation` 同口径）。二者冲突时**以后者为准**：
+    #   `NoBoundsCheck`(§13.4) / `fast`·`unroll`·`section`(§13.2) 章号属 §13.1–13.4，
+    #   但释文与语料都在**语句前导位**用它们 ⇒ 收。**禁止**后人按章号再收窄回去。
+    _STMT_AT_NAMES = ('preferredDomain', 'executionDomain', 'NoBoundsCheck',
+                      'fast', 'unroll', 'section')
+
+    def _skip_stmt_at_annotations(self):
+        """消费语句前导位的 `@` 注解链（各占一行）。**语义面 = 接受并跳过**
+        （bootstrap 侧无执行域/安全检查数据面，与顶层前导 `@` 同口径）。
+
+        **未知名不在此列** ⇒ 仍按表达式解析 ⇒ 由既有路径响亮拒绝（不静默）。
+        注解**独占一行**：违反即 `self.error`（响亮）。
+        """
+        while self.check(TokenType.AT):
+            nxt = self.tokens[self.pos + 1] if self.pos + 1 < len(self.tokens) else None
+            if nxt is None or nxt.type != TokenType.IDENT:
+                break
+            if nxt.lexeme not in self._STMT_AT_NAMES:
+                break
+            name = nxt.lexeme
+            self.advance()                      # '@'
+            self.advance()                      # 名字
+            if self.check(TokenType.LPAREN):
+                depth = 1
+                self.advance()
+                while depth > 0:
+                    if self.check(TokenType.EOF):
+                        self.error("unterminated '@' annotation: missing ')'")
+                    if self.check(TokenType.LPAREN):
+                        depth += 1
+                    elif self.check(TokenType.RPAREN):
+                        depth -= 1
+                    self.advance()
+            if not self._at_line_end():
+                self.error(f"Expected end of line after '@{name}' annotation")
+            self._consume_newlines()
+
     def parse_stmt(self):
         # 语句位入口（规则 ①）：本语句整体在语句位 ⇒ 先复位；语句内的表达式位由各入口重
         # 置 True（声明的右值 / return 值 / 实参 / 括号 / 索引 …）。
         self.want_value = False
+        # v4 §13.7 第三例 / §13.4：**语句前导位**的 `@` 注解（`@preferredDomain(gpu)` 前导 `loop:`）。
+        # 必须在此消费，否则 `@` 落进表达式路（自源侧实测会被 checker 当未知名内建报 N01）。
+        self._skip_stmt_at_annotations()
         if self.check(TokenType.IDENT) and self._is_var_decl_start():
             names, tags, typ, values = self._parse_var_decl_names_tags_type()
             self._end_decl()
@@ -932,9 +1071,11 @@ class Parser:
         want = self.want_value
         self.expect(TokenType.MATCH)
         expr = self._want_value_expr()
-        self._expect_region()
+        has_items = self._expect_region()   # False = 空 region（§10.2 裁定推翻后合法）
         arms = []
         while True:
+            if not has_items:
+                break
             self._consume_newlines()
             if self.check(TokenType.DEDENT) or self.check(TokenType.EOF):
                 break
@@ -953,11 +1094,34 @@ class Parser:
                 self.advance()
             pat = self.parse_pattern()
             self.expect(TokenType.FAT_ARROW)   # 使用 =>
-            body = self._want_value_expr()
+            # v4 文档 §7.3（逐字）：「需要多行 arm body 时，`=>` 后换行并进入更深 layout」
+            # ⇒ `=>` 后**行尾** ⟺ 臂体是一个 layout region；否则单表达式。
+            # ⚠ 该 region **没有 `:`**（`=>` 已充当开启符）⇒ 不能走 `_expect_region`。
+            # **兼容形 `=>:`**（`=>` 后紧跟 `:`）：文档 §7.3 没有这一形（那里是 `=>` 后直接换行），
+            # 但 T6 语料机械改写成了它 ⇒ 按本批先例（`flow fn` 兼容形）收为兼容，与文档形同判。
+            # 「臂体是 region」的判据必须在**消费 `:` 之前**定下 —— 消费后再问 `_at_line_end()`
+            # 会因为站在 INDENT 上而误判成「非行边界」（实测踩过）。
+            is_region = False
+            if self.check(TokenType.COLON_BLOCK):
+                is_region = True
+                self.advance()
+            elif self._at_line_end():
+                is_region = True
+            if is_region:
+                self._consume_newlines()
+                if self.check(TokenType.INDENT):
+                    self.advance()
+                    self.want_value = True          # 臂体 = 表达式位 ⇒ region 保尾值
+                    body = self.parse_block_items()
+                else:
+                    body = Block([], None)          # 空 region（形态 D）
+            else:
+                body = self._want_value_expr()
             arms.append(MatchArm(pat, body))
             if self.check(TokenType.COMMA):
                 self.advance()
-        self.expect(TokenType.DEDENT)
+        if has_items:
+            self.expect(TokenType.DEDENT)
         self.want_value = want
         return Match(expr, arms)
     def parse_pattern(self) -> Pattern:
@@ -1063,9 +1227,11 @@ class Parser:
         self.expect(TokenType.STRUCT)
         name = self.expect(TokenType.IDENT).lexeme
         generics = self._parse_generics()
-        self._expect_region()
+        has_items = self._expect_region()   # False = 空 region（§10.2 裁定推翻后合法）
         fields = []
         while True:
+            if not has_items:
+                break
             self._consume_newlines()
             if self.check(TokenType.DEDENT) or self.check(TokenType.EOF):
                 break
@@ -1094,16 +1260,19 @@ class Parser:
             fields.append((fname, ftype))
             if self.check(TokenType.COMMA):
                 self.advance()
-        self.expect(TokenType.DEDENT)
+        if has_items:
+            self.expect(TokenType.DEDENT)
         return StructDecl(is_pub, name, generics, fields)
 
     def parse_enum_decl(self, is_pub):
         self.expect(TokenType.ENUM)
         name = self.expect(TokenType.IDENT).lexeme
         generics = self._parse_generics()
-        self._expect_region()
+        has_items = self._expect_region()   # False = 空 region（§10.2 裁定推翻后合法）
         variants = []
         while True:
+            if not has_items:
+                break
             self._consume_newlines()
             if self.check(TokenType.DEDENT) or self.check(TokenType.EOF):
                 break
@@ -1125,16 +1294,19 @@ class Parser:
             variants.append((vname, types))
             if self.check(TokenType.COMMA):
                 self.advance()
-        self.expect(TokenType.DEDENT)
+        if has_items:
+            self.expect(TokenType.DEDENT)
         return EnumDecl(is_pub, name, generics, variants)
 
     def parse_interface_decl(self, is_pub):
         self.expect(TokenType.INTERFACE)
         name = self.expect(TokenType.IDENT).lexeme
         generics = self._parse_generics()
-        self._expect_region()
+        has_items = self._expect_region()   # False = 空 region ⇒ **零方法接口**（合法且有意义）
         methods = []
         while True:
+            if not has_items:
+                break
             self._consume_newlines()
             if self.check(TokenType.DEDENT) or self.check(TokenType.EOF):
                 break
@@ -1150,7 +1322,8 @@ class Parser:
             #   三元组里加一个 body 槽 ⇒ 动 `ast.py` ⇒ 违 J-T1-1 冻结。此处**响亮报错**（不静默吞体）。
             self._end_decl()
             methods.append((mname, params, ret))
-        self.expect(TokenType.DEDENT)
+        if has_items:
+            self.expect(TokenType.DEDENT)
         return InterfaceDecl(is_pub, name, generics, methods)
 
     def parse_impl_decl(self):
@@ -1162,14 +1335,17 @@ class Parser:
             self.advance()
             trait = for_type
             for_type = self.parse_path()
-        self._expect_region()
+        has_items = self._expect_region()   # False = 空 region
         methods = []
         while True:
+            if not has_items:
+                break
             self._consume_newlines()
             if self.check(TokenType.DEDENT) or self.check(TokenType.EOF):
                 break
             methods.append(self.parse_function_decl(False))
-        self.expect(TokenType.DEDENT)
+        if has_items:
+            self.expect(TokenType.DEDENT)
         return ImplDecl(generics, trait, for_type, methods)
 
     def parse_type_alias(self):

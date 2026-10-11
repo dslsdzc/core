@@ -14,20 +14,17 @@
 import io
 import os
 
-fn main() -> int {
-    rc := system("exit 3");
-    if rc != 3 {
-        print("FAIL: system(\"exit 3\") rc=");
-        println_i(rc);
-        return 1;
-    }
+fn main() -> int:
+    rc := system("exit 3")
+    if rc != 3:
+        print("FAIL: system(\"exit 3\") rc=")
+        println_i(rc)
+        return 1
     // 第二探针换一个值：区分「常量/陈旧缓冲区回传」与真实状态位解码。
-    rc2 := system("exit 42");
-    if rc2 != 42 {
-        print("FAIL: system(\"exit 42\") rc=");
-        println_i(rc2);
-        return 2;
-    }
-    println("ALL PASS");
-    return 0;
-}
+    rc2 := system("exit 42")
+    if rc2 != 42:
+        print("FAIL: system(\"exit 42\") rc=")
+        println_i(rc2)
+        return 2
+    println("ALL PASS")
+    return 0

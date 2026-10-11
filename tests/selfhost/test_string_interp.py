@@ -35,9 +35,7 @@ BASE = Path(__file__).resolve().parents[2]
 COREC = os.environ.get("COREC_BIN") or str(BASE / "build" / "corec")
 P21 = re.compile(r"error\[P21\]")
 
-PRELUDE = ('import io\nimport fmt\nstruct S { f: int }\n'
-           'fn f(v: int) -> int { return v * 3; }\n'
-           'fn g(s: string) -> int { return str_len(s); }\nfn f42(c: int) -> int { return 42; }\n')
+PRELUDE = ('import io\nimport fmt\nstruct S:\n    f: int\nfn f(v: int) -> int:\n    return v * 3\nfn g(s: string) -> int:\n    return str_len(s)\nfn f42(c: int) -> int:\n    return 42\n')
 
 # (名, 串字面量, 期望值, 备注) —— 值 = **展开后**语义
 VALUES = [
@@ -61,15 +59,7 @@ VALUES = [
 
 def build_run(lit, extra_prelude="", extra_body=""):
     src = (PRELUDE + extra_prelude +
-           'fn main() -> int {\n'
-           '    n := 7;\n'
-           '    b := true;\n'
-           '    str := "S";\n'
-           '    s := "%s";\n'
-           '    println(s);\n'
-           '%s'
-           '    return 0;\n'
-           '}\n') % (lit, extra_body)
+           'fn main() -> int:\n    n := 7\n    b := true\n    str := "S"\n    s := "%s"\n    println(s)\n    %s    return 0\n') % (lit, extra_body)
     with tempfile.NamedTemporaryFile("w", suffix=".cr", delete=False) as fh:
         fh.write(src)
         path = fh.name
@@ -104,9 +94,9 @@ def main():
 
     # A 解析完整性：插值**同一行**含 `}`/后续语句 ⇒ 不得 P21 级联，且同行后续语句仍生效
     same_line = [
-        ("same_line_return", 'fn main() -> int { s := "x=${7}"; return 7; }', 7),
-        ("same_line_if", 'fn main() -> int { s := "A${7}"; if 1 == 1 { return 5; } return 0; }', 5),
-        ("same_line_call", 'import io\nimport fmt\nfn main() -> int { println("n=${7}"); return 3; }', 3),
+        ("same_line_return", 'fn main() -> int:\n    s := "x=${7}"\n    return 7\n', 7),
+        ("same_line_if", 'fn main() -> int:\n    s := "A${7}"\n    if 1 == 1:\n        return 5\n    return 0\n', 5),
+        ("same_line_call", 'import io\nimport fmt\nfn main() -> int:\n    println("n=${7}")\n    return 3\n', 3),
     ]
     for name, src, want_rc in same_line:
         with tempfile.NamedTemporaryFile("w", suffix=".cr", delete=False) as fh:
@@ -150,8 +140,7 @@ def main():
     ]
     # 泛型洞（真泛型上下文；洞型在实例化前不可得 ⇒ P028 + 未覆盖面）
     with tempfile.NamedTemporaryFile("w", suffix=".cr", delete=False) as fh:
-        fh.write(PRELUDE + 'fn h[T](x: T) -> string { return "${x}"; }\n'
-                 'fn main() -> int { return 0; }\n')
+        fh.write(PRELUDE + 'fn h[T](x: T) -> string:\n    return "${x}"\nfn main() -> int:\n    return 0\n')
         gpath = fh.name
     gout = str(BASE / "build" / f"_interp_{uuid.uuid4().hex[:8]}")
     try:
@@ -169,9 +158,9 @@ def main():
                 os.unlink(q)
 
     for name, lit, code, note in errs:
-        pre = "    d : dex = 1.5;\n    db : dex, apx = 1.5;\n    t : int = 7;\n"
+        pre = "    d : dex = 1.5\n    db : dex, apx = 1.5\n    t : int = 7\n"
         with tempfile.NamedTemporaryFile("w", suffix=".cr", delete=False) as fh:
-            fh.write(PRELUDE + 'fn main() -> int {\n    n := 7;\n' + pre + f'    s := "{lit}";\n    return 0;\n}}\n')
+            fh.write(PRELUDE + 'fn main() -> int:\n    n := 7\n' + pre + f'    s := "{lit}"\n    return 0\n')
             path = fh.name
         out = str(BASE / "build" / f"_interp_{uuid.uuid4().hex[:8]}")
         try:
@@ -192,7 +181,7 @@ def main():
     sys.path.insert(0, str(BASE / "bootstrap"))
     try:
         from corec.frontend.lexer import Lexer
-        toks = Lexer('s := "x=${n}";').tokenize()
+        toks = Lexer('s := "x=${n}"\n').tokenize()
         lexeme = [t.lexeme for t in toks if getattr(t.type, "name", "") == "STRING_LIT"]
         print(f"[D bootstrap 面] lexeme={lexeme}（**未展开**：本批只改自举前端；分歧已登记）")
         expect("D.bootstrap_unexpanded_fact", lexeme == ["x=${n}"], f"得 {lexeme}")

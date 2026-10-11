@@ -64,12 +64,12 @@ state edge 是 DFEdge 中 kind=1 的边，kind=0 为普通的 data 边（边结�
 ### 并发原语
 
 ```core
-ch := make(chan int, 10);  // 缓冲 channel,容量 10
-go f(args);                // 异步启动,不等待
-ch2 := go g(args);         // 返回 channel 句柄,用于接收返回值
-send(ch, 42);              // 发送
-val := recv(ch);           // 接收
-close(ch);                 // 关闭
+ch := make(chan int, 10)  // 缓冲 channel,容量 10
+go f(args)                // 异步启动,不等待
+ch2 := go g(args)         // 返回 channel 句柄,用于接收返回值
+send(ch, 42)              // 发送
+val := recv(ch)           // 接收
+close(ch)                 // 关闭
 ```
 
 这些语法与 stdlib 中 `chan_*` 函数的对应关系见 `docs/developer/syntax.md` 第十一章与 `chan.cr`。go 还支持范围批量形态（`go var start..end expr`，在 `parser.cr` 中 desugar）。
@@ -79,10 +79,14 @@ close(ch);                 // 关闭
 每个 G 是一个用户态协程，栈固定为 16KB，绑定独立的 arena：
 
 ```core
-struct Goroutine {
-    id: int;  status: int;  stack_ptr: int;  stack_lo: int;
-    arena_id: int;  chan_wait: int;  next: int;   // 链表(run/wait queue)
-}
+struct Goroutine:
+    id: int
+    status: int
+    stack_ptr: int
+    stack_lo: int
+    arena_id: int
+    chan_wait: int
+    next: int   // 链表(run/wait queue)
 ```
 
 G 的状态机有五个状态：`_Gidle`（未启动）、`_Grunnable`（在队列中）、`_Grunning`（执行中）、`_Gwaiting`（阻塞在 chan 的 send 或 recv）、`_Gdead`（已退出，待回收）。
@@ -100,9 +104,12 @@ G 的状态机有五个状态：`_Gidle`（未启动）、`_Grunnable`（在队�
 ### M：machine（OS 线程）
 
 ```core
-struct Machine {
-    id: int;  cur_g: int;  runq_head: int;  runq_tail: int;  g0: int;  // g0 = M 自身的系统 G
-}
+struct Machine:
+    id: int
+    cur_g: int
+    runq_head: int
+    runq_tail: int
+    g0: int  // g0 = M 自身的系统 G
 ```
 
 `sched_init` 注册主线程，主流程的 G 记为 G0；`sched_spawn_workers(n)` 派生多个 M，以 m_idx 标识。
@@ -116,10 +123,15 @@ struct Machine {
 channel 由环形缓冲与等待链表组成：
 
 ```core
-struct Channel {
-    buf: string;  cap: int;  len: int;  head: int;  elemsize: int;
-    send_wait: int;  recv_wait: int;  closed: int;
-}
+struct Channel:
+    buf: string
+    cap: int
+    len: int
+    head: int
+    elemsize: int
+    send_wait: int
+    recv_wait: int
+    closed: int
 ```
 
 send 的行为分四种情况：channel 已关闭则 panic；有等待接收的 G 则直接拷贝给接收者并唤醒它；缓冲未满则写入缓冲；缓冲已满则当前 G 阻塞，进入 send_wait。

@@ -73,12 +73,12 @@ Expected: FAIL — 断言 `'Region: if' in out` 失败（cir dump 尚无 Region 
 `src/compiler/dataflow.cr:104-106` 常量区追加：
 
 ```core
-SG_FUNC   : int = 0;
-SG_LOOP   : int = 1;
-SG_FOR    : int = 2;
-SG_FLOW   : int = 3;
-SG_UNSAFE : int = 4;
-SG_IF     : int = 5;  // conditional region: covers [condition, merge)
+SG_FUNC   : int = 0
+SG_LOOP   : int = 1
+SG_FOR    : int = 2
+SG_FLOW   : int = 3
+SG_UNSAFE : int = 4
+SG_IF     : int = 5  // conditional region: covers [condition, merge)
 ```
 
 - [ ] **Step 4: if/else 生成 SG_IF**
@@ -173,21 +173,24 @@ Expected: FAIL（`cluster_for` 不存在）
 
 ```core
 // sg_pop：弹出最后一个 open（EXIT<0）的 region，而非 g_sg_count-1
-fn sg_pop() {
-    if g_sg_count <= 0 { return; }
-    idx : ., mut = -1;
-    pi := g_sg_count - 1;
-    loop {
-        if pi < 0 { break; }
-        if r64(g_sgs, pi * ESZ_SG + OFF_SG_EXIT) < 0 { idx = pi; break; }
-        pi = pi - 1;
-    }
-    if idx < 0 { return; }
-    w64(g_sgs, idx * ESZ_SG + OFF_SG_EXIT, g_df_node_count);
+fn sg_pop():
+    if g_sg_count <= 0:
+        return
+    idx : ., mut = -1
+    pi := g_sg_count - 1
+    loop:
+        if pi < 0:
+            break
+        if r64(g_sgs, pi * ESZ_SG + OFF_SG_EXIT) < 0:
+            idx = pi
+            break
+        pi = pi - 1
+    if idx < 0:
+        return
+    w64(g_sgs, idx * ESZ_SG + OFF_SG_EXIT, g_df_node_count)
     w64(g_sgs, idx * ESZ_SG + OFF_SG_NCOUNT,
-        g_df_node_count - r64(g_sgs, idx * ESZ_SG + OFF_SG_NSTART));
-    g_cur_sg = r64(g_sgs, idx * ESZ_SG + OFF_SG_PARENT);
-}
+        g_df_node_count - r64(g_sgs, idx * ESZ_SG + OFF_SG_NSTART))
+    g_cur_sg = r64(g_sgs, idx * ESZ_SG + OFF_SG_PARENT)
 ```
 
 验证修复（dump 断言）：if 后跟尾代码的函数，`Region: if nodes A..B` 的 B 必须等于 merge label 处节点数（不吞尾代码）。测试：`tests/selfhost/test_region_cfg.py` 的 if/for 用例改为断言区域边界在函数指令跨度内（sanity 检查）。
@@ -205,13 +208,12 @@ g_cur_sg : int, mut;              // currently open region id (-1 = none)
 
 ```core
 // df_create_node 内、g_df_node_count = nid 递增之前插入（约 68-90 行）：
-fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, type_kind: int) -> int {
-    nid := g_df_node_count;
-    grow_df_nodes(nid + 1);
-    grow_df_node_region(nid + 1);
-    w64(g_df_node_region, nid * 8, g_cur_sg);
+fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, type_kind: int) -> int:
+    nid := g_df_node_count
+    grow_df_nodes(nid + 1)
+    grow_df_node_region(nid + 1)
+    w64(g_df_node_region, nid * 8, g_cur_sg)
     // ... 现有初始化不变 ...
-}
 ```
 
 （`grow_df_node_region` 照 `grow_df_nodes` 模式实现：cap 倍增、_dyncpy 复制。）
@@ -453,13 +455,14 @@ OFF_DFE_KIND : int = 24; // 0=data (def-use), 1=state (ordering/termination)
 
 ```core
 // df_add_edge 改为带 kind 版本；原 df_add_edge 保持 0 参数语义内部调 df_add_edge_kind(..., 0)
-fn df_add_edge_kind(from_id: int, to_id: int, kind: int) {
-    if from_id < 0 || to_id < 0 { return; }
+fn df_add_edge_kind(from_id: int, to_id: int, kind: int):
+    if from_id < 0 || to_id < 0:
+        return
     // ... 原 df_add_edge 逻辑（grow_df_edges、写 from/to/next、g_df_edge_count 递增）...
-    w64(g_df_edges, (g_df_edge_count - 1) * ESZ_DFEDGE + OFF_DFE_KIND, kind);
-}
+    w64(g_df_edges, (g_df_edge_count - 1) * ESZ_DFEDGE + OFF_DFE_KIND, kind)
 
-fn df_add_edge(from_id: int, to_id: int) { df_add_edge_kind(from_id, to_id, 0); }
+fn df_add_edge(from_id: int, to_id: int):
+    df_add_edge_kind(from_id, to_id, 0)
 ```
 
 副作用链（模块级变量，df_begin_func 重置）：
@@ -467,18 +470,22 @@ fn df_add_edge(from_id: int, to_id: int) { df_add_edge_kind(from_id, to_id, 0); 
 ```core
 // df_begin_func 中：g_last_state_node = -1;
 // df_connect_srcs 内，opcode 判定为副作用时：
-fn df_connect_state(node_id: int, opcode: int) {
-    is_side_effect : ., mut = 0;
-    if opcode == IR_STORE        { is_side_effect = 1; }
-    if opcode == IR_STORE_FIELD  { is_side_effect = 1; }
-    if opcode == IR_STORE_INDEX  { is_side_effect = 1; }
-    if opcode == IR_STORE_INDEX_VAR { is_side_effect = 1; }
-    if opcode == IR_CALL && fi_ispure(find_func(/*当前函数*/)) == 0 { is_side_effect = 1; }
-    if is_side_effect != 0 {
-        if g_last_state_node >= 0 { df_add_edge_kind(g_last_state_node, node_id, 1); }
-        g_last_state_node = node_id;
-    }
-}
+fn df_connect_state(node_id: int, opcode: int):
+    is_side_effect : ., mut = 0
+    if opcode == IR_STORE:
+        is_side_effect = 1
+    if opcode == IR_STORE_FIELD:
+        is_side_effect = 1
+    if opcode == IR_STORE_INDEX:
+        is_side_effect = 1
+    if opcode == IR_STORE_INDEX_VAR:
+        is_side_effect = 1
+    if opcode == IR_CALL && fi_ispure(find_func(/*当前函数*/)) == 0:
+        is_side_effect = 1
+    if is_side_effect != 0:
+        if g_last_state_node >= 0:
+            df_add_edge_kind(g_last_state_node, node_id, 1)
+        g_last_state_node = node_id
 ```
 
 （`IR_CALL` 的纯度判定：call 的 s3 是 func name idx——`fi_ispure` 需要 func index；实现时经 `find_func(s3)` 获得。非纯调用才进链。若 find_func 不可得（外部函数），保守进链。）
@@ -589,26 +596,32 @@ Expected: 当前即 PASS（v2 未加，但 ELF 路径不受影响）——本测
 `src/compiler/ccr_io.cr` 的 load：版本判断处（当前读取 version 的位置）改为：
 
 ```core
-    ver := <读出的 version 字段>;
-    // v4（无 SG 段）：跳过 SG 读取，g_sg_count = 0
-    // v5：按 Step 3 布局读取 SG 段并回填 g_sgs
-    if ver >= 5 {
-        sg_n := buf_read_i32(buf, pos); pos = pos + 4;
-        si = 0;
-        loop {
-            if si >= sg_n { break; }
-            grow_sg(si + 1);
-            f = si * ESZ_SG;
-            w64(g_sgs, f + OFF_SG_KIND, buf_read_i32(buf, pos)); pos = pos + 4;
-            w64(g_sgs, f + OFF_SG_ENTER, buf_read_i32(buf, pos)); pos = pos + 4;
-            w64(g_sgs, f + OFF_SG_EXIT, buf_read_i32(buf, pos)); pos = pos + 4;
-            w64(g_sgs, f + OFF_SG_PARENT, buf_read_i32(buf, pos)); pos = pos + 4;
-            w64(g_sgs, f + OFF_SG_NSTART, buf_read_i32(buf, pos)); pos = pos + 4;
-            w64(g_sgs, f + OFF_SG_NCOUNT, buf_read_i32(buf, pos)); pos = pos + 4;
-            si = si + 1;
-        }
-        g_sg_count = sg_n;
-    }
+    ver := <读出的 version 字段>
+        // v4（无 SG 段）：跳过 SG 读取，g_sg_count = 0
+        // v5：按 Step 3 布局读取 SG 段并回填 g_sgs
+    if ver >= 5:
+        sg_n := buf_read_i32(buf, pos)
+        pos = pos + 4
+        si = 0
+        loop:
+            if si >= sg_n:
+                break
+            grow_sg(si + 1)
+            f = si * ESZ_SG
+            w64(g_sgs, f + OFF_SG_KIND, buf_read_i32(buf, pos))
+            pos = pos + 4
+            w64(g_sgs, f + OFF_SG_ENTER, buf_read_i32(buf, pos))
+            pos = pos + 4
+            w64(g_sgs, f + OFF_SG_EXIT, buf_read_i32(buf, pos))
+            pos = pos + 4
+            w64(g_sgs, f + OFF_SG_PARENT, buf_read_i32(buf, pos))
+            pos = pos + 4
+            w64(g_sgs, f + OFF_SG_NSTART, buf_read_i32(buf, pos))
+            pos = pos + 4
+            w64(g_sgs, f + OFF_SG_NCOUNT, buf_read_i32(buf, pos))
+            pos = pos + 4
+            si = si + 1
+        g_sg_count = sg_n
 ```
 
 - [ ] **Step 5: 兼容性回归——旧 v4 文件**
@@ -675,13 +688,11 @@ Expected: 当前即 PASS（B010 已在）——本测试为迁移后的守卫。
 `src/compiler/region_check.cr:36-49` 的 `subgraph_containing(ni)`（当前线性扫 g_sgs 区间）改为：
 
 ```core
-fn subgraph_containing(node_seq: int) -> int {
+fn subgraph_containing(node_seq: int) -> int:
     // 显式映射：O(1) 归属查询（g_df_node_region 由 df_create_node 写入）
-    if node_seq >= 0 && node_seq < g_df_node_count {
-        return r64(g_df_node_region, node_seq * 8);
-    }
-    return -1;
-}
+    if node_seq >= 0 && node_seq < g_df_node_count:
+        return r64(g_df_node_region, node_seq * 8)
+    return -1
 ```
 
 （调用处 `alloc_seq_to_sg` 仍保留其现有逻辑——两者语义对齐：region id == g_sgs 索引。）

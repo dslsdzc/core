@@ -39,15 +39,15 @@ Core 将一切执行抽象为 HDFG。
 该图等价于传统的数据流程序图。
 
 ```core
-fn transform(x: int) -> int { x * 2 }
-fn display(v: int) { println(v); }
+fn transform(x: int) -> int:
+    x * 2
+fn display(v: int):
+    println(v)
 
-fn main() {
-    data := [1, 2, 3];
-    for d in data {
-        go display(transform(d));
-    }
-}
+fn main():
+    data := [1, 2, 3]
+    for d in data:
+        go display(transform(d))
 ```
 
 图结构：data → transform 节点（多个实例） → display 节点（多个实例）。
@@ -112,27 +112,21 @@ flow load_balancer() {
 ## 5. 并行计算 π 的图表示例
 
 ```core
-flow worker(id, base, chunk) -> dex {
-    loop {
-        partial := leibniz_partial(offset, chunk);
-        yield partial;
-        offset += chunk * num_workers();
-    }
-}
+flow worker(id, base, chunk) -> dex:
+    loop:
+        partial := leibniz_partial(offset, chunk)
+        yield partial
+        offset += chunk * num_workers()
 
-flow orchestrator(workers, chunk_size) {
-    flows : ., mut = [go worker(...), ...];   // 扇出多个 worker 节点
-    loop {
-        for f in &flows {
-            pi += 4.0 * f.recv();           // 扇入：从每个 worker 收集部分和
-        }
-        println(pi);
-    }
-}
+flow orchestrator(workers, chunk_size):
+    flows : ., mut = [go worker(...), ...]   // 扇出多个 worker 节点
+    loop:
+        for f in &flows:
+            pi += 4.0 * f.recv()           // 扇入：从每个 worker 收集部分和
+        println(pi)
 
-fn main() {
-    go orchestrator(8, 10000);
-}
+fn main():
+    go orchestrator(8, 10000)
 ```
 
 图结构：

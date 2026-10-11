@@ -56,23 +56,21 @@ POS = BASE / "tests" / "suite" / "ptr_ref_first.cr"
 #   ⇒ 它的前提被**直接推翻**。按「改前提、不删断言」：**同形源码改判为正钉**（见下 `REF_OK`），
 #   **并补一个真该被拒的形态填空**（`optional` = `int?`，实测 `rc=1 TF07×1` ✓；`tuple` 亦实测被拒，取一即可）。
 NEG = {
-    "string": 'fn main() -> int { s := "hi"; return @raw_int(s); }\n',
-    "bool": "fn main() -> int { b := true; return @raw_int(b); }\n",
-    "array": "fn main() -> int { a := [1,2,3]; return @raw_int(a); }\n",
-    "slice": "fn main() -> int { a := [1,2,3]; s := a[0..2]; return @raw_int(s); }\n",
-    "optional": "fn main() -> int { x : int? = None; return @raw_int(x); }\n",
-    "struct": "struct S { v: int }\n"
-              "fn main() -> int { s : ., mut = S { v = 1 }; return @raw_int(s); }\n",
+    "string": 'fn main() -> int:\n    s := "hi"\n    return @raw_int(s)\n',
+    "bool": "fn main() -> int:\n    b := true\n    return @raw_int(b)\n",
+    "array": "fn main() -> int:\n    a := [1,2,3]\n    return @raw_int(a)\n",
+    "slice": "fn main() -> int:\n    a := [1,2,3]\n    s := a[0..2]\n    return @raw_int(s)\n",
+    "optional": "fn main() -> int:\n    x : int? = none\n    return @raw_int(x)\n",
+    "struct": "struct S:\n    v: int\nfn main() -> int:\n    s : ., mut = S { v = 1 }\n    return @raw_int(s)\n",
 }
 # **正钉（S2 新增）**：原 `ref_type` 负控的**同形源码**改判——`TYP_REF` **必须被接受**。
 REF_OK = {
-    "ref_type": "fn f(r: &int) -> int { return @raw_int(r); }\n"
-                "fn main() -> int { x : ., mut = 1; return f(&x); }\n",
+    "ref_type": "fn f(r: &int) -> int:\n    return @raw_int(r)\nfn main() -> int:\n    x : ., mut = 1\n    return f(&x)\n",
 }
 # 既有被接受形态（放宽不得把它们弄坏；两向钉子）
 POS_FORMS = {
-    "dex": "fn main() -> int { d : dex, mut = 1.5; return @raw_int(d); }\n",
-    "int": "fn main() -> int { n : ., mut = 7; return @raw_int(n); }\n",
+    "dex": "fn main() -> int:\n    d : dex, mut = 1.5\n    return @raw_int(d)\n",
+    "int": "fn main() -> int:\n    n : ., mut = 7\n    return @raw_int(n)\n",
 }
 
 

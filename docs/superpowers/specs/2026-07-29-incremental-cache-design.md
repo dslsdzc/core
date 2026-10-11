@@ -55,15 +55,14 @@ Core 编译器的函数级增量缓存。默认开启，编译无感知——每
 ## 指纹计算
 
 ```core
-fn function_fingerprint(func_node: int) -> int {
+fn function_fingerprint(func_node: int) -> int:
     // 从 AST 中提取函数体原文区域
-    body_node := ast_data(func_node);  // body AST node
-    body_start := ast_pos(body_node);  // 函数体在源文件中的起始位置
-    body_end := ast_end(body_node);    // 结束位置
-    
+    body_node := ast_data(func_node)  // body AST node
+    body_start := ast_pos(body_node)  // 函数体在源文件中的起始位置
+    body_end := ast_end(body_node)    // 结束位置
+
     // 对原文做 hash
-    return hash_source_segment(g_source, body_start, body_end);
-}
+    return hash_source_segment(g_source, body_start, body_end)
 ```
 
 使用现有 `str_hash` 函数（Fowler-Noll-Vo 或同类算法），该函数已存在于 `dyn_arr.cr`。
@@ -71,29 +70,28 @@ fn function_fingerprint(func_node: int) -> int {
 ### 签名指纹
 
 ```core
-fn sig_fingerprint(func_node: int) -> int {
+fn sig_fingerprint(func_node: int) -> int:
     // 函数名 + 参数类型 + 返回类型
-    name_ni := ast_a(func_node);
-    hash := str_hash(istr_get(name_ni));
-    
+    name_ni := ast_a(func_node)
+    hash := str_hash(istr_get(name_ni))
+
     // 遍历参数
-    param := ast_b(func_node);
-    param_count := ast_c(func_node);
-    pi := 0;
-    loop {
-        if pi >= param_count { break; }
-        param_type := ast_type_val(param);
-        hash = hash * 31 + param_type;  // 将类型编码入 hash
-        pi = pi + 1;
-        param = param + 1;
-    }
-    
+    param := ast_b(func_node)
+    param_count := ast_c(func_node)
+    pi := 0
+    loop:
+        if pi >= param_count:
+            break
+        param_type := ast_type_val(param)
+        hash = hash * 31 + param_type  // 将类型编码入 hash
+        pi = pi + 1
+        param = param + 1
+
     // 返回类型
-    ret_type := ast_type_val(func_node);
-    hash = hash * 31 + ret_type;
-    
-    return hash;
-}
+    ret_type := ast_type_val(func_node)
+    hash = hash * 31 + ret_type
+
+    return hash
 ```
 
 ## 编译管线集成（更新后的 `build` 流程）
@@ -146,26 +144,27 @@ fn sig_fingerprint(func_node: int) -> int {
 ### save_cir_cache(path, func_idx)
 
 ```core
-fn save_cir_cache(path: string, func_idx: int) {
-    fd := syscall3(2, path, 577, 420);  // O_WRONLY|O_CREAT|O_TRUNC
-    if fd < 0 { return; }
-    
-    w_cir_cache(fd, func_idx);
-    syscall3(3, fd, 0, 0);
-}
+fn save_cir_cache(path: string, func_idx: int):
+    fd := syscall3(2, path, 577, 420)  // O_WRONLY|O_CREAT|O_TRUNC
+    if fd < 0:
+        return
+
+    w_cir_cache(fd, func_idx)
+    syscall3(3, fd, 0, 0)
 ```
 
 ### load_cir_cache(path) -> int
 
 ```core
-fn load_cir_cache(path: string) -> int {
-    buf := read_file(path);
-    if str_len(buf) < 32 { return -1; }  // 太短，无效
-    
+fn load_cir_cache(path: string) -> int:
+    buf := read_file(path)
+    if str_len(buf) < 32:
+        return -1
+    // 太短，无效
+
     // 验证 magic + version
     // 反序列化到 g_df_nodes/g_ir_instrs 等
-    return 0;  // 成功
-}
+    return 0  // 成功
 ```
 
 ## 实现清单

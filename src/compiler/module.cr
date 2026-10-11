@@ -168,7 +168,9 @@ fn parent_dir(dir: string) -> string:
 fn load_imports(dir_path: string) -> string:
     imp_path : ., mut = dir_path + "_import.cr"
     content := module_get_source(imp_path)
-
+    // 回流（2026-10-11）：同 `main.cr::read_source_file` —— T4 按旧政策整条删除，
+    // **连带删掉一次内存读**；现政策（region 可为空）下回流成 `if …:` + 空 region。
+    if str_len(content) > 0:
     return content
 
 fn reg_fileid(fileid_str: string, path: string) -> int:

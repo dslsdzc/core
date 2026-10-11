@@ -27,79 +27,79 @@ COREC = BUILD / "corec"
 CASES = [
     (
         "array_global_literal",
-        "g : [int;2] = [8,9];\nfn main()->int{return g[1];}",
+        "g : [int;2] = [8,9]\nfn main()->int:\n    return g[1]\n",
         9,
     ),
     (
         "array_global_no_init",
-        "g : [int;2];\nfn main()->int{ g[1]=7; return g[1]; }",
+        "g : [int;2]\nfn main()->int:\n    g[1]=7\n    return g[1]\n",
         7,
     ),
     (
         "array_global_copy",
-        "a : [int;2] = [8,9];\nb : [int;2] = a;\nfn main()->int{return b[1];}",
+        "a : [int;2] = [8,9]\nb : [int;2] = a\nfn main()->int:\n    return b[1]\n",
         9,
     ),
     (
         "array_global_unused",
-        "g : [int;4] = [1,2,3,4];\nfn main()->int{return 5;}",
+        "g : [int;4] = [1,2,3,4]\nfn main()->int:\n    return 5\n",
         5,
     ),
     (
         "scalar_mut_global",
-        "x : int, mut = 5;\nfn main()->int{ x = x + 1; return x; }",
+        "x : int, mut = 5\nfn main()->int:\n    x = x + 1\n    return x\n",
         6,
     ),
     (
         "scalar_const_global",
-        "x : int = 5;\nfn main()->int{return x;}",
+        "x : int = 5\nfn main()->int:\n    return x\n",
         5,
     ),
     (
         "array_global_cross_func",
-        "g : [int;2] = [3,4];\nfn get()->int{return g[1];}\nfn main()->int{return get();}",
+        "g : [int;2] = [3,4]\nfn get()->int:\n    return g[1]\nfn main()->int:\n    return get()\n",
         4,
     ),
     (
         "array_global_two_refs",
-        "a : [int;2] = [8,9];\nb : [int;2] = a;\nfn main()->int{return a[0]+b[1];}",
+        "a : [int;2] = [8,9]\nb : [int;2] = a\nfn main()->int:\n    return a[0]+b[1]\n",
         17,
     ),
     # —— 以下为同一修复面（R1 ② 判据）的扩展 pin：非字面量初值的其它形态 + callee 侧
     # 聚合访问（解释器外函数内联路径的聚合族 opcode；ELF 全局基址字段读写）。 ——
     (
         "struct_global_field_read",
-        "struct P { x: int, y: int }\ng : P = P { x = 30, y = 12 };\nfn main()->int{return g.y;}",
+        "struct P:\n    x: int, y: int\ng : P = P { x = 30, y = 12 }\nfn main()->int:\n    return g.y\n",
         12,
     ),
     (
         "struct_global_field_write_callee",
-        "struct P { x: int, y: int }\ng : P = P { x = 1, y = 2 };\nfn set()->int{ g.y = 40; return 0; }\nfn main()->int{ set(); return g.y; }",
+        "struct P:\n    x: int, y: int\ng : P = P { x = 1, y = 2 }\nfn set()->int:\n    g.y = 40\n    return 0\nfn main()->int:\n    set()\n    return g.y\n",
         40,
     ),
     (
         "string_global",
-        'g : string = "hello";\nfn main()->int{ if str_len(g) == 5 { return 7; } return 1; }',
+        'g : string = "hello"\nfn main()->int:\n    if str_len(g) == 5:\n        return 7\n    return 1\n',
         7,
     ),
     (
         "call_init_global",
-        "fn make()->int{ return 33; }\ng : int, mut = make();\nfn main()->int{ return g; }",
+        "fn make()->int:\n    return 33\ng : int, mut = make()\nfn main()->int:\n    return g\n",
         33,
     ),
     (
         "callee_array_var_index",
-        "g : [int;3] = [5,6,7];\nfn get(i: int)->int{ return g[i]; }\nfn main()->int{ return get(2); }",
+        "g : [int;3] = [5,6,7]\nfn get(i: int)->int:\n    return g[i]\nfn main()->int:\n    return get(2)\n",
         7,
     ),
     (
         "alias_array_global_literal",
-        "type Arr = [int;2];\ng : Arr = [3,4];\nfn main()->int{return g[1];}",
+        "type Arr = [int;2]\ng : Arr = [3,4]\nfn main()->int:\n    return g[1]\n",
         4,
     ),
     (
         "alias_array_global_no_init",
-        "type Arr = [int;2];\ng : Arr;\nfn main()->int{ g[1] = 7; return g[1]; }",
+        "type Arr = [int;2]\ng : Arr\nfn main()->int:\n    g[1] = 7\n    return g[1]\n",
         7,
     ),
 ]

@@ -102,7 +102,7 @@ def test_hover_and_definition():
     #       5:     x := add(1, 2);
     #       6:     return x;
     #       7: }
-    src = "fn add(a: int, b: int) -> int {\n    return a + b;\n}\n\nfn main() -> int {\n    x := add(1, 2);\n    return x;\n}\n"
+    src = "fn add(a: int, b: int) -> int:\n    return a + b\n\nfn main() -> int:\n    x := add(1, 2)\n    return x\n"
     # 注意：didOpen 不能用 send()——它自带 read_frame 会吞掉 publishDiagnostics
     # 帧（brief 原文 send()+read_frame() 双读会永久阻塞）；直接写帧再读一帧。
     body = json.dumps({"jsonrpc": "2.0", "method": "textDocument/didOpen",
@@ -140,10 +140,7 @@ def test_completion_and_document_symbol():
     #       9:     poi := add(1, 2);
     #      10:     return @sizeOf(int);
     #      11: }
-    src = ("fn add(a: int, b: int) -> int {\n    return a + b;\n}\n\n"
-           "struct Point { x: int, y: int }\n\n"
-           "enum Color { Red, Green, Blue }\n\n"
-           "fn main() -> int {\n    poi := add(1, 2);\n    return @sizeOf(int);\n}\n")
+    src = ("fn add(a: int, b: int) -> int:\n    return a + b\n\nstruct Point:\n    x: int, y: int\n\nenum Color:\n    Red, Green, Blue\n\nfn main() -> int:\n    poi := add(1, 2)\n    return @sizeOf(int)\n")
     body = json.dumps({"jsonrpc": "2.0", "method": "textDocument/didOpen",
                        "params": {"textDocument": {"uri": uri, "version": 1,
                                                    "text": src}}}).encode()
@@ -202,7 +199,7 @@ def test_semantic_tokens():
     proc = subprocess.Popen([BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     send(proc, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
     uri = "file:///tmp/semantic_test.cr"
-    src = "fn main() -> int { return 42; }"
+    src = "fn main() -> int:\n    return 42\n"
     body = json.dumps({"jsonrpc": "2.0", "method": "textDocument/didOpen",
                        "params": {"textDocument": {"uri": uri, "version": 1,
                                                    "text": src}}}).encode()
@@ -250,7 +247,7 @@ def test_semantic_tokens_multiline():
     proc = subprocess.Popen([BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     send(proc, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
     uri = "file:///tmp/semantic_ml.cr"
-    src = "fn main() -> int {\n    return 42;\n}\n"
+    src = "fn main() -> int:\n    return 42\n"
     body = json.dumps({"jsonrpc": "2.0", "method": "textDocument/didOpen",
                        "params": {"textDocument": {"uri": uri, "version": 1,
                                                    "text": src}}}).encode()
@@ -369,7 +366,7 @@ def test_large_frame_body():
 
     # Keep the request valid while forcing several 4KB stdin refills.
     uri = "file:///tmp/large_frame.cr"
-    text = "fn main() -> int { return 0; }\n" + ("// padding\n" * 600)
+    text = "fn main() -> int:\n    return 0\n" + ("// padding\n" * 600)
     request = {"jsonrpc": "2.0", "method": "textDocument/didOpen",
                "params": {"textDocument": {"uri": uri, "version": 1,
                                               "text": text}}}
@@ -450,26 +447,14 @@ def main() -> int:
     print(f"lsp suite: ALL PASS ({len(TESTS)} tests)")
     return 0
 
-SAMPLE = 'fn main() -> int { return 42; }'
-BAD = 'fn main() -> int { return ; }'
+SAMPLE = 'fn main() -> int:\n    return 42\n'
+BAD = 'fn main() -> int:\n    return\n'
 
 # 桥接缓存跨请求失效回归（R2 P2a Task 3 评审 Critical）——两版只差 `a` 的元素型：
 # V1 `[int;3]` → 新进程 rc=0（ok）；V2 `[bool;3]` → 新进程 1 条 error[TA01] Assignment
 # type mismatch。两次 didOpen 之间类型行号被复用（同 URI 重开），故缓存不失效即漏报。
-BRIDGE_V1 = ("fn f() -> int {\n"
-             "    a : [int;3] = [1,2,3];\n"
-             "    b : [int;3], mut = [4,5,6];\n"
-             "    b = a;\n"
-             "    return 0;\n"
-             "}\n"
-             "fn main() -> int { return f(); }\n")
-BRIDGE_V2 = ("fn f() -> int {\n"
-             "    a : [bool;3] = [true,false,true];\n"
-             "    b : [int;3], mut = [4,5,6];\n"
-             "    b = a;\n"
-             "    return 0;\n"
-             "}\n"
-             "fn main() -> int { return f(); }\n")
+BRIDGE_V1 = ("fn f() -> int:\n    a : [int;3] = [1,2,3]\n    b : [int;3], mut = [4,5,6]\n    b = a\n    return 0\nfn main() -> int:\n    return f()\n")
+BRIDGE_V2 = ("fn f() -> int:\n    a : [bool;3] = [true,false,true]\n    b : [int;3], mut = [4,5,6]\n    b = a\n    return 0\nfn main() -> int:\n    return f()\n")
 
 if __name__ == "__main__":
     sys.exit(main())

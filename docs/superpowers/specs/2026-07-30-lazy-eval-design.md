@@ -46,17 +46,16 @@
 
 ```core
 // checker.cr: 函数注册时分析函数体
-fn is_pure_func(func_node: int) -> int {
+fn is_pure_func(func_node: int) -> int:
     // 扫描函数体
     // 如果有 IO/FFI/unsafe 调用 → 返回 0
     // 如果全为纯计算 → 返回 1
-}
 ```
 
 存储在 `g_funcs` 的新字段中：
 
 ```core
-OFF_FN_ISPURE : int = 32;  // 新字段，1=纯函数
+OFF_FN_ISPURE : int = 32  // 新字段，1=纯函数
 ESZ_FN 增长为 40
 ```
 
@@ -81,8 +80,8 @@ ESZ_FN 增长为 40
 ### 新增 IR 操作
 
 ```core
-IR_LAZY_THUNK  : int = 46;  // dest=thunk_var, s1=expr_var — 包装为惰性 thunk
-IR_LAZY_FORCE  : int = 47;  // dest=val_var, s1=thunk_var — 强制求值
+IR_LAZY_THUNK  : int = 46  // dest=thunk_var, s1=expr_var — 包装为惰性 thunk
+IR_LAZY_FORCE  : int = 47  // dest=val_var, s1=thunk_var — 强制求值
 ```
 
 ### Thunk 表示

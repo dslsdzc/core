@@ -241,24 +241,17 @@ CASES = [
 ]
 
 SRCS = {
-    "t1_add": "fn main() -> int {\n    a := 2000000000;\n    b := 2000000000;\n"
-              "    c := a + b;\n    return c;\n}\n",
-    "t2_add_overflow": "fn main() -> int {\n    x : ., mut = 4611686018427387904;\n"
-                       "    x = x + 4611686018427387904;\n"
-                       "    r := syscall3(1, 1, x, 16);\n    return r;\n}\n",
+    "t1_add": "fn main() -> int:\n    a := 2000000000\n    b := 2000000000\n    c := a + b\n    return c\n",
+    "t2_add_overflow": "fn main() -> int:\n    x : ., mut = 4611686018427387904\n    x = x + 4611686018427387904\n    r := syscall3(1, 1, x, 16)\n    return r\n",
     "t3_bigfunc": None,  # Python 生成（250 次 x = x + 1）
-    "t4_sub_overflow": "fn main() -> int {\n    x : ., mut = 4611686018427387904;\n"
-                       "    x = x - -4611686018427387904;\n"   # 2^62 − (−2^62) = 2^63
-                       "    r := syscall3(1, 1, x, 16);\n    return r;\n}\n",
-    "z1_noarith": "fn main() -> int {\n    return 7;\n}\n",
-    "z2_copy": "fn main() -> int {\n    a := 123456;\n    b := a;\n"
-               "    c := b;\n    return 100;\n}\n",
-    "z3_branch": "fn main() -> int {\n    x : ., mut = 0;\n"
-                 "    while x > 0 {\n        x = 0;\n    }\n    return 9;\n}\n",
+    "t4_sub_overflow": "fn main() -> int:\n    x : ., mut = 4611686018427387904\n    x = x - -4611686018427387904\n    r := syscall3(1, 1, x, 16)\n    return r\n",
+    "z1_noarith": "fn main() -> int:\n    return 7\n",
+    "z2_copy": "fn main() -> int:\n    a := 123456\n    b := a\n    c := b\n    return 100\n",
+    "z3_branch": "fn main() -> int:\n    x : ., mut = 0\n    while x > 0:\n        x = 0\n    return 9\n",
 }
-SRCS["t3_bigfunc"] = ("fn main() -> int {\n    x : ., mut = 0;\n"
-                      + "\n".join("    x = x + 1;" for _ in range(250))
-                      + "\n    return x;\n}\n")
+SRCS["t3_bigfunc"] = ("fn main() -> int:\n    x : ., mut = 0\n"
+                      + "\n".join("    x = x + 1" for _ in range(250))
+                      + "\n    return x\n")
 
 
 def _selftest_failclosed_paths():

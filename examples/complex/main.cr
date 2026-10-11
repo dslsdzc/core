@@ -1,37 +1,33 @@
-struct Point {
+struct Point:
     x: int,
     y: int,
-}
 
-impl Point {
-    fn sum(self: Point) -> int {
-        return self.x + self.y;
-    }
-    fn scale(self: Point, factor: int) -> int {
-        return (self.x + self.y) * factor;
-    }
-}
+impl Point:
+    fn sum(self: Point) -> int:
+        return self.x + self.y
+    fn scale(self: Point, factor: int) -> int:
+        return (self.x + self.y) * factor
 
-fn sum_to(n: int) -> int {
-    i : ., mut = 1;
-    s : ., mut = 0;
-    loop {
-        if i > n { break; }
-        s = s + i;
-        i = i + 1;
-    }
-    return s;
-}
+fn sum_to(n: int) -> int:
+    i : ., mut = 1
+    s : ., mut = 0
+    loop:
+        if i > n:
+            break
+        s = s + i
+        i = i + 1
+    return s
 
-fn max(a: int, b: int) -> int {
-    if a > b { return a; } else { return b; }
-}
+fn max(a: int, b: int) -> int:
+    if a > b:
+        return a
+    else:
+        return b
 
-fn main() -> int {
-    p := = Point { x = 10, y = 20 };
-    s := = p.sum();
-    scaled := = p.scale(3);
-    loop_val := = sum_to(5);
-    biggest := = max(s, loop_val);
-    return biggest + scaled;
-}
+fn main() -> int:
+    p := = Point { x = 10, y = 20 }
+    s := = p.sum()
+    scaled := = p.scale(3)
+    loop_val := = sum_to(5)
+    biggest := = max(s, loop_val)
+    return biggest + scaled

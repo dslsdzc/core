@@ -60,22 +60,19 @@ FNV_PRIME = 1099511628211
 M64 = 1 << 64
 
 PROBE = """// cache identity probe (tests/selfhost/test_cache_identity.py)
-fn alpha(a: int, b: int) -> int {
-    x := a + b;
-    y := x * 2;
-    z := y - a;
-    return z;
-}
+fn alpha(a: int, b: int) -> int:
+    x := a + b
+    y := x * 2
+    z := y - a
+    return z
 
-fn beta(p: int) -> int {
-    m := p + 1;
-    n := m * m;
-    return n;
-}
+fn beta(p: int) -> int:
+    m := p + 1
+    n := m * m
+    return n
 
-fn main() -> int {
-    return alpha(3, 4) + beta(5);
-}
+fn main() -> int:
+    return alpha(3, 4) + beta(5)
 """
 
 
@@ -287,11 +284,7 @@ def main():
         opt_fd, opt_name = tempfile.mkstemp(suffix="_cacheid_opt.cr")
         opt_src = pathlib.Path(opt_name)
         with os.fdopen(opt_fd, "w") as f:
-            f.write("// optional-using probe (batch 8; cache must stay OFF)\n"
-                    "fn alpha(x: int?, y: int) -> int {\n"
-                    "    return match x { Some(v) => { return v + y; } None => { return y; } };\n"
-                    "}\n"
-                    "fn main() -> int { return alpha(None, 1) - 1; }\n")
+                        f.write("// optional-using probe (batch 8; cache must stay OFF)\nfn alpha(x: int?, y: int) -> int:\n    return match x:\n        Some(v) => v + y\n        none => y\nfn main() -> int:\n    return alpha(none, 1) - 1\n")
         opt_prefix = str(opt_src).replace("/", "_")
         try:
             before = len(list(CACHE_DIR.glob(f"{opt_prefix}::*.cir")))

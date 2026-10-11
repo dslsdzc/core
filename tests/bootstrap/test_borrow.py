@@ -42,40 +42,36 @@ def test(src, desc, expect_errors):
 
 # Immutable borrow should prevent use of original
 test('''
-fn main() -> int {
-    x := 10;
-    r := &x;
-    return x;
-}
+fn main() -> int:
+    x := 10
+    r := &x
+    return x
 ''', 'immutable borrow then use original', True)
 
 # Mutable borrow should prevent use of original
 test('''
-fn main() -> int {
-    x : ., mut = 10;
-    rm := &mut x;
-    return x;
-}
+fn main() -> int:
+    x : ., mut = 10
+    rm := &mut x
+    return x
 ''', 'mut borrow then use original', True)
 
 # Multiple immutable borrows are allowed
 test('''
-fn main() -> int {
-    x := 10;
-    r1 := &x;
-    r2 := &x;
-    return *r1 + *r2;
-}
+fn main() -> int:
+    x := 10
+    r1 := &x
+    r2 := &x
+    return *r1 + *r2
 ''', 'multiple immutable borrows allowed', False)
 
 # Immutable borrow then mutable borrow should fail
 test('''
-fn main() -> int {
-    x : ., mut = 10;
-    r1 := &x;
-    r2 := &mut x;
-    return 0;
-}
+fn main() -> int:
+    x : ., mut = 10
+    r1 := &x
+    r2 := &mut x
+    return 0
 ''', 'immutable then mutable borrow forbidden', True)
 
 print(f"\n{passed}/{passed + failed} passed", end="")

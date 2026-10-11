@@ -203,33 +203,33 @@ fn purity_selftest_run() -> int:
     total : ., mut = 0
 
     // 用例程序：正控（含传递正控）+ 负控①-⑥（含 SCC 互递归 + 有效应泛型）
-    src := "fn pure_add(a: int, b: int) -> int { return a + b; }\n"
-    src = src + "fn pure_caller(a: int, b: int) -> int { return pure_add(a, b); }\n"
-    src = src + "fn effect() { st : ., mut = 0; st = 1; }\n"
-    src = src + "fn call_effect() { effect(); }\n"
-    src = src + "extern fn ext_probe(x: int) -> int;\n"
-    src = src + "fn call_extern(x: int) -> int { return ext_probe(x); }\n"
-    src = src + "fn call_builtin(x: int) -> int { return load64(x); }\n"
-    src = src + "fn self_rec(n: int) -> int { if n <= 0 { return 0; } return self_rec(n - 1); }\n"
-    src = src + "fn mut_rec_a(n: int) -> int { if n <= 0 { return 0; } return mut_rec_b(n - 1); }\n"
-    src = src + "fn mut_rec_b(n: int) -> int { if n <= 0 { return 0; } return mut_rec_a(n - 1); }\n"
-    src = src + "fn id[T](x: T) -> T { return x; }\n"
-    src = src + "fn use_id(x: int) -> int { return id(x); }\n"
-    src = src + "fn gid[T](x: T) -> T { gst : ., mut = 0; gst = 1; return x; }\n"
-    src = src + "fn use_gid(x: int) -> int { return gid(x); }\n"
+    src := "fn pure_add(a: int, b: int) -> int:\n    return a + b\n"
+    src = src + "fn pure_caller(a: int, b: int) -> int:\n    return pure_add(a, b)\n"
+    src = src + "fn effect():\n    st : ., mut = 0\n    st = 1\n"
+    src = src + "fn call_effect():\n    effect()\n"
+    src = src + "extern fn ext_probe(x: int) -> int\n"
+    src = src + "fn call_extern(x: int) -> int:\n    return ext_probe(x)\n"
+    src = src + "fn call_builtin(x: int) -> int:\n    return load64(x)\n"
+    src = src + "fn self_rec(n: int) -> int:\n    if n <= 0:\n        return 0\n    return self_rec(n - 1)\n"
+    src = src + "fn mut_rec_a(n: int) -> int:\n    if n <= 0:\n        return 0\n    return mut_rec_b(n - 1)\n"
+    src = src + "fn mut_rec_b(n: int) -> int:\n    if n <= 0:\n        return 0\n    return mut_rec_a(n - 1)\n"
+    src = src + "fn id[T](x: T) -> T:\n    return x\n"
+    src = src + "fn use_id(x: int) -> int:\n    return id(x)\n"
+    src = src + "fn gid[T](x: T) -> T:\n    gst : ., mut = 0\n    gst = 1\n    return x\n"
+    src = src + "fn use_gid(x: int) -> int:\n    return gid(x)\n"
     // state 链面用例（行为级）：效应调用夹在两 store 之间 / 纯调用同形 / 循环
-    src = src + "fn chain_effect() -> int { a : ., mut = 0; a = 1; effect(); a = 2; return a; }\n"
-    src = src + "fn chain_pure() -> int { a : ., mut = 0; a = 1; b := pure_add(a, 1); a = 2; return a + b; }\n"
-    src = src + "fn chain_loop() -> int { acc : ., mut = 0; i : ., mut = 0; loop { if i >= 3 { break; } acc = acc + 1; i = i + 1; } return acc; }\n"
+    src = src + "fn chain_effect() -> int:\n    a : ., mut = 0\n    a = 1\n    effect()\n    a = 2\n    return a\n"
+    src = src + "fn chain_pure() -> int:\n    a : ., mut = 0\n    a = 1\n    b := pure_add(a, 1)\n    a = 2\n    return a + b\n"
+    src = src + "fn chain_loop() -> int:\n    acc : ., mut = 0\n    i : ., mut = 0\n    loop:\n        if i >= 3:\n            break\n        acc = acc + 1\n        i = i + 1\n    return acc\n"
     // Task 2 用例：① 效应调用双调（验收例：两个 CALL 都必须进链）+ 同形纯调用
     // 负控；② IR_CALL_EXTERN / IR_SPAWN / IR_YIELD 三类 Task 2 新入链 opcode
     // ——每例都带前 store（链头播种）与后 store（出边），故期望 touch == 3。
-    src = src + "fn chain_two() -> int { a : ., mut = 0; a = 1; effect(); effect(); b := pure_add(a, 1); a = 2; return a + b; }\n"
-    src = src + "fn chain_extern_op(x: int) -> int { a : ., mut = 0; a = 1; r := ext_probe(a); a = 2; return a + r; }\n"
-    src = src + "fn spawnee(x: int) -> int { return x + 1; }\n"
-    src = src + "fn chain_spawn_op() -> int { a : ., mut = 0; a = 1; r := go i 0..2 spawnee(i); a = 2; return a; }\n"
-    src = src + "flow fn chain_yield_op(n: int) -> int { a : ., mut = 0; a = 1; yield n; a = 2; return a; }\n"
-    src = src + "fn main() -> int { return 0; }\n"
+    src = src + "fn chain_two() -> int:\n    a : ., mut = 0\n    a = 1\n    effect()\n    effect()\n    b := pure_add(a, 1)\n    a = 2\n    return a + b\n"
+    src = src + "fn chain_extern_op(x: int) -> int:\n    a : ., mut = 0\n    a = 1\n    r := ext_probe(a)\n    a = 2\n    return a + r\n"
+    src = src + "fn spawnee(x: int) -> int:\n    return x + 1\n"
+    src = src + "fn chain_spawn_op() -> int:\n    a : ., mut = 0\n    a = 1\n    r := go i 0..2 spawnee(i)\n    a = 2\n    return a\n"
+    src = src + "flow fn chain_yield_op(n: int) -> int:\n    a : ., mut = 0\n    a = 1\n    yield n\n    a = 2\n    return a\n"
+    src = src + "fn main() -> int:\n    return 0\n"
 
     if ps_compile(src) != 0:
         print("FAIL ")
