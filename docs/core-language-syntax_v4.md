@@ -42,7 +42,7 @@ catch fail spec
 - `self` 用于方法接收者（`self` / `&self` / `&mut self`）。
 - `Self` 是接口/实现上下文中的类型名。
 - `@comptime` 等 `@` 形式属于内建原语，不作为普通关键字处理。
-- `#check` / `#ensure` / `#invariant` / `#variant` 属于规约指令；`#smt`、`#induct`、`#simp`、`#tag` 等属于证明战术标签。它们都不占用普通代码的全局关键字。
+- `#check` / `#ensure` / `#invariant` / `#variant` 属于规约指令；`#smt`、`#induct`、`#simp` 等属于证明战术标签。它们都不占用普通代码的全局关键字。（**注**：战术标签里**没有**「策略/标签定义」这一形——Core 不引入用户可见的策略定义机制，战术库的扩展走普通模块与导入，见 §10.6/§10.8。）
 - `forall`、`exists`、`result`、`old` 只在规约上下文中具有特殊含义，不作为普通代码的全局保留字。
 - v4 不使用 `move` 关键字。
 
@@ -824,9 +824,9 @@ type Point3 = (dex, dex, dex)
 
 ## 十、规约
 
-规约直接写在 `.cr` 中，不存在独立的 `.corespec` / `.csp` 源语言。规约只描述不能从实现唯一恢复、或需要主动保证的性质；能够从 HDFG 自动推导的性质不要求用户重复标注。`#` 同时承载规约指令与证明战术标签：前者产生证明目标，后者向证明引擎提供能力、领域知识与搜索约束。`#tag` 用于定义可复用的证明策略，不建立第二套宏语言。
+规约直接写在 `.cr` 中，不存在独立的 `.corespec` / `.csp` 源语言。规约只描述不能从实现唯一恢复、或需要主动保证的性质；能够从 HDFG 自动推导的性质不要求用户重复标注。`#` 同时承载规约指令与战术标签：前者产生证明目标，后者向证明引擎提供能力、领域知识与搜索约束。
 
-### 10.1 `#check` / `#ensure`
+### 10.1 规约指令 `#check` / `#ensure`
 
 函数规约位于函数 layout region 的开头：
 
@@ -855,6 +855,8 @@ fn transfer(from: &mut Account, to: &mut Account, amount: int):
     to.balance += amount
 ```
 
+`#check` / `#ensure` 是函数契约的一部分，不是附加的独立定理声明。证明一个函数，就是证明其前置条件蕴含后置条件。
+
 ### 10.2 循环规约 `#invariant` / `#variant`
 
 循环不变量和终止度量写在循环 region 开头：
@@ -876,14 +878,50 @@ loop:
 - `#invariant(expr)`：每次进入循环与完成一次迭代后都必须保持的性质。
 - `#variant(expr)`：用于终止性证明的递减度量。
 
-### 10.3 `spec fn`
+### 10.3 可复用命题与纯函数
+
+Core **不引入 `spec fn`**。**所有函数都是 `fn`**。规约表达式中可以调用任何被编译器判定为**纯、终止、可判定**的函数。纯性由 HDFG 自动推导，不需要用户标记。
 
 ```core
-spec fn valid(x: int) -> bool:
+fn valid(x: int) -> bool:
     return x >= 0
+
+fn divide(a: int, b: int) -> int?:
+    #check(b != 0)
+    #ensure(result != none)
+
+    if b == 0:
+        return none
+
+    return a / b
 ```
 
-`spec fn` 使用与普通函数相同的 layout 和显式 `return` 规则，可以被 `#check`、`#ensure`、`#invariant` 等规约表达式调用。
+`valid` 是普通 `fn`，但编译器证明它纯、终止、可判定，因此可以在 `#check` / `#ensure` / `#invariant` 中调用：
+
+```core
+#ensure(forall(i: int) => i >= 0 ==> valid(i))
+```
+
+如果某个函数有副作用、不终止或不可判定，就不能出现在规约中，编译器直接报错。用户不需要主动标记 spec。
+
+函数契约本身就是可复用的命题。已证明的函数可以通过 `#apply` / `#rewrite` 在其他证明中引用：
+
+```core
+fn append_assoc(xs: List, ys: List, zs: List) -> bool:
+    #ensure(append(append(xs, ys), zs) == append(xs, append(ys, zs)))
+    return append(append(xs, ys), zs) == append(xs, append(ys, zs))
+
+fn append_nil(xs: List) -> bool:
+    #apply(append_assoc)
+    #ensure(append(xs, Nil) == xs)
+    return append(xs, Nil) == xs
+```
+
+`#apply(append_assoc)` 引用的是已证明的函数契约，即全称命题：
+
+```text
+forall(xs: List, ys: List, zs: List) => append(append(xs, ys), zs) == append(xs, append(ys, zs))
+```
 
 ### 10.4 量词与蕴含
 
@@ -901,6 +939,8 @@ forall(name: Type) => SpecExpr
 exists(name: Type) => SpecExpr
 ```
 
+规约表达式中的自由变量自动泛化为全称闭包。例如 `#ensure(append(xs, Nil) == xs)` 自动等价于 `forall(xs: List) => append(xs, Nil) == xs`。
+
 `==>` 是规约层蕴含运算符，优先级低于 `||`，右结合：
 
 ```text
@@ -913,12 +953,110 @@ A ==> B ==> C
 A ==> (B ==> C)
 ```
 
-### 10.5 证明自动化与复杂度边界
+### 10.5 战术标签
 
-`spec fn` 描述**要证明什么**；证明战术标签描述证明引擎**可以使用什么能力、知识或搜索约束**。普通情况下不要求用户手写战术：验证器先根据目标结构自动选择适用能力，只有无法低成本唯一决定策略、需要缩小搜索空间或需要显式授权昂贵证明时才写标签。
+战术标签不是命令式 proof script。它们向证明引擎提供候选能力、领域提示或搜索限制；证明引擎根据目标结构、成本模型和已推导事实自动选择实际执行顺序，并可以在更便宜的方法已经关闭目标时忽略未使用的提示。
+
+**提示标签**
+
+提示标签缩小证明搜索范围，验证器可以忽略。
+
+```text
+#induct(x)        指定归纳对象
+#cases(x)         指定情况分析对象
+#unfold(f)        指定展开函数
+#rewrite(lemma)   指定重写引理
+#apply(lemma)     指定应用引理
+#exists(witness)  提供存在量词见证
+```
+
+示例：
 
 ```core
-spec fn distributive(a: int, b: int, c: int) -> bool:
+fn append_nil(xs: List) -> bool:
+    #induct(xs)
+    #simp
+    #ensure(append(xs, Nil) == xs)
+    return append(xs, Nil) == xs
+```
+
+`#induct(xs)` 的含义是：如果当前证明需要归纳，将 `xs` 作为明确的归纳对象；它不要求验证器立刻执行归纳。如果化简或已有定理已经关闭目标，则不需要实际执行归纳。
+
+**语义范围标签**
+
+语义范围标签读取 HDFG 语义信息，将证明问题缩到有限图切片。这些标签只能读取、裁剪和分析 HDFG，并产生子目标、可验证事实或证书；不能修改源程序、HDFG 或 backend mapping。
+
+```text
+#graph.provenance(...)
+#graph.dependencies(...)
+#graph.reachability(...)
+#graph.scc(...)
+#graph.region(...)
+#graph.effects(...)
+#graph.alias(...)
+#graph.state(...)
+#graph.dataflow(...)
+#graph.slice(...)
+```
+
+示例：
+
+```core
+fn output_independent(secret: ., output: .) -> bool:
+    #graph.dependencies(secret, output)
+    #ensure(no_dependency(secret, output))
+    return no_dependency(secret, output)
+```
+
+如果相应分析属于已证明最坏情况线性的 ONLINE 能力，它可以在普通构建中生成语义事实；如果其证明过程需要非线性搜索，则只能在 VERIFY 阶段消费这些事实。
+
+**判定与求解标签**
+
+判定与求解标签提供专用证明能力。**它们只能在 VERIFY 阶段执行。**
+
+```text
+#ring
+#field
+#lia
+#lra
+#nia
+#nra
+#bitvec
+#congruence
+#sat
+#smt
+```
+
+这些名字描述 proof capability，不意味着它们都能进入 ONLINE。每个战术必须登记自己的执行等级、适用目标、证据形式和成本信息。
+
+`#smt` 是一个 VERIFY 战术标签：
+
+```core
+#smt
+fn bounded(x: int, lo: int, hi: int) -> bool:
+    #ensure(x >= lo && x <= hi)
+    return x >= lo && x <= hi
+```
+
+它表示当前目标允许或优先使用 SMT 证明能力；`corec build` 仍不会因此启动 SMT。
+
+**预算标签**
+
+预算标签只约束 VERIFY 搜索，不改变普通 `corec build` 的线性复杂度边界。
+
+```text
+#budget(fast)
+#budget(normal)
+#budget(deep)
+```
+
+### 10.6 证明自动化与复杂度边界
+
+`fn` 描述要证明什么；战术标签描述证明引擎可以使用什么能力、知识或搜索约束。普通情况下不要求用户手写战术：验证器先根据目标结构自动选择适用能力，只有无法低成本唯一决定策略、需要缩小搜索空间或需要显式授权昂贵证明时才写标签。
+
+```core
+fn distributive(a: int, b: int, c: int) -> bool:
+    #ensure(a * (b + c) == a * b + a * c)
     return a * (b + c) == a * b + a * c
 ```
 
@@ -949,7 +1087,7 @@ corec build
     HDFG / CIR / codegen
 
 corec verify
-    已生成的语义对象 + spec fn
+    已生成的语义对象 + 函数契约
       ↓
     ONLINE + VERIFY 战术
       ↓
@@ -959,170 +1097,6 @@ corec verify
 ```
 
 已经验证的证明结果可以作为带依赖身份的 proof artifact 缓存；后续普通构建可以读取和校验其身份，但不能为了重新得到该结果而隐式启动 VERIFY 搜索。
-
-### 10.6 证明战术标签
-
-证明战术标签不是命令式 proof script。它们向证明引擎提供**候选能力、领域提示或搜索限制**；证明引擎仍可以根据目标结构选择实际执行顺序，并可以在更便宜的方法已经关闭目标时忽略未使用的提示。
-
-例如：
-
-```core
-spec fn append_nil(xs: List) -> bool:
-    #induct(xs)
-    return append(xs, Nil) == xs
-```
-
-`#induct(xs)` 的含义是：如果当前证明需要归纳，将 `xs` 作为明确的归纳对象；它不要求验证器在读取该行时立刻执行归纳。如果化简或已有定理已经关闭目标，则不需要实际执行归纳。
-
-基础战术库可以提供：
-
-```text
-#intro
-#exact(...)
-#apply(...)
-#cases(...)
-#induct(...)
-#rewrite(...)
-#simp
-#unfold(...)
-#constructor
-#split
-#exists(...)
-#contradiction
-#auto
-```
-
-专用判定与求解战术可以提供：
-
-```text
-#ring
-#field
-#lia
-#lra
-#nia
-#nra
-#bitvec
-#congruence
-#sat
-#smt
-```
-
-这些名字描述 proof capability，不意味着它们都能进入 ONLINE。每个战术必须登记自己的执行等级、适用目标、证据形式和成本信息。
-
-`#smt` 因此不再被定义为普通编译阶段的“证明通道开关”，而是一个 VERIFY 战术标签：
-
-```core
-#smt
-spec fn bounded(x: int, lo: int, hi: int) -> bool:
-    return x >= lo && x <= hi
-```
-
-它表示当前目标允许或优先使用 SMT 证明能力；`corec build` 仍不会因此启动 SMT。
-
-### 10.7 Core 语义战术
-
-Core 的战术库不仅包含传统逻辑战术，还可以直接读取编译器已经拥有的 HDFG 语义信息。语义战术只能**读取、裁剪和分析** HDFG，并产生子目标、可验证事实或证书；不能通过证明标签修改源程序、HDFG 或 backend mapping。
-
-典型能力：
-
-```text
-#graph.provenance(...)
-#graph.dependencies(...)
-#graph.reachability(...)
-#graph.scc(...)
-#graph.region(...)
-#graph.effects(...)
-#graph.alias(...)
-#graph.state(...)
-#graph.dataflow(...)
-#graph.slice(...)
-
-#derive(bounds)
-#derive(pure)
-#derive(deterministic)
-#derive(terminating)
-#derive(no_alias)
-#derive(noninterference)
-```
-
-例如：
-
-```core
-spec fn output_independent(secret: ., output: .) -> bool:
-    #graph.dependencies(secret, output)
-    return no_dependency(secret, output)
-```
-
-如果相应分析属于已证明最坏情况线性的 ONLINE 能力，它可以在普通构建中生成语义事实；如果其证明过程需要非线性搜索，则只能在 VERIFY 阶段消费这些事实。
-
-编译器自动推导的 `pure`、`deterministic`、`terminating`、`no_alloc`、`safe_index` 等性质首先属于内部 FactDB / 验证结果，不要求用户在普通源码中重复书写同名标签。只有需要给证明引擎增加无法自动恢复的信息时才使用显式战术标签。
-
-### 10.8 `#tag` 战术策略
-
-`#tag` 定义一个可复用的**证明策略（proof strategy）**。它不是宏，不进行源码文本展开、AST 替换或 hygienic substitution；标签体声明的是该策略可提供的战术能力和搜索约束。
-
-无参数策略：
-
-```core
-#tag arithmetic:
-    #simp
-    #ring
-    #lia
-    #smt
-```
-
-参数化策略：
-
-```core
-#tag structural(x):
-    #induct(x)
-    #simp
-    #auto
-```
-
-使用：
-
-```core
-spec fn append_nil(xs: List) -> bool:
-    #structural(xs)
-    return append(xs, Nil) == xs
-```
-
-`#tag` 的标签体是**能力集合**，不是严格的命令序列。对某个多项式恒等式，`#arithmetic` 可能只实际运行 `ring`；对另一个目标可能先化简再进入 SMT。验证器依据目标分类、适用条件、确定性与成本模型选择实际路径。
-
-目标语法：
-
-```text
-TagDecl      = '#tag' IDENT ['(' [TagParamList] ')'] ':' Layout
-TagParamList = IDENT (',' IDENT)*
-TagUse       = '#' TagPath ['(' [ArgList] ')']
-```
-
-`#tag` 参数不写普通 Core 运行时类型。参数的 proof-semantic role 由其在组成战术中的使用方式推导；这些内部角色不形成 `Goal<T>`、`Proof<T>`、`InductionSubject` 等用户可见类型。
-
-例如：
-
-```core
-#tag structural(x):
-    #induct(x)
-    #simp
-```
-
-`#induct(x)` 约束 `x` 必须能够作为归纳对象；该要求在策略使用位置进行静态检查。
-
-`#tag` 的硬规则：
-
-- 只允许出现在顶层；标签名位于独立的 tactic/tag namespace。
-- 内建战术名不能被用户 `#tag` 覆盖。
-- 标签体只能引用证明战术、证明提示或其他 `#tag` 策略。
-- `#check`、`#ensure`、`#invariant`、`#variant` 不允许进入 `#tag`；命题复用使用 `spec fn`。
-- 会改变信任边界的 `axiom`、`assume`、`admit` 一类能力不得被 `#tag` 隐藏。
-- 编译/优化/映射操作不属于 `#tag`；这类能力继续由普通语言或 `@` 编译/映射控制承担。
-- 自定义策略可以引用其他自定义策略；直接或间接形成递归环时属于静态错误。
-- 策略不产生运行时指令，不单独生成 HDFG 节点。
-- 策略不能把未证明命题变成已证明事实；所有最终结论仍必须具有 CIC 内核可复验的 proof / certificate，或显式受信机制所要求的证据。
-
-### 10.9 战术执行等级与成本传播
 
 每个战术至少登记：
 
@@ -1136,44 +1110,15 @@ required_context
 produced_evidence
 ```
 
-组合策略的执行等级由其成员自动传播：
+组合策略的执行等级由其成员自动传播。但 **Core 不引入用户可见的策略定义机制**；战术库的扩展通过**普通模块和导入**完成。
 
-```text
-class(strategy) = max(class(member tactics))
-```
+编译器自动推导的 `pure`、`deterministic`、`terminating`、`no_alloc`、`safe_index` 等性质首先属于内部 FactDB / 验证结果，不要求用户在普通源码中重复书写同名标签。只有需要给证明引擎增加无法自动恢复的信息时才使用显式战术标签。
 
-例如：
+### 10.7 证明对象与元编程不形成用户类型
 
-```core
-#tag memory_linear:
-    #graph.provenance
-    #graph.region
-```
+Core 不引入 `Fragment<...>`、`Relation`、`Goal<...>`、`Proof<...>`、`Rewrite<...>` 等用户可见元对象类型。证明状态、战术参数角色、证明项、语义切片与重写对象可以存在于验证器内部，但源码仍使用普通 Core 语法、`fn`、`#` 战术标签和 `@` 编译/映射控制表达。
 
-如果两个组成战术都满足 ONLINE 要求，则整个策略仍是 ONLINE。
-
-```core
-#tag algebra:
-    #simp
-    #ring
-    #smt
-```
-
-只要其中存在 VERIFY 战术，则整个策略是 VERIFY；它不能被伪装成普通构建中的线性自动分析。
-
-VERIFY 阶段仍按照成本模型优先选择高适用性、低成本、高确定性的战术，不默认穷举所有候选。
-
-必要时可以提供验证预算提示：
-
-```text
-#budget(fast)
-#budget(normal)
-#budget(deep)
-```
-
-预算只约束 VERIFY 搜索，不改变普通 `corec build` 的线性复杂度边界。
-
-### 10.10 战术库与扩展
+### 10.8 战术库与扩展
 
 战术库可以包含：
 
@@ -1181,7 +1126,6 @@ VERIFY 阶段仍按照成本模型优先选择高适用性、低成本、高确�
 primitive tactics
 semantic tactics
 decision procedures
-strategy tags
 lemma / rewrite databases
 goal classifiers
 reflection procedures
@@ -1199,16 +1143,7 @@ std::proof::memory
 std::proof::concurrency
 ```
 
-第三方战术库继续使用普通 Core 模块与包管理机制，不建立独立的 proof package manager。可见 theorem / lemma 数据库由普通 `import` 范围限制，避免默认把整个生态的规则都送入 proof search。
-
-
-### 10.11 元编程与证明对象不形成用户类型
-
-Core 不引入 `Fragment<...>`、`Relation`、`Goal<...>`、`Proof<...>`、`Rewrite<...>` 等用户可见元对象类型。证明状态、战术参数角色、证明项、语义切片与重写对象可以存在于验证器内部，但源码仍使用普通 Core 语法、`spec fn`、`#` 战术标签和 `@` 编译/映射控制表达。
-
-
-
----
+第三方战术库继续使用**普通 Core 模块与包管理机制**，不建立独立的 proof package manager。可见 theorem / lemma 数据库由普通 `import` 范围限制，避免默认把整个生态的规则都送入 proof search。
 
 ## 十一、并发与执行流
 
