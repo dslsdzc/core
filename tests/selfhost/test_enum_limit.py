@@ -117,36 +117,43 @@ def case_reject(name, source, needles, cmd="build", forbid=()):
 
 
 # ─── 语料构造 ───
+def _body(b: str) -> str:
+    """函数体片段（多行、自带**相对**缩进）⇒ v4 region 体：逐行 +4 空格。"""
+    if not b.endswith("\n"):
+        b += "\n"
+    return "".join(("    " + ln) if ln.strip() else ln for ln in b.splitlines(keepends=True))
+
+
 def enum_src(n, extra="return 0"):
     """n 变体枚举 + main（`extra` = main 体）。"""
     vs = ", ".join(f"V{i}" for i in range(n))
-    return f"enum E{n} {{ {vs} }}\nfn main() -> int {{ {extra}; }}\n"
+    return f"enum E{n}:\n    {vs}\nfn main() -> int:\n{_body(extra)}"
 
 
 def enum_exhaustive_src(n, pick):
     """n 变体枚举 + 全臂 match（返回被选变体下标 ⇒ 逐变体可判值正确）。"""
     vs = ", ".join(f"V{i}" for i in range(n))
     arms = ", ".join(f"V{i} => {i}" for i in range(n))
-    return (f"enum E{n} {{ {vs} }}\n"
-            f"fn main() -> int {{ x := V{pick}(); return match x {{ {arms}, }}; }}\n")
+    return (f"enum E{n}:\n    {vs}\n"
+            f"fn main() -> int:\n    x := V{pick}()\n    return match x:\n        {arms},\n")
 
 
 def enum_missing_arm_src(n):
     """n 变体枚举 + n-1 臂 match（缺最后一变体 ⇒ 真·非穷尽）。"""
     vs = ", ".join(f"V{i}" for i in range(n))
     arms = ", ".join(f"V{i} => {i}" for i in range(n - 1))
-    return (f"enum E{n} {{ {vs} }}\n"
-            f"fn main() -> int {{ x := V0(); return match x {{ {arms}, }}; }}\n")
+    return (f"enum E{n}:\n    {vs}\n"
+            f"fn main() -> int:\n    x := V0()\n    return match x:\n        {arms},\n")
 
 
 def payload_src(n, extra="return 0"):
     ps = ", ".join("int" for _ in range(n))
-    return f"enum P {{ A({ps}), B }}\nfn main() -> int {{ {extra}; }}\n"
+    return f"enum P:\n    A({ps}), B\nfn main() -> int:\n{_body(extra)}"
 
 
 def struct_src(n, extra="return 0"):
     fs = ", ".join(f"f{i}: int" for i in range(n))
-    return f"struct S{n} {{ {fs} }}\nfn main() -> int {{ {extra}; }}\n"
+    return f"struct S{n}:\n    {fs}\nfn main() -> int:\n{_body(extra)}"
 
 
 def main():
@@ -154,46 +161,42 @@ def main():
         # ── 16 = 旧边界（含）：三面全对（回归钉）──
         case_run("enum16_exhaustive_ok", enum_exhaustive_src(16, 9), 9),
         case_run("enum16_decl_only_ok", enum_src(16), 0),
-        case_run("payload16_ok", payload_src(16, "x := B(); return 4"), 4),
+        case_run("payload16_ok", payload_src(16, "x := B()\nreturn 4\n"), 4),
         case_run("struct16_ok",
-                 struct_src(16, "s := S16 { " + ", ".join(f"f{i}: {i}" for i in range(16))
-                            + " }; return s.f15"),
+                 struct_src(16, "s := S16 { " + ", ".join(f"f{i} = {i}" for i in range(16))
+                            + " }\nreturn s.f15\n"),
                  15),
         # ── >16（17/40）：旧 P022/P023 拒绝面的**转正**（死亡证据 = 侧表解除）──
         case_run("enum17_now_ok", enum_exhaustive_src(17, 13), 13),
         case_run("enum40_now_ok", enum_exhaustive_src(40, 33), 33),
-        case_run("payload17_now_ok", payload_src(17, "x := A(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17); return match x { A(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17) => { return a17; } B => { return 0; } }"), 17),
+        case_run("payload17_now_ok", payload_src(17, "x := A(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17)\nreturn match x:\n    A(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17) => a17\n    B => 0\n"), 17),
         case_run("struct17_now_ok",
-                 struct_src(17, "s := S17 { " + ", ".join(f"f{i}: {i}" for i in range(17))
-                            + " }; return s.f16"),
+                 struct_src(17, "s := S17 { " + ", ".join(f"f{i} = {i}" for i in range(17))
+                            + " }\nreturn s.f16\n"),
                  16),
         case_run("struct40_now_ok",
-                 struct_src(40, "s := S40 { " + ", ".join(f"f{i}: {i}" for i in range(40))
-                            + " }; return s.f39"),
+                 struct_src(40, "s := S40 { " + ", ".join(f"f{i} = {i}" for i in range(40))
+                            + " }\nreturn s.f39\n"),
                  39),
         # ── 跨记录完整性（侧表基址不重叠：宽记录 + 邻记录）──
         case_run("enum40_plus_small_ok",
-                 enum_src(40, "v := V39(); return 0") + "enum F3 { X, Y, Z }\n"
-                 "fn g() -> int { w := Z(); return match w { X => { return 1; } Y => { return 2; } Z => { return 3; } }; }\n", 0),
+                 enum_src(40, "v := V39()\nreturn 0\n") + "enum F3:\n    X, Y, Z\nfn g() -> int:\n    w := Z()\n    return match w:\n        X => 1\n        Y => 2\n        Z => 3\n", 0),
         # 记录碰撞敏感面（**判别性**）：大枚举之后声明小枚举 ⇒ 大枚举的**判定面**
         # （穷尽性）仍须正确（侧表基址不重叠的机器抓手）
         case_reject("enum40_then_small_missing_arm_rejected",
-                    enum_src(40, "v := V0(); return 0") + "enum H4 { S, T, U }\n"
-                    "fn hm(x: E40) -> int { return match x { "
-                    + ", ".join(f"V{i} => {{ return {i}; }}" for i in range(39)) + " }; }\n",
+                    enum_src(40, "v := V0()\nreturn 0\n") + "enum H4:\n    S, T, U\n"
+                    "fn hm(x: E40) -> int:\n    return match x:\n        "
+                    + ", ".join(f"V{i} => {i}" for i in range(39)) + ",\n",
                     ["error[TM03]", "missing variant 'V39'"], cmd="check"),
         case_run("enum40_then_small_then_match_big_ok",
-                 enum_src(40, "v := V0(); return 0") + "enum H3 { S, T, U }\n"
-                 "fn hm(x: E40) -> int { return match x { " + ", ".join(f"V{i} => {{ return {i}; }}" for i in range(40)) + " }; }\n"
-                 "fn main3() -> int { return 0; }\n", 0),
+                 enum_src(40, "v := V0()\nreturn 0\n") + "enum H3:\n    S, T, U\n"
+                 "fn hm(x: E40) -> int:\n    return match x:\n        " + ", ".join(f"V{i} => {i}" for i in range(40)) + ",\n"
+                 "fn main3() -> int:\n    return 0\n", 0),
         case_run("enum40_plus_small_match_ok",
-                 enum_src(40, "v := V7(); return 0") + "enum G3 { P, Q, R }\n"
-                 "fn gm(x: G3) -> int { return match x { P => { return 41; } Q => { return 42; } R => { return 43; } }; }\n"
-                 "fn main2() -> int { return 0; }\n", 0),
+                 enum_src(40, "v := V7()\nreturn 0\n") + "enum G3:\n    P, Q, R\nfn gm(x: G3) -> int:\n    return match x:\n        P => 41\n        Q => 42\n        R => 43\nfn main2() -> int:\n    return 0\n", 0),
         case_run("struct40_plus_pair_ok",
-                 struct_src(40, "a := S40 { " + ", ".join(f"f{i}: {i}" for i in range(40)) + " }; return a.f39")
-                 + "struct P2 { x: int, y: int }\n"
-                 "fn h() -> int { p : ., mut = P2 { x: 7, y: 8 }; return p.y; }\n", 39),
+                 struct_src(40, "a := S40 { " + ", ".join(f"f{i} = {i}" for i in range(40)) + " }\nreturn a.f39\n")
+                 + "struct P2:\n    x: int, y: int\nfn h() -> int:\n    p : ., mut = P2 { x = 7, y = 8 }\n    return p.y\n", 39),
         # ── 覆盖位无界（≥63 变体）：穷尽性判定仍正确 ──
         case_run("enum64_exhaustive_ok", enum_exhaustive_src(64, 63), 63 % 256),
         case_run("enum70_exhaustive_ok", enum_exhaustive_src(70, 69), 69),

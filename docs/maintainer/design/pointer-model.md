@@ -1,6 +1,6 @@
 # Core 指针模型:图上的三点验证 pass
 
-> 定位:受众 = 维护者(改/验证三点 pass 的人);状态 = active;出处 = 源码(src/compiler/ptr_analysis.cr、region_check.cr、provenance_verify.cr)——本文描述的是已实现行为,文档与源码冲突时以源码为准,并请更新本文。
+> 定位：受众 = 维护者（改/验证三点 pass 的人）；状态 = active；出处 = 源码（src/compiler/ptr_analysis.cr、region_check.cr、provenance_verify.cr）——本文描述的是已实现行为，文档与源码冲突时以源码为准，并请更新本文。
 > 语义定位:指针安全建立在 HDFG 上,不引入 borrow checker/生命周期标注。地址语义(条目标识 + 偏移)见条款 6(docs/academic/cache-semantics.md);层本体 = 存在格(docs/maintainer/design/materialization-space.md);经典映射见 docs/maintainer/design/region-model.md。
 > 本文 2026-09 重写:三 pass 描述与实现对齐(Andersen 约束求解、逃逸三点检查、双路径边界验证)。
 
@@ -8,7 +8,7 @@
 
 ## 一、问题与方案
 
-C 风格裸指针表达力强但无保障;Rust 用 borrow checker 换安全,代价是学习曲线与表达力。Core 的目标:**指针和 C 一样自由,安全保障不依赖用户标注**——编译器维护完整 HDFG,图中每个值的出生节点记录来源(provenance),每个解引用是 DEREF/STORE_PTR 节点;三点 pass 在图上验证,与类型系统解耦:
+C 风格裸指针表达力强但无保障;Rust 用 borrow checker 换安全,代价是学习曲线与表达力。Core 的目标:**指针和 C 一样自由,安全保障不依赖用户标注**。编译器维护完整 HDFG:图中每个值的出生节点记录来源(provenance),每个解引用是 DEREF/STORE_PTR 节点;三点 pass 在图上验证,与类型系统解耦:
 
 | Pass | 文件 | 功能 |
 |---|---|---|
@@ -28,28 +28,27 @@ C 风格裸指针表达力强但无保障;Rust 用 borrow checker 换安全,代�
 | 子图/SG region | 图锚定的执行域(函数/loop/for/flow/unsafe,见 execution-model.md §二) |
 | 图边界 | 编译器无 provenance 的入口(外部地址、FFI 返回、inline asm)→ unsafe |
 
-## 三、用户可见语法(开发者的形状)
+## 三、用户可见语法(开发者视角)
 
 开发者视角的语法与保证见 docs/developer/syntax.md 指针节;此处只列 pass 输入形状:
 
 ```core
-p := &arr[0];          // REF/ADDR_INDEX → self-pointer
-p = p + n;             // 偏移(不影响 pts;偏移入 g_offsets)
-x := *p;               // DEREF → 读 alloc content
-*p = v;                // STORE_PTR → v 的 pts 写入 alloc content
-q := cast<int*>(p);    // 类型转换(pts 不变,视图变化)
+p := &arr[0]          // REF/ADDR_INDEX → self-pointer
+p = p + n             // 偏移(不影响 pts;偏移入 g_offsets)
+x := *p               // DEREF → 读 alloc content
+*p = v                // STORE_PTR → v 的 pts 写入 alloc content
+q := cast<int*>(p)    // 类型转换(pts 不变,视图变化)
 
-unsafe {
-    mmio := 0x7fff0000 as *int;   // 图边界入口:整数转指针,asp=1
-    *mmio = 42;
-}
+unsafe:
+    mmio := 0x7fff0000 as *int   // 图边界入口:整数转指针,asp=1
+    *mmio = 42
 ```
 
-类型双关(`*(dex*)&i`)不需要 unsafe——地址语义是条目标识 + 偏移(条款 6),经典映射是"字节序列 + 宽度 + 边界",provenance/offset/alloc_size 与类型无关;cast 保留值流,provenance 边不断。判据 = 边界 + 宽度。
+类型双关(`*(dex*)&i`)不需要 unsafe——地址语义是条目标识 + 偏移(条款 6),经典映射是"字节序列 + 宽度 + 边界",provenance/offset/alloc_size 与类型无关;`cast` 保留值流,provenance 边不断。判据 = 边界 + 宽度。
 
 ## 四、Pass 1:PointerAnalysis(ptr_analysis.cr)
 
-**算法**:interprocedural Andersen-style 约束求解(参考 SVF, Sui & Xue CC 2016——inclusion constraints + interprocedural function summaries),在数据流图上跑。规则(源码注释):
+**算法**:在数据流图上跑 interprocedural Andersen-style 约束求解(参考 SVF, Sui & Xue CC 2016——inclusion constraints + interprocedural function summaries)。规则(源码注释):
 
 | 规则 | 触发 | 动作 |
 |---|---|---|
@@ -60,15 +59,15 @@ unsafe {
 | Call | 调用 | 函数摘要传播 + 参数保守处理(interprocedural) |
 
 实现要点:
-- pts 为**位图**(pa_set_bit 等,grow_pa_alloc_nodes 动态扩容)——非逐对象列表
-- **alloc content 跟踪**:g_alloc_pts[alloc_id] 记录"存进该分配块的值集合",DEREF 读它——pointer-induced flow 的实现形态(不是图上物理加边,是位图数据)
-- unsafe 感知:pa_in_unsafe 使 unsafe 域内指针不参与正常约束
+- pts 为**位图**(`pa_set_bit` 等,`grow_pa_alloc_nodes` 动态扩容)——非逐对象列表
+- **alloc content 跟踪**:`g_alloc_pts[alloc_id]` 记录"存进该分配块的值集合",DEREF 读它——pointer-induced flow 的实现形态(不是图上物理加边,是位图数据)
+- unsafe 感知:`pa_in_unsafe` 使 unsafe 域内指针不参与正常约束
 
 按子图独立分析 + 函数摘要跨子图——不需要全程序统一求解。
 
 ## 五、Pass 2:RegionCheck(region_check.cr)
 
-**功能**:逃逸检查——子图 A 分配的内存不能逃逸出 A 的存活域。判定基准 = SG region 区间(enter/nstart/ncount/exit,dataflow.cr 的 sg 表)。
+**功能**:逃逸检查——子图 A 分配的内存不能逃逸出 A 的存活域。判定基准 = SG region 区间(`enter`/`nstart`/`ncount`/`exit`,dataflow.cr 的 sg 表)。
 
 四点判定(2026-09-20 修订为与实现一致;实现见 `region_check.cr`,共用单源判定 `rc_var_dead`):
 
@@ -87,7 +86,7 @@ unsafe {
 
 **功能**:DEREF/STORE_PTR 越界检查——偏移 + 访问宽度 vs 分配大小。
 
-处理(per DEREF/STORE_PTR,per 函数 provenance_verify_func):
+处理(per DEREF/STORE_PTR,per 函数 `provenance_verify_func`):
 1. 从 s1(指针变量)取 pts 目标集合;经 g_offsets 取累计偏移
 2. 对每个目标 alloc:get_alloc_size(编译期已知大小)且偏移可静态定 → `0 <= off && off + width <= alloc_size`?通过则**编译期证明**;越界 → 编译错误(EC_TU_DEREF 错误码)
 3. 未知大小或动态偏移 → **运行时检查**:编码 allocation base/size/width,`sub+cmp+jae+ud2` 序列(panic);多 pts 目标时按目标定位实际 base(runtime_targets),不再用页内偏移近似(2026-08-16 落地)
@@ -107,9 +106,9 @@ unsafe {
 **ALLOC_AT(声明式放置,2026-08-13 定稿)**:`alloc_at(addr, size, align)` 是声明式进图节点——固定地址区域以(地址+大小+对齐)声明,与 ALLOC 同路径获得 provenance,之后全图追踪、照常验证:
 
 ```core
-mmio := alloc_at(0x7fff0000, 4096, align(4096));  // MMIO 页
-*mmio = 42;              // safe 代码即可,边界内照常验证
-p := mmio + 4096;        // 越界 → 编译错误或运行时 check
+mmio := alloc_at(0x7fff0000, 4096, align(4096))  // MMIO 页
+*mmio = 42              // safe 代码即可,边界内照常验证
+p := mmio + 4096        // 越界 → 编译错误或运行时 check
 ```
 
 声明是唯一信任点(等价受控图边界入口);与 2026-08-10 定论不冲突(0x 字面量仍只作 unsafe 外部入口)。

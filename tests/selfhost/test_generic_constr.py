@@ -166,78 +166,137 @@ def case_ccr_names(name, source, present, absent=()):
 # A/B：本质轴约束（函数侧 + 结构侧 + 枚举侧）
 # 返回型 = T（**既有语义约束**：泛型体内 `return a`（a: T）对**具体**返回型会 TF01——实测
 # 新旧一致，非本批面）；调用点 int 返回 T 实例化的结果
-FUNC_INT_CONSTR = """fn f[T: int](a: T) -> T { return a; }
-fn main() -> int { return f(1); }
+FUNC_INT_CONSTR = """fn f[T: int](a: T) -> T:
+    return a
+fn main() -> int:
+    return f(1)
 """
-FUNC_INT_CONSTR_BAD = """fn f[T: int](a: T) -> T { return a; }
-fn main() -> int { return f("s"); }
+FUNC_INT_CONSTR_BAD = """fn f[T: int](a: T) -> T:
+    return a
+fn main() -> int:
+    return f("s")
 """
-STRUCT_INT_CONSTR = """struct Box[T: int] { v: T }
-fn g(b: Box[int]) -> int { return b.v; }
-fn main() -> int { return g(Box { v: 7 }); }
+STRUCT_INT_CONSTR = """struct Box[T: int]:
+    v: T
+fn g(b: Box[int]) -> int:
+    return b.v
+fn main() -> int:
+    return g(Box { v= 7 })
 """
-STRUCT_INT_CONSTR_BAD = """struct Box[T: int] { v: T }
-struct S { a: int }
-fn g(b: Box[S]) -> int { return 0; }
-fn main() -> int { return 0; }
+STRUCT_INT_CONSTR_BAD = """struct Box[T: int]:
+    v: T
+struct S:
+    a: int
+fn g(b: Box[S]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
-STRUCT_INT_CONSTR_STR_BAD = """struct Box[T: int] { v: T }
-fn g(b: Box[string]) -> int { return 0; }
-fn main() -> int { return 0; }
+STRUCT_INT_CONSTR_STR_BAD = """struct Box[T: int]:
+    v: T
+fn g(b: Box[string]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
-ENUM_INT_CONSTR_BAD = """enum EBox[T: int] { V(T), N }
-fn g(b: EBox[string]) -> int { return 0; }
-fn main() -> int { return 0; }
+ENUM_INT_CONSTR_BAD = """enum EBox[T: int]:
+    V(T), N
+fn g(b: EBox[string]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
 # 无约束泛型（对照：约束面落地不得波及无约束声明）
-STRUCT_NO_CONSTR = """struct Wrap[T] { v: T }
-struct S { a: int }
-fn g(b: Wrap[S]) -> int { return b.v.a; }
-fn main() -> int { return g(Wrap { v: S { a: 3 } }); }
+STRUCT_NO_CONSTR = """struct Wrap[T]:
+    v: T
+struct S:
+    a: int
+fn g(b: Wrap[S]) -> int:
+    return b.v.a
+fn main() -> int:
+    return g(Wrap { v= S { a= 3 } })
 """
 # C：用户接口约束 = P3b 边界（零诊断；函数侧走既有 check_iface，结构侧 = 不判）
-IFACE_LEGACY_OK = """interface Show { fn show(self) -> int; }
-struct S { a: int }
-impl S { fn show(self: S) -> int { return 1; } }
-fn f[T: Show](a: T) -> int { return 0; }
-fn main() -> int { s := S { a: 1 }; return f(s); }
+IFACE_LEGACY_OK = """interface Show:
+    fn show(self) -> int
+struct S:
+    a: int
+impl S:
+    fn show(self: S) -> int:
+        return 1
+fn f[T: Show](a: T) -> int:
+    return 0
+fn main() -> int:
+    s := S { a= 1 }
+    return f(s)
 """
-IFACE_LEGACY_BAD = """interface Show { fn show(self) -> int; }
-struct S { a: int }
-fn f[T: Show](a: T) -> int { return 0; }
-fn main() -> int { s := S { a: 1 }; return f(s); }
+IFACE_LEGACY_BAD = """interface Show:
+    fn show(self) -> int
+struct S:
+    a: int
+fn f[T: Show](a: T) -> int:
+    return 0
+fn main() -> int:
+    s := S { a= 1 }
+    return f(s)
 """
-STRUCT_IFACE_REJECT = """interface Show { fn show(self) -> int; }
-struct Box[T: Show] { v: T }
-struct S { a: int }
-fn g(b: Box[S]) -> int { return 0; }
-fn main() -> int { return 0; }
+STRUCT_IFACE_REJECT = """interface Show:
+    fn show(self) -> int
+struct Box[T: Show]:
+    v: T
+struct S:
+    a: int
+fn g(b: Box[S]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
 # 结构侧正控：方法在位 ⇒ 满足（P3b Task 0 起实例化点**真判定**——本常量 = 新判定不误报的守门）
-STRUCT_IFACE_ACCEPT = """interface Show { fn show(self) -> int; }
-struct Box[T: Show] { v: T }
-struct S { a: int }
-impl S { fn show(self: S) -> int { return 1; } }
-fn g(b: Box[S]) -> int { return b.v.a; }
-fn main() -> int { return g(Box { v = S { a = 7 } }); }
+STRUCT_IFACE_ACCEPT = """interface Show:
+    fn show(self) -> int
+struct Box[T: Show]:
+    v: T
+struct S:
+    a: int
+impl S:
+    fn show(self: S) -> int:
+        return 1
+fn g(b: Box[S]) -> int:
+    return b.v.a
+fn main() -> int:
+    return g(Box { v = S { a = 7 } })
 """
-UNKNOWN_CONSTR_NAME = """fn f[T: NoSuchThing](a: T) -> int { return 0; }
-fn main() -> int { return f(1); }
+UNKNOWN_CONSTR_NAME = """fn f[T: NoSuchThing](a: T) -> int:
+    return 0
+fn main() -> int:
+    return f(1)
 """
 # D：F4 形参链（旧态：后续形参的声明类型被绕过 → T 未绑定 → 假拒 TF01）
-F4_LATER_PARAM = """fn foo(s: string) -> string { return s; }
-fn take[T](n: int, a: T) -> T { return a; }
-fn main() -> int { return take(1, 2); }
+F4_LATER_PARAM = """fn foo(s: string) -> string:
+    return s
+fn take[T](n: int, a: T) -> T:
+    return a
+fn main() -> int:
+    return take(1, 2)
 """
-F4_LATER_PARAM_BAD = """fn foo(s: string) -> string { return s; }
-fn take[T](n: int, a: T) -> T { return a; }
-fn main() -> int { return take(1, "s"); }
+F4_LATER_PARAM_BAD = """fn foo(s: string) -> string:
+    return s
+fn take[T](n: int, a: T) -> T:
+    return a
+fn main() -> int:
+    return take(1, "s")
 """
 # E：实例键（两个不同结构体实参）
-TWO_STRUCTS = """struct A { a: int }
-struct B { b: int, c: int }
-fn f[T](x: T) -> int { return 1; }
-fn main() -> int { p := A { a: 1 }; q := B { b: 2, c: 3 }; return f(p) + f(q); }
+TWO_STRUCTS = """struct A:
+    a: int
+struct B:
+    b: int, c: int
+fn f[T](x: T) -> int:
+    return 1
+fn main() -> int:
+    p := A { a= 1 }
+    q := B { b= 2, c= 3 }
+    return f(p) + f(q)
 """
 
 

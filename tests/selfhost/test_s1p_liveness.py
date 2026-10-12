@@ -52,55 +52,54 @@ REGEX_SAMPLES = [
 ]
 
 # 活性命中探针：`b := bool` 传给 `a: int` 形参（非字面量 ⇒ 不被护栏③跳过）
-MISMATCH = """fn f(a: int) -> int { return a; }
-fn main() -> int {
-    b := true;
-    return f(b);
-}
+MISMATCH = """fn f(a: int) -> int:
+    return a
+fn main() -> int:
+    b := true
+    return f(b)
 """
 
-CLEAN = """fn g(a: int) -> int { return a + 1; }
-fn main() -> int {
-    n := 41;
-    return g(n);
-}
+CLEAN = """fn g(a: int) -> int:
+    return a + 1
+fn main() -> int:
+    n := 41
+    return g(n)
 """
 
-EXTERN = """extern fn putchar(c: int) -> int;
-fn main() -> int {
-    b := true;
-    return putchar(b);
-}
+EXTERN = """extern fn putchar(c: int) -> int
+fn main() -> int:
+    b := true
+    return putchar(b)
 """
 
 # 护栏③：字面量多态（`f(3)` 必须**不**打点）
-LITERAL = """fn f(a: int) -> int { return a; }
-fn main() -> int {
-    return f(3);
-}
+LITERAL = """fn f(a: int) -> int:
+    return a
+fn main() -> int:
+    return f(3)
 """
 
 # 护栏⑥：元数不齐（含变参面）⇒ 静默跳过（**不打点**，且不得崩/挂）
-ARITY = """fn g2(a: int, b: int) -> int { return a + b; }
-fn main() -> int {
-    c := true;
-    return g2(c);
-}
+ARITY = """fn g2(a: int, b: int) -> int:
+    return a + b
+fn main() -> int:
+    c := true
+    return g2(c)
 """
 
 # 护栏②：`None` → `T?` 必须**不**打点；对照腿（同一函数传 bool）**必须**打点
 #   ——对照腿是关键：它证明「调用本身到点」，否则 0 打点可能只是没覆盖。
-NONE_OPT = """fn h(o: int?) -> int { return 0; }
-fn main() -> int {
-    return h(None);
-}
+NONE_OPT = """fn h(o: int?) -> int:
+    return 0
+fn main() -> int:
+    return h(none)
 """
 
-NONE_OPT_CTRL = """fn h(o: int?) -> int { return 0; }
-fn main() -> int {
-    b := true;
-    return h(b);
-}
+NONE_OPT_CTRL = """fn h(o: int?) -> int:
+    return 0
+fn main() -> int:
+    b := true
+    return h(b)
 """
 
 # ✅ 覆盖面（2026-09-18 批 8（甲）刀 2 扩覆盖后**已翻**）：方法调用 / 模块限定调用 / 枚举构造器
@@ -112,20 +111,25 @@ fn main() -> int {
 # ⚠ 两腿均用**非嵌套**形态（let 位）：嵌套实参里的调用会被台账**打点两次**
 #   （**先于刀 2 存在**的既有缺陷：`g(f("hi"))` ⇒ ['f','f']，平铺 `g("hi")` ⇒ ['g']；pre/post 二进制同形 ⇒ 已登记）。
 MODULE_GAP = """import fmt
-fn main() -> int { x := fmt.int_str("hi"); return 0; }
+fn main() -> int:
+    x := fmt.int_str("hi")
+    return 0
 """
-ENUM_GAP = """enum E { V(int) }
-fn main() -> int { e := V("hi"); return 0; }
+ENUM_GAP = """enum E:
+    V(int)
+fn main() -> int:
+    e := V("hi")
+    return 0
 """
-METHOD_GAP = """struct S { f: int }
-impl S {
-    fn m(self: S, x: int) -> int { return x; }
-}
-fn main() -> int {
-    b := true;
-    s : ., mut = S { f = 0 };
-    return s.m(b);
-}
+METHOD_GAP = """struct S:
+    f: int
+impl S:
+    fn m(self: S, x: int) -> int:
+        return x
+fn main() -> int:
+    b := true
+    s : ., mut = S { f = 0 }
+    return s.m(b)
 """
 
 

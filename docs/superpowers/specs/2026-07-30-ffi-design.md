@@ -6,27 +6,27 @@
 
 ## 核心原则
 
-- **C ABI 是默认接口**。所有语言最终通过 C ABI 对接。
-- **`@ffi` 是编译控制**。不改变语义，只改变调用方式的生成。
-- **类型编组在 IR gen 时静态插入**。`@ffi("Python")` 在每个调用点插入 PyObject* 转换代码。
-- **`.so` 链接已有基础设施**。`ctx_add_plt`/`g_x86_ext_rel` 等直接复用。
+- **C ABI 是默认接口**：所有语言最终通过 C ABI 对接。
+- **`@ffi` 是编译控制**：不改变语义，只改变调用方式的生成。
+- **类型编组在 IR gen 时静态插入**：`@ffi("Python")` 在每个调用点插入 `PyObject*` 转换代码。
+- **`.so` 链接已有基础设施**：`ctx_add_plt`/`g_x86_ext_rel` 等直接复用。
 
 ## 语法
 
-### extern fn 声明
+### `extern fn` 声明
 
 ```core
-extern fn read_file(path: *const u8) -> *mut u8;
-extern fn write(fd: i32, buf: *const u8, len: i32) -> i32;
-extern fn getchar() -> i32;
+extern fn read_file(path: *const u8) -> *mut u8
+extern fn write(fd: i32, buf: *const u8, len: i32) -> i32
+extern fn getchar() -> i32
 ```
 
-### @ffi 多语言注解
+### `@ffi` 多语言注解
 
 ```core
-@ffi("C") extern fn printf(fmt: *const u8, ...) -> i32;
-@ffi("Python") extern fn py_call(obj: dyn, method: string) -> dyn;
-@ffi("Java") extern fn java_call(env: dyn, obj: dyn, method: string) -> dyn;
+@ffi("C") extern fn printf(fmt: *const u8, ...) -> i32
+@ffi("Python") extern fn py_call(obj: dyn, method: string) -> dyn
+@ffi("Java") extern fn java_call(env: dyn, obj: dyn, method: string) -> dyn
 ```
 
 ## 类型映射
@@ -70,38 +70,36 @@ extern fn getchar() -> i32;
 
 **新增 Token**：
 ```core
-T_EXTERN : int = 100;  // extern 关键字
+T_EXTERN : int = 100  // extern 关键字
 ```
 
-**parse_extern_fn**：在 `parse_declaration` 中处理 `extern fn`：
+**`parse_extern_fn`**：在 `parse_declaration` 中处理 `extern fn`：
 
 ```core
-if tok_k(cur_tok()) == T_EXTERN {
-    advance_tok();
+if tok_k(cur_tok()) == T_EXTERN:
+    advance_tok()
     // 检查 @ffi("...") 注解
-    ffi_lang : ., mut = "C";
-    if tok_k(cur_tok()) == T_AT {
+    ffi_lang : ., mut = "C"
+    if tok_k(cur_tok()) == T_AT:
         // @ffi("Python") 解析
-        ffi_lang = parse_ffi_annotation();
-    }
+        ffi_lang = parse_ffi_annotation()
     // 解析 fn name(args) -> ret;
-    fn_node := parse_fn_declaration();
+    fn_node := parse_fn_declaration()
     // 标记为 extern 函数
-    ast_set_data(fn_node, str_intern(ffi_lang));
+    ast_set_data(fn_node, str_intern(ffi_lang))
     // 不解析函数体
-    return fn_node;
-}
+    return fn_node
 ```
 
 ### 2. 检查器
 
-- `extern fn` 不需要函数体，只做签名检查
-- 参数类型和返回类型校验（是否可编组）
-- `@ffi("Python")` 的参数类型校验（`dyn` 类型是否合理）
+- `extern fn` 不需要函数体，只做签名检查。
+- 参数类型和返回类型校验（是否可编组）。
+- `@ffi("Python")` 的参数类型校验（`dyn` 类型是否合理）。
 
 ### 3. IR 生成
 
-**extern 调用点的代码生成**：
+**`extern` 调用点的代码生成**：
 
 ```core
 if is_extern_func(func_ni) {
@@ -121,18 +119,17 @@ if is_extern_func(func_ni) {
 
 ### 4. 链接器集成
 
-在链接阶段，extern 函数自动触发 `.so` 加载：
+在链接阶段，`extern` 函数自动触发 `.so` 加载：
 
 ```core
 // 在 ldd.cr 中处理 extern 函数
-fn link_extern_func(func_ni: int) {
+fn link_extern_func(func_ni: int):
     // 根据函数名查找 .so
     // 如果已经通过 reg_so_funcs 注册，直接使用
     // 否则搜索默认路径
-    lib_name := "lib" + get_func_module(func_ni) + ".so";
-    ctx_add_so(lib_name);
-    ctx_add_plt(func_name, so_idx);
-}
+    lib_name := "lib" + get_func_module(func_ni) + ".so"
+    ctx_add_so(lib_name)
+    ctx_add_plt(func_name, so_idx)
 ```
 
 ## 已有基础设施（直接复用）

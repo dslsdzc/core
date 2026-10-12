@@ -1,6 +1,6 @@
 # Core IR 操作语义表（对照 CompCert x86/Op.v + Asm.v）
 
-> 定位：受众 = 维护者；状态 = active
+> 定位：受众 = 维护者；状态 = active。
 
 > 用途：CompCert 对照审查第四轮（2026-08-16）的**契约文档**——Task 2 后端审查逐 opcode 三方对照
 > （本表定义语义 vs `src/arch/linux/ld/instr.cr` ELF 编码 vs `src/compiler/interp.cr` 解释执行）以本表为准。
@@ -57,69 +57,69 @@ Core 侧只读来源：`src/compiler/ast.cr`（opcode 常量，L527-580）、`sr
 
 | # | 名称 | 分组 | 发射方 | ELF 后端 | 解释器 | 本节 |
 |---|---|---|---|---|---|---|
-| 0 | IR_NOP | 控制流 | — | ✓ 空 | ✓ 空 | 2.5 |
-| 1 | IR_CONST | 常量 | ir_gen | ✓ | ✓ | 2.1 |
-| 2 | IR_BINARY | 算术 | ir_gen | ✓ | ✓（部分） | 2.2 |
-| 3 | IR_UNARY | 算术 | ir_gen | ✓ | ✓ | 2.2 |
-| 4 | IR_CALL | 调用 | ir_gen | ✓ | ✓（单层内联） | 2.5 |
-| 5 | IR_RETURN | 调用 | ir_gen | ✓ | ✓ | 2.5 |
-| 6 | IR_ALLOC | 内存 | ir_gen（标量槽标记） | ✓ 空 | ✓ 置 0 | 2.4 |
-| 7 | IR_ALLOC_STRUCT | 内存 | ir_gen | ✓ | ✓ | 2.4 |
-| 8 | IR_ALLOC_ARRAY | 内存 | ir_gen | ✓ | ✓ | 2.4 |
-| 9 | IR_STORE | 拷贝（命名误导） | ir_gen | ✓ | ✓ | 2.1 |
-| 10 | IR_LOAD | 拷贝 | ir_gen | ✓ | ✓ | 2.1 |
-| 11 | IR_LOAD_FIELD | 内存 | ir_gen | ✓ | ✓ | 2.4 |
-| 12 | IR_STORE_FIELD | 内存 | ir_gen | ✓ | ✓ | 2.4 |
-| 13 | IR_LOAD_INDEX | 内存 | ir_gen | ✓ | ✓ | 2.4 |
-| 14 | IR_STORE_INDEX | 内存 | ir_gen | ✓ | ✓ | 2.4 |
-| 15 | IR_LOAD_INDEX_VAR | 内存 | ir_gen | ✓ | ✓ | 2.4 |
-| 16 | IR_STORE_INDEX_VAR | 内存 | ir_gen | ✓ | ✓ | 2.4 |
-| 17 | IR_MAKE_ENUM | 枚举 | ir_gen | ✓ | ✓（近似） | 2.6 |
-| 18 | IR_REF | 地址 | ir_gen | ✓ | ✓（近似） | 2.4 |
-| 19 | IR_BRANCH | 控制流 | ir_gen | ✓ | ✓ | 2.5 |
-| 20 | IR_JUMP | 控制流 | ir_gen | ✓ | ✓ | 2.5 |
-| 21 | IR_LABEL | 控制流 | ir_gen | ✓ | ✓ | 2.5 |
-| 22 | IR_PHI | 控制流 | **无**（保留） | ✗ | ✗ | 2.5 |
-| 23 | IR_LOAD_ENUM_TAG | 枚举 | ir_gen | ✓ | ✓（近似） | 2.6 |
-| 24 | IR_SLICE | 内存 | ir_gen | ✓ | ✓（BC11 已修补实现） | 2.4 |
-| 25 | IR_DEREF | 内存 | ir_gen | ✓ | ✓（近似） | 2.4 |
-| 26 | IR_STORE_PTR | 内存 | ir_gen | ✓ | ✓（近似） | 2.4 |
-| 27 | IR_SPAWN | 并发 | ir_gen | ✓（单线程近似） | ✓（单层） | 2.7 |
-| 28 | IR_YIELD | 并发 | ir_gen | ✓（eager 值传递近似，BC8/F5 已修） | ✓ | 2.7 |
-| 29 | IR_AWAIT | 并发 | ir_gen | ✓（eager） | ✓（eager） | 2.7 |
-| 30 | IR_BOUNDS_CHECK | 内存/安全 | ext_safety | ✓ | ✓（BC11 已修补实现） | 2.4 |
-| 31 | IR_ADDR_INDEX | 地址 | ir_gen | ✓ | ✓（BC11 已修补实现） | 2.4 |
-| 32 | IR_ARENA_NEW | 内存 | ir_gen | ✓ | ✓（no-op 近似，BC11 已修） | 2.4 |
-| 33 | IR_ARENA_RESET | 内存 | ir_gen（作用域退出） | ✓ | ✓（no-op 近似，BC11 已修） | 2.4 |
-| 34 | IR_INLINE | 注解 | ir_gen | 空 | 空 | 2.9 |
-| 35 | IR_NO_BOUNDS_CHECK | 注解 | ir_gen | 空 | 空 | 2.9 |
-| 36 | IR_FAST | 注解 | ir_gen | 空 | 空 | 2.9 |
-| 37 | IR_UNROLL | 注解 | ir_gen | 空 | 空 | 2.9 |
-| 38 | IR_SECTION | 注解 | ir_gen | 空 | 空 | 2.9 |
-| 39 | IR_HOTPATCH_ROUTE | 调用 | ir_gen | ✓ | ✗ | 2.5 |
+| 0 | `IR_NOP` | 控制流 | — | ✓ 空 | ✓ 空 | 2.5 |
+| 1 | `IR_CONST` | 常量 | `ir_gen` | ✓ | ✓ | 2.1 |
+| 2 | `IR_BINARY` | 算术 | `ir_gen` | ✓ | ✓（部分） | 2.2 |
+| 3 | `IR_UNARY` | 算术 | `ir_gen` | ✓ | ✓ | 2.2 |
+| 4 | `IR_CALL` | 调用 | `ir_gen` | ✓ | ✓（单层内联） | 2.5 |
+| 5 | `IR_RETURN` | 调用 | `ir_gen` | ✓ | ✓ | 2.5 |
+| 6 | `IR_ALLOC` | 内存 | `ir_gen`（标量槽标记） | ✓ 空 | ✓ 置 0 | 2.4 |
+| 7 | `IR_ALLOC_STRUCT` | 内存 | `ir_gen` | ✓ | ✓ | 2.4 |
+| 8 | `IR_ALLOC_ARRAY` | 内存 | `ir_gen` | ✓ | ✓ | 2.4 |
+| 9 | `IR_STORE` | 拷贝（命名误导） | `ir_gen` | ✓ | ✓ | 2.1 |
+| 10 | `IR_LOAD` | 拷贝 | `ir_gen` | ✓ | ✓ | 2.1 |
+| 11 | `IR_LOAD_FIELD` | 内存 | `ir_gen` | ✓ | ✓ | 2.4 |
+| 12 | `IR_STORE_FIELD` | 内存 | `ir_gen` | ✓ | ✓ | 2.4 |
+| 13 | `IR_LOAD_INDEX` | 内存 | `ir_gen` | ✓ | ✓ | 2.4 |
+| 14 | `IR_STORE_INDEX` | 内存 | `ir_gen` | ✓ | ✓ | 2.4 |
+| 15 | `IR_LOAD_INDEX_VAR` | 内存 | `ir_gen` | ✓ | ✓ | 2.4 |
+| 16 | `IR_STORE_INDEX_VAR` | 内存 | `ir_gen` | ✓ | ✓ | 2.4 |
+| 17 | `IR_MAKE_ENUM` | 枚举 | `ir_gen` | ✓ | ✓（近似） | 2.6 |
+| 18 | `IR_REF` | 地址 | `ir_gen` | ✓ | ✓（近似） | 2.4 |
+| 19 | `IR_BRANCH` | 控制流 | `ir_gen` | ✓ | ✓ | 2.5 |
+| 20 | `IR_JUMP` | 控制流 | `ir_gen` | ✓ | ✓ | 2.5 |
+| 21 | `IR_LABEL` | 控制流 | `ir_gen` | ✓ | ✓ | 2.5 |
+| 22 | `IR_PHI` | 控制流 | **无**（保留） | ✗ | ✗ | 2.5 |
+| 23 | `IR_LOAD_ENUM_TAG` | 枚举 | `ir_gen` | ✓ | ✓（近似） | 2.6 |
+| 24 | `IR_SLICE` | 内存 | `ir_gen` | ✓ | ✓（BC11 已修补实现） | 2.4 |
+| 25 | `IR_DEREF` | 内存 | `ir_gen` | ✓ | ✓（近似） | 2.4 |
+| 26 | `IR_STORE_PTR` | 内存 | `ir_gen` | ✓ | ✓（近似） | 2.4 |
+| 27 | `IR_SPAWN` | 并发 | `ir_gen` | ✓（单线程近似） | ✓（单层） | 2.7 |
+| 28 | `IR_YIELD` | 并发 | `ir_gen` | ✓（eager 值传递近似，BC8/F5 已修） | ✓ | 2.7 |
+| 29 | `IR_AWAIT` | 并发 | `ir_gen` | ✓（eager） | ✓（eager） | 2.7 |
+| 30 | `IR_BOUNDS_CHECK` | 内存/安全 | `ext_safety` | ✓ | ✓（BC11 已修补实现） | 2.4 |
+| 31 | `IR_ADDR_INDEX` | 地址 | `ir_gen` | ✓ | ✓（BC11 已修补实现） | 2.4 |
+| 32 | `IR_ARENA_NEW` | 内存 | `ir_gen` | ✓ | ✓（no-op 近似，BC11 已修） | 2.4 |
+| 33 | `IR_ARENA_RESET` | 内存 | `ir_gen`（作用域退出） | ✓ | ✓（no-op 近似，BC11 已修） | 2.4 |
+| 34 | `IR_INLINE` | 注解 | `ir_gen` | 空 | 空 | 2.9 |
+| 35 | `IR_NO_BOUNDS_CHECK` | 注解 | `ir_gen` | 空 | 空 | 2.9 |
+| 36 | `IR_FAST` | 注解 | `ir_gen` | 空 | 空 | 2.9 |
+| 37 | `IR_UNROLL` | 注解 | `ir_gen` | 空 | 空 | 2.9 |
+| 38 | `IR_SECTION` | 注解 | `ir_gen` | 空 | 空 | 2.9 |
+| 39 | `IR_HOTPATCH_ROUTE` | 调用 | `ir_gen` | ✓ | ✗ | 2.5 |
 | 40 | *（未定义）* | — | — | — | — | — |
-| 41 | IR_DYN_TAG | 动态 | ir_gen | ✓ | ✗ | 2.6 |
-| 42 | IR_DYN_VAL | 动态 | ir_gen | ✓ | ✗ | 2.6 |
-| 43 | IR_DYN_PACK | 动态 | ir_gen | ✓ | ✗ | 2.6 |
-| 44 | IR_DYN_DISPATCH | 动态 | ir_gen | ✓（占位） | ✗ | 2.6 |
-| 45 | IR_CALL_EXTERN | 调用 | ir_gen | ✓ | ✗ | 2.5 |
-| 46 | IR_LAZY_THUNK | 惰性 | ir_gen | ✓（eager） | ✓（eager） | 2.7 |
-| 47 | IR_LAZY_FORCE | 惰性 | ir_gen | ✓（eager） | ✓（eager） | 2.7 |
-| 48 | IR_FNADDR | 地址 | ir_gen | ✓ | ✓（d=0） | 2.5 |
-| 49 | IR_I2F | 转换 | ir_gen | ✓（[注意] 见 BC-I2F） | ✗ | 2.3 |
-| 50 | IR_F2I | 转换 | ir_gen | ✓ | ✗ | 2.3 |
-| 51 | IR_APPROX | 注解 | —（**零发射点**；`ast.cr:568` 已定义） | — | — | 2.9 |
+| 41 | `IR_DYN_TAG` | 动态 | `ir_gen` | ✓ | ✗ | 2.6 |
+| 42 | `IR_DYN_VAL` | 动态 | `ir_gen` | ✓ | ✗ | 2.6 |
+| 43 | `IR_DYN_PACK` | 动态 | `ir_gen` | ✓ | ✗ | 2.6 |
+| 44 | `IR_DYN_DISPATCH` | 动态 | `ir_gen` | ✓（占位） | ✗ | 2.6 |
+| 45 | `IR_CALL_EXTERN` | 调用 | `ir_gen` | ✓ | ✗ | 2.5 |
+| 46 | `IR_LAZY_THUNK` | 惰性 | `ir_gen` | ✓（eager） | ✓（eager） | 2.7 |
+| 47 | `IR_LAZY_FORCE` | 惰性 | `ir_gen` | ✓（eager） | ✓（eager） | 2.7 |
+| 48 | `IR_FNADDR` | 地址 | `ir_gen` | ✓ | ✓（d=0） | 2.5 |
+| 49 | `IR_I2F` | 转换 | `ir_gen` | ✓（[注意] 见 BC-I2F） | ✗ | 2.3 |
+| 50 | `IR_F2I` | 转换 | `ir_gen` | ✓ | ✗ | 2.3 |
+| 51 | `IR_APPROX` | 注解 | —（**零发射点**；`ast.cr:568` 已定义） | — | — | 2.9 |
 
 对照 CompCert：Core 的「opcode + 操作数槽（dest/src1/src2/src3/type_kind）」形态对应 RTL 的 `Iop`（3 地址）
-与 Asm 的 `instruction` 之间的中间层——语义表以 Asm.v 的机器语义为基准（opcode 最终由机器指令兑现），
-算术层语义以 Op.v 的 `eval_operation` 为基准。
+与 Asm 的 `instruction` 之间的中间层——语义表以 `Asm.v` 的机器语义为基准（opcode 最终由机器指令兑现），
+算术层语义以 `Op.v` 的 `eval_operation` 为基准。
 
 ## 3. 分组语义定义
 
 记法：`a` = `ρ(s1)`、`b` = `ρ(s2)`（变量取值）；`d` = dest 变量；`M[x]` = 内存 `x` 处 8 字节；
 `→` = 状态变换；`⊥` = 中止（陷阱）。
 
-### 2.1 常量与拷贝（对照 Op.v 常量/Omove）
+### 2.1 常量与拷贝（对照 `Op.v` 常量/`Omove`）
 
 - **IR_CONST**（1）：`d := s1`（立即数）。`type_kind` 决定解释：`TI_STR` → `d` = rodata 字符串基址
   （ELF 经 `lea r10,[rip+disp]` 补丁；对照 CompCert `Pmov_rs` Asm.v:L619-620 / `Oindirectsymbol` Op.v:L352）；
@@ -131,7 +131,7 @@ Core 侧只读来源：`src/compiler/ast.cr`（opcode 常量，L527-580）、`sr
   > 组注：`IR_LOAD`/`IR_STORE` 在 Core 中是「槽间拷贝」，真正的内存操作是 FIELD/INDEX/DEREF 族——
   > 与 CompCert 的 load/store 命名不同，属 Core 的 IR 形态设计（D：扁平槽模型，全局/局部统一）。
 
-### 2.2 算术（对照 Op.v eval_operation + Asm.v 整数算术）
+### 2.2 算术（对照 `Op.v` `eval_operation` + `Asm.v` 整数算术）
 
 `IR_BINARY`（2）按 `s3 = OP_*` 分派；`IR_UNARY`（3）按 `s3 = UOP_*` 分派。`type_kind = TI_FLOAT` 时走浮点路径（见下）。
 
@@ -171,16 +171,16 @@ Core 侧只读来源：`src/compiler/ast.cr`（opcode 常量，L527-580）、`sr
 **BC2 [ok] 已修复（2026-08-17，第四轮 F10）——整数除/模截断方向三方已统一为向零截断**：
 - ELF 后端：`idiv` → 向零截断（与 CompCert `Z.quot` 一致）✓
 - Python bootstrap 解释器（`bootstrap/corec/backend/interpreter.py`）：**已修**——`//` 改 abs+符号向零截断、`%` 余数符号随被除数（修复前 Python `//` = 向下取整（-7/3 = -3，C 为 -2）、`%` 余数符号随除数——与 Core 的 C 语义不一致）；`tests/bootstrap/test_pipeline.py` 补四组负操作数回归用例（-7/3、7/-3、-7%3、7%-3）
-- 自托管 interp.cr 的 `lv / rv` 行为取决于承载二进制：经 ELF 构建 → 向零；经 Python bootstrap 跑测试 → 向下（修复后一致）。
+- 自托管 interp.cr 的 `lv / rv` 行为取决于承载二进制：经 ELF 构建 → 向零；经 Python bootstrap 执行测试 → 向下（修复后一致）。
 - 契约定为：**向零截断**（对照 CompCert）。
 
-### 2.3 转换（对照 Op.v 转换族）
+### 2.3 转换（对照 `Op.v` 转换族）
 
 - **IR_I2F**（49）：`d := float(int64(a))`。对照 `Ofloatoflong`（Op.v:L169, L438）→ `Val.floatoflong` = `Float.of_long`（Floats.v:L318-320：`BofZ` 53 位二进制浮点，就近舍入）。ELF 编码现状：`F2 48 0F 2A`（`cvtsi2sd`，**REX.W 已补——BC-I2F [ok] 已修复（2026-08-17，第四轮 F7）**，`e2_sd_cvt` instr.cr L378-389）。修复前为 `F2 0F 2A`（32 位操作数）只转换低 32 位符号扩展，`|a| ≥ 2³¹` 时结果错误（如 `2⁴⁰ → 0.0`），与 `IR_F2I` 的 `cvttsd2si` `F2 48 0F 2C`（REX.W ✓）不对称。迁移后语义：int→dex = `d := a·10⁶`（精确，无舍入）。
 - **IR_F2I**（50）：`d := trunc(f)`（向零截断）。对照 `Olongoffloat`（Op.v:L167, L437）→ `Val.longoffloat` = `Float.to_long`（Floats.v:L308-309：`ZofB_range` 向零截断，**越界 → None**）。当前 ELF 用 `cvttsd2si`：向零截断 ✓，但**越界结果是硬件返回的特殊值 0x8000000000000000**（Intel SDM：异常掩码默认下越界 `cvttsd2si` 返回不定值 INT64_MIN——文档化行为）——CompCert 定义为 `None`（Stuck）。**BC-F2I（死路径已确认，第四轮 §2）：IR_F2I 无发射方（语言级 float→int 转换不存在），当前不可触发**；若将来启用需定越界语义。迁移后语义：dex→int = `d := trunc(a/10⁶)`（有损转换，`EC_R_LOSSY_CONVERT` R004 检查点）。
 - interp：op 49/50 **已实现**（`i64_to_f64`/`f64_to_i64`，f64.cr 软件路径，BC11 已修）——原「静默跳过」见 BC11（已修复）。
 
-### 2.4 内存与地址（对照 Memory.v 模型 + Asm.v 访问指令）
+### 2.4 内存与地址（对照 `Memory.v` 模型 + `Asm.v` 访问指令）
 
 分配（对照 CompCert `Pallocframe`（Asm.v:L948-958）/`Mem.alloc`（Memory.v:L348）——L531 是 `store`，勿误引）：
 
@@ -220,7 +220,7 @@ load/store（对照 `Mem.load`/`Mem.store` Memory.v:L428/L531 + `valid_access` L
 - **IR_CALL_EXTERN**（45）：外部符号调用——`s1`=函数名 ni、`s2`=首参、`s3`=参数个数（**注意：约定与 IR_CALL 不同，名字在 s1**）。ELF：外部重定位 `call rel32`。对照 CompCert `exec_step_external`（Asm.v:L1120-1127）。
 - **IR_HOTPATCH_ROUTE**（39）：热补丁路由调用（s1=名字、s2=首参、s3=参数数，同 CALL_EXTERN 约定）。ELF：call patch 同 CALL。对照无（CompCert 无热补丁）——D。
 - **IR_FNADDR**（48）：`d := &f`（`s1`=函数名 ni；`movabs` imm64 + 链接期补丁）。对照 `Oindirectsymbol`（Op.v:L79, L352）→ `Genv.symbol_address`。interp：`d := 0`（无地址概念，已知局限）。
-- **IR_SPAWN**（27）：创建并发执行单元——`d`=future/结果、`s1`=首参、`s2`=参数个数、`s3`=函数名 ni（**按 ir_gen.cr L871 实际发射**）。**BC1 [ok] 已修复（2026-08-17，第四轮 F4）**：操作数约定统一为 s3=函数名，并补 SysV 参数装载（修复前 ast.cr 注释/instr.cr（`name_ni := s1`）与发射方/interp 四方错位——ELF 拿参数变量索引当函数名查表、且从不装载参数 → SIGSEGV）。ELF 现为单线程近似（直接 call 存结果）；interp 单层内联。对照：CompCert 无并发——D。
+- **IR_SPAWN**（27）：创建并发执行单元——`d`=future/结果、`s1`=首参、`s2`=参数个数、`s3`=函数名 ni（**按 ir_gen.cr L871 实际发射**）。**BC1 [ok] 已修复（2026-08-17，第四轮 F4）**：操作数约定统一为 s3=函数名，并补 SysV 参数装载（修复前 ast.cr 注释/instr.cr（`name_ni := s1`）与发射方/interp 四方错位——ELF 以参数变量索引作函数名查表、且从不装载参数 → SIGSEGV）。ELF 现为单线程近似（直接 call 存结果）；interp 单层内联。对照：CompCert 无并发——D。
 
 ### 2.6 枚举与动态类型
 
@@ -234,7 +234,7 @@ load/store（对照 `Mem.load`/`Mem.store` Memory.v:L428/L531 + `valid_access` L
 ### 2.7 并发 / 流 / 惰性（对照：CompCert 无，全部为 D 设计差异）
 
 - **IR_SPAWN**：见 2.5。
-- **IR_YIELD**（28）：语义 = **向 flow 消费者通道发射 `ρ(s1)`**（ast.cr L557）。**BC8 [ok] 已修复（2026-08-17，第四轮 F5）**：ELF 改 **eager 值传递近似**（`d := ρ(s1)`，不再 `call sched_yield()`——修复前实现与定义语义不符且未导入符号 rel32=0 崩溃）；interp 补 `d >= 0` 守卫（修复前发射恒 dest=-1 → `g_ir_vals[-8]` 堆下溢写，静默 UB）。三方一致为 eager 近似（D：单线程模式既定近似——完整 go/G-M 调度见 docs/maintainer/design/execution-model.md §三）；flow fn 语法已修（parser 不再把 T_FN 当函数名）。
+- **IR_YIELD**（28）：语义 = **向 flow 消费者通道发射 `ρ(s1)`**（ast.cr L557）。**BC8 [ok] 已修复（2026-08-17，第四轮 F5）**：ELF 改 **eager 值传递近似**（`d := ρ(s1)`，不再 `call sched_yield()`——修复前实现与定义语义不符且未导入符号 rel32=0 崩溃）；interp 补 `d >= 0` 守卫（修复前发射恒 dest=-1 → `g_ir_vals[-8]` 堆下溢写，静默 UB）。三方一致为 eager 近似（D：单线程模式既定近似——完整 go/G-M 调度见 docs/maintainer/design/execution-model.md §三）；flow fn 语法已修（parser 不再将 T_FN 视作函数名）。
 - **IR_AWAIT**（29）：语义 = 阻塞直到 future 就绪，`d` = 结果。ELF/interp 均为值复制（eager 近似，已文档化）——D：单线程模式的既定近似。
 - **IR_LAZY_THUNK**（46）：`d` = 惰性包装（s1 = 表达式求值）。**IR_LAZY_FORCE**（47）：`d` = 强求结果。两者当前均 eager 近似（值传递，ELF/interp 一致）——D：惰性求值尚未落地（lazy 设计文档），IR 保留显式 thunk 形态以便迁移。
 
@@ -287,7 +287,7 @@ load/store（对照 `Mem.load`/`Mem.store` Memory.v:L428/L531 + `valid_access` L
 | # | 位置 | 现象 | 依据 | 状态（2026-08-17） |
 |---|---|---|---|---|
 | **BC-I2F** | instr.cr L352-363 | **IR_I2F 的 `cvtsi2sd` 缺 REX.W**：`F2 0F 2A`（32 位操作数）→ `\|a\|≥2³¹` 的 int64→float 截断为低 32 位符号扩展（如 2⁴⁰ → 0.0）。IR_F2I 有 `F2 48 0F 2C` 对照可见遗漏 | 本表 2.3；CompCert `Ofloatoflong`（Op.v:L438）语义对照 | [ok] 已修复（2026-08-17，第四轮 F7：`e2_sd_cvt` 补 REX.W） |
-| BC1 | instr.cr L825-836（IR_SPAWN `name_ni := s1`） | SPAWN 操作数约定错位：发射方/interp 用 `s3`=函数名、`s1`=首参；ELF 拿 `s1`（参数变量索引）当函数名查表；ast.cr L556 注释与二者皆不同 | 本表 2.5；ir_gen.cr L871 vs instr.cr L828 | [ok] 已修复（2026-08-17，第四轮 F4：统一 s3=函数名 + SysV 参数装载） |
+| BC1 | instr.cr L825-836（IR_SPAWN `name_ni := s1`） | SPAWN 操作数约定错位：发射方/interp 用 `s3`=函数名、`s1`=首参；ELF 以 `s1`（参数变量索引）作函数名查表；ast.cr L556 注释与二者皆不同 | 本表 2.5；ir_gen.cr L871 vs instr.cr L828 | [ok] 已修复（2026-08-17，第四轮 F4：统一 s3=函数名 + SysV 参数装载） |
 | BC2 | bootstrap/corec/backend/interpreter.py L108 | 整数除/模截断方向：Python `//` 向下取整 vs 契约向零截断（ELF `idiv` ✓，CompCert `Z.quot` ✓）——负除数程序在 bootstrap 与 ELF 下结果不同 | 本表 2.2；Values.v L727 / Integers.v L193 | [ok] 已修复（2026-08-17，第四轮 F10：abs+符号向零截断，补四组负操作数回归） |
 | BC3 | ast.cr L282-283 + instr.cr L495-512 | OP_SHL/OP_SHR 无发射方（死路径）；若启用，OP_SHR 用 `shr`（逻辑）而契约方向未定（CompCert `Oshrl` 为算术） | 本表 2.2 | 死路径已确认（第四轮 §2）——启用时按契约补语义 |
 | BC4 | interp.cr L96-123 | 解释器对 TI_FLOAT 无分支：float 算术按整数位模式运算（结果错误）；op 24/30/31/32/33/41-45/49/50 未实现（静默跳过）；`IR_STORE_PTR` 槽拷贝错位（BC12 细化） | 本表 2.2/2.3/2.4 | [ok] 已修复（2026-08-17，第四轮 F9：TI_FLOAT 走 f64.cr 软件实现；其余 opcode 随 BC11 补齐） |

@@ -28,26 +28,26 @@
 
 After `TI_CHAR : int = 6;`:
 ```core
-TI_DYN : int = 7;    // dynamic type
+TI_DYN : int = 7    // dynamic type
 ```
 
 After `TYP_TUPLE : int = 10;`:
 ```core
-TYP_DYN : int = 11;  // data = type set bitmap (0 = single known type)
+TYP_DYN : int = 11  // data = type set bitmap (0 = single known type)
 ```
 
 After `IR_SECTION : int = 38;`:
 ```core
-IR_DYN_TAG      : int = 41;  // dest=tag_var, s1=dyn_var — extract tag
-IR_DYN_VAL      : int = 42;  // dest=val_var, s1=dyn_var — extract value
-IR_DYN_PACK     : int = 43;  // dest=dyn_var, s1=val_var, s2=type_idx — pack dyn
-IR_DYN_DISPATCH : int = 44;  // s1=dyn_var, s2=dispatch_table_ni — dispatch by tag
+IR_DYN_TAG      : int = 41  // dest=tag_var, s1=dyn_var — extract tag
+IR_DYN_VAL      : int = 42  // dest=val_var, s1=dyn_var — extract value
+IR_DYN_PACK     : int = 43  // dest=dyn_var, s1=val_var, s2=type_idx — pack dyn
+IR_DYN_DISPATCH : int = 44  // s1=dyn_var, s2=dispatch_table_ni — dispatch by tag
 ```
 
 - [ ] **Step 2: Add token to keywords.cr**
 
 ```core
-T_DYN : int = 48;
+T_DYN : int = 48
 ```
 
 - [ ] **Step 3: Commit**
@@ -94,35 +94,55 @@ jj commit src/compiler/parser.cr -m "feat: parse dyn keyword"
 
 ```core
 // Per-variable type set: bitmap of possible types for dyn variables
-g_dyn_type_sets : string, mut;  // dyn type info per variable
-g_dyn_type_set_count : int, mut;
-g_dyn_type_set_cap : int, mut;
+g_dyn_type_sets : string, mut  // dyn type info per variable
+g_dyn_type_set_count : int, mut
+g_dyn_type_set_cap : int, mut
 
-fn grow_dyn_type_sets(needed: int) {
-    if needed < g_dyn_type_set_cap { return; }
-    nc := g_dyn_type_set_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := alloc(nc * 8); _dyncpy(g_dyn_type_sets, g_dyn_type_set_cap * 8, nb);
-    g_dyn_type_sets = nb; g_dyn_type_set_cap = nc;
-}
+fn grow_dyn_type_sets(needed: int):
+    if needed < g_dyn_type_set_cap:
+        return
+    nc := g_dyn_type_set_cap * 2
+    if nc < 64:
+        nc = 64
+    if nc < needed:
+        nc = needed + 64
+    nb := alloc(nc * 8)
+    _dyncpy(g_dyn_type_sets, g_dyn_type_set_cap * 8, nb)
+    g_dyn_type_sets = nb
+    g_dyn_type_set_cap = nc
 
 // Set a bit in the type set for a variable
-fn dyn_set_type(var_idx: int, ti: int) {
-    grow_dyn_type_sets(var_idx + 1);
-    old := r64(g_dyn_type_sets, var_idx * 8);
-    bit := 1;
-    if ti >= 0 && ti < 64 { bit = 1; shl := ti; loop { if shl <= 0 { break; } bit = bit * 2; shl = shl - 1; } }
-    w64(g_dyn_type_sets, var_idx * 8, old + bit);
-}
+fn dyn_set_type(var_idx: int, ti: int):
+    grow_dyn_type_sets(var_idx + 1)
+    old := r64(g_dyn_type_sets, var_idx * 8)
+    bit := 1
+    if ti >= 0 && ti < 64:
+        bit = 1
+        shl := ti
+        loop:
+            if shl <= 0:
+                break
+            bit = bit * 2
+            shl = shl - 1
+    w64(g_dyn_type_sets, var_idx * 8, old + bit)
 
 // Check if a type is in the set
-fn dyn_has_type(var_idx: int, ti: int) -> int {
-    if var_idx < 0 || var_idx >= g_dyn_type_set_count { return 0; }
-    set := r64(g_dyn_type_sets, var_idx * 8);
-    bit := 1;
-    if ti >= 0 && ti < 64 { bit = 1; shl := ti; loop { if shl <= 0 { break; } bit = bit * 2; shl = shl - 1; } }
-    if (set / bit) % 2 != 0 { return 1; }
-    return 0;
-}
+fn dyn_has_type(var_idx: int, ti: int) -> int:
+    if var_idx < 0 || var_idx >= g_dyn_type_set_count:
+        return 0
+    set := r64(g_dyn_type_sets, var_idx * 8)
+    bit := 1
+    if ti >= 0 && ti < 64:
+        bit = 1
+        shl := ti
+        loop:
+            if shl <= 0:
+                break
+            bit = bit * 2
+            shl = shl - 1
+    if (set / bit) % 2 != 0:
+        return 1
+    return 0
 ```
 
 - [ ] **Step 2: Track types at assignment**
@@ -140,10 +160,9 @@ if target_type == TI_DYN {
 In if/else handling, after processing both branches, merge dyn type sets:
 
 ```core
-fn merge_dyn_types(target_var: int, then_set: int, else_set: int) {
+fn merge_dyn_types(target_var: int, then_set: int, else_set: int):
     // Union the type sets
-    w64(g_dyn_type_sets, target_var * 8, then_set + else_set);
-}
+    w64(g_dyn_type_sets, target_var * 8, then_set + else_set)
 ```
 
 - [ ] **Step 4: Validate method calls on dyn values**
@@ -336,44 +355,50 @@ jj commit -m "feat: ELF backend dyn opcode encoding"
 ```core
 import io
 
-fn test_dyn_basic() -> int {
-    x : dyn = 42;
+fn test_dyn_basic() -> int:
+    x : dyn = 42
     // Single-path dyn should work like normal value
-    if x != 42 { return 1; }
-    return 0;
-}
+    if x != 42:
+        return 1
+    return 0
 
-fn test_dyn_reassign() -> int {
-    x : dyn = 42;
-    x = "hello";
+fn test_dyn_reassign() -> int:
+    x : dyn = 42
+    x = "hello"
     // After reassignment, x should be string
-    if str_len(x) < 1 { return 1; }
-    return 0;
-}
+    if str_len(x) < 1:
+        return 1
+    return 0
 
-fn test_dyn_multi_path() -> int {
-    cond : int = 1;
-    x : dyn = 0;
-    if cond != 0 {
-        x = 42;
-    } else {
-        x = "hello";
-    }
+fn test_dyn_multi_path() -> int:
+    cond : int = 1
+    x : dyn = 0
+    if cond != 0:
+        x = 42
+    else:
+        x = "hello"
     // x could be int or string
     // Just verify it compiles and runs
-    return 0;
-}
+    return 0
 
-fn main() -> int {
-    r1 := test_dyn_basic();
-    if r1 != 0 { print("FAIL basic: "); println(int_str(r1)); return r1; }
-    r2 := test_dyn_reassign();
-    if r2 != 0 { print("FAIL reassign: "); println(int_str(r2)); return r2; }
-    r3 := test_dyn_multi_path();
-    if r3 != 0 { print("FAIL multipath: "); println(int_str(r3)); return r3; }
-    println("ALL PASS");
-    return 0;
-}
+fn main() -> int:
+    r1 := test_dyn_basic()
+    if r1 != 0:
+        print("FAIL basic: ")
+        println(int_str(r1))
+        return r1
+    r2 := test_dyn_reassign()
+    if r2 != 0:
+        print("FAIL reassign: ")
+        println(int_str(r2))
+        return r2
+    r3 := test_dyn_multi_path()
+    if r3 != 0:
+        print("FAIL multipath: ")
+        println(int_str(r3))
+        return r3
+    println("ALL PASS")
+    return 0
 ```
 
 - [ ] **Step 2: Verify**

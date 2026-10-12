@@ -70,64 +70,62 @@ def main() -> int:
     ok = [
         # 运行时界 slice 越界读/写必须 trap
         case("runtime_bounds_literal_index_oob_traps", """
-fn main() -> int {
-    a : [int; 5] = [10, 20, 30, 40, 50];
-    lo := 1; hi := 3;
-    s := a[lo..hi];
-    x := s[2];
-    return x;
-}
+fn main() -> int:
+    a : [int; 5] = [10, 20, 30, 40, 50]
+    lo := 1
+    hi := 3
+    s := a[lo..hi]
+    x := s[2]
+    return x
 """, SIGILL),
         case("runtime_bounds_var_index_oob_traps", """
-fn main() -> int {
-    a : [int; 5] = [10, 20, 30, 40, 50];
-    lo := 1; hi := 3;
-    s := a[lo..hi];
-    i := 2;
-    return s[i];
-}
+fn main() -> int:
+    a : [int; 5] = [10, 20, 30, 40, 50]
+    lo := 1
+    hi := 3
+    s := a[lo..hi]
+    i := 2
+    return s[i]
 """, SIGILL),
         case("runtime_bounds_store_oob_traps", """
-fn main() -> int {
-    a : [int; 5] = [10, 20, 30, 40, 50];
-    lo := 1; hi := 3;
-    s := a[lo..hi];
-    s[5] = 99;
-    return 0;
-}
+fn main() -> int:
+    a : [int; 5] = [10, 20, 30, 40, 50]
+    lo := 1
+    hi := 3
+    s := a[lo..hi]
+    s[5] = 99
+    return 0
 """, SIGILL),
         # 空切片（len=0）任何访问都越界
         case("empty_slice_index_traps", """
-fn main() -> int {
-    a : [int; 5] = [10, 20, 30, 40, 50];
-    lo := 2; hi := 2;
-    s := a[lo..hi];
-    return s[0];
-}
+fn main() -> int:
+    a : [int; 5] = [10, 20, 30, 40, 50]
+    lo := 2
+    hi := 2
+    s := a[lo..hi]
+    return s[0]
 """, SIGILL),
         # 合法访问不误伤：值必须正确（s[1] == 30）
         case("runtime_bounds_in_bounds_load_ok", """
-fn main() -> int {
-    a : [int; 5] = [10, 20, 30, 40, 50];
-    lo := 1; hi := 3;
-    s := a[lo..hi];
-    return s[1];
-}
+fn main() -> int:
+    a : [int; 5] = [10, 20, 30, 40, 50]
+    lo := 1
+    hi := 3
+    s := a[lo..hi]
+    return s[1]
 """, 30),
         # 字面量界 slice 的既有守卫不回归
         case("literal_bounds_oob_still_traps", """
-fn main() -> int {
-    a : [int; 5] = [10, 20, 30, 40, 50];
-    s := a[1..3];
-    return s[2];
-}
+fn main() -> int:
+    a : [int; 5] = [10, 20, 30, 40, 50]
+    s := a[1..3]
+    return s[2]
 """, SIGILL),
         case("literal_bounds_in_bounds_ok", """
-fn main() -> int {
-    a : [int; 5] = [10, 20, 30, 40, 50];
-    s := a[1..3];
-    return s[1];
-}
+fn main() -> int:
+    a : [int; 5] = [10, 20, 30, 40, 50]
+    s := a[1..3]
+    return s[1]
 """, 30),
     ]
     passed = sum(ok)

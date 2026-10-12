@@ -5,25 +5,25 @@
 
 ## 一、背景与动机
 
-内核路线（project-book 第五阶段）需要汇编级/硬件级能力——MMIO 是第一步。标准化问题：x86 有
+内核路线（`project-book` 第五阶段）需要汇编级/硬件级能力——MMIO 是第一步。标准化问题：x86 有
 标准手册可循，而 **arm64 SoC 外设各写各的、手册不统一**（内存映射因芯片而异）。结论：后端需要
 一个**能直接编译的具体硬件目标**——参考机（固定 MMIO 映射的虚拟标准机），真实硬件走平台投影。
 
 先例（均已批准）：
-- **crasm**（2026-08-08）：统一汇编层 + 特权指令固定集（mmio_read/mmio_write/barrier/...）+ 平台映射表
-- **alloc_at**（2026-08-13）：MMIO 页声明式进图获得 provenance（pointer-model.md）
+- **`crasm`**（2026-08-08）：统一汇编层 + 特权指令固定集（`mmio_read`/`mmio_write`/`barrier`/...）+ 平台映射表
+- **`alloc_at`**（2026-08-13）：MMIO 页声明式进图获得 `provenance`（`pointer-model.md`）
 - **平台桥抽象**（2026-08-16）：语义接口（数学）+ 后端实现（惯例隔离）
 - **地址 = 映射**（2026-08-15 语义定稿）：字节地址不是语义对象，只是经典投影实例
 
 ## 二、决策记录（2026-08-23 brainstorming 确认）
 
 1. **参考机 + 裸机输出**：后端直接编译到固定 MMIO 映射的参考机，产出裸机镜像（无 OS）
-2. **全局生效接入检查**：每次 MMIO 访问对照映射表验证——存在性与地址、宽度匹配、读写权限、volatile 顺序性（全面）
+2. **全局生效接入检查**：每次 MMIO 访问对照映射表验证——存在性与地址、宽度匹配、读写权限、`volatile` 顺序性（全面）
 3. **描述形态两者结合**：语言内声明（主）+ 外部数据文件（真实 SoC）
 4. **双方都生效**：语言层与 crasm 层共用同一全局映射表与检查
 5. **落地顺序**：先定义表描述格式 → 再完成 x64 映射表
 6. **范式无关**：设备声明不绑定物理地址——地址绑定下沉到投影层（与「地址 = 映射」定稿一致）
-7. **暂不接入能力模型**：能力格 v4（memory-model-capability-lattice.md）已发布——M1 定论：能力不提升一等公民（语义还原图上，授权归治理层）；本设计不绑定，与 v4 定位一致
+7. **暂不接入能力模型**：能力格 v4（`memory-model-capability-lattice.md`）已发布——M1 定论：能力不提升一等公民（语义还原图上，授权归治理层）；本设计不绑定，与 v4 定位一致
 
 ## 三、架构：三层结构（描述 → 检查 → 发射）
 
@@ -39,10 +39,10 @@ g_hw_sem
         ├── name / offset（设备内逻辑偏移）/ width(8|16|32|64) / perm(ro|wo|rw)
 ```
 
-没有 base、没有绝对地址——设备 = 逻辑身份 + 寄存器结构，量子/分布式/GPU 范式下照常可用。
+没有 `base`、没有绝对地址——设备 = 逻辑身份 + 寄存器结构，量子/分布式/GPU 范式下照常可用。
 语言声明与数据文件编译进**同一张表**，形式不同、语义同一。
 
-**语言内声明**（声明式进图，alloc_at 同路径）：
+**语言内声明**（声明式进图，`alloc_at` 同路径）：
 
 ```core
 device UART {                    // 无 @ 基址——不绑定任何硬件
@@ -51,7 +51,7 @@ device UART {                    // 无 @ 基址——不绑定任何硬件
 }
 ```
 
-**数据文件**（真实 SoC 用，复用 stdlib/toml.cr 解析器）：
+**数据文件**（真实 SoC 用，复用 `stdlib/toml.cr` 解析器）：
 
 ```toml
 [[device]]
@@ -60,7 +60,7 @@ name = "uart"                    # 无 base 字段
 name = "data"; offset = 0x00; width = 8; perm = "rw"
 ```
 
-**投影表（经典地址绑定 = 后端实现选择）**——device id → 物理基址：
+**投影表（经典地址绑定 = 后端实现选择）**——`device` id → 物理基址：
 
 ```
 uart → 0x3F200000    （x64 参考机，编译器内置）
@@ -69,12 +69,12 @@ uart → 0x09000000    （真实平台：QEMU virt，数据文件导入）
 ```
 
 x64 映射表 = 投影表的第一份实例。同一份语义表 + 不同投影表 = 同一程序编译到不同硬件。
-访问 `UART.DATA` 语义上是「逻辑设备内的逻辑寄存器」；只有发射时才解析为 基址+偏移 的经典 load/store。
+访问 `UART.DATA` 语义上是「逻辑设备内的逻辑寄存器」；只有发射时才解析为 基址+偏移 的经典 `load`/`store`。
 
 ### 2. 检查层
 
-**hw_check pass**：在 HDFG 上运行（与 ptr_analysis / region_check / provenance_verify 并列），
-消费 `g_hw_sem`。访问形式：语言层 `UART.DATA` 下降为携带 device+reg 引用的 IR 节点
+**`hw_check` pass**：在 HDFG 上运行（与 `ptr_analysis` / `region_check` / `provenance_verify` 并列），
+消费 `g_hw_sem`。访问形式：语言层 `UART.DATA` 下降为携带 `device`+`reg` 引用的 IR 节点
 （`IR_MMIO_READ/WRITE`）。
 
 | 检查 | 规则 | 违反示例 |
@@ -86,26 +86,26 @@ x64 映射表 = 投影表的第一份实例。同一份语义表 + 不同投影�
 
 全部编译期，零运行期开销。
 
-**crasm 双方都生效——「可解析即检查」**：crasm 的 `mmio_read(addr)` / `mmio_write(addr, val)`
-中，地址若经投影表**静态解析**回语义寄存器 → 四项检查照常；解析不到（动态地址）→ unsafe
-外部入口（与 0x 字面量同角色，见 pointer-model.md）。
+**`crasm` 双方都生效——「可解析即检查」**：`crasm` 的 `mmio_read(addr)` / `mmio_write(addr, val)`
+中，地址若经投影表**静态解析**回语义寄存器 → 四项检查照常；解析不到（动态地址）→ `unsafe`
+外部入口（与 0x 字面量同角色，见 `pointer-model.md`）。
 
 ```
 mmio_read(0x3F200000)    → 投影解析 → UART.DATA → 四项检查
 mmio_read(addr_var)      → 解析不到 → unsafe 边界（检查不适用）
 ```
 
-**volatile 实现**：IR 节点带 volatile 标记；`pass.cr`（常量折叠）、`opt.cr`（CSE/regalloc/调度）
+**`volatile` 实现**：IR 节点带 `volatile` 标记；`pass.cr`（常量折叠）、`opt.cr`（CSE/regalloc/调度）
 一律不消除、不重排、不合并 MMIO 读写——每个 MMIO 读都是副作用，读后不用也必须保留。
-发射为普通 load/store 到解析地址；跨核/硬件的顺序保障是 crasm `barrier` 的职责，不混入。
+发射为普通 `load`/`store` 到解析地址；跨核/硬件的顺序保障是 `crasm` `barrier` 的职责，不混入。
 
-**错误报告**：走现有 diag 体系，新错误码（E_MMIO_UNKNOWN_REG / E_MMIO_WIDTH_MISMATCH /
-E_MMIO_PERM / E_MMIO_VOLATILE），实现时在 error-codes 规格里定归属。
+**错误报告**：走现有 `diag` 体系，新错误码（`E_MMIO_UNKNOWN_REG` / `E_MMIO_WIDTH_MISMATCH` /
+`E_MMIO_PERM` / `E_MMIO_VOLATILE`），实现时在 `error-codes` 规格里定归属。
 
 ### 3. 发射层
 
 **参考机定义**（x64 投影表第一份实例）：编译器内置投影表（如 `src/arch/x86_64/hw_ref.toml`），
-第一版外设范围**只有 UART**（能打印 = 最小验证闭环）；timer / 中断控制器 / GPIO 后续扩展。
+第一版外设范围**只有 UART**（能打印 = 最小验证闭环）；`timer` / 中断控制器 / GPIO 后续扩展。
 
 **发射流程**：
 
@@ -128,23 +128,23 @@ IR_MMIO_READ/WRITE（语义引用 device+reg）
 
 ## 四、边界
 
-- crasm `mmio_read(addr)` 显式地址 = unsafe 外部入口（不可静态解析时），与 0x 字面量同角色，
+- `crasm` `mmio_read(addr)` 显式地址 = `unsafe` 外部入口（不可静态解析时），与 0x 字面量同角色，
   不与语义层混淆
 - 检查全部编译期，零运行期开销
 - 语言层 `device` 是声明不是运行时对象——映射表只活在编译期
 
 ## 五、测试与里程碑
 
-1. 语义表构建：`device` 声明解析 + toml 导入 → 同一张表（单测）
-2. hw_check pass + 四项检查测试（tests/selfhost 载体）
+1. 语义表构建：`device` 声明解析 + `toml` 导入 → 同一张表（单测）
+2. `hw_check` pass + 四项检查测试（`tests/selfhost` 载体）
 3. 投影表 + 地址解析（可解析即检查路径测试）
-4. x64 参考机投影表 + IR_MMIO 发射
+4. x64 参考机投影表 + `IR_MMIO` 发射
 5. `corearch --bare` 裸机输出
-6. 端到端：`.cr`（device UART 声明 + 打印）→ `--bare` → QEMU 运行 → 断言串口输出
+6. 端到端：`.cr`（`device` UART 声明 + 打印）→ `--bare` → QEMU 运行 → 断言串口输出
    （无 QEMU 环境时跳过）
 7. （后补）真实平台投影表数据文件（树莓派 / QEMU virt）
 
-回归：现有测试全部不破（test_pipeline / test_compile / test_pointer_safety 等）。
+回归：现有测试全部保持通过（`test_pipeline` / `test_compile` / `test_pointer_safety` 等）。
 
 ## 六、明确不做（YAGNI）
 
@@ -156,6 +156,6 @@ IR_MMIO_READ/WRITE（语义引用 device+reg）
 ## 七、参考
 
 - `docs/crasm.md`、`docs/superpowers/specs/2026-08-08-crasm-design.md`（特权指令固定集、平台映射表）
-- `docs/pointer-model.md`（alloc_at 声明式进图、unsafe 边界、地址 = 映射）
+- `docs/pointer-model.md`（`alloc_at` 声明式进图、`unsafe` 边界、地址 = 映射）
 - `docs/superpowers/specs/2026-08-16-platform-abstract-design.md`（语义接口 + 后端实现原则）
 - `docs/memory-model-capability-lattice.md`（能力格 v4，已发布——能力不提升一等公民）

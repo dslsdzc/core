@@ -1,7 +1,7 @@
 # Core 错误码参考
 
-> 定位:受众 = 开发者;状态 = active。
-> 出处:错误码数值与注释名 = src/compiler/ast.cr 的 EC_* 常量(每码唯一检查点,注释带本文编号,如 `EC_P_EXPECTED = 1001 // P001`);**词法族(L 族)例外**——lexer.cr 的 add_error 只传消息文本不带码,L 码为本文档侧编号,以消息文本为准。改码须同步 ast.cr 注释与本文。
+> 定位：受众 = 开发者；状态 = active。
+> 出处：错误码数值与注释名 = `src/compiler/ast.cr` 的 `EC_*` 常量（每码唯一检查点，注释带本文编号，如 `EC_P_EXPECTED = 1001 // P001`）；**词法族（L 族）例外**——`lexer.cr` 的 `add_error` 只传消息文本不带码，L 码为本文档侧编号，以消息文本为准。改码须同步 `ast.cr` 注释与本文。
 
 > **fail-closed 语义（2026-09-15，FC 批 T2 起）**：**默认阻断**——任何**不在豁免登记表**内的
 > 类型面诊断 ⇒ `rc=1` + **零产物**（不落目标 ELF、不落本次 `<out>.ccr`）。豁免表 =
@@ -14,9 +14,9 @@
 
 ---
 
-## L0xx — 词法 (Lexer)
+## L0xx — 词法（Lexer）
 
-> 注:本族码无数值常量(lexer add_error 不带码)——以消息模板为准,码为文档侧编号。
+> 注：本族码无数值常量（lexer 的 `add_error` 不带码）——以消息模板为准，码为文档侧编号。
 
 | 码 | 检查点 | 消息模板 | 触发条件 |
 |----|--------|---------|---------|
@@ -32,7 +32,7 @@
 | L010 | 小数后缀非法（f32/f64 = apx 的 CPU 位宽标注） | `Invalid float suffix: {suffix}` | 非 f32/f64 后缀 |
 | L011 | 无法识别的字符 | `Unknown character: '{c}'` | 源码中出现 ASCII 控制字符或全角空格等 |
 
-## P0xx — 语法 (Parser)
+## P0xx — 语法（Parser）
 
 | 码 | 检查点 | 消息模板 |
 |----|--------|---------|
@@ -67,7 +67,7 @@
 > （打印器取 `码 % 1000`）。三者均属**语法族（P 族）** ⇒ 按本文件开头的 fail-closed 语义：**前端任一即 `rc=1` + 零产物**
 > （不进入 lower / 不写 `.ccr` / 不产 ELF）。出处（本轮实读，`develop` = `662ff87d`）：`ast.cr` 常量三行 + `parser.cr` 三处 `check_error` 调用点。
 
-## N0xx — 名字解析 (Name Resolution)
+## N0xx — 名字解析（Name Resolution）
 
 | 码 | 检查点 | 消息模板 |
 |----|--------|---------|
@@ -93,7 +93,7 @@
 | N020 | 导入文件读取失败 | `Failed to read import '{id}'` |
 | N021 | 符号重导出冲突 | `Name '{name}' re-exported from multiple modules` |
 
-## I0xx — 类型推断 (Inference)
+## I0xx — 类型推断（Inference）
 
 | 码 | 检查点 | 消息模板 |
 |----|--------|---------|
@@ -106,7 +106,7 @@
 
 ## TA0xx — 类型检查：赋值与绑定
 
-> TA02 自 2026-09-13（R2 P5 Task 6 / TODO #2026-09-11-14）起**实现**并列入 run_frontend 硬错误名单
+> TA02 自 2026-09-13（R2 P5 Task 6 / TODO #2026-09-11-14）起**实现**并列入 `run_frontend` 硬错误名单
 > （rc=1 且不产出产物）：修复前 `EXPR_LET` 站点**无任何兼容检查**（符号取注解行、后端按注解
 > 行发射 = 静默错产物；`EC_TA_DECL` 定义零 raise）。判定点 = `checker.cr::check_let_annot_compat`
 > （局部 `EXPR_LET` + 全局 `check_global_let` 两调用点共用），组合函数 = `type_compat_strict`
@@ -209,7 +209,7 @@
 
 ## TS0xx — 类型检查：结构体字面量
 
-> 四码自 2026-09-11（TODO #2026-09-11-11）起**全部实现**并列入 run_frontend 硬错误名单（rc=1 且不产出
+> 四码自 2026-09-11（TODO #2026-09-11-11）起**全部实现**并列入 `run_frontend` 硬错误名单（rc=1 且不产出
 > 产物）：修复前字段名被丢弃（值按声明位序绑定 = 静默错值），四校验均不存在。字段值现按
 > **名字**绑定（与 Python bootstrap 的 gen_struct_lit 同语义；求值顺序仍为源序）。
 

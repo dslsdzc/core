@@ -45,8 +45,15 @@
 
 ```core
 // 直调形（本批实测 RED）：期望「拒绝」（类型错误）；修前 check=0 · build=0 · ELF 垃圾 / interp 15
-fn g[T](t: T, x: T?) -> int { return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } }; }
-fn main() -> int { d : dex, apx = 7.0; return g(1, d); }
+fn g[T](t: T, x: T?) -> int:
+    return match x:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
+fn main() -> int:
+    d : dex, apx = 7.0
+    return g(1, d)
 ```
 - **(甲) 落点**：`checker.cr` 的 `unify_types` 丢弃点（F3 面）——按 lead 三阶段 S1（report-only）→ S2（修站点）→ S3（升硬错）。
 - **(乙) 落点**：`monomorph.cr` `EXPR_FN` 分支**连形参链一起克隆**（`gen_clone_consecutive(b, c)`）；

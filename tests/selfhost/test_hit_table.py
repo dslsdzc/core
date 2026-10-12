@@ -34,23 +34,22 @@ SMOKE_MEM = BASE / "tests" / "hit" / "smoke_mem.cr"
 OPT = "1"  # 与 corec build 默认同（corec/main.cr: g_opt_level 默认 1）
 
 # 载体（直线子集：const/store/add/sub/load/return——无 &&/||（短路分支化超 M1））
-SUB_SRC = "fn main() -> int {\n    a := 7;\n    b := 5;\n    return a - b;\n}\n"
+SUB_SRC = "fn main() -> int:\n    a := 7\n    b := 5\n    return a - b\n"
 SUB_RC = 2  # 7 - 5
 
-ADD_SRC = "fn main() -> int {\n    a := 7;\n    b := 5;\n    return a + b;\n}\n"
+ADD_SRC = "fn main() -> int:\n    a := 7\n    b := 5\n    return a + b\n"
 ADD_RC = 12  # 7 + 5（add → sub 反减：12 = 7 - (0 - 5)）
 
-MEM_SRC = """fn main() -> int {
-    a: ., mut = 6;
-    b := 3;
-    a = a + b;
-    a = a - 4;
-    return a;
-}
+MEM_SRC = """fn main() -> int:
+    a: ., mut = 6
+    b := 3
+    a = a + b
+    a = a - 4
+    return a
 """
 MEM_RC = 5  # 6+3-4（链式加减 + 内存读写，与 tests/hit/smoke_mem.cr 同源同期望）
 
-MOD_SRC = "fn main() -> int {\n    a := 7;\n    b := 3;\n    return a % b;\n}\n"
+MOD_SRC = "fn main() -> int:\n    a := 7\n    b := 3\n    return a % b\n"
 
 # `--dump-events` 事件行白名单形态（B3/#2026-09-16-24 修复）：`  ev <name> dst=<v> s1=<v> s2=<v>`；
 # v ∈ `\d+` 或 `pool\d+`（池引用）。emit 侧格式见 corearch.cr `dump_ev` 分支。
@@ -434,32 +433,29 @@ def test_hit_lower_sources_check_clean() -> bool:
 # 逐字节对照载体只用非门面指令：store/load（as 槽载入）/jump/cst。
 # jump 对照载体：if（无 else）体内 store 链 + 尾 jump 指向合并标签 = if 后首个
 # 事件指令（d 的 load——事件序 4）。跳转目标 = 事件序（jump 事件 s1 域）。
-JUMP_SRC = """fn main() -> int {
-    a : ., mut = 10;
-    b := 3;
-    if a > b {
-        c := a as int;
-        a = c;
-    }
-    d := a as int;
-    return d;
-}
+JUMP_SRC = """fn main() -> int:
+    a : ., mut = 10
+    b := 3
+    if a > b:
+        c := a as int
+        a = c
+    d := a as int
+    return d
 """
 JUMP_EVENTS = ["ev load", "ev store", "ev store", "ev jump s1=4", "ev load", "ev store"]
 JUMP_RC = 10  # 10>3 真 → c=10、a=10 → d=10
 
 # disp 对照载体：let 初始化 store ×2 + as 槽 load/store 链 + 变量移动 store
 #（事件全部 auto disp8——旧路径 e2_ld/e2_st 同规则；固定 disp32 旧发射会红）
-DISP_SRC = """fn main() -> int {
-    a : ., mut = 10;
-    b := 3;
-    c := a as int;
-    a = c;
-    d := b as int;
-    e := a as int;
-    a = d;
-    return a;
-}
+DISP_SRC = """fn main() -> int:
+    a : ., mut = 10
+    b := 3
+    c := a as int
+    a = c
+    d := b as int
+    e := a as int
+    a = d
+    return a
 """
 DISP_EVENTS = ["ev store", "ev store", "ev load", "ev store", "ev store",
                "ev load", "ev store", "ev load", "ev store", "ev store"]
@@ -471,12 +467,11 @@ BIG_RC = 18  # a19 = a18
 
 
 def big_src() -> str:
-    lines = ["fn main() -> int {"]
+    lines = ["fn main() -> int:"]
     for i in range(20):
-        lines.append(f"    a{i} : ., mut = {i};")
-    lines.append("    a19 = a18;")
-    lines.append("    return a19;")
-    lines.append("}")
+        lines.append(f"    a{i} : ., mut = {i}")
+    lines.append("    a19 = a18")
+    lines.append("    return a19")
     return "\n".join(lines) + "\n"
 
 
@@ -488,12 +483,12 @@ CST_FIX = TABLE.read_text().replace("events = 9", "events = 10", 1) + (
     "[[event.proj.step]]\nrex_w = 1\nopcode = [0xC7]\nmodrm_reg_digit = 0\n"
     "modrm_rm_role = \"dst\"\nrm_mode = 1\nimm_size = 4\nimm_role = \"src1\"\n")
 
-IMM_SRC = "fn main() -> int {\n    a := 63;\n    return a;\n}\n"
+IMM_SRC = "fn main() -> int:\n    a := 63\n    return a\n"
 IMM_EVENTS = ["ev cst"]
 IMM_RC = 63
 
 # 池对照载体：const → 池 load（M1 语义——字节与旧路径 e2_li 有意不同，判据 = 运行）
-POOL_SRC = "fn main() -> int {\n    a := 7;\n    b := 5;\n    return a - b;\n}\n"
+POOL_SRC = "fn main() -> int:\n    a := 7\n    b := 5\n    return a - b\n"
 POOL_LINES = ["pool 7 5"]
 POOL_EVENTS = ["ev load s1=pool0", "ev store", "ev load s1=pool1", "ev store"]
 POOL_RC = 2  # a-b 指令 = mw 门旧路径——池载入 + 初始化 store 经表
@@ -1590,7 +1585,7 @@ def main():
             test_v2_fixture_multi_step_sections(tmp),
             test_v2_bad_field_rejects(tmp),
             # M2a Task 2：事件流注入通道 + v2 形态发射（跳转/disp/imm 逐字节对照）
-            test_inject_byte_compare(tmp, "simple", "fn main() -> int {\n    a : ., mut = 7;\n    return a;\n}\n",
+            test_inject_byte_compare(tmp, "simple", "fn main() -> int:\n    a : ., mut = 7\n    return a\n",
                                      ["ev store"], 7),
             test_inject_byte_compare(tmp, "jump", JUMP_SRC, JUMP_EVENTS, JUMP_RC),
             test_inject_byte_compare(tmp, "disp", DISP_SRC, DISP_EVENTS, DISP_RC),

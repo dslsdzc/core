@@ -367,18 +367,7 @@ def read_ccr(path: str) -> bytes:
 # --- tests ---
 
 PROBE_SRC = (
-    "fn pure_add(a: int, b: int) -> int { return a + b; }\n"
-    "fn main() -> int {\n"
-    "    arr : [int; 4], mut = [0, 0, 0, 0];\n"
-    "    i : int = 1;\n"
-    "    v : int = 9;\n"
-    "    arr[i] = v;\n"
-    "    arr[0] = v + 1;\n"
-    "    x := arr[i];\n"
-    "    s : int = pure_add(x, v);\n"
-    "    s = s + arr[0];\n"
-    "    return s;\n"
-    "}\n")
+    "fn pure_add(a: int, b: int) -> int:\n    return a + b\nfn main() -> int:\n    arr : [int; 4], mut = [0, 0, 0, 0]\n    i : int = 1\n    v : int = 9\n    arr[i] = v\n    arr[0] = v + 1\n    x := arr[i]\n    s : int = pure_add(x, v)\n    s = s + arr[0]\n    return s\n")
 
 
 # --- Task 2: ENT 实记录期望（Python 独立模型 + 手算对照）---
@@ -394,13 +383,7 @@ IR_CALL = 4
 IR_CALL_EXTERN = 45
 
 ENT_SRC = (
-    "fn identity(n: int) -> int { return n; }\n"
-    "fn main() -> int {\n"
-    "    x := 1;\n"
-    "    x = x + 1;\n"
-    "    x = x + 2;\n"
-    "    return x;\n"
-    "}\n")
+    "fn identity(n: int) -> int:\n    return n\nfn main() -> int:\n    x := 1\n    x = x + 1\n    x = x + 2\n    return x\n")
 
 
 def model_compute_entries(nod, funcs, gcount, regs):
@@ -762,7 +745,7 @@ def _mutate_ent_field(data, rec_idx, field_off, value, fmt='<I'):
 
 def test_v7_loader_rejects_bad_ent_version():
     """loader ENT 实记录校验（激活面）：version 字段 = 0 → 拒绝。"""
-    src = "fn main() -> int { return 42; }\n"
+    src = "fn main() -> int:\n    return 42\n"
     ccr_path = os.path.join(BASE, 'build/test_v7_entver.ccr')
     try:
         os.unlink(ccr_path)
@@ -794,7 +777,7 @@ def test_v7_loader_rejects_bad_ent_version():
 def test_v7_loader_rejects_ent_liveend_oob():
     """loader ENT 区间校验：live_end（半开）越出 NOD 空间（ele > instr_cnt）
     → 拒绝。"""
-    src = "fn main() -> int { return 42; }\n"
+    src = "fn main() -> int:\n    return 42\n"
     ccr_path = os.path.join(BASE, 'build/test_v7_entle.ccr')
     try:
         os.unlink(ccr_path)
@@ -828,7 +811,7 @@ def test_v7_loader_rejects_ent_liveend_oob():
 def test_v7_loader_rejects_ent_ls_ge_le():
     """loader ENT 区间校验：live_start ≥ live_end（半开区间倒置/退化）→
     拒绝。"""
-    src = "fn main() -> int { return 42; }\n"
+    src = "fn main() -> int:\n    return 42\n"
     ccr_path = os.path.join(BASE, 'build/test_v7_entls.ccr')
     try:
         os.unlink(ccr_path)
@@ -861,8 +844,7 @@ def test_v7_loader_rejects_sym_ent_block_mismatch():
     """loader 双写对照（激活面）：SYM func first_ent 与 ENT 实块界失配 →
     拒绝。byte mutation：func0 记录 first_ent 字段 +1（REG 根行对照与
     ENT 块界对照双路径同源拒绝）。"""
-    src = ("fn add(a: int, b: int) -> int { return a + b; }\n"
-           "fn main() -> int { return 42; }\n")
+    src = ("fn add(a: int, b: int) -> int:\n    return a + b\nfn main() -> int:\n    return 42\n")
     ccr_path = os.path.join(BASE, 'build/test_v7_entblk.ccr')
     try:
         os.unlink(ccr_path)
@@ -905,12 +887,7 @@ def test_v7_layout_and_walk():
     """段表架构：magic/version=8/8 段规范序（EDG=tag 6 必落；TYPE=7/IFACE=8
     空壳——R2 P4 Task 1）/offset 连续/NOD 40B（P6 T3 起）+ 邻接域/EDG 段完整走查 ==
     文件大小。"""
-    src = ("fn add(a: int, b: int) -> int { return a + b; }\n"
-           "fn main() -> int {\n"
-           "    s : ., mut = 0;\n"
-           "    for i in 0..4 { s = s + i; }\n"
-           "    return s;\n"
-           "}\n")
+    src = ("fn add(a: int, b: int) -> int:\n    return a + b\nfn main() -> int:\n    s : ., mut = 0\n    for i in 0..4:\n        s = s + i\n    return s\n")
     ccr_path = os.path.join(BASE, 'build/test_v7_layout.ccr')
     for p in (ccr_path,):
         try:
@@ -1014,7 +991,7 @@ def test_v7_object_surface_recipe_readable():
         # 出边（函数化收敛）。上列运行时断言经收敛后通道 = 封装体行为证明。
         kern_src = os.path.join(BASE, 'src/lattice/ent_kernel.cr')
         ktext = open(kern_src, encoding='utf-8').read()
-        assert 'fn nod_inputs(n: int) {' in ktext, \
+        assert 'fn nod_inputs(n: int):' in ktext, \
             "kernel nod_inputs recipe-query wrapper missing (dangling note reverted)"
         drv_src = os.path.join(BASE, 'src/compiler/corearch.cr')
         dtext = open(drv_src, encoding='utf-8').read()
@@ -1098,7 +1075,7 @@ def test_v7_loader_rejects_version_ne_7():
     """v9-only（R2 P6 Task 3 起合法版本 = 9）：version 改成 7/8/6/5（**旧 v7 六段
     文件与 v8 文件整类拒收**——D10 的落点：不得静默当「TYPE/IFACE 缺席 = 空表」）或
     任意非 9 → corearch 必须拒绝。"""
-    src = "fn main() -> int { return 42; }\n"
+    src = "fn main() -> int:\n    return 42\n"
     ccr_path = os.path.join(BASE, 'build/test_v7_reject.ccr')
     try:
         os.unlink(ccr_path)
@@ -1132,7 +1109,7 @@ def test_v7_loader_rejects_backward_edge():
     """拓扑不变量（v7 §4 规则 1）：EDG 边 to_nod 必须 > 所属节点——byte
     mutation 把 node 0 唯一出边（0→3 arena def-use）的 to_nod 改成 0（自环）
     → corearch 必须拒绝（'invalid .ccr'）。"""
-    src = "fn main() -> int { return 42; }\n"
+    src = "fn main() -> int:\n    return 42\n"
     ccr_path = os.path.join(BASE, 'build/test_v7_selfloop.ccr')
     try:
         os.unlink(ccr_path)
@@ -1169,7 +1146,7 @@ def test_v7_loader_rejects_backward_edge():
 def test_v7_loader_rejects_edg_count_mismatch():
     """Σ 校验（v7 §4 规则 3）：NOD edge_count 总和 ≠ EDG edg_count → corearch
     必须拒绝。byte mutation：node 0 edge_count 1 → 2（EDG 段未加记录）。"""
-    src = "fn main() -> int { return 42; }\n"
+    src = "fn main() -> int:\n    return 42\n"
     ccr_path = os.path.join(BASE, 'build/test_v7_edgcnt.ccr')
     try:
         os.unlink(ccr_path)
@@ -1208,11 +1185,7 @@ def test_v7_roundtrip_elf():
     0+1+2+3+4+5 = 15 → ELF 退出码 15；corearch 直载同文件同结果；中间产物 =
     v7 段表架构（version 9/EDG 必落/走查全绿——R2 P4 Task 1 起 +TYPE/IFACE
     空壳两段）。"""
-    src = ("fn main() -> int {\n"
-           "    s : ., mut = 0;\n"
-           "    for i in 0..6 { s = s + i; }\n"
-           "    return s;\n"
-           "}\n")
+    src = ("fn main() -> int:\n    s : ., mut = 0\n    for i in 0..6:\n        s = s + i\n    return s\n")
     ccr_path = os.path.join(BASE, 'build/test_v7_rt.ccr')
     out = os.path.join(BASE, 'build/test_v7_rt')
     with tempfile.NamedTemporaryFile('w', suffix='.cr', delete=False) as f:
@@ -1339,11 +1312,7 @@ def test_v7_sym_reg_target_shape():
     - 根 region（SG_FUNC）行与 func 记录 1:1，span 连续铺满 NOD 空间，
       first/last = 本函数条目块；嵌套 region 条目范围 = 定值点 ∈ [enter, exit)
       （文件条目序连续一段）；变量命名空间行数覆盖 ENT/NOD 引用。"""
-    src = ("fn main() -> int {\n"
-           "    s : ., mut = 0;\n"
-           "    for i in 0..4 { s = s + i; }\n"
-           "    return s;\n"
-           "}\n")
+    src = ("fn main() -> int:\n    s : ., mut = 0\n    for i in 0..4:\n        s = s + i\n    return s\n")
     ccr_path = os.path.join(BASE, 'build/test_v7_symreg.ccr')
     try:
         os.unlink(ccr_path)
@@ -1430,13 +1399,7 @@ def test_v7_sym_func_shapes():
     参数 = var 声明区前 param_count 个（行序 = 参数序，类型 int）；root_region
     行序 1:1、span 连续铺满 NOD 空间；first/last_ent 实回填（add 参数 a/b 从未
     定值 → def=-1 条目 → param_ents = 其条目 id；main 无参；条目范围 = 块界）。"""
-    src = ("fn add(a: int, b: int) -> int { return a + b; }\n"
-           "fn main() -> int {\n"
-           "    x := 1;\n"
-           "    x = x + 1;\n"
-           "    x = x + 2;\n"
-           "    return x;\n"
-           "}\n")
+    src = ("fn add(a: int, b: int) -> int:\n    return a + b\nfn main() -> int:\n    x := 1\n    x = x + 1\n    x = x + 2\n    return x\n")
     ccr_path = os.path.join(BASE, 'build/test_v7_symparams.ccr')
     try:
         os.unlink(ccr_path)
@@ -1518,11 +1481,7 @@ def test_v7_loader_rejects_root_span_beyond_nod_space():
     无上界校验（ENT 有 ele > instr_cnt 拒绝先例）。损坏文件把末函数 root
     region 的 exit_nod 推出 NOD 空间（exit == instr_cnt + 1）→ corearch 必须
     拒绝（'invalid .ccr'）。"""
-    src = ("fn main() -> int {\n"
-           "    s : ., mut = 0;\n"
-           "    for i in 0..4 { s = s + i; }\n"
-           "    return s;\n"
-           "}\n")
+    src = ("fn main() -> int:\n    s : ., mut = 0\n    for i in 0..4:\n        s = s + i\n    return s\n")
     ccr_path = os.path.join(BASE, 'build/test_v7_rootspan.ccr')
     try:
         os.unlink(ccr_path)
@@ -1571,11 +1530,7 @@ def test_v7_save_rejects_var_block_misalignment():
     构建路径永不注入）后 Σ 不变，旧实现静默落盘行序错位的文件（声明区/
     var 命名空间漂移）。位置级守卫（vs == 前缀累计）必须拒绝：rc != 0、
     不落盘。"""
-    src = ("fn add(a: int, b: int) -> int { return a + b; }\n"
-           "fn main() -> int {\n"
-           "    x := 1;\n"
-           "    return x + 1;\n"
-           "}\n")
+    src = ("fn add(a: int, b: int) -> int:\n    return a + b\nfn main() -> int:\n    x := 1\n    return x + 1\n")
     ccr_path = os.path.join(BASE, 'build/test_v7_varshift.ccr')
     with tempfile.NamedTemporaryFile('w', suffix='.cr', delete=False) as f:
         f.write(src)
@@ -1616,8 +1571,7 @@ def test_v7_loader_rejects_ent_var_foreign_block():
     起点 → 逐条语义校验（ev 命名空间 :1431/区间 :1432/def 关系 :1433-1436）
     全过（只动 var_id 一字段）→ 块重推导见 func0 首条 var 不在其窗口 →
     pcnt=0 与 SYM first_ent 实值失配 → 拒绝。命中点唯一 = :1471-1478。"""
-    src = ("fn add(a: int, b: int) -> int { return a + b; }\n"
-           "fn main() -> int { return 42; }\n")
+    src = ("fn add(a: int, b: int) -> int:\n    return a + b\nfn main() -> int:\n    return 42\n")
     ccr_path = os.path.join(BASE, 'build/test_v7_entblk2.ccr')
     try:
         os.unlink(ccr_path)
@@ -1658,7 +1612,7 @@ def test_v7_loader_rejects_ent_var_foreign_block():
 def test_v7_loader_rejects_ent_var_namespace_oob():
     """Task 2 review R2——ENT var_id 命名空间校验（ccr_io.cr :1431）：var_id
     改写出 SYM 行重建总量（= loader 侧 g_ir_var_count）→ 逐条校验拒绝。"""
-    src = "fn main() -> int { return 42; }\n"
+    src = "fn main() -> int:\n    return 42\n"
     ccr_path = os.path.join(BASE, 'build/test_v7_entns.ccr')
     try:
         os.unlink(ccr_path)
@@ -1703,7 +1657,7 @@ def _first_def_entry(ents):
 def test_v7_loader_rejects_ent_def_nod_oob():
     """Task 2 review R2——ENT def_nod 越界（ccr_io.cr :1434）：定值条目的
     def_nod 改写为 instr_cnt（= NOD 空间外第一个坐标）→ 拒绝。"""
-    src = "fn main() -> int { return 42; }\n"
+    src = "fn main() -> int:\n    return 42\n"
     ccr_path = os.path.join(BASE, 'build/test_v7_entdef.ccr')
     try:
         os.unlink(ccr_path)
@@ -1739,7 +1693,7 @@ def test_v7_loader_rejects_ent_def_ne_live_start():
     """Task 2 review R2——ENT 定值条目 def == live_start 失配（ccr_io.cr
     :1435）：定值条目 def_nod 改写为 els+1（仍在 NOD 空间内 → 只触发
     ed != els 分支）→ 拒绝。"""
-    src = "fn main() -> int { return 42; }\n"
+    src = "fn main() -> int:\n    return 42\n"
     ccr_path = os.path.join(BASE, 'build/test_v7_entdls.ccr')
     try:
         os.unlink(ccr_path)
@@ -1803,12 +1757,7 @@ def test_v7_cache_hit_restore_path():
     elf_cold2 = os.path.join(BASE, 'build', 'test_v7_cache_cold2.elf')
     artifacts = [src_path, out_cold, out_warm, out_hyb, out_cold2,
                  elf_cold, elf_warm, elf_hyb, elf_cold2]
-    src1 = ("fn mul2(x: int) -> int { return x * 2; }\n"
-            "fn main() -> int {\n"
-            "    s : ., mut = 0;\n"
-            "    for i in 0..4 { s = s + mul2(i); }\n"
-            "    return s;\n"   # Σ mul2(0..3) = 0+2+4+6 = 12
-            "}\n")
+    src1 = ("fn mul2(x: int) -> int:\n    return x * 2\nfn main() -> int:\n    s : ., mut = 0\n    for i in 0..4:\n        s = s + mul2(i)\n    return s\n")
     src2 = src1.replace('0..4', '0..6')  # Σ mul2(0..5) = 30
 
     def ccr_run(out: str) -> None:
@@ -1902,32 +1851,7 @@ def test_v7_cache_hit_restore_path():
 # 边跨函数 = 0、15 个函数各自携带 kind=1 边 ⇒ ③ 非空非退化）。
 
 CHAIN_SRC = (
-    "fn pure_add(a: int, b: int) -> int { return a + b; }\n"
-    "fn id[T](x: T) -> T { return x; }\n"
-    "fn effect() { a : ., mut = 0; a = 1; a = 2; }\n"
-    "extern fn ext_probe(x: int) -> int;\n"
-    "struct Counter { n: int }\n"
-    "impl Counter {\n"
-    "    fn bump(self) { }\n"          # dyn 方法（间接调用载体）
-    "}\n"
-    "fn main() -> int {\n"
-    "    s : ., mut = 0;\n"
-    "    s = 1;\n"
-    "    p := pure_add(s, 1);\n"        # 可证纯调用（性质①载体）
-    "    s = p;\n"
-    "    q := id(s);\n"                 # 泛型纯调用（Task 1 前 = 意外入链的 RED 载体）
-    "    s = s + q;\n"
-    "    effect();\n"                   # store 体效应调用（②-a）
-    "    r := ext_probe(s);\n"          # extern（②-b）
-    "    s = s + r;\n"
-    "    b := load64(s);\n"             # 不可解析 runtime builtin（②-c）
-    "    s = s + b;\n"
-    "    c : Counter = Counter { n: 7 };\n"
-    "    d : dyn = c;\n"
-    "    d.bump();\n"                   # 间接调用（②-d）
-    "    s = s + 1;\n"
-    "    return s;\n"
-    "}\n")
+    "fn pure_add(a: int, b: int) -> int:\n    return a + b\nfn id[T](x: T) -> T:\n    return x\nfn effect():\n    a : ., mut = 0\n    a = 1\n    a = 2\nextern fn ext_probe(x: int) -> int\nstruct Counter:\n    n: int\nimpl Counter:\n    fn bump(self):\nfn main() -> int:\n    s : ., mut = 0\n    s = 1\n    p := pure_add(s, 1)\n    s = p\n    q := id(s)\n    s = s + q\n    effect()\n    r := ext_probe(s)\n    s = s + r\n    b := load64(s)\n    s = s + b\n    c : Counter = Counter { n= 7 }\n    d : dyn = c\n    d.bump()\n    s = s + 1\n    return s\n")
 
 
 def _op_nodes(nod, opcode, lo=0, hi=-1):

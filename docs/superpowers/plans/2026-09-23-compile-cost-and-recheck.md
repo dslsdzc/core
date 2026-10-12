@@ -290,13 +290,11 @@
 
 ```
 src/compiler/region_check.cr:5-11
-fn subgraph_containing(node_seq: int) -> int {
+fn subgraph_containing(node_seq: int) -> int:
     // 显式映射：O(1) 归属查询（g_df_node_region 由 df_create_node 写入）
-    if node_seq >= 0 && node_seq < g_df_node_count {
-        return r64(g_df_node_region, node_seq * 8);
-    }
-    return -1;
-}
+    if node_seq >= 0 && node_seq < g_df_node_count:
+        return r64(g_df_node_region, node_seq * 8)
+    return -1
 ```
 - `g_df_node_region` 的**写点唯一**：`dataflow.cr:103` `w64(g_df_node_region, nid * 8, g_cur_sg);`（在 `df_create_node` 内，**每节点一次**）。
 - ⇒ **修法是「去掉每调用全扫」，不是发明新算法。**

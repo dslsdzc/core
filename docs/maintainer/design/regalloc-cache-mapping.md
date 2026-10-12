@@ -1,6 +1,6 @@
 # 寄存器分配:缓存语义映射实例
 
-> 定位:受众 = 维护者(分配器/opt.cr/一致性自检);状态 = active。
+> 定位：受众 = 维护者(分配器/opt.cr/一致性自检)；状态 = active。
 > 本文是寄存器分配在 Core 架构中的正式参考文档——缓存语义(条款权威 = docs/academic/cache-semantics.md;层定义 = docs/maintainer/design/materialization-space.md)的寄存器映射实例;存在区间载体 = v6 ENT(docs/maintainer/design/existence-structure.md)。
 > 设计决策记录(日期/排除方向/讨论):docs/superpowers/specs/2026-08-27-regalloc-cache-mapping-design.md;分配器逻辑契约文档 = src/compiler/regalloc-consistency.cr(v6 分支)。
 > 本文 2026-09 重写:v6 对齐(ENT 区间/home/sweep 共存)+ 实现状态分线(develop vs lattice-ir-v6)。
@@ -20,7 +20,7 @@
 | 共存 | 两条目存在区间相交(对称、无传递性;v6 sweep 推导,不落盘) |
 | 寄存器映射实例 | 寄存器文件 = 缓存层、home = 栈槽(条款 7) |
 
-## 一、定位:分配是映射实例,不是编译器 pass
+## 一、定位:映射实例而非编译器 pass
 
 寄存器分配与区域/arena/字节权限同族,是格 → 编码的映射实例(条款 7):
 
@@ -36,12 +36,12 @@
 - 正确性 **order-free**:对全部可能执行陈述,不对某条线性化路径
 - 范式映射表 = 映射正确性定理表——寄存器实例是其中一行(经典行),与字节内存行同构:证明缓存语义 ⊇ 该实现
 
-## 二、语义基座:驱逐不变量 = 语义保持定理
+## 二、语义基座:驱逐不变量与语义保持定理
 
 公理 = 条款 1–7(docs/academic/cache-semantics.md)。其中:
 
 - **驱逐不变量(条款 2)**:⟦G ∖ storage(e)⟧ = ⟦G⟧——驱逐任意条目不改变可观测语义
-- 分配器放寄存器还是栈、放多久 = 放置/替换策略——**算法零证明**,语义保持不依赖具体贪心(生成器 + 验证器分离;VeriLocc 同构先例)
+- 分配器选寄存器还是栈、保留时长 = 放置/替换策略——**算法零证明**,语义保持不依赖具体贪心(生成器 + 验证器分离;VeriLocc 同构先例)
 - **无格承诺**:判定/定理只在关系层面陈述——共存无传递性(最弱理论);对一切格成立
 
 ## 三、对象与 v6 载体

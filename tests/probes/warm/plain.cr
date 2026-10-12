@@ -1,4 +1,3 @@
-fn main() -> int {
-    x := 1 + 2;
-    return x;
-}
+fn main() -> int:
+    x := 1 + 2
+    return x

@@ -1,9 +1,9 @@
-# 术语表(Glossary)——Core 架构术语
+# 术语表（Glossary）——Core 架构术语
 
-> 定位:受众 = maintainers(兼 contributors);状态 = active;出处 = 各术语「出处」列的文档与
-> `src/compiler/lexer.cr`(语言关键字只以它为准,本表不重复);实现与文档冲突时以源码为准(既有惯例)。
-> 规则:本表只收**架构级术语**,实现细节与设计论证在出处文档,不在本表展开。
-> 演进:2026-08-27 v3 全量扩充 → 2026-09-06 v4 校准(去 .corespec 退役残留、出处链接对齐、重复表压缩)。
+> 定位：受众 = maintainers（兼 contributors）；状态 = active；出处 = 各术语「出处」列的文档与
+> `src/compiler/lexer.cr`（语言关键字只以它为准，本表不重复）；实现与文档冲突时以源码为准（既有惯例）。
+> 规则：本表只收**架构级术语**，实现细节与设计论证在出处文档，不在本表展开。
+> 演进：2026-08-27 v3 全量扩充 → 2026-09-06 v4 校准（去 `.corespec` 退役残留、出处链接对齐、重复表压缩）。
 
 ## 一、设计出发点
 
@@ -34,7 +34,7 @@
 | 线性投影 | v5 格形态 = 从图线性化的投影;v6 升级为存在结构本体 | specs/lattice-ir-v6-format |
 | 部署配置 | 执行方式由部署配置声明决定,图语义不变 | maintainer/design/execution-model.md |
 
-> 注:.corespec/.csr 独立规约形态已退役(2026-09-06)——规约 = .cr 语法内约束,见 maintainer/adr/adr-0001。
+> 注：`.corespec`/`.csr` 独立规约形态已退役（2026-09-06）——规约 = `.cr` 语法内约束，见 `maintainer/adr/adr-0001`。
 
 ## 四、存在格条款(1–7 + 2′)+ 边界
 
@@ -51,14 +51,14 @@
 | 地址 = 映射 | `&x` = (条目标识, 偏移);字节地址只是经典投影 | 6 |
 | 映射实例正确性 | 映射实例保持条款 1-6 = 范式映射表的行定理 | 7 |
 
-> 完整条款 + 字节权限层/home/存在区间/驱逐配对等扩展术语:maintainer/design/memory-model.md。
-> **层本体 = 存在格**(四问/七字段/归类表/划界):maintainer/design/materialization-space.md。
+> 完整条款 + 字节权限层/home/存在区间/驱逐配对等扩展术语：`maintainer/design/memory-model.md`。
+> **层本体 = 存在格**（四问/七字段/归类表/划界）：`maintainer/design/materialization-space.md`。
 
 ## 五、寄存器分配(缓存语义映射实例)
 
 一致性判定/共存互斥/读点无陈旧/调用点失效契约/remat/共存偏序 width/order-free/
 上下文贪心 CAG/spill/栈槽/装载存储/写回——全部术语定义与论证见
-maintainer/design/regalloc-cache-mapping.md(正式参考),本表不重复。
+`maintainer/design/regalloc-cache-mapping.md`（正式参考），本表不重复。
 
 ## 六、执行标注空间
 
@@ -86,5 +86,5 @@ maintainer/design/regalloc-cache-mapping.md(正式参考),本表不重复。
 
 ## 九、讨论判据与术语演进
 
-- 判据(何时一个新词值得进本表):跨文档引用 ≥2 处且语义唯一;否则留在出处文档
-- v3(2026-08-27)全量扩充 → v4(2026-09-06)校准;历史演进细节见 git 历史,不设演进记录节
+- 判据（何时一个新词值得进本表）：跨文档引用 ≥2 处且语义唯一；否则留在出处文档。
+- v3（2026-08-27）全量扩充 → v4（2026-09-06）校准；历史演进细节见 git 历史，不设演进记录节。

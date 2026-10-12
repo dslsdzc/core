@@ -165,11 +165,18 @@ def mut_self_item2():
     """M7 **真跑腿**（`COREC_MUT_SELF=1`；默认关）：在 /tmp 副本上把条目 2 的分派块**失效化** ⇒ 重建
     ⇒ 六位位码探针须回 **24**（= 修复前读数；2026-09-18 复核重跑实测）；同时**原树正控**同探针须为 **30**。
     成本 ≈ 1 次重建（~1 min）+ 2 次探针编译。用途：把「突变能命中目标」从文档承诺变成**机检**。"""
-    probe = ("fn b2i(x: bool) -> int { if x { return 1; } return 0; }\n"
-             "fn main() -> int {\n"
-             "    n : int? = None;\n    m : int? = None;\n    a : int? = 7;\n    b : int? = 7;\n"
-             "    return b2i(n == Some(7)) + b2i(n == None) * 2 + b2i(n == m) * 4 + b2i(a == b) * 8"
-             " + b2i(a == 7) * 16 + b2i(n == 7) * 32;\n}\n")
+    # ⚠ v4 迁移：载荷由 v3 形（`{ … ; }`）改为 v4 形（`:` + layout 缩进 + 无 `;`），
+    #   且可选字面量 `None` → **`none`**（v4 拼音面；`None` 在 v4 是 `error[N01] Undefined name`）。
+    #   语义（六位位码）不变：未突变树 = 30、突变树 = 24（本批 v4 形载荷实核 30）。
+    probe = ("fn b2i(x: bool) -> int:\n"
+             "    if x:\n"
+             "        return 1\n"
+             "    return 0\n"
+             "\n"
+             "fn main() -> int:\n"
+             "    n : int? = none\n    m : int? = none\n    a : int? = 7\n    b : int? = 7\n"
+             "    return b2i(n == Some(7)) + b2i(n == none) * 2 + b2i(n == m) * 4 + b2i(a == b) * 8"
+             " + b2i(a == 7) * 16 + b2i(n == 7) * 32\n")
     tmp = Path(tempfile.mkdtemp(prefix="mutself_"))
     try:
         for item in ("src", "tools", "tests", "bootstrap"):
@@ -182,10 +189,11 @@ def mut_self_item2():
                 shutil.copy2(src, tmp / item)
         p = tmp / "src" / "compiler" / "ir_gen.cr"
         s = p.read_text()
-        old = ("if (op == OP_EQ || op == OP_NE) && g_optrep_on != 0 {\n"
-               "            lo := opt_cmp_optish(left, left_var);")
-        new = ("if (op == OP_EQ || op == OP_NE) && g_optrep_on != 0 && g_optrep_on == 999 {\n"
-               "            lo := opt_cmp_optish(left, left_var);")
+        # v4 形锚点（与 main() 的 M7 同源同处）：去 `{`、去 `;`。
+        old = ("if (op == OP_EQ || op == OP_NE) && g_optrep_on != 0:\n"
+               "            lo := opt_cmp_optish(left, left_var)")
+        new = ("if (op == OP_EQ || op == OP_NE) && g_optrep_on != 0 && g_optrep_on == 999:\n"
+               "            lo := opt_cmp_optish(left, left_var)")
         if s.count(old) != 1:
             return False, "突变锚点漂移（副本内未唯一命中）"
         p.write_text(s.replace(old, new))
@@ -386,8 +394,10 @@ def main() -> int:
         return txt.count(needle)
 
     # M7：条目 2（可选 == 表示透明）——突变 = 分派块失效化 ⇒ 位码回 **24**（2026-09-18 复核重跑实测）
-    n1 = _once("src/compiler/ir_gen.cr", "if (op == OP_EQ || op == OP_NE) && g_optrep_on != 0 {")
-    n2 = _once("src/compiler/ir_gen.cr", "lo := opt_cmp_optish(left, left_var);")
+    # ⚠ v4 迁移（layout 缩进）：锚点由 v3 形 `… != 0 {` / `…left_var);` 改为 v4 形 `… != 0:`
+    #   / `…left_var)`（**去 `{`、去 `;`**，语义面同一处代码；见 mut_self_item2 同源锚点）。
+    n1 = _once("src/compiler/ir_gen.cr", "if (op == OP_EQ || op == OP_NE) && g_optrep_on != 0:")
+    n2 = _once("src/compiler/ir_gen.cr", "lo := opt_cmp_optish(left, left_var)")
     opt_eq = (BASE / "tests/selfhost/test_opt_eq.py").read_text()
     pre = "BITCODE_PRE = 24" in opt_eq
     post = "BITCODE_POST = 30" in opt_eq
@@ -397,9 +407,10 @@ def main() -> int:
                    f"锚点×2={n1}/{n2}（各自须 =1）· BITCODE_PRE/POST 24/30={pre}/{post} · run.sh 注 24/30={rs}"))
 
     # M8：条目 3（extern 可选 ⇒ P24）——突变 = 撤 parser 的 extern_opt 检查 ⇒ 4 拒收例回 check=0
-    n1 = _once("src/compiler/parser.cr", "extern_opt : ., mut = 0;")
-    n2 = _once("src/compiler/parser.cr", "if extern_opt != 0 {")
-    n3 = _once("src/compiler/ast.cr", "EC_P_EXTERN_OPTIONAL : int = 1024;")
+    # ⚠ v4 迁移：锚点去 `{` / 去 `;`（同处代码，语义不变）。
+    n1 = _once("src/compiler/parser.cr", "extern_opt : ., mut = 0")
+    n2 = _once("src/compiler/parser.cr", "if extern_opt != 0:")
+    n3 = _once("src/compiler/ast.cr", "EC_P_EXTERN_OPTIONAL : int = 1024")
     ext = (BASE / "tests/selfhost/test_extern_opt.py").read_text()
     batch8.append(("M8/批8-条目3 extern 可选 P24", n1 == 1 and n2 == 1 and n3 == 1 and "error[P24]" in ext,
                    f"锚点={n1}/{n2} · 码 1024={n3} · 套件期望 error[P24]={'error[P24]' in ext}"))
@@ -407,19 +418,22 @@ def main() -> int:
     # M9：条目 4（顶层兜底 ⇒ P25）——突变 = 兜底退回裸 advance_tok() ⇒ 5 拒收例回 check=0
     # 锚点收紧（2026-09-18）：只用单行 `if tok_k(cur_tok()) != T_EOF {` 会被**无关新代码**撞形
     # （插值展开批的 `interp_parse_holes` 曾加过同形行 ⇒ 本判据在 CI 假红）。改为**顶层兜底特有的两行合体**。
-    n1 = _once("src/compiler/parser.cr", "if tok_k(cur_tok()) != T_EOF {\n        check_error(EC_P_TOPLEVEL_TOKEN,")
+    # ⚠ v4 迁移：兜底锚去 `{`（`!= T_EOF:`）、`is_fileid` 锚去 `;`、码锚去 `;`；
+    #   「两行合体」的收紧口径**原样保留**（仍靠特有后继行区分同形行）。
+    n1 = _once("src/compiler/parser.cr", "if tok_k(cur_tok()) != T_EOF:\n        check_error(EC_P_TOPLEVEL_TOKEN,")
     n2 = _once("src/compiler/parser.cr", "EC_P_TOPLEVEL_TOKEN")
-    n3 = _once("src/compiler/parser.cr", "is_fileid := tk == T_FILEID;")
-    n4 = _once("src/compiler/ast.cr", "EC_P_TOPLEVEL_TOKEN  : int = 1025;")
+    n3 = _once("src/compiler/parser.cr", "is_fileid := tk == T_FILEID")
+    n4 = _once("src/compiler/ast.cr", "EC_P_TOPLEVEL_TOKEN  : int = 1025")
     tlr = (BASE / "tests/selfhost/test_toplevel_reject.py").read_text()
     batch8.append(("M9/批8-条目4 顶层兜底 P25", n1 == 1 and n2 >= 1 and n3 == 1 and n4 == 1
                    and "error[P25]" in tlr,
                    f"兜底锚={n1} · 码锚={n2} · import 整句消费锚={n3} · 码 1025={n4} · 套件 error[P25]={'error[P25]' in tlr}"))
 
     # M10：条目 5（apx 白名单 ⇒ P26）——突变 = 撤白名单检查 ⇒ 5 拒收例回 check=0
-    n1 = _once("src/compiler/parser.cr", "apx_ok : ., mut = 0;")
-    n2 = _once("src/compiler/parser.cr", "if apx_ok == 0 {")
-    n3 = _once("src/compiler/ast.cr", "EC_P_APX_TAG         : int = 1026;")
+    # ⚠ v4 迁移：锚点去 `{` / 去 `;`（同处代码，语义不变）。
+    n1 = _once("src/compiler/parser.cr", "apx_ok : ., mut = 0")
+    n2 = _once("src/compiler/parser.cr", "if apx_ok == 0:")
+    n3 = _once("src/compiler/ast.cr", "EC_P_APX_TAG         : int = 1026")
     ats = (BASE / "tests/selfhost/test_apx_tag_scope.py").read_text()
     batch8.append(("M10/批8-条目5 apx 白名单 P26", n1 == 1 and n2 == 1 and n3 == 1 and "error[P26]" in ats,
                    f"锚点={n1}/{n2} · 码 1026={n3} · 套件 error[P26]={'error[P26]' in ats}"))

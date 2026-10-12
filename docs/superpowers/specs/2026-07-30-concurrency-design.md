@@ -6,10 +6,10 @@
 
 ## 核心原则
 
-- **不共享内存。** goroutine 之间不共享变量。所有通信通过 channel 传值。
-- **"像图一样"。** 每个 goroutine 是图上的一个节点，channel 是边。
-- **Arena 隔离。** 每个 goroutine 有自己的 arena。`go f()` 时创建新 arena。
-- **Cooperative 调度。** 只在 channel send/recv 和显式 `yield` 时切换。
+- **不共享内存**：goroutine 之间不共享变量。所有通信通过 channel 传值。
+- **「像图一样」**：每个 goroutine 是图上的一个节点，channel 是边。
+- **Arena 隔离**：每个 goroutine 有自己的 arena。`go f()` 时创建新 arena。
+- **Cooperative 调度**：只在 channel `send`/`recv` 和显式 `yield` 时切换。
 
 ## GMP 模型（简化）
 
@@ -34,7 +34,7 @@ P — 不分离，合并到 M
 ### G 结构
 
 ```core
-struct Goroutine {
+struct Goroutine:
     id: int,
     status: int,
     stack_ptr: int,    // 栈指针（固定 16KB 栈）
@@ -42,19 +42,17 @@ struct Goroutine {
     arena_id: int,     // 绑定的 arena
     chan_wait: int,    // 阻塞在此 channel 上（_Gwaiting 时）
     next: int,         // 链表（run queue / wait queue）
-}
 ```
 
 ### M 结构
 
 ```core
-struct Machine {
+struct Machine:
     id: int,
     cur_g: int,        // 当前运行的 G
     runq_head: int,    // local run queue 头
     runq_tail: int,    // local run queue 尾
     g0: int,           // 系统 G（M 本身的栈）
-}
 ```
 
 ## Channel
@@ -62,16 +60,16 @@ struct Machine {
 ### `chan T` 语法
 
 ```core
-ch := make(chan int, 10);  // 缓冲 channel，容量 10
-send(ch, 42);              // 发送
-val := recv(ch);            // 接收
-close(ch);                 // 关闭
+ch := make(chan int, 10)  // 缓冲 channel，容量 10
+send(ch, 42)              // 发送
+val := recv(ch)            // 接收
+close(ch)                 // 关闭
 ```
 
 ### channel 结构
 
 ```core
-struct Channel {
+struct Channel:
     buf: string,          // 环形缓冲区
     cap: int,             // 容量
     len: int,             // 当前元素数
@@ -80,12 +78,11 @@ struct Channel {
     send_wait: int,       // 等待发送的 G 链表头
     recv_wait: int,       // 等待接收的 G 链表头
     closed: int,          // 是否已关闭
-}
 ```
 
 ### Channel 操作
 
-**send(ch, val)**:
+**`send(ch, val)`**：
 ```
 1. 如果 ch 已关闭 → panic
 2. 如果有等待接收的 G → 直接拷贝给接收者，唤醒 G
@@ -93,7 +90,7 @@ struct Channel {
 4. 如果 buf 已满 → 当前 G 阻塞，加入 send_wait 链表
 ```
 
-**recv(ch)**:
+**`recv(ch)`**：
 ```
 1. 如果有等待发送的 G → 从发送者直接接收，唤醒发送者
 2. 如果 buf 非空 → 从缓冲区读取
@@ -103,7 +100,7 @@ struct Channel {
 
 **值拷贝语义**：channel 边界永远拷贝值，不传引用。发送方的值在发送后不变。
 
-## go f() 语义
+## `go f()` 语义
 
 ```core
 go f(args);
@@ -112,15 +109,15 @@ go f(args);
 1. 分配 G 结构 + 16KB 栈
 2. 复制参数到新 arena
 3. 创建新 arena（`arena_new()`）
-4. 设置 G 状态为 _Grunnable
+4. 设置 G 状态为 `_Grunnable`
 5. 投递到 M 的 local run queue
 6. 返回（不等待 f 完成）
 
-**返回值**：`go f()` 返回一个 channel，用于接收 f 的返回值：
+**返回值**：`go f()` 返回一个 channel，用于接收 `f` 的返回值：
 
 ```core
-ch := go f(args);
-result := recv(ch);  // 等待 f 完成并获取结果
+ch := go f(args)
+result := recv(ch)  // 等待 f 完成并获取结果
 ```
 
 ## 调度器
@@ -164,11 +161,11 @@ ret
 ## IR 指令
 
 ```core
-IR_SPAWN : int = 27;  // 已有: dest=chan, s1=fn_ni, s2=first_arg, s3=arg_count
-IR_YIELD : int = 28;  // 已有: s1=value_var
+IR_SPAWN : int = 27  // 已有: dest=chan, s1=fn_ni, s2=first_arg, s3=arg_count
+IR_YIELD : int = 28  // 已有: s1=value_var
 ```
 
-保持不变。`IR_SPAWN` 在后端编译为 fiber 创建 + 队列投递。`IR_YIELD` 编译为 fiber 切换。
+上列编号保持不变。`IR_SPAWN` 在后端编译为 fiber 创建 + 队列投递。`IR_YIELD` 编译为 fiber 切换。
 
 ## 实现清单
 

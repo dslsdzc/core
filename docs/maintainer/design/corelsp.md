@@ -4,9 +4,9 @@
 > 用户接入（Neovim/VS Code/Zed 配置步骤）见 [developer/editors.md](../../developer/editors.md)。
 > 早期设计稿（历史，细节以源码为准）：2026-08-08 [lsp-design](../../superpowers/specs/2026-08-08-lsp-design.md)、2026-08-28 [lsp-production-design](../../superpowers/specs/2026-08-28-lsp-production-design.md)。
 
-## 一、是什么
+## 一、定位与组成
 
-corelsp = 用 Core 自举编译器**前端子集**拼接出的语言服务器：LSP over stdio，rpc 循环收请求、按请求跑一次静默检查、回协议帧。与 corec 共享 lexer/parser/checker/diag/module/globals 等前端模块；**不含** corec 的 main.cr/entry.cr（corec_main 不参与 corelsp 构建）。
+corelsp 由 Core 自举编译器的**前端子集**拼接而成：LSP over stdio，rpc 循环接收请求，每次请求执行一次静默检查并回协议帧。与 corec 共享 lexer/parser/checker/diag/module/globals 等前端模块；**不含** corec 的 main.cr/entry.cr（corec_main 不参与 corelsp 构建）。
 
 `src/lsp/` 文件职责：
 
@@ -21,13 +21,13 @@ corelsp = 用 Core 自举编译器**前端子集**拼接出的语言服务器：
 
 ## 二、构建接线
 
-`build_selfhost_native.py` 的「corelsp」段：前端依赖子集（lexer/parser/checker/diag/module/globals 及其依赖链）+ `src/lsp/` 六文件，按依赖序 concat 后包装为 `lsp_main`，产出 `build/corelsp`。拼接顺序约束（json → rpc → lsp 同翻译单元内可见）见 lsp.cr 头部注释；给 src/lsp/ 加新文件时需同步该 concat 列表。
+`build_selfhost_native.py` 的「corelsp」段由前端依赖子集（lexer/parser/checker/diag/module/globals 及其依赖链）与 `src/lsp/` 六文件构成，按依赖序 concat 后包装为 `lsp_main`，产出 `build/corelsp`。拼接顺序约束（json → rpc → lsp 同翻译单元内可见）见 lsp.cr 头部注释；在 `src/lsp/` 新增文件时须同步该 concat 列表。
 
 ## 三、检查管线与诊断通道
 
-管线（lsp.cr 注释实录，改动前先读源码）：
+管线（lsp.cr 注释实录；改动前须先读源码）：
 
-- **禁止 `run_frontend()`**——它含 `println("[1/5]...")` 进度输出，会污染 stdout 协议通道。检查固定走 `lsp_check_file`。
+- **禁止 `run_frontend()`**——它含 `println("[1/5]...")` 进度输出，会污染 stdout 协议通道；检查统一走 `lsp_check_file`。
 - `lsp_check_file(path, src)`：`g_source` 置源文本 → `reset_frontend_state()` → tokenize → `res_imports` → parse_all →（parse 阶段有诊断则跳过 check_all，AST 可能不完整）→ check_all → publishDiagnostics。
 - **publishDiagnostics**：主文件（`g_files[0]`，当前检查文档）无条件发布——无诊断也发空数组以清旧；其余有诊断的文件（file_id 去重）逐个发布。`file_id → 路径` 经 g_files 路径表，`uri = "file://" + path`。诊断字段：range 1-based → 0-based 减 1、severity=1、message 做 JSON 转义（含引号/反斜杠/控制符时保证合法 JSON）。
 

@@ -3,47 +3,70 @@
 // 不引入编译器全局（grow 函数引用全部 g_* 数组——内核不需要）。
 // 来源对照：dyn_arr.cr L5-46, L144-146；语义逐字节一致。
 
-fn w8(buf: string, pos: int, val: int) { store8(buf, pos, val % 256); }
-fn bu8(buf: string, pos: int) -> int { return load8(buf, pos) % 256; }
-fn w32(buf: string, pos: int, val: int) {
-    b0 : ., mut = val % 256; t1 : ., mut = val / 256;
-    b1 : ., mut = t1 % 256; t2 : ., mut = t1 / 256;
-    b2 : ., mut = t2 % 256; t3 : ., mut = t2 / 256;
-    b3 : ., mut = t3 % 256;
+fn w8(buf: string, pos: int, val: int):
+    store8(buf, pos, val % 256)
+fn bu8(buf: string, pos: int) -> int:
+    return load8(buf, pos) % 256
+fn w32(buf: string, pos: int, val: int):
+    b0 : ., mut = val % 256
+    t1 : ., mut = val / 256
+    b1 : ., mut = t1 % 256
+    t2 : ., mut = t1 / 256
+    b2 : ., mut = t2 % 256
+    t3 : ., mut = t2 / 256
+    b3 : ., mut = t3 % 256
     // Borrow chain for two's complement of negative val (no 4294967296 constant)
-    if b0 < 0 { b0 = b0 + 256; b1 = b1 - 1; }
-    if b1 < 0 { b1 = b1 + 256; b2 = b2 - 1; }
-    if b2 < 0 { b2 = b2 + 256; b3 = b3 - 1; }
-    if b3 < 0 { b3 = b3 + 256; }
-    store8(buf,pos,b0); store8(buf,pos+1,b1);
-    store8(buf,pos+2,b2); store8(buf,pos+3,b3); }
-fn r32(buf: string, pos: int) -> int {
-    b0 := bu8(buf,pos); b1 := bu8(buf,pos+1);
-    b2 := bu8(buf,pos+2); b3 := bu8(buf,pos+3);
-    v := b0 + b1*256 + b2*65536;
-    if b3 >= 128 { v = v + (b3 - 256) * 16777216; }
-    else { v = v + b3 * 16777216; }
-    return v; }
-fn w64(buf: string, pos: int, val: int) {
-    cur : ., mut = val;
-    i : ., mut = 0;
-    loop {
-        if i >= 8 { break; }
-        byte : ., mut = cur % 256;
-        if byte < 0 { byte = byte + 256; }
-        store8(buf, pos + i, byte);
-        cur = (cur - byte) / 256;
-        i = i + 1;
-    }
-}
-fn r64(buf: string, pos: int) -> int {
+    if b0 < 0:
+        b0 = b0 + 256
+        b1 = b1 - 1
+    if b1 < 0:
+        b1 = b1 + 256
+        b2 = b2 - 1
+    if b2 < 0:
+        b2 = b2 + 256
+        b3 = b3 - 1
+    if b3 < 0:
+        b3 = b3 + 256
+    store8(buf,pos,b0)
+    store8(buf,pos+1,b1)
+    store8(buf,pos+2,b2)
+    store8(buf,pos+3,b3)
+fn r32(buf: string, pos: int) -> int:
+    b0 := bu8(buf,pos)
+    b1 := bu8(buf,pos+1)
+    b2 := bu8(buf,pos+2)
+    b3 := bu8(buf,pos+3)
+    v := b0 + b1*256 + b2*65536
+    if b3 >= 128:
+        v = v + (b3 - 256) * 16777216
+    else:
+        v = v + b3 * 16777216
+    return v
+fn w64(buf: string, pos: int, val: int):
+    cur : ., mut = val
+    i : ., mut = 0
+    loop:
+        if i >= 8:
+            break
+        byte : ., mut = cur % 256
+        if byte < 0:
+            byte = byte + 256
+        store8(buf, pos + i, byte)
+        cur = (cur - byte) / 256
+        i = i + 1
+fn r64(buf: string, pos: int) -> int:
     // The low dword is unsigned. Reading it through r32 double-subtracts
     // 2^32 for negative values, e.g. -1 becomes -1 + (-1 * 2^32).
-    lo := bu8(buf,pos) + bu8(buf,pos+1)*256 + bu8(buf,pos+2)*65536 + bu8(buf,pos+3)*16777216;
-    hi := r32(buf,pos+4);
-    hi_part := hi * 65536; hi_part = hi_part * 65536;
-    return lo + hi_part; }
+    lo := bu8(buf,pos) + bu8(buf,pos+1)*256 + bu8(buf,pos+2)*65536 + bu8(buf,pos+3)*16777216
+    hi := r32(buf,pos+4)
+    hi_part := hi * 65536
+    hi_part = hi_part * 65536
+    return lo + hi_part
 
-fn _dyncpy(src: string, nbytes: int, dst: string) {
-    ci : ., mut = 0;
-    loop { if ci >= nbytes { break; } w8(dst, ci, bu8(src, ci)); ci = ci + 1; } }
+fn _dyncpy(src: string, nbytes: int, dst: string):
+    ci : ., mut = 0
+    loop:
+        if ci >= nbytes:
+            break
+        w8(dst, ci, bu8(src, ci))
+        ci = ci + 1

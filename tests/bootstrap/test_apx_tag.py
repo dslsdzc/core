@@ -55,12 +55,11 @@ def run_main(mod, *args):
 
 def test_apx_parses_and_annotates():
     src = '''
-fn main() -> int {
-    x : int, apx = 42;
-    y : int = 84;
-    z : int, apx, mut = 126;
-    return x + y + z;
-}
+fn main() -> int:
+    x : int, apx = 42
+    y : int = 84
+    z : int, apx, mut = 126
+    return x + y + z
 '''
     mod = compile_src(src)
     n = count_approx(mod)
@@ -73,11 +72,10 @@ fn main() -> int {
 
 def test_plain_has_no_approx():
     src = '''
-fn main() -> int {
-    x : int = 42;
-    y : int = 84;
-    return x + y;
-}
+fn main() -> int:
+    x : int = 42
+    y : int = 84
+    return x + y
 '''
     mod = compile_src(src)
     n = count_approx(mod)
@@ -91,10 +89,9 @@ fn main() -> int {
 def test_batch_apx():
     # 批量声明：apx 标签作用于所有名字（每个名字一条注解）
     src = '''
-fn main() -> int {
-    a, b : int, apx = 1, 2;
-    return a + b;
-}
+fn main() -> int:
+    a, b : int, apx = 1, 2
+    return a + b
 '''
     mod = compile_src(src)
     n = count_approx(mod)
@@ -112,10 +109,9 @@ fn main() -> int {
 
 def test_unknown_tag_rejected():
     src = '''
-fn main() -> int {
-    x : int, bogus_tag = 42;
-    return x;
-}
+fn main() -> int:
+    x : int, bogus_tag = 42
+    return x
 '''
     try:
         compile_src(src)
@@ -130,18 +126,16 @@ fn main() -> int {
 
 def test_no_semantic_change():
     plain = '''
-fn main() -> int {
-    x : int = 42;
-    y : int = 84;
-    return x + y;
-}
+fn main() -> int:
+    x : int = 42
+    y : int = 84
+    return x + y
 '''
     apx = '''
-fn main() -> int {
-    x : int, apx = 42;
-    y : int, apx = 84;
-    return x + y;
-}
+fn main() -> int:
+    x : int, apx = 42
+    y : int, apx = 84
+    return x + y
 '''
     rp = run_main(compile_src(plain))
     ra = run_main(compile_src(apx))

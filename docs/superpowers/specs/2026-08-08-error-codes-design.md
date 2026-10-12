@@ -7,10 +7,10 @@
 
 ### 1.1 现状问题
 
-- 错误码 145 条平铺分段（L/P/N/I/TA/TF/TB/TU/TC/TM/TK/TS/TG/B/R/E/ICE），**维度混杂无层级**：L/P/N/I 是编译阶段，TA/TF 是类型子系统，B 是借用，R 是运行时
-- **同性质分散**："类型不匹配"因上下文不同分裂在 TA01/TF07/TS03/TM07 四个段
+- 错误码 145 条平铺分段（`L`/`P`/`N`/`I`/`TA`/`TF`/`TB`/`TU`/`TC`/`TM`/`TK`/`TS`/`TG`/`B`/`R`/`E`/`ICE`），**维度混杂无层级**：`L`/`P`/`N`/`I` 是编译阶段，`TA`/`TF` 是类型子系统，`B` 是借用，`R` 是运行时
+- **同性质分散**："类型不匹配"因上下文不同分裂在 `TA01`/`TF07`/`TS03`/`TM07` 四个段
 - **无严重度维度**：无法支撑致命/警告决策（PR #23 诊断致命化争论的根源）
-- 编译器自身源码有数百条类型检查诊断（dyn_arr.cr 156 条等），致命化会让自举失败
+- 编译器自身源码有数百条类型检查诊断（`dyn_arr.cr` 156 条等），致命化会让自举失败
 
 ### 1.2 心理学/人因研究依据
 
@@ -23,9 +23,9 @@
 ### 1.3 设计原则（brainstorming 定稿）
 
 1. **人机双读分离**：码值给机器（唯一、稳定、可解析），渲染给人（快速锁定、可读）——两层独立设计
-2. **severity 可靠编码 = 词**：error/warning/note 词是唯一可靠编码（终端变色、色弱不影响）；颜色仅增强
+2. **severity 可靠编码 = 词**：`error`/`warning`/`note` 词是唯一可靠编码（终端变色、色弱不影响）；颜色仅增强
 3. **类别单字母快速锁定**：码的字母段只表达类别（第一性原理：锁类别，理解靠消息）；子类信息在消息里
-4. **同性质聚合**：类型系 8 段合并为 T 类
+4. **同性质聚合**：类型系 8 段合并为 `T` 类
 
 ## 2. 码值结构（机器层）
 
@@ -53,7 +53,7 @@
 
 ### 2.2 序号
 
-- 类别内唯一，5 位（00001-99999）——为未来图分析提示（匹配度/业务逻辑建议，大量 N 类提示）留足空间
+- 类别内唯一，5 位（00001-99999）——为未来图分析提示（匹配度/业务逻辑建议，大量 `N` 类提示）留足空间
 - 序号无语义（不编码检查点），检查点信息在消息文本中
 
 ### 2.3 severity 不在码内
@@ -84,7 +84,7 @@ error[T00001] cannot assign string to int
 - 颜色仅增强：词按 severity 着色（红/黄/蓝）；类别位可加粗（与序号区分，形态主题免疫）
 - 位置行 `--> file:line:col` 灰色（现有格式延续）
 - 源码上下文行 + `^^^` 标注（现有格式延续）
-- 消息简短（可读性四因素：短、无行话、建设性措辞；不用 illegal/offending/fatal 语气词）
+- 消息简短（可读性四因素：短、无行话、建设性措辞；不用 `illegal`/`offending`/`fatal` 语气词）
 
 ### 3.2 示例
 
@@ -110,12 +110,12 @@ note[F00001] loop condition always true (match 100%)
 
 - 语法/语义正确性错误 → Error（编译必须失败）
 - 设计警告/可运行代码的风格性问题 → Warning
-- 编译器自身源码现存数百条诊断（TC02 等）→ Warning（否则自举失败）
+- 编译器自身源码现存数百条诊断（`TC02` 等）→ Warning（否则自举失败）
 - 提示类（未来图分析）→ Note
 
 ### 5.2 逐条归属（原码 → 新码 → severity）
 
-**L 词法（→ L 类）**——全部 Error：
+**`L` 词法（→ `L` 类）**——全部 Error：
 | 原码 | 新码 | 消息 |
 |---|---|---|
 | L001 | L00001 | Unterminated string literal |
@@ -130,11 +130,11 @@ note[F00001] loop condition always true (match 100%)
 | L010 | L00010 | Invalid float suffix |
 | L011 | L00011 | Unknown character |
 
-**S 语法（→ S 类）**——全部 Error：P001-019 → S00001-00019（按原序）
-**U 名字（→ U 类）**——全部 Error：N001-021 → U00001-00021（按原序）
-**I 推断（→ T 类）**——全部 Error：I001-006 → T00001-00006（接在 TA 系前）
+**`S` 语法（→ `S` 类）**——全部 Error：`P001-019` → `S00001-00019`（按原序）
+**`U` 名字（→ `U` 类）**——全部 Error：`N001-021` → `U00001-00021`（按原序）
+**`I` 推断（→ `T` 类）**——全部 Error：`I001-006` → `T00001-00006`（接在 TA 系前）
 
-**T 类型（→ T 类）**：
+**`T` 类型（→ `T` 类）**：
 | 原段 | severity | 新码 |
 |---|---|---|
 | TA01-07 | Error | T00007-00013 |
@@ -146,9 +146,9 @@ note[F00001] loop condition always true (match 100%)
 | TK01-08 | Error | T00056-00063 |
 | I001-006 | Error | T00001-00006 |
 
-**G 泛型（→ G 类）**——全部 Error：TG01-02 → G00001-00002
-**B 借用（→ B 类）**——全部 Error：B001-004/B010-011/B020-022 → B00001-00010（按原序）
-**F 控制流（→ F 类）**：
+**`G` 泛型（→ `G` 类）**——全部 Error：`TG01-02` → `G00001-00002`
+**`B` 借用（→ `B` 类）**——全部 Error：`B001-004`/`B010-011`/`B020-022` → `B00001-00010`（按原序）
+**`F` 控制流（→ `F` 类）**：
 | 原码 | severity | 新码 | 理由 |
 |---|---|---|---|
 | TC01 | Error | F00001 | if 条件非 bool——真错误 |
@@ -159,7 +159,7 @@ note[F00001] loop condition always true (match 100%)
 | TC06 | Error | F00006 | break 在循环外 |
 | TC07 | Error | F00007 | continue 在循环外 |
 
-**R 运行时（→ R 类）**：
+**`R` 运行时（→ `R` 类）**：
 | 原码 | severity | 新码 | 理由 |
 |---|---|---|---|
 | R001 | Error | R00001 | 编译期除零 |
@@ -167,20 +167,20 @@ note[F00001] loop condition always true (match 100%)
 | R003 | Error | R00003 | 编译期溢出 |
 | R004 | Warning | R00004 | 数值转换损失精度——警告性质 |
 
-**O IO（→ O 类）**——全部 Error：E001-004 → O00001-00004
-**I 内部（→ I 类）**——全部 Error：ICE01-03 → I00001-00003
+**`O` IO（→ `O` 类）**——全部 Error：`E001-004` → `O00001-00004`
+**`I` 内部（→ `I` 类）**——全部 Error：`ICE01-03` → `I00001-00003`
 
 ### 5.3 自举可行性
 
-编译器自身源码现有诊断（dyn_arr.cr 156 条等）在归属表下均为 Warning（TC02 类）→ `check` 不失败 → 自举不阻塞。PR #23 的"诊断致命化"以"severity 字段 + 退出码判定"替代（N001 类 Undefined name → U 类 Error → 致命，测试断言成立）。
+编译器自身源码现有诊断（`dyn_arr.cr` 156 条等）在归属表下均为 Warning（`TC02` 类）→ `check` 不失败 → 自举不阻塞。PR #23 的"诊断致命化"以"severity 字段 + 退出码判定"替代（`N001` 类 Undefined name → `U` 类 Error → 致命，测试断言成立）。
 
 ## 6. 迁移路径
 
-1. 诊断记录 32→40B：+severity 字段、+file_id 字段（corelsp 需求）
+1. 诊断记录 32→40B：+severity 字段、+`file_id` 字段（`corelsp` 需求）
 2. `check_error(code, msg, line, col)` → 新签名 `check_error(sev, code, msg, line, col)`（调用点机械替换）
-3. 错误码常量重命名：`EC_N_UNDEFINED` → `EC_U_UNDEFINED` 等（以 ast.cr/diag.cr 实际常量名为准）
-4. print_diagnostics 输出格式：`error[L001]:` → `error[T00001]:`
-5. error-codes.md 重写为本规格的映射表
+3. 错误码常量重命名：`EC_N_UNDEFINED` → `EC_U_UNDEFINED` 等（以 `ast.cr`/`diag.cr` 实际常量名为准）
+4. `print_diagnostics` 输出格式：`error[L001]:` → `error[T00001]:`
+5. `error-codes.md` 重写为本规格的映射表
 6. `--fatal-warnings` flag
 7. 全量回归 + 自举 O0/O1
 
@@ -189,4 +189,4 @@ note[F00001] loop condition always true (match 100%)
 - 消息模板参数化/本地化（保留现有英文消息，仅换码）
 - LLM 生成解释（研究显示[效果不一致](https://searchworks-lb.stanford.edu/articles/edsarx__edsarx.2409.18661)，专家手写结构最佳）
 - 修复建议/quick-fix 数据（未来图分析提示阶段）
-- LSP 的 severity 渲染（corelsp 消费端自映射）
+- LSP 的 severity 渲染（`corelsp` 消费端自映射）

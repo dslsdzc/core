@@ -22,9 +22,9 @@ def main() -> int:
         helper = os.path.join(directory, "helper.cr")
         main_path = os.path.join(directory, "main.cr")
         with open(helper, "w", encoding="utf-8") as file:
-            file.write("fn value() -> int { return 42; }\n")
+            file.write("fn value() -> int:\n    return 42\n")
         with open(main_path, "w", encoding="utf-8") as file:
-            file.write("import helper : h; fn main() -> int { return h.value(); }\n")
+            file.write("import helper : h\nfn main() -> int:\n    return h.value()\n")
 
         with open(main_path, encoding="utf-8") as file:
             source = file.read()

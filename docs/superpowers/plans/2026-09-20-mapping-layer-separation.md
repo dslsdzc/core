@@ -216,19 +216,22 @@ jj --ignore-working-copy file show -r "$DEV" src/compiler/ptr_analysis.cr | grep
 **观测（最小、两腿可跑、rc 即读数）**——`corec run <内联源码>` 的 **rc = `main` 的返回值**（已自证：`return 42` ⇒ rc=42）：
 
 ```core
-fn main() -> int {
-    i : ., mut = 0;  prev : ., mut = 0;  gap : ., mut = 0;
-    loop {
-        if i >= 3 { break; }
-        s := alloc(8);
-        p : ., mut = 0;
-        unsafe { p = @ptr_of(s); }
-        if i > 0 { gap = p - prev; }
-        prev = p;
-        i = i + 1;
-    }
-    return gap;
-}
+fn main() -> int:
+    i : ., mut = 0
+    prev : ., mut = 0
+    gap : ., mut = 0
+    loop:
+        if i >= 3:
+            break
+        s := alloc(8)
+        p : ., mut = 0
+        unsafe:
+            p = @ptr_of(s)
+        if i > 0:
+            gap = p - prev
+        prev = p
+        i = i + 1
+    return gap
 ```
 
 **实测读数（本批实跑，非注释转述）**：

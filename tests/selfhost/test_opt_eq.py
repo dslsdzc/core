@@ -41,17 +41,15 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parents[2]
 COREC = BASE / "build" / "corec"
 
-B2I = "fn b2i(x: bool) -> int { if x { return 1; } return 0; }\n"
+B2I = "fn b2i(x: bool) -> int:\n    if x:\n        return 1\n    return 0\n"
 # 位码打包：五读数各占一位（ELF/interp 同判）
 BITCODE = """
-fn main() -> int {
-    n : int? = None;
-    m : int? = None;
-    a : int? = 7;
-    b : int? = 7;
-    return b2i(n == Some(7)) + b2i(n == None) * 2 + b2i(n == m) * 4
-         + b2i(a == b) * 8 + b2i(a == 7) * 16 + b2i(n == 7) * 32;
-}
+fn main() -> int:
+    n : int? = none
+    m : int? = none
+    a : int? = 7
+    b : int? = 7
+    return b2i(n == Some(7)) + b2i(n == none) * 2 + b2i(n == m) * 4 + b2i(a == b) * 8 + b2i(a == 7) * 16 + b2i(n == 7) * 32
 """
 BITCODE_PRE = 24   # 修复前实测（= 五读数 0/0/0/1/1 ⇒ bit3+bit4；lead 2026-09-18 裁定锚）
 BITCODE_POST = 30  # 修复后期望：②③④⑤ 置位（① 与 bit5 不置位）
@@ -89,70 +87,120 @@ def case_dual(name, source, want, note=""):
 CASES = [
     # ── 判据 ①：Some(x)==Some(x)（两个**不同对象**、载荷相等）──
     ("some_eq_some_true", B2I + """
-fn main() -> int { return b2i(Some(7) == Some(7)); }
+fn main() -> int:
+    return b2i(Some(7) == Some(7))
 """, 1, "① 装箱两对象载荷相等"),
     ("some_eq_some_false", B2I + """
-fn main() -> int { return b2i(Some(7) == Some(8)); }
+fn main() -> int:
+    return b2i(Some(7) == Some(8))
 """, 0, "① 反向：载荷不等"),
     # ── 判据 ②：None==None（两个不同 None 源）──
     ("none_eq_none_vars", B2I + """
-fn main() -> int { n : int? = None; m : int? = None; return b2i(n == m); }
+fn main() -> int:
+    n : int? = none
+    m : int? = none
+    return b2i(n == m)
 """, 1, "② 两个 None 变量"),
     ("none_eq_none_lit", B2I + """
-fn main() -> int { n : int? = None; return b2i(n == None); }
+fn main() -> int:
+    n : int? = none
+    return b2i(n == none)
 """, 1, "② 变量 vs None 字面量"),
     # ── 判据 ③：Some(x)==None 必假（双向）──
     ("some_ne_none", B2I + """
-fn main() -> int { n : int? = Some(7); return b2i(n == None); }
+fn main() -> int:
+    n : int? = Some(7)
+    return b2i(n == none)
 """, 0, "③ Some vs None"),
     ("none_ne_some", B2I + """
-fn main() -> int { n : int? = None; return b2i(n == Some(7)); }
+fn main() -> int:
+    n : int? = none
+    return b2i(n == Some(7))
 """, 0, "③ None vs Some（反向）"),
     # ── 判据 ④：同源自比较 x==x（bare / boxed 两表示）──
     ("self_eq_bare", B2I + """
-fn main() -> int { a : int? = 7; return b2i(a == a); }
+fn main() -> int:
+    a : int? = 7
+    return b2i(a == a)
 """, 1, "④ 裸表示自比较"),
     ("self_eq_boxed", B2I + """
-fn main() -> int { a : int? = 7; p := &a; *p = Some(9); return b2i(*p == *p); }
+fn main() -> int:
+    a : int? = 7
+    p := &a
+    *p = Some(9)
+    return b2i(*p == *p)
 """, 1, "④ 装箱表示自比较（INV-1 取址槽；`*p` 形态绕开软诊断 B04，同批 5 体例）"),
     # ── 表示透明：同语义两种表示同判（本修复的核心命题）──
     ("rep_transparent_bare", B2I + """
-fn main() -> int { a : int? = 7; b : int? = 7; return b2i(a == b); }
+fn main() -> int:
+    a : int? = 7
+    b : int? = 7
+    return b2i(a == b)
 """, 1, "裸 7 == 裸 7"),
     ("rep_transparent_boxed", B2I + """
-fn main() -> int { a : int? = 7; b : int? = 7; p := &a; q := &b; *p = Some(7); *q = Some(7); return b2i(*p == *q); }
+fn main() -> int:
+    a : int? = 7
+    b : int? = 7
+    p := &a
+    q := &b
+    *p = Some(7)
+    *q = Some(7)
+    return b2i(*p == *q)
 """, 1, "装箱 Some(7) == 装箱 Some(7)"),
     ("boxed_vs_bare_mixed", B2I + """
-fn main() -> int { a : int? = 7; b : int? = 7; p := &a; *p = Some(7); return b2i(*p == b); }
+fn main() -> int:
+    a : int? = 7
+    b : int? = 7
+    p := &a
+    *p = Some(7)
+    return b2i(*p == b)
 """, 1, "装箱 Some(7) == 裸 7（表示无关）"),
     # ── `!=` 面 ──
     ("ne_some_diff", B2I + """
-fn main() -> int { return b2i(Some(7) != Some(8)); }
+fn main() -> int:
+    return b2i(Some(7) != Some(8))
 """, 1, "!=：载荷不等 ⇒ 真"),
     ("ne_none_none", B2I + """
-fn main() -> int { n : int? = None; m : int? = None; return b2i(n != m); }
+fn main() -> int:
+    n : int? = none
+    m : int? = none
+    return b2i(n != m)
 """, 0, "!=：两个 None ⇒ 假"),
     # ── 合成/嵌套：比较结果再参与比较 ──
     ("composed_bool", B2I + """
-fn main() -> int { n : int? = None; m : int? = None; return b2i((n == None) == (m == None)); }
+fn main() -> int:
+    n : int? = none
+    m : int? = none
+    return b2i((n == none) == (m == none))
 """, 1, "两比较结果相等（bool 面）"),
     # ── 位码总钉（五读数打包；ELF 与 interp 同判）──
     ("bitcode_five_readings", B2I + BITCODE, BITCODE_POST,
      f"五读数位码（修复前 {BITCODE_PRE}）"),
     # ── 判据 ⑤：非可选对比 = 零变化（逐值钉子）──
     ("plain_eq_true", B2I + """
-fn main() -> int { a := 7; b := 7; return b2i(a == b); }
+fn main() -> int:
+    a := 7
+    b := 7
+    return b2i(a == b)
 """, 1, "⑤ 非可选 7==7"),
     ("plain_eq_false", B2I + """
-fn main() -> int { a := 7; b := 8; return b2i(a == b); }
+fn main() -> int:
+    a := 7
+    b := 8
+    return b2i(a == b)
 """, 0, "⑤ 非可选 7==8"),
     ("plain_str_eq", B2I + """
 import io
-fn main() -> int { a := "hi"; b := "hi"; return b2i(a == b); }
+fn main() -> int:
+    a := "hi"
+    b := "hi"
+    return b2i(a == b)
 """, 1, "⑤ 非可选字符串相等（走 str_eq 原路径）"),
     # ── 已登记未覆盖面（**记录现状**，不是判据：字符串载荷的装箱比较仍按指针）──
     ("known_uncovered_str_payload", B2I + """
-fn main() -> int { a : string? = None; return b2i(a == None); }
+fn main() -> int:
+    a : string? = none
+    return b2i(a == none)
 """, 1, "未覆盖面抽样：None 判定（类型无关，已在覆盖面内）"),
 ]
 

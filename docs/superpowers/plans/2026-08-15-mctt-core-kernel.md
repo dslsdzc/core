@@ -408,28 +408,38 @@ Expected: 确认 `str_len(s)`、`chr(n)`、`int_str(n)`、字符串比较/拼接
 // src/kernel/term_io.cr —— 共享格式协议实现（Task 5）
 // 扁平 arena：g_kernel_nodes 五槽一组 {kind, a, b, c, d}，索引 = 起始槽
 // 槽 0..4 = 节点 0，槽 5..9 = 节点 1，……
-g_kernel_nodes : [int; 8192] = [0; 8192];
-g_kernel_count : int = 0;
+g_kernel_nodes : [int; 8192] = [0; 8192]
+g_kernel_count : int = 0
 
 // 常量
-K_TYP : int = 0;  K_NAT : int = 1;  K_ZERO : int = 2;  K_SUCC : int = 3;
-K_NATREC : int = 4;  K_PI : int = 5;  K_FN : int = 6;  K_APP : int = 7;
-K_VAR : int = 8;  K_SUB : int = 9;
-S_ID : int = 0;  S_WEAKEN : int = 1;  S_COMPOSE : int = 2;  S_EXTEND : int = 3;
+K_TYP : int = 0
+K_NAT : int = 1
+K_ZERO : int = 2
+K_SUCC : int = 3
+K_NATREC : int = 4
+K_PI : int = 5
+K_FN : int = 6
+K_APP : int = 7
+K_VAR : int = 8
+K_SUB : int = 9
+S_ID : int = 0
+S_WEAKEN : int = 1
+S_COMPOSE : int = 2
+S_EXTEND : int = 3
 
-fn kern_new(k: int) -> int {
-    i := g_kernel_count * 5;
-    g_kernel_nodes[i] = k; g_kernel_nodes[i+1] = 0; g_kernel_nodes[i+2] = 0;
-    g_kernel_nodes[i+3] = 0; g_kernel_nodes[i+4] = 0;
-    g_kernel_count = g_kernel_count + 1;
-    return i;
-}
-fn kern_set(n: int, slot: int, v: int) {
-    g_kernel_nodes[n + slot] = v;
-}
-fn kern_get(n: int, slot: int) -> int {
-    return g_kernel_nodes[n + slot];
-}
+fn kern_new(k: int) -> int:
+    i := g_kernel_count * 5
+    g_kernel_nodes[i] = k
+    g_kernel_nodes[i+1] = 0
+    g_kernel_nodes[i+2] = 0
+    g_kernel_nodes[i+3] = 0
+    g_kernel_nodes[i+4] = 0
+    g_kernel_count = g_kernel_count + 1
+    return i
+fn kern_set(n: int, slot: int, v: int):
+    g_kernel_nodes[n + slot] = v
+fn kern_get(n: int, slot: int) -> int:
+    return g_kernel_nodes[n + slot]
 ```
 
 （解析与打印函数在本任务执行中补齐：`kernel_parse` 手写递归下降（跳过空白、读 `(token ...)`、数字用 `int_str` 反向解析——`str_to_int` 若无则用逐位 `(ch-'0')` 累加）；`kernel_print` 按协议对节点递归打印，var/succ 等单子节点直接递归。测试先写。）

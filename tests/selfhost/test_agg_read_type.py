@@ -55,89 +55,99 @@ BASE = Path(__file__).resolve().parents[2]
 COREC = BASE / "build" / "corec"
 
 R1 = """
-struct S { f: dex }
-fn main() -> int {
-    d : dex, apx = 7.0;
-    s : ., mut = S { f = d };
-    x := s.f;
-    if x * 2.0 != 14.0 { return 1; }
-    return 7;
-}
+struct S:
+    f: dex
+fn main() -> int:
+    d : dex, apx = 7.0
+    s : ., mut = S { f = d }
+    x := s.f
+    if x * 2.0 != 14.0:
+        return 1
+    return 7
 """
 
 R2 = """
-enum E { V(dex) }
-fn main() -> int {
-    d : dex, apx = 7.0;
-    e : ., mut = V(d);
-    return match e { V(x) => { if x * 2.0 != 14.0 { return 1; } return 7; } };
-}
+enum E:
+    V(dex)
+fn main() -> int:
+    d : dex, apx = 7.0
+    e : ., mut = V(d)
+    return match e:
+        V(x) =>:
+            if x * 2.0 != 14.0:
+                return 1
+            return 7
 """
 
 R3 = """
-fn main() -> int {
-    d : dex, apx = 7.0;
-    a : [dex; 2] = [d, 1.0];
-    if a[0] * 2.0 != 14.0 { return 1; }
-    return 7;
-}
+fn main() -> int:
+    d : dex, apx = 7.0
+    a : [dex; 2] = [d, 1.0]
+    if a[0] * 2.0 != 14.0:
+        return 1
+    return 7
 """
 
 R4 = """
-fn main() -> int {
-    d : dex, apx = 7.0;
-    t := (d, 1.0);
-    if (t . 0) * 2.0 != 14.0 { return 1; }
-    return 7;
-}
+fn main() -> int:
+    d : dex, apx = 7.0
+    t := (d, 1.0)
+    if (t . 0) * 2.0 != 14.0:
+        return 1
+    return 7
 """
 
 R5 = """
-g : dex, apx, mut = 1.0;
-struct S { f: dex }
-fn main() -> int {
-    d : dex, apx = 7.0;
-    s : ., mut = S { f = d };
-    g = s.f;
-    if g != 7.0 { return 1; }
-    return 7;
-}
+g : dex, apx, mut = 1.0
+struct S:
+    f: dex
+fn main() -> int:
+    d : dex, apx = 7.0
+    s : ., mut = S { f = d }
+    g = s.f
+    if g != 7.0:
+        return 1
+    return 7
 """
 
 # R6：extern 实参——**仅作 cir 断言载体**（运行路径既有崩溃，见头注）
 R6 = """
-struct S { f: dex }
-extern fn dex_agg_arg_check(d: dex) -> int;
-fn main() -> int {
-    d : dex, apx = 7.0;
-    s : ., mut = S { f = d };
-    r := dex_agg_arg_check(s.f);
-    return r;
-}
+struct S:
+    f: dex
+extern fn dex_agg_arg_check(d: dex) -> int
+fn main() -> int:
+    d : dex, apx = 7.0
+    s : ., mut = S { f = d }
+    r := dex_agg_arg_check(s.f)
+    return r
 """
 
 # ── 腿 C：非回归钉子（改前即绿，修后必须仍绿）──
 R7 = """
-struct S { f: dex }
-fn dbl(x: dex) -> dex { return x * 2.0; }
-fn main() -> int {
-    d : dex, apx = 7.0;
-    s : ., mut = S { f = d };
-    y := dbl(s.f);
-    if y != 14.0 { return 1; }
-    return 7;
-}
+struct S:
+    f: dex
+fn dbl(x: dex) -> dex:
+    return x * 2.0
+fn main() -> int:
+    d : dex, apx = 7.0
+    s : ., mut = S { f = d }
+    y := dbl(s.f)
+    if y != 14.0:
+        return 1
+    return 7
 """
 
 N1 = """
-struct S { f: dex }
-fn main() -> int {
-    d : dex, apx = 7.0;
-    s : ., mut = S { f = d };
-    if @raw_int(s.f) / 1000000 != 7 { return 1; }
-    if s.f != 7.0 { return 2; }
-    return 7;
-}
+struct S:
+    f: dex
+fn main() -> int:
+    d : dex, apx = 7.0
+    s : ., mut = S { f = d }
+    if @raw_int(s.f) / 1000000 != 7:
+        return 1
+    if s.f != 7.0:
+        return 2
+    return 7
 """
 
 # (name, expect_rc, src, kind)

@@ -128,8 +128,7 @@ def check_versioned_entries() -> tuple:
     会因临时值条目数变化而脆弱）；每个 def'd 条目 ls == def 与同组版本链
     不变量仍全表成立。
     """
-    src = "fn identity(n:int)->int{return n;}\n" \
-          "fn main()->int{x:=1;x=x+1;x=x+2;return x;}\n"
+    src = "fn identity(n:int)->int:\n    return n\nfn main()->int:\n    x:=1\n    x=x+1\n    x=x+2\n    return x\n"
     rc, out = dump_entries(src)
     if rc != 0:
         return False, f"cir --dump-entries rc={rc}\n{out[-500:]}"
@@ -198,15 +197,7 @@ def check_array_birth_versions() -> tuple:
     dest≥0 全定值扩权后：a 的版本 = [ALLOC_ARRAY(诞生), STORE(重定值)] 两条，
     区间按 [def_j, def_{j+1}-1] 切割——诞生版覆盖元素写/拷贝读（a[0]=5、
     b := a），STORE 版覆盖重定值后读（a[0]+a[1]+a[i]）。"""
-    src = "fn main()->int{\n" \
-          "  a : [int; 3];\n" \
-          "  a[0] = 5; a[1] = 7;\n" \
-          "  b := a;\n" \
-          "  a = [1, 2, 3];\n" \
-          "  i := 0;\n" \
-          "  a[i] = 9;\n" \
-          "  return a[0] + a[1] + b[0] + a[i];\n" \
-          "}\n"
+    src = "fn main()->int:\n    a : [int; 3]\n    a[0] = 5\n    a[1] = 7\n    b := a\n    a = [1, 2, 3]\n    i := 0\n    a[i] = 9\n    return a[0] + a[1] + b[0] + a[i]\n"
     rc, out = dump_entries(src)
     if rc != 0:
         return False, f"cir --dump-entries rc={rc}\n{out[-500:]}"
@@ -252,8 +243,7 @@ def check_array_birth_versions() -> tuple:
 
 def run_smoke() -> tuple:
     """Task 1 存量冒烟：fib(10)==55 at O1-default / O2。"""
-    src = "fn fib(n:int)->int{if n<2{return n;}return fib(n-1)+fib(n-2);}\n" \
-          "fn main()->int{return fib(10);}\n"
+    src = "fn fib(n:int)->int:\n    if n<2:\n        return n\n    return fib(n-1)+fib(n-2)\nfn main()->int:\n    return fib(10)\n"
     passed = 0
     total = 2
     detail = []
@@ -286,7 +276,7 @@ def check_coexistence() -> tuple:
     (c) 概念断言（Python 侧用 --dump-entries 区间数据）：a/b 两变量条目
         存在区间相交（共存），同一变量两版本区间不相交（不共存）。
     """
-    src = "fn main()->int{a:=1;b:=2;return a+b;}\n"
+    src = "fn main()->int:\n    a:=1\n    b:=2\n    return a+b\n"
     rc, out = dump_coexist(src)
     if rc != 0:
         return False, f"cir --dump-coexist rc={rc}\n{out[-500:]}"
@@ -350,10 +340,8 @@ def check_regalloc_consistency() -> tuple:
     （check_regalloc_violations / check_regalloc_read_gap_nonfunc0，注入现以
     改写真实分配输出为手段）；fib/6 变量绿程序按行为锚点保留。"""
     for name, src in (
-        ("fib", "fn fib(n:int)->int{if n<2{return n;}return fib(n-1)+fib(n-2);}\n"
-                "fn main()->int{return fib(10);}\n"),
-        ("multi-var", "fn main()->int{a:=1;b:=2;c:=3;d:=4;e:=5;f:=6;"
-                      "return a+b+c+d+e+f;}\n"),
+        ("fib", "fn fib(n:int)->int:\n    if n<2:\n        return n\n    return fib(n-1)+fib(n-2)\nfn main()->int:\n    return fib(10)\n"),
+        ("multi-var", "fn main()->int:\n    a:=1\n    b:=2\n    c:=3\n    d:=4\n    e:=5\n    f:=6\n    return a+b+c+d+e+f\n"),
     ):
         rc, out = check_regalloc(src, [])
         if rc != 0:
@@ -382,7 +370,7 @@ def check_regalloc_real_use() -> tuple:
     6 共存 int var 的作用是把共存压力拉到 5 callee-saved 上限，使分配必然发生
     且必有栈驻留余数（不分配 = 保留栈 home；分配器无驱逐事件，不设驱逐路径）。
     """
-    src = "fn main()->int{a:=1;b:=2;c:=3;d:=4;e:=5;f:=6;return a+b+c+d+e+f;}\n"
+    src = "fn main()->int:\n    a:=1\n    b:=2\n    c:=3\n    d:=4\n    e:=5\n    f:=6\n    return a+b+c+d+e+f\n"
     rc, out = check_regalloc(src, [])
     if rc != 0:
         return False, f"check-regalloc rc={rc}:\n{out[-500:]}"
@@ -401,16 +389,7 @@ def check_regalloc_real_use() -> tuple:
 
 
 LOOP_CARRY_SRC = (
-    "fn main()->int{\n"
-    "  i:=0;s:=0;\n"
-    "  loop {\n"
-    "    if i>=4 { break; }\n"
-    "    i = i + 1;\n"
-    "    d := 5;\n"
-    "    s = s + d;\n"
-    "  }\n"
-    "  return s;\n"
-    "}\n"
+    "fn main()->int:\n    i:=0\n    s:=0\n    loop:\n        if i>=4:\n            break\n        i = i + 1\n        d := 5\n        s = s + d\n    return s\n"
 )
 
 
@@ -450,30 +429,8 @@ def check_regalloc_cond_def_carry() -> tuple:
     断言 O2（真实分配）== 期望；O1（无分配路径基线）同断言。
     """
     for name, src, expect in (
-        ("v_noz", "fn main()->int{\n"
-                  "  i:=0;s:=0;\n"
-                  "  x : int, mut = 3;\n"
-                  "  loop {\n"
-                  "    if i>=2 { break; }\n"
-                  "    if i==0 { x = 7; }\n"
-                  "    s = s + x;\n"
-                  "    i = i + 1;\n"
-                  "  }\n"
-                  "  return s;\n"
-                  "}\n", 14),
-        ("conddef-z", "fn main()->int{\n"
-                      "  i:=0;s:=0;\n"
-                      "  x : int, mut = 3;\n"
-                      "  loop {\n"
-                      "    if i>=2 { break; }\n"
-                      "    if i==0 { x = 7; }\n"
-                      "    s = s + x;\n"
-                      "    i = i + 1;\n"
-                      "    z := 5;\n"
-                      "    s = s + z;\n"
-                      "  }\n"
-                      "  return s;\n"
-                      "}\n", 24),
+        ("v_noz", "fn main()->int:\n    i:=0\n    s:=0\n    x : int, mut = 3\n    loop:\n        if i>=2:\n            break\n        if i==0:\n            x = 7\n        s = s + x\n        i = i + 1\n    return s\n", 14),
+        ("conddef-z", "fn main()->int:\n    i:=0\n    s:=0\n    x : int, mut = 3\n    loop:\n        if i>=2:\n            break\n        if i==0:\n            x = 7\n        s = s + x\n        i = i + 1\n        z := 5\n        s = s + z\n    return s\n", 24),
     ):
         for mode, flags in (("O1-baseline", []), ("O2-regalloc", ["--opt-level", "2"])):
             rc = build_and_run(src, flags)
@@ -503,27 +460,8 @@ def check_regalloc_else_def_carry() -> tuple:
     断言 O2（真实分配）== 期望；O1（无分配路径基线）同断言。
     """
     for name, src, expect in (
-        ("else1", "fn main()->int{\n"
-                  "  i:=0;s:=0;\n"
-                  "  x : int, mut = 3;\n"
-                  "  loop {\n"
-                  "    if i>=4 { break; }\n"
-                  "    if i<2 { s = s + 1; } else { x = 7; }\n"
-                  "    s = s + x;\n"
-                  "    i = i + 1;\n"
-                  "  }\n"
-                  "  return s;\n"
-                  "}\n", 22),
-        ("else-while", "fn main()->int{\n"
-                       "  i:=0;s:=0;\n"
-                       "  x : int, mut = 3;\n"
-                       "  while i < 4 {\n"
-                       "    if i<2 { s = s + 1; } else { x = 7; }\n"
-                       "    s = s + x;\n"
-                       "    i = i + 1;\n"
-                       "  }\n"
-                       "  return s;\n"
-                       "}\n", 22),
+        ("else1", "fn main()->int:\n    i:=0\n    s:=0\n    x : int, mut = 3\n    loop:\n        if i>=4:\n            break\n        if i<2:\n            s = s + 1\n        else:\n            x = 7\n        s = s + x\n        i = i + 1\n    return s\n", 22),
+        ("else-while", "fn main()->int:\n    i:=0\n    s:=0\n    x : int, mut = 3\n    while i < 4:\n        if i<2:\n            s = s + 1\n        else:\n            x = 7\n        s = s + x\n        i = i + 1\n    return s\n", 22),
     ):
         for mode, flags in (("O1-baseline", []), ("O2-regalloc", ["--opt-level", "2"])):
             rc = build_and_run(src, flags)
@@ -545,29 +483,8 @@ def check_regalloc_else_controls() -> tuple:
     断言 O2（真实分配）== 期望。
     """
     for name, src, expect in (
-        ("then2", "fn main()->int{\n"
-                  "  i:=0;s:=0;\n"
-                  "  x : int, mut = 3;\n"
-                  "  loop {\n"
-                  "    if i>=4 { break; }\n"
-                  "    if i<2 { x = 7; } else { s = s + 1; }\n"
-                  "    s = s + x;\n"
-                  "    i = i + 1;\n"
-                  "  }\n"
-                  "  return s;\n"
-                  "}\n", 30),
-        ("cont", "fn main()->int{\n"
-                 "  i:=0;s:=0;\n"
-                 "  x : int, mut = 3;\n"
-                 "  loop {\n"
-                 "    if i>=5 { break; }\n"
-                 "    if i==0 { i = i + 1; continue; }\n"
-                 "    if i<2 { x = 7; } else { s = s + 1; }\n"
-                 "    s = s + x;\n"
-                 "    i = i + 1;\n"
-                 "  }\n"
-                 "  return s;\n"
-                 "}\n", 31),
+        ("then2", "fn main()->int:\n    i:=0\n    s:=0\n    x : int, mut = 3\n    loop:\n        if i>=4:\n            break\n        if i<2:\n            x = 7\n        else:\n            s = s + 1\n        s = s + x\n        i = i + 1\n    return s\n", 30),
+        ("cont", "fn main()->int:\n    i:=0\n    s:=0\n    x : int, mut = 3\n    loop:\n        if i>=5:\n            break\n        if i==0:\n            i = i + 1\n            continue\n        if i<2:\n            x = 7\n        else:\n            s = s + 1\n        s = s + x\n        i = i + 1\n    return s\n", 31),
     ):
         rc = build_and_run(src, ["--opt-level", "2"])
         ok = rc == expect
@@ -585,7 +502,7 @@ def check_regalloc_violations() -> tuple:
     - --inject-read-gap     : 寄存器驻留 var 末版区间截断到定值点 → 规则 2（读点无版本）
     O2 正确程序（无注入）rc=0 已在 check_regalloc_consistency 断言——同一二进制
     注入后 rc=1 即证明 verify 真消费了分配/条目数据而非恒真。"""
-    src = "fn main()->int{a:=1;b:=2;c:=3;d:=4;e:=5;f:=6;return a+b+c+d+e+f;}\n"
+    src = "fn main()->int:\n    a:=1\n    b:=2\n    c:=3\n    d:=4\n    e:=5\n    f:=6\n    return a+b+c+d+e+f\n"
     for flag, rule in (("--inject-home-conflict", "1"),
                        ("--inject-reg-conflict", "1"),
                        ("--inject-read-gap", "2")):
@@ -614,16 +531,7 @@ def check_regalloc_read_gap_nonfunc0() -> tuple:
     inject_read_gap 的迭代序改为 1..n-1 再 0（调试钩子，真实路径永不注入），
     注入恒落非 func 0 函数；注入目标函数不再固定为 sum6（按函数序首个可注入
     者定，此处为 ist>0 的 stdlib/用户函数）——断言 = func > 0 + rule 2。"""
-    src = "fn main()->int{return n0(1,2);}\n" \
-          "fn n0(a:int,b:int)->int{return a+b;}\n" \
-          "fn n1(a:int,b:int)->int{return a+b;}\n" \
-          "fn n2(a:int,b:int)->int{return a+b;}\n" \
-          "fn n3(a:int,b:int)->int{return a+b;}\n" \
-          "fn n4(a:int,b:int)->int{return a+b;}\n" \
-          "fn n5(a:int,b:int)->int{return a+b;}\n" \
-          "fn n6(a:int,b:int)->int{return a+b;}\n" \
-          "fn n7(a:int,b:int)->int{return a+b;}\n" \
-          "fn sum6()->int{a:=1;b:=2;c:=3;d:=4;e:=5;f:=6;return a+b+c+d+e+f;}\n"
+    src = "fn main()->int:\n    return n0(1,2)\nfn n0(a:int,b:int)->int:\n    return a+b\nfn n1(a:int,b:int)->int:\n    return a+b\nfn n2(a:int,b:int)->int:\n    return a+b\nfn n3(a:int,b:int)->int:\n    return a+b\nfn n4(a:int,b:int)->int:\n    return a+b\nfn n5(a:int,b:int)->int:\n    return a+b\nfn n6(a:int,b:int)->int:\n    return a+b\nfn n7(a:int,b:int)->int:\n    return a+b\nfn sum6()->int:\n    a:=1\n    b:=2\n    c:=3\n    d:=4\n    e:=5\n    f:=6\n    return a+b+c+d+e+f\n"
     rc, out = check_regalloc(src, ["--inject-read-gap"])
     if rc != 1:
         return False, f"check-regalloc +--inject-read-gap (non-func0): rc={rc}, expected 1:\n{out[-500:]}"
@@ -650,7 +558,7 @@ def check_coexist_oob_guard() -> tuple:
     --inject-coexist-oob 探针通道：输出 "coexist-oob-guard: <r>"，
     r != 0（探针自检失败）→ 退出码 1。与 dump-coexist 摘要同源同前置
     （compute_live_ranges），真实构建路径永不注入。"""
-    src = "fn main()->int{a:=1;b:=2;return a+b;}\n"
+    src = "fn main()->int:\n    a:=1\n    b:=2\n    return a+b\n"
     rc, out = corearch_chan(src, "--inject-coexist-oob")
     if rc != 0:
         return False, f"corearch --inject-coexist-oob rc={rc}\n{out[-500:]}"

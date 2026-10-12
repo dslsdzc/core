@@ -47,51 +47,22 @@ def limb_bytes(S):
 S64 = 1 << 63
 CASES = [
     ("m1_add_pos",
-     "fn main() -> int {\n"
-     "    x : ., mut = 4611686018427387904;\n"      # 2^62
-     "    x = x + 4611686018427387904;\n"           # S = 2^63：正溢出 CF=0 → hi=0
-     "    r := syscall3(1, 1, x, 16);\n    return r;\n}\n",
+     "fn main() -> int:\n    x : ., mut = 4611686018427387904\n    x = x + 4611686018427387904\n    r := syscall3(1, 1, x, 16)\n    return r\n",
      S64, "add 正溢出：CF=0 → 高 limb = 0（lo=2^63 环绕 0x8000..0）"),
     ("m2_add_neg",
-     "fn main() -> int {\n"
-     "    x : ., mut = -9223372036854775807;\n"     # -(2^63-1)
-     "    x = x + -2;\n"                            # S = -2^63-1：负溢出 CF=1 → hi=-1
-     "    r := syscall3(1, 1, x, 16);\n    return r;\n}\n",
+     "fn main() -> int:\n    x : ., mut = -9223372036854775807\n    x = x + -2\n    r := syscall3(1, 1, x, 16)\n    return r\n",
      -S64 - 1, "add 负溢出：CF=1 → 高 limb = -1（lo=2^63-1、hi=0xFF..F）"),
     ("m3_sub_pos",
-     "fn main() -> int {\n"
-     "    x : ., mut = 4611686018427387904;\n"      # 2^62
-     "    x = x - -4611686018427387904;\n"          # S = 2^63：正溢出借位 CF=1 →
-     "    r := syscall3(1, 1, x, 16);\n    return r;\n}\n",  # sub 规则 hi=0（add 规则会给 -1 → 红）
+     "fn main() -> int:\n    x : ., mut = 4611686018427387904\n    x = x - -4611686018427387904\n    r := syscall3(1, 1, x, 16)\n    return r\n",  # sub 规则 hi=0（add 规则会给 -1 → 红）
      S64, "sub 正溢出：CF=1 → 高 limb = 0（判别：add 规则在此给 -1）"),
     ("m4_sub_neg",
-     "fn main() -> int {\n"
-     "    x : ., mut = -4611686018427387905;\n"     # -(2^62+1)
-     "    x = x - 4611686018427387904;\n"           # S = -2^63-1：负溢出（混合符号
-     "    r := syscall3(1, 1, x, 16);\n    return r;\n}\n",  # 无借位 CF=0）→ sub 规则 hi=-1
+     "fn main() -> int:\n    x : ., mut = -4611686018427387905\n    x = x - 4611686018427387904\n    r := syscall3(1, 1, x, 16)\n    return r\n",  # 无借位 CF=0）→ sub 规则 hi=-1
      -S64 - 1, "sub 负溢出：CF=0 → 高 limb = -1（判别：add 规则在此给 0）"),
     ("m5_two_add_sites",
-     "fn main() -> int {\n"
-     "    x : ., mut = 4611686018427387904;\n"
-     "    x = x + 4611686018427387904;\n"           # 站点 1：2^63
-     "    r1 := syscall3(1, 1, x, 16);\n"
-     "    y : ., mut = -9223372036854775807;\n"
-     "    y = y + -2;\n"                            # 站点 2：-2^63-1
-     "    r2 := syscall3(1, 1, y, 16);\n"
-     "    return r1 + r2;\n}\n",
+     "fn main() -> int:\n    x : ., mut = 4611686018427387904\n    x = x + 4611686018427387904\n    r1 := syscall3(1, 1, x, 16)\n    y : ., mut = -9223372036854775807\n    y = y + -2\n    r2 := syscall3(1, 1, y, 16)\n    return r1 + r2\n",
      None, "同函数双 add 站点：两独立块都执行、都正确（rc=32 + 32B 流）"),
     ("m6_mix_sites",
-     "fn main() -> int {\n"
-     "    a : ., mut = 4611686018427387904;\n"
-     "    a = a - -4611686018427387904;\n"          # sub 正溢出 → 2^63
-     "    r1 := syscall3(1, 1, a, 16);\n"
-     "    b : ., mut = -4611686018427387905;\n"
-     "    b = b - 4611686018427387904;\n"           # sub 负溢出 → -2^63-1
-     "    r2 := syscall3(1, 1, b, 16);\n"
-     "    c : ., mut = -9223372036854775807;\n"
-     "    c = c + -2;\n"                            # add 负溢出 → -2^63-1
-     "    r3 := syscall3(1, 1, c, 16);\n"
-     "    return r1 + r2 + r3;\n}\n",
+     "fn main() -> int:\n    a : ., mut = 4611686018427387904\n    a = a - -4611686018427387904\n    r1 := syscall3(1, 1, a, 16)\n    b : ., mut = -4611686018427387905\n    b = b - 4611686018427387904\n    r2 := syscall3(1, 1, b, 16)\n    c : ., mut = -9223372036854775807\n    c = c + -2\n    r3 := syscall3(1, 1, c, 16)\n    return r1 + r2 + r3\n",
      None, "add+sub 混站：sub 块（含 not 修正）与 add 块同函数共存"),
 ]
 

@@ -1,2 +1,3 @@
 // Project-mode entry point
-fn main() -> int { return compiler_main(); }
+fn main() -> int:
+    return compiler_main()

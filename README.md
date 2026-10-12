@@ -17,19 +17,16 @@ is represented as relations first, state/storage is mapped separately, and machi
 representation comes last.
 
 ```core
-import io;
+import io
 
-fn fib(n: int) -> int {
-    if n < 2 {
-        return n;
-    }
-    return fib(n - 1) + fib(n - 2);
-}
+fn fib(n: int) -> int:
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
 
-fn main() -> int {
-    io.println_i(fib(10));   // 55
-    return 0;
-}
+fn main() -> int:
+    io.println_i(fib(10))   // 55
+    return 0
 ```
 
 Core is under active development.
@@ -93,7 +90,8 @@ This produces `build/corec` (frontend) and `build/corearch` (backend).
 
 - [Project Book](docs/project-book.md) — design and rationale
 - [Developer documentation](docs/developer/) — syntax reference and internals
-- [Execution Model](docs/maintainer/design/execution-model.md) · [Memory Model](docs/maintainer/design/memory-model.md)
+- [Execution Model](docs/maintainer/design/execution-model.md)
+- [Memory Model](docs/maintainer/design/memory-model.md)
 - [Error codes](docs/developer/errors.md)
 
 ## Contributing

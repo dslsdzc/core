@@ -7,17 +7,15 @@
 //
 // 编译器专用部分（需要编译器全局变量）在 src/compiler/trace_ext.cr
 
-fn trace_assert(cond: int, msg: string) {
-    if cond != 0 { return; }
-    println(msg);
-}
+fn trace_assert(cond: int, msg: string):
+    if cond != 0:
+        return
+    println(msg)
 
-fn trace_dbg(name: string, val: int) -> int {
-    print_i(val);
-    return val;
-}
+fn trace_dbg(name: string, val: int) -> int:
+    print_i(val)
+    return val
 
-fn trace_dbg_str(name: string, val: string) -> string {
-    print(val);
-    return val;
-}
+fn trace_dbg_str(name: string, val: string) -> string:
+    print(val)
+    return val

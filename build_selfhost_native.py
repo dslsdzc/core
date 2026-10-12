@@ -154,7 +154,9 @@ def concat(files, wrapper_fn=None):
                     parts.append(f"// === {f} ===\n{content}")
     src = '\n\n'.join(parts)
     if wrapper_fn:
-        src += f'\n\nfn main() -> int {{ return {wrapper_fn}(); }}\n'
+        # v4（T3）：wrapper 必须用目标语法形——`: ` + layout region，不用花括号。
+        # 这行是承重面：不改它，T1/T2 翻到 v4 后整个自举链在第一步就断。
+        src += f'\n\nfn main() -> int:\n    return {wrapper_fn}()\n'
     return src
 
 

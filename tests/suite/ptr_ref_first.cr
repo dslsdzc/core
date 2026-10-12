@@ -3,10 +3,10 @@
 // → p+1 退化为字节加（&x + 1）→ 地址差为 1 而非 8。
 // 修复后：占位表项占住下标 8，&int 从 9 起 → PTR_ADD 按 8 字节元素缩放。
 // 断言用 @raw_int 取地址原值求字节差（确定性；不依赖局部槽布局）。
-fn main() -> int {
-    x : ., mut = 42;
-    p := &x;
-    q := p + 1;      // 必须 = &x + 8（一个 int 元素），而非 &x + 1 字节
-    if @raw_int(q) - @raw_int(p) != 8 { return 1; }
-    return 0;
-}
+fn main() -> int:
+    x : ., mut = 42
+    p := &x
+    q := p + 1      // 必须 = &x + 8（一个 int 元素），而非 &x + 1 字节
+    if @raw_int(q) - @raw_int(p) != 8:
+        return 1
+    return 0

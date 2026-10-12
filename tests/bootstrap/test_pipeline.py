@@ -87,239 +87,300 @@ def test_raw(name, src, expected):
 
 # ── Arithmetic & Function Calls ──
 test('Arithmetic & Call', '''
-fn add(a: int, b: int) -> int { return a + b; }
-fn main() -> int { return add(3, 4); }
+fn add(a: int, b: int) -> int:
+    return a + b
+fn main() -> int:
+    return add(3, 4)
 ''', 7)
 
 test('old is an identifier', '''
-fn main() -> int {
-    old := 40;
-    return old + 2;
-}
+fn main() -> int:
+    old := 40
+    return old + 2
+''', 42)
+
+test('V4 layout and contracts have zero runtime footprint', '''
+fn bounded(x: int) -> int:
+    #check(x >= 0)
+    #ensure(result >= x)
+    return x + 1
+
+fn main() -> int:
+    value := bounded(41)
+    if value == 42:
+        return value
+    else:
+        return 0
+''', 42)
+
+test('V4 layout struct and impl', '''
+struct Point:
+    x: int
+    y: int
+
+impl Point:
+    fn sum(&self) -> int:
+        return self.x + self.y
+
+fn main() -> int:
+    p := Point { x = 20, y = 22 }
+    return p.sum()
+''', 42)
+
+test('V4 layout enum and multiline match arm', '''
+enum Mode:
+ | Server
+ | Client
+
+fn main() -> int:
+    mode := Server
+    value := match mode:
+     | Server =>
+        base := 40
+        base + 2
+     | Client => 0
+    return value
+''', 42)
+
+test('V4 lowercase none', '''
+fn main() -> int:
+    value := none
+    return match value:
+     | none => 42
+     | _ => 0
 ''', 42)
 
 # ── Loop & Break ──
 test('Loop & Break', '''
-fn sum(n: int) -> int {
-    i : ., mut = 0;
-    s : ., mut = 0;
-    loop {
-        if i >= n { break; }
-        s = s + i;
-        i = i + 1;
-    }
-    return s;
-}
-fn main() -> int { return sum(5); }
+fn sum(n: int) -> int:
+    i : ., mut = 0
+    s : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        s = s + i
+        i = i + 1
+    return s
+fn main() -> int:
+    return sum(5)
 ''', 10)
 
 # ── If / Else ──
 test('If/Else', '''
-fn max(a: int, b: int) -> int {
-    if a > b { return a; } else { return b; }
-}
-fn main() -> int { return max(3, 7); }
+fn max(a: int, b: int) -> int:
+    if a > b:
+        return a
+    else:
+        return b
+fn main() -> int:
+    return max(3, 7)
 ''', 7)
 
 # ── Struct ──
 test('Struct Field Access', '''
-struct Point { x: int, y: int }
-fn main() -> int {
-    p := Point { x = 10, y = 20 };
-    return p.x + p.y;
-}
+struct Point:
+    x: int, y: int
+fn main() -> int:
+    p := Point { x = 10, y = 20 }
+    return p.x + p.y
 ''', 30)
 
 test('Method Call', '''
-struct Vec { x: int, y: int }
-impl Vec {
-    fn norm(self: Vec) -> int { return self.x + self.y; }
-}
-fn main() -> int {
-    v := Vec { x = 1, y = 2 };
-    return v.norm();
-}
+struct Vec:
+    x: int, y: int
+impl Vec:
+    fn norm(self: Vec) -> int:
+        return self.x + self.y
+fn main() -> int:
+    v := Vec { x = 1, y = 2 }
+    return v.norm()
 ''', 3)
 
 test('Nested Structs', '''
-struct Inner { a: int }
-struct Outer { inner: Inner, b: int }
-fn main() -> int {
-    inner := Inner { a = 5 };
-    outer := Outer { inner = inner, b = 10 };
-    return outer.inner.a + outer.b;
-}
+struct Inner:
+    a: int
+struct Outer:
+    inner: Inner, b: int
+fn main() -> int:
+    inner := Inner { a = 5 }
+    outer := Outer { inner = inner, b = 10 }
+    return outer.inner.a + outer.b
 ''', 15)
 
 # ── Comparisons & Logic ──
 test('Comparisons', '''
-fn main() -> int {
-    if 2 < 3 && 4 == 4 { return 1; }
-    return 0;
-}
+fn main() -> int:
+    if 2 < 3 && 4 == 4:
+        return 1
+    return 0
 ''', 1)
 
 # ── Enum & Match ──
 test('Enum Match Unwrap', '''
-enum Option { Some(int), None }
-fn main() -> int {
-    x := Some(42);
-    match x {
+enum Option:
+    Some(int), none
+fn main() -> int:
+    x := Some(42)
+    match x:
         Some(val) => val,
-        None => 0,
-    }
-}
+        none => 0,
 ''', 42)
 
 test('Enum Multi Args', '''
-enum Color { Red, Green(int), Blue(int, int) }
-fn main() -> int {
-    c := Blue(1, 2);
-    match c {
+enum Color:
+    Red, Green(int), Blue(int, int)
+fn main() -> int:
+    c := Blue(1, 2)
+    match c:
         Red => 0,
         Green(n) => n,
         Blue(a, b) => a + b,
-    }
-}
 ''', 3)
 
 # ── Dex ──
 test('Dex Add', '''
-fn main() -> dex {
-    a := 3.14;
-    b := 2.86;
-    return a + b;
-}
+fn main() -> dex:
+    a := 3.14
+    b := 2.86
+    return a + b
 ''', 6.0)
 
 test('Int Dex Mix', '''
-fn main() -> dex {
-    a := 2;
-    b := 3.5;
-    return a + b;
-}
+fn main() -> dex:
+    a := 2
+    b := 3.5
+    return a + b
 ''', 5.5)
 
 # ── String ──
 test_raw('String Concat', '''
-fn main() -> string {
-    a := "Hello, ";
-    b := "World!";
-    return a + b;
-}
+fn main() -> string:
+    a := "Hello, "
+    b := "World!"
+    return a + b
 ''', "Hello, World!")
 
 # ── Array ──
 test('Array Read', '''
-fn main() -> int {
-    arr := [10, 20, 30];
-    return arr[0] + arr[1] + arr[2];
-}
+fn main() -> int:
+    arr := [10, 20, 30]
+    return arr[0] + arr[1] + arr[2]
 ''', 60)
 
 test('Array Mutate', '''
-fn main() -> int {
-    arr : ., mut = [10, 20, 30];
-    arr[1] = 50;
-    return arr[0] + arr[1] + arr[2];
-}
+fn main() -> int:
+    arr : ., mut = [10, 20, 30]
+    arr[1] = 50
+    return arr[0] + arr[1] + arr[2]
 ''', 90)
 
 # ── For Loop ──
 test('For Range Sum', '''
-fn main() -> int {
-    sum : ., mut = 0;
-    for i in 0..10 { sum = sum + i; }
-    return sum;
-}
+fn main() -> int:
+    sum : ., mut = 0
+    for i in 0..10:
+        sum = sum + i
+    return sum
 ''', 45)
 
 test('For Array Iter', '''
-fn main() -> int {
-    arr := [10, 20, 30];
-    s : ., mut = 0;
-    for val in arr { s = s + val; }
-    return s;
-}
+fn main() -> int:
+    arr := [10, 20, 30]
+    s : ., mut = 0
+    for val in arr:
+        s = s + val
+    return s
 ''', 60)
 
 # ── References ──
 test('Ref Deref', '''
-fn main() -> int {
-    x := 42;
-    r := &x;
-    return *r;
-}
+fn main() -> int:
+    x := 42
+    r := &x
+    return *r
 ''', 42)
 
 test('Mut Ref Write', '''
-fn main() -> int {
-    x : ., mut = 10;
-    r := &mut x;
-    *r = 20;
-    return *r;
-}
+fn main() -> int:
+    x : ., mut = 10
+    r := &mut x
+    *r = 20
+    return *r
 ''', 20)
 
 # ── Enum Match (via desugar) ──
 test('Enum Match Opt', '''
-fn main() -> int {
-    opt := Some(99);
-    match opt {
+fn main() -> int:
+    opt := Some(99)
+    match opt:
         Some(val) => val,
-        None => 0,
-    }
-}
+        none => 0,
 ''', 99)
+
+# ── V4 relational type expression ──
+test('V4 typeof(expr)', '''
+fn main() -> int:
+    source := 40
+    copy : typeof(source) = source
+    return copy + 2
+''', 42)
 
 # ── If without else (regression: two-variable comparison) ──
 test('If No Else (gt, true)', '''
-fn main() -> int {
-    a := 10; b := 3;
-    if a > b { return 100; }
-    return 200;
-}
+fn main() -> int:
+    a := 10
+    b := 3
+    if a > b:
+        return 100
+    return 200
 ''', 100)
 
 test('If No Else (gt, false)', '''
-fn main() -> int {
-    a := 3; b := 10;
-    if a > b { return 100; }
-    return 200;
-}
+fn main() -> int:
+    a := 3
+    b := 10
+    if a > b:
+        return 100
+    return 200
 ''', 200)
 
 test('If No Else (eq, true)', '''
-fn main() -> int {
-    a := 5; b := 5;
-    if a == b { return 99; }
-    return 88;
-}
+fn main() -> int:
+    a := 5
+    b := 5
+    if a == b:
+        return 99
+    return 88
 ''', 99)
 
 test('If No Else (ne, false)', '''
-fn main() -> int {
-    a := 5; b := 5;
-    if a != b { return 99; }
-    return 88;
-}
+fn main() -> int:
+    a := 5
+    b := 5
+    if a != b:
+        return 99
+    return 88
 ''', 88)
 
 # ── 整数除/模向零截断（BC2/F10：对照 ELF idiv 与 CompCert Z.quot/Z.rem）──
 test('Div trunc toward zero (-7/3)', '''
-fn main() -> int { return -7 / 3; }
+fn main() -> int:
+    return -7 / 3
 ''', -2)
 
 test('Div trunc toward zero (7/-3)', '''
-fn main() -> int { return 7 / -3; }
+fn main() -> int:
+    return 7 / -3
 ''', -2)
 
 test('Mod sign follows dividend (-7%3)', '''
-fn main() -> int { return -7 % 3; }
+fn main() -> int:
+    return -7 % 3
 ''', -1)
 
 test('Mod sign follows dividend (7%-3)', '''
-fn main() -> int { return 7 % -3; }
+fn main() -> int:
+    return 7 % -3
 ''', 1)
 
 # ── Lexer integer literal forms and wide apx literals ──

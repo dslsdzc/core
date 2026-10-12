@@ -24,34 +24,44 @@ def main() -> int:
     TEST_BUILD.mkdir(parents=True)
     (TEST_BUILD / "src").symlink_to(BASE / "src", target_is_directory=True)
     SOURCE.write_text(
-        """\
-import fmt
+        """import fmt
 import io
 
-struct Point { x: int, y: int }
+struct Point:
+    x: int, y: int
 
-fn main() -> int {
-    one := int_str(7);
-    if str_eq(one, "7") == 0 { return 1; }
-    many := int_str(567);
-    if str_eq(many, "567") == 0 { return 2; }
+fn main() -> int:
+    one := int_str(7)
+    if str_eq(one, "7") == 0:
+        return 1
+    many := int_str(567)
+    if str_eq(many, "567") == 0:
+        return 2
 
-    joined := "AB" + "CD";
-    if str_eq(joined, "ABCD") == 0 { return 3; }
-    println(joined);
+    joined := "AB" + "CD"
+    if str_eq(joined, "ABCD") == 0:
+        return 3
+    println(joined)
 
-    if str_len("hello") != 5 { return 4; }
-    fields := @fields(Point);
-    if str_len(fields) != 3 { return 5; }
+    if str_len("hello") != 5:
+        return 4
+    fields := @fields(Point)
+    if str_len(fields) != 3:
+        return 5
 
-    if str_eq(float_str_bits(4614253070214989087), "3.14") == 0 { return 6; }
-    if str_eq(float_str_bits(4611686016625948053), "2") == 0 { return 7; }
-    if str_eq(float_str_bits(4621819117363791539), "10") == 0 { return 8; }
-    if str_eq(float_str_bits(4607182415197137706), "1") == 0 { return 9; }
-    if str_eq(float_str_bits(4636737291326488790), "100") == 0 { return 10; }
-    if str_eq(float_str_bits(-4611686020228827755), "-2") == 0 { return 11; }
-    return 0;
-}
+    if str_eq(float_str_bits(4614253070214989087), "3.14") == 0:
+        return 6
+    if str_eq(float_str_bits(4611686016625948053), "2") == 0:
+        return 7
+    if str_eq(float_str_bits(4621819117363791539), "10") == 0:
+        return 8
+    if str_eq(float_str_bits(4607182415197137706), "1") == 0:
+        return 9
+    if str_eq(float_str_bits(4636737291326488790), "100") == 0:
+        return 10
+    if str_eq(float_str_bits(-4611686020228827755), "-2") == 0:
+        return 11
+    return 0
 """,
         encoding="utf-8",
     )

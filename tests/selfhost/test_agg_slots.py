@@ -36,106 +36,109 @@ VALUE_CASES = [
     (
         "struct: compound value in last field (F5 ①主判据)",
         """
-struct P { a: int, b: int }
-fn g() -> int { return 3; }
-fn main() -> int {
-    p := P{a: 11, b: g()};
-    return p.a * 100 + p.b;
-}
+struct P:
+    a: int, b: int
+fn g() -> int:
+    return 3
+fn main() -> int:
+    p := P{a= 11, b= g()}
+    return p.a * 100 + p.b
 """,
         1103,
     ),
     (
         "struct: both fields compound (F5 ①主判据)",
         """
-struct P { a: int, b: int }
-fn g() -> int { return 3; }
-fn h() -> int { return 4; }
-fn main() -> int {
-    p := P{a: g(), b: h()};
-    return p.a * 10 + p.b;
-}
+struct P:
+    a: int, b: int
+fn g() -> int:
+    return 3
+fn h() -> int:
+    return 4
+fn main() -> int:
+    p := P{a= g(), b= h()}
+    return p.a * 10 + p.b
 """,
         34,
     ),
     (
         "struct: 3 fields, compound in middle (错位累积面)",
         """
-struct P { a: int, b: int, c: int }
-fn g() -> int { return 5; }
-fn main() -> int {
-    p := P{a: 1, b: g(), c: 2};
-    return p.a * 100 + p.b * 10 + p.c;
-}
+struct P:
+    a: int, b: int, c: int
+fn g() -> int:
+    return 5
+fn main() -> int:
+    p := P{a= 1, b= g(), c= 2}
+    return p.a * 100 + p.b * 10 + p.c
 """,
         152,
     ),
     (
         "struct: nested struct literal as field value",
         """
-struct Q { u: int, v: int }
-struct P { a: int, b: Q }
-fn main() -> int {
-    p := P{a: 1, b: Q{u: 2, v: 3}};
-    return p.a * 100 + p.b.u * 10 + p.b.v;
-}
+struct Q:
+    u: int, v: int
+struct P:
+    a: int, b: Q
+fn main() -> int:
+    p := P{a= 1, b= Q{u= 2, v= 3}}
+    return p.a * 100 + p.b.u * 10 + p.b.v
 """,
         123,
     ),
     (
         "struct: single-slot fields only (反证边界——旧交错顺序下此形本已正确)",
         """
-struct P { a: int, b: int }
-fn main() -> int {
-    p := P{a: 11, b: 22};
-    return p.a * 100 + p.b;
-}
+struct P:
+    a: int, b: int
+fn main() -> int:
+    p := P{a= 11, b= 22}
+    return p.a * 100 + p.b
 """,
         1122,
     ),
     (
         "generic fn body: struct literal cloned by monomorph",
         """
-struct P { a: int, b: int }
-fn f[T](x: T) -> int {
-    p := P{a: 1, b: x};
-    return p.a * 100 + p.b;
-}
-fn main() -> int {
-    return f(7);
-}
+struct P:
+    a: int, b: int
+fn f[T](x: T) -> int:
+    p := P{a= 1, b= x}
+    return p.a * 100 + p.b
+fn main() -> int:
+    return f(7)
 """,
         107,
     ),
     (
         "array: compound element in middle (F5 ③主判据)",
         """
-fn g() -> int { return 7; }
-fn main() -> int {
-    a := [1, g(), 3];
-    return a[0] * 10 + a[1];
-}
+fn g() -> int:
+    return 7
+fn main() -> int:
+    a := [1, g(), 3]
+    return a[0] * 10 + a[1]
 """,
         17,
     ),
     (
         "array: nested array element read (修复前 a[1][0] SIGSEGV)",
         """
-fn main() -> int {
-    a := [[1, 2], [3, 4]];
-    return a[0][0] * 10 + a[1][1];
-}
+fn main() -> int:
+    a := [[1, 2], [3, 4]]
+    return a[0][0] * 10 + a[1][1]
 """,
         14,
     ),
     (
         "array: repeat form [value; N] 共享值节点",
         """
-fn g() -> int { return 4; }
-fn main() -> int {
-    a := [g() + 1; 3];
-    return a[0] + a[1] + a[2];
-}
+fn g() -> int:
+    return 4
+fn main() -> int:
+    a := [g() + 1; 3]
+    return a[0] + a[1] + a[2]
 """,
         15,
     ),
@@ -146,46 +149,42 @@ CHECK_CASES = [
     (
         "soundness: nested vs flat array literal rejected (F5 ③)",
         """
-fn main() -> int {
-    x : ., mut = [[1, 2], [3, 4]];
-    y : ., mut = [5, 6];
-    x = y;
-    return 0;
-}
+fn main() -> int:
+    x : ., mut = [[1, 2], [3, 4]]
+    y : ., mut = [5, 6]
+    x = y
+    return 0
 """,
         "TA01",
     ),
     (
         "array element count mismatch rejected",
         """
-fn main() -> int {
-    x : ., mut = [1, 2, 3];
-    y : ., mut = [5, 6];
-    x = y;
-    return 0;
-}
+fn main() -> int:
+    x : ., mut = [1, 2, 3]
+    y : ., mut = [5, 6]
+    x = y
+    return 0
 """,
         "LEN",
     ),
     (
         "same-shape nested arrays accepted (反证边界)",
         """
-fn main() -> int {
-    x : ., mut = [[1, 2], [3, 4]];
-    y : ., mut = [[5, 6], [7, 8]];
-    x = y;
-    return 0;
-}
+fn main() -> int:
+    x : ., mut = [[1, 2], [3, 4]]
+    y : ., mut = [[5, 6], [7, 8]]
+    x = y
+    return 0
 """,
         "ACCEPT",
     ),
     (
         "array type form [T; N] + literal accepted (类型形不受字面量契约影响)",
         """
-fn main() -> int {
-    a : [int; 3] = [1, 2, 3];
-    return a[2];
-}
+fn main() -> int:
+    a : [int; 3] = [1, 2, 3]
+    return a[2]
 """,
         "ACCEPT",
     ),

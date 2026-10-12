@@ -1,6 +1,5 @@
-fn f(a: int) -> int
+fn f(a: int) -> int:
     #check(a >= 0)
-{
-    return a;
-}
-fn main() -> int { return f(1); }
+    return a
+fn main() -> int:
+    return f(1)

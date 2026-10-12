@@ -122,11 +122,17 @@
   ⇒ 静默错值 **+ ELF≠interp（双路径分歧）**，与批 5 原始 RED（u11）同严重级。
 - **最小复现**：
   ```core
-  fn g[T](t: T, x: T?) -> int {
-      return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-  }
-  fn main() -> int { d : dex, apx = 7.0; return g(1, d); }     // 期望 7；实测 ELF 142 / interp 15
-  // ⚠ 标注：`142`=样本非锚（非确定分布的一次采样）；「期望 7」已作废 ⇒ 修后应为**硬错拒绝**（rc=1，见回填块 ③ 与 Ⅶ 支 1）
+  fn g[T](t: T, x: T?) -> int:
+      return match x:
+          Some(v) =>:
+              return @raw_int(v) / 1000000
+          none =>:
+              return 0
+  fn main() -> int:
+      d : dex, apx = 7.0
+      return g(1, d)
+  // 期望 7；实测 ELF 142 / interp 15
+    // ⚠ 标注：`142`=样本非锚（非确定分布的一次采样）；「期望 7」已作废 ⇒ 修后应为**硬错拒绝**（rc=1，见回填块 ③ 与 Ⅶ 支 1）
   ```
 - **机理（`file:line`，读码）**：
   - 调用侧环取**泛型声明**的形参链：`ir_gen.cr:1965` `cfi := find_func(func_ni)` → `fi_ast_node(cfi)`；门在 `:1985`
@@ -151,7 +157,12 @@
   两个值为 7 的可选比较 ⇒ **1** · `n == 7`（可选 vs 内层值）⇒ **1**。
 - **最小复现**：
   ```core
-  fn main() -> int { n : int? = None; if n == None { return 1; } return 0; }   // 期望 1；实测 0
+  fn main() -> int:
+      n : int? = none
+      if n == none:
+          return 1
+      return 0
+  // 期望 1；实测 0
   ```
 - **机理（2026-09-18 重锚 + 定性更正）**：`==` 走 `gen_expr`（`ir_gen.cr:1192` 起）内的**通用落点 `:1465-1467`**
   （`emit(IR_BINARY, v, left_var, right_var, op, fti)`）**不读 rep 位** ⇒ **逐槽比较原始值**：
@@ -183,8 +194,11 @@
   对照 `extern fn e(x: int?)` ⇒ **同形同判**（非 dex 特有）。
 - **最小复现**：
   ```core
-  extern fn e_opt(x: dex?) -> int;
-  fn main() -> int { d : dex, apx = 7.0; return e_opt(d); }    // check=0（应拒未拒）；运行期 139
+  extern fn e_opt(x: dex?) -> int
+  fn main() -> int:
+      d : dex, apx = 7.0
+      return e_opt(d)
+  // check=0（应拒未拒）；运行期 139
   ```
 - **机理（读码）**：`checker.cr:2167` `if ast_kind(fn_node) == EXPR_EXTERN { return; }` ⇒ **extern 声明的形参/体检查整段跳过**
   ⇒ 无「C ABI 可表示性」校验；`ir_gen.cr:1985` 的 `cfn_ext == 0` 守卫使实参环**对 extern 侧不扩**（无约定可依）。

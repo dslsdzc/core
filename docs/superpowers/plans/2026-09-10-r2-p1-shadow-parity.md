@@ -2,9 +2,14 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把 P0 的类型项引擎以**影子模式**挂到检查器的类型判定上（旧判定照常生效），对真实语料并跑两套判定、产出**分类差异清单**——收紧面（旧接受→新拒绝 / 旧拒绝→新接受）在 P1 暴露，而不改任何行为。
+**Goal:** 把 P0 的类型项引擎以**影子模式**挂到检查器的类型判定上，旧判定照常生效。对真实语料并跑两套判定，产出**分类差异清单**，使收紧面（旧接受→新拒绝 / 旧拒绝→新接受）在 P1 暴露，而不改任何行为。
 
-**Architecture:** 三件新东西 + 一处包装：① 判定衔接层 `ty_shadow.cr`（checker 的 `ti` → 引擎类型项）；② 影子判定核心（翻译 → `ty_equiv` → 分类：`AGREE` / `OLD_STRICTER`（旧拒新受）/ `OLD_LOOSER`（旧受新拒）/ `UNKNOWN`（引擎 -1，单列不计差异））；③ 通道（CLI `--type-shadow` 开关 + 摘要行 + 转储文件）；挂点 = `type_equal` 包装（原函数改名 `type_equal_core` 供内部递归，外部 8 个决策点经包装自动覆盖）。
+**Architecture:** 本批共三件新东西加一处包装。
+
+- ① 判定衔接层 `ty_shadow.cr`，负责把 checker 的 `ti` 翻译为引擎类型项。
+- ② 影子判定核心，流程为翻译 → `ty_equiv` → 分类，分类取值为 `AGREE` / `OLD_STRICTER`（旧拒新受）/ `OLD_LOOSER`（旧受新拒）/ `UNKNOWN`（引擎 -1，单列不计差异）。
+- ③ 通道，由 CLI `--type-shadow` 开关、摘要行与转储文件组成。
+- 挂点 = `type_equal` 包装：原函数改名 `type_equal_core` 供内部递归，外部 8 个决策点经包装自动覆盖。
 
 **Tech Stack:** Core 自举栈；P0 引擎（`src/compiler/type_terms.cr` / `type_engine.cr` / `type_selftest.cr`）；检查器 `src/compiler/checker.cr`；CLI `src/compiler/main.cr`。
 
@@ -12,13 +17,13 @@
 
 ## Global Constraints
 
-- **jj only**；**提交必须路径限定**（多 agent 共用工作副本）。
-- 所有编译/测试命令 `nice -n 19` 前缀；改编译器源码后**必须重建**。
-- **P1 行为零变化（强判据）**：`--type-shadow` **关**（默认）= 产物与 P0 基线逐字节相同；**开** = 产物**同样**逐字节相同（影子只观察、不改判定、不写产物）。两态都要过。
-- **判据前清缓存**：`nice -n 19 ./build/corec clean-cache`（TODO #2026-09-10-1），且 cwd = 仓库根。
+- **jj only**。**提交必须路径限定**（多 agent 共用工作副本）。
+- 所有编译/测试命令加 `nice -n 19` 前缀。改编译器源码后**必须重建**。
+- **P1 行为零变化（强判据）**：`--type-shadow` **关**（默认）时，产物与 P0 基线逐字节相同；**开**时产物**同样**逐字节相同（影子只观察、不改判定、不写产物）。两态都要过。
+- **判据前清缓存**：执行 `nice -n 19 ./build/corec clean-cache`（TODO #2026-09-10-1），且 cwd = 仓库根。
 - 文件永久不允许还原；不得绕过；**引擎 UNKNOWN（-1）不得计入差异**（未覆盖面 ≠ 收紧面，单列统计）。
-- diff 校验式样：`jj diff --git <paths...> | grep '^[+]' | grep -v -e '^[+][+][+]'`；环境陷阱：noclobber（用 `>|`）、变量不分词。
-- 新文件三处注册（`src/compiler/_import.cr` / `build_selfhost_native.py` 的 **corec 清单**（checker 段后）/ `tests/selfhost/test_compile.py`）。
+- diff 校验式样：`jj diff --git <paths...> | grep '^[+]' | grep -v -e '^[+][+][+]'`。环境陷阱：noclobber（用 `>|`）、变量不分词。
+- 新文件三处注册：`src/compiler/_import.cr`、`build_selfhost_native.py` 的 **corec 清单**（checker 段后）、`tests/selfhost/test_compile.py`。
 
 ---
 
@@ -78,124 +83,151 @@ fn sh_map_entries() -> int     // 已翻译条目数
 // 这正是 P1 要暴露的「未覆盖面」，与「收紧面」分开统计）。
 // 缓存：g_shadow_map（16B/条：ti → term），线性探测开放寻址（与引擎表同式）。
 
-fn sh_map_cap_init() {
-    if g_shadow_map_cap <= 0 {
-        nc : ., mut = 1024;
-        nb := alloc(nc * 16);
-        i : ., mut = 0;
-        loop { if i >= nc { break; } w64(nb, i * 16, -1); i = i + 1; }
-        g_shadow_map = nb;
-        g_shadow_map_cap = nc;
-    }
-}
+fn sh_map_cap_init():
+    if g_shadow_map_cap <= 0:
+        nc : ., mut = 1024
+        nb := alloc(nc * 16)
+        i : ., mut = 0
+        loop:
+            if i >= nc:
+                break
+            w64(nb, i * 16, -1)
+            i = i + 1
+        g_shadow_map = nb
+        g_shadow_map_cap = nc
 
 // ⚠️ 骨架修正（Task 1 评审 M6：**直接照抄初稿骨架会回归缺陷 ②③**）：
 //   · 探测前必须有**装填因子守卫**（否则 >cap 条目时探测永不落空 = 挂死）
 //   · 扩容 = 重建 + **重放既有条目**（`sh_map_rehash`）
 //   · 调用方**回写前必须重探**（递归翻译可能触发扩容/重建，写旧 slot 会写错槽）
-fn sh_map_find(ti: int) -> int {   // 命中返回槽位，未命中返回空槽位（不插入）
-    sh_map_cap_init();
-    if (g_shadow_map_count + 1) * 2 >= g_shadow_map_cap { sh_map_rehash(); }   // 守卫（探测前）
-    h : ., mut = ti % g_shadow_map_cap;
-    if h < 0 { h = 0 - h; }
-    p : ., mut = h;
-    loop {
-        k := r64(g_shadow_map, p * 16);
-        if k < 0 { return p; }
-        if k == ti { return p; }
-        p = p + 1; if p >= g_shadow_map_cap { p = 0; }
-    }
-}
+fn sh_map_find(ti: int) -> int:
+    // 命中返回槽位，未命中返回空槽位（不插入）
+    sh_map_cap_init()
+    if (g_shadow_map_count + 1) * 2 >= g_shadow_map_cap:
+        sh_map_rehash()
+    // 守卫（探测前）
+    h : ., mut = ti % g_shadow_map_cap
+    if h < 0:
+        h = 0 - h
+    p : ., mut = h
+    loop:
+        k := r64(g_shadow_map, p * 16)
+        if k < 0:
+            return p
+        if k == ti:
+            return p
+        p = p + 1
+        if p >= g_shadow_map_cap:
+            p = 0
 
 // 扩容：容量翻倍（≥2 的幂）+ 逐条重放（保留既有映射）
-fn sh_map_rehash() {
-    old_map := g_shadow_map;
-    old_cap := g_shadow_map_cap;
-    nc : ., mut = old_cap * 2;
-    if nc < 1024 { nc = 1024; }
-    nb := alloc(nc * 16);
-    i : ., mut = 0;
-    loop { if i >= nc { break; } w64(nb, i * 16, -1); i = i + 1; }
-    g_shadow_map = nb;
-    g_shadow_map_cap = nc;
-    g_shadow_map_count = 0;
-    j : ., mut = 0;
-    loop {
-        if j >= old_cap { break; }
-        k := r64(old_map, j * 16);
-        if k >= 0 {
-            s := sh_map_slot_no_grow(k);      // ⚠️ 重放必须用**无守卫**版（有守卫版会再触发 rehash → 递归）
-            w64(g_shadow_map, s * 16, k);
-            w64(g_shadow_map, s * 16 + 8, r64(old_map, j * 16 + 8));
-            g_shadow_map_count = g_shadow_map_count + 1;
-        }
-        j = j + 1;
-    }
-}
+fn sh_map_rehash():
+    old_map := g_shadow_map
+    old_cap := g_shadow_map_cap
+    nc : ., mut = old_cap * 2
+    if nc < 1024:
+        nc = 1024
+    nb := alloc(nc * 16)
+    i : ., mut = 0
+    loop:
+        if i >= nc:
+            break
+        w64(nb, i * 16, -1)
+        i = i + 1
+    g_shadow_map = nb
+    g_shadow_map_cap = nc
+    g_shadow_map_count = 0
+    j : ., mut = 0
+    loop:
+        if j >= old_cap:
+            break
+        k := r64(old_map, j * 16)
+        if k >= 0:
+            s := sh_map_slot_no_grow(k)      // ⚠️ 重放必须用**无守卫**版（有守卫版会再触发 rehash → 递归）
+            w64(g_shadow_map, s * 16, k)
+            w64(g_shadow_map, s * 16 + 8, r64(old_map, j * 16 + 8))
+            g_shadow_map_count = g_shadow_map_count + 1
+        j = j + 1
 
 // 无守卫探测（仅供 rehash 重放；外部一律走 sh_map_find）
-fn sh_map_slot_no_grow(ti: int) -> int {
-    h : ., mut = ti % g_shadow_map_cap;
-    if h < 0 { h = 0 - h; }
-    p : ., mut = h;
-    loop {
-        k := r64(g_shadow_map, p * 16);
-        if k < 0 { return p; }
-        if k == ti { return p; }
-        p = p + 1; if p >= g_shadow_map_cap { p = 0; }
-    }
-}
+fn sh_map_slot_no_grow(ti: int) -> int:
+    h : ., mut = ti % g_shadow_map_cap
+    if h < 0:
+        h = 0 - h
+    p : ., mut = h
+    loop:
+        k := r64(g_shadow_map, p * 16)
+        if k < 0:
+            return p
+        if k == ti:
+            return p
+        p = p + 1
+        if p >= g_shadow_map_cap:
+            p = 0
 
-fn sh_term_of_ti(ti: int) -> int {
-    if ti < 0 { return -1; }
+fn sh_term_of_ti(ti: int) -> int:
+    if ti < 0:
+        return -1
     // 预置常量：natives **按语义逐项分派**（⚠️ 数值不 1:1：TI_BOOL=2/TI_STR=3 vs
     // AK_STRING=2/AK_BOOL=3 下标互换——直接 tt_atom(ti,ti,-1) 会静默错标，Task 1 实测）
-    if ti == TI_INT { return tt_atom(AK_INT, ti, -1); }
-    if ti == TI_DEX { return tt_atom(AK_DEX, ti, -1); }
-    if ti == TI_BOOL { return tt_atom(AK_BOOL, ti, -1); }
-    if ti == TI_STR { return tt_atom(AK_STRING, ti, -1); }
-    if ti == TI_UNIT { return tt_atom(AK_UNIT, ti, -1); }
-    if ti == TI_NEVER { return tt_atom(AK_NEVER, ti, -1); }
-    if ti == TI_CHAR { return tt_atom(AK_CHAR, ti, -1); }
-    if ti == TI_DYN { return tt_atom(AK_DYN, ti, -1); }   // 注意：dyn 位图按 ⊤ 近似（过宽）→ Task 3 须单列 dyn 类差异
-    if ti == TI_DEX_S { return tt_atom(AK_DEX, ti, -1); } // 精确 dex 与 dex 同语义域
-    slot := sh_map_find(ti);
-    k := r64(g_shadow_map, slot * 16);
-    if k == ti {
-        g_shadow_hits = g_shadow_hits + 1;
-        return r64(g_shadow_map, slot * 16 + 8);
-    }
+    if ti == TI_INT:
+        return tt_atom(AK_INT, ti, -1)
+    if ti == TI_DEX:
+        return tt_atom(AK_DEX, ti, -1)
+    if ti == TI_BOOL:
+        return tt_atom(AK_BOOL, ti, -1)
+    if ti == TI_STR:
+        return tt_atom(AK_STRING, ti, -1)
+    if ti == TI_UNIT:
+        return tt_atom(AK_UNIT, ti, -1)
+    if ti == TI_NEVER:
+        return tt_atom(AK_NEVER, ti, -1)
+    if ti == TI_CHAR:
+        return tt_atom(AK_CHAR, ti, -1)
+    if ti == TI_DYN:
+        return tt_atom(AK_DYN, ti, -1)
+    // 注意：dyn 位图按 ⊤ 近似（过宽）→ Task 3 须单列 dyn 类差异
+    if ti == TI_DEX_S:
+        return tt_atom(AK_DEX, ti, -1)
+    // 精确 dex 与 dex 同语义域
+    slot := sh_map_find(ti)
+    k := r64(g_shadow_map, slot * 16)
+    if k == ti:
+        g_shadow_hits = g_shadow_hits + 1
+        return r64(g_shadow_map, slot * 16 + 8)
     // 未命中：按 kind 翻译（递归子项）
-    term : ., mut = -1;
-    k1 := get_type_kind(ti);
-    d1 := get_type_data(ti);
-    if k1 == TYP_ARRAY || k1 == TYP_SLICE {
-        el := sh_term_of_ti(d1);
-        if el >= 0 { term = tt_atom(AK_SEQUENCE, -1, tt_cons(el, tt_nil())); }
-    } else if k1 == TYP_PTR {
-        in1 := sh_term_of_ti(d1);
-        if in1 >= 0 { term = tt_atom(AK_PTR, -1, tt_cons(in1, tt_nil())); }
-    } else if k1 == TYP_REF {
-        in2 := sh_term_of_ti(d1);
-        if in2 >= 0 { term = tt_atom(AK_REF, -1, tt_cons(in2, tt_nil())); }
-    } else if k1 == TYP_TUPLE {
+    term : ., mut = -1
+    k1 := get_type_kind(ti)
+    d1 := get_type_data(ti)
+    if k1 == TYP_ARRAY || k1 == TYP_SLICE:
+        el := sh_term_of_ti(d1)
+        if el >= 0:
+            term = tt_atom(AK_SEQUENCE, -1, tt_cons(el, tt_nil()))
+    else if k1 == TYP_PTR:
+        in1 := sh_term_of_ti(d1)
+        if in1 >= 0:
+            term = tt_atom(AK_PTR, -1, tt_cons(in1, tt_nil()))
+    else if k1 == TYP_REF:
+        in2 := sh_term_of_ti(d1)
+        if in2 >= 0:
+            term = tt_atom(AK_REF, -1, tt_cons(in2, tt_nil()))
+    else if k1 == TYP_TUPLE:
         // 逐字段翻译（字段访问器与 g_tuple_* 布局见 checker.cr；实现时以实际访问器为准）
-        term = sh_tuple_to_product(ti);
-    } else if k1 == TYP_NAMED || k1 == TYP_GENERIC_PARAM || k1 == TYP_GENERIC_APPLY {
-        term = tt_atom(AK_NAMED, ti, -1);   // 不展开 → UNKNOWN（P1 预期）
-    } else {
-        term = tt_atom(AK_NAMED, ti, -1);   // 未知 kind 保守归入命名类
-    }
-    if term < 0 { return -1; }
+        term = sh_tuple_to_product(ti)
+    else if k1 == TYP_NAMED || k1 == TYP_GENERIC_PARAM || k1 == TYP_GENERIC_APPLY:
+        term = tt_atom(AK_NAMED, ti, -1)   // 不展开 → UNKNOWN（P1 预期）
+    else:
+        term = tt_atom(AK_NAMED, ti, -1)   // 未知 kind 保守归入命名类
+    if term < 0:
+        return -1
     // ⚠️ 缓存表必须：① 装填因子守卫（表满时开放寻址探测永不落空 = 挂死——P0 C2 同族，
     // Task 1 实测：固定 1024 容量在编译器自身语料（数千 ti）下必挂）；② 重建时重放既有
     // 条目；③ **回写前重探**（递归翻译可能触发扩容/重建，直接写旧 slot 会写错槽）。
-    slot2 := sh_map_find(ti);
-    w64(g_shadow_map, slot2 * 16, ti);
-    w64(g_shadow_map, slot2 * 16 + 8, term);
-    g_shadow_entries = g_shadow_entries + 1;
-    return term;
-}
+    slot2 := sh_map_find(ti)
+    w64(g_shadow_map, slot2 * 16, ti)
+    w64(g_shadow_map, slot2 * 16 + 8, term)
+    g_shadow_entries = g_shadow_entries + 1
+    return term
 ```
 （`sh_tuple_to_product`：按 checker 侧 tuple 字段访问器逐字段 `sh_term_of_ti` 后串成 CONS 链——实现者按实际访问器落，签名 `fn sh_tuple_to_product(ti: int) -> int`。）
 
@@ -249,35 +281,45 @@ fn sh_count_old_looser() -> int   fn sh_count_unknown() -> int
 
 ```core
 // R2 P1 影子对拍包装：旧判定照常返回；影子判定只观察（--type-shadow 开时）
-fn type_equal(t1: int, t2: int) -> bool {
-    r := type_equal_core(t1, t2);
-    if g_shadow_on != 0 { sh_compare(t1, t2, r ? 1 : 0); }
-    return r;
-}
+fn type_equal(t1: int, t2: int) -> bool:
+    r := type_equal_core(t1, t2)
+    if g_shadow_on != 0:
+        sh_compare(t1, t2, r ? 1 : 0)
+    return r
 ```
 （`r ? 1 : 0`：**本语言无三元运算符**——用 `ok : ., mut = 0; if r { ok = 1; }` 显式写。）
 
-- [ ] **Step 2: 站点标注**：在 8 个外部调用点（`checker.cr:711/947/959/973/1212/1405/1796/2127`）调用前 `sh_site_begin(<id>)`。
+- [ ] **Step 2: 站点标注**：在 8 个外部调用点（`checker.cr:711/947/959/973/1212/1405/1796/2127`）调用前执行 `sh_site_begin(<id>)`。
   **实读修正（Task 2 落地，取代初稿标签）**：8 个外部点**无一是 match 路径**；站点 4 = 泛型匹配（pattern 侧恒 `TI_UNIT` → 难产差异）；站点 6 = `EXPR_BINARY+OP_ASSIGN` 遗留路径（**当前不可达**——parser 已把 `=` 统一降为 `EXPR_ASSIGN`，挂点保留但永不产样本，去留待 P2 裁决）；站点 8 = `EXPR_ASSIGN` 节点（**非「索引」**）。站点 ↔ 语义以 `ty_shadow.cr` 头注（实读表）为准。
 
 - [ ] **Step 3: 分类核心（`ty_shadow.cr`）**
 
 ```core
-fn sh_compare(t1: int, t2: int, old_ok: int) -> void {
-    g_shadow_total = g_shadow_total + 1;
-    a := sh_term_of_ti(t1);
-    b := sh_term_of_ti(t2);
-    if a < 0 || b < 0 { g_shadow_unknown = g_shadow_unknown + 1; return; }
-    ty_budget_reset(200000);
-    e := ty_equiv(a, b);
-    ty_budget_reset(200000);                 // 影子运行不污染后续
-    if e == -1 { g_shadow_unknown = g_shadow_unknown + 1; sh_record(0, t1, t2, old_ok); return; }
+fn sh_compare(t1: int, t2: int, old_ok: int) -> void:
+    g_shadow_total = g_shadow_total + 1
+    a := sh_term_of_ti(t1)
+    b := sh_term_of_ti(t2)
+    if a < 0 || b < 0:
+        g_shadow_unknown = g_shadow_unknown + 1
+        return
+    ty_budget_reset(200000)
+    e := ty_equiv(a, b)
+    ty_budget_reset(200000)                 // 影子运行不污染后续
+    if e == -1:
+        g_shadow_unknown = g_shadow_unknown + 1
+        sh_record(0, t1, t2, old_ok)
+        return
     // 注意语义：旧 true ⇔ 引擎 1
-    if e == old_ok { g_shadow_agree = g_shadow_agree + 1; return; }
-    if old_ok == 0 && e == 1 { g_shadow_old_stricter = g_shadow_old_stricter + 1; }   // 旧拒新受
-    else { g_shadow_old_looser = g_shadow_old_looser + 1; }                           // 旧受新拒 = 收紧面
-    sh_record(1, t1, t2, old_ok);
-}
+    if e == old_ok:
+        g_shadow_agree = g_shadow_agree + 1
+        return
+    if old_ok == 0 && e == 1:
+        g_shadow_old_stricter = g_shadow_old_stricter + 1
+    // 旧拒新受
+    else:
+        g_shadow_old_looser = g_shadow_old_looser + 1
+    // 旧受新拒 = 收紧面
+    sh_record(1, t1, t2, old_ok)
 ```
 `sh_record(flag, t1, t2, old)`：环形缓冲（前 256 条差异/未知）——每槽 `{site, t1, t2, old_ok, kind}`；满则只计数。
 

@@ -56,7 +56,7 @@ jj git fetch && jj bookmark move main -r main@origin
 
 ```bash
 # Build self-hosted compiler (Python bootstrap → native binary)
-python3 build_selfhost_native.py       # Produces build/corec + build/corearch
+python3 build_selfhost_native.py       # 产出三个：build/corec · build/corearch · build/corelsp
 
 # Self-hosted frontend: .cr → .ccr/.cir
 ./build/corec build FILE.cr -o OUTPUT --static
@@ -73,22 +73,70 @@ python3 build_selfhost_native.py       # Produces build/corec + build/corearch
 # Dataflow graph dump
 ./build/corec cir FILE.cr
 
-# 格形态 IR dump（v8 = 段表 8 段：STR/SYM/NOD/ENT/REG/EDG + TYPE(7)/IFACE(8)）
+# 格形态 IR dump（v9 = 段表 8 段：STR/SYM/NOD/ENT/REG/EDG + TYPE(7)/IFACE(8)；
+# 版本真源 = src/compiler/ccr_io.cr::CCR_VERSION，load 校验 ==9 且拒收 v8 及更早）
 ./build/corec ccr FILE.cr
+
+# Project mode：目录（Core.toml + main.cr + _import.cr）整体构建
+./build/corec build src/targets/x86_64-linux -o OUT --static
+
+# 增量缓存 + 引擎自测通道（判定面自测，非构建）
+./build/corec clean-cache
+./build/corec selftest-types           # 类型项引擎用例表（400+ 例）
+./build/corec selftest-purity          # 真纯度计算自测通道
 ```
+
+**构建脚本的两个结构性事实**（读 `build_selfhost_native.py` 才看得到，勿凭文件名推断）：
+
+1. **清单 = 单元归属真源**。脚本按 `common_files` / `hit_engine_files` / `kernel_files` /
+   `arch_x86_64_files` / `format_elf_files` / `os_linux_files` / `backend_support_files` /
+   `corec_files` / `corelsp_files` / `x86_linux_target_files` 逐条列出全路径后 concat 成
+   **单一扁平编译单元**（逐文件剥 `import` 行）。**段内/段间的相对顺序 = 行为定义面**
+   （平铺单元的声明序/全局序），搬迁文件必须保序。→ 判断「某文件属谁、是否在编译」以本脚本为准，
+   不是以目录位置或 `_import.cr` 为准。
+2. **两道构建守卫**（吸收 ld 单元静默缺陷教训）：① `guard_manifest` 清单文件存在性断言；
+   ② `guard_build_log` 本阶段日志 `error[` 计数与未定义符号计数必须为 0。project-mode 面
+   （`corec build <dir>`）不走该门，其对应门 = `tests/selfhost/test_backend_bootstrap.py` 的
+   `run_checked`（rc=0 时仍扫 stdout+stderr 的 `error[`）——**两门互补，改一处须同步另一处**。
+
+### 本地复现 CI（首选入口：与 CI 跑的是同一条命令）
+
+CI 与本地**唯一真源 = `src/ci/run.sh`**（按 `CI_JOB_NAME` 的 case 分发，逐档带计数注）；
+workflow 只负责事件分层与 matrix 派发（`.github/workflows/core-ci.yml`）：
+PR 层 = `check`/`bootstrap-tests`/`selfhost-tests`，完整层 = `suite`/`full-bootstrap`
+（merge queue 因免费计划降级，完整层目前经 `workflow_dispatch` 手动派发）。
+
+```bash
+CI_JOB_NAME=check src/ci/run.sh             # 构建 + ./build/corec check src/compiler（最快）
+CI_JOB_NAME=bootstrap-tests src/ci/run.sh   # 纯 python：bootstrap 套件 + harness 机械门 + canary 载体牙
+CI_JOB_NAME=selfhost-tests src/ci/run.sh    # 最长档：构建 + 40+ 档套件/闸门调用（含 canary）
+CI_JOB_NAME=suite src/ci/run.sh             # tests/suite/*.cr 逐个编译成 ELF 并运行（rc=0 为过）
+CI_JOB_NAME=full-bootstrap src/ci/run.sh    # 三阶段自举：corec2 与 corec3 必须 cmp 逐字节同
+```
+
+> 判据口径：改 `src/compiler/**` ⇒ 至少 `selfhost-tests` + `full-bootstrap`；只动文档/注释 ⇒ `check` 够。
+> 长编译遵守铁律 #6。
 
 ### Test suites
 
-**Bootstrap pipeline tests** (`tests/bootstrap/`):
+`tests/` 共 8 个目录，职责不同——**只有前三个是「测试套件」**：
+
+| 目录 | 形态 | 说明 |
+|------|------|------|
+| `bootstrap/` | 7 个 `.py` | 纯 Python 驱动，import `bootstrap/corec` 走全管线后解释执行。**不需要构建** |
+| `selfhost/` | 59 个 `.py` | 驱动原生 `build/corec` 子进程；**前置**：先跑 `build_selfhost_native.py`（缺则报 `[FAIL] missing native compiler`） |
+| `suite/` | `.cr` 源码 | 端到端集成：逐个编译成 ELF 并运行，main 返回 0 为通过；`*_mini*.cr` 被 CI 跳过 |
+| `harness/` | 5 个 `.py` | **判据的判据**（元测试）：git 拦截、CI 挂点覆盖、判据突变自证、canary 载体牙、TODO 标识迁移 |
+| `probes/` | 29 档 `.cr` | 行为探针语料（`check` 面负例为主），**非编译单元**；runner = `tools/baseline/probes_run.sh` |
+| `fixtures/` | 夹具 | 判据自带夹具（如 `so_index/` 两态索引） |
+| `kernel/` | 语料 + 驱动 | McTT→Core 内核差分测试；**需仓外 OCaml 参考侧 `~/mctt`**（见 `tools/mctt_ref/`）⇒ 不入 CI |
+| `hit/` | `.cr` + `.ccr` | HIT 表冒烟语料 |
+
+**跑单个套件** = 直接跑那个 `.py`（多数套件**不支持过滤参数**，用例表写在文件内的
+`CASES` / `CHECK_CASES` 列表里 ⇒ 跑「单个用例」= 改列表或临时注释）：
+
 ```bash
 python3 tests/bootstrap/test_pipeline.py   # core pipeline: lex → parse → check → ir → interp
-python3 tests/bootstrap/test_borrow.py     # Borrow checker error detection
-python3 tests/bootstrap/test_generics.py   # Generic function + generic struct
-```
-
-**Self-hosted compiler tests** (`tests/selfhost/`):
-```bash
-python3 tests/selfhost/test_compile.py     # Self-compilation pipeline test
 python3 tests/selfhost/test_impl.py        # Impl/method tests
 python3 tests/selfhost/test_borrow.py      # Self-hosted borrow checker (7 rules)
 ```
@@ -101,6 +149,38 @@ python3 tests/selfhost/test_borrow.py      # Self-hosted borrow checker (7 rules
 Integration tests in `tests/suite/` are `.cr` source files — run through `./build/corec`.
 
 **行为探针语料**（`tests/probes/`，29 档 `check` 面负例为主，**非编译单元**）与**回归网配方**（`tools/baseline/`：冻结基线重建 + sha 白名单 + 两条 runner）见 `tools/baseline/REBUILD.md`——判定面回归网 = 冻结基线同源对拍 + 行为探针 + 突变控制 + 三态纪律（R2 P6 Task 1 起；影子通道已下线，不得引用其计数）。
+
+**改单档 suite 语料**：
+
+```bash
+./build/corec build tests/suite/at_test.cr -o /tmp/bin --static && chmod +x /tmp/bin && /tmp/bin
+```
+
+> ⚠ **新增测试文件 = 必须同时登记，否则 CI 变红**（`test_ci_hook_coverage.py` 机械判）：
+> 新建 `tests/{selfhost,bootstrap,harness}/*.py` 后，**要么**在 `src/ci/run.sh` 加挂点，
+> **要么**在 `tests/harness/ci_hook_allowlist.txt` 逐条登记一行理由（`路径<TAB>理由`）。
+> 双向都查：已挂/已删条目留在白名单里也会 FAIL。该门存在的原因见 `run.sh:71-79`
+> （曾因「自称已挂而 run.sh 零命中」致 `error[N06]` 跨 5 任务漏检 33 次）。
+
+### 判据网（回归网四要素 + canary 闸门）
+
+判定面回归网 = **① 冻结基线同源对拍** + **② 行为探针** + **③ 突变控制** + **④ 三态纪律**
+（R2 P6 Task 1 起；**影子通道已下线，不得引用其计数/摘要**）。
+
+- **①** 冻结基线（二进制**不入库**）由 `bash tools/baseline/rebuild.sh <outdir>` 从 pinned revision
+  重建，配方 + 三 sha 白名单 = `tools/baseline/REBUILD.md`；对拍 runner = `tools/baseline/parity_run.sh`
+  （逐档 `clean-cache`）。CI 内不跑（浅检出无 jj）。
+- **②** 探针语料 `tests/probes/`（29 档，**非编译单元**）+ 行为套件；runner = `tools/baseline/probes_run.sh`。
+- **③** 改坏派生面 ⇒ 探针/对拍必须转红（`tests/harness/test_criteria_mutations.py` 是这条的机械形态）。
+- **④** 引擎 -1 ⇒ ICE04 硬错（`main.cr` 硬名单）。
+
+**ELF canary + `.ccr` 四条闸门**（CI `selfhost-tests` 内，`bash tools/baseline/canary_check.sh` +
+`tests/harness/test_canary_carrier.py --require-compiler`）：锁定值**单一真源** =
+`tools/baseline/canary_values.tsv`。契约分两级——canary ELF = 发射面零泄漏检测器（**变 = 越界 ⇒ 停下上报**）；
+`.ccr` 四条 = 格式+形状检测器（值变 ≠ 必然回归，但**必须「显式归因 + 同批重锁 + 旧值留痕」**）。
+> ⚠ **换代纪律**：跑出来不符时**先归因**，归因不出按回归处理并停下上报——**不得改值表去对齐输出**。
+> 详见 `docs/superpowers/plans/2026-09-16-criteria-carrier.md` §6。另注：`.ccr` 四条为**冷态**锁定，
+> 且 `.so` 索引面须环境归一化（载体已把 `HOME` 钉到采集目录内空 `home/`）。
 
 ## Architecture
 
@@ -121,7 +201,7 @@ bootstrap/corec/frontend/type_checker.py → Type inference + checking + borrow 
 bootstrap/corec/frontend/ir_gen.py     → AST → Core IR
 
 bootstrap/corec/ir/cir.py              → Dataflow graph IR definitions
-bootstrap/corec/ir/ccr.py              → 格形态 IR（注：该文件实际不存在——.ccr 仅由 self-hosted ccr_io.cr 读写；现行 = v8 八段段表，见 specs/2026-09-09-lattice-ir-v7-format.md；v6 版历史设计见 specs/2026-09-05-lattice-ir-v6-format.md）
+bootstrap/corec/ir/ccr.py              → 格形态 IR（注：该文件实际不存在——.ccr 仅由 self-hosted ccr_io.cr 读写；现行 = v9 八段段表（NOD 40B），见 specs/2026-09-09-lattice-ir-v7-format.md；v6 版历史设计见 specs/2026-09-05-lattice-ir-v6-format.md）
 bootstrap/corec/ir/base.py             → IRNode base class, IRVar, VarKind
 bootstrap/corec/ir/symbol_table.py     → Scoped symbol table
 
@@ -183,6 +263,20 @@ src/compiler/     （**全 38 个 .cr**；2026-09-16 文档审计修订：原清
 ├── type_engine.cr  → R2 P0 类型项判定引擎（语义包含；spec §1/§3）（backend_support+corec+corelsp）
 ├── type_selftest.cr → 类型引擎判定用例表 + `corec selftest-types`（corec）
 └── type_terms.cr   → R2 P0 类型项表（集合语义 DAG）（backend_support+corec+corelsp）
+```
+
+### 其余 src 子树（**不在 `src/compiler/`，易漏**）
+
+```
+src/lattice/ent_kernel.cr → 语义内核（范式无关），corec 与 corearch **双 concat 共享**（`kernel_files`）
+src/arch/hit/             → HIT 表**引擎**（hit.cr + lower_to_core.cr）——与架构轴的**表数据** `core-x86.toml` 分工
+src/kernel/               → McTT→Core **验证内核**移植（bytes/term_io/mctt/subst/nbe/subtype/check/kernel_main）
+                            · 由根目录 **`build_kernel.py`** 单独构建出 `build/kernel`（复用 bootstrap 管线的
+                            `concat`/`compile_and_assemble`，**不在** build_selfhost_native.py 的任何清单内）
+                            · 差分语料 `tests/kernel/`（需仓外 OCaml 参考侧 `~/mctt`，不入 CI）
+src/lsp/                  → corelsp：json.cr · rpc.cr · lsp.cr · analysis.cr · main.cr（+ `_import.cr`）
+                            · 由自举脚本的 `corelsp_files` 清单构建成 `build/corelsp`
+src/scheduler/            → sched.s + example.cr（调度器汇编侧原型）
 ```
 
 ### Backend（x86 实例化三轴布局：架构 × 格式 × OS；`src/arch/linux/ld/` 已退役）
@@ -313,10 +407,28 @@ Design documents (Chinese):
 - File extensions: `.cr` (source), `.cir` (dataflow graph IR / 图形态), `.ccr`（格形态 IR，**v9 = 段表架构 8 段**：STR/SYM/NOD/ENT/REG/EDG + TYPE(7)/IFACE(8)（R2 P4 载体批起；R2 P6 T3 起 **v9**——NOD 40B 承载 TYPE 段项索引；版本以 `src/compiler/ccr_io.cr::CCR_VERSION` 为准；文件名/测试名保留「v7」= 段表架构代号，见 specs/2026-09-09-lattice-ir-v7-format.md）。**2026-09-16 审计修订：原文写 v8（陈旧）**）, `.corespec`（已退役 2026-09-06——规约并入 .cr 语法，见 grammar/core.ebnf 迁移事项）
 - Tests in `tests/bootstrap/` and `tests/selfhost/` define inline Core source strings and compare output
 - Python bootstrap: `sys.path.insert(0, 'bootstrap')` to import compiler modules
-- VS Code extension in `vscode-core/`
+- Editor integrations under **`editor/`**（不是仓库根的 `vscode-core/`）：`vscode-core/`（VS Code 扩展）·
+  `nvim/`（Neovim：syntax/ftdetect/ftplugin/snippets）· `core.mtsx`（Zed 用 grammar）· `corecheck`（脚本）
 - Spec files in `spec/`（.corespec 已退役——规约语法并入 .cr，图即验证承载于 TagNode/.csr）
 - Examples in `examples/`
 
 ## Known Issues & TODO
 
-See [TODO.md](TODO.md) for current status.
+See [TODO.md](TODO.md) for current status——**371 KB / 1300+ 行，别整读**，用 `rg`/`grep` 定位条目。
+
+### TODO 标识约定（**机械门，写错即 CI 红**）
+
+新条目标识 = **`#YYYY-MM-DD-N`**（日期 = 创建日期；`N` = 当天序号，按标题行行号升序，取「当天最大 +1」）。
+**旧「全局单调号 `#NN`」已永久封存**（不复用、不重编号）——历史 commit/文档里的旧号经 TODO.md 头部
+「编号迁移对照表」解析。由 `tests/harness/test_todo_id_migration.py` 机械执行：
+J1 全仓无旧形态残留 · J2 新 id ↔ TODO.md 标题双向一致（无悬空）· J3 映射完备 · J4 突变自证。
+> ⚠ J4 的突变样本**就取自本文件**——`elf.cr` 死文件条目的 `TODO #2026-09-10-3` 引用是那个载体，
+> 删/改它会让 J4 失去自证能力（跑 `python3 tests/harness/test_todo_id_migration.py` 可立即确认）。
+
+### 会话级铁律的机械执行面（别绕，绕不过）
+
+- **铁律 #2（禁 git）**：`.claude/settings.json` 的 PreToolUse hook → `.claude/hooks/block-git.py`，
+  拦截**任意位置**的 git 调用（分隔符后 / 命令替换 / `bash -c` / 前缀命令后），引号内文本与
+  heredoc 体不误伤，`jj git push` 放行。回归 = `tests/harness/test_block_git.py`。
+  **hook 自身异常一律放行（宁可漏拦不卡会话）**⇒ 不要依赖它做安全边界，依赖它做习惯约束。
+- **铁律 #3（文件永久不允许还原）**：`jj restore` / `jj abandon` / 覆盖回退既有文件均**须先取得明确许可**。

@@ -50,55 +50,49 @@ CACHE_DIR = BASE / ".core" / "cache" / "cir"
 
 # ── 探针源（无 import、无泛型、无可选 ⇒ 缓存全开）──────────────────────────
 BASE_PROBE = """// warm-path probe (tests/selfhost/test_cir_warm_path.py)
-fn add(a: int, b: int) -> int {
-    return a + b;
-}
+fn add(a: int, b: int) -> int:
+    return a + b
 
-fn scale(x: int) -> int {
-    return x * 3;
-}
+fn scale(x: int) -> int:
+    return x * 3
 
-fn pick(i: int) -> string {
-    if i > 0 { return "alpha"; }
-    if i > 1 { return "beta"; }
-    return "gamma";
-}
+fn pick(i: int) -> string:
+    if i > 0:
+        return "alpha"
+    if i > 1:
+        return "beta"
+    return "gamma"
 
-fn main() -> int {
-    s : ., mut = add(1, 2);
-    s = s + scale(4);
-    t := pick(0);
-    return s;
-}
+fn main() -> int:
+    s : ., mut = add(1, 2)
+    s = s + scale(4)
+    t := pick(0)
+    return s
 """
 
 ZERO_STR_PROBE = """// warm-path probe: 无字符串常量
-fn twice(x: int) -> int {
-    return x * 2;
-}
+fn twice(x: int) -> int:
+    return x * 2
 
-fn main() -> int {
-    a : ., mut = 0;
-    i : ., mut = 1;
-    loop {
-        if i > 8 { break; }
-        a = a + twice(i);
-        i = i + 1;
-    }
-    return a;
-}
+fn main() -> int:
+    a : ., mut = 0
+    i : ., mut = 1
+    loop:
+        if i > 8:
+            break
+        a = a + twice(i)
+        i = i + 1
+    return a
 """
 
 BIG_STR_PROBE = """// warm-path probe: 大字符串字面量（4KB）
-fn big() -> string {
-    s := "%s";
-    return s;
-}
+fn big() -> string:
+    s := "%s"
+    return s
 
-fn main() -> int {
-    t := big();
-    return 42;
-}
+fn main() -> int:
+    t := big()
+    return 42
 """ % ("A" * 4096)
 
 
@@ -106,18 +100,19 @@ def many_funcs_probe(n: int) -> str:
     parts = ["// warm-path probe: %d 函数" % n]
     for i in range(n):
         parts.append("fn f%d(x: int) -> int { return x + %d; }" % (i, i))
-    parts.append("fn main() -> int { return f0(0) + f1(1) + f2(2); }")
+    parts.append("fn main() -> int:\n    return f0(0) + f1(1) + f2(2)\n")
     return "\n".join(parts) + "\n"
 
 
 OPTIONAL_PROBE = """// warm-path probe: 可选程序（表示面启用 ⇒ .cir 缓存关闭）
-fn g() -> int? { return Some(1); }
+fn g() -> int?:
+    return Some(1)
 
-fn main() -> int {
-    x : int? = 5;
-    y := g();
-    return match x { Some(v) => v, None => 0, };
-}
+fn main() -> int:
+    x : int? = 5
+    y := g()
+    return match x:
+        Some(v) => v, none => 0,
 """
 
 PAD_FUNCS = 400

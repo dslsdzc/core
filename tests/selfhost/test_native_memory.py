@@ -15,11 +15,11 @@ CASES = [
     (
         "negative_global_initializer",
         """
-g_negative : int, mut = -1;
-fn main() -> int {
-    if g_negative < 0 { return 77; }
-    return 1;
-}
+g_negative : int, mut = -1
+fn main() -> int:
+    if g_negative < 0:
+        return 77
+    return 1
 """,
         77,
         0,
@@ -27,12 +27,12 @@ fn main() -> int {
     (
         "struct_fields",
         """
-struct Pair { x: int, y: int }
-fn main() -> int {
-    p : ., mut = Pair { x = 10, y = 20 };
-    p.x = 7;
-    return p.x + p.y;
-}
+struct Pair:
+    x: int, y: int
+fn main() -> int:
+    p : ., mut = Pair { x = 10, y = 20 }
+    p.x = 7
+    return p.x + p.y
 """,
         27,
         0,
@@ -40,11 +40,10 @@ fn main() -> int {
     (
         "array_constant_index",
         """
-fn main() -> int {
-    arr : ., mut = [10, 20, 30];
-    arr[1] = 9;
-    return arr[0] + arr[1] + arr[2];
-}
+fn main() -> int:
+    arr : ., mut = [10, 20, 30]
+    arr[1] = 9
+    return arr[0] + arr[1] + arr[2]
 """,
         49,
         0,
@@ -52,12 +51,11 @@ fn main() -> int {
     (
         "array_variable_index",
         """
-fn main() -> int {
-    arr : ., mut = [10, 20, 30];
-    i := 1;
-    arr[i] = 9;
-    return arr[0] + arr[i] + arr[2];
-}
+fn main() -> int:
+    arr : ., mut = [10, 20, 30]
+    i := 1
+    arr[i] = 9
+    return arr[0] + arr[i] + arr[2]
 """,
         49,
         0,
@@ -65,16 +63,15 @@ fn main() -> int {
     (
         "enum_tag",
         """
-enum Choice { First(int), Second(int), Third(int) }
-fn main() -> int {
-    c := Third(33);
-    value := match c {
+enum Choice:
+    First(int), Second(int), Third(int)
+fn main() -> int:
+    c := Third(33)
+    value := match c:
         First(v) => v,
         Second(v) => v,
         Third(v) => v,
-    };
-    return value;
-}
+    return value
 """,
         33,
         0,
@@ -82,14 +79,14 @@ fn main() -> int {
     (
         "aggregate_o1",
         """
-struct Pair { x: int, y: int }
-fn main() -> int {
-    p := Pair { x = 7, y = 20 };
-    arr : ., mut = [3, 4, 5];
-    i := 1;
-    arr[i] = 9;
-    return p.x + p.y + arr[0] + arr[i] + arr[2];
-}
+struct Pair:
+    x: int, y: int
+fn main() -> int:
+    p := Pair { x = 7, y = 20 }
+    arr : ., mut = [3, 4, 5]
+    i := 1
+    arr[i] = 9
+    return p.x + p.y + arr[0] + arr[i] + arr[2]
 """,
         44,
         1,

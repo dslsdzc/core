@@ -9,7 +9,7 @@ COREC = os.path.join(BASE, 'build', 'corec')
 BAD = ('1_000', '1_000.5', '0x1_0', '10f32', '1.5f64', '10u8')
 
 def selfhost(src):
-    r = subprocess.run(['nice', '-n', '19', COREC, 'run', 'fn main()->int{return %s;}' % src],
+    r = subprocess.run(['nice', '-n', '19', COREC, 'run', 'fn main()->int:\n    return %s\n' % src],
                        cwd=BASE, capture_output=True, text=True)
     return r.returncode, r.stdout + r.stderr
 

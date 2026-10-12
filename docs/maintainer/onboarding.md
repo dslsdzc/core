@@ -1,16 +1,16 @@
 # 新维护者入门手册（onboarding）
 
 > 定位：受众 = maintainers；状态 = active；出处 = 源码 + [CLAUDE.md](../../CLAUDE.md)（实现与文档冲突时以源码为准，既有惯例）。
-> 文档导航见 [docs/README.md](../README.md)（分类规则：主题 × 读者 × 状态）。本文档聚焦仓库结构、构建、工作流与雷区。
+> 文档导航见 [docs/README.md](../README.md)（分类规则：主题 × 读者 × 状态）。本文档聚焦仓库结构、构建、工作流与已知陷阱。
 
 ## 一、仓库地图
 
-**仓库协作约定**(人类维护者视角;CLAUDE.md 的"铁律"是面向 AI 助手的会话规则,不直接约束人——但下述约定人机一致):
+**仓库协作约定**（人类维护者视角；`CLAUDE.md` 的「铁律」是面向 AI 助手的会话规则，不直接约束人——但下述约定人机一致）：
 
-- **版本控制只用 jj,不用 git 写操作**——仓库工具链统一(jj 分支模型见 §四)
-- **不随意还原/回滚文件**——改坏了向前修,不回头抹历史(有争议先讨论)
-- **修问题找 root cause**,不绕过、不掩盖、不加临时开关了事
-- **长构建/测试注意机器负载**:无人值守或共享机器上建议 `cpulimit -l 10` / `nice -n 19`(减风扇噪音与卡顿;交互式短任务不必)
+- **版本控制只用 `jj`，不用 `git` 写操作**——仓库工具链统一（`jj` 分支模型见 §四）
+- **不随意还原/回滚文件**——改坏了向前修，不回头抹历史（有争议先讨论）
+- **修问题找 root cause**，不绕过、不掩盖、不加临时开关了事
+- **长构建/测试注意机器负载**：无人值守或共享机器上建议 `cpulimit -l 10` / `nice -n 19`（减风扇噪音与卡顿；交互式短任务不必）
 
 ```
 src/compiler/         → 自举编译器主体（corec 前端 + corearch 后端共用）
@@ -73,11 +73,11 @@ python3 build_selfhost_native.py       # Stage 0：Python bootstrap → build/co
 
 三级自举（回归必验）：
 
-- **Stage 0** — Python bootstrap 编译 `src/compiler/*.cr` → corec（第一代原生编译器）
-- **Stage 1** — corec 编译 `src/compiler/*.cr` → corec2
-- **Stage 2** — corec2 编译 `src/compiler/*.cr` → corec3；闭环判据 = corec2/corec3 输出逐字节一致（可加 O1，历史 O0/O1 均已贯通）
+- **Stage 0** — Python bootstrap 编译 `src/compiler/*.cr` → `corec`（第一代原生编译器）
+- **Stage 1** — `corec` 编译 `src/compiler/*.cr` → `corec2`
+- **Stage 2** — `corec2` 编译 `src/compiler/*.cr` → `corec3`；闭环判据 = `corec2`/`corec3` 输出逐字节一致（可加 O1，历史 O0/O1 均已贯通）
 
-任何长时间构建/测试任务建议 `cpulimit -l 10` 或 `nice -n 19`(机器负载与噪音考虑;交互式短任务不必)。
+任何长时间构建/测试任务建议 `cpulimit -l 10` 或 `nice -n 19`（机器负载与噪音考虑；交互式短任务不必）。
 
 ## 三、分支模型与 jj 速查
 
@@ -87,7 +87,7 @@ python3 build_selfhost_native.py       # Stage 0：Python bootstrap → build/co
 - **develop** = 集成分支：日常 PR 目标（ruleset：PR 通道 + 审批 + merge queue + CI 门槛）
 - 日常开发 feature 分支 base = develop；PR 一律指向 develop
 
-jj 速查（仓库 hook 机械拦截 git；提交经 SSH 自动签名，无需人工操作）：
+`jj` 速查（仓库 hook 机械拦截 `git`；提交经 SSH 自动签名，无需人工操作）：
 
 ```bash
 jj bookmark create feature/xxx         # 每个改动独立分支
@@ -100,12 +100,12 @@ jj git fetch && jj bookmark move develop -r develop@origin   # 同步远端 deve
 
 发布（develop → main，仅维护者）：`jj git push -b develop` → `gh pr create --base main --fill` → 合入后 `jj git fetch && jj bookmark move main -r main@origin`。
 
-## 四、已知雷区
+## 四、已知陷阱
 
-- **corec2 tokenizer 死循环**：约 9 个全局变量（`g_tok_cap`/`g_tokens`/`g_str_count`/`g_line`/`g_source_len` 等）未被 parser 注册到 `g_ir_globals` 时，赋值语句被静默丢弃 → tokenizer 卡死。曾以 tokenizer 参数化（PR #9）规避 `g_source` 依赖，残留项待根治。机理全文见 [CLAUDE.md Known Issues](../../CLAUDE.md)；遇 tokenizer 卡住先查 `g_pos`/`g_tok_cap` 是否递增。
-- **O1 不稳定**：`--opt-level 1`（pass_cse 与 alloc_registers 元数据交互）在自举编译大函数时可能崩溃；遇崩降 O0 定位，详见 [CLAUDE.md Known Issues](../../CLAUDE.md)。
-- **core dump 挂起（桌面环境）**：trap 类测试进程 SIGILL 后，内核写 core 经 systemd-coredump 管道唤醒服务，拥堵时进程挂起。2026-09-05 起 `src/ci/run.sh` 全局 `ulimit -c 0`、trap 测试内置 `RLIMIT_CORE=0`；根治方向 = 图推导边界判定 pass。详见 [TODO.md](../../TODO.md)。
-- **测试总览与回归流程**：命令与跑法见 [CLAUDE.md Build & Test](../../CLAUDE.md)，历史修复记录在 [TODO.md](../../TODO.md)。
+- **`corec2` tokenizer 死循环**：约 9 个全局变量（`g_tok_cap`/`g_tokens`/`g_str_count`/`g_line`/`g_source_len` 等）未被 `parser` 注册到 `g_ir_globals` 时，赋值语句被静默丢弃 → tokenizer 停滞。曾以 tokenizer 参数化（PR #9）规避 `g_source` 依赖，残留项待根治。机理全文见 [CLAUDE.md Known Issues](../../CLAUDE.md)；遇 tokenizer 停滞时首先检查 `g_pos`/`g_tok_cap` 是否递增。
+- **O1 不稳定**：`--opt-level 1`（`pass_cse` 与 `alloc_registers` 元数据交互）在自举编译大函数时可能崩溃；遇崩溃时降至 O0 定位，详见 [CLAUDE.md Known Issues](../../CLAUDE.md)。
+- **core dump 挂起（桌面环境）**：`trap` 类测试进程 SIGILL 后，内核写 core 经 systemd-coredump 管道唤醒服务，拥堵时进程挂起。2026-09-05 起 `src/ci/run.sh` 全局 `ulimit -c 0`、`trap` 测试内置 `RLIMIT_CORE=0`；根治方向 = 图推导边界判定 pass。详见 [TODO.md](../../TODO.md)。
+- **测试总览与回归流程**：命令与运行方式见 [CLAUDE.md Build & Test](../../CLAUDE.md)，历史修复记录在 [TODO.md](../../TODO.md)。
 
 ## 五、贡献清单（检查列表）
 

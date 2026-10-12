@@ -124,7 +124,7 @@ def case_old_check(name, source, lineno, colno):
 
 def case_run_face(name, snippet, expect_rc, needle=None):
     """`run`（解释器面）同判：期望 rc + （可选）诊断文本。"""
-    r = _run(["run", f"fn main() -> int {{ {snippet} return 7; }}"])
+    r = _run(["run", f"fn main() -> int:\n    {snippet}\n    return 7\n"])
     log = r.stdout + r.stderr
     if r.returncode != expect_rc:
         print(f"[FAIL] {name}: expected rc {expect_rc}, got {r.returncode}: {log}")
@@ -187,10 +187,10 @@ def _cir_dump(source: str):
 
 
 def main():
-    stmt_old = "fn f() -> int {\n    @no_bounds_check;\n    return 7;\n}\nfn main() -> int { return f(); }\n"
-    paren_old = "fn f() -> int {\n    @no_bounds_check();\n    return 7;\n}\nfn main() -> int { return f(); }\n"
-    stmt_new = "fn f() -> int {\n    @NoBoundsCheck;\n    return 7;\n}\nfn main() -> int { return f(); }\n"
-    paren_new = "fn f() -> int {\n    @NoBoundsCheck();\n    return 7;\n}\nfn main() -> int { return f(); }\n"
+    stmt_old = "fn f() -> int:\n    @no_bounds_check\n    return 7\nfn main() -> int:\n    return f()\n"
+    paren_old = "fn f() -> int:\n    @no_bounds_check()\n    return 7\nfn main() -> int:\n    return f()\n"
+    stmt_new = "fn f() -> int:\n    @NoBoundsCheck\n    return 7\nfn main() -> int:\n    return f()\n"
+    paren_new = "fn f() -> int:\n    @NoBoundsCheck()\n    return 7\nfn main() -> int:\n    return f()\n"
 
     ok = [
         # ── A. 旧名响亮失败 ──
@@ -198,11 +198,11 @@ def main():
         case_old_rejected("old_paren_build_rejected", paren_old),
         case_old_check("old_stmt_check_location", stmt_old, 2, 5),
         case_old_check("old_paren_check_location", paren_old, 2, 5),
-        case_run_face("old_run_rejected", "@no_bounds_check();", 1, NEEDLE_OLD),
+        case_run_face("old_run_rejected", "@no_bounds_check()", 1, NEEDLE_OLD),
         # ── B. 新名等价（正控）──
         case_new_ok("new_stmt_ok", stmt_new),
         case_new_ok("new_paren_ok", paren_new),
-        case_run_face("new_run_ok", "@NoBoundsCheck();", 7),
+        case_run_face("new_run_ok", "@NoBoundsCheck()", 7),
         case_corpus("corpus_at_test", "tests/suite/at_test.cr"),
         case_corpus("corpus_at_test_mini7", "tests/suite/at_test_mini7.cr"),
         # ── C. .cir 显示名（括号形态有行 / 语句形态零 IR = F4 既有语义）──
@@ -277,7 +277,7 @@ def dispatch_sites_case():
 def opcode_constant_case():
     """IR 操作码常量**不改**（内部标识，非语言面名字）——钉住本批的取舍。"""
     text = _read("src/compiler/ast.cr")
-    needle = "IR_NO_BOUNDS_CHECK   : int = 35;"
+    needle = "IR_NO_BOUNDS_CHECK   : int = 35"
     if needle not in text:
         print(f"[FAIL] opcode_constant: ast.cr 缺 {needle!r}（内部常量被误改？）")
         return False

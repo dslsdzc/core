@@ -62,31 +62,45 @@ def annotation_parsers(text):
     return {m.group(1) for l in text.split("\n") for m in [ANN_FN.match(l)] if m}
 
 
+def top_level_body(lines, start):
+    """v4 体边界：`start` 行之后的**首个顶格行**（非空且首字符非空白）的行号。
+
+    v3 形以顶格 `}` 收束函数体；v4 形改 layout 缩进、函数**无闭括号** ⇒ 等价边界 =
+    「下一个顶格行」（下一条 `fn` / 顶格注释 / 全局常量皆顶格）。边界与 v3 的 `}` 行同为**排他**。
+    """
+    return next((j for j in range(start + 1, len(lines))
+                 if lines[j] and not lines[j][0].isspace()), None)
+
+
 def annotation_names(text, fn_name):
     """某注解解析器函数体内被期望的注解名（`str_eq(<tok>, "X")` 的 X 集合）。
 
-    体边界 = `fn <name>(` 行 → 之后首个顶格 `}` 行。
+    体边界（v4 = layout 缩进）= `fn <name>(` 行 → 之后首个顶格行（v3 的顶格 `}` 行等价物）。
     """
     lines = text.split("\n")
     start = next((i for i, l in enumerate(lines) if l.startswith("fn %s(" % fn_name)), None)
     if start is None:
         return None
-    end = next((j for j in range(start + 1, len(lines)) if lines[j] == "}"), None)
+    end = top_level_body(lines, start)
     if end is None:
         return None
-    return {m.group(2) for l in lines[start:end + 1] for m in STR_EQ_ANY.finditer(l)}
+    return {m.group(2) for l in lines[start + 1:end] for m in STR_EQ_ANY.finditer(l)}
 
 
 def lsp_at_names(text):
-    """LSP 侧：`analysis_at_items()` 体内的 `analysis_citem("X", 3)` 名字集合。"""
+    """LSP 侧：`analysis_at_items()` 体内的 `analysis_citem("X", 3)` 名字集合。
+
+    体边界（v4 = layout 缩进）= `fn analysis_at_items(` 行 → 之后首个顶格行
+    （v3 的 `return out;` 行等价物——两形皆收束到函数体末尾为止）。
+    """
     lines = text.split("\n")
     start = next((i for i, l in enumerate(lines) if l.startswith("fn analysis_at_items(")), None)
     if start is None:
         return None
-    end = next((j for j in range(start + 1, len(lines)) if lines[j].strip() == "return out;"), None)
+    end = top_level_body(lines, start)
     if end is None:
         return None
-    return {m.group(1) for l in lines[start:end + 1] for m in CITEM.finditer(l)}
+    return {m.group(1) for l in lines[start + 1:end] for m in CITEM.finditer(l)}
 
 
 def truth_set(ck_text, pp_text):

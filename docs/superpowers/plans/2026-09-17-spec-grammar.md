@@ -372,8 +372,10 @@
 **探针** `/tmp/spec-t0/red_annot.cr`：
 
 ```core
-fn f() -> int #check(1 < 0) { return 1; }
-fn main() -> int { return f(); }
+fn f() -> int #check(1 < 0):
+    return 1
+fn main() -> int:
+    return f()
 ```
 
 | 命令 | **实测结果** |
@@ -498,9 +500,13 @@ B04 ×2（`ptr_arith` **= canary 载体本人** + `apx_conversion_test`）= **39
 上文「corec 侧 = 响亮拒绝」**只在注解名恰好未定义时成立**。实测（`/tmp/spec-t1/collide.cr`）：
 
 ```core
-fn check(x: bool) -> bool { return x; }      // ← 注解名撞上一个**真实函数**
-fn f() -> int #check(1 < 0) { return 1; }
-fn main() -> int { return f(); }
+fn check(x: bool) -> bool:
+    return x
+// ← 注解名撞上一个**真实函数**
+fn f() -> int #check(1 < 0):
+    return 1
+fn main() -> int:
+    return f()
 ```
 
 | 命令 | 实测 |

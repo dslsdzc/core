@@ -1,7 +1,7 @@
 # 更新日志
 
 > 说明：本文档记录里程碑级变更。近期每日开发流水、预存 bug 与架构规划以 `TODO.md` 为准。
-> 2026-06-21 至 2026-07-23 之间曾存在文档缺失期，以下条目按提交历史与 TODO.md 补齐。
+> 2026-06-21 至 2026-07-23 之间曾存在文档缺失期，以下条目按提交历史与 `TODO.md` 补齐。
 
 ## 2026-09-17
 ### [change] `@no_bounds_check` 更名为 `@NoBoundsCheck`
@@ -22,7 +22,7 @@
 - 函数地址支持：IR_FNADDR + `@addr` 内建（checker/ir_gen/ELF 后端全链路）。
 - 并发集成：g_set_curg/g_get_curg 桥接 + M worker 线程池接线。
 - 主线程注册为 G 0，可经 channel 阻塞/唤醒；sched_yield 不再重排 Gwaiting。
-- 多 M 线程完整验证仍待补（见 TODO.md 预存 bug 第 2 条）。
+- 多 M 线程完整验证仍待补（见 `TODO.md` 预存 bug 第 2 条）。
 
 ## 2026-07-30
 ### [fix] restore directory builds
@@ -42,7 +42,7 @@
 ## 2026-07-28
 ### [feat] arena memory model, @ builtins, incremental cache, hotpatch, pointer-model passes
 - Arena 内存模型完整实现（`src/stdlib/arena.cr`）：init/new/reset 生命周期、动态元数据、free list、嵌套；IR 子图绑定（函数/loop/for/unsafe 自动 arena）；ELF 双路径 alloc（arena 感知 + 全局 bump 回退）；IR_ARENA_NEW(32)/IR_ARENA_RESET(33) 编码；mmap 堆扩展（BSS 打满自动 mmap 1GB）。
-- `@` 内建原语 12 个全部完整：`@sizeOf/@alignOf/@fields/@hasField/@field/@typeInfo/@comptime/@inline/@no_bounds_check/@fast/@unroll/@section`（后增 `@addr`、`@hotpatch`，见 07-31/07-30）。
+- `@` 内建原语 12 个已全部实现：`@sizeOf/@alignOf/@fields/@hasField/@field/@typeInfo/@comptime/@inline/@no_bounds_check/@fast/@unroll/@section`（后增 `@addr`、`@hotpatch`，见 07-31/07-30）。
 - 增量缓存（函数级 .cir，默认开启）：`cir_cache.cr` save/load 每函数快照，`clean-cache` 子命令。
 - `@hotpatch` 滚动更新：IR_HOTPATCH_ROUTE(39) + parser `@hotpatch(ver=N)` + checker 多版本签名校验 + ELF 编码 + SIGHUP 信号处理。
 - 指针模型三 pass 实现（PointerAnalysis/RegionCheck/ProvenanceVerify）：DEREF 后端 cmp+jae+ud2 边界检查（s3 编码 alloc_size）、运行时 prov_table 堆边界检查 patch、arena BSS 全局。
@@ -159,13 +159,13 @@
   Known issue: name_idx in .ccr is off by 1 (first string index mismatch)
 ### [fix] use index comparison for main lookup
   - Replace str_get() comparison with direct index comparison in elf.cr
-### [fix] pipeline from source to binary now works!
+### [fix] pipeline from source to binary now works
   Root cause: g_str_count = 0 after tokenize() reset the string table,
 ### [feat] BSS global variable support in ELF backend
   - Add g_x86_is_global/g_x86_global_off arrays to track BSS vars
 ### [feat] dynamic linking - external call relocation recording
   - IR_CALL to unknown functions now records ext_rel entries instead of
-### [feat] dynamic linking with PLT/GOT works!
+### [feat] dynamic linking with PLT/GOT works
   Bug fix: PLT j loop missing 'break' caused infinite loop in emit().
 ### [feat] standard library .so files
   - Build core_io.so and core_math.so from src/stdlib/*.cr
@@ -237,13 +237,13 @@
 ### [refactor] measure _start size via emit_start_size() instead of hardcoded 22
   - Extract _start emission into emit_start() function
 ### [refactor] instruction sizes via _size() functions (Hexagon pessimistic)
-### [fix] massive landmine cleanup — dynamic arrays, dynamic linking, instr fixes, va/offset bugs
+### [fix] large-scale landmine cleanup — dynamic arrays, dynamic linking, instr fixes, va/offset bugs
   - Converted all [int; N]/[string; N] arrays to dynamic string buffers
 ### [docs] add hard rules — ban git, use jj, no bypassing, no reverting
 
 ## 2026-06-18
-### [fix] 扫清全部隐患 — CLI 子命令 + 6 个未初始化数组 + batch:= 解析 + 边界校验
-  CLI 重构:
+### [fix] 清理全部隐患 — CLI 子命令 + 6 个未初始化数组 + batch:= 解析 + 边界校验
+  CLI 重构：
 ### [fix] 3 parser fixes — parse_primary advance_tok, local_stmts 256-limit, parse_for_expr C-style guard
 ### [fix] string interpolation parser infinite loop on unterminated { — cli.cr crash root cause
 ### [fix] string interpolation infinite loop when { without }

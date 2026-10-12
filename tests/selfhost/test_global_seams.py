@@ -119,106 +119,104 @@ def case_elf_match(name, source, patterns):
 
 # ── B1：IR_BINARY(TI_DEX) 双操作数（全局 vs 局部同形对拍 + 正负号差分）──
 B1_NEG = """
-g : dex, apx, mut = -100.0;
-fn main() -> int {
-    if g > 0.0 { return 7; }
-    return 1;
-}
+g : dex, apx, mut = -100.0
+fn main() -> int:
+    if g > 0.0:
+        return 7
+    return 1
 """
 B1_POS = """
-g : dex, apx, mut = 100.0;
-fn main() -> int {
-    if g > 0.0 { return 7; }
-    return 1;
-}
+g : dex, apx, mut = 100.0
+fn main() -> int:
+    if g > 0.0:
+        return 7
+    return 1
 """
 B1_NEG_LOCAL = """
-fn main() -> int {
-    g : dex, apx, mut = -100.0;
-    if g > 0.0 { return 7; }
-    return 1;
-}
+fn main() -> int:
+    g : dex, apx, mut = -100.0
+    if g > 0.0:
+        return 7
+    return 1
 """
 
 # ── B2：IR_I2F 源（scaled 全局 → apx；局部同形对照）──
 B2_NEG = """
-h : dex, mut = -100.0;
-fn main() -> int {
-    d : dex, apx = h;
-    if d > 0.0 { return 7; }
-    return 1;
-}
+h : dex, mut = -100.0
+fn main() -> int:
+    d : dex, apx = h
+    if d > 0.0:
+        return 7
+    return 1
 """
 B2_POS = """
-h : dex, mut = 100.0;
-fn main() -> int {
-    d : dex, apx = h;
-    if d > 0.0 { return 7; }
-    return 1;
-}
+h : dex, mut = 100.0
+fn main() -> int:
+    d : dex, apx = h
+    if d > 0.0:
+        return 7
+    return 1
 """
 B2_NEG_LOCAL = """
-fn main() -> int {
-    h : dex, mut = -100.0;
-    d : dex, apx = h;
-    if d > 0.0 { return 7; }
-    return 1;
-}
+fn main() -> int:
+    h : dex, mut = -100.0
+    d : dex, apx = h
+    if d > 0.0:
+        return 7
+    return 1
 """
 
 # ── B4：IR_SLICE 数组指针 + 低界（全局数组；局部对照；字面量低界隔离 s1/s2）──
 B4_GLOBAL = """
-g : [int;4] = [10, 20, 30, 40];
-lo : int, mut = 1;
-fn main() -> int {
-    s := g[lo..3];
-    return s[0];
-}
+g : [int;4] = [10, 20, 30, 40]
+lo : int, mut = 1
+fn main() -> int:
+    s := g[lo..3]
+    return s[0]
 """
 B4_LOCAL = """
-fn main() -> int {
-    g : [int;4] = [10, 20, 30, 40];
-    lo : int, mut = 1;
-    s := g[lo..3];
-    return s[0];
-}
+fn main() -> int:
+    g : [int;4] = [10, 20, 30, 40]
+    lo : int, mut = 1
+    s := g[lo..3]
+    return s[0]
 """
 
 # ── B5：IR_AWAIT 源（int 全局运行期赋值 ⇒ 不可折叠；局部对照）──
 B5_GLOBAL = """
-g : int, mut = 5;
-fn main() -> int {
-    g = 9;
-    x := await g;
-    return x;
-}
+g : int, mut = 5
+fn main() -> int:
+    g = 9
+    x := await g
+    return x
 """
 B5_LOCAL = """
-fn main() -> int {
-    g : int, mut = 5;
-    g = 9;
-    x := await g;
-    return x;
-}
+fn main() -> int:
+    g : int, mut = 5
+    g = 9
+    x := await g
+    return x
 """
 
 # ── B6(b)：callseq dex 实参（单实参 extern = 恒不打包 ⇒ 全局实参直达分派）──
 # 静态无 .so ⇒ 调用未解析符号必崩（对照 seam_ext(1.5) 同样 139）⇒ 判据只到发射字节。
 B6B_EXTERN = """
-g : dex, apx, mut = 1.5;
-extern fn seam_ext(x: dex) -> dex;
-fn main() -> int {
-    y := seam_ext(g);
-    if y != 3.0 { return 1; }
-    return 7;
-}
+g : dex, apx, mut = 1.5
+extern fn seam_ext(x: dex) -> dex
+fn main() -> int:
+    y := seam_ext(g)
+    if y != 3.0:
+        return 1
+    return 7
 """
 
 # ── B7：非回归（非 dex 全局返回走 rax 路径，修复前后同字节）──
 B7_RET_GLOBAL = """
-g : int, mut = 5;
-fn ret_g() -> int { return g; }
-fn main() -> int { return ret_g(); }
+g : int, mut = 5
+fn ret_g() -> int:
+    return g
+fn main() -> int:
+    return ret_g()
 """
 
 

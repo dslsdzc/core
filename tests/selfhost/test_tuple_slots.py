@@ -30,163 +30,151 @@ CASES = [
     (
         "compound elem same type accepted (F5 ①假拒回归)",
         """
-fn main() -> int {
-    a : [int; 3] = [1, 2, 3];
-    x : ., mut = (1, a);
-    y : ., mut = (1, [1, 2, 3]);
-    x = y;
-    return 0;
-}
+fn main() -> int:
+    a : [int; 3] = [1, 2, 3]
+    x : ., mut = (1, a)
+    y : ., mut = (1, [1, 2, 3])
+    x = y
+    return 0
 """,
         "ACCEPT",
     ),
     (
         "compound elem diff type rejected (F5 ②soundness)",
         """
-fn h() -> int { return 5; }
-fn main() -> int {
-    x : ., mut = (1, [1, 2, 3]);
-    y : ., mut = (1, h());
-    x = y;
-    return 0;
-}
+fn h() -> int:
+    return 5
+fn main() -> int:
+    x : ., mut = (1, [1, 2, 3])
+    y : ., mut = (1, h())
+    x = y
+    return 0
 """,
         "TA01",
     ),
     (
         "compound elem length mismatch rejected (F5 ③N 面)",
         """
-fn main() -> int {
-    x : ., mut = (1, [1, 2, 3]);
-    y : ., mut = (1, [1, 2]);
-    x = y;
-    return 0;
-}
+fn main() -> int:
+    x : ., mut = (1, [1, 2, 3])
+    y : ., mut = (1, [1, 2])
+    x = y
+    return 0
 """,
         "LEN",
     ),
     (
         "both compound elems same type accepted",
         """
-fn main() -> int {
-    x : ., mut = (1, [1, 2, 3]);
-    y : ., mut = (2, [7, 8, 9]);
-    x = y;
-    return 0;
-}
+fn main() -> int:
+    x : ., mut = (1, [1, 2, 3])
+    y : ., mut = (2, [7, 8, 9])
+    x = y
+    return 0
 """,
         "ACCEPT",
     ),
     (
         "both compound elems diff elem type rejected",
         """
-fn main() -> int {
-    x : ., mut = (1, [1, 2, 3]);
-    y : ., mut = (2, ["a", "b", "c"]);
-    x = y;
-    return 0;
-}
+fn main() -> int:
+    x : ., mut = (1, [1, 2, 3])
+    y : ., mut = (2, ["a", "b", "c"])
+    x = y
+    return 0
 """,
         "TA01",
     ),
     (
         "array in first slot accepted (反证边界)",
         """
-fn main() -> int {
-    a : [int; 3] = [1, 2, 3];
-    x : ., mut = (a, 1);
-    y : ., mut = ([1, 2, 3], 1);
-    x = y;
-    return 0;
-}
+fn main() -> int:
+    a : [int; 3] = [1, 2, 3]
+    x : ., mut = (a, 1)
+    y : ., mut = ([1, 2, 3], 1)
+    x = y
+    return 0
 """,
         "ACCEPT",
     ),
     (
         "single-node elems accepted (反证边界)",
         """
-fn main() -> int {
-    a : [int; 3] = [1, 2, 3];
-    x : ., mut = (1, a);
-    y : ., mut = (1, a);
-    x = y;
-    return 0;
-}
+fn main() -> int:
+    a : [int; 3] = [1, 2, 3]
+    x : ., mut = (1, a)
+    y : ., mut = (1, a)
+    x = y
+    return 0
 """,
         "ACCEPT",
     ),
     (
         "single-node elems diff type rejected (反证边界)",
         """
-fn main() -> int {
-    a : [int; 3] = [1, 2, 3];
-    x : ., mut = (1, a);
-    y : ., mut = (1, 5);
-    x = y;
-    return 0;
-}
+fn main() -> int:
+    a : [int; 3] = [1, 2, 3]
+    x : ., mut = (1, a)
+    y : ., mut = (1, 5)
+    x = y
+    return 0
 """,
         "TA01",
     ),
     (
         "ident elems length mismatch rejected",
         """
-fn main() -> int {
-    a : [int; 3] = [1, 2, 3];
-    b : [int; 4] = [1, 2, 3, 4];
-    x : ., mut = (1, a);
-    y : ., mut = (2, b);
-    x = y;
-    return 0;
-}
+fn main() -> int:
+    a : [int; 3] = [1, 2, 3]
+    b : [int; 4] = [1, 2, 3, 4]
+    x : ., mut = (1, a)
+    y : ., mut = (2, b)
+    x = y
+    return 0
 """,
         "LEN",
     ),
     (
         "nested tuple elems accepted",
         """
-fn main() -> int {
-    x : ., mut = (1, (2, 3));
-    y : ., mut = (1, (2, 3));
-    x = y;
-    return 0;
-}
+fn main() -> int:
+    x : ., mut = (1, (2, 3))
+    y : ., mut = (1, (2, 3))
+    x = y
+    return 0
 """,
         "ACCEPT",
     ),
     (
         "nested tuple arity mismatch rejected",
         """
-fn main() -> int {
-    x : ., mut = (1, (2, 3));
-    y : ., mut = (1, (2, 3, 4));
-    x = y;
-    return 0;
-}
+fn main() -> int:
+    x : ., mut = (1, (2, 3))
+    y : ., mut = (1, (2, 3, 4))
+    x = y
+    return 0
 """,
         "TA01",
     ),
     (
         "nested tuple vs int rejected",
         """
-fn main() -> int {
-    x : ., mut = (1, (2, 3));
-    y : ., mut = (1, 5);
-    x = y;
-    return 0;
-}
+fn main() -> int:
+    x : ., mut = (1, (2, 3))
+    y : ., mut = (1, 5)
+    x = y
+    return 0
 """,
         "TA01",
     ),
     (
         "nested tuple in first slot vs int rejected",
         """
-fn main() -> int {
-    x : ., mut = ((2, 3), 1);
-    y : ., mut = (5, 1);
-    x = y;
-    return 0;
-}
+fn main() -> int:
+    x : ., mut = ((2, 3), 1)
+    y : ., mut = (5, 1)
+    x = y
+    return 0
 """,
         "TA01",
     ),
@@ -194,11 +182,11 @@ fn main() -> int {
 
 # IR 路径冒烟：复合元素元组必须能过 ir_gen（wrapper 解引用 + 数组元素构造）
 IR_SMOKE = """
-fn g() -> int { return 33; }
-fn main() -> int {
-    t := (g() + 1, [10, 20, 30]);
-    return 0;
-}
+fn g() -> int:
+    return 33
+fn main() -> int:
+    t := (g() + 1, [10, 20, 30])
+    return 0
 """
 
 

@@ -16,63 +16,76 @@ CASES = [
     (
         "immutable borrow then use original",
         """
-fn main() -> int {
-    x := 42; r := &x; y := x; return y;
-}
+fn main() -> int:
+    x := 42
+    r := &x
+    y := x
+    return y
 """,
         True,
     ),
     (
         "mutable borrow then use original",
         """
-fn main() -> int {
-    x : ., mut = 42; r := &mut x; y := x; return y;
-}
+fn main() -> int:
+    x : ., mut = 42
+    r := &mut x
+    y := x
+    return y
 """,
         True,
     ),
     (
         "multiple immutable borrows allowed",
         """
-fn main() -> int {
-    x := 42; r1 := &x; r2 := &x; return 0;
-}
+fn main() -> int:
+    x := 42
+    r1 := &x
+    r2 := &x
+    return 0
 """,
         False,
     ),
     (
         "immutable then mutable borrow",
         """
-fn main() -> int {
-    x : ., mut = 42; r1 := &x; r2 := &mut x; return 0;
-}
+fn main() -> int:
+    x : ., mut = 42
+    r1 := &x
+    r2 := &mut x
+    return 0
 """,
         True,
     ),
     (
         "borrow released after block scope exit",
         """
-fn main() -> int {
-    x := 42;
-    { r := &x; }
-    y := x; return y;
-}
+fn main() -> int:
+    x := 42:
+        r := &x
+    y := x
+    return y
 """,
         False,
     ),
     (
         "normal copy use",
         """
-fn main() -> int { x := 42; y := x; return y; }
+fn main() -> int:
+    x := 42
+    y := x
+    return y
 """,
         False,
     ),
     (
         "mutable then immutable borrow",
         """
-fn main() -> int {
-    x : ., mut = 42; r1 := &mut x; r2 := &x; return 0;
-}
+fn main() -> int:
+    x : ., mut = 42
+    r1 := &mut x
+    r2 := &x
+    return 0
 """,
         True,
     ),
