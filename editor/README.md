@@ -5,7 +5,7 @@
 所有文件安装到 `~/.config/nvim/`：
 
 ```bash
-# 一键安装
+# 一次性安装
 cp -r editor/nvim/syntax/*.vim    ~/.config/nvim/syntax/
 cp -r editor/nvim/ftdetect/*.vim  ~/.config/nvim/ftdetect/
 cp -r editor/nvim/ftplugin/*.vim  ~/.config/nvim/ftplugin/
@@ -14,7 +14,7 @@ cp -r editor/nvim/snippets/*.json ~/.config/nvim/snippets/
 cp -r editor/nvim/plugin/*.lua    ~/.config/nvim/lua/plugins/
 ```
 
-### 功能一览
+### 功能
 
 | 功能 | 触发方式 | 说明 |
 |------|----------|------|

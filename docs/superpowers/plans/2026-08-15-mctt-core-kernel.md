@@ -1,38 +1,38 @@
-# McTT → Core 验证内核移植实现计划（M1）
+# McTT 到 Core 的验证内核移植实现计划（M1）
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-> **注意：Task 6（src/kernel/ 内核本体移植）由项目维护者 DslsDZC 手工执行，不由 agent 代做。** 其余任务（1–5、7）由 agent 执行。
+> 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
+> 注意：任务 6（src/kernel/ 内核本体移植）由项目维护者 DslsDZC 手工执行，不由 agent 代做。其余任务（1–5、7）由 agent 执行。
 
-**Goal:** 将 McTT（ICFP'25 全验证 MLTT 内核）照抄移植为 Core 实现，通过术语级差分测试验证与 OCaml 参考逐位一致，作为语义保鲜验证管线的信任根。
+目标：将 McTT（ICFP'25 全验证 MLTT 内核）按原样移植为 Core 实现，通过与 OCaml 参考的术语级差分测试验证逐位一致，作为语义保留验证管线的信任根。
 
-**Architecture:** 信任根 = 规范转写（kernel-spec.md，移植契约）+ 验证继承（McTT 的 Rocq 定理）+ 差分对拍（同一语料驱动 OCaml 参考与 Core 实现，输出逐位一致）。M1 只做内核本体（Π + ℕ + 累积宇宙 + NbE + 显式替换），不做前端、不做证书管线。
+架构：信任根由三部分组成：规范转写（kernel-spec.md，移植契约）、验证继承（McTT 的 Rocq 定理）、差分比对（同一语料驱动 OCaml 参考与 Core 实现，输出逐位一致）。M1 只做内核本体（Π + ℕ + 累积宇宙 + NbE + 显式替换），不做前端、不做证书管线。
 
-**Tech Stack:** OCaml（McTT 提取代码，dune 构建）、Core 语言（src/kernel/，build/corec 编译）、Python 3（语料生成与差分脚本）。
+技术栈：OCaml（McTT 提取代码，dune 构建）、Core 语言（src/kernel/，build/corec 编译）、Python 3（语料生成与差分脚本）。
 
-**Spec:** `docs/superpowers/specs/2026-08-15-mctt-core-kernel-design.md`
+规格：`docs/superpowers/specs/2026-08-15-mctt-core-kernel-design.md`
 
-## Global Constraints
+## 全局约束
 
-- **禁止 git**，全部用 `jj`（仓库铁律 #2）；提交信息中文
-- 长时间编译/构建必须 `cpulimit -l 10` 或 `nice -n 19` 包裹（仓库铁律 #6）——本计划中所有 dune 构建命令已带
+- 禁止 git，全部用 `jj`（仓库铁律 #2）；提交信息中文
+- 长时间编译/构建必须 `cpulimit -l 10` 或 `nice -n 19` 包裹（仓库铁律 #6）。本计划中所有 dune 构建命令都已加上限流前缀
 - Core 编译：`./build/corec build FILE.cr -o OUT --static`（工作目录 = 仓库根）
-- McTT 参考代码克隆到仓库外 `~/mctt`（不提交）；我们的 harness 在仓库内 `tools/mctt_ref/`
-- 术语表示契约（Task 5/6 共同遵守）：扁平节点布局 `{kind, a, b, c, d}`（int），节点存全局 arena `g_kernel_nodes: [int; 8192]`，kind 常量与布局定义在 `src/kernel/term_io.cr`（Task 5 产出），内核代码 import 它
-- 查询/输出格式协议：见 Task 3（本计划内定死，两侧实现到同一协议）
-- 差分输出只比 accept/reject + 规范化类型文本，不比错误消息（设计文档 §七）
+- McTT 参考代码克隆到仓库外 `~/mctt`（不提交）；本仓的 harness 在仓库内 `tools/mctt_ref/`
+- 术语表示契约（任务 5/6 共同遵守）：扁平节点布局 `{kind, a, b, c, d}`（int），节点存全局 arena `g_kernel_nodes: [int; 8192]`，kind 常量与布局定义在 `src/kernel/term_io.cr`（任务 5 产出），内核代码 import 它
+- 查询/输出格式协议：见任务 3（本计划内固定，两侧实现到同一协议）
+- 差分输出只比 accept/reject 与规范化类型文本，不比错误消息（设计文档第七节）
 
 ---
 
-### Task 1: 拉取并构建 McTT 参考侧
+### 任务 1：拉取并构建 McTT 参考侧
 
-**Files:**
-- Create: `~/mctt`（克隆 McTT 仓库，icfp25 分支）
+涉及文件：
+- 创建：`~/mctt`（克隆 McTT 仓库，icfp25 分支）
 - 参考实现：McTT driver（OCaml 提取代码，含类型检查器）
 
-**Interfaces:**
-- Produces: 可运行的 McTT driver（`~/mctt/driver/_build/default/Main.exe`），后续 Task 3 的 harness 将依赖其提取模块
+接口：
+- 产出：可运行的 McTT driver（`~/mctt/driver/_build/default/Main.exe`），后续任务 3 的 harness 将依赖其提取模块
 
-- [ ] **Step 1: 克隆并检出**
+- [ ] 步骤 1：克隆并检出
 
 ```bash
 git clone https://github.com/Beluga-lang/McTT ~/mctt
@@ -42,36 +42,36 @@ cd ~/mctt && git checkout icfp25
 > 说明：克隆 McTT 仓库本身用 git 是允许的（这是第三方仓库操作，不是本仓库的版本控制；本仓库的提交一律 jj）。若 `git` 被 hook 拦截，改用：
 > `curl -sL https://github.com/Beluga-lang/McTT/archive/refs/heads/icfp25.tar.gz | tar xz -C ~/ && mv ~/McTT-icfp25 ~/mctt`
 
-- [ ] **Step 2: 检查提取代码是否自带（应已含，无需 Coq 构建）**
+- [ ] 步骤 2：检查提取代码是否自带（应已包含，无需 Coq 构建）
 
 ```bash
 ls ~/mctt/driver/extracted/
 ls ~/mctt/driver/dune
 ```
 
-Expected: `extracted/` 下有 `.ml`/`.mli` 文件与自己的 dune 文件；driver 的 dune 引用它们。若 `extracted/` 为空，则需先 `opam install coq-mctt` 或按 `~/mctt/README.md` 从 Rocq 构建——遇到此情况停下报告，不自行尝试 Coq 全量构建。
+预期：`extracted/` 下有 `.ml`/`.mli` 文件与自己的 dune 文件；driver 的 dune 引用它们。若 `extracted/` 为空，则需先 `opam install coq-mctt` 或按 `~/mctt/README.md` 从 Rocq 构建。遇到此情况停下报告，不自行尝试 Coq 全量构建。
 
-- [ ] **Step 3: 构建 driver（限 CPU）**
+- [ ] 步骤 3：构建 driver（限 CPU）
 
 ```bash
 cd ~/mctt/driver && nice -n 19 dune build 2>&1 | tail -20
 ```
 
-Expected: 构建成功，无致命错误。产出 `_build/default/Main.exe`。
+预期：构建成功，无致命错误。产出 `_build/default/Main.exe`。
 
-- [ ] **Step 4: 冒烟测试：跑 McTT 自带例子**
+- [ ] 步骤 4：快速验证测试，运行 McTT 自带例子
 
 ```bash
 cd ~/mctt/driver && ./_build/default/Main.exe ../examples/simple_nat.mctt
 ```
 
-Expected: 输出类型检查结果（接受）。若命令用法不同，读 `Main.ml` 顶部注释确认参数格式。
+预期：输出类型检查结果（接受）。若命令用法不同，读 `Main.ml` 顶部注释确认参数格式。
 
-- [ ] **Step 5: 记录参考侧验证点**
+- [ ] 步骤 5：记录参考侧验证点
 
-在 `tools/mctt_ref/README.md`（新建）中记录：构建命令、Main.exe 用法、extracted 模块清单（`ls driver/extracted/*.mli` 的输出粘进去）。这是 Task 3 的输入。
+在 `tools/mctt_ref/README.md`（新建）中记录：构建命令、Main.exe 用法、extracted 模块清单（`ls driver/extracted/*.mli` 的输出粘进去）。这是任务 3 的输入。
 
-- [ ] **Step 6: 提交**
+- [ ] 步骤 6：提交
 
 ```bash
 cd /home/DslsDZC/core && jj commit -m "tools: McTT 参考侧构建记录（Task 1）"
@@ -79,60 +79,60 @@ cd /home/DslsDZC/core && jj commit -m "tools: McTT 参考侧构建记录（Task 
 
 ---
 
-### Task 2: 规范转写 kernel-spec.md（移植契约）
+### 任务 2：规范转写 kernel-spec.md（移植契约）
 
-**Files:**
-- Create: `docs/verifier/kernel-spec.md`
+涉及文件：
+- 创建：`docs/verifier/kernel-spec.md`
 - Read（对照源，转写不二手）：`~/mctt/theories/Core/Syntactic/Syntax.v`、`~/mctt/theories/Core/Syntactic/System.v`、`~/mctt/theories/Core/Syntactic/System/Definitions.v`、`~/mctt/theories/Algorithmic/Typing/Definitions.v`、`~/mctt/theories/Algorithmic/Subtyping/Definitions.v`、`~/mctt/theories/Core/Semantic/{Domain,Evaluation,Readback}/Definitions.v`
 
-**Interfaces:**
-- Produces: `docs/verifier/kernel-spec.md`——类型规则、算法规则、NbE 结构、子类型规则的逐条转写，每条带 `源文件:行号` 交叉引用；**上下文/de Bruijn 约定必须在本任务确认并写死**（Task 3 协议与 Task 6 移植都以它为准）
+接口：
+- 产出：`docs/verifier/kernel-spec.md`，内容为类型规则、算法规则、NbE 结构、子类型规则的逐条转写，每条带 `源文件:行号` 交叉引用；上下文与 de Bruijn 约定必须在本任务确认并固定（任务 3 协议与任务 6 移植都以它为准）
 
-- [ ] **Step 1: 通读 Syntax.v 与 System.v，写出术语/子术语/正规形/中性形的构造子清单**
+- [ ] 步骤 1：通读 Syntax.v 与 System.v，写出术语、子术语、正规形、中性形的构造子清单
 
 在 spec 中逐条列出（exp/sub/nf/ne 的构造子、参数、含义），每条标注 `Syntax.v:行号`。同时确认：de Bruijn 索引方向、上下文序（var 0 = 上下文最右元素？）、`q` 替换的定义（`Syntax.v` 中 `Definition q`）。
 
-- [ ] **Step 2: 转写类型规则（System/Definitions.v）**
+- [ ] 步骤 2：转写类型规则（System/Definitions.v）
 
 每条推导规则：结论 `Γ ⊢ t : T` 的规则名、前提、条件。格式：规则名 + 前提列表 + 结论 + 源位置。
 
-- [ ] **Step 3: 转写算法化规则（Algorithmic/Typing/Definitions.v）**
+- [ ] 步骤 3：转写算法化规则（Algorithmic/Typing/Definitions.v）
 
-双向类型检查的检查模式（`Γ ⊢ t ⇐ T`）与推断模式（`Γ ⊢ t ⇒ T`）的全部规则，逐条标注源位置。
+双向类型检查包括检查模式（`Γ ⊢ t ⇐ T`）和推断模式（`Γ ⊢ t ⇒ T`），两者的全部规则都要逐条标注源位置。
 
-- [ ] **Step 4: 转写子类型（Algorithmic/Subtyping/Definitions.v）**
+- [ ] 步骤 4：转写子类型规则（Algorithmic/Subtyping/Definitions.v）
 
 累积宇宙 `Type_i ≤ Type_j (i ≤ j)`、Π 逆变/协变规则、判定算法结构。
 
-- [ ] **Step 5: 转写 NbE 结构（Semantic/{Domain,Evaluation,Readback}/Definitions.v）**
+- [ ] 步骤 5：转写 NbE 结构（Semantic/{Domain,Evaluation,Readback}/Definitions.v）
 
 语义域定义（闭项/开放项的表示）、求值函数结构、读出函数结构、正常形/中性形判定、转换判定（`t ≡ u : T`）的完整算法描述。
 
-- [ ] **Step 6: 自检**
+- [ ] 步骤 6：自检
 
-对 spec 全文核对：每个构造子、每条规则都有来源行号；无「待定」「类似上面」类描述；de Bruijn/上下文约定明确写出。修正后，在 spec 头部注明「本文件由 Task 2 生成，行号对应 McTT icfp25 分支」。
+对 spec 全文核对：每个构造子、每条规则都有来源行号；无「待定」「类似上面」类描述；de Bruijn/上下文约定明确写出。修正后，在 spec 头部注明「本文件由任务 2 生成，行号对应 McTT icfp25 分支」。
 
-- [ ] **Step 7: 提交**
+- [ ] 步骤 7：提交
 
 ```bash
-cd /home/DslsDZC/core && jj commit -m "docs: kernel-spec 规范转写（McTT→Core 移植契约）"
+cd /home/DslsDZC/core && jj commit -m "docs: kernel-spec 规范转写（McTT 到 Core 移植契约）"
 ```
 
 ---
 
-### Task 3: 共享格式协议 + OCaml 参考 harness
+### 任务 3：共享格式协议 + OCaml 参考 harness
 
-**Files:**
-- Create: `tools/mctt_ref/protocol.md`（协议，定死）
-- Create: `tools/mctt_ref/harness.ml`（读查询文件 → 调提取检查器 → 规范输出）
-- Create: `tools/mctt_ref/dune`
-- Test: `tools/mctt_ref/smoke.txt` + `tools/mctt_ref/smoke.expected`
+涉及文件：
+- 创建：`tools/mctt_ref/protocol.md`（协议，定死）
+- 创建：`tools/mctt_ref/harness.ml`（读取查询文件，调用提取检查器，输出规范格式）
+- 创建：`tools/mctt_ref/dune`
+- 测试：`tools/mctt_ref/smoke.txt` + `tools/mctt_ref/smoke.expected`
 
-**Interfaces:**
-- Consumes: Task 1 的 `~/mctt` 构建产物与模块清单
-- Produces: 可执行 `tools/mctt_ref/harness.exe`；协议文档（Task 4 语料生成器与 Task 5 term_io.cr 都按它实现）
+接口：
+- 使用：任务 1 的 `~/mctt` 构建产物与模块清单
+- 产出：可执行 `tools/mctt_ref/harness.exe`；协议文档（任务 4 语料生成器与任务 5 term_io.cr 都按它实现）
 
-**协议（本任务定死，写进 protocol.md 与后续所有任务）：**
+协议（本任务固定，写进 protocol.md 与后续所有任务）：
 
 ```
 查询文件：每行一条查询
@@ -155,29 +155,29 @@ cd /home/DslsDZC/core && jj commit -m "docs: kernel-spec 规范转写（McTT→C
 de Bruijn 约定：以 kernel-spec.md（Task 2）为准
 ```
 
-- [ ] **Step 1: 写 protocol.md**
+- [ ] 步骤 1：编写 protocol.md
 
-内容 = 上面协议块（含 Task 2 确认的 de Bruijn 约定与一行示例）。
+内容 = 上面协议块（含任务 2 确认的 de Bruijn 约定与一行示例）。
 
-- [ ] **Step 2: 侦查提取模块的入口签名**
+- [ ] 步骤 2：侦查提取模块的入口签名
 
 ```bash
 cd ~/mctt/driver && cat dune && ls extracted/*.mli 2>/dev/null && grep -n "module\|val " extracted/*.mli 2>/dev/null | head -60
 ```
 
-若 `.mli` 不存在，用 `grep -rn "let check\|let infer\|let subtype\|let convert" extracted/*.ml | head -20` 找函数名。Expected: 找到类型检查入口（来自 `theories/Extraction/TypeCheck.v`）、子类型入口、NbE/转换入口，以及术语类型的构造子名（`Typ`/`Nat`/`Zero`/`Succ`/`NatRec`/`Pi`/`Fn`/`App`/`Var`/`Sub` 一类）。**把找到的真实模块名与函数名记录到 `tools/mctt_ref/README.md`（更新 Task 1 建的），后续步骤按真实名接线**；若名字与预期不同，以 grep 结果为准。
+若 `.mli` 不存在，用 `grep -rn "let check\|let infer\|let subtype\|let convert" extracted/*.ml | head -20` 找函数名。预期：找到类型检查入口（来自 `theories/Extraction/TypeCheck.v`）、子类型入口、NbE/转换入口，以及术语类型的构造子名（`Typ`/`Nat`/`Zero`/`Succ`/`NatRec`/`Pi`/`Fn`/`App`/`Var`/`Sub` 一类）。把找到的真实模块名与函数名记录到 `tools/mctt_ref/README.md`（更新任务 1 建的文件），后续步骤按真实名接线；若名字与预期不同，以 grep 结果为准。
 
-- [ ] **Step 3: 写 harness.ml**
+- [ ] 步骤 3：编写 harness.ml
 
-结构：读行 → 解析（手写 ~80 行 S-表达式解析器，产出提取模块的术语值）→ 分发到 check/infer/convert/subtype → 打印规范输出（类型结果经读出/正规化后打印）。关键接线点：
-- 解析器把 `(typ N)` 映射到提取模块的宇宙构造子，`(natrec A mz ms n)` 映射到 NatRec 构造子（构造子字段顺序以提取代码为准，Step 2 侦查确认）
+结构：读取行，解析（手写约 80 行 S-表达式解析器，产出提取模块的术语值），分发到 check/infer/convert/subtype，打印规范输出（类型结果经读出或正规化后打印）。关键接线点：
+- 解析器把 `(typ N)` 映射到提取模块的宇宙构造子，`(natrec A mz ms n)` 映射到 NatRec 构造子（构造子字段顺序以提取代码为准，步骤 2 侦查确认）
 - 推断输出必须正规化：用提取的求值+读出函数（或转换判定自带的正常化路径）把结果化为 nf 再打印
 - 上下文：解析 `(ctx e1 e2 ...)` 为提取模块的 context 类型（顺序按 kernel-spec.md 约定）
 - 拒绝路径统一打印 `reject`；convert/subtype 打印 `yes|no`
 
-harness.ml 全文在此任务的执行中按 Step 2 的真实签名完成；本步骤的验收标准 = Step 4 冒烟通过。
+harness.ml 全文在此任务的执行中按步骤 2 的真实签名完成；本步骤的验收标准 = 步骤 4 快速验证通过。
 
-- [ ] **Step 4: 写 dune 并构建（限 CPU）**
+- [ ] 步骤 4：编写 dune 并构建（限 CPU）
 
 ```bash
 cat > tools/mctt_ref/dune <<'EOF'
@@ -190,7 +190,7 @@ cd ~/mctt/driver && cp /home/DslsDZC/core/tools/mctt_ref/harness.ml . && nice -n
 
 若库名不对，读 `~/mctt/driver/dune` 与 `~/mctt/driver/extracted/dune` 的 `(libraries ...)`/`(modules ...)` 修正。产出 `harness.exe`（放 `~/mctt/driver/_build/default/`）。
 
-- [ ] **Step 5: 冒烟测试**
+- [ ] 步骤 5：快速验证测试
 
 写 `tools/mctt_ref/smoke.txt`：
 
@@ -216,9 +216,9 @@ subtype: yes
 check: reject
 ```
 
-（第 7 行 `fn (nat) (var 0)` 的类型是 `(pi (nat) (nat))`，不是 `(typ 0)`，故 reject——若实际输出不同，记录实际值作为 ground truth，后续语料以 McTT 为准，不以本表为准。）`smoke.expected` 内容 = 实际核验后的七行。
+（第 7 行 `fn (nat) (var 0)` 的类型是 `(pi (nat) (nat))`，不是 `(typ 0)`，故 reject。若实际输出不同，记录实际值作为 ground truth，后续语料以 McTT 为准，不以本表为准。）`smoke.expected` 内容 = 实际核验后的七行。
 
-- [ ] **Step 6: 提交**
+- [ ] 步骤 6：提交
 
 ```bash
 cd /home/DslsDZC/core && jj commit -m "tools: 参考侧 harness + 共享格式协议（术语级差分）"
@@ -226,18 +226,18 @@ cd /home/DslsDZC/core && jj commit -m "tools: 参考侧 harness + 共享格式�
 
 ---
 
-### Task 4: 语料生成器（穷举 + 随机 + 案卷）
+### 任务 4：语料生成器（穷举 + 随机 + 案卷）
 
-**Files:**
-- Create: `tests/kernel/gen_corpus.py`（生成查询文件，不含期望值）
-- Create: `tests/kernel/cases/corpus_exhaustive.txt`、`corpus_random.txt`、`corpus_manual.txt`（生成物）
-- Create: `tests/kernel/README.md`（语料说明与固定种子）
+涉及文件：
+- 创建：`tests/kernel/gen_corpus.py`（生成查询文件，不含期望值）
+- 创建：`tests/kernel/cases/corpus_exhaustive.txt`、`corpus_random.txt`、`corpus_manual.txt`（生成物）
+- 创建：`tests/kernel/README.md`（语料说明与固定种子）
 
-**Interfaces:**
-- Consumes: 协议（Task 3 的 protocol.md）——生成器输出必须被 harness 与 term_io 都能解析
-- Produces: 三个语料文件；期望值在 Task 7 由参考 harness 生成并固化
+接口：
+- 使用：协议（任务 3 的 protocol.md），生成器输出必须能被 harness 与 term_io 解析
+- 产出：三个语料文件；期望值在任务 7 由参考 harness 生成并固化
 
-- [ ] **Step 1: 写穷举生成器（exact code）**
+- [ ] 步骤 1：编写穷举生成器（完整代码）
 
 `tests/kernel/gen_corpus.py`：
 
@@ -288,7 +288,7 @@ def gen_exps(max_size):
         res = []
         for i in range(1, n):
             j = n - i
-            for a in out.get(i, []): 
+            for a in out.get(i, []):
                 for b in out.get(j, []):
                     res += [(K_SUCC, a), (K_FN, a, b), (K_APP, a, b), (K_PI, a, b)]
         res += [(K_NATREC, a, b, c, d) for a in out.get(1,[]) for b in out.get(1,[]) for c in out.get(1,[]) for d in out.get(1,[]) if n == 1+size(a)+size(b)+size(c)+size(d)]
@@ -303,9 +303,9 @@ def gen_exps(max_size):
     return [t for n in range(1, max_size + 1) for t in out.get(n, [])]
 ```
 
-（注：natrec 组合处保持简单——只枚举 a,b,c,d 均为 size-1 项的组合，覆盖归约路径即可；完整枚举在随机层补。）
+（注：natrec 组合处保持简单，只枚举 a、b、c、d 均为 size-1 项的组合，覆盖归约路径即可；完整枚举在随机层补充。）
 
-- [ ] **Step 2: 写查询发射逻辑**
+- [ ] 步骤 2：编写查询发射逻辑
 
 对每个穷举项 t（size ≤ 4）发射：
 - `infer (ctx) {t}`
@@ -314,7 +314,7 @@ def gen_exps(max_size):
 对类型形态的项（首构造子为 pi/typ/nat 的）额外发 `subtype (ctx) {t} (nat)` 与 `subtype (ctx) (nat) {t}`。
 对 (ctx (nat)) 与 (ctx (typ 0)) 上下文重复发射 infer/check。输出 `corpus_exhaustive.txt`，行首带 `#` 注释标明来源层。
 
-- [ ] **Step 3: 写随机生成器**
+- [ ] 步骤 3：编写随机生成器
 
 ```python
 def rand_exp(rng, depth, max_var):
@@ -334,7 +334,7 @@ def rand_exp(rng, depth, max_var):
 
 固定种子 `seed=20260815`，生成 1200 条随机查询（infer 为主 + check/convert/subtype 混合），上下文随机选自 `(ctx)`、`(ctx (nat))`、`(ctx (typ 0))`、`(ctx (nat) (nat))`。输出 `corpus_random.txt`。
 
-- [ ] **Step 4: 写案卷（≥ 20 条，exact content）**
+- [ ] 步骤 4：编写案卷（至少 20 条，内容完整）
 
 `corpus_manual.txt`，至少包含（编号从 1 起，全部具体写出）：
 
@@ -366,17 +366,17 @@ def rand_exp(rng, depth, max_var):
 25 check (ctx) (nat) (typ 0)                                         # 类型 Type
 ```
 
-第 16 条预期推断为 `(nat)`；全部条目的期望值由参考 harness 生成固化（Task 7），不以本表人工预期为准（人工预期只在 Step 5 冒烟用）。
+第 16 条预期推断为 `(nat)`；全部条目的期望值由参考 harness 生成固化（任务 7），不以本表人工预期为准（人工预期只在步骤 5 快速验证用）。
 
-- [ ] **Step 5: 运行生成器并统计**
+- [ ] 步骤 5：运行生成器并统计
 
 ```bash
 cd /home/DslsDZC/core && python3 tests/kernel/gen_corpus.py && wc -l tests/kernel/cases/*.txt
 ```
 
-Expected: `corpus_exhaustive.txt` ≥ 300 行，`corpus_random.txt` = 1200 行，`corpus_manual.txt` = 25 行。写 `tests/kernel/README.md` 记录种子与统计。
+预期：`corpus_exhaustive.txt` ≥ 300 行，`corpus_random.txt` = 1200 行，`corpus_manual.txt` = 25 行。写 `tests/kernel/README.md` 记录种子与统计。
 
-- [ ] **Step 6: 提交**
+- [ ] 步骤 6：提交
 
 ```bash
 cd /home/DslsDZC/core && jj commit -m "tests: 内核差分语料生成器（穷举+随机+案卷）"
@@ -384,28 +384,28 @@ cd /home/DslsDZC/core && jj commit -m "tests: 内核差分语料生成器（穷�
 
 ---
 
-### Task 5: Core 侧 term_io.cr（格式读取器 + 打印器）
+### 任务 5：Core 侧 term_io.cr（格式读取器 + 打印器）
 
-**Files:**
-- Create: `src/kernel/term_io.cr`（协议实现：S-表达式解析 → 扁平 arena；扁平节点 → 规范文本）
-- Test: `src/kernel/test_term_io.cr`（用 `./build/corec run` 直跑）
+涉及文件：
+- 创建：`src/kernel/term_io.cr`（协议实现：S-表达式解析为扁平 arena；扁平节点转为规范文本）
+- 测试：`src/kernel/test_term_io.cr`（用 `./build/corec run` 直接运行）
 
-**Interfaces:**
-- Consumes: 协议（Task 3 protocol.md）；Task 2 的 de Bruijn 约定
-- Produces: 全局 `g_kernel_nodes: [int; 8192]`（{kind,a,b,c,d} 五槽一组，节点索引 = 槽起点/5）、kind 常量（`K_TYP=0 K_NAT=1 K_ZERO=2 K_SUCC=3 K_NATREC=4 K_PI=5 K_FN=6 K_APP=7 K_VAR=8 K_SUB=9`；sub 用 `S_ID=0 S_WEAKEN=1 S_COMPOSE=2 S_EXTEND=3` 存于节点 d 槽）、`kernel_parse(text: string) -> int`（返回根节点索引，失败返回 -1）、`kernel_print(idx: int) -> string`（节点 → S-表达式文本）。Task 6 的内核代码 import 本文件的常量与 arena。
+接口：
+- 使用：协议（任务 3 protocol.md）；任务 2 的 de Bruijn 约定
+- 产出：全局 `g_kernel_nodes: [int; 8192]`（{kind,a,b,c,d} 五槽一组，节点索引 = 槽起点/5）、kind 常量（`K_TYP=0 K_NAT=1 K_ZERO=2 K_SUCC=3 K_NATREC=4 K_PI=5 K_FN=6 K_APP=7 K_VAR=8 K_SUB=9`；sub 用 `S_ID=0 S_WEAKEN=1 S_COMPOSE=2 S_EXTEND=3` 存于节点 d 槽）、`kernel_parse(text: string) -> int`（返回根节点索引，失败返回 -1）、`kernel_print(idx: int) -> string`（把节点转为 S-表达式文本）。任务 6 的内核代码 import 本文件的常量与 arena。
 
-- [ ] **Step 1: 核对 Core stdlib API 名**
+- [ ] 步骤 1：核对 Core stdlib API 名
 
 ```bash
 grep -n "^fn \|^pub fn " src/stdlib/fmt.cr | head -30; grep -n "fn str_len\|fn chr\|fn int_str" src/stdlib/fmt.cr src/stdlib/io.cr
 ```
 
-Expected: 确认 `str_len(s)`、`chr(n)`、`int_str(n)`、字符串比较/拼接可用；记录到本任务执行笔记。若名字不同，以下代码按实际 API 调整（签名一致即可，行为不变）。
+预期：确认 `str_len(s)`、`chr(n)`、`int_str(n)`、字符串比较/拼接可用；记录到本任务执行笔记。若名字不同，以下代码按实际 API 调整（签名一致即可，行为不变）。
 
-- [ ] **Step 2: 写 term_io.cr（exact code）**
+- [ ] 步骤 2：写 term_io.cr（exact code）
 
 ```core
-// src/kernel/term_io.cr —— 共享格式协议实现（Task 5）
+// src/kernel/term_io.cr：共享格式协议实现（Task 5）
 // 扁平 arena：g_kernel_nodes 五槽一组 {kind, a, b, c, d}，索引 = 起始槽
 // 槽 0..4 = 节点 0，槽 5..9 = 节点 1，……
 g_kernel_nodes : [int; 8192] = [0; 8192]
@@ -442,14 +442,14 @@ fn kern_get(n: int, slot: int) -> int:
     return g_kernel_nodes[n + slot]
 ```
 
-（解析与打印函数在本任务执行中补齐：`kernel_parse` 手写递归下降（跳过空白、读 `(token ...)`、数字用 `int_str` 反向解析——`str_to_int` 若无则用逐位 `(ch-'0')` 累加）；`kernel_print` 按协议对节点递归打印，var/succ 等单子节点直接递归。测试先写。）
+（解析与打印函数在本任务执行中补齐：`kernel_parse` 手写递归下降（跳过空白、读 `(token ...)`、数字用 `int_str` 反向解析；若没有 `str_to_int`，用逐位 `(ch-'0')` 累加）；`kernel_print` 按协议对节点递归打印，var/succ 等单子节点直接递归。测试先写。）
 
-- [ ] **Step 3: 写测试并运行**
+- [ ] 步骤 3：写测试并运行
 
 `src/kernel/test_term_io.cr`（main 里对三个固定字符串调用 kernel_parse 再 kernel_print，比对往返一致）：
 
 ```
-输入: (succ (succ (zero)))   → 往返必须等于原文
+输入: (succ (succ (zero)))，往返必须等于原文
 输入: (natrec (nat) (zero) (fn (nat) (nat) (succ (var 0))) (succ (zero)))
 输入: (sub (var 0) (compose (weaken) (id)))
 ```
@@ -458,13 +458,13 @@ fn kern_get(n: int, slot: int) -> int:
 cd /home/DslsDZC/core && ./build/corec run src/kernel/test_term_io.cr
 ```
 
-Expected: 打印往返一致（三行全部与原输入相同）。失败则修解析/打印。
+预期：打印往返一致（三行全部与原输入相同）。失败则修解析/打印。
 
-- [ ] **Step 4: 协议互验**
+- [ ] 步骤 4：协议互验
 
-把 `tests/kernel/cases/corpus_manual.txt` 前 3 行喂给 term_io（写一个临时 main 打印 `kernel_parse` 结果），再人工核对第 16 条 `infer` 术语解析后打印一致。Expected: 解析成功（无 -1）。
+把 `tests/kernel/cases/corpus_manual.txt` 前 3 行喂给 term_io（写一个临时 main 打印 `kernel_parse` 结果），再人工核对第 16 条 `infer` 术语解析后打印一致。预期：解析成功（无 -1）。
 
-- [ ] **Step 5: 提交**
+- [ ] 步骤 5：提交
 
 ```bash
 cd /home/DslsDZC/core && jj commit -m "src: term_io 共享格式读取器/打印器（协议实现）"
@@ -472,49 +472,49 @@ cd /home/DslsDZC/core && jj commit -m "src: term_io 共享格式读取器/打印
 
 ---
 
-### Task 6: 用户手工移植内核本体（DslsDZC 执行）
+### 任务 6：用户手工移植内核本体（DslsDZC 执行）
 
-**Files:**
-- Create: `src/kernel/mctt.cr`（arena 访问辅助、kind 常量复用 term_io、上下文结构）
-- Create: `src/kernel/subst.cr`（显式替换操作：id/weaken/compose/extend 的语义实现）
-- Create: `src/kernel/nbe.cr`（求值 + 读出：语义域、正常形/中性形）
-- Create: `src/kernel/subtype.cr`（协变子类型判定）
-- Create: `src/kernel/check.cr`（双向类型检查：检查 + 推断）
-- Create: `src/kernel/kernel_main.cr`（CLI：读查询文件 → 分发 → 输出协议格式）
-- Test: `src/kernel/test_kernel.cr`（冒烟：零/继承/应用/natrec 的 check/infer）
+涉及文件：
+- 创建：`src/kernel/mctt.cr`（arena 访问辅助、kind 常量复用 term_io、上下文结构）
+- 创建：`src/kernel/subst.cr`（显式替换操作：id/weaken/compose/extend 的语义实现）
+- 创建：`src/kernel/nbe.cr`（求值 + 读出：语义域、正常形/中性形）
+- 创建：`src/kernel/subtype.cr`（协变子类型判定）
+- 创建：`src/kernel/check.cr`（双向类型检查：检查 + 推断）
+- 创建：`src/kernel/kernel_main.cr`（CLI：读取查询文件，分发，输出协议格式）
+- 测试：`src/kernel/test_kernel.cr`（快速验证：零/继承/应用/natrec 的 check/infer）
 
-**Interfaces:**
-- Consumes: `term_io.cr` 的常量/arena/parse/print（Task 5）；`docs/verifier/kernel-spec.md`（Task 2，逐规则移植）；`~/mctt/driver/extracted/`（行为参考）
-- Produces: `kernel_main` 可执行（`./build/corec build src/kernel/kernel_main.cr -o build/kernel --static`），输出 = Task 3 协议
+接口：
+- 使用：`term_io.cr` 的常量/arena/parse/print（任务 5）；`docs/verifier/kernel-spec.md`（任务 2，逐规则移植）；`~/mctt/driver/extracted/`（行为参考）
+- 产出：`kernel_main` 可执行（`./build/corec build src/kernel/kernel_main.cr -o build/kernel --static`），输出 = 任务 3 协议
 
-**本任务由维护者手工执行（非 agent）。执行节奏（每文件一个 checkpoint）：**
+本任务由维护者手工执行（非 agent）。执行节奏（每文件一个 checkpoint）：
 
-- [ ] **Step 1: mctt.cr**——术语/上下文的数据结构与辅助函数；对照 kernel-spec.md 的构造子清单；`./build/corec check` 通过后进入下一步
-- [ ] **Step 2: subst.cr**——显式替换语义（对照 spec 的替换规则）；用 term_io 造测试项冒烟（如案卷 18/19/20 的替换项），`./build/corec run` 通过
-- [ ] **Step 3: nbe.cr**——求值 + 读出（对照 spec 的 NbE 结构）；冒烟：`convert` 案卷 14/24 语义
-- [ ] **Step 4: subtype.cr**——子类型判定（案卷 11/12/13 冒烟）
-- [ ] **Step 5: check.cr**——双向类型检查（案卷 1–10、16–17 冒烟）
-- [ ] **Step 6: kernel_main.cr**——CLI 接线 + 协议输出；`./build/corec build src/kernel/kernel_main.cr -o build/kernel --static` 成功
-- [ ] **Step 7: 全案卷自跑**——`./build/kernel tests/kernel/cases/corpus_manual.txt` 无崩溃；输出与人工预期目测一致即可（正式对拍在 Task 7）
-- [ ] **Step 8: 提交**
+- [ ] 步骤 1：mctt.cr，术语与上下文的数据结构和辅助函数；对照 kernel-spec.md 的构造子清单；`./build/corec check` 通过后进入下一步
+- [ ] 步骤 2：subst.cr，显式替换语义（对照 spec 的替换规则）；用 term_io 造测试项快速验证（如案卷 18/19/20 的替换项），`./build/corec run` 通过
+- [ ] 步骤 3：nbe.cr，求值与读出（对照 spec 的 NbE 结构）；快速验证测试：`convert` 案卷 14/24 语义
+- [ ] 步骤 4：subtype.cr，子类型判定（案卷 11/12/13 快速验证）
+- [ ] 步骤 5：check.cr，双向类型检查（案卷 1–10、16–17 快速验证）
+- [ ] 步骤 6：kernel_main.cr，CLI 接线与协议输出；`./build/corec build src/kernel/kernel_main.cr -o build/kernel --static` 成功
+- [ ] 步骤 7：全案卷自行运行，`./build/kernel tests/kernel/cases/corpus_manual.txt` 无崩溃；输出与人工预期目测一致即可（正式差分比对在任务 7）
+- [ ] 步骤 8：提交
 
 ```bash
-cd /home/DslsDZC/core && jj commit -m "src: McTT→Core 内核移植（mctt/subst/nbe/subtype/check/main）"
+cd /home/DslsDZC/core && jj commit -m "src: McTT 到 Core 内核移植（mctt/subst/nbe/subtype/check/main）"
 ```
 
 ---
 
-### Task 7: 差分对拍 + 全绿验收
+### 任务 7：差分对拍 + 全部通过验收
 
-**Files:**
-- Create: `tests/kernel/run_diff.py`（三语料 × 两侧 → 逐行比对）
-- Create: `tests/kernel/expected/*.expected`（参考 harness 生成的期望值，静态固化）
+涉及文件：
+- 创建：`tests/kernel/run_diff.py`（三份语料与两侧实现，逐行比对）
+- 创建：`tests/kernel/expected/*.expected`（参考 harness 生成的期望值，静态固化）
 
-**Interfaces:**
-- Consumes: harness（Task 3）、语料（Task 4）、kernel_main（Task 6）
-- Produces: 差分报告；M1 完成判定
+接口：
+- 使用：harness（任务 3）、语料（任务 4）、kernel_main（任务 6）
+- 产出：差分报告；M1 完成判定
 
-- [ ] **Step 1: 生成期望值**
+- [ ] 步骤 1：生成期望值
 
 ```bash
 cd ~/mctt/driver && for f in exhaustive random manual; do
@@ -523,9 +523,9 @@ done
 wc -l /home/DslsDZC/core/tests/kernel/expected/*.expected
 ```
 
-Expected: 行数与语料一致。
+预期：行数与语料一致。
 
-- [ ] **Step 2: 写 run_diff.py（exact code）**
+- [ ] 步骤 2：写 run_diff.py（exact code）
 
 ```python
 import subprocess, sys, pathlib
@@ -561,40 +561,40 @@ def main():
 main()
 ```
 
-- [ ] **Step 3: 跑对拍**
+- [ ] 步骤 3：运行差分比对
 
 ```bash
 cd /home/DslsDZC/core && python3 tests/kernel/run_diff.py
 ```
 
-Expected 第一轮：`fail > 0`（Core 侧尚未对齐）。逐类排查：
-- 两侧都 ≠ 期望 → 期望固化问题（回到 Step 1 检查 harness 输出）
-- 仅 Core ≠ 期望 → 内核 bug：对照 kernel-spec.md 对应规则修复（用户或 agent 协作定位，差分失败行即线索）
+预期第一轮：`fail > 0`（Core 侧尚未对齐）。逐类排查：
+- 两侧都不等于期望时，属于期望固化问题（回到步骤 1 检查 harness 输出）
+- 仅 Core 不等于期望时，属于内核 bug：对照 kernel-spec.md 的对应规则修复（用户或 agent 协作定位，差分失败行即线索）
 
-- [ ] **Step 4: 修复至全绿**
+- [ ] 步骤 4：修复至全部通过
 
-循环：修 → 重跑 → 直到 `total=… ok=… fail=0`。注意规则：**不许改期望值迁就 Core**——期望 = McTT ground truth，唯一可改的是内核。
+循环执行：修改、重新运行，直到 `total=… ok=… fail=0`。注意规则：不许改期望值迁就 Core。期望 = McTT ground truth，唯一可改的是内核。
 
-- [ ] **Step 5: 验收清单**
+- [ ] 步骤 5：验收清单
 
-- [ ] 穷举层全绿（corpus_exhaustive）
-- [ ] 随机 ≥ 1000 条全绿（corpus_random = 1200）
-- [ ] 案卷 ≥ 20 条全绿（corpus_manual = 25）
-- [ ] `docs/verifier/kernel-spec.md` 与 Rocq 源码逐规则对应（Task 2 完成时已核）
+- [ ] 穷举层全部通过（corpus_exhaustive）
+- [ ] 随机 ≥ 1000 条全部通过（corpus_random = 1200）
+- [ ] 案卷 ≥ 20 条全部通过（corpus_manual = 25）
+- [ ] `docs/verifier/kernel-spec.md` 与 Rocq 源码逐规则对应（任务 2 完成时已核）
 - [ ] 理论范围无增删（Π + ℕ + 累积宇宙 + NbE + 显式替换）
 
-- [ ] **Step 6: 提交并记录**
+- [ ] 步骤 6：提交并记录
 
 ```bash
-cd /home/DslsDZC/core && jj commit -m "tests: 差分对拍全绿——M1 内核完成（McTT 验证继承落地）"
+cd /home/DslsDZC/core && jj commit -m "tests: 差分对拍全部通过，M1 内核完成（McTT 验证继承实施）"
 ```
 
-在 `docs/verifier/kernel-spec.md` 头部追加「M1 完成：差分全绿 N 条（日期）」一行（先改后提交，随 Step 6 一起提交）。
+在 `docs/verifier/kernel-spec.md` 头部追加「M1 完成：差分全部通过 N 条（日期）」一行（先改后提交，随步骤 6 一起提交）。
 
 ---
 
-## Self-Review 记录
+## 执行前自查记录
 
-- **Spec 覆盖**：设计文档 §三架构 → Task 5/6；§四分工 → 各任务分工注记；§五数据流/格式 → Task 3 协议 + Task 7；§六语料 → Task 4；§七错误处理 → Task 3/5 实现约定；§八里程碑 → Task 1–7 一一对应；§九验收 → Task 7 Step 5。
-- **占位符**：Task 3 harness 的具体接线留作侦查后确定（Step 2 有明确侦查命令与验收标准，非 TBD）；Task 5 解析函数体标注「执行中补齐」但测试先行、协议固定——已尽量收紧。
-- **类型一致性**：协议格式在 Task 3 定死，Task 4/5/6/7 全部引用同一协议；kind 常量在 Task 5 定义，Task 6 消费；`kernel_parse`/`kernel_print` 签名跨 Task 5→6 一致；`harness.exe` 路径跨 Task 3→7 一致。
+- 规格覆盖：设计文档第三节架构对应任务 5/6；第四节分工对应各任务的分工注记；第五节数据流与格式对应任务 3 协议和任务 7；第六节语料对应任务 4；第七节错误处理对应任务 3/5 的实现约定；第八节阶段对应任务 1–7；第九节验收对应任务 7 步骤 5。
+- 占位符：任务 3 harness 的具体接线留到侦查后确定（步骤 2 有明确的侦查命令与验收标准，不是 TBD）；任务 5 的解析函数体标注为「执行中补齐」，但测试先行、协议固定，已尽量收紧。
+- 类型一致性：协议格式在任务 3 固定，任务 4/5/6/7 全部引用同一协议；kind 常量在任务 5 定义，任务 6 使用；`kernel_parse`/`kernel_print` 的签名在任务 5 到任务 6 之间一致；`harness.exe` 路径在任务 3 到任务 7 之间一致。

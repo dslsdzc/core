@@ -6,10 +6,10 @@
 
 ## 核心原则
 
-- **不需要 trait bounds / where 子句 / 关联类型**：类型检查不通过的用法在 monomorphization 时报错，报错路径与普通函数一致。
-- **自动推导**：`identity(42)` → `T = int`，不需要写 `identity<int>(42)`。
-- **Monomorphization 是编译期展开**：每次实例化产生独立函数/结构体，后端不感知泛型。
-- **零运行时开销**：特化后的代码和手写具体类型版本完全一样。
+- 不需要 trait bounds、where 子句或关联类型：类型检查不通过的用法在 monomorphization 时报错，报错路径与普通函数一致。
+- 自动推导：`identity(42)` 推导出 `T = int`，不需要写 `identity<int>(42)`。
+- Monomorphization 是编译期展开：每次实例化产生独立函数或结构体，后端不感知泛型。
+- 零运行时开销：特化后的代码和手写具体类型版本完全一样。
 
 ## 用户语法
 
@@ -59,38 +59,39 @@ x := b.get()  // T = int
 |------|------|--------|
 | `parser.cr` | 解析 `<T, U>` 语法 | ~30 行 |
 | `checker.cr` | 泛型参数注册、类型替换 | ~200 行 |
-| `monomorph.cr` | **新建**：实例表管理、特化生成 | ~200 行 |
+| `monomorph.cr` | 新建：实例表管理、特化生成 | ~200 行 |
 | `ir_gen.cr` | 调用特化版本 | ~20 行 |
 | 测试 | 泛型函数/结构体/方法/多参数 | ~80 行 |
 
-### 1. 解析器（`parser.cr`）
+### 解析器（`parser.cr`）
 
 在 `parse_fn` 中识别 `fn name<T, U>(...)`：
 
 ```
-解析 fn 关键字 → 解析函数名 → cur_tok 为 < → 进入泛型参数列表
-  loop: 解析 T_IDENT → 注册为 GENERIC_PARAM → 检查 T_COMMA 继续 → T_GT 结束
+解析 fn 关键字，解析函数名，cur_tok 为 < 时进入泛型参数列表
+  loop: 解析 T_IDENT，注册为 GENERIC_PARAM，检查 T_COMMA 继续，T_GT 结束
 ```
 
-在 `parse_struct` 中同理处理 `struct Box<T>`。
+在 `parse_struct` 中同样处理 `struct Box<T>`。
 
 在 `parse_type` 中处理 `Box<int>`（泛型类型的显式特化）：
 
 ```
-解析类型名 → cur_tok 为 < → 解析类型参数列表 → 创建 TYP_GENERIC_APPLY
+解析类型名，cur_tok 为 < 时解析类型参数列表，创建 TYP_GENERIC_APPLY
 ```
 
-### 2. 类型检查器（`checker.cr`）
+### 类型检查器（`checker.cr`）
 
-**泛型参数注册**：遇到 `<T>` 时注册 `T` 为 `TYP_GENERIC_PARAM`，存储在符号表中。
+泛型参数注册：遇到 `<T>` 时注册 `T` 为 `TYP_GENERIC_PARAM`，存储在符号表中。
 
-**实例化**：当检测到 `identity(42)` 调用时：
+实例化：检测到 `identity(42)` 调用时：
+
 1. 检查函数是否有泛型参数。
-2. 从参数类型推导具体类型（`42` 是 `int` → `T = int`）。
+2. 从参数类型推导具体类型（`42` 是 `int`，所以 `T = int`）。
 3. 检查 `g_gen_instances` 缓存中是否已有 `identity<int>`。
 4. 如果没有，注册新实例，触发 monomorphization。
 
-**类型替换**：在实例化时将函数/结构体定义中所有 `T` 替换为具体类型。
+类型替换：在实例化时将函数或结构体定义中所有 `T` 替换为具体类型。
 
 ```core
 // 实例化 identity<int>:
@@ -98,7 +99,7 @@ x := b.get()  // T = int
 // 特化: fn identity$int(x: int) -> int { return x; }
 ```
 
-### 3. Monomorphization（`monomorph.cr`）— 新文件
+### Monomorphization（`monomorph.cr`，新文件）
 
 ```core
 // 实例表
@@ -119,13 +120,13 @@ fn gen_monomorphize(func_ni: int, type_args: string) -> int:
     // 4. 返回新函数索引
 ```
 
-### 4. IR 生成（`ir_gen.cr`）
+### IR 生成（`ir_gen.cr`）
 
 在 `gen_expr` 的 `EXPR_CALL` 处理中：
 
 ```core
-// 调用普通函数 → 已有逻辑
-// 调用泛型函数 → 查找/创建特化版本 → 调用特化版本
+// 调用普通函数，走已有逻辑
+// 调用泛型函数，查找或创建特化版本，然后调用特化版本
 if is_generic_func(func_ni) {
     concrete_ni := gen_find_instance(func_ni, inferred_types);
     emit(IR_CALL, dest, first_arg, arg_count, concrete_ni, 0);
@@ -139,5 +140,5 @@ if is_generic_func(func_ni) {
 | 1 | `src/compiler/parser.cr` | parse_fn/parse_struct 处理 `<T>` + parse_type 处理 `Box<int>` |
 | 2 | `src/compiler/checker.cr` | GENERIC_PARAM 注册 + 调用时类型推导 + 类型替换 |
 | 3 | `src/compiler/monomorph.cr` | 新建：gen_find_instance + gen_monomorphize + 实例缓存 |
-| 4 | `src/compiler/ir_gen.cr` | 泛型调用 → 查实例表 → 调用特化版本 |
+| 4 | `src/compiler/ir_gen.cr` | 泛型调用：查实例表，调用特化版本 |
 | 5 | `tests/suite/gen_test.cr` | 泛型函数/结构体/多参数/方法测试 |

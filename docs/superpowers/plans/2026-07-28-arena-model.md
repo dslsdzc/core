@@ -1,17 +1,17 @@
 # Arena 内存模型实现计划
 
-> **受众**：执行本计划的 agentic worker。**必需子技能**：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
+> 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
 
-**目标**：将单一全局 bump 分配器替换为多 arena 系统——每个子图（function/loop/for/unsafe）持有独立 arena，分配自动使用当前 arena，子图退出时重置 arena 游标。
+目标：将单一全局 bump 分配器替换为多 arena 系统。每个子图（function/loop/for/unsafe）持有独立 arena，分配自动使用当前 arena，子图退出时重置 arena 游标。
 
-**架构**：三层结构——（1）Core 侧的 stdlib arena 生命周期（`arena.cr`）；（2）编译器在子图边界发射 `IR_ARENA_NEW`/`IR_ARENA_RESET`，并做编译期尺寸估算；（3）ELF 后端 `emit_alloc_body` 检查 `g_current_arena`，已设置时从 arena chunk 分配，未设置时回退到全局 bump。
+架构：三层结构：（1）Core 侧的 stdlib arena 生命周期（`arena.cr`）；（2）编译器在子图边界发射 `IR_ARENA_NEW`/`IR_ARENA_RESET`，并做编译期尺寸估算；（3）ELF 后端 `emit_alloc_body` 检查 `g_current_arena`，已设置时从 arena chunk 分配，未设置时回退到全局 bump。
 
-**技术栈**：Core 语言（自举编译器）、x86-64 ELF 后端、GNU as（rt.s）
+技术栈：Core 语言（自举编译器）、x86-64 ELF 后端、GNU as（rt.s）
 
 ## 全局约束
 
-- 无固定 `MAX_ARENAS` 上限——元数据数组为动态数组（与 `g_df_nodes` 同机制）
-- `alloc()` API 不变——arena 感知对调用方透明
+- 无固定 `MAX_ARENAS` 上限，元数据数组为动态数组（与 `g_df_nodes` 同机制）
+- `alloc()` API 不变，arena 感知对调用方透明
 - `g_current_arena = -1` 保留既有全局 bump 行为
 - 生命周期管理全部位于 Core 代码（`arena.cr`）；汇编仅承担 bump 路径
 - 新增 IR opcode：`IR_ARENA_NEW = 32`、`IR_ARENA_RESET = 33`
@@ -22,13 +22,13 @@
 
 ### 任务 1：BSS 扩展（rt.s）
 
-**涉及文件：**
+涉及文件：
 - 修改：`src/runtime/rt.s`
 
-**接口：**
+接口：
 - 产出：`g_current_arena`（BSS，8 字节）、`g_arena_pool_data`（BSS，8 字节）、`g_arena_free_list`（BSS，8 字节）
 
-- [ ] **步骤 1：新增 arena BSS 变量**
+- [ ] 步骤 1：新增 arena BSS 变量
 
 在 `src/runtime/rt.s` 中定位 `.bss` 段，在 `.balign 4096` 之后、`heap_ptr` 之前新增：
 
@@ -43,7 +43,7 @@ heap_start: .space 1024 * 1024 * 1024
 heap_end:
 ```
 
-- [ ] **步骤 2：在 _start 中初始化新增全局变量**
+- [ ] 步骤 2：在 _start 中初始化新增全局变量
 
 在 `_start` 中既有 `heap_ptr` 初始化（`lea rax, [rip + heap_start]; lea r10, [rip + heap_ptr]; mov [r10], rax`）之后新增：
 
@@ -59,12 +59,12 @@ heap_end:
     mov [r10], rax
 ```
 
-- [ ] **步骤 3：校验汇编**
+- [ ] 步骤 3：校验汇编
 
 命令：`as -o /tmp/rt.o src/runtime/rt.s`
 预期：无错误。
 
-- [ ] **步骤 4：提交**
+- [ ] 步骤 4：提交
 
 ```bash
 git add src/runtime/rt.s
@@ -75,15 +75,15 @@ git commit -m "feat: add arena BSS globals (g_current_arena, g_arena_pool_data, 
 
 ### 任务 2：新增 IR Opcode（ast.cr、dataflow.cr、opt.cr）
 
-**涉及文件：**
+涉及文件：
 - 修改：`src/compiler/ast.cr`
 - 修改：`src/compiler/dataflow.cr`
 - 修改：`src/compiler/opt.cr`
 
-**接口：**
+接口：
 - 产出：`IR_ARENA_NEW = 32`、`IR_ARENA_RESET = 33`
 
-- [ ] **步骤 1：向 ast.cr 添加 opcode 常量**
+- [ ] 步骤 1：向 ast.cr 添加 opcode 常量
 
 定位 IR opcode 段（约第 526-530 行），在 `IR_YIELD` 之后新增：
 
@@ -92,7 +92,7 @@ IR_ARENA_NEW   : int = 32   // dest=arena_var, src1=size_estimate
 IR_ARENA_RESET : int = 33   // src1=arena_id (dest=-1)
 ```
 
-- [ ] **步骤 2：在 dataflow.cr 的 df_opcode_name 中登记**
+- [ ] 步骤 2：在 dataflow.cr 的 df_opcode_name 中登记
 
 定位 `fn df_opcode_name`，在 `IR_YIELD` 条目之后（约第 349 行）新增：
 
@@ -101,7 +101,7 @@ IR_ARENA_RESET : int = 33   // src1=arena_id (dest=-1)
     if opcode == IR_ARENA_RESET { return "arena_reset"; }
 ```
 
-- [ ] **步骤 3：在 dataflow.cr 的 df_connect_srcs 中登记**
+- [ ] 步骤 3：在 dataflow.cr 的 df_connect_srcs 中登记
 
 定位 `fn df_connect_srcs`（搜索其定义）。在函数结尾之前追加：
 
@@ -110,7 +110,7 @@ IR_ARENA_RESET : int = 33   // src1=arena_id (dest=-1)
     if opcode == IR_ARENA_RESET { df_use_var(nid, s1); return; }
 ```
 
-- [ ] **步骤 4：在 opt.cr 优化循环中跳过**
+- [ ] 步骤 4：在 opt.cr 优化循环中跳过
 
 定位 `opt.cr` 的主优化循环（搜索 `if op == IR_` 分支）。新增：
 
@@ -121,7 +121,7 @@ IR_ARENA_RESET : int = 33   // src1=arena_id (dest=-1)
 
 同时检查 `resolve.cr` 中是否存在 opcode 分支；若存在则补充跳过分支。
 
-- [ ] **步骤 5：提交**
+- [ ] 步骤 5：提交
 
 ```bash
 git add src/compiler/ast.cr src/compiler/dataflow.cr src/compiler/opt.cr
@@ -132,10 +132,10 @@ git commit -m "feat: add IR_ARENA_NEW(32) and IR_ARENA_RESET(33) opcodes"
 
 ### 任务 3：CCR 序列化（ccr_io.cr）
 
-**涉及文件：**
+涉及文件：
 - 修改：`src/compiler/ccr_io.cr`
 
-- [ ] **步骤 1：添加 save_ccr 分支**
+- [ ] 步骤 1：添加 save_ccr 分支
 
 定位 `fn save_ccr` 中的指令写入循环（opcode 分发处），在 YIELD 分支之后新增：
 
@@ -162,7 +162,7 @@ git commit -m "feat: add IR_ARENA_NEW(32) and IR_ARENA_RESET(33) opcodes"
     }
 ```
 
-- [ ] **步骤 2：添加 load_ccr 分支**
+- [ ] 步骤 2：添加 load_ccr 分支
 
 定位 `fn load_ccr` 中的指令读取循环，在 YIELD 分支之后新增：
 
@@ -189,7 +189,7 @@ git commit -m "feat: add IR_ARENA_NEW(32) and IR_ARENA_RESET(33) opcodes"
     }
 ```
 
-- [ ] **步骤 3：提交**
+- [ ] 步骤 3：提交
 
 ```bash
 git add src/compiler/ccr_io.cr
@@ -198,16 +198,16 @@ git commit -m "feat: save/load IR_ARENA_NEW and IR_ARENA_RESET in ccr_io"
 
 ---
 
-### 任务 4：Stdlib——arena.cr
+### 任务 4：Stdlib 的 arena.cr
 
-**涉及文件：**
+涉及文件：
 - 重写：`src/stdlib/arena.cr`
 
-**接口：**
+接口：
 - 全局变量：`g_current_arena`、`g_arena_cursors`、`g_arena_sizes`、`g_arena_parents`、`g_arena_pool_data`、`g_arena_max_size`、`g_arena_free_list`、`g_arena_count`、`g_arena_cap`
 - 函数：`arena_init(pool_size, arena_size)`、`arena_new() -> int`、`arena_reset(ai)`、`arena_avail(ai) -> int`
 
-- [ ] **步骤 1：编写 arena.cr**
+- [ ] 步骤 1：编写 arena.cr
 
 ```core
 // Arena memory model — per-subgraph bump allocator.
@@ -335,14 +335,14 @@ fn arena_avail(ai: int) -> int:
     return limit - cursor
 ```
 
-- [ ] **步骤 2：类型检查**
+- [ ] 步骤 2：类型检查
 
 命令：`./build/corec check src/stdlib/arena.cr`
-预期：无编译错误。（若报全局变量相关错误，确认 `arena.cr` 的全局变量已注册——参见 CLAUDE.md 的 Known Issues 中关于未注册全局变量的记录。）
+预期：无编译错误。（若报全局变量相关错误，确认 `arena.cr` 的全局变量已注册，参见 CLAUDE.md 的 Known Issues 中关于未注册全局变量的记录。）
 
 若出现全局变量注册相关错误，将 arena 全局变量加入 parser 的全局注册表（做法与 CLAUDE.md 记录的 tokenizer 全局注册问题相同）。
 
-- [ ] **步骤 3：提交**
+- [ ] 步骤 3：提交
 
 ```bash
 git add src/stdlib/arena.cr
@@ -353,10 +353,10 @@ git commit -m "feat: arena lifecycle allocator — init/new/reset with dynamic m
 
 ### 任务 5：IR Gen 集成（ir_gen.cr）
 
-**涉及文件：**
+涉及文件：
 - 修改：`src/compiler/ir_gen.cr`
 
-- [ ] **步骤 1：添加子图级 arena 跟踪全局变量**
+- [ ] 步骤 1：添加子图级 arena 跟踪全局变量
 
 在 `ir_gen.cr` 顶部（注释块之后）新增：
 
@@ -394,7 +394,7 @@ fn grow_sg_arena_var(needed: int):
     g_sg_arena_var_cap = nc
 ```
 
-- [ ] **步骤 2：添加 sg_alloc_push/pop 与 track_alloc_size**
+- [ ] 步骤 2：添加 sg_alloc_push/pop 与 track_alloc_size
 
 ```core
 fn sg_alloc_push(kind: int):
@@ -415,7 +415,7 @@ fn track_alloc_size(size: int):
         w64(g_sg_alloc_total, (g_sg_count - 1) * 8, old + size)
 ```
 
-- [ ] **步骤 3：在 ir_gen_func 的函数入口与出口接入 arena**
+- [ ] 步骤 3：在 ir_gen_func 的函数入口与出口接入 arena
 
 在 `ir_gen_func` 中定位 body 生成的起点，替换 `sg_push(kind)` 的调用模式。该函数本身不直接调用 `sg_push`（由 `df_begin_func` 调用），arena 生命周期需加在函数 body 外围。
 
@@ -454,7 +454,7 @@ fn track_alloc_size(size: int):
     sg_alloc_pop();
 ```
 
-- [ ] **步骤 4：在 loop/for/unsafe 边界接入 arena**
+- [ ] 步骤 4：在 loop/for/unsafe 边界接入 arena
 
 定位 `ir_gen.cr` 中既有的 `sg_push`/`sg_pop` 调用点。
 
@@ -497,7 +497,7 @@ UNSAFE（约第 1005 行）：
     sg_alloc_pop();
 ```
 
-- [ ] **步骤 5：将 track_alloc_size 接入全部 ALLOC 指令发射点**
+- [ ] 步骤 5：将 track_alloc_size 接入全部 ALLOC 指令发射点
 
 `track_alloc_size` 可在各 ALLOC 发射点分别调用，也可在 `emit()` 内统一调用。选定位置为 `emit()` 内部：写入指令之后判断 opcode 是否为 ALLOC 变体，是则记录尺寸。
 
@@ -515,7 +515,7 @@ UNSAFE（约第 1005 行）：
         track_alloc_size(src1 * 8)
 ```
 
-- [ ] **步骤 6：提交**
+- [ ] 步骤 6：提交
 
 ```bash
 git add src/compiler/ir_gen.cr
@@ -524,12 +524,12 @@ git commit -m "feat: ir_gen arena lifecycle — sg_alloc_push/pop, size estimati
 
 ---
 
-### 任务 6：ELF 后端——emit_alloc_body 双路径（elf.cr）
+### 任务 6：ELF 后端的 emit_alloc_body 双路径（elf.cr）
 
-**涉及文件：**
+涉及文件：
 - 修改：`src/arch/linux/ld/elf.cr`
 
-- [ ] **步骤 1：阅读现有 emit_alloc_body**
+- [ ] 步骤 1：阅读现有 emit_alloc_body
 
 阅读 `emit_alloc_body` 现有实现（`elf.cr` 中约第 23-84 行），其结构如下：
 - 发射 `_start` 初始化代码
@@ -538,7 +538,7 @@ git commit -m "feat: ir_gen arena lifecycle — sg_alloc_push/pop, size estimati
 - 以 `rep stosb` 清零内存
 - 写入长度头，返回数据指针
 
-- [ ] **步骤 2：改写 emit_alloc_body 为双路径**
+- [ ] 步骤 2：改写 emit_alloc_body 为双路径
 
 改写 `emit_alloc_body` 函数体，在入口处检查 `g_current_arena`。新逻辑如下：
 
@@ -653,7 +653,7 @@ emit_alloc_body:
 
 实际发射使用 `w8(buf, pos+cp, byte)` 等原语，遵循既有模式。
 
-- [ ] **步骤 3：更新阶段 2 尺寸估算中 emit_alloc_body 的返回签名**
+- [ ] 步骤 3：更新阶段 2 尺寸估算中 emit_alloc_body 的返回签名
 
 在 `elf_gen` 中预计算 `emit_alloc_body` 尺寸的位置（现为硬编码 84 字节），上调估算尺寸以容纳扩展后的函数（约为原值的两倍，约 160-180 字节）。
 
@@ -661,7 +661,7 @@ emit_alloc_body:
     total_code = total_code + 180;  // arena-aware alloc body
 ```
 
-- [ ] **步骤 4：提交**
+- [ ] 步骤 4：提交
 
 ```bash
 git add src/arch/linux/ld/elf.cr
@@ -670,14 +670,14 @@ git commit -m "feat: emit_alloc_body dual-path arena alloc + chain expansion fal
 
 ---
 
-### 任务 7：ELF 后端——arena NEW/RESET 编码（instr.cr、resolve.cr）
+### 任务 7：ELF 后端的 arena NEW/RESET 编码（instr.cr、resolve.cr）
 
-**涉及文件：**
+涉及文件：
 - 修改：`src/arch/linux/ld/instr.cr`
 - 修改：`src/arch/linux/ld/elf.cr`（新增 `arena_new_impl` / `arena_reset_impl` 发射）
 - 修改：`src/arch/linux/ld/resolve.cr`
 
-- [ ] **步骤 1：向 instr.cr 添加 IR_ARENA_NEW 编码**
+- [ ] 步骤 1：向 instr.cr 添加 IR_ARENA_NEW 编码
 
 定位 `instr.cr` 的主指令编码函数（IR opcode 分发处，约 `if op == IR_ALLOC` 段），在末尾 `return cp` 之前新增：
 
@@ -698,7 +698,7 @@ git commit -m "feat: emit_alloc_body dual-path arena alloc + chain expansion fal
     }
 ```
 
-- [ ] **步骤 2：向 instr.cr 添加 IR_ARENA_RESET 编码**
+- [ ] 步骤 2：向 instr.cr 添加 IR_ARENA_RESET 编码
 
 ```core
     if op == IR_ARENA_RESET {
@@ -715,7 +715,7 @@ git commit -m "feat: emit_alloc_body dual-path arena alloc + chain expansion fal
 
 注：`e2_load_var(buf, pos+cp, 7, s1)` 将 IR 变量 `s1` 载入 rdi（`edi` 的编号为 7）。寄存器编号约定以 `instr.cr` 为准，发射代码须匹配调用约定（`rdi` = 第一个参数）。
 
-- [ ] **步骤 3：在 sizes.cr 中为新 opcode 添加尺寸估算**
+- [ ] 步骤 3：在 sizes.cr 中为新 opcode 添加尺寸估算
 
 定位 `src/arch/linux/ld/sizes.cr` 的指令尺寸函数，新增尺寸分支：
 
@@ -730,7 +730,7 @@ git commit -m "feat: emit_alloc_body dual-path arena alloc + chain expansion fal
     }
 ```
 
-- [ ] **步骤 4：向 elf.cr 添加 arena_new_impl / arena_reset_impl**
+- [ ] 步骤 4：向 elf.cr 添加 arena_new_impl / arena_reset_impl
 
 在 `elf.cr` 中（`emit_alloc_body` 之后）新增两个发射函数：
 
@@ -770,7 +770,7 @@ fn emit_arena_reset_impl(buf: string, pos: int) -> int:
     return 6
 ```
 
-- [ ] **步骤 5：在 elf_gen 中登记 arena_new_impl / arena_reset_impl**
+- [ ] 步骤 5：在 elf_gen 中登记 arena_new_impl / arena_reset_impl
 
 在 `elf_gen` 中，alloc body 发射及其偏移登记之后新增：
 
@@ -799,11 +799,11 @@ Phase 3（发射）中，在调用 `emit_alloc_body` 之后调用新增的发射
     cp = cp + emit_arena_reset_impl(buf, cp);
 ```
 
-- [ ] **步骤 6：在 resolve.cr 标签解析中处理新 opcode**
+- [ ] 步骤 6：在 resolve.cr 标签解析中处理新 opcode
 
 在 `resolve.cr` 中确认各标签相关 pass 跳过新增 opcode（新增 opcode 不使用标签）。
 
-- [ ] **步骤 7：提交**
+- [ ] 步骤 7：提交
 
 ```bash
 git add src/arch/linux/ld/instr.cr src/arch/linux/ld/elf.cr src/arch/linux/ld/sizes.cr src/arch/linux/ld/resolve.cr
@@ -814,10 +814,10 @@ git commit -m "feat: ELF backend arena_new/reset opcode encoding + impl stubs"
 
 ### 任务 8：测试
 
-**涉及文件：**
+涉及文件：
 - 创建：`tests/suite/arena_test.cr`
 
-- [ ] **步骤 1：编写 arena 生命周期测试**
+- [ ] 步骤 1：编写 arena 生命周期测试
 
 ```core
 // Arena memory model test suite
@@ -927,13 +927,13 @@ fn main() -> int:
     return 0
 ```
 
-- [ ] **步骤 2：以解释器运行测试**
+- [ ] 步骤 2：以解释器运行测试
 
 ```bash
 ./build/corec run -f tests/suite/arena_test.cr
 ```
 
-（注：`-f` 标志可能不存在——`run` 子命令接受文件路径或内联代码，正确语法以 `./build/corec --help` 为准。）
+（注：`-f` 标志可能不存在。`run` 子命令接受文件路径或内联代码，正确语法以 `./build/corec --help` 为准。）
 
 若 `run` 命令不支持导入 stdlib 文件，改用：
 ```bash
@@ -944,7 +944,7 @@ echo $?
 
 或将 arena 代码直接内联进测试文件（不使用 `import`），直接以解释器测试。
 
-- [ ] **步骤 3：运行既有测试确认无回归**
+- [ ] 步骤 3：运行既有测试确认无回归
 
 ```bash
 python3 tests/bootstrap/test_pipeline.py
@@ -953,7 +953,7 @@ python3 tests/selfhost/test_compile.py
 
 预期：既有测试全部通过（非 arena 测试不会触发 arena 代码路径）。
 
-- [ ] **步骤 4：提交**
+- [ ] 步骤 4：提交
 
 ```bash
 git add tests/suite/arena_test.cr

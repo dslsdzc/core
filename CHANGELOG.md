@@ -1,27 +1,27 @@
 # 更新日志
 
-> 说明：本文档记录里程碑级变更。近期每日开发流水、预存 bug 与架构规划以 `TODO.md` 为准。
+> 说明：本文档记录重要变更。近期每日开发记录、预存 bug 与架构规划以 `TODO.md` 为准。
 > 2026-06-21 至 2026-07-23 之间曾存在文档缺失期，以下条目按提交历史与 `TODO.md` 补齐。
 
 ## 2026-09-17
 ### [change] `@no_bounds_check` 更名为 `@NoBoundsCheck`
-- 维护者 2026-09-17 指示的重命名。**干净重命名，不留别名**：旧名 `@no_bounds_check` 从此**不是内建**——
-  必须**响亮失败**（`error[N01] unknown @ builtin`：rc=1 + 文件:行:列定位 + 零产物），**不得静默接受**。
-- 名分派四处同步：`src/compiler/checker.cr`（EXPR_AT 名分派）· `src/compiler/ir_gen.cr`（注解发射）·
-  `src/compiler/dataflow.cr`（`.cir` 显示名）· `src/lsp/analysis.cr`（`@` 补全表）。语料/探针同步：
-  `tests/suite/at_test.cr` · `tests/suite/at_test_mini7.cr` · `tests/probes/p_annots{,2}.cr`（+ 探针 README 表）。
-- **IR 操作码常量 `IR_NO_BOUNDS_CHECK(35)` 不变**（内部标识、非语言面名字；改名 = 无谓 churn）。
-  发射面零变化：改名前后的语料 ELF **逐字节同**（仅 `.ccr` 的 STR 段因源文本标识符驻留而变）。
-- 回归判据 = `tests/selfhost/test_at_rename.py`（14 例，已挂 `selfhost-tests`）：旧名三面（build/check/run）
-  响亮失败 + 新名两形态等价 + 两条入仓语料运行 + `.cir` 显示名（括号形态有行 / 语句形态零 IR = F4 语义保持）
-  + 分派点四处同步守门 + 操作码 35 钉。
+- 维护者 2026-09-17 指示的重命名。完全重命名，不保留别名：旧名 `@no_bounds_check` 从此不是内建，
+  必须报错（`error[N01] unknown @ builtin`：rc=1，带文件:行:列定位，零产物），不得不报错地接受。
+- 名称分派在四处同步：`src/compiler/checker.cr`（EXPR_AT 名分派）、`src/compiler/ir_gen.cr`（注解发射）、
+  `src/compiler/dataflow.cr`（`.cir` 显示名）、`src/lsp/analysis.cr`（`@` 补全表）。语料和探针同步：
+  `tests/suite/at_test.cr`、`tests/suite/at_test_mini7.cr`、`tests/probes/p_annots{,2}.cr`（另加探针 README 表）。
+- IR 操作码常量 `IR_NO_BOUNDS_CHECK(35)` 不变（内部标识，不是语言层面的名字，改名只会增加无谓改动）。
+  发射面没有变化：改名前后的语料 ELF 逐字节相同（只有 `.ccr` 的 STR 段因源文本标识符驻留而变化）。
+- 回归检查是 `tests/selfhost/test_at_rename.py`（14 例，已挂 `selfhost-tests`）：旧名在 build、check、run
+  三个面都报错，新名两种形态等价，两条入仓语料可以运行，`.cir` 显示名正确（括号形态有行，语句形态零 IR，
+  F4 语义保持），四个分派点同步，操作码固定为 35。
 
 ## 2026-07-31
-### [feat] concurrency end-to-end — goroutine spawn, function address, result channels
-- `go f(args)` 端到端打通：`sched_go(@addr(f), arg)` → g_new 存 saved_fn/saved_arg → ELF 后端内联发射 fiber_init/fiber_switch/goroutine_entry_wrapper → wrapper 调用 saved_fn(saved_arg) → 结果经 result_ch 回传。
+### [feat] concurrency end-to-end: goroutine spawn, function address, result channels
+- `go f(args)` 端到端连接：`sched_go(@addr(f), arg)` 调用 g_new 存 saved_fn/saved_arg，ELF 后端内联发射 fiber_init/fiber_switch/goroutine_entry_wrapper，wrapper 调用 saved_fn(saved_arg)，结果经 result_ch 回传。
 - 函数地址支持：IR_FNADDR + `@addr` 内建（checker/ir_gen/ELF 后端全链路）。
 - 并发集成：g_set_curg/g_get_curg 桥接 + M worker 线程池接线。
-- 主线程注册为 G 0，可经 channel 阻塞/唤醒；sched_yield 不再重排 Gwaiting。
+- 主线程注册为 G 0，可经 channel 阻塞/恢复执行；sched_yield 不再重排 Gwaiting。
 - 多 M 线程完整验证仍待补（见 `TODO.md` 预存 bug 第 2 条）。
 
 ## 2026-07-30
@@ -41,7 +41,7 @@
 
 ## 2026-07-28
 ### [feat] arena memory model, @ builtins, incremental cache, hotpatch, pointer-model passes
-- Arena 内存模型完整实现（`src/stdlib/arena.cr`）：init/new/reset 生命周期、动态元数据、free list、嵌套；IR 子图绑定（函数/loop/for/unsafe 自动 arena）；ELF 双路径 alloc（arena 感知 + 全局 bump 回退）；IR_ARENA_NEW(32)/IR_ARENA_RESET(33) 编码；mmap 堆扩展（BSS 打满自动 mmap 1GB）。
+- Arena 内存模型完整实现（`src/stdlib/arena.cr`）：init/new/reset 生命周期、动态元数据、free list、嵌套；IR 子图绑定（函数/loop/for/unsafe 自动 arena）；ELF 双路径 alloc（arena 感知 + 全局 bump 回退）；IR_ARENA_NEW(32)/IR_ARENA_RESET(33) 编码；mmap 堆扩展（BSS 用满后自动 mmap 1GB）。
 - `@` 内建原语 12 个已全部实现：`@sizeOf/@alignOf/@fields/@hasField/@field/@typeInfo/@comptime/@inline/@no_bounds_check/@fast/@unroll/@section`（后增 `@addr`、`@hotpatch`，见 07-31/07-30）。
 - 增量缓存（函数级 .cir，默认开启）：`cir_cache.cr` save/load 每函数快照，`clean-cache` 子命令。
 - `@hotpatch` 滚动更新：IR_HOTPATCH_ROUTE(39) + parser `@hotpatch(ver=N)` + checker 多版本签名校验 + ELF 编码 + SIGHUP 信号处理。
@@ -61,11 +61,11 @@
 - Fix REX/ModRM/SIB encoding for variable array index loads and stores.
 - Add native ELF regression coverage for aggregate access at O0/O1.
 - Verify clean corec -> corec2 -> corec3 bootstrap at O0 and O1.
-- **corec2 自举阻塞解除**：corec2 --help、tokenizer/check 和 corec2→corec3 均正常；O0/O1 自举均成功。
+- corec2 自举阻塞解除：corec2 --help、tokenizer/check 和 corec2 到 corec3 构建均正常；O0/O1 自举均成功。
 
 ## 2026-07-26
 ### [fix] global variable registration fixes
-- `g_global_lets` 注册全局变量，不再扫描局部 EXPR_LET（修复全局变量丢失导致的静默赋值丢弃）。
+- `g_global_lets` 注册全局变量，不再扫描局部 EXPR_LET（修复全局变量丢失导致的不报错地赋值丢弃）。
 
 ## 2026-07-21
 ### [fix] local lets out of global IR
@@ -119,7 +119,7 @@
   - Add reference support: &T / &mut T in parser, checker, ir_gen, x86-64
 
 ## 2026-05-28
-### [rename] Rename .core→.cr, split compiler into corec (frontend) + corearch (backend)
+### [rename] Rename .core to .cr, split compiler into corec (frontend) + corearch (backend)
   Breaking changes:
 ### [docs] Update CLAUDE.md to reflect corec/corearch split
 ### [add] Add .ccr binary format specification and spec IR schema docs
@@ -142,7 +142,7 @@
 ### [fix] build_selfhost.py now works, use compile_source instead of compiler_main
   - build_selfhost.py: switch from compiler_main (needs file I/O via
 ### [fix] bump MAX_* limits to handle full token stream, fix interpreter int division and store8 for lists
-  - Bump all MAX_* constants to generous values (MAX_TOKENS 8192→65536,
+  - Bump all MAX_* constants to generous values (MAX_TOKENS 8192 改为 65536,
 
 ## 2026-06-13
 ### [fix] global var stack size, REX/SIB codegen, resolve_labels copy semantics, text assembly path removed, Chunk linker restored
@@ -155,7 +155,7 @@
   - All arrays converted to dynamic byte buffers (no MAX_* limits)
 ### [fix] remaining paren issues in dump.cr, corec + corearch build success
   - Rewrite ir_instr_str function with proper paren balancing
-### [fix] rename r8→bu8 to avoid x86 register conflict, ELF now produces binaries
+### [fix] rename r8 to bu8 to avoid x86 register conflict, ELF now produces binaries
   Known issue: name_idx in .ccr is off by 1 (first string index mismatch)
 ### [fix] use index comparison for main lookup
   - Replace str_get() comparison with direct index comparison in elf.cr
@@ -178,7 +178,7 @@
 
 ## 2026-06-15
 ### [feat] add diagnostic tool + __builtin_print/println ELF support
-  tools/diagnose.py — Python diagnostic tool that:
+  tools/diagnose.py：Python diagnostic tool that:
 ### [fix] reduce MAX_STRS to 131072, add diagnostic tool
   tools/diagnose.py - Python diagnostic wrapper for compilation pipeline.
 ### [debug] identify that g_ir_func_name_idx is allocated but then NULL at crash
@@ -205,7 +205,7 @@
 ### [revert] Revert "fix: ELF enum field offset, register allocation improvements"
   This reverts commit 5f38fe9be744266217bb28b44c1b08e2346835eb.
 ### [fix] MAKE_ENUM arch_instr_size, ELF enum offset check, reg alloc revert
-  - arch_instr_size: MAKE_ENUM 18→26 (fixes SIGILL in match)
+  - arch_instr_size: MAKE_ENUM 18 改为 26 (fixes SIGILL in match)
 ### [fix] ELF enum field offset works (match returns 42)
   Replace per-variable g_x86_is_enum check with global g_x86_is_enum_cap > 0.
 ### [fix] enum field offset driven by frontend, backend is pure translator
@@ -237,22 +237,22 @@
 ### [refactor] measure _start size via emit_start_size() instead of hardcoded 22
   - Extract _start emission into emit_start() function
 ### [refactor] instruction sizes via _size() functions (Hexagon pessimistic)
-### [fix] large-scale landmine cleanup — dynamic arrays, dynamic linking, instr fixes, va/offset bugs
+### [fix] large-scale latent-defect cleanup: dynamic arrays, dynamic linking, instr fixes, va/offset bugs
   - Converted all [int; N]/[string; N] arrays to dynamic string buffers
-### [docs] add hard rules — ban git, use jj, no bypassing, no reverting
+### [docs] add hard rules: ban git, use jj, no bypassing, no reverting
 
 ## 2026-06-18
-### [fix] 清理全部隐患 — CLI 子命令 + 6 个未初始化数组 + batch:= 解析 + 边界校验
+### [fix] 清理全部隐患：CLI 子命令 + 6 个未初始化数组 + batch:= 解析 + 边界校验
   CLI 重构：
-### [fix] 3 parser fixes — parse_primary advance_tok, local_stmts 256-limit, parse_for_expr C-style guard
-### [fix] string interpolation parser infinite loop on unterminated { — cli.cr crash root cause
+### [fix] 3 parser fixes: parse_primary advance_tok, local_stmts 256-limit, parse_for_expr C-style guard
+### [fix] string interpolation parser infinite loop on unterminated {: cli.cr crash root cause
 ### [fix] string interpolation infinite loop when { without }
 ### [fix] remove bogus string interpolation code + add multi-arg print/println to stdlib
-### [stdlib] io.cr with int_to_str, concat, print — prepare for string interpolation expansion
-### [stdlib] split io.cr → fmt.cr (pure) + io.cr (side effects)
+### [stdlib] io.cr with int_to_str, concat, print: prepare for string interpolation expansion
+### [stdlib] split io.cr into fmt.cr (pure) + io.cr (side effects)
 ### [refactor] remove __builtin_ prefix, split io.cr/fmt.cr, restructure runtime
 ### [fix] get_char/istr_get confusion, remove stale __builtin_ refs in fmt.cr
-### [fix] tok_lx get_char→istr_get (root cause of all SIGSEGV)
+### [fix] tok_lx get_char to istr_get (root cause of all SIGSEGV)
 ### [feat] variadic function syntax ...name:type + T_DOTDOTDOT token
 ### [feat] .so extension interface with SYM_SO_FN + variadic print expansion
 ### [fix] alloc heap init (init_globals offset bug) + str_intern vs ccr index mismatch
@@ -263,7 +263,7 @@
 ### [fix] call recording + ld.cr decls reorder + Phase 3 position override
 ### [fix] alloc_ni string lookup + call recording infrastructure
 ### [fix] reverse Phase 3 emission order + position override for backward calls
-### [fix] Python parser (ld.cr revert) + cp tracking for call patches + last-resort fix
+### [fix] Python parser (ld.cr revert) + cp tracking for call patches + fallback fix
 
 ## 2026-06-19
 ### [fix] alloc_size 58 (was 65) + Phase 2 stack size from g_ir_var_count
@@ -280,13 +280,13 @@
 ### [docs] replace Chinese bullets (·) with markdown standard (-)
   Markdown only recognizes -, *, + for unordered lists.
 ### [docs] fix remaining rendering issues
-  - project-book.md: space-aligned route table → pipe table
-### [docs] tone down chuunibyou conclusions
-  - dataflow-design.md: over-long dramatic conclusion → concise
+  - project-book.md: convert space-aligned route table to pipe table
+### [docs] tone down exaggerated conclusions
+  - dataflow-design.md: shorten over-long dramatic conclusion
 ### [docs] remove redundant 预期成果 section (duplicates language features)
 ### [docs] remove conversational/promotional language, maintain professional tone
-  - language-syntax.md: rewrite 设计哲学 from casual bullet points to factual statements; rename '为什么极其容易学习' → '设计要点'; reword all 7 points professionally
-### [feat] add Zed extension as submodule (zed → core-plugin-zed)
+  - language-syntax.md: rewrite 设计哲学 from casual bullet points to factual statements; rename '为什么极其容易学习' to '设计要点'; reword all 7 points professionally
+### [feat] add Zed extension as submodule (zed to core-plugin-zed)
   Core language support for Zed editor:
 ### [fix] replace hardcoded fn_name checks in interpreter with SYM_SO_FN lookup
 
@@ -298,13 +298,13 @@
 ### [fix] remove all hardcoded builtin names except syscall3
   - load8/store8/alloc/get_arg/load_str_ptr/store_str_ptr now registered
 ### [refactor] shorten verbose function names across codebase
-  - dyn_grow_* → grow_* (60+ functions)
+  - dyn_grow_* to grow_* (60+ functions)
 ### [fix] SO type_enc2 mod 100 loop was O(10^10) for encoded params
   The 'mod 100' loop subtracted 100 per iteration.
 ### [refactor] separate variadic and auto_str into independent handlers
-  handle_variadic: pure N-args→N-calls expansion, no type conversion
+  handle_variadic: pure N-args to N-calls expansion, no type conversion
 ### [refactor] remove variadic and auto_str from compiler, move to stdlib
-  dispatch_call now returns -1 for all calls — the compiler does
+  dispatch_call now returns -1 for all calls: the compiler does
 ### [feat] add runtime scheduler (dispatch table + trampolines)
   - src/scheduler/sched.cr: DispatchTable struct, create/set/get/dump
 ### [feat] runtime scheduler (dispatch table)
@@ -320,9 +320,9 @@
 ## 2026-06-21
 ### [fix] ext_rel Phase 0/2 contamination in elf_gen
   - external relocation entries from Phase 0 (res_labels) and Phase 2 (size
-    calculation) survived into Phase 3, because ext_rel was only reset at the
+    calculation) were still present in Phase 3, because ext_rel was only reset at the
     start of elf_gen (after Phase 0) but not before Phase 3 emission
-  - Phase 2 entries use dry-run buffer positions — when patch_relocs processes
+  - Phase 2 entries use dry-run buffer positions: when patch_relocs processes
     them alongside Phase 3 entries, they patch wrong code locations and corrupt
     the binary
   - Fix: add `g_x86_ext_rel_count = 0;` to the Phase 3 reset block alongside

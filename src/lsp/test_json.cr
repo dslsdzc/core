@@ -1,12 +1,13 @@
-// test_json.cr —— json.cr 自断言测试（TDD，Task 1）
-// 运行：./build/corec build src/lsp/test_json.cr -o /tmp/test_json --static && /tmp/test_json
-// 用例（brief Step 4）：
-//   1) 往返：{"a": 1, "b": [true, null, "x"]} → stringify == 规范紧凑形式
-//   2) 三层嵌套对象/数组
-//   3) 字符串转义 "a\"b\\c\nd" 往返 + \uXXXX 往返
-//   4) json_obj_get 链式取值
-//   5) 错误输入 { [1, "abc 123abc 空串 → parse 返回 -1
-//   6) 数字 -42 → J_NUM a=-42
+// test_json.cr: self-asserting tests for json.cr.
+// Build and run:
+// ./build/corec build src/lsp/test_json.cr -o /tmp/test_json --static && /tmp/test_json
+// Cases:
+// 1. round-trip an object with an array and literals;
+// 2. three levels of nested objects and arrays;
+// 3. string escapes and \uXXXX round-trip;
+// 4. chained json_obj_get;
+// 5. invalid inputs return -1;
+// 6. negative and boundary integer values.
 
 import json
 import fmt
@@ -23,7 +24,7 @@ fn t_expect(cond: bool, name: string):
         print("ok: ")
         println(name)
 
-// 解析 + 序列化往返：输出须等于规范紧凑形式
+// Parse and serialize; the output must equal the canonical compact form.
 fn check_roundtrip(text: string, canonical: string):
     idx := json_parse(text)
     t_expect(idx >= 0, "parse: " + text)
@@ -34,30 +35,30 @@ fn check_roundtrip(text: string, canonical: string):
             print("  got: ")
             println(out)
 
-// 非法输入必须返回 -1
+// Invalid input must return -1.
 fn check_bad(text: string):
     idx := json_parse(text)
     t_expect(idx < 0, "bad input rejected: " + text)
 
 fn main() -> int:
-    // 1. 往返：对象 + 数组 + 字面量
+    // Round-trip: object, array, and literals.
     check_roundtrip("{\"a\": 1, \"b\": [true, null, \"x\"]}",
         "{\"a\":1,\"b\":[true,null,\"x\"]}")
 
-    // 2. 三层嵌套对象/数组
+    // Three levels of nested objects and arrays.
     check_roundtrip("{\"a\": {\"b\": {\"c\": [1, 2, [3, 4]]}}}",
         "{\"a\":{\"b\":{\"c\":[1,2,[3,4]]}}}")
 
-    // 3. 字符串转义往返：\" \\ \n
+    // String escapes: quote, backslash, and newline.
     check_roundtrip("\"a\\\"b\\\\c\\nd\"", "\"a\\\"b\\\\c\\nd\"")
-    // \uXXXX：解析为码点，序列化输出大写十六进制
+    // \uXXXX escapes decode to code points and serialize as uppercase hex.
     check_roundtrip("\"\\u4e2d\\u00e9\"", "\"\\u4E2D\\u00E9\"")
     // UTF-16 surrogate pair becomes one Unicode scalar and round-trips in
     // the canonical JSON form.
     check_roundtrip("\"\\uD83D\\uDE00\"", "\"\\uD83D\\uDE00\"")
     check_roundtrip("\"a\\b\\f\\/\"", "\"a\\u0008\\u000C/\"")
 
-    // 4. json_obj_get：{"position": {"line": 3, "character": 7}} 取 line → 3
+    // json_obj_get: read line from a nested position object.
     root := json_parse("{\"position\": {\"line\": 3, \"character\": 7}}")
     t_expect(root >= 0, "obj_get: parse")
     pos := json_obj_get(root, "position")
@@ -67,14 +68,14 @@ fn main() -> int:
         "obj_get: line == 3")
     t_expect(json_obj_get(root, "nope") < 0, "obj_get: missing key -> -1")
 
-    // 5. 错误输入：{  [1,  "abc  123abc  空串
+    // Invalid inputs.
     check_bad("{")
     check_bad("[1,")
     check_bad("\"abc")
     check_bad("123abc")
     check_bad("")
 
-    // 6. 数字：-42 → J_NUM a=-42
+    // Numbers: negative values and signed 64-bit boundaries.
     n := json_parse("-42")
     t_expect(n >= 0 && json_get(n, 0) == J_NUM && json_get(n, 1) == -42,
         "num: -42 -> J_NUM a=-42")
@@ -105,7 +106,7 @@ fn main() -> int:
         ni = ni + 1
     check_bad(nested)
 
-    // 7. json_array_get：下标访问 + 越界
+    // json_array_get: indexed access and out-of-bounds rejection.
     a := json_parse("[10, 20]")
     e0 := json_array_get(a, 0)
     t_expect(e0 >= 0 && json_get(e0, 0) == J_NUM && json_get(e0, 1) == 10,

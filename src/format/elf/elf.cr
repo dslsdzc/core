@@ -1,13 +1,13 @@
-// === src/format/elf/elf.cr（格式轴：ELF 容器/段/phdr + elf_gen + allocator body；
-// 波 1 Task 1 迁入；_start 发射序 = OS 轴 src/os/linux/entry.cr，Task 2 迁出；
-// 函数帧（尺寸核算 + 序言/尾声/函数尾附加块）= 架构轴 src/arch/x86_64/frame.cr，
-// Task 3 抽出——本文件零帧尺寸计算（H2））===
-// Direct ELF binary output for x86-64 using the new resolve+emit interface.
-// Depends on: x86_64/instr.cr (instr_size, emit_instr, g2_*)
-// Depends on: x86_64/frame.cr (pf_frame_size, pf_frame_overhead, pf_prologue,
-//             pf_epilogue——Phase 2 dry-run 与 Phase 3 两处调用点;帧公式单源)
-// Depends on: backend/resolve.cr (res_labels)
-
+// === elf.cr ===
+// ELF container, sections, program headers, elf_gen, and the allocator body for
+// x86-64.
+//
+// The _start emission sequence is in src/os/linux/entry.cr. Function frames
+// (size accounting, prologue, epilogue, and tail blocks) are in
+// src/arch/x86_64/frame.cr; this file does not compute frame sizes.
+//
+// Depends on instr.cr for instruction sizes and emission, frame.cr for frame
+// layout, and backend/resolve.cr for labels.
 // ── ELF constants (x86-64) ──
 ET_EXEC : int = 2
 EM_X86_64 : int = 62
@@ -55,12 +55,12 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + 1
 
     // ── Part 1: Save original size + check arena (53 bytes) ──
-    // mov r9, rdi — 49 89 F9
+    // mov r9, rdi: 49 89 F9
     w8(buf, pos+cp, 73)
     w8(buf, pos+cp+1, 137)
     w8(buf, pos+cp+2, 249)
     cp = cp + 3
-    // lea r10, [rip + g_current_arena] — 4C 8D 15 (dest r10, not r8!)
+    // lea r10, [rip + g_current_arena]: 4C 8D 15 (dest r10, not r8!)
     rip_pos_ca := pos + cp + 3
     w8(buf, pos+cp, 76)
     w8(buf, pos+cp+1, 141)
@@ -71,18 +71,18 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos_ca)
     w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_current_arena)
     g_x86_rip_patch_count = g_x86_rip_patch_count + 1
-    // mov r10, [r10] — 4D 8B 12 (modrm 0x12: reg=010+R -> r10, rm=010+B -> [r10];
+    // mov r10, [r10]: 4D 8B 12 (modrm 0x12: reg=010+R -> r10, rm=010+B -> [r10];
     // old 0x10 had rm=100 which consumed a SIB byte and desynced the stream)
     w8(buf, pos+cp, 77)
     w8(buf, pos+cp+1, 139)
     w8(buf, pos+cp+2, 18)
     cp = cp + 3
-    // test r10, r10 — 4D 85 D2
+    // test r10, r10: 4D 85 D2
     w8(buf, pos+cp, 77)
     w8(buf, pos+cp+1, 133)
     w8(buf, pos+cp+2, 210)
     cp = cp + 3
-    // jl .Lglobal (no active arena → global bump path) — 0F 8C rel32, patched at Part 8
+    // jl .Lglobal (no active arena -> global bump path): 0F 8C rel32, patched at Part 8
     g_alloc_gl_jmp_pos = pos + cp
     w8(buf, pos+cp, 15)
     w8(buf, pos+cp+1, 140)
@@ -90,21 +90,21 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + 6
 
     // ── Compute chunk_start BEFORE loading the cursors pointer ──
-    // mul r10 clobbers rdx:rax — if rdx already held the cursors pointer
+    // mul r10 clobbers rdx:rax: if rdx already held the cursors pointer
     // (loaded below), the commit at Part 5 would write to garbage. Order matters.
-    // lea r11, [rip + g_arena_pool_data] — e2_lrb, rip_patch
+    // lea r11, [rip + g_arena_pool_data]: e2_lrb, rip_patch
     rip_pos3 := pos + cp + 3
     cp = cp + e2_lrb(buf, pos + cp, 0)
     grow_rip_patch(g_x86_rip_patch_count + 1)
     w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos3)
     w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_arena_pool_data)
     g_x86_rip_patch_count = g_x86_rip_patch_count + 1
-    // mov r11, [r11] — 4D 8B 1B
+    // mov r11, [r11]: 4D 8B 1B
     w8(buf, pos+cp, 77)
     w8(buf, pos+cp+1, 139)
     w8(buf, pos+cp+2, 27)
     cp = cp + 3
-    // lea rax, [rip + g_arena_max_size] — 48 8D 05 xx xx xx xx, rip_patch
+    // lea rax, [rip + g_arena_max_size]: 48 8D 05 xx xx xx xx, rip_patch
     rip_pos4 := pos + cp + 3
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 141)
@@ -115,26 +115,26 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos4)
     w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_arena_max_size)
     g_x86_rip_patch_count = g_x86_rip_patch_count + 1
-    // mov rax, [rax] — 48 8B 00 (load g_arena_max_size value)
+    // mov rax, [rax]: 48 8B 00 (load g_arena_max_size value)
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 139)
     w8(buf, pos+cp+2, 0)
     cp = cp + 3
-    // mul r10 — 49 F7 E2 (rax = g_arena_max_size * ai)
+    // mul r10: 49 F7 E2 (rax = g_arena_max_size * ai)
     w8(buf, pos+cp, 73)
     w8(buf, pos+cp+1, 247)
     w8(buf, pos+cp+2, 226)
     cp = cp + 3
-    // add r11, rax — 49 01 C3 (r11 = pool_base + offset = chunk_start)
+    // add r11, rax: 49 01 C3 (r11 = pool_base + offset = chunk_start)
     w8(buf, pos+cp, 73)
     w8(buf, pos+cp+1, 1)
     w8(buf, pos+cp+2, 195)
     cp = cp + 3
 
     // ── Load cursors + sizes (rdx must not be clobbered after this) ──
-    // NB: r11 MUST keep chunk_start (pool_data + max_size*ai) — Part 5b/6
+    // NB: r11 MUST keep chunk_start (pool_data + max_size*ai): Part 5b/6
     // depend on it. Load the cursors array into rdx directly.
-    // lea rdx, [rip + g_arena_cursors] — 48 8D 15, rip_patch
+    // lea rdx, [rip + g_arena_cursors]: 48 8D 15, rip_patch
     rip_pos1 := pos + cp + 3
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 141)
@@ -145,18 +145,18 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos1)
     w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_arena_cursors)
     g_x86_rip_patch_count = g_x86_rip_patch_count + 1
-    // mov rdx, [rdx] — 48 8B 12
+    // mov rdx, [rdx]: 48 8B 12
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 139)
     w8(buf, pos+cp+2, 18)
     cp = cp + 3
-    // mov rcx, [rdx + r10*8] — 4A 8B 0C D2 (SIB: scale=3, index=r10, base=rdx)
+    // mov rcx, [rdx + r10*8]: 4A 8B 0C D2 (SIB: scale=3, index=r10, base=rdx)
     w8(buf, pos+cp, 74)
     w8(buf, pos+cp+1, 139)
     w8(buf, pos+cp+2, 12)
     w8(buf, pos+cp+3, 210)
     cp = cp + 4
-    // lea rsi, [rip + g_arena_sizes] — preserve r11 as chunk_start
+    // lea rsi, [rip + g_arena_sizes]: preserve r11 as chunk_start
     rip_pos2 := pos + cp + 3
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 141)
@@ -167,12 +167,12 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos2)
     w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_arena_sizes)
     g_x86_rip_patch_count = g_x86_rip_patch_count + 1
-    // mov rsi, [rsi] — 48 8B 36
+    // mov rsi, [rsi]: 48 8B 36
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 139)
     w8(buf, pos+cp+2, 54)
     cp = cp + 3
-    // mov r8, [rsi + r10*8] — 4E 8B 04 D6
+    // mov r8, [rsi + r10*8]: 4E 8B 04 D6
     w8(buf, pos+cp, 78)
     w8(buf, pos+cp+1, 139)
     w8(buf, pos+cp+2, 4)
@@ -180,45 +180,45 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     cp = cp + 4
 
     // ── Part 4: Align size + bump check (22 bytes) ──
-    // mov rdi, r9 — 49 8B F9 (restore original size for alignment)
+    // mov rdi, r9: 49 8B F9 (restore original size for alignment)
     w8(buf, pos+cp, 73)
     w8(buf, pos+cp+1, 139)
     w8(buf, pos+cp+2, 249)
     cp = cp + 3
-    // add rdi, 15 — 48 83 C7 0F
+    // add rdi, 15: 48 83 C7 0F
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 131)
     w8(buf, pos+cp+2, 199)
     w8(buf, pos+cp+3, 15)
     cp = cp + 4
-    // and rdi, -8 — 48 83 E7 F8
+    // and rdi, -8: 48 83 E7 F8
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 131)
     w8(buf, pos+cp+2, 231)
     w8(buf, pos+cp+3, 248)
     cp = cp + 4
-    // mov rax, rcx — 48 89 C8 (rax = old_cursor)
+    // mov rax, rcx: 48 89 C8 (rax = old_cursor)
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 137)
     w8(buf, pos+cp+2, 200)
     cp = cp + 3
-    // add rcx, rdi — 48 01 F9 (rcx = new_cursor)
+    // add rcx, rdi: 48 01 F9 (rcx = new_cursor)
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 1)
     w8(buf, pos+cp+2, 249)
     cp = cp + 3
-    // cmp rcx, r8 — 4C 39 C1
+    // cmp rcx, r8: 4C 39 C1
     w8(buf, pos+cp, 76)
     w8(buf, pos+cp+1, 57)
     w8(buf, pos+cp+2, 193)
     cp = cp + 3
-    // ja .Lchain — 77 22 (rel8=34)
+    // ja .Lchain: 77 22 (rel8=34)
     w8(buf, pos+cp, 119)
     w8(buf, pos+cp+1, 34)
     cp = cp + 2
 
     // ── Part 5: Commit cursor update (4 bytes) ──
-    // mov [rdx + r10*8], rcx — 4A 89 0C D2
+    // mov [rdx + r10*8], rcx: 4A 89 0C D2
     w8(buf, pos+cp, 74)
     w8(buf, pos+cp+1, 137)
     w8(buf, pos+cp+2, 12)
@@ -228,52 +228,52 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     // ── Part 5b: Zero-init newly allocated arena block (18 bytes) ──
     // Zero only the newly allocated data bytes.
     // rax=old_cursor, r11=chunk_start, rdx=cursors_ptr (no longer needed)
-    // mov rdx, rax (save old_cursor) — 48 89 C2
+    // mov rdx, rax (save old_cursor): 48 89 C2
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 137)
     w8(buf, pos+cp+2, 194)
     cp = cp + 3
-    // lea rdi, [r11 + rax + 8] — allocation data after its header
+    // lea rdi, [r11 + rax + 8]: allocation data after its header
     w8(buf, pos+cp, 73)
     w8(buf, pos+cp+1, 141)
     w8(buf, pos+cp+2, 124)
     w8(buf, pos+cp+3, 3)
     w8(buf, pos+cp+4, 8)
     cp = cp + 5
-    // mov rcx, r9 (requested data size) — 4C 89 C9
+    // mov rcx, r9 (requested data size): 4C 89 C9
     w8(buf, pos+cp, 76)
     w8(buf, pos+cp+1, 137)
     w8(buf, pos+cp+2, 201)
     cp = cp + 3
-    // xor eax, eax — 31 C0
+    // xor eax, eax: 31 C0
     w8(buf, pos+cp, 49)
     w8(buf, pos+cp+1, 192)
     cp = cp + 2
-    // cld — FC
+    // cld: FC
     w8(buf, pos+cp, 252)
     cp = cp + 1
-    // rep stosb — F3 AA
+    // rep stosb: F3 AA
     w8(buf, pos+cp, 243)
     w8(buf, pos+cp+1, 170)
     cp = cp + 2
-    // mov rax, rdx (restore old_cursor) — 48 89 D0
+    // mov rax, rdx (restore old_cursor): 48 89 D0
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 137)
     w8(buf, pos+cp+2, 208)
     cp = cp + 3
 
     // ── Part 6: Return arena pointer (11 bytes) ──
-    // add rax, r11 — 4C 01 D8 (rax = chunk_start + old_cursor = data ptr before header)
+    // add rax, r11: 4C 01 D8 (rax = chunk_start + old_cursor = data ptr before header)
     w8(buf, pos+cp, 76)
     w8(buf, pos+cp+1, 1)
     w8(buf, pos+cp+2, 216)
     cp = cp + 3
-    // mov [rax], r9 — 4C 89 08 (store hidden length header)
+    // mov [rax], r9: 4C 89 08 (store hidden length header)
     w8(buf, pos+cp, 76)
     w8(buf, pos+cp+1, 137)
     w8(buf, pos+cp+2, 8)
     cp = cp + 3
-    // lea rax, [rax + 8] — 48 8D 40 08
+    // lea rax, [rax + 8]: 48 8D 40 08
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 141)
     w8(buf, pos+cp+2, 64)
@@ -283,8 +283,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos+cp, 195)
     cp = cp + 1
 
-    // ── Part 7: .Lchain — arena OOM → chain expand + mark full (41 bytes) ──
-    // lea r8, [rip + g_current_arena] — 4C 8D 05 xx xx xx xx, rip_patch #6
+    // ── Part 7: .Lchain: arena OOM -> chain expand + mark full (41 bytes) ──
+    // lea r8, [rip + g_current_arena]: 4C 8D 05 xx xx xx xx, rip_patch #6
     rip_pos5 := pos + cp + 3
     w8(buf, pos+cp, 76)
     w8(buf, pos+cp+1, 141)
@@ -295,8 +295,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos5)
     w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_current_arena)
     g_x86_rip_patch_count = g_x86_rip_patch_count + 1
-    // mov qword [r8], -1 — 49 C7 00 FF FF FF FF (set g_current_arena = -1;
-    // REX.W+B — a 32-bit store would leave the slot = 0x00000000ffffffff,
+    // mov qword [r8], -1: 49 C7 00 FF FF FF FF (set g_current_arena = -1;
+    // REX.W+B: a 32-bit store would leave the slot = 0x00000000ffffffff,
     // which is positive and re-enters the arena path with a garbage index)
     w8(buf, pos+cp, 73)
     w8(buf, pos+cp+1, 199)
@@ -307,7 +307,7 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     // ── Bug 2 fix: Advance arena cursor to limit (mark full) ──
     // rdx = cursors array pointer (from Part 2), r10 = arena index (from Part 1)
     // Load sizes[ai] again (r8 was overwritten by g_current_arena LEA above)
-    // lea rsi, [rip + g_arena_sizes] — 48 8D 35 xx xx xx xx, rip_patch #8
+    // lea rsi, [rip + g_arena_sizes]: 48 8D 35 xx xx xx xx, rip_patch #8
     rip_pos_sizes := pos + cp + 3
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 141)
@@ -318,54 +318,54 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos_sizes)
     w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_arena_sizes)
     g_x86_rip_patch_count = g_x86_rip_patch_count + 1
-    // mov rsi, [rsi] — 48 8B 36 (deref to get sizes array pointer)
+    // mov rsi, [rsi]: 48 8B 36 (deref to get sizes array pointer)
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 139)
     w8(buf, pos+cp+2, 54)
     cp = cp + 3
-    // mov r8, [rsi + r10*8] — 4E 8B 04 D6 (r8 = sizes[ai] = limit)
+    // mov r8, [rsi + r10*8]: 4E 8B 04 D6 (r8 = sizes[ai] = limit)
     w8(buf, pos+cp, 78)
     w8(buf, pos+cp+1, 139)
     w8(buf, pos+cp+2, 4)
     w8(buf, pos+cp+3, 214)
     cp = cp + 4
-    // mov [rdx + r10*8], r8 — 4E 89 04 D2 (cursors[ai] = limit, mark full)
+    // mov [rdx + r10*8], r8: 4E 89 04 D2 (cursors[ai] = limit, mark full)
     w8(buf, pos+cp, 78)
     w8(buf, pos+cp+1, 137)
     w8(buf, pos+cp+2, 4)
     w8(buf, pos+cp+3, 210)
     cp = cp + 4
-    // Set r10d = -1 to skip arena restore at .Lglobal's end — 41 BA FF FF FF FF
+    // Set r10d = -1 to skip arena restore at .Lglobal's end: 41 BA FF FF FF FF
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 186)
     e2_w32(buf, pos+cp+2, -1)
     cp = cp + 6
 
-    // mov rdi, r9 — 49 8B F9 (restore original size for global path alignment)
+    // mov rdi, r9: 49 8B F9 (restore original size for global path alignment)
     w8(buf, pos+cp, 73)
     w8(buf, pos+cp+1, 139)
     w8(buf, pos+cp+2, 249)
     cp = cp + 3
 
-    // ── Part 8: .Lglobal — global bump alloc path + arena restore (84 bytes) ──
+    // ── Part 8: .Lglobal: global bump alloc path + arena restore (84 bytes) ──
     // Patch Part 1's jl .Lglobal to here
     if g_alloc_gl_jmp_pos >= 0:
         rel_gl := (pos + cp) - (g_alloc_gl_jmp_pos + 6)
         w32(buf, g_alloc_gl_jmp_pos + 2, rel_gl)
         g_alloc_gl_jmp_pos = -1
-    // add rdi, 15 — 48 83 C7 0F (align)
+    // add rdi, 15: 48 83 C7 0F (align)
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 131)
     w8(buf, pos+cp+2, 199)
     w8(buf, pos+cp+3, 15)
     cp = cp + 4
-    // and rdi, -8 — 48 83 E7 F8
+    // and rdi, -8: 48 83 E7 F8
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 131)
     w8(buf, pos+cp+2, 231)
     w8(buf, pos+cp+3, 248)
     cp = cp + 4
-    // mov r11, [rip + g_heap_ptr] — load via rip_patch
+    // mov r11, [rip + g_heap_ptr]: load via rip_patch
     if gv_heap_ptr >= 0:
         rip_hp0 := pos + cp + 3
         w8(buf, pos+cp, 76)
@@ -384,12 +384,12 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
         w8(buf, pos+cp+2, 29)
         w8_signed(buf, pos+cp+3, rel0)
         cp = cp + 7
-    // test r11, r11 — 4D 85 DB
+    // test r11, r11: 4D 85 DB
     w8(buf, pos+cp, 77)
     w8(buf, pos+cp+1, 133)
     w8(buf, pos+cp+2, 219)
     cp = cp + 3
-    // jne +14 (skip init if already set) — 75 0E
+    // jne +14 (skip init if already set): 75 0E
     w8(buf, pos+cp, 117)
     w8(buf, pos+cp+1, 14)
     cp = cp + 2
@@ -402,7 +402,7 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos+cp+2, 29)
     w8_signed(buf, pos+cp+3, rel1)
     cp = cp + 7
-    // mov [rip + g_heap_ptr], r11 — store via rip_patch
+    // mov [rip + g_heap_ptr], r11: store via rip_patch
     if gv_heap_ptr >= 0:
         rip_hp_s1 := pos + cp + 3
         w8(buf, pos+cp, 76)
@@ -425,20 +425,20 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     // Save original heap_ptr, check against heap_end, call heap_expand if OOM.
     // retry_cp must start BEFORE mov r8, r11: heap_expand clobbers r8
     // (r8d = fd = -1), so the retry has to re-save the (possibly new) heap_ptr.
-    // mov r8, r11 -- 4D 89 D8 (save original heap_ptr)
+    // mov r8, r11, 4D 89 D8 (save original heap_ptr)
     retry_cp := cp
     w8(buf, pos+cp, 77)
     w8(buf, pos+cp+1, 137)
     w8(buf, pos+cp+2, 216)
     cp = cp + 3
-    // lea rdx, [r11 + rdi] -- 4A 8D 14 1F (compute new end = r11 + rdi)
+    // lea rdx, [r11 + rdi]. 4A 8D 14 1F (compute new end = r11 + rdi)
     // REX 0x4A = W=1, X=1 (index 011 -> r11), B=0 (base 111 -> rdi); modrm reg=010 (rdx).
     w8(buf, pos+cp, 74)
     w8(buf, pos+cp+1, 141)
     w8(buf, pos+cp+2, 20)
     w8(buf, pos+cp+3, 31)
     cp = cp + 4
-    // lea rcx, [rip + g_heap_end] — rip_patch for gv_heap_end
+    // lea rcx, [rip + g_heap_end]: rip_patch for gv_heap_end
     if gv_heap_end >= 0:
         rip_he := pos + cp + 3
         w8(buf, pos+cp, 72)
@@ -458,7 +458,7 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
         w8(buf, pos+cp+2, 13)
         w8_signed(buf, pos+cp+3, rel_he)
         cp = cp + 7
-    // cmp rdx, [rcx] -- 48 3B 11
+    // cmp rdx, [rcx]. 48 3B 11
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 59)
     w8(buf, pos+cp+2, 17)
@@ -467,12 +467,12 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w8(buf, pos+cp, 118)
     w8(buf, pos+cp+1, 14)
     cp = cp + 2
-    // call heap_expand -- E8 xx xx xx xx (patched in elf_gen after heap_expand emitted)
+    // call heap_expand. E8 xx xx xx xx (patched in elf_gen after heap_expand emitted)
     g_heap_expand_call_pos = pos + cp
     e2_w8(buf, pos+cp, 232)
     e2_w32(buf, pos+cp+1, 0)
     cp = cp + 5
-    // mov r11, [rip + g_heap_ptr] — reload via rip_patch after heap_expand
+    // mov r11, [rip + g_heap_ptr]: reload via rip_patch after heap_expand
     if gv_heap_ptr >= 0:
         rip_hp_rl := pos + cp + 3
         w8(buf, pos+cp, 76)
@@ -491,17 +491,17 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
         w8(buf, pos+cp+2, 29)
         w8_signed(buf, pos+cp+3, rel_hr)
         cp = cp + 7
-    // jmp .Lretry -- EB xx (short backwards jump to mov r8, r11)
+    // jmp .Lretry. EB xx (short backwards jump to mov r8, r11)
     jmp_off_val := retry_cp - (cp + 2)
     w8(buf, pos+cp, 235)
     w8(buf, pos+cp+1, jmp_off_val % 256)
     cp = cp + 2
-    // add r11, rdi -- 49 01 FB (bump r11, only reached when within bounds)
+    // add r11, rdi. 49 01 FB (bump r11, only reached when within bounds)
     w8(buf, pos+cp, 73)
     w8(buf, pos+cp+1, 1)
     w8(buf, pos+cp+2, 251)
     cp = cp + 3
-    // mov [rip + g_heap_ptr], r11 — store via rip_patch
+    // mov [rip + g_heap_ptr], r11: store via rip_patch
     if gv_heap_ptr >= 0:
         rip_hp_s2 := pos + cp + 3
         w8(buf, pos+cp, 76)
@@ -520,54 +520,54 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
         w8(buf, pos+cp+2, 29)
         w8_signed(buf, pos+cp+3, rel3)
         cp = cp + 7
-    // mov rdi, r8 — 4C 89 C7
+    // mov rdi, r8: 4C 89 C7
     w8(buf, pos+cp, 76)
     w8(buf, pos+cp+1, 137)
     w8(buf, pos+cp+2, 199)
     cp = cp + 3
-    // mov rcx, r11 — 4C 89 D9
+    // mov rcx, r11: 4C 89 D9
     w8(buf, pos+cp, 76)
     w8(buf, pos+cp+1, 137)
     w8(buf, pos+cp+2, 217)
     cp = cp + 3
-    // sub rcx, rdi — 48 29 F9
+    // sub rcx, rdi: 48 29 F9
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 41)
     w8(buf, pos+cp+2, 249)
     cp = cp + 3
-    // xor eax, eax — 31 C0
+    // xor eax, eax: 31 C0
     w8(buf, pos+cp, 49)
     w8(buf, pos+cp+1, 192)
     cp = cp + 2
-    // cld — FC
+    // cld: FC
     w8(buf, pos+cp, 252)
     cp = cp + 1
-    // rep stosb — F3 AA
+    // rep stosb: F3 AA
     w8(buf, pos+cp, 243)
     w8(buf, pos+cp+1, 170)
     cp = cp + 2
-    // mov [r8], r9 — 4D 89 08 (store header)
+    // mov [r8], r9: 4D 89 08 (store header)
     w8(buf, pos+cp, 77)
     w8(buf, pos+cp+1, 137)
     w8(buf, pos+cp+2, 8)
     cp = cp + 3
-    // lea rax, [r8+8] — 49 8D 40 08
+    // lea rax, [r8+8]: 49 8D 40 08
     w8(buf, pos+cp, 73)
     w8(buf, pos+cp+1, 141)
     w8(buf, pos+cp+2, 64)
     w8(buf, pos+cp+3, 8)
     cp = cp + 4
     // ── Arena restore (before ret) ──
-    // test r10d, r10d — 45 85 D2 (was arena active? r10d ≥ 0 at entry)
+    // test r10d, r10d: 45 85 D2 (was arena active? r10d >= 0 at entry)
     w8(buf, pos+cp, 69)
     w8(buf, pos+cp+1, 133)
     w8(buf, pos+cp+2, 210)
     cp = cp + 3
-    // js .Lret (skip restore if r10d < 0, i.e. normal global alloc) — 78 0A
+    // js .Lret (skip restore if r10d < 0, i.e. normal global alloc): 78 0A
     w8(buf, pos+cp, 120)
     w8(buf, pos+cp+1, 10)
     cp = cp + 2
-    // lea r8, [rip + g_current_arena] — 4C 8D 05 xx xx xx xx, rip_patch #7
+    // lea r8, [rip + g_current_arena]: 4C 8D 05 xx xx xx xx, rip_patch #7
     rip_pos6 := pos + cp + 3
     w8(buf, pos+cp, 76)
     w8(buf, pos+cp+1, 141)
@@ -578,7 +578,7 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos6)
     w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_current_arena)
     g_x86_rip_patch_count = g_x86_rip_patch_count + 1
-    // mov [r8], r10d — 45 89 10 (restore arena index: r8 = g_current_arena addr)
+    // mov [r8], r10d: 45 89 10 (restore arena index: r8 = g_current_arena addr)
     // objdump 验证：45 89 10 = mov %r10d,(%r8) ✓；44 89 00 = mov %r8d,(%rax) ✗
     w8(buf, pos+cp, 69)
     w8(buf, pos+cp+1, 137)
@@ -590,7 +590,7 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
 
     return cp
 
-// ── Simple bump allocator (no arena) — used when gv_current_arena < 0 ──
+// ── Simple bump allocator (no arena): used when gv_current_arena < 0 ──
 // Original 84-byte alloc body: no arena check, no rip_patches for arena globals.
 // This avoids relying on unpatched RIP-relative addresses for g_current_arena
 // when the variable isn't registered in the output binary (non-static builds).
@@ -631,7 +631,7 @@ fn emit_alloc_body_simple(buf: string, pos: int, bss_va: int, globals_size: int)
     w8(buf, pos+cp+3, 248)
     cp = cp + 4
 
-    // mov r11, [rip + g_heap_ptr] — load via rip_patch
+    // mov r11, [rip + g_heap_ptr]: load via rip_patch
     if gv_heap_ptr >= 0:
         rip_hp_l := pos + cp + 3
         w8(buf, pos+cp, 76)
@@ -667,7 +667,7 @@ fn emit_alloc_body_simple(buf: string, pos: int, bss_va: int, globals_size: int)
     w8(buf, pos+cp+2, 29)
     w8_signed(buf, pos+cp+3, rel1)
     cp = cp + 7
-    // mov [rip + g_heap_ptr], r11 — store via rip_patch
+    // mov [rip + g_heap_ptr], r11: store via rip_patch
     if gv_heap_ptr >= 0:
         rip_hp_s1 := pos + cp + 3
         w8(buf, pos+cp, 76)
@@ -768,52 +768,52 @@ fn emit_heap_expand(buf: string, pos: int, bss_va: int) -> int:
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 82)
     cp = cp + 2  // push r10
-    // xor edi, edi -- 31 FF (addr = NULL, let kernel choose)
+    // xor edi, edi. 31 FF (addr = NULL, let kernel choose)
     w8(buf, pos+cp, 49)
     w8(buf, pos+cp+1, 255)
     cp = cp + 2
-    // mov esi, 1073741824 -- BE xx xx xx xx (length = 1 GiB)
+    // mov esi, 1073741824. BE xx xx xx xx (length = 1 GiB)
     e2_w8(buf, pos+cp, 190)
     e2_w32(buf, pos+cp+1, 1073741824)
     cp = cp + 5
-    // mov edx, 3 -- BA 03 00 00 00 (prot = PROT_READ|PROT_WRITE)
+    // mov edx, 3. BA 03 00 00 00 (prot = PROT_READ|PROT_WRITE)
     w8(buf, pos+cp, 186)
     e2_w32(buf, pos+cp+1, 3)
     cp = cp + 5
-    // mov r10d, 0x22 -- 41 BA 22 00 00 00 (flags = MAP_PRIVATE|MAP_ANONYMOUS)
+    // mov r10d, 0x22. 41 BA 22 00 00 00 (flags = MAP_PRIVATE|MAP_ANONYMOUS)
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 186)
     e2_w32(buf, pos+cp+2, 34)
     cp = cp + 6
-    // mov r8d, -1 -- 41 B8 FF FF FF FF (fd = -1)
+    // mov r8d, -1. 41 B8 FF FF FF FF (fd = -1)
     w8(buf, pos+cp, 65)
     w8(buf, pos+cp+1, 184)
     e2_w32(buf, pos+cp+2, -1)
     cp = cp + 6
-    // xor r9d, r9d -- 45 31 C9 (offset = 0)
+    // xor r9d, r9d. 45 31 C9 (offset = 0)
     w8(buf, pos+cp, 69)
     w8(buf, pos+cp+1, 49)
     w8(buf, pos+cp+2, 201)
     cp = cp + 3
-    // mov eax, 9 -- B8 09 00 00 00 (sys_mmap)
+    // mov eax, 9. B8 09 00 00 00 (sys_mmap)
     w8(buf, pos+cp, 184)
     e2_w32(buf, pos+cp+1, 9)
     cp = cp + 5
-    // syscall -- 0F 05
+    // syscall. 0F 05
     w8(buf, pos+cp, 15)
     w8(buf, pos+cp+1, 5)
     cp = cp + 2
-    // test rax, rax -- 48 85 C0 (check if mmap returned negative error)
+    // test rax, rax. 48 85 C0 (check if mmap returned negative error)
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 133)
     w8(buf, pos+cp+2, 192)
     cp = cp + 3
-    // js .Lhf -- 78 XX (skip success path if mmap failed, rax has -errno)
+    // js .Lhf. 78 XX (skip success path if mmap failed, rax has -errno)
     // Success path: 7+7+7+2+5+1 = 29 bytes
     w8(buf, pos+cp, 120)
     w8(buf, pos+cp+1, 29)
     cp = cp + 2
-    // mov [rip + g_heap_ptr], rax — store via rip_patch
+    // mov [rip + g_heap_ptr], rax: store via rip_patch
     if gv_heap_ptr >= 0:
         rip_hp_ex := pos + cp + 3
         w8(buf, pos+cp, 72)
@@ -832,13 +832,13 @@ fn emit_heap_expand(buf: string, pos: int, bss_va: int) -> int:
         w8(buf, pos+cp+2, 5)
         w8_signed(buf, pos+cp+3, rel_hp_s)
         cp = cp + 7
-    // lea r11, [rax + 1073741824] -- 4C 8D 98 xx xx xx xx (heap_end = new base + 1GB)
+    // lea r11, [rax + 1073741824]. 4C 8D 98 xx xx xx xx (heap_end = new base + 1GB)
     w8(buf, pos+cp, 76)
     w8(buf, pos+cp+1, 141)
     w8(buf, pos+cp+2, 152)
     e2_w32(buf, pos+cp+3, 1073741824)
     cp = cp + 7
-    // mov [rip + g_heap_end], r11 — store via rip_patch
+    // mov [rip + g_heap_end], r11: store via rip_patch
     if gv_heap_end >= 0:
         rip_he_ex := pos + cp + 3
         w8(buf, pos+cp, 76)
@@ -857,7 +857,7 @@ fn emit_heap_expand(buf: string, pos: int, bss_va: int) -> int:
         w8(buf, pos+cp+2, 29)
         w8_signed(buf, pos+cp+3, rel_hp_e)
         cp = cp + 7
-    // xor eax, eax -- 31 C0 (return 0 for success)
+    // xor eax, eax. 31 C0 (return 0 for success)
     w8(buf, pos+cp, 49)
     w8(buf, pos+cp+1, 192)
     cp = cp + 2
@@ -870,11 +870,11 @@ fn emit_heap_expand(buf: string, pos: int, bss_va: int) -> int:
     cp = cp + 2  // pop r9
     w8(buf, pos+cp, 95)
     cp = cp + 1  // pop rdi
-    // ret -- C3
+    // ret. C3
     w8(buf, pos+cp, 195)
     cp = cp + 1
     // .Lhf: mmap failed, return -1
-    // mov rax, -1 -- 48 C7 C0 FF FF FF FF
+    // mov rax, -1. 48 C7 C0 FF FF FF FF
     w8(buf, pos+cp, 72)
     w8(buf, pos+cp+1, 199)
     w8(buf, pos+cp+2, 192)
@@ -888,7 +888,7 @@ fn emit_heap_expand(buf: string, pos: int, bss_va: int) -> int:
     cp = cp + 2  // pop r9
     w8(buf, pos+cp, 95)
     cp = cp + 1  // pop rdi
-    // ret -- C3
+    // ret. C3
     w8(buf, pos+cp, 195)
     cp = cp + 1
     return cp
@@ -943,7 +943,7 @@ fn sched_tramp_sz(n: int) -> int:
 // implementations that read/write a dedicated BSS slot (current_g).
 // In .so-linked builds (g_x86_emit_rt_stubs == 0) these stay external
 // relocations resolved from rt.s at link time.
-// Size: 11 bytes each — must match Phase 2 estimate.
+// Size: 11 bytes each: must match Phase 2 estimate.
 fn emit_curg_stubs(buf: string, pos: int, curg_va: int) -> int:
     cp : ., mut = 0
     // g_set_curg: lea rax, [rip + curg_va]; mov [rax], rdi; ret
@@ -979,14 +979,14 @@ fn emit_curg_stubs(buf: string, pos: int, curg_va: int) -> int:
 // The wrapper is the fiber entry for every G (g_new sets it via @addr);
 // it reads saved_fn/saved_arg from the G struct (offsets 56/64), calls
 // saved_fn(saved_arg), sends the result to result_ch (G+40), then yields
-// forever. chan_send/sched_yield are Core functions — recorded as call
+// forever. chan_send/sched_yield are Core functions: recorded as call
 // patches resolved by the Phase 3 patch loop (user function names).
 fn emit_goroutine_stubs(buf: string, pos: int) -> int:
     cp : ., mut = 0
 
-    // fiber_init(stack_bottom, entry_fn) -> int — fake frame on the new stack.
+    // fiber_init(stack_bottom, entry_fn) -> int: fake frame on the new stack.
     // Layout: fiber_switch pops 6 regs (48 bytes) then ret reads
-    // [stack_bottom-8] — entry_fn MUST be at [stack_bottom-8]:
+    // [stack_bottom-8]: entry_fn MUST be at [stack_bottom-8]:
     //   mov rax, rdi; sub rax, 8; mov [rax], rsi; sub rax, 48;
     //   xor ecx, ecx; mov [rax], rcx; ret
     w8(buf, pos+cp, 72)
@@ -1018,7 +1018,7 @@ fn emit_goroutine_stubs(buf: string, pos: int) -> int:
     cp = cp + 1  // ret
     // 20 bytes
 
-    // fiber_switch(current_sp_addr, next_sp) -> int — save/restore context:
+    // fiber_switch(current_sp_addr, next_sp) -> int: save/restore context:
     //   push rbx,r12-r15,rbp; mov [rdi], rsp; mov rsp, rsi; pop rbp,r15-r12,rbx; ret
     w8(buf, pos+cp, 83)
     cp = cp + 1  // push rbx
@@ -1064,8 +1064,8 @@ fn emit_goroutine_stubs(buf: string, pos: int) -> int:
     cp = cp + 1  // ret
     // 27 bytes
 
-    // goroutine_entry_wrapper — fiber entry, no prologue (runs on the G's stack):
-    //   call g_get_curg; rdi = [rax+64] (saved_arg — first param, SysV rdi);
+    // goroutine_entry_wrapper: fiber entry, no prologue (runs on the G's stack):
+    //   call g_get_curg; rdi = [rax+64] (saved_arg: first param, SysV rdi);
     //   rax = [rax+56] (saved_fn); call rax; push rax; call g_get_curg;
     //   rdi = [rax+40] (result_ch); pop rsi; call chan_send;
     //   then exit: call g_get_curg; mov rdi, rax; call g_free (arena_reset +
@@ -1268,7 +1268,7 @@ fn emit_m_start_workers(buf: string, pos: int) -> int:
     w8(buf, pos+cp+2, 1)
     w8(buf, pos+cp+3, 0)
     cp = cp + 4
-    // lea r13, [rip + worker_entry] — worker_entry at stub base (pos+0), this lea
+    // lea r13, [rip + worker_entry]: worker_entry at stub base (pos+0), this lea
     // is 7 bytes ending at (pos+58): disp = (pos+0) - (pos+58) = -58
     w8(buf, pos+cp, 76)
     w8(buf, pos+cp+1, 141)
@@ -1466,7 +1466,7 @@ fn elf2_hdr(buf: string, code_end: int, total_sz: int):
         rodata_va, rodata_va,
         data_sz, 1073741824, 4096)  // memsz = 1 GiB virtual bump heap
 
-// ── _start 面共享状态（发射序本体 = OS 轴 src/os/linux/entry.cr）──
+// ── _start 共享状态（发射序本体 = OS 轴 src/os/linux/entry.cr）──
 g_call_main_pos : int, mut  // set by emit_start (OS 轴 entry.cr), used for patching call main
 gv_argc : int, mut   // IR var index for g_rt_argc (or -1)
 gv_argv : int, mut   // IR var index for g_rt_argv_ptr (or -1)
@@ -1484,10 +1484,9 @@ gv_hp_inflight : int, mut = -1
 g_heap_expand_call_pos : int, mut = -1
 g_alloc_gl_jmp_pos : int, mut = -1  // Part 1 jl .Lglobal displacement position (patched at Part 8)
 
-// ── _start 发射序（emit_start/emit_start_size）已整函数迁 OS 轴
-// src/os/linux/entry.cr（x86 实例化波 1 Task 2——跨轴调用经 module.cr 三轴回退
-// 链 / 组合根 _import.cr 的 `import entry` 解析；本文件保留调用点与下方共享
-// 全局声明——单扁平编译单元内解析，无重复声明）──
+// _start emission (emit_start and emit_start_size) lives in
+// src/os/linux/entry.cr. This file keeps the call sites and the shared global
+// declarations; the flat compilation unit resolves them once.
 
 // ── Main ELF generation ──
 fn elf_gen(buf: string) -> int:
@@ -1503,16 +1502,14 @@ fn elf_gen(buf: string) -> int:
         gi = gi + 1
     grow_is_global(g_ir_var_count)
 
-    // 内置体名索引扫描段（g_ni_* 赋值）：**保留原位**——本段整体参数化 =
-    // 波 2 面（x86 实例化设计 §5 波 2）。syscall3/syscall4 二项消费方 =
-    // instr.cr emit_instr 内置体分派链，其**发射序**已归 OS 轴
-    // src/os/linux/syscall.cr（波 1 Task 6 抽取——sys_syscall3_stub/
-    // sys_syscall4_stub：rax 号 + rdi/rsi/rdx(/r10) 参数序 + 0F 05 + 回存）；
-    // 本段只负责"名字 → 索引"，与发射面解耦。**注**：本段 ≠ syscall 序全集
-    // ——elf.cr 另有三处手写 syscall 序列（emit_heap_expand mmap / worker
-    // exit / clone，syscall1/5/6 形，非内置体径）= OS 轴收编面，见 TODO #2026-09-10-6
-    // （波 2 / 实例 B 前必办——实例 B 承诺"换轴零改动"要求 Linux ABI 字节
-    // 不留在格式轴）。
+    // Builtin name scan: assign the g_ni_* indices. This section only maps names
+    // to indices and is independent of emission. The syscall3 and syscall4
+    // emission sequences are in src/os/linux/syscall.cr and are consumed by the
+    // builtin dispatch chain in instr.cr.
+    // This is not the full set of syscall sequences. This file still has three
+    // handwritten sequences: emit_heap_expand mmap, worker exit, and clone
+    // (syscall1, syscall5, and syscall6 shapes, not builtin paths). Moving them to
+    // the OS axis is still pending.
     g_ni_syscall3 = -1
     g_ni_syscall4 = -1
     g_ni_load8 = -1
@@ -1572,7 +1569,7 @@ fn elf_gen(buf: string) -> int:
     g_x86_fnaddr_patch_count = 0
 
     println("  elf: Phase 1 (rodata layout)...")
-    // Phase 1: rodata layout — collect string constants
+    // Phase 1: rodata layout: collect string constants
     g_x86_str_count = 0
     si := 0
     loop:
@@ -1692,16 +1689,22 @@ fn elf_gen(buf: string) -> int:
         vs2 := r64(g_ir_func_var_start, fi * 8)
         pc2 := r64(g_ir_func_param_count, fi * 8)
 
-        // int 多字 M1（Task 1）：识别潜在多字变量并计入帧尺寸（tag 区）。
-        // tag 数为 0 → pf_frame_size 与旧公式逐字节一致（快路径零变化）。
+        // Identify potential multiword vars and include the tag area in the
+        // frame size. With zero tags, pf_frame_size matches the layout without a
+        // tag area.
+        //
+        // Identify potential multiword vars and include the tag area in the frame
+        // size. With zero tags, pf_frame_size matches the layout without a tag
+        // area.
         mw_setup_tags(fi, vs2, vc2)
         fsz := r64(g_x86_func_code_sz, fi * 8)
-        // 帧尺寸/帧相关字节 = frame.cr 单源（H2）：SysV 16 字节对齐（发现 11）
-        // ——call 后 rsp%16=8；opt≥1 有 6 个 push（rbx,r12-15,rbp）→ rsp%16=8
-        // → size 需 ≡8 (mod 16)；opt<1 有 1 个 push（rbp）→ rsp%16=0 → ≡0。
-        // 本 dry-run 与 Phase 3 的 sub rsp 立即数**调用同一函数**（pf_frame_size
-        // ——双源合流）；帧相关字节总数 = pf_frame_overhead（须与 pf_prologue/
-        // pf_epilogue 实际发射一致）。本文件零帧尺寸计算（H2 纪律）。
+        // Frame size comes from frame.cr. SysV requires 16-byte alignment: after
+        // a call rsp is 8 mod 16. With opt >= 1 there are 6 pushes (rbx, r12-r15,
+        // rbp), so the frame size must be 8 mod 16. With opt < 1 there is 1 push
+        // (rbp), so the frame size must be 0 mod 16. This dry-run and the Phase 3
+        // sub rsp immediate call the same pf_frame_size. The frame byte count is
+        // pf_frame_overhead and must match the actual pf_prologue and pf_epilogue
+        // emission. This file does not compute frame sizes.
         g_x86_emit_stack_size = pf_frame_size(vc2)
         ss_dry := g_x86_emit_stack_size
         total_code = total_code + pf_frame_overhead(ss_dry)
@@ -1770,7 +1773,7 @@ fn elf_gen(buf: string) -> int:
     g_x86_func_off_count = g_x86_func_off_count + 1
     total_code = total_code + sched_tramp_sz(4)
     if g_x86_emit_rt_stubs != 0:
-        // g_set_curg / g_get_curg bridges (11 bytes each) — pure-static self-containment
+        // g_set_curg / g_get_curg bridges (11 bytes each): pure-static self-containment
         grow_func_offsets(g_x86_func_off_count * 2 + 2)
         w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("g_set_curg"))
         w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
@@ -1790,7 +1793,7 @@ fn elf_gen(buf: string) -> int:
     // Phase 3: emit to buffer
     cp := hdr_total  // skip ELF header + program headers
 
-    // NB: g_x86_is_global already marked before Phase 0 — no need to redo
+    // NB: g_x86_is_global already marked before Phase 0: no need to redo
 
     // ── _start (measured size from Phase 2) ──
     cp = cp + emit_start(buf, cp)
@@ -1837,11 +1840,12 @@ fn elf_gen(buf: string) -> int:
                 break
             g2_slot(vs + vi)
             vi = vi + 1
-        // int 多字 M1（Task 1）：潜在多字变量识别 + tag 字节偏移表（g2_tag_off）。
-        // 帧尺寸 = pf_frame_size(vc)（含 tag 区，16 对齐规则与 Phase 2 dry run
-        // 同源）；tag 数为 0 → 与旧布局逐字节一致。
+        // Identify potential multiword vars and build the tag byte offset table
+        // (g2_tag_off). The frame size is pf_frame_size(vc), including the tag
+        // area, with the same 16-byte alignment as the Phase 2 dry-run. With zero
+        // tags, the layout is unchanged.
+        // SysV 16-byte alignment, the same rule as the dry-run.
         mw_setup_tags(fi, vs, vc)
-        // SysV 16 字节对齐（发现 11）：与 dry run 相同的对齐规则
         g_x86_emit_stack_size = pf_frame_size(vc)
 
         // Init label state for single-pass backpatching (-1 = not yet seen)
@@ -1854,13 +1858,14 @@ fn elf_gen(buf: string) -> int:
             li2 = li2 + 1
         g_pending_count = 0
 
-        // ── 序言 + 形参落槽 + 寄存器参数装载（frame.cr pf_prologue）──
-        // 帧 setup（opt≥1 六寄存器保存 → push rbp/mov rbp,rsp → sub rsp 占位
-        // 立即数）+ 形参落槽（XMM/int/栈参 + tag 卫生③参数行清 tag）+ 寄存器
-        // 分配参数装载。帧序唯一发射器（H2 ③）；ss = pf_frame_size 结果。
+        // Prologue, parameter stores, and register parameter loads
+        // (frame.cr pf_prologue). With opt >= 1: save six callee-saved registers,
+        // push rbp, mov rbp,rsp, reserve the frame with a placeholder immediate,
+        // store parameters (XMM, int, stack), clear parameter tags, then load
+        // register-allocated parameters. ss is the pf_frame_size result.
         cp = pf_prologue(vs, pc, g_x86_emit_stack_size, buf, cp)
 
-        // function body — emit instructions
+        // Function body: emit instructions.
         g_x86_func_frame_start = cp  // absolute buffer pos of body start
         save_ss := g_x86_emit_stack_size  // save frame size before emission
 
@@ -1869,48 +1874,49 @@ fn elf_gen(buf: string) -> int:
             if ii >= ic:
                 break
             inst_idx := ist + ii
-            // HIT 表模式（M1 Task 2）：表映射 op 走 emit_instr_tabled；
-            // -1（未映射/形态不支持/无表）落旧路径 emit_instr——混合模式。
-            // int 多字 M1（Task 2）：tagged int add/sub 需溢出跳（jo）——
-            // 表路径（hit_ev 降低不知 tag/无 jo 事件）整条排除落旧路径。
-            jo_before := g_x86_mw_jo_count  // Task 3：站点回跳点记录
-            oc_before := g_x86_mw_oc_count  // Task 4：2L 操作数站点回跳点记录
+            // HIT table mode: mapped ops go through emit_instr_tabled. A return
+            // of -1 (unmapped, unsupported shape, or no table) falls back to
+            // emit_instr. Tagged int add/sub needs an overflow jump (jo), which
+            // the event lowering does not model, so the whole instruction takes
+            // the fallback path.
+            jo_before := g_x86_mw_jo_count
+            oc_before := g_x86_mw_oc_count
             sz : ., mut = -1
             if hit_table_active() != 0 && mw_int_arith_jo_needed(inst_idx) == 0:
                 sz = emit_instr_tabled(inst_idx, buf, cp)
             if sz < 0:
                 sz = emit_instr(inst_idx, buf, cp)
-            // Task 3：本指令若发射了 jo（至多 1 站点/指令——add/sub 单点），
-            // 其回跳点 = 快路径 e2_st 之后的指令尾（绝对位置 cp+sz）——慢路径
-            // 块跳回后从此继续（跳走即跳过该 store；dest 由块自行回存）。
+            // If this instruction emitted a jo (at most one site per instruction,
+            // add/sub), its resume point is the instruction tail after the fast
+            // path e2_st (absolute position cp + sz). The slow-path block jumps
+            // back here; it skips the fast store and stores dest itself.
             if g_x86_mw_jo_count > jo_before:
                 w64(g_x86_mw_jo_resume, (g_x86_mw_jo_count - 1) * 8, cp + sz)
-            // Task 4：本指令若新建了 2L 操作数站点（至多 1/指令），其块回跳点
-            // 同样 = 指令尾（tag 清 0 之后——2L 块自写 tag 不受影响）。
+            // If this instruction created a 2L operand site (at most one per
+            // instruction), its block resume point is also the instruction tail,
+            // after the tag clear. The 2L block writes its own tag.
             if g_x86_mw_oc_count > oc_before:
                 w64(g_x86_mw_oc_resume, (g_x86_mw_oc_count - 1) * 8, cp + sz)
             cp = cp + sz
             ii = ii + 1
 
-        // ── 尾声 + 函数尾附加块（frame.cr pf_epilogue）──
-        // RETURN patch → sub rsp 立即数回填（save_ss = 本函数帧字节）→
-        // epilogue（add rsp/opt≥1 逆序 pop/pop rbp/ret）→ jo 慢路径块 +
-        // 2L 操作数块（函数尾冷区）。帧序唯一发射器（H2 ③）。
+        // Epilogue and function-tail blocks (frame.cr pf_epilogue). Patch
+        // returns, fill the sub rsp immediate with save_ss, emit the epilogue
+        // (add rsp, reverse callee-saved pops with opt >= 1, pop rbp, ret), then
+        // append the jo slow-path blocks and 2L operand blocks in the cold tail.
         cp = pf_epilogue(save_ss, buf, cp)
         fi = fi + 1
 
-    // ── M2a Task 2：事件流 rel32 回填（回填表 kind 0 = 事件流位置）──
-    // jump 事件于事件字节发射期登记（instr.cr hit_rel_add）；目标 = 事件序 →
-    // 发射期位置表（g_hit_ev_pos，边发射边记）解析为绝对字节位置后回填：
-    //   disp = 目标位置 - (rel 字段位置 + 4)（rel32——与旧路径 label 回填同公式）。
-    // kind 1/2（函数起点 / 外部符号）= Task 4/5 消费——回填未实现：出现即大声
-    // 拒（防御——现事件集（jump/branch 前）无 func/extern rel 步可达登记）。
-    // 守卫重构（v7 Task 1 注记——编译器巨型函数尾既有代码生成缺陷规避）：
-    // 计数先读入局部 + 外层 if 包裹，等价于原 `hri := 0; loop { if hri >=
-    // g_hit_rel_count ...`（循环体不改计数；reset 恒执行）——原形状在巨型
-    // 函数尾控制流下经自举编译器生成的边界读 = 未初始化栈槽（dir 目录构建
-    // corearch 的 stage1 场景 segv；concat 构建因陈旧栈值恰为 0 而潜伏），
-    // 重构后边界读落已写局部。语义零变化；缺陷 = 编译器层潜在面（待核注记）。
+    // Event-stream rel32 backfill. Kind 0 means an event-stream position.
+    // Jump events register during event byte emission (instr.cr hit_rel_add). The
+    // target is an event ordinal; resolve it through g_hit_ev_pos and write
+    // disp = target - (rel field + 4), the same formula as label backfill.
+    // Kind 1 and 2 (function start and external symbol) are not implemented. If
+    // they appear, print a diagnostic and reject.
+    // The count is read into a local and guarded by an outer if. The loop body
+    // does not change the count, and the reset runs unconditionally. This shape
+    // avoids an uninitialized boundary read at the tail of a large function when
+    // compiled by the self-hosted compiler.
     hri2 : ., mut = g_hit_rel_count
     if hri2 > 0:
         hri : ., mut = 0
@@ -1930,7 +1936,7 @@ fn elf_gen(buf: string) -> int:
             else:
                 print("  BAD rel kind ")
                 print(int_str(rk))
-                println(" (func/extern backfill = Task 4/5)")
+                println(" (func/extern backfill not implemented)")
             hri = hri + 1
     g_hit_rel_count = 0
 
@@ -1947,7 +1953,7 @@ fn elf_gen(buf: string) -> int:
     cp = cp + 1
 
     // ── alloc (bump allocator) ──
-    // BSS VA will be computed after all code emitted — placeholder for now
+    // BSS VA will be computed after all code emitted: placeholder for now
     bss_va := ((TEXT_BASE + cp + 4096 + 4095) / 4096) * 4096
 
     max_gv : ., mut = 0
@@ -2055,7 +2061,7 @@ fn elf_gen(buf: string) -> int:
             gsi2 = gsi2 + 1
 
     // ── Goroutine runtime stubs (fiber_init / fiber_switch / goroutine_entry_wrapper) ──
-    // Required by g_new → go f(): the wrapper is the fiber entry, fiber_init
+    // Required by g_new -> go f(): the wrapper is the fiber entry, fiber_init
     // builds the fake frame, fiber_switch performs the context switch.
     // Registered in func_offsets so IR_CALL (fiber_init/fiber_switch from
     // Core) and IR_FNADDR (@addr(goroutine_entry_wrapper)) resolve here.
@@ -2064,7 +2070,7 @@ fn elf_gen(buf: string) -> int:
         sched_reg_one("fiber_switch", 0, cp + 20)
         sched_reg_one("goroutine_entry_wrapper", 0, cp + 47)
         cp = cp + emit_goroutine_stubs(buf, cp)
-        // m_start_workers — worker thread launcher (clone). worker_entry
+        // m_start_workers: worker thread launcher (clone). worker_entry
         // (15 bytes) precedes the public entry so its RIP-relative LEA stays
         // backward; register the public symbol at cp + 15.
         sched_reg_one("m_start_workers", 0, cp + 15)
@@ -2151,7 +2157,7 @@ fn elf_gen(buf: string) -> int:
     g_x86_fnaddr_patch_count = 0
 
     // Pad code to page boundary so RW segment doesn't share a page with RX
-    // (kernel maps shared page with RW permissions → code becomes non-executable)
+    // (kernel maps shared page with RW permissions -> code becomes non-executable)
     code_pad_end := (cp + 4095) / 4096 * 4096
     loop:
         if cp >= code_pad_end:
@@ -2200,7 +2206,7 @@ fn elf_gen(buf: string) -> int:
             cp = cp + 1
         si = si + 1
 
-    // ── HIT const pool（M1 Task 3 合成层：lower 常量池 → rodata）──
+    // HIT constant pool: lower the constant pool into rodata.
     // 池引用（mov r64, [rip+disp32] 占位）在函数发射期间记录（instr.cr 编码器）；
     // 字符串区定稿后回填 disp（池区紧随字符串，8B/槽、8 对齐不破）。
     hpr : ., mut = 0
@@ -2338,9 +2344,9 @@ fn elf_gen(buf: string) -> int:
     // rep stosb. This stub becomes the new entry point; after
     // zeroing it jumps to the real _start.
     bss_init_cp := cp
-    BSS_ZERO_SIZE : int = 131072  // 128 KB — covers all globals
+    BSS_ZERO_SIZE : int = 131072  // 128 KB: covers all globals
 
-    // lea rdi, [rip + rel]  → rdi = bss_va
+    // lea rdi, [rip + rel]  -> rdi = bss_va
     rel_di := bss_va - (TEXT_BASE + cp + 7)
     w8(buf, cp, 72)
     w8(buf, cp+1, 141)

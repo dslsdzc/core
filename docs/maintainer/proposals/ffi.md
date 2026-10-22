@@ -1,13 +1,13 @@
 # Core FFI
 
-> 定位：受众 = 维护者/贡献者；状态 = **partial（仅 extern fn）**——`@ffi` 统一入口为设计态未实现；当前 C ABI 走 `extern fn`（`IR_CALL`/syscall）；细节见 src/stdlib/io.cr extern 声明。
+> 定位：受众 = 维护者/贡献者；状态 = partial（仅 extern fn）。`@ffi` 统一入口为设计态未实现；当前 C ABI 走 `extern fn`（`IR_CALL`/syscall）；细节见 src/stdlib/io.cr extern 声明。
 
 ## 设计原则
 
-- **所有语言统一走 `@ffi`，参数描述运行时特征。**
+- 所有语言统一走 `@ffi`，参数描述运行时特征。
 - `@ffi` 是编译控制，不改变语义，只改变编译方式，与 `@inline` 属同一分类。
 - C ABI 是默认接口，所有其他语言最终也通过 C ABI 对接。
-- **平台接口隔离在后端。** 常规 I/O 走标准库流语义接口（print/println/read_file/write_file 保持），read/write 等系统调用是平台桥后端的实现细节；`extern fn` 直接声明系统接口是绕过语义层的例外入口，属 unsafe 范畴。
+- 平台接口隔离在后端。常规 I/O 走标准库流语义接口（print/println/read_file/write_file 保持），read/write 等系统调用是平台桥后端的实现细节；`extern fn` 直接声明系统接口是绕过语义层的例外入口，属 unsafe 范畴。
 
 ## 语法
 
@@ -51,9 +51,9 @@ extern fn read_file(path: *const u8) -> *mut u8
 
 ```
 @ 分类：
-├─ 元数据查询     → @typeInfo, @field, @hasField
-├─ 编译控制       → @inline, @unroll, @section, @comptime, @ffi
-└─ 安全检查       → @NoBoundsCheck
+├─ 元数据查询：@typeInfo, @field, @hasField
+├─ 编译控制：@inline, @unroll, @section, @comptime, @ffi
+└─ 安全检查：@NoBoundsCheck
 ```
 
 `@ffi` 属编译控制：不改变语义，只改变编译方式。

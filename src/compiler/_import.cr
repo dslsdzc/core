@@ -1,6 +1,6 @@
-// _import.cr — imports applied to all .cr files in src/compiler/
-// Backend files in subdirectories use :: as path separator.
-// Legacy ASM backend removed — ELF pipeline is the only path.
+// _import.cr: imports applied to all .cr files in src/compiler.
+// Backend files in subdirectories use :: as a path separator.
+// The ELF pipeline is the only backend.
 import cli
 import ast
 import globals
@@ -10,21 +10,20 @@ import parser
 import checker
 import type_terms
 import type_engine
-// R2 P2b Task 1：本质条目表 + iface_* 查询 API（静态数据表；置于引擎之后、桥接层之前
-// ——Task 2 起桥接层（ty_shadow.cr）委托本层，故顺序必须是 引擎 → 注册表 → 桥接层。
-// 注：ty_shadow.cr 的文件名是历史遗留（其影子对拍挂点已随 R2 P5 Task 5 下线）。
+// Interface registry: the entry table and iface_* query API. It is placed after
+// the engine and before the bridge. ty_shadow.cr delegates to this layer, so the
+// order is engine, registry, bridge.
 import iface_registry
-// R2 P4 Task 0：引擎核纯化拆分——iface 满足判定簇 + `iface_kind_of` 移入 corec-only 的
-// iface_axis.cr（type_engine.cr 留纯核、iface_registry.cr 除该函数）。**project-mode 面必须
-// 同列本行**：src/compiler 目录的文件集 = 本清单（无目录自动发现，仅 import 收编）——
-// 漏列 ⇒ corec2/corec3 自举链上 iface_kind_of/iface_satisfies 全族 `error[N06]` 静默未定义
-// （rc=0 + 产物照出，B.6 同族）。corearch 清单（src/targets/x86_64-linux/_import.cr）**不列**
-// 本文件与引擎簇（本任务不动该文件）。
+// Interface satisfaction checks and iface_kind_of live in iface_axis.cr, which is
+// corec-only. Project mode must import this file because the src/compiler file set
+// is exactly this import list; a missing import leaves iface_kind_of and the
+// iface_satisfies family undefined in the bootstrap chain. The corearch import
+// list does not include this file or the engine set.
 import iface_axis
 import ty_shadow
-// R2 P4 Task 2：TYPE(7) 段内容构造（D18 corec-only——装填引用桥接层 sh_term_of_ti；
-// project-mode 面必须同列本行：src/compiler 目录的文件集 = 本清单，漏列 ⇒ 自举链上
-// ccr_type_prepare_save 族全 N06 静默未定义（B.6 同族）。corearch 清单不列本文件。）
+// TYPE segment construction. It uses the sh_term_of_ti bridge and is corec-only.
+// Project mode must import this file for ccr_type_prepare_save; the corearch list
+// does not include it.
 import ccr_types
 import type_selftest
 import purity_selftest

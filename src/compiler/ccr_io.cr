@@ -1,168 +1,143 @@
 // === ccr_io.cr ===
-// .ccr binary serialization — the interface between corec (frontend)
-// and corearch (backend).
+// .ccr binary serialization, the interface between corec and corearch.
 //
-// v8 format（serialization v5；v8-only——load 校验 version==8，无 v7 兼容/转换；
-// 旧 v7 文件由 version 拒收，无转换工具。v8 = v7 段表架构的**加法扩展**
-// （R2 P4 Task 1，D9/D10）：+ TYPE(7)/IFACE(8) 两段（内容面归 Task 2/3，本
-// 任务落空壳）+ CCR_VERSION 7→8（留 7 会让旧 6 段文件被静默读成「两段缺席 =
-// 空表」——正是三态纪律要消灭的静默类）。规范序闸 tg == ri+1 与段体连续闸
-// 形状不变（D9 取 7/8 而非 9/10 的直接收益：加段成本 = 闸界 6→8 一处））
-// 字节真相 = docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md（设计定稿
-// ——在 v6 段表架构上扩展：NOD 36B 邻接 + EDG 段必落 + ENT 实记录（Task 2：
-// corec 产时重建——直调内核 compute_live_ranges（ent_kernel.cr 单源化，见 save_ccr））
-// + coreir-schema.md 家风格（Task 6 并入 schema）。本文件头注释 = 实现权威
-// （v6 目标形状落地：SYM 归并 spec §3.2——vars 表并入函数记录声明区/globals；
-// REG 坐标化 spec §3.5——kind/parent/enter/exit/first_ent/last_ent，nstart/
-// ncount 由 enter/exit 派生）。与 spec 表格的编码层差异（实现决策，Task 6
-// schema 同步按本注释落笔）：
-//   (a) 局部变量 name/type 不丢：ENT 28B 定长记录只携带 var_id（NOD 同命名
-//       space = 内存行序），无法容纳声明元数据——「存在即声明」落为：变量的
-//       名称/类型 = 函数记录内嵌声明区（位置数组，行序即创建序、前 param_count
-//       个 = 参数；非符号命名空间——SYM 无 vars 小节）；全局 type 占 v5 全局
-//       记录 var_idx 槽（var_idx 恒 == 行序，冗余）——记录仍 16B。
-//   (b) SYM 子节序 = globals → funcs → str_consts → structs → enums →
-//       opt_meta（globals 前置 = loader 单遍流式重建 var 行序 [全局行][函数块]）。
-//   (c) func 记录的 instr/var 范围不再落盘——instr 范围由 root_region（REG 行
-//       id）span 派生（根 region = SG_FUNC，span = 函数节点范围，与 v5 func_meta
-//       instr_start/count 恒等）；var_start = 声明区行序游标（globals 行 + 前缀
-//       函数块）。
-//   (d) REG 由「可缺」升为必备（load 拒绝无 REG 的文件——函数指令边界唯一
-//       真源）；ENT 仍可缺（v5 精神：旧段缺失 = 空）。
-// 全整数 LE；offset 相对文件头：
-//   [header 16B]: magic u32 = "CCR1" | version u32 = 8 | seg_count u32 = 8 |
-//                 reserved u32 = 0
-//   [seg table 8×12B]: {tag u32, offset u32, size u32}——规范序（tag = 行号 1..8，
-//                 offset = 上一段尾，段体紧随段表连续排列）
-//   [seg bodies]（按段表寻址）:
-//     STR(1) 字符串表：  [str_count u32] [× {len u32, data}]（同 v5）
-//     SYM(2) 符号面（spec §3.2 归并形状——每小节自带计数）:
-//       [global_count][global_count×16B {name u32, type u32, init_val i64}]
-//                    （v5 var_idx 槽 → type：var 行序 = 全局记录序 0..G-1，
-//                    行名/型随本记录携带——var_idx 恒等行序故删除）
-//       [func_count][func_count×{name u32, param_count u32, ret_type u32,
-//                    root_region i32（本函数 SG_FUNC 的 REG 行 id）,
-//                    first_ent i32, last_ent i32（本函数条目文件范围；
-//                    -1 = 无条目）}                                   = 24B
-//                    + param_ents[param_count]×i32（参数变量的「入参」条目 =
-//                    该参数 def_nod=-1 条目 id；函数内被重定值/从未引用 → -1）
-//                    + var_count u32
-//                    + var_decls[var_count]×{name u32, type u32}]（v5 vars 表
-//                    并入——行序 = 创建序，前 param_count 个 = 参数；变量命名
-//                    space = globals 行 + 函数块行序相接，ENT/NOD var_id 指此）
-//       [str_const_count][str_const_count×4B]
-//       [struct_count][struct_count×{name u32, field_count u32,
-//                      fields[field_count]×{name u32, type u32}}]
-//       [enum_count][enum_count×{name u32, variant_count u32,
-//                     variants[variant_count]×{name u32, type_count u32,
-//                     types[type_count]×u32}}]
-//       [opt_count][opt_count×{key u32, len u32, data lenB}]
-//     NOD(3) 节点表：    [nod_count u32] [×36B {op i32, dest i32, src1 i64,
-//                        src2 i32, src3 i32, tk i32, first_edge u32,
-//                        edge_count u32}]——28B v5 语义字段不变 + 邻接索引
-//                        （v7 spec §3.3；NOD id = 文件序索引 0..nod_count-1
-//                        = 图坐标 D1；ENT 区间/def 即指此坐标）
-//     EDG(6) 边表（v7 必落）：[edg_count u32] [×8B {to_nod u32, kind u32}]
-//                        ——节点 i 出边连续段 [first_edge, first_edge+edge_count)，
-//                        first_edge = 前缀累计（节点 i+1 first_edge = 前节点
-//                        first_edge+edge_count）；每边 to_nod > 所属节点（v7
-//                        spec §4 拓扑不变量 1——数据/state 边前向）；kind 0=数据
-//                        (def-use)、1=state（副作用序）。落盘源 = g_df_edges
-//                        （内存 = 头插链表，dataflow.cr）——save 前按节点序
-//                        单遍收集（见 ccr_collect_edges）；v7 校验规则
-//                        edg_count == Σ edge_count（规则 3）。
-//     ENT(4) 条目表：    [ent_count u32] [×28B {var_id i32, version u32,
-//                        def_nod i32, live_start u32, live_end u32（半开：
-//                        最后使用点+1）, home i32, flags u32}]
-//                        v7 Task 2 起实记录（corec 产时重建 = 直调内核
-//                        compute_live_ranges/compute_entries（ent_kernel.cr——
-//                        内核抽取 Task 2 写侧单源化，镜像消除；文件 ENT = 校验面
-//                        + 语义消费通道数据源）；内存表 24B/条（闭区间、无
-//                        version，内核与写侧共用）→ 落盘：
-//                        version = 同 var 组内定值升序序数（1-based），
-//                        live_end_disk = live_end_mem + 1；盘上 7 字段 = 28B。
-//                        home 恒 -1（实例注记——分配决策不写回格式，字节
-//                        spec §3.5）；flags 恒 0（无配方/参数/全局/驱逐位
-//                        零实例——位语义保留）
-//     REG(5) region 表： [sg_count u32] [×24B {kind u32, parent i32,
-//                        enter_nod u32, exit_nod u32（v5 enter/exit 指令号 =
-//                        NOD 坐标，语义不变）, first_ent i32, last_ent i32}]
-//                        v5 的 nstart/ncount 不再落盘——nstart ≡ enter、
-//                        ncount = exit − enter（sg_push/sg_pop 不变式），
-//                        load 内存态重建与 v5 记录逐字节一致。
-//                        first_ent/last_ent（区内条目范围）语义：条目按其
-//                        def_nod ∈ [enter_nod, exit_nod) 归属 region（定值点
-//                        升序 → 文件条目序连续一段）；根 region（kind=SG_FUNC）
-//                        = 整个函数条目块（含 def=-1 参数条目）；无条目 = -1。
-//     TYPE(7) 类型面（R2 P4 Task 2 内容面；D12 两小节 = 类型行表 24B/条
-//                        {kind,data,extra}（i64×3——与内存 g_types 槽逐位同源）
-//                        + 类型项 DAG 40B/条 {tag,a..d}（i64×5），哈希不落盘
-//                        （加载侧 tt_hash5 重算）→ load 重建 g_types/
-//                        g_type_terms/g_tt_index，失败 = 整体拒绝（**不得**
-//                        留空表）。段体构造 = corec-only 的 ccr_types.cr（D18：
-//                        装填引用桥接层 sh_term_of_ti，corearch 无此层）；本文件
-//                        只搬运 g_ccr_type_seg 缓冲（保存侧）+ 解析重建（加载侧）。
-//                        loader 逐条校验（违规 = 拒绝）：两小节计数/长度自洽 +
-//                        段体无尾随字节；tag ∈ 0..10（TT_*）；a..d ≥ -1；子项
-//                        引用 < 自身行号（标注槽不查——字段表见 ccr_type_term_ref_ok）。
-//                        段内容确定性 = ccr_types.cr 的 D13 装填（类型表/接口表
-//                        的纯函数，与判定历史无关）。**段序 7/8 的数值权威 =
-//                        本文件段序**（D9；format spec §2 的 `9+` 预留顺移驱逐
-//                        标注段/证书段——两段代码零实现，仅注释冲突）
-//     IFACE(8) 接口面（R2 P4 Task 1 空壳 = [native_count u32 = 0]；内容面归
-//                        Task 3：D14 五小节 = 原生条目/横切形状/用户接口签名
-//                        项/impl 边/方法表）
-//                        Task 1 空壳纪律：段体恒 4B count = 0；loader 对
-//                        count != 0 或段体非 4B **拒绝**（内容面落地前不接受
-//                        外部半成品——不得静默当空表，三态纪律 C.5-3）。
-//                        两段必备（D11：have7/have8 == 0 → 拒绝）——可选段 =
-//                        两种 .ccr 在野 = 静默降级面。
-// 载荷约定（corec → corearch）：NOD 段 = v5 instrs 坐标化（字段同布局）——
-// corearch 消费路径不变（硬约束）；ENT 由 corearch 加载校验，发射不依赖。
-// 内存态重建（load 后 = 本文件字节的投影，ELF 发射语义零变化）：g_ir_vars 行
-// （+ TYPE 段：g_types 行表 + g_type_terms 项 DAG + g_tt_index 索引，见 TYPE 段注）
-// {name,id,type}（id = 行序）、g_ir_globals {name,var_idx,init_val}（var_idx =
-// 行序）、g_ir_func_* 七数组（instr/var 范围派生，见 (c)）、g_sgs（nstart/
-// ncount 派生）、g_ir_entries 24B 表 + func 条目块（块界按 SYM func first/last
-// 校验）。
-// 与 v5 差异：固定 36B 头 + 定序段 → Header + 段表；entries 段新增；
-//   v5 参考：magic/version=5/7 计数在固定偏移，本文件旧注释已废弃。
+// Version 9 only. The loader checks version == 9 and rejects earlier versions;
+// there is no conversion path. The format has 8 segments in canonical order:
+// STR, SYM, NOD, ENT, REG, EDG, TYPE, IFACE (tags 1..8).
+//
+// Header 16B: magic "CCR1", version 9, segment count 8, reserved 0.
+// Segment table: 8 entries of {tag u32, offset u32, size u32}. Tags are in
+// canonical order, offsets are contiguous and start at the end of the table.
+//
+// STR(1): [count][{len, data}].
+// SYM(2):
+//   globals: [count][{name u32, type u32, init_val i64}] 16B each.
+//   functions: [count][{name u32, param_count u32, ret_type u32,
+//     root_region i32, first_ent i32, last_ent i32} 24B
+//     + param_ents[param_count] i32
+//     + var_count u32 + var_decls[var_count]{name u32, type u32}].
+//   string constants: [count][u32...].
+//   structs: [count][{name u32, field_count u32,
+//     fields[field_count]{name u32, type u32}}].
+//   enums: [count][{name u32, variant_count u32,
+//     variants[variant_count]{name u32, type_count u32,
+//     types[type_count] u32}}].
+//   opt metadata: [count][{key u32, len u32, data len bytes}].
+// NOD(3): [count][40B {op i32, dest i32, src1 i64, src2 i32, src3 i32,
+//   tk i32, item i32, first_edge u32, edge_count u32}].
+// EDG(6): [count][8B {to_nod u32, kind u32}].
+// ENT(4): [count][28B {var_id i32, version u32, def_nod i32, live_start u32,
+//   live_end u32, home i32, flags u32}].
+// REG(5): [count][24B {kind u32, parent i32, enter_nod u32, exit_nod u32,
+//   first_ent i32, last_ent i32}].
+// TYPE(7): type rows and the type-term DAG.
+//   Layout: [row_count u32]
+//           [row_count * 24B {kind i64, data i64, extra i64}]
+//           [term_count u32]
+//           [term_count * 40B {tag i64, a i64, b i64, c i64, d i64}]
+//
+//   Rows are g_types[0..row_count-1] verbatim, using the same 24B memory layout:
+//   kind, data, extra. Primitive rows 0..8 and dynamic rows use the same record;
+//   the loader rebuilds the table directly and does not rerun type construction.
+//
+//   Terms are the type-term DAG in file order. The hash slot is not stored. The
+//   loader recomputes it with tt_hash5 and rebuilds g_tt_index. Field meaning by
+//   tag:
+//     TT_BOT(0), TT_TOP(1), TT_NIL(9): no references.
+//     TT_TOP_K(2): a = atom class k.
+//     TT_UNION(3), TT_INTER(4): a and b = child term indices.
+//     TT_NOT(5): a = child term index.
+//     TT_MU(6): a = bound variable id, b = body term index.
+//     TT_ATOM(7): a = AK_* atom class; b = annotation (canonical type row, fixedness
+//       marker, token value, or mut marker); c = parameter chain head or -1.
+//     TT_VAR(8): a = variable id.
+//     TT_CONS(10): a = head term, b = tail chain.
+//
+//   Validation in the loader:
+//     - row_count must fit the remaining segment; every row is read as 24B.
+//     - term_count must fit; tag is in 0..10; a, b, c, d are >= -1.
+//     - Child references must be -1 or less than the current term row. This covers
+//       UNION/INTER a and b, NOT a, MU b, CONS a and b, and every element of an
+//       ATOM c chain. The DAG is therefore acyclic in file order.
+//     - Annotation slots are not checked as row references: ATOM a and b, TOP_K a,
+//       MU a, and VAR a store class ids, annotations, or variable ids.
+//     - The segment must end exactly at its table boundary. A mismatch rejects the
+//       file.
+//
+//   NOD.item is an index into this term table. After TYPE loads, the loader checks
+//   every NOD item: item = -1 needs no term, and item >= 0 must satisfy
+//   tt_atom_of_term(item) == the on-disk tk code. A mismatch rejects the file.
+//
+//   TYPE is required. An empty, truncated, or non-translatable TYPE segment rejects
+//   the whole file; it is never treated as an empty table. Content is built by
+//   corec-only ccr_types.cr from the type rows and interface table, independent of
+//   judgment history. Hashes are omitted because they are a pure function of the
+//   five fields.
+//
+// IFACE(8): five sections, each prefixed by a u32 count.
+//   1. Native entries:
+//      [count = IFACE_ENTRY_COUNT][24B {ak i32, ti_row i32, name_ni i32,
+//       lit_code i32, ops i64}].
+//   2. Cross-cutting shapes: [count][8B {name_ni i32, term i32}].
+//   3. User interfaces:
+//      [count][16B {name_ni i32, method_count i32, generic_count i32, pad i32}
+//       + method_count * 80B {name_ni i32, param_count i32, self_mode i32,
+//       ret_term i32, param_terms[8] i32, param_codes[8] i32}].
+//   4. Impl edges: [count][8B {trait_ni i32, type_ni i32}].
+//   5. Method table: [count][12B {type_ni i32, method_ni i32, mangled_ni i32}].
+//   name_ni, method_ni, and mangled_ni are STR indices. ti_row is -1 or a TYPE
+//   row; term is -1 or a TYPE term. Counts must fit the segment and the walk must
+//   end exactly at its table boundary.
+//
+// Invariants:
+// - Node ids are file order. Edges are stored per node in a contiguous range;
+//   every to_nod is greater than the owning node.
+// - ENT is the verification and semantic source. version is the 1-based
+//   definition ordinal within a var group; live_end is half-open. home is -1
+//   and flags is 0 in files produced by the current writer.
+// - REG is required; function instruction ranges derive from the SG_FUNC root
+//   region span. ENT may be absent, treated as an empty table.
+// - TYPE and IFACE are required. The loader rejects missing segments rather
+//   than treating them as empty.
+//
+// Memory reconstruction after load: g_ir_vars, g_ir_globals, function arrays,
+// g_sgs, g_ir_entries, g_types, g_type_terms, g_tt_index, and interface tables.
+//
+// All integers are little-endian, and offsets are relative to the file start.
 
 // --- Byte buffer helpers ---
-// No bitwise ops in Core — use arithmetic instead.
+// No bitwise ops in Core; use arithmetic instead.
 
 CCR_MAGIC : int = 827474755  // "CCR1" (0x31524343)
-CCR_VERSION : int = 9        // v9-only（load 校验 ==9；拒 version≠9——D10 先例：v8 及更早整类拒收，**不得**静默当「段/字段缺席 = 空表」）。
-//                              R2 P6 Task 3（β）：v8→v9 = NOD 记录 36→40B（+28 项索引 i32、邻接域顺移 +32/+36）——旧文件在版本闸整类拒收
-//                              （cache miss 语义 = 使用者重编；.cir 快照面零改动 ⇒ CIR_CACHE_VER 当时为 17——**该值此后由 TODO #2026-09-16-16 批 2 升到 18**（见该批计划 §12.4），**再于 2026-09-17 由批 5（opt-dex，TODO #2026-09-16-29）升到 19**（`dex?` 载荷形式规范化）；**再于同日由缓存膨胀批升到 20**（段粒度按函数收窄 + 边端点相对 id + 尾部基线见证 trailer））；`.ccr` 侧仍不 bump）
-CCR_SEG_COUNT : int = 8      // STR SYM NOD ENT REG EDG TYPE IFACE（规范序 tag 1..8；预留 9+ 不占空间——D9：原 7/8 预留段顺移）
-CCR_SEG_TYPE : int = 7       // TYPE 段 tag（数值权威 = 段序；D9）
-CCR_SEG_IFACE : int = 8      // IFACE 段 tag（D9）
+CCR_VERSION : int = 9        // v9 only. The loader rejects any other version;
+                             // there is no conversion path.
+CCR_SEG_COUNT : int = 8      // STR SYM NOD ENT REG EDG TYPE IFACE
+CCR_SEG_TYPE : int = 7       // TYPE 段 tag
+CCR_SEG_IFACE : int = 8      // IFACE 段 tag
 
-// On-disk NOD record size: 32B 语义区（8 字段）+ 邻接 2 × u32 = 40 bytes — v7 spec §3.3
-// {op, dest, s1(i64), src2, src3, tk, item, first_edge, edge_count}（v5 原 28B 语义
-// 字段逐字节不变 + R2 P6 Task 3 的 4B 项索引 = 32B 语义区；first_edge/edge_count =
-// 节点出边在 EDG 段的连续段索引）。`tk` = **派生码**（sh_dfn_code_of_slots，
-// 语义/字节与 v8 逐字节同——辅码面节点即靠它）；`item` = **TYPE 段文件空间**
-// 项索引（i32，-1 = 无项；写侧装填 = ccr_types.cr:ccr_nod_item_populate，
-// 读侧 = load_ccr 的 TYPE 段后一致性硬校验——见该段注）。内存对象记录 = 本记录
-// 前 32B（ESZ_NOD_SEM，剥离邻接）——见 ent_kernel.cr 语义对象节。
+// NOD record: 40 bytes.
+// {op i32, dest i32, s1 i64, src2 i32, src3 i32, tk i32, item i32,
+//  first_edge u32, edge_count u32}.
+// tk is the derived type code. item is an index into the TYPE segment term space
+// (-1 means none). first_edge and edge_count locate this node's outgoing edges
+// in EDG. The in-memory object record is the first 32 bytes (ESZ_NOD_SEM)
+// without the adjacency fields.
 ESZ_NOD_DISK : int = 40
 
-// On-disk EDG record size: 2 × u32 = 8 bytes — v7 spec §3.4
-// {to_nod u32, kind u32}（from = 所属节点，邻接隐含——文件序节点 i 的出边
-// 在 [first_edge, first_edge+edge_count) 连续段内）
+// EDG record: 8 bytes, {to_nod u32, kind u32}. The source node is implicit:
+// node i's outgoing edges are the contiguous range
+// [first_edge, first_edge + edge_count).
 ESZ_EDGE_DISK : int = 8
 
-// On-disk REG record size: 6 × i32 = 24 bytes — v6 坐标化字段序
-// {kind, parent, enter_nod, exit_nod, first_ent, last_ent}（v5 的 nstart/ncount
-// 不落盘——load 由 enter/exit 派生：nstart = enter, ncount = exit − enter）。
-// NOTE: the in-memory SG entry is ESZ_SG (48 bytes, u64 fields) — that is NOT
-// the wire format. Always use ESZ_SG_DISK for .ccr size math, never ESZ_SG.
+// REG record: 24 bytes, {kind i32, parent i32, enter_nod u32, exit_nod u32,
+// first_ent i32, last_ent i32}. nstart and ncount are not stored; the loader
+// derives nstart = enter and ncount = exit - enter.
+// The in-memory SG entry is ESZ_SG (48 bytes, u64 fields), which is not the wire
+// format. Use ESZ_SG_DISK for .ccr size math.
 ESZ_SG_DISK : int = 24
 
 // SYM 落盘记录尺寸：
-//   全局记录 16B {name u32, type u32, init_val i64}（v5 var_idx 槽 → type）
+//   global records: 16B {name u32, type u32, init_val i64}.
 //   函数记录 = 24B 定长头 {name, param_count, ret_type, root_region,
 //                first_ent, last_ent} + param_ents[i32 × param_count]
 //              + {var_count u32} + var_decls[8B × var_count]
@@ -172,8 +147,8 @@ ESZ_VARDECL_DISK : int = 8
 
 // On-disk ENT record: 7 × 4B = 28 bytes (var_id/version/def_nod/live_start/
 // live_end/home/flags; version + 半开 live_end 由内存 24B 表转换，见文件头注释).
-// The in-memory entry table is ESZ_ENTRY (24 bytes, no version field — the
-// per-var ordinal is derivable from group order); disk record ≠ memory record.
+// The in-memory entry table is ESZ_ENTRY (24 bytes, no version field，the
+// per-var ordinal is derivable from group order); disk record != memory record.
 ESZ_ENTRY_DISK : int = 28
 
 fn bw_byte(val: int, shift: int) -> int:
@@ -216,7 +191,7 @@ fn buf_read_i32(buf: string, pos: int) -> int:
 fn buf_read_i64(buf: string, pos: int) -> int:
     // Little-endian signed 64-bit. The low dword must be read UNSIGNED:
     // reading it signed (buf_read_i32) would double-subtract for negatives
-    // (e.g. -7 = lo -7 + hi -1 → -7 + -2^32, not -7).
+    // (e.g. -7 = lo -7 + hi -1 -> -7 + -2^32, not -7).
     b0 := load8(buf, pos)
     b1 := load8(buf, pos + 1)
     b2 := load8(buf, pos + 2)
@@ -231,7 +206,7 @@ fn buf_read_i64(buf: string, pos: int) -> int:
         hi = hi + (h3 - 256) * 16777216
     else:
         hi = hi + h3 * 16777216
-    // 修复 15：h3 < 128 时漏加 h3×2^24 → bit 56-62 丢失
+    // 修复 15：h3 < 128 时漏加 h3×2^24 -> bit 56-62 丢失
     // Keep the factor within the parser's supported integer-literal range.
     hi_part := hi * 65536
     hi_part = hi_part * 65536
@@ -260,8 +235,8 @@ fn ccr_validate_i32_fields() -> int:
         if ccr_i32_fits(iri_dest(ii)) == 0 || ccr_i32_fits(iri_s2(ii)) == 0 || ccr_i32_fits(iri_s3(ii)) == 0:
             return 0
         ii = ii + 1
-    // REG 落盘字段 = kind/parent/enter/exit（nstart/ncount 由 enter/exit 派生，
-    // 不再落盘——v5 校验过的内存 nstart/ncount 字段随之免除）
+    // REG stores kind, parent, enter, and exit. nstart and ncount are derived
+    // from enter and exit and are not written.
     si : ., mut = 0
     loop:
         if si >= g_sg_count:
@@ -272,9 +247,9 @@ fn ccr_validate_i32_fields() -> int:
         si = si + 1
     return 1
 
-// 函数 fi 的根 region = REG 行序第 fi 个 SG_FUNC 行（压栈序：每个已编译函数
-// df_begin_func 推 SG_FUNC，嵌套行紧随其根行——根行按函数序 1:1）。
-// 返回行 id；-1 = 越界/结构不一致。
+// 函数 fi 的根 region = REG 记录顺序第 fi 个 SG_FUNC 行（压栈序：每个已编译函数
+// df_begin_func 推 SG_FUNC，嵌套行紧随其根记录，根记录按函数序 1:1）。
+// 返回记录 id；-1 = 越界/结构不一致。
 fn ccr_func_root_sg(func_i: int) -> int:
     if func_i < 0:
         return -1
@@ -290,8 +265,9 @@ fn ccr_func_root_sg(func_i: int) -> int:
         si = si + 1
     return -1
 
-// --- Segment size calculation（段体大小；Header+段表 = 16 + 12×6 = 88）---
-// 每段自带计数 u32；写侧与 calc 侧逐字节一致（v7 测试 walk 校验 end==fsize）。
+// Segment size calculation. Header plus segment table = 16 + 12*8 = 112 bytes.
+// Each segment carries a u32 count. The writer and size calculation must agree;
+// the final segment end must equal the file size.
 
 fn ccr_str_seg_size() -> int:
     sz : ., mut = 4  // str_count
@@ -305,8 +281,8 @@ fn ccr_str_seg_size() -> int:
 
 fn ccr_sym_seg_size() -> int:
     // 布局 = ccr_sym_seg_size/save_ccr/load_ccr 三方逐字节一致（见头注释）：
-    //   globals(16B) → funcs(24B 头 + param_ents + var_count + var_decls 8B)
-    //   → str_consts → structs → enums → opt_meta
+    //   globals(16B) -> funcs(24B 头 + param_ents + var_count + var_decls 8B)
+    //   -> str_consts -> structs -> enums -> opt_meta
     sz : ., mut = 4 + g_ir_global_count * ESZ_GLOBAL_DISK   // global_count + globals
     sz = sz + 4  // func_count
     fi : ., mut = 0
@@ -364,21 +340,21 @@ fn ccr_ent_seg_size() -> int:
 fn ccr_reg_seg_size() -> int:
     return 4 + g_sg_count * ESZ_SG_DISK
 
-// R2 P4 Task 2：TYPE(7) 段体大小 = 段体缓冲长度（D18：内容构造 = corec-only
-// ccr_types.cr；本文件保持共享层纯度——ccr_io.cr 同时在 corearch 清单内，任何
-// 前端符号引用 = corearch N06 静默未定义）。缓冲**含首字段 row_count** ⇒ 段体
-// 大小 ≡ 缓冲长度（单源；T1 空壳期注释写的「4 + 段体缓冲长度」是缓冲不含计数的
-// 方案，实施取「缓冲 = 完整段体」，偏差登记见 Task 2 报告）。
+// TYPE(7) segment size is the prepared buffer length. The content is built by
+// corec-only ccr_types.cr. ccr_io.cr is shared with corearch and must not refer
+// to frontend symbols. The buffer includes row_count, so segment size equals
+// buffer length.
 fn ccr_type_seg_size() -> int:
     return g_ccr_type_seg_len
 
-// R2 P4 Task 3：IFACE(8) 段体大小（D14 五小节；D18 解耦——内容构造 = corec-only
-// ccr_types.cr 的 ccr_iface_populate/ccr_iface_seg_build；本文件（corearch 也链接）
-// 只按段表搬运/解析）。缓冲**含首字段 native_count** ⇒ 段体大小 ≡ 缓冲长度（单源）。
+// IFACE(8) segment size is the prepared buffer length. The five sub-sections are
+// built by corec-only ccr_iface_populate and ccr_iface_seg_build in ccr_types.cr.
+// This file, which corearch also links, only copies and parses the segment. The
+// buffer includes native_count, so segment size equals buffer length.
 fn ccr_iface_seg_size() -> int:
     return g_ccr_iface_seg_len
 
-// --- Size calculation（v8：16B header + 8×12B seg table + 各段体）---
+// Size calculation: 16B header + 8*12B segment table + segment bodies.
 // edge_total = EDG 记录总数（save_ccr 先行收集，见 ccr_collect_edges）。
 
 fn calc_ccr_size(edge_total: int) -> int:
@@ -393,13 +369,13 @@ fn calc_ccr_size(edge_total: int) -> int:
     sz = sz + ccr_iface_seg_size()
     return sz
 
-// --- EDG 内容收集（写侧；v7 spec §3.4/§4）---
-// g_df_edges = 每节点头插出边链表（dataflow.cr df_add_edge_kind，OFF_DFE_NEXT
-// 链）。落盘前按节点序单遍走查 → 每节点出边连续段（first_edge = 前缀累计）
-// + 扁平 {to, kind} 值缓冲（8B/边，to + kind×2^32 打包）。写侧守卫与 loader
-// 同域（v7 守卫面强度保持）：链表归属错乱/后向边（to_nod ≤ 所属节点，自环
-// 含）/kind > 1 → 拒绝落盘（内存图 = 文件 EDG 的唯一源，loader 永不拒绝
-// 自己 writer 的产物）。
+// EDG collection on the write side.
+// g_df_edges is a per-node head-inserted out-edge list (dataflow.cr,
+// OFF_DFE_NEXT). Before saving, walk nodes in order and build each node's
+// contiguous out-edge range (first_edge = prefix sum) plus a flat {to, kind}
+// buffer (8B per edge, packed as to + kind*2^32). The write guard matches the
+// loader: a wrong owner, a backward or self edge (to_nod <= source), or
+// kind > 1 rejects the file. The in-memory graph is the only source for EDG.
 fn ccr_collect_edges(edge_counts: string, edge_offs: string) -> int:
     total : ., mut = 0
     ni : ., mut = 0
@@ -414,13 +390,13 @@ fn ccr_collect_edges(edge_counts: string, edge_offs: string) -> int:
                 break
             if eid >= g_df_edge_count:
                 return -1
-            // 链表越界（缓存恢复错乱防御）
+            // Edge record out of range; reject a corrupted cache restore.
             if r64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_FROM) != ni:
                 return -1
             eto := r64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_TO)
             if eto <= ni:
                 return -1
-            // v7 §4 规则 1：to_nod > 所属节点
+            // Rule: to_nod must be greater than the source node.
             if r64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_KIND) > 1:
                 return -1
             cnt = cnt + 1
@@ -448,16 +424,15 @@ fn ccr_fill_edge_buf(buf: string, edge_offs: string):
             eid = r64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_NEXT)
         ni = ni + 1
 
-// --- v7 读侧载入缓冲（EDG 校验后保留——图边语义对象：内核完备 Task 1 起经
-// 对象面 v7_edge_to/v7_edge_kind 消费（ent_kernel.cr——节点出边遍历 = 配方
-// 输入集）；g_df_edges 在 corearch 编译物中存在但 dataflow.cr 不在其内——
-// 独立缓冲）---
-g_v7_edges : string, mut         // EDG 扁平记录（8B/条，文件序 = 节点运行序）
+// EDG load buffer. After validation, keep the flat edge records for the object
+// API v7_edge_to and v7_edge_kind in ent_kernel.cr. The corearch build does not
+// include dataflow.cr, so this is a separate buffer.
+g_v7_edges : string, mut         // EDG 扁平记录（8B/条，文件序 = 节点运记录顺序）
 g_v7_edge_count : int, mut
 
-// --- Entry-table accessors（内存 24B 表读——写侧/loader 本地别名；内核
-// ent_* 等价访问器在 ent_kernel.cr（双 concat 共享，2026-09-10 Task 2 起），
-// 本组保留不收敛（按实际引用删原则）。buf_read_i32 带符号扩展同内核。）---
+// Entry table accessors for the in-memory 24B table. These are local aliases for
+// the writer and loader; ent_kernel.cr has equivalent ent_* accessors.
+// buf_read_i32 sign-extends the same way as the kernel.
 fn ccr_ent_var(e: int) -> int:
     return buf_read_i32(g_ir_entries, e * ESZ_ENTRY + OFF_ENTRY_VAR)
 fn ccr_ent_def(e: int) -> int:
@@ -471,16 +446,15 @@ fn ccr_ent_home(e: int) -> int:
 fn ccr_ent_flags(e: int) -> int:
     return buf_read_i32(g_ir_entries, e * ESZ_ENTRY + OFF_ENTRY_FLAGS)
 
-// --- Entry 表载体 grow 注记（内核抽取 Task 2：写侧单源化）---
-// compute_entries_v7/ccr_grow_* 镜像已删——corec 写侧直调内核
-// compute_live_ranges()（尾部逐函数内调 compute_entries；grow = 内核
-// grow_entries/grow_func_entry_meta，ent_kernel.cr 双 concat 共享单实例）。
-// loader（corearch 进程）ENT 载入同样直调内核 grow（函数体 = 原本地副本
-// 逐字节同源——语义零变化）。
+// Entry table growth. compute_entries_v7 and the ccr_grow_* mirrors are gone.
+// The corec writer calls compute_live_ranges(), which calls compute_entries per
+// function. Growth uses the kernel grow_entries and grow_func_entry_meta functions
+// in ent_kernel.cr, shared by both concat builds. The corearch loader calls the
+// same kernel functions.
 
 // 函数条目块 [es, es+ec) 内 var 的 def=-1 条目 id（SYM func param_ents 回填
-// 用——参数「入参」条目 = 该参数 def=-1 条目；被重定值/从未引用 → 无 = -1；
-// def=-1 补丁每 var 至多一条）。写侧守卫：返回 id 恒 ≥ es 且在块内。
+// 用，参数入参条目 = 该参数 def=-1 条目；被重定值/从未引用 -> 无 = -1；
+// def=-1 补丁每 var 至多一条）。写侧检查：返回 id 恒 >= es 且在块内。
 fn ccr_param_entry_id(var_id: int, es: int, ec: int) -> int:
     e : ., mut = 0
     loop:
@@ -492,17 +466,13 @@ fn ccr_param_entry_id(var_id: int, es: int, ec: int) -> int:
         e = e + 1
     return -1
 
-// --- 写侧对象镜像（内核完备 Task 2——A 通道中立化写侧载体裁决 2026-09-10）---
-// corec 写侧不经 loader——内核 compute 系（ent_kernel.cr）现读 NOD 对象面
-// nod_*（compute_live_ranges/compute_entries/… 的 iri_* 4 使用点已中立化）：
-// 本函数在 compute 前把线性流 g_ir_instrs 单遍镜像到内核对象缓冲
-// g_v7_nod_sem（28B 语义字段——字段序/宽度与 loader 解析逐字节对称：op u32
-// @0/dest i32 @4/s1 i64 @8/s2 i32 @16/s3 i32 @20/tk u32 @24，布局 = 盘 36B
-// 记录剥离邻接——OFF_NS_*/ESZ_NOD_SEM 见 ent_kernel.cr 语义对象节）。数值
-// 与本函数下方 NOD 段写盘同源（同 g_ir_instrs 直读、save_ccr 头已过
-// ccr_validate_i32_fields 形状守卫）→ loader 载入文件产生的镜像与本函数产物
-// 逐字节同 —— compute 尾随逐函数 compute_entries，ENT 数据面双进程同值、
-// 产物 byte-identical（行为零变化判据）。
+// Write-side object mirror. corec does not load through the loader, and the
+// kernel compute functions read NOD objects through nod_*. Before compute, copy
+// g_ir_instrs into g_v7_nod_sem (28B semantic fields: op, dest, s1, s2, s3, tk,
+// item). Values come from the same g_ir_instrs that save_ccr writes, after
+// ccr_validate_i32_fields. The loader builds the same mirror from the file, so
+// both processes call compute_entries on identical inputs and produce the same
+// ENT data.
 fn populate_nod_objects():
     g_v7_nod_sem = alloc((g_ir_instr_count + 8) * ESZ_NOD_SEM)
     g_v7_nod_count = g_ir_instr_count
@@ -516,10 +486,10 @@ fn populate_nod_objects():
         w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S2, iri_s2(ii))
         w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S3, iri_s3(ii))
         w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_TK, iri_tk(ii))
-        // R2 P6 Task 3（β）：项索引（TYPE 段文件空间；-1 = 无项）。缓冲由 corec-only
-        // 的 ccr_types.cr:ccr_nod_item_populate 装填（D18：本文件在 corearch 清单内，
-        // 此处**不得**引桥接层符号），本函数纯搬运；缓冲短于节点数（不经
-        // ccr_seg_prepare_save 的诊断路径）⇒ 落 -1（响亮面由 load 侧一致性校验承担）。
+        // 项索引（TYPE 段文件空间；-1 = 无项）。缓冲由 corec-only
+        // 的 ccr_types.cr:ccr_nod_item_populate 装填（：本文件在 corearch 清单内，
+        // 此处不得引桥接层符号），本函数纯搬运；缓冲短于节点数（不经
+        // ccr_seg_prepare_save 的诊断路径），因此落 -1（报错路径由 load 侧一致性校验承担）。
         it0 : ., mut = -1
         if ii < g_ccr_nod_item_count:
             it0 = buf_read_i32(g_ccr_nod_item, ii * 4)
@@ -529,29 +499,27 @@ fn populate_nod_objects():
 // --- Save（写侧与 calc 侧一致；段表规范序、段体连续）---
 
 fn save_ccr(path: string) -> int:
-    // The v7 wire format stores these fields as signed i32 — 编码层文件格式
-    // 限制（字段形状 = 文件布局域，hw-map/经典投影实例；与 int 语义无涉，
-    // int-unbounded-semantics 定稿 §三）。Refuse to emit a lossy file instead
-    // of letting w32 silently keep only the low bits.
+    // The wire format stores the checked fields as signed i32. Refuse to emit a
+    // lossy file instead of letting w32 keep only the low bits.
     if ccr_validate_i32_fields() == 0:
         return -1
 
-    // v7 Task 2（ENT 主干化）+ 内核抽取 Task 2（写侧单源化）：ENT 数据面先行
-    // ——corec 写侧直调内核 compute_live_ranges()（尾部逐函数内调 compute_entries，
-    // 填 g_ir_entries 内存 24B 闭区间表 / g_entry_count + 函数块界
-    // g_ir_func_entry_start/count）。镜像 compute_entries_v7 已消除——双转录
-    // R5 收敛；corearch 判定/分配自算 = 同一内核（双进程同源）。文件 ENT = 校验
-    // 面 + 语义消费通道数据源，行为零变化（半开转换 live_end+1 仍在下方写点）。
-    // 内核完备 Task 2（A 通道中立化——写侧载体裁决 2026-09-10）：compute 系
-    // 已改读 NOD 对象面（nod_*——ent_kernel.cr iri_* 4 使用点中立化），corec
-    // 写侧不经 loader → 本进程 compute 前先 populate（g_ir_instrs →
-    // g_v7_nod_sem 镜像，与 loader 载入对称）；同值 → ENT 产物与直读时代
-    // byte-identical（双进程同实现，无第二套 compute）。
+    // ENT data is computed first. The corec writer calls compute_live_ranges(),
+    // which calls compute_entries per function and fills the in-memory 24B
+    // half-open table g_ir_entries, g_entry_count, and the per-function entry
+    // block bounds g_ir_func_entry_start/count. The corearch verifier and
+    // allocator call the same kernel. The file ENT section is the verification
+    // and semantic source; the half-open conversion live_end + 1 happens at the
+    // write site below.
+    // Before compute, populate the NOD object mirror from g_ir_instrs. The loader
+    // builds the same mirror, so ENT bytes match the loader's view.
     populate_nod_objects()
     compute_live_ranges()
 
-    // v7：EDG 内容先收集（NOD 邻接域 + 段尺寸先决）——g_df_edges 内存 =
-    // 头插链表，按节点序走查 → 每节点出边连续段（first_edge = 前缀累计）
+    // EDG content is collected first because NOD adjacency and segment sizes
+    // depend on it. g_df_edges is an in-memory head-inserted list; walking nodes
+    // in order builds each node's contiguous out-edge range (first_edge is the
+    // prefix sum).
     edge_counts := alloc((g_ir_instr_count + 8) * 8)
     edge_offs := alloc((g_ir_instr_count + 8) * 8)
     edge_total := ccr_collect_edges(edge_counts, edge_offs)
@@ -583,8 +551,8 @@ fn save_ccr(path: string) -> int:
     s4 := ccr_ent_seg_size()
     s5 := ccr_reg_seg_size()
     s6 := ccr_edg_seg_size(edge_total)
-    s7 := ccr_type_seg_size()    // R2 P4 Task 2：内容面（缓冲长度）
-    s8 := ccr_iface_seg_size()   // R2 P4 Task 3：内容面（缓冲长度）
+    s7 := ccr_type_seg_size()    // 内容（缓冲长度）
+    s8 := ccr_iface_seg_size()   // 内容（缓冲长度）
 
     // Seg table（8 × 12B；offset = 前段尾，从段表后起；规范序 tag 1..8）
     o1 : ., mut = 16 + CCR_SEG_COUNT * 12
@@ -649,9 +617,11 @@ fn save_ccr(path: string) -> int:
         si = si + 1
 
     // === SYM: globals（16B each: name u32, type u32, init_val i64）===
-    // v5 var_idx 槽 → type（var_idx 恒 == 行序——ir_gen reg_one_global 每全局
-    // 一 var 行、行序与记录序锁步；下方校验强制，失配拒绝 = 防止未来布局漂移
-    // 时静默生成行序错位的文件）。全局行 = var 命名空间前缀 0..G-1。
+    // The global record stores type, not var_idx: var_idx always equals the row
+    // order because reg_one_global creates one var row per global and keeps row
+    // order in lockstep. The check below rejects a mismatch, so a future layout
+    // change cannot silently produce a file with the wrong row order. Global rows
+    // are the prefix 0..G-1 of the var namespace.
     buf_write_u32(buf, pos, g_ir_global_count)
     pos = pos + 4
     gi : ., mut = 0
@@ -668,15 +638,17 @@ fn save_ccr(path: string) -> int:
         pos = pos + 8 // init_val
         gi = gi + 1
 
-    // === SYM: funcs（24B 头 + param_ents + var 声明区——v5 func_meta 的
-    // instr_start/count 由 root_region span 取代、var_start/count 由声明区
-    // 行序游标取代；v5 vars 表并入声明区：行序 = 创建序、前 param_count 个
-    // = 参数。var 行序守卫：每函数声明区起点 == 前缀累计（globals 行 + 前
-    // 函数 var 数），块序相接铺满 g_ir_vars）===
-    // GC-4（SYM 评审 M2）：位置级守卫——计数级（Σ == var_count + var_idx == gi）
-    // 总量守恒时察觉不到块错位（声明区左移/右移一格、总量不变 → 文件行序
-    // 静默漂移，ENT var_id 命名空间错位）。失配 = 函数非序发射 → 拒绝；与
-    // loader REG root span 校验（load 侧同域闭环）同风格。
+    // === SYM: functions ===
+    // Header 24B plus param_ents plus the var declaration area. The function
+    // instruction range is derived from root_region span, and var_start/count are
+    // derived from the declaration-area cursor. Variable rows are in creation
+    // order, and the first param_count rows are parameters.
+    // The guard is positional: each function declaration block must start at the
+    // prefix sum (global rows plus previous function var counts), and blocks must
+    // cover g_ir_vars without gaps. A count-only check cannot detect a block
+    // shifted by one row when the total is unchanged; that would silently shift
+    // file row order and corrupt the ENT var_id namespace. A mismatch means the
+    // function was not emitted in order and the file is rejected.
     vcursor : ., mut = g_ir_global_count
     buf_write_u32(buf, pos, g_ir_func_count)
     pos = pos + 4
@@ -691,13 +663,13 @@ fn save_ccr(path: string) -> int:
         vs := r64(g_ir_func_var_start, fi * 8)
         if vs != vcursor:
             return -1
-        // 声明区起点 ≠ 前缀累计 → 行序错位
+        // 声明区起点 != 前缀累计 -> 记录顺序错位
         vcursor = vcursor + vc
         pc := r64(g_ir_func_param_count, fi * 8)
         if pc > vc:
             return -1
-        // v7 Task 2：条目块界实回填（内核 compute_live_ranges 已先行）——函数条目
-        // 块 = ENT 文件序连续段 [es, es+ec)（SYM func 与 REG 根行同源双写；
+        // 条目块界实回填（内核 compute_live_ranges 已先行），函数条目
+        // 块 = ENT 文件序连续段 [es, es+ec)（SYM func 与 REG 根记录同源双写；
         // loader 块对照消费：pcnt==0 ↔ -1、ffe == 块首、fle == 块末）
         es := r64(g_ir_func_entry_start, fi * 8)
         ec := r64(g_ir_func_entry_count, fi * 8)
@@ -718,9 +690,9 @@ fn save_ccr(path: string) -> int:
         pos = pos + 4
         buf_write_i32(buf, pos, le2)
         pos = pos + 4
-        // param_ents 实回填：参数「入参」条目 = 该参数 var 的 def=-1 条目 id
-        // （函数内被重定值/从未引用 → -1；头注释 §3.2 语义）。loader 只做
-        // 界拒绝（pid < -1）——与 ENT 的一致性由 Python 侧/测试网对照。
+        // param_ents 实回填：参数入参条目 = 该参数 var 的 def=-1 条目 id
+        // （函数内被重定值/从未引用 -> -1；头注释 3.2 语义）。loader 只做
+        // 界拒绝（pid < -1），与 ENT 的一致性由 Python 侧/测试网对照。
         pp : ., mut = 0
         loop:
             if pp >= pc:
@@ -728,7 +700,7 @@ fn save_ccr(path: string) -> int:
             buf_write_i32(buf, pos, ccr_param_entry_id(vs + pp, es, ec))
             pos = pos + 4
             pp = pp + 1
-        // var 声明区（行序声明——name/type；ENT「存在即声明」的名称/类型投影）
+        // var 声明区（记录顺序声明，name/type；ENT存在即声明的名称/类型投影）
         buf_write_u32(buf, pos, vc)
         pos = pos + 4
         vv : ., mut = 0
@@ -746,7 +718,7 @@ fn save_ccr(path: string) -> int:
         fi = fi + 1
     if vcursor != g_ir_var_count:
         return -1
-    // 末块未铺满命名空间 → 洞
+    // 末块未铺满命名空间 -> 洞
 
     // === SYM: string constants ===
     buf_write_u32(buf, pos, g_ir_str_const_count)
@@ -836,9 +808,10 @@ fn save_ccr(path: string) -> int:
             di = di + 1
         mi = mi + 1
 
-    // === NOD: instructions（36B each；NOD id = 文件序 = 全局指令序；28B
-    // 语义字段与 v6 逐字段一致 + first_edge/edge_count 邻接索引——EDG 段
-    // 由 edge_buf 在段体末尾落盘）===
+    // === NOD: instructions ===
+    // 40B each. NOD id is file order and equals global instruction order. Each
+    // record has the 32B semantic fields plus first_edge and edge_count for the
+    // adjacency range. EDG is written from edge_buf after the NOD body.
     buf_write_u32(buf, pos, g_ir_instr_count)
     pos = pos + 4
     ii : ., mut = 0
@@ -849,8 +822,8 @@ fn save_ccr(path: string) -> int:
         pos = pos + 4
         buf_write_i32(buf, pos, iri_dest(ii))
         pos = pos + 4
-        // 修复 14：s1 改 64 位——IR_CONST 的大 int 常量 / float 位模式
-        // 之前被截断成 32 位（float 常量静默损坏）
+        // s1 is 64-bit so IR_CONST large int constants and float bit patterns are
+        // not truncated to 32 bits.
         buf_write_i64(buf, pos, iri_s1(ii))
         pos = pos + 8
         buf_write_i32(buf, pos, iri_s2(ii))
@@ -859,7 +832,7 @@ fn save_ccr(path: string) -> int:
         pos = pos + 4
         buf_write_u32(buf, pos, iri_tk(ii))
         pos = pos + 4
-        // R2 P6 Task 3（β）：项索引（i32；-1 = 无项）——与内存镜像同源
+        // 项索引（i32；-1 = 无项），与内存镜像同源
         // （g_ccr_nod_item，corec-only 侧装填；本文件纯搬运）。
         it1 : ., mut = -1
         if ii < g_ccr_nod_item_count:
@@ -872,8 +845,8 @@ fn save_ccr(path: string) -> int:
         pos = pos + 4 // edge_count
         ii = ii + 1
 
-    // === ENT: entries（28B each；内存闭区间 → 盘上：version 组内序数、live_end+1 半开）===
-    // 版本序数：每 var 一张计数槽（var 全局槽 id 唯一属一个函数——组内序 = 全局序）
+    // === ENT: entries（28B each；内存闭区间 -> 盘上：version 组内序数、live_end+1 半开）===
+    // 版本序数：每 var 一张计数槽（var 全局槽 id 唯一属一个函数，组内序 = 全局序）
     buf_write_u32(buf, pos, g_entry_count)
     pos = pos + 4
     vcnt : string, mut = alloc((g_ir_var_count + 8) * 8)
@@ -911,15 +884,17 @@ fn save_ccr(path: string) -> int:
         pos = pos + 4     // flags
         ej = ej + 1
 
-    // === REG: region（24B each——spec §3.5 字段序 {kind, parent, enter_nod,
-    // exit_nod, first_ent, last_ent}；v5 nstart/ncount 不落盘 = enter/exit 派生，
-    // 未闭合（exit < enter）region 无法表示 → 拒绝）===
-    // first/last 语义：区内条目 = 定值点 def_nod ∈ [enter, exit)（定值点升序 →
-    // 文件条目序连续段）；根 region（kind=SG_FUNC，函数 k = 行序第 k 个根）=
-    // 整个函数条目块（含 def=-1 参数条目）；无条目 = -1。
+    // === REG: regions ===
+    // 24B each: {kind, parent, enter_nod, exit_nod, first_ent, last_ent}.
+    // nstart and ncount are not stored; they derive from enter and exit. A region
+    // with exit < enter is unclosed and is rejected.
+    // first/last semantics: entries in the region have def_nod in [enter, exit).
+    // Definition order keeps the file range contiguous. The root region
+    // (kind=SG_FUNC, function k is the k-th root row) covers the whole function
+    // entry block, including def=-1 parameter entries. No entries means -1.
     buf_write_u32(buf, pos, g_sg_count)
     pos = pos + 4
-    rfunc : ., mut = -1  // 当前根 region 的函数号（行序 = 压栈序）
+    rfunc : ., mut = -1  // 当前根 region 的函数号（记录顺序 = 压栈序）
     si2 : ., mut = 0
     loop:
         if si2 >= g_sg_count:
@@ -931,17 +906,17 @@ fn save_ccr(path: string) -> int:
         spa := r64(g_sgs, f + OFF_SG_PARENT)
         if sex < sen:
             return -1
-        // 未闭合 → ncount 不可派生
+        // 未闭合 -> ncount 不可派生
         if sk2 == SG_FUNC:
             rfunc = rfunc + 1
         if rfunc < 0 || rfunc >= g_ir_func_count:
             return -1
-        // 行序结构失配
-        // v7 Task 2：条目范围实回填（内核 compute_live_ranges 已先行）——根 region
+        // 记录顺序结构失配
+        // 条目范围实回填（内核 compute_live_ranges 已先行），根 region
         // （SG_FUNC）= 整个函数条目块（含 def=-1 参数条目；与 SYM func
-        // first/last 同源双写——loader 逐根行对照）；嵌套 region = 定值点
-        // def_nod ∈ [enter, exit) 的条目段（块内定值点升序 → 文件条目序连续
-        // 一段；无 = -1）。头注释 §3.5 语义：区间 = def_nod 归属，非全块。
+        // first/last 同源双写，loader 逐根记录对照）；嵌套 region = 定值点
+        // def_nod in [enter, exit) 的条目段（块内定值点升序 -> 文件条目序连续
+        // 一段；无 = -1）。头注释 3.5 语义：区间 = def_nod 归属，非全块。
         fe2 : ., mut = -1
         le2 : ., mut = -1
         bes := r64(g_ir_func_entry_start, rfunc * 8)
@@ -964,7 +939,7 @@ fn save_ccr(path: string) -> int:
                 kk = kk + 1
         if sk2 == SG_FUNC:
             // 根 region span = 函数指令范围（REG = 文件里函数边界的唯一真源，
-            // 与 func 表一致性校验——失配 = 内部状态漂移）
+            // 与 func 表一致性校验，失配 = 内部状态漂移）
             is2 := r64(g_ir_func_instr_start, rfunc * 8)
             ic2 := r64(g_ir_func_instr_count, rfunc * 8)
             if sen != is2 || sex != is2 + ic2:
@@ -983,9 +958,11 @@ fn save_ccr(path: string) -> int:
         pos = pos + 4
         si2 = si2 + 1
 
-    // === EDG: edges（v7 必落；8B each {to_nod u32, kind u32}——所属节点 =
-    // 邻接隐含：节点 i 出边连续段 [first_edge, first_edge+edge_count)，
-    // edge_buf = 收集遍的扁平记录（打包 to + kind×2^32，此处解包写 u32 对）===
+    // === EDG: edges ===
+    // 8B each: {to_nod u32, kind u32}. The source node is implicit: node i's
+    // outgoing edges are the contiguous range [first_edge, first_edge+edge_count).
+    // edge_buf holds the flat records from the collection pass, packed as
+    // to + kind*2^32; this loop unpacks them into u32 pairs.
     buf_write_u32(buf, pos, edge_total)
     pos = pos + 4
     ei3 : ., mut = 0
@@ -999,11 +976,11 @@ fn save_ccr(path: string) -> int:
         pos = pos + 4   // kind
         ei3 = ei3 + 1
 
-    // === TYPE(7)：段体缓冲搬运（R2 P4 Task 2；内容构造 = corec-only
-    // ccr_types.cr 的 ccr_type_prepare_save，D18——本处只按段表搬运）===
-    // 缓冲含首字段 row_count ⇒ 大小 ≡ ccr_type_seg_size()（同一来源）。空缓冲 =
-    // 未装填（调用点漏调 prepare）⇒ **拒绝落盘**：不得产出「两小节缺席」的
-    // 半成品文件（三态纪律；行表恒含原生 9 行，空缓冲只可能是程序错误）。
+    // === TYPE(7): copy the prepared segment buffer. Content is built by
+    // corec-only ccr_types.cr ccr_type_prepare_save; this file only copies it.
+    // 缓冲含首字段 row_count，因此大小 == ccr_type_seg_size()（同一来源）。空缓冲 =
+    // 未装填（调用点漏调 prepare），因此拒绝落盘：不得产出两小节缺席的
+    // 半成品文件（判定约定；记录表恒含原生 9 行，空缓冲只可能是程序错误）。
     if g_ccr_type_seg_len <= 0:
         return -1
     ct : ., mut = 0
@@ -1014,11 +991,12 @@ fn save_ccr(path: string) -> int:
         pos = pos + 1
         ct = ct + 1
 
-    // === IFACE(8)：段体缓冲搬运（R2 P4 Task 3；内容构造 = corec-only ccr_types.cr
-    // 的 ccr_iface_populate/ccr_iface_seg_build，D18——本处只按段表搬运）===
-    // 缓冲含首字段 native_count ⇒ 大小 ≡ ccr_iface_seg_size()（同一来源）。空缓冲 =
-    // 未装填（调用点漏调 prepare）⇒ **拒绝落盘**（不得产出「五小节缺席」的半成品；
-    // 条目表恒 16 行 ⇒ 空缓冲只可能是程序错误，三态纪律）。
+    // === IFACE(8): copy the prepared segment buffer. Content is built by
+    // corec-only ccr_iface_populate and ccr_iface_seg_build in ccr_types.cr;
+    // this file only copies it.
+    // 缓冲含首字段 native_count，因此大小 == ccr_iface_seg_size()（同一来源）。空缓冲 =
+    // 未装填（调用点漏调 prepare），因此拒绝落盘（不得产出五小节缺席的半成品；
+    // 条目表恒 16 行，因此空缓冲只可能是程序错误，判定约定）。
     if g_ccr_iface_seg_len <= 0:
         return -1
     ict : ., mut = 0
@@ -1040,41 +1018,36 @@ fn save_ccr(path: string) -> int:
         return -1
     return 0
 
-// GC-4 测试钩子（corec ccr --inject-var-shift 载体；真实构建路径永不调用）：
-// func0 var 声明区起点左移 1 行（globals ≥ 1 时新块 [vs-1, vs-1+vc0) 恒留在
-// 命名空间内——行首行被 globals 末行顶替、行尾少写 func0 末行）。Σ 计数级
-// 守卫（Σ func var_count == g_ir_var_count，总量守恒）察觉不到；位置级守卫
-// （vs == 前缀累计）必须拒绝 save——模拟未来函数非序发射的静默错位。
+//  测试钩子（corec ccr --inject-var-shift 测试钩子；真实构建路径永不调用）：
+// func0 var 声明区起点左移 1 行（globals >= 1 时新块 [vs-1, vs-1+vc0) 恒留在
+// 命名空间内，行首行被 globals 末行顶替、行尾少写 func0 末行）。Σ 计数级
+// 检查（Σ func var_count == g_ir_var_count，总量守恒）察觉不到；位置级检查
+// (vs == prefix sum) must reject the save; otherwise a future out-of-order
+// function emission would silently shift row order.
 fn inject_var_shift() -> int:
     if g_ir_func_count < 1:
         return 1
     vs := r64(g_ir_func_var_start, 0)
     if vs < 1:
         return 1
-    // 无 globals 行可借位 → 注入前置不满足
+    // 无 globals 行可借位 -> 注入前置不满足
     w64(g_ir_func_var_start, 0, vs - 1)
     return 0
 
-// --- Load（v8-only：校验 Header + 段表规范布局 + 逐段越界拒绝；version ≠ 8
-// = v7 读路径退役——拒绝。R2 P4 Task 1：段表 = 8 段规范序（加段成本 = 闸界
-// 6→8 一处，规范序/连续闸形状不变——D9），TYPE/IFACE 必落（D11）+ 空壳期
-// 内容校验（计数 = 0 且段体恰 4B））---
-// 内核完备 Task 1（语义对象模型）：loader 产出 = 语义对象载入 + 守卫——
-// NOD→g_ir_instrs 线性重建段移出（调度重建 = 实例事务 build_linear_schedule，
-// regalloc.cr；入口 = corearch.cr / 组合根 src/targets/x86_64-linux/main.cr
-// 在 load 成功后调用）。
-// 解析序：STR → SYM（globals/funcs 声明区重建 var 命名空间行序）→ REG
-// （nstart/ncount 派生 + func 指令边界回填）→ NOD（36B——28B 语义字段入对象
-// 缓冲 g_v7_nod_sem（对象留存形态裁决 (a)，邻接域入 g_v7_nod_meta——不再写
-// 线性流）→ ENT（28B → 内存 24B 表，去掉 version、live_end 半开转回闭区间
-// −1；块界与 SYM func first/last 对照）→ EDG（邻接连续段校验 + 拓扑不变量
-// + 入 g_v7_edges 缓冲）→ TYPE/IFACE（R2 P4 Task 1 空壳：计数 = 0 且段体恰
-// 4B，非空拒绝——内容面归 Task 2/3）。守卫消费 = NOD 计数（局部 instr_cnt）+ 邻接域
-// （g_v7_nod_meta）+ REG 派生边界——全程零线性流（iri_*/g_ir_instrs）依赖。
-// 内存态（g_ir_vars 行 id=行序 / g_ir_globals var_idx=行序 / func 七数组 /
-// g_sgs）与 v6 加载结果逐字节一致；线性流由 build_linear_schedule 从对象
-// 缓冲重建，与原重建段产物逐字节一致（28B 语义字段与 v6 逐字段相同，文件
-// 布局变化不影响下游——ELF 发射）。
+// Load: v9 only. Validate the header and canonical segment table, reject
+// out-of-range segments, and reject any version other than 9. The table has 8
+// segments in canonical order. TYPE and IFACE are required.
+// Loader output is semantic objects plus guards. The linear NOD-to-g_ir_instrs
+// rebuild is outside this file: build_linear_schedule in regalloc.cr is called by
+// corearch.cr or src/targets/x86_64-linux/main.cr after a successful load.
+// Parse order: STR -> SYM (globals and funcs rebuild the var namespace) -> REG
+// (derive nstart/ncount and function instruction bounds) -> NOD (40B; 28B
+// semantic fields into g_v7_nod_sem, adjacency into g_v7_nod_meta) -> ENT (28B
+// to the in-memory 24B table; drop version and convert half-open live_end back to
+// closed) -> EDG (contiguous ranges and topology checks into g_v7_edges) ->
+// TYPE/IFACE (rebuild type rows and terms, and interface tables).
+// Guards use only NOD counts, adjacency, and REG-derived bounds; the loader does
+// not depend on the linear stream.
 
 fn load_ccr(data: string, fsize: int) -> int:
     if fsize < 16:
@@ -1089,7 +1062,7 @@ fn load_ccr(data: string, fsize: int) -> int:
     if magic != CCR_MAGIC:
         return -1
 
-    // Version — v6-only（无 v5 兼容/转换工具）
+    // Version: v9 only, with no compatibility or conversion path.
     ver := buf_read_u32(data, pos)
     pos = pos + 4
     if ver != CCR_VERSION:
@@ -1103,9 +1076,9 @@ fn load_ccr(data: string, fsize: int) -> int:
     if seg_cnt > (fsize - 16) / 12:
         return -1
 
-    // 段表：规范布局——tag 必须 = 行号（1..），offset 必须 = 前段尾，段不越界。
-    // （段表 {tag, offset, size} 结构本身允段序自由，v7 writer 只用规范序——
-    // loader 按规范序校验，非规范布局一律拒绝。）
+    // Segment table: canonical layout. tag must equal the row number (1..8),
+    // offset must equal the previous segment end, and segments must stay in
+    // bounds. The loader rejects any non-canonical layout.
     seg_off1 : ., mut = 0
     seg_off2 : ., mut = 0
     seg_off3 : ., mut = 0
@@ -1206,13 +1179,10 @@ fn load_ccr(data: string, fsize: int) -> int:
         cursor = soff + ssz
         ri = ri + 1
 
-    // STR/SYM/NOD/REG 必备（v6 坐标化后 func 指令边界 = root_region span 的
-    // 唯一真源，REG 缺段无法重建函数边界）；EDG v7 必落（spec §3.4——文件
-    // 语义载体 = NOD+EDG，缺边段 = 格式不一致拒绝）；ENT 可缺（v5 精神：
-    // 旧段缺失 = 空表——Task 2 起 corec 恒产实记录，缺段等价空 = loader
-    // 兼容语义保留）；TYPE/IFACE 必备（R2 P4 Task 1，D11——可选段 = 两种
-    // .ccr 在野 = 任何消费者都要处理缺席 = 静默降级面；本阶段承诺即
-    // 「信息恒随载体」，与 ENT 的可选先例不同源）
+    // STR, SYM, NOD, REG, EDG, TYPE, and IFACE are required. REG is the only
+    // source for function instruction bounds. ENT may be absent and is treated as
+    // an empty table. TYPE and IFACE are required so there are not two .ccr
+    // variants in the wild.
     if have1 == 0 || have2 == 0 || have3 == 0 || have5 == 0 || have6 == 0:
         return -1
     if have7 == 0 || have8 == 0:
@@ -1234,13 +1204,13 @@ fn load_ccr(data: string, fsize: int) -> int:
     g_opt_meta_count = 0
     g_entry_count = 0
     g_v7_edge_count = 0
-    g_v7_nod_count = 0   // 内核完备 Task 1：NOD 对象缓冲计数（NOD 段载入后置位）
-    // R2 P4 Task 2：TYPE 段有真实内存表（g_types 行表 + 项层 g_type_terms/
-    // g_tt_index）——复位在 TYPE 段解析处（行表大小随段内容，且需与项层 memo
+    g_v7_nod_count = 0   // NOD 对象缓冲计数（NOD 段载入后置位）
+    // TYPE 段有真实内存表（g_types 记录表 + 项层 g_type_terms/
+    // g_tt_index），复位在 TYPE 段解析处（记录表大小随段内容，且需与项层 memo
     // 同步作废；见该段注释）。
-    // R2 P4 Task 3：IFACE 段同理有真实内存表（g_iface_entries/g_iface_shape_*/
-    // g_ifaces/g_impl_for/g_methods）——计数复位在此（表缓冲随段内容重建；
-    // g_iface_registry_ok 清 0 = 「表未建立」，本段解析末尾置 1 = **段真源**）。
+    // IFACE 段同理有真实内存表（g_iface_entries/g_iface_shape_*/
+    // g_ifaces/g_impl_for/g_methods），计数复位在此（表缓冲随段内容重建；
+    // g_iface_registry_ok 清 0 = 表未建立，本段解析末尾置 1 = 段真源）。
     g_iface_count = 0
     g_iface_entry_count = 0
     g_iface_registry_ok = 0
@@ -1279,7 +1249,8 @@ fn load_ccr(data: string, fsize: int) -> int:
 
     // === SYM: globals（16B each: name u32, type u32, init_val i64）===
     // var 命名空间重建（流式）：全局行 = 记录序 0..G-1（行名/型随本记录携带，
-    // v5 的 var 行 = 同源冗余）；id = 行序。后续函数声明区行序相接。
+    // var rows are the same source); id = row order. Function declaration areas
+    // follow in row order.
     pos = seg_off2
     if !ccr_has_bytes(pos, 4, seg_end2):
         return -1
@@ -1313,9 +1284,9 @@ fn load_ccr(data: string, fsize: int) -> int:
         gi = gi + 1
 
     // === SYM: funcs（24B 头 + param_ents + var 声明区）===
-    // 头字段 = spec §3.2：name/param_count/ret_type/root_region（REG 行 id）/
+    // 头字段 = spec 3.2：name/param_count/ret_type/root_region（REG 记录 id）/
     // first_ent/last_ent（本函数条目文件范围）。instr/var 范围不落盘：instr =
-    // root_region span（REG 段解析后回填），var_start = 声明区行序游标。
+    // root_region span（REG 段解析后回填），var_start = 声明区记录顺序游标。
     if !ccr_has_bytes(pos, 4, seg_end2):
         return -1
     func_cnt := buf_read_u32(data, pos)
@@ -1354,7 +1325,7 @@ fn load_ccr(data: string, fsize: int) -> int:
         w64(fn_meta, fi * 24, froot)
         w64(fn_meta, fi * 24 + 8, ffe)
         w64(fn_meta, fi * 24 + 16, fle)
-        // param_ents（i32 each；内存无消费者——只做越界拒绝）
+        // param_ents（i32 each；内存无消费者，只做越界拒绝）
         pj : ., mut = 0
         loop:
             if pj >= fpc:
@@ -1366,7 +1337,7 @@ fn load_ccr(data: string, fsize: int) -> int:
             if pid < -1:
                 return -1
             pj = pj + 1
-        // var 声明区（行序 = 创建序，前 param_count 个 = 参数）
+        // var 声明区（记录顺序 = 创建序，前 param_count 个 = 参数）
         if !ccr_has_bytes(pos, 4, seg_end2):
             return -1
         fvc := buf_read_u32(data, pos)
@@ -1439,8 +1410,8 @@ fn load_ccr(data: string, fsize: int) -> int:
         pos = pos + 4
         fc := buf_read_u32(data, pos)
         pos = pos + 4
-        // 容量批 T3（裁-CAP-2 (a)）：字段数**无硬上限**（侧表承载）⇒ 旧 MAX_STRUCT_FIELDS
-        // 读回闸与 16 槽清零循环一并删除；段界核算保留（fc 越段 ⇒ 拒绝，三态纪律）。
+        // 字段数无硬上限（侧表承载），因此旧 MAX_STRUCT_FIELDS
+        // 读回检查与 16 槽清零循环一并删除；段界核算保留（fc 越段，因此拒绝，判定约定）。
         if fc > (seg_end2 - pos) / 8:
             return -1
         w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_NAME, sname_ni)
@@ -1454,7 +1425,7 @@ fn load_ccr(data: string, fsize: int) -> int:
                 break
             w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + zgi * 8, 0)
             zgi = zgi + 1
-        // Write field data（侧表；盘面逐字段变长，格式不变）
+        // Write field data（侧表；磁盘布局逐字段变长，格式不变）
         fi2 : ., mut = 0
         loop:
             if fi2 >= fc:
@@ -1488,8 +1459,8 @@ fn load_ccr(data: string, fsize: int) -> int:
         pos = pos + 4
         vc := buf_read_u32(data, pos)
         pos = pos + 4
-        // 容量批 T3（裁-CAP-2 (a)）：变体/载荷数**无硬上限**（侧表）⇒ 旧两闸与 16 槽清零
-        // 循环删除；段界核算保留（三态纪律）
+        // 变体/携带值数无硬上限（侧表），因此两处旧检查与 16 槽清零
+        // 循环删除；段界核算保留（判定约定）
         if vc > (seg_end2 - pos) / 8:
             return -1
         w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_NAME, ename_ni)
@@ -1558,14 +1529,14 @@ fn load_ccr(data: string, fsize: int) -> int:
         g_opt_meta_count = mi + 1
         mi = mi + 1
 
-    // === REG: region（24B each——spec §3.5 字段序 {kind, parent, enter_nod,
+    // === REG: region（24B each，spec 3.5 字段序 {kind, parent, enter_nod,
     // exit_nod, first_ent, last_ent}）===
-    // v5 的 nstart/ncount 不落盘——由 enter/exit 派生（不变式 nstart ≡ enter、
-    // ncount = exit − enter），内存态与 v5 记录逐字节一致。未闭合（exit < enter）
-    // 记录 v6 无法表示 → 拒绝。
-    // first/last 校验：SG_FUNC 根行（行序第 k 个 = 函数 k）的区内条目范围必须
+    // nstart and ncount are not stored; the loader derives nstart = enter and
+    // ncount = exit - enter. A record with exit < enter is unclosed and has no
+    // valid representation, so the file is rejected.
+    // first/last 校验：SG_FUNC 根记录（记录顺序第 k 个 = 函数 k）的区内条目范围必须
     // 与 SYM func 记录 first/last 一致（同信息双写，失配 = 格式不一致）。
-    // 函数指令边界重建：func root_region（SYM）→ REG span = [enter, exit)。
+    // 函数指令边界重建：func root_region（SYM）-> REG span = [enter, exit)。
     pos = seg_off5
     if !ccr_has_bytes(pos, 4, seg_end5):
         return -1
@@ -1574,7 +1545,7 @@ fn load_ccr(data: string, fsize: int) -> int:
     if sg_n > (seg_end5 - seg_off5) / ESZ_SG_DISK:
         return -1
     sg_i : ., mut = 0
-    rfcnt : ., mut = 0  // 已见 SG_FUNC 根行数（行序 = 函数序 1:1）
+    rfcnt : ., mut = 0  // 已见 SG_FUNC 根记录数（记录顺序 = 函数序 1:1）
     loop:
         if sg_i >= sg_n:
             break
@@ -1594,7 +1565,7 @@ fn load_ccr(data: string, fsize: int) -> int:
         pos = pos + 4
         if rex < ren:
             return -1
-        // 未闭合 → ncount 不可派生
+        // 未闭合 -> ncount 不可派生
         if rfe < -1 || rle < -1 || (rfe == -1) != (rle == -1):
             return -1
         w64(g_sgs, f + OFF_SG_KIND, rk)
@@ -1606,19 +1577,19 @@ fn load_ccr(data: string, fsize: int) -> int:
         if rk == SG_FUNC:
             if rfcnt >= func_cnt:
                 return -1
-            // 根行多于函数记录
+            // 根记录多于函数记录
             if rfe != r64(fn_meta, rfcnt * 24 + 8) || rle != r64(fn_meta, rfcnt * 24 + 16):
-                return -1  // REG 根行条目范围 ≠ SYM func 记录
+                return -1  // REG 根记录条目范围 != SYM func 记录
             rfcnt = rfcnt + 1
         sg_i = sg_i + 1
     if rfcnt != func_cnt:
         return -1
-    // 根行少于函数记录（每函数必有根）
+    // 根记录少于函数记录（每函数必有根）
     g_sg_count = sg_n
 
     // 函数指令边界回填：instr_start = root_region enter, instr_count = exit − enter
-    // （根 region span = 函数节点范围——与 v5 func_meta instr_start/count 恒等，
-    // 内存态与 v5 逐字节一致）
+    // The root region span is the function node range and is the single source for
+    // function instruction bounds.
     bfi : ., mut = 0
     loop:
         if bfi >= func_cnt:
@@ -1638,12 +1609,13 @@ fn load_ccr(data: string, fsize: int) -> int:
         bfi = bfi + 1
 
     // === NOD: instructions（36B each）===
-    // 内核完备 Task 1（语义对象模型）：loader 产出 = 对象载入 + 守卫——28B
-    // 语义字段 → 内核对象缓冲 g_v7_nod_sem（内存记录 = 盘记录剥离邻接的镜像，
-    // 布局 offset 同盘）+ 邻接域 first_edge/edge_count → g_v7_nod_meta
-    // （EDG 段校验 + 对象面 nod_edge_first/count 消费）。NOD→g_ir_instrs
+    // loader 产出 = 对象载入 + 检查，28B
+    // Semantic fields go to the kernel object buffer g_v7_nod_sem (the in-memory
+    // record mirrors the disk record without adjacency, with the same offsets).
+    // Adjacency first_edge/edge_count go to g_v7_nod_meta.
+    // （EDG 段校验 + 对象数据 nod_edge_first/count 消费）。NOD->g_ir_instrs
     // 线性重建段已移出本函数（调度重建 = 实例事务 build_linear_schedule，
-    // regalloc.cr——load 返回后、发射/分派前由入口调用）；g_ir_instrs/
+    // regalloc.cr，load 返回后、发射/分派前由入口调用）；g_ir_instrs/
     // g_ir_instr_count 本段不再触碰（重建段原写点全清）。
     pos = seg_off3
     if !ccr_has_bytes(pos, 4, seg_end3):
@@ -1673,12 +1645,12 @@ fn load_ccr(data: string, fsize: int) -> int:
         tk := buf_read_u32(data, pos)
         pos = pos + 4
         it2 := buf_read_i32(data, pos)
-        pos = pos + 4  // R2 P6 Task 3：项索引（i32；-1 = 无项）
+        pos = pos + 4  // 项索引（i32；-1 = 无项）
         nfe := buf_read_u32(data, pos)
         pos = pos + 4  // first_edge（邻接索引）
         nec := buf_read_u32(data, pos)
         pos = pos + 4  // edge_count
-        // 对象缓冲写（语义字段 = 盘字节镜像——w32/w64 低 32/64 位存储，存取
+        // 对象缓冲写（语义字段 = 盘字节镜像，w32/w64 低 32/64 位存储，存取
         // 经 nod_* 访问器 buf_read_* 符号扩展，数值与原重建段消费完全一致）
         w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_OP, opcode)
         w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_DEST, dest)
@@ -1686,18 +1658,18 @@ fn load_ccr(data: string, fsize: int) -> int:
         w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S2, s2)
         w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S3, s3)
         w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_TK, tk)
-        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_ITEM, it2)   // R2 P6 Task 3：项索引（-1 = 无）
+        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_ITEM, it2)   // 项索引（-1 = 无）
         w64(g_v7_nod_meta, ii * ESZ_NOD_META, nfe)
         w64(g_v7_nod_meta, ii * ESZ_NOD_META + 8, nec)
         ii = ii + 1
     g_v7_nod_count = instr_cnt
 
-    // GC-3（SYM 评审 M1）：REG root span 对 NOD 空间上界校验——函数指令边界
-    // （root_region span）在 REG 段解析时回填，instr_cnt 直到 NOD 段才可知；
-    // 彼时只查了 rex ≥ ren（未闭合），无上界 → 越界 span 通过后 ELF 发射在
-    // NOD 空间外读指令（缓冲外静默/崩溃）。逐函数校验 instr_start + count
-    // ≤ instr_cnt（含负值拒绝；风格与 ENT ele > instr_cnt 拒绝一致——载荷
-    // 消费前的最后一次可拒绝点）。
+    // REG root span upper-bound check. Function instruction bounds (root_region
+    // span) are filled when REG is parsed, but instr_cnt is only known at NOD. At
+    // that point only rex >= ren was checked, not the upper bound. An out-of-range
+    // span would make ELF emission read outside the NOD space. For each function,
+    // check instr_start + count <= instr_cnt and reject negative values. This is
+    // the last reject point before payload consumption.
     rfi : ., mut = 0
     loop:
         if rfi >= func_cnt:
@@ -1708,8 +1680,8 @@ fn load_ccr(data: string, fsize: int) -> int:
             return -1
         rfi = rfi + 1
 
-    // === ENT: entries（28B each → 内存 24B 表）===
-    // 盘上半开 live_end → 内存闭区间 −1；version 字段不入内存（组内序可推）。
+    // === ENT: entries（28B each -> 内存 24B 表）===
+    // 盘上半开 live_end -> 内存闭区间 −1；version 字段不入内存（组内序可推）。
     if have4 != 0:
         pos = seg_off4
         if !ccr_has_bytes(pos, 4, seg_end4):
@@ -1739,7 +1711,7 @@ fn load_ccr(data: string, fsize: int) -> int:
             pos = pos + 4  // home
             efl := buf_read_u32(data, pos)
             pos = pos + 4  // flags
-            // 语义校验（越界拒绝，先例 ccr 校验风格）
+            // Semantic validation: reject out-of-range values.
             if evr < 1:
                 return -1
             if ev < 0 || ev >= g_ir_var_count:
@@ -1764,7 +1736,7 @@ fn load_ccr(data: string, fsize: int) -> int:
             g_entry_count = eii + 1
             eii = eii + 1
         // 函数条目段界重建：条目按函数升序成块落盘（compute_entries func_i 升序），
-        // 每函数一段 [start, count)——块判定 = var 槽 ∈ 该函数 var 区间（var 槽
+        // 每函数一段 [start, count)，块判定 = var 槽 in 该函数 var 区间（var 槽
         // 全属唯一函数，段序与函数序一致）。重建结果与 SYM func 记录
         // first_ent/last_ent 逐函数对照（同信息双写，失配 = 格式不一致）。
         grow_func_entry_meta(func_cnt)
@@ -1798,16 +1770,16 @@ fn load_ccr(data: string, fsize: int) -> int:
         if pe != g_entry_count:
             return -1
 
-    // === EDG: edges（v7 必落；8B each {to_nod u32, kind u32}——所属节点 =
+    // === EDG: edges（v7 必落；8B each {to_nod u32, kind u32}，所属节点 =
     // 邻接隐含：节点 i 出边连续段 [first_edge, first_edge+edge_count)，first_edge
-    // = 前缀累计（v7 spec §3.3 邻接约定）。校验（spec §4 + 守卫面强度保持）：
-    //   ① 连续段与 NOD 邻接域逐节点对照（first_edge == 前缀累计；段界不出 EDG）
-    //   ② Σ edge_count == edg_count（规则 3；行走完 == 段体大小）
-    //   ③ 每条边 to_nod < instr_cnt（NOD 引用界内）+ to_nod > 所属节点
-    //      （规则 1 拓扑不变量——数据/state 边前向；自环/后向 = 文件损坏拒绝）
-    //   ④ kind ≤ 1（0=数据、1=state；2+ 预留 = 未知边类拒绝）
-    // 校验通过后边表入 g_v7_edges 缓冲（文件序连续段——图语义消费通道/调试）。
-    // branch/jump 目标 = 操作数引用非边（v7 §4 边界声明）——NOD 操作数不参与
+    // = 前缀累计（spec 3.3 邻接约定）。校验（spec 4 + 检查强度保持）：
+    //   1 连续段与 NOD 邻接域逐节点对照（first_edge == 前缀累计；段界不出 EDG）
+    //   2 Σ edge_count == edg_count（规则 3；行走完 == 段体大小）
+    //   3 每条边 to_nod < instr_cnt（NOD 引用界内）+ to_nod > 所属节点
+    //      （规则 1 拓扑不变量，数据/state 边前向；自环/后向 = 文件损坏拒绝）
+    //   4 kind <= 1（0=数据、1=state；2+ 预留 = 未知边类拒绝）
+    // 校验通过后边表入 g_v7_edges 缓冲（文件序连续段，图语义消费通道/调试）。
+    // branch/jump 目标 = 操作数引用非边（v7 4 边界声明），NOD 操作数不参与
     // 本段校验。
     pos = seg_off6
     if !ccr_has_bytes(pos, 4, seg_end6):
@@ -1826,17 +1798,17 @@ fn load_ccr(data: string, fsize: int) -> int:
     loop:
         if ei4 >= instr_cnt:
             break
-        // 邻接域读内核对象缓冲 g_v7_nod_meta（原 nod_edge_meta loader 局部——
-        // 内核完备 Task 1 对象留存形态裁决 (a)：对象 = 内核持有物，EDG 守卫
-        // 与对象面 nod_edge_first/count 同源；守卫逻辑零改动）
+        // 邻接域读内核对象缓冲 g_v7_nod_meta（原 nod_edge_meta loader 局部，
+        // 对象 = 内核持有物，EDG 检查
+        // 与对象数据 nod_edge_first/count 同源；检查逻辑零改动）
         nfe := r64(g_v7_nod_meta, ei4 * ESZ_NOD_META)
         nec := r64(g_v7_nod_meta, ei4 * ESZ_NOD_META + 8)
         if nfe != run_off:
             return -1
-        // ① 前缀累计失配（段错位/伪造）
+        // 1 前缀累计失配（段错位/伪造）
         if run_off + nec > edg_cnt:
             return -1
-        // ① 节点段越出 EDG 空间
+        // 1 节点段越出 EDG 空间
         rec : ., mut = 0
         loop:
             if rec >= nec:
@@ -1849,36 +1821,36 @@ fn load_ccr(data: string, fsize: int) -> int:
             pos = pos + 4
             if ekind > 1:
                 return -1
-            // ④ 未知边类
+            // 4 未知边类
             if eto >= instr_cnt:
                 return -1
-            // ③ to 出 NOD 空间
+            // 3 to 出 NOD 空间
             if eto <= ei4:
                 return -1
-            // ③ 后向/自环（拓扑不变量）
+            // 3 后向/自环（拓扑不变量）
             w64(v7_buf, (run_off + rec) * 8, eto + ekind * 4294967296)
             rec = rec + 1
         run_off = run_off + nec
         ei4 = ei4 + 1
     if run_off != edg_cnt:
         return -1
-    // ② Σ edge_count == edg_count
+    // 2 Σ edge_count == edg_count
     if pos != seg_end6:
         return -1
-    // ② 行走完 == 段体大小
+    // 2 行走完 == 段体大小
 
-    // === TYPE(7)：类型面（R2 P4 Task 2 内容面——两小节解析 + 内存重建）===
-    // D12 字节：row_count → 行表（24B/条）→ term_count → 项 DAG（40B/条；哈希
+    // === TYPE(7)：类型信息===
+    //  字节：row_count -> 记录表（24B/条）-> term_count -> 项 DAG（40B/条；哈希
     // 不落盘、本处 tt_hash5 重算）。重建 = g_types 行 + g_type_terms 项 +
-    // g_tt_index 索引重放（grow_tt_index → tt_reindex）。
-    // 逐条校验（违规 = 拒绝——不得静默当空表/截断表，三态纪律 C.5-3）：
-    //   ① 计数/长度自洽（计数 × 记录尺寸 ≤ 段余量）；② 段体恰两小节（行走完
-    //   == seg_end7，无尾随字节）；③ tag ∈ 0..10（TT_*）+ a..d ≥ -1；④ 子项引用
+    // g_tt_index 索引重放（grow_tt_index -> tt_reindex）。
+    // 逐条校验（违规 = 拒绝，不得当作空表或截断表，判定约定 C.5-3）：
+    //   1 计数/长度自洽（计数 × 记录尺寸 <= 段余量）；2 段体恰两小节（行走完
+    //   == seg_end7，无尾随字节）；3 tag in 0..10（TT_*）+ a..d >= -1；4 子项引用
     //   -1 或 < 自身行号（拓扑无环；标注槽按 tag 分派跳过，字段表见
-    //   ccr_type_term_ref_ok——ATOM 的 b = 自类型行号可达数千，不得误拒）。
-    // 复位：行表/项层（含引擎预算/memo/lits——见 tt_layer_reset 注记）全部作废
-    // 重建（旧行号语义的缓存一并清；行表大小随段内容，此处为唯一复位点）。
-    // corearch 侧无桥接/checker 层：行表 = 数据（消费者 = --dump-types 通道 +
+    //   ccr_type_term_ref_ok，ATOM 的 b = 自类型表记录编号可达数千，不得误拒）。
+    // 复位：记录表/项层（含引擎预算/memo/lits，见 tt_layer_reset 注记）全部作废
+    // 重建（旧行号语义的缓存一并清；记录表大小随段内容，此处为唯一复位点）。
+    // corearch 侧无桥接/checker 层：记录表 = 数据（消费者 = --dump-types 通道 +
     // 未来判定原语），本处不做语义解释。
     g_type_count = 0
     tt_layer_reset()
@@ -1944,22 +1916,22 @@ fn load_ccr(data: string, fsize: int) -> int:
     if pos != seg_end7:
         return -1
     // 段体恰两小节（无尾随字节）
-    grow_tt_index(g_type_term_count + 1)        // 索引重建（cap 已清零 → 必走重建）
+    grow_tt_index(g_type_term_count + 1)        // 索引重建（cap 已清零 -> 必走重建）
 
-    // === IFACE(8)：接口面（R2 P4 Task 3 内容面——D14 五小节解析 + 内存重建）===
-    // 重建 = g_iface_entries（条目表；并置 g_iface_registry_ok = 1——**段 = corearch
-    // 侧真源**，防「常量表覆盖段内容」）+ g_iface_shape_names/terms + g_ifaces
-    // （ESZ_IFACEINFO 布局；corearch 侧无 AST ⇒ 节点槽恒 -1、**项槽** = 段值）
+    // === IFACE(8)：接口数据===
+    // 重建 = g_iface_entries（条目表；并置 g_iface_registry_ok = 1，段 = corearch
+    // 侧真源，防常量表覆盖段内容）+ g_iface_shape_names/terms + g_ifaces
+    // （ESZ_IFACEINFO 布局；corearch 侧无 AST，因此节点槽恒 -1、项槽 = 段值）
     // + g_impl_for + g_methods。
-    // 逐条校验（违规 = 拒绝；三态纪律 C.5-3——不得静默当空表/截断表）：
-    //   ① 五小节计数/长度自洽（计数 × 记录尺寸 ≤ 段余量）+ 行走完 == seg_end8（无尾随）；
-    //   ② native_count == IFACE_ENTRY_COUNT（表内容 = 常量表，计数漂移 = 损坏）；
-    //   ③ **跨段引用域**：name_ni/type_ni/method_ni/mangled_ni ∈ [0, g_str_count)（STR
-    //      段先于本段解析）；ti_row ∈ {-1} ∪ [0, g_type_count)；term ∈ {-1} ∪ [0, tt_count())
-    //      （TYPE(7) 段先于本段解析 ⇒ 两域已建立）；
-    //   ④ 结构域：ak ∈ 0..AK_NULL、method_count ≤ MAX_IFACE_METHODS、
-    //      param_count ≤ MAX_IFACE_METHOD_PARAMS、self_mode ∈ 0..3。
-    // IFACE 段 = 纯信息面（不参与 ELF 发射）；本段解析失败 = 整体拒绝（load_ccr -1）。
+    // 逐条校验（违规 = 拒绝；判定约定 C.5-3，不得当作空表或截断表）：
+    //   1 五小节计数/长度自洽（计数 × 记录尺寸 <= 段余量）+ 行走完 == seg_end8（无尾随）；
+    //   2 native_count == IFACE_ENTRY_COUNT（表内容 = 常量表，计数漂移 = 损坏）；
+    //   3 跨段引用域：name_ni/type_ni/method_ni/mangled_ni in [0, g_str_count)（STR
+    //      段先于本段解析）；ti_row in {-1} ∪ [0, g_type_count)；term in {-1} ∪ [0, tt_count())
+    //      （TYPE(7) 段先于本段解析，因此两域已建立）；
+    //   4 结构域：ak in 0..AK_NULL、method_count <= MAX_IFACE_METHODS、
+    //      param_count <= MAX_IFACE_METHOD_PARAMS、self_mode in 0..3。
+    // IFACE 段 = 纯信息（不参与 ELF 发射）；本段解析失败 = 整体拒绝（load_ccr -1）。
     pos = seg_off8
     if !ccr_has_bytes(pos, 4, seg_end8):
         return -1
@@ -2005,7 +1977,7 @@ fn load_ccr(data: string, fsize: int) -> int:
     g_iface_entry_count = ifc_nat
     g_iface_registry_ok = 1
 
-    // ② 横切形状（名 ni + 形状项）
+    // 2 横切形状（名 ni + 形状项）
     if !ccr_has_bytes(pos, 4, seg_end8):
         return -1
     ifc_shn := buf_read_u32(data, pos)
@@ -2031,7 +2003,7 @@ fn load_ccr(data: string, fsize: int) -> int:
         ifs = ifs + 1
     g_iface_shape_count = ifc_shn
 
-    // ③ 用户接口（头 16B + 方法 80B × method_count）
+    // 3 用户接口（头 16B + 方法 80B × method_count）
     if !ccr_has_bytes(pos, 4, seg_end8):
         return -1
     ifc_usn := buf_read_u32(data, pos)
@@ -2097,7 +2069,7 @@ fn load_ccr(data: string, fsize: int) -> int:
             w64(g_ifaces, mb + OFF_IFM_PARAM_COUNT, mpc)
             w64(g_ifaces, mb + OFF_IFM_SELF_MODE, msm)
             w64(g_ifaces, mb + OFF_IFM_RET_TERM, mrt)
-            w64(g_ifaces, mb + OFF_IFM_RET_NODE, -1)    // corearch 无 AST ⇒ 节点槽恒 -1
+            w64(g_ifaces, mb + OFF_IFM_RET_NODE, -1)    // corearch 无 AST，因此节点槽恒 -1
             mq : ., mut = 0
             loop:
                 if mq >= MAX_IFACE_METHOD_PARAMS:
@@ -2115,7 +2087,7 @@ fn load_ccr(data: string, fsize: int) -> int:
                 if mp >= MAX_IFACE_METHOD_PARAMS:
                     break
                 mc2 := buf_read_i32(data, pos)
-                pos = pos + 4            // 裸码（信息面）
+                pos = pos + 4            // 裸码（信息）
                 if mc2 < -1:
                     return -1
                 w64(g_ifaces, mb + OFF_IFM_PARAM_TYPES + mp * 8, mc2)
@@ -2124,7 +2096,7 @@ fn load_ccr(data: string, fsize: int) -> int:
         ifu = ifu + 1
     g_iface_count = ifc_usn
 
-    // ④ impl 边（g_impl_for：{trait_ni, type_ni}——声明元数据）
+    // 4 impl 边（g_impl_for：{trait_ni, type_ni}，声明元数据）
     if !ccr_has_bytes(pos, 4, seg_end8):
         return -1
     ifc_imp := buf_read_u32(data, pos)
@@ -2149,7 +2121,7 @@ fn load_ccr(data: string, fsize: int) -> int:
         ifi = ifi + 1
     g_impl_for_count = ifc_imp
 
-    // ⑤ 方法表（g_methods：{type_ni, method_ni, mangled_ni}——iface_find_method 数据面）
+    // 5 方法表（g_methods：{type_ni, method_ni, mangled_ni}，iface_find_method 数据源）
     if !ccr_has_bytes(pos, 4, seg_end8):
         return -1
     ifc_met := buf_read_u32(data, pos)
@@ -2183,17 +2155,15 @@ fn load_ccr(data: string, fsize: int) -> int:
         return -1
     // 五小节行走完 == 段体（无尾随字节）
 
-    // === NOD 项索引一致性硬校验（R2 P6 Task 3 β）===
-    // 时点约束：项索引的解析域 = TYPE 段重建的项表（g_type_terms/tt_count）⇒ **必须**
-    // 排在 TYPE/IFACE 段之后——NOD 段（规范序 3）解析时项表尚不存在（TYPE = 7）。
-    // 判据（三态纪律：不得猜、不得静默当空表/当无项）：
-    //   · item < -1                                  ⇒ 拒绝（域外）
-    //   · item ≥ tt_count()                          ⇒ 拒绝（域外）
-    //   · item ≥ 0 且 tt_atom_of_term(item) != 盘上码 ⇒ 拒绝（**并存两值分歧 = 硬错**；
-    //     这正是本布局的 D20 合规条件——分歧不得静默择一，见 Task 3 报告 §1.1-3）
-    //   · item = -1                                  ⇒ 无需校验（无项：复合行 / 辅码面 /
-    //     无面 / 暖态缺行——码由 `tk` 槽逐字节承担）
-    // 合法文件恒通过（写侧两值同源于 ccr_types.cr:ccr_nod_item_populate 的单次派生）。
+    // === NOD item index consistency check ===
+    // This check runs after TYPE/IFACE because it needs the term table. The NOD
+    // segment (canonical order 3) is parsed before TYPE (7), so the check cannot
+    // run there.
+    // Reject item < -1, item >= tt_count, and item >= 0 when
+    // tt_atom_of_term(item) differs from the on-disk code. item = -1 needs no
+    // check: composite rows, aux-face rows, and warm rows without a face carry
+    // their code in tk. Valid files always pass because both values come from the
+    // same ccr_types.cr ccr_nod_item_populate derivation.
     ni : ., mut = 0
     loop:
         if ni >= g_v7_nod_count:
@@ -2210,13 +2180,13 @@ fn load_ccr(data: string, fsize: int) -> int:
 
     return 0
 
-// ─── TYPE 段项引用拓扑（R2 P4 Task 2；load 侧校验 + 通道/dump 共用）───
-// 项引用 = -1（无）或 < 自身行号（DAG 由 tt_term 追加式构造 ⇒ 子项恒先建）。
-// **字段表按 tag 分派**（不得全槽施检——标注槽会被误拒）：
+// ─── TYPE 段项引用拓扑───
+// 项引用 = -1（无）或 < 自身行号（DAG 由 tt_term 追加式构造，因此子项恒先建）。
+// 字段表按 tag 分派（不得全槽施检，标注槽会被误拒）：
 //   TT_UNION/TT_INTER/TT_CONS：a, b          （两子项）
 //   TT_NOT：a                                 ；TT_MU：b（a = 绑定变量标注）
-//   TT_ATOM：c（参数链头，-1 = 无参）         ；a = ak、b = 标注（自类型行号/固定性位/
-//                                               令牌值/mut 标记——可达数千）、d = 保留
+//   TT_ATOM：c（参数列表首项，-1 = 无参）         ；a = ak、b = 标注（自类型表记录编号/固定性位/
+//                                               令牌值/mut 标记，可达数千）、d = 保留
 //   TT_BOT/TT_TOP/TT_NIL：无引用槽           ；TT_TOP_K：a = k；TT_VAR：a = 绑定变量
 // 构造点单源见 ty_shadow.cr 的 sh_ref_mut_marker/sh_name_token/sh_seq_term 三处注记。
 fn ccr_type_ref_before(r: int, row: int) -> int:
@@ -2241,13 +2211,13 @@ fn ccr_type_term_ref_ok(tag: int, a: int, b: int, c: int, d: int, row: int) -> i
         return ccr_type_ref_before(c, row)
     return 1   // ⊥ / ⊤ / ⊤ₖ / VAR / NIL：无引用槽（a 为标注）
 
-// ─── --dump-types 通道（R2 P4 Task 2）：段内容面打印 ───
+// ─── --dump-types 通道（段内容打印 ───
 // 写侧（corec `ccr --dump-types`，经 ccr_types.cr 的 ccr_type_selftest_dump 调
-// 本函数）与读侧（corearch `--dump-types`）共用**同一条打印路径**——跨进程行
+// 本函数）与读侧（corearch `--dump-types`）共用同一条打印路径，跨进程行
 // 格式零分歧；行格式契约见 tests/selfhost/test_ccr_types.py:parse_type_dump。
-// 读侧意义 = §6.3 的读回证据：载入段重建后的行表/项 DAG 与写侧逐行一致，
+// 读侧意义 = 6.3 的读回证据：载入段重建后的记录表/项 DAG 与写侧逐条记录一致，
 // 且 probe 行的跨进程同值 = 项层原语（tt_norm/tt_is_dnf/tt_is_literal）在同构
-// 重建表上逐点同值（下标含新建项 ⇒ 索引重建/去重行为的实证）。
+// 重建表上逐点同值（下标含新建项，因此索引重建/去重行为的实证）。
 CCR_TYPE_PROBE_N : int = 16   // probe 窗口（前 N 项）
 
 fn ccr_type_surface_dump():
@@ -2291,24 +2261,24 @@ fn ccr_type_surface_dump():
         j = j + 1
     ccr_type_probe_dump()
 
-// 项层原语跨进程同值探针（**项层**——type_terms.cr 面；判定原语 ty_sub 族不入
+// 项层原语跨进程同值检查（项层，type_terms.cr 数据；判定原语 ty_sub 族不入
 // corearch 清单，见 build_selfhost_native.py 的 backend_support_nodes 注记）：
-// 预算状态复位（两侧同起点）→ 前 N 项逐个 tt_norm（规范化 = 判定算法输入形态，
-// spec §1.3）→ 折叠**规范化结果的项下标** + 形态位（tt_is_dnf/tt_is_literal）
-// 成摘要。两侧表同构（行表/项表/probe 前各节逐行同）⇒ 调用序、步数消耗、
-// **新建项的下标**逐点同 ⇒ 摘要同。下标入摘要即「重建后的索引（g_tt_index）
-// 与去重行为」的实证：索引未重建/重建错位 ⇒ tt_norm 的去重退化/错配 ⇒ 新建项
-// 下标漂移 ⇒ 摘要变。
-// 本探针**会**向项表追加规范化新项（tt_norm 的构造面）——在 dump 的 terms 节
-// 之后运行，故不影响打印面（序列化缓冲早在 dump 前已生成，见 ccr_type_prepare_save）。
-// ─── --dump-ifaces 通道（R2 P4 Task 3）：IFACE 段内容面打印 ───
+// 预算状态复位（两侧同起点）-> 前 N 项逐个 tt_norm（规范化 = 判定算法输入形态，
+// spec 1.3）-> 折叠规范化结果的项下标 + 形态位（tt_is_dnf/tt_is_literal）
+// 成摘要。两侧表同构（记录表/项表/probe 前各节逐条记录同），因此调用序、步数消耗、
+// 新建项的下标逐点同，因此摘要同。下标入摘要即重建后的索引（g_tt_index）
+// 与去重行为的实证：索引未重建/重建错位，因此tt_norm 的去重退化/错配，因此新建项
+// 下标漂移，因此摘要变。
+// 本检查会向项表追加规范化新项（tt_norm 的构造），在 dump 的 terms 节
+// 之后运行，故不影响打印输出（序列化缓冲早在 dump 前已生成，见 ccr_type_prepare_save）。
+// ─── --dump-ifaces 通道（IFACE 段内容打印 ───
 // 写侧（corec `ccr --dump-ifaces`，经 ccr_types.cr 的 ccr_iface_selftest_dump 调本
-// 函数）与读侧（corearch `--dump-ifaces`）共用**同一条打印路径**——跨进程行格式零
+// 函数）与读侧（corearch `--dump-ifaces`）共用同一条打印路径，跨进程行格式零
 // 分歧；行格式契约见 tests/selfhost/test_ccr_types.py:parse_iface_dump。
-// 读侧意义 = §6.3 的读回证据：载入段重建后的条目表/形状表/接口表/impl 边/方法表与
-// 写侧逐行一致；`ifaceprobe` 行 = **跨段引用域的可解析性**（每个项槽在重建的项表上
-// 解析：tag/a/c 折叠成摘要——两侧同值即「段内项索引在 corearch 侧解析到同构项」）。
-// **零建项**（纯读：不动项表/预算/memo——与 TYPE 的 probe 不同，本处无需构造面）。
+// 读侧意义 = 6.3 的读回证据：载入段重建后的条目表/形状表/接口表/impl 边/方法表与
+// 写侧逐条记录一致；`ifaceprobe` 行 = 跨段引用域的可解析性（每个项槽在重建的项表上
+// 解析：tag/a/c 折叠成摘要，两侧同值即段内项索引在 corearch 侧解析到同构项）。
+// 零建项（纯读：不动项表/预算/memo，与 TYPE 的 probe 不同，本处无需构造项）。
 fn ccr_iface_surface_dump():
     print("ifacenative: ")
     print_i(g_iface_entry_count)
@@ -2434,9 +2404,9 @@ fn ccr_iface_surface_dump():
         print_i(r64(g_methods, im2 * 24 + 16))
         println("")
         im2 = im2 + 1
-    // 跨段引用域探针：逐接口/方法/有效形参的项槽
-    //   resolved = 0 ≤ t < tt_count()（在重建项表上可解析）；unbuilt = t == -1；
-    //   bad = t < -1 || t ≥ tt_count()（**必须为 0**——写侧不产、loader 拒绝）。
+    // 跨段引用域检查：逐接口/方法/有效形参的项槽
+    //   resolved = 0 <= t < tt_count()（在重建项表上可解析）；unbuilt = t == -1；
+    //   bad = t < -1 || t >= tt_count()（必须为 0，写侧不产、loader 拒绝）。
     //   摘要 = Σ (tt_tag×31 + tt_a) 与 (tt_c×31 + 2) 的混入（两侧同值 = 段内项索引
     //   解析到同构项；TYPE 段的跨进程同构由 --dump-types 的 probe 行独立承担）。
     slots : ., mut = 0
@@ -2528,7 +2498,7 @@ fn ccr_type_probe_dump():
             dnf_ok = dnf_ok + 1
         if tt_is_literal(i) == 1:
             lit_ok = lit_ok + 1
-        // 摘要 = 规范化结果下标 + DNF 位（-1 = 预算耗尽，下标面用 -1 表示）
+        // 摘要 = 规范化结果下标 + DNF 位（-1 = 预算耗尽，下标用 -1 表示）
         h = h * 31 + (norm + 2)
         h = h * 31 + (d + 2)
         i = i + 1

@@ -29,11 +29,12 @@ fn read_file(path: string) -> string:
         r1 := syscall3(3, fd, 0, 0)  // close(fd)
         return ""
     if fsize == 0:
-        // I-1：伪文件（/proc/self/environ 等）——procfs 的 lseek SEEK_END 恒返回
-        // 0，长度不可信 → 循环读取直到 EOF。修复前 get_env("CORE_SAFE") 恒读
-        // 空串 → CORE_SAFE=0 关检查的分支永不可达。正常文件的 lseek 行为不变。
-        // 注意：不用 while 做增长（自托管 parser 对裸 while + 双标识符条件有
-        // 预存崩溃——见波 3 报告 N2），用 loop+break 等价实现。
+        // Pseudo-files such as /proc/self/environ report 0 from lseek SEEK_END, so
+        // their length is not trustworthy. Read until EOF instead. Without this,
+        // get_env("CORE_SAFE") always read an empty string and CORE_SAFE=0 never
+        // disabled checks. Normal files keep the lseek path.
+        // Use loop with break instead of while: the self-hosted parser has a known
+        // crash on a bare while with a two-identifier condition.
         r1 := syscall3(8, fd, 0, 0)  // lseek(fd, 0, SEEK_SET)
         cap : ., mut = 4096
         buf := alloc(cap)

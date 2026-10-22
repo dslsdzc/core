@@ -1,25 +1,23 @@
 // === lsp.cr ===
-// 文档状态（g_open_docs）+ 静默检查管线 + publishDiagnostics（Task 3）。
+// Document state, the silent check pipeline, and publishDiagnostics.
 //
-// 依赖拼接顺序：本文件在 build_selfhost_native.py corelsp 段 concat 列表中
-// 位于 json.cr / rpc.cr 之后——json_new/json_obj_get/g_json_strs、
-// rpc_send 等均为同翻译单元内可见。
+// Build order: this file follows json.cr and rpc.cr in the corelsp concat list.
+// json_new, json_obj_get, g_json_strs, and rpc_send are visible in the same
+// translation unit.
 //
-// ── 检查管线 ──
-//   lsp_check_file(path, src)：g_source 置源文本 → reset_frontend_state()
-//   → tokenize → res_imports → parse_all →（parse 阶段有诊断则跳过
-//   check_all，AST 可能不完整）→ check_all → publishDiagnostics。
-//   禁止 run_frontend()——它含 println("[1/5]...") 进度输出会污染 stdout
-//   协议通道。
+// Check pipeline: lsp_check_file sets g_source, calls reset_frontend_state,
+// tokenize, res_imports, parse_all, check_all when parsing produced no
+// diagnostics, then publishes diagnostics. Do not call run_frontend: its
+// "[1/5]..." progress output would corrupt the protocol stream.
 //
-// ── publishDiagnostics ──
-//   主文件（g_files[0]，当前检查文档）无条件发布——无诊断即空数组清旧；
-//   其余有诊断的文件（file_id 去重）逐个发布。file_id → 路径经 g_files
-//   路径表，uri = "file://" + path。诊断字段：range（1-based → 0-based
-//   减 1）、severity=1、message（JSON 转义）。
+// publishDiagnostics: the main file (g_files[0]) is always published, so an
+// empty array clears stale diagnostics. Other files with diagnostics are
+// published once each. File ids map to paths through g_files, and the URI is
+// "file://" plus the path. Diagnostics use a 0-based range, severity 1, and a
+// JSON-escaped message.
 //
-// 注意（Python bootstrap 地雷）：字符串累加必须从字面量初始化的
-// `: string, mut` 累加器出发；本文件所有拼接均遵循该模式。
+// String accumulation must start from a literal-initialized `: string, mut`
+// accumulator; the bootstrap parser requires that form.
 
 g_lsp_snapshot_path : string, mut
 
@@ -36,8 +34,8 @@ fn lsp_request_matches_snapshot(root: int) -> int:
     uri := lsp_str_pool_copy(json_get(un, 1), json_get(un, 2))
     return str_eq(lsp_uri_to_path(uri), g_lsp_snapshot_path)
 
-// 从 JSON 字符串池复制字节段 → 稳定堆字符串。
-// 池在每次 json_parse 会被重置复用，直接存池内指针会在下一帧失效。
+// Copy a byte range from the JSON string pool to a stable heap string. The pool
+// is reset on each json_parse, so pointers into it expire after the frame.
 fn lsp_str_pool_copy(off: int, len: int) -> string:
     s := alloc(len + 1)
     i : ., mut = 0
@@ -49,14 +47,14 @@ fn lsp_str_pool_copy(off: int, len: int) -> string:
     store8(s, len, 0)
     return s
 
-// "file:///tmp/x.cr" → "/tmp/x.cr"；无前缀原样返回
+// Strip file:// from an LSP URI; return the URI unchanged when absent.
 fn lsp_uri_to_path(uri: string) -> string:
     ul := str_len(uri)
     if ul >= 7 && load8(uri, 0) == 102 && load8(uri, 1) == 105 && load8(uri, 2) == 108 && load8(uri, 3) == 101 && load8(uri, 4) == 58 && load8(uri, 5) == 47 && load8(uri, 6) == 47:
         return str_sub(uri, 7, ul - 7)
     return uri
 
-// JSON 字符串转义（诊断消息含引号/反斜杠/控制符时保证合法 JSON）
+// Escape a string for JSON, including quotes, backslashes, and control bytes.
 fn lsp_json_escape_str(s: string) -> string:
     sl := str_len(s)
     out : string, mut = "\""
@@ -83,7 +81,7 @@ fn lsp_json_escape_str(s: string) -> string:
     out = out + "\""
     return out
 
-// 单条诊断 → JSON 片段（范围 1-based → 0-based 减 1；severity=1 错误）
+// One diagnostic as a JSON object. Convert 1-based positions to 0-based and use severity 1.
 fn lsp_diag_json(di: int) -> string:
     ln := r64(g_diags, di * DIAG_REC_SIZE + 16)
     cl := r64(g_diags, di * DIAG_REC_SIZE + 24)
@@ -107,8 +105,7 @@ fn lsp_diag_json(di: int) -> string:
     out = out + "}"
     return out
 
-// 发送某文件（file_id = fni）的 publishDiagnostics 通知；fni = -1 时无匹配
-// 诊断 → 空数组（清诊断用）
+// Send publishDiagnostics for one file. fni = -1 sends an empty array to clear diagnostics.
 fn lsp_send_file_diags(uri: string, fni: int):
     out : string, mut = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":"
     out = out + lsp_json_escape_str(uri)
@@ -127,7 +124,7 @@ fn lsp_send_file_diags(uri: string, fni: int):
     out = out + "]}}"
     rpc_send(out)
 
-// 对所有有诊断的文件发布；主文件无条件发布（空数组清旧诊断）
+// Publish every affected file. The main file is always published, which clears stale diagnostics.
 fn lsp_publish_diags():
     main_fni : ., mut = -1
     if g_file_count > 0:
@@ -138,7 +135,7 @@ fn lsp_publish_diags():
         if str_len(mp) > 0:
             main_uri = "file://" + mp
     lsp_send_file_diags(main_uri, main_fni)
-    // 其余文件：仅发布有诊断者（按 file_id 去重，经 g_files 路径表映射 uri）
+    // Other files are published only when they have diagnostics, deduplicated by file id.
     i : ., mut = 0
     loop:
         if i >= g_diag_count:
@@ -170,7 +167,7 @@ fn lsp_publish_diags():
                     lsp_send_file_diags(uri, fni)
         i = i + 1
 
-// 静默检查管线（禁止 run_frontend——进度 println 污染协议通道）
+// Run the check pipeline without run_frontend, whose progress output would corrupt the protocol stream.
 fn lsp_check_file(path: string, src: string):
     g_lsp_snapshot_path = path
     g_source = src
@@ -178,22 +175,20 @@ fn lsp_check_file(path: string, src: string):
     reset_frontend_state()
     tokenize(g_source, 0)
     res_imports()
-    // res_imports 把主文件注册到 g_files[0] 时路径为空串——补上真实路径
-    // （供 publishDiagnostics 的 file_id → uri 映射；path 为稳定堆字符串）。
-    // 记录布局 {file_id@0, path@8}（module.cr reg_fileid）——旧代码误写 +16
-    // （记录 1 的 id 槽）仅靠读写同侧巧合工作，Task 4 的 analysis 按真实布局
-    // 读 +8 会拿到空串，故统一为 +8（root cause 修复）。
+    // res_imports registers the main file with an empty path. Store the real path
+    // for the file-id to URI mapping. The record layout is {file_id at 0, path at
+    // 8}; analysis reads the path at offset 8.
     if g_file_count > 0:
         store_str_ptr(g_files, 8, path)
     parse_all()
     if g_diag_count > 0:
-        // parse 阶段诊断：AST 可能不完整，跳过 check_all（与 run_frontend 一致）
+        // Parse diagnostics can leave the AST incomplete, so skip check_all.
         lsp_publish_diags()
         return
     check_all()
     lsp_publish_diags()
 
-// ── 文档同步处理器（通知，不回响应）───────────────────────────────
+// Document synchronization notifications; they send no response.
 
 fn lsp_did_open(root: int):
     params := json_obj_get(root, "params")
@@ -225,7 +220,7 @@ fn lsp_did_change(root: int):
     uri_node := json_obj_get(td, "uri")
     if uri_node < 0 || json_get(uri_node, 0) != J_STR:
         return
-    // 全量同步（textDocumentSync=1）：contentChanges[0].text = 完整新文本
+    // Full sync: contentChanges[0].text is the complete new text.
     c0 := json_array_get(changes, 0)
     text_node : ., mut = -1
     if c0 >= 0:
@@ -250,7 +245,7 @@ fn lsp_did_save(root: int):
         return
     uri := lsp_str_pool_copy(json_get(uri_node, 1), json_get(uri_node, 2))
     path := lsp_uri_to_path(uri)
-    // 重跑检查（源文本取打开文档——编辑器内存内容优先于磁盘）
+    // Recheck using the open document text; editor content takes priority over disk.
     src := module_get_source(path)
     if str_len(src) > 0:
         lsp_check_file(path, src)
@@ -270,14 +265,14 @@ fn lsp_did_close(root: int):
     module_open_doc_remove(path)
     if str_eq(path, g_lsp_snapshot_path) != 0:
         g_lsp_snapshot_path = ""
-    // 清诊断：发布空数组
+    // Clear diagnostics by publishing an empty array.
     lsp_send_file_diags("file://" + path, -1)
 
-// ── hover / definition（Task 4）──────────────────────────────
-// 请求（带 id）→ 响应。查询基于最后一次成功检查的快照（analysis.cr），
-// 不触发检查。position 为 LSP 0-based；无结果 → result:null。
+// Hover and definition. Requests carry an id and receive a response. Queries use
+// the snapshot from the last successful check in analysis.cr and do not run a
+// check. Positions are LSP 0-based; no result sends result:null.
 
-// 响应体：contents 非空 → {"contents": "<文本>"}，否则 null
+// Response: {"contents": text} when contents is non-empty, otherwise null.
 fn lsp_send_hover_resp(root: int, contents: string):
     idnode := json_obj_get(root, "id")
     id_val : ., mut = 0
@@ -293,7 +288,7 @@ fn lsp_send_hover_resp(root: int, contents: string):
         out = out + "}}"
     rpc_send(out)
 
-// 响应体：loc 非空 → {"uri","range"} Location，否则 null
+// Response: a {uri, range} Location when loc is non-empty, otherwise null.
 fn lsp_send_def_resp(root: int, loc: string):
     idnode := json_obj_get(root, "id")
     id_val : ., mut = 0
@@ -345,12 +340,13 @@ fn lsp_definition(root: int):
         return
     lsp_send_def_resp(root, analysis_definition(json_get(line_node, 1), json_get(col_node, 1)))
 
-// ── completion / documentSymbol（Task 5）────────────────────────
-// 请求（带 id）→ 响应。查询基于最后一次成功检查的快照（analysis.cr），
-// 不触发检查。响应体复用 lsp_send_def_resp 的 "result":<json> 形状。
+// Completion and documentSymbol. Queries use the snapshot from the last
+// successful check in analysis.cr and do not run a check. Responses reuse the
+// "result": json shape from lsp_send_def_resp.
 
-// textDocument/completion：params.position（0-based）+ context（当前仅
-// 忽略——触发类型不影响候选）；result 为 {"items":[...]}，坏参数 → 空 items。
+// textDocument/completion: params.position is 0-based. The context field is
+// ignored because the trigger kind does not affect candidates. The result is
+// {"items":[...]}; bad parameters produce an empty array.
 fn lsp_completion(root: int):
     if lsp_request_matches_snapshot(root) == 0:
         lsp_send_def_resp(root, "{\"items\":[]}")
@@ -369,8 +365,8 @@ fn lsp_completion(root: int):
         return
     lsp_send_def_resp(root, analysis_completion(json_get(line_node, 1), json_get(col_node, 1)))
 
-// textDocument/documentSymbol：params.textDocument.uri 只需存在即可
-// （符号来自快照，与 uri 具体值无关）；result 为 JSON 数组。
+// textDocument/documentSymbol: params.textDocument.uri only has to be present;
+// symbols come from the snapshot. The result is a JSON array.
 fn lsp_document_symbol(root: int):
     if lsp_request_matches_snapshot(root) == 0:
         lsp_send_def_resp(root, "[]")
@@ -388,10 +384,9 @@ fn lsp_document_symbol(root: int):
         return
     lsp_send_def_resp(root, analysis_document_symbol())
 
-// ── semanticTokens（Task 6）──────────────────────────────────
-// textDocument/semanticTokens/full：params.textDocument.uri 只需存在即可
-// （令牌来自快照，与 uri 具体值无关——与 documentSymbol 同模式）；result
-// 为 {"data":[...]}（差分编码见 analysis.cr）。坏参数 → 空 data。
+// textDocument/semanticTokens/full: params.textDocument.uri only has to be
+// present; tokens come from the snapshot. The result is {"data":[...]} with the
+// differential encoding from analysis.cr. Bad parameters produce empty data.
 fn lsp_semantic_tokens(root: int):
     if lsp_request_matches_snapshot(root) == 0:
         lsp_send_def_resp(root, "{\"data\":[]}")

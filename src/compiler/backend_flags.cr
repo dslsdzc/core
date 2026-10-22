@@ -1,0 +1,26 @@
+// 后端 CLI 旗标注册单源。
+// concat 入口（corearch.cr）与组合根 project-mode 入口
+// （src/targets/x86_64-linux/main.cr）共用本函数，避免两处注册表漂移。
+fn register_backend_flags():
+    cli_flag_bool("elf", "", "Output ELF binary (default)")
+    cli_flag_bool("shared", "", "Output shared library (.so)")
+    cli_flag_bool("static", "", "Static linking (embed runtime)")
+    cli_flag("link", "l", "Comma-sep .so files, or 'auto' for ~/.core/lib/")
+    cli_flag("output", "o", "Output path")
+    cli_flag("opt-level", "O", "Optimization level (0-3, default=0)")
+    cli_flag("table", "", "HIT table file (load & emit mapped ops through it)")
+    cli_flag("hit-events-file", "", "Hidden debug: inject text event stream file (dump-events inverse; skips lowering)")
+    cli_flag_bool("dump-events", "", "Dump lowered HIT event stream + const pool")
+    cli_flag_bool("dump-table", "", "Hidden debug: dump loaded HIT event/proj/step/runtime state")
+    cli_flag_bool("dump-entries", "", "Hidden debug: versioned entries summary")
+    cli_flag_bool("dump-coexist", "", "Hidden debug: coexistence summary")
+    cli_flag_bool("dump-regassign", "", "Hidden debug: per-pair var->reg dump after O2 self-alloc")
+    cli_flag_bool("check-regalloc", "", "Hidden debug: O2-forced alloc + regalloc consistency self-check")
+    cli_flag_bool("inject-home-conflict", "", "Hidden debug: inject coexisting entries onto same home slot, then verify")
+    cli_flag_bool("inject-reg-conflict", "", "Hidden debug: inject fake var->reg pair colliding with a real one, then verify")
+    cli_flag_bool("inject-read-gap", "", "Hidden debug: truncate last version interval to def point, then verify")
+    cli_flag_bool("inject-coexist-oob", "", "Hidden debug: probe entries_coexist with OOB indices")
+    cli_flag_bool("dump-objects", "", "Hidden debug: dump loaded NOD/EDG semantic objects")
+    cli_flag_bool("dump-nod-items", "", "Hidden debug: dump loaded NOD item indices through the TYPE term table")
+    cli_flag_bool("dump-types", "", "Hidden debug: dump loaded TYPE segment content")
+    cli_flag_bool("dump-ifaces", "", "Hidden debug: dump loaded IFACE segment content")

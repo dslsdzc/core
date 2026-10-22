@@ -1,5 +1,5 @@
 // === resolve.cr ===
-// Generic label→offset resolution pass.
+// Generic label-to-offset resolution pass.
 //
 // Uses emit_instr() (the real encoder) for sizing — no duplicate size logic.
 // A reusable scratch buffer avoids per-instruction allocation.
@@ -7,9 +7,9 @@
 // resolved byte offsets directly into src2/src3/src1.
 //
 // After resolution:
-//   IR_BRANCH: src2=true_offset, src3=false_offset, type_kind=IR_RESOLVED
-//   IR_JUMP:   src1=offset, type_kind=IR_RESOLVED
-//   IR_LABEL:  opcode → IR_NOP
+//   IR_BRANCH: src2 = true_offset, src3 = false_offset, type_kind = IR_RESOLVED
+//   IR_JUMP:   src1 = offset, type_kind = IR_RESOLVED
+//   IR_LABEL:  opcode becomes IR_NOP
 //
 // The backend's emit_instr() can then write branch instructions using
 // the pre-computed offsets, no label table lookup needed.

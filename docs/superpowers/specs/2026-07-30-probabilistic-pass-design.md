@@ -1,41 +1,41 @@
 # 概率编程 pass 实现设计
 
 
-> **术语注记（2026-08-15）**：本规格为历史设计记录，其中「数据流图」（及「RVSDG 式」）为当时术语；该结构后定名为 **HDFG（Holographic Dataflow Graph，全息数据流图）**，术语演进见 `docs/project-book.md`。正文保留历史原样。
+> 术语注记（2026-08-15）：本规格为历史设计记录，其中「数据流图」（及「RVSDG 式」）为当时术语；该结构后定名为 HDFG（Holographic Dataflow Graph，全息数据流图），术语演进见 `docs/project-book.md`。正文保留历史原样。
 
 ## 概述
 
-在 Core 编译器中实现 ProbabilityPass——一个在数据流图上运行的概率推导 pass。该 pass 不需要新语法、不需要运行时系统、不需要 CPS 变换，全部工作在编译期完成。
+在 Core 编译器中实现 ProbabilityPass，一个在数据流图上运行的概率推导 pass。这个 pass 不需要新语法、不需要运行时系统、不需要 CPS 变换，全部在编译期完成。
 
 参考 Mappl (PLDI 2024) 的变量消元编译方法，并利用 Core 已有的数据流图简化实现。
 
 ## 核心原则
 
-- **概率以 pass 形态实现，而非新增语言特性。**
-- **数据流图天然记录了所有依赖关系。** Mappl 需借助信息流类型系统与 CPS 变换才能分析的信息，Core 的数据流图上已经具备。
-- **`random()` 是库函数。** 编译器不做特殊对待——pass 看到的是 `IR_CALL random` 节点。
-- **观测即条件分支。** `if sensor > 30` — pass 在该分支边上标注观察约束。
+- 概率以 pass 形态实现，不新增语言特性。
+- 数据流图本身记录了所有依赖关系。Mappl 需要借助信息流类型系统与 CPS 变换才能分析的信息，Core 的数据流图已经具备。
+- `random()` 是库函数。编译器不做特殊对待，pass 看到的是 `IR_CALL random` 节点。
+- 观测即条件分支。`if sensor > 30` 时，pass 在该分支边上标注观察约束。
 
 ## ProbabilityPass 架构
 
 ```
 输入: 数据流图 (g_df_nodes, g_df_edges)
-      分支节点 (IR_BRANCH) 已就位
+      分支节点 (IR_BRANCH) 已经存在
       random() 调用 (IR_CALL) 作为普通节点出现
 
 pass 流程:
-  1. scan_random_calls()  — 扫描 random() 节点
-  2. tag_branch_weights() — 识别 random() < p 模式，标注分支概率
-  3. propagate_weights()  — 沿值流传播概率权重
-  4. apply_observations() — 处理观测约束（条件分支）
-  5. annotate_graph()     — 将分布信息附到图节点上
+  1. scan_random_calls()  扫描 random() 节点
+  2. tag_branch_weights() 识别 random() < p 模式，标注分支概率
+  3. propagate_weights()  沿值流传播概率权重
+  4. apply_observations() 处理观测约束（条件分支）
+  5. annotate_graph()     将分布信息附到图节点上
 
 消费端:
   - 优化器: 低概率路径放远
   - 代码生成: 冷热路径分离
   - 验证器: 统计性质检验
 
-无运行时开销: 全部信息在编译期走完。
+无运行时开销: 全部信息在编译期计算完成。
 ```
 
 ## Step 1：`random()` 节点识别
@@ -71,17 +71,15 @@ fn tag_branch_weights():
 图上的表示：
 
 ```
-random() ──→ IR_CONST(0.3)
-    ↓            ↓
- IR_BINARY(OP_LT)
-    ↓
- IR_BRANCH → true_edge (weight=0.3)
-          → false_edge (weight=0.7)
+random() 和 IR_CONST(0.3) 输入 IR_BINARY(OP_LT)
+IR_BINARY(OP_LT) 输入 IR_BRANCH
+IR_BRANCH 的 true_edge (weight=0.3)
+IR_BRANCH 的 false_edge (weight=0.7)
 ```
 
 ## Step 3：权重传播
 
-沿值流传播概率权重。原理与数据流分析相同——每个值的"可能概率"沿分支边与数据边传播：
+沿值流传播概率权重。原理与数据流分析相同，每个值的「可能概率」沿分支边和数据边传播：
 
 ```core
 fn propagate_weights():
@@ -91,7 +89,7 @@ fn propagate_weights():
     //
     // 示例:
     //   result := if random() < 0.05 { "rare" } else { "common" }
-    //   → result 的分布: {5% "rare", 95% "common"}
+    //   result 的分布: {5% "rare", 95% "common"}
 
     // 迭代直到不动点（和 PointerAnalysis 一样的模式）
     changed := 1
@@ -105,7 +103,7 @@ fn propagate_weights():
 
 ## Step 4：观测约束
 
-`if sensor > 30 { ... }` — 条件分支同时也是一个观测。pass 在该处标注：
+`if sensor > 30 { ... }` 这个条件分支同时也是一个观测。pass 在该处标注：
 
 ```core
 fn apply_observations():
@@ -117,11 +115,11 @@ fn apply_observations():
 
 ## Step 5：图标注
 
-概率信息附加到 DF 节点上供优化器和验证器消费：
+概率信息附加到 DF 节点上，供优化器和验证器使用：
 
 ```core
 // 新增 DF 节点字段（复用现有字段）
-// OFF_DF_PROB: int = 48  — 概率权重 (fixed-point, 0-1)
+// OFF_DF_PROB: int = 48  // 概率权重 (fixed-point, 0-1)
 // EXTENDED_ESZ_DFNODE: int = 72  (原本 64 + 8)
 ```
 
@@ -131,8 +129,8 @@ fn apply_observations():
 
 | Mappl | Core |
 |-------|------|
-| 信息流类型系统 → 分析依赖 | 数据流图边已记录所有依赖 |
-| CPS 变换 → 处理分支上下文 | 图的分支节点已在图上 |
+| 信息流类型系统用于分析依赖 | 数据流图边已记录所有依赖 |
+| CPS 变换处理分支上下文 | 图的分支节点已在图上 |
 | 消元子问题分解 | 子图边界已划分 |
 | 类型安全证明 | 图结构保证正确性 |
 | 运行时消元 | 编译期权重传播 |
@@ -142,6 +140,6 @@ fn apply_observations():
 | # | 文件 | 改动 |
 |---|------|------|
 | 1 | `src/compiler/prob_pass.cr` | 新建：ProbabilityPass 五个步骤 |
-| 2 | `src/compiler/main.cr` | passe 管线中插入 ProbabilityPass |
+| 2 | `src/compiler/main.cr` | pass 管线中插入 ProbabilityPass |
 | 3 | `src/compiler/globals.cr` | g_node_probs 数组 |
 | 4 | `tests/suite/prob_test.cr` | 测试 |

@@ -2,14 +2,14 @@
 
 ## 概述
 
-在 Core 中实现完整的 FFI。支持 `extern fn` 声明外部函数、C ABI 调用、多语言 `@ffi` 注解自动类型编组。利用现有的 `.so` 动态链接基础设施（PLT/GOT/符号解析）。
+在 Core 中实现完整的 FFI。支持 `extern fn` 声明外部函数、C ABI 调用，以及多语言 `@ffi` 注解自动类型编组。使用现有的 `.so` 动态链接基础设施（PLT/GOT/符号解析）。
 
 ## 核心原则
 
-- **C ABI 是默认接口**：所有语言最终通过 C ABI 对接。
-- **`@ffi` 是编译控制**：不改变语义，只改变调用方式的生成。
-- **类型编组在 IR gen 时静态插入**：`@ffi("Python")` 在每个调用点插入 `PyObject*` 转换代码。
-- **`.so` 链接已有基础设施**：`ctx_add_plt`/`g_x86_ext_rel` 等直接复用。
+- C ABI 是默认接口：所有语言最终通过 C ABI 对接。
+- `@ffi` 是编译控制：不改变语义，只改变调用方式的生成。
+- 类型编组在 IR gen 时静态插入：`@ffi("Python")` 在每个调用点插入 `PyObject*` 转换代码。
+- `.so` 链接已有基础设施：`ctx_add_plt`/`g_x86_ext_rel` 等直接复用。
 
 ## 语法
 
@@ -31,7 +31,7 @@ extern fn getchar() -> i32
 
 ## 类型映射
 
-### C 类型 ↔ Core 类型
+### C 类型与 Core 类型
 
 | C 类型 | Core 类型 | 说明 |
 |--------|----------|------|
@@ -47,13 +47,13 @@ extern fn getchar() -> i32
 
 ### Python 类型编组
 
-| Python → Core | Core → Python |
+| Python 到 Core | Core 到 Python |
 |---------------|---------------|
-| `PyObject*` → `dyn` | `dyn` → `PyObject*` |
-| `int` → `int` | `int` → `PyLong_FromLong` |
-| `str` → `string` | `string` → `PyUnicode_FromString` |
-| `list` → `[dyn]` | `[dyn]` → `PyList_New` |
-| `dict` → `dyn` | `dyn` → `PyDict_New` |
+| `PyObject*` 转 `dyn` | `dyn` 转 `PyObject*` |
+| `int` 转 `int` | `int` 转 `PyLong_FromLong` |
+| `str` 转 `string` | `string` 转 `PyUnicode_FromString` |
+| `list` 转 `[dyn]` | `[dyn]` 转 `PyList_New` |
+| `dict` 转 `dyn` | `dyn` 转 `PyDict_New` |
 
 ## 实现架构
 
@@ -66,14 +66,15 @@ extern fn getchar() -> i32
 | `ir_gen.cr` | extern 调用 + 类型编组生成 | ~100 行 |
 | `linker.cr` | `.so` 自动加载 + PLT 注册 | ~60 行 |
 
-### 1. 解析器
+### 解析器
 
-**新增 Token**：
+新增 Token：
+
 ```core
 T_EXTERN : int = 100  // extern 关键字
 ```
 
-**`parse_extern_fn`**：在 `parse_declaration` 中处理 `extern fn`：
+`parse_extern_fn`：在 `parse_declaration` 中处理 `extern fn`：
 
 ```core
 if tok_k(cur_tok()) == T_EXTERN:
@@ -91,33 +92,33 @@ if tok_k(cur_tok()) == T_EXTERN:
     return fn_node
 ```
 
-### 2. 检查器
+### 检查器
 
 - `extern fn` 不需要函数体，只做签名检查。
 - 参数类型和返回类型校验（是否可编组）。
 - `@ffi("Python")` 的参数类型校验（`dyn` 类型是否合理）。
 
-### 3. IR 生成
+### IR 生成
 
-**`extern` 调用点的代码生成**：
+`extern` 调用点的代码生成：
 
 ```core
 if is_extern_func(func_ni) {
     ffi_lang := get_ffi_lang(func_ni);
     if str_eq(ffi_lang, "C") != 0 {
-        // C ABI：直通调用
+        // C ABI：直接调用
         emit(IR_CALL_EXTERN, dest, func_ni, first_arg, arg_count, 0);
     } else if str_eq(ffi_lang, "Python") != 0 {
         // Python：插入 PyObject* 转换
-        // 参数：dyn → PyObject*
-        // 返回值：PyObject* → dyn
+        // 参数：dyn 转 PyObject*
+        // 返回值：PyObject* 转 dyn
         // 插入 refcount 管理
         emit_python_marshal(dest, func_ni, first_arg, arg_count);
     }
 }
 ```
 
-### 4. 链接器集成
+### 链接器集成
 
 在链接阶段，`extern` 函数自动触发 `.so` 加载：
 

@@ -1,35 +1,41 @@
 // === src/arch/hit/lower_to_core.cr ===
-// 合成层（HIT M1 Task 3）：IR 直线子集 → 4 核事件流 + 常量池。
-// 设计：docs/superpowers/plans/2026-09-05-hit-minimal-core-m1.md Task 3。
-// 管线（表模式下 corearch 内部）：IR →（本文件降低）→ 事件流 →（表投影）→ 字节。
+// Lowering layer for HIT: a straight-line IR subset to a four-event core stream
+// and a constant pool.
 //
-// 事件流记录（g_hit_ev_stream，每条 20B = 5 × i32）：
-//   [ev_id i32, dst i32, src1 i32, src2 i32, flags i32]
-//   ev_id    最小核事件号（sub=1 nand=2 load=3 store=4——语义锚，表加载侧校验存在）
-//   dst     结果变量（store = 0 未用）；src1/src2 = 变量或常量池槽（flags 区分）
-//   flags    bit0 = src1 为常量池槽（否则变量），bit1 = src2 为常量池槽
-// 未用操作数字段恒存 0（勿存 -1：hit_w32 字节拆取仅定义非负值——自持 x86 截断
-// 除法与 Python 解释地板除读回分裂（255 vs 0xFFFFFFFF），M2-2a 改存 0）。
-// 降低规则（M1 直线子集：const/store/load/add/sub）：
-//   IR_CONST n        → load 事件（addr = 池槽；池值发射时写 ELF rodata）
-//   IR_BINARY OP_SUB  → sub 事件直通
-//   IR_BINARY OP_ADD  → sub 反减 sub(a, sub(0, b))：事件 E1 sub(d, 池0, b)、
-//                       E2 sub(d, a, d)——中间值驻 d（编码器先读后写，读先于写）；
-//                       dest-fresh 前提 d != a（违反 → 0 事件落旧路径，M2-2c 防御）
-//   IR_LOAD/IR_STORE  → load/store 事件直通（槽寻址；全局/形态不符由编码器预检落旧路径）
-//   超子集 IR_BINARY 子操作 → 报错「needs more events」（exit 1）
-// 未映射指令（RET/ALLOC/ARENA_*/…）→ 无事件 → 旧路径（M1 混合模式）。
+// Pipeline in table mode inside corearch: IR, lowering in this file, event
+// stream, table projection, bytes.
 //
-// 常量池（g_hit_pool，每槽 8B，按值去重）：值于发射尾随字符串区写入 .rodata；
-// 事件对池槽的引用由编码器记 g_hit_pool_patch（instr.cr 记、elf.cr 发射后回填 rip 位移）。
+// Event record, 20 bytes:
+//   [event id i32, dst i32, src1 i32, src2 i32, flags i32]
+// Event ids: sub=1, nand=2, load=3, store=4. The table loader checks that the id
+// exists. dst is the result variable; store uses 0. src1 and src2 hold variable
+// numbers or pool slots; flags bit 0 marks src1 as a pool slot, bit 1 marks src2.
+// Unused operand fields hold 0, never -1: hit_w32 defines only non-negative
+// values, because byte extraction with x86 truncating division and Python floor
+// division disagree on negative inputs.
 //
-// 本文件进两份构建：corearch concat 清单（build_selfhost_native.py 的
-// hit_engine_files 段，位于 common 之后、内核/架构轴之前）与组合根
-// project-mode 单元（src/targets/x86_64-linux/
-// _import.cr 的 `import lower_to_core`，2026-09-10 补——该单元原先漏此导入，
-// 致 15×N06+16×N01 静默未定义）。import 行供独立 `corec check`/project-mode
-// 解析（concat 构建剥离 import 行；io/ast/globals/dyn_arr/hit 均在闭包内；
-// dyn_arr 的 iri_* 等访问器与 w32/r32/r64 即编译器 IR 访问面）。
+// Lowering rules for the straight-line subset:
+//   IR_CONST n: load event with the address in a pool slot; the pool value is
+//     written to ELF rodata during emission.
+//   IR_BINARY OP_SUB: one sub event.
+//   IR_BINARY OP_ADD: sub(a, sub(0, b)). Event 1 computes sub(d, pool0, b);
+//     event 2 computes sub(d, a, d). The encoder reads before writing, so the
+//     intermediate value can live in d. The destination must differ from a;
+//     otherwise no event is emitted and the instruction uses the normal path.
+//   IR_LOAD and IR_STORE: load or store event. The encoder rejects globals and
+//     unsupported shapes before emission.
+//   Other IR_BINARY operations: print "needs more events" and exit 1.
+// Unmapped instructions (RET, ALLOC, ARENA_*, and others) emit no event and use
+// the normal path, giving mixed mode.
+//
+// Constant pool: 8 bytes per slot, deduplicated by value. Values are written to
+// .rodata after emission. Pool references are recorded in g_hit_pool_patch by the
+// encoder and patched by elf.cr after emission.
+//
+// This file is part of two builds: the corearch concat list, after common and
+// before the kernel and architecture files, and the project-mode unit
+// src/targets/x86_64-linux/_import.cr. The import lines also let standalone
+// `corec check` and project mode resolve symbols; concat builds strip them.
 
 import io
 import fmt
@@ -38,20 +44,20 @@ import globals
 import dyn_arr
 import hit
 
-// ════════════════════════════════════════════════════════════════
-// 事件流 / 常量池 布局与状态
-// ════════════════════════════════════════════════════════════════
+// ------------------------------------------------------------------
+// Event stream, pool layout, and state
+// ------------------------------------------------------------------
 
-// 最小核事件号契约（core-x86.toml 的 id 同此——表加载侧按 id 匹配，缺则旧路径）
+// Event ids shared with core-x86.toml. The table loader matches by id and falls back to the normal path when an id is absent.
 HIT_EV_SUB   : int = 1
 HIT_EV_NAND  : int = 2
 HIT_EV_LOAD  : int = 3
 HIT_EV_STORE : int = 4
-HIT_EV_JUMP  : int = 5    // M2a：jump（rel32 事件流位置回填——发射 = instr.cr Task 2）
-HIT_EV_BRANCH: int = 6    // M2a：branch/call/ret/extern 模板已声明——发射 = Task 3 起
-HIT_EV_CALL  : int = 7
-HIT_EV_RET   : int = 8
-HIT_EV_EXTERN: int = 9
+HIT_EV_JUMP  : int = 5    // jump; the rel32 field is patched from the event position
+HIT_EV_BRANCH: int = 6    // branch template; emitted by the table encoder
+HIT_EV_CALL  : int = 7    // call template
+HIT_EV_RET   : int = 8    // return template
+HIT_EV_EXTERN: int = 9    // external call template
 
 HIT_ES_REC    : int = 20  // 5 × i32
 HIT_ES_OFF_ID    : int = 0
@@ -59,28 +65,29 @@ HIT_ES_OFF_DST   : int = 4
 HIT_ES_OFF_S1    : int = 8
 HIT_ES_OFF_S2    : int = 12
 HIT_ES_OFF_FLAGS : int = 16
-HIT_ES_S1_POOL : int = 1   // src1 = 常量池槽（否则 = 变量号）
-HIT_ES_S2_POOL : int = 2   // src2 = 常量池槽（否则 = 变量号）
+HIT_ES_S1_POOL : int = 1   // src1 is a pool slot instead of a variable
+HIT_ES_S2_POOL : int = 2   // src2 is a pool slot instead of a variable
 
 g_hit_ev_stream : string, mut
 g_hit_ev_count : int, mut
 g_hit_ev_cap : int, mut
 g_hit_ev_map : string, mut
-g_hit_ev_map_size : int, mut  // 每 IR 指令 8B {start u32, count u32}
+g_hit_ev_map_size : int, mut  // 8 bytes per IR instruction: {start u32, count u32}
 g_hit_pool : string, mut
 g_hit_pool_count : int, mut
 g_hit_pool_cap : int, mut
 g_hit_pool_patch : string, mut
 g_hit_pool_patch_count : int, mut
-g_hit_pool_patch_cap : int, mut  // 16B/条 {pos i64, k i64}
+g_hit_pool_patch_cap : int, mut  // 16 bytes per record: {pos i64, k i64}
 
-// ── M2a Task 2：rel 回填表 + 事件发射位置表 + 注入通道激活态 ──
-// g_hit_rel：三张回填表合一（kind 0 = 事件流位置、1 = 函数起点、2 = 外部符号序），
-// 24B/条 {kind i64, pos i64, target i64}（pos = rel 字段位置）。登记 = instr.cr
-// 发射器（hit_rel_add）；回填 = elf.cr 发射后循环（本任务 kind 0 = 事件序目标）。
-// g_hit_ev_pos：事件序 → 发射字节位置（8B/序；发射器边发边记——jump 回填消费）。
-// g_hit_inject_active：--hit-events-file 注入通道激活（测试专用——预检拒绝升级为
-// 大声错误 + 事件计数不符 = exit 1，防静默落旧路径掩盖注入文件错误）。
+// Relocation tables, event emission positions, and injection state.
+// g_hit_rel stores {kind, pos, target}, 24 bytes per record. kind 0 targets an
+// event position, 1 a function start, and 2 an external symbol ordinal. instr.cr
+// adds records; elf.cr patches them after emission.
+// g_hit_ev_pos maps event ordinals to emission byte positions, 8 bytes each. The
+// emitter records positions as it writes, and jump patching reads them.
+// g_hit_inject_active marks the test-only --hit-events-file path. A failed check
+// or a count mismatch exits 1 instead of falling back to the normal path.
 g_hit_rel : string, mut
 g_hit_rel_count : int, mut
 g_hit_rel_cap : int, mut
@@ -154,9 +161,8 @@ fn hit_grow_ev_pos(needed: int):
     g_hit_ev_pos = nb
     g_hit_ev_pos_cap = nc
 
-// rel 回填登记（M2a Task 2 接口——instr.cr 发射器调用；elf.cr 发射后回填）。
-// kind: 0 = 事件流位置（jump/branch——事件序目标，本任务落地）、
-//       1 = 函数起点、2 = 外部符号序（Task 4/5 消费——登记接口先行，回填拒接）。
+// Add a relocation record. kind 0 targets an event ordinal; kinds 1 and 2 are
+// reserved for function starts and external symbol ordinals.
 fn hit_rel_add(kind: int, pos: int, target: int):
     hit_grow_rel(g_hit_rel_count + 1)
     slot : ., mut = g_hit_rel_count
@@ -165,14 +171,14 @@ fn hit_rel_add(kind: int, pos: int, target: int):
     w64(g_hit_rel, slot * 24 + 8, pos)
     w64(g_hit_rel, slot * 24 + 16, target)
 
-// 事件序 → 发射位置记录（8B；发射器在事件字节落位前写入——位置 = 绝对 buf 偏移）
+// Record the emission byte position of an event ordinal before its bytes are written.
 fn hit_ev_pos_set(ord: int, pos: int):
     hit_grow_ev_pos(ord + 1)
     w64(g_hit_ev_pos, ord * 8, pos)
     if ord + 1 > g_hit_ev_pos_count:
         g_hit_ev_pos_count = ord + 1
 
-// 8B 补码小端写（借位链，两补正确——负值池槽可表达；仿 dyn_arr w32 链扩至 8 字节）
+// Write an 8-byte two's-complement little-endian value. The borrow sequence supports negative pool values.
 fn hit_pool_w64(buf: string, pos: int, v: int):
     b0 : ., mut = v % 256
     t1 : ., mut = v / 256
@@ -225,7 +231,7 @@ fn hit_lower_reset():
     g_hit_ev_count = 0
     g_hit_pool_count = 0
     g_hit_pool_patch_count = 0
-    // M2a Task 2：rel 回填表 + 事件位置表逐次发射清零
+    // Clear relocation and event position tables for each emission.
     g_hit_rel_count = 0
     g_hit_ev_pos_count = 0
 
@@ -247,7 +253,7 @@ fn hit_ev_map_start(i: int) -> int:
         return 0
     return r32(g_hit_ev_map, i * 8)
 
-// 追加一条事件（20B）；未用操作数 = 0（勿存 -1：hit_w32 非负约定——M2-2a）
+// Append one 20-byte event. Unused operands are 0, never -1.
 fn hit_ev_append(ev_id: int, d: int, s1: int, s2: int, flags: int):
     hit_grow_ev(g_hit_ev_count + 1)
     slot : ., mut = g_hit_ev_count
@@ -258,7 +264,7 @@ fn hit_ev_append(ev_id: int, d: int, s1: int, s2: int, flags: int):
     hit_w32(g_hit_ev_stream, slot * HIT_ES_REC + HIT_ES_OFF_S2, s2)
     hit_w32(g_hit_ev_stream, slot * HIT_ES_REC + HIT_ES_OFF_FLAGS, flags)
 
-// 事件流访问器（dump/编码器消费；i 为流内下标）
+// Event stream accessors for dumps and the encoder; i is the stream index.
 fn hit_ev_id(i: int) -> int:
     return hit_r32(g_hit_ev_stream, i * HIT_ES_REC + HIT_ES_OFF_ID)
 fn hit_ev_dst(i: int) -> int:
@@ -272,7 +278,7 @@ fn hit_ev_flags(i: int) -> int:
 fn hit_ev_total() -> int:
     return g_hit_ev_count
 
-// 常量池：按值去重 intern；返回槽号
+// Intern a pool value by value and return its slot.
 fn hit_pool_intern(v: int) -> int:
     k : ., mut = 0
     loop:
@@ -292,7 +298,7 @@ fn hit_pool_total() -> int:
 fn hit_pool_val(k: int) -> int:
     return r64(g_hit_pool, k * 8)
 
-// 池引用 patch 记录（编码器在发射池值 mov 时调用；elf.cr 于 rodata 定稿后回填）
+// Record a pool reference at a byte position. elf.cr patches it after rodata is final.
 fn hit_pool_patch_add(pos: int, k: int):
     hit_grow_pool_patch(g_hit_pool_patch_count + 1)
     slot : ., mut = g_hit_pool_patch_count
@@ -300,12 +306,13 @@ fn hit_pool_patch_add(pos: int, k: int):
     w64(g_hit_pool_patch, slot * 16, pos)
     w64(g_hit_pool_patch, slot * 16 + 8, k)
 
-// ════════════════════════════════════════════════════════════════
-// 降低规则（IR 直线子集 → 事件流）
-// ════════════════════════════════════════════════════════════════
+// ------------------------------------------------------------------
+// Lowering rules: straight-line IR to event stream
+// ------------------------------------------------------------------
 
-// 降低单条 IR 指令并追加事件。Returns 0 = 成功（可能无事件 = 旧路径直通）；
-// 1 = 超子集 op（错误已打印）——调用方中止（exit 1）。
+// Lower one IR instruction and append events. Returns 0 on success, possibly with
+// no event and therefore the normal path; returns 1 for an unsupported operation
+// after printing an error, and the caller exits 1.
 fn hit_lower_instr(j: int) -> int:
     op := iri_op(j)
     d := iri_dest(j)
@@ -314,19 +321,19 @@ fn hit_lower_instr(j: int) -> int:
     s3 := iri_s3(j)
     ti := iri_tk(j)
     if op == IR_CONST:
-        // 字符串常量走旧路径（g2_str_off/rodataref 字符串机制）；
-        // 其余常量 → 池槽 load 事件（8B 槽值发射时写 rodata）
+        // String constants use the normal string path. Other constants become a
+        // pool load event; the 8-byte value is written to rodata during emission.
         if ti == TI_STR:
             return 0
         if d < 0:
             return 0
         k := hit_pool_intern(s1)
-        hit_ev_append(HIT_EV_LOAD, d, k, 0, HIT_ES_S1_POOL)   // load 事件：addr = 池槽（s2 = 0 未用）
+        hit_ev_append(HIT_EV_LOAD, d, k, 0, HIT_ES_S1_POOL)   // load event: src1 is the pool slot, src2 is unused
         return 0
     if op == IR_BINARY:
         if ti == TI_DEX:
             return 0
-        // binary64 运算走旧 SSE 路径（M1 不移表）
+        // binary64 operations use the normal SSE path.
         if s3 == OP_SUB:
             if d < 0 || s1 < 0 || s2 < 0:
                 return 0
@@ -335,18 +342,18 @@ fn hit_lower_instr(j: int) -> int:
         if s3 == OP_ADD:
             if d < 0 || s1 < 0 || s2 < 0:
                 return 0
-            // dest-fresh 前提（M2-2c 防御）：E1 先把中间值 (0−b) 写入 d 槽；
-            // d == a 时 E2 读 src1(a) 读到的已是中间值 → a − (0−b) 语义崩。
-            // 落 0 事件 = 旧路径（旧路径编码器逐事件先读后写，无此前提）。
+            // The destination must differ from src1. Event 1 writes 0-b into d;
+            // if d == a, event 2 would read the intermediate value instead of a.
+            // Emitting no event uses the normal path.
             if d == s1:
                 return 0
-            k0 := hit_pool_intern(0)   // 合成 0（最小核无 const 事件）
-            // sub 反减 add(a,b) := sub(a, sub(0,b))——中间值驻 d：
-            // E1: d ← 0 − b；E2: d ← a − d（编码器先读后写，读先于写）
+            k0 := hit_pool_intern(0)   // synthesized zero; the minimal core has no const event
+            // add(a, b) = sub(a, sub(0, b)). Event 1 writes 0-b to d; event 2
+            // writes a-d to d. The encoder reads before writing.
             hit_ev_append(HIT_EV_SUB, d, k0, s2, HIT_ES_S1_POOL)
             hit_ev_append(HIT_EV_SUB, d, s1, d, 0)
             return 0
-        // 其余子操作（mul/div/mod/移位/位与/或/…）= 超出 M1 直线子集
+        // Other suboperations (mul, div, mod, shifts, bitwise and, or, and others) are outside the straight-line subset.
         print("error: HIT lower: instr ")
         print_i(j)
         print(" op=")
@@ -357,24 +364,26 @@ fn hit_lower_instr(j: int) -> int:
         return 1
     if op == IR_LOAD:
         if d >= 0 && s1 >= 0:
-            // 槽读 → 槽写（全局/形态不符由编码器预检 → 整条落旧路径）；
-            // s2 = 0 未用（勿存 -1：hit_w32 非负约定，M2-2a）
+            // Slot read to slot write. The encoder rejects globals and unsupported
+            // shapes and uses the normal path for the whole instruction. src2 is
+            // unused, so store 0.
             hit_ev_append(HIT_EV_LOAD, d, s1, 0, 0)
         return 0
     if op == IR_STORE:
         if s1 >= 0 && s2 >= 0:
-            // 槽写：addr = s1 槽、val = s2；dst = 0 未用（M2-2a）
+            // Slot write: src1 is the address slot and src2 the value. dst is unused.
             hit_ev_append(HIT_EV_STORE, 0, s1, s2, 0)
         return 0
     return 0
 
-// 全程序降低（corearch 表模式下、发射前调用）。
-// M1 直线子集契约 = 入口函数 main 的指令流；.ccr 随带的标准库辅助函数
-// （fmt/io 闭包，src/stdlib/_import.cr 无条件引入）含比较/分支/除法等超子集
-// 运算——超出 M1 语义范围，记 0 事件（发射时落旧路径，混合模式）。main 内
-// 超子集 op（mod/移位/…）→ 'needs more events' 报错（exit 1）。
-// map 全量清零（未降低指令 0 事件）；仅降低 main。
-// Returns 0 = 成功；1 = 超子集 op（错误已打印，调用方 exit 1）。
+// Lower the whole program in table mode before emission.
+// The subset covers the main function's instruction stream. Standard library
+// helpers pulled in by fmt and io contain comparisons, branches, and division;
+// those emit no event and use the normal path. An unsupported operation inside
+// main reports "needs more events" and exits 1. Clear the map for every
+// instruction and lower only main.
+// Returns 0 on success and 1 for an unsupported operation after printing an
+// error; the caller exits 1.
 fn hit_lower_program() -> int:
     hit_lower_reset()
     hit_ev_map_init(g_ir_instr_count)
@@ -395,7 +404,7 @@ fn hit_lower_program() -> int:
         fi = fi + 1
     if entry < 0:
         return 0
-    // 无 main = M1 载体外（不降低，全旧路径）
+    // No main means there is nothing to lower; use the normal path.
     ist := r64(g_ir_func_instr_start, entry * 8)
     ic := r64(g_ir_func_instr_count, entry * 8)
     ii : ., mut = 0
@@ -410,44 +419,49 @@ fn hit_lower_program() -> int:
         ii = ii + 1
     return 0
 
-// ════════════════════════════════════════════════════════════════
-// ════════════════════════════════════════════════════════════════
-// 事件流注入测试通道（M2a Task 2）——hit_lower_program 的注入替身
-// ════════════════════════════════════════════════════════════════
-// corearch 隐藏 flag --hit-events-file <path>（测试专用；真实构建路径不启用）：
-// 文本事件流文件（--dump-events 输出的逆格式）→ 构造 g_hit_ev_stream/g_hit_pool
-// + 每指令事件映射，跳过降低直接 emit——模板对照与降低器解耦（Task 3/6 的
-// 对照与 dump 断言全部经此通道，无需降低器先支持）。
+// ------------------------------------------------------------------
+// Event stream injection for tests
+// ------------------------------------------------------------------
+// The hidden corearch flag --hit-events-file <path> replaces hit_lower_program.
+// The text file is the inverse of --dump-events. It builds g_hit_ev_stream,
+// g_hit_pool, and the per-instruction event map, then skips lowering. Template
+// comparison and dump tests can therefore run before the lowering layer supports
+// an operation.
 //
-// 文件格式（'#' 注释行可夹；行序 = 事件流序 = 指令序）：
-//   ev <name> [dst=N] [s1=[pool]N] [s2=[pool]N]   每事件一行（name = 表内事件名）
-//   pool <v0> <v1> ...                            池值行（按序入槽——可多行）
-// 事件操作数域缺省 = 取所附着 IR 指令的同名操作数（dst→iri_dest、s1→iri_s1、
-// s2→iri_s2；指令域为负 → 0）——测试作者无需知道 .ccr 全局变量号；需要改写
-// 的域显式给（jump 的 s1 = 目标事件序；池引用写 s1=poolN）。
+// File format; lines beginning with # are comments:
+//   ev <name> [dst=N] [s1=[pool]N] [s2=[pool]N]   one event per line; name is a
+//                                                table event name
+//   pool <v0> <v1> ...                           pool values in slot order; may
+//                                                span multiple lines
+// Missing operands take the attached IR instruction's value: dst from iri_dest,
+// s1 from iri_s1, s2 from iri_s2. A negative instruction field becomes 0.
+// Authors do not need to know .ccr global numbers. Explicit fields override the
+// default; a jump's s1 is a target event ordinal and a pool reference uses
+// s1=poolN.
 //
-// 附着规则（= M1 降低的指令↔事件对应；未列事件指令 = 0 事件 → 旧路径——
-// 逐字节对照面因此可含 const/分支等任意旧路径指令）：
-//   事件 1 sub  ← IR_BINARY(OP_SUB)          事件 4 store ← IR_STORE
-//   事件 3 load ← IR_LOAD（var 操作数）/ IR_CONST（非串、pool 操作数——池载入）
-//   事件 5 jump ← IR_JUMP（s1 须显式 = 目标事件序）
-//   事件 11 cst ← IR_CONST（非串、imm 直载 const 事件——cst 夹具表测试载体，
-//        imm 值 = 事件 s1 原值；核心表未声明 id 11 时行解析即拒 'unknown event'）
-//   其余事件（6-9 等）→ 无指令期望 → 行无法附着 → 拒绝（'no instruction
-//   expects'——branch/call/ret/extern Task 3 前保持拒绝的大声面）。
-// 解析/附着错误全部 return 1（corearch exit 1）。本文件与注入表均测试专用。
+// Attachment rules matching the lowering layer:
+//   event 1 sub <- IR_BINARY(OP_SUB)
+//   event 3 load <- IR_LOAD with a variable operand, or IR_CONST with a
+//                    non-string pool operand
+//   event 4 store <- IR_STORE
+//   event 5 jump <- IR_JUMP; s1 must be the explicit target event ordinal
+//   event 11 cst <- IR_CONST with a non-string immediate operand; this is the
+//                    cst fixture event, and its immediate is the event's s1
+// Other events have no instruction expectation and are rejected with
+// "no instruction expects". Parse and attachment errors return 1.
 //
-// 注入事件行暂存（解析期不知目标指令——两遍：先解析行，后走指令附着）：
-// 每行 20B = {id i32, flags i32, dst i32, s1 i32, s2 i32}（flags 位见下）
+// Parsed event lines are buffered for a second pass because the target
+// instruction is unknown during parsing. Each line is 20 bytes:
+// {id i32, flags i32, dst i32, s1 i32, s2 i32}.
 g_hit_inj : string, mut
 g_hit_inj_count : int, mut
 g_hit_inj_cap : int, mut
 
-HIT_INJ_HAS_DST : int = 1   // dst 域显式（否则 = 指令 dest）
-HIT_INJ_HAS_S1  : int = 2   // s1 域显式
-HIT_INJ_HAS_S2  : int = 4   // s2 域显式
-HIT_INJ_S1_POOL : int = 8   // s1 = 池槽引用
-HIT_INJ_S2_POOL : int = 16  // s2 = 池槽引用
+HIT_INJ_HAS_DST : int = 1   // dst is explicit; otherwise use the instruction dest
+HIT_INJ_HAS_S1  : int = 2   // s1 is explicit
+HIT_INJ_HAS_S2  : int = 4   // s2 is explicit
+HIT_INJ_S1_POOL : int = 8   // s1 is a pool reference
+HIT_INJ_S2_POOL : int = 16  // s2 is a pool reference
 
 fn hit_grow_inj(needed: int):
     if needed < g_hit_inj_cap:
@@ -473,7 +487,7 @@ fn hit_inj_line_s1(i: int) -> int:
 fn hit_inj_line_s2(i: int) -> int:
     return hit_r32(g_hit_inj, i * 20 + 16)
 
-// 事件名 → 事件槽（反向查名——dump 打印名、注入文件写名；未知 → -1）
+// Event name to table slot for dump names and injected files. -1 means unknown.
 fn hit_inj_event_by_name(name: string) -> int:
     ei : ., mut = 0
     loop:
@@ -484,8 +498,8 @@ fn hit_inj_event_by_name(name: string) -> int:
         ei = ei + 1
     return -1
 
-// 注入行附着期望：指令 (op, subop, ti) 是否期望事件行 (l_id, l_pool)。
-// 未列事件（6-9 等）= 无期望 → 行不得附着（拒绝面）。
+// Whether instruction (op, subop, ti) expects event line (l_id, l_pool).
+// Events with no expectation reject the line.
 fn hit_inj_line_expected(op: int, subop: int, ti: int, l_id: int, l_pool: int) -> int:
     if l_id == HIT_EV_JUMP:
         if op == IR_JUMP && l_pool == 0:
@@ -506,13 +520,13 @@ fn hit_inj_line_expected(op: int, subop: int, ti: int, l_id: int, l_pool: int) -
             return 1
         return 0
     if l_id == 11:
-        // cst 夹具事件（imm 直载 const）——注入测试载体，见上注
+        // cst fixture event for a direct immediate const; see the header.
         if op == IR_CONST && ti != TI_STR && l_pool == 0:
             return 1
         return 0
     return 0
 
-// 行分派：pool 值行 / ev 事件行 / 坏行。0 = 行已处理；1 = 错误（已打印）。
+// Dispatch a pool line, an event line, or a bad line. 0 handled, 1 error.
 fn hit_inj_parse_line(line: string) -> int:
     llen := str_len(line)
     if llen >= 4 && load8(line, 0) == 112 && load8(line, 1) == 111 && load8(line, 2) == 111 && load8(line, 3) == 108 && (llen == 4 || load8(line, 4) == 32):
@@ -523,7 +537,7 @@ fn hit_inj_parse_line(line: string) -> int:
     println(line)
     return 1
 
-// pool 行：空格分隔值按序入池槽（可多行）。0 = 成功；1 = 错误（已打印）。
+// Parse a pool line: whitespace-separated values appended to the pool. 0 success, 1 error.
 fn hit_inj_parse_pool_line(line: string) -> int:
     llen := str_len(line)
     vp : ., mut = 4
@@ -546,7 +560,7 @@ fn hit_inj_parse_pool_line(line: string) -> int:
         hit_pool_w64(g_hit_pool, g_hit_pool_count * 8, vv)
         g_hit_pool_count = g_hit_pool_count + 1
         loop:
-            // 越过该值全部数字（'-' 含首字符——已在 parse 校验）
+            // Skip all digits of the value; a leading minus was already validated.
             if vp >= llen:
                 break
             c := load8(line, vp)
@@ -556,9 +570,9 @@ fn hit_inj_parse_pool_line(line: string) -> int:
                 break
     return 0
 
-// ev 行：`ev <name> [dst=N] [s1=[pool]N] [s2=[pool]N]`——操作数域缺省 = 附着时
-// 取指令同名操作数（附着规则见 hit_inj_line_expected）。行暂存 20B 待遍 2 附着。
-// 0 = 成功；1 = 错误（已打印）。
+// Parse an ev line and buffer it for attachment. Missing operands take the
+// instruction's values; see hit_inj_line_expected for attachment rules. The
+// buffered record is 20 bytes. 0 success, 1 error.
 fn hit_inj_parse_ev_line(line: string) -> int:
     llen := str_len(line)
     np : ., mut = 2
@@ -610,7 +624,7 @@ fn hit_inj_parse_ev_line(line: string) -> int:
         return 1
     if s1pos >= 0:
         if load8(line, s1pos) == 112:
-            // poolN
+            // poolN reference
             s1v = str_int(str_sub(line, s1pos + 4, str_len(line) - s1pos - 4))
             fl = fl + HIT_INJ_HAS_S1 + HIT_INJ_S1_POOL
         else:
@@ -645,8 +659,8 @@ fn hit_inj_parse_ev_line(line: string) -> int:
     g_hit_inj_count = g_hit_inj_count + 1
     return 0
 
-// 注入文件解析 + 指令附着（入口函数 = main——与降低同定位）。0 = 成功；1 = 错
-//（错误已打印——corearch 侧 exit 1）。
+// Parse an injection file and attach events to main, the same entry used by
+// lowering. 0 success, 1 error; corearch exits 1 on error.
 fn hit_inject_events(path: string) -> int:
     content := read_file(path)
     if str_len(content) == 0:
@@ -655,7 +669,7 @@ fn hit_inject_events(path: string) -> int:
         return 1
     hit_lower_reset()
     g_hit_inj_count = 0
-    // ── 遍 1：逐行解析（pool 值直入池；ev 行暂存待附着）──
+    // Pass 1: parse lines. Pool lines append values; ev lines are buffered.
     slen := str_len(content)
     ln : ., mut = 0
     loop:
@@ -678,12 +692,12 @@ fn hit_inject_events(path: string) -> int:
                 break
             e = e + 1
         if s < e && load8(content, s) != 35:
-            // 非注释非空行
+            // Ignore empty and comment lines.
             line := str_sub(content, s, e - s)
             if hit_inj_parse_line(line) != 0:
                 return 1
         ln = e + 1
-    // ── 遍 2：入口函数（main）指令序附着（行序 = 指令序——未匹配行留待下条）──
+    // Pass 2: attach buffered lines to main in instruction order. Unmatched lines wait for a later instruction.
     entry : ., mut = -1
     fi : ., mut = 0
     loop:
@@ -705,7 +719,7 @@ fn hit_inject_events(path: string) -> int:
         mi = mi + 1
     ist := r64(g_ir_func_instr_start, entry * 8)
     ic := r64(g_ir_func_instr_count, entry * 8)
-    cur : ., mut = 0   // 下一条未附着行
+    cur : ., mut = 0   // next unattached line
     ii : ., mut = 0
     loop:
         if ii >= ic:
@@ -726,7 +740,7 @@ fn hit_inject_events(path: string) -> int:
                 if l_id == HIT_EV_JUMP && l_fl / 2 % 2 == 0:
                     println("error: HIT events: jump event needs explicit s1 (target event ordinal)")
                     return 1
-                // 附着：事件记录 = 行值（缺省取指令同名操作数）
+                // Attach: event values come from the line, with instruction defaults.
                 d : ., mut = hit_inj_line_dst(cur)
                 if l_fl % 2 == 0:
                     d = iri_dest(j)
@@ -751,7 +765,7 @@ fn hit_inject_events(path: string) -> int:
                 hit_ev_map_set(j, g_hit_ev_count - 1, 1)
                 cur = cur + 1
         ii = ii + 1
-    // ── 遍 3：尾校验（未附着行 = 作者错——事件不支持/与指令序不符）──
+    // Pass 3: check leftover lines. An unattached line is unsupported or out of order.
     if cur < g_hit_inj_count:
         print("error: HIT events: no instruction expects event ")
         print(hit_event_name(hit_event_lookup(hit_inj_line_id(cur))))
@@ -762,7 +776,7 @@ fn hit_inject_events(path: string) -> int:
     if g_hit_inj_count == 0:
         println("error: HIT events: file has no ev lines")
         return 1
-    // jump 事件目标 = 事件序——范围校验（0 ≤ 目标 < 总事件数）
+    // Jump targets are event ordinals; check the range.
     ji : ., mut = 0
     loop:
         if ji >= g_hit_ev_count:
@@ -779,21 +793,21 @@ fn hit_inject_events(path: string) -> int:
         ji = ji + 1
     return 0
 
-// 行内数值 token 解析（val 起为值首；返回 值；-1 = 非数）
+// Parse a numeric token starting at val. -1 means not a number.
 fn hit_inj_parse_int(content: string, val: int) -> int:
     slen := str_len(content)
     p : ., mut = val
     if p < slen && load8(content, p) == 45:
         p = p + 1
-    // '-'（池负值）
+    // A leading minus is allowed for negative pool values.
     if p >= slen:
         return -1
     if load8(content, p) < 48 || load8(content, p) > 57:
         return -1
     return str_int(str_sub(content, val, str_len(content) - val))
 
-// k=v 字段定位：从 fpos 起找 token "k="；命中返回 v 起偏移（v = 数或 "pool"）。
-// 返回：≥0 = 值起；-1 = 键未出现；-2 = 键出现但值非数/非 pool（坏值——调用方报错）。
+// Find token key= starting at fpos. Returns the value offset, -1 when the key is
+// absent, or -2 when the value is not a number or a pool reference.
 fn hit_inj_field_of(content: string, fpos: int, key: string, pool_ok: int) -> int:
     slen := str_len(content)
     klen := str_len(key)

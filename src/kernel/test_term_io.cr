@@ -1,11 +1,12 @@
-// test_term_io.cr —— Task 5 协议层测试（TDD）
-// 运行：./build/corec build src/kernel/test_term_io.cr -o build/test_term_io --static
-//       然后执行 ./build/test_term_io（工作目录 = 仓库根）
-// 用例：
-//   1) 三个固定字符串解析→打印往返一致（brief Step 3）
-//   2) 协议全 kind 覆盖往返（typ/pi/app/sub-extend/natrec……）
-//   3) 非法输入返回 -1
-//   4) corpus_manual.txt 前 3 行（+ 第 16 条 infer）解析成功且往返一致（brief Step 4）
+// test_term_io.cr: protocol-layer tests.
+// Build: ./build/corec build src/kernel/test_term_io.cr -o build/test_term_io --static
+// Run ./build/test_term_io from the repository root.
+// Cases:
+// 1. three fixed strings parse and print back unchanged;
+// 2. round-trip every protocol kind (typ, pi, app, sub-extend, natrec, ...);
+// 3. invalid input returns -1;
+// 4. the first three lines and infer case 16 of corpus_manual.txt parse and
+//    round-trip.
 
 import io
 import term_io
@@ -132,10 +133,10 @@ fn check_line_exps(line: string) -> int:
     return 0
 
 fn main() -> int:
-    // ── Step 3：三个固定字符串往返 ──
-    // 注：brief 原例 2 的 λ 为 3 元 `(fn (nat) (nat) M)`，与协议 `(fn A M)`（2 元）不符
-    // （tests/kernel/README.md 已披露此 brief 错误并修正案卷）；此处按协议用 2 元，
-    // 3 元形式列入负例（应解析失败）。
+    // Three fixed round-trip strings.
+    // The reference lambda example used a three-element form `(fn (nat) (nat) M)`,
+    // which does not match the protocol `(fn A M)`. This test uses the two-element
+    // form; the three-element form is a negative case.
     if check_roundtrip("(succ (succ (zero)))") != 0:
         println("  ^ case 1")
     if check_roundtrip("(natrec (nat) (zero) (fn (nat) (succ (var 0))) (succ (zero)))") != 0:
@@ -205,13 +206,14 @@ fn main() -> int:
     if check_parse_fail("(var x)") != 0:
         println("  ^ var nonnum")
 
-    // ── Step 4：案卷前 3 行 + 第 16 条 infer（1 基）──
+    // Corpus: the first three lines and infer case 16 (1-based).
     data := read_file("tests/kernel/cases/corpus_manual.txt")
     if str_len(data) == 0:
         g_fail_count = g_fail_count + 1
         println("FAIL cannot read corpus_manual.txt (run from repo root)")
     else:
-        // 按行处理（前 3 行 + 第 16 行为验收点，其余顺带全查）
+        // Process line by line; the first three lines and case 16 are the
+        // acceptance points, and the remaining lines are checked as well.
         line_no : int, mut = 0
         pos : int, mut = 0
         dlen := str_len(data)

@@ -1,29 +1,21 @@
 // === ext_mgr.cr ===
-// 编译器扩展管理器 — 插件注册表 + 钩子调度
+// Compiler extension manager: plugin registry and hook dispatch.
 //
-// 插件通过 ext_reg() 注册自己监听哪些钩子。
-// pass.cr 通过 ext_dispatch() 触发钩子，遍历所有已注册的插件。
-//
-// 注册流程：
-//   1. 每个插件在初始化时调用 ext_reg(hook_type, plugin_id)
-//   2. 编译器核心在关键点位调用 pass_*()
-//   3. pass_*() 调 ext_dispatch() 遍历注册表
-//   4. ext_dispatch() 对每个注册的插件调对应的 handler
-//
-// 插件 ID（在 ext_plugins.cr 中定义）:
-//   EXT_PLUGIN_SAFETY = 1   — 安全检查插件
+// Plugins register the hooks they handle through ext_reg. pass.cr dispatches
+// hooks through ext_dispatch, which walks the registry and calls each matching
+// plugin. Plugin ids are defined in ext_plugins.cr; EXT_PLUGIN_SAFETY is 1.
 
 g_ext_flags : int, mut = 0
 g_ext_inited : int, mut = 0
 
-// 插件注册表：[hook_type, plugin_id] pairs, flat array
+// Plugin registry: flat array of [hook_type, plugin_id] pairs.
 g_ext_reg : string, mut
 g_ext_reg_count : int, mut
 g_ext_reg_cap : int, mut
 
-// 钩子类型
-EXT_HOOK_ARRAY_ACCESS : int = 1  // 数组访问前
-EXT_HOOK_BINARY_OP    : int = 2  // 二元运算后
+// Hook types.
+EXT_HOOK_ARRAY_ACCESS : int = 1  // before an array access
+EXT_HOOK_BINARY_OP    : int = 2  // after a binary operation
 
 fn grow_ext_reg(needed: int):
     if needed < g_ext_reg_cap:
@@ -33,9 +25,8 @@ fn grow_ext_reg(needed: int):
         ncap = 8
     if ncap < needed:
         ncap = needed + 8
-    // 记录 = [hook_type(8), plugin_id(8)] 共 16 字节——修复 F1：原代码按 8 字节
-    // 扩容/拷贝，且 ext_reg 把 plugin_id 写到 +4（与 hook_type 重叠）→ 注册表
-    // 恒损坏 → dispatch 永远匹配不到插件 → 越界守卫从不触发。
+    // Each record is 16 bytes: hook_type at offset 0 and plugin_id at offset 8.
+    // An 8-byte stride would overlap the two fields and break dispatch.
     nb := alloc(ncap * 16)
     _dyncpy(g_ext_reg, g_ext_reg_cap * 16, nb)
     g_ext_reg = nb
@@ -47,14 +38,14 @@ fn ext_init():
     g_ext_inited = 1
     g_ext_reg_cap = 0
     g_ext_reg_count = 0
-    // 环境变量控制：边界检查是 Core 的安全契约，默认开启。
-    // CORE_SAFE=0 显式关闭（仅 unsafe 调试场景）；CORE_SAFE=1 保持显式开启兼容。
+    // Bounds checks are part of Core's safety contract and are on by default.
+    // CORE_SAFE=0 disables them for unsafe debugging; CORE_SAFE=1 keeps them on.
     ev := get_env("CORE_SAFE")
     if str_len(ev) > 0 && ev == "0":
         g_ext_flags = 0
     else:
         g_ext_flags = 1
-    // 内置插件初始化（未来从 .so 加载）
+    // Initialize built-in plugins. Future plugins may load from shared objects.
     ext_safety_init()
 
 fn ext_has(flag: int) -> int:
@@ -62,16 +53,15 @@ fn ext_has(flag: int) -> int:
         ext_init()
     return g_ext_flags
 
-// 注册一个插件到指定钩子
+// Register a plugin for a hook.
 fn ext_reg(hook_type: int, plugin_id: int):
     grow_ext_reg(g_ext_reg_count + 1)
     w64(g_ext_reg, g_ext_reg_count * 16, hook_type)
     w64(g_ext_reg, g_ext_reg_count * 16 + 8, plugin_id)
     g_ext_reg_count = g_ext_reg_count + 1
 
-// 分发钩子 — 遍历注册表，调所有匹配的插件
-// arr_var / idx_var / idx_lit / arr_len_lit: 数组访问参数
-// 返回: 0=继续, 1=跳过此次访问
+// Dispatch an array access hook. arr_var, idx_var, idx_lit, and arr_len_lit are
+// the access operands. Returns 0 to continue and 1 to skip the access.
 fn ext_dispatch_array_access(arr_var: int, idx_var: int, idx_lit: int, arr_len_lit: int) -> int:
     if g_ext_inited == 0:
         ext_init()
@@ -90,7 +80,7 @@ fn ext_dispatch_array_access(arr_var: int, idx_var: int, idx_lit: int, arr_len_l
         ri = ri + 1
     return 0
 
-// 分发二元运算钩子
+// Dispatch a binary operation hook.
 fn ext_dispatch_binary_op(op: int, lv: int, rv: int, result_var: int) -> int:
     if g_ext_inited == 0:
         ext_init()

@@ -74,7 +74,7 @@ ESZ_IRVAR    : int = 24    // name_idx,id,type_kind = 3×8
 ESZ_IRINSTR  : int = 48    // opcode,dest,src1,src2,src3,type_kind = 6×8
 ESZ_FUNCINFO : int = 688
 ESZ_STRUCTINFO : int = 440
-ESZ_ENUMINFO : int = 4408  // name+variants[16]（含载荷类型节点槽，P3 Task 4）+variant_count+generic_names[4]+generic_count
+ESZ_ENUMINFO : int = 4408  // name, variants[16] with payload type nodes, counts, generic names
 
 // Token field offsets
 OFF_TK_KIND : int = 0
@@ -113,28 +113,27 @@ OFF_IRI_S2 : int = 24
 OFF_IRI_S3 : int = 32
 OFF_IRI_TK : int = 40
 
-// FuncInfo offsets
-// 形参槽上限：param_types 是**定长内嵌槽区**（跟在 param_count 之后、return_type
-// 之前），槽数即硬上限。修复前槽数 = 16 且写入无界 → 第 17 个形参起改写
-// return_type/ast_node（TY_INT=0 恰把 ast_node 写成 0 = 节点表首项）→
-// 「TF01 误归 + .ccr name_idx/param_count=0 + rc=0 产物崩」静默误编译
-// （TODO #2026-09-10-4，2026-09-11）。64 = 与 ast.cr FuncInfo 镜像 `[int; 64]` 对齐，
-// 并覆盖 ≥22（16 栈参 + 6 寄存器参，SysV）的栈清理形。越界 = parser 硬错
-// P020（rc=1）+ 下方访问器护栏双保险——**任何情况下不得静默越界写**。
+// FuncInfo offsets.
+// param_types is a fixed inline array between param_count and return_type. The old
+// limit of 16 with unbounded writes let parameter 17 overwrite return_type and
+// ast_node, producing a silent miscompile. MAX_FN_PARAMS is 64, matching the
+// [int; 64] mirror in ast.cr and covering signatures with 16 stack arguments plus
+// 6 register arguments. A larger signature is parser error P020, and the accessors
+// below guard the array as a second layer.
 MAX_FN_PARAMS : int = 64
 OFF_FI_NAME : int = 0
 OFF_FI_PARAM_COUNT : int = 8
-OFF_FI_PARAM_TYPES : int = 16                        // 64 槽 × 8B = 512 → 至 527
+OFF_FI_PARAM_TYPES : int = 16                        // 64 slots x 8B = 512 bytes, ending at 527
 OFF_FI_RETURN_TYPE : int = 528
 OFF_FI_AST_NODE : int = 536
 OFF_FI_GENERIC_NAMES : int = 544
 OFF_FI_GENERIC_COUNT : int = 672
 OFF_FI_ISPURE : int = 680  // 1 = pure (no side effects), 0 = impure
 
-// StructInfo offsets
-// 容量批 T3（裁-CAP-2 (a)）：字段槽区**迁侧表**——本槽（原 field_names 首槽）改义为
-// `field_base`（侧表起始行）；`OFF_SI_FIELD_TYPES`/`OFF_SI_FIELD_TYPE_NODES` 保留为
-// **未用填充**（记录尺寸不变 ⇒ 盘面与外部算术零改动）。
+// StructInfo offsets. Field storage moved to side tables: OFF_SI_FIELD_BASE is the
+// starting row and OFF_SI_FIELD_TYPES / OFF_SI_FIELD_TYPE_NODES are unused padding.
+// The record size is unchanged, so on-disk layout and external arithmetic are
+// unaffected.
 OFF_SI_NAME : int = 0
 OFF_SI_FIELD_BASE : int = 8
 OFF_SI_FIELD_TYPES : int = 136
@@ -143,33 +142,29 @@ OFF_SI_FIELD_COUNT : int = 392
 OFF_SI_GENERIC_NAMES : int = 400
 OFF_SI_GENERIC_COUNT : int = 432
 
-// DFNode sizes and offsets
-// R2 P5 Task 2（D19 单槽化 α = 槽语义对调 + 辅码显式分离）：类型面**单源**。
-//   OFF_DF_TK  (40) = **类型项引用**（g_type_terms 行号；-1 = 无项）= 类型面唯一真源；
-//   OFF_DF_AUX (64) = **辅码**（旗标/宽度/计数 + 不可入项的原始类型行码；0 = 无）。
-// 契约（四条，缺一即静默类）：
-//   ① **字节零变化**：ESZ_DFNODE 保持 72B，两槽只是**语义对调**（原 40 = 混用码、
-//      原 64 = 项引用）⇒ `.ccr`（NOD 36B）与 `.cir` 快照（节点 64B）布局零改动，
-//      `CCR_VERSION=8` 不 bump；`CIR_CACHE_VER` 当时为 17（**此后由 TODO #2026-09-16-16 批 2 升级到 18**——聚合读结果槽型改声明面形式；**再于 2026-09-17 由批 5（opt-dex）升到 19**——`dex?` 载荷形式规范化；**再于同日由缓存膨胀批升到 20**——段粒度按函数收窄 + 边端点相对 id + 尾部基线见证 trailer；历次同因：旧快照与新格式/新语义不等价）。
-//   ② **互斥**（D22-②）：辅码 ≠ 0 ⇒ 项 = -1；项 ≥ 0 ⇒ 辅码 = 0（由拆分器构造保证）。
-//   ③ **码 = 派生量**（D22-①/D23）：`iri_tk` / `.ccr` NOD / `.cir` 快照里的类型码
-//      一律由 `sh_dfn_code_of_slots(项, 辅码)` 派生，**不得**当独立真源存储或读回
-//      （派生码逐节点 ≡ 单槽化前的混用码；`.ccr`/`.cir` 面因此逐字节不变）。
-//   ④ 写点 = df_create_node（dataflow.cr，本文件不引用桥接符号）+ `.cir` 快照装载
-//      侧的**重派生**（cir_cache.cr——盘面只承载派生码，不入项/辅码槽：进程内项
-//      引用不得跨进程，D20）。
-// 拆分器（(opcode, tk) → (项, 辅码)）单源 = ty_shadow.cr 的 sh_tk_split；既有消费者
-// （instr.cr/regalloc/lower_to_core/dump/ccr_io）读的是**派生码**，零改动。
+// DFNode sizes and offsets. Type information has one source:
+//   OFF_DF_TK (40) = type-term reference (a g_type_terms row), or -1.
+//   OFF_DF_AUX (64) = auxiliary code (flags, widths, counts, or an original type
+//                     row code that cannot be represented as a term), or 0.
+// The two slots are mutually exclusive: auxiliary code means term = -1, and a term
+// means auxiliary code = 0. The splitter guarantees this.
+// The stored type code in iri_tk, .ccr NOD records, and .cir snapshots is always
+// derived through sh_dfn_code_of_slots(term, aux). It is not an independent source.
+// Byte layout is unchanged: ESZ_DFNODE is still 72 bytes, and .ccr NOD / .cir node
+// layouts are unchanged.
+// The splitter is sh_tk_split in ty_shadow.cr. Consumers read the derived code.
+// Write points are df_create_node and the .cir loader's rederivation; the snapshot
+// stores only the derived code, never process-local term references.
 ESZ_DFNODE : int = 72   // opcode,dest_var,src1,src2,src3,tk_term,first_edge,edge_count,tk_aux = 9x8
 OFF_DF_OPCODE : int = 0
 OFF_DF_DEST : int = 8
 OFF_DF_S1 : int = 16
 OFF_DF_S2 : int = 24
 OFF_DF_S3 : int = 32
-OFF_DF_TK : int = 40   // ★语义（P5 T2）：类型项引用（-1 = 无项）
+OFF_DF_TK : int = 40   // type-term reference (-1 = none)
 OFF_DF_FIRST_EDGE : int = 48
 OFF_DF_EDGE_COUNT : int = 56
-OFF_DF_AUX : int = 64   // P5 T2（D19，原 OFF_DF_TK_TERM 槽位）：辅码（0 = 无）
+OFF_DF_AUX : int = 64   // auxiliary code (0 = none)
 
 // DFEdge sizes and offsets
 ESZ_DFEDGE : int = 32   // from_node,to_node,next_out,kind = 4x8
@@ -178,9 +173,10 @@ OFF_DFE_TO : int = 8
 OFF_DFE_NEXT : int = 16
 OFF_DFE_KIND : int = 24 // 0=data (def-use), 1=state (ordering/termination)
 
-// Entry record (v6 条目版本段：变量 × 定值点切分版本条目，compute_entries 填充)。
-// 内存布局 = .ccr v6 落盘格式逐字节一致（24B/条，六字段各 4B，w32/r32 LE 存取）：
-// var_idx u32, def_instr i32, live_start i32, live_end i32, home i32, flags u32。
+// Entry record, filled by compute_entries. It splits variables into versions at
+// definition points. The in-memory layout is identical to the .ccr on-disk layout:
+// 24 bytes, six 4-byte fields, read and written little-endian.
+// var_idx u32, def_instr i32, live_start i32, live_end i32, home i32, flags u32.
 ESZ_ENTRY   : int = 24
 OFF_ENTRY_VAR   : int = 0    // 全局 IR 变量索引
 OFF_ENTRY_DEF   : int = 4    // 定值指令全局索引（-1 = 无定值）
@@ -205,9 +201,8 @@ SG_FLOW   : int = 3
 SG_UNSAFE : int = 4
 SG_IF     : int = 5  // conditional region: covers [condition, merge)
 
-// InterfaceInfo: fixed-size entry per interface
-// Header(24) + methods[16] * method_entry(240) = 3864 total（R2 P4 Task 3：168 → 240，
-//   + 类型项槽 72B——见下 OFF_IFM_PARAM_TERMS/OFF_IFM_RET_TERM 注）
+// InterfaceInfo: one fixed-size entry per interface.
+// Header 24 bytes plus 16 method entries of 240 bytes = 3864 bytes.
 ESZ_IFACEINFO : int = 3864
 OFF_IF_NAME : int = 0
 OFF_IF_METHOD_COUNT : int = 8
@@ -215,62 +210,57 @@ OFF_IF_GENERIC_COUNT : int = 16
 OFF_IF_METHODS : int = 24  // first method entry
 // Each method entry: name_idx(8) + param_count(8) + ret_ti(8) + param_types[8](64)
 //   + param_nodes[8](64) + ret_node(8) + self_mode(8) + param_terms[8](64) + ret_term(8) = 240 bytes
-// R2 P3b Task 6（Step 1 签名类型项化）：**裸码槽保留**（`param_types` / `ret_ti`）——
-//   S6 站点（checker 的泛型方法调用返回型映射）的值域 = 映射层编码（TY_*），P2b Task 6 已把
-//   该域**显式化钉住**（t6_S6_* 行为用例）⇒ 不得改；新增**类型节点**槽 = 签名的忠实来源
-//   （裸码把非原生类型一律塌缩为 0 = TY_INT，与 int 不可区分）——供 Step 3 的签名项比较
-//   （满足判定 / impl 声明面）与 `sh_iface_shape_term` 建项。-1 = 无节点（哨兵；不用 0——
-//   节点 0 是合法下标，用 0 会与「首个分配节点」混同）。接收者槽两侧皆无节点（parser 的
-//   self 约定，见 self_mode）。
+// Raw code slots param_types and ret_ti are kept because checker's generic-method
+// return mapping uses their TY_* encoding. Type-node slots are added as the faithful
+// signature source: raw code collapses non-native types to 0 (TY_INT). A node slot
+// of -1 means no node; 0 is a valid node index and cannot be the sentinel. The
+// receiver slot has no node on either side.
 ESZ_IFMETHOD : int = 240
 OFF_IFM_NAME : int = 0
 OFF_IFM_PARAM_COUNT : int = 8
 OFF_IFM_RET_TI : int = 16
-OFF_IFM_PARAM_TYPES : int = 24   // first of up to 8 param types (each 8 bytes)   → 24..87
-OFF_IFM_PARAM_NODES : int = 88   // first of up to 8 param type nodes (8B each)  → 88..151
+OFF_IFM_PARAM_TYPES : int = 24   // first of up to 8 param types (8B each), covers 24..87
+OFF_IFM_PARAM_NODES : int = 88   // first of up to 8 param type nodes (8B each), covers 88..151
 OFF_IFM_RET_NODE : int = 152     // return type node（-1 = 无，= unit）
 OFF_IFM_SELF_MODE : int = 160    // 接收者模式：0 = 无接收者（首参为普通形参）/ 1 = self /
                                   //   2 = &self / 3 = &mut self（照 EXPR_PARAM 的 int_val 约定）
-// R2 P4 Task 3（IFACE 段签名项化）——**类型项槽**（-1 = 不可建/无）：
-//   param_terms[8] = 各形参的签名类型项（`sh_iface_sig_param_term`；接收者槽 = unit 占位项）
-//   ret_term       = 返回签名类型项（`sh_iface_sig_ret_term`）
-// 与 param_nodes/ret_node 的关系：节点槽 = **corec 侧**的签名来源（AST 节点，判定路径消费）；
-// 项槽 = **载体面**（IFACE(8) 段落盘 + corearch 读回）——corearch 侧无 AST ⇒ 节点槽恒 -1，
-// 项槽是签名在载入侧的唯一忠实表示（二者不同域，不得互相复用）。写侧 = ccr_types.cr 的
-// ccr_iface_populate 填充（与段体同一读点）；读侧 = load_ccr 由段填充。**不入 .cir 快照**
-// （快照字段清单不含 g_ifaces——见 Task 3 报告 §布局影响面）。
-OFF_IFM_PARAM_TERMS : int = 168  // first of up to 8 param terms (8B each)       → 168..231
+// Signature type-term slots, or -1 when not buildable:
+//   param_terms[8]: one signature term per parameter; the receiver uses unit.
+//   ret_term: return signature term.
+// Node slots are the corec-side signature source from the AST. Term slots are the
+// carrier form stored in the IFACE segment and read back by corearch, which has no
+// AST. The two representations are distinct and must not be reused for each other.
+// ccr_iface_populate fills them; load_ccr reads them back. They are not stored in
+// .cir snapshots.
+OFF_IFM_PARAM_TERMS : int = 168  // first of up to 8 param terms (8B each), covers 168..231
 OFF_IFM_RET_TERM : int = 232     // return signature term (-1 = 不可建)
 MAX_IFACE_METHOD_PARAMS : int = 8
-// R2 P3b Task 6（Step 1）：方法上限单源化（旧态 = parser 内联字面量 16，与 ESZ_IFACEINFO
-// 的槽数隐式绑定）。**本任务显式登记保留**（不解除）：解除需把方法表迁到侧表（全部读点换位），
-// 按 B.4-7 的 MAX_* 统一口径「先加护栏、再评估解除」；护栏现状 = 超限**硬错 rc=1**（非静默
-// 截断——实测），本任务加钉子用例（test_impl_iface.py 的 limit 组）。
+// Method limit. It is tied to the fixed method slots in ESZ_IFACEINFO. Exceeding it
+// is a hard error, not a silent truncation. Removing the limit requires moving the
+// method table to side storage and updating all readers.
 MAX_IFACE_METHODS : int = 16
 
-// ─── 本质条目表布局（R2 P4 Task 3：自 iface_registry.cr **迁入**）───
-// 迁入理由 = IFACE(8) 段的 loader（corearch 侧，ccr_io.cr）要重建 `g_iface_entries`
-// 并校验 `native_count == IFACE_ENTRY_COUNT`，而 iface_registry.cr **不入 corearch
-// 清单**（corec-only：内含 checker 耦合的 iface_kind_of 之邻）⇒ 布局常量必须在双
-// concat 共享面（本文件 = 共享层；与 ESZ_IFACEINFO/ESZ_IFMETHOD 同居一处的先例）。
-// 迁入只放宽声明序（dyn_arr.cr < checker.cr < iface_registry.cr），零语义变化。
-//   {ak, ti_row, name_ni, lit_code, ops}：ak = 原子类（AK_*）；ti_row = 规范 checker
-//   类型行（8 原生 = TI_* 常量；结构/命名 = -1）；name_ni = 名字 ni（显示/查询用，
-//   R2 P4 Task 3 起在注册面 str_intern 填充——裁决 1 接受 STR 段增长）；lit_code =
-//   字面量定型（AST kind；-1 = 无）；ops = 操作许可位集。
+// Native interface entry layout. These constants live here because the IFACE
+// segment loader in corearch needs them, and iface_registry.cr is corec-only.
+// Each entry is {ak, ti_row, name_ni, lit_code, ops}:
+//   ak: atom class (AK_*).
+//   ti_row: canonical checker type row for the eight native types; -1 for
+//           structural or named classes.
+//   name_ni: name index for display and lookup.
+//   lit_code: literal AST kind, or -1.
+//   ops: operation-permission bits.
 ESZ_IFACE_ENTRY : int = 40
 OFF_IE_AK : int = 0
 OFF_IE_TI : int = 8
 OFF_IE_NAME : int = 16
 OFF_IE_LIT : int = 24
 OFF_IE_OPS : int = 32
-// R2 P4 Task 3（裁决 3+7）：13 → 16（+AK_NULL 原生第九员 + AK_SUM + AK_FN——纯信息面，
-// ops = 0 = 无操作许可；判定面零变化由全类型行枚举守门）。
+// 16 entries: 13 original entries plus AK_NULL, AK_SUM, and AK_FN. The last three
+// are informational and have ops = 0.
 IFACE_ENTRY_COUNT : int = 16
 
-// 形状条目表 grow（R2 P4 Task 3：自 iface_registry.cr **迁入**——同 IFACE 段 loader
-// 读回面：corearch 侧重建 g_iface_shape_* 需表增长；本文件 = grow 助手统一宿主，
-// 零依赖（alloc/_dyncpy 皆共享层））。语义/布局零变化（逐字搬迁）。
+// Grow the shape entry table. It lives here because the corearch IFACE loader also
+// rebuilds g_iface_shape_*, and this file is the shared host for grow helpers.
 fn iface_shape_grow(needed: int):
     if needed <= g_iface_shape_cap:
         return
@@ -287,14 +277,14 @@ fn iface_shape_grow(needed: int):
     g_iface_shape_terms = nt
     g_iface_shape_cap = nc
 
-// EnumInfo offsets
-// R2 P3 Task 4（T0 交接 ①）：变体载荷**类型节点**槽（照 struct 先例 OFF_SI_FIELD_TYPE_NODES）
-// ——裸码槽 OFF_EV_TYPES 的非基型载荷一律塌缩为 0 = TY_INT（parser 的 unpack_type），
-// 「载荷是 int」与「载荷是 string/命名类型/泛型形参」不可区分 ⇒ 载荷面（泛型代入/满足判定）
-// 在裸码表上不可能忠实。nodes 槽 = parse_type 的产物节点（-1/0 = 无信息）。
-// 布局：EnumVariant = name(8) + types[16](128) + type_count(8) + type_nodes[16](128) = 272
-// 容量批 T3（裁-CAP-2 (a)）：变体槽区**迁侧表**——`OFF_EI_VARIANTS` 槽改义为 `variant_base`
-// （侧表起始行）；`OFF_EV_*` 与 272B 槽区保留为**未用填充**（记录尺寸不变 ⇒ 外部算术零改动）。
+// EnumInfo offsets.
+// Variant payload type nodes are stored separately from raw codes. Raw codes
+// collapse non-native payloads to 0 (TY_INT), so they cannot distinguish int from
+// string, a named type, or a generic parameter. The node slots hold the parse_type
+// result, or -1/0 when there is no information.
+// Variant storage moved to side tables: OFF_EI_VARIANTS is now variant_base, and
+// OFF_EV_* and the 272-byte slot area are unused padding. The record size is
+// unchanged, so external arithmetic is unaffected.
 OFF_EI_NAME : int = 0
 OFF_EI_VARIANTS : int = 8    // = variant_base
 OFF_EI_VARIANT_COUNT : int = 4360
@@ -318,13 +308,13 @@ fn _dyncpy(src: string, nbytes: int, dst: string):
         ci = ci + 1
 
 // ============================================================
-// Grow helpers for ALL arrays
+// Grow helpers for all arrays
 // ============================================================
+// _grow is a placeholder. The language has no generics, and cap_name is passed by
+// value, so each array has its own grow function. All follow the same pattern:
+// double the capacity, enforce a minimum, and copy the old contents.
 fn _grow(buf_name: string, cap_name: int, esz: int, min_init: int):
     return
-    // Helper: cap_name is by value; we return new cap. Caller must assign.
-    // Inline expansion needed per array since Core can't do generic.
-// Each array gets its own grow function with doubling pattern.
 
 fn grow_tokens(needed: int):
     if needed < g_tok_cap:
@@ -373,8 +363,8 @@ fn grow_types(needed: int):
         nc = 64
     if nc < needed:
         nc = needed + 64
-    // R2 P4 Task 2：行尺寸经 ESZ_TYPE_ROW 单源（globals.cr——与 alloc_type/
-    // TYPE 段序列化同源；原为字面量 24）。
+    // Row size comes from ESZ_TYPE_ROW in globals.cr, shared with alloc_type and
+    // TYPE-segment serialization.
     nb := alloc(nc * ESZ_TYPE_ROW)
     _dyncpy(g_types, g_type_cap * ESZ_TYPE_ROW, nb)
     g_types = nb
@@ -619,16 +609,11 @@ fn ast_alloc(kind: int, a: int, b: int, c: int, iv: int, tv: int, d: int, line: 
     g_ast_count = idx + 1
     return idx
 
-// Accessor helpers for SymEntry
-// ─── R2 P3 Task 4：读取面护栏（n ∉ [0, g_sym_count) ⇒ -1，不触内存）───
-// 触发链（本任务实测）：① 本任务退役了内建 Option 注册（collect_decls 早期的一次 def_sym）
-// ⇒ 「无类型声明的源文件」在函数注册循环处 g_syms 仍为 **NULL**（首个 def_sym 尚未发生，
-// 这是合法状态）；② `collect_decls` 的重复函数检查写的是 `existing_si >= 0 && sym_kind(existing_si)`
-// （checker.cr:1202），而 **bootstrap 构建的编译器二进制不求值短路**（T0 §5-③ 实测：`&&`
-// 两侧无条件求值）⇒ `sym_kind(-1)` 被求值 → `r64(NULL, 负偏移)` → SIGSEGV（实测 d0 类
-// 「只有 fn、无类型声明」的源 rc=139）。修法 = 访问器自身带范围闸（与类型表访问器
-// get_type_kind/get_type_data 同款）；合法读零变化，越界/未分配返回 -1（哨兵语义与
-// find_gsym 的 -1 一致）。根因（bootstrap 不短路）仍归 T0 §5-③ 登记，不在本任务面内。
+// SymEntry accessors. Reads check n against [0, g_sym_count) and return -1 without
+// touching memory when out of range. The guard is needed because the bootstrap
+// build does not short-circuit &&: a check such as `existing_si >= 0 &&
+// sym_kind(existing_si)` still evaluates sym_kind(-1), which would read a negative
+// offset from a NULL g_syms when no type declaration has been registered yet.
 fn sym_name(n: int) -> int:
     if n < 0 || n >= g_sym_count:
         return -1
@@ -694,8 +679,8 @@ fn iri_set_s3(n: int, v: int):
 fn iri_set_tk(n: int, v: int):
     w64(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_TK, v)
 
-// 变量名查询（原定义于 ir_gen.cr——2026-09-07 regalloc 移后端随迁本文件：
-// corearch 闭包不含 ir_gen.cr，regalloc.cr 判定/注入打印消费本函数；双侧共享）
+// Variable-name lookup. It lives here because regalloc.cr in corearch consumes it,
+// and the corearch build does not include ir_gen.cr.
 fn get_ir_var_name(var_idx: int) -> string:
     if var_idx >= 0 && var_idx < g_ir_var_count:
         ni := irv_name(var_idx)
@@ -716,7 +701,7 @@ fn fi_generic_count(n: int) -> int:
 fn fi_param_type(n: int, pi: int) -> int:
     if pi < 0 || pi >= MAX_FN_PARAMS:
         return 0
-    // 越界 = 槽区外（读护栏；写侧同护栏 + parser 硬错）
+    // Out of range: read guard only; writes have the same guard plus parser P020.
     return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_TYPES + pi * 8)
 fn fi_generic_name(n: int, gi: int) -> int:
     return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gi * 8)
@@ -727,7 +712,8 @@ fn fi_set_param_count(n: int, v: int):
 fn fi_set_param_type(n: int, pi: int, v: int):
     if pi < 0 || pi >= MAX_FN_PARAMS:
         return
-    // 槽区护栏：越界写会踩 return_type/ast_node/generic_*/ispure（TODO #2026-09-10-4 根源）
+    // Slot guard. An out-of-range write would overwrite return_type, ast_node,
+    // generic_*, and ispure.
     w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_TYPES + pi*8, v)
 fn fi_set_return_type(n: int, v: int):
     w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_RETURN_TYPE, v)
@@ -750,10 +736,10 @@ fn si_field_count(n: int) -> int:
     return r64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT)
 fn si_generic_count(n: int) -> int:
     return r64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT)
-// ─── 容量批 T3（裁-CAP-2 (a)）：结构体字段**侧表**（无硬上限）───
-// 布局：记录内 `OFF_SI_FIELD_BASE` = 本记录字段在侧表的起始行；`OFF_SI_FIELD_COUNT` = 计数
-// （真值）。三条扁平表按「记录基数 + 字段下标」寻址；高水位 `g_si_f_used` 由
-// `si_commit_fields` 提交（记录字段区一次性占用，不重叠）。
+// Struct field side tables. OFF_SI_FIELD_BASE is the starting row and
+// OFF_SI_FIELD_COUNT is the true count. Three flat tables are addressed by record
+// base + field index. si_commit_fields advances g_si_f_used, reserving the whole
+// field range so records do not overlap.
 fn grow_si_fields(needed: int):
     if needed <= g_si_f_cap:
         return
@@ -776,7 +762,8 @@ fn si_field_base(n: int) -> int:
     return r64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_FIELD_BASE)
 fn si_set_field_base(n: int, v: int):
     w64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_FIELD_BASE, v)
-// 提交字段区（base + 计数 ⇒ 高水位）；parser 与 ccr_io 装载共用
+// Commit the field range, advancing the high-water mark to base + count. parser and
+// the ccr_io loader share this.
 fn si_commit_fields(n: int, fc: int):
     b := si_field_base(n)
     if b < 0:
@@ -785,8 +772,8 @@ fn si_commit_fields(n: int, fc: int):
         return
     if b + fc > g_si_f_used:
         g_si_f_used = b + fc
-// 读护栏（R2 P4 Task 6 / TODO #2026-09-12-2 的**计数为界**版本）：fi 越界（< 0 或 ≥ count）⇒ 回哨兵
-// -1（不越读）；在界读 = 侧表取值。
+// Read guard. fi outside [0, count) returns -1 without touching memory; an in-range
+// read returns the side-table value.
 fn si_field_row(n: int, fi: int) -> int:
     if fi < 0:
         return -1
@@ -823,9 +810,9 @@ fn ei_generic_count(n: int) -> int:
     return r64(g_enums, n * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT)
 fn ei_generic_name(n: int, gi: int) -> int:
     return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + gi*8)
-// 读护栏（R2 P4 Task 6 / TODO #2026-09-12-2）：越界 = 槽区外（读会取到 variant_count/generic 槽或邻
-// 记录）⇒ 回哨兵（名字/类型码/类型节点 = -1；计数 = 0）。在界调用点（count ≤ 16）行为不变。
-// ─── 容量批 T3：枚举变体**侧表**（无硬上限；同 struct 字段形态）───
+// Read guard: out-of-range reads return -1 for names, type codes, and type nodes,
+// and 0 for counts. They never read the neighboring record.
+// Enum variant side tables, the same shape as struct fields.
 fn grow_ei_variants(needed: int):
     if needed <= g_ei_v_cap:
         return
@@ -907,8 +894,9 @@ fn ei_variant_type(n: int, vi: int, ti: int) -> int:
     if tb < 0:
         return -1
     return r64(g_ei_vt_types, (tb + ti) * 8)
-// R2 P3 Task 4（T0 交接 ①）：载荷第 ti 个的**类型节点**（-1/0 = 无信息——.ccr 不落本列，
-// 序列化读回侧该列恒 0；消费者须以 type_count 为界，不得据 0 反推「节点 0」）。
+// Type node of payload ti, or -1/0 when there is no information. The .ccr does not
+// store this column, so a loader read returns 0. Consumers must bound ti by
+// type_count and must not interpret 0 as node 0.
 fn ei_variant_type_node(n: int, vi: int, ti: int) -> int:
     r := ei_variant_row(n, vi)
     if r < 0:
@@ -920,17 +908,14 @@ fn ei_variant_type_node(n: int, vi: int, ti: int) -> int:
         return -1
     return r64(g_ei_vt_nodes, (tb + ti) * 8)
 
-// ─── 枚举/结构体记录**受护访问器**（R2 P4 Task 6；TODO #2026-09-12-2 收口，#2026-09-10-4 同族形态）───
-// 背景（TODO #2026-09-12-2 代码级定位；**容量批 T3 起该定长槽区已退役**——字段/变体迁侧表）：EnumVariant 槽区（旧 `MAX_ENUM_VARIANTS` 槽 × `OFF_EV_SIZE`）与
-// StructInfo 字段槽区（旧 `MAX_STRUCT_FIELDS` 槽）曾是**定长内嵌槽区**——其后紧跟记录自身的
-// count/generic 槽，再往后是**下一条记录**（同一 buffer）⇒ 无界写入既踩自身记录尾也踩邻记录
-// （实测：第 17 变体槽起点 = `OFF_EI_VARIANT_COUNT` 自身、槽尾越过 `ESZ_ENUMINFO` 224B）。
-// 修复形态**照 TODO #2026-09-10-4 收口**（`fi_param_type`/`fi_set_param_type`）：
-//   ① **唯一受护写点** = 本组 setter（parser 全改走它们 ⇒ 未来新调用点亦不可能越界写）；
-//   ② 读护栏 = 越界回哨兵（名字/类型节点 = -1 = 无效下标；计数 = 0），**不越读**；
-//   ③ 面向用户的拒绝由 parser 的 P022/P023 硬错承担（本层只做内存安全兜底，不代替诊断）。
-// count 槽（`ei_variant_count`/`si_field_count` 的写）**不设护栏**——真值是诊断依据，照
-// P020 的 `add_func(pc)` 先例（计数保持真实值，超限由硬错拒绝；越界读由②兜底）。
+// Guarded enum and struct accessors.
+// Field and variant storage now lives in side tables. The setters below are the
+// only write points and all parser writes go through them, so a future call site
+// cannot write out of bounds. Read accessors return -1 for names and nodes and 0
+// for counts when out of range. User-facing rejection is parser P022/P023; this
+// layer only guarantees memory safety.
+// Count slots are not guarded: the true count is needed for diagnostics, and an
+// over-limit declaration is rejected by the parser.
 fn ei_set_variant_name(n: int, vi: int, v: int):
     if vi < 0:
         return
@@ -941,7 +926,7 @@ fn ei_set_variant_name(n: int, vi: int, v: int):
     if b + vi + 1 > g_ei_v_used:
         g_ei_v_used = b + vi + 1
     w64(g_ei_v_names, (b + vi) * 8, v)
-// 载荷基址**惰性分配**（首个载荷写入时占用高水位；后续增量推进）
+// Payload bases are allocated lazily: the first payload write reserves from the high-water mark.
 
 fn ei_variant_tbase_ensure(n: int, vi: int) -> int:
     b := ei_variant_base(n)
@@ -1102,7 +1087,7 @@ fn str_intern(s: string) -> int:
         si := r64(g_str_hash, pos * 8)
         if si < 0:
             break
-        // empty slot → not found
+        // Empty slot means not found.
         if str_eq(load_str_ptr(g_strs, si * 8), s) != 0:
             return si
         pos = (pos + 1) % cap
@@ -1112,8 +1097,8 @@ fn str_intern(s: string) -> int:
     store_str_ptr(g_strs, g_str_count * 8, s)
     g_str_count = g_str_count + 1
 
-    // 生成期 intern 日志（CIR_CACHE_VER 21）：**唯一插入路径**在此 ⇒ 单点保证
-    // 「gen 期新 intern 必进日志」（不存在「判定表漏点」这一失效面）。见 globals.cr 注。
+    // This is the only insertion path for interned strings, so every new string
+    // created during generation enters the journal. See globals.cr.
     if g_cir_rec_on != 0:
         cir_rec_push(g_str_count - 1)
 
@@ -1125,8 +1110,9 @@ fn str_intern(s: string) -> int:
         _grow_str_hash(g_str_hash_cap * 2)
     return g_str_count - 1
 
-// 生成期 intern 日志的写入端（唯一调用点 = str_intern 的插入路径）。
-// 只记 **id**（本进程载体）；落盘时由 cir_cache.cr 解析为**内容**——跨进程 id 不可跨进程解释。
+// Append one journal entry. The only caller is str_intern's insertion path.
+// It records the local id; cir_cache.cr resolves it to the string content when
+// saving, because ids are not meaningful across processes.
 fn cir_rec_push(si: int):
     if g_cir_rec_count >= g_cir_rec_cap:
         nc := g_cir_rec_cap * 2
@@ -1241,11 +1227,10 @@ fn grow_df_arrays(needed: int):
     sz := nc * 8
     n1 := alloc(sz)
     _dyncpy(g_df_var_producer, g_df_cap * 8, n1)
-    // 幽灵边修复（v7 Task 0 注 A 裁决 = 播种修复，dataflow.cr/cir_cache.cr 同款）：
-    // producer 槽必须对全部 var 下标恒 -1——alloc 新段（零页/复用页）不可依赖，
-    // 未定值 var（全局/参数/0 字面量槽）若留 0 =「节点 0」→ df_use_var 产幽灵边
-    // 0→X + 自环 (0,0)。增长区显式播种 -1；既有区由 _dyncpy 保留（定值由
-    // df_create_node 覆写、缓存放回路径同走本函数 → 未产出 var 保持 -1）。
+    // Initialize producer slots to -1. Newly allocated memory is not guaranteed to
+    // be zeroed, and a zero would mean node 0, creating ghost edges 0->X and a
+    // self-loop. The new range is filled explicitly; the copied range keeps its
+    // values. df_create_node overwrites producers for variables it defines.
     zi : ., mut = g_df_cap
     loop:
         if zi >= nc:
@@ -1259,8 +1244,8 @@ fn grow_df_arrays(needed: int):
     n3 := alloc(sz)
     _dyncpy(g_df_func_node_count, g_df_cap * 8, n3)
     g_df_func_node_count = n3
-    // 缓存收窄批（CIR_CACHE_VER 20）：每函数边起点随 g_df_cap 同域增长（未定值槽由
-    // df_begin_func 逐函数覆写；读取侧只在 df_begin_func 之后取，无未初始化读面）。
+    // Per-function edge starts grow with g_df_cap. df_begin_func overwrites the
+    // slot for each function, and readers only access it afterwards.
     n4 := alloc(sz)
     _dyncpy(g_df_func_edge_start, g_df_cap * 8, n4)
     g_df_func_edge_start = n4
@@ -1486,8 +1471,8 @@ fn grow_rip_patch(needed: int):
     g_x86_rip_patch_globals = nb2
     g_x86_rip_patch_cap = nc
 
-// `.so` 扩展索引侧表（第 4 批 #82/#83）：**动态增长**（本仓约定：All arrays are dynamic
-// byte buffers, no MAX_* limits——这正是 TODO #2026-09-17-1「容量硬编码 128 + 写入无界」要消灭的形态）。
+// .so extension index side tables. They grow dynamically, following the rule that
+// all arrays are dynamic byte buffers with no fixed limits.
 fn grow_so_side(needed: int):
     if needed < g_so_side_cap:
         return
@@ -1508,7 +1493,7 @@ fn grow_so_side(needed: int):
     g_so_side_type = n3
     g_so_side_cap = nc
 
-// ─── 批 6 T2：规约标注侧表（动态增长；照本仓「no MAX_* limits」约定）────────────────
+// Spec annotation side table. It grows dynamically with no fixed limit.
 fn grow_spec_side(needed: int):
     if needed < g_spec_cap:
         return
@@ -1541,7 +1526,7 @@ fn grow_spec_side(needed: int):
     g_spec_col = n5
     g_spec_cap = nc
 
-// 追加一条标注记录（**唯一写点**；源序 ⇒ 索引即源序）。
+// Append one annotation record. This is the only write point; records are in source order.
 fn spec_add(fn_ni: int, kind: int, expr: int, line: int, col: int):
     grow_spec_side(g_spec_count + 1)
     i := g_spec_count
@@ -1554,7 +1539,7 @@ fn spec_add(fn_ni: int, kind: int, expr: int, line: int, col: int):
     w64(g_spec_col, i * 8, col)
     g_spec_count = i + 1
 
-// 读访问器（**受护**：越界回哨兵，绝不读邻记录——照 fi_param_type 的护栏体例）。
+// Guarded read accessors: out-of-range indexes return the sentinel and never read a neighboring record.
 fn spec_fn(i: int) -> int:
     if i < 0 || i >= g_spec_count:
         return -1
@@ -1567,7 +1552,7 @@ fn spec_status(i: int) -> int:
     if i < 0 || i >= g_spec_count:
         return -1
     return r64(g_spec_status, i * 8)
-// 三态写入：**red 粘性**（已判红不被后续 green 覆盖——否则「有硬错」会被「常量真」抹掉）。
+// Status write: red is sticky. A later green must not erase a hard error.
 fn spec_set_status(i: int, st: int):
     if i < 0 || i >= g_spec_count:
         return
@@ -1995,8 +1980,8 @@ fn grow_gen_constr(needed: int):
     g_generic_constr = nb
     g_generic_constr_cap = nc
 
-// R2 P3 Task 5：结构/枚举泛型约束侧表（键 = row * MAX_GENERICS + gi；索引空间与函数侧分家，
-// 见 globals.cr 表注）。增长式样逐字照 grow_gen_constr（同族第三/第四份，语义同构）。
+// Struct and enum generic constraint side tables. Key = row * MAX_GENERICS + gi,
+// a separate index space from function constraints. Growth matches grow_gen_constr.
 fn grow_sgen_constr(needed: int):
     if needed < g_sgen_constr_cap:
         return
@@ -2023,7 +2008,7 @@ fn grow_egen_constr(needed: int):
     g_egen_constr = nb
     g_egen_constr_cap = nc
 
-// R2 P3 Task 5（Step 4）：调用点绑定侧表增长（i64 顺序追加，无洞——与上面两张稀疏表不同）
+// Call-site binding table growth: i64 values appended in order, with no holes, unlike the sparse constraint tables.
 fn grow_gen_binds(needed: int):
     if needed < g_gen_binds_cap:
         return
@@ -2037,8 +2022,9 @@ fn grow_gen_binds(needed: int):
     g_gen_binds = nb
     g_gen_binds_cap = nc
 
-// 结构/枚举第 gi 个泛型形参的约束名 ni（-1 = 无约束/越界）。读取面护栏（照 SI 访问器惯例：
-// 越界不越读——gi 上限 MAX_GENERICS、行下标上限计数）。
+// Constraint name of the gi-th generic parameter for a struct or enum, or -1 when
+// absent or out of range. The read guard checks gi against MAX_GENERICS and the row
+// index against the table count.
 fn si_gen_constr(n: int, gi: int) -> int:
     if n < 0 || gi < 0 || gi >= MAX_GENERICS:
         return -1

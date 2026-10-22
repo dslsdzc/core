@@ -1,0 +1,147 @@
+# 指针模型实现核对记录
+
+> 对应设计：[2026-09-20-pointer-model.md](../../maintainer/design/pointer-model.md)
+
+本文保存指针分析三个 pass 的实现核对细节、2026-09-20 修订前后的差异、源码行号和已知缺口。设计正文只写当前规则。
+
+# Core 指针模型：图上的三个验证 pass
+
+> 定位：受众 = 维护者（修改或验证三个 pass 的人）；状态 = active；出处 = 源码（src/compiler/ptr_analysis.cr、region_check.cr、provenance_verify.cr），本文描述的是已实现行为，文档与源码冲突时以源码为准，并请更新本文。
+> 语义定位：指针安全建立在 HDFG 上，不引入 borrow checker/生命周期标注。地址语义（条目标识 + 偏移）见规则 6（docs/academic/cache-semantics.md）；层本体 = 存在格（docs/maintainer/design/materialization-space.md）；经典映射见 docs/maintainer/design/region-model.md。
+> 本文 2026-09 重写：三个 pass 的描述与实现对齐（Andersen 约束求解、逃逸检查、双路径边界验证）。
+
+---
+
+## 一、问题与方案
+
+C 风格原始指针表达力强但无保障；Rust 用 borrow checker 换安全，代价是学习成本与表达力。Core 的目标：指针和 C 一样自由，安全保障不依赖用户标注。编译器维护完整 HDFG：图中每个值的产生节点记录来源（provenance），每个解引用是 DEREF/STORE_PTR 节点；三个 pass 在图上验证，与类型系统解耦：
+
+| Pass | 文件 | 功能 |
+|---|---|---|
+| PointerAnalysis | ptr_analysis.cr | 建 points-to（约束求解），alloc content 跟踪 |
+| RegionCheck | region_check.cr | 逃逸检查（失效 DEREF / 返回 / 存储 三面已实现；传参面设计未实现），按 region（SG）区间 |
+| ProvenanceVerify | provenance_verify.cr | DEREF/STORE_PTR 越界检查（静态证明或运行时检查） |
+
+## 二、术语
+
+| 术语 | 含义 |
+|---|---|
+| provenance | 指针的来源，出自哪个分配（ALLOC/ALLOC_STRUCT/ALLOC_ARRAY/…），经 provenance 边追踪 |
+| points-to（pts） | 指针可能指向哪些分配块（位图表示） |
+| alloc content | 存入某分配块的值集合（g_alloc_pts），Store/Load 规则的中介 |
+| direct flow | 值沿 def-use 链直接传递 |
+| pointer-induced flow | 经 STORE_PTR/DEREF 间接传递，需要 pts 才能追踪 |
+| 子图/SG region | 以图为依据的执行域（函数/loop/for/flow/unsafe，见 execution-model.md 第 2 节） |
+| 图边界 | 编译器无 provenance 的入口（外部地址、FFI 返回、inline asm），unsafe |
+
+## 三、用户可见语法（开发者视角）
+
+开发者视角的语法与保证见 docs/developer/syntax.md 指针节；此处只列 pass 输入形状：
+
+```core
+p := &arr[0]          // REF/ADDR_INDEX -> self-pointer
+p = p + n             // 偏移(不影响 pts;偏移入 g_offsets)
+x := *p               // DEREF -> 读 alloc content
+*p = v                // STORE_PTR -> v 的 pts 写入 alloc content
+q := cast<int*>(p)    // 类型转换(pts 不变,视图变化)
+
+unsafe:
+    mmio := 0x7fff0000 as *int   // 图边界入口:整数转指针,asp=1
+    *mmio = 42
+```
+
+类型双关(`*(dex*)&i`)不需要 unsafe，地址语义是条目标识 + 偏移（规则 6），经典映射是“字节序列 + 宽度 + 边界”，provenance/offset/alloc_size 与类型无关；`cast` 保留值流，provenance 边不断。检查 = 边界 + 宽度。
+
+## 四、Pass 1:PointerAnalysis（ptr_analysis.cr）
+
+算法：在数据流图上运行 interprocedural Andersen-style 约束求解（参考 SVF, Sui & Xue CC 2016，inclusion constraints + interprocedural function summaries）。规则（源码注释）：
+
+| 规则 | 触发 | 动作 |
+|---|---|---|
+| Addr | ALLOC/REF/ADDR_INDEX | 产生 self-pointer（alloc 自身入 pts） |
+| Copy | LOAD/STORE 沿 def-use | 沿 def-use 链传播 pts |
+| Store | STORE_PTR | ∀alloc ∈ pts（ptr）:val 的 pts 并入 g_alloc_pts[alloc](alloc content) |
+| Load | DEREF | dest 的 pts ∪= g_alloc_pts[alloc]，∀alloc ∈ pts（ptr） |
+| Call | 调用 | 函数摘要传播 + 参数保守处理（interprocedural） |
+
+实现要点：
+- pts 为位图(`pa_set_bit` 等，`grow_pa_alloc_nodes` 动态扩容），非逐对象列表
+- alloc content 跟踪：`g_alloc_pts[alloc_id]` 记录“存入该分配块的值集合”，DEREF 读它，pointer-induced flow 的实现形态（不是图上物理加边，是位图数据）
+- unsafe 感知：`pa_in_unsafe` 使 unsafe 域内指针不参与正常约束
+
+按子图独立分析 + 函数摘要跨子图，不需要全程序统一求解。
+
+## 五、Pass 2:RegionCheck（region_check.cr）
+
+功能：逃逸检查，子图 A 分配的内存不能逃逸出 A 的有效范围。判定基准 = SG region 区间(`enter`/`nstart`/`ncount`/`exit`,dataflow.cr 的 sg 表）。
+
+四点判定(2026-09-20 修订为与实现一致；实现见 `region_check.cr`，共用单源判定 `rc_var_dead`):
+
+1. 失效 DEREF(`IR_DEREF`），`B011`（EC_B_LIFETIME）
+2. 返回逃逸(`IR_RETURN`,`rc_return_escape`），`B010`(EC_B_ESCAPE），`errors.md:245`「Reference to local escapes the function」，例子即 `return &x`。2026-09-20 前误报 B011（码位错配）
+3. 存储逃逸(`IR_STORE_PTR`,`rc_store_escape`），`B011`。2026-09-20 前该检查从不可触发：判定值被整行丢弃(`rc_pts_has_escaped(val_pts, ni, 0);` 同行注 `// simplified check`），而 `rc_pts_has_escaped` 体内无 `check_error`(只 `return 1/0`），因此无任何可观察效果(引入提交 `92eec5a7` 起即如此）
+4. 传参逃逸（把 alloc 指针作参数传给外部），设计未实现（登记，非“已实现”）。`region_check_func` 无 `IR_CALL` 分支，`region_check.cr` 全历史(`jj log` 逐提交核过）从未出现 `IR_CALL`。为什么不能直接补上：有意义的传参逃逸（被调者把指针存到生命周期更长的位置）需要函数摘要，而 `ptr_analysis.cr` 的 CALL 分支是 `pts = 0`(`:250`，头注声称的 summary propagation 未实现），因此该语义在当前架构下不可达；单侧近似（检“传入已死指针”）与存储逃逸同判定、无独立检出能力
+
+判定的图活性语义（实现的做法，2026-09-20 修订）：
+- 半开区间：SG 区间 = `[OFF_SG_NSTART, OFF_SG_EXIT)`；`OFF_SG_EXIT` 由 `sg_pop()` 写成当时 `g_df_node_count` = 区域关闭后第一个节点的下标(`dataflow.cr:78-82`），因此“使用点在区域外” = `ni >= EXIT`。与 `adr-0007` 记的 `cur_seq < exit_seq`（在内）相反。2026-09-20 前写 `ni > EXIT`，因此漏掉“使用点紧跟区域”这一种情况（= 最典型的逃逸情形：循环后第一句即解引用/返回/存储）
+- 只有出口归还内存的区域才算逃逸点：`SG_LOOP`/`SG_FOR`/`SG_UNSAFE`(出口发射 `IR_ARENA_RESET`；后端 `src/arch/x86_64/instr.cr` 确实调用 `arena_new`/`arena_reset`）。`SG_IF` 只 `sg_push/sg_pop`、不建 arena(`ir_gen.cr:2414/2437`）；`SG_FUNC` 的 arena 在函数出口才重置（返回给调用者仍有效），因此两者都不是归还点。分配点在 `if` 内时按父链(`OFF_SG_PARENT`)上溯到真正归还它的那个区域。2026-09-20 前把“任何区域关闭”当归还点，因此 `if x { arr := [..]; p = &arr[0]; } *p` 这类合法程序被误报 rc=1（运行期重读仍是原值 = 内存没有释放）
+- 类型门 = `TYP_PTR` ∪ `TYP_REF`（S6 裁定二并入），且在该面上 PTR 半边当前是惰性的：裁定二把 `&x` 改判 `TYP_REF` 后，`&局部` 一律是 REF，而 `&局部 as *T`（REF，PTR cast）本身即 TF01（实测，基线与本批同），因此由 `&局部` 构造不出 `TYP_PTR` 的区域局部形状，活的是 REF 半边。并集保留（PTR 侧对 `alloc()`/FFI 派生值仍有效）；不得为了满足 PTR 形状构造检查（会是假断言）。
+- 重赋值清除：`pts` 是流不敏感并集，`[EXIT, ni)` 内若对该指针变量有重赋值且写入值本身不含已死分配，因此并集已失效，因此不报。已知不完整（登记）：值为跨调用结果时 `pts` 为空（同 4 的 CALL 缺口），因此会被当作“明确不逃逸”而清除，该类真阳性转漏检，根因是 `pts` 流不敏感，非本批引入
+
+## 六、Pass 3:ProvenanceVerify（provenance_verify.cr）
+
+功能：DEREF/STORE_PTR 越界检查，偏移 + 访问宽度 vs 分配大小。
+
+处理(per DEREF/STORE_PTR,per 函数 `provenance_verify_func`):
+1. 从 s1（指针变量）取 pts 目标集合；经 g_offsets 取累计偏移
+2. 对每个目标 alloc:get_alloc_size（编译期已知大小）且偏移可静态定，`0 <= off && off + width <= alloc_size`?通过则编译期证明；越界，编译错误（EC_TU_DEREF 错误码）
+3. 未知大小或动态偏移，运行时检查：编码 allocation base/size/width,`sub+cmp+jae+ud2` 序列（panic）；多 pts 目标时按目标定位实际 base(runtime_targets），不再用页内偏移近似（2026-08-16 实现）
+
+宽度取 tk（类型码，宽度，宽 ≤ 0 时默认 8）。
+
+## 七、unsafe 边界与 ALLOC_AT
+
+`unsafe` = 编译器无法追踪 provenance 时唯一的方式，发生在图边界：
+
+| 场景 | 原因 |
+|---|---|
+| 外部硬件地址 | 直接写 `0x7fff0000 as *int` 无 ALLOC；整数转指针带 asp=1，解引需在 unsafe 域内（pa/pv 的 unsafe 感知） |
+| FFI 返回值 | 外部指针无 Core provenance |
+| inline asm | 输出指针无来源 |
+
+ALLOC_AT（声明式放置，2026-08-13 定稿）：`alloc_at(addr, size, align)` 是声明式进图节点，固定地址区域以（地址+大小+对齐）声明，与 ALLOC 同路径获得 provenance，之后在全图范围内追踪，并按同一流程验证：
+
+```core
+mmio := alloc_at(0x7fff0000, 4096, align(4096))  // MMIO 页
+*mmio = 42              // safe 代码即可,边界内照常验证
+p := mmio + 4096        // 越界 -> 编译错误或运行时 check
+```
+
+声明是唯一信任点（等价受控图边界入口）；与 2026-08-10 定论不冲突（0x 字面量仍只作 unsafe 外部入口）。
+
+## 八、字节权限层（设计阶段）
+
+经典映射在“字节序列 + 宽度 + 边界”之上补充每字节权限（CompCert v2 投影，cache-semantics 规则 7）：
+
+Freeable > Writable > Readable > Nonempty > Empty
+
+权限与 provenance/offset/size 一样是图数据（验证器读取图数据即可获得每字节的控制）。实现状态：设计阶段（region-model.md 第 5 节）。
+
+## 九、与其它语言的对比
+
+| | C | Rust | Zig | Core |
+|--|---|------|-----|------|
+| 指针算术 | 允许 | *T 不行 | [*]T 可以 | 原始指针允许 |
+| 越界检查 | 无 | bounds check | bounds check | 编译期证明或运行时 check |
+| 生命周期验证 | 无 | borrow checker | 编译时 | RegionCheck（失效/返回/存储三面；传参面设计未实现） |
+| 别名分析 | 无 | 独占/共享引用 | 编译时 | PointerAnalysis（Andersen） |
+| 用户需标注 | 无 | lifetimes | 有时 | 无 |
+| unsafe | 整个语言 | 关键字 | 关键字 | 关键字（图边界） |
+
+## 十、参考与谱系
+
+- SVF（Sui & Xue, CC 2016）:Andersen inclusion + interprocedural summaries，PointerAnalysis 直接参考
+- Fridtjof Siebert(2006）：全程序 context/flow-sensitive 指针分析检区域失效，RegionCheck 概念来源
+- Prov-GC（Banerjee 2020）:provenance 追踪，ProvenanceVerify 概念来源
+- 存储语义：docs/academic/cache-semantics.md（规则 6 地址 = 映射）
+- 经典映射：docs/maintainer/design/region-model.md

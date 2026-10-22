@@ -2,21 +2,21 @@
 
 ## 概述
 
-在 Core 中实现 M:N 协程并发模型。`go f()` 启动新 goroutine，goroutine 之间通过 channel 传值，不共享内存。每个 goroutine 拥有独立 arena，值在 channel 边界拷贝。
+在 Core 中实现 M:N 协程并发模型。`go f()` 启动新的 goroutine，goroutine 之间通过 channel 传值，不共享内存。每个 goroutine 拥有独立 arena，值在 channel 边界拷贝。
 
 ## 核心原则
 
-- **不共享内存**：goroutine 之间不共享变量。所有通信通过 channel 传值。
-- **「像图一样」**：每个 goroutine 是图上的一个节点，channel 是边。
-- **Arena 隔离**：每个 goroutine 有自己的 arena。`go f()` 时创建新 arena。
-- **Cooperative 调度**：只在 channel `send`/`recv` 和显式 `yield` 时切换。
+- 不共享内存：goroutine 之间不共享变量。所有通信通过 channel 传值。
+- 图结构：goroutine 是图上的节点，channel 是连接节点的边。
+- Arena 隔离：每个 goroutine 有自己的 arena。`go f()` 时创建新 arena。
+- Cooperative 调度：只在 channel `send`/`recv` 和显式 `yield` 时切换。
 
 ## GMP 模型（简化）
 
 ```
-G (goroutine) — fiber: 栈 + arena_id + 状态
-M (machine)   — OS 线程: 当前 G + local run queue
-P — 不分离，合并到 M
+G (goroutine)：fiber，包含栈、arena_id 和状态
+M (machine)：OS 线程，包含当前 G 和 local run queue
+P：不分离，合并到 M
 
 没有全局 GOMAXPROCS。M 数量 = CPU 核数（运行时配置）。
 ```
@@ -82,23 +82,25 @@ struct Channel:
 
 ### Channel 操作
 
-**`send(ch, val)`**：
+`send(ch, val)`：
+
 ```
-1. 如果 ch 已关闭 → panic
-2. 如果有等待接收的 G → 直接拷贝给接收者，唤醒 G
-3. 如果 buf 未满 → 拷贝到缓冲区
-4. 如果 buf 已满 → 当前 G 阻塞，加入 send_wait 链表
+1. 如果 ch 已关闭，panic
+2. 如果有等待接收的 G，直接拷贝给接收者，恢复 G 的执行
+3. 如果 buf 未满，拷贝到缓冲区
+4. 如果 buf 已满，当前 G 阻塞，加入 send_wait 链表
 ```
 
-**`recv(ch)`**：
+`recv(ch)`：
+
 ```
-1. 如果有等待发送的 G → 从发送者直接接收，唤醒发送者
-2. 如果 buf 非空 → 从缓冲区读取
-3. 如果 ch 已关闭且 buf 空 → 返回零值
-4. buf 空且未关闭 → 当前 G 阻塞，加入 recv_wait 链表
+1. 如果有等待发送的 G，从发送者直接接收，恢复发送者的执行
+2. 如果 buf 非空，从缓冲区读取
+3. 如果 ch 已关闭且 buf 空，返回零值
+4. buf 空且未关闭，当前 G 阻塞，加入 recv_wait 链表
 ```
 
-**值拷贝语义**：channel 边界永远拷贝值，不传引用。发送方的值在发送后不变。
+值拷贝语义：channel 边界总是拷贝值，不传引用。发送方的值在发送后不变。
 
 ## `go f()` 语义
 
@@ -113,7 +115,7 @@ go f(args);
 5. 投递到 M 的 local run queue
 6. 返回（不等待 f 完成）
 
-**返回值**：`go f()` 返回一个 channel，用于接收 `f` 的返回值：
+返回值：`go f()` 返回一个 channel，用于接收 `f` 的返回值：
 
 ```core
 ch := go f(args)
@@ -127,8 +129,8 @@ result := recv(ch)  // 等待 f 完成并获取结果
 ```
 schedule():
   1. 从 local run queue 取一个 G
-  2. 如果 local 为空，从 global run queue 偷
-  3. 如果 global 也为空，进入 idle（OS 线程休眠）
+  2. 如果 local 为空，从 global run queue 窃取任务
+  3. 如果 global 也为空，进入 idle（OS 线程等待）
   4. 恢复 G 的执行（load 栈指针 + jump）
 ```
 
@@ -136,9 +138,9 @@ schedule():
 
 | 操作 | 行为 |
 |------|------|
-| `send(ch, val)` | 如果 chan 满 → G 阻塞，schedule() |
-| `val = recv(ch)` | 如果 chan 空 → G 阻塞，schedule() |
-| `yield()` | 主动让出 CPU，G 回到 _Grunnable，schedule() |
+| `send(ch, val)` | 如果 chan 满，G 阻塞，调用 schedule() |
+| `val = recv(ch)` | 如果 chan 空，G 阻塞，调用 schedule() |
+| `yield()` | 主动放弃 CPU CPU，G 回到 _Grunnable，调用 schedule() |
 | `go f()` | 新 G 入队，当前 G 继续执行 |
 
 ### Fiber 切换
@@ -165,7 +167,7 @@ IR_SPAWN : int = 27  // 已有: dest=chan, s1=fn_ni, s2=first_arg, s3=arg_count
 IR_YIELD : int = 28  // 已有: s1=value_var
 ```
 
-上列编号保持不变。`IR_SPAWN` 在后端编译为 fiber 创建 + 队列投递。`IR_YIELD` 编译为 fiber 切换。
+上列编号保持不变。`IR_SPAWN` 在后端编译为 fiber 创建和队列投递。`IR_YIELD` 编译为 fiber 切换。
 
 ## 实现清单
 

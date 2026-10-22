@@ -1,19 +1,16 @@
-// ══════════════════════════════════════════════════════════════
-// Single source of truth for all x86-64 instruction byte sizes.
+// === sizes.cr ===
+// Single source for x86-64 instruction byte sizes.
 //
-// Every instruction size in the backend comes from here:
-//   - instr_size() calls these helpers
-//   - Phase 2 prologue/epilogue uses these helpers
-//   - emit_instr() returns sizes via e2_* return values (must match)
+// instr_size uses these helpers for Phase 2 layout, and pf_frame_overhead uses
+// them for prologue and epilogue accounting. emit_instr must return the same
+// sizes through the e2_* helpers.
 //
-// NEVER hardcode byte counts in elf.cr, instr.cr, tag2l.cr, resolve.cr, frame.cr,
-// or src/os/linux/entry.cr (_start 体与 sz_start_body/sz_start_argv_save 必须同步
-// ——H2 类双源守护；frame.cr 的 pf_frame_overhead/pf_prologue/pf_epilogue 分居
-// 核算侧与发射侧,尺寸必须经本文件 sz_* 单源；tag2l.cr mw 族尺寸**值一致但尚未
-// 同源化**（评审修正——e2_mw_jo 现返回字面量 6, sz_jo 无引用：改 sz_jo 不会传播,
-// 波 2 同源化或保持注记）。
-// Change a size here → all phases automatically agree.
-// ══════════════════════════════════════════════════════════════
+// Do not hardcode byte counts in elf.cr, instr.cr, tag2l.cr, resolve.cr,
+// frame.cr, or src/os/linux/entry.cr. sz_start_body and sz_start_argv_save must
+// stay in sync with the _start body in entry.cr.
+//
+// The tag2l.cr mw helpers currently return matching literal sizes but do not
+// call these helpers; changing sz_jo does not propagate to e2_mw_jo.
 
 // ── Basic encoding sizes (one per e2_* helper in instr.cr) ──
 fn sz_mov() -> int:
@@ -57,7 +54,8 @@ fn sz_alu() -> int:
     return 3
 fn sz_jo() -> int:
     return 6
-// jo rel32 (0F 80 cd)——慢路径块附函数尾，rel8 ±127 在 >127B 函数体上不可达
+// jo rel32 (0F 80). The slow-path block is at the function tail, so rel8 cannot
+// reach it when the body is larger than 127 bytes.
 fn sz_syscall() -> int:
     return 2
 
@@ -78,9 +76,9 @@ fn sz_pop_rbp() -> int:
     return 1
 fn sz_ret() -> int:
     return 1
-// callee-saved 保存/恢复（opt≥1）：push rbx(1)+r12..r15(4×2)=9 / pop r15..r12(4×2)
-// +rbx(1)=9——frame.cr pf_frame_overhead 核算与 pf_prologue/pf_epilogue 发射同源
-// （波 1 Task 4 起自 pf_frame_overhead 的硬编码 18/9 提到本文件——值逐字节不变）。
+// Callee-saved save and restore with opt >= 1: push rbx (1) plus r12-r15 (4*2)
+// is 9; pop in reverse order is also 9. pf_frame_overhead accounting and
+// pf_prologue/pf_epilogue emission use these values.
 fn sz_callee_saved_push() -> int:
     return 9
 fn sz_callee_saved_pop() -> int:

@@ -1,39 +1,39 @@
-# RVSDG Region 化控制流 Implementation Plan
+# RVSDG Region 化控制流实现计划
 
-> **术语注记（2026-08-15）**：本计划中的"RVSDG 式"为当时路线的真实记录；该结构后定名为 **HDFG（Holographic Dataflow Graph）**，术语演进见 docs/project-book.md。正文保留历史原样。
+> 术语注记（2026-08-15）：本计划中的"RVSDG 式"是当时方案的原始记录；该结构后定名为 HDFG（Holographic Dataflow Graph），术语变化见 docs/project-book.md。正文保留历史原样。
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
 
-**Goal:** 把现有 SG 子图树升级为 RVSDG 式嵌套 region（新增 SG_IF、显式 node→region 映射、解释器 region 迭代执行、state edges、序列化 v2），根治解释器 for 循环 bug 并为验证工具铺路。
+目标：把现有 SG 子图树升级为 RVSDG 式嵌套 region（新增 SG_IF、显式 node 到 region 的映射、解释器按 region 迭代执行、state edges、序列化 v2），修复解释器 for 循环 bug 的根本原因，并为验证工具提供基础。
 
-**Architecture:** 复用现有 `sg_push/sg_pop` 嵌套树（dataflow.cr）；新增 `g_df_node_region[]` 显式映射与 `SG_IF`；解释器循环从 label 位置表跳转改为 region 边界判定；DFEdge 加 kind 承载 state edges；.ccr 格式追加 SG 段（v2，v1 兼容加载）。ELF 后端零改动。
+架构：复用现有 `sg_push/sg_pop` 嵌套树（dataflow.cr）；新增 `g_df_node_region[]` 显式映射与 `SG_IF`；解释器循环从 label 位置表跳转改为 region 边界判定；DFEdge 加 kind 表示 state edges；.ccr 格式追加 SG 段（v2，v1 兼容加载）。ELF 后端零改动。
 
-**Tech Stack:** Core 自举编译器（src/compiler/：dataflow.cr、ir_gen.cr、interp.cr、dump.cr、ccr_io.cr、region_check.cr）；Python 测试驱动（tests/selfhost/）；构建 `build_selfhost_native.py`。
+技术栈：Core 自举编译器（src/compiler/：dataflow.cr、ir_gen.cr、interp.cr、dump.cr、ccr_io.cr、region_check.cr）；Python 测试驱动（tests/selfhost/）；构建 `build_selfhost_native.py`。
 
-## Global Constraints
+## 全局约束
 
 - 版本控制用 `jj`，禁止 `git`（项目铁律 2）；提交只包含本任务文件
 - 任何编译/测试命令用 `nice -n 19` 前缀限制 CPU（项目铁律 6）；快速单文件测试（<30s）可不加
-- 禁止绕过问题、禁止还原文件（铁律 1/3/5）
+- 不绕过问题，不还原文件（铁律 1/3/5）
 - 常量/关键字以源码为准（`src/compiler/ast.cr`、`src/compiler/dyn_arr.cr` 的 ESZ_*/OFF_* 定义）
 - 解释器 opcode 编号（interp.cr 实际值）：CONST=1 BINARY=2 RETURN=5 ALLOC=6 ALLOC_STRUCT=7 ALLOC_ARRAY=8 STORE=9 LOAD=10 LOAD_FIELD=11 STORE_FIELD=12 LOAD_INDEX=13 STORE_INDEX=14 LOAD_INDEX_VAR=15 STORE_INDEX_VAR=16 BRANCH=19 JUMP=20 LABEL=21
 - SG 常量（dataflow.cr:104-106）：SG_FUNC=0 SG_LOOP=1 SG_FOR=2 SG_FLOW=3 SG_UNSAFE=4
-- 规格：`docs/superpowers/specs/2026-08-08-region-cfg-design.md`（阶段划分 P1-P5 对应 Task 1-6）
+- 规格：`docs/superpowers/specs/2026-08-08-region-cfg-design.md`（阶段划分 P1-P5 对应任务 1-6）
 
 ---
 
-### Task 1: SG_IF region 生成（ir_gen + dataflow 常量）
+### 任务 1：SG_IF region 生成（ir_gen + dataflow 常量）
 
-**Files:**
-- Modify: `src/compiler/dataflow.cr:104-106`（SG 常量区）
-- Modify: `src/compiler/ir_gen.cr:1147-1159`（if/else 生成处）
-- Create: `tests/selfhost/test_region_cfg.py`（Python 测试驱动）
+涉及文件：
+- 修改：`src/compiler/dataflow.cr:104-106`（SG 常量区）
+- 修改：`src/compiler/ir_gen.cr:1147-1159`（if/else 生成处）
+- 创建：`tests/selfhost/test_region_cfg.py`（Python 测试驱动）
 
-**Interfaces:**
-- Consumes: `sg_push(kind)` / `sg_pop()`（dataflow.cr:36-64，已有）；`g_sgs` 表（globals.cr:123）；`cmd_cir` dump 输出格式（dump.cr:225-270，"Function: name" + "Block: labelN"）
-- Produces: `SG_IF = 5` 常量；if/else 生成 SG_IF region（Task 2/3 依赖）
+接口：
+- 使用：`sg_push(kind)` / `sg_pop()`（dataflow.cr:36-64，已有）；`g_sgs` 表（globals.cr:123）；`cmd_cir` dump 输出格式（dump.cr:225-270，"Function: name" + "Block: labelN"）
+- 产出：`SG_IF = 5` 常量；if/else 生成 SG_IF region（任务 2/3 依赖）
 
-- [ ] **Step 1: 写失败测试**
+- [ ] 步骤 1：写失败测试
 
 创建 `tests/selfhost/test_region_cfg.py`：
 
@@ -63,12 +63,12 @@ def test_loop_region():
     assert 'Region: for' in out, f"SG_FOR region missing in cir dump:\n{out}"
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] 步骤 2：运行测试确认失败
 
-Run: `nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
-Expected: FAIL — 断言 `'Region: if' in out` 失败（cir dump 尚无 Region 行）
+运行：`nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
+预期：FAIL，断言 `'Region: if' in out` 失败（cir dump 尚无 Region 行）
 
-- [ ] **Step 3: 实现 SG_IF 常量**
+- [ ] 步骤 3：实现 SG_IF 常量
 
 `src/compiler/dataflow.cr:104-106` 常量区追加：
 
@@ -81,7 +81,7 @@ SG_UNSAFE : int = 4
 SG_IF     : int = 5  // conditional region: covers [condition, merge)
 ```
 
-- [ ] **Step 4: if/else 生成 SG_IF**
+- [ ] 步骤 4：if/else 生成 SG_IF
 
 `src/compiler/ir_gen.cr:1147-1159` 的 if 处理（当前是 `emit(IR_BRANCH...)` 开始 then/else/merge label 序列）在 BRANCH 之前加 region 打开、merge label 之后加关闭：
 
@@ -93,9 +93,9 @@ sg_push(SG_IF);
 sg_pop();
 ```
 
-（`sg_push`/`sg_pop` 已在 ir_gen.cr:29/35 被 `sg_alloc_push`/`sg_alloc_pop` 调用——直接调用即可，无需新声明。）
+（`sg_push`/`sg_pop` 已在 ir_gen.cr:29/35 被 `sg_alloc_push`/`sg_alloc_pop` 调用，直接调用即可，无需新声明。）
 
-- [ ] **Step 5: 实现 region 标注输出**
+- [ ] 步骤 5：实现 region 标注输出
 
 `src/compiler/dump.cr` 的 `cmd_cir`（dump.cr:225），在 Function 循环内、Block 循环前加 region 段输出：
 
@@ -121,19 +121,19 @@ loop {
 }
 ```
 
-（`start`/`count` 是外层已有变量：`r64(g_ir_func_instr_start, fi * 8)` / `r64(g_ir_func_instr_count, fi * 8)`。注意 SG 的 ENTER/NSTART 是 DFNode 序号而函数 start 是线性指令序号——两套编号在 dump 里都以本函数内相对位置近似显示，断言只查 `Region: if` 存在，不查具体编号。）
+（`start`/`count` 是外层已有变量：`r64(g_ir_func_instr_start, fi * 8)` / `r64(g_ir_func_instr_count, fi * 8)`。注意 SG 的 ENTER/NSTART 是 DFNode 序号而函数 start 是线性指令序号。两套编号在 dump 里都以本函数内相对位置近似显示，断言只查 `Region: if` 存在，不查具体编号。）
 
-- [ ] **Step 6: 运行测试确认通过**
+- [ ] 步骤 6：运行测试确认通过
 
-Run: `nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
-Expected: PASS（两个断言通过）
+运行：`nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
+预期：PASS（两个断言通过）
 
-- [ ] **Step 7: 回归——编译器自举检查**
+- [ ] 步骤 7：回归检查编译器自举
 
-Run: `nice -n 19 ./build/corec check src/compiler/main.cr`
-Expected: 无致命错误（若 SG_IF 常量冲突或 if 生成破坏编译，在此暴露）
+运行：`nice -n 19 ./build/corec check src/compiler/main.cr`
+预期：无致命错误（若 SG_IF 常量冲突或 if 生成破坏编译，在此暴露）
 
-- [ ] **Step 8: 提交**
+- [ ] 步骤 8：提交
 
 ```bash
 jj commit -m "feat: SG_IF region for conditionals + region annotation in cir dump"
@@ -141,19 +141,19 @@ jj commit -m "feat: SG_IF region for conditionals + region annotation in cir dum
 
 ---
 
-### Task 2: 显式 g_df_node_region 映射 + DOT 按 region 分组
+### 任务 2：显式 g_df_node_region 映射 + DOT 按 region 分组
 
-**Files:**
-- Modify: `src/compiler/dataflow.cr`（g_df_node_region 数组 + df_create_node 写入）
-- Modify: `src/compiler/globals.cr:121-123`（新全局声明）
-- Modify: `src/compiler/dataflow.cr:331+`（df_graph_to_dot 分组）
-- Modify: `tests/selfhost/test_region_cfg.py`
+涉及文件：
+- 修改：`src/compiler/dataflow.cr`（g_df_node_region 数组 + df_create_node 写入）
+- 修改：`src/compiler/globals.cr:121-123`（新全局声明）
+- 修改：`src/compiler/dataflow.cr:331+`（df_graph_to_dot 分组）
+- 修改：`tests/selfhost/test_region_cfg.py`
 
-**Interfaces:**
-- Consumes: `sg_push/sg_pop`（Task 1 已含 SG_IF）；`g_sg_count`/`g_sgs`
-- Produces: `g_df_node_region[]`（每 DFNode → region id，-1 = 无）；`g_cur_sg`（当前 open region id，sg_push 设置、sg_pop 恢复为 parent）
+接口：
+- 使用：`sg_push/sg_pop`（任务 1 已含 SG_IF）；`g_sg_count`/`g_sgs`
+- 产出：`g_df_node_region[]`（每个 DFNode 对应的 region id，-1 表示无）；`g_cur_sg`（当前 open region id，sg_push 设置、sg_pop 恢复为 parent）
 
-- [ ] **Step 1: 写失败测试（追加到 test_region_cfg.py）**
+- [ ] 步骤 1：写失败测试（追加到 test_region_cfg.py）
 
 ```python
 def test_node_region_mapping():
@@ -162,14 +162,14 @@ def test_node_region_mapping():
     assert 'cluster_for' in out, f"DOT region cluster missing:\n{out}"
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [ ] 步骤 2：运行确认失败
 
-Run: `nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
-Expected: FAIL（`cluster_for` 不存在）
+运行：`nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
+预期：FAIL（`cluster_for` 不存在）
 
-- [ ] **Step 3: 修复 sg_pop close 语义（硬性要求）+ 实现 g_cur_sg 与映射数组**
+- [ ] 步骤 3：修复 sg_pop close 语义（硬性要求）+ 实现 g_cur_sg 与映射数组
 
-> **硬性要求（Task 1 审查发现，root cause 在既有代码）**：`sg_pop` 当前关闭 `g_sg_count-1` 且不递减 count——ir_gen 的 pop 正确关闭嵌套 region 后，`df_end_func`（dataflow.cr:321-327）再 pop 又落到同一条目，把最内层 region 的 EXIT 覆盖为全函数节点数（已用重建二进制验证：`Region: if nodes 4..18`，实际 if 在 ~12 结束）。SG_FOR 同样被腐蚀 → Task 3 的循环预扫会算错范围。**修复：`sg_pop` 改为弹出"最后 open 条目"（EXIT<0），并同步恢复 `g_cur_sg` 为其 parent。**
+> 硬性要求（任务 1 审查发现，原因在既有代码）：`sg_pop` 当前关闭 `g_sg_count-1` 且不递减 count。ir_gen 的 pop 正确关闭嵌套 region 后，`df_end_func`（dataflow.cr:321-327）再 pop 又落到同一条目，把最内层 region 的 EXIT 覆盖为全函数节点数（已用重建二进制验证：`Region: if nodes 4..18`，实际 if 在约 12 结束）。SG_FOR 也会被同样破坏，导致任务 3 的循环预扫算错范围。修复方式：`sg_pop` 改为弹出"最后 open 条目"（EXIT<0），并同步恢复 `g_cur_sg` 为其 parent。
 
 ```core
 // sg_pop：弹出最后一个 open（EXIT<0）的 region，而非 g_sg_count-1
@@ -193,9 +193,9 @@ fn sg_pop():
     g_cur_sg = r64(g_sgs, idx * ESZ_SG + OFF_SG_PARENT)
 ```
 
-验证修复（dump 断言）：if 后跟尾代码的函数，`Region: if nodes A..B` 的 B 必须等于 merge label 处节点数（不吞尾代码）。测试：`tests/selfhost/test_region_cfg.py` 的 if/for 用例改为断言区域边界在函数指令跨度内（sanity 检查）。
+验证修复（dump 断言）：if 后跟尾代码的函数，`Region: if nodes A..B` 的 B 必须等于 merge label 处节点数（不覆盖尾部代码）。测试：`tests/selfhost/test_region_cfg.py` 的 if/for 用例改为断言区域边界在函数指令跨度内（sanity 检查）。
 
-（`sg_alloc_push/sg_alloc_pop` 与 `g_sg_alloc_total/g_sg_arena_var` 并行表按 push/pop 配对索引，不受"弹出最后 open"影响——arena 用例 `tests/suite/arena_test.cr` 回归验证。）
+（`sg_alloc_push/sg_alloc_pop` 与 `g_sg_alloc_total/g_sg_arena_var` 并行表按 push/pop 配对索引，不受"弹出最后 open"影响。arena 用例 `tests/suite/arena_test.cr` 回归验证。）
 
 `src/compiler/globals.cr:123` 附近（g_sgs 声明处）追加：
 
@@ -222,7 +222,7 @@ fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, type_
 
 `src/compiler/dataflow.cr` 的 init_df 中重置：`g_df_node_region_cap = 0;`（node region 数组随 grow 重建）。
 
-- [ ] **Step 4: DOT 按 region 分组**
+- [ ] 步骤 4：DOT 按 region 分组
 
 `df_graph_to_dot`（dataflow.cr:331）中，节点输出前加 cluster 头（用 `digraph` 现有的 subgraph 语法）：
 
@@ -251,38 +251,38 @@ loop {
 }
 ```
 
-（`dot` 变量为 df_graph_to_dot 内部累加串——插入到现有节点循环之前。节点命名与现有输出一致：`n{id}`。）
+（`dot` 变量为 df_graph_to_dot 内部累加串，插入到现有节点循环之前。节点命名与现有输出一致：`n{id}`。）
 
-- [ ] **Step 5: 运行测试确认通过**
+- [ ] 步骤 5：运行测试确认通过
 
-Run: `nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
-Expected: PASS
+运行：`nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
+预期：PASS
 
-- [ ] **Step 6: 回归——cir dump 无崩溃**
+- [ ] 步骤 6：回归检查 cir dump 无崩溃
 
-Run: `nice -n 19 ./build/corec cir tests/suite/go_parallel_test.cr 2>&1 | head -20`
-Expected: 正常输出（DOT 含 cluster 段，无崩溃）
+运行：`nice -n 19 ./build/corec cir tests/suite/go_parallel_test.cr 2>&1 | head -20`
+预期：正常输出（DOT 含 cluster 段，无崩溃）
 
-- [ ] **Step 7: 提交**
+- [ ] 步骤 7：提交
 
 ```bash
-jj commit -m "feat: explicit DFNode→region mapping (g_df_node_region) + DOT clusters"
+jj commit -m "feat: explicit DFNode to region mapping (g_df_node_region) + DOT clusters"
 ```
 
 ---
 
-### Task 3: 解释器 region 迭代执行（根治 for 循环 bug）
+### 任务 3：解释器 region 迭代执行（修复 for 循环 bug 的根本原因）
 
-**Files:**
-- Modify: `src/compiler/interp.cr`（预扫描 + IR_JUMP 处理）
-- Modify: `src/compiler/globals.cr`（循环 region 表全局）
-- Create: `tests/selfhost/test_region_cfg.py` 追加运行类测试
+涉及文件：
+- 修改：`src/compiler/interp.cr`（预扫描 + IR_JUMP 处理）
+- 修改：`src/compiler/globals.cr`（循环 region 表全局）
+- 创建：`tests/selfhost/test_region_cfg.py` 追加运行类测试
 
-**Interfaces:**
-- Consumes: `g_sgs`（SG 表）；`g_df_node_region`（Task 2）；`g_df_func_node_start/node_count`（main 函数图区间）；`g_label_poses`（label→node 偏移，interp.cr:42-57 预扫描已有）
-- Produces: `g_loop_regions[]`（每循环 region 的 enter/exit 图内偏移）；循环执行不再依赖 label 回跳查找
+接口：
+- 使用：`g_sgs`（SG 表）；`g_df_node_region`（任务 2）；`g_df_func_node_start/node_count`（main 函数图区间）；`g_label_poses`（label 到 node 的偏移，interp.cr:42-57 预扫描已有）
+- 产出：`g_loop_regions[]`（每循环 region 的 enter/exit 图内偏移）；循环执行不再依赖 label 回跳查找
 
-- [ ] **Step 1: 写失败测试（复现 TODO #2026-07-25-1 for 循环 bug）**
+- [ ] 步骤 1：写失败测试（复现 TODO #2026-07-25-1 for 循环 bug）
 
 追加到 `tests/selfhost/test_region_cfg.py`：
 
@@ -312,12 +312,12 @@ def test_break_continue_run():
 
 （`corec run` 为解释器模式，见 CLAUDE.md。若 `corec run` 对多行/字符串有解析限制，改用临时文件 + `./build/corec build path -o /tmp/out && /tmp/out` 的形式运行并捕获输出。）
 
-- [ ] **Step 2: 运行确认失败**
+- [ ] 步骤 2：运行确认失败
 
-Run: `nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
-Expected: test_for_loop_run FAIL（stdout 无 `6`——解释器 for 循环不兼容，即 TODO #2026-07-25-1）
+运行：`nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
+预期：test_for_loop_run FAIL（stdout 无 `6`，解释器 for 循环不兼容，即 TODO #2026-07-25-1）
 
-- [ ] **Step 3: 实现循环 region 预扫描**
+- [ ] 步骤 3：实现循环 region 预扫描
 
 `src/compiler/globals.cr` 追加：
 
@@ -356,7 +356,7 @@ g_loop_region_count : int, mut;     g_loop_region_cap : int, mut;  // per loop r
     }
 ```
 
-- [ ] **Step 4: 实现 region 迭代的 JUMP 处理**
+- [ ] 步骤 4：实现 region 迭代的 JUMP 处理
 
 `src/compiler/interp.cr:193-197` 现有 IR_JUMP 处理改为：
 
@@ -391,21 +391,21 @@ g_loop_region_count : int, mut;     g_loop_region_cap : int, mut;  // per loop r
         }
 ```
 
-（该实现把"回跳 header"显式化为 region 迭代：target == 当前 innermost region 的 enter → 回到 region 起点继续迭代；其余照旧 label 跳转。若测试表明原 bug 另有成因——如 IR_ALLOC/STORE 对循环变量的处理——Step 5 中按解释器实际输出修正，保持"region 边界判定"为循环执行的主路径。）
+（该实现把"回跳 header"显式化为 region 迭代：target 等于当前最内层 region 的 enter 时，回到 region 起点继续迭代；其余照旧按 label 跳转。若测试表明原 bug 另有成因（如 IR_ALLOC/STORE 对循环变量的处理），在步骤 5 中按解释器实际输出修正，保持"region 边界判定"为循环执行的主路径。）
 
-- [ ] **Step 5: 运行测试**
+- [ ] 步骤 5：运行测试
 
-Run: `nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
-Expected: test_for_loop_run / test_while_loop_run / test_break_continue_run 全部 PASS
+运行：`nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
+预期：test_for_loop_run / test_while_loop_run / test_break_continue_run 全部 PASS
 
-若仍有失败：用 `./build/corec run` 加 `cir` dump 对比指令序列，按实际失败模式修正 Step 4 实现（回归断言以测试为准，不修改测试期望值）。
+若仍有失败：用 `./build/corec run` 加 `cir` dump 对比指令序列，按实际失败模式修正步骤 4 实现（回归断言以测试为准，不修改测试期望值）。
 
-- [ ] **Step 6: 全量解释器回归**
+- [ ] 步骤 6：全量解释器回归
 
-Run: `nice -n 19 python3 tests/bootstrap/test_pipeline.py && nice -n 19 python3 tests/selfhost/test_compile.py`
-Expected: 全绿（解释器改动不影响编译管线；若有失败属解释器行为变化，逐个确认后修正）
+运行：`nice -n 19 python3 tests/bootstrap/test_pipeline.py && nice -n 19 python3 tests/selfhost/test_compile.py`
+预期：全部通过（解释器改动不影响编译管线；若有失败属解释器行为变化，逐个确认后修正）
 
-- [ ] **Step 7: 提交**
+- [ ] 步骤 7：提交
 
 ```bash
 jj commit -m "fix: interpreter loop execution via region iteration (TODO #2026-07-25-1)"
@@ -413,19 +413,19 @@ jj commit -m "fix: interpreter loop execution via region iteration (TODO #2026-0
 
 ---
 
-### Task 4: State Edges（副作用链 + 循环终止依赖）
+### 任务 4：State Edges（副作用链 + 循环终止依赖）
 
-**Files:**
-- Modify: `src/compiler/dyn_arr.cr:52,99`（ESZ_DFEDGE 24→32、OFF_DFE_* 加 KIND）
-- Modify: `src/compiler/dataflow.cr`（df_connect_srcs 副作用链 + sg_pop 终止边）
-- Modify: `src/compiler/dump.cr`（cir 文本显示 state 边）
-- Modify: `tests/selfhost/test_region_cfg.py`
+涉及文件：
+- 修改：`src/compiler/dyn_arr.cr:52,99`（ESZ_DFEDGE 从 24 改为 32、OFF_DFE_* 增加 KIND）
+- 修改：`src/compiler/dataflow.cr`（df_connect_srcs 副作用链 + sg_pop 终止边）
+- 修改：`src/compiler/dump.cr`（cir 文本显示 state 边）
+- 修改：`tests/selfhost/test_region_cfg.py`
 
-**Interfaces:**
-- Consumes: `df_add_edge`（dataflow.cr:94）；`g_sgs`；`g_df_node_region`（Task 2）
-- Produces: `OFF_DFE_KIND = 16`（0=data, 1=state）；副作用链与循环终止边
+接口：
+- 使用：`df_add_edge`（dataflow.cr:94）；`g_sgs`；`g_df_node_region`（任务 2）
+- 产出：`OFF_DFE_KIND = 16`（0=data, 1=state）；副作用链与循环终止边
 
-- [ ] **Step 1: 写失败测试**
+- [ ] 步骤 1：写失败测试
 
 ```python
 def test_state_edges():
@@ -433,12 +433,12 @@ def test_state_edges():
     assert 'state' in out, f"state edges not shown in cir dump:\n{out}"
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [ ] 步骤 2：运行确认失败
 
-Run: `nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
-Expected: FAIL（`state` 不存在）
+运行：`nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
+预期：FAIL（`state` 不存在）
 
-- [ ] **Step 3: 边结构加 kind**
+- [ ] 步骤 3：边结构加 kind
 
 `src/compiler/dyn_arr.cr:99`：
 
@@ -449,7 +449,7 @@ OFF_DFE_FROM : int = 0;  OFF_DFE_TO : int = 8;  OFF_DFE_NEXT : int = 16;
 OFF_DFE_KIND : int = 24; // 0=data (def-use), 1=state (ordering/termination)
 ```
 
-- [ ] **Step 4: 副作用链 + 终止边实现**
+- [ ] 步骤 4：副作用链 + 终止边实现
 
 `src/compiler/dataflow.cr`：
 
@@ -488,14 +488,14 @@ fn df_connect_state(node_id: int, opcode: int):
         g_last_state_node = node_id
 ```
 
-（`IR_CALL` 的纯度判定：call 的 s3 是 func name idx——`fi_ispure` 需要 func index；实现时经 `find_func(s3)` 获得。非纯调用才进链。若 find_func 不可得（外部函数），保守进链。）
+（`IR_CALL` 的纯度判定：call 的 s3 是 func name idx，`fi_ispure` 需要 func index；实现时经 `find_func(s3)` 获得。非纯调用才进链。若 find_func 不可得（外部函数），保守进链。）
 
 循环终止依赖（`sg_pop` 内，kind 为 SG_LOOP/SG_FOR 时）：
 
 ```core
 // sg_pop 中、OFF_SG_EXIT 写入之后：
 if kind == SG_LOOP || kind == SG_FOR {
-    // region 内最后一条副作用指令 → region 最后一个节点（exit label）
+    // region 内最后一条副作用指令指向 region 最后一个节点（exit label）
     last_node := g_df_node_count - 1;
     if last_node >= r64(g_sgs, idx * ESZ_SG + OFF_SG_NSTART) {
         if g_last_state_node >= 0 {
@@ -505,7 +505,7 @@ if kind == SG_LOOP || kind == SG_FOR {
 }
 ```
 
-- [ ] **Step 5: dump 显示 state 边**
+- [ ] 步骤 5：dump 显示 state 边
 
 `src/compiler/dump.cr` 的 cir 文本输出（DFNode 转储处）：DFEdge 遍历时按 kind 标注：
 
@@ -517,17 +517,17 @@ if kind == SG_LOOP || kind == SG_FOR {
 
 （若 dump.cr 当前不输出 DFEdge 明细，则在 `cmd_cir` 的 Function 段后追加一个 edges 段：遍历 `g_df_edges`，kind==1 的行输出 `state: n{from} -> n{to}`。测试断言只查 `state` 字符串存在。）
 
-- [ ] **Step 6: 运行测试确认通过**
+- [ ] 步骤 6：运行测试确认通过
 
-Run: `nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
-Expected: PASS
+运行：`nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
+预期：PASS
 
-- [ ] **Step 7: 回归**
+- [ ] 步骤 7：回归
 
-Run: `nice -n 19 python3 tests/bootstrap/test_pipeline.py`
-Expected: 全绿（ESZ_DFEDGE 改 32 影响所有读写该结构的代码——grep `ESZ_DFEDGE` 全部使用点确认无越界）
+运行：`nice -n 19 python3 tests/bootstrap/test_pipeline.py`
+预期：全部通过（ESZ_DFEDGE 改 32 影响所有读写该结构的代码，用 grep 检查 `ESZ_DFEDGE` 的全部使用点，确认无越界）
 
-- [ ] **Step 8: 提交**
+- [ ] 步骤 8：提交
 
 ```bash
 jj commit -m "feat: state edges — side-effect chain + loop termination dependency (VSDG)"
@@ -535,21 +535,21 @@ jj commit -m "feat: state edges — side-effect chain + loop termination depende
 
 ---
 
-### Task 5: 序列化 v2（.ccr 追加 SG 段 + edge kind）
+### 任务 5：序列化 v2（.ccr 追加 SG 段 + edge kind）
 
-**Files:**
-- Modify: `src/compiler/ccr_io.cr`（save_ccr/load_ccr）
-- Create: `tests/selfhost/test_region_cfg.py` 追加往返测试
+涉及文件：
+- 修改：`src/compiler/ccr_io.cr`（save_ccr/load_ccr）
+- 创建：`tests/selfhost/test_region_cfg.py` 追加往返测试
 
-**Interfaces:**
-- Consumes: `save_ccr(path)` / `load_ccr(buf, size)`（ccr_io.cr:137+）；`g_sgs`
-- Produces: .ccr v2（version 5：追加 SG 段 + DFEdge kind）；v1（version 4）兼容加载
+接口：
+- 使用：`save_ccr(path)` / `load_ccr(buf, size)`（ccr_io.cr:137+）；`g_sgs`
+- 产出：.ccr v2（version 5：追加 SG 段 + DFEdge kind）；v1（version 4）兼容加载
 
-- [ ] **Step 1: 写失败测试**
+- [ ] 步骤 1：写失败测试
 
 ```python
 def test_ccr_roundtrip_v2():
-    """save→load 往返：v2 文件含 SG 段，load 后 g_sg_count 恢复"""
+    """save 到 load 往返：v2 文件含 SG 段，load 后 g_sg_count 恢复"""
     src = "fn main() -> int {\n    s : ., mut = 0;\n    for i in 0..3 { s = s + i; }\n    return s;\n}\n"
     with tempfile.NamedTemporaryFile('w', suffix='.cr', delete=False) as f:
         f.write(src); path = f.name
@@ -562,14 +562,14 @@ def test_ccr_roundtrip_v2():
     assert '6' in run.stdout, f"expected 6, got {run.stdout!r}"
 ```
 
-- [ ] **Step 2: 运行确认当前状态**
+- [ ] 步骤 2：运行确认当前状态
 
-Run: `nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
-Expected: 当前即 PASS（v2 未加，但 ELF 路径不受影响）——本测试为 v2 后行为不变的守卫；真正的 v2 断言在 Step 4 实现后补充（load 侧 g_sg_count 恢复的检查经 corearch 加载回归验证）。
+运行：`nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
+预期：当前即 PASS（v2 未加，但 ELF 路径不受影响）。本测试为 v2 后行为不变的保护性检查；真正的 v2 断言在步骤 4 实现后补充（load 侧 g_sg_count 恢复的检查经 corearch 加载回归验证）。
 
-- [ ] **Step 3: save_ccr 追加 SG 段**
+- [ ] 步骤 3：save_ccr 追加 SG 段
 
-`src/compiler/ccr_io.cr:144` 版本号 4 → 5，并在文件尾部（现有各段写完、字符串表之后）追加：
+`src/compiler/ccr_io.cr:144` 版本号从 4 改为 5，并在文件尾部（现有各段写完、字符串表之后）追加：
 
 ```core
     // v5: SG (region) section — sg_count × 48B
@@ -589,9 +589,9 @@ Expected: 当前即 PASS（v2 未加，但 ELF 路径不受影响）——本测
     }
 ```
 
-（`buf_write_i32` 已存在（ccr_io.cr:35）。追加在字符串表段之后、文件结束前——load 侧对应位置读取。）
+（`buf_write_i32` 已存在（ccr_io.cr:35）。追加在字符串表段之后、文件结束前，load 侧在对应位置读取。）
 
-- [ ] **Step 4: load_ccr 兼容 v4/v5**
+- [ ] 步骤 4：load_ccr 兼容 v4/v5
 
 `src/compiler/ccr_io.cr` 的 load：版本判断处（当前读取 version 的位置）改为：
 
@@ -624,9 +624,9 @@ Expected: 当前即 PASS（v2 未加，但 ELF 路径不受影响）——本测
         g_sg_count = sg_n
 ```
 
-- [ ] **Step 5: 兼容性回归——旧 v4 文件**
+- [ ] 步骤 5：兼容性回归，检查旧 v4 文件
 
-Run: 用仓库中任一既有 `.ccr` 产物（或先生成一个 v4 文件存档）验证：
+运行：用仓库中任一既有 `.ccr` 产物（或先生成一个 v4 文件存档）验证：
 
 ```bash
 nice -n 19 ./build/corec ccr tests/suite/go_parallel_test.cr -o /tmp/old_v4.ccr   # 若当前已产出 v4
@@ -635,14 +635,14 @@ nice -n 19 python3 build_selfhost_native.py 2>&1 | tail -3   # 重新构建（�
 ./build/corearch /tmp/old_v4.ccr --elf --static -o /tmp/old_v4_bin && /tmp/old_v4_bin
 ```
 
-Expected: v4 文件正常加载执行（返回 0/正确输出）——验证向后兼容。若仓库无 v4 产物，用 `jj show qvkrpwxs --tool=..` 前一个版本生成一个再测，或跳过本步并在提交信息注明。
+预期：v4 文件正常加载执行（返回 0 或正确输出），验证向后兼容。若仓库无 v4 产物，用 `jj show qvkrpwxs --tool=..` 前一个版本生成一个再测，或跳过本步并在提交信息注明。
 
-- [ ] **Step 6: 自举三阶段回归（v5 格式全链路）**
+- [ ] 步骤 6：自举三阶段回归（v5 格式全链路）
 
-Run: `nice -n 19 python3 build_selfhost_native.py && nice -n 19 ./build/corec build build/all.cr -o /tmp/corec2 --static -O 0 2>&1 | tail -3`
-Expected: corec2 构建成功（v5 格式经 corec→corearch 全链路，无解析错误）
+运行：`nice -n 19 python3 build_selfhost_native.py && nice -n 19 ./build/corec build build/all.cr -o /tmp/corec2 --static -O 0 2>&1 | tail -3`
+预期：corec2 构建成功（v5 格式经 corec 到 corearch 的完整链路，无解析错误）
 
-- [ ] **Step 7: 提交**
+- [ ] 步骤 7：提交
 
 ```bash
 jj commit -m "feat: ccr serialization v2 — SG region section + version 5, v4 compatible load"
@@ -650,21 +650,21 @@ jj commit -m "feat: ccr serialization v2 — SG region section + version 5, v4 c
 
 ---
 
-### Task 6: RegionCheck 显式映射 + 全量回归 + 文档同步
+### 任务 6：RegionCheck 显式映射 + 全量回归 + 文档同步
 
-**Files:**
-- Modify: `src/compiler/region_check.cr`（subgraph_containing 用 g_df_node_region）
-- Modify: `docs/project-book.md`（5.2 反馈环愿景修正）
-- Modify: `docs/execution-model.md`（静态循环图描述修正）
-- Modify: `docs/ir-schema/coreir-schema.md`（SG 段 + edge kind + v2）
-- Modify: `CLAUDE.md`（dataflow.cr 职责描述）
-- Create: `tests/selfhost/test_region_cfg.py` 追加 region_check 断言
+涉及文件：
+- 修改：`src/compiler/region_check.cr`（subgraph_containing 用 g_df_node_region）
+- 修改：`docs/project-book.md`（5.2 反馈环愿景修正）
+- 修改：`docs/execution-model.md`（静态循环图描述修正）
+- 修改：`docs/ir-schema/coreir-schema.md`（SG 段 + edge kind + v2）
+- 修改：`CLAUDE.md`（dataflow.cr 职责描述）
+- 创建：`tests/selfhost/test_region_cfg.py` 追加 region_check 断言
 
-**Interfaces:**
-- Consumes: `g_df_node_region`（Task 2）；`subgraph_containing`（region_check.cr:36-49）
-- Produces: 文档同步（规格第 11 节）
+接口：
+- 使用：`g_df_node_region`（任务 2）；`subgraph_containing`（region_check.cr:36-49）
+- 产出：文档同步（规格第 11 节）
 
-- [ ] **Step 1: 写失败测试**
+- [ ] 步骤 1：写失败测试
 
 ```python
 def test_region_check_pointer_escape():
@@ -678,12 +678,12 @@ def test_region_check_pointer_escape():
     assert 'B010' in r.stdout or 'error' in r.stdout, f"expected escape error, got {r.stdout!r}"
 ```
 
-- [ ] **Step 2: 运行确认当前行为**
+- [ ] 步骤 2：运行确认当前行为
 
-Run: `nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
-Expected: 当前即 PASS（B010 已在）——本测试为迁移后的守卫。真正的迁移验证在 Step 4 后重跑全量。
+运行：`nice -n 19 python3 tests/selfhost/test_region_cfg.py -v`
+预期：当前即 PASS（B010 已在）。本测试为迁移后的保护性检查。真正的迁移验证在步骤 4 后重新运行全量。
 
-- [ ] **Step 3: subgraph_containing 用显式映射**
+- [ ] 步骤 3：subgraph_containing 用显式映射
 
 `src/compiler/region_check.cr:36-49` 的 `subgraph_containing(ni)`（当前线性扫 g_sgs 区间）改为：
 
@@ -695,11 +695,11 @@ fn subgraph_containing(node_seq: int) -> int:
     return -1
 ```
 
-（调用处 `alloc_seq_to_sg` 仍保留其现有逻辑——两者语义对齐：region id == g_sgs 索引。）
+（调用处 `alloc_seq_to_sg` 仍保留其现有逻辑，两者语义对齐：region id == g_sgs 索引。）
 
-- [ ] **Step 4: 全量回归**
+- [ ] 步骤 4：全量回归
 
-Run:
+运行：
 ```bash
 nice -n 19 python3 tests/selfhost/test_region_cfg.py -v
 nice -n 19 python3 tests/bootstrap/test_pipeline.py
@@ -709,18 +709,18 @@ nice -n 19 python3 tests/selfhost/test_compile.py
 nice -n 19 python3 tests/selfhost/test_impl.py
 nice -n 19 python3 tests/selfhost/test_borrow.py
 ```
-Expected: 全绿。再跑自举三阶段：
+预期：全部通过。再运行自举三阶段：
 ```bash
 nice -n 19 ./build/corec build build/all.cr -o /tmp/corec2 --static -O 0 2>&1 | tail -3
 nice -n 19 /tmp/corec2 build build/all.cr -o /tmp/corec3 --static -O 0 2>&1 | tail -3
 nice -n 19 /tmp/corec3 build build/all.cr -o /tmp/corec4 --static -O 0 2>&1 | tail -3
 cmp /tmp/corec3 /tmp/corec4 && echo "BYTE-IDENTICAL"
 ```
-Expected: corec2/corec3/corec4 全部成功且 corec3 与 corec4 逐字节一致
+预期：corec2/corec3/corec4 全部成功且 corec3 与 corec4 逐字节一致
 
-- [ ] **Step 5: 文档同步**
+- [ ] 步骤 5：文档同步
 
-`docs/project-book.md` 5.2 段（当前"当代码中出现 loop 构造，图中引入反馈边——从循环体末端回到循环头。执行器按迭代周期调度"）改为：
+`docs/project-book.md` 5.2 段（当前"当代码中出现 loop 构造，图中引入反馈边，从循环体末端回到循环头。执行器按迭代周期调度"）改为：
 
 ```markdown
 ### 5.2 带环静态图：有节奏的循环
@@ -758,20 +758,20 @@ fn main() {
 `CLAUDE.md` 架构段 dataflow.cr 行改为：
 
 ```
-├── dataflow.cr     → 数据流图构建：DFNode/DFEdge（含 state edges）+ 嵌套 region（SG_IF/LOOP/FOR/FLOW/UNSAFE）+ g_df_node_region 显式映射 + DOT
+├── dataflow.cr     负责数据流图构建：DFNode/DFEdge（含 state edges）+ 嵌套 region（SG_IF/LOOP/FOR/FLOW/UNSAFE）+ g_df_node_region 显式映射 + DOT
 ```
 
-- [ ] **Step 6: 提交**
+- [ ] 步骤 6：提交
 
 ```bash
-jj commit -m "feat: RegionCheck via explicit node→region mapping + docs sync (region semantics)"
+jj commit -m "feat: RegionCheck via explicit node to region mapping + docs sync (region semantics)"
 ```
 
 ---
 
-## Self-Review（执行前自查）
+## 执行前自查
 
-- **规格覆盖**：P1（SG_IF+映射+DOT）→ Task 1/2；P2（region 迭代）→ Task 3；P3（state edges）→ Task 4；P4（序列化 v2）→ Task 5；P5（RegionCheck+回归+文档）→ Task 6。规格第 11 节文档同步 → Task 6 Step 5 
-- **类型一致**：`g_df_node_region`/`g_cur_sg`/`g_loop_region_*`/`OFF_DFE_KIND`/`SG_IF` 在各 Task 定义处与使用处一致 
-- **全局约束**：所有长任务命令带 `nice -n 19`；提交用 `jj` 
-- **已知不确定点**：Task 3 复现测试若与预期失败模式不符，以实际输出为准修正（步骤已注明）；Task 5 的 v4 存档文件若无现成产物则跳过兼容测试并在提交注明
+- 规格覆盖：P1（SG_IF+映射+DOT）对应任务 1/2；P2（region 迭代）对应任务 3；P3（state edges）对应任务 4；P4（序列化 v2）对应任务 5；P5（RegionCheck+回归+文档）对应任务 6。规格第 11 节文档同步对应任务 6 步骤 5
+- 类型一致：`g_df_node_region`/`g_cur_sg`/`g_loop_region_*`/`OFF_DFE_KIND`/`SG_IF` 在各任务定义处与使用处一致
+- 全局约束：所有长任务命令带 `nice -n 19`；提交用 `jj`
+- 已知不确定点：任务 3 复现测试若与预期失败模式不符，以实际输出为准修正（步骤已注明）；任务 5 的 v4 存档文件若无现成产物则跳过兼容测试并在提交注明

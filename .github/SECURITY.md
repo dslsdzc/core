@@ -2,7 +2,7 @@
 
 ## 报告漏洞
 
-请通过 GitHub 的**私有漏洞报告**（仓库页 → Security → Report a vulnerability）提交，
+请通过 GitHub 的私有漏洞报告提交（仓库页的 Security 页面，选择 Report a vulnerability），
 不要公开披露。
 
 ## 响应

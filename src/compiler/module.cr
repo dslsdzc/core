@@ -1,10 +1,11 @@
 // === module.cr ===
 // File system utilities, fileid management, and import resolution.
 
-// ─── LSP open documents ────────────────────────────────────────
-// g_open_docs：路径 → 源文本的扁平记录，24 字节/条 {path_ptr, src_ptr, src_len}。
-// didOpen/didChange 由 LSP 层把路径与源文本复制到稳定堆字符串后注册；
-// module_get_source 先查打开文档、未打开才读盘——进程内重跑前端不再依赖磁盘。
+// LSP open documents. g_open_docs is a flat array of 24-byte records:
+// {path pointer, source pointer, source length}. didOpen and didChange copy paths
+// and source text to stable heap strings before registering. module_get_source
+// checks open documents first and reads from disk only when absent, so rerunning
+// the frontend in-process does not depend on disk.
 
 fn grow_open_docs(needed: int):
     if needed < g_open_doc_cap:
@@ -53,7 +54,7 @@ fn module_open_doc_remove(path: string):
             return
         i = i + 1
 
-// 先查打开文档（路径精确匹配），未打开读盘；两者皆无返回 ""
+// Check open documents by exact path, then read from disk. Return "" when neither has the file.
 fn module_get_source(path: string) -> string:
     i : ., mut = 0
     loop:
@@ -168,8 +169,7 @@ fn parent_dir(dir: string) -> string:
 fn load_imports(dir_path: string) -> string:
     imp_path : ., mut = dir_path + "_import.cr"
     content := module_get_source(imp_path)
-    // 回流（2026-10-11）：同 `main.cr::read_source_file` —— T4 按旧政策整条删除，
-    // **连带删掉一次内存读**；现政策（region 可为空）下回流成 `if …:` + 空 region。
+    // Return the _import.cr content when present.
     if str_len(content) > 0:
     return content
 
@@ -424,15 +424,14 @@ fn reg_so_funcs(index_content: string, so_name: string):
             ret_code = 4
         type_encoding : ., mut = param_count * 1000000000000 + param_type_bits * 100 + ret_code
 
-        // 落**侧表**（第 4 批 #82/#83），**不**进串表/符号表：
-        //   ① 本函数在 `import` 解析期被调用，而「该名字是否被程序引用」要到检查期才知道
-        //      ⇒ 此刻 `str_intern` + 追加 SYM 会把**宿主 HOME 里的元数据**写进产物面，
-        //      哪怕程序**从未引用**它（前批 PR #80 红档：canary 语料 +28B；且符号索引平移
-        //      ⇒ STR/SYM/NOD/IFACE 四段扰动，良性索引亦然）。
-        //   ② 元数据仍是**合法输入**：被引用的名字由 `so_materialize` 在**首次查找**时物化
-        //      ⇒ 承重面（`print_int` 等只在索引里存在的名字）不变。
-        //   ③ 侧表**动态增长**（grow_so_side）⇒ 不再有 `check_all` 里那份 128 容量硬编码、
-        //      写入无界的保全缓冲（TODO #2026-09-17-1 的越界写堆面随本改动消失，见 checker.cr:check_all 注）。
+        // Record the function in the side table. Do not add it to the string or
+        // symbol table yet: import resolution runs before the checker knows
+        // whether the program references the name. Interning it now would add host
+        // home-directory metadata to output even for an unused function and shift
+        // later string and symbol indexes.
+        // Referenced names are materialized by so_materialize on first lookup, so
+        // names that exist only in the index still work. The side table grows
+        // dynamically, so no fixed 128-entry buffer is needed.
         ssi : ., mut = g_so_side_count
         grow_so_side(ssi + 1)
         store_str_ptr(g_so_side_name, ssi * 8, func_name)
@@ -440,8 +439,9 @@ fn reg_so_funcs(index_content: string, so_name: string):
         w64(g_so_side_type, ssi * 8, type_encoding)
         g_so_side_count = ssi + 1
 
-// 侧表按名字查找（返回侧表下标；-1 = 未命中）。名字**尚未 intern**（存的是原始串），
-// 故按串比较——这是「未引用不物化」的代价面，只在查找未命中主表时走一次。
+// Look up a side-table entry by name and return its index, or -1. Names are
+// stored before interning, so compare strings. This runs only when the main
+// symbol table misses.
 fn find_so_side(name_idx: int) -> int:
     i : ., mut = 0
     loop:
@@ -452,9 +452,10 @@ fn find_so_side(name_idx: int) -> int:
         i = i + 1
     return -1
 
-// 把侧表条目**物化**进符号表（首次被查找时调用）。返回新落的符号索引。
-// 调用点约定（裁-HR-2「.cr 声明优先」）：只有主表**完全没有**该名字时才可调用
-// —— 否则宿主家目录里的一个索引文件会**覆盖用户源码里的声明**。
+// Materialize a side-table entry into the symbol table on first lookup and return
+// the new symbol index. Call only when the main table has no entry for the name;
+// otherwise an index file in the user's home directory could override a
+// declaration in user source.
 fn so_materialize(side_i: int) -> int:
     fni := str_intern(load_str_ptr(g_so_side_name, side_i * 8))
     si := g_sym_count
@@ -474,7 +475,7 @@ fn res_imports():
     g_seg_count = 0
     g_seg_cap = 0
 
-    // Step 1: collect _import.cr from source directory and ancestors
+    // First, collect _import.cr from the source directory and ancestors.
     import_core_acc : ., mut = ""
     // Also collect stdlib _import.cr (provides import fmt for stdlib files)
     sic := load_imports("src/stdlib/")
@@ -588,17 +589,13 @@ fn res_imports():
                             pi = pi + 1
                         // Try .so extension index: $HOME/.core/lib/<name>/index
                         // Loads metadata (tags). The .cr file still provides runtime implementation.
-                        // 第 4 批 #83：**不再**兜底到硬编码家目录。原实现把空 HOME 兜底为
-                        //   一个写死的开发者家目录常量（字面已从源码移除，判据 J4 要求
-                        //   `src/` 内该串零命中 ⇒ 此处亦不得回引）
-                        // ⇒ HOME 未设/为空时去读**原开发者**的家目录：他人机器上读一个不存在的
-                        //   路径（或更糟——读到**别人的** `~/.core/lib`，进而按 #82 改变产物）。
-                        // 裁-HR-5 的边界：索引缺席属「可选输入不存在」⇒ **静默降级到确定态**
-                        // （不注册）；而**真正用到**索引独有名字时仍**响亮失败**——那条由
-                        //   查找侧的「查不到 ⇒ -1 ⇒ Undefined/N06」保证（见 checker.cr find_gsym 注），
-                        //   **不在此处放行**（放行会把响亮失败退化为静默错值 = 本批红线）。
-                        // 注：嵌套 if 而非 `home_dir != "" && …`——bootstrap 构建的 corec 对
-                        //   `&&` 两侧**无条件求值**（仓内既有纪律）。
+                        // Do not fall back to a hard-coded developer home directory.
+                        // Reading another user's ~/.core/lib would change output based
+                        // on host state. When HOME is unset or the index is absent,
+                        // skip registration; a later lookup of an index-only name
+                        // still fails with Undefined/N06.
+                        // Use a nested if instead of `home_dir != "" && ...` because
+                        // the bootstrap-built corec evaluates both sides of &&.
                         home_dir : ., mut = get_env("HOME")
                         if str_len(home_dir) > 0:
                             so_idx_path : ., mut = home_dir + "/.core/lib/" + fs_path + "/index"
@@ -615,16 +612,12 @@ fn res_imports():
                         if str_len(content) == 0:
                             path = "src/runtime/" + fs_path + ".cr"
                             content = module_get_source(path)
-                        // ── 三轴实例目录（x86 实例化波 1 Task 1 搬迁落位）──
-                        // 架构 × 格式 × OS 三轴目录 = 跨轴 import 的唯一通道（H5：
-                        // elf→arch 6 处跨轴缝依赖此回退链）。**置于 src/compiler/
-                        // 之前**：①实例文件须先于通用面命中（实例 = 特化，通用面 =
-                        // 兜底——与 src/arch/hit 同理）；②否则 src/compiler/elf.cr
-                        // （遗留死文件：零 importer + 不入任何 concat 清单）会遮蔽
-                        // src/format/elf/elf.cr，目标单元解析漂移 → elf_gen 等
-                        // N06 静默未定义。既有条目命中不漂：本三条目录为新建，
-                        // 其文件名（instr/sizes/regalloc/elf/resolve/ld）在
-                        // g_source_dir / src/stdlib / src/runtime 三级均无同名文件。
+                        // Architecture, format, and OS directories. These are the only
+                        // path for cross-axis imports. They come before src/compiler so
+                        // an instance-specific file wins over the generic file. The
+                        // existing names do not overlap: these directories contain
+                        // instr, sizes, regalloc, elf, resolve, and ld, none of which
+                        // exist in the earlier search directories.
                         if str_len(content) == 0:
                             path = "src/format/elf/" + fs_path + ".cr"
                             content = module_get_source(path)
@@ -640,22 +633,20 @@ fn res_imports():
                         if str_len(content) == 0:
                             path = "src/arch/hit/" + fs_path + ".cr"
                             content = module_get_source(path)
-                        // ent_kernel.cr（语义内核，格层 src/lattice/——2026-09-10 自
-                        // 旧实例目录迁出：实例目录不再承载语义内核；该目录于 x86
-                        // 实例化波 1 Task 1 拆为三轴 src/arch/x86_64 + src/format/elf
-                        // + src/os/linux）双 concat
-                        // 共享——corec 写侧 save_ccr 直调 compute_live_ranges/
-                        // grow_entries 等；镜像 src/compiler 跨树回退（同 concat 共享
-                        // 文件可被任意编译单元 import——src/compiler 单元自身需经此路
-                        // 径收编内核；实例单元与独立工程构建同经此路径命中）
+                        // ent_kernel.cr is the semantic kernel under src/lattice. It was
+                        // moved out of the old instance directory when the x86
+                        // instance was split into the architecture, format, and OS
+                        // axes. Both corec and corearch import it: the corec writer
+                        // calls compute_live_ranges and grow_entries, and backend
+                        // units reach it through this path.
                         if str_len(content) == 0:
                             path = "src/lattice/" + fs_path + ".cr"
                             content = module_get_source(path)
-                        // 组合根（三轴组合 = target triple 命名）：project-mode 入口
-                        // = 该目录 main.cr（load_project 直读）+ _import.cr（load_imports
-                        // 直读）——**后置于 compiler/lattice**：目录内 main.cr 非 import
-                        // 目标，前置会遮蔽既有 main/entry 命中（src/compiler/_import.cr
-                        // 的 import main/entry）；此条目为跨轴/跨单元收编面而备。
+                        // Combination root named by the target triple. Project mode
+                        // reads main.cr and _import.cr directly from this directory.
+                        // It comes after compiler and lattice because main.cr here is
+                        // not an import target and must not shadow the existing main
+                        // or entry imports.
                         if str_len(content) == 0:
                             path = "src/targets/x86_64-linux/" + fs_path + ".cr"
                             content = module_get_source(path)

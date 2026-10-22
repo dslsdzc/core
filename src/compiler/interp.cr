@@ -1,40 +1,43 @@
 // === interp.cr ===
 // Dataflow graph interpreter for -c (eval) mode.
-// Interprets g_df_nodes[] (the .cir graph) instead of linear g_ir_instrs[] (.ccr).
-// The DFG preserves type/semantic information throughout execution.
+// It interprets g_df_nodes (the .cir graph) instead of linear g_ir_instrs (.ccr).
+// The dataflow graph preserves type and semantic information during execution.
 //
 // Limitations:
-// - String constants: 解释器不调用 syscall3，alloc/print/syscall 相关函数返回 0
-// - 递归/跨函数调用：callee 图内联执行（ir_interp_run_fn），支持嵌套/递归/互递归；
-//   深度上限 IR_INTERP_MAX_DEPTH（超限响亮报错，不挂死）
-// - 动态分发/外部函数（IR_DYN_DISPATCH/IR_CALL_EXTERN，见 ir_interp_call）与
-//   binary64 转换（IR_I2F/IR_F2I）：解释器无对应语义——响亮报错 + 非零退出码，
-//   绝不静默落 0（TODO #2026-09-10-7 的静默分叉类）
-// - 主循环与 callee 内联路径共用同一份 opcode 分派（ir_interp_call/ir_interp_run_fn），
-//   双路径一致性由 tests/selfhost/test_interp_parity.py 钉死（interp callee ≡
-//   interp main ≡ ELF oracle）
+// - String helpers: the interpreter does not call syscall3; allocation, printing,
+//   and syscall helpers return 0.
+// - Recursion and cross-function calls: callee graphs run inline through
+//   ir_interp_run_fn, including nested and mutual recursion. The depth limit is
+//   IR_INTERP_MAX_DEPTH; exceeding it reports an error instead of hanging.
+// - Dynamic dispatch, external functions, and binary64 conversions have no
+//   interpreter semantics. They report an error and return a non-zero code.
+// - The main loop and the callee path share one opcode dispatch in
+//   ir_interp_call and ir_interp_run_fn. tests/selfhost/test_interp_parity.py
+//   checks both paths against the ELF oracle.
 
 g_ir_vals : string, mut
 g_ir_vals_cap : int, mut
 
-// === 调用分派 / callee 内联执行（主循环与 callee 路径的唯一实现）===
-// ir_interp_abort：解释器中止码（0 = 正常；非 0 = ir_interpret 应立即返回的
-// 值）。callee（含嵌套层）里的响亮失败——越界陷阱（-1）/ 动态分发·extern（2）/
-// binary64 转换（-1）——沿调用链上抛到 ir_interpret，绝不静默落 0
-// （TODO #2026-09-10-7 的静默分叉类：主循环有、callee 路径无 → 双路径分叉）。
+// Call dispatch and inline callee execution. This is the only implementation for
+// both the main loop and callee paths.
+// Interpreter abort code. 0 means continue; a non-zero value is what ir_interpret
+// should return. Errors inside callees propagate up the call stack: a bounds
+// failure returns -1, dynamic dispatch or an external call returns 2, and a
+// binary64 conversion returns -1.
 g_interp_abort : int, mut
-// 嵌套内联深度（callee 内再调用用户函数 = 递归内联）。超限响亮报错，不挂死、
-// 不静默——Python 参照解释器无此概念，深度上限取足够覆盖正常递归用例。
+// Nested inline depth. A callee that calls another user function enters another
+// level. Exceeding IR_INTERP_MAX_DEPTH reports an error instead of hanging.
 g_interp_call_depth : int, mut
 IR_INTERP_MAX_DEPTH : int = 400
-// 活动函数栈（g_interp_stack[d] = 第 d 层内联执行的函数索引）——用于重入（递归/
-// 互递归）检测：同一函数再次进入时必须逐帧保存/恢复其槽区（扁平槽模型里同一
-// 函数的形参/局部只有一份槽，不保存则外层帧被内层调用覆写 → 静默错值）。
+// Active function stack. g_interp_stack[d] is the function index at depth d.
+// Re-entry of the same function requires saving and restoring its slot range:
+// the flat slot model has one range per function, so an inner call would
+// overwrite the outer frame.
 g_interp_stack : string, mut
 
-// IR_BINARY 统一分派（主循环与 callee 内联循环共用）：
-// 整数路径（模 2⁶⁴）。dex 为缩放整数——同走整数路径（数值迁移 #2026-09-13-9 定稿）；
-// IR_I2F/IR_F2I 在 dispatch 入口显式报错（interp 无 binary64 语义）。
+// Shared IR_BINARY dispatch for the main loop and callee loops.
+// The integer path is modulo 2^64. dex values are scaled integers and use the
+// same path. IR_I2F and IR_F2I are rejected at dispatch entry.
 fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int):
     if d < 0:
         return
@@ -100,9 +103,10 @@ fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int):
         w64(g_ir_vals, d * 8, (lv - rv) / 8)
     // OP_PTR_DIFF
 
-// 指针间接读写（近似，对照 ELF 语义）：
-// 槽号（0 ≤ ptr < g_ir_var_count）= 栈变量的「地址」（REF 给的槽索引）→ 读写该槽；
-// 其余 = 堆地址（alloc/ALLOC_ARRAY 产出的真实指针）→ 读写内存。
+// Pointer read and write.
+// A pointer in [0, g_ir_var_count) is a stack slot address produced by REF; read
+// or write that slot. Any other value is a heap pointer from alloc or
+// ALLOC_ARRAY; read or write memory.
 fn ir_interp_deref_read(ptr: int) -> int:
     if ptr >= 0 && ptr < g_ir_var_count:
         return r64(g_ir_vals, ptr * 8)
@@ -130,19 +134,20 @@ fn ir_interp_str_char(a: int, i: int) -> int:
 fn ir_interp_str_sub(a: int, start: int, len: int) -> int:
     return str_intern(str_sub(istr_get(a), start, len))
 
-// IR_CALL (4) / IR_SPAWN (27) 统一分派——d=结果槽，s1=实参首槽，s2=实参数，
-// s3=函数名驻留索引。内置函数近似与原主循环分支逐条同语义同守卫；用户函数经
-// ir_interp_run_fn 内联执行（callee 内再调用 = 嵌套内联，深度守卫见 MAX_DEPTH）。
+// Dispatch for IR_CALL and IR_SPAWN. d is the result slot, s1 the first argument
+// slot, s2 the argument count, and s3 the interned function name. Builtins mirror
+// the previous main-loop branches. User functions run inline through
+// ir_interp_run_fn; nested calls use the same depth check.
 fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
     fn_ni := s3
     fn_name := istr_get(fn_ni)
     sfi := find_so_fn(fn_ni)
     if sfi >= 0 && s2 >= 1:
         tf := sym_type(sfi)
-          // TAG_VARIADIC: print/println — NOOP (syscall3 returns 0)
-           // TAG_AUTO_STR: print_i/println_i — NOOP (syscall3 returns 0)
+          // TAG_VARIADIC: print and println are no-ops; syscall3 returns 0.
+           // TAG_AUTO_STR: print_i and println_i are no-ops; syscall3 returns 0.
 
-    // syscall3/syscall4 — interpreter returns 0
+    // syscall3 and syscall4 return 0 in the interpreter.
     if str_eq(fn_name, "syscall3") != 0 || str_eq(fn_name, "syscall4") != 0:
         if d >= 0:
             w64(g_ir_vals, d * 8, 0)
@@ -199,7 +204,7 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
             store8(b, p+7, (hi/16777216)%256)
         if d >= 0:
             w64(g_ir_vals, d * 8, 0)
-    // 字符串内置已处理 → 不再走用户函数查找（对照主循环的 ip+1;continue）
+    // String builtins are handled; do not fall through to the user-function lookup.
     if str_eq(fn_name, "str_len") != 0 || str_eq(fn_name, "str_eq") != 0 || str_eq(fn_name, "concat") != 0 || str_eq(fn_name, "int_str") != 0 || str_eq(fn_name, "chr") != 0 || str_eq(fn_name, "get_char") != 0 || str_eq(fn_name, "str_sub") != 0:
         return
     // 用户函数内联执行（单层 / 嵌套递归）
@@ -219,10 +224,11 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
             break
         cfi = cfi + 1
 
-// callee 图内联执行（唯一实现）：主循环的 IR_CALL 与 callee 内的 IR_CALL 都走
-// 这里——两路径不再各有一份分派。建标签表 → 拷实参 → 顺序执行 f_count 节点 →
-// 恢复标签表 → 返回 IR_RETURN 值（无值返回 = 0，与主循环 ret_slot 清零同语义）。
-// 深度守卫：嵌套超过 IR_INTERP_MAX_DEPTH 响亮报错 + 中止（不挂死、不静默）。
+// Inline execution of a callee graph. Both the main loop and nested callees use
+// this function. It builds the label table, copies arguments, executes f_count
+// nodes, restores the label table, and returns the IR_RETURN value. A function
+// with no return value returns 0.
+// Depth check: exceeding IR_INTERP_MAX_DEPTH reports an error and aborts.
 fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
     f_start := r64(g_df_func_node_start, cfi * 8)
     f_count := r64(g_df_func_node_count, cfi * 8)
@@ -232,8 +238,9 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
         println("interpreter error: IR_INTERP_MAX_DEPTH exceeded — corec run cannot execute this recursion; build & run natively (corec build) instead")
         g_interp_abort = -1
         return 0
-    // 重入检测（递归 / 互递归）：本函数已在活动栈上 → 外层帧与本层共用同一份
-    // 槽区（扁平槽模型），必须在入口保存、出口恢复，否则外层帧被覆写（静默错值）。
+    // Re-entry detection for recursion and mutual recursion. If this function is
+    // already active, it shares one slot range with the outer frame in the flat
+    // slot model. Save the range on entry and restore it on exit.
     reentrant : ., mut = 0
     si3 : ., mut = 0
     loop:
@@ -256,8 +263,9 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
                 break
             w64(frame, fi4 * 8, r64(g_ir_vals, (vs + fi4) * 8))
             fi4 = fi4 + 1
-    // 实参先入缓冲再落形参槽：递归调用时实参槽与形参槽同属本函数槽区，直接
-    // 逐个搬运可能被己方写覆盖（缓冲后行为与原子搬移一致）。
+    // Copy arguments to a buffer before writing parameter slots. In a recursive
+    // call the argument and parameter slots belong to the same function range, so
+    // a direct copy could overwrite an argument that has not been read yet.
     args_buf : string, mut = ""
     if argc > 0:
         args_buf = alloc(argc * 8)
@@ -267,11 +275,11 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
                 break
             w64(args_buf, pai * 8, r64(g_ir_vals, (arg_base + pai) * 8))
             pai = pai + 1
-    // 压栈（重入检测在上；深度守卫已在入口）
+    // Push the frame. Re-entry detection and the depth check already ran.
     w64(g_interp_stack, g_interp_call_depth * 8, cfi)
     g_interp_call_depth = g_interp_call_depth + 1
-    rval : ., mut = 0  // callee 无值返回（IR_RETURN s1<0，如裸 return）→ 0
-    // Save label state（递归安全：每层帧在局部变量里保存/恢复）
+    rval : ., mut = 0  // a callee with no value (IR_RETURN s1 < 0) returns 0
+    // Save label state in locals so each recursion level restores its own state.
     old_lc := g_label_count
     old_poses := g_label_poses
     old_poses_cap := g_label_cap
@@ -311,9 +319,9 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
         t1 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S1)
         t2 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S2)
         t3 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S3)
-        // R2 P5 Task 2（D19）：这里是**派生码**（不是槽）——单槽化后 40 槽 = 类型项
-        // 引用。`ir_interp_binary` 当前不消费该参（槽 3 的 op 码决定运算），值仍与
-        // 单槽化前逐字节相同（派生码 ≡ 旧混用码）。
+        // Derived code, not a slot. After the single-slot change, slot 40 holds a
+        // type-term reference. ir_interp_binary does not consume this argument
+        // today; the operation code in s3 selects the operation.
         t4 := sh_dfn_code_of_slots(r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_TK),
             r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_AUX))
         if op2 == 1 && d2 >= 0:
@@ -333,9 +341,8 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
                     w64(g_ir_vals, d2 * 8, 1)
                 else:
                     w64(g_ir_vals, d2 * 8, 0)
-        // Keep callee locals in the shared value store.
-        // The old inline path skipped these opcodes, so
-        // loop-carried assignments never changed state.
+        // Keep callee locals in the shared value store. Skipping these opcodes
+        // would leave loop-carried assignments unchanged.
         if op2 == 6 && d2 >= 0:
             w64(g_ir_vals, d2 * 8, 0)
         // IR_ALLOC
@@ -345,11 +352,10 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
         if op2 == 10 && d2 >= 0 && t1 >= 0:
             w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8))
         // IR_LOAD
-        // 聚合族（与主循环 IR_ALLOC_ARRAY/IR_ALLOC_STRUCT/LOAD|STORE_INDEX
-        // /LOAD|STORE_FIELD/ADDR_INDEX 同语义）：此前外函数内联路径缺这组
-        // opcode——callee 里读写聚合全局（数组/结构体）静默落 0。本批
-        // §1.3 让这类全局在 main 序言获得运行期存储（ir_gen.cr），callee
-        // 侧的读路径必须同批补齐，否则双路径语义仍分叉。
+        // Aggregate operations: ALLOC_ARRAY, ALLOC_STRUCT, LOAD_INDEX,
+        // STORE_INDEX, LOAD_FIELD, STORE_FIELD, and ADDR_INDEX. The callee path
+        // must implement them too, or an aggregate global read inside a callee
+        // would return 0 while the main path works.
         if op2 == 8 && d2 >= 0:
             // IR_ALLOC_ARRAY
             cnt2 := t1
@@ -442,9 +448,10 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
         if op2 == 46 || op2 == 47:
             if d2 >= 0 && t1 >= 0:
                 w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8))
-        // —— TODO #2026-09-10-7：以下 18 族与主循环同语义同守卫补齐（此前内联路径静默落空）——
-        // IR_MAKE_ENUM (17)：d := alloc(8·(1+s2))；M[d+0] := s1（tag = 变体名索引）——
-        // 与 ELF 布局 [tag][payload...] 一致的堆镜像（payload 由后续 IR_STORE_FIELD 写堆）
+        // The following opcode families mirror the main loop.
+        // IR_MAKE_ENUM: allocate 8 + 8*s2 bytes and store s1 (the variant-name
+        // index) in the first word. This matches the ELF layout [tag][payload];
+        // IR_STORE_FIELD writes the payload.
         if op2 == 17:
             if d2 >= 0:
                 need3 := 8 + t2 * 8
@@ -458,27 +465,27 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
                 w64(bp2, 0, t1)
                 unsafe:
                     w64(g_ir_vals, d2 * 8, @ptr_of(bp2))
-        // IR_LOAD_ENUM_TAG (23)：d := M[ρ(s1)+0]
+        // IR_LOAD_ENUM_TAG: d = tag word at the pointer in slot s1.
         if op2 == 23:
             if d2 >= 0 && t1 >= 0:
                 p23 := r64(g_ir_vals, t1 * 8)
                 if p23 != 0:
                     unsafe:
                         w64(g_ir_vals, d2 * 8, r64(@str_of(p23), 0))
-        // IR_REF (18)：d := &ρ(s1)——槽模型近似：槽号即「地址」（ir_interp_deref_* 同规则）
+        // IR_REF: d = s1. The slot number is the stack address used by the deref helpers.
         if op2 == 18:
             if d2 >= 0 && t1 >= 0:
                 w64(g_ir_vals, d2 * 8, t1)
-        // IR_DEREF (25)：d := M[ρ(s1)]（栈槽间接或堆读取，见 ir_interp_deref_read）
+        // IR_DEREF: read through the pointer in slot s1.
         if op2 == 25:
             if d2 >= 0 && t1 >= 0:
                 w64(g_ir_vals, d2 * 8, ir_interp_deref_read(r64(g_ir_vals, t1 * 8)))
-        // IR_SLICE (24): d := arr + low*8（与 ELF 编码一致）
+        // IR_SLICE: d = arr + low*8, matching the ELF encoding.
         if op2 == 24:
             if d2 >= 0 && t1 >= 0 && t2 >= 0:
                 w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8) + r64(g_ir_vals, t2 * 8) * 8)
-        // IR_BOUNDS_CHECK (30): s1=index var, s2=max_len 字面量（ti=1 = 动态上限）——
-        // index < 0 或 index >= max → 陷阱（中止码 -1，与主循环 return -1 同语义）
+        // IR_BOUNDS_CHECK: s1 is the index variable and s2 the limit. A dynamic
+        // limit uses ti = 1. An index below 0 or at least the limit aborts with -1.
         if op2 == 30 && t2 >= 0:
             iv30 := r64(g_ir_vals, t1 * 8)
             lim30 : ., mut = t2
@@ -487,49 +494,49 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
             if iv30 < 0 || iv30 >= lim30:
                 g_interp_abort = -1
                 break
-        // IR_STORE_PTR (26)：M[ρ(s1)] := ρ(s2)（与 ELF 操作数一致；d=-1 发射态不再影响）
+        // IR_STORE_PTR: write the value in slot s2 through the pointer in slot s1.
         if op2 == 26:
             if t1 >= 0 && t2 >= 0:
                 ir_interp_deref_write(r64(g_ir_vals, t1 * 8), r64(g_ir_vals, t2 * 8))
-        // IR_YIELD (28)：eager 值传递近似（d ← ρ(s1)，同 IR_AWAIT）
+        // IR_YIELD: pass the value in slot s1 eagerly, like IR_AWAIT.
         if op2 == 28:
             if d2 >= 0 && t1 >= 0:
                 w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8))
-        // IR_AWAIT (29)
+        // IR_AWAIT. (29)
         if op2 == 29:
             if d2 >= 0:
                 w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8))
-        // IR_FNADDR (48) — no real addresses in the interpreter; dest = 0
+        // IR_FNADDR: no real addresses in the interpreter; store 0.
         if op2 == 48:
             if d2 >= 0:
                 w64(g_ir_vals, d2 * 8, 0)
-        // IR_APPROX (51) — pure annotation, skip（无运算语义，不能崩）
+        // IR_APPROX is a pure annotation; skip it.
 
-        // IR_DYN_PACK (43)：dyn 变量双槽 [value, tag]——slot[d]=值、slot[d+1]=tag
+        // IR_DYN_PACK: a dyn value uses two slots, value at d and tag at d+1.
         if op2 == 43:
             if d2 >= 0 && t1 >= 0:
                 w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8))
                 w64(g_ir_vals, (d2 + 1) * 8, t2)
-        // IR_DYN_TAG (41)：d := slot[ρ(s1)+1]（读 +8 槽）
+        // IR_DYN_TAG: d = tag at slot s1 + 1.
         if op2 == 41:
             if d2 >= 0 && t1 >= 0:
                 w64(g_ir_vals, d2 * 8, r64(g_ir_vals, (t1 + 1) * 8))
-        // IR_DYN_VAL (42)：d := slot[ρ(s1)]（读 +0 槽）
+        // IR_DYN_VAL: d = value at slot s1.
         if op2 == 42:
             if d2 >= 0 && t1 >= 0:
                 w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8))
-        // IR_DYN_DISPATCH (44)：响亮报错（与主循环同文案同码；不再静默落空）
+        // IR_DYN_DISPATCH has no interpreter implementation; report an error.
         if op2 == 44:
             println("error: interp 不支持动态分发（IR_DYN_DISPATCH）")
             g_interp_abort = 2
             break
-        // IR_CALL_EXTERN (45)：响亮报错（ELF 静态构建同样拒绝，见 F16）
+        // IR_CALL_EXTERN has no interpreter implementation; report an error.
         if op2 == 45:
             print("error: interp 无法调用外部函数：")
             println(istr_get(t1))
             g_interp_abort = 2
             break
-        // IR_CALL (4) / IR_SPAWN (27)：与主循环同一分派（嵌套内联 / 内置近似）
+        // IR_CALL and IR_SPAWN use the shared dispatch for builtins and inline calls.
         if op2 == 4 || op2 == 27:
             ir_interp_call(d2, t1, t2, t3)
         if op2 == 5:
@@ -553,8 +560,8 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
     g_label_count = old_lc
     g_label_poses = old_poses
     g_label_cap = old_poses_cap
-    // 重入帧恢复：外层帧的形参/局部/临时槽回到调用前（返回结果经局部 rval 传递，
-    // 不占本槽区，故恢复不丢返回值）
+    // Restore the outer frame after a re-entrant call. The return value travels in
+    // the local rval, not in this slot range, so restoring does not lose it.
     if has_frame != 0:
         fi5 : ., mut = 0
         loop:
@@ -586,10 +593,9 @@ fn ir_interpret() -> int:
     if node_start < 0 || node_count <= 0:
         return -1
 
-    // 解释器状态复位（同一进程内可多次调用 ir_interpret）。
-    // 注：callee 返回值不再经「暂存槽」传递（原 ret_slot = g_ir_var_count，
-    // 更早的 g_ir_vals[0] 约定会静默覆写首个全局）——现由 ir_interp_run_fn 的
-    // 局部返回值传递，该缺陷类结构性消失。
+    // Reset interpreter state so ir_interpret can run more than once in one
+    // process. Callee results travel through ir_interp_run_fn's local return
+    // value instead of a shared temporary slot.
     g_interp_abort = 0
     g_interp_call_depth = 0
     g_interp_stack = alloc(IR_INTERP_MAX_DEPTH * 8)  // 活动函数栈（重入检测）
@@ -606,11 +612,10 @@ fn ir_interpret() -> int:
         w64(g_ir_vals, vi * 8, 0)
         vi = vi + 1
 
-    // 编译期标量常量全局初始化阶段——与 ELF _start 的常量初始化循环
-    // （os/linux/entry.cr 的 g_ir_globals +16 环）同语义、同数据源。此前解释器
-    // 无此阶段：可变标量全局读回 0（不可变标量因 find_global_const_node 折叠
-    // 而侥幸正确）。运行期初始化的聚合/非常量全局不在此——它们在 main 序言以
-    // IR 序列注入（ir_gen.cr inject_global_inits，主循环执行）。
+    // Initialize compile-time scalar globals. This mirrors the constant loop in
+    // the ELF entry path and uses the same g_ir_globals rows. Aggregates and
+    // globals with run-time initializers are injected as IR at the start of main
+    // by ir_gen inject_global_inits and executed by the main loop.
     gi2 : ., mut = 0
     loop:
         if gi2 >= g_ir_global_count:
@@ -621,7 +626,7 @@ fn ir_interpret() -> int:
             w64(g_ir_vals, gv2 * 8, iv2)
         gi2 = gi2 + 1
 
-    // Pre-scan: build label→node mapping (for branches)
+    // Pre-scan: build the label-to-node mapping for branches.
     g_label_count = 0
     li : ., mut = 0
     loop:
@@ -639,8 +644,8 @@ fn ir_interpret() -> int:
                     g_label_count = ln + 1
         li = li + 1
 
-    // Pre-scan: record SG_LOOP/SG_FOR region enter/exit node offsets
-    // (main function graph only — filter by node_start..node_start+node_count)
+    // Pre-scan SG_LOOP and SG_FOR region enter and exit offsets for the main
+    // function graph.
     g_loop_region_count = 0
     li = 0
     loop:
@@ -652,8 +657,8 @@ fn ir_interpret() -> int:
             l_exit  := r64(g_sgs, li * ESZ_SG + OFF_SG_EXIT)
             if l_enter >= node_start && l_enter < node_start + node_count:
                 if g_loop_region_count + 1 > g_loop_region_cap:
-                    // Grow both arrays from the OLD cap — copying with the new
-                    // cap would over-read the previous (possibly empty) buffer.
+                    // Grow both arrays using the old capacity. Copying with the new
+                    // capacity would over-read the previous buffer.
                     nc := g_loop_region_cap * 2
                     if nc < 16:
                         nc = 16
@@ -679,14 +684,14 @@ fn ir_interpret() -> int:
         s1 := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_S1)
         s2 := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_S2)
         s3 := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_S3)
-        // R2 P5 Task 2（D19）：派生码（同上一处；IR_BINARY 传参，当前不消费）。
+        // Derived code as above; passed to IR_BINARY and currently unused.
         ti := sh_dfn_code_of_slots(r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_TK),
             r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_AUX))
 
         if op == 1:
             if d >= 0:
                 w64(g_ir_vals, d * 8, s1)
-        // IR_CONST（dex 的 s1 为缩放整数）
+        // IR_CONST; dex uses a scaled integer in s1.
         if op == 5:
             if s1 >= 0:
                 return r64(g_ir_vals, s1 * 8)
@@ -811,8 +816,9 @@ fn ir_interpret() -> int:
                 else:
                     unsafe:
                         w64(@str_of(arr_value), idx * 8, r64(g_ir_vals, d * 8))
-        // IR_MAKE_ENUM (17)：d := alloc(8·(1+s2))；M[d+0] := s1（tag = 变体名索引）——
-        // 与 ELF 布局 [tag][payload...] 一致的堆镜像（payload 由后续 IR_STORE_FIELD 写堆）
+        // IR_MAKE_ENUM: allocate 8 + 8*s2 bytes and store s1 (the variant-name
+        // index) in the first word. This matches the ELF layout [tag][payload];
+        // IR_STORE_FIELD writes the payload.
         if op == 17:
             if d >= 0:
                 need2 := 8 + s2 * 8
@@ -826,29 +832,29 @@ fn ir_interpret() -> int:
                 w64(bp, 0, s1)
                 unsafe:
                     w64(g_ir_vals, d * 8, @ptr_of(bp))
-        // IR_LOAD_ENUM_TAG (23)：d := M[ρ(s1)+0]
+        // IR_LOAD_ENUM_TAG: d = tag word at the pointer in slot s1.
         if op == 23:
             if d >= 0 && s1 >= 0:
                 ptr := r64(g_ir_vals, s1 * 8)
                 if ptr != 0:
                     unsafe:
                         w64(g_ir_vals, d * 8, r64(@str_of(ptr), 0))
-        // IR_REF (18)：d := &ρ(s1)——槽模型近似：槽号即「地址」（ir_interp_deref_* 同规则）
+        // IR_REF: d = s1. The slot number is the stack address used by the deref helpers.
         if op == 18:
             if d >= 0 && s1 >= 0:
                 w64(g_ir_vals, d * 8, s1)
-        // IR_DEREF (25)：d := M[ρ(s1)]（栈槽间接或堆读取，见 ir_interp_deref_read）
+        // IR_DEREF: read through the pointer in slot s1.
         if op == 25:
             if d >= 0 && s1 >= 0:
                 w64(g_ir_vals, d * 8, ir_interp_deref_read(r64(g_ir_vals, s1 * 8)))
 
-        // IR_SLICE (24): d := arr + low*8（与 ELF 编码一致；BC11 补实现）
+        // IR_SLICE: d = arr + low*8, matching the ELF encoding.
         if op == 24:
             if d >= 0 && s1 >= 0 && s2 >= 0:
                 w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8) + r64(g_ir_vals, s2 * 8) * 8)
 
-        // IR_BOUNDS_CHECK (30): s1=index var, s2=max_len 字面量 —
-        // index < 0 或 index >= max → 陷阱（返回 -1 表示中止；BC11 补实现）
+        // IR_BOUNDS_CHECK: s1 is the index variable and s2 the limit. An index
+        // below 0 or at least the limit aborts with -1.
         if op == 30 && s2 >= 0:
             iv := r64(g_ir_vals, s1 * 8)
             limit : ., mut = s2
@@ -857,79 +863,79 @@ fn ir_interpret() -> int:
             if iv < 0 || iv >= limit:
                 return -1
 
-        // IR_LAZY_THUNK / IR_LAZY_FORCE. Calls are currently eager, so both
-        // wrappers preserve the computed value.
+        // IR_LAZY_THUNK and IR_LAZY_FORCE. Calls are eager, so both wrappers
+        // preserve the computed value.
         if op == 46 || op == 47:
             if d >= 0 && s1 >= 0:
                 w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8))
 
-        // IR_YIELD (28)：eager 值传递近似（d ← ρ(s1)，同 IR_AWAIT）。
-        // F5a：补 d >= 0 守卫——发射恒 dest=-1（ir_gen L1569），原代码
-        // w64(g_ir_vals, d*8 = -8, ...) 堆下溢写（g_ir_vals[-8]，静默 UB）。
+        // IR_YIELD: pass the value in slot s1 eagerly, like IR_AWAIT. Emission
+        // uses dest = -1, so the d >= 0 check prevents a write before the value
+        // buffer.
         if op == 28:
             if d >= 0 && s1 >= 0:
                 w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8))
 
-        // IR_FNADDR — no real addresses in the interpreter; dest = 0
+        // IR_FNADDR: the interpreter has no real addresses; store 0.
         if op == 48:
             if d >= 0:
                 w64(g_ir_vals, d * 8, 0)
 
-        // IR_APPROX — pure annotation, skip（无运算语义，不能崩）
+        // IR_APPROX is a pure annotation; skip it.
         if op == 51:
             ip = ip + 1
             continue
 
-        // IR_I2F(49) / IR_F2I(50)——int↔binary64 转换：解释器无 binary64 语义
-        // （数值迁移 Task 6 定稿）。apx dex 运算必然经过 bits↔缩放转换（打印/边界），
-        // 此处显式报错替代静默跳过——跳过会让目的槽残留 0/脏值，后续除法可能 SIGFPE。
+        // IR_I2F and IR_F2I convert between int and binary64. The interpreter has
+        // no binary64 semantics. Report an error instead of skipping: a skipped
+        // conversion leaves 0 or a stale value and can cause SIGFPE later.
         if op == 49 || op == 50:
             println("interpreter error: IR_I2F/IR_F2I needs binary64 semantics (apx dex) — `corec run` cannot execute apx dex arithmetic; build & run natively (corec build) instead")
             return -1
 
-        // IR_STORE_PTR (26)：M[ρ(s1)] := ρ(s2)（与 ELF 操作数一致；d=-1 发射态不再影响）。
-        // 栈槽间接（指针 = 槽号）或堆写入，见 ir_interp_deref_write。
+        // IR_STORE_PTR: write the value in slot s2 through the pointer in slot s1.
+        // The pointer may be a stack slot number or a heap address.
         if op == 26:
             if s1 >= 0 && s2 >= 0:
                 ir_interp_deref_write(r64(g_ir_vals, s1 * 8), r64(g_ir_vals, s2 * 8))
 
-        // IR_ADDR_INDEX (31)：d := ρ(s1) + 8·ρ(s2)（&arr[i]；s3=scale 恒 3，与 ELF 一致）
+        // IR_ADDR_INDEX: d = slot s1 + 8 * slot s2 for &arr[i].
         if op == 31:
             if d >= 0 && s1 >= 0 && s2 >= 0:
                 w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8) + r64(g_ir_vals, s2 * 8) * 8)
-        // IR_ARENA_NEW (32) / IR_ARENA_RESET (33)：interp 无 arena——no-op 近似
-        // （对照语义表 2.4 的 D7：ELF 有 arena 句柄/复位；解释器槽模型无作用域内存概念）
+        // IR_ARENA_NEW and IR_ARENA_RESET: the slot model has no scoped arena, so
+        // these are approximations.
         if op == 32:
             if d >= 0:
                 w64(g_ir_vals, d * 8, 0)
 
-        // IR_DYN_PACK (43)：dyn 变量双槽 [value, tag]——slot[d]=值、slot[d+1]=tag（对照 ELF slot+0/+8）
+        // IR_DYN_PACK: a dyn value uses two slots, value at d and tag at d+1.
         if op == 43:
             if d >= 0 && s1 >= 0:
                 w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8))
                 w64(g_ir_vals, (d + 1) * 8, s2)
-        // IR_DYN_TAG (41)：d := slot[ρ(s1)+1]（读 +8 槽）
+        // IR_DYN_TAG: d = tag at slot s1 + 1.
         if op == 41:
             if d >= 0 && s1 >= 0:
                 w64(g_ir_vals, d * 8, r64(g_ir_vals, (s1 + 1) * 8))
-        // IR_DYN_VAL (42)：d := slot[ρ(s1)]（读 +0 槽）
+        // IR_DYN_VAL: d = value at slot s1.
         if op == 42:
             if d >= 0 && s1 >= 0:
                 w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8))
 
-        // IR_DYN_DISPATCH (44)：显式报错（不再静默跳过；对照 ELF 的占位实现——见语义表 2.6 BC9）
+        // IR_DYN_DISPATCH has no interpreter implementation; report an error.
         if op == 44:
             println("error: interp 不支持动态分发（IR_DYN_DISPATCH）")
             return 2
-        // IR_CALL_EXTERN (45)：显式报错（不再静默错值；ELF 静态构建同样拒绝，见 F16）
+        // IR_CALL_EXTERN has no interpreter implementation; report an error.
         if op == 45:
             print("error: interp 无法调用外部函数：")
             println(istr_get(s1))
             return 2
 
-        // IR_I2F(49)/IR_F2I(50) 在 dispatch 入口已被显式报错拦截（#2026-09-13-9 定稿：interp 无 binary64）
+        // IR_I2F and IR_F2I are rejected at dispatch entry.
 
-        // Branch (node-index based)
+        // Branch by node index.
         if op == 19:
             cv := r64(g_ir_vals, s1 * 8)
             if cv != 0:
@@ -944,17 +950,10 @@ fn ir_interpret() -> int:
                 break
         if op == 20:
             // IR_JUMP
-            // Region iteration: a jump whose target is the innermost
-            // enclosing loop region's enter is a back-edge — loop iteration
-            // is driven by the region (SG) table: ip is taken from
-            // g_loop_region_enter, NOT from the label table.  Every other
-            // jump is a plain label jump resolved via g_label_poses.
-            // (The region enter from the SG table equals the label pose of
-            // the same node; the point is the code path: back-edges never
-            // read g_label_poses.)
-            // Innermost loop region enclosing the current ip (if any):
-            // among regions containing ip, the one with the largest enter
-            // offset is the innermost (e2 > cur_enter selection).
+            // A jump to the innermost enclosing loop region's enter is a
+            // back-edge. Its target comes from g_loop_region_enter, not from the
+            // label table. Other jumps use g_label_poses. The innermost region is
+            // the region containing ip with the largest enter offset.
             cur_enter : ., mut = -1
             cur_ri : ., mut = -1
             ri2 : ., mut = 0
@@ -984,16 +983,16 @@ fn ir_interpret() -> int:
                 continue
             else:
                 break
-        // IR_LABEL (21) - noop
+        // IR_LABEL: no operation.
 
         // IR_AWAIT
         if op == 29:
             if d >= 0:
                 w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8))
 
-        // IR_CALL (4) / IR_SPAWN (27) —— 统一分派（ir_interp_call；与 callee 内联
-        // 路径共用同一实现：内置近似 / 用户函数内联 / 嵌套递归 / 中止码上抛全在此一处）。
-        // 原实现把这段分派复制在主循环里，callee 路径无对应物 → 双路径静默分叉（TODO #2026-09-10-7）。
+        // IR_CALL and IR_SPAWN use the shared dispatch in ir_interp_call. Builtins,
+        // inline user functions, nested recursion, and abort propagation all live
+        // in that one function.
         if op == 4 || op == 27:
             ir_interp_call(d, s1, s2, s3)
             if g_interp_abort != 0:

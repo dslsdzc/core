@@ -1,20 +1,16 @@
 // === targets/x86_64-linux/main.cr ===
-// Backend project entry: .ccr → ELF/assembly/SO
-// Self-hosted counterpart of src/compiler/corearch.cr
+// Backend project entry: .ccr to ELF, assembly, or shared object.
+// Self-hosted counterpart of src/compiler/corearch.cr.
 //
-// 活入口注记（2026-09-10 内核完备 Task 1 评审 I-1 修正——原「死代码」注记驳斥）：
-// 本文件 = 组合根（x86_64-linux target）project-mode 构建的活入口——
-// corec build src/targets/x86_64-linux
-// 以本文件 main:160 → corearch_main :31 → load_ccr :64 → build_linear_schedule
-// :71 为链，backend_bootstrap stage 链全程经此入口自举（tests/selfhost/
-// test_backend_bootstrap.py project mode：corec build <目录> 的入口 = 该目录
-// main.cr——与 concat 清单并列的独立构建机制；Task 1 偏差 ① 实证并接线）。
-// 入口二元性：corearch concat 清单入口 = src/compiler/corearch.cr（wrapper
-// corearch_main），组合根 project-mode 入口 = 本文件——两条均活、均已接线（load 后
-// 调 build_linear_schedule）。内核抽取 Task 4 原注记「零 concat 引用 → 实际入口
-// = corearch.cr → 删除挂账」仅核对 concat 清单而误判 project-mode 入口；两入口
-// 未来如需合并/删除，须同步双入口接线与 _import.cr 导入集（现 load 后行为同构；
-// 表模式/调试通道的 flag 注册分歧 = TODO #2026-09-10-2，留波 2 收敛——本注记仅措辞同步）。
+// This file is the live project-mode entry for the x86_64-linux target.
+// `corec build src/targets/x86_64-linux` starts at main, calls corearch_main,
+// loads the .ccr, and rebuilds the linear schedule. The backend bootstrap stages
+// all pass through this entry.
+// There are two live entries: the corearch concat entry in
+// src/compiler/corearch.cr and this project-mode entry. Both register backend
+// flags and both call build_linear_schedule after loading. This entry emits ELF
+// only and rejects table and debug channels with a message pointing to the concat
+// entry.
 
 fn init_backend_arrays():
     g_x86_var_count = 0
@@ -39,16 +35,52 @@ fn split_links(val: string):
             start = i + 1
         i = i + 1
 
+fn backend_has_extended_flags() -> int:
+    if str_len(cli_get("table")) > 0:
+        return 1
+    if str_len(cli_get("hit-events-file")) > 0:
+        return 1
+    if cli_has("dump-events") != 0:
+        return 1
+    if cli_has("dump-table") != 0:
+        return 1
+    if cli_has("dump-entries") != 0:
+        return 1
+    if cli_has("dump-coexist") != 0:
+        return 1
+    if cli_has("dump-regassign") != 0:
+        return 1
+    if cli_has("check-regalloc") != 0:
+        return 1
+    if cli_has("inject-home-conflict") != 0:
+        return 1
+    if cli_has("inject-reg-conflict") != 0:
+        return 1
+    if cli_has("inject-read-gap") != 0:
+        return 1
+    if cli_has("inject-coexist-oob") != 0:
+        return 1
+    if cli_has("dump-objects") != 0:
+        return 1
+    if cli_has("dump-nod-items") != 0:
+        return 1
+    if cli_has("dump-types") != 0:
+        return 1
+    if cli_has("dump-ifaces") != 0:
+        return 1
+    return 0
+
 fn corearch_main() -> int:
     cli_init("corearch", "Core architecture backend")
-    cli_flag_bool("elf", "", "Output ELF binary (default)")
-    cli_flag_bool("shared", "", "Output shared library (.so)")
-    cli_flag_bool("static", "", "Static linking (embed runtime)")
-    cli_flag("link", "l", "Comma-sep .so files, or 'auto' for ~/.core/lib/")
-    cli_flag("output", "o", "Output path")
-    cli_flag("opt-level", "O", "Optimization level (0-3, default=0)")
+    register_backend_flags()
 
     if cli_parse() != 0:
+        return 1
+    // This entry emits ELF only. Table and debug channels exist only in the
+    // concat entry, so reject them explicitly instead of reporting an unknown
+    // flag or ignoring a known flag.
+    if backend_has_extended_flags() != 0:
+        println("error: this entry supports ELF emission only; use the corearch concat entry for table and debug channels")
         return 1
     g_opt_level = 0
     ol : ., mut = cli_get("opt-level")
@@ -92,18 +124,18 @@ fn corearch_main() -> int:
         return 1
     init_backend_arrays()
 
-    // 内核完备 Task 1（调度重建移实例）：loader 只产语义对象——线性流重建 =
-    // 实例事务（build_linear_schedule——本文件所在自举 stage 链 = 本函数实际
-    // 消费方之一：load 后、elf_gen 前必须重建，产物逐字节同移出前）。
+    // The loader produces semantic objects only. Rebuild the linear instruction
+    // stream before elf_gen; this entry is one of the consumers of
+    // build_linear_schedule.
     build_linear_schedule()
 
     emit_so := cli_has("shared")
     link_val := cli_get("link")
     out_path := cli_get("output")
 
-    // Pure-static output does not link rt.s, so emit the current-g bridge
-    // stubs directly. Keep this in sync with the legacy corearch entrypoint
-    // so self-hosted backend stages generate identical binaries.
+    // Pure-static output does not link rt.s, so emit the current-g bridge stubs
+    // directly. Keep this in sync with the concat entry so self-hosted backend
+    // stages generate identical binaries.
     g_x86_emit_rt_stubs = 0
     if str_len(link_val) == 0 && emit_so == 0:
         g_x86_emit_rt_stubs = 1
@@ -185,7 +217,7 @@ fn corearch_main() -> int:
                 ctx_set_user_code(cd, cs)
                 sz = ctx_emit_static(g_elf_buf, out_path)
             else:
-                fd := syscall3(2, out_path, 577, 493)  // 0755：ELF 输出必须可执行（Task 6 修复 0644 怪癖）
+                fd := syscall3(2, out_path, 577, 493)  // 0755: ELF output must be executable
                 if fd < 0:
                     print("error: cannot write ")
                     println(out_path)
@@ -207,7 +239,7 @@ fn corearch_main() -> int:
             return 1
     else:
         sz := elf_gen(g_elf_buf)
-        fd := syscall3(2, out_path, 577, 493)  // 0755：ELF 输出必须可执行（Task 6 修复 0644 怪癖）
+        fd := syscall3(2, out_path, 577, 493)  // 0755: ELF output must be executable
         if fd < 0:
             print("error: cannot write ")
             println(out_path)

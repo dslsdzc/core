@@ -67,7 +67,7 @@ fn type_kind_name(tk: int) -> string:
         return "char"
     if tk == 8:
         return "dex"
-    // TI_DEX_S（定点精确形式，数值迁移 Task 4）
+    // TI_DEX_S: fixed-point exact form.
     return "?"
 
 fn binop_name(op: int) -> string:
@@ -230,7 +230,7 @@ fn cmd_ir(src_path: string) -> int:
         println(src_path)
         return 1
     g_source_dir = dirname(src_path)
-    g_error_count = 0  // 会话起点（tokenize 多轮累积词法错误，见 lexer.cr）
+    g_error_count = 0  // reset before a new tokenize pass; lexical errors accumulate across passes
     tokenize(g_source, 0)
     g_str_count = 0
     res_imports()
@@ -266,9 +266,9 @@ fn cmd_ir(src_path: string) -> int:
     println(" edges)")
     return 0
 
-// Text dump of the linear CFG: "Function: name" + per-function region list
-// (SG_IF/SG_LOOP/SG_FOR/SG_FLOW/SG_UNSAFE) + "Block: labelN" blocks.
-// Shared by cmd_cir (writes to file) and main.cr's `cir` command (stdout).
+// Text dump of the linear control-flow graph: a function header, its regions
+// (SG_IF, SG_LOOP, SG_FOR, SG_FLOW, SG_UNSAFE), and label blocks. Shared by
+// cmd_cir, which writes a file, and main.cr's cir command, which writes stdout.
 fn cir_text_dump() -> string:
     dump_buf_reset()
     fi : ., mut = 0
@@ -352,20 +352,21 @@ fn cir_text_dump() -> string:
         ei = ei + 1
     return dump_buf_finish()
 
-// ─── R2 P5 Task 2 测试通道（corec 侧 hidden flag `cir --dump-tk-terms`）───
-// 用途 = 单槽化的**逐节点**观察面：两槽（OFF_DF_TK = 类型项引用、OFF_DF_AUX = 辅码）
-// + **派生码**（sh_dfn_code_of_slots——与 iri_tk / .ccr NOD / .cir 盘记录同源）+ 项结构
-// （tag/a/b/c，直读 g_type_terms）——冷路径（emit 填槽）与暖路径（`.cir` 快照读回 +
-// 重派生）两态用同一通道 dump 后逐行对拍。`tk` 列 = 派生码 ⇒ 与单槽化前同名通道的
-// `tk` 列**逐字节可比**（D22-① 的直方图判据就建在这上面）。
-// 只读：不改任何全局、不产产物（与 --dump-types/--dump-ifaces 同纪律）。
-// 行格式（制表分隔；头行含计数与越界项计数）：
-//   [df-tk-terms] nodes=N with_term=M bad_term=B aux_nonzero=A face_fail=F terms=K rows=R mint=1,2,4,6,10,49,50
-//   <node>\t<opcode>\t<tk>\t<term>\t<tag>\t<a>\t<b>\t<c>\t<aux>
-// term < 0（无项）或项行号越出项表（bad_term，跨进程索引空间分歧的暴露面——不得
-// 静默读越界内存）：tag/a/b/c 一律 -1。aux_nonzero = 辅码非零节点数（互斥不变量
-// D22-② 的观察面）；face_fail = D23 建项失败计数（0 = 全语料无不可译类型面行）；
-// rows = 当前进程类型表行数（冷/暖比对用：暖态可小于冷态——见 sh_tk_split_load 注）。
+// Hidden test channel: cir --dump-tk-terms.
+// It gives a per-node view of the single-slot type encoding: OFF_DF_TK holds the
+// type-term reference, OFF_DF_AUX holds the auxiliary code, and
+// sh_dfn_code_of_slots derives the code used by iri_tk and the .ccr NOD records.
+// The term structure (tag, a, b, c) is read directly from g_type_terms. Cold and
+// warm paths dump through the same channel for line-by-line comparison.
+// The channel is read-only and produces no artifact, like --dump-types and
+// --dump-ifaces.
+// Format: a header line, then tab-separated rows.
+//   [df-tk-terms] nodes=N with_term=M bad_term=B aux_nonzero=A face_fail=F terms=K rows=R mint=...
+//   <node> <opcode> <tk> <term> <tag> <a> <b> <c> <aux>
+// A negative term, or a term index outside the term table, prints tag, a, b, and
+// c as -1. aux_nonzero counts nodes with a non-zero auxiliary code. face_fail
+// counts type-face construction failures. rows is the current type-table size;
+// a warm table can be smaller than a cold table.
 fn df_tk_term_dump() -> string:
     dump_buf_reset()
     total := g_df_node_count
@@ -490,10 +491,12 @@ fn cmd_cir(src_path: string) -> int:
     println(" instrs)")
     return 0
 
-// ─── 批 6（T4）：规约标注的 VC 清单 dump（`--dump-vcs`）──────────────────────────
-// 表达式**规范化文本**（只服务 dump；**不参与判定**——判定面在 checker.cr 的 spec_check_all/spec_check_func）。
-// C1 子集：int/bool 字面量 · 标识符 · 一元 `-`/`!` · 二元（算术/比较/逻辑）· 括号（显式加括号 ⇒ 无歧义）。
-// 子集外节点形 ⇒ `(?)` 兜底（由 V05/V06 在检查面拦截，不在此处判）。
+// Text form of a specification expression for --dump-vcs. It is display-only and
+// does not participate in checking; spec_check_all and spec_check_func in
+// checker.cr decide validity.
+// Supported forms are int and bool literals, identifiers, unary - and !, binary
+// arithmetic, comparison, and logical operators, and explicit parentheses.
+// Other node kinds print (?) and are rejected by V05 or V06 in the checker.
 fn spec_expr_text(e: int) -> string:
     if e < 0:
         return "?"
@@ -517,13 +520,15 @@ fn spec_expr_text(e: int) -> string:
         return "(" + spec_expr_text(ast_a(e)) + " " + binop_name(ast_c(e)) + " " + spec_expr_text(ast_b(e)) + ")"
     return "(?)"
 
-// VC 清单 dump（隐藏通道 `--dump-vcs`；维护者 2026-09-17 四点钉死）：
-//   ① **stdout、零新产物**；开关**不改 rc/产物**（只打印）。
-//   ② 三态**分流**：红走诊断通道（V01/V04/V05/V06 ⇒ rc=1 + 定位），绿/黄进本通道。
-//   ③ **红也列**（`status=red`）——「**没列出来**」与「**列出来是红的**」必须可区分，**不得静默省略**；
-//      且本 dump 打印点位于 `main.cr::run_frontend` 的 **fail-closed 闸门之前** ⇒ 红态下也照样列出。
-//   ④ **只读侧表**（`g_spec_*`，与判定同源）——不另起一份状态，杜绝「dump 与判定分叉」（第二真源）。
-// 序 = 侧表序 = **源序**（构造性确定）；且与 `.cir` 缓存状态**无关**（dump 全在 parse/check 期算）⇒ 冷/暖恒同。
+// VC list dump for the hidden --dump-vcs channel.
+// It writes to stdout, creates no artifact, and does not change the return code.
+// Red VCs (V01, V04, V05, V06) go through diagnostics with a location and rc 1;
+// green and yellow VCs go through this dump. Red VCs are also listed as
+// status=red, so omission is distinguishable from a red result. The dump runs
+// before main.cr's fail-closed gate, so red cases still appear.
+// It reads only the g_spec_* side tables used by checking, which keeps dump and
+// check results consistent. Order is source order and is independent of the .cir
+// cache; cold and warm runs produce the same output.
 fn vcs_dump() -> string:
     dump_buf_reset()
     dump_buf_append("[vcs] count=")

@@ -12,9 +12,9 @@ g_sg_arena_var_cap : int, mut
 g_ir_source_hash : int, mut
 g_ir_source_hash_ready : int, mut
 
-// 切片编译期长度侧表（var → 字面量长度；-1 = 未知/无记录）。
+// 切片编译期长度侧表（var -> 字面量长度；-1 = 未知/无记录）。
 // IR_SLICE 的字面量界（high−low）在此登记，供解引用处的越界检查
-// （pass_before_array_access 的 arr_len_lit）使用——见 F11。
+// （pass_before_array_access 的 arr_len_lit）使用，见 F11。
 g_ir_slice_lens : string, mut     // [var, len] pairs
 g_ir_slice_len_count : int, mut
 g_ir_slice_len_cap : int, mut
@@ -58,7 +58,7 @@ fn slice_len_set(var_idx: int, len: int):
     w64(g_ir_slice_lens, g_ir_slice_len_count * 16 + 8, len)
     g_ir_slice_len_count = g_ir_slice_len_count + 1
 
-// F11（运行时界切片，2026-09-05 扩展）：len 字段编码——
+// F11 运行时界切片：len 字段编码，
 // >= 0 = 字面量长度；<= -2 = 长度 IR 变量（-2-len_var，避开 -1 清除码）；-1 = 已清除/无记录。
 fn slice_len_raw_set(var_idx: int, len_code: int):
     si : ., mut = 0
@@ -77,7 +77,7 @@ fn slice_len_raw_set(var_idx: int, len_code: int):
     w64(g_ir_slice_lens, g_ir_slice_len_count * 16 + 8, len_code)
     g_ir_slice_len_count = g_ir_slice_len_count + 1
 
-// 登记运行时界切片的长度变量；查询返回 len_var（无 → -1）。
+// 登记运行时界切片的长度变量；查询返回 len_var（无 -> -1）。
 fn slice_len_var_set(var_idx: int, len_var: int):
     if var_idx < 0 || len_var < 0:
         return
@@ -96,8 +96,8 @@ fn slice_len_var_get(var_idx: int) -> int:
         si = si + 1
     return -1
 
-// 切片长度沿赋值/LET 传播：无条件同步 src 记录到 dst——src 无记录
-// 时清除 dst（防非切片赋值后陈旧长度残留导致误守卫）。
+// 切片长度沿赋值/LET 传播：无条件同步 src 记录到 dst，src 无记录
+// 时清除 dst（防非切片赋值后陈旧长度残留导致误检查）。
 fn slice_len_copy_to(dst_var: int, src_var: int):
     si : ., mut = 0
     loop:
@@ -109,8 +109,8 @@ fn slice_len_copy_to(dst_var: int, src_var: int):
         si = si + 1
     slice_len_raw_set(dst_var, -1)
 
-// 切片解引用守卫（运行时界长度）：s1 = idx 变量/字面量，上限 = 长度变量
-// （IR_BOUNDS_CHECK ti=1 动态上限——与 emit_string_bounds 同机制）。
+// 切片解引用检查（运行时界长度）：s1 = idx 变量/字面量，上限 = 长度变量
+// （IR_BOUNDS_CHECK ti=1 动态上限，与 emit_string_bounds 同机制）。
 fn emit_slice_bounds(arr_var: int, idx_var: int):
     if arr_var < 0 || idx_var < 0:
         return
@@ -128,7 +128,7 @@ fn emit_slice_lit_bounds(arr_var: int, idx_lit: int):
         emit(IR_BOUNDS_CHECK, -1, t, lv, 0, 1)
 
 // 数组/切片的编译期长度：TYP_ARRAY 的 extra=size；切片查侧表（字面量界）。
-// 未知 → -1（ext_safety 不发射 IR_BOUNDS_CHECK）。
+// 未知 -> -1（ext_safety 不发射 IR_BOUNDS_CHECK）。
 fn arr_len_lit_of(arr_var: int) -> int:
     if arr_var < 0:
         return -1
@@ -137,8 +137,8 @@ fn arr_len_lit_of(arr_var: int) -> int:
         return get_type_extra(ti)
     if ti == TI_STR:
         prod := r64(g_df_var_producer, arr_var * 8)
-        // R2 P5 Task 2（D19）：读 **派生码**（不是 40 槽——单槽化后 40 槽 = 类型项引用）；
-        // 常量节点的行是原子基行 ⇒ 派生码逐字节 ≡ 单槽化前该槽的混用码。
+        // 读 派生码（不是 40 槽，单槽化后 40 槽 = 类型项引用）；
+        // 常量节点的行是原子基行 -> 派生码逐字节 ≡ 单槽化前该槽的混用码。
         if prod >= 0 && r64(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE) == IR_CONST && sh_dfn_code_of_slots(r64(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_TK),
             r64(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_AUX)) == TI_STR:
             return istr_len(r64(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1))
@@ -151,8 +151,8 @@ fn emit_string_bounds(arr_var: int, idx_var: int):
     emit(IR_CALL, len_var, arr_var, 1, str_intern("str_len"), TI_INT)
     emit(IR_BOUNDS_CHECK, -1, idx_var, len_var, 0, 1)
 
-// 字面量下标 + 字符串 → 运行时边界守卫（M-2 遗留：emit_string_bounds
-// 只覆盖变量下标路径，常量下标路径与 arr_len_lit 两头落空——静默越界）。
+// 字面量下标 + 字符串 -> 运行时边界检查（常量下标路径与 arr_len_lit 两头落空，emit_string_bounds
+// 只覆盖变量下标路径，常量下标路径与 arr_len_lit 两头落空，越界且不报错）。
 fn emit_string_lit_bounds(arr_var: int, idx_lit: int):
     if arr_var < 0 || irv_type(arr_var) != TI_STR:
         return
@@ -212,23 +212,23 @@ fn new_ir_var(name: string, type_idx: int) -> int:
     g_ir_var_count = idx + 1
     return idx
 
-// ── 可选运行期表示面（R2 P4 Task 5；裁决 5「解包侧判表示」；附录 B.7）──
+// ── 可选运行期表示──
 // 事实：`Some(1)`/`None` 走 IR_MAKE_ENUM 对象（[tag][payload…]），而 `T?` 槽里的
-// **裸值**仍是裸值 ⇒ 同一 `T?` 值两种表示；`Some` 臂的载荷解包（IR_LOAD_FIELD fi+1）
-// 把裸值当对象解引用 ⇒ 双路径 SIGSEGV（check/build rc=0 零诊断）。
-// 机制（**纯 IR**：无新 opcode、无 ABI/帧布局改动 ⇒ ELF 后端与解释器天然同源）：
-// 每个可选槽（局部/形参/调用结果）配一个**表示位 IR 变量**（普通 int 局部，运行期值：
-// 0 = 裸值、1 = 装箱）。写点置位（静态已知 → 常量；源已配表示位 → 拷贝），**解包点
-// 分派**（`match` 的 Some/None 臂、`?`）：
-//   · 裸值（0）→ 槽值**即**载荷（Some 臂直取、不读 tag；None 臂不命中）
-//   · 装箱（≠0）→ 既有 tag 分派 + 字段 fi+1 取载荷（逐字不变）
-// 跨函数面（返回/形参）用隐藏全局信道（纯 IR：返回点写/调用点读、调用点写/被调序言读）。
-// 未覆盖面（结构体字段/数组元素/全局槽/match 结果/惰性 thunk）：不配表示位 ⇒ 解包走
-// **既有**装箱假定（P3 前语义）——响亮失败或既有正确值，不新增静默错值（逐形态实测入报告）。
-// g_optrep_on 关（AST 无 EXPR_OPTIONAL 且无 `Some`/`None`）⇒ 本面**零足迹**（发射面逐字节不变）。
+// 裸值仍是裸值 -> 同一 `T?` 值两种表示；`Some` 臂的携带值解包（IR_LOAD_FIELD fi+1）
+// 把裸值当对象解引用 -> 双路径 SIGSEGV（check/build rc=0 零诊断）。
+// 机制（纯 IR：无新 opcode、无 ABI/帧布局改动 -> ELF 后端与解释器天然同源）：
+// 每个可选槽（局部/形参/调用结果）配一个表示位 IR 变量（普通 int 局部，运行期值：
+// 0 = 裸值、1 = 装箱）。写点置位（静态已知 -> 常量；源已配表示位 -> 拷贝），解包点
+// 分派（`match` 的 Some/None 臂、`?`）：
+//   · 裸值（0）-> 槽值即携带值（Some 臂直取、不读 tag；None 臂不命中）
+//   · 装箱（≠0）-> 既有 tag 分派 + 字段 fi+1 取携带值（逐字不变）
+// 跨函数（返回/形参）用隐藏全局信道（纯 IR：返回点写/调用点读、调用点写/被调序言读）。
+// 未覆盖情形（结构体字段/数组元素/全局槽/match 结果/惰性 thunk）：不配表示位 -> 解包走
+// 既有装箱假定，响亮失败或既有正确值，不新增错误值且不报错(each shape is handled conservatively)。
+// g_optrep_on 关（AST 无 EXPR_OPTIONAL 且无 `Some`/`None`）-> 本范围零足迹（发射路径逐字节不变）。
 
-// 表示码常量 OE_BARE/OE_BOXED 声明在 **globals.cr**（负值文件级常量放本文件会静默读 0
-// ——见该处注记与 iface_registry.cr:23 先例；实测踩过）。
+// 表示码常量 OE_BARE/OE_BOXED 声明在 globals.cr。负值文件级常量放在本文件
+// 会读成 0 且不报错; see the note there.
 
 fn grow_ir_var_rep(needed: int):
     if needed < g_ir_var_rep_cap:
@@ -240,9 +240,9 @@ fn grow_ir_var_rep(needed: int):
         nc = needed + 64
     nb := alloc(nc * 8)
     _dyncpy(g_ir_var_rep, g_ir_var_rep_cap * 8, nb)
-    // 新槽填 **-1（哨兵 = 无表示位）**——alloc 零初始化，不填则「未写槽」被读成
-    // 表示位 var 0（每个值都被判成「有表示位」= 静默错值；实测踩过：`None` 初值
-    // 的表示位被读成 var0 的当前值 0 = 裸值）。照 tag2l.cr 的 tag 区初始化先例。
+    // 新槽填 -1（哨兵 = 无表示位），alloc 零初始化，不填则未写槽被读成
+    // 表示位 var 0（每个值都被判成有表示位，产生错误值且不报错；for example, the `None` initial value
+    // 的表示位被读成 var0 的当前值 0 = 裸值）。Use the same initialization pattern as the tag area in tag2l.cr.
     z : ., mut = g_ir_var_rep_cap
     loop:
         if z >= nc:
@@ -252,10 +252,10 @@ fn grow_ir_var_rep(needed: int):
     g_ir_var_rep = nb
     g_ir_var_rep_cap = nc
 
-// 槽的表示位变量索引（-1 = 无表示位 = 非可选槽 / 未覆盖面 / 本编译单元未启用）。
-// 守卫走 **cap（int 全局，默认 0）而非 str_len(base)**——base 未分配时是空串/空指针，
-// 未初始化的 str_len 即 SIGSEGV（实测：文件路径（main.cr 逐函数 + .cir 缓存）不经过
-// 批量入口的复位面 ⇒ 本函数必须自守卫）。
+// 槽的表示位变量索引（-1 = 无表示位 = 非可选槽 / 未覆盖情形 / 本编译单元未启用）。
+// 检查走 cap（int 全局，默认 0）而非 str_len(base)，base 未分配时是空串/空指针，
+// 未初始化的 str_len 即 SIGSEGV（file paths, including per-function main.cr and the .cir cache, do not go through
+// 批量入口的复位 -> 本函数必须自检查）。
 fn irv_rep(var_idx: int) -> int:
     if var_idx < 0:
         return -1
@@ -271,7 +271,7 @@ fn irv_set_rep(var_idx: int, rep_var: int):
     grow_ir_var_rep(var_idx + 1)
     w64(g_ir_var_rep, var_idx * 8, rep_var)
 
-// 置表示位：enc >= 0 → 从该表示位槽拷贝；OE_BARE/OE_BOXED → 直接常量写。
+// 置表示位：enc >= 0 -> 从该表示位槽拷贝；OE_BARE/OE_BOXED -> 直接常量写。
 fn emit_rep_set(rep_var: int, enc: int):
     if rep_var < 0:
         return
@@ -284,7 +284,7 @@ fn emit_rep_set(rep_var: int, enc: int):
     if enc >= 0:
         emit(IR_STORE, -1, rep_var, enc, 0, 0)
 
-// 给可选槽配表示位变量（初始值 = 1 装箱 = 既有语义）；非可选/未启用 → -1。
+// 给可选槽配表示位变量（初始值 = 1 装箱 = 既有语义）；非可选/未启用 -> -1。
 fn opt_rep_slot(ti: int, name: string) -> int:
     if g_optrep_on == 0:
         return -1
@@ -296,7 +296,7 @@ fn opt_rep_slot(ti: int, name: string) -> int:
     emit(IR_CONST, rv, 1, 0, 0, TI_INT)
     return rv
 
-// 全局槽的声明类型是否可选（globals 无表示位 ⇒ 视作未覆盖面；照声明区分裸/装箱假定）。
+// 全局槽的声明类型是否可选（globals 无表示位 -> 视作为未覆盖情形；照声明区分裸/装箱假定）。
 fn global_decl_optional(name_ni: int) -> int:
     gi : ., mut = 0
     loop:
@@ -312,10 +312,10 @@ fn global_decl_optional(name_ni: int) -> int:
         gi = gi + 1
     return 0
 
-// 被调方返回类型是否可选。判据走**返回类型节点**（`EXPR_FN.type_val`）而非
-// `fi_return_type`：后者是 parser 存的**裸类型码**，而 `T?` 的类型节点 `type_val` = 0
-// ⇒ 被读成 int 行、判据恒假（实测踩过：裸值返回不写返回信道 + 调用点不读信道，
-// 回落装箱假定 ⇒ `fn g() -> int? { return 5; }` 的调用点解包仍崩）。
+// 被调方返回类型是否可选。判据走返回类型节点（`EXPR_FN.type_val`）而非
+// `fi_return_type`：后者是 parser 存的裸类型码，而 `T?` 的类型节点 `type_val` = 0
+// -> is read as an int row and the test is always false. A bare return that does not write the return channel, plus a call site that does not read it,
+// 回落装箱假定 -> `fn g() -> int? { return 5; }` 的调用点解包仍崩）。
 fn callee_ret_optional(func_ni: int) -> int:
     if func_ni < 0:
         return 0
@@ -335,16 +335,16 @@ fn callee_ret_optional(func_ni: int) -> int:
         return 1
     return 0
 
-// ── 容量批 T2（裁-CAP-1 (a)）：可选**聚合槽**的存储边界规范化（写点装箱）──
-// 法则：可选聚合槽（结构体字段 / 数组·切片元素 / 元组元素 / 枚举载荷 / 全局槽）任何时刻恒持
-// **装箱值（Some 对象）**或 None；**裸 T 值在写点装箱**。读侧零改动（既有装箱假定）。
-// 局部/形参/返回/调用结果**不走本律**（R2 P4 Task 5 表示位机制不变，可持裸值）。
-// 零足迹：目标槽类型不可选 ⇒ 本组函数恒不发射任何 IR（非可选程序逐字节不变）。
-// 未覆盖面（登记）：指针写 `IR_STORE_PTR`——同一站点同时服务局部与聚合槽，装箱会与局部
-// 表示位冲突（实测 c1 今日正确 / 装箱后静默错值）；元组·数组字面量的非 ident/调用元素。
+// ── 容量批 T2：可选聚合槽的存储边界规范化（写点装箱）──
+// 法则：可选聚合槽（结构体字段 / 数组·切片元素 / 元组元素 / 枚举携带值 / 全局槽）任何时刻恒持
+// 装箱值（Some 对象）或 None；裸 T 值在写点装箱。读侧零改动（既有装箱假定）。
+// 局部/形参/返回/调用结果不走本规则。
+// 零足迹：目标槽类型不可选 -> 本组函数恒不发射任何 IR（非可选程序逐字节不变）。
+// 未覆盖情形（登记）：指针写 `IR_STORE_PTR`，同一站点同时服务局部与聚合槽，装箱会与局部
+// 表示位冲突(boxing produces a wrong value without a diagnostic)；元组·数组字面量的非 ident/调用元素。
 
-// 槽声明类型侧表（var → 声明类型索引；-1 = 无注解/未知）。仅进程内状态，零布局变更。
-// 内容（IR var 索引 → 类型索引）由声明面写入（LET 注解 / 形参类型节点），读点 = 元素写。
+// 槽声明类型侧表（var -> 声明类型索引；-1 = 无注解/未知）。仅进程内状态，零布局变更。
+// 内容（IR var 索引 -> 类型索引）由声明信息写入（LET 注解 / 形参类型节点），读点 = 元素写。
 fn grow_ir_var_decl(needed: int):
     if needed < g_ir_var_decl_cap:
         return
@@ -377,7 +377,7 @@ fn irv_set_decl_ti(v: int, ti: int):
     grow_ir_var_decl(v + 1)
     w64(g_ir_var_decl_ti, v * 8, ti)
 
-// 目标槽类型是否可选（未知/越界 ⇒ 0 = 不装箱）
+// 目标槽类型是否可选（未知/越界 -> 0 = 不装箱）
 fn ti_is_optional(ti: int) -> int:
     if ti < 0:
         return 0
@@ -387,14 +387,14 @@ fn ti_is_optional(ti: int) -> int:
         return 1
     return 0
 
-// 槽（IR var）**声明**类型：声明侧表优先，否则运行期类型
+// 槽（IR var）声明类型：声明侧表优先，否则运行期类型
 fn slot_decl_ti(v: int) -> int:
     d := irv_decl_ti(v)
     if d >= 0:
         return d
     return irv_type(v)
 
-// 声明类型 → 数组/切片元素类型（-1 = 非数组/切片）
+// 声明类型 -> 数组/切片元素类型（-1 = 非数组/切片）
 fn elem_ti_of_decl(ti: int) -> int:
     if ti < 0:
         return -1
@@ -410,7 +410,7 @@ fn elem_ti_of(arr_var: int) -> int:
     return elem_ti_of_decl(slot_decl_ti(arr_var))
 
 // 结构体字段声明类型（field_node = EXPR_FIELD 目标节点；checker 写入 ast_c = 结构体名 ni；
-// 数字元组下标形（ast_type_val > 0）不是结构体字段 ⇒ 不判）
+// 数字元组下标形（ast_type_val > 0）不是结构体字段 -> 不判）
 fn field_ti_of_node(field_node: int, fi: int) -> int:
     if field_node < 0 || fi < 0:
         return -1
@@ -442,7 +442,7 @@ fn global_decl_ti(name_ni: int) -> int:
         gi = gi + 1
     return -1
 
-// 枚举变体载荷声明类型（-1 = 非用户枚举构造器/未知）
+// 枚举变体携带值声明类型（-1 = 非用户枚举构造器/未知）
 fn enum_payload_ti(name_ni: int, pos: int) -> int:
     si := find_gsym(name_ni)
     if si < 0:
@@ -459,17 +459,17 @@ fn enum_payload_ti(name_ni: int, pos: int) -> int:
         vi = vi + 1
     return -1
 
-// ── 聚合读**结果槽的声明面形式**（TODO #2026-09-16-16 批 2 T3 · 裁-AGG-1 ①）──────────────────────
-// 聚合槽的规范存储形式**恒为精确（scaled）**（apx 批不变量「聚合面不存在 apx 形式」；写点漏斗
-// `dex_slot_norm:1059` 与 :2725/:2688/:2774/:2902 各写点均按此规范化）⇒ 只要**声明面**是 dex
-// （类型节点 `TY_DEX`），读槽就应当定型 `TI_DEX_S`；其余形态**一律保持 `TI_INT`**（零足迹：
+// ── 聚合读结果槽的声明信息形式──────────────────────
+// 聚合槽的规范存储形式恒为精确（scaled）（apx 批不变量聚合类型不存在 apx 形式；写点汇聚点
+// `dex_slot_norm:1059` 与 :2725/:2688/:2774/:2902 各写点均按此规范化）-> 只要声明信息是 dex
+// （类型节点 `TY_DEX`），读槽就应当定型 `TI_DEX_S`；其余形态一律保持 `TI_INT`（零足迹：
 // 非 dex 程序逐字节不变）。
-// **零 alloc（GC12′）**：只做**节点判**（`ast_kind(tn)==0 && ast_type_val(tn)==TY_DEX`）与
-// **纯表读**（`elem_ti_of_decl`/`get_type_kind`/`get_type_data`）——**不调** `res_type_node`/
-// `alloc_type`（那会新增可能 alloc 的站点，破坏暖缓存不变式）。
-// **覆盖面（本批）** = 结构体字段读 / 数组·切片元素读（元素 ti 可由数组型取得）/ match 臂载荷绑定。
-// **未覆盖面（登记，见计划 §10）** = 元组数字下标（裁-AGG-3：元组无声明面）· match 结果槽
-// （裁-AGG-2：多臂可异型）· 泛型字段/元素（裁-AGG-4：声明型 = 类型参数）· `IR_SLICE` 产物的
+// 零 alloc（GC12′）：只做节点判（`ast_kind(tn)==0 && ast_type_val(tn)==TY_DEX`）与
+// 纯表读（`elem_ti_of_decl`/`get_type_kind`/`get_type_data`），不调 `res_type_node`/
+// `alloc_type`（那会新增可能 alloc 的站点，违反暖缓存不变式）。
+// 覆盖范围(current coverage) = 结构体字段读 / 数组·切片元素读（元素 ti 可由数组型取得）/ match 臂携带值绑定。
+// 未覆盖情形（登记，见计划 10） = 元组数字下标· match 结果槽
+// · 泛型字段/元素· `IR_SLICE` 产物的
 // 元素读（切片 var 的 IR 型恒 `TI_INT`，元素形式无处寄存）。
 fn agg_read_form_is_dex(tn: int) -> int:
     if tn < 0:
@@ -480,7 +480,7 @@ fn agg_read_form_is_dex(tn: int) -> int:
         return 1
     return 0
 
-// 结构体字段读（`EXPR_FIELD`；数字元组下标形态 `ast_type_val > 0` 无声明面 ⇒ 不判）
+// 结构体字段读（`EXPR_FIELD`；数字元组下标形态 `ast_type_val > 0` 无声明信息 -> 不判）
 fn agg_field_read_form(field_node: int, fi: int) -> int:
     if field_node < 0 || fi < 0:
         return TI_INT
@@ -493,15 +493,15 @@ fn agg_field_read_form(field_node: int, fi: int) -> int:
         return TI_DEX_S
     return TI_INT
 
-// 数组/切片元素读：元素 ti 由**数组 var 的型**取得（纯表读）；`TI_DEX`（apx 声明形态的
-// 元素 ti）与 `TI_DEX_S` 都归一到**精确**读槽（聚合存储 = scaled）。
+// 数组/切片元素读：元素 ti 由数组 var 的型取得（纯表读）；`TI_DEX`（apx 声明形态的
+// 元素 ti）与 `TI_DEX_S` 都归一到精确读槽（聚合存储 = scaled）。
 fn agg_elem_read_form(arr_var: int) -> int:
     et := elem_ti_of_decl(slot_decl_ti(arr_var))
     if et == TI_DEX || et == TI_DEX_S:
         return TI_DEX_S
     return TI_INT
 
-// match 臂载荷绑定读（`EXPR_ENUMPAT`：a=变体名 ni、b=首子模式、c=子模式数）
+// match 臂携带值绑定读（`EXPR_ENUMPAT`：a=变体名 ni、b=首子模式、c=子模式数）
 fn agg_payload_read_form(pat_node: int, pos: int) -> int:
     if pat_node < 0 || pos < 0:
         return TI_INT
@@ -523,8 +523,8 @@ fn agg_payload_read_form(pat_node: int, pos: int) -> int:
         vi = vi + 1
     return TI_INT
 
-// 元素表达式（元组/数组字面量的元素槽无声明面）的可选性：**保守 = 不可选 ⇒ 不装箱**
-// 覆盖面 = ident（声明侧表）/ 调用（被调返回类型可选）；其余形态登记为未覆盖面。
+// 元素表达式（元组/数组字面量的元素槽无声明信息）的可选性：保守 = 不可选 -> 不装箱
+// 覆盖范围 = ident（声明侧表）/ 调用（被调返回类型可选）；其余形态登记为未覆盖情形。
 fn elem_node_optional(node: int) -> int:
     if node < 0:
         return 0
@@ -542,12 +542,12 @@ fn elem_node_optional(node: int) -> int:
         return 0
     return 0
 
-// (A) T3（裁-T3-1）：元素表达式的**可选感知元素类型**（-1 = 不可选/未知面）。
-// 字面量/切片两站点的声明面登记用。**调用点必须已判 `g_optrep_on`**——Some/None/调用
-// 三支会 `alloc_type`（零足迹教训：新增类型面查询前先核是否 alloc）。
-//   `Some(x)` / `None`（关键字形）⇒ `T?`（内层此处不可得 ⇒ TI_UNIT 占位；`ti_is_optional`
-//   只看 kind ⇒ 写点装箱判定成立）；`ident`（声明面可选）⇒ 其声明类型；`call`（返回可选）
-//   ⇒ `T?` 占位；其余 ⇒ -1（不可选面）。
+// (A) T3：元素表达式的可选感知元素类型（-1 = 不可选/未知情形）。
+// 字面量/切片两站点的声明信息登记用。调用点必须已判 `g_optrep_on`，Some/None/调用
+// 三支会 `alloc_type`（零足迹教训：新增类型查询前先核是否 alloc）。
+//   `Some(x)` / `None`（关键字形）-> `T?`（内层此处不可得 -> TI_UNIT 占位；`ti_is_optional`
+//   只看 kind -> 写点装箱判定成立）；`ident`（声明信息可选）-> 其声明类型；`call`（返回可选）
+//   -> `T?` 占位；其余 -> -1（不可选类型）。
 fn elem_ti_of_node(node: int) -> int:
     if node < 0:
         return -1
@@ -572,15 +572,15 @@ fn elem_ti_of_node(node: int) -> int:
     return -1
 
 // 装箱体（静态）：obj = Some(v)（无新 opcode；形态照既有 EXPR_ENUM_CONSTRUCTOR 发射：
-// IR_MAKE_ENUM 的 s1 = 变体名索引、载荷经 IR_STORE_FIELD 存 fi+1；tag 值 = 名索引）
+// IR_MAKE_ENUM 的 s1 = 变体名索引、携带值经 IR_STORE_FIELD 存 fi+1；tag 值 = 名索引）
 fn emit_box_some(val_var: int) -> int:
     obj := new_ir_var("box", TI_INT)
     emit(IR_MAKE_ENUM, obj, str_intern("Some"), 1, 0, 0)
     emit(IR_STORE_FIELD, -1, obj, val_var, 1, 0)
     return obj
 
-// 写点规范化（按**可选性标志**）：不可选 ⇒ 原样（零 IR）；已装箱 ⇒ 原样；
-// 静态裸值 ⇒ 直接装箱；源槽带表示位 ⇒ **运行期条件装箱**（裸则装、装箱则原样）。
+// 写点规范化（按可选性标志）：不可选 -> 原样（零 IR）；已装箱 -> 原样；
+// 静态裸值 -> 直接装箱；源槽带表示位 -> 运行期条件装箱（裸则装、装箱则原样）。
 fn box_for_slot_flag(val_node: int, val_var: int, is_opt: int) -> int:
     if val_var < 0:
         return val_var
@@ -609,15 +609,15 @@ fn box_for_slot_flag(val_node: int, val_var: int, is_opt: int) -> int:
     emit(IR_LABEL, -1, end_lbl, 0, 0, 0)
     return dest
 
-// 写点规范化（按**目标槽类型**）
+// 写点规范化（按目标槽类型）
 fn box_for_optional_slot(val_node: int, val_var: int, slot_ti: int) -> int:
     return box_for_slot_flag(val_node, val_var, ti_is_optional(slot_ti))
 
-// 值表达式的**静态表示判定**（解包侧判表示的另一半：写点置位的入参）。
+// 值表达式的静态表示判定（解包侧判表示的另一半：写点置位的入参）。
 // 返回：>= 0 = 从该表位槽拷贝（源值自身已配表示位：可选局部/形参/调用结果）；
 //   OE_BARE = 静态裸值（T 值注入 `T?`：字面量/算术/解包结果/非可选槽/聚合字面量…）；
-//   OE_BOXED = 静态装箱（`Some`/`None`）**或**未覆盖面回落（字段/下标/match 结果/
-//   惰性 thunk/未识别形态）——回落取装箱 = P3 前既有语义，绝不新造静默错值。
+//   OE_BOXED = 静态装箱（`Some`/`None`）或未覆盖情形回落（字段/下标/match 结果/
+//   惰性 thunk/未识别形态），回落取装箱 = 之前的既有语义，绝不新造产生错误值且不报错。
 fn rep_enc_of_expr(node: int, val_var: int) -> int:
     if val_var >= 0:
         rv := irv_rep(val_var)
@@ -630,7 +630,7 @@ fn rep_enc_of_expr(node: int, val_var: int) -> int:
         nm := istr_get(ast_a(node))
         if str_eq(nm, "Some") != 0 || str_eq(nm, "None") != 0:
             return oe_boxed()
-        return oe_bare()  // 用户枚举变体 = T 值（对象指针即载荷）
+        return oe_bare()  // 用户枚举变体 = T 值（对象指针即携带值）
     if k == EXPR_INT || k == EXPR_BOOL || k == EXPR_DEX || k == EXPR_STRING:
         return oe_bare()
     if k == EXPR_CHAR:
@@ -655,10 +655,10 @@ fn rep_enc_of_expr(node: int, val_var: int) -> int:
         return oe_bare()  // 枚举裸变体等 T 值
     return oe_boxed()
 
-// 批 8（静默面收口 · 条目 2）：操作数是否**确定可选**——保守触发面，**纯节点/表读、零 alloc_type**
-// （先例 `rep_enc_of_expr` / `elem_ti_of_node`）：
-//   ① var 带表示位（可选槽/形参/调用结果）；② `Some`/`None` 构造子；③ 可选声明面（局部槽型 / 全局）。
-// 非可选一律 0 ⇒ 比较走原路径（产物零变化 = 条目 2 判据 ⑤）。
+// 操作数是否确定可选，保守触发范围，纯节点/表读、零 alloc_type
+// (same pattern as `rep_enc_of_expr` / `elem_ti_of_node`）：
+//   1 var 带表示位（可选槽/形参/调用结果）；2 `Some`/`None` 构造子；3 可选声明信息（局部槽型 / 全局）。
+// 非可选一律 0 -> 比较走原路径（产物零变化 = 条目 2 判据 5）。
 fn opt_cmp_optish(node: int, var: int) -> int:
     if var >= 0 && irv_rep(var) >= 0:
         return 1
@@ -681,25 +681,25 @@ fn opt_cmp_optish(node: int, var: int) -> int:
         if gv >= 0 && global_decl_optional(ni) != 0:
             return 1
         return 0
-    // 解引用可选指针：解引用结果**不配表示位**（`ir_gen.cr` UOP_DEREF 只发 IR_DEREF），
-    // 但 **INV-1** 保证「取址的可选槽恒装箱」⇒ 所指即装箱对象（`match *p` 走同一假定）。
+    // 解引用可选指针：解引用结果不配表示位（`ir_gen.cr` UOP_DEREF 只发 IR_DEREF），
+    // 但 INV-1 保证取址的可选槽恒装箱-> 所指即装箱对象（`match *p` 走同一假定）。
     if k == EXPR_UNARY && ast_c(node) == UOP_DEREF:
         if var >= 0 && ti_is_optional(irv_type(var)) != 0:
             return 1
         return 0
     return 0
 
-// 批 8（条目 2）：比较点的**有效表示** = `rep_enc_of_expr` + 一条解引用规则——
-// 解引用「可选指针」的槽 ⇒ 装箱对象（INV-1；`rep_enc_of_expr` 对 EXPR_UNARY 按 OE_BARE
-// 回落会把装箱对象当裸值 ⇒ 必须在此覆盖）。
+// 比较点的有效表示 = `rep_enc_of_expr` + 一条解引用规则，
+// 解引用可选指针的槽 -> 装箱对象（INV-1；`rep_enc_of_expr` 对 EXPR_UNARY 按 OE_BARE
+// 回落会把装箱对象当裸值 -> 必须在此覆盖）。
 fn opt_cmp_enc(node: int, var: int) -> int:
     if node >= 0 && ast_kind(node) == EXPR_UNARY && ast_c(node) == UOP_DEREF:
         if var >= 0 && ti_is_optional(irv_type(var)) != 0:
             return oe_boxed()
     return rep_enc_of_expr(node, var)
 
-// 批 8（条目 2）：装箱对象的 (absent, payload) 提取——tag == "None" ⇒ (1, 0)；
-// 否则 (0, 字段1)。**字段读只在非 None 分支发射**（None 对象无载荷字段 ⇒ 避免越界读）。
+// 装箱对象的 (absent, payload) 提取，tag == "None" -> (1, 0)；
+// 否则 (0, 字段1)。字段读只在非 None 分支发射（None 对象无携带值字段 -> 避免越界读）。
 fn opt_cmp_extract_boxed(var: int, out_absent: int, out_val: int, zero: int):
     tag := new_ir_var("otag", TI_INT)
     emit(IR_LOAD_ENUM_TAG, tag, var, 0, 0, 0)
@@ -727,9 +727,9 @@ fn opt_cmp_extract_boxed(var: int, out_absent: int, out_val: int, zero: int):
     emit(IR_STORE, -1, out_val, fv, 0, 0)
     emit(IR_LABEL, -1, xend_lbl, 0, 0, 0)
 
-// 批 8（条目 2）：归一为 (absent, payload) 二元组（写进调用点预建的 out 槽）——
-//   裸（OE_BARE）   ⇒ (0, 槽值)；装箱（OE_BOXED）⇒ 见 `opt_cmp_extract_boxed`；
-//   运行期表示位（≥0）⇒ 分支判裸/装箱（裸 ⇒ (0, 槽值)）。
+// 归一为 (absent, payload) 二元组（写进调用点预建的 out 槽），
+//   裸（OE_BARE）   -> (0, 槽值)；装箱（OE_BOXED）-> 见 `opt_cmp_extract_boxed`；
+//   运行期表示位（≥0）-> 分支判裸/装箱（裸 -> (0, 槽值)）。
 fn opt_cmp_norm(node: int, var: int, out_absent: int, out_val: int):
     enc := opt_cmp_enc(node, var)
     zero := new_ir_var("_oz", TI_INT)
@@ -766,16 +766,16 @@ fn emit(opcode: int, dest: int, src1: int, src2: int, src3: int, type_kind: int)
     iri_set_s1(idx, src1)
     iri_set_s2(idx, src2)
     iri_set_s3(idx, src3)
-    // R2 P5 Task 2（D19 单槽化）：类型面**单源** = DFNode 的（项, 辅码）两槽。
-    // 本处是**唯一**拆分点：同一次 sh_tk_split 同时喂 DFNode 两槽与 iri_tk 的派生码
-    // （sh_dfn_code_of_slots）——既无第二真源，也不可能两处漂移。
+    // 类型信息单源 = DFNode 的（项, 辅码）两槽。
+    // 本处是唯一拆分点：同一次 sh_tk_split 同时喂 DFNode 两槽与 iri_tk 的派生码
+    // （sh_dfn_code_of_slots），既无第二真源，也不可能两处漂移。
     sh_tk_split(opcode, type_kind)
     iri_set_tk(idx, sh_dfn_code_of_slots(g_sh_slot_term, g_sh_slot_aux))
     g_ir_instr_count = idx + 1
     // Build dataflow graph (.cir) in parallel
-    // 拆分时点 = **emit 期**（不得后移到 save 前：快照在 IR 生成期逐函数写 ⇒ 后填
-    // 必然冷/暖分歧）。代价 = 每 emit 一次分类查询（非类型面 op = 几次整数比较即
-    // 返回；类型面 op = sh_term_of_ti 的原生快路径/桥接缓存，实测耗时见报告 §6）。
+    // 拆分时点 = emit 期（不得后移到 save 前：快照在 IR 生成期逐函数写 -> 后填
+    // 必然冷/暖分歧）。代价 = 每 emit 一次分类查询（非类型 op = 几次整数比较即
+    // 返回；类型信息 op = sh_term_of_ti 的原生快路径/桥接缓存)。
     df_create_node(opcode, dest, src1, src2, src3, g_sh_slot_term, g_sh_slot_aux)
 
 fn new_label() -> int:
@@ -843,7 +843,8 @@ fn is_ptr_var(var_idx: int) -> int:
     ti := irv_type(var_idx)
     if ti == TI_DEX_S:
         return 0
-    // 哨兵类型：不查类型表（终审 M1：8 为占位表项，用户类型从 9 起）
+    // TI_DEX_S is a sentinel and is not in the type table. Row 8 is a
+    // placeholder; user types start at 9.
     if ti >= 0:
         tk := get_type_kind(ti)
         if tk == TYP_PTR || tk == TYP_REF:
@@ -901,8 +902,8 @@ fn ir_call_return_type(func_ni: int) -> int:
         if rt == TY_INT:
             return TI_INT
         if rt == TY_DEX:
-            // dex 边界规则（数值迁移 Task 4）：Core 函数返回精确形式（缩放整数）；
-            // extern 函数保留 TI_DEX（binary64 位模式——C ABI / apx 授权 FFI）
+            // dex 边界规则：Core 函数返回精确形式（缩放整数）；
+            // extern 函数保留 TI_DEX（binary64 位模式，C ABI / apx 授权 FFI）
             if fi_ast_node(fi) >= 0 && ast_kind(fi_ast_node(fi)) == EXPR_EXTERN:
                 return TI_DEX
             return TI_DEX_S
@@ -959,7 +960,7 @@ fn pop_loop_labels():
 
 // 枚举变体名查找（F15）：name_idx 是否为任一枚举的变体名（裸引用 `c := Red`）。
 // 匹配返回 name_idx 本身；非变体名返回 -1。checker 的 collect_decls 把每个
-// 变体名注册为 SYM_FN（指向枚举类型）——裸变体经类型检查后到达 ir_gen。
+// 变体名注册为 SYM_FN（指向枚举类型），裸变体经类型检查后到达 ir_gen。
 fn find_enum_variant(name_idx: int) -> int:
     ei : ., mut = 0
     loop:
@@ -1043,7 +1044,8 @@ fn ti_from_type_expr(node: int) -> int:
 fn type_size(ti: int) -> int:
     if ti == TI_DEX_S:
         return 8
-    // 哨兵类型：8 字节槽（不查类型表；终审 M1：8 为占位表项，用户类型从 9 起）
+    // TI_DEX_S uses an 8-byte slot and is not in the type table. Row 8 is a
+    // placeholder; user types start at 9.
     if ti == TI_CHAR:
         return 4
     // not in type table
@@ -1105,7 +1107,8 @@ fn ptr_access_width(var_idx: int) -> int:
 fn type_align(ti: int) -> int:
     if ti == TI_DEX_S:
         return 8
-    // 哨兵类型：8 字节对齐（不查类型表；终审 M1：8 为占位表项）
+    // TI_DEX_S has 8-byte alignment and is not in the type table. Row 8 is a
+    // placeholder.
     if ti == TI_CHAR:
         return 4
     if ti < 0 || ti >= g_type_count:
@@ -1223,18 +1226,18 @@ fn force_if_thunk(var_idx: int) -> int:
             return forced
     return var_idx
 
-// --- dex 定点精确运算辅助（数值迁移 Task 4）---
+// --- dex 定点精确运算辅助---
 // dex 值有两种 IR 形式：
-//   TI_DEX_S = 定点缩放整数（精确形式，S = 10^6，默认世界——跨函数边界统一此形式）
-//   TI_DEX   = binary64 位模式（apx 形式——apx 变量及其运算的快路径表示）
-// 转换规则（文档化）：运算按操作数形式分流（有 TI_DEX 操作数 → binary64 快路径，
-// 否则 → 定点整数指令序列）；存储/边界处按槽位形式转换（apx 结果在边界按定点
-// 6 位截断/舍入——「精确，或经授权的近似」契约的兑现）。
+//   TI_DEX_S = 定点缩放整数（精确形式，S = 10^6，默认世界，跨函数边界统一此形式）
+//   TI_DEX   = binary64 位模式（apx 形式，apx 变量及其运算的快路径表示）
+// 转换规则（文档化）：运算按操作数形式分流（有 TI_DEX 操作数 -> binary64 快路径，
+// 否则 -> 定点整数指令序列）；存储/边界处按槽位形式转换（apx 结果在边界按定点
+// 6 位截断/舍入，精确，或经授权的近似契约的兑现）。
 
-// bits（TI_DEX）→ 缩放整数（TI_DEX_S）：round(bits × S)——6 位定点舍入（四舍五入
-// 半进，数值迁移 Task 6 定稿：apx 打印/边界行为 = 6 位定点舍入，非截断、非全精度
-// binary64）。实现：F2I 本身向零截断——正数先 +0.5、负数先 −0.5（分支按 m < 0 分流，
-// 与字面量 str_to_scaled 的半进一致；半进 = 绝对值半上，-0.5 → -1）。此舍入同时吸收
+// bits（TI_DEX）-> 缩放整数（TI_DEX_S）：round(bits × S)，6 位定点舍入（四舍五入
+// 半进，dex 定点：apx 打印/边界行为 = 6 位定点舍入，非截断、非全精度
+// binary64）。实现：F2I 本身向零截断，正数先 +0.5、负数先 −0.5（分支按 m < 0 分流，
+// 与字面量 str_to_scaled 的半进一致；半进 = 绝对值半上，-0.5 -> -1）。此舍入同时合并
 // str_to_f64_bits 字面量转换的 ~2ulp 截断误差（打印/边界 6 位精度下不可见）。
 fn dex_bits_to_scaled(var: int) -> int:
     if irv_type(var) != TI_DEX:
@@ -1246,7 +1249,7 @@ fn dex_bits_to_scaled(var: int) -> int:
     zero := new_ir_var("_dx0", TI_DEX)
     emit(IR_CONST, zero, 0, 0, 0, TI_DEX)
     negc := new_ir_var("_dxc", TI_INT)
-    emit(IR_BINARY, negc, m, zero, OP_LT, TI_DEX)  // m < 0 → int 0/1（comisd 路径）
+    emit(IR_BINARY, negc, m, zero, OP_LT, TI_DEX)  // m < 0 -> int 0/1（comisd 路径）
     half := new_ir_var("_dxh", TI_DEX)
     emit(IR_CONST, half, 4602678819172646912, 0, 0, TI_DEX)  // 0.5 的 binary64 位模式（0x3FE0000000000000）
     pos_lbl := new_label()
@@ -1268,7 +1271,7 @@ fn dex_bits_to_scaled(var: int) -> int:
     emit(IR_F2I, r, mrg, 0, 0, TI_DEX)
     return r
 
-// 缩放整数（TI_DEX_S）→ bits（TI_DEX）：I2F(scaled) / S
+// 缩放整数（TI_DEX_S）-> bits（TI_DEX）：I2F(scaled) / S
 // 字面量节点（EXPR_DEX）直接重发射为 bits 常量（与 lexer 位模式一致，免转换序列）
 fn dex_scaled_to_bits(var: int, node: int) -> int:
     if irv_type(var) != TI_DEX_S:
@@ -1285,7 +1288,7 @@ fn dex_scaled_to_bits(var: int, node: int) -> int:
     emit(IR_BINARY, d, f, c, OP_DIV, TI_DEX)
     return d
 
-// int 操作数 → 定点缩放（×S）：精确路径的 int 隐式对齐（与 apx 路径的 I2F 同位）
+// int 操作数 -> 定点缩放（×S）：精确路径的 int 隐式对齐（与 apx 路径的 I2F 同位）
 fn dex_scale_int(var: int) -> int:
     if irv_type(var) != TI_INT:
         return var
@@ -1295,9 +1298,9 @@ fn dex_scale_int(var: int) -> int:
     emit(IR_BINARY, t, var, c, OP_MUL, TI_INT)
     return t
 
-// 存储到 dex 槽位前按槽位形式转换（数值迁移 Task 4）：
-//   TI_DEX 槽（apx 变量）← 缩放值：scaled → bits（字面量重发射，计算值 I2F/S）
-//   TI_DEX_S 槽（精确变量）← bits 值：bits → scaled（apx 结果按定点 6 位舍入入精确世界）
+// 存储到 dex 槽位前按槽位形式转换：
+//   TI_DEX 槽（apx 变量）← 缩放值：scaled -> bits（字面量重发射，计算值 I2F/S）
+//   TI_DEX_S 槽（精确变量）← bits 值：bits -> scaled（apx 结果按定点 6 位舍入入精确世界）
 fn dex_store_adjust(target: int, val: int, val_node: int) -> int:
     tt := irv_type(target)
     vt := irv_type(val)
@@ -1307,12 +1310,12 @@ fn dex_store_adjust(target: int, val: int, val_node: int) -> int:
         return dex_bits_to_scaled(val)
     return val
 
-// 聚合/指针槽写点规范化（apx 批 T3）：**聚合面不存在 apx 形式**——`apx` 是 LET 专属
-// 标签（parser.cr:819），字段 / 数组·切片元素 / 元组元素 / 枚举载荷 / 指针 pointee
-// 的规范存储形式**恒为精确（scaled）** ⇒ 任何 TI_DEX（bits）值入这类槽前一律转
-// scaled；非 apx 值原样返回（**零 IR** ⇒ 非 apx 程序逐字节不变）。
-// 纪律（Global Constraint 12）：本判定**不含任何类型表查询**（不调 res_type_node/
-// alloc_type）——ir_gen 路径新增 alloc_type 站点会破坏暖缓存「不可写条目」不变式。
+// 聚合/指针槽写点规范化（apx 批 T3）：聚合类型不存在 apx 形式，`apx` 是 LET 专属
+// 标签（parser.cr:819），字段 / 数组·切片元素 / 元组元素 / 枚举携带值 / 指针 pointee
+// 的规范存储形式恒为精确（scaled） -> 任何 TI_DEX（bits）值入这类槽前一律转
+// scaled；非 apx 值原样返回（零 IR -> 非 apx 程序逐字节不变）。
+// 规则（Global Constraint 12）：本判定不含任何类型表查询（不调 res_type_node/
+// alloc_type），ir_gen 路径新增 alloc_type 站点会违反暖缓存不可写条目不变式。
 fn dex_slot_norm(val: int) -> int:
     if val < 0:
         return val
@@ -1320,10 +1323,11 @@ fn dex_slot_norm(val: int) -> int:
         return val
     return dex_bits_to_scaled(val)
 
-// 声明类型**节点**是否 `dex?`（可选 dex）——**节点级零 alloc**（先例 `agg_read_form_is_dex:417` /
-// `reg_one_global` 的 `ast_kind(ltn)==0 && ast_type_val(ltn)==TY_DEX`）。`dex?` 的类型节点 =
-// `EXPR_OPTIONAL`，其内层是基类型节点 `dex`（`ast_kind==0 && ast_type_val==TY_DEX`）。
-// 用途（批 5 · R1）：写点/槽型按**声明**定形式（G1 裁决 = scaled），而非按值型反推。
+// Whether a declaration type node is `dex?` (optional dex). This is a node-level
+// check with zero allocation, using the same pattern as agg_read_form_is_dex and
+// reg_one_global. A `dex?` type node is EXPR_OPTIONAL with an inner base `dex`
+// node (kind 0 and type_val TY_DEX). Write points and slot typing use the declared
+// form (G1: scaled) rather than inferring from the value type.
 fn dex_opt_type_node(tn: int) -> int:
     if tn < 0:
         return 0
@@ -1336,10 +1340,12 @@ fn dex_opt_type_node(tn: int) -> int:
         return 1
     return 0
 
-// 类型**行**是否 `dex?`（`TYP_OPTIONAL` ∧ `data == TI_DEX`）——**纯表读零 alloc**（先例
-// `ti_is_optional:328` / `elem_ti_of_decl:343`）。用途（批 5 · G2 读点定型）：optional 声明的
-// 载荷读槽取**声明面**形式——`agg_payload_read_form` 只认枚举行，内建 `Some` 面无行 ⇒ 恒 TI_INT
-// （`dex?` 载荷按值参与 dex 运算会被当 int 再 ×S）。G2 红线：**不得**调 `res_type_node`/`alloc_type`。
+// Whether a type row is `dex?` (TYP_OPTIONAL with data == TI_DEX). This is a pure
+// table read with zero allocation, using the same pattern as ti_is_optional and
+// elem_ti_of_decl. Optional payload read slots take the declared form.
+// agg_payload_read_form recognizes only enum rows, and the built-in Some type has
+// no row, so it stays TI_INT; a dex payload used as an int would be multiplied by
+// S again. G2 constraint: do not call res_type_node or alloc_type.
 fn dex_opt_slot_ti(ti: int) -> int:
     if ti < 0 || ti >= g_type_count:
         return 0
@@ -1349,15 +1355,16 @@ fn dex_opt_slot_ti(ti: int) -> int:
         return 1
     return 0
 
-// 批 8（静默面收口 · 条目 1）：dex 实参按**被调方**形参链对齐——**可复用版**（泛型实例化后按实例再跑）。
-// ⚠ **本抽取在本批（批 8）未生效**：实例形参链未替换（`monomorph.cr` 的 `EXPR_FN` 克隆只克隆体 ⇒ 门恒假）
-//   ⇒ 实测零效果（3 二进制 × 4 探针矩阵 + 32 档隔离对拍确认行为中性）。**不得当死码删除**：
-//   `TODO #2026-09-18-3`（(乙) 泛型实例形参擦除）的 **A2a 依赖此抽取**（`cfi` 参数化 + 幂等 +
-//   重定向后第二遍的缝）——下游批次直接复用，删掉会让 (乙) 重做一遍。
-// 锁步契约：`arg_vars`/`arg_nodes` 与形参链**同索引**取用——直调（无接收者）1:1；方法调用接收者占
-// `arg_vars[0]`，而 `self` 在方法形参链中亦占第 0 位（parser 物化 EXPR_PARAM，parser.cr `self` 分支）
-// ⇒ 同对齐。**幂等**：转换只对 `irv_type(av) == TI_DEX` 生效 ⇒ 已转换（TI_DEX_S）者不会被二次转换
-// （这是「重定向前后各跑一遍」安全的前提）。**本函数不得重分配 arg_vars**（只写元素；句柄按值传入）。
+// Align dex arguments to the callee parameter list; reusable after generic
+// instantiation. This extraction has no effect yet because the instance parameter
+// list is not substituted: monomorph's EXPR_FN clone copies only the body, so the
+// condition is always false. It produces no behavior change. Do not delete it as
+// dead code: generic instance parameter erasure depends on it, including
+// parameterized cfi, idempotence, and the second pass after redirection.
+// 锁步契约：`arg_vars`/`arg_nodes` 与参数列表同索引取用，直调（无接收者）1:1；方法调用接收者占
+// `arg_vars[0]`，而 `self` 在方法参数列表中亦占第 0 位（parser 物化 EXPR_PARAM，parser.cr `self` 分支）
+// -> 同对齐。幂等：转换只对 `irv_type(av) == TI_DEX` 生效 -> 已转换（TI_DEX_S）者不会被二次转换
+// （这是重定向前后各跑一遍安全的前提）。本函数不得重分配 arg_vars（只写元素；句柄按值传入）。
 fn dex_align_call_args(cfi: int, ac: int, arg_vars: string, arg_nodes: string, arg_nodes_cap: int):
     cfn := fi_ast_node(cfi)
     cfn_ext : ., mut = 0
@@ -1369,25 +1376,24 @@ fn dex_align_call_args(cfi: int, ac: int, arg_vars: string, arg_nodes: string, a
         return
     cpi : ., mut = 0
     cpn : ., mut = ast_b(cfn)
-    // 实参节点与实参 var **同表锁步**取（`arg_nodes[cpi]` 与 `arg_vars[cpi]` 同索引写入，
-    // 接收者亦在内）——方法调用下 EXPR_ARG 链**不含接收者**，若按链另走游标会滞后一位
-    // （批 5 实测：node 仅服务于 extern 字面量重发射，Core 分支不用；仍按锁步改正以免埋雷）。
+    // 实参节点与实参 var 同表锁步取（`arg_nodes[cpi]` 与 `arg_vars[cpi]` 同索引写入，
+    // 接收者亦在内）。方法调用下 EXPR_ARG 列表不含接收者，若按列表另走游标会滞后一位。
     loop:
         if cpi >= ac:
             break
         if cpn < 0:
             break
         dd := ast_data(cpn)
-        // 批 5（opt-dex · R3）：`dex?` 形参也进环——修复前门只认基类型节点（`type_val == TI_DEX`），
-        // `dex?` 的 `type_val` = 0 ⇒ apx 实参不转换 ⇒ 与 callee 槽型（本批已改 TI_DEX_S）口径一致；
-        // extern 侧不扩（C ABI 无可选表示，`.so` 面登记未覆盖面）。
-        // 批 8（条目 1）：泛型声明的 `T?`（inner = 泛型参数）判据为**假** ⇒ 调用点在**重定向后**
-        // 用**实例**形参链（inner = 具体 dex）再跑一遍本环。
+        // dex? parameters are included. The test accepts a TI_DEX node or a
+        // dex-optional declaration node. The extern side is not extended because
+        // C ABI has no optional representation; that face is uncovered.
+        // 泛型声明的 `T?`（inner = 泛型参数）判据为假 -> 调用点在重定向后
+        // 用实例参数列表（inner = 具体 dex）再跑一遍本环。
         if ast_type_val(cpn) == TI_DEX || (cfn_ext == 0 && dex_opt_type_node(ast_data(cpn)) != 0):
             av := r64(arg_vars, cpi * 8)
             if av >= 0:
                 if cfn_ext != 0:
-                    // extern：scaled → bits（字面量直接重发射位模式常量）
+                    // extern：scaled -> bits（字面量直接重发射位模式常量）
                     if irv_type(av) == TI_DEX_S:
                         arg_node : ., mut = -1
                         if cpi < arg_nodes_cap:
@@ -1395,7 +1401,7 @@ fn dex_align_call_args(cfi: int, ac: int, arg_vars: string, arg_nodes: string, a
                         av = dex_scaled_to_bits(av, arg_node)
                         w64(arg_vars, cpi * 8, av)
                 else if irv_type(av) == TI_DEX:
-                    // Core 函数：apx bits → scaled
+                    // Core 函数：apx bits -> scaled
                     av = dex_bits_to_scaled(av)
                     w64(arg_vars, cpi * 8, av)
         cpi = cpi + 1
@@ -1407,13 +1413,13 @@ fn dex_align_call_args(cfi: int, ac: int, arg_vars: string, arg_nodes: string, a
                 break
             cpn = cpn + 1
 
-// 聚合读的**声明面** dex-ness（apx 批 T3 · 比较/相等点专用）：
-// #2026-09-16-16 未修 ⇒ 聚合读的结果槽 IR 型恒 TI_INT、**声明型被抹** ⇒ 下游「按值型触发」的
-// 形式分流看不到 dex。本函数在**节点级**把声明面取回来（**零 alloc_type**；先例
-// agg_elem_count_of:3004），供比较点判断操作数的**规范槽形式**：
-//   EXPR_FIELD ⇒ 结构体字段的声明类型节点（数字元组下标 ast_type_val>0 不判——元组无声明面）
-//   EXPR_INDEX ⇒ **全局**定长数组/切片的元素声明类型节点（局部数组无节点级声明面 ⇒ 不判）
-// 返回 1 = 声明为 dex（⇒ 槽内规范形式 = **精确/scaled**，由本批写点保证）· 0 = 非 dex / 不可得。
+// 聚合读的声明信息 dex-ness（apx 批 T3 · 比较/相等点专用）：
+//  未修 -> 聚合读的结果槽 IR 型恒 TI_INT、声明型被抹 -> 下游按值型触发的
+// 形式分流看不到 dex。本函数在节点级把声明信息取回来(zero alloc_type; same pattern as
+// agg_elem_count_of:3004），供比较点判断操作数的规范槽形式：
+//   EXPR_FIELD -> 结构体字段的声明类型节点（数字元组下标 ast_type_val>0 不判，元组无声明信息）
+//   EXPR_INDEX -> 全局定长数组/切片的元素声明类型节点（局部数组无节点级声明信息 -> 不判）
+// 返回 1 = 声明为 dex（-> 槽内规范形式 = 精确/scaled，guaranteed by the write points）· 0 = 非 dex / 不可得。
 fn dex_decl_form_of_expr(node: int) -> int:
     if node < 0:
         return 0
@@ -1471,7 +1477,7 @@ fn gen_expr(node: int) -> int:
         emit(IR_CONST, v, ast_int_val(node), 0, 0, TI_INT)
         return v
     if ast_kind(node) == EXPR_DEX:
-        // 精确字面量（数值迁移 Task 4）：定点缩放整数常量（TI_DEX_S）。
+        // 精确字面量：定点缩放整数常量（TI_DEX_S）。
         // apx 场景（变量级 apx 标签的运算）在运算点按 node.a 的 binary64 位模式重发射。
         v := new_ir_var("dex", TI_DEX_S)
         emit(IR_CONST, v, ast_int_val(node), 0, 0, TI_DEX_S)
@@ -1486,10 +1492,10 @@ fn gen_expr(node: int) -> int:
         track_str(str_idx)
         emit(IR_CONST, v, str_idx, 0, 0, TI_STR)
         return v
-    // 插值洞兜底（批 8 插值展开）：**洞应在 checker 就被就地改写**（见 checker.cr EXPR_INTERP_HOLE
-    // 分支：string 恒等 / int→int_str / bool→bool_str，其它 P028）。若仍有洞走到发射面，说明
-    // checker 漏走了某条路径（extern 早退 / 实例体 / 未来新路径）⇒ **响亮拒绝**（P029），
-    // **绝不**静默当空值或身份——那正是本批要消灭的静默类。
+    // 插值洞的后备路径：洞应在 checker 就被就地改写（见 checker.cr EXPR_INTERP_HOLE
+    // 分支：string 恒等 / int->int_str / bool->bool_str，其它 P028）。若仍有洞走到发射路径，说明
+    // checker 漏走了某条路径（extern 早退 / 实例体 / 未来新路径）-> 响亮拒绝，
+    // 绝不当作空值且不报错或身份，that is the class of wrong values this code prevents。
     if ast_kind(node) == EXPR_INTERP_HOLE:
         check_error(EC_P_INTERP_HOLE_LEAK, "internal: string interpolation hole reached codegen (checker rewrite missing)", ast_line(node), ast_col(node))
         v := new_ir_var("interp_leak", TI_STR)
@@ -1510,9 +1516,9 @@ fn gen_expr(node: int) -> int:
         if lv >= 0:
             return lv
         const_node := find_global_const_node(name_idx)
-        // 容量批 T2：**可选全局槽不得常量折叠**——字面量初值（`g : int? = 5`）的读点若被
-        // 折成裸常量 5，则 match 的 tag 读会解引用该裸值（双路径 139，实测 e2_global_bare）。
-        // 折叠面只对非可选全局生效（零足迹）；可选全局由运行期初始化写入装箱对象。
+        // 容量批 T2：可选全局槽不得常量折叠，字面量初值（`g : int? = 5`）的读点若被
+        // 折成裸常量 5，则 match 的 tag 读会解引用该裸值(both paths fail at run time)。
+        // 折叠只对非可选全局生效（零足迹）；可选全局由运行期初始化写入装箱对象。
         if const_node >= 0 && g_optrep_on != 0 && global_decl_optional(name_idx) != 0:
             const_node = -1
         if const_node >= 0:
@@ -1528,10 +1534,10 @@ fn gen_expr(node: int) -> int:
         gv := find_global(name_idx)
         if gv >= 0:
             return gv
-        // F15：枚举裸变体（c := Red，不带括号）——发射无 payload 的 MAKE_ENUM
-        // （s1=变体名 ni、s2=0），与 EXPR_ENUM_CONSTRUCTOR 的 `Red()` 调用形式
-        // 同机制（tag = 变体名驻留索引，match 按名字比较）。修复前落为下方
-        // "unresolved" 哑变量 → 后续 LOAD_ENUM_TAG 解引用垃圾值 → SIGSEGV（139）。
+        // A bare enum variant (c := Red, no parentheses) emits MAKE_ENUM with no
+        // payload: s1 = variant name intern index, s2 = 0. This is the same
+        // mechanism as the Red() constructor form. The tag is the variant name
+        // intern index, and match compares by name.
         if find_enum_variant(name_idx) >= 0:
             s := new_ir_var("enum", TI_UNIT)
             emit(IR_MAKE_ENUM, s, name_idx, 0, 0, 0)
@@ -1546,10 +1552,10 @@ fn gen_expr(node: int) -> int:
         right := ast_b(node)
         op := ast_c(node)
 
-        // R2 P5 Task 4（D25）：`EXPR_BINARY + OP_ASSIGN` 赋值分支**已删**——不可达
-        // （parser 不产该组合：`tok2op` 零 OP_ASSIGN；`T_EQ` → EXPR_ASSIGN；`+=` 族构造
+        // `EXPR_BINARY + OP_ASSIGN` 赋值分支已删，不可达
+        // （parser 不产该组合：`tok2op` 零 OP_ASSIGN；`T_EQ` -> EXPR_ASSIGN；`+=` 族构造
         // `EXPR_ASSIGN` 包裹的 EXPR_BINARY 且 op ∈ {ADD,SUB,MUL,DIV}；语料站点直方图 0 命中）。
-        // 赋值发射面在下方 `EXPR_ASSIGN` 分支（gen_expr 的另一 arm），逐字未动。
+        // 赋值发射路径在下方 `EXPR_ASSIGN` 分支（gen_expr 的另一 arm），逐字未动。
 
         // Regular binary
         left_var := gen_expr(left)
@@ -1601,11 +1607,11 @@ fn gen_expr(node: int) -> int:
             right_var = uv
             rt = irv_type(right_var)
 
-        // 批 8（静默面收口 · 条目 2）：可选值 `==`/`!=` **按值比较**（表示透明）。
-        // 修复前走通用二元路径逐槽比**原始值**：裸（rep=0，槽值=载荷）⇒ 比载荷（正确）；
-        // 装箱（Some/None 对象）⇒ 比**指针** ⇒ `n==None` / 两个 None / `Some(7)==Some(7)` **恒假**（静默错值）。
-        // 本点把两侧归一为 (absent, payload) 后按值比：缺省性不同 ⇒ 不等；同缺省 ⇒ 相等；同在 ⇒ 比载荷。
-        // 触发面**保守**（`opt_cmp_optish`：带表示位 / Some|None 构造子 / 可选声明面）⇒ 非可选比较零变化（判据 ⑤）。
+        // Optional == and != compare by value, independent of representation.
+        // Both sides are normalized to (absent, payload). Different absence means
+        // not equal; both absent means equal; both present compares payloads. The
+        // trigger is conservative (representation bit, Some/None constructor, or
+        // optional declaration), so non-optional comparisons are unchanged.
         if (op == OP_EQ || op == OP_NE) && g_optrep_on != 0:
             lo := opt_cmp_optish(left, left_var)
             ro := opt_cmp_optish(right, right_var)
@@ -1624,7 +1630,7 @@ fn gen_expr(node: int) -> int:
                 opt_cmp_norm(right, right_var, abs_r, val_r)
                 zb := new_ir_var("_cz", TI_INT)
                 emit(IR_CONST, zb, 0, 0, 0, TI_INT)
-                // peq = 载荷相等（两侧皆缺省时其值无意义——由 both_abs 兜底）
+                // peq = 携带值相等（两侧皆缺省时其值无意义，由 both_abs 覆盖）
                 peq : ., mut = -1
                 if lt2 == TI_STR || rt2 == TI_STR:
                     eq0 := new_ir_var("_eq0", lt2)
@@ -1680,11 +1686,12 @@ fn gen_expr(node: int) -> int:
                 v := new_ir_var("str", TI_STR)
                 emit(IR_CALL, v, packed0, 2, concat_ni, TI_STR)
                 return v
-        // apx 批 T3（L10 · 比较/运算点的**声明面**查表）：聚合读的结果槽 IR 型恒 TI_INT
-        // （#2026-09-16-16：读点定型丢失声明型）⇒ 当操作数节点是聚合读**且声明面为 dex** 时，槽内
-        // 规范形式 = **精确（scaled）**（由本批写点保证）⇒ 按 TI_DEX_S 参与分流——否则
-        // 会落「TI_INT 操作数 I2F」支，把 scaled 整数当整数升 double（实测 b8 红 0）。
-        // **作用域**：只覆盖本分流点；**不改读点定型**（那是 #2026-09-16-16 的爆炸半径，#2026-09-16-29/#2026-09-16-16 另批）。
+        // apx 批 T3（L10 · 比较/运算点的声明信息查表）：聚合读的结果槽 IR 型恒 TI_INT
+        // （读点定型丢失声明型）-> 当操作数节点是聚合读且声明信息为 dex 时，槽内
+        // The canonical form is exact (scaled), guaranteed by the write points. It
+        // participates as TI_DEX_S; otherwise it falls into the TI_INT I2F branch
+        // and a scaled integer is converted to double as if it were an int.
+        // 作用域：只覆盖本分流点；不改读点定型（那是  的爆炸半径，/ 另批）。
         if lt == TI_INT && dex_decl_form_of_expr(left) != 0:
             lt = TI_DEX_S
         if rt == TI_INT && dex_decl_form_of_expr(right) != 0:
@@ -1708,13 +1715,13 @@ fn gen_expr(node: int) -> int:
                 fti = irv_type(left_var)
             else if is_ptr_var(right_var) != 0:
                 fti = irv_type(right_var)
-        // dex 运算分流（数值迁移 Task 4）：
-        //   有 TI_DEX（apx 形式）操作数 → binary64 快路径（SSE2，IEEE 754——apx 标准答案）
-        //   有 TI_DEX_S（定点形式）操作数 → 精确路径（缩放整数指令序列）
+        // dex 运算分流：
+        //   有 TI_DEX（apx 形式）操作数 -> binary64 快路径（SSE2，IEEE 754，apx 标准答案）
+        //   有 TI_DEX_S（定点形式）操作数 -> 精确路径（缩放整数指令序列）
         if lt == TI_DEX || rt == TI_DEX:
             fti = TI_DEX
-            // apx 路径操作数对齐：字面量 → 重发射 bits 常量；定点（TI_DEX_S）→
-            // I2F/S 转 bits（按精确值参与——apx 授权的近似）；int → I2F（隐式转换）
+            // apx 路径操作数对齐：字面量 -> 重发射 bits 常量；定点（TI_DEX_S）->
+            // I2F/S 转 bits（按精确值参与，apx 授权的近似）；int -> I2F（隐式转换）
             if lt == TI_DEX_S:
                 left_var = dex_scaled_to_bits(left_var, left)
             else if lt == TI_INT:
@@ -1732,13 +1739,13 @@ fn gen_expr(node: int) -> int:
             return v
         if lt == TI_DEX_S || rt == TI_DEX_S:
             fti = TI_DEX_S
-            // 精确路径操作数对齐：int → ×S（隐式缩放）；定点（TI_DEX_S）直接参与
+            // 精确路径操作数对齐：int -> ×S（隐式缩放）；定点（TI_DEX_S）直接参与
             if lt == TI_INT:
                 left_var = dex_scale_int(left_var)
             if rt == TI_INT:
                 right_var = dex_scale_int(right_var)
             if op == OP_MUL:
-                // (a×b)/S：先乘后缩回（中间值 a·b ≤ 9.2e18 → |值| ≤ 3.03e3 级，文档化）
+                // (a×b)/S：先乘后缩回（中间值 a·b ≤ 9.2e18 -> |值| ≤ 3.03e3 级，文档化）
                 p := new_ir_var("_dxm", TI_DEX_S)
                 emit(IR_BINARY, p, left_var, right_var, OP_MUL, TI_INT)
                 c := new_ir_var("_dxs", TI_INT)
@@ -1747,7 +1754,7 @@ fn gen_expr(node: int) -> int:
                 emit(IR_BINARY, v, p, c, OP_DIV, TI_INT)
                 return v
             if op == OP_DIV:
-                // (a×S)/b：先放大再除（中间值 a·S ≤ 9.2e18 → |a| ≤ 9.2e6，向零截断）
+                // (a×S)/b：先放大再除（中间值 a·S ≤ 9.2e18 -> |a| ≤ 9.2e6，向零截断）
                 c := new_ir_var("_dxs", TI_INT)
                 emit(IR_CONST, c, 1000000, 0, 0, TI_INT)
                 t := new_ir_var("_dxn", TI_DEX_S)
@@ -1771,7 +1778,7 @@ fn gen_expr(node: int) -> int:
                 emit(IR_BINARY, v, left_var, t4, OP_SUB, TI_INT)
                 return v
             if op == OP_EQ || op == OP_NE || op == OP_LT || op == OP_GT || op == OP_LE || op == OP_GE:
-                // 比较：缩放整数比较，结果 0/1（int——非 dex 值）
+                // 比较：缩放整数比较，结果 0/1（int，非 dex 值）
                 v := new_ir_var("cmp", TI_INT)
                 emit(IR_BINARY, v, left_var, right_var, op, TI_INT)
                 return v
@@ -1814,7 +1821,7 @@ fn gen_expr(node: int) -> int:
                     if forced2 != 0:
                         val_var = box_for_slot_flag(val_node, val_var, 1)
                     emit(IR_STORE, -1, lv, val_var, 0, 0)
-                    // 可选表示（R2 P4 Task 5）：赋值写点置位（同 LET——解包点据此分派）
+                    // 可选表示：赋值写点置位（同 LET，解包点据此分派）
                     if rpv0 >= 0:
                         if forced2 != 0:
                             emit_rep_set(rpv0, oe_boxed())
@@ -1824,7 +1831,7 @@ fn gen_expr(node: int) -> int:
                 gv := find_global(name_idx)
                 if gv >= 0:
                     val_var = dex_store_adjust(gv, val_var, val_node)
-                    // 容量批 T2：可选全局槽写点规范化（裸值装箱；目标不可选 ⇒ 零 IR）
+                    // 容量批 T2：可选全局槽写点规范化（裸值装箱；目标不可选 -> 零 IR）
                     if g_optrep_on != 0:
                         val_var = box_for_optional_slot(val_node, val_var, global_decl_ti(name_idx))
                     emit(IR_STORE, -1, gv, val_var, 0, 0)
@@ -1834,7 +1841,7 @@ fn gen_expr(node: int) -> int:
             obj_var = force_if_thunk(obj_var)
             fi := ast_data(target)
             // 容量批 T2：可选字段写点规范化（字段声明类型取自 checker 记的 ast_c 结构体名）
-            val_var = dex_slot_norm(val_var)   // apx 批 T3：聚合面恒精确（§0 推论）；先归形式后装箱
+            val_var = dex_slot_norm(val_var)   // apx 批 T3：聚合类型恒精确（0 推论）；先归形式后装箱
             if g_optrep_on != 0:
                 val_var = box_for_optional_slot(val_node, val_var, field_ti_of_node(target, fi))
             emit(IR_STORE_FIELD, -1, obj_var, val_var, fi, 0)
@@ -1844,7 +1851,7 @@ fn gen_expr(node: int) -> int:
             arr_var = force_if_thunk(arr_var)
             idx_node := ast_b(target)
             // 容量批 T2：可选元素写点规范化（元素类型 = 数组/切片声明类型的内层；
-            // 全局数组的声明面在 g_global_lets ⇒ ident 形目标回退查全局声明）
+            // 全局数组的声明信息在 g_global_lets -> ident 形目标回退查全局声明）
             et := elem_ti_of(arr_var)
             if et < 0:
                 anode := ast_a(target)
@@ -1853,7 +1860,7 @@ fn gen_expr(node: int) -> int:
             val_var = dex_slot_norm(val_var)   // apx 批 T3：元素槽恒精确
             if g_optrep_on != 0:
                 val_var = box_for_optional_slot(val_node, val_var, et)
-            // F1：写路径越界守卫钩子（修复前完全没有——见 compcert-round4 F1）
+            // Write-path bounds check hook.
             arr_len_lit : ., mut = arr_len_lit_of(arr_var)
             if ast_kind(idx_node) == EXPR_INT:
                 emit_string_lit_bounds(arr_var, ast_int_val(idx_node))
@@ -1870,11 +1877,11 @@ fn gen_expr(node: int) -> int:
         if ast_kind(target) == EXPR_UNARY && ast_c(target) == UOP_DEREF:
             ptr_var := gen_expr(ast_a(target))
             ptr_var = force_if_thunk(ptr_var)
-            // (A) 批（INV-2）：**指针写且 pointee 可选 ⇒ 装箱**——一致性由 INV-1（取址槽恒装箱）
-            // 与 E-2（聚合恒装箱）保证；越界面 = REP-2（指针算术）/ extern（登记）
-            // 批 5（opt-dex · R2 序修正）：**先归形式、后可选装箱**——装箱载荷须为规范形式；
-            // 反序时 `dex_slot_norm` 落在箱对象（TI_INT）上 = 空转（可选 dex 载荷留 bits）。
-            val_var = dex_slot_norm(val_var)   // apx 批 T3：pointee 槽恒精确（`*p = d` 实测 RED）
+            // (A) 批（INV-2）：指针写且 pointee 可选 -> 装箱，一致性由 INV-1（取址槽恒装箱）
+            // 与 E-2（聚合恒装箱）保证；越界 = REP-2（指针算术）/ extern（登记）
+            // 先归形式、后可选装箱，装箱携带值须为规范形式；
+            // 反序时 `dex_slot_norm` 落在箱对象（TI_INT）上 = 无效果（可选 dex 携带值留 bits）。
+            val_var = dex_slot_norm(val_var)   // apx: pointee slots are always exact; *p = d must not be approximated.
             if g_optrep_on != 0 && ti_is_optional(ptr_pointee_type(ptr_var)) != 0:
                 val_var = box_for_slot_flag(val_node, val_var, 1)
             emit(IR_STORE_PTR, -1, ptr_var, val_var, 0, ptr_access_width(ptr_var))
@@ -1893,7 +1900,7 @@ fn gen_expr(node: int) -> int:
                 idx_var := gen_expr(ast_b(inner))
                 idx_var = force_if_thunk(idx_var)
                 elem_ti : ., mut = TI_INT
-                // (A) 批：元素类型**声见面优先**（T2 的 elem_ti_of：decl 表优先，退回运行期类型）
+                // (A) 批：元素类型声明优先（T2 的 elem_ti_of：decl 表优先，退回运行期类型）
                 de := elem_ti_of(arr_var)
                 if de >= 0:
                     elem_ti = de
@@ -1903,20 +1910,20 @@ fn gen_expr(node: int) -> int:
                         arr_kind := get_type_kind(arr_ti)
                         if arr_kind == TYP_ARRAY || arr_kind == TYP_SLICE:
                             elem_ti = get_type_data(arr_ti)
-                // S3 同批（2026-09-20，裁 (甲)）：`&arr[i]` 与 `&x` 是**同一种语法现象（取址）** ⇒ 同判
-                // **`TYP_REF`**。两套模型并存（`&x`=REF 而 `&arr[i]`=PTR）= 本批在收的「声明与事实不符」的变体。
-                // **checker 侧已被 S1 覆盖**（`UOP_REF` 对非 `EXPR_IDENT` 操作数走 `else` 分支后同样
-                // `return alloc_type(TYP_REF, inner, is_mut)`）⇒ **本处是 ir_gen 侧唯一剩下的点**。
+                // S3 同批：`&arr[i]` 与 `&x` 是同一种语法现象（取址） -> 同判
+                // `TYP_REF`。两套模型并存（`&x`=REF 而 `&arr[i]`=PTR）= a mismatch between declaration and runtime fact.
+                // checker 侧已被 S1 覆盖（`UOP_REF` 对非 `EXPR_IDENT` 操作数走 `else` 分支后同样
+                // `return alloc_type(TYP_REF, inner, is_mut)`）-> 本处是 ir_gen 侧唯一剩下的点。
                 // `extra` 同 `&x`：取 `is_mut`（`&mut arr[i]` 与 `&arr[i]` 须同 `&x`/`&mut x` 一样可分）。
                 v := new_ir_var("addr", alloc_type(TYP_REF, elem_ti, ast_int_val(node)))
                 emit(IR_ADDR_INDEX, v, arr_var, idx_var, 3, 0)
                 return v
             op_var := gen_expr(ast_a(node))
             op_var = force_if_thunk(op_var)
-            // (A) 批：pointee 类型**声见面优先**（字面量推出的 IR 类型对可选槽退化为对象占位），
-            // 且**取址槽（INV-1 恒装箱）⇒ pointee 记为 TYP_OPTIONAL**（装载侧 W5 据此装箱；
+            // (A) 批：pointee 类型声明优先（字面量推出的 IR 类型对可选槽退化为对象占位），
+            // 且取址槽（INV-1 恒装箱）-> pointee 记为 TYP_OPTIONAL（装载侧 W5 据此装箱；
             // 非可选取址槽不受影响）
-            // 取址目标的**源名索引**取自操作数（EXPR_UNARY 的 int_val 是 is_mut 位，不是名索引）
+            // 取址目标的源名索引取自操作数（EXPR_UNARY 的 int_val 是 is_mut 位，不是名索引）
             ni_src : ., mut = -1
             if ast_kind(ast_a(node)) == EXPR_IDENT:
                 ni_src = ast_int_val(ast_a(node))
@@ -1924,26 +1931,26 @@ fn gen_expr(node: int) -> int:
             if pti < 0:
                 pti = irv_type(op_var)
             if ni_src >= 0:
-                // 全局槽：声明面在 g_global_lets（E-2 的 global_decl_ti）——局部表未登记全局。
-                // **只升级不降级**：全局声明可选 ⇒ 记可选；否则保留上面已得的类型
-                // （全局 IR var 本身可能已是可选类型，直接取声明面会把它覆盖成非可选 ⇒ W5 不装箱）。
+                // 全局槽：声明信息在 g_global_lets（E-2 的 global_decl_ti），局部表未登记全局。
+                // 只升级不降级：全局声明可选 -> 记可选；否则保留上面已得的类型
+                // （全局 IR var 本身可能已是可选类型，直接取声明信息会把它覆盖成非可选 -> W5 不装箱）。
                 gti := global_decl_ti(ni_src)
                 if ti_is_optional(gti) != 0:
                     pti = gti
             if g_optrep_on != 0 && ni_src >= 0 && addr_taken_of(ni_src) != 0:
-                // 取址目标具备可选能力（有表示位 / 声明为可选）⇒ pointee 记 TYP_OPTIONAL：
+                // 取址目标具备可选能力（有表示位 / 声明为可选）-> pointee 记 TYP_OPTIONAL：
                 // 装载侧 IR_STORE_PTR（W5）据 pointee 是否可选决定装箱。非可选槽 rep<0
-                // 且声明非可选 ⇒ 两种形态都不触发（零足迹）。
+                // 且声明非可选 -> 两种形态都不触发（零足迹）。
                 if irv_rep(op_var) >= 0 || ti_is_optional(pti) != 0:
                     if ti_is_optional(pti) == 0:
                         inner3 := pti
                         if inner3 < 0:
                             inner3 = TI_INT
                         pti = alloc_type(TYP_OPTIONAL, inner3, 0)
-            // S1 同批（2026-09-20）：**IR 变量型也必须一起改**——`checker` 侧只决定语义视图，
-            // 而 `region_check` / `provenance_verify` / `ptr_analysis` 读的是 **`irv_type()`**
-            // （本行）。只改 `checker.cr:2966` ⇒ 三道安全门看到的仍是 `TYP_PTR` ⇒
-            // S6 的 (a) 扩法会**对着一个永远不出现的 kind 生效**（静默空转）。
+            // S1 同批：IR 变量型也必须一起改，`checker` 侧只决定语义视图，
+            // 而 `region_check` / `provenance_verify` / `ptr_analysis` 读的是 `irv_type()`
+            // （这一行源码）。只改 `checker.cr:2966` -> 三道安全检查看到的仍是 `TYP_PTR` ->
+            // S6 的 (a) 扩法会对着一个永远不出现的 kind 生效（无效果且不报错）。
             // `extra` 同 checker：取 `is_mut`（即下面 emit 的 s2 实参，同一个值）。
             v := new_ir_var("ref", alloc_type(TYP_REF, pti, ast_int_val(node)))
             emit(IR_REF, v, op_var, ast_int_val(node), 0, 0)
@@ -1958,9 +1965,9 @@ fn gen_expr(node: int) -> int:
         op_var = force_if_thunk(op_var)
         vt : ., mut = TI_INT
         if op == UOP_NEG:
-            // 一元负保持数值操作数类型：dex 精确（TI_DEX_S）→ 缩放整数取负 ✓；
-            // dex apx（TI_DEX）→ 整型取负（binary64 符号位翻转未实现——既有 apx
-            // 限制，数值迁移 Task 4 文档化；apx 负值请用 0 - x 表达）
+            // 一元负保持数值操作数类型：dex 精确（TI_DEX_S）-> 缩放整数取负 ✓；
+            // dex apx（TI_DEX）-> 整型取负（binary64 符号位翻转未实现，既有 apx
+            // 限制，dex 定点文档；apx 负值请用 0 - x 表达）
             ot := irv_type(op_var)
             if ot == TI_DEX_S || ot == TI_DEX || ot == TI_INT:
                 vt = ot
@@ -2008,7 +2015,7 @@ fn gen_expr(node: int) -> int:
                 emit(IR_CALL, dest, packed0, 2, sched_go_ni, TI_INT)
                 return dest
             return gen_expr(body)
-        // Range go: go var start..end expr → collect results into array
+        // Range go: go var start..end expr -> collect results into array
         iter_ni := ast_c(node)  // loop variable name
         range_count := ast_b(range_node) - ast_a(range_node)
         if range_count <= 0:
@@ -2045,7 +2052,7 @@ fn gen_expr(node: int) -> int:
         is_inline_call := call_flags == CALL_FLAG_INLINE || call_flags == CALL_FLAG_MODULE + CALL_FLAG_INLINE
         arg_vars : string, mut
         arg_vars_cap : int, mut
-        // R2 P4 Task 5：实参**节点**并行表（表示面写信道按实参位判表示需要节点——
+        // 实参节点并记录表（表示方式写信道按实参位判表示需要节点，
         // 值 var 的类型不足以区分裸 T 与装箱 T?；方法调用时 arg 0 = 接收者节点）
         arg_nodes : string, mut
         arg_nodes_cap : int, mut
@@ -2153,10 +2160,10 @@ fn gen_expr(node: int) -> int:
                 emit(IR_CONST, v, ni, 0, 0, TI_STR)
                 return v
 
-            // @raw_int(expr): 显式转换——dex 表达式 → 其定点缩放整数原值（int）。
-            // 数值迁移 Task 4：dex.cr 的打印等辅助以此访问缩放表示的原始整数；
+            // @raw_int(expr): 显式转换，dex 表达式 -> 其定点缩放整数原值（int）。
+            // dex 定点：dex.cr 的打印等辅助以此访问缩放表示的原始整数；
             // apx 值（TI_DEX bits）先按边界规则转 scaled（F2I(bits×S)）。
-            // 结果必须复制为 TI_INT 定型变量——直接返回内层变量会携带其 dex 类型
+            // 结果必须复制为 TI_INT 定型变量，直接返回内层变量会携带其 dex 类型
             // （TI_DEX_S），后续 int 运算被误分派到 dex 精确路径。
             if str_eq(name, "raw_int") != 0:
                 inner_var := gen_expr(ast_a(first_arg))
@@ -2221,17 +2228,17 @@ fn gen_expr(node: int) -> int:
                     return v
                 return -1
 
-            // ── 2(a) 视图内建：**真直通**（零指令、零新变量）——同一个 64 位字，只换看法 ──
-            //    为什么**不**沿用本项目 `@raw_int` 的「新建变量 + IR_STORE」写法：
-            //      `@raw_int` 换来换去的是 dex↔int（**XMM/精确路径 vs GP** 两条真正不同的机器路径），
-            //      所以必须把值搬进一个「定型 int」的变量，否则下游按 dex 分派。
-            //      而 `int ↔ string` 在两条运行期腿上都是**同一个 GP 字**（原生：string = 指针；
-            //      解释器：string = intern 索引）——搬运不改变任何东西，只会多出一条 IR_STORE，
-            //      从而破坏「视图可完全擦除」这条判据（见 test_view_builtins.py ②：往返写法与
-            //      直写产物的 ELF 必须**逐字节一致**；实测「新建变量 + IR_STORE」版本不成立）。
-            //    类型在哪换：**checker 侧**（`@str_of` 返回 TI_STR / `@ptr_of` 返回 TI_INT），
-            //      即「表达式的类型」而不是「变量的类型」；调用边界按**被调函数形参类型**编组，
-            //      int/string 同属 GP 字 ⇒ 两侧一致。
+            // ── 2(a) 视图内建：真直通（零指令、零新变量），同一个 64 位字，只换看法 ──
+            //    为什么不沿用本项目 `@raw_int` 的新建变量 + IR_STORE写法：
+            //      `@raw_int` 换来换去的是 dex↔int（XMM/精确路径 vs GP 两条真正不同的机器路径），
+            //      所以必须把值搬进一个定型 int的变量，否则下游按 dex 分派。
+            //      而 `int ↔ string` 在两条运行期腿上都是同一个 GP 字（原生：string = 指针；
+            //      解释器：string = intern 索引），搬运不改变任何东西，只会多出一条 IR_STORE，
+            //      从而违反视图可完全擦除这条判据（见 test_view_builtins.py 2：往返写法与
+            //      直写产物的 ELF 必须逐字节一致.
+            //    类型在哪换：checker 侧（`@str_of` 返回 TI_STR / `@ptr_of` 返回 TI_INT），
+            //      即表达式的类型而不是变量的类型；调用边界按被调函数形参类型编组，
+            //      int/string 同属 GP 字 -> 两侧一致。
             if str_eq(name, "str_of") != 0 || str_eq(name, "ptr_of") != 0:
                 inner := gen_expr(ast_a(first_arg))
                 return force_if_thunk(inner)
@@ -2287,21 +2294,21 @@ fn gen_expr(node: int) -> int:
             w64(arg_nodes, ac * 8, ast_a(an))
             ac = ac + 1
             an = ast_b(an)
-        // dex 边界规则（数值迁移 Task 4 + 终审 M2）：dex 参数在调用点按被调方形式对齐——
+        // dex 边界规则：dex 参数在调用点按被调方形式对齐，
         //   Core 函数：一律精确形式（scaled），apx 位模式参数转 scaled（F2I(bits×S)）；
         //   extern 函数：C ABI 契约（module.cr：dex 编码 3 = binary64 跨 C 边界），
-        //     精确形式（scaled）实参转 binary64 bits（I2F/S——字面量重发射位模式常量）
-        // 覆盖面（apx 批 T3；维护者硬条件 1「逐形态收窄」）：环从「仅直调」放宽到
-        // **可解析到 Core/extern 函数的调用形态**——直调（EXPR_IDENT）/ 方法调用
+        //     精确形式（scaled）实参转 binary64 bits（I2F/S，字面量重发射位模式常量）
+        // 覆盖范围（apx 批 T3；维护者硬条件 1逐形态收窄）：环从仅直调放宽到
+        // 可解析到 Core/extern 函数的调用形态，直调（EXPR_IDENT）/ 方法调用
         // （EXPR_FIELD 且非模块调用）/ 模块限定调用（EXPR_FIELD 且 is_module_call）。
-        //   · 三者共用同一环：实参表与形参链**天然对齐**（方法调用的接收者占
-        //     arg_vars[0]，而 `self` 在方法形参链中亦占第 0 位——parser.cr:1378-1405
-        //     把 self 物化为 EXPR_PARAM）；`arg_nodes` 游标同步走 EXPR_ARG 链。
-        //   · **不是「凡调用都进环」**：EXPR_AT 内建在 `:1600` 已提前返回（独立路径）；
-        //     `find_func` 落空（func_ni < 0 / 名字非函数）⇒ 无声明面 ⇒ 环不进（零变化）。
-        //   · 实测依据：方法调用 b1/b1b 红 49/15 · 模块限定调用 m1b 红（ELF=4，期望 7）
-        //     —— 二者同因（旧门的 `EXPR_IDENT` 硬限制）。
-        // 批 8（条目 1）：环已抽为 `dex_align_call_args`（可复用——重定向后按实例签名再跑一遍）
+        //   · 三者共用同一环：实参表与参数列表天然对齐（方法调用的接收者占
+        //     arg_vars[0]，而 `self` 在方法参数列表中亦占第 0 位，parser.cr:1378-1405
+        //     把 self 物化为 EXPR_PARAM）；`arg_nodes` 游标同步走 EXPR_ARG 列表。
+        //   · 不是凡调用都进环：EXPR_AT 内建在 `:1600` 已提前返回（独立路径）；
+        //     `find_func` 落空（func_ni < 0 / 名字非函数）-> 无声明信息 -> 环不进（零变化）。
+        //   · Evidence:方法调用 b1/b1b 红 49/15，模块限定调用 m1b 红（ELF=4，期望 7），
+        //     二者同因（原检查中的 EXPR_IDENT 硬限制）。
+        // 环已抽为 `dex_align_call_args`（可复用，重定向后按实例签名再跑一遍）
         if func_ni >= 0:
             cfi := find_func(func_ni)
             if cfi >= 0:
@@ -2310,13 +2317,16 @@ fn gen_expr(node: int) -> int:
         if func_ni >= 0 && (ast_kind(func_node) == EXPR_IDENT):
             gen_fi := find_func(func_ni)
             if gen_fi >= 0 && fi_generic_count(gen_fi) > 0:
-                // ─── R2 P3 Task 5（Step 4）：实例键类型项化 ───
-                // 优先：checker 登记的**调用点绑定段**（g_gen_binds；节点 int_val = 段起始+1，
-                // 0 = 无）——按被调方泛型形参**声明序**给 ti，键 = `inst_key_of_ti` 规范结构名
-                // （含命名/应用实参真身份），替换走 ti 路径（monomorph.cr）。前置 = 段长与形参
-                // 数一致 + 全绑定 + 全具体（否则回落旧路径；半解实例比旧路径更坏）。
-                // 回落（旧路径，**逐字保留**）：键由**实参 IR 变量类型**拼名串（非原生 → "int"
-                // 兜底），替换走名字路径——`gen_create_instance(func, args, -1)`。
+                // ─── 实例键类型项化 ───
+                // Preferred path: the checker's call-site binding segment (g_gen_binds;
+                // node int_val = segment start + 1, 0 = none). Record ti in the callee's
+                // generic parameter declaration order, build the key with
+                // inst_key_of_ti, and replace through the ti path (monomorph.cr). The
+                // segment length must match the parameter count and all entries must be
+                // bound and concrete.
+                // Fallback: build the key from argument IR variable types (non-primitive
+                // becomes "int"), and replace through the name path with
+                // gen_create_instance(func, args, -1).
                 gc_g := fi_generic_count(gen_fi)
                 biv := ast_int_val(node)
                 type_args : ., mut = ""
@@ -2348,7 +2358,8 @@ fn gen_expr(node: int) -> int:
                             if ok_b != 0:
                                 bstart = bs
                 if bstart < 0:
-                    // 旧路径：逐实参类型名串（**不得**改动——checker 未给绑定时的唯一退路）
+                    // Fallback: build the key from argument type names when the checker
+                    // provided no bindings.
                     type_args = ""
                     ai : ., mut = 0
                     loop:
@@ -2383,9 +2394,9 @@ fn gen_expr(node: int) -> int:
                     spec_ni = gen_find_or_create(gen_fi, type_args)
                 if spec_ni >= 0:
                     func_ni = fi_name(spec_ni)
-                    // 批 8（条目 1）：泛型声明的形参是 `T?`（inner = 泛型参数 ⇒ 判据**假**）⇒ 上面的环
-                    // 对泛型实参空转；重定向后用**实例**形参链（inner = 具体 dex ⇒ 判据真）再跑一遍。
-                    // 幂等性见 `dex_align_call_args` 头注（已转换者 IR 型 = TI_DEX_S ⇒ 不重转）。
+                    // 泛型声明的形参是 `T?`（inner = 泛型参数 -> 判据假）-> 上面的环
+                    // 对泛型实参无效果；重定向后用实例参数列表（inner = 具体 dex -> 判据真）再跑一遍。
+                    // 幂等性见 `dex_align_call_args` 头注（已转换者 IR 型 = TI_DEX_S -> 不重转）。
                     cfi_i := find_func(func_ni)
                     if cfi_i >= 0:
                         dex_align_call_args(cfi_i, ac, arg_vars, arg_nodes, arg_nodes_cap)
@@ -2438,15 +2449,13 @@ fn gen_expr(node: int) -> int:
                 emit(IR_DYN_DISPATCH, dyn_dest, dyn_receiver, func_ni, 0, 0)
                 return dyn_dest
 
-        // Hotpatch function call: emit IR_HOTPATCH_ROUTE instead of IR_CALL
-        // R2 P5 Task 2（F1 裁决）：第 6 实参**必须显式给**。修复前本调用点只传 5 参，
-        // 而 `emit` 形参 6 个 ⇒ 第 6 参 = **残留寄存器值**（corec 由 Python bootstrap
-        // 生成：bootstrap/corec/backend/x86_64_stack_asm.py:222-226 只为实际存在的
-        // 实参写寄存器，r9 保持前序计算的残留 ⇒ 实测同一语料两种程序形状得 0 / 4 两值；
-        // 自托管语义下缺省实参 = 0）。op39 的类型面 = 「无」（Task 0 表 A），故显式 0。
-        // 已裁决偏差登记：含 hotpatch 的语料该节点码 4→0（该值本是垃圾、零消费者；
-        // canary 语料 ptr_arith 不含 hotpatch ⇒ 不受影响）。把未定义行为烘进分类表
-        // 不可接受——分类表要求「每格有依据」。
+        // Hotpatch function call: emit IR_HOTPATCH_ROUTE instead of IR_CALL.
+        // The sixth argument must be explicit. emit has six parameters; this call
+        // site passes 0 because op39 has no type face. Previously the bootstrap
+        // generated only the present arguments and left r9 as a stale value, which
+        // made the same input produce 0 or 4 depending on program shape. Undefined
+        // values must not be baked into the classification table; every cell needs
+        // evidence.
         if func_ni >= 0 && is_hotpatch_func(func_ni) != 0:
             emit(IR_HOTPATCH_ROUTE, dest, func_ni, first_arg_var, ac, 0)
             return dest
@@ -2458,8 +2467,8 @@ fn gen_expr(node: int) -> int:
                 if fn_node >= 0 && ast_kind(fn_node) == EXPR_EXTERN:
                     emit(IR_CALL_EXTERN, dest, func_ni, first_arg_var, ac, 0)
                     return dest
-        // 可选表示（R2 P4 Task 5）：实参表示写信道——逐实参位写（被调序言最早处读；
-        // 写点 = 全部实参求值之后、IR_CALL 紧邻之前 ⇒ 嵌套调用不覆写信道）。
+        // 可选表示：实参表示写信道，逐实参位写（被调序言最早处读；
+        // 写点 = 全部实参求值之后、IR_CALL 紧邻之前 -> 嵌套调用不覆写信道）。
         if g_optrep_on != 0 && g_optrep_arg_count > 0:
             ai3 : ., mut = 0
             loop:
@@ -2474,10 +2483,10 @@ fn gen_expr(node: int) -> int:
                 emit_rep_set(g_optrep_arg_cell0 + ai3, rep_enc_of_expr(an3, av3))
                 ai3 = ai3 + 1
         emit(IR_CALL, dest, first_arg_var, ac, func_ni, call_ti)
-        // 可选表示（R2 P4 Task 5）：被调返回可选 ⇒ 1) 读返回信道（读点必须**紧跟真实
-        // 调用**：调用点与返回点同进程同栈、其间无写入）；2) **禁惰性 thunk**——thunk 把
-        // 调用推迟到 force 点，读点即悬空（实测踩过：`v := g()` 的 g 判纯 ⇒ thunk ⇒ 表示位
-        // 回落装箱 ⇒ 裸值返回解包崩）。代价 = 仅「返回可选」的被调不做 thunk 延迟。
+        // 可选表示：被调返回可选 -> 1) 读返回信道（读点必须紧跟真实
+        // 调用：调用点与返回点同进程同栈、其间无写入）；2) 禁惰性 thunk，thunk 把
+        // 调用推迟到 force 点，读点即悬空(for example: `v := g()` 的 g 判纯 -> thunk -> 表示位
+        // 回落装箱 -> 裸值返回解包崩）。代价 = 仅返回可选的被调不做 thunk 延迟。
         ret_opt : ., mut = 0
         if g_optrep_on != 0 && g_optrep_ret_cell >= 0:
             ret_opt = callee_ret_optional(func_ni)
@@ -2687,10 +2696,10 @@ fn gen_expr(node: int) -> int:
         // Allocate a result variable for the match expression value
         result_var := new_ir_var("match_res", TI_INT)
         emit(IR_ALLOC, result_var, 0, 0, 0, TI_INT)
-        // 容量批 T2（裁-CAP-1 (a) 的 match 面 = 裁决 (i) 表示位案）：结果槽配**表示位**
-        // （与既有局部机制同源；默认 1 = 装箱），各臂写点置位 ⇒ 消费点（LET/返回/解包）
-        // 自动继承正确表示。修复前：臂写裸值时无表示 ⇒ 消费侧落 `oe_boxed()` 装箱假定
-        // ⇒ 双路径 139（T1 实测 e2_matchres_bare）。
+        // The result slot gets a representation bit, defaulting to 1 (boxed).
+        // Each arm sets it at its write point, so consumers (LET, return, unpack)
+        // inherit the correct representation. Without the bit, an arm writing a
+        // bare value would make the consumer assume oe_boxed().
         mrep_var : ., mut = -1
         if g_optrep_on != 0:
             mrep_var = new_ir_var("match_res_rep", TI_INT)
@@ -2709,7 +2718,7 @@ fn gen_expr(node: int) -> int:
             is_wildcard := 0
             if pat_kind == EXPR_WILDCARD:
                 is_wildcard = 1
-            // 可选表示位（R2 P4 Task 5）：臂条件与臂体绑定共用（声明在臂作用域）
+            // 可选表示位：臂条件与臂体绑定共用（声明在臂作用域）
             rep_v : ., mut = -1
             body_lbl := new_label()
             fall_lbl : ., mut = merge_lbl
@@ -2720,11 +2729,11 @@ fn gen_expr(node: int) -> int:
                 emit(IR_JUMP, -1, body_lbl, 0, 0, 0)
             else if pat_kind == EXPR_ENUMPAT:
                 variant_ni := get_variant_name_idx(ast_a(arm_pat))
-                // R2 P4 Task 5：**解包侧判表示**——scrutinee 配表示位（可选槽）时按位分派：
-                //   裸值（0）→ 值即载荷：Some 模式命中臂体（**不读 tag**——裸值非对象，
+                // 解包侧判表示，scrutinee 配表示位（可选槽）时按位分派：
+                //   裸值（0）-> 值即携带值：Some 模式命中臂体（不读 tag，裸值非对象，
                 //   读 tag 即 SIGSEGV = 原红态）；None 模式不命中（裸值非 null）。
-                //   装箱（≠0）→ 既有 tag 分派（逐字不变）。
-                // 无表示位（非可选槽 / 未覆盖面）→ 既有路径逐字不变（装箱假定）。
+                //   装箱（≠0）-> 既有 tag 分派（逐字不变）。
+                // 无表示位（非可选槽 / 未覆盖情形）-> 既有路径逐字不变（装箱假定）。
                 if g_optrep_on != 0 && match_val >= 0:
                     rep_v = irv_rep(match_val)
                 if rep_v < 0:
@@ -2751,8 +2760,8 @@ fn gen_expr(node: int) -> int:
                         emit(IR_BINARY, isb, rep_v, zb, OP_EQ, 0)
                     else:
                         emit(IR_BINARY, isb, rep_v, zb, OP_NE, 0)
-                    // Some：裸 → 直接命中；装箱 → 落 tag 比对。None：裸 → 不命中（落 fall）；
-                    // 装箱 → 落 tag 比对。
+                    // Some：裸 -> 直接命中；装箱 -> 落 tag 比对。None：裸 -> 不命中（落 fall）；
+                    // 装箱 -> 落 tag 比对。
                     if is_some_pat != 0:
                         emit(IR_BRANCH, -1, isb, body_lbl, tag_lbl, 0)
                     else:
@@ -2793,12 +2802,12 @@ fn gen_expr(node: int) -> int:
                     if fi >= sub_count:
                         break
                     fv := new_ir_var("fld", TI_INT)
-                    // TODO #2026-09-16-16 批 2：载荷读定型取**声明面形式**（dex 载荷 ⇒ TI_DEX_S）
-                    // 批 5（opt-dex · G2）：optional 声明的载荷（内建 `Some` 面无枚举行 ⇒
-                    // `agg_payload_read_form` 恒 TI_INT）改由 **scrutinee 的声明行**补判——
+                    //  携带值读定类型取声明信息形式（dex 携带值 -> TI_DEX_S）
+                    // optional 声明的携带值（内建 `Some` 类型无枚举行 ->
+                    // `agg_payload_read_form` 恒 TI_INT）改由 scrutinee 的声明行补判，
                     // `irv_decl_ti(match_val)` 是 LET 期登记的 `TYP_OPTIONAL` 行（`:2573`），
-                    // `dex_opt_slot_ti` 纯表读（**零 alloc_type** = G2 红线）。否则 `dex?`
-                    // 载荷入 dex 运算会被当 int 再 ×S（`dex_scale_int`）。
+                    // `dex_opt_slot_ti` 纯表读(zero alloc_type, a G2 constraint)。否则 `dex?`
+                    // 携带值入 dex 运算会被当 int 再 ×S（`dex_scale_int`）。
                     fv_ti : ., mut = agg_payload_read_form(arm_pat, fi)
                     if fv_ti == TI_INT && match_val >= 0:
                         if dex_opt_slot_ti(irv_decl_ti(match_val)) != 0:
@@ -2807,9 +2816,9 @@ fn gen_expr(node: int) -> int:
                     if rep_v < 0:
                         emit(IR_LOAD_FIELD, fv, match_val, 0, fi + 1, 0)  // +1 for tag offset
                     else:
-                        // 解包侧判表示：裸值（0）→ 槽值**即**载荷（直取，不解引用）；
-                        // 装箱（≠0）→ 字段 fi+1（既有语义）。裸分支须**跳过**装
-                        // 箱分支的字段读（end_lbl）——否则裸值仍被解引用（原红态）。
+                        // 解包侧判表示：裸值（0）-> 槽值即携带值（直取，不解引用）；
+                        // 装箱（≠0）-> 字段 fi+1（既有语义）。裸分支须跳过装
+                        // 箱分支的字段读（end_lbl），否则裸值仍被解引用（原红态）。
                         bare_lbl := new_label()
                         boxed_lbl := new_label()
                         end_lbl := new_label()
@@ -2832,7 +2841,7 @@ fn gen_expr(node: int) -> int:
             body_val = force_if_thunk(body_val)
             if body_val >= 0:
                 emit(IR_STORE, -1, result_var, body_val, 0, 0)
-                // 容量批 T2：结果槽表示位置位（同 LET/赋值的写点口径——解包点据此分派）
+                // 容量批 T2：结果槽表示位置位（同 LET/赋值的写点口径，解包点据此分派）
                 if mrep_var >= 0:
                     emit_rep_set(mrep_var, rep_enc_of_expr(arm_body, body_val))
             pop_ir_scope()
@@ -2858,22 +2867,22 @@ fn gen_expr(node: int) -> int:
         declared_ti : ., mut = TI_UNIT
         if type_node >= 0:
             declared_ti = res_type_node(type_node)
-        // 容量批 T2：登记声明类型（元素写点判定目标元素类型用——声明的 `[T?;N]` 才是
+        // 容量批 T2：登记声明类型（元素写点判定目标元素类型用，声明的 `[T?;N]` 才是
         // 权威；字面量推出的元素类型对可选元素退化为对象占位 TI_UNIT）
         if g_optrep_on != 0 && type_node >= 0:
             irv_set_decl_ti(var, declared_ti)
-        // 可选表示（R2 P4 Task 5）：显式 `T?` 标注的槽配表示位（默认 1 = 装箱）。
-        // 推断槽（无标注）在初值求值后按初值表示面补配（`v := g()` / `x := Some(1)`）。
+        // 可选表示：显式 `T?` 标注的槽配表示位（默认 1 = 装箱）。
+        // 推断槽（无标注）在初值求值后按初值表示补配（`v := g()` / `x := Some(1)`）。
         rep_var : ., mut = opt_rep_slot(declared_ti, istr_get(var_ni))
         if rep_var >= 0:
             irv_set_rep(var, rep_var)
         // `dex` is the source-level type; its IR slot has two forms. Only an
         // explicitly tagged `apx` declaration uses binary64 bits.
         target_ti : ., mut = declared_ti
-        // 批 5（opt-dex · R1）：`dex?` 声明的**规范槽形式 = scaled**（G1 裁决：装箱对象是聚合类
-        // 载体、无形式位可挂；rep 位 1 比特承载不了 2 位信息）⇒ 槽型由**声明**给定。
-        // 修复前：门 `declared_ti == TI_DEX` 对 `dex?`（TYP_OPTIONAL 行）不触发，槽型退化为
-        // 「随值」（:2577-2579 的值型采纳）⇒ apx 源直接把 bits 存进槽（实测 ELF/interp 15）。
+        // `dex?` 声明的规范槽形式 = scaled（G1 决定：装箱对象是聚合类
+        // 表示方式、无形式位可挂；rep 位 1 比特承载不了 2 位信息）-> 槽型由声明给定。
+        // The declared type determines the slot form. A dex? declaration uses the
+        // scaled form so the slot type does not fall back to the value type.
         dex_opt : ., mut = 0
         if type_node >= 0:
             dex_opt = dex_opt_type_node(type_node)
@@ -2893,7 +2902,7 @@ fn gen_expr(node: int) -> int:
                 if sz > 0:
                     emit(IR_ALLOC_ARRAY, var, sz, 8, 0, 0)
                     is_arr = 1
-                    // F1：记录数组类型（TYP_ARRAY extra=size）——直接索引越界
+                    // F1：记录数组类型（TYP_ARRAY extra=size），直接索引越界
                     // 检查（arr_len_lit_of）依赖该长度信息。
                     irv_set_type(var, res_type_node(type_node))
         // For dyn vars with initializer: skip allocation (value is packed below)
@@ -2903,8 +2912,8 @@ fn gen_expr(node: int) -> int:
         if val_node >= 0:
             val_var := gen_expr(val_node)
             val_var = force_if_thunk(val_var)
-            // 可选表示：推断槽按初值表示面补配表示位（有表示位可拷贝 / Some/None 构造 /
-            // 未覆盖面回落值——回落配位无害：默认 1 = 装箱 = 既有语义）
+            // 可选表示：推断槽按初值表示补配表示位（有表示位可拷贝 / Some/None 构造 /
+            // 未覆盖情形回落值，回落配位无害：默认 1 = 装箱 = 既有语义）
             if rep_var < 0 && g_optrep_on != 0 && rep_enc_of_expr(val_node, val_var) != oe_bare():
                 rep_var = new_ir_var(istr_get(var_ni) + "_rep", TI_INT)
                 irv_set_rep(var, rep_var)
@@ -2915,8 +2924,8 @@ fn gen_expr(node: int) -> int:
             if declared_ti == TI_DEX:
                 val_var = dex_store_adjust(var, val_var, val_node)
             else if dex_opt != 0:
-                // 批 5（opt-dex · R1）：`dex?` 初值入箱/入槽前先归规范形式（bits → scaled）。
-                // 后续所有写点（赋值 / 指针写 / 聚合 / 装箱）都是「目标槽型驱动」⇒ 槽型定为
+                // `dex?` 初值入箱/入槽前先归规范形式（bits -> scaled）。
+                // 后续所有写点（赋值 / 指针写 / 聚合 / 装箱）都是目标槽型驱动-> 槽型定为
                 // TI_DEX_S 后既有的 dex_store_adjust 路径自动生效（无需逐点补接线）。
                 val_var = dex_slot_norm(val_var)
             else if declared_ti == TI_UNIT:
@@ -2935,27 +2944,27 @@ fn gen_expr(node: int) -> int:
                 return dyn_var
              // Preserve the initializer type so later operations can select
              // type-specific lowering (notably string + -> concat()).
-             // 批 5（opt-dex · R1）：`dex?` 槽**不**采纳值型（槽型由声明给定 TI_DEX_S）——
+             // `dex?` 槽不采纳值型（槽型由声明给定 TI_DEX_S），
              // 否则 `x : dex? = Some(...)`（值 = 箱对象 TI_INT）会把槽型改回 TI_INT，
-             // 令「裸载荷 = scaled」这一规范面在下游再次丢失。
+             // 令裸携带值 = scaled这一规范在下游再次丢失。
             if declared_ti != TI_DEX && dex_opt == 0:
                 irv_set_type(var, irv_type(val_var))
-            // F11：切片长度沿 LET 初始化传播（s := arr[0..2] → s 带长度 2；
-            // 运行时界 slice 同步长度变量——slice_len_copy_to）
+            // F11：切片长度沿 LET 初始化传播（s := arr[0..2] -> s 带长度 2；
+            // 运行时界 slice 同步长度变量，slice_len_copy_to）
             slice_len_copy_to(var, val_var)
-            // (A) T3（裁-T3-1）：**推断**声明（无注解）但值面已判可选聚合 ⇒ 声明面继承到
-            // **绑定 var**（字面量/切片站点登记在**值 var** 上；元素写点的目标是绑定 var）
+            // (A) T3：推断声明（无注解）但值已判可选聚合 -> 声明信息继承到
+            // 绑定 var（字面量/切片站点登记在值 var 上；元素写点的目标是绑定 var）
             if g_optrep_on != 0 && type_node < 0:
                 vd := irv_decl_ti(val_var)
                 if vd >= 0:
                     irv_set_decl_ti(var, vd)
-            // (A) 批（INV-1）：**取址槽恒装箱**——该槽地址被取过 ⇒ 写点装箱 + 表示位钉 1
+            // (A) INV-1：取址槽恒装箱，该槽地址被取过 -> 写点装箱 + 表示位固定为 1
             //（指针写/直接写两路的表示必须一致；解包侧恒走装箱分支）
             forced := g_optrep_on != 0 && rep_var >= 0 && addr_taken_of(var_ni) != 0
             if forced != 0:
                 val_var = box_for_slot_flag(val_node, val_var, 1)
             emit(IR_STORE, -1, var, val_var, 0, 0)
-            // 可选表示：写点置位（静态已知常量 / 源表示位拷贝）——解包点据此分派
+            // 可选表示：写点置位（静态已知常量 / 源表示位拷贝），解包点据此分派
             if rep_var >= 0:
                 if forced != 0:
                     emit_rep_set(rep_var, oe_boxed())
@@ -2989,15 +2998,15 @@ fn gen_expr(node: int) -> int:
             val_node := ast_a(node)
             val_var := gen_expr(val_node)
             val_var = force_if_thunk(val_var)
-            // dex 边界规则（数值迁移 Task 4）：函数返回一律精确形式（缩放整数）——
+            // dex 边界规则：函数返回一律精确形式（缩放整数），
             // apx 位模式在返回点转 scaled（F2I(bits×S)，按定点 6 位舍入）
-            // 批 5（opt-dex · R3）：`-> dex?` 的 `g_cur_ret_ti` 亦为 0（`unpack_type` 塌陷）
-            // ⇒ 追加**返回类型节点**判据（`g_cur_ret_dex_opt`，由 ir_gen_func 设置）——
-            // 否则 apx 源经 `-> dex?` 返回时不转换（实测 ELF/interp 双路径 15）。
+            // `-> dex?` 的 `g_cur_ret_ti` 亦为 0（`unpack_type` 塌陷）
+            // -> 追加返回类型节点判据（`g_cur_ret_dex_opt`，由 ir_gen_func 设置），
+            // 否则 apx 源经 `-> dex?` 返回时不转换(both ELF and interpreter paths fail)。
             if (g_cur_ret_ti == TI_DEX || g_cur_ret_dex_opt != 0) && irv_type(val_var) == TI_DEX:
                 val_var = dex_bits_to_scaled(val_var)
-            // 可选表示（R2 P4 Task 5）：返回点写返回信道——值求值**完成后**、IR_RETURN
-            // 紧邻处（其间无调用 ⇒ 嵌套调用不覆写信道；调用点紧跟 IR_CALL 读）。
+            // 可选表示：返回点写返回信道，值求值完成后、IR_RETURN
+            // 紧邻处（其间无调用 -> 嵌套调用不覆写信道；调用点紧跟 IR_CALL 读）。
             if g_cur_ret_opt != 0:
                 emit_rep_set(g_optrep_ret_cell, rep_enc_of_expr(val_node, val_var))
             emit(IR_RETURN, -1, val_var, 0, 0, 0)
@@ -3009,16 +3018,16 @@ fn gen_expr(node: int) -> int:
     if ast_kind(node) == EXPR_FIELD:
         obj_var := gen_expr(ast_a(node))
         obj_var = force_if_thunk(obj_var)
-        // ── S4（2026-09-21）：**镜像 checker 的 REF 自动解引用**（`checker.cr:3725`）──
-        // checker 对 `TYP_REF` 对象解包后按结构体查字段 ⇒ **接受** `p.v`；而本分支此前
-        // **不发解引用** ⇒ `IR_LOAD_FIELD` 把「地址」当聚合读 ⇒ **静默错值**
-        // （实测：`p := &s; p.v` 得 **8** 而非 42；`(*p).v` 得 42 ⇒ 缺陷就在缺这一条）。
+        // Mirror the checker's automatic REF dereference. For a TYP_REF object,
+        // the checker unwraps the reference before struct field lookup and accepts
+        // p.v. This branch must emit the dereference; otherwise IR_LOAD_FIELD reads
+        // the address as an aggregate and produces a wrong value.
         //
-        // **只对 `TYP_REF`**：`PTR` **不解** —— 与 checker 一致（实测 `p as *S` 后 `p.v` = **check=1 拒绝**）。
-        // `&mut x` 同为 `TYP_REF`（仅 `extra` = mut 标记不同）⇒ 本判定**按 kind、不看 extra** ⇒ 一并覆盖。
+        // 只对 `TYP_REF`：`PTR` 不解，与 checker 一致(`p as *S` followed by `p.v` is rejected)。
+        // `&mut x` 同为 `TYP_REF`（仅 `extra` = mut 标记不同）-> 本判定按 kind、不看 extra -> 一并覆盖。
         //
-        // 发射序**逐字镜像** `UOP_DEREF` 分支（`IR_DEREF` + `ptr_pointee_type` + `ptr_access_width`）
-        // ——该序已被 `(*p).v`（实测 **42** ✓）证明正确 ⇒ 不自创新序。
+        // 发射序逐字镜像 UOP_DEREF 分支（IR_DEREF + ptr_pointee_type +
+        // ptr_access_width）。该序已被 (*p).v(value 42)证明正确，不另创新序。
         if get_type_kind(irv_type(obj_var)) == TYP_REF:
             dv := new_ir_var("autoderef", ptr_pointee_type(obj_var))
             emit(IR_DEREF, dv, obj_var, -1, 0, ptr_access_width(obj_var))
@@ -3029,8 +3038,8 @@ fn gen_expr(node: int) -> int:
             fi = fi - 1  // numeric tuple index (parser stored +1)
         else:
             fi = ast_data(node)   // struct field index (from checker)
-        // TODO #2026-09-16-16 批 2：读点定型取**声明面形式**（dex 声明 ⇒ TI_DEX_S）——零 alloc 节点判，
-        // 非 dex 形态恒 TI_INT ⇒ 零足迹。**必须在 fi 解出之后**（字段位序）。
+        //  读点定类型取声明信息形式（dex 声明 -> TI_DEX_S），零 alloc 节点判，
+        // 非 dex 形态恒 TI_INT -> 零足迹。必须在 fi 解出之后（字段位序）。
         irv_set_type(v, agg_field_read_form(node, fi))
         emit(IR_LOAD_FIELD, v, obj_var, 0, fi, 0)
         return v
@@ -3042,7 +3051,7 @@ fn gen_expr(node: int) -> int:
         idx_node := ast_b(node)
         idx_kind := ast_kind(idx_node)
         arr_len_lit : ., mut = arr_len_lit_of(arr_var)
-        // Range index: arr[low..high] → slice (pointer to arr[low])
+        // Range index: arr[low..high] -> slice (pointer to arr[low])
         if idx_kind == EXPR_RANGE:
             low_node := ast_a(idx_node)
             high_node := ast_b(idx_node)
@@ -3050,8 +3059,9 @@ fn gen_expr(node: int) -> int:
             low_var = force_if_thunk(low_var)
             high_var := gen_expr(high_node)
             high_var = force_if_thunk(high_var)
-            // F11：创建期守卫——high ≤ arr_len、low ≤ arr_len（low ≤ high 的
-            // 运行时检查需切片运行时长度，见报告设计缺口；字面量界由 checker 拦截）。
+            // Creation checks: high <= arr_len and low <= arr_len. The low <= high
+            // run-time check needs the slice's run-time length, a known design gap;
+            // literal bounds are rejected by the checker.
             if arr_len_lit > 0:
                 if ast_kind(low_node) == EXPR_INT:
                     if ast_int_val(low_node) < 0 || ast_int_val(low_node) > arr_len_lit:
@@ -3065,15 +3075,15 @@ fn gen_expr(node: int) -> int:
                     emit(IR_BOUNDS_CHECK, -1, high_var, arr_len_lit + 1, 0, 0)
             v := new_ir_var("slice", TI_INT)
             emit(IR_SLICE, v, arr_var, low_var, high_var, 0)
-            // (A) T3（裁-T3-1）：源数组元素**可选** ⇒ 切片登记声明面（切片元素写点据此装箱；
-            // 非可选不登记 ⇒ 零足迹。切片 var 的 IR 型面不动——避免影响 dtype/宽度等消费者）
+            // (A) T3：源数组元素可选 -> 切片登记声明信息（切片元素写点据此装箱；
+            // 非可选不登记 -> 零足迹。切片 var 的 IR 类型信息不动，避免影响 dtype/宽度等消费者）
             if g_optrep_on != 0:
                 sti := elem_ti_of(arr_var)
                 if ti_is_optional(sti) != 0:
                     irv_set_decl_ti(v, alloc_type(TYP_SLICE, sti, 0))
-            // F11：字面量界 → 登记切片编译期长度（解引用处 arr_len_lit 用）；
-            // 运行时界 → 计算 len = high − low 并登记长度变量（解引用处发射
-            // 动态边界检查——见 emit_slice_*_bounds）。
+            // F11：字面量界 -> 登记切片编译期长度（解引用处 arr_len_lit 用）；
+            // 运行时界 -> 计算 len = high − low 并登记长度变量（解引用处发射
+            // 动态边界检查，见 emit_slice_*_bounds）。
             if ast_kind(low_node) == EXPR_INT && ast_kind(high_node) == EXPR_INT:
                 sl := ast_int_val(high_node) - ast_int_val(low_node)
                 if sl >= 0:
@@ -3084,7 +3094,7 @@ fn gen_expr(node: int) -> int:
                 slice_len_var_set(v, len_var)
             return v
         v := new_ir_var("elem", TI_INT)
-        // TODO #2026-09-16-16 批 2：元素读定型取**声明面形式**（元素 ti 为 dex ⇒ TI_DEX_S；纯表读）
+        //  元素读定类型取声明信息形式（元素 ti 为 dex -> TI_DEX_S；纯表读）
         irv_set_type(v, agg_elem_read_form(arr_var))
         if idx_kind == EXPR_INT:
             emit_string_lit_bounds(arr_var, ast_int_val(idx_node))
@@ -3112,10 +3122,10 @@ fn gen_expr(node: int) -> int:
                 break
             val_var := gen_expr(ast_a(an))
             val_var = force_if_thunk(val_var)
-            // 容量批 T2：可选载荷写点规范化（载荷类型 = 变体声明面；`Some`/`None` 关键字
-            // 形不带变体行 ⇒ enum_payload_ti 返回 -1 ⇒ 原样，不装箱）
-            // 批 5（opt-dex · R2 序修正）：先归形式、后装箱（同上——反序 = 漏斗空转）
-            val_var = dex_slot_norm(val_var)   // apx 批 T3：载荷槽恒精确
+            // 容量批 T2：可选携带值写点规范化（携带值类型 = 变体声明信息；`Some`/`None` 关键字
+            // 形不带变体行 -> enum_payload_ti 返回 -1 -> 原样，不装箱）
+            // 先归形式、后装箱（同上，反序 = 汇聚点无效果）
+            val_var = dex_slot_norm(val_var)   // apx 批 T3：携带值槽恒精确
             if g_optrep_on != 0:
                 val_var = box_for_optional_slot(ast_a(an), val_var, enum_payload_ti(name_idx, ai))
             emit(IR_STORE_FIELD, -1, s, val_var, ai + 1, 0)  // +1 for tag offset
@@ -3127,11 +3137,11 @@ fn gen_expr(node: int) -> int:
     if ast_kind(node) == EXPR_STRUCT:
         // F5 契约（见 parser.cr struct 分支）：a=name idx、b=首 wrapper（连续）、c=字段数；
         // wrapper.a=字段值节点（gen_expr 对 EXPR_NONE 前向）。逐 wrapper 解引用，不得按偏移
-        // 直取相邻节点当字段值——复合字段值子树占多槽会错位（静默错误值）。
-        // TODO #2026-09-11-11 ①（名字绑定）：wrapper.b=字段名 idx（parser 写入；-1 = 无名字信息 → 位序
-        // 回落）。**存字段位按名字解出**（与 Python bootstrap 的 gen_struct_lit 同语义）——
-        // 修复前按 wrapper 序直取 fi = 声明位序绑定 ⇒ P{b:11, a:22} 静默得 a=11。发出顺序
-        // 仍是**源序**（求值顺序 = 源码书写顺序，与 bootstrap 一致）。
+        // 直取相邻节点当字段值，复合字段值子树占多槽会错位（错误值且不报错）。
+        //  1（名字绑定）：wrapper.b=字段名 idx（parser 写入；-1 = 无名字信息 -> 位序
+        // 回落）。存字段位按名字解出（与 Python bootstrap 的 gen_struct_lit 同语义），
+        // Field values bind by name, not by declaration order. Evaluation order
+        // stays source order, the same as the bootstrap.
         name_ni := ast_a(node)
         s := new_ir_var("struct", TI_UNIT)
         emit(IR_ALLOC_STRUCT, s, 0, 0, name_ni, 0)
@@ -3152,7 +3162,7 @@ fn gen_expr(node: int) -> int:
                     if jdi >= 0:
                         field_idx = jdi
                 // 容量批 T2：可选字段写点规范化（字面量形；元素值节点 = wrapper.a）
-                // 批 5（opt-dex · R2 序修正）：先归形式、后装箱（同上）
+                // 先归形式、后装箱（同上）
                 val_var = dex_slot_norm(val_var)   // apx 批 T3：字段槽恒精确
                 if g_optrep_on != 0:
                     val_var = box_for_optional_slot(ast_a(fn2), val_var, struct_row_field_ti(si, field_idx))
@@ -3168,8 +3178,8 @@ fn gen_expr(node: int) -> int:
         v := new_ir_var("arr", TI_UNIT)
         emit(IR_ALLOC_ARRAY, v, ast_b(node), 0, 0, 0)
         elem_ti : ., mut = TI_INT
-        // (A) T3（裁-T3-1）：**数组级元素可选性预扫**——元素序在后的 Some/None 也必须影响
-        // 在前的裸元素（`[2, Some(1)]`）⇒ 装箱判定不能只按逐元素形态。
+        // (A) T3：数组级元素可选性预扫，元素序在后的 Some/None 也必须影响
+        // 在前的裸元素（`[2, Some(1)]`）-> 装箱判定不能只按逐元素形态。
         elem_opt_ti : ., mut = -1
         if g_optrep_on != 0:
             pn : ., mut = ast_a(node)
@@ -3194,11 +3204,11 @@ fn gen_expr(node: int) -> int:
                 if ei == 0:
                     elem_ti = irv_type(e_var)
                 // 先取原元素类型（装箱前）
-                // 容量批 T2：可选元素写点规范化（字面量形；元素槽无声明面 ⇒ 按元素
-                // 表达式可选性保守判定——ident/调用覆盖面，其余形态登记）。
-                // 注意：数组字面量的 en 是 **wrapper** 节点（值在 ast_a）——须解引用后判定。
-                // (A) T3：数组级可选（预扫得）⇒ 逐元素判定亦须为真（裸元素装箱）。
-                // 批 5（opt-dex · R2 序修正）：先归形式、后装箱（同上）
+                // 容量批 T2：可选元素写点规范化（字面量形；元素槽无声明信息 -> 按元素
+                // 表达式可选性保守判定，ident/调用覆盖范围，其余形态登记）。
+                // 注意：数组字面量的 en 是 wrapper 节点（值在 ast_a），须解引用后判定。
+                // (A) T3：数组级可选（预扫得）-> 逐元素判定亦须为真（裸元素装箱）。
+                // 先归形式、后装箱（同上）
                 e_var = dex_slot_norm(e_var)   // apx 批 T3：元素槽恒精确
                 if g_optrep_on != 0:
                     eo := elem_node_optional(ast_a(en))
@@ -3209,8 +3219,8 @@ fn gen_expr(node: int) -> int:
                 en = en + 1
             ei = ei + 1
         irv_set_type(v, alloc_type(TYP_ARRAY, elem_ti, ast_b(node)))
-        // (A) T3（裁-T3-1）：**可选元素数组 ⇒ 登记声明面**（元素写点 `elem_ti_of` 据此装箱；
-        // 非可选不登记 ⇒ 与既有语料/非可选程序零足迹）。IR 型面不动（只登记声明面）。
+        // (A) T3：可选元素数组 -> 登记声明信息（元素写点 `elem_ti_of` 据此装箱；
+        // 非可选不登记 -> 与既有语料/非可选程序零足迹）。IR 类型信息不动（只登记声明信息）。
         if g_optrep_on != 0 && elem_opt_ti >= 0:
             irv_set_decl_ti(v, alloc_type(TYP_ARRAY, elem_opt_ti, ast_b(node)))
         return v
@@ -3268,9 +3278,9 @@ fn gen_expr(node: int) -> int:
         emit(IR_LOAD, cast_var, inner_var, 0, 0, target_ti)
         return cast_var
     if ast_kind(node) == EXPR_TRY:
-        // R2 P4 Task 5：`?` 解包 = 解包点之一 ⇒ 同规则判表示：裸值（0）→ 槽值即载荷
-        // （直取）；装箱（≠0）→ 字段 1（tag 之后）。无表示位（未覆盖面/非可选）→ 既有
-        // 行为**逐字不变**（原样返回内层表达式值）。
+        // `?` 解包 = 解包点之一 -> 同规则判表示：裸值（0）-> 槽值即携带值
+        // （直取）；装箱（≠0）-> 字段 1（tag 之后）。无表示位（未覆盖情形/非可选）-> 既有
+        // 行为逐字不变（原样返回内层表达式值）。
         inner := gen_expr(ast_a(node))
         if g_optrep_on != 0 && inner >= 0:
             rv := irv_rep(inner)
@@ -3300,7 +3310,7 @@ fn gen_expr(node: int) -> int:
     if ast_kind(node) == EXPR_TUPLE:
         // Tuple: allocate array for N elements, store each
         // F5 契约：a=首 wrapper（g_ast 中连续）、b=元素个数；wrapper.a = 元素值节点
-        // （复合元素值节点不连续，须经 wrapper 解引用——见 checker.cr EXPR_TUPLE 注）。
+        // （复合元素值节点不连续，须经 wrapper 解引用，见 checker.cr EXPR_TUPLE 注）。
         elem_idx := ast_a(node)
         ec : ., mut = ast_b(node)
         tv := new_ir_var("tuple", TI_INT)
@@ -3315,8 +3325,8 @@ fn gen_expr(node: int) -> int:
                 en = ast_a(elem_idx + e)
             elem_var := gen_expr(en)
             elem_var = force_if_thunk(elem_var)
-            // 容量批 T2：可选元素写点规范化（元组元素槽无声明面 ⇒ 按元素表达式可选性
-            // 保守判定；ident/调用覆盖面，其余形态登记）
+            // 容量批 T2：可选元素写点规范化（元组元素槽无声明信息 -> 按元素表达式可选性
+            // 保守判定；ident/调用覆盖范围，其余形态登记）
             if g_optrep_on != 0:
                 elem_var = box_for_slot_flag(en, elem_var, elem_node_optional(en))
             elem_var = dex_slot_norm(elem_var)   // apx 批 T3：元组元素槽恒精确
@@ -3337,8 +3347,8 @@ fn ir_gen_func(fi: int):
     first_param := ast_b(fn_node)
     param_count := ast_c(fn_node)
     // 返回类型：从 FuncInfo 取原始 TY_* 常量（ast_type_val(fn_node) 是返回类型
-    // 节点下标而非类型常量——错读会使 g_cur_ret_ti 不等于 TI_DEX，apx 返回点
-    // bits→scaled 转换失效，仅在 dex 类型节点下标恰为 1 时碰巧生效）
+    // 节点下标而非类型常量，错读会使 g_cur_ret_ti 不等于 TI_DEX，apx 返回点
+    // bits->scaled 转换失效，仅在 dex 类型节点下标恰为 1 时碰巧生效）
     ret_ti := fi_return_type(fi)
     body := ast_data(fn_node)
 
@@ -3364,24 +3374,23 @@ fn ir_gen_func(fi: int):
         param_type : ., mut = ast_type_val(pn)
         if param_type < 0:
             param_type = TI_INT
-        // dex 边界规则（数值迁移 Task 4）：参数一律精确形式（缩放整数，整数寄存器传递）
+        // dex 边界规则：参数一律精确形式（缩放整数，整数寄存器传递）
         if param_type == TI_DEX:
             param_type = TI_DEX_S
-        // 批 5（opt-dex · R3）：`dex?` 形参槽型 —— 修复前 `unpack_type(EXPR_OPTIONAL)` 返 0
-        // （parser.cr:150-153）⇒ `EXPR_PARAM.type_val` = 0 = `TI_INT` ⇒ 槽型按 int 建、
-        // 而调用点按实参 var 的 `TI_DEX` 分类为 binary64（XMM）⇒ **ABI 失配**（按 XMM 传、
-        // 按 GP 读 = 垃圾值 + 双路径分歧）。槽型按**声明面节点**定 = `TI_DEX_S`（GP 类，
-        // 与调用点转换后的实参一致）。
+        // A dex? parameter slot uses TI_DEX_S, determined by the declaration node.
+        // Using int would make the call site pass binary64 in XMM while the callee
+        // reads GP, an ABI mismatch. TI_DEX_S is the GP class and matches the
+        // converted argument.
         else if dex_opt_type_node(ast_data(pn)) != 0:
             param_type = TI_DEX_S
-        // ── S4 形参半（2026-09-21）：`&T` 形参槽型按**声明面节点**定（照上行 `dex?` 先例同形）──
-        // **背景（预存缺陷）**：`ast_type_val(pn)` 对 `&T` = **0**（`EXPR_REFTYPE` 节点未填写类型索引；
-        //   上面 `if param_type < 0` 护栏拦不住 0）⇒ 槽型退化成 `TI_INT` ⇒ **REF 身份在 IR 形参定型处丢失**
-        //   ⇒ `r.f` 在 `EXPR_FIELD` 看不到 REF ⇒ **静默错值**（实测 `fn f(r: &S){r.v}` 得 **8** 而非 42；
-        //   pre/post 两代同值 ⇒ 存在早于裁定二）。
-        // **只查不建**：`checker` 解析签名时**已**为该 `&T` 建过 REF 行（实测类型表中存在 `kind 3`）
-        //   ⇒ 线性查找即可 ⇒ **零新增类型行**。⚠ `alloc_type` 是**裸分配器、不去重**（`checker.cr:10` 注）
-        //   ⇒ 若在此另分配一行，会写进 TYPE 段 ⇒ 动产物字节 ⇒ 那正是本笔要避免的。
+        // ── S4 形参半：`&T` 形参槽型按声明信息节点定(same form as `dex?` above)──
+        // 背景（预存缺陷）：`ast_type_val(pn)` 对 `&T` = 0（`EXPR_REFTYPE` 节点未填写类型索引；
+        //   上面 `if param_type < 0` 护栏拦不住 0）-> 槽型退化成 `TI_INT` -> REF 身份在 IR 形参定型处丢失
+        //   -> `r.f` 在 `EXPR_FIELD` 看不到 REF -> 产生错误值且不报错(`fn f(r: &S){r.v}` returns 8 instead of 42; 
+        //   pre/post 两代同值 -> 存在早于裁定二）。
+        // 只查不建：`checker` 解析签名时已为该 `&T` 建过 REF 行(the type table contains `kind 3`)
+        //   -> 线性查找即可 -> 零新增类型行。 `alloc_type` 是裸分配器、不去重（`checker.cr:10` 注）
+        //   -> 若在此另分配一行，会写进 TYPE 段 -> 动产物字节 -> 那正是本笔要避免的。
         else if ast_kind(ast_data(pn)) == EXPR_REFTYPE:
             rinner := ti_from_type_expr(ast_a(ast_data(pn)))
             rmf := ast_int_val(ast_data(pn))
@@ -3396,12 +3405,12 @@ fn ir_gen_func(fi: int):
         pvar := new_ir_var(pname, param_type)
         // Bind param name
         bind_local(pname_idx, pvar)
-        // (乙) A1 判据通道（`--dump-params`，隐藏）：**槽型直读** = 判据 P2 的仪器
+        // (乙) A1 判据通道（`--dump-params`，隐藏）：槽型直读 = 参数判据的仪器
         // （现 CLI 无 IR 变量槽型直读：`cir` 文本 dump 只有逐指令、`--dump-tk-terms` 是
-        // DFNode.TK **派生面**、`alloc d : unit` 那行是 decl 面）。纯表读
-        // （`irv_type`/`ast_type_val`/`istr_get` + `int_str`）⇒ 零 alloc 副作用、
-        // **rc 中性 + 零产物**（用不用该 flag 产物逐字节不变）。
-        // `decl` = 声明面节点 `type_val`：泛型形参 = 0 ⇒ 与 `slot` 并排即「擦除」的直接证据。
+        // DFNode.TK 派生信息、`alloc d : unit` 那行是 decl 信息）。纯表读
+        // （`irv_type`/`ast_type_val`/`istr_get` + `int_str`）-> 零 alloc 副作用、
+        // rc 中性 + 零产物（用不用该 flag 产物逐字节不变）。
+        // `decl` = 声明信息节点 `type_val`：泛型形参 = 0 -> 与 `slot` 并排即擦除的直接证据。
         if g_dump_params_on != 0:
             print("PARAM ")
             print(istr_get(name_idx))
@@ -3414,10 +3423,10 @@ fn ir_gen_func(fi: int):
             print(" decl=")
             print(int_str(ast_type_val(pn)))
             print("\n")
-        // 可选表示（R2 P4 Task 5）：形参表示位——**序言最早处**从实参信道读（先于任何
+        // 可选表示：形参表示位，序言最早处从实参信道读（先于任何
         // 可能改写信道的调用；调用点在 IR_CALL 前写）。形参类型节点 = EXPR_PARAM.data。
         ptn := ast_data(pn)
-        // 容量批 T2：形参声明类型登记（元素写点判定用；与表示位面互不干扰）
+        // 容量批 T2：形参声明类型登记（元素写点判定用；与表示位互不干扰）
         if g_optrep_on != 0 && ptn >= 0:
             irv_set_decl_ti(pvar, res_type_node(ptn))
         if g_optrep_on != 0 && g_optrep_arg_count > 0 && ptn >= 0 && pi < g_optrep_arg_count:
@@ -3426,8 +3435,8 @@ fn ir_gen_func(fi: int):
                 prv := new_ir_var(pname + "_prep", TI_INT)
                 emit(IR_LOAD, prv, g_optrep_arg_cell0 + pi, 0, 0, TI_INT)
                 irv_set_rep(pvar, prv)
-                // (A) 批（INV-1）：**取址形参**恒装箱——序言内条件装箱（信道 rep = 0 裸值 ⇒ 装箱）
-                // 并把表示位钉 1（后续含指针写在内的一切写点都由 W3/W2 保持该不变量）
+                // (A) 批（INV-1）：取址形参恒装箱，序言内条件装箱（信道 rep = 0 裸值 -> 装箱）
+                // 并把表示位固定为 1（后续含指针写在内的一切写点都由 W3/W2 保持该不变量）
                 if addr_taken_of(pname_idx) != 0:
                     zb := new_ir_var("_rz", TI_INT)
                     emit(IR_CONST, zb, 0, 0, 0, TI_INT)
@@ -3462,25 +3471,25 @@ fn ir_gen_func(fi: int):
     emit(IR_ARENA_NEW, arena_var, 0, 0, 0, 0)
     arena_instr := g_ir_instr_count - 1
 
-    // 程序启动期全局初始化（2026-09-10 R1 ②）：只在 main 序言注入——run 与 build
+    // 程序启动期全局初始化：只在 main 序言注入，run 与 build
     // 两路径都从 main 进入（interp.cr 按名查找 main；ELF _start call main），因此
     // 无需新 IR 函数/新 .ccr 段/新 _start 指令 = 无序列化与字节布局扰动。
     // 无需运行期初始化的程序不发射任何指令（零变化）。
     if str_eq(istr_get(name_idx), "main") != 0:
         inject_global_inits()
 
-    // Generate body（记录返回 TI——EXPR_RETURN 的 dex 边界转换用）
+    // Generate body（记录返回 TI，EXPR_RETURN 的 dex 边界转换用）
     g_cur_ret_ti = ret_ti
-    // 批 5（opt-dex · R3）：返回类型节点是否 `dex?`（节点级零 alloc）。`-> dex?` 的
+    // 返回类型节点是否 `dex?`（节点级零 alloc）。`-> dex?` 的
     // `ret_ti`（= `fi_return_type` 裸码）与 `type_val` 均为 0（`unpack_type(EXPR_OPTIONAL)`）
-    // ⇒ 返回点 dex 转换门 `g_cur_ret_ti == TI_DEX` 恒假 ⇒ 需本标志补位。
+    // -> 返回点 dex 转换检查 `g_cur_ret_ti == TI_DEX` 恒假 -> 需本标志补位。
     g_cur_ret_dex_opt = 0
     rtn_d := ast_type_val(fn_node)
     if rtn_d >= 0 && dex_opt_type_node(rtn_d) != 0:
         g_cur_ret_dex_opt = 1
-    // 可选表示（R2 P4 Task 5）：本函数返回可选时，返回点写返回信道（见 EXPR_RETURN）。
-    // 判据走**返回类型节点**（ast_type_val(fn_node) = 返回类型节点下标——见上方 ret_ti
-    // 注释）而非 fi_return_type 裸码（`T?` 的类型节点 type_val = 0 ⇒ 恒判否）。
+    // 可选表示：本函数返回可选时，返回点写返回信道（见 EXPR_RETURN）。
+    // 判据走返回类型节点（ast_type_val(fn_node) = 返回类型节点下标，见上方 ret_ti
+    // 注释）而非 fi_return_type 裸码（`T?` 的类型节点 type_val = 0 -> 恒判否）。
     g_cur_ret_opt = 0
     if g_optrep_on != 0 && g_optrep_ret_cell >= 0:
         rtn := ast_type_val(fn_node)
@@ -3500,7 +3509,7 @@ fn ir_gen_func(fi: int):
         iri_set_s1(arena_instr, total)
     emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
 
-    // Add return at end if not already terminated（可达 = 兜底 return；不可达 = 死码，
+    // Add return at end if not already terminated（可达 = 后备 return；不可达 = 死码，
     // 两后端同语义不执行）。可选返回点写装箱默认值（与 ABI 返回寄存器的未定义值同档）。
     if g_cur_ret_opt != 0:
         emit_rep_set(g_optrep_ret_cell, oe_boxed())
@@ -3531,7 +3540,7 @@ fn global_init_val(name_idx: int) -> int:
                     return ast_int_val(value_node)
                 if vk == EXPR_DEX:
                     // dex 全局常量：定点缩放整数（精确形式初始值；apx 位模式由
-                    // reg_one_global 从节点 a 取——见该函数）
+                    // reg_one_global 从节点 a 取，见该函数）
                     return ast_int_val(value_node)
                 if vk == EXPR_UNARY && ast_c(value_node) == UOP_NEG:
                     inner := ast_a(value_node)
@@ -3542,10 +3551,10 @@ fn global_init_val(name_idx: int) -> int:
         i = i - 1
     return 0
 
-// 类型节点 → `[T; N]` 的元素数 N（`[T]` 切片 = 0）；非聚合 = -1。
+// 类型节点 -> `[T; N]` 的元素数 N（`[T]` 切片 = 0）；非聚合 = -1。
 // 类型别名解析一层：`type Arr = [int;2]; g : Arr;` 的声明类型节点是 EXPR_IDENT
 // （parser.cr parse_type 的用户类型分支），须经 g_type_aliases（{name_idx, type_node}
-// 16B/条）回到底层 EXPR_ARRAY——否则同一「定长数组全局」类仍留 SIGSEGV。
+// 16B/条）回到底层 EXPR_ARRAY，否则同一定长数组全局类仍留 SIGSEGV。
 fn agg_elem_count_of(tn: int) -> int:
     if tn < 0:
         return -1
@@ -3565,10 +3574,10 @@ fn agg_elem_count_of(tn: int) -> int:
             ai = ai + 1
     return -1
 
-// 文件级 let 是否需要「运行期初始化」（2026-09-10 语言面收窄 §1.3 / R1 ②）。
-// 判据（与 global_init_val 互补——它只认编译期标量常量，其余静默归 0）：
-//   ① 声明类型是聚合（`[T; N]`/`[T]`，含类型别名一层解析）→ 必须运行期分配存储；
-//   ② 初值存在且不是 int/bool/dex 字面量（含负号字面量）→ 必须运行期求值。
+// 文件级 let 是否需要运行期初始化。
+// 判据（与 global_init_val 互补，它只认编译期标量常量，其余归 0 且不报错）：
+//   1 声明类型是聚合（`[T; N]`/`[T]`，含类型别名一层解析）-> 必须运行期分配存储；
+//   2 初值存在且不是 int/bool/dex 字面量（含负号字面量）-> 必须运行期求值。
 fn global_needs_runtime_init(name_idx: int) -> int:
     i : ., mut = g_global_let_count - 1
     loop:
@@ -3576,8 +3585,8 @@ fn global_needs_runtime_init(name_idx: int) -> int:
             break
         node := r64(g_global_lets, i * 8)
         if ast_a(node) == name_idx:
-            // 容量批 T2：可选全局槽**必须**走运行期初始化——静态度量（.quad 裸值）写进槽后
-            // 读侧按装箱解引用 ⇒ 双路径 139（实测 e2_global_bare）。装箱在 inject_global_inits
+            // 容量批 T2：可选全局槽必须走运行期初始化，静态度量（.quad 裸值）写进槽后
+            // 读侧按装箱解引用 -> 双路径 139(run-time failure)。装箱在 inject_global_inits
             // 内完成；非可选全局不受影响（零足迹）。
             if g_optrep_on != 0 && ti_is_optional(global_decl_ti(name_idx)) != 0:
                 return 1
@@ -3627,19 +3636,19 @@ fn inject_global_inits():
                     v = gen_expr(vn)
                     v = force_if_thunk(v)
                 else:
-                    // 无初值聚合：整流分配（零初始化由 alloc 语义保证——rt.s 的 rep stosb；
+                    // 无初值聚合：整流分配（零初始化由 alloc 语义保证，rt.s 的 rep stosb；
                     // 解释器 IR_ALLOC_ARRAY 显式清零）。仅 `[T; N]`（N ≥ 1）注入；`[T]`
-                    // （切片无长度，N = 0）不注入——保持 BSS 零 = 空切片/哑指针，
-                    // 空切片解引用属独立 null 陷阱类，不在本批。
+                    // （切片无长度，N = 0）不注入，保持 BSS 零 = 空切片/哑指针，
+                    // 空切片解引用属独立 null 陷阱类.
                     cnt := agg_elem_count_of(ast_b(lnode))
                     if cnt > 0:
                         v = new_ir_var("ginit", TI_UNIT)
                         emit(IR_ALLOC_ARRAY, v, cnt, 0, 0, 0)
                         irv_set_type(v, alloc_type(TYP_ARRAY, TI_INT, cnt))
                 if v >= 0:
-                    // 容量批 T2：可选全局槽**初值**写点规范化（与赋值点 :1155 是两处独立
-                    // 代码点——初值走 inject_global_inits，赋值走 EXPR_ASSIGN）
-                    // 批 5（opt-dex · R2 序修正）：先归形式、后装箱（同上——反序 = 漏斗空转）
+                    // 容量批 T2：可选全局槽初值写点规范化（与赋值点 :1155 是两处独立
+                    // 代码点，初值走 inject_global_inits，赋值走 EXPR_ASSIGN）
+                    // 先归形式、后装箱（同上，反序 = 汇聚点无效果）
                     v = dex_store_adjust(gv, v, vn)   // apx 批 T3：全局初值按槽声明型（含 apx 全局）
                     if g_optrep_on != 0:
                         v = box_for_optional_slot(vn, v, global_decl_ti(name_idx))
@@ -3659,8 +3668,8 @@ fn reg_one_global(name_idx: int):
         gi = gi + 1
     if found == 0:
         name := istr_get(name_idx)
-        // dex 全局变量（数值迁移 Task 4）：精确（TI_DEX_S，缩放整数初始值）或
-        // apx（TI_DEX，binary64 位模式初始值）——按声明 LET 的类型节点与 apx 位
+        // dex 全局变量：精确（TI_DEX_S，缩放整数初始值）或
+        // apx（TI_DEX，binary64 位模式初始值），按声明 LET 的类型节点与 apx 位
         gtype : ., mut = TI_INT
         is_dex_global : ., mut = 0
         gli : ., mut = 0
@@ -3677,10 +3686,8 @@ fn reg_one_global(name_idx: int):
                         gtype = TI_DEX_S
                     is_dex_global = 1
                 else if ltn >= 0 && dex_opt_type_node(ltn) != 0:
-                    // 批 5（opt-dex · R1）：`dex?` 全局槽 = **规范形式 scaled**（G1 裁决）。
-                    // 修复前本门只认基类型节点 `dex` ⇒ `dex?` 全局落 TI_INT 槽，
-                    // 赋值/初值的 dex_store_adjust 因目标型不匹配而空转（实测 15）。
-                    // is_dex_global 不置 1：其唯一消费者（:3320）只服务 apx 位模式全局。
+                    // A dex? global slot uses the scaled form. is_dex_global stays 0
+                    // because its only consumer handles apx bit-pattern globals.
                     gtype = TI_DEX_S
                 break
             gli = gli + 1
@@ -3691,7 +3698,7 @@ fn reg_one_global(name_idx: int):
         // Const initializer — emitted by the ELF backend's _init_globals.
         iv : int = global_init_val(name_idx)
         if is_dex_global != 0 && gtype == TI_DEX:
-            // apx 全局：初始值为 binary64 位模式（缩放值 → bits 从节点 a 取）
+            // apx 全局：初始值为 binary64 位模式（缩放值 -> bits 从节点 a 取）
             i2 : ., mut = 0
             loop:
                 if i2 >= g_global_let_count:
@@ -3728,8 +3735,8 @@ fn ir_gen_globals():
     reg_one_global(str_intern("g_cir_write_buf"))
     reg_one_global(str_intern("g_cir_write_pos"))
     reg_one_global(str_intern("g_cir_write_cap"))
-    // v21 生成期 intern 日志（cir_cache.cr/dyn_arr.cr/globals.cr 共用；**新增编译器侧全局
-    // 必须在此登记**——parser 的 file-scope 自动发现已知会漏，漏登记 ⇒ 赋值静默丢弃/错槽）。
+    // v21 生成期 intern 日志（cir_cache.cr/dyn_arr.cr/globals.cr 共用；新增编译器侧全局
+    // 必须在此登记，parser 的 file-scope 自动发现已知会漏，漏登记 -> 赋值丢弃或落错槽且不报错）。
     reg_one_global(str_intern("g_cir_rec_on"))
     reg_one_global(str_intern("g_cir_rec_ids"))
     reg_one_global(str_intern("g_cir_rec_count"))
@@ -3751,9 +3758,9 @@ fn ir_gen_globals():
     reg_one_global(str_intern("g_arena_free_list"))
     reg_optrep_globals()
 
-// 表示面初始化（**两条 IR 生成入口都必须先调**：ir_gen_all 批量路径 + main.cr 文件路径
-// （逐函数 + .cir 缓存）——后者不经过本文件的批量入口，漏调即侧表未分配）。位置：
-// **先于 ir_gen_globals**（隐藏信道的 var 行序 = 全局行序依赖）。
+// 表示方式初始化（两条 IR 生成入口都必须先调：ir_gen_all 批量路径 + main.cr 文件路径
+// （逐函数 + .cir 缓存），后者不经过本文件的批量入口，漏调即侧表未分配）。位置：
+// 先于 ir_gen_globals（隐藏信道的 var 记录顺序 = 全局记录顺序依赖）。
 fn optrep_begin():
     g_ir_var_rep = ""
     g_ir_var_rep_cap = 0
@@ -3766,10 +3773,12 @@ fn optrep_begin():
     optrep_prescan()
     optrep_addr_prescan()
 
-// (A) 批（裁-REP-4）：**取址面预扫**——收集一切「取址 ident」的名字索引（照 optrep_prescan
-// 先例；全 AST 一遍）。判据面 = `&ident`（`UOP_REF` 的 operand 为 `EXPR_IDENT`）；其余取址
-// 形态见计划 §2.3 引理 1（`&arr[i]` = 聚合面已恒装箱；`&<其它表达式>` = 临时量非槽；函数地址
-// 非槽；指针算术 = REP-2 边界；extern = 登记）。
+// Address-taken prescan, one pass over the AST, collecting the name indexes of all
+// address-taken identifiers. A criterion is `&ident`, where UOP_REF's operand is
+// EXPR_IDENT. Other address forms follow design section 2.3: `&arr[i]` is an
+// already boxed aggregate, other expressions are temporaries, function addresses
+// are not slots, pointer arithmetic is a REP-2 boundary, and externs are
+// recorded.
 fn grow_addr_taken(needed: int):
     if needed <= g_addr_taken_cap:
         return
@@ -3814,9 +3823,9 @@ fn optrep_addr_prescan():
                 addr_taken_add(ast_int_val(opn))
         i = i + 1
 
-// 表示面启用扫描（**零足迹门**）：AST 含任一 `T?` 类型节点（EXPR_OPTIONAL）或任一
+// 表示方式启用扫描（零足迹检查）：AST 含任一 `T?` 类型节点（EXPR_OPTIONAL）或任一
 // `Some`/`None` 构造（关键字名分派，与 checker 同规约：用户变体同名时上方 SYM_FN 优先，
-// 但扫描**宽于**实际使用只会多启用一层空机器、不会漏启用——判据面为「启用 ⇒ 表示面完整」）。
+// 但扫描宽于实际使用只会多启用一层空机器、不会漏启用，判据为启用 -> 表示方式完整）。
 fn optrep_prescan():
     g_optrep_on = 0
     i : ., mut = 0
@@ -3834,9 +3843,9 @@ fn optrep_prescan():
                 break
         i = i + 1
 
-// 隐藏全局注册（照 reg_one_global 形态但不查 g_global_lets——编译器内部名，零初值）。
-// var_idx == 行序（save_ccr 的全局行序守卫）由「本函数只在 ir_gen_globals 尾部调用、
-// 此后不再注册全局」保证。
+// 隐藏全局注册（照 reg_one_global 形态但不查 g_global_lets，编译器内部名，零初值）。
+// var_idx == 记录顺序（save_ccr 的全局记录顺序检查）由本函数只在 ir_gen_globals 尾部调用、
+// 此后不再注册全局保证。
 fn reg_hidden_global(name_ni: int) -> int:
     gvar := new_ir_var(istr_get(name_ni), TI_INT)
     grow_ir_globals(g_ir_global_count + 1)
@@ -3965,10 +3974,11 @@ fn ast_patch_node(node: int, subst_from: string, subst_to: string):
         if ast_a(node) >= 0:
             ast_patch_node(ast_a(node), subst_from, subst_to)
     else if k == EXPR_STRUCT:
-        // a=type_name_ni, b=first wrapper（连续）, c=field_count；wrapper.a=字段值节点
-        // （F5 契约，见 parser.cr struct 字面量分支）——须解引用 wrapper 再递归，
-        // 旧代码把 EXPR_NONE wrapper 本身交给 ast_patch_node（无该 kind 分支）= 空转，
-        // 泛型实例体内 struct 字面量字段中的方法调用名得不到替换。
+        // a = type name index, b = first wrapper (contiguous), c = field count,
+        // wrapper.a = field value node. Dereference the wrapper and recurse.
+        // Passing the EXPR_NONE wrapper itself to ast_patch_node would do nothing,
+        // so method names in struct literal fields inside generic instances would
+        // not be replaced.
         an5 := ast_b(node)
         ac5 := ast_c(node)
         ai5 : ., mut = 0
@@ -4083,7 +4093,7 @@ fn find_or_create_mono_func(fi: int, call_node: int) -> int:
     // Create new EXPR_FN node
     new_fn_node := alloc_node(EXPR_FN, mangled_ni, new_first_param, param_count, orig_ret_type, orig_ret_node, body, 0, 0)
 
-    // Patch body: replace "gen_name.method" → "concrete_type_name.method"
+    // Patch body: replace "gen_name.method" -> "concrete_type_name.method"
     if body >= 0:
         ast_patch_node(body, gen_name, concrete_type_name)
 
@@ -4107,7 +4117,7 @@ fn ir_gen_all():
     g_next_label = 1
     g_ir_loop_depth = 0
     g_ir_str_const_count = 0
-    // 可选表示面：侧表复位 + 启用扫描（先于全局注册——隐藏信道的 var 行序依赖）
+    // 可选表示方式：侧表复位 + 启用扫描（先于全局注册，隐藏信道的 var 记录顺序依赖）
     optrep_begin()
 
     // Initialize dataflow graph
@@ -4129,7 +4139,7 @@ fn ir_gen_all():
         df_end_func(ir_func_idx)
         i = i + 1
 
-    // 纯度 + state 链最终化（全部 IR 体就绪后；理由见 checker.cr compute_all_purity
+    // 纯度 + 状态依赖边序列最终化（全部 IR 体就绪后；理由见 checker.cr compute_all_purity
     // 与 dataflow.cr df_replay_state_chain 头注）。文件路径的同点调用在 main.cr。
     df_state_finalize()
 

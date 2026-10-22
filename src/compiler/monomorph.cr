@@ -10,22 +10,22 @@ g_gen_instance_count : int, mut
 g_gen_instance_cap : int, mut
 
 // ── Temporary substitution mapping (during clone) ──
-// Parallel arrays: generic param name index → concrete type name index
+// Parallel arrays mapping a generic parameter name index to a concrete type name index.
 g_gen_subst_old : string, mut
 g_gen_subst_new : string, mut
 g_gen_subst_count : int, mut
 g_gen_subst_cap : int, mut
 
-// ── R2 P3 Task 5（Step 4）：ti 型替换表（与上面的名字表**并行同键**：g_gen_subst_old 的
-//    名字 ni → 实参**类型行 ti**）。来源 = checker 的调用点绑定段（g_gen_binds，globals.cr
-//    表注）；命中时替换产物 = `inst_type_node_of_ti` 造的**完整类型节点**（命名/复合/泛型
-//    应用皆可表达），取代旧「拼名字串再 str_intern 查名字」的塌缩（非原生实参一律 "int"）。
-//    -1/缺位 → 回落名字路径（旧行为逐字保持）。──
+// Type-row substitution table. It is parallel to the name table above:
+// g_gen_subst_old maps a name index to an argument type row. The source is the
+// call-site binding block from checker. On a hit, inst_type_node_of_ti builds a
+// complete type node, which can represent named, composite, and generic types.
+// A missing row falls back to the name path.
 g_gen_subst_tis : string, mut
 g_gen_subst_tis_count : int, mut
 g_gen_subst_tis_cap : int, mut
 
-// ── Temporary dedup map (old AST node → new AST node during clone) ──
+// Temporary dedup map from an old AST node to its new clone.
 g_gen_dedup_old : string, mut
 g_gen_dedup_new : string, mut
 g_gen_dedup_count : int, mut
@@ -47,8 +47,9 @@ fn grow_gen_instances(needed: int):
     g_gen_instances = nb
     g_gen_instance_cap = nc
 
-// 效应/纯度修正 Task 1：实例 → 源映射侧表（声明在 globals.cr——checker.cr 的
-// compute_all_purity 要读它，bootstrap 名字解析按声明序）。
+// Instance-to-source mapping for purity. It is declared in globals.cr because
+// checker's compute_all_purity reads it, and bootstrap name resolution follows
+// declaration order.
 fn grow_purity_inst(needed: int):
     if needed < g_purity_inst_cap:
         return
@@ -96,7 +97,7 @@ fn grow_gen_dedup(needed: int):
     g_gen_dedup_new = n2
     g_gen_dedup_cap = nc
 
-// R2 P3 Task 5（Step 4）：ti 型替换表增长（与 g_gen_subst_old 同长——同一次实例化建立）
+// Grow the type-row substitution table. It has the same length as g_gen_subst_old.
 fn grow_gen_subst_tis(needed: int):
     if needed < g_gen_subst_tis_cap:
         return
@@ -147,9 +148,10 @@ fn gen_build_subst(func_ni: int, type_args: string):
         g_gen_subst_count = g_gen_subst_count + 1
         gi = gi + 1
 
-// R2 P3 Task 5（Step 4）：把调用点绑定段（块 = [count, ti…]，见 checker.cr 写入点）装进
-// ti 型替换表——**名表与 ti 表同序同键**（第 i 项同为第 i 个泛型形参）。返回装填条数；
-// 0 = 无绑定段/段非法（调用方回落名字路径）。
+// Load a call-site binding block into the type-row substitution table. The block
+// is [count, ti...], with the i-th entry for the i-th generic parameter, in the
+// same order as the name table. Returns the number loaded, or 0 when the block is
+// absent or invalid; the caller then falls back to the name path.
 fn gen_build_subst_tis(func_ni: int, bstart: int) -> int:
     g_gen_subst_tis_count = 0
     g_gen_subst_tis_cap = 0
@@ -163,7 +165,7 @@ fn gen_build_subst_tis(func_ni: int, bstart: int) -> int:
     cnt := r64(g_gen_binds, bstart * 8)
     if cnt != gc:
         return 0
-    // 段长必须与形参数一致（不同 ⇒ 不信任）
+    // The block length must equal the parameter count; otherwise reject it.
     if bstart + 1 + cnt > g_gen_binds_count:
         return 0
     grow_gen_subst_tis(gc)
@@ -174,10 +176,10 @@ fn gen_build_subst_tis(func_ni: int, bstart: int) -> int:
         t := r64(g_gen_binds, (bstart + 1 + i) * 8)
         if t < 0:
             return 0
-        // 未绑定 ⇒ 全段放弃（不半解）
+        // An unbound entry discards the whole block; no partial substitution.
         if inst_ti_concrete(t) == 0:
             return 0
-        // 含泛型形参行 ⇒ 全段放弃（同上）
+        // A remaining generic-parameter row also discards the whole block.
         w64(g_gen_subst_tis, i * 8, t)
         g_gen_subst_tis_count = i + 1
         i = i + 1
@@ -214,22 +216,25 @@ fn gen_base_type_tv(name_ni: int) -> int:
         return TY_NEVER
     return -1
 
-// ═══════════════ R2 P3 Task 5（Step 4）：ti ⇄ 节点/键 三件套 ═══════════════
-// 背景（旧态，逐条实测）：实例键由 ir_gen 从**实参 IR 变量的类型**拼名字串得到，非原生
-// （struct/tuple/slice/ref…）一律兜底 "int"（ir_gen.cr 的 else 分支）⇒ ① 两个不同 struct
-// 实参折叠成同一实例（实测 .ccr：`f[unit]` 一份）；② 替换 = 名字文本替换（gen_build_subst）
-// ⇒ 泛型形参被替换成**错的名字**（`fn f[T](a: int, b: T)` 以 `f(1, "s")` 调用 → T := int，
-// 而形参 b 的声明类型是 T ⇒ 实例体按 int 落地）。本套即治此二病：
-//   ① `inst_key_of_ti`：类型行 → 规范结构名（键的构成单元；结构忠实 ⇒ 异型不再折叠）；
-//   ② `inst_type_node_of_ti`：类型行 → 类型语法节点（替换产物；命名/应用/序列/引用/指针/
-//      可选皆可表达）；
-//   ③ `gen_subst_ti`：克隆期把嵌套调用点绑定里的泛型形参行按**当前实例**替换。
-// 分隔符约定（**键必须能被 gen_build_subst 按逗号切分**）：项内分隔用 "|"、长度用 "; "、
-// 形参间才用 ","（实例键的 join 分隔符）⇒ 规范名内**不得出现逗号**。
-// 语法节点合成契约：**仅**合成「根节点占单槽」的类型（原生/命名/泛型形参）——EXPR_GENERIC_APPLY
-// 的实参读取按 `first_arg + i`（res_type_node）⇒ 实参根节点必须**连续**，而合成复合实参时
-// 子树节点会插在中间（parser 侧靠「子树的根恒为该子树最后分配的节点」自然成立）⇒ 复合实参
-// 一律回 -1（调用方回落名字路径；登记为未覆盖面）。
+// Type-row helpers: key, syntax node, and substitution.
+// The old instance key was built from argument IR variable types as a name string.
+// Non-native types (struct, tuple, slice, ref) all collapsed to "int", so two
+// different struct arguments produced the same instance. Type substitution also
+// replaced names as text, which could substitute a wrong name into a generic
+// parameter position. These helpers fix both problems:
+//   1. inst_key_of_ti: type row to a canonical structural key. Different types get
+//      different keys.
+//   2. inst_type_node_of_ti: type row to a type syntax node for substitution.
+//   3. gen_subst_ti: replace generic parameter rows in nested call-site bindings
+//      using the current instance.
+// Key separators: "|" inside a type, "; " for array lengths, and "," only between
+// parameters, because gen_build_subst splits on commas. A canonical key must not
+// contain a comma.
+// Syntax node synthesis only handles types whose root occupies one slot: native,
+// named, and generic-parameter types. EXPR_GENERIC_APPLY reads arguments at
+// first_arg + i, so argument roots must be consecutive; a composite argument's
+// subtree would be interleaved. Composite arguments return -1 and fall back to the
+// name path.
 
 fn inst_key_of_ti(ti: int) -> string:
     k := get_type_kind(ti)
@@ -300,9 +305,9 @@ fn inst_key_of_ti(ti: int) -> string:
             s = s + inst_key_of_ti(r64(g_gen_apply_data, (start2 + i2) * 8))
             i2 = i2 + 1
         return s + ")"
-    return "#" + int_str(ti)   // 未知 kind：行号兜底（同编译期内确定；跨行同型不去重，登记）
+    return "#" + int_str(ti)   // unknown kind: fall back to the row number
 
-// 类型行 → 类型语法节点（**单槽根**约束见上注）；-1 = 无对应形态（调用方回落名字路径）
+// Type row to a type syntax node (single-slot root rule above). -1 means no syntax form; the caller falls back to the name path.
 fn inst_type_node_of_ti(ti: int) -> int:
     k := get_type_kind(ti)
     if k < 0:
@@ -351,7 +356,7 @@ fn inst_type_node_of_ti(ti: int) -> int:
                 break
             at := r64(g_gen_apply_data, (start + 1 + i) * 8)
             ak := get_type_kind(at)
-            // 实参根节点连续契约：仅接受单槽根（原生/命名/形参）——复合实参见上注（登记）
+            // Argument roots must be consecutive: accept only native, named, and generic-parameter rows.
             if ak != TYP_BASE && ak != TYP_NAMED && ak != TYP_GENERIC_PARAM:
                 return -1
             an := inst_type_node_of_ti(at)
@@ -361,7 +366,7 @@ fn inst_type_node_of_ti(ti: int) -> int:
                 first_an = an
             i = i + 1
         return alloc_node(EXPR_GENERIC_APPLY, get_type_data(base), first_an, cnt, 0, 0, 0, 0, 0)
-    return -1   // TUPLE / NULL / DYN / 未知 kind：无语法形态（DYN 另见 res_type_node 的码 7 格）
+    return -1   // tuple, null, dyn, and unknown kinds have no syntax form here
 
 fn gen_lookup_subst_ti(name_ni: int) -> int:
     mi : ., mut = 0
@@ -373,7 +378,7 @@ fn gen_lookup_subst_ti(name_ni: int) -> int:
         mi = mi + 1
     return -1
 
-// 类型行 → 按当前实例替换泛型形参行后的类型行（-1 保持原行；复合行结构性重建）
+// Type row after replacing generic-parameter rows for the current instance. Invalid rows stay unchanged; composite rows are rebuilt structurally.
 fn gen_subst_ti(ti: int) -> int:
     k := get_type_kind(ti)
     if k < 0:
@@ -396,7 +401,7 @@ fn gen_subst_ti(ti: int) -> int:
     if k == TYP_GENERIC_APPLY:
         start := get_type_extra(ti)
         cnt := r64(g_gen_apply_data, start * 8)
-        // 两趟（照 res_type_node 同款：子项替换自身会追加 gen_apply 载荷）
+        // Two passes: substituting a child can append to g_gen_apply_data.
         subs : string, mut
         if cnt > 0:
             subs = alloc(cnt * 8)
@@ -419,13 +424,15 @@ fn gen_subst_ti(ti: int) -> int:
         return alloc_type(TYP_GENERIC_APPLY, get_type_data(ti), ns)
     return ti
 
-// 替换后是否**全具体**（无残留泛型形参行）：克隆期嵌套调用点绑定重映射的前置条件
-// （残留 = 该绑定在本实例上下文无解 ⇒ 整段放弃、回落旧名字路径，不发明半解实例）
+// Whether a substituted row is fully concrete, with no remaining generic-parameter
+// rows. This is required before remapping nested call-site bindings. If a row
+// remains, the binding has no solution in this instance and the whole block is
+// discarded instead of creating a partial instance.
 fn inst_ti_concrete(ti: int) -> int:
     k := get_type_kind(ti)
     if k < 0:
         return 1
-    // 越界行：非形参，按具体处理（判定面自会拒绝）
+    // An out-of-range row is not a parameter, so treat it as concrete; the judgment path rejects it later.
     if k == TYP_GENERIC_PARAM:
         return 0
     if k == TYP_ARRAY || k == TYP_SLICE || k == TYP_REF || k == TYP_PTR || k == TYP_OPTIONAL:
@@ -454,10 +461,12 @@ fn inst_ti_concrete(ti: int) -> int:
         return 1
     return 1
 
-// 克隆期：源调用点绑定段（iv = 段起始 + 1，见 checker.cr 写入点）→ 按当前实例重登记的段
-// （返回新的 **iv**；0 = 无/不可重映射 ⇒ 克隆体回落旧名字路径）。
-// 为何必须重映射：克隆体内的调用节点携带**源函数上下文**的绑定（如 T := gparam(U)）——
-// 直接沿用 = 用源上下文的形参行给实例建键（错实例）；置 0 = 丢信息（旧行为）。
+// Remap a source call-site binding block (iv = block start + 1) for the current
+// instance. Returns the new iv, or 0 when the block cannot be remapped and the
+// clone should fall back to the name path.
+// A cloned call node carries bindings from the source function context, such as
+// T := gparam(U). Reusing them would build an instance key from the source context
+// and select the wrong instance; clearing them would lose information.
 fn gen_remap_binds(iv: int) -> int:
     if iv <= 0:
         return 0
@@ -469,8 +478,9 @@ fn gen_remap_binds(iv: int) -> int:
         return 0
     if start + 1 + cnt > g_gen_binds_count:
         return 0
-    // 前置：全部条目替换后须**全具体**（否则整段放弃——不发明半解实例）。替换结果先落暂存
-    // （gen_subst_ti 对复合行会追加类型行/载荷 ⇒ 逐条重算 = 双倍分配；且避免边写边读）。
+    // Every entry must be fully concrete after substitution; otherwise discard the
+    // whole block. Results go to a temporary buffer first because gen_subst_ti can
+    // append type rows and payloads, and to avoid reading while writing.
     subs : string, mut = alloc(cnt * 8)
     i : ., mut = 0
     loop:
@@ -574,9 +584,9 @@ fn gen_clone_tree(node: int) -> int:
     // ── EXPR_IDENT: might be a generic param reference ──
     if k == EXPR_IDENT:
         ni := iv
-        // R2 P3 Task 5（Step 4）：**ti 路径优先**——由类型行合成完整类型节点（命名/应用/序列/
-        // 引用/指针/可选皆可表达），治旧「名字文本替换」对非原生实参的塌缩。合成失败（-1：
-        // 元组/复合实参等无语法形态）→ 落名字路径（旧行为逐字保持）。
+        // Try the type-row path first: it can build a complete type node for named,
+        // applied, sequence, reference, pointer, and optional types. If synthesis
+        // fails for a type with no syntax form, fall back to the name path.
         sti := gen_lookup_subst_ti(ni)
         if sti >= 0:
             sn := inst_type_node_of_ti(sti)
@@ -588,15 +598,15 @@ fn gen_clone_tree(node: int) -> int:
             // Substitute generic param with concrete type
             base_tv := gen_base_type_tv(sub)
             if base_tv >= 0:
-                // Base type reference (int, float, etc.) → kind=0 node with type_val
+                // Base type reference: kind 0 with type_val.
                 n := ast_alloc(0, 0, 0, 0, 0, base_tv, 0, ln, cl)
                 gen_dedup_add(node, n)
                 return n
-            // Named type (struct name, etc.) → EXPR_IDENT with concrete name
+            // Named type: EXPR_IDENT with the concrete name.
             n := ast_alloc(k, a, b, c, sub, tv, d, ln, cl)
             gen_dedup_add(node, n)
             return n
-        // Not a generic param — clone as-is
+        // Not a generic parameter; clone unchanged.
         n := ast_alloc(k, a, b, c, ni, tv, d, ln, cl)
         gen_dedup_add(node, n)
         return n
@@ -699,17 +709,18 @@ fn gen_clone_tree(node: int) -> int:
         n := ast_alloc(k, a2, b, c, iv, tv, d, ln, cl)
         gen_dedup_add(node, n)
         return n
-    // ── R2 P3 Task 4：`T?`（a = 内层类型节点，可能含泛型形参）——单子节点克隆，
-    //    形参代入由 EXPR_IDENT 分支承担（clone 时经 gen_lookup_subst），故此处只递归 a。
-    //    **必配分支**：默认兜底会把 d（=0）当 AST 子节点克隆（读进节点 0）——显式分支消除该面。
+    // T? has the inner type node in a. Its generic parameters are substituted by the
+    // EXPR_IDENT branch, so clone only a here. This explicit branch avoids the
+    // fallback treating d (=0) as a child node.
     if k == EXPR_OPTIONAL:
         a2 := gen_clone_tree(a)
         n := ast_alloc(k, a2, b, c, iv, tv, d, ln, cl)
         gen_dedup_add(node, n)
         return n
-    // ── 插值洞（批 8 插值展开）：**理论不可达**（checker 已把洞就地改写为转换调用，早于本阶段的
-    //    克隆面）——但**必须显式分支**：默认兜底会把 `d` 当 AST 子节点（读进节点 0）或静默丢子树，
-    //    两者都是静默类。本分支 = 递归唯一的真子节点 `a`（洞表达式），并保留 `data`（洞文本）。
+    // An interpolation hole should not reach cloning, because the checker rewrites
+    // it to a conversion call earlier. It still needs an explicit branch: the
+    // fallback would treat d as a child or drop the subtree. Clone only a and keep
+    // data (the hole text).
     if k == EXPR_INTERP_HOLE:
         a2 := gen_clone_tree(a)
         n := ast_alloc(k, a2, b, c, 0, tv, d, ln, cl)
@@ -763,18 +774,19 @@ fn gen_clone_tree(node: int) -> int:
     if k == EXPR_CALL:
         a2 := gen_clone_tree(a)
         b2 := gen_clone_tree(b)
-        // R2 P3 Task 5（Step 4）：调用点绑定的**实例化重映射**——克隆体内的调用节点携带
-        // **源函数上下文**的绑定（如 T := gparam(U)）⇒ 按当前实例替换重登记（gen_remap_binds）；
-        // 不可完全落地 → 0（= 无绑定，回落旧名字路径）。**必须显式改写**：iv 经 ast_alloc
-        // 原样拷贝，沿用 = 用源上下文的形参行给实例建键（错实例）。
+        // Remap call-site bindings for this instance. The cloned node carries the
+        // source function context's bindings; gen_remap_binds substitutes them for
+        // the current instance. A block that is not fully concrete becomes 0 and
+        // falls back to the name path. The iv must be rewritten explicitly because
+        // ast_alloc copies it.
         n := ast_alloc(k, a2, b2, c, iv, tv, d, ln, cl)
         ast_set_int_val(n, gen_remap_binds(iv))
-        // R2 P3b Task 6（Step 3，mangling 退役）：接口方法调用（泛型形参接收者）的**实例化解析**。
-        // 源节点携带（data = 泛型形参名 ni，type_val = CALL_FLAG_IFACE_METHOD；检查见 checker 的
-        // 泛型约束方法路径注）⇒ 此处按当前实例的具体类型**查方法表**取真实函数名（`g_methods`
-        // 三元组 → 函数名 ni）。旧态 = 克隆期沿用合成的 "T.m" 串（文本替换只作用于 EXPR_IDENT）
-        // ⇒ 实例体内调用目标悬空（实测：产物运行 rc=139）。
-        // 解析失败（形参未绑定 / 具体类型无此方法 / 嵌套形参）⇒ 保持原状（登记面，不发明目标）。
+        // Resolve an interface method call whose receiver is a generic parameter.
+        // The source node has data = the generic parameter name and
+        // type_val = CALL_FLAG_IFACE_METHOD. Use the current instance's concrete
+        // type to look up the real function name in g_methods.
+        // If resolution fails because the parameter is unbound, the type has no such
+        // method, or the parameter is nested, leave the node unchanged.
         if tv == CALL_FLAG_IFACE_METHOD:
             cni := gen_lookup_subst(d)
             if cni >= 0 && a2 >= 0:
@@ -840,15 +852,15 @@ fn gen_clone_tree(node: int) -> int:
         gen_dedup_add(node, n)
         return n
 
-    // ── EXPR_STRUCT: a=type_name_ni(NOT), b=first wrapper(YES, consecutive), c=field_count(NOT)；
-    //    wrapper.a = field value node、wrapper.b = 字段名 idx（TODO #2026-09-11-11 ①；-1 = 无名字信息）
-    //    （F5 契约，见 parser.cr struct 字面量分支）──
+    // EXPR_STRUCT: a = type name, b = first wrapper (consecutive), c = field count.
+    // wrapper.a = field value node, wrapper.b = field name index or -1.
     if k == EXPR_STRUCT:
         if b >= 0 && c > 0:
-            // 字段值先逐个深克隆（各自子树自占槽位），再统建连续 wrapper——
-            // 不得「克隆值后随建 wrapper」逐元素交错：wrapper 将不连续（与 parser 同契约）。
-            // **名字随克隆保留**（#2026-09-11-11 ①）：实例体里的字段绑定仍按名字（源序 ≠ 声明序时，
-            // 丢名字会让 ir_gen 回落位序 ⇒ 静默错值——正是 #2026-09-11-11 要消灭的类）。
+            // Clone field values first, then build consecutive wrappers. Interleaving
+            // value cloning with wrapper creation would make wrappers non-consecutive.
+            // Keep field names: instance bodies bind fields by name, and losing the
+            // name would fall back to positional binding when source order differs
+            // from declaration order.
             nvs : string, mut = alloc(c * 8)
             nms : string, mut = alloc(c * 8)
             i : ., mut = 0
@@ -875,11 +887,11 @@ fn gen_clone_tree(node: int) -> int:
         gen_dedup_add(node, n)
         return n
 
-    // ── EXPR_ARRAY: a=first wrapper(YES, consecutive), b=elem_count(NOT)；
-    //    wrapper.a = element value node（F5 契约，见 parser.cr 下标分支）──
+    // EXPR_ARRAY: a = first wrapper (consecutive), b = element count.
+    // wrapper.a = element value node.
     if k == EXPR_ARRAY:
         if a >= 0 && b > 0:
-            // 元素值先逐个深克隆（各自子树自占槽位），再统建连续 wrapper（与 parser 同契约）。
+            // Clone element values first, then build consecutive wrappers.
             nvs : string, mut = alloc(b * 8)
             i : ., mut = 0
             loop:
@@ -904,12 +916,11 @@ fn gen_clone_tree(node: int) -> int:
         gen_dedup_add(node, n)
         return n
 
-    // ── EXPR_TUPLE: a=first wrapper(YES, consecutive), b=elem_count(NOT)；
-    //    wrapper.a = element value node（F5 契约，见 parser.cr 元组分支）──
+    // EXPR_TUPLE: a = first wrapper (consecutive), b = element count.
+    // wrapper.a = element value node.
     if k == EXPR_TUPLE:
         if a >= 0 && b > 0:
-            // 元素值先逐个深克隆（各自子树自占槽位），再统建连续 wrapper——
-            // 不得「克隆值后随建 wrapper」逐元素交错：wrapper 将不连续（与 parser 同契约）。
+            // Clone element values first, then build consecutive wrappers.
             nvs : string, mut = alloc(b * 8)
             i : ., mut = 0
             loop:
@@ -975,8 +986,8 @@ fn gen_clone_tree(node: int) -> int:
         gen_dedup_add(node, n)
         return n
 
-    // ── EXPR_STRUCTPAT: a=name_ni(NOT), b=first wrapper(YES, consecutive), c=field_count(NOT)；
-    //    wrapper.a = 子模式节点（F5 契约，见 parser.cr struct 模式分支）──
+    // EXPR_STRUCTPAT: a = name, b = first wrapper (consecutive), c = field count.
+    // wrapper.a = subpattern node.
     if k == EXPR_STRUCTPAT:
         if b >= 0 && c > 0:
             nvs : string, mut = alloc(c * 8)
@@ -1018,8 +1029,8 @@ fn gen_clone_tree(node: int) -> int:
         gen_dedup_add(node, n)
         return n
 
-    // ── Fallback (shouldn't normally reach here) ──
-    // Conservatively clone all pointer-sized fields as AST children.
+    // Fallback for node kinds without an explicit branch. Clone all pointer-sized
+    // fields as children.
     a2 := gen_clone_tree(a)
     b2 := gen_clone_tree(b)
     c2 := gen_clone_tree(c)
@@ -1058,26 +1069,26 @@ fn gen_find_or_create(func_ni: int, type_args: string) -> int:
         return cached
     return gen_create_instance(func_ni, type_args, -1)
 
-// R2 P3 Task 5（Step 4）：带**调用点绑定段**的查/建（ir_gen 提供规范键 + 段起始）。
-// 缓存键 = type_args 串（规范结构名 join，含真身份）⇒ 同实例同键、异实例异键（不再折叠）。
+// Find or create an instance with a call-site binding block. ir_gen supplies the
+// canonical key and the block start. The key is the joined structural type string,
+// so different instances get different keys.
 fn gen_find_or_create_bind(func_ni: int, type_args: string, bstart: int) -> int:
     cached := gen_find_cached(func_ni, type_args)
     if cached >= 0:
         return cached
     return gen_create_instance(func_ni, type_args, bstart)
 
-// Create a specialized copy of a generic function.
-// Steps:
-//   1. Build generic param → concrete type name substitution mapping
-//   2. Deep-clone the function's AST subtree with type substitution
-//   3. Register the new function in g_funcs
-//   4. Cache the new function index
-//   5. Return the new function index
+// Create a specialized copy of a generic function:
+//   1. build generic-parameter to concrete-type substitutions;
+//   2. deep-clone the AST with substitution;
+//   3. register the new function in g_funcs;
+//   4. cache the new function index;
+//   5. return the new index.
 fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
-    // 1. Build substitution mapping
-    //    · 名表（g_gen_subst_old/new）：键 = 键串按逗号切分——**回落路径**；规范键下其名字对
-    //      复合类型不是声明名 ⇒ 只在 ti 路径失效时才可能被用到（见 gen_clone_tree 的优先级）。
-    //    · ti 表（g_gen_subst_tis）：bstart ≥ 0 且段合法时装填（**优先路径**——完整类型节点）。
+    // Build substitution mappings. The name table is the fallback; under canonical
+    // keys its names are not declaration names for composite types, so it is used
+    // only when the type-row path fails. The type-row table is the preferred path
+    // and is filled when bstart is valid.
     gen_build_subst(func_ni, type_args)
     gen_build_subst_tis(func_ni, bstart)
 
@@ -1087,20 +1098,16 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
     g_gen_dedup_cap = 0
     new_fn_node := gen_clone_tree(orig_fn_node)
 
-    // ── (乙) A1：实例形参链**具体化**（2026-09-18）──────────────────────────────
-    // 根因：上方 `gen_clone_tree` 的 EXPR_FN 分支只深克隆 `d`（函数体），`b/c`（首形参/
-    // 形参数）**原样复制** ⇒ 实例与声明**共用形参节点链** ⇒ 形参序言（ir_gen.cr:3071）
-    // 读 `ast_type_val(pn)` = 0 ⇒ 槽型恒 `TI_INT`（GP 类）；调用点对齐环按声明面判门
-    // （ir_gen.cr:1984 的两个子判据对泛型形参恒假）⇒ 表示面失配（GB/XMM 读错寄存器）。
-    // 本段：逐形参克隆「形参节点 + 其类型子树」——类型子树经 `gen_clone_tree` 的
-    // EXPR_IDENT / EXPR_OPTIONAL 分支**按当前实例代入**（ti 路径优先，见该函数头注）；
-    // 并**重算 type_val**：契约照 parser.cr:1427 的 `unpack_type(pty)`——基类型节点 ⇒
-    // 取该节点 `type_val`；非基类型（`T?`/命名/复合）⇒ 0。
-    // **重算不可省**：EXPR_PARAM 克隆分支原样拷贝 `tv`（= 声明的 0）⇒ 不重算则
-    // `ast_type_val(pn)` 仍是 0、槽型仍 `TI_INT`（本修复白做）。两形态回绿路径**不同**：
-    // `T` 靠本行（`type_val`），`T?` 靠类型节点代入（序言走 `dex_opt_type_node` 分支）。
-    // 布局契约（与 parser 同形）：每个形参的类型子树**先于**其形参节点分配 ⇒ 「从
-    // `pn+1` 向前扫到下一个 EXPR_PARAM」的游标语义（序言与对齐环共用）逐字保持。
+    // Concretize the instance parameter chain. The EXPR_FN clone branch copies b/c
+    // (first parameter and count), so the instance would share the declaration's
+    // parameter nodes. The prologue would read type_val = 0 and assign TI_INT to
+    // every slot, and call-site alignment would fail for generic parameters.
+    // Clone each parameter node and its type subtree, substituting generic
+    // parameters for the current instance. Recompute type_val from the cloned type
+    // node: a base-type node contributes its type_val; a non-base type contributes
+    // 0. Without this, the copied declaration value 0 would remain.
+    // Keep the layout contract: each parameter's type subtree is allocated before
+    // its parameter node, so the pn+1 cursor scan still works.
     pc_src := ast_c(orig_fn_node)
     if pc_src > 0:
         opn : ., mut = ast_b(orig_fn_node)
@@ -1171,11 +1178,11 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
     w64(g_gen_instances, g_gen_instance_count * 24 + 16, new_fi)
     g_gen_instance_count = g_gen_instance_count + 1
 
-    // 效应/纯度修正 Task 1：登记实例 → 源（纯度回填用，见 globals.cr 表注）。
-    // 注意：不在此处写 fi_set_ispure(new_fi, fi_ispure(func_ni))——本时点（IR 生成期）
-    // 源函数还没有真纯度（真纯度只能由全程序 IR 体算，见 checker.cr 头注），
-    // 抄过来的是乐观默认值，会把有效应泛型实例错标为纯。实例纯度由其自身体
-    // 在 df_state_finalize 算出；源函数纯度 = 实例合取（compute_all_purity 回填）。
+    // Record the instance-to-source mapping for purity. Do not copy
+    // fi_ispure(func_ni) here: at IR generation time the source function has no
+    // true purity yet, and the default is optimistic. The instance's own purity is
+    // computed in df_state_finalize; the source purity is the conjunction of its
+    // instances, filled by compute_all_purity.
     grow_purity_inst(g_purity_inst_count + 1)
     w64(g_purity_inst, g_purity_inst_count * 24, func_ni)
     w64(g_purity_inst, g_purity_inst_count * 24 + 8, type_args_ni)

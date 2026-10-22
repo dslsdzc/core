@@ -162,22 +162,19 @@ fn str_int(s: string) -> int:
 
 fn to_str(n: int) -> string:
     return int_str(n)
-// 字符串插值用（批 8 插值展开）：`bool` 洞的转换。**不经 int**——遵维护者「bool 不隐式转 int」裁定，
-// 故不写 `int_str(b)`，而按真值给出 `"true"`/`"false"`。
-// ⚠ 为何必须是「函数」而非合成 `if` 表达式（实测）：`"v=" + if b { "true" } else { "false" }`
-// **rc=139**（手写同形亦崩 = 预存缺陷，另立条目）⇒ 转换只能走调用面，本函数即该调用面。
-// ⚠ 代价（实测、已上报）：本函数进 `fmt.cr` ⇒ **所有 `import fmt` 程序的产物变大**
-// （pa ELF 28822→28854 = +32B、`.ccr` +725B）⇒ canary 载体面变化，按 §6 纪律停下上报 + 同批重锁。
+// Convert a bool to text for interpolation. It returns "true" or "false" without
+// converting through int, following the rule that bool is not implicitly an int.
+// A helper function is required because an inline if expression inside a string
+// concatenation crashes the bootstrap compiler. All programs importing fmt carry
+// this function.
 fn bool_str(b: bool) -> string:
     if b:
         return "true"
     return "false"
 
 
-// Format string: replace {} with args sequentially.
-// Example: format("x = {} and y = {}", int_str(x), int_str(y))
-// Simple string interpolation: replaces "{0}" with first arg, "{1}" with second, etc.
-// Usage: format("Hello {0}, you are {1} years old", name, age_str)
+// Replace {0} in a format string with a0. The one-argument form supports one
+// placeholder.
 fn format(fmt_str: string, a0: string) -> string:
     fl := str_len(fmt_str)
     a0l := str_len(a0)
@@ -190,7 +187,7 @@ fn format(fmt_str: string, a0: string) -> string:
             break
         c := load8(fmt_str, fi)
         if c == 123 && fi + 2 < fl && load8(fmt_str, fi+1) == 48 && load8(fmt_str, fi+2) == 125:
-            // "{0}" → replace with a0
+            // Replace {0} with a0.
             ai : ., mut = 0
             loop:
                 if ai >= a0l:
@@ -207,14 +204,15 @@ fn format(fmt_str: string, a0: string) -> string:
     return out_buf
 
 fn format2(fmt_str: string, a0: string, a1: string) -> string:
-    return format(fmt_str, a0)  // fallback: format handles {0} only for now
+    return format(fmt_str, a0)  // the one-argument form handles only {0}
 
-// Integer to string → format helper
+// Format an integer through int_str.
 fn format_int(fmt_str: string, val: int) -> string:
     return format(fmt_str, int_str(val))
 
-// ── float 打印（IEEE 754 double → 十进制字符串，定点最多 6 位小数）──
-// 纯整数实现：提取符号/指数/尾数 → 规范化 → 整数部分 + 小数长除
+// Float printing: IEEE 754 double to decimal text with at most six fractional
+// digits. This is a pure integer implementation: extract sign, exponent, and
+// mantissa, normalize, then split the integer part and long-divide the fraction.
 
 fn fpow2i(k: int) -> int:
     v : int = 1
@@ -227,18 +225,18 @@ fn fpow2i(k: int) -> int:
     return v
 
 fn float_str_bits(bits: int) -> string:
-    // 符号（bit63）
+    // Sign bit.
     neg : int = 0
     u : int = bits
     if u < 0:
         neg = 1
-        // Avoid spelling INT64_MIN: the lexer cannot represent its positive
-        // magnitude as an integer token before applying unary minus.
+        // Avoid writing INT64_MIN: the lexer cannot represent its positive
+        // magnitude before applying unary minus.
         u = u - (-9223372036854775807) + 1
-    // 提取字段（除以 2^52 代替移位）
+    // Extract fields by division instead of shifting.
     exp := (u / 4503599627370496) % 2048
     mant := u % 4503599627370496
-    // 特殊值（IEEE 754 标准）
+    // IEEE 754 special values.
     if exp == 0 && mant == 0:
         if neg != 0:
             return "-0"
@@ -249,23 +247,23 @@ fn float_str_bits(bits: int) -> string:
                 return "-inf"
             return "inf"
         return "nan"
-    // 归一化：m = 1.mant（正规）或 0.mant（次正规），e = exp - 1023
+    // Normalize: m = 1.mant for a normal value or 0.mant for a subnormal, with e = exp - 1023.
     m : int = mant
     e : int = exp - 1023
     if exp != 0:
         m = mant + 4503599627370496
     else:
         e = e + 1
-    // value = m × 2^(e-52)（m 是 2^52 缩放的尾数）
+    // value = m * 2^(e-52), where m is scaled by 2^52.
     ip : int = 0
-    den : int = 1   // 小数分母（小数部分 = r/den）
+    den : int = 1   // fractional denominator; the fraction is r/den
     r : int = 0
     if e >= 52:
         if e - 52 <= 10:
             ip = m * fpow2i(e - 52)
         else:
             ip = m * 1024
-        // 大数近似（超出 int 范围）
+        // Approximate large values that exceed the int range.
     else:
         if 52 - e <= 53:
             den = fpow2i(52 - e)
@@ -274,8 +272,8 @@ fn float_str_bits(bits: int) -> string:
         else:
             ip = 0
             den = fpow2i(53)
-            r = m  // 极小值
-    // 长除：r × 10 / den，提取 7 位（第 7 位用于舍入）
+            r = m  // very small value
+    // Long division: r*10/den. Extract seven digits; the seventh is used for rounding.
     frac_str : ., mut = ""
     r2 : ., mut = r
     di : ., mut = 0
@@ -290,7 +288,7 @@ fn float_str_bits(bits: int) -> string:
         if di < 6:
             frac_str = frac_str + int_str(dg2)
         else if dg2 >= 5:
-            // 第 7 位 ≥ 5：从第 6 位向前传播进位。
+            // The seventh digit is at least 5: propagate a carry from the sixth digit.
             fl2 := str_len(frac_str)
             carry : ., mut = 1
             ri : ., mut = fl2 - 1
@@ -307,7 +305,7 @@ fn float_str_bits(bits: int) -> string:
             if carry != 0:
                 ip = ip + 1
         di = di + 1
-    // 去尾零
+    // Remove trailing zeros.
     fl := str_len(frac_str)
     loop:
         if fl <= 0:
@@ -317,7 +315,7 @@ fn float_str_bits(bits: int) -> string:
         fl = fl - 1
     if fl > 0:
         frac_str = str_sub(frac_str, 0, fl)
-    // 组装
+    // Assemble the result.
     out : ., mut = ""
     if neg != 0:
         out = out + "-"

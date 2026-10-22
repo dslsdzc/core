@@ -120,6 +120,7 @@ backend_support_files = [
     'src/stdlib/goroutine.cr',
     'src/stdlib/chan.cr',
     'src/stdlib/sched.cr',
+    'src/compiler/backend_flags.cr',
     'src/compiler/corearch.cr',
 ]
 

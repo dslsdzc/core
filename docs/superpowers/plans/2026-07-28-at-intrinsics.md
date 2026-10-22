@@ -1,44 +1,44 @@
-# @ 内建原语 Implementation Plan
+# @ 内建原语实现计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
 
-**Goal:** Implements compiler built-in intrinsics (`@sizeOf`, `@alignOf`, `@typeInfo`, `@fields`, `@field`, `@hasField`, `@comptime`, `@inline`, `@no_bounds_check`, `@fast`) across parser, type checker, IR gen, and backend.
+目标：在 parser、type checker、IR gen 和后端实现编译器内建原语（`@sizeOf`、`@alignOf`、`@typeInfo`、`@fields`、`@field`、`@hasField`、`@comptime`、`@inline`、`@no_bounds_check`、`@fast`）。
 
-**Architecture:** `@ident` is parsed as `EXPR_AT` AST node. Type checker validates each known @ name and its arguments. IR gen computes metadata queries at compile time (emit as `IR_CONST`), emits annotation opcodes for compile control, and invokes the interpreter for `@comptime`. The dataflow graph retains semantic nodes for verification tools.
+架构：`@ident` 解析为 `EXPR_AT` AST 节点。类型检查器校验每个已知 @ 名称及其参数。IR gen 在编译期计算元数据查询（以 `IR_CONST` 发射），为编译控制发射注解 opcode，并对 `@comptime` 调用解释器。数据流图保留语义节点，供验证工具使用。
 
-**Tech Stack:** Core self-hosted compiler (parser.cr, type_checker.cr, ir_gen.cr, dataflow.cr, opt.cr, elf backend)
+技术栈：Core 自举编译器（parser.cr、type_checker.cr、ir_gen.cr、dataflow.cr、opt.cr、elf 后端）
 
-## Global Constraints
+## 全局约束
 
-- Every `@` builtin has a corresponding IR semantic node (even if folded to IR_CONST)
-- Metadata query results (`@sizeOf`, `@fields`) are known at compile time — emit as IR_CONST
-- `@comptime` invokes the interpreter during IR gen
-- `@no_bounds_check` / `@fast` emit annotation opcodes consumed by passes
-- Uses `jj` for all version control
-- EXPR_AT = 46 (EXPR_PTRTYPE was 46, renumbered to 47)
-- New IR opcodes: IR_INLINE, IR_NO_BOUNDS_CHECK, IR_FAST (34, 35, 36)
+- 每个 `@` 内建都对应一个 IR 语义节点（即使折叠为 IR_CONST）
+- 元数据查询结果（`@sizeOf`、`@fields`）在编译期已知，以 IR_CONST 发射
+- `@comptime` 在 IR gen 期间调用解释器
+- `@no_bounds_check` / `@fast` 发射注解 opcode，由各 pass 消费
+- 所有版本控制使用 `jj`
+- EXPR_AT = 46（EXPR_PTRTYPE 原为 46，改为 47）
+- 新增 IR opcode：IR_INLINE、IR_NO_BOUNDS_CHECK、IR_FAST（34、35、36）
 
 ---
 
-### Task 1: AST + IR Constants (ast.cr)
+### 任务 1：AST 与 IR 常量（ast.cr）
 
-**Files:**
-- Modify: `src/compiler/ast.cr`
+涉及文件：
+- 修改：`src/compiler/ast.cr`
 
-**Interfaces:**
-- Produces: `EXPR_AT = 46`, `IR_INLINE = 34`, `IR_NO_BOUNDS_CHECK = 35`, `IR_FAST = 36`
+接口：
+- 产出：`EXPR_AT = 46`、`IR_INLINE = 34`、`IR_NO_BOUNDS_CHECK = 35`、`IR_FAST = 36`
 
-- [ ] **Step 1: Add EXPR_AT AST constant**
+- [ ] 步骤 1：添加 EXPR_AT AST 常量
 
-Find the EXPR_ section (around `EXPR_AWAIT = 45`). Add after it:
+找到 EXPR_ 段（`EXPR_AWAIT = 45` 附近），在其后添加：
 
 ```core
 EXPR_AT : int = 46     // @builtin: a=name_ni, b=args_node, c=0, iv=0, tv=0, data=0
 ```
 
-- [ ] **Step 2: Add IR opcode constants**
+- [ ] 步骤 2：添加 IR opcode 常量
 
-Find the IR opcode section (after `IR_ARENA_RESET = 33`). Add:
+找到 IR opcode 段（`IR_ARENA_RESET = 33` 之后），添加：
 
 ```core
 IR_INLINE            : int = 34   // src1=fn_var — inline hint
@@ -46,7 +46,7 @@ IR_NO_BOUNDS_CHECK   : int = 35   // — skip bounds check for subsequent DEREFs
 IR_FAST              : int = 36   // — allow precision-for-speed optimizations
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] 步骤 3：提交
 
 ```bash
 jj commit src/compiler/ast.cr -m "feat: add EXPR_AT(46), IR_INLINE(34), IR_NO_BOUNDS_CHECK(35), IR_FAST(36)"
@@ -54,14 +54,14 @@ jj commit src/compiler/ast.cr -m "feat: add EXPR_AT(46), IR_INLINE(34), IR_NO_BO
 
 ---
 
-### Task 2: Parser — @ identifier → EXPR_AT
+### 任务 2：Parser 将 @ 标识符解析为 EXPR_AT
 
-**Files:**
-- Modify: `src/compiler/parser.cr`
+涉及文件：
+- 修改：`src/compiler/parser.cr`
 
-- [ ] **Step 1: Add @ parsing in primary expression**
+- [ ] 步骤 1：在 primary 表达式中添加 @ 解析
 
-Find the `fn parse_primary` function. Find where `T_SELF` etc. are handled (around the primary dispatch). Add before the `T_IDENT` check:
+找到 `fn parse_primary` 函数，再找到处理 `T_SELF` 等分支的位置（primary 分发处）。在 `T_IDENT` 检查之前添加：
 
 ```core
     if tok_k(t) == T_AT {
@@ -79,13 +79,13 @@ Find the `fn parse_primary` function. Find where `T_SELF` etc. are handled (arou
     }
 ```
 
-This goes right after the `T_AMPERSAND` check and before the `T_IDENT`/`T_SELF`/`T_UNDERSCORE` check.
+这段代码放在 `T_AMPERSAND` 检查之后，`T_IDENT`/`T_SELF`/`T_UNDERSCORE` 检查之前。
 
-- [ ] **Step 2: Verify parsing**
+- [ ] 步骤 2：验证解析
 
-Run: `./build/corec check -c '@sizeOf(int)' 2>&1` — should parse without error.
+运行：`./build/corec check -c '@sizeOf(int)' 2>&1`，应能解析且不报错。
 
-- [ ] **Step 3: Commit**
+- [ ] 步骤 3：提交
 
 ```bash
 jj commit src/compiler/parser.cr -m "feat: parse @identifier as EXPR_AT node"
@@ -93,14 +93,14 @@ jj commit src/compiler/parser.cr -m "feat: parse @identifier as EXPR_AT node"
 
 ---
 
-### Task 3: Type Checker — EXPR_AT dispatch
+### 任务 3：类型检查器分发 EXPR_AT
 
-**Files:**
-- Modify: `src/compiler/type_checker.cr`
+涉及文件：
+- 修改：`src/compiler/type_checker.cr`
 
-- [ ] **Step 1: Add EXPR_AT handling in the main type-check dispatch**
+- [ ] 步骤 1：在主类型检查分发中添加 EXPR_AT 处理
 
-Find the main type-check loop (where EXPR_* kinds are dispatched). Add before the return statement:
+找到主类型检查循环（分发 EXPR_* 类型处），在 return 语句之前添加：
 
 ```core
     if kind == EXPR_AT {
@@ -191,14 +191,14 @@ Find the main type-check loop (where EXPR_* kinds are dispatched). Add before th
     }
 ```
 
-- [ ] **Step 2: Verify type check**
+- [ ] 步骤 2：验证类型检查
 
 ```bash
 ./build/corec check -c 'fn f() { let x := @sizeOf(int); }'
 ```
-Expected: No errors.
+预期：无错误。
 
-- [ ] **Step 3: Commit**
+- [ ] 步骤 3：提交
 
 ```bash
 jj commit src/compiler/type_checker.cr -m "feat: type check EXPR_AT — validate @ builtin names and args"
@@ -206,14 +206,14 @@ jj commit src/compiler/type_checker.cr -m "feat: type check EXPR_AT — validate
 
 ---
 
-### Task 4: IR Gen — compile-time constant folding
+### 任务 4：IR Gen 的编译期常量折叠
 
-**Files:**
-- Modify: `src/compiler/ir_gen.cr`
+涉及文件：
+- 修改：`src/compiler/ir_gen.cr`
 
-- [ ] **Step 1: Add EXPR_AT handling in gen_expr**
+- [ ] 步骤 1：在 gen_expr 中添加 EXPR_AT 处理
 
-Find the main `fn gen_expr(node)` function. Add before the `return -1` at the end:
+找到主函数 `fn gen_expr(node)`，在末尾的 `return -1` 之前添加：
 
 ```core
     if ast_kind(node) == EXPR_AT:
@@ -301,9 +301,9 @@ Find the main `fn gen_expr(node)` function. Add before the `return -1` at the en
         return -1
 ```
 
-- [ ] **Step 2: Add helper functions for type metadata**
+- [ ] 步骤 2：添加类型元数据辅助函数
 
-At the top of the file or in a helper section, add:
+在文件顶部或辅助函数区添加：
 
 ```core
 // Type size lookup
@@ -350,14 +350,14 @@ fn ti_field_offset(ti: int, name: string) -> int:
     return 0  // placeholder
 ```
 
-- [ ] **Step 3: Verify IR gen**
+- [ ] 步骤 3：验证 IR gen
 
 ```bash
 ./build/corec check -c 'fn f() { let x := @sizeOf(int); }'
 ```
-Expected: No errors.
+预期：无错误。
 
-- [ ] **Step 4: Commit**
+- [ ] 步骤 4：提交
 
 ```bash
 jj commit src/compiler/ir_gen.cr -m "feat: IR gen EXPR_AT — compile-time constant folding for @ builtins"
@@ -365,15 +365,15 @@ jj commit src/compiler/ir_gen.cr -m "feat: IR gen EXPR_AT — compile-time const
 
 ---
 
-### Task 5: Dataflow + Pass Registration
+### 任务 5：Dataflow 与 pass 注册
 
-**Files:**
-- Modify: `src/compiler/dataflow.cr`
-- Modify: `src/compiler/opt.cr`
+涉及文件：
+- 修改：`src/compiler/dataflow.cr`
+- 修改：`src/compiler/opt.cr`
 
-- [ ] **Step 1: Register in dataflow.cr df_opcode_name**
+- [ ] 步骤 1：在 dataflow.cr 的 df_opcode_name 中登记
 
-Find `fn df_opcode_name`. Add after the `IR_ARENA_RESET` entry:
+找到 `fn df_opcode_name`，在 `IR_ARENA_RESET` 条目之后添加：
 
 ```core
     if opcode == IR_INLINE { return "inline"; }
@@ -381,19 +381,19 @@ Find `fn df_opcode_name`. Add after the `IR_ARENA_RESET` entry:
     if opcode == IR_FAST { return "fast"; }
 ```
 
-- [ ] **Step 2: Register in dataflow.cr df_connect_srcs**
+- [ ] 步骤 2：在 dataflow.cr 的 df_connect_srcs 中登记
 
-Find `fn df_connect_srcs`. Add:
+找到 `fn df_connect_srcs`，添加：
 
 ```core
     if opcode == IR_INLINE { df_use_var(nid, s1); return; }
 ```
 
-`IR_NO_BOUNDS_CHECK` and `IR_FAST` have no src operands, so no edges needed.
+`IR_NO_BOUNDS_CHECK` 和 `IR_FAST` 没有 src 操作数，不需要连边。
 
-- [ ] **Step 3: Skip in opt.cr CSE loop**
+- [ ] 步骤 3：在 opt.cr 的 CSE 循环中跳过
 
-Find the `pass_cse` optimization loop. Add after the `IR_ARENA_RESET` skip:
+找到 `pass_cse` 优化循环，在 `IR_ARENA_RESET` 的跳过分支之后添加：
 
 ```core
     if op == IR_INLINE { ii = ii + 1; continue; }
@@ -401,7 +401,7 @@ Find the `pass_cse` optimization loop. Add after the `IR_ARENA_RESET` skip:
     if op == IR_FAST { ii = ii + 1; continue; }
 ```
 
-- [ ] **Step 4: Commit**
+- [ ] 步骤 4：提交
 
 ```bash
 jj commit src/compiler/dataflow.cr src/compiler/opt.cr -m "feat: register IR_INLINE/NO_BOUNDS_CHECK/FAST in dataflow and opt passes"
@@ -409,15 +409,15 @@ jj commit src/compiler/dataflow.cr src/compiler/opt.cr -m "feat: register IR_INL
 
 ---
 
-### Task 6: ELF Backend — Annotation Opcodes
+### 任务 6：ELF 后端的注解 opcode
 
-**Files:**
-- Modify: `src/arch/linux/ld/instr.cr`
-- Modify: `src/arch/linux/ld/sizes.cr`
+涉及文件：
+- 修改：`src/arch/linux/ld/instr.cr`
+- 修改：`src/arch/linux/ld/sizes.cr`
 
-- [ ] **Step 1: Add encoding in instr.cr**
+- [ ] 步骤 1：在 instr.cr 中添加编码
 
-Find the main instruction encoder function. Add before final `return cp`:
+找到主指令编码函数，在最后的 `return cp` 之前添加：
 
 ```core
     if op == IR_INLINE {
@@ -434,9 +434,9 @@ Find the main instruction encoder function. Add before final `return cp`:
     }
 ```
 
-- [ ] **Step 2: Add size estimates in sizes.cr**
+- [ ] 步骤 2：在 sizes.cr 中添加尺寸估算
 
-Find the instruction size function. Add:
+找到指令尺寸函数，添加：
 
 ```core
     if op == IR_INLINE { return 0; }
@@ -444,7 +444,7 @@ Find the instruction size function. Add:
     if op == IR_FAST { return 0; }
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] 步骤 3：提交
 
 ```bash
 jj commit src/arch/linux/ld/instr.cr src/arch/linux/ld/sizes.cr -m "feat: ELF backend no-op encoding for IR_INLINE/NO_BOUNDS_CHECK/FAST"
@@ -452,12 +452,12 @@ jj commit src/arch/linux/ld/instr.cr src/arch/linux/ld/sizes.cr -m "feat: ELF ba
 
 ---
 
-### Task 7: Tests
+### 任务 7：测试
 
-**Files:**
-- Create: `tests/suite/at_test.cr`
+涉及文件：
+- 创建：`tests/suite/at_test.cr`
 
-- [ ] **Step 1: Write @ builtins test suite**
+- [ ] 步骤 1：编写 @ 内建测试套件
 
 ```core
 // @ builtins test suite
@@ -551,14 +551,14 @@ fn main() -> int:
     return 0
 ```
 
-- [ ] **Step 2: Type-check the test**
+- [ ] 步骤 2：对测试做类型检查
 
 ```bash
 ./build/corec check tests/suite/at_test.cr
 ```
-Expected: No errors.
+预期：无错误。
 
-- [ ] **Step 3: Commit**
+- [ ] 步骤 3：提交
 
 ```bash
 jj commit tests/suite/at_test.cr -m "test: @ builtins suite — sizeOf, alignOf, fields, inline, no_bounds_check"

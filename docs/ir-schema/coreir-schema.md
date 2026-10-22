@@ -1,48 +1,49 @@
-# Core IR Schema — HDFG (.cir / .csr)
+# Core IR Schema：HDFG（.cir / .ccr / .csr）
 
-> 定位:受众 = 维护者(后端/ccr_io 实现者);状态 = active(实现期规格);出处 = src/compiler/ccr_io.cr 与 ast.cr。
->
-> ⚠ **修订（2026-09-16 文档审计）**：上述「出处」对本文件的两半**效力不同**——`.cir`/`.ccr` 半**成立**
-> （这两半以 `ccr_io.cr`/`ast.cr` 为准）；**`.csr` 半不成立**（`.csr` 全仓**零实现**，见 `corespecir-schema.md`
-> 头部修订注）。另：`.ccr` 的**现行版本 = 9**（`ccr_io.cr:135`）——本文件「六、线性化」节的 `v7` 为
-> **段表架构代号**（沿用 `lattice-ir-v7-format.md` 命名），与原文字面 `version=7` 的差异已在节内修订注标明。
+本文件描述 Core 的中间表示格式。`.cir` 是程序图和规约约束的验证表示，`.ccr` 是格形态的落盘表示，`.csr` 是规约约束的序列化设计。
+
+格式以源码为准：`.cir` 和 `.ccr` 的字段与版本以 `src/compiler/ccr_io.cr` 和 `src/compiler/ast.cr` 为准；`.csr` 当前没有实现，见 `docs/ir-schema/corespecir-schema.md` 头部的说明。
+
+`.ccr` 的当前版本是 9，版本常量在 `src/compiler/ccr_io.cr`。本文件第六节保留段表架构的说明，里面的 `v7` 是架构代号，不是当前文件版本号。
 
 ## 概述
 
-Core 编译器使用两种中间表示：
+Core 编译器使用三种中间表示：
 
-| 格式 | 全称 | 用途 | 生产者 | 消费者 |
-|------|------|------|--------|--------|
-| `.cir` | Core IR Graph | HDFG + 规约约束（验证 IR） | `corec`（前端） | 验证工具 / `corearch` / 解释器 |
-| `.ccr` | Core Region Representation（C 路线：格形态，v7 = 真图载体） | 格层**图载体**——NOD+EDG（节点 + 数据/state 边）+ ENT（条目 × 版本）+ REG（区域），存在结构与图语义落盘；文件序 = 合法拓扑调度，**执行序 = 投影**（字节布局以 `docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md` 为准） | `corec`（前端） | `corearch`（后端） |
+| 格式 | 全称 | 用途 | 生产者 | 使用方 |
+|---|---|---|---|---|
+| `.cir` | Core IR Graph | HDFG 和规约约束，验证用 | `corec` 前端 | 验证工具、`corearch`、解释器 |
+| `.ccr` | Core Region Representation | 格形态：NOD、EDG、ENT、REG，保存节点、边、条目和区域 | `corec` 前端 | `corearch` 后端 |
+| `.csr` | Core Spec Representation | 规约约束的序列化设计，当前零实现 | 前端，设计 | 验证工具，设计 |
 
-**`.cir` 是 Core 的验证核心。** 它承载程序的完整语义（HDFG）。验证工具消费 `.cir` + `.csr`（规约约束元数据）进行验证。
+`.cir` 是 Core 的验证核心。它保存程序的完整语义。验证工具使用 `.cir` 和 `.csr` 完成验证。
 
-自托管编译器在 IR 生成期间同时构建 HDFG（`.cir`，图形态）和格层图载体（`.ccr`，格形态 v7——NOD/EDG/ENT/REG 段，节点 + 边 + 条目落盘），然后 `lower_to_ccr()` 将图节点镜像投影为文件序线性数组（= 合法拓扑调度）供 x86-64 后端消费——执行序是图的投影，不再是文件唯一语义主干。
+自托管编译器在 IR 生成期间同时构建 HDFG 和格形态，然后 `lower_to_ccr()` 把图节点投影为文件序线性数组，供 x86-64 后端使用。执行序是图的投影，文件顺序不是唯一的语义主干。
 
 ---
 
-## 一、核心设计：图即验证
+## 一、核心设计：在图上验证
 
 ```
 .cir = 程序的HDFG + 规约约束
-         ↓
+         |
+         v
 验证工具消费 .cir：
-  1. 编译器已证明的约束（自动推导标签）标注为 
+  1. 编译器已证明的约束（自动推导标签）标注为已证明
   2. 用户写的约束标注为 pending
   3. 验证工具尝试证明 pending 约束
-  4. 输出：每个约束绿/黄/红
+  4. 输出：每个约束的状态，分为已证明、待证明和失败
 ```
 
-**规约约束是图的一等公民。** `#check`、`#ensure`、`#invariant` 和 `spec fn` 的身体都编译为 `.cir` 图上的节点，与普通指令节点并列。验证工具遍历图时，普通节点描述"程序做什么"，规约节点描述"程序应该做什么"，两者在同一张图上。
+规约约束是图的一等结构。`#check`、`#ensure`、`#invariant` 和 `spec fn` 的身体都编译为 `.cir` 图上的节点，与普通指令节点并列。验证工具遍历图时，普通节点描述“程序做什么”，规约节点描述“程序应该做什么”，两者在同一张图上。
 
 ---
 
-## 二、二进制 `.csr` 格式（v1）
+## 二、二进制 `.csr` 格式（设计）
 
-`.csr` 是规约约束的二进制序列化格式——将内存中的 TagNode（约束元数据）数组序列化为文件，与 `.cir`（DFNode HDFG）配套。
+`.csr` 是规约约束的二进制序列化格式，把内存中的 TagNode 数组序列化为文件，与 `.cir` 配套。
 
-> 注：本节描述 `.csr`（规约约束元数据）格式。`.ccr` 二进制格式（CCR1 文件）的 v5 变更见「六、线性化」中的 `.ccr` 二进制序列化小节。
+当前 `.csr` 没有实现，本节是格式设计。`.ccr` 的二进制格式见第六节。
 
 ### 整体布局
 
@@ -56,7 +57,7 @@ Core 编译器使用两种中间表示：
 [SG region 段（.ccr v5）：sg_count × 24B：kind/enter/exit/parent/nstart/ncount]
 ```
 
-> 注：DFEdge 仅在内存与 `.cir` 缓存中（v5 按 4×8B 带 kind 序列化），**不落盘 `.ccr`**——CCR1 writer（`save_ccr`，ccr_io.cr）只写指令/变量/字符串等数组。布局中的 SG region 段即 `.ccr` v5 追加段（详见「六、线性化」）。
+> 注：DFEdge 仅在内存与 `.cir` 缓存中（v5 按 4×8B 带 kind 序列化），不落盘 `.ccr`。CCR1 writer（`save_ccr`，ccr_io.cr）只写指令/变量/字符串等数组。布局中的 SG region 段即 `.ccr` v5 追加段（详见“六、线性化”）。
 
 ### 文件头（36 字节）
 
@@ -101,7 +102,7 @@ DFNode 覆盖两种节点：普通指令节点（opcode ≤ IR_AWAIT）和规约
 | 20 | 4 | source_line | 源文件行号 |
 | 24 | 16 | reserved | 保留 |
 
-**约束类型（tag_kind）：**
+约束类型（tag_kind）：
 
 | 值 | 名称 | 说明 |
 |----|------|------|
@@ -114,7 +115,7 @@ DFNode 覆盖两种节点：普通指令节点（opcode ≤ IR_AWAIT）和规约
 | 6 | TAG_SPEC_FN | 检查函数引用 |
 | 7 | TAG_USER_TAG | 自定义标签 |
 
-### DFEdge（内存 32 字节；不落盘 `.ccr`——仅 `.cir` 缓存 v5 序列化）
+### DFEdge（内存 32 字节；不落盘 `.ccr`，仅 `.cir` 缓存 v5 序列化）
 
 | 偏移 | 大小 | 字段 | 说明 |
 |------|------|------|------|
@@ -123,7 +124,7 @@ DFNode 覆盖两种节点：普通指令节点（opcode ≤ IR_AWAIT）和规约
 | 16 | 8 | next_out | 同一源节点的下一条出边索引（-1 = 结尾） |
 | 24 | 8 | kind | 边类型：0=data, 1=state（VSDG state edge；`.cir` 缓存 v5 按 4×8B 序列化） |
 
-边使用邻接列表结构：每个节点通过 `first_edge` → `next_out` 链表遍历其出边。
+边使用邻接列表结构：每个节点通过 `first_edge` 到 `next_out` 的邻接记录遍历其出边。
 
 ### 字符串表
 
@@ -158,9 +159,9 @@ DFNode 覆盖两种节点：普通指令节点（opcode ≤ IR_AWAIT）和规约
 | 4 | 4 | kind | 符号类型：0=func, 1=var, 2=type, 3=field |
 | 8 | 4 | scope | 作用域（函数索引或 -1 表示全局） |
 
-### ALLOC_AT 节点（声明式放置，2026-08-13）
+### ALLOC_AT 节点（声明式放置）
 
-固定地址放置的声明式进图节点（图锚定区域内存模型，见 `docs/maintainer/design/memory-model.md` 机制 #3）：
+固定地址放置的声明式进图节点（图绑定区域内存模型，见 `docs/maintainer/design/memory-model.md` 机制 #3）：
 
 | 字段 | 含义 |
 |------|------|
@@ -171,20 +172,20 @@ DFNode 覆盖两种节点：普通指令节点（opcode ≤ IR_AWAIT）和规约
 | src3 | 对齐（字节） |
 | type_kind | 指向的元素类型 |
 
-与 ALLOC 同路径获得 provenance；ProvenanceVerify 验证边界+宽度（`offset ∈ [0, size)` 且 `off + width <= size`）。声明是唯一信任点，之后全图追踪。
+与 ALLOC 同路径获得 provenance；ProvenanceVerify 验证边界和宽度（`offset ∈ [0, size)` 且 `off + width <= size`）。声明是唯一信任点，之后全图追踪。
 
-### 布局元数据（Layout Descriptor，2026-08-13）
+### 布局元数据（Layout Descriptor）
 
-struct 类型关联布局描述符。**默认由编译器推导自然布局**（字段顺序 + 自然对齐），用户 `layout(...)` 声明时显式给出（packed/强制对齐/硬件结构例外入口）：
+struct 类型关联布局描述符。默认由编译器推导自然布局（字段顺序 + 自然对齐），用户 `layout(...)` 声明时显式给出（packed/强制对齐/硬件结构例外入口）：
 
 | 字段 | 含义 |
 |------|------|
 | packed | 是否紧凑（无填充） |
 | align | 整体对齐要求（字节） |
 | field_count | 字段数 |
-| fields | 每字段：(name_idx, offset, width, align)——name_idx 索引字符串表 |
+| fields | 每字段：(name_idx, offset, width, align)，name_idx 索引字符串表 |
 
-布局元数据是**图数据**：后端与验证器消费同一来源（语义保鲜），DEREF 的偏移+宽度检查对着布局走。
+布局元数据是图数据：后端与验证器消费同一来源（语义保留），DEREF 的偏移和宽度检查按布局执行。
 
 ---
 
@@ -218,13 +219,13 @@ struct 类型关联布局描述符。**默认由编译器推导自然布局**（
 | `#no_throw` | 无可达的异常路径（无分支导向 panic/error 节点） | 不抛异常 |
 | `#safe_index` | 所有 LOAD_INDEX/STORE_INDEX 节点的索引输入 ≤ 数组长度变量 | 安全索引 |
 | `#len_preserved` | 输入集合变量和输出集合变量之间的 DFNode 无插入/删除操作（STORE_INDEX 不超出边界，无 ALLOC 替换） | 长度守恒 |
-| `#atomic` | 配对操作（如 LOAD → STORE）之间无 YIELD/AWAIT/SPAWN 节点 | 不可分割 |
-| `#conservation` | 图上两条 STORE 边的修改值之和为零或常数（编译器需要识别配对模式） | 守恒律 |
-| `#ordered` | 图中有比较（CMP）→ 条件分支（BRANCH）→ 交换（STORE_INDEX）的子图模式 | 有序结果 |
+| `#atomic` | 配对操作（如 LOAD 到 STORE）之间无 YIELD/AWAIT/SPAWN 节点 | 不可分割 |
+| `#conservation` | 图上两条 STORE 边的修改值之和为零或常数（编译器需要识别配对模式） | 守恒规则 |
+| `#ordered` | 图中有比较（CMP）、条件分支（BRANCH）、交换（STORE_INDEX）的子图模式 | 有序结果 |
 
 ---
 
-## 五、HDFG构建规则
+## 五、HDFG 构建规则
 
 ### 辅助数组
 
@@ -240,54 +241,54 @@ struct 类型关联布局描述符。**默认由编译器推导自然布局**（
 
 由 `df_connect_srcs()` 根据操作码类型自动构建：
 
-- `IR_CONST`：所有 src 为标量值，不产生边
-- `IR_BINARY`：src1 和 src2 均为变量 → 两条边
-- `IR_CALL`/`IR_SPAWN`：src1 到 src1+src2-1 为连续参数变量 → 多条边
-- `IR_RETURN`：src1 >= 0 时为返回值变量 → 一条边
-- `IR_BRANCH`：src1 为条件变量 → 一条边（标签在 src2/src3，非变量）
-- `IR_STORE`/`IR_STORE_FIELD`/`IR_STORE_INDEX`：目标 + 值 → 两条边
-- `IR_LABEL`/`IR_JUMP`/`IR_PHI`/`IR_ALLOC` 等：无变量输入 → 无边
-- `SPEC_CONSTRAINT`：condition_node 为条件 DFNode → 一条边
-- `SPEC_FORALL`/`SPEC_EXISTS`：集合 DFNode + 条件 DFNode → 两条边
-- `SPEC_IMPLY`：前提 + 结论 → 两条边
+- `IR_CONST`：所有 src 为标量值，不产生边。
+- `IR_BINARY`：src1 和 src2 均为变量，产生两条边。
+- `IR_CALL`/`IR_SPAWN`：src1 到 src1+src2-1 为连续参数变量，产生多条边。
+- `IR_RETURN`：src1 >= 0 时为返回值变量，产生一条边。
+- `IR_BRANCH`：src1 为条件变量，产生一条边（标签在 src2/src3，非变量）。
+- `IR_STORE`/`IR_STORE_FIELD`/`IR_STORE_INDEX`：目标 + 值，产生两条边。
+- `IR_LABEL`/`IR_JUMP`/`IR_PHI`/`IR_ALLOC` 等：无变量输入，无边。
+- `SPEC_CONSTRAINT`：condition_node 为条件 DFNode，产生一条边。
+- `SPEC_FORALL`/`SPEC_EXISTS`：集合 DFNode + 条件 DFNode，产生两条边。
+- `SPEC_IMPLY`：前提 + 结论，产生两条边。
 
 ---
 
-## 六、图载体投影（HDFG → `.ccr`）
+## 六、图实现方式投影（HDFG 到 `.ccr`）
 
-`lower_to_ccr()` 将 HDFG 镜像投影为文件序线性数组供后端消费——v7 起文件序 = 生产者选择的合法拓扑调度（沿 EDG 边约束，DAG 前向），**执行序 = 图的投影**，不再是文件唯一语义主干（格形态语义见 `docs/superpowers/specs/2026-09-09-lattice-ir-v7-carrier-design.md`）。规约约束节点（opcode ≥ 30）照常线性化，但 `corearch` 后端在代码生成时跳过它们。
+`lower_to_ccr()` 将 HDFG 镜像投影为文件序线性数组供后端消费。当前文件序是生产者选择的合法拓扑调度（沿 EDG 边约束，DAG 前向），执行序是图的投影，不再是文件唯一的语义主干（格形态语义见 `docs/superpowers/specs/2026-09-09-lattice-ir-v7-carrier-design.md`）。规约约束节点（opcode ≥ 30）照常线性化，但 `corearch` 后端在代码生成时跳过它们。
 
-### `.ccr` 二进制序列化（v7，2026-09；v7-only——v6 中间态已退役）
+### `.ccr` 二进制序列化（v7，2026-09；v7-only，v6 中间态已退役）
 
-> ⚠ **修订（2026-09-16 文档审计）**：本节「v7」= **段表架构代号**（沿用 `lattice-ir-v7-format.md` 的命名），**不等于现行版本字段值**——现行 `version = 9`（`src/compiler/ccr_io.cr:135` `CCR_VERSION = 9`），段数 **8**（`:138` `CCR_SEG_COUNT = 8`；R2 P4 T1 由 6 段扩为 8：+TYPE(7)/IFACE(8)；R2 P6 T3 由 v8 升至 **v9**：NOD 记录 36B→40B 承载 TYPE 段项索引）。**版本以 `ccr_io.cr` 为准，本节所列 `version=7`/`seg_count=6` 为 2026-09 快照，勿据以对拍产物**（load 对 `version != 9` **整类拒收**，照 D10 先例）。
+> 注：本节“v7”是段表架构代号，不是当前版本字段值。当前 `version = 9`，段数 8，新增 TYPE(7) 和 IFACE(8)。NOD 记录从 36B 扩为 40B，用于 TYPE 段项索引。版本以 `ccr_io.cr` 为准；下面的 v7 布局是快照示例，不能用于逐字节比对。loader 只接受 `version = 9`。
 
-`.ccr` 文件头 magic 为 `0x31524343`（ASCII `CCR1`）。v7 = 段表架构 + 真图载体（字节布局以 `docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md` + `ccr_io.cr` 头注释为准）：
+`.ccr` 文件头 magic 为 `0x31524343`（ASCII `CCR1`）。v7 = 段表架构 + 真图实现方式（字节布局以 `docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md` + `ccr_io.cr` 头注释为准）：
 
 ```
 [header 16B]: magic u32="CCR1" | version u32=7 | seg_count u32=6 | reserved u32=0
-[seg table 6×12B]: {tag u32, offset u32, size u32}——规范序（tag=行号 1..6）
+[seg table 6×12B]: {tag u32, offset u32, size u32}，规范序（tag=行号 1..6）
 [seg bodies]:
   STR(1) 字符串表：   [str_count] [× {len u32, data}]
-  SYM(2) 符号面：      globals(16B {name,type,init}) + funcs（内嵌 var 声明区、
+  SYM(2) 符号表：      globals(16B {name,type,init}) + funcs（内嵌 var 声明区、
                       param_ents、first_ent/last_ent、root_region）+ str_consts
                       /structs/enums/opt_meta 自描述拼接
   NOD(3) 节点表：      [nod_count] [×36B {op i32,dest i32,src1 i64,src2 i32,
-                      src3 i32,tk i32,first_edge u32,edge_count u32}]——28B
+                      src3 i32,tk i32,first_edge u32,edge_count u32}]，28B
                       语义字段 + 邻接索引；NOD id = 文件序 = 图坐标（D1）
   ENT(4) 条目表：      [ent_count] [×28B {var_id i32,version u32,def_nod i32,
                       live_start u32,live_end u32(半开:最后使用点+1),home i32,
-                      flags u32}]——存在结构（corec 产实记录；home 恒 -1
+                      flags u32}]，存在结构（corec 产实记录；home 恒 -1
                       直通 = 实例层注记）
   REG(5) region 表：   [sg_count] [×24B kind/parent/enter_nod/exit_nod/
                       first_ent/last_ent]（enter/exit = NOD id，nstart/ncount
                       由 span 派生）
-  EDG(6) 边表（v7 必落）：[edg_count] [×8B {to_nod u32, kind u32}]——节点出边
+  EDG(6) 边表（v7 必落）：[edg_count] [×8B {to_nod u32, kind u32}]，节点出边
                       连续成段（first_edge = 前缀累计）；每条边 to_nod > 所属
                       节点（前向拓扑）；kind 0=数据 1=state（branch/jump 目标
                       = 操作数字段非边）
 ```
 
-v7-only：load 校验 version==**9**（**2026-09-16 文档审计修订：原文写 `version==7`**；现行值见 `ccr_io.cr:135`；无 v6/v8 兼容/转换——.ccr 为管线中间产物现生成，旧版整类拒收）。v6 中间态（5 段、NOD 28B、ENT 恒空、**DFEdge 不落盘**——边仅在内存与 `.cir` 缓存中）已被取代：v7 架构起 EDG 段必落（P3 修复），ENT 携带实记录（P2 修复）。
+v7-only：load 校验 `version == 9`。没有 v6 或 v8 兼容转换；`.ccr` 是管线中间产物，每次生成，旧版整类拒收。v6 中间态（5 段、NOD 28B、ENT 恒空、DFEdge 不落盘，边仅在内存与 `.cir` 缓存中）已被取代：v7 架构起 EDG 段必落（P3 修复），ENT 携带实记录（P2 修复）。
 
 ---
 
@@ -332,7 +333,7 @@ store_index_var, make_enum, ref,            // 15-17
 branch, jump, label, phi, load_enum_tag,    // 18-23
 slice, deref, store_ptr,                    // 24-26
 spawn, yield, await,                        // 27-29
-alloc_at,                                   // 编号待实现时分配（声明式放置，2026-08-13）
+alloc_at,                                   // 编号待实现时分配（声明式放置）
 spec_constraint, spec_forall, spec_exists,  // 30-32
 spec_imply, spec_old, spec_assume           // 33-35
 ```
@@ -344,17 +345,17 @@ spec_imply, spec_old, spec_assume           // 33-35
 ```
 # 正常编译
 corec build file.cr
-  → tokenize / parse / type check / ir_gen / lower_to_ccr()
-  → file.cir + file.ccr
+  执行 tokenize / parse / type check / ir_gen / lower_to_ccr()
+  生成 file.cir + file.ccr
 
 # 编译 + 规约
 corec build file.cr -s
-  → tokenize / parse / type check / ir_gen
-  → 构建 DFNode 数组（指令节点 + 规约约束节点）
-  → 自动生成/更新 file.csp（函数骨架 + 用户规约 + 自动推导标签）
-  → 解析 file.csp → 构建 TagNode 数组（约束元数据）
-  → lower_to_ccr() → file.ccr（跳过约束节点）
-  → save_csr() → file.csr（二进制序列化）
+  执行 tokenize / parse / type check / ir_gen
+  构建 DFNode 数组（指令节点 + 规约约束节点）
+  自动生成或更新 file.csp（函数框架 + 用户规约 + 自动推导标签）
+  解析 file.csp，构建 TagNode 数组（约束元数据）
+  lower_to_ccr() 生成 file.ccr（跳过约束节点）
+  save_csr() 生成 file.csr（二进制序列化）
       包含：TagNode[] + 符号引用表 + 函数约束映射
       同时输出 file.cir（DOT 可视化 + 完整 DFNode 数据）
 
@@ -373,6 +374,6 @@ corec build file.cr -s
 | `src/compiler/ast.cr` | DFNode/DFEdge/TagNode 结构体、IR 操作码常量、TI_* 常量 |
 | `src/compiler/dataflow.cr` | 图构建、边连接、线性化、DOT 输出 |
 | `src/compiler/ccr_io.cr` | `.ccr` / `.csr` 二进制读写 |
-| `src/compiler/ir_gen.cr` | AST → IR 生成，含规约约束节点生成 |
+| `src/compiler/ir_gen.cr` | AST 到 IR 生成，含规约约束节点生成 |
 | `src/compiler/dump.cr` | 文本 `.cir` 转储（含规约标注） |
-| `src/compiler/interp.cr` | HDFG解释器（跳过约束节点） |
+| `src/compiler/interp.cr` | HDFG 解释器（跳过约束节点） |

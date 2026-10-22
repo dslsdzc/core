@@ -4,8 +4,8 @@
 // Detects out-of-bounds pointer accesses at compile time.
 
 fn get_alloc_size(alloc_seq: int) -> int:
-    // 修复 3：alloc_seq 是 pts 位号（第几个 alloc），经映射表查 DF 节点序号再算大小。
-    // 修复前直接当节点序号用 → 查到节点 0 → 恒返回 -1 → 运行时检查永不生成。
+    // alloc_seq is a pts allocation bit, not a DF node index. Map it through
+    // g_pa_alloc_nodes before reading the allocation node.
     if alloc_seq < 0 || alloc_seq >= g_pa_alloc_count:
         return -1
     an := r64(g_pa_alloc_nodes, alloc_seq * 8)
@@ -13,13 +13,13 @@ fn get_alloc_size(alloc_seq: int) -> int:
     s1 := r64(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S1)
     s3 := r64(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S3)
 
-    // 修复 12：IR_ALLOC（标量变量槽标记）不是堆分配——不返回 8（修复前把
-    // 变量槽当 8 字节堆块，误报/误取 size）
+    // IR_ALLOC marks a scalar variable slot, not a heap allocation, so it has no
+    // allocation size.
     if op == IR_ALLOC_ARRAY:
         return s1 * 8
-    // count * 8（元素恒 8 字节，见 instr.cr IR_ALLOC_ARRAY）
+    // count * 8; elements are always 8 bytes in IR_ALLOC_ARRAY.
     if op == IR_ALLOC_STRUCT:
-        // 与 instr.cr IR_ALLOC_STRUCT 一致：fc * 8（field count × 8）
+        // Match IR_ALLOC_STRUCT: field count times 8.
         fi : int = -1
         si2 : ., mut = 0
         loop:
@@ -32,7 +32,7 @@ fn get_alloc_size(alloc_seq: int) -> int:
         if fi >= 0:
             return si_field_count(fi) * 8
         return 8
-    return -1  // unknown (defer to runtime check)
+    return -1  // unknown; leave the check to run time
 
 fn get_alloc_var(alloc_seq: int) -> int:
     if alloc_seq < 0 || alloc_seq >= g_pa_alloc_count:
@@ -61,9 +61,9 @@ fn provenance_verify_func(nstart: int, ncount: int):
             break
         op := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
         s1 := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
-        // R2 P5 Task 2（D19）：本处读的是**访问宽度**（字节数）——单槽化前它住在混用
-        // tk 槽，现居**辅码**槽（OFF_DF_AUX）。值域/语义零变化（仅 IR_DEREF/IR_STORE_PTR
-        // 消费；两 op 均属辅码面）。读 40 槽（类型项引用）会把项行号当宽度 = 静默错值。
+        // Read the access width in bytes from OFF_DF_AUX. Before the single-slot
+        // change it lived in the shared tk slot. Reading slot 40 would treat a
+        // type-term index as a width.
         width : ., mut = r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_AUX)
 
         if (op == IR_DEREF || op == IR_STORE_PTR) && s1 >= 0:
@@ -73,19 +73,12 @@ fn provenance_verify_func(nstart: int, ncount: int):
                 continue
 
             ptr_ti := irv_type(s1)
-            // ── S6 (b′) **登记「本处不适用」**（2026-09-20 维护者裁）——**不给它写 REF 谓词** ──
-            // **为什么不用改**：本门是**条件触发硬错**（`kind == TYP_PTR && extra != 0` ⇒ 报 EC_TU_DEREF），
-            //   而 `&x` 的型在改判前由 `checker.cr` 写死 `extra = 0` ⇒ **该门对 `&x` 从来就没生效过**，
-            //   改判前后一致 ⇒ **零覆盖损失**（不在「安全面净减」面上）。
-            // **为什么不写谓词**：`TYP_REF.extra` = **mut 标记** ≠ `TYP_PTR.extra` = **地址空间**
-            //   （`ast.cr:295-296`）⇒ 若照抄成 `kind == TYP_PTR || kind == TYP_REF`，则 **`&mut x` 的
-            //   `extra = 1` 会被误读成「external 地址空间」** ⇒ **每一个 `&mut` 解引用当场假阳**
-            //   （载体：`tests/suite/ptr_arith.cr` 的 `*q = 99`、`opt_dex_test.cr` 的 `*p = d`）。
-            //   ⇒ **对不生效的门写谓词 = 凭空造检查**，故取 (b′) 而非 (a)。
-            // **语料侧佐证**（非「读码认为」）：打 `EC_TU_DEREF` 的**恰 4 例**全在
-            //   `tests/selfhost/test_pointer_safety.py`（`:132`/`:142`/`:153`/`:165`），**全部是
-            //   `as *T` 转换形，无一处用 `&x`** ⇒ 该门活覆盖 100% 在 cast 面。
-            // **反向钉**：naive 扩 ⇒ `&mut` 解引用假阳（见上，两处现成载体）。
+            // This check applies only to TYP_PTR values with a non-zero extra field,
+            // which marks an external address space. It does not apply to TYP_REF:
+            // REF extra is the mut flag, so treating it as an address space would
+            // reject every &mut dereference. The four EC_TU_DEREF cases in
+            // tests/selfhost/test_pointer_safety.py all use `as *T` casts; none use
+            // `&x`. Extending the check to REF would create false positives.
             if ptr_ti >= 0 && get_type_kind(ptr_ti) == TYP_PTR && get_type_extra(ptr_ti) != 0:
                 check_error(EC_TU_DEREF,
                     "external pointer dereference requires unsafe",
@@ -127,8 +120,8 @@ fn provenance_verify_func(nstart: int, ncount: int):
                             runtime_targets = runtime_targets + 1
                             runtime_size = alloc_size
                             runtime_base = get_alloc_var(bi)
-                        // 分配信息未知 → 不填充 s2/s3；编码器（instr.cr）对 s3=0
-                        // 保留 null 陷阱（F6 修复——此前 s3=0 连 null 陷阱都没有）
+                        // Unknown allocation information leaves s2 and s3 unset. The
+                        // encoder keeps a null trap for s3 = 0.
 
                 mask = mask * 2
                 bi = bi + 1
@@ -147,7 +140,7 @@ fn provenance_verify_func(nstart: int, ncount: int):
         ni = ni + 1
 
 fn provenance_verify_all():
-    // Safety pass — always runs
+    // Safety pass; always runs.
     fi : ., mut = 0
     loop:
         if fi >= g_ir_func_count:
