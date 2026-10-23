@@ -457,24 +457,26 @@ jj commit -m "ccr: make v10 loader consume canonical segment order"
 ### Task 7: `.ccrb` 分发和 `.coi` 边界
 
 **Files:**
-- Create: `src/dist/ccrb.cr`（或现有分发层中的对应文件）
+- Create: `tools/ccrb.py`（分发/安装层；不进入 corearch）
 - Modify: `docs/maintainer/design/coi-optimization-knowledge-sidecar.md`
 - Test: `tests/selfhost/test_ccrb_bundle.py`
 
 **Interfaces:**
 - Consumes: raw v10 `.ccr`。
 - Produces:
-  - `ccrb_pack(raw_ccr: string, coi: string) -> string`，输出 zstd(deterministic tar)。
-  - `ccrb_unpack(bundle: string) -> int`，解出 `manifest`、`program.ccr`、可选 `coi/<target>.coi`。
+  - `tools/ccrb.py pack --ccr <path> --out <path> [--coi <path>]`，输出 zstd(deterministic tar)。
+  - `tools/ccrb.py unpack --bundle <path> --outdir <dir>`，解出 `manifest`、`program.ccr`、可选 `coi/<target>.coi`。
   - corearch 只接收解压后的 raw `.ccr`，不依赖 zstd。
+
+**Ruling:** `.ccr` v10 规格只要求分发层输出 `.ccrb`；corearch 不实现 zstd。仓库没有 Core 侧 zstd，本任务把 `.ccrb` 放在外部 `tools/ccrb.py`，使用系统 `zstd` 和确定性 tar。`src/compiler/coi_*.cr` 的完整 `.coi` 格式属于独立计划 `docs/superpowers/plans/2026-09-23-coi-implementation.md`，本任务只保证 `.coi` 是可选、不透明、可删除的旁挂 payload。
 
 - [ ] **Step 1: 写失败测试**
 
-测试固定 tar 顺序和元数据；同一输入两次打包逐字节相同；删除 `.coi` 后 raw `.ccr` 字节不变；缺失 `.coi` 时加载/投影不变。
+测试固定 tar 顺序和元数据；同一输入两次打包逐字节相同；删除 `.coi` 后 raw `.ccr` 字节不变；缺失 `.coi` 时加载/投影不变；manifest 只含 bundle 版本、raw `.ccr` 哈希、可选 `.coi` 目标和哈希。
 
 - [ ] **Step 2: 实现打包/解包**
 
-manifest 只含 bundle 版本、raw `.ccr` 哈希、`.coi` 目标列表和哈希。`.coi` 不能包含语义、布局或正确性条件。
+用固定顺序 `manifest` -> `program.ccr` -> `coi/<target>.coi`、固定 tar 元数据（uid/gid=0、mtime=0、mode 0644）、zstd 单帧输出。`.coi` 不解析，只作为可选不透明 payload；解包后 raw `.ccr` 必须逐字节等于输入。
 
 - [ ] **Step 3: 运行测试**
 
