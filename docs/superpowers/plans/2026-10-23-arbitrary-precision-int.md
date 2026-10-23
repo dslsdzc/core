@@ -169,7 +169,7 @@ python3 tests/bootstrap/test_bigint_pipeline.py
 - `T_BIGINT` token，词素是规范十进制字符串。
 - `EXPR_BIGINT`，`a` 是字符串下标，`type_val=TY_INT`。
 - `IR_CONST_BIG = 34`，`d=目标变量`，`s1=字符串下标`，`tk=TI_INT`。
-- `CCR_VERSION = 10`。
+- `.ccr` 版本 v9.1，编码为 `(9 << 16) | 1`。
 - `CIR_CACHE_VER = 23`。
 
 ### 步骤
@@ -348,7 +348,7 @@ python3 tests/selfhost/test_bigint_interp.py
    - 原先测试 2-limb 快慢路径的测试改为测试 tagged 立即数/装箱路径。
    - `test_dex_type.py` 的大十进制字面量溢出测试改为成功用例。
    - `test_lexer_parity.py` 的字面量溢出预期同步修改。
-4. 更新 `.ccr` v10 和 `.cir` v23 的测试。
+4. 更新 `.ccr` v9.1 和 `.cir` v23 的测试。
 5. 重新采集 canary 值，记录每个值变化的原因。
 6. 全量自举并比较阶段产物。
 
