@@ -325,6 +325,7 @@ def main():
         'src/compiler/lexer.cr',
         'src/compiler/parser.cr',
         'src/compiler/checker.cr',
+        'src/compiler/mapping.cr',
         # R2 P0 类型项引擎（建层）：类型项 DAG 表 + 构造去重 → 判定引擎（桩）→ 自测通道。
         # 置于 checker 之后（计划 Step 9 指定位置）；引擎尚无 checker 侧消费者，
         # 本批为纯增量（checker/ir_gen/后端零改动 = 产物零变化）。

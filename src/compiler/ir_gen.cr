@@ -1040,52 +1040,9 @@ fn ti_from_type_expr(node: int) -> int:
     // Complex type expressions: delegate to checker's resolver
     return res_type_node(node)
 
-// Type size in bytes
+// Type size in bytes. The classic mapping lives in mapping.cr.
 fn type_size(ti: int) -> int:
-    if ti == TI_DEX_S:
-        return 8
-    // TI_DEX_S uses an 8-byte slot and is not in the type table. Row 8 is a
-    // placeholder; user types start at 9.
-    if ti == TI_CHAR:
-        return 4
-    // not in type table
-    if ti < 0 || ti >= g_type_count:
-        return 8
-    k := get_type_kind(ti)
-    if k == TYP_BASE:
-        d := get_type_data(ti)
-        if d == TY_INT:
-            return 8
-        if d == TY_DEX:
-            return 8
-        if d == TY_BOOL:
-            return 1
-        if d == TY_STRING:
-            return 8
-        if d == TY_UNIT:
-            return 0
-        if d == TY_CHAR:
-            return 4
-        return 8
-    if k == TYP_ARRAY:
-        elem := get_type_data(ti)
-        cnt := get_type_extra(ti)
-        return type_size(elem) * cnt
-    if k == TYP_PTR || k == TYP_REF:
-        return 8
-    if k == TYP_SLICE:
-        return 16
-    if k == TYP_NAMED:
-        name_ni := get_type_data(ti)
-        si : ., mut = 0
-        loop:
-            if si >= g_struct_count:
-                break
-            if si_name(si) == name_ni:
-                return si_field_count(si) * 8
-            si = si + 1
-        return 8
-    return 8
+    return mp_size(ti)
 
 fn ptr_pointee_type(var_idx: int) -> int:
     if var_idx < 0:
@@ -1103,39 +1060,9 @@ fn ptr_access_width(var_idx: int) -> int:
         return 8
     return width
 
-// Type alignment in bytes
+// Type alignment in bytes. The classic mapping lives in mapping.cr.
 fn type_align(ti: int) -> int:
-    if ti == TI_DEX_S:
-        return 8
-    // TI_DEX_S has 8-byte alignment and is not in the type table. Row 8 is a
-    // placeholder.
-    if ti == TI_CHAR:
-        return 4
-    if ti < 0 || ti >= g_type_count:
-        return 8
-    k := get_type_kind(ti)
-    if k == TYP_BASE:
-        d := get_type_data(ti)
-        if d == TY_INT:
-            return 8
-        if d == TY_DEX:
-            return 8
-        if d == TY_BOOL:
-            return 1
-        if d == TY_STRING:
-            return 8
-        if d == TY_CHAR:
-            return 4
-        return 8
-    if k == TYP_ARRAY:
-        return type_align(get_type_data(ti))
-    if k == TYP_PTR || k == TYP_REF:
-        return 8
-    if k == TYP_SLICE:
-        return 8
-    if k == TYP_NAMED:
-        return 8
-    return 8
+    return mp_align(ti)
 
 // Resolve a type index to a struct info index.
 // Returns -1 if the type is not a struct type.
@@ -1177,7 +1104,7 @@ fn ti_has_field(ti: int, name: string) -> int:
         fi = fi + 1
     return 0
 
-// Get field byte offset (each field is 8 bytes)
+// Get field byte offset. The slot stride comes from mapping.cr.
 fn ti_field_offset(ti: int, name: string) -> int:
     si := ti_resolve_struct(ti)
     if si < 0:
@@ -1190,7 +1117,7 @@ fn ti_field_offset(ti: int, name: string) -> int:
         fn_ni := si_field_name(si, fi)
         fname := istr_get(fn_ni)
         if str_eq(fname, name) != 0:
-            return fi * 8
+            return mp_field_offset(fi)
         fi = fi + 1
     return -1
 

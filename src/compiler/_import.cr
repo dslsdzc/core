@@ -8,6 +8,7 @@ import dyn_arr
 import lexer
 import parser
 import checker
+import mapping
 import type_terms
 import type_engine
 // Interface registry: the entry table and iface_* query API. It is placed after

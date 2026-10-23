@@ -16,10 +16,10 @@ fn get_alloc_size(alloc_seq: int) -> int:
     // IR_ALLOC marks a scalar variable slot, not a heap allocation, so it has no
     // allocation size.
     if op == IR_ALLOC_ARRAY:
-        return s1 * 8
-    // count * 8; elements are always 8 bytes in IR_ALLOC_ARRAY.
+        return mp_extent(s1, TI_INT)
+    // count * slot stride; elements are always one slot in IR_ALLOC_ARRAY.
     if op == IR_ALLOC_STRUCT:
-        // Match IR_ALLOC_STRUCT: field count times 8.
+        // Match IR_ALLOC_STRUCT: field count times the slot stride.
         fi : int = -1
         si2 : ., mut = 0
         loop:
@@ -30,8 +30,8 @@ fn get_alloc_size(alloc_seq: int) -> int:
                 break
             si2 = si2 + 1
         if fi >= 0:
-            return si_field_count(fi) * 8
-        return 8
+            return mp_extent(si_field_count(fi), TI_INT)
+        return mp_stride(TI_INT)
     return -1  // unknown; leave the check to run time
 
 fn get_alloc_var(alloc_seq: int) -> int:

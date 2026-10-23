@@ -260,9 +260,9 @@ fn ptr_analysis_func(nstart: int, ncount: int, vstart: int, vcount: int):
                 if op == IR_ADDR_INDEX && s1 >= 0:
                     if pa_merge_pts(d, s1) != 0:
                         changed = 1
-                    // The index decides the offset. A constant index gives idx*8;
-                    // a dynamic index gives -1, which makes provenance_verify emit
-                    // a runtime check.
+                    // The index decides the offset. A constant index gives
+                    // index times the mapping stride; a dynamic index gives -1,
+                    // which makes provenance_verify emit a runtime check.
                     base_off := r64(g_offsets, s1 * 8)
                     idx_val : int = -1
                     if s2 >= 0:
@@ -272,12 +272,12 @@ fn ptr_analysis_func(nstart: int, ncount: int, vstart: int, vcount: int):
                             if prod_op == IR_CONST:
                                 idx_val = r64(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1)
                     if idx_val >= 0 && base_off >= 0:
-                        w64(g_offsets, d * 8, base_off + idx_val * 8)
+                        w64(g_offsets, d * 8, base_off + mp_offset(idx_val, TI_INT))
                     else:
                         w64(g_offsets, d * 8, -1)
 
                 // IR_SLICE propagates the underlying array provenance for
-                // d = &arr[low]. A constant low gives offset low*8.
+                // d = &arr[low]. A constant low gives low times the mapping stride.
                 if op == IR_SLICE && s1 >= 0:
                     if pa_merge_pts(d, s1) != 0:
                         changed = 1
@@ -290,7 +290,7 @@ fn ptr_analysis_func(nstart: int, ncount: int, vstart: int, vcount: int):
                             if prod_op == IR_CONST:
                                 low_val = r64(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1)
                     if low_val >= 0 && base_off >= 0:
-                        w64(g_offsets, d * 8, base_off + low_val * 8)
+                        w64(g_offsets, d * 8, base_off + mp_offset(low_val, TI_INT))
                     else:
                         w64(g_offsets, d * 8, -1)
 
