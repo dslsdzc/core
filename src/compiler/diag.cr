@@ -52,7 +52,7 @@ fn print_source_line(line: int, col: int, annotation: string):
     print(ln_str)
     print(" | ")
     println(ltxt)
-    // underline: spaces + ^ under the column + annotation
+    // Underline: spaces, a caret under the column, then the annotation.
     print("   | ")
     ci : ., mut = 0
     loop:
@@ -63,21 +63,21 @@ fn print_source_line(line: int, col: int, annotation: string):
     print("^")
     if str_len(annotation) > 0:
         print(" ")
-        // Short annotation: first line or up to first " — "
+        // Short annotation: use the text before the first " — " separator.
         alen := str_len(annotation)
         cutoff : ., mut = alen
-        // Truncate at ' — ' (3 bytes in UTF-8: em dash = 3 bytes)
+        // Truncate at the separator; the em dash is three UTF-8 bytes.
         ci2 : ., mut = 0
         loop:
             if ci2 + 3 > alen:
                 break
             c := load8(annotation, ci2)
             if c == 226:
-                // start of em dash (— = U+2014, 3 bytes)
+                // Start of the em dash U+2014, three UTF-8 bytes.
                 cutoff = ci2
                 break
             ci2 = ci2 + 1
-        // Limit to 48 chars max
+        // Limit the annotation to 48 characters.
         if cutoff > 48:
             cutoff = 48
         print(str_sub(annotation, 0, cutoff))
@@ -118,7 +118,7 @@ fn error_cat_prefix(cat: int) -> string:
         return "ICE"
     if cat == 17:
         return "V"
-    // 批 6：规约语法/验证面（EC_V_*，17xxx）
+    // Category 17 covers specification syntax and validation.
     return "E"
 
 fn pad_diag_num(num: int) -> string:
@@ -129,7 +129,7 @@ fn pad_diag_num(num: int) -> string:
 
 // ─── diagnostics (g_diags) ─────────────────────────────────────
 
-// 行号 → 所属文件 id（build_line_fileid 的逐行映射）；越界返回 -1
+// Line number to file id through g_line_fileid. -1 is out of range.
 fn diag_fileid_for_line(line: int) -> int:
     if line >= 1 && line <= g_line_count:
         return r64(g_line_fileid, (line - 1) * 8)
@@ -175,68 +175,49 @@ fn print_parse_errors():
             break
         println("error: " + istr_get(r64(g_errors, ei2 * 8)))
         ei2 = ei2 + 1
-// ─── fail-closed 判据线（FC 批 T2）：豁免登记表 ────────────────────────
-// 语义：**默认阻断 + 豁免登记表**——`main.cr` 的硬判定循环对每条诊断调本函数，返回 0 ⇒ 阻断
-// （rc=1 + 零产物）。判据 = 「判定继续 ⇒ 产出静默错产物」（R002 / TS01-04+TK02 / TM03 / ICE04 /
-// TA02 五组先例；旧正向名单 11 码按新语义默认在闸内，故退役）。
-// **换代纪律（只减不增）**：撤条须带根因证据；**加条须维护者批**；每次开新面（新命令/新语料层）
-// 必须重跑全语料 report-only 并对表（表外命中 ⇒ 停）。
-// 粒度 = 码级；每条附「位点证据 / 理由 / 退出条件」三字段（证据字段不参与判定）。
-// **不得**把本表写成「默认放行」形态（那会把静默错产物制度化）。
+// Fail-closed diagnostic gate exemptions.
+// Diagnostics are blocking by default. main.cr calls this function for every
+// diagnostic and blocks the build with rc 1 and no output when it returns 0. An
+// exemption is recorded only when blocking would reject a valid program.
+// The table is code-level. Each entry records a site, reason, and exit
+// condition. Adding an entry requires maintainer approval; removing one requires
+// root-cause evidence. When a new command or corpus layer is added, rerun the
+// full report-only corpus and compare it with this table. Never make the default
+// permissive.
 fn diag_gate_exempt(code: int, scope: int) -> int:
-    // ── scope = BUILD（5 条；build/ccr/cir/run 面）────────────────────────
-    // **TF01 已于 2026-09-18（批 8 A₂）撤销**——撤条归因（带根因证据，合「只减不增」纪律）：
-    //   真因 = 类型模型冲突：`alloc` 的模型是 `() -> string`（`checker.cr` 的 `bi_add("alloc", TI_STR)`），
-    //   而 `src/stdlib/{chan,goroutine,sched}.cr` 的 3 处 handle 返回型写作 `-> int`（`chan_make` / `g_new` /
-    //   透传的 `sched_go`）⇒ 返回位 `type_compat_strict(string, int) != 1` ⇒ TF01（**不是误报**：上一批
-    //   `lits_copy` 同因已修，本次是**同族未清实例**）。修法 = **(A) 语料/stdlib 向模型对齐**（3 处返回型 +
-    //   5 处 handle 形参：`chan_send/chan_recv/chan_close(ch: string)` · `sched_enqueue/g_free(g: string)`）。
-    //   判据 = 5 档并发语料 `check` **rc=0 且无 TF01**、`build` rc=0、`run` rc=0（前后读数 2→0）；
-    //   **负控** = 真 TF01（string 值返 int 声明）仍**阻断**（rc=1 + 零产物）——见 `test_diag_gate.py`。
-    //   ⇒ 豁免**不再需要**（撤条 = 「不再用豁免盖住真冲突」；条目 6 的收口形态）。
-    // TF07 · 位点 = tests/suite/ptr_ref_first.cr:8（@raw_int）+ tests/selfhost/test_ccr_types.py:1805
-    //        理由 = EC_TF_ARG_TYPE 全仓唯一 raise 点在 @raw_int 内建位（checker.cr:3727），非调用位点
-    //        退出 = #2026-09-16-1/F3 调用位点收口后撤
+    // BUILD scope: build, ccr, cir, and run.
+    // TF01 is not exempt. The conflict was a real type mismatch: alloc returns
+    // string, while chan, goroutine, and sched declared handle returns as int. The
+    // standard library now matches the type model, and a real TF01 still blocks.
+    // TF07: EC_TF_ARG_TYPE is raised only at the @raw_int builtin, not at the
+    // call site. Remove this exemption when call-site reporting is implemented.
     if scope == GATE_SCOPE_BUILD && code == EC_TF_ARG_TYPE:
         return 1
-    // TF07 · 位点 = tests/suite/ptr_ref_first.cr:8（@raw_int）+ tests/selfhost/test_ccr_types.py:1805
-    //        理由 = EC_TF_ARG_TYPE 全仓唯一 raise 点在 @raw_int 内建位（checker.cr:3727），非调用位点
-    //        退出 = #2026-09-16-1/F3 调用位点收口后撤
     if scope == GATE_SCOPE_BUILD && code == EC_TF_ARG_TYPE:
         return 1
-    // TB01 · 位点 = ptr_ref_first（TF07 级联）+ t3/t4 库单元 8 档（N 族级联）
-    //        理由 = **级联码**：ANY 门（checker.cr:2473-2474）仅在**双侧**非 int/dex 时报，
-    //               而错误标记 TI_NEVER 的回传点（:2433/:2810/:3728）先行 ⇒ 连带命中
-    //        退出 = 随根因码（N 族划界 / TF07）消失；**真错形态（*T + *T、"a" - "b"）不受影响**
+    // TB01 is a cascade code. The ANY check reports only when both sides are
+    // non-int and non-dex, and TI_NEVER propagation reaches the check first. It
+    // disappears with the root-cause fixes. Real type errors still block.
     if scope == GATE_SCOPE_BUILD && code == EC_TB_ADD:
         return 1
-    // TM04 · 位点 = tests/selfhost/test_match_exhaust.py:217（case_soft：build rc=0 + 产物照出）
-    //        理由 = P3 Task 3 政策（软面登记，同 Rust unreachable-pattern 警告口径）
-    //        退出 = 政策改判（引入真 warning 通道）
+    // TM04 is a redundant match arm, a soft diagnostic similar to Rust's
+    // unreachable-pattern warning. Exempt until a warning channel exists.
     if scope == GATE_SCOPE_BUILD && code == EC_TM_REDUNDANT:
         return 1
-    // TK01 · 位点 = tests/selfhost/test_xcut_iface.py:234-241（case_reject soft=True：build rc=0 + 产物）
-    //        理由 = P3b Task 2 索引兜底门软面政策
-    //        退出 = 政策改判
+    // TK01 is a soft interface-index fallback diagnostic. Exempt until the policy changes.
     if scope == GATE_SCOPE_BUILD && code == EC_TK_INDEX:
         return 1
-    // B04  · 位点 = tests/suite/ptr_arith.cr:12:8（= ELF canary 载体本人）
-    //        理由 = 借用模型无末次使用（NLL 式）收缩——借用只随作用域退出释放
-    //               （checker.cr:878 push / :884-915 pop）
-    //        退出 = 裁-FC-3 取 (c)（块包裹修法）或 (i)（实现借用收缩）后撤
+    // B04: borrows end only when the scope exits; there is no last-use shrink.
+    // Exempt until block wrapping or borrow shrinking is implemented.
     if scope == GATE_SCOPE_BUILD && code == EC_B_USE_WHILE_BORROWED:
         return 1
-    // ── scope = CHECK（3 条；**本批对 build/gate 无效，仅登记**）────────────
-    // 维护者 2026-09-14 裁（裁-FC-1 = (C) 终局）：check 面 rc 规则不消费本表 ⇒ 本 3 条对判定
-    // **惰性**；保留 = 登记（T1 would_block.tsv 的 34 条 check 面命中即其证据）+ 若将来另裁 (B)
-    // 时的单点开关。**(B) 不是活选项**——不得据此实现活分支。
-    // N01/N06/N11 · 位点 = 25 档库单元单独 check（t2 1 + t3 13 + t4 10 + t1 1）
-    //        理由 = concat 供货语境缺失（非独立编译单元），check rc=1 为既有语义
-    //        退出 = 口径固定
+    // CHECK scope: these codes apply to standalone checks of library units, where
+    // the concat context is absent. The check return-code rule does not consult
+    // this table, so these entries only record the current policy.
     if scope == GATE_SCOPE_CHECK && code == EC_N_UNDEFINED:
         return 1
     if scope == GATE_SCOPE_CHECK && code == EC_N_FUNC:
         return 1
     if scope == GATE_SCOPE_CHECK && code == EC_N_DUPLICATE:
         return 1
-    return 0   // 默认：不豁免（= 阻断）
+    return 0   // default: no exemption, so the diagnostic blocks

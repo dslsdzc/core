@@ -1,6 +1,6 @@
-// ══════════════════════════════════════════════════════════════
-// Binary emit interface — state + helpers + emit_instr
-// ══════════════════════════════════════════════════════════════
+// === instr.cr ===
+// x86-64 binary emitter: encoding primitives, operand helpers, emit_instr, and
+// the HIT table emitter.
 
 // State globals (set by caller before emit phase)
 g_x86_rodata_base : int, mut
@@ -15,20 +15,20 @@ fn g2_init():
     g_x86_emit_var_count = 0
     g_x86_emit_stack_size = 0
     g_x86_ret_patch_count = 0
-    // g_x86_mw_jo_count: reset per function — jo rel32s are patched to the
+    // g_x86_mw_jo_count: reset per function. jo rel32s are patched to the
     // function-tail slow-path block right after each function's epilogue.
     g_x86_mw_jo_count = 0
-    // g_x86_mw_oc_count (Task 4): reset per function — 2L 操作数检查
-    // （jne 0F 85）同款回填到函数尾 2L 块。
+    // Reset per function. 2L operand checks (jne 0F 85) are patched to the
+    // function-tail 2L block.
     g_x86_mw_oc_count = 0
     // g_x86_alloc_patch_count NOT reset: alloc calls are patched after all funcs.
     // g_x86_ext_rel_count NOT reset: extern relocations span all functions.
     // g_x86_rip_patch_count NOT reset
 
 // ── Optimization metadata: register assignment lookup ──
-// Reads g_opt_meta to find register for a variable. regalloc 移后端（2026-09-07）
-// 后 g_opt_meta 由 corearch O2 自算填充（load 后 alloc_registers，不再经 .ccr
-// 传输）；O0/O1 恒空 → 全栈发射。Returns -1 if no register assigned.
+// Read g_opt_meta and return the register assigned to a variable, or -1.
+// corearch fills g_opt_meta at O2 by running alloc_registers after loading.
+// O0 and O1 leave it empty, so all vars use stack slots.
 
 fn get_reg_for_var(var_idx: int) -> int:
     mi : ., mut = 0
@@ -101,24 +101,9 @@ fn g2_rodata_sz() -> int:
         i = i + 1
     return o
 
-// int 多字 M1（tagged 槽）/ tag 表 / 2L 编码族——**全章移至
-// src/arch/x86_64/tag2l.cr**（值表示、识别规则 A/B/B'、M1 边界、tag 卫生、
-// 慢路径块/2L 块、tag 字节助手；x86 实例化波 1 Task 4 整函数搬迁，发射序
-// 逐字节 verbatim，无行为变化）。本文件保留通用编码原语（e2_*/emit_*）与
-// emit_instr；mw 族消费点见 IR_BINARY/IR_LOAD/IR_STORE/IR_RETURN 分支的
-// tag 检查 / jo / tag 卫生调用（tag 表读取 = frame.cr g2_tag_off）。
-//
-// 调用序列——**已移至 src/os/linux/callseq.cr**（x86 实例化波 1 Task 5 抽取；
-// OS 轴 = SysV AMD64 调用约定）：寄存器参数分派（cs_args_dispatch——IR_CALL/
-// IR_CALL_EXTERN/IR_SPAWN 三处同源合流）/栈参压栈（cs_arg_on_stack/
-// cs_stack_count/cs_stack_args）/栈清理（cs_stack_cleanup）/返回值
-// （cs_ret_value——IR_RETURN 值序列 + tag 读路径 A）/通用调用
-// （cs_call_direct）。本文件保留 e2_* 编码原语、emit_instr 分派与内置体
-// （load8/store8/…、get_arg、_dyncpy、goroutine_wrapper_addr——内置体直通属
-// 波 2 参数化面）。**syscall 约定（syscall3/4 内置体）已移
-// src/os/linux/syscall.cr**（x86 实例化波 1 Task 6 抽取——sys_syscall3_stub/
-// sys_syscall4_stub；rax 号 + rdi/rsi/rdx(/r10) 参数序 + 0F 05 + 回存）。
-
+// Tagged-slot helpers and the 2L encoder live in tag2l.cr. Call sequences live
+// in src/os/linux/callseq.cr; syscall stubs live in src/os/linux/syscall.cr.
+// This file keeps the e2_* primitives, emit_instr dispatch, and builtin bodies.
 // ── Byte encoding helpers ──
 fn e2_w8(buf: string, pos: int, val: int):
     store8(buf, pos, val % 256)
@@ -208,7 +193,7 @@ fn e2_li(b: string, p: int, o: int, v: int) -> int:
         // Step 1: mov rax, imm64 (REX.W + 0xB8 MOV r, imm + rax + 8B imm)
         cp = cp + emit_rex(b, cp, 1, 0, 0, 0)
         e2_w8(b, cp, 184)
-        cp = cp + 1  // 0xB8 MOV r, imm (reg=0→rax)
+        cp = cp + 1  // 0xB8 MOV r, imm (reg=0->rax)
         cp = cp + e2_w64(b, cp, v)
         // Step 2: mov [rbp+disp], rax (REX.W + 0x89 MOV r/m, r)
         cp = cp + emit_rex(b, cp, 1, 0, 0, 0)
@@ -319,7 +304,7 @@ fn e2_ptr_bounds_check(b: string, p: int, base_var: int, alloc_sz: int, access_w
     e2_w8(b, p+cp, 41)
     cp = cp + 1
     cp = cp + emit_modrm(b, p+cp, 3, 11%8, 0)
-    // F17：limit ≥ 2³¹ 时 cmp imm32 符号扩展会把 limit 变负——无符号比较永不陷阱。
+    // limit >= 2^31 时 cmp imm32 的符号扩展会把 limit 变负，无符号比较永远不会陷阱。
     // 改为 movabs rcx, imm64 + cmp rax, rcx（64 位无符号比较正确）。
     // movabs rcx, imm64 — REX.W 0x48 + 0xB9 + imm64
     e2_w8(b, p+cp, 72)
@@ -348,8 +333,8 @@ fn e2_ptr_bounds_check(b: string, p: int, base_var: int, alloc_sz: int, access_w
     w8(b, safe_jmp_pos + 1, (p+cp) - (safe_jmp_pos + 2))
     return cp
 
-// F6：仅 null 陷阱（无分配信息时——s3=0 快速路径）。
-// test r10, r10（REX.WRB 0x4D 0x85 0xD2）；null → ud2（SIGILL）
+// 仅做 null 检查（没有分配信息时，s3=0 的快速路径）。
+// test r10, r10（REX.WRB 0x4D 0x85 0xD2）；null -> ud2（SIGILL）
 fn e2_ptr_null_check(b: string, p: int) -> int:
     cp := p
     cp = cp + emit_rex(b, cp, 1, 10/8, 0, 10/8)
@@ -364,8 +349,8 @@ fn e2_ptr_null_check(b: string, p: int) -> int:
     cp = cp + 2  // ud2 (SIGILL)
     return cp - p
 
-// F14：movabs rdi, imm64 — REX.W 0x48 + 0xBF + imm64（64 位尺寸语义；
-// 修复前 mov edi, imm32 对 ≥2³² 尺寸按 mod 2³² 回绕）
+// movabs rdi, imm64：REX.W 0x48 + 0xBF + imm64，使用 64 位尺寸语义。
+// 与 mov edi, imm32 不同，它不会截断大于 2^32 的尺寸。
 fn e2_movabs_rdi(b: string, p: int, v: int) -> int:
     e2_w8(b, p, 72)
     e2_w8(b, p+1, 191)
@@ -381,7 +366,7 @@ fn e2_alu(b: string, p: int, op: int) -> int:
     return cp - p
 
 // ── SSE2 double 运算（IEEE 754 标准，float 支持）──
-// movsd xmm0, [rbp+disp] — F2 0F 10 /0
+// movsd xmm0, [rbp+disp] —  0F 10 /0
 fn e2_sd_load(b: string, p: int, o: int) -> int:
     cp := p
     w8(b, cp, 242)
@@ -397,7 +382,7 @@ fn e2_sd_load(b: string, p: int, o: int) -> int:
         cp = cp + 1                     // ModRM 10 000 101
         cp = cp + e2_w32(b, cp, o)
     return cp - p
-// movsd xmm1, [rbp+disp] — F2 0F 10 /1
+// movsd xmm1, [rbp+disp] —  0F 10 /1
 fn e2_sd_load1(b: string, p: int, o: int) -> int:
     cp := p
     w8(b, cp, 242)
@@ -413,7 +398,7 @@ fn e2_sd_load1(b: string, p: int, o: int) -> int:
         cp = cp + 1                     // ModRM 10 001 101
         cp = cp + e2_w32(b, cp, o)
     return cp - p
-// movsd xmm{rn}, [rbp+disp] — F2 0F 10 /rn（rn=0..7，SysV float 参数）
+// movsd xmm{rn}, [rbp+disp] —  0F 10 /rn（rn=0..7，SysV float 参数）
 fn e2_sd_load_x(b: string, p: int, o: int, rn: int) -> int:
     cp := p
     w8(b, cp, 242)
@@ -430,7 +415,7 @@ fn e2_sd_load_x(b: string, p: int, o: int, rn: int) -> int:
         cp = cp + e2_w32(b, cp, o)
     return cp - p
 
-// 存返回值到 dest：dex（binary64，apx 快路径）→ movsd [slot], xmm0（SysV XMM0 返回）；int → rax
+// 存返回值到 dest：dex（binary64，apx 快路径）-> movsd [slot], xmm0（SysV XMM0 返回）；int -> rax
 fn e2_store_ret(b: string, p: int, d: int) -> int:
     if d >= 0 && irv_type(d) == TI_DEX:
         return e2_sd_store(b, p, g2_slot(d))
@@ -469,7 +454,7 @@ fn e2_sd_cvt(b: string, p: int, o: int) -> int:
         cp = cp + e2_w32(b, cp, o)
     return cp - p
 
-// movsd [rbp+disp], xmm0 — F2 0F 11 /0
+// movsd [rbp+disp], xmm0 —  0F 11 /0
 fn e2_sd_store(b: string, p: int, o: int) -> int:
     cp := p
     w8(b, cp, 242)
@@ -505,14 +490,16 @@ fn e2_load_var(buf: string, pos: int, reg: int, var_idx: int) -> int:
         return sz
     return e2_ld(buf, pos, reg, g2_slot(var_idx))
 
-// ── 全局行操作数 seam（2026-09-16 批）：全局 vs 局部的分派单入口 ──
-// 根因：`g2_slot` 对**全局行**（`v < g_current_func_var_start`）返回**帧外伪 rbp 偏移**
-// （指向调用者帧的合法位移）⇒ 任何直吃 `g2_slot` 的操作数读写点都静默读写调用者帧
-// （读静默错值 / 写静默丢写 / 个别响亮 139），而 int 面已由 `e2_load_var` 收编。
-// 本族把判定收进单入口，**非全局行 = 既有字节逐字节原样**（零足迹硬约束）。
-// `e2_lea_glob`：lea r11,[rip+0] + RIP 补丁登记（disp32 位置 = pos+3，与 `e2_load_var`
-// 内联段逐字节同序）。**仅当 is_global 时调用**；scratch = r11 **即时消费、不跨指令存活**
-// （双全局操作数形 = 两次「lea r11 + 消费」序列，目标寄存器各自独立 ⇒ 无需第二 scratch）。
+// Global operand seam: one dispatch entry for globals and locals.
+// g2_slot returns a frame-relative offset for locals. For a global row
+// (v < g_current_func_var_start), that offset would point into the caller's
+// frame, so globals must use RIP-relative addressing. This family keeps the
+// decision in one place. Non-global rows keep their existing bytes unchanged.
+// e2_lea_glob emits lea r11,[rip+0] and records the RIP patch at pos+3, the same
+// layout as e2_load_var. Scratch r11 is consumed immediately and does not live
+// across instructions. A form with two global operands emits two lea/consume
+// sequences; the destination registers are independent, so no second scratch is
+// needed.
 fn e2_lea_glob(buf: string, pos: int, var_idx: int) -> int:
     grow_rip_patch(g_x86_rip_patch_count + 1)
     w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + 3)
@@ -525,15 +512,15 @@ fn e2_is_glob(var_idx: int) -> int:
         return 0
     return r64(g_x86_is_global, var_idx * 8)
 
-// 读侧 dex（movsd xmm{n}, [槽]）：全局 → RIP 相对（lea r11 + movsd [r11]）；
-// 局部 → 现 `e2_sd_load`/`e2_sd_load1`/`e2_sd_load_x` 原字节（按 xmmn 分派，n=0/1 与
+// 读侧 dex（movsd xmm{n}, [槽]）：全局 -> RIP 相对（lea r11 + movsd [r11]）；
+// 局部 -> 现 `e2_sd_load`/`e2_sd_load1`/`e2_sd_load_x` 原字节（按 xmmn 分派，n=0/1 与
 // `e2_sd_load_x` 编码逐字节等价）。消费点：IR_BINARY(TI_DEX) 双操作数、cs_args_dispatch、
 // cs_stack_args（callseq.cr）。
 fn e2_sd_ld_var(buf: string, pos: int, xmmn: int, var_idx: int) -> int:
     if e2_is_glob(var_idx) != 0:
         cp := e2_lea_glob(buf, pos, var_idx)
-        // movsd xmm{n}, [r11] — F2 **41** 0F 10 /n, ModRM mod=00 reg=n rm=3
-        // （41 = REX.B：r11 在 ModRM rm 需 REX.B=1；漏它则 rm=3 变成 [rbx] ⇒ 野指针 139）
+        // movsd xmm{n}, [r11] —  41 0F 10 /n, ModRM mod=00 reg=n rm=3
+        // （41 = REX.B：r11 在 ModRM rm 需 REX.B=1；漏它则 rm=3 变成 [rbx]，因此野指针 139）
         e2_w8(buf, pos+cp, 242)
         e2_w8(buf, pos+cp+1, 65)
         e2_w8(buf, pos+cp+2, 15)
@@ -546,11 +533,11 @@ fn e2_sd_ld_var(buf: string, pos: int, xmmn: int, var_idx: int) -> int:
         return e2_sd_load1(buf, pos, g2_slot(var_idx))
     return e2_sd_load_x(buf, pos, g2_slot(var_idx), xmmn)
 
-// 读侧 dex（int 源 cvt 形，IR_I2F）：全局 → RIP 相对 cvtsi2sd；局部 → 现 `e2_sd_cvt` 原字节。
+// 读侧 dex（int 源 cvt 形，IR_I2F）：全局 -> RIP 相对 cvtsi2sd；局部 -> 现 `e2_sd_cvt` 原字节。
 fn e2_sd_cvt_var(buf: string, pos: int, var_idx: int) -> int:
     if e2_is_glob(var_idx) != 0:
         cp := e2_lea_glob(buf, pos, var_idx)
-        // cvtsi2sd xmm0, [r11] — F2 **49** 0F 2A /0, ModRM mod=00 reg=0 rm=3
+        // cvtsi2sd xmm0, [r11] —  49 0F 2A /0, ModRM mod=00 reg=0 rm=3
         // （49 = REX.W=1 + REX.B=1：REX.B 选 r11；漏它则 rm=3 变成 [rbx]）
         e2_w8(buf, pos+cp, 242)
         e2_w8(buf, pos+cp+1, 73)
@@ -560,11 +547,11 @@ fn e2_sd_cvt_var(buf: string, pos: int, var_idx: int) -> int:
         return cp + 5
     return e2_sd_cvt(buf, pos, g2_slot(var_idx))
 
-// 写侧 dex（movsd [槽], xmm0）：全局 → RIP 相对；局部 → 现 `e2_sd_store` 原字节。
+// 写侧 dex（movsd [槽], xmm0）：全局 -> RIP 相对；局部 -> 现 `e2_sd_store` 原字节。
 fn e2_sd_st_var(buf: string, pos: int, var_idx: int) -> int:
     if e2_is_glob(var_idx) != 0:
         cp := e2_lea_glob(buf, pos, var_idx)
-        // movsd [r11], xmm0 — F2 **41** 0F 11 /0, ModRM mod=00 reg=0 rm=3（41 = REX.B）
+        // movsd [r11], xmm0 —  41 0F 11 /0, ModRM mod=00 reg=0 rm=3（41 = REX.B）
         e2_w8(buf, pos+cp, 242)
         e2_w8(buf, pos+cp+1, 65)
         e2_w8(buf, pos+cp+2, 15)
@@ -573,8 +560,8 @@ fn e2_sd_st_var(buf: string, pos: int, var_idx: int) -> int:
         return cp + 5
     return e2_sd_store(buf, pos, g2_slot(var_idx))
 
-// 写侧 int（mov [槽], reg）：全局 → RIP 相对（lea r11 + mov [r11], reg）；
-// 局部 → 现 `e2_st` 原字节。消费点：HIT 表路径 dest 回存（hit_ev_emit_one）+ IR_AWAIT dest。
+// 写侧 int（mov [槽], reg）：全局 -> RIP 相对（lea r11 + mov [r11], reg）；
+// 局部 -> 现 `e2_st` 原字节。消费点：HIT 表路径 dest 回存（hit_ev_emit_one）+ IR_AWAIT dest。
 fn e2_st_var(buf: string, pos: int, reg: int, var_idx: int) -> int:
     if e2_is_glob(var_idx) != 0:
         cp := e2_lea_glob(buf, pos, var_idx)
@@ -602,14 +589,15 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         return 0
 
     if op == IR_I2F && d >= 0:
-        // int → binary64：cvtsi2sd xmm0, [槽] — F2 0F 2A /0，然后 movsd 存回。
-        // 读写两端走全局行 seam（修复前 s1 为全局行时读帧外伪偏移 ⇒ 静默错值）。
+        // int -> binary64：cvtsi2sd xmm0, [槽] —  0F 2A /0，然后 movsd 存回。
+        // Both sides go through the global operand seam.
         cp = cp + e2_sd_cvt_var(buf, pos+cp, s1)   // cvtsi2sd xmm0, [s1]
         cp = cp + e2_sd_st_var(buf, pos+cp, d)
         return cp
 
     if op == IR_F2I && d >= 0:
-        // binary64 → int：movsd xmm0, [s1]；cvttsd2si rax, xmm0（F2 48 0F 2C C0，截断）；存回
+        // binary64 -> int: movsd xmm0, [s1]; cvttsd2si rax, xmm0 (48 0F 2C C0,
+        // truncating); store back.
         do2 := g2_slot(d)
         cp = cp + e2_sd_load(buf, pos+cp, g2_slot(s1))
         w8(buf, pos+cp, 242)
@@ -633,12 +621,13 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             cp = cp + e2_lr(buf, pos+cp, 0)  // placeholder, patched later
             cp = cp + e2_st(buf, pos+cp, 10, do2)
         else if r64(g_x86_is_global, d * 8) != 0:
-            // R2 P4 Task 5：**全局行**直写（g2_slot 对全局行返回帧外伪偏移 ⇒ 修复前
-            // 本分支落 `e2_li` 即写栈垃圾 = 静默丢写；解释器同 IR 直写 g_ir_vals ⇒
-            // **两路径分歧**）。与 IR_LOAD/IR_STORE 的全局分派同款：常量入 r10 +
-            // RIP 相对 store（e2_lrb 取址、patch 记录与 IR_STORE 同构）。
-            // 注：TI_STR 分支（rodata 指针）对全局行同样未分派——当前零发射点
-            // （字符串常量入全局走 .data/_init_globals），登记不改。
+            // Global row direct write. g2_slot would return an offset outside the
+            // current frame, so e2_li would write stack garbage. The interpreter
+            // writes g_ir_vals directly for the same IR. Use the same dispatch as
+            // IR_LOAD and IR_STORE: load the constant into r10 and store
+            // RIP-relative via e2_lrb with a patch. The TI_STR branch does not
+            // dispatch global rows; string constants go through .data and
+            // _init_globals, and there are no emit sites.
             e2_w8(buf, pos+cp, 73)
             e2_w8(buf, pos+cp+1, 186)  // movabs r10, imm64（REX.W + B8+rd）
             e2_w64(buf, pos+cp+2, s1)
@@ -660,11 +649,11 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
     if op == IR_BINARY:
         do2 := g2_slot(d)
         if ti == TI_DEX:
-            // binary64 运算（SSE2 double，IEEE 754）——apx 快路径标准答案实现
-            // 操作数两端走全局行 seam（修复前全局行读帧外伪偏移 ⇒ 静默错值）
+            // binary64 运算（SSE2 double，IEEE 754），apx 快路径标准答案实现
+            // Both operands go through the global operand seam.
             cp = cp + e2_sd_ld_var(buf, pos+cp, 0, s1)   // xmm0 = s1
             cp = cp + e2_sd_ld_var(buf, pos+cp, 1, s2)   // xmm1 = s2
-            // F2 0F 5x C1：addsd/subsd/mulsd/divsd xmm0, xmm1
+            //  0F 5x C1：addsd/subsd/mulsd/divsd xmm0, xmm1
             if s3 == OP_ADD:
                 w8(buf, pos+cp, 242)
                 w8(buf, pos+cp+1, 15)
@@ -724,7 +713,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                     w8(buf, pos+cp+1, 200)
                     cp = cp + 2
                 else:
-                    // LT/GT/LE/GE 不动——硬件标志语义已正确（含无序时 LT/LE 为真）
+                    // LT/GT/LE/GE 不动，硬件标志语义已正确（含无序时 LT/LE 为真）
                     sop : ., mut = 146
                     if s3 == OP_GT:
                         sop = 151
@@ -749,11 +738,12 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             return cp
         cp = cp + e2_load_var(buf, pos+cp, 10, s1)
         cp = cp + e2_load_var(buf, pos+cp, 11, s2)
-        // int 多字 M1（Task 4）：消费者站点 tag 检查——操作数行 tagged 且站点
-        // 属 2L 消费面（add/sub dest tagged = jo 同条件；比较任一操作数
-        // tagged）→ 快路径前查 tag：任一操作数 2L（tag=1）→ 函数尾 2L 块
-        // （128 位算术/比较，e2_mw_opnd_block）。untagged 行/站点零字节。
-        // （tag 检查在操作数装载后——检查只写标志，不扰 r10/r11。）
+        // Int multiword tagged-slot check. At 2L consumer sites (add/sub with a
+        // tagged dest, or a comparison with any tagged operand), check tags before
+        // the fast path. If any operand is 2L (tag = 1), jump to the function-tail
+        // 2L block for 128-bit arithmetic or comparison (e2_mw_opnd_block).
+        // Untagged rows and sites emit no bytes. The check runs after operand
+        // loads and only writes flags, so it does not disturb r10 or r11.
         mw_oc : ., mut = -1
         if (s3 == OP_ADD || s3 == OP_SUB) && g2_tag_off(d) != -1 || (s3 >= OP_EQ && s3 <= OP_GE):
             if g2_tag_off(s1) != -1:
@@ -766,12 +756,13 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                 cp = cp + e2_mw_oc_check(buf, pos+cp, mw_oc, 1, s2)
         if s3 == OP_ADD:
             cp = cp + e2_alu(buf, pos+cp, 1)
-            // int 多字 M1（Task 2/3）：tagged dest 的 add/sub 后紧跟溢出跳
-            // （e2_alu 的 OF 其后无任何写标志指令可再被读）→ 函数尾慢路径
-            // 块。慢路径在快路径 store 之前跳走（块内自回存 dest 值 + 置 tag
-            // 并跳回 store 之后继续——e2_mw_slow_block，tag2l.cr；块发射 =
-            // frame.cr pf_epilogue 函数尾按站点）。站点记录 dest 与 op（is_sub
-            // ——高 limb 修正规则因 op 异）。
+            // A tagged dest add/sub is followed by an overflow jump. e2_alu's OF
+            // is consumed immediately because the next instruction would overwrite
+            // flags. The slow-path block at the function tail stores the dest value,
+            // sets tag = 1, and jumps back after the store (e2_mw_slow_block in
+            // tag2l.cr; frame.cr pf_epilogue emits the block per site). The site
+            // records dest and whether the op is subtract, because the high-limb
+            // correction differs.
             if g2_tag_off(d) != -1:
                 cp = cp + e2_mw_jo(buf, pos+cp, d, 0)
         else if s3 == OP_SUB:
@@ -809,7 +800,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         else if s3 == OP_PTR_ADD:
             // p + n: scale n by element size (8), add to p
             // imul r11, 8, r11 — REX.WRB + 0x6B + ModRM(3, r11, r11) + imm8
-            //（0x4D：reg 字段与 rm 同为 r11——R（reg）与 B（rm）都需置位）
+            //（0x4D：reg 字段与 rm 同为 r11，R（reg）与 B（rm）都需置位）
             cp = cp + emit_rex(buf, pos+cp, 1, 11/8, 0, 11/8)
             e2_w8(buf, pos+cp, 107)
             cp = cp + 1
@@ -830,7 +821,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             // sub r10, r11
             cp = cp + e2_alu(buf, pos+cp, 41)
         else if s3 == OP_PTR_DIFF:
-            // p - q: diff in bytes, then /8 → element count
+            // p - q: diff in bytes, then /8 -> element count
             // sub r10, r11
             cp = cp + e2_alu(buf, pos+cp, 41)
             // sar r10, 3 — divide by 8
@@ -874,7 +865,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             e2_w8(buf, pos+cp, sop)
             cp = cp + 1
             cp = cp + emit_modrm(buf, pos+cp, 3, 0, 0)
-            // movzx r10d, al — REX.R + 0x0FB6（rm=al 无需 B——R 只因 reg=r10）
+            // movzx r10d, al — REX.R + 0x0FB6（rm=al 无需 B，R 只因 reg=r10）
             cp = cp + emit_rex(buf, pos+cp, 0, 10/8, 0, 0)
             e2_w8(buf, pos+cp, 15)
             cp = cp + 1
@@ -886,11 +877,12 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         else if s3 == OP_OR:
             cp = cp + e2_alu(buf, pos+cp, 9)
         cp = cp + e2_st(buf, pos+cp, 10, do2)
-        // int 多字 M1（Task 4）tag 卫生①：快路径 64 位定值点 tag 清 0——
-        // 快值落 tagged 槽后 tag 必须为 0（否则回边再执行时 stale tag=1 会
-        // 把快值当 2-limb 指针读）。jo/2L 块跳 resume 在此之后——慢路径自
-        // 写 tag=1，不被本条清除（resume 位于本条之后）。dest untagged →
-        // 零字节（mul/shl/…/非 add-sub 的 tagged dest 不存在——防御兜底）。
+        // Tag hygiene 1: clear the tag at every fast-path 64-bit definition.
+        // A fast value stored into a tagged slot must have tag = 0. Otherwise a
+        // later backedge execution would see stale tag = 1 and read the fast value
+        // as a 2-limb pointer. The jo and 2L blocks jump to resume after this
+        // instruction; the slow path writes tag = 1 itself, so this clear does not
+        // affect it. An untagged dest emits no bytes.
         cp = cp + e2_mw_tag_clr(buf, pos+cp, d)
         return cp
 
@@ -928,8 +920,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
     if op == IR_CALL:
         fa := s1
         ac := s2
-        // SysV AMD64 参数分派 + 栈超限压栈 = OS 轴序列（callseq.cr，波 1
-        // Task 5 抽取——三处同源合流/差异核对见该文件头注）。
+        // SysV AMD64 参数分派 + 栈超限压栈 = OS 轴序列（callseq.cr，
+        //  抽取，三处同源合流/差异核对见该文件头注）。
         // 第一遍：寄存器参数（位置顺序，左到右）
         cp = cs_args_dispatch(buf, pos, cp, fa, ac)
         // 第二遍：栈参数（右到左压，第 7 个 int / 第 9 个 binary64 超限才压）
@@ -937,12 +929,12 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         cp = cs_stack_args(buf, pos, cp, fa, ac)
         // Match builtins by interned string index (integer compare, no str_eq)
         if s3 == g_ni_syscall3:
-            // Linux syscall 约定发射序 = OS 轴序列（syscall.cr，波 1 Task 6
-            // 抽取——rax 号 + rdi/rsi/rdx 参数序 + 0F 05 + rax 回存）。
+            // Linux syscall 约定发射序 = OS 轴序列（syscall.cr， 
+            // 抽取，rax 号 + rdi/rsi/rdx 参数序 + 0F 05 + rax 回存）。
             cp = sys_syscall3_stub(buf, pos, cp, d)
         else if s3 == g_ni_syscall4:
-            // Linux syscall 约定发射序 = OS 轴序列（syscall.cr，波 1 Task 6
-            // 抽取——第 4 参经 r10 的约定与 I-2 修复史见该文件内注）。
+            // Linux syscall 约定发射序 = OS 轴序列（syscall.cr， 
+            // 抽取，第 4 参经 r10 的约定与 I-2 修复史见该文件内注）。
             cp = sys_syscall4_stub(buf, pos, cp, d)
         else if s3 == g_ni_load8:
             // movzx rax, byte [rdi+rsi] — REX.W + 0x0FB6 + SIB
@@ -1098,7 +1090,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             if d >= 0:
                 cp = cp + e2_store_ret(buf, pos+cp, d)
         else if s3 == g_ni_w64:
-            // w64(buf, pos, val) → mov [rsi+rdi??], rdx
+            // w64(buf, pos, val) -> mov [rsi+rdi??], rdx
             // Actually args: rdi=buf, rsi=pos, rdx=val
             // Just: mov [rdi+rsi], rdx
             cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 0)
@@ -1107,7 +1099,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             cp = cp + emit_modrm(buf, pos+cp, 0, 2, 4)
             cp = cp + emit_sib(buf, pos+cp, 0, 6, 7)
         else if s3 == g_ni_dyncpy:
-            // _dyncpy(src, n, dst) → memcpy(dst, src, n)
+            // _dyncpy(src, n, dst) -> memcpy(dst, src, n)
             // rdi=src, rsi=n, rdx=dst
             // Loop: for(i=0; i<n; i++) store8(dst,i,load8(src,i))
             // i in rcx
@@ -1115,7 +1107,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             e2_w8(buf, pos+cp+1, 201)
             cp = cp + 2  // xor ecx, ecx
             // loop:
-            //   cmp rcx, rsi → jae done
+            //   cmp rcx, rsi -> jae done
             e2_w8(buf, pos+cp, 72)
             e2_w8(buf, pos+cp+1, 57)
             e2_w8(buf, pos+cp+2, 241)
@@ -1133,7 +1125,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             cp = cp + 1  // 0x88 MOV r/m8, r8
             cp = cp + emit_modrm(buf, pos+cp, 0, 0, 4)
             cp = cp + emit_sib(buf, pos+cp, 0, 1, 2)  // [rcx][rdx]
-            //   inc rcx → jmp loop
+            //   inc rcx -> jmp loop
             e2_w8(buf, pos+cp, 72)
             e2_w8(buf, pos+cp+1, 255)
             e2_w8(buf, pos+cp+2, 193)
@@ -1158,8 +1150,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             cp = cp + 10
             cp = cp + e2_st(buf, pos+cp, 10, do2)
         else if s3 >= 0:
-            // 通用调用路径 = callseq.cr cs_call_direct（查名 → e2_call /
-            // 外部位 + 返回值存；波 1 Task 5 抽取）
+            // 通用调用路径 = callseq.cr cs_call_direct（查名 -> e2_call /
+            // 外部位 + 返回值存；  抽取）
             cp = cs_call_direct(buf, pos, cp, s3, d)
         else:
             // xor eax, eax
@@ -1168,18 +1160,19 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             cp = cp + 2
             if d >= 0:
                 cp = cp + e2_store_ret(buf, pos+cp, d)
-        // 栈清理（call 后恢复 rsp）= callseq.cr cs_stack_cleanup（波 1 Task 5 抽取）
+        // 栈清理（call 后恢复 rsp）= callseq.cr cs_stack_cleanup
         cp = cs_stack_cleanup(buf, pos, cp, stack_total)
         return cp
 
     if op == IR_CALL_EXTERN:
         do2 := g2_slot(d)
         name_ni := s1
-        // F16①：装载参数（s2=首参、s3=参数个数，SysV AMD64 约定：
-        // int rdi,rsi,rdx,rcx,r8,r9；float xmm0-7）——修复前 call 前无任何装载。
-        // 分派段 = callseq.cr cs_args_dispatch（波 1 Task 5 三处同源合流）。
-        // **注**：extern 路径只做寄存器分派——无栈参压栈/栈清理（预存行为，
-        // 逐字节保持；差异核对见 callseq.cr 头注）。
+        // Load arguments: s2 = first arg, s3 = arg count. SysV AMD64 assigns int
+        // arguments to rdi, rsi, rdx, rcx, r8, r9 and float arguments to
+        // xmm0-xmm7. The dispatch is callseq.cr cs_args_dispatch, shared with
+        // IR_CALL and IR_SPAWN. The extern path only dispatches registers; it
+        // does not push stack arguments or clean the stack. This is existing
+        // behavior and is kept byte-for-byte; see callseq.cr for the difference.
         cp = cs_args_dispatch(buf, pos, cp, s2, s3)
         // Record external relocation
         grow_ext_rel(g_x86_ext_rel_count + 1)
@@ -1209,19 +1202,18 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
 
     if op == IR_SPAWN:
         do2 := g2_slot(d)
-        // F4：操作数约定对齐——s1=首参、s2=参数个数、s3=函数名 ni
-        // （ir_gen L939 发射 `emit(IR_SPAWN, dest2, val_var, 1, func_ni, -1)`；
-        //  interp 同用 s3 查函数名。修复前 `name_ni := s1` 拿参数变量索引当
-        //  函数名查表 → 补丁失败 → call rel32=0 → 栈不平衡 → SIGSEGV 139。）
+        // Operand convention: s1 = first arg, s2 = arg count, s3 = function name
+        // ni. ir_gen emits emit(IR_SPAWN, dest2, val_var, 1, func_ni, -1), and
+        // the interpreter uses s3 to look up the function name. Load arguments
+        // with the same SysV AMD64 dispatch as IR_CALL: int arguments go to
+        // rdi, rsi, rdx, rcx, r8, r9, then the stack; float arguments go to
+        // xmm0-xmm7.
         name_ni := s3
-        // F4：补参数装载——与 IR_CALL 完全相同的 SysV AMD64 分派
-        // （int: rdi,rsi,rdx,rcx,r8,r9 + 栈超限；float: xmm0-7）——
-        // = callseq.cr cs_args_dispatch（波 1 Task 5 三处同源合流）。
         fa := s1
         ac := s2
         cp = cs_args_dispatch(buf, pos, cp, fa, ac)
-        // 栈参数（右到左压，第 7 个 int / 第 9 个 float 超限才压）——同 IR_CALL
-        // （= callseq.cr cs_stack_args/cs_stack_count；波 1 Task 5 抽取）
+        // Push stack arguments right to left. Only the 7th int or 9th float
+        // argument goes on the stack. The helpers are in callseq.cr.
         stack_total := cs_stack_count(fa, ac)
         cp = cs_stack_args(buf, pos, cp, fa, ac)
         // Emit call to function + store result (single-threaded approximation)
@@ -1232,7 +1224,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         e2_w8(buf, pos+cp, 232)
         e2_w32(buf, pos+cp+1, 0)
         cp = cp + 5
-        // 栈清理（call 后恢复 rsp）——同 IR_CALL（= callseq.cr cs_stack_cleanup）
+        // Clean the stack after the call, same as IR_CALL.
         cp = cs_stack_cleanup(buf, pos, cp, stack_total)
         if d >= 0 && irv_type(d) == TI_DEX:
             cp = cp + e2_sd_store(buf, pos+cp, do2)
@@ -1261,8 +1253,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         return cp
 
     if op == IR_RETURN:
-        // 值序列 + ret_patch 登记 + jmp 占位 = callseq.cr cs_ret_value
-        // （波 1 Task 5 抽取；tag 读路径 A 见该文件注释）
+        // Value sequence, ret_patch registration, and jump placeholder are in
+        // callseq.cr cs_ret_value. See that file for tag read path A.
         cp = cs_ret_value(buf, pos, cp, s1)
         return cp
 
@@ -1308,8 +1300,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             cp = cp + 5  // call placeholder
             cp = cp + e2_st(buf, pos+cp, 0, do2)
         else if s1 > 0:
-            // F14：s1*8 在 64 位内溢出为负（s1 > 2⁶¹）——不静默不发射；
-            // 按 OOM 处理（alloc(-1) → null），后续访问由 null 陷阱捕获。
+            // s1*8 在 64 位内溢出为负（s1 > 2^61），不报错也不发射；
+            // 按 OOM 处理（alloc(-1) -> null），后续访问由 null 陷阱捕获。
             cp = cp + e2_movabs_rdi(buf, pos+cp, -1)
             grow_alloc_patch(g_x86_alloc_patch_count + 1)
             w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp)
@@ -1351,7 +1343,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         cp = cp + e2_load_var(buf, pos+cp, 7, s1)
         // Skip the call when no arena was created (id < 0). Without this,
         // arena_reset's own exit marker would call arena_reset(-1), whose
-        // early return still runs its exit marker → infinite recursion.
+        // early return still runs its exit marker -> infinite recursion.
         // test rdi, rdi — 48 85 FF
         w8(buf, pos+cp, 72)
         w8(buf, pos+cp+1, 133)
@@ -1387,19 +1379,19 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                 cp = cp + 1
                 cp = cp + emit_modrm(buf, pos+cp, 0, 10%8, 10%8)
                 cp = cp + e2_st(buf, pos+cp, 10, do2)
-                // 全局源（恒 64 位值）→ d tagged 时防御性清 tag
+                // 全局源（恒 64 位值）-> d tagged 时防御性清 tag
                 cp = cp + e2_mw_tag_clr(buf, pos+cp, d)
             else:
                 cp = cp + e2_load_var(buf, pos+cp, 10, s1)
                 cp = cp + e2_st(buf, pos+cp, 10, do2)
-                // 拷贝定值 tag 传播（源 tagged → 运行时 tag 拷贝；源 untagged
-                // → 清 0）——d 为 as 转换/拷贝链行（规则 B 闭包成员）
+                // 拷贝定值 tag 传播（源 tagged -> 运行时 tag 拷贝；源 untagged
+                // -> 清 0），d 为 as 转换或拷贝序列中的记录（规则 B 闭包成员）
                 cp = cp + e2_mw_tag_cpy(buf, pos+cp, d, s1)
         else:
             cp = cp + e2_load_var(buf, pos+cp, 10, s1)
             cp = cp + e2_st(buf, pos+cp, 10, do2)
-        // s1<0 尾分支（域外行——现 IR 形态防御兜底）：mw_setup_tags 规则 B 只扫
-        // 函数域 [vs, ve)（s1 ∈ 域 且 tagged 才标 d）→ d 恒 untagged——快值原样
+        // s1<0 尾分支（域外行，现 IR 形态防御后备）：mw_setup_tags 规则 B 只扫
+        // 函数域 [vs, ve)（s1 ∈ 域 且 tagged 才标 d）-> d 恒 untagged，快值原样
         // 直拷，无 e2_mw_tag_cpy/清 0 字节（tag 拷贝只对有 tag 字节的域内行发）。
         return cp
 
@@ -1421,25 +1413,23 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             else:
                 cp = cp + e2_load_var(buf, pos+cp, 10, s2)
                 cp = cp + e2_st(buf, pos+cp, 10, o1)
-                // 拷贝定值 tag 传播（规则 B' 闭包成员：s2 tagged → 运行时 tag
-                // 拷贝；untagged/全局源 → 清 0）——变量行真定值载体
+                // 拷贝定值 tag 传播（规则 B' 闭包成员：s2 tagged -> 运行时 tag
+                // 拷贝；untagged/全局源 -> 清 0），变量行真定值
                 cp = cp + e2_mw_tag_cpy(buf, pos+cp, s1, s2)
         else:
             cp = cp + e2_load_var(buf, pos+cp, 10, s2)
             cp = cp + e2_st(buf, pos+cp, 10, o1)
-        // s1<0 尾分支（域外目标行——现 IR 形态防御兜底）：规则 B' 只标函数域内
-        // [vs, ve) 的 s1（且 s2 tagged）→ 域外 s1 恒 untagged——快值原样直拷，
-        // 无 tag 拷贝/清 0（g2_tag_off 域外恒 -1，拷贝源 s2 的 tag 无需落地）。
+        // s1<0 尾分支（域外目标行，现 IR 形态防御后备）：规则 B' 只标函数域内
+        // [vs, ve) 的 s1（且 s2 tagged）-> 域外 s1 恒 untagged，快值原样直拷，
+        // 无 tag 拷贝/清 0（g2_tag_off 域外恒 -1，拷贝源 s2 的 tag 无需实现）。
         return cp
 
     if op == IR_LOAD_FIELD && d >= 0:
         do2 := g2_slot(d)
         fi2 := s3
         fo : ., mut = fi2 * 8
-        // 基址加载走 e2_load_var（局部 = [rbp+slot]；全局 = RIP 相对 lea，
-        // 与 IR_LOAD_INDEX/IR_ADDR_INDEX 的「handles local and global」同规约）。
-        // 修复前为 g2_slot(s1)+e2_ld：全局行落在本函数帧之外，g2_slot 返回正的
-        // 伪 rbp 偏移 → 读栈垃圾（全局结构体字段读静默错值）。
+        // Load the base with e2_load_var: locals use [rbp+slot], globals use a
+        // RIP-relative lea. IR_LOAD_INDEX and IR_ADDR_INDEX use the same rule.
         cp = cp + e2_load_var(buf, pos+cp, 10, s1)
         // mov r10, [r10 + disp32] — REX.WRB + 0x8B
         cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 10/8)
@@ -1466,12 +1456,9 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
     if op == IR_REF && d >= 0:
         do2 := g2_slot(d)
         if s1 >= 0 && r64(g_x86_is_global, s1 * 8) != 0:
-            // 全局取址：lea r10, [rip+rel32] + RIP 补丁（与 IR_STORE 全局分支、
-            // e2_load_var 全局分支同规约）。修复前一律 e2_lb(g2_slot(s1))——
-            // 全局行的 g2_slot 是**帧外的伪 rbp 偏移**（与 IR_LOAD_FIELD 修复前
-            // 同型缺陷）⇒ `&g` 取到栈上垃圾地址：`*p = x` 写进帧内临时、读回
-            // 自洽（`*p` 仍读到 x），但与全局槽 `g` 完全脱钩（EL2 实测：ELF
-            // `*p = 5; return g` 恒为初值，interp 正确）。
+            // Global address: lea r10, [rip+rel32] with a RIP patch, the same
+            // rule as the IR_STORE global branch and e2_load_var. A local row uses
+            // e2_lb with its frame slot.
             grow_rip_patch(g_x86_rip_patch_count + 1)
             w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3)
             w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1)
@@ -1492,7 +1479,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             else:
                 cp = cp + n
         else:
-            // F6：无分配信息（s3=0）时至少保留 null 陷阱
+            // 没有分配信息（s3=0）时，至少保留 null 检查。
             cp = cp + e2_ptr_null_check(buf, pos+cp)
         // mov r10, [r10]
         cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 10/8)
@@ -1527,8 +1514,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             else:
                 cp = cp + n
         else:
-            // F6：s3=0（provenance 未填充/unsafe）时至少保留 null 陷阱——
-            // 修复前整个检查序列（含 null 陷阱）被跳过（instr.cr 旧 L1051）。
+            // When s3 = 0 (provenance unavailable or unsafe), keep at least the
+            // null check.
             cp = cp + e2_ptr_null_check(buf, pos+cp)
         // load value to store (handles local and global)
         cp = cp + e2_load_var(buf, pos+cp, 11, s2)
@@ -1546,7 +1533,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         e2_w8(buf, pos+cp, 133)
         cp = cp + 1
         cp = cp + emit_modrm(buf, pos+cp, 3, 10%8, 10%8)
-        // je → false_label (s3), jmp → true_label (s2)
+        // je -> false_label (s3), jmp -> true_label (s2)
         // Single-pass backpatching: known labels emit immediately, unknown record pending
         je_rel_pos := pos+cp + 2
         cp = cp + e2_je(buf, pos+cp, 0)
@@ -1604,11 +1591,10 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
 
     if op == IR_LOAD_ENUM_TAG && d >= 0:
         do2 := g2_slot(d)
-        // R2 P4 Task 5（与 IR_CONST 全局行分支同族）：**tag 读取源走 e2_load_var**
-        // （局部 = [rbp+slot]；全局 = RIP 相对 lea）。修复前 `e2_ld(o1)` 对全局行读
-        // 帧外伪偏移 ⇒ tag 读垃圾 ⇒ 全局可选槽的 match **静默走空臂**（实测：
-        // `g : int? = Some(5)` + Some 臂 ELF=0 / 解释器=5 = 双路径分歧，基线同病）。
-        // 注：目的槽仍按帧槽（全局目的行的 RIP 相对 store 未接——当前零发射点）。
+        // Read the tag through e2_load_var: locals use [rbp+slot], globals use a
+        // RIP-relative lea. The destination slot still uses a frame slot; a
+        // RIP-relative store for a global destination is not wired, and there are
+        // no emit sites.
         cp = cp + e2_load_var(buf, pos+cp, 10, s1)
         // mov r10, [r10 + disp32] — tag at offset 0
         // mov r10, [r10 + 0] (enum tag)
@@ -1737,8 +1723,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
 
     if op == IR_SLICE && d >= 0:
         do2 := g2_slot(d)
-        // 数组指针（s1）与低界（s2）两端走全局行 seam（修复前直吃 g2_slot ⇒ 全局行
-        // 读帧外伪偏移：实测 ELF 71 vs 解释器 20 的静默错值，见批计划 §T1 B4）
+        // Both the array pointer (s1) and the low bound (s2) go through the
+        // global operand seam.
         cp = cp + e2_load_var(buf, pos+cp, 10, s1)
         cp = cp + e2_load_var(buf, pos+cp, 11, s2)
         // shl r11, 3 — REX.WB + 0xC1, /4
@@ -1756,15 +1742,15 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         cp = cp + e2_st(buf, pos+cp, 10, do2)
         return cp
     if op == IR_AWAIT && d >= 0 && s1 >= 0:
-        // s1 走全局行 seam（修复前全局行读帧外伪偏移 ⇒ 静默错值，实测 interp 9 / ELF 26）
+        // s1 goes through the global operand seam.
         cp = cp + e2_load_var(buf, pos+cp, 10, s1)
         cp = cp + e2_st_var(buf, pos+cp, 10, d)
         return cp
 
     if op == IR_BOUNDS_CHECK && s2 >= 0:
-        // s1 = index var, s2 = max_len 字面量 — index < 0 或 index >= max_len → ud2
-        // F1c：s2 是字面量长度（发射约定），修复前按变量槽加载（e2_load_var）——
-        // 把长度当变量索引读，检查恒错。
+        // s1 = index var, s2 = max_len literal. index < 0 or index >= max_len
+        // traps with ud2. When ti == 0, s2 is a literal upper bound; otherwise it
+        // is a variable holding the length.
         cp = cp + e2_load_var(buf, pos+cp, 10, s1)  // index
         if ti != 0:
             // Dynamic upper bound: load len_var into r11.
@@ -1776,12 +1762,11 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             e2_w64(buf, pos+cp+2, s2)
             cp = cp + 10
         cp = cp + e2_alu(buf, pos+cp, 57)           // cmp r10, r11
-        // jb +2: if index < max (unsigned below), skip the 2-byte ud2 → continue
+        // jb +2: if index < max (unsigned below), skip the 2-byte ud2 -> continue
         e2_w8(buf, pos+cp, 114)                      // 0x72 = jb rel8
         e2_w8(buf, pos+cp+1, 2)                     // skip past ud2
         cp = cp + 2
-        // 注意：必须用 pos+cp（Phase 3 的 pos 为绝对基址）——修复前写 cp（相对
-        // 偏移）→ ud2 落到缓冲区开头（后被 ELF 头覆盖）→ 检查恒不陷阱。
+        // Use pos + cp: pos is the absolute buffer base passed by Phase 3.
         e2_w8(buf, pos+cp, 15)
         e2_w8(buf, pos+cp+1, 11)
         cp = cp + 2  // ud2 (SIGILL)
@@ -1817,12 +1802,10 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         return cp
 
     if op == IR_YIELD:
-        // F5b：eager 单线程近似——与 IR_AWAIT 一致的槽转移（d ← ρ(s1)），
-        // 与 interp 一致（语义表 2.7：eager 近似，D 设计族）。
-        // 原实现 `call sched_yield()` 且忽略 s1：① 与定义语义（向 flow 消费者
-        // 通道发射值）不符；② sched_yield 未导入 → call rel32 补丁悬空 → 崩溃；
-        // 导入后无 goroutine 上下文（fiber_switch 无栈可切）同样崩溃（139）。
-        // 发射侧 dest=-1（ir_gen L1569）→ 本近似为 no-op（yield 值被丢弃）。
+        // Eager single-thread approximation: transfer the slot value from s1 to
+        // d, the same shape as IR_AWAIT. The interpreter uses the same
+        // approximation. When dest is -1, the yield value is discarded and this
+        // is a no-op.
         if d >= 0 && s1 >= 0:
             cp = cp + e2_ld(buf, pos+cp, 10, g2_slot(s1))
             cp = cp + e2_st(buf, pos+cp, 10, g2_slot(d))
@@ -1902,12 +1885,9 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         e2_w8(buf, pos+cp+1, 0)
         cp = cp + 2
 
-        // 3. .type_error: 未知 tag——静默产 0（语义表 2.6 BC9 的占位设计意图：
-        // 「未知 tag 静默返回 0」；s2 方法名当前未用，占位）。
-        //    F3：原实现 `xor eax,eax; ret` 在函数体中间发射 ret——有栈帧
-        //    （push rbp; sub rsp）时弹出局部槽 → SIGSEGV；改 xor r10d,r10d +
-        //    jmp .done（值级 d := 0，无中间 ret，不崩溃）。注意：本段必须位于
-        //    compare-chain 之后（落空即到此）、.case_common 之前。
+        // 3. type_error: unknown tag produces 0 and jumps to .done. s2 is the
+        // method name and is currently unused. This block must follow the compare
+        // chain and precede .case_common.
         e2_w8(buf, pos+cp, 69)
         e2_w8(buf, pos+cp+1, 49)
         e2_w8(buf, pos+cp+2, 210)
@@ -1931,10 +1911,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         if d >= 0:
             cp = cp + e2_st(buf, pos+cp, 10, do2)
 
-        // 6. Patch all forward jump offsets (rel8)
-        //    F3：写入位置加 pos 基——原实现用指令内相对偏移（j1_off 等，cp 系）
-        //    当绝对缓冲区偏移 → 补丁写错地址 → 三个 je rel8 恒 0 → 已知 tag 也
-        //    坠错误路径 → SIGSEGV（139）。对照全文件其他补丁的 `pos + cp` 惯例。
+        // 6. Patch all forward jump offsets. Every write uses pos + offset, the
+        // same convention as the other patch sites.
         e2_w8(buf, pos + j1_off + 1, case_pos - (j1_off + 2))
         e2_w8(buf, pos + j2_off + 1, case_pos - (j2_off + 2))
         e2_w8(buf, pos + j3_off + 1, case_pos - (j3_off + 2))
@@ -1945,24 +1923,25 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
 
     return 0
 
-// ══════════════════════════════════════════════════════════════
-// HIT 表驱动发射（M1 Task 2/3）——事件流编码器（emit_instr 的并行路径）
-// ══════════════════════════════════════════════════════════════
-// 表模式下 corearch 内部 = IR →（lower_to_core.cr 降低）→ 事件流 →（本编码器
-// 表投影）→ 字节。数据 = core-x86.toml（表数据归架构轴 src/arch/x86_64/，
-// load_hit_table 已载入
-// g_hit_events/steps）。降低在发射前一次性完成（hit_lower_program，
-// lower_to_core.cr：IR 直线子集 → 事件流 + 常量池）；每条 IR 指令在
-// g_hit_ev_map 记 [事件流起点, 条数]（0 条 = 非子集 → 落旧路径）。
-// 调用方（elf.cr 发射循环）：hit_table_active() 时先调 emit_instr_tabled，
-// 返回 -1 = 无事件/形态不支持 → 落旧路径 emit_instr（M1 混合模式）。
-// 正确性契约：事件字节 = 模板投影（opcode 与 modrm 角色取自表数据——表 = 数据，
-// 错在数据不在代码）+ 操作数装载/回存 glue（复用 e2_* 槽机制，与旧路径同语义；
-// 逐字节对照仅 Task 2 直通形严格，Task 3 起 const → 池 load 字节有意不同）。
-// 事件记录布局/访问器/常量池：lower_to_core.cr（构建清单中位于本文件之前）；
-// 布局常量 hit.cr（HIT_*）。
+// ============================================================
+// HIT table-driven emission: event-stream encoder (parallel to emit_instr)
+// ============================================================
+// In table mode, corearch lowers IR to an event stream with lower_to_core.cr,
+// and this encoder projects each event with the templates in core-x86.toml.
+// load_hit_table loads g_hit_events and g_hit_steps. Lowering runs once before
+// emission; g_hit_ev_map records [event start, count] for each IR instruction,
+// and count 0 means the instruction is not in the subset.
+// elf.cr calls emit_instr_tabled when hit_table_active(). A return of -1 means
+// no events or an unsupported shape, and emission falls back to emit_instr.
+// Correctness contract: event bytes come from the template projection (opcode and
+// modrm roles are table data) plus operand load/store glue that reuses the e2_*
+// slot helpers. Byte-for-byte comparison is strict only for the direct form;
+// constant loads through the pool intentionally differ.
+// Event layout, accessors, and the constant pool are in lower_to_core.cr; layout
+// constants are in hit.cr (HIT_*).
 
-// 角色 → M1 寄存器对低 3 位（modrm 字段编码；r10=2 主累加 / r11=3 第二操作数）
+// Map a role to the low 3 bits of the register pair used by the template.
+// r10 is the main accumulator and r11 is the second operand.
 fn hit_role_reg_low(role: int) -> int:
     if role == HIT_ROLE_DST:
         return 2
@@ -1973,17 +1952,19 @@ fn hit_role_reg_low(role: int) -> int:
     if role == HIT_ROLE_VAL:
         return 2
     return -1
-// addr/未知：无寄存器惯例（M1 addr 走 rbp+disp 形态）
+// addr and unknown roles have no register convention. addr uses the rbp+disp form.
 
-// 角色 → 绝对寄存器号（M1 惯例 r10/r11：低 3 位 + REX.R 位含在表 opcode 内）
+// Map a role to an absolute register number. The table opcode contains the REX.R
+// bit, so only the low 3 bits are added to r10/r11.
 fn hit_role_reg(role: int) -> int:
     low := hit_role_reg_low(role)
     if low < 0:
         return -1
     return 8 + low
 
-// 槽/池寻址形态的 addr 变量可用性：须为当前函数真内存槽变量
-// （表模板 = rbp+disp32：寄存器分配变量/全局走旧路径——e2 族已有其语义）
+// Check whether an addr variable can use the slot or pool addressing form. It must
+// be a real memory slot in the current function. Register-allocated vars and
+// globals use the fallback emitter, where the e2_* helpers already handle them.
 fn hit_ev_slot_addr_ok(v: int) -> int:
     if v < 0:
         return 0
@@ -1998,9 +1979,9 @@ fn hit_ev_slot_addr_ok(v: int) -> int:
         return 0
     return 1
 
-// 取事件模板步（proj0 视图整条 108B 记录复制入 st；本文件 M1 消费面只读
-// 前 20B 视区——schema v2 记录加宽后偏移 0-16 语义未变，见 hit.cr 布局注释）；
-// -1 = 表无此事件/步非法
+// Copy step 0 of the proj0 view into st. The record is 108 bytes; this file reads
+// the first 20 bytes, and the schema v2 widening keeps offsets 0-16 unchanged.
+// Returns -1 when the event is missing or the step is invalid.
 fn hit_ev_step_of(ev_id: int, st: string) -> int:
     es := hit_event_lookup(ev_id)
     if es < 0:
@@ -2009,21 +1990,26 @@ fn hit_ev_step_of(ev_id: int, st: string) -> int:
         return -1
     return 0
 
-// ── v2 步模板发射/预检（M2a Task 2——模板解释器字段发射）──
-// 形态族字段（hit.cr HIT_ST_OFF_* v2 区）按解释器固定序组装：prefix → rex →
-// opcode → modrm → disp → imm → rel（= loader 字节视区拼接序同源）。本任务
-// 消费面：modrm 双角色（rm_mode 0 寄存器对 = 清单 A 族 / rm_mode 1 rbp+disp =
-// C 族）/digit 操作码扩展（C7 系）/disp auto|1|4（auto = 槽偏移幅度选 disp8/32
-// ——与旧路径 e2_ld/e2_st 同规则 ④）/imm 字面量与操作数原值/rel32 回填登记
-// （kind 0 = 事件流位置）。SIB（rm_mode 2）/rip 基/寄存器字面量角色/imm_kind/
-// rel8/cond/多步序列 = 后续批与 Task 3/6 消费——预检拒（保守落旧路径）。
+// Schema v2 step templates: field emission and preflight.
+// Fields in the v2 region (hit.cr HIT_ST_OFF_*) are assembled in the interpreter's
+// fixed order: prefix, rex, opcode, modrm, disp, imm, rel. That order matches the
+// loader's byte-view concatenation.
+// This file consumes modrm dual roles (rm_mode 0 register pair; rm_mode 1 rbp+disp),
+// /digit opcode extensions (C7 family), disp auto, 1, or 4 (auto chooses disp8 or
+// disp32 from the slot offset, same as e2_ld and e2_st), immediate literals and
+// operand values, and rel32 patch registration (kind 0 is an event-stream
+// position).
+// SIB (rm_mode 2), rip base, register literal roles, imm_kind, rel8, cond, and
+// multi-step sequences are not implemented yet; preflight rejects them so emission
+// falls back conservatively.
 
-// 事件语义类（运行时核事件 id = 语义锚：粘合序列 = 保留代码，模板字节 = 表数据）：
+// 事件语义类（运行时核事件 id = 语义标记：粘合序列 = 保留代码，模板字节 = 表数据）：
 //   ALU（sub=1/nand=2）：rm_mode 0 双寄存器累加形（rm = dst r10、reg = src2 r11）
 //   MEM（load=3/store=4 槽寻址）：rm_mode 1 [rbp+disp]（reg = dst|val r10）
-//   POOL：load 事件 s1 = 池槽——池 mov（[rip+disp] 硬编码辅助——M1 通道，非模板）
-//   JUMP（5）：无 modrm rel32 步（E9——目标 = 事件序）
-//   IMM（11 cst——注入夹具）：/digit + [rbp+disp] + imm（imm 值 = 事件 s1 原值）
+//   POOL: load event s1 is a pool slot. The pool mov ([rip+disp]) uses a
+//   hardcoded helper, not a template.
+//   JUMP（5）：无 modrm rel32 步（E9，目标 = 事件序）
+//   IMM（11 cst，注入夹具）：/digit + [rbp+disp] + imm（imm 值 = 事件 s1 原值）
 HIT_EV_CLS_ALU  : int = 0
 HIT_EV_CLS_MEM  : int = 1
 HIT_EV_CLS_POOL : int = 2
@@ -2041,14 +2027,14 @@ fn hit_ev_class(ev_id: int, fl: int) -> int:
         return HIT_EV_CLS_JUMP
     if ev_id == 11:
         return HIT_EV_CLS_IMM
-    // cst 夹具（注入测试载体）
+    // cst 夹具（注入测试用例）
     return -1
-// 事件 6-9 = Task 3 前拒绝（无语义类 → 落旧路径）
+// 事件 6-9 =当前拒绝（无语义类 -> 落回退路径）
 
-// 形态（proj）选择：类按所需形态逐 proj 选首个匹配（条目序 = 优先序——
+// 形态（proj）选择：类按所需形态逐 proj 选首个匹配（条目序 = 优先序，
 // 槽寻址 = rm_mode 1/2 形态、寄存器对 = 0；jump 取首个投影）。st = 选中
 // proj 的步 0 记录（108B）。返回 proj 下标；-1 = 无匹配形态（'no projection
-// for shape'——预检落旧路径）。
+// for shape'，预检落回退路径）。
 fn hit_ev_proj_pick(es: int, cls: int, st: string) -> int:
     pc := hit_proj_count(es)
     pi : ., mut = 0
@@ -2069,7 +2055,7 @@ fn hit_ev_proj_pick(es: int, cls: int, st: string) -> int:
         pi = pi + 1
     return -1
 
-// 模板字节头：prefix → rex → opcode（v2 字段区逐段；st = 108B 步记录）。
+// 模板字节头：prefix -> rex -> opcode（v2 字段区逐段；st = 108B 步记录）。
 // 返回字节数。
 fn hit_st_head(st: string, buf: string, pos: int) -> int:
     cp : ., mut = 0
@@ -2101,7 +2087,7 @@ fn hit_st_head(st: string, buf: string, pos: int) -> int:
     return cp
 
 // rm_mode 1（base = rbp）的 modrm + disp 发射：宽度按步 disp_size 字段
-//（0 = auto——槽偏移幅度选 disp8|32，与旧路径 e2_ld/e2_st 同规则 ④）。
+//（0 = auto，槽偏移幅度选 disp8|32，与回退路径 e2_ld/e2_st 同规则 4）。
 // 返回字节数；宽度不符（disp8 越界）= -1。
 fn hit_st_modrm_disp(st: string, buf: string, pos: int, reg_lo: int, disp_val: int) -> int:
     dsz := hit_r32(st, HIT_ST_OFF_DISP_SIZE)
@@ -2125,7 +2111,7 @@ fn hit_st_modrm_disp(st: string, buf: string, pos: int, reg_lo: int, disp_val: i
             cp = cp + e2_w32(buf, pos + cp, disp_val)
     return cp
 
-// 步 imm 发射（imm_size 1/2/4/8；值由调用方解析——lit 取模板字面量、操作数
+// 步 imm 发射（imm_size 1/2/4/8；值由调用方解析，lit 取模板字面量、操作数
 // 角色取事件域原值）。返回字节数。
 fn hit_st_imm(st: string, buf: string, pos: int, imm_val: int) -> int:
     isz := hit_r32(st, HIT_ST_OFF_IMM_SIZE)
@@ -2144,20 +2130,20 @@ fn hit_st_imm(st: string, buf: string, pos: int, imm_val: int) -> int:
     e2_w64(buf, pos, imm_val)
     return 8
 
-// 步 rel 发射 + 回填登记（kind 0 = 事件流位置——pos = rel 字段偏移；宽 = 32）。
-// 返回字节数；kind/宽度非本任务面 = -1（预检已拦——防御）。
+// 步 rel 发射 + 回填登记（kind 0 = 事件流位置，pos = rel 字段偏移；宽 = 32）。
+// 返回字节数；kind/宽度不在本文件范围 = -1（预检已拦，防御）。
 fn hit_st_rel_emit(st: string, buf: string, pos: int, target: int) -> int:
     rk := hit_r32(st, HIT_ST_OFF_REL_KIND)
     if rk == 0:
         return 0
     rs := hit_r32(st, HIT_ST_OFF_REL_SIZE)
     if rk == HIT_REL_EVENT && rs == 32:
-        e2_w32(buf, pos, 0)   // 占位——elf.cr 发射后按事件位置表回填
+        e2_w32(buf, pos, 0)   // 占位，elf.cr 发射后按事件位置表回填
         hit_rel_add(0, pos, target)
         return 4
     return -1
 
-// 单条事件预检（发射前整条指令全过才落字节；任一不支持 → 整条落旧路径，
+// 单条事件预检（发射前整条指令全过才落字节；任一不支持 -> 整条落回退路径，
 // 不产生半写）。Returns 0 = 可发射；1 = 不支持。
 fn hit_ev_preflight_ok(ev_i: int) -> int:
     ev_id := hit_ev_id(ev_i)
@@ -2168,11 +2154,11 @@ fn hit_ev_preflight_ok(ev_i: int) -> int:
     es := hit_event_lookup(ev_id)
     if es < 0:
         return 1
-    // 表在但事件缺 → 保守落旧路径
+    // 表在但事件缺 -> 保守落回退路径
     cls := hit_ev_class(ev_id, fl)
     if cls < 0:
         return 1
-    // 事件 6-9 等 = 无语义类 → 拒绝（Task 3 前保持）
+    // Events 6-9 have no semantic class and are rejected for now.
     if cls == HIT_EV_CLS_POOL:
         // 池载入：load 模板 proj0 视区（= hit_ev_emit_pool_mov 同源形态）
         if d < 0:
@@ -2197,39 +2183,39 @@ fn hit_ev_preflight_ok(ev_i: int) -> int:
     // 'no projection for shape'
     if hit_proj_step_count(es, pj) != 1:
         return 1
-    // 多步序列 = Task 3/6
+    // 多步序列 = 
     rm_mode := hit_r32(st, HIT_ST_OFF_RM_MODE)
     rr := hit_r32(st, HIT_ST_OFF_REG_ROLE)
     mr := hit_r32(st, HIT_ST_OFF_RM_ROLE)
-    // ── 步字段支持门（本任务发射面外 → 保守落旧路径）──
+    // ── 步字段支持检查（本本文件发射外 -> 保守落回退路径）──
     if hit_r32(st, HIT_ST_OFF_OPN) < 1:
         return 1
-    // opcode 必选（loader 已验——防御）
+    // opcode 必选（loader 已验，防御）
     if hit_r32(st, HIT_ST_OFF_SIB_SCALE) != 0 || rm_mode == 2:
         return 1
-    // SIB = M2c 批 3
+    // SIB is not supported.
     if hit_r32(st, HIT_ST_OFF_BASE_ROLE) != 0:
         return 1
-    // 非 rbp 基（rip/槽值寄存器 = 批 4/3）
+    // Only rbp-based addressing is supported.
     if hit_r32(st, HIT_ST_OFF_REG_ROLE) >= HIT_REG_BASE:
         return 1
-    // 寄存器字面量角色 = M2c
+    // Register literal roles are not supported.
     if hit_r32(st, HIT_ST_OFF_RM_ROLE) >= HIT_REG_BASE:
         return 1
     if hit_r32(st, HIT_ST_OFF_IMM_KIND) != 0:
         return 1
-    // imm64 fnaddr 回填 = M2c 批 2
+    // imm64 function-address relocation is not supported.
     if hit_r32(st, HIT_ST_OFF_REL_SIZE) == 8:
         return 1
-    // rel8 = Task 12（批 2 G2）
+    // rel8 is not supported.
     if hit_r32(st, HIT_ST_OFF_COND_ROLE) != 0:
         return 1
-    // cond 发射 = Task 3
+    // Conditional emission is not supported.
     if hit_r32(st, HIT_ST_OFF_REL_KIND) == HIT_REL_FUNC || hit_r32(st, HIT_ST_OFF_REL_KIND) == HIT_REL_EXTERN:
         return 1
-    // Task 4/5
+    // Function and extern relocations are not supported.
     if cls == HIT_EV_CLS_JUMP:
-        // 无条件转移：E9 rel32——目标 = 事件序（s1）；dst/s2 未用（恒 0）
+        // 无条件转移：E9 rel32，目标 = 事件序（s1）；dst/s2 未用（恒 0）
         if d != 0 || s2 != 0:
             return 1
         if fl != 0:
@@ -2259,10 +2245,10 @@ fn hit_ev_preflight_ok(ev_i: int) -> int:
             return 1
         if fl / 2 % 2 == 1:
             return 1
-        // M1：仅首操作数可为池
+        // Only the first operand can use the pool form.
         return 0
     if cls == HIT_EV_CLS_IMM:
-        // cst（注入夹具）：/digit + [rbp+disp] + imm——rm = dst 槽、值 = s1 原值
+        // cst（注入夹具）：/digit + [rbp+disp] + imm，rm = dst 槽、值 = s1 原值
         if d < 0 || s1 < 0:
             return 1
         if fl != 0:
@@ -2278,13 +2264,13 @@ fn hit_ev_preflight_ok(ev_i: int) -> int:
         if hit_r32(st, HIT_ST_OFF_REL_KIND) != 0:
             return 1
         return 0
-    // MEM（load/store 槽寻址）：reg 角色 = dst（load）或 val（store）——rm 侧 = addr
+    // MEM（load/store 槽寻址）：reg 角色 = dst（load）或 val（store），rm 侧 = addr
     if mr != HIT_ROLE_ADDR:
         return 1
     if hit_role_reg_low(rr) < 0:
         return 1
     if rr == HIT_ROLE_DST:
-        // load：读 [addr槽] → dst 槽
+        // load：读 [addr槽] -> dst 槽
         if d < 0:
             return 1
         if fl % 2 == 1:
@@ -2297,7 +2283,7 @@ fn hit_ev_preflight_ok(ev_i: int) -> int:
         // store：写 [addr槽] ← val
         if fl % 2 == 1:
             return 1
-        // 写池 = 无意义（池只读）——保守
+        // 写池 = 无意义（池只读），保守
         if hit_ev_slot_addr_ok(s1) == 0:
             return 1
         if s2 < 0:
@@ -2305,9 +2291,9 @@ fn hit_ev_preflight_ok(ev_i: int) -> int:
         return 0
     return 1
 
-// 池值 → 寄存器：mov r64, [rip+disp32]——load 事件模板字节 + mod=00（rm=101 =
+// 池值 -> 寄存器：mov r64, [rip+disp32]，load 事件模板字节 + mod=00（rm=101 =
 // rip 相对；disp 由 elf.cr 于 rodata 定稿后按池槽回填）。reg 低 3 位 = 目标。
-// 返回写入字节数（恒 7）；load 事件形态不符 = -1（调用方整条落旧路径）。
+// 返回写入字节数（恒 7）；load 事件形态不符 = -1（调用方整条落回退路径）。
 fn hit_ev_emit_pool_mov(buf: string, pos: int, reg_low: int, k: int) -> int:
     st := alloc(HIT_STEP_REC)
     if hit_ev_step_of(HIT_EV_LOAD, st) != 0:
@@ -2334,7 +2320,7 @@ fn hit_ev_emit_pool_mov(buf: string, pos: int, reg_low: int, k: int) -> int:
     hit_pool_patch_add(pos, k)
     return cp - pos
 
-// 编码单条事件 → 字节（预检已过；此处仍防御性 -1）。
+// 编码单条事件 -> 字节（预检已过；此处仍防御性 -1）。
 fn hit_ev_emit_one(ev_i: int, buf: string, pos: int) -> int:
     ev_id := hit_ev_id(ev_i)
     d := hit_ev_dst(ev_i)
@@ -2350,12 +2336,13 @@ fn hit_ev_emit_one(ev_i: int, buf: string, pos: int) -> int:
     st := alloc(HIT_STEP_REC)
     cp : ., mut = 0
     if cls == HIT_EV_CLS_POOL:
-        // 池载入：mov r10, [rip+池槽]（load 模板字节 + rip 回填——M1 通道）
+        // Load from pool: mov r10, [rip+pool slot], using the load template bytes
+        // and a RIP patch.
         n := hit_ev_emit_pool_mov(buf, pos, hit_role_reg_low(HIT_ROLE_DST), s1)
         if n < 0:
             return -1
         cp = cp + n
-        // dest 回存走全局行 seam（表实例面：d 为全局行时原先写帧外伪偏移）
+        // dest 回存走全局行 seam（表实例：d 为全局行时原先写帧外伪偏移）
         cp = cp + e2_st_var(buf, pos + cp, 10, d)
         return cp
     if hit_ev_proj_pick(es, cls, st) < 0:
@@ -2364,7 +2351,7 @@ fn hit_ev_emit_one(ev_i: int, buf: string, pos: int) -> int:
     rr := hit_r32(st, HIT_ST_OFF_REG_ROLE)
     mr := hit_r32(st, HIT_ST_OFF_RM_ROLE)
     if cls == HIT_EV_CLS_JUMP:
-        // E9 rel32（模板头）+ rel 登记（目标 = 事件序 s1——elf.cr 按位置表回填）
+        // E9 rel32（模板头）+ rel 登记（目标 = 事件序 s1，elf.cr 按位置表回填）
         hd := hit_st_head(st, buf, pos + cp)
         if hd < 0:
             return -1
@@ -2376,8 +2363,8 @@ fn hit_ev_emit_one(ev_i: int, buf: string, pos: int) -> int:
         return cp
     if cls == HIT_EV_CLS_ALU:
         // 双寄存器累加形：rm = dst 累加器（首输入驻）、reg = src2
-        r_acc := hit_role_reg(mr)   // dst → 10
-        r_sec := hit_role_reg(rr)   // src2 → 11
+        r_acc := hit_role_reg(mr)   // dst -> 10
+        r_sec := hit_role_reg(rr)   // src2 -> 11
         if r_acc < 0 || r_sec < 0:
             return -1
         if fl % 2 == 1:
@@ -2389,18 +2376,18 @@ fn hit_ev_emit_one(ev_i: int, buf: string, pos: int) -> int:
         else:
             cp = cp + e2_load_var(buf, pos + cp, r_acc, s1)
         cp = cp + e2_load_var(buf, pos + cp, r_sec, s2)
-        // 指令字节：prefix → rex → opcode 三段（v2 字段区——legacy 视区同源）
+        // 指令字节：prefix -> rex -> opcode 三段（v2 字段区，legacy 视区同源）
         hd2 := hit_st_head(st, buf, pos + cp)
         if hd2 < 0:
             return -1
         cp = cp + hd2
-        // modrm：mod=3（寄存器）；reg/rm 低 3 位来自角色（src2→r11=3、dst→r10=2）
+        // modrm：mod=3（寄存器）；reg/rm 低 3 位来自角色（src2->r11=3、dst->r10=2）
         cp = cp + emit_modrm(buf, pos + cp, 3, hit_role_reg_low(rr), hit_role_reg_low(mr))
-        // 结果回存（先读后写——dst 兼作操作数（add 反减中间值）时读先于写）
+        // 结果回存（先读后写，dst 兼作操作数（add 反减中间值）时读先于写）
         cp = cp + e2_st_var(buf, pos + cp, r_acc, d)
         return cp
     if cls == HIT_EV_CLS_IMM:
-        // cst：/digit + [rbp+disp(auto)] + imm——rm = dst 槽、imm 值 = s1 原值
+        // cst：/digit + [rbp+disp(auto)] + imm，rm = dst 槽、imm 值 = s1 原值
         hd3 := hit_st_head(st, buf, pos + cp)
         if hd3 < 0:
             return -1
@@ -2418,7 +2405,8 @@ fn hit_ev_emit_one(ev_i: int, buf: string, pos: int) -> int:
             return -1
         cp = cp + n5
         return cp
-    // MEM：reg 角色（dst/val）→ r10（glue 寄存器对同 M1）；rm = [rbp+disp 槽]
+    // MEM: the reg role (dst or val) maps to r10, the same glue register pair as
+    // the direct form; rm is [rbp+disp slot].
     reg_lo := hit_role_reg_low(rr)
     if reg_lo < 0:
         return -1
@@ -2426,7 +2414,7 @@ fn hit_ev_emit_one(ev_i: int, buf: string, pos: int) -> int:
     if r_val < 0:
         return -1
     if rr == HIT_ROLE_DST:
-        // load：读 [addr槽] → dst（disp = addr 槽偏移——auto/1/4 按步字段）
+        // load：读 [addr槽] -> dst（disp = addr 槽偏移，auto/1/4 按步字段）
         hd4 := hit_st_head(st, buf, pos + cp)
         if hd4 < 0:
             return -1
@@ -2452,8 +2440,8 @@ fn hit_ev_emit_one(ev_i: int, buf: string, pos: int) -> int:
     return -1
 
 // 表驱动单指令发射。与 emit_instr 同签名；返回写入字节数；-1 = 无事件/不支持。
-// 消费 lower_to_core.cr 的事件流：0 事件 = 非子集指令（旧路径）；
-// 有事件 = 预检整条 → 逐事件表投影发射（g_hit_tabled_count 计事件条数）。
+// 消费 lower_to_core.cr 的事件流：0 事件 = 非子集指令（回退路径）；
+// 有事件 = 预检整条 -> 逐事件表投影发射（g_hit_tabled_count 计事件条数）。
 fn emit_instr_tabled(instr_idx: int, buf: string, pos: int) -> int:
     cnt := hit_ev_map_cnt(instr_idx)
     if cnt <= 0:
@@ -2464,9 +2452,10 @@ fn emit_instr_tabled(instr_idx: int, buf: string, pos: int) -> int:
         if e >= cnt:
             break
         if hit_ev_preflight_ok(start + e) != 0:
-            // 注入通道（测试专用）：预检拒绝 = 文件事件无法经表发射——大声错误
-            // （corearch 于发射后按事件计数不符 exit 1——不静默落旧路径掩盖）；
-            // 真实降低路径 = 整条落旧路径（M1 混合模式，不半写）。
+            // 注入通道（测试专用）：预检拒绝 = 文件事件无法经表发射，大声错误
+            // （corearch 于发射后按事件计数不符 exit 1，不悄悄落回退路径掩盖）；
+            // The real lowering path falls back for the whole instruction. It never
+            // writes half an instruction.
             if g_hit_inject_active != 0:
                 print("error: HIT events: event ")
                 print_i(start + e)
@@ -2480,8 +2469,9 @@ fn emit_instr_tabled(instr_idx: int, buf: string, pos: int) -> int:
     loop:
         if e2 >= cnt:
             break
-        // 事件序 → 字节位置（M2a Task 2：rel 回填表 kind 0 的目标解析表——
-        // 边发射边记；位置 = 事件首字节的绝对 buf 偏移）
+        // Map event order to byte position. The rel32 patch table with kind 0
+        // resolves targets; record the absolute buffer offset of the event's first
+        // byte as emission proceeds.
         hit_ev_pos_set(start + e2, pos + cp)
         n := hit_ev_emit_one(start + e2, buf, pos + cp)
         if n < 0:

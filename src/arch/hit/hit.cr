@@ -1,108 +1,112 @@
 // === src/arch/hit/hit.cr ===
-// 硬件接口表（HIT）：core-x86.toml → 内存表 加载器（M1 Task 1 + M2a Task 1 schema v2）。
-// 表数据归架构轴（src/arch/x86_64/core-x86.toml，x86 实例化波 1 Task 1 迁入）——
-// 本文件 = 引擎（留 src/arch/hit/，未来实例可复用）；路径由 --table 传入。
-// 设计：docs/superpowers/specs/2026-09-05-hardware-interface-table.md
-// 格式：docs/superpowers/plans/2026-09-05-hit-minimal-core-m1.md「表文件格式」节
-//      + docs/superpowers/specs/2026-09-07-hit-m2-design.md §3（schema v2）
-// 表 = corearch 运行的唯一平台依赖：load_hit_table 把 toml 表文件读成
-// 事件/投影/步 三块紧凑 buffer 表 + 运行时条目，表驱动编码器直读。
+// Hardware interface table (HIT) loader: core-x86.toml to in-memory tables.
+// The table data belongs to the architecture layer
+// (src/arch/x86_64/core-x86.toml). This file is the engine and leaves the path to
+// --table.
+// Design and format are documented under docs/superpowers/specs and
+// docs/superpowers/plans.
 //
-// schema v2（M2a Task 1）：步模板从 M1 的 5 字段扩展为完整形态描述
-// prefix/rex/opcode/modrm{role|digit}/SIB/disp/imm/rel/cond；每事件可多 proj
-// 条目（多形态）；[[event.proj.step]] 步小节表达多步序列；[runtime.x86] 小节
-// 表达运行时条目。M1 表形态（字段直置 proj 层、单 proj、无 runtime）
-// = v2 子集，加载不变。字段值域/关联规则校验错误全部拒绝加载。
+// The table is corearch's only platform dependency. load_hit_table reads the TOML
+// into three compact buffers (events, projections, steps) plus runtime entries;
+// the table-driven encoder reads them directly.
 //
-// 本文件仅进 corearch 构建清单（build_selfhost_native.py corearch concat），
-// corec 不需要。import 行仅为独立 `corec check src/arch/hit/hit.cr` 解析
-// （flat concat 构建会剥离 import 行；io/toml/fmt 均在 corearch 闭包内）。
+// Step templates describe prefix, REX, opcode, ModRM role or digit, SIB, disp,
+// imm, rel, and condition. An event can have multiple projections; each
+// [[event.proj.step]] section describes one step in a sequence; [runtime.x86]
+// holds runtime entries. The older flat single-projection event form is a subset
+// and still loads. Invalid values or associations reject the whole table.
+//
+// This file is part of the corearch build only; corec does not need it. The import
+// lines let `corec check src/arch/hit/hit.cr` resolve symbols; concat builds strip
+// them.
 import io
 import toml
 import fmt
 
-// ════════════════════════════════════════════════════════════════
-// 内存表布局（直读；LE 存取用 hit_w32/hit_r32）
-// ════════════════════════════════════════════════════════════════
+// ------------------------------------------------------------------
+// In-memory table layout. Read directly; hit_w32 and hit_r32 handle
+// little-endian fields.
+// ------------------------------------------------------------------
 
-// g_hit_events：每事件 40B = 10 × i32
+// g_hit_events: 40 bytes per event, 10 i32 fields.
 HIT_EVENT_REC : int = 40
-HIT_EV_OFF_ID         : int = 0   // 最小核事件号（1-4 数据 + 5-9 控制/调用/系统）
-HIT_EV_OFF_NAME       : int = 4   // 名字串下标（g_hit_names 表）
-HIT_EV_OFF_INPUTS     : int = 8   // 事件签名（无宽度/寄存器/寻址——最小核抽象）
-HIT_EV_OFF_OUTPUTS    : int = 12
-HIT_EV_OFF_SIDE       : int = 16  // 0 = pure，1 = effect
-// 20/24/28 = proj0（M1 兼容视区）：M1 消费方（emit_instr_tabled → hit_ev_step_of
-// → hit_proj_step(es, 0, st)）只读首投影视图，故把 proj0 的 isa/步数/首步偏移
-// 镜像于此，多 proj 事件的其余形态走 32/36 字段。旧路径消费面布局不变。
-HIT_EV_OFF_ISA        : int = 20  // proj0 ISA 码（1 = x86-64）
-HIT_EV_OFF_STEP_COUNT : int = 24  // proj0 步数
-HIT_EV_OFF_STEP_OFF   : int = 28  // proj0 首步在 g_hit_steps 的字节偏移
-HIT_EV_OFF_PROJ_OFF   : int = 32  // 首投影记录下标（g_hit_projs，12B/条）
-HIT_EV_OFF_PROJ_COUNT : int = 36  // 投影形态数（M1 恒 1）
+HIT_EV_OFF_ID         : int = 0   // core event id: 1-4 data, 5-9 control, call, and system
+HIT_EV_OFF_NAME       : int = 4   // name string index into g_hit_names
+HIT_EV_OFF_INPUTS     : int = 8   // event signature; the minimal core has no width, register, or addressing fields
+HIT_EV_OFF_OUTPUTS    : int = 12  // number of outputs
+HIT_EV_OFF_SIDE       : int = 16  // 0 = pure, 1 = effect
+// Fields 20, 24, and 28 mirror projection 0 for existing consumers, which read
+// only the first projection through hit_proj_step(es, 0, st). Other projections
+// use fields 32 and 36. The layout seen by the normal path is unchanged.
+HIT_EV_OFF_ISA        : int = 20  // projection 0 ISA code (1 = x86-64)
+HIT_EV_OFF_STEP_COUNT : int = 24  // projection 0 step count
+HIT_EV_OFF_STEP_OFF   : int = 28  // byte offset of projection 0 first step in g_hit_steps
+HIT_EV_OFF_PROJ_OFF   : int = 32  // first projection record index in g_hit_projs; 12 bytes each
+HIT_EV_OFF_PROJ_COUNT : int = 36  // number of projections
 
-// g_hit_projs：每投影 12B = 3 × i32（事件 32/36 字段索引本表）
+// g_hit_projs: 12 bytes per projection, 3 i32 fields. Event fields 32 and 36 index this table.
 HIT_PROJ_REC : int = 12
-HIT_PJ_OFF_ISA        : int = 0   // 投影 ISA 码
-HIT_PJ_OFF_STEP_COUNT : int = 4   // 该形态步数
-HIT_PJ_OFF_STEP_OFF   : int = 8   // 该形态首步在 g_hit_steps 的字节偏移
+HIT_PJ_OFF_ISA        : int = 0   // projection ISA code
+HIT_PJ_OFF_STEP_COUNT : int = 4   // step count for this projection
+HIT_PJ_OFF_STEP_OFF   : int = 8   // byte offset of this projection first step in g_hit_steps
 
-// g_hit_steps：每步 108B。前 20B = M1 布局视区（OP0/OP1/REG_ROLE/RM_ROLE/
-// RM_MODE——偏移与旧布局一致，旧消费方原样可读）；20B 起 = v2 规范字段。
-// 模板字节 = prefix → REX → opcode 三段固定拼接序（不含 ModRM/SIB/disp/imm/
-// rel——那些由槽位/角色回填，非模板字节）。
+// g_hit_steps: 108 bytes per step. The first 20 bytes keep the older layout
+// (OP0, OP1, REG_ROLE, RM_ROLE, RM_MODE) at the same offsets. Fields from byte 20
+// are the current schema. Template bytes are prefix, REX, and opcode in that fixed
+// order. ModRM, SIB, disp, imm, and rel are filled from roles and operands, not
+// from template bytes.
 HIT_STEP_REC : int = 108
-HIT_ST_OFF_OP0      : int = 0    // 字节流首字节（prefix/REX/opcode 拼接序）
-HIT_ST_OFF_OP1      : int = 4    // 字节流第二字节（0 = 无）
-HIT_ST_OFF_REG_ROLE : int = 8    // modrm.reg 侧角色码（角色 1-6 / 寄存器字面量 16+regno；0 = 无/digit 形）
-HIT_ST_OFF_RM_ROLE  : int = 12   // modrm.rm 角色码（同上；0 = 无）
-HIT_ST_OFF_RM_MODE  : int = 16   // 0 = rm 为寄存器；1 = rm 为 base+disp（缺省 base = rbp）；2 = SIB
-// ── v2 规范字段（20 起；未用恒 0）──
-HIT_ST_OFF_PFX0        : int = 20  // 前缀字节 0（66/0F…）
-HIT_ST_OFF_PFX1        : int = 24  // 前缀字节 1
-HIT_ST_OFF_REX         : int = 28  // REX 字节（0x40|w<<3|r<<2|x<<1|b；无 REX = 0）
-HIT_ST_OFF_OPB0        : int = 32  // opcode 字节 0
-HIT_ST_OFF_OPB1        : int = 36  // opcode 字节 1
-HIT_ST_OFF_OPB2        : int = 40  // opcode 字节 2
-HIT_ST_OFF_OPN         : int = 44  // opcode 字节数（1..3）
-HIT_ST_OFF_REG_IS_DIGIT : int = 48 // reg 侧为 /digit（1）而非角色
-HIT_ST_OFF_REG_DIGIT   : int = 52  // digit 值（0..7）
-HIT_ST_OFF_BASE_ROLE   : int = 56  // base 角色码（rm_mode 1 = modrm base，缺省 rbp→0；
-                                    // rm_mode 2 = SIB base；rip = 32 池/rodata/全局形）
-HIT_ST_OFF_SIB_SCALE   : int = 60  // SIB scale（0..3；非 rm_mode 2 = 0）
-HIT_ST_OFF_SIB_INDEX   : int = 64  // SIB index 角色码
-HIT_ST_OFF_DISP_SIZE   : int = 68  // disp 宽度：0 = auto（槽回填按幅度选 1|4）；1/4 字面
-HIT_ST_OFF_DISP_SRC    : int = 72  // disp 源角色码（0 = 无/槽隐含）
-HIT_ST_OFF_IMM_SIZE    : int = 76  // imm 宽度（1/2/4/8；0 = 无）
-HIT_ST_OFF_IMM_ROLE    : int = 80  // imm 操作数角色码（字面量 lit = 100）
-HIT_ST_OFF_IMM_KIND    : int = 84  // imm 回填 kind（0 = 无；1 = fnaddr）
-HIT_ST_OFF_IMM_LIT     : int = 88  // imm 字面量值（imm_role = lit 时）
-HIT_ST_OFF_REL_ROLE    : int = 92  // rel 回填操作数角色码（0 = 无）
-HIT_ST_OFF_REL_KIND    : int = 96  // rel 回填表：1 = 事件流位置；2 = 函数；3 = 外部符号
-HIT_ST_OFF_REL_SIZE    : int = 100 // rel 宽度（8/32）
-HIT_ST_OFF_COND_ROLE   : int = 104 // branch 条件源槽角色码（cmp/test 序列操作数）
+HIT_ST_OFF_OP0      : int = 0    // first byte of the template stream (prefix, REX, opcode)
+HIT_ST_OFF_OP1      : int = 4    // second template byte; 0 means none
+HIT_ST_OFF_REG_ROLE : int = 8    // modrm.reg role code (1-6, or 16 + regno); 0 means none or a digit form
+HIT_ST_OFF_RM_ROLE  : int = 12   // modrm.rm role code; same encoding, 0 means none
+HIT_ST_OFF_RM_MODE  : int = 16   // 0 = rm is a register; 1 = base + disp with default base rbp; 2 = SIB
+// Current schema fields from byte 20; unused fields are 0.
+HIT_ST_OFF_PFX0        : int = 20  // prefix byte 0, such as 0x66 or 0x0F
+HIT_ST_OFF_PFX1        : int = 24  // prefix byte 1
+HIT_ST_OFF_REX         : int = 28  // REX byte: 0x40 | w<<3 | r<<2 | x<<1 | b; 0 means none
+HIT_ST_OFF_OPB0        : int = 32  // opcode byte 0
+HIT_ST_OFF_OPB1        : int = 36  // opcode byte 1
+HIT_ST_OFF_OPB2        : int = 40  // opcode byte 2
+HIT_ST_OFF_OPN         : int = 44  // opcode byte count, 1 to 3
+HIT_ST_OFF_REG_IS_DIGIT : int = 48 // 1 when reg is a /digit instead of a role
+HIT_ST_OFF_REG_DIGIT   : int = 52  // digit value, 0 to 7
+HIT_ST_OFF_BASE_ROLE   : int = 56  // base role code: modrm base for rm_mode 1, 0 for default rbp;
+                                    // SIB base for rm_mode 2; rip = 32 for pool, rodata, and global forms
+HIT_ST_OFF_SIB_SCALE   : int = 60  // SIB scale 0 to 3; 0 outside rm_mode 2
+HIT_ST_OFF_SIB_INDEX   : int = 64  // SIB index role code
+HIT_ST_OFF_DISP_SIZE   : int = 68  // disp width: 0 = auto, 1 or 4 for a literal size
+HIT_ST_OFF_DISP_SRC    : int = 72  // disp source role code; 0 means none or implied by the slot
+HIT_ST_OFF_IMM_SIZE    : int = 76  // imm width 1, 2, 4, or 8; 0 means none
+HIT_ST_OFF_IMM_ROLE    : int = 80  // imm operand role code; literal lit = 100
+HIT_ST_OFF_IMM_KIND    : int = 84  // imm patch kind: 0 none, 1 fnaddr
+HIT_ST_OFF_IMM_LIT     : int = 88  // imm literal value when imm_role is lit
+HIT_ST_OFF_REL_ROLE    : int = 92  // rel patch operand role code; 0 means none
+HIT_ST_OFF_REL_KIND    : int = 96  // rel table: 1 event position, 2 function, 3 external symbol
+HIT_ST_OFF_REL_SIZE    : int = 100 // rel width, 8 or 32
+HIT_ST_OFF_COND_ROLE   : int = 104 // branch condition source slot role code
 
-// 角色/效应/ISA 码
+// Role, effect, and ISA codes.
 HIT_ROLE_DST  : int = 1
 HIT_ROLE_SRC1 : int = 2
 HIT_ROLE_SRC2 : int = 3
 HIT_ROLE_ADDR : int = 4
 HIT_ROLE_VAL  : int = 5
-HIT_ROLE_COND : int = 6          // branch 条件源（v2）
+HIT_ROLE_COND : int = 6          // branch condition source
 HIT_SIDE_PURE : int = 0
 HIT_SIDE_EFFECT : int = 1
 HIT_ISA_X86 : int = 1
-// 操作数码空间补充（与角色码不相交）
-HIT_REG_BASE : int = 16          // 寄存器字面量 = 16 + regno（rax=0..r15=15）
-HIT_CODE_RIP : int = 32          // rip 基（仅 base 键合法）
-HIT_CODE_LIT : int = 100         // imm 字面量（imm_role = "lit"）
-// rel kind 码
+// Additional operand codes; disjoint from role codes.
+HIT_REG_BASE : int = 16          // register literal = 16 + regno (rax=0 through r15=15)
+HIT_CODE_RIP : int = 32          // rip base; valid only in a base field
+HIT_CODE_LIT : int = 100         // imm literal when imm_role is lit
+// Relocation kind codes.
 HIT_REL_EVENT : int = 1
 HIT_REL_FUNC  : int = 2
 HIT_REL_EXTERN : int = 3
-// imm kind 码
+// Immediate kind codes.
 HIT_IMM_FNADDR : int = 1
-// [runtime.x86] 条目槽（每槽 4B；见 hit_parse_runtime_chunk）
+// [runtime.x86] entry slots, 4 bytes each; see hit_parse_runtime_chunk.
 HIT_RT_CALL_MECHANISM  : int = 0
 HIT_RT_CALL_RET_ADDR   : int = 1
 HIT_RT_CALL_STACK_GROW : int = 2
@@ -112,7 +116,7 @@ HIT_RT_SAVE_MASK       : int = 5
 HIT_RT_EXTERN_ENTRY    : int = 6
 HIT_RT_EXTERN_RESOLVE  : int = 7
 
-// 表加载全局（hit.cr 仅进 corearch 构建 → 不污染 corec/corelsp）
+// Table loader globals. This file is part of the corearch build only.
 g_hit_events : string, mut
 g_hit_event_count : int, mut
 g_hit_event_cap : int, mut
@@ -128,9 +132,9 @@ g_hit_name_cap : int, mut
 g_hit_runtime : string, mut
 g_hit_runtime_present : int, mut
 
-// ════════════════════════════════════════════════════════════════
-// buffer 表小工具（自持：仅用运行时内建 load8/store8/alloc）
-// ════════════════════════════════════════════════════════════════
+// ------------------------------------------------------------------
+// Buffer helpers. They use only the runtime builtins load8, store8, and alloc.
+// ------------------------------------------------------------------
 
 fn hit_copy_bytes(src: string, n: int, dst: string):
     i : int, mut = 0
@@ -140,8 +144,9 @@ fn hit_copy_bytes(src: string, n: int, dst: string):
         store8(dst, i, load8(src, i))
         i = i + 1
 
-// 4B 小端写/读（仅存非负值——id/字节/码 均非负；字节拆取仿 w32 的 % 256
-// 惯例——按位 & 不进 HIT 表值域：本文件仅 hit_bit 用倍增）
+// 4-byte little-endian write and read. Stored ids, bytes, and codes are
+// non-negative. Byte extraction uses division and modulo; this file has no
+// bitwise and. hit_bit uses doubling because the language has no shift operator.
 fn hit_w32(buf: string, pos: int, v: int):
     store8(buf, pos + 0, v % 256)
     store8(buf, pos + 1, (v / 256) % 256)
@@ -211,15 +216,15 @@ fn hit_grow_names(needed: int):
     g_hit_names = nb
     g_hit_name_cap = nc
 
-// ════════════════════════════════════════════════════════════════
-// toml 文本扫描（表文件结构层；标量值解析复用 stdlib toml.cr）
-// ════════════════════════════════════════════════════════════════
+// ------------------------------------------------------------------
+// TOML text scanning for table structure. Scalar parsing uses stdlib toml.cr.
+// ------------------------------------------------------------------
 
-// 从 pos 起逐行扫描，返回第一个 tag 匹配的行首偏移；无 → -1。
-// 匹配规则：行首（允许前导空白）字节与 tag 完全相等，且 tag 之后只允许
-// 行尾 / 空白 / '\r'（CRLF）/ '#'（行尾注释）——容忍手写表的
-// "[[event.proj]]   # 注释" 形式；同时避免 "[[event]]" 前缀误配
-// "[[event.proj]]"（tag 后必须紧跟界定符）。
+// Scan lines from pos and return the offset of the first line whose tag matches,
+// or -1. Leading whitespace is allowed. The tag must be followed by end of line,
+// whitespace, carriage return, or a comment. This accepts a hand-written
+// "[[event.proj]]   # comment" and prevents "[[event]]" from matching the prefix
+// of "[[event.proj]]".
 fn hit_find_tag(content: string, pos: int, tag: string) -> int:
     slen := str_len(content)
     tlen := str_len(tag)
@@ -263,7 +268,7 @@ fn hit_find_tag(content: string, pos: int, tag: string) -> int:
         p = e + 1
     return -1
 
-// pos 所在行的行尾后偏移（下一行首；EOF = 文长）
+// Offset just after the line containing pos, or the text length at end of file.
 fn hit_line_after(content: string, pos: int) -> int:
     slen := str_len(content)
     i : int, mut = pos
@@ -275,8 +280,8 @@ fn hit_line_after(content: string, pos: int) -> int:
         i = i + 1
     return slen
 
-// 行首 token（键名）判定：text 中是否存在以 key 为整 token 的行
-// （token 终止符 = 空白 / '=' / 行尾；'#' 注释行跳过）。
+// Whether text has a line whose first token equals key. Token terminators are
+// whitespace, '=', or end of line. Comment lines are skipped.
 fn hit_has_key(text: string, key: string) -> int:
     slen := str_len(text)
     klen := str_len(key)
@@ -327,7 +332,7 @@ fn hit_has_key(text: string, key: string) -> int:
         p = e + 1
     return 0
 
-// allowed（空格分隔键名表）中是否含 key（整 token 匹配）
+// Whether the space-separated allowed list contains key as a whole token.
 fn hit_key_allowed(allowed: string, key: string) -> int:
     alen := str_len(allowed)
     klen := str_len(key)
@@ -366,8 +371,9 @@ fn hit_key_allowed(allowed: string, key: string) -> int:
         p = e
     return 0
 
-// 本层键名白名单扫描：任一非 '#' 行以不在 allowed 中的键开头 → 报错
-// "unknown key"。Returns 0 = 干净；1 = 已报未知键。
+// Check every non-comment line against the allowed key list and report
+// "unknown key" for the first unmatched key. Returns 0 when clean and 1 after
+// reporting an unknown key.
 fn hit_scan_keys_ok(text: string, allowed: string) -> int:
     slen := str_len(text)
     p : int, mut = 0
@@ -391,7 +397,7 @@ fn hit_scan_keys_ok(text: string, allowed: string) -> int:
                 break
             e = e + 1
         if s < e && load8(text, s) != 35:
-            // 非注释行
+            // Non-comment line.
             t : int, mut = s
             loop:
                 if t >= e:
@@ -410,7 +416,7 @@ fn hit_scan_keys_ok(text: string, allowed: string) -> int:
         p = e + 1
     return 0
 
-// 原始值串（key = 之后到行尾注释前，去首尾空白；返回原样含引号）
+// Raw value after key=, trimmed and before a trailing comment. Quotes are preserved.
 fn hit_raw_str(text: string, key: string) -> string:
     slen := str_len(text)
     klen := str_len(key)
@@ -468,7 +474,7 @@ fn hit_raw_str(text: string, key: string) -> string:
                             break
                         if load8(text, v1) == 35:
                             break
-                        // '#' 行尾注释
+                        // Trailing comment starts here.
                         v1 = v1 + 1
                     loop:
                         if v1 <= v0:
@@ -482,7 +488,7 @@ fn hit_raw_str(text: string, key: string) -> string:
         p = e + 1
     return ""
 
-// 事件名 → 角色码（1..6；0 = 未知/缺失）
+// Event name to role code 1 through 6. 0 means unknown or absent.
 fn hit_role_code(name: string) -> int:
     if str_eq(name, "dst") != 0:
         return HIT_ROLE_DST
@@ -498,7 +504,7 @@ fn hit_role_code(name: string) -> int:
         return HIT_ROLE_COND
     return 0
 
-// 寄存器名 → regno（0..15）；非寄存器名 → -1
+// Register name to regno 0 through 15. -1 means not a register.
 fn hit_reg_code(name: string) -> int:
     if str_eq(name, "rax") != 0:
         return 0
@@ -534,7 +540,7 @@ fn hit_reg_code(name: string) -> int:
         return 15
     return -1
 
-// 操作数码：角色 1..6 或寄存器字面量 16+regno；0 = 未知
+// Operand code: role 1 through 6, or 16 + regno for a register literal. 0 means unknown.
 fn hit_operand_code(name: string) -> int:
     rc := hit_role_code(name)
     if rc != 0:
@@ -544,7 +550,7 @@ fn hit_operand_code(name: string) -> int:
         return HIT_REG_BASE + rn
     return 0
 
-// base 键码：操作数码或 rip（32）；0 = 未知
+// Base code: an operand code or rip (32). 0 means unknown.
 fn hit_base_code(name: string) -> int:
     oc := hit_operand_code(name)
     if oc != 0:
@@ -553,7 +559,7 @@ fn hit_base_code(name: string) -> int:
         return HIT_CODE_RIP
     return 0
 
-// 2^n（按位或不存在，倍增）
+// Compute 2^n by doubling; the language has no shift or bitwise operators.
 fn hit_bit(n: int) -> int:
     b : int, mut = 1
     i : int, mut = 0
@@ -576,12 +582,12 @@ fn hit_err_step(ev_id: int, step_no: int):
     print_i(step_no)
     print(": ")
 
-// ════════════════════════════════════════════════════════════════
-// schema v2 步字段解析（模板语言核心）
-// ════════════════════════════════════════════════════════════════
-// text = 一个 [[event.proj.step]] 小节全文（或 v1 平铺投影的 proj 层文本——
-// isa_ok = 1 时允许 isa 键混于其中）。解析成功 → 追加一条 108B 步记录。
-// Returns 0 = 成功；1 = 失败（错误已打印）。
+// ------------------------------------------------------------------
+// Step field parsing for the table template language
+// ------------------------------------------------------------------
+// text is one [[event.proj.step]] section, or the projection body of an older
+// flat projection when isa_ok = 1. On success, append one 108-byte step record.
+// Returns 0 on success and 1 after printing an error.
 fn hit_parse_step(text: string, ev_id: int, step_no: int, isa_ok: int) -> int:
     if isa_ok == 1:
         if hit_scan_keys_ok(text, "isa prefix opcode rex_w rex_r rex_x rex_b modrm_reg_role modrm_reg_digit modrm_rm_role rm_mode modrm_base_role sib_scale sib_index_role sib_base_role disp_size disp_src imm_size imm_role imm_lit imm_kind rel_role rel_kind rel_size cond_role") != 0:
@@ -589,7 +595,7 @@ fn hit_parse_step(text: string, ev_id: int, step_no: int, isa_ok: int) -> int:
     else:
         if hit_scan_keys_ok(text, "prefix opcode rex_w rex_r rex_x rex_b modrm_reg_role modrm_reg_digit modrm_rm_role rm_mode modrm_base_role sib_scale sib_index_role sib_base_role disp_size disp_src imm_size imm_role imm_lit imm_kind rel_role rel_kind rel_size cond_role") != 0:
             return 1
-    // ── 输出记录字段（函数顶给默认值；各组按需覆盖）──
+    // Output record fields. Each group overwrites its defaults.
     op0 : int, mut = 0
     op1 : int, mut = 0
     reg_code : int, mut = 0
@@ -614,7 +620,7 @@ fn hit_parse_step(text: string, ev_id: int, step_no: int, isa_ok: int) -> int:
     npf : int, mut = 0
     pfx0 : int, mut = 0
     pfx1 : int, mut = 0
-    // ── rex 位（出现则须 0/1；任一出现且值 1 才产生 REX 字节）──
+    // REX bits must be 0 or 1. A REX byte is emitted when at least one bit is set.
     rwp := hit_has_key(text, "rex_w")
     rrp := hit_has_key(text, "rex_r")
     rxp := hit_has_key(text, "rex_x")
@@ -657,7 +663,7 @@ fn hit_parse_step(text: string, ev_id: int, step_no: int, isa_ok: int) -> int:
             rex_byte = rex_byte + 2
         if rbp == 1 && rb == 1:
             rex_byte = rex_byte + 1
-    // ── prefix（≤2 字节；每字节 ≤255）──
+    // Prefix: at most two bytes, each 0 to 255.
     if hit_has_key(text, "prefix") == 1:
         pfb := alloc(16)
         npf = toml_get_int_list(text, "prefix", pfb, 3)
@@ -682,7 +688,7 @@ fn hit_parse_step(text: string, ev_id: int, step_no: int, isa_ok: int) -> int:
             pfx0 = hit_r32(pfb, 0)
         if npf >= 2:
             pfx1 = hit_r32(pfb, 4)
-    // ── opcode（必选，1..3 字节；每字节 ≤255）──
+    // Opcode: required, one to three bytes, each 0 to 255.
     opc_p := hit_has_key(text, "opcode")
     opb := alloc(16)
     nop := toml_get_int_list(text, "opcode", opb, 4)
@@ -703,7 +709,7 @@ fn hit_parse_step(text: string, ev_id: int, step_no: int, isa_ok: int) -> int:
             println("opcode byte >255 (not a byte)")
             return 1
         j = j + 1
-    // ── modrm 族关联校验（键出现才算族；各组字段按需自校验）──
+    // ModRM field groups. A group is present only when at least one key appears.
     h_role  := hit_has_key(text, "modrm_reg_role")
     h_digit := hit_has_key(text, "modrm_reg_digit")
     h_rm    := hit_has_key(text, "modrm_rm_role")
@@ -815,7 +821,7 @@ fn hit_parse_step(text: string, ev_id: int, step_no: int, isa_ok: int) -> int:
                 hit_err_step(ev_id, step_no)
                 println("bad disp_src")
                 return 1
-    // ── imm 族（与 modrm 族无关：字面量/回填载体）──
+    // Immediate fields, independent of the ModRM group.
     h_isz  := hit_has_key(text, "imm_size")
     h_iro  := hit_has_key(text, "imm_role")
     h_ik   := hit_has_key(text, "imm_kind")
@@ -856,7 +862,7 @@ fn hit_parse_step(text: string, ev_id: int, step_no: int, isa_ok: int) -> int:
             hit_err_step(ev_id, step_no)
             println("bad imm_lit (negative unsupported)")
             return 1
-    // ── rel 族（三字段同现；kind = event/func/extern；size = 8/32）──
+    // Relocation fields must appear together. kind is event, func, or extern; size is 8 or 32.
     h_rro := hit_has_key(text, "rel_role")
     h_rk  := hit_has_key(text, "rel_kind")
     h_rs  := hit_has_key(text, "rel_size")
@@ -886,14 +892,14 @@ fn hit_parse_step(text: string, ev_id: int, step_no: int, isa_ok: int) -> int:
             hit_err_step(ev_id, step_no)
             println("bad rel role")
             return 1
-    // ── cond 键（branch 条件源槽）──
+    // Condition field for a branch source slot.
     if hit_has_key(text, "cond_role") == 1:
         cond_code = hit_operand_code(toml_get_str(text, "cond_role"))
         if cond_code == 0:
             hit_err_step(ev_id, step_no)
             println("bad cond_role")
             return 1
-    // ── 字节流组装（prefix → REX → opcode）+ 追加 108B 步记录 ──
+    // Assemble template bytes in prefix, REX, opcode order and append the step record.
     stb := alloc(8)
     nst : int, mut = 0
     if npf >= 1:
@@ -949,14 +955,16 @@ fn hit_parse_step(text: string, ev_id: int, step_no: int, isa_ok: int) -> int:
     hit_w32(g_hit_steps, sb + HIT_ST_OFF_COND_ROLE, cond_code)
     return 0
 
-// ════════════════════════════════════════════════════════════════
-// [[event.proj]] 投影小节解析（chunk 内 ph 处起；多步/平铺两形）
-// ════════════════════════════════════════════════════════════════
-// Returns 0 = 成功；1 = 失败（错误已打印）。
+// ------------------------------------------------------------------
+// Parse one [[event.proj]] section at ph. It may be a multi-step projection or
+// a flat single-step projection.
+// ------------------------------------------------------------------
+// Returns 0 on success and 1 after printing an error.
 fn hit_parse_proj_section(chunk: string, ph: int, ev_id: int) -> int:
     pl := hit_line_after(chunk, ph)
-    // 本投影文本终点：平铺 = 下一 [[event.proj]]（或块尾）；步小节形 = 首步头
-    //（步头位于下一 proj 头之前才算本投影的步小节——防跨 proj 误配）
+    // Projection text ends at the next [[event.proj]] for a flat projection, or
+    // at the first step header. A step header counts only when it precedes the
+    // next projection header.
     nxt_pr := hit_find_tag(chunk, pl, "[[event.proj]]")
     st_hdr := hit_find_tag(chunk, pl, "[[event.proj.step]]")
     sectioned : int, mut = 0
@@ -967,7 +975,7 @@ fn hit_parse_proj_section(chunk: string, ph: int, ev_id: int) -> int:
     else if nxt_pr >= 0:
         pend = nxt_pr
     pfields := str_sub(chunk, pl, pend - pl)
-    // isa 必选且须为 x86-64（层级无关：平铺时 isa 混于步字段）
+    // isa is required and must be x86-64. In a flat projection it shares the step fields.
     if str_eq(toml_get_str(pfields, "isa"), "x86-64") == 0:
         hit_err_ev(ev_id)
         println("unknown isa")
@@ -975,14 +983,14 @@ fn hit_parse_proj_section(chunk: string, ph: int, ev_id: int) -> int:
     first_step := g_hit_step_count
     scnt : int, mut = 0
     if sectioned == 0:
-        // 平铺单步（v1 子集：isa 之外的字段 = 单步字段；白名单扫 = 步层全表）
+        // Flat single step. Fields other than isa are step fields.
         if hit_parse_step(pfields, ev_id, 0, 1) != 0:
             return 1
         scnt = 1
     else:
         if hit_scan_keys_ok(pfields, "isa") != 0:
             return 1
-        // 步小节逐个解析（步文本终点 = 下一 step 头 / 下一 proj 头 / 块尾）
+        // Parse each step section. Step text ends at the next step header, the next projection header, or the chunk end.
         sp : int, mut = st_hdr
         loop:
             if sp < 0:
@@ -999,10 +1007,9 @@ fn hit_parse_proj_section(chunk: string, ph: int, ev_id: int) -> int:
             if hit_parse_step(stext, ev_id, scnt, 0) != 0:
                 return 1
             scnt = scnt + 1
-            // 续行边界（Task 1 评审 fix）：ns 在下一 proj 头之后 = 属于后续
-            // [[event.proj]] 的步小节——不得续入本投影（np2 只截步文本、不
-            // 终止循环；旧缺陷 = 静默吸收后续投影步：本投影步数膨胀 + 步
-            // 记录重复入库，多 proj 步小节事件加载成功但表已错）
+            // A next step header after the next projection header belongs to a
+            // later projection and must not continue this one. Without this
+            // boundary, later steps would be counted here and inserted twice.
             if ns >= 0 && (np2 < 0 || ns < np2):
                 sp = ns
             else:
@@ -1011,7 +1018,7 @@ fn hit_parse_proj_section(chunk: string, ph: int, ev_id: int) -> int:
             hit_err_ev(ev_id)
             println("projection has no steps")
             return 1
-    // 追加投影记录（isa/步数/首步字节偏移）
+    // Append the projection record: ISA, step count, and first-step byte offset.
     hit_grow_projs(g_hit_proj_count + 1)
     ps := g_hit_proj_count
     g_hit_proj_count = ps + 1
@@ -1020,13 +1027,13 @@ fn hit_parse_proj_section(chunk: string, ph: int, ev_id: int) -> int:
     hit_w32(g_hit_projs, ps * HIT_PROJ_REC + HIT_PJ_OFF_STEP_OFF, first_step * HIT_STEP_REC)
     return 0
 
-// ════════════════════════════════════════════════════════════════
-// [[event]] 事件小节解析（含其全部投影小节）
-// ════════════════════════════════════════════════════════════════
-// chunk = 自 "[[event]]" 行起、到下个节头前的文本（不含下一节）。
-// Returns 0 = 成功；1 = 失败（错误已打印）。
+// ------------------------------------------------------------------
+// Parse one [[event]] section and all of its projections.
+// ------------------------------------------------------------------
+// chunk starts at the [[event]] line and ends before the next section.
+// Returns 0 on success and 1 after printing an error.
 fn hit_parse_event_chunk(chunk: string) -> int:
-    // 事件字段区 = 头行后、首个 proj/step 小节前（step 在 proj 前 = 结构错）
+    // Event fields span from the header line to the first projection or step section. A step before a projection is a structural error.
     fe := hit_line_after(chunk, 0)
     p_off := hit_find_tag(chunk, fe, "[[event.proj]]")
     s_off := hit_find_tag(chunk, fe, "[[event.proj.step]]")
@@ -1045,7 +1052,7 @@ fn hit_parse_event_chunk(chunk: string) -> int:
     if id <= 0:
         println("error: HIT table: event missing or invalid id")
         return 1
-    // 重复 id 检测
+    // Reject duplicate ids.
     k : int, mut = 0
     loop:
         if k >= g_hit_event_count:
@@ -1073,12 +1080,12 @@ fn hit_parse_event_chunk(chunk: string) -> int:
         hit_err_ev(id)
         println("bad side_effect")
         return 1
-    // 名字入名字表（8B/项存串指针；str_sub 副本 arena 存活）
+    // Add the name to the name table; each entry stores a string pointer.
     hit_grow_names(g_hit_name_count + 1)
     name_ni : int, mut = g_hit_name_count
     g_hit_name_count = name_ni + 1
     store_str_ptr(g_hit_names, name_ni * 8, name)
-    // 事件行追加（proj 范围字段在投影解析后回填）
+    // Append the event record. Projection range fields are filled after parsing.
     hit_grow_events(g_hit_event_count + 1)
     slot := g_hit_event_count
     g_hit_event_count = slot + 1
@@ -1088,7 +1095,7 @@ fn hit_parse_event_chunk(chunk: string) -> int:
     hit_w32(g_hit_events, slot * HIT_EVENT_REC + HIT_EV_OFF_INPUTS, inputs)
     hit_w32(g_hit_events, slot * HIT_EVENT_REC + HIT_EV_OFF_OUTPUTS, outputs)
     hit_w32(g_hit_events, slot * HIT_EVENT_REC + HIT_EV_OFF_SIDE, side)
-    // 投影小节（多 proj：事件 32/36 记范围；20/24/28 = proj0 镜像）
+    // Parse projections. Fields 32 and 36 record the range; fields 20, 24, and 28 mirror projection 0.
     first_proj : int, mut = g_hit_proj_count
     pcount : int, mut = 0
     hpos : int, mut = fend
@@ -1106,7 +1113,7 @@ fn hit_parse_event_chunk(chunk: string) -> int:
         return 1
     hit_w32(g_hit_events, slot * HIT_EVENT_REC + HIT_EV_OFF_PROJ_OFF, first_proj)
     hit_w32(g_hit_events, slot * HIT_EVENT_REC + HIT_EV_OFF_PROJ_COUNT, pcount)
-    // proj0 镜像（M1 消费方视区：isa/步数/首步字节偏移）
+    // Mirror projection 0: ISA, step count, and first-step byte offset.
     p0 := first_proj * HIT_PROJ_REC
     hit_w32(g_hit_events, slot * HIT_EVENT_REC + HIT_EV_OFF_ISA,
         hit_r32(g_hit_projs, p0 + HIT_PJ_OFF_ISA))
@@ -1116,17 +1123,18 @@ fn hit_parse_event_chunk(chunk: string) -> int:
         hit_r32(g_hit_projs, p0 + HIT_PJ_OFF_STEP_OFF))
     return 0
 
-// ════════════════════════════════════════════════════════════════
-// [runtime.x86] 运行时小节（spec §6 最小描述；可选小节，出现则 8 键齐备）
-// ════════════════════════════════════════════════════════════════
-// chunk = 自 "[runtime.x86]" 行起、到下个节头前的文本（不含下一节）。
-// Returns 0 = 成功；1 = 失败（错误已打印）。
+// ------------------------------------------------------------------
+// [runtime.x86] runtime section. It is optional, but when present all eight keys
+// are required.
+// ------------------------------------------------------------------
+// chunk starts at the [runtime.x86] line and ends before the next section.
+// Returns 0 on success and 1 after printing an error.
 fn hit_parse_runtime_chunk(chunk: string) -> int:
     fe := hit_line_after(chunk, 0)
     text := str_sub(chunk, fe, str_len(chunk) - fe)
     if hit_scan_keys_ok(text, "call_mechanism call_ret_addr call_stack_grow param_mode param_regs save_regs extern_entry extern_resolve") != 0:
         return 1
-    // 8 键齐备
+    // Require all eight keys.
     if hit_has_key(text, "call_mechanism") == 0:
         println("error: HIT table: runtime section missing call_mechanism")
         return 1
@@ -1152,7 +1160,7 @@ fn hit_parse_runtime_chunk(chunk: string) -> int:
         println("error: HIT table: runtime section missing extern_resolve")
         return 1
     rt := alloc(32)
-    // 机制枚举值（非 stack/pushed/down/regs/call_rel32/ext_rel → 拒）
+    // Check the enumeration values for the call mechanism.
     if str_eq(toml_get_str(text, "call_mechanism"), "stack") == 0:
         println("error: HIT table: bad call_mechanism")
         return 1
@@ -1181,7 +1189,7 @@ fn hit_parse_runtime_chunk(chunk: string) -> int:
         println("error: HIT table: bad extern_resolve")
         return 1
     hit_w32(rt, HIT_RT_EXTERN_RESOLVE * 4, 1)
-    // 寄存器掩码（空格分隔寄存器名 → regno 位集）
+    // Register masks: space-separated names become a bit set of register numbers.
     if hit_parse_reg_mask(toml_get_str(text, "param_regs"), rt, HIT_RT_PARAM_MASK * 4) != 0:
         return 1
     if hit_parse_reg_mask(toml_get_str(text, "save_regs"), rt, HIT_RT_SAVE_MASK * 4) != 0:
@@ -1190,7 +1198,7 @@ fn hit_parse_runtime_chunk(chunk: string) -> int:
     g_hit_runtime_present = 1
     return 0
 
-// 寄存器掩码解析（空格分隔名列表 → 位掩码写 rt+pos）；0 = 成功；1 = 未知名（已打印）
+// Parse a space-separated register list into a bit mask at rt+pos. Returns 0 on success and 1 for an unknown name after printing it.
 fn hit_parse_reg_mask(raw: string, rt: string, pos: int) -> int:
     rlen := str_len(raw)
     mask : int, mut = 0
@@ -1225,14 +1233,15 @@ fn hit_parse_reg_mask(raw: string, rt: string, pos: int) -> int:
     hit_w32(rt, pos, mask)
     return 0
 
-// ════════════════════════════════════════════════════════════════
-// 公共接口（M1 Task 1 契约 + M2a Task 1 扩展）
-// ════════════════════════════════════════════════════════════════
+// ------------------------------------------------------------------
+// Public interface
+// ------------------------------------------------------------------
 
-// 加载 HIT 表文件并填充 g_hit_events/g_hit_projs/g_hit_steps（计数式重置——
-// 重复调用覆盖旧表）。[[event]] 与 [runtime.x86] 小节按出现序任意交错解析
-//（runtime 可夹在事件间，尾部追加事件亦可）。Returns 0 = 成功；1 = 失败
-//（错误已打印，表不可用）。
+// Load a HIT table and fill g_hit_events, g_hit_projs, and g_hit_steps. Counters
+// reset, so a repeated call replaces the previous table. [[event]] and
+// [runtime.x86] sections may appear in any order, including runtime between
+// events. Returns 0 on success and 1 after printing an error; the table is then
+// unusable.
 fn load_hit_table(path: string) -> int:
     content := read_file(path)
     if str_len(content) == 0:
@@ -1244,7 +1253,7 @@ fn load_hit_table(path: string) -> int:
     g_hit_proj_count = 0
     g_hit_name_count = 0
     g_hit_runtime_present = 0
-    expected := toml_get_int(content, "events")  // [table] events（缺省 0 → 尾部校验兜底）
+    expected := toml_get_int(content, "events")  // [table] events; the final count check uses 0 when absent
     pos : int, mut = 0
     loop:
         ev := hit_find_tag(content, pos, "[[event]]")
@@ -1279,9 +1288,9 @@ fn load_hit_table(path: string) -> int:
     if g_hit_event_count == 0:
         println("error: HIT table: no [[event]] sections")
         return 1
-    // 注（M2a Task 1 评审记录）：spec §2「运行时核事件 id 1-9 每表必具」与验证项
-    // 「缺事件…拒绝」的加载器强制在场检查暂缓——事件绑定 = Task 4 落地（届时
-    // 消费方按 id 查找自然暴露缺失），此处仅拦零事件与 [table] events 计数不符。
+    // This loader does not require every core event id to be present. Consumers
+    // look up ids and expose a missing event naturally. It rejects an empty table
+    // and a count that differs from [table] events.
     if g_hit_event_count != expected:
         print("error: HIT table: [table] events=")
         print_i(expected)
@@ -1291,13 +1300,13 @@ fn load_hit_table(path: string) -> int:
         return 1
     return 0
 
-// 表模式激活态：加载成功（g_hit_event_count > 0）= 发射循环启用表优先
+// Whether table mode is active. A positive g_hit_event_count enables table-first emission.
 fn hit_table_active() -> int:
     if g_hit_event_count > 0:
         return 1
     return 0
 
-// 事件 id → 事件槽（记录下标）；-1 = 无
+// Event id to event slot index. -1 means absent.
 fn hit_event_lookup(id: int) -> int:
     i : int, mut = 0
     loop:
@@ -1308,7 +1317,7 @@ fn hit_event_lookup(id: int) -> int:
         i = i + 1
     return -1
 
-// 事件名（诊断用；g_hit_names 表取串）
+// Event name for diagnostics, read from g_hit_names.
 fn hit_event_name(slot: int) -> string:
     if slot < 0 || slot >= g_hit_event_count:
         return ""
@@ -1317,13 +1326,13 @@ fn hit_event_name(slot: int) -> string:
         return ""
     return load_str_ptr(g_hit_names, ni * 8)
 
-// 事件投影形态数；-1 = 事件槽非法
+// Number of projections for an event. -1 means an invalid event slot.
 fn hit_proj_count(event_slot: int) -> int:
     if event_slot < 0 || event_slot >= g_hit_event_count:
         return -1
     return hit_r32(g_hit_events, event_slot * HIT_EVENT_REC + HIT_EV_OFF_PROJ_COUNT)
 
-// 事件第 proj_i 投影步数；-1 = 越界
+// Step count for projection proj_i. -1 is out of range.
 fn hit_proj_step_count(event_slot: int, proj_i: int) -> int:
     if event_slot < 0 || event_slot >= g_hit_event_count:
         return -1
@@ -1333,9 +1342,9 @@ fn hit_proj_step_count(event_slot: int, proj_i: int) -> int:
         return -1
     return hit_r32(g_hit_projs, (po + proj_i) * HIT_PROJ_REC + HIT_PJ_OFF_STEP_COUNT)
 
-// 取事件第 proj_i 投影第 step_i 步：把该步 108B v2 记录原样复制到 out
-//（字段布局 = 上方 HIT_ST_OFF_* 常量序；调用方保证 ≥108B）。
-// Returns 0 = 成功；-1 = 事件槽/proj/步号非法。
+// Copy step step_i of projection proj_i into out as one 108-byte record. The field
+// layout is the HIT_ST_OFF_* order above. The caller provides at least 108 bytes.
+// Returns 0 on success and -1 for an invalid event slot, projection, or step.
 fn hit_proj_step_get(event_slot: int, proj_i: int, step_i: int, out: string) -> int:
     if event_slot < 0 || event_slot >= g_hit_event_count:
         return -1
@@ -1356,10 +1365,10 @@ fn hit_proj_step_get(event_slot: int, proj_i: int, step_i: int, out: string) -> 
         j = j + 1
     return 0
 
-// 取事件投影步（M1 契约 = proj0 视图）：把该步记录原样复制到 out（调用方
-// 保证 ≥HIT_STEP_REC；M1 消费方只读前 20B 视区 = 布局未变。事件 24/28 字段
-// = proj0 镜像，语义与 M1 记录等价——单投影事件的 proj0 = 唯一投影）。
-// Returns 0 = 成功；-1 = 事件槽/步号非法。
+// Copy a step from projection 0 into out. The caller provides at least
+// HIT_STEP_REC bytes. Existing consumers read only the first 20 bytes, whose
+// layout is unchanged. Event fields 24 and 28 mirror projection 0.
+// Returns 0 on success and -1 for an invalid event slot or step.
 fn hit_proj_step(event_slot: int, step_i: int, out: string) -> int:
     if event_slot < 0 || event_slot >= g_hit_event_count:
         return -1
@@ -1375,9 +1384,10 @@ fn hit_proj_step(event_slot: int, step_i: int, out: string) -> int:
         j = j + 1
     return 0
 
-// 运行时条目查询：key = 8 键名之一（call_mechanism/call_ret_addr/
-// call_stack_grow/param_mode/param_regs/save_regs/extern_entry/extern_resolve）。
-// 值 = 4B 码或位掩码写入 out。Returns 0 = 已写；-1 = 无 runtime 小节/未知键。
+// Query a runtime entry by key. The keys are call_mechanism, call_ret_addr,
+// call_stack_grow, param_mode, param_regs, save_regs, extern_entry, and
+// extern_resolve. Write a 4-byte code or bit mask to out. Returns 0 when written
+// and -1 when there is no runtime section or the key is unknown.
 fn hit_runtime_get(key: string, out: string) -> int:
     if g_hit_runtime_present == 0:
         return -1
@@ -1403,13 +1413,12 @@ fn hit_runtime_get(key: string, out: string) -> int:
     hit_w32(out, 0, hit_r32(g_hit_runtime, slot * 4))
     return 0
 
-// ── --dump-table 读回通道（corearch 加载后调用；只读表状态，零写侧影响）──
-// 评审项 1 锁（多 proj 步小节归属）与评审项 4（v2 字段区读回覆盖）共用：
-// 每事件一行 proj 表记录回读（hit_proj_count/hit_proj_step_count——步数吞并
-// 在此失真）；每步一行 v2 字段区探针（hit_proj_step_get 整条 108B 复制后读
-// opcode 区 OPB0 = 偏移 32——写读一致的实证）；runtime 槽位掩码读回。
+// --dump-table readback, called by corearch after loading. It only reads table
+// state. One line per event reports the projection record readback through
+// hit_proj_count and hit_proj_step_count. One line per step reports the first
+// opcode byte from a full 108-byte copy. Runtime masks are read back too.
 fn hit_dump_table_state():
-    // 事件 → 逐 proj 步数（proj0 镜像/M1 视区也随 p0 步数一起验证）
+    // Per event, report each projection's step count.
     ei : int, mut = 0
     loop:
         if ei >= g_hit_event_count:
@@ -1430,7 +1439,7 @@ fn hit_dump_table_state():
             pi = pi + 1
         println("")
         ei = ei + 1
-    // 逐步 opcode 首字节探针（v2 字段区 = 步记录偏移 32 起）
+    // Per step, report the first opcode byte from the current schema fields.
     st := alloc(HIT_STEP_REC)
     ej : int, mut = 0
     loop:
@@ -1458,8 +1467,8 @@ fn hit_dump_table_state():
                 sj = sj + 1
             pj = pj + 1
         ej = ej + 1
-    // runtime 槽读回（掩码十进制 = 测试期望锚：param = rdi rsi rdx rcx r8 r9；
-    // save = rbx r12-15）
+    // Read back runtime masks as decimal values. Param registers are rdi, rsi,
+    // rdx, rcx, r8, and r9; saved registers are rbx and r12 through r15.
     if hit_runtime_get("param_regs", st) == 0:
         print("hit rt: param_regs=")
         print_i(hit_r32(st, 0))

@@ -1,10 +1,10 @@
 # Core 泛型
 
-> 定位：受众 = 维护者/贡献者；状态 = **active（已实现）**——泛型函数/struct + 跨模块实例化（monomorph.cr）已纳入自举；本设计文档留作机制参考，细节见 checker.cr/monomorph.cr/tests/suite/generics_test.cr。
+> 定位：受众 = 维护者/贡献者；状态 = active（已实现）。泛型函数/struct + 跨模块实例化（monomorph.cr）已纳入自举；本设计文档留作机制参考，细节见 checker.cr/monomorph.cr/tests/suite/generics_test.cr。
 
 ## 设计原则
 
-- **尽量靠图推导，不需要用户标注约束。**
+- 尽量使用图推导，不需要用户标注约束。
 - 泛型函数的每次实例化在图上产生独立子图，互不干扰。
 - 学习成本：用户只需掌握 `<T>` 写法，不需要学 trait bounds、where 子句、关联类型。
 
@@ -35,17 +35,17 @@ struct Pair<A, B>:
 
 ### 泛型参数约束
 
-当泛型函数内部调用了类型的方法或字段时，编译器自动推导约束，不需要用户写 `where T: SomeInterface`：
+泛型函数内部调用类型的方法或字段时，编译器自动推导约束，不需要用户写 `where T: SomeInterface`：
 
 ```core
 fn print_size<T>(x: T) {
     // 编译器：T 必须有 .size() 方法
-    // 调用处推导约束，不是在定义处声明
+    // 调用处推导约束，不在定义处声明
     println(x.size());
 }
 ```
 
-约束推导：编译器看图，发现 `x.size()` 调用，检查传入的实际类型是否有 `.size()` 方法。
+约束推导：编译器检查图，发现 `x.size()` 调用，检查传入的实际类型是否有 `.size()` 方法。
 
 ```core
 print_size(42);          //  int 没有 .size()
@@ -94,7 +94,7 @@ pub fn wrap<T>(x: T) -> (T, T):
 
 // main.cr
 import lib
-p := lib.wrap(42)   // lib 的泛型函数 main 中实例化
+p := lib.wrap(42)   // lib 的泛型函数在 main 中实例化
                      // 实例化发生在 main 的 ccr 中
 ```
 
@@ -102,7 +102,7 @@ p := lib.wrap(42)   // lib 的泛型函数 main 中实例化
 
 ```
 1. 泛型函数的 IR 被序列化到 .ccr 中，作为未实例化的函数模板
-2. 调用方在实例化时，将类型参数代入 IR 模板，生成具体类型的子图
+2. 调用方在实例化时，将类型参数应用到 IR 模板，生成具体类型的子图
 3. 子图加入调用方的图
 ```
 

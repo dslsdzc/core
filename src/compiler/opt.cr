@@ -1,13 +1,14 @@
 // === opt.cr ===
-// Corec 侧语义优化（2026-09-07 regalloc 移后端后剩件——编码层资源决策
-// 数据面/分配/判定已迁 src/arch/x86_64/regalloc.cr）：
-//  - AST 常量折叠（ast_optimize_body 族——AST 层）
-//  - 线性流 CSE（pass_cse——IR 层，main.cr O≥1 调用）
-//  - optimize_all（历史编排入口——无调用者，见函数内注记）
+// Corec-side semantic optimizations that remain after register allocation moved
+// to the backend:
+// - AST constant folding in ast_optimize_body;
+// - linear IR common-subexpression elimination in pass_cse, called at O1 or
+//   higher;
+// - optimize_all, a legacy orchestration entry with no callers.
 
 
 // ------------------------------------------------------------------
-// AST constant folding: EXPR_BINARY(int, int) → EXPR_INT
+// AST constant folding: EXPR_BINARY with two int literals becomes EXPR_INT.
 // ------------------------------------------------------------------
 
 fn ast_is_const_int(node: int) -> int:
@@ -69,8 +70,7 @@ fn ast_fold_binary(node: int) -> int:
         known = 0
     if known == 0:
         return 0
-    // Fold: replace EXPR_BINARY with EXPR_INT
-    // Use ast_set_* to modify in-place
+    // Replace EXPR_BINARY with EXPR_INT in place.
     ast_set_kind(node, EXPR_INT)
     ast_set_a(node, 0)
     ast_set_b(node, 0)
@@ -80,7 +80,7 @@ fn ast_fold_binary(node: int) -> int:
     return 1
 
 // ------------------------------------------------------------------
-// Walk a block's statements and fold expressions
+// Walk a block's statements and fold expressions.
 // ------------------------------------------------------------------
 
 fn ast_optimize_body(body: int):
@@ -88,7 +88,7 @@ fn ast_optimize_body(body: int):
         return
     bk := ast_kind(body)
 
-    // EXPR_BLOCK: optimize each statement recursively
+    // EXPR_BLOCK: optimize each statement.
     if bk == EXPR_BLOCK:
         ss := ast_a(body)
         sc := ast_b(body)
@@ -100,44 +100,40 @@ fn ast_optimize_body(body: int):
             ast_optimize_body(sn)
             i = i + 1
         return
-    // EXPR_RETURN: optimize the return value expression
+    // EXPR_RETURN: optimize the value.
     if bk == EXPR_RETURN:
         if ast_a(body) >= 0:
             ast_optimize_body(ast_a(body))
         return
-    // EXPR_IF: optimize condition, then, else
+    // EXPR_IF: optimize the condition, then branch, and else branch.
     if bk == EXPR_IF:
         ast_optimize_body(ast_a(body))  // cond
         ast_optimize_body(ast_b(body))  // then
         if ast_c(body) >= 0:
             ast_optimize_body(ast_c(body))
         // else
-        // Fold: if const_int(0) → else, if const_int(≠0) → then
+        // Constant-condition folding for if is not implemented here.
         cond := ast_a(body)
         if ast_is_const_int(cond):
             cv := ast_const_val(cond)
             then_node := ast_b(body)
             else_node := ast_c(body)
 
-                // Replace if with then body
-                // We can't easily clone AST, so just mark as NONE
-                // (IR gen will skip)
-
-                // Replace if with else body
+                // Reserved for constant-condition folding. No rewrite is applied.
 
         return
-    // EXPR_BINARY: fold constants
+    // EXPR_BINARY: fold constants.
     if bk == EXPR_BINARY:
         ast_optimize_body(ast_a(body))
         ast_optimize_body(ast_b(body))
         ast_fold_binary(body)
         return
-    // EXPR_UNARY
+    // EXPR_UNARY: optimize the operand.
     if bk == EXPR_UNARY:
         if ast_a(body) >= 0:
             ast_optimize_body(ast_a(body))
         return
-    // EXPR_CALL: optimize args
+    // EXPR_CALL: optimize arguments.
     if bk == EXPR_CALL:
         if ast_a(body) >= 0:
             ast_optimize_body(ast_a(body))
@@ -152,9 +148,9 @@ fn ast_optimize_body(body: int):
                 an = an + 1
             ai = ai + 1
         return
-    // EXPR_STRUCT: a=type_name_ni, b=first wrapper（连续）, c=field_count；wrapper.a=字段值节点
-    // （F5 契约，见 parser.cr struct 字面量分支）。旧代码直接对 wrapper 递归，而 wrapper 的
-    // kind=EXPR_NONE 在本函数无分支 ⇒ 常量折叠静默空转（字段值从不被优化）。
+    // EXPR_STRUCT: a is the type name, b the first consecutive wrapper, and c
+    // the field count. wrapper.a holds the field value, so recurse into that
+    // value rather than the wrapper node.
     if bk == EXPR_STRUCT:
         fn2 := ast_b(body)
         fc := ast_c(body)
@@ -171,12 +167,12 @@ fn ast_optimize_body(body: int):
                 fn2 = fn2 + 1
             i = i + 1
         return
-    // EXPR_LET: optimize value expression
+    // EXPR_LET: optimize the value expression.
     if bk == EXPR_LET:
         if ast_c(body) >= 0:
             ast_optimize_body(ast_c(body))
         return
-    // EXPR_GO: optimize spawned body
+    // EXPR_GO: optimize the spawned body.
     if bk == EXPR_GO:
         if ast_b(body) >= 0:
             ast_optimize_body(ast_b(body))
@@ -185,19 +181,19 @@ fn ast_optimize_body(body: int):
         if ast_a(body) >= 0:
             ast_optimize_body(ast_a(body))
         return
-    // EXPR_LOOP, EXPR_WHILE: optimize body
+    // EXPR_LOOP and EXPR_WHILE: optimize the body.
     if bk == EXPR_LOOP || bk == EXPR_WHILE:
         if ast_a(body) >= 0:
             ast_optimize_body(ast_a(body))
         return
-    // EXPR_FOR: optimize iter and body
+    // EXPR_FOR: optimize the iterable and body.
     if bk == EXPR_FOR:
         if ast_b(body) >= 0:
             ast_optimize_body(ast_b(body))
         if ast_c(body) >= 0:
             ast_optimize_body(ast_c(body))
         return
-    // EXPR_MATCH: optimize match expr and arms
+    // EXPR_MATCH: optimize the scrutinee and each arm.
     if bk == EXPR_MATCH:
         if ast_a(body) >= 0:
             ast_optimize_body(ast_a(body))
@@ -211,13 +207,13 @@ fn ast_optimize_body(body: int):
                 ast_optimize_body(ast_b(an))
             an = ast_c(an)
         return
-    // EXPR_STMT: unwrap
+    // EXPR_STMT: optimize the wrapped expression.
     if bk == EXPR_STMT:
         if ast_a(body) >= 0:
             ast_optimize_body(ast_a(body))
         return
-    // EXPR_ARRAY: a=first wrapper（连续）, b=elem_count；wrapper.a=元素值节点
-    // （F5 契约，见 parser.cr 下标分支）；旧代码直接对 wrapper 递归 = 空转（EXPR_NONE 无分支）。
+    // EXPR_ARRAY: a is the first consecutive wrapper and b the element count.
+    // wrapper.a holds the element value, so recurse into that value.
     if bk == EXPR_ARRAY:
         an := ast_a(body)
         ac := ast_b(body)
@@ -234,7 +230,8 @@ fn ast_optimize_body(body: int):
                 an = an + 1
             i = i + 1
         return
-    // EXPR_TUPLE: a=first wrapper（连续）, b=elem_count；wrapper.a=元素值节点（F5 契约）
+    // EXPR_TUPLE: a is the first consecutive wrapper and b the element count.
+    // wrapper.a holds the element value.
     if bk == EXPR_TUPLE:
         an := ast_a(body)
         ac := ast_b(body)
@@ -251,15 +248,15 @@ fn ast_optimize_body(body: int):
                 an = an + 1
             i = i + 1
         return
-    // EXPR_AS: optimize both sides
+    // EXPR_AS: optimize the operand.
     if bk == EXPR_AS:
         if ast_a(body) >= 0:
             ast_optimize_body(ast_a(body))
         return
-    // EXPR_BINARY already handled above; fallthrough for EXPR_INDEX etc.
+    // EXPR_BINARY is handled above. Other kinds need no rewrite here.
 
 // ------------------------------------------------------------------
-// Common subexpression elimination (CFIR)
+// Common subexpression elimination over the linear IR.
 // ------------------------------------------------------------------
 fn pass_cse():
     if g_ir_func_count <= 0:
@@ -274,12 +271,12 @@ fn pass_cse():
             fi = fi + 1
             continue
 
-        // CSE: track seen (op, s1, s2) → dest_var mapping
-        // Simple linear scan — sufficient for O1
+        // Track seen (op, s1, s2, dest) expressions. A linear scan is sufficient
+        // at O1.
         seen_count : ., mut = 0
-        // Flat array: each entry = (op:8, s1:8, s2:8, dest:8) = 32 bytes
+        // Flat array: each entry is {op, s1, s2, dest}, 32 bytes.
         seen : string, mut = alloc(ic * 32)
-        // Replacement map: var → canonical var (8 bytes each)
+        // Flat buffer of old-to-canonical replacement pairs.
         replace_map : string, mut = alloc(ic * 8)
         replace_count : ., mut = 0
 
@@ -293,7 +290,7 @@ fn pass_cse():
             s1 := iri_s1(inst)
             s2 := iri_s2(inst)
 
-            // Skip arena opcodes — side-effecting, not optimizable
+            // Skip side-effecting and annotation opcodes.
             if op == IR_ARENA_NEW:
                 ii = ii + 1
                 continue
@@ -346,9 +343,9 @@ fn pass_cse():
                 ii = ii + 1
                 continue
 
-            // Only CSE for pure computations: BINARY, UNARY
+            // Eliminate only pure computations: binary and unary operations.
             if (op == IR_BINARY || op == IR_UNARY) && d >= 0:
-                // Check if we've seen this expression
+                // Check whether the expression was already seen.
                 found : ., mut = -1
                 sj : ., mut = 0
                 loop:
@@ -360,15 +357,16 @@ fn pass_cse():
                         break
                     sj = sj + 1
                 if found >= 0:
-                    // Duplicate — record replacement: d → canonical dest
+                    // Duplicate: map d to the canonical destination and replace
+                    // this instruction with a no-op.
                     canonical := r64(seen, found * 32 + 24)
                     w64(replace_map, replace_count * 8, d)
                     w64(replace_map, replace_count * 8 + 8, canonical)
                     replace_count = replace_count + 1
-                    // NOP this instruction
+                    // Replace the instruction with a no-op.
                     iri_set_op(inst, IR_NOP)
                 else:
-                    // New expression — record it
+                    // New expression: record it.
                     so := seen_count * 32
                     w64(seen, so, op)
                     w64(seen, so+8, s1)
@@ -376,7 +374,7 @@ fn pass_cse():
                     w64(seen, so+24, d)
                     seen_count = seen_count + 1
 
-            // Apply replacements to operands of ALL instructions
+            // Apply replacements to the operands of every instruction.
             if replace_count > 0:
                 rj : ., mut = 0
                 loop:
@@ -396,11 +394,11 @@ fn pass_cse():
         fi = fi + 1
 
 fn optimize_all():
-    // Pointer analysis (always runs, even at opt_level 0)
+    // Pointer analysis always runs, even at optimization level 0.
     ptr_analysis_all()
-    // RegionCheck: verify DEREF targets are in live subgraphs
+    // RegionCheck: verify that DEREF targets are in live subgraphs.
     region_check_all()
-    // ProvenanceVerify: check DEREF offsets against allocation sizes
+    // ProvenanceVerify: check DEREF offsets against allocation sizes.
     provenance_verify_all()
     if g_opt_level < 1:
         return
@@ -412,8 +410,8 @@ fn optimize_all():
         body := ast_data(fn_node)  // function body
         ast_optimize_body(body)
         fi = fi + 1
-    // 注（2026-09-07 regalloc 移后端）：alloc_registers/pass_stack_share 已迁
-    // corearch（src/arch/x86_64/regalloc.cr——.ccr 不再传 REG_ASSIGN/ENT）。
-    // 本函数无调用者（main.cr 直调各 pass），保留为历史编排入口。
+    // Register allocation and stack sharing live in corearch now
+    // (src/arch/x86_64/regalloc.cr). This function has no callers; main.cr calls
+    // the passes directly.
     if g_opt_level >= 2:
         pass_cse()

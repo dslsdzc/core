@@ -61,8 +61,8 @@ fn sched_current_m_idx() -> int:
     return g_current_m_idx
 
 fn sched_enqueue(g: string):
-    // Add to the CURRENT M's local queue (no shared global queue → no
-    // cross-thread contention; each M only touches its own list).
+    // Add to the current M's local queue. There is no shared global queue, so
+    // workers do not contend; each M touches only its own list.
     m_idx := sched_current_m_idx()
     if m_idx < 0:
         m_idx = 0

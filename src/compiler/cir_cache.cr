@@ -1,181 +1,97 @@
 // === cir_cache.cr ===
-// Incremental compilation cache: per-function .cir snapshot save/load.
-// Saves the dataflow graph state (DF nodes, edges, IR instrs, vars, strings)
-// for one function. On cache hit, restores the state directly into the
+// Incremental compilation cache: per-function .cir snapshot save and load.
+//
+// A snapshot stores one function's dataflow graph, IR instructions, variables,
+// string constants, nested subgraph records, and the string-interning journal for
+// the generation window. On a hit, load_cir_cache restores this state into the
 // compiler's global arrays.
-
-// Magic header for .cir cache files
-// v12: invalidate older call flags, generic cloning/indexing, and yield ASTs.
-// v13: persist nested SG region metadata in per-function cache files.
-// v14: 幽灵边播种修复（v7 Task 0 注 A 裁决）——快照内未产出 var 的 producer
-//      槽语义随 grow_df_arrays 播种变更为恒 -1；旧快照（含 0 槽幽灵边 + 恢复
-//      路径不重播种）必须失效——cache miss = 无害重建。
-// 注意：magic 位模式 = C1C1…（bytes）；以 signed 十进制书写——hex 字面量
-// 0xC1C1C1C1C1C1C1C1 超 i64 上界，会被词法溢出守卫拒绝（见 lexer P2 修复）。
-// v15（效应/纯度修正 Task 1）：state 链（kind=1）不再随函数即时连接——改由
-// df_replay_state_chain 在 IR 生成结束后对成品图统一重建 ⇒ 快照里不再需要
-// （也不应）持久化链边。旧快照带链边 + 重建再连一次 = 重复链边，必须失效
-// （cache miss = 无害重建）。
-// v16（TODO #2026-09-10-4 修复）：参数槽区 16→64（dyn_arr.cr OFF_FI_PARAM_TYPES 扩容）——
-// 修复前编译 ≥18 形参函数时，越界写把 return_type/ast_node 踩坏，**且该坏
-// 状态已被写入 .cir 快照**（IR 体 46→28 instrs 等）。缓存键 = 源路径::函数名 +
-// 纯 AST 指纹 ⇒ 同源文件在修复前后指纹相同 → 旧快照会被命中，把坏 IR 原样
-// 恢复成活产物（rc=0）——正是本修复要消灭的静默类。bump 使旧条目整体失效
-// （cache miss = 无害重建）。注意：本条只治「本仓旧快照」，键缺编译器身份
-// 的根因另见 TODO #2026-09-10-1。
-// v17（TODO #2026-09-10-1 修复）：头部新增**编译器身份**字段（见下）。布局 = magic/ver/
-// identity/fp/sig/name_len/name…（相对 v16 整体后移 8B），旧条目读取即错位 ⇒
-// 必须 bump。v16→v17 的手工 bump 本身只覆盖「本仓旧条目」；身份字段起自动
-// 覆盖面（重建即失效）。
-// [曾议 v18 而未 bump]（R2 P4 Task 4 / D15 的实测修正，见下）：DF 节点内存记录
-// 64 → 72B 新增该项槽，但**快照盘记录仍 64B/节点**（第 9 槽不落盘）⇒ 格式
-// 与布局零变化 ⇒ 版本位不动。
-// 计划 D15 原写「`.cir` 快照入项槽并 CIR_CACHE_VER 17→18」，其前提 = 「不入槽
-// 则命中恢复路径与冷路径分歧」。**该前提实测不成立且方向相反**（本任务新增
-// `cir --dump-tk-terms` 通道实测，ptr_arith）：
-//   冷路径 terms=13 / bad_term=0；暖路径 terms=10 / **bad_term=329**
-// ——暖路径所有恢复来的项引用域外。根因 = 项表（g_type_terms）是**进程内**
-// 内容寻址表，emit 期按需追加（本语料冷路径 emit 新增 3 项）⇒ 快照里的项索引
-// 只在**写侧进程**的索引空间里成立；暖路径若跳过 emit（全命中）则项表更短，
-// 恢复出的索引整体悬空——若日后有消费者，读到的就是错项（或越界读）= 正是
-// 本批要消灭的静默类。**且**「把 f(tk) 的纯函数值与其入参并存于同一记录」=
-// 第二真源（本仓反复治过的病），分歧时盘面值静默胜出。
-// 修正（根因级）= **不落盘，装载时按 emit 的等价时点重派生**：load_cir_cache
-// 逐节点（节点序 = emit 序）调 sh_tk_split(opcode, tk)——opcode/派生码本就
-// 在盘记录内（单源），派生值与冷路径**同项同索引**（项表按同序追加 ⇒ 两进程
-// 索引空间对齐，由 T4 用例的冷/暖 dump 逐行相等断言锁住）。
-// R2 P5 Task 2（D19 单槽化）后：盘上仍只有**一个** tk 字段（= 派生码，由
-// sh_dfn_code_of_slots 产出），装载侧由它同时重派生**两槽**（项引用 + 辅码）——
-// 盘面布局/版本位与 P4 逐字节相同（单槽化只在内存语义面）。
+//
+// File layout:
+//   header: magic, version, compiler identity, func fingerprint, signature
+//           fingerprint, name length, name
+//   vars: count, then {name, id, type} per record
+//   nodes: count, then 64-byte records
+//          {opcode, dest, s1, s2, s3, derived code, first_edge, edge_count}
+//   nested subgraphs: count, then 48-byte records
+//          {kind, enter_rel, exit_rel, parent_rel, nstart_rel, ncount}
+//   edges: count, then 24-byte records {rel_from, rel_to, kind}
+//   instructions: count, then 48-byte records {op, dest, s1, s2, s3, tk}
+//   string constants: count, then {length, bytes}
+//   intern journal: base count, record count, then {length, bytes}
+//   trailer: var_start, node_start
+//
+// Validation before restore:
+//   The loader scans the whole snapshot and validates all ranges, the compiler
+//   identity, both fingerprints, the var baseline, edge endpoints, per-node edge
+//   counts, and the trailer before writing any global. A truncated or inconsistent
+//   snapshot is a cache miss, never a partial restore.
+//
+// Derived type codes:
+//   The type-term table is process-local. The snapshot stores only the derived
+//   code produced by sh_dfn_code_of_slots. On load, sh_tk_split_load rederives
+//   both the term reference and the auxiliary code at the same point in the node
+//   sequence as the cold path, so cold and warm runs get the same term indexes.
+//
+// Edges:
+//   Only this function's edges are stored, with endpoints relative to node_start.
+//   The next pointers are not stored; df_add_edge_kind rebuilds them in the same
+//   insertion order as the cold path. Relative endpoints remain valid when a
+//   partial rebuild shifts the node baseline.
+//
+// Intern journal:
+//   Absolute intern ids depend on which functions were generated or loaded in the
+//   current process. The journal stores the contents of new strings, not their
+//   ids, and the loader replays them in order before restoring any id. The base
+//   count must match the reader's g_str_count; otherwise the snapshot is rejected.
+//
+// Version policy:
+//   Bump CIR_CACHE_VER when stored content is no longer equivalent to current
+//   semantics. A cache miss is a harmless rebuild. The compiler identity also
+//   invalidates all entries when the running binary changes, so source edits do
+//   not need a manual bump for body changes.
+//
+// Magic value:
+//   The magic is a negative 64-bit constant written as signed decimal. The
+//   bootstrap backend currently stores negative file-level constants as 0; both
+//   writer and reader use the same constant, so the cache remains self-consistent.
+//   The limitation is recorded in the project backlog.
 CIR_CACHE_MAGIC : int = -4485090715960753727
-// 21：**串域跨进程 id 修复**（2026-09-18 · TODO #2026-09-18-9 · 计划
-//     `docs/superpowers/plans/2026-09-18-cir-cache-str-domain.md`）——快照内既存的
-//     **绝对 intern id**（指令/节点槽、var 名）在命中装载时被按**读侧**编号解释，
-//     而读侧编号取决于「哪些函数被生成、哪些被装载」⇒ 凡**首次 intern 发生在 IR
-//     生成期**的串（多字段 `@fields`、合成变量名、未点名的 `Some`/`None` 标签…）
-//     取到**别的串**（实测可到含 NUL 的垃圾字节；`@fields(Pair)` 冷 `a,b` → 暖
-//     `goroutine_entry_wrapper`+垃圾），两次 build 均 rc=0、ELF/.ccr 静默不同
-//     （VER 17/18/19/20 四代全复现 ⇒ **非本代引入**）。
-//     修法 = **载进快照**（生成期 intern 日志）：写侧在函数生成窗口内把 `str_intern`
-//     **唯一插入路径**上的每一次**新** intern 记进日志（只存**内容**，不存 id），
-//     装载侧**按序重放** ⇒ 读侧串表与写侧**同态** ⇒ 全部 id 原样有效。
-//     **为何不用重映射 / 恒校验见证**：(a) 重映射与 (c) 按 `(op,tk)` 重建都需一张
-//     「哪些槽是串」的判定表，而该表**原理上不可完备**——反例：`IR_CONST.s1` 在
-//     `tk=TI_INT` 下可携带**变体名 id**（`str_intern("None")` 的 tag 值，见
-//     ir_gen.cr 的 `opt_cmp_extract_boxed`），与整数立即数在盘面**不可区分**；
-//     (b) 恒校验见证因读侧**永远缺**未经 `track_str` 的 gen 期 intern（实测：
-//     冷态 `.ccr` 有 `_fields`/`_cat0`，暖态没有）而**恒不合** ⇒ 等于关缓存。
-//     **为何必须 bump**：旧条目无日志段亦无基线见证——若容忍缺失而继续按旧编号
-//     解释，正是本代要消灭的静默类 ⇒ 整体失效，cache miss = **无害重建**。
-//     与 20 代同族——**每一代都是「快照携带了会随进程态漂移的量」**；本代是首次
-//     把这类量**从盘上彻底拿掉**（盘只存内容，编号由两侧同序重建）。
-// 20：缓存膨胀批（2026-09-17 · `plans/2026-09-17-cir-cache-bloat.md`）——**段粒度按函数收窄 +
-//     边端点改相对 id + 尾部基线见证 trailer**（结构变更，非语义变更）：
-//       ① **边段只写本函数** `[edge_start, g_df_edge_count)`（写侧 O(1) 取界：df_begin_func 记
-//          `g_df_func_edge_start`），盘记录 24B/条 = {rel_from, rel_to, kind}（相对 node_start 的
-//          **有符号**偏移；`next` 不落盘，装载期由 df_add_edge_kind 前插重建）。旧格式写**全图边表**
-//          ⇒ 全缓存 O(函数数 × 累计图)：实测单条 2.38MB 中 98.6% 是别人的边、全档 97.0% 的字节是边记录。
-//       ② 节点盘记录**仍 64B**（裁-4），但 `first_edge/edge_count` **装载期不信任**：归零后由重放重建，
-//          盘值降格为**逐节点见证**（不符 ⇒ miss）。
-//       ③ 尾部 +16B trailer = {var_start, node_start}（**基线见证**）：装载期**先校验后恢复**
-//          （var_start 恒校验；node_start 仅当快照含越界 rel 时条件见证）。trailer 定位于**结构扫描
-//          终点**：`p + 16 <= dlen` 才可读（**截断** ⇒ fail-closed miss，P4：不得落 139/垃圾），
-//          但**容忍尾随字节**（既有契约：装载历来忽略条目尾随字节；`test_cir_warm_path` D5 补零
-//          条目仍须命中——本批首版误用 `dlen−16` 定位曾使 D5 红，既有判据网抓到的）。
-//     **为什么必须 bump**：旧条目按「绝对节点 id + 全量覆盖」写 ⇒ 新装载器读到的边段计数/步长与
-//     旧格式完全不同（旧计数 = 全图边数、步长 32B/含 next；新 = 本函数边数、24B/无 next）⇒ 命中旧
-//     条目即「错图」而非「错值」，且与 #8 事故同族（坏 IR 原样复活成产物 rc=0）。cache miss = 无害重建。
-//     与前 19 代同族（每一代都是「快照携带了会随进程态/格式漂移的量」）；`.ccr` 侧不 bump（交付格式）。
-// 19：批 5（opt-dex，2026-09-17 · TODO #2026-09-16-29）——**可选 dex（`dex?`）载荷形式规范化**：
-//     写点门/槽型/形参槽/返回门/读点定型一律改「按**声明面**定形式」（G1 裁决 = scaled；见
-//     ir_gen.cr 的 dex_opt_type_node/dex_opt_slot_ti）。**旧快照里 `dex?` 的槽仍是修复前的形态
-//     （未规范化的装箱 bits / 读槽 TI_INT），与新语义不等价** ⇒ 命中旧条目会把「坏 IR」原样
-//     复活成产物（rc=0 的静默类）⇒ bump 使旧条目整体失效，cache miss = **无害重建**。
-//     与 18 代同族（#2026-09-16-16 批 2 的先例）；`.ccr` 侧仍不 bump（交付格式、段布局与
-//     字段序未动，内容仅 `dex?` 程序变）。
-// 18：TODO #2026-09-16-16「聚合读丢型」批 2 —— 聚合读结果槽型由 `TI_INT` 改为**声明面形式**
-//     （dex 声明 ⇒ `TI_DEX_S`；见 ir_gen.cr 的 agg_*_read_form）。**旧快照里读槽型 = `TI_INT`，
-//     与修复后语义不等价** ⇒ 命中旧条目会把「丢型」的坏 IR 原样复活成产物（rc=0 的静默类）
-//     ⇒ bump 使旧条目整体失效，cache miss = **无害重建**。与 TODO #2026-09-10-4（缓存键缺编译器身份）
-//     同族；`.ccr` 侧不 bump（交付格式、无快照复用语义），但**内容会变**（dex 程序）。
-// 21：**串域跨进程 id 修复**（2026-09-18 · TODO #2026-09-18-9 · 计划
-//     `docs/superpowers/plans/2026-09-18-cir-cache-str-domain.md`）——快照内既存的
-//     **绝对 intern id**（指令/节点槽、var 名）在命中装载时被按**读侧**编号解释，
-//     而读侧编号取决于「哪些函数被生成、哪些被装载」⇒ 凡**首次 intern 发生在 IR
-//     生成期**的串（多字段 `@fields`、合成变量名、未点名的 `Some`/`None` 标签…）
-//     取到**别的串**（实测可到含 NUL 的垃圾字节；`@fields(Pair)` 冷 `a,b` → 暖
-//     `goroutine_entry_wrapper`+垃圾），两次 build 均 rc=0、ELF/.ccr 静默不同
-//     （VER 17/18/19/20 四代全复现 ⇒ **非本代引入**）。
-//     修法 = **载进快照**（生成期 intern 日志）：写侧在函数生成窗口内把 `str_intern`
-//     **唯一插入路径**上的每一次**新** intern 记进日志（只存**内容**，不存 id），
-//     装载侧**按序重放** ⇒ 读侧串表与写侧**同态** ⇒ 全部 id 原样有效。
-//     **为何不用重映射 / 恒校验见证**：(a) 重映射与 (c) 按 `(op,tk)` 重建都需一张
-//     「哪些槽是串」的判定表，而该表**原理上不可完备**——反例：`IR_CONST.s1` 在
-//     `tk=TI_INT` 下可携带**变体名 id**（`str_intern("None")` 的 tag 值，见
-//     ir_gen.cr 的 `opt_cmp_extract_boxed`），与整数立即数在盘面**不可区分**；
-//     (b) 恒校验见证因读侧**永远缺**未经 `track_str` 的 gen 期 intern（实测：
-//     冷态 `.ccr` 有 `_fields`/`_cat0`，暖态没有）而**恒不合** ⇒ 等于关缓存。
-//     **为何必须 bump**：旧条目无日志段亦无基线见证——若容忍缺失而继续按旧编号
-//     解释，正是本代要消灭的静默类 ⇒ 整体失效，cache miss = **无害重建**。
-//     与 20 代同族——**每一代都是「快照携带了会随进程态漂移的量」**；本代是首次
-//     把这类量**从盘上彻底拿掉**（盘只存内容，编号由两侧同序重建）。
-// 22：**字符串插值展开**（2026-09-18 · 批 8 插队 + 裁定 (b)）——含 `${...}` 的**源语义变化**：
-//     修复前该形态或 P21 崩、或（`}` 换行形态）编成**原文串常量**（静默空转）；展开后得到
-//     段/洞拼接的正确值 ⇒ 同源在修复前后产出的 IR **不等价** ⇒ 若命中旧快照，会把「原文串」
-//     旧 IR 原样复活成产物（rc=0 的静默类）⇒ 整体失效，cache miss = **无害重建**。
-//     ⚠ **真正的复活防线是身份闸、不是指纹**（对抗复核 2026-09-18 实测更正）：`func_fingerprint`
-//     （ir_gen.cr:3964-3996）**不覆盖函数体内容**——只取源文件字节哈希 + 4 个函数级字段
-//     （kind/名/形参数/body 节点 kind），注释自称 "Walk the body AST" 但**代码是 stub**；
-//     `sig_fingerprint` 同理。⇒ 展开不改源文件字节 ⇒ fp/sig 前后**完全相同**。关闭复活通道的是
-//     `cir_cache.cr` 的身份比对（`cid == 0 || entry_cid != cid ⇒ miss`；身份 = 运行中 ELF 全文件
-//     哈希）⇒ 任何源码改动都要重建 ⇒ 身份必变 ⇒ 旧条目整体拒收。**本代 bump 的理由 = 语义面
-//     变化**（与「快照携带会漂移的量」的 19/20/21 代不同族）：即便身份闸失效，本代也不复活旧语义。
-//     ⚠ **同批登记**：指纹不覆盖函数体 ⇒ **身份闸是唯一防线**（同族 TODO #2026-09-17-17）——
-//     若将来身份闸被移除/降级，任何**体级**编辑都会静默复活旧 IR。
 CIR_CACHE_VER   : int = 22
 
 g_cir_write_buf : string, mut
 g_cir_write_pos : int, mut
 g_cir_write_cap : int, mut
 
-// === 编译器身份（TODO #2026-09-10-1）===
-// 现象：缓存键 = 源路径::函数名 + 纯 AST 指纹（func_fingerprint/sig_fingerprint
-// 只覆盖目标源），**无编译器身份分量**。编译器二进制重建后，字符串驻留序
-// （g_strs 的 intern 序）与快照内索引（var 的 irv_name / 指令 s1..s3 / 名字
-// 索引）不再一致，而键与指纹一字未变 ⇒ 旧条目被命中，旧序索引被当活产物
-// 使用（dump 变量名缺失/错位，rc=0 静默）。CIR_CACHE_VER 的手工 bump 是
-// 现状兜底，已经忘记过两次（14→15、15→16）——本字段即为其自动化。
+// === Compiler identity ===
+// The cache key contains the source path, function name, and AST fingerprints.
+// Fingerprints cover the target source only. If the compiler binary changes, its
+// string interning order and snapshot indexes can change while the key and
+// fingerprints stay the same. The old entry would then be reused with invalid
+// indexes.
 //
-// 修复 = 头部写入**运行中编译器自身 ELF 的内容哈希**（/proc/self/exe 全文件
-// 单趟哈希），装载时比对：不等 = cache miss = 无害重建。不变量：**任何改变
-// 前端语义的重建都改变身份**（二进制变了，哈希必变）。
+// The header therefore stores a content hash of the running compiler ELF
+// (/proc/self/exe). The loader requires it to match. A mismatch is a cache miss
+// and a rebuild. Any rebuild that changes frontend semantics changes the binary
+// and therefore the hash.
 //
-// 为什么是「运行中二进制自哈希」而非「构建期源哈希常量」：
-//   * 自哈希捕获**全部**决定编译器语义的输入——src/compiler 清单 + 其顺序 +
-//     bootstrap Python 工具链 + rt.s + as/ld——源哈希只是其中一部分的代理，
-//     漏掉任何一项就复现本单要消灭的静默类；
-//   * 无需构建管道改动/生成文件：其它编译路径（tests 直编 src/compiler、
-//     full-bootstrap 的 corec2/corec3）不因缺一个生成文件而断；
-//   * 自哈希取内容而非路径 ⇒ 「同内容二进制」判为同身份（正确：语义同）。
-// 依赖（实测成立，判据在案）：本仓 ELF 构建逐字节确定（两连建 cmp IDENTICAL
-// ——本单修复前后两侧均实测；run.sh full-bootstrap 亦以 cmp 为判据）⇒ 同源
-// 重建身份不变，缓存命中面不退化。若某日构建变为非确定，症状 = 缓存恒 miss
-// （性能面，非正确性面），由该判据暴露。
-// 退化路径（无 procfs / 读取失败）：身份 = 0 ⇒ 两端点均关缓存，每次全量重建
-// ——绝不落「身份 0」条目（否则两个同样取不到身份的编译器互相当作同身份命中，
-// 正是本单静默类复活）。实测：`unshare -rm` 把 tmpfs 挂到 /proc 掩掉 procfs 后
-// 编译 rc=0 且 **零条目落盘**；已删除（unlink）的编译器二进制反而仍可经
-// /proc/self/exe 打开取到原 inode 内容（身份照常成立）。
+// A build-time source hash is not enough: the binary also depends on the source
+// file list and order, the bootstrap Python toolchain, rt.s, and as/ld. Hashing
+// the running binary covers all of them without adding generated files to the
+// build.
 //
-// 与 CIR_CACHE_VER 的分工：VER = 手工粗粒度（格式/语义生成代，例如「快照里
-// 不该有链边」这类**格式**变更）；身份 = 自动细粒度（编译器内容驱动，覆盖
-// 「同格式、不同前端行为」）。两者都必须匹配才命中——格式变更手工 bump，
-// 行为变更由身份自动接管，不必再记得 bump。
+// If the hash is unavailable (no procfs, read failure, empty file), the identity
+// is 0. Save refuses to write and load refuses to hit, so both endpoints disable
+// the cache. This avoids two identity-less compilers accepting each other's
+// entries.
+//
+// CIR_CACHE_VER is the manual coarse-grained gate for format or semantic
+// generation changes. The identity is the automatic fine-grained gate for compiler
+// content changes. Both must match.
 g_cir_compiler_id       : int, mut = 0
 g_cir_compiler_id_ready : int, mut = 0
 
-// 运行中编译器 ELF 的内容哈希（memoized）。0 = 取不到身份（无 procfs /
-// 读取失败 / 空文件）——调用方按「身份不可证」处理（关缓存，见两端点）。
+// Content hash of the running compiler ELF, memoized. 0 means the identity is
+// unavailable (no procfs, read failure, or empty file); callers disable the cache.
 fn cir_compiler_identity() -> int:
     if g_cir_compiler_id_ready != 0:
         return g_cir_compiler_id
@@ -183,17 +99,16 @@ fn cir_compiler_identity() -> int:
     g_cir_compiler_id = cir_hash_running_binary()
     return g_cir_compiler_id
 
-// 单趟乘加哈希（FNV-1 64-bit 常数；本语言无 XOR 运算符——与 ir_gen.cr
-// func_fingerprint 同族写法）。8 字节字一步（load64 = 单条未对齐小端读；
-// corec 目标面即 x86-64 小端，字节序不影响「确定性」这一唯一要求）+ 余尾
-// 逐字节 + 末尾混入总长（长度不同必不同）。
-// 采样（本单判据，热身缓存，build/corec 1.32MB）：逐字节形中位 +11.6ms/次
-// （小文件编译 17→29ms）→ 8 字节字粒度后 min 基准 +2~3ms/次（同件 15→17ms；
-// 大件 src/compiler/main.cr 热身 5.5s 下不可分——采样噪声大于该值）。代价只在
-// **真正走到缓存**的进程里付一次（memoized：strace 实测热身全量编译 1 次
-// open("/proc/self/exe")），身份不可得/无条目可查时不付。
-// 非密码学用途（对侧不设敌手）：它要区分的是「同一编译器的两次构建」，随机
-// 差异撞上 2^-64 忽略；能写缓存文件的对手本来就能写任意载荷。
+// Single-pass multiplicative hash (FNV-1 64-bit constants; the language has no
+// XOR operator, so this uses the same shape as func_fingerprint in ir_gen.cr).
+// It processes eight-byte words, then the remaining bytes, then mixes in the total
+// length so different lengths cannot collide by construction. The target is
+// little-endian x86-64, and only determinism matters, not byte order.
+//
+// The hash is memoized by the caller, so the cost is paid once per process that
+// actually reaches the cache. It is not cryptographic: it distinguishes builds of
+// the same compiler, and an attacker who can write cache files can already write
+// arbitrary payloads.
 fn cir_hash_running_binary() -> int:
     fd := syscall3(2, "/proc/self/exe", 0, 0)  // open(O_RDONLY)
     if fd < 0:
@@ -269,9 +184,9 @@ fn cir_cache_sg_parent(sg_idx: int, node_start: int, node_count: int) -> int:
 // ir_fi: compact IR function index used for IR/DFG ranges
 // Returns 0 on success, -1 on failure.
 fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
-    // 身份不可证（无 procfs 等）⇒ 绝不落盘：否则身份 0 的条目会被另一个同样
-    // 取不到身份的编译器当作「同身份」命中——即本单的静默类在退化路径复活。
-    // 关缓存 = 每次都全量重建 = 正确性优先（见 cir_compiler_identity 头注）。
+    // If the compiler identity is unavailable, do not write a snapshot. An entry
+    // with identity 0 could be accepted by another compiler that also lacks an
+    // identity. Disabling the cache is a full rebuild, which is correct.
     cid := cir_compiler_identity()
     if cid == 0:
         return -1
@@ -299,14 +214,14 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
     // made a full self-host build perform millions of syscalls on its cache.
     total_size : ., mut = 48 + name_len  // v17 头部 = magic/ver/identity/fp/sig/name_len
     total_size = total_size + 8 + var_count * 24
-    // 节点盘记录 = 8 字段 × 8B = 64B（R2 P5 Task 2 起 = {op,dest,s1,s2,s3,**派生码**,
-    // first_edge,edge_count}；第 9 槽 OFF_DF_AUX 不落盘——两槽装载时按派生码重派生，
-    // 见文件头 v18 注）。
+    // Node records are 8 fields of 8 bytes: {opcode, dest, s1, s2, s3, derived
+    // code, first_edge, edge_count}. The term-reference and auxiliary slots are
+    // not stored; the loader rederives both from the derived code.
     total_size = total_size + 8 + node_count * 64
-    // 缓存收窄批（CIR_CACHE_VER 20）：**只写本函数的边**（[edge_start, g_df_edge_count)），
-    // 盘记录 24B/条 = {rel_from, rel_to, kind}（相对 node_start 的**有符号**偏移；`next` 不落盘，
-    // 装载期由 df_add_edge_kind 前插重建）。旧格式写**全图边表** ⇒ 全缓存 O(函数数 × 累计图)
-    // = 二次膨胀（实测 97.0% 的缓存字节是边记录、其中 99.70% 属于别的函数）。
+    // Only this function's edges are stored: [edge_start, g_df_edge_count).
+    // Each record is 24 bytes: {rel_from, rel_to, kind}, with signed offsets
+    // relative to node_start. The next pointers are not stored; the loader
+    // rebuilds them through df_add_edge_kind in the cold-path insertion order.
     edge_start := r64(g_df_func_edge_start, ir_fi * 8)
     own_edge_count : ., mut = g_df_edge_count - edge_start
     if own_edge_count < 0:
@@ -324,7 +239,7 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
     // v13: nested SG records (kind/enter/exit/parent/nstart/ncount).
     sg_count := cir_cache_sg_count(node_start, node_count)
     total_size = total_size + 8 + sg_count * 48
-    // v21 生成期 intern 日志段 = {基线见证, 条数, × (len, bytes)}
+    // Intern journal: {base count, record count, then {length, bytes}}.
     total_size = total_size + 16
     size_ri : ., mut = 0
     loop:
@@ -332,7 +247,7 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
             break
         total_size = total_size + 8 + str_len(istr_get(r64(g_cir_rec_ids, size_ri * 8)))
         size_ri = size_ri + 1
-    // v20 尾部 trailer = {var_start, node_start}（**基线见证**；装载期先校验后恢复）
+    // Trailer: {var_start, node_start}. Both are validated before restore.
     total_size = total_size + 16
     if total_size > g_cir_write_cap:
         new_cap := g_cir_write_cap * 2
@@ -377,15 +292,16 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
         w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S1))
         w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S2))
         w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S3))
-        // R2 P5 Task 2（D19）：盘记录承载**派生码**（不是 40 槽——单槽化后 40 槽 =
-        // 进程内类型项引用，不得跨进程/跨复位，D20；辅码槽同理不入盘）。派生码逐节点
-        // ≡ 单槽化前的混用码 ⇒ 盘面逐字节不变（布局与版本位零改动）。
+        // Store the derived code only. The term-reference slot is a process-local
+        // type-term index and cannot cross processes or resets. The auxiliary code
+        // is derived from the same pair and is not stored either.
         w64_cir(fd, sh_dfn_code_of_slots(r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK),
                 r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_AUX)))
         w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_FIRST_EDGE))
         w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_EDGE_COUNT))
-        // 项槽/辅码槽**不写盘**：两槽都是 (opcode, 派生码) 的纯函数，装载侧按 emit 的
-        // 等价时点重派生（文件头 v18 注——实测快照携带进程内索引会在暖路径整体悬空）。
+        // The term and auxiliary slots are pure functions of the opcode and derived
+        // code. The loader rederives them at the same point in the node sequence as
+        // the cold path, keeping term indexes aligned.
         ni2 = ni2 + 1
 
     // Persist nested SG metadata with offsets relative to this function's
@@ -406,11 +322,8 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
             w64_cir(fd, r64(g_sgs, sg_i * ESZ_SG + OFF_SG_NCOUNT))
         sg_i = sg_i + 1
 
-    // Write this function's edges only (v20)。
-    // 历史注（v5–v19）：此处写的是**全图边表**，注释原文「For simplicity, write ALL edges
-    // (they're few compared to nodes)」——该「边比节点少」的前提**早已失效**（实测 4,314 万条边
-    // 记录 vs 20.6 万节点记录），它正是本条二次膨胀的起点（见计划 §1.1 的「假设已失效」注）。
-    // v20：只写 [edge_start, g_df_edge_count) 且端点存**相对 node_start 的有符号偏移**。
+    // Write only this function's edges. Endpoints are signed offsets relative to
+    // node_start; the next pointers are rebuilt during load.
     w64_cir(fd, own_edge_count)
     ei : ., mut = 0
     loop:
@@ -455,11 +368,11 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
             vi = vi + 1
         si = si + 1
 
-    // v21 生成期 intern 日志（**只存内容，不存 id**——跨进程 id 不可跨进程解释；装载侧按序重放
-    // 即把读侧串表推到与写侧同态，故盘上不需要任何编号）。
-    // 首字段 = **基线见证**：本函数生成窗口开始时的 `g_str_count`（写侧）。装载侧在重放**之前**
-    // 要求读侧 `g_str_count` 与之相等——不等 = 两侧不同态（如：本进程在更早的函数处走了不同
-    // 的生成/装载路径）⇒ 拒绝（cache miss = 无害重建），绝不带着错编号继续。
+    // The intern journal stores contents, not ids. The loader replays the records
+    // in order to bring the reader's string table to the same state as the writer's.
+    // The first field is the writer's g_str_count at the start of the generation
+    // window. The reader requires the same count before replay; a mismatch means
+    // the two sides diverged earlier, so the snapshot is rejected.
     w64_cir(fd, g_cir_rec_base)
     w64_cir(fd, g_cir_rec_count)
     ri : ., mut = 0
@@ -477,8 +390,9 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
             rj = rj + 1
         ri = ri + 1
 
-    // v20 尾部 trailer（**基线见证**）：{var_start, node_start}。装载期**先校验后恢复**：
-    // var 域恒校验（唯一不可低成本重映射的镜像域）；node 域仅在快照含越界 rel 时作条件见证。
+    // Trailer: {var_start, node_start}. The var baseline is always validated. The
+    // node baseline is required only when the snapshot contains an out-of-range
+    // relative endpoint.
     w64_cir(fd, var_start)
     w64_cir(fd, node_start)
 
@@ -506,30 +420,26 @@ fn write_fd(fd: int, data: string, len: int):
         g_cir_write_pos = g_cir_write_pos + 1
         write_pos = write_pos + 1
 
-// === 快照装载读缓冲（R2 P5 Task 1：暖态 SIGSEGV 根因修复）===
-// 根因链（实测，自源语料 src/compiler/main.cr -O 0，seed 见报告 §1）：
-//   ① 每函数快照的读侧原先 = read_file(path) = alloc(fsize+1)，而 bump 分配器
-//      （rt.s alloc）**不回收** ⇒ 946 个文件的读缓冲**累计驻留**（1,253,453,548B
-//      = 1.1674GiB）；
-//   ② 单文件尺寸是 O(程序) 而非 O(函数)（快照含全程序边表 + 全程序字符串表，
-//      实测 nod_s3（13 节点）文件 = 2.48MB，其中 98.7% 是 80100 条全程序边），
-//      累计 1.1674GiB > 1GiB 堆（rt.s heap_start .space 1024*1024*1024）；
-//   ③ alloc 耗尽返回 0（.Lalloc_oom）⇒ read_file 把 0 当 string 返回；
-//   ④ load_cir_cache 首行 str_len(0) → load64(0, -8) = SIGSEGV（暖态 rc=139；
-//      冷态不读快照故 rc=0）——预存缺陷（P4 T5 §7-5 登记）。
-// 修法（根因级，非给长度加钳位）：快照内容对装载是**瞬态**的——装完即弃，
-// 无指针被保留（var 名以索引入表、字符串经 str_sub 拷贝后 str_intern、
-// 节点/指令字段逐值拷入全局数组）⇒ 单个复用缓冲按需增长，峰值 = 最大单文件
-// 尺寸（本语料实测最大 3,987,879B = 3.80MiB）而非全体累计。布局语义 = 与 read_file 返回的字符串
-// 逐位同：alloc(cap+8) 的长度头在 buf-8，每次读取后改写为 fsize+1 ⇒
-// str_len(g_cir_read_buf) == fsize，既有消费面（r64/str_sub）零改动。
+// === Snapshot read buffer ===
+// The snapshot contents are transient: after load, no pointer into the buffer is
+// kept. Variable names and strings are interned, and node and instruction fields
+// are copied into global arrays. The old reader allocated a new buffer per
+// function. The bump allocator never frees, so the buffers accumulated and could
+// exhaust the heap; when allocation returned 0, the reader passed it to str_len
+// and crashed.
+//
+// A single reusable buffer grows to the largest snapshot, not the sum of all
+// snapshots. It has the same string layout as read_file: an 8-byte length header
+// at buf-8, rewritten to fsize+1 after each read, so str_len(buf) == fsize and
+// existing r64/str_sub consumers work unchanged.
 g_cir_read_buf : string, mut
 g_cir_read_cap : int, mut   // 数据区容量（不含 -8 处的 8B 长度头）
 
-// 读取快照文件到复用缓冲。返回文件长度；< 0 = 不可用（open 失败/空文件/短读/
-// 缓冲分配失败）——调用方按 cache miss 处理（三态纪律：载入失败 ⇒ 拒绝，
-// 不得静默当空表）。快照恒为 save_cir_cache 单次 write 产出的常规文件 ⇒
-// fsize <= 0（空文件或伪文件）= 不可用，不做 read_file 的伪文件循环回退。
+// Read a snapshot into the reusable buffer. Returns the file length, or -1 when
+// the snapshot is unusable: open failure, empty file, short read, or allocation
+// failure. The caller treats -1 as a cache miss and never as an empty table.
+// A snapshot is a regular file written by one save_cir_cache write, so size <= 0
+// is invalid and there is no pseudo-file read loop.
 fn cir_read_snapshot(path: string) -> int:
     fd := syscall3(2, path, 0, 0)  // open(O_RDONLY)
     if fd < 0:
@@ -551,12 +461,11 @@ fn cir_read_snapshot(path: string) -> int:
     r2 := syscall3(8, fd, 0, 0)  // lseek(fd, 0, SEEK_SET)
     nread := syscall3(0, fd, g_cir_read_buf, fsize)  // read(fd, buf, fsize)
     r3 := syscall3(3, fd, 0, 0)  // close(fd)
-    // 缓冲不可得（alloc 耗尽 ⇒ g_cir_read_buf 仍为 0 ⇒ read 取 EFAULT）或短读
-    // （并发截断等）⇒ 均**不可用** ⇒ miss：绝不拿半份/空载荷继续解析（静默错值
-    // 类）。⚠ 此处刻意**不写** `buf == 0` 形态的空判——该字符串-整型混比在
-    // Python bootstrap 侧（x86_64_stack_asm.py:168 按 _is_string_var 分派）会编成
-    // `str_eq(buf, 0)` → `str_len(0)` 解引用 NULL-8 = 崩溃（与自举侧 int 比较
-    // 语义不一致，登记见报告 §6）；read 的 EFAULT 面已是同效且更稳的判据。
+    // A missing buffer (allocation exhausted, so g_cir_read_buf is 0 and read
+    // returns EFAULT) or a short read is unusable: return a miss instead of parsing
+    // half a snapshot. Do not add a `buf == 0` check: the bootstrap backend compiles
+    // a string/int comparison through str_eq and str_len(0), which dereferences
+    // NULL-8. The read EFAULT result is the safer guard.
     if nread != fsize:
         return -1
     w64(g_cir_read_buf, -8, fsize + 1)  // 长度头 = fsize（str_len 口径同 read_file）
@@ -566,12 +475,12 @@ fn cir_read_snapshot(path: string) -> int:
 // func_idx is the function index used to verify the cached fingerprints
 // against the current AST. Returns 0 on success, -1 on failure (cache miss).
 fn load_cir_cache(path: string, func_idx: int) -> int:
-    // 快照读入**复用缓冲**（不逐函数新分配——见 cir_read_snapshot 头注）。
+    // Load through the reusable buffer; see cir_read_snapshot.
     dlen := cir_read_snapshot(path)
     if dlen < 0:
         return -1
     data := g_cir_read_buf
-    // v17 头部 = 48B + 函数名（再至少 8B 载荷段头）。
+    // Header is 48 bytes plus the function name, then at least one 8-byte section count.
     if dlen < 56:
         return -1
     pos : ., mut = 0
@@ -586,10 +495,10 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
     if ver != CIR_CACHE_VER:
         return -1
 
-    // v17: 编译器身份——条目由另一个（或旧版）编译器二进制写入 ⇒ 其字符串
-    // 驻留序/索引与本次运行不一致，而 fp/sig 只覆盖目标源（同源必同）⇒ 必须
-    // 在此拒绝，否则下面恢复出的旧序索引即成活产物（TODO #2026-09-10-1 静默类）。
-    // 身份取不到（0）同样拒绝（save 侧对称地不落盘）：身份不可证 = 不可命中。
+    // Compiler identity: an entry written by another compiler binary has different
+    // string interning order and indexes, while the fingerprints cover only the
+    // target source. Reject it here. Identity 0 is also rejected; save does not
+    // write such entries.
     cid := cir_compiler_identity()
     entry_cid := r64(data, pos)
     pos = pos + 8
@@ -617,14 +526,17 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
     // Skip name string (we already know which function we tried to load)
     pos = pos + name_len
 
-    // === v20 尾部 trailer = 基线见证（**先校验后恢复**）===
-    // 最短合法条目 = 头 48 + trailer 16（上方 dlen < 56 的粗检已过 ⇒ 此处再按 64 收紧）。
+    // Trailer baselines are validated before restore. The shortest valid entry is a
+    // 48-byte header plus a 16-byte trailer; dlen < 56 was rejected above, so use
+    // 64 here.
     if dlen < 64:
         return -1
 
-    // === 结构预扫（**只读，不动全局**）===
-    // 为什么先扫后恢复：装载的破坏性写在半途失败会污染全局数组（随后回归生成会**叠加**到
-    // 半恢复的图上）⇒ 所有校验必须在**任何写之前**完成（P4：截断/越界 ⇒ rc=0/miss，不得 139/垃圾）。
+    // Structural pre-scan. It only reads; no globals are written. A destructive
+    // restore that fails halfway would leave global arrays partially updated, and a
+    // later rebuild would add to that state. Every range check must pass before the
+    // first write. Truncation or an out-of-range field is a cache miss, never a
+    // crash or a partial restore.
     p : ., mut = pos
     var_p := p
     p_var_count := r64(data, p)
@@ -663,7 +575,7 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         if p > dlen:
             return -1
         p_si = p_si + 1
-    // v21 生成期 intern 日志段（**只读扫描**）：{基线见证, 条数, × (len, bytes)}
+    // Intern journal section during the read-only scan: {base count, record count, records}.
     j_p := p
     p_j_base := r64(data, p)
     p = p + 8
@@ -678,21 +590,26 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         if p > dlen:
             return -1
         p_ji = p_ji + 1
-    // trailer 定位于**扫描终点 p**（而非 dlen−16）：**尾随字节容忍**——装载历来忽略条目尾随字节
-    // （既有契约：`test_cir_warm_path.py` 的 D5 用例即其钉子——补零条目仍须**命中**），故只要求
-    // `p + 16 <= dlen`；**截断**（p+16 > dlen，含「恰缺 trailer」「trailer 半截」）仍 fail-closed miss。
+    // The trailer starts at the scan end p, not at dlen-16. Trailing bytes after the
+    // entry are ignored, as they always were; test_cir_warm_path.py D5 is the
+    // regression case. A truncated entry, including a missing or partial trailer,
+    // returns a miss.
     if p + 16 > dlen:
         return -1
     var_start_w := r64(data, p)
     node_start_w := r64(data, p + 8)
-    // var 域是**唯一无法低成本重映射**的镜像域（var 下标出现在节点 dest/s1..s3 与指令 s1..s3）
-    // ⇒ 恒校验：不符 = 读者与写者不同态 ⇒ miss（无害重建；「宁可 miss 不可静默」）。
+    // The var range is the only mirror domain that cannot be remapped cheaply:
+    // var indexes appear in node dest/s1..s3 and instruction s1..s3. Always
+    // validate it. A mismatch means the reader and writer are in different states,
+    // so return a miss.
     if g_ir_var_count != var_start_w:
         return -1
 
-    // 边端点合法性 + **条件见证**：常态（rel 全在 [0, node_count)）下节点基线平移**不**影响相对 id
-    // 的正确性 ⇒ 不校验 node_start（否则每次编辑都会让「被编辑函数之后的所有条目」集体 miss）；
-    // 仅当出现**越界 rel**（全档实测 1/1618 档：from 指向更早函数/全局的节点）时，才要求节点基线一致。
+    // Validate edge endpoints. When every relative endpoint is in
+    // [0, node_count), shifting the node baseline does not change the meaning of
+    // the relative ids, so node_start is not checked; otherwise every edit would
+    // invalidate all later functions. If an endpoint is negative, it points to an
+    // earlier function or a global node, and node_start must match.
     base_node_v := g_df_node_count
     need_node_witness : ., mut = 0
     ei_v : ., mut = 0
@@ -704,10 +621,10 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         rt_v := r64(data, eo_v + 8)
         if rf_v >= p_node_count:
             return -1
-        // 前向引用 = 异常（写侧 from 恒 ≤ 当前节点）⇒ 拒
+        // An endpoint at or past node_count is invalid.
         if rt_v >= p_node_count:
             return -1
-        // to 越界 = 异常 ⇒ 拒
+        // A negative endpoint needs the node baseline witness.
         if rf_v < 0 || rt_v < 0:
             need_node_witness = 1
             if base_node_v + rf_v < 0:
@@ -719,9 +636,10 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         if g_df_node_count != node_start_w:
             return -1
 
-    // **逐节点见证**（v20；盘值降格为校验）：盘上 node.edge_count 必须等于「该节点在边表里的
-    // 出边条数」——链由重放重建，重建前先把盘值与重放应得值对齐，不符即拒（半恢复不允许）。
-    // 缓冲区按 p_node_count 现取（bump 分配器不回收；全档累计 Σnode ≈ 20.6 万槽 ≈ 1.6MB，可忽略）。
+    // Per-node witness: the stored edge_count must equal the number of outgoing
+    // edges for that node in the edge list. The linked list is rebuilt by replay,
+    // so check the stored value against the replay count before writing anything.
+    // The tally buffer is small relative to the graph.
     if p_node_count > 0:
         tally := alloc(p_node_count * 8)
         tz : ., mut = 0
@@ -747,13 +665,14 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
                 return -1
             nj = nj + 1
 
-    // === v21 串域修复：按序重放「生成期 intern 日志」（**必须先于任何 id 消费**）===
-    // 为什么先于恢复：快照内一切 id（var 名 / 指令与节点槽 / str 段引用者）都是**写侧编号**；
-    // 只有把读侧串表推到与写侧同态，这些编号才成立。重放序 = 记录序 = 写侧生成序（两侧同序，
-    // 见 §顺序确定性），故逐条 `str_intern` 后编号逐一同位。
-    // 基线见证：读侧此刻的 g_str_count 必须等于写侧窗口开始时的值——不等 = 两侧不同态
-    // （更早的函数走了不同的生成/装载路径）⇒ 拒绝（cache miss = 无害重建），绝不带错编号继续。
-    // `--inject-cir-skip-journal`（隐藏 debug，仅判据突变自证用）= 跳过重放 ⇒ 本缺陷原样复现。
+    // Replay the intern journal before consuming any id. All ids in the snapshot are
+    // writer-side indexes; they are valid only after the reader's string table
+    // reaches the writer's state. Replay order is record order, which is generation
+    // order, so each str_intern reproduces the writer's index.
+    // The base count must equal the reader's g_str_count at the start of the
+    // window. A mismatch means the two sides diverged, so return a miss.
+    // --inject-cir-skip-journal skips replay and reproduces the original defect; it
+    // exists only for mutation testing.
     if g_cir_skip_journal == 0:
         if g_str_count != p_j_base:
             return -1
@@ -796,11 +715,11 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
     pos = pos + 8
     base_node := g_df_node_count
     grow_df_nodes(g_df_node_count + node_count)
-    // RegionCheck 显式映射：恢复的节点没有经过 df_create_node，须在此同步写入
-    // node→region 映射，否则 subgraph_containing 在缓存命中路径读到未初始化
-    // 的 g_df_node_region（null → SIGSEGV）。缓存不保存内层 region（Minor #4），
-    // 以当前 open 的 func region（df_begin_func 已 sg_push）为归属——与旧的
-    // 线性扫 g_sgs 在缓存命中路径得到的结果一致。
+    // Restored nodes did not pass through df_create_node, so write their node-to-
+    // region mapping here. Otherwise subgraph_containing reads an uninitialized
+    // g_df_node_region entry and crashes. The snapshot does not store inner
+    // regions; the current function region opened by df_begin_func owns them,
+    // which matches what the old linear g_sgs scan produced.
     grow_df_node_region(base_node + node_count)
     ni : ., mut = 0
     loop:
@@ -818,27 +737,31 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         pos = pos + 8
         w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S3, r64(data, pos))
         pos = pos + 8
-        // R2 P5 Task 2（D19）：盘上只有**一个** tk 字段（派生码）；两槽皆由它**重派生**
-        // ——时点 = emit 的等价点（逐函数、逐节点序），拆分器单源 = sh_tk_split，故项表
-        // 追加序与冷路径一致 ⇒ 冷/暖两态同项**同索引**（T4 用例逐行对拍）。项引用/辅码
-        // **不读盘**（进程内项引用跨进程必悬空；盘上不存第二份 f(tk) 值 = 无第二真源）。
+        // The snapshot stores one tk field, the derived code. Both slots are
+        // rederived from it at the same point in the node sequence as the cold
+        // path. The splitter has one implementation, sh_tk_split, so the term table
+        // grows in the same order and cold and warm runs get the same term
+        // indexes. Term references are not read from disk because they are
+        // process-local indexes.
         tk_disk := r64(data, pos)
         pos = pos + 8
-        // 装载侧变体（不置 D23 失败位——盘码可能落在暖进程更小的类型表之外，见
-        // ty_shadow.cr 的 sh_tk_split_load 注；缓存命中绝不因此让编译失败）。
+        // The load variant does not set the build-failure bit. A stored code may
+        // fall outside the warm process's smaller type table; a cache hit must not
+        // turn that into a compile failure. See sh_tk_split_load in ty_shadow.cr.
         sh_tk_split_load(r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE), tk_disk)
         w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK, g_sh_slot_term)
         w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_AUX, g_sh_slot_aux)
-        // v20：盘上 first_edge/edge_count **不信任**（边下标随新基线平移）——两槽归零后由
-        // 下方的 df_add_edge_kind 重放**重建**；盘值已在预扫中作**逐节点见证**校验过。
+        // The stored first_edge and edge_count are not trusted because edge indexes
+        // shift with the new node baseline. Zero both and let df_add_edge_kind
+        // rebuild them. The stored values were already checked by the per-node
+        // witness during the pre-scan.
         w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_FIRST_EDGE, -1)
         w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_EDGE_COUNT, 0)
         pos = pos + 16   // 跳过盘上两字段
-        // Record var producer. 幽灵边修复（v7 注 A 裁决）缓存面：grow_df_arrays
-        // 对新增长区播种 -1（dyn_arr.cr 同款注释）——快照内未产出 var（参数等）
-        // 的 producer 槽恒 -1（修复前零页 = 0 =「节点 0」→ 缓存命中函数保留
-        // 幽灵边）；本处只覆写快照内真实定值的 var。旧快照由 CIR_CACHE_VER
-        // 13→14 失效。
+        // Record the producer for variables defined by this node. grow_df_arrays
+        // fills new slots with -1, so a variable with no producer in the snapshot
+        // stays -1. Only overwrite variables that the snapshot actually defines.
+        // The old zero-filled slots read as node 0 and kept ghost edges.
         dest := r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_DEST)
         if dest >= 0:
             grow_df_arrays(dest + 1)
@@ -891,10 +814,11 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
             rn = rn + 1
         sg_i = sg_i + 1
 
-    // Restore this function's edges (v20): 3×8B = {rel_from, rel_to, kind}，`next` 不落盘。
-    // 逐条经 **df_add_edge_kind** 重放（与冷路径同一函数、同一前插序）⇒ 逐节点链序与
-    // edge_count 与写者同态；且相对 id 在**节点基线平移**（部分 rebuild）时仍指向正确节点
-    // ——这正是 R3（绝对 id + 全量覆盖的「未声明同态」）的根因级闭合。
+    // Restore this function's edges. Each record is {rel_from, rel_to, kind}; the
+    // next pointer is not stored. Replay through df_add_edge_kind, the same function
+    // and insertion order as the cold path, so each node's list and edge_count match
+    // the writer. Relative endpoints remain correct when a partial rebuild shifts
+    // the node baseline.
     own_edge_count := r64(data, pos)
     pos = pos + 8
     ei : ., mut = 0
@@ -907,7 +831,8 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         pos = pos + 8
         e_kind := r64(data, pos)
         pos = pos + 8
-        // 有符号映射（rel<0 = 指向更早函数/全局的节点；界与基线见证已在预扫校验）
+        // Signed mapping: a negative endpoint points to an earlier function or a
+        // global node. Bounds and the baseline witness were checked in the pre-scan.
         df_add_edge_kind(base_node + rel_from, base_node + rel_to, e_kind)
         ei = ei + 1
 
@@ -952,11 +877,13 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
 
     return 0
 
-// === v21 生成期 intern 日志：窗口开闭（main.cr 在 ir_gen_func 前后成对调用；仅缓存启用时）===
-// 顺序确定性论证（判据 §顺序）：① 跨函数 = main.cr 的函数循环**一个序**（写侧在该循环里生成、
-// 读侧在同一循环里装载）；② 函数内 = 两侧共用**唯一插入路径** `str_intern`（`dyn_arr.cr`），
-// 记录序即插入序；③ 窗口外的插入（parse/check 等）两侧同源同序 ⇒ 不进日志也不需要进。
-// ⇒ 装载侧按记录序重放即逐条复现写侧编号（归纳：前序函数同态 ⇒ 本篇起点同态）。
+// Intern journal window. main.cr calls these around ir_gen_func when the cache is
+// enabled. Ordering is deterministic: across functions, main.cr uses one loop for
+// generation and load; within a function, both sides use the single str_intern
+// insertion path in dyn_arr.cr, so record order is insertion order. Insertions
+// outside the window come from parse and check, which are identical on both sides
+// and do not need to be in the journal. Replaying records in order therefore
+// reproduces the writer's indexes.
 fn cir_rec_begin():
     g_cir_rec_on = 1
     g_cir_rec_count = 0

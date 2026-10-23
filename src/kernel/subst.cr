@@ -10,8 +10,8 @@ fn subst_wk_wk_succ1() -> int:
 fn subst_id_of(e : int) -> int:
     return mk_extend(mk_id() , e)
 
-// Wk∘…∘Wk（n 次）——lookup 的弱化计数（TypeCheck.ml lookup 每层递归包一次 Wk，
-// 索引 x 的查找结果被弱化 x+1 次；差分对拍 2026-08-28 实测确认）
+// Wk composed n times. Context lookup adds one Wk per level, so index x is
+// weakened x+1 times.
 fn subst_wk_n(n : int) -> int:
     s : ., mut = mk_weaken()
     i : ., mut = 1

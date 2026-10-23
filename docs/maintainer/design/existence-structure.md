@@ -1,20 +1,20 @@
-# 存在结构:v6 格形态 IR 的语义承载(ENT/NOD/REG)
+# 存在结构：v6 格形态 IR 的语义表示（ENT/NOD/REG）
 
 > 定位：受众 = 维护者（ccr_io/分配器/验证器实现者）；状态 = active（设计定稿，实现推进中）。
-> 本文件从**语义视角**讲 v6 存在结构——条款 1–7(权威 = docs/academic/cache-semantics.md)如何在 `.ccr` 中落成 IR 一等结构。字节级布局(段表/字段宽/对齐)的最终规格在 docs/ir-schema/coreir-schema.md(实现期并入);格式设计草案与实施状态以 docs/superpowers/specs/2026-09-05-lattice-ir-v6-format.md 与实施计划为准。
-> **2026-09-20 层定义修订(ADR-0021)**:条款所属的层本体 = **存在格 / Materialization Space**(层定义与七字段模型 = docs/maintainer/design/materialization-space.md)——本文件的载体结构不变,变的只是条款的层归属称谓。
-> 决策:adr/adr-0002(.ccr v6 段表架构)。
+> 本文件从语义角度说明 v6 存在结构，以及规则 1–7（权威 = docs/academic/cache-semantics.md）如何在 `.ccr` 中定义为 IR 一等结构。字节级布局（段表/字段宽/对齐）的最终规格在 docs/ir-schema/coreir-schema.md（实现期并入）；格式设计草案与实施状态以 docs/archive/2026-09-05-lattice-ir-v6-format.md 与实施计划为准。
+> 2026-09-20 层定义修订（ADR-0021）：规则所属的层本体 = 存在格 / Materialization Space（层定义与七字段模型 = docs/maintainer/design/materialization-space.md），本文件的表示结构不变，变的只是规则的层归属称谓。
+> 决策：adr/adr-0002（.ccr v6 段表架构）。
 
 ---
 
-## 一、设计原则(v6 与 v5 的分野)
+## 一、设计原则（v6 与 v5 的区别）
 
-1. **存在为主体,执行为投影**:v5 文件描述"按什么顺序执行什么"(线性指令数组);v6 描述"什么存在(条目 × 版本)、存在多久(区间)、由什么产生(配方)、嵌套在哪(region)"。执行序是可重建的投影,不再是文件主干。
-2. **图节点坐标(D1)**:存在区间端点、region 边界、条目定值点全部以 NOD id(图节点序)为坐标——与 `.cir`(图形态)同坐标系,兑现"图 = 唯一真相层"。
-3. **执行序重建(D2)**:corearch 从 NOD + REG 重建线性投影——图节点文件序即合法拓扑序,重建 = 文件序直出 + region 边界标注,无排序成本。
-4. **共存不落盘(D3)**:判定消费时从存在区间推导,sweep O(n log n),不超线性、不冗余存储。
-5. **v6-only**:不兼容 v5、无转换工具(`.ccr` 为管线中间产物,零持久生态)。
-6. **格层 vs 编码层**:ENT/NOD/REG 的语义(条目数学结构/版本/区间/共存)属格层,范式无关;字节宽/段表布局是编码层投影,可按编码空间调整。
+1. 以存在为核心：v5 文件描述“按什么顺序执行什么”（线性指令数组）；v6 描述“什么存在（条目 × 版本）、存在多久（区间）、由什么产生（方法）、嵌套在哪（region）”。执行序可以从存在结构重建，不再是文件主体。
+2. 图节点坐标（D1）：存在区间端点、region 边界、条目定值点全部以 NOD id（图节点序）为坐标，与 `.cir`（图形态）同坐标系，实现“图 = 唯一权威来源”。
+3. 执行序重建（D2）：corearch 从 NOD + REG 重建线性执行序，图节点文件序就是合法拓扑序，重建时直接按文件序输出并标注 region 边界，没有排序成本。
+4. 共存不写入文件（D3）：判定时从存在区间推导，sweep 为 O(n log n)，不超线性，也不冗余存储。
+5. v6-only：不兼容 v5，没有转换工具（`.ccr` 是编译流程的中间产物，没有持久化生态）。
+6. 格层与编码层：ENT/NOD/REG 的语义（条目数学结构、版本、区间、共存）属于格层，与范式无关；字节宽度和段表布局属于编码层，可以按编码空间调整。
 
 ---
 
@@ -22,132 +22,132 @@
 
 | 段 | 内容 | 语义层角色 |
 |---|---|---|
-| STR | 字符串表 | 符号名的字节投影 |
-| SYM | 符号表(函数/全局/结构/枚举,v5 func_meta 等归并) | 函数记录带 root_region 与 first_ent/last_ent |
-| NOD | 节点表 = 图事件(v5 instrs 图坐标化)+ 显式边表 | **配方** |
-| ENT | 条目表(v6 新增,存在结构核心) | **条目**:位置 + 配方 + 存在 |
-| REG | region 表(SG 嵌套,坐标升级) | 存在区间锚定 |
+| STR | 字符串表 | 符号名的字节表示 |
+| SYM | 符号表（函数/全局/结构/枚举，v5 func_meta 等归并） | 函数记录带 root_region 与 first_ent/last_ent |
+| NOD | 节点表 = 图事件（v5 instrs 图坐标化）+ 显式边表 | 方法 |
+| ENT | 条目表（v6 新增，存在结构核心） | 条目：位置 + 方法 + 存在 |
+| REG | region 表（SG 嵌套，坐标升级） | 存在区间定位 |
 
-变量(局部)不入 SYM——由 ENT 全量携带(存在即声明)。
+变量（局部）不入 SYM，由 ENT 全量携带（存在即声明）。
 
 ---
 
-## 三、ENT:条目表
+## 三、ENT：条目表
 
-ENT 记录字段与条款 1–7 的对应:
+ENT 记录字段与规则 1–7 的对应：
 
-> 2026-09-20 层定义修订:本表列名原为「与缓存条款的对应」。条款 1–7 内容未变,
-> 只是该层不再以「缓存」命名(层本体 = 存在格,见 materialization-space.md)。
-> **注意**上表 `flags` 行的「bit0 无配方」是**位预留、语义未实现**——见本节末实现状态注。
+> 2026-09-20 层定义修订：本表列名原为“与缓存规则的对应”。规则 1–7 内容未变，
+> 只是该层不再以“缓存”命名（层本体 = 存在格，见 materialization-space.md）。
+> 注意上表 `flags` 行的“bit0 无方法”是位预留、语义未实现，见本节末实现状态注。
 
-| 字段 | 语义 | 条款 |
+| 字段 | 语义 | 规则 |
 |---|---|---|
-| var_id | 变量 id(NOD dest/srcs 同命名空间;-1 = 匿名常量条目) | 条款 6(条目坐标) |
-| version | 该变量第几版(1-based;每次定值 +1) | 条款 5(赋值 = 版本化) |
-| def_nod | 定值节点 id(-1 = 函数参数/全局) | 条款 1/4(无配方) |
-| live_start / live_end | 存在区间(NOD id);live_end 开区间(最后使用点 +1) | 条款 2 的量化基础 |
-| home | 槽位(分配器回填;-1 = 未分配/寄存器候选) | 条款 4b + 条款 7 的接口 |
-| flags | bit0 无配方 / bit1 参数 / bit2 全局 / bit3 驱逐候选(v6.1) | 条款 4b / 条款 2 |
+| var_id | 变量 id（NOD dest/srcs 同命名空间；-1 = 匿名常量条目） | 规则 6（条目坐标） |
+| version | 该变量第几版（1-based；每次定值 +1） | 规则 5（赋值 = 版本化） |
+| def_nod | 定值节点 id（-1 = 函数参数/全局） | 规则 1/4（无方法） |
+| live_start / live_end | 存在区间（NOD id）；live_end 开区间（最后使用点 +1） | 规则 2 的量化基础 |
+| home | 槽位（分配器回填；-1 = 未分配/寄存器候选） | 规则 4b + 规则 7 的接口 |
+| flags | bit0 无方法 / bit1 参数 / bit2 全局 / bit3 驱逐候选（v6.1） | 规则 4b / 规则 2 |
 
-### 版本化切分(条款 5 的落盘规则)
+### 版本化切分（规则 5 的写入规则）
 
-Core IR 非 SSA——变量每次定值切分一个新版本条目,相邻版本存在区间按定值点切割(版本 k 区间终点 = 版本 k+1 定值点)。
+Core IR 非 SSA，变量每次定值切分一个新版本条目，相邻版本存在区间按定值点切割（版本 k 区间终点 = 版本 k+1 定值点）。
 
-定值点收集规则:扫 NOD,dest ≥ 0 的节点 = 该变量的定值点,两处 carve-out(GC 批 2 勘定):
-- IR_STORE 单列:定值目标在 s1(ρ(s1):=ρ(s2)),dest 恒 -1——不走 dest 列
-- 三 op 排除:STORE_INDEX_VAR/STORE_PTR/DYN_DISPATCH 的 dest ≥ 0 **非**定值(值 = 被存值源/基址标注/占位)
+定值点收集规则：扫 NOD,dest ≥ 0 的节点 = 该变量的定值点，两处 carve-out（GC 批 2 勘定）：
+- IR_STORE 单列：定值目标在 s1(ρ（s1）:=ρ（s2）),dest 恒 -1，不走 dest 列
+- 三 op 排除：STORE_INDEX_VAR/STORE_PTR/DYN_DISPATCH 的 dest ≥ 0 非定值（值 = 被存值源/基址标注/占位）
 
-参数/全局条目:def_nod = -1,区间 = [函数首节点, last_ref+1)。
+参数/全局条目：def_nod = -1，区间 = [函数首节点，last_ref+1）。
 
-### 无配方条目(条款 4/4b)
+### 无方法条目（规则 4/4b）
 
-ENT flags bit0 = 无配方(`recipe = unrecomputable`,图内不可重算)——必须有 home。
+ENT flags bit0 = 无方法(`recipe = unrecomputable`，图内不可重算），必须有 home。
 
-> ⚠ **实现状态(2026-09-20 实核)**:该位**已按此语义预留,但尚未实现**——两个写侧
-> 硬编码 0(`src/lattice/ent_kernel.cr:295`、`:318`),读侧纯直通/回环
-> (`src/compiler/ccr_io.cr:473`→`:811`/`:820`→`:1431`/`:1447`),全仓零语义消费者;
-> 源码自述 `src/compiler/ccr_io.cr:85`「flags 恒 0(…零实例——位语义保留)」,
-> 挂账见 TODO.md:2159。**位就位 ≠ 语义就位**:`recipe=unrecomputable` 的生产者
-> (边界/执行标注)与判定目前都不存在。详见 materialization-space.md §7.1。
+> 注意：实现状态（2026-09-20 核对）：该位已按此语义预留，但尚未实现，两个写侧
+> 硬编码 0(`src/lattice/ent_kernel.cr:295`、`:318`），读侧纯直通/回环
+> (`src/compiler/ccr_io.cr:473`，`:811`/`:820`，`:1431`/`:1447`），全仓零语义消费者；
+> 源码自述 `src/compiler/ccr_io.cr:85`“flags 恒 0（…零实例，位语义保留）”,
+> 记录见 TODO.md:2159。位已预留不等于语义已实现：`recipe=unrecomputable` 的生产者
+> （边界/执行标注）与判定目前都不存在。详见 materialization-space.md 第 7.1 节。
 
-匿名常量条目(var_id = -1)仅当被判定消费时物化,否则常量内联于 NOD src1——避免条目爆炸。(同属**未实现**设计面:该形态在 `src/` 下零命中。)
-
----
-
-## 四、NOD:配方(图事件)
-
-- NOD 的 dest/srcs 语义与 v5 instrs 相同(引用 vars 表变量 id)——corearch 指令发射逻辑最小改动
-- v6 新增**显式边表**(from_nod/to_nod/kind):kind = 数据/state 边(.cir 语义落盘;v5 边不落盘)
-  - state 边(kind=1)两条来源:副作用链(STORE 族/非纯 CALL 按序连边)+ 循环终止依赖(见 execution-model.md §二)
-- 坐标约定:NOD id = 文件序索引——图节点坐标,存在区间端点直接引用
+匿名常量条目（var_id = -1）只在被判定逻辑消费时物化，否则常量内联于 NOD src1，避免条目数量增长。该形态尚未实现，在 `src/` 下没有命中。
 
 ---
 
-## 五、REG:存在区间锚定
+## 四、NOD：方法（图事件）
 
-REG 记录 = v5 sgs 坐标升级:
+- NOD 的 dest/srcs 语义与 v5 instrs 相同（引用 vars 表变量 id），corearch 指令发射逻辑最小改动
+- v6 新增显式边表（from_nod/to_nod/kind）：kind = 数据/state 边（.cir 语义写入文件；v5 边不写入文件）
+ - state 边（kind=1）有两条来源：副作用序列（STORE 族和非纯 CALL 按序连边）和循环终止依赖（见 execution-model.md 第 2 节）
+ - 坐标约定：NOD id = 文件序索引，表示图节点坐标，存在区间端点直接引用
+
+---
+
+## 五、REG：存在区间定位
+
+REG 记录 = v5 sgs 坐标升级：
 
 | 字段 | 语义 |
 |---|---|
 | kind | SG_IF/LOOP/FOR/FLOW/UNSAFE/FUNC |
-| parent | 父 region id(-1 = 根) |
-| enter_nod / exit_nod | 入口/出口节点(NOD id) |
-| first_ent / last_ent | 区内条目范围(-1 = 无) |
+| parent | 父 region id（-1 = 根） |
+| enter_nod / exit_nod | 入口/出口节点（NOD id） |
+| first_ent / last_ent | 区内条目范围（-1 = 无） |
 
-REG 的 first_ent/last_ent 使"子图边界 = 存在域边界"成为直接查询——图锚定区域内存模型(region-model.md)的语义锚点。区域生命周期由 region 的存在结构推导,而非词法作用域。
+REG 的 first_ent/last_ent 使“子图边界 = 存在域边界”可以直接查询，是以图为依据的区域内存模型（region-model.md）的语义依据。区域生命周期由 region 的存在结构推导，而不是词法作用域。
 
 ---
 
-## 六、共存判定:不落盘,sweep 推导
+## 六、共存判定：不写入文件，sweep 推导
 
-`entries_coexist` 不逐对枚举(消费侧现算):
+`entries_coexist` 不逐对枚举（消费侧现算）：
 
-1. 按 live_start 排序条目(O(n log n))
-2. 单遍扫描:维护活跃条目集(start < 当前点 ≤ end 的条目);新条目进入时,与活跃集中 end > start 的条目即共存——按 end 排序的活跃集弹出(end ≤ start 移出)
-3. 判定四条消费此关系(共存互斥等:同 home 组内做 2 的扫描,O(k log k) per 组)
+1. 按 live_start 排序条目(O（n log n）)
+2. 单遍扫描：维护活跃条目集（start < 当前点 ≤ end 的条目）；新条目进入时，与活跃集中 end > start 的条目即共存，按 end 排序的活跃集弹出（end ≤ start 移出）
+3. 判定四条消费此关系(共存互斥等：同 home 组内做 2 的扫描，O（k log k） per 组）
 
-共存 = 对称、无传递性(最弱理论——最多模型)。无需输出全量共存表——判定四条都是存在性/∀ 检查,sweep 给出相交证据即止。
+共存 = 对称、无传递性（最弱理论，最多模型）。无需输出全量共存表，判定四条都是存在性/∀ 检查，sweep 给出相交证据即止。
 
 ---
 
 ## 七、与 v5 差异与消费方影响
 
-| 面 | v5 | v6 |
+| 项目 | v5 | v6 |
 |---|---|---|
-| 组织 | 定序段 | Header + 段表(tag/offset/size) |
-| 指令 | instrs 线性数组(主干) | NOD 图事件 + 显式边表(与 ENT 并列) |
-| 坐标 | 指令序 | NOD id(图坐标) |
-| 变量 | vars 表 | ENT(变量 × 版本,含区间/home/flags) |
-| region | sgs(enter/exit 指令号) | REG(enter/exit NOD id + 区内条目范围) |
-| 共存 | 无 | 不落盘,sweep 推导 |
-| 兼容 | — | v6-only,无转换工具 |
+| 组织 | 定序段 | Header + 段表（tag/offset/size） |
+| 指令 | instrs 线性数组（主干） | NOD 图事件 + 显式边表（与 ENT 并列） |
+| 坐标 | 指令序 | NOD id（图坐标） |
+| 变量 | vars 表 | ENT（变量 × 版本，含区间/home/flags） |
+| region | sgs（enter/exit 指令号） | REG（enter/exit NOD id + 区内条目范围） |
+| 共存 | 无 | 不写入文件，sweep 推导 |
+| 兼容 | — | v6-only，无转换工具 |
 
-消费方:
-- corec:前端产 NOD+REG + 条目重建
-- corearch:段表寻址 → 投影重建 → 发射
-- 判定(分配器/一致性自检):消费 ENT
-- 证书等判定产物独立于 `.ccr`,不落本文件。
+消费方：
+- corec：前端产 NOD+REG + 条目重建
+- corearch：段表寻址，重建执行序，发射
+- 判定（分配器/一致性自检）：消费 ENT
+- 证书等判定产物独立于 `.ccr`，不落本文件。
 
 ---
 
-## 八、开放点(实现期定夺,以实施计划为准)
+## 八、开放点（实现期确定，以实施计划为准）
 
-1. NOD 显式边表是否必须(v6.0 可省略,v6.1 按需)——编码层问题
-2. 变长记录/对齐/校验规则——编码层问题
-3. ENT home 回填方式(原地改写 vs 内存态)
-4. 预留段 tag **9+**(驱逐标注段 v6.1、证书段)
-   ——数值权威 = `docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md:50`
-   (「`9+` 预留顺移:驱逐标注段 v6.1 延续、证书段」;R2 P4 Task 1 D9 段集合扩至 8 段后顺移)。
-   **2026-09-20 校正**:本节原写「tag 6+」为 v6 期快照,已陈旧。
+1. NOD 显式边表是否必须（v6.0 可省略，v6.1 按需），编码层问题
+2. 变长记录/对齐/校验规则，编码层问题
+3. ENT home 回填方式（原地改写 vs 内存态）
+4. 预留段 tag 9+（驱逐标注段 v6.1、证书段）
+ 数值权威 = `docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md:50`
+ （“9+ 预留顺移：驱逐标注段 v6.1 延续、证书段”；段集合扩至 8 段后，预留 tag 顺移）。
+ 本节早期写的“tag 6+”是 v6 期快照，已不适用。
 
 ---
 
 ## 九、关联
 
-- 层定义(存在格 / 七字段 / 归类 / 不变量):docs/maintainer/design/materialization-space.md
-- 条款权威:docs/academic/cache-semantics.md(条款 1–7)
-- 格式字节级:docs/superpowers/specs/2026-09-05-lattice-ir-v6-format.md(设计定稿)
-- 方向:docs/superpowers/specs/2026-08-27-lattice-form-ir-design.md
-- 决策:docs/maintainer/adr/adr-0002-ccr-v6-segment-table.md
-- 实施:docs/superpowers/plans/2026-09-05-lattice-ir-v6.md(状态以此为准)
-- 分配器判定:docs/maintainer/design/regalloc-cache-mapping.md(判定四条消费共存)
+- 层定义（存在格 / 七字段 / 归类 / 不变量）：docs/maintainer/design/materialization-space.md
+- 规则来源：docs/academic/cache-semantics.md（规则 1–7）
+- 格式字节级：docs/archive/2026-09-05-lattice-ir-v6-format.md（设计定稿）
+- 方向：docs/archive/2026-08-27-lattice-form-ir-design.md
+- 决策：docs/maintainer/adr/adr-0002-ccr-v6-segment-table.md
+- 实施：docs/superpowers/plans/2026-09-05-lattice-ir-v6.md（状态以此为准）
+- 分配器判定：docs/maintainer/design/regalloc-cache-mapping.md（判定四条消费共存）

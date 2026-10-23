@@ -153,11 +153,12 @@ fn _toml_hex_digit(c: int) -> int:
     // 'a'-'f'
     return -1
 
-// Extract an int array value: key = [a, b, c]（项支持十进制与 0x/0X 十六进制，
-// 非负整数；值写入 out，每项 4B 小端）。供 HIT 表 opcode = [0x48, 0x29] 类
-// 条目使用（见 src/arch/x86_64/core-x86.toml）。
-// Returns item count on success（遇 ']' 收尾）；-1 = key 缺 / 值非数组 /
-// 项格式错 / 项数超过 max_items（不静默截断）。
+// Extract an int array value: key = [a, b, c]. Items are decimal or 0x/0X
+// hexadecimal non-negative integers, written as 4-byte little-endian values.
+// Used for HIT entries such as opcode = [0x48, 0x29].
+// Returns the item count when the list ends at ']'. Returns -1 when the key is
+// absent, the value is not an array, an item is malformed, or the item count
+// exceeds max_items. It never truncates.
 fn toml_get_int_list(content: string, key: string, out: string, max_items: int) -> int:
     slen := str_len(content)
     klen := str_len(key)
@@ -178,12 +179,12 @@ fn toml_get_int_list(content: string, key: string, out: string, max_items: int) 
             continue
         eq_pos := _skip_whitespace(content, spos + klen)
         if load8(content, eq_pos) != 61:
-            // 非 '=' 的行不算命中
+            // A line without '=' does not match.
             pos = _next_line_start(content, pos)
             continue
         val_pos := _skip_whitespace(content, eq_pos + 1)
         if load8(content, val_pos) != 91:
-            // 值非 '[' 开头 → 非数组，继续找下一条
+            // The value is not an array; continue with the next line.
             pos = _next_line_start(content, pos)
             continue
         // Parse list items
@@ -204,14 +205,14 @@ fn toml_get_int_list(content: string, key: string, out: string, max_items: int) 
                     break
             if ch == 93:
                 break
-            // ']' → list end（此处 return n）
+            // ']' ends the list.
             if ch == 44:
                 p = p + 1
                 continue
-            // ',' — 宽容跳过分隔符
+            // Skip commas tolerantly.
             if n >= max_items:
                 return -1
-            // 项数超限（不静默截断）
+            // Item limit reached; do not truncate.
             v : ., mut = 0
             // Hex item: 0x/0X prefix
             if ch == 48 && p + 1 < slen && (load8(content, p + 1) == 120 || load8(content, p + 1) == 88):

@@ -1,18 +1,18 @@
 # 增量缓存设计
 
 
-> **术语注记（2026-08-15）**：本规格为历史设计记录，其中「数据流图」（及「RVSDG 式」）为当时术语；该结构后定名为 **HDFG（Holographic Dataflow Graph，全息数据流图）**，术语演进见 `docs/project-book.md`。正文保留历史原样。
+> 术语注记（2026-08-15）：本规格为历史设计记录，其中「数据流图」（及「RVSDG 式」）为当时术语；该结构后定名为 HDFG（Holographic Dataflow Graph，全息数据流图），术语演进见 `docs/project-book.md`。正文保留历史原样。
 
 ## 概述
 
-Core 编译器的函数级增量缓存。默认开启，编译无感知——每次编译自动检查缓存，命中时跳过 tokenize→parse→check→IR gen，直接从数据流图（`.cir`）快照恢复。
+Core 编译器的函数级增量缓存。默认开启，编译器使用者不需要额外操作。每次编译自动检查缓存，命中时跳过 tokenize、parse、check 和 IR gen，直接从数据流图（`.cir`）快照恢复。
 
 ## 核心原则
 
-- **无感缓存**：默认开启，不需要 `--incremental` 标志
-- **函数级粒度**：缓存 key 是单个函数，不是整个文件
-- **存 `.cir`**：缓存 = 数据流图内存状态二进制快照，不发明新格式
-- **自动失效**：函数体原文 hash 匹配即命中，不匹配即重编
+- 无感缓存：默认开启，不需要 `--incremental` 标志
+- 函数级粒度：缓存 key 是单个函数，不是整个文件
+- 存 `.cir`：缓存内容是数据流图内存状态的二进制快照，不另定义新格式
+- 自动失效：函数体原文 hash 匹配即命中，不匹配就重新编译
 
 ## 缓存架构
 
@@ -98,8 +98,8 @@ fn sig_fingerprint(func_node: int) -> int:
 
 ```
 1. tokenize(g_source)
-2. res_imports()                  ← 始终运行（确保 import 最新）
-3. parse_all()                    ← 始终运行（构建完整 AST）
+2. res_imports()                  始终运行（确保 import 最新）
+3. parse_all()                    始终运行（构建完整 AST）
 4. 
 5. for each function fi:
    a. func_node := fi_ast_node(fi)
@@ -112,13 +112,13 @@ fn sig_fingerprint(func_node: int) -> int:
       if file_exists(cache_path):
           cached_fp, cached_sig = read_header(cache_path)
           if cached_fp == fp && cached_sig == sig:
-              load_cir_cache(cache_path)   ← 命中！跳过 check+IR gen
+              load_cir_cache(cache_path)   命中时跳过 check+IR gen
               continue
    
    g. 缓存未命中：
-      check_func(fi)                ← 类型检查这个函数
-      ir_gen_func(fi)               ← IR 生成
-      save_cir_cache(cache_path, fi) ← 保存缓存
+      check_func(fi)                类型检查这个函数
+      ir_gen_func(fi)               IR 生成
+      save_cir_cache(cache_path, fi) 保存缓存
 
 6. 签名变更传播（处理 sig_hash 不匹配的级联失效）：
    if any function has sig_hash changed:
@@ -126,15 +126,15 @@ fn sig_fingerprint(func_node: int) -> int:
            mark caller's cache as stale
            re-check + re-ir-gen the caller
 
-7. lower_to_ccr()                  ← 整体跑
+7. lower_to_ccr()                  整体运行
 8. backend (ELF gen etc.)
 ```
 
 ## 缓存目录管理
 
-- 缓存目录: `.core/cache/cir/`（自动创建）
-- 缓存清理: `./build/corec clean-cache` 命令删除该目录
-- `corec` 自动在启动时尝试创建 `.core/cache/cir/`
+- 缓存目录：`.core/cache/cir/`（自动创建）
+- 缓存清理：`./build/corec clean-cache` 命令删除该目录
+- `corec` 启动时尝试创建 `.core/cache/cir/`
 - `.gitignore` 建议添加 `.core/`
 
 ## 序列化/反序列化
@@ -178,7 +178,7 @@ fn load_cir_cache(path: string) -> int:
 
 ## 预留接口
 
-以下功能不在当前实现中，但缓存架构需为它们预留接口。
+以下功能不在当前实现中，但缓存架构需要为它们预留接口。
 
 ### 缓存 GC
 
@@ -193,14 +193,14 @@ fn load_cir_cache(path: string) -> int:
 
 ### 并发编译
 
-缓存文件按函数 ID 独立存储，天然支持并发读。写时互斥通过文件级锁：
+缓存文件按函数 ID 独立存储，本身支持并发读。写入互斥使用文件级锁：
 
 ```core
 // 每个函数独立 .cir 文件，写时通过 O_CREAT|O_EXCL 原子创建避免冲突。
 // 预留接口：cir_cache_lock(func_id) / cir_cache_unlock(func_id)
 ```
 
-并发编译时，多个线程同时写不同函数的缓存不会冲突（写入不同文件）。只有写同一个函数时才需要锁——当前阶段不实现锁，因为单线程编译不会遇到冲突。
+并发编译时，多个线程同时写不同函数的缓存不会冲突（写入不同文件）。只有写同一个函数时才需要锁。当前阶段不实现锁，因为单线程编译不会遇到冲突。
 
 ### 网络缓存（分布式编译）
 

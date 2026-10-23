@@ -1,16 +1,16 @@
 // === format/elf/ld.cr ===
-// Core dynamic ELF linker — mold-inspired chunk architecture.
+// Core dynamic ELF linker with a mold-inspired chunk architecture.
 //
 // Chunks (kind dispatch):
-//   0 = EhdrChunk    — ELF header + program headers
-//   1 = InterpChunk  — .interp
-//   2 = UserChunk    — user code (.text)
-//   3 = PltChunk     — .plt (header + entries)
-//   4 = GotPltChunk  — .got.plt
-//   5 = DynChunk     — .dynamic
-//   6 = DynsymChunk  — .dynsym
-//   7 = DynstrChunk  — .dynstr
-//   8 = RelaChunk    — .rela.plt
+//   0 = EhdrChunk    : ELF header and program headers
+//   1 = InterpChunk  : .interp
+//   2 = UserChunk    : user code (.text)
+//   3 = PltChunk     : .plt (header and entries)
+//   4 = GotPltChunk  : .got.plt
+//   5 = DynChunk     : .dynamic
+//   6 = DynsymChunk  : .dynsym
+//   7 = DynstrChunk  : .dynstr
+//   8 = RelaChunk    : .rela.plt
 //
 // Pipeline:
 //   ctx_init()
@@ -234,7 +234,7 @@ fn so_find_any(name: string) -> int:
         if si >= g_so_count:
             break
         if istr_len(r64(g_so_paths, si * 8)) > 0:
-            // 裸字 → string 视图：表里存的是**串指针**（`ctx_add_so` 的 `@ptr_of` 写入面），
+            // Raw word to string view: the table stores a string pointer (the @ptr_of write side of ctx_add_so),
             // 读回时必须显式还原视图（2(a) 范式；`@str_of` 必须在 `unsafe` 内）。
             so_path_str := unsafe:
                 @str_of(r64(g_so_paths, si * 8))
@@ -247,7 +247,7 @@ fn so_find_any(name: string) -> int:
     return -1
 
 // ============================================================
-// Layout — assign VA and file offsets to all chunks
+// Layout: assign VA and file offsets to all chunks
 // ============================================================
 
 fn layout():
@@ -289,7 +289,7 @@ fn layout():
         i = i + 1
 
 // ============================================================
-// Emit — write chunk data to output buffer
+// Emit: write chunk data to the output buffer
 // ============================================================
 
 fn w32s(buf: string, pos: int, v: int):
@@ -579,7 +579,7 @@ fn emit(buf: string, total: int, is_so: int):
         i = i + 1
 
 // ============================================================
-// Relocation patching — fix up call offsets to PLT entries
+// Relocation patching: fix up call offsets to PLT entries
 // ============================================================
 
 fn patch_relocs():
@@ -606,7 +606,8 @@ fn patch_relocs():
         loop:
             if si >= g_plt_count:
                 break
-            // 同上：`g_plts` 第 0 列存的是 PLT 名**串指针**（`ctx_add_plt` 的 `@ptr_of` 写入面）
+            // Same as above: column 0 of g_plts stores the PLT name string pointer (the
+            // @ptr_of write side of ctx_add_plt).
             plt_name_str := unsafe:
                 @str_of(r64(g_plts, si * 16))
             if str_eq(plt_name_str, fn_name) != 0:
@@ -637,8 +638,8 @@ fn ctx_init():
 fn ctx_set_user_code(data: string, sz: int):
     g_user_code = data
     g_user_size = sz
-// 表里存的是**串指针**（裸字表）：写入面必须显式取指针（2(a) 范式；`@ptr_of` 必须在 `unsafe` 内）。
-// 读回面对称地还原视图（见 `so_find_any` / `ctx_emit_static` / 上面的 `g_plts` 查找）。
+// The table stores string pointers as raw words. The write side must take the pointer explicitly (2(a) pattern; @ptr_of must be inside unsafe).
+// 读回对称地还原视图（见 `so_find_any` / `ctx_emit_static` / 上面的 `g_plts` 查找）。
 fn ctx_add_so(path: string):
     dyn_grow_so(g_so_count + 1)
     path_ptr := unsafe:
@@ -669,7 +670,7 @@ fn ctx_emit_dyn(buf: string, path: string) -> int:
     total := r64(g_ch_vaddr, (g_ch_count - 1) * 8) + r64(g_ch_size, (g_ch_count - 1) * 8) - g_text_base
     println(int_str(total))
     emit(buf, total, 0)
-    fd := syscall3(2, path, 577, 493)  // 0755：ELF 输出必须可执行（Task 6 修复 0644 怪癖）
+    fd := syscall3(2, path, 577, 493)  // 0755: ELF output must be executable
     if fd < 0:
         return -1
     nw := syscall3(1, fd, buf, total)
@@ -684,7 +685,7 @@ fn ctx_emit_so(buf: string, path: string) -> int:
     layout()
     total := r64(g_ch_vaddr, (g_ch_count - 1) * 8) + r64(g_ch_size, (g_ch_count - 1) * 8) - g_text_base
     emit(buf, total, 1)
-    fd := syscall3(2, path, 577, 493)  // 0755：ELF 输出必须可执行（Task 6 修复 0644 怪癖）
+    fd := syscall3(2, path, 577, 493)  // 0755: ELF output must be executable
     if fd < 0:
         return -1
     nw := syscall3(1, fd, buf, total)
@@ -692,7 +693,7 @@ fn ctx_emit_so(buf: string, path: string) -> int:
     return total
 
 // ============================================================
-// Static linking — embed .so text into ELF, resolve relocations
+// Static linking: embed .so text into ELF and resolve relocations
 // ============================================================
 // Scans all .so files in g_so_paths. For each external symbol
 // referenced by user code, looks it up in the .so symbol table
@@ -772,7 +773,7 @@ fn ctx_emit_static(buf: string, path: string) -> int:
         if si >= g_so_count:
             break
         sp := r64(g_so_paths, si * 8)
-        // `sp` 是表里的**串指针**（裸字）⇒ 用前显式还原视图（2(a) 范式；两处用法各自在 `unsafe` 内还原）
+        // sp is a raw-word string pointer. Restore the view explicitly before use (2(a) pattern; each use restores it inside unsafe).
         sp_str := unsafe:
             @str_of(sp)
         if str_len(sp_str) > 0:
@@ -817,8 +818,9 @@ fn ctx_emit_static(buf: string, path: string) -> int:
         w8(buf, user_out + cj, bu8(g_user_code, cj))
         cj = cj + 1
 
-    // Patch external relocations: user code calls → .so functions
-    // F16②：解析失败的外部符号是硬错误——修复前静默保留 rel32=0 → 跳入 ELF 头崩溃。
+    // Patch external relocations: user code calls to .so functions
+    // A failed external symbol resolution is a hard error. Keeping rel32 = 0 would
+    // jump into the ELF header and crash.
     unresolved : ., mut = 0
     rpi : ., mut = 0
     loop:
@@ -890,7 +892,7 @@ fn ctx_emit_static(buf: string, path: string) -> int:
     bss_page := 0x400000 + ((total + 4095) / 4096) * 4096 + 4096
     write_phdr(buf, 1, 1, 6, 0, bss_page, bss_page, 0, 1073741824, 4096)
 
-    fd := syscall3(2, path, 577, 493)  // 0755：ELF 输出必须可执行（Task 6 修复 0644 怪癖）
+    fd := syscall3(2, path, 577, 493)  // 0755: ELF output must be executable
     if fd < 0:
         return -1
     nw := syscall3(1, fd, buf, total)

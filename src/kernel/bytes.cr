@@ -1,7 +1,8 @@
-// src/kernel/bytes.cr —— 字节辅助（内核自包含，信任根独立可审计）
-// 从 src/compiler/dyn_arr.cr 复制字节层（w8/bu8/w32/r32/w64/r64/_dyncpy），
-// 不引入编译器全局（grow 函数引用全部 g_* 数组——内核不需要）。
-// 来源对照：dyn_arr.cr L5-46, L144-146；语义逐字节一致。
+// src/kernel/bytes.cr: byte helpers. The kernel is self-contained so its trust
+// base can be audited independently.
+// The byte layer (w8, bu8, w32, r32, w64, r64, and _dyncpy) is copied from
+// src/compiler/dyn_arr.cr without compiler globals, which the kernel does not
+// need. Semantics match dyn_arr.cr lines 5-46 and 144-146 byte for byte.
 
 fn w8(buf: string, pos: int, val: int):
     store8(buf, pos, val % 256)

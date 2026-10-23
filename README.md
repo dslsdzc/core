@@ -1,6 +1,6 @@
 # Core Programming Language
 
-**English** | [中文](README.zh-CN.md)
+English | [中文](README.zh-CN.md)
 
 ![self-hosted](https://img.shields.io/badge/self--hosted-yes-blue)
 ![target](https://img.shields.io/badge/target-x86--64-lightgrey)
@@ -47,8 +47,8 @@ Core is under active development.
 
 ## Design
 
-The **graph** represents computation and program relationships. The **lattice**
-layer represents state and storage mappings. **Target encodings** map those
+The graph represents computation and program relationships. The lattice
+layer represents state and storage mappings. Target encodings map those
 semantics onto a concrete execution model. Type, provenance, and specification
 information remains available in the semantic IR through lowering, allowing
 verification and optimization to operate before final target encoding.

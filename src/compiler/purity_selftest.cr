@@ -1,12 +1,13 @@
 // === purity_selftest.cr ===
-// 效应/纯度修正 Task 1（P0 插队批）：真纯度计算自测通道（`corec selftest-purity`）。
+// Self-test for effect and purity analysis (corec selftest-purity).
 //
-// 判据：每例一行 PASS/FAIL，末行 "N/M purity cases passed"，rc=0 = 全过。
+// Each case prints PASS or FAIL. The last line is "N/M purity cases passed", and
+// return code 0 means every case passed.
 //
-// 与 type_selftest.cr 的差别：纯度是**跨函数**事实（IR 体扫描 + 调用图不动点），
-// 必须走完整前端 + IR 生成 ⇒ 本通道自建最小管线（不读文件、不产产物），且断言
-// 的是 IR 生成后由 compute_all_purity 写回的值（时点见 checker.cr 头注）。
-// 语言面注意：本语言无三元运算符。
+// Purity is a cross-function property computed from IR bodies and a call-graph
+// fixed point. This test runs the full frontend and IR generation, then checks
+// the values written back by compute_all_purity. It reads no input file and
+// produces no output artifact. The language has no ternary operator.
 
 fn ps_check(name: string, got: int, want: int) -> int:
     if got == want:
@@ -21,7 +22,7 @@ fn ps_check(name: string, got: int, want: int) -> int:
     println(int_str(want))
     return 1
 
-// bool 版（批 8 S2 · bool 类；同 `ts_check_b`，纯度自测表用）。
+// Boolean version of the check, used by the purity cases.
 fn ps_check_b(name: string, got: bool, want: bool) -> int:
     if got == want:
         print("PASS ")
@@ -35,7 +36,7 @@ fn ps_check_b(name: string, got: bool, want: bool) -> int:
     println(bool_str(want))
     return 1
 
-// 单次完整前端 + IR 生成（自测用；与 main.cr 的 run 路径同序，无文件缓存）。
+// Run one full frontend pass and IR generation. The order matches main.cr run, without the file cache.
 fn ps_compile(src: string) -> int:
     reset_frontend_state()
     g_source = src
@@ -57,19 +58,22 @@ fn ps_compile(src: string) -> int:
     ir_gen_all()
     return 0
 
-// 按名查纯度（-1 = 无此函数——与 0/1 区分，防「查不到」被当「不纯」混过）
+// Look up purity by function name. -1 means the function is absent, distinct from 0 and 1 so a missing lookup is not treated as impure.
 fn ps_purity(name: string) -> int:
     return fi_ispure_of(str_intern(name))
 
-// ── state 链面（Task 1 的落点：纯度是手段，「调用进链」才是目的）──────────
-// 链 = kind=1 的 DF 边（dataflow.cr df_replay_state_chain 重放产出）。以下三条
-// 是 Task 1 的**行为级**判据：不检查实现细节，只检查成品图的边集语义——
-// ① 效应调用必须被链穿过（前 store → call → 后 store）；② 可证纯调用必须
-// 不被链触及；③ 循环终止依赖必须存在（重放复刻 sg_pop 规则的守门——该规则
-// 从「生成期即时连接」迁到「生成后重放」，判据不可省）。
+// State dependency checks. A state edge is a DF edge with kind 1, produced by
+// df_replay_state_chain in dataflow.cr. These checks are behavioral and inspect
+// the finished graph's edge set:
+// 1. an effectful call must have state edges before and after it;
+// 2. a provably pure call must not touch a state edge;
+// 3. a loop exit must have a state dependency on the last side effect in the
+//    loop body.
+// The last rule mirrors sg_pop during graph replay rather than graph construction.
 
-// 源函数名 → IR 函数序号（-1 = 无）。IR 表名 = 源函数名（monomorph 实例为
-// 改写名，本通道只用非泛型函数名）。
+// Source function name to IR function index. -1 means absent. IR table names
+// equal source names; monomorph instances use rewritten names, and this test uses
+// only non-generic names.
 fn ps_ir_index_of(name: string) -> int:
     ni := str_intern(name)
     irf : ., mut = 0
@@ -81,7 +85,7 @@ fn ps_ir_index_of(name: string) -> int:
         irf = irf + 1
     return -1
 
-// 函数 irf 体内「调 callee」的 DF 节点序号（-1 = 无）
+// Index of the first DF node in function irf that calls callee. -1 means none.
 fn ps_call_node(irf: int, callee: string) -> int:
     cni := str_intern(callee)
     start := r64(g_df_func_node_start, irf * 8)
@@ -96,8 +100,8 @@ fn ps_call_node(irf: int, callee: string) -> int:
         n = n + 1
     return -1
 
-// 函数 irf 体内「调 callee」的 DF 节点总数（非空断言用：防「查不到 ⇒ 恒 0」
-// 把「零入链」退化断言混过）
+// Number of DF nodes in function irf that call callee. The non-empty assertion
+// prevents a missing lookup from making a zero count look valid.
 fn ps_count_call_nodes(irf: int, callee: string) -> int:
     if irf < 0:
         return -1
@@ -115,7 +119,7 @@ fn ps_count_call_nodes(irf: int, callee: string) -> int:
         n = n + 1
     return r
 
-// 函数 irf 体内首个 opcode 节点（-1 = 无）
+// Index of the first node with the given opcode in function irf. -1 means none.
 fn ps_op_node(irf: int, opcode: int) -> int:
     if irf < 0:
         return -1
@@ -130,22 +134,23 @@ fn ps_op_node(irf: int, opcode: int) -> int:
         n = n + 1
     return -1
 
-// 节点 nid 是否被 kind=1 边指入（1 = 有入边，0 = 无，-1 = 无此节点）
+// Whether a kind-1 edge enters node nid: 1 yes, 0 no, -1 no such node.
 fn ps_has_state_in(nid: int) -> int:
     if nid < 0:
         return -1
     t := ps_state_touch(nid)
-    return t - (t / 2) * 2   // t 的入边位（无按位与；t >= 0 ⇒ 取模非负）
+    return t - (t / 2) * 2   // incoming-edge bit; no bitwise and, and t >= 0 makes modulo non-negative
 
-// 节点 nid 是否以 kind=1 边指出（1 = 有出边，0 = 无，-1 = 无此节点）
+// Whether a kind-1 edge leaves node nid: 1 yes, 0 no, -1 no such node.
 fn ps_has_state_out(nid: int) -> int:
     if nid < 0:
         return -1
     t := ps_state_touch(nid)
     return t / 2 - (t / 4) * 2
 
-// 函数 irf 体内「调 callee 且被链指入」的节点数（Task 2 验收例：同一被调者
-// 被调两次 ⇒ 必须两个都在链上；纯调用同形 ⇒ 0）
+// Number of call nodes in function irf that call callee and have an incoming
+// state edge. If the same callee is called twice, both calls must count. A pure
+// call with the same shape counts 0.
 fn ps_calls_in_chain(irf: int, callee: string) -> int:
     if irf < 0:
         return -1
@@ -164,7 +169,7 @@ fn ps_calls_in_chain(irf: int, callee: string) -> int:
         n = n + 1
     return r
 
-// 节点 nid 被 kind=1 边触及的面：+1 = 有入边，+2 = 有出边（返回 0..3）
+// State edges touching node nid: +1 for an incoming edge, +2 for an outgoing edge. The result is 0..3.
 fn ps_state_touch(nid: int) -> int:
     if nid < 0:
         return -1
@@ -181,8 +186,8 @@ fn ps_state_touch(nid: int) -> int:
         e = e + 1
     return r
 
-// 函数 irf 区间内是否存在「指向 label 节点的 kind=1 边」（循环终止依赖：
-// 循环退出节点必须依赖循环体内最后一个副作用——spec region-cfg §4.2）
+// Whether function irf has a kind-1 edge to a label node. A loop exit must
+// depend on the last side effect in the loop body.
 fn ps_has_label_state_target(irf: int) -> int:
     start := r64(g_df_func_node_start, irf * 8)
     cnt := r64(g_df_func_node_count, irf * 8)
@@ -202,7 +207,7 @@ fn purity_selftest_run() -> int:
     fails : ., mut = 0
     total : ., mut = 0
 
-    // 用例程序：正控（含传递正控）+ 负控①-⑥（含 SCC 互递归 + 有效应泛型）
+    // Test program: positive controls plus negative cases 1 through 6, including an SCC and an effectful generic.
     src := "fn pure_add(a: int, b: int) -> int:\n    return a + b\n"
     src = src + "fn pure_caller(a: int, b: int) -> int:\n    return pure_add(a, b)\n"
     src = src + "fn effect():\n    st : ., mut = 0\n    st = 1\n"
@@ -217,13 +222,14 @@ fn purity_selftest_run() -> int:
     src = src + "fn use_id(x: int) -> int:\n    return id(x)\n"
     src = src + "fn gid[T](x: T) -> T:\n    gst : ., mut = 0\n    gst = 1\n    return x\n"
     src = src + "fn use_gid(x: int) -> int:\n    return gid(x)\n"
-    // state 链面用例（行为级）：效应调用夹在两 store 之间 / 纯调用同形 / 循环
+    // State dependency cases: an effectful call between stores, a pure call with
+    // the same shape, and a loop.
     src = src + "fn chain_effect() -> int:\n    a : ., mut = 0\n    a = 1\n    effect()\n    a = 2\n    return a\n"
     src = src + "fn chain_pure() -> int:\n    a : ., mut = 0\n    a = 1\n    b := pure_add(a, 1)\n    a = 2\n    return a + b\n"
     src = src + "fn chain_loop() -> int:\n    acc : ., mut = 0\n    i : ., mut = 0\n    loop:\n        if i >= 3:\n            break\n        acc = acc + 1\n        i = i + 1\n    return acc\n"
-    // Task 2 用例：① 效应调用双调（验收例：两个 CALL 都必须进链）+ 同形纯调用
-    // 负控；② IR_CALL_EXTERN / IR_SPAWN / IR_YIELD 三类 Task 2 新入链 opcode
-    // ——每例都带前 store（链头播种）与后 store（出边），故期望 touch == 3。
+    // Two calls to an effectful function, a pure call with the same shape, and the
+    // IR_CALL_EXTERN, IR_SPAWN, and IR_YIELD opcodes. Each case has a store before
+    // and after, so the expected touch value is 3.
     src = src + "fn chain_two() -> int:\n    a : ., mut = 0\n    a = 1\n    effect()\n    effect()\n    b := pure_add(a, 1)\n    a = 2\n    return a + b\n"
     src = src + "fn chain_extern_op(x: int) -> int:\n    a : ., mut = 0\n    a = 1\n    r := ext_probe(a)\n    a = 2\n    return a + r\n"
     src = src + "fn spawnee(x: int) -> int:\n    return x + 1\n"
@@ -236,100 +242,106 @@ fn purity_selftest_run() -> int:
         println("purity.selftest_compile")
         return 1
 
-    // ── 正控：无 store、无调用（及经纯函数的传递调用）⇒ 1 ──
+    // Positive control: no store and no call, plus a transitive call through a pure function.
     total = total + 1
     fails = fails + ps_check("purity.pure_add", ps_purity("pure_add"), 1)
     total = total + 1
     fails = fails + ps_check("purity.pure_caller", ps_purity("pure_caller"), 1)
 
-    // ── 负控① store ──
+    // Negative case 1: a store makes the function impure.
     total = total + 1
     fails = fails + ps_check("purity.effect_store", ps_purity("effect"), 0)
-    // ── 负控② 传递：被调者不纯 ⇒ 调用者不纯 ──
+    // Negative case 2: a call to an impure function makes the caller impure.
     total = total + 1
     fails = fails + ps_check("purity.call_effect", ps_purity("call_effect"), 0)
-    // ── 负控③ extern 调用（IR_CALL_EXTERN 出现即不纯）──
+    // Negative case 3: an IR_CALL_EXTERN makes the function impure.
     total = total + 1
     fails = fails + ps_check("purity.call_extern", ps_purity("call_extern"), 0)
-    // ── 负控④ 不可解析调用（runtime builtin：load64 无 FuncInfo）──
+    // Negative case 4: an unresolvable call to the runtime builtin load64, which has no FuncInfo.
     total = total + 1
     fails = fails + ps_check("purity.call_builtin", ps_purity("call_builtin"), 0)
-    // ── 负控⑤ 自递归（保守不纯：不动点永等不到自己被证明纯）──
+    // Negative case 5: self-recursion is conservatively impure because the fixed point never proves the function pure.
     total = total + 1
     fails = fails + ps_check("purity.self_rec", ps_purity("self_rec"), 0)
-    // ── 负控⑤b 互递归（SCC 保守；两成员都要钉）──
+    // Negative case 5b: mutual recursion in an SCC. Check both members.
     total = total + 1
     fails = fails + ps_check("purity.mut_rec_a", ps_purity("mut_rec_a"), 0)
     total = total + 1
     fails = fails + ps_check("purity.mut_rec_b", ps_purity("mut_rec_b"), 0)
 
-    // ── 负控⑥ 泛型实例：与源函数同值。纯源：**两断**（同值 + 实例值 = 1）——
-    //    只断同值会被「两侧同为不纯」的退化实现假绿；只断实例值则漏掉源值。
+    // Negative case 6: a generic instance and its source must agree. A pure
+    // source is checked twice: the instance is 1 and equals the source. Checking
+    // only equality could pass when both sides are impure; checking only the
+    // instance would miss the source.
     inst_p := ps_purity("id[int]")
     src_p := ps_purity("id")
     total = total + 1
     fails = fails + ps_check("purity.generic_instance_pure", inst_p, 1)
     total = total + 1
     fails = fails + ps_check_b("purity.generic_instance_eq_source", (inst_p == src_p), true)
-    // 负控⑥b 有效应泛型（体内有 store）：实例与源同为 0（反向：防「实例恒纯」）
+    // Negative case 6b: an effectful generic with a store in its body. Both the
+    // instance and the source are 0, which also rules out an implementation that
+    // always marks instances pure.
     g_inst := ps_purity("gid[int]")
     total = total + 1
     fails = fails + ps_check("purity.generic_effect_instance", g_inst, 0)
     total = total + 1
     fails = fails + ps_check_b("purity.generic_effect_eq_source", (g_inst == ps_purity("gid")), true)
 
-    // ── state 链面（Task 1 目的：效应调用重新进链；纯调用不入链；循环终止依赖）──
-    // ① 效应调用被链穿过：调用节点既要有入边（前 store → call）又要有出边
-    //    （call → 后 store）——touch == 3。
+    // State dependency checks: effectful calls take part, pure calls do not, and
+    // loop exits depend on the body's last side effect.
+    // An effectful call has an incoming edge from the store before it and an
+    // outgoing edge to the store after it, so touch is 3.
     irf_ce := ps_ir_index_of("chain_effect")
     n_ce := ps_call_node(irf_ce, "effect")
     total = total + 1
     fails = fails + ps_check("chain.impure_call_pierced", ps_state_touch(n_ce), 3)
-    // ② 可证纯调用不被链触及：同形（store / call / store）下 touch == 0——
-    //    与 ① 只差被调者纯度 ⇒ 两条合起来把「按真纯度入链」钉死（退化实现
-    //    「全入链」挂②、「全不入链」挂①）。
+    // A provably pure call with the same store, call, and store shape has touch
+    // 0. Together with the previous case, this distinguishes a purity-based
+    // decision from an implementation that always connects or never connects.
     irf_cp := ps_ir_index_of("chain_pure")
     n_cp := ps_call_node(irf_cp, "pure_add")
     total = total + 1
     fails = fails + ps_check("chain.pure_call_untouched", ps_state_touch(n_cp), 0)
-    // ③ 循环终止依赖：链重放复刻 sg_pop 规则（regcfg §4.2）——循环体内的最后
-    //    副作用必须有边指向循环退出节点（label）。该规则随本次迁移从生成期移到
-    //    重放，缺判据则回归无感。
+    // Loop termination: the last side effect in the loop body must have an edge
+    // to the exit label. Replay applies the same rule as sg_pop.
     irf_cl := ps_ir_index_of("chain_loop")
     total = total + 1
     fails = fails + ps_check("chain.loop_exit_termination", ps_has_label_state_target(irf_cl), 1)
-    // ③' 负控：无循环的函数区间内不得出现指向 label 的链边（防「恒真」实现）
+    // Negative control: a function without a loop must not have a state edge to a label.
     total = total + 1
     fails = fails + ps_check("chain.no_label_edge_without_loop",
         ps_has_label_state_target(irf_cp), 0)
 
-    // ── Task 2：分类表补全（效应 opcode 全族入链；单一真源 = purity_op_effect）──
-    // ④ 验收例：effect 被调两次 ⇒ **两个** CALL 都在链上；同形纯调用 ⇒ 0。
+    // Effect opcode coverage. purity_op_effect is the single source of truth.
+    // Two calls to effect must both take part in the state dependency; a pure
+    // call with the same shape counts 0.
     irf_tw := ps_ir_index_of("chain_two")
     total = total + 1
     fails = fails + ps_check("chain.two_calls_exist",
-        ps_count_call_nodes(irf_tw, "effect"), 2)          // 非空断言（防「零入链」退化假绿）
+        ps_count_call_nodes(irf_tw, "effect"), 2)          // non-empty assertion
     total = total + 1
     fails = fails + ps_check("chain.two_impure_calls_in_chain",
         ps_calls_in_chain(irf_tw, "effect"), 2)
     total = total + 1
     fails = fails + ps_check("chain.two_pure_call_untouched",
         ps_calls_in_chain(irf_tw, "pure_add"), 0)
-    // ⑤ IR_CALL_EXTERN：extern 调用入链（前后 store 夹逼 ⇒ touch == 3）
+    // IR_CALL_EXTERN takes part in the state dependency; stores before and after
+    // give touch 3.
     irf_ex := ps_ir_index_of("chain_extern_op")
     n_ex := ps_op_node(irf_ex, IR_CALL_EXTERN)
     total = total + 1
     fails = fails + ps_check_b("chain.extern_op_exists", (n_ex >= 0), true)
     total = total + 1
     fails = fails + ps_check("chain.extern_op_pierced", ps_state_touch(n_ex), 3)
-    // ⑥ IR_SPAWN（range-go 每迭代发射）：入链
+    // IR_SPAWN, emitted for each range-go iteration, takes part in the state dependency.
     irf_sp := ps_ir_index_of("chain_spawn_op")
     n_sp := ps_op_node(irf_sp, IR_SPAWN)
     total = total + 1
     fails = fails + ps_check_b("chain.spawn_op_exists", (n_sp >= 0), true)
     total = total + 1
     fails = fails + ps_check("chain.spawn_op_in_chain", ps_has_state_in(n_sp), 1)
-    // ⑦ IR_YIELD（flow 函数体）：入链
+    // IR_YIELD in a flow function body takes part in the state dependency.
     irf_yl := ps_ir_index_of("chain_yield_op")
     n_yl := ps_op_node(irf_yl, IR_YIELD)
     total = total + 1

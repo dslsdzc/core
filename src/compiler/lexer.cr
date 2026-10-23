@@ -8,22 +8,25 @@ g_pos : int, mut
 g_line : int, mut
 g_col : int, mut
 
-// ── v4 布局（layout）状态（T5；出处 = 施工计划 §四.1 项 3 + T0 布局规格 §1/§2）──────
-// 缩进栈：**空栈起**，由首个非空行的首个 token 建立基准 anchor（规格 §1.1 ①-1 第 3 条）
-// —— 基准层不出 INDENT/DEDENT，故它**在栈里占一层**（栈长 >= 1 表示已建基）。
+// Layout state.
+// The indentation stack starts empty. The first token of the first non-empty line
+// establishes the base anchor. The base level emits no INDENT or DEDENT, but it
+// occupies one stack slot, so a stack length of at least 1 means the base exists.
 g_indent_stack : string, mut
 g_indent_cap : int, mut
 g_indent_len : int, mut
-// 括号/花括号深度：>0 时**不参与布局**（隐式续行）。`{ }` 一并计入 ⇒
-// 结构体字面量内部不产生 layout（规格 §4.1「字面量内部不参与 layout region」）。
+// Bracket depth. While greater than 0, layout is suspended and lines continue
+// implicitly. Braces count too, so struct literal interiors produce no layout.
 g_bracket_depth : int, mut
-// 当前逻辑行是否已产出 token（决定换行时是否发 NEWLINE；纯空行/纯注释行不发）。
+// Whether the current logical line has produced a token. Blank and comment-only
+// lines do not emit NEWLINE.
 g_line_has_token : int, mut
-// 上一个「属于某个 token」的物理行号——换行判定用（比跨行空白标志更稳）。
+// Physical line of the last token, used to decide when to emit NEWLINE.
 g_last_tok_line : int, mut
-// 布局旁路旗标（T0 布局规格 §5.2）：0 = 发射 INDENT/DEDENT（默认，fail-closed）；
-// 1 = **不发射，且不读不写缩进栈**。凡「调用后 token 流不由 parse_all/parse_expr 消费」
-// 的 tokenize() 调用点必须置 1（洞内重入 / 转储 / 自测 / LSP 分析）。
+// Layout bypass flag. 0 emits INDENT/DEDENT. 1 suppresses them and does not read or
+// write the indentation stack. Any tokenize call whose stream is not consumed by
+// parse_all or parse_expr must pass 1: hole reentry, dumps, self tests, and LSP
+// analysis.
 g_layout_bypass : int, mut
 
 // Character constants
@@ -165,10 +168,9 @@ fn lookup_keyword(s: string) -> int:
         return T_AUTO
     if s == "fileid":
         return T_FILEID
-    // v4（T5，施工计划 §四.1 项 7/8）：36 → 39。去 `None`/`Some`/`move`
-    // （前二者退役为普通标识符——`Some(x)` 仍经 parse_postfix 的「首字母大写 ⇒
-    // 枚举构造器」分支解，与 bootstrap 侧同判；`move` 退场），加
-    // `catch`/`dyn`/`fail`/`never`/`none`/`spec`。逐元素目标 = bootstrap/corec/syntax/tokens.py 的 KEYWORDS。
+    // None, Some, and move are no longer keywords. Some(x) still parses as an enum
+    // constructor through the uppercase identifier rule. catch, dyn, fail, never,
+    // none, and spec are keywords.
     if s == "self":
         return T_SELF
     if s == "in":
@@ -200,9 +202,10 @@ fn pow2i(k: int) -> int:
         i = i + 1
     return v
 
-// decimal string → IEEE 754 binary64 位模式（纯整数近似，≤18 位有效数字）
-// 实现：value = ip + fp/den → 整数部分位 + 64 位长除小数 → 53 位尾数窗口
-// 精度：截断（无舍入），≤18 位有效数字内 ~2ulp
+// Convert a decimal string to IEEE 754 binary64 bits using integer arithmetic
+// (at most 18 significant digits). The value is ip + fp/den: find the integer
+// bit width, long-divide the fraction to 64 bits, then take a 53-bit significand.
+// The result truncates rather than rounds, within about 2 ulp for 18 digits.
 fn str_to_f64_bits(s: string) -> int:
     sl := str_len(s)
     i : ., mut = 0
@@ -304,7 +307,7 @@ fn str_to_f64_bits(s: string) -> int:
         else:
             mant = frac64 / pow2i(-sh)
         exp = 1023 + (bf - 65)
-    // 组装（mant 截断到 52 位——无舍入）
+    // Assemble; mant is truncated to 52 bits without rounding.
     bits64 : int = 0
     if exp > 0 && exp < 2047:
         bits64 = (mant % 4503599627370496) + exp * 4503599627370496
@@ -312,12 +315,12 @@ fn str_to_f64_bits(s: string) -> int:
         bits64 = bits64 + (-9223372036854775807 - 1)
     return bits64
 
-// Parse an integer literal after tokenization. Supports decimal separators
-// and 0x/0o/0b prefixes; out-of-shape literals are rejected as lexer errors.
-// 层语义（int-unbounded-semantics 定稿）：语言 int = 无上限数学整数——本守卫报的
-// 「integer literal overflow」是编码层限制错误（编译器内部表示 = 经典 64 位机器字
-// 投影，超形状 = 该投影无载体），不是语义溢出事件——语义层无溢出概念。表示升级
-// （扩展/多字）为 hw-map/远期事项，见 specs/2026-09-06-int-unbounded-semantics.md。
+// Parse an integer literal. Supports digit separators and 0x/0o/0b prefixes;
+// malformed literals are lexer errors.
+// Language int is an unbounded mathematical integer. The overflow guard reports an
+// encoding limit: the compiler represents values as a 64-bit machine word, and a
+// larger value has no carrier there. It is not a semantic overflow. Wider
+// representations are future work.
 fn str_int_literal(s: string) -> int:
     sl := str_len(s)
     base : ., mut = 10
@@ -353,9 +356,9 @@ fn str_int_literal(s: string) -> int:
         if d < 0 || d >= base:
             add_error("invalid integer literal")
             return 0
-        // 溢出守卫按 base 校准：固定 i64max/10 阈值只对十进制有效——base 16
-        // 累积值在最后一次 ×16 直接环绕（0x8000000000000000 → i64min 绕开守卫）。
-        // 阈值必须 = i64max/base（base 10 的末位 d>7 边界保持）。
+        // The overflow threshold depends on the base. A fixed i64max/10 threshold
+        // works only for decimal; in base 16 the final multiply can wrap past
+        // i64min. Use i64max/base, with the decimal digit boundary handled below.
         if base == 10:
             if value > 922337203685477580 || (value == 922337203685477580 && d > 7):
                 add_error("integer literal overflow")
@@ -380,10 +383,11 @@ fn str_int_literal(s: string) -> int:
         return 0
     return value
 
-// decimal string → 定点缩放整数（数值迁移 Task 4：dex 精确字面量解析）
-// S = 10^6（6 位小数）。整数部分 × S + 小数 6 位；第 7 位小数起四舍五入（半进，
-// 与 float_str_bits 的舍入规则一致）。负号直接处理（'-' 前缀）。
-// 溢出：|整数部分| ≤ 9.2e12（×S 越界 = 环绕，与 int 溢出一致——文档化限制）。
+// Convert a decimal string to a fixed-point scaled integer for dex literals.
+// Scale is 10^6. Value = integer part * S + first six fractional digits, with
+// round-half-up from the seventh digit. A leading minus is handled directly.
+// The integer part must be at most about 9.2e12; larger values wrap, matching the
+// documented int limit.
 fn str_to_scaled(s: string) -> int:
     sl := str_len(s)
     i : ., mut = 0
@@ -421,7 +425,7 @@ fn str_to_scaled(s: string) -> int:
         if fp >= 1000000:
             fp = 0
             ip = ip + 1
-    // 小数位补齐到 6 位：fp 是原始数字（如 "3.14" → 14），×10^(6-nd)
+    // Pad the fraction to six digits: fp holds the raw digits (3.14 -> 14).
     if nd < 6:
         pad : ., mut = 6 - nd
         loop:
@@ -465,7 +469,7 @@ fn add_tok_str(kind: int, s: string, start_line: int, start_col: int):
     w64(g_tokens, tp + OFF_TK_COL, start_col)
     g_token_count = g_token_count + 1
 
-// int_val + lexeme 双载令牌（dex 字面量用：int_val = 缩放整数，lexeme = 原数字串）
+// Token with both int_val and lexeme, used for dex literals: int_val is the scaled integer and lexeme is the source digits.
 fn add_tok_int_lex(kind: int, ival: int, lexeme_ni: int, start_line: int, start_col: int):
     grow_tokens(g_token_count + 1)
     tp := g_token_count * ESZ_TOKEN
@@ -476,15 +480,14 @@ fn add_tok_int_lex(kind: int, ival: int, lexeme_ni: int, start_line: int, start_
     w64(g_tokens, tp + OFF_TK_COL, start_col)
     g_token_count = g_token_count + 1
 
-// ── v4 布局（layout）机件（T5；判定出处 = T0 布局规格 §1/§2）──────────────────────
-// 实现约束（规格 §2.3，写死）：判定 ① 的 anchor 计算与判定 ② 的行尾判定**必须共用同一个**
-// 注释/字符串感知扫描器——两处各写一份必然漂。故本区**只有** `layout_skip_blank` 一份
-// 「跳过空白与注释」的实现：`colon_at_line_end`（只读前瞻）建在它之上。
+// Layout helpers. Anchor computation and the colon end-of-line check must share
+// one comment- and string-aware scanner. layout_skip_blank is that single
+// implementation; colon_at_line_end is a read-only lookahead built on it.
 
-// 从 idx 起跳过空白与注释（`//` 行注释 · 可跨行 `/* */` 块注释）。
-// 返回 (新下标, 是否跨过至少一个物理行边界) —— 二元返回用 out 参数编码：
-// 返回值为新下标，跨行标志写进 g_layout_saw_nl（**调用方须在读前清零**，同款先例 = 仓内
-// 「一次调用一次用」的临时全局；不引入元组类型）。
+// Skip whitespace and comments from idx, including // comments and multi-line
+// /* */ comments. Returns the new index. Whether a physical line boundary was
+// crossed is written to g_layout_saw_nl; the caller must clear it before reading.
+// The language has no tuple return, so an out global carries the second value.
 g_layout_saw_nl : int, mut
 
 fn layout_skip_blank(src: string, idx: int, max_len: int) -> int:
@@ -524,14 +527,14 @@ fn layout_skip_blank(src: string, idx: int, max_len: int) -> int:
         break
     return i
 
-// 裁定 ②（词法位置决定，T0 布局规格 §2.1/§2.3）：`:` **是行尾的** ⟺ 该 `:` 之后、
-// 到该**物理行行尾**为止，**不存在任何 token**（空白不计 · 注释不计 ⇒ §2.3 的四格：
-// `// note` / `/* note */` / 跨行块注释都判**行尾**；`x : int = 5 // note` 判**行内**）。
-// 调用点保证 pos 正好在 `:` **之后**。
+// A colon is at end of line when no token follows it on the same physical line.
+// Whitespace and comments do not count: a line comment, a block comment, or a
+// multi-line block comment still leaves the colon at line end. `x : int = 5 // note`
+// is an inline colon. The caller passes pos just after the colon.
 fn colon_at_line_end(src: string, pos: int, max_len: int) -> int:
     i := layout_skip_blank(src, pos, max_len)
     if g_layout_saw_nl != 0:
-        // 跨过行边界（含跨行块注释）⇒ 本物理行 `:` 之后已无余物
+        // A line boundary was crossed, so no token follows the colon on this line.
         return 1
     if i >= max_len:
         return 1
@@ -553,10 +556,11 @@ fn ind_push(col: int):
     w64(g_indent_stack, g_indent_len * 8, col)
     g_indent_len = g_indent_len + 1
 
-// 越过物理行边界（且不在括号内）时，发出 NEWLINE 与 INDENT/DEDENT。
-// 判定出处：§1.1 ①-1/①-2（空行与只含注释的行**不产生 token**、不改变 anchor，
-// 故调用点只在「上一逻辑行确实产出过 token」时才进来）；①-3（anchor 列 ≡ 该行
-// **首个 token** 的列，由 advance 的既有列维护给出）；①-1 第 3 条（首个非空行建基）。
+// Emit NEWLINE and any INDENT/DEDENT when crossing a physical line outside
+// brackets. Blank and comment-only lines produce no token and do not change the
+// anchor, so this is called only after a line that produced a token. The anchor
+// column is the first token's column. The first non-empty line establishes the
+// base.
 fn layout_break():
     add_tok(T_NEWLINE, -1, g_line, g_col)
     g_line_has_token = 0
@@ -575,14 +579,15 @@ fn layout_break():
             add_tok(T_DEDENT, -1, g_line, col)
         if ind_top() != col:
             if g_indent_len == 1:
-                // 「比单元基准锚点更浅」——T0 §6.1 A2 定义的那个 layout 错误
+                // Shallower than the unit base anchor.
                 add_error("layout anchor " + int_str(col) + " is shallower than the unit base anchor " + int_str(ind_top()))
             else:
-                // 不匹配任何外层列 ⇒ 响亮报错（**不得**静默对齐到最近一层——那是猜）
+                // The column matches no open level. Report an error instead of
+                // aligning to the nearest level.
                 add_error("inconsistent dedent: column " + int_str(col) + " matches no open indent level")
 
-// 源尾收尾：补发最后一个 NEWLINE，并弹出全部未闭合的缩进层（各发一个 DEDENT）。
-// 基准层（栈底 = 首行 anchor）**不发 DEDENT**——它没有对应的 INDENT。
+// End of source: emit the final NEWLINE and pop every open indentation level,
+// emitting one DEDENT each. The base level has no INDENT, so it emits no DEDENT.
 fn finish_layout():
     if g_line_has_token != 0:
         add_tok(T_NEWLINE, -1, g_line, g_col)
@@ -621,22 +626,23 @@ fn skip_ws(src: string, pos: int, max_len: int) -> int:
     g_pos = pos
     return pos
 
-// 第二形参 = 布局旁路旗标（T0 布局规格 §5.2）：0 = 发射 INDENT/DEDENT（默认，fail-closed）；
-// 1 = **不发射，且不读不写缩进栈**。**显式形参**而非纯全局：判据 J-T0-5 的零构建半读
-// call site 原文，要求旁路在**调用点可见**（隐含全局会被读成「视情况」）。
-// 规则（可机械判定）：一个调用点必须传 1 ⟺ 该调用之后、在同一控制流里该 token 流**不由**
-// `parse_all` / `parse_expr` 消费（⟺ 只做转储、重扫、自测、LSP 分析，或是重入路径）。
+// The second parameter is the layout bypass flag. 0 emits INDENT/DEDENT. 1
+// suppresses them and does not read or write the indentation stack. It is an
+// explicit parameter so the bypass is visible at each call site.
+// A call site must pass 1 exactly when its token stream is not consumed by
+// parse_all or parse_expr: dumps, rescans, self tests, LSP analysis, or reentry.
 fn tokenize(_src: string, layout_bypass: int):
     g_layout_bypass = layout_bypass
     g_token_count = 0
-    // 注意：不再清零 g_error_count——res_imports 会重 tokenize（拼接 import
-    // 前后两轮），清零会把首轮词法守卫错误（整数字面量溢出等）吞掉。错误
-    // 清理由 run_frontend 会话起点负责（错误累积跨多轮 tokenize）。
+    // Do not clear g_error_count. res_imports tokenizes twice while joining
+    // imports, and clearing here would drop lexer errors from the first pass.
+    // run_frontend clears errors at the start of a session.
     _pos : ., mut = 0
     g_pos = 0
     g_line = 1
     g_col = 1
-    // v4 布局状态复位（T0 布局规格 §5.2）：旁路时不读不写缩进栈 —— 只清零记账量。
+    // Reset layout bookkeeping. With bypass set, the indentation stack is neither
+    // read nor written; only the counters are cleared.
     g_indent_len = 0
     g_bracket_depth = 0
     g_line_has_token = 0
@@ -645,12 +651,11 @@ fn tokenize(_src: string, layout_bypass: int):
     _pos = skip_ws(_src, _pos, _slen)
 
     loop:
-        // 先吃掉**注释与其后的空白/空行**，使下面的「行首」判定落在**真 token** 上。
-        // 为什么必须先吃（判定 ①-2 的机械实现）：纯空行与纯注释行是 no-op（不产生 token、
-        // 不改变 anchor）。若在注释字符处判行首，会把**注释的列**当 anchor ⇒ 一行行尾注释
-        // 后接一行缩进注释就会伪造 INDENT（实测：本仓 ast.cr 的 `TY_DEX_S : int = 8  // …`
-        // 续行注释触发 INDENT(22)）。bootstrap 的 `skip_whitespace_and_comments` 把注释
-        // 收在其内部，故天然没有这一格 ⇒ 本循环照同一语义重组（**不是**另写一份判定）。
+        // Consume comments and following whitespace first, so the line-start check
+        // sees a real token. Blank and comment-only lines are no-ops: they produce
+        // no token and do not change the anchor. If the comment column were used as
+        // the anchor, a trailing comment followed by an indented comment could
+        // invent an INDENT.
         loop:
             _pos = skip_ws(_src, _pos, _slen)
             if _pos >= _slen:
@@ -679,20 +684,20 @@ fn tokenize(_src: string, layout_bypass: int):
             break
         if _pos >= _slen:
             break
-        // 布局发射（判定出处 = T0 布局规格 §1/§2）：
-        //  - 只在括号外（`()`/`[]`/`{}` 内是隐式续行，不参与 layout）；
-        //  - 只在「上一逻辑行确实产出过 token」时发 NEWLINE ⇒ 纯空行与纯注释行天然成为
-        //    no-op（规格 ①-1/①-2）；
-        //  - anchor 列 = 本 token 的列（规格 ①-3），由 skip_ws 的既有列维护给出；
-        //  - 旁路旗标（g_layout_bypass）置位时整段跳过（洞内重入 / 转储 / 自测 / LSP）。
+        // Layout emission:
+        //  - only outside brackets; lines inside ()/[]/{} continue implicitly;
+        //  - emit NEWLINE only after a line that produced a token, so blank and
+        //    comment-only lines are no-ops;
+        //  - the anchor column is this token's column;
+        //  - skip everything when the layout bypass flag is set.
         if g_layout_bypass == 0:
             if g_bracket_depth == 0 && g_line_has_token != 0 && g_line != g_last_tok_line:
                 layout_break()
             g_line_has_token = 1
             g_last_tok_line = g_line
             if g_indent_len == 0:
-                // ①-1 第 3 条：**首个非空行建立 anchor**（该行的首个 token 即基准列）。
-                // 基准层不发 INDENT —— 否则顶层代码会整体被多包一层。
+                // The first non-empty line establishes the anchor. The base level
+                // emits no INDENT; otherwise top-level code would be wrapped.
                 ind_push(g_col)
         c := cur_char_at(_src, _pos, _slen)
         start_line : ., mut = g_line
@@ -728,8 +733,8 @@ fn tokenize(_src: string, layout_bypass: int):
             // Hex/octal/binary prefix
             if c == 48 && _pos - start == 1:
                 nx := cur_char_at(_src, _pos, _slen)
-                // 三条进制前缀循环均**不再接受** '_'（2026-09-10 语言面收窄 §2）：
-                // 遗留 '_' 由下方后缀段落统一响亮报错（不静默消费）。
+                // The three base-prefix loops do not accept '_'. A leftover '_' is
+                // rejected by the suffix check below.
                 if nx == 120 || nx == 88:
                     _pos = _pos + 1
                     loop:
@@ -760,9 +765,9 @@ fn tokenize(_src: string, layout_bypass: int):
                     bad_prefix_digit = 1
                 if bad_prefix_digit != 0:
                     add_error("invalid digit in integer literal")
-            // Float: only consume the '.' when it does not start a '..'
-            // range operator (otherwise `0..4` lexes as `0.` `.4` and the
-            // range is silently lost — the for-loop body never executes).
+            // Consume '.' only when it does not start a '..' range operator.
+            // Otherwise `0..4` would lex as `0.` and `.4`, and the range would be
+            // lost.
             has_dot : ., mut = 0
             if cur_char_at(_src, _pos, _slen) == 46 && peek_at(_src, _pos, _slen) != 46:
                 _pos = _pos + 1
@@ -772,20 +777,18 @@ fn tokenize(_src: string, layout_bypass: int):
                         _pos = _pos + 1
                     else:
                         break
-            // 数字词法收窄（2026-09-10 用户裁决，语言面收窄 §2）：`_` 分隔符与宽度后缀
-            // （f32/f64/i8..u64）**均不支持**——一律响亮报错且**不消费**残余字符
-            // （按标识符继续 tokenize，使后续解析给出第二重信号，不静默、不猜）。
-            // 修复前：`_` 被 is_alpha(95) 当后缀静默消费 → T_INT 取「无值」= 0
-            // （`x := 1_000` 静默成 0 = 实质误编译）；宽度后缀同样静默丢弃。
+            // Digit separators and width suffixes (f32/f64/i8..u64) are not
+            // supported. Report an error and leave the remaining characters to be
+            // tokenized as an identifier, so the parser can add a second signal.
             sx := cur_char_at(_src, _pos, _slen)
             if sx == 95:
                 add_error("invalid character '_' in numeric literal (digit separators not supported)")
             else if is_alpha(sx) != 0:
                 add_error("invalid suffix on numeric literal (width suffixes retired 2026-09-10)")
             num_str := str_sub(_src, start, _pos - start)
-            // dex 字面量（含小数点）：int_val = 定点缩放整数（精确解析，数值迁移
-            // Task 4——十进制 → 缩放整数，非二进制近似）；lexeme 槽 = 原数字串
-            // （parser 在 apx 场景需要 binary64 位模式：str_to_f64_bits(num_str)）。
+            // A dex literal with a decimal point stores the scaled integer in
+            // int_val and the original text in the lexeme slot. The parser can
+            // derive binary64 bits with str_to_f64_bits when needed.
             if has_dot != 0:
                 add_tok_int_lex(T_DEX, str_to_scaled(num_str), str_intern(num_str), start_line, start_col)
             else:
@@ -793,14 +796,15 @@ fn tokenize(_src: string, layout_bypass: int):
             _pos = skip_ws(_src, _pos, _slen)
             continue
 
-        // 字符串字面量（含 `${...}` 插值）。含插值的字面量**分段发 token**：段 = T_STRING、洞 = T_INTERP，
-        // 由 parser 组装为 `seg + conv(hole)` 链、checker 按洞类型就地改写转换（见 ast.cr EXPR_INTERP_HOLE）。
-        // **无洞字面量与旧实现逐字相同**（单个 T_STRING、同 line/col、iv=0）⇒ 产物零足迹。
+        // String literals, including `${...}` interpolation. An interpolated literal
+        // is emitted in parts: T_STRING for text and T_INTERP for a hole. The parser
+        // assembles seg + conv(hole), and the checker rewrites the conversion in
+        // place. A literal without holes is a single T_STRING with iv=0.
         if c == 34:
             _pos = _pos + 1
             sp : ., mut = _pos                     // 串内容起点（同行内换算列；串内不跨行）
             seg_pos : ., mut = sp                  // 当前段起点
-            run_start : ., mut = g_token_count     // 本字面量首 token（末尾回填 iv）
+            run_start : ., mut = g_token_count     // first token of this literal; iv is backfilled at the end
             str_val : ., mut = ""
             has_hole : ., mut = 0
             loop:
@@ -842,9 +846,10 @@ fn tokenize(_src: string, layout_bypass: int):
                     else:
                         str_val = str_val + chr(esc)
                 else if cc == 36 && peek_at(_src, _pos, _slen) == 123:
-                    // ── 插值洞 `${...}` ────────────────────────────────────────────
-                    // 扫描 = **花括号配平**（`${S{f=1}}` 取到配对 `}`；旧「跳至首个 `}`」规则会截断），
-                    // 洞内字符串字面量（含转义）整体跳过；换行/EOF 终止 ⇒ 未闭合由 parser 报 P027。
+                    // Interpolation hole `${...}`. Scan with brace matching, so
+                    // `${S{f=1}}` takes the matching }. String literals and escapes
+                    // inside the hole are skipped as a unit. A newline or EOF ends the
+                    // hole; the parser reports P027 if it is unclosed.
                     if str_len(str_val) > 0:
                         col : ., mut = start_col
                         if seg_pos != sp:
@@ -872,7 +877,8 @@ fn tokenize(_src: string, layout_bypass: int):
                                 if sc == 34:
                                     break
                             continue
-                        // 洞内 **char 字面量** 整体跳过（`'{'` 里的 `{` 不得参与配平——对抗复核点名的漏点①）
+                        // Skip a char literal in the hole; a { inside quotes must not
+                        // affect brace depth.
                         if hc == 39:
                             hp = hp + 1
                             loop:
@@ -886,7 +892,7 @@ fn tokenize(_src: string, layout_bypass: int):
                                 if cc2 == 39:
                                     break
                             continue
-                        // 洞内 **行注释** 整体跳过（漏点②）
+                        // Skip a line comment in the hole.
                         if hc == 47 && cur_char_at(_src, hp + 1, _slen) == 47:
                             loop:
                                 cc3 := cur_char_at(_src, hp, _slen)
@@ -894,7 +900,7 @@ fn tokenize(_src: string, layout_bypass: int):
                                     break
                                 hp = hp + 1
                             continue
-                        // 洞内 **块注释** 整体跳过（漏点③）
+                        // Skip a block comment in the hole.
                         if hc == 47 && cur_char_at(_src, hp + 1, _slen) == 42:
                             hp = hp + 2
                             loop:
@@ -933,9 +939,11 @@ fn tokenize(_src: string, layout_bypass: int):
                     col2 = start_col + 1 + (seg_pos - sp)
                 add_tok_str(T_STRING, str_val, start_line, col2)
             if has_hole != 0:
-                // 回填 run 内各 part 的 iv：+1 = 属插值字面量 · +2 = 其后还有 part（洞闭合位 4 保留）。
-                // ⚠ 用加法不用按位或：**bootstrap 后端不支持 `|`/`&`**（`NotImplementedError: Binary op |`，实测）。
-                // 目的：parser 只把**同一字面量**的 part 连成一条链（`"${x}" "y"` 是两个字面量，不连）。
+                // Fill iv for each part: +1 means it belongs to an interpolated
+                // literal; +2 means another part follows. Bit 2 (4) marks a closed
+                // hole. Use addition, not bitwise or: the bootstrap backend does not
+                // support `|` or `&`. This lets the parser join only parts of the same
+                // literal; `"${x}" "y"` stays two literals.
                 ri : ., mut = run_start
                 loop:
                     if ri >= g_token_count:
@@ -1022,9 +1030,8 @@ fn tokenize(_src: string, layout_bypass: int):
             add_tok(T_PIPEPIPE, -1, start_line, start_col)
             _pos = skip_ws(_src, _pos, _slen)
             continue
-        // v4 单竖线（T5）：原代码**无此分支** ⇒ 裸 `|` 落 Unknown 分支被静默丢弃。
-        // v4 的 match 臂前缀 = `|`（docs/core-language-syntax_v4.md 的 match 例）⇒ 显式收下。
-        // 零足迹依据：全仓 `src/**` 的裸 `|` **零处**（注释/字符串内的 `|` 不达本行）。
+        // Single vertical bar, used as a match arm prefix. It is a real token so
+        // it is not lost through the unknown-token path. `||` uses T_PIPEPIPE.
         if c == 124:
             _pos = _pos + 1
             add_tok(T_PIPE, -1, start_line, start_col)
@@ -1083,8 +1090,8 @@ fn tokenize(_src: string, layout_bypass: int):
             continue
 
         // Single-char tokens
-        // 括号深度（T0 布局规格 §4.1）：`( ) [ ] { }` **都计入** ⇒ 括号内是隐式续行、
-        // 不发 layout；`{ }` 一并计入 ⇒ 结构体字面量内部不产生 layout region。
+        // Bracket depth counts ( ) [ ] { }. Layout is suspended inside brackets, so
+        // struct literal interiors produce no layout regions.
         if c == 40:
             _pos = _pos + 1
             g_bracket_depth = g_bracket_depth + 1
@@ -1135,9 +1142,9 @@ fn tokenize(_src: string, layout_bypass: int):
             _pos = skip_ws(_src, _pos, _slen)
             continue
         if c == 58:
-            // 裁定 ②（词法位置决定，T0 布局规格 §2.1）：行尾 `:` ⇒ T_COLON_BLOCK（region 开启）；
-            // 行内 `:` ⇒ T_COLON_DECL（类型标注 / import 别名 / 字段 / 形参 / 泛型约束分隔符）。
-            // 二者互斥且穷尽 ⇒ parser 侧零前瞻。`:=` / `::` 已在上方多字符分支消费，**不受影响**。
+            // A colon at end of line opens a region (T_COLON_BLOCK). An inline colon
+            // is a declaration separator (T_COLON_DECL). The two cases are disjoint,
+            // so the parser needs no lookahead. `:=` and `::` are consumed earlier.
             le := colon_at_line_end(_src, _pos + 1, _slen)
             _pos = _pos + 1
             if le != 0:
@@ -1216,11 +1223,10 @@ fn tokenize(_src: string, layout_bypass: int):
             add_tok(T_QUESTION, -1, start_line, start_col)
             _pos = skip_ws(_src, _pos, _slen)
             continue
-        // 批 6（T1 词法面）：`#` = 规约标注 sigil（`#check(expr)` / `#ensure(expr)` 的首字符）。
-        // **有意的行为变更**：修复前 `#` 走下方 Unknown 分支被**静默丢弃**（本函数尾），
-        // 带标注的源会被 parse_body 误解析成静默错产物（T0 §10.2 实测：build rc=0 + 运行返回错值）。
-        // 零足迹依据（T0 实测）：全仓 182 个 .cr 的**裸 `#` = 0**（注释/字符串内的 `#` 不达本行）
-        // ⇒ 本分支对既有语料**构造性零扰动**。后随字符由 parser 校验（必须 IDENT）。
+        // `#` starts a spec annotation such as #check(expr) or #ensure(expr).
+        // The parser requires an identifier after it. Previously `#` fell into the
+        // unknown-token path and was dropped, so annotated source produced a wrong
+        // result with rc=0.
         if c == 35:
             _pos = _pos + 1
             add_tok(T_HASH, -1, start_line, start_col)
@@ -1231,8 +1237,8 @@ fn tokenize(_src: string, layout_bypass: int):
         _pos = _pos + 1
         _pos = skip_ws(_src, _pos, _slen)
 
-    // 源尾收尾（T0 布局规格 §1）：补发末行 NEWLINE + 弹出全部未闭合缩进层（各一个 DEDENT）。
-    // 旁路时同样不发射（不读不写缩进栈）。
+    // End of source: emit the final NEWLINE and pop every open indentation level,
+    // one DEDENT each. The bypass mode emits nothing and does not touch the stack.
     if g_layout_bypass == 0:
         finish_layout()
     add_tok(T_EOF, -1, g_line, g_col)

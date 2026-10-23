@@ -107,8 +107,8 @@ fn cli_init(prog: string, desc: string):
 fn cli_cmd(name: string, desc: string):
     grow_cli_cmds(g_cli_cmd_count + 1)
     off : ., mut = g_cli_cmd_count * 16
-    // 裸字表（16B/条：name、desc）：串值以 64 位字存入 ⇒ 显式视图 `@ptr_of`（2(a)；
-    // 语义 = 同一个字，不改存储内容）。安全面 (ii)：视图必须出现在 unsafe 块内。
+    // Flat table with 16-byte records: name and description. String values are
+    // stored as 64-bit words, so access them through @ptr_of inside unsafe.
     unsafe:
         w64(g_cli_cmds, off, @ptr_of(name))
         w64(g_cli_cmds, off + 8, @ptr_of(desc))
@@ -145,7 +145,7 @@ fn _cli_find_flag(name: string) -> int:
     loop:
         if i >= g_cli_flag_count:
             break
-        // 裸字读出 ⇒ 视图 `@str_of`（同一个字，只是按串用）。
+        // Read a string from a 64-bit word through @str_of inside unsafe.
         unsafe:
             ln := @str_of(r64(g_cli_flags, i * 48))
             sn := @str_of(r64(g_cli_flags, i * 48 + 8))
@@ -284,8 +284,8 @@ fn cli_get(name: string) -> string:
     fi := _cli_find_flag(name)
     if fi >= 0 && r64(g_cli_flags, fi * 48 + 32) != 0:
         // has_value
-        // 返回位同为裸字→串（S1P 只覆盖**调用实参**、不覆盖返回位 ⇒ 它不在 68 点里，
-        // 但同属一类；2(a) 一并收口）。
+        // The return value is a string stored in a raw word; read it through
+        // @str_of inside unsafe.
         unsafe:
             return @str_of(r64(g_cli_flags, fi * 48 + 24))
         // value
@@ -301,7 +301,7 @@ fn cli_arg(n: int) -> string:
     if n >= 0 && n < g_cli_arg_count:
         unsafe:
             return @str_of(r64(g_cli_args, n * 8))
-        // 返回位裸字→串（同族）
+        // The return value is a string stored in a raw word.
     return ""
 
 fn cli_arg_count() -> int:

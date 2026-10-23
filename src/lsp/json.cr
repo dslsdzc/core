@@ -1,31 +1,31 @@
 // === json.cr ===
-// corelsp JSON 解析/序列化（v1：仅整数数字；JSON-RPC 参数全整数）。
-// 自包含模块：不 import 任何东西（仅依赖运行时内建与 stdlib 字符串函数）。
+// corelsp JSON parser and serializer. v1 supports integer numbers only, which is
+// sufficient for JSON-RPC parameters.
+// This module has no imports; it uses runtime builtins and stdlib string helpers.
 //
-// ── 扁平节点布局（Task 2-6 按此 import 常量与布局）──
-// g_json_nodes：节点字节缓冲（string, mut，惰性 alloc + 倍增扩容）。
-//   节点 = 五槽一组 {kind, a, b, c, d}（40 字节）；节点索引 = 起始槽（0, 5, 10, …）。
-//   J_NULL    {J_NULL, 0, 0, 0, 0}
-//   J_BOOL    {J_BOOL, 0/1, 0, 0, 0}
-//   J_NUM     {J_NUM,  整数值, 0, 0, 0}          v1 仅整数；溢出 → 解析失败
-//   J_STR     {J_STR,  字符串池字节偏移, 长度, 0, 0}
-//   J_ARRAY   {J_ARRAY, 元素表偏移, 元素数, 0, 0}
-//   J_OBJ     {J_OBJ,  成员表偏移, 成员数, 0, 0}
-// 注意：表偏移均为【字节偏移】，与节点索引（槽号）单位不同——用 json_get/json_set
-//   访问节点槽；表内容只经 json_array_get/json_obj_get 与内部函数访问。
+// Node layout: g_json_nodes is a byte buffer with five slots per node, 40 bytes:
+// {kind, a, b, c, d}. A node index is its first slot (0, 5, 10, ...).
+//   J_NULL  {J_NULL, 0, 0, 0, 0}
+//   J_BOOL  {J_BOOL, 0/1, 0, 0, 0}
+//   J_NUM   {J_NUM, integer, 0, 0, 0}; overflow fails parsing
+//   J_STR   {J_STR, pool byte offset, length, 0, 0}
+//   J_ARRAY {J_ARRAY, element table offset, count, 0, 0}
+//   J_OBJ   {J_OBJ, member table offset, count, 0, 0}
+// Table offsets are byte offsets, not node indexes. Use json_get and json_set for
+// node slots; access tables only through json_array_get, json_obj_get, and the
+// internal functions.
 //
-// g_json_tables：元素表/成员表字节缓冲（内部，与节点缓冲分离，避免两区域
-//   在同一缓冲内相互覆盖；brief 规定的四个全局保持不变，此缓冲为内部实现）。
-//   元素表 = 节点索引连续存放（每元素 8 字节）。
-//   成员表 = 三槽一组 {key_off, key_len, value_idx}（24 字节），key_off/key_len
-//   指向 g_json_strs 字符串池中的键字节。
+// g_json_tables is separate from the node buffer so the two regions cannot
+// overlap. Element tables store node indexes, 8 bytes each. Member tables store
+// {key offset, key length, value index}, 24 bytes each. Key bytes live in
+// g_json_strs.
 //
-// g_json_strs：字符串池（原始字节，UTF-8 直通存储；独立长度计数管理）。
-//
-// \uXXXX：解析为 Unicode 码点并合并 UTF-16 代理对；stringify 对非 ASCII
-//   统一使用大写 \uXXXX（非 BMP 输出为一对代理项）。
+// g_json_strs stores raw UTF-8 bytes with a separate length.
+// \uXXXX escapes are decoded to Unicode code points and UTF-16 surrogate pairs
+// are combined. stringify emits uppercase \uXXXX for non-ASCII and a surrogate
+// pair outside the BMP.
 
-// ── 常量（全局初始化必须是字面量——ELF 后端限制）──
+// Constants. Global initializers must be literals in the ELF backend.
 J_NULL : int = 0
 J_BOOL : int = 1
 J_NUM : int = 2
@@ -33,18 +33,18 @@ J_STR : int = 3
 J_ARRAY : int = 4
 J_OBJ : int = 5
 
-J_NODE_SLOTS : int = 5    // 每节点槽数
-J_NODE_BYTES : int = 40   // 5 × 8
-J_ELEM_BYTES : int = 8    // 元素表每元素字节数
-J_MEMBER_BYTES : int = 24 // 成员表每组字节数
+J_NODE_SLOTS : int = 5    // slots per node
+J_NODE_BYTES : int = 40   // 5 slots times 8 bytes
+J_ELEM_BYTES : int = 8    // bytes per element-table entry
+J_MEMBER_BYTES : int = 24 // bytes per member-table entry
 
-// ── 存储（brief 规定的接口全局）──
-g_json_nodes : string, mut   // 节点字节缓冲（惰性 alloc）
-g_json_count : int, mut      // 节点数
-g_json_strs : string, mut    // 字符串字节池
-g_json_str_count : int, mut  // 池中字符串数
+// Storage globals.
+g_json_nodes : string, mut   // node byte buffer, allocated lazily
+g_json_count : int, mut      // node count
+g_json_strs : string, mut    // string byte pool
+g_json_str_count : int, mut  // number of strings in the pool
 
-// ── 内部：容量/长度计数 + 元素表/成员表缓冲 ──
+// Internal capacities, lengths, and table buffer.
 g_json_nodes_cap : int, mut
 g_json_strs_len : int, mut
 g_json_strs_cap : int, mut
@@ -52,7 +52,7 @@ g_json_tables : string, mut
 g_json_tables_len : int, mut
 g_json_tables_cap : int, mut
 
-// ── 低层字节助手（自包含，不依赖 dyn_arr.cr 的 w64/r64）──
+// Low-level byte helpers, independent of dyn_arr.cr.
 
 fn _jw64(buf: string, pos: int, val: int):
     cur : ., mut = val
@@ -68,8 +68,8 @@ fn _jw64(buf: string, pos: int, val: int):
         i = i + 1
 
 fn _jr64(buf: string, pos: int) -> int:
-    // 与 dyn_arr.cr r64 相同策略：低 32 位按无符号读，高 32 位经两次
-    // 65536 乘法回绕得到正确的符号扩展（-1 → -1 + (-1 × 2^32)）。
+    // Read the low 32 bits unsigned. The high 32 bits are multiplied by 65536
+    // twice to preserve sign extension.
     lo := load8(buf, pos) + load8(buf, pos + 1) * 256 + load8(buf, pos + 2) * 65536 + load8(buf, pos + 3) * 16777216
     hi := load8(buf, pos + 4) + load8(buf, pos + 5) * 256 + load8(buf, pos + 6) * 65536 + load8(buf, pos + 7) * 16777216
     hi_part := hi * 65536
@@ -84,7 +84,7 @@ fn _jcopy(src: string, n: int, dst: string):
         store8(dst, ci, load8(src, ci))
         ci = ci + 1
 
-// ── 扩容（惰性 alloc + 倍增）──
+// Growth: lazy allocation with doubling.
 
 fn _json_grow_nodes(needed: int):
     if needed <= g_json_nodes_cap:
@@ -125,9 +125,9 @@ fn _json_grow_strs(needed: int):
     g_json_strs = nb
     g_json_strs_cap = nc
 
-// ── 节点接口（Task 2-6 依赖）──
+// Node interface.
 
-// 新建节点，返回节点索引（起始槽号）
+// Create a node and return its index, which is its first slot.
 fn json_new(kind: int) -> int:
     need := g_json_count * J_NODE_BYTES + J_NODE_BYTES
     _json_grow_nodes(need)
@@ -150,7 +150,7 @@ fn json_get(node: int, slot: int) -> int:
         return -1
     return _jr64(g_json_nodes, (node + slot) * 8)
 
-// ── 解析状态 ──
+// Parse state.
 
 g_json_parse_pos : int, mut
 g_json_parse_text : string, mut
@@ -161,7 +161,7 @@ J_MAX_PARSE_DEPTH : int = 128
 fn _jp_len() -> int:
     return str_len(g_json_parse_text)
 
-// 当前位置的字符；文件尾返回 -1
+// Current byte, or -1 at end of input.
 fn _jp_peek() -> int:
     if g_json_parse_pos >= _jp_len():
         return -1
@@ -177,7 +177,7 @@ fn _jskip_ws():
         else:
             break
 
-// 关键字匹配（true/false/null）并消费；后随字符必须是边界（非标识符字符）
+// Match and consume true, false, or null. The next byte must not be an identifier character.
 fn _jk_match(word: string) -> int:
     wl := str_len(word)
     if g_json_parse_pos + wl > _jp_len():
@@ -208,7 +208,7 @@ fn _jk_match(word: string) -> int:
     g_json_parse_pos = g_json_parse_pos + wl
     return 1
 
-// 数字：可选负号 + 十进制整数；溢出/非法置 g_json_parse_failed
+// Number: optional minus and decimal digits. Overflow or invalid input sets g_json_parse_failed.
 fn _jnum() -> int:
     neg : ., mut = 0
     if g_json_parse_pos < _jp_len() && load8(g_json_parse_text, g_json_parse_pos) == 45:
@@ -247,7 +247,7 @@ fn _jnum() -> int:
                 return 0
             v = v * 10 + digit
         i = i + 1
-    // 尾随 '.' / 'e' / 'E'：v1 不支持浮点 → 失败（不静默截断）
+    // Trailing dot or exponent: v1 does not support floating point, so fail instead of truncating.
     if g_json_parse_pos < _jp_len():
         c2 := load8(g_json_parse_text, g_json_parse_pos)
         if c2 == 46 || c2 == 101 || c2 == 69:
@@ -255,7 +255,7 @@ fn _jnum() -> int:
             return 0
     return v
 
-// 十六进制数字值；非法返回 -1
+// Hex digit value, or -1 when invalid.
 fn _jhex_val(c: int) -> int:
     if c >= 48 && c <= 57:
         return c - 48
@@ -265,7 +265,7 @@ fn _jhex_val(c: int) -> int:
         return c - 55
     return -1
 
-// ── 字符串池写入 ──
+// String pool writes.
 
 fn _jstr_byte(b: int):
     need := g_json_strs_len + 1
@@ -273,7 +273,7 @@ fn _jstr_byte(b: int):
     store8(g_json_strs, g_json_strs_len, b)
     g_json_strs_len = g_json_strs_len + 1
 
-// 码点 → UTF-8 编码写入池
+// Encode a code point as UTF-8 in the pool.
 fn _jstr_cp(cp: int):
     if cp < 128:
         _jstr_byte(cp)
@@ -306,18 +306,18 @@ fn _jparse_hex4(pos: int) -> int:
         i = i + 1
     return cp
 
-// 解析 JSON 字符串（当前位置必须是 '"'），返回 J_STR 节点；失败返回 -1
+// Parse a JSON string at a quote and return a J_STR node, or -1 on failure.
 fn _jparse_str() -> int:
     if _jp_peek() != 34:
         g_json_parse_failed = 1
         return -1
-    g_json_parse_pos = g_json_parse_pos + 1   // 消费 '"'
+    g_json_parse_pos = g_json_parse_pos + 1   // consume the quote
     off := g_json_strs_len
     loop:
         if g_json_parse_pos >= _jp_len():
             g_json_parse_failed = 1
             return -1
-        // 未闭合
+        // Unclosed string.
         c := load8(g_json_parse_text, g_json_parse_pos)
         if c == 34:
             g_json_parse_pos = g_json_parse_pos + 1
@@ -327,7 +327,7 @@ fn _jparse_str() -> int:
             g_json_str_count = g_json_str_count + 1
             return n
         if c == 92:
-            // '\'
+            // Backslash.
             g_json_parse_pos = g_json_parse_pos + 1
             if g_json_parse_pos >= _jp_len():
                 g_json_parse_failed = 1
@@ -351,7 +351,7 @@ fn _jparse_str() -> int:
             else if e == 116:
                 _jstr_byte(9)
             else if e == 117:
-                // 'u'
+                // Unicode escape.
                 if g_json_parse_pos + 4 > _jp_len():
                     g_json_parse_failed = 1
                     return -1
@@ -360,8 +360,8 @@ fn _jparse_str() -> int:
                     return -1
                 g_json_parse_pos = g_json_parse_pos + 4
                 if cp >= 55296 && cp <= 56319:
-                    // A high surrogate must be immediately followed by a low
-                    // surrogate escape; store the resulting scalar as UTF-8.
+                    // A high surrogate must be followed by a low surrogate
+                    // escape; store the resulting scalar as UTF-8.
                     if g_json_parse_pos + 6 > _jp_len() || load8(g_json_parse_text, g_json_parse_pos) != 92 || load8(g_json_parse_text, g_json_parse_pos + 1) != 117:
                         g_json_parse_failed = 1
                         return -1
@@ -378,34 +378,34 @@ fn _jparse_str() -> int:
             else:
                 g_json_parse_failed = 1
                 return -1
-            // 未知转义
+            // Unknown escape.
         else if c < 32:
             g_json_parse_failed = 1
-            return -1   // 控制字符必须转义
+            return -1   // control characters must be escaped
         else:
-            _jstr_byte(c)   // 原始字节（UTF-8 直通）
+            _jstr_byte(c)   // raw UTF-8 byte
             g_json_parse_pos = g_json_parse_pos + 1
 
-// ── 值解析（递归下降）──
+// Value parsing, recursive descent.
 
 fn _jparse_obj(depth: int) -> int:
     if depth > J_MAX_PARSE_DEPTH:
         g_json_parse_failed = 1
         return -1
-    g_json_parse_pos = g_json_parse_pos + 1   // 消费 '{'
-    tbl : ., mut = -1      // 成员表偏移（惰性：首成员时分配）
+    g_json_parse_pos = g_json_parse_pos + 1   // consume the opening brace
+    tbl : ., mut = -1      // member table offset; allocated on the first member
     count : ., mut = 0
     loop:
         _jskip_ws()
         if _jp_peek() == 125:
-            // '}'
+            // Closing brace.
             g_json_parse_pos = g_json_parse_pos + 1
             break
         if count > 0:
             if _jp_peek() != 44:
                 g_json_parse_failed = 1
                 return -1
-            // ','
+            // Comma.
             g_json_parse_pos = g_json_parse_pos + 1
             _jskip_ws()
         key_node := _jparse_str()
@@ -415,13 +415,14 @@ fn _jparse_obj(depth: int) -> int:
         if _jp_peek() != 58:
             g_json_parse_failed = 1
             return -1
-        // ':'
+        // Colon.
         g_json_parse_pos = g_json_parse_pos + 1
         val := parse_value(depth + 1)
         if val < 0:
             return -1
-        // 表 = 可增长列表：新成员时把已有成员迁移到当前末尾（子容器表在下方，
-        // 不受影响），再写入新成员——保证成员表连续且不与子容器表重叠。
+        // The member table is a growing list. Copy existing members to the
+        // current end before adding a new member; child tables are allocated
+        // later, so this keeps each table contiguous.
         if count == 0:
             tbl = g_json_tables_len
             _json_grow_tables(tbl + J_MEMBER_BYTES)
@@ -453,13 +454,13 @@ fn _jparse_arr(depth: int) -> int:
     if depth > J_MAX_PARSE_DEPTH:
         g_json_parse_failed = 1
         return -1
-    g_json_parse_pos = g_json_parse_pos + 1   // 消费 '['
-    tbl : ., mut = -1      // 元素表偏移（惰性：首元素时分配）
+    g_json_parse_pos = g_json_parse_pos + 1   // consume the opening bracket
+    tbl : ., mut = -1      // element table offset; allocated on the first element
     count : ., mut = 0
     loop:
         _jskip_ws()
         if _jp_peek() == 93:
-            // ']'
+            // Closing bracket.
             g_json_parse_pos = g_json_parse_pos + 1
             break
         if count > 0:
@@ -511,26 +512,26 @@ fn parse_value(depth: int) -> int:
     if c == 34:
         return _jparse_str()
     if c == 116:
-        // 't' → true
+        // true
         if _jk_match("true") != 0:
             n1 := json_new(J_BOOL)
             json_set(n1, 1, 1)
             return n1
         return -1
     if c == 102:
-        // 'f' → false
+        // false
         if _jk_match("false") != 0:
             n2 := json_new(J_BOOL)
             json_set(n2, 1, 0)
             return n2
         return -1
     if c == 110:
-        // 'n' → null
+        // null
         if _jk_match("null") != 0:
             return json_new(J_NULL)
         return -1
     if c == 45 || (c >= 48 && c <= 57):
-        // '-' 或数字
+        // Minus or digit.
         v := _jnum()
         if g_json_parse_failed != 0:
             return -1
@@ -539,9 +540,9 @@ fn parse_value(depth: int) -> int:
         return n3
     return -1
 
-// ── 公开解析接口 ──
+// Public parsing interface.
 
-// 解析 JSON 文本 → 根节点索引；失败返回 -1。每次调用重置全部池。
+// Parse JSON text to a root node index, or -1 on failure. Each call resets all pools.
 fn json_parse(text: string) -> int:
     g_json_count = 0
     g_json_str_count = 0
@@ -559,21 +560,21 @@ fn json_parse(text: string) -> int:
     _jskip_ws()
     if g_json_parse_pos < _jp_len():
         return -1
-    // 尾部多余内容
+    // Trailing content after the root value.
     return idx
 
-// ── 序列化 ──
+// Serialization.
 
 fn _jhex_digit(v: int) -> string:
     if v < 10:
         return chr(48 + v)
-    return chr(65 + v - 10)   // 大写 A-F
+    return chr(65 + v - 10)   // uppercase A through F
 
-// 码点 → \uXXXX（大写十六进制）
+// Code point to an uppercase \uXXXX escape.
 fn _jhex4(v: int) -> string:
-    // 逐段累加：Python bootstrap 对 BinaryOp 结果变量不做字符串类型传播，
-    // 裸表达式链会被编译成整数 add（见 Task 1 报告）；累加器从字面量初始化
-    // 则类型正确，两条管线（bootstrap/corec 与自举 corec）行为一致。
+    // Accumulate into a literal-initialized string. The bootstrap parser does not
+    // propagate string types through a bare BinaryOp chain and would compile it as
+    // integer addition.
     out : string, mut = "\\u"
     out = out + _jhex_digit((v / 4096) % 16)
     out = out + _jhex_digit((v / 256) % 16)
@@ -581,9 +582,9 @@ fn _jhex4(v: int) -> string:
     out = out + _jhex_digit(v % 16)
     return out
 
-g_json_utf8_cp : int, mut   // _jutf8_dec 的解码结果（内部暂存）
+g_json_utf8_cp : int, mut   // decoded code point from _jutf8_dec
 
-// 从字符串池 off 处解码 UTF-8 序列；返回字节推进数（非法序列返回 1，cp = 原字节）
+// Decode a UTF-8 sequence at off and return the byte advance. An invalid sequence returns 1 and leaves the original byte as the code point.
 fn _jutf8_dec(off: int) -> int:
     b0 := load8(g_json_strs, off)
     if b0 < 128:
@@ -616,7 +617,7 @@ fn _jutf8_dec(off: int) -> int:
     g_json_utf8_cp = b0
     return 1
 
-// 池中字节段 → JSON 字符串文本（含引号；转义反转义；非 ASCII 一律 \uXXXX）
+// Convert a pool byte range to JSON string text, including quotes. Non-ASCII bytes become uppercase \uXXXX escapes.
 fn _jstr_out(off: int, len: int) -> string:
     out : string, mut = "\""
     i : ., mut = 0
@@ -649,7 +650,7 @@ fn _jstr_out(off: int, len: int) -> string:
             adv := _jutf8_dec(off + i)
             cp := g_json_utf8_cp
             if cp >= 65536:
-                // 非 BMP：编码为代理对两个 \uXXXX（JSON 规范要求）
+                // Outside the BMP: emit a surrogate pair of \uXXXX escapes.
                 c0 := cp - 65536
                 hi := 55296 + c0 / 1024    // 0xD800 + (cp-0x10000)>>10
                 lo := 56320 + c0 % 1024    // 0xDC00 + (cp-0x10000)&0x3FF
@@ -705,15 +706,15 @@ fn _jstringify_rec(idx: int) -> string:
         return out
     return "null"
 
-// 节点 → JSON 文本；非法索引返回空串
+// Node to JSON text; an invalid index returns an empty string.
 fn json_stringify(idx: int) -> string:
     if idx < 0 || idx % J_NODE_SLOTS != 0 || idx / J_NODE_SLOTS >= g_json_count || g_json_count == 0:
         return ""
     return _jstringify_rec(idx)
 
-// ── 查找接口（Task 2-6 依赖）──
+// Lookup interface.
 
-// 对象按键查找：线性扫描成员表；找不到返回 -1
+// Look up an object member by key with a linear scan. Return -1 when absent.
 fn json_obj_get(obj: int, key: string) -> int:
     if obj < 0 || obj % J_NODE_SLOTS != 0 || obj / J_NODE_SLOTS >= g_json_count || json_get(obj, 0) != J_OBJ:
         return -1
@@ -742,7 +743,7 @@ fn json_obj_get(obj: int, key: string) -> int:
         i = i + 1
     return found_value
 
-// 数组按下标取元素；越界或非数组返回 -1
+// Get an array element by index. Return -1 when out of range or not an array.
 fn json_array_get(arr: int, i: int) -> int:
     if arr < 0 || arr % J_NODE_SLOTS != 0 || arr / J_NODE_SLOTS >= g_json_count || json_get(arr, 0) != J_ARRAY:
         return -1

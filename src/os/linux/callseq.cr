@@ -1,68 +1,42 @@
-// ══════════════════════════════════════════════════════════════
-// src/os/linux/callseq.cr —— OS 轴：SysV AMD64 调用约定序列
-//   （寄存器参数分派 / 栈参压栈 / 栈清理 / 返回值 / 直接调用）
+// === callseq.cr ===
+// SysV AMD64 call sequences for the Linux OS axis.
 //
-// x86 实例化波 1 Task 5 抽取（H1 波 1 最大风险之一——emit_instr 内联段落）：
-// emit_instr（src/arch/x86_64/instr.cr）中 IR_CALL / IR_CALL_EXTERN /
-// IR_SPAWN / IR_RETURN 四分支的调用序列此前全部内联在巨函数里，本文件把它们
-// 抽为 5 个入口（发射序逐字节 verbatim——波 1 判据 = stage 链 byte-identical）：
-//   ① cs_args_dispatch  —— 寄存器参数分派（int: rdi,rsi,rdx,rcx,r8,r9；
-//      binary64: xmm0-7，int/float 各自独立编号）。**三处同源合流**：IR_CALL
-//      主路径 / IR_CALL_EXTERN / IR_SPAWN 三处逐字节相同的分派段（差异核对
-//      见下），抽取后三调用点共用本入口。
-//   ② cs_arg_on_stack / cs_stack_count / cs_stack_args —— 栈参判定 + 压栈
-//      （右到左压；第 7 个 int / 第 9 个 binary64 起才压）。判定单入口
-//      （cs_arg_on_stack）——计数（cs_stack_count，供清理立即数）与发射
-//      （cs_stack_args）共用同一规则，防判定/计数双源漂移。
-//   ③ cs_stack_cleanup  —— call 后 add rsp 恢复（≤127B 用 4B 立即数形，
-//      否则 7B 形）。
-//   ④ cs_ret_value      —— IR_RETURN 值序列（TI_DEX → xmm0；global → RIP
-//      读 rax；局部 → rax 装载 + int 多字 tag 读路径 A）+ ret_patch 登记 +
-//      jmp 占位（尾声回填）。
-//   ⑤ cs_call_direct    —— 通用调用路径（按名查 g_x86_func_offsets → e2_call；
-//      未找到 → g_x86_ext_rel_* 外部位）+ 返回值存（d ≥ 0）。
+// Entry points:
+//   1. cs_args_dispatch: register argument dispatch. int args use rdi, rsi, rdx,
+//      rcx, r8, r9; binary64 args use xmm0-xmm7. Each class is numbered
+//      independently. Used by IR_CALL, IR_CALL_EXTERN, and IR_SPAWN.
+//   2. cs_arg_on_stack, cs_stack_count, cs_stack_args: stack argument test, count,
+//      and push. Int args from the 7th and binary64 from the 9th go on the stack,
+//      pushed right to left. The test and count share cs_arg_on_stack.
+//   3. cs_stack_cleanup: add rsp after a call. It uses a 4-byte immediate when the
+//      byte count is at most 127, otherwise a 7-byte form.
+//   4. cs_ret_value: IR_RETURN value sequence, ret_patch registration, and jump
+//      placeholder. TI_DEX returns in xmm0; a tagged local goes through tag read
+//      path A.
+//   5. cs_call_direct: direct call by name through g_x86_func_offsets, or external
+//      relocation when not found; stores the return value when d >= 0.
 //
-// 归属裁决（设计 §1 "ABI = 交叉轴"）：ABI = 架构轴寄存器集 × OS 轴调用约定
-// ——本文件 = 调用约定的 OS 轴落点；寄存器名/编码原语（e2_*/emit_*/g2_slot/
-// irv_type/TI_DEX）经架构轴 src/arch/x86_64/instr.cr（concat 扁平单元 /
-// module.cr 三轴回退链解析，见组合根 _import.cr `import callseq`）。
-// 与 x86_64/instr.cr 的关系：instr.cr = 指令编码原语 + emit_instr 分派；
-// 本文件 = 序列算法（多指令粘合序）——不新增任何编码原语。
+// IR_CALL and IR_SPAWN use the stack helpers. IR_CALL_EXTERN only dispatches
+// registers and does not push stack arguments or clean the stack. This is
+// existing behavior; more than six integer extern arguments remain unsupported.
+// IR_HOTPATCH_ROUTE keeps its own external placeholder and does not use
+// cs_call_direct.
 //
-// 抽取纪律（H1）：cp/pos/buf 三参数显式传递（无环境态假设）——buf = 字节
-// 缓冲、pos = 本 IR 指令的绝对缓冲起点、cp = 相对 pos 的已发字节数；返回
-// **新 cp**（相对量）。调用点形如 `cp = cs_xxx(buf, pos, cp, ...)`（与
-// emit_instr 内部约定一致；注：同波 frame.cr pf_* 取绝对位置约定，两者按
-// 各自宿主函数风格定形，见 frame.cr 头注）。
+// buf is the byte buffer, pos is the absolute buffer position of this IR
+// instruction, and cp is the number of bytes already emitted relative to pos.
+// Each function returns the new cp. Calls look like
+// cp = cs_xxx(buf, pos, cp, ...).
 //
-// **三处同源合流差异核对结论**（抽取时逐处比对——不得静默合并）：
-//   ✔ cs_args_dispatch：IR_CALL / IR_CALL_EXTERN / IR_SPAWN 三处发射字节
-//     逐字节相同（同一 e2_sd_load_x 序号 + e2_load_var 序列 + 同一 int 寄存器
-//     映射表 rdi(7),rsi(6),rdx(2),rcx(1),r8(8),r9(9)），合并等价。
-//   ✔ cs_stack_args / cs_stack_cleanup：IR_CALL 与 IR_SPAWN 两处逐字节相同，
-//     合并等价；**IR_CALL_EXTERN 不调用二者**（预存行为：extern 路径只做寄存器
-//     分派，无栈参压栈/栈清理——波 1 逐字节保持，不改判据；>6 int 参 extern
-//     调用的语义缺口见 TODO 挂账，属波 2 参数化面）。
-//   ✔ cs_call_direct：IR_CALL 专有（IR_HOTPATCH_ROUTE 形式近似但语义不同——
-//     恒外部位占位、无 g_x86_func_offsets 查名——保持分立原位）。
-//   ✔ cs_ret_value：IR_RETURN 值序列专有；IR_CALL/IR_HOTPATCH_ROUTE 用
-//     e2_store_ret（d ≥ 0 门）、IR_SPAWN 另有 TI_DEX/整数两分派、
-//     IR_CALL_EXTERN 恒 e2_st(rax)（无 dex 分支、无 d 门）——差异面各自保留
-//     原位，不在本任务抽界内。
-//
-// Depends on: x86_64/instr.cr（e2_*/emit_rex/emit_modrm/g2_slot/istr_get/
-//             str_eq/str_intern）、x86_64/frame.cr（g2_tag_off——tag 读路径 A
-//             的 tag 字节偏移）、x86_64/tag2l.cr（e2_mw_t8——tag 测试字节）、
-//             共享全局（g_x86_func_offsets/g_x86_call_patch_*/g_x86_ext_rel_*/
-//             g_x86_ret_patch_*/g_x86_rip_patch_*/g_x86_is_global）。
-// ══════════════════════════════════════════════════════════════
+// Depends on instr.cr for encoding primitives and g2_slot, frame.cr for
+// g2_tag_off, tag2l.cr for e2_mw_t8, and the shared x86 patch and global arrays.
 
-// ── ① 寄存器参数分派（IR_CALL 主路径 / IR_CALL_EXTERN / IR_SPAWN 三处同源）──
-// SysV AMD64：int 用 ir（0-5 → rdi,rsi,rdx,rcx,r8,r9），binary64 用 fr
-// （0-7 → xmm0-7），各自独立编号（标准答案）。第一遍按位置顺序（左到右）发
-// 寄存器装载；超限者（第 7 int / 第 9 binary64 起）不在此处发射——留待
-// cs_stack_args（调用点自行决定是否压栈：IR_CALL/IR_SPAWN 压，EXTERN 不压）。
-// 返回新 cp。
+// Register argument dispatch, shared by IR_CALL, IR_CALL_EXTERN, and IR_SPAWN.
+// SysV AMD64 assigns int args to rdi, rsi, rdx, rcx, r8, r9 and binary64 args to
+// xmm0-xmm7. Each class has its own index. The first pass emits register loads in
+// left-to-right order. Arguments above the limit (7th int or 9th binary64) are
+// not emitted here; cs_stack_args decides whether to push them. IR_CALL and
+// IR_SPAWN push them, IR_CALL_EXTERN does not.
+// Returns the new cp.
 fn cs_args_dispatch(buf: string, pos: int, cp: int, fa: int, ac: int) -> int:
     ir_cnt : ., mut = 0
     fr_cnt : ., mut = 0
@@ -73,8 +47,9 @@ fn cs_args_dispatch(buf: string, pos: int, cp: int, fa: int, ac: int) -> int:
         pt := irv_type(fa + ai)
         if pt == TI_DEX:
             if fr_cnt < 8:
-                // 全局行实参走 seam（e2_sd_ld_var）：单实参调用恒不打包（ir_gen need_pack），
-                // 全局实参可直达此处 ⇒ 修复前 e2_sd_load_x(g2_slot(全局)) 读帧外伪偏移。
+                // Global arguments go through e2_sd_ld_var. A single-argument
+                // call is never packed, so a global argument can reach here;
+                // g2_slot would read outside the current frame.
                 cp = cp + e2_sd_ld_var(buf, pos+cp, fr_cnt, fa + ai)
                 fr_cnt = fr_cnt + 1
         else:
@@ -97,10 +72,10 @@ fn cs_args_dispatch(buf: string, pos: int, cp: int, fa: int, ac: int) -> int:
         ai = ai + 1
     return cp
 
-// ── ② 栈参：判定 / 计数 / 压栈（IR_CALL + IR_SPAWN 两处同源）──
-// 第 i 个实参是否超限落栈（SysV：int 第 7 个起、binary64 第 9 个起）。
-// 判定 = 类型 × 该类型在 i 之前的实参个数（与提取前内联段同一规则）。
-// 1 = 落栈，0 = 走寄存器。
+// Stack arguments: test, count, and push. IR_CALL and IR_SPAWN share them.
+// cs_arg_on_stack returns 1 when the i-th argument goes on the stack: int from
+// the 7th and binary64 from the 9th. The test counts earlier arguments of the
+// same class. 1 means stack, 0 means register.
 fn cs_arg_on_stack(fa: int, i: int) -> int:
     ic2 : ., mut = 0
     fc2 : ., mut = 0
@@ -121,8 +96,9 @@ fn cs_arg_on_stack(fa: int, i: int) -> int:
             return 1
     return 0
 
-// 实际压栈参数个数（cs_stack_cleanup 的 add rsp 立即数 = count*8）。
-// 与 cs_stack_args 同规则（cs_arg_on_stack）——两处计数恒等。
+// Number of stack arguments. cs_stack_cleanup uses count*8 as the add rsp
+// immediate. This function and cs_stack_args use the same cs_arg_on_stack rule,
+// so their counts always agree.
 fn cs_stack_count(fa: int, ac: int) -> int:
     n : ., mut = 0
     i : ., mut = 0
@@ -134,9 +110,9 @@ fn cs_stack_count(fa: int, ac: int) -> int:
         i = i + 1
     return n
 
-// 栈参压栈（右到左压——保持栈上实参位置顺序：调用时 [rsp] = 第 7 int / 第 9
-// binary64）。int → r10 装载 + push r10（41 52）；binary64 → xmm0 装载 +
-// e2_push_xmm0（sub rsp,8 + movsd [rsp],xmm0）。返回新 cp。
+// Push stack arguments right to left, so at the call [rsp] is the 7th int or
+// 9th binary64. Int: load into r10 and push r10 (41 52). Binary64: load into
+// xmm0 and call e2_push_xmm0 (sub rsp,8; movsd [rsp],xmm0). Returns the new cp.
 fn cs_stack_args(buf: string, pos: int, cp: int, fa: int, ac: int) -> int:
     stack_ai : ., mut = ac - 1
     loop:
@@ -155,9 +131,10 @@ fn cs_stack_args(buf: string, pos: int, cp: int, fa: int, ac: int) -> int:
         stack_ai = stack_ai - 1
     return cp
 
-// ── ③ 栈清理（IR_CALL + IR_SPAWN 两处同源）──
-// call 后恢复 rsp：add rsp, stack_count*8——字节数 ≤127 → 4B 立即数形
-// （48 83 C4 imm8），否则 7B 形（48 81 C4 imm32）。返回新 cp。
+// Stack cleanup, shared by IR_CALL and IR_SPAWN.
+// Restore rsp after the call with add rsp, stack_count*8. Use the 4-byte form
+// (48 83 C4 imm8) when the byte count is at most 127, otherwise the 7-byte form
+// (48 81 C4 imm32). Returns the new cp.
 fn cs_stack_cleanup(buf: string, pos: int, cp: int, stack_count: int) -> int:
     if stack_count > 0:
         stack_bytes := stack_count * 8
@@ -175,15 +152,16 @@ fn cs_stack_cleanup(buf: string, pos: int, cp: int, stack_count: int) -> int:
             cp = cp + 7
     return cp
 
-// ── ④ IR_RETURN 值序列 + ret_patch 登记 + jmp 占位 ──
-// s1 < 0（无值）→ 只登记 ret_patch（尾声回填 jmp → epilogue）。
-// 返回新 cp。
+// IR_RETURN value sequence, ret_patch registration, and jump placeholder.
+// When s1 < 0 there is no value; only ret_patch is registered, and the epilogue
+// patches the jmp. Returns the new cp.
 fn cs_ret_value(buf: string, pos: int, cp: int, s1: int) -> int:
     if s1 >= 0:
         if e2_is_glob(s1) != 0:
-            // 全局支**自身按型分派**（裁-SEAM-4 修正修法：不是把 dex 判定前移——前移
-            // 会让全局 dex 返回走 rax，而 dex 返回约定在 **XMM0**）。零字节代价：
-            // 全局 dex 返回当前不可达（返回点已转 scaled ⇒ s1 恒临时），属次序不变量加固。
+            // The global branch dispatches by type. Do not move the dex test
+            // earlier: a global dex return uses xmm0, not rax. Global dex returns
+            // are currently unreachable because return sites are scaled and s1 is
+            // always a temporary; this ordering is an invariant guard.
             if irv_type(s1) == TI_DEX:
                 cp = cp + e2_sd_ld_var(buf, pos+cp, 0, s1)   // movsd xmm0, [rip 槽]
             else:
@@ -193,7 +171,7 @@ fn cs_ret_value(buf: string, pos: int, cp: int, s1: int) -> int:
                 w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1)
                 g_x86_rip_patch_count = g_x86_rip_patch_count + 1
                 cp = cp + e2_lr(buf, pos+cp, 0)       // lea r10, [rip+0]
-                // mov rax, [r10] — REX.WB + 0x8B
+                // mov rax, [r10], REX.WB with 0x8B
                 cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 10/8)
                 e2_w8(buf, pos+cp, 139)
                 cp = cp + 1
@@ -203,10 +181,11 @@ fn cs_ret_value(buf: string, pos: int, cp: int, s1: int) -> int:
             cp = cp + e2_sd_load(buf, pos+cp, g2_slot(s1))
         else:
             cp = cp + e2_ld(buf, pos+cp, 0, g2_slot(s1))
-            // int 多字 M1（Task 4）tag 读路径 A：return 的 tagged 局部值
-            // ——tag=1（槽 = 2-limb 指针）→ 解指针取低 limb → rax（exit
-            // 低 8 位 = 数学值低字节；不解 = 指针低字节 = 错值）。tag=0
-            // → 快值原样。行内（je rel8 跨 3B deref——tag 字节测试）。
+            // Tag read path A for a tagged local return. tag=1 means the slot
+            // holds a 2-limb pointer; dereference it and put the low limb in rax
+            // (the exit code uses the low byte of the mathematical value). tag=0
+            // leaves the fast value unchanged. The je rel8 skips the 3-byte
+            // dereference.
             tg := g2_tag_off(s1)
             if tg != -1:
                 cp = cp + e2_mw_t8(buf, pos+cp, tg)
@@ -217,19 +196,21 @@ fn cs_ret_value(buf: string, pos: int, cp: int, s1: int) -> int:
                 w8(buf, pos+cp+1, 139)
                 w8(buf, pos+cp+2, 0)
                 cp = cp + 3  // mov rax, [rax]
-    // record position for caller to patch jmp → epilogue
+    // Record the jump position for the caller to patch to the epilogue.
     grow_ret_patch(g_x86_ret_patch_count + 1)
     w64(g_x86_ret_patch_pos, g_x86_ret_patch_count * 8, pos + cp)
     g_x86_ret_patch_count = g_x86_ret_patch_count + 1
     cp = cp + e2_jmp(buf, pos+cp, 0)
     return cp
 
-// ── ⑤ 通用调用路径（IR_CALL 的 s3 ≥ 0 分支）──
-// 按函数名（interned string 索引）查 g_x86_func_offsets：
-//   命中 → e2_call 直接相对调用（目标 = 代码起点 176 + 函数体偏移）
-//   未命中 → 外部位登记（g_x86_ext_rel_*，动态链接期解析）+ call 占位
-// 两者都先登记 call 补丁（g_x86_call_patch_*，名字 → 后置回填实际 cp）。
-// 末尾 d ≥ 0 → e2_store_ret（int → rax / dex → xmm0）。返回新 cp。
+// Direct call path for IR_CALL.
+// Look up the function name (interned string index) in g_x86_func_offsets:
+//   hit: e2_call direct relative call (target = code base 176 + body offset).
+//   miss: register an external relocation (g_x86_ext_rel_*, resolved by the
+//   dynamic linker) and emit a call placeholder.
+// Both register a call patch first (g_x86_call_patch_*), then the post-emission
+// pass fills in the actual cp. When d >= 0, store the return value with
+// e2_store_ret (int in rax, dex in xmm0). Returns the new cp.
 fn cs_call_direct(buf: string, pos: int, cp: int, s3: int, d: int) -> int:
     fn2 := istr_get(s3)
     to := -1

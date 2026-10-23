@@ -1,47 +1,47 @@
 # R2 P0（建层）实施计划：类型项表 + 语义包含引擎 + 判定用例表
 
-> **受众**：执行本计划的 agentic worker。**必需子技能**：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
+> 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
 
-**目标**：为 R2 建立「类型项层 + 语义包含引擎」的地基，内容包括集合语义的类型项 DAG 表、NNF/DNF 规范化、包含/等价/不相交/可空/反例判定 API（三态 + 预算守卫）、数据驱动判定用例表，以及 `corec selftest-types` 自测通道（**checker 零改动、产物零变化**）。
+目标：为 R2 建立「类型项层 + 语义包含引擎」的基础，内容包括集合语义的类型项 DAG 表、NNF/DNF 规范化、包含/等价/不相交/可空/反例判定 API（三态 + 预算守卫）、数据驱动判定用例表，以及 `corec selftest-types` 自测通道（checker 零改动、产物零变化）。
 
-**架构**：本计划新增三个文件，其分工如下：
+架构：本计划新增三个文件，其分工如下：
 
 - `type_terms.cr` 负责类型项表、构造与去重，以及规范化。
 - `type_engine.cr` 负责判定 API、原子互斥公理、μ memo 与预算守卫。
 - `type_selftest.cr` 负责用例表与自测驱动。
 
-引擎自带原子类 id（`AK_*`），与 `g_types` 行解耦；natives 采用 1:1 映射；结构原子与命名原子挂 `g_types` 行（`-1` 表示类级）。**不改 checker / ir_gen / 后端 / 解释器**：P0 不改判据行为，只建能力。
+引擎自带原子类 id（`AK_*`），与 `g_types` 行解耦；natives 采用 1:1 映射；结构原子与命名原子挂 `g_types` 行（`-1` 表示类级）。不改 checker / ir_gen / 后端 / 解释器：P0 不改检查行为，只建能力。
 
-**技术栈**：本计划涉及四个技术面，列举如下：
+技术栈：本计划涉及四个技术面，列举如下：
 
 - Core 自举栈，即 self-hosted 编译器 `src/compiler/`。
 - 扁平字节缓冲表，由 `string` 加 `w64/r64` 与 `grow_*` 构成，常量族为 `ESZ_*/OFF_*`；先例为 `g_types` 与 `g_ifaces`。
 - CLI 通道，由 `cli_cmd` 加 `corec_main` 分派。
 - Python 测试包装，沿用 `tests/selfhost/test_*.py` 风格，经 subprocess 调用 `./build/corec`。
 
-**设计 spec**：`docs/superpowers/specs/2026-09-10-type-interface-unification-design.md`（§0 裁决、§1 语义基座、§3 类型项层与引擎、§4 步 1 建层、§9 P0）。
+设计 spec：`docs/superpowers/specs/2026-09-10-type-interface-unification-design.md`（第 0 节裁决、第 1 节语义基座、第 3 节类型项层与引擎、第 4 节步 1 建层、第 9 节 P0）。
 
 ## 全局约束
 
-- **仅用 `jj`**：版本控制一律使用 `jj`，`git` 由 hook 机械拦截。
-- **提交必须路径限定**（多 agent 共用工作副本）：
+- 仅用 `jj`：版本控制一律使用 `jj`，`git` 由 hook 机械拦截。
+- 提交必须路径限定（多 agent 共用工作副本）：
   `jj commit <本次改动的精确文件...> -m '<中文，前缀 feat:/docs:/test:>'`
-- **CPU 限速**：所有编译与测试命令必须加 `nice -n 19` 前缀（铁律 #6）。
-- **文件永久不允许还原**。不得绕过问题，不得变通，一律做根因修复。
-- **P0 零行为改动**：`checker.cr`、`ir_gen.cr`、`interp.cr` 与后端、内核文件**一行不动**；现有程序的编译产物必须 **byte-identical**（判据见 Task 5）。
-- **diff 校验规范式样**：本机 `jj diff` 默认使用 color-words，输出无 `+` 前缀，因此 `grep '^+'` 恒真空通过；本机 `grep` 实为 ugrep。式样如下：
+- CPU 限速：所有编译与测试命令必须加 `nice -n 19` 前缀（项目规则第 6 条）。
+- 文件永久不允许还原。不得绕过问题，不得变通，一律做根因修复。
+- P0 零行为改动：`checker.cr`、`ir_gen.cr`、`interp.cr` 与后端、内核文件一行不动；现有程序的编译产物必须 byte-identical（检查见 Task 5）。
+- diff 校验规范式样：本机 `jj diff` 默认使用 color-words，输出无 `+` 前缀，因此 `grep '^+'` 始终为空输出，起不到校验作用；本机 `grep` 实为 ugrep。式样如下：
   ```bash
   jj diff --git <paths...> | grep '^[+]' | grep -v -e '^[+][+][+]'      # 逐行核新增
   jj diff --git <paths...> | grep -c '^[-]'                             # 期望 0（除计划性替换）
   ```
 - 环境陷阱：noclobber 下用 `>` 覆盖已存在文件会失败，须改用 `>|` 或先删；变量展开不分词。
-- **新文件必须注册三处**，否则构建静默缺件：
+- 新文件必须注册三处，否则构建不报错地缺件：
   1. `src/compiler/_import.cr`，即 project-mode 解析链。
-  2. `build_selfhost_native.py` 的 **corec 清单**（`corec_files`）。其顺序即行为定义面：置于 `src/compiler/checker.cr` 之后、`ir_gen.cr` 之前。
+  2. `build_selfhost_native.py` 的 corec 清单（`corec_files`）。其顺序即行为定义面：置于 `src/compiler/checker.cr` 之后、`ir_gen.cr` 之前。
   3. `tests/selfhost/test_compile.py` 的 `concat_sources()` 清单，位置同上。
-  （`corelsp` 与 `corearch` 清单 P0 **不加**：引擎尚无消费者。）
-- **判据铁律**：`corec selftest-types` 全 PASS，末行有计数断言，且无 `FAIL` 行；全回归绿；自举 `corec2/corec3` 的 `cmp` 结果为 IDENTICAL，且 N06=0。
-- **附加验证纪律（Task 1 实证教训，2026-09-10）**：白盒与压力验证**必须限时**，禁止 `sleep` 式长等待，改用短超时或直接看日志。同一缺陷最多迭代 **2 轮**；达到 3 轮以上说明假设错了，须改为最小化失败用例并作 BLOCKED 上报。**计划代码不是免检的**：本次 `h - (h/cap)*cap` 的负哈希取模越界即为计划缺陷，由压力测试发现。
+  （`corelsp` 与 `corearch` 清单 P0 不加：引擎尚无消费者。）
+- 检查要求：`corec selftest-types` 全 PASS，末行有计数断言，且无 `FAIL` 行；全回归绿；自举 `corec2/corec3` 的 `cmp` 结果为 IDENTICAL，且 N06=0。
+- 附加验证纪律（Task 1 实证教训，2026-09-10）：白盒与压力验证必须限时，禁止 `sleep` 式长等待，改用短超时或直接看日志。同一缺陷最多迭代 2 轮；达到 3 轮以上说明假设错了，须改为最小化失败用例并作 BLOCKED 上报。计划代码同样需要检查：本次 `h - (h/cap)*cap` 的负哈希取模越界即为计划缺陷，由压力测试发现。
 
 ---
 
@@ -53,7 +53,7 @@
 | `src/compiler/type_engine.cr`（新建） | 原子类 id/互斥公理 + 判定 API（`ty_sub`/`ty_equiv`/`ty_disjoint`/`ty_inhabited`/`tt_witness`）+ memo + 预算守卫 |
 | `src/compiler/type_selftest.cr`（新建） | 用例表（数据驱动）+ `type_selftest_run()` 驱动（打印 PASS/FAIL + 摘要，返回 rc） |
 | `src/compiler/globals.cr`（修改） | 新增表全局声明（`g_type_terms` / `g_tt_*` / memo / budget / 引擎侧缓冲） |
-| ~~`src/compiler/dyn_arr.cr`~~ | **不入本批**——扩容函数由引擎自持（`type_terms.cr`）。理由（Task 1 实测，D5）：`dyn_arr.cr` 属**双 concat 共享面**（`build_selfhost_native.py` 的 `common_files`，corearch/corelsp 都编），而引擎文件只入 corec 清单 → 在共享文件里引用引擎符号 = corearch 解析期 `Undefined name: ESZ_TYPE_TERM / tt_reindex` 硬失败 |
+| `src/compiler/dyn_arr.cr` | 不入本批。扩容函数由引擎自行实现（`type_terms.cr`）。理由（Task 1 实测，D5）：`dyn_arr.cr` 属双 concat 共享面（`build_selfhost_native.py` 的 `common_files`，corearch/corelsp 都编），而引擎文件只入 corec 清单，因此在共享文件里引用引擎符号会让 corearch 解析期报 `Undefined name: ESZ_TYPE_TERM / tt_reindex` 并直接失败 |
 | `src/compiler/main.cr`（修改） | `cli_cmd("selftest-types", ...)` + `corec_main` 分派 |
 | `src/compiler/_import.cr`（修改） | 注册三个新模块 |
 | `build_selfhost_native.py`（修改） | corec 清单加三个文件 |
@@ -62,25 +62,25 @@
 
 ---
 
-## Task 1: 类型项表 + 构造 API + 自测通道骨架
+## Task 1: 类型项表 + 构造 API + 自测通道框架
 
-**涉及文件：**
+涉及文件：
 - 新建 `src/compiler/type_terms.cr`
 - 新建 `src/compiler/type_selftest.cr`
 - 修改 `src/compiler/globals.cr`（表全局声明）、`src/compiler/main.cr`（CLI）、`src/compiler/_import.cr`、`build_selfhost_native.py`、`tests/selfhost/test_compile.py`
-  （**不含 `dyn_arr.cr`**：扩容函数放在 `type_terms.cr` 自持，理由见「文件结构」表注）
+  （不含 `dyn_arr.cr`：扩容函数放在 `type_terms.cr` 自行实现，理由见「文件结构」表注）
 - 新建 `tests/selfhost/test_type_engine.py`
 
-**接口（本任务产出，后续任务依赖，签名不可改）：**
+接口（本任务产出，后续任务依赖，签名不可改）：
 
 ```
-// —— 标签常量（type_terms.cr）——
+// 标签常量（type_terms.cr）
 TT_BOT=0  TT_TOP=1  TT_TOP_K=2  TT_UNION=3  TT_INTER=4  TT_NOT=5
 TT_MU=6   TT_ATOM=7 TT_VAR=8    TT_NIL=9    TT_CONS=10
 ESZ_TYPE_TERM=48   // {tag, a, b, c, d, hash} 各 8B
 OFF_TT_TAG=0 OFF_TT_A=8 OFF_TT_B=16 OFF_TT_C=24 OFF_TT_D=32 OFF_TT_HASH=40
 
-// —— 构造（全部返回类型项行号；DAG 去重）——
+// 构造（全部返回类型项行号；DAG 去重）
 fn tt_term(tag: int, a: int, b: int, c: int, d: int) -> int   // 构造/复用
 fn tt_bot() -> int
 fn tt_top() -> int
@@ -94,7 +94,7 @@ fn tt_atom(atom_kind: int, atom_ti: int, params: int) -> int   // params = CONS 
 fn tt_nil() -> int
 fn tt_cons(head: int, tail: int) -> int
 
-// —— 访问器 ——
+// 访问器
 fn tt_tag(i: int) -> int
 fn tt_a(i: int) -> int
 fn tt_b(i: int) -> int
@@ -102,18 +102,18 @@ fn tt_c(i: int) -> int
 fn tt_d(i: int) -> int
 fn tt_count() -> int
 
-// —— 自测（type_selftest.cr）——
+// 自测（type_selftest.cr）
 fn type_selftest_run() -> int   // 0 = 全过；1 = 有失败（打印每例 PASS/FAIL + 末行 "N/M type-engine cases passed"）
 ```
 
-- [ ] **Step 1: 写失败测试 `tests/selfhost/test_type_engine.py`**
+- [ ] Step 1: 写失败测试 `tests/selfhost/test_type_engine.py`
 
 ```python
 #!/usr/bin/env python3
-"""R2 P0 判据：类型项引擎自测通道（corec selftest-types）。
+"""R2 P0 检查：类型项引擎自测通道（corec selftest-types）。
 
-引擎 = 集合语义的包含判定（spec docs/superpowers/specs/2026-09-10-type-interface-unification-design.md §3）。
-P0 只建层：checker 零改动、产物零变化；判据 = 用例表全 PASS + 零 FAIL + 计数行。
+引擎 = 集合语义的包含判定（spec docs/superpowers/specs/2026-09-10-type-interface-unification-design.md 第 3 节）。
+P0 只建层：checker 零改动、产物零变化；检查 = 用例表全 PASS + 零 FAIL + 计数行。
 """
 
 import re
@@ -124,7 +124,7 @@ BASE = Path(__file__).resolve().parents[2]
 COREC = BASE / "build" / "corec"
 
 # 用例数下限：Task 1 = 建层，用例表 = 5 例（最小面：bot_sub_int/int_sub_str/int_sub_int/
-# dedup/notnot）；Task 3/4 填满 spec §8 全类后**必须把此常量抬到 32**（Task 4 Step 4 明文要求）。
+# dedup/notnot）；Task 3/4 填满 spec 第 8 节全类后必须把此常量抬到 32（Task 4 Step 4 明文要求）。
 MIN_CASES = 5
 
 
@@ -151,14 +151,14 @@ if __name__ == "__main__":
     print("PASS test_selftest_types_all_pass")
 ```
 
-- [ ] **Step 2: 运行确认「红」**
+- [ ] Step 2: 运行确认失败
 
 ```bash
 nice -n 19 python3 tests/selfhost/test_type_engine.py
 ```
 预期：FAIL，因为 `selftest-types` 未注册（`corec` 打印未知子命令，或无 `N/M ... passed` 行）。
 
-- [ ] **Step 3: 表全局声明（`src/compiler/globals.cr`）**
+- [ ] Step 3: 表全局声明（`src/compiler/globals.cr`）
 
 追加内容与既有表声明同风格：
 
@@ -171,12 +171,12 @@ g_ty_memo_keys : string, mut;      g_ty_memo_vals : string, mut;
 g_ty_memo_count : int, mut;        g_ty_memo_cap : int, mut;
 g_ty_steps : int, mut;             g_ty_budget_max : int, mut;     g_ty_exhausted : int, mut;
 g_ty_lits : string, mut;           g_ty_lits_cap : int, mut;       g_ty_lits_count : int, mut;
-g_ty_uncovered : int, mut;         // 未覆盖面命中位（如 AK_NAMED 具体行不展开）——P0 只登记不消费
+g_ty_uncovered : int, mut;         // 未覆盖面命中位（如 AK_NAMED 具体行不展开）。P0 只登记不消费
 ```
 
-- [ ] **Step 4: 扩容函数（**落在 `src/compiler/type_terms.cr`，不放 `dyn_arr.cr`**）**
+- [ ] Step 4: 扩容函数（落在 `src/compiler/type_terms.cr`，不放 `dyn_arr.cr`）
 
-> **位置修正（Task 1 实测 D5）**：若照 `grow_types` 先例放进 `dyn_arr.cr`，会让 **corearch 解析期硬失败**（`Undefined name: ESZ_TYPE_TERM / tt_reindex`），因为 `dyn_arr.cr` 是双 concat 共享面。引擎自持扩容与常量，代码见 Step 5 代码块；共享面零改动。
+> 位置修正（Task 1 实测 D5）：若照 `grow_types` 先例放进 `dyn_arr.cr`，会让 corearch 解析期硬失败（`Undefined name: ESZ_TYPE_TERM / tt_reindex`），因为 `dyn_arr.cr` 是双 concat 共享面。引擎自行实现扩容与常量，代码见 Step 5 代码块；共享面零改动。
 
 追加内容照 `grow_types` 先例：
 
@@ -216,16 +216,16 @@ fn grow_tt_index(needed: int):
     tt_reindex()
 ```
 
-- [ ] **Step 5: 类型项表 + 构造 API（`src/compiler/type_terms.cr`）**
+- [ ] Step 5: 类型项表 + 构造 API（`src/compiler/type_terms.cr`）
 
-> **Task 1 落地确认的三条实现约定（Task 2/3/4 必须沿用，勿回退）**：
-> ① **键 = 五字段全比，哈希不入键**，哈希只负责槽位定位。理由：「存储哈希 == 重算哈希」只在 i64 回绕下成立，而 bootstrap 解释器为任意精度整数，因此该等式恒假，引擎静默退化为「只插不查」（Task 1 实证）。
-> ② **惰性 memo 用零初值加 ready 位**（`g_tt_top_ok` 与 `g_tt_nil_ok`）。理由：全局 `= -1` 初值被 bootstrap 后端降级为 0（`bootstrap/corec/frontend/ir_gen.py:68-74` 中 `constant_value` 只对 `Literal` 赋值，其余写 `.quad 0`；见 TODO #2026-09-10-10）。
-> ③ **本语言无位异或算子**，因此哈希采用 FNV-1 加法折叠（照 `dyn_arr.cr` 的 `hash_bytes` 家族），不用 FNV-1a 的 `^`。
+> Task 1 实施确认的三条实现约定（Task 2/3/4 必须沿用，勿回退）：
+> 1 键 = 五字段全比，哈希不入键，哈希只负责槽位定位。理由：「存储哈希 == 重算哈希」只在 i64 回绕下成立，而 bootstrap 解释器为任意精度整数，因此该等式恒假，引擎不报错地退化为「只插不查」（Task 1 实证）。
+> 2 惰性 memo 用零初值加 ready 位（`g_tt_top_ok` 与 `g_tt_nil_ok`）。理由：全局 `= -1` 初值被 bootstrap 后端降级为 0（`bootstrap/corec/frontend/ir_gen.py:68-74` 中 `constant_value` 只对 `Literal` 赋值，其余写 `.quad 0`；见 TODO #2026-09-10-10）。
+> 3 本语言无位异或算子，因此哈希采用 FNV-1 加法折叠（照 `dyn_arr.cr` 的 `hash_bytes` 家族），不用 FNV-1a 的 `^`。
 
 ```core
 // R2 P0：类型项表（集合语义的类型项 DAG）
-// 语义见 spec §1：τ ::= ⊥ | ⊤ | ⊤ₖ | τ₁∪τ₂ | τ₁∩τ₂ | ¬τ | μX.τ | X | k(τ₁…τₙ)
+// 语义见 spec 第 1 节：τ ::= ⊥ | ⊤ | ⊤ₖ | τ₁∪τ₂ | τ₁∩τ₂ | ¬τ | μX.τ | X | k(τ₁…τₙ)
 // 条目 48B {tag, a, b, c, d, hash}；同构项共享（DAG），索引 = 开放寻址哈希表 g_tt_index。
 // 本文件只做「表示 + 规范化」；判定在 type_engine.cr。
 
@@ -246,7 +246,7 @@ fn tt_d(i: int) -> int { return r64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_D);
 fn tt_count() -> int { return g_type_term_count; }
 
 fn tt_hash5(tag: int, a: int, b: int, c: int, d: int) -> int {
-    // FNV-1a 变体：逐槽 fold（确定性、与插入顺序无关——DAG 去重的键）
+    // FNV-1a 变体：逐槽 fold（确定性、与插入顺序无关，是 DAG 去重的键）
     h : ., mut = 1469598103934665603;
     slot : ., mut = 0;
     loop {
@@ -269,8 +269,8 @@ fn tt_hash5(tag: int, a: int, b: int, c: int, d: int) -> int {
 }
 
 fn tt_mod(h: int, cap: int) -> int {
-    // 非负取模（**必须用这个，不要写 h - (h/cap)*cap**）：
-    // i64 除法向零截断——h 为负时上式得到负下标 → 探针越界 → 去重静默失效
+    // 非负取模（必须用这个，不要写 h - (h/cap)*cap）：
+    // i64 除法向零截断。h 为负时上式得到负下标，探针越界，去重不报错地失效
     // （2026-09-10 P0 Task 1 压力测试实证：扩容后 dedup 全灭）。
     m : ., mut = h / 2;          // 折半再去符号：避免 i64min 直接取负溢出
     if m < 0 { m = 0 - m; }
@@ -307,7 +307,7 @@ fn tt_term(tag: int, a: int, b: int, c: int, d: int) -> int {
     // 构造/复用：查哈希索引（开放寻址），未命中则追加
     if g_tt_index_cap <= 0 { grow_tt_index(2); }
     h := tt_hash5(tag, a, b, c, d);
-    p : ., mut = tt_mod(h, g_tt_index_cap);   // 非负取模（见 tt_mod 注释：负数取模是越界静默失效源）
+    p : ., mut = tt_mod(h, g_tt_index_cap);   // 非负取模（见 tt_mod 注释：负数取模是越界不报错地失效源）
     loop {
         idx := r64(g_tt_index, p * 8);
         if idx < 0 { break; }
@@ -362,11 +362,11 @@ fn tt_cons(head: int, tail: int) -> int { return tt_term(TT_CONS, head, tail, 0,
 fn tt_atom(ak: int, ti: int, params: int) -> int { return tt_term(TT_ATOM, ak, ti, params, 0); }
 ```
 
-- [ ] **Step 6: 自测骨架（`src/compiler/type_selftest.cr`）**
+- [ ] Step 6: 自测框架（`src/compiler/type_selftest.cr`）
 
 ```core
 // R2 P0：类型项引擎判定用例表（数据驱动）+ 自测驱动。
-// 判据：corec selftest-types → 每例一行 PASS/FAIL，末行 "N/M type-engine cases passed"，rc=0 全过。
+// 检查：执行 corec selftest-types 后，每例一行 PASS/FAIL，末行 "N/M type-engine cases passed"，rc=0 全过。
 // 说明：本文件只依赖 type_terms.cr / type_engine.cr 的公开 API（签名见计划 Task 1/Task 3）。
 
 fn ts_check(name: string, got: int, want: int) -> int:
@@ -386,7 +386,7 @@ fn type_selftest_run() -> int:
     fails : ., mut = 0
     total : ., mut = 0
 
-    // --- P0 最小用例（Task 3/4 扩充为 spec §8 全类：子类型/等价/不相交/可空/反例/穷尽性/递归/参数化/预算）---
+    // --- P0 最小用例（Task 3/4 扩充为 spec 第 8 节全类：子类型/等价/不相交/可空/反例/穷尽性/递归/参数化/预算）---
     a_int := tt_atom(AK_INT, TI_INT, -1)
     a_str := tt_atom(AK_STRING, TI_STR, -1)
 
@@ -410,11 +410,11 @@ fn type_selftest_run() -> int:
     return 0
 ```
 
-- [ ] **Step 7: `type_engine.cr` 最小桩（供 Step 6 编译通过；Task 3 补全判定）**
+- [ ] Step 7: `type_engine.cr` 最小模拟（供 Step 6 编译通过；Task 3 补全判定）
 
 ```core
 // R2 P0：类型项判定引擎（语义包含）。
-// 本文件在 Task 3 补全；Task 1 只放原子类常量 + ty_sub 桩（保证骨架可编译可跑）。
+// 本文件在 Task 3 补全；Task 1 只放原子类常量 + ty_sub 模拟（保证框架可编译可跑）。
 AK_INT : int = 0
 AK_DEX : int = 1
 AK_STRING : int = 2
@@ -432,7 +432,7 @@ AK_FN : int = 13
 AK_NAMED : int = 14
 
 fn ty_sub(a: int, b: int) -> int:
-    // 桩：Task 3 替换为真判定（三态 1/0/-1）
+    // 模拟：Task 3 替换为真判定（三态 1/0/-1）
     if a == b:
         return 1
     if tt_tag(b) == TT_TOP:
@@ -442,7 +442,7 @@ fn ty_sub(a: int, b: int) -> int:
     return 0
 ```
 
-- [ ] **Step 8: CLI 注册（`src/compiler/main.cr`）**
+- [ ] Step 8: CLI 注册（`src/compiler/main.cr`）
 
 在 `corec_main()` 的子命令注册段中追加，位置在 `cli_cmd("clean-cache", ...)` 之后：
 
@@ -456,13 +456,13 @@ fn ty_sub(a: int, b: int) -> int:
     if cli_eq(cmd, "selftest-types") { return type_selftest_run(); }
 ```
 
-- [ ] **Step 9: 清单注册（三处）**
+- [ ] Step 9: 清单注册（三处）
 
 1. `src/compiler/_import.cr`：在 `import checker` 之后加入 `import type_terms`、`import type_engine`、`import type_selftest`。
 2. `build_selfhost_native.py`：在 `corec_files` 列表的 `'src/compiler/checker.cr',` 之后插入三行。
 3. `tests/selfhost/test_compile.py`：在 `concat_sources()` 的 `files` 列表的同样位置插入三行。
 
-- [ ] **Step 10: 重建 + 跑测试**
+- [ ] Step 10: 重建 + 跑测试
 
 ```bash
 nice -n 19 python3 build_selfhost_native.py      # BUILD SUCCESS + [GUARD] manifest OK + build log clean
@@ -470,36 +470,36 @@ nice -n 19 ./build/corec selftest-types          # 期望 5/5 ... passed、rc=0
 nice -n 19 python3 tests/selfhost/test_type_engine.py   # 期望 PASS
 nice -n 19 ./build/corec run 'fn main()->int{return 42;}'   # 期望 rc=42（既有行为不动）
 ```
-预期：全绿。
+预期：全部通过。
 
-- [ ] **Step 11: 提交（路径限定）**
+- [ ] Step 11: 提交（路径限定）
 
 ```bash
 jj commit src/compiler/type_terms.cr src/compiler/type_engine.cr src/compiler/type_selftest.cr \
   src/compiler/globals.cr src/compiler/main.cr src/compiler/_import.cr \
   build_selfhost_native.py tests/selfhost/test_compile.py tests/selfhost/test_type_engine.py \
-  -m 'feat: R2 P0 Task 1——类型项表（DAG + 哈希去重）+ 构造 API + selftest-types 自测通道骨架（checker 零改动）'
+  -m 'feat: R2 P0 Task 1：类型项表（DAG + 哈希去重）+ 构造 API + selftest-types 自测通道框架（checker 零改动）'
 ```
-（**不含 `dyn_arr.cr`**：扩容自持于 `type_terms.cr`，见「文件结构」表注。）
+（不含 `dyn_arr.cr`：扩容实现位于 `type_terms.cr`，见「文件结构」表注。）
 
 ---
 
 ## Task 2: NNF + DNF 规范化
 
-**涉及文件：**
+涉及文件：
 - 修改 `src/compiler/type_terms.cr`
 - 修改 `src/compiler/type_selftest.cr`（加用例）
 
-**接口：**
+接口：
 - 消费：Task 1 的构造 API
 - 产出：
 ```
-fn tt_nnf(i: int) -> int          // 否定下推：¬(∪) → ∩(¬)、¬(∩) → ∪(¬)、¬¬ 消、¬ATOM/¬VAR/¬μ 保留为字面
+fn tt_nnf(i: int) -> int          // 否定下推：¬(∪) 变为 ∩(¬)，¬(∩) 变为 ∪(¬)、¬¬ 消、¬ATOM/¬VAR/¬μ 保留为字面
 fn tt_norm(i: int) -> int         // 规范化到 DNF：UNION of INTER-of-literals（literals = ATOM/¬ATOM/VAR/¬VAR/TOP_K）
 fn tt_is_dnf(i: int) -> int       // 自测辅助：检查项是否已是 DNF 形态
 ```
 
-- [ ] **Step 1: 加失败用例（`type_selftest.cr`）**
+- [ ] Step 1: 加失败用例（`type_selftest.cr`）
 
 ```core
     // --- 规范化（Task 2）---
@@ -511,14 +511,14 @@ fn tt_is_dnf(i: int) -> int       // 自测辅助：检查项是否已是 DNF �
 ```
 （`tt_intersect_union_probe()` 是构造 `(int ∪ string) ∩ bool` 的探针函数，Task 2 一并加上；它测的是「∩ 分配到 ∪ 后 DNF 不丢项」。）
 
-- [ ] **Step 2: 运行确认「红」**
+- [ ] Step 2: 运行确认失败
 
 ```bash
 nice -n 19 python3 build_selfhost_native.py && nice -n 19 ./build/corec selftest-types
 ```
-预期：FAIL（`tt_norm`、`tt_is_dnf`、`tt_equiv` 未实现，或桩返回 0）。
+预期：FAIL（`tt_norm`、`tt_is_dnf`、`tt_equiv` 未实现，或模拟返回 0）。
 
-- [ ] **Step 3: 实现 NNF（`type_terms.cr`）**
+- [ ] Step 3: 实现 NNF（`type_terms.cr`）
 
 ```core
 // NNF：否定下推（De Morgan + 双重否定消除）；μ 体内照推
@@ -561,7 +561,7 @@ fn tt_nnf_neg(i: int) -> int:
 ```
 （`tt_nnf_list` 是新增的小工具函数，对 CONS 链逐元素调用 `tt_nnf`。）
 
-- [ ] **Step 4: 实现 DNF（`type_terms.cr`）**
+- [ ] Step 4: 实现 DNF（`type_terms.cr`）
 
 ```core
 // DNF：把 NNF 形态分配到「union of inter-of-literals」。
@@ -577,8 +577,8 @@ fn tt_dnf(i: int) -> int:
     if t == TT_INTER:
         l := tt_dnf(tt_a(i))
         r := tt_dnf(tt_b(i))
-        // 分配律**两支都展开**：(A∪B)∩C → (A∩C) ∪ (B∩C)
-        // （本计划初稿只展开一支 = 静默丢项；P0 Task 2 自测 norm.distributed 实证 got INTER want UNION）
+        // 分配律两支都展开：(A∪B)∩C 展开为 (A∩C) ∪ (B∩C)
+        // （本计划初稿只展开一支 = 不报错地丢项；P0 Task 2 自测 norm.distributed 实证 got INTER want UNION）
         if tt_tag(l) == TT_UNION:
             return tt_union(tt_dnf(tt_inter(tt_a(l), r)), tt_dnf(tt_inter(tt_b(l), r)))
         if tt_tag(r) == TT_UNION:
@@ -610,9 +610,9 @@ fn tt_is_product_chain(i: int) -> int:
         return tt_is_product_chain(tt_b(i))
     return tt_is_literal(i)
 ```
-（`tt_is_literal` 已在 Task 3 Step 3 定义，**依赖顺序**如下：Task 2 落地时先补一个最小 `tt_is_literal`，其语义同 Task 3 版本；Task 3 再替换为最终版。两版语义必须一致。）
+（`tt_is_literal` 已在 Task 3 Step 3 定义，依赖顺序如下：Task 2 实施时先补一个最小 `tt_is_literal`，其语义同 Task 3 版本；Task 3 再替换为最终版。两版语义必须一致。）
 
-- [ ] **Step 5: 跑测试确认变绿**
+- [ ] Step 5: 跑测试确认通过
 
 ```bash
 nice -n 19 python3 build_selfhost_native.py && nice -n 19 ./build/corec selftest-types
@@ -620,23 +620,23 @@ nice -n 19 python3 tests/selfhost/test_type_engine.py
 ```
 预期：全部 PASS，计数行 ≥ 8。
 
-- [ ] **Step 6: 提交**
+- [ ] Step 6: 提交
 
 ```bash
-jj commit src/compiler/type_terms.cr src/compiler/type_selftest.cr -m 'feat: R2 P0 Task 2——NNF（否定下推）+ DNF 规范化（∪/∩ 分配律）+ 形态自测'
+jj commit src/compiler/type_terms.cr src/compiler/type_selftest.cr -m 'feat: R2 P0 Task 2：NNF（否定下推）+ DNF 规范化（∪/∩ 分配律）+ 形态自测'
 ```
 
 ---
 
 ## Task 3: 判定引擎（三态 + 原子互斥 + μ memo + 预算守卫）
 
-**涉及文件：**
-- 修改 `src/compiler/type_engine.cr`（替换 Task 1 的桩）
+涉及文件：
+- 修改 `src/compiler/type_engine.cr`（替换 Task 1 的模拟）
 - 修改 `src/compiler/type_selftest.cr`（加用例）
 
-**接口：**
+接口：
 - 消费：Task 1/2 的 API
-- 产出（**API 稳定，Task 4/后续 P 期依赖**）：
+- 产出（API 稳定，Task 4/后续 P 期依赖）：
 ```
 // 三态：1 = 成立；0 = 不成立；-1 = 预算耗尽/不可判定（禁止当 0 用）
 fn ty_sub(a: int, b: int) -> int
@@ -646,18 +646,18 @@ fn ty_inhabited(a: int) -> int
 fn tt_witness(a: int, b: int) -> int   // A\B 的具体类型项（不可满足时 -1）
 fn ty_budget_reset(limit: int)          // 每次顶层判定前调用
 fn ty_exhausted() -> int                // 上一次判定是否预算耗尽
-// —— 本任务一并实现的内部辅助（签名固定，供 Task 4 复用）——
-fn lit_collect(i: int) -> int           // product/字面 → 字面数组（写入 g_ty_lits 侧缓冲），返回字面个数
+// 本任务一并实现的内部辅助（签名固定，供 Task 4 复用）：
+fn lit_collect(i: int) -> int           // product 或字面展开为字面数组（写入 g_ty_lits 侧缓冲），返回字面个数
 fn lit_at(k: int) -> int                // 第 k 个字面项（g_ty_lits 读取）
-fn lits_contradictory() -> int          // 当前 g_ty_lits 内是否含 X 与 ¬X、或两个互斥原子类 → 1
+fn lits_contradictory() -> int          // 当前 g_ty_lits 内是否含 X 与 ¬X、或两个互斥原子类，返回 1
 fn lit_set_covers(n: int, q: int) -> int // 前 n 个字面集合是否覆盖字面 q（lit_covers 扫描）
 fn ak_disjoint(x: int, y: int) -> int
 ```
 
-- [ ] **Step 1: 加失败用例（`type_selftest.cr`）**
+- [ ] Step 1: 加失败用例（`type_selftest.cr`）
 
 ```core
-    // 深递归探针：μX₀. product<μX₁. product<… int>>（深度 256）——判定展开会耗尽小预算
+    // 深递归探针：μX₀. product<μX₁. product<… int>>（深度 256），判定展开会耗尽小预算
         // （放在 type_selftest.cr 内，仅自测使用）
     fn tt_mu_probe_deep() -> int:
         acc : ., mut = tt_atom(AK_INT, TI_INT, -1)
@@ -694,7 +694,7 @@ fn ak_disjoint(x: int, y: int) -> int
     fails = fails + ts_check("topk.sub", ty_sub(a_int, tt_top_k(AK_INT)), 1)
     total = total + 1
     fails = fails + ts_check("topk.neg", ty_sub(a_str, tt_top_k(AK_INT)), 0)
-        // 预算守卫（深递归爆炸项 + 极小预算 → 三态 -1，且不与"不成立"混淆）
+        // 预算守卫（深递归展开项 + 极小预算，得到三态 -1，且不与"不成立"混淆）
     ty_budget_reset(64)
     total = total + 1
     fails = fails + ts_check("budget.unknown", ty_sub(tt_mu_probe_deep(), a_int), -1)
@@ -703,13 +703,13 @@ fn ak_disjoint(x: int, y: int) -> int
     ty_budget_reset(200000)
 ```
 
-- [ ] **Step 2: 运行确认「红」**（桩返回 0，断言 1 或 -1 的用例必然失败）
+- [ ] Step 2: 运行确认失败（模拟返回 0，断言 1 或 -1 的用例必然失败）
 
-- [ ] **Step 3: 实现互斥公理 + 逐字面覆盖（`type_engine.cr`）**
+- [ ] Step 3: 实现互斥公理 + 逐字面覆盖（`type_engine.cr`）
 
 ```core
 // 原子类互斥（P0 公理表）：不同原子类两两不相交；AK_DYN = ⊤（与所有类相交）。
-// 例外：AK_NAMED 的具体行可能展开为其它类——P0 不展开（登记为未覆盖面），按未知处理。
+// 例外：AK_NAMED 的具体行可能展开为其它类。P0 不展开（登记为未覆盖面），按未知处理。
 fn ak_disjoint(x: int, y: int) -> int:
     if x == y:
         return 0
@@ -749,7 +749,7 @@ fn lit_covers(p: int, q: int) -> int:
 ```
 （`ty_ak_of(lit)` 的规则：ATOM 取 `tt_a(lit)`；`¬ATOM` 取 `tt_a(tt_a(lit))`。）
 
-- [ ] **Step 4: 实现判定的 product 覆盖 + μ 展开 + memo + 预算（`type_engine.cr`）**
+- [ ] Step 4: 实现判定的 product 覆盖 + μ 展开 + memo + 预算（`type_engine.cr`）
 
 ```core
 // 顶层入口：每次重置步数/耗尽位，规范化两侧，逐 product 覆盖判定
@@ -778,7 +778,7 @@ fn prod_covered(p: int, b: int) -> int:
             return 1
         return prod_covered(p, tt_b(b))
     // p 与 b 均为 product/字面：收集双方字面集后做覆盖（b ⊆ p）
-    //   —— p 是待检查的「更小集合」，b 是候选「更大集合」：需要 b 的每个字面被 p 的某字面蕴含
+    //   p 是待检查的「更小集合」，b 是候选「更大集合」：需要 b 的每个字面被 p 的某字面蕴含
     plits := lit_collect(p)
     blits := lit_collect(b)
     bi : ., mut = 0
@@ -786,7 +786,7 @@ fn prod_covered(p: int, b: int) -> int:
         if bi >= blits_count:
             break
         bq := blits[bi]
-        // ⊥ 早退：p 的字面集内部矛盾 → 空集，覆盖一切
+        // ⊥ 早退：p 的字面集内部矛盾 ，得到空集，覆盖一切
         if lits_contradictory(plits) != 0:
             return 1
         if !lit_set_covers(plits, bq):
@@ -798,7 +798,7 @@ fn prod_covered(p: int, b: int) -> int:
 
 ```core
 // μ 展开 + memo（假设-判定，最大不动点）：遇到 MU 单步展开，并在假设集中登记 (子项对)
-// 预算：每次 sub 调用 g_ty_steps += 1；超 g_ty_budget_max → g_ty_exhausted = 1，返回 -1
+// 预算：每次 sub 调用 g_ty_steps += 1；超过 g_ty_budget_max 则 g_ty_exhausted = 1，返回 -1
 fn sub_step(a: int, b: int) -> int:
     g_ty_steps = g_ty_steps + 1
     if g_ty_steps > g_ty_budget_max:
@@ -807,13 +807,13 @@ fn sub_step(a: int, b: int) -> int:
     mk := ty_memo_find(a, b)
     if mk >= 0:
         return r64(g_ty_memo_vals, mk * 8)
-    ...   // 1) a 为 MU → 展开（tt_subst(a 的 var, a 的 body)）后递归
-          // 2) b 为 MU → 展开后递归
+    ...   // 1) a 为 MU 时展开（tt_subst(a 的 var, a 的 body)）后递归
+          // 2) b 为 MU 时展开后递归
           // 3) 结果写 memo（三态值）
     return r
 ```
 
-- [ ] **Step 5: 实现 `ty_equiv` / `ty_disjoint` / `ty_inhabited` / 预算重置**
+- [ ] Step 5: 实现 `ty_equiv` / `ty_disjoint` / `ty_inhabited` / 预算重置
 
 ```core
 fn ty_equiv(a: int, b: int) -> int:
@@ -843,40 +843,40 @@ fn ty_budget_reset(limit: int):
 fn ty_exhausted() -> int:
     return g_ty_exhausted
 ```
-（`prod_inhabited_any`：UNION 拆分 + 每个 product 做 `lits_contradictory` 检查；`AK_NAMED` 具体行 P0 不展开——**登记为未覆盖面**，遇到即 `g_ty_exhausted` 语义之外的 `unknown`：返回 -1 并置一个 `g_ty_uncovered` 位，自测里不出现。）
+（`prod_inhabited_any`：UNION 拆分 + 每个 product 做 `lits_contradictory` 检查；`AK_NAMED` 具体行 P0 不展开。登记为未覆盖面，遇到即 `g_ty_exhausted` 语义之外的 `unknown`：返回 -1 并置一个 `g_ty_uncovered` 位，自测里不出现。）
 
-- [ ] **Step 6: 跑测试（含预算用例）**
+- [ ] Step 6: 跑测试（含预算用例）
 
 ```bash
 nice -n 19 python3 build_selfhost_native.py && nice -n 19 ./build/corec selftest-types
 nice -n 19 python3 tests/selfhost/test_type_engine.py
 ```
-Expected: 全 PASS（计数 ≥ 20，含 2 例预算三态）。
+预期： 全 PASS（计数 ≥ 20，含 2 例预算三态）。
 
-- [ ] **Step 7: 提交**
+- [ ] Step 7: 提交
 
 ```bash
 jj commit src/compiler/type_engine.cr src/compiler/type_selftest.cr \
-  -m 'feat: R2 P0 Task 3——语义包含判定（子类型/等价/不相交/可空 + 原子互斥公理 + μ 展开 memo + 三态预算守卫）'
+  -m 'feat: R2 P0 Task 3：语义包含判定（子类型/等价/不相交/可空 + 原子互斥公理 + μ 展开 memo + 三态预算守卫）'
 ```
 
 ---
 
 ## Task 4: 反例（witness）+ 穷尽性 + 递归/参数化用例补齐
 
-**Files:**
+文件：
 - Modify: `src/compiler/type_engine.cr`（`tt_witness`、`ty_exhaustive`）
-- Modify: `src/compiler/type_selftest.cr`（用例补齐到 spec §8 全类）
+- Modify: `src/compiler/type_selftest.cr`（用例补齐到 spec 第 8 节全类）
 
-**Interfaces:**
+接口：
 - Consumes: Task 3 的判定 API
 - Produces:
 ```
-fn tt_witness(a: int, b: int) -> int   // A\B 的类型项（规范化后）；不可满足 → -1
+fn tt_witness(a: int, b: int) -> int   // A\B 的类型项（规范化后）；不可满足返回 -1
 fn ty_exhaustive(domain: int, patterns: int) -> int   // patterns = CONS 链；1 = 穷尽；0 = 有遗漏；-1 = 未知
 ```
 
-- [ ] **Step 1: 加失败用例（`type_selftest.cr`）**
+- [ ] Step 1: 加失败用例（`type_selftest.cr`）
 
 ```core
     // --- 反例 + 穷尽性（Task 4）---
@@ -907,12 +907,12 @@ fn ty_exhaustive(domain: int, patterns: int) -> int   // patterns = CONS 链；1
     total = total + 1; fails = fails + ts_check("param.invariant_p0", ty_sub(seq_i, seq_s), 0);  // P0 参数不变；变型规则 P3
 ```
 
-- [ ] **Step 2: 运行确认「红」**（`tt_witness`/`ty_exhaustive` 未实现）
+- [ ] Step 2: 运行确认失败（`tt_witness`/`ty_exhaustive` 未实现）
 
-- [ ] **Step 3: 实现 witness（`type_engine.cr`）**
+- [ ] Step 3: 实现 witness（`type_engine.cr`）
 
 ```core
-// 反例 = A\B 的规范化项；不可满足（= ⊥）→ -1（无遗漏/无反例值）
+// 反例 = A\B 的规范化项；不可满足（= ⊥）时返回 -1（无遗漏/无反例值）
 fn tt_witness(a: int, b: int) -> int:
     r := tt_norm(tt_inter(a, tt_not(b)))
     if ty_inhabited(r) != 1:
@@ -921,7 +921,7 @@ fn tt_witness(a: int, b: int) -> int:
         return -1
     return r
 
-// 穷尽性：¬(⋃patterns) ∩ domain 可满足 → 有遗漏；witness = 遗漏的具体类型项
+// 穷尽性：¬(⋃patterns) ∩ domain 可满足则有遗漏；witness = 遗漏的具体类型项
 fn ty_exhaust_witness(domain: int, patterns: int) -> int:
     acc : ., mut = tt_bot()
     p : ., mut = patterns
@@ -941,14 +941,14 @@ fn ty_exhaustive(domain: int, patterns: int) -> int:
     return 0
 ```
 
-- [ ] **Step 4: 跑测试（用例表到 spec §8 全类）**
+- [ ] Step 4: 跑测试（用例表到 spec 第 8 节全类）
 
-**同时必办两件**（Task 1 评审遗留，2026-09-10）：
-1. 把 `tests/selfhost/test_type_engine.py` 的 `MIN_CASES` 从 `5` **抬到 `32`**（注释同步：P0 全类落地）。
-2. 用例表加入**索引扩容守门**（Task 1 实测：5 例 << 初始容量 1024 → 扩容路径在判据下不可达，只能靠一次性压力程序验证；长期守门须有常规用例）：
+同时必办两件（Task 1 评审遗留，2026-09-10）：
+1. 把 `tests/selfhost/test_type_engine.py` 的 `MIN_CASES` 从 `5` 抬到 `32`（注释同步：P0 全类实施）。
+2. 用例表加入索引扩容守门（Task 1 实测：5 例 << 初始容量 1024，扩容路径在检查下不可达，只能靠一次性压力程序验证；长期守门须有常规用例）：
    新增自测函数（`type_selftest.cr`）：先把 `g_tt_index` 预置为 8 槽（直接 `grow_tt_index` 前先手动置 `g_tt_index_cap = 0` 再调 `grow_tt_index(2)`，或按实现时可用的最小触发路径），随后构造 ~40 个互异项逼出装填因子守卫扩容 + `tt_reindex` + 同轮重试，最后断言：
    - `tt_count()` 等于期望项数（无重复插入、无丢项）
-   - 一组「扩容前构造的项」在扩容后**行号不变**（DAG 键跨重建稳定）
+   - 一组「扩容前构造的项」在扩容后行号不变（DAG 键跨重建稳定）
    - 新项插入后 `tt_tag/tt_a` 读回正确
    断言写成 `ts_check("grow.*", …)` 若干例（≥3）。
 
@@ -956,25 +956,25 @@ fn ty_exhaustive(domain: int, patterns: int) -> int:
 nice -n 19 python3 build_selfhost_native.py && nice -n 19 ./build/corec selftest-types
 nice -n 19 python3 tests/selfhost/test_type_engine.py
 ```
-Expected: 全 PASS，`N/N ... passed` 且 N ≥ 32（子类型/等价/不相交/可空/反例/穷尽性/递归/参数化/预算全类齐 + 扩容守门）。
+预期： 全 PASS，`N/N ... passed` 且 N ≥ 32（子类型/等价/不相交/可空/反例/穷尽性/递归/参数化/预算全类齐 + 扩容守门）。
 
-- [ ] **Step 5: 提交**
+- [ ] Step 5: 提交
 
 ```bash
 jj commit src/compiler/type_engine.cr src/compiler/type_selftest.cr \
-  -m 'feat: R2 P0 Task 4——反例（witness = A\B 具体类型项）+ 穷尽性（补集空性 + 遗漏 witness）+ 递归/参数化用例补齐（用例表覆盖 spec §8 全类）'
+  -m 'feat: R2 P0 Task 4：反例（witness = A\B 具体类型项）+ 穷尽性（补集空性 + 遗漏 witness）+ 递归/参数化用例补齐（用例表覆盖 spec 第 8 节全类）'
 ```
 
 ---
 
-## Task 5: 收官（回归 + 自举 + 零产物变化 + 文档/清单）
+## Task 5: 结束（回归 + 自举 + 零产物变化 + 文档/清单）
 
-**Files:**
-- Modify: `docs/superpowers/specs/2026-09-10-type-interface-unification-design.md`（§9 P0 标记完成）
-- Modify: `TODO.md`（登记 P0 落点 + 未覆盖面）
-- Modify: `.superpowers/sdd/progress.md`（清单）
+文件：
+- Modify: `docs/superpowers/specs/2026-09-10-type-interface-unification-design.md`（第 9 节 P0 标记完成）
+- Modify: `TODO.md`（登记 P0 位置 + 未覆盖面）
+- Modify: `docs/superpowers/implementation/2026-09-11-sdd-progress.md`（清单）
 
-- [ ] **Step 1: 全量回归**
+- [ ] Step 1: 全量回归
 
 ```bash
 nice -n 19 ./build/corec clean-cache
@@ -991,21 +991,21 @@ nice -n 19 python3 tests/bootstrap/test_pipeline.py
 nice -n 19 python3 tests/bootstrap/test_borrow.py
 nice -n 19 python3 tests/bootstrap/test_generics.py
 ```
-Expected: 全绿（13 项）。
+预期： 全部通过（13 项）。
 
-- [ ] **Step 2: 零产物变化判据（P0 的硬锚）**
+- [ ] Step 2: 零产物变化检查（P0 的关键检查）
 
 P0 前后各构建同一「无新能力程序」样本，产物必须逐字节相同：
 
 ```bash
-# 在**本批第一个任务提交之前**的基点捕获基线（若未捕获，用 jj 取父修订重建编译器的做法不可行——
-# 改以「同源两次构建」+ 既有套件全绿替代，并在报告显式记录该替代）
+# 在本批第一个任务提交之前的基点捕获基线（若未捕获，用 jj 取父修订重建编译器的做法不可行，
+# 改为「同源两次构建」加既有套件全部通过，并在报告显式记录该替代）
 nice -n 19 ./build/corec build tests/suite/ptr_arith.cr --static -o /tmp/r2p0_head_bin
 cmp /tmp/r1t4_base_bin /tmp/r2p0_head_bin && echo BYTE-IDENTICAL
 ```
-Expected: `BYTE-IDENTICAL`（`/tmp/r1t4_base_bin` = R1 批捕获的同一样本产物，sha256 `95084e7b…d475`；若该文件不在盘上 → 从 `tests/suite/ptr_arith.cr` 重建并在报告记录不可比对）。
+预期： `BYTE-IDENTICAL`（`/tmp/r1t4_base_bin` = R1 批捕获的同一样本产物，sha256 `95084e7b…d475`；若该文件不在盘上，则从 `tests/suite/ptr_arith.cr` 重建并在报告记录不可比对）。
 
-- [ ] **Step 3: 自举全链**
+- [ ] Step 3: 自举全链
 
 ```bash
 nice -n 19 python3 build_selfhost_native.py                 # BUILD SUCCESS + [GUARD] OK + 日志守卫 clean
@@ -1014,27 +1014,27 @@ nice -n 19 ./build/corec build src/compiler/main.cr -o /tmp/corec2 --static -O 0
 cmp /tmp/corec2 /tmp/corec3 && echo CMP_IDENTICAL
 nice -n 19 ./build/corec run 'fn main()->int{return 42;}'   # rc=42
 ```
-Expected: `CMP_IDENTICAL` + rc=42 + 无 `error[`/N06。
+预期： `CMP_IDENTICAL` + rc=42 + 无 `error[`/N06。
 
-- [ ] **Step 4: 文档与清单**
+- [ ] Step 4: 文档与清单
 
-- spec §9 表 P0 行标 ✅ 已完成 + 记录落点（提交哈希）
-- `TODO.md` 新增条目：**P0 未覆盖面登记**（`AK_NAMED` 具体行不展开 → 判定返回 unknown；参数变型规则 = P3；用户接口/载体 = P2/P4）
-- `.superpowers/sdd/progress.md` 追加 R2 P0 段
+- spec 第 9 节表 P0 行标为已完成，并记录位置（提交哈希）
+- `TODO.md` 新增条目：P0 未覆盖面登记（`AK_NAMED` 具体行不展开，判定返回 unknown；参数变型规则 = P3；用户接口/实现方式 = P2/P4）
+- `docs/superpowers/implementation/2026-09-11-sdd-progress.md` 追加 R2 P0 段
 
-- [ ] **Step 5: 提交**
+- [ ] Step 5: 提交
 
 ```bash
 jj commit docs/superpowers/specs/2026-09-10-type-interface-unification-design.md TODO.md \
-  -m 'docs: R2 P0 收官——用例表全绿 + 全回归 + 零产物变化（byte-identical）+ 自举 cmp IDENTICAL；spec/TODO/台账同步（未覆盖面登记）'
+  -m 'docs: R2 P0 收尾：用例表全部通过 + 全回归 + 零产物变化（byte-identical）+ 自举 cmp IDENTICAL；spec/TODO/台账同步（未覆盖面登记）'
 ```
 
 ---
 
 ## 自检记录（写完计划后复核）
 
-- **spec 覆盖**：spec §4 步 1（建层：类型项表 + 引擎 + 查询 API + 用例表；checker 不动）→ Task 1-4；§3.2 判定 API 五函数 → Task 3（三态）/Task 4（witness）；§3.3 规范化/记忆化/位集合快路径/预算守卫 → Task 2（规范化）· Task 3（memo + 预算）· 位集合快路径**不在 P0**（属 P3 穷尽性快路径，已在本计划 Task 4 用判定实现穷尽性）；§8 用例表分层 → Task 4；§9 P0 判据 → Task 5
-- **P0 边界守住**：checker/ir_gen/后端/解释器零改动（清单仅加三文件）；查询 API（`iface_*`）= P2 的接线面，P0 只出判定 API（`ty_*`）——spec §3.2 与 §2.5 的分工在计划里明确（`iface_*` 属 P2）
-- **占位符扫描**：无 TBD/TODO；Task 2 Step 4 的 `tt_is_dnf` 与 Task 3 Step 4 的 `prod_covered` 给了语义级骨架 + 明确要求（实现者补完辅助函数），非「稍后填」
-- **命名一致性**：`tt_*`（构造/访问/规范化）、`ty_*`（判定/预算）、`ak_*`/`AK_*`（原子类）、`ts_check`（自测）在四任务间签名一致；`AK_NAMED` 的两处引用（Task 3 Step 3 与 Step 5）语义一致
-- **风险注记**：Task 1 的开放寻址索引在扩容时用 `tt_reindex()` 重建（O(n)），实现者须保证 `grow_tt_index` 后 `tt_reindex` 被调用（计划代码已含）；预算用例依赖 `g_ty_steps` 全局——多例连续跑时每例前须 `ty_budget_reset`（用例表已按此写）
+- spec 覆盖：spec 第 4 节步 1（建层：类型项表 + 引擎 + 查询 API + 用例表；checker 不动）对应 Task 1-4；第 3.2 节判定 API 五函数对应 Task 3（三态）和 Task 4（witness）；第 3.3 节规范化/记忆化/位集合快路径/预算守卫对应 Task 2（规范化）和 Task 3（memo 加预算），位集合快路径不在 P0（属 P3 穷尽性快路径，已在本计划 Task 4 用判定实现穷尽性）；第 8 节用例表分层对应 Task 4；第 9 节 P0 检查对应 Task 5
+- P0 边界守住：checker/ir_gen/后端/解释器零改动（清单仅加三文件）；查询 API（`iface_*`）= P2 的接线面，P0 只出判定 API（`ty_*`）。spec 第 3.2 节与第 2.5 节的分工在计划里明确（`iface_*` 属 P2）
+- 占位符扫描：无 TBD/TODO；Task 2 Step 4 的 `tt_is_dnf` 与 Task 3 Step 4 的 `prod_covered` 给了语义级框架 + 明确要求（实现者补完辅助函数），非「稍后填」
+- 命名一致性：`tt_*`（构造/访问/规范化）、`ty_*`（判定/预算）、`ak_*`/`AK_*`（原子类）、`ts_check`（自测）在四任务间签名一致；`AK_NAMED` 的两处引用（Task 3 Step 3 与 Step 5）语义一致
+- 风险注记：Task 1 的开放寻址索引在扩容时用 `tt_reindex()` 重建（O(n)），实现者须保证 `grow_tt_index` 后 `tt_reindex` 被调用（计划代码已含）；预算用例依赖 `g_ty_steps` 全局。多例连续跑时每例前须 `ty_budget_reset`（用例表已按此写）

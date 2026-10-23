@@ -24,7 +24,7 @@ fn va_arg(pack: string, n: int) -> int:
         return -1
     return r64(pack, (n + 1) * 8)
 
-// 检测函数名是否含 "ln"（println → print + "\n"）
+// println is print plus a newline; detect the "ln" suffix.
 fn va_fn_has_ln(fn_name: string) -> bool:
     fnl := str_len(fn_name)
     if fnl >= 4:

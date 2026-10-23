@@ -1,161 +1,148 @@
-# 统一硬件映射设计：MMIO 管理（语义表 + 投影表 + 检查 + 参考机）
+# 硬件映射设计：MMIO 管理
 
-日期：2026-08-23
-状态：已批准（brainstorming 会话，三节逐节确认）
+## 概述
 
-## 一、背景与动机
+内核路线需要汇编级和硬件级能力，MMIO 是第一步。
 
-内核路线（`project-book` 第五阶段）需要汇编级/硬件级能力——MMIO 是第一步。标准化问题：x86 有
-标准手册可循，而 **arm64 SoC 外设各写各的、手册不统一**（内存映射因芯片而异）。结论：后端需要
-一个**能直接编译的具体硬件目标**——参考机（固定 MMIO 映射的虚拟标准机），真实硬件走平台投影。
+x86 有标准手册，arm64 SoC 的外设各自定义，内存映射因芯片而异。后端需要一个可以直接编译的具体硬件目标，即参考机。参考机有固定 MMIO 映射，真实硬件通过平台投影接入。
 
-先例（均已批准）：
-- **`crasm`**（2026-08-08）：统一汇编层 + 特权指令固定集（`mmio_read`/`mmio_write`/`barrier`/...）+ 平台映射表
-- **`alloc_at`**（2026-08-13）：MMIO 页声明式进图获得 `provenance`（`pointer-model.md`）
-- **平台桥抽象**（2026-08-16）：语义接口（数学）+ 后端实现（惯例隔离）
-- **地址 = 映射**（2026-08-15 语义定稿）：字节地址不是语义对象，只是经典投影实例
+设计状态：已批准。决策记录、检查细节、裸机输出对照和测试阶段见 `docs/superpowers/implementation/2026-08-23-hw-map-audit.md`。
 
-## 二、决策记录（2026-08-23 brainstorming 确认）
+## 结构
 
-1. **参考机 + 裸机输出**：后端直接编译到固定 MMIO 映射的参考机，产出裸机镜像（无 OS）
-2. **全局生效接入检查**：每次 MMIO 访问对照映射表验证——存在性与地址、宽度匹配、读写权限、`volatile` 顺序性（全面）
-3. **描述形态两者结合**：语言内声明（主）+ 外部数据文件（真实 SoC）
-4. **双方都生效**：语言层与 crasm 层共用同一全局映射表与检查
-5. **落地顺序**：先定义表描述格式 → 再完成 x64 映射表
-6. **范式无关**：设备声明不绑定物理地址——地址绑定下沉到投影层（与「地址 = 映射」定稿一致）
-7. **暂不接入能力模型**：能力格 v4（`memory-model-capability-lattice.md`）已发布——M1 定论：能力不提升一等公民（语义还原图上，授权归治理层）；本设计不绑定，与 v4 定位一致
+硬件映射分三层：
 
-## 三、架构：三层结构（描述 → 检查 → 发射）
-
-### 1. 描述层
-
-**语义表（范式无关、零地址）**——编译期单例 `g_hw_sem`：
-
-```
-g_hw_sem
-└── Device
-    ├── id（逻辑身份："uart"）
-    └── regs[]：Register
-        ├── name / offset（设备内逻辑偏移）/ width(8|16|32|64) / perm(ro|wo|rw)
+```mermaid
+flowchart TD
+    A["语义表<br/>设备逻辑身份和寄存器结构"] --> B["检查层<br/>hw_check pass"]
+    B --> C["投影表<br/>设备 id 到物理基址"]
+    C --> D["发射层<br/>load/store 到解析地址"]
 ```
 
-没有 `base`、没有绝对地址——设备 = 逻辑身份 + 寄存器结构，量子/分布式/GPU 范式下照常可用。
-语言声明与数据文件编译进**同一张表**，形式不同、语义同一。
+### 语义表
 
-**语言内声明**（声明式进图，`alloc_at` 同路径）：
+语义表是范式无关的，不含地址。编译期单例 `g_hw_sem`：
+
+```text
+Device
+    id          逻辑身份，例如 "uart"
+    regs[]      寄存器
+        name
+        offset  设备内逻辑偏移
+        width   8、16、32、64
+        perm    ro、wo、rw
+```
+
+设备由逻辑身份和寄存器结构组成，没有 `base`，也没有绝对地址。语言声明和数据文件编译进同一张表，形式不同，语义相同。
+
+语言内声明：
 
 ```core
-device UART {                    // 无 @ 基址——不绑定任何硬件
-    DATA   : u8  @ 0x00, rw;
-    STATUS : u8  @ 0x04, ro;
+device UART {
+    DATA   : u8 @ 0x00, rw;
+    STATUS : u8 @ 0x04, ro;
 }
 ```
 
-**数据文件**（真实 SoC 用，复用 `stdlib/toml.cr` 解析器）：
+数据文件用于真实 SoC，复用 `stdlib/toml.cr`：
 
 ```toml
 [[device]]
-name = "uart"                    # 无 base 字段
+name = "uart"
+
 [[device.reg]]
-name = "data"; offset = 0x00; width = 8; perm = "rw"
+name = "data"
+offset = 0x00
+width = 8
+perm = "rw"
 ```
 
-**投影表（经典地址绑定 = 后端实现选择）**——`device` id → 物理基址：
+### 投影表
 
+投影表是经典地址绑定，属于后端实现选择：
+
+```text
+uart -> 0x3F200000   x64 参考机，编译器内置
+uart -> 0xFE201000   树莓派，数据文件导入
+uart -> 0x09000000   QEMU virt，数据文件导入
 ```
-uart → 0x3F200000    （x64 参考机，编译器内置）
-uart → 0xFE201000    （真实平台：树莓派，数据文件导入）
-uart → 0x09000000    （真实平台：QEMU virt，数据文件导入）
-```
 
-x64 映射表 = 投影表的第一份实例。同一份语义表 + 不同投影表 = 同一程序编译到不同硬件。
-访问 `UART.DATA` 语义上是「逻辑设备内的逻辑寄存器」；只有发射时才解析为 基址+偏移 的经典 `load`/`store`。
+同一份语义表配不同投影表，可以把同一程序编译到不同硬件。访问 `UART.DATA` 在语义上是访问逻辑设备内的逻辑寄存器，只有发射时才解析为基址加偏移的 `load` 或 `store`。
 
-### 2. 检查层
+## 检查
 
-**`hw_check` pass**：在 HDFG 上运行（与 `ptr_analysis` / `region_check` / `provenance_verify` 并列），
-消费 `g_hw_sem`。访问形式：语言层 `UART.DATA` 下降为携带 `device`+`reg` 引用的 IR 节点
-（`IR_MMIO_READ/WRITE`）。
+`hw_check` pass 在 HDFG 上运行，与指针分析、区域检查和 provenance 验证并列，消费 `g_hw_sem`。
+
+语言层的 `UART.DATA` 下降为携带设备和寄存器引用的 IR 节点 `IR_MMIO_READ` 和 `IR_MMIO_WRITE`。
 
 | 检查 | 规则 | 违反示例 |
 |---|---|---|
-| 存在性 | 访问的设备/寄存器必须存在于语义表 | `UART.DATA` 表里没有 DATA |
-| 宽度匹配 | 访问宽度 == 寄存器声明宽度 | 32 位写 u8 寄存器 |
-| 读写权限 | ro 不被写、wo 不被读 | `UART.STATUS = 1` |
-| volatile 顺序性 | MMIO 节点不可消除/不可重排/不可合并 | 优化器 CSE 两个 MMIO 读 |
+| 存在性 | 设备和寄存器必须在语义表中 | 表里没有 `UART.DATA` |
+| 宽度匹配 | 访问宽度等于寄存器声明宽度 | 用 32 位写 u8 寄存器 |
+| 读写权限 | ro 不能被写，wo 不能被读 | 写 `UART.STATUS` |
+| volatile 顺序 | MMIO 节点不可消除、不可重排、不可合并 | CSE 合并两个 MMIO 读 |
 
-全部编译期，零运行期开销。
+全部检查在编译期完成，运行期没有开销。
 
-**`crasm` 双方都生效——「可解析即检查」**：`crasm` 的 `mmio_read(addr)` / `mmio_write(addr, val)`
-中，地址若经投影表**静态解析**回语义寄存器 → 四项检查照常；解析不到（动态地址）→ `unsafe`
-外部入口（与 0x 字面量同角色，见 `pointer-model.md`）。
+外部接口如果使用显式地址，地址能经投影表静态解析回语义寄存器时，四项检查照常执行。解析不到的动态地址按 `unsafe` 外部入口处理，与 `0x` 字面量同角色。
 
-```
-mmio_read(0x3F200000)    → 投影解析 → UART.DATA → 四项检查
-mmio_read(addr_var)      → 解析不到 → unsafe 边界（检查不适用）
-```
+volatile 的实现：IR 节点带 `volatile` 标记。常量折叠、CSE、寄存器分配和调度一律不消除、不重排、不合并 MMIO 读写。每个 MMIO 读都是副作用，读后不用也必须保留。
 
-**`volatile` 实现**：IR 节点带 `volatile` 标记；`pass.cr`（常量折叠）、`opt.cr`（CSE/regalloc/调度）
-一律不消除、不重排、不合并 MMIO 读写——每个 MMIO 读都是副作用，读后不用也必须保留。
-发射为普通 `load`/`store` 到解析地址；跨核/硬件的顺序保障是 `crasm` `barrier` 的职责，不混入。
+错误码新增 `E_MMIO_UNKNOWN_REG`、`E_MMIO_WIDTH_MISMATCH`、`E_MMIO_PERM` 和 `E_MMIO_VOLATILE`，具体归属在错误码规范中确定。
 
-**错误报告**：走现有 `diag` 体系，新错误码（`E_MMIO_UNKNOWN_REG` / `E_MMIO_WIDTH_MISMATCH` /
-`E_MMIO_PERM` / `E_MMIO_VOLATILE`），实现时在 `error-codes` 规格里定归属。
+## 发射
 
-### 3. 发射层
+参考机是 x64 投影表的第一份实例。编译器内置投影表，例如 `src/arch/x86_64/hw_ref.toml`。
 
-**参考机定义**（x64 投影表第一份实例）：编译器内置投影表（如 `src/arch/x86_64/hw_ref.toml`），
-第一版外设范围**只有 UART**（能打印 = 最小验证闭环）；`timer` / 中断控制器 / GPIO 后续扩展。
+第一版外设只有 UART，能打印即可完成最小验证。timer、中断控制器和 GPIO 后续扩展。
 
-**发射流程**：
-
-```
-IR_MMIO_READ/WRITE（语义引用 device+reg）
-  → 投影解析：经典地址 = 投影基址 + 逻辑偏移
-  → ELF 后端：直接 load/store 到该地址（volatile 标记抑制优化）
+```mermaid
+flowchart LR
+    A["IR_MMIO_READ/WRITE<br/>device + reg"] --> B["投影解析<br/>基址 + 逻辑偏移"]
+    B --> C["ELF 后端<br/>load/store"]
+    C --> D["volatile 标记抑制优化"]
 ```
 
-**裸机输出模式**（区别于现有 Linux 用户态输出）：
+裸机输出模式与 Linux 用户态输出的区别：
 
-| | 现有（Linux ELF） | 裸机模式（新增，`corearch --bare`） |
+| | Linux ELF | 裸机模式 `corearch --bare` |
 |---|---|---|
-| 入口 | `_start`（rt.s） | 同 `_start`，无 OS 依赖 |
-| 动态链接 | PLT/GOT（ld.cr） | 无，纯静态 |
-| 全局变量寻址 | RIP-relative | 直接绝对地址（固定加载地址，如 0x100000） |
-| 加载 | 用户态加载器 | QEMU multiboot / flat binary |
+| 入口 | `_start` | 同一个 `_start`，无 OS 依赖 |
+| 动态链接 | PLT 和 GOT | 无，纯静态 |
+| 全局变量寻址 | RIP-relative | 绝对地址，固定加载地址 |
+| 加载 | 用户态加载器 | QEMU multiboot 或 flat binary |
 
-复用现有 `elf.cr` / `instr.cr` / `resolve.cr`，只改链接与入口装配。
+复用 `elf.cr`、`instr.cr` 和 `resolve.cr`，只改链接和入口装配。
 
-## 四、边界
+## 边界
 
-- `crasm` `mmio_read(addr)` 显式地址 = `unsafe` 外部入口（不可静态解析时），与 0x 字面量同角色，
-  不与语义层混淆
-- 检查全部编译期，零运行期开销
-- 语言层 `device` 是声明不是运行时对象——映射表只活在编译期
+- 外部接口使用显式地址时，不能静态解析的走 `unsafe` 外部入口，不与语义层混淆。
+- 检查全部在编译期完成，运行期没有开销。
+- 语言层的 `device` 是声明，不是运行时对象。映射表只存在于编译期。
 
-## 五、测试与里程碑
+## 测试
 
-1. 语义表构建：`device` 声明解析 + `toml` 导入 → 同一张表（单测）
-2. `hw_check` pass + 四项检查测试（`tests/selfhost` 载体）
-3. 投影表 + 地址解析（可解析即检查路径测试）
-4. x64 参考机投影表 + `IR_MMIO` 发射
-5. `corearch --bare` 裸机输出
-6. 端到端：`.cr`（`device` UART 声明 + 打印）→ `--bare` → QEMU 运行 → 断言串口输出
-   （无 QEMU 环境时跳过）
-7. （后补）真实平台投影表数据文件（树莓派 / QEMU virt）
+1. 语义表构建：`device` 声明解析和 TOML 导入得到同一张表。
+2. `hw_check` 四项检查。
+3. 投影表和地址解析。
+4. x64 参考机投影表和 `IR_MMIO` 发射。
+5. `corearch --bare` 裸机输出。
+6. 端到端：`.cr` 声明 UART 并打印，经 `--bare` 编译后在 QEMU 运行，断言串口输出。没有 QEMU 环境时跳过。
+7. 真实平台投影表数据文件，例如树莓派和 QEMU virt。
 
-回归：现有测试全部保持通过（`test_pipeline` / `test_compile` / `test_pointer_safety` 等）。
+回归：现有测试全部保持通过。
 
-## 六、明确不做（YAGNI）
+## 不做项
 
-- 中断 / 定时器 / GPIO——参考机第一版只有 UART
-- 页表 / MMU / 内存管理——直接物理地址，单核
-- 能力模型接入——能力格 v4 已发布（能力不提升一等公民，语义还原图上）；本设计按 v4 定位评估
-- 设备语义注解（表项携带规约语义）——留给规约层，后续展开
+- 中断、定时器和 GPIO。参考机第一版只有 UART。
+- 页表、MMU 和内存管理。直接使用物理地址，单核。
+- 能力模型接入。能力不提升为一等公民，语义仍还原到图上。
+- 设备语义注解。留给规约层。
 
-## 七、参考
+## 关联
 
-- `docs/crasm.md`、`docs/superpowers/specs/2026-08-08-crasm-design.md`（特权指令固定集、平台映射表）
-- `docs/pointer-model.md`（`alloc_at` 声明式进图、`unsafe` 边界、地址 = 映射）
-- `docs/superpowers/specs/2026-08-16-platform-abstract-design.md`（语义接口 + 后端实现原则）
-- `docs/memory-model-capability-lattice.md`（能力格 v4，已发布——能力不提升一等公民）
+- 决策记录和实施细节：`docs/superpowers/implementation/2026-08-23-hw-map-audit.md`
+- 硬件接口表：`docs/superpowers/specs/2026-09-05-hardware-interface-table.md`
+- 指针模型：`docs/maintainer/design/pointer-model.md`
+- 执行标注空间：`docs/maintainer/design/execution-annotation-space.md`
+- 地址等于映射：`docs/academic/cache-semantics.md`

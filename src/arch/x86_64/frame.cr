@@ -1,42 +1,29 @@
-// ══════════════════════════════════════════════════════════════
-// src/arch/x86_64/frame.cr —— 架构轴：x86-64 函数帧
+// === frame.cr ===
+// x86-64 function frame: size calculation, prologue, epilogue, and the blocks
+// appended at the function tail.
 //
-// x86 实例化波 1 Task 3 抽取（帧公式双源合流——H2 波 1 最大风险之一）：
-//   - 帧尺寸/帧相关字节核算自 src/format/elf/elf.cr（Phase 2 dry-run 核算 +
-//     Phase 3 sub rsp 立即数）与 src/arch/x86_64/instr.cr（g2_tag_off /
-//     mw_frame_size——H3 归属裁决：帧布局面归 frame，tag2l 依赖 frame）迁入；
-//   - 序言/尾声/函数尾附加块（jo 慢路径块 + 2L 操作数块）自 elf.cr Phase 3
-//     抽为本文件 pf_prologue/pf_epilogue（发射序逐字节 verbatim——波 1 判据
-//     = stage 链 byte-identical）。
+// Frame size has one source: pf_frame_size(vc). Phase 2 dry-run and the Phase 3
+// sub rsp immediate both call it. pf_frame_overhead(ss) is only for the dry-run
+// byte count and must agree with the actual emission from pf_prologue and
+// pf_epilogue. Encoding sizes come from sizes.cr.
 //
-// **H2 帧公式单源**（三处入口，各自唯一）：
-//   ① 帧总字节     = pf_frame_size(vc)      —— Phase 2 dry-run 与 Phase 3
-//                    sub rsp 立即数两处**调用同一函数**（此前双源 = 唯一风险面;
-//                    test_mw_task1.py 的 sub rsp 立即数断言 = 帧专项判据）；
-//   ② 帧字节总数   = pf_frame_overhead(ss)  —— dry-run 只核算，须与 ③ 的
-//                    实际发射逐字节一致（尺寸原语 sz_* 由 sizes.cr 单源）；
-//   ③ 实际发射     = pf_prologue/pf_epilogue —— 帧相关段的唯一发射器
-//                    （elf.cr 零残留帧尺寸计算/帧发射序）。
-// tag 区（int 多字 M1）：tag 字节位于槽区之下，偏移 -(vc*8+1+k)——公式与
-// 识别规则见 tag2l.cr mw_setup_tags 注释块（波 1 Task 4 起 tag 表 owner 在
-// tag2l.cr；本文件 g2_tag_off = 读侧 seam）；tag 数为 0 时帧公式与旧布局
-// 逐字节一致（快路径零变化硬约束）。
+// Tag area: tag bytes live below the slot area at -(vc*8 + 1 + k). The formula
+// and recognition rules are in tag2l.cr mw_setup_tags. This file reads them
+// through g2_tag_off. With zero tags, the frame layout is byte-identical to the
+// layout without a tag area.
 //
-// 抽取纪律（H1）：cp/pos/buf 三参数显式传递（无环境态假设）；调用点 = elf.cr
-// Phase 2 dry-run 与 Phase 3 函数发射序。
+// pf_prologue saves callee-saved registers, sets rbp, reserves the frame, stores
+// parameters, clears tags on parameter rows, and loads register-allocated
+// parameters. pf_epilogue patches returns, fills the sub rsp immediate, emits the
+// epilogue, and appends the jo slow-path blocks and 2L operand blocks.
 //
-// Depends on: x86_64/instr.cr（e2_*/emit_rex/emit_modrm/get_reg_for_var/
-//             w8/w32/r64）、x86_64/tag2l.cr（e2_mw_slow_block/
-//             e2_mw_opnd_block——pf_epilogue 函数尾块；同轴双向引用见
-//             tag2l.cr 头注：本文件反向提供 g2_tag_off 给 tag2l）、
-//             x86_64/sizes.cr（sz_* 编码尺寸单源）、共享全局（g_opt_level/
-//             g_current_func_var_start/g_x86_sub_rsp_pos/g_x86_mw_* 站点表）。
-// 跨文件引用经 concat 扁平单元（build_selfhost_native.py arch_x86_64_files）
-// / module.cr 三轴回退链（组合根 _import.cr `import frame`）解析。
-// ══════════════════════════════════════════════════════════════
+// buf is the byte buffer, pos is the absolute buffer position, and cp is the
+// number of bytes already emitted. Returns the new cp.
+//
+// Depends on instr.cr for encoding primitives, tag2l.cr for the tail blocks,
+// sizes.cr for byte sizes, and the shared x86 globals.
 
-// ── tag 表读取（H3 自 instr.cr 迁入；表由 tag2l.cr mw_setup_tags 按函数填充
-//    ——波 1 Task 4 起 tag 表 owner 在 tag2l.cr）──
+// Tag table read. tag2l.cr mw_setup_tags fills the table per function.
 fn g2_tag_off(v: int) -> int:
     // var v（当前函数内）的 tag 字节偏移（相对 rbp，恒负）；-1 = 非 tagged。
     // 仅当前函数内有效（表由 mw_setup_tags 按函数填充）。
@@ -49,11 +36,12 @@ fn g2_tag_off(v: int) -> int:
         return -1
     return r64(g_x86_mw_tag_off, lv * 8)
 
-// ── 帧总字节（H2 ①：Phase 2 dry-run 与 Phase 3 共用）──
+// Total frame bytes, shared by Phase 2 dry-run and Phase 3.
 fn pf_frame_size(vc: int) -> int:
-    // 帧总字节 = var 槽 vc*8 + tag 区（g_x86_mw_tag_count 字节）再按现 SysV
-    // 规则补 16 对齐：opt≥1（6 pushes）帧 ≡ 8 (mod 16)；opt<1（1 push）≡ 0。
-    // tag 数为 0 时对任意 vc 的结果与旧公式逐字节一致（快路径零变化）。
+    // Frame bytes = vc*8 for var slots + g_x86_mw_tag_count tag bytes, padded
+    // to 16-byte alignment. With opt >= 1 (6 pushes) the frame is 8 mod 16;
+    // with opt < 1 (1 push) it is 0 mod 16. With zero tags the result is
+    // byte-identical to the frame without a tag area.
     sz : ., mut = vc * 8 + g_x86_mw_tag_count
     r := sz % 16
     if g_opt_level >= 1:
@@ -67,15 +55,17 @@ fn pf_frame_size(vc: int) -> int:
             sz = sz + (16 - r)
     return sz
 
-// ── Phase 2 dry-run：帧相关字节总数（序言 + 尾声；不含形参落槽与函数体）──
-// H2 ②：dry-run 核算（本函数）与 H2 ③ 实际发射（pf_prologue/pf_epilogue）必须
-// 一致——尺寸原语 sz_* 单源 sizes.cr；本函数 = 帧的核算侧唯一入口。
-// callee-saved 计入 = sz_callee_saved_push/pop（波 1 Task 4 自硬编码 18/9 提出
-// ——数值与提取前逐字节相同，波 1 零变化硬约束）。
-// ⚠️ 已知预存偏差（波 1 Task 4 评审登记，波 2 清）：opt≥1 时本函数多计一个
-// sz_callee_saved_pop（9B/函数——push/pop 对已在 sz_callee_saved_push+pop 内,
-// 见下方函数尾再计点）。Phase 2 total_code 为临时值（Phase 3 由实际 cp 重算
-// rodata/bss/函数偏移——elf.cr:1380/1422/1088），**无发射字节影响**、偏保守。
+// Phase 2 dry-run: frame-related byte count for prologue and epilogue, excluding
+// parameter stores and the function body.
+// This is the accounting side of the frame. It must agree with the actual
+// emission from pf_prologue and pf_epilogue; encoding sizes come from sizes.cr.
+// Callee-saved bytes use sz_callee_saved_push and sz_callee_saved_pop.
+//
+// For opt >= 1 this function counts one extra sz_callee_saved_pop (9 bytes per
+// function) beyond the push/pop pair. Phase 2 total_code is temporary: Phase 3
+// recomputes total_code from the actual cp before fixing rodata, bss, and
+// function offsets. The extra count does not change emitted bytes and is
+// conservative.
 fn pf_frame_overhead(ss: int) -> int:
     sz : ., mut = sz_push_rbp() + sz_mov_rbp_rsp()
     if g_opt_level >= 1:
@@ -88,15 +78,17 @@ fn pf_frame_overhead(ss: int) -> int:
     // pop r15,r14,r13,r12,rbx
     return sz
 
-// ── Phase 3 序言（帧 setup + 形参落槽 + 寄存器参数装载）──
-// 发射序（opt≥1 六寄存器保存 → push rbp/mov rbp,rsp → sub rsp 占位（立即数
-// 由 pf_epilogue 回填实际帧字节）→ 形参落槽（XMM/int/栈参 + tag 卫生③参数行
-// 清 tag）→ 寄存器分配参数装载）；返回新 cp。g_x86_sub_rsp_pos = sub rsp
-// 立即数字段位置（供 pf_epilogue 回填）；帧尺寸 ss 显式传入（= pf_frame_size
-// 结果——H2 单源，本函数不再自行计算帧尺寸）。
+// Phase 3 prologue: frame setup, parameter stores, and register parameter loads.
+// Emission order with opt >= 1: save six callee-saved registers, push rbp, mov
+// rbp,rsp, reserve the frame with a placeholder sub rsp immediate, store
+// parameters (XMM, int, stack), clear tags on parameter rows, then load
+// register-allocated parameters. Returns the new cp.
+// pf_epilogue fills the sub rsp immediate with the actual frame size.
+// g_x86_sub_rsp_pos records the immediate field. ss is passed in explicitly and
+// equals pf_frame_size(vc).
 fn pf_prologue(vs: int, pc: int, ss: int, buf: string, pos: int) -> int:
     cp : ., mut = pos
-    // Save callee-saved registers (pushed before rbp setup → at [rbp+8..48])
+    // Save callee-saved registers before rbp setup. They are at [rbp+8..48].
     if g_opt_level >= 1:
         w8(buf, cp, 83)
         cp = cp + 1  // push rbx
@@ -152,7 +144,7 @@ fn pf_prologue(vs: int, pc: int, ss: int, buf: string, pos: int) -> int:
                     frn = frn + 1
                 fj = fj + 1
             if frn < 8:
-                // movsd [rbp+po2], xmm{frn} — F2 0F 11 /rn（mod=01, rm=5）
+                // movsd [rbp+po2], xmm{frn}, F2 0F 11 /rn（mod=01, rm=5）
                 w8(buf, cp, 242)
                 w8(buf, cp+1, 15)
                 w8(buf, cp+2, 17)
@@ -209,10 +201,12 @@ fn pf_prologue(vs: int, pc: int, ss: int, buf: string, pos: int) -> int:
                 w8(buf, cp+2, 77)
                 w8(buf, cp+3, po2)
                 cp = cp + 4
-        // int 多字 M1（Task 4）tag 卫生③：tagged 参数行的 prologue 定值
-        // 清 tag——参数在函数内首次定值前可能被消费者读取（tag 闭包可含
-        // 参数行：p = p + k 的 B' 定值拷贝），无本清则读到上次调用/垃圾
-        // tag。参数行按强制栈槽保存（po2），tag 字节同在帧内。
+        // Tag hygiene for tagged parameter rows: clear the tag in the prologue.
+        // A parameter can be read before its first definition in the function,
+        // and the tag closure can include parameter rows (for example the B'
+        // copy p = p + k). Without this clear, a consumer can read the tag from
+        // a previous call or garbage. Parameters are saved to a forced stack slot
+        // po2, and the tag byte is in the same frame.
         if pty == TI_INT:
             ptg := g2_tag_off(vs + pi)
             if ptg != -1:
@@ -239,7 +233,7 @@ fn pf_prologue(vs: int, pc: int, ss: int, buf: string, pos: int) -> int:
             pri := get_reg_for_var(vs + pi2)
             if pri >= 0:
                 pso2 := -(vs + pi2 + 1 - g_current_func_var_start) * 8  // force stack slot
-                // mov reg, [rbp+offset] — load from stack to allocated register
+                // mov reg, [rbp+offset], load from stack to allocated register
                 cp = cp + emit_rex(buf, cp, 1, pri/8, 0, 0)
                 e2_w8(buf, cp, 139)
                 cp = cp + 1  // 0x8B MOV r64, r/m64
@@ -250,11 +244,12 @@ fn pf_prologue(vs: int, pc: int, ss: int, buf: string, pos: int) -> int:
     return cp
 
 
-// ── Phase 3 尾声 + 函数尾附加块 ——
-// RETURN patch（回填至 epilogue 起点）→ sub rsp 立即数回填（实际帧字节）→
-// epilogue 发射（add rsp / opt≥1 六寄存器逆序 pop / pop rbp / ret）→ 函数尾
-// 附加块（jo 慢路径块 + 2L 操作数块；逐站点独立块，冷区）。返回新 cp。
-// ss 显式传入（= 序言所用帧尺寸；H2 单源）。
+// Phase 3 epilogue and function-tail blocks.
+// Patch returns to the epilogue start, fill the sub rsp immediate with the actual
+// frame size, emit the epilogue (add rsp, reverse callee-saved pops, pop rbp,
+// ret), then append the jo slow-path blocks and 2L operand blocks. Each site gets
+// its own block in the cold tail. Returns the new cp.
+// ss is the frame size used by the prologue.
 fn pf_epilogue(ss: int, buf: string, pos: int) -> int:
     cp : ., mut = pos
     // patch RETURNs to epilogue
@@ -318,17 +313,12 @@ fn pf_epilogue(ss: int, buf: string, pos: int) -> int:
     w8(buf, cp, 195)
     cp = cp + 1  // ret
 
-    // ── int 多字 M1（Task 3）：慢路径块（函数尾附加）+ jo rel32 回填 ──
-    // 每 jo 站点独立块（块形状决策：jo 现场 = dest 槽/回跳点逐站点而异，
-    // 共享块需逐站分发 = 复杂度不值；块 ≈ 45B × 站点数，函数尾冷区，M1
-    // 保守 tagged 集代价的一部分——与 Task 2 已付的每站 jo 6B 同族）。
-    // 块 = 真实 2-limb 修正代码（e2_mw_slow_block，tag2l.cr）：
-    //   修正 128 位值 → alloc(16)（alloc_patch 注册——计数逐函数不重置，
-    //   与函数体 alloc 调用同批回填）→ 写 2-limb → 值槽存指针（含
-    //   O1/O2 reg 形态——g2_slot 于当前函数上下文现算，与函数体发射
-    //   同源同值）→ tag 置位 → jmp 回该站点快路径 store 之后。
-    // jo 记录（pos/dest/is_sub/resume——g2_init 清零逐函数段）此处按站
-    // 点点序发射；无 jo 的函数不发块、零字节影响（untagged 快路径零变化）。
+    // Function-tail slow-path blocks for tagged add/sub.
+    // Each jo site gets its own block. The block emits the 128-bit correction
+    // (e2_mw_slow_block), allocates 16 bytes, writes the 2-limb object, stores
+    // the pointer in the value slot, sets tag = 1, and jumps back after the
+    // fast-path store. jo records are emitted in site order. Functions without
+    // jo sites emit no bytes.
     if g_x86_mw_jo_count > 0:
         mw_ji : ., mut = 0
         loop:
@@ -343,13 +333,12 @@ fn pf_epilogue(ss: int, buf: string, pos: int) -> int:
             cp = cp + e2_mw_slow_block(buf, cp, jo_d, jo_sub, jo_res)
             mw_ji = mw_ji + 1
         g_x86_mw_jo_count = 0
-    // ── int 多字 M1（Task 4）：2L 操作数块（函数尾附加，jo 块之后）──
-    // 每消费者站点独立块（快路径 tag 检查 jne → 块首；块 = 128 位算术
-    // 或比较 + 公共落值——e2_mw_opnd_block，tag2l.cr）。块形状按站点
-    // 静态参数化（操作数行 tagged 与否决定分派形态），含 alloc(16) 的
-    // 块与函数体同批回填（alloc_patch 计数逐函数不重置）。jne rel32
-    // 位置在 oc 记录（pos1/pos2，-1 = 无第二个检查），块位置 = 发射时
-    // cp。无消费者站点的函数零字节（untagged 快路径零变化保持）。
+    // Function-tail 2L operand blocks, after the jo blocks.
+    // Each consumer site gets its own block (e2_mw_opnd_block). The fast-path tag
+    // check reaches it with jne rel32. The block does 128-bit arithmetic or
+    // comparison and a common result store. Its shape is specialized statically
+    // by whether operand rows are tagged. Blocks that allocate use the same alloc
+    // patch table as the function body. No consumer sites means no bytes.
     if g_x86_mw_oc_count > 0:
         mw_oi : ., mut = 0
         loop:

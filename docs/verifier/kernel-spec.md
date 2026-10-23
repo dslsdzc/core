@@ -1,17 +1,8 @@
-# kernel-spec.md — McTT → Core 内核移植契约
+# McTT 到 Core 内核移植规范
 
-> 定位:受众 = 维护者(内核移植 Task 3/6 实现者);状态 = active(移植契约,对应 McTT 快照);出处 = ~/mctt 源文件(本文件为行号对照转换层)。
->
-> ⚠ **修订（2026-09-16 文档审计）**：出处（`~/mctt`）是**仓外树**且**原文未记版本锚**（仅「对应 McTT 快照」+「`icfp25` 分支」，
-> 无 commit/日期）⇒ 行号对照**跨机/跨会话不可复现**、外部树变动后**静默漂移**。
-> **补锚要求**：下次修订时补 `~/mctt` 的 commit/快照日期；**跨机复核前须重核**（`~/mctt` 是否同版本）。
-> 同类问题另见 `docs/maintainer/design/ir-op-semantics.md` §0（该文的出处是 `~/compcert`）。
+本文件把 McTT 的类型系统、算法类型检查、算法子类型和 NbE 语义映射到 Core 内核实现。每条规则给出 Coq 源文件行号，实现时以本文件和源文件为准；有歧义时回到源文件核对。
 
-> 本文件由 Task 2 生成，行号对应 McTT icfp25 分支。
-> 源仓库：`~/mctt`（只读参考，非 git 拷贝）。所有行号均为对应源文件的实际行号，
-> 格式为「文件基名:行号」；文件全路径见下表。
-> 本文件是 Task 6（Core 手写移植）与 Task 3（协议设计）的**唯一依据**——任何规则实现
-> 以本文件为准，任何歧义回到源文件核对。
+源文件在 `~/mctt`，对应 `icfp25` 分支。所有行号是源文件的实际行号，格式为“文件基名:行号”，完整路径见下表。行号只在对应快照上有效。换机器或换快照前，要重新核对 `~/mctt` 的版本。
 
 ## 源文件清单
 
@@ -33,14 +24,14 @@
 
 ---
 
-## 0. 全局约定（移植前必读）
+## 0. 全局约定（移植前阅读）
 
 ### 0.1 de Bruijn 索引方向与上下文序（Task 3/6 以此为唯一基准）
 
-- **上下文是「头部 = 最右（最近绑定）」的 list**。记号 `Γ , A` 定义为
+- 上下文是“头部 = 最右（最近绑定）”的列表。记号 `Γ , A` 定义为
   `cons A Γ`（Syntax.v:151 `Notation "x , y" := (cons y x)`），即 `Γ , A` 把 `A`
-  追加到 Γ 的**头部**。上下文 `⋅ , A , B` 读作先绑 A 再绑 B，B 为最右。
-- **var 0 = 上下文最右（最近绑定）元素**，索引随绑定深度向外递增。
+  追加到 Γ 的头部。上下文 `⋅ , A , B` 读作先绑 A 再绑 B，B 为最右。
+- var 0 = 上下文最右（最近绑定）元素，索引随绑定深度向外递增。
   依据是查找规则（System/Definitions.v:20-23）：
 
   ```
@@ -49,21 +40,21 @@
   ```
   在 `Γ , A` 中 `#0` 指向头部 `A`（其类型经 Wk 提升，因为 `A` 所在上下文比 `Γ` 深一层）；
   外层的 `#n` 变成 `#(S n)`。这与 var 0 = 最右元素完全一致。
-- 语义侧同样：`extend_env ρ d := fun n => match n with 0 => d | S n' => ρ n' end`
-  （Domain.v:32-37）——环境头部（索引 0）是最近扩展的值；`drop_env ρ := ρ (S _)`
+- 语义层同样：`extend_env ρ d := fun n => match n with 0 => d | S n' => ρ n' end`
+  （Domain.v:32-37）。环境头部（索引 0）是最近扩展的值；`drop_env ρ := ρ (S _)`
   （Domain.v:41）删除头部。
 
 ### 0.2 替换记号与 `q`
 
-- `σ ,, M` := `a_extend σ M`（Syntax.v:147）——替换头部延长。
-- `σ ∘ τ` := `a_compose σ τ`（Syntax.v:146）——**右结合；求值时 τ 先作用、σ 后作用**
+- `σ ,, M` := `a_extend σ M`（Syntax.v:147），表示替换头部延长。
+- `σ ∘ τ` := `a_compose σ τ`（Syntax.v:146），右结合；求值时 τ 先作用、σ 后作用
   （Eval/Definitions.v:73-76：先 `⟦ τ ⟧s ρ ↘ ρτ`，再 `⟦ σ ⟧s ρτ ↘ ρτσ`）。
-- **`q` 的定义**（Syntax.v:113）：
+- `q` 的定义（Syntax.v:113）：
   ```
   q σ := a_extend (a_compose σ a_weaken) (a_var 0)
   ```
-  即 `q σ = (σ ∘ Wk) ,, #0`：先穿透头部再压入变量 0。用于把「在 Δ 上定义的替换 σ」
-  提升为「在 Δ , A 上定义的替换」，使 `M[q σ]` 中 M 的自由变量映射一致
+  即 `q σ = (σ ∘ Wk) ,, #0`：先对 σ 复合 Wk，再把变量 0 延长到头部。用于把“在 Δ 上定义的替换 σ”
+  提升为“在 Δ , A 上定义的替换”，使 `M[q σ]` 中 M 的自由变量映射一致
   （用途见 2.3 的 wf_exp_eq_natrec_sub / pi_sub / fn_sub）。
 - `Id` := `a_id`，`Wk` := `a_weaken`（Syntax.v:143-144）。
 
@@ -77,7 +68,7 @@
 | `Π A B` | `a_pi A B`（B 的上下文 = A 延长后的上下文） | Syntax.v:138 |
 | `λ A M` | `a_fn A M` | Syntax.v:134 |
 | `succ e` | `a_succ e` | Syntax.v:140 |
-| `rec M return A \| zero -> MZ \| succ -> MS end` | `a_natrec A MZ MS M`（注意参数序！） | Syntax.v:141 |
+| `rec M return A \| zero -> MZ \| succ -> MS end` | `a_natrec A MZ MS M`（注意参数序） | Syntax.v:141 |
 | `M [σ]` | `a_sub M σ` | Syntax.v:130 |
 | `⇑ M`（nf 层） | `nf_neut M` | Syntax.v:166 |
 | `⇑ a m`（domain 层） | `d_neut a m` | Domain.v:64 |
@@ -93,14 +84,14 @@
 
 ### 0.4 移植边界提示
 
-- 记号 `Γ , A ⊢ …` 中 `A` 是**头部**（0.1），因此 `Γ , A ⊢ M : B` 意为「M 在
-  上下文 Γ 延长 A 后良型」。Core 移植时若用自身上下文表示（如右扩展 list），
-  需将「头部扩展」映射为 Core 的「尾部/头部扩展」并固定一个方向（本文件全部以
+- 记号 `Γ , A ⊢ …` 中 `A` 是头部（0.1），因此 `Γ , A ⊢ M : B` 意为“M 在
+  上下文 Γ 延长 A 后良型”。Core 移植时若用自身上下文表示（如右扩展 list），
+  需将“头部扩展”映射为 Core 的“尾部/头部扩展”并固定一个方向（本文件全部以
   McTT 头部扩展为准）。
 - `a_natrec` 的参数序为 `A MZ MS M`（motif、zero 分支、succ 分支、被归纳项），
   与记号 `rec M return A | zero -> MZ | succ -> MS end` 中 M 的位置不同，移植时
   注意按构造子序（Syntax.v:27）。
-- d_var 的编号**不是 de Bruijn 索引而是绝对名**（Domain.v:16-19 注释）——在读出时
+- d_var 的编号不是 de Bruijn 索引，而是绝对名（Domain.v:16-19 注释）。读出时
   通过深度 s 转换为 de Bruijn 索引：`Rne !x in s ↘ #(s - x - 1)`（Readback/Definitions.v:39）。
 
 ---
@@ -134,7 +125,7 @@
 | `a_fn : exp -> exp -> exp` | `λ A M` | λ 抽象 | Syntax.v:30 |
 | `a_app : exp -> exp -> exp` | `M N` | 应用 | Syntax.v:31 |
 | `a_var : nat -> exp` | `#n` | de Bruijn 变量 | Syntax.v:33 |
-| `a_sub : exp -> sub -> exp` | `M[σ]` | 替换应用（显式替换！） | Syntax.v:35 |
+| `a_sub : exp -> sub -> exp` | `M[σ]` | 替换应用（显式替换） | Syntax.v:35 |
 
 附：`ctx := list exp`，`typ := exp`（Syntax.v:42-43）。
 
@@ -143,7 +134,7 @@
 | 构造子 | 类型 | 含义 | 行号 |
 |--------|------|------|------|
 | `a_id : sub` | `Id` | 恒等替换 | Syntax.v:37 |
-| `a_weaken : sub` | `Wk` | 弱化（丢弃头部变量） | Syntax.v:38 |
+| `a_weaken : sub` | `Wk` | 弱化（去掉头部变量） | Syntax.v:38 |
 | `a_compose : sub -> sub -> sub` | `σ ∘ τ`（τ 先作用） | 复合 | Syntax.v:39 |
 | `a_extend : sub -> exp -> sub` | `σ ,, M` | 延长 | Syntax.v:40 |
 
@@ -203,7 +194,7 @@ wf_ctx_empty :  ⊢ ⋅                                                         
 wf_ctx_extend : ⊢ Γ   Γ ⊢ A : Type@i  ⟹  ⊢ Γ , A                           (System/Definitions.v:27-30)
 ```
 
-### 2.3 项良型 wf_exp（System/Definitions.v:43-98）—— 11 条
+### 2.3 项良型 wf_exp（System/Definitions.v:43-98），共 11 条
 
 ```
 wf_typ :
@@ -268,14 +259,14 @@ wf_exp_sub :
 
 wf_exp_subtyp :
     Γ ⊢ M : A
-    Γ ⊢ A' : Type@i            (i 存在即可；A 的类型**不**检查——
+    Γ ⊢ A' : Type@i            (i 存在即可；A 的类型不检查，
                                不对称，理由见 System/Definitions.v:86-94 注释)
     Γ ⊢ A ⊆ A'
     ────────────────           (System/Definitions.v:84-97)
     Γ ⊢ M : A'
 ```
 
-### 2.4 替换良构 wf_sub（System/Definitions.v:100-125）—— 5 条
+### 2.4 替换良构 wf_sub（System/Definitions.v:100-125），共 5 条
 
 ```
 wf_sub_id :
@@ -309,11 +300,11 @@ wf_sub_subtyp :
     Γ ⊢s σ : Δ'
 ```
 
-### 2.5 项等价 wf_exp_eq（System/Definitions.v:127-259）—— 27 条
+### 2.5 项等价 wf_exp_eq（System/Definitions.v:127-259），共 27 条
 
 记号：`Γ ⊢ M ≈ M' : A`。全部规则：
 
-**替换同余（sub 规则族）**：
+替换同余（sub 规则族）：
 
 ```
 wf_exp_eq_typ_sub :
@@ -425,7 +416,7 @@ wf_exp_eq_app_sub :
     Γ ⊢ (M N)[σ] ≈ M[σ] N[σ] : B[σ,,N[σ]]
 ```
 
-**β/η 规则**：
+β/η 规则：
 
 ```
 wf_exp_eq_pi_beta :
@@ -444,7 +435,7 @@ wf_exp_eq_pi_eta :
     Γ ⊢ M ≈ λ A (M[Wk] #0) : Π A B
 ```
 
-**变量规则**：
+变量规则：
 
 ```
 wf_exp_eq_var :
@@ -475,7 +466,7 @@ wf_exp_eq_var_weaken :
     Γ , B ⊢ #x[Wk] ≈ #(S x) : A[Wk]
 ```
 
-**替换代数**：
+替换代数：
 
 ```
 wf_exp_eq_sub_cong :
@@ -497,7 +488,7 @@ wf_exp_eq_sub_compose :
     Γ ⊢ M[σ ∘ τ] ≈ M[σ][τ] : A[σ ∘ τ]
 ```
 
-**子型与等价关系**：
+子型与等价关系：
 
 ```
 wf_exp_eq_subtyp :
@@ -521,7 +512,7 @@ wf_exp_eq_trans :
 
 `wf_exp_eq` 是 PER（System/Definitions.v:391-397）。
 
-### 2.6 替换等价 wf_sub_eq（System/Definitions.v:261-317）—— 13 条
+### 2.6 替换等价 wf_sub_eq（System/Definitions.v:261-317），共 13 条
 
 ```
 wf_sub_eq_id :
@@ -605,7 +596,7 @@ wf_sub_eq_subtyp :
 
 `wf_sub_eq` 是 PER（System/Definitions.v:399-405）。
 
-### 2.7 类型子型 wf_subtyp（System/Definitions.v:319-349）—— 4 条
+### 2.7 类型子型 wf_subtyp（System/Definitions.v:319-349），共 4 条
 
 ```
 wf_subtyp_refl :
@@ -637,12 +628,12 @@ wf_subtyp_pi :
     Γ ⊢ Π A B ⊆ Π A' B'
 ```
 
-**注意**：Π 子型的域要求**等价**（`A ≈ A'`）而非逆变子型；余域协变
-（`Γ , A' ⊢ B ⊆ B'`）。这是 McTT 子类型的设计，移植时必须保持一致
+注意：Π 子型的域要求等价（`A ≈ A'`），不是逆变子型；余域协变
+（`Γ , A' ⊢ B ⊆ B'`）。这是 McTT 子类型的设计，移植时要保持一致
 （算法层 asnf_pi 同样，见 4.2；语义层 per_subtyp_pi 同，见 5.6）。
 `wf_subtyp` 传递（System/Definitions.v:414-417）。
 
-### 2.8 上下文等价 wf_ctx_eq（System/Definitions.v:375-386）—— 2 条
+### 2.8 上下文等价 wf_ctx_eq（System/Definitions.v:375-386），共 2 条
 
 ```
 wf_ctx_eq_empty :  ⊢ ⋅ ≈ ⋅                                                (System/Definitions.v:376)
@@ -658,7 +649,7 @@ wf_ctx_eq_extend :
     ⊢ Γ , A ≈ Δ , A'
 ```
 
-### 2.9 上下文子型 wf_ctx_sub（System/Definitions.v:33-41）—— 2 条
+### 2.9 上下文子型 wf_ctx_sub（System/Definitions.v:33-41），共 2 条
 
 ```
 wf_ctx_sub_empty :  ⊢ ⋅ ⊆ ⋅                                              (System/Definitions.v:34)
@@ -683,8 +674,8 @@ SystemOpt.v 是 System/Definitions.v 规则的推论版本，去掉了可由预�
 ## 3. 算法化类型规则（AlgTyp/Definitions.v）
 
 判定形式（AlgTyp/Definitions.v:5-6）：
-- **推断模式**：`Γ ⊢a M ⟹ A`（A 为 **nf**！）— `alg_type_infer Γ A M`（AlgTyp/Definitions.v:16）
-- **检查模式**：`Γ ⊢a M ⟸ A`（A 为任意 exp）— `alg_type_check Γ A M`（AlgTyp/Definitions.v:10）
+- 推断模式：`Γ ⊢a M ⟹ A`（A 为 nf），对应 `alg_type_infer Γ A M`（AlgTyp/Definitions.v:16）
+- 检查模式：`Γ ⊢a M ⟸ A`（A 为任意 exp），对应 `alg_type_check Γ A M`（AlgTyp/Definitions.v:10）
 
 互归纳定义（AlgTyp/Definitions.v:10-51）。
 
@@ -697,7 +688,7 @@ atc_ati :
     ──────────────────         (AlgTyp/Definitions.v:11-14)
     Γ ⊢a M ⟸ B
 ```
-（唯一检查规则：推断 + 子类型，双向检查的标准「转换」入口。）
+（这是唯一的检查规则：先推断，再检查子类型，是双向检查中的转换规则。）
 
 ### 3.2 推断模式（9 条）
 
@@ -756,7 +747,7 @@ ati_vlookup :
 ```
 
 要点：
-- 推断结果一律是 **nf**（由 `nbe_ty` 把类型规范化：ati_natrec / ati_fn / ati_app /
+- 推断结果一律是 nf（由 `nbe_ty` 把类型规范化：ati_natrec / ati_fn / ati_app /
   ati_vlookup 中均有 `nbe_ty` 前提）。
 - `ati_pi` 的 `Type@(max i j)` 对应 SystemOpt.v:121 的 `wf_pi_max`。
 - `nbe_ty Γ A B` 定义见 5.5（NbE.v:137-142）。
@@ -774,7 +765,7 @@ not_univ_pi : nf -> Prop
   not_univ_pi _          = True
 ```
 
-### 4.2 正规形子类型 alg_subtyping_nf（AlgSub/Definitions.v:15-27）—— 3 条
+### 4.2 正规形子类型 alg_subtyping_nf（AlgSub/Definitions.v:15-27），共 3 条
 
 ```
 asnf_refl :
@@ -795,11 +786,11 @@ asnf_pi :
     ⊢anf Π A B ⊆ Π A' B'
 ```
 
-**注意**：asnf_pi 的域要求**语法相等**（`A = A'`），无逆变前提；余域协变。与
+注意：asnf_pi 的域要求语法相等（`A = A'`），没有逆变前提；余域协变。与
 System/Definitions.v:341-348 的 wf_subtyp_pi 一致（域等价 + 余域协变）。
-McTT 没有 Π 逆变子类型规则——移植时不得添加。
+McTT 没有 Π 逆变子类型规则，移植时不要添加。
 
-### 4.3 算法子类型 alg_subtyping（AlgSub/Definitions.v:29-35）—— 1 条
+### 4.3 算法子类型 alg_subtyping（AlgSub/Definitions.v:29-35），共 1 条
 
 ```
 alg_subtyp_run :
@@ -810,7 +801,7 @@ alg_subtyp_run :
     Γ ⊢a A ⊆ B
 ```
 
-算法结构：**先规范化两侧到 nf，再在 nf 上比较**（`alg_subtyp_run` 是唯一入口）。
+算法结构：先把两侧都规范化到 nf，再在 nf 上比较（`alg_subtyp_run` 是唯一规则）。
 
 ---
 
@@ -829,7 +820,7 @@ domain : Set                                                               (Doma
 | d_neut : domain -> domain_ne -> domain                ⇑ a m（类型标注 a）  (Domain.v:14)
 
 domain_ne : Set                                                            (Domain.v:15)
-| d_var : nat -> domain_ne                              !x —— 绝对名，非 de Bruijn 索引（Domain.v:20，注释见 Domain.v:16-19）
+| d_var : nat -> domain_ne                              !x：绝对名，不是 de Bruijn 索引（Domain.v:20，注释见 Domain.v:16-19）
 | d_app : domain_ne -> domain_nf -> domain_ne           m n                  (Domain.v:21)
 | d_natrec : env -> typ -> domain -> exp -> domain_ne   rec m under ρ return P | zero -> mz | succ -> MS end（Domain.v:22，参数序 ρ P mz MS m）
 
@@ -851,7 +842,7 @@ drop_env  ρ   := fun n => ρ (S n)                                          (Do
 `$| m & n |↘ r`（eval_app，Eval/Definitions.v:56）、
 `⟦ σ ⟧s ρ ↘ ρσ`（eval_sub，Eval/Definitions.v:64）。互归纳，共 19 条。
 
-**eval_exp（10 条）**：
+eval_exp（10 条）：
 
 ```
 eval_exp_typ :    ⟦ Type@i ⟧ ρ ↘ 𝕌@i                                        (Eval/Definitions.v:13-14)
@@ -864,7 +855,7 @@ eval_exp_natrec : ⟦ M ⟧ ρ ↘ m
                   ─────────────────────────────────────────────────        (Eval/Definitions.v:24-27)
                   ⟦ rec M return A | zero -> MZ | succ -> MS end ⟧ ρ ↘ r
 eval_exp_pi :     ⟦ A ⟧ ρ ↘ a  ⟹  ⟦ Π A B ⟧ ρ ↘ Π a ρ B                      (Eval/Definitions.v:28-30)
-eval_exp_fn :     ⟦ λ A M ⟧ ρ ↘ λ ρ M        （A 不参与求值！）              (Eval/Definitions.v:31-32)
+eval_exp_fn :     ⟦ λ A M ⟧ ρ ↘ λ ρ M        （A 不参与求值）              (Eval/Definitions.v:31-32)
 eval_exp_app :    ⟦ M ⟧ ρ ↘ m   ⟦ N ⟧ ρ ↘ n   $| m & n |↘ r
                   ─────────────────────────────────                        (Eval/Definitions.v:33-37)
                   ⟦ M N ⟧ ρ ↘ r
@@ -873,7 +864,7 @@ eval_exp_sub :    ⟦ σ ⟧s ρ ↘ ρ'   ⟦ M ⟧ ρ' ↘ m
                   ⟦ M[σ] ⟧ ρ ↘ m
 ```
 
-**eval_natrec（3 条）**：
+eval_natrec（3 条）：
 
 ```
 eval_natrec_zero : ⟦ MZ ⟧ ρ ↘ mz
@@ -892,7 +883,7 @@ eval_natrec_neut : ⟦ MZ ⟧ ρ ↘ mz
                      ↘ ⇑ a (rec m under ρ return A | zero -> mz | succ -> MS end)
 ```
 
-**eval_app（2 条）**：
+eval_app（2 条）：
 
 ```
 eval_app_fn :   ⟦ M ⟧ ρ ↦ n ↘ m
@@ -905,7 +896,7 @@ eval_app_neut : ⟦ B ⟧ ρ ↦ n ↘ b
 ```
 （`m (⇓ a n)` 是 d_app：把 neutral 应用到类型标注的值上。）
 
-**eval_sub（4 条）**：
+eval_sub（4 条）：
 
 ```
 eval_sub_id :      ⟦ Id ⟧s ρ ↘ ρ                                            (Eval/Definitions.v:65-66)
@@ -918,7 +909,7 @@ eval_sub_compose : ⟦ τ ⟧s ρ ↘ ρτ   ⟦ σ ⟧s ρτ ↘ ρτσ
                    ⟦ σ ∘ τ ⟧s ρ ↘ ρτσ
 ```
 
-求值是**确定性**的（functional，见 Eval/Lemmas.v；互归纳原理 Eval/Definitions.v:80-88）。
+求值是确定性的（functional，见 Eval/Lemmas.v；互归纳原理 Eval/Definitions.v:80-88）。
 
 ### 5.3 读出 Readback/Definitions.v
 
@@ -926,9 +917,9 @@ eval_sub_compose : ⟦ τ ⟧s ρ ↘ ρτ   ⟦ σ ⟧s ρτ ↘ ρτσ
 `Rne m in s ↘ M`（read_ne，Readback/Definitions.v:37）、
 `Rtyp m in s ↘ M`（read_typ，Readback/Definitions.v:63）。
 `s` = 深度（上下文长度）；读出把 domain（含绝对名）转回带 de Bruijn 索引的 nf/ne。
-互归纳，共 13 条（read_nf 6 + read_ne 3 + read_typ 4；2026-08-28 修正：原「12 条」漏计 read_nf_neut）。
+互归纳，共 13 条（read_nf 6 条、read_ne 3 条、read_typ 4 条）。
 
-**read_nf（6 条）**：
+read_nf（6 条）：
 
 ```
 read_nf_type :
@@ -965,13 +956,13 @@ read_nf_neut :
     Rnf ⇓ (⇑ a b) (⇑ c m) in s ↘ ⇑ M
 ```
 
-**read_ne（3 条）**：
+read_ne（3 条）：
 
 ```
 read_ne_var :
     ──────────────────────────   (Readback/Definitions.v:38-39)
     Rne !x in s ↘ #(s - x - 1)
-    （绝对名 x → de Bruijn 索引 s - x - 1）
+    （绝对名 x 转为 de Bruijn 索引 s - x - 1）
 
 read_ne_app :
     Rne m in s ↘ M
@@ -993,7 +984,7 @@ read_ne_natrec :
       ↘ rec M return B' | zero -> MZ | succ -> MS' end
 ```
 
-**read_typ（4 条）**：
+read_typ（4 条）：
 
 ```
 read_typ_univ :    Rtyp 𝕌@i in s ↘ Type@i                                    (Readback/Definitions.v:64-65)
@@ -1021,7 +1012,7 @@ initial_env_cons : initial_env Γ ρ
 ```
 
 性质（NbE.v:38-41，initial_env_spec）：若 `initial_env Γ ρ` 且 `#x : A ∈ Γ`，
-则 `ρ x = ⇑! a (length Γ - x - 1)`——第 x 个变量映射为绝对名 `length Γ - x - 1`
+则 `ρ x = ⇑! a (length Γ - x - 1)`。第 x 个变量映射为绝对名 `length Γ - x - 1`
 的 neutral（类型为 a 的求值结果）。即上下文头部（x=0）映射到绝对名 `length Γ - 1`。
 
 ### 5.5 规范化 nbe / nbe_ty（NbE.v:59-65, 137-142）
@@ -1043,12 +1034,12 @@ nbe_ty_run :                    （nbe_ty Γ M W：类型 M 规范化为 W ∈ n
     nbe_ty Γ M W
 ```
 
-两者均**确定性**（functional_nbe NbE.v:70-81、functional_nbe_ty NbE.v:147-158）。
+两者都是确定性的（functional_nbe NbE.v:70-81、functional_nbe_ty NbE.v:147-158）。
 `nbe` 的读入深度恒为 `length Γ`。
 
 ### 5.6 转换判定（语义转换 = 规范化到同一正规形）
 
-McTT 没有独立的 `t ≡ u : T` 判定；转换由下述双向定理刻画：
+McTT 没有独立的 `t ≡ u : T` 判定；转换由下述双向定理说明：
 
 ```
 completeness :  ∀ Γ M M' A,   Γ ⊢ M ≈ M' : A  ⟹  ∃ W, nbe Γ M A W ∧ nbe Γ M' A W
@@ -1057,15 +1048,15 @@ soundness :     ∀ Γ M A,      Γ ⊢ M : A  ⟹  ∃ W, nbe Γ M A W ∧ Γ �
                                                               (Soundness.v:9-10)
 ```
 
-即：**两表达式转换当且仅当它们在初始环境下求值并读出到同一个正规形**
-（completeness 给出 ⇒，soundness 给出 nf 与原文的语法等价，二者合起来是 ⇔）。
-算法实现上，转换判定 = 两侧分别 `nbe`/`nbe_ty` + nf 的语法相等
+即：两个表达式转换，当且仅当它们在初始环境下求值并读出到同一个正规形
+（completeness 给出从左到右的推导，soundness 通过 nf 与原表达式的语法等价给出从右到左的推导。二者合起来是充要条件）。
+算法实现中，转换判定就是两侧分别做 `nbe` 或 `nbe_ty`，再比较 nf 的语法相等
 （nf_eq_dec，Syntax.v:104-111）。
 
 ### 5.7 语义子类型 per_subtyp（PER/Definitions.v:237-258，soundness 侧，4 条）
 
-算法子类型（4.3）之上还定义语义子类型（用于 PER 逻辑关系/健全性证明，移植 kernel
-时如不做证明可只参照）：
+除算法子类型（4.3）外，还定义语义子类型（用于 PER 逻辑关系/健全性证明。移植 kernel
+时如果不做证明，可以只作参考）：
 
 ```
 per_subtyp_neut :  Dom b ≈ b' ∈ per_bot  ⟹  Sub ⇑ a b <: ⇑ a' b' at i            (PER/Definitions.v:238-240)
@@ -1089,12 +1080,12 @@ per_univ_elem PER/Definitions.v:161-164 为逻辑关系构造，移植 kernel �
 
 ---
 
-## 6. 自检清单（Task 2 生成时逐项核对，见 task-2-report.md）
+## 6. 检查清单
 
 1. 每个构造子有来源行号：Syntax.v（10 exp + 4 sub + 7 nf + 3 ne）、Domain.v（7 domain + 3 ne + 1 nf）。
 2. 每条规则有来源行号：System/Definitions.v（69 条推导规则 + 2 条查找 + 判定形式）、
    AlgTyp/Definitions.v（10 条）、AlgSub/Definitions.v（4 条）、Eval/Definitions.v（19 条）、
    Readback/Definitions.v（12 条）、NbE.v（2 条 + initial_env 2 条）、PER/Definitions.v（4 条）。
-3. 无「待定」「类似上面」类描述。
-4. de Bruijn/上下文约定在 §0.1 明确写出（var 0 = 上下文头部 = 最右元素；
+3. 正文没有“待定”或“类似上面”的描述。
+4. de Bruijn/上下文约定在第 0.1 节明确写出（var 0 = 上下文头部 = 最右元素；
    `Γ , A := cons A Γ`；d_var 为绝对名，读出时 `s - x - 1` 转换）。
