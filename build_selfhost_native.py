@@ -122,8 +122,8 @@ backend_support_files = [
     'src/stdlib/goroutine.cr',
     'src/stdlib/chan.cr',
     'src/stdlib/sched.cr',
-    'src/compiler/backend_flags.cr',
-    'src/compiler/corearch.cr',
+    'src/arch/x86_64/backend_flags.cr',
+    'src/arch/x86_64/corearch.cr',
 ]
 
 # 组合根（x86_64-linux target triple）：project-mode 入口链——`corec build
