@@ -75,24 +75,27 @@
 
 后端用 8 字节 tagged value 表示 `int`：
 
-| 最高位 | 含义 |
+| 最低位 | 含义 |
 |---|---|
-| 0 | 立即数，低 63 位是二补码有符号值 |
-| 1 | 指向 BigInt 对象的指针，低 63 位是地址 |
+| 0 | 立即数，存的是数学值的两倍 |
+| 1 | 指向 BigInt 对象的指针加一，对象地址 8 字节对齐 |
 
-立即数范围是 `[-2^62, 2^62-1]`。零是立即数 0。超出范围的值装箱。这个范围和标记只存在于后端，不出现在前端或 `.ccr`。
+立即数范围是 `[-2^62, 2^62-1]`。零是立即数 0。超出范围的值装箱。这个编码只存在于后端，不出现在前端或 `.ccr`。
+
+使用最低位而不是最高位，是为了让 Core 运行时不需要 64 位掩码或 2^63 常量。立即数装箱是乘 2，拆箱是除 2；BigInt 指针装箱是加 1，拆箱是减 1。对象地址由 `alloc` 保证 8 字节对齐。
 
 BigInt 对象布局：
 
 ```text
-offset 0: sign   i32   -1, 0, 1
-offset 4: len    u32   limb count
-offset 8: limbs  u32[len]
+offset 0:  sign   int   -1, 0, 1
+offset 8:  len    int   digit count
+offset 16: digits int[len]   每个元素保存 0..2^30-1
 ```
 
-- limb 采用 32 位小端序。
+- 采用 30 位 digit 的小端序表示。两个 30 位 digit 的乘积小于 2^60，加上进位后仍小于 2^62，因此运行时自身的 limb 运算保持在 Core 的立即数范围内。
+- 吸收 GMP 的规范化表示、schoolbook 乘加、Knuth 除法和小整数快路径；不链接 GMP，也不复制 GMP 源码。
 - 零的 `sign = 0`、`len = 0`。
-- 非零对象去掉高位零 limb。
+- 非零对象去掉高位零 digit。
 - 对象不可变，运算分配新对象。
 - 大整数对象从当前 arena 分配，arena 重置时统一回收。
 
@@ -102,10 +105,13 @@ offset 8: limbs  u32[len]
 
 ## 运行时契约
 
+BigInt 运行时用 Core 写成 `src/runtime/bigint.cr`。实现参考 imath 的整数算法结构和 GMP 的若干优化技术，不链接 C 源码，也不引入 libc 或 C 编译器依赖。运行时使用 30 位 digit，limb 中间值保持在立即数范围内，避免在 limb 运算中递归进入 BigInt 路径。
+
 运行时提供：
 
 ```text
 bi_from_word
+bi_from_uword
 bi_from_dec
 bi_to_dec
 bi_add
@@ -117,11 +123,14 @@ bi_cmp
 bi_neg
 bi_is_zero
 bi_to_word_checked
+bi_to_uword_checked
 ```
 
-- 除 `bi_from_word` 和 `bi_to_word_checked` 外，输入和输出都是 tagged value。
-- `bi_from_word` 接收原始 64 位机器字，返回 tagged value。
-- `bi_to_word_checked` 接收 tagged value，返回原始 64 位机器字。
+- 除 `bi_from_word`、`bi_from_uword`、`bi_to_word_checked` 和 `bi_to_uword_checked` 外，输入和输出都是 tagged value。
+- `bi_from_word` 接收原始有符号 64 位机器字，返回 tagged value。
+- `bi_from_uword` 接收原始无符号 64 位机器字，返回 tagged value。
+- `bi_to_word_checked` 接收 tagged value，返回原始有符号 64 位机器字。
+- `bi_to_uword_checked` 接收 tagged value，返回原始无符号 64 位机器字。
 - `bi_div` 和 `bi_mod` 使用向零截断，余数符号跟随被除数。
 - 除数为零时进入统一的运行期错误入口。
 - `bi_to_word_checked` 检查有符号 64 位范围；地址场景使用单独的无符号范围检查。

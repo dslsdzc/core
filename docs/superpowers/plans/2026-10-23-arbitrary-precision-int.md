@@ -32,8 +32,9 @@
 
 ### 文件
 
-- 新建 `src/runtime/bigint.s`
-- 新建 `tests/runtime/bigint_driver.s`
+- 新建 `src/runtime/bigint.cr`
+- 新建 `src/runtime/bigint.LICENSE`
+- 新建 `tests/runtime/bigint_driver.cr`
 - 新建 `tests/runtime/test_bigint.py`
 
 ### 接口
@@ -56,18 +57,21 @@ bi_to_uword_checked
 
 ### 步骤
 
-1. 实现 32 位 limb 的 BigInt 对象：
-   - header 为 `sign i32`、`len u32`。
-   - limb 小端序。
+1. 在 `src/runtime/bigint.cr` 实现 30 位 digit 的 BigInt 对象：
+   - 对象头为 `sign`、`len`，每个字段占一个 Core 槽。
+   - digit 小端序，每个 digit 保存 0..2^30-1。
    - 零规范化为 `sign=0`、`len=0`。
-   - 非零对象去掉高位零 limb。
+   - 非零对象去掉高位零 digit。
+   - limb 中间值保持在 2^62 以内，不触发 BigInt 递归。
+   - 使用 GMP 风格的规范化表示、schoolbook 乘加、Knuth 除法和小整数快路径。
 2. 实现 tagged value：
    - 最高位 0 是立即数，低 63 位二补码。
    - 最高位 1 是 BigInt 指针。
    - 立即数范围 `[-2^62, 2^62-1]`。
 3. 实现加减乘、向零截断的除法和取模、比较、取负、零判断、十进制读写和机器字范围检查。
 4. 所有对象从 `alloc` 分配，分配失败走现有 OOM 路径。
-5. `bigint_driver.s` 提供最小测试入口，通过退出码报告结果。
+5. `bigint_driver.cr` 提供最小测试入口，通过退出码报告结果。测试程序用现有 `corec` 编译，驱动只使用 30 位 digit 和 64 位以内的中间值。
+6. 在 `bigint.cr` 头注和 `bigint.LICENSE` 保留 imath 的 MIT 许可与来源说明。GMP 只参考优化思想，不复制源码。移植代码不包含 C 源文件，也不链接 C 目标文件。
 
 ### 测试
 
