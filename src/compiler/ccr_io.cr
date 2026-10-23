@@ -347,7 +347,7 @@ fn ccr_reg_seg_size() -> int:
 fn ccr_case_seg_size() -> int:
     // CASE is 4B case_count plus 24B records. Match lowering fills g_ccr_case;
     // before that the count is zero and the segment is a bare 4B zero.
-    return 4 + g_ccr_case_count * CCR_CASE_DISK
+    return 4 + g_ccr_case_count * CCR_V10_CASE_DISK
 
 // Write-side CASE domain check. The in-memory table is the source of truth, so
 // a malformed row must reject the save instead of producing a file the loader
@@ -361,7 +361,7 @@ fn ccr_validate_cases() -> int:
     loop:
         if ci >= g_ccr_case_count:
             break
-        base := ci * CCR_CASE_DISK
+        base := ci * CCR_V10_CASE_DISK
         kind := cell_load32(g_ccr_case, base + CCR_CASE_KIND)
         sidx := cell_load32(g_ccr_case, base + CCR_CASE_STR)
         target := cell_load32(g_ccr_case, base + CCR_CASE_TARGET)
@@ -570,10 +570,11 @@ fn ccr_validate_nod_operands() -> int:
             if ccr_label_known(ids, ln, s2) == 0 || ccr_label_known(ids, ln, s3) == 0:
                 return -1
         else if op == IR_MATCH:
-            // Minimal v10 MATCH shape: scrutinee var plus a non-negative
-            // CASE range. The range is checked against the CASE table after
-            // that segment loads (match projection work lands with the backend).
-            if ccr_nod_var_ok(s1) == 0:
+            // Minimal v10 MATCH shape: a real scrutinee var plus a non-negative
+            // CASE range. -1 is the reserved "none" id and is not a scrutinee.
+            // The range is checked against the CASE table after that segment
+            // loads (match projection work lands with the backend).
+            if s1 < 0 || ccr_nod_var_ok(s1) == 0:
                 return -1
             if s2 < 0 || s3 < 0:
                 return -1
@@ -1387,7 +1388,7 @@ fn save_ccr(path: string) -> int:
     loop:
         if ci3 >= g_ccr_case_count:
             break
-        cbase := ci3 * CCR_CASE_DISK
+        cbase := ci3 * CCR_V10_CASE_DISK
         buf_write_i64(buf, pos, cell_load(g_ccr_case, cbase + CCR_CASE_VALUE))
         pos = pos + 8
         buf_write_u32(buf, pos, cell_load32(g_ccr_case, cbase + CCR_CASE_KIND))
@@ -2707,7 +2708,7 @@ fn load_ccr(data: string, fsize: int) -> int:
         return -1
     case_buf : string, mut = ""
     if case_cnt > 0:
-        case_buf = alloc(case_cnt * CCR_CASE_DISK)
+        case_buf = alloc(case_cnt * CCR_V10_CASE_DISK)
     case_defaults : ., mut = 0
     ci4 : ., mut = 0
     loop:
@@ -2715,10 +2716,10 @@ fn load_ccr(data: string, fsize: int) -> int:
             break
         if !ccr_has_bytes(pos, CCR_V10_CASE_DISK, seg_end9):
             return -1
-        cbase := ci4 * CCR_CASE_DISK
+        cbase := ci4 * CCR_V10_CASE_DISK
         cval := buf_read_i64(data, pos)
         pos = pos + 8
-        ckind := buf_read_i32(data, pos)
+        ckind := buf_read_u32(data, pos)
         pos = pos + 4
         csidx := buf_read_i32(data, pos)
         pos = pos + 4

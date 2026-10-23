@@ -268,8 +268,9 @@ def test_ir_match_opcode_is_known_to_loader():
         assert nod_off is not None
 
         # A MATCH node plus three CASE records, as the schema expects them to
-        # coexist. s2/s3 are zero because this fixture only exercises the
-        # opcode/segment gates; match lowering fills the range in Task 2.
+        # coexist. s2/s3 carry the CASE range: s2=0, s3=count. Removing
+        # IR_MATCH from ccr_nod_src3_semantic would reject s3=3 as a legacy
+        # target fact, so this fixture pins the semantic field.
         records = [
             (7, KIND_VALUE, -1, labels[0], 0),
             (2, KIND_ENUM, -1, labels[1], 0),
@@ -277,11 +278,27 @@ def test_ir_match_opcode_is_known_to_loader():
         ]
         with_match = _replace_case(data, _pack_case(records))
         d = bytearray(with_match)
-        struct.pack_into("<I", d, nod_off + 4, IR_MATCH)
+        struct.pack_into("<I", d, nod_off + 4, IR_MATCH)       # op
+        struct.pack_into("<i", d, nod_off + 4 + 16, 0)         # s2 = case start
+        struct.pack_into("<i", d, nod_off + 4 + 20, len(records))  # s3 = count
         match_image = bytes(d)
         validate(match_image)
+        first = _nod_records(match_image)[0]
+        assert first[0] == IR_MATCH and first[3] == 0 and first[4] == len(records)
         assert len(_parse_case(segment(match_image, CASE_TAG))) == 3
         _assert_loads(match_image, tmp, "match_opcode")
+
+        # Negative: the scrutinee cannot be the reserved -1 id.
+        d = bytearray(with_match)
+        struct.pack_into("<I", d, nod_off + 4, IR_MATCH)
+        struct.pack_into("<q", d, nod_off + 4 + 8, -1)
+        _assert_load_rejected(bytes(d), tmp, "match_scrutinee_none")
+
+        # Negative: a negative CASE count is not a range.
+        d = bytearray(with_match)
+        struct.pack_into("<I", d, nod_off + 4, IR_MATCH)
+        struct.pack_into("<i", d, nod_off + 4 + 20, -1)
+        _assert_load_rejected(bytes(d), tmp, "match_case_count_negative")
 
         # Smallest reachable proof that the gate is real in this fixture: the
         # same byte patch with an opcode above the table is rejected.
