@@ -31,6 +31,11 @@
 //   type_id i32, flags u32, first_edge u32, edge_count u32}].
 //   src2/src3 never carry width, byte offset, stride, or alignment.
 // EDG(8): [count][8B {to_nod u32, kind u32}].
+// CASE(9): [count][24B {value i64, kind u32, str_index i32, target_nod i32,
+//   flags u32}]. kind is 0=value, 1=enum, 2=string, 3=default. target_nod is
+//   a NOD id whose node is IR_LABEL. str_index is -1 or a STR index, and a
+//   string case needs a real index. flags is reserved and zero in v10. CASE is
+//   last so every target and STR reference is already visible when it loads.
 // ENT(6): [count][24B {var_id i32, version u32, def_nod i32, live_start u32,
 //   live_end u32, flags u32}]. home is not part of v10.
 // REG(7): [count][24B {kind u32, parent i32, enter_nod u32, exit_nod u32,
@@ -340,8 +345,45 @@ fn ccr_reg_seg_size() -> int:
     return 4 + g_sg_count * CCR_V10_REG_DISK
 
 fn ccr_case_seg_size() -> int:
-    // CASE is an empty table until match lowering writes it: 4B case_count = 0.
-    return 4
+    // CASE is 4B case_count plus 24B records. Match lowering fills g_ccr_case;
+    // before that the count is zero and the segment is a bare 4B zero.
+    return 4 + g_ccr_case_count * CCR_CASE_DISK
+
+// Write-side CASE domain check. The in-memory table is the source of truth, so
+// a malformed row must reject the save instead of producing a file the loader
+// would refuse. Targets are NOD ids of LABEL nodes; the value domain is checked
+// by the projection that consumes it, not here.
+fn ccr_validate_cases() -> int:
+    if g_ccr_case_count < 0:
+        return 0
+    defaults : ., mut = 0
+    ci : ., mut = 0
+    loop:
+        if ci >= g_ccr_case_count:
+            break
+        base := ci * CCR_CASE_DISK
+        kind := cell_load32(g_ccr_case, base + CCR_CASE_KIND)
+        sidx := cell_load32(g_ccr_case, base + CCR_CASE_STR)
+        target := cell_load32(g_ccr_case, base + CCR_CASE_TARGET)
+        cflags := cell_load32(g_ccr_case, base + CCR_CASE_FLAGS)
+        if kind < CCR_CASE_KIND_VALUE || kind > CCR_CASE_KIND_DEFAULT:
+            return 0
+        if sidx < -1 || sidx >= g_str_count:
+            return 0
+        if kind == CCR_CASE_KIND_STRING && sidx < 0:
+            return 0
+        if target < 0 || target >= g_ir_instr_count:
+            return 0
+        if iri_op(target) != IR_LABEL:
+            return 0
+        if cflags != 0:
+            return 0
+        if kind == CCR_CASE_KIND_DEFAULT:
+            defaults = defaults + 1
+            if defaults > 1:
+                return 0
+        ci = ci + 1
+    return 1
 
 // ── Header flag classification (spec §3.1) ──────────────────────────────
 // SYSTEM boundary ops: runtime/FFI/ABI surfaces. ARENA_NEW only counts when the
@@ -388,12 +430,12 @@ fn ccr_op_is_concurrent(op: int) -> int:
         return 1
     return 0
 
-// v10 opcode table. The IR opcode values are assigned densely 0..53 in ast.cr;
+// v10 opcode table. The IR opcode values are assigned densely 0..54 in ast.cr;
 // anything outside that table is not a v10 operation. Rejecting unknown opcodes
 // before emission also prevents emit_instr from silently falling through as a
 // zero-byte instruction.
 fn ccr_op_is_known(op: int) -> int:
-    if op >= IR_NOP && op <= IR_STR_OF:
+    if op >= IR_NOP && op <= IR_MATCH:
         return 1
     return 0
 
@@ -527,6 +569,14 @@ fn ccr_validate_nod_operands() -> int:
                 return -1
             if ccr_label_known(ids, ln, s2) == 0 || ccr_label_known(ids, ln, s3) == 0:
                 return -1
+        else if op == IR_MATCH:
+            // Minimal v10 MATCH shape: scrutinee var plus a non-negative
+            // CASE range. The range is checked against the CASE table after
+            // that segment loads (match projection work lands with the backend).
+            if ccr_nod_var_ok(s1) == 0:
+                return -1
+            if s2 < 0 || s3 < 0:
+                return -1
         else if op == IR_JUMP || op == IR_LABEL:
             if ccr_label_known(ids, ln, s1) == 0:
                 return -1
@@ -592,7 +642,7 @@ fn ccr_validate_nod_operands() -> int:
 // fact. ALLOC_ARRAY/ADDR_INDEX/DEREF/STORE_PTR are handled explicitly because
 // their old src2/src3 facts are the migration's critical cases.
 fn ccr_nod_src3_semantic(op: int) -> int:
-    if op == IR_UNARY || op == IR_BINARY || op == IR_CALL || op == IR_ALLOC_STRUCT || op == IR_LOAD_FIELD || op == IR_STORE_FIELD || op == IR_STORE_INDEX || op == IR_BRANCH || op == IR_SLICE || op == IR_SPAWN || op == IR_HOTPATCH_ROUTE || op == IR_CALL_EXTERN || op == IR_LOAD_INDEX:
+    if op == IR_UNARY || op == IR_BINARY || op == IR_CALL || op == IR_ALLOC_STRUCT || op == IR_LOAD_FIELD || op == IR_STORE_FIELD || op == IR_STORE_INDEX || op == IR_BRANCH || op == IR_MATCH || op == IR_SLICE || op == IR_SPAWN || op == IR_HOTPATCH_ROUTE || op == IR_CALL_EXTERN || op == IR_LOAD_INDEX:
         return 1
     return 0
 
@@ -811,6 +861,10 @@ fn save_ccr(path: string) -> int:
     // The wire format stores the checked fields as signed i32. Refuse to emit a
     // lossy file instead of letting w32 keep only the low bits.
     if ccr_validate_i32_fields() == 0:
+        return -1
+    // CASE rows are in-memory 24B records. Reject a malformed table here so the
+    // writer never emits a file the loader would reject.
+    if ccr_validate_cases() == 0:
         return -1
 
     // ENT data is computed first. The corec writer calls compute_live_ranges(),
@@ -1325,10 +1379,26 @@ fn save_ccr(path: string) -> int:
         pos = pos + 4   // kind
         ei3 = ei3 + 1
 
-    // === CASE: empty table for now (4B case_count = 0). CASE is last because it
-    // may reference every NOD target once match lowering fills it in.
-    buf_write_u32(buf, pos, 0)
+    // === CASE: 24B records from g_ccr_case. CASE is last because targets may
+    // reference every NOD label and string cases may reference every STR entry.
+    buf_write_u32(buf, pos, g_ccr_case_count)
     pos = pos + 4
+    ci3 : ., mut = 0
+    loop:
+        if ci3 >= g_ccr_case_count:
+            break
+        cbase := ci3 * CCR_CASE_DISK
+        buf_write_i64(buf, pos, cell_load(g_ccr_case, cbase + CCR_CASE_VALUE))
+        pos = pos + 8
+        buf_write_u32(buf, pos, cell_load32(g_ccr_case, cbase + CCR_CASE_KIND))
+        pos = pos + 4
+        buf_write_i32(buf, pos, cell_load32(g_ccr_case, cbase + CCR_CASE_STR))
+        pos = pos + 4
+        buf_write_i32(buf, pos, cell_load32(g_ccr_case, cbase + CCR_CASE_TARGET))
+        pos = pos + 4
+        buf_write_u32(buf, pos, cell_load32(g_ccr_case, cbase + CCR_CASE_FLAGS))
+        pos = pos + 4
+        ci3 = ci3 + 1
 
     // The size calculator and the writer are two independent walks. A mismatch
     // means a section changed without updating calc_ccr_size; refuse to write a
@@ -1565,6 +1635,8 @@ fn load_ccr(data: string, fsize: int) -> int:
     g_entry_count = 0
     g_v7_edge_count = 0
     g_v7_nod_count = 0   // NOD 对象缓冲计数（NOD 段载入后置位）
+    g_ccr_case = ""
+    g_ccr_case_count = 0
     // TYPE 段有真实内存表（g_types 记录表 + 项层 g_type_terms/
     // g_tt_index），复位在 TYPE 段解析处（记录表大小随段内容，且需与项层 memo
     // 同步作废；见该段注释）。
@@ -2623,17 +2695,64 @@ fn load_ccr(data: string, fsize: int) -> int:
         return -1
     // 2 行走完 == 段体大小
 
-    // === CASE: empty table for now ===
-    // The loader requires case_count == 0 until match lowering writes CASE. Any
-    // other count is an unknown shape, so reject instead of treating it as empty.
+    // === CASE: [case_count][24B records] ===
+    // Targets are NOD ids of LABEL nodes; CASE loads after NOD, so the whole
+    // graph is visible. Records are bounds-checked before each read and the
+    // walk must end exactly at the segment boundary.
     if !ccr_has_bytes(pos, 4, seg_end9):
         return -1
     case_cnt := buf_read_u32(data, pos)
     pos = pos + 4
-    if case_cnt != 0:
+    if case_cnt > (seg_end9 - pos) / CCR_V10_CASE_DISK:
         return -1
+    case_buf : string, mut = ""
+    if case_cnt > 0:
+        case_buf = alloc(case_cnt * CCR_CASE_DISK)
+    case_defaults : ., mut = 0
+    ci4 : ., mut = 0
+    loop:
+        if ci4 >= case_cnt:
+            break
+        if !ccr_has_bytes(pos, CCR_V10_CASE_DISK, seg_end9):
+            return -1
+        cbase := ci4 * CCR_CASE_DISK
+        cval := buf_read_i64(data, pos)
+        pos = pos + 8
+        ckind := buf_read_i32(data, pos)
+        pos = pos + 4
+        csidx := buf_read_i32(data, pos)
+        pos = pos + 4
+        ctarget := buf_read_i32(data, pos)
+        pos = pos + 4
+        cflags := buf_read_u32(data, pos)
+        pos = pos + 4
+        if ckind < CCR_CASE_KIND_VALUE || ckind > CCR_CASE_KIND_DEFAULT:
+            return -1
+        if csidx < -1 || csidx >= g_str_count:
+            return -1
+        if ckind == CCR_CASE_KIND_STRING && csidx < 0:
+            return -1
+        if ctarget < 0 || ctarget >= g_v7_nod_count:
+            return -1
+        if nod_op(ctarget) != IR_LABEL:
+            return -1
+        // v10 defines no CASE flag bits yet; reject unknown meaning.
+        if cflags != 0:
+            return -1
+        if ckind == CCR_CASE_KIND_DEFAULT:
+            case_defaults = case_defaults + 1
+            if case_defaults > 1:
+                return -1
+        cell_store(case_buf, cbase + CCR_CASE_VALUE, cval)
+        cell_store32(case_buf, cbase + CCR_CASE_KIND, ckind)
+        cell_store32(case_buf, cbase + CCR_CASE_STR, csidx)
+        cell_store32(case_buf, cbase + CCR_CASE_TARGET, ctarget)
+        cell_store32(case_buf, cbase + CCR_CASE_FLAGS, cflags)
+        ci4 = ci4 + 1
     if pos != seg_end9:
         return -1
+    g_ccr_case = case_buf
+    g_ccr_case_count = case_cnt
 
     // === NOD type_id domain check ===
     // TYPE is consumed before NOD, so the row domain is already rebuilt. The

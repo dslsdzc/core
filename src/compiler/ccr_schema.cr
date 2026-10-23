@@ -39,6 +39,23 @@ CCR_V10_REG_DISK : int = 24
 CCR_V10_EDG_DISK : int = 8
 CCR_V10_CASE_DISK : int = 24
 
+// CASE record (24B): value i64, kind u32, str index i32, target NOD id i32,
+// flags u32. The target names an IR_LABEL node; CASE carries no width, byte
+// extent, or target layout fact.
+CCR_CASE_VALUE : int = 0
+CCR_CASE_KIND : int = 8
+CCR_CASE_STR : int = 12
+CCR_CASE_TARGET : int = 16
+CCR_CASE_FLAGS : int = 20
+CCR_CASE_DISK : int = 24
+
+// CASE semantic kinds. VALUE covers int/bool/char literals, ENUM covers enum
+// variant tags, STRING names a STR entry, and DEFAULT is the fall-through arm.
+CCR_CASE_KIND_VALUE : int = 0
+CCR_CASE_KIND_ENUM : int = 1
+CCR_CASE_KIND_STRING : int = 2
+CCR_CASE_KIND_DEFAULT : int = 3
+
 // v10 header flags (spec §3.1). They describe program properties only; no bit
 // carries raw-int, external-binary-interface, or target identity.
 //   bit 0 PORTABLE   no raw/FFI/external-binary boundary

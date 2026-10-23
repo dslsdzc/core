@@ -60,6 +60,13 @@ g_ccr_nod_type : string, mut
 g_ccr_nod_type_count : int, mut
 g_ccr_nod_flags : string, mut
 g_ccr_nod_flags_count : int, mut
+// In-memory CASE table for v10 segment tag 9. Rows are 24B records with the
+// layout named by CCR_CASE_* (value, kind, str index, target NOD, flags).
+// corec fills this table when it lowers a match; the empty program keeps count
+// zero and the wire writes a bare 4B zero count. The loader rebuilds the same
+// rows from disk. This file is first in both builds, so it must stay here.
+g_ccr_case : string, mut
+g_ccr_case_count : int, mut
 g_ast : string, mut
 g_ast_count : int, mut
 g_ast_cap : int, mut
