@@ -411,6 +411,7 @@ class X86_64StackAsmGen:
                 self.emit("    add rax, rax")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
             if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
+            return
         if instr.func == 'alloc':
             if self.bigint_mode:
                 self.emit("    sar rdi, 1")
@@ -418,6 +419,7 @@ class X86_64StackAsmGen:
             self._clobber_regs()
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
             if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
+            return
         if instr.func == 'r64':
             # r64(buf, pos) → read 8 bytes
             if self.bigint_mode:
