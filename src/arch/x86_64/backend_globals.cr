@@ -5,6 +5,9 @@
 g_ni_syscall3 : int, mut
 g_ni_syscall4 : int, mut
 
+// IR variable index to shared stack slot variable (-1 = own slot).
+g_stack_map : string, mut
+
 // Backend arrays (all dynamic byte buffers)
 g_x86_str_offs : string, mut
 g_x86_str_count : int, mut

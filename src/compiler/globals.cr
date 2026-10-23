@@ -300,9 +300,6 @@ g_gen_map_cap : int, mut
 g_dyn_type_sets : string, mut
 g_dyn_type_set_count : int, mut
 g_dyn_type_set_cap : int, mut
-g_stack_map : string, mut  // IR var index to shared stack slot var (-1 = own slot), set by allocator
-g_home_dir : string, mut           // cached HOME dir for SO index lookup
-g_home_dir_ok : int, mut           // 1 = g_home_dir initialized
 
 g_ir_func_name_idx : string, mut
 g_ir_func_name_idx_cap : int, mut
