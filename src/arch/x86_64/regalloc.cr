@@ -29,10 +29,10 @@ fn inject_coexist_oob() -> int:
 // assuming function 0 is the tested main.
 //
 // Home-group conflict: pick two coexisting entries for different vars, remove
-// both vars from register residency, then set both home slots to 7. The
-// verifier reports a home-group violation (rule 1). Vars without a home entry
-// have home = -1 and do not participate in the sweep, so there are no side
-// effects.
+// both vars from register residency, then set both runtime/instance home slots
+// to 7. This slot is never serialized into `.ccr`. The verifier reports a
+// home-group violation (rule 1). Vars without a home entry have runtime_home =
+// -1 and do not participate in the sweep, so there are no side effects.
 fn try_inject_home_conflict(func_i: int) -> int:
     es := entry_start(func_i)
     ec := entry_count(func_i)

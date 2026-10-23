@@ -506,9 +506,10 @@ fn coexist_version_conflicts(func_i: int) -> int:
         ei = ei + 1
     return conflicts
 
-// Count conflicts among entries with the same home slot. home = -1 is ignored.
-// This is a simple pairwise check; when home assignment is enabled, replace it
-// with a per-group sweep instead of reusing this function.
+// Count conflicts among entries with the same runtime/instance home slot.
+// runtime_home = -1 is ignored. This is a simple pairwise check; when home
+// assignment is enabled, replace it with a per-group sweep instead of reusing
+// this function. This slot never enters `.ccr`.
 fn coexist_home_conflicts(func_i: int) -> int:
     es := entry_start(func_i)
     ec := entry_count(func_i)
@@ -532,8 +533,8 @@ fn coexist_home_conflicts(func_i: int) -> int:
         ei = ei + 1
     return conflicts
 
-// --dump-coexist output: per function, version conflicts (expected 0) and home
-// conflicts (expected 0 while home is unassigned).
+// --dump-coexist output: per function, version conflicts (expected 0) and
+// runtime/instance home conflicts (expected 0 while runtime_home is unassigned).
 fn dump_coexist_summary():
     fi : ., mut = 0
     loop:
@@ -713,8 +714,9 @@ fn rl_merge_sort(buf: string, n: int):
         width = width * 2
 
 // Print an opaque location. The kernel does not classify values as registers or
-// home slots; that belongs to the instance. Rule 1 has two passes, the registry
-// pass and the home-field pass, but they print the same report format.
+// runtime/instance home slots; that belongs to the instance. Rule 1 has two
+// passes, the registry pass and the runtime-home pass, but they print the same
+// report format.
 fn rl_print_loc(loc: int):
     print("loc ")
     print(int_str(loc))

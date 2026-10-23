@@ -177,11 +177,25 @@
 # **后来人注意**：**任何新增编译器侧全局**都会移动这张表（登记 ⇒ 启动期 intern ⇒ id 顺移）。
 #   这是**固有代价**，不是回归——但按本文件两级纪律，**必须显式声明 + 同批重锁 + 旧值留痕**。
 
+# ── 【本批重锁 2026-10-24】Task 8 review fix：raw ABI 调用成为图级 SYSTEM 边界 ──
+#   四条 `.ccr`：size 全不变，sha 全变；canary ELF 逐字节不变（826d74cf…）。
+#   归因 = `ccr_compute_header_flags` 现在识别 IR_CALL 到保留的 raw ABI 内建
+#   （cell_store/cell_load/load8/store8/load64/w32/load_str_ptr/store_str_ptr/
+#   _dyncpy）⇒ 注入的 stdlib/runtime 函数使每个程序图都含 raw 调用 ⇒ header
+#   flags 从 PORTABLE(1) 变为 SYSTEM(2)。逐字节对照旧编译器产物：四条 `.ccr`
+#   **唯一差异 = 偏移 12 的 header flags 字节 `01 → 02`**，其余字节与尺寸全同；
+#   ELF canary 不变。D1 5/5 PASS。
+#   旧值留痕（自本批起作废）：
+#     pa_ccr        1115f352656d6e53f388d48088616703e2c9df13c8233b9471bdd047aa16b367 93710
+#     pa_static_ccr 5f1b90d4be268c350e0ae34b4d805732573d5a115f53a51df08d0ab4e2192630 93853
+#     gt_ccr        a1b3d07dc98772351edcdbf5798887e679caa9d452444ef6ad76c86ea2ff05ff 138672
+#     gt_static_ccr bd7d2fc42282a3ca3905a567c8c6d577390262ec269002f96da2f59a8a40301c 138815
+
 canary_elf	pa	826d74cf7f099f9758e11a64d443695ff8360327a88e7eb5922ddfd617e0dce5	53430
-pa_ccr	pa.ccr	1115f352656d6e53f388d48088616703e2c9df13c8233b9471bdd047aa16b367	93710
-pa_static_ccr	pa_st.bin.ccr	5f1b90d4be268c350e0ae34b4d805732573d5a115f53a51df08d0ab4e2192630	93853
-gt_ccr	gt.ccr	a1b3d07dc98772351edcdbf5798887e679caa9d452444ef6ad76c86ea2ff05ff	138672
-gt_static_ccr	gt_st.bin.ccr	bd7d2fc42282a3ca3905a567c8c6d577390262ec269002f96da2f59a8a40301c	138815
+pa_ccr	pa.ccr	f45a52584e647fa093e7b7d785aabfcd2d6a1ba520c2a560eaf0e0901a13cd2f	93710
+pa_static_ccr	pa_st.bin.ccr	d218b5218a9b05b32b3a9211ec3f6769084dd17b1bdf73012d56788b0631e388	93853
+gt_ccr	gt.ccr	6f449f88f25291599e91b956f6f5951882453886747aa7873ecaf7235d765f65	138672
+gt_static_ccr	gt_st.bin.ccr	95001eea331f8c3bad0b26ce33116b21a08b0231066267cbe476e51f4cf00288	138815
 # ⚠ **本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下

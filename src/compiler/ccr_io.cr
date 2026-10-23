@@ -360,6 +360,21 @@ fn ccr_op_is_system(op: int, arena_count: int) -> int:
         return 1
     return 0
 
+// Raw byte/runtime ABI builtins retained for the stdlib scheduler/arena and
+// the compiler runtime. A direct IR_CALL to one of these is a SYSTEM boundary:
+// the graph calls are the authority, not the g_ccr_emit_raw_int source bit.
+// IR_CALL stores the callee string index in src3; ordinary arguments live in
+// the argument chain rooted at s1 and must never be inspected here.
+fn ccr_raw_abi_builtin(name: string) -> int:
+    if name == "cell_store" || name == "cell_load" || name == "load8" || name == "store8" || name == "load64" || name == "w32" || name == "load_str_ptr" || name == "store_str_ptr" || name == "_dyncpy":
+        return 1
+    return 0
+
+fn ccr_raw_abi_call(sym: int) -> int:
+    if sym < 0:
+        return 0
+    return ccr_raw_abi_builtin(istr_get(sym))
+
 fn ccr_op_is_concurrent(op: int) -> int:
     if op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT:
         return 1
@@ -384,6 +399,8 @@ fn ccr_compute_header_flags() -> int:
         if ii >= g_ir_instr_count:
             break
         if ccr_op_is_system(iri_op(ii), iri_s1(ii)) != 0:
+            hsys = 1
+        if iri_op(ii) == IR_CALL && ccr_raw_abi_call(iri_s3(ii)) != 0:
             hsys = 1
         if ccr_op_is_concurrent(iri_op(ii)) != 0:
             hconc = 1
@@ -410,6 +427,8 @@ fn ccr_validate_header_flags(rsv: int) -> int:
         if ii >= g_v7_nod_count:
             break
         if ccr_op_is_system(nod_op(ii), nod_s1(ii)) != 0:
+            nsys = 1
+        if nod_op(ii) == IR_CALL && ccr_raw_abi_call(nod_s3(ii)) != 0:
             nsys = 1
         if ccr_op_is_concurrent(nod_op(ii)) != 0:
             nconc = 1
@@ -2050,8 +2069,8 @@ fn load_ccr(data: string, fsize: int) -> int:
         // so rejecting here keeps old loaders from silently ignoring meaning.
         if fl2 > CCR_NOD_FLAG_KNOWN_MASK:
             return -1
-        // 对象缓冲写（语义字段 = 盘字节镜像，w32/w64 低 32/64 位存储，存取
-        // 经 nod_* 访问器 buf_read_* 符号扩展，数值与原重建段消费完全一致）
+        // 对象缓冲写（语义字段 = 盘字节镜像，由 cell_store/cell_store32 存储，
+        // 存取经 nod_* 访问器 buf_read_* 符号扩展，数值与原重建段消费完全一致）
         cell_store32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_OP, opcode)
         cell_store32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_DEST, dest)
         cell_store(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S1, s1)

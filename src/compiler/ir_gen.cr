@@ -4173,8 +4173,9 @@ fn ccr_set_raw_mode_from_source():
         g_ccr_emit_raw_int = 1
     if ccr_source_has_marker("import cli") != 0:
         // The CLI word-table layer intentionally stores raw string pointers via
-        // w64/r64 and views them back through @str_of. Legacy raw semantics are
-        // required for that table; user CLI programs are not arithmetic kernels.
+        // cell_store/cell_load and views them back through @str_of. Legacy raw
+        // semantics are required for that table; user CLI programs are not
+        // arithmetic kernels.
         g_ccr_emit_raw_int = 1
     if ccr_source_dir_is_compiler() != 0:
         g_ccr_emit_raw_int = 1

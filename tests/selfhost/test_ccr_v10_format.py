@@ -853,14 +853,29 @@ RUNTIME_BOUND_SOURCE = """fn main() -> int:
     return *p
 """
 
+# Direct raw ABI call: the graph must make this SYSTEM even though no extern or
+# raw-int build mode is involved.
+RAW_CALL_SOURCE = """fn main() -> int:
+    b := alloc(16)
+    cell_store(b, 0, 7)
+    return cell_load(b, 0)
+"""
 
-def test_header_flags_portable_user_program():
+
+def test_header_flags_minimal_program_is_system():
+    """Every compiled program is SYSTEM while raw stdlib/runtime ABI remains.
+
+    The compiler injects runtime functions that call raw builtins (load8/store8/
+    cell_load/...), so a minimal user program is not an isolated graph. PORTABLE
+    cannot be truthfully produced by the current e2e pipeline; the graph-level
+    classifier (not this test) decides the header.
+    """
     with tempfile.TemporaryDirectory() as td:
         data = _build_v10(Path(td), PORTABLE_SOURCE, "portable")
     f = flags(data)
     assert f & ~0x7 == 0, f"reserved header bits set: {f:#x}"
-    assert f & 2 == 0, f"portable user program marked SYSTEM: {f:#x}"
-    assert f in (0, 1), f"unexpected portable flags {f:#x}"
+    assert f & 2 != 0, f"raw runtime injection did not mark SYSTEM: {f:#x}"
+    assert f & 1 == 0, f"SYSTEM program also claims PORTABLE: {f:#x}"
 
 
 def test_header_flags_system_artifact():
@@ -869,6 +884,32 @@ def test_header_flags_system_artifact():
     f = flags(data)
     assert f & 2 != 0, f"extern/ABI program missing SYSTEM: {f:#x}"
     assert f & 1 == 0, f"SYSTEM program also claims PORTABLE: {f:#x}"
+
+
+def test_header_flags_raw_abi_call_is_system():
+    """A direct raw ABI call is a SYSTEM boundary at graph level.
+
+    cell_store/cell_load are retained SYSTEM runtime builtins. The header must
+    say SYSTEM (bit 2), not PORTABLE (bit 1), even without extern/raw-int mode.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        data = _build_v10(Path(td), RAW_CALL_SOURCE, "rawcall")
+    f = flags(data)
+    assert f & 2 != 0, f"raw ABI call missing SYSTEM: {f:#x}"
+    assert f & 1 == 0, f"raw ABI call also claims PORTABLE: {f:#x}"
+
+
+def test_portable_header_with_raw_abi_call_rejected():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_v10(tmp, RAW_CALL_SOURCE, "rawcallportable")
+        bad = tmp / "rawcallportable.ccr"
+        # Downgrade the truthful SYSTEM header to PORTABLE. The loader's graph
+        # classifier must reject it, not trust the header word.
+        bad.write_bytes(patch_u32(data, 12, 1))
+        r = _run([COREARCH, bad, "--elf", "--static", "-o", tmp / "rawcallportable.elf"])
+        assert r.returncode != 0, "PORTABLE header with a raw ABI call accepted"
+        assert "invalid" in (r.stdout + r.stderr)
 
 
 def test_portable_system_flags_rejected():

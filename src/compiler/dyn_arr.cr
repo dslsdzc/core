@@ -1,7 +1,7 @@
 // === dyn_arr.cr ===
 // Compiler table constants + grow functions + string pool.
-// Byte helpers (w8/bu8/w32/r32/w64/r64/_dyncpy) live in src/kernel/bytes.cr;
-// they are the low-level cell layer, not frontend semantics.
+// Byte helpers (w8/bu8/w32/r32/cell_store/cell_load/_dyncpy) live in
+// src/kernel/bytes.cr; they are the low-level cell layer, not frontend semantics.
 
 // ============================================================
 // Element sizes (bytes per element)
@@ -114,10 +114,12 @@ OFF_DFE_KIND : int = 24 // 0=data (def-use), 1=state (ordering/termination)
 
 // Entry record, filled by compute_entries. It splits variables into versions at
 // definition points. The in-memory record is 24 bytes, six 4-byte fields, read
-// and written little-endian. It is NOT the v10 wire record: on disk ENT is also
-// 24 bytes but stores `version` in the slot where memory keeps the runtime-only
-// allocator home. var_idx u32, def_instr i32, live_start i32, live_end i32,
-// runtime_home i32, flags u32.
+// and written little-endian:
+//   mem 0 var, 4 def, 8 live_start, 12 live_end, 16 runtime_home, 20 flags.
+// The v10 wire ENT record is also 24 bytes but has a different slot meaning:
+//   wire 0 var_id, 4 version, 8 def_nod, 12 live_start, 16 live_end, 20 flags.
+// The wire has no home field. In particular, wire offset 16 is live_end while
+// memory offset 16 is the runtime-only allocator home.
 ESZ_ENTRY   : int = 24
 OFF_ENTRY_VAR   : int = 0    // 全局 IR 变量索引
 OFF_ENTRY_DEF   : int = 4    // 定值指令全局索引（-1 = 无定值）
