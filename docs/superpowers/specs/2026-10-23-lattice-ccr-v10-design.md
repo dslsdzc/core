@@ -68,15 +68,15 @@ Segment table 9 × 12B
   offset  offset   相对文件头
   size    size
 
-Segments
+Segments（canonical file order）
   1 STR
-  2 SYM
-  3 NOD
-  4 ENT
-  5 REG
-  6 EDG
-  7 TYPE
-  8 IFACE
+  2 TYPE
+  3 IFACE
+  4 SYM
+  5 NOD
+  6 ENT
+  7 REG
+  8 EDG
   9 CASE
 ```
 
@@ -98,6 +98,57 @@ bit 3+ 保留，必须为 0
 ```
 
 flags 不携带 target 身份、字宽、字节序或 ABI。一个 `SYSTEM` 程序仍可以是格形态，但不承诺跨目标运行。
+
+### 3.2 流式读取契约
+
+v10 的 canonical file order 是为顺序读取设计的：
+
+```text
+STR -> TYPE -> IFACE -> SYM -> NOD -> ENT -> REG -> EDG -> CASE
+```
+
+依赖方向：
+
+- STR 只被所有段引用；
+- TYPE 在 IFACE/SYM/NOD 前，类型域先就绪；
+- IFACE 在 SYM 前；
+- SYM 在 NOD 前，函数/全局/结构声明先就绪；
+- NOD 在 ENT/REG/EDG/CASE 前，图坐标先就绪；
+- ENT 在 REG 前，区域条目范围可校验；
+- EDG 在 NOD 后，边可校验；
+- CASE 最后，目标 NOD 已全部可见。
+
+读取器可以：
+
+1. 先读 16B header 和 9×12B 段表；
+2. 校验 magic/version/seg_count、offset/size 连续、无重叠；
+3. 按 canonical order 顺序消费段体；
+4. 对固定记录段直接流式解析；
+5. 对变长段按 count + length 前缀读取；
+6. NOD 控制目标、CASE 目标等前向引用在 NOD/CASE 读完后再解析，不要求文件后向 seek；
+7. 语义表可以继续驻留内存；流式指输入路径，不承诺零内存执行。
+
+写入器可以为了填写段表先计算各段大小，或使用可 seek 输出；**读取器不得依赖后向 seek**。
+
+随机访问模式仍可用段表 offset/size 直接定位；它和流式模式必须产生相同语义。
+
+### 3.3 分发 bundle
+
+标准分发单位是 `.ccrb`：
+
+```text
+.ccrb = Zstandard frame(deterministic tar)
+  manifest
+  program.ccr
+  coi/<target>.coi   (0..N，可选)
+```
+
+- zstd 流式解压；tar 条目按固定顺序、固定元数据；
+- manifest 只含 bundle/版本/raw `.ccr` 身份/`.coi` 目标和哈希；
+- `.ccr` 保持 raw、固定 wire、目标无关；
+- `.coi` 可选、可删、可重算；
+- 解压后的 raw `.ccr` 用 3.2 的流式读取契约；
+- `corearch` 不要求实现 zstd；由分发/安装层解包。
 
 ## 4. NOD：图事件
 
