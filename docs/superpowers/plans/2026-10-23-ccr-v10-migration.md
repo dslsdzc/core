@@ -163,7 +163,7 @@ jj commit -m "ccr: add v10 wire schema constants"
 
 ---
 
-### Task 3: NOD 语义域和 ENT 无 home 化（仍写 v9）
+### Task 3: NOD 语义域（仍写 v9）
 
 **Files:**
 - Modify: `src/lattice/ent_kernel.cr`
@@ -229,7 +229,7 @@ Expected: 全绿；`.ccr` 字节可变化，但 ELF canary 和语义断言不变
 - [ ] **Step 5: 提交**
 
 ```bash
-jj commit -m "ccr: derive semantic type ids and drop ent home from v10 path"
+jj commit -m "ccr: derive semantic type ids for v10 nod"
 ```
 
 ---
