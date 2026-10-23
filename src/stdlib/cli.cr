@@ -34,6 +34,7 @@ struct CliFlag:
     value: string,
     has_value: int,
     is_bool: int,
+    debug: int,
 
 // --- Global state ---
 g_cli_prog : string, mut
@@ -70,8 +71,8 @@ fn grow_cli_flags(needed: int):
         nc = 8
     if nc < needed:
         nc = needed + 8
-    nb := alloc(nc * 48)
-    _dyncpy(g_cli_flags, cur_cap * 48, nb)
+    nb := alloc(nc * 56)
+    _dyncpy(g_cli_flags, cur_cap * 56, nb)
     g_cli_flags = nb
     g_cli_flag_cap = nc
 fn grow_cli_args(needed: int):
@@ -116,7 +117,7 @@ fn cli_cmd(name: string, desc: string):
 
 fn cli_flag(long_name: string, short_name: string, desc: string):
     grow_cli_flags(g_cli_flag_count + 1)
-    off : ., mut = g_cli_flag_count * 48
+    off : ., mut = g_cli_flag_count * 56
     unsafe:
         w64(g_cli_flags, off, @ptr_of(long_name))
         w64(g_cli_flags, off + 8, @ptr_of(short_name))
@@ -124,11 +125,12 @@ fn cli_flag(long_name: string, short_name: string, desc: string):
         w64(g_cli_flags, off + 24, @ptr_of(""))   // value
     w64(g_cli_flags, off + 32, 0)         // has_value
     w64(g_cli_flags, off + 40, 0)         // is_bool
+    w64(g_cli_flags, off + 48, 0)         // debug
     g_cli_flag_count = g_cli_flag_count + 1
 
 fn cli_flag_bool(long_name: string, short_name: string, desc: string):
     grow_cli_flags(g_cli_flag_count + 1)
-    off : ., mut = g_cli_flag_count * 48
+    off : ., mut = g_cli_flag_count * 56
     unsafe:
         w64(g_cli_flags, off, @ptr_of(long_name))
         w64(g_cli_flags, off + 8, @ptr_of(short_name))
@@ -136,6 +138,33 @@ fn cli_flag_bool(long_name: string, short_name: string, desc: string):
         w64(g_cli_flags, off + 24, @ptr_of(""))   // value
     w64(g_cli_flags, off + 32, 0)         // has_value
     w64(g_cli_flags, off + 40, 1)         // is_bool
+    w64(g_cli_flags, off + 48, 0)         // debug
+    g_cli_flag_count = g_cli_flag_count + 1
+
+fn cli_flag_bool_debug(long_name: string, short_name: string, desc: string):
+    grow_cli_flags(g_cli_flag_count + 1)
+    off : ., mut = g_cli_flag_count * 56
+    unsafe:
+        w64(g_cli_flags, off, @ptr_of(long_name))
+        w64(g_cli_flags, off + 8, @ptr_of(short_name))
+        w64(g_cli_flags, off + 16, @ptr_of(desc))
+        w64(g_cli_flags, off + 24, @ptr_of(""))   // value
+    w64(g_cli_flags, off + 32, 0)         // has_value
+    w64(g_cli_flags, off + 40, 1)         // is_bool
+    w64(g_cli_flags, off + 48, 1)         // debug
+    g_cli_flag_count = g_cli_flag_count + 1
+
+fn cli_flag_debug(long_name: string, short_name: string, desc: string):
+    grow_cli_flags(g_cli_flag_count + 1)
+    off : ., mut = g_cli_flag_count * 56
+    unsafe:
+        w64(g_cli_flags, off, @ptr_of(long_name))
+        w64(g_cli_flags, off + 8, @ptr_of(short_name))
+        w64(g_cli_flags, off + 16, @ptr_of(desc))
+        w64(g_cli_flags, off + 24, @ptr_of(""))   // value
+    w64(g_cli_flags, off + 32, 0)         // has_value
+    w64(g_cli_flags, off + 40, 0)         // is_bool
+    w64(g_cli_flags, off + 48, 1)         // debug
     g_cli_flag_count = g_cli_flag_count + 1
 
 // --- Internal helpers ---
@@ -147,8 +176,8 @@ fn _cli_find_flag(name: string) -> int:
             break
         // Read a string from a 64-bit word through @str_of inside unsafe.
         unsafe:
-            ln := @str_of(r64(g_cli_flags, i * 48))
-            sn := @str_of(r64(g_cli_flags, i * 48 + 8))
+            ln := @str_of(r64(g_cli_flags, i * 56))
+            sn := @str_of(r64(g_cli_flags, i * 56 + 8))
             if str_len(ln) > 0 && str_eq(ln, name) != 0:
                 return i
             if str_len(sn) > 0 && str_eq(sn, name) != 0:
@@ -244,11 +273,11 @@ fn cli_parse() -> int:
                 println(arg)
                 cli_help()
                 return -1
-            if r64(g_cli_flags, fi * 48 + 40) != 0:
+            if r64(g_cli_flags, fi * 56 + 40) != 0:
                 // is_bool
-                w64(g_cli_flags, fi * 48 + 32, 1)       // has_value
+                w64(g_cli_flags, fi * 56 + 32, 1)       // has_value
                 unsafe:
-                    w64(g_cli_flags, fi * 48 + 24, @ptr_of("1"))
+                    w64(g_cli_flags, fi * 56 + 24, @ptr_of("1"))
                 // value（串字入裸字槽）
             else:
                 ai = ai + 1
@@ -259,9 +288,9 @@ fn cli_parse() -> int:
                     return -1
                 val := get_arg(ai)
                 unsafe:
-                    w64(g_cli_flags, fi * 48 + 24, @ptr_of(val))
+                    w64(g_cli_flags, fi * 56 + 24, @ptr_of(val))
                 // value
-                w64(g_cli_flags, fi * 48 + 32, 1)         // has_value
+                w64(g_cli_flags, fi * 56 + 32, 1)         // has_value
         else:
             // Positional argument
             grow_cli_args(g_cli_arg_count + 1)
@@ -282,19 +311,19 @@ fn cli_eq(cmd: string, expected: string) -> int:
 
 fn cli_get(name: string) -> string:
     fi := _cli_find_flag(name)
-    if fi >= 0 && r64(g_cli_flags, fi * 48 + 32) != 0:
+    if fi >= 0 && r64(g_cli_flags, fi * 56 + 32) != 0:
         // has_value
         // The return value is a string stored in a raw word; read it through
         // @str_of inside unsafe.
         unsafe:
-            return @str_of(r64(g_cli_flags, fi * 48 + 24))
+            return @str_of(r64(g_cli_flags, fi * 56 + 24))
         // value
     return ""
 
 fn cli_has(name: string) -> int:
     fi := _cli_find_flag(name)
     if fi >= 0:
-        return r64(g_cli_flags, fi * 48 + 32)  // has_value
+        return r64(g_cli_flags, fi * 56 + 32)  // has_value
     return 0
 
 fn cli_arg(n: int) -> string:
@@ -308,6 +337,41 @@ fn cli_arg_count() -> int:
     return g_cli_arg_count
 
 // --- Help ---
+
+fn cli_print_flags(debug_only: int):
+    fi : ., mut = 0
+    loop:
+        if fi >= g_cli_flag_count:
+            break
+        unsafe:
+            f_debug := r64(g_cli_flags, fi * 56 + 48)
+            if f_debug == debug_only:
+                f_short := @str_of(r64(g_cli_flags, fi * 56 + 8))
+                f_long := @str_of(r64(g_cli_flags, fi * 56))
+                f_desc := @str_of(r64(g_cli_flags, fi * 56 + 16))
+                if str_len(f_desc) > 0:
+                    print("  ")
+                    if str_len(f_short) > 0:
+                        print("-")
+                        print(f_short)
+                        print(", ")
+                    else:
+                        print("    ")
+                    print("--")
+                    print(f_long)
+                    print(" ")
+                    // Pad to 24 chars total (prefix = "  " + short/"    " + "--" + " ")
+                    total : ., mut = 9
+                    if str_len(f_short) > 0:
+                        total = 9  // "  " + "-X, " + "--" + one space = 9
+                    total = total + str_len(f_long)
+                    loop:
+                        if total >= 24:
+                            break
+                        print(" ")
+                        total = total + 1
+                    println(f_desc)
+        fi = fi + 1
 
 fn cli_help():
     // usage: prog [-h] {cmd1,cmd2,...} [options]
@@ -376,32 +440,7 @@ fn cli_help():
     println("options:")
     // Built-in -h, --help
     println("  -h, --help            show this help message and exit")
-    fi : ., mut = 0
-    loop:
-        if fi >= g_cli_flag_count:
-            break
-        unsafe:
-            f_short := @str_of(r64(g_cli_flags, fi * 48 + 8))
-            f_long := @str_of(r64(g_cli_flags, fi * 48))
-            f_desc := @str_of(r64(g_cli_flags, fi * 48 + 16))
-            print("  ")
-            if str_len(f_short) > 0:
-                print("-")
-                print(f_short)
-                print(", ")
-            else:
-                print("    ")
-            print("--")
-            print(f_long)
-            // Pad to 24 chars total (prefix = "  " + short/"    " + "--")
-            total : ., mut = 8
-            if str_len(f_short) > 0:
-                total = 8  // "  " + "-X, " + "--" = 2+4+2 = 8
-            total = total + str_len(f_long)
-            loop:
-                if total >= 24:
-                    break
-                print(" ")
-                total = total + 1
-            println(f_desc)
-        fi = fi + 1
+    cli_print_flags(0)
+    println("")
+    println("debug options:")
+    cli_print_flags(1)

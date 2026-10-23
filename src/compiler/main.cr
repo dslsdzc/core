@@ -230,19 +230,20 @@ fn corec_main() -> int:
     cli_cmd("selftest-purity", "Run effect-purity self tests (Task 1)")
     cli_flag("output", "o", "Output path")
     cli_flag_bool("static", "", "Static linking (embed runtime)")
-    cli_flag("opt-level", "O", "Optimization level (0,1,2,3; default=1) — O1 CSE(corec 进程内)；O2 寄存器分配+判定在 corearch（corec build 透传 --opt-level，.ccr 不承载分配结果）")
-    cli_flag_bool("inject-var-shift", "", "Hidden debug: shift func0 var decl block left by 1, then save (GC-4 test hook)")
-    cli_flag_bool("inject-cir-skip-journal", "", "Hidden debug: skip .cir intern-journal replay at load (v21 mutation hook; NOT for real builds)")
-    cli_flag_bool("dump-types", "", "Hidden debug: dump TYPE segment content (row table + term DAG + cross-process judgment probe) after populate (R2 P4 Task 2 test channel)")
-    cli_flag_bool("dump-ifaces", "", "Hidden debug: dump IFACE segment content (entry table + shapes + user ifaces + impls + method table + cross-segment term probe) after populate (R2 P4 Task 3 test channel)")
-    cli_flag_bool("dump-tk-terms", "", "Hidden debug: dump per-DFNode tk + type-term slot (cir; R2 P4 Task 4 test channel — cold/warm snapshot symmetry)")
+    cli_flag("opt-level", "O", "Optimization level (0,1,2,3; default=1). O1 CSE runs in corec; O2 register allocation runs in corearch")
+    // Debug channels are printed in their own help group.
+    cli_flag_bool_debug("inject-var-shift", "", "Debug hook: shift func0 var decl block left by 1")
+    cli_flag_bool_debug("inject-cir-skip-journal", "", "Debug hook: skip .cir journal replay at load")
+    cli_flag_bool_debug("dump-types", "", "Debug: dump TYPE segment")
+    cli_flag_bool_debug("dump-ifaces", "", "Debug: dump IFACE segment")
+    cli_flag_bool_debug("dump-tk-terms", "", "Debug: dump per-DFNode type terms")
     // The old type-shadow CLI channels were removed; the judgment path has no
     // switch and always goes through the engine.
-    cli_flag_bool("verify-named-dedup", "", "R2 P2a: assert side-table == res_type_node for all named types (debug)")
-    cli_flag_bool("verify-evp-nodes", "", "R2 P3 T4: assert enum variant payload type nodes recorded (debug)")
-    cli_flag_bool("diag-gate-report", "", "FC T2: report fail-closed gate verdicts per compile (debug; default off — 不改 rc/产物)")
-    cli_flag_bool("dump-vcs", "", "批 6 T4: dump spec VC list (#check/#ensure) — hidden debug channel; stdout only, no artifact, rc untouched")
-    cli_flag_bool("dump-params", "", "(乙) A1: dump per-param slot type at prologue (`PARAM fn p<i> name slot=<ti> decl=<tv>`) — hidden debug channel; stdout only, no artifact, rc untouched")
+    cli_flag_bool_debug("verify-named-dedup", "", "Debug: verify type side-table consistency")
+    cli_flag_bool_debug("verify-evp-nodes", "", "Debug: verify enum payload type nodes")
+    cli_flag_bool_debug("diag-gate-report", "", "Debug: report fail-closed gate verdicts")
+    cli_flag_bool_debug("dump-vcs", "", "Debug: dump spec VC list")
+    cli_flag_bool_debug("dump-params", "", "Debug: dump parameter slot types")
 
     if cli_parse() != 0:
         return 1
