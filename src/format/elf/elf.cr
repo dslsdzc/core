@@ -1798,6 +1798,9 @@ fn elf_gen(buf: string) -> int:
     g_x86_rodataref_count = 0
     g_x86_alloc_patch_count = 0
     g_x86_ext_rel_count = 0
+    // Per-run emission counter: reset before the sizing-result Phase 3 pass so
+    // it counts real emission only, not the Phase 2 sizing calls.
+    g_match_bin_emits = 0
     fi = 0
     loop:
         if fi >= g_ir_func_count:

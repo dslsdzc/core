@@ -723,6 +723,7 @@ fn e2_match_patch_miss(buf: string, jmp_pos: int, is_jcc: int, default_lbl: int,
 // Emit the balanced tree. p is the absolute start of the tree, s2 the CASE
 // start, idx the sorted CASE-relative indices, n the unique value count.
 fn e2_emit_match_binary(buf: string, p: int, s2: int, idx: string, n: int, default_lbl: int, tagged: int) -> int:
+    g_match_bin_emits = g_match_bin_emits + 1
     tree_base := p
     trap_pos := tree_base + n * E2_MATCH_NODE_SZ
     k : ., mut = 0

@@ -311,12 +311,32 @@ fn dump_object_surface():
         nod_inputs(ni)   // print outgoing edge records through the kernel helper
         ni = ni + 1
 
-// --dump-match-plan: per IR_MATCH, report the CASE row count and the dispatch
-// strategy the emitter selects. The strategy comes from e2_match_use_binary,
-// the same predicate emit_instr uses, so this is a direct read of the emitted
-// plan (linear <=2 value rows, balanced binary search otherwise). Read-only: it
-// returns without entering emission.
+// --dump-match-plan: per IR_MATCH, report the CASE row count, the strategy
+// predicate, and how many MATCH nodes actually entered e2_emit_match_binary.
+// `binary_emits` is the verification channel: it is incremented inside the real
+// emitter, not in the predicate, so a strategy/path mismatch shows up as
+// `strategy binary` with `binary_emits 0`.
+//
+// The read-only guarantee is about artifacts: this runs the real emitter once
+// per MATCH into a throwaway buffer and writes no ELF, no .ccr, and no source.
+// A label table of -1 forces every case hit through pending backpatching, so no
+// absolute target needs to exist yet.
 fn dump_match_plan():
+    g_match_bin_emits = 0
+    g_pending_count = 0
+    // Mirror elf_gen's pre-emission global marking so e2_load_var's global/local
+    // dispatch reads an initialized table during the scratch pass.
+    grow_is_global(g_ir_var_count)
+    gi : ., mut = 0
+    loop:
+        if gi >= g_ir_global_count:
+            break
+        gv := cell_load(g_ir_globals, gi * 24 + 8)
+        if gv >= 0:
+            grow_is_global(gv + 1)
+            cell_store(g_x86_is_global, gv * 8, 1)
+        gi = gi + 1
+    max_lbl : ., mut = 0
     ni : ., mut = 0
     loop:
         if ni >= g_v7_nod_count:
@@ -324,6 +344,38 @@ fn dump_match_plan():
         if nod_op(ni) == IR_MATCH:
             ms := nod_s2(ni)
             mc := nod_s3(ni)
+            cj : ., mut = 0
+            loop:
+                if cj >= mc:
+                    break
+                ct := cell_load_i32(g_ccr_case, (ms + cj) * CCR_V10_CASE_DISK + CCR_CASE_TARGET)
+                if ct >= 0 && ct < g_v7_nod_count:
+                    if nod_op(ct) == IR_LABEL:
+                        ln := nod_s1(ct)
+                        if ln + 1 > max_lbl:
+                            max_lbl = ln + 1
+                cj = cj + 1
+        ni = ni + 1
+    if max_lbl > 0:
+        grow_label_poses(max_lbl)
+        lj : ., mut = 0
+        loop:
+            if lj >= max_lbl:
+                break
+            cell_store(g_label_poses, lj * 8, -1)
+            lj = lj + 1
+
+    ni = 0
+    loop:
+        if ni >= g_v7_nod_count:
+            break
+        if nod_op(ni) == IR_MATCH:
+            ms := nod_s2(ni)
+            mc := nod_s3(ni)
+            // Scratch-only real-emitter pass: the returned byte count is not
+            // used, only the side effects that the channel reports.
+            scratch := alloc(mc * 32 + 256)
+            emit_instr(ni, scratch, 0)
             print("match ")
             print_i(ni)
             print(" cases ")
@@ -337,6 +389,9 @@ fn dump_match_plan():
                 print("linear")
             println("")
         ni = ni + 1
+    print("binary_emits ")
+    print_i(g_match_bin_emits)
+    println("")
 
 // --dump-nod-types: print each node's semantic type_id and feature flags. The
 // disk has no term-index field in v10, so this channel exposes the actual wire

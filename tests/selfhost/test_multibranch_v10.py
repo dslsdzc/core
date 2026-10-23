@@ -667,24 +667,27 @@ def _dense_source(ways):
 
 
 def _match_plan(ccr_path):
-    """Run the read-only plan channel and parse one row per IR_MATCH."""
+    """Run the read-only plan channel; return (one row per IR_MATCH, binary_emits)."""
     r = _run([COREARCH, ccr_path, "--dump-match-plan"])
     assert r.returncode == 0, f"corearch --dump-match-plan failed: {r.stdout}\n{r.stderr}"
     plans = []
+    binary_emits = None
     for line in r.stdout.splitlines():
-        if not line.startswith("match "):
-            continue
-        parts = line.split()
-        assert len(parts) == 8, line
-        plans.append(
-            {
-                "nod": int(parts[1]),
-                "cases": int(parts[3]),
-                "nondefault": int(parts[5]),
-                "strategy": parts[7],
-            }
-        )
-    return plans
+        if line.startswith("match "):
+            parts = line.split()
+            assert len(parts) == 8, line
+            plans.append(
+                {
+                    "nod": int(parts[1]),
+                    "cases": int(parts[3]),
+                    "nondefault": int(parts[5]),
+                    "strategy": parts[7],
+                }
+            )
+        elif line.startswith("binary_emits "):
+            binary_emits = int(line.split()[1])
+    assert binary_emits is not None, f"missing binary_emits line: {r.stdout!r}"
+    return plans, binary_emits
 
 
 def _ccr_file(tmp, data, name):
@@ -693,12 +696,12 @@ def _ccr_file(tmp, data, name):
     return ccr
 
 
-def _run_corearch_elf(tmp, data, name):
+def _run_corearch_elf(tmp, data, name, opt=2):
     """Build a tagged-mode ELF straight from a .ccr image and return its rc."""
     ccr = _ccr_file(tmp, data, name)
     elf = tmp / f"{name}.elf"
     built = _run(
-        [COREARCH, ccr, "--elf", "--static", "-O", "2", "-o", elf]
+        [COREARCH, ccr, "--elf", "--static", "-O", str(opt), "-o", elf]
     )
     assert built.returncode == 0, (
         f"corearch --elf failed: {built.stdout}\n{built.stderr}"
@@ -1040,11 +1043,14 @@ def test_sparse_16way_match_is_binary_and_correct():
         data = _build_ccr(tmp, source, "match_sparse16")
         rec = _single_match(data)
         assert rec[4] == 17, f"MATCH case count {rec[4]} != 16 values + default"
-        plans = _match_plan(_ccr_file(tmp, data, "match_sparse16_plan"))
+        plans, binary_emits = _match_plan(
+            _ccr_file(tmp, data, "match_sparse16_plan")
+        )
         assert len(plans) == 1, plans
         assert plans[0]["cases"] == 17, plans
         assert plans[0]["nondefault"] == 16, plans
         assert plans[0]["strategy"] == "binary", plans
+        assert binary_emits == 1, f"binary emitter ran {binary_emits} times"
         _assert_program(
             tmp, source, 42, opts=(0, 2, 3), name="match_sparse16"
         )
@@ -1057,11 +1063,14 @@ def test_sparse_64way_match_is_binary_and_correct():
         data = _build_ccr(tmp, source, "match_sparse64")
         rec = _single_match(data)
         assert rec[4] == 65, f"MATCH case count {rec[4]} != 64 values + default"
-        plans = _match_plan(_ccr_file(tmp, data, "match_sparse64_plan"))
+        plans, binary_emits = _match_plan(
+            _ccr_file(tmp, data, "match_sparse64_plan")
+        )
         assert len(plans) == 1, plans
         assert plans[0]["cases"] == 65, plans
         assert plans[0]["nondefault"] == 64, plans
         assert plans[0]["strategy"] == "binary", plans
+        assert binary_emits == 1, f"binary emitter ran {binary_emits} times"
         _assert_program(
             tmp, source, 42, opts=(0, 2, 3), name="match_sparse64"
         )
@@ -1074,11 +1083,14 @@ def test_dense_match_range_is_binary_and_correct():
         data = _build_ccr(tmp, source, "match_dense")
         rec = _single_match(data)
         assert rec[4] == DENSE_WAYS + 1, rec[4]
-        plans = _match_plan(_ccr_file(tmp, data, "match_dense_plan"))
+        plans, binary_emits = _match_plan(
+            _ccr_file(tmp, data, "match_dense_plan")
+        )
         assert len(plans) == 1, plans
         assert plans[0]["nondefault"] == DENSE_WAYS, plans
         # A jump-table lowering is deferred; binary search is the accepted path.
         assert plans[0]["strategy"] == "binary", plans
+        assert binary_emits == 1, f"binary emitter ran {binary_emits} times"
         _assert_program(tmp, source, 42, opts=(0, 2, 3), name="match_dense")
 
 
@@ -1086,22 +1098,31 @@ def test_match_plan_threshold_keeps_1_and_2_case_linear():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         one = _build_ccr(tmp, MATCH_ONE_CASE_SOURCE, "match_one")
-        one_plans = _match_plan(_ccr_file(tmp, one, "match_one_plan"))
+        one_plans, one_emits = _match_plan(
+            _ccr_file(tmp, one, "match_one_plan")
+        )
         assert len(one_plans) == 1, one_plans
         assert one_plans[0]["nondefault"] == 1, one_plans
         assert one_plans[0]["strategy"] == "linear", one_plans
+        assert one_emits == 0, f"linear 1-case match ran binary emitter {one_emits}x"
 
         two = _build_ccr(tmp, MATCH_NO_DEFAULT_HIT_SOURCE, "match_two_values")
-        two_plans = _match_plan(_ccr_file(tmp, two, "match_two_values_plan"))
+        two_plans, two_emits = _match_plan(
+            _ccr_file(tmp, two, "match_two_values_plan")
+        )
         assert len(two_plans) == 1, two_plans
         assert two_plans[0]["nondefault"] == 2, two_plans
         assert two_plans[0]["strategy"] == "linear", two_plans
+        assert two_emits == 0, f"linear 2-case match ran binary emitter {two_emits}x"
 
         # One source, two functions: 2 values stays linear, 3 goes binary.
         mixed = _build_ccr(tmp, MATCH_TWO_FUNCS_SOURCE, "match_threshold")
-        mixed_plans = _match_plan(_ccr_file(tmp, mixed, "match_threshold_plan"))
+        mixed_plans, mixed_emits = _match_plan(
+            _ccr_file(tmp, mixed, "match_threshold_plan")
+        )
         assert [p["nondefault"] for p in mixed_plans] == [2, 3], mixed_plans
         assert [p["strategy"] for p in mixed_plans] == ["linear", "binary"], mixed_plans
+        assert mixed_emits == 1, f"binary emitter ran {mixed_emits} times"
 
         _assert_program(tmp, MATCH_ONE_CASE_SOURCE, 42, name="match_one")
 
@@ -1110,10 +1131,13 @@ def test_enum_match_uses_binary_plan():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_ENUM_SOURCE, "match_enum_plan")
-        plans = _match_plan(_ccr_file(tmp, data, "match_enum_plan"))
+        plans, binary_emits = _match_plan(
+            _ccr_file(tmp, data, "match_enum_plan")
+        )
         assert len(plans) == 1, plans
         assert plans[0]["nondefault"] == 3, plans
         assert plans[0]["strategy"] == "binary", plans
+        assert binary_emits == 1, f"binary emitter ran {binary_emits} times"
         _assert_program(
             tmp, MATCH_ENUM_SOURCE, 42, opts=(0, 2, 3), name="match_enum_plan_run"
         )
@@ -1127,9 +1151,12 @@ def test_sparse_no_default_binary_match_traps_on_miss():
         data = _build_ccr(tmp, hit_source, "match_sparse_nodefault")
         rec = _single_match(data)
         assert rec[4] == 16, rec[4]
-        plans = _match_plan(_ccr_file(tmp, data, "match_sparse_nodefault_plan"))
+        plans, binary_emits = _match_plan(
+            _ccr_file(tmp, data, "match_sparse_nodefault_plan")
+        )
         assert plans[0]["nondefault"] == 16, plans
         assert plans[0]["strategy"] == "binary", plans
+        assert binary_emits == 1, f"binary emitter ran {binary_emits} times"
         _assert_program(
             tmp,
             hit_source,
@@ -1152,19 +1179,24 @@ def test_sparse_no_default_binary_match_traps_on_miss():
         src = tmp / "match_sparse_nodefault_miss.cr"
         src.write_text(miss_source, encoding="utf-8")
         miss_data = _build_ccr(tmp, miss_source, "match_sparse_nodefault_miss")
-        plans = _match_plan(
+        plans, binary_emits = _match_plan(
             _ccr_file(tmp, miss_data, "match_sparse_nodefault_miss_plan")
         )
         assert plans[0]["strategy"] == "binary", plans
-        elf = tmp / "match_sparse_nodefault_miss.elf"
-        built = _run([COREC, "build", src, "-o", elf, "--static", "-O", "2"])
-        assert built.returncode == 0, built.stdout + built.stderr
-        run = subprocess.run(
-            [str(elf)], capture_output=True, text=True, timeout=30, cwd=str(BASE)
-        )
-        assert run.returncode == -4, (
-            f"binary MATCH miss did not trap with SIGILL: rc={run.returncode}"
-        )
+        assert binary_emits == 1, f"binary emitter ran {binary_emits} times"
+        for opt in (0, 2, 3):
+            elf = tmp / f"match_sparse_nodefault_miss_O{opt}.elf"
+            built = _run(
+                [COREC, "build", src, "-o", elf, "--static", "-O", str(opt)]
+            )
+            assert built.returncode == 0, built.stdout + built.stderr
+            run = subprocess.run(
+                [str(elf)], capture_output=True, text=True, timeout=30, cwd=str(BASE)
+            )
+            assert run.returncode == -4, (
+                f"binary MATCH miss at -O{opt} did not trap with SIGILL: "
+                f"rc={run.returncode}"
+            )
 
 
 def test_duplicate_value_binary_match_keeps_first_case():
@@ -1206,11 +1238,15 @@ fn main() -> int:
             records[3][4],
         )
         dup = _replace_case(data, _pack_case(records))
-        plans = _match_plan(_ccr_file(tmp, dup, "match_dup_plan"))
+        plans, binary_emits = _match_plan(
+            _ccr_file(tmp, dup, "match_dup_plan")
+        )
         assert len(plans) == 1, plans
         assert plans[0]["nondefault"] == 4, plans
         assert plans[0]["strategy"] == "binary", plans
-        assert _run_corearch_elf(tmp, dup, "match_dup") == 42
+        assert binary_emits == 1, f"binary emitter ran {binary_emits} times"
+        for opt in (0, 2, 3):
+            assert _run_corearch_elf(tmp, dup, f"match_dup_O{opt}", opt) == 42
 
 
 def main():

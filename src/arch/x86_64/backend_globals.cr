@@ -66,6 +66,10 @@ g_x86_alloc_patch_pos : string, mut
 g_x86_alloc_patch_cap : int, mut
 g_x86_alloc_patch_count : int, mut
 g_x86_emit_rt_stubs : int, mut         // 1 = pure-static: backend emits g_set_curg/g_get_curg stubs
+// Count of IR_MATCH nodes that actually entered e2_emit_match_binary. This is a
+// verification counter, not a strategy predicate: a scratch-only emitter pass in
+// --dump-match-plan and the real Phase 3 emission both increment it.
+g_match_bin_emits : int, mut
 // --big-int: user int slots hold tagged values (immediate v*2 or BigInt pointer+1).
 // The compiler itself and the BigInt runtime blob stay raw.  See int_rep.cr.
 g_x86_big_enabled : int, mut
