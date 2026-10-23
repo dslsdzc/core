@@ -180,7 +180,7 @@ jj commit -m "ccr: add v10 wire schema constants"
   - `g_ccr_nod_type : string`、`g_ccr_nod_type_count : int`。
   - `nod_type_id(n: int) -> int`。
   - `nod_type_flags(n: int) -> int`（先恒 0）。
-  - ENT 落盘不再写 `home`，但 v9 读取端在任务 4 前暂时忽略该字段。
+  - v9 写侧保持 28B ENT（含 `home`）；v10 写侧到 Task 4 才删除 `home`。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -192,7 +192,7 @@ def test_nod_type_id_is_type_row_or_minus_one(...):
     # 非类型节点：type_id == -1
 ```
 
-以及 ENT 记录不再依赖 `home` 的内存断言。
+以及一个“v9 ENT 仍为 28B 且 `home` 可由旧 loader 读取”的回归断言；v10 的 24B 断言放到 Task 4。
 
 - [ ] **Step 2: 运行测试确认失败**
 
@@ -214,7 +214,7 @@ else:
 flags = 0
 ```
 
-`item` 仍保留在 v9 内存镜像中供诊断；v10 落盘时不再使用 `item`。ENT 的 `home` 从写入路径删除，`OFF_ENTRY_HOME` 只保留给 v9 读取兼容，任务 4 删除。
+`item` 仍保留在 v9 内存镜像中供诊断；v10 落盘时不再使用 `item`。**本任务不改变 v9 wire 字节**：v9 写侧仍写 28B ENT（含 `home`），`home` 只在 Task 4 的 v10 写侧删除。这样任务 3 的产物仍可被当前 v9 loader 读取，`.ccr` canary 只应因 Task 3 新增的内部登记而按需重锁；如果 ELF 变化，停止并记录原因。
 
 - [ ] **Step 4: 运行回归**
 
