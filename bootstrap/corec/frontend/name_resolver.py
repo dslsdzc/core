@@ -34,6 +34,10 @@ class NameResolver:
 
     def resolve(self, ast: CompilationUnit):
         self._declare_builtins()
+        for imp in ast.imports:
+            alias = imp.alias or imp.path[-1]
+            if self.symtab.lookup(alias, recursive=False) is None:
+                self.symtab.define(alias, SymbolKind.MODULE, type_=imp.path[-1])
         # 第一遍：收集顶层声明（函数、类型等）
         for decl in ast.declarations:
             if isinstance(decl, FunctionDecl):

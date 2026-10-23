@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
 """
+[DEPRECATED / 已废弃 —— R2 P6 Task 5（E-8）标注]
+
+本工具写出的是 **version = 1** 的远古 `.ccr`（`wu32(1)`，见本文件 `:219-220`），而现行
+loader 对 `version != 8` **整类拒收**（`src/compiler/ccr_io.cr:135`：`CCR_VERSION = 8`；
+三态纪律 D10：不得静默当「空表」）⇒ **本工具的产物必被现行 corearch 拒绝**。
+零 in-repo 调用者（全仓 grep 仅命中本 docstring / CHANGELOG / 历史计划文档，无脚本或清单引用）。
+**保留不删**（删除属独立决定，已登记「删除候选」）；历史价值 = P0 期「Python bootstrap → `.ccr`」过渡通道。
+
+以上为现状标注；以下为原始说明（保留备查）。
+————————————————————————————————————————————
 Convert a bootstrap IR Module to .ccr binary format,
 then compile with build/corearch for a fast native binary.
 

@@ -24,7 +24,8 @@ def _parse_coretoml(search_path):
     toml_path = os.path.join(search_path, 'Core.toml')
     if not os.path.exists(toml_path):
         return None
-    m = re.search(r'^\s*name\s*=\s*"([^"]+)"', open(toml_path).read(), re.MULTILINE)
+    with open(toml_path, encoding='utf-8') as f:
+        m = re.search(r'^\s*name\s*=\s*"([^"]+)"', f.read(), re.MULTILINE)
     return m.group(1) if m else None
 
 
@@ -34,7 +35,7 @@ def _determine_fileid(filepath):
     If the file starts with `fileid "name";`, use that.
     Otherwise use the filename without .cr extension.
     """
-    with open(filepath) as f:
+    with open(filepath, encoding='utf-8') as f:
         head = f.read(512)  # Only need first few hundred bytes
     m = _FILEID_RE.search(head)
     if m:
@@ -87,7 +88,7 @@ def _parse_imports_from_file(filepath):
 
     Returns list of (file_id, alias, project).
     """
-    with open(filepath) as f:
+    with open(filepath, encoding='utf-8') as f:
         src = f.read()
     lex = Lexer(src)
     tokens = lex.tokenize()
@@ -168,6 +169,10 @@ def resolve_imports(ast, source_path=None, search_paths=None, errors=None):
     if source_path:
         current_dir = os.path.dirname(os.path.abspath(source_path))
 
+    # Preserve imports as semantic metadata. Flattened declarations still need
+    # their alias when a qualified call is type-checked.
+    root_imports = list(ast.imports)
+
     # Resolve each import
     loaded = set()
     while ast.imports:
@@ -219,7 +224,7 @@ def resolve_imports(ast, source_path=None, search_paths=None, errors=None):
         loaded.add(abs_path)
 
         # Parse the imported file
-        with open(abs_path) as f:
+        with open(abs_path, encoding='utf-8') as f:
             src = f.read()
         lex = Lexer(src)
         tokens = lex.tokenize()
@@ -230,4 +235,11 @@ def resolve_imports(ast, source_path=None, search_paths=None, errors=None):
                        search_paths=search_paths, errors=errors)
 
         # Prepend imported declarations
+        module_alias = imp.alias or file_id
+        for decl in mod_ast.declarations:
+            if isinstance(decl, FunctionDecl):
+                decl._module_alias = module_alias
+                decl._module_file_id = file_id
         ast.declarations = list(mod_ast.declarations) + ast.declarations
+
+    ast.imports = root_imports

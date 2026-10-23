@@ -1,495 +1,1002 @@
 // === interp.cr ===
 // Dataflow graph interpreter for -c (eval) mode.
-// Interprets g_df_nodes[] (the .cir graph) instead of linear g_ir_instrs[] (.ccr).
-// The DFG preserves type/semantic information throughout execution.
+// It interprets g_df_nodes (the .cir graph) instead of linear g_ir_instrs (.ccr).
+// The dataflow graph preserves type and semantic information during execution.
 //
 // Limitations:
-// - String constants: 解释器不调用 syscall3，alloc/print/syscall 相关函数返回 0
-// - 递归/跨函数调用：inline 执行不支持 IR_CALL，只处理 main→callee 的单层调用
-// - for 循环：dataflow 图按顺序执行，label/branch 机制不与 for 循环兼容
+// - String helpers: the interpreter does not call syscall3; allocation, printing,
+//   and syscall helpers return 0.
+// - Recursion and cross-function calls: callee graphs run inline through
+//   ir_interp_run_fn, including nested and mutual recursion. The depth limit is
+//   IR_INTERP_MAX_DEPTH; exceeding it reports an error instead of hanging.
+// - Dynamic dispatch, external functions, and binary64 conversions have no
+//   interpreter semantics. They report an error and return a non-zero code.
+// - The main loop and the callee path share one opcode dispatch in
+//   ir_interp_call and ir_interp_run_fn. tests/selfhost/test_interp_parity.py
+//   checks both paths against the ELF oracle.
 
-g_ir_vals : string, mut;    g_ir_vals_cap : int, mut;
+g_ir_vals : string, mut
+g_ir_vals_cap : int, mut
 
-// IR_BINARY 统一分派（主循环与 callee 内联循环共用）：
-// 整数路径（模 2⁶⁴）。dex 为缩放整数——同走整数路径（数值迁移 #48 定稿）；
-// IR_I2F/IR_F2I 在 dispatch 入口显式报错（interp 无 binary64 语义）。
-fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int) {
-    if d < 0 { return; }
-    lv := r64(g_ir_vals, s1 * 8); rv := r64(g_ir_vals, s2 * 8);
-    if s3 == 1  { w64(g_ir_vals, d * 8, lv + rv); }
-    if s3 == 2  { w64(g_ir_vals, d * 8, lv - rv); }
-    if s3 == 3  { w64(g_ir_vals, d * 8, lv * rv); }
-    if s3 == 4  { w64(g_ir_vals, d * 8, lv / rv); }
-    if s3 == 5  { w64(g_ir_vals, d * 8, lv % rv); }
-    if s3 == 6  { if lv == rv { w64(g_ir_vals, d * 8, 1); } else { w64(g_ir_vals, d * 8, 0); } }
-    if s3 == 7  { if lv != rv { w64(g_ir_vals, d * 8, 1); } else { w64(g_ir_vals, d * 8, 0); } }
-    if s3 == 8  { if lv < rv  { w64(g_ir_vals, d * 8, 1); } else { w64(g_ir_vals, d * 8, 0); } }
-    if s3 == 9  { if lv > rv  { w64(g_ir_vals, d * 8, 1); } else { w64(g_ir_vals, d * 8, 0); } }
-    if s3 == 10 { if lv <= rv { w64(g_ir_vals, d * 8, 1); } else { w64(g_ir_vals, d * 8, 0); } }
-    if s3 == 11 { if lv >= rv { w64(g_ir_vals, d * 8, 1); } else { w64(g_ir_vals, d * 8, 0); } }
-    if s3 == 12 { if lv != 0 && rv != 0 { w64(g_ir_vals, d * 8, 1); } else { w64(g_ir_vals, d * 8, 0); } }
-    if s3 == 13 { if lv != 0 || rv != 0 { w64(g_ir_vals, d * 8, 1); } else { w64(g_ir_vals, d * 8, 0); } }
-    if s3 == 17 { w64(g_ir_vals, d * 8, lv + rv * 8); }   // OP_PTR_ADD
-    if s3 == 18 { w64(g_ir_vals, d * 8, lv - rv * 8); }   // OP_PTR_SUB
-    if s3 == 19 { w64(g_ir_vals, d * 8, (lv - rv) / 8); }  // OP_PTR_DIFF
-}
+// Call dispatch and inline callee execution. This is the only implementation for
+// both the main loop and callee paths.
+// Interpreter abort code. 0 means continue; a non-zero value is what ir_interpret
+// should return. Errors inside callees propagate up the call stack: a bounds
+// failure returns -1, dynamic dispatch or an external call returns 2, and a
+// binary64 conversion returns -1.
+g_interp_abort : int, mut
+// Nested inline depth. A callee that calls another user function enters another
+// level. Exceeding IR_INTERP_MAX_DEPTH reports an error instead of hanging.
+g_interp_call_depth : int, mut
+IR_INTERP_MAX_DEPTH : int = 400
+// Active function stack. g_interp_stack[d] is the function index at depth d.
+// Re-entry of the same function requires saving and restoring its slot range:
+// the flat slot model has one range per function, so an inner call would
+// overwrite the outer frame.
+g_interp_stack : string, mut
 
-// 指针间接读写（近似，对照 ELF 语义）：
-// 槽号（0 ≤ ptr < g_ir_var_count）= 栈变量的「地址」（REF 给的槽索引）→ 读写该槽；
-// 其余 = 堆地址（alloc/ALLOC_ARRAY 产出的真实指针）→ 读写内存。
-fn ir_interp_deref_read(ptr: int) -> int {
-    if ptr >= 0 && ptr < g_ir_var_count { return r64(g_ir_vals, ptr * 8); }
-    return r64(ptr, 0);
-}
-fn ir_interp_deref_write(ptr: int, val: int) {
-    if ptr >= 0 && ptr < g_ir_var_count { w64(g_ir_vals, ptr * 8, val); }
-    else { w64(ptr, 0, val); }
-}
+// Shared IR_BINARY dispatch for the main loop and callee loops.
+// The integer path is modulo 2^64. dex values are scaled integers and use the
+// same path. IR_I2F and IR_F2I are rejected at dispatch entry.
+fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int):
+    if d < 0:
+        return
+    lv := r64(g_ir_vals, s1 * 8)
+    rv := r64(g_ir_vals, s2 * 8)
+    if s3 == 1:
+        w64(g_ir_vals, d * 8, lv + rv)
+    if s3 == 2:
+        w64(g_ir_vals, d * 8, lv - rv)
+    if s3 == 3:
+        w64(g_ir_vals, d * 8, lv * rv)
+    if s3 == 4:
+        w64(g_ir_vals, d * 8, lv / rv)
+    if s3 == 5:
+        w64(g_ir_vals, d * 8, lv % rv)
+    if s3 == 6:
+        if lv == rv:
+            w64(g_ir_vals, d * 8, 1)
+        else:
+            w64(g_ir_vals, d * 8, 0)
+    if s3 == 7:
+        if lv != rv:
+            w64(g_ir_vals, d * 8, 1)
+        else:
+            w64(g_ir_vals, d * 8, 0)
+    if s3 == 8:
+        if lv < rv:
+            w64(g_ir_vals, d * 8, 1)
+        else:
+            w64(g_ir_vals, d * 8, 0)
+    if s3 == 9:
+        if lv > rv:
+            w64(g_ir_vals, d * 8, 1)
+        else:
+            w64(g_ir_vals, d * 8, 0)
+    if s3 == 10:
+        if lv <= rv:
+            w64(g_ir_vals, d * 8, 1)
+        else:
+            w64(g_ir_vals, d * 8, 0)
+    if s3 == 11:
+        if lv >= rv:
+            w64(g_ir_vals, d * 8, 1)
+        else:
+            w64(g_ir_vals, d * 8, 0)
+    if s3 == 12:
+        if lv != 0 && rv != 0:
+            w64(g_ir_vals, d * 8, 1)
+        else:
+            w64(g_ir_vals, d * 8, 0)
+    if s3 == 13:
+        if lv != 0 || rv != 0:
+            w64(g_ir_vals, d * 8, 1)
+        else:
+            w64(g_ir_vals, d * 8, 0)
+    if s3 == 17:
+        w64(g_ir_vals, d * 8, lv + rv * 8)
+    // OP_PTR_ADD
+    if s3 == 18:
+        w64(g_ir_vals, d * 8, lv - rv * 8)
+    // OP_PTR_SUB
+    if s3 == 19:
+        w64(g_ir_vals, d * 8, (lv - rv) / 8)
+    // OP_PTR_DIFF
 
-fn ir_interpret() -> int {
+// Pointer read and write.
+// A pointer in [0, g_ir_var_count) is a stack slot address produced by REF; read
+// or write that slot. Any other value is a heap pointer from alloc or
+// ALLOC_ARRAY; read or write memory.
+fn ir_interp_deref_read(ptr: int) -> int:
+    if ptr >= 0 && ptr < g_ir_var_count:
+        return r64(g_ir_vals, ptr * 8)
+    unsafe:
+        return r64(@str_of(ptr), 0)
+fn ir_interp_deref_write(ptr: int, val: int):
+    if ptr >= 0 && ptr < g_ir_var_count:
+        w64(g_ir_vals, ptr * 8, val)
+    else:
+        unsafe:
+            w64(@str_of(ptr), 0, val)
+
+// Interpreter string values are intern-table indices (IR_CONST stores the
+// index, while native ELF stores a pointer). Keep string builtins in that same
+// representation instead of passing the index to pointer-based helpers.
+fn ir_interp_str_concat(a: int, b: int) -> int:
+    out : string, mut = ""
+    out = out + istr_get(a)
+    out = out + istr_get(b)
+    return str_intern(out)
+
+fn ir_interp_str_char(a: int, i: int) -> int:
+    return str_intern(get_char(istr_get(a), i))
+
+fn ir_interp_str_sub(a: int, start: int, len: int) -> int:
+    return str_intern(str_sub(istr_get(a), start, len))
+
+// Dispatch for IR_CALL and IR_SPAWN. d is the result slot, s1 the first argument
+// slot, s2 the argument count, and s3 the interned function name. Builtins mirror
+// the previous main-loop branches. User functions run inline through
+// ir_interp_run_fn; nested calls use the same depth check.
+fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
+    fn_ni := s3
+    fn_name := istr_get(fn_ni)
+    sfi := find_so_fn(fn_ni)
+    if sfi >= 0 && s2 >= 1:
+        tf := sym_type(sfi)
+          // TAG_VARIADIC: print and println are no-ops; syscall3 returns 0.
+           // TAG_AUTO_STR: print_i and println_i are no-ops; syscall3 returns 0.
+
+    // syscall3 and syscall4 return 0 in the interpreter.
+    if str_eq(fn_name, "syscall3") != 0 || str_eq(fn_name, "syscall4") != 0:
+        if d >= 0:
+            w64(g_ir_vals, d * 8, 0)
+    if str_eq(fn_name, "str_len") != 0:
+        if d >= 0 && s2 >= 1:
+            w64(g_ir_vals, d * 8, istr_len(r64(g_ir_vals, s1 * 8)))
+    if str_eq(fn_name, "str_eq") != 0:
+        if d >= 0 && s2 >= 2:
+            left_s := istr_get(r64(g_ir_vals, s1 * 8))
+            right_s := istr_get(r64(g_ir_vals, (s1 + 1) * 8))
+            w64(g_ir_vals, d * 8, str_eq(left_s, right_s))
+    if str_eq(fn_name, "concat") != 0:
+        if d >= 0 && s2 >= 2:
+            w64(g_ir_vals, d * 8, ir_interp_str_concat(
+                    r64(g_ir_vals, s1 * 8), r64(g_ir_vals, (s1 + 1) * 8)))
+    if str_eq(fn_name, "int_str") != 0:
+        if d >= 0 && s2 >= 1:
+            w64(g_ir_vals, d * 8, str_intern(int_str(r64(g_ir_vals, s1 * 8))))
+    if str_eq(fn_name, "chr") != 0:
+        if d >= 0 && s2 >= 1:
+            w64(g_ir_vals, d * 8, str_intern(chr(r64(g_ir_vals, s1 * 8))))
+    if str_eq(fn_name, "get_char") != 0:
+        if d >= 0 && s2 >= 2:
+            w64(g_ir_vals, d * 8, ir_interp_str_char(r64(g_ir_vals, s1 * 8), r64(g_ir_vals, (s1 + 1) * 8)))
+    if str_eq(fn_name, "str_sub") != 0:
+        if d >= 0 && s2 >= 3:
+            w64(g_ir_vals, d * 8, ir_interp_str_sub(r64(g_ir_vals, s1 * 8), r64(g_ir_vals, (s1 + 1) * 8), r64(g_ir_vals, (s1 + 2) * 8)))
+    if str_eq(fn_name, "load_str_ptr") != 0:
+        if d >= 0 && s2 >= 2:
+            b := r64(g_ir_vals, s1 * 8)
+            p := r64(g_ir_vals, s1 + 1 * 8)
+            lo := load8(b, p) + load8(b, p+1)*256 + load8(b, p+2)*65536 + load8(b, p+3)*16777216
+            hi := load8(b, p+4) + load8(b, p+5)*256 + load8(b, p+6)*65536 + load8(b, p+7)*16777216
+            if hi < 0:
+                hi = hi + 4294967296
+            w64(g_ir_vals, d * 8, lo + hi * 4294967296)
+    if str_eq(fn_name, "store_str_ptr") != 0:
+        if s2 >= 3:
+            b := r64(g_ir_vals, s1 * 8)
+            p := r64(g_ir_vals, s1 + 1 * 8)
+            v := r64(g_ir_vals, s1 + 2 * 8)
+            lo : ., mut = v % 4294967296
+            hi : ., mut = v / 4294967296
+            if v < 0:
+                lo = v
+                hi = -1
+            store8(b, p, lo%256)
+            store8(b, p+1, (lo/256)%256)
+            store8(b, p+2, (lo/65536)%256)
+            store8(b, p+3, (lo/16777216)%256)
+            store8(b, p+4, hi%256)
+            store8(b, p+5, (hi/256)%256)
+            store8(b, p+6, (hi/65536)%256)
+            store8(b, p+7, (hi/16777216)%256)
+        if d >= 0:
+            w64(g_ir_vals, d * 8, 0)
+    // String builtins are handled; do not fall through to the user-function lookup.
+    if str_eq(fn_name, "str_len") != 0 || str_eq(fn_name, "str_eq") != 0 || str_eq(fn_name, "concat") != 0 || str_eq(fn_name, "int_str") != 0 || str_eq(fn_name, "chr") != 0 || str_eq(fn_name, "get_char") != 0 || str_eq(fn_name, "str_sub") != 0:
+        return
+    // 用户函数内联执行（单层 / 嵌套递归）
+    if d < 0:
+        return
+    cfi : ., mut = 0
+    loop:
+        if cfi >= g_ir_func_count:
+            break
+        if r64(g_ir_func_name_idx, cfi * 8) == fn_ni:
+            f_start := r64(g_df_func_node_start, cfi * 8)
+            f_count := r64(g_df_func_node_count, cfi * 8)
+            if f_start >= 0 && f_count > 0:
+                rval := ir_interp_run_fn(cfi, s1, s2)
+                if g_interp_abort == 0:
+                    w64(g_ir_vals, d * 8, rval)
+            break
+        cfi = cfi + 1
+
+// Inline execution of a callee graph. Both the main loop and nested callees use
+// this function. It builds the label table, copies arguments, executes f_count
+// nodes, restores the label table, and returns the IR_RETURN value. A function
+// with no return value returns 0.
+// Depth check: exceeding IR_INTERP_MAX_DEPTH reports an error and aborts.
+fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
+    f_start := r64(g_df_func_node_start, cfi * 8)
+    f_count := r64(g_df_func_node_count, cfi * 8)
+    if f_start < 0 || f_count <= 0:
+        return 0
+    if g_interp_call_depth >= IR_INTERP_MAX_DEPTH:
+        println("interpreter error: IR_INTERP_MAX_DEPTH exceeded — corec run cannot execute this recursion; build & run natively (corec build) instead")
+        g_interp_abort = -1
+        return 0
+    // Re-entry detection for recursion and mutual recursion. If this function is
+    // already active, it shares one slot range with the outer frame in the flat
+    // slot model. Save the range on entry and restore it on exit.
+    reentrant : ., mut = 0
+    si3 : ., mut = 0
+    loop:
+        if si3 >= g_interp_call_depth:
+            break
+        if r64(g_interp_stack, si3 * 8) == cfi:
+            reentrant = 1
+            break
+        si3 = si3 + 1
+    vs := r64(g_ir_func_var_start, cfi * 8)
+    vc := r64(g_ir_func_var_count, cfi * 8)
+    frame : string, mut = ""
+    has_frame : ., mut = 0
+    if reentrant != 0 && vc > 0 && vs >= 0:
+        frame = alloc(vc * 8)
+        has_frame = 1
+        fi4 : ., mut = 0
+        loop:
+            if fi4 >= vc:
+                break
+            w64(frame, fi4 * 8, r64(g_ir_vals, (vs + fi4) * 8))
+            fi4 = fi4 + 1
+    // Copy arguments to a buffer before writing parameter slots. In a recursive
+    // call the argument and parameter slots belong to the same function range, so
+    // a direct copy could overwrite an argument that has not been read yet.
+    args_buf : string, mut = ""
+    if argc > 0:
+        args_buf = alloc(argc * 8)
+        pai : ., mut = 0
+        loop:
+            if pai >= argc:
+                break
+            w64(args_buf, pai * 8, r64(g_ir_vals, (arg_base + pai) * 8))
+            pai = pai + 1
+    // Push the frame. Re-entry detection and the depth check already ran.
+    w64(g_interp_stack, g_interp_call_depth * 8, cfi)
+    g_interp_call_depth = g_interp_call_depth + 1
+    rval : ., mut = 0  // a callee with no value (IR_RETURN s1 < 0) returns 0
+    // Save label state in locals so each recursion level restores its own state.
+    old_lc := g_label_count
+    old_poses := g_label_poses
+    old_poses_cap := g_label_cap
+    g_label_poses = alloc(64 * 8)
+    g_label_cap = 64
+    // Build label map for callee
+    li2 : ., mut = 0
+    loop:
+        if li2 >= f_count:
+            break
+        n_op := r64(g_df_nodes, (f_start + li2) * ESZ_DFNODE + OFF_DF_OPCODE)
+        n_s1 := r64(g_df_nodes, (f_start + li2) * ESZ_DFNODE + OFF_DF_S1)
+        if n_op == 21:
+            if n_s1 >= 0:
+                grow_label_poses(n_s1 + 1)
+                w64(g_label_poses, n_s1 * 8, li2)
+                if n_s1 + 1 > g_label_count:
+                    g_label_count = n_s1 + 1
+        li2 = li2 + 1
+    // Copy args from buffer to callee param vars
+    pstart := vs
+    pai2 : ., mut = 0
+    loop:
+        if pai2 >= argc:
+            break
+        w64(g_ir_vals, (pstart + pai2) * 8, r64(args_buf, pai2 * 8))
+        pai2 = pai2 + 1
+    // Execute callee graph (inline)
+    ip2 : ., mut = 0
+    loop:
+        if ip2 >= f_count:
+            break
+        if g_interp_abort != 0:
+            break
+        op2 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_OPCODE)
+        d2 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_DEST)
+        t1 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S1)
+        t2 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S2)
+        t3 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S3)
+        // Derived code, not a slot. After the single-slot change, slot 40 holds a
+        // type-term reference. ir_interp_binary does not consume this argument
+        // today; the operation code in s3 selects the operation.
+        t4 := sh_dfn_code_of_slots(r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_TK),
+            r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_AUX))
+        if op2 == 1 && d2 >= 0:
+            w64(g_ir_vals, d2 * 8, t1)
+        if op2 == 2 && t1 >= 0 && t2 >= 0:
+            ir_interp_binary(d2, t1, t2, t3, t4)
+        if op2 == 49 || op2 == 50:
+            println("interpreter error: IR_I2F/IR_F2I needs binary64 semantics (apx dex) — `corec run` cannot execute apx dex arithmetic; build & run natively (corec build) instead")
+            g_interp_abort = -1
+            break
+        if op2 == 3 && t1 >= 0:
+            ov2 := r64(g_ir_vals, t1 * 8)
+            if t3 == 1:
+                w64(g_ir_vals, d2 * 8, -ov2)
+            else if t3 == 2:
+                if ov2 == 0:
+                    w64(g_ir_vals, d2 * 8, 1)
+                else:
+                    w64(g_ir_vals, d2 * 8, 0)
+        // Keep callee locals in the shared value store. Skipping these opcodes
+        // would leave loop-carried assignments unchanged.
+        if op2 == 6 && d2 >= 0:
+            w64(g_ir_vals, d2 * 8, 0)
+        // IR_ALLOC
+        if op2 == 9 && t1 >= 0 && t2 >= 0:
+            w64(g_ir_vals, t1 * 8, r64(g_ir_vals, t2 * 8))
+        // IR_STORE
+        if op2 == 10 && d2 >= 0 && t1 >= 0:
+            w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8))
+        // IR_LOAD
+        // Aggregate operations: ALLOC_ARRAY, ALLOC_STRUCT, LOAD_INDEX,
+        // STORE_INDEX, LOAD_FIELD, STORE_FIELD, and ADDR_INDEX. The callee path
+        // must implement them too, or an aggregate global read inside a callee
+        // would return 0 while the main path works.
+        if op2 == 8 && d2 >= 0:
+            // IR_ALLOC_ARRAY
+            cnt2 := t1
+            esz2 := t2
+            if esz2 <= 0:
+                esz2 = 8
+            need3 := cnt2 * esz2 + 8
+            bp2 := alloc(need3)
+            vi3 : ., mut = 0
+            loop:
+                if vi3 >= need3:
+                    break
+                store8(bp2, vi3, 0)
+                vi3 = vi3 + 1
+            unsafe:
+                w64(g_ir_vals, d2 * 8, @ptr_of(bp2))
+        if op2 == 13 && d2 >= 0 && t1 >= 0:
+            // IR_LOAD_INDEX: t1=arr_var, t3=literal_idx
+            av2 := r64(g_ir_vals, t1 * 8)
+            if irv_type(t1) == TI_STR:
+                w64(g_ir_vals, d2 * 8, str_load8(av2, t3))
+            else:
+                unsafe:
+                    w64(g_ir_vals, d2 * 8, r64(@str_of(av2), t3 * 8))
+        if op2 == 14 && t1 >= 0 && t2 >= 0:
+            // IR_STORE_INDEX: t1=arr_var, t2=val_var
+            av2 := r64(g_ir_vals, t1 * 8)
+            if irv_type(t1) == TI_STR:
+                store8(istr_get(av2), t3, r64(g_ir_vals, t2 * 8))
+            else:
+                unsafe:
+                    w64(@str_of(av2), t3 * 8, r64(g_ir_vals, t2 * 8))
+        if op2 == 15 && d2 >= 0 && t1 >= 0 && t2 >= 0:
+            // IR_LOAD_INDEX_VAR: t1=arr_var, t2=idx_var
+            av2 := r64(g_ir_vals, t1 * 8)
+            ix2 := r64(g_ir_vals, t2 * 8)
+            if irv_type(t1) == TI_STR:
+                w64(g_ir_vals, d2 * 8, str_load8(av2, ix2))
+            else:
+                unsafe:
+                    w64(g_ir_vals, d2 * 8, r64(@str_of(av2), ix2 * 8))
+        if op2 == 16 && d2 >= 0 && t1 >= 0 && t2 >= 0:
+            // IR_STORE_INDEX_VAR: d2=val_var, t1=arr_var, t2=idx_var
+            av2 := r64(g_ir_vals, t1 * 8)
+            ix2 := r64(g_ir_vals, t2 * 8)
+            if irv_type(t1) == TI_STR:
+                store8(istr_get(av2), ix2, r64(g_ir_vals, d2 * 8))
+            else:
+                unsafe:
+                    w64(@str_of(av2), ix2 * 8, r64(g_ir_vals, d2 * 8))
+        if op2 == 31 && d2 >= 0 && t1 >= 0 && t2 >= 0:
+            // IR_ADDR_INDEX: &arr[i]
+            w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8) + r64(g_ir_vals, t2 * 8) * 8)
+        if op2 == 11 && d2 >= 0 && t1 >= 0:
+            // IR_LOAD_FIELD: t1=struct_var, t3=field_idx
+            pf2 := r64(g_ir_vals, t1 * 8)
+            if pf2 != 0:
+                unsafe:
+                    w64(g_ir_vals, d2 * 8, r64(@str_of(pf2), t3 * 8))
+            else:
+                w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8))
+        if op2 == 12 && t1 >= 0 && t2 >= 0:
+            // IR_STORE_FIELD: t1=struct_var, t2=val_var, t3=field_idx
+            pf2 := r64(g_ir_vals, t1 * 8)
+            if pf2 != 0:
+                unsafe:
+                    w64(@str_of(pf2), t3 * 8, r64(g_ir_vals, t2 * 8))
+            else:
+                w64(g_ir_vals, t1 * 8, r64(g_ir_vals, t2 * 8))
+        if op2 == 7 && d2 >= 0:
+            // IR_ALLOC_STRUCT
+            si2 := find_struct(t3)
+            fc2 : ., mut = 0
+            if si2 >= 0:
+                fc2 = si_field_count(si2)
+            need3 := fc2 * 8 + 8
+            bp2 := alloc(need3)
+            vi3 : ., mut = 0
+            loop:
+                if vi3 >= need3:
+                    break
+                store8(bp2, vi3, 0)
+                vi3 = vi3 + 1
+            unsafe:
+                w64(g_ir_vals, d2 * 8, @ptr_of(bp2))
+        if op2 == 32 && d2 >= 0:
+            w64(g_ir_vals, d2 * 8, 0)
+        // IR_ARENA_NEW
+           // IR_ARENA_RESET
+        if op2 == 46 || op2 == 47:
+            if d2 >= 0 && t1 >= 0:
+                w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8))
+        // The following opcode families mirror the main loop.
+        // IR_MAKE_ENUM: allocate 8 + 8*s2 bytes and store s1 (the variant-name
+        // index) in the first word. This matches the ELF layout [tag][payload];
+        // IR_STORE_FIELD writes the payload.
+        if op2 == 17:
+            if d2 >= 0:
+                need3 := 8 + t2 * 8
+                bp2 := alloc(need3)
+                vi3 : ., mut = 0
+                loop:
+                    if vi3 >= need3:
+                        break
+                    store8(bp2, vi3, 0)
+                    vi3 = vi3 + 1
+                w64(bp2, 0, t1)
+                unsafe:
+                    w64(g_ir_vals, d2 * 8, @ptr_of(bp2))
+        // IR_LOAD_ENUM_TAG: d = tag word at the pointer in slot s1.
+        if op2 == 23:
+            if d2 >= 0 && t1 >= 0:
+                p23 := r64(g_ir_vals, t1 * 8)
+                if p23 != 0:
+                    unsafe:
+                        w64(g_ir_vals, d2 * 8, r64(@str_of(p23), 0))
+        // IR_REF: d = s1. The slot number is the stack address used by the deref helpers.
+        if op2 == 18:
+            if d2 >= 0 && t1 >= 0:
+                w64(g_ir_vals, d2 * 8, t1)
+        // IR_DEREF: read through the pointer in slot s1.
+        if op2 == 25:
+            if d2 >= 0 && t1 >= 0:
+                w64(g_ir_vals, d2 * 8, ir_interp_deref_read(r64(g_ir_vals, t1 * 8)))
+        // IR_SLICE: d = arr + low*8, matching the ELF encoding.
+        if op2 == 24:
+            if d2 >= 0 && t1 >= 0 && t2 >= 0:
+                w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8) + r64(g_ir_vals, t2 * 8) * 8)
+        // IR_BOUNDS_CHECK: s1 is the index variable and s2 the limit. A dynamic
+        // limit uses ti = 1. An index below 0 or at least the limit aborts with -1.
+        if op2 == 30 && t2 >= 0:
+            iv30 := r64(g_ir_vals, t1 * 8)
+            lim30 : ., mut = t2
+            if t4 == 1:
+                lim30 = r64(g_ir_vals, t2 * 8)
+            if iv30 < 0 || iv30 >= lim30:
+                g_interp_abort = -1
+                break
+        // IR_STORE_PTR: write the value in slot s2 through the pointer in slot s1.
+        if op2 == 26:
+            if t1 >= 0 && t2 >= 0:
+                ir_interp_deref_write(r64(g_ir_vals, t1 * 8), r64(g_ir_vals, t2 * 8))
+        // IR_YIELD: pass the value in slot s1 eagerly, like IR_AWAIT.
+        if op2 == 28:
+            if d2 >= 0 && t1 >= 0:
+                w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8))
+        // IR_AWAIT. (29)
+        if op2 == 29:
+            if d2 >= 0:
+                w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8))
+        // IR_FNADDR: no real addresses in the interpreter; store 0.
+        if op2 == 48:
+            if d2 >= 0:
+                w64(g_ir_vals, d2 * 8, 0)
+        // IR_APPROX is a pure annotation; skip it.
+
+        // IR_DYN_PACK: a dyn value uses two slots, value at d and tag at d+1.
+        if op2 == 43:
+            if d2 >= 0 && t1 >= 0:
+                w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8))
+                w64(g_ir_vals, (d2 + 1) * 8, t2)
+        // IR_DYN_TAG: d = tag at slot s1 + 1.
+        if op2 == 41:
+            if d2 >= 0 && t1 >= 0:
+                w64(g_ir_vals, d2 * 8, r64(g_ir_vals, (t1 + 1) * 8))
+        // IR_DYN_VAL: d = value at slot s1.
+        if op2 == 42:
+            if d2 >= 0 && t1 >= 0:
+                w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8))
+        // IR_DYN_DISPATCH has no interpreter implementation; report an error.
+        if op2 == 44:
+            println("error: interp 不支持动态分发（IR_DYN_DISPATCH）")
+            g_interp_abort = 2
+            break
+        // IR_CALL_EXTERN has no interpreter implementation; report an error.
+        if op2 == 45:
+            print("error: interp 无法调用外部函数：")
+            println(istr_get(t1))
+            g_interp_abort = 2
+            break
+        // IR_CALL and IR_SPAWN use the shared dispatch for builtins and inline calls.
+        if op2 == 4 || op2 == 27:
+            ir_interp_call(d2, t1, t2, t3)
+        if op2 == 5:
+            if t1 >= 0:
+                rval = r64(g_ir_vals, t1 * 8)
+            ip2 = f_count  // return exits the callee immediately
+        // IR_RETURN
+        if op2 == 19 && t1 >= 0:
+            cv2 := r64(g_ir_vals, t1 * 8)
+            if cv2 != 0:
+                if t2 >= 0 && t2 < g_label_count:
+                    ip2 = r64(g_label_poses, t2 * 8)
+            else:
+                if t3 >= 0 && t3 < g_label_count:
+                    ip2 = r64(g_label_poses, t3 * 8)
+        if op2 == 20:
+            if t1 >= 0 && t1 < g_label_count:
+                ip2 = r64(g_label_poses, t1 * 8)
+        ip2 = ip2 + 1
+    // Restore label state
+    g_label_count = old_lc
+    g_label_poses = old_poses
+    g_label_cap = old_poses_cap
+    // Restore the outer frame after a re-entrant call. The return value travels in
+    // the local rval, not in this slot range, so restoring does not lose it.
+    if has_frame != 0:
+        fi5 : ., mut = 0
+        loop:
+            if fi5 >= vc:
+                break
+            w64(g_ir_vals, (vs + fi5) * 8, r64(frame, fi5 * 8))
+            fi5 = fi5 + 1
+    g_interp_call_depth = g_interp_call_depth - 1
+    if g_interp_abort != 0:
+        return 0
+    return rval
+
+fn ir_interpret() -> int:
     // Find main function in the dataflow graph
-    main_idx : ., mut = -1;
-    fi : ., mut = 0;
-    loop {
-        if fi >= g_ir_func_count { break; }
-        ni := r64(g_ir_func_name_idx, fi * 8);
-        if str_eq(istr_get(ni), "main") != 0 { main_idx = fi; break; }
-        fi = fi + 1;
-    }
-    if main_idx < 0 { return -1; }
-    node_start := r64(g_df_func_node_start, main_idx * 8);
-    node_count := r64(g_df_func_node_count, main_idx * 8);
-    if node_start < 0 || node_count <= 0 { return -1; }
+    main_idx : ., mut = -1
+    fi : ., mut = 0
+    loop:
+        if fi >= g_ir_func_count:
+            break
+        ni := r64(g_ir_func_name_idx, fi * 8)
+        if str_eq(istr_get(ni), "main") != 0:
+            main_idx = fi
+            break
+        fi = fi + 1
+    if main_idx < 0:
+        return -1
+    node_start := r64(g_df_func_node_start, main_idx * 8)
+    node_count := r64(g_df_func_node_count, main_idx * 8)
+    if node_start < 0 || node_count <= 0:
+        return -1
+
+    // Reset interpreter state so ir_interpret can run more than once in one
+    // process. Callee results travel through ir_interp_run_fn's local return
+    // value instead of a shared temporary slot.
+    g_interp_abort = 0
+    g_interp_call_depth = 0
+    g_interp_stack = alloc(IR_INTERP_MAX_DEPTH * 8)  // 活动函数栈（重入检测）
 
     // Initialize value store (size = node_count + padding for destinations)
-    need := g_ir_var_count + 64;
-    if g_ir_vals_cap < need {
-        g_ir_vals = alloc(need * 8);
-        g_ir_vals_cap = need;
-    }
-    vi : ., mut = 0;
-    loop {
-        if vi >= need { break; }
-        w64(g_ir_vals, vi * 8, 0);
-        vi = vi + 1;
-    }
+    need := g_ir_var_count + 64
+    if g_ir_vals_cap < need:
+        g_ir_vals = alloc(need * 8)
+        g_ir_vals_cap = need
+    vi : ., mut = 0
+    loop:
+        if vi >= need:
+            break
+        w64(g_ir_vals, vi * 8, 0)
+        vi = vi + 1
 
-    // Pre-scan: build label→node mapping (for branches)
-    g_label_count = 0;
-    li : ., mut = 0;
-    loop {
-        if li >= node_count { break; }
-        n_op := r64(g_df_nodes, (node_start + li) * ESZ_DFNODE + OFF_DF_OPCODE);
-        n_s1 := r64(g_df_nodes, (node_start + li) * ESZ_DFNODE + OFF_DF_S1);
-        if n_op == 21 {  // IR_LABEL
-            ln := n_s1;  // label number
-            if ln >= 0 {
-                grow_label_poses(ln + 1);
-                w64(g_label_poses, ln * 8, li);
-                if ln + 1 > g_label_count { g_label_count = ln + 1; }
-            }
-        }
-        li = li + 1;
-    }
+    // Initialize compile-time scalar globals. This mirrors the constant loop in
+    // the ELF entry path and uses the same g_ir_globals rows. Aggregates and
+    // globals with run-time initializers are injected as IR at the start of main
+    // by ir_gen inject_global_inits and executed by the main loop.
+    gi2 : ., mut = 0
+    loop:
+        if gi2 >= g_ir_global_count:
+            break
+        iv2 := r64(g_ir_globals, gi2 * 24 + 16)
+        gv2 := r64(g_ir_globals, gi2 * 24 + 8)
+        if iv2 != 0 && gv2 >= 0 && gv2 < need:
+            w64(g_ir_vals, gv2 * 8, iv2)
+        gi2 = gi2 + 1
 
-    // Pre-scan: record SG_LOOP/SG_FOR region enter/exit node offsets
-    // (main function graph only — filter by node_start..node_start+node_count)
-    g_loop_region_count = 0;
-    li = 0;
-    loop {
-        if li >= g_sg_count { break; }
-        lk := r64(g_sgs, li * ESZ_SG + OFF_SG_KIND);
-        if lk == SG_LOOP || lk == SG_FOR {
-            l_enter := r64(g_sgs, li * ESZ_SG + OFF_SG_ENTER);
-            l_exit  := r64(g_sgs, li * ESZ_SG + OFF_SG_EXIT);
-            if l_enter >= node_start && l_enter < node_start + node_count {
-                if g_loop_region_count + 1 > g_loop_region_cap {
-                    // Grow both arrays from the OLD cap — copying with the new
-                    // cap would over-read the previous (possibly empty) buffer.
-                    nc := g_loop_region_cap * 2; if nc < 16 { nc = 16; }
-                    nb := alloc(nc * 8); _dyncpy(g_loop_region_enter, g_loop_region_cap * 8, nb);
-                    nb2 := alloc(nc * 8); _dyncpy(g_loop_region_exit, g_loop_region_cap * 8, nb2);
-                    g_loop_region_enter = nb; g_loop_region_exit = nb2; g_loop_region_cap = nc;
-                }
-                w64(g_loop_region_enter, g_loop_region_count * 8, l_enter - node_start);
-                w64(g_loop_region_exit,  g_loop_region_count * 8, l_exit  - node_start);
-                g_loop_region_count = g_loop_region_count + 1;
-            }
-        }
-        li = li + 1;
-    }
+    // Pre-scan: build the label-to-node mapping for branches.
+    g_label_count = 0
+    li : ., mut = 0
+    loop:
+        if li >= node_count:
+            break
+        n_op := r64(g_df_nodes, (node_start + li) * ESZ_DFNODE + OFF_DF_OPCODE)
+        n_s1 := r64(g_df_nodes, (node_start + li) * ESZ_DFNODE + OFF_DF_S1)
+        if n_op == 21:
+            // IR_LABEL
+            ln := n_s1  // label number
+            if ln >= 0:
+                grow_label_poses(ln + 1)
+                w64(g_label_poses, ln * 8, li)
+                if ln + 1 > g_label_count:
+                    g_label_count = ln + 1
+        li = li + 1
+
+    // Pre-scan SG_LOOP and SG_FOR region enter and exit offsets for the main
+    // function graph.
+    g_loop_region_count = 0
+    li = 0
+    loop:
+        if li >= g_sg_count:
+            break
+        lk := r64(g_sgs, li * ESZ_SG + OFF_SG_KIND)
+        if lk == SG_LOOP || lk == SG_FOR:
+            l_enter := r64(g_sgs, li * ESZ_SG + OFF_SG_ENTER)
+            l_exit  := r64(g_sgs, li * ESZ_SG + OFF_SG_EXIT)
+            if l_enter >= node_start && l_enter < node_start + node_count:
+                if g_loop_region_count + 1 > g_loop_region_cap:
+                    // Grow both arrays using the old capacity. Copying with the new
+                    // capacity would over-read the previous buffer.
+                    nc := g_loop_region_cap * 2
+                    if nc < 16:
+                        nc = 16
+                    nb := alloc(nc * 8)
+                    _dyncpy(g_loop_region_enter, g_loop_region_cap * 8, nb)
+                    nb2 := alloc(nc * 8)
+                    _dyncpy(g_loop_region_exit, g_loop_region_cap * 8, nb2)
+                    g_loop_region_enter = nb
+                    g_loop_region_exit = nb2
+                    g_loop_region_cap = nc
+                w64(g_loop_region_enter, g_loop_region_count * 8, l_enter - node_start)
+                w64(g_loop_region_exit,  g_loop_region_count * 8, l_exit  - node_start)
+                g_loop_region_count = g_loop_region_count + 1
+        li = li + 1
 
     // Execute nodes in order (dataflow: sequential order = valid topological order for straight-line)
-    ip : ., mut = 0;
-    loop {
-        if ip >= node_count { break; }
-        op := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_OPCODE);
-        d := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_DEST);
-        s1 := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_S1);
-        s2 := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_S2);
-        s3 := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_S3);
-        ti := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_TK);
+    ip : ., mut = 0
+    loop:
+        if ip >= node_count:
+            break
+        op := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_OPCODE)
+        d := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_DEST)
+        s1 := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_S1)
+        s2 := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_S2)
+        s3 := r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_S3)
+        // Derived code as above; passed to IR_BINARY and currently unused.
+        ti := sh_dfn_code_of_slots(r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_TK),
+            r64(g_df_nodes, (node_start + ip) * ESZ_DFNODE + OFF_DF_AUX))
 
-        if op == 1  { if d >= 0 { w64(g_ir_vals, d * 8, s1); } }  // IR_CONST（dex 的 s1 为缩放整数）
-        if op == 5  { if s1 >= 0 { return r64(g_ir_vals, s1 * 8); } return 0; }  // IR_RETURN
+        if op == 1:
+            if d >= 0:
+                w64(g_ir_vals, d * 8, s1)
+        // IR_CONST; dex uses a scaled integer in s1.
+        if op == 5:
+            if s1 >= 0:
+                return r64(g_ir_vals, s1 * 8)
+            return 0
+        // IR_RETURN
 
-        if op == 2 { ir_interp_binary(d, s1, s2, s3, ti); }  // IR_BINARY
+        if op == 2:
+            ir_interp_binary(d, s1, s2, s3, ti)
+        // IR_BINARY
 
-        if op == 3 {  // IR_UNARY
-            ov := r64(g_ir_vals, s1 * 8);
-            if s3 == 1 { w64(g_ir_vals, d * 8, -ov); }
-            if s3 == 2 { if ov == 0 { w64(g_ir_vals, d * 8, 1); } else { w64(g_ir_vals, d * 8, 0); } }
-        }
+        if op == 3:
+            // IR_UNARY
+            ov := r64(g_ir_vals, s1 * 8)
+            if s3 == 1:
+                w64(g_ir_vals, d * 8, -ov)
+            if s3 == 2:
+                if ov == 0:
+                    w64(g_ir_vals, d * 8, 1)
+                else:
+                    w64(g_ir_vals, d * 8, 0)
 
         // Alloc / Store / Load / Field / Index
-        if op == 6 { if d >= 0 { w64(g_ir_vals, d * 8, 0); } }  // IR_ALLOC
-        if op == 7 {  // IR_ALLOC_STRUCT
-            if d >= 0 {
-                si := find_struct(s3);
-                fc : ., mut = 0;
-                if si >= 0 { fc = si_field_count(si); }
-                need2 := fc * 8 + 8;
-                bp := alloc(need2);
-                vi2 : ., mut = 0;
-                loop { if vi2 >= need2 { break; } store8(bp, vi2, 0); vi2 = vi2 + 1; }
-                w64(g_ir_vals, d * 8, bp);
-            }
-        }
-        if op == 8 {  // IR_ALLOC_ARRAY
-            if d >= 0 {
-                cnt := s1; esz := s2;
-                if esz <= 0 { esz = 8; }
-                need2 := cnt * esz + 8;
-                bp := alloc(need2);
-                vi2 : ., mut = 0;
-                loop { if vi2 >= need2 { break; } store8(bp, vi2, 0); vi2 = vi2 + 1; }
-                w64(g_ir_vals, d * 8, bp);
-            }
-        }
-        if op == 9 { if s1 >= 0 && s2 >= 0 { w64(g_ir_vals, s1 * 8, r64(g_ir_vals, s2 * 8)); } }  // IR_STORE
-        if op == 10 { if d >= 0 { w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8)); } }  // IR_LOAD
-        if op == 11 {  // IR_LOAD_FIELD: s1=struct_var, s3=field_idx
-            if d >= 0 && s1 >= 0 {
-                ptr := r64(g_ir_vals, s1 * 8);
-                if ptr != 0 { w64(g_ir_vals, d * 8, r64(ptr, s3 * 8)); }
-                else { w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8)); }
-            }
-        }
-        if op == 12 {  // IR_STORE_FIELD: s1=struct_var, s2=val_var, s3=field_idx
-            if s1 >= 0 && s2 >= 0 {
-                ptr := r64(g_ir_vals, s1 * 8);
-                if ptr != 0 { w64(ptr, s3 * 8, r64(g_ir_vals, s2 * 8)); }
-                else { w64(g_ir_vals, s1 * 8, r64(g_ir_vals, s2 * 8)); }
-            }
-        }
-        if op == 13 {  // IR_LOAD_INDEX: s1=arr_var, s3=literal_idx
-            if d >= 0 && s1 >= 0 {
-                arr_ptr := r64(g_ir_vals, s1 * 8);
-                w64(g_ir_vals, d * 8, r64(arr_ptr, s3 * 8));
-            }
-        }
-        if op == 14 {  // IR_STORE_INDEX: s1=arr_var, s2=val_var, s3=literal_idx
-            if s1 >= 0 && s2 >= 0 {
-                arr_ptr := r64(g_ir_vals, s1 * 8);
-                w64(arr_ptr, s3 * 8, r64(g_ir_vals, s2 * 8));
-            }
-        }
-        if op == 15 {  // IR_LOAD_INDEX_VAR: s1=arr_var, s2=idx_var
-            if d >= 0 && s1 >= 0 && s2 >= 0 {
-                arr_ptr := r64(g_ir_vals, s1 * 8);
-                idx := r64(g_ir_vals, s2 * 8);
-                w64(g_ir_vals, d * 8, r64(arr_ptr, idx * 8));
-            }
-        }
-        if op == 16 {  // IR_STORE_INDEX_VAR: d=val_var, s1=arr_var, s2=idx_var
-            if d >= 0 && s1 >= 0 && s2 >= 0 {
-                arr_ptr := r64(g_ir_vals, s1 * 8);
-                idx := r64(g_ir_vals, s2 * 8);
-                w64(arr_ptr, idx * 8, r64(g_ir_vals, d * 8));
-            }
-        }
-        // IR_MAKE_ENUM (17)：d := alloc(8·(1+s2))；M[d+0] := s1（tag = 变体名索引）——
-        // 与 ELF 布局 [tag][payload...] 一致的堆镜像（payload 由后续 IR_STORE_FIELD 写堆）
-        if op == 17 {
-            if d >= 0 {
-                need2 := 8 + s2 * 8;
-                bp := alloc(need2);
-                vi2 : ., mut = 0;
-                loop { if vi2 >= need2 { break; } store8(bp, vi2, 0); vi2 = vi2 + 1; }
-                w64(bp, 0, s1);
-                w64(g_ir_vals, d * 8, bp);
-            }
-        }
-        // IR_LOAD_ENUM_TAG (23)：d := M[ρ(s1)+0]
-        if op == 23 {
-            if d >= 0 && s1 >= 0 {
-                ptr := r64(g_ir_vals, s1 * 8);
-                if ptr != 0 { w64(g_ir_vals, d * 8, r64(ptr, 0)); }
-            }
-        }
-        // IR_REF (18)：d := &ρ(s1)——槽模型近似：槽号即「地址」（ir_interp_deref_* 同规则）
-        if op == 18 { if d >= 0 && s1 >= 0 { w64(g_ir_vals, d * 8, s1); } }
-        // IR_DEREF (25)：d := M[ρ(s1)]（栈槽间接或堆读取，见 ir_interp_deref_read）
-        if op == 25 {
-            if d >= 0 && s1 >= 0 {
-                w64(g_ir_vals, d * 8, ir_interp_deref_read(r64(g_ir_vals, s1 * 8)));
-            }
-        }
+        if op == 6:
+            if d >= 0:
+                w64(g_ir_vals, d * 8, 0)
+        // IR_ALLOC
+        if op == 7:
+            // IR_ALLOC_STRUCT
+            if d >= 0:
+                si := find_struct(s3)
+                fc : ., mut = 0
+                if si >= 0:
+                    fc = si_field_count(si)
+                need2 := fc * 8 + 8
+                bp := alloc(need2)
+                vi2 : ., mut = 0
+                loop:
+                    if vi2 >= need2:
+                        break
+                    store8(bp, vi2, 0)
+                    vi2 = vi2 + 1
+                unsafe:
+                    w64(g_ir_vals, d * 8, @ptr_of(bp))
+        if op == 8:
+            // IR_ALLOC_ARRAY
+            if d >= 0:
+                cnt := s1
+                esz := s2
+                if esz <= 0:
+                    esz = 8
+                need2 := cnt * esz + 8
+                bp := alloc(need2)
+                vi2 : ., mut = 0
+                loop:
+                    if vi2 >= need2:
+                        break
+                    store8(bp, vi2, 0)
+                    vi2 = vi2 + 1
+                unsafe:
+                    w64(g_ir_vals, d * 8, @ptr_of(bp))
+        if op == 9:
+            if s1 >= 0 && s2 >= 0:
+                w64(g_ir_vals, s1 * 8, r64(g_ir_vals, s2 * 8))
+        // IR_STORE
+        if op == 10:
+            if d >= 0:
+                w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8))
+        // IR_LOAD
+        if op == 11:
+            // IR_LOAD_FIELD: s1=struct_var, s3=field_idx
+            if d >= 0 && s1 >= 0:
+                ptr := r64(g_ir_vals, s1 * 8)
+                if ptr != 0:
+                    unsafe:
+                        w64(g_ir_vals, d * 8, r64(@str_of(ptr), s3 * 8))
+                else:
+                    w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8))
+        if op == 12:
+            // IR_STORE_FIELD: s1=struct_var, s2=val_var, s3=field_idx
+            if s1 >= 0 && s2 >= 0:
+                ptr := r64(g_ir_vals, s1 * 8)
+                if ptr != 0:
+                    unsafe:
+                        w64(@str_of(ptr), s3 * 8, r64(g_ir_vals, s2 * 8))
+                else:
+                    w64(g_ir_vals, s1 * 8, r64(g_ir_vals, s2 * 8))
+        if op == 13:
+            // IR_LOAD_INDEX: s1=arr_var, s3=literal_idx
+            if d >= 0 && s1 >= 0:
+                arr_value := r64(g_ir_vals, s1 * 8)
+                if irv_type(s1) == TI_STR:
+                    w64(g_ir_vals, d * 8, str_load8(arr_value, s3))
+                else:
+                    unsafe:
+                        w64(g_ir_vals, d * 8, r64(@str_of(arr_value), s3 * 8))
+        if op == 14:
+            // IR_STORE_INDEX: s1=arr_var, s2=val_var, s3=literal_idx
+            if s1 >= 0 && s2 >= 0:
+                arr_value := r64(g_ir_vals, s1 * 8)
+                if irv_type(s1) == TI_STR:
+                    store8(istr_get(arr_value), s3, r64(g_ir_vals, s2 * 8))
+                else:
+                    unsafe:
+                        w64(@str_of(arr_value), s3 * 8, r64(g_ir_vals, s2 * 8))
+        if op == 15:
+            // IR_LOAD_INDEX_VAR: s1=arr_var, s2=idx_var
+            if d >= 0 && s1 >= 0 && s2 >= 0:
+                arr_value := r64(g_ir_vals, s1 * 8)
+                idx := r64(g_ir_vals, s2 * 8)
+                if irv_type(s1) == TI_STR:
+                    w64(g_ir_vals, d * 8, str_load8(arr_value, idx))
+                else:
+                    unsafe:
+                        w64(g_ir_vals, d * 8, r64(@str_of(arr_value), idx * 8))
+        if op == 16:
+            // IR_STORE_INDEX_VAR: d=val_var, s1=arr_var, s2=idx_var
+            if d >= 0 && s1 >= 0 && s2 >= 0:
+                arr_value := r64(g_ir_vals, s1 * 8)
+                idx := r64(g_ir_vals, s2 * 8)
+                if irv_type(s1) == TI_STR:
+                    store8(istr_get(arr_value), idx, r64(g_ir_vals, d * 8))
+                else:
+                    unsafe:
+                        w64(@str_of(arr_value), idx * 8, r64(g_ir_vals, d * 8))
+        // IR_MAKE_ENUM: allocate 8 + 8*s2 bytes and store s1 (the variant-name
+        // index) in the first word. This matches the ELF layout [tag][payload];
+        // IR_STORE_FIELD writes the payload.
+        if op == 17:
+            if d >= 0:
+                need2 := 8 + s2 * 8
+                bp := alloc(need2)
+                vi2 : ., mut = 0
+                loop:
+                    if vi2 >= need2:
+                        break
+                    store8(bp, vi2, 0)
+                    vi2 = vi2 + 1
+                w64(bp, 0, s1)
+                unsafe:
+                    w64(g_ir_vals, d * 8, @ptr_of(bp))
+        // IR_LOAD_ENUM_TAG: d = tag word at the pointer in slot s1.
+        if op == 23:
+            if d >= 0 && s1 >= 0:
+                ptr := r64(g_ir_vals, s1 * 8)
+                if ptr != 0:
+                    unsafe:
+                        w64(g_ir_vals, d * 8, r64(@str_of(ptr), 0))
+        // IR_REF: d = s1. The slot number is the stack address used by the deref helpers.
+        if op == 18:
+            if d >= 0 && s1 >= 0:
+                w64(g_ir_vals, d * 8, s1)
+        // IR_DEREF: read through the pointer in slot s1.
+        if op == 25:
+            if d >= 0 && s1 >= 0:
+                w64(g_ir_vals, d * 8, ir_interp_deref_read(r64(g_ir_vals, s1 * 8)))
 
-        // IR_SLICE (24): d := arr + low*8（与 ELF 编码一致；BC11 补实现）
-        if op == 24 {
-            if d >= 0 && s1 >= 0 && s2 >= 0 {
-                w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8) + r64(g_ir_vals, s2 * 8) * 8);
-            }
-        }
+        // IR_SLICE: d = arr + low*8, matching the ELF encoding.
+        if op == 24:
+            if d >= 0 && s1 >= 0 && s2 >= 0:
+                w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8) + r64(g_ir_vals, s2 * 8) * 8)
 
-        // IR_BOUNDS_CHECK (30): s1=index var, s2=max_len 字面量 —
-        // index < 0 或 index >= max → 陷阱（返回 -1 表示中止；BC11 补实现）
-        if op == 30 && s2 >= 0 {
-            iv := r64(g_ir_vals, s1 * 8);
-            if iv < 0 || iv >= s2 { return -1; }
-        }
+        // IR_BOUNDS_CHECK: s1 is the index variable and s2 the limit. An index
+        // below 0 or at least the limit aborts with -1.
+        if op == 30 && s2 >= 0:
+            iv := r64(g_ir_vals, s1 * 8)
+            limit : ., mut = s2
+            if ti == 1:
+                limit = r64(g_ir_vals, s2 * 8)
+            if iv < 0 || iv >= limit:
+                return -1
 
-        // IR_LAZY_THUNK / IR_LAZY_FORCE. Calls are currently eager, so both
-        // wrappers preserve the computed value.
-        if op == 46 || op == 47 {
-            if d >= 0 && s1 >= 0 { w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8)); }
-        }
+        // IR_LAZY_THUNK and IR_LAZY_FORCE. Calls are eager, so both wrappers
+        // preserve the computed value.
+        if op == 46 || op == 47:
+            if d >= 0 && s1 >= 0:
+                w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8))
 
-        // IR_YIELD (28)：eager 值传递近似（d ← ρ(s1)，同 IR_AWAIT）。
-        // F5a：补 d >= 0 守卫——发射恒 dest=-1（ir_gen L1569），原代码
-        // w64(g_ir_vals, d*8 = -8, ...) 堆下溢写（g_ir_vals[-8]，静默 UB）。
-        if op == 28 {
-            if d >= 0 && s1 >= 0 { w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8)); }
-        }
+        // IR_YIELD: pass the value in slot s1 eagerly, like IR_AWAIT. Emission
+        // uses dest = -1, so the d >= 0 check prevents a write before the value
+        // buffer.
+        if op == 28:
+            if d >= 0 && s1 >= 0:
+                w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8))
 
-        // IR_FNADDR — no real addresses in the interpreter; dest = 0
-        if op == 48 {
-            if d >= 0 { w64(g_ir_vals, d * 8, 0); }
-        }
+        // IR_FNADDR: the interpreter has no real addresses; store 0.
+        if op == 48:
+            if d >= 0:
+                w64(g_ir_vals, d * 8, 0)
 
-        // IR_APPROX — pure annotation, skip（无运算语义，不能崩）
-        if op == 51 { ip = ip + 1; continue; }
+        // IR_APPROX is a pure annotation; skip it.
+        if op == 51:
+            ip = ip + 1
+            continue
 
-        // IR_I2F(49) / IR_F2I(50)——int↔binary64 转换：解释器无 binary64 语义
-        // （数值迁移 Task 6 定稿）。apx dex 运算必然经过 bits↔缩放转换（打印/边界），
-        // 此处显式报错替代静默跳过——跳过会让目的槽残留 0/脏值，后续除法可能 SIGFPE。
-        if op == 49 || op == 50 {
-            println("interpreter error: IR_I2F/IR_F2I needs binary64 semantics (apx dex) — `corec run` cannot execute apx dex arithmetic; build & run natively (corec build) instead");
-            return -1;
-        }
+        // IR_I2F and IR_F2I convert between int and binary64. The interpreter has
+        // no binary64 semantics. Report an error instead of skipping: a skipped
+        // conversion leaves 0 or a stale value and can cause SIGFPE later.
+        if op == 49 || op == 50:
+            println("interpreter error: IR_I2F/IR_F2I needs binary64 semantics (apx dex) — `corec run` cannot execute apx dex arithmetic; build & run natively (corec build) instead")
+            return -1
 
-        // IR_STORE_PTR (26)：M[ρ(s1)] := ρ(s2)（与 ELF 操作数一致；d=-1 发射态不再影响）。
-        // 栈槽间接（指针 = 槽号）或堆写入，见 ir_interp_deref_write。
-        if op == 26 { if s1 >= 0 && s2 >= 0 { ir_interp_deref_write(r64(g_ir_vals, s1 * 8), r64(g_ir_vals, s2 * 8)); } }
+        // IR_STORE_PTR: write the value in slot s2 through the pointer in slot s1.
+        // The pointer may be a stack slot number or a heap address.
+        if op == 26:
+            if s1 >= 0 && s2 >= 0:
+                ir_interp_deref_write(r64(g_ir_vals, s1 * 8), r64(g_ir_vals, s2 * 8))
 
-        // IR_ADDR_INDEX (31)：d := ρ(s1) + 8·ρ(s2)（&arr[i]；s3=scale 恒 3，与 ELF 一致）
-        if op == 31 {
-            if d >= 0 && s1 >= 0 && s2 >= 0 {
-                w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8) + r64(g_ir_vals, s2 * 8) * 8);
-            }
-        }
-        // IR_ARENA_NEW (32) / IR_ARENA_RESET (33)：interp 无 arena——no-op 近似
-        // （对照语义表 2.4 的 D7：ELF 有 arena 句柄/复位；解释器槽模型无作用域内存概念）
-        if op == 32 { if d >= 0 { w64(g_ir_vals, d * 8, 0); } }
-        if op == 33 { }
+        // IR_ADDR_INDEX: d = slot s1 + 8 * slot s2 for &arr[i].
+        if op == 31:
+            if d >= 0 && s1 >= 0 && s2 >= 0:
+                w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8) + r64(g_ir_vals, s2 * 8) * 8)
+        // IR_ARENA_NEW and IR_ARENA_RESET: the slot model has no scoped arena, so
+        // these are approximations.
+        if op == 32:
+            if d >= 0:
+                w64(g_ir_vals, d * 8, 0)
 
-        // IR_DYN_PACK (43)：dyn 变量双槽 [value, tag]——slot[d]=值、slot[d+1]=tag（对照 ELF slot+0/+8）
-        if op == 43 {
-            if d >= 0 && s1 >= 0 {
-                w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8));
-                w64(g_ir_vals, (d + 1) * 8, s2);
-            }
-        }
-        // IR_DYN_TAG (41)：d := slot[ρ(s1)+1]（读 +8 槽）
-        if op == 41 { if d >= 0 && s1 >= 0 { w64(g_ir_vals, d * 8, r64(g_ir_vals, (s1 + 1) * 8)); } }
-        // IR_DYN_VAL (42)：d := slot[ρ(s1)]（读 +0 槽）
-        if op == 42 { if d >= 0 && s1 >= 0 { w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8)); } }
+        // IR_DYN_PACK: a dyn value uses two slots, value at d and tag at d+1.
+        if op == 43:
+            if d >= 0 && s1 >= 0:
+                w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8))
+                w64(g_ir_vals, (d + 1) * 8, s2)
+        // IR_DYN_TAG: d = tag at slot s1 + 1.
+        if op == 41:
+            if d >= 0 && s1 >= 0:
+                w64(g_ir_vals, d * 8, r64(g_ir_vals, (s1 + 1) * 8))
+        // IR_DYN_VAL: d = value at slot s1.
+        if op == 42:
+            if d >= 0 && s1 >= 0:
+                w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8))
 
-        // IR_DYN_DISPATCH (44)：显式报错（不再静默跳过；对照 ELF 的占位实现——见语义表 2.6 BC9）
-        if op == 44 {
-            println("error: interp 不支持动态分发（IR_DYN_DISPATCH）");
-            return 2;
-        }
-        // IR_CALL_EXTERN (45)：显式报错（不再静默错值；ELF 静态构建同样拒绝，见 F16）
-        if op == 45 {
-            print("error: interp 无法调用外部函数："); println(istr_get(s1));
-            return 2;
-        }
+        // IR_DYN_DISPATCH has no interpreter implementation; report an error.
+        if op == 44:
+            println("error: interp 不支持动态分发（IR_DYN_DISPATCH）")
+            return 2
+        // IR_CALL_EXTERN has no interpreter implementation; report an error.
+        if op == 45:
+            print("error: interp 无法调用外部函数：")
+            println(istr_get(s1))
+            return 2
 
-        // IR_I2F(49)/IR_F2I(50) 在 dispatch 入口已被显式报错拦截（#48 定稿：interp 无 binary64）
+        // IR_I2F and IR_F2I are rejected at dispatch entry.
 
-        // Branch (node-index based)
-        if op == 19 {
-            cv := r64(g_ir_vals, s1 * 8);
-            if cv != 0 { if s2 >= 0 && s2 < g_label_count { ip = r64(g_label_poses, s2 * 8); } }
-            else       { if s3 >= 0 && s3 < g_label_count { ip = r64(g_label_poses, s3 * 8); } }
-            if ip < node_count { continue; } else { break; }
-        }
-        if op == 20 {  // IR_JUMP
-            // Region iteration: a jump whose target is the innermost
-            // enclosing loop region's enter is a back-edge — loop iteration
-            // is driven by the region (SG) table: ip is taken from
-            // g_loop_region_enter, NOT from the label table.  Every other
-            // jump is a plain label jump resolved via g_label_poses.
-            // (The region enter from the SG table equals the label pose of
-            // the same node; the point is the code path: back-edges never
-            // read g_label_poses.)
-            // Innermost loop region enclosing the current ip (if any):
-            // among regions containing ip, the one with the largest enter
-            // offset is the innermost (e2 > cur_enter selection).
-            cur_enter : ., mut = -1;
-            cur_ri : ., mut = -1;
-            ri2 : ., mut = 0;
-            loop {
-                if ri2 >= g_loop_region_count { break; }
-                e2 := r64(g_loop_region_enter, ri2 * 8);
-                x2 := r64(g_loop_region_exit,  ri2 * 8);
-                if ip >= e2 && ip < x2 && e2 > cur_enter { cur_enter = e2; cur_ri = ri2; }
-                ri2 = ri2 + 1;
-            }
-            if s1 >= 0 && s1 < g_label_count {
-                target := r64(g_label_poses, s1 * 8);
-                if target >= 0 {
-                    if cur_ri >= 0 && target == cur_enter {
+        // Branch by node index.
+        if op == 19:
+            cv := r64(g_ir_vals, s1 * 8)
+            if cv != 0:
+                if s2 >= 0 && s2 < g_label_count:
+                    ip = r64(g_label_poses, s2 * 8)
+            else:
+                if s3 >= 0 && s3 < g_label_count:
+                    ip = r64(g_label_poses, s3 * 8)
+            if ip < node_count:
+                continue
+            else:
+                break
+        if op == 20:
+            // IR_JUMP
+            // A jump to the innermost enclosing loop region's enter is a
+            // back-edge. Its target comes from g_loop_region_enter, not from the
+            // label table. Other jumps use g_label_poses. The innermost region is
+            // the region containing ip with the largest enter offset.
+            cur_enter : ., mut = -1
+            cur_ri : ., mut = -1
+            ri2 : ., mut = 0
+            loop:
+                if ri2 >= g_loop_region_count:
+                    break
+                e2 := r64(g_loop_region_enter, ri2 * 8)
+                x2 := r64(g_loop_region_exit,  ri2 * 8)
+                if ip >= e2 && ip < x2 && e2 > cur_enter:
+                    cur_enter = e2
+                    cur_ri = ri2
+                ri2 = ri2 + 1
+            if s1 >= 0 && s1 < g_label_count:
+                target := r64(g_label_poses, s1 * 8)
+                if target >= 0:
+                    if cur_ri >= 0 && target == cur_enter:
                         // Back-edge to the innermost loop region's enter:
                         // ip comes from the region table, not label poses.
-                        ip = r64(g_loop_region_enter, cur_ri * 8);  // == cur_enter
-                    } else {
-                        ip = target;  // plain jump, resolved via label poses
-                    }
-                } else { ip = ip + 1; }
-            } else { ip = ip + 1; }
-            if ip < node_count { continue; } else { break; }
-        }
-        // IR_LABEL (21) - noop
+                        ip = r64(g_loop_region_enter, cur_ri * 8)  // == cur_enter
+                    else:
+                        ip = target  // plain jump, resolved via label poses
+                else:
+                    ip = ip + 1
+            else:
+                ip = ip + 1
+            if ip < node_count:
+                continue
+            else:
+                break
+        // IR_LABEL: no operation.
 
         // IR_AWAIT
-        if op == 29 { if d >= 0 { w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8)); } }
+        if op == 29:
+            if d >= 0:
+                w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8))
 
-        // IR_CALL or IR_SPAWN — only handles direct calls from main's graph
-        // Inline-executed callee graphs do NOT support nested calls.
-        if op == 4 || op == 27 {
-            fn_ni := s3;
-            fn_name := istr_get(fn_ni);
-            sfi := find_so_fn(fn_ni);
-            if sfi >= 0 && s2 >= 1 {
-                tf := sym_type(sfi);
-                if tf == 1 || tf == 3 {  // TAG_VARIADIC: print/println — NOOP (syscall3 returns 0)
-                } else if tf == 2 || tf == 3 {  // TAG_AUTO_STR: print_i/println_i — NOOP (syscall3 returns 0)
-                }
-            }
-            // syscall3/syscall4 — interpreter returns 0
-            if str_eq(fn_name, "syscall3") != 0 || str_eq(fn_name, "syscall4") != 0 {
-                if d >= 0 { w64(g_ir_vals, d * 8, 0); }
-            }
-            if str_eq(fn_name, "load_str_ptr") != 0 {
-                if d >= 0 && s2 >= 2 {
-                    b := r64(g_ir_vals, s1 * 8); p := r64(g_ir_vals, s1 + 1 * 8);
-                    lo := load8(b, p) + load8(b, p+1)*256 +
-                          load8(b, p+2)*65536 + load8(b, p+3)*16777216;
-                    hi := load8(b, p+4) + load8(b, p+5)*256 +
-                          load8(b, p+6)*65536 + load8(b, p+7)*16777216;
-                    if hi < 0 { hi = hi + 4294967296; }
-                    w64(g_ir_vals, d * 8, lo + hi * 4294967296);
-                }
-            }
-            if str_eq(fn_name, "store_str_ptr") != 0 {
-                if s2 >= 3 {
-                    b := r64(g_ir_vals, s1 * 8); p := r64(g_ir_vals, s1 + 1 * 8); v := r64(g_ir_vals, s1 + 2 * 8);
-                    lo : ., mut = v % 4294967296; hi : ., mut = v / 4294967296;
-                    if v < 0 { lo = v; hi = -1; }
-                    store8(b, p, lo%256);     store8(b, p+1, (lo/256)%256);
-                    store8(b, p+2, (lo/65536)%256); store8(b, p+3, (lo/16777216)%256);
-                    store8(b, p+4, hi%256);   store8(b, p+5, (hi/256)%256);
-                    store8(b, p+6, (hi/65536)%256); store8(b, p+7, (hi/16777216)%256);
-                }
-                if d >= 0 { w64(g_ir_vals, d * 8, 0); }
-            }
-            // Regular function call (single level — no recursive/nested call support)
-            if d >= 0 {
-                cfi : ., mut = 0;
-                loop {
-                    if cfi >= g_ir_func_count { break; }
-                    if r64(g_ir_func_name_idx, cfi * 8) == fn_ni {
-                        f_start := r64(g_df_func_node_start, cfi * 8);
-                        f_count := r64(g_df_func_node_count, cfi * 8);
-                        if f_start >= 0 && f_count > 0 {
-                            // Save label state
-                            old_lc := g_label_count;
-                            old_poses := g_label_poses;
-                            old_poses_cap := g_label_cap;
-                            g_label_poses = alloc(64 * 8); g_label_cap = 64;
-                            // Build label map for callee
-                            li2 : ., mut = 0;
-                            loop { if li2 >= f_count { break; }
-                                n_op := r64(g_df_nodes, (f_start + li2) * ESZ_DFNODE + OFF_DF_OPCODE);
-                                n_s1 := r64(g_df_nodes, (f_start + li2) * ESZ_DFNODE + OFF_DF_S1);
-                                if n_op == 21 { if n_s1 >= 0 {
-                                    grow_label_poses(n_s1 + 1);
-                                    w64(g_label_poses, n_s1 * 8, li2);
-                                    if n_s1 + 1 > g_label_count { g_label_count = n_s1 + 1; }
-                                }}
-                            li2 = li2 + 1; }
-                            // Copy args from caller positions to callee param vars
-                            pstart := r64(g_ir_func_var_start, cfi * 8);
-                            pai : ., mut = 0;
-                            loop { if pai >= s2 { break; }
-                                w64(g_ir_vals, (pstart + pai) * 8, r64(g_ir_vals, (s1 + pai) * 8));
-                            pai = pai + 1; }
-                            // Execute callee graph (inline)
-                            ip2 : ., mut = 0;
-                            loop {
-                                if ip2 >= f_count { break; }
-                                op2 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_OPCODE);
-                                d2 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_DEST);
-                                t1 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S1);
-                                t2 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S2);
-                                t3 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_S3);
-                                t4 := r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_TK);
-                                if op2 == 1 && d2 >= 0 { w64(g_ir_vals, d2 * 8, t1); }
-                                if op2 == 2 && t1 >= 0 && t2 >= 0 { ir_interp_binary(d2, t1, t2, t3, t4); }
-                                if op2 == 49 || op2 == 50 { println("interpreter error: IR_I2F/IR_F2I needs binary64 semantics (apx dex)"); return -1; }
-                                if op2 == 3 && t1 >= 0 {
-                                    ov2 := r64(g_ir_vals, t1 * 8);
-                                    if t3 == 1 { w64(g_ir_vals, d2 * 8, -ov2); }
-                                    else if t3 == 2 { if ov2 == 0 { w64(g_ir_vals, d2 * 8, 1); } else { w64(g_ir_vals, d2 * 8, 0); } } }
-                                // Keep callee locals in the shared value store.
-                                // The old inline path skipped these opcodes, so
-                                // loop-carried assignments never changed state.
-                                if op2 == 6 && d2 >= 0 { w64(g_ir_vals, d2 * 8, 0); }  // IR_ALLOC
-                                if op2 == 9 && t1 >= 0 && t2 >= 0 { w64(g_ir_vals, t1 * 8, r64(g_ir_vals, t2 * 8)); }  // IR_STORE
-                                if op2 == 10 && d2 >= 0 && t1 >= 0 { w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8)); }  // IR_LOAD
-                                if op2 == 32 && d2 >= 0 { w64(g_ir_vals, d2 * 8, 0); }  // IR_ARENA_NEW
-                                if op2 == 33 { }  // IR_ARENA_RESET
-                                if op2 == 46 || op2 == 47 {
-                                    if d2 >= 0 && t1 >= 0 { w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8)); }
-                                }
-                                if op2 == 5 {
-                                    if t1 >= 0 { w64(g_ir_vals, 0, r64(g_ir_vals, t1 * 8)); }
-                                    ip2 = f_count;  // return exits the callee immediately
-                                }  // IR_RETURN
-                                if op2 == 19 && t1 >= 0 {
-                                    cv2 := r64(g_ir_vals, t1 * 8);
-                                    if cv2 != 0 { if t2 >= 0 && t2 < g_label_count { ip2 = r64(g_label_poses, t2 * 8); } }
-                                    else { if t3 >= 0 && t3 < g_label_count { ip2 = r64(g_label_poses, t3 * 8); } } }
-                                if op2 == 20 { if t1 >= 0 && t1 < g_label_count { ip2 = r64(g_label_poses, t1 * 8); } }
-                                ip2 = ip2 + 1;
-                            }
-                            rval := r64(g_ir_vals, 0 * 8);
-                            // Restore label state
-                            g_label_count = old_lc;
-                            g_label_poses = old_poses;
-                            g_label_cap = old_poses_cap;
-                            w64(g_ir_vals, d * 8, rval);
-                        }
-                        break;
-                    }
-                cfi = cfi + 1; }
-            }
-        }
+        // IR_CALL and IR_SPAWN use the shared dispatch in ir_interp_call. Builtins,
+        // inline user functions, nested recursion, and abort propagation all live
+        // in that one function.
+        if op == 4 || op == 27:
+            ir_interp_call(d, s1, s2, s3)
+            if g_interp_abort != 0:
+                return g_interp_abort
 
-        ip = ip + 1;
-    }
-    return 0;
-}
+        ip = ip + 1
+    return 0

@@ -5,7 +5,7 @@
 所有文件安装到 `~/.config/nvim/`：
 
 ```bash
-# 一键安装
+# 一次性安装
 cp -r editor/nvim/syntax/*.vim    ~/.config/nvim/syntax/
 cp -r editor/nvim/ftdetect/*.vim  ~/.config/nvim/ftdetect/
 cp -r editor/nvim/ftplugin/*.vim  ~/.config/nvim/ftplugin/
@@ -14,12 +14,12 @@ cp -r editor/nvim/snippets/*.json ~/.config/nvim/snippets/
 cp -r editor/nvim/plugin/*.lua    ~/.config/nvim/lua/plugins/
 ```
 
-### 功能一览
+### 功能
 
 | 功能 | 触发方式 | 说明 |
 |------|----------|------|
 | 语法高亮 | 自动 | `.cr`/`.cir`/`.ccr` 文件 |
-| 代码补全 | 自动 | blink.cmp 关键字 + types |
+| 代码补全 | 自动 | `blink.cmp` 关键字 + types |
 | 代码片段 | `fn` `struct` 等 | 共 20+ 片段 |
 | 诊断 | 保存时自动 | 编译器错误显示在行内 |
 | Quickfix | `:make` | 编译结果 + 错误列表 |
@@ -31,7 +31,7 @@ cp -r editor/nvim/plugin/*.lua    ~/.config/nvim/lua/plugins/
 
 ### 错误诊断格式
 
-编译器输出 `error CODE: MSG` → `--> LINE:COL` 会被自动解析为：
+编译器输出的 `error CODE: MSG` 与 `--> LINE:COL` 由插件自动解析。
 
 ## VS Code
 
@@ -41,7 +41,7 @@ cp -r editor/nvim/plugin/*.lua    ~/.config/nvim/lua/plugins/
 code --install-extension editor/vscode-core/
 ```
 
-或从 VS Code 插件市场搜索 "core-lang"。
+也可从 VS Code 插件市场搜索 `core-lang` 安装。
 
 ## 项目仓库
 

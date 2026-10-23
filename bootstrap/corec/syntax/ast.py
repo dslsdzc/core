@@ -32,6 +32,15 @@ class UnaryOp(Expr): op: str; operand: Expr
 @dataclass
 class Call(Expr): func: Expr; args: List[Expr]
 @dataclass
+class Builtin(Expr):
+    """`@name` / `@name(args)` 内建形态（2(a) 视图内建批新增；与 `@project file::symbol` 区分）。
+
+    自托管面同形（`EXPR_AT`：a=name、b=args）。**未知名必须 fail-closed**（见 type_checker._infer_builtin），
+    不得静默当 0——两面一致是本批硬要求③。
+    """
+    name: str
+    args: List[Expr]
+@dataclass
 class FieldAccess(Expr): object: Expr; field: str
 @dataclass
 class Index(Expr): object: Expr; index: Expr

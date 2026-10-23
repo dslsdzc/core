@@ -58,11 +58,7 @@ def run_inline(source):
 def test_apx_tag_parses():
     # 1) apx 标签合法：check 通过（exit 0）
     src = (
-        "fn main() -> int {\n"
-        "    x : int, apx = 42;\n"
-        "    y : int, apx, mut = 84;\n"   # apx 与 mut 同槽位、可混排
-        "    return x + y;\n"
-        "}\n"
+        "fn main() -> int:\n    x : int, apx = 42\n    y : int, apx, mut = 84\n    return x + y\n"
     )
     r = run_corec(["check"], src)
     if r.returncode != 0:
@@ -73,10 +69,7 @@ def test_apx_tag_parses():
 
     # 2) 未知标签非法：check 报错（exit != 0，TA08）
     src2 = (
-        "fn main() -> int {\n"
-        "    x : int, bogus_tag = 42;\n"
-        "    return x;\n"
-        "}\n"
+        "fn main() -> int:\n    x : int, bogus_tag = 42\n    return x\n"
     )
     r2 = run_corec(["check"], src2)
     output2 = r2.stdout + r2.stderr
@@ -94,8 +87,8 @@ def test_apx_tag_parses():
 
 def test_apx_tag_no_semantic_change():
     # 1) 语义不变：带/不带 apx 的同一程序 run 返回值一致（interp 跳过 IR_APPROX）
-    plain_src = "fn main() -> int { x : int = 42; y : int = 84; return x + y; }"
-    apx_src = "fn main() -> int { x : int, apx = 42; y : int, apx = 84; return x + y; }"
+    plain_src = "fn main() -> int:\n    x : int = 42\n    y : int = 84\n    return x + y\n"
+    apx_src = "fn main() -> int:\n    x : int, apx = 42\n    y : int, apx = 84\n    return x + y\n"
     rp = run_inline(plain_src)
     ra = run_inline(apx_src)
     if rp.returncode != ra.returncode or rp.returncode != 126:
@@ -107,19 +100,10 @@ def test_apx_tag_no_semantic_change():
 
     # 2) IR 差异：仅 apx 变量处多 IR_APPROX（cir dump 每变量恰一条 `approx`）
     plain_file = (
-        "fn main() -> int {\n"
-        "    x : int = 42;\n"
-        "    y : int = 84;\n"
-        "    return x + y;\n"
-        "}\n"
+        "fn main() -> int:\n    x : int = 42\n    y : int = 84\n    return x + y\n"
     )
     apx_file = (
-        "fn main() -> int {\n"
-        "    x : int, apx = 42;\n"
-        "    y : int = 84;\n"          # 无 apx 的变量不发射
-        "    z : int, apx = 126;\n"
-        "    return x + y + z;\n"
-        "}\n"
+        "fn main() -> int:\n    x : int, apx = 42\n    y : int = 84\n    z : int, apx = 126\n    return x + y + z\n"
     )
     rc = run_corec(["cir"], plain_file)
     out_plain = rc.stdout + rc.stderr

@@ -53,10 +53,7 @@ def run_test(name, src, expected):
 def expect_float_rejected():
     """float 类型名已移除（数值迁移 Task 5）——使用 float 必须报类型错误。"""
     src = (
-        "fn main() -> dex {\n"
-        "    x : float = 3.14;\n"
-        "    return x;\n"
-        "}\n"
+        "fn main() -> dex:\n    x : float = 3.14\n    return x\n"
     )
     lex = Lexer(src)
     ast = Parser(lex.tokenize()).parse_compilation_unit()
@@ -76,15 +73,13 @@ def expect_float_rejected():
 def main():
     results = [
         run_test('Dex Declare + Literal', '''
-fn main() -> dex {
-    x : dex = 3.14;
-    return x;
-}
+fn main() -> dex:
+    x : dex = 3.14
+    return x
 ''', 3.14),
         run_test('Dex Arithmetic', '''
-fn main() -> dex {
-    return 1.5 + 1.25;
-}
+fn main() -> dex:
+    return 1.5 + 1.25
 ''', 2.75),
         expect_float_rejected(),
     ]

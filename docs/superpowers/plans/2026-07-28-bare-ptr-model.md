@@ -1,156 +1,156 @@
-# Bare Pointer Model Implementation Plan
+# 原始指针模型实现计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
 
-**Goal:** Replace `TYP_REF` (borrow-checked reference) with `TYP_PTR` (bare pointer) backed by dataflow verification passes, per `docs/pointer-model.md`.
+目标：按 `docs/pointer-model.md` 将 `TYP_REF`（借用检查引用）替换为 `TYP_PTR`（原始指针），由数据流验证 pass 支撑。
 
-**Architecture:** 6 phases, each producing testable output. P1+P3 can be parallelized. P2 builds on P1. P4-6 build on all prior phases.
+架构：分 6 个阶段，每阶段产出可测试的结果。P1 与 P3 可并行。P2 建立在 P1 上。P4-6 建立在此前全部阶段上。
 
-**Tech Stack:** Self-hosted Core compiler (`.cr`), Python bootstrap for initial build. ELF x86-64 backend.
+技术栈：自举 Core 编译器（`.cr`），初次构建使用 Python bootstrap。ELF x86-64 后端。
 
-**Plan:** `docs/superpowers/specs/2026-07-28-bare-ptr-model-design.md`
+计划：`docs/archive/2026-07-28-bare-ptr-model-design.md`
 
-## Global Constraints
+## 全局约束
 
-- All changes must compile with Python bootstrap (`build_selfhost_native.py`) AND produce working ELF via self-hosted pipeline
-- All existing tests must pass after each phase: `tests/bootstrap/test_pipeline.py`, `tests/selfhost/test_compile.py`
-- New pointer operations must pass a test in `tests/suite/` or equivalent
-- `jj` for version control, not `git`
-- CPU-limited builds: `nice -n 19` for long-running compilation
-
----
-
-## File Structure
-
-### New files
-- `src/compiler/ptr_analysis.cr` — PointerAnalysis pass
-- `src/compiler/region_check.cr` — RegionCheck pass
-- `src/compiler/provenance_verify.cr` — ProvenanceVerify pass
-
-### Modified files (by phase)
-
-**Phase 1 (types):**
-- `src/compiler/ast.cr` — add `TYP_PTR:4`, `EXPR_PTRTYPE:41`, `OP_PTR_ADD:14`, `OP_PTR_SUB:15`, `OP_PTR_DIFF:16`
-- `src/compiler/parser.cr` — `parse_type()`: `*T` → `EXPR_PTRTYPE`
-- `src/compiler/checker.cr` — `UOP_REF` → `TYP_PTR`; `UOP_DEREF` handles `TYP_PTR`; binary ops allow ptr arithmetic; `res_type_node` handles `EXPR_PTRTYPE`; `unsafe` scope
-- `src/compiler/ir_gen.cr` — binary op dispatch for `TYP_PTR` operands → `OP_PTR_ADD/SUB/DIFF`
-- `src/compiler/dataflow.cr` — `df_connect_srcs`, `df_opcode_name` for new opcodes
-- `src/compiler/dump.cr` — dump new opcode names
-- `src/compiler/interp.cr` — `OP_PTR_ADD/SUB/DIFF` in interpreter
-
-**Phase 2 (backend):**
-- `src/compiler/ast.cr` — (already done in P1)
-- `src/arch/linux/ld/instr.cr` — `OP_PTR_ADD/SUB/DIFF` in `IR_BINARY` handler
-
-**Phase 3 (subgraph):**
-- `src/compiler/dyn_arr.cr` — subgraph data structures
-- `src/compiler/dataflow.cr` — `sg_push/sg_pop` functions
-- `src/compiler/ir_gen.cr` — call `sg_push/sg_pop` at loop/for/unsafe boundaries
-
-**Phase 4 (PointerAnalysis):**
-- `src/compiler/ptr_analysis.cr` — new pass
-- `src/compiler/dyn_arr.cr` — points-to + offset storage
-- `src/compiler/dataflow.cr` — DFNode extension fields
-- `src/compiler/opt.cr` — call `ptr_analysis_all()` in `optimize_all()`
-- `src/compiler/globals.cr` — new globals
-
-**Phase 5 (RegionCheck):**
-- `src/compiler/region_check.cr` — new pass
-- `src/compiler/opt.cr` — call pass in `optimize_all()`
-
-**Phase 6 (ProvenanceVerify):**
-- `src/compiler/provenance_verify.cr` — new pass
-- `src/arch/linux/ld/instr.cr` — `IR_BOUNDS_CHECK` backend implementation
-- `src/compiler/opt.cr` — call pass in `optimize_all()`
+- 所有改动必须能通过 Python bootstrap（`build_selfhost_native.py`）编译，并且经自举管线产出可运行的 ELF
+- 每个阶段结束后既有测试必须全部通过：`tests/bootstrap/test_pipeline.py`、`tests/selfhost/test_compile.py`
+- 新增指针操作必须在 `tests/suite/` 或同等位置有测试通过
+- 版本控制使用 `jj`，不使用 `git`
+- 构建限 CPU：长时间编译使用 `nice -n 19`
 
 ---
 
-## Phase 1: Type System — TYP_PTR
+## 文件结构
 
-### Task 1.1: Add type constants and AST opcodes
+### 新增文件
+- `src/compiler/ptr_analysis.cr`：PointerAnalysis pass
+- `src/compiler/region_check.cr`：RegionCheck pass
+- `src/compiler/provenance_verify.cr`：ProvenanceVerify pass
 
-**Files:**
-- Modify: `src/compiler/ast.cr`
+### 修改文件（按阶段）
 
-**Interfaces:**
-- Produces: `TYP_PTR:4`, `EXPR_PTRTYPE:41`, `OP_PTR_ADD:14`, `OP_PTR_SUB:15`, `OP_PTR_DIFF:16`
+阶段 1（类型）：
+- `src/compiler/ast.cr`：添加 `TYP_PTR:4`、`EXPR_PTRTYPE:41`、`OP_PTR_ADD:14`、`OP_PTR_SUB:15`、`OP_PTR_DIFF:16`
+- `src/compiler/parser.cr`：`parse_type()` 将 `*T` 解析为 `EXPR_PTRTYPE`
+- `src/compiler/checker.cr`：`UOP_REF` 产出 `TYP_PTR`；`UOP_DEREF` 处理 `TYP_PTR`；二元运算允许指针算术；`res_type_node` 处理 `EXPR_PTRTYPE`；增加 `unsafe` 作用域
+- `src/compiler/ir_gen.cr`：对 `TYP_PTR` 操作数的二元运算分发到 `OP_PTR_ADD/SUB/DIFF`
+- `src/compiler/dataflow.cr`：为新 opcode 补充 `df_connect_srcs`、`df_opcode_name`
+- `src/compiler/dump.cr`：转储新 opcode 名称
+- `src/compiler/interp.cr`：解释器中的 `OP_PTR_ADD/SUB/DIFF`
 
-- [ ] **Step 1: Add TYP_PTR constant**
+阶段 2（后端）：
+- `src/compiler/ast.cr`：（P1 已完成）
+- `src/arch/linux/ld/instr.cr`：`IR_BINARY` 处理分支中的 `OP_PTR_ADD/SUB/DIFF`
 
-In `src/compiler/ast.cr` after line 297 (`TYP_REF : int = 3;`):
+阶段 3（子图）：
+- `src/compiler/dyn_arr.cr`：子图数据结构
+- `src/compiler/dataflow.cr`：`sg_push/sg_pop` 函数
+- `src/compiler/ir_gen.cr`：在 loop/for/unsafe 边界调用 `sg_push/sg_pop`
+
+阶段 4（PointerAnalysis）：
+- `src/compiler/ptr_analysis.cr`：新 pass
+- `src/compiler/dyn_arr.cr`：points-to 与 offset 存储
+- `src/compiler/dataflow.cr`：DFNode 扩展字段
+- `src/compiler/opt.cr`：在 `optimize_all()` 中调用 `ptr_analysis_all()`
+- `src/compiler/globals.cr`：新增全局变量
+
+阶段 5（RegionCheck）：
+- `src/compiler/region_check.cr`：新 pass
+- `src/compiler/opt.cr`：在 `optimize_all()` 中调用该 pass
+
+阶段 6（ProvenanceVerify）：
+- `src/compiler/provenance_verify.cr`：新 pass
+- `src/arch/linux/ld/instr.cr`：`IR_BOUNDS_CHECK` 后端实现
+- `src/compiler/opt.cr`：在 `optimize_all()` 中调用该 pass
+
+---
+
+## 阶段 1：类型系统中的 TYP_PTR
+
+### 任务 1.1：添加类型常量与 AST opcode
+
+涉及文件：
+- 修改：`src/compiler/ast.cr`
+
+接口：
+- 产出：`TYP_PTR:4`、`EXPR_PTRTYPE:41`、`OP_PTR_ADD:14`、`OP_PTR_SUB:15`、`OP_PTR_DIFF:16`
+
+- [ ] 步骤 1：添加 TYP_PTR 常量
+
+在 `src/compiler/ast.cr` 第 297 行（`TYP_REF : int = 3;`）之后添加：
 ```crystal
 TYP_PTR : int = 4;    // data=pointee_type, extra=address_space (0=tracked, 1=external)
 ```
 
-- [ ] **Step 2: Add EXPR_PTRTYPE AST node**
+- [ ] 步骤 2：添加 EXPR_PTRTYPE AST 节点
 
-In `src/compiler/ast.cr` after line 249 (`EXPR_AS : int = 36;`):
+在 `src/compiler/ast.cr` 第 249 行（`EXPR_AS : int = 36;`）之后添加：
 ```crystal
 EXPR_PTRTYPE : int = 46;  // a=inner_type (for \*T in type position)
 ```
 
-- [ ] **Step 3: Add pointer arithmetic opcodes**
+- [ ] 步骤 3：添加指针算术 opcode
 
-In `src/compiler/ast.cr` after line 276 (`OP_GE : int = 13;`):
+在 `src/compiler/ast.cr` 第 276 行（`OP_GE : int = 13;`）之后添加：
 ```crystal
-OP_PTR_ADD  : int = 17;  // p + n (p: \*T, n: int) → scaled by sizeof(T)
+OP_PTR_ADD  : int = 17;  // p + n (p: \*T, n: int), scaled by sizeof(T)
 OP_PTR_SUB  : int = 18;  // p - n
-OP_PTR_DIFF : int = 19;  // p - q → element count
+OP_PTR_DIFF : int = 19;  // p - q, returns element count
 ```
 
-- [ ] **Step 4: Commit**
+- [ ] 步骤 4：提交
 
 ```bash
 jj commit -m "feat: add TYP_PTR, EXPR_PTRTYPE, pointer arithmetic opcodes"
 ```
 
 
-### Task 1.2: Add `*T` type parsing
+### 任务 1.2：添加 `*T` 类型解析
 
-**Files:**
-- Modify: `src/compiler/parser.cr`
+涉及文件：
+- 修改：`src/compiler/parser.cr`
 
-**Interfaces:**
-- Consumes: `EXPR_PTRTYPE:41`
-- Produces: parser creates `EXPR_PTRTYPE(inner_type)` for `*T` syntax
+接口：
+- 使用：`EXPR_PTRTYPE:41`
+- 产出：parser 为 `*T` 语法创建 `EXPR_PTRTYPE(inner_type)`
 
-- [ ] **Step 1: Add \*T branch in parse_type()**
+- [ ] 步骤 1：在 parse_type() 中添加 \*T 分支
 
-In `src/compiler/parser.cr` inside `fn parse_type()`, after the `T_AMPERSAND` branch (around line 72) and before `T_UNIT`:
+在 `src/compiler/parser.cr` 的 `fn parse_type()` 中，`T_AMPERSAND` 分支之后（约第 72 行）、`T_UNIT` 之前添加：
 ```crystal
 } else if tok_k(t) == T_STAR {
     advance_tok();
     inner := parse_type();
     res = alloc_node(EXPR_PTRTYPE, inner, 0, 0, 0, 0, 0, line, col);
 ```
-*Note: `T_STAR` is token 43 (`\*`). It shares the same token as multiplication/dereference, but in type position there is no ambiguity.*
+注：`T_STAR` 是 token 43（`\*`）。它与乘法/解引用共用同一个 token，但在类型位置没有歧义。
 
-- [ ] **Step 2: Build and test**
+- [ ] 步骤 2：构建并测试
 
 ```bash
 nice -n 19 python3 build_selfhost_native.py 2>&1 | tail -5
 ```
-Expected: BUILD SUCCESS
+预期：BUILD SUCCESS
 
-- [ ] **Step 3: Commit**
+- [ ] 步骤 3：提交
 
 ```bash
 jj commit -m "feat: parse \*T pointer type syntax"
 ```
 
 
-### Task 1.3: Update type checker — base pointer support
+### 任务 1.3：更新类型检查器以支持原始指针
 
-**Files:**
-- Modify: `src/compiler/checker.cr`
+涉及文件：
+- 修改：`src/compiler/checker.cr`
 
-**Interfaces:**
-- Consumes: `EXPR_PTRTYPE`, `TYP_PTR`, `OP_PTR_ADD/SUB/DIFF`
-- Produces: checker accepts `TYP_PTR` in `UOP_DEREF`, creates `TYP_PTR` from `UOP_REF`, allows pointer arithmetic
+接口：
+- 使用：`EXPR_PTRTYPE`、`TYP_PTR`、`OP_PTR_ADD/SUB/DIFF`
+- 产出：类型检查器在 `UOP_DEREF` 中接受 `TYP_PTR`，由 `UOP_REF` 创建 `TYP_PTR`，并允许指针算术
 
-- [ ] **Step 1: Add `res_type_node` handling for `EXPR_PTRTYPE`**
+- [ ] 步骤 1：让 `res_type_node` 处理 `EXPR_PTRTYPE`
 
-In `src/compiler/checker.cr` inside `fn res_type_node()`, after the `EXPR_REFTYPE` branch (creates `TYP_REF`), add:
+在 `src/compiler/checker.cr` 的 `fn res_type_node()` 中，`EXPR_REFTYPE` 分支（创建 `TYP_REF`）之后添加：
 ```crystal
 if ast_kind(node) == EXPR_PTRTYPE {
     inner := res_type_node(ast_a(node));
@@ -158,17 +158,17 @@ if ast_kind(node) == EXPR_PTRTYPE {
 }
 ```
 
-- [ ] **Step 2: Update `UOP_REF` to produce `TYP_PTR` instead of `TYP_REF`**
+- [ ] 步骤 2：让 `UOP_REF` 产出 `TYP_PTR` 而不是 `TYP_REF`
 
-In `src/compiler/checker.cr` around line 1186-1210 (`if op == UOP_REF` block):
-- Remove the `check_borrow()` call and borrow error emission
-- Change `return alloc_type(TYP_REF, inner, mut_flag);` to:
+在 `src/compiler/checker.cr` 第 1186-1210 行附近（`if op == UOP_REF` 块）：
+- 删除 `check_borrow()` 调用与借用错误发射
+- 将 `return alloc_type(TYP_REF, inner, mut_flag);` 改为：
 ```crystal
 return alloc_type(TYP_PTR, inner, 0);
 ```
-- Remove the `mut_flag` / `ast_int_val(node)` usage for UOP_REF (no mutable vs immutable distinction for raw pointers)
+- 删除 UOP_REF 对 `mut_flag` / `ast_int_val(node)` 的使用（原始指针不区分可变与不可变）
 
-The block should become:
+该块改为：
 ```crystal
 if op == UOP_REF {
     operand := ast_a(node);
@@ -184,9 +184,9 @@ if op == UOP_REF {
 }
 ```
 
-- [ ] **Step 3: Update `UOP_DEREF` to handle `TYP_PTR`**
+- [ ] 步骤 3：让 `UOP_DEREF` 处理 `TYP_PTR`
 
-In `src/compiler/checker.cr` around line 1212-1221 (`if op == UOP_DEREF` block), add `TYP_PTR` branch alongside `TYP_REF`:
+在 `src/compiler/checker.cr` 第 1212-1221 行附近（`if op == UOP_DEREF` 块），在 `TYP_REF` 旁增加 `TYP_PTR` 分支：
 ```crystal
 if op == UOP_DEREF {
     inner := infer_expr(ast_a(node));
@@ -203,21 +203,21 @@ if op == UOP_DEREF {
 }
 ```
 
-- [ ] **Step 4: Update binary op checking to allow pointer arithmetic**
+- [ ] 步骤 4：更新二元运算检查以允许指针算术
 
-In `src/compiler/checker.cr` around line 1159-1167 (`if op == OP_ADD || op == OP_SUB ...` block), add pointer arithmetic paths:
+在 `src/compiler/checker.cr` 第 1159-1167 行附近（`if op == OP_ADD || op == OP_SUB ...` 块）添加指针算术分支：
 ```crystal
 if op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV || op == OP_MOD {
     // String concatenation for OP_ADD
     if op == OP_ADD && (lt == TI_STR || rt == TI_STR) { return TI_STR; }
-    // Pointer arithmetic: \*T + n or n + \*T → \*T
+    // Pointer arithmetic: \*T + n or n + \*T yields \*T
     if (op == OP_ADD || op == OP_SUB) && (get_type_kind(lt) == TYP_PTR && rt == TI_INT) {
         return lt;  // return the pointer type unchanged
     }
     if (op == OP_ADD || op == OP_SUB) && (lt == TI_INT && get_type_kind(rt) == TYP_PTR) {
         return rt;
     }
-    // Pointer difference: \*T - \*T → int
+    // Pointer difference: \*T - \*T yields int
     if op == OP_SUB && get_type_kind(lt) == TYP_PTR && get_type_kind(rt) == TYP_PTR {
         return TI_INT;
     }
@@ -229,9 +229,9 @@ if op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV || op == OP_MOD 
 }
 ```
 
-- [ ] **Step 5: Update `EXPR_UNSAFE` to use unsafe scope**
+- [ ] 步骤 5：让 `EXPR_UNSAFE` 使用 unsafe 作用域
 
-In `src/compiler/checker.cr` around line 1834-1839, replace `push_borrow_scope`/`pop_borrow_scope` with unsafe scope:
+在 `src/compiler/checker.cr` 第 1834-1839 行附近，把 `push_borrow_scope`/`pop_borrow_scope` 替换为 unsafe 作用域：
 ```crystal
 if ast_kind(node) == EXPR_UNSAFE {
     push_unsafe_scope();
@@ -241,55 +241,55 @@ if ast_kind(node) == EXPR_UNSAFE {
 }
 ```
 
-For now, `push_unsafe_scope` and `pop_unsafe_scope` can be stubs that call the existing borrow scope functions (they'll be replaced when the passes are implemented):
+目前 `push_unsafe_scope` 与 `pop_unsafe_scope` 可以是模拟函数，调用既有的借用作用域函数（实现各 pass 时再替换）：
 ```crystal
 fn push_unsafe_scope() { push_borrow_scope(); }
 fn pop_unsafe_scope()  { pop_borrow_scope(); }
 ```
 
-- [ ] **Step 6: Fix `type_equal` to handle `TYP_PTR`**
+- [ ] 步骤 6：让 `type_equal` 处理 `TYP_PTR`
 
-In `src/compiler/checker.cr` inside `fn type_equal()`, after the `TYP_REF` check:
+在 `src/compiler/checker.cr` 的 `fn type_equal()` 中，`TYP_REF` 检查之后添加：
 ```crystal
 if k1 == TYP_PTR && k2 == TYP_PTR {
     return type_equal(get_type_data(t1), get_type_data(t2));
 }
 ```
 
-- [ ] **Step 7: Build and run tests**
+- [ ] 步骤 7：构建并运行测试
 
 ```bash
 nice -n 19 python3 build_selfhost_native.py 2>&1 | tail -5
 nice -n 19 python3 tests/bootstrap/test_pipeline.py 2>&1 | tail -5
 ```
-Expected: BUILD SUCCESS + 23/23 passed
+预期：BUILD SUCCESS + 23/23 passed
 
-- [ ] **Step 8: Commit**
+- [ ] 步骤 8：提交
 
 ```bash
 jj commit -m "feat: type checker handles TYP_PTR, pointer arithmetic, unsafe scope"
 ```
 
 
-### Task 1.4: Update IR generation for pointer arithmetic
+### 任务 1.4：更新指针算术的 IR 生成
 
-**Files:**
-- Modify: `src/compiler/ir_gen.cr`
-- Modify: `src/compiler/dataflow.cr`
-- Modify: `src/compiler/dump.cr`
-- Modify: `src/compiler/interp.cr`
+涉及文件：
+- 修改：`src/compiler/ir_gen.cr`
+- 修改：`src/compiler/dataflow.cr`
+- 修改：`src/compiler/dump.cr`
+- 修改：`src/compiler/interp.cr`
 
-**Interfaces:**
-- Consumes: `OP_PTR_ADD/SUB/DIFF`, `TYP_PTR`
-- Produces: `IR_BINARY` with `s3=OP_PTR_ADD/SUB/DIFF` for pointer arithmetic
+接口：
+- 使用：`OP_PTR_ADD/SUB/DIFF`、`TYP_PTR`
+- 产出：指针算术使用 `s3=OP_PTR_ADD/SUB/DIFF` 的 `IR_BINARY`
 
-- [ ] **Step 1: Update `ir_gen.cr` binary op dispatch**
+- [ ] 步骤 1：更新 `ir_gen.cr` 的二元运算分发
 
-In `src/compiler/ir_gen.cr`, in the `EXPR_BINARY` handler after computing `left_var` and `right_var` and before `emit(IR_BINARY, ...)`:
+在 `src/compiler/ir_gen.cr` 的 `EXPR_BINARY` 处理中，算出 `left_var` 与 `right_var` 之后、`emit(IR_BINARY, ...)` 之前：
 
-We need the checker to set `ast_c(node)` to the PTR opcodes when operands are pointers. But wait — the checker returns the result type, it doesn't rewrite `ast_c`. The IR gen needs to detect pointer operands and emit the right opcode.
+这里需要类型检查器在操作数为指针时把 `ast_c(node)` 设为 PTR opcode。但类型检查器只返回结果类型，不改写 `ast_c`。因此 IR gen 要自行检测指针操作数并发射正确的 opcode。
 
-Add after the string concat/eq handling and before `emit(IR_BINARY, ...)`:
+在字符串拼接/相等处理之后、`emit(IR_BINARY, ...)` 之前添加：
 ```crystal
 // Pointer arithmetic: use PTR_ADD/PTR_SUB/PTR_DIFF instead of standard opcodes
 pt := irv_type(left_var);
@@ -305,11 +305,11 @@ if get_type_kind(pt) == TYP_PTR || get_type_kind(irv_type(right_var)) == TYP_PTR
 }
 ```
 
-This requires `get_type_kind()` and `irv_type()` to be accessible. `irv_type` reads from `g_ir_var_types`.
+这要求 `get_type_kind()` 与 `irv_type()` 可访问。`irv_type` 从 `g_ir_var_types` 读取。
 
-- [ ] **Step 2: Add `df_opcode_name` entries in `dataflow.cr`**
+- [ ] 步骤 2：在 `dataflow.cr` 中添加 `df_opcode_name` 条目
 
-In `src/compiler/dataflow.cr` in `df_opcode_name()`:
+在 `src/compiler/dataflow.cr` 的 `df_opcode_name()` 中：
 ```crystal
 if opcode == IR_BINARY {
     if s3 == OP_PTR_ADD  { return "ptr_add"; }
@@ -318,94 +318,94 @@ if opcode == IR_BINARY {
 }
 ```
 
-- [ ] **Step 3: Add dump entries in `dump.cr`**
+- [ ] 步骤 3：在 `dump.cr` 中添加转储条目
 
-In `src/compiler/dump.cr` `binop_name()` function:
+在 `src/compiler/dump.cr` 的 `binop_name()` 函数中：
 ```crystal
 if op == OP_PTR_ADD  { return "+ (ptr)"; }
 if op == OP_PTR_SUB  { return "- (ptr)"; }
 if op == OP_PTR_DIFF { return "- (diff)"; }
 ```
 
-- [ ] **Step 4: Add interpreter cases in `interp.cr`**
+- [ ] 步骤 4：在 `interp.cr` 中添加解释器分支
 
-In `src/compiler/interp.cr` after the existing binary op cases:
+在 `src/compiler/interp.cr` 现有二元 op 分支之后添加：
 ```crystal
 if s3 == 17 { w64(g_ir_vals, d * 8, lv + rv * 8); }   // OP_PTR_ADD
 if s3 == 18 { w64(g_ir_vals, d * 8, lv - rv * 8); }   // OP_PTR_SUB
 if s3 == 19 { w64(g_ir_vals, d * 8, (lv - rv) / 8); }  // OP_PTR_DIFF
 ```
 
-- [ ] **Step 5: Build and test**
+- [ ] 步骤 5：构建并测试
 
 ```bash
 nice -n 19 python3 build_selfhost_native.py 2>&1 | tail -5
 nice -n 19 python3 tests/bootstrap/test_pipeline.py 2>&1 | tail -5
 ```
-Expected: BUILD SUCCESS + all tests pass
+预期：BUILD SUCCESS + all tests pass
 
-- [ ] **Step 6: Commit**
+- [ ] 步骤 6：提交
 
 ```bash
 jj commit -m "feat: IR gen emits OP_PTR_ADD/SUB/DIFF for pointer arithmetic"
 ```
 
 
-### Task 1.5: Add pointer arithmetic test
+### 任务 1.5：添加指针算术测试
 
-**Files:**
-- Create: `tests/suite/ptr_arith.cr` (or add to existing test)
+涉及文件：
+- 创建：`tests/suite/ptr_arith.cr`（或加入既有测试）
 
-- [ ] **Step 1: Write pointer arithmetic test**
+- [ ] 步骤 1：编写指针算术测试
 
-Create `tests/suite/ptr_arith.cr`:
+创建 `tests/suite/ptr_arith.cr`：
 ```crystal
 fn main() -> int {
     // Basic pointer arithmetic via array access
     arr := [10, 20, 30, 40, 50];
-    
+
     // &arr[i] and deref
     p := &arr[2];
     if *p != 30 { return 1; }
-    
+
     // Should also compile and work with \&x
     x : ., mut = 42;
     q := &x;
     *q = 99;
     if x != 99 { return 2; }
-    
+
     return 0;
 }
 ```
 
-- [ ] **Step 2: Build and run the test**
+- [ ] 步骤 2：构建并运行测试
 
 ```bash
 ./build/corec build tests/suite/ptr_arith.cr -o /tmp/ptr_arith_test --static 2>&1 &&
 chmod +x /tmp/ptr_arith_test && /tmp/ptr_arith_test
 ```
-Expected: exit code 0
+预期：退出码 0
 
-- [ ] **Step 3: Commit**
+- [ ] 步骤 3：提交
 
 ```bash
 jj commit -m "test: pointer arithmetic suite test"
 ```
 
 
-## Phase 2: ELF Backend for Pointer Arithmetic
+## 阶段 2：指针算术的 ELF 后端
 
-### Task 2.1: Implement OP_PTR_ADD/SUB/DIFF in ELF backend
+### 任务 2.1：在 ELF 后端实现 OP_PTR_ADD/SUB/DIFF
 
-**Files:**
-- Modify: `src/arch/linux/ld/instr.cr`
+涉及文件：
+- 修改：`src/arch/linux/ld/instr.cr`
 
-**Interfaces:**
-- Consumes: `OP_PTR_ADD:14`, `OP_PTR_SUB:15`, `OP_PTR_DIFF:16`
+接口：
+- 使用：`OP_PTR_ADD:14`、`OP_PTR_SUB:15`、`OP_PTR_DIFF:16`
 
-- [ ] **Step 1: Add pointer arithmetic branches in IR_BINARY handler**
+- [ ] 步骤 1：在 IR_BINARY 处理中添加指针算术分支
 
-In `src/arch/linux/ld/instr.cr` in the `IR_BINARY` handler, after the `OP_SHR` branch and before `OP_DIV/OP_MOD`:
+在 `src/arch/linux/ld/instr.cr` 的 `IR_BINARY` 处理中，`OP_SHR` 分支之后、`OP_DIV/OP_MOD` 之前添加：
 ```crystal
 else if s3 == OP_PTR_ADD {
     // imul r11, 8, r11 — scale by element size (hardcoded 8)
@@ -436,32 +436,32 @@ else if s3 == OP_PTR_DIFF {
 }
 ```
 
-- [ ] **Step 2: Build and run tests**
+- [ ] 步骤 2：构建并运行测试
 
 ```bash
 nice -n 19 python3 build_selfhost_native.py 2>&1 | tail -5
 ./build/corec build /tmp/ptr_arith_test --static 2>&1 > /dev/null && chmod +x /tmp/ptr_arith_test && /tmp/ptr_arith_test
 ```
-Expected: BUILD SUCCESS + exit 0
+预期：BUILD SUCCESS + exit 0
 
-- [ ] **Step 3: Commit**
+- [ ] 步骤 3：提交
 
 ```bash
 jj commit -m "feat: ELF backend OP_PTR_ADD/SUB/DIFF with element size scaling"
 ```
 
 
-## Phase 3: Subgraph Infrastructure
+## 阶段 3：子图基础设施
 
-### Task 3.1: Add subgraph data structures
+### 任务 3.1：添加子图数据结构
 
-**Files:**
-- Modify: `src/compiler/dyn_arr.cr`
-- Modify: `src/compiler/globals.cr`
+涉及文件：
+- 修改：`src/compiler/dyn_arr.cr`
+- 修改：`src/compiler/globals.cr`
 
-- [ ] **Step 1: Add subgraph entry constants to dyn_arr.cr**
+- [ ] 步骤 1：在 dyn_arr.cr 中添加子图条目常量
 
-After the DFEdge definitions:
+在 DFEdge 定义之后添加：
 ```crystal
 // Subgraph entry (48 bytes each)
 ESZ_SG   : int = 48;
@@ -479,14 +479,14 @@ SG_FLOW   : int = 3;
 SG_UNSAFE : int = 4;
 ```
 
-- [ ] **Step 2: Add subgraph globals to globals.cr**
+- [ ] 步骤 2：在 globals.cr 中添加子图全局变量
 
 ```crystal
 g_sg_count : int, mut;
 g_sgs : string, mut;
 ```
 
-- [ ] **Step 3: Add grow_sg function to dyn_arr.cr**
+- [ ] 步骤 3：在 dyn_arr.cr 中添加 grow_sg 函数
 
 ```crystal
 fn grow_sg(n: int) {
@@ -500,21 +500,21 @@ fn grow_sg(n: int) {
 }
 ```
 
-- [ ] **Step 4: Commit**
+- [ ] 步骤 4：提交
 
 ```bash
 jj commit -m "feat: subgraph data structures (SG_FUNC/LOOP/FOR/FLOW/UNSAFE)"
 ```
 
 
-### Task 3.2: Implement sg_push/sg_pop functions
+### 任务 3.2：实现 sg_push/sg_pop 函数
 
-**Files:**
-- Modify: `src/compiler/dataflow.cr`
+涉及文件：
+- 修改：`src/compiler/dataflow.cr`
 
-- [ ] **Step 1: Add sg_push function**
+- [ ] 步骤 1：添加 sg_push 函数
 
-In `dataflow.cr`:
+在 `dataflow.cr` 中：
 ```crystal
 fn sg_push(kind: int) {
     grow_sg(g_sg_count + 1);
@@ -547,45 +547,45 @@ fn sg_pop() {
 }
 ```
 
-- [ ] **Step 2: Wire sg_push/sg_pop into existing function boundary calls**
+- [ ] 步骤 2：把 sg_push/sg_pop 接入既有函数边界调用
 
-In `df_begin_func`, add `sg_push(SG_FUNC)`.
-In `df_end_func`, add `sg_pop()`.
+在 `df_begin_func` 中添加 `sg_push(SG_FUNC)`。
+在 `df_end_func` 中添加 `sg_pop()`。
 
-- [ ] **Step 3: Build and test**
+- [ ] 步骤 3：构建并测试
 
 ```bash
 nice -n 19 python3 build_selfhost_native.py 2>&1 | tail -5
 nice -n 19 python3 tests/bootstrap/test_pipeline.py 2>&1 | tail -5
 ```
-Expected: BUILD SUCCESS + all tests pass
+预期：BUILD SUCCESS + all tests pass
 
-- [ ] **Step 4: Commit**
+- [ ] 步骤 4：提交
 
 ```bash
 jj commit -m "feat: sg_push/sg_pop for function subgraphs"
 ```
 
 
-### Task 3.3: Add subgraph calls at loop/for/unsafe boundaries
+### 任务 3.3：在 loop/for/unsafe 边界添加子图调用
 
-**Files:**
-- Modify: `src/compiler/ir_gen.cr`
+涉及文件：
+- 修改：`src/compiler/ir_gen.cr`
 
-- [ ] **Step 1: Add sg_push(SG_LOOP) in loop IR generation**
+- [ ] 步骤 1：在 loop IR 生成中添加 sg_push(SG_LOOP)
 
-Find the `EXPR_LOOP` handling in `ir_gen.cr`, add before loop body gen:
+找到 `ir_gen.cr` 中的 `EXPR_LOOP` 处理，在循环体生成之前添加：
 ```crystal
 sg_push(SG_LOOP);
 ```
-Add after loop body gen:
+在循环体生成之后添加：
 ```crystal
 sg_pop();
 ```
 
-Find the `EXPR_FOR` handling, wrap similarly with `SG_FOR`.
+找到 `EXPR_FOR` 处理，用 `SG_FOR` 按同样方式包裹。
 
-Find `EXPR_UNSAFE` handling (line 969-971), wrap with:
+找到 `EXPR_UNSAFE` 处理（第 969-971 行），用以下代码包裹：
 ```crystal
 if ast_kind(node) == EXPR_UNSAFE {
     sg_push(SG_UNSAFE);
@@ -595,33 +595,33 @@ if ast_kind(node) == EXPR_UNSAFE {
 }
 ```
 
-- [ ] **Step 2: Build and test**
+- [ ] 步骤 2：构建并测试
 
 ```bash
 nice -n 19 python3 build_selfhost_native.py 2>&1 | tail -5
 nice -n 19 python3 tests/bootstrap/test_pipeline.py 2>&1 | tail -5
 ```
-Expected: BUILD SUCCESS + all tests pass
+预期：BUILD SUCCESS + all tests pass
 
-- [ ] **Step 3: Commit**
+- [ ] 步骤 3：提交
 
 ```bash
 jj commit -m "feat: subgraph boundary calls at loop/for/unsafe in IR gen"
 ```
 
 
-## Phase 4: PointerAnalysis Pass
+## 阶段 4：PointerAnalysis pass
 
-### Task 4.1: Add points-to storage and DFNode extension
+### 任务 4.1：添加 points-to 存储与 DFNode 扩展
 
-**Files:**
-- Modify: `src/compiler/dyn_arr.cr`
-- Modify: `src/compiler/globals.cr`
-- Modify: `src/compiler/dataflow.cr`
+涉及文件：
+- 修改：`src/compiler/dyn_arr.cr`
+- 修改：`src/compiler/globals.cr`
+- 修改：`src/compiler/dataflow.cr`
 
-- [ ] **Step 1: Add points-to and offset globals**
+- [ ] 步骤 1：添加 points-to 与 offset 全局变量
 
-In `globals.cr`:
+在 `globals.cr` 中：
 ```crystal
 g_pts : string, mut;       // per-variable points-to bitmap
 g_pts_cap : int, mut;
@@ -629,7 +629,7 @@ g_offsets : string, mut;   // per-variable offset from base alloc
 g_offsets_cap : int, mut;
 ```
 
-- [ ] **Step 2: Add pts/offset grow helpers in dyn_arr.cr**
+- [ ] 步骤 2：在 dyn_arr.cr 中添加 pts/offset 扩容辅助函数
 
 ```crystal
 fn grow_pts(n: int) {
@@ -650,9 +650,9 @@ fn grow_offsets(n: int) {
 }
 ```
 
-- [ ] **Step 3: Add DFNode extension fields**
+- [ ] 步骤 3：添加 DFNode 扩展字段
 
-In `dataflow.cr`, add after the existing DFNode definitions:
+在 `dataflow.cr` 中，既有 DFNode 定义之后添加：
 ```crystal
 // Extension fields for pointer analysis (optional, allocated per-node as needed)
 OFF_DF_PTS      : int = 64;   // inline lower-64-bits of points-to bitmap
@@ -660,22 +660,22 @@ OFF_DF_OFFSET   : int = 72;   // accumulated offset from base alloc
 ESZ_DFNODE_PTR  : int = 80;
 ```
 
-*Note: We use the original ESZ_DFNODE for the main node array and store pts/offset separately. This avoids breaking existing node layout.*
+注：主节点数组仍使用原来的 `ESZ_DFNODE`，pts/offset 单独存储。这样不会破坏既有节点布局。
 
-- [ ] **Step 4: Commit**
+- [ ] 步骤 4：提交
 
 ```bash
 jj commit -m "feat: points-to and offset storage infrastructure"
 ```
 
 
-### Task 4.2: Implement PointerAnalysis pass
+### 任务 4.2：实现 PointerAnalysis pass
 
-**Files:**
-- Create: `src/compiler/ptr_analysis.cr`
-- Modify: `src/compiler/opt.cr` — wire pass into optimize_all()
+涉及文件：
+- 创建：`src/compiler/ptr_analysis.cr`
+- 修改：`src/compiler/opt.cr`：在 `optimize_all()` 中接入该 pass
 
-- [ ] **Step 1: Create ptr_analysis.cr**
+- [ ] 步骤 1：创建 ptr_analysis.cr
 
 ```crystal
 // PointerAnalysis pass — builds points-to relations from dataflow graph
@@ -757,57 +757,57 @@ fn ptr_analysis_all() {
 }
 ```
 
-- [ ] **Step 2: Wire into optimize_all() in opt.cr**
+- [ ] 步骤 2：接入 opt.cr 的 optimize_all()
 
-In `optimize_all()`, add at the end:
+在 `optimize_all()` 末尾添加：
 ```crystal
 // Pointer analysis (always runs, even at opt_level 0)
 ptr_analysis_all();
 ```
 
-- [ ] **Step 3: Build and test**
+- [ ] 步骤 3：构建并测试
 
 ```bash
 nice -n 19 python3 build_selfhost_native.py 2>&1 | tail -5
 nice -n 19 python3 tests/bootstrap/test_pipeline.py 2>&1
 ```
-Expected: BUILD SUCCESS + all tests pass
+预期：BUILD SUCCESS + all tests pass
 
-- [ ] **Step 4: Add _import.cr include**
+- [ ] 步骤 4：添加 _import.cr 引用
 
-Add `ptr_analysis` to the import lists in `_import.cr` files both in `src/compiler/` and `src/arch/linux/ld/`:
+在 `src/compiler/` 与 `src/arch/linux/ld/` 的 `_import.cr` 引用列表中都加入 `ptr_analysis`：
 ```
 import ptr_analysis
 ```
 
-Actually, the ELF backend `_import.cr` only needs the globals and structures. PointerAnalysis runs in the frontend/optimizer, so it needs to be in the `corec` import list, not `corearch`.
+实际上 ELF 后端的 `_import.cr` 只需要全局变量和结构定义。PointerAnalysis 在前端/优化器中运行，因此应加入 `corec` 的引用列表，而不是 `corearch`。
 
-In `src/compiler/_import.cr`, add: `import ptr_analysis`
+在 `src/compiler/_import.cr` 中添加：`import ptr_analysis`
 
-- [ ] **Step 5: Rebuild and test**
+- [ ] 步骤 5：重新构建并测试
 
 ```bash
 nice -n 19 python3 build_selfhost_native.py 2>&1 | tail -5
 nice -n 19 python3 tests/bootstrap/test_pipeline.py 2>&1
 ```
-Expected: BUILD SUCCESS + all tests pass
+预期：BUILD SUCCESS + all tests pass
 
-- [ ] **Step 6: Commit**
+- [ ] 步骤 6：提交
 
 ```bash
 jj commit -m "feat: PointerAnalysis pass (ptr_analysis.cr)"
 ```
 
 
-## Phase 5: RegionCheck Pass
+## 阶段 5：RegionCheck pass
 
-### Task 5.1: Implement RegionCheck pass
+### 任务 5.1：实现 RegionCheck pass
 
-**Files:**
-- Create: `src/compiler/region_check.cr`
-- Modify: `src/compiler/opt.cr` — wire pass
+涉及文件：
+- 创建：`src/compiler/region_check.cr`
+- 修改：`src/compiler/opt.cr`：接入该 pass
 
-- [ ] **Step 1: Create region_check.cr**
+- [ ] 步骤 1：创建 region_check.cr
 
 ```crystal
 // RegionCheck pass — verifies DEREF targets are in live subgraphs
@@ -876,41 +876,41 @@ fn region_check_all() {
 }
 ```
 
-- [ ] **Step 2: Wire into optimize_all() in opt.cr**
+- [ ] 步骤 2：接入 opt.cr 的 optimize_all()
 
-Add after `ptr_analysis_all()`:
+在 `ptr_analysis_all()` 之后添加：
 ```crystal
 region_check_all();
 ```
 
-- [ ] **Step 3: Add import**
+- [ ] 步骤 3：添加引用
 
-In `src/compiler/_import.cr`, add: `import region_check`
+在 `src/compiler/_import.cr` 中添加：`import region_check`
 
-- [ ] **Step 4: Build and test**
+- [ ] 步骤 4：构建并测试
 
 ```bash
 nice -n 19 python3 build_selfhost_native.py 2>&1 | tail -5
 nice -n 19 python3 tests/bootstrap/test_pipeline.py 2>&1
 ```
-Expected: BUILD SUCCESS + all tests pass
+预期：BUILD SUCCESS + all tests pass
 
-- [ ] **Step 5: Commit**
+- [ ] 步骤 5：提交
 
 ```bash
 jj commit -m "feat: RegionCheck pass (region_check.cr)"
 ```
 
 
-## Phase 6: ProvenanceVerify Pass
+## 阶段 6：ProvenanceVerify pass
 
-### Task 6.1: Implement ProvenanceVerify pass
+### 任务 6.1：实现 ProvenanceVerify pass
 
-**Files:**
-- Create: `src/compiler/provenance_verify.cr`
-- Modify: `src/compiler/opt.cr` — wire pass
+涉及文件：
+- 创建：`src/compiler/provenance_verify.cr`
+- 修改：`src/compiler/opt.cr`：接入该 pass
 
-- [ ] **Step 1: Create provenance_verify.cr**
+- [ ] 步骤 1：创建 provenance_verify.cr
 
 ```crystal
 // ProvenanceVerify pass — checks DEREF offset against allocation size
@@ -971,40 +971,40 @@ fn provenance_verify_all() {
 }
 ```
 
-- [ ] **Step 2: Wire into optimize_all() in opt.cr**
+- [ ] 步骤 2：接入 opt.cr 的 optimize_all()
 
-Add after `region_check_all()`:
+在 `region_check_all()` 之后添加：
 ```crystal
 provenance_verify_all();
 ```
 
-- [ ] **Step 3: Add import**
+- [ ] 步骤 3：添加引用
 
-In `src/compiler/_import.cr`, add: `import provenance_verify`
+在 `src/compiler/_import.cr` 中添加：`import provenance_verify`
 
-- [ ] **Step 4: Build and test**
+- [ ] 步骤 4：构建并测试
 
 ```bash
 nice -n 19 python3 build_selfhost_native.py 2>&1 | tail -5
 nice -n 19 python3 tests/bootstrap/test_pipeline.py 2>&1
 ```
-Expected: BUILD SUCCESS + all tests pass
+预期：BUILD SUCCESS + all tests pass
 
-- [ ] **Step 5: Commit**
+- [ ] 步骤 5：提交
 
 ```bash
 jj commit -m "feat: ProvenanceVerify pass (provenance_verify.cr)"
 ```
 
 
-### Task 6.2: Implement IR_BOUNDS_CHECK in ELF backend
+### 任务 6.2：在 ELF 后端实现 IR_BOUNDS_CHECK
 
-**Files:**
-- Modify: `src/arch/linux/ld/instr.cr`
+涉及文件：
+- 修改：`src/arch/linux/ld/instr.cr`
 
-- [ ] **Step 1: Add IR_BOUNDS_CHECK handler**
+- [ ] 步骤 1：添加 IR_BOUNDS_CHECK 处理
 
-In `instr.cr` in `emit_instr()`, add before the fallthrough return:
+在 `instr.cr` 的 `emit_instr()` 中，最后 return 之前添加：
 ```crystal
 if op == IR_BOUNDS_CHECK && s2 >= 0 {
     cp = cp + e2_load_var(buf, pos+cp, 10, s1);  // index
@@ -1021,35 +1021,35 @@ if op == IR_BOUNDS_CHECK && s2 >= 0 {
 }
 ```
 
-- [ ] **Step 2: Build and test**
+- [ ] 步骤 2：构建并测试
 
 ```bash
 nice -n 19 python3 build_selfhost_native.py 2>&1 | tail -5
 nice -n 19 python3 tests/bootstrap/test_pipeline.py 2>&1
 ```
-Expected: BUILD SUCCESS + all tests pass
+预期：BUILD SUCCESS + all tests pass
 
-- [ ] **Step 3: Commit**
+- [ ] 步骤 3：提交
 
 ```bash
 jj commit -m "feat: IR_BOUNDS_CHECK backend emits cmp + jae + ud2"
 ```
 
 
-## Self-Review Checklist
+## 执行前自查
 
-1. **Spec coverage**: Every section of the design doc has a corresponding task. P1 covers types+parser+checker+IR gen+dump+interp. P2 covers ELF backend. P3 covers subgraph infrastructure. P4-6 cover the three passes.
+1. 规格覆盖：设计文档的每一节都有对应任务。P1 覆盖 types+parser+checker+IR gen+dump+interp。P2 覆盖 ELF 后端。P3 覆盖子图基础设施。P4-6 覆盖三个 pass。
 
-2. **Placeholder scan**: All code blocks contain complete implementations. No "TBD" or "TODO" or "implement later".
+2. 占位符扫描：所有代码块都是完整实现。没有 "TBD"、"TODO" 或 "implement later"。
 
-3. **Type consistency**: All opcode constants and function signatures are consistent across tasks. The `_import.cr` updates are included in the appropriate tasks.
+3. 类型一致性：所有 opcode 常量与函数签名在各任务间一致。`_import.cr` 的改动已放进相应任务。
 
 ---
 
-Plan complete. Two execution options:
+计划完成。两种执行方式：
 
-**1. Subagent-Driven (recommended)** — I dispatch a fresh subagent per task, review between tasks, fast iteration
+1. 子代理驱动（推荐）：每个任务派发新的子代理，任务之间审查，迭代快
 
-**2. Inline Execution** — Execute tasks in this session using executing-plans, batch execution with checkpoints
+2. 内联执行：在当前会话中用 executing-plans 执行，分批执行并设检查点
 
-**Which approach?**
+选哪种？

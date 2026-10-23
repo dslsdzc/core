@@ -1,221 +1,217 @@
 // === module.cr ===
 // File system utilities, fileid management, and import resolution.
 
-// ─── LSP open documents ────────────────────────────────────────
-// g_open_docs：路径 → 源文本的扁平记录，24 字节/条 {path_ptr, src_ptr, src_len}。
-// didOpen/didChange 由 LSP 层把路径与源文本复制到稳定堆字符串后注册；
-// module_get_source 先查打开文档、未打开才读盘——进程内重跑前端不再依赖磁盘。
+// LSP open documents. g_open_docs is a flat array of 24-byte records:
+// {path pointer, source pointer, source length}. didOpen and didChange copy paths
+// and source text to stable heap strings before registering. module_get_source
+// checks open documents first and reads from disk only when absent, so rerunning
+// the frontend in-process does not depend on disk.
 
-fn grow_open_docs(needed: int) {
-    if needed < g_open_doc_cap { return; }
-    ncap : ., mut = g_open_doc_cap * 2; if ncap < 8 { ncap = 8; } if ncap < needed { ncap = needed + 8; }
-    nb := alloc(ncap * 24); _dyncpy(g_open_docs, g_open_doc_cap * 24, nb);
-    g_open_docs = nb; g_open_doc_cap = ncap; }
+fn grow_open_docs(needed: int):
+    if needed < g_open_doc_cap:
+        return
+    ncap : ., mut = g_open_doc_cap * 2
+    if ncap < 8:
+        ncap = 8
+    if ncap < needed:
+        ncap = needed + 8
+    nb := alloc(ncap * 24)
+    _dyncpy(g_open_docs, g_open_doc_cap * 24, nb)
+    g_open_docs = nb
+    g_open_doc_cap = ncap
 
-fn module_open_doc_set(path: string, src: string) {
-    i : ., mut = 0;
-    loop {
-        if i >= g_open_doc_count { break; }
-        if str_eq(load_str_ptr(g_open_docs, i * 24), path) != 0 {
-            store_str_ptr(g_open_docs, i * 24 + 8, src);
-            w64(g_open_docs, i * 24 + 16, str_len(src));
-            return;
-        }
-        i = i + 1;
-    }
-    grow_open_docs(g_open_doc_count + 1);
-    store_str_ptr(g_open_docs, g_open_doc_count * 24, path);
-    store_str_ptr(g_open_docs, g_open_doc_count * 24 + 8, src);
-    w64(g_open_docs, g_open_doc_count * 24 + 16, str_len(src));
-    g_open_doc_count = g_open_doc_count + 1;
-}
+fn module_open_doc_set(path: string, src: string):
+    i : ., mut = 0
+    loop:
+        if i >= g_open_doc_count:
+            break
+        if str_eq(load_str_ptr(g_open_docs, i * 24), path) != 0:
+            store_str_ptr(g_open_docs, i * 24 + 8, src)
+            w64(g_open_docs, i * 24 + 16, str_len(src))
+            return
+        i = i + 1
+    grow_open_docs(g_open_doc_count + 1)
+    store_str_ptr(g_open_docs, g_open_doc_count * 24, path)
+    store_str_ptr(g_open_docs, g_open_doc_count * 24 + 8, src)
+    w64(g_open_docs, g_open_doc_count * 24 + 16, str_len(src))
+    g_open_doc_count = g_open_doc_count + 1
 
-fn module_open_doc_remove(path: string) {
-    i : ., mut = 0;
-    loop {
-        if i >= g_open_doc_count { break; }
-        if str_eq(load_str_ptr(g_open_docs, i * 24), path) != 0 {
-            j : ., mut = i + 1;
-            loop {
-                if j >= g_open_doc_count { break; }
-                store_str_ptr(g_open_docs, (j - 1) * 24, load_str_ptr(g_open_docs, j * 24));
-                store_str_ptr(g_open_docs, (j - 1) * 24 + 8, load_str_ptr(g_open_docs, j * 24 + 8));
-                w64(g_open_docs, (j - 1) * 24 + 16, r64(g_open_docs, j * 24 + 16));
-                j = j + 1;
-            }
-            g_open_doc_count = g_open_doc_count - 1;
-            return;
-        }
-        i = i + 1;
-    }
-}
+fn module_open_doc_remove(path: string):
+    i : ., mut = 0
+    loop:
+        if i >= g_open_doc_count:
+            break
+        if str_eq(load_str_ptr(g_open_docs, i * 24), path) != 0:
+            j : ., mut = i + 1
+            loop:
+                if j >= g_open_doc_count:
+                    break
+                store_str_ptr(g_open_docs, (j - 1) * 24, load_str_ptr(g_open_docs, j * 24))
+                store_str_ptr(g_open_docs, (j - 1) * 24 + 8, load_str_ptr(g_open_docs, j * 24 + 8))
+                w64(g_open_docs, (j - 1) * 24 + 16, r64(g_open_docs, j * 24 + 16))
+                j = j + 1
+            g_open_doc_count = g_open_doc_count - 1
+            return
+        i = i + 1
 
-// 先查打开文档（路径精确匹配），未打开读盘；两者皆无返回 ""
-fn module_get_source(path: string) -> string {
-    i : ., mut = 0;
-    loop {
-        if i >= g_open_doc_count { break; }
-        if str_eq(load_str_ptr(g_open_docs, i * 24), path) != 0 {
-            return load_str_ptr(g_open_docs, i * 24 + 8);
-        }
-        i = i + 1;
-    }
-    return read_file(path);
-}
+// Check open documents by exact path, then read from disk. Return "" when neither has the file.
+fn module_get_source(path: string) -> string:
+    i : ., mut = 0
+    loop:
+        if i >= g_open_doc_count:
+            break
+        if str_eq(load_str_ptr(g_open_docs, i * 24), path) != 0:
+            return load_str_ptr(g_open_docs, i * 24 + 8)
+        i = i + 1
+    return read_file(path)
 
-fn count_newlines(s: string) -> int {
-    slen := str_len(s);
-    n : ., mut = 0;
-    i : ., mut = 0;
-    loop {
-        if i >= slen { break; }
-        if str_eq(get_char(s, i), "\n") != 0 { n = n + 1; }
-        i = i + 1;
-    }
-    return n;
-}
+fn count_newlines(s: string) -> int:
+    slen := str_len(s)
+    n : ., mut = 0
+    i : ., mut = 0
+    loop:
+        if i >= slen:
+            break
+        if str_eq(get_char(s, i), "\n") != 0:
+            n = n + 1
+        i = i + 1
+    return n
 
-fn get_fileid(s: string) -> string {
-    slen := str_len(s);
-    i : ., mut = 0;
-    loop {
-        if i + 6 >= slen { return ""; }
+fn get_fileid(s: string) -> string:
+    slen := str_len(s)
+    i : ., mut = 0
+    loop:
+        if i + 6 >= slen:
+            return ""
         // Inline "fileid" check — int-based, no str_sub/str_eq
-        if load8(s, i) == 102 && load8(s, i+1) == 105 && load8(s, i+2) == 108 &&
-           load8(s, i+3) == 101 && load8(s, i+4) == 105 && load8(s, i+5) == 100 {
-            j : ., mut = i + 6;
-            loop {
-                if j >= slen { return ""; }
-                if load8(s, j) == 34 {  // '"'
-                    start := j + 1;
-                    k : ., mut = start;
-                    loop {
-                        if k >= slen { return ""; }
-                        if load8(s, k) == 34 {  // '"'
-                            return str_sub(s, start, k - start);
-                        }
-                        k = k + 1;
-                    }
-                }
-                j = j + 1;
-            }
-        }
-        i = i + 1;
-    }
-    return "";
-}
+        if load8(s, i) == 102 && load8(s, i+1) == 105 && load8(s, i+2) == 108 && load8(s, i+3) == 101 && load8(s, i+4) == 105 && load8(s, i+5) == 100:
+            j : ., mut = i + 6
+            loop:
+                if j >= slen:
+                    return ""
+                if load8(s, j) == 34:
+                    // '"'
+                    start := j + 1
+                    k : ., mut = start
+                    loop:
+                        if k >= slen:
+                            return ""
+                        if load8(s, k) == 34:
+                            // '"'
+                            return str_sub(s, start, k - start)
+                        k = k + 1
+                j = j + 1
+        i = i + 1
+    return ""
 
-fn dirname(path: string) -> string {
-    slen := str_len(path);
-    last_slash : ., mut = -1;
-    i : ., mut = 0;
-    loop {
-        if i >= slen { break; }
-        if str_eq(get_char(path, i), "/") != 0 { last_slash = i; }
-        i = i + 1;
-    }
-    if last_slash >= 0 {
-        return str_sub(path, 0, last_slash + 1);
-    }
-    return "";
-}
+fn dirname(path: string) -> string:
+    slen := str_len(path)
+    last_slash : ., mut = -1
+    i : ., mut = 0
+    loop:
+        if i >= slen:
+            break
+        if str_eq(get_char(path, i), "/") != 0:
+            last_slash = i
+        i = i + 1
+    if last_slash >= 0:
+        return str_sub(path, 0, last_slash + 1)
+    return ""
 
-fn basename(path: string) -> string {
-    slen := str_len(path);
-    if slen == 0 { return ""; }
-    end : ., mut = slen;
+fn basename(path: string) -> string:
+    slen := str_len(path)
+    if slen == 0:
+        return ""
+    end : ., mut = slen
     // strip trailing /
-    loop {
-        if end <= 0 { break; }
-        if str_eq(get_char(path, end - 1), "/") != 0 { end = end - 1; }
-        else { break; }
-    }
-    if end == 0 { return "/"; }
-    last_slash : ., mut = -1;
-    i : ., mut = 0;
-    loop {
-        if i >= end { break; }
-        if str_eq(get_char(path, i), "/") != 0 { last_slash = i; }
-        i = i + 1;
-    }
-    if last_slash >= 0 {
-        return str_sub(path, last_slash + 1, end - last_slash - 1);
-    }
-    return str_sub(path, 0, end);
-}
+    loop:
+        if end <= 0:
+            break
+        if str_eq(get_char(path, end - 1), "/") != 0:
+            end = end - 1
+        else:
+            break
+    if end == 0:
+        return "/"
+    last_slash : ., mut = -1
+    i : ., mut = 0
+    loop:
+        if i >= end:
+            break
+        if str_eq(get_char(path, i), "/") != 0:
+            last_slash = i
+        i = i + 1
+    if last_slash >= 0:
+        return str_sub(path, last_slash + 1, end - last_slash - 1)
+    return str_sub(path, 0, end)
 
-fn parent_dir(dir: string) -> string {
-    slen := str_len(dir);
-    if slen <= 1 { return ""; }
-    trimmed : ., mut = dir;
-    last_ch := get_char(dir, slen - 1);
-    if str_eq(last_ch, "/") != 0 {
-        trimmed = str_sub(dir, 0, slen - 1);
-    }
-    last_slash : ., mut = -1;
-    i : ., mut = 0;
-    tlen := str_len(trimmed);
-    loop {
-        if i >= tlen { break; }
-        if str_eq(get_char(trimmed, i), "/") != 0 { last_slash = i; }
-        i = i + 1;
-    }
-    if last_slash >= 0 {
-        return str_sub(trimmed, 0, last_slash + 1);
-    }
-    return "";
-}
+fn parent_dir(dir: string) -> string:
+    slen := str_len(dir)
+    if slen <= 1:
+        return ""
+    trimmed : ., mut = dir
+    last_ch := get_char(dir, slen - 1)
+    if str_eq(last_ch, "/") != 0:
+        trimmed = str_sub(dir, 0, slen - 1)
+    last_slash : ., mut = -1
+    i : ., mut = 0
+    tlen := str_len(trimmed)
+    loop:
+        if i >= tlen:
+            break
+        if str_eq(get_char(trimmed, i), "/") != 0:
+            last_slash = i
+        i = i + 1
+    if last_slash >= 0:
+        return str_sub(trimmed, 0, last_slash + 1)
+    return ""
 
-fn load_imports(dir_path: string) -> string {
-    imp_path : ., mut = dir_path + "_import.cr";
-    content := module_get_source(imp_path);
-    if str_len(content) > 0 {
-    }
-    return content;
-}
+fn load_imports(dir_path: string) -> string:
+    imp_path : ., mut = dir_path + "_import.cr"
+    content := module_get_source(imp_path)
+    // Return the _import.cr content when present.
+    if str_len(content) > 0:
+    return content
 
-fn reg_fileid(fileid_str: string, path: string) -> int {
-    fni := str_intern(fileid_str);
-    fi : ., mut = 0;
-    loop {
-        if fi >= g_file_count { break; }
-        if r64(g_files, fi * 16) == fni {
-            return fni;
-        }
-        fi = fi + 1;
-    }
-    grow_files(g_file_count + 1);
-    w64(g_files, g_file_count * 16, fni);
-    store_str_ptr(g_files, g_file_count * 16 + 8, path);
-    g_file_count = g_file_count + 1;
-    return fni;
-}
+fn reg_fileid(fileid_str: string, path: string) -> int:
+    fni := str_intern(fileid_str)
+    fi : ., mut = 0
+    loop:
+        if fi >= g_file_count:
+            break
+        if r64(g_files, fi * 16) == fni:
+            return fni
+        fi = fi + 1
+    grow_files(g_file_count + 1)
+    w64(g_files, g_file_count * 16, fni)
+    store_str_ptr(g_files, g_file_count * 16 + 8, path)
+    g_file_count = g_file_count + 1
+    return fni
 
-fn build_line_fileid() {
-    g_line_count = 0; g_line_cap = 0;
-    slen := str_len(g_source);
-    seg_idx : ., mut = 0;
-    grow_line_file(g_line_count + 1); w64(g_line_fileid, g_line_count * 8, r64(g_seg_fileids, 0));
-    g_line_count = g_line_count + 1;
-    pos : ., mut = 0;
-    loop {
-        if pos >= slen { break; }
-        if str_eq(get_char(g_source, pos), "\n") != 0 {
-            next_start := 0;
-            next_fileid := -1;
-            if seg_idx + 1 < g_seg_count {
-                next_start = r64(g_seg_starts, (seg_idx + 1) * 8);
-                next_fileid = r64(g_seg_fileids, (seg_idx + 1) * 8);
-            }
-            if next_fileid >= 0 && pos + 1 >= next_start {
-                seg_idx = seg_idx + 1;
-            }
-            grow_line_file(g_line_count + 1); w64(g_line_fileid, g_line_count * 8, r64(g_seg_fileids, seg_idx * 8));
-            g_line_count = g_line_count + 1;
-        }
-        pos = pos + 1;
-    }
-}
+fn build_line_fileid():
+    g_line_count = 0
+    g_line_cap = 0
+    slen := str_len(g_source)
+    seg_idx : ., mut = 0
+    grow_line_file(g_line_count + 1)
+    w64(g_line_fileid, g_line_count * 8, r64(g_seg_fileids, 0))
+    g_line_count = g_line_count + 1
+    pos : ., mut = 0
+    loop:
+        if pos >= slen:
+            break
+        if str_eq(get_char(g_source, pos), "\n") != 0:
+            next_start := 0
+            next_fileid := -1
+            if seg_idx + 1 < g_seg_count:
+                next_start = r64(g_seg_starts, (seg_idx + 1) * 8)
+                next_fileid = r64(g_seg_fileids, (seg_idx + 1) * 8)
+            if next_fileid >= 0 && pos + 1 >= next_start:
+                seg_idx = seg_idx + 1
+            grow_line_file(g_line_count + 1)
+            w64(g_line_fileid, g_line_count * 8, r64(g_seg_fileids, seg_idx * 8))
+            g_line_count = g_line_count + 1
+        pos = pos + 1
 
 // Register functions from a .so extension index file.
 // Index format (one function per line):
@@ -223,395 +219,502 @@ fn build_line_fileid() {
 // Examples:
 //   print: string, variadic, auto_str
 //   read_file: string -> string
-fn reg_so_funcs(index_content: string, so_name: string) {
-    sl := str_len(index_content);
-    line_start : ., mut = 0;
-    loop {
-        if line_start >= sl { break; }
+fn reg_so_funcs(index_content: string, so_name: string):
+    sl := str_len(index_content)
+    line_start : ., mut = 0
+    loop:
+        if line_start >= sl:
+            break
         // Find end of line
-        line_end : ., mut = line_start;
-        loop {
-            if line_end >= sl { break; }
-            c := load8(index_content, line_end);
-            if c == 10 { break; }  // \n
-            line_end = line_end + 1;
-        }
-        line := str_sub(index_content, line_start, line_end - line_start);
-        line_start = line_end + 1;
+        line_end : ., mut = line_start
+        loop:
+            if line_end >= sl:
+                break
+            c := load8(index_content, line_end)
+            if c == 10:
+                break
+            // \n
+            line_end = line_end + 1
+        line := str_sub(index_content, line_start, line_end - line_start)
+        line_start = line_end + 1
 
         // Skip empty lines and comments
-        if str_len(line) == 0 { continue; }
-        c0 := load8(line, 0);
-        if c0 == 35 || c0 == 10 || c0 == 13 { continue; }  // #, \n, \r
+        if str_len(line) == 0:
+            continue
+        c0 := load8(line, 0)
+        if c0 == 35 || c0 == 10 || c0 == 13:
+            continue
+        // #, \n, \r
 
         // Parse: func_name: rest
-        colon_pos : ., mut = -1;
-        ci : ., mut = 0;
-        loop {
-            if ci >= str_len(line) { break; }
-            if load8(line, ci) == 58 { colon_pos = ci; break; }  // :
-            ci = ci + 1;
-        }
-        if colon_pos < 0 { continue; }
-        func_name := str_sub(line, 0, colon_pos);
-        rest := str_sub(line, colon_pos + 1, str_len(line) - colon_pos - 1);
-        if str_len(func_name) == 0 { continue; }
+        colon_pos : ., mut = -1
+        ci : ., mut = 0
+        loop:
+            if ci >= str_len(line):
+                break
+            if load8(line, ci) == 58:
+                colon_pos = ci
+                break
+            // :
+            ci = ci + 1
+        if colon_pos < 0:
+            continue
+        func_name := str_sub(line, 0, colon_pos)
+        rest := str_sub(line, colon_pos + 1, str_len(line) - colon_pos - 1)
+        if str_len(func_name) == 0:
+            continue
 
         // Parse rest into params and tags (comma-separated)
-        param_types : ., mut = "";
-        ret_type : ., mut = "unit";
-        tag_flags : ., mut = 0;
+        param_types : ., mut = ""
+        ret_type : ., mut = "unit"
+        tag_flags : ., mut = 0
 
         // Split rest by -> to get ret type
-        arrow_pos : ., mut = -1;
-        ai : ., mut = 0; rl := str_len(rest);
-        loop {
-            if ai + 2 > rl { break; }
-            if load8(rest, ai) == 45 && ai + 1 < rl && load8(rest, ai+1) == 62 {  // ->
-                arrow_pos = ai; break; }
-            ai = ai + 1;
-        }
+        arrow_pos : ., mut = -1
+        ai : ., mut = 0
+        rl := str_len(rest)
+        loop:
+            if ai + 2 > rl:
+                break
+            if load8(rest, ai) == 45 && ai + 1 < rl && load8(rest, ai+1) == 62:
+                // ->
+                arrow_pos = ai
+                break
+            ai = ai + 1
 
-        params_str : ., mut = "";
-        tags_str : ., mut = "";
-        if arrow_pos >= 0 {
-            params_str = str_sub(rest, 0, arrow_pos);
-            ret_str := str_sub(rest, arrow_pos + 2, rl - arrow_pos - 2);
+        params_str : ., mut = ""
+        tags_str : ., mut = ""
+        if arrow_pos >= 0:
+            params_str = str_sub(rest, 0, arrow_pos)
+            ret_str := str_sub(rest, arrow_pos + 2, rl - arrow_pos - 2)
             // ret_str might have tags too after comma
-            ret_comma : ., mut = -1;
-            rci : ., mut = 0;
-            loop { if rci >= str_len(ret_str) { break; }
-                if load8(ret_str, rci) == 44 { ret_comma = rci; break; }
-                rci = rci + 1; }
-            if ret_comma >= 0 {
-                ret_type = str_sub(ret_str, 0, ret_comma);
-                tags_str = str_sub(ret_str, ret_comma + 1, str_len(ret_str) - ret_comma - 1);
-            } else {
-                ret_type = ret_str;
+            ret_comma : ., mut = -1
+            rci : ., mut = 0
+            loop:
+                if rci >= str_len(ret_str):
+                    break
+                if load8(ret_str, rci) == 44:
+                    ret_comma = rci
+                    break
+                rci = rci + 1
+            if ret_comma >= 0:
+                ret_type = str_sub(ret_str, 0, ret_comma)
+                tags_str = str_sub(ret_str, ret_comma + 1, str_len(ret_str) - ret_comma - 1)
+            else:
+                ret_type = ret_str
                 // trim whitespace
-                trim_rt : ., mut = "";
-                tri : ., mut = 0;
-                loop { if tri >= str_len(ret_type) { break; }
-                    tc := load8(ret_type, tri);
-                    if tc != 32 { trim_rt = trim_rt + get_char(ret_type, tri); }
-                    tri = tri + 1; }
-                ret_type = trim_rt;
-            }
-        } else {
-            params_str = rest;
-        }
+                trim_rt : ., mut = ""
+                tri : ., mut = 0
+                loop:
+                    if tri >= str_len(ret_type):
+                        break
+                    tc := load8(ret_type, tri)
+                    if tc != 32:
+                        trim_rt = trim_rt + get_char(ret_type, tri)
+                    tri = tri + 1
+                ret_type = trim_rt
+        else:
+            params_str = rest
 
         // Split params_str and tags_str by comma
         // Params are before the first recognized tag name
-        pi : ., mut = 0; pl := str_len(params_str);
-        loop {
-            if pi >= pl { break; }
+        pi : ., mut = 0
+        pl := str_len(params_str)
+        loop:
+            if pi >= pl:
+                break
             // Skip whitespace
-            while pi < pl && load8(params_str, pi) == 32 { pi = pi + 1; }
-            if pi >= pl { break; }
+            while pi < pl && load8(params_str, pi) == 32:
+                pi = pi + 1
+            if pi >= pl:
+                break
             // Find comma or end
-            item_end : ., mut = pi;
-            while item_end < pl && load8(params_str, item_end) != 44 { item_end = item_end + 1; }
-            item := str_sub(params_str, pi, item_end - pi);
+            item_end : ., mut = pi
+            while item_end < pl && load8(params_str, item_end) != 44:
+                item_end = item_end + 1
+            item := str_sub(params_str, pi, item_end - pi)
             // Trim whitespace
-            while str_len(item) > 0 && load8(item, 0) == 32 { item = str_sub(item, 1, str_len(item)-1); }
-            while str_len(item) > 0 && load8(item, str_len(item)-1) == 32 { item = str_sub(item, 0, str_len(item)-1); }
+            while str_len(item) > 0 && load8(item, 0) == 32:
+                item = str_sub(item, 1, str_len(item)-1)
+            while str_len(item) > 0 && load8(item, str_len(item)-1) == 32:
+                item = str_sub(item, 0, str_len(item)-1)
 
-            if str_len(item) > 0 {
-                if item == "variadic" { tag_flags = tag_flags + TAG_VARIADIC; }
-                else if item == "auto_str" { tag_flags = tag_flags + TAG_AUTO_STR; }
-                else {
+            if str_len(item) > 0:
+                if item == "variadic":
+                    tag_flags = tag_flags + TAG_VARIADIC
+                else if item == "auto_str":
+                    tag_flags = tag_flags + TAG_AUTO_STR
+                else:
                     // It's a param type name
-                    if str_len(param_types) > 0 { param_types = param_types + ","; }
-                    param_types = param_types + item;
-                }
-            }
-            pi = item_end + 1;
-        }
+                    if str_len(param_types) > 0:
+                        param_types = param_types + ","
+                    param_types = param_types + item
+            pi = item_end + 1
 
         // Same for tags_str
-        ti : ., mut = 0; tl := str_len(tags_str);
-        loop {
-            if ti >= tl { break; }
-            while ti < tl && load8(tags_str, ti) == 32 { ti = ti + 1; }
-            if ti >= tl { break; }
-            item_end2 : ., mut = ti;
-            while item_end2 < tl && load8(tags_str, item_end2) != 44 { item_end2 = item_end2 + 1; }
-            item2 := str_sub(tags_str, ti, item_end2 - ti);
-            while str_len(item2) > 0 && load8(item2, 0) == 32 { item2 = str_sub(item2, 1, str_len(item2)-1); }
-            while str_len(item2) > 0 && load8(item2, str_len(item2)-1) == 32 { item2 = str_sub(item2, 0, str_len(item2)-1); }
-            if item2 == "variadic" { tag_flags = tag_flags + TAG_VARIADIC; }
-            else if item2 == "auto_str" { tag_flags = tag_flags + TAG_AUTO_STR; }
-            ti = item_end2 + 1;
-        }
+        ti : ., mut = 0
+        tl := str_len(tags_str)
+        loop:
+            if ti >= tl:
+                break
+            while ti < tl && load8(tags_str, ti) == 32:
+                ti = ti + 1
+            if ti >= tl:
+                break
+            item_end2 : ., mut = ti
+            while item_end2 < tl && load8(tags_str, item_end2) != 44:
+                item_end2 = item_end2 + 1
+            item2 := str_sub(tags_str, ti, item_end2 - ti)
+            while str_len(item2) > 0 && load8(item2, 0) == 32:
+                item2 = str_sub(item2, 1, str_len(item2)-1)
+            while str_len(item2) > 0 && load8(item2, str_len(item2)-1) == 32:
+                item2 = str_sub(item2, 0, str_len(item2)-1)
+            if item2 == "variadic":
+                tag_flags = tag_flags + TAG_VARIADIC
+            else if item2 == "auto_str":
+                tag_flags = tag_flags + TAG_AUTO_STR
+            ti = item_end2 + 1
 
         // Build type encoding for sym_node: param_count + param_types (3 bits each) + ret_type (3 bits)
-        param_count : ., mut = 0;
-        param_type_bits : ., mut = 0;
-        pti : ., mut = 0;
-        loop {
-            if pti >= str_len(param_types) { break; }
+        param_count : ., mut = 0
+        param_type_bits : ., mut = 0
+        pti : ., mut = 0
+        loop:
+            if pti >= str_len(param_types):
+                break
             // Skip to next param (comma-separated)
-            pn_start : ., mut = pti;
-            while pti < str_len(param_types) && load8(param_types, pti) != 44 { pti = pti + 1; }
-            pname := str_sub(param_types, pn_start, pti - pn_start);
-            while str_len(pname) > 0 && load8(pname, 0) == 32 { pname = str_sub(pname, 1, str_len(pname)-1); }
-            while str_len(pname) > 0 && load8(pname, str_len(pname)-1) == 32 { pname = str_sub(pname, 0, str_len(pname)-1); }
-            if str_len(pname) > 0 && param_count < 8 {
+            pn_start : ., mut = pti
+            while pti < str_len(param_types) && load8(param_types, pti) != 44:
+                pti = pti + 1
+            pname := str_sub(param_types, pn_start, pti - pn_start)
+            while str_len(pname) > 0 && load8(pname, 0) == 32:
+                pname = str_sub(pname, 1, str_len(pname)-1)
+            while str_len(pname) > 0 && load8(pname, str_len(pname)-1) == 32:
+                pname = str_sub(pname, 0, str_len(pname)-1)
+            if str_len(pname) > 0 && param_count < 8:
                 // Encode type: int=0, string=1, unit=2, dex=3（binary64 跨 C 边界 = apx 授权）, bool=4, other=5
-                ptype_code : ., mut = 5;
-                if pname == "int" { ptype_code = 0; }
-                else if pname == "string" { ptype_code = 1; }
-                else if pname == "unit" { ptype_code = 2; }
-                else if pname == "dex" { ptype_code = 3; }
-                else if pname == "bool" { ptype_code = 4; }
+                ptype_code : ., mut = 5
+                if pname == "int":
+                    ptype_code = 0
+                else if pname == "string":
+                    ptype_code = 1
+                else if pname == "unit":
+                    ptype_code = 2
+                else if pname == "dex":
+                    ptype_code = 3
+                else if pname == "bool":
+                    ptype_code = 4
                 // Decimal encoding: packed positionally
-                param_type_bits = param_type_bits * 100 + ptype_code;
-                param_count = param_count + 1;
-            }
-            if pti < str_len(param_types) && load8(param_types, pti) == 44 { pti = pti + 1; }
-        }
+                param_type_bits = param_type_bits * 100 + ptype_code
+                param_count = param_count + 1
+            if pti < str_len(param_types) && load8(param_types, pti) == 44:
+                pti = pti + 1
 
         // Encode return type
-        ret_code : ., mut = 5;
-        if ret_type == "int" { ret_code = 0; }
-        else if ret_type == "string" { ret_code = 1; }
-        else if ret_type == "unit" || str_eq(ret_type, "") != 0 { ret_code = 2; }
-        else if ret_type == "dex" { ret_code = 3; }
-        else if ret_type == "bool" { ret_code = 4; }
-        type_encoding : ., mut = param_count * 1000000000000 + param_type_bits * 100 + ret_code;
+        ret_code : ., mut = 5
+        if ret_type == "int":
+            ret_code = 0
+        else if ret_type == "string":
+            ret_code = 1
+        else if ret_type == "unit" || str_eq(ret_type, "") != 0:
+            ret_code = 2
+        else if ret_type == "dex":
+            ret_code = 3
+        else if ret_type == "bool":
+            ret_code = 4
+        type_encoding : ., mut = param_count * 1000000000000 + param_type_bits * 100 + ret_code
 
-        // Register in symbol table
-        fni := str_intern(func_name);
-        // Manually set symbol entry
-        si := g_sym_count;
-        grow_syms(si + 1);
-        sym_set_name(si, fni);
-        sym_set_kind(si, SYM_SO_FN);
-        sym_set_type(si, tag_flags);
-        sym_set_node(si, type_encoding);
-        g_sym_count = si + 1;
-    }
-}
+        // Record the function in the side table. Do not add it to the string or
+        // symbol table yet: import resolution runs before the checker knows
+        // whether the program references the name. Interning it now would add host
+        // home-directory metadata to output even for an unused function and shift
+        // later string and symbol indexes.
+        // Referenced names are materialized by so_materialize on first lookup, so
+        // names that exist only in the index still work. The side table grows
+        // dynamically, so no fixed 128-entry buffer is needed.
+        ssi : ., mut = g_so_side_count
+        grow_so_side(ssi + 1)
+        store_str_ptr(g_so_side_name, ssi * 8, func_name)
+        w64(g_so_side_tags, ssi * 8, tag_flags)
+        w64(g_so_side_type, ssi * 8, type_encoding)
+        g_so_side_count = ssi + 1
 
-fn res_imports() {
-    g_file_count = 0; g_file_cap = 0;
-    g_mod_count = 0; g_mod_cap = 0;
-    g_seg_count = 0; g_seg_cap = 0;
+// Look up a side-table entry by name and return its index, or -1. Names are
+// stored before interning, so compare strings. This runs only when the main
+// symbol table misses.
+fn find_so_side(name_idx: int) -> int:
+    i : ., mut = 0
+    loop:
+        if i >= g_so_side_count:
+            return -1
+        if str_eq(istr_get(name_idx), load_str_ptr(g_so_side_name, i * 8)) != 0:
+            return i
+        i = i + 1
+    return -1
 
-    // Step 1: collect _import.cr from source directory and ancestors
-    import_core_acc : ., mut = "";
+// Materialize a side-table entry into the symbol table on first lookup and return
+// the new symbol index. Call only when the main table has no entry for the name;
+// otherwise an index file in the user's home directory could override a
+// declaration in user source.
+fn so_materialize(side_i: int) -> int:
+    fni := str_intern(load_str_ptr(g_so_side_name, side_i * 8))
+    si := g_sym_count
+    grow_syms(si + 1)
+    sym_set_name(si, fni)
+    sym_set_kind(si, SYM_SO_FN)
+    sym_set_type(si, r64(g_so_side_tags, side_i * 8))
+    sym_set_node(si, r64(g_so_side_type, side_i * 8))
+    g_sym_count = si + 1
+    return si
+
+fn res_imports():
+    g_file_count = 0
+    g_file_cap = 0
+    g_mod_count = 0
+    g_mod_cap = 0
+    g_seg_count = 0
+    g_seg_cap = 0
+
+    // First, collect _import.cr from the source directory and ancestors.
+    import_core_acc : ., mut = ""
     // Also collect stdlib _import.cr (provides import fmt for stdlib files)
-    sic := load_imports("src/stdlib/");
-    if str_len(sic) > 0 { import_core_acc = sic + "\n"; }
-    search_dir : ., mut = g_source_dir;
-    loop {
-        ic := load_imports(search_dir);
-        if str_len(ic) > 0 {
-            import_core_acc = ic + "\n" + import_core_acc;
-        }
-        pd := parent_dir(search_dir);
-        if str_len(pd) == 0 { break; }
-        if str_eq(pd, search_dir) != 0 { break; }
-        search_dir = pd;
-    }
+    sic := load_imports("src/stdlib/")
+    if str_len(sic) > 0:
+        import_core_acc = sic + "\n"
+    search_dir : ., mut = g_source_dir
+    loop:
+        ic := load_imports(search_dir)
+        if str_len(ic) > 0:
+            import_core_acc = ic + "\n" + import_core_acc
+        pd := parent_dir(search_dir)
+        if str_len(pd) == 0:
+            break
+        if str_eq(pd, search_dir) != 0:
+            break
+        search_dir = pd
     // Record original source length before prepending _import.cr preamble.
     // Used later for segment tracking when we strip the preamble.
-    real_main_len : ., mut = str_len(g_source);
+    real_main_len : ., mut = str_len(g_source)
 
-    if str_len(import_core_acc) > 0 {
-        g_source = import_core_acc + "\n" + g_source;
-        tokenize(g_source);
-    }
+    if str_len(import_core_acc) > 0:
+        g_source = import_core_acc + "\n" + g_source
+        tokenize(g_source, 0)
 
     // Determine main file's fileid
-    main_fileid_str : ., mut = get_fileid(g_source);
-    if str_len(main_fileid_str) == 0 { main_fileid_str = "main"; }
-    main_fni := reg_fileid(main_fileid_str, "");
-    main_len : ., mut = real_main_len;  // original source length (without preamble)
+    main_fileid_str : ., mut = get_fileid(g_source)
+    if str_len(main_fileid_str) == 0:
+        main_fileid_str = "main"
+    main_fni := reg_fileid(main_fileid_str, "")
+    main_len : ., mut = real_main_len  // original source length (without preamble)
 
     // First segment: main source
-    grow_segs(g_seg_count + 1); w64(g_seg_starts, g_seg_count * 8, 0);
-    w64(g_seg_fileids, g_seg_count * 8, main_fni);
-    g_seg_count = g_seg_count + 1;
+    grow_segs(g_seg_count + 1)
+    w64(g_seg_starts, g_seg_count * 8, 0)
+    w64(g_seg_fileids, g_seg_count * 8, main_fni)
+    g_seg_count = g_seg_count + 1
 
-    total_accumulated : ., mut = 0;
+    total_accumulated : ., mut = 0
 
     // Multi-pass import resolution: keep scanning until no new imports found.
     // This enables imports from within imported files (recursive imports).
-    loop {
-        pass_src : ., mut = "";
-        pass_bytes : ., mut = 0;
-        any_new : ., mut = 0;
+    loop:
+        pass_src : ., mut = ""
+        pass_bytes : ., mut = 0
+        any_new : ., mut = 0
 
-        i : ., mut = 0;
-        loop {
-            if i >= g_token_count { break; }
-            tk := r64(g_tokens, i * ESZ_TOKEN + OFF_TK_KIND);
+        i : ., mut = 0
+        loop:
+            if i >= g_token_count:
+                break
+            tk := r64(g_tokens, i * ESZ_TOKEN + OFF_TK_KIND)
 
-            if tk == T_IMPORT {
-                pos : ., mut = i + 1;
-                is_project : ., mut = false;
-                project_name : ., mut = "";
-                if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_AT {
-                    is_project = true;
-                    pos = pos + 1;
-                    if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT {
-                        project_name = istr_get(r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME));
-                        pos = pos + 1;
-                    }
-                }
-                import_fileid : ., mut = "";
-                if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT {
-                    import_fileid = istr_get(r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME));
-                    pos = pos + 1;
+            if tk == T_IMPORT:
+                pos : ., mut = i + 1
+                is_project : ., mut = false
+                project_name : ., mut = ""
+                if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_AT:
+                    is_project = true
+                    pos = pos + 1
+                    if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT:
+                        project_name = istr_get(r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME))
+                        pos = pos + 1
+                import_fileid : ., mut = ""
+                if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT:
+                    import_fileid = istr_get(r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME))
+                    pos = pos + 1
                     // Handle :: segments: backend::x86_64 -> backend::x86_64
-                    loop {
-                        if pos + 1 < g_token_count &&
-                           r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_PATHSEP &&
-                           r64(g_tokens, (pos + 1) * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT {
-                            import_fileid = import_fileid + "::" + istr_get(r64(g_tokens, (pos + 1) * ESZ_TOKEN + OFF_TK_LEXEME));
-                            pos = pos + 2;
-                        } else { break; }
-                    }
-                }
-                alias_str : ., mut = "";
-                if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_COLON {
-                    pos = pos + 1;
-                    if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT {
-                        alias_str = istr_get(r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME));
-                        pos = pos + 1;
-                    }
-                }
-                path : ., mut = "";
-                content : ., mut = "";
+                    loop:
+                        if pos + 1 < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_PATHSEP && r64(g_tokens, (pos + 1) * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT:
+                            import_fileid = import_fileid + "::" + istr_get(r64(g_tokens, (pos + 1) * ESZ_TOKEN + OFF_TK_LEXEME))
+                            pos = pos + 2
+                        else:
+                            break
+                alias_str : ., mut = ""
+                if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_COLON_DECL:
+                    pos = pos + 1
+                    if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT:
+                        alias_str = istr_get(r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME))
+                        pos = pos + 1
+                path : ., mut = ""
+                content : ., mut = ""
                 // Skip import if it references the same file as the main source
                 // (prevents duplicate definitions when _import.cr imports the entry file)
-                if str_len(import_fileid) > 0 && str_eq(import_fileid, main_fileid_str) != 0 {
-                    i = pos;
-                    continue;
-                }
-                if str_len(import_fileid) > 0 {
-                    if is_project {
-                        proj_toml : ., mut = "src/" + project_name + "/Core.toml";
-                        ptc := read_file(proj_toml);
-                        if str_len(ptc) > 0 {
-                            pn := extract_toml_name(ptc);
-                            if str_len(pn) > 0 && str_eq(pn, project_name) == 0 {
-                                if g_silent_stdout == 0 {
-                                    print("  warning: @");
-                                    print(project_name);
-                                    print(" toml name='");
-                                    print(pn);
-                                    println("' mismatch");
-                                }
-                            }
-                        }
-                        path = "src/" + project_name + "/" + import_fileid + ".cr";
-                        content = module_get_source(path);
-                    } else {
+                if str_len(import_fileid) > 0 && str_eq(import_fileid, main_fileid_str) != 0:
+                    i = pos
+                    continue
+                if str_len(import_fileid) > 0:
+                    if is_project:
+                        proj_toml : ., mut = "src/" + project_name + "/Core.toml"
+                        ptc := read_file(proj_toml)
+                        if str_len(ptc) > 0:
+                            pn := extract_toml_name(ptc)
+                            if str_len(pn) > 0 && str_eq(pn, project_name) == 0:
+                                if g_silent_stdout == 0:
+                                    print("  warning: @")
+                                    print(project_name)
+                                    print(" toml name='")
+                                    print(pn)
+                                    println("' mismatch")
+                        path = "src/" + project_name + "/" + import_fileid + ".cr"
+                        content = module_get_source(path)
+                    else:
                         // Convert :: to / for subdirectory paths (e.g. backend::x86_64::instr -> backend/x86_64/instr)
-                        fs_path : ., mut = import_fileid;
-                        pi : ., mut = 0;
-                        loop {
-                            if pi >= str_len(fs_path) { break; }
-                            if load8(fs_path, pi) == 58 && pi + 1 < str_len(fs_path) && load8(fs_path, pi+1) == 58 {
-                                fs_path = str_sub(fs_path, 0, pi) + "/" + str_sub(fs_path, pi+2, str_len(fs_path)-pi-2);
-                            }
-                            pi = pi + 1;
-                        }
+                        fs_path : ., mut = import_fileid
+                        pi : ., mut = 0
+                        loop:
+                            if pi >= str_len(fs_path):
+                                break
+                            if load8(fs_path, pi) == 58 && pi + 1 < str_len(fs_path) && load8(fs_path, pi+1) == 58:
+                                fs_path = str_sub(fs_path, 0, pi) + "/" + str_sub(fs_path, pi+2, str_len(fs_path)-pi-2)
+                            pi = pi + 1
                         // Try .so extension index: $HOME/.core/lib/<name>/index
                         // Loads metadata (tags). The .cr file still provides runtime implementation.
-                        home_dir : ., mut = get_env("HOME");
-                        if str_len(home_dir) == 0 { home_dir = "/home/DslsDZC"; }
-                        so_idx_path : ., mut = home_dir + "/.core/lib/" + fs_path + "/index";
-                        so_idx := read_file(so_idx_path);
-                        if str_len(so_idx) > 0 {
-                            reg_so_funcs(so_idx, fs_path);
-                        }
+                        // Do not fall back to a hard-coded developer home directory.
+                        // Reading another user's ~/.core/lib would change output based
+                        // on host state. When HOME is unset or the index is absent,
+                        // skip registration; a later lookup of an index-only name
+                        // still fails with Undefined/N06.
+                        // Use a nested if instead of `home_dir != "" && ...` because
+                        // the bootstrap-built corec evaluates both sides of &&.
+                        home_dir : ., mut = get_env("HOME")
+                        if str_len(home_dir) > 0:
+                            so_idx_path : ., mut = home_dir + "/.core/lib/" + fs_path + "/index"
+                            so_idx := read_file(so_idx_path)
+                            if str_len(so_idx) > 0:
+                                reg_so_funcs(so_idx, fs_path)
                         // Always load .cr for runtime implementation
                         // （module_get_source：打开文档优先，未打开读盘）
-                        path = g_source_dir + fs_path + ".cr";
-                        content = module_get_source(path);
-                        if str_len(content) == 0 {
-                            path = "src/stdlib/" + fs_path + ".cr";
-                            content = module_get_source(path);
-                        }
-                        if str_len(content) == 0 {
-                            path = "src/runtime/" + fs_path + ".cr";
-                            content = module_get_source(path);
-                        }
-                        if str_len(content) == 0 {
-                            path = "src/compiler/" + fs_path + ".cr";
-                            content = module_get_source(path);
-                        }
-                        if str_len(content) == 0 {
-                            path = fs_path + ".cr";
-                            content = module_get_source(path);
-                        }
-                        if str_len(content) == 0 {
-                            if g_silent_stdout == 0 { print("!! import fail: "); println(import_fileid); }
-                        }
-                    }
-                }
-                if str_len(content) > 0 {
-                    content_len := str_len(content);
-                    loaded_fid : ., mut = get_fileid(content);
-                    if str_len(loaded_fid) == 0 { loaded_fid = import_fileid; }
-                    loaded_fni := reg_fileid(loaded_fid, path);
+                        path = g_source_dir + fs_path + ".cr"
+                        content = module_get_source(path)
+                        if str_len(content) == 0:
+                            path = "src/stdlib/" + fs_path + ".cr"
+                            content = module_get_source(path)
+                        if str_len(content) == 0:
+                            path = "src/runtime/" + fs_path + ".cr"
+                            content = module_get_source(path)
+                        // Architecture, format, and OS directories. These are the only
+                        // path for cross-axis imports. They come before src/compiler so
+                        // an instance-specific file wins over the generic file. The
+                        // existing names do not overlap: these directories contain
+                        // instr, sizes, regalloc, elf, resolve, and ld, none of which
+                        // exist in the earlier search directories.
+                        if str_len(content) == 0:
+                            path = "src/format/elf/" + fs_path + ".cr"
+                            content = module_get_source(path)
+                        if str_len(content) == 0:
+                            path = "src/arch/x86_64/" + fs_path + ".cr"
+                            content = module_get_source(path)
+                        if str_len(content) == 0:
+                            path = "src/os/linux/" + fs_path + ".cr"
+                            content = module_get_source(path)
+                        if str_len(content) == 0:
+                            path = "src/compiler/" + fs_path + ".cr"
+                            content = module_get_source(path)
+                        if str_len(content) == 0:
+                            path = "src/arch/hit/" + fs_path + ".cr"
+                            content = module_get_source(path)
+                        // ent_kernel.cr is the semantic kernel under src/lattice. It was
+                        // moved out of the old instance directory when the x86
+                        // instance was split into the architecture, format, and OS
+                        // axes. Both corec and corearch import it: the corec writer
+                        // calls compute_live_ranges and grow_entries, and backend
+                        // units reach it through this path.
+                        if str_len(content) == 0:
+                            path = "src/lattice/" + fs_path + ".cr"
+                            content = module_get_source(path)
+                        // Combination root named by the target triple. Project mode
+                        // reads main.cr and _import.cr directly from this directory.
+                        // It comes after compiler and lattice because main.cr here is
+                        // not an import target and must not shadow the existing main
+                        // or entry imports.
+                        if str_len(content) == 0:
+                            path = "src/targets/x86_64-linux/" + fs_path + ".cr"
+                            content = module_get_source(path)
+                        if str_len(content) == 0:
+                            path = fs_path + ".cr"
+                            content = module_get_source(path)
+                        if str_len(content) == 0:
+                            if g_silent_stdout == 0:
+                                print("!! import fail: ")
+                                println(import_fileid)
+                if str_len(content) > 0:
+                    content_len := str_len(content)
+                    loaded_fid : ., mut = get_fileid(content)
+                    if str_len(loaded_fid) == 0:
+                        loaded_fid = import_fileid
+                    loaded_fni := reg_fileid(loaded_fid, path)
                     // Check if this file was already loaded (prevent duplicates)
-                    already_loaded : ., mut = 0;
-                    mi : ., mut = 0;
-                    loop { if mi >= g_mod_count { break; }
-                        if r64(g_mods, mi * 24 + 8) == loaded_fni { already_loaded = 1; break; }
-                    mi = mi + 1; }
-                    if already_loaded != 0 {
-                        i = pos;
-                        continue;
-                    }
-                    if g_silent_stdout == 0 { print("  -> "); println(path); }
-                    any_new = 1;
-                    seg_byte := main_len + total_accumulated + pass_bytes + 1;
-                    grow_segs(g_seg_count + 1); w64(g_seg_starts, g_seg_count * 8, seg_byte);
-                    w64(g_seg_fileids, g_seg_count * 8, loaded_fni);
-                    g_seg_count = g_seg_count + 1;
-                    pass_bytes = pass_bytes + 1 + content_len;
-                    alias_ni : ., mut = -1;
-                    if str_len(alias_str) > 0 {
-                        alias_ni = str_intern(alias_str);
-                    } else {
-                        alias_ni = loaded_fni;
-                    }
-                    grow_mods(g_mod_count + 1);
-                    w64(g_mods, g_mod_count * 24, alias_ni);
-                    w64(g_mods, g_mod_count * 24 + 8, loaded_fni);
-                    store_str_ptr(g_mods, g_mod_count * 24 + 16, path);
-                    g_mod_count = g_mod_count + 1;
-                    pass_src = pass_src + "\n" + content;
-                }
-                i = pos;
-                continue;
-            }
-            i = i + 1;
-        }
+                    already_loaded : ., mut = 0
+                    mi : ., mut = 0
+                    loop:
+                        if mi >= g_mod_count:
+                            break
+                        if r64(g_mods, mi * 24 + 8) == loaded_fni:
+                            already_loaded = 1
+                            break
+                        mi = mi + 1
+                    if already_loaded != 0:
+                        i = pos
+                        continue
+                    if g_silent_stdout == 0:
+                        print("  -> ")
+                        println(path)
+                    any_new = 1
+                    seg_byte := main_len + total_accumulated + pass_bytes + 1
+                    grow_segs(g_seg_count + 1)
+                    w64(g_seg_starts, g_seg_count * 8, seg_byte)
+                    w64(g_seg_fileids, g_seg_count * 8, loaded_fni)
+                    g_seg_count = g_seg_count + 1
+                    pass_bytes = pass_bytes + 1 + content_len
+                    alias_ni : ., mut = -1
+                    if str_len(alias_str) > 0:
+                        alias_ni = str_intern(alias_str)
+                    else:
+                        alias_ni = loaded_fni
+                    grow_mods(g_mod_count + 1)
+                    w64(g_mods, g_mod_count * 24, alias_ni)
+                    w64(g_mods, g_mod_count * 24 + 8, loaded_fni)
+                    store_str_ptr(g_mods, g_mod_count * 24 + 16, path)
+                    g_mod_count = g_mod_count + 1
+                    pass_src = pass_src + "\n" + content
+                i = pos
+                continue
+            i = i + 1
 
-        if any_new == 0 { break; }
+        if any_new == 0:
+            break
 
-        if str_len(pass_src) > 0 {
-            g_source = g_source + pass_src;
-            tokenize(g_source);
-            total_accumulated = total_accumulated + pass_bytes;
-        }
-    }
+        if str_len(pass_src) > 0:
+            g_source = g_source + pass_src
+            tokenize(g_source, 0)
+            total_accumulated = total_accumulated + pass_bytes
 
     // Strip _import.cr preamble to prevent re-parsing import tokens as code.
     // Import resolution already completed above; leaving the preamble in
     // g_source causes the checker to emit spurious errors and may crash IR gen.
-    if str_len(import_core_acc) > 0 {
-        skip := str_len(import_core_acc) + 1;  // +1 for the "\n" separator
-        g_source = str_sub(g_source, skip, str_len(g_source) - skip);
-        tokenize(g_source);
-    }
+    if str_len(import_core_acc) > 0:
+        skip := str_len(import_core_acc) + 1  // +1 for the "\n" separator
+        g_source = str_sub(g_source, skip, str_len(g_source) - skip)
+        tokenize(g_source, 0)
 
-    build_line_fileid();
-}
+    build_line_fileid()

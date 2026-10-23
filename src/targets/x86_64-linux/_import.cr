@@ -1,0 +1,45 @@
+// Imports for the corearch backend project.
+import cli
+import backend_flags
+import fmt
+import io
+import toml
+import ast
+import globals
+import dyn_arr
+import hit
+// HIT lowering layer. instr.cr's table encoder consumes the event stream and pool
+// patch records defined here.
+import lower_to_core
+// Monomorphization belongs to the frontend IR generation pass and is deliberately
+// absent here. It depends on checker and parser symbols that this backend project
+// does not include.
+// The type-term layer must precede ccr_io: the load path rebuilds the type-term
+// table and reads ESZ_TYPE_TERM, OFF_TT_*, and TT_* constants. type_engine follows
+// type_terms and precedes ccr_io so the type judgment primitives are available.
+import type_terms
+import type_engine
+import ccr_io
+import ent_kernel
+// The backend rebuilds the linear schedule after loading through
+// build_linear_schedule in regalloc.cr.
+import regalloc
+import sizes
+import instr
+// Architecture tag-table owner: mw_setup_tags and the mw encoders used by elf.cr.
+// tag2l and frame.cr reference each other; pf_epilogue calls e2_mw_*, and tag2l
+// reads the table through g2_tag_off.
+import tag2l
+// Function frame layout: pf_frame_size, pf_prologue, pf_epilogue, and g2_tag_off.
+import frame
+import resolve
+import elf
+import ld
+// Linux entry sequence: emit_start and emit_start_size.
+import entry
+// SysV AMD64 call sequences: cs_args_dispatch, cs_stack_args, cs_stack_cleanup,
+// cs_ret_value, and cs_call_direct.
+import callseq
+// Linux syscall emission: sys_syscall3_stub uses rax for the number and rdi, rsi,
+// and rdx for arguments. sys_syscall4_stub passes the fourth argument in r10.
+import syscall

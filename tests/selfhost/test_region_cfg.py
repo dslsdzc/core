@@ -63,32 +63,32 @@ def assert_region_within_func(out: str, name: str, tail: bool = True):
     return a, b, fs, fe
 
 def test_if_region():
-    out = cir_dump("fn f(x: int) -> int {\n    if x > 0 { return 1; }\n    return 0;\n}\nfn main() -> int { return f(1); }\n")
+    out = cir_dump("fn f(x: int) -> int:\n    if x > 0:\n        return 1\n    return 0\nfn main() -> int:\n    return f(1)\n")
     assert 'Region: if' in out, f"SG_IF region missing in cir dump:\n{out}"
     assert 'Region: func' in out, f"SG_FUNC region not labeled in cir dump:\n{out}"
     assert_region_within_func(out, 'if')
 
 def test_loop_region():
-    out = cir_dump("fn main() -> int {\n    s : ., mut = 0;\n    for i in 0..3 { s = s + i; }\n    return s;\n}\n")
+    out = cir_dump("fn main() -> int:\n    s : ., mut = 0\n    for i in 0..3:\n        s = s + i\n    return s\n")
     assert 'Region: for' in out, f"SG_FOR region missing in cir dump:\n{out}"
     assert 'Region: func' in out, f"SG_FUNC region not labeled in cir dump:\n{out}"
     assert_region_within_func(out, 'for')
 
 def test_node_region_mapping():
-    out = cir_dump("fn main() -> int {\n    s : ., mut = 0;\n    for i in 0..3 { s = s + i; }\n    return s;\n}\n")
+    out = cir_dump("fn main() -> int:\n    s : ., mut = 0\n    for i in 0..3:\n        s = s + i\n    return s\n")
     # DOT cluster grouping: the for region's nodes appear in one cluster
     assert 'cluster_for' in out, f"DOT region cluster missing:\n{out}"
 
 def test_state_edges():
     """State edges (VSDG): side-effect chain + loop termination dependencies
     must appear in the cir dump as 'state: nA -> nB' lines."""
-    out = cir_dump("fn main() -> int {\n    s : ., mut = 0;\n    s = s + 1;\n    s = s + 2;\n    return s;\n}\n")
+    out = cir_dump("fn main() -> int:\n    s : ., mut = 0\n    s = s + 1\n    s = s + 2\n    return s\n")
     assert re.search(r'state: n\d+ -> n\d+', out), f"state edges not shown in cir dump:\n{out}"
 
 def test_loop_termination_edge():
     """A loop whose body has side effects must carry a termination dependency
     from the last side-effect node to the loop exit node."""
-    out = cir_dump("fn main() -> int {\n    s : ., mut = 0;\n    for i in 0..3 { s = s + i; }\n    return s;\n}\n")
+    out = cir_dump("fn main() -> int:\n    s : ., mut = 0\n    for i in 0..3:\n        s = s + i\n    return s\n")
     assert re.search(r'state: n\d+ -> n\d+', out), f"loop termination state edge missing in cir dump:\n{out}"
 
 def _state_edges(out: str):
@@ -100,13 +100,7 @@ def test_termination_edge_source_guard():
     SG_LOOP 循环体纯（无副作用）时，g_last_state_node 是循环前的 STORE——
     源在 region 外，不得连终止边；且链头必须推进到 region exit 节点，
     使循环后的 STORE 依赖循环终止（规格 §4.2：循环不终止则图不终止）。"""
-    out = cir_dump("fn main() -> int {\n"
-                   "    s : ., mut = 0;\n"
-                   "    s = s + 1;\n"
-                   "    loop { break; }\n"
-                   "    s = s + 2;\n"
-                   "    return s;\n"
-                   "}\n")
+    out = cir_dump("fn main() -> int:\n    s : ., mut = 0\n    s = s + 1\n    loop:\n        break\n    s = s + 2\n    return s\n")
     regs = parse_regions(out)
     assert 'loop' in regs, f"loop region missing in cir dump:\n{out}"
     a, b = regs['loop'][0]
@@ -127,12 +121,7 @@ def test_termination_edge_source_guard():
 def test_termination_edge_source_in_region():
     """终止边源边界（正例）：循环体有副作用时，终止边源必须在 region 内
     （last side-effect node ∈ [NSTART, EXIT)），不能是 region 外的旧副作用。"""
-    out = cir_dump("fn main() -> int {\n"
-                   "    s : ., mut = 0;\n"
-                   "    s = s + 1;\n"
-                   "    for i in 0..3 { s = s + i; }\n"
-                   "    return s;\n"
-                   "}\n")
+    out = cir_dump("fn main() -> int:\n    s : ., mut = 0\n    s = s + 1\n    for i in 0..3:\n        s = s + i\n    return s\n")
     regs = parse_regions(out)
     assert 'for' in regs, f"for region missing in cir dump:\n{out}"
     a, b = regs['for'][0]
@@ -146,12 +135,7 @@ def test_termination_edge_source_in_region():
 
 def test_while_region_and_termination_edge():
     """while 也必须有 SG_LOOP 区域，并把循环退出接入 state 链。"""
-    out = cir_dump("fn main() -> int {\n"
-                   "    n : ., mut = 0;\n"
-                   "    while n < 5 { n = n + 1; }\n"
-                   "    n = n + 1;\n"
-                   "    return n;\n"
-                   "}\n")
+    out = cir_dump("fn main() -> int:\n    n : ., mut = 0\n    while n < 5:\n        n = n + 1\n    n = n + 1\n    return n\n")
     main_match = re.search(r'Function: main\n(.*?)(?=\nFunction: |\Z)', out, re.S)
     assert main_match, f"main function missing in cir dump:\n{out}"
     main_out = main_match.group(1)
@@ -168,28 +152,26 @@ def test_while_region_and_termination_edge():
     assert any(f == exit_node for f, _ in states), \
         f"post-while side effect does not depend on loop exit node {exit_node}:\n{out}"
 
-# --- Interpreter loop execution (TODO#3) ---
+# --- Interpreter loop execution (TODO #2026-07-25-1) ---
 # `corec run` compiles and interprets inline code; main()'s return value
 # becomes the process exit code.
 
 def test_for_loop_run():
-    """for 循环在解释器中正确执行并返回累加和（TODO#3 回归用例）"""
+    """for 循环在解释器中正确执行并返回累加和（TODO #2026-07-25-1 回归用例）"""
     r = subprocess.run(['./build/corec', 'run',
-                        'fn main() -> int { s : ., mut = 0; for i in 0..4 { s = s + i; } return s; }'],
+                        'fn main() -> int:\n    s : ., mut = 0\n    for i in 0..4:\n        s = s + i\n    return s\n'],
                        capture_output=True, text=True, cwd=BASE, timeout=30)
     assert r.returncode == 6, f"for loop expected 6, got exit={r.returncode} stdout={r.stdout!r} stderr={r.stderr!r}"
 
 def test_while_loop_run():
     r = subprocess.run(['./build/corec', 'run',
-                        'fn main() -> int { n : ., mut = 0; while n < 5 { n = n + 1; } return n; }'],
+                        'fn main() -> int:\n    n : ., mut = 0\n    while n < 5:\n        n = n + 1\n    return n\n'],
                        capture_output=True, text=True, cwd=BASE, timeout=30)
     assert r.returncode == 5, f"while loop expected 5, got exit={r.returncode} stdout={r.stdout!r} stderr={r.stderr!r}"
 
 def test_while_break_continue_run():
     r = subprocess.run(['./build/corec', 'run',
-                        'fn main() -> int { n : ., mut = 0; s : ., mut = 0; '
-                        'while n < 10 { n = n + 1; if n < 3 { continue; } '
-                        'if n == 6 { break; } s = s + n; } return s; }'],
+                        'fn main() -> int:\n    n : ., mut = 0\n    s : ., mut = 0\n    while n < 10:\n        n = n + 1\n        if n < 3:\n            continue\n        if n == 6:\n            break\n        s = s + n\n    return s\n'],
                        capture_output=True, text=True, cwd=BASE, timeout=30)
     assert r.returncode == 12, \
         f"while break/continue expected 12, got exit={r.returncode} stdout={r.stdout!r} stderr={r.stderr!r}"
@@ -197,25 +179,21 @@ def test_while_break_continue_run():
 def test_inline_callee_while_run():
     """内联 callee 的 while 必须更新局部状态并正常返回。"""
     r = subprocess.run(['./build/corec', 'run',
-                        'fn sum(n: int) -> int { s : ., mut = 0; '
-                        'while n > 0 { s = s + n; n = n - 1; } return s; } '
-                        'fn main() -> int { return sum(3); }'],
+                        'fn sum(n: int) -> int:\n    s : ., mut = 0\n    while n > 0:\n        s = s + n\n        n = n - 1\n    return s\nfn main() -> int:\n    return sum(3)\n'],
                        capture_output=True, text=True, cwd=BASE, timeout=10)
     assert r.returncode == 6, \
         f"inline callee while expected 6, got exit={r.returncode} stdout={r.stdout!r} stderr={r.stderr!r}"
 
 def test_inline_callee_for_run():
     r = subprocess.run(['./build/corec', 'run',
-                        'fn sum() -> int { s : ., mut = 0; '
-                        'for i in 0..4 { s = s + i; } return s; } '
-                        'fn main() -> int { return sum(); }'],
+                        'fn sum() -> int:\n    s : ., mut = 0\n    for i in 0..4:\n        s = s + i\n    return s\nfn main() -> int:\n    return sum()\n'],
                        capture_output=True, text=True, cwd=BASE, timeout=10)
     assert r.returncode == 6, \
         f"inline callee for expected 6, got exit={r.returncode} stdout={r.stdout!r} stderr={r.stderr!r}"
 
 def test_break_continue_run():
     r = subprocess.run(['./build/corec', 'run',
-                        'fn main() -> int { s : ., mut = 0; for i in 0..10 { if i == 2 { continue; } if i == 6 { break; } s = s + i; } return s; }'],
+                        'fn main() -> int:\n    s : ., mut = 0\n    for i in 0..10:\n        if i == 2:\n            continue\n        if i == 6:\n            break\n        s = s + i\n    return s\n'],
                        capture_output=True, text=True, cwd=BASE, timeout=30)
     assert r.returncode == 13, f"break/continue expected 13 (0+1+3+4+5), got exit={r.returncode} stdout={r.stdout!r} stderr={r.stderr!r}"
 
@@ -223,15 +201,21 @@ def test_nested_loop_run():
     """嵌套 for 循环：覆盖 innermost region 选择分支（e2 > cur_enter 路径）——
     内层回跳必须命中内层 region enter，外层回跳必须命中外层 region enter。"""
     r = subprocess.run(['./build/corec', 'run',
-                        'fn main() -> int { s : ., mut = 0; for i in 0..3 { for j in 0..3 { s = s + 1; } } return s; }'],
+                        'fn main() -> int:\n    s : ., mut = 0\n    for i in 0..3:\n        for j in 0..3:\n            s = s + 1\n    return s\n'],
                        capture_output=True, text=True, cwd=BASE, timeout=30)
     assert r.returncode == 9, f"nested loop expected 9 (3x3), got exit={r.returncode} stdout={r.stdout!r} stderr={r.stderr!r}"
 
-# --- Serialization v2 (.ccr SG section + edge kind) ---
+# --- v7 serialization (.ccr segment-table layout + REG segment; Task 1 机械更新) ---
 
 def ccr_walk(path: str):
-    """Walk the .ccr binary layout (mirrors load_ccr reading order) and return
-    (version, sg_count, file_size, end_pos). Raises if the layout is invalid."""
+    """Walk the v7 .ccr binary layout (mirrors load_ccr reading order) and return
+    (version, sg_count, file_size, end_pos). Raises if the layout is invalid.
+
+    v7 (Task 1 机械更新): Header 16B + 段表 6×12B {tag, offset, size}（规范序
+    tag 1..6）+ 段体 STR/SYM/NOD/ENT/REG/EDG。NOD（tag 3）= 40B×nod_count（32B
+    语义字段 + first_edge/edge_count 邻接）、EDG（tag 6）= 8B×edg_count 必落。
+    REG（tag 5）= 24B×sg_count（坐标化字段序 kind/parent/enter/exit/
+    first_ent/last_ent，记录宽不变）。见 ccr_io.cr 头注释（v7 布局权威）。"""
     with open(path, 'rb') as fh:
         d = fh.read()
     pos = 0
@@ -243,43 +227,57 @@ def ccr_walk(path: str):
     assert struct.unpack_from('<I', d, pos)[0] == 0x31524343, "bad magic"  # "CCR1"
     pos += 4
     ver = u32()
-    func_cnt, instr_cnt, var_cnt, str_cnt, str_const_cnt, struct_cnt, enum_cnt = \
-        [u32() for _ in range(7)]
-    for _ in range(str_cnt):
-        sl = u32()
-        pos += sl
-    pos += func_cnt * 28
-    # Each instruction stores opcode/dest (8B), 64-bit s1 (8B), s2/s3/tk
-    # (12B): 28 bytes total.  Keep this walk in sync with ccr_io.cr's wire
-    # format so malformed offsets do not masquerade as a serializer failure.
-    pos += instr_cnt * 28
-    pos += var_cnt * 12
-    pos += str_const_cnt * 4
-    for _ in range(struct_cnt):
-        u32(); fc = u32()
-        pos += fc * 8
-    for _ in range(enum_cnt):
-        u32(); vc = u32()
-        for _ in range(vc):
-            u32(); tc = u32()
-            pos += tc * 4
+    seg_count = u32()
+    reserved = u32()
+    assert reserved == 0
+    # Segment table: canonical order (STR SYM NOD ENT REG EDG TYPE IFACE),
+    # contiguous bodies（R2 P4 Task 1 起 8 段——TYPE/IFACE 空壳）
+    segs = {}
+    cur = 16 + seg_count * 12  # first body follows the whole table
+    for tag in (1, 2, 3, 4, 5, 6, 7, 8):
+        t = u32()
+        off = u32()
+        size = u32()
+        assert t == tag, f"segment row: expected tag {tag}, got {t}"
+        assert off == cur, f"segment tag {tag}: offset {off} != {cur}"
+        segs[tag] = (off, size)
+        cur = off + size
+    # Walk each segment body (each starts with its own count)
     sg_count = None
-    if ver >= 2:
-        gc = u32()
-        pos += gc * 16
-    if ver >= 3:
-        mc = u32()
-        for _ in range(mc):
-            u32(); dl = u32()
-            pos += dl
-    if ver >= 5:
-        sg_count = u32()
-        pos += sg_count * 24
-    return ver, sg_count, len(d), pos
+    def body(tag):
+        off, size = segs[tag]
+        return d[off:off + size]
+    # STR (tag 1): str_count + strings
+    b = body(1)
+    (n,) = struct.unpack_from('<I', b, 0)
+    p = 4
+    for _ in range(n):
+        sl = struct.unpack_from('<I', b, p)[0]
+        p += 4 + sl
+    assert p == len(b), "STR walk mismatch"
+    # NOD (tag 3): nodes, 40B each (v7 spec §3.3: 32B 语义字段 [R2 P6 T3 起含
+    # +28 项索引 i32] + 邻接索引)
+    b = body(3)
+    (instr_cnt,) = struct.unpack_from('<I', b, 0)
+    assert 4 + instr_cnt * 40 == len(b), "NOD walk mismatch"
+    # EDG (tag 6): edges, 8B each (v7 必落)
+    b = body(6)
+    (edg_cnt,) = struct.unpack_from('<I', b, 0)
+    assert 4 + edg_cnt * 8 == len(b), "EDG walk mismatch"
+    # ENT (tag 4): entries, 28B each
+    b = body(4)
+    (ent_cnt,) = struct.unpack_from('<I', b, 0)
+    assert 4 + ent_cnt * 28 == len(b), "ENT walk mismatch"
+    # REG (tag 5): sgs, 24B each
+    b = body(5)
+    sg_count = struct.unpack_from('<I', b, 0)[0]
+    assert 4 + sg_count * 24 == len(b), "REG walk mismatch"
+    return ver, sg_count, len(d), cur
 
-def test_ccr_v2_sg_section():
-    """.ccr 序列化 v2：version==5，文件尾追加 SG 段（func+for 两个 region）"""
-    src = "fn main() -> int {\n    s : ., mut = 0;\n    for i in 0..3 { s = s + i; }\n    return s;\n}\n"
+def test_ccr_v6_reg_section():
+    """.ccr 序列化 v7 段表架构（Task 1 机械更新；R2 P6 Task 3 起 version==9，
+    8 段）：REG 段（tag 5）含 func+for 两个 region"""
+    src = "fn main() -> int:\n    s : ., mut = 0\n    for i in 0..3:\n        s = s + i\n    return s\n"
     with tempfile.NamedTemporaryFile('w', suffix='.cr', delete=False) as f:
         f.write(src)
         path = f.name
@@ -293,15 +291,27 @@ def test_ccr_v2_sg_section():
     os.unlink(path)
     assert r.returncode == 0, f"ccr failed: {r.stderr}"
     ver, sg_count, fsize, end = ccr_walk(ccr_path)
-    assert ver == 5, f"expected .ccr version 5, got {ver}"
+    assert ver == 9, f"expected .ccr version 9, got {ver}"
     assert sg_count is not None and sg_count >= 2, \
-        f"expected SG section with >=2 regions (func+for), got {sg_count}"
+        f"expected REG segment with >=2 regions (func+for), got {sg_count}"
     assert end == fsize, f"format walk ended at {end} of {fsize} bytes"
 
+
+def test_ccr_writer_rejects_i32_overflow_inputs():
+    """The v5 writer must reject out-of-range i32 fields instead of truncating."""
+    # This is a source-level regression marker for the writer guard. A normal
+    # source program cannot currently synthesize a >i32 instruction operand;
+    # the guard is exercised by backend-generated metadata and malformed IR.
+    ccr_source = os.path.join(BASE, "src", "compiler", "ccr_io.cr")
+    with open(ccr_source, encoding="utf-8") as fh:
+        text = fh.read()
+    assert "fn ccr_i32_fits(val: int) -> int" in text
+    assert "if ccr_validate_i32_fields() == 0 { return -1; }" in text
+
 def test_ccr_roundtrip_v2():
-    """save→load 往返守卫：v2 文件经 corearch 加载后 ELF 输出行为不变。
+    """save→load 往返守卫：v6 文件经 corearch 加载后 ELF 输出行为不变。
     程序计算 0+1+2+3=6，ELF 运行时以 main 返回值为退出码。"""
-    src = "fn main() -> int {\n    s : ., mut = 0;\n    for i in 0..4 { s = s + i; }\n    return s;\n}\n"
+    src = "fn main() -> int:\n    s : ., mut = 0\n    for i in 0..4:\n        s = s + i\n    return s\n"
     with tempfile.NamedTemporaryFile('w', suffix='.cr', delete=False) as f:
         f.write(src)
         path = f.name
@@ -320,20 +330,54 @@ def test_ccr_roundtrip_v2():
         f"expected exit 6 (sum of 0..4), got {run.returncode} stdout={run.stdout!r}"
 
 def test_region_check_pointer_escape():
-    """嵌套 region 下的指针逃逸检测（RegionCheck 走显式映射后仍正确）"""
-    src = "fn bad() -> &int {\n    x := 42;\n    return &x;\n}\nfn main() -> int { return 0; }\n"
+    """嵌套 region 下的指针逃逸检测（RegionCheck 走显式映射后仍正确）
+
+    ⚠ **2026-09-20 重定（裁定二配套）：原断言的**第一支从来没有内容**。**
+
+    **原断言（逐字保留）**：
+        assert 'B010' in r.stdout or 'error' in r.stdout, f"expected escape error, got {r.stdout!r}"
+
+    **为什么它一直是空壳**：`EC_B_ESCAPE`(B010) **全仓零 raise 点**（`grep -rn EC_B_ESCAPE src/`
+    只命中 `ast.cr:482` 的**定义行**；`region_check.cr` 实际报的是 `EC_B_LIFETIME`(B011)）
+    ⇒ **第一支永不可能成立**；本用例长期靠**第二支**通过，而那时命中的是 **`TF01`**
+    （`&x` 当时是 `TYP_PTR`、而返回型声明 `&int` ⇒ 返回型不符）——**与逃逸检测毫无关系**。
+    且该源**原理上不可能逃逸**：`rc_return_escape` 对 `SG_FUNC` 直接放行
+    （源码注释原文 `// function-level alloc = ok to return`——函数级 alloc **明确允许**返回）。
+
+    **是裁定二（`&x` → `TYP_REF`）把它照出来的**：`&x` 变成 REF ⇒ 与 `&int` **同 kind** ⇒ TF01 消失
+    ⇒ 该判据暴露为空壳。**这不是改判弄坏的**，是改判把一个从来没测过东西的判据照了出来。
+
+    **逃逸面零覆盖的完整登记 = TODO `#2026-09-20-1`**（含同面第二处：存储逃逸点
+    `region_check.cr:108` **丢弃返回值**，与 `docs/maintainer/design/pointer-model.md` §五
+    把它写成「已实现的三点之一」不一致）。
+
+    ⚠ **上述「零 raise 点 / 零命中」是 2026-09-20 收口前的状态描述**（本 docstring 保留它作为
+    归因记录）。**该面已于 2026-09-20 修复**：`EC_B_ESCAPE` 现有 raise 点（返回逃逸改报
+    `B10`）、`B11` 有活判据 —— 见 `tests/selfhost/test_region_escape.py`（15 例，两向钉子）
+    与 `TODO #2026-09-20-1` 的「状态（2026-09-20 收口）」段。**本用例自身仍不覆盖逃逸面。**
+
+    **本用例现在钉什么**：一条**真实成立**的性质——**`&x` 的 kind 与 `&int` 声明位一致**（裁定二的目标）
+    ⇒ 该源 `check` 通过且**不再报 TF01**。
+    **⚠ 它不覆盖逃逸面**（该面零活覆盖，见上）——**勿据此断言「逃逸被检测」**；
+    也**不写**「输出 == ok」那种把「逃逸不报」固化成预期的断言（本仓纪律禁止）。
+    """
+    src = "fn bad() -> &int:\n    x := 42\n    return &x\nfn main() -> int:\n    return 0\n"
     with tempfile.NamedTemporaryFile('w', suffix='.cr', delete=False) as f:
         f.write(src); path = f.name
     r = subprocess.run(['./build/corec', 'check', path], capture_output=True, text=True,
                        cwd=BASE, timeout=30)
     os.unlink(path)
-    assert 'B010' in r.stdout or 'error' in r.stdout, f"expected escape error, got {r.stdout!r}"
+    out = r.stdout + r.stderr
+    # 真实成立的性质：`&x`(REF) 与 `&int` 声明位**同 kind** ⇒ 无返回型不符
+    assert 'TF01' not in out and 'error[TA02]' not in out, \
+        f"`&x` 与 `&int` 应同 kind（裁定二）⇒ 不应有 TF01/TA02；got {out!r}"
+    assert r.returncode == 0, f"check 应无诊断通过；rc={r.returncode} got {out!r}"
 
 def test_region_check_cache_hit():
     """RegionCheck 在缓存命中路径不回归：同路径第二次 build（全函数 cache hit）
     不得因 g_df_node_region 未恢复而崩溃/误报。显式映射改造的回归守卫：
     load_cir_cache 恢复节点时需同步写入 node→region 映射。"""
-    src = "fn main() -> int {\n    s : ., mut = 0;\n    for i in 0..3 { s = s + i; }\n    return s;\n}\n"
+    src = "fn main() -> int:\n    s : ., mut = 0\n    for i in 0..3:\n        s = s + i\n    return s\n"
     with tempfile.NamedTemporaryFile('w', suffix='.cr', delete=False) as f:
         f.write(src)
         path = f.name
@@ -354,13 +398,7 @@ def test_region_check_cache_hit():
 
 def test_nested_regions_cache_persist():
     """增量 .cir 命中必须恢复函数内的嵌套 SG，而不是只恢复 func region。"""
-    src = ("fn main() -> int {\n"
-           "    s : ., mut = 0;\n"
-           "    for i in 0..3 {\n"
-           "        for j in 0..2 { s = s + i + j; }\n"
-           "    }\n"
-           "    return s;\n"
-           "}\n")
+    src = ("fn main() -> int:\n    s : ., mut = 0\n    for i in 0..3:\n        for j in 0..2:\n            s = s + i + j\n    return s\n")
     with tempfile.NamedTemporaryFile('w', suffix='.cr', delete=False) as f:
         f.write(src)
         path = f.name
@@ -389,7 +427,7 @@ def test_nested_regions_cache_persist():
 def test_state_edges_cache_persist():
     """缓存命中路径不丢 state 边：同路径第二次 cir dump（cache hit）必须仍显示
     state 边（cir_cache v2 边序列化带 kind 的回归守卫）"""
-    src = "fn main() -> int {\n    s : ., mut = 0;\n    s = s + 1;\n    s = s + 2;\n    return s;\n}\n"
+    src = "fn main() -> int:\n    s : ., mut = 0\n    s = s + 1\n    s = s + 2\n    return s\n"
     with tempfile.NamedTemporaryFile('w', suffix='.cr', delete=False) as f:
         f.write(src)
         path = f.name
@@ -419,8 +457,9 @@ if __name__ == '__main__':
              test_for_loop_run, test_while_loop_run, test_while_break_continue_run,
              test_inline_callee_while_run, test_inline_callee_for_run,
              test_break_continue_run,
-             test_nested_loop_run,
-             test_ccr_v2_sg_section, test_ccr_roundtrip_v2,
+              test_nested_loop_run,
+              test_ccr_v6_reg_section, test_ccr_writer_rejects_i32_overflow_inputs,
+              test_ccr_roundtrip_v2,
              test_region_check_pointer_escape, test_region_check_cache_hit,
              test_nested_regions_cache_persist, test_state_edges_cache_persist]
     failed = 0

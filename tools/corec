@@ -50,7 +50,7 @@ def cmd_build(args):
     for func in mod.functions:
         pass  # rebuild struct_fields if needed later
     # Temporarily re-parse to get struct fields
-    with open(args.source) as f:
+    with open(args.source, encoding='utf-8') as f:
         src = f.read()
     lex = Lexer(src)
     ast = Parser(lex.tokenize()).parse_compilation_unit()
@@ -60,7 +60,7 @@ def cmd_build(args):
             struct_fields[decl.name] = [(fname, str(ftype)) for fname, ftype in decl.fields]
 
     ccr_path = args.source.replace('.cr', '.ccr')
-    with open(ccr_path, 'w') as f:
+    with open(ccr_path, 'w', encoding='utf-8') as f:
         for func in mod.functions:
             f.write(f"Function: {func.name}\n")
             for blk in func.blocks:
@@ -73,7 +73,7 @@ def cmd_build(args):
     asm_code = asm_gen.generate()
     out_path = args.output
     asm_path = out_path + ".s"
-    with open(asm_path, 'w') as f:
+    with open(asm_path, 'w', encoding='utf-8') as f:
         f.write(asm_code)
     obj_path = out_path + ".o"
     subprocess.run(['as', '-o', obj_path, asm_path], check=True)
@@ -88,7 +88,7 @@ def cmd_ir(args):
         sys.exit(1)
     graphs = extract_all(mod)
     cir_path = args.source.replace('.cr', '.cir')
-    with open(cir_path, 'w') as f:
+    with open(cir_path, 'w', encoding='utf-8') as f:
         for name, g in graphs.items():
             f.write(f"// Function: {name}\n")
             f.write(g.to_dot())
@@ -102,7 +102,7 @@ def cmd_cir(args):
         print("Errors:", errors, file=sys.stderr)
         sys.exit(1)
     ccr_path = args.source.replace('.cr', '.ccr')
-    with open(ccr_path, 'w') as f:
+    with open(ccr_path, 'w', encoding='utf-8') as f:
         for func in mod.functions:
             f.write(f"Function: {func.name}\n")
             for blk in func.blocks:

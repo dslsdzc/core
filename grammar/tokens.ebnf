@@ -19,16 +19,15 @@ KEYWORD =
     'auto' | 'fileid' | 'move' | 'in' | 'None' | 'Some' | 'unit' ;
 
 (* 字面量 *)
-(* 数字字面量不支持 '_' 分隔符（lexer.cr：数字扫描仅收 DIGIT；'_' 属 is_alpha（95），
-   会被消费为后缀，产生无效 T_INT(-1)；bootstrap lexer 支持 '_'，两实现有分歧——
-   以实现为准取不支持） *)
-INT_LIT = DIGIT { DIGIT } [ INT_SUFFIX ] ;
-INT_SUFFIX = 'i8' | 'i16' | 'i32' | 'i64' | 'u8' | 'u16' | 'u32' | 'u64' ;
+(* 数字字面量不支持 '_' 分隔符、不支持任何宽度后缀（2026-09-10 语言面收窄 §2 用户裁决：
+   两实现统一响亮报错——修复前 self-hosted 把 '_' 当后缀静默消费成取值 0、bootstrap
+   静默接受；宽度后缀 = 机器形状，归映射层）。 *)
+INT_LIT = DIGIT { DIGIT } ;
 (* 3.14 十进制小数 → DEX_LIT（数值迁移：T_FLOAT → T_DEX，见 core.ebnf Literal 注）。
    定点缩放精确解析（int_val = 缩放整数），lexeme 槽保留原数字串（apx 场景由
-   str_to_f64_bits 还原 binary64 位模式）。f32/f64 后缀 = apx CPU 位宽标注
-   （lexer 消费后缀后统一发 T_DEX——宽度透传为已知缺口，见 numeric-migration-inventory 争议点 7） *)
-DEX_LIT = ( DIGIT { DIGIT } [ '.' DIGIT { DIGIT } ] | '.' DIGIT { DIGIT } ) [ 'f32' | 'f64' ] ;
+   str_to_f64_bits 还原 binary64 位模式）。f32/f64 宽度后缀已退役（2026-09-10 语言面
+   收窄 §2）——lexer 对字母后缀一律响亮报错；宽度 = 机器形状，归映射层。 *)
+DEX_LIT = ( DIGIT { DIGIT } [ '.' DIGIT { DIGIT } ] | '.' DIGIT { DIGIT } ) ;
 STRING_LIT = '"' { ESCAPED_CHAR } '"' ;
 CHAR_LIT = '\'' ( ESCAPED_CHAR | CHAR - '\'' ) '\'' ;
 ESCAPED_CHAR = '\' ( 'n' | 't' | 'r' | '0' | '\' | '"' | '\'' ) | '\x' HEX HEX ;

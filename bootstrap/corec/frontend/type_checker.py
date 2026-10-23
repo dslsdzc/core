@@ -13,6 +13,8 @@ class TypeChecker:
         self.borrow_state = {}       # borrowed_var -> {ref_count, mut_ref}
         self.borrow_holders = {}     # borrower_var -> [(borrowed_var, is_mut)]
         self.borrow_scope_stack = []  # stack of sets of borrower vars in each scope
+        self.module_functions = {}
+        self.unsafe_depth = 0        # 2(a)：`unsafe` 块深度（视图内建的允许区判据）
 
     # --------------------------------------------------------------
     # Borrow checking helpers
@@ -84,15 +86,61 @@ class TypeChecker:
         for borrower in self.borrow_scope_stack.pop():
             self._release_holder_borrows(borrower)
 
+    def _type_name(self, typ):
+        """Return a scalar type name without assuming every Type is BaseType."""
+        return typ.name if isinstance(typ, BaseType) else None
+
+    def _is_generic_type(self, typ):
+        """Whether typ is a generic parameter in the active function scope."""
+        return (isinstance(typ, PathType) and len(typ.path) == 1 and
+                any(typ.path[0] in scope for scope in self.generic_scopes))
+
     # --------------------------------------------------------------
     # Built-in types
     # --------------------------------------------------------------
+    def _infer_builtin(self, expr) -> Type:
+        """`@name` / `@name(args)` 内建（2(a) 视图内建批）。
+
+        视图内建语义 = **同一个 64 位字的两种看法**（零转换、零拷贝、无运行期动作）：
+            `@ptr_of(s: string) -> int`   ·   `@str_of(p: int) -> string`
+        两条硬规则（与自托管面 `checker.cr` 同款，两面一致）：
+          · **安全面（裁 (ii)）**：必须出现在 `unsafe` 块内，块外 ⇒ 报错；
+          · **未知名 fail-closed**：不得静默当 0（本批硬要求③）。
+        """
+        if expr.name in ('ptr_of', 'str_of'):
+            if self.unsafe_depth == 0:
+                self.errors.append(f"@{expr.name} must appear inside an `unsafe` block")
+                return BaseType('never')
+            if len(expr.args) != 1:
+                self.errors.append(f"@{expr.name} expects exactly 1 argument")
+                return BaseType('never')
+            want = 'string' if expr.name == 'ptr_of' else 'int'
+            result = BaseType('int') if expr.name == 'ptr_of' else BaseType('string')
+            at = self._infer_expr(expr.args[0])
+            if self._type_name(at) != want:
+                self.errors.append(f"@{expr.name} expects a {want} expression, got {at}")
+                return BaseType('never')
+            return result
+        self.errors.append(f"unknown @ builtin: {expr.name}")
+        return BaseType('never')
+
     def _declare_builtins(self):
         """Register built-in generic types Option[T] and Result[T, E]."""
         if not self.symtab.lookup('Option'):
             opt = EnumDecl(True, 'Option', ['T'],
                            [('Some', [PathType(['T'])]), ('None', [])])
             self._declare_enum(opt)
+            # v4 拼写面（`none`）**已接通**（2026-10-11，T5 收尾）：本注册原先**不可达**
+            # —— 裸 `none` 在表达式位被 `parser.parse_primary` 归到一个 `Ident('none')`，
+            # 而 `NameResolver` 内建表里没有该名 ⇒ 以 `Undefined name` 拦下（旧注释的实况）。
+            # 现改为在 parse_primary 的 `T_NONE` 格**归一到 canonical 变体**
+            # `EnumConstructor(['None'], [])` —— 与自源 `src/compiler/parser.cr` 的
+            # `T_NONE → EXPR_ENUM_CONSTRUCTOR(str_intern("None"))` **同语义**；
+            # 该节点由**本函数的 Option 注册**解（`symtab.lookup('None')` 命中），
+            # 且 `__variant` 标签 = `None` ⇒ desugar 的臂比较与 ir_gen 的 MakeEnum 都成立。
+            # ⇒ **不需要**另在内建表补一个 `none` 值名：`Ident('none')` 没有 `__variant`
+            #   字段，走那条路反而会打断 match 的 desugar 面。
+            # 语料影响 = 0：`src/**` 无代码面裸 `none`/`None`（全在注释/字符串里）。
         if not self.symtab.lookup('Result'):
             res = EnumDecl(True, 'Result', ['T', 'E'],
                            [('Ok', [PathType(['T'])]), ('Err', [PathType(['E'])])])
@@ -100,6 +148,11 @@ class TypeChecker:
 
     def check(self, ast: CompilationUnit):
         self._declare_builtins()
+        self.module_functions = {}
+        for decl in ast.declarations:
+            alias = getattr(decl, '_module_alias', None)
+            if alias and isinstance(decl, FunctionDecl):
+                self.module_functions[(alias, decl.name)] = decl
         for decl in ast.declarations:
             if isinstance(decl, StructDecl):
                 self._declare_struct(decl)
@@ -184,7 +237,7 @@ class TypeChecker:
             self.symtab.define(name, SymbolKind.PARAM, typ)
         if decl.body:
             inferred = self._infer_expr(decl.body)
-            if not self._type_equal(inferred, decl.return_type):
+            if not self._compat(inferred, decl.return_type):
                 # Relaxed check: try to unify unresolved generic params
                 if not self._unify_return_type(inferred, decl.return_type):
                     self.errors.append(f"Function {decl.name}: expected return type {decl.return_type}, got {inferred}")
@@ -216,27 +269,36 @@ class TypeChecker:
                 return left_t
             left_t = self._infer_expr(expr.left)
             right_t = self._infer_expr(expr.right)
+            left_name = self._type_name(left_t)
+            right_name = self._type_name(right_t)
             if expr.op in ('+','-','*','/','%'):
-                if left_t.name in ('int','dex') and right_t.name in ('int','dex'):
-                    if left_t.name == 'dex' or right_t.name == 'dex':
+                if left_name in ('int','dex') and right_name in ('int','dex'):
+                    if left_name == 'dex' or right_name == 'dex':
                         return BaseType('dex')
                     return BaseType('int')
-                elif expr.op == '+' and left_t.name == 'string' and right_t.name == 'string':
+                elif expr.op == '+' and left_name == 'string' and right_name == 'string':
                     return BaseType('string')
+                elif self._is_generic_type(left_t) or self._is_generic_type(right_t):
+                    # Generic parameters are dynamically represented by the
+                    # bootstrap interpreter. Preserve the parameter type here
+                    # instead of dereferencing .name on PathType.
+                    return left_t if self._is_generic_type(left_t) else right_t
                 else:
-                    self.errors.append(f"Arithmetic type error between {left_t.name} and {right_t.name}")
+                    self.errors.append(f"Arithmetic type error between {left_t} and {right_t}")
                     return BaseType('never')
             elif expr.op in ('==','!=','<','>','<=','>='):
-                if left_t.name not in ('int','dex','string') or right_t.name not in ('int','dex','string'):
+                if ((left_name not in ('int','dex','string') and not self._is_generic_type(left_t)) or
+                    (right_name not in ('int','dex','string') and not self._is_generic_type(right_t))):
                     self.errors.append(f"Comparison not allowed")
                 return BaseType('bool')
             elif expr.op in ('|', '&'):
-                if left_t.name == 'int' and right_t.name == 'int':
+                if ((left_name == 'int' and right_name == 'int') or
+                    (self._is_generic_type(left_t) and self._is_generic_type(right_t))):
                     return BaseType('int')
                 self.errors.append(f"Bitwise ops require int")
                 return BaseType('never')
             elif expr.op in ('&&','||'):
-                if left_t.name == 'bool' and right_t.name == 'bool':
+                if left_name == 'bool' and right_name == 'bool':
                     return BaseType('bool')
                 self.errors.append("Logical ops require bool")
                 return BaseType('never')
@@ -264,7 +326,7 @@ class TypeChecker:
                 self.errors.append("Cannot dereference non-reference type")
                 return BaseType('never')
             if expr.op == '!':
-                if operand_type.name != 'bool':
+                if self._type_name(operand_type) != 'bool':
                     self.errors.append("Unary ! requires bool")
                     return BaseType('never')
                 return BaseType('bool')
@@ -300,6 +362,8 @@ class TypeChecker:
                 return GenericApplyType([enum_name], concrete_args)
             return func_decl.return_type
         elif isinstance(expr, FieldAccess):
+            if isinstance(expr.object, Ident) and (expr.object.name, expr.field) in self.module_functions:
+                return self.module_functions[(expr.object.name, expr.field)].return_type
             obj_t = self._infer_expr(expr.object)
             # Unwrap RefType for field access through references
             if isinstance(obj_t, RefType):
@@ -366,6 +430,16 @@ class TypeChecker:
                 return BaseType('int')
             self.errors.append("Indexing non-array type")
             return BaseType('never')
+        elif isinstance(expr, Builtin):
+            return self._infer_builtin(expr)
+        elif isinstance(expr, Unsafe):
+            # 2(a)：bootstrap 侧 `unsafe` 支持。此前自源**零使用**（实测 corec 清单去注释去字符串后
+            # `unsafe` 行数 = 0）⇒ 本面从未实现（旧行为：`Unsupported expression` + ir_gen NotImplementedError）。
+            # 语义 = 块作用域 + 「危险操作许可区」；本批只把它作为**视图内建的允许区**登记 ⇒ 直通。
+            self.unsafe_depth = self.unsafe_depth + 1
+            ret = self._infer_expr(expr.block)
+            self.unsafe_depth = self.unsafe_depth - 1
+            return ret
         elif isinstance(expr, Block):
             self.symtab.push_scope()
             self._push_borrow_scope()
@@ -379,7 +453,7 @@ class TypeChecker:
             return last_type
         elif isinstance(expr, If):
             cond_t = self._infer_expr(expr.cond)
-            if cond_t.name != 'bool':
+            if self._type_name(cond_t) != 'bool':
                 self.errors.append("If condition must be bool")
             self.symtab.push_scope()
             self._push_borrow_scope()
@@ -392,7 +466,7 @@ class TypeChecker:
                 else_t = self._infer_expr(expr.else_branch)
                 self._pop_borrow_scope()
                 self.symtab.pop_scope()
-                if not self._type_equal(then_t, else_t):
+                if not self._compat(then_t, else_t):
                     self.errors.append(f"If branches have different types: {then_t} vs {else_t}")
                     return BaseType('never')
                 return then_t
@@ -435,15 +509,16 @@ class TypeChecker:
             if arm_types:
                 first = arm_types[0]
                 for t in arm_types[1:]:
-                    if not self._type_equal(first, t):
+                    if not self._compat(first, t):
                         self.errors.append("Match arms have different types")
                         return BaseType('never')
                 return first
             return BaseType('unit')
         elif isinstance(expr, ReturnStmt):
+            # v4 裁定：发散出口 ⇒ never（值仍须推断，否则返回值内的诊断整段消失）
             if expr.value:
-                return self._infer_expr(expr.value)
-            return BaseType('unit')
+                self._infer_expr(expr.value)
+            return BaseType('never')
         elif isinstance(expr, ExprStmt):
             self._infer_expr(expr.expr)  # check for side effects
             return BaseType('unit')
@@ -474,7 +549,7 @@ class TypeChecker:
                         self._record_borrow_holder(name, borrowed_name, expr.values[i].op == '&mut')
             return BaseType('unit')
         elif isinstance(expr, BreakStmt) or isinstance(expr, ContinueStmt):
-            return BaseType('unit')
+            return BaseType('never')   # v4 裁定：发散出口 ⇒ never（原 unit）
         elif isinstance(expr, Go):
             self._infer_expr(expr.expr)
             return BaseType('unit')
@@ -507,6 +582,16 @@ class TypeChecker:
         # Track which function we're checking (set by _check_function)
         self._current_checking_func = getattr(self, '_current_checking_func', '?')
         if isinstance(call.func, FieldAccess):
+            if isinstance(call.func.object, Ident):
+                module_fn = self.module_functions.get((call.func.object.name, call.func.field))
+                if module_fn is not None:
+                    if len(call.args) != len(module_fn.params):
+                        self.errors.append(f"Module function {call.func.field} argument count mismatch")
+                    else:
+                        for arg, (_, pt) in zip(call.args, module_fn.params):
+                            if not self._type_equal(self._infer_expr(arg), pt):
+                                self.errors.append("Module function argument type mismatch")
+                    return module_fn.return_type
             obj_t = self._infer_expr(call.func.object)
             if isinstance(obj_t, RefType):
                 obj_t = obj_t.inner
@@ -646,6 +731,19 @@ class TypeChecker:
             args = [self._substitute_type(a, mapping) for a in typ.args]
             return GenericApplyType(typ.path, args)
         return typ
+
+    def _is_never(self, t) -> bool:
+        return isinstance(t, BaseType) and t.name == 'never'
+
+    def _compat(self, t1, t2) -> bool:
+        """分支合一/返回位相容判定（v4 裁定 2026-10-11）：
+        两侧类型相同 **或** 任一侧为 `never` ⇒ 相容（`never` 作子类型）。
+        依据 = docs/core-language-syntax_v4.md §3.1：`never`（发散类型）是基本类型，
+        且以发散语句（return/break/continue）收尾的路径其类型即 `never`。
+        """
+        if self._is_never(t1) or self._is_never(t2):
+            return True
+        return self._type_equal(t1, t2)
 
     def _type_equal(self, t1, t2) -> bool:
         if t1 is None or t2 is None:

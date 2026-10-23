@@ -1,0 +1,315 @@
+# Core 错误码参考
+
+错误码数值和注释名来自 `src/compiler/ast.cr` 的 `EC_*` 常量。每个码对应唯一的检查点，注释中带有本文编号，例如 `EC_P_EXPECTED = 1001 // P001`。词法族的 L 码是本文档侧的编号，因为 `lexer.cr` 的 `add_error` 只传消息文本，不带码。修改码值时，要同步修改 `ast.cr` 的注释和本文。
+
+诊断默认阻断。任何不在豁免登记表内的类型诊断都会使 `rc=1`，并且不产生任何产物，不写目标 ELF，也不写本次的 `<out>.ccr`。豁免表是 `src/compiler/diag.cr::diag_gate_exempt`，码级共 8 条：TF07、TB01、TM04、TK01、B04 属于 build 命令，N01、N06、N11 属于 check 命令并且只登记。每条都带位点证据、理由和退出条件，条目只减不增。
+
+TF01 已从豁免表移除。原因是 `alloc: () -> string` 模型与三处 handle 返回类型 `-> int` 不一致，三处分别是 `chan_make`、`g_new` 和 `sched_go`。对齐语料并调整 5 处 handle 形参后，5 档并发语料不再产生 TF01。
+
+语法错误（P/L 族）和安全检查错误（B11、TU03 等）原本就是任一错误即 `rc=1`。`check` 命令的 rc 规则是计数大于 0，不读取豁免表，因此 check 基线不换代。
+
+---
+
+## L0xx：词法（Lexer）
+
+> 注：本族码没有数值常量（lexer 的 `add_error` 不带码），以消息模板为准，码为文档侧编号。
+
+| 码 | 检查点 | 消息模板 | 触发条件 |
+|----|--------|---------|---------|
+| L001 | 字符串终止 | `Unterminated string literal` | 引号未闭合就到行尾 |
+| L002 | 块注释终止 | `Unterminated block comment` | `/*` 未闭合就到文件尾 |
+| L003 | 转义序列 | `Invalid escape sequence: \{c}` | `\` 后跟了非法字符 |
+| L004 | 字符字面量空 | `Empty character literal` | `''` |
+| L005 | 字符字面量多字节 | `Multi-character character literal` | `'ab'` |
+| L006 | 十六进制转义 | `Invalid hex escape: {seq}` | `\x` 后不是合法十六进制 |
+| L007 | 整数后缀非法 | `Invalid integer suffix: {suffix}` | `42_xyz` 之类 |
+| L008 | 整数后缀溢出 | `Integer literal out of range for suffix {suffix}` | `999999_i8` |
+| L009 | 小数（dex）字面量格式 | `Invalid float literal`（消息文本随代码迁移改 dex 表述） | `1.` 或 `.e5` 等 |
+| L010 | 小数后缀非法（f32/f64 = apx 的 CPU 位宽标注） | `Invalid float suffix: {suffix}` | 非 f32/f64 后缀 |
+| L011 | 无法识别的字符 | `Unknown character: '{c}'` | 源码中出现 ASCII 控制字符或全角空格等 |
+
+## P0xx：语法（Parser）
+
+| 码 | 检查点 | 消息模板 |
+|----|--------|---------|
+| P001 | 期望 token 不匹配 | `Expected {X}, got {Y}` |
+| P002 | 顶层意外 token | `Unexpected token {X} at top level` |
+| P003 | 表达式内意外 token | `Unexpected token in expression` |
+| P004 | 数组大小非编译期常量 | `Expected integer literal or constant name for array size` |
+| P005 | 模式内意外 token | `Unexpected token in pattern` |
+| P006 | 缺少闭合括号 | `Missing closing delimiter: expected {X}` |
+| P007 | 缺少分号 | `Expected semicolon after {stmt}` |
+| P008 | 结构体为空 | `Empty struct body` |
+| P009 | 枚举体为空 | `Empty enum body` |
+| P010 | 函数体为空 | `Function body is empty` |
+| P011 | 参数缺少类型标注 | `Parameter {name} requires type annotation` |
+| P012 | 泛型列表语法 | `Invalid generic parameter list` |
+| P013 | 结构体字段/值配对错误 | `Invalid field syntax in struct literal` |
+| P014 | match 体为空 | `Match body cannot be empty` |
+| P015 | 绑定模式格式 | `Invalid pattern binding` |
+| P016 | import 路径格式 | `Invalid import path` |
+| P017 | fileid 声明格式 | `Invalid fileid declaration` |
+| P018 | 变量声明语法 | `Invalid variable declaration syntax` |
+| P019 | 字面量后缀溢出 | `Numeric literal overflow` |
+| P020 | 形参数目超上限（> `MAX_FN_PARAMS=64`） | `too many parameters`。解析阶段拒绝，不生成参数槽。 |
+| P021 | 函数体内嵌套 `fn` 声明（不属于语言） | 定位拒绝，不进入声明体解析。 |
+| P022 | 枚举变体数或变体携带值类型数超上限（> `MAX_ENUM_VARIANTS=16` / `MAX_VARIANT_TYPES=16`） | `Enum has too many variants (17 > 16)` / `Enum variant has too many payload types (17 > 16)`。写入前检查边界，超限即拒绝。 |
+| P023 | 结构体字段数超上限（> `MAX_STRUCT_FIELDS=16`） | `Struct has too many fields (17 > 16)`。写入前检查边界，超限即拒绝。 |
+| P024 | `extern` 声明含可选类型（`?`），即形参或返回值使用可选类型（C ABI 没有可选类型的表示） | `extern declaration cannot use optional type ('?') - no C ABI representation`。常量是 `EC_P_EXTERN_OPTIONAL = 1024`；`parser.cr` 的 extern 分支对形参和返回值使用同一判断和同一个码。 |
+| P025 | 无法识别的顶层 token | `unexpected top-level token '{tok}'`。常量是 `EC_P_TOPLEVEL_TOKEN = 1025`；`parser.cr` 的 `parse_declaration` 末尾报告后仍消费该 token，避免 `parse_all` 停在同一个位置；遇到 EOF 不报错。 |
+| P026 | `apx` 标签不适用于该声明（允许清单为显式 `dex` 和显式 `int`） | `'apx' tag is only allowed on an explicit 'dex' or 'int' declaration`。常量是 `EC_P_APX_TAG = 1026`；`parser.cr` 的声明标签分支拒绝其他组合，例如 `auto`、`dex?`、`string` 或 `bool` 加 `apx`。 |
+
+> 打印形式：上表中的三位族号（P024、P025、P026）用于文档索引，实际输出为 `error[P24]`、`error[P25]`、`error[P26]`（打印器取 `码 % 1000`）。三者都属于语法族（P 族），因此按本文件开头的 fail-closed 语义，前端出现任一错误即 `rc=1` 且零产物，不进入 lower，不写 `.ccr`，不生成 ELF。出处（本轮实读，`develop` = `662ff87d`）：`ast.cr` 的三个常量行和 `parser.cr` 的三处 `check_error` 调用点。
+
+## N0xx：名字解析（Name Resolution）
+
+| 码 | 检查点 | 消息模板 |
+|----|--------|---------|
+| N001 | 名称未定义 | `Undefined name '{name}'` |
+| N002 | 结构体未定义 | `Undefined struct '{name}'` |
+| N003 | 字段不存在于结构体 | `Undefined field '{name}' in struct {struct}` |
+| N004 | 枚举构造器未定义 | `Undefined enum constructor '{name}'` |
+| N005 | 枚举变体不存在 | `Undefined variant '{name}' in enum {enum}` |
+| N006 | 函数未定义 | `Undefined function '{name}'` |
+| N007 | 类型名未定义 | `Undefined type '{name}'` |
+| N008 | 方法不存在于类型 | `Undefined method '{name}' for type {type}` |
+| N009 | 泛型实例化类型找不到 | `Undefined type in generic application` |
+| N010 | 泛型参数未定义 | `Undefined generic parameter '{name}'` |
+| N011 | 同一作用域重复定义 | `Duplicate definition of '{name}'` |
+| N012 | 结构体字段重复定义 | `Duplicate field '{field}' in struct {struct}` |
+| N013 | 枚举变体重复定义 | `Duplicate variant '{variant}' in enum {enum}` |
+| N014 | 函数重复定义 | `Duplicate function definition '{name}'` |
+| N015 | 文件标识符冲突 | `File identifier '{id}' already in use` |
+| N016 | 模块路径未定义 | `Undefined module '{path}'` |
+| N017 | 外部项目未定义 | `Undefined project '{name}'` |
+| N018 | 导入循环 | `Cyclic import detected: {path}` |
+| N019 | import 文件未找到 | `Cannot find file for import '{id}'` |
+| N020 | 导入文件读取失败 | `Failed to read import '{id}'` |
+| N021 | 符号重导出冲突 | `Name '{name}' re-exported from multiple modules` |
+
+## I0xx：类型推断（Inference）
+
+| 码 | 检查点 | 消息模板 |
+|----|--------|---------|
+| I001 | 变量类型无法推导 | `Cannot infer type of variable '{name}'` |
+| I002 | 全局变量类型无法推导 | `Cannot infer type of global '{name}'` |
+| I003 | 函数返回类型无法推导 | `Cannot infer return type of function '{name}'` |
+| I004 | 泛型参数类型无法推导 | `Cannot infer type for generic parameter '{name}'` |
+| I005 | 类型歧义 | `Ambiguous type: {expr} could be more than one type` |
+| I006 | 无限类型 | `Infinite type: type {T} contains itself` |
+
+## TA0xx：类型检查（赋值与绑定）
+
+> TA02 是 `run_frontend` 编译错误，rc=1 且不产出产物。判定点是 `checker.cr::check_let_annot_compat`，局部的 `EXPR_LET` 和全局的 `check_global_let` 共用；组合函数是 `type_compat_strict`，处理类型身份、常量数组长度和可选目标注入。豁免情况：无注解、`auto` 或无初值；注解为 `dyn`；值为 `never`（底部类型加错误标记，用于抑制级联）；注解为泛型形参。
+
+| 码 | 检查点 | 消息模板 |
+|----|--------|---------|
+| TA01 | 赋值号类型不匹配 | `Cannot assign {T2} to {T1}` |
+| TA02 | 变量声明类型与初始值不符（`EXPR_LET` 判定点，局部和全局初始化器共用；`-1` 分支是常量数组长度约束，措辞同 TS03/TK02） | `Variable declared as {T1}, got {T2}` / `Array length constraint not satisfied` |
+| TA03 | 批量声明类型不一致 | `Batch declaration has mixed types: {T1} vs {T2}` |
+| TA04 | 赋值给不可变变量 | `Cannot assign to immutable variable '{name}'` |
+| TA05 | 变量未声明 mutable | `Variable '{name}' is not mutable` |
+| TA06 | 全局变量未声明 mutable | `Global '{name}' must be `mut` to reassign` |
+| TA07 | 元组解构数量不匹配 | `Tuple destructuring has {M} variables but tuple has {N} elements` |
+| TA08 | 未知声明标签 | `unknown declaration tag '{tag}'`（已知：mut/pub/apx + 插件标签） |
+
+## TF0xx：类型检查（函数与调用）
+
+| 码 | 检查点 | 消息模板 |
+|----|--------|---------|
+| TF01 | 返回值类型不匹配 | `Expected return type {T1}, got {T2}` |
+| TF02 | 缺少返回值 | `Missing return expression; expected {T}` |
+| TF03 | 多余返回值 | `Expected return type unit, got value` |
+| TF04 | 多返回值中类型不一致 | `Return values in different branches have different types` |
+| TF05 | 实参个数少于形参 | `Expected {N} arguments, got {M}` |
+| TF06 | 实参个数多于形参 | `Too many arguments: expected {N}, got {M}` |
+| TF07 | 第 N 个实参类型不匹配 | `Argument {N}: expected {T1}, got {T2}` |
+| TF08 | 方法不存在于类型 | `Method '{name}' not found for type {T}` |
+| TF09 | 方法参数个数不匹配 | `Expected {N} arguments for method '{name}', got {M}` |
+| TF10 | 方法参数类型不匹配 | `Argument {N} of method '{name}': expected {T1}, got {T2}` |
+| TF11 | 方法调用于非结构体 | `Method call on non-struct type {T}` |
+| TF12 | 缺少 main 函数 | `No `main` function found` |
+| TF13 | main 函数签名错误 | ``main` function must return `int` or `unit`` |
+| TF14 | self 参数格式非法 | `Invalid `self` parameter type` |
+| TF15 | 方法需要 self 参数 | `Method '{name}' requires a `self` parameter` |
+| TF16 | 函数调用名未定义 | `Cannot find function '{name}' in scope` |
+| TF17 | 函数名歧义 | `Ambiguous function call: multiple candidates for '{name}'` |
+
+## TB0xx：类型检查（二元运算）
+
+| 码 | 检查点 | 消息模板 |
+|----|--------|---------|
+| TB01 | `+` 左右类型不兼容 | `Cannot add {T1} and {T2}` |
+| TB02 | `-` 左右类型不兼容 | `Cannot subtract {T2} from {T1}` |
+| TB03 | `*` 左右类型不兼容 | `Cannot multiply {T1} and {T2}` |
+| TB04 | `/` 左右类型不兼容 | `Cannot divide {T2} by {T1}` |
+| TB05 | `%` 左右类型不兼容 | `Cannot mod {T1} by {T2}` |
+| TB06 | `==`/`!=` 左右类型不兼容 | `Cannot compare {T1} and {T2}` |
+| TB07 | `<`/`>`/`<=`/`>=` 左右类型不兼容 | `Cannot order {T1} and {T2}` |
+| TB08 | `&&`/`||` 操作数不是 bool | ``&&` requires `bool` operands, got {T}` |
+| TB09 | `+` 字符串与非字符串混用 | `Cannot concatenate string and {T}` |
+
+## TU0xx：类型检查（一元运算）
+
+| 码 | 检查点 | 消息模板 |
+|----|--------|---------|
+| TU01 | `-` 取负于非数值类型 | `Cannot negate type {T}` |
+| TU02 | `!` 非 bool 类型 | ``!` requires `bool`, got {T}` |
+| TU03 | `*` 解引用于非引用 | `Cannot dereference non-reference type {T}` |
+
+## TC0xx：类型检查（控制流）
+
+| 码 | 检查点 | 消息模板 |
+|----|--------|---------|
+| TC01 | if 条件不是 bool | `If condition must be `bool`, got {T}` |
+| TC02 | if/else 分支类型不一致。else 支确定发散时不判定：`EXPR_RETURN` 的推断结果是被返回值的类型，`{ return X; }` 分支没有类型，判定函数是 `stmt_diverges`。then 支发散时仍然报错，因为 `then_ti` 不存在，但这是真实信号 | `If branches have different types: {T1} vs {T2}` |
+| TC03 | if 单分支不能有返回值 | `If without `else` cannot return value` |
+| TC04 | while 条件不是 bool | `While condition must be `bool`, got {T}` |
+| TC05 | loop 内 break 带值不一致 | ``break` with value conflicts with previous `break` without value` |
+| TC06 | break 在循环外 | ``break` outside of loop` |
+| TC07 | continue 在循环外 | ```continue` outside of loop` |
+
+## TM0xx：类型检查（Match 与模式匹配）
+
+| 码 | 检查点 | 消息模板 |
+|----|--------|---------|
+| TM01 | match 目标不是枚举 | `Match expression must be enum, got {T}` |
+| TM02 | 分支类型不一致 | `Match arms have different types: {T1} vs {T2}` |
+| TM03 | 非穷尽匹配 | `Non-exhaustive match: missing variant(s): {names}` |
+| TM04 | 冗余分支 | `Redundant arm: variant '{name}' already matched above` |
+| TM05 | 通配符前置 | `Wildcard `_` arm must be the last arm` |
+| TM06 | 枚举构造参数个数不匹配 | `Expected {N} arguments for variant '{name}', got {M}` |
+| TM07 | 枚举构造参数类型不匹配 | `Argument {N}: expected {T1}, got {T2}` |
+| TM08 | 模式绑定冲突 | `Binding '{name}' appears more than once in the same arm` |
+| TM09 | 模式中非法嵌套 | `Complex pattern not allowed in this position` |
+
+## TK0xx：类型检查（数组与切片）
+
+| 码 | 检查点 | 消息模板 |
+|----|--------|---------|
+| TK01 | 下标索引非数组 | `Cannot index type {T}` |
+| TK02 | 数组元素类型不一致。字面量处取首元素类型，后续元素逐个比对；不一致即编译错误 | `Expected array element type {T1}, got {T2}` |
+| TK03 | 数组大小不是整数 | `Array size must be `int`` |
+| TK04 | 数组大小为负数 | `Array size must be positive, got {size}` |
+| TK05 | 切片起点超出范围 | `Slice start {N} is out of bounds (length {L})` |
+| TK06 | 切片长度非法 | `Slice length must be non-negative` |
+| TK07 | `for` 迭代目标不是数组或范围 | `Cannot iterate over type {T}` |
+| TK08 | `for` 迭代变量与元素类型不匹配 | ``for` variable type {T1} does not match element type {T2}` |
+
+## TS0xx：类型检查（结构体字面量）
+
+> TS01 到 TS04 都是 `run_frontend` 编译错误，rc=1 且不产出产物。字段值按名字绑定，求值顺序为源序。
+
+| 码 | 检查点 | 消息模板 |
+|----|--------|---------|
+| TS01 | 缺少必要字段 | `Missing field '{name}' in struct literal {struct}` |
+| TS02 | 不存在的字段 | `Unknown field '{name}' in struct literal {struct}` |
+| TS03 | 字段类型不匹配 | `Field '{name}': expected {T1}, got {T2}` |
+| TS04 | 字段重复初始化 | `Field '{name}' initialized more than once` |
+
+## TG0xx：类型检查（泛型）
+
+| 码 | 检查点 | 消息模板 |
+|----|--------|---------|
+| TG01 | 泛型实参个数不匹配 | `Expected {N} generic arguments, got {M}` |
+| TG02 | 泛型参数约束不满足 | `Type {T} does not satisfy the required interface` |
+
+## B0xx：所有权与借用
+
+### 借用冲突
+
+| 码 | 消息模板 | 场景 |
+|----|---------|------|
+| B001 | `Cannot borrow `{name}` as mutable — already borrowed as immutable` | `r := &x; rm := &mut x;` |
+| B002 | `Cannot borrow `{name}` as immutable — already borrowed as mutable` | `rm := &mut x; r := &x;` |
+| B003 | `Cannot borrow `{name}` as mutable — already mutably borrowed` | `r1 := &mut x; r2 := &mut x;` |
+| B004 | `Cannot use `{name}` while it is borrowed` | `r := &x; x = 42;` |
+
+### 生命周期
+
+| 码 | 消息模板 | 场景 |
+|----|---------|------|
+| B010 | `Reference to local `{name}` escapes the function` | `fn f() -> &int { x := 42; return &x; }` |
+| B011 | `Borrowed value does not live long enough` | 引用比原对象存在时间更长 |
+
+### Move
+
+| 码 | 消息模板 | 场景 |
+|----|---------|------|
+| B020 | `Use of moved value `{name}`` | `move y = x; print(x);` |
+| B021 | `Cannot move `{name}` — was already moved` | `move a = x; move b = x;` |
+| B022 | `Cannot move `{name}` while borrowed` | `r := &x; move y = x;` |
+
+## R0xx：运行时检查
+
+| 码 | 检查点 | 消息模板 |
+|----|--------|---------|
+| R001 | 编译期除零 | `Division by zero in constant expression` |
+| R002 | 编译期下标超出数组长度 | `Index {idx} out of bounds for array of length {len}` |
+| R003 | 编译期整数溢出 | `Integer overflow in constant expression: {expr}` |
+| R004 | 数值转换损失精度 | `Conversion from {T1} to {T2} loses precision` |
+
+## I/O 错误
+
+| 码 | 检查点 | 消息模板 |
+|----|--------|---------|
+| E001 | 源码文件不可读 | `Cannot read source file '{path}'` |
+| E002 | 输出文件不可写 | `Cannot write output file '{path}'` |
+| E003 | CCR 文件格式损坏 | `Invalid .ccr file: {reason}` |
+| E004 | CCR 文件不可读 | `Cannot open .ccr file '{path}'` |
+
+## ICE：编译器内部错误
+
+| 码 | 检查点 | 消息模板 |
+|----|--------|---------|
+| ICE01 | 不应该发生的状况 | `Internal compiler error: {detail}` |
+| ICE02 | 全局缓冲区溢出 | `Compiler limit: {buffer} overflow (max {max})` |
+| ICE03 | IR 生成缺实现 | `Unsupported expression: {kind}` |
+| ICE04 | 类型判定不可判（引擎返回 `-1`：未覆盖的情况或预算耗尽；或桥接缺口，即该行无法翻译成类型项）。未知不当作 0 或 1，按编译错误拒绝写入产物；两侧类型项文本随消息输出；判定点没有 AST 位置，因此位置显示为 `--> 0:0` | `type judgment indeterminate: {term_a} vs {term_b} ({cause})` / `type judgment indeterminate: no type term for type row {t1} / {t2} (bridge gap)` |
+
+## V0xx：规约语法与验证
+
+> 语义边界：本族只收可判定且必然错误的规约错误。
+> 未证明（yellow）不是错误，只进入 `corec … --dump-vcs` 通道，不产生诊断。
+> fail-closed 检查（`main.cr:146-175`）默认阻断。把“没有证明”报成诊断会把“未证明不阻断编译”变成 rc=1。
+> 码值以 `src/compiler/ast.cr` 的 `EC_V_*` 为准（17xxx；`error_cat_prefix` 中 `cat == 17` 对应 `"V"`）。
+
+| 码 | 检查点 | 消息模板 |
+|----|--------|---------|
+| V01 | `#check(常量假)` 是当前子集唯一会报错的项：常量折叠判定为假（可判定且必然错误） | `#check(...) is statically false` |
+| V02 | 未知的 `#` 标签，或 `#` 后不是 IDENT（当前子集只识别 `#check` 和 `#ensure`；`check` 和 `ensure` 是普通 IDENT，不是关键字，见 `grammar/core.ebnf` 的 `Annotation` 注） | `Expected annotation name after '#'` / `Unknown annotation '#{name}' (expected '#check' or '#ensure')` |
+| V03 | 标注形态错：缺 `(` / 未闭合 `)` | `Expected '(' after '#{name}'` / `Expected ')' to close '#{name}' annotation` |
+| V04 | `#ensure` 的 `result` 绑定与既有作用域名冲突（编译错误，有提示选择其中一个，也有提示遮蔽） | `'result' is already bound in this scope (#ensure binding would shadow it)` |
+| V05 | 标注表达式类型不是 bool。当前子集要求恰为 `TI_BOOL`；`infer_expr` 给不出 bool 时报编译错误，未知不当作通过 | `annotation expression must be bool` |
+| V06 | 标注表达式含调用。C1 子集禁止调用，以避开纯度与时序问题 | `annotation expression must not contain calls (C1 subset)` |
+
+---
+
+## 统计
+
+| 段 | 范围 | 数量 | 说明 |
+|----|------|------|------|
+| L | L001–L011 | 11 | 词法 |
+| P | P001–P023 | 23 | 语法 |
+| N | N001–N021 | 21 | 名字解析 |
+| I | I001–I006 | 6 | 类型推断 |
+| TA | TA01–TA08 | 8 | 赋值与绑定 |
+| TF | TF01–TF17 | 17 | 函数与调用 |
+| TB | TB01–TB09 | 9 | 二元运算 |
+| TU | TU01–TU03 | 3 | 一元运算 |
+| TC | TC01–TC07 | 7 | 控制流 |
+| TM | TM01–TM09 | 9 | Match/模式 |
+| TK | TK01–TK08 | 8 | 数组与切片 |
+| TS | TS01–TS04 | 4 | 结构体字面量 |
+| TG | TG01–TG02 | 2 | 泛型 |
+| B | B001–B010 | 10 | 借用 |
+| R | R001–R004 | 4 | 运行时 |
+| E | E001–E004 | 4 | I/O |
+| ICE | ICE01–ICE04 | 4 | 编译器内部 |
+| 总计 | | 150 | 计数约定见下注 |
+
+> 错误码数量有三种数法，引用时必须说明按哪一种：
+> 1. 本表加和 = 150（17 族的编号容量之和）；2. 本文档中的明细码行 = 149；
+> 3. `src/compiler/ast.cr` 实际定义的 `EC_*` 常量 = 137（`grep -cE '^EC_[A-Z_]+ *: *int *='`）。
+> 三者不等的已知原因：L 族（11 个）没有数值常量（`lexer.cr::add_error` 只传消息文本，见本文件开头的“L 族例外”），
+> 另外其余族有个别编号在文档侧占位，但没有对应的常量。两处的出处：码值以 `ast.cr` 为准，文档侧编号以本文件为准。

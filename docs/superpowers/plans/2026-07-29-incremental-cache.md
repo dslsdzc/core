@@ -1,42 +1,42 @@
-# 增量缓存 Implementation Plan
+# 增量缓存实现计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
 
-**Goal:** Add function-level `.cir` caching to the compiler. Each function's dataflow graph state is serialized to a file keyed by content hash. On subsequent compilations, unchanged functions skip tokenize→parse→check→IR gen, restoring their DFG from cache.
+目标：为编译器增加函数级 `.cir` 缓存。每个函数的数据流图状态序列化到文件，文件名由内容哈希决定。后续编译时，未改动的函数跳过 tokenize、parse、check、IR gen，直接从缓存恢复 DFG。
 
-**Architecture:** `cir_cache.cr` handles save/load of per-function `.cir` snapshots. `ir_gen.cr` calls cache check before each function. `main.cr` enables cache directory and wires the cache into the build pipeline. Fingerprint = hash of function body source text.
+架构：`cir_cache.cr` 负责单函数 `.cir` 快照的保存与加载。`ir_gen.cr` 在每个函数处理前检查缓存。`main.cr` 启用缓存目录，并把缓存接入构建管线。指纹是函数体源文本的哈希。
 
-**Tech Stack:** Core self-hosted compiler (ir_gen.cr, main.cr, new cir_cache.cr)
+技术栈：Core 自举编译器（ir_gen.cr、main.cr、新增 cir_cache.cr）
 
-## Global Constraints
+## 全局约束
 
-- Signature-change propagation (sig fingerprint mismatch → recompile callers) is deferred to a Phase 2 optimization. Phase 1 only checks func-level fingerprint. If body changed, the function is recompiled. Callers of unchanged functions always use their cached DFG regardless of callee signature changes.
+- 签名变更传播（sig 指纹不匹配时重编译调用方）留到阶段 2 优化。阶段 1 只检查函数级指纹。函数体改动时重编译该函数。未改动函数的调用方始终使用其缓存 DFG，不受被调方签名变化影响。
 
-- Cache is always on, no `--incremental` flag
-- `.cir` cache = binary snapshot of DFG arrays (g_df_nodes, g_ir_instrs, g_ir_vars, strings)
-- Uses existing `w64`/`r64` serialization primitives (same style as save_ccr/load_ccr)
-- Cache directory: `.core/cache/cir/`
-- func_id = filepath.replace("/", "_") + "::" + func_name (e.g., `src_compiler_main_cr::corec_main`)
-- Cache key = hash of function body source text (using existing `str_hash`)
-- Signature cache busting = hash of func name + param types + return type
-- Uses `jj` for version control
+- 缓存始终开启，不提供 `--incremental` 标志
+- `.cir` 缓存是 DFG 数组的二进制快照（g_df_nodes、g_ir_instrs、g_ir_vars、字符串）
+- 使用既有的 `w64`/`r64` 序列化原语（风格与 save_ccr/load_ccr 相同）
+- 缓存目录：`.core/cache/cir/`
+- func_id = filepath.replace("/", "_") + "::" + func_name（例如 `src_compiler_main_cr::corec_main`）
+- 缓存键是函数体源文本的哈希（使用既有的 `str_hash`）
+- 签名缓存失效键是函数名、参数类型和返回类型的哈希
+- 版本控制使用 `jj`
 
 ---
 
-### Task 1: Fingerprint Computation (dyn_arr.cr + helper)
+### 任务 1：计算指纹（dyn_arr.cr 与辅助函数）
 
-**Files:**
-- Modify: `src/compiler/dyn_arr.cr` (add `hash_bytes(data, len) -> int`)
-- Modify: `src/compiler/ir_gen.cr` (add `func_fingerprint` and `sig_fingerprint`)
+涉及文件：
+- 修改：`src/compiler/dyn_arr.cr`（添加 `hash_bytes(data, len) -> int`）
+- 修改：`src/compiler/ir_gen.cr`（添加 `func_fingerprint` 与 `sig_fingerprint`）
 
-**Interfaces:**
-- Produces: `fn hash_bytes(data: string, len: int) -> int` in dyn_arr.cr
-- Produces: `fn func_fingerprint(func_ast_node: int) -> int` in ir_gen.cr
-- Produces: `fn sig_fingerprint(func_ast_node: int) -> int` in ir_gen.cr
+接口：
+- 产出：dyn_arr.cr 中的 `fn hash_bytes(data: string, len: int) -> int`
+- 产出：ir_gen.cr 中的 `fn func_fingerprint(func_ast_node: int) -> int`
+- 产出：ir_gen.cr 中的 `fn sig_fingerprint(func_ast_node: int) -> int`
 
-- [ ] **Step 1: Add hash_bytes to dyn_arr.cr**
+- [ ] 步骤 1：在 dyn_arr.cr 中添加 hash_bytes
 
-Find the `str_hash` function and add a data-hash version:
+找到 `str_hash` 函数，添加一个对数据字节做哈希的版本：
 
 ```core
 // Hash arbitrary bytes (for function body content fingerprinting).
@@ -54,9 +54,9 @@ fn hash_bytes(data: string, len: int) -> int {
 }
 ```
 
-- [ ] **Step 2: Add fingerprint functions to ir_gen.cr**
+- [ ] 步骤 2：在 ir_gen.cr 中添加指纹函数
 
-Add at the end of ir_gen.cr (or after the helper functions section):
+在 ir_gen.cr 末尾（或辅助函数区之后）添加：
 
 ```core
 // Compute function body fingerprint: hash of the function body source text.
@@ -112,12 +112,12 @@ fn sig_fingerprint(func_node: int) -> int {
 }
 ```
 
-- [ ] **Step 3: Verify compilation**
+- [ ] 步骤 3：验证编译
 
-Run: `python3 build_selfhost_native.py 2>&1 | tail -2`
-Expected: BUILD SUCCESS
+运行：`python3 build_selfhost_native.py 2>&1 | tail -2`
+预期：BUILD SUCCESS
 
-- [ ] **Step 4: Commit**
+- [ ] 步骤 4：提交
 
 ```
 jj commit -m "feat: add hash_bytes and func/sig fingerprint functions"
@@ -125,17 +125,17 @@ jj commit -m "feat: add hash_bytes and func/sig fingerprint functions"
 
 ---
 
-### Task 2: cir_cache.cr — Save/Load .cir Snapshots
+### 任务 2：cir_cache.cr 保存与加载 .cir 快照
 
-**Files:**
-- Create: `src/compiler/cir_cache.cr`
+涉及文件：
+- 创建：`src/compiler/cir_cache.cr`
 
-**Interfaces:**
-- Produces: `fn save_cir_cache(path: string, func_idx: int) -> int`
-- Produces: `fn load_cir_cache(path: string, func_name: string) -> int`
-- Produces: `fn make_cir_cache_dir()`
+接口：
+- 产出：`fn save_cir_cache(path: string, func_idx: int) -> int`
+- 产出：`fn load_cir_cache(path: string, func_name: string) -> int`
+- 产出：`fn make_cir_cache_dir()`
 
-- [ ] **Step 1: Create cir_cache.cr**
+- [ ] 步骤 1：创建 cir_cache.cr
 
 ```core
 // === cir_cache.cr ===
@@ -393,14 +393,14 @@ fn make_cir_cache_dir() {
 }
 ```
 
-- [ ] **Step 2: Verify compilation**
+- [ ] 步骤 2：验证编译
 
 ```bash
 python3 build_selfhost_native.py 2>&1 | tail -2
 ```
-Expected: BUILD SUCCESS
+预期：BUILD SUCCESS
 
-- [ ] **Step 3: Commit**
+- [ ] 步骤 3：提交
 
 ```bash
 jj commit -m "feat: cir_cache.cr — save/load per-function .cir snapshots"
@@ -408,18 +408,18 @@ jj commit -m "feat: cir_cache.cr — save/load per-function .cir snapshots"
 
 ---
 
-### Task 3: Pipeline Integration — Cache Check in Build Flow
+### 任务 3：构建管线中的缓存检查
 
-**Files:**
-- Modify: `src/compiler/main.cr`
+涉及文件：
+- 修改：`src/compiler/main.cr`
 
-- [ ] **Step 1: Add cache check to the build pipeline**
+- [ ] 步骤 1：在构建管线中添加缓存检查
 
-Find the main build function where functions are processed. After `ir_gen_globals()` and before the function loop, add cache directory setup.
+找到处理各函数的主构建函数。在 `ir_gen_globals()` 之后、函数循环之前，添加缓存目录初始化。
 
-The key loop is around the `ir_gen_all_funcs` call. We need to modify the flow so each function checks cache before IR gen.
+关键循环在 `ir_gen_all_funcs` 调用附近。需要修改流程，让每个函数在 IR gen 之前检查缓存。
 
-Find where `ir_gen_all_funcs()` is called (around line 325-340). Replace with:
+找到 `ir_gen_all_funcs()` 的调用处（约第 325-340 行），替换为：
 
 ```core
     // Incremental cache: ensure cache directory exists
@@ -430,7 +430,7 @@ Find where `ir_gen_all_funcs()` is called (around line 325-340). Replace with:
     loop {
         if fi >= g_func_count { break; }
         df_begin_func(fi);
-        
+
         // Check cache before full IR gen
         name_ni := fi_name_ni(fi);
         name := istr_get(name_ni);
@@ -441,12 +441,12 @@ Find where `ir_gen_all_funcs()` is called (around line 325-340). Replace with:
         loop {
             if ci >= str_len(func_id) { break; }
             c := load8(func_id, ci);
-            if c == 47 { store8(cache_path, str_len(cache_path), 95); }  // / → _
+            if c == 47 { store8(cache_path, str_len(cache_path), 95); }  // / becomes _
             else { store8(cache_path, str_len(cache_path), c); }
             ci = ci + 1;
         }
         cache_path = cache_path + ".cir";
-        
+
         // Try loading from cache
         cached := load_cir_cache(cache_path);
         if cached == 0 {
@@ -465,39 +465,37 @@ Find where `ir_gen_all_funcs()` is called (around line 325-340). Replace with:
             // Save cache
             save_cir_cache(cache_path, fi);
         }
-        
+
         fi = fi + 1;
     }
 ```
 
-Note: The actual implementation needs to adapt to the existing `ir_gen_all_funcs()` function structure. The key points are:
-1. Call `make_cir_cache_dir()` before the function loop
-2. For each function, try `load_cir_cache(path)` first
-3. If cache hit, skip `ir_gen_func(fi)`
-4. If cache miss, call `ir_gen_func(fi)` then `save_cir_cache(path, fi)`
+注：实际实现要适配既有的 `ir_gen_all_funcs()` 函数结构。要点如下：
+1. 在函数循环之前调用 `make_cir_cache_dir()`
+2. 对每个函数先尝试 `load_cir_cache(path)`
+3. 缓存命中时跳过 `ir_gen_func(fi)`
+4. 缓存未命中时调用 `ir_gen_func(fi)`，再调用 `save_cir_cache(path, fi)`
 
-- [ ] **Step 2: Add cache-related helper functions**
+- [ ] 步骤 2：添加缓存相关辅助函数
 
-If needed, add helper to get the source file path for function ID construction.
+如有需要，添加辅助函数获取源文件路径，用于构造函数 ID。
 
 ```core
-fn get_source_path() -> string {
-    return g_source_path;  // already set during file loading
-}
+fn get_source_path() -> string:
+    return g_source_path  // already set during file loading
 
-fn fi_name_ni(fi: int) -> int {
-    return r64(g_ir_func_name_idx, fi * 8);
-}
+fn fi_name_ni(fi: int) -> int:
+    return r64(g_ir_func_name_idx, fi * 8)
 ```
 
-- [ ] **Step 3: Verify compilation**
+- [ ] 步骤 3：验证编译
 
 ```bash
 python3 build_selfhost_native.py 2>&1 | tail -2
 ```
-Expected: BUILD SUCCESS
+预期：BUILD SUCCESS
 
-- [ ] **Step 4: Commit**
+- [ ] 步骤 4：提交
 
 ```bash
 jj commit -m "feat: integrate .cir cache into build pipeline"
@@ -505,20 +503,20 @@ jj commit -m "feat: integrate .cir cache into build pipeline"
 
 ---
 
-### Task 4: Clean Cache Command
+### 任务 4：清理缓存命令
 
-**Files:**
-- Modify: `src/compiler/main.cr`
+涉及文件：
+- 修改：`src/compiler/main.cr`
 
-- [ ] **Step 1: Add clean-cache subcommand**
+- [ ] 步骤 1：添加 clean-cache 子命令
 
-Find the CLI command registration section. Add:
+找到 CLI 命令注册段，添加：
 
 ```core
     cli_cmd("clean-cache", "Delete incremental compilation cache");
 ```
 
-And in the command dispatch:
+并在命令分发处添加：
 
 ```core
     if str_eq(cmd, "clean-cache") != 0 {
@@ -530,9 +528,9 @@ And in the command dispatch:
     }
 ```
 
-For the initial implementation, a simple `rm -rf` instruction or a recursive delete function.
+初始实现可以打印一条 `rm -rf` 指令，或提供一个递归删除函数。
 
-- [ ] **Step 2: Commit**
+- [ ] 步骤 2：提交
 
 ```bash
 jj commit -m "feat: clean-cache subcommand"
@@ -540,45 +538,46 @@ jj commit -m "feat: clean-cache subcommand"
 
 ---
 
-### Task 5: Tests
+### 任务 5：测试
 
-**Files:**
-- Create: `tests/suite/cache_test.cr`
+涉及文件：
+- 创建：`tests/suite/cache_test.cr`
 
-- [ ] **Step 1: Write cache test**
+- [ ] 步骤 1：编写缓存测试
 
 ```core
 // Incremental cache test
 // Compiles a simple program twice, verifies the second run is faster
 // (or at least produces the same output).
 
-fn test_cache_basic() -> int {
+fn test_cache_basic() -> int:
     // First compilation creates cache
     // Second compilation should hit cache
     // This test verifies the mechanism works end-to-end
-    
+
     // For now, just verify the cache directory was created
     // by printing the cache status
-    print("cache dir: .core/cache/cir/\n");
-    return 0;
-}
+    print("cache dir: .core/cache/cir/\n")
+    return 0
 
-fn main() -> int {
-    r1 := test_cache_basic();
-    if r1 != 0 { print("FAIL: "); println(int_str(r1)); return r1; }
-    println("ALL PASS");
-    return 0;
-}
+fn main() -> int:
+    r1 := test_cache_basic()
+    if r1 != 0:
+        print("FAIL: ")
+        println(int_str(r1))
+        return r1
+    println("ALL PASS")
+    return 0
 ```
 
-- [ ] **Step 2: Verify type-check**
+- [ ] 步骤 2：验证类型检查
 
 ```bash
 ./build/corec check tests/suite/cache_test.cr
 ```
-Expected: ok
+预期：ok
 
-- [ ] **Step 3: Commit**
+- [ ] 步骤 3：提交
 
 ```bash
 jj commit -m "test: cache test suite"

@@ -2,56 +2,59 @@
 
 ## 概述
 
-Core 编译器的滚动更新（hotpatch）机制。通过 `@hotpatch` 注解支持函数的多版本共存、按比例流量分发、渐进式 rollout 和排水回收。
+Core 编译器的滚动更新（hotpatch）机制。`@hotpatch` 注解支持同一函数的多版本共存、按比例分发流量、逐步 rollout 和 drain 回收。
 
-基于现有子图边界 + Arena 隔离，不需要额外运行时。
+使用现有子图边界和 Arena 隔离，不需要额外运行时。
 
 ## 核心原则
 
-- **同名函数多版本共存**：`@hotpatch(ver=N)` 标记的函数允许同名，签名必须一致
-- **编译期路由节点**：调用点 emit `IR_HOTPATCH_ROUTE`，运行时根据配置选择版本
-- **运行时配置**：`.hotpatch.toml` 配置文件，SIGHUP 信号重读
-- **排水安全**：in_flight 计数追踪进行中请求，drain 完成后回收旧版本
+- 同名函数多版本共存：带 `@hotpatch(ver=N)` 标记的函数允许同名，签名必须一致
+- 编译期路由节点：调用点 emit `IR_HOTPATCH_ROUTE`，运行时根据配置选择版本
+- 运行时配置：读取 `.hotpatch.toml` 配置文件，收到 SIGHUP 信号后重新读取
+- drain 安全：用 `in_flight` 计数追踪进行中的请求，drain 完成后回收旧版本
 
 ## IR 指令
 
 ```core
-IR_HOTPATCH_ROUTE : int = 39;  // dest=result_var, s1=fn_name_ni, s2=first_arg, s3=arg_count
+IR_HOTPATCH_ROUTE : int = 39  // dest=result_var, s1=fn_name_ni, s2=first_arg, s3=arg_count
 ```
 
-`IR_HOTPATCH_ROUTE` 在调用点替代 `IR_CALL`。后端将其编译为：
+`IR_HOTPATCH_ROUTE` 在调用点替代 `IR_CALL`。后端把它编译为：
 
 1. 加载 `g_hotpatch_config[fn_name]` 配置
 2. 根据权重随机数选择版本
 3. 跳转到对应版本的函数体
-4. 函数入口 `g_hotpatch_inflight[fn_name_vN]++`
-5. 函数返回前 `g_hotpatch_inflight[fn_name_vN]--`
+4. 函数入口执行 `g_hotpatch_inflight[fn_name_vN]++`
+5. 函数返回前执行 `g_hotpatch_inflight[fn_name_vN]--`
 
 ## 解析器
 
-**新增关键字**：`@hotpatch` 作为 `@` 内建原语扩展。
+新增关键字：`@hotpatch` 作为 `@` 内建原语的扩展。
 
 ```core
-@hotpatch(ver=1) fn handle(x: dyn) -> dyn { body1 }
-@hotpatch(ver=2) fn handle(x: dyn) -> dyn { body2 }
+@hotpatch(ver=1) fn handle(x: dyn) -> dyn:
+    body1
+@hotpatch(ver=2) fn handle(x: dyn) -> dyn:
+    body2
 ```
 
 解析器：
-- `@hotpatch(...)` → `EXPR_AT("hotpatch", args)` 处理
-- 参数解析：`ver=1` 表示版本号，`canary="5%"` 表示金丝雀比例
-- 内部存储：函数符号表允许同名条目，附加版本号标签
+- `@hotpatch(...)` 按 `EXPR_AT("hotpatch", args)` 处理
+- 参数解析：`ver=1` 表示版本号，`canary="5%"` 表示 canary 比例
+- 内部存储：函数符号表允许同名条目，并附加版本号标签
 
 ## 类型检查器
 
 允许同名函数共存的条件：
+
 1. 所有版本都有 `@hotpatch` 注解
-2. 所有版本的签名完全相同（参数类型 + 返回类型）
+2. 所有版本的签名完全相同（参数类型和返回类型）
 3. 版本号唯一且递增
 
 ## IR 生成
 
 ```core
-// 调用点 emit 路由而非直接 call
+// 调用点 emit 路由指令，不直接 call
 if is_hotpatch(fn_name_ni) {
     emit(IR_HOTPATCH_ROUTE, dest, fn_name_ni, first_arg, arg_count);
 } else {
@@ -69,7 +72,7 @@ g_hp_config  : string, mut;  // 序列化配置表
 g_hp_inflight : string, mut;  // in_flight 计数数组
 ```
 
-### 配置格式（.hotpatch.toml）
+### 配置格式（`.hotpatch.toml`）
 
 ```toml
 [hotpatch.handle]
@@ -82,12 +85,12 @@ rollout = 50        # 50% 流量到新版本
 # 或 100% + drain
 [hotpatch.handle]
 rollout = 100
-drain = true        # 旧版本开始排水
+drain = true        # 旧版本开始 drain
 ```
 
 ### 信号处理
 
-SIGHUP 信号 → 重新读取 `.hotpatch.toml` → 更新 `g_hp_config`。
+收到 SIGHUP 信号后重新读取 `.hotpatch.toml`，更新 `g_hp_config`。
 
 ### Drain 流程
 
@@ -97,7 +100,7 @@ SIGHUP 信号 → 重新读取 `.hotpatch.toml` → 更新 `g_hp_config`。
 3. 函数入口 g_hp_inflight[fn_v1]++
 4. 函数返回前 g_hp_inflight[fn_v1]--
 5. 后台/定时检查 in_flight 是否为 0
-6. 为 0 → 回收 v1 的子图数据
+6. 为 0 时回收 v1 的子图数据
 ```
 
 ## 实现清单

@@ -16,44 +16,63 @@ CHECK_CASES = [
     (
         "method returns constant",
         """
-struct Vec { x: int, y: int }
-impl Vec { fn get_x(self: Vec) -> int { return 42; } }
-fn main() -> int { v := Vec { x = 10, y = 20 }; return v.get_x(); }
+struct Vec:
+    x: int, y: int
+impl Vec:
+    fn get_x(self: Vec) -> int:
+        return 42
+fn main() -> int:
+    v := Vec { x = 10, y = 20 }
+    return v.get_x()
 """,
     ),
     (
         "method reads self.x",
         """
-struct Vec { x: int, y: int }
-impl Vec { fn get_x(self: Vec) -> int { return self.x; } }
-fn main() -> int { v := Vec { x = 10, y = 20 }; return v.get_x(); }
+struct Vec:
+    x: int, y: int
+impl Vec:
+    fn get_x(self: Vec) -> int:
+        return self.x
+fn main() -> int:
+    v := Vec { x = 10, y = 20 }
+    return v.get_x()
 """,
     ),
     (
         "struct field read",
         """
-struct Pos { x: int }
-fn main() -> int { p := Pos { x = 42 }; return p.x; }
+struct Pos:
+    x: int
+fn main() -> int:
+    p := Pos { x = 42 }
+    return p.x
 """,
     ),
     (
         "method with self param",
         """
-struct Vec { x: int, y: int }
-impl Vec { fn sum(self: Vec) -> int { return self.x + self.y; } }
-fn main() -> int { v := Vec { x = 10, y = 20 }; return v.sum(); }
+struct Vec:
+    x: int, y: int
+impl Vec:
+    fn sum(self: Vec) -> int:
+        return self.x + self.y
+fn main() -> int:
+    v := Vec { x = 10, y = 20 }
+    return v.sum()
 """,
     ),
     (
         "method returning struct",
         """
-struct Point { x: int, y: int }
-impl Point {
-    fn double(self: Point) -> Point {
-        return Point { x = self.x * 2, y = self.y * 2 };
-    }
-}
-fn main() -> Point { p := Point { x = 5, y = 7 }; return p.double(); }
+struct Point:
+    x: int, y: int
+impl Point:
+    fn double(self: Point) -> Point:
+        return Point { x = self.x * 2, y = self.y * 2 }
+fn main() -> Point:
+    p := Point { x = 5, y = 7 }
+    return p.double()
 """,
     ),
 ]
@@ -63,25 +82,32 @@ NATIVE_CASES = [
     (
         "self_method",
         """
-struct Point { x: int, y: int }
-impl Point { fn get_x(&self) -> int { return self.x; } }
-fn main() -> int { p := Point { x = 42, y = 100 }; return p.get_x(); }
+struct Point:
+    x: int, y: int
+impl Point:
+    fn get_x(&self) -> int:
+        return self.x
+fn main() -> int:
+    p := Point { x = 42, y = 100 }
+    return p.get_x()
 """,
         42,
     ),
     (
         "mut_self_method",
         """
-struct Counter { val: int }
-impl Counter {
-    fn inc(&mut self) { self.val = self.val + 1; }
-    fn get(&self) -> int { return self.val; }
-}
-fn main() -> int {
-    c : ., mut = Counter { val = 5 };
-    c.inc(); c.inc();
-    return c.get();
-}
+struct Counter:
+    val: int
+impl Counter:
+    fn inc(&mut self):
+        self.val = self.val + 1
+    fn get(&self) -> int:
+        return self.val
+fn main() -> int:
+    c : ., mut = Counter { val = 5 }
+    c.inc()
+    c.inc()
+    return c.get()
 """,
         7,
     ),

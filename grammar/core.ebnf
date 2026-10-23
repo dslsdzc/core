@@ -1,28 +1,45 @@
 (*** 顶层结构 ***)
 CompilationUnit = { FileIdDecl | ModuleDecl | ImportDecl } { TopLevelDecl } ;
 
-FileIdDecl = 'fileid' STRING_LIT ';' ;
-ModuleDecl = 'mod' Path ';' ;
-ImportDecl = 'import' [ '@' IDENT ] IDENT [ ':' IDENT ] ';' ;
+FileIdDecl = 'fileid' STRING_LIT ;
+ModuleDecl = 'mod' Path ;
+ImportDecl = 'import' [ '@' IDENT ] IDENT [ ':' IDENT ] ;
 Path = IDENT { '::' IDENT } ;
 
 TopLevelDecl = FunctionDecl | FlowDecl | StructDecl | EnumDecl | InterfaceDecl | ImplDecl | TypeAlias ;
 
 (*** 函数 ***)
-FunctionDecl = [ 'pub' ] 'fn' IDENT [ GenericParams ] '(' [ ParamList ] ')' '->' Type
-               ( FunctionBody | '=' Expr ';' ) ;
+(* v4：函数体 = 签名后 `:` + layout region；规约标注（批 6）位于 region 开头，
+   产生式统一用 Annotation（见下方「规约标注」节），不再另立 VerificationAnnotation。 *)
+FunctionDecl = [ 'pub' ] 'fn' IDENT '(' [ ParamList ] ')' [ '->' Type ] ':'
+               FunctionLayout ;
+
+FunctionLayout = { Annotation } { Statement } ;
+SpecExpr = ( QuantifiedSpec | LogicalOr ) [ '==>' SpecExpr ] ;
+QuantifiedSpec = ( 'forall' | 'exists' ) '(' IDENT ':' Type ')' '=>' SpecExpr ;
 
 GenericParams = '[' IDENT { ',' IDENT } ']' ;
 ParamList = Param { ',' Param } ;
 Param = IDENT ':' Type ;
 
-FunctionBody = Block ;
+FlowDecl = 'flow' IDENT '(' [ ParamList ] ')' [ '->' Type ] ':' FlowLayout ;
 
-FlowDecl = 'flow' IDENT [ GenericParams ] '(' [ ParamList ] ')' '->' Type
-            ( FunctionBody | '=' Expr ';' ) ;
+FlowLayout = { Annotation } { Statement } ;
+
+(*** 规约标注（批 6；2026-09-17 正式接入）***)
+(* 位置 = **签名之后、body 之前**（spec-design §四）；可多条，按源序。
+   终结符 `ANNOT_HASH` = 词法 `#`（self-hosted `T_HASH = 101`；bootstrap `TokenType.HASH`）。
+   **`check`/`ensure` 是普通 IDENT 而非关键字**（本仓已有 `fn check`（parser.cr:30）与 CLI
+   子命令 "check"（main.cr:235）⇒ 做成关键字会当场打断自源）——故产生式里写 IDENT，
+   具体比对 `#check` / `#ensure` 由 parser 按词素做，未知标签 = error[V02]。
+   语义：标注**不影响运行时**（不产 IR；裁-S4「不编图」）——本刀只登记 + 常量折叠判定，
+   未证（yellow）不阻断编译；唯一硬错 = `#check(常量假)` ⇒ error[V01]。见
+   docs/superpowers/plans/2026-09-17-spec-grammar.md。 *)
+Annotation = ANNOT_HASH IDENT '(' SpecExpr ')' ;
 
 (*** 类型 ***)
-Type = BaseType | PathType | RefType | OptionalType | TupleType | ArrayType | SliceType ;
+Type = BaseType | PathType | RefType | PtrType | OptionalType | FunctionType
+     | TupleType | ArrayType | SliceType | '.' | 'auto' | TypeOf ;
 (* 注：'Self' 非词法关键字——lexer.cr lookup_keyword() 无 Self，按标识符解析；
    接口方法签名中的 Self 由 checker 按上下文处理，以源码实现为准 *)
 BaseType = 'int' | 'dex' | 'bool' | 'string' | 'char' | 'unit' | 'never' | 'Self' ;
@@ -30,16 +47,19 @@ BaseType = 'int' | 'dex' | 'bool' | 'string' | 'char' | 'unit' | 'never' | 'Self
    'apx' 标签（近似授权，后端 binary64 快路径） *)
 PathType = Path ;
 RefType = '&' [ 'mut' ] Type ;
+PtrType = '*' Type ;
 OptionalType = Type '?' ;
+FunctionType = 'fn' '(' [ Type { ',' Type } ] ')' '->' Type ;
+TypeOf = 'typeof' '(' Expr ')' ;
 TupleType = '(' [ Type { ',' Type } ] ')' ;
 ArrayType = '[' Type ';' INT_LIT ']' ;
 SliceType = '[' Type ']' ;
 
 (*** 表达式 ***)
 Expr = Assignment | LogicalOr ;
-Assignment = [ Let | Move ] LogicalOr [ '=' LogicalOr ] ;
+Assignment = [ Let ] Pipeline [ '=' Pipeline ] ;
 Let = IDENT [ ':' ( Type | 'auto' | '.' ) [ ',' Tag { ',' Tag } ] ] ( ':=' | '=' ) ;
-Move = 'move' IDENT '=' ;
+Pipeline = LogicalOr { '|>' LogicalOr } ;
 
 LogicalOr = LogicalAnd { '||' LogicalAnd } ;
 LogicalAnd = Equality { '&&' Equality } ;
@@ -48,56 +68,62 @@ Comparison = Addition { ('<' | '>' | '<=' | '>=') Addition } ;
 Addition = Multiplication { ('+' | '-') Multiplication } ;
 Multiplication = Unary { ('*' | '/' | '%') Unary } ;
 Unary = ('-' | '!' | '&' | '&mut') Unary | CallOrField ;
-CallOrField = Primary { '(' [ ArgList ] ')' | '.' IDENT | '[' Expr ']' | '?' } ;
-Primary = Literal | IDENT | ProjectAccess | '(' Expr ')' | 'move' Primary | BlockExpr | IfExpr | MatchExpr | LoopExpr | ForExpr | GoExpr | AwaitExpr | UnsafeExpr ;
+CallOrField = Primary { '(' [ ArgList ] ')' | '.' IDENT | '[' Expr ']' } ;
+Primary = Literal | IDENT | ProjectAccess | '(' Expr ')' | LambdaExpr | IfExpr | MatchExpr | LoopExpr | ForExpr | GoExpr | AwaitExpr | UnsafeExpr ;
 ProjectAccess = '@' IDENT IDENT '::' IDENT ;
 
 ArgList = Expr { ',' Expr } ;
 
 (* 注：DEX_LIT（`3.14` 十进制小数，词法令牌名 T_DEX，原 T_FLOAT）默认产生 dex（精确
-   定点小数，数值迁移 Task 4）；f32/f64 后缀 = apx CPU 位宽标注（见数值类型设计，
-   2026-08-16；lexer 消费后缀后仅发 T_DEX，宽度透传为已知缺口） *)
-Literal = INT_LIT | DEX_LIT | STRING_LIT | CHAR_LIT | BOOL_LIT | UNIT_LIT | 'None' | 'Some' '(' Expr ')' ;
-BlockExpr = Block ;
-IfExpr = 'if' Expr Block [ 'else' ( Block | IfExpr ) ] ;
-MatchExpr = 'match' Expr '{' MatchArm { ',' MatchArm } '}' ;
-MatchArm = Pattern '=>' Expr ;
+   定点小数，数值迁移 Task 4）；f32/f64 后缀已退役（2026-09-10 语言面收窄 §2）——词法
+   对数字字面量的字母后缀一律响亮报错，宽度 = 机器形状，归映射层（数值类型设计，
+   2026-08-16） *)
+Literal = INT_LIT | DEX_LIT | STRING_LIT | CHAR_LIT | BOOL_LIT | UNIT_LIT | 'none' ;
+LambdaExpr = 'fn' '(' [ ParamList ] ')' [ '->' Type ] ( '=>' Expr | ':' Layout ) ;
+IfExpr = 'if' Expr ':' Layout [ 'else' ( IfExpr | ':' Layout ) ] ;
+MatchExpr = 'match' Expr ':' MatchLayout ;
+MatchLayout = MatchArm { MatchArm } ;
+MatchArm = '|' Pattern '=>' ( Expr | Layout ) ;
 Pattern = Literal | IDENT | TuplePattern | StructPattern | EnumPattern | '_' ;
 TuplePattern = '(' [ Pattern { ',' Pattern } ] ')' ;
 StructPattern = Path '{' [ FieldPattern { ',' FieldPattern } ] '}' ;
 FieldPattern = IDENT '=' Pattern ;
 EnumPattern = Path '(' [ Pattern { ',' Pattern } ] ')' | Path ;
 
-LoopExpr = 'loop' Block ;
-ForExpr = 'for' IDENT 'in' Expr Block ;
+LoopExpr = 'loop' ':' LoopLayout ;
+LoopLayout = { LoopVerification } { Statement } ;
+LoopVerification = '#' ( 'invariant' | 'variant' ) '(' SpecExpr ')' ;
+ForExpr = 'for' IDENT 'in' Expr ':' LoopLayout ;
 
 GoExpr = 'go' Expr ;
 AwaitExpr = 'await' Expr ;
-UnsafeExpr = 'unsafe' Block ;
+UnsafeExpr = 'unsafe' ':' Layout ;
 
-Block = '{' { Statement } '}' ;
-Statement = Expr ';' | LetStmt | ReturnStmt | YieldStmt | BreakStmt | ContinueStmt ;
+(* Layout is established by ':' plus relative indentation. The first child
+   establishes the sibling anchor; a shallower column closes the region. *)
+Layout = { Statement } ;
+Statement = Expr | LetStmt | ReturnStmt | YieldStmt | BreakStmt | ContinueStmt ;
 
-LetStmt = IDENT [ ':' ( Type | 'auto' | '.' ) [ ',' Tag { ',' Tag } ] ] ( ':=' | '=' ) Expr ';' ;
+LetStmt = IDENT [ ':' ( Type | 'auto' | '.' ) [ ',' Tag { ',' Tag } ] ] ( ':=' | '=' ) Expr ;
 
 (* 变量标签：mut 可变 / pub 公开 / apx 近似授权（后端变换许可，与 mut/pub 同族——
    数值类型设计 2026-08-16） *)
 Tag = 'mut' | 'pub' | 'apx' ;
-ReturnStmt = 'return' [ Expr ] ';' ;
-YieldStmt = 'yield' Expr ';' ;
-BreakStmt = 'break' ';' ;
-ContinueStmt = 'continue' ';' ;
+ReturnStmt = 'return' [ Expr ] ;
+YieldStmt = 'yield' Expr ;
+BreakStmt = 'break' ;
+ContinueStmt = 'continue' ;
 
 (*** 复合类型声明 ***)
-StructDecl = [ 'pub' ] 'struct' IDENT GenericParams? '{' { FieldDecl ',' } '}' ;
+StructDecl = [ 'pub' ] 'struct' IDENT ':' { FieldDecl } ;
 FieldDecl = IDENT ':' Type ;
 
-EnumDecl = [ 'pub' ] 'enum' IDENT GenericParams? '{' Variant { ',' Variant } '}' ;
+EnumDecl = [ 'pub' ] 'enum' IDENT ':' { '|' Variant } ;
 Variant = IDENT [ '(' Type { ',' Type } ')' ] ;
 
-InterfaceDecl = [ 'pub' ] 'interface' IDENT GenericParams? '{' { InterfaceMethod ';' } '}' ;
+InterfaceDecl = [ 'pub' ] 'interface' IDENT ':' { InterfaceMethod } ;
 InterfaceMethod = 'fn' IDENT '(' [ ParamList ] ')' '->' Type ;
 
-ImplDecl = 'impl' [ GenericParams? ] Path [ 'for' Path ] '{' { FunctionDecl } '}' ;
+ImplDecl = 'impl' Path [ 'for' Path ] ':' { FunctionDecl } ;
 
-TypeAlias = 'type' IDENT '=' Type ';' ;
+TypeAlias = 'type' IDENT '=' Type ;

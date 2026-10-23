@@ -1,56 +1,56 @@
-# 动态类型 Implementation Plan
+# 动态类型实现计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> 受众：执行本计划的 agentic worker。必需子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
 
-**Goal:** Add `dyn` dynamic typing to Core — variables declared as `dyn` can hold different types across paths, compiler tracks all possible types, generates tagged unions at merge points.
+目标：为 Core 增加 `dyn` 动态类型。声明为 `dyn` 的变量在不同控制流路径上可以持有不同类型，编译器跟踪全部可能类型，并在汇合点生成带标签的联合体。
 
-**Architecture:** `TI_DYN(7)` / `TYP_DYN(11)` type system. `IR_DYN_TAG(41)` / `IR_DYN_VAL(42)` / `IR_DYN_PACK(43)` / `IR_DYN_DISPATCH(44)` for runtime representation. Checker tracks per-variable type sets through control flow.
+架构：类型系统使用 `TI_DYN(7)` 与 `TYP_DYN(11)`。运行期表示使用 `IR_DYN_TAG(41)`、`IR_DYN_VAL(42)`、`IR_DYN_PACK(43)`、`IR_DYN_DISPATCH(44)`。类型检查器沿控制流跟踪每个变量的类型集合。
 
-**Tech Stack:** Core self-hosted compiler parser → checker → IR gen → ELF backend
+技术栈：Core 自举编译器的 parser、checker、IR gen、ELF 后端
 
-## Global Constraints
+## 全局约束
 
-- `TI_DYN = 7`, `TYP_DYN = 11`, token `T_DYN = 48`
-- `IR_DYN_TAG = 41`, `IR_DYN_VAL = 42`, `IR_DYN_PACK = 43`, `IR_DYN_DISPATCH = 44`
-- `ESZ_IRV = 24` (existing) — dyn variables use `irv_extra` field for width
-- Single-path dyn = underlying type (8 bytes); multi-path dyn = 16 bytes (tag+value)
-- Uses `jj` for version control
+- `TI_DYN = 7`、`TYP_DYN = 11`、token `T_DYN = 48`
+- `IR_DYN_TAG = 41`、`IR_DYN_VAL = 42`、`IR_DYN_PACK = 43`、`IR_DYN_DISPATCH = 44`
+- `ESZ_IRV = 24`（既有值），dyn 变量用 `irv_extra` 字段表示宽度
+- 单路径 dyn 使用底层类型（8 字节）；多路径 dyn 使用 16 字节（tag + value）
+- 版本控制使用 `jj`
 
 ---
 
-### Task 1: Token + Type Constants
+### 任务 1：token 与类型常量
 
-**Files:**
-- Modify: `src/compiler/ast.cr`
-- Modify: `src/compiler/keywords.cr`
+涉及文件：
+- 修改：`src/compiler/ast.cr`
+- 修改：`src/compiler/keywords.cr`
 
-- [ ] **Step 1: Add type constants to ast.cr**
+- [ ] 步骤 1：在 ast.cr 中添加类型常量
 
-After `TI_CHAR : int = 6;`:
+在 `TI_CHAR : int = 6;` 之后添加：
 ```core
-TI_DYN : int = 7;    // dynamic type
+TI_DYN : int = 7    // dynamic type
 ```
 
-After `TYP_TUPLE : int = 10;`:
+在 `TYP_TUPLE : int = 10;` 之后添加：
 ```core
-TYP_DYN : int = 11;  // data = type set bitmap (0 = single known type)
+TYP_DYN : int = 11  // data = type set bitmap (0 = single known type)
 ```
 
-After `IR_SECTION : int = 38;`:
+在 `IR_SECTION : int = 38;` 之后添加：
 ```core
-IR_DYN_TAG      : int = 41;  // dest=tag_var, s1=dyn_var — extract tag
-IR_DYN_VAL      : int = 42;  // dest=val_var, s1=dyn_var — extract value
-IR_DYN_PACK     : int = 43;  // dest=dyn_var, s1=val_var, s2=type_idx — pack dyn
-IR_DYN_DISPATCH : int = 44;  // s1=dyn_var, s2=dispatch_table_ni — dispatch by tag
+IR_DYN_TAG      : int = 41  // dest=tag_var, s1=dyn_var — extract tag
+IR_DYN_VAL      : int = 42  // dest=val_var, s1=dyn_var — extract value
+IR_DYN_PACK     : int = 43  // dest=dyn_var, s1=val_var, s2=type_idx — pack dyn
+IR_DYN_DISPATCH : int = 44  // s1=dyn_var, s2=dispatch_table_ni — dispatch by tag
 ```
 
-- [ ] **Step 2: Add token to keywords.cr**
+- [ ] 步骤 2：在 keywords.cr 中添加 token
 
 ```core
-T_DYN : int = 48;
+T_DYN : int = 48
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] 步骤 3：提交
 
 ```bash
 jj commit -m "feat: add TI_DYN/TYP_DYN/IR_DYN_* type and IR constants"
@@ -58,14 +58,14 @@ jj commit -m "feat: add TI_DYN/TYP_DYN/IR_DYN_* type and IR constants"
 
 ---
 
-### Task 2: Parser — dyn Keyword + Variable Declarations
+### 任务 2：Parser 处理 dyn 关键字与变量声明
 
-**Files:**
-- Modify: `src/compiler/parser.cr`
+涉及文件：
+- 修改：`src/compiler/parser.cr`
 
-- [ ] **Step 1: Add `dyn` to parse_type**
+- [ ] 步骤 1：在 parse_type 中添加 `dyn`
 
-Find where `int`, `float`, `bool`, `string`, `char` are matched in `parse_type()` or `parse_primary()`. Add `dyn`:
+找到 `parse_type()` 或 `parse_primary()` 中匹配 `int`、`float`、`bool`、`string`、`char` 的位置，添加 `dyn`：
 
 ```core
 else if lex == "dyn" {
@@ -73,11 +73,11 @@ else if lex == "dyn" {
 }
 ```
 
-- [ ] **Step 2: Handle `dyn` type in variable declarations**
+- [ ] 步骤 2：在变量声明中处理 `dyn` 类型
 
-In `parse_decl()` (or wherever `:` type annotations are parsed), when the type is `TI_DYN`, store it as the variable's type. The existing `:` syntax already handles recording the type — `TI_DYN` just flows through naturally.
+在 `parse_decl()`（或解析 `:` 类型标注的位置），类型为 `TI_DYN` 时将其存为变量类型。既有的 `:` 语法已经会记录类型，`TI_DYN` 可以直接沿用这条路径。
 
-- [ ] **Step 3: Commit**
+- [ ] 步骤 3：提交
 
 ```bash
 jj commit src/compiler/parser.cr -m "feat: parse dyn keyword"
@@ -85,49 +85,69 @@ jj commit src/compiler/parser.cr -m "feat: parse dyn keyword"
 
 ---
 
-### Task 3: Checker — Type Set Tracking
+### 任务 3：类型检查器跟踪类型集合
 
-**Files:**
-- Modify: `src/compiler/checker.cr`
+涉及文件：
+- 修改：`src/compiler/checker.cr`
 
-- [ ] **Step 1: Add type set tracking infrastructure**
+- [ ] 步骤 1：添加类型集合跟踪基础设施
 
 ```core
 // Per-variable type set: bitmap of possible types for dyn variables
-g_dyn_type_sets : string, mut;  // dyn type info per variable
-g_dyn_type_set_count : int, mut;
-g_dyn_type_set_cap : int, mut;
+g_dyn_type_sets : string, mut  // dyn type info per variable
+g_dyn_type_set_count : int, mut
+g_dyn_type_set_cap : int, mut
 
-fn grow_dyn_type_sets(needed: int) {
-    if needed < g_dyn_type_set_cap { return; }
-    nc := g_dyn_type_set_cap * 2; if nc < 64 { nc = 64; } if nc < needed { nc = needed + 64; }
-    nb := alloc(nc * 8); _dyncpy(g_dyn_type_sets, g_dyn_type_set_cap * 8, nb);
-    g_dyn_type_sets = nb; g_dyn_type_set_cap = nc;
-}
+fn grow_dyn_type_sets(needed: int):
+    if needed < g_dyn_type_set_cap:
+        return
+    nc := g_dyn_type_set_cap * 2
+    if nc < 64:
+        nc = 64
+    if nc < needed:
+        nc = needed + 64
+    nb := alloc(nc * 8)
+    _dyncpy(g_dyn_type_sets, g_dyn_type_set_cap * 8, nb)
+    g_dyn_type_sets = nb
+    g_dyn_type_set_cap = nc
 
 // Set a bit in the type set for a variable
-fn dyn_set_type(var_idx: int, ti: int) {
-    grow_dyn_type_sets(var_idx + 1);
-    old := r64(g_dyn_type_sets, var_idx * 8);
-    bit := 1;
-    if ti >= 0 && ti < 64 { bit = 1; shl := ti; loop { if shl <= 0 { break; } bit = bit * 2; shl = shl - 1; } }
-    w64(g_dyn_type_sets, var_idx * 8, old + bit);
-}
+fn dyn_set_type(var_idx: int, ti: int):
+    grow_dyn_type_sets(var_idx + 1)
+    old := r64(g_dyn_type_sets, var_idx * 8)
+    bit := 1
+    if ti >= 0 && ti < 64:
+        bit = 1
+        shl := ti
+        loop:
+            if shl <= 0:
+                break
+            bit = bit * 2
+            shl = shl - 1
+    w64(g_dyn_type_sets, var_idx * 8, old + bit)
 
 // Check if a type is in the set
-fn dyn_has_type(var_idx: int, ti: int) -> int {
-    if var_idx < 0 || var_idx >= g_dyn_type_set_count { return 0; }
-    set := r64(g_dyn_type_sets, var_idx * 8);
-    bit := 1;
-    if ti >= 0 && ti < 64 { bit = 1; shl := ti; loop { if shl <= 0 { break; } bit = bit * 2; shl = shl - 1; } }
-    if (set / bit) % 2 != 0 { return 1; }
-    return 0;
-}
+fn dyn_has_type(var_idx: int, ti: int) -> int:
+    if var_idx < 0 || var_idx >= g_dyn_type_set_count:
+        return 0
+    set := r64(g_dyn_type_sets, var_idx * 8)
+    bit := 1
+    if ti >= 0 && ti < 64:
+        bit = 1
+        shl := ti
+        loop:
+            if shl <= 0:
+                break
+            bit = bit * 2
+            shl = shl - 1
+    if (set / bit) % 2 != 0:
+        return 1
+    return 0
 ```
 
-- [ ] **Step 2: Track types at assignment**
+- [ ] 步骤 2：在赋值处记录类型
 
-In the checker's assignment handling, when the target variable is `TI_DYN`, record the RHS type:
+在类型检查器的赋值处理中，目标变量为 `TI_DYN` 时记录右侧表达式的类型：
 
 ```core
 if target_type == TI_DYN {
@@ -135,22 +155,21 @@ if target_type == TI_DYN {
 }
 ```
 
-- [ ] **Step 3: Merge type sets at control flow join points**
+- [ ] 步骤 3：在控制流汇合点合并类型集合
 
-In if/else handling, after processing both branches, merge dyn type sets:
+在 if/else 处理中，两个分支都处理完后合并 dyn 类型集合：
 
 ```core
-fn merge_dyn_types(target_var: int, then_set: int, else_set: int) {
+fn merge_dyn_types(target_var: int, then_set: int, else_set: int):
     // Union the type sets
-    w64(g_dyn_type_sets, target_var * 8, then_set + else_set);
-}
+    w64(g_dyn_type_sets, target_var * 8, then_set + else_set)
 ```
 
-- [ ] **Step 4: Validate method calls on dyn values**
+- [ ] 步骤 4：校验 dyn 值上的方法调用
 
-When a method is called on a `dyn` value, check that ALL types in the set support that method. If any type doesn't, emit error.
+在 `dyn` 值上调用方法时，检查集合中的所有类型都支持该方法。有任一类型不支持则报错。
 
-- [ ] **Step 5: Commit**
+- [ ] 步骤 5：提交
 
 ```bash
 jj commit src/compiler/checker.cr -m "feat: checker dyn type set tracking + control flow merge"
@@ -158,15 +177,15 @@ jj commit src/compiler/checker.cr -m "feat: checker dyn type set tracking + cont
 
 ---
 
-### Task 4: IR Opcodes Registration
+### 任务 4：注册 IR opcode
 
-**Files:**
-- Modify: `src/compiler/dataflow.cr`
-- Modify: `src/compiler/opt.cr`
-- Modify: `src/compiler/ccr_io.cr`
-- Modify: `src/compiler/dyn_arr.cr` (add ESZ_IRV_NEW if needed)
+涉及文件：
+- 修改：`src/compiler/dataflow.cr`
+- 修改：`src/compiler/opt.cr`
+- 修改：`src/compiler/ccr_io.cr`
+- 修改：`src/compiler/dyn_arr.cr`（如有需要，添加 ESZ_IRV_NEW）
 
-- [ ] **Step 1: Register in df_opcode_name**
+- [ ] 步骤 1：在 df_opcode_name 中登记
 
 ```core
 if opcode == IR_DYN_TAG { return "dyn_tag"; }
@@ -175,7 +194,7 @@ if opcode == IR_DYN_PACK { return "dyn_pack"; }
 if opcode == IR_DYN_DISPATCH { return "dyn_dispatch"; }
 ```
 
-- [ ] **Step 2: Register in df_connect_srcs**
+- [ ] 步骤 2：在 df_connect_srcs 中登记
 
 ```core
 if opcode == IR_DYN_TAG { df_use_var(nid, s1); return; }
@@ -184,7 +203,7 @@ if opcode == IR_DYN_PACK { df_use_var(nid, s1); return; }
 if opcode == IR_DYN_DISPATCH { df_use_var(nid, s1); return; }
 ```
 
-- [ ] **Step 3: Skip in opt.cr**
+- [ ] 步骤 3：在 opt.cr 中跳过
 
 ```core
 if op == IR_DYN_TAG { ii = ii + 1; continue; }
@@ -193,11 +212,11 @@ if op == IR_DYN_PACK { ii = ii + 1; continue; }
 if op == IR_DYN_DISPATCH { ii = ii + 1; continue; }
 ```
 
-- [ ] **Step 4: Add to ccr_io.cr save/load**
+- [ ] 步骤 4：加入 ccr_io.cr 的 save/load
 
-Follow the standard 6-field pattern for each new opcode.
+每个新 opcode 按标准的 6 字段模式处理。
 
-- [ ] **Step 5: Commit**
+- [ ] 步骤 5：提交
 
 ```bash
 jj commit -m "feat: register IR_DYN_TAG/VAL/PACK/DISPATCH in dataflow/passes/ccr"
@@ -205,14 +224,14 @@ jj commit -m "feat: register IR_DYN_TAG/VAL/PACK/DISPATCH in dataflow/passes/ccr
 
 ---
 
-### Task 5: IR Gen — Dyn Pack + Dispatch
+### 任务 5：IR Gen 的 dyn 打包与分发
 
-**Files:**
-- Modify: `src/compiler/ir_gen.cr`
+涉及文件：
+- 修改：`src/compiler/ir_gen.cr`
 
-- [ ] **Step 1: Handle dyn variable declaration**
+- [ ] 步骤 1：处理 dyn 变量声明
 
-When a `dyn` variable is declared and assigned, check if it's single-path (known type) or multi-path:
+声明并赋值 `dyn` 变量时，判断它是单路径（类型已知）还是多路径：
 
 ```core
 if var_type == TI_DYN {
@@ -220,7 +239,7 @@ if var_type == TI_DYN {
     rhs_type := get_type(rhs_node);
     // If rhs_type is known and unique, emit bare value (no tag)
     // Single-path dyn: just emit as-is
-        
+
     // If rhs_type varies by path, emit IR_DYN_PACK
     // Multi-path dyn: pack with tag
     tag := rhs_type;
@@ -228,16 +247,16 @@ if var_type == TI_DYN {
 }
 ```
 
-- [ ] **Step 2: Handle operations on dyn values**
+- [ ] 步骤 2：处理 dyn 值上的运算
 
-When a binary operation like `dyn + int` is encountered:
-1. If dyn is single-path with known type → fall through to normal code
-2. If dyn is multi-path → emit DISPATCH with cases for each tracked type
-3. If dynamic conversion needed (int + string) → emit conversion code
+遇到 `dyn + int` 这类二元运算时：
+1. dyn 是单路径且类型已知时，走普通代码路径
+2. dyn 是多路径时，发射 DISPATCH，为每个跟踪到的类型提供一个分支
+3. 需要动态转换时（int + string），发射转换代码
 
-- [ ] **Step 3: Handle method calls on dyn values**
+- [ ] 步骤 3：处理 dyn 值上的方法调用
 
-When `dyn.method()` is called:
+调用 `dyn.method()` 时：
 ```core
 if receiver_is_dyn(receiver_type) {
     // Collect all possible methods (one per type in set)
@@ -246,7 +265,7 @@ if receiver_is_dyn(receiver_type) {
 }
 ```
 
-- [ ] **Step 4: Commit**
+- [ ] 步骤 4：提交
 
 ```bash
 jj commit src/compiler/ir_gen.cr -m "feat: IR gen dyn pack/dispatch + auto conversion"
@@ -254,13 +273,13 @@ jj commit src/compiler/ir_gen.cr -m "feat: IR gen dyn pack/dispatch + auto conve
 
 ---
 
-### Task 6: ELF Backend — Dyn Opcodes
+### 任务 6：ELF 后端的 dyn opcode
 
-**Files:**
-- Modify: `src/arch/linux/ld/instr.cr`
-- Modify: `src/arch/linux/ld/sizes.cr`
+涉及文件：
+- 修改：`src/arch/linux/ld/instr.cr`
+- 修改：`src/arch/linux/ld/sizes.cr`
 
-- [ ] **Step 1: Add encoding in instr.cr**
+- [ ] 步骤 1：在 instr.cr 中添加编码
 
 ```core
 if op == IR_DYN_PACK {
@@ -303,13 +322,13 @@ if op == IR_DYN_DISPATCH {
     cp = cp + e2_load_var_off(buf, pos+cp, 10, s1, 8);  // load tag
     // Compare and jump table
     // (Simplified for initial implementation: compare against each known type)
-    // s2 = dispatch_table_ni (contains type → function mapping)
+    // s2 = dispatch_table_ni (contains type to function mapping)
     // For now: fallback to normal call
     return 0;  // placeholder — full dispatch table in next pass
 }
 ```
 
-- [ ] **Step 2: Add size estimates in sizes.cr**
+- [ ] 步骤 2：在 sizes.cr 中添加尺寸估算
 
 ```core
 if op == IR_DYN_PACK { return 16; }  // load + 2 stores
@@ -318,7 +337,7 @@ if op == IR_DYN_VAL { return 8; }    // load + store
 if op == IR_DYN_DISPATCH { return 20; } // tag load + cmp/je chain
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] 步骤 3：提交
 
 ```bash
 jj commit -m "feat: ELF backend dyn opcode encoding"
@@ -326,65 +345,71 @@ jj commit -m "feat: ELF backend dyn opcode encoding"
 
 ---
 
-### Task 7: Tests
+### 任务 7：测试
 
-**Files:**
-- Create: `tests/suite/dyn_test.cr`
+涉及文件：
+- 创建：`tests/suite/dyn_test.cr`
 
-- [ ] **Step 1: Write dyn test**
+- [ ] 步骤 1：编写 dyn 测试
 
 ```core
 import io
 
-fn test_dyn_basic() -> int {
-    x : dyn = 42;
+fn test_dyn_basic() -> int:
+    x : dyn = 42
     // Single-path dyn should work like normal value
-    if x != 42 { return 1; }
-    return 0;
-}
+    if x != 42:
+        return 1
+    return 0
 
-fn test_dyn_reassign() -> int {
-    x : dyn = 42;
-    x = "hello";
+fn test_dyn_reassign() -> int:
+    x : dyn = 42
+    x = "hello"
     // After reassignment, x should be string
-    if str_len(x) < 1 { return 1; }
-    return 0;
-}
+    if str_len(x) < 1:
+        return 1
+    return 0
 
-fn test_dyn_multi_path() -> int {
-    cond : int = 1;
-    x : dyn = 0;
-    if cond != 0 {
-        x = 42;
-    } else {
-        x = "hello";
-    }
+fn test_dyn_multi_path() -> int:
+    cond : int = 1
+    x : dyn = 0
+    if cond != 0:
+        x = 42
+    else:
+        x = "hello"
     // x could be int or string
     // Just verify it compiles and runs
-    return 0;
-}
+    return 0
 
-fn main() -> int {
-    r1 := test_dyn_basic();
-    if r1 != 0 { print("FAIL basic: "); println(int_str(r1)); return r1; }
-    r2 := test_dyn_reassign();
-    if r2 != 0 { print("FAIL reassign: "); println(int_str(r2)); return r2; }
-    r3 := test_dyn_multi_path();
-    if r3 != 0 { print("FAIL multipath: "); println(int_str(r3)); return r3; }
-    println("ALL PASS");
-    return 0;
-}
+fn main() -> int:
+    r1 := test_dyn_basic()
+    if r1 != 0:
+        print("FAIL basic: ")
+        println(int_str(r1))
+        return r1
+    r2 := test_dyn_reassign()
+    if r2 != 0:
+        print("FAIL reassign: ")
+        println(int_str(r2))
+        return r2
+    r3 := test_dyn_multi_path()
+    if r3 != 0:
+        print("FAIL multipath: ")
+        println(int_str(r3))
+        return r3
+    println("ALL PASS")
+    return 0
 ```
 
-- [ ] **Step 2: Verify**
+- [ ] 步骤 2：验证
 
 ```bash
 ./build/corec check tests/suite/dyn_test.cr
 ```
 
-Expected: ok
+预期：ok
 
-- [ ] **Step 3: Commit**
+- [ ] 步骤 3：提交
 
 ```bash
 jj commit tests/suite/dyn_test.cr -m "test: dyn type basic + multi-path"

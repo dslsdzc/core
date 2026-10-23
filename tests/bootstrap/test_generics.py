@@ -46,8 +46,11 @@ failed = 0
 
 # Generic function
 if run_test('Generic Identity', '''
-fn identity[T](val: T) -> T { return val; }
-fn main() -> int { x := identity(42); return x; }
+fn identity[T](val: T) -> T:
+    return val
+fn main() -> int:
+    x := identity(42)
+    return x
 ''', 42):
     passed += 1
 else:
@@ -55,13 +58,29 @@ else:
 
 # Generic struct
 if run_test('Generic Struct Box', '''
-struct Box[T] { value: T }
-fn get_value[T](b: Box[T]) -> T { return b.value; }
-fn main() -> int {
-    boxed := Box { value = 100 };
-    return get_value(boxed);
-}
+struct Box[T]:
+    value: T
+fn get_value[T](b: Box[T]) -> T:
+    return b.value
+fn main() -> int:
+    boxed := Box { value = 100 }
+    return get_value(boxed)
 ''', 100):
+    passed += 1
+else:
+    failed += 1
+
+# Generic function with a recursive call and generic arithmetic/comparison.
+# This exercises PathType handling in the type checker; scalar-only code must
+# not assume every type has BaseType.name.
+if run_test('Generic Recursive Function', '''
+fn fact[T](n: T) -> T:
+    if n <= 1:
+        return 1
+    return n * fact(n - 1)
+fn main() -> int:
+    return fact(5)
+''', 120):
     passed += 1
 else:
     failed += 1
