@@ -16,13 +16,13 @@
 fn va_count(pack: string) -> int:
     if str_len(pack) < 8:
         return 0
-    return r64(pack, 0)
+    return cell_load(pack, 0)
 
 // 变参包取值：返回第 n 个参数的 IR 变量
 fn va_arg(pack: string, n: int) -> int:
     if str_len(pack) < (n + 1) * 8 + 8:
         return -1
-    return r64(pack, (n + 1) * 8)
+    return cell_load(pack, (n + 1) * 8)
 
 // println is print plus a newline; detect the "ln" suffix.
 fn va_fn_has_ln(fn_name: string) -> bool:

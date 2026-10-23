@@ -99,8 +99,8 @@ fn e2_big_patch_jmp(buf: string, jump_pos: int, target_pos: int):
 fn e2_big_call_name(buf: string, p: int, name_idx: int) -> int:
     // E8 rel32 placeholder; resolved by the existing call-patch table in elf.cr.
     grow_call_patch(g_x86_call_patch_count + 1)
-    w64(g_x86_call_patch_pos, g_x86_call_patch_count * 8, p)
-    w64(g_x86_call_patch_name, g_x86_call_patch_count * 8, name_idx)
+    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, p)
+    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, name_idx)
     g_x86_call_patch_count = g_x86_call_patch_count + 1
     e2_w8(buf, p, 232)
     e2_w32(buf, p + 1, 0)

@@ -484,7 +484,7 @@ fn corearch_main() -> int:
                     if hpi >= g_hit_pool_count:
                         break
                     print(" ")
-                    print_i(r64(g_hit_pool, hpi * 8))
+                    print_i(cell_load(g_hit_pool, hpi * 8))
                     hpi = hpi + 1
                 println("")
 
@@ -569,7 +569,7 @@ fn corearch_main() -> int:
         loop:
             if rpi >= g_x86_rip_patch_count:
                 break
-            ppos := r64(g_x86_rip_patch_pos, rpi * 8)
+            ppos := cell_load(g_x86_rip_patch_pos, rpi * 8)
             if ppos >= 176 && ppos - 176 + 4 <= cs:
                 w32(cd, ppos - 176, 0)
                 w8(cd, ppos + 4 - 176, 144)
@@ -594,7 +594,7 @@ fn corearch_main() -> int:
                     loop:
                         if ri2 >= g_x86_ext_rel_count:
                             break
-                        println("  " + istr_get(r64(g_x86_ext_rel_name, ri2 * 8)))
+                        println("  " + istr_get(cell_load(g_x86_ext_rel_name, ri2 * 8)))
                         ri2 = ri2 + 1
                     return 1
                 // Pure static: write directly; the frontend prepends rt.cr. ELF output
@@ -612,7 +612,7 @@ fn corearch_main() -> int:
             loop:
                 if ri >= g_x86_ext_rel_count:
                     break
-                fn_name := istr_get(r64(g_x86_ext_rel_name, ri * 8))
+                fn_name := istr_get(cell_load(g_x86_ext_rel_name, ri * 8))
                 ctx_add_plt(fn_name, 0)
                 ri = ri + 1
             ctx_set_user_code(cd, cs)

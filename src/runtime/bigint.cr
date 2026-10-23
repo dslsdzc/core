@@ -63,22 +63,22 @@ fn bi_new(n: int) -> string:
     return alloc(BI_DIGITS + n * 8)
 
 fn bi_sign_of(p: string) -> int:
-    return r64(p, BI_SIGN)
+    return cell_load(p, BI_SIGN)
 
 fn bi_len_of(p: string) -> int:
-    return r64(p, BI_LEN)
+    return cell_load(p, BI_LEN)
 
 fn bi_digit(p: string, i: int) -> int:
-    return r64(p, BI_DIGITS + i * 8)
+    return cell_load(p, BI_DIGITS + i * 8)
 
 fn bi_set_sign(p: string, s: int):
-    w64(p, BI_SIGN, s)
+    cell_store(p, BI_SIGN, s)
 
 fn bi_set_len(p: string, n: int):
-    w64(p, BI_LEN, n)
+    cell_store(p, BI_LEN, n)
 
 fn bi_set_digit(p: string, i: int, d: int):
-    w64(p, BI_DIGITS + i * 8, d)
+    cell_store(p, BI_DIGITS + i * 8, d)
 
 fn bi_normalize(p: string) -> string:
     n := bi_len_of(p)

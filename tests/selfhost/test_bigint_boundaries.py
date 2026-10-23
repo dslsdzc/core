@@ -13,13 +13,13 @@ COREARCH = BASE / "build" / "corearch"
 VALID = r"""
 fn main() -> int:
     buf := alloc(32)
-    w64(buf, 0, 42)
-    if r64(buf, 0) != 42:
+    cell_store(buf, 0, 42)
+    if cell_load(buf, 0) != 42:
         return 1
 
     x := 4611686018427387904
-    w64(buf, 8, x)
-    if r64(buf, 8) != x:
+    cell_store(buf, 8, x)
+    if cell_load(buf, 8) != x:
         return 2
 
     store8(buf, 16, 65)
@@ -63,7 +63,7 @@ W64_BIG = r"""
 fn main() -> int:
     buf := alloc(8)
     x := 1267650600228229401496703205376
-    w64(buf, 0, x)
+    cell_store(buf, 0, x)
     return 0
 """
 

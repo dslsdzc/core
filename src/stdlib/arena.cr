@@ -75,7 +75,7 @@ fn arena_new() -> int:
     // Try free list first
     if g_arena_free_list >= 0:
         ai = g_arena_free_list
-        g_arena_free_list = r64(g_arena_parents, ai * 8)  // pop head
+        g_arena_free_list = cell_load(g_arena_parents, ai * 8)  // pop head
 
     if ai < 0:
         // Allocate new slot (grow metadata arrays)
@@ -85,13 +85,13 @@ fn arena_new() -> int:
         g_arena_count = need
 
     // Initialize slot
-    w64(g_arena_cursors, ai * 8, 0)
-    w64(g_arena_sizes, ai * 8, g_arena_max_size)
-    w64(g_arena_parents, ai * 8, -1)
+    cell_store(g_arena_cursors, ai * 8, 0)
+    cell_store(g_arena_sizes, ai * 8, g_arena_max_size)
+    cell_store(g_arena_parents, ai * 8, -1)
 
     // Set parent = previous current arena
     if g_current_arena >= 0:
-        w64(g_arena_parents, ai * 8, g_current_arena)
+        cell_store(g_arena_parents, ai * 8, g_current_arena)
 
     // Activate
     g_current_arena = ai
@@ -102,10 +102,10 @@ fn arena_reset(ai: int):
         return
 
     // Save parent BEFORE free list overwrites g_arena_parents[ai]
-    parent := r64(g_arena_parents, ai * 8)
+    parent := cell_load(g_arena_parents, ai * 8)
 
     // Push to free list
-    w64(g_arena_parents, ai * 8, g_arena_free_list)
+    cell_store(g_arena_parents, ai * 8, g_arena_free_list)
     g_arena_free_list = ai
 
     // Restore parent
@@ -117,6 +117,6 @@ fn arena_reset(ai: int):
 fn arena_avail(ai: int) -> int:
     if ai < 0 || ai >= g_arena_count:
         return 0
-    cursor := r64(g_arena_cursors, ai * 8)
-    limit := r64(g_arena_sizes, ai * 8)
+    cursor := cell_load(g_arena_cursors, ai * 8)
+    limit := cell_load(g_arena_sizes, ai * 8)
     return limit - cursor

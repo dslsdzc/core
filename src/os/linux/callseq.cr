@@ -167,8 +167,8 @@ fn cs_ret_value(buf: string, pos: int, cp: int, s1: int) -> int:
             else:
                 // Global: load via RIP-relative into rax
                 grow_rip_patch(g_x86_rip_patch_count + 1)
-                w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3)
-                w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1)
+                cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3)
+                cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1)
                 g_x86_rip_patch_count = g_x86_rip_patch_count + 1
                 cp = cp + e2_lr(buf, pos+cp, 0)       // lea r10, [rip+0]
                 // mov rax, [r10], REX.WB with 0x8B
@@ -183,7 +183,7 @@ fn cs_ret_value(buf: string, pos: int, cp: int, s1: int) -> int:
             cp = cp + e2_ld(buf, pos+cp, 0, g2_slot(s1))
     // Record the jump position for the caller to patch to the epilogue.
     grow_ret_patch(g_x86_ret_patch_count + 1)
-    w64(g_x86_ret_patch_pos, g_x86_ret_patch_count * 8, pos + cp)
+    cell_store(g_x86_ret_patch_pos, g_x86_ret_patch_count * 8, pos + cp)
     g_x86_ret_patch_count = g_x86_ret_patch_count + 1
     cp = cp + e2_jmp(buf, pos+cp, 0)
     return cp
@@ -203,22 +203,22 @@ fn cs_call_direct(buf: string, pos: int, cp: int, s3: int, d: int) -> int:
     loop:
         if tf >= g_x86_func_off_count:
             break
-        if str_eq(istr_get(r64(g_x86_func_offsets, tf*16)), fn2) != 0:
-            to = r64(g_x86_func_offsets, tf*16+8)
+        if str_eq(istr_get(cell_load(g_x86_func_offsets, tf*16)), fn2) != 0:
+            to = cell_load(g_x86_func_offsets, tf*16+8)
             break
         tf = tf + 1
                 // Record call position for post-emission patching
     grow_call_patch(g_x86_call_patch_count + 1)
-    w64(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
-    w64(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern(fn2))
+    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
+    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern(fn2))
     g_x86_call_patch_count = g_x86_call_patch_count + 1
     if to >= 0:
         cp = cp + e2_call(buf, pos+cp, (176 + to) - (pos + cp + 5))
     else:
         // Unknown function: emit external relocation (for dynamic linking)
         grow_ext_rel(g_x86_ext_rel_count + 1)
-        w64(g_x86_ext_rel_pos, g_x86_ext_rel_count * 8, pos + cp + 1)
-        w64(g_x86_ext_rel_name, g_x86_ext_rel_count * 8, s3)
+        cell_store(g_x86_ext_rel_pos, g_x86_ext_rel_count * 8, pos + cp + 1)
+        cell_store(g_x86_ext_rel_name, g_x86_ext_rel_count * 8, s3)
         g_x86_ext_rel_count = g_x86_ext_rel_count + 1
         cp = cp + e2_call(buf, pos+cp, 0)
     if d >= 0:

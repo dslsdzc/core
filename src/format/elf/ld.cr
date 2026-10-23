@@ -152,10 +152,10 @@ fn grow_chunks(needed: int):
 
 fn cnew(k: int):
     grow_chunks(g_ch_count + 1)
-    w64(g_ch_kind, g_ch_count * 8, k)
-    w64(g_ch_vaddr, g_ch_count * 8, 0)
-    w64(g_ch_foff, g_ch_count * 8, 0)
-    w64(g_ch_size, g_ch_count * 8, 0)
+    cell_store(g_ch_kind, g_ch_count * 8, k)
+    cell_store(g_ch_vaddr, g_ch_count * 8, 0)
+    cell_store(g_ch_foff, g_ch_count * 8, 0)
+    cell_store(g_ch_size, g_ch_count * 8, 0)
     g_ch_count = g_ch_count + 1
 
 fn cby(k: int) -> int:
@@ -163,7 +163,7 @@ fn cby(k: int) -> int:
     loop:
         if i >= g_ch_count:
             break
-        if r64(g_ch_kind, i * 8) == k:
+        if cell_load(g_ch_kind, i * 8) == k:
             return i
         i = i + 1
     return -1
@@ -178,7 +178,7 @@ fn so_find(buf: string, name: string) -> int:
         return -1
     if read_u16(buf, 16) != 3:
         return -1
-    e_shoff := r64(buf, 40)
+    e_shoff := cell_load(buf, 40)
     e_shnum := read_u16(buf, 60)
     do : ., mut = 0
     ds : ., mut = 0
@@ -189,9 +189,9 @@ fn so_find(buf: string, name: string) -> int:
         if i >= e_shnum:
             break
         t := r32(buf, e_shoff+i*64+4)
-        a := r64(buf, e_shoff+i*64+16)
-        o := r64(buf, e_shoff+i*64+24)
-        s := r64(buf, e_shoff+i*64+32)
+        a := cell_load(buf, e_shoff+i*64+16)
+        o := cell_load(buf, e_shoff+i*64+24)
+        s := cell_load(buf, e_shoff+i*64+32)
         if t == 11:
             do = o
             ds = s
@@ -207,7 +207,7 @@ fn so_find(buf: string, name: string) -> int:
         if i >= sc:
             break
         sn := r32(buf, do+i*24)
-        sv := r64(buf, do+i*24+8)
+        sv := cell_load(buf, do+i*24+8)
         si := bu8(buf, do+i*24+4)
         sx := read_u16(buf, do+i*24+6)
         if si/16 == 1 && si%16 == 2 && sx != 0:
@@ -233,11 +233,11 @@ fn so_find_any(name: string) -> int:
     loop:
         if si >= g_so_count:
             break
-        if istr_len(r64(g_so_paths, si * 8)) > 0:
+        if istr_len(cell_load(g_so_paths, si * 8)) > 0:
             // Raw word to string view: the table stores a string pointer (the @ptr_of write side of ctx_add_so),
             // 读回时必须显式还原视图（2(a) 范式；`@str_of` 必须在 `unsafe` 内）。
             so_path_str := unsafe:
-                @str_of(r64(g_so_paths, si * 8))
+                @str_of(cell_load(g_so_paths, si * 8))
             b := read_file(so_path_str)
             if str_len(b) > 0:
                 a := so_find(b, name)
@@ -257,7 +257,7 @@ fn layout():
         if i >= g_ch_count:
             break
         sz : ., mut = 0
-        k := r64(g_ch_kind, i * 8)
+        k := cell_load(g_ch_kind, i * 8)
         if k == 0:
             sz = 344
         if k == 1:
@@ -278,13 +278,13 @@ fn layout():
             loop:
                 if j >= g_plt_count:
                     break
-                sz = sz + istr_len(r64(g_plts, j * 16)) + 1
+                sz = sz + istr_len(cell_load(g_plts, j * 16)) + 1
                 j = j + 1
         if k == 8:
             sz = g_plt_count * 24
-        w64(g_ch_vaddr, i * 8, va)
-        w64(g_ch_foff, i * 8, va - g_text_base)
-        w64(g_ch_size, i * 8, sz)
+        cell_store(g_ch_vaddr, i * 8, va)
+        cell_store(g_ch_foff, i * 8, va - g_text_base)
+        cell_store(g_ch_size, i * 8, sz)
         va = va + sz
         i = i + 1
 
@@ -308,8 +308,8 @@ fn emit(buf: string, total: int, is_so: int):
     loop:
         if i >= g_ch_count:
             break
-        p : ., mut = r64(g_ch_foff, i * 8)
-        k := r64(g_ch_kind, i * 8)
+        p : ., mut = cell_load(g_ch_foff, i * 8)
+        k := cell_load(g_ch_kind, i * 8)
 
 
         // Ehdr: ELF header + 4 program headers
@@ -328,63 +328,63 @@ fn emit(buf: string, total: int, is_so: int):
             w16(buf,18,62)
             w32(buf,20,1)
             uv := cby(2)
-            ev := r64(g_ch_vaddr, uv * 8)
-            w64(buf,24,ev)
-            w64(buf,32,64)
-            w64(buf,40,0)
+            ev := cell_load(g_ch_vaddr, uv * 8)
+            cell_store(buf,24,ev)
+            cell_store(buf,32,64)
+            cell_store(buf,40,0)
             w16(buf,52,64)
             w16(buf,54,56)
             w16(buf,56,5)
             w16(buf,58,64)
-            pe := r64(g_ch_size, i * 8)  // size of this chunk (EHDR+PHDRs)
+            pe := cell_load(g_ch_size, i * 8)  // size of this chunk (EHDR+PHDRs)
             // PT_PHDR
             w32(buf,64,6)
             w32(buf,68,4)
-            w64(buf,72,64)
-            w64(buf,80,tb+64)
-            w64(buf,88,tb+64)
-            w64(buf,96,pe-64)
-            w64(buf,104,pe-64)
-            w64(buf,112,8)
+            cell_store(buf,72,64)
+            cell_store(buf,80,tb+64)
+            cell_store(buf,88,tb+64)
+            cell_store(buf,96,pe-64)
+            cell_store(buf,104,pe-64)
+            cell_store(buf,112,8)
             // PT_INTERP
             ic := cby(1)
             w32(buf,120,3)
             w32(buf,124,4)
-            w64(buf,128,r64(g_ch_foff, ic * 8))
-            w64(buf,136,r64(g_ch_vaddr, ic * 8))
-            w64(buf,144,r64(g_ch_vaddr, ic * 8))
-            w64(buf,152,r64(g_ch_size, ic * 8))
-            w64(buf,160,r64(g_ch_size, ic * 8))
-            w64(buf,168,1)
+            cell_store(buf,128,cell_load(g_ch_foff, ic * 8))
+            cell_store(buf,136,cell_load(g_ch_vaddr, ic * 8))
+            cell_store(buf,144,cell_load(g_ch_vaddr, ic * 8))
+            cell_store(buf,152,cell_load(g_ch_size, ic * 8))
+            cell_store(buf,160,cell_load(g_ch_size, ic * 8))
+            cell_store(buf,168,1)
             // PT_LOAD (RX)
-            fs := r64(g_ch_vaddr, (g_ch_count - 1) * 8) + r64(g_ch_size, (g_ch_count - 1) * 8) - tb
+            fs := cell_load(g_ch_vaddr, (g_ch_count - 1) * 8) + cell_load(g_ch_size, (g_ch_count - 1) * 8) - tb
             w32(buf,176,1)
             w32(buf,180,7)
-            w64(buf,184,0)
-            w64(buf,192,tb)
-            w64(buf,200,tb)
-            w64(buf,208,fs)
-            w64(buf,216,fs)
-            w64(buf,224,4096)
+            cell_store(buf,184,0)
+            cell_store(buf,192,tb)
+            cell_store(buf,200,tb)
+            cell_store(buf,208,fs)
+            cell_store(buf,216,fs)
+            cell_store(buf,224,4096)
             // PT_GNU_STACK
             w32(buf,232,1685382481)
             w32(buf,236,6)
-            w64(buf,240,0)
-            w64(buf,248,0)
-            w64(buf,256,0)
-            w64(buf,264,0)
-            w64(buf,272,0)
-            w64(buf,280,8)
+            cell_store(buf,240,0)
+            cell_store(buf,248,0)
+            cell_store(buf,256,0)
+            cell_store(buf,264,0)
+            cell_store(buf,272,0)
+            cell_store(buf,280,8)
             // PT_DYNAMIC
             dc := cby(5)
             w32(buf,288,2)
             w32(buf,292,4)
-            w64(buf,296,r64(g_ch_foff, dc * 8))
-            w64(buf,304,r64(g_ch_vaddr, dc * 8))
-            w64(buf,312,r64(g_ch_vaddr, dc * 8))
-            w64(buf,320,r64(g_ch_size, dc * 8))
-            w64(buf,328,r64(g_ch_size, dc * 8))
-            w64(buf,336,8)
+            cell_store(buf,296,cell_load(g_ch_foff, dc * 8))
+            cell_store(buf,304,cell_load(g_ch_vaddr, dc * 8))
+            cell_store(buf,312,cell_load(g_ch_vaddr, dc * 8))
+            cell_store(buf,320,cell_load(g_ch_size, dc * 8))
+            cell_store(buf,328,cell_load(g_ch_size, dc * 8))
+            cell_store(buf,336,8)
 
         // Interp
         if k == 1:
@@ -408,8 +408,8 @@ fn emit(buf: string, total: int, is_so: int):
 
         // PLT
         if k == 3:
-            gv := r64(g_ch_vaddr, cby(4) * 8)
-            pv := r64(g_ch_vaddr, i * 8)
+            gv := cell_load(g_ch_vaddr, cby(4) * 8)
+            pv := cell_load(g_ch_vaddr, i * 8)
             r1 := (gv+8)-(pv+6)
             w8(buf,p,255)
             w8(buf,p+1,53)
@@ -445,16 +445,16 @@ fn emit(buf: string, total: int, is_so: int):
 
         // GOT.PLT
         if k == 4:
-            dv := r64(g_ch_vaddr, cby(5) * 8)
-            w64(buf,p,dv)
-            w64(buf,p+8,0)
-            w64(buf,p+16,0)
+            dv := cell_load(g_ch_vaddr, cby(5) * 8)
+            cell_store(buf,p,dv)
+            cell_store(buf,p+8,0)
+            cell_store(buf,p+16,0)
             pi : ., mut = 0
             loop:
                 if pi >= g_plt_count:
                     break
-                pv2 := r64(g_ch_vaddr, cby(3) * 8)
-                w64(buf,p+24+pi*8,pv2+16+pi*16+6)
+                pv2 := cell_load(g_ch_vaddr, cby(3) * 8)
+                cell_store(buf,p+24+pi*8,pv2+16+pi*16+6)
                 pi=pi+1
 
         // .dynamic (also writes .dynstr)
@@ -465,7 +465,7 @@ fn emit(buf: string, total: int, is_so: int):
             loop:
                 if dnp >= g_plt_count:
                     break
-                dn = dn + istr_len(r64(g_plts, dnp * 16)) + 1
+                dn = dn + istr_len(cell_load(g_plts, dnp * 16)) + 1
                 dnp = dnp + 1
             // Build dynstr
             db : ., mut = alloc(dn)
@@ -485,12 +485,12 @@ fn emit(buf: string, total: int, is_so: int):
                     break
                 j=0
                 loop:
-                    if j >= istr_len(r64(g_plts, pi * 16)):
+                    if j >= istr_len(cell_load(g_plts, pi * 16)):
                         break
-                    w8(db,nxt+j, load8(r64(g_plts, pi * 16),j))
+                    w8(db,nxt+j, load8(cell_load(g_plts, pi * 16),j))
                     j=j+1
-                w8(db,nxt+istr_len(r64(g_plts, pi * 16)),0)
-                nxt=nxt+istr_len(r64(g_plts, pi * 16))+1
+                w8(db,nxt+istr_len(cell_load(g_plts, pi * 16)),0)
+                nxt=nxt+istr_len(cell_load(g_plts, pi * 16))+1
                 pi=pi+1
             // Write dynstr to its chunk
             dsc := cby(7)
@@ -498,44 +498,44 @@ fn emit(buf: string, total: int, is_so: int):
             loop:
                 if di2 >= nxt:
                     break
-                w8(buf,r64(g_ch_foff, dsc * 8)+di2,bu8(db,di2))
+                w8(buf,cell_load(g_ch_foff, dsc * 8)+di2,bu8(db,di2))
                 di2=di2+1
             // Write dynamic entries
-            sv := r64(g_ch_vaddr, cby(6) * 8)
-            dv2 := r64(g_ch_vaddr, dsc * 8)
-            gv2 := r64(g_ch_vaddr, cby(4) * 8)
-            rv := r64(g_ch_vaddr, cby(8) * 8)
-            rs := r64(g_ch_size, cby(8) * 8)
+            sv := cell_load(g_ch_vaddr, cby(6) * 8)
+            dv2 := cell_load(g_ch_vaddr, dsc * 8)
+            gv2 := cell_load(g_ch_vaddr, cby(4) * 8)
+            rv := cell_load(g_ch_vaddr, cby(8) * 8)
+            rs := cell_load(g_ch_size, cby(8) * 8)
             de : ., mut = 0
-            w64(buf,p+de*16,5)
-            w64(buf,p+de*16+8,dv2)
+            cell_store(buf,p+de*16,5)
+            cell_store(buf,p+de*16+8,dv2)
             de=de+1  // DT_STRTAB
-            w64(buf,p+de*16,11)
-            w64(buf,p+de*16+8,24)
+            cell_store(buf,p+de*16,11)
+            cell_store(buf,p+de*16+8,24)
             de=de+1
-            w64(buf,p+de*16,6)
-            w64(buf,p+de*16+8,sv)
+            cell_store(buf,p+de*16,6)
+            cell_store(buf,p+de*16+8,sv)
             de=de+1  // DT_SYMTAB
-            w64(buf,p+de*16,10)
-            w64(buf,p+de*16+8,r64(g_ch_size, dsc * 8))
+            cell_store(buf,p+de*16,10)
+            cell_store(buf,p+de*16+8,cell_load(g_ch_size, dsc * 8))
             de=de+1
-            w64(buf,p+de*16,3)
-            w64(buf,p+de*16+8,gv2)
+            cell_store(buf,p+de*16,3)
+            cell_store(buf,p+de*16+8,gv2)
             de=de+1  // DT_PLTGOT
-            w64(buf,p+de*16,2)
-            w64(buf,p+de*16+8,rs)
+            cell_store(buf,p+de*16,2)
+            cell_store(buf,p+de*16+8,rs)
             de=de+1
-            w64(buf,p+de*16,20)
-            w64(buf,p+de*16+8,7)
+            cell_store(buf,p+de*16,20)
+            cell_store(buf,p+de*16+8,7)
             de=de+1  // DT_PLTREL=RELA
-            w64(buf,p+de*16,23)
-            w64(buf,p+de*16+8,rv)
+            cell_store(buf,p+de*16,23)
+            cell_store(buf,p+de*16+8,rv)
             de=de+1  // DT_JMPREL
-            w64(buf,p+de*16,1)
-            w64(buf,p+de*16+8,so_off)
+            cell_store(buf,p+de*16,1)
+            cell_store(buf,p+de*16+8,so_off)
             de=de+1  // DT_NEEDED
-            w64(buf,p+de*16,0)
-            w64(buf,p+de*16+8,0)
+            cell_store(buf,p+de*16,0)
+            cell_store(buf,p+de*16+8,0)
 
         // .dynsym
         if k == 6:
@@ -543,8 +543,8 @@ fn emit(buf: string, total: int, is_so: int):
             w8(buf,p+4,0)
             w8(buf,p+5,0)
             w16(buf,p+6,0)
-            w64(buf,p+8,0)
-            w64(buf,p+16,0)
+            cell_store(buf,p+8,0)
+            cell_store(buf,p+16,0)
             so_off2 : ., mut = 1
             nxt2 : ., mut = 12
             pi : ., mut = 0
@@ -556,25 +556,25 @@ fn emit(buf: string, total: int, is_so: int):
                 w8(buf,so2+4,18)
                 w8(buf,so2+5,0)
                 w16(buf,so2+6,0)
-                w64(buf,so2+8,0)
-                w64(buf,so2+16,0)
-                nxt2 = nxt2 + istr_len(r64(g_plts, pi * 16)) + 1
+                cell_store(buf,so2+8,0)
+                cell_store(buf,so2+16,0)
+                nxt2 = nxt2 + istr_len(cell_load(g_plts, pi * 16)) + 1
                 pi=pi+1
 
         // .rela.plt
         if k == 8:
-            gv3 := r64(g_ch_vaddr, cby(4) * 8)
+            gv3 := cell_load(g_ch_vaddr, cby(4) * 8)
             pi : ., mut = 0
             loop:
                 if pi >= g_plt_count:
                     break
                 ro := p+pi*24
-                w64(buf,ro,gv3+24+pi*8)
+                cell_store(buf,ro,gv3+24+pi*8)
                 rinfo := pi + 1
                 rinfo = rinfo * 65536
                 rinfo = rinfo * 65536 + 7
-                w64(buf,ro+8,rinfo)
-                w64(buf,ro+16,0)
+                cell_store(buf,ro+8,rinfo)
+                cell_store(buf,ro+16,0)
                 pi=pi+1
         i = i + 1
 
@@ -586,18 +586,18 @@ fn patch_relocs():
     if g_x86_ext_rel_count == 0:
         return
     uc := cby(2)
-    uv := r64(g_ch_vaddr, uc * 8)
-    pv := r64(g_ch_vaddr, cby(3) * 8)
+    uv := cell_load(g_ch_vaddr, uc * 8)
+    pv := cell_load(g_ch_vaddr, cby(3) * 8)
     ri : ., mut = 0
     loop:
         if ri >= g_x86_ext_rel_count:
             break
-        abs_pos := r64(g_x86_ext_rel_pos, ri * 8)
+        abs_pos := cell_load(g_x86_ext_rel_pos, ri * 8)
         code_off : ., mut = abs_pos - 176
         if code_off < 0 || code_off >= g_user_size:
             ri=ri+1
             continue
-        fn_name_ni := r64(g_x86_ext_rel_name, ri * 8)
+        fn_name_ni := cell_load(g_x86_ext_rel_name, ri * 8)
         fn_name : ., mut = ""
         if fn_name_ni >= 0:
             fn_name = istr_get(fn_name_ni)
@@ -609,7 +609,7 @@ fn patch_relocs():
             // Same as above: column 0 of g_plts stores the PLT name string pointer (the
             // @ptr_of write side of ctx_add_plt).
             plt_name_str := unsafe:
-                @str_of(r64(g_plts, si * 16))
+                @str_of(cell_load(g_plts, si * 16))
             if str_eq(plt_name_str, fn_name) != 0:
                 plt_idx = si
                 break
@@ -644,14 +644,14 @@ fn ctx_add_so(path: string):
     dyn_grow_so(g_so_count + 1)
     path_ptr := unsafe:
         @ptr_of(path)
-    w64(g_so_paths, g_so_count * 8, path_ptr)
+    cell_store(g_so_paths, g_so_count * 8, path_ptr)
     g_so_count = g_so_count + 1
 fn ctx_add_plt(name: string, so_idx: int):
     dyn_grow_plts(g_plt_count + 1)
     name_ptr := unsafe:
         @ptr_of(name)
-    w64(g_plts, g_plt_count * 16, name_ptr)
-    w64(g_plts, g_plt_count * 16 + 8, so_idx)
+    cell_store(g_plts, g_plt_count * 16, name_ptr)
+    cell_store(g_plts, g_plt_count * 16 + 8, so_idx)
     g_plt_count = g_plt_count + 1
 
 // Produce dynamically-linked ELF executable
@@ -667,7 +667,7 @@ fn ctx_emit_dyn(buf: string, path: string) -> int:
     cnew(8)
     layout()
     patch_relocs()
-    total := r64(g_ch_vaddr, (g_ch_count - 1) * 8) + r64(g_ch_size, (g_ch_count - 1) * 8) - g_text_base
+    total := cell_load(g_ch_vaddr, (g_ch_count - 1) * 8) + cell_load(g_ch_size, (g_ch_count - 1) * 8) - g_text_base
     println(int_str(total))
     emit(buf, total, 0)
     fd := syscall3(2, path, 577, 493)  // 0755: ELF output must be executable
@@ -683,7 +683,7 @@ fn ctx_emit_so(buf: string, path: string) -> int:
     cnew(2)
     g_ch_count = 2
     layout()
-    total := r64(g_ch_vaddr, (g_ch_count - 1) * 8) + r64(g_ch_size, (g_ch_count - 1) * 8) - g_text_base
+    total := cell_load(g_ch_vaddr, (g_ch_count - 1) * 8) + cell_load(g_ch_size, (g_ch_count - 1) * 8) - g_text_base
     emit(buf, total, 1)
     fd := syscall3(2, path, 577, 493)  // 0755: ELF output must be executable
     if fd < 0:
@@ -707,7 +707,7 @@ fn so_parse_text(buf: string) -> int:
     // Find the executable PROGBITS section (.text) in the .so
     if str_len(buf) < 64:
         return -1
-    e_shoff := r64(buf, 40)
+    e_shoff := cell_load(buf, 40)
     e_shnum := read_u16(buf, 60)
     // A normal linker may place .init/.plt before .text. The old first-match
     // scan copied one of those stubs and then resolved symbols against the
@@ -717,8 +717,8 @@ fn so_parse_text(buf: string) -> int:
     shstr_sz : ., mut = 0
     if e_shstrndx < e_shnum:
         sh := e_shoff + e_shstrndx * 64
-        shstr_off = r64(buf, sh + 24)
-        shstr_sz = r64(buf, sh + 32)
+        shstr_off = cell_load(buf, sh + 24)
+        shstr_sz = cell_load(buf, sh + 32)
     i : ., mut = 0
     fallback_off : ., mut = -1
     fallback_sz : ., mut = 0
@@ -727,10 +727,10 @@ fn so_parse_text(buf: string) -> int:
         if i >= e_shnum:
             break
         t := r32(buf, e_shoff+i*64+4)
-        fl := r64(buf, e_shoff+i*64+8)
-        a := r64(buf, e_shoff+i*64+16)
-        o := r64(buf, e_shoff+i*64+24)
-        s := r64(buf, e_shoff+i*64+32)
+        fl := cell_load(buf, e_shoff+i*64+8)
+        a := cell_load(buf, e_shoff+i*64+16)
+        o := cell_load(buf, e_shoff+i*64+24)
+        s := cell_load(buf, e_shoff+i*64+32)
         // SHT_PROGBITS(1) + SHF_ALLOC|SHF_EXECINSTR(6) = .text
         if t == 1 && fl == 6 && s > 0:
             if fallback_off < 0:
@@ -772,7 +772,7 @@ fn ctx_emit_static(buf: string, path: string) -> int:
     loop:
         if si >= g_so_count:
             break
-        sp := r64(g_so_paths, si * 8)
+        sp := cell_load(g_so_paths, si * 8)
         // sp is a raw-word string pointer. Restore the view explicitly before use (2(a) pattern; each use restores it inside unsafe).
         sp_str := unsafe:
             @str_of(sp)
@@ -826,8 +826,8 @@ fn ctx_emit_static(buf: string, path: string) -> int:
     loop:
         if rpi >= g_x86_ext_rel_count:
             break
-        abs_pos := r64(g_x86_ext_rel_pos, rpi * 8)
-        fn_ni := r64(g_x86_ext_rel_name, rpi * 8)
+        abs_pos := cell_load(g_x86_ext_rel_pos, rpi * 8)
+        fn_ni := cell_load(g_x86_ext_rel_name, rpi * 8)
         fn_name := istr_get(fn_ni)
         if str_len(fn_name) > 0:
             sym_addr := so_find(so_buf, fn_name)
@@ -870,9 +870,9 @@ fn ctx_emit_static(buf: string, path: string) -> int:
     w16(buf,16,2)
     w16(buf,18,62)
     w32(buf,20,1)
-    w64(buf,24,0x400000 + user_out)  // entry = user code's _start
-    w64(buf,32,64)
-    w64(buf,40,0)
+    cell_store(buf,24,0x400000 + user_out)  // entry = user code's _start
+    cell_store(buf,32,64)
+    cell_store(buf,40,0)
     w16(buf,52,64)
     w16(buf,54,56)
     w16(buf,56,2)
@@ -885,12 +885,12 @@ fn ctx_emit_static(buf: string, path: string) -> int:
         w32(buf,68,7)
     else:
         w32(buf,68,5)
-    w64(buf,72,0)
-    w64(buf,80,0x400000)
-    w64(buf,88,0x400000)
-    w64(buf,96,total)
-    w64(buf,104,total)
-    w64(buf,112,4096)
+    cell_store(buf,72,0)
+    cell_store(buf,80,0x400000)
+    cell_store(buf,88,0x400000)
+    cell_store(buf,96,total)
+    cell_store(buf,104,total)
+    cell_store(buf,112,4096)
     // The embedded user code still contains RIP-relative references to the
     // original frontend BSS page, shifted by the copied .so text. Map a
     // writable anonymous load at the next page so allocator/global slots do

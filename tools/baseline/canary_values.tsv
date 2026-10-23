@@ -178,10 +178,10 @@
 #   这是**固有代价**，不是回归——但按本文件两级纪律，**必须显式声明 + 同批重锁 + 旧值留痕**。
 
 canary_elf	pa	826d74cf7f099f9758e11a64d443695ff8360327a88e7eb5922ddfd617e0dce5	53430
-pa_ccr	pa.ccr	8b0575e0060df241a697b2e2d78e1a128eeff3515b8444f178cf127e03077f7f	96985
-pa_static_ccr	pa_st.bin.ccr	667ca1f65421cc11cdc8935e070d663e2b4fa1b692e26e80dad75ace776103dd	97128
-gt_ccr	gt.ccr	4df02acd1ea343601ae8a016cff093bf56d7a90f7b6b06c2811b1b3a3a2d3e41	143687
-gt_static_ccr	gt_st.bin.ccr	bacd9eddd956dce88df3de675a29d0857d832c5a843781707a2e84b3c864f8a1	143830
+pa_ccr	pa.ccr	6ef24784e9cf043f38141c1f6bcf809d4ac5b89fd71cb74a34ff771b7a13aacb	96998
+pa_static_ccr	pa_st.bin.ccr	e1e7a1c1aeb8c883bb88b21be907f9fb0b1fd2c28185997adca84caf4d17bf33	97141
+gt_ccr	gt.ccr	93ed0dc5cb33964df5857ba21738f6880700a5248098c3f043087e1369b26f23	143700
+gt_static_ccr	gt_st.bin.ccr	a9e5343389de547a0ab9a9dde33b030877c44e5505deee24eb683715b700c88f	143843
 # ⚠ **本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下
@@ -292,3 +292,13 @@ gt_static_ccr	gt_st.bin.ccr	bacd9eddd956dce88df3de675a29d0857d832c5a843781707a2e
 #     pa_static_ccr a7d2433b0c78428ed93e434ccd617f1308362d7bb268764712d2972e243485a1 97128
 #     gt_ccr        21b1f39c96bd2242b963bb5a1726eb93b912739f77c31317da055d6b37d88103 143687
 #     gt_static_ccr 4949ff5437e1bc78a5e2f95e4fb05c07e20da0ed4bee35c58662f19bbdc60271 143830
+
+# ── 【本批重锁 2026-10-23】raw 内建改名 cell_store/cell_load ──
+#   四条 `.ccr` 各 +13B，sha 全变；ELF canary 不变。
+#   归因 = 编译器侧字符串表新增 `cell_store`/`cell_load` 并移除 `w64`/`r64`；
+#   用户程序语义和发射面未变。D1 5/5 PASS。
+#   旧值留痕（自本批起作废）：
+#     pa_ccr        8b0575e0060df241a697b2e2d78e1a128eeff3515b8444f178cf127e03077f7f 96985
+#     pa_static_ccr 667ca1f65421cc11cdc8935e070d663e2b4fa1b692e26e80dad75ace776103dd 97128
+#     gt_ccr        4df02acd1ea343601ae8a016cff093bf56d7a90f7b6b06c2811b1b3a3a2d3e41 143687
+#     gt_static_ccr bacd9eddd956dce88df3de675a29d0857d832c5a843781707a2e84b3c864f8a1 143830

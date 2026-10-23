@@ -56,7 +56,7 @@ fn g2_slot(v: int) -> int:
             return E2_REG_SLOT_BASE + rn
     // Stack sharing: if this var maps to another, use that var's slot
     if v >= 0 && str_len(g_stack_map) > v * 8:
-        mapped := r64(g_stack_map, v * 8)
+        mapped := cell_load(g_stack_map, v * 8)
         if mapped >= 0 && mapped != v:
             v = mapped
     // Function-relative slot: offset within current function's stack frame
@@ -71,15 +71,15 @@ fn g2_str_off(si: int) -> int:
     loop:
         if i >= g_x86_str_count:
             break
-        if r64(g_x86_str_offs, i * 8) == si:
+        if cell_load(g_x86_str_offs, i * 8) == si:
             return o + 8
         // +8 for this string's header
-        o = o + 8 + istr_len(r64(g_x86_str_offs, i * 8)) + 1
+        o = o + 8 + istr_len(cell_load(g_x86_str_offs, i * 8)) + 1
         if o % 8 != 0:
             o = o + 8 - (o % 8)
         i = i + 1
     grow_str_offs(g_x86_str_count + 1)
-    w64(g_x86_str_offs, g_x86_str_count * 8, si)
+    cell_store(g_x86_str_offs, g_x86_str_count * 8, si)
     g_x86_str_count = g_x86_str_count + 1
     return o + 8  // +8 for this string's header
 
@@ -89,7 +89,7 @@ fn g2_rodata_sz() -> int:
     loop:
         if i >= g_x86_str_count:
             break
-        o = o + 8 + istr_len(r64(g_x86_str_offs, i * 8)) + 1
+        o = o + 8 + istr_len(cell_load(g_x86_str_offs, i * 8)) + 1
         if o % 8 != 0:
             o = o + 8 - (o % 8)
         i = i + 1
@@ -107,7 +107,7 @@ fn e2_w32(buf: string, pos: int, val: int) -> int:
     w32(buf, pos, val)
     return 4
 fn e2_w64(buf: string, pos: int, val: int) -> int:
-    w64(buf, pos, val)
+    cell_store(buf, pos, val)
     return 8
 
 // ── Encoding primitives (computed, no magic numbers) ──
@@ -468,10 +468,10 @@ fn e2_sd_store(b: string, p: int, o: int) -> int:
 // ── emit_instr: write one instruction to buffer, return bytes written ──
 
 fn e2_load_var(buf: string, pos: int, reg: int, var_idx: int) -> int:
-    if var_idx >= 0 && r64(g_x86_is_global, var_idx * 8) != 0:
+    if var_idx >= 0 && cell_load(g_x86_is_global, var_idx * 8) != 0:
         grow_rip_patch(g_x86_rip_patch_count + 1)
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + 3)
-        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, var_idx)
+        cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + 3)
+        cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, var_idx)
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1
         sz := e2_lrb(buf, pos, 0)
         // mov reg, [r11] — memory load (NOT register copy; e2_ld + e2_rslot would misinterpret)
@@ -496,15 +496,15 @@ fn e2_load_var(buf: string, pos: int, reg: int, var_idx: int) -> int:
 // needed.
 fn e2_lea_glob(buf: string, pos: int, var_idx: int) -> int:
     grow_rip_patch(g_x86_rip_patch_count + 1)
-    w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + 3)
-    w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, var_idx)
+    cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + 3)
+    cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, var_idx)
     g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     return e2_lrb(buf, pos, 0)
 
 fn e2_is_glob(var_idx: int) -> int:
     if var_idx < 0:
         return 0
-    return r64(g_x86_is_global, var_idx * 8)
+    return cell_load(g_x86_is_global, var_idx * 8)
 
 // 读侧 dex（movsd xmm{n}, [槽]）：全局 -> RIP 相对（lea r11 + movsd [r11]）；
 // 局部 -> 现 `e2_sd_load`/`e2_sd_load1`/`e2_sd_load_x` 原字节（按 xmmn 分派，n=0/1 与
@@ -607,8 +607,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         if g_x86_big_enabled != 0:
             ro := g2_str_off(s1)
             grow_rodataref(g_x86_rodataref_count + 1)
-            w64(g_x86_rodataref_pos, g_x86_rodataref_count * 8, pos + cp)
-            w64(g_x86_rodataref_ro, g_x86_rodataref_count * 8, ro)
+            cell_store(g_x86_rodataref_pos, g_x86_rodataref_count * 8, pos + cp)
+            cell_store(g_x86_rodataref_ro, g_x86_rodataref_count * 8, ro)
             g_x86_rodataref_count = g_x86_rodataref_count + 1
             cp = cp + e2_lr(buf, pos+cp, 0)       // r10 = decimal string
             cp = cp + e2_mov(buf, pos+cp, 7, 10)  // rdi = string
@@ -634,12 +634,12 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             ro := g2_str_off(s1)
             // Record for post-emission patching (rodata position from Phase 3)
             grow_rodataref(g_x86_rodataref_count + 1)
-            w64(g_x86_rodataref_pos, g_x86_rodataref_count * 8, pos + cp)
-            w64(g_x86_rodataref_ro, g_x86_rodataref_count * 8, ro)
+            cell_store(g_x86_rodataref_pos, g_x86_rodataref_count * 8, pos + cp)
+            cell_store(g_x86_rodataref_ro, g_x86_rodataref_count * 8, ro)
             g_x86_rodataref_count = g_x86_rodataref_count + 1
             cp = cp + e2_lr(buf, pos+cp, 0)  // placeholder, patched later
             cp = cp + e2_st(buf, pos+cp, 10, do2)
-        else if r64(g_x86_is_global, d * 8) != 0:
+        else if cell_load(g_x86_is_global, d * 8) != 0:
             // Global row direct write. g2_slot would return an offset outside the
             // current frame, so e2_li would write stack garbage. The interpreter
             // writes g_ir_vals directly for the same IR. Use the same dispatch as
@@ -652,8 +652,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             e2_w64(buf, pos+cp+2, s1)
             cp = cp + 10
             grow_rip_patch(g_x86_rip_patch_count + 1)
-            w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3)
-            w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, d)
+            cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3)
+            cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, d)
             g_x86_rip_patch_count = g_x86_rip_patch_count + 1
             cp = cp + e2_lrb(buf, pos+cp, 0)
             // mov [r11], r10 — REX.WRB + 0x89
@@ -1020,7 +1020,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             cp = cp + 1
             cp = cp + emit_modrm(buf, pos+cp, 0, 2, 4)
             cp = cp + emit_sib(buf, pos+cp, 0, 6, 7)
-        else if s3 == g_ni_load64 || s3 == g_ni_load_str_ptr || s3 == g_ni_r64:
+        else if s3 == g_ni_load64 || s3 == g_ni_load_str_ptr || s3 == g_ni_cell_load:
             // mov rax, [rdi + rsi]
             if g_x86_big_enabled != 0:
                 cp = cp + e2_big_sub_rsp(buf, pos+cp, 16)
@@ -1067,8 +1067,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             // would be registered as a rip_patch with gvi=-1 and SKIPPED by the
             // patch loop, leaving displacement=0 and causing GPF on dereference.
             grow_rip_patch(g_x86_rip_patch_count + 1)
-            w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3)
-            w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argv)
+            cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3)
+            cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argv)
             g_x86_rip_patch_count = g_x86_rip_patch_count + 1
             cp = cp + e2_lr(buf, pos+cp, 0)  // lea r10, [rip+0] placeholder
             // mov r10, [r10] — REX.WRB + 0x8B
@@ -1095,7 +1095,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             e2_w32(buf, pos+cp+1, 1)
             cp = cp + 5  // mov edi, 1
             grow_alloc_patch(g_x86_alloc_patch_count + 1)
-            w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp)
+            cell_store(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp)
             g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1
             e2_w8(buf, pos+cp, 232)
             e2_w32(buf, pos+cp+1, 0)
@@ -1139,7 +1139,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             e2_w8(buf, pos+cp+1, 82)
             cp = cp + 2  // push r10
             grow_alloc_patch(g_x86_alloc_patch_count + 1)
-            w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp)
+            cell_store(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp)
             g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1
             e2_w8(buf, pos+cp, 232)
             e2_w32(buf, pos+cp+1, 0)
@@ -1178,8 +1178,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             cp = cp + 2  // jne copy_loop
             if d >= 0:
                 cp = cp + e2_store_ret(buf, pos+cp, d)
-        else if s3 == g_ni_w64:
-            // w64(buf, pos, val) -> mov [rdi+rsi], rdx
+        else if s3 == g_ni_cell_store:
+            // cell_store(buf, pos, val) -> mov [rdi+rsi], rdx
             // In --big-int pos/val are tagged ints; convert them at the boundary.
             if g_x86_big_enabled != 0:
                 cp = cp + e2_big_sub_rsp(buf, pos+cp, 32)
@@ -1239,8 +1239,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             // movabs r10, imm64 + store; imm64 patched in elf.cr Phase 3.
             do2 := g2_slot(d)
             grow_fnaddr_patch(g_x86_fnaddr_patch_count + 1)
-            w64(g_x86_fnaddr_patch_pos, g_x86_fnaddr_patch_count * 8, pos + cp)
-            w64(g_x86_fnaddr_patch_name, g_x86_fnaddr_patch_count * 8, str_intern("goroutine_entry_wrapper"))
+            cell_store(g_x86_fnaddr_patch_pos, g_x86_fnaddr_patch_count * 8, pos + cp)
+            cell_store(g_x86_fnaddr_patch_name, g_x86_fnaddr_patch_count * 8, str_intern("goroutine_entry_wrapper"))
             g_x86_fnaddr_patch_count = g_x86_fnaddr_patch_count + 1
             // movabs r10, imm64: REX.W+B = 0x49, opcode 0xBA (0xB8 + reg 2)
             e2_w8(buf, pos+cp, 73)
@@ -1305,8 +1305,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             cp = cp + e2_big_add_rsp(buf, pos+cp, 48)
         // Record external relocation
         grow_ext_rel(g_x86_ext_rel_count + 1)
-        w64(g_x86_ext_rel_pos, g_x86_ext_rel_count * 8, pos + cp)
-        w64(g_x86_ext_rel_name, g_x86_ext_rel_count * 8, name_ni)
+        cell_store(g_x86_ext_rel_pos, g_x86_ext_rel_count * 8, pos + cp)
+        cell_store(g_x86_ext_rel_name, g_x86_ext_rel_count * 8, name_ni)
         g_x86_ext_rel_count = g_x86_ext_rel_count + 1
         // Emit call placeholder (E8 + rel32 = 0, patched later)
         e2_w8(buf, pos+cp, 232)
@@ -1325,8 +1325,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         do2 := g2_slot(d)
         name_ni := s1
         grow_call_patch(g_x86_call_patch_count + 1)
-        w64(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
-        w64(g_x86_call_patch_name, g_x86_call_patch_count * 8, name_ni)
+        cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
+        cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, name_ni)
         g_x86_call_patch_count = g_x86_call_patch_count + 1
         e2_w8(buf, pos+cp, 232)
         e2_w32(buf, pos+cp+1, 0)
@@ -1352,8 +1352,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         cp = cs_stack_args(buf, pos, cp, fa, ac)
         // Emit call to function + store result (single-threaded approximation)
         grow_call_patch(g_x86_call_patch_count + 1)
-        w64(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
-        w64(g_x86_call_patch_name, g_x86_call_patch_count * 8, name_ni)
+        cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
+        cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, name_ni)
         g_x86_call_patch_count = g_x86_call_patch_count + 1
         e2_w8(buf, pos+cp, 232)
         e2_w32(buf, pos+cp+1, 0)
@@ -1373,8 +1373,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         do2 := g2_slot(d)
         name_ni := s1
         grow_fnaddr_patch(g_x86_fnaddr_patch_count + 1)
-        w64(g_x86_fnaddr_patch_pos, g_x86_fnaddr_patch_count * 8, pos + cp)
-        w64(g_x86_fnaddr_patch_name, g_x86_fnaddr_patch_count * 8, name_ni)
+        cell_store(g_x86_fnaddr_patch_pos, g_x86_fnaddr_patch_count * 8, pos + cp)
+        cell_store(g_x86_fnaddr_patch_name, g_x86_fnaddr_patch_count * 8, name_ni)
         g_x86_fnaddr_patch_count = g_x86_fnaddr_patch_count + 1
         // movabs r10, imm64: REX.W+B = 0x49, opcode 0xBA (0xB8 + reg 2,
         // REX.B extends to 10 = r10). 0x49 0xBB would encode r11 — the
@@ -1418,7 +1418,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                 if fc > 0:
                     cp = cp + e2_movabs_rdi(buf, pos+cp, fc * 8)
                     grow_alloc_patch(g_x86_alloc_patch_count + 1)
-                    w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp)
+                    cell_store(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp)
                     g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1
                     e2_w8(buf, pos+cp, 232)
                     e2_w32(buf, pos+cp+1, 0)
@@ -1432,7 +1432,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         if sz > 0:
             cp = cp + e2_movabs_rdi(buf, pos+cp, sz)
             grow_alloc_patch(g_x86_alloc_patch_count + 1)
-            w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp)
+            cell_store(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp)
             g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1
             e2_w8(buf, pos+cp, 232)
             e2_w32(buf, pos+cp+1, 0)
@@ -1443,7 +1443,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             // 按 OOM 处理（alloc(-1) -> null），后续访问由 null 陷阱捕获。
             cp = cp + e2_movabs_rdi(buf, pos+cp, -1)
             grow_alloc_patch(g_x86_alloc_patch_count + 1)
-            w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp)
+            cell_store(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp)
             g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1
             e2_w8(buf, pos+cp, 232)
             e2_w32(buf, pos+cp+1, 0)
@@ -1457,8 +1457,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             // Scope actually allocates: create a fresh arena via arena_new().
             ni_arena_new := str_intern("arena_new")
             grow_call_patch(g_x86_call_patch_count + 1)
-            w64(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
-            w64(g_x86_call_patch_name, g_x86_call_patch_count * 8, ni_arena_new)
+            cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
+            cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, ni_arena_new)
             g_x86_call_patch_count = g_x86_call_patch_count + 1
             e2_w8(buf, pos+cp, 232)
             e2_w32(buf, pos+cp+1, 0)
@@ -1494,8 +1494,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         cp = cp + 2
         ni_arena_reset := str_intern("arena_reset")
         grow_call_patch(g_x86_call_patch_count + 1)
-        w64(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
-        w64(g_x86_call_patch_name, g_x86_call_patch_count * 8, ni_arena_reset)
+        cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, pos + cp)
+        cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, ni_arena_reset)
         g_x86_call_patch_count = g_x86_call_patch_count + 1
         e2_w8(buf, pos+cp, 232)
         e2_w32(buf, pos+cp+1, 0)
@@ -1505,11 +1505,11 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
     if op == IR_LOAD && d >= 0:
         do2 := g2_slot(d)
         if s1 >= 0:
-            isg : ., mut = r64(g_x86_is_global, s1 * 8)
+            isg : ., mut = cell_load(g_x86_is_global, s1 * 8)
             if isg != 0:
                 grow_rip_patch(g_x86_rip_patch_count + 1)
-                w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3)
-                w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1)
+                cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3)
+                cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1)
                 g_x86_rip_patch_count = g_x86_rip_patch_count + 1
                 cp = cp + e2_lr(buf, pos+cp, 0)
                 // mov r10, [r10] — REX.WRB + 0x8B
@@ -1533,15 +1533,15 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         // 立即数（例如 7_000_000 被读成 3_500_000）。
         needs_big_box := g_x86_big_enabled != 0 && irv_type(s1) == TI_INT && irv_type(s2) == TI_DEX_S
         if s1 >= 0:
-            if r64(g_x86_is_global, s1 * 8) != 0:
+            if cell_load(g_x86_is_global, s1 * 8) != 0:
                 cp = cp + e2_load_var(buf, pos+cp, 10, s2)
                 if needs_big_box != 0:
                     cp = cp + e2_mov(buf, pos+cp, 7, 10)
                     cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_from_word"))
                     cp = cp + e2_mov(buf, pos+cp, 10, 0)
                 grow_rip_patch(g_x86_rip_patch_count + 1)
-                w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3)
-                w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1)
+                cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3)
+                cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1)
                 g_x86_rip_patch_count = g_x86_rip_patch_count + 1
                 cp = cp + e2_lrb(buf, pos+cp, 0)
                 // mov [r11], r10 — REX.WRB + 0x89
@@ -1596,13 +1596,13 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
 
     if op == IR_REF && d >= 0:
         do2 := g2_slot(d)
-        if s1 >= 0 && r64(g_x86_is_global, s1 * 8) != 0:
+        if s1 >= 0 && cell_load(g_x86_is_global, s1 * 8) != 0:
             // Global address: lea r10, [rip+rel32] with a RIP patch, the same
             // rule as the IR_STORE global branch and e2_load_var. A local row uses
             // e2_lb with its frame slot.
             grow_rip_patch(g_x86_rip_patch_count + 1)
-            w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3)
-            w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1)
+            cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3)
+            cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1)
             g_x86_rip_patch_count = g_x86_rip_patch_count + 1
             cp = cp + e2_lr(buf, pos+cp, 0)
         else:
@@ -1684,36 +1684,36 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         // Single-pass backpatching: known labels emit immediately, unknown record pending
         je_rel_pos := pos+cp + 2
         cp = cp + e2_je(buf, pos+cp, 0)
-        if s3 >= 0 && r64(g_label_poses, s3 * 8) >= 0:
-            target := r64(g_label_poses, s3 * 8)
+        if s3 >= 0 && cell_load(g_label_poses, s3 * 8) >= 0:
+            target := cell_load(g_label_poses, s3 * 8)
             e2_w32(buf, je_rel_pos, target - (je_rel_pos + 4))
         else if s3 >= 0:
             grow_pending(g_pending_count + 1)
-            w64(g_pending_pos, g_pending_count*8, je_rel_pos)
-            w64(g_pending_label, g_pending_count*8, s3)
+            cell_store(g_pending_pos, g_pending_count*8, je_rel_pos)
+            cell_store(g_pending_label, g_pending_count*8, s3)
             g_pending_count = g_pending_count + 1
         jmp_rel_pos := pos+cp + 1
         cp = cp + e2_jmp(buf, pos+cp, 0)
-        if s2 >= 0 && r64(g_label_poses, s2 * 8) >= 0:
-            target := r64(g_label_poses, s2 * 8)
+        if s2 >= 0 && cell_load(g_label_poses, s2 * 8) >= 0:
+            target := cell_load(g_label_poses, s2 * 8)
             e2_w32(buf, jmp_rel_pos, target - (jmp_rel_pos + 4))
         else if s2 >= 0:
             grow_pending(g_pending_count + 1)
-            w64(g_pending_pos, g_pending_count*8, jmp_rel_pos)
-            w64(g_pending_label, g_pending_count*8, s2)
+            cell_store(g_pending_pos, g_pending_count*8, jmp_rel_pos)
+            cell_store(g_pending_label, g_pending_count*8, s2)
             g_pending_count = g_pending_count + 1
         return cp
 
     if op == IR_JUMP:
         jmp_rel_pos := pos+cp + 1
         cp = cp + e2_jmp(buf, pos+cp, 0)
-        if s1 >= 0 && r64(g_label_poses, s1 * 8) >= 0:
-            target := r64(g_label_poses, s1 * 8)
+        if s1 >= 0 && cell_load(g_label_poses, s1 * 8) >= 0:
+            target := cell_load(g_label_poses, s1 * 8)
             e2_w32(buf, jmp_rel_pos, target - (jmp_rel_pos + 4))
         else if s1 >= 0:
             grow_pending(g_pending_count + 1)
-            w64(g_pending_pos, g_pending_count*8, jmp_rel_pos)
-            w64(g_pending_label, g_pending_count*8, s1)
+            cell_store(g_pending_pos, g_pending_count*8, jmp_rel_pos)
+            cell_store(g_pending_label, g_pending_count*8, s1)
             g_pending_count = g_pending_count + 1
         return cp
 
@@ -1721,7 +1721,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         li := iri_s1(instr_idx)
         if li >= 0:
             grow_label_poses(li + 1)
-            w64(g_label_poses, li * 8, pos)
+            cell_store(g_label_poses, li * 8, pos)
             if li + 1 > g_label_count:
                 g_label_count = li + 1
             // Patch all pending forward jumps targeting this label
@@ -1729,10 +1729,10 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             loop:
                 if pi >= g_pending_count:
                     break
-                if r64(g_pending_label, pi * 8) == li:
-                    rp := r64(g_pending_pos, pi * 8)
+                if cell_load(g_pending_label, pi * 8) == li:
+                    rp := cell_load(g_pending_pos, pi * 8)
                     e2_w32(buf, rp, pos - (rp + 4))
-                    w64(g_pending_label, pi * 8, -1)
+                    cell_store(g_pending_label, pi * 8, -1)
                 pi = pi + 1
         return 0
 
@@ -1881,7 +1881,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         e2_w32(buf, pos+cp+1, alloc_size)
         cp = cp + 5  // mov edi, size
         grow_alloc_patch(g_x86_alloc_patch_count + 1)
-        w64(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp)
+        cell_store(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp)
         g_x86_alloc_patch_count = g_x86_alloc_patch_count + 1
         e2_w8(buf, pos+cp, 232)
         e2_w32(buf, pos+cp+1, 0)
@@ -2190,7 +2190,7 @@ fn hit_ev_slot_addr_ok(v: int) -> int:
         return 0
     if v >= g_ir_var_count:
         return 0
-    if r64(g_x86_is_global, v * 8) != 0:
+    if cell_load(g_x86_is_global, v * 8) != 0:
         return 0
     if v < g_current_func_var_start:
         return 0

@@ -25,11 +25,11 @@ fn res_labels():
         if fi >= g_ir_func_count:
             break
 
-        ist := r64(g_ir_func_instr_start, fi * 8)
-        ic := r64(g_ir_func_instr_count, fi * 8)
-        vs_r := r64(g_ir_func_var_start, fi * 8)
-        vc_r := r64(g_ir_func_var_count, fi * 8)
-        pc_r := r64(g_ir_func_param_count, fi * 8)
+        ist := cell_load(g_ir_func_instr_start, fi * 8)
+        ic := cell_load(g_ir_func_instr_count, fi * 8)
+        vs_r := cell_load(g_ir_func_var_start, fi * 8)
+        vc_r := cell_load(g_ir_func_var_count, fi * 8)
+        pc_r := cell_load(g_ir_func_param_count, fi * 8)
 
         // Init slot state for accurate sizing
         g2_init()
@@ -60,7 +60,7 @@ fn res_labels():
                 ln := iri_s1(inst_idx)
                 if ln >= 0:
                     grow_label_poses(ln + 1)
-                    w64(g_label_poses, ln * 8, off)
+                    cell_store(g_label_poses, ln * 8, off)
                     if ln + 1 > g_label_count:
                         g_label_count = ln + 1
             else:
@@ -68,7 +68,7 @@ fn res_labels():
             ii = ii + 1
         // Save per-function code size for Phase 2 reuse
         grow_func_code_sz(fi + 1)
-        w64(g_x86_func_code_sz, fi * 8, off)
+        cell_store(g_x86_func_code_sz, fi * 8, off)
 
         // ── Pass 2: patch BRANCH/JUMP with resolved offsets ──
         ii = 0
@@ -77,14 +77,14 @@ fn res_labels():
                 break
             inst_idx := ist + ii
             if iri_op(inst_idx) == IR_BRANCH:
-                true_off := r64(g_label_poses, iri_s2(inst_idx) * 8)
-                false_off := r64(g_label_poses, iri_s3(inst_idx) * 8)
+                true_off := cell_load(g_label_poses, iri_s2(inst_idx) * 8)
+                false_off := cell_load(g_label_poses, iri_s3(inst_idx) * 8)
                 iri_set_op(inst_idx, IR_BRANCH)
                 iri_set_s2(inst_idx, true_off)
                 iri_set_s3(inst_idx, false_off)
                 iri_set_tk(inst_idx, IR_RESOLVED)
             if iri_op(inst_idx) == IR_JUMP:
-                tgt_off := r64(g_label_poses, iri_s1(inst_idx) * 8)
+                tgt_off := cell_load(g_label_poses, iri_s1(inst_idx) * 8)
                 iri_set_op(inst_idx, IR_JUMP)
                 iri_set_s1(inst_idx, tgt_off)
                 iri_set_tk(inst_idx, IR_RESOLVED)

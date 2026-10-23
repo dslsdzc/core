@@ -218,7 +218,7 @@ fn pf_epilogue(ss: int, buf: string, pos: int) -> int:
     loop:
         if rpi >= g_x86_ret_patch_count:
             break
-        jmp_pos := r64(g_x86_ret_patch_pos, rpi * 8)
+        jmp_pos := cell_load(g_x86_ret_patch_pos, rpi * 8)
         rel := epi_pos - (jmp_pos + 5)
         w32(buf, jmp_pos + 1, rel)
         rpi = rpi + 1

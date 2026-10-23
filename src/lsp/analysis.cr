@@ -83,7 +83,7 @@ fn analysis_type_name_ti(ti: int) -> string:
                 break
             if e > 0:
                 out = out + ", "
-            out = out + analysis_type_name_ti(r64(g_gen_apply_data, (get_type_extra(ti) + e) * 8))
+            out = out + analysis_type_name_ti(cell_load(g_gen_apply_data, (get_type_extra(ti) + e) * 8))
             e = e + 1
         out = out + ")"
         return out
@@ -155,11 +155,11 @@ fn analysis_token_at(line: int, col: int) -> int:
     loop:
         if i >= g_token_count:
             return -1
-        if r64(g_tokens, i * ESZ_TOKEN + OFF_TK_KIND) == T_EOF:
+        if cell_load(g_tokens, i * ESZ_TOKEN + OFF_TK_KIND) == T_EOF:
             return -1
-        if r64(g_tokens, i * ESZ_TOKEN + OFF_TK_LINE) == tl:
-            cl := r64(g_tokens, i * ESZ_TOKEN + OFF_TK_COL)
-            lex := r64(g_tokens, i * ESZ_TOKEN + OFF_TK_LEXEME)
+        if cell_load(g_tokens, i * ESZ_TOKEN + OFF_TK_LINE) == tl:
+            cl := cell_load(g_tokens, i * ESZ_TOKEN + OFF_TK_COL)
+            lex := cell_load(g_tokens, i * ESZ_TOKEN + OFF_TK_LEXEME)
             w : ., mut = 1
             if lex >= 0:
                 w = str_len(istr_get(lex))
@@ -422,9 +422,9 @@ fn analysis_hover(line: int, col: int) -> string:
     ti := analysis_token_at(line, col)
     if ti < 0:
         return ""
-    if r64(g_tokens, ti * ESZ_TOKEN + OFF_TK_KIND) != T_IDENT:
+    if cell_load(g_tokens, ti * ESZ_TOKEN + OFF_TK_KIND) != T_IDENT:
         return ""
-    name_ni := r64(g_tokens, ti * ESZ_TOKEN + OFF_TK_LEXEME)
+    name_ni := cell_load(g_tokens, ti * ESZ_TOKEN + OFF_TK_LEXEME)
     // Locals and parameters shadow functions and type names.
     vd := analysis_var_decl(name_ni, line, col)
     if vd >= 0:
@@ -455,8 +455,8 @@ fn analysis_decl_tok(kw: int, name_ni: int) -> int:
     loop:
         if i + 1 >= g_token_count:
             return -1
-        if r64(g_tokens, i * ESZ_TOKEN + OFF_TK_KIND) == kw:
-            if r64(g_tokens, (i + 1) * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT && r64(g_tokens, (i + 1) * ESZ_TOKEN + OFF_TK_LEXEME) == name_ni:
+        if cell_load(g_tokens, i * ESZ_TOKEN + OFF_TK_KIND) == kw:
+            if cell_load(g_tokens, (i + 1) * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT && cell_load(g_tokens, (i + 1) * ESZ_TOKEN + OFF_TK_LEXEME) == name_ni:
                 return i + 1
         i = i + 1
 
@@ -464,14 +464,14 @@ fn analysis_decl_tok(kw: int, name_ni: int) -> int:
 fn analysis_path_for_line(ln1: int) -> string:
     fid : ., mut = -1
     if ln1 >= 1 && ln1 - 1 < g_line_count:
-        fid = r64(g_line_fileid, (ln1 - 1) * 8)
+        fid = cell_load(g_line_fileid, (ln1 - 1) * 8)
     if fid < 0 && g_file_count > 0:
-        fid = r64(g_files, 0)
+        fid = cell_load(g_files, 0)
     i : ., mut = 0
     loop:
         if i >= g_file_count:
             break
-        if r64(g_files, i * 16) == fid:
+        if cell_load(g_files, i * 16) == fid:
             p := load_str_ptr(g_files, i * 16 + 8)
             if str_len(p) > 0:
                 return p
@@ -482,15 +482,15 @@ fn analysis_path_for_line(ln1: int) -> string:
 fn analysis_line_offset(ln1: int) -> int:
     fid : ., mut = -1
     if ln1 >= 1 && ln1 - 1 < g_line_count:
-        fid = r64(g_line_fileid, (ln1 - 1) * 8)
+        fid = cell_load(g_line_fileid, (ln1 - 1) * 8)
     if fid < 0:
         return 0
     i : ., mut = 1
     loop:
         if i >= g_seg_count:
             break
-        if r64(g_seg_fileids, i * 8) == fid:
-            limit := r64(g_seg_starts, i * 8)
+        if cell_load(g_seg_fileids, i * 8) == fid:
+            limit := cell_load(g_seg_starts, i * 8)
             off_lines : ., mut = 0
             pos : ., mut = 0
             loop:
@@ -533,9 +533,9 @@ fn analysis_definition(line: int, col: int) -> string:
     ti := analysis_token_at(line, col)
     if ti < 0:
         return ""
-    if r64(g_tokens, ti * ESZ_TOKEN + OFF_TK_KIND) != T_IDENT:
+    if cell_load(g_tokens, ti * ESZ_TOKEN + OFF_TK_KIND) != T_IDENT:
         return ""
-    name_ni := r64(g_tokens, ti * ESZ_TOKEN + OFF_TK_LEXEME)
+    name_ni := cell_load(g_tokens, ti * ESZ_TOKEN + OFF_TK_LEXEME)
     // 局部变量/参数
     vd := analysis_var_decl(name_ni, line, col)
     if vd >= 0:
@@ -545,20 +545,20 @@ fn analysis_definition(line: int, col: int) -> string:
     if fi >= 0:
         dfn := analysis_decl_tok(T_FN, name_ni)
         if dfn >= 0:
-            return analysis_def_json(r64(g_tokens, dfn * ESZ_TOKEN + OFF_TK_LINE),
-                r64(g_tokens, dfn * ESZ_TOKEN + OFF_TK_COL))
+            return analysis_def_json(cell_load(g_tokens, dfn * ESZ_TOKEN + OFF_TK_LINE),
+                cell_load(g_tokens, dfn * ESZ_TOKEN + OFF_TK_COL))
         return ""
     // 结构体 / 枚举（令牌反查声明）
     if find_struct_by_name(name_ni) >= 0:
         d := analysis_decl_tok(T_STRUCT, name_ni)
         if d >= 0:
-            return analysis_def_json(r64(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE),
-                r64(g_tokens, d * ESZ_TOKEN + OFF_TK_COL))
+            return analysis_def_json(cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE),
+                cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_COL))
     if find_enum(name_ni) >= 0:
         d := analysis_decl_tok(T_ENUM, name_ni)
         if d >= 0:
-            return analysis_def_json(r64(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE),
-                r64(g_tokens, d * ESZ_TOKEN + OFF_TK_COL))
+            return analysis_def_json(cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE),
+                cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_COL))
     return ""
 
 // Completion: position to prefix, then filter candidates and emit JSON.
@@ -939,11 +939,11 @@ fn analysis_cand_add(cand: string, count: int, ni: int, kind: int) -> int:
     loop:
         if i >= count:
             break
-        if r64(cand, i * 16) == ni:
+        if cell_load(cand, i * 16) == ni:
             return 0
         i = i + 1
-    w64(cand, count * 16, ni)
-    w64(cand, count * 16 + 8, kind)
+    cell_store(cand, count * 16, ni)
+    cell_store(cand, count * 16 + 8, kind)
     return 1
 
 // Map SYM_* kinds to CompletionItemKind: functions 3, variables 6, types 22,
@@ -1011,11 +1011,11 @@ fn analysis_completion(line: int, col: int) -> string:
         loop:
             if j >= cnt:
                 break
-            ni := r64(cand, j * 16)
+            ni := cell_load(cand, j * 16)
             if analysis_has_prefix(istr_get(ni), prefix) != 0:
                 if str_len(out) > 10:
                     out = out + ","
-                out = out + analysis_citem(istr_get(ni), r64(cand, j * 16 + 8))
+                out = out + analysis_citem(istr_get(ni), cell_load(cand, j * 16 + 8))
             j = j + 1
     out = out + "]}"
     return out
@@ -1065,10 +1065,10 @@ fn analysis_document_symbol() -> string:
             ln = ast_line(fn_node)
             cl = ast_col(fn_node)
         if ln > 0 && analysis_line_offset(ln) == 0:
-            w64(ent, cnt * 32, ni)
-            w64(ent, cnt * 32 + 8, 12)        // SymbolKind.Function = 12
-            w64(ent, cnt * 32 + 16, ln)
-            w64(ent, cnt * 32 + 24, cl)
+            cell_store(ent, cnt * 32, ni)
+            cell_store(ent, cnt * 32 + 8, 12)        // SymbolKind.Function = 12
+            cell_store(ent, cnt * 32 + 16, ln)
+            cell_store(ent, cnt * 32 + 24, cl)
             cnt = cnt + 1
         i = i + 1
     i = 0
@@ -1078,12 +1078,12 @@ fn analysis_document_symbol() -> string:
         ni := si_name(i)
         d := analysis_decl_tok(T_STRUCT, ni)
         if d >= 0:
-            ln := r64(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE)
+            ln := cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE)
             if analysis_line_offset(ln) == 0:
-                w64(ent, cnt * 32, ni)
-                w64(ent, cnt * 32 + 8, 23)    // SymbolKind.Struct = 23
-                w64(ent, cnt * 32 + 16, ln)
-                w64(ent, cnt * 32 + 24, r64(g_tokens, d * ESZ_TOKEN + OFF_TK_COL))
+                cell_store(ent, cnt * 32, ni)
+                cell_store(ent, cnt * 32 + 8, 23)    // SymbolKind.Struct = 23
+                cell_store(ent, cnt * 32 + 16, ln)
+                cell_store(ent, cnt * 32 + 24, cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_COL))
                 cnt = cnt + 1
         i = i + 1
     i = 0
@@ -1093,12 +1093,12 @@ fn analysis_document_symbol() -> string:
         ni := ei_name(i)
         d := analysis_decl_tok(T_ENUM, ni)
         if d >= 0:
-            ln := r64(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE)
+            ln := cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE)
             if analysis_line_offset(ln) == 0:
-                w64(ent, cnt * 32, ni)
-                w64(ent, cnt * 32 + 8, 10)    // SymbolKind.Enum = 10
-                w64(ent, cnt * 32 + 16, ln)
-                w64(ent, cnt * 32 + 24, r64(g_tokens, d * ESZ_TOKEN + OFF_TK_COL))
+                cell_store(ent, cnt * 32, ni)
+                cell_store(ent, cnt * 32 + 8, 10)    // SymbolKind.Enum = 10
+                cell_store(ent, cnt * 32 + 16, ln)
+                cell_store(ent, cnt * 32 + 24, cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_COL))
                 cnt = cnt + 1
         i = i + 1
     // Insertion-sort by (line, col) for source order.
@@ -1106,27 +1106,27 @@ fn analysis_document_symbol() -> string:
     loop:
         if j >= cnt:
             break
-        key_ni := r64(ent, j * 32)
-        key_kind := r64(ent, j * 32 + 8)
-        key_ln := r64(ent, j * 32 + 16)
-        key_cl := r64(ent, j * 32 + 24)
+        key_ni := cell_load(ent, j * 32)
+        key_kind := cell_load(ent, j * 32 + 8)
+        key_ln := cell_load(ent, j * 32 + 16)
+        key_cl := cell_load(ent, j * 32 + 24)
         k : ., mut = j
         loop:
             if k <= 0:
                 break
-            pln := r64(ent, (k - 1) * 32 + 16)
-            pcl := r64(ent, (k - 1) * 32 + 24)
+            pln := cell_load(ent, (k - 1) * 32 + 16)
+            pcl := cell_load(ent, (k - 1) * 32 + 24)
             if pln < key_ln || (pln == key_ln && pcl <= key_cl):
                 break
-            w64(ent, k * 32, r64(ent, (k - 1) * 32))
-            w64(ent, k * 32 + 8, r64(ent, (k - 1) * 32 + 8))
-            w64(ent, k * 32 + 16, pln)
-            w64(ent, k * 32 + 24, pcl)
+            cell_store(ent, k * 32, cell_load(ent, (k - 1) * 32))
+            cell_store(ent, k * 32 + 8, cell_load(ent, (k - 1) * 32 + 8))
+            cell_store(ent, k * 32 + 16, pln)
+            cell_store(ent, k * 32 + 24, pcl)
             k = k - 1
-        w64(ent, k * 32, key_ni)
-        w64(ent, k * 32 + 8, key_kind)
-        w64(ent, k * 32 + 16, key_ln)
-        w64(ent, k * 32 + 24, key_cl)
+        cell_store(ent, k * 32, key_ni)
+        cell_store(ent, k * 32 + 8, key_kind)
+        cell_store(ent, k * 32 + 16, key_ln)
+        cell_store(ent, k * 32 + 24, key_cl)
         j = j + 1
     out : string, mut = "["
     q : ., mut = 0
@@ -1135,13 +1135,13 @@ fn analysis_document_symbol() -> string:
             break
         if q > 0:
             out = out + ","
-        ni := r64(ent, q * 32)
-        ln1 := r64(ent, q * 32 + 16)
-        cl1 := r64(ent, q * 32 + 24)
+        ni := cell_load(ent, q * 32)
+        ln1 := cell_load(ent, q * 32 + 16)
+        cl1 := cell_load(ent, q * 32 + 24)
         out = out + "{\"name\":"
         out = out + lsp_json_escape_str(istr_get(ni))
         out = out + ",\"kind\":"
-        out = out + int_str(r64(ent, q * 32 + 8))
+        out = out + int_str(cell_load(ent, q * 32 + 8))
         out = out + ",\"range\":"
         out = out + analysis_range_json(ln1, cl1)
         out = out + ",\"selectionRange\":"
@@ -1184,10 +1184,10 @@ fn analysis_is_builtin_type(ni: int) -> int:
 
 // Token index to legend index. T_IDENT is classified by symbol table and builtin type names.
 fn analysis_token_type(ti: int) -> int:
-    k := r64(g_tokens, ti * ESZ_TOKEN + OFF_TK_KIND)
+    k := cell_load(g_tokens, ti * ESZ_TOKEN + OFF_TK_KIND)
     if k != T_IDENT:
         return analysis_kind_type(k)
-    ni := r64(g_tokens, ti * ESZ_TOKEN + OFF_TK_LEXEME)
+    ni := cell_load(g_tokens, ti * ESZ_TOKEN + OFF_TK_LEXEME)
     if analysis_is_builtin_type(ni) != 0:
         return 1
     if find_func(ni) >= 0:
@@ -1200,7 +1200,7 @@ fn analysis_token_type(ti: int) -> int:
 
 // Token index to source byte span. Start at st and mirror the lexer consumption rules for the kind.
 fn analysis_tok_span(ti: int, st: int, sl: int) -> int:
-    k := r64(g_tokens, ti * ESZ_TOKEN + OFF_TK_KIND)
+    k := cell_load(g_tokens, ti * ESZ_TOKEN + OFF_TK_KIND)
     // String and char spans mirror the lexer after interpolation splitting:
     // T_STRING is a literal segment, ending at the closing quote, the next `${`,
     // or a newline. T_INTERP is a hole from `${` to its matching }, with nesting.
@@ -1313,7 +1313,7 @@ fn analysis_tok_span(ti: int, st: int, sl: int) -> int:
                 break
         return p - st
     // Identifiers, keywords, and type keywords: the lexeme is the source text.
-    lex := r64(g_tokens, ti * ESZ_TOKEN + OFF_TK_LEXEME)
+    lex := cell_load(g_tokens, ti * ESZ_TOKEN + OFF_TK_LEXEME)
     if lex >= 0:
         return str_len(istr_get(lex))
     // Operators and separators have lexeme -1; use the fixed length table, defaulting to one byte.
@@ -1330,7 +1330,7 @@ fn analysis_semantic_tokens() -> string:
     loop:
         if n >= g_token_count:
             break
-        if r64(g_tokens, n * ESZ_TOKEN + OFF_TK_KIND) == T_EOF:
+        if cell_load(g_tokens, n * ESZ_TOKEN + OFF_TK_KIND) == T_EOF:
             break
         n = n + 1
     if n == 0:
@@ -1345,8 +1345,8 @@ fn analysis_semantic_tokens() -> string:
     loop:
         if i >= n:
             break
-        tline := r64(g_tokens, i * ESZ_TOKEN + OFF_TK_LINE)
-        tcol := r64(g_tokens, i * ESZ_TOKEN + OFF_TK_COL)
+        tline := cell_load(g_tokens, i * ESZ_TOKEN + OFF_TK_LINE)
+        tcol := cell_load(g_tokens, i * ESZ_TOKEN + OFF_TK_COL)
         loop:
             // 跨行到 tline
             if ln >= tline:
@@ -1367,13 +1367,13 @@ fn analysis_semantic_tokens() -> string:
                 break
             pos = pos + 1
             cl = cl + 1
-        w64(offs, i * 8, pos)
+        cell_store(offs, i * 8, pos)
         i = i + 1
     // Pass 2: differential encoding relative to the previous token; the first is
     // relative to (0, 0), and modifiers are always 0. Emit only main-file tokens.
     main_limit : ., mut = sl
     if g_seg_count > 1:
-        main_limit = r64(g_seg_starts, 8)
+        main_limit = cell_load(g_seg_starts, 8)
     out : string, mut = "{\"data\":["
     prev_line : ., mut = 0
     prev_col : ., mut = 0
@@ -1382,9 +1382,9 @@ fn analysis_semantic_tokens() -> string:
     loop:
         if j >= n:
             break
-        st := r64(offs, j * 8)
+        st := cell_load(offs, j * 8)
         if st < main_limit:
-            line0 : ., mut = r64(g_tokens, j * ESZ_TOKEN + OFF_TK_LINE) - 1
+            line0 : ., mut = cell_load(g_tokens, j * ESZ_TOKEN + OFF_TK_LINE) - 1
             token_line_start := analysis_line_start(line0)
             col0 := analysis_utf16_units(token_line_start, st)
             if first == 0:

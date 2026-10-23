@@ -1,8 +1,8 @@
 // src/kernel/bytes.cr: byte helpers. The kernel is self-contained so its trust
 // base can be audited independently.
-// The byte layer (w8, bu8, w32, r32, w64, r64, and _dyncpy) is copied from
-// src/compiler/dyn_arr.cr without compiler globals, which the kernel does not
-// need. Semantics match dyn_arr.cr lines 5-46 and 144-146 byte for byte.
+// The byte layer (w8, bu8, w32, r32, cell_store/cell_load, and _dyncpy) is
+// shared by the compiler and the target/runtime axes. It is not language
+// semantics; semantic passes use typed operations instead.
 
 fn w8(buf: string, pos: int, val: int):
     store8(buf, pos, val % 256)
@@ -43,7 +43,7 @@ fn r32(buf: string, pos: int) -> int:
     else:
         v = v + b3 * 16777216
     return v
-fn w64(buf: string, pos: int, val: int):
+fn cell_store(buf: string, pos: int, val: int):
     cur : ., mut = val
     i : ., mut = 0
     loop:
@@ -55,7 +55,7 @@ fn w64(buf: string, pos: int, val: int):
         store8(buf, pos + i, byte)
         cur = (cur - byte) / 256
         i = i + 1
-fn r64(buf: string, pos: int) -> int:
+fn cell_load(buf: string, pos: int) -> int:
     // The low dword is unsigned. Reading it through r32 double-subtracts
     // 2^32 for negative values, e.g. -1 becomes -1 + (-1 * 2^32).
     lo := bu8(buf,pos) + bu8(buf,pos+1)*256 + bu8(buf,pos+2)*65536 + bu8(buf,pos+3)*16777216
@@ -74,14 +74,8 @@ fn _dyncpy(src: string, nbytes: int, dst: string):
 
 // ── Compiler cell API ──
 // The frontend uses these names for compiler-owned table slots. The cell width
-// and raw machine access stay in this low-level module; semantic passes do not
-// read or write w64/r64/r32/load8 directly.
-
-fn cell_store(buf: string, pos: int, val: int):
-    w64(buf, pos, val)
-
-fn cell_load(buf: string, pos: int) -> int:
-    return r64(buf, pos)
+// and raw byte access stay in this low-level module; semantic passes do not
+// issue fixed-width memory operations.
 
 fn cell_store32(buf: string, pos: int, val: int):
     w32(buf, pos, val)

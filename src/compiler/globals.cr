@@ -417,9 +417,9 @@ g_ni_load64 : int, mut
 g_ni_load_str_ptr : int, mut
 g_ni_store_str_ptr : int, mut
 g_ni_get_arg : int, mut
-g_ni_w64 : int, mut
+g_ni_cell_store : int, mut
 g_ni_dyncpy : int, mut
-g_ni_r64 : int, mut
+g_ni_cell_load : int, mut
 g_ni_goroutine_wrapper_addr : int, mut
 // Single-pass backpatching: pending forward jumps
 g_pending_pos : string, mut        // rel32 buffer positions to patch

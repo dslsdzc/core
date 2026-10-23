@@ -36,8 +36,8 @@ fn emit_start(buf: string, pos: int) -> int:
         rip_pos := cp + 3
         cp = cp + e2_lr(buf, cp, 0)
         grow_rip_patch(g_x86_rip_patch_count + 1)
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos)
-        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argc)
+        cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos)
+        cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argc)
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1
         // mov [r10], rdi, store argc
         cp = cp + emit_rex(buf, cp, 1, 0, 0, 10/8)
@@ -49,8 +49,8 @@ fn emit_start(buf: string, pos: int) -> int:
         rip_pos2 := cp + 3
         cp = cp + e2_lr(buf, cp, 0)
         grow_rip_patch(g_x86_rip_patch_count + 1)
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos2)
-        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argv)
+        cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos2)
+        cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_argv)
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1
         // mov [r10], rsi, store argv
         cp = cp + emit_rex(buf, cp, 1, 0, 0, 10/8)
@@ -63,8 +63,8 @@ fn emit_start(buf: string, pos: int) -> int:
         rip_ca := cp + 3
         cp = cp + e2_lr(buf, cp, 0)  // lea r10, [rip+0]
         grow_rip_patch(g_x86_rip_patch_count + 1)
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_ca)
-        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_current_arena)
+        cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_ca)
+        cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_current_arena)
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1
         // mov qword [r10], -1, REX.WB + 0xC7 /0
         cp = cp + emit_rex(buf, cp, 1, 0, 0, 10/8)
@@ -82,8 +82,8 @@ fn emit_start(buf: string, pos: int) -> int:
     loop:
         if gi0 >= g_ir_global_count:
             break
-        iv := r64(g_ir_globals, gi0 * 24 + 16)
-        gvv0 := r64(g_ir_globals, gi0 * 24 + 8)
+        iv := cell_load(g_ir_globals, gi0 * 24 + 16)
+        gvv0 := cell_load(g_ir_globals, gi0 * 24 + 8)
         if iv != 0 && gvv0 >= 0:
             ivv : ., mut = iv
             if g_x86_big_enabled != 0 && irv_type(gvv0) == TI_INT:
@@ -93,8 +93,8 @@ fn emit_start(buf: string, pos: int) -> int:
             rip_pos_g := cp + 3
             cp = cp + e2_lr(buf, cp, 0)
             grow_rip_patch(g_x86_rip_patch_count + 1)
-            w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos_g)
-            w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gvv0)
+            cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos_g)
+            cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gvv0)
             g_x86_rip_patch_count = g_x86_rip_patch_count + 1
             if ivv >= -2147483647 - 1 && ivv <= 2147483647:
                 // mov qword [r10], imm32 (sign-extended), 49 C7 02 imm32
@@ -161,8 +161,8 @@ fn emit_start_size() -> int:
     loop:
         if gi0s >= g_ir_global_count:
             break
-        ivs := r64(g_ir_globals, gi0s * 24 + 16)
-        gvvs := r64(g_ir_globals, gi0s * 24 + 8)
+        ivs := cell_load(g_ir_globals, gi0s * 24 + 16)
+        gvvs := cell_load(g_ir_globals, gi0s * 24 + 8)
         if ivs != 0 && gvvs >= 0:
             if ivs >= -2147483647 - 1 && ivs <= 2147483647:
                 sz = sz + 14
