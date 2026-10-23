@@ -422,8 +422,36 @@ def _fn_body(text, name):
     return "\n".join(body)
 
 
-INTERP_LAYOUT_BRANCHES = {
-    "// IR_ALLOC_ARRAY": "interp_ptr_stride()",
+def _strip_crystal_comments(text):
+    """Drop `//` comments so a structural assertion cannot match a comment."""
+    out = []
+    for line in text.splitlines():
+        cut = line.find("//")
+        out.append(line[:cut] if cut >= 0 else line)
+    return "\n".join(out)
+
+
+def _guard_block(text, guard):
+    """The `if <guard>:` statement plus its body (comment-stripped input)."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if guard not in line:
+            continue
+        indent = _line_indent(line)
+        block = [line]
+        for cur in lines[i + 1:]:
+            if cur.strip():
+                ind = _line_indent(cur)
+                if ind < indent:
+                    break
+                if ind == indent and cur.lstrip().startswith("if "):
+                    break
+            block.append(cur)
+        return "\n".join(block)
+    return ""
+
+
+INTERP_LAYOUT_BRANCHES = {    "// IR_ALLOC_ARRAY": "interp_ptr_stride()",
     "// IR_ALLOC_STRUCT": "interp_field_stride()",
     "// IR_ADDR_INDEX": "interp_ptr_stride()",
     "// IR_SLICE": "interp_ptr_stride()",
@@ -698,9 +726,17 @@ def test_alloc_stride_is_element_type_driven():
 
 def test_provenance_unknown_type_span_fails_closed():
     """A warm cache may miss the type row a pointer variable refers to. The pass
-    must treat that as unknown (span -1) and keep the runtime bounds check, never
-    silently assume a one-cell access."""
-    src = (REPO_ROOT / "src/compiler/provenance_verify.cr").read_text(encoding="utf-8")
+    must treat that as unknown (span -1) and keep the runtime bounds check even
+    with a *constant* offset, never silently assume a one-cell access.
+
+    A runtime fixture is impractical here: the unknown span only arises when the
+    variable's TYPE row is outside the loaded table, which a plain source compile
+    cannot produce (the frontend allocates the row). provenance_verify runs in
+    corec before serialization, so corearch cannot re-run it on a doctored .ccr.
+    The condition is therefore pinned structurally on comment-stripped code.
+    """
+    raw = (REPO_ROOT / "src/compiler/provenance_verify.cr").read_text(encoding="utf-8")
+    src = _strip_crystal_comments(raw)
     for fname in ("pv_value_span", "pv_access_span"):
         body = _fn_body(src, fname)
         assert "ti < 0" in body and "ti >= g_type_count" in body, f"{fname} lacks range guard"
@@ -708,7 +744,38 @@ def test_provenance_unknown_type_span_fails_closed():
 
     verify = _fn_body(src, "provenance_verify_func")
     assert "span > 0" in verify, "static proof must require a known span"
+
+    # The runtime trigger must combine a dynamic offset with an unknown span,
+    # and must actually set the flag on the next statement.
+    vlines = verify.splitlines()
+    trigger = None
+    for i, line in enumerate(vlines):
+        if line.strip().startswith("if ") and ("span <= 0" in line or "span < 0" in line):
+            trigger = i
+            break
+    assert trigger is not None, "missing unknown-span runtime trigger"
+    assert "off < 0" in vlines[trigger], "runtime trigger drops the dynamic-offset case"
+    assert "||" in vlines[trigger], "runtime trigger must be a disjunction"
+    nxt = next(ln.strip() for ln in vlines[trigger + 1:] if ln.strip())
+    assert nxt == "needs_runtime = 1", f"runtime trigger does not set the flag: {nxt!r}"
+
+    guards = [ln.strip() for ln in vlines if "runtime_targets" in ln and "if " in ln]
+    single = [ln for ln in guards if "runtime_targets == 1" in ln]
+    multi = [ln for ln in guards if "runtime_targets > 1" in ln]
+    assert len(single) == 1 and len(multi) == 1, guards
+    assert "needs_runtime" in single[0], "single-target marker ignores unknown span"
+    assert "needs_runtime" in multi[0], "multiple-target error ignores unknown span"
     assert "runtime_targets = runtime_targets + 1" in verify, "runtime fallback was removed"
+
+    # The backend must emit a real bounds check (not only a null check) whenever
+    # the frontend marked a runtime bound in s3.
+    instr = _strip_crystal_comments(
+        (REPO_ROOT / "src/arch/x86_64/instr.cr").read_text(encoding="utf-8")
+    )
+    for guard in ("if op == IR_DEREF && d >= 0:", "if op == IR_STORE_PTR:"):
+        block = _guard_block(instr, guard)
+        assert block, f"missing backend branch {guard}"
+        assert "s3 != 0" in block, f"{guard} does not emit a bounds check for s3 != 0"
 
 
 def test_corearch_accepts_v10_and_rejects_v9():

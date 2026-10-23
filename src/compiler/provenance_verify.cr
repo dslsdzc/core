@@ -189,14 +189,25 @@ fn provenance_verify_func(nstart: int, ncount: int):
                 mask = mask * 2
                 bi = bi + 1
 
-            if off < 0 && runtime_targets == 1 && runtime_base >= 0:
+            // A constant offset plus a known span can be proven statically. A
+            // dynamic offset (off < 0) or an unknown span (span <= 0: missing or
+            // out-of-range type row, e.g. a warm cache without it) cannot. Both
+            // must keep the runtime bound, otherwise the backend would emit only
+            // a null check and the access would be fail-open. `span` is never 0
+            // from pv_value_span/pv_access_span; treating 0 as unknown is
+            // intentionally conservative.
+            needs_runtime : ., mut = 0
+            if off < 0 || span <= 0:
+                needs_runtime = 1
+
+            if needs_runtime != 0 && runtime_targets == 1 && runtime_base >= 0:
                 cell_store(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3, runtime_size)
                 if op == IR_DEREF:
                     cell_store(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2, runtime_base)
                 else:
                     // IR_STORE_PTR has no result, so dest carries the runtime base.
                     cell_store(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST, runtime_base)
-            else if off < 0 && runtime_targets > 1:
+            else if needs_runtime != 0 && runtime_targets > 1:
                 check_error(EC_TK_INDEX,
                     "runtime pointer bounds check has multiple allocation targets",
                     0, 0)
