@@ -567,6 +567,16 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
     p = p + 8 + p_instr_count * 48
     if p > dlen:
         return -1
+    // A snapshot stores instructions but not the CASE table. A function with
+    // IR_MATCH cannot be restored without its CASE range, so treat it as a miss
+    // and rebuild. (Task 5 may persist the range instead.)
+    p_mi : ., mut = 0
+    loop:
+        if p_mi >= p_instr_count:
+            break
+        if cell_load(data, instr_p + 8 + p_mi * 48) == IR_MATCH:
+            return -1
+        p_mi = p_mi + 1
     str_p := p
     p_str_count := cell_load(data, p)
     p = p + 8

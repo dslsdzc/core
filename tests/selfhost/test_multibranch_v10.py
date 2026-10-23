@@ -79,21 +79,21 @@ class CaseParseError(ValueError):
     """Raised when a CASE body is not the exact 24B table v10 defines."""
 
 
-def _run(cmd, timeout=180):
+def _run(cmd, timeout=180, cwd=None):
     return subprocess.run(
         [str(part) for part in cmd],
         capture_output=True,
         text=True,
-        cwd=str(BASE),
+        cwd=str(cwd if cwd is not None else BASE),
         timeout=timeout,
     )
 
 
-def _build_ccr(tmp, source=BRANCH_SOURCE, name="multibranch"):
+def _build_ccr(tmp, source=BRANCH_SOURCE, name="multibranch", cwd=None):
     src = tmp / f"{name}.cr"
     ccr = tmp / f"{name}.ccr"
     src.write_text(source, encoding="utf-8")
-    r = _run([COREC, "ccr", src, "-o", ccr])
+    r = _run([COREC, "ccr", src, "-o", ccr], cwd=cwd)
     assert r.returncode == 0, f"corec ccr failed: {r.stdout}\n{r.stderr}"
     data = ccr.read_bytes()
     validate(data)
@@ -379,8 +379,10 @@ def test_malformed_case_records_rejected():
         install("case_target_oob", _pack_case([(1, KIND_VALUE, -1, nod_count + 10, 0)]))
         install("case_target_negative", _pack_case([(1, KIND_VALUE, -1, -2, 0)]))
         install("case_target_not_label", _pack_case([(1, KIND_VALUE, -1, non_label, 0)]))
-        install(
-            "case_two_defaults",
+        # Two DEFAULT rows inside one MATCH range are invalid. (The table is
+        # global, so two different matches may each have one default.)
+        two_defaults = _replace_case(
+            data,
             _pack_case(
                 [
                     (0, KIND_DEFAULT, -1, label, 0),
@@ -388,6 +390,14 @@ def test_malformed_case_records_rejected():
                 ]
             ),
         )
+        nod_off = next(
+            offset for tag, offset, _size in read_segment_table(data) if tag == NOD_TAG
+        )
+        d = bytearray(two_defaults)
+        struct.pack_into("<I", d, nod_off + 4, IR_MATCH)
+        struct.pack_into("<i", d, nod_off + 4 + 16, 0)  # s2 = case start
+        struct.pack_into("<i", d, nod_off + 4 + 20, 2)  # s3 = case count
+        _assert_load_rejected(bytes(d), tmp, "case_two_defaults")
         install("case_flags_reserved", _pack_case([(1, KIND_VALUE, -1, label, 1)]))
         # Count claims two records but only one is present.
         install("case_count_truncated", struct.pack("<I", 2) + _pack_case([(1, 0, -1, label, 0)])[4:])
@@ -413,6 +423,294 @@ def test_duplicate_value_cases_are_allowed_by_the_reader():
             ),
         )
         _assert_loads(out, tmp, "duplicate_values")
+
+
+# ---------------------------------------------------------------------------
+# 5. corec lowers supported match expressions to one IR_MATCH
+# ---------------------------------------------------------------------------
+#
+# Supported arm patterns in this task: int literal, bool literal, enum variant
+# with no sub-patterns, and `_`. Anything else (string/char/struct/tuple/ident
+# binding, enum payload binding, optional representation dispatch) keeps the
+# existing sequential lowering. These fixtures pin both sides of that boundary.
+
+MATCH_INT_SOURCE = """fn pick(n: int) -> int:
+    return match n:
+        10 => 1,
+        20 => 2,
+        30 => 3,
+        40 => 4,
+        _ => 5
+
+fn main() -> int:
+    if pick(10) != 1:
+        return 10
+    if pick(20) != 2:
+        return 20
+    if pick(30) != 3:
+        return 30
+    if pick(40) != 4:
+        return 40
+    if pick(99) != 5:
+        return 99
+    return 42
+"""
+
+MATCH_BOOL_SOURCE = """fn pickb(b: bool) -> int:
+    return match b:
+        true => 7,
+        false => 8,
+        _ => 9
+
+fn main() -> int:
+    if pickb(true) != 7:
+        return 1
+    if pickb(false) != 8:
+        return 2
+    return 42
+"""
+
+MATCH_ENUM_SOURCE = """enum Color:
+    Red, Green, Blue
+
+fn pickc(c: Color) -> int:
+    return match c:
+        Red => 11,
+        Green => 22,
+        Blue => 33,
+        _ => 44
+
+fn main() -> int:
+    if pickc(Red()) != 11:
+        return 1
+    if pickc(Green()) != 22:
+        return 2
+    if pickc(Blue()) != 33:
+        return 3
+    return 42
+"""
+
+# Every function here has at least one arm outside the supported set, so each
+# must keep the old sequential lowering. The programs are not executed: the old
+# path's string/struct semantics are Task 4/5 work, and this fixture only pins
+# that corec does not encode them as MATCH.
+MATCH_UNSUPPORTED_SOURCE = """struct P:
+    x: int
+
+fn pickstr(s: string) -> int:
+    return match s:
+        "a" => 1,
+        _ => 2
+
+fn pickid(n: int) -> int:
+    return match n:
+        x => x + 1
+
+fn pickp(p: P) -> int:
+    return match p:
+        P { x = _ } => 1,
+        _ => 2
+
+fn main() -> int:
+    return 0
+"""
+
+MATCH_TWO_FUNCS_SOURCE = """fn pick_a(n: int) -> int:
+    return match n:
+        1 => 10,
+        2 => 20,
+        _ => 30
+
+fn pick_b(n: int) -> int:
+    return match n:
+        7 => 70,
+        8 => 80,
+        9 => 90,
+        _ => 99
+
+fn main() -> int:
+    if pick_a(2) != 20:
+        return 1
+    if pick_b(9) != 90:
+        return 2
+    if pick_b(100) != 99:
+        return 3
+    return 42
+"""
+
+
+def _match_nodes(data):
+    return [i for i, rec in enumerate(_nod_records(data)) if rec[0] == IR_MATCH]
+
+
+def _single_match(data):
+    matches = _match_nodes(data)
+    assert len(matches) == 1, f"expected exactly one MATCH, got {matches}"
+    return _nod_records(data)[matches[0]]
+
+
+def _assert_targets_are_labels(data, rows):
+    nodes = _nod_records(data)
+    for row in rows:
+        target = row["target_nod"]
+        assert 0 <= target < len(nodes), f"case target {target} out of range"
+        assert nodes[target][0] == IR_LABEL, (
+            f"case target {target} is op {nodes[target][0]}, expected IR_LABEL"
+        )
+
+
+def _assert_program(tmp, source, expected):
+    """Run the fixture through the interpreter and a static ELF."""
+    interp = _run([COREC, "run", source], cwd=BASE)
+    assert interp.returncode == expected, (
+        f"interp returned {interp.returncode}, expected {expected}: "
+        f"{interp.stdout}\n{interp.stderr}"
+    )
+    src = tmp / "match_program.cr"
+    src.write_text(source, encoding="utf-8")
+    elf = tmp / "match_program.elf"
+    built = _run([COREC, "build", src, "-o", elf, "--static"], cwd=BASE)
+    assert built.returncode == 0, f"corec build failed: {built.stdout}\n{built.stderr}"
+    assert elf.exists(), "corec build produced no ELF"
+    run = subprocess.run(
+        [str(elf)], capture_output=True, text=True, timeout=30, cwd=str(BASE)
+    )
+    assert run.returncode == expected, (
+        f"ELF returned {run.returncode}, expected {expected}: "
+        f"{run.stdout}\n{run.stderr}"
+    )
+
+
+def test_int_match_is_one_match_with_default_case():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_INT_SOURCE, "match_int")
+        rec = _single_match(data)
+        rows = _parse_case(segment(data, CASE_TAG))
+
+        assert rec[3] == 0, f"MATCH case start is {rec[3]}, expected 0"
+        assert rec[4] == 5, f"MATCH case count is {rec[4]}, expected 5"
+        assert len(rows) == 5, f"CASE has {len(rows)} rows, expected 5"
+        assert [row["kind"] for row in rows] == [
+            KIND_VALUE,
+            KIND_VALUE,
+            KIND_VALUE,
+            KIND_VALUE,
+            KIND_DEFAULT,
+        ]
+        assert [row["value"] for row in rows] == [10, 20, 30, 40, 0]
+        assert [row["str_index"] for row in rows] == [-1, -1, -1, -1, -1]
+        assert [row["flags"] for row in rows] == [0, 0, 0, 0, 0]
+        _assert_targets_are_labels(data, rows)
+        assert len({row["target_nod"] for row in rows}) == 5, (
+            "distinct arms must target distinct body labels"
+        )
+        _assert_program(tmp, MATCH_INT_SOURCE, 42)
+
+
+def test_bool_match_is_one_match_with_value_cases():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_BOOL_SOURCE, "match_bool")
+        rec = _single_match(data)
+        rows = _parse_case(segment(data, CASE_TAG))
+
+        assert rec[3] == 0
+        assert rec[4] == 3
+        assert [row["kind"] for row in rows] == [
+            KIND_VALUE,
+            KIND_VALUE,
+            KIND_DEFAULT,
+        ]
+        assert [row["value"] for row in rows] == [1, 0, 0]
+        _assert_targets_are_labels(data, rows)
+        _assert_program(tmp, MATCH_BOOL_SOURCE, 42)
+
+
+def test_enum_match_is_one_match_with_enum_cases():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_ENUM_SOURCE, "match_enum")
+        rec = _single_match(data)
+        rows = _parse_case(segment(data, CASE_TAG))
+
+        assert rec[3] == 0
+        assert rec[4] == 4
+        assert [row["kind"] for row in rows] == [
+            KIND_ENUM,
+            KIND_ENUM,
+            KIND_ENUM,
+            KIND_DEFAULT,
+        ]
+        enum_values = [row["value"] for row in rows[:3]]
+        assert all(value > 0 for value in enum_values), enum_values
+        assert len(set(enum_values)) == 3, enum_values
+        assert rows[3]["value"] == 0
+        _assert_targets_are_labels(data, rows)
+        _assert_program(tmp, MATCH_ENUM_SOURCE, 42)
+
+
+def test_unsupported_patterns_keep_sequential_lowering():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_UNSUPPORTED_SOURCE, "match_unsupported")
+        assert _match_nodes(data) == [], (
+            "string/ident-binding/struct patterns must not become MATCH"
+        )
+        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+
+
+def test_dump_objects_prints_match_cases():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_INT_SOURCE, "match_dump")
+        ccr = tmp / "match_dump.ccr"
+        ccr.write_bytes(data)
+        r = _run([COREARCH, ccr, "--dump-objects"])
+        assert r.returncode == 0, r.stdout + r.stderr
+        lines = r.stdout.splitlines()
+        match_lines = [
+            line for line in lines if line.startswith("nod ") and " op 54 " in line
+        ]
+        assert len(match_lines) == 1, match_lines
+        assert " s2 0 " in match_lines[0], match_lines[0]
+        assert " s3 5 " in match_lines[0], match_lines[0]
+        cases = [line for line in lines if line.startswith("case ")]
+        assert len(cases) == 5, cases
+        assert " value 10 " in cases[0], cases[0]
+        assert " kind 0 " in cases[0], cases[0]
+        assert " kind 3 " in cases[4], cases[4]
+        target = int(cases[0].split("target ")[1].split()[0])
+        assert _nod_records(data)[target][0] == IR_LABEL
+
+
+def test_case_ranges_are_disjoint_across_functions():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_TWO_FUNCS_SOURCE, "match_two")
+        matches = _match_nodes(data)
+        assert len(matches) == 2, f"expected two MATCH nodes, got {matches}"
+        nodes = _nod_records(data)
+        rows = _parse_case(segment(data, CASE_TAG))
+        ranges = sorted((nodes[m][3], nodes[m][3] + nodes[m][4]) for m in matches)
+        assert ranges[0][0] == 0, ranges
+        assert ranges[0][1] == ranges[1][0], ranges
+        assert ranges[-1][1] == len(rows), (ranges, len(rows))
+        assert len(rows) == 3 + 4, rows
+        _assert_targets_are_labels(data, rows)
+        _assert_program(tmp, MATCH_TWO_FUNCS_SOURCE, 42)
+
+
+def test_cir_cache_does_not_restore_match_without_cases():
+    """A warm build must rebuild a MATCH function, not reuse a case-less .cir."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        first = _build_ccr(tmp, MATCH_INT_SOURCE, "warm", cwd=tmp)
+        second = _build_ccr(tmp, MATCH_INT_SOURCE, "warm", cwd=tmp)
+        assert segment(first, CASE_TAG) == segment(second, CASE_TAG)
+        rows = _parse_case(segment(second, CASE_TAG))
+        assert len(rows) == 5, rows
+        assert _single_match(second)[4] == 5
 
 
 def main():

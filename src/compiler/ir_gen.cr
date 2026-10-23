@@ -827,6 +827,40 @@ fn new_label() -> int:
     g_next_label = g_next_label + 1
     return lbl
 
+// ── v10 CASE table helpers ───────────────────────────────────────────────
+// The CASE table is a flat 24B-row buffer. A match reserves its rows before
+// emitting arm bodies so nested matches append after the outer range; the
+// targets (NOD ids of IR_LABEL nodes) are filled after each body label exists.
+fn grow_ccr_case(needed: int):
+    if needed < g_ccr_case_cap:
+        return
+    nc : ., mut = g_ccr_case_cap * 2
+    if nc < 16:
+        nc = 16
+    if nc < needed:
+        nc = needed + 16
+    nb := alloc(nc * CCR_V10_CASE_DISK)
+    cell_copy(g_ccr_case, g_ccr_case_cap * CCR_V10_CASE_DISK, nb)
+    g_ccr_case = nb
+    g_ccr_case_cap = nc
+
+fn ccr_case_append(value: int, kind: int, str_index: int, target: int, flags: int) -> int:
+    idx := g_ccr_case_count
+    grow_ccr_case(idx + 1)
+    base := idx * CCR_V10_CASE_DISK
+    cell_store(g_ccr_case, base + CCR_CASE_VALUE, value)
+    cell_store32(g_ccr_case, base + CCR_CASE_KIND, kind)
+    cell_store32(g_ccr_case, base + CCR_CASE_STR, str_index)
+    cell_store32(g_ccr_case, base + CCR_CASE_TARGET, target)
+    cell_store32(g_ccr_case, base + CCR_CASE_FLAGS, flags)
+    g_ccr_case_count = idx + 1
+    return idx
+
+fn ccr_case_set_target(idx: int, target: int):
+    if idx < 0 || idx >= g_ccr_case_count:
+        return
+    cell_store32(g_ccr_case, idx * CCR_V10_CASE_DISK + CCR_CASE_TARGET, target)
+
 fn bind_local(name_idx: int, var_idx: int):
     grow_ir_locals(g_ir_local_count + 1)
     cell_store(g_ir_locals, g_ir_local_count  * 16, name_idx)
@@ -2694,7 +2728,141 @@ fn gen_expr(node: int) -> int:
             emit(IR_CONST, mrep_var, 1, 0, 0, TI_INT)
             irv_set_rep(result_var, mrep_var)
         merge_lbl := new_label()
+        // ── Supported-pattern pre-scan ───────────────────────────────────
+        // One IR_MATCH requires every arm to be encodable in the CASE table:
+        // int/bool literals, enum variants without sub-patterns, and one last
+        // wildcard. Anything else keeps the sequential lowering unchanged.
+        arm_total : ., mut = 0
+        an0 := first_arm
+        loop:
+            if an0 < 0:
+                break
+            arm_total = arm_total + 1
+            an0 = ast_c(an0)
+        match_mode : ., mut = 1
+        if first_arm < 0:
+            match_mode = 0
+        // 可选表示位分派（Some/None 的裸/装箱两态）保留既有逐臂路径。
+        if g_optrep_on != 0 && match_val >= 0:
+            if irv_rep(match_val) >= 0:
+                match_mode = 0
+        vals := alloc((arm_total + 1) * 16)   // unique cases: kind@0, value@8
+        cis := alloc((arm_total + 1) * 8)     // arm -> unique-case index, -1 = duplicate
+        unique_n : ., mut = 0
+        wild_total : ., mut = 0
+        saw_int : ., mut = 0
+        saw_bool : ., mut = 0
+        arm_scan : ., mut = 0
+        an0 = first_arm
+        loop:
+            if an0 < 0:
+                break
+            ap0 := ast_a(an0)
+            k0 : ., mut = -1
+            if ap0 >= 0:
+                k0 = ast_kind(ap0)
+            kind0 : ., mut = -1
+            value0 : ., mut = 0
+            if k0 == EXPR_INT:
+                iv0 := ast_int_val(ap0)
+                saw_int = 1
+                // The backend tags small integers as value<<1. Values outside
+                // the 62-bit immediate window need the big-int path, which this
+                // task does not encode in CASE.
+                if iv0 > 4611686018427387903 || iv0 < -4611686018427387903:
+                    match_mode = 0
+                kind0 = CCR_CASE_KIND_VALUE
+                value0 = iv0
+            else if k0 == EXPR_BOOL:
+                saw_bool = 1
+                bv0 : ., mut = 0
+                if ast_int_val(ap0) != 0:
+                    bv0 = 1
+                kind0 = CCR_CASE_KIND_VALUE
+                value0 = bv0
+            else if k0 == EXPR_ENUMPAT:
+                if ast_c(ap0) != 0:
+                    // Payload binding/guard patterns are Task 4/5.
+                    match_mode = 0
+                vn0 := get_variant_name_idx(ast_a(ap0))
+                if vn0 < 0:
+                    match_mode = 0
+                kind0 = CCR_CASE_KIND_ENUM
+                value0 = vn0
+            else if k0 == EXPR_IDENT && str_eq(istr_get(ast_int_val(ap0)), "_") != 0:
+                // The lexer classifies a bare `_` as an identifier because `_`
+                // is a valid identifier character; the parser's EXPR_WILDCARD
+                // branch is therefore unreachable for the common form.
+                wild_total = wild_total + 1
+                if ast_c(an0) >= 0:
+                    // A wildcard shadows every later arm; keep the old path so
+                    // the CASE order cannot change which body wins.
+                    match_mode = 0
+                kind0 = CCR_CASE_KIND_DEFAULT
+                value0 = 0
+            else if k0 == EXPR_WILDCARD:
+                wild_total = wild_total + 1
+                if ast_c(an0) >= 0:
+                    // A wildcard shadows every later arm; keep the old path so
+                    // the CASE order cannot change which body wins.
+                    match_mode = 0
+                kind0 = CCR_CASE_KIND_DEFAULT
+                value0 = 0
+            else:
+                match_mode = 0
+            ci0 : ., mut = -1
+            if match_mode != 0:
+                j0 : ., mut = 0
+                dup0 : ., mut = 0
+                loop:
+                    if j0 >= unique_n:
+                        break
+                    if cell_load(vals, j0 * 16) == kind0:
+                        if cell_load(vals, j0 * 16 + 8) == value0:
+                            dup0 = 1
+                            break
+                    j0 = j0 + 1
+                if dup0 == 0:
+                    cell_store(vals, unique_n * 16, kind0)
+                    cell_store(vals, unique_n * 16 + 8, value0)
+                    ci0 = unique_n
+                    unique_n = unique_n + 1
+            cell_store(cis, arm_scan * 8, ci0)
+            arm_scan = arm_scan + 1
+            an0 = ast_c(an0)
+        if match_val < 0:
+            match_mode = 0
+        if saw_int != 0 && irv_type(match_val) != TI_INT:
+            // The backend compares tagged int slots; a different scrutinee form
+            // (dex, char, struct) needs its own lowering.
+            match_mode = 0
+        if saw_bool != 0 && irv_type(match_val) != TI_BOOL:
+            match_mode = 0
+        if wild_total > 1:
+            match_mode = 0
+        synth_default : ., mut = -1
+        if match_mode != 0 && wild_total == 0:
+            // No wildcard: an unmatched value falls through to the merge label,
+            // exactly as the sequential lowering did. Add that edge as DEFAULT.
+            cell_store(vals, unique_n * 16, CCR_CASE_KIND_DEFAULT)
+            cell_store(vals, unique_n * 16 + 8, 0)
+            synth_default = unique_n
+            unique_n = unique_n + 1
+        case_base : ., mut = -1
+        if match_mode != 0:
+            case_base = g_ccr_case_count
+            emit(IR_MATCH, -1, match_val, case_base, unique_n, 0)
+            g_cir_has_match = 1
+            // Reserve the whole range before emitting bodies: nested matches in
+            // an arm must append after this range, not splice into it.
+            cj0 : ., mut = 0
+            loop:
+                if cj0 >= unique_n:
+                    break
+                ccr_case_append(cell_load(vals, cj0 * 16 + 8), cell_load(vals, cj0 * 16), -1, -1, 0)
+                cj0 = cj0 + 1
         an : ., mut = first_arm
+        arm_idx : ., mut = 0
         loop:
             if an < 0:
                 break
@@ -2706,6 +2874,12 @@ fn gen_expr(node: int) -> int:
             is_wildcard := 0
             if pat_kind == EXPR_WILDCARD:
                 is_wildcard = 1
+            if match_mode != 0:
+                // MATCH owns the dispatch: suppress the sequential compare chain
+                // and the payload-binding reads (sub-patterns already forced the
+                // fallback path).
+                pat_kind = -2
+                is_wildcard = 0
             // 可选表示位：臂条件与臂体绑定共用（声明在臂作用域）
             rep_v : ., mut = -1
             body_lbl := new_label()
@@ -2781,7 +2955,14 @@ fn gen_expr(node: int) -> int:
                 if has_next == 1:
                     fall_lbl = new_label()
                 emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
+            body_nod : ., mut = -1
+            if match_mode != 0:
+                body_nod = g_ir_instr_count
             emit(IR_LABEL, -1, body_lbl, 0, 0, 0)
+            if match_mode != 0:
+                ci_arm := cell_load(cis, arm_idx * 8)
+                if ci_arm >= 0:
+                    ccr_case_set_target(case_base + ci_arm, body_nod)
             push_ir_scope()
             if pat_kind == EXPR_ENUMPAT:
                 sub_count := ast_c(arm_pat)
@@ -2842,11 +3023,14 @@ fn gen_expr(node: int) -> int:
                     emit_rep_set(mrep_var, rep_enc_of_expr(arm_body, body_val))
             pop_ir_scope()
             emit(IR_JUMP, -1, merge_lbl, 0, 0, 0)
-            if is_wildcard == 0:
-                if has_next == 1:
-                    emit(IR_LABEL, -1, fall_lbl, 0, 0, 0)
+            if match_mode == 0 && is_wildcard == 0 && has_next == 1:
+                emit(IR_LABEL, -1, fall_lbl, 0, 0, 0)
             an = ast_c(an)
+            arm_idx = arm_idx + 1
+        merge_nod := g_ir_instr_count
         emit(IR_LABEL, -1, merge_lbl, 0, 0, 0)
+        if match_mode != 0 && synth_default >= 0:
+            ccr_case_set_target(case_base + synth_default, merge_nod)
         return result_var
 
     // Let binding
@@ -3353,6 +3537,7 @@ fn ir_gen_func(fi: int):
     // Skip generic functions — they will be monomorphized at call sites
     if fi_generic_count(fi) > 0:
         return
+    g_cir_has_match = 0
     fn_node := fi_ast_node(fi)
     name_idx := ast_a(fn_node)
     first_param := ast_b(fn_node)
@@ -4191,6 +4376,10 @@ fn ir_gen_all():
     g_next_label = 1
     g_ir_loop_depth = 0
     g_ir_str_const_count = 0
+    g_ccr_case = ""
+    g_ccr_case_count = 0
+    g_ccr_case_cap = 0
+    g_cir_has_match = 0
     // 可选表示方式：侧表复位 + 启用扫描（先于全局注册，隐藏信道的 var 记录顺序依赖）
     optrep_begin()
 

@@ -1748,6 +1748,91 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                 pi = pi + 1
         return 0
 
+    if op == IR_MATCH:
+        // v10 multi-way dispatch (comparison chain; Task 4 may add tables).
+        // s1 = scrutinee var, s2 = CASE start, s3 = CASE count. Every target is
+        // a NOD id whose node is IR_LABEL; the label number drives backpatching.
+        ti_s := irv_type(s1)
+        cp = cp + e2_load_var(buf, pos+cp, 10, s1)
+
+        // Enum CASE rows compare the tag word, not the pointer. A match cannot
+        // mix enum and value patterns under the type checker, so the first
+        // non-default row selects the scrutinee form.
+        first_kind : ., mut = -1
+        fk : ., mut = 0
+        loop:
+            if fk >= s3:
+                break
+            fk_kind := cell_load32(g_ccr_case, (s2 + fk) * CCR_V10_CASE_DISK + CCR_CASE_KIND)
+            if fk_kind != CCR_CASE_KIND_DEFAULT:
+                first_kind = fk_kind
+                break
+            fk = fk + 1
+        if first_kind == CCR_CASE_KIND_ENUM:
+            // mov r10, [r10 + 0]: the enum tag word.
+            cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 10/8)
+            e2_w8(buf, pos+cp, 139)
+            cp = cp + 1
+            cp = cp + emit_modrm(buf, pos+cp, 2, 10%8, 10%8)
+            cp = cp + e2_w32(buf, pos+cp, 0)
+            if g_x86_big_enabled != 0:
+                cp = cp + e2_big_tag_reg(buf, pos+cp, 10)
+
+        default_lbl : ., mut = -1
+        ci : ., mut = 0
+        loop:
+            if ci >= s3:
+                break
+            cbase := (s2 + ci) * CCR_V10_CASE_DISK
+            ckind := cell_load32(g_ccr_case, cbase + CCR_CASE_KIND)
+            ctarget := cell_load_i32(g_ccr_case, cbase + CCR_CASE_TARGET)
+            if ckind == CCR_CASE_KIND_DEFAULT:
+                if ctarget >= 0 && ctarget < g_ir_instr_count:
+                    if iri_op(ctarget) == IR_LABEL:
+                        default_lbl = iri_s1(ctarget)
+            else:
+                lbl_no : ., mut = -1
+                if ctarget >= 0 && ctarget < g_ir_instr_count:
+                    if iri_op(ctarget) == IR_LABEL:
+                        lbl_no = iri_s1(ctarget)
+                if lbl_no >= 0:
+                    cval := cell_load(g_ccr_case, cbase + CCR_CASE_VALUE)
+                    tagged : ., mut = 0
+                    if ckind == CCR_CASE_KIND_ENUM:
+                        tagged = 1
+                    else if g_x86_big_enabled != 0 && ti_s == TI_INT:
+                        tagged = 1
+                    imm := cval
+                    if tagged != 0:
+                        imm = cval * 2
+                    cp = cp + e2_big_mov_imm64(buf, pos+cp, 11, imm)
+                    cp = cp + e2_alu(buf, pos+cp, 57)  // cmp r10, r11
+                    jp := pos + cp
+                    cp = cp + e2_big_jcc(buf, pos+cp, 4)  // je rel32
+                    if cell_load(g_label_poses, lbl_no * 8) >= 0:
+                        e2_big_patch_jcc(buf, jp, cell_load(g_label_poses, lbl_no * 8))
+                    else:
+                        grow_pending(g_pending_count + 1)
+                        cell_store(g_pending_pos, g_pending_count*8, jp + 2)
+                        cell_store(g_pending_label, g_pending_count*8, lbl_no)
+                        g_pending_count = g_pending_count + 1
+            ci = ci + 1
+
+        // No value hit -> default (or fall through when the loader let an
+        // invalid target through; the loader rejects that shape).
+        if default_lbl >= 0:
+            jmp_pos := pos + cp
+            cp = cp + e2_jmp(buf, pos+cp, 0)
+            if cell_load(g_label_poses, default_lbl * 8) >= 0:
+                target := cell_load(g_label_poses, default_lbl * 8)
+                e2_w32(buf, jmp_pos + 1, target - (jmp_pos + 5))
+            else:
+                grow_pending(g_pending_count + 1)
+                cell_store(g_pending_pos, g_pending_count*8, jmp_pos + 1)
+                cell_store(g_pending_label, g_pending_count*8, default_lbl)
+                g_pending_count = g_pending_count + 1
+        return cp
+
     if op == IR_LOAD_ENUM_TAG && d >= 0:
         do2 := g2_slot(d)
         // Read the tag through e2_load_var: locals use [rbp+slot], globals use a

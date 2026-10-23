@@ -252,7 +252,7 @@ LOUD_MARKERS = {
 EXPECT_OPS = {
     "enum_payload_in_callee": {"make_enum", "load_enum_tag"},
     "enum_construct_callee_match_main": {"call", "load_enum_tag"},
-    "enum_tag_variant_in_callee": {"make_enum", "load_enum_tag"},
+    "enum_tag_variant_in_callee": {"make_enum", "match"},
     "enum_payload_tag_only_in_callee": {"make_enum", "load_enum_tag"},
     "bare_ptr_deref_callee": {"addr_index", "deref"},
     "ptr_store_callee": {"ref", "store_ptr"},

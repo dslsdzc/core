@@ -67,6 +67,13 @@ g_ccr_nod_flags_count : int, mut
 // rows from disk. This file is first in both builds, so it must stay here.
 g_ccr_case : string, mut
 g_ccr_case_count : int, mut
+// Capacity of g_ccr_case in 24B rows. corec appends rows while lowering a
+// match; the capacity is compiler-private and never serialized.
+g_ccr_case_cap : int, mut
+// Set by ir_gen when the current function lowered a match to IR_MATCH. The
+// per-function .cir snapshot does not carry the CASE range, so a function with
+// this flag is rebuilt and not saved in this task.
+g_cir_has_match : int, mut
 g_ast : string, mut
 g_ast_count : int, mut
 g_ast_cap : int, mut

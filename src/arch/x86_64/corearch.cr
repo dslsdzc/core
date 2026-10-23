@@ -284,6 +284,30 @@ fn dump_object_surface():
         print(" ec ")
         print_i(nod_edge_count(ni))
         println("")
+        if nod_op(ni) == IR_MATCH:
+            // CASE rows are part of the match node's dumped surface. The range
+            // comes from the MATCH operands; targets are NOD ids of LABEL nodes.
+            mstart := nod_s2(ni)
+            mcount := nod_s3(ni)
+            mi3 : ., mut = 0
+            loop:
+                if mi3 >= mcount:
+                    break
+                cbase := (mstart + mi3) * CCR_V10_CASE_DISK
+                print("case ")
+                print_i(mstart + mi3)
+                print(" value ")
+                print_i(cell_load(g_ccr_case, cbase + CCR_CASE_VALUE))
+                print(" kind ")
+                print_i(cell_load32(g_ccr_case, cbase + CCR_CASE_KIND))
+                print(" str ")
+                print_i(cell_load_i32(g_ccr_case, cbase + CCR_CASE_STR))
+                print(" target ")
+                print_i(cell_load_i32(g_ccr_case, cbase + CCR_CASE_TARGET))
+                print(" flags ")
+                print_i(cell_load32(g_ccr_case, cbase + CCR_CASE_FLAGS))
+                println("")
+                mi3 = mi3 + 1
         nod_inputs(ni)   // print outgoing edge records through the kernel helper
         ni = ni + 1
 

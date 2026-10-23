@@ -193,6 +193,11 @@ fn ir_instr_str(instr_idx: int) -> string:
     if iri_op(instr_idx) == IR_BRANCH:
         s = s + "if " + ir_var_str(iri_s1(instr_idx)) + " goto label" + int_str(iri_s2(instr_idx)) + " else label" + int_str(iri_s3(instr_idx))
         return s
+    if iri_op(instr_idx) == IR_MATCH:
+        // CASE rows live in the global table; print the range so the cir dump
+        // and --dump-objects agree on which rows belong to this node.
+        s = s + "match " + ir_var_str(iri_s1(instr_idx)) + " cases " + int_str(iri_s2(instr_idx)) + ".." + int_str(iri_s2(instr_idx) + iri_s3(instr_idx))
+        return s
     if iri_op(instr_idx) == IR_JUMP:
         s = s + "goto label" + int_str(iri_s1(instr_idx))
         return s

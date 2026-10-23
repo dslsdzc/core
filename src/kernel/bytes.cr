@@ -83,6 +83,14 @@ fn cell_store32(buf: string, pos: int, val: int):
 fn cell_load32(buf: string, pos: int) -> int:
     return r32(buf, pos)
 
+// Signed 32-bit read. The wire uses signed i32 for STR indexes and NOD
+// targets; cell_load32 returns the unsigned bit pattern.
+fn cell_load_i32(buf: string, pos: int) -> int:
+    v := r32(buf, pos)
+    if v > 2147483647:
+        return v - 4294967296
+    return v
+
 fn cell_store8(buf: string, pos: int, val: int):
     w8(buf, pos, val)
 

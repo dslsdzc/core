@@ -356,15 +356,14 @@ fn ccr_case_seg_size() -> int:
 fn ccr_validate_cases() -> int:
     if g_ccr_case_count < 0:
         return 0
-    defaults : ., mut = 0
     ci : ., mut = 0
     loop:
         if ci >= g_ccr_case_count:
             break
         base := ci * CCR_V10_CASE_DISK
         kind := cell_load32(g_ccr_case, base + CCR_CASE_KIND)
-        sidx := cell_load32(g_ccr_case, base + CCR_CASE_STR)
-        target := cell_load32(g_ccr_case, base + CCR_CASE_TARGET)
+        sidx := cell_load_i32(g_ccr_case, base + CCR_CASE_STR)
+        target := cell_load_i32(g_ccr_case, base + CCR_CASE_TARGET)
         cflags := cell_load32(g_ccr_case, base + CCR_CASE_FLAGS)
         if kind < CCR_CASE_KIND_VALUE || kind > CCR_CASE_KIND_DEFAULT:
             return 0
@@ -378,11 +377,33 @@ fn ccr_validate_cases() -> int:
             return 0
         if cflags != 0:
             return 0
-        if kind == CCR_CASE_KIND_DEFAULT:
-            defaults = defaults + 1
-            if defaults > 1:
-                return 0
         ci = ci + 1
+    // Every MATCH owns a contiguous CASE range with at most one DEFAULT.
+    // Multiple matches in one program therefore have one default each; the
+    // table itself is global.
+    mi : ., mut = 0
+    loop:
+        if mi >= g_ir_instr_count:
+            break
+        if iri_op(mi) == IR_MATCH:
+            mstart := iri_s2(mi)
+            mcount := iri_s3(mi)
+            if mstart < 0 || mcount < 0:
+                return 0
+            if mstart + mcount > g_ccr_case_count:
+                return 0
+            mdef : ., mut = 0
+            mj : ., mut = 0
+            loop:
+                if mj >= mcount:
+                    break
+                mk := cell_load32(g_ccr_case, (mstart + mj) * CCR_V10_CASE_DISK + CCR_CASE_KIND)
+                if mk == CCR_CASE_KIND_DEFAULT:
+                    mdef = mdef + 1
+                    if mdef > 1:
+                        return 0
+                mj = mj + 1
+        mi = mi + 1
     return 1
 
 // ── Header flag classification (spec §3.1) ──────────────────────────────
@@ -1393,9 +1414,9 @@ fn save_ccr(path: string) -> int:
         pos = pos + 8
         buf_write_u32(buf, pos, cell_load32(g_ccr_case, cbase + CCR_CASE_KIND))
         pos = pos + 4
-        buf_write_i32(buf, pos, cell_load32(g_ccr_case, cbase + CCR_CASE_STR))
+        buf_write_i32(buf, pos, cell_load_i32(g_ccr_case, cbase + CCR_CASE_STR))
         pos = pos + 4
-        buf_write_i32(buf, pos, cell_load32(g_ccr_case, cbase + CCR_CASE_TARGET))
+        buf_write_i32(buf, pos, cell_load_i32(g_ccr_case, cbase + CCR_CASE_TARGET))
         pos = pos + 4
         buf_write_u32(buf, pos, cell_load32(g_ccr_case, cbase + CCR_CASE_FLAGS))
         pos = pos + 4
@@ -2709,7 +2730,6 @@ fn load_ccr(data: string, fsize: int) -> int:
     case_buf : string, mut = ""
     if case_cnt > 0:
         case_buf = alloc(case_cnt * CCR_V10_CASE_DISK)
-    case_defaults : ., mut = 0
     ci4 : ., mut = 0
     loop:
         if ci4 >= case_cnt:
@@ -2740,10 +2760,6 @@ fn load_ccr(data: string, fsize: int) -> int:
         // v10 defines no CASE flag bits yet; reject unknown meaning.
         if cflags != 0:
             return -1
-        if ckind == CCR_CASE_KIND_DEFAULT:
-            case_defaults = case_defaults + 1
-            if case_defaults > 1:
-                return -1
         cell_store(case_buf, cbase + CCR_CASE_VALUE, cval)
         cell_store32(case_buf, cbase + CCR_CASE_KIND, ckind)
         cell_store32(case_buf, cbase + CCR_CASE_STR, csidx)
@@ -2752,6 +2768,31 @@ fn load_ccr(data: string, fsize: int) -> int:
         ci4 = ci4 + 1
     if pos != seg_end9:
         return -1
+    // MATCH ranges are slices of the global table. Each range must fit and may
+    // contain at most one DEFAULT; different matches may each have one.
+    mi4 : ., mut = 0
+    loop:
+        if mi4 >= g_v7_nod_count:
+            break
+        if nod_op(mi4) == IR_MATCH:
+            mstart4 := nod_s2(mi4)
+            mcount4 := nod_s3(mi4)
+            if mstart4 < 0 || mcount4 < 0:
+                return -1
+            if mstart4 + mcount4 > case_cnt:
+                return -1
+            mdef4 : ., mut = 0
+            mj4 : ., mut = 0
+            loop:
+                if mj4 >= mcount4:
+                    break
+                mk4 := cell_load32(case_buf, (mstart4 + mj4) * CCR_V10_CASE_DISK + CCR_CASE_KIND)
+                if mk4 == CCR_CASE_KIND_DEFAULT:
+                    mdef4 = mdef4 + 1
+                    if mdef4 > 1:
+                        return -1
+                mj4 = mj4 + 1
+        mi4 = mi4 + 1
     g_ccr_case = case_buf
     g_ccr_case_count = case_cnt
 

@@ -451,6 +451,10 @@ fn corec_main() -> int:
     g_ir_str_const_count = 0
     g_ir_source_hash = 0
     g_ir_source_hash_ready = 0
+    g_ccr_case = ""
+    g_ccr_case_count = 0
+    g_ccr_case_cap = 0
+    g_cir_has_match = 0
     init_df()
     // This path does not use ir_gen_all, so initialize optional representation
     // state here, before ir_gen_globals, because the hidden channels depend on
@@ -564,7 +568,9 @@ fn corec_main() -> int:
             df_end_func(ir_func_idx)
 
             // Save only when generation did not change snapshot-uncarried shared state.
-            if cache_enabled != 0:
+            // A MATCH function's CASE range is not in the snapshot, so saving it
+            // would let a warm build restore a MATCH with no dispatch table.
+            if cache_enabled != 0 && g_cir_has_match == 0:
                 if g_type_count == tc0:
                     save_cir_cache(cache_path, fi, ir_func_idx)
 

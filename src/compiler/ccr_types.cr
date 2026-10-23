@@ -440,6 +440,10 @@ fn ccr_nod_type_domain(ii: int, op: int, d: int, s1: int, s2: int, s3: int) -> i
         return ccr_var_type_row(d)
     if op == IR_LOAD_ENUM_TAG:
         return ccr_var_type_row(d)
+    if op == IR_MATCH:
+        // The scrutinee's semantic type is the meaningful domain; the CASE
+        // table carries no width or layout fact.
+        return ccr_var_type_row(s1)
     // Listed ops whose domain is genuinely unavailable from the current IR
     // state. They remain -1 rather than guessing.
     return -1
