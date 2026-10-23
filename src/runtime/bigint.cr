@@ -180,8 +180,8 @@ fn bi_cmp(a: int, b: int) -> int:
         return 0
     c := bi_cmp_abs(pa, pb)
     if sa < 0:
-        return -c
-    return c
+        return bi_tag(-c)
+    return bi_tag(c)
 
 fn bi_add_abs(a: string, b: string) -> string:
     la := bi_len_of(a)
