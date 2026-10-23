@@ -23,6 +23,8 @@ pytest-discoverable (plain `test_*` functions, stdlib only).
 """
 
 import contextlib
+import re
+from pathlib import Path
 
 from ccr_v10_model import (
     BODY_START,
@@ -263,6 +265,85 @@ def test_encode_rejects_non_bytes_body():
     segments[5] = "not-bytes"
     with raises(CcrV10Error):
         encode(segments)
+
+
+# ---------------------------------------------------------------------------
+# 11. Core schema constants (static drift guard against the Python oracle)
+# ---------------------------------------------------------------------------
+
+SCHEMA_PATH = (
+    Path(__file__).resolve().parent.parent.parent / "src" / "compiler" / "ccr_schema.cr"
+)
+
+# Values are the wire contract from spec §3; they must match ccr_v10_model.py.
+EXPECTED_V10_CONSTANTS = {
+    "CCR_V10_VERSION": 655360,  # 0x000A0000
+    "CCR_V10_SEG_COUNT": 9,
+    "CCR_V10_SEG_STR": 1,
+    "CCR_V10_SEG_TYPE": 2,
+    "CCR_V10_SEG_IFACE": 3,
+    "CCR_V10_SEG_SYM": 4,
+    "CCR_V10_SEG_NOD": 5,
+    "CCR_V10_SEG_ENT": 6,
+    "CCR_V10_SEG_REG": 7,
+    "CCR_V10_SEG_EDG": 8,
+    "CCR_V10_SEG_CASE": 9,
+    "CCR_V10_NOD_DISK": 40,
+    "CCR_V10_ENT_DISK": 24,
+    "CCR_V10_REG_DISK": 24,
+    "CCR_V10_EDG_DISK": 8,
+    "CCR_V10_CASE_DISK": 24,
+}
+
+# `Name : int = <decimal>` — the Core constant form used in the schema file.
+_SCHEMA_CONST_RE = re.compile(
+    r"^\s*(CCR_V10_[A-Z0-9_]+)\s*:\s*int\s*=\s*(\d+)\s*(?://.*)?$", re.MULTILINE
+)
+
+SEGMENT_NAMES = ("STR", "TYPE", "IFACE", "SYM", "NOD", "ENT", "REG", "EDG", "CASE")
+
+
+def _schema_text():
+    assert SCHEMA_PATH.is_file(), f"ccr_schema.cr does not exist: {SCHEMA_PATH}"
+    return SCHEMA_PATH.read_text(encoding="utf-8")
+
+
+def _schema_constants(text):
+    found = {}
+    for name, value in _SCHEMA_CONST_RE.findall(text):
+        assert name not in found, f"{name} is defined more than once"
+        found[name] = int(value)
+    return found
+
+
+def test_schema_v10_constants_exact():
+    found = _schema_constants(_schema_text())
+
+    missing = sorted(set(EXPECTED_V10_CONSTANTS) - set(found))
+    assert not missing, f"missing v10 constants: {missing}"
+
+    for name, expected in EXPECTED_V10_CONSTANTS.items():
+        assert found[name] == expected, f"{name} = {found[name]}, expected {expected}"
+
+    extra = sorted(set(found) - set(EXPECTED_V10_CONSTANTS))
+    assert not extra, f"unexpected v10 constants: {extra}"
+
+
+def test_schema_v10_matches_python_oracle():
+    found = _schema_constants(_schema_text())
+
+    assert found["CCR_V10_VERSION"] == VERSION
+    assert found["CCR_V10_SEG_COUNT"] == SEG_COUNT == len(SEG_TAGS)
+
+    tags = [found[f"CCR_V10_SEG_{name}"] for name in SEGMENT_NAMES]
+    assert tuple(tags) == tuple(SEG_TAGS) == tuple(range(1, 10))
+
+
+def test_schema_has_no_target_layout_words():
+    text = _schema_text()
+
+    for word in ("mp_", "ABI", "align", "stride", "offset"):
+        assert word not in text, f"ccr_schema.cr must not mention {word!r}"
 
 
 # ---------------------------------------------------------------------------
