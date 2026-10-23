@@ -625,7 +625,7 @@ IR_AWAIT : int = 29     // dest=value_var, s1=future_var; block until future rea
 IR_BOUNDS_CHECK : int = 30 // s1=index, s2=max_len/len_var, type_kind=1 for dynamic max
 IR_ARENA_NEW   : int = 32   // dest=arena_var, src1=size_estimate
 IR_ARENA_RESET : int = 33   // src1=arena_id
-IR_CONST_BIG : int = 34     // dest=value, s1=canonical decimal string index, tk=TI_INT (dest=-1)
+IR_CONST_BIG : int = 40     // dest=value, s1=canonical decimal string index, tk=TI_INT (dest=-1)
 IR_INLINE            : int = 34   // src1=fn_var; inline hint
 IR_NO_BOUNDS_CHECK   : int = 35   //skip bounds check for subsequent DEREFs
 IR_FAST              : int = 36   //allow precision-for-speed optimizations
@@ -643,6 +643,8 @@ IR_FNADDR : int = 48  // dest=addr_var, s1=fn_name_ni; load function address (mo
 IR_I2F : int = 49  // dest=dex_var(bits), s1=int_var; int  to  binary64（cvtsi2sd，apx 快路径）
 IR_F2I : int = 50  // dest=int_var, s1=dex_var(bits); binary64  to  int（cvttsd2si 截断，apx 快路径）
 IR_APPROX : int = 51  //无操作数注解：apx 变量声明处（语义许可，后端可忽略，interp 跳过）
+IR_PTR_OF : int = 52  // dest=same int var, s1=same string var; view/convert address to mathematical int
+IR_STR_OF : int = 53  // dest=same string var, s1=same int var; view/convert mathematical int to raw address
 
 // Resolution flag for BRANCH/JUMP (stored in type_kind field after label resolution)
 IR_RESOLVED : int = 1

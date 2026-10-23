@@ -2172,7 +2172,15 @@ fn gen_expr(node: int) -> int:
             //      int/string 同属 GP 字 -> 两侧一致。
             if str_eq(name, "str_of") != 0 || str_eq(name, "ptr_of") != 0:
                 inner := gen_expr(ast_a(first_arg))
-                return force_if_thunk(inner)
+                inner = force_if_thunk(inner)
+                // Keep the view as a zero-byte alias in raw mode.  In --big-int
+                // the backend converts this same slot between a raw address and
+                // a tagged mathematical int.
+                if str_eq(name, "ptr_of") != 0:
+                    emit(IR_PTR_OF, inner, inner, 0, 0, TI_INT)
+                else:
+                    emit(IR_STR_OF, inner, inner, 0, 0, TI_STR)
+                return inner
 
             return -1
 
@@ -3005,6 +3013,8 @@ fn gen_expr(node: int) -> int:
                 else:
                     emit(IR_BOUNDS_CHECK, -1, high_var, arr_len_lit + 1, 0, 0)
             v := new_ir_var("slice", TI_INT)
+            if irv_type(arr_var) == TI_STR:
+                irv_set_type(v, TI_STR)
             emit(IR_SLICE, v, arr_var, low_var, high_var, 0)
             // (A) T3：源数组元素可选 -> 切片登记声明信息（切片元素写点据此装箱；
             // 非可选不登记 -> 零足迹。切片 var 的 IR 类型信息不动，避免影响 dtype/宽度等消费者）
@@ -3026,19 +3036,24 @@ fn gen_expr(node: int) -> int:
             return v
         v := new_ir_var("elem", TI_INT)
         //  元素读定类型取声明信息形式（元素 ti 为 dex -> TI_DEX_S；纯表读）
-        irv_set_type(v, agg_elem_read_form(arr_var))
+        elem_tk : ., mut = 0
+        if irv_type(arr_var) == TI_STR:
+            irv_set_type(v, TI_CHAR)
+            elem_tk = TI_CHAR
+        else:
+            irv_set_type(v, agg_elem_read_form(arr_var))
         if idx_kind == EXPR_INT:
             emit_string_lit_bounds(arr_var, ast_int_val(idx_node))
             emit_slice_lit_bounds(arr_var, ast_int_val(idx_node))
             if pass_before_array_access(arr_var, -1, ast_int_val(idx_node), arr_len_lit) == 0:
-                emit(IR_LOAD_INDEX, v, arr_var, 0, ast_int_val(idx_node), 0)
+                emit(IR_LOAD_INDEX, v, arr_var, 0, ast_int_val(idx_node), elem_tk)
         else:
             idx_var := gen_expr(idx_node)
             idx_var = force_if_thunk(idx_var)
             emit_string_bounds(arr_var, idx_var)
             emit_slice_bounds(arr_var, idx_var)
             if pass_before_array_access(arr_var, idx_var, -1, arr_len_lit) == 0:
-                emit(IR_LOAD_INDEX_VAR, v, arr_var, idx_var, 0, 0)
+                emit(IR_LOAD_INDEX_VAR, v, arr_var, idx_var, 0, elem_tk)
         return v
 
     // Enum constructor

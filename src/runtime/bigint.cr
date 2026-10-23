@@ -584,12 +584,19 @@ fn bi_to_word_checked(a: int) -> int:
         d1 = bi_digit(p, 1)
     if n > 2:
         d2 = bi_digit(p, 2)
-    if d2 > 3:
+    neg := bi_sign_of(p) < 0
+    // 2^63-1 is 7*2^60 + (2^60-1); 2^63 is 8*2^60 and is
+    // representable only as the negative minimum, -2^63.
+    if d2 > 8:
+        bi_runtime_error("integer out of machine-word range\n")
+        g_bi_error = 1
+        return 0
+    if d2 == 8 && (!neg || d1 != 0 || d0 != 0):
         bi_runtime_error("integer out of machine-word range\n")
         g_bi_error = 1
         return 0
     x := d0 + d1 * BI_BASE + d2 * BI_BASE2
-    if bi_sign_of(p) < 0:
+    if neg:
         x = -x
     return x
 

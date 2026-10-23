@@ -878,7 +878,13 @@ fn ctx_emit_static(buf: string, path: string) -> int:
     w16(buf,56,2)
     w16(buf,58,64)
     w32(buf,64,1)
-    w32(buf,68,5)
+    if g_x86_big_enabled != 0:
+        // The BigInt runtime blob carries g_bi_error/g_bi_rem in the code
+        // segment.  Static --link copies the code into a single load segment;
+        // keep those runtime words writable.
+        w32(buf,68,7)
+    else:
+        w32(buf,68,5)
     w64(buf,72,0)
     w64(buf,80,0x400000)
     w64(buf,88,0x400000)

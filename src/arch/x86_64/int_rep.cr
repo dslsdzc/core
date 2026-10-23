@@ -159,6 +159,127 @@ fn e2_big_pop_r11(buf: string, p: int) -> int:
     e2_w8(buf, p + 1, 91)
     return 2
 
+fn e2_big_sub_rsp(buf: string, p: int, n: int) -> int:
+    e2_w8(buf, p, 72)
+    e2_w8(buf, p + 1, 131)
+    e2_w8(buf, p + 2, 236)
+    e2_w8(buf, p + 3, n)
+    return 4
+
+fn e2_big_add_rsp(buf: string, p: int, n: int) -> int:
+    e2_w8(buf, p, 72)
+    e2_w8(buf, p + 1, 131)
+    e2_w8(buf, p + 2, 196)
+    e2_w8(buf, p + 3, n)
+    return 4
+
+fn e2_big_store_rsp(buf: string, p: int, off: int, reg: int) -> int:
+    // mov [rsp+off], reg — REX.WR, 0x89, ModRM(1,reg,4), SIB(0,4,4), disp8
+    cp := p
+    cp = cp + emit_rex(buf, cp, 1, reg / 8, 0, 0)
+    e2_w8(buf, cp, 137)
+    cp = cp + 1
+    cp = cp + emit_modrm(buf, cp, 1, reg % 8, 4)
+    e2_w8(buf, cp, 36)
+    cp = cp + 1
+    e2_w8(buf, cp, off)
+    cp = cp + 1
+    return cp - p
+
+fn e2_big_load_rsp(buf: string, p: int, off: int, reg: int) -> int:
+    // mov reg, [rsp+off] — REX.WR, 0x8B, ModRM(1,reg,4), SIB(0,4,4), disp8
+    cp := p
+    cp = cp + emit_rex(buf, cp, 1, reg / 8, 0, 0)
+    e2_w8(buf, cp, 139)
+    cp = cp + 1
+    cp = cp + emit_modrm(buf, cp, 1, reg % 8, 4)
+    e2_w8(buf, cp, 36)
+    cp = cp + 1
+    e2_w8(buf, cp, off)
+    cp = cp + 1
+    return cp - p
+
+fn e2_big_convert_stack(buf: string, p: int, off: int) -> int:
+    cp : ., mut = 0
+    cp = cp + e2_big_load_rsp(buf, p + cp, off, 7)
+    cp = cp + e2_big_call_name(buf, p + cp, str_intern("bi_to_word_checked"))
+    cp = cp + e2_big_store_rsp(buf, p + cp, off, 0)
+    return cp
+
+fn e2_big_box_rax(buf: string, p: int, unsigned: int) -> int:
+    cp : ., mut = 0
+    cp = cp + e2_mov(buf, p + cp, 7, 0)
+    if unsigned != 0:
+        cp = cp + e2_big_call_name(buf, p + cp, str_intern("bi_from_uword"))
+    else:
+        cp = cp + e2_big_call_name(buf, p + cp, str_intern("bi_from_word"))
+    return cp
+
+fn emit_big_char_cmp(buf: string, pos: int, d: int, s1: int, s2: int, op: int) -> int:
+    cp : ., mut = 0
+    // Convert the int operand before loading the raw char operand: the runtime
+    // call is allowed to clobber caller-saved r10/r11.
+    if irv_type(s2) == TI_INT:
+        cp = cp + e2_big_word_var(buf, pos + cp, 11, s2)
+    else:
+        cp = cp + e2_load_var(buf, pos + cp, 11, s2)
+    if irv_type(s1) == TI_INT:
+        cp = cp + e2_big_word_var(buf, pos + cp, 10, s1)
+    else:
+        cp = cp + e2_load_var(buf, pos + cp, 10, s1)
+    cp = cp + e2_alu(buf, pos + cp, 57)  // cmp r10, r11
+    cond : ., mut = 4
+    if op == OP_NE:
+        cond = 5
+    else if op == OP_LT:
+        cond = 12
+    else if op == OP_GT:
+        cond = 15
+    else if op == OP_LE:
+        cond = 14
+    else if op == OP_GE:
+        cond = 13
+    cp = cp + e2_big_setcc(buf, pos + cp, cond)
+    cp = cp + e2_big_bool_to_r10(buf, pos + cp)
+    cp = cp + e2_st_var(buf, pos + cp, 10, d)
+    return cp
+
+fn emit_big_ptr_binary(buf: string, pos: int, d: int, s1: int, s2: int, op: int) -> int:
+    cp : ., mut = 0
+    if op == OP_PTR_ADD || op == OP_PTR_SUB:
+        // Convert the int offset before loading the raw pointer: the runtime call
+        // may clobber caller-saved r10.
+        cp = cp + e2_big_word_var(buf, pos + cp, 11, s2)
+        cp = cp + e2_load_var(buf, pos + cp, 10, s1)
+        cp = cp + emit_rex(buf, pos + cp, 1, 0, 0, 11 / 8)
+        e2_w8(buf, pos + cp, 193)  // shl r11, 3
+        cp = cp + 1
+        cp = cp + emit_modrm(buf, pos + cp, 3, 4, 11 % 8)
+        e2_w8(buf, pos + cp, 3)
+        cp = cp + 1
+        if op == OP_PTR_ADD:
+            cp = cp + e2_alu(buf, pos + cp, 1)
+        else:
+            cp = cp + e2_alu(buf, pos + cp, 41)
+        cp = cp + e2_st_var(buf, pos + cp, 10, d)
+        return cp
+    if op == OP_PTR_DIFF:
+        cp = cp + e2_load_var(buf, pos + cp, 10, s1)
+        cp = cp + e2_load_var(buf, pos + cp, 11, s2)
+        cp = cp + e2_alu(buf, pos + cp, 41)  // sub r10, r11
+        cp = cp + emit_rex(buf, pos + cp, 1, 0, 0, 10 / 8)
+        e2_w8(buf, pos + cp, 193)  // sar r10, 3
+        cp = cp + 1
+        cp = cp + emit_modrm(buf, pos + cp, 3, 7, 10 % 8)
+        e2_w8(buf, pos + cp, 3)
+        cp = cp + 1
+        // The difference is a mathematical int, not a pointer.
+        cp = cp + e2_mov(buf, pos + cp, 7, 10)
+        cp = cp + e2_big_call_name(buf, pos + cp, str_intern("bi_from_word"))
+        cp = cp + e2_st_var(buf, pos + cp, 0, d)
+        return cp
+    return 0
+
 fn emit_big_neg(buf: string, pos: int, d: int, s1: int) -> int:
     cp : ., mut = 0
     cp = cp + e2_load_var(buf, pos + cp, 10, s1)

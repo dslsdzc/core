@@ -56,7 +56,7 @@
 //   writer and reader use the same constant, so the cache remains self-consistent.
 //   The limitation is recorded in the project backlog.
 CIR_CACHE_MAGIC : int = -4485090715960753727
-CIR_CACHE_VER   : int = 22
+CIR_CACHE_VER   : int = 23
 
 g_cir_write_buf : string, mut
 g_cir_write_pos : int, mut

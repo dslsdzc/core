@@ -673,7 +673,13 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
 
     if op == IR_BINARY:
         do2 := g2_slot(d)
-        if g_x86_big_enabled != 0 && ti == TI_INT:
+        if g_x86_big_enabled != 0 && (s3 == OP_PTR_ADD || s3 == OP_PTR_SUB || s3 == OP_PTR_DIFF):
+            pz := emit_big_ptr_binary(buf, pos, d, s1, s2, s3)
+            if pz > 0:
+                return pz
+        if g_x86_big_enabled != 0 && s3 >= OP_EQ && s3 <= OP_GE && (irv_type(s1) == TI_CHAR || irv_type(s2) == TI_CHAR):
+            return emit_big_char_cmp(buf, pos, d, s1, s2, s3)
+        if g_x86_big_enabled != 0 && ti == TI_INT && irv_type(s1) == TI_INT && irv_type(s2) == TI_INT:
             bz := emit_big_binary(buf, pos, d, s1, s2, s3)
             if bz > 0:
                 return bz
@@ -917,7 +923,7 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
 
     if op == IR_UNARY && d >= 0:
         do2 := g2_slot(d)
-        if g_x86_big_enabled != 0 && s3 == UOP_NEG:
+        if g_x86_big_enabled != 0 && s3 == UOP_NEG && irv_type(s1) == TI_INT:
             return emit_big_neg(buf, pos, d, s1)
         cp = cp + e2_load_var(buf, pos+cp, 10, s1)
         if s3 == UOP_NEG:
@@ -960,15 +966,64 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         cp = cs_stack_args(buf, pos, cp, fa, ac)
         // Match builtins by interned string index (integer compare, no str_eq)
         if s3 == g_ni_syscall3:
+            if g_x86_big_enabled != 0:
+                cp = cp + e2_big_sub_rsp(buf, pos+cp, 32)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 0, 7)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 8, 6)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 16, 2)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 24, 1)
+                cp = cp + e2_big_convert_stack(buf, pos+cp, 0)
+                cp = cp + e2_big_convert_stack(buf, pos+cp, 8)
+                cp = cp + e2_big_convert_stack(buf, pos+cp, 16)
+                cp = cp + e2_big_convert_stack(buf, pos+cp, 24)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 0, 7)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 8, 6)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 16, 2)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 24, 1)
+                cp = cp + e2_big_add_rsp(buf, pos+cp, 32)
             // Linux syscall 约定发射序 = OS 轴序列（syscall.cr， 
             // 抽取，rax 号 + rdi/rsi/rdx 参数序 + 0F 05 + rax 回存）。
             cp = sys_syscall3_stub(buf, pos, cp, d)
+            if g_x86_big_enabled != 0 && d >= 0:
+                cp = cp + e2_load_var(buf, pos+cp, 7, d)
+                cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_from_word"))
+                cp = cp + e2_st_var(buf, pos+cp, 0, d)
         else if s3 == g_ni_syscall4:
+            if g_x86_big_enabled != 0:
+                cp = cp + e2_big_sub_rsp(buf, pos+cp, 48)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 0, 7)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 8, 6)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 16, 2)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 24, 1)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 32, 8)
+                cp = cp + e2_big_convert_stack(buf, pos+cp, 0)
+                cp = cp + e2_big_convert_stack(buf, pos+cp, 8)
+                cp = cp + e2_big_convert_stack(buf, pos+cp, 16)
+                cp = cp + e2_big_convert_stack(buf, pos+cp, 24)
+                cp = cp + e2_big_convert_stack(buf, pos+cp, 32)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 0, 7)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 8, 6)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 16, 2)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 24, 1)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 32, 8)
+                cp = cp + e2_big_add_rsp(buf, pos+cp, 48)
             // Linux syscall 约定发射序 = OS 轴序列（syscall.cr， 
             // 抽取，第 4 参经 r10 的约定与 I-2 修复史见该文件内注）。
             cp = sys_syscall4_stub(buf, pos, cp, d)
+            if g_x86_big_enabled != 0 && d >= 0:
+                cp = cp + e2_load_var(buf, pos+cp, 7, d)
+                cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_from_word"))
+                cp = cp + e2_st_var(buf, pos+cp, 0, d)
         else if s3 == g_ni_load8:
             // movzx rax, byte [rdi+rsi] — REX.W + 0x0FB6 + SIB
+            if g_x86_big_enabled != 0:
+                cp = cp + e2_big_sub_rsp(buf, pos+cp, 16)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 0, 7)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 8, 6)
+                cp = cp + e2_big_convert_stack(buf, pos+cp, 8)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 0, 7)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 8, 6)
+                cp = cp + e2_big_add_rsp(buf, pos+cp, 16)
             cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 0)
             e2_w8(buf, pos+cp, 15)
             cp = cp + 1
@@ -977,32 +1032,70 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             cp = cp + emit_modrm(buf, pos+cp, 0, 0, 4)
             cp = cp + emit_sib(buf, pos+cp, 0, 6, 7)
             if d >= 0:
-                cp = cp + e2_store_ret(buf, pos+cp, d)
+                if g_x86_big_enabled != 0:
+                    cp = cp + e2_big_tag_reg(buf, pos+cp, 0)
+                    cp = cp + e2_st_var(buf, pos+cp, 0, d)
+                else:
+                    cp = cp + e2_store_ret(buf, pos+cp, d)
         else if s3 == g_ni_store8:
             // mov [rdi+rsi], dl — 0x88 + SIB (3rd arg in rdx = register 2)
+            if g_x86_big_enabled != 0:
+                cp = cp + e2_big_sub_rsp(buf, pos+cp, 32)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 0, 7)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 8, 6)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 16, 2)
+                cp = cp + e2_big_convert_stack(buf, pos+cp, 8)
+                if fa + 2 < fa + ac && irv_type(fa + 2) == TI_INT:
+                    cp = cp + e2_big_convert_stack(buf, pos+cp, 16)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 0, 7)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 8, 6)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 16, 2)
+                cp = cp + e2_big_add_rsp(buf, pos+cp, 32)
             e2_w8(buf, pos+cp, 136)
             cp = cp + 1
             cp = cp + emit_modrm(buf, pos+cp, 0, 2, 4)
             cp = cp + emit_sib(buf, pos+cp, 0, 6, 7)
         else if s3 == g_ni_load64 || s3 == g_ni_load_str_ptr || s3 == g_ni_r64:
             // mov rax, [rdi + rsi]
-            // mov rax, [rdi+rsi] — REX.W + 0x8B + SIB
+            if g_x86_big_enabled != 0:
+                cp = cp + e2_big_sub_rsp(buf, pos+cp, 16)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 0, 7)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 8, 6)
+                cp = cp + e2_big_convert_stack(buf, pos+cp, 8)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 0, 7)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 8, 6)
+                cp = cp + e2_big_add_rsp(buf, pos+cp, 16)
             cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 0)
             e2_w8(buf, pos+cp, 139)
             cp = cp + 1
             cp = cp + emit_modrm(buf, pos+cp, 0, 0, 4)
             cp = cp + emit_sib(buf, pos+cp, 0, 6, 7)
             if d >= 0:
-                cp = cp + e2_store_ret(buf, pos+cp, d)
+                if g_x86_big_enabled != 0 && s3 != g_ni_load_str_ptr:
+                    cp = cp + e2_big_box_rax(buf, pos+cp, 0)
+                    cp = cp + e2_st_var(buf, pos+cp, 0, d)
+                else:
+                    cp = cp + e2_store_ret(buf, pos+cp, d)
         else if s3 == g_ni_store_str_ptr:
             // mov [rdi + rsi], rdx
-            // mov [rdi+rsi], rdx — REX.W + 0x89 + SIB
+            if g_x86_big_enabled != 0:
+                cp = cp + e2_big_sub_rsp(buf, pos+cp, 16)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 0, 7)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 8, 6)
+                cp = cp + e2_big_convert_stack(buf, pos+cp, 8)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 0, 7)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 8, 6)
+                cp = cp + e2_big_add_rsp(buf, pos+cp, 16)
             cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 0)
             e2_w8(buf, pos+cp, 137)
             cp = cp + 1
             cp = cp + emit_modrm(buf, pos+cp, 0, 2, 4)
             cp = cp + emit_sib(buf, pos+cp, 0, 6, 7)
         else if s3 == g_ni_get_arg && gv_argv >= 0:
+            // Convert the tagged argv index to a raw word first.
+            if g_x86_big_enabled != 0:
+                cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_to_word_checked"))
+                cp = cp + e2_mov(buf, pos+cp, 7, 0)
             // Convert C argv[n] into a Core string with the hidden length header.
             // NB: gv_argv must be >= 0 (g_rt_argv_ptr registered as a global).
             // If it's -1, fall through to regular call path — the LEA displacement
@@ -1121,9 +1214,19 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             if d >= 0:
                 cp = cp + e2_store_ret(buf, pos+cp, d)
         else if s3 == g_ni_w64:
-            // w64(buf, pos, val) -> mov [rsi+rdi??], rdx
-            // Actually args: rdi=buf, rsi=pos, rdx=val
-            // Just: mov [rdi+rsi], rdx
+            // w64(buf, pos, val) -> mov [rdi+rsi], rdx
+            // In --big-int pos/val are tagged ints; convert them at the boundary.
+            if g_x86_big_enabled != 0:
+                cp = cp + e2_big_sub_rsp(buf, pos+cp, 32)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 0, 7)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 8, 6)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 16, 2)
+                cp = cp + e2_big_convert_stack(buf, pos+cp, 8)
+                cp = cp + e2_big_convert_stack(buf, pos+cp, 16)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 0, 7)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 8, 6)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 16, 2)
+                cp = cp + e2_big_add_rsp(buf, pos+cp, 32)
             cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 0)
             e2_w8(buf, pos+cp, 137)
             cp = cp + 1
@@ -1179,7 +1282,12 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             e2_w8(buf, pos+cp+1, 186)
             e2_w64(buf, pos+cp+2, 0)  // placeholder — patched in elf.cr Phase 3
             cp = cp + 10
-            cp = cp + e2_st(buf, pos+cp, 10, do2)
+            if g_x86_big_enabled != 0 && d >= 0:
+                cp = cp + e2_mov(buf, pos+cp, 7, 10)
+                cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_from_uword"))
+                cp = cp + e2_st_var(buf, pos+cp, 0, d)
+            else:
+                cp = cp + e2_st(buf, pos+cp, 10, do2)
         else if s3 >= 0:
             // 通用调用路径 = callseq.cr cs_call_direct（查名 -> e2_call /
             // 外部位 + 返回值存；  抽取）
@@ -1205,6 +1313,31 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         // does not push stack arguments or clean the stack. This is existing
         // behavior and is kept byte-for-byte; see callseq.cr for the difference.
         cp = cs_args_dispatch(buf, pos, cp, s2, s3)
+        if g_x86_big_enabled != 0 && s3 > 0:
+            // Extern int arguments must be raw machine words.  Save the six
+            // integer argument registers, convert the int-typed ones, and
+            // restore.  Float/string arguments are left untouched.
+            cp = cp + e2_big_sub_rsp(buf, pos+cp, 48)
+            cp = cp + e2_big_store_rsp(buf, pos+cp, 0, 7)
+            cp = cp + e2_big_store_rsp(buf, pos+cp, 8, 6)
+            cp = cp + e2_big_store_rsp(buf, pos+cp, 16, 2)
+            cp = cp + e2_big_store_rsp(buf, pos+cp, 24, 1)
+            cp = cp + e2_big_store_rsp(buf, pos+cp, 32, 8)
+            cp = cp + e2_big_store_rsp(buf, pos+cp, 40, 9)
+            ai3 : ., mut = 0
+            loop:
+                if ai3 >= s3:
+                    break
+                if ai3 < 6 && irv_type(s2 + ai3) == TI_INT:
+                    cp = cp + e2_big_convert_stack(buf, pos+cp, ai3 * 8)
+                ai3 = ai3 + 1
+            cp = cp + e2_big_load_rsp(buf, pos+cp, 0, 7)
+            cp = cp + e2_big_load_rsp(buf, pos+cp, 8, 6)
+            cp = cp + e2_big_load_rsp(buf, pos+cp, 16, 2)
+            cp = cp + e2_big_load_rsp(buf, pos+cp, 24, 1)
+            cp = cp + e2_big_load_rsp(buf, pos+cp, 32, 8)
+            cp = cp + e2_big_load_rsp(buf, pos+cp, 40, 9)
+            cp = cp + e2_big_add_rsp(buf, pos+cp, 48)
         // Record external relocation
         grow_ext_rel(g_x86_ext_rel_count + 1)
         w64(g_x86_ext_rel_pos, g_x86_ext_rel_count * 8, pos + cp)
@@ -1215,7 +1348,12 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         e2_w32(buf, pos+cp+1, 0)
         cp = cp + 5
         // Store return value from rax
-        cp = cp + e2_st(buf, pos+cp, 0, do2)
+        if d >= 0:
+            if g_x86_big_enabled != 0 && irv_type(d) == TI_INT:
+                cp = cp + e2_big_box_rax(buf, pos+cp, 0)
+                cp = cp + e2_st_var(buf, pos+cp, 0, d)
+            else:
+                cp = cp + e2_st(buf, pos+cp, 0, do2)
         return cp
 
     if op == IR_HOTPATCH_ROUTE:
@@ -1280,7 +1418,12 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         e2_w8(buf, pos+cp+1, 186)  // movabs r10, imm64
         e2_w64(buf, pos+cp+2, 0)  // placeholder — patched in elf.cr Phase 3
         cp = cp + 10
-        cp = cp + e2_st(buf, pos+cp, 10, do2)
+        if g_x86_big_enabled != 0 && d >= 0:
+            cp = cp + e2_mov(buf, pos+cp, 7, 10)
+            cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_from_uword"))
+            cp = cp + e2_st_var(buf, pos+cp, 0, d)
+        else:
+            cp = cp + e2_st(buf, pos+cp, 10, do2)
         return cp
 
     if op == IR_RETURN:
@@ -1860,6 +2003,26 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         e2_w8(buf, pos+cp, 15)
         e2_w8(buf, pos+cp+1, 11)
         cp = cp + 2  // ud2 (SIGILL)
+        return cp
+
+    if op == IR_PTR_OF:
+        if g_x86_big_enabled != 0:
+            cp = cp + e2_load_var(buf, pos+cp, 7, s1)
+            cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_from_uword"))
+            cp = cp + e2_st_var(buf, pos+cp, 0, d)
+        else if d >= 0 && d != s1:
+            cp = cp + e2_load_var(buf, pos+cp, 10, s1)
+            cp = cp + e2_st_var(buf, pos+cp, 10, d)
+        return cp
+
+    if op == IR_STR_OF:
+        if g_x86_big_enabled != 0:
+            cp = cp + e2_load_var(buf, pos+cp, 7, s1)
+            cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_to_uword_checked"))
+            cp = cp + e2_st_var(buf, pos+cp, 0, d)
+        else if d >= 0 && d != s1:
+            cp = cp + e2_load_var(buf, pos+cp, 10, s1)
+            cp = cp + e2_st_var(buf, pos+cp, 10, d)
         return cp
 
     if op == IR_INLINE:

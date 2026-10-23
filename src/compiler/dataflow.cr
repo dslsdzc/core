@@ -551,6 +551,10 @@ fn df_opcode_name(opcode: int, s3: int) -> string:
         return "const"
     if opcode == IR_CONST_BIG:
         return "const_big"
+    if opcode == IR_PTR_OF:
+        return "ptr_of"
+    if opcode == IR_STR_OF:
+        return "str_of"
     if opcode == IR_BINARY:
         if s3 == OP_PTR_ADD:
             return "ptr_add"
