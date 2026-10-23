@@ -15,12 +15,6 @@ fn g2_init():
     g_x86_emit_var_count = 0
     g_x86_emit_stack_size = 0
     g_x86_ret_patch_count = 0
-    // g_x86_mw_jo_count: reset per function. jo rel32s are patched to the
-    // function-tail slow-path block right after each function's epilogue.
-    g_x86_mw_jo_count = 0
-    // Reset per function. 2L operand checks (jne 0F 85) are patched to the
-    // function-tail 2L block.
-    g_x86_mw_oc_count = 0
     // g_x86_alloc_patch_count NOT reset: alloc calls are patched after all funcs.
     // g_x86_ext_rel_count NOT reset: extern relocations span all functions.
     // g_x86_rip_patch_count NOT reset
@@ -101,7 +95,7 @@ fn g2_rodata_sz() -> int:
         i = i + 1
     return o
 
-// Tagged-slot helpers and the 2L encoder live in tag2l.cr. Call sequences live
+// Tagged mathematical-int helpers live in int_rep.cr. Call sequences live
 // in src/os/linux/callseq.cr; syscall stubs live in src/os/linux/syscall.cr.
 // This file keeps the e2_* primitives, emit_instr dispatch, and builtin bodies.
 // ── Byte encoding helpers ──
@@ -773,37 +767,10 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             return cp
         cp = cp + e2_load_var(buf, pos+cp, 10, s1)
         cp = cp + e2_load_var(buf, pos+cp, 11, s2)
-        // Int multiword tagged-slot check. At 2L consumer sites (add/sub with a
-        // tagged dest, or a comparison with any tagged operand), check tags before
-        // the fast path. If any operand is 2L (tag = 1), jump to the function-tail
-        // 2L block for 128-bit arithmetic or comparison (e2_mw_opnd_block).
-        // Untagged rows and sites emit no bytes. The check runs after operand
-        // loads and only writes flags, so it does not disturb r10 or r11.
-        mw_oc : ., mut = -1
-        if (s3 == OP_ADD || s3 == OP_SUB) && g2_tag_off(d) != -1 || (s3 >= OP_EQ && s3 <= OP_GE):
-            if g2_tag_off(s1) != -1:
-                if mw_oc == -1:
-                    mw_oc = mw_oc_new(s1, s2, d, s3)
-                cp = cp + e2_mw_oc_check(buf, pos+cp, mw_oc, 0, s1)
-            if s1 != s2 && g2_tag_off(s2) != -1:
-                if mw_oc == -1:
-                    mw_oc = mw_oc_new(s1, s2, d, s3)
-                cp = cp + e2_mw_oc_check(buf, pos+cp, mw_oc, 1, s2)
         if s3 == OP_ADD:
             cp = cp + e2_alu(buf, pos+cp, 1)
-            // A tagged dest add/sub is followed by an overflow jump. e2_alu's OF
-            // is consumed immediately because the next instruction would overwrite
-            // flags. The slow-path block at the function tail stores the dest value,
-            // sets tag = 1, and jumps back after the store (e2_mw_slow_block in
-            // tag2l.cr; frame.cr pf_epilogue emits the block per site). The site
-            // records dest and whether the op is subtract, because the high-limb
-            // correction differs.
-            if g2_tag_off(d) != -1:
-                cp = cp + e2_mw_jo(buf, pos+cp, d, 0)
         else if s3 == OP_SUB:
             cp = cp + e2_alu(buf, pos+cp, 41)
-            if g2_tag_off(d) != -1:
-                cp = cp + e2_mw_jo(buf, pos+cp, d, 1)
         else if s3 == OP_MUL:
             // imul r10, r11 — 2-byte opcode 0x0F 0xAF
             cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 11/8)
@@ -912,13 +879,6 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         else if s3 == OP_OR:
             cp = cp + e2_alu(buf, pos+cp, 9)
         cp = cp + e2_st(buf, pos+cp, 10, do2)
-        // Tag hygiene 1: clear the tag at every fast-path 64-bit definition.
-        // A fast value stored into a tagged slot must have tag = 0. Otherwise a
-        // later backedge execution would see stale tag = 1 and read the fast value
-        // as a 2-limb pointer. The jo and 2L blocks jump to resume after this
-        // instruction; the slow path writes tag = 1 itself, so this clear does not
-        // affect it. An untagged dest emits no bytes.
-        cp = cp + e2_mw_tag_clr(buf, pos+cp, d)
         return cp
 
     if op == IR_UNARY && d >= 0:
@@ -1558,27 +1518,27 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                 cp = cp + 1
                 cp = cp + emit_modrm(buf, pos+cp, 0, 10%8, 10%8)
                 cp = cp + e2_st(buf, pos+cp, 10, do2)
-                // 全局源（恒 64 位值）-> d tagged 时防御性清 tag
-                cp = cp + e2_mw_tag_clr(buf, pos+cp, d)
             else:
                 cp = cp + e2_load_var(buf, pos+cp, 10, s1)
                 cp = cp + e2_st(buf, pos+cp, 10, do2)
-                // 拷贝定值 tag 传播（源 tagged -> 运行时 tag 拷贝；源 untagged
-                // -> 清 0），d 为 as 转换或拷贝序列中的记录（规则 B 闭包成员）
-                cp = cp + e2_mw_tag_cpy(buf, pos+cp, d, s1)
         else:
             cp = cp + e2_load_var(buf, pos+cp, 10, s1)
             cp = cp + e2_st(buf, pos+cp, 10, do2)
-        // s1<0 尾分支（域外行，现 IR 形态防御后备）：mw_setup_tags 规则 B 只扫
-        // 函数域 [vs, ve)（s1 ∈ 域 且 tagged 才标 d）-> d 恒 untagged，快值原样
-        // 直拷，无 e2_mw_tag_cpy/清 0 字节（tag 拷贝只对有 tag 字节的域内行发）。
         return cp
 
     if op == IR_STORE:
         o1 := g2_slot(s1)
+        // @raw_int 的跨表示边界：dex 的 TI_DEX_S 槽是 raw 缩放整数，
+        // 写入 tagged int 槽前必须装箱；否则后续 int 运算会把它当成 tagged
+        // 立即数（例如 7_000_000 被读成 3_500_000）。
+        needs_big_box := g_x86_big_enabled != 0 && irv_type(s1) == TI_INT && irv_type(s2) == TI_DEX_S
         if s1 >= 0:
             if r64(g_x86_is_global, s1 * 8) != 0:
                 cp = cp + e2_load_var(buf, pos+cp, 10, s2)
+                if needs_big_box != 0:
+                    cp = cp + e2_mov(buf, pos+cp, 7, 10)
+                    cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_from_word"))
+                    cp = cp + e2_mov(buf, pos+cp, 10, 0)
                 grow_rip_patch(g_x86_rip_patch_count + 1)
                 w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3)
                 w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, s1)
@@ -1591,16 +1551,18 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                 cp = cp + emit_modrm(buf, pos+cp, 0, 10%8, 11%8)
             else:
                 cp = cp + e2_load_var(buf, pos+cp, 10, s2)
+                if needs_big_box != 0:
+                    cp = cp + e2_mov(buf, pos+cp, 7, 10)
+                    cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_from_word"))
+                    cp = cp + e2_mov(buf, pos+cp, 10, 0)
                 cp = cp + e2_st(buf, pos+cp, 10, o1)
-                // 拷贝定值 tag 传播（规则 B' 闭包成员：s2 tagged -> 运行时 tag
-                // 拷贝；untagged/全局源 -> 清 0），变量行真定值
-                cp = cp + e2_mw_tag_cpy(buf, pos+cp, s1, s2)
         else:
             cp = cp + e2_load_var(buf, pos+cp, 10, s2)
+            if needs_big_box != 0:
+                cp = cp + e2_mov(buf, pos+cp, 7, 10)
+                cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_from_word"))
+                cp = cp + e2_mov(buf, pos+cp, 10, 0)
             cp = cp + e2_st(buf, pos+cp, 10, o1)
-        // s1<0 尾分支（域外目标行，现 IR 形态防御后备）：规则 B' 只标函数域内
-        // [vs, ve) 的 s1（且 s2 tagged）-> 域外 s1 恒 untagged，快值原样直拷，
-        // 无 tag 拷贝/清 0（g2_tag_off 域外恒 -1，拷贝源 s2 的 tag 无需实现）。
         return cp
 
     if op == IR_LOAD_FIELD && d >= 0:

@@ -17,7 +17,7 @@ Pipeline (fast path — no interpreter bottleneck, no gcc dependency):
   段内/段间**相对顺序 = 行为定义面**（平铺编译单元的声明序/全局序），分段只做
   命名与按序组合，顺序与拆分前逐一对应，不可乱序。
   架构轴 `arch_x86_64_files` × 格式轴 `format_elf_files` × OS 轴 `os_linux_files`
-  （波 1 落位：Task 1 三轴搬迁 + 组合根 / Task 3/4 frame·tag2l 入架构轴 /
+  （波 1 落位：Task 1 三轴搬迁 + 组合根 / Task 3/4 frame 入架构轴 /
   Task 2/5/6 entry·callseq·syscall 入 OS 轴——**全轴已就位**）+ 组合根
   `x86_linux_target_files`（target triple 命名：project-mode 入口链，不入
   concat——见段注释）。
@@ -58,10 +58,7 @@ kernel_files = [
 ]
 
 # ① 架构轴 x86_64：寄存器分配 CAG + 指令编码 + 字节尺寸单源（sizes.cr）
-# + int 多字 M1 tag/2L 编码族（tag2l.cr——波 1 Task 4 自 instr.cr 整搬）。
-# 段内顺序 = 「被依赖者先」惯例（函数可见性与顺序无关）：tag2l 消费 instr 的
-# 编码原语 → instr 之后；frame.cr → tag2l（pf_epilogue 函数尾块调 e2_mw_*；
-# tag2l 反向消费 frame 的 g2_tag_off——同轴双向引用，波 1 Task 4 裁定可接受）。
+# + tagged BigInt 立即数/装箱辅助（int_rep.cr）与运行时 blob。
 arch_x86_64_files = [
     'src/arch/x86_64/backend_schema.cr',
     'src/arch/x86_64/backend_globals.cr',
@@ -71,7 +68,6 @@ arch_x86_64_files = [
     'src/arch/x86_64/int_rep.cr',
     'src/runtime/bigint_blob.cr',
     'src/arch/x86_64/instr.cr',
-    'src/arch/x86_64/tag2l.cr',
     'src/arch/x86_64/frame.cr',
 ]
 

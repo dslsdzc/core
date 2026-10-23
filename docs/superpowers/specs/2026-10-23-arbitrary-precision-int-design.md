@@ -166,7 +166,7 @@ bi_to_uword_checked
 4. 不保证大整数运算与立即数运算有相同性能。
 5. 不改变 arena 的生命周期模型。
 6. 自举链的 stage0 由 Python 后端生成。Python 前端使用 Python 整数；Python 后端和运行时必须使用与 corec 相同的 tagged value 和对象布局，否则 stage0 与 self-hosted 输出不一致。
-7. 现有 2-limb `tag2l` 机制只覆盖局部加减，新实现完成后移除这条专用路径。
+7. 旧 2-limb `tag2l` 机制只覆盖局部加减，已在新实现完成后移除；raw 编译器/回退路径只使用 64 位裸值。
 
 ## 未决
 

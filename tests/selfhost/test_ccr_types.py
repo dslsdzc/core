@@ -72,7 +72,7 @@ import subprocess
 import sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-# 段表/对象面解析器唯一真源 = test_ccr_v7.py（同目录；test_mw_task1.py 先例）
+# 段表/对象面解析器唯一真源 = test_ccr_v7.py（同目录）
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_ccr_v7 import parse_object_dump  # noqa: E402
 COREC = os.path.join(BASE, 'build/corec')

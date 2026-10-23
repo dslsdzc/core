@@ -439,13 +439,15 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
         // would leave loop-carried assignments unchanged.
         if op2 == 6 && d2 >= 0:
             w64(g_ir_vals, d2 * 8, 0)
-        // IR_ALLOC
-        if op2 == 9 && t1 >= 0 && t2 >= 0:
-            w64(g_ir_vals, t1 * 8, r64(g_ir_vals, t2 * 8))
         // IR_STORE
+        if op2 == 9 && t1 >= 0 && t2 >= 0:
+            v2 := r64(g_ir_vals, t2 * 8)
+            if g_interp_big != 0 && irv_type(t1) == TI_INT && irv_type(t2) == TI_DEX_S:
+                v2 = ir_interp_tag(v2)
+            w64(g_ir_vals, t1 * 8, v2)
+        // IR_LOAD
         if op2 == 10 && d2 >= 0 && t1 >= 0:
             w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8))
-        // IR_LOAD
         // Aggregate operations: ALLOC_ARRAY, ALLOC_STRUCT, LOAD_INDEX,
         // STORE_INDEX, LOAD_FIELD, STORE_FIELD, and ADDR_INDEX. The callee path
         // must implement them too, or an aggregate global read inside a callee
@@ -871,8 +873,11 @@ fn ir_interpret() -> int:
                     w64(g_ir_vals, d * 8, @ptr_of(bp))
         if op == 9:
             if s1 >= 0 && s2 >= 0:
-                w64(g_ir_vals, s1 * 8, r64(g_ir_vals, s2 * 8))
-        // IR_STORE
+                v := r64(g_ir_vals, s2 * 8)
+                if g_interp_big != 0 && irv_type(s1) == TI_INT && irv_type(s2) == TI_DEX_S:
+                    v = ir_interp_tag(v)
+                w64(g_ir_vals, s1 * 8, v)
+        // IR_LOAD
         if op == 10:
             if d >= 0:
                 w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8))

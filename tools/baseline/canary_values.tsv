@@ -177,7 +177,7 @@
 # **后来人注意**：**任何新增编译器侧全局**都会移动这张表（登记 ⇒ 启动期 intern ⇒ id 顺移）。
 #   这是**固有代价**，不是回归——但按本文件两级纪律，**必须显式声明 + 同批重锁 + 旧值留痕**。
 
-canary_elf	pa	dfae9d845362856fe3609ecd23fcb2deaaa7eae1d2ca39b7a242695513e9bb09	53430
+canary_elf	pa	826d74cf7f099f9758e11a64d443695ff8360327a88e7eb5922ddfd617e0dce5	53430
 pa_ccr	pa.ccr	e581daf5a8e30f91745d3c0b6fb6ae6421422248507ec401a67228ae7c6c2355	96985
 pa_static_ccr	pa_st.bin.ccr	a7d2433b0c78428ed93e434ccd617f1308362d7bb268764712d2972e243485a1	97128
 gt_ccr	gt.ccr	21b1f39c96bd2242b963bb5a1726eb93b912739f77c31317da055d6b37d88103	143687
@@ -271,3 +271,13 @@ gt_static_ccr	gt_st.bin.ccr	4949ff5437e1bc78a5e2f95e4fb05c07e20da0ed4bee35c58662
 #       pa_static_ccr 041b6e3e83d915690324c5e453b49652207e9f919080e53d2ddec1060d595f62
 #       gt_ccr        edfd8e98d7b64fdb3a99e62bffc99954879432a48390bedbe98171348a49dd22
 #       gt_static_ccr bbfe47897c8fb97f9cc38ffbfe6043577604ef86595760db55cd7ac0781b0c97
+
+# ── 【本批重锁 2026-10-23】删除旧 2-limb/tag 路径（任务 9 收尾）──
+#   canary_elf: `dfae9d84…` → `826d74cf…`，size 不变（53430B）。
+#   归因（**编译器全局位移，非发射面回归**）：删除 `tag2l.cr` 及 18 个
+#   `g_x86_mw_*` 编译期全局（tag_off/cap/count、jo_pos/cap/count/dest/is_sub/resume、
+#   oc_pos1/pos2/cap/count/s1/s2/dest/op/resume）⇒ `corearch` 启动期登记集缩小
+#   ⇒ 被编译程序内嵌 intern id 顺移；机码语义未变，`pa` 运行仍 rc=0。
+#   四条 `.ccr` **逐字节不变**（`.ccr` 由 `corec` 前端生成，不含后端全局）。
+#   D1 确定性闸门 5/5 PASS（重锁前置已绿）。
+#   旧值留痕（自本批起作废）：canary_elf `dfae9d845362856fe3609ecd23fcb2deaaa7eae1d2ca39b7a242695513e9bb09` 53430。

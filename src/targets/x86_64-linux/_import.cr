@@ -32,11 +32,7 @@ import sizes
 import int_rep
 import bigint_blob
 import instr
-// Architecture tag-table owner: mw_setup_tags and the mw encoders used by elf.cr.
-// tag2l and frame.cr reference each other; pf_epilogue calls e2_mw_*, and tag2l
-// reads the table through g2_tag_off.
-import tag2l
-// Function frame layout: pf_frame_size, pf_prologue, pf_epilogue, and g2_tag_off.
+// Function frame layout: pf_frame_size, pf_prologue, pf_epilogue.
 import frame
 import resolve
 import elf

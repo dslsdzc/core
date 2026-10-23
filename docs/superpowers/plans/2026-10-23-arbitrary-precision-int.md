@@ -406,5 +406,6 @@ cmp /tmp/corec2 /tmp/corec3
 - 用户程序的 `.ccr` header reserved 字段为 0，`corearch` 默认按 tagged BigInt 发射。
 - 编译器/自举链的 `.ccr` header 写 `CCR_FLAG_RAW_INT`；`corearch` 自动按 raw 发射，也支持显式 `--raw-int`。
 - `.ccr` 版本为 v9.1 `(9 << 16) | 1`；`.cir` 缓存版本为 23。
-- 2-limb `tag2l` 仍作为 raw 编译器/回退路径保留，尚未删除；默认用户程序不经过它。
+- 2-limb `tag2l`、`g_x86_mw_*` 状态和帧 tag 区已删除；raw 编译器/回退路径只用 64 位裸值，默认用户程序走 tagged BigInt。
+- 旧 `test_mw_*` 已删除，语义面由 `tests/selfhost/test_bigint_*.py` 承接。
 - canary 已按 v9.1、默认 tagged ELF 和全局整数初始化重新锁定。

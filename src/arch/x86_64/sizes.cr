@@ -5,12 +5,9 @@
 // them for prologue and epilogue accounting. emit_instr must return the same
 // sizes through the e2_* helpers.
 //
-// Do not hardcode byte counts in elf.cr, instr.cr, tag2l.cr, resolve.cr,
-// frame.cr, or src/os/linux/entry.cr. sz_start_body and sz_start_argv_save must
-// stay in sync with the _start body in entry.cr.
-//
-// The tag2l.cr mw helpers currently return matching literal sizes but do not
-// call these helpers; changing sz_jo does not propagate to e2_mw_jo.
+// Do not hardcode byte counts in elf.cr, instr.cr, resolve.cr, frame.cr, or
+// src/os/linux/entry.cr. sz_start_body and sz_start_argv_save must stay in sync
+// with the _start body in entry.cr.
 
 // ── Basic encoding sizes (one per e2_* helper in instr.cr) ──
 fn sz_mov() -> int:

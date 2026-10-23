@@ -242,7 +242,7 @@ fn grow_ir_var_rep(needed: int):
     _dyncpy(g_ir_var_rep, g_ir_var_rep_cap * 8, nb)
     // 新槽填 -1（哨兵 = 无表示位），alloc 零初始化，不填则未写槽被读成
     // 表示位 var 0（每个值都被判成有表示位，产生错误值且不报错；for example, the `None` initial value
-    // 的表示位被读成 var0 的当前值 0 = 裸值）。Use the same initialization pattern as the tag area in tag2l.cr.
+    // 的表示位被读成 var0 的当前值 0 = 裸值）。
     z : ., mut = g_ir_var_rep_cap
     loop:
         if z >= nc:

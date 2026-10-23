@@ -1690,14 +1690,6 @@ fn elf_gen(buf: string) -> int:
         vs2 := r64(g_ir_func_var_start, fi * 8)
         pc2 := r64(g_ir_func_param_count, fi * 8)
 
-        // Identify potential multiword vars and include the tag area in the
-        // frame size. With zero tags, pf_frame_size matches the layout without a
-        // tag area.
-        //
-        // Identify potential multiword vars and include the tag area in the frame
-        // size. With zero tags, pf_frame_size matches the layout without a tag
-        // area.
-        mw_setup_tags(fi, vs2, vc2)
         fsz := r64(g_x86_func_code_sz, fi * 8)
         // Frame size comes from frame.cr. SysV requires 16-byte alignment: after
         // a call rsp is 8 mod 16. With opt >= 1 there are 6 pushes (rbx, r12-r15,
@@ -1841,12 +1833,8 @@ fn elf_gen(buf: string) -> int:
                 break
             g2_slot(vs + vi)
             vi = vi + 1
-        // Identify potential multiword vars and build the tag byte offset table
-        // (g2_tag_off). The frame size is pf_frame_size(vc), including the tag
-        // area, with the same 16-byte alignment as the Phase 2 dry-run. With zero
-        // tags, the layout is unchanged.
-        // SysV 16-byte alignment, the same rule as the dry-run.
-        mw_setup_tags(fi, vs, vc)
+        // Frame size uses the shared pf_frame_size; SysV 16-byte alignment is
+        // the same rule as the Phase 2 dry-run.
         g_x86_emit_stack_size = pf_frame_size(vc)
 
         // Init label state for single-pass backpatching (-1 = not yet seen)
@@ -1875,36 +1863,17 @@ fn elf_gen(buf: string) -> int:
             if ii >= ic:
                 break
             inst_idx := ist + ii
-            // HIT table mode: mapped ops go through emit_instr_tabled. A return
-            // of -1 (unmapped, unsupported shape, or no table) falls back to
-            // emit_instr. Tagged int add/sub needs an overflow jump (jo), which
-            // the event lowering does not model, so the whole instruction takes
-            // the fallback path.
-            jo_before := g_x86_mw_jo_count
-            oc_before := g_x86_mw_oc_count
             sz : ., mut = -1
-            if hit_table_active() != 0 && mw_int_arith_jo_needed(inst_idx) == 0:
+            if hit_table_active() != 0:
                 sz = emit_instr_tabled(inst_idx, buf, cp)
             if sz < 0:
                 sz = emit_instr(inst_idx, buf, cp)
-            // If this instruction emitted a jo (at most one site per instruction,
-            // add/sub), its resume point is the instruction tail after the fast
-            // path e2_st (absolute position cp + sz). The slow-path block jumps
-            // back here; it skips the fast store and stores dest itself.
-            if g_x86_mw_jo_count > jo_before:
-                w64(g_x86_mw_jo_resume, (g_x86_mw_jo_count - 1) * 8, cp + sz)
-            // If this instruction created a 2L operand site (at most one per
-            // instruction), its block resume point is also the instruction tail,
-            // after the tag clear. The 2L block writes its own tag.
-            if g_x86_mw_oc_count > oc_before:
-                w64(g_x86_mw_oc_resume, (g_x86_mw_oc_count - 1) * 8, cp + sz)
             cp = cp + sz
             ii = ii + 1
 
-        // Epilogue and function-tail blocks (frame.cr pf_epilogue). Patch
-        // returns, fill the sub rsp immediate with save_ss, emit the epilogue
-        // (add rsp, reverse callee-saved pops with opt >= 1, pop rbp, ret), then
-        // append the jo slow-path blocks and 2L operand blocks in the cold tail.
+        // Epilogue (frame.cr pf_epilogue). Patch returns, fill the sub rsp
+        // immediate with save_ss, emit the epilogue (add rsp, reverse
+        // callee-saved pops with opt >= 1, pop rbp, ret).
         cp = pf_epilogue(save_ss, buf, cp)
         fi = fi + 1
 

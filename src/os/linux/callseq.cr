@@ -27,8 +27,8 @@
 // Each function returns the new cp. Calls look like
 // cp = cs_xxx(buf, pos, cp, ...).
 //
-// Depends on instr.cr for encoding primitives and g2_slot, frame.cr for
-// g2_tag_off, tag2l.cr for e2_mw_t8, and the shared x86 patch and global arrays.
+// Depends on instr.cr for encoding primitives and g2_slot, and the shared x86
+// patch and global arrays.
 
 // Register argument dispatch, shared by IR_CALL, IR_CALL_EXTERN, and IR_SPAWN.
 // SysV AMD64 assigns int args to rdi, rsi, rdx, rcx, r8, r9 and binary64 args to
@@ -181,21 +181,6 @@ fn cs_ret_value(buf: string, pos: int, cp: int, s1: int) -> int:
             cp = cp + e2_sd_load(buf, pos+cp, g2_slot(s1))
         else:
             cp = cp + e2_ld(buf, pos+cp, 0, g2_slot(s1))
-            // Tag read path A for a tagged local return. tag=1 means the slot
-            // holds a 2-limb pointer; dereference it and put the low limb in rax
-            // (the exit code uses the low byte of the mathematical value). tag=0
-            // leaves the fast value unchanged. The je rel8 skips the 3-byte
-            // dereference.
-            tg := g2_tag_off(s1)
-            if tg != -1:
-                cp = cp + e2_mw_t8(buf, pos+cp, tg)
-                w8(buf, pos+cp, 116)
-                w8(buf, pos+cp+1, 3)
-                cp = cp + 2  // je +3
-                w8(buf, pos+cp, 72)
-                w8(buf, pos+cp+1, 139)
-                w8(buf, pos+cp+2, 0)
-                cp = cp + 3  // mov rax, [rax]
     // Record the jump position for the caller to patch to the epilogue.
     grow_ret_patch(g_x86_ret_patch_count + 1)
     w64(g_x86_ret_patch_pos, g_x86_ret_patch_count * 8, pos + cp)
