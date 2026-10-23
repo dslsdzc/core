@@ -32,6 +32,8 @@ from pathlib import Path
 
 from ccr_v10_model import (
     BODY_START,
+    DEFAULT_FLAGS,
+    FLAG_PORTABLE,
     CcrV10Error,
     MAGIC,
     SEG_COUNT,
@@ -95,7 +97,7 @@ def test_header_and_canonical_segment_order():
     assert magic(data) == MAGIC == 0x31524343
     assert version(data) == VERSION == 0x000A0000
     assert seg_count(data) == SEG_COUNT == 9
-    assert flags(data) == 0
+    assert flags(data) == DEFAULT_FLAGS == FLAG_PORTABLE
 
     assert read_segment_table(data) == [
         (1, 124, 4),

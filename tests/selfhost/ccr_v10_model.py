@@ -46,6 +46,14 @@ SEG_TAGS = {
 }
 
 FLAGS_KNOWN_MASK = 0x7  # PORTABLE | SYSTEM | CONCURRENT
+FLAG_PORTABLE = 0x1
+FLAG_SYSTEM = 0x2
+FLAG_CONCURRENT = 0x4
+# Synthetic wire fixtures are program-shaped but contain no SYSTEM boundary.
+# The real loader requires exactly one of PORTABLE/SYSTEM; use PORTABLE as the
+# default so oracle images satisfy the same header gate. Callers rebuilding a
+# real .ccr must pass that file's flags explicitly (see test_ccr_v10_stream).
+DEFAULT_FLAGS = FLAG_PORTABLE
 
 
 class CcrV10Error(ValueError):
@@ -155,15 +163,24 @@ def segment(data, tag):
     raise CcrV10Error(f"segment tag not present: {tag}")
 
 
-def encode(segments):
+def encode(segments, flags=DEFAULT_FLAGS):
     """Serialize a complete tag->body mapping into a v10 `.ccr` image.
 
     All nine tags must be present; bodies may be empty. Missing, unknown, or
     non-bytes entries raise `CcrV10Error`. Output is canonical and deterministic
-    regardless of input dict order.
+    regardless of input dict order. `flags` must satisfy the loader's header
+    rule: exactly one of PORTABLE/SYSTEM, CONCURRENT only together with SYSTEM.
     """
     if not isinstance(segments, dict):
         raise CcrV10Error(f"segments must be a dict, got {type(segments).__name__}")
+    if flags & ~FLAGS_KNOWN_MASK:
+        raise CcrV10Error(f"reserved header flag bits set: 0x{flags:08X}")
+    if (flags & (FLAG_PORTABLE | FLAG_SYSTEM)) not in (FLAG_PORTABLE, FLAG_SYSTEM):
+        raise CcrV10Error(
+            f"header flags must set exactly one of PORTABLE/SYSTEM: 0x{flags:08X}"
+        )
+    if (flags & FLAG_CONCURRENT) and not (flags & FLAG_SYSTEM):
+        raise CcrV10Error("CONCURRENT requires SYSTEM")
 
     unknown = [tag for tag in segments if tag not in SEG_TAGS]
     if unknown:
@@ -182,7 +199,7 @@ def encode(segments):
             )
         bodies.append(bytes(body))
 
-    header = struct.pack("<IIII", MAGIC, VERSION, SEG_COUNT, 0)
+    header = struct.pack("<IIII", MAGIC, VERSION, SEG_COUNT, flags)
 
     table = bytearray()
     offset = BODY_START
@@ -228,6 +245,18 @@ def validate(data):
         raise CcrV10Error(
             f"reserved header flag bits set: 0x{found_flags:08X}"
         )
+    # Mirrors load_ccr: exactly one of PORTABLE/SYSTEM, and CONCURRENT implies
+    # SYSTEM. flags=0 is not a valid program description.
+    if (found_flags & (FLAG_PORTABLE | FLAG_SYSTEM)) not in (
+        FLAG_PORTABLE,
+        FLAG_SYSTEM,
+    ):
+        raise CcrV10Error(
+            f"header flags must set exactly one of PORTABLE/SYSTEM: "
+            f"0x{found_flags:08X}"
+        )
+    if (found_flags & FLAG_CONCURRENT) and not (found_flags & FLAG_SYSTEM):
+        raise CcrV10Error("CONCURRENT requires SYSTEM")
 
     table = read_segment_table(data)
 

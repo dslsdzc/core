@@ -42,13 +42,19 @@ from pathlib import Path
 from ccr_v10_model import (
     BODY_START,
     CcrV10Error,
+    FLAG_PORTABLE,
+    FLAG_SYSTEM,
     MAGIC,
     SEG_COUNT,
     SEG_TAGS,
     VERSION,
     encode,
+    flags,
+    magic,
     read_segment_table,
+    seg_count,
     validate,
+    version,
 )
 
 BASE = Path(__file__).resolve().parent.parent.parent
@@ -117,6 +123,19 @@ def _elf_result(data, tmp, name):
     return _run([COREARCH, ccr, "--elf", "--static", "-o", out]), out
 
 
+def _assert_header_valid(data, name):
+    """Every negative fixture must clear the header gate it is not testing."""
+    assert magic(data) == MAGIC, f"{name}: bad magic in fixture"
+    assert version(data) == VERSION, f"{name}: bad version in fixture"
+    assert seg_count(data) == SEG_COUNT, f"{name}: bad seg_count in fixture"
+    f = flags(data)
+    assert f & ~0x7 == 0, f"{name}: reserved header bits set: {f:#x}"
+    assert (f & 0x3) in (FLAG_PORTABLE, FLAG_SYSTEM), \
+        f"{name}: fixture does not set exactly one of PORTABLE/SYSTEM: {f:#x}"
+    assert not (f & 0x4) or (f & FLAG_SYSTEM), \
+        f"{name}: CONCURRENT without SYSTEM: {f:#x}"
+
+
 def _assert_rejected(data, tmp, name, wire_valid):
     """Assert rejection at the expected layer.
 
@@ -124,6 +143,7 @@ def _assert_rejected(data, tmp, name, wire_valid):
     contiguous ascending offsets, exact file length), so the rejection must come
     from body parsing. Otherwise the wire table check must reject before parse.
     """
+    _assert_header_valid(data, name)
     if wire_valid:
         validate(data)
     else:
@@ -153,14 +173,17 @@ def _tag_content_mismatch_image(data, order):
     bodies = _split(data)
     # Physical slot i (table tag i+1) carries the body of the i-th name in
     # `order`; sizes follow the body, so the table stays contiguous.
-    return encode({tag: bodies[TAG_OF[order[tag - 1]]] for tag in SEG_TAGS})
+    return encode(
+        {tag: bodies[TAG_OF[order[tag - 1]]] for tag in SEG_TAGS},
+        flags=flags(data),
+    )
 
 
 def _truncated_nod(data, cut=4):
     bodies = _split(data)
     assert len(bodies[TAG_OF["NOD"]]) > cut + 40
     bodies[TAG_OF["NOD"]] = bodies[TAG_OF["NOD"]][:-cut]
-    return encode(bodies)
+    return encode(bodies, flags=flags(data))
 
 
 def _permuted_offset_image(data):
@@ -183,7 +206,7 @@ def _permuted_offset_image(data):
         placed.append(bodies[tag])
         offset += len(bodies[tag])
 
-    header = struct.pack("<IIII", MAGIC, VERSION, SEG_COUNT, 0)
+    header = struct.pack("<IIII", MAGIC, VERSION, SEG_COUNT, flags(data))
     table = b"".join(
         struct.pack("<III", tag, offsets[tag], len(bodies[tag]))
         for tag in SEG_TAGS
