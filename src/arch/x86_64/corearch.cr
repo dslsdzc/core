@@ -300,6 +300,7 @@ fn corearch_main() -> int:
 
     if cli_parse() != 0:
         return 1
+    g_x86_big_enabled = cli_has("big-int")
     // Boot: select the instance from the flags, then query its declaration row at
     // each reject, table, and O2 gate.
     instance_decl_init()

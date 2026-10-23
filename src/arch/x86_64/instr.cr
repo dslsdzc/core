@@ -609,8 +609,33 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         cp = cp + e2_st(buf, pos+cp, 0, do2)
         return cp
 
+    if op == IR_CONST_BIG && d >= 0:
+        if g_x86_big_enabled != 0:
+            ro := g2_str_off(s1)
+            grow_rodataref(g_x86_rodataref_count + 1)
+            w64(g_x86_rodataref_pos, g_x86_rodataref_count * 8, pos + cp)
+            w64(g_x86_rodataref_ro, g_x86_rodataref_count * 8, ro)
+            g_x86_rodataref_count = g_x86_rodataref_count + 1
+            cp = cp + e2_lr(buf, pos+cp, 0)       // r10 = decimal string
+            cp = cp + e2_mov(buf, pos+cp, 7, 10)  // rdi = string
+            cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_from_dec"))
+            cp = cp + e2_st_var(buf, pos+cp, 0, d)  // rax -> dest
+        return cp
+
     if op == IR_CONST && d >= 0:
         do2 := g2_slot(d)
+        if ti == TI_INT && g_x86_big_enabled != 0:
+            if s1 >= BI_TAG_IMM_MIN && s1 <= BI_TAG_IMM_MAX:
+                cp = cp + e2_big_mov_imm64(buf, pos+cp, 10, s1 * 2)
+                cp = cp + e2_st_var(buf, pos+cp, 10, d)
+            else:
+                // The literal fits a machine word but not the immediate range.
+                // bi_from_word converts the raw word to a tagged value.
+                cp = cp + e2_big_mov_imm64(buf, pos+cp, 7, s1)
+                cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_from_word"))
+                cp = cp + e2_mov(buf, pos+cp, 10, 0)
+                cp = cp + e2_st_var(buf, pos+cp, 10, d)
+            return cp
         if ti == TI_STR:
             ro := g2_str_off(s1)
             // Record for post-emission patching (rodata position from Phase 3)
@@ -648,6 +673,10 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
 
     if op == IR_BINARY:
         do2 := g2_slot(d)
+        if g_x86_big_enabled != 0 && ti == TI_INT:
+            bz := emit_big_binary(buf, pos, d, s1, s2, s3)
+            if bz > 0:
+                return bz
         if ti == TI_DEX:
             // binary64 运算（SSE2 double，IEEE 754），apx 快路径标准答案实现
             // Both operands go through the global operand seam.
@@ -888,6 +917,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
 
     if op == IR_UNARY && d >= 0:
         do2 := g2_slot(d)
+        if g_x86_big_enabled != 0 && s3 == UOP_NEG:
+            return emit_big_neg(buf, pos, d, s1)
         cp = cp + e2_load_var(buf, pos+cp, 10, s1)
         if s3 == UOP_NEG:
             // neg r10: REX.WB + 0xF7 + /3

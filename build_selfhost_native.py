@@ -68,6 +68,8 @@ arch_x86_64_files = [
     'src/arch/x86_64/backend_arrays.cr',
     'src/arch/x86_64/regalloc.cr',
     'src/arch/x86_64/sizes.cr',
+    'src/arch/x86_64/int_rep.cr',
+    'src/runtime/bigint_blob.cr',
     'src/arch/x86_64/instr.cr',
     'src/arch/x86_64/tag2l.cr',
     'src/arch/x86_64/frame.cr',

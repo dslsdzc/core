@@ -76,6 +76,7 @@ fn corearch_main() -> int:
 
     if cli_parse() != 0:
         return 1
+    g_x86_big_enabled = cli_has("big-int")
     // This entry emits ELF only. Table and debug channels exist only in the
     // concat entry, so reject them explicitly instead of reporting an unknown
     // flag or ignoring a known flag.

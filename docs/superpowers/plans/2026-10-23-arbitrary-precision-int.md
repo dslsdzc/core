@@ -137,17 +137,18 @@ python3 tests/bootstrap/test_bigint_frontend.py
 2. 超出立即数范围的常量生成静态 BigInt 对象。
 3. 加减乘除、取模、比较生成立即数快路径和 BigInt 运行时调用。
 4. 指针、FFI、`w64/r64`、`@ptr_of`、`@str_of` 生成范围检查。
-5. `build_selfhost_native.py` 支持 `BIGINT=1`，输出 `build/corec-big` 和 `build/corearch-big`，不覆盖旧二进制。
-6. `test_bigint_pipeline.py` 用 Python 后端编译并运行一个 Core 程序，覆盖大整数字面量、算术、函数调用和打印。
+5. 编译器自身保持 raw；`build_selfhost_native.py` 不生成 tagged 的 `corec-big`。tagged Python 代码生成只用于用户程序测试。
+6. `test_bigint_pipeline.py` 用 Python 后端编译并运行一个 Core 程序，覆盖大整数字面量、算术、函数调用和返回；BigInt 运行时单独以 raw 语义编译并链接。
 
 ### 验收
 
 ```bash
-BIGINT=1 python3 build_selfhost_native.py
+python3 build_selfhost_native.py
 python3 tests/bootstrap/test_bigint_pipeline.py
+bash tools/baseline/canary_check.sh
 ```
 
-不设置 `BIGINT` 时旧构建仍通过。
+不设置任何开关时编译器仍以 raw 语义构建和运行。
 
 ## 任务 4：Core 前端和 `.ccr` 大常量
 
@@ -239,9 +240,11 @@ python3 tests/selfhost/test_bigint_literals.py
 ### 验收
 
 ```bash
-BIGINT=1 python3 build_selfhost_native.py
+python3 build_selfhost_native.py
 python3 tests/selfhost/test_bigint_arith.py
 ```
+
+`corearch --big-int` 只改变用户程序；不设置该旗标时旧的 raw 路径和 canary 保持不变。
 
 ## 任务 6：容器、调用和全局变量
 
@@ -376,8 +379,8 @@ cmp /tmp/corec2 /tmp/corec3
 ## 集成顺序
 
 1. 任务 1 只改运行时，不进入编译器。
-2. 任务 2 到 3 改 Python bootstrap 前端和后端，用 `BIGINT=1` 构建新编译器。
-3. 任务 4 到 8 用 `corec-big` 和 `corearch-big` 逐步替换 Core 前端、后端和解释器。
+2. 任务 2 到 3 改 Python bootstrap 前端和后端：编译器仍 raw，tagged 代码生成只用于用户程序测试。
+3. 任务 4 到 8 用 raw 的 `corec` 和 `corearch --big-int` 逐步替换 Core 前端、后端和解释器。
 4. 任务 9 才切换默认语义，删除旧路径，更新 canary。
 
 ## 不包含

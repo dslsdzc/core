@@ -101,7 +101,7 @@ T_EXTERN : int = 100  // extern "C" / foreign function declaration
 // has a function named check and a CLI subcommand named check.
 T_HASH : int = 101
 T_INTERP : int = 102  // interpolation hole token; lexeme is the hole text, iv carries part and closure flags
-T_BIGINT : int = 103  // arbitrary precision integer token; lexeme is canonical decimal text
+T_BIGINT : int = 113  // arbitrary precision integer token; lexeme is canonical decimal text
 
 // Layout tokens and the two colon meanings.
 // T_NEWLINE is emitted at the end of a logical line that contains a token. Blank

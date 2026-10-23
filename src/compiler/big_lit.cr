@@ -3,10 +3,16 @@
 // The compiler itself uses machine-word ints; this module only keeps the exact
 // decimal text of a literal that does not fit those ints.
 
+// The frontend's alloc() header stores the requested byte count; str_len()
+// subtracts one for the terminator.  The decimal builder therefore carries an
+// explicit length instead of calling str_len on a freshly allocated work buffer.
+g_big_dec_len : int, mut
+
 // Multiply a little-endian decimal string by base, then add digit.
-// Returns a new little-endian decimal string.
-fn dec_mul_add(dec: string, base: int, digit: int) -> string:
-    n := str_len(dec)
+// dec_len is the exact digit count.  The new digit count is stored in
+// g_big_dec_len.  Returns a new little-endian decimal buffer.
+fn dec_mul_add(dec: string, dec_len: int, base: int, digit: int) -> string:
+    n := dec_len
     out := alloc(n + 2)
     carry : ., mut = digit
     i : ., mut = 0
@@ -25,6 +31,7 @@ fn dec_mul_add(dec: string, base: int, digit: int) -> string:
         carry = carry / 10
         pos = pos + 1
     store8(out, pos, 0)
+    g_big_dec_len = pos
     return out
 
 // Convert an integer literal (decimal or 0x/0o/0b) to canonical decimal text.
@@ -45,6 +52,7 @@ fn big_lit_decimal(s: string) -> string:
             start = 2
     dec := alloc(2)
     store8(dec, 0, 48)
+    dec_len : ., mut = 1
     i : ., mut = start
     loop:
         if i >= sl:
@@ -60,10 +68,11 @@ fn big_lit_decimal(s: string) -> string:
             d = c - 55
         else:
             d = c - 87
-        dec = dec_mul_add(dec, base, d)
+        dec = dec_mul_add(dec, dec_len, base, d)
+        dec_len = g_big_dec_len
         i = i + 1
 
-    n := str_len(dec)
+    n := dec_len
     last : ., mut = n - 1
     loop:
         if last <= 0:

@@ -8,6 +8,7 @@ fn register_backend_flags():
     cli_flag("link", "l", "Comma-sep .so files, or 'auto' for ~/.core/lib/")
     cli_flag("output", "o", "Output path")
     cli_flag("opt-level", "O", "Optimization level (0-3, default=0)")
+    cli_flag_bool("big-int", "", "Arbitrary precision int semantics for user programs")
     cli_flag("table", "", "HIT table file (load & emit mapped ops through it)")
     cli_flag_debug("hit-events-file", "", "Debug: inject text event stream file")
     cli_flag_bool("dump-events", "", "Dump lowered HIT event stream + const pool")

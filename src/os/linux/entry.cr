@@ -114,6 +114,13 @@ fn emit_start(buf: string, pos: int) -> int:
     g_call_main_pos = cp
     cp = cp + e2_call(buf, cp, 0)  // call main
 
+    if g_x86_big_enabled != 0:
+        // main's return value is a tagged mathematical int.  Convert at the
+        // process boundary; sys_exit still takes a machine word.
+        cp = cp + e2_mov(buf, cp, 7, 0)  // rdi = rax
+        g_x86_big_exit_call_pos = cp
+        cp = cp + e2_call(buf, cp, 0)  // call bi_to_word_checked (patched later)
+
     // mov edi, eax
     e2_w8(buf, cp, 137)
     cp = cp + 1
@@ -141,6 +148,9 @@ fn emit_start_size() -> int:
     // g_current_arena init: lea(7) + rex+mov+modrm+imm32(7) = 14 bytes
     if gv_current_arena >= 0:
         sz = sz + 14
+    if g_x86_big_enabled != 0:
+        // mov rdi, rax (3) + call bi_to_word_checked (5)
+        sz = sz + 8
     // Constant global initializers: lea r10(7) + mov imm32(7) = 14 bytes,
     // or mov rax imm64 + mov [r10],rax = 20 bytes for large values.
     gi0s : ., mut = 0

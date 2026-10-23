@@ -29,6 +29,13 @@ BI_IMM_MIN : int = -4611686018427387904
 g_bi_error : int, mut
 g_bi_rem : int, mut
 
+fn bi_runtime_error(message: string):
+    // One shared runtime-error path for divide-by-zero and machine-word range
+    // failures.  Keep the text here so the ELF and interpreter can converge on
+    // the same contract later.
+    syscall3(1, 2, message, str_len(message))
+    syscall3(60, 1, 0, 0)
+
 fn bi_is_big(v: int) -> int:
     if v % 2 != 0:
         return 1
@@ -87,6 +94,14 @@ fn bi_normalize(p: string) -> string:
     return p
 
 fn bi_from_imm(x: int) -> string:
+    if x == -9223372036854775808:
+        // -2^63 = -8 * 2^60.  Negating INT64_MIN in a raw machine int
+        // would overflow back to itself.
+        p := bi_new(3)
+        bi_set_digit(p, 2, 8)
+        bi_set_sign(p, -1)
+        bi_set_len(p, 3)
+        return p
     p := bi_new(3)
     if x == 0:
         return p
@@ -493,6 +508,7 @@ fn bi_to_dec(a: int) -> string:
 
 fn bi_divmod(a: int, b: int) -> int:
     if b == 0:
+        bi_runtime_error("division by zero\n")
         g_bi_error = 1
         return 0
     if a == 0:
@@ -558,6 +574,7 @@ fn bi_to_word_checked(a: int) -> int:
     p := bi_as_big(a)
     n := bi_len_of(p)
     if n > 3:
+        bi_runtime_error("integer out of machine-word range\n")
         g_bi_error = 1
         return 0
     d0 := bi_digit(p, 0)
@@ -568,6 +585,7 @@ fn bi_to_word_checked(a: int) -> int:
     if n > 2:
         d2 = bi_digit(p, 2)
     if d2 > 3:
+        bi_runtime_error("integer out of machine-word range\n")
         g_bi_error = 1
         return 0
     x := d0 + d1 * BI_BASE + d2 * BI_BASE2
@@ -580,6 +598,7 @@ fn bi_to_uword_checked(a: int) -> int:
     if g_bi_error != 0:
         return 0
     if x < 0:
+        bi_runtime_error("integer out of unsigned machine-word range\n")
         g_bi_error = 1
         return 0
     return x

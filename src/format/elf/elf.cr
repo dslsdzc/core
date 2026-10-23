@@ -1490,6 +1490,7 @@ g_alloc_gl_jmp_pos : int, mut = -1  // Part 1 jl .Lglobal displacement position 
 
 // ── Main ELF generation ──
 fn elf_gen(buf: string) -> int:
+    g_x86_big_exit_call_pos = -1
     // Mark global variables for RIP-relative addressing
     gi := 0
     loop:
@@ -2076,6 +2077,69 @@ fn elf_gen(buf: string) -> int:
         sched_reg_one("m_start_workers", 0, cp + 15)
         cp = cp + emit_m_start_workers(buf, cp)
 
+    // ── BigInt runtime blob (--big-int) ──
+    // The generated blob is raw-core machine code plus its data.  It is placed
+    // in the code segment; --big-int marks that segment writable so the runtime's
+    // g_bi_error/g_bi_rem slots work.  All intra-blob relocations were resolved
+    // by tools/gen_bigint_blob.py; the only external calls are the four alloc
+    // sites, which are patched to the allocator emitted above.
+    if g_x86_big_enabled != 0:
+        blob := bigint_blob_bytes()
+        blob_start := cp
+        g_x86_big_blob_start = blob_start
+        bi : ., mut = 0
+        loop:
+            if bi >= BIGINT_BLOB_SIZE:
+                break
+            store8(buf, blob_start + bi, load8(blob, bi))
+            bi = bi + 1
+        cp = cp + BIGINT_BLOB_SIZE
+
+        // Register every bi_* entry so IR_CALL placeholders and the arithmetic
+        // cold paths resolve through the normal func_offsets fallback.
+        sci : ., mut = 0
+        loop:
+            if sci >= bigint_blob_symbol_count():
+                break
+            sym_name := bigint_blob_symbol_name(sci)
+            sym_off := bigint_blob_symbol(sym_name)
+            if sym_off >= 0:
+                grow_func_offsets(g_x86_func_off_count * 2 + 2)
+                w64(g_x86_func_offsets, g_x86_func_off_count * 16,
+                    str_intern(sym_name))
+                w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8,
+                    blob_start + sym_off - 176)
+                g_x86_func_off_count = g_x86_func_off_count + 1
+            sci = sci + 1
+
+        aci : ., mut = 0
+        loop:
+            if aci >= bigint_blob_alloc_count():
+                break
+            aoff := bigint_blob_alloc_off(aci)
+            call_pos := blob_start + aoff
+            // gen_bigint_blob records the relocation offset, i.e. the first byte
+            // of the call's rel32 immediate.  The call opcode is at call_pos-1.
+            w32(buf, call_pos, alloc_start - (call_pos + 4))
+            aci = aci + 1
+
+        // _start's exit conversion call was emitted before the function list
+        // reset the general call-patch table.  Resolve it explicitly now that the
+        // blob's bi_to_word_checked entry is registered.
+        if g_x86_big_exit_call_pos >= 0:
+            exi : ., mut = 0
+            loop:
+                if exi >= g_x86_func_off_count:
+                    break
+                if str_eq(istr_get(r64(g_x86_func_offsets, exi * 16)),
+                    "bi_to_word_checked") != 0:
+                    ex_off := r64(g_x86_func_offsets, exi * 16 + 8)
+                    ex_target := 176 + ex_off
+                    w32(buf, g_x86_big_exit_call_pos + 1,
+                        ex_target - (g_x86_big_exit_call_pos + 5))
+                    break
+                exi = exi + 1
+
     // ── Patch forward calls using actual cp positions ──
     // Phase 3 stored cp at start of each function in g_x86_func_cp
     // Must run after ALL code emitted (incl alloc + sched_call) so func_offsets are final
@@ -2379,6 +2443,11 @@ fn elf_gen(buf: string) -> int:
     total_sz := cp
     // Use actual total_sz as code_end so code segment covers all emitted content
     elf2_hdr(buf, total_sz, total_sz)
+    if g_x86_big_enabled != 0:
+        // The BigInt blob carries a few writable runtime words in the code
+        // segment.  Mark that PT_LOAD RWX instead of adding another segment;
+        // user code itself remains the only executable content.
+        w32(buf, EHDR_SIZE + 4, 7)
     // Override entry point to bss_init (which zeroes heap then jumps to _start)
     w64(buf, E_ENTRY, TEXT_BASE + bss_init_cp)
     // Patch data segment VA to match bss_va (page after code+rodata)

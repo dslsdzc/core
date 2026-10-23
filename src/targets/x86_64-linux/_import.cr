@@ -29,6 +29,8 @@ import ent_kernel
 // build_linear_schedule in regalloc.cr.
 import regalloc
 import sizes
+import int_rep
+import bigint_blob
 import instr
 // Architecture tag-table owner: mw_setup_tags and the mw encoders used by elf.cr.
 // tag2l and frame.cr reference each other; pf_epilogue calls e2_mw_*, and tag2l
