@@ -113,15 +113,19 @@ OFF_DFE_NEXT : int = 16
 OFF_DFE_KIND : int = 24 // 0=data (def-use), 1=state (ordering/termination)
 
 // Entry record, filled by compute_entries. It splits variables into versions at
-// definition points. The in-memory layout is identical to the .ccr on-disk layout:
-// 24 bytes, six 4-byte fields, read and written little-endian.
-// var_idx u32, def_instr i32, live_start i32, live_end i32, home i32, flags u32.
+// definition points. The in-memory record is 24 bytes, six 4-byte fields, read
+// and written little-endian. It is NOT the v10 wire record: on disk ENT is also
+// 24 bytes but stores `version` in the slot where memory keeps the runtime-only
+// allocator home. var_idx u32, def_instr i32, live_start i32, live_end i32,
+// runtime_home i32, flags u32.
 ESZ_ENTRY   : int = 24
 OFF_ENTRY_VAR   : int = 0    // 全局 IR 变量索引
 OFF_ENTRY_DEF   : int = 4    // 定值指令全局索引（-1 = 无定值）
 OFF_ENTRY_LS    : int = 8    // 版本存在区间起点（全局指令序）
 OFF_ENTRY_LE    : int = 12   // 版本存在区间终点（全局指令序）
-OFF_ENTRY_HOME  : int = 16   // 分配槽位（-1 = 未分配）
+// Runtime/instance-only allocator slot (-1 = unassigned). This is never
+// serialized into `.ccr`; v10 ENT has no home field.
+OFF_ENTRY_RUNTIME_HOME : int = 16
 OFF_ENTRY_FLAGS : int = 20   // 位 0 预留：无配方（条款 4b）
 
 // Subgraph entry (48 bytes each)

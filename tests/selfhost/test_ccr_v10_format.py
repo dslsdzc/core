@@ -131,6 +131,8 @@ def test_data_starts_at_124_and_last_end_is_file_length():
 
 
 def test_rejects_v9_version():
+    # HISTORICAL v9 fixture: 589825 is 0x00090001 (v9.1). Kept only to prove the
+    # v10 version gate rejects the old wire format outright.
     data = encode(_sample_segments())
     assert 589825 == 0x00090001  # v9.1
     with raises(CcrV10Error):
@@ -789,6 +791,8 @@ def test_corearch_accepts_v10_and_rejects_v9():
         assert r.returncode == 0, f"corearch rejected v10: {r.stdout}\n{r.stderr}"
         assert out.exists()
 
+        # HISTORICAL v9 fixture: 589825 (v9.1) must stay rejected; it is not a
+        # supported conversion input.
         # A structurally coherent v9 image (8 segments, version 589825) must be
         # rejected outright, not read as a v10 file with missing segments.
         tags = list(range(1, 9))
@@ -949,6 +953,124 @@ def test_runtime_bound_unresolvable_rejected():
         r = _run([COREARCH, bad, "--elf", "--static", "-o", tmp / "rtbound.elf"])
         assert r.returncode != 0, "unresolvable runtime bound emitted a null-only check"
         assert "invalid" in (r.stdout + r.stderr)
+
+
+# ---------------------------------------------------------------------------
+# residual v9 surface / runtime-only entry home / raw ABI boundary
+# ---------------------------------------------------------------------------
+
+
+def test_ccr_io_has_no_v9_wire_surface():
+    """The v10 reader/writer must not keep a v9 wire constant on any path.
+
+    Historical v9 bytes are only valid as negative fixtures in the test suite;
+    the production serializer has no v9 branch and no stale v9 version literal.
+    """
+    ccr_io = (REPO_ROOT / "src/compiler/ccr_io.cr").read_text(encoding="utf-8")
+    code = _strip_crystal_comments(ccr_io)
+    assert "589825" not in code, "ccr_io still carries the v9 wire version"
+    assert "589825" not in ccr_io, "ccr_io still documents the v9 wire version"
+    assert not re.search(r"ESZ_ENTRY_DISK\s*:\s*int\s*=\s*28", code), (
+        "ccr_io still defines the v9 28B ENT disk record"
+    )
+
+
+def test_v10_ccr_io_never_reads_or_writes_home():
+    """ENT.home was a v9 wire field. v10 stores 24B without it.
+
+    The in-memory record keeps a runtime/instance slot, but the serializer must
+    not consume a byte for it and no accessor may present it as a wire field.
+    """
+    ccr_io = (REPO_ROOT / "src/compiler/ccr_io.cr").read_text(encoding="utf-8")
+    code = _strip_crystal_comments(ccr_io)
+    assert "ccr_ent_home" not in code, "stale home accessor still present"
+
+    writer = _fn_body(code, "save_ccr")
+    assert "HOME" not in writer.upper(), "v10 writer still touches the home slot"
+
+    loader = _fn_body(code, "load_ccr")
+    home_lines = [ln for ln in loader.splitlines() if "HOME" in ln.upper()]
+    # The only allowed mention is the runtime-only slot reset to "unassigned".
+    assert len(home_lines) <= 1, f"v10 loader has home wire reads: {home_lines}"
+    for line in home_lines:
+        assert "-1" in line, f"v10 loader reads home from disk: {line}"
+
+
+def test_entry_home_is_runtime_only():
+    """The entry slot survives only as an instance-side allocator field."""
+    dyn = (REPO_ROOT / "src/compiler/dyn_arr.cr").read_text(encoding="utf-8")
+    dyn_code = _strip_crystal_comments(dyn)
+    assert "OFF_ENTRY_RUNTIME_HOME : int = 16" in dyn_code, (
+        "runtime entry-home slot missing or renamed unexpectedly"
+    )
+    assert not re.search(r"\bOFF_ENTRY_HOME\b", dyn_code), (
+        "dyn_arr still exposes the wire-shaped OFF_ENTRY_HOME name"
+    )
+    compact = " ".join(dyn.replace("//", " ").split()).lower()
+    assert "never serialized into `.ccr`" in compact, (
+        "dyn_arr does not mark the home slot as runtime/instance only"
+    )
+
+    for path in (
+        "src/compiler/ccr_io.cr",
+        "src/lattice/ent_kernel.cr",
+        "src/arch/x86_64/regalloc.cr",
+    ):
+        src = _strip_crystal_comments(
+            (REPO_ROOT / path).read_text(encoding="utf-8")
+        )
+        assert not re.search(r"\bOFF_ENTRY_HOME\b", src), (
+            f"{path} still uses the wire-shaped OFF_ENTRY_HOME name"
+        )
+
+    globals_src = (REPO_ROOT / "src/compiler/globals.cr").read_text(encoding="utf-8")
+    compact_globals = " ".join(globals_src.replace("//", " ").split()).lower()
+    assert "never serialized into `.ccr`" in compact_globals, (
+        "globals.cr does not mark the home slot as runtime/instance only"
+    )
+
+
+# Raw byte builtins are a SYSTEM/runtime ABI, not ordinary language API. They
+# stay because the stdlib scheduler/arena still uses them; the fixed-width
+# aliases w64/r64 are retired.
+RAW_RUNTIME_BUILTINS = (
+    "cell_store",
+    "cell_load",
+    "load8",
+    "store8",
+    "load64",
+    "w32",
+    "load_str_ptr",
+    "store_str_ptr",
+    "_dyncpy",
+)
+
+
+def test_frontend_registers_no_w64_r64():
+    src = (REPO_ROOT / "src/arch/x86_64/x86_frontend_abi.cr").read_text(
+        encoding="utf-8"
+    )
+    code = _strip_crystal_comments(src)
+    for retired in ("w64", "r64"):
+        assert f'prelude_builtin_add("{retired}"' not in code, (
+            f"retired raw builtin {retired} is still registered"
+        )
+
+
+def test_frontend_raw_builtins_are_system_runtime_abi():
+    src = (REPO_ROOT / "src/arch/x86_64/x86_frontend_abi.cr").read_text(
+        encoding="utf-8"
+    )
+    code = _strip_crystal_comments(src)
+    for name in RAW_RUNTIME_BUILTINS:
+        assert f'prelude_builtin_add("{name}"' in code, f"missing raw builtin {name}"
+
+    marker = src[: src.index("fn x86_frontend_builtin_register")]
+    assert "SYSTEM" in marker, "raw builtins are not marked as SYSTEM ABI"
+    lowered = marker.lower()
+    assert "raw" in lowered and "runtime" in lowered, (
+        "raw builtins lack the explicit runtime/raw boundary note"
+    )
 
 
 # ---------------------------------------------------------------------------

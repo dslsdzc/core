@@ -12,7 +12,7 @@ Task 1（机制面）：
   ③ TYPE(2)/IFACE(3) **皆为内容面**（R2 P4 Task 2/3 起——空壳期已退役）；
   ④ loader 负分支（byte mutation，逐个打；全部要求 corearch rc≠0 且**不得
      静默当空表**——三态纪律 C.5-3）：
-       · version := 7/8/589825 → 拒（v10 版本闸整类拒收）；
+       · version := 7/8/589825（589825 = 历史 v9.1 负向 fixture）→ 拒（v10 版本闸整类拒收）；
        · **结构性合法的 v7（6 段）文件整体重建** → 拒（D10 的正面证据：
          非「字节破烂」被拒，而是合法旧文件被版本闸拒）；
        · seg_cnt := 6（末段 size 扩到 EOF——前闸全过）→ 拒（D11 必备集）；
@@ -2155,6 +2155,7 @@ def test_p6t3_version_gate_rejects_v8():
         corec_ccr(src, ccr_path)
         arch_elf(ccr_path, out)                      # v10 正控（非平凡性）
         data = bytearray(read_ccr(ccr_path))
+        # HISTORICAL v9 fixture: 589825 (v9.1) must be rejected by the v10 gate.
         struct.pack_into('<I', data, 4, 589825)      # version := v9.1
         _write(bad, bytes(data))
         arch_elf(bad, out, must_fail=True)           # 拒收（不得静默当空表）

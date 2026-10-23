@@ -212,8 +212,8 @@ fn ent_live_start(e: int) -> int:
     return buf_read_i32(g_ir_entries, ent_off(e) + OFF_ENTRY_LS)
 fn ent_live_end(e: int) -> int:
     return buf_read_i32(g_ir_entries, ent_off(e) + OFF_ENTRY_LE)
-fn ent_home(e: int) -> int:
-    return buf_read_i32(g_ir_entries, ent_off(e) + OFF_ENTRY_HOME)
+fn ent_runtime_home(e: int) -> int:
+    return buf_read_i32(g_ir_entries, ent_off(e) + OFF_ENTRY_RUNTIME_HOME)
 fn ent_flags(e: int) -> int:
     return buf_read_i32(g_ir_entries, ent_off(e) + OFF_ENTRY_FLAGS)
 
@@ -290,7 +290,7 @@ fn compute_entries(func_i: int) -> int:
                 w32(g_ir_entries, eo + OFF_ENTRY_DEF, inst)
                 w32(g_ir_entries, eo + OFF_ENTRY_LS, inst)
                 w32(g_ir_entries, eo + OFF_ENTRY_LE, last_global)
-                w32(g_ir_entries, eo + OFF_ENTRY_HOME, -1)
+                w32(g_ir_entries, eo + OFF_ENTRY_RUNTIME_HOME, -1)
                 w32(g_ir_entries, eo + OFF_ENTRY_FLAGS, 0)
                 cell_store(prev, lv * 8, g_entry_count)
                 g_entry_count = g_entry_count + 1
@@ -312,7 +312,7 @@ fn compute_entries(func_i: int) -> int:
                     w32(g_ir_entries, eo + OFF_ENTRY_DEF, -1)
                     w32(g_ir_entries, eo + OFF_ENTRY_LS, ist + ff)
                     w32(g_ir_entries, eo + OFF_ENTRY_LE, ist + ll)
-                    w32(g_ir_entries, eo + OFF_ENTRY_HOME, -1)
+                    w32(g_ir_entries, eo + OFF_ENTRY_RUNTIME_HOME, -1)
                     w32(g_ir_entries, eo + OFF_ENTRY_FLAGS, 0)
                     g_entry_count = g_entry_count + 1
                     cnt = cnt + 1
@@ -448,7 +448,7 @@ fn dump_entries_summary():
             print("..")
             print(int_str(ent_live_end(e)))
             print(" home ")
-            print(int_str(ent_home(e)))
+            print(int_str(ent_runtime_home(e)))
             print(" flags ")
             println(int_str(ent_flags(e)))
             ei = ei + 1
@@ -518,14 +518,14 @@ fn coexist_home_conflicts(func_i: int) -> int:
         if ei >= ec:
             break
         e1 := es + ei
-        h1 := ent_home(e1)
+        h1 := ent_runtime_home(e1)
         if h1 >= 0:
             ej : ., mut = ei + 1
             loop:
                 if ej >= ec:
                     break
                 e2 := es + ej
-                if ent_home(e2) == h1:
+                if ent_runtime_home(e2) == h1:
                     if entries_coexist(func_i, e1, e2) != 0:
                         conflicts = conflicts + 1
                 ej = ej + 1
@@ -903,10 +903,11 @@ fn verify_regalloc_consistency(func_i: int) -> int:
 
     // Rule 1 has two passes:
     //   1. Registry pass: entries with kern_loc_of(e) >= 0 grouped by location.
-    //   2. Home pass: entries with ent_home >= 0 grouped by home value, skipping
-    //      -1.
+    //   2. Runtime-home pass: entries with ent_runtime_home >= 0 grouped by the
+    //      instance-side slot value, skipping -1.
     // The registry pass runs first. Entries already registered are excluded from
-    // the home pass; an entry with both is not produced by the current paths.
+    // the runtime-home pass; an entry with both is not produced by the current
+    // paths.
     reg_cnt : ., mut = 0
     home_cnt : ., mut = 0
     ei : ., mut = 0
@@ -917,7 +918,7 @@ fn verify_regalloc_consistency(func_i: int) -> int:
         if ent_live_start(e) >= 0 && ent_live_end(e) >= 0:
             if kern_loc_of(e) >= 0:
                 reg_cnt = reg_cnt + 1
-            else if ent_home(e) >= 0:
+            else if ent_runtime_home(e) >= 0:
                 home_cnt = home_cnt + 1
         ei = ei + 1
     rule1_viol : ., mut = 0
@@ -938,8 +939,8 @@ fn verify_regalloc_consistency(func_i: int) -> int:
                     ci = ci + 1
             ei = ei + 1
         rule1_viol = rl_rule1_sweep(func_i, rec, reg_cnt, 0)
-    // Home pass. cap_base carries the number already printed so RPT_MAX applies
-    // across both passes.
+    // Runtime-home pass. cap_base carries the number already printed so RPT_MAX
+    // applies across both passes.
     if home_cnt > 1:
         rec : string, mut = alloc(home_cnt * 16)
         ci : ., mut = 0
@@ -949,7 +950,7 @@ fn verify_regalloc_consistency(func_i: int) -> int:
                 break
             e := es + ei
             if ent_live_start(e) >= 0 && ent_live_end(e) >= 0:
-                h := ent_home(e)
+                h := ent_runtime_home(e)
                 if h >= 0:
                     cell_store(rec, ci * 16, h)
                     cell_store(rec, ci * 16 + 8, e)

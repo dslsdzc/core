@@ -1095,6 +1095,7 @@ def test_v7_loader_rejects_version_ne_7():
         pass
     try:
         corec_ccr(src, ccr_path)
+        # HISTORICAL v9 fixture: 589825 (v9.1) is kept only as a rejection case.
         for bad_ver in (589825, 8, 7, 6, 5):
             data = bytearray(read_ccr(ccr_path))
             struct.pack_into('<I', data, 4, bad_ver)  # patch version

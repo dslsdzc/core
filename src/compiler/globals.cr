@@ -347,7 +347,8 @@ g_live_range_cap : int, mut
 //   live_start(8) / live_end(12) i32: version live range as a closed interval in
 //                 global instruction order, [def_j, min(def_{j+1}-1, last_ref)].
 //                 Without a defining entry, [first_ref, last_ref].
-//   home(16)      i32: slot assigned by the allocator, or -1 if unassigned.
+//   runtime_home(16) i32: allocator/instance slot, or -1 if unassigned. Never
+//                 serialized into `.ccr`; v10 ENT has no home field.
 //   flags(20)     u32: 0; bit 0 is reserved.
 // Each function has one segment, appended in func_i order. Segment bounds are in
 // g_ir_func_entry_start and g_ir_func_entry_count (8 bytes each).

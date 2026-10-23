@@ -2,7 +2,8 @@
 // .ccr binary serialization, the interface between corec and corearch.
 //
 // Version 10 only. The loader checks version == CCR_V10_VERSION (0x000A0000)
-// and rejects v9 (589825) and every other version; there is no conversion path.
+// and rejects the historical v9 wire id and every other version; there is no
+// conversion path. v9 bytes survive only as negative fixtures in the test suite.
 // The format has 9 segments in canonical order:
 // STR, TYPE, IFACE, SYM, NOD, ENT, REG, EDG, CASE (tags 1..9).
 //
@@ -525,8 +526,6 @@ fn ccr_ent_ls(e: int) -> int:
     return buf_read_i32(g_ir_entries, e * ESZ_ENTRY + OFF_ENTRY_LS)
 fn ccr_ent_le(e: int) -> int:
     return buf_read_i32(g_ir_entries, e * ESZ_ENTRY + OFF_ENTRY_LE)
-fn ccr_ent_home(e: int) -> int:
-    return buf_read_i32(g_ir_entries, e * ESZ_ENTRY + OFF_ENTRY_HOME)
 fn ccr_ent_flags(e: int) -> int:
     return buf_read_i32(g_ir_entries, e * ESZ_ENTRY + OFF_ENTRY_FLAGS)
 
@@ -1021,7 +1020,7 @@ fn save_ccr(path: string) -> int:
         buf_write_u32(buf, pos, ele + 1)
         pos = pos + 4 // live_end（半开 = 内存闭区间 +1）
         buf_write_u32(buf, pos, efl)
-        pos = pos + 4     // flags；home 不属于 v10
+        pos = pos + 4     // flags（ENT 记录到此结束；home 不在 v10 盘面）
         ej = ej + 1
 
     // === REG: regions ===
@@ -1149,9 +1148,10 @@ fn inject_var_shift() -> int:
     return 0
 
 // Load: v10 only. Validate the header and canonical segment table, reject
-// out-of-range segments, and reject every version other than 0x000A0000 (v9 is
-// rejected outright). The table has 9 segments in canonical order. All nine are
-// required; ENT may carry an empty record table but its 4B count is present.
+// out-of-range segments, and reject every version other than 0x000A0000 (the
+// historical v9 wire id is rejected outright). The table has 9 segments in
+// canonical order. All nine are required; ENT may carry an empty record table
+// but its 4B count is present.
 // Loader output is semantic objects plus guards. The linear NOD-to-g_ir_instrs
 // rebuild is outside this file: build_linear_schedule in regalloc.cr is called by
 // corearch.cr or src/targets/x86_64/linux/elf/main.cr after a successful load.
@@ -2028,8 +2028,8 @@ fn load_ccr(data: string, fsize: int) -> int:
         pos = pos + 4  // type_id（TYPE row；-1 = 无）
         fl2 := buf_read_u32(data, pos)
         pos = pos + 4  // flags（语义特性；非目标事实）
-        // src2/src3 may not carry v9 target facts. The writer normalizes them;
-        // the loader rejects old/foreign files instead of silently accepting.
+        // src2/src3 may not carry legacy v9 target facts. The writer normalizes
+        // them; the loader rejects old/foreign files instead of silently accepting.
         if opcode == IR_ALLOC_ARRAY:
             if s2 != 0 || s3 != 0:
                 return -1
@@ -2073,8 +2073,9 @@ fn load_ccr(data: string, fsize: int) -> int:
 
     // === ENT: entries（24B each -> 内存 24B 表）===
     // 盘上半开 live_end -> 内存闭区间 −1；version 字段不入内存（组内序可推）。
-    // v10 has no home field. The in-memory slot stays -1 until Task 8 retires it;
-    // the loader never reads that slot from disk.
+    // v10 has no home field. OFF_ENTRY_RUNTIME_HOME is an instance-side
+    // allocator slot only: the loader initializes it to -1 and never consumes a
+    // disk byte for it.
     if have6 != 0:
         if !ccr_has_bytes(pos, 4, seg_end6):
             return -1
@@ -2124,7 +2125,7 @@ fn load_ccr(data: string, fsize: int) -> int:
             cell_store32(g_ir_entries, mo2 + OFF_ENTRY_DEF, ed)
             cell_store32(g_ir_entries, mo2 + OFF_ENTRY_LS, els)
             cell_store32(g_ir_entries, mo2 + OFF_ENTRY_LE, ele - 1)
-            cell_store32(g_ir_entries, mo2 + OFF_ENTRY_HOME, -1)
+            cell_store32(g_ir_entries, mo2 + OFF_ENTRY_RUNTIME_HOME, -1)
             cell_store32(g_ir_entries, mo2 + OFF_ENTRY_FLAGS, efl)
             g_entry_count = eii + 1
             eii = eii + 1

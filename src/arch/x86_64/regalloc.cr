@@ -56,8 +56,8 @@ fn try_inject_home_conflict(func_i: int) -> int:
             if v1 != v2 && entries_coexist(func_i, e1, e2) != 0:
                 meta_remove_var(v1)
                 meta_remove_var(v2)
-                w32(g_ir_entries, e1 * ESZ_ENTRY + OFF_ENTRY_HOME, 7)
-                w32(g_ir_entries, e2 * ESZ_ENTRY + OFF_ENTRY_HOME, 7)
+                w32(g_ir_entries, e1 * ESZ_ENTRY + OFF_ENTRY_RUNTIME_HOME, 7)
+                w32(g_ir_entries, e2 * ESZ_ENTRY + OFF_ENTRY_RUNTIME_HOME, 7)
                 return 1
             e2i = e2i + 1
         e1i = e1i + 1
