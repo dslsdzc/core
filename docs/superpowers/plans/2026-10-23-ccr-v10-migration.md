@@ -493,25 +493,34 @@ jj commit -m "dist: add ccrb bundle with optional coi sidecar"
 
 ---
 
-### Task 8: 删除残留旧面并重锁
+### Task 8: 删除残留 v9 面并重锁
 
 **Files:**
 - Modify: `src/arch/x86_64/x86_frontend_abi.cr`
 - Modify: `src/compiler/ccr_io.cr`
 - Modify: `src/compiler/globals.cr`
+- Modify: `src/compiler/dyn_arr.cr`
 - Modify: `docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md`（标注 v9 历史）
-- Modify: `tools/baseline/canary_values.tsv`
+- Modify: `tools/baseline/canary_values.tsv`（仅在字节变化时）
+- Test: `tests/selfhost/test_ccr_v10_format.py`
 
 **Interfaces:**
 - Consumes: Task 4 至 7 的 v10 路径。
 - Produces:
-  - 普通语言 API 不再注册 `cell_store/cell_load/load8/store8/load64/w32/load_str_ptr/store_str_ptr/_dyncpy` 中的机器名。
-  - v9 常量、`OFF_ENTRY_HOME`、v9 测试常量全部删除或标为历史 fixture。
-  - canary 只保留 v10 值。
+  - v9 wire 常量 `589825`、`ESZ_ENTRY_DISK : int = 28`、v9 段 tag/顺序在源码中不再作为有效路径出现；负向 fixture 可保留 `589825`，但必须标注为历史 fixture。
+  - `ccr_io.cr` 的 v10 写侧/读侧不再写/读 `home`；`OFF_ENTRY_HOME` 如仍在 corearch 实例侧使用，必须改名为 runtime/instance 字段并注释“不进入 `.ccr`”。
+  - `x86_frontend_abi.cr` 不再注册 `w64/r64`（已移除）；现有 `cell_*`/`load8`/`store8`/`load64`/`w32`/`load_str_ptr`/`store_str_ptr`/`_dyncpy` 暂作为 `SYSTEM` runtime ABI 保留，因为 stdlib scheduler/arena 仍依赖它们。新增注释说明这是 SYSTEM/raw 边界，不是普通语言 API。
+  - canary 只保留 v10 值；ELF canary 保持 `826d74cf...`。
+
+**Ruling:** “普通语言 API 彻底删除 fixed-width/raw 内建”需要先实现 `Bytes` 公共层并迁移 stdlib，属于独立任务；本任务不做半删。保留的 raw 内建必须显式标为 `SYSTEM`/runtime ABI，并让使用它们的程序在 header 中标 SYSTEM。
 
 - [ ] **Step 1: 写失败测试**
 
-静态断言 `src/arch/x86_64/x86_frontend_abi.cr` 不出现 fixed-width builtin 名；`src/compiler/ccr_io.cr` 不出现 `589825`、`ESZ_ENTRY_DISK : int = 28`、`home` 写入。
+静态断言：
+- `src/compiler/ccr_io.cr` 不出现有效路径的 `589825` 或 `ESZ_ENTRY_DISK : int = 28`；历史负向 fixture 中的 `589825` 豁免。
+- `src/compiler/ccr_io.cr` 的 v10 writer/reader 不写/读 `home`。
+- `src/arch/x86_64/x86_frontend_abi.cr` 不注册 `w64`/`r64`；保留的 raw 内建必须带 `SYSTEM` 注释。
+- `test_ccr_v10_format.py` 继续断言 v10 header/段序/ENT 24B/CASE。
 
 - [ ] **Step 2: 删除并运行**
 
