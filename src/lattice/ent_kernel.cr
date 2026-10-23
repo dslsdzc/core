@@ -1035,6 +1035,19 @@ fn nod_tk(n: int) -> int:
 // 0xFFFFFFFF on disk and has different semantics; do not mix the read types.
 fn nod_item(n: int) -> int:
     return buf_read_i32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_ITEM)
+// Semantic type-id accessor (v10 NOD `type_id` side data). The buffer is filled
+// by ccr_types.cr:ccr_nod_type_populate during the corec save path; the v9 wire
+// still stores `item` at +28 and has no type_id field, so the read side leaves
+// this buffer empty until the v10 cutover. >= 0 is a TYPE row; -1 means none.
+// It reads i32 so -1 stays -1, but the sign convention differs from the code
+// slot's 0xFFFFFFFF, so do not mix the read types.
+fn nod_type_id(n: int) -> int:
+    return buf_read_i32(g_ccr_nod_type, n * 4)
+// Semantic node flags companion word. Constant 0 in v9: no semantic node feature
+// is classified yet and the wire has no flags field. Task 4 fills this from
+// classified aux codes; callers must not read it as a width or byte offset.
+fn nod_type_flags(n: int) -> int:
+    return 0
 fn nod_edge_first(n: int) -> int:
     return cell_load(g_v7_nod_meta, n * ESZ_NOD_META)
 fn nod_edge_count(n: int) -> int:

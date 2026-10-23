@@ -319,7 +319,12 @@ fn ccr_seg_prepare_save() -> int:
     // bodies: it only queries the bridge cache, and all rows are already built, so
     // it adds no terms and does not change segment bytes. Failure uses the same
     // type-face gate.
-    return ccr_nod_item_populate()
+    if ccr_nod_item_populate() != 0:
+        return -1
+    // Derive the v10 NOD semantic type ids from the same save-time type state.
+    // This is side data for the v10 cutover: the v9 NOD wire keeps `item` at +28
+    // and does not gain a type_id field here.
+    return ccr_nod_type_populate()
 
 // Fill NOD term indexes. For each node in global instruction order, look up the
 // file-space term index from the stored derived code.
@@ -346,9 +351,36 @@ fn ccr_nod_item_populate() -> int:
         ii = ii + 1
     return 0
 
+// Fill NOD semantic type ids into the v10 side buffer. For each node in global
+// instruction order, apply the fixed rule:
+//   sh_tk_face_of_code(op, tk) == 0 -> type_id = tk   (tk is a TYPE row)
+//   otherwise                        -> type_id = -1
+// The companion flags word is constant 0 in this task; Task 4 classifies semantic
+// node features into it.
+// This is a pure query/derivation: it does not mutate the type tables, the term
+// table, or g_tk_face_fail, and it does not change the v9 wire. The 40B NOD record
+// still carries `item` at +28 for diagnostics and for the current v9 loader.
+fn ccr_nod_type_populate() -> int:
+    n := g_ir_instr_count
+    g_ccr_nod_type = alloc((n + 8) * 4)
+    g_ccr_nod_type_count = n
+    ii : ., mut = 0
+    loop:
+        if ii >= n:
+            break
+        tk := iri_tk(ii)
+        tid : ., mut = -1
+        if sh_tk_face_of_code(iri_op(ii), tk) == 0:
+            tid = tk
+        cell_store32(g_ccr_nod_type, ii * 4, tid)
+        ii = ii + 1
+    return 0
+
 // --dump-types test channel. The shared surface dump in ccr_io.cr uses the same
 // print path as corearch, so line formats match across processes. This corec-only
-// section adds the row-to-term mapping; tests split on "rowterms:".
+// section adds the row-to-term mapping and the NOD semantic type-id side buffer
+// (v10 preparation; the v9 wire does not carry it); tests split on "rowterms:"
+// and "nodtypes:".
 fn ccr_type_selftest_dump():
     ccr_type_surface_dump()
     print("rowterms: ")
@@ -363,6 +395,28 @@ fn ccr_type_selftest_dump():
         print(" ")
         println(int_str(sh_term_of_ti(i)))
         i = i + 1
+    // v10 NOD semantic type ids (v9 wire frozen): read the side buffer through the
+    // shared accessors so tests see exactly what nod_type_id returns. One
+    // deterministic line per node; flags is the constant 0 companion word.
+    print("nodtypes: ")
+    print_i(g_ccr_nod_type_count)
+    println("")
+    ni : ., mut = 0
+    loop:
+        if ni >= g_ccr_nod_type_count:
+            break
+        print("nodtype ")
+        print_i(ni)
+        print(" op ")
+        print_i(iri_op(ni))
+        print(" tk ")
+        print_i(iri_tk(ni))
+        print(" tid ")
+        print_i(nod_type_id(ni))
+        print(" flags ")
+        print_i(nod_type_flags(ni))
+        println("")
+        ni = ni + 1
 
 // --dump-ifaces test channel. The shared surface dump uses the same print path as
 // corearch. This corec-only section recomputes signature terms after the segment

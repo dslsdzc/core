@@ -57,6 +57,15 @@ g_ccr_iface_seg_len : int, mut
 // This file is first in both builds, so these globals must stay here.
 g_ccr_nod_item : string, mut
 g_ccr_nod_item_count : int, mut
+// NOD semantic type-id side buffer (v10 NOD `type_id`). Filling happens in
+// ccr_types.cr:ccr_nod_type_populate during the save path; the v9 wire keeps the
+// 40B NOD record with `item` at +28 and does not carry this value.
+// Value semantics: >= 0 is a TYPE row (face 0 = the row's item is reversible);
+// -1 means no type row. `nod_type_flags` is the companion semantic-flags word
+// (constant 0 until the v10 cutover classifies aux codes).
+// This file is first in both builds, so these globals must stay here.
+g_ccr_nod_type : string, mut
+g_ccr_nod_type_count : int, mut
 g_ast : string, mut
 g_ast_count : int, mut
 g_ast_cap : int, mut

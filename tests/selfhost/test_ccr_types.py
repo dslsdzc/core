@@ -2298,6 +2298,132 @@ def test_p6t3_d18_purity_static():
     assert not bad, f"ccr_io.cr references bridge-layer symbols in code: {bad[:3]}"
 
 
+# ═══════════ CCR v10 Task 3：NOD 语义 type_id（v9 wire 冻结）═══════════
+# 观察通道 = `corec ccr --dump-types` 末尾的 `nodtypes` 节（corec-only；只读、
+# 不产额外产物、无新 CLI flag）。语义 = `ccr_types.cr:ccr_nod_type_populate`
+# 的 side buffer：face 0（tk 是可逆 TYPE 行）⇒ type_id = tk；其余 ⇒ -1；
+# flags 恒 0（本任务不落 v9 wire，v10 cutover 才消费）。
+# 期望值在 Python 侧按规则**独立复述**（MINT_OPS + rowterms + 项表读逆），
+# 不复用编译器判定表——防同源同错自洽假绿。
+
+P7_TID_HDR_RE = re.compile(r'^nodtypes: (\d+)$')
+P7_TID_RE = re.compile(r'^nodtype (\d+) op (-?\d+) tk (-?\d+) tid (-?\d+) flags (-?\d+)$')
+
+
+def parse_nod_type_dump(text: str):
+    """`--dump-types` 的 `nodtypes` 节 → (count, [(node, op, tk, tid, flags)])。
+    行格式契约见 ccr_types.cr:ccr_type_selftest_dump。节点序必须无洞。"""
+    hdr = None
+    rows = []
+    for ln in text.splitlines():
+        m = P7_TID_HDR_RE.match(ln)
+        if m:
+            hdr = int(m.group(1))
+            continue
+        m = P7_TID_RE.match(ln)
+        if m:
+            rows.append(tuple(int(m.group(k)) for k in range(1, 6)))
+    assert hdr is not None, "dump has no 'nodtypes:' header"
+    assert len(rows) == hdr, f"nodtype rows {len(rows)} != header {hdr}"
+    assert [r[0] for r in rows] == list(range(hdr)), "nodtype node ids not contiguous"
+    return hdr, rows
+
+
+def expected_nod_type_id(op: int, tk: int, rows, terms, rowterms) -> int:
+    """Python 侧独立复述固定规则：
+      · 类型行面 op（MINT_OPS = sh_tk_is_type_face 的同一集合）∧ tk 行域内
+        ∧ rowterm 是 ATOM(b == tk)（= 可逆行）⇒ type_id = tk；
+      · 其余（辅码面 / 复合行 / 越界 / 无类型）⇒ -1。"""
+    if op not in MINT_OPS:
+        return -1
+    if tk < 0 or tk >= len(rows):
+        return -1
+    t = rowterms.get(tk, -1)
+    if t < 0 or t >= len(terms):
+        return -1
+    tag, _a, b, _c, _d = terms[t]
+    if tag != TT_ATOM or b != tk:
+        return -1
+    return tk
+
+
+def test_nod_type_id_is_type_row_or_minus_one():
+    """Task 3（v10 NOD 语义域，v9 wire 冻结）：`ccr_nod_type_populate` 的逐节点
+    type_id —— 类型面节点 `0 <= type_id < row_count` 且 `type_id == tk`；
+    非类型面节点 `type_id == -1`；`flags == 0`（本任务恒 0）。
+    非空转：夹具必须同时出现类型面节点（const/binary/load…）与非类型面节点
+    （deref/bounds/spawn…）。"""
+    src = tk_fixture('p7tid', TK_FIXTURE)
+    ccr_path = os.path.join(BASE, 'build', 'test_p7t3_typeid.ccr')
+    try:
+        out = corec_dump(src, ccr_path)          # ccr --dump-types（save 前 dump）
+        rows, terms, _probe, rowterms = parse_type_dump(out)
+        hdr, nrows = parse_nod_type_dump(out)
+        assert hdr == len(nrows) > 0, "vacuous: no node in nodtype dump"
+        assert len(rowterms) == len(rows), \
+            f"rowterm map {len(rowterms)} != rows {len(rows)}"
+        # 通道自洽：dump 的节点序 == 同一次 ccr 产物 NOD 段的 (op, tk) 序列
+        nod = ccr_nod_records(read_ccr(ccr_path))
+        assert hdr == len(nod), f"nodtype count {hdr} != NOD records {len(nod)}"
+        for i, (n, op, tk, _tid, _flags) in enumerate(nrows):
+            assert (op, tk) == (nod[i][0], nod[i][1]), \
+                f"node {i}: dump (op,tk)=({op},{tk}) != wire {(nod[i][0], nod[i][1])}"
+        face = 0
+        nonface = 0
+        face_gt0 = 0
+        for (n, op, tk, tid, flags) in nrows:
+            assert flags == 0, f"node {n}: flags {flags} != 0"
+            exp = expected_nod_type_id(op, tk, rows, terms, rowterms)
+            assert tid == exp, \
+                f"node {n}: type_id {tid} != expected {exp} (op={op} tk={tk})"
+            if exp >= 0:
+                face += 1
+                if tid > 0:
+                    face_gt0 += 1
+                assert tid == tk, f"node {n}: type_id {tid} != row {tk}"
+                assert 0 <= tid < len(rows), \
+                    f"node {n}: type_id {tid} outside row domain {len(rows)}"
+            else:
+                nonface += 1
+                assert tid == -1, f"node {n}: non-face type_id {tid} != -1"
+        assert face > 0, "vacuous: fixture has no type-face node"
+        assert nonface > 0, "vacuous: fixture has no non-type node"
+        assert face_gt0 > 0, "vacuous: all type ids are row 0 (degenerate mapping)"
+    finally:
+        _cleanup(src, ccr_path)
+
+
+def test_v9_ent_still_28b_with_home():
+    """Task 3 回归（v9 wire 冻结）：ENT 记录仍为 28B（var/version/def/
+    live_start/live_end/home/flags），`home` 仍由旧 loader 读回，合法 v9
+    文件仍能载入并发射 ELF。v10 的 24B 断言留在 Task 4。"""
+    src_path, ccr_path = _shell_fixture('t3ent')
+    out = os.path.join(BASE, 'build', 'test_p7t3_ent.out')
+    try:
+        data = read_ccr(ccr_path)
+        c = CcrFile(data)        # 内含 version == VER(589825) + 8 段规范序断言
+        assert VER == 589825, "CCR_VERSION is no longer v9.1"
+        body = c.body(4)
+        (cnt,) = struct.unpack_from('<I', body, 0)
+        assert cnt > 0, "fixture produced no ENT records (vacuous)"
+        assert (len(body) - 4) % 28 == 0, \
+            f"ENT body {len(body)}B not 4 + n*28"
+        assert (len(body) - 4) // 28 == cnt, \
+            f"ENT count {cnt} != record slots {(len(body) - 4) // 28}"
+        # 旧 loader 读回 home：每条记录都打印 home 列（28B 记录的 +20 槽）
+        r = subprocess.run([COREARCH, ccr_path, '--dump-entries'],
+                           capture_output=True, text=True, cwd=BASE, timeout=120)
+        assert r.returncode == 0, \
+            f"corearch --dump-entries rc={r.returncode}: {r.stdout!r} {r.stderr!r}"
+        homes = re.findall(r' home (-?\d+)', r.stdout)
+        assert len(homes) == cnt, \
+            f"{len(homes)} home values != {cnt} ENT records"
+        # 合法 v9 文件端到端仍可载入/发射
+        arch_elf(ccr_path, out)
+    finally:
+        _cleanup(src_path, ccr_path, out)
+
+
 if __name__ == '__main__':
     tests = [test_p4t1_layout_eight_segments,
              test_p4t1_loader_rejects_valid_v7_file,
@@ -2347,7 +2473,9 @@ if __name__ == '__main__':
              test_p6t3_aux_face_and_composite_preserved,
              test_p6t3_item_oob_rejected,
              test_p6t3_nod_count_overflow_rejected,
-             test_p6t3_d18_purity_static]
+             test_p6t3_d18_purity_static,
+             test_nod_type_id_is_type_row_or_minus_one,
+             test_v9_ent_still_28b_with_home]
     failed = 0
     for t in tests:
         try:
