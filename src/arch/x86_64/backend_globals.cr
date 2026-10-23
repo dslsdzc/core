@@ -70,6 +70,18 @@ g_x86_emit_rt_stubs : int, mut         // 1 = pure-static: backend emits g_set_c
 // verification counter, not a strategy predicate: a scratch-only emitter pass in
 // --dump-match-plan and the real Phase 3 emission both increment it.
 g_match_bin_emits : int, mut
+// Dense jump-table state. g_match_table_cursor counts table bytes during code
+// emission; the rodata writer resets a separate cursor and rescans the same
+// functions in the same order, so a table's recorded in-rodata offset is
+// reproducible without a second code pass.
+g_match_table_emits : int, mut
+g_match_table_cursor : int, mut
+g_match_table_ro_cursor : int, mut
+// Label number -> absolute code-buffer position. g_label_poses is per-function
+// and overwritten; case targets are global label numbers, so the rodata phase
+// needs this global map to resolve table entries.
+g_label_abs : string, mut
+g_label_abs_cap : int, mut
 // --big-int: user int slots hold tagged values (immediate v*2 or BigInt pointer+1).
 // The compiler itself and the BigInt runtime blob stay raw.  See int_rep.cr.
 g_x86_big_enabled : int, mut

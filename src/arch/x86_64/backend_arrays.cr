@@ -215,6 +215,19 @@ fn grow_rodataref(needed: int):
     g_x86_rodataref_ro = n2
     g_x86_rodataref_cap = nc
 
+fn grow_label_abs(needed: int):
+    if needed < g_label_abs_cap:
+        return
+    nc : ., mut = g_label_abs_cap * 2
+    if nc < 64:
+        nc = 64
+    if nc < needed:
+        nc = needed + 64
+    nb := alloc(nc * 8)
+    _dyncpy(g_label_abs, g_label_abs_cap * 8, nb)
+    g_label_abs = nb
+    g_label_abs_cap = nc
+
 fn grow_alloc_patch(needed: int):
     if needed < g_x86_alloc_patch_cap:
         return

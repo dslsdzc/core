@@ -793,6 +793,196 @@ fn e2_emit_match_binary(buf: string, p: int, s2: int, idx: string, n: int, defau
         return n * E2_MATCH_NODE_SZ + 2
     return n * E2_MATCH_NODE_SZ
 
+// ── v10 dense MATCH: rodata jump table ────────────────────────────────────
+//
+// A dense integer range lowers to a rodata table of signed 32-bit offsets
+// relative to the table base:
+//
+//   bounds check (min/max miss -> DEFAULT)
+//   index = (scrutinee - min) >> (tagged ? 1 : 0)
+//   lea  r11, [rip+table]
+//   movsxd rax, dword [r11+r10*4]
+//   add  rax, r11
+//   jmp  rax
+//
+// The table is written during the rodata phase, after strings and before the
+// HIT pool. Every slot is present for [min,max]; holes point at DEFAULT.
+// Tables are only selected when there are >=8 unique values, the range is at
+// most twice as wide as the value count, and a DEFAULT arm exists. Everything
+// else keeps the linear/binary behavior above.
+
+g_match_dense_min_unique : int = 8
+
+fn e2_match_default_label(s2: int, s3: int) -> int:
+    ci : ., mut = 0
+    loop:
+        if ci >= s3:
+            break
+        cbase := (s2 + ci) * CCR_V10_CASE_DISK
+        if cell_load32(g_ccr_case, cbase + CCR_CASE_KIND) == CCR_CASE_KIND_DEFAULT:
+            lbl := e2_match_case_label(cell_load_i32(g_ccr_case, cbase + CCR_CASE_TARGET))
+            if lbl >= 0:
+                return lbl
+        ci = ci + 1
+    return -1
+
+fn e2_match_case_value(s2: int, ci: int) -> int:
+    return cell_load(g_ccr_case, (s2 + ci) * CCR_V10_CASE_DISK + CCR_CASE_VALUE)
+
+// Return the table width (max-min+1) when the dense predicate holds, else 0.
+// This is the single predicate shared by the plan channel, the emitter, and the
+// rodata table writer. All target labels must resolve: the table stores absolute
+// positions, so a missing label would desync code and data.
+fn e2_match_table_span(s2: int, s3: int) -> int:
+    if s3 <= 0:
+        return 0
+    if e2_match_default_label(s2, s3) < 0:
+        return 0
+    idx := alloc((s3 + 1) * 8)
+    n := e2_match_sort_cases(s2, s3, idx)
+    if n < g_match_dense_min_unique:
+        return 0
+    vi : ., mut = 0
+    loop:
+        if vi >= n:
+            break
+        vci := cell_load(idx, vi * 8)
+        vt := cell_load_i32(g_ccr_case, (s2 + vci) * CCR_V10_CASE_DISK + CCR_CASE_TARGET)
+        if e2_match_case_label(vt) < 0:
+            return 0
+        vi = vi + 1
+    first := cell_load(idx, 0)
+    last := cell_load(idx, (n - 1) * 8)
+    span := e2_match_case_value(s2, last) - e2_match_case_value(s2, first) + 1
+    if span <= 0:
+        return 0
+    if span > n * 2:
+        return 0
+    return span
+
+fn e2_label_abs_pos(lbl: int) -> int:
+    if lbl < 0:
+        return -1
+    if lbl >= g_label_abs_cap:
+        return -1
+    return cell_load(g_label_abs, lbl * 8)
+
+// Emit the dense dispatch. span comes from e2_match_table_span; the caller has
+// already loaded r10 (and tagged it for enum/tagged-int) exactly as the other
+// MATCH paths do.
+fn e2_emit_match_table(buf: string, p: int, s2: int, s3: int, span: int, tagged: int) -> int:
+    g_match_table_emits = g_match_table_emits + 1
+    idx := alloc((s3 + 1) * 8)
+    n := e2_match_sort_cases(s2, s3, idx)
+    first := cell_load(idx, 0)
+    last := cell_load(idx, (n - 1) * 8)
+    minv := e2_match_case_value(s2, first)
+    maxv := e2_match_case_value(s2, last)
+    default_lbl := e2_match_default_label(s2, s3)
+    min_imm : ., mut = minv
+    max_imm : ., mut = maxv
+    if tagged != 0:
+        min_imm = minv * 2
+        max_imm = maxv * 2
+
+    w : ., mut = p
+    w = w + e2_big_mov_imm64(buf, w, 11, min_imm)
+    w = w + e2_alu(buf, w, 57)              // cmp r10, r11
+    lo_pos := w
+    w = w + e2_big_jcc(buf, w, 12)          // jl default
+    w = w + e2_big_mov_imm64(buf, w, 11, max_imm)
+    w = w + e2_alu(buf, w, 57)              // cmp r10, r11
+    hi_pos := w
+    w = w + e2_big_jcc(buf, w, 15)          // jg default
+    w = w + e2_big_mov_imm64(buf, w, 11, min_imm)
+    w = w + e2_alu(buf, w, 41)              // sub r10, r11
+    if tagged != 0:
+        w = w + e2_big_untag_reg(buf, w, 10) // sar r10, 1
+
+    // Table lives after the strings. Record the in-rodata offset for the LEA
+    // patch, exactly like a string reference.
+    table_off := g2_rodata_sz() + g_match_table_cursor
+    grow_rodataref(g_x86_rodataref_count + 1)
+    cell_store(g_x86_rodataref_pos, g_x86_rodataref_count * 8, w)
+    cell_store(g_x86_rodataref_ro, g_x86_rodataref_count * 8, table_off)
+    g_x86_rodataref_count = g_x86_rodataref_count + 1
+    w = w + e2_lrb(buf, w, 0)               // lea r11, [rip+table]
+
+    // movsxd rax, dword [r11+r10*4]
+    w = w + emit_rex(buf, w, 1, 0, 1, 1)
+    e2_w8(buf, w, 99)
+    w = w + 1
+    w = w + emit_modrm(buf, w, 0, 0, 4)
+    w = w + emit_sib(buf, w, 2, 2, 3)
+    // add rax, r11
+    w = w + emit_rex(buf, w, 1, 1, 0, 0)
+    e2_w8(buf, w, 1)
+    w = w + 1
+    w = w + emit_modrm(buf, w, 3, 3, 0)
+    // jmp rax
+    e2_w8(buf, w, 255)
+    w = w + 1
+    w = w + emit_modrm(buf, w, 3, 4, 0)
+
+    // A table is only chosen with a DEFAULT arm, so both miss edges land there.
+    e2_match_patch_miss(buf, lo_pos, 1, default_lbl, w)
+    e2_match_patch_miss(buf, hi_pos, 1, default_lbl, w)
+    g_match_table_cursor = g_match_table_cursor + span * 4
+    return w - p
+
+// Write dense tables into rodata at ro_tables_start (absolute buffer position,
+// immediately after the strings). Rescans functions/instrs in emission order
+// and uses the same e2_match_table_span predicate, so offsets line up with the
+// LEA references recorded during code emission. Returns the table bytes written.
+fn e2_match_write_tables(buf: string, ro_tables_start: int) -> int:
+    g_match_table_ro_cursor = 0
+    fi : ., mut = 0
+    loop:
+        if fi >= g_ir_func_count:
+            break
+        ist := cell_load(g_ir_func_instr_start, fi * 8)
+        ic := cell_load(g_ir_func_instr_count, fi * 8)
+        ii : ., mut = 0
+        loop:
+            if ii >= ic:
+                break
+            inst := ist + ii
+            if iri_op(inst) == IR_MATCH:
+                s2 := iri_s2(inst)
+                s3 := iri_s3(inst)
+                span := e2_match_table_span(s2, s3)
+                if span > 0:
+                    idx := alloc((s3 + 1) * 8)
+                    n := e2_match_sort_cases(s2, s3, idx)
+                    first := cell_load(idx, 0)
+                    minv := e2_match_case_value(s2, first)
+                    default_lbl := e2_match_default_label(s2, s3)
+                    table_abs := ro_tables_start + g_match_table_ro_cursor
+                    def_abs := e2_label_abs_pos(default_lbl)
+                    if def_abs < 0:
+                        def_abs = table_abs
+                    vi : ., mut = 0
+                    k : ., mut = 0
+                    loop:
+                        if k >= span:
+                            break
+                        v := minv + k
+                        target_abs : ., mut = def_abs
+                        if vi < n:
+                            vci := cell_load(idx, vi * 8)
+                            if e2_match_case_value(s2, vci) == v:
+                                vt := cell_load_i32(g_ccr_case, (s2 + vci) * CCR_V10_CASE_DISK + CCR_CASE_TARGET)
+                                ta := e2_label_abs_pos(e2_match_case_label(vt))
+                                if ta >= 0:
+                                    target_abs = ta
+                                vi = vi + 1
+                        w32(buf, table_abs + k * 4, target_abs - table_abs)
+                        k = k + 1
+                    g_match_table_ro_cursor = g_match_table_ro_cursor + span * 4
+            ii = ii + 1
+        fi = fi + 1
+    return g_match_table_ro_cursor
+
 fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
     op := iri_op(instr_idx)
     d := iri_dest(instr_idx)
@@ -1953,6 +2143,11 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         if li >= 0:
             grow_label_poses(li + 1)
             cell_store(g_label_poses, li * 8, pos)
+            // Global map: label numbers are process-global and the rodata table
+            // writer runs after all functions, when g_label_poses only holds the
+            // last function's labels.
+            grow_label_abs(li + 1)
+            cell_store(g_label_abs, li * 8, pos)
             if li + 1 > g_label_count:
                 g_label_count = li + 1
             // Patch all pending forward jumps targeting this label
@@ -2014,9 +2209,19 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                         default_lbl = iri_s1(ctarget)
             ci = ci + 1
 
-        // Sparse dispatch: >2 value rows use a balanced binary search tree.
-        // Dense jump-table/rodata lowering is deferred. The strategy predicate is
-        // shared with --dump-match-plan.
+        // Dense dispatch: >=8 unique values in a range at most twice as wide
+        // as the value count, with a DEFAULT arm, use a rodata jump table.
+        // Sparse (>2 rows, not dense) keeps the balanced binary search tree.
+        // Both predicates are shared with --dump-match-plan.
+        table_span := e2_match_table_span(s2, s3)
+        if table_span > 0:
+            tab_tagged : ., mut = 0
+            if g_x86_big_enabled != 0:
+                if first_kind == CCR_CASE_KIND_ENUM || ti_s == TI_INT:
+                    tab_tagged = 1
+            cp = cp + e2_emit_match_table(buf, pos+cp, s2, s3, table_span, tab_tagged)
+            return cp
+
         if e2_match_use_binary(s2, s3) != 0:
             idx := alloc((s3 + 1) * 8)
             uniq := e2_match_sort_cases(s2, s3, idx)

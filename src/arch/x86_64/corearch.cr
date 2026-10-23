@@ -323,6 +323,8 @@ fn dump_object_surface():
 // absolute target needs to exist yet.
 fn dump_match_plan():
     g_match_bin_emits = 0
+    g_match_table_emits = 0
+    g_match_table_cursor = 0
     g_pending_count = 0
     // Mirror elf_gen's pre-emission global marking so e2_load_var's global/local
     // dispatch reads an initialized table during the scratch pass.
@@ -383,7 +385,9 @@ fn dump_match_plan():
             print(" nondefault ")
             print_i(e2_match_nondefault_count(ms, mc))
             print(" strategy ")
-            if e2_match_use_binary(ms, mc) != 0:
+            if e2_match_table_span(ms, mc) > 0:
+                print("table")
+            else if e2_match_use_binary(ms, mc) != 0:
                 print("binary")
             else:
                 print("linear")
@@ -391,6 +395,9 @@ fn dump_match_plan():
         ni = ni + 1
     print("binary_emits ")
     print_i(g_match_bin_emits)
+    println("")
+    print("table_emits ")
+    print_i(g_match_table_emits)
     println("")
 
 // --dump-nod-types: print each node's semantic type_id and feature flags. The

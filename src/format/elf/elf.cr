@@ -1801,6 +1801,18 @@ fn elf_gen(buf: string) -> int:
     // Per-run emission counter: reset before the sizing-result Phase 3 pass so
     // it counts real emission only, not the Phase 2 sizing calls.
     g_match_bin_emits = 0
+    g_match_table_emits = 0
+    g_match_table_cursor = 0
+    // Global label -> absolute position map for the rodata table writer. g_label_poses
+    // is overwritten per function; table targets are global label numbers.
+    if g_label_abs_cap < g_label_count:
+        grow_label_abs(g_label_count)
+    lab_abs_i : ., mut = 0
+    loop:
+        if lab_abs_i >= g_label_count:
+            break
+        cell_store(g_label_abs, lab_abs_i * 8, -1)
+        lab_abs_i = lab_abs_i + 1
     fi = 0
     loop:
         if fi >= g_ir_func_count:
@@ -2241,6 +2253,12 @@ fn elf_gen(buf: string) -> int:
             w8(buf, cp, 0)
             cp = cp + 1
         si = si + 1
+
+    // Dense MATCH jump tables: after strings, before the HIT pool, 4-aligned.
+    // The writer rescans functions in emission order with the same predicate, so
+    // each table lands at the in-rodata offset recorded by its LEA reference.
+    // Strings end 8-aligned, so no pad is needed here.
+    cp = cp + e2_match_write_tables(buf, cp)
 
     // HIT constant pool: lower the constant pool into rodata.
     // 池引用（mov r64, [rip+disp32] 占位）在函数发射期间记录（instr.cr 编码器）；

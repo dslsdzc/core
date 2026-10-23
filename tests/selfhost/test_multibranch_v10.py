@@ -625,8 +625,7 @@ fn main() -> int:
 # this frontend, so the range starts above zero.
 SPARSE_STEP = 13
 SPARSE_BASE = 3
-# Deliberately not a power of two: the balanced tree then has one-child nodes,
-# so the pre-order child-position arithmetic is covered both ways.
+# Not a power of two, and dense (0..32), so the rodata jump table is selected.
 DENSE_WAYS = 33
 
 
@@ -666,12 +665,17 @@ def _dense_source(ways):
     return _match_source(_match_values(ways, 0, 1))
 
 
-def _match_plan(ccr_path):
-    """Run the read-only plan channel; return (one row per IR_MATCH, binary_emits)."""
+def _match_plan_full(ccr_path):
+    """Run the read-only plan channel.
+
+    Returns (one row per IR_MATCH, binary_emits, table_emits). Table emits is the
+    verification channel for the dense jump-table path, mirroring binary_emits.
+    """
     r = _run([COREARCH, ccr_path, "--dump-match-plan"])
     assert r.returncode == 0, f"corearch --dump-match-plan failed: {r.stdout}\n{r.stderr}"
     plans = []
     binary_emits = None
+    table_emits = 0
     for line in r.stdout.splitlines():
         if line.startswith("match "):
             parts = line.split()
@@ -686,7 +690,16 @@ def _match_plan(ccr_path):
             )
         elif line.startswith("binary_emits "):
             binary_emits = int(line.split()[1])
+        elif line.startswith("table_emits "):
+            table_emits = int(line.split()[1])
     assert binary_emits is not None, f"missing binary_emits line: {r.stdout!r}"
+    assert "table_emits " in r.stdout, f"missing table_emits line: {r.stdout!r}"
+    return plans, binary_emits, table_emits
+
+
+def _match_plan(ccr_path):
+    """Backward-compatible two-value view of the plan channel."""
+    plans, binary_emits, _table_emits = _match_plan_full(ccr_path)
     return plans, binary_emits
 
 
@@ -710,6 +723,43 @@ def _run_corearch_elf(tmp, data, name, opt=2):
         [str(elf)], capture_output=True, text=True, timeout=30, cwd=str(BASE)
     )
     return run.returncode
+
+
+def _build_corearch_elf(tmp, data, name, opt=2, raw=False):
+    """Build a static ELF from a .ccr and return (path, bytes)."""
+    ccr = _ccr_file(tmp, data, name)
+    elf = tmp / f"{name}.elf"
+    args = [COREARCH, ccr, "--elf", "--static", "-O", str(opt), "-o", elf]
+    if raw:
+        args.insert(3, "--raw-int")
+    built = _run(args)
+    assert built.returncode == 0, (
+        f"corearch --elf failed: {built.stdout}\n{built.stderr}"
+    )
+    return elf, elf.read_bytes()
+
+
+TABLE_STUB = bytes.fromhex("4b6304934c01d8ffe0")
+# lea r11, [rip+disp32] is 4c 8d 1d <disp32>; the dense table stub follows it.
+TABLE_LEA_PREFIX = bytes.fromhex("4c8d1d")
+
+
+def _table_region(data, span):
+    """Locate the dense table via its lea/movsxd/add/jmp stub.
+
+    File offsets equal code-buffer positions (the code segment maps at zero
+    offset), so table[+entry] is the absolute target position. Returns
+    (lea_pos, table_pos, entries) with entries as signed 32-bit offsets.
+    """
+    stub = data.find(TABLE_STUB)
+    assert stub >= 0, "no dense jump-table stub in ELF"
+    assert data.find(TABLE_STUB, stub + 1) < 0, "more than one table stub"
+    lea = stub - 7
+    assert data[lea : lea + 3] == TABLE_LEA_PREFIX, data[lea : lea + 7].hex()
+    rel = struct.unpack_from("<i", data, lea + 3)[0]
+    table = lea + 7 + rel
+    entries = [struct.unpack_from("<i", data, table + 4 * k)[0] for k in range(span)]
+    return lea, table, entries
 
 
 def _match_nodes(data):
@@ -1032,7 +1082,7 @@ def test_cir_cache_does_not_restore_match_without_cases():
 
 
 # ---------------------------------------------------------------------------
-# 6. Sparse MATCH uses a balanced binary search (Task 4); dense tables deferred
+# 6. Sparse MATCH uses a balanced binary search; dense MATCH uses rodata tables
 # ---------------------------------------------------------------------------
 
 
@@ -1076,22 +1126,378 @@ def test_sparse_64way_match_is_binary_and_correct():
         )
 
 
-def test_dense_match_range_is_binary_and_correct():
+def test_dense_33way_match_is_table_and_correct():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         source = _dense_source(DENSE_WAYS)
         data = _build_ccr(tmp, source, "match_dense")
         rec = _single_match(data)
         assert rec[4] == DENSE_WAYS + 1, rec[4]
-        plans, binary_emits = _match_plan(
+        plans, binary_emits, table_emits = _match_plan_full(
             _ccr_file(tmp, data, "match_dense_plan")
         )
         assert len(plans) == 1, plans
         assert plans[0]["nondefault"] == DENSE_WAYS, plans
-        # A jump-table lowering is deferred; binary search is the accepted path.
-        assert plans[0]["strategy"] == "binary", plans
-        assert binary_emits == 1, f"binary emitter ran {binary_emits} times"
+        assert plans[0]["strategy"] == "table", plans
+        assert binary_emits == 0, f"table path also ran binary emitter {binary_emits}x"
+        assert table_emits == 1, f"table emitter ran {table_emits} times"
         _assert_program(tmp, source, 42, opts=(0, 2, 3), name="match_dense")
+
+        # Table slots are relative to the table base and resolve to the arm body.
+        _elf, elf_data = _build_corearch_elf(tmp, data, "match_dense_elf", opt=2)
+        lea, table, entries = _table_region(elf_data, DENSE_WAYS)
+        assert table > lea, (lea, table)
+        assert table % 4 == 0, table
+        assert len(set(entries)) == DENSE_WAYS, entries
+        for k, entry in enumerate(entries):
+            target = table + entry
+            assert 0 <= target < table, (k, entry, target, table)
+            assert abs(entry) < table, (k, entry)
+            assert elf_data[target : target + 2] == b"\x49\xba", (
+                k,
+                target,
+                elf_data[target : target + 8].hex(),
+            )
+            imm = struct.unpack_from("<q", elf_data, target + 2)[0]
+            assert imm == (k + 1) * 2, (k, imm)
+
+
+def test_dense_64way_match_is_table_and_correct():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        source = _match_source(list(range(64)))
+        data = _build_ccr(tmp, source, "match_dense64")
+        rec = _single_match(data)
+        assert rec[4] == 65, rec[4]
+        plans, binary_emits, table_emits = _match_plan_full(
+            _ccr_file(tmp, data, "match_dense64_plan")
+        )
+        assert plans[0]["nondefault"] == 64, plans
+        assert plans[0]["strategy"] == "table", plans
+        assert binary_emits == 0, binary_emits
+        assert table_emits == 1, table_emits
+        _assert_program(tmp, source, 42, opts=(0, 2, 3), name="match_dense64")
+
+        _elf, elf_data = _build_corearch_elf(tmp, data, "match_dense64_elf", opt=2)
+        _lea, table, entries = _table_region(elf_data, 64)
+        assert len(entries) == 64
+        assert len(set(entries)) == 64
+        assert all(abs(entry) < table for entry in entries)
+
+
+def test_two_dense_tables_resolve_global_labels():
+    lines = ["fn pick_a(n: int) -> int:", "    return match n:"]
+    for value in range(8):
+        lines.append(f"        {value} => {value + 1},")
+    lines += ["        _ => 99", "", "fn pick_b(n: int) -> int:", "    return match n:"]
+    for value in range(100, 116):
+        lines.append(f"        {value} => {value - 99},")
+    lines += ["        _ => 98", "", "fn main() -> int:"]
+    for value in range(8):
+        lines.append(f"    if pick_a({value}) != {value + 1}:")
+        lines.append(f"        return {10 + value}")
+    for value in range(100, 116):
+        lines.append(f"    if pick_b({value}) != {value - 99}:")
+        lines.append(f"        return {30 + value - 100}")
+    lines += ["    if pick_a(50) != 99:", "        return 70"]
+    lines += ["    if pick_b(50) != 98:", "        return 71"]
+    lines += ["    return 42"]
+    source = "\n".join(lines) + "\n"
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, source, "match_two_dense")
+        assert len(_match_nodes(data)) == 2
+        plans, binary_emits, table_emits = _match_plan_full(
+            _ccr_file(tmp, data, "match_two_dense_plan")
+        )
+        assert [p["strategy"] for p in plans] == ["table", "table"], plans
+        assert [p["nondefault"] for p in plans] == [8, 16], plans
+        assert binary_emits == 0
+        assert table_emits == 2, table_emits
+        _assert_program(tmp, source, 42, opts=(0, 2, 3), name="match_two_dense")
+
+        _elf, elf_data = _build_corearch_elf(
+            tmp, data, "match_two_dense_elf", opt=2
+        )
+        stubs = []
+        pos = elf_data.find(TABLE_STUB)
+        while pos >= 0:
+            stubs.append(pos)
+            pos = elf_data.find(TABLE_STUB, pos + 1)
+        assert len(stubs) == 2, stubs
+        for stub, span in zip(stubs, (8, 16)):
+            lea = stub - 7
+            assert elf_data[lea : lea + 3] == TABLE_LEA_PREFIX
+            rel = struct.unpack_from("<i", elf_data, lea + 3)[0]
+            table = lea + 7 + rel
+            entries = [
+                struct.unpack_from("<i", elf_data, table + 4 * k)[0]
+                for k in range(span)
+            ]
+            assert len(set(entries)) == span
+            for entry in entries:
+                target = table + entry
+                assert 0 <= target < table, (table, entry, target)
+                assert elf_data[target : target + 2] == b"\x49\xba"
+
+
+def test_dense_holey_range_uses_default_slots():
+    values = [0, 1, 2, 4, 5, 6, 8, 9]
+    source = _match_source(values)
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, source, "match_holes")
+        plans, binary_emits, table_emits = _match_plan_full(
+            _ccr_file(tmp, data, "match_holes_plan")
+        )
+        assert plans[0]["nondefault"] == 8, plans
+        assert plans[0]["strategy"] == "table", plans
+        assert binary_emits == 0
+        assert table_emits == 1
+        _assert_program(tmp, source, 42, opts=(0, 2, 3), name="match_holes")
+
+        _elf, elf_data = _build_corearch_elf(tmp, data, "match_holes_elf", opt=2)
+        _lea, table, entries = _table_region(elf_data, 10)
+        # Holes at 3 and 7 share the DEFAULT target, distinct from every arm.
+        assert entries[3] == entries[7], entries
+        assert entries[3] not in (entries[0], entries[1], entries[2]), entries
+        assert entries[3] not in (entries[4], entries[5], entries[6]), entries
+        assert entries[3] not in (entries[8], entries[9]), entries
+        default_target = table + entries[3]
+        assert elf_data[default_target : default_target + 2] == b"\x49\xba"
+        assert struct.unpack_from("<q", elf_data, default_target + 2)[0] == 99 * 2
+
+
+def test_dense_negative_values_raw_int_table():
+    # Negative patterns are not parseable, so build a positive fixture and shift
+    # every CASE value down; main probes the shifted values through subtraction.
+    patterns = list(range(8, 16))
+    lines = ["fn pick(n: int) -> int:", "    return match n:"]
+    for i, value in enumerate(patterns):
+        lines.append(f"        {value} => {i + 1},")
+    lines.append("        _ => 99")
+    lines += ["", "fn main() -> int:"]
+    for i, value in enumerate(patterns):
+        lines.append(f"    if pick({value} - 16) != {i + 1}:")
+        lines.append(f"        return {10 + i}")
+    lines += [
+        "    if pick(0 - 9) != 99:",
+        "        return 30",
+        "    if pick(0) != 99:",
+        "        return 31",
+        "    if pick(0 - 1000) != 99:",
+        "        return 32",
+        "    return 42",
+    ]
+    source = "\n".join(lines) + "\n"
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, source, "match_negative")
+        rows = _parse_case(segment(data, CASE_TAG))
+        shifted = [
+            (
+                row["value"] - 16,
+                row["kind"],
+                row["str_index"],
+                row["target_nod"],
+                row["flags"],
+            )
+            for row in rows
+        ]
+        neg = _replace_case(data, _pack_case(shifted))
+        plans, binary_emits, table_emits = _match_plan_full(
+            _ccr_file(tmp, neg, "match_negative_plan")
+        )
+        assert plans[0]["nondefault"] == 8, plans
+        assert plans[0]["strategy"] == "table", plans
+        assert binary_emits == 0
+        assert table_emits == 1
+        # Tagged mode represents negative ints as BigInt pointers, so the dense
+        # signed range is exercised in raw-int mode (the mode that stores signed
+        # machine words directly).
+        for opt in (0, 2, 3):
+            elf, _elf_data = _build_corearch_elf(
+                tmp, neg, f"match_negative_O{opt}", opt=opt, raw=True
+            )
+            run = subprocess.run(
+                [str(elf)], capture_output=True, text=True, timeout=30
+            )
+            assert run.returncode == 42, (
+                f"raw-int negative table -O{opt} returned {run.returncode}"
+            )
+
+
+def test_dense_enum_tagged_and_raw_int_table():
+    variants = [f"V{i}" for i in range(10)]
+    lines = ["enum E:", "    " + ", ".join(variants), "", "fn pick(e: E) -> int:",
+             "    return match e:"]
+    for i, variant in enumerate(variants):
+        lines.append(f"        {variant} => {i + 1},")
+    lines.append("        _ => 99")
+    lines += ["", "fn main() -> int:"]
+    for i, variant in enumerate(variants):
+        lines.append(f"    if pick({variant}()) != {i + 1}:")
+        lines.append(f"        return {10 + i}")
+    lines.append("    return 42")
+    source = "\n".join(lines) + "\n"
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, source, "match_enum10")
+        rec = _single_match(data)
+        assert rec[4] == 11, rec[4]
+        plans, binary_emits, table_emits = _match_plan_full(
+            _ccr_file(tmp, data, "match_enum10_plan")
+        )
+        assert plans[0]["nondefault"] == 10, plans
+        assert plans[0]["strategy"] == "table", plans
+        assert binary_emits == 0
+        assert table_emits == 1
+        for opt in (0, 2, 3):
+            elf, _elf_data = _build_corearch_elf(
+                tmp, data, f"match_enum10_O{opt}", opt=opt
+            )
+            run = subprocess.run([str(elf)], capture_output=True, text=True, timeout=30)
+            assert run.returncode == 42, (
+                f"tagged enum table -O{opt} returned {run.returncode}"
+            )
+        raw_elf, _raw_data = _build_corearch_elf(
+            tmp, data, "match_enum10_raw", opt=2, raw=True
+        )
+        run = subprocess.run([str(raw_elf)], capture_output=True, text=True, timeout=30)
+        assert run.returncode == 42, f"raw-int enum table returned {run.returncode}"
+
+
+def test_no_default_dense_match_stays_binary_and_traps():
+    values = list(range(16))
+    hit_source = _match_source(values, with_default=False)
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, hit_source, "match_dense_nodefault")
+        rec = _single_match(data)
+        assert rec[4] == 16, rec[4]
+        plans, binary_emits, table_emits = _match_plan_full(
+            _ccr_file(tmp, data, "match_dense_nodefault_plan")
+        )
+        assert plans[0]["nondefault"] == 16, plans
+        # A dense range without DEFAULT must not select a table: holes/misses
+        # have no target. Binary keeps the ud2 trap.
+        assert plans[0]["strategy"] == "binary", plans
+        assert binary_emits == 1, binary_emits
+        assert table_emits == 0, table_emits
+        _assert_program(
+            tmp, hit_source, 42, opts=(0, 2, 3), name="match_dense_nodefault"
+        )
+
+        miss_lines = ["fn pick(n: int) -> int:", "    return match n:"]
+        for i, value in enumerate(values):
+            miss_lines.append(f"        {value} => {i + 1},")
+        miss_lines += ["", "fn main() -> int:", "    return pick(99)"]
+        miss_source = "\n".join(miss_lines) + "\n"
+        miss_data = _build_ccr(tmp, miss_source, "match_dense_nodefault_miss")
+        miss_plans, miss_binary, miss_tables = _match_plan_full(
+            _ccr_file(tmp, miss_data, "match_dense_nodefault_miss_plan")
+        )
+        assert miss_plans[0]["strategy"] == "binary", miss_plans
+        assert miss_binary == 1
+        assert miss_tables == 0
+        for opt in (0, 2, 3):
+            elf, _elf_data = _build_corearch_elf(
+                tmp, miss_data, f"match_dense_nodefault_miss_O{opt}", opt=opt
+            )
+            run = subprocess.run(
+                [str(elf)], capture_output=True, text=True, timeout=30
+            )
+            assert run.returncode == -4, (
+                f"dense no-default miss at -O{opt} did not SIGILL: "
+                f"rc={run.returncode}"
+            )
+
+
+def test_dense_threshold_boundary():
+    # 8 unique values, span exactly 16 -> table. One wider value makes span 17,
+    # which must fall back to the binary tree.
+    table_values = list(range(7)) + [15]
+    binary_values = list(range(7)) + [16]
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        table_source = _match_source(table_values)
+        table_data = _build_ccr(tmp, table_source, "match_boundary_table")
+        plans, binary_emits, table_emits = _match_plan_full(
+            _ccr_file(tmp, table_data, "match_boundary_table_plan")
+        )
+        assert plans[0]["nondefault"] == 8, plans
+        assert plans[0]["strategy"] == "table", plans
+        assert binary_emits == 0
+        assert table_emits == 1
+        _assert_program(
+            tmp, table_source, 42, opts=(0, 2, 3), name="match_boundary_table"
+        )
+
+        binary_source = _match_source(binary_values)
+        binary_data = _build_ccr(tmp, binary_source, "match_boundary_binary")
+        plans, binary_emits, table_emits = _match_plan_full(
+            _ccr_file(tmp, binary_data, "match_boundary_binary_plan")
+        )
+        assert plans[0]["nondefault"] == 8, plans
+        assert plans[0]["strategy"] == "binary", plans
+        assert binary_emits == 1, binary_emits
+        assert table_emits == 0, table_emits
+        _assert_program(
+            tmp, binary_source, 42, opts=(0, 2, 3), name="match_boundary_binary"
+        )
+
+
+def test_table_follows_strings_in_rodata():
+    values = list(range(8))
+    lines = ["fn pick(n: int) -> int:", "    return match n:"]
+    for i, value in enumerate(values):
+        lines.append(f"        {value} => {i + 1},")
+    lines.append("        _ => 99")
+    lines += [
+        "",
+        "fn main() -> int:",
+        '    s := "DENSETABLESTRING"',
+        '    if s == "SECONDRODATASTRING":',
+        "        return 1",
+    ]
+    for i, value in enumerate(values):
+        lines.append(f"    if pick({value}) != {i + 1}:")
+        lines.append(f"        return {10 + i}")
+    lines.append("    return 42")
+    source = "\n".join(lines) + "\n"
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, source, "match_strings")
+        plans, _binary_emits, table_emits = _match_plan_full(
+            _ccr_file(tmp, data, "match_strings_plan")
+        )
+        assert plans[0]["strategy"] == "table", plans
+        assert table_emits == 1
+        _elf, elf_data = _build_corearch_elf(tmp, data, "match_strings_elf", opt=2)
+        _lea, table, entries = _table_region(elf_data, 8)
+        assert len(entries) == 8
+        # Tables are written after every string. Confirm both string bodies end
+        # before the table base, and the table does not run past the file (the
+        # HIT pool, when present, is appended after the tables).
+        for text in (b"DENSETABLESTRING", b"SECONDRODATASTRING"):
+            pos = elf_data.find(text)
+            assert pos >= 0, text
+            end = ((pos + len(text) + 1 + 7) // 8) * 8
+            assert table >= end, (text, table, end)
+        assert table + 8 * 4 <= len(elf_data), (table, len(elf_data))
+
+
+def test_project_mode_rejects_match_plan_channel():
+    # The project-mode entry (.ccr -> ELF only) must keep rejecting the
+    # dump-match-plan debug channel; the concat entry owns it.
+    text = (
+        BASE / "src/targets/x86_64/linux/elf/main.cr"
+    ).read_text(encoding="utf-8")
+    start = text.index("fn backend_has_extended_flags")
+    end = text.index("fn corearch_main")
+    guard = text[start:end]
+    assert 'cli_has("dump-match-plan")' in guard, guard
+    assert "ELF emission only" in text
 
 
 def test_match_plan_threshold_keeps_1_and_2_case_linear():
