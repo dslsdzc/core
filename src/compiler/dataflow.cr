@@ -277,6 +277,8 @@ fn df_use_var(consumer_node: int, var_idx: int):
 fn df_connect_srcs(node_id: int, opcode: int, s1: int, s2: int, s3: int, tk_aux: int):
     if opcode == IR_CONST:
         return
+    if opcode == IR_CONST_BIG:
+        return
     // all srcs are scalar values/labels
 
     if opcode == IR_BINARY:
@@ -547,6 +549,8 @@ fn df_graph_to_dot() -> string:
 fn df_opcode_name(opcode: int, s3: int) -> string:
     if opcode == IR_CONST:
         return "const"
+    if opcode == IR_CONST_BIG:
+        return "const_big"
     if opcode == IR_BINARY:
         if s3 == OP_PTR_ADD:
             return "ptr_add"

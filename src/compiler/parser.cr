@@ -571,6 +571,10 @@ fn parse_primary() -> int:
     if tok_k(t) == T_INT:
         advance_tok()
         return alloc_node(EXPR_INT, 0, 0, 0, tok_iv(t), TY_INT, 0, tok_ln(t), tok_cl(t))
+    if tok_k(t) == T_BIGINT:
+        advance_tok()
+        tl := r64(g_tokens, t * ESZ_TOKEN + OFF_TK_LEXEME)
+        return alloc_node(EXPR_BIGINT, tl, 0, 0, 0, TY_INT, 0, tok_ln(t), tok_cl(t))
     if tok_k(t) == T_DEX:
         advance_tok()
         // Node fields: a = binary64 bit pattern, restored from the numeric text in
@@ -1416,6 +1420,10 @@ fn parse_pattern() -> int:
     if tok_k(t) == T_INT:
         advance_tok()
         return alloc_node(EXPR_INT, 0, 0, 0, tok_iv(t), TY_INT, 0, tok_ln(t), tok_cl(t))
+    if tok_k(t) == T_BIGINT:
+        advance_tok()
+        tl := r64(g_tokens, t * ESZ_TOKEN + OFF_TK_LEXEME)
+        return alloc_node(EXPR_BIGINT, tl, 0, 0, 0, TY_INT, 0, tok_ln(t), tok_cl(t))
     if tok_k(t) == T_STRING || tok_k(t) == T_INTERP:
         return parse_interp_run()
     if tok_k(t) == T_CHAR:

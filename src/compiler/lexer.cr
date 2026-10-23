@@ -198,6 +198,7 @@ fn lookup_keyword(s: string) -> int:
 // has no carrier in this interface. It is not a semantic overflow. Wider
 // representations are future work.
 fn str_int_literal(s: string) -> int:
+    g_int_big = 0
     sl := str_len(s)
     base : ., mut = 10
     start : ., mut = 0
@@ -237,19 +238,19 @@ fn str_int_literal(s: string) -> int:
         // i64min. Use i64max/base, with the decimal digit boundary handled below.
         if base == 10:
             if value > 922337203685477580 || (value == 922337203685477580 && d > 7):
-                add_error("integer literal overflow")
+                g_int_big = 1
                 return 0
         else if base == 16:
             if value > 576460752303423487:
-                add_error("integer literal overflow")
+                g_int_big = 1
                 return 0
         else if base == 8:
             if value > 1152921504606846975:
-                add_error("integer literal overflow")
+                g_int_big = 1
                 return 0
         else:
             if value > 4611686018427387903:
-                add_error("integer literal overflow")
+                g_int_big = 1
                 return 0
         value = value * base + d
         digits = digits + 1
@@ -668,7 +669,11 @@ fn tokenize(_src: string, layout_bypass: int):
             if has_dot != 0:
                 add_tok_int_lex(T_DEX, str_to_scaled(num_str), str_intern(num_str), start_line, start_col)
             else:
-                add_tok_int(T_INT, str_int_literal(num_str), start_line, start_col)
+                iv := str_int_literal(num_str)
+                if g_int_big != 0:
+                    add_tok_str(T_BIGINT, big_lit_decimal(num_str), start_line, start_col)
+                else:
+                    add_tok_int(T_INT, iv, start_line, start_col)
             _pos = skip_ws(_src, _pos, _slen)
             continue
 

@@ -1403,6 +1403,10 @@ fn gen_expr(node: int) -> int:
         v := new_ir_var("int", TI_INT)
         emit(IR_CONST, v, ast_int_val(node), 0, 0, TI_INT)
         return v
+    if ast_kind(node) == EXPR_BIGINT:
+        v := new_ir_var("bigint", TI_INT)
+        emit(IR_CONST_BIG, v, ast_a(node), 0, 0, TI_INT)
+        return v
     if ast_kind(node) == EXPR_DEX:
         // 精确字面量：定点缩放整数常量（TI_DEX_S）。
         // apx 场景（变量级 apx 标签的运算）在运算点按 node.a 的 binary64 位模式重发射。

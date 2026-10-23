@@ -101,6 +101,7 @@ T_EXTERN : int = 100  // extern "C" / foreign function declaration
 // has a function named check and a CLI subcommand named check.
 T_HASH : int = 101
 T_INTERP : int = 102  // interpolation hole token; lexeme is the hole text, iv carries part and closure flags
+T_BIGINT : int = 103  // arbitrary precision integer token; lexeme is canonical decimal text
 
 // Layout tokens and the two colon meanings.
 // T_NEWLINE is emitted at the end of a logical line that contains a token. Blank
@@ -255,6 +256,7 @@ EXPR_OPTIONAL : int = 49  // a=inner type node (T? 类型位置)
 // a typed conversion call. data is the interned hole text; line and col locate the
 // hole for diagnostics.
 EXPR_INTERP_HOLE : int = 50  // data=hole text ni（解析期）；checker 改写后本 kind 不再存在
+EXPR_BIGINT : int = 51       // a=canonical decimal string ni; type TY_INT
 
 // Field representation in struct literal: two consecutive AST nodes
 // (name_idx, value_idx, line=line, col=col)
@@ -622,7 +624,8 @@ IR_YIELD : int = 28     // s1=value_var; emit value from flow to consumer channe
 IR_AWAIT : int = 29     // dest=value_var, s1=future_var; block until future ready, get value
 IR_BOUNDS_CHECK : int = 30 // s1=index, s2=max_len/len_var, type_kind=1 for dynamic max
 IR_ARENA_NEW   : int = 32   // dest=arena_var, src1=size_estimate
-IR_ARENA_RESET : int = 33   // src1=arena_id (dest=-1)
+IR_ARENA_RESET : int = 33   // src1=arena_id
+IR_CONST_BIG : int = 34     // dest=value, s1=canonical decimal string index, tk=TI_INT (dest=-1)
 IR_INLINE            : int = 34   // src1=fn_var; inline hint
 IR_NO_BOUNDS_CHECK   : int = 35   //skip bounds check for subsequent DEREFs
 IR_FAST              : int = 36   //allow precision-for-speed optimizations

@@ -276,6 +276,7 @@ g_checker_current_fi : int, mut
 // change the .ccr STR segment, so it must stay off by default to keep output
 // byte-identical.
 g_s1p_on : int, mut        // S1′ 打点开关：0 = 关（默认行为）· 1 = 开（`CORE_S1P=1`）
+g_int_big : int, mut       // set by str_int_literal when the literal does not fit a machine word
 g_s1p_seen : int, mut      // 0 = environment variable not read yet. The sentinel must be
                             // zero: non-literal global initializers are stored as 0 by the
                             // Python bootstrap build, so `= -1` cannot be relied on.

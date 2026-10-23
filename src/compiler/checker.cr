@@ -2799,6 +2799,8 @@ fn infer_expr(node: int) -> int:
     // 不得重排、不得合并成先取 kind 再查的循环（那会改短路路径）。
     if ast_kind(node) == EXPR_INT:
         return iface_lit_ti(EXPR_INT)
+    if ast_kind(node) == EXPR_BIGINT:
+        return TI_INT
     if ast_kind(node) == EXPR_NONE && ast_a(node) >= 0 && ast_a(node) != node:
         return infer_expr(ast_a(node))
     if ast_kind(node) == EXPR_DEX:

@@ -7,6 +7,7 @@ import ccr_schema
 import globals
 import dyn_arr
 import literal
+import big_lit
 import lexer
 import parser
 import checker
