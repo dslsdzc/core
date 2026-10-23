@@ -351,7 +351,83 @@ def test_schema_has_no_target_layout_words():
 
 
 # ---------------------------------------------------------------------------
-# 12. end-to-end: corec writes v10, corearch rejects v9 and accepts v10
+# 12. static: layout belongs to the target projection, not the frontend
+# ---------------------------------------------------------------------------
+
+# The semantic frontend must not ask for target byte sizes, alignments, slot
+# strides, field byte offsets, or allocation byte extents. corearch
+# reconstructs those from the semantic type ids plus the active target layout,
+# so the same source produces the same v10 bytes on every target.
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+FRONTEND_LAYOUT_FREE = (
+    "src/compiler/ir_gen.cr",
+    "src/compiler/ptr_analysis.cr",
+    "src/compiler/provenance_verify.cr",
+    "src/compiler/ccr_lower.cr",
+)
+FRONTEND_LAYOUT_CALLS = (
+    "mp_size",
+    "mp_align",
+    "mp_stride",
+    "mp_field_offset",
+    "mp_extent",
+    "mp_offset",
+)
+# Same target facts under new names are still target facts. The frontend must
+# not grow a private copy of the target layout.
+FRONTEND_TARGET_FACT_NAMES = ("word_bytes", "slot_size", "offset_bytes", "byte_offset")
+
+
+def test_frontend_has_no_layout_calls():
+    for path in FRONTEND_LAYOUT_FREE:
+        src = (REPO_ROOT / path).read_text(encoding="utf-8")
+        for name in FRONTEND_LAYOUT_CALLS + FRONTEND_TARGET_FACT_NAMES:
+            assert name not in src, f"{path} still calls {name}"
+
+
+def test_layout_introspection_is_a_target_query():
+    """@sizeOf/@alignOf/@field ask the target descriptor; the compiler does not
+    evaluate layout itself. Their results are program constants, so the same
+    source keeps byte-identical v10 output."""
+    ir_gen = (REPO_ROOT / "src/compiler/ir_gen.cr").read_text(encoding="utf-8")
+    for name in (
+        "target_introspect_size(",
+        "target_introspect_align(",
+        "target_introspect_field_offset(",
+    ):
+        assert name in ir_gen, f"ir_gen must ask the target descriptor for {name}"
+
+    desc = (REPO_ROOT / "src/targets/x86_64/linux/elf/frontend_target.cr").read_text(
+        encoding="utf-8"
+    )
+    for name in (
+        "fn target_introspect_size(",
+        "fn target_introspect_align(",
+        "fn target_introspect_field_offset(",
+    ):
+        assert name in desc, f"target descriptor missing {name}"
+
+
+def test_interp_has_no_direct_layout_calls():
+    """`corec run` executes IR without a projection pass, so it asks a
+    target-owned hook for the element scale. It must not reach into the
+    compiler mapping interface or inline the x86 scale itself."""
+    src = (REPO_ROOT / "src/compiler/interp.cr").read_text(encoding="utf-8")
+    for name in ("mp_offset", "mp_stride"):
+        assert name not in src, f"src/compiler/interp.cr still calls {name}"
+
+    hook_path = REPO_ROOT / "src/arch/x86_64/x86_mapping.cr"
+    hook = hook_path.read_text(encoding="utf-8")
+    assert "fn interp_ptr_offset(" in hook, "missing target-owned interp offset hook"
+    assert "fn interp_ptr_stride(" in hook, "missing target-owned interp stride hook"
+    # The hook is a target-owned delegation, never a hardcoded x86 scale.
+    hook_body = hook.split("fn interp_ptr_offset(", 1)[1]
+    assert "mp_offset(" in hook_body, "interp layout hook must delegate to the target"
+    assert "* 8" not in hook_body, "interp layout hook hardcodes the x86 scale"
+
+
+# ---------------------------------------------------------------------------
+# 13. end-to-end: corec writes v10, corearch rejects v9 and accepts v10
 # ---------------------------------------------------------------------------
 
 CORE_BASE = Path(__file__).resolve().parent.parent.parent

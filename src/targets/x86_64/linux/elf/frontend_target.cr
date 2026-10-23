@@ -51,6 +51,21 @@ fn target_so_index_path(home_dir: string, fs_path: string) -> string:
 fn target_static_runtime_source() -> string:
     return "src/runtime/rt.cr"
 
+// -- Compile-time target introspection -------------------------------------
+// @sizeOf / @alignOf / @field are source-level layout queries: the program asks
+// the target for a value, and the frontend emits that value as a program
+// constant. They are not frontend layout decisions — no IR opcode, access
+// width, element stride, or allocation extent depends on them — so the answer
+// lives with the target descriptor, not in the semantic frontend.
+fn target_introspect_size(ti: int) -> int:
+    return mp_size(ti)
+
+fn target_introspect_align(ti: int) -> int:
+    return mp_align(ti)
+
+fn target_introspect_field_offset(field_index: int) -> int:
+    return mp_field_offset(field_index)
+
 // Build the backend command for this target. The caller prefixes the sibling
 // corearch directory; the target owns the backend name and ABI flags.
 fn target_backend_command(ccr_path: string, out_path: string, is_static: int, opt_level: int) -> string:

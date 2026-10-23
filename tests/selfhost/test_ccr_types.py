@@ -1564,11 +1564,13 @@ def cir_entry_nodes(path: str):
 
 
 def test_p4t4_tk_slot_rule_per_node():
-    """㉖（P5 T2 重钉：双槽 → 单槽化）逐节点规则（探针夹具）：
+    """㉖（P5 T2 重钉：双槽 → 单槽化；v10 Task 5：前端去布局）逐节点规则（探针夹具）：
       · 类型行面（MINT_OPS）∧ 原子行 ⇒ term ≥ 0 ∧ aux == 0 ∧ 项 = ATOM(b == 行号)；
       · 类型行面 ∧ 复合行/越界/无类型 ⇒ term == -1 ∧ aux == 原码（码保真）；
-      · 辅码面 ⇒ term == -1 ∧ aux == 原码——**含数值陷阱**：DEREF/STORE_PTR 的宽度 8、
-        BOUNDS_CHECK 的旗标 1（两者数值上恰是合法类型行，只能靠分类表挡住）；
+      · 辅码面 ⇒ term == -1 ∧ aux == 原码——**含数值陷阱**：BOUNDS_CHECK 的旗标 1
+        （数值上恰是合法类型行 TI_DEX，只能靠分类表挡住）；
+      · IR_DEREF/IR_STORE_PTR 不再携带访问宽度（Task 5：宽度由 corearch 从
+        pointee 语义类型 + target 重建）⇒ 其 tk == 0 ∧ aux == 0；
       · 其余 op ⇒ term == -1 ∧ aux == 原码；
       · **派生码不变量（逐节点）**：term ≥ 0 ⇒ tk == b；aux ≠ 0 ⇒ tk == aux；否则 tk == 0。
     正控逐行类型面：int/bool/str/dex_s 四个类型行的 AK_* 与行号 b 槽。"""
@@ -1585,7 +1587,7 @@ def test_p4t4_tk_slot_rule_per_node():
         assert hdr['aux_nonzero'] > 0, "vacuous: no node carries an aux code"
 
         saw = {'const_rows': set(), 'binary_rows': set()}
-        traps = {'deref_w8': 0, 'store_w8': 0, 'bounds_flag1': 0, 'bounds_flag0': 0,
+        traps = {'deref_no_width': 0, 'store_no_width': 0, 'bounds_flag1': 0, 'bounds_flag0': 0,
                  'call_row': 0, 'spawn_dyn': 0}
         for (n, op, tk, term, tag, a, b, c, aux) in rows:
             # ── 派生码不变量（D22-①，逐节点）──
@@ -1615,10 +1617,10 @@ def test_p4t4_tk_slot_rule_per_node():
                 assert term == -1, \
                     f"node {n}: non-mint op {op} got term {term}"
                 assert aux == tk, f"node {n}: non-mint op {op} aux {aux} != code {tk}"
-                if op == IR_DEREF and tk == 8:
-                    traps['deref_w8'] += 1
-                if op == IR_STORE_PTR and tk == 8:
-                    traps['store_w8'] += 1
+                if op == IR_DEREF and tk == 0:
+                    traps['deref_no_width'] += 1
+                if op == IR_STORE_PTR and tk == 0:
+                    traps['store_no_width'] += 1
                 if op == IR_BOUNDS_CHECK and tk == 1:
                     traps['bounds_flag1'] += 1
                 if op == IR_BOUNDS_CHECK and tk == 0:
@@ -1634,9 +1636,9 @@ def test_p4t4_tk_slot_rule_per_node():
         assert (8, AK_DEX) in saw['const_rows'], \
             f"dex_s row (8) not mapped to AK_DEX: {saw['const_rows']}"
         assert saw['binary_rows'], "no binary node carries a term"
-        # 陷阱非空：宽度 8 / 旗标 1 / 旗标 0 必须逐条在夹具里出现过（否则用例空转）。
-        # IR_CALL 已入类型行面（P5 T2）⇒ 不再计入陷阱。
-        assert traps['deref_w8'] >= 1 and traps['store_w8'] >= 1, traps
+        # 陷阱非空：BOUNDS_CHECK 旗标 1/0 与「指针 op 无可宽度」必须逐条在夹具里
+        # 出现过（否则用例空转）。IR_CALL 已入类型行面（P5 T2）⇒ 不再计入陷阱。
+        assert traps['deref_no_width'] >= 1 and traps['store_no_width'] >= 1, traps
         assert traps['bounds_flag1'] >= 1 and traps['bounds_flag0'] >= 1, traps
     finally:
         _cleanup(src)

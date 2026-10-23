@@ -1,9 +1,17 @@
 // === provenance_verify.cr ===
-// ProvenanceVerify pass — checks DEREF offset against allocation size.
-// Runs after PointerAnalysis (ptr_analysis.cr) and RegionCheck (region_check.cr).
-// Detects out-of-bounds pointer accesses at compile time.
+// ProvenanceVerify pass — checks the DEREF/STORE_PTR element interval against
+// the allocation extent. Runs after PointerAnalysis (ptr_analysis.cr) and
+// RegionCheck (region_check.cr). Detects out-of-bounds pointer accesses at
+// compile time.
+//
+// Units are IR cells (element indices), never target bytes. PointerAnalysis
+// stores element offsets and this pass derives the allocation extent from the
+// ALLOC node's semantic count. corearch computes the matching byte extent from
+// the same node plus the target layout, so this decision is target-independent.
 
-fn get_alloc_size(alloc_seq: int) -> int:
+// Semantic extent of an allocation in IR cells.
+// -1 = unknown; leave the check to run time. Never approximate unknown as 0.
+fn get_alloc_extent(alloc_seq: int) -> int:
     // alloc_seq is a pts allocation bit, not a DF node index. Map it through
     // g_pa_alloc_nodes before reading the allocation node.
     if alloc_seq < 0 || alloc_seq >= g_pa_alloc_count:
@@ -14,12 +22,13 @@ fn get_alloc_size(alloc_seq: int) -> int:
     s3 := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S3)
 
     // IR_ALLOC marks a scalar variable slot, not a heap allocation, so it has no
-    // allocation size.
+    // allocation extent.
     if op == IR_ALLOC_ARRAY:
-        return mp_extent(s1, TI_INT)
-    // count * slot stride; elements are always one slot in IR_ALLOC_ARRAY.
+        // s1 is the semantic element count; one element occupies one IR cell.
+        return s1
     if op == IR_ALLOC_STRUCT:
-        // Match IR_ALLOC_STRUCT: field count times the slot stride.
+        // Field count is the struct's cell extent. An unknown struct name falls
+        // back to a single cell, matching the scalar placeholder in the IR.
         fi : int = -1
         si2 : ., mut = 0
         loop:
@@ -30,9 +39,56 @@ fn get_alloc_size(alloc_seq: int) -> int:
                 break
             si2 = si2 + 1
         if fi >= 0:
-            return mp_extent(si_field_count(fi), TI_INT)
-        return mp_stride(TI_INT)
+            return si_field_count(fi)
+        return 1
     return -1  // unknown; leave the check to run time
+
+// Semantic cell span of one value of type `ti`. Arrays and tuples are
+// contiguous element sequences, structs cover their fields, a slice view is a
+// (data, len) pair, and every scalar occupies one cell. This is the IR value
+// model, not a target byte size.
+fn pv_value_span(ti: int) -> int:
+    if ti < 0 || ti >= g_type_count:
+        return 1
+    k := get_type_kind(ti)
+    if k == TYP_ARRAY:
+        elem := pv_value_span(get_type_data(ti))
+        cnt := get_type_extra(ti)
+        if cnt <= 0:
+            return 1
+        return elem * cnt
+    if k == TYP_NAMED:
+        name_ni := get_type_data(ti)
+        si : ., mut = 0
+        loop:
+            if si >= g_struct_count:
+                break
+            if si_name(si) == name_ni:
+                fc := si_field_count(si)
+                if fc > 0:
+                    return fc
+                return 1
+            si = si + 1
+        return 1
+    if k == TYP_TUPLE:
+        n := get_type_data(ti)
+        if n > 0:
+            return n
+        return 1
+    if k == TYP_SLICE:
+        return 2
+    return 1
+
+// Cell span of the value a dereference reads or writes, derived from the
+// pointer's pointee type. The frontend no longer stores an access width code.
+fn pv_access_span(ptr_var: int) -> int:
+    ti := irv_type(ptr_var)
+    if ti < 0:
+        return 1
+    k := get_type_kind(ti)
+    if k == TYP_PTR || k == TYP_REF:
+        return pv_value_span(get_type_data(ti))
+    return 1
 
 fn get_alloc_var(alloc_seq: int) -> int:
     if alloc_seq < 0 || alloc_seq >= g_pa_alloc_count:
@@ -61,16 +117,15 @@ fn provenance_verify_func(nstart: int, ncount: int):
             break
         op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
         s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
-        // Read the access width in bytes from OFF_DF_AUX. Before the single-slot
-        // change it lived in the shared tk slot. Reading slot 40 would treat a
-        // type-term index as a width.
-        width : ., mut = cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_AUX)
 
         if (op == IR_DEREF || op == IR_STORE_PTR) && s1 >= 0:
             // Skip checks in unsafe blocks
             if pv_is_in_unsafe(ni) != 0:
                 ni = ni + 1
                 continue
+
+            // Access span in IR cells, from the pointee semantic type.
+            span := pv_access_span(s1)
 
             ptr_ti := irv_type(s1)
             // This check applies only to TYP_PTR values with a non-zero extra field,
@@ -86,9 +141,6 @@ fn provenance_verify_func(nstart: int, ncount: int):
                 ni = ni + 1
                 continue
 
-            if width <= 0:
-                width = 8
-
             pts := cell_load(g_pts, s1 * 8)
             off := cell_load(g_offsets, s1 * 8)
             runtime_targets : ., mut = 0
@@ -102,23 +154,25 @@ fn provenance_verify_func(nstart: int, ncount: int):
                 if bi >= 64:
                     break
                 if (pts / mask) % 2 != 0:
-                    alloc_size := get_alloc_size(bi)
-                    if alloc_size >= 0 && off >= 0:
-                        if width > alloc_size || off > alloc_size - width:
+                    alloc_extent := get_alloc_extent(bi)
+                    if alloc_extent >= 0 && off >= 0:
+                        if span > alloc_extent || off > alloc_extent - span:
                             check_error(EC_TK_INDEX,
-                                "pointer out of bounds: offset " + int_str(off) +
-                                " + width " + int_str(width) +
-                                " > size " + int_str(alloc_size),
+                                "pointer out of bounds: index " + int_str(off) +
+                                " + span " + int_str(span) +
+                                " > extent " + int_str(alloc_extent) +
+                                " (IR cells)",
                                 0, 0)
-                    else if alloc_size >= 0:
-                        if width > alloc_size:
+                    else if alloc_extent >= 0:
+                        if span > alloc_extent:
                             check_error(EC_TK_INDEX,
-                                "pointer access width " + int_str(width) +
-                                " exceeds allocation size " + int_str(alloc_size),
+                                "pointer access span " + int_str(span) +
+                                " exceeds allocation extent " + int_str(alloc_extent) +
+                                " (IR cells)",
                                 0, 0)
                         else:
                             runtime_targets = runtime_targets + 1
-                            runtime_size = alloc_size
+                            runtime_size = alloc_extent
                             runtime_base = get_alloc_var(bi)
                         // Unknown allocation information leaves s2 and s3 unset. The
                         // encoder keeps a null trap for s3 = 0.

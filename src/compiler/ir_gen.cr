@@ -1084,9 +1084,9 @@ fn ti_from_type_expr(node: int) -> int:
     // Complex type expressions: delegate to checker's resolver
     return res_type_node(node)
 
-// Type size in bytes. The classic mapping lives in mapping.cr.
-fn type_size(ti: int) -> int:
-    return mp_size(ti)
+// The frontend carries the pointee *type*, never a byte width. corearch
+// reconstructs the access width for IR_DEREF/IR_STORE_PTR from this type and
+// the active target layout.
 
 fn ptr_pointee_type(var_idx: int) -> int:
     if var_idx < 0:
@@ -1097,16 +1097,6 @@ fn ptr_pointee_type(var_idx: int) -> int:
         if k == TYP_PTR || k == TYP_REF:
             return get_type_data(ti)
     return TI_INT
-
-fn ptr_access_width(var_idx: int) -> int:
-    width := type_size(ptr_pointee_type(var_idx))
-    if width <= 0:
-        return mp_stride(TI_INT)
-    return width
-
-// Type alignment in bytes. The classic mapping lives in mapping.cr.
-fn type_align(ti: int) -> int:
-    return mp_align(ti)
 
 // Resolve a type index to a struct info index.
 // Returns -1 if the type is not a struct type.
@@ -1148,8 +1138,10 @@ fn ti_has_field(ti: int, name: string) -> int:
         fi = fi + 1
     return 0
 
-// Get field byte offset. The slot stride comes from mapping.cr.
-fn ti_field_offset(ti: int, name: string) -> int:
+// Get the field index of `name` in type `ti`. -1 = no such field.
+// @field byte offsets are a target introspection query and are resolved by the
+// target descriptor at the call site; this helper stays semantic.
+fn ti_field_index(ti: int, name: string) -> int:
     si := ti_resolve_struct(ti)
     if si < 0:
         return -1
@@ -1161,7 +1153,7 @@ fn ti_field_offset(ti: int, name: string) -> int:
         fn_ni := si_field_name(si, fi)
         fname := istr_get(fn_ni)
         if str_eq(fname, name) != 0:
-            return mp_field_offset(fi)
+            return fi
         fi = fi + 1
     return -1
 
@@ -1859,7 +1851,7 @@ fn gen_expr(node: int) -> int:
             val_var = dex_slot_norm(val_var)   // apx: pointee slots are always exact; *p = d must not be approximated.
             if g_optrep_on != 0 && ti_is_optional(ptr_pointee_type(ptr_var)) != 0:
                 val_var = box_for_slot_flag(val_node, val_var, 1)
-            emit(IR_STORE_PTR, -1, ptr_var, val_var, 0, ptr_access_width(ptr_var))
+            emit(IR_STORE_PTR, -1, ptr_var, val_var, 0, 0)
             return val_var
         return val_var
 
@@ -1934,7 +1926,7 @@ fn gen_expr(node: int) -> int:
             inner_var := gen_expr(ast_a(node))
             inner_var = force_if_thunk(inner_var)
             dv := new_ir_var("deref", ptr_pointee_type(inner_var))
-            emit(IR_DEREF, dv, inner_var, -1, 0, ptr_access_width(inner_var))
+            emit(IR_DEREF, dv, inner_var, -1, 0, 0)
             return dv
         op_var := gen_expr(ast_a(node))
         op_var = force_if_thunk(op_var)
@@ -2044,18 +2036,20 @@ fn gen_expr(node: int) -> int:
             name_ni := ast_a(func_node)
             name := istr_get(name_ni)
 
-            // @sizeOf(T): emit IR_CONST with type size
+            // @sizeOf(T): emit IR_CONST with the target's size for T. Source-level
+            // layout introspection is a program request, so the target descriptor
+            // answers it; no IR width or stride depends on this value.
             if str_eq(name, "sizeOf") != 0:
                 ti := ti_from_type_expr(ast_a(first_arg))
-                sz := type_size(ti)
+                sz := target_introspect_size(ti)
                 v := new_ir_var("_sizeof", TI_INT)
                 emit(IR_CONST, v, sz, 0, 0, TI_INT)
                 return v
 
-            // @alignOf(T): emit IR_CONST with type alignment
+            // @alignOf(T): emit IR_CONST with the target's alignment for T.
             if str_eq(name, "alignOf") != 0:
                 ti := ti_from_type_expr(ast_a(first_arg))
-                al := type_align(ti)
+                al := target_introspect_align(ti)
                 v := new_ir_var("_alignof", TI_INT)
                 emit(IR_CONST, v, al, 0, 0, TI_INT)
                 return v
@@ -2096,13 +2090,17 @@ fn gen_expr(node: int) -> int:
                 emit(IR_CONST, v, exists, 0, 0, TI_BOOL)
                 return v
 
-            // @field(T, name): get field offset
+            // @field(T, name): target byte offset of a field. The field index is
+            // semantic; the target descriptor maps it to the target layout.
             if str_eq(name, "field") != 0:
                 ti := ti_from_type_expr(ast_a(first_arg))
                 name_arg := ast_b(first_arg)
                 name_expr := ast_a(name_arg)
                 fn_name := istr_get(ast_int_val(name_expr))
-                off := ti_field_offset(ti, fn_name)
+                fi := ti_field_index(ti, fn_name)
+                off : ., mut = -1
+                if fi >= 0:
+                    off = target_introspect_field_offset(fi)
                 v := new_ir_var("_fldoff", TI_INT)
                 emit(IR_CONST, v, off, 0, 0, TI_INT)
                 return v
@@ -2898,7 +2896,9 @@ fn gen_expr(node: int) -> int:
             if ast_kind(type_node) == 19:
                 sz := ast_int_val(type_node)
                 if sz > 0:
-                    emit(IR_ALLOC_ARRAY, var, sz, mp_stride(TI_INT), 0, 0)
+                    // Array stride is a target fact; corearch reconstructs it from
+                    // the allocation count. src2/src3 stay zero on the wire.
+                    emit(IR_ALLOC_ARRAY, var, sz, 0, 0, 0)
                     is_arr = 1
                     // F1：记录数组类型（TYP_ARRAY extra=size），直接索引越界
                     // 检查（arr_len_lit_of）依赖该长度信息。
@@ -3024,11 +3024,12 @@ fn gen_expr(node: int) -> int:
         // 只对 `TYP_REF`：`PTR` 不解，与 checker 一致(`p as *S` followed by `p.v` is rejected)。
         // `&mut x` 同为 `TYP_REF`（仅 `extra` = mut 标记不同）-> 本判定按 kind、不看 extra -> 一并覆盖。
         //
-        // 发射序逐字镜像 UOP_DEREF 分支（IR_DEREF + ptr_pointee_type +
-        // ptr_access_width）。该序已被 (*p).v(value 42)证明正确，不另创新序。
+        // 发射序逐字镜像 UOP_DEREF 分支（IR_DEREF + ptr_pointee_type）。
+        // 该序已被 (*p).v(value 42)证明正确，不另创新序。宽度由 corearch 从
+        // pointee 语义类型重建，前端不再携带。
         if get_type_kind(irv_type(obj_var)) == TYP_REF:
             dv := new_ir_var("autoderef", ptr_pointee_type(obj_var))
-            emit(IR_DEREF, dv, obj_var, -1, 0, ptr_access_width(obj_var))
+            emit(IR_DEREF, dv, obj_var, -1, 0, 0)
             obj_var = dv
         v := new_ir_var("field", TI_INT)
         fi : ., mut = ast_type_val(node)
@@ -3323,7 +3324,8 @@ fn gen_expr(node: int) -> int:
         elem_idx := ast_a(node)
         ec : ., mut = ast_b(node)
         tv := new_ir_var("tuple", TI_INT)
-        emit(IR_ALLOC_ARRAY, tv, ec, 0, mp_stride(TI_INT), 0)  // target slot stride
+        // Element stride is a target fact; corearch reconstructs it.
+        emit(IR_ALLOC_ARRAY, tv, ec, 0, 0, 0)
         // Store each element at its offset
         e : ., mut = 0
         loop:

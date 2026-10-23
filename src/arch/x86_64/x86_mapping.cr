@@ -103,3 +103,16 @@ fn x86_mp_offset(index: int, ti: int) -> int:
 // Byte offset of a struct field.
 fn x86_mp_field_offset(field_index: int) -> int:
     return field_index * X86_MP_WORD_BYTES
+
+// ── Interpreter layout hooks ───────────────────────────────────────────────
+// `corec run` executes IR directly, without the projection pass corearch runs
+// after loading a .ccr. The interpreter therefore asks the target for its
+// element scale through these hooks instead of naming a layout interface or
+// embedding an x86 constant. A different target replaces this file; interp.cr
+// does not change.
+fn interp_ptr_offset(index: int) -> int:
+    return mp_offset(index, TI_INT)
+
+// Element stride used when turning a pointer difference back into a count.
+fn interp_ptr_stride() -> int:
+    return mp_stride(TI_INT)

@@ -450,6 +450,11 @@ def main():
         'src/compiler/lexer.cr',
         'src/compiler/parser.cr',
         'src/compiler/checker.cr',
+        # The shared target descriptor (targets/.../frontend_target.cr) answers
+        # @sizeOf/@alignOf/@field through the target mapping, so the LSP links
+        # the same target-neutral interface + x86 implementation as corec.
+        'src/compiler/mapping.cr',
+        'src/arch/x86_64/x86_mapping.cr',
         'src/compiler/prelude.cr',
         'src/arch/x86_64/x86_frontend_abi.cr',
         'src/os/linux/linux_frontend_abi.cr',

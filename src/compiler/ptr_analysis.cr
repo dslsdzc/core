@@ -197,7 +197,8 @@ fn pa_store(ptr_var: int, val_var: int) -> int:
     return changed
 
 fn ptr_analysis_func(nstart: int, ncount: int, vstart: int, vcount: int):
-    // Initialize points-to sets and offsets for this function's variables.
+    // Initialize points-to sets and semantic element offsets for this function's
+    // variables. Offsets are element indices, never target byte addresses.
     vi : ., mut = 0
     loop:
         if vi >= vcount:
@@ -260,9 +261,10 @@ fn ptr_analysis_func(nstart: int, ncount: int, vstart: int, vcount: int):
                 if op == IR_ADDR_INDEX && s1 >= 0:
                     if pa_merge_pts(d, s1) != 0:
                         changed = 1
-                    // The index decides the offset. A constant index gives
-                    // index times the mapping stride; a dynamic index gives -1,
-                    // which makes provenance_verify emit a runtime check.
+                    // The index decides the semantic element offset. A constant
+                    // index adds that many elements; a dynamic index gives -1,
+                    // which makes provenance_verify emit a runtime check. Byte
+                    // scaling is a target fact and belongs to corearch.
                     base_off := cell_load(g_offsets, s1 * 8)
                     idx_val : int = -1
                     if s2 >= 0:
@@ -272,12 +274,13 @@ fn ptr_analysis_func(nstart: int, ncount: int, vstart: int, vcount: int):
                             if prod_op == IR_CONST:
                                 idx_val = cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1)
                     if idx_val >= 0 && base_off >= 0:
-                        cell_store(g_offsets, d * 8, base_off + mp_offset(idx_val, TI_INT))
+                        cell_store(g_offsets, d * 8, base_off + idx_val)
                     else:
                         cell_store(g_offsets, d * 8, -1)
 
                 // IR_SLICE propagates the underlying array provenance for
-                // d = &arr[low]. A constant low gives low times the mapping stride.
+                // d = &arr[low]. A constant low adds that many elements; the
+                // target scale is not part of the analysis.
                 if op == IR_SLICE && s1 >= 0:
                     if pa_merge_pts(d, s1) != 0:
                         changed = 1
@@ -290,7 +293,7 @@ fn ptr_analysis_func(nstart: int, ncount: int, vstart: int, vcount: int):
                             if prod_op == IR_CONST:
                                 low_val = cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1)
                     if low_val >= 0 && base_off >= 0:
-                        cell_store(g_offsets, d * 8, base_off + mp_offset(low_val, TI_INT))
+                        cell_store(g_offsets, d * 8, base_off + low_val)
                     else:
                         cell_store(g_offsets, d * 8, -1)
 
@@ -308,10 +311,12 @@ fn ptr_analysis_func(nstart: int, ncount: int, vstart: int, vcount: int):
                             prod_op := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
                             if prod_op == IR_CONST:
                                 off_val = cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1)
+                    // Pointer add and subtract propagate provenance and the
+                    // semantic element offset. Constant offsets are exact.
                     if s3 == OP_PTR_ADD:
-                        cell_store(g_offsets, d * 8, base_off + mp_offset(off_val, TI_INT))
+                        cell_store(g_offsets, d * 8, base_off + off_val)
                     else:
-                        cell_store(g_offsets, d * 8, base_off - mp_offset(off_val, TI_INT))
+                        cell_store(g_offsets, d * 8, base_off - off_val)
 
                 // LOAD: copy provenance from s1 to d.
                 if op == IR_LOAD && s1 >= 0:

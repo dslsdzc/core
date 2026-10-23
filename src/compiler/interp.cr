@@ -83,11 +83,11 @@ fn ir_interp_binary_raw(d: int, s1: int, s2: int, s3: int):
     else if s3 == 13:
         cell_store(g_ir_vals, d * 8, lv != 0 || rv != 0)
     else if s3 == 17:
-        cell_store(g_ir_vals, d * 8, lv + mp_offset(rv, TI_INT))
+        cell_store(g_ir_vals, d * 8, lv + interp_ptr_offset(rv))
     else if s3 == 18:
-        cell_store(g_ir_vals, d * 8, lv - mp_offset(rv, TI_INT))
+        cell_store(g_ir_vals, d * 8, lv - interp_ptr_offset(rv))
     else if s3 == 19:
-        cell_store(g_ir_vals, d * 8, (lv - rv) / mp_stride(TI_INT))
+        cell_store(g_ir_vals, d * 8, (lv - rv) / interp_ptr_stride())
 
 // Shared IR_BINARY dispatch for the main loop and callee loops.
 // g_ir_vals int slots hold tagged mathematical integers. Char/bool/dex and
@@ -106,11 +106,11 @@ fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int):
         // Pointer add/sub/diff: the pointer is raw; the offset is mathematical.
         off := ir_interp_word(rv)
         if s3 == 17:
-            cell_store(g_ir_vals, d * 8, lv + mp_offset(off, TI_INT))
+            cell_store(g_ir_vals, d * 8, lv + interp_ptr_offset(off))
         else if s3 == 18:
-            cell_store(g_ir_vals, d * 8, lv - mp_offset(off, TI_INT))
+            cell_store(g_ir_vals, d * 8, lv - interp_ptr_offset(off))
         else:
-            cell_store(g_ir_vals, d * 8, ir_interp_tag((lv - rv) / mp_stride(TI_INT)))
+            cell_store(g_ir_vals, d * 8, ir_interp_tag((lv - rv) / interp_ptr_stride()))
         return
     if s3 == 12 || s3 == 13:
         // Boolean and/or store raw 0/1.
