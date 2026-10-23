@@ -1447,6 +1447,91 @@ def test_dense_threshold_boundary():
         )
 
 
+def test_dense_table_with_bigint_string_interning():
+    # Regression: IR_CONST_BIG interns a decimal string during Phase 3 via
+    # g2_str_off. A g2_rodata_sz()-derived table offset recorded during code
+    # emission then pointed into the string area and the table jump crashed.
+    source = """fn pick(n: int) -> int:
+    return match n:
+        0 => 1,
+        1 => 2,
+        2 => 3,
+        3 => 4,
+        4 => 5,
+        5 => 6,
+        6 => 7,
+        7 => 8,
+        _ => 99
+
+fn main() -> int:
+    big := 1180591620717411303424
+    if big == 0:
+        return 1
+    if pick(0) != 1:
+        return 10
+    if pick(7) != 8:
+        return 11
+    if pick(9) != 99:
+        return 12
+    return 42
+"""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, source, "match_bigint_string")
+        plans, binary_emits, table_emits = _match_plan_full(
+            _ccr_file(tmp, data, "match_bigint_string_plan")
+        )
+        assert plans[0]["nondefault"] == 8, plans
+        assert plans[0]["strategy"] == "table", plans
+        assert binary_emits == 0
+        assert table_emits == 1
+        _assert_program(
+            tmp, source, 42, opts=(0, 2, 3), name="match_bigint_string"
+        )
+
+        # Same-function ordering: the MATCH is emitted before the BigInt literal
+        # is interned, so the LEA must still be patched later.
+        same_source = """fn same(n: int) -> int:
+    r := match n:
+        0 => 1,
+        1 => 2,
+        2 => 3,
+        3 => 4,
+        4 => 5,
+        5 => 6,
+        6 => 7,
+        7 => 8,
+        _ => 99
+    big := 1180591620717411303424
+    if big == 0:
+        return 1
+    return r
+
+fn main() -> int:
+    if same(0) != 1:
+        return 10
+    if same(7) != 8:
+        return 11
+    if same(9) != 99:
+        return 12
+    return 42
+"""
+        same_data = _build_ccr(tmp, same_source, "match_bigint_same_fn")
+        same_plans, same_binary, same_tables = _match_plan_full(
+            _ccr_file(tmp, same_data, "match_bigint_same_fn_plan")
+        )
+        assert same_plans[0]["strategy"] == "table", same_plans
+        assert same_binary == 0
+        assert same_tables == 1
+        _assert_program(
+            tmp,
+            same_source,
+            42,
+            opts=(0, 2, 3),
+            name="match_bigint_same_fn",
+        )
+
+
 def test_table_follows_strings_in_rodata():
     values = list(range(8))
     lines = ["fn pick(n: int) -> int:", "    return match n:"]

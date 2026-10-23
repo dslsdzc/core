@@ -899,13 +899,15 @@ fn e2_emit_match_table(buf: string, p: int, s2: int, s3: int, span: int, tagged:
     if tagged != 0:
         w = w + e2_big_untag_reg(buf, w, 10) // sar r10, 1
 
-    // Table lives after the strings. Record the in-rodata offset for the LEA
-    // patch, exactly like a string reference.
-    table_off := g2_rodata_sz() + g_match_table_cursor
-    grow_rodataref(g_x86_rodataref_count + 1)
-    cell_store(g_x86_rodataref_pos, g_x86_rodataref_count * 8, w)
-    cell_store(g_x86_rodataref_ro, g_x86_rodataref_count * 8, table_off)
-    g_x86_rodataref_count = g_x86_rodataref_count + 1
+    // Table lives after the strings, whose final size is not known during code
+    // emission (Phase 3 may still intern BigInt decimal strings). Record the LEA
+    // displacement position with this table's ordinal; the rodata writer patches
+    // it once the table has an actual address.
+    table_id := g_match_table_cursor
+    grow_match_table_ref(g_match_table_ref_count + 1)
+    cell_store(g_match_table_ref_pos, g_match_table_ref_count * 8, w)
+    cell_store(g_match_table_ref_id, g_match_table_ref_count * 8, table_id)
+    g_match_table_ref_count = g_match_table_ref_count + 1
     w = w + e2_lrb(buf, w, 0)               // lea r11, [rip+table]
 
     // movsxd rax, dword [r11+r10*4]
@@ -927,15 +929,18 @@ fn e2_emit_match_table(buf: string, p: int, s2: int, s3: int, span: int, tagged:
     // A table is only chosen with a DEFAULT arm, so both miss edges land there.
     e2_match_patch_miss(buf, lo_pos, 1, default_lbl, w)
     e2_match_patch_miss(buf, hi_pos, 1, default_lbl, w)
-    g_match_table_cursor = g_match_table_cursor + span * 4
+    g_match_table_cursor = table_id + 1
     return w - p
 
 // Write dense tables into rodata at ro_tables_start (absolute buffer position,
-// immediately after the strings). Rescans functions/instrs in emission order
-// and uses the same e2_match_table_span predicate, so offsets line up with the
-// LEA references recorded during code emission. Returns the table bytes written.
+// immediately after the strings). Rescans functions/instrs in emission order,
+// uses the same e2_match_table_span predicate, and patches each table's recorded
+// LEA with the actual address. Returns the table bytes written. The LEA patch is
+// deferred because Phase 3 may intern BigInt decimal strings after code emission,
+// so no in-rodata offset is stable at e2_emit_match_table time.
 fn e2_match_write_tables(buf: string, ro_tables_start: int) -> int:
     g_match_table_ro_cursor = 0
+    table_bytes : ., mut = 0
     fi : ., mut = 0
     loop:
         if fi >= g_ir_func_count:
@@ -957,7 +962,8 @@ fn e2_match_write_tables(buf: string, ro_tables_start: int) -> int:
                     first := cell_load(idx, 0)
                     minv := e2_match_case_value(s2, first)
                     default_lbl := e2_match_default_label(s2, s3)
-                    table_abs := ro_tables_start + g_match_table_ro_cursor
+                    table_id := g_match_table_ro_cursor
+                    table_abs := ro_tables_start + table_bytes
                     def_abs := e2_label_abs_pos(default_lbl)
                     if def_abs < 0:
                         def_abs = table_abs
@@ -978,10 +984,20 @@ fn e2_match_write_tables(buf: string, ro_tables_start: int) -> int:
                                 vi = vi + 1
                         w32(buf, table_abs + k * 4, target_abs - table_abs)
                         k = k + 1
-                    g_match_table_ro_cursor = g_match_table_ro_cursor + span * 4
+                    // Patch every LEA that refers to this table ordinal.
+                    ri : ., mut = 0
+                    loop:
+                        if ri >= g_match_table_ref_count:
+                            break
+                        if cell_load(g_match_table_ref_id, ri * 8) == table_id:
+                            ref_pos := cell_load(g_match_table_ref_pos, ri * 8)
+                            w32(buf, ref_pos + 3, table_abs - (ref_pos + 7))
+                        ri = ri + 1
+                    g_match_table_ro_cursor = table_id + 1
+                    table_bytes = table_bytes + span * 4
             ii = ii + 1
         fi = fi + 1
-    return g_match_table_ro_cursor
+    return table_bytes
 
 fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
     op := iri_op(instr_idx)

@@ -1803,6 +1803,7 @@ fn elf_gen(buf: string) -> int:
     g_match_bin_emits = 0
     g_match_table_emits = 0
     g_match_table_cursor = 0
+    g_match_table_ref_count = 0
     // Global label -> absolute position map for the rodata table writer. g_label_poses
     // is overwritten per function; table targets are global label numbers.
     if g_label_abs_cap < g_label_count:

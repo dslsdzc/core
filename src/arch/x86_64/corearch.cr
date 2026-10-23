@@ -325,6 +325,7 @@ fn dump_match_plan():
     g_match_bin_emits = 0
     g_match_table_emits = 0
     g_match_table_cursor = 0
+    g_match_table_ref_count = 0
     g_pending_count = 0
     // Mirror elf_gen's pre-emission global marking so e2_load_var's global/local
     // dispatch reads an initialized table during the scratch pass.
@@ -399,6 +400,8 @@ fn dump_match_plan():
     print("table_emits ")
     print_i(g_match_table_emits)
     println("")
+    // Scratch pass records refs but never patches them; drop them.
+    g_match_table_ref_count = 0
 
 // --dump-nod-types: print each node's semantic type_id and feature flags. The
 // disk has no term-index field in v10, so this channel exposes the actual wire
