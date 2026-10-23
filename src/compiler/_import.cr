@@ -30,6 +30,7 @@ import purity_selftest
 import diag
 import ir_gen
 import dataflow
+import ccr_lower
 import ccr_io
 import ent_kernel
 import module

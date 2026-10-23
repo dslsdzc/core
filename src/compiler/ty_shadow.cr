@@ -481,7 +481,7 @@ fn sh_tk_split_impl(opcode: int, tk: int, count_fail: int):
             if sh_tk_is_type_face(opcode) != 0 && sh_tk_row_state(tk) == 0:
                 g_tk_face_fail = g_tk_face_fail + 1
 
-// 槽 -> 派生码（唯一派生点；dataflow.cr 的 lower_to_ccr / ir_gen.cr 的 emit /
+// 槽 -> 派生码（唯一派生点；ccr_lower.cr 的 lower_to_ccr / ir_gen.cr 的 emit /
 // cir_cache.cr 的装载侧共用）：辅码 ≠ 0 -> 辅码；无项 -> 0；否则 `atom_of(项)`
 // （不可逆 -> -1：显式、响亮，绝不近似成 0/1）。
 fn sh_dfn_code_of_slots(tk_term: int, tk_aux: int) -> int:

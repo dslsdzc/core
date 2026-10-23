@@ -363,6 +363,7 @@ def main():
         'src/compiler/monomorph.cr',
         'src/compiler/pass.cr',
         'src/compiler/dataflow.cr',
+        'src/compiler/ccr_lower.cr',
         'src/compiler/ccr_io.cr',
         'src/lattice/ent_kernel.cr',
         'src/compiler/module.cr',
