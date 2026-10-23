@@ -335,6 +335,23 @@ fn callee_ret_optional(func_ni: int) -> int:
         return 1
     return 0
 
+// Declared `dex?` return row for a call result. The payload can be bare
+// (scaled) or boxed; the declaration row is what later match/inner reads use
+// to recover the payload form. -1 = not a dex-optional return.
+fn callee_ret_dex_opt_decl(func_ni: int) -> int:
+    if func_ni < 0:
+        return -1
+    cfi := find_func(func_ni)
+    if cfi < 0:
+        return -1
+    cfn := fi_ast_node(cfi)
+    if cfn < 0 || ast_kind(cfn) != EXPR_FN:
+        return -1
+    rtn := ast_type_val(cfn)
+    if rtn < 0 || dex_opt_type_node(rtn) == 0:
+        return -1
+    return res_type_node(rtn)
+
 // ── 容量批 T2：可选聚合槽的存储边界规范化（写点装箱）──
 // 法则：可选聚合槽（结构体字段 / 数组·切片元素 / 元组元素 / 枚举携带值 / 全局槽）任何时刻恒持
 // 装箱值（Some 对象）或 None；裸 T 值在写点装箱。读侧零改动（既有装箱假定）。
@@ -489,7 +506,10 @@ fn agg_field_read_form(field_node: int, fi: int) -> int:
     si := find_struct(ast_c(field_node))
     if si < 0:
         return TI_INT
-    if agg_read_form_is_dex(si_field_type_node(si, fi)) != 0:
+    ftn := si_field_type_node(si, fi)
+    if agg_read_form_is_dex(ftn) != 0:
+        return TI_DEX_S
+    if dex_opt_type_node(ftn) != 0:
         return TI_DEX_S
     return TI_INT
 
@@ -522,6 +542,30 @@ fn agg_payload_read_form(pat_node: int, pos: int) -> int:
             return TI_INT
         vi = vi + 1
     return TI_INT
+
+// 枚举携带值的声明行（仅 `T?` 且内层 dex；-1 = 不登记）。用于外层 match 的
+// 载荷变量：内层再 match 时，`dex_opt_slot_ti(irv_decl_ti(...))` 才能识别它。
+fn agg_payload_decl_ti(pat_node: int, pos: int) -> int:
+    if pat_node < 0 || pos < 0:
+        return -1
+    name_ni := ast_a(pat_node)
+    si := find_gsym(name_ni)
+    if si < 0:
+        return -1
+    ei := find_enum_row_of(sym_type(si))
+    if ei < 0:
+        return -1
+    vi : ., mut = 0
+    loop:
+        if vi >= ei_variant_count(ei):
+            return -1
+        if ei_variant_name(ei, vi) == name_ni:
+            tn := ei_variant_type_node(ei, vi, pos)
+            if dex_opt_type_node(tn) != 0:
+                return res_type_node(tn)
+            return -1
+        vi = vi + 1
+    return -1
 
 // 元素表达式（元组/数组字面量的元素槽无声明信息）的可选性：保守 = 不可选 -> 不装箱
 // 覆盖范围 = ident（声明侧表）/ 调用（被调返回类型可选）；其余形态登记为未覆盖情形。
@@ -2422,6 +2466,13 @@ fn gen_expr(node: int) -> int:
                 emit_rep_set(g_optrep_arg_cell0 + ai3, rep_enc_of_expr(an3, av3))
                 ai3 = ai3 + 1
         emit(IR_CALL, dest, first_arg_var, ac, func_ni, call_ti)
+        // `dex?` returns carry a declared optional row, not just TI_INT. Keeping
+        // the row on the call result lets a later match recover the payload form
+        // (bare scaled vs boxed Some) without guessing from the IR value width.
+        if g_optrep_on != 0:
+            cdd := callee_ret_dex_opt_decl(func_ni)
+            if cdd >= 0:
+                irv_set_decl_ti(dest, cdd)
         // 可选表示：被调返回可选 -> 1) 读返回信道（读点必须紧跟真实
         // 调用：调用点与返回点同进程同栈、其间无写入）；2) 禁惰性 thunk，thunk 把
         // 调用推迟到 force 点，读点即悬空(for example: `v := g()` 的 g 判纯 -> thunk -> 表示位
@@ -2749,8 +2800,16 @@ fn gen_expr(node: int) -> int:
                     // 携带值入 dex 运算会被当 int 再 ×S（`dex_scale_int`）。
                     fv_ti : ., mut = agg_payload_read_form(arm_pat, fi)
                     if fv_ti == TI_INT && match_val >= 0:
-                        if dex_opt_slot_ti(irv_decl_ti(match_val)) != 0:
+                        if irv_type(match_val) == TI_DEX_S:
                             fv_ti = TI_DEX_S
+                        else if dex_opt_slot_ti(irv_decl_ti(match_val)) != 0:
+                            fv_ti = TI_DEX_S
+                        else if dex_opt_slot_ti(irv_type(match_val)) != 0:
+                            fv_ti = TI_DEX_S
+                    if g_optrep_on != 0 && match_val >= 0:
+                        pdt := agg_payload_decl_ti(arm_pat, fi)
+                        if pdt >= 0:
+                            irv_set_decl_ti(fv, pdt)
                     irv_set_type(fv, fv_ti)
                     if rep_v < 0:
                         emit(IR_LOAD_FIELD, fv, match_val, 0, fi + 1, 0)  // +1 for tag offset
@@ -2980,6 +3039,10 @@ fn gen_expr(node: int) -> int:
         //  读点定类型取声明信息形式（dex 声明 -> TI_DEX_S），零 alloc 节点判，
         // 非 dex 形态恒 TI_INT -> 零足迹。必须在 fi 解出之后（字段位序）。
         irv_set_type(v, agg_field_read_form(node, fi))
+        if g_optrep_on != 0:
+            ft := field_ti_of_node(node, fi)
+            if ft >= 0 && dex_opt_slot_ti(ft) != 0:
+                irv_set_decl_ti(v, ft)
         emit(IR_LOAD_FIELD, v, obj_var, 0, fi, 0)
         return v
 
