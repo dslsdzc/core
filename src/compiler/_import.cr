@@ -6,6 +6,7 @@ import ast
 import ccr_schema
 import globals
 import dyn_arr
+import literal
 import lexer
 import parser
 import checker

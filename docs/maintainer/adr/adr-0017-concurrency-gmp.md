@@ -10,7 +10,7 @@
 
 ## 决策
 
-- 采用与 Go runtime 同构的 GMP 简化模型：G = `goroutine`（`fiber`，16KB 栈，独立 arena），M = machine，P 不分离，合并到 M；没有 `GOMAXPROCS`，M 的数量等于 CPU 核数。
+- 采用与 Go runtime 同构的 GMP 简化模型：G = `goroutine`（`fiber`，16KB 栈，独立 arena），M = machine，P 不分离，合并到 M；没有 `GOMAXPROCS`，M 的数量等于 CPU 核数。栈尺寸常量是 `src/stdlib/goroutine.cr` 的 `G_STACK_SIZE`。
 - G 状态机（`_Gidle`/`_Grunnable`/`_Grunning`/`_Gwaiting`/`_Gdead`）；本地 run queue 加全局队列偷取；切换是用户态 `fiber_switch`（协作式）。
 - channel 通信（环形缓冲 + `send_wait`/`recv_wait` 队列，值拷贝语义）；go 返回 `result_ch`。
 

@@ -12,6 +12,10 @@ fn goroutine_wrapper_addr() -> int:
 // Goroutine ID counter
 g_next_id : int, mut = 1
 
+// Fiber stack size for one G. This is an execution policy constant, not a
+// frontend type-layout rule.
+G_STACK_SIZE : int = 16384
+
 // G struct layout (80 bytes):
 //   0: id
 //   8: status (0=runnable, 1=running, 2=waiting, 3=dead)
@@ -31,9 +35,9 @@ fn g_new(entry_fn: int, arg: int, arg_type: int) -> string:
     // alloc() routes to g_current_arena when it is >= 0 — arena_new() sets it.
     aid := arena_new()
 
-    // Allocate stack (16KB) — from the G's arena
-    stack := alloc(16384)
-    stack_top := stack + 16384 - 8
+    // Allocate stack (G_STACK_SIZE) — from the G's arena
+    stack := alloc(G_STACK_SIZE)
+    stack_top := stack + G_STACK_SIZE - 8
 
     // Initialize fiber. The entry is ALWAYS goroutine_entry_wrapper
     // (rt.s / emitted by the ELF backend): it reads saved_fn/saved_arg
