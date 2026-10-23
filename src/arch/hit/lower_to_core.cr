@@ -34,7 +34,7 @@
 //
 // This file is part of two builds: the corearch concat list, after common and
 // before the kernel and architecture files, and the project-mode unit
-// src/targets/x86_64-linux-elf/_import.cr. The import lines also let standalone
+// src/targets/x86_64/linux/elf/_import.cr. The import lines also let standalone
 // `corec check` and project mode resolve symbols; concat builds strip them.
 
 import io

@@ -1048,7 +1048,7 @@ fn inject_var_shift() -> int:
 // segments in canonical order. TYPE and IFACE are required.
 // Loader output is semantic objects plus guards. The linear NOD-to-g_ir_instrs
 // rebuild is outside this file: build_linear_schedule in regalloc.cr is called by
-// corearch.cr or src/targets/x86_64-linux-elf/main.cr after a successful load.
+// corearch.cr or src/targets/x86_64/linux/elf/main.cr after a successful load.
 // Parse order: STR -> SYM (globals and funcs rebuild the var namespace) -> REG
 // (derive nstart/ncount and function instruction bounds) -> NOD (40B; 28B
 // semantic fields into g_v7_nod_sem, adjacency into g_v7_nod_meta) -> ENT (28B

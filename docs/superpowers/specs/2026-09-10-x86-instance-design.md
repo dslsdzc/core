@@ -8,7 +8,7 @@ x86 实例是三个轴的组合：
 架构 x86_64 × 格式 ELF × OS Linux
 ```
 
-组合根目录必须显式包含三部分：`src/targets/x86_64-linux-elf/`；`Core.toml` 同时记录 `arch = "x86_64"`、`system = "linux"`、`container = "elf"`。旧的两段名 `x86_64-linux` 只表示架构和系统，不能作为完整目标名。
+组合根目录必须显式包含三部分：`src/targets/x86_64/linux/elf/`；`Core.toml` 同时记录 `arch = "x86_64"`、`system = "linux"`、`container = "elf"`。旧的两段名 `x86_64-linux` 只表示架构和系统，不能作为完整目标名。
 
 架构轴提供指令、寄存器、编码和序列。格式轴提供容器、段、重定位和链接。OS 轴提供系统调用、入口和 ABI 约定。
 

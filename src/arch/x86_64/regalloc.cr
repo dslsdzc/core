@@ -898,7 +898,7 @@ fn alloc_registers():
 // nod_* 访问器读 g_v7_nod_sem 的 28 字节语义字段，nod_edge_first 和 nod_edge_count
 // 读邻接域。REG 展开和函数边界回填（root span 到 g_ir_func_instr_start 和
 // g_ir_func_instr_count）留在 loader。
-// 调用方是 corearch.cr 和组合根 src/targets/x86_64-linux-elf/main.cr；load_ccr 成功后、
+// 调用方是 corearch.cr 和组合根 src/targets/x86_64/linux/elf/main.cr；load_ccr 成功后、
 // 分派和发射前调用一次。
 fn build_linear_schedule():
     grow_ir_instrs(g_v7_nod_count)

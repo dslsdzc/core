@@ -1,5 +1,5 @@
-// === targets/x86_64-linux-elf/target_abi.cr ===
-// Combination-root frontend ABI composition for x86_64-linux-elf.
+// === targets/x86_64/linux/elf/target_abi.cr ===
+// Combination-root frontend ABI composition for x86_64/linux/elf.
 //
 // The root owns no target facts. It composes the architecture, OS, and runtime
 // axes; the container axis (ELF) is provided by src/format/elf and is not part

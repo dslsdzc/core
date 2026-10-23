@@ -1,4 +1,4 @@
-// === targets/x86_64-linux-elf/frontend_target.cr ===
+// === targets/x86_64/linux/elf/frontend_target.cr ===
 // Frontend-visible target description for the x86_64 / Linux / ELF instance.
 //
 // The three axes are explicit. The frontend asks this file for import roots,
@@ -6,7 +6,7 @@
 // directory names or backend flags itself.
 
 fn target_name() -> string:
-    return "x86_64-linux-elf"
+    return "x86_64/linux/elf"
 
 fn target_arch_name() -> string:
     return "x86_64"
@@ -42,7 +42,7 @@ fn target_import_root(i: int) -> string:
     if i == 8:
         return "src/lattice/"
     if i == 9:
-        return "src/targets/x86_64-linux-elf/"
+        return "src/targets/x86_64/linux/elf/"
     return ""
 
 fn target_so_index_path(home_dir: string, fs_path: string) -> string:

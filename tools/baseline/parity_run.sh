@@ -57,7 +57,7 @@ run_one() {   # $1 tier tag, $2 file
 
   echo "=== Tier 3: backend/kernel units ==="
   run_one t3 src/compiler/ccr_io.cr
-  for f in src/format/elf/*.cr src/os/linux/*.cr src/arch/x86_64/*.cr src/lattice/*.cr src/targets/x86_64-linux-elf/*.cr; do
+  for f in src/format/elf/*.cr src/os/linux/*.cr src/arch/x86_64/*.cr src/lattice/*.cr src/targets/x86_64/linux/elf/*.cr; do
     run_one t3 "$f"
   done
 

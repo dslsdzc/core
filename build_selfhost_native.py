@@ -127,15 +127,15 @@ backend_support_files = [
     'src/arch/x86_64/corearch.cr',
 ]
 
-# 组合根（x86_64-linux-elf target triple）：project-mode 入口链——`corec build
-# src/targets/x86_64-linux-elf` 的入口 = 该目录 main.cr（load_project 直读）+
+# 组合根（x86_64/linux/elf target triple）：project-mode 入口链——`corec build
+# src/targets/x86_64/linux/elf` 的入口 = 该目录 main.cr（load_project 直读）+
 # _import.cr（load_imports 直读）+ Core.toml（工程名）。**不入 concat**：
 # main.cr 的 fn main 与 concat 追加的 wrapper 冲突，且其 .cr 经 project-mode
 # 独立收编（stage0/stage 链即此入口）。仅纳入清单存在性守卫。
 x86_linux_elf_target_files = [
-    'src/targets/x86_64-linux-elf/main.cr',
-    'src/targets/x86_64-linux-elf/_import.cr',
-    'src/targets/x86_64-linux-elf/Core.toml',
+    'src/targets/x86_64/linux/elf/main.cr',
+    'src/targets/x86_64/linux/elf/_import.cr',
+    'src/targets/x86_64/linux/elf/Core.toml',
 ]
 
 
@@ -337,8 +337,8 @@ def main():
         'src/arch/x86_64/x86_frontend_abi.cr',
         'src/os/linux/linux_frontend_abi.cr',
         'src/runtime/runtime_frontend_abi.cr',
-        'src/targets/x86_64-linux-elf/target_abi.cr',
-        'src/targets/x86_64-linux-elf/frontend_target.cr',
+        'src/targets/x86_64/linux/elf/target_abi.cr',
+        'src/targets/x86_64/linux/elf/frontend_target.cr',
         # R2 P0 类型项引擎（建层）：类型项 DAG 表 + 构造去重 → 判定引擎（桩）→ 自测通道。
         # 置于 checker 之后（计划 Step 9 指定位置）；引擎尚无 checker 侧消费者，
         # 本批为纯增量（checker/ir_gen/后端零改动 = 产物零变化）。
@@ -409,7 +409,7 @@ def main():
                       arch_x86_64_files + format_elf_files + os_linux_files +
                       backend_support_files)
     guard_manifest(corearch_files, 'corearch')
-    guard_manifest(x86_linux_elf_target_files, 'x86_64-linux-elf target')
+    guard_manifest(x86_linux_elf_target_files, 'x86_64/linux/elf target')
     compile_and_assemble(
         concat(corearch_files, wrapper_fn='corearch_main'),
         label='corearch',
@@ -449,8 +449,8 @@ def main():
         'src/arch/x86_64/x86_frontend_abi.cr',
         'src/os/linux/linux_frontend_abi.cr',
         'src/runtime/runtime_frontend_abi.cr',
-        'src/targets/x86_64-linux-elf/target_abi.cr',
-        'src/targets/x86_64-linux-elf/frontend_target.cr',
+        'src/targets/x86_64/linux/elf/target_abi.cr',
+        'src/targets/x86_64/linux/elf/frontend_target.cr',
         # R2 P1：checker 的判定入口引用桥接层（sh_term_of_ti；影子挂点已随 P5 T5 下线）→
         # corelsp 也必须链接 引擎 + 桥接层（相对顺序与 corec 一致；corearch 无 checker 仍不含）。
         'src/compiler/type_terms.cr',

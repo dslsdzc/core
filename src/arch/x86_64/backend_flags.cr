@@ -1,6 +1,6 @@
 // 后端 CLI 旗标注册单源。
 // concat 入口（corearch.cr）与组合根 project-mode 入口
-// （src/targets/x86_64-linux-elf/main.cr）共用本函数，避免两处注册表漂移。
+// （src/targets/x86_64/linux/elf/main.cr）共用本函数，避免两处注册表漂移。
 fn register_backend_flags():
     cli_flag_bool("elf", "", "Output ELF binary (default)")
     cli_flag_bool("shared", "", "Output shared library (.so)")
