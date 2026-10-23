@@ -18,6 +18,11 @@
 g_ir_vals : string, mut
 g_ir_vals_cap : int, mut
 
+fn ir_interp_const(ti: int, raw: int) -> int:
+    if ti == TI_INT:
+        return bi_from_word(raw)
+    return raw
+
 // Call dispatch and inline callee execution. This is the only implementation for
 // both the main loop and callee paths.
 // Interpreter abort code. 0 means continue; a non-zero value is what ir_interpret
@@ -36,72 +41,96 @@ IR_INTERP_MAX_DEPTH : int = 400
 g_interp_stack : string, mut
 
 // Shared IR_BINARY dispatch for the main loop and callee loops.
-// The integer path is modulo 2^64. dex values are scaled integers and use the
-// same path. IR_I2F and IR_F2I are rejected at dispatch entry.
+// g_ir_vals int slots hold tagged mathematical integers. Char/bool/dex and
+// pointer values remain raw machine words, so the operand variable types select
+// the representation. Pointer arithmetic converts its int offset through the
+// same checked boundary as the ELF backend.
 fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int):
     if d < 0:
         return
     lv := r64(g_ir_vals, s1 * 8)
     rv := r64(g_ir_vals, s2 * 8)
+    if s3 == 17 || s3 == 18 || s3 == 19:
+        // Pointer add/sub/diff: the pointer is raw; the offset is mathematical.
+        off := bi_to_word_checked(rv)
+        if s3 == 17:
+            w64(g_ir_vals, d * 8, lv + off * 8)
+        else if s3 == 18:
+            w64(g_ir_vals, d * 8, lv - off * 8)
+        else:
+            w64(g_ir_vals, d * 8, bi_from_word((lv - rv) / 8))
+        return
+    if s3 == 12 || s3 == 13:
+        // Boolean and/or store raw 0/1.
+        if s3 == 12:
+            w64(g_ir_vals, d * 8, lv != 0 && rv != 0)
+        else:
+            w64(g_ir_vals, d * 8, lv != 0 || rv != 0)
+        return
+
+    lhs_char := irv_type(s1) == TI_CHAR
+    rhs_char := irv_type(s2) == TI_CHAR
+    if lhs_char || rhs_char:
+        // Char comparisons are raw. An int operand is still tagged.
+        l := lv
+        r := rv
+        if !lhs_char && s1 >= 0:
+            l = bi_to_word_checked(lv)
+        if !rhs_char && s2 >= 0:
+            r = bi_to_word_checked(rv)
+        if s3 == 6:
+            w64(g_ir_vals, d * 8, l == r)
+        else if s3 == 7:
+            w64(g_ir_vals, d * 8, l != r)
+        else if s3 == 8:
+            w64(g_ir_vals, d * 8, l < r)
+        else if s3 == 9:
+            w64(g_ir_vals, d * 8, l > r)
+        else if s3 == 10:
+            w64(g_ir_vals, d * 8, l <= r)
+        else if s3 == 11:
+            w64(g_ir_vals, d * 8, l >= r)
+        return
+
+    if ti == TI_DEX || ti == TI_DEX_S:
+        // Dex slots are scaled machine integers (or binary64 bits, rejected at
+        // dispatch); keep their existing raw arithmetic.
+        if s3 == 1:
+            w64(g_ir_vals, d * 8, lv + rv)
+        else if s3 == 2:
+            w64(g_ir_vals, d * 8, lv - rv)
+        else if s3 == 3:
+            w64(g_ir_vals, d * 8, lv * rv)
+        else if s3 == 4:
+            w64(g_ir_vals, d * 8, lv / rv)
+        else if s3 == 5:
+            w64(g_ir_vals, d * 8, lv % rv)
+        return
+
     if s3 == 1:
-        w64(g_ir_vals, d * 8, lv + rv)
-    if s3 == 2:
-        w64(g_ir_vals, d * 8, lv - rv)
-    if s3 == 3:
-        w64(g_ir_vals, d * 8, lv * rv)
-    if s3 == 4:
-        w64(g_ir_vals, d * 8, lv / rv)
-    if s3 == 5:
-        w64(g_ir_vals, d * 8, lv % rv)
-    if s3 == 6:
-        if lv == rv:
-            w64(g_ir_vals, d * 8, 1)
+        w64(g_ir_vals, d * 8, bi_add(lv, rv))
+    else if s3 == 2:
+        w64(g_ir_vals, d * 8, bi_sub(lv, rv))
+    else if s3 == 3:
+        w64(g_ir_vals, d * 8, bi_mul(lv, rv))
+    else if s3 == 4:
+        w64(g_ir_vals, d * 8, bi_div(lv, rv))
+    else if s3 == 5:
+        w64(g_ir_vals, d * 8, bi_mod(lv, rv))
+    else if s3 >= 6 && s3 <= 11:
+        c := bi_cmp(lv, rv)
+        if s3 == 6:
+            w64(g_ir_vals, d * 8, c == 0)
+        else if s3 == 7:
+            w64(g_ir_vals, d * 8, c != 0)
+        else if s3 == 8:
+            w64(g_ir_vals, d * 8, c < 0)
+        else if s3 == 9:
+            w64(g_ir_vals, d * 8, c > 0)
+        else if s3 == 10:
+            w64(g_ir_vals, d * 8, c <= 0)
         else:
-            w64(g_ir_vals, d * 8, 0)
-    if s3 == 7:
-        if lv != rv:
-            w64(g_ir_vals, d * 8, 1)
-        else:
-            w64(g_ir_vals, d * 8, 0)
-    if s3 == 8:
-        if lv < rv:
-            w64(g_ir_vals, d * 8, 1)
-        else:
-            w64(g_ir_vals, d * 8, 0)
-    if s3 == 9:
-        if lv > rv:
-            w64(g_ir_vals, d * 8, 1)
-        else:
-            w64(g_ir_vals, d * 8, 0)
-    if s3 == 10:
-        if lv <= rv:
-            w64(g_ir_vals, d * 8, 1)
-        else:
-            w64(g_ir_vals, d * 8, 0)
-    if s3 == 11:
-        if lv >= rv:
-            w64(g_ir_vals, d * 8, 1)
-        else:
-            w64(g_ir_vals, d * 8, 0)
-    if s3 == 12:
-        if lv != 0 && rv != 0:
-            w64(g_ir_vals, d * 8, 1)
-        else:
-            w64(g_ir_vals, d * 8, 0)
-    if s3 == 13:
-        if lv != 0 || rv != 0:
-            w64(g_ir_vals, d * 8, 1)
-        else:
-            w64(g_ir_vals, d * 8, 0)
-    if s3 == 17:
-        w64(g_ir_vals, d * 8, lv + rv * 8)
-    // OP_PTR_ADD
-    if s3 == 18:
-        w64(g_ir_vals, d * 8, lv - rv * 8)
-    // OP_PTR_SUB
-    if s3 == 19:
-        w64(g_ir_vals, d * 8, (lv - rv) / 8)
-    // OP_PTR_DIFF
+            w64(g_ir_vals, d * 8, c >= 0)
 
 // Pointer read and write.
 // A pointer in [0, g_ir_var_count) is a stack slot address produced by REF; read
@@ -153,7 +182,7 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
             w64(g_ir_vals, d * 8, 0)
     if str_eq(fn_name, "str_len") != 0:
         if d >= 0 && s2 >= 1:
-            w64(g_ir_vals, d * 8, istr_len(r64(g_ir_vals, s1 * 8)))
+            w64(g_ir_vals, d * 8, bi_from_word(istr_len(r64(g_ir_vals, s1 * 8))))
     if str_eq(fn_name, "str_eq") != 0:
         if d >= 0 && s2 >= 2:
             left_s := istr_get(r64(g_ir_vals, s1 * 8))
@@ -165,30 +194,35 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
                     r64(g_ir_vals, s1 * 8), r64(g_ir_vals, (s1 + 1) * 8)))
     if str_eq(fn_name, "int_str") != 0:
         if d >= 0 && s2 >= 1:
-            w64(g_ir_vals, d * 8, str_intern(int_str(r64(g_ir_vals, s1 * 8))))
+            w64(g_ir_vals, d * 8, str_intern(bi_to_dec(r64(g_ir_vals, s1 * 8))))
     if str_eq(fn_name, "chr") != 0:
         if d >= 0 && s2 >= 1:
-            w64(g_ir_vals, d * 8, str_intern(chr(r64(g_ir_vals, s1 * 8))))
+            w64(g_ir_vals, d * 8, str_intern(chr(bi_to_word_checked(r64(g_ir_vals, s1 * 8)))))
     if str_eq(fn_name, "get_char") != 0:
         if d >= 0 && s2 >= 2:
-            w64(g_ir_vals, d * 8, ir_interp_str_char(r64(g_ir_vals, s1 * 8), r64(g_ir_vals, (s1 + 1) * 8)))
+            w64(g_ir_vals, d * 8, ir_interp_str_char(
+                r64(g_ir_vals, s1 * 8),
+                bi_to_word_checked(r64(g_ir_vals, (s1 + 1) * 8))))
     if str_eq(fn_name, "str_sub") != 0:
         if d >= 0 && s2 >= 3:
-            w64(g_ir_vals, d * 8, ir_interp_str_sub(r64(g_ir_vals, s1 * 8), r64(g_ir_vals, (s1 + 1) * 8), r64(g_ir_vals, (s1 + 2) * 8)))
+            w64(g_ir_vals, d * 8, ir_interp_str_sub(
+                r64(g_ir_vals, s1 * 8),
+                bi_to_word_checked(r64(g_ir_vals, (s1 + 1) * 8)),
+                bi_to_word_checked(r64(g_ir_vals, (s1 + 2) * 8))))
     if str_eq(fn_name, "load_str_ptr") != 0:
         if d >= 0 && s2 >= 2:
             b := r64(g_ir_vals, s1 * 8)
-            p := r64(g_ir_vals, s1 + 1 * 8)
+            p := bi_to_word_checked(r64(g_ir_vals, s1 + 1 * 8))
             lo := load8(b, p) + load8(b, p+1)*256 + load8(b, p+2)*65536 + load8(b, p+3)*16777216
             hi := load8(b, p+4) + load8(b, p+5)*256 + load8(b, p+6)*65536 + load8(b, p+7)*16777216
             if hi < 0:
                 hi = hi + 4294967296
-            w64(g_ir_vals, d * 8, lo + hi * 4294967296)
+            w64(g_ir_vals, d * 8, bi_from_word(lo + hi * 4294967296))
     if str_eq(fn_name, "store_str_ptr") != 0:
         if s2 >= 3:
             b := r64(g_ir_vals, s1 * 8)
-            p := r64(g_ir_vals, s1 + 1 * 8)
-            v := r64(g_ir_vals, s1 + 2 * 8)
+            p := bi_to_word_checked(r64(g_ir_vals, s1 + 1 * 8))
+            v := bi_to_word_checked(r64(g_ir_vals, s1 + 2 * 8))
             lo : ., mut = v % 4294967296
             hi : ., mut = v / 4294967296
             if v < 0:
@@ -325,7 +359,9 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
         t4 := sh_dfn_code_of_slots(r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_TK),
             r64(g_df_nodes, (f_start + ip2) * ESZ_DFNODE + OFF_DF_AUX))
         if op2 == 1 && d2 >= 0:
-            w64(g_ir_vals, d2 * 8, t1)
+            w64(g_ir_vals, d2 * 8, ir_interp_const(t4, t1))
+        if op2 == 40 && d2 >= 0 && t1 >= 0:
+            w64(g_ir_vals, d2 * 8, bi_from_dec(istr_get(t1)))
         if op2 == 2 && t1 >= 0 && t2 >= 0:
             ir_interp_binary(d2, t1, t2, t3, t4)
         if op2 == 49 || op2 == 50:
@@ -335,7 +371,10 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
         if op2 == 3 && t1 >= 0:
             ov2 := r64(g_ir_vals, t1 * 8)
             if t3 == 1:
-                w64(g_ir_vals, d2 * 8, -ov2)
+                if irv_type(t1) == TI_INT:
+                    w64(g_ir_vals, d2 * 8, bi_neg(ov2))
+                else:
+                    w64(g_ir_vals, d2 * 8, -ov2)
             else if t3 == 2:
                 if ov2 == 0:
                     w64(g_ir_vals, d2 * 8, 1)
@@ -391,7 +430,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
         if op2 == 15 && d2 >= 0 && t1 >= 0 && t2 >= 0:
             // IR_LOAD_INDEX_VAR: t1=arr_var, t2=idx_var
             av2 := r64(g_ir_vals, t1 * 8)
-            ix2 := r64(g_ir_vals, t2 * 8)
+            ix2 := bi_to_word_checked(r64(g_ir_vals, t2 * 8))
             if irv_type(t1) == TI_STR:
                 w64(g_ir_vals, d2 * 8, str_load8(av2, ix2))
             else:
@@ -400,7 +439,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
         if op2 == 16 && d2 >= 0 && t1 >= 0 && t2 >= 0:
             // IR_STORE_INDEX_VAR: d2=val_var, t1=arr_var, t2=idx_var
             av2 := r64(g_ir_vals, t1 * 8)
-            ix2 := r64(g_ir_vals, t2 * 8)
+            ix2 := bi_to_word_checked(r64(g_ir_vals, t2 * 8))
             if irv_type(t1) == TI_STR:
                 store8(istr_get(av2), ix2, r64(g_ir_vals, d2 * 8))
             else:
@@ -408,7 +447,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
                     w64(@str_of(av2), ix2 * 8, r64(g_ir_vals, d2 * 8))
         if op2 == 31 && d2 >= 0 && t1 >= 0 && t2 >= 0:
             // IR_ADDR_INDEX: &arr[i]
-            w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8) + r64(g_ir_vals, t2 * 8) * 8)
+            w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8) + bi_to_word_checked(r64(g_ir_vals, t2 * 8)) * 8)
         if op2 == 11 && d2 >= 0 && t1 >= 0:
             // IR_LOAD_FIELD: t1=struct_var, t3=field_idx
             pf2 := r64(g_ir_vals, t1 * 8)
@@ -471,7 +510,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
                 p23 := r64(g_ir_vals, t1 * 8)
                 if p23 != 0:
                     unsafe:
-                        w64(g_ir_vals, d2 * 8, r64(@str_of(p23), 0))
+                        w64(g_ir_vals, d2 * 8, bi_from_word(r64(@str_of(p23), 0)))
         // IR_REF: d = s1. The slot number is the stack address used by the deref helpers.
         if op2 == 18:
             if d2 >= 0 && t1 >= 0:
@@ -483,14 +522,14 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
         // IR_SLICE: d = arr + low*8, matching the ELF encoding.
         if op2 == 24:
             if d2 >= 0 && t1 >= 0 && t2 >= 0:
-                w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8) + r64(g_ir_vals, t2 * 8) * 8)
+                w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8) + bi_to_word_checked(r64(g_ir_vals, t2 * 8)) * 8)
         // IR_BOUNDS_CHECK: s1 is the index variable and s2 the limit. A dynamic
         // limit uses ti = 1. An index below 0 or at least the limit aborts with -1.
         if op2 == 30 && t2 >= 0:
-            iv30 := r64(g_ir_vals, t1 * 8)
+            iv30 := bi_to_word_checked(r64(g_ir_vals, t1 * 8))
             lim30 : ., mut = t2
             if t4 == 1:
-                lim30 = r64(g_ir_vals, t2 * 8)
+                lim30 = bi_to_word_checked(r64(g_ir_vals, t2 * 8))
             if iv30 < 0 || iv30 >= lim30:
                 g_interp_abort = -1
                 break
@@ -506,6 +545,13 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
         if op2 == 29:
             if d2 >= 0:
                 w64(g_ir_vals, d2 * 8, r64(g_ir_vals, t1 * 8))
+        // IR_PTR_OF / IR_STR_OF: raw address <-> mathematical int view.
+        if op2 == 52:
+            if d2 >= 0 && t1 >= 0:
+                w64(g_ir_vals, d2 * 8, bi_from_uword(r64(g_ir_vals, t1 * 8)))
+        if op2 == 53:
+            if d2 >= 0 && t1 >= 0:
+                w64(g_ir_vals, d2 * 8, bi_to_uword_checked(r64(g_ir_vals, t1 * 8)))
         // IR_FNADDR: no real addresses in the interpreter; store 0.
         if op2 == 48:
             if d2 >= 0:
@@ -690,11 +736,15 @@ fn ir_interpret() -> int:
 
         if op == 1:
             if d >= 0:
-                w64(g_ir_vals, d * 8, s1)
+                w64(g_ir_vals, d * 8, ir_interp_const(ti, s1))
         // IR_CONST; dex uses a scaled integer in s1.
+        if op == 40:
+            if d >= 0 && s1 >= 0:
+                w64(g_ir_vals, d * 8, bi_from_dec(istr_get(s1)))
+        // IR_CONST_BIG
         if op == 5:
             if s1 >= 0:
-                return r64(g_ir_vals, s1 * 8)
+                return bi_to_word_checked(r64(g_ir_vals, s1 * 8))
             return 0
         // IR_RETURN
 
@@ -706,7 +756,10 @@ fn ir_interpret() -> int:
             // IR_UNARY
             ov := r64(g_ir_vals, s1 * 8)
             if s3 == 1:
-                w64(g_ir_vals, d * 8, -ov)
+                if irv_type(s1) == TI_INT:
+                    w64(g_ir_vals, d * 8, bi_neg(ov))
+                else:
+                    w64(g_ir_vals, d * 8, -ov)
             if s3 == 2:
                 if ov == 0:
                     w64(g_ir_vals, d * 8, 1)
@@ -800,7 +853,7 @@ fn ir_interpret() -> int:
             // IR_LOAD_INDEX_VAR: s1=arr_var, s2=idx_var
             if d >= 0 && s1 >= 0 && s2 >= 0:
                 arr_value := r64(g_ir_vals, s1 * 8)
-                idx := r64(g_ir_vals, s2 * 8)
+                idx := bi_to_word_checked(r64(g_ir_vals, s2 * 8))
                 if irv_type(s1) == TI_STR:
                     w64(g_ir_vals, d * 8, str_load8(arr_value, idx))
                 else:
@@ -810,7 +863,7 @@ fn ir_interpret() -> int:
             // IR_STORE_INDEX_VAR: d=val_var, s1=arr_var, s2=idx_var
             if d >= 0 && s1 >= 0 && s2 >= 0:
                 arr_value := r64(g_ir_vals, s1 * 8)
-                idx := r64(g_ir_vals, s2 * 8)
+                idx := bi_to_word_checked(r64(g_ir_vals, s2 * 8))
                 if irv_type(s1) == TI_STR:
                     store8(istr_get(arr_value), idx, r64(g_ir_vals, d * 8))
                 else:
@@ -838,7 +891,7 @@ fn ir_interpret() -> int:
                 ptr := r64(g_ir_vals, s1 * 8)
                 if ptr != 0:
                     unsafe:
-                        w64(g_ir_vals, d * 8, r64(@str_of(ptr), 0))
+                        w64(g_ir_vals, d * 8, bi_from_word(r64(@str_of(ptr), 0)))
         // IR_REF: d = s1. The slot number is the stack address used by the deref helpers.
         if op == 18:
             if d >= 0 && s1 >= 0:
@@ -851,15 +904,15 @@ fn ir_interpret() -> int:
         // IR_SLICE: d = arr + low*8, matching the ELF encoding.
         if op == 24:
             if d >= 0 && s1 >= 0 && s2 >= 0:
-                w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8) + r64(g_ir_vals, s2 * 8) * 8)
+                w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8) + bi_to_word_checked(r64(g_ir_vals, s2 * 8)) * 8)
 
         // IR_BOUNDS_CHECK: s1 is the index variable and s2 the limit. An index
         // below 0 or at least the limit aborts with -1.
         if op == 30 && s2 >= 0:
-            iv := r64(g_ir_vals, s1 * 8)
+            iv := bi_to_word_checked(r64(g_ir_vals, s1 * 8))
             limit : ., mut = s2
             if ti == 1:
-                limit = r64(g_ir_vals, s2 * 8)
+                limit = bi_to_word_checked(r64(g_ir_vals, s2 * 8))
             if iv < 0 || iv >= limit:
                 return -1
 
@@ -875,6 +928,14 @@ fn ir_interpret() -> int:
         if op == 28:
             if d >= 0 && s1 >= 0:
                 w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8))
+
+        // IR_PTR_OF / IR_STR_OF: raw address <-> mathematical int view.
+        if op == 52:
+            if d >= 0 && s1 >= 0:
+                w64(g_ir_vals, d * 8, bi_from_uword(r64(g_ir_vals, s1 * 8)))
+        if op == 53:
+            if d >= 0 && s1 >= 0:
+                w64(g_ir_vals, d * 8, bi_to_uword_checked(r64(g_ir_vals, s1 * 8)))
 
         // IR_FNADDR: the interpreter has no real addresses; store 0.
         if op == 48:
@@ -902,7 +963,7 @@ fn ir_interpret() -> int:
         // IR_ADDR_INDEX: d = slot s1 + 8 * slot s2 for &arr[i].
         if op == 31:
             if d >= 0 && s1 >= 0 && s2 >= 0:
-                w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8) + r64(g_ir_vals, s2 * 8) * 8)
+                w64(g_ir_vals, d * 8, r64(g_ir_vals, s1 * 8) + bi_to_word_checked(r64(g_ir_vals, s2 * 8)) * 8)
         // IR_ARENA_NEW and IR_ARENA_RESET: the slot model has no scoped arena, so
         // these are approximations.
         if op == 32:

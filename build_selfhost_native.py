@@ -322,6 +322,7 @@ def main():
         'src/runtime/rt.cr',
         'src/stdlib/io.cr',
         'src/stdlib/fmt.cr',
+        'src/runtime/bigint.cr',
         'src/stdlib/cli.cr',
         'src/compiler/ast.cr',
         'src/compiler/ccr_schema.cr',
