@@ -7,6 +7,8 @@ import toml
 import ast
 import globals
 import dyn_arr
+import backend_globals
+import backend_arrays
 import hit
 // HIT lowering layer. instr.cr's table encoder consumes the event stream and pool
 // patch records defined here.

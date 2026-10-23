@@ -62,6 +62,8 @@ kernel_files = [
 # 编码原语 → instr 之后；frame.cr → tag2l（pf_epilogue 函数尾块调 e2_mw_*；
 # tag2l 反向消费 frame 的 g2_tag_off——同轴双向引用，波 1 Task 4 裁定可接受）。
 arch_x86_64_files = [
+    'src/arch/x86_64/backend_globals.cr',
+    'src/arch/x86_64/backend_arrays.cr',
     'src/arch/x86_64/regalloc.cr',
     'src/arch/x86_64/sizes.cr',
     'src/arch/x86_64/instr.cr',
