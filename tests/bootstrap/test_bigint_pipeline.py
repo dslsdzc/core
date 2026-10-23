@@ -29,7 +29,7 @@ SRC = """fn main() -> int:
 """
 
 
-def compile_module(src: str) -> Module:
+def compile_module(src: str, bigint_mode: bool = False) -> Module:
     ast = Parser(Lexer(src).tokenize()).parse_compilation_unit()
     resolver = NameResolver()
     resolver.resolve(ast)
@@ -38,7 +38,7 @@ def compile_module(src: str) -> Module:
     checker.check(ast)
     if resolver.errors or checker.errors:
         raise AssertionError(resolver.errors + checker.errors)
-    return IRGen(resolver.symtab).gen_module(ast)
+    return IRGen(resolver.symtab, bigint_mode=bigint_mode).gen_module(ast)
 
 
 def build_object(module: Module, path: Path, **kwargs) -> None:
@@ -52,7 +52,7 @@ def build_object(module: Module, path: Path, **kwargs) -> None:
 
 def main() -> int:
     raw_mod = compile_module(RUNTIME.read_text(encoding="utf-8"))
-    user_mod = compile_module(SRC)
+    user_mod = compile_module(SRC, bigint_mode=True)
     with tempfile.TemporaryDirectory(prefix="core-bigint-pipeline-") as td:
         d = Path(td)
         raw_obj = d / "bigint.o"

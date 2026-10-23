@@ -289,15 +289,20 @@ class X86_64StackAsmGen:
         self.emit(f"{done}:")
 
     def gen_binary(self, instr: BinaryInstr):
-        if self.bigint_mode and instr.op in ('raw_add', 'raw_sub', 'raw_and'):
+        if self.bigint_mode and instr.op in ('raw_add', 'raw_sub', 'raw_and', 'tag_word', 'untag_word'):
             self.load_to_r10(instr.left)
-            self.load_to_r11(instr.right)
+            if instr.op in ('raw_add', 'raw_sub', 'raw_and'):
+                self.load_to_r11(instr.right)
             if instr.op == 'raw_add':
                 self.emit("    add r10, r11")
             elif instr.op == 'raw_sub':
                 self.emit("    sub r10, r11")
-            else:
+            elif instr.op == 'raw_and':
                 self.emit("    and r10, r11")
+            elif instr.op == 'tag_word':
+                self.emit("    add r10, r10")
+            else:
+                self.emit("    sar r10, 1")
             self.store_from_r10(instr.dest)
             return
         if (self.bigint_mode and
@@ -312,6 +317,8 @@ class X86_64StackAsmGen:
             if op in ('==', '!='):
                 self.emit(f"    mov rdi, r10"); self.emit(f"    mov rsi, r11")
                 self.emit("    call str_eq"); self._clobber_regs()
+                if self.bigint_mode:
+                    self.emit("    sar rax, 1")
                 if op == '==': self.emit(f"    mov {self._ref(instr.dest)}, rax")
                 else:
                     self.emit("    cmp rax, 1")
@@ -320,6 +327,8 @@ class X86_64StackAsmGen:
             else:
                 self.emit(f"    mov rdi, r10"); self.emit(f"    mov rsi, r11")
                 self.emit("    call str_cmp"); self._clobber_regs()
+                if self.bigint_mode:
+                    self.emit("    sar rax, 1")
                 self.emit("    cmp rax, 0")
                 asm = {"<":"    setl al\n    movzx r10, al",">":"    setg al\n    movzx r10, al","<=":"    setle al\n    movzx r10, al",">=":"    setge al\n    movzx r10, al"}
                 if op in asm: self._alu_clobber(asm[op])
@@ -404,6 +413,14 @@ class X86_64StackAsmGen:
         for i in reversed(range(6, len(instr.args))):
             self.emit(f"    push {self._ref(instr.args[i])}")
         # ── Inline hot helper functions (avoids call overhead for millions of calls) ──
+        if instr.func == 'get_arg':
+            if self.bigint_mode:
+                self.emit("    sar rdi, 1")
+            self.emit("    call get_arg")
+            self._clobber_regs()
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+            if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
+            return
         if instr.func == 'str_len':
             self.emit("    mov rax, [rdi - 8]")
             self.emit("    sub rax, 1")
@@ -419,6 +436,28 @@ class X86_64StackAsmGen:
             self._clobber_regs()
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
             if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
+            return
+        if instr.func == 'load64':
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
+            self.emit("    mov rax, [rdi + rsi]")
+            if self.bigint_mode:
+                self.emit("    add rax, rax")
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+            if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
+            return
+        if instr.func == 'load_str_ptr':
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
+            self.emit("    mov rax, [rdi + rsi]")
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+            if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
+            return
+        if instr.func == 'store_str_ptr':
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
+            self.emit("    mov [rdi + rsi], rdx")
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
             return
         if instr.func == 'r64':
             # r64(buf, pos) → read 8 bytes
@@ -438,24 +477,40 @@ class X86_64StackAsmGen:
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
         elif instr.func == 'r32':
             # r32(buf, pos) → read 4 bytes (zero-extended)
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
             self.emit("    mov eax, [rdi + rsi]")
+            if self.bigint_mode:
+                self.emit("    add rax, rax")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
             if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
         elif instr.func == 'w32':
             # w32(buf, pos, val) → write 4 bytes
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
+                self.emit("    sar rdx, 1")
             self.emit("    mov [rdi + rsi], edx")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
         elif instr.func == 'bu8':
             # bu8(buf, pos) → read 1 byte (zero-extended)
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
             self.emit("    movzx eax, BYTE PTR [rdi + rsi]")
+            if self.bigint_mode:
+                self.emit("    add rax, rax")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
             if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
         elif instr.func == 'w8':
             # w8(buf, pos, val) → write 1 byte
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
+                self.emit("    sar rdx, 1")
             self.emit("    mov BYTE PTR [rdi + rsi], dl")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
         elif instr.func == '_dyncpy':
             # _dyncpy(src, nbytes, dst) → memcpy via rep movsb
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
             self.emit("    mov rcx, rsi")    # rcx = byte count
             self.emit("    mov rsi, rdi")    # rsi = source
             self.emit("    mov rdi, rdx")    # rdi = dest
@@ -465,22 +520,34 @@ class X86_64StackAsmGen:
         elif instr.func == 'syscall3':
             # Inline syscall: after arg setup rdi=nr, rsi=arg1, rdx=arg2, rcx=arg3
             # Need: rax=nr, rdi=arg1, rsi=arg2, rdx=arg3
+            if self.bigint_mode:
+                for reg, arg in zip(['rdi', 'rsi', 'rdx', 'rcx'], instr.args[:4]):
+                    if self._is_int_var(arg):
+                        self.emit(f"    sar {reg}, 1")
             self.emit("    mov rax, rdi")
             self.emit("    mov rdi, rsi")
             self.emit("    mov rsi, rdx")
             self.emit("    mov rdx, rcx")
             self.emit("    syscall")
+            if self.bigint_mode:
+                self.emit("    add rax, rax")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
             if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
         elif instr.func == 'syscall4':
             # syscall4(num, a, b, c, d): rdi=nr, rsi=a, rdx=b, rcx=c, r8=d
             # Need: rax=nr, rdi=a, rsi=b, rdx=c, r10=d (x86-64: 4th syscall arg in r10)
+            if self.bigint_mode:
+                for reg, arg in zip(['rdi', 'rsi', 'rdx', 'rcx', 'r8'], instr.args[:5]):
+                    if self._is_int_var(arg):
+                        self.emit(f"    sar {reg}, 1")
             self.emit("    mov rax, rdi")
             self.emit("    mov rdi, rsi")
             self.emit("    mov rsi, rdx")
             self.emit("    mov rdx, rcx")
             self.emit("    mov r10, r8")
             self.emit("    syscall")
+            if self.bigint_mode:
+                self.emit("    add rax, rax")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
             if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
         elif instr.func == 'load8':
@@ -560,6 +627,8 @@ class X86_64StackAsmGen:
         self.load_to_r10(instr.array)
         if self._is_string_var(instr.array):
             self.emit(f"    movzx r11, byte ptr [r10 + {instr.index}]")
+            if self.bigint_mode:
+                self.emit("    add r11, r11")
         else:
             self.emit(f"    mov r11, [r10 + {instr.index * 8}]")
         self.emit(f"    mov {self._ref(instr.dest)}, r11")
@@ -568,6 +637,8 @@ class X86_64StackAsmGen:
         self.load_to_r10(instr.array)
         self.emit(f"    mov r11, {self._ref(instr.value)}")
         if self._is_string_var(instr.array):
+            if self.bigint_mode:
+                self.emit("    sar r11, 1")
             self.emit(f"    mov [r10 + {instr.index}], r11b")
         else:
             self.emit(f"    mov [r10 + {instr.index * 8}], r11")
@@ -575,8 +646,12 @@ class X86_64StackAsmGen:
     def gen_load_index_var(self, instr: LoadIndexVarInstr):
         self.load_to_r10(instr.array)
         self.emit(f"    mov r11, {self._ref(instr.index_var)}")
+        if self.bigint_mode:
+            self.emit("    sar r11, 1")
         if self._is_string_var(instr.array):
             self.emit("    movzx r12, byte ptr [r10 + r11]")
+            if self.bigint_mode:
+                self.emit("    add r12, r12")
         else:
             self.emit("    mov r12, [r10 + r11 * 8]")
         self.emit(f"    mov {self._ref(instr.dest)}, r12")
@@ -584,8 +659,12 @@ class X86_64StackAsmGen:
     def gen_store_index_var(self, instr: StoreIndexVarInstr):
         self.load_to_r10(instr.array)
         self.emit(f"    mov r11, {self._ref(instr.index_var)}")
+        if self.bigint_mode:
+            self.emit("    sar r11, 1")
         self.emit(f"    mov r12, {self._ref(instr.value)}")
         if self._is_string_var(instr.array):
+            if self.bigint_mode:
+                self.emit("    sar r12, 1")
             self.emit("    mov [r10 + r11], r12b")
         else:
             self.emit("    mov [r10 + r11 * 8], r12")

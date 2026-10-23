@@ -4,8 +4,9 @@ from corec.ir.base import VarKind
 from corec.ir.symbol_table import SymbolTable, SymbolKind
 
 class IRGen:
-    def __init__(self, symtab=None):
+    def __init__(self, symtab=None, bigint_mode: bool = False):
         self.temp_counter = 0
+        self.bigint_mode = bigint_mode
         self.mod = Module("main")
         self.current_func = None
         self.current_block = None
@@ -163,7 +164,14 @@ class IRGen:
                 self.add_instr(BinaryInstr(expr.name, args[0], args[1], dest))
                 return dest
             if expr.name in ('ptr_of', 'str_of') and expr.args:
-                return self.gen_expr(expr.args[0])
+                v = self.gen_expr(expr.args[0])
+                if self.bigint_mode:
+                    dest = self.new_temp()
+                    dest.type = BaseType('int') if expr.name == 'ptr_of' else BaseType('string')
+                    op = 'tag_word' if expr.name == 'ptr_of' else 'untag_word'
+                    self.add_instr(BinaryInstr(op, v, v, dest))
+                    return dest
+                return v
             v = self.new_temp()
             self.add_instr(ConstInstr(0, 'int', v))
             return v
