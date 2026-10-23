@@ -139,6 +139,26 @@ fn e2_big_test_rr(buf: string, p: int, a: int, b: int) -> int:
 fn e2_big_test_rax(buf: string, p: int) -> int:
     return e2_big_test_rr(buf, p, 0, 0)
 
+// Convert an int variable to a raw machine word through the checked runtime
+// boundary.  The value remains tagged in its slot; only the temporary register
+// is raw.  Used by index, slice, and bounds-check paths.
+fn e2_big_word_var(buf: string, p: int, reg: int, var_idx: int) -> int:
+    cp : ., mut = 0
+    cp = cp + e2_load_var(buf, p + cp, 7, var_idx)
+    cp = cp + e2_big_call_name(buf, p + cp, str_intern("bi_to_word_checked"))
+    cp = cp + e2_mov(buf, p + cp, reg, 0)
+    return cp
+
+fn e2_big_push_r11(buf: string, p: int) -> int:
+    e2_w8(buf, p, 65)
+    e2_w8(buf, p + 1, 83)
+    return 2
+
+fn e2_big_pop_r11(buf: string, p: int) -> int:
+    e2_w8(buf, p, 65)
+    e2_w8(buf, p + 1, 91)
+    return 2
+
 fn emit_big_neg(buf: string, pos: int, d: int, s1: int) -> int:
     cp : ., mut = 0
     cp = cp + e2_load_var(buf, pos + cp, 10, s1)

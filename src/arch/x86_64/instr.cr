@@ -1522,10 +1522,16 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
 
     if op == IR_ADDR_INDEX && d >= 0:
         do2 := g2_slot(d)
-        // load array pointer from arr base slot (handles both local and global)
-        cp = cp + e2_load_var(buf, pos+cp, 10, s1)
-        // load index (handles both local and global)
-        cp = cp + e2_load_var(buf, pos+cp, 11, s2)
+        if g_x86_big_enabled != 0:
+            // The index is a mathematical int.  Convert it before loading the
+            // array pointer because the runtime call may clobber caller-saved r10.
+            cp = cp + e2_big_word_var(buf, pos+cp, 11, s2)
+            cp = cp + e2_load_var(buf, pos+cp, 10, s1)
+        else:
+            // load array pointer from arr base slot (handles both local and global)
+            cp = cp + e2_load_var(buf, pos+cp, 10, s1)
+            // load index (handles both local and global)
+            cp = cp + e2_load_var(buf, pos+cp, 11, s2)
         // lea r10, [r10 + r11*8] = address of arr[i] on heap
         cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 11/8, 10/8)
         e2_w8(buf, pos+cp, 141)
@@ -1634,6 +1640,10 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         cp = cp + 1
         cp = cp + emit_modrm(buf, pos+cp, 2, 10%8, 10%8)
         cp = cp + e2_w32(buf, pos+cp, 0)
+        if g_x86_big_enabled != 0:
+            // The enum tag is an int value in user code (variant name index).
+            // The object stores it raw; tag it before it reaches a comparison.
+            cp = cp + e2_big_tag_reg(buf, pos+cp, 10)
         cp = cp + e2_st(buf, pos+cp, 10, do2)
         return cp
 
@@ -1685,10 +1695,15 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
 
     if op == IR_LOAD_INDEX_VAR && d >= 0:
         do2 := g2_slot(d)
-        // load array pointer (handles local and global)
-        cp = cp + e2_load_var(buf, pos+cp, 10, s1)
-        // load index (handles local and global)
-        cp = cp + e2_load_var(buf, pos+cp, 11, s2)
+        if g_x86_big_enabled != 0:
+            // Convert the index before loading the array pointer.
+            cp = cp + e2_big_word_var(buf, pos+cp, 11, s2)
+            cp = cp + e2_load_var(buf, pos+cp, 10, s1)
+        else:
+            // load array pointer (handles local and global)
+            cp = cp + e2_load_var(buf, pos+cp, 10, s1)
+            // load index (handles local and global)
+            cp = cp + e2_load_var(buf, pos+cp, 11, s2)
         // Strings use byte indexing; arrays use 8-byte element indexing.
         if irv_type(s1) == TI_STR:
             cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 11/8, 10/8)
@@ -1708,26 +1723,45 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         return cp
 
     if op == IR_STORE_INDEX_VAR && d >= 0:
-        // load array pointer (handles local and global)
-        cp = cp + e2_load_var(buf, pos+cp, 10, s1)
-        // load index (handles local and global)
-        cp = cp + e2_load_var(buf, pos+cp, 11, s2)
-        // load value to store (handles local and global)
-        cp = cp + e2_load_var(buf, pos+cp, 12, d)
+        if g_x86_big_enabled != 0:
+            cp = cp + e2_big_word_var(buf, pos+cp, 11, s2)
+            cp = cp + e2_load_var(buf, pos+cp, 10, s1)
+            cp = cp + e2_load_var(buf, pos+cp, 8, d)
+        else:
+            // load array pointer (handles local and global)
+            cp = cp + e2_load_var(buf, pos+cp, 10, s1)
+            // load index (handles local and global)
+            cp = cp + e2_load_var(buf, pos+cp, 11, s2)
+            // load value to store (handles local and global)
+            cp = cp + e2_load_var(buf, pos+cp, 12, d)
         if irv_type(s1) == TI_STR:
             // String assignment stores one byte at the runtime byte index.
-            cp = cp + emit_rex(buf, pos+cp, 0, 12/8, 0, 10/8)
-            e2_w8(buf, pos+cp, 136)
-            cp = cp + 1
-            cp = cp + emit_modrm(buf, pos+cp, 0, 12%8, 4)
-            cp = cp + emit_sib(buf, pos+cp, 0, 11%8, 10%8)
+            if g_x86_big_enabled != 0:
+                cp = cp + emit_rex(buf, pos+cp, 0, 8/8, 0, 10/8)
+                e2_w8(buf, pos+cp, 136)
+                cp = cp + 1
+                cp = cp + emit_modrm(buf, pos+cp, 0, 8%8, 4)
+                cp = cp + emit_sib(buf, pos+cp, 0, 11%8, 10%8)
+            else:
+                cp = cp + emit_rex(buf, pos+cp, 0, 12/8, 0, 10/8)
+                e2_w8(buf, pos+cp, 136)
+                cp = cp + 1
+                cp = cp + emit_modrm(buf, pos+cp, 0, 12%8, 4)
+                cp = cp + emit_sib(buf, pos+cp, 0, 11%8, 10%8)
         else:
-            // mov [r10 + r11*8], r12 — SIB(scale=3, index=r11%8, base=r10%8)
-            cp = cp + emit_rex(buf, pos+cp, 1, 12/8, 11/8, 10/8)
-            e2_w8(buf, pos+cp, 137)
-            cp = cp + 1
-            cp = cp + emit_modrm(buf, pos+cp, 0, 12%8, 4)
-            cp = cp + emit_sib(buf, pos+cp, 3, 11%8, 10%8)
+            // mov [r10 + r11*8], value — SIB(scale=3, index=r11%8, base=r10%8)
+            if g_x86_big_enabled != 0:
+                cp = cp + emit_rex(buf, pos+cp, 1, 8/8, 11/8, 10/8)
+                e2_w8(buf, pos+cp, 137)
+                cp = cp + 1
+                cp = cp + emit_modrm(buf, pos+cp, 0, 8%8, 4)
+                cp = cp + emit_sib(buf, pos+cp, 3, 11%8, 10%8)
+            else:
+                cp = cp + emit_rex(buf, pos+cp, 1, 12/8, 11/8, 10/8)
+                e2_w8(buf, pos+cp, 137)
+                cp = cp + 1
+                cp = cp + emit_modrm(buf, pos+cp, 0, 12%8, 4)
+                cp = cp + emit_sib(buf, pos+cp, 3, 11%8, 10%8)
         return cp
 
     if op == IR_MAKE_ENUM && d >= 0:
@@ -1755,9 +1789,14 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
     if op == IR_SLICE && d >= 0:
         do2 := g2_slot(d)
         // Both the array pointer (s1) and the low bound (s2) go through the
-        // global operand seam.
-        cp = cp + e2_load_var(buf, pos+cp, 10, s1)
-        cp = cp + e2_load_var(buf, pos+cp, 11, s2)
+        // global operand seam.  Convert the bound first: the runtime call may
+        // clobber caller-saved r10.
+        if g_x86_big_enabled != 0:
+            cp = cp + e2_big_word_var(buf, pos+cp, 11, s2)
+            cp = cp + e2_load_var(buf, pos+cp, 10, s1)
+        else:
+            cp = cp + e2_load_var(buf, pos+cp, 10, s1)
+            cp = cp + e2_load_var(buf, pos+cp, 11, s2)
         // shl r11, 3 — REX.WB + 0xC1, /4
         cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 11/8)
         e2_w8(buf, pos+cp, 193)
@@ -1782,16 +1821,36 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         // s1 = index var, s2 = max_len literal. index < 0 or index >= max_len
         // traps with ud2. When ti == 0, s2 is a literal upper bound; otherwise it
         // is a variable holding the length.
-        cp = cp + e2_load_var(buf, pos+cp, 10, s1)  // index
-        if ti != 0:
-            // Dynamic upper bound: load len_var into r11.
-            cp = cp + e2_load_var(buf, pos+cp, 11, s2)
+        if g_x86_big_enabled != 0:
+            if ti != 0:
+                // Convert both tagged operands.  Save the length on the stack:
+                // r12 belongs to the register allocator at O2 and a runtime call
+                // may clobber caller-saved registers.  Two pushes keep rsp
+                // 16-byte aligned across the calls.
+                cp = cp + e2_big_word_var(buf, pos+cp, 11, s2)
+                cp = cp + e2_big_push_r11(buf, pos+cp)
+                cp = cp + e2_big_push_r11(buf, pos+cp)
+                cp = cp + e2_big_word_var(buf, pos+cp, 10, s1)
+                cp = cp + e2_big_pop_r11(buf, pos+cp)
+                cp = cp + e2_big_pop_r11(buf, pos+cp)
+            else:
+                cp = cp + e2_big_word_var(buf, pos+cp, 10, s1)
+                // Constant upper bound: movabs r11, imm64.
+                e2_w8(buf, pos+cp, 73)
+                e2_w8(buf, pos+cp+1, 187)
+                e2_w64(buf, pos+cp+2, s2)
+                cp = cp + 10
         else:
-            // Constant upper bound: movabs r11, imm64.
-            e2_w8(buf, pos+cp, 73)
-            e2_w8(buf, pos+cp+1, 187)
-            e2_w64(buf, pos+cp+2, s2)
-            cp = cp + 10
+            cp = cp + e2_load_var(buf, pos+cp, 10, s1)  // index
+            if ti != 0:
+                // Dynamic upper bound: load len_var into r11.
+                cp = cp + e2_load_var(buf, pos+cp, 11, s2)
+            else:
+                // Constant upper bound: movabs r11, imm64.
+                e2_w8(buf, pos+cp, 73)
+                e2_w8(buf, pos+cp+1, 187)
+                e2_w64(buf, pos+cp+2, s2)
+                cp = cp + 10
         cp = cp + e2_alu(buf, pos+cp, 57)           // cmp r10, r11
         // jb +2: if index < max (unsigned below), skip the 2-byte ud2 -> continue
         e2_w8(buf, pos+cp, 114)                      // 0x72 = jb rel8
