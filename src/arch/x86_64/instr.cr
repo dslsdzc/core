@@ -1797,11 +1797,13 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                         lbl_no = iri_s1(ctarget)
                 if lbl_no >= 0:
                     cval := cell_load(g_ccr_case, cbase + CCR_CASE_VALUE)
+                    // Tagged int form: enum tags are ints in user code, and an
+                    // int scrutinee slot is tagged. In raw-int mode neither is,
+                    // so the enum tag must stay raw too.
                     tagged : ., mut = 0
-                    if ckind == CCR_CASE_KIND_ENUM:
-                        tagged = 1
-                    else if g_x86_big_enabled != 0 && ti_s == TI_INT:
-                        tagged = 1
+                    if g_x86_big_enabled != 0:
+                        if ckind == CCR_CASE_KIND_ENUM || ti_s == TI_INT:
+                            tagged = 1
                     imm := cval
                     if tagged != 0:
                         imm = cval * 2
@@ -1818,8 +1820,8 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                         g_pending_count = g_pending_count + 1
             ci = ci + 1
 
-        // No value hit -> default (or fall through when the loader let an
-        // invalid target through; the loader rejects that shape).
+        // No value hit -> default. A range without DEFAULT is a trap: the
+        // design forbids falling through into the first arm body.
         if default_lbl >= 0:
             jmp_pos := pos + cp
             cp = cp + e2_jmp(buf, pos+cp, 0)
@@ -1831,6 +1833,10 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                 cell_store(g_pending_pos, g_pending_count*8, jmp_pos + 1)
                 cell_store(g_pending_label, g_pending_count*8, default_lbl)
                 g_pending_count = g_pending_count + 1
+        else:
+            e2_w8(buf, pos+cp, 15)
+            e2_w8(buf, pos+cp+1, 11)  // ud2: invalid opcode trap
+            cp = cp + 2
         return cp
 
     if op == IR_LOAD_ENUM_TAG && d >= 0:

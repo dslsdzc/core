@@ -270,10 +270,12 @@ def test_ir_match_opcode_is_known_to_loader():
         # A MATCH node plus three CASE records, as the schema expects them to
         # coexist. s2/s3 carry the CASE range: s2=0, s3=count. Removing
         # IR_MATCH from ccr_nod_src3_semantic would reject s3=3 as a legacy
-        # target fact, so this fixture pins the semantic field.
+        # target fact, so this fixture pins the semantic field. The range is
+        # homogeneous (all VALUE + DEFAULT); mixed ENUM/VALUE is rejected by the
+        # loader rule and is covered separately.
         records = [
             (7, KIND_VALUE, -1, labels[0], 0),
-            (2, KIND_ENUM, -1, labels[1], 0),
+            (2, KIND_VALUE, -1, labels[1], 0),
             (0, KIND_DEFAULT, -1, labels[2], 0),
         ]
         with_match = _replace_case(data, _pack_case(records))
@@ -381,15 +383,16 @@ def test_malformed_case_records_rejected():
         install("case_target_not_label", _pack_case([(1, KIND_VALUE, -1, non_label, 0)]))
         # Two DEFAULT rows inside one MATCH range are invalid. (The table is
         # global, so two different matches may each have one default.)
-        two_defaults = _replace_case(
-            data,
-            _pack_case(
-                [
-                    (0, KIND_DEFAULT, -1, label, 0),
-                    (0, KIND_DEFAULT, -1, labels[1], 0),
-                ]
-            ),
+        two_defaults_body = _pack_case(
+            [
+                (0, KIND_DEFAULT, -1, label, 0),
+                (0, KIND_DEFAULT, -1, labels[1], 0),
+            ]
         )
+        two_defaults = _replace_case(data, two_defaults_body)
+        # Without a MATCH node, the table alone is structurally valid: this
+        # pins the rejection below to the loader's per-range rule.
+        _assert_loads(two_defaults, tmp, "case_two_defaults_no_range")
         nod_off = next(
             offset for tag, offset, _size in read_segment_table(data) if tag == NOD_TAG
         )
@@ -397,7 +400,7 @@ def test_malformed_case_records_rejected():
         struct.pack_into("<I", d, nod_off + 4, IR_MATCH)
         struct.pack_into("<i", d, nod_off + 4 + 16, 0)  # s2 = case start
         struct.pack_into("<i", d, nod_off + 4 + 20, 2)  # s3 = case count
-        _assert_load_rejected(bytes(d), tmp, "case_two_defaults")
+        _assert_load_rejected(bytes(d), tmp, "case_two_defaults_loader")
         install("case_flags_reserved", _pack_case([(1, KIND_VALUE, -1, label, 1)]))
         # Count claims two records but only one is present.
         install("case_count_truncated", struct.pack("<I", 2) + _pack_case([(1, 0, -1, label, 0)])[4:])
@@ -539,6 +542,71 @@ fn main() -> int:
 """
 
 
+MATCH_MIXED_SOURCE = """enum Color:
+    Red, Green, Blue
+
+fn pick(c: Color) -> int:
+    return match c:
+        Red => 1,
+        2 => 2,
+        _ => 3
+
+fn main() -> int:
+    if pick(Red()) != 1:
+        return 1
+    if pick(Green()) != 3:
+        return 2
+    return 42
+"""
+
+MATCH_NO_DEFAULT_SOURCE = """fn pick(n: int) -> int:
+    return match n:
+        1 => 11,
+        2 => 22
+
+fn main() -> int:
+    return pick(99)
+"""
+
+MATCH_NO_DEFAULT_HIT_SOURCE = """fn pick(n: int) -> int:
+    return match n:
+        1 => 11,
+        2 => 22
+
+fn main() -> int:
+    return pick(1) + pick(2)
+"""
+
+MATCH_LOOP_SOURCE = """fn f() -> int:
+    x : int
+    sum : int = 0
+    i : int = 0
+    loop:
+        if i >= 5:
+            break
+        match i:
+            0 =>:
+                x = 10
+            1 =>:
+                sum = sum + x
+            _ =>:
+                sum = sum + x
+        i = i + 1
+    return sum + 2
+
+fn main() -> int:
+    return f()
+"""
+
+MATCH_IDENT_FALLBACK_SOURCE = """fn pickid(n: int) -> int:
+    return match n:
+        x => 42
+
+fn main() -> int:
+    return pickid(7)
+"""
+
+
 def _match_nodes(data):
     return [i for i, rec in enumerate(_nod_records(data)) if rec[0] == IR_MATCH]
 
@@ -559,26 +627,31 @@ def _assert_targets_are_labels(data, rows):
         )
 
 
-def _assert_program(tmp, source, expected):
-    """Run the fixture through the interpreter and a static ELF."""
+def _assert_program(tmp, source, expected, opts=(0, 2), name="match_program"):
+    """Run the fixture through the interpreter and static ELFs at each -O."""
     interp = _run([COREC, "run", source], cwd=BASE)
     assert interp.returncode == expected, (
         f"interp returned {interp.returncode}, expected {expected}: "
         f"{interp.stdout}\n{interp.stderr}"
     )
-    src = tmp / "match_program.cr"
+    src = tmp / f"{name}.cr"
     src.write_text(source, encoding="utf-8")
-    elf = tmp / "match_program.elf"
-    built = _run([COREC, "build", src, "-o", elf, "--static"], cwd=BASE)
-    assert built.returncode == 0, f"corec build failed: {built.stdout}\n{built.stderr}"
-    assert elf.exists(), "corec build produced no ELF"
-    run = subprocess.run(
-        [str(elf)], capture_output=True, text=True, timeout=30, cwd=str(BASE)
-    )
-    assert run.returncode == expected, (
-        f"ELF returned {run.returncode}, expected {expected}: "
-        f"{run.stdout}\n{run.stderr}"
-    )
+    for opt in opts:
+        elf = tmp / f"{name}_O{opt}.elf"
+        built = _run(
+            [COREC, "build", src, "-o", elf, "--static", "-O", str(opt)], cwd=BASE
+        )
+        assert built.returncode == 0, (
+            f"corec build -O {opt} failed: {built.stdout}\n{built.stderr}"
+        )
+        assert elf.exists(), f"corec build -O {opt} produced no ELF"
+        run = subprocess.run(
+            [str(elf)], capture_output=True, text=True, timeout=30, cwd=str(BASE)
+        )
+        assert run.returncode == expected, (
+            f"ELF -O {opt} returned {run.returncode}, expected {expected}: "
+            f"{run.stdout}\n{run.stderr}"
+        )
 
 
 def test_int_match_is_one_match_with_default_case():
@@ -588,6 +661,8 @@ def test_int_match_is_one_match_with_default_case():
         rec = _single_match(data)
         rows = _parse_case(segment(data, CASE_TAG))
 
+        assert rec[1] == -1, f"MATCH dest is {rec[1]}, expected -1"
+        assert rec[2] >= 0, f"MATCH scrutinee is {rec[2]}, expected a var"
         assert rec[3] == 0, f"MATCH case start is {rec[3]}, expected 0"
         assert rec[4] == 5, f"MATCH case count is {rec[4]}, expected 5"
         assert len(rows) == 5, f"CASE has {len(rows)} rows, expected 5"
@@ -615,6 +690,8 @@ def test_bool_match_is_one_match_with_value_cases():
         rec = _single_match(data)
         rows = _parse_case(segment(data, CASE_TAG))
 
+        assert rec[1] == -1
+        assert rec[2] >= 0
         assert rec[3] == 0
         assert rec[4] == 3
         assert [row["kind"] for row in rows] == [
@@ -634,6 +711,8 @@ def test_enum_match_is_one_match_with_enum_cases():
         rec = _single_match(data)
         rows = _parse_case(segment(data, CASE_TAG))
 
+        assert rec[1] == -1
+        assert rec[2] >= 0
         assert rec[3] == 0
         assert rec[4] == 4
         assert [row["kind"] for row in rows] == [
@@ -650,6 +729,22 @@ def test_enum_match_is_one_match_with_enum_cases():
         _assert_program(tmp, MATCH_ENUM_SOURCE, 42)
 
 
+def _run_raw_elf(tmp, data, name):
+    """Build an ELF through corearch in raw-int mode and return its exit code."""
+    ccr = tmp / f"{name}.ccr"
+    ccr.write_bytes(data)
+    elf = tmp / f"{name}.elf"
+    built = _run([COREARCH, ccr, "--elf", "--static", "--raw-int", "-o", elf])
+    assert built.returncode == 0, (
+        f"corearch --raw-int failed: {built.stdout}\n{built.stderr}"
+    )
+    assert elf.exists(), "corearch --raw-int produced no ELF"
+    run = subprocess.run(
+        [str(elf)], capture_output=True, text=True, timeout=30, cwd=str(BASE)
+    )
+    return run.returncode
+
+
 def test_unsupported_patterns_keep_sequential_lowering():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -658,6 +753,124 @@ def test_unsupported_patterns_keep_sequential_lowering():
             "string/ident-binding/struct patterns must not become MATCH"
         )
         assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+
+
+def test_mixed_enum_and_value_arms_fall_back():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_MIXED_SOURCE, "match_mixed")
+        assert _match_nodes(data) == [], (
+            "a match mixing enum variants and value literals must keep the old path"
+        )
+        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+        _assert_program(tmp, MATCH_MIXED_SOURCE, 42, name="match_mixed")
+
+
+def test_mixed_kind_case_range_rejected_by_loader():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_ENUM_SOURCE, "match_enum_mixed")
+        rows = _parse_case(segment(data, CASE_TAG))
+        records = [
+            (rows[0]["value"], KIND_VALUE, -1, rows[0]["target_nod"], 0)
+        ]
+        for row in rows[1:]:
+            records.append(
+                (
+                    row["value"],
+                    row["kind"],
+                    row["str_index"],
+                    row["target_nod"],
+                    row["flags"],
+                )
+            )
+        bad = _replace_case(data, _pack_case(records))
+        _assert_load_rejected(bad, tmp, "case_mixed_kinds")
+
+
+def test_no_default_match_traps_on_miss():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_NO_DEFAULT_SOURCE, "match_nodefault")
+        rec = _single_match(data)
+        rows = _parse_case(segment(data, CASE_TAG))
+        assert rec[1] == -1
+        assert rec[2] >= 0
+        assert rec[4] == 2
+        assert [row["kind"] for row in rows] == [KIND_VALUE, KIND_VALUE]
+        _assert_targets_are_labels(data, rows)
+
+        interp = _run([COREC, "run", MATCH_NO_DEFAULT_SOURCE], cwd=BASE)
+        assert interp.returncode != 0, (
+            "a MATCH miss with no DEFAULT must abort the interpreter"
+        )
+        assert interp.returncode not in (11, 22), (
+            f"interp fell into an arm: rc={interp.returncode}"
+        )
+
+        src = tmp / "match_nodefault.cr"
+        src.write_text(MATCH_NO_DEFAULT_SOURCE, encoding="utf-8")
+        elf = tmp / "match_nodefault.elf"
+        built = _run([COREC, "build", src, "-o", elf, "--static", "-O", "2"])
+        assert built.returncode == 0, built.stdout + built.stderr
+        run = subprocess.run(
+            [str(elf)], capture_output=True, text=True, timeout=30, cwd=str(BASE)
+        )
+        assert run.returncode == -4, (
+            f"ELF did not trap with SIGILL: rc={run.returncode}"
+        )
+
+
+def test_no_default_match_dispatches_hits():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_NO_DEFAULT_HIT_SOURCE, "match_nodefault_hit")
+        rec = _single_match(data)
+        rows = _parse_case(segment(data, CASE_TAG))
+        assert rec[4] == 2
+        assert KIND_DEFAULT not in [row["kind"] for row in rows]
+        _assert_program(
+            tmp, MATCH_NO_DEFAULT_HIT_SOURCE, 33, name="match_nodefault_hit"
+        )
+
+
+def test_enum_match_raw_int_mode():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_ENUM_SOURCE, "match_enum_raw")
+        assert len(_match_nodes(data)) == 1
+        assert _run_raw_elf(tmp, data, "match_enum_raw") == 42
+
+
+def test_loop_match_all_opt_levels():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_LOOP_SOURCE, "match_loop")
+        rec = _single_match(data)
+        rows = _parse_case(segment(data, CASE_TAG))
+        assert rec[4] == 3
+        assert [row["kind"] for row in rows] == [
+            KIND_VALUE,
+            KIND_VALUE,
+            KIND_DEFAULT,
+        ]
+        _assert_program(
+            tmp, MATCH_LOOP_SOURCE, 42, opts=(0, 2, 3), name="match_loop"
+        )
+
+
+def test_ident_fallback_executes_old_path():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_IDENT_FALLBACK_SOURCE, "match_ident_fallback")
+        assert _match_nodes(data) == []
+        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+        _assert_program(
+            tmp,
+            MATCH_IDENT_FALLBACK_SOURCE,
+            42,
+            name="match_ident_fallback",
+        )
 
 
 def test_dump_objects_prints_match_cases():

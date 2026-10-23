@@ -112,6 +112,7 @@ fn compute_live_ranges():
                 if ii >= ic:
                     break
                 inst := ist + ii
+                op := nod_op(inst)
                 d := nod_dest(inst)
                 s1 := nod_s1(inst)
                 s2 := nod_s2(inst)
@@ -127,7 +128,7 @@ fn compute_live_ranges():
                     if cell_load(g_ir_live_ranges, st) < 0:
                         cell_store(g_ir_live_ranges, st, ii)
                     cell_store(g_ir_live_ranges, st + 8, ii)
-                if s2 >= vs && s2 < vs + vc:
+                if op != IR_MATCH && s2 >= vs && s2 < vs + vc:
                     lv := s2 - vs
                     st := (seg + lv) * 16
                     if cell_load(g_ir_live_ranges, st) < 0:
@@ -922,7 +923,7 @@ fn rl_rule2_func(func_i: int, vs: int, vc: int, nst: int, nc: int, es: int, ec: 
             s2 := nod_s2(inst)
             if s1 == gv && op != IR_STORE:
                 rd = 1
-            if s2 == gv:
+            if op != IR_MATCH && s2 == gv:
                 rd = 1
             if rd != 0 && inst >= ent_def(first_def):
                 // 推进游标至最后一个 def ≤ inst 的版本

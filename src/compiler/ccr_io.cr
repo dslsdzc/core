@@ -393,6 +393,8 @@ fn ccr_validate_cases() -> int:
             if mstart + mcount > g_ccr_case_count:
                 return 0
             mdef : ., mut = 0
+            menum : ., mut = 0
+            mvalue : ., mut = 0
             mj : ., mut = 0
             loop:
                 if mj >= mcount:
@@ -402,7 +404,15 @@ fn ccr_validate_cases() -> int:
                     mdef = mdef + 1
                     if mdef > 1:
                         return 0
+                else if mk == CCR_CASE_KIND_ENUM:
+                    menum = menum + 1
+                else if mk == CCR_CASE_KIND_VALUE:
+                    mvalue = mvalue + 1
                 mj = mj + 1
+            if menum > 0 && mvalue > 0:
+                // The backend selects one scrutinee form (enum tag vs value
+                // slot) for the whole range.
+                return 0
         mi = mi + 1
     return 1
 
@@ -2782,6 +2792,8 @@ fn load_ccr(data: string, fsize: int) -> int:
             if mstart4 + mcount4 > case_cnt:
                 return -1
             mdef4 : ., mut = 0
+            menum4 : ., mut = 0
+            mvalue4 : ., mut = 0
             mj4 : ., mut = 0
             loop:
                 if mj4 >= mcount4:
@@ -2791,7 +2803,13 @@ fn load_ccr(data: string, fsize: int) -> int:
                     mdef4 = mdef4 + 1
                     if mdef4 > 1:
                         return -1
+                else if mk4 == CCR_CASE_KIND_ENUM:
+                    menum4 = menum4 + 1
+                else if mk4 == CCR_CASE_KIND_VALUE:
+                    mvalue4 = mvalue4 + 1
                 mj4 = mj4 + 1
+            if menum4 > 0 && mvalue4 > 0:
+                return -1
         mi4 = mi4 + 1
     g_ccr_case = case_buf
     g_ccr_case_count = case_cnt

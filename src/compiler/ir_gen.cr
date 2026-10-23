@@ -2746,13 +2746,13 @@ fn gen_expr(node: int) -> int:
         if g_optrep_on != 0 && match_val >= 0:
             if irv_rep(match_val) >= 0:
                 match_mode = 0
-        vals := alloc((arm_total + 1) * 16)   // unique cases: kind@0, value@8
-        cis := alloc((arm_total + 1) * 8)     // arm -> unique-case index, -1 = duplicate
-        unique_n : ., mut = 0
+        // Pass A: classify support without resolving enum variant names. This
+        // keeps an unsupported match's string-interning order byte-identical to
+        // the old sequential lowering.
         wild_total : ., mut = 0
         saw_int : ., mut = 0
         saw_bool : ., mut = 0
-        arm_scan : ., mut = 0
+        saw_enum : ., mut = 0
         an0 = first_arm
         loop:
             if an0 < 0:
@@ -2761,34 +2761,21 @@ fn gen_expr(node: int) -> int:
             k0 : ., mut = -1
             if ap0 >= 0:
                 k0 = ast_kind(ap0)
-            kind0 : ., mut = -1
-            value0 : ., mut = 0
             if k0 == EXPR_INT:
-                iv0 := ast_int_val(ap0)
                 saw_int = 1
+                iv0 := ast_int_val(ap0)
                 // The backend tags small integers as value<<1. Values outside
                 // the 62-bit immediate window need the big-int path, which this
                 // task does not encode in CASE.
                 if iv0 > 4611686018427387903 || iv0 < -4611686018427387903:
                     match_mode = 0
-                kind0 = CCR_CASE_KIND_VALUE
-                value0 = iv0
             else if k0 == EXPR_BOOL:
                 saw_bool = 1
-                bv0 : ., mut = 0
-                if ast_int_val(ap0) != 0:
-                    bv0 = 1
-                kind0 = CCR_CASE_KIND_VALUE
-                value0 = bv0
             else if k0 == EXPR_ENUMPAT:
+                saw_enum = 1
                 if ast_c(ap0) != 0:
                     // Payload binding/guard patterns are Task 4/5.
                     match_mode = 0
-                vn0 := get_variant_name_idx(ast_a(ap0))
-                if vn0 < 0:
-                    match_mode = 0
-                kind0 = CCR_CASE_KIND_ENUM
-                value0 = vn0
             else if k0 == EXPR_IDENT && str_eq(istr_get(ast_int_val(ap0)), "_") != 0:
                 // The lexer classifies a bare `_` as an identifier because `_`
                 // is a valid identifier character; the parser's EXPR_WILDCARD
@@ -2798,37 +2785,12 @@ fn gen_expr(node: int) -> int:
                     // A wildcard shadows every later arm; keep the old path so
                     // the CASE order cannot change which body wins.
                     match_mode = 0
-                kind0 = CCR_CASE_KIND_DEFAULT
-                value0 = 0
             else if k0 == EXPR_WILDCARD:
                 wild_total = wild_total + 1
                 if ast_c(an0) >= 0:
-                    // A wildcard shadows every later arm; keep the old path so
-                    // the CASE order cannot change which body wins.
                     match_mode = 0
-                kind0 = CCR_CASE_KIND_DEFAULT
-                value0 = 0
             else:
                 match_mode = 0
-            ci0 : ., mut = -1
-            if match_mode != 0:
-                j0 : ., mut = 0
-                dup0 : ., mut = 0
-                loop:
-                    if j0 >= unique_n:
-                        break
-                    if cell_load(vals, j0 * 16) == kind0:
-                        if cell_load(vals, j0 * 16 + 8) == value0:
-                            dup0 = 1
-                            break
-                    j0 = j0 + 1
-                if dup0 == 0:
-                    cell_store(vals, unique_n * 16, kind0)
-                    cell_store(vals, unique_n * 16 + 8, value0)
-                    ci0 = unique_n
-                    unique_n = unique_n + 1
-            cell_store(cis, arm_scan * 8, ci0)
-            arm_scan = arm_scan + 1
             an0 = ast_c(an0)
         if match_val < 0:
             match_mode = 0
@@ -2838,19 +2800,73 @@ fn gen_expr(node: int) -> int:
             match_mode = 0
         if saw_bool != 0 && irv_type(match_val) != TI_BOOL:
             match_mode = 0
+        if saw_enum != 0 && (saw_int != 0 || saw_bool != 0):
+            // The backend picks one scrutinee form per MATCH range (enum tag vs
+            // value slot). Mixed rows would dispatch differently in the
+            // interpreter, so keep the sequential path instead.
+            match_mode = 0
         if wild_total > 1:
             match_mode = 0
-        synth_default : ., mut = -1
-        if match_mode != 0 && wild_total == 0:
-            // No wildcard: an unmatched value falls through to the merge label,
-            // exactly as the sequential lowering did. Add that edge as DEFAULT.
-            cell_store(vals, unique_n * 16, CCR_CASE_KIND_DEFAULT)
-            cell_store(vals, unique_n * 16 + 8, 0)
-            synth_default = unique_n
-            unique_n = unique_n + 1
+
+        // Pass B: only for supported matches. Resolve enum tags and dedupe by
+        // (kind, value), keeping the first arm.
+        vals := alloc((arm_total + 1) * 16)   // unique cases: kind@0, value@8
+        cis := alloc((arm_total + 1) * 8)     // arm -> unique-case index, -1 = duplicate
+        unique_n : ., mut = 0
+        arm_scan : ., mut = 0
+        if match_mode != 0:
+            an0 = first_arm
+            loop:
+                if an0 < 0:
+                    break
+                ap0 := ast_a(an0)
+                k0 := ast_kind(ap0)
+                kind0 : ., mut = -1
+                value0 : ., mut = 0
+                if k0 == EXPR_INT:
+                    kind0 = CCR_CASE_KIND_VALUE
+                    value0 = ast_int_val(ap0)
+                else if k0 == EXPR_BOOL:
+                    bv0 : ., mut = 0
+                    if ast_int_val(ap0) != 0:
+                        bv0 = 1
+                    kind0 = CCR_CASE_KIND_VALUE
+                    value0 = bv0
+                else if k0 == EXPR_ENUMPAT:
+                    kind0 = CCR_CASE_KIND_ENUM
+                    value0 = get_variant_name_idx(ast_a(ap0))
+                    if value0 < 0:
+                        match_mode = 0
+                else:
+                    kind0 = CCR_CASE_KIND_DEFAULT
+                    value0 = 0
+                ci0 : ., mut = -1
+                if match_mode != 0:
+                    j0 : ., mut = 0
+                    dup0 : ., mut = 0
+                    loop:
+                        if j0 >= unique_n:
+                            break
+                        if cell_load(vals, j0 * 16) == kind0:
+                            if cell_load(vals, j0 * 16 + 8) == value0:
+                                dup0 = 1
+                                break
+                        j0 = j0 + 1
+                    if dup0 == 0:
+                        cell_store(vals, unique_n * 16, kind0)
+                        cell_store(vals, unique_n * 16 + 8, value0)
+                        ci0 = unique_n
+                        unique_n = unique_n + 1
+                cell_store(cis, arm_scan * 8, ci0)
+                arm_scan = arm_scan + 1
+                an0 = ast_c(an0)
         case_base : ., mut = -1
         if match_mode != 0:
             case_base = g_ccr_case_count
+            // type_kind 0: MATCH is not a type-face op. The NOD semantic
+            // type_id is filled by ccr_nod_type_domain from the scrutinee var,
+            // so the wire records the scrutinee domain instead of an invented
+            // result domain.
             emit(IR_MATCH, -1, match_val, case_base, unique_n, 0)
             g_cir_has_match = 1
             // Reserve the whole range before emitting bodies: nested matches in
@@ -3027,10 +3043,7 @@ fn gen_expr(node: int) -> int:
                 emit(IR_LABEL, -1, fall_lbl, 0, 0, 0)
             an = ast_c(an)
             arm_idx = arm_idx + 1
-        merge_nod := g_ir_instr_count
         emit(IR_LABEL, -1, merge_lbl, 0, 0, 0)
-        if match_mode != 0 && synth_default >= 0:
-            ccr_case_set_target(case_base + synth_default, merge_nod)
         return result_var
 
     // Let binding

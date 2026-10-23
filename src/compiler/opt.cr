@@ -384,10 +384,12 @@ fn pass_cse():
                     new_v := cell_load(replace_map, rj * 8 + 8)
                     if iri_s1(inst) == old_v:
                         iri_set_s1(inst, new_v)
-                    if iri_s2(inst) == old_v:
-                        iri_set_s2(inst, new_v)
-                    if iri_s3(inst) == old_v:
-                        iri_set_s3(inst, new_v)
+                    // MATCH s2/s3 are CASE start/count, not variables.
+                    if op != IR_MATCH:
+                        if iri_s2(inst) == old_v:
+                            iri_set_s2(inst, new_v)
+                        if iri_s3(inst) == old_v:
+                            iri_set_s3(inst, new_v)
                     rj = rj + 1
 
             ii = ii + 1
