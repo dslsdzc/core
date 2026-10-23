@@ -311,6 +311,33 @@ fn dump_object_surface():
         nod_inputs(ni)   // print outgoing edge records through the kernel helper
         ni = ni + 1
 
+// --dump-match-plan: per IR_MATCH, report the CASE row count and the dispatch
+// strategy the emitter selects. The strategy comes from e2_match_use_binary,
+// the same predicate emit_instr uses, so this is a direct read of the emitted
+// plan (linear <=2 value rows, balanced binary search otherwise). Read-only: it
+// returns without entering emission.
+fn dump_match_plan():
+    ni : ., mut = 0
+    loop:
+        if ni >= g_v7_nod_count:
+            break
+        if nod_op(ni) == IR_MATCH:
+            ms := nod_s2(ni)
+            mc := nod_s3(ni)
+            print("match ")
+            print_i(ni)
+            print(" cases ")
+            print_i(mc)
+            print(" nondefault ")
+            print_i(e2_match_nondefault_count(ms, mc))
+            print(" strategy ")
+            if e2_match_use_binary(ms, mc) != 0:
+                print("binary")
+            else:
+                print("linear")
+            println("")
+        ni = ni + 1
+
 // --dump-nod-types: print each node's semantic type_id and feature flags. The
 // disk has no term-index field in v10, so this channel exposes the actual wire
 // semantics. It returns before emission.
@@ -473,6 +500,12 @@ fn corearch_main() -> int:
     // emission. It returns without entering the O2 or emission paths.
     if cli_has("dump-objects") != 0:
         dump_object_surface()
+        return 0
+
+    // Hidden channel: per-MATCH dispatch strategy. It shares the emitter's
+    // predicate and returns before O2 allocation or emission.
+    if cli_has("dump-match-plan") != 0:
+        dump_match_plan()
         return 0
 
     // O2 allocation and consistency checks run here, not in corec. The .ccr no

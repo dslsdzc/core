@@ -62,6 +62,8 @@ fn backend_has_extended_flags() -> int:
         return 1
     if cli_has("dump-objects") != 0:
         return 1
+    if cli_has("dump-match-plan") != 0:
+        return 1
     if cli_has("dump-nod-types") != 0:
         return 1
     if cli_has("dump-alloc-strides") != 0:

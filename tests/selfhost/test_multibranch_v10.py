@@ -606,6 +606,108 @@ fn main() -> int:
     return pickid(7)
 """
 
+MATCH_ONE_CASE_SOURCE = """fn pick(n: int) -> int:
+    return match n:
+        7 => 1,
+        _ => 2
+
+fn main() -> int:
+    if pick(7) != 1:
+        return 1
+    if pick(8) != 2:
+        return 2
+    return 42
+"""
+
+# >2 non-default values, so these exercise the balanced binary search path.
+# The sparse generator keeps a wide spread (step 13) to prove the tree is not
+# relying on table-like density. Negative literals are not match patterns in
+# this frontend, so the range starts above zero.
+SPARSE_STEP = 13
+SPARSE_BASE = 3
+# Deliberately not a power of two: the balanced tree then has one-child nodes,
+# so the pre-order child-position arithmetic is covered both ways.
+DENSE_WAYS = 33
+
+
+def _match_values(ways, base, step):
+    return [base + i * step for i in range(ways)]
+
+
+def _match_source(values, with_default=True):
+    """Build an exhaustive checker: every probe must return its arm or the
+    default. `main` returns 42 only when all probes pass, so one build per -O
+    covers every hit plus out-of-range misses on both sides."""
+    lines = ["fn pick(n: int) -> int:", "    return match n:"]
+    for i, value in enumerate(values):
+        lines.append(f"        {value} => {i + 1},")
+    if with_default:
+        lines.append("        _ => 99")
+    lines += ["", "fn main() -> int:"]
+    # Probe every arm so every tree node is exercised, plus both out-of-range
+    # misses when a DEFAULT exists.
+    probes = list(values)
+    if with_default:
+        # -1000 checks the signed jl route through the left spine.
+        probes += [values[0] - 1, values[-1] + 1, -1000]
+    for i, probe in enumerate(probes):
+        expected = values.index(probe) + 1 if probe in values else 99
+        lines.append(f"    if pick({probe}) != {expected}:")
+        lines.append(f"        return {10 + i}")
+    lines.append("    return 42")
+    return "\n".join(lines) + "\n"
+
+
+def _sparse_source(ways):
+    return _match_source(_match_values(ways, SPARSE_BASE, SPARSE_STEP))
+
+
+def _dense_source(ways):
+    return _match_source(_match_values(ways, 0, 1))
+
+
+def _match_plan(ccr_path):
+    """Run the read-only plan channel and parse one row per IR_MATCH."""
+    r = _run([COREARCH, ccr_path, "--dump-match-plan"])
+    assert r.returncode == 0, f"corearch --dump-match-plan failed: {r.stdout}\n{r.stderr}"
+    plans = []
+    for line in r.stdout.splitlines():
+        if not line.startswith("match "):
+            continue
+        parts = line.split()
+        assert len(parts) == 8, line
+        plans.append(
+            {
+                "nod": int(parts[1]),
+                "cases": int(parts[3]),
+                "nondefault": int(parts[5]),
+                "strategy": parts[7],
+            }
+        )
+    return plans
+
+
+def _ccr_file(tmp, data, name):
+    ccr = tmp / f"{name}.ccr"
+    ccr.write_bytes(data)
+    return ccr
+
+
+def _run_corearch_elf(tmp, data, name):
+    """Build a tagged-mode ELF straight from a .ccr image and return its rc."""
+    ccr = _ccr_file(tmp, data, name)
+    elf = tmp / f"{name}.elf"
+    built = _run(
+        [COREARCH, ccr, "--elf", "--static", "-O", "2", "-o", elf]
+    )
+    assert built.returncode == 0, (
+        f"corearch --elf failed: {built.stdout}\n{built.stderr}"
+    )
+    run = subprocess.run(
+        [str(elf)], capture_output=True, text=True, timeout=30, cwd=str(BASE)
+    )
+    return run.returncode
+
 
 def _match_nodes(data):
     return [i for i, rec in enumerate(_nod_records(data)) if rec[0] == IR_MATCH]
@@ -924,6 +1026,191 @@ def test_cir_cache_does_not_restore_match_without_cases():
         rows = _parse_case(segment(second, CASE_TAG))
         assert len(rows) == 5, rows
         assert _single_match(second)[4] == 5
+
+
+# ---------------------------------------------------------------------------
+# 6. Sparse MATCH uses a balanced binary search (Task 4); dense tables deferred
+# ---------------------------------------------------------------------------
+
+
+def test_sparse_16way_match_is_binary_and_correct():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        source = _sparse_source(16)
+        data = _build_ccr(tmp, source, "match_sparse16")
+        rec = _single_match(data)
+        assert rec[4] == 17, f"MATCH case count {rec[4]} != 16 values + default"
+        plans = _match_plan(_ccr_file(tmp, data, "match_sparse16_plan"))
+        assert len(plans) == 1, plans
+        assert plans[0]["cases"] == 17, plans
+        assert plans[0]["nondefault"] == 16, plans
+        assert plans[0]["strategy"] == "binary", plans
+        _assert_program(
+            tmp, source, 42, opts=(0, 2, 3), name="match_sparse16"
+        )
+
+
+def test_sparse_64way_match_is_binary_and_correct():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        source = _sparse_source(64)
+        data = _build_ccr(tmp, source, "match_sparse64")
+        rec = _single_match(data)
+        assert rec[4] == 65, f"MATCH case count {rec[4]} != 64 values + default"
+        plans = _match_plan(_ccr_file(tmp, data, "match_sparse64_plan"))
+        assert len(plans) == 1, plans
+        assert plans[0]["cases"] == 65, plans
+        assert plans[0]["nondefault"] == 64, plans
+        assert plans[0]["strategy"] == "binary", plans
+        _assert_program(
+            tmp, source, 42, opts=(0, 2, 3), name="match_sparse64"
+        )
+
+
+def test_dense_match_range_is_binary_and_correct():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        source = _dense_source(DENSE_WAYS)
+        data = _build_ccr(tmp, source, "match_dense")
+        rec = _single_match(data)
+        assert rec[4] == DENSE_WAYS + 1, rec[4]
+        plans = _match_plan(_ccr_file(tmp, data, "match_dense_plan"))
+        assert len(plans) == 1, plans
+        assert plans[0]["nondefault"] == DENSE_WAYS, plans
+        # A jump-table lowering is deferred; binary search is the accepted path.
+        assert plans[0]["strategy"] == "binary", plans
+        _assert_program(tmp, source, 42, opts=(0, 2, 3), name="match_dense")
+
+
+def test_match_plan_threshold_keeps_1_and_2_case_linear():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        one = _build_ccr(tmp, MATCH_ONE_CASE_SOURCE, "match_one")
+        one_plans = _match_plan(_ccr_file(tmp, one, "match_one_plan"))
+        assert len(one_plans) == 1, one_plans
+        assert one_plans[0]["nondefault"] == 1, one_plans
+        assert one_plans[0]["strategy"] == "linear", one_plans
+
+        two = _build_ccr(tmp, MATCH_NO_DEFAULT_HIT_SOURCE, "match_two_values")
+        two_plans = _match_plan(_ccr_file(tmp, two, "match_two_values_plan"))
+        assert len(two_plans) == 1, two_plans
+        assert two_plans[0]["nondefault"] == 2, two_plans
+        assert two_plans[0]["strategy"] == "linear", two_plans
+
+        # One source, two functions: 2 values stays linear, 3 goes binary.
+        mixed = _build_ccr(tmp, MATCH_TWO_FUNCS_SOURCE, "match_threshold")
+        mixed_plans = _match_plan(_ccr_file(tmp, mixed, "match_threshold_plan"))
+        assert [p["nondefault"] for p in mixed_plans] == [2, 3], mixed_plans
+        assert [p["strategy"] for p in mixed_plans] == ["linear", "binary"], mixed_plans
+
+        _assert_program(tmp, MATCH_ONE_CASE_SOURCE, 42, name="match_one")
+
+
+def test_enum_match_uses_binary_plan():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_ENUM_SOURCE, "match_enum_plan")
+        plans = _match_plan(_ccr_file(tmp, data, "match_enum_plan"))
+        assert len(plans) == 1, plans
+        assert plans[0]["nondefault"] == 3, plans
+        assert plans[0]["strategy"] == "binary", plans
+        _assert_program(
+            tmp, MATCH_ENUM_SOURCE, 42, opts=(0, 2, 3), name="match_enum_plan_run"
+        )
+
+
+def test_sparse_no_default_binary_match_traps_on_miss():
+    values = _match_values(16, SPARSE_BASE, SPARSE_STEP)
+    hit_source = _match_source(values, with_default=False)
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, hit_source, "match_sparse_nodefault")
+        rec = _single_match(data)
+        assert rec[4] == 16, rec[4]
+        plans = _match_plan(_ccr_file(tmp, data, "match_sparse_nodefault_plan"))
+        assert plans[0]["nondefault"] == 16, plans
+        assert plans[0]["strategy"] == "binary", plans
+        _assert_program(
+            tmp,
+            hit_source,
+            42,
+            opts=(0, 2, 3),
+            name="match_sparse_nodefault_hit",
+        )
+
+        # The generated checker only probes arm hits; build a single-miss main
+        # so the binary tree's miss edge must reach ud2.
+        miss_lines = ["fn pick(n: int) -> int:", "    return match n:"]
+        for i, value in enumerate(values):
+            miss_lines.append(f"        {value} => {i + 1},")
+        miss_lines += [
+            "",
+            "fn main() -> int:",
+            f"    return pick({values[-1] + 7})",
+        ]
+        miss_source = "\n".join(miss_lines) + "\n"
+        src = tmp / "match_sparse_nodefault_miss.cr"
+        src.write_text(miss_source, encoding="utf-8")
+        miss_data = _build_ccr(tmp, miss_source, "match_sparse_nodefault_miss")
+        plans = _match_plan(
+            _ccr_file(tmp, miss_data, "match_sparse_nodefault_miss_plan")
+        )
+        assert plans[0]["strategy"] == "binary", plans
+        elf = tmp / "match_sparse_nodefault_miss.elf"
+        built = _run([COREC, "build", src, "-o", elf, "--static", "-O", "2"])
+        assert built.returncode == 0, built.stdout + built.stderr
+        run = subprocess.run(
+            [str(elf)], capture_output=True, text=True, timeout=30, cwd=str(BASE)
+        )
+        assert run.returncode == -4, (
+            f"binary MATCH miss did not trap with SIGILL: rc={run.returncode}"
+        )
+
+
+def test_duplicate_value_binary_match_keeps_first_case():
+    source = """fn pick(n: int) -> int:
+    return match n:
+        10 => 1,
+        20 => 2,
+        30 => 3,
+        40 => 4,
+        _ => 5
+
+fn main() -> int:
+    if pick(10) != 1:
+        return 10
+    if pick(40) != 5:
+        return 40
+    if pick(20) != 2:
+        return 20
+    if pick(99) != 5:
+        return 99
+    return 42
+"""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, source, "match_dup")
+        rows = _parse_case(segment(data, CASE_TAG))
+        records = [
+            (row["value"], row["kind"], row["str_index"], row["target_nod"], row["flags"])
+            for row in rows
+        ]
+        # Turn the 40 arm into a duplicate of 10. First-case semantics keep the
+        # 10 arm's target, so pick(10) must stay 1 and pick(40) falls through to
+        # the default. A last-wins dedupe would return 4 for pick(10).
+        records[3] = (
+            records[0][0],
+            records[3][1],
+            records[3][2],
+            records[3][3],
+            records[3][4],
+        )
+        dup = _replace_case(data, _pack_case(records))
+        plans = _match_plan(_ccr_file(tmp, dup, "match_dup_plan"))
+        assert len(plans) == 1, plans
+        assert plans[0]["nondefault"] == 4, plans
+        assert plans[0]["strategy"] == "binary", plans
+        assert _run_corearch_elf(tmp, dup, "match_dup") == 42
 
 
 def main():
