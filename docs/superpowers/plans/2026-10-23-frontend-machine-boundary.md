@@ -70,7 +70,7 @@ cmp /tmp/corec2 /tmp/corec3
 
 1. 构建通过，`corec`、`corearch`、`corelsp` 三个清单都通过存在性检查。
 2. `./build/corec check src/compiler` 通过。
-3. `src/compiler` 中不再出现 `g_x86_` 或 `grow_x86_`。
+3. `src/compiler/globals.cr` 和 `src/compiler/dyn_arr.cr` 中不再出现 `g_x86_` 或 `grow_x86_`。任务 2 完成前，`src/compiler/corearch.cr` 仍会引用这些符号。
 4. canary 五条全部通过。
 5. `.ccr` 和 ELF 产物与改动前逐字节相同。
 
@@ -152,7 +152,7 @@ fn mp_offset(index: int, ti: int) -> int
 2. 把 `provenance_verify.cr` 的两处 `s1 * 8` 和 `si_field_count(fi) * 8` 改为 `mp_extent`。
 3. 把 `ptr_analysis.cr` 的 `idx_val * 8` 和 `low * 8` 改为 `mp_offset`。
 4. 保留所有 `-1` 未知分支和运行时检查路径。
-5. 在 `corec_files` 中加入 `mapping.cr`，位置在 `ast.cr` 之后、`ir_gen.cr` 之前。
+5. 在 `corec_files` 中加入 `mapping.cr`，位置在 `checker.cr` 之后、`type_terms.cr` 之前。
 
 ### 验收
 
@@ -172,11 +172,11 @@ fn mp_offset(index: int, ti: int) -> int
 
 ### 步骤
 
-1. 在 `globals.cr` 增加 `g_s1p_enabled`，默认值为 0。
-2. 在 `main.cr` 启动时读取 `CORE_S1P`，把结果写入 `g_s1p_enabled`。
-3. 删除 `checker.cr` 中两处 `get_env("CORE_S1P")`，改为读取 `g_s1p_enabled`。
+1. 在 `prelude.cr` 增加 `prelude_init()`，读取 `CORE_S1P` 并设置 `g_s1p_seen` 和 `g_s1p_on`。
+2. `checker.cr` 的两个 S1P 入口在首次调用时调用 `prelude_init()`，不再直接读取环境变量。
+3. 删除 `checker.cr` 中两处 `get_env("CORE_S1P")`。
 4. 把 `syscall3` 和 `syscall4` 的返回类型判断移到 `prelude.cr`。`checker.cr` 只调用 `prelude_builtin_return_ti`。
-5. 删除未使用的 `g_ni_syscall3` 和 `g_ni_syscall4`。
+5. 删除未使用的 `g_ni_syscall3` 和 `g_ni_syscall4`，后端仍然使用的同名状态移到 `backend_globals.cr`。
 6. 不改变 `extern` 的可选类型拒绝规则。该规则属于外部接口边界，保留在解析器中，并在文档中记录原因。
 
 ### 验收
@@ -200,8 +200,8 @@ fn mp_offset(index: int, ti: int) -> int
 
 ### 步骤
 
-1. 把 `ESZ_TYPE_TERM`、`OFF_TT_*`、`ESZ_IFACE_ENTRY`、`OFF_IFM_*` 和 `.ccr` 段布局常量移到 `ccr_schema.cr`。
-2. 在 `type_terms.cr`、`iface_registry.cr` 和 `ty_shadow.cr` 中保留语义结构和判定函数，只引用 `ccr_schema.cr` 的常量。
+1. 把 `ESZ_TYPE_TERM`、`ESZ_TYPE_TERM_DISK`、`OFF_TT_*` 和 `OPT_META_STRIDE` 移到 `ccr_schema.cr`。`ESZ_IFACE_ENTRY`、`OFF_IFM_*` 是解析器和类型桥接层直接使用的内存表布局，保留在 `dyn_arr.cr`，避免语义模块反向依赖载体层。
+2. `type_terms.cr` 保留类型项结构和判定函数，只引用 `ccr_schema.cr` 的常量。`iface_registry.cr` 和 `ty_shadow.cr` 的内存表访问保持不变。
 3. 把 `OPT_KEY_REG_ASSIGN`、`OPT_KEY_STACK_SHARE` 和 `OPT_KEY_CSE` 移到后端使用的 `src/arch/x86_64/backend_schema.cr`，因为只有后端读取这些键。
 4. `ast.cr` 不再声明后端优化键。`ir_gen.cr` 和 `opt.cr` 不使用这些键。
 5. 更新 `corec`、`corearch`、`corelsp` 三个清单的常量可见顺序。
@@ -227,7 +227,7 @@ fn mp_offset(index: int, ti: int) -> int
 1. 把 `str_to_f64_bits` 从 `lexer.cr` 移到 `parser.cr` 或独立的数值字面量模块。词法层只保留原始数字字符串。
 2. 为 `str_int_literal` 的 64 位上限增加明确注释，说明这是当前 token 载体的编码限制，不是语言语义上限。是否支持任意精度由后续多字整数设计决定，本任务不改变行为。
 3. 把 `goroutine.cr` 的 `alloc(16384)` 改为命名常量 `G_STACK_SIZE`，值仍为 16384。该常量属于运行时执行策略，不进入前端。
-4. 更新 `docs/maintainer/design/execution-model.md` 中的栈尺寸表述，说明常量位置。
+4. 更新 `docs/maintainer/adr/adr-0017-concurrency-gmp.md` 中的栈尺寸表述，指向 `G_STACK_SIZE`。
 
 ### 验收
 
