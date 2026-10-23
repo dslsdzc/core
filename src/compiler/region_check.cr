@@ -5,7 +5,7 @@
 fn subgraph_containing(node_seq: int) -> int:
     // O(1) region lookup. df_create_node writes g_df_node_region.
     if node_seq >= 0 && node_seq < g_df_node_count:
-        return r64(g_df_node_region, node_seq * 8)
+        return cell_load(g_df_node_region, node_seq * 8)
     return -1
 
 fn is_in_unsafe(node_seq: int) -> int:
@@ -13,10 +13,10 @@ fn is_in_unsafe(node_seq: int) -> int:
     loop:
         if si >= g_sg_count:
             break
-        kind := r64(g_sgs, si * ESZ_SG + OFF_SG_KIND)
+        kind := cell_load(g_sgs, si * ESZ_SG + OFF_SG_KIND)
         if kind == SG_UNSAFE:
-            nstart := r64(g_sgs, si * ESZ_SG + OFF_SG_NSTART)
-            ncount := r64(g_sgs, si * ESZ_SG + OFF_SG_NCOUNT)
+            nstart := cell_load(g_sgs, si * ESZ_SG + OFF_SG_NSTART)
+            ncount := cell_load(g_sgs, si * ESZ_SG + OFF_SG_NCOUNT)
             if node_seq >= nstart && node_seq < nstart + ncount:
                 return 1
         si = si + 1
@@ -44,7 +44,7 @@ fn is_in_unsafe(node_seq: int) -> int:
 fn rc_sg_releases(sg: int) -> int:
     if sg < 0:
         return 0
-    k := r64(g_sgs, sg * ESZ_SG + OFF_SG_KIND)
+    k := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_KIND)
     if k == SG_LOOP || k == SG_FOR || k == SG_UNSAFE:
         return 1
     return 0
@@ -59,16 +59,16 @@ fn rc_releasing_region(alloc_node: int) -> int:
             return -1
         if rc_sg_releases(sg) != 0:
             return sg
-        sg = r64(g_sgs, sg * ESZ_SG + OFF_SG_PARENT)
+        sg = cell_load(g_sgs, sg * ESZ_SG + OFF_SG_PARENT)
 
 // Release node for allocation bit bi, mapped through g_pa_alloc_nodes to a DF
 // node. Returns the EXIT ordinal, or -1 when no region releases the allocation.
 fn rc_bit_exit(bi: int) -> int:
-    alloc_node := r64(g_pa_alloc_nodes, bi * 8)
+    alloc_node := cell_load(g_pa_alloc_nodes, bi * 8)
     sg := rc_releasing_region(alloc_node)
     if sg < 0:
         return -1
-    return r64(g_sgs, sg * ESZ_SG + OFF_SG_EXIT)
+    return cell_load(g_sgs, sg * ESZ_SG + OFF_SG_EXIT)
 
 fn rc_bit_dead(bi: int, ni: int) -> int:
     ex := rc_bit_exit(bi)
@@ -108,22 +108,22 @@ fn rc_reassign_clears(ptr_var: int, lo: int, hi: int) -> int:
     loop:
         if i >= hi:
             break
-        op := r64(g_df_nodes, i * ESZ_DFNODE + OFF_DF_OPCODE)
-        d  := r64(g_df_nodes, i * ESZ_DFNODE + OFF_DF_DEST)
-        s1 := r64(g_df_nodes, i * ESZ_DFNODE + OFF_DF_S1)
-        s2 := r64(g_df_nodes, i * ESZ_DFNODE + OFF_DF_S2)
+        op := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_OPCODE)
+        d  := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_DEST)
+        s1 := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_S1)
+        s2 := cell_load(g_df_nodes, i * ESZ_DFNODE + OFF_DF_S2)
         if op == IR_STORE && s1 == ptr_var:
             if s2 < 0:
                 return 0
-            if rc_pts_dead(r64(g_pts, s2 * 8), i) != 0:
+            if rc_pts_dead(cell_load(g_pts, s2 * 8), i) != 0:
                 return 0
             saw_safe = 1
         if op == IR_PHI && d == ptr_var:
             if s1 < 0 || s2 < 0:
                 return 0
-            if rc_pts_dead(r64(g_pts, s1 * 8), i) != 0:
+            if rc_pts_dead(cell_load(g_pts, s1 * 8), i) != 0:
                 return 0
-            if rc_pts_dead(r64(g_pts, s2 * 8), i) != 0:
+            if rc_pts_dead(cell_load(g_pts, s2 * 8), i) != 0:
                 return 0
             saw_safe = 1
         i = i + 1
@@ -138,7 +138,7 @@ fn rc_var_dead(ptr_var: int, ni: int) -> int:
     ti := irv_type(ptr_var)
     if ti < 0 || (get_type_kind(ti) != TYP_PTR && get_type_kind(ti) != TYP_REF):
         return 0
-    pts := r64(g_pts, ptr_var * 8)
+    pts := cell_load(g_pts, ptr_var * 8)
     if pts == 0:
         return 0
     mask : int, mut = 1
@@ -181,10 +181,10 @@ fn region_check_func(nstart: int, ncount: int):
     loop:
         if ni >= nstart + ncount:
             break
-        op := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
-        d  := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
-        s1 := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
-        s2 := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        d  := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
+        s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
+        s2 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2)
 
         if is_in_unsafe(ni) != 0:
             ni = ni + 1
@@ -212,7 +212,7 @@ fn region_check_all():
     loop:
         if fi >= g_ir_func_count:
             break
-        nstart := r64(g_df_func_node_start, fi * 8)
-        ncount := r64(g_df_func_node_count, fi * 8)
+        nstart := cell_load(g_df_func_node_start, fi * 8)
+        ncount := cell_load(g_df_func_node_count, fi * 8)
         region_check_func(nstart, ncount)
         fi = fi + 1

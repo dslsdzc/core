@@ -633,7 +633,7 @@ fn grow_plugin_tags(needed: int):
     if ncap < needed:
         ncap = needed + 8
     nb := alloc(ncap * 24)
-    _dyncpy(g_plugin_tags, g_plugin_tag_cap * 24, nb)
+    cell_copy(g_plugin_tags, g_plugin_tag_cap * 24, nb)
     g_plugin_tags = nb
     g_plugin_tag_cap = ncap
 
@@ -646,7 +646,7 @@ fn grow_plugin_rtypes(needed: int):
     if ncap < needed:
         ncap = needed + 8
     nb := alloc(ncap * 24)
-    _dyncpy(g_plugin_rtypes, g_plugin_rtype_cap * 24, nb)
+    cell_copy(g_plugin_rtypes, g_plugin_rtype_cap * 24, nb)
     g_plugin_rtypes = nb
     g_plugin_rtype_cap = ncap
 
@@ -658,9 +658,9 @@ fn find_plugin_entry(table: string, count: int, name_ni: int, ns_ni: int) -> int
     loop:
         if i >= count:
             break
-        if r64(table, i*24+8) == name_ni && r64(table, i*24) == ns_ni:
+        if cell_load(table, i*24+8) == name_ni && cell_load(table, i*24) == ns_ni:
             return i
-        if r64(table, i*24+8) == name_ni && ns_ni < 0 && r64(table, i*24) < 0:
+        if cell_load(table, i*24+8) == name_ni && ns_ni < 0 && cell_load(table, i*24) < 0:
             return i
         i = i + 1
     return -1
@@ -673,9 +673,9 @@ fn register_plugin_tag(ns_ni: int, name_ni: int, data: int) -> int:
     if ns_ni >= 0 && find_plugin_entry(g_plugin_tags, g_plugin_tag_count, name_ni, -1) >= 0:
         return -3
     grow_plugin_tags(g_plugin_tag_count + 1)
-    w64(g_plugin_tags, g_plugin_tag_count*24, ns_ni)
-    w64(g_plugin_tags, g_plugin_tag_count*24+8, name_ni)
-    w64(g_plugin_tags, g_plugin_tag_count*24+16, data)
+    cell_store(g_plugin_tags, g_plugin_tag_count*24, ns_ni)
+    cell_store(g_plugin_tags, g_plugin_tag_count*24+8, name_ni)
+    cell_store(g_plugin_tags, g_plugin_tag_count*24+16, data)
     g_plugin_tag_count = g_plugin_tag_count + 1
     return 0
 
@@ -685,9 +685,9 @@ fn register_plugin_rtype(ns_ni: int, name_ni: int, data: int) -> int:
     if ns_ni >= 0 && find_plugin_entry(g_plugin_rtypes, g_plugin_rtype_count, name_ni, -1) >= 0:
         return -3
     grow_plugin_rtypes(g_plugin_rtype_count + 1)
-    w64(g_plugin_rtypes, g_plugin_rtype_count*24, ns_ni)
-    w64(g_plugin_rtypes, g_plugin_rtype_count*24+8, name_ni)
-    w64(g_plugin_rtypes, g_plugin_rtype_count*24+16, data)
+    cell_store(g_plugin_rtypes, g_plugin_rtype_count*24, ns_ni)
+    cell_store(g_plugin_rtypes, g_plugin_rtype_count*24+8, name_ni)
+    cell_store(g_plugin_rtypes, g_plugin_rtype_count*24+16, data)
     g_plugin_rtype_count = g_plugin_rtype_count + 1
     return 0
 

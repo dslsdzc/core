@@ -15,17 +15,17 @@ fn lower_to_ccr():
             break
         idx := g_ir_instr_count
         grow_ir_instrs(idx + 1)
-        iri_set_op(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE))
-        iri_set_dest(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST))
-        iri_set_s1(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1))
-        iri_set_s2(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2))
-        iri_set_s3(idx, r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3))
+        iri_set_op(idx, cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE))
+        iri_set_dest(idx, cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST))
+        iri_set_s1(idx, cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1))
+        iri_set_s2(idx, cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2))
+        iri_set_s3(idx, cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3))
         // iri_tk is the derived code, not the stored slot value. The node slot
         // holds a type-term reference; sh_dfn_code_of_slots combines it with the
         // auxiliary code. The derived code preserves the previous mixed code.
         iri_set_tk(idx, sh_dfn_code_of_slots(
-                r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_TK),
-                r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_AUX)))
+                cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_TK),
+                cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_AUX)))
         g_ir_instr_count = idx + 1
         ni = ni + 1
 
@@ -35,10 +35,10 @@ fn lower_to_ccr():
     loop:
         if fi >= g_ir_func_count:
             break
-        w64(g_ir_func_instr_start, fi * 8,
-            r64(g_df_func_node_start, fi * 8))
-        w64(g_ir_func_instr_count, fi * 8,
-            r64(g_df_func_node_count, fi * 8))
+        cell_store(g_ir_func_instr_start, fi * 8,
+            cell_load(g_df_func_node_start, fi * 8))
+        cell_store(g_ir_func_instr_count, fi * 8,
+            cell_load(g_df_func_node_count, fi * 8))
         fi = fi + 1
 
     // After lowering, compute per-variable usage counts for optimization passes

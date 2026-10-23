@@ -28,7 +28,7 @@ fn grow_ir_slice_lens(needed: int):
     if nc < needed:
         nc = needed + 8
     nb := alloc(nc * 16)
-    _dyncpy(g_ir_slice_lens, g_ir_slice_len_cap * 16, nb)
+    cell_copy(g_ir_slice_lens, g_ir_slice_len_cap * 16, nb)
     g_ir_slice_lens = nb
     g_ir_slice_len_cap = nc
 
@@ -37,8 +37,8 @@ fn slice_len_get(var_idx: int) -> int:
     loop:
         if si >= g_ir_slice_len_count:
             break
-        if r64(g_ir_slice_lens, si * 16) == var_idx:
-            return r64(g_ir_slice_lens, si * 16 + 8)
+        if cell_load(g_ir_slice_lens, si * 16) == var_idx:
+            return cell_load(g_ir_slice_lens, si * 16 + 8)
         si = si + 1
     return -1
 
@@ -47,15 +47,15 @@ fn slice_len_set(var_idx: int, len: int):
     loop:
         if si >= g_ir_slice_len_count:
             break
-        if r64(g_ir_slice_lens, si * 16) == var_idx:
-            w64(g_ir_slice_lens, si * 16 + 8, len)
+        if cell_load(g_ir_slice_lens, si * 16) == var_idx:
+            cell_store(g_ir_slice_lens, si * 16 + 8, len)
             return
         si = si + 1
     if len < 0:
         return
     grow_ir_slice_lens(g_ir_slice_len_count + 1)
-    w64(g_ir_slice_lens, g_ir_slice_len_count * 16, var_idx)
-    w64(g_ir_slice_lens, g_ir_slice_len_count * 16 + 8, len)
+    cell_store(g_ir_slice_lens, g_ir_slice_len_count * 16, var_idx)
+    cell_store(g_ir_slice_lens, g_ir_slice_len_count * 16 + 8, len)
     g_ir_slice_len_count = g_ir_slice_len_count + 1
 
 // F11 运行时界切片：len 字段编码，
@@ -65,16 +65,16 @@ fn slice_len_raw_set(var_idx: int, len_code: int):
     loop:
         if si >= g_ir_slice_len_count:
             break
-        if r64(g_ir_slice_lens, si * 16) == var_idx:
-            w64(g_ir_slice_lens, si * 16 + 8, len_code)
+        if cell_load(g_ir_slice_lens, si * 16) == var_idx:
+            cell_store(g_ir_slice_lens, si * 16 + 8, len_code)
             return
         si = si + 1
     if len_code == -1:
         return
     // 清除无条目 = no-op；负编码（长度变量）允许新增
     grow_ir_slice_lens(g_ir_slice_len_count + 1)
-    w64(g_ir_slice_lens, g_ir_slice_len_count * 16, var_idx)
-    w64(g_ir_slice_lens, g_ir_slice_len_count * 16 + 8, len_code)
+    cell_store(g_ir_slice_lens, g_ir_slice_len_count * 16, var_idx)
+    cell_store(g_ir_slice_lens, g_ir_slice_len_count * 16 + 8, len_code)
     g_ir_slice_len_count = g_ir_slice_len_count + 1
 
 // 登记运行时界切片的长度变量；查询返回 len_var（无 -> -1）。
@@ -88,8 +88,8 @@ fn slice_len_var_get(var_idx: int) -> int:
     loop:
         if si >= g_ir_slice_len_count:
             break
-        if r64(g_ir_slice_lens, si * 16) == var_idx:
-            v := r64(g_ir_slice_lens, si * 16 + 8)
+        if cell_load(g_ir_slice_lens, si * 16) == var_idx:
+            v := cell_load(g_ir_slice_lens, si * 16 + 8)
             if v <= -2:
                 return -2 - v
             return -1
@@ -103,8 +103,8 @@ fn slice_len_copy_to(dst_var: int, src_var: int):
     loop:
         if si >= g_ir_slice_len_count:
             break
-        if r64(g_ir_slice_lens, si * 16) == src_var:
-            slice_len_raw_set(dst_var, r64(g_ir_slice_lens, si * 16 + 8))
+        if cell_load(g_ir_slice_lens, si * 16) == src_var:
+            slice_len_raw_set(dst_var, cell_load(g_ir_slice_lens, si * 16 + 8))
             return
         si = si + 1
     slice_len_raw_set(dst_var, -1)
@@ -136,12 +136,12 @@ fn arr_len_lit_of(arr_var: int) -> int:
     if ti >= 0 && ti < g_type_count && get_type_kind(ti) == TYP_ARRAY:
         return get_type_extra(ti)
     if ti == TI_STR:
-        prod := r64(g_df_var_producer, arr_var * 8)
+        prod := cell_load(g_df_var_producer, arr_var * 8)
         // 读 派生码（不是 40 槽，单槽化后 40 槽 = 类型项引用）；
         // 常量节点的行是原子基行 -> 派生码逐字节 ≡ 单槽化前该槽的混用码。
-        if prod >= 0 && r64(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE) == IR_CONST && sh_dfn_code_of_slots(r64(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_TK),
-            r64(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_AUX)) == TI_STR:
-            return istr_len(r64(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1))
+        if prod >= 0 && cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE) == IR_CONST && sh_dfn_code_of_slots(cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_TK),
+            cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_AUX)) == TI_STR:
+            return istr_len(cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S1))
     return slice_len_get(arr_var)
 
 fn emit_string_bounds(arr_var: int, idx_var: int):
@@ -169,7 +169,7 @@ fn grow_sg_alloc(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 8)
-    _dyncpy(g_sg_alloc_total, g_sg_alloc_cap * 8, nb)
+    cell_copy(g_sg_alloc_total, g_sg_alloc_cap * 8, nb)
     g_sg_alloc_total = nb
     g_sg_alloc_cap = nc
 
@@ -182,26 +182,26 @@ fn grow_sg_arena_var(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 8)
-    _dyncpy(g_sg_arena_var, g_sg_arena_var_cap * 8, nb)
+    cell_copy(g_sg_arena_var, g_sg_arena_var_cap * 8, nb)
     g_sg_arena_var = nb
     g_sg_arena_var_cap = nc
 
 fn sg_alloc_push(kind: int):
     grow_sg_alloc(g_sg_count + 1)
     grow_sg_arena_var(g_sg_count + 1)
-    w64(g_sg_alloc_total, g_sg_count * 8, 0)
+    cell_store(g_sg_alloc_total, g_sg_count * 8, 0)
     sg_push(kind)
 
 fn sg_alloc_pop():
-    total := r64(g_sg_alloc_total, (g_sg_count - 1) * 8)
-    arena_var := r64(g_sg_arena_var, (g_sg_count - 1) * 8)
+    total := cell_load(g_sg_alloc_total, (g_sg_count - 1) * 8)
+    arena_var := cell_load(g_sg_arena_var, (g_sg_count - 1) * 8)
     sg_pop()
     emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
 
 fn track_alloc_size(size: int):
     if g_sg_count > 0 && str_len(g_sg_alloc_total) > 0:
-        prev := r64(g_sg_alloc_total, (g_sg_count - 1) * 8)
-        w64(g_sg_alloc_total, (g_sg_count - 1) * 8, prev + size)
+        prev := cell_load(g_sg_alloc_total, (g_sg_count - 1) * 8)
+        cell_store(g_sg_alloc_total, (g_sg_count - 1) * 8, prev + size)
 
 fn new_ir_var(name: string, type_idx: int) -> int:
     idx := g_ir_var_count
@@ -239,7 +239,7 @@ fn grow_ir_var_rep(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 8)
-    _dyncpy(g_ir_var_rep, g_ir_var_rep_cap * 8, nb)
+    cell_copy(g_ir_var_rep, g_ir_var_rep_cap * 8, nb)
     // 新槽填 -1（哨兵 = 无表示位），alloc 零初始化，不填则未写槽被读成
     // 表示位 var 0（每个值都被判成有表示位，产生错误值且不报错；for example, the `None` initial value
     // 的表示位被读成 var0 的当前值 0 = 裸值）。
@@ -247,7 +247,7 @@ fn grow_ir_var_rep(needed: int):
     loop:
         if z >= nc:
             break
-        w64(nb, z * 8, -1)
+        cell_store(nb, z * 8, -1)
         z = z + 1
     g_ir_var_rep = nb
     g_ir_var_rep_cap = nc
@@ -263,13 +263,13 @@ fn irv_rep(var_idx: int) -> int:
         return -1
     if var_idx >= g_ir_var_rep_cap:
         return -1
-    return r64(g_ir_var_rep, var_idx * 8)
+    return cell_load(g_ir_var_rep, var_idx * 8)
 
 fn irv_set_rep(var_idx: int, rep_var: int):
     if var_idx < 0:
         return
     grow_ir_var_rep(var_idx + 1)
-    w64(g_ir_var_rep, var_idx * 8, rep_var)
+    cell_store(g_ir_var_rep, var_idx * 8, rep_var)
 
 // 置表示位：enc >= 0 -> 从该表示位槽拷贝；OE_BARE/OE_BOXED -> 直接常量写。
 fn emit_rep_set(rep_var: int, enc: int):
@@ -302,7 +302,7 @@ fn global_decl_optional(name_ni: int) -> int:
     loop:
         if gi >= g_global_let_count:
             break
-        lnode := r64(g_global_lets, gi * 8)
+        lnode := cell_load(g_global_lets, gi * 8)
         if ast_a(lnode) == name_ni:
             tn := ast_b(lnode)
             if tn >= 0 && res_type_node(tn) >= 0:
@@ -354,12 +354,12 @@ fn grow_ir_var_decl(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 8)
-    _dyncpy(g_ir_var_decl_ti, g_ir_var_decl_cap * 8, nb)
+    cell_copy(g_ir_var_decl_ti, g_ir_var_decl_cap * 8, nb)
     z : ., mut = g_ir_var_decl_cap
     loop:
         if z >= nc:
             break
-        w64(nb, z * 8, -1)
+        cell_store(nb, z * 8, -1)
         z = z + 1
     g_ir_var_decl_ti = nb
     g_ir_var_decl_cap = nc
@@ -370,12 +370,12 @@ fn irv_decl_ti(v: int) -> int:
         return -1
     if v >= g_ir_var_decl_cap:
         return -1
-    return r64(g_ir_var_decl_ti, v * 8)
+    return cell_load(g_ir_var_decl_ti, v * 8)
 fn irv_set_decl_ti(v: int, ti: int):
     if v < 0 || ti < 0:
         return
     grow_ir_var_decl(v + 1)
-    w64(g_ir_var_decl_ti, v * 8, ti)
+    cell_store(g_ir_var_decl_ti, v * 8, ti)
 
 // 目标槽类型是否可选（未知/越界 -> 0 = 不装箱）
 fn ti_is_optional(ti: int) -> int:
@@ -433,7 +433,7 @@ fn global_decl_ti(name_ni: int) -> int:
     loop:
         if gi >= g_global_let_count:
             break
-        lnode := r64(g_global_lets, gi * 8)
+        lnode := cell_load(g_global_lets, gi * 8)
         if ast_a(lnode) == name_ni:
             tn := ast_b(lnode)
             if tn >= 0:
@@ -785,8 +785,8 @@ fn new_label() -> int:
 
 fn bind_local(name_idx: int, var_idx: int):
     grow_ir_locals(g_ir_local_count + 1)
-    w64(g_ir_locals, g_ir_local_count  * 16, name_idx)
-    w64(g_ir_locals, g_ir_local_count  * 16 + 8, var_idx)
+    cell_store(g_ir_locals, g_ir_local_count  * 16, name_idx)
+    cell_store(g_ir_locals, g_ir_local_count  * 16 + 8, var_idx)
     g_ir_local_count = g_ir_local_count + 1
 
 fn find_local(name_idx: int) -> int:
@@ -794,8 +794,8 @@ fn find_local(name_idx: int) -> int:
     loop:
         if i < 0:
             return -1
-        if r64(g_ir_locals, i * 16) == name_idx:
-            return r64(g_ir_locals, i * 16 + 8)
+        if cell_load(g_ir_locals, i * 16) == name_idx:
+            return cell_load(g_ir_locals, i * 16 + 8)
         i = i - 1
     return -1
 
@@ -804,8 +804,8 @@ fn find_global(name_idx: int) -> int:
     loop:
         if i < 0:
             return -1
-        if r64(g_ir_globals, i * 24) == name_idx:
-            return r64(g_ir_globals, i * 24 + 8)
+        if cell_load(g_ir_globals, i * 24) == name_idx:
+            return cell_load(g_ir_globals, i * 24 + 8)
         i = i - 1
     return -1
 
@@ -817,7 +817,7 @@ fn find_global_const_node(name_idx: int) -> int:
     loop:
         if i < 0:
             break
-        node := r64(g_global_lets, i * 8)
+        node := cell_load(g_global_lets, i * 8)
         if ast_a(node) == name_idx && ast_data(node) == 0:
             value_node := ast_c(node)
             if value_node >= 0:
@@ -830,12 +830,12 @@ fn find_global_const_node(name_idx: int) -> int:
 
 fn push_ir_scope():
     grow_ir_local_scopes(g_ir_local_depth + 1)
-    w64(g_ir_local_scopes, g_ir_local_depth * 8, g_ir_local_count)
+    cell_store(g_ir_local_scopes, g_ir_local_depth * 8, g_ir_local_count)
     g_ir_local_depth = g_ir_local_depth + 1
 
 fn pop_ir_scope():
     g_ir_local_depth = g_ir_local_depth - 1
-    g_ir_local_count = r64(g_ir_local_scopes, g_ir_local_depth * 8)
+    g_ir_local_count = cell_load(g_ir_local_scopes, g_ir_local_depth * 8)
 
 fn is_ptr_var(var_idx: int) -> int:
     if var_idx < 0:
@@ -849,10 +849,10 @@ fn is_ptr_var(var_idx: int) -> int:
         tk := get_type_kind(ti)
         if tk == TYP_PTR || tk == TYP_REF:
             return 1
-    prod := r64(g_df_var_producer, var_idx * 8)
+    prod := cell_load(g_df_var_producer, var_idx * 8)
     if prod < 0:
         return 0
-    prod_op := r64(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
+    prod_op := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
     if prod_op == IR_ALLOC:
         ti := irv_type(var_idx)
         if ti == TI_INT || ti == TI_DEX || ti == TI_BOOL || ti == TI_CHAR:
@@ -870,15 +870,15 @@ fn is_byte_buf_var(var_idx: int) -> int:
         return 0
     if irv_type(var_idx) != TI_UNIT:
         return 0
-    prod := r64(g_df_var_producer, var_idx * 8)
+    prod := cell_load(g_df_var_producer, var_idx * 8)
     if prod < 0:
         return 0
-    prod_op := r64(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
+    prod_op := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
     if prod_op == IR_ALLOC:
         return 1
     if prod_op == IR_CALL:
-        func_ni := r64(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S3)
-        if func_ni >= 0 && istr_get(func_ni) == "alloc":
+        func_ni := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S3)
+        if runtime_frontend_builtin_is_alloc(func_ni) != 0:
             return 1
     return 0
 
@@ -887,14 +887,14 @@ fn ir_call_return_type(func_ni: int) -> int:
         return TI_UNIT
     // alloc() produces a raw byte buffer. Keep the existing internal pointer
     // sentinel until Core has a distinct raw-buffer type.
-    if istr_get(func_ni) == "alloc":
+    if runtime_frontend_builtin_is_alloc(func_ni) != 0:
         return TI_UNIT
     bi : ., mut = 0
     loop:
         if bi >= g_rt_builtin_count:
             break
-        if r64(g_rt_builtin_names, bi * 8) == func_ni:
-            return r64(g_rt_builtin_ret_types, bi * 8)
+        if cell_load(g_rt_builtin_names, bi * 8) == func_ni:
+            return cell_load(g_rt_builtin_ret_types, bi * 8)
         bi = bi + 1
     fi := find_func(func_ni)
     if fi >= 0:
@@ -941,18 +941,18 @@ fn track_str(str_idx: int):
     loop:
         if i >= g_ir_str_const_count:
             break
-        if r64(g_ir_str_consts, i * 8) == str_idx:
+        if cell_load(g_ir_str_consts, i * 8) == str_idx:
             return
         i = i + 1
     grow_ir_str_consts(g_ir_str_const_count + 1)
-    w64(g_ir_str_consts, g_ir_str_const_count * 8, str_idx)
+    cell_store(g_ir_str_consts, g_ir_str_const_count * 8, str_idx)
     g_ir_str_const_count = g_ir_str_const_count + 1
 
 // --- Loop label stack ---
 fn push_loop_labels(header: int, exit: int):
     grow_ir_loop_stacks(g_ir_loop_depth + 1)
-    w64(g_ir_loop_header, g_ir_loop_depth * 8, header)
-    w64(g_ir_loop_exit, g_ir_loop_depth * 8, exit)
+    cell_store(g_ir_loop_header, g_ir_loop_depth * 8, header)
+    cell_store(g_ir_loop_exit, g_ir_loop_depth * 8, exit)
     g_ir_loop_depth = g_ir_loop_depth + 1
 
 fn pop_loop_labels():
@@ -1057,7 +1057,7 @@ fn ptr_pointee_type(var_idx: int) -> int:
 fn ptr_access_width(var_idx: int) -> int:
     width := type_size(ptr_pointee_type(var_idx))
     if width <= 0:
-        return 8
+        return mp_stride(TI_INT)
     return width
 
 // Type alignment in bytes. The classic mapping lives in mapping.cr.
@@ -1144,9 +1144,9 @@ fn is_hotpatch_func(name_idx: int) -> int:
 fn force_if_thunk(var_idx: int) -> int:
     if var_idx < 0:
         return var_idx
-    prod := r64(g_df_var_producer, var_idx * 8)
+    prod := cell_load(g_df_var_producer, var_idx * 8)
     if prod >= 0:
-        prod_op := r64(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
+        prod_op := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
         if prod_op == IR_LAZY_THUNK:
             forced := new_ir_var("_forced", irv_type(var_idx))
             emit(IR_LAZY_FORCE, forced, var_idx, 0, 0, 0)
@@ -1317,20 +1317,20 @@ fn dex_align_call_args(cfi: int, ac: int, arg_vars: string, arg_nodes: string, a
         // 泛型声明的 `T?`（inner = 泛型参数）判据为假 -> 调用点在重定向后
         // 用实例参数列表（inner = 具体 dex）再跑一遍本环。
         if ast_type_val(cpn) == TI_DEX || (cfn_ext == 0 && dex_opt_type_node(ast_data(cpn)) != 0):
-            av := r64(arg_vars, cpi * 8)
+            av := cell_load(arg_vars, cpi * 8)
             if av >= 0:
                 if cfn_ext != 0:
                     // extern：scaled -> bits（字面量直接重发射位模式常量）
                     if irv_type(av) == TI_DEX_S:
                         arg_node : ., mut = -1
                         if cpi < arg_nodes_cap:
-                            arg_node = r64(arg_nodes, cpi * 8)
+                            arg_node = cell_load(arg_nodes, cpi * 8)
                         av = dex_scaled_to_bits(av, arg_node)
-                        w64(arg_vars, cpi * 8, av)
+                        cell_store(arg_vars, cpi * 8, av)
                 else if irv_type(av) == TI_DEX:
                     // Core 函数：apx bits -> scaled
                     av = dex_bits_to_scaled(av)
-                    w64(arg_vars, cpi * 8, av)
+                    cell_store(arg_vars, cpi * 8, av)
         cpi = cpi + 1
         cpn = cpn + 1
         loop:
@@ -1373,7 +1373,7 @@ fn dex_decl_form_of_expr(node: int) -> int:
         loop:
             if gi >= g_global_let_count:
                 break
-            lnode := r64(g_global_lets, gi * 8)
+            lnode := cell_load(g_global_lets, gi * 8)
             if ast_a(lnode) == ni:
                 tn := ast_b(lnode)
                 if tn >= 0 && ast_kind(tn) == EXPR_ARRAY:
@@ -2195,17 +2195,17 @@ fn gen_expr(node: int) -> int:
                 if ac >= arg_vars_cap:
                     nc := arg_vars_cap * 2
                     nb := alloc(nc * 8)
-                    _dyncpy(arg_vars, arg_vars_cap * 8, nb)
+                    cell_copy(arg_vars, arg_vars_cap * 8, nb)
                     arg_vars = nb
                     arg_vars_cap = nc
-                w64(arg_vars, ac * 8, self_var)
+                cell_store(arg_vars, ac * 8, self_var)
                 if ac >= arg_nodes_cap:
                     nc := arg_nodes_cap * 2
                     nb := alloc(nc * 8)
-                    _dyncpy(arg_nodes, arg_nodes_cap * 8, nb)
+                    cell_copy(arg_nodes, arg_nodes_cap * 8, nb)
                     arg_nodes = nb
                     arg_nodes_cap = nc
-                w64(arg_nodes, ac * 8, obj_node)
+                cell_store(arg_nodes, ac * 8, obj_node)
                 ac = ac + 1
         else if ast_kind(func_node) == EXPR_IDENT:
             func_ni = ast_int_val(func_node)
@@ -2220,17 +2220,17 @@ fn gen_expr(node: int) -> int:
             if ac >= arg_vars_cap:
                 nc := arg_vars_cap * 2
                 nb := alloc(nc * 8)
-                _dyncpy(arg_vars, arg_vars_cap * 8, nb)
+                cell_copy(arg_vars, arg_vars_cap * 8, nb)
                 arg_vars = nb
                 arg_vars_cap = nc
-            w64(arg_vars, ac * 8, arg_var)
+            cell_store(arg_vars, ac * 8, arg_var)
             if ac >= arg_nodes_cap:
                 nc := arg_nodes_cap * 2
                 nb := alloc(nc * 8)
-                _dyncpy(arg_nodes, arg_nodes_cap * 8, nb)
+                cell_copy(arg_nodes, arg_nodes_cap * 8, nb)
                 arg_nodes = nb
                 arg_nodes_cap = nc
-            w64(arg_nodes, ac * 8, ast_a(an))
+            cell_store(arg_nodes, ac * 8, ast_a(an))
             ac = ac + 1
             an = ast_b(an)
         // dex 边界规则：dex 参数在调用点按被调方形式对齐，
@@ -2273,14 +2273,14 @@ fn gen_expr(node: int) -> int:
                 if biv > 0:
                     bs := biv - 1
                     if bs < g_gen_binds_count:
-                        bcnt := r64(g_gen_binds, bs * 8)
+                        bcnt := cell_load(g_gen_binds, bs * 8)
                         if bcnt == gc_g && bs + 1 + bcnt <= g_gen_binds_count:
                             ok_b : ., mut = 1
                             gi_b : ., mut = 0
                             loop:
                                 if gi_b >= bcnt:
                                     break
-                                bt := r64(g_gen_binds, (bs + 1 + gi_b) * 8)
+                                bt := cell_load(g_gen_binds, (bs + 1 + gi_b) * 8)
                                 if bt < 0:
                                     ok_b = 0
                                     break
@@ -2304,7 +2304,7 @@ fn gen_expr(node: int) -> int:
                     loop:
                         if ai >= ac:
                             break
-                        av := r64(arg_vars, ai * 8)
+                        av := cell_load(arg_vars, ai * 8)
                         ti := TI_INT
                         if av >= 0:
                             ti = irv_type(av)
@@ -2354,13 +2354,13 @@ fn gen_expr(node: int) -> int:
         first_arg_var := -1
         need_pack : ., mut = 0
         if ac > 0:
-            prev := r64(arg_vars, 0 * 8)
+            prev := cell_load(arg_vars, 0 * 8)
             first_arg_var = prev
             ai : ., mut = 1
             loop:
                 if ai >= ac:
                     break
-                cur := r64(arg_vars, ai * 8)
+                cur := cell_load(arg_vars, ai * 8)
                 if cur != prev + 1:
                     need_pack = 1
                     break
@@ -2371,7 +2371,7 @@ fn gen_expr(node: int) -> int:
             loop:
                 if ai >= ac:
                     break
-                av := r64(arg_vars, ai * 8)
+                av := cell_load(arg_vars, ai * 8)
                 at := TI_INT
                 if av >= 0:
                     at = irv_type(av)
@@ -2415,10 +2415,10 @@ fn gen_expr(node: int) -> int:
                     break
                 if ai3 >= g_optrep_arg_count:
                     break
-                av3 := r64(arg_vars, ai3 * 8)
+                av3 := cell_load(arg_vars, ai3 * 8)
                 an3 : ., mut = -1
                 if ai3 < arg_nodes_cap:
-                    an3 = r64(arg_nodes, ai3 * 8)
+                    an3 = cell_load(arg_nodes, ai3 * 8)
                 emit_rep_set(g_optrep_arg_cell0 + ai3, rep_enc_of_expr(an3, av3))
                 ai3 = ai3 + 1
         emit(IR_CALL, dest, first_arg_var, ac, func_ni, call_ti)
@@ -2434,7 +2434,7 @@ fn gen_expr(node: int) -> int:
             call_fi := find_func(func_ni)
             if call_fi >= 0 && fi_ispure(call_fi) != 0:
                 grow_var_use_count(dest + 1)
-                use_count := r64(g_var_use_count, dest * 8)
+                use_count := cell_load(g_var_use_count, dest * 8)
                 if use_count <= 1:
                     thunk_var := new_ir_var("_lazy", irv_type(dest))
                     emit(IR_LAZY_THUNK, thunk_var, dest, 0, 0, 0)
@@ -2455,7 +2455,7 @@ fn gen_expr(node: int) -> int:
         loop:
             if i >= stmt_count:
                 break
-            sn := r64(g_block_stmts, (stmt_start + i) * 8)
+            sn := cell_load(g_block_stmts, (stmt_start + i) * 8)
             last = gen_expr(sn)
             i = i + 1
         pop_ir_scope()
@@ -2497,7 +2497,7 @@ fn gen_expr(node: int) -> int:
         // header lands on the region enter (region iteration in interp.cr).
         sg_alloc_push(SG_LOOP)
         arena_var := new_ir_var("_arena", TI_INT)
-        w64(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
+        cell_store(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
         emit(IR_LABEL, -1, header_lbl, 0, 0, 0)
         emit(IR_JUMP, -1, body_lbl, 0, 0, 0)
         emit(IR_LABEL, -1, body_lbl, 0, 0, 0)
@@ -2511,7 +2511,7 @@ fn gen_expr(node: int) -> int:
         gen_expr(ast_a(node))
         pop_loop_labels()
         pop_ir_scope()
-        total := r64(g_sg_alloc_total, g_sg_count - 1)
+        total := cell_load(g_sg_alloc_total, g_sg_count - 1)
         if total > 0:
             iri_set_s1(arena_instr, total)
         emit(IR_LABEL, -1, post_lbl, 0, 0, 0)
@@ -2533,7 +2533,7 @@ fn gen_expr(node: int) -> int:
         // can add the termination dependency and advance the state chain.
         sg_push(SG_LOOP)
         arena_var := new_ir_var("_arena", TI_INT)
-        w64(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
+        cell_store(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
         emit(IR_LABEL, -1, header_lbl, 0, 0, 0)
         cond_var := gen_expr(cond)
         cond_var = force_if_thunk(cond_var)
@@ -2548,7 +2548,7 @@ fn gen_expr(node: int) -> int:
         gen_expr(body)
         pop_loop_labels()
         pop_ir_scope()
-        total := r64(g_sg_alloc_total, g_sg_count - 1)
+        total := cell_load(g_sg_alloc_total, g_sg_count - 1)
         if total > 0:
             iri_set_s1(arena_instr, total)
         emit(IR_LABEL, -1, post_lbl, 0, 0, 0)
@@ -2590,7 +2590,7 @@ fn gen_expr(node: int) -> int:
         // drive loop iteration from region boundaries (region iteration).
         sg_alloc_push(SG_FOR)
         arena_var := new_ir_var("_arena", TI_INT)
-        w64(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
+        cell_store(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
         // Header: check ivar < end, branch to exit if false
         emit(IR_LABEL, -1, header_lbl, 0, 0, 0)
         cond_var := new_ir_var("for_cond", TI_INT)
@@ -2608,7 +2608,7 @@ fn gen_expr(node: int) -> int:
         gen_expr(body)
         pop_loop_labels()
         pop_ir_scope()
-        total := r64(g_sg_alloc_total, g_sg_count - 1)
+        total := cell_load(g_sg_alloc_total, g_sg_count - 1)
         if total > 0:
             iri_set_s1(arena_instr, total)
         // Increment ivar and jump to header (arena reset runs on every path,
@@ -2839,7 +2839,7 @@ fn gen_expr(node: int) -> int:
             if ast_kind(type_node) == 19:
                 sz := ast_int_val(type_node)
                 if sz > 0:
-                    emit(IR_ALLOC_ARRAY, var, sz, 8, 0, 0)
+                    emit(IR_ALLOC_ARRAY, var, sz, mp_stride(TI_INT), 0, 0)
                     is_arr = 1
                     // F1：记录数组类型（TYP_ARRAY extra=size），直接索引越界
                     // 检查（arr_len_lit_of）依赖该长度信息。
@@ -3182,11 +3182,11 @@ fn gen_expr(node: int) -> int:
     // Break / Continue
     if ast_kind(node) == EXPR_BREAK:
         if g_ir_loop_depth > 0:
-            emit(IR_JUMP, -1, r64(g_ir_loop_exit, (g_ir_loop_depth - 1) * 8), 0, 0, 0)
+            emit(IR_JUMP, -1, cell_load(g_ir_loop_exit, (g_ir_loop_depth - 1) * 8), 0, 0, 0)
         return -1
     if ast_kind(node) == EXPR_CONTINUE:
         if g_ir_loop_depth > 0:
-            emit(IR_JUMP, -1, r64(g_ir_loop_header, (g_ir_loop_depth - 1) * 8), 0, 0, 0)
+            emit(IR_JUMP, -1, cell_load(g_ir_loop_header, (g_ir_loop_depth - 1) * 8), 0, 0, 0)
         return -1
 
     if ast_kind(node) == EXPR_WILDCARD:
@@ -3198,11 +3198,11 @@ fn gen_expr(node: int) -> int:
     if ast_kind(node) == EXPR_UNSAFE:
         sg_alloc_push(SG_UNSAFE)
         arena_var := new_ir_var("_arena", TI_INT)
-        w64(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
+        cell_store(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
         emit(IR_ARENA_NEW, arena_var, 0, 0, 0, 0)
         arena_instr := g_ir_instr_count - 1
         ret := gen_expr(ast_a(node))
-        total := r64(g_sg_alloc_total, g_sg_count - 1)
+        total := cell_load(g_sg_alloc_total, g_sg_count - 1)
         if total > 0:
             iri_set_s1(arena_instr, total)
         sg_alloc_pop()
@@ -3260,7 +3260,7 @@ fn gen_expr(node: int) -> int:
         elem_idx := ast_a(node)
         ec : ., mut = ast_b(node)
         tv := new_ir_var("tuple", TI_INT)
-        emit(IR_ALLOC_ARRAY, tv, ec, 0, 8, 0)  // alloc N * 8 bytes
+        emit(IR_ALLOC_ARRAY, tv, ec, 0, mp_stride(TI_INT), 0)  // target slot stride
         // Store each element at its offset
         e : ., mut = 0
         loop:
@@ -3301,11 +3301,11 @@ fn ir_gen_func(fi: int):
     // Record function metadata
     func_idx := g_ir_func_count
     grow_ir_func_meta(func_idx + 1)
-    w64(g_ir_func_name_idx, func_idx * 8, name_idx)
-    w64(g_ir_func_ret_type, func_idx * 8, ret_ti)
-    w64(g_ir_func_instr_start, func_idx * 8, g_ir_instr_count)
-    w64(g_ir_func_var_start, func_idx * 8, g_ir_var_count)
-    w64(g_ir_func_param_count, func_idx * 8, param_count)
+    cell_store(g_ir_func_name_idx, func_idx * 8, name_idx)
+    cell_store(g_ir_func_ret_type, func_idx * 8, ret_ti)
+    cell_store(g_ir_func_instr_start, func_idx * 8, g_ir_instr_count)
+    cell_store(g_ir_func_var_start, func_idx * 8, g_ir_var_count)
+    cell_store(g_ir_func_param_count, func_idx * 8, param_count)
 
     // Create IR vars for params
     pi : ., mut = 0
@@ -3411,9 +3411,9 @@ fn ir_gen_func(fi: int):
     // Function-level arena (df_begin_func already pushed SG_FUNC)
     grow_sg_alloc(g_sg_count + 1)
     grow_sg_arena_var(g_sg_count + 1)
-    w64(g_sg_alloc_total, (g_sg_count - 1) * 8, 0)
+    cell_store(g_sg_alloc_total, (g_sg_count - 1) * 8, 0)
     arena_var := new_ir_var("_arena", TI_INT)
-    w64(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
+    cell_store(g_sg_arena_var, (g_sg_count - 1) * 8, arena_var)
     emit(IR_ARENA_NEW, arena_var, 0, 0, 0, 0)
     arena_instr := g_ir_instr_count - 1
 
@@ -3450,7 +3450,7 @@ fn ir_gen_func(fi: int):
     g_cur_ret_dex_opt = 0
 
     // Patch arena size and reset before return
-    total := r64(g_sg_alloc_total, (g_sg_count - 1) * 8)
+    total := cell_load(g_sg_alloc_total, (g_sg_count - 1) * 8)
     if total > 0:
         iri_set_s1(arena_instr, total)
     emit(IR_ARENA_RESET, -1, arena_var, 0, 0, 0)
@@ -3461,8 +3461,8 @@ fn ir_gen_func(fi: int):
         emit_rep_set(g_optrep_ret_cell, oe_boxed())
     emit(IR_RETURN, -1, -1, 0, 0, 0)
 
-    w64(g_ir_func_instr_count, func_idx * 8, g_ir_instr_count - r64(g_ir_func_instr_start, func_idx * 8))
-    w64(g_ir_func_var_count, func_idx * 8, g_ir_var_count - r64(g_ir_func_var_start, func_idx * 8))
+    cell_store(g_ir_func_instr_count, func_idx * 8, g_ir_instr_count - cell_load(g_ir_func_instr_start, func_idx * 8))
+    cell_store(g_ir_func_var_count, func_idx * 8, g_ir_var_count - cell_load(g_ir_func_var_start, func_idx * 8))
     g_ir_func_count = func_idx + 1
 
 // --- Initialize global IR vars from global lets ---
@@ -3477,7 +3477,7 @@ fn global_init_val(name_idx: int) -> int:
     loop:
         if i < 0:
             break
-        node := r64(g_global_lets, i * 8)
+        node := cell_load(g_global_lets, i * 8)
         if ast_a(node) == name_idx:
             value_node := ast_c(node)
             if value_node >= 0:
@@ -3512,8 +3512,8 @@ fn agg_elem_count_of(tn: int) -> int:
         loop:
             if ai >= g_type_alias_count:
                 break
-            if r64(g_type_aliases, ai * 16) == ni:
-                rt := r64(g_type_aliases, ai * 16 + 8)
+            if cell_load(g_type_aliases, ai * 16) == ni:
+                rt := cell_load(g_type_aliases, ai * 16 + 8)
                 if rt >= 0 && ast_kind(rt) == EXPR_ARRAY:
                     return ast_int_val(rt)
                 break
@@ -3529,7 +3529,7 @@ fn global_needs_runtime_init(name_idx: int) -> int:
     loop:
         if i < 0:
             break
-        node := r64(g_global_lets, i * 8)
+        node := cell_load(g_global_lets, i * 8)
         if ast_a(node) == name_idx:
             // 容量批 T2：可选全局槽必须走运行期初始化，静态度量（.quad 裸值）写进槽后
             // 读侧按装箱解引用 -> 双路径 139(run-time failure)。装箱在 inject_global_inits
@@ -3569,8 +3569,8 @@ fn global_var_of(name_idx: int) -> int:
     loop:
         if gi >= g_ir_global_count:
             break
-        if r64(g_ir_globals, gi * 24) == name_idx:
-            return r64(g_ir_globals, gi * 24 + 8)
+        if cell_load(g_ir_globals, gi * 24) == name_idx:
+            return cell_load(g_ir_globals, gi * 24 + 8)
         gi = gi + 1
     return -1
 
@@ -3581,7 +3581,7 @@ fn inject_global_inits():
     loop:
         if i >= g_global_let_count:
             break
-        lnode := r64(g_global_lets, i * 8)
+        lnode := cell_load(g_global_lets, i * 8)
         name_idx := ast_a(lnode)
         if global_needs_runtime_init(name_idx) != 0:
             gv := global_var_of(name_idx)
@@ -3618,7 +3618,7 @@ fn reg_one_global(name_idx: int):
     loop:
         if gi >= g_ir_global_count:
             break
-        if r64(g_ir_globals, gi * 24) == name_idx:
+        if cell_load(g_ir_globals, gi * 24) == name_idx:
             found = 1
             break
         gi = gi + 1
@@ -3632,7 +3632,7 @@ fn reg_one_global(name_idx: int):
         loop:
             if gli >= g_global_let_count:
                 break
-            lnode := r64(g_global_lets, gli * 8)
+            lnode := cell_load(g_global_lets, gli * 8)
             if ast_a(lnode) == name_idx:
                 ltn := ast_b(lnode)
                 if ltn >= 0 && ast_kind(ltn) == 0 && ast_type_val(ltn) == TY_DEX:
@@ -3649,8 +3649,8 @@ fn reg_one_global(name_idx: int):
             gli = gli + 1
         gvar := new_ir_var(name, gtype)
         grow_ir_globals(g_ir_global_count + 1)
-        w64(g_ir_globals, g_ir_global_count * 24, name_idx)
-        w64(g_ir_globals, g_ir_global_count * 24 + 8, gvar)
+        cell_store(g_ir_globals, g_ir_global_count * 24, name_idx)
+        cell_store(g_ir_globals, g_ir_global_count * 24 + 8, gvar)
         // Const initializer — emitted by the ELF backend's _init_globals.
         iv : int = global_init_val(name_idx)
         if is_dex_global != 0 && gtype == TI_DEX:
@@ -3659,14 +3659,14 @@ fn reg_one_global(name_idx: int):
             loop:
                 if i2 >= g_global_let_count:
                     break
-                lnode2 := r64(g_global_lets, i2 * 8)
+                lnode2 := cell_load(g_global_lets, i2 * 8)
                 if ast_a(lnode2) == name_idx:
                     vn := ast_c(lnode2)
                     if vn >= 0 && ast_kind(vn) == EXPR_DEX:
                         iv = ast_a(vn)
                     break
                 i2 = i2 + 1
-        w64(g_ir_globals, g_ir_global_count * 24 + 16, iv)
+        cell_store(g_ir_globals, g_ir_global_count * 24 + 16, iv)
         g_ir_global_count = g_ir_global_count + 1
 
 fn ir_gen_globals():
@@ -3677,7 +3677,7 @@ fn ir_gen_globals():
     loop:
         if i >= g_global_let_count:
             break
-        node := r64(g_global_lets, i * 8)
+        node := cell_load(g_global_lets, i * 8)
         reg_one_global(ast_a(node))
         i = i + 1
 
@@ -3745,7 +3745,7 @@ fn grow_addr_taken(needed: int):
     if nc < needed:
         nc = needed + 32
     nb := alloc(nc * 8)
-    _dyncpy(g_addr_taken_names, g_addr_taken_cap * 8, nb)
+    cell_copy(g_addr_taken_names, g_addr_taken_cap * 8, nb)
     g_addr_taken_names = nb
     g_addr_taken_cap = nc
 fn addr_taken_add(ni: int):
@@ -3755,7 +3755,7 @@ fn addr_taken_add(ni: int):
         return
     // 去重（线性扫；量级 = 源码里 &ident 的条数）
     grow_addr_taken(g_addr_taken_count + 1)
-    w64(g_addr_taken_names, g_addr_taken_count * 8, ni)
+    cell_store(g_addr_taken_names, g_addr_taken_count * 8, ni)
     g_addr_taken_count = g_addr_taken_count + 1
 fn addr_taken_of(ni: int) -> int:
     if ni < 0:
@@ -3764,7 +3764,7 @@ fn addr_taken_of(ni: int) -> int:
     loop:
         if i >= g_addr_taken_count:
             return 0
-        if r64(g_addr_taken_names, i * 8) == ni:
+        if cell_load(g_addr_taken_names, i * 8) == ni:
             return 1
         i = i + 1
     return 0
@@ -3806,9 +3806,9 @@ fn optrep_prescan():
 fn reg_hidden_global(name_ni: int) -> int:
     gvar := new_ir_var(istr_get(name_ni), TI_INT)
     grow_ir_globals(g_ir_global_count + 1)
-    w64(g_ir_globals, g_ir_global_count * 24, name_ni)
-    w64(g_ir_globals, g_ir_global_count * 24 + 8, gvar)
-    w64(g_ir_globals, g_ir_global_count * 24 + 16, 0)
+    cell_store(g_ir_globals, g_ir_global_count * 24, name_ni)
+    cell_store(g_ir_globals, g_ir_global_count * 24 + 8, gvar)
+    cell_store(g_ir_globals, g_ir_global_count * 24 + 16, 0)
     g_ir_global_count = g_ir_global_count + 1
     return gvar
 
@@ -3862,11 +3862,11 @@ fn ast_patch_node(node: int, subst_from: string, subst_to: string):
                     loop:
                         if dci >= flen:
                             break
-                        if load8(data_str, dci) != load8(subst_from, dci):
+                        if cell_load_byte(data_str, dci) != cell_load_byte(subst_from, dci):
                             matches = 0
                             break
                         dci = dci + 1
-                    if matches != 0 && (dlen == flen || load8(data_str, flen) == 46):
+                    if matches != 0 && (dlen == flen || cell_load_byte(data_str, flen) == 46):
                         rest := str_sub(data_str, flen, dlen - flen)
                         new_name := subst_to + rest
                         ast_set_data(node, str_intern(new_name))
@@ -3878,7 +3878,7 @@ fn ast_patch_node(node: int, subst_from: string, subst_to: string):
         loop:
             if i2 >= sc:
                 break
-            sn2 := r64(g_block_stmts, (ss + i2) * 8)
+            sn2 := cell_load(g_block_stmts, (ss + i2) * 8)
             ast_patch_node(sn2, subst_from, subst_to)
             i2 = i2 + 1
     else if k == EXPR_IF || k == EXPR_LOOP || k == EXPR_WHILE || k == EXPR_UNSAFE:
@@ -4077,7 +4077,7 @@ fn ccr_source_has_marker(marker: string) -> int:
         loop:
             if j >= ml:
                 break
-            if load8(g_source, i + j) != load8(marker, j):
+            if cell_load_byte(g_source, i + j) != cell_load_byte(marker, j):
                 break
             j = j + 1
         if j >= ml:
@@ -4092,7 +4092,7 @@ fn ccr_source_dir_is_compiler() -> int:
         return 1
     if n >= 12 && str_eq(str_sub(d, n - 12, 12), "src/compiler") != 0:
         return 1
-    if n >= 13 && load8(d, n - 1) == 47:
+    if n >= 13 && cell_load_byte(d, n - 1) == 47:
         if str_eq(str_sub(d, n - 13, 12), "src/compiler") != 0:
             return 1
     return 0
@@ -4170,7 +4170,7 @@ fn func_fingerprint(func_node: int) -> int:
         loop:
             if source_pos >= source_len:
                 break
-            source_hash = source_hash * 16777619 + load8(g_source, source_pos)
+            source_hash = source_hash * 16777619 + cell_load_byte(g_source, source_pos)
             source_pos = source_pos + 1
         g_ir_source_hash = source_hash
         g_ir_source_hash_ready = 1
@@ -4199,7 +4199,7 @@ fn sig_fingerprint(func_node: int) -> int:
     loop:
         if ni >= str_len(name):
             break
-        h = h * 16777619 + (load8(name, ni) % 256)
+        h = h * 16777619 + (cell_load_byte(name, ni) % 256)
         ni = ni + 1
     // Param types
     param := ast_b(func_node)

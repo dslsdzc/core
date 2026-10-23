@@ -22,15 +22,15 @@ fn init_df():
         if fi >= g_func_count:
             break
         grow_df_arrays(fi + 1)
-        w64(g_df_func_node_start, fi * 8, -1)
-        w64(g_df_func_node_count, fi * 8, 0)
+        cell_store(g_df_func_node_start, fi * 8, -1)
+        cell_store(g_df_func_node_count, fi * 8, 0)
         fi = fi + 1
     vi : ., mut = 0
     loop:
         if vi >= g_ir_var_count:
             break
         grow_df_arrays(vi + 1)
-        w64(g_df_var_producer, vi * 8, -1)
+        cell_store(g_df_var_producer, vi * 8, -1)
         vi = vi + 1
 
 // --- Subgraph management (bare pointer model) ---
@@ -38,23 +38,23 @@ fn init_df():
 fn sg_push(kind: int):
     grow_sg(g_sg_count + 1)
     idx := g_sg_count
-    w64(g_sgs, idx * ESZ_SG + OFF_SG_KIND, kind)
-    w64(g_sgs, idx * ESZ_SG + OFF_SG_ENTER, g_df_node_count)
-    w64(g_sgs, idx * ESZ_SG + OFF_SG_EXIT, -1)
-    w64(g_sgs, idx * ESZ_SG + OFF_SG_NSTART, g_df_node_count)
-    w64(g_sgs, idx * ESZ_SG + OFF_SG_NCOUNT, 0)
+    cell_store(g_sgs, idx * ESZ_SG + OFF_SG_KIND, kind)
+    cell_store(g_sgs, idx * ESZ_SG + OFF_SG_ENTER, g_df_node_count)
+    cell_store(g_sgs, idx * ESZ_SG + OFF_SG_EXIT, -1)
+    cell_store(g_sgs, idx * ESZ_SG + OFF_SG_NSTART, g_df_node_count)
+    cell_store(g_sgs, idx * ESZ_SG + OFF_SG_NCOUNT, 0)
     // Parent: find innermost currently open subgraph
     parent := -1
     pi := idx - 1
     loop:
         if pi < 0:
             break
-        if r64(g_sgs, pi * ESZ_SG + OFF_SG_EXIT) < 0:
+        if cell_load(g_sgs, pi * ESZ_SG + OFF_SG_EXIT) < 0:
             // still open
             parent = pi
             break
         pi = pi - 1
-    w64(g_sgs, idx * ESZ_SG + OFF_SG_PARENT, parent)
+    cell_store(g_sgs, idx * ESZ_SG + OFF_SG_PARENT, parent)
     g_cur_sg = idx  // new innermost open region
     g_sg_count = idx + 1
 
@@ -71,22 +71,22 @@ fn sg_pop():
     loop:
         if pi < 0:
             break
-        if r64(g_sgs, pi * ESZ_SG + OFF_SG_EXIT) < 0:
+        if cell_load(g_sgs, pi * ESZ_SG + OFF_SG_EXIT) < 0:
             idx = pi
             break
         pi = pi - 1
     if idx < 0:
         return
-    w64(g_sgs, idx * ESZ_SG + OFF_SG_EXIT, g_df_node_count)
-    w64(g_sgs, idx * ESZ_SG + OFF_SG_NCOUNT,
-        g_df_node_count - r64(g_sgs, idx * ESZ_SG + OFF_SG_NSTART))
+    cell_store(g_sgs, idx * ESZ_SG + OFF_SG_EXIT, g_df_node_count)
+    cell_store(g_sgs, idx * ESZ_SG + OFF_SG_NCOUNT,
+        g_df_node_count - cell_load(g_sgs, idx * ESZ_SG + OFF_SG_NSTART))
     // Loop termination dependency: the region exit node (last node created in
     // the region, i.e. the exit label) must happen after the region's last
     // side effect — a VSDG state edge enforcing loop-exit ordering.
     // 循环终止依赖（kind=1）与序列头推进不在本处连接，状态依赖边序列统一在
     // 全部 IR 生成结束后重建（df_replay_state_chain；时点理由见该函数头注）：
     // 被调函数真纯度只有拿到全程序 IR 体才能算，状态依赖关系不能边生成边连接。
-    g_cur_sg = r64(g_sgs, idx * ESZ_SG + OFF_SG_PARENT)
+    g_cur_sg = cell_load(g_sgs, idx * ESZ_SG + OFF_SG_PARENT)
 
 // --- Node creation ---
 
@@ -99,22 +99,22 @@ fn df_create_node(opcode: int, dest: int, src1: int, src2: int, src3: int, tk_te
     nid := g_df_node_count
     grow_df_nodes(nid + 1)
     grow_df_node_region(nid + 1)
-    w64(g_df_node_region, nid * 8, g_cur_sg)  // owning region (-1 = none)
-    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_OPCODE, opcode)
-    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_DEST, dest)
-    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_S1, src1)
-    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_S2, src2)
-    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_S3, src3)
-    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_TK, tk_term)   // type-term reference
-    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_AUX, tk_aux)   // auxiliary code
-    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_FIRST_EDGE, -1)
-    w64(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_EDGE_COUNT, 0)
+    cell_store(g_df_node_region, nid * 8, g_cur_sg)  // owning region (-1 = none)
+    cell_store(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_OPCODE, opcode)
+    cell_store(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_DEST, dest)
+    cell_store(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_S1, src1)
+    cell_store(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_S2, src2)
+    cell_store(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_S3, src3)
+    cell_store(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_TK, tk_term)   // type-term reference
+    cell_store(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_AUX, tk_aux)   // auxiliary code
+    cell_store(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_FIRST_EDGE, -1)
+    cell_store(g_df_nodes, nid * ESZ_DFNODE + OFF_DF_EDGE_COUNT, 0)
     g_df_node_count = nid + 1
 
     // Record that this node produces `dest`
     if dest >= 0:
         grow_df_arrays(dest + 1)
-        w64(g_df_var_producer, dest * 8, nid)
+        cell_store(g_df_var_producer, dest * 8, nid)
 
     // Add edges for src fields that are IR variables (based on opcode)
     // 第 6 参 = 辅码（IR_BOUNDS_CHECK 的 `!= 0` = 动态上限旗标，单槽化后旗标在
@@ -131,14 +131,14 @@ fn df_add_edge_kind(from_id: int, to_id: int, kind: int):
         return
     eid := g_df_edge_count
     grow_df_edges(eid + 1)
-    w64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_FROM, from_id)
-    w64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_TO, to_id)
-    w64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_KIND, kind)
-    old_first := r64(g_df_nodes, from_id * ESZ_DFNODE + OFF_DF_FIRST_EDGE)
-    w64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_NEXT, old_first)
-    w64(g_df_nodes, from_id * ESZ_DFNODE + OFF_DF_FIRST_EDGE, eid)
-    old_cnt := r64(g_df_nodes, from_id * ESZ_DFNODE + OFF_DF_EDGE_COUNT)
-    w64(g_df_nodes, from_id * ESZ_DFNODE + OFF_DF_EDGE_COUNT, old_cnt + 1)
+    cell_store(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_FROM, from_id)
+    cell_store(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_TO, to_id)
+    cell_store(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_KIND, kind)
+    old_first := cell_load(g_df_nodes, from_id * ESZ_DFNODE + OFF_DF_FIRST_EDGE)
+    cell_store(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_NEXT, old_first)
+    cell_store(g_df_nodes, from_id * ESZ_DFNODE + OFF_DF_FIRST_EDGE, eid)
+    old_cnt := cell_load(g_df_nodes, from_id * ESZ_DFNODE + OFF_DF_EDGE_COUNT)
+    cell_store(g_df_nodes, from_id * ESZ_DFNODE + OFF_DF_EDGE_COUNT, old_cnt + 1)
     g_df_edge_count = eid + 1
 
 // Data edge (def-use). This is the common case.
@@ -180,14 +180,14 @@ fn df_connect_state(node_id: int, opcode: int, s3: int):
 // The replay keeps node creation order as program order, resets the chain head
 // per function, and closes loop and for regions at OFF_SG_EXIT.
 fn df_state_close_regions_at(head: string, next: string, pos: int):
-    sg := r64(head, pos * 8)
+    sg := cell_load(head, pos * 8)
     loop:
         if sg < 0:
             break
         // A region closes at the node after its last node. last_node is the
         // node immediately before the close position.
         last_node := pos - 1
-        nstart := r64(g_sgs, sg * ESZ_SG + OFF_SG_NSTART)
+        nstart := cell_load(g_sgs, sg * ESZ_SG + OFF_SG_NSTART)
         if last_node >= nstart:
             // 终止边源必须在区内（循环体无副作用时序列头是区前的 store，连过去等于
             // 宣称循环退出依赖于该区不含的副作用）。
@@ -196,7 +196,7 @@ fn df_state_close_regions_at(head: string, next: string, pos: int):
             // 序列头推进到区退出节点：循环之后的副作用必须依赖循环终止
             // （spec 4.2：不终止的循环必须终止整图）。
             g_last_state_node = last_node
-        sg = r64(next, sg * 8)
+        sg = cell_load(next, sg * 8)
 
 fn df_replay_state_chain():
     if g_ir_func_count <= 0:
@@ -210,25 +210,25 @@ fn df_replay_state_chain():
     loop:
         if i > g_df_node_count:
             break
-        w64(head, i * 8, -1)
+        cell_store(head, i * 8, -1)
         i = i + 1
     si : ., mut = 0
     loop:
         if si >= g_sg_count:
             break
-        k := r64(g_sgs, si * ESZ_SG + OFF_SG_KIND)
+        k := cell_load(g_sgs, si * ESZ_SG + OFF_SG_KIND)
         if k == SG_LOOP || k == SG_FOR:
-            ex := r64(g_sgs, si * ESZ_SG + OFF_SG_EXIT)
+            ex := cell_load(g_sgs, si * ESZ_SG + OFF_SG_EXIT)
             if ex >= 0 && ex <= g_df_node_count:
-                w64(next, si * 8, r64(head, ex * 8))
-                w64(head, ex * 8, si)
+                cell_store(next, si * 8, cell_load(head, ex * 8))
+                cell_store(head, ex * 8, si)
         si = si + 1
     irf : ., mut = 0
     loop:
         if irf >= g_ir_func_count:
             break
-        start := r64(g_df_func_node_start, irf * 8)
-        cnt := r64(g_df_func_node_count, irf * 8)
+        start := cell_load(g_df_func_node_start, irf * 8)
+        cnt := cell_load(g_df_func_node_count, irf * 8)
         g_last_state_node = -1   // 每函数独立的状态依赖序列（与 df_begin_func 同语义）
         n : ., mut = 0
         loop:
@@ -237,8 +237,8 @@ fn df_replay_state_chain():
             if n > 0:
                 df_state_close_regions_at(head, next, start + n)
             pos := start + n
-            df_connect_state(pos, r64(g_df_nodes, pos * ESZ_DFNODE + OFF_DF_OPCODE),
-                r64(g_df_nodes, pos * ESZ_DFNODE + OFF_DF_S3))
+            df_connect_state(pos, cell_load(g_df_nodes, pos * ESZ_DFNODE + OFF_DF_OPCODE),
+                cell_load(g_df_nodes, pos * ESZ_DFNODE + OFF_DF_S3))
             n = n + 1
         // 函数末端关闭位（SG_FUNC 恒在此；循环落在函数末句时该环也在此），只在此
         // 处理：下一函数走 n=0 时跳过 start -> 每个关闭位恰好处理一次。函数 0 的
@@ -268,7 +268,7 @@ fn df_use_var(consumer_node: int, var_idx: int):
     // where dest=-1 but src1 is a high arena ID variable).
     if var_idx >= g_df_cap:
         grow_df_arrays(var_idx + 1)
-    producer := r64(g_df_var_producer, var_idx * 8)
+    producer := cell_load(g_df_var_producer, var_idx * 8)
     if producer >= 0:
         df_add_edge(producer, consumer_node)
 
@@ -411,7 +411,7 @@ fn grow_var_use_count(needed: int):
     if nc < needed:
         nc = needed + 128
     nb := alloc(nc * 8)
-    _dyncpy(g_var_use_count, g_var_use_count_cap * 8, nb)
+    cell_copy(g_var_use_count, g_var_use_count_cap * 8, nb)
     g_var_use_count = nb
     g_var_use_count_cap = nc
 
@@ -423,15 +423,15 @@ fn compute_usage_counts():
         if ei >= g_df_edge_count:
             break
         // State edges are not data consumers — skip them for usage counts
-        if r64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_KIND) != 0:
+        if cell_load(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_KIND) != 0:
             ei = ei + 1
             continue
-        from_id := r64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_FROM)
-        dest := r64(g_df_nodes, from_id * ESZ_DFNODE + OFF_DF_DEST)
+        from_id := cell_load(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_FROM)
+        dest := cell_load(g_df_nodes, from_id * ESZ_DFNODE + OFF_DF_DEST)
         if dest >= 0:
             grow_var_use_count(dest + 1)
-            prev := r64(g_var_use_count, dest * 8)
-            w64(g_var_use_count, dest * 8, prev + 1)
+            prev := cell_load(g_var_use_count, dest * 8)
+            cell_store(g_var_use_count, dest * 8, prev + 1)
         ei = ei + 1
 
 // --- Mark function boundary in graph ---
@@ -439,18 +439,18 @@ fn compute_usage_counts():
 fn df_begin_func(func_idx: int):
     if func_idx >= 0:
         grow_df_arrays(func_idx + 1)
-        w64(g_df_func_node_start, func_idx * 8, g_df_node_count)
+        cell_store(g_df_func_node_start, func_idx * 8, g_df_node_count)
         // Record the edge start for this function. Edges created after this
         // point belong to the function; df_begin_func and df_end_func do not
         // create edges, and the state chain is replayed later.
-        w64(g_df_func_edge_start, func_idx * 8, g_df_edge_count)
+        cell_store(g_df_func_edge_start, func_idx * 8, g_df_edge_count)
         sg_push(SG_FUNC)
     g_last_state_node = -1  // fresh state chain per function
 
 fn df_end_func(func_idx: int):
     if func_idx >= 0:
-        start := r64(g_df_func_node_start, func_idx * 8)
-        w64(g_df_func_node_count, func_idx * 8, g_df_node_count - start)
+        start := cell_load(g_df_func_node_start, func_idx * 8)
+        cell_store(g_df_func_node_count, func_idx * 8, g_df_node_count - start)
         sg_pop()
 
 // --- DOT output ---
@@ -468,7 +468,7 @@ fn df_graph_to_dot() -> string:
     loop:
         if si >= g_sg_count:
             break
-        skind := r64(g_sgs, si * ESZ_SG + OFF_SG_KIND)
+        skind := cell_load(g_sgs, si * ESZ_SG + OFF_SG_KIND)
         sname : ., mut = "region"
         if skind == SG_IF:
             sname = "if"
@@ -487,8 +487,8 @@ fn df_graph_to_dot() -> string:
         dump_buf_append(sname)
         dump_buf_append("\";\n")
         // Nodes in this region:
-        n0 := r64(g_sgs, si * ESZ_SG + OFF_SG_NSTART)
-        n1 := r64(g_sgs, si * ESZ_SG + OFF_SG_EXIT)
+        n0 := cell_load(g_sgs, si * ESZ_SG + OFF_SG_NSTART)
+        n1 := cell_load(g_sgs, si * ESZ_SG + OFF_SG_EXIT)
         if n1 >= 0:
             // skip unclosed (EXIT<0) entries
             ni : ., mut = n0
@@ -507,9 +507,9 @@ fn df_graph_to_dot() -> string:
     loop:
         if ni >= g_df_node_count:
             break
-        n_op := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
-        n_dest := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
-        n_s3 := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
+        n_op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        n_dest := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST)
+        n_s3 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3)
         label : ., mut = df_opcode_name(n_op, n_s3)
         if n_dest >= 0:
             vname := get_ir_var_name(n_dest)
@@ -527,9 +527,9 @@ fn df_graph_to_dot() -> string:
     loop:
         if ei >= g_df_edge_count:
             break
-        e_from := r64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_FROM)
-        e_to := r64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_TO)
-        if r64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_KIND) != 0:
+        e_from := cell_load(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_FROM)
+        e_to := cell_load(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_TO)
+        if cell_load(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_KIND) != 0:
             dump_buf_append("    n")
             dump_buf_append(int_str(e_from))
             dump_buf_append(" -> n")

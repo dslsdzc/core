@@ -71,3 +71,44 @@ fn _dyncpy(src: string, nbytes: int, dst: string):
             break
         w8(dst, ci, bu8(src, ci))
         ci = ci + 1
+
+// ── Compiler cell API ──
+// The frontend uses these names for compiler-owned table slots. The cell width
+// and raw machine access stay in this low-level module; semantic passes do not
+// read or write w64/r64/r32/load8 directly.
+
+fn cell_store(buf: string, pos: int, val: int):
+    w64(buf, pos, val)
+
+fn cell_load(buf: string, pos: int) -> int:
+    return r64(buf, pos)
+
+fn cell_store32(buf: string, pos: int, val: int):
+    w32(buf, pos, val)
+
+fn cell_load32(buf: string, pos: int) -> int:
+    return r32(buf, pos)
+
+fn cell_store8(buf: string, pos: int, val: int):
+    w8(buf, pos, val)
+
+fn cell_load8(buf: string, pos: int) -> int:
+    return bu8(buf, pos)
+
+fn cell_store_byte(buf: string, pos: int, val: int):
+    store8(buf, pos, val)
+
+fn cell_load_byte(buf: string, pos: int) -> int:
+    return load8(buf, pos)
+
+fn cell_load64(buf: string, pos: int) -> int:
+    return load64(buf, pos)
+
+fn cell_copy(src: string, nbytes: int, dst: string):
+    _dyncpy(src, nbytes, dst)
+
+fn cell_load_str(buf: string, pos: int) -> string:
+    return load_str_ptr(buf, pos)
+
+fn cell_store_str(buf: string, pos: int, val: string) -> int:
+    return store_str_ptr(buf, pos, val)

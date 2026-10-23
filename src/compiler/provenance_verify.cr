@@ -8,10 +8,10 @@ fn get_alloc_size(alloc_seq: int) -> int:
     // g_pa_alloc_nodes before reading the allocation node.
     if alloc_seq < 0 || alloc_seq >= g_pa_alloc_count:
         return -1
-    an := r64(g_pa_alloc_nodes, alloc_seq * 8)
-    op := r64(g_df_nodes, an * ESZ_DFNODE + OFF_DF_OPCODE)
-    s1 := r64(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S1)
-    s3 := r64(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S3)
+    an := cell_load(g_pa_alloc_nodes, alloc_seq * 8)
+    op := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_OPCODE)
+    s1 := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S1)
+    s3 := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S3)
 
     // IR_ALLOC marks a scalar variable slot, not a heap allocation, so it has no
     // allocation size.
@@ -37,18 +37,18 @@ fn get_alloc_size(alloc_seq: int) -> int:
 fn get_alloc_var(alloc_seq: int) -> int:
     if alloc_seq < 0 || alloc_seq >= g_pa_alloc_count:
         return -1
-    an := r64(g_pa_alloc_nodes, alloc_seq * 8)
-    return r64(g_df_nodes, an * ESZ_DFNODE + OFF_DF_DEST)
+    an := cell_load(g_pa_alloc_nodes, alloc_seq * 8)
+    return cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_DEST)
 
 fn pv_is_in_unsafe(node_seq: int) -> int:
     si : ., mut = 0
     loop:
         if si >= g_sg_count:
             break
-        kind := r64(g_sgs, si * ESZ_SG + OFF_SG_KIND)
+        kind := cell_load(g_sgs, si * ESZ_SG + OFF_SG_KIND)
         if kind == SG_UNSAFE:
-            nstart := r64(g_sgs, si * ESZ_SG + OFF_SG_NSTART)
-            ncount := r64(g_sgs, si * ESZ_SG + OFF_SG_NCOUNT)
+            nstart := cell_load(g_sgs, si * ESZ_SG + OFF_SG_NSTART)
+            ncount := cell_load(g_sgs, si * ESZ_SG + OFF_SG_NCOUNT)
             if node_seq >= nstart && node_seq < nstart + ncount:
                 return 1
         si = si + 1
@@ -59,12 +59,12 @@ fn provenance_verify_func(nstart: int, ncount: int):
     loop:
         if ni >= nstart + ncount:
             break
-        op := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
-        s1 := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
         // Read the access width in bytes from OFF_DF_AUX. Before the single-slot
         // change it lived in the shared tk slot. Reading slot 40 would treat a
         // type-term index as a width.
-        width : ., mut = r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_AUX)
+        width : ., mut = cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_AUX)
 
         if (op == IR_DEREF || op == IR_STORE_PTR) && s1 >= 0:
             // Skip checks in unsafe blocks
@@ -89,8 +89,8 @@ fn provenance_verify_func(nstart: int, ncount: int):
             if width <= 0:
                 width = 8
 
-            pts := r64(g_pts, s1 * 8)
-            off := r64(g_offsets, s1 * 8)
+            pts := cell_load(g_pts, s1 * 8)
+            off := cell_load(g_offsets, s1 * 8)
             runtime_targets : ., mut = 0
             runtime_size : ., mut = 0
             runtime_base : ., mut = -1
@@ -127,12 +127,12 @@ fn provenance_verify_func(nstart: int, ncount: int):
                 bi = bi + 1
 
             if off < 0 && runtime_targets == 1 && runtime_base >= 0:
-                w64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3, runtime_size)
+                cell_store(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3, runtime_size)
                 if op == IR_DEREF:
-                    w64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2, runtime_base)
+                    cell_store(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2, runtime_base)
                 else:
                     // IR_STORE_PTR has no result, so dest carries the runtime base.
-                    w64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST, runtime_base)
+                    cell_store(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST, runtime_base)
             else if off < 0 && runtime_targets > 1:
                 check_error(EC_TK_INDEX,
                     "runtime pointer bounds check has multiple allocation targets",
@@ -145,7 +145,7 @@ fn provenance_verify_all():
     loop:
         if fi >= g_ir_func_count:
             break
-        nstart := r64(g_df_func_node_start, fi * 8)
-        ncount := r64(g_df_func_node_count, fi * 8)
+        nstart := cell_load(g_df_func_node_start, fi * 8)
+        ncount := cell_load(g_df_func_node_count, fi * 8)
         provenance_verify_func(nstart, ncount)
         fi = fi + 1

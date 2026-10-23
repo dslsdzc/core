@@ -80,7 +80,7 @@ fn ps_ir_index_of(name: string) -> int:
     loop:
         if irf >= g_ir_func_count:
             return -1
-        if r64(g_ir_func_name_idx, irf * 8) == ni:
+        if cell_load(g_ir_func_name_idx, irf * 8) == ni:
             return irf
         irf = irf + 1
     return -1
@@ -88,14 +88,14 @@ fn ps_ir_index_of(name: string) -> int:
 // Index of the first DF node in function irf that calls callee. -1 means none.
 fn ps_call_node(irf: int, callee: string) -> int:
     cni := str_intern(callee)
-    start := r64(g_df_func_node_start, irf * 8)
-    cnt := r64(g_df_func_node_count, irf * 8)
+    start := cell_load(g_df_func_node_start, irf * 8)
+    cnt := cell_load(g_df_func_node_count, irf * 8)
     n : ., mut = start
     loop:
         if n >= start + cnt:
             return -1
-        if r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE) == IR_CALL:
-            if r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S3) == cni:
+        if cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE) == IR_CALL:
+            if cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S3) == cni:
                 return n
         n = n + 1
     return -1
@@ -106,15 +106,15 @@ fn ps_count_call_nodes(irf: int, callee: string) -> int:
     if irf < 0:
         return -1
     cni := str_intern(callee)
-    start := r64(g_df_func_node_start, irf * 8)
-    cnt := r64(g_df_func_node_count, irf * 8)
+    start := cell_load(g_df_func_node_start, irf * 8)
+    cnt := cell_load(g_df_func_node_count, irf * 8)
     r : ., mut = 0
     n : ., mut = start
     loop:
         if n >= start + cnt:
             return r
-        if r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE) == IR_CALL:
-            if r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S3) == cni:
+        if cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE) == IR_CALL:
+            if cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S3) == cni:
                 r = r + 1
         n = n + 1
     return r
@@ -123,13 +123,13 @@ fn ps_count_call_nodes(irf: int, callee: string) -> int:
 fn ps_op_node(irf: int, opcode: int) -> int:
     if irf < 0:
         return -1
-    start := r64(g_df_func_node_start, irf * 8)
-    cnt := r64(g_df_func_node_count, irf * 8)
+    start := cell_load(g_df_func_node_start, irf * 8)
+    cnt := cell_load(g_df_func_node_count, irf * 8)
     n : ., mut = start
     loop:
         if n >= start + cnt:
             return -1
-        if r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE) == opcode:
+        if cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE) == opcode:
             return n
         n = n + 1
     return -1
@@ -155,15 +155,15 @@ fn ps_calls_in_chain(irf: int, callee: string) -> int:
     if irf < 0:
         return -1
     cni := str_intern(callee)
-    start := r64(g_df_func_node_start, irf * 8)
-    cnt := r64(g_df_func_node_count, irf * 8)
+    start := cell_load(g_df_func_node_start, irf * 8)
+    cnt := cell_load(g_df_func_node_count, irf * 8)
     r : ., mut = 0
     n : ., mut = start
     loop:
         if n >= start + cnt:
             return r
-        if r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE) == IR_CALL:
-            if r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S3) == cni:
+        if cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE) == IR_CALL:
+            if cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S3) == cni:
                 if ps_has_state_in(n) == 1:
                     r = r + 1
         n = n + 1
@@ -178,10 +178,10 @@ fn ps_state_touch(nid: int) -> int:
     loop:
         if e >= g_df_edge_count:
             break
-        if r64(g_df_edges, e * ESZ_DFEDGE + OFF_DFE_KIND) == 1:
-            if r64(g_df_edges, e * ESZ_DFEDGE + OFF_DFE_TO) == nid:
+        if cell_load(g_df_edges, e * ESZ_DFEDGE + OFF_DFE_KIND) == 1:
+            if cell_load(g_df_edges, e * ESZ_DFEDGE + OFF_DFE_TO) == nid:
                 r = r + 1
-            if r64(g_df_edges, e * ESZ_DFEDGE + OFF_DFE_FROM) == nid:
+            if cell_load(g_df_edges, e * ESZ_DFEDGE + OFF_DFE_FROM) == nid:
                 r = r + 2
         e = e + 1
     return r
@@ -189,16 +189,16 @@ fn ps_state_touch(nid: int) -> int:
 // Whether function irf has a kind-1 edge to a label node. A loop exit must
 // depend on the last side effect in the loop body.
 fn ps_has_label_state_target(irf: int) -> int:
-    start := r64(g_df_func_node_start, irf * 8)
-    cnt := r64(g_df_func_node_count, irf * 8)
+    start := cell_load(g_df_func_node_start, irf * 8)
+    cnt := cell_load(g_df_func_node_count, irf * 8)
     e : ., mut = 0
     loop:
         if e >= g_df_edge_count:
             break
-        if r64(g_df_edges, e * ESZ_DFEDGE + OFF_DFE_KIND) == 1:
-            tgt := r64(g_df_edges, e * ESZ_DFEDGE + OFF_DFE_TO)
+        if cell_load(g_df_edges, e * ESZ_DFEDGE + OFF_DFE_KIND) == 1:
+            tgt := cell_load(g_df_edges, e * ESZ_DFEDGE + OFF_DFE_TO)
             if tgt >= start && tgt < start + cnt:
-                if r64(g_df_nodes, tgt * ESZ_DFNODE + OFF_DF_OPCODE) == IR_LABEL:
+                if cell_load(g_df_nodes, tgt * ESZ_DFNODE + OFF_DF_OPCODE) == IR_LABEL:
                     return 1
         e = e + 1
     return 0
@@ -214,7 +214,7 @@ fn purity_selftest_run() -> int:
     src = src + "fn call_effect():\n    effect()\n"
     src = src + "extern fn ext_probe(x: int) -> int\n"
     src = src + "fn call_extern(x: int) -> int:\n    return ext_probe(x)\n"
-    src = src + "fn call_builtin(x: int) -> int:\n    return load64(x)\n"
+    src = src + "fn call_builtin(x: int) -> int:\n    return cell_load64(x)\n"
     src = src + "fn self_rec(n: int) -> int:\n    if n <= 0:\n        return 0\n    return self_rec(n - 1)\n"
     src = src + "fn mut_rec_a(n: int) -> int:\n    if n <= 0:\n        return 0\n    return mut_rec_b(n - 1)\n"
     src = src + "fn mut_rec_b(n: int) -> int:\n    if n <= 0:\n        return 0\n    return mut_rec_a(n - 1)\n"

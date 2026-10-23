@@ -28,7 +28,7 @@ fn grow_ext_reg(needed: int):
     // Each record is 16 bytes: hook_type at offset 0 and plugin_id at offset 8.
     // An 8-byte stride would overlap the two fields and break dispatch.
     nb := alloc(ncap * 16)
-    _dyncpy(g_ext_reg, g_ext_reg_cap * 16, nb)
+    cell_copy(g_ext_reg, g_ext_reg_cap * 16, nb)
     g_ext_reg = nb
     g_ext_reg_cap = ncap
 
@@ -56,8 +56,8 @@ fn ext_has(flag: int) -> int:
 // Register a plugin for a hook.
 fn ext_reg(hook_type: int, plugin_id: int):
     grow_ext_reg(g_ext_reg_count + 1)
-    w64(g_ext_reg, g_ext_reg_count * 16, hook_type)
-    w64(g_ext_reg, g_ext_reg_count * 16 + 8, plugin_id)
+    cell_store(g_ext_reg, g_ext_reg_count * 16, hook_type)
+    cell_store(g_ext_reg, g_ext_reg_count * 16 + 8, plugin_id)
     g_ext_reg_count = g_ext_reg_count + 1
 
 // Dispatch an array access hook. arr_var, idx_var, idx_lit, and arr_len_lit are
@@ -69,8 +69,8 @@ fn ext_dispatch_array_access(arr_var: int, idx_var: int, idx_lit: int, arr_len_l
     loop:
         if ri >= g_ext_reg_count:
             break
-        ht := r64(g_ext_reg, ri * 16)
-        pid := r64(g_ext_reg, ri * 16 + 8)
+        ht := cell_load(g_ext_reg, ri * 16)
+        pid := cell_load(g_ext_reg, ri * 16 + 8)
         if ht == EXT_HOOK_ARRAY_ACCESS:
             if pid == 1:
                 // EXT_PLUGIN_SAFETY
@@ -88,8 +88,8 @@ fn ext_dispatch_binary_op(op: int, lv: int, rv: int, result_var: int) -> int:
     loop:
         if ri >= g_ext_reg_count:
             break
-        ht := r64(g_ext_reg, ri * 16)
-        pid := r64(g_ext_reg, ri * 16 + 8)
+        ht := cell_load(g_ext_reg, ri * 16)
+        pid := cell_load(g_ext_reg, ri * 16 + 8)
         if ht == EXT_HOOK_BINARY_OP:
             if pid == 1:
                 return ext_safety_on_binary_op(op, lv, rv, result_var)

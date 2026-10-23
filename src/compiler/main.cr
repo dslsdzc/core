@@ -38,19 +38,19 @@ fn is_decl_stmt(s: string) -> int:
     loop:
         if i >= slen:
             return 0
-        cb := load8(s, i)
+        cb := cell_load_byte(s, i)
         if cb == 32 || cb == 9 || cb == 10 || cb == 13:
             i = i + 1
         else:
             break
     if i < slen:
-        cb := load8(s, i)
+        cb := cell_load_byte(s, i)
         if (cb >= 97 && cb <= 122) || (cb >= 65 && cb <= 90) || cb == 95:
             j : ., mut = i + 1
             loop:
                 if j >= slen:
                     return 0
-                c2b := load8(s, j)
+                c2b := cell_load_byte(s, j)
                 if c2b == 32 || c2b == 9 || c2b == 10 || c2b == 13:
                     j = j + 1
                 else if c2b == 58:
@@ -69,7 +69,7 @@ fn detect_imports(src: string) -> int:
     loop:
         if i + 6 >= sl:
             break
-        if load8(src,i) == 105 && load8(src,i+1) == 109 && load8(src,i+2) == 112 && load8(src,i+3) == 111 && load8(src,i+4) == 114 && load8(src,i+5) == 116:
+        if cell_load_byte(src,i) == 105 && cell_load_byte(src,i+1) == 109 && cell_load_byte(src,i+2) == 112 && cell_load_byte(src,i+3) == 111 && cell_load_byte(src,i+4) == 114 && cell_load_byte(src,i+5) == 116:
             cnt = cnt + 1
             i = i + 6
             continue
@@ -109,14 +109,15 @@ fn read_source_or_project(src_path: string) -> int:
     return 0
 
 fn read_static_runtime_source() -> string:
-    source := read_file("src/runtime/rt.cr")
+    rel := target_static_runtime_source()
+    source := read_file(rel)
     if str_len(source) > 0:
         return source
 
     exe_path := get_exe_path()
     exe_dir := dirname(exe_path)
     if str_len(exe_dir) > 0:
-        source = read_file(exe_dir + "../src/runtime/rt.cr")
+        source = read_file(exe_dir + "../" + rel)
     return source
 
 // Run the shared frontend pipeline: tokenize, resolve, parse, and check.
@@ -153,7 +154,7 @@ fn run_frontend() -> int:
         loop:
             if di >= g_diag_count:
                 break
-            ec := r64(g_diags, di * DIAG_REC_SIZE)
+            ec := cell_load(g_diags, di * DIAG_REC_SIZE)
             // A diagnostic outside the exemption table is blocking.
             if diag_gate_exempt(ec, GATE_SCOPE_BUILD) == 0:
                 hard = 1
@@ -287,10 +288,10 @@ fn corec_main() -> int:
         loop:
             if si2 >= sl2:
                 break
-            c0 := load8(g_source, si2)
+            c0 := cell_load_byte(g_source, si2)
             if c0 == 102:
                 if si2 + 6 < sl2:
-                    if load8(g_source, si2)     == 102 && load8(g_source, si2 + 1) == 110 && load8(g_source, si2 + 2) == 32  && load8(g_source, si2 + 3) == 109 && load8(g_source, si2 + 4) == 97  && load8(g_source, si2 + 5) == 105 && load8(g_source, si2 + 6) == 110:
+                    if cell_load_byte(g_source, si2)     == 102 && cell_load_byte(g_source, si2 + 1) == 110 && cell_load_byte(g_source, si2 + 2) == 32  && cell_load_byte(g_source, si2 + 3) == 109 && cell_load_byte(g_source, si2 + 4) == 97  && cell_load_byte(g_source, si2 + 5) == 105 && cell_load_byte(g_source, si2 + 6) == 110:
                         has_main = 1
                         break
             si2 = si2 + 1
@@ -304,16 +305,16 @@ fn corec_main() -> int:
                 if ii >= ilen:
                     break
                 if ii + 6 < ilen:
-                    c := load8(g_source, ii)
+                    c := cell_load_byte(g_source, ii)
                     c_prev : ., mut = 59
                     if ii > 0:
-                        c_prev = load8(g_source, ii - 1)
-                    if (ii == 0 || c_prev == 59 || c_prev == 10) && load8(g_source, ii)     == 105 && load8(g_source, ii + 1) == 109 && load8(g_source, ii + 2) == 112 && load8(g_source, ii + 3) == 111 && load8(g_source, ii + 4) == 114 && load8(g_source, ii + 5) == 116:
+                        c_prev = cell_load_byte(g_source, ii - 1)
+                    if (ii == 0 || c_prev == 59 || c_prev == 10) && cell_load_byte(g_source, ii)     == 105 && cell_load_byte(g_source, ii + 1) == 109 && cell_load_byte(g_source, ii + 2) == 112 && cell_load_byte(g_source, ii + 3) == 111 && cell_load_byte(g_source, ii + 4) == 114 && cell_load_byte(g_source, ii + 5) == 116:
                         ij : ., mut = ii
                         loop:
                             if ij >= ilen:
                                 break
-                            if load8(g_source, ij) == 59:
+                            if cell_load_byte(g_source, ij) == 59:
                                 ij = ij + 1
                                 break
                             ij = ij + 1
@@ -355,7 +356,7 @@ fn corec_main() -> int:
                         loop:
                             if lci >= lclen:
                                 break
-                            if load8(last_expr, lci) == 40:
+                            if cell_load_byte(last_expr, lci) == 40:
                                 has_lcall = 1
                                 break
                             lci = lci + 1
@@ -375,7 +376,7 @@ fn corec_main() -> int:
                     loop:
                         if ci3 >= clen:
                             break
-                        if load8(g_source, ci3) == 40:
+                        if cell_load_byte(g_source, ci3) == 40:
                             has_call = 1
                             break
                         ci3 = ci3 + 1
@@ -509,7 +510,7 @@ fn corec_main() -> int:
         loop:
             if ci >= str_len(func_id):
                 break
-            c := load8(func_id, ci)
+            c := cell_load_byte(func_id, ci)
             if c == 47:
                 cache_path = cache_path + "_"
             else:
@@ -529,13 +530,13 @@ fn corec_main() -> int:
             // Cache hit: setup function metadata for restored data
             func_idx := g_ir_func_count
             grow_ir_func_meta(func_idx + 1)
-            w64(g_ir_func_name_idx, func_idx * 8, name_ni)
-            w64(g_ir_func_ret_type, func_idx * 8, fi_return_type(fi))
-            w64(g_ir_func_instr_start, func_idx * 8, instr_start)
-            w64(g_ir_func_var_start, func_idx * 8, var_start)
-            w64(g_ir_func_param_count, func_idx * 8, ast_c(fn_node))
-            w64(g_ir_func_instr_count, func_idx * 8, g_ir_instr_count - instr_start)
-            w64(g_ir_func_var_count, func_idx * 8, g_ir_var_count - var_start)
+            cell_store(g_ir_func_name_idx, func_idx * 8, name_ni)
+            cell_store(g_ir_func_ret_type, func_idx * 8, fi_return_type(fi))
+            cell_store(g_ir_func_instr_start, func_idx * 8, instr_start)
+            cell_store(g_ir_func_var_start, func_idx * 8, var_start)
+            cell_store(g_ir_func_param_count, func_idx * 8, ast_c(fn_node))
+            cell_store(g_ir_func_instr_count, func_idx * 8, g_ir_instr_count - instr_start)
+            cell_store(g_ir_func_var_count, func_idx * 8, g_ir_var_count - var_start)
             g_ir_func_count = func_idx + 1
 
             df_end_func(ir_func_idx)
@@ -676,16 +677,8 @@ fn corec_main() -> int:
         println("error: could not write .ccr")
         return 1
     println("generate ELF...")
-    // Call corearch to produce ELF
-    cmd2 : ., mut = "corearch "
-    cmd2 = cmd2 + ccr_path + " --elf"
-    if g_opt_level > 0:
-        cmd2 = cmd2 + " --opt-level " + int_str(g_opt_level)
-    if cli_has("static") != 0:
-        cmd2 = cmd2 + " --static"
-    else:
-        cmd2 = cmd2 + " --link auto"
-    cmd2 = cmd2 + " -o " + out_path
+    // The target owns the backend name, ELF flag, link mode, and output flag.
+    cmd2 : ., mut = target_backend_command(ccr_path, out_path, cli_has("static"), g_opt_level)
     self_path := get_arg(0)
     sl2 := str_len(self_path)
     if sl2 > 0:
@@ -694,7 +687,7 @@ fn corec_main() -> int:
         loop:
             if si >= sl2:
                 break
-            if load8(self_path, si) == 47:
+            if cell_load_byte(self_path, si) == 47:
                 last_slash = si
             si = si + 1
         if last_slash >= 0:
@@ -720,8 +713,8 @@ fn compile_source(source: string) -> string:
         loop:
             if ei >= g_diag_count:
                 break
-            diag_code := r64(g_diags, ei * DIAG_REC_SIZE)
-            diag_msg := load_str_ptr(g_diags, ei * DIAG_REC_SIZE + 8)
+            diag_code := cell_load(g_diags, ei * DIAG_REC_SIZE)
+            diag_msg := cell_load_str(g_diags, ei * DIAG_REC_SIZE + 8)
             err_msg = err_msg + " [" + int_str(diag_code) + "] " + diag_msg
             ei = ei + 1
         return err_msg

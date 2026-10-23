@@ -55,7 +55,7 @@ cmp /tmp/corec2 /tmp/corec3
 - 新建 `src/arch/x86_64/backend_globals.cr`
 - 新建 `src/arch/x86_64/backend_arrays.cr`
 - `build_selfhost_native.py`
-- `src/targets/x86_64-linux/_import.cr`
+- `src/targets/x86_64-linux-elf/_import.cr`
 
 ### 步骤
 
@@ -64,7 +64,7 @@ cmp /tmp/corec2 /tmp/corec3
 3. 从 `src/compiler/globals.cr` 删除这些 `g_x86_*` 声明。保留 `g_opt_*`、`g_sgs`、`.so` 侧表和规格注记侧表。
 4. 从 `src/compiler/dyn_arr.cr` 删除 x86 扩容函数。保留 `grow_so_side`、`grow_spec_side` 和其余前端扩容函数。
 5. 在 `build_selfhost_native.py` 的 `arch_x86_64_files` 开头加入两个新文件，顺序为 `backend_globals.cr`、`backend_arrays.cr`、`regalloc.cr`。
-6. 在 `src/targets/x86_64-linux/_import.cr` 中加入 `import backend_globals` 和 `import backend_arrays`，位置在 `import regalloc` 之前。
+6. 在 `src/targets/x86_64-linux-elf/_import.cr` 中加入 `import backend_globals` 和 `import backend_arrays`，位置在 `import regalloc` 之前。
 
 ### 验收
 
@@ -82,16 +82,16 @@ cmp /tmp/corec2 /tmp/corec3
 - `src/compiler/backend_flags.cr` 移到 `src/arch/x86_64/backend_flags.cr`
 - `src/compiler/regalloc-consistency.cr` 移到 `docs/maintainer/design/regalloc-consistency.md`
 - `build_selfhost_native.py`
-- `src/targets/x86_64-linux/_import.cr`
+- `src/targets/x86_64-linux-elf/_import.cr`
 - 相关路径引用
 
 ### 步骤
 
 1. 移动文件，保留文件内部函数名和代码。
 2. 更新 `backend_support_files` 中的路径。
-3. 更新 `src/targets/x86_64-linux/_import.cr` 的导入名。
+3. 更新 `src/targets/x86_64-linux-elf/_import.cr` 的导入名。
 4. 搜索 `src/compiler/corearch.cr`、`src/compiler/backend_flags.cr` 和 `regalloc-consistency.cr` 的路径引用，全部改为新位置。
-5. 不修改 `src/targets/x86_64-linux/main.cr` 的行为。
+5. 不修改 `src/targets/x86_64-linux-elf/main.cr` 的行为。
 
 ### 验收
 
@@ -196,7 +196,7 @@ fn mp_offset(index: int, ti: int) -> int
 - `src/compiler/ty_shadow.cr`
 - `src/compiler/ast.cr`
 - `build_selfhost_native.py`
-- `src/targets/x86_64-linux/_import.cr`
+- `src/targets/x86_64-linux-elf/_import.cr`
 
 ### 步骤
 
@@ -245,5 +245,94 @@ fn mp_offset(index: int, ti: int) -> int
 ## 未决问题
 
 1. `extern` 的可选类型拒绝规则是否应移到独立的 FFI 映射层。当前保留在解析器，因为它描述外部接口的表示能力，而不是目标机器细节。
-2. `IR_ALLOC_ARRAY` 的元素步长 8 是否应进入 Mapping 接口。当前后端固定按 8 计算，前置改动需要同时修改 IR 语义和后端发射。
+2. `IR_ALLOC_ARRAY` 的元素步长已改用 `mp_stride(TI_INT)`；classic x86-64 的值仍是 8，但前端不再直接写 8。后端仍按目标实例的 8 字节槽发射，非经典映射需同时改后端。
 3. 64 位整数上限是否解除，取决于多字整数的前端表示和后端运算是否完整覆盖。
+
+## 任务 8：目标内建表与三轴描述（已实施）
+
+### 目标标识
+
+三轴显式化，不再是只含架构和系统的组合名：
+
+```text
+arch      = x86_64
+system    = linux
+container = elf
+target    = x86_64-linux-elf
+root      = src/targets/x86_64-linux-elf/
+```
+
+`Core.toml` 记录 `arch`、`system`、`container`；`src/targets/x86_64-linux-elf/frontend_target.cr` 提供 target name、import roots、backend command 和 runtime source 路径。
+
+### 文件
+
+- 新建 `src/targets/x86_64-linux-elf/frontend_target.cr`
+- 新建 `src/targets/x86_64-linux-elf/target_abi.cr`
+- 新建 `src/arch/x86_64/x86_frontend_abi.cr`
+- 新建 `src/os/linux/linux_frontend_abi.cr`
+- 新建 `src/runtime/runtime_frontend_abi.cr`
+- 删除 `src/compiler/checker.cr` 的内建名表；`prelude.cr` 只保留表容器
+- `build_selfhost_native.py`、两个 `_import.cr`
+
+### 结果
+
+- `checker.cr` 不再出现 `w64/r64/w32/load8/store8/load64/_dyncpy/load_str_ptr/store_str_ptr` 等 ABI 名字。
+- 固定宽度/裸内存内建归 `x86_64` 架构轴，`get_arg`/syscall 归 `linux` OS 轴，`alloc`/sched/fiber 归 runtime；target 根只组合三轴。
+- `prelude_builtin_return_ti` 仍只回答 syscall3/4；内建表顺序由 target 组合决定。
+
+## 任务 9：Mapping 与语义字节收口（已实施）
+
+### 文件
+
+- `src/compiler/mapping.cr` 改为纯接口
+- `src/arch/x86_64/x86_mapping.cr` 保存 classic x86-64 常量
+- `src/compiler/ir_gen.cr`
+- `src/compiler/ptr_analysis.cr`
+- `src/compiler/interp.cr`
+- `src/compiler/provenance_verify.cr`
+
+### 结果
+
+- `ir_gen` 的数组/元组分配、`ptr_access_width` 回退改走 `mp_stride`。
+- `ptr_analysis` 的指针加减改走 `mp_offset`。
+- 解释器的指针加法/减法/差值改走 `mp_offset` / `mp_stride`。
+- `MP_WORD_BYTES`、`MP_SLICE_BYTES`、char/bool 尺寸只存在于架构轴的 `x86_mapping.cr`；`src/compiler` 不再保存目标布局常量。
+
+## 任务 10：前端自身的 cell 层（已实施）
+
+### 文件
+
+- `src/kernel/bytes.cr`
+- `src/compiler/dyn_arr.cr`
+- `src/compiler/*.cr`
+
+### 结果
+
+- `dyn_arr.cr` 删除 `w8/bu8/w32/r32/w64/r64/_dyncpy` 定义。
+- `src/kernel/bytes.cr` 提供 `cell_load/cell_store/cell_load32/cell_store32/cell_byte/cell_copy/...` 低层 API。
+- `src/compiler` 的表格访问改为 `cell_*`；`w64/r64/...` 只留在 kernel 低层和 target/backend 轴。
+- 这是一次机械 API 收口，不改变 cell 宽度；若将来非 64 位宿主，替换点在 `bytes.cr`。
+
+## 任务 11：驱动与导入路径（已实施）
+
+### 文件
+
+- `src/compiler/main.cr`
+- `src/compiler/module.cr`
+- `src/targets/x86_64-linux-elf/frontend_target.cr`
+
+### 结果
+
+- `main.cr` 不再拼 `corearch` 命令、`--elf`、`--static`、`--link auto`；改由 `target_backend_command`。
+- `read_static_runtime_source` 不再写死 `src/runtime/rt.cr`；改由 target 描述。
+- `module.cr` 的 import 搜索根、`.so` index 路径改由 target 描述提供；前端不再写死 `src/format/elf`、`src/arch/x86_64`、`src/os/linux`、`src/targets/x86_64-linux-elf`。
+- `src/targets/x86_64-linux` 旧目录改名为 `src/targets/x86_64-linux-elf`；`test_backend_bootstrap.py`、`parity_run.sh` 同步。
+
+### 本批验证（实测）
+
+- `python3 build_selfhost_native.py` 成功，三个 guard 通过。
+- `test_backend_bootstrap.py` 11/11，stage1/2/3 byte-identical。
+- `corec2`/`corec3` 自举 `cmp` 一致。
+- BigInt 五套、`test_view_builtins`、`test_ccr_types` 49/49、`test_native_memory` 6/6 通过。
+- canary D1 5/5；`.ccr` 四条按“编译器侧全局登记顺序变化”重锁，ELF canary 不变。
+- `test_opt_dex` 仍有 8 项 optional-dex 聚合/返回/全局路径失败；与本次 target/cell 边界无关，单独登记。

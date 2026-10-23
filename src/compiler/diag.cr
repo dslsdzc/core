@@ -22,7 +22,7 @@ fn read_source_line(line: int) -> string:
                     break
                 j = j + 1
             return str_sub(g_source, i, j - i)
-        if load8(g_source, i) == 10:
+        if cell_load_byte(g_source, i) == 10:
             cur = cur + 1
             start = i + 1
         i = i + 1
@@ -35,7 +35,7 @@ fn source_line_count() -> int:
     loop:
         if i >= slen:
             break
-        if load8(g_source, i) == 10:
+        if cell_load_byte(g_source, i) == 10:
             count = count + 1
         i = i + 1
     return count
@@ -71,7 +71,7 @@ fn print_source_line(line: int, col: int, annotation: string):
         loop:
             if ci2 + 3 > alen:
                 break
-            c := load8(annotation, ci2)
+            c := cell_load_byte(annotation, ci2)
             if c == 226:
                 // Start of the em dash U+2014, three UTF-8 bytes.
                 cutoff = ci2
@@ -132,7 +132,7 @@ fn pad_diag_num(num: int) -> string:
 // Line number to file id through g_line_fileid. -1 is out of range.
 fn diag_fileid_for_line(line: int) -> int:
     if line >= 1 && line <= g_line_count:
-        return r64(g_line_fileid, (line - 1) * 8)
+        return cell_load(g_line_fileid, (line - 1) * 8)
     return -1
 
 fn print_diagnostics():
@@ -143,10 +143,10 @@ fn print_diagnostics():
     loop:
         if di >= g_diag_count:
             break
-        ec := r64(g_diags, di * DIAG_REC_SIZE)
-        msg := load_str_ptr(g_diags, di * DIAG_REC_SIZE + 8)
-        ln := r64(g_diags, di * DIAG_REC_SIZE + 16)
-        cl := r64(g_diags, di * DIAG_REC_SIZE + 24)
+        ec := cell_load(g_diags, di * DIAG_REC_SIZE)
+        msg := cell_load_str(g_diags, di * DIAG_REC_SIZE + 8)
+        ln := cell_load(g_diags, di * DIAG_REC_SIZE + 16)
+        cl := cell_load(g_diags, di * DIAG_REC_SIZE + 24)
         cat : ., mut = ec / 1000
         num : ., mut = ec % 1000
         print("error[")
@@ -173,7 +173,7 @@ fn print_parse_errors():
     loop:
         if ei2 >= g_error_count:
             break
-        println("error: " + istr_get(r64(g_errors, ei2 * 8)))
+        println("error: " + istr_get(cell_load(g_errors, ei2 * 8)))
         ei2 = ei2 + 1
 // Fail-closed diagnostic gate exemptions.
 // Diagnostics are blocking by default. main.cr calls this function for every

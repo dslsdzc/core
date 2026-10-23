@@ -21,7 +21,7 @@ fn str_to_f64_bits(s: string) -> int:
     sl := str_len(s)
     i : ., mut = 0
     neg : int = 0
-    if i < sl && load8(s, i) == 45:
+    if i < sl && cell_load_byte(s, i) == 45:
         neg = 1
         i = i + 1
     ip : int = 0
@@ -34,7 +34,7 @@ fn str_to_f64_bits(s: string) -> int:
     loop:
         if i >= sl:
             break
-        c := load8(s, i)
+        c := cell_load_byte(s, i)
         if c == 46:
             sd = 1
             i = i + 1

@@ -49,7 +49,7 @@ fn ts_diag_code_at(idx: int) -> int:
         return -1
     if idx >= g_diag_count:
         return -1
-    return r64(g_diags, idx * DIAG_REC_SIZE)
+    return cell_load(g_diags, idx * DIAG_REC_SIZE)
 
 // Read the message pointer of diagnostic idx. check_error stores that pointer.
 fn ts_diag_msg_at(idx: int) -> string:
@@ -57,7 +57,7 @@ fn ts_diag_msg_at(idx: int) -> string:
         return ""
     if idx >= g_diag_count:
         return ""
-    return load_str_ptr(g_diags, idx * DIAG_REC_SIZE + 8)
+    return cell_load_str(g_diags, idx * DIAG_REC_SIZE + 8)
 
 // Frozen expected AK mapping, compared cell by cell with iface_by_ty_code.
 // This table is expected data, not a second production implementation.
@@ -116,7 +116,7 @@ fn ts_unf_mk_int_struct(name: string) -> int:
     si_set_field_name(sa, 0, str_intern("a"))
     si_set_field_type(sa, 0, TY_INT)
     si_set_field_type_node(sa, 0, alloc_node(0, 0, 0, 0, 0, TY_INT, 0, 0, 0))
-    w64(g_structs, sa * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, 1)
+    cell_store(g_structs, sa * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, 1)
     return alloc_named_type(str_intern(name))
 
 // Count union leaves in a domain term. This walks the union tree by term shape
@@ -135,8 +135,8 @@ fn ts_gen_map_ti(name_ni: int) -> int:
     loop:
         if i >= g_gen_map_count:
             return -1
-        if r64(g_gen_map_names, i * 8) == name_ni:
-            return r64(g_gen_map_types, i * 8)
+        if cell_load(g_gen_map_names, i * 8) == name_ni:
+            return cell_load(g_gen_map_types, i * 8)
         i = i + 1
     return -1
 
@@ -144,19 +144,19 @@ fn ts_gen_map_ti(name_ni: int) -> int:
 // 函数 save_struct_gen_constrs 写入侧表，测试真实路径，不手写侧表。
 fn ts_t5_mk_constr_struct(name: string, cname: string) -> int:
     sa := add_struct(name)
-    w64(g_structs, sa * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT, 1)
-    w64(g_structs, sa * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES, str_intern("T5_CS_T"))
+    cell_store(g_structs, sa * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT, 1)
+    cell_store(g_structs, sa * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES, str_intern("T5_CS_T"))
     cb := alloc(8)
-    w64(cb, 0, str_intern(cname))
+    cell_store(cb, 0, str_intern(cname))
     save_struct_gen_constrs(sa, cb, 1)
     return sa
 
 fn ts_t5_mk_constr_enum(name: string, cname: string) -> int:
     ea := add_enum(name)
-    w64(g_enums, ea * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 1)
-    w64(g_enums, ea * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES, str_intern("T5_CE_T"))
+    cell_store(g_enums, ea * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 1)
+    cell_store(g_enums, ea * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES, str_intern("T5_CE_T"))
     cb := alloc(8)
-    w64(cb, 0, str_intern(cname))
+    cell_store(cb, 0, str_intern(cname))
     save_enum_gen_constrs(ea, cb, 1)
     return ea
 
@@ -169,10 +169,10 @@ fn ts_t5_mk_iface(name: string) -> int:
     loop:
         if zi >= ESZ_IFACEINFO:
             break
-        w8(g_ifaces, base + zi, 0)
+        cell_store8(g_ifaces, base + zi, 0)
         zi = zi + 1
-    w64(g_ifaces, base + OFF_IF_NAME, str_intern(name))
-    w64(g_ifaces, base + OFF_IF_GENERIC_COUNT, 0)
+    cell_store(g_ifaces, base + OFF_IF_NAME, str_intern(name))
+    cell_store(g_ifaces, base + OFF_IF_GENERIC_COUNT, 0)
     g_iface_count = g_iface_count + 1
     return g_iface_count - 1
 
@@ -231,8 +231,8 @@ fn ts_t5_run() -> int:
     fails = fails + ts_check_b("t5.f4_later_param_declared_type",
         (t5_ti_bound == TI_STR && ts_gen_map_ti(t5_u_ni) == -1), true)
     fails = fails + ts_check_b("t5.f4_bind_seg_recorded",
-        (g_gen_binds_count == 2 && r64(g_gen_binds, 0 * 8) == 1 &&
-            r64(g_gen_binds, 1 * 8) == TI_STR && ast_int_val(t5_calln) == 1), true)
+        (g_gen_binds_count == 2 && cell_load(g_gen_binds, 0 * 8) == 1 &&
+            cell_load(g_gen_binds, 1 * 8) == TI_STR && ast_int_val(t5_calln) == 1), true)
     // 2. 约束名解析和本质轴判定结果。
     t5_ni_int := str_intern("int")
     t5_ni_str := str_intern("string")
@@ -271,7 +271,7 @@ fn ts_t5_run() -> int:
             ei_generic_count(t5_ei) == 1 && ei_gen_constr(t5_ei, 0) == t5_ni_int &&
             ei_gen_constr(t5_ei, 4) == -1), true)
     t5_args := alloc(8)
-    w64(t5_args, 0 * 8, TI_STR)
+    cell_store(t5_args, 0 * 8, TI_STR)
     t5_gnode := alloc_node(EXPR_GENERIC_APPLY, str_intern("T5BoxInt"), -1, 1, 0, 0, 0, 41, 3)
     t5_d0 := g_diag_count
     gen_inst_constr_check(t5_gnode, t5_si, -1, t5_args, 1)
@@ -281,12 +281,12 @@ fn ts_t5_run() -> int:
     t5_gnode2 := alloc_node(EXPR_GENERIC_APPLY, str_intern("T5BoxInt"), -1, 1, 0, 0, 0, 42, 3)
     gen_inst_constr_check(t5_gnode2, t5_si, -1, t5_args, 1)     // 新节点 -> 再报（去重不跨节点）
     t5_d3 := g_diag_count
-    w64(t5_args, 0 * 8, TI_INT)
+    cell_store(t5_args, 0 * 8, TI_INT)
     t5_gnode3 := alloc_node(EXPR_GENERIC_APPLY, str_intern("T5BoxInt"), -1, 1, 0, 0, 0, 43, 3)
     gen_inst_constr_check(t5_gnode3, t5_si, -1, t5_args, 1)     // 正控：满足 -> 零诊断
     gen_inst_constr_check(t5_gnode3, t5_ei, -1, t5_args, 1)     // 枚举侧同（满足）
     t5_d4 := g_diag_count
-    w64(t5_args, 0 * 8, TI_STR)
+    cell_store(t5_args, 0 * 8, TI_STR)
     t5_gnode4 := alloc_node(EXPR_GENERIC_APPLY, str_intern("T5EBoxInt"), -1, 1, 0, 0, 0, 44, 3)
     gen_inst_constr_check(t5_gnode4, -1, t5_ei, t5_args, 1)     // 枚举侧违反 -> 诊断
     t5_d5 := g_diag_count
@@ -330,8 +330,8 @@ fn ts_t5_run() -> int:
     // 绑定段按 checker 的写入形态人工构造：块 = [count, ti...]，节点 int_val = 起始 + 1。
     grow_gen_binds(g_gen_binds_count + 2)
     t5_bstart := g_gen_binds_count
-    w64(g_gen_binds, t5_bstart * 8, 1)
-    w64(g_gen_binds, (t5_bstart + 1) * 8, t5_slice_ti)
+    cell_store(g_gen_binds, t5_bstart * 8, 1)
+    cell_store(g_gen_binds, (t5_bstart + 1) * 8, t5_slice_ti)
     g_gen_binds_count = t5_bstart + 2
     t5_key_s := inst_key_of_ti(t5_slice_ti)
     t5_f1 := gen_find_or_create_bind(t5_m_fi, t5_key_s, t5_bstart)
@@ -360,23 +360,23 @@ fn ts_t5_run() -> int:
 
 // 追加接口方法，写入位置与 parser 的 interface 分支相同：mbase + name、param_count、ret_ti。
 fn ts_isat_add_method(ii: int, mname: string, pc: int, rt: int) -> int:
-    n := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
+    n := cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
     mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + n * ESZ_IFMETHOD
-    w64(g_ifaces, mbase + OFF_IFM_NAME, str_intern(mname))
-    w64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT, pc)
-    w64(g_ifaces, mbase + OFF_IFM_RET_TI, rt)
+    cell_store(g_ifaces, mbase + OFF_IFM_NAME, str_intern(mname))
+    cell_store(g_ifaces, mbase + OFF_IFM_PARAM_COUNT, pc)
+    cell_store(g_ifaces, mbase + OFF_IFM_RET_TI, rt)
     // 返回类型节点槽与 parser 相同：基类型节点是 kind 0，type_val = TY_*。
     // 接收者模式 0 表示无接收者，本组夹具使用这种形态。
-    w64(g_ifaces, mbase + OFF_IFM_RET_NODE, ts_ifc_base_node(rt))
-    w64(g_ifaces, mbase + OFF_IFM_SELF_MODE, 0)
+    cell_store(g_ifaces, mbase + OFF_IFM_RET_NODE, ts_ifc_base_node(rt))
+    cell_store(g_ifaces, mbase + OFF_IFM_SELF_MODE, 0)
     pj : ., mut = 0
     loop:
         if pj >= pc || pj >= MAX_IFACE_METHOD_PARAMS:
             break
-        w64(g_ifaces, mbase + OFF_IFM_PARAM_TYPES + pj * 8, TY_INT)
-        w64(g_ifaces, mbase + OFF_IFM_PARAM_NODES + pj * 8, ts_ifc_base_node(TY_INT))
+        cell_store(g_ifaces, mbase + OFF_IFM_PARAM_TYPES + pj * 8, TY_INT)
+        cell_store(g_ifaces, mbase + OFF_IFM_PARAM_NODES + pj * 8, ts_ifc_base_node(TY_INT))
         pj = pj + 1
-    w64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT, n + 1)
+    cell_store(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT, n + 1)
     return mbase
 
 // 基类型节点，与 parser 的 parse_type 产物同形：kind 0，type_val = TY_*。
@@ -407,9 +407,9 @@ fn ts_isat_add_impl_method(tname_ni: int, mname: string, pc: int, rt: int) -> in
     fn_node := alloc_node(EXPR_FN, mangled_ni, pf, pc, rt, rtn, -1, 0, 0)
     fi := add_func(mn, pc, rt, fn_node)
     grow_methods(g_method_count + 1)
-    w64(g_methods, g_method_count * 24, tname_ni)
-    w64(g_methods, g_method_count * 24 + 8, str_intern(mname))
-    w64(g_methods, g_method_count * 24 + 16, mangled_ni)
+    cell_store(g_methods, g_method_count * 24, tname_ni)
+    cell_store(g_methods, g_method_count * 24 + 8, str_intern(mname))
+    cell_store(g_methods, g_method_count * 24 + 16, mangled_ni)
     g_method_count = g_method_count + 1
     return fi
 
@@ -509,8 +509,8 @@ fn ts_isat_run() -> int:
     // 13. 泛型应用记录：查方法使用基名，走 decl_name_of_ti 的 TYP_GENERIC_APPLY 分支。
     grow_gen_apply_data(g_gen_apply_data_count + 2)
     isat_ga_s := g_gen_apply_data_count
-    w64(g_gen_apply_data, isat_ga_s * 8, 1)
-    w64(g_gen_apply_data, (isat_ga_s + 1) * 8, TI_INT)
+    cell_store(g_gen_apply_data, isat_ga_s * 8, 1)
+    cell_store(g_gen_apply_data, (isat_ga_s + 1) * 8, TI_INT)
     g_gen_apply_data_count = isat_ga_s + 2
     isat_ga_ti := alloc_type(TYP_GENERIC_APPLY, isat_s_ti, isat_ga_s)
     fails = fails + ts_check("isat.generic_apply_base_name",
@@ -566,7 +566,7 @@ fn ts_x2_run() -> int:
     x2_rw_view := alloc_type(TYP_REF, x2_slice, 1)    // &mut [int]（可写视图）
     grow_gen_apply_data(g_gen_apply_data_count + 1)   // 元组行：字段列（product 类型表记录）
     x2_tup_start := g_gen_apply_data_count
-    w64(g_gen_apply_data, x2_tup_start * 8, TI_INT)
+    cell_store(g_gen_apply_data, x2_tup_start * 8, TI_INT)
     g_gen_apply_data_count = x2_tup_start + 1
     x2_tup := alloc_type(TYP_TUPLE, 1, x2_tup_start)
     x2_named := alloc_named_type(str_intern("X2ShapeN"))
@@ -808,13 +808,13 @@ fn ts_ifc_apply_node(base_name: string, arg_node: int) -> int:
 // 接口方法条目（节点数据可控：pnodes = 参数节点缓冲（可 -1 = 全无节点）；rnode = 返回型节点；
 // smode = 接收者模式（0 = 无接收者，1/2/3 = self/&self/&mut self））
 fn ts_ifc_add_method_n(ii: int, mname: string, pc: int, smode: int, n0: int, n1: int, n2: int, n3: int, rnode: int) -> int:
-    n := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
+    n := cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
     mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + n * ESZ_IFMETHOD
-    w64(g_ifaces, mbase + OFF_IFM_NAME, str_intern(mname))
-    w64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT, pc)
-    w64(g_ifaces, mbase + OFF_IFM_RET_TI, 0)
-    w64(g_ifaces, mbase + OFF_IFM_RET_NODE, rnode)
-    w64(g_ifaces, mbase + OFF_IFM_SELF_MODE, smode)
+    cell_store(g_ifaces, mbase + OFF_IFM_NAME, str_intern(mname))
+    cell_store(g_ifaces, mbase + OFF_IFM_PARAM_COUNT, pc)
+    cell_store(g_ifaces, mbase + OFF_IFM_RET_TI, 0)
+    cell_store(g_ifaces, mbase + OFF_IFM_RET_NODE, rnode)
+    cell_store(g_ifaces, mbase + OFF_IFM_SELF_MODE, smode)
     pj : ., mut = 0
     loop:
         if pj >= pc || pj >= MAX_IFACE_METHOD_PARAMS:
@@ -828,10 +828,10 @@ fn ts_ifc_add_method_n(ii: int, mname: string, pc: int, smode: int, n0: int, n1:
             pn = n2
         if pj == 3:
             pn = n3
-        w64(g_ifaces, mbase + OFF_IFM_PARAM_TYPES + pj * 8, TY_INT)
-        w64(g_ifaces, mbase + OFF_IFM_PARAM_NODES + pj * 8, pn)
+        cell_store(g_ifaces, mbase + OFF_IFM_PARAM_TYPES + pj * 8, TY_INT)
+        cell_store(g_ifaces, mbase + OFF_IFM_PARAM_NODES + pj * 8, pn)
         pj = pj + 1
-    w64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT, n + 1)
+    cell_store(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT, n + 1)
     return mbase
 
 // impl 侧函数行（节点数据可控；mode0 = 首参接收者模式（≠0 时该参无节点，接收者槽约定））。
@@ -860,9 +860,9 @@ fn ts_ifc_add_impl(tname_ni: int, mname: string, pc: int, mode0: int, n0: int, n
     fn_node := alloc_node(EXPR_FN, mangled_ni, pf, pc, 0, rnode, -1, 0, 0)
     fi := add_func(mn, pc, 0, fn_node)
     grow_methods(g_method_count + 1)
-    w64(g_methods, g_method_count * 24, tname_ni)
-    w64(g_methods, g_method_count * 24 + 8, str_intern(mname))
-    w64(g_methods, g_method_count * 24 + 16, mangled_ni)
+    cell_store(g_methods, g_method_count * 24, tname_ni)
+    cell_store(g_methods, g_method_count * 24 + 8, str_intern(mname))
+    cell_store(g_methods, g_method_count * 24 + 16, mangled_ni)
     g_method_count = g_method_count + 1
     return fi
 
@@ -1091,15 +1091,15 @@ fn ts_t3n_run() -> int:
     // 2 泛型应用：规范形 b = 基型记录 + 序列 [基名令牌, 实参项…]
     grow_gen_apply_data(g_gen_apply_data_count + 2)
     gs1 := g_gen_apply_data_count
-    w64(g_gen_apply_data, gs1 * 8, 1)
-    w64(g_gen_apply_data, (gs1 + 1) * 8, TI_INT)
+    cell_store(g_gen_apply_data, gs1 * 8, 1)
+    cell_store(g_gen_apply_data, (gs1 + 1) * 8, TI_INT)
     g_gen_apply_data_count = gs1 + 2
     ga1 := alloc_type(TYP_GENERIC_APPLY, n_a, gs1)
     ga2 := alloc_type(TYP_GENERIC_APPLY, n_a, gs1)      // 另一行，同基型同实参
     grow_gen_apply_data(g_gen_apply_data_count + 2)
     gs2 := g_gen_apply_data_count
-    w64(g_gen_apply_data, gs2 * 8, 1)
-    w64(g_gen_apply_data, (gs2 + 1) * 8, TI_STR)
+    cell_store(g_gen_apply_data, gs2 * 8, 1)
+    cell_store(g_gen_apply_data, (gs2 + 1) * 8, TI_STR)
     g_gen_apply_data_count = gs2 + 2
     ga3 := alloc_type(TYP_GENERIC_APPLY, n_a, gs2)      // 同基型异实参
     t_ga1 := sh_term_of_ti(ga1)
@@ -1124,14 +1124,14 @@ fn ts_t3n_run() -> int:
     // 2 嵌套应用：Box[Box[int]] 两处（外层实参分别指向同实参的不同行）-> 同节点
     grow_gen_apply_data(g_gen_apply_data_count + 2)
     gs3 := g_gen_apply_data_count
-    w64(g_gen_apply_data, gs3 * 8, 1)
-    w64(g_gen_apply_data, (gs3 + 1) * 8, ga1)
+    cell_store(g_gen_apply_data, gs3 * 8, 1)
+    cell_store(g_gen_apply_data, (gs3 + 1) * 8, ga1)
     g_gen_apply_data_count = gs3 + 2
     ga4 := alloc_type(TYP_GENERIC_APPLY, n_a, gs3)
     grow_gen_apply_data(g_gen_apply_data_count + 2)
     gs4 := g_gen_apply_data_count
-    w64(g_gen_apply_data, gs4 * 8, 1)
-    w64(g_gen_apply_data, (gs4 + 1) * 8, ga2)
+    cell_store(g_gen_apply_data, gs4 * 8, 1)
+    cell_store(g_gen_apply_data, (gs4 + 1) * 8, ga2)
     g_gen_apply_data_count = gs4 + 2
     ga5 := alloc_type(TYP_GENERIC_APPLY, n_a, gs4)
     fails = fails + ts_check_b("t3n.nested_apply_same",
@@ -1343,11 +1343,11 @@ fn ts_ccr_roundtrip_ok() -> int:
     loop:
         if i >= rc:
             break
-        if buf_read_i64(g_ccr_type_seg, pos) != r64(g_types, i * ESZ_TYPE_ROW + OFF_TR_KIND):
+        if buf_read_i64(g_ccr_type_seg, pos) != cell_load(g_types, i * ESZ_TYPE_ROW + OFF_TR_KIND):
             return 0
-        if buf_read_i64(g_ccr_type_seg, pos + 8) != r64(g_types, i * ESZ_TYPE_ROW + OFF_TR_DATA):
+        if buf_read_i64(g_ccr_type_seg, pos + 8) != cell_load(g_types, i * ESZ_TYPE_ROW + OFF_TR_DATA):
             return 0
-        if buf_read_i64(g_ccr_type_seg, pos + 16) != r64(g_types, i * ESZ_TYPE_ROW + OFF_TR_EXTRA):
+        if buf_read_i64(g_ccr_type_seg, pos + 16) != cell_load(g_types, i * ESZ_TYPE_ROW + OFF_TR_EXTRA):
             return 0
         pos = pos + ESZ_TYPE_ROW
         i = i + 1
@@ -1399,11 +1399,11 @@ fn ts_ccr_dedup_ok(opt_a: int, opt_b: int, arr3: int, arr4: int) -> int:
 fn ts_ccr_purity_ok() -> int:
     n0 := g_ccr_type_seg_len
     cp := alloc(n0 + 8)
-    _dyncpy(g_ccr_type_seg, n0, cp)
+    cell_copy(g_ccr_type_seg, n0, cp)
     // IFACE 段也纳入。类型表和接口表的装填都是纯函数。
     i0 := g_ccr_iface_seg_len
     ip := alloc(i0 + 8)
-    _dyncpy(g_ccr_iface_seg, i0, ip)
+    cell_copy(g_ccr_iface_seg, i0, ip)
     // 判定历史扰动：跨项判定 + 规范化（向项表追加新项，旧直接序列化活表必在此变）
     pa := tt_atom(AK_INT, TI_INT, -1)
     pb := tt_atom(AK_STRING, TI_STR, -1)
@@ -1436,7 +1436,7 @@ fn ts_ccr_purity_ok() -> int:
     loop:
         if k >= n0:
             break
-        if load8(g_ccr_type_seg, k) != load8(cp, k):
+        if cell_load_byte(g_ccr_type_seg, k) != cell_load_byte(cp, k):
             print("ct.seg_determinism: buffer byte mismatch at ")
             println(int_str(k))
             return 0
@@ -1452,7 +1452,7 @@ fn ts_ccr_purity_ok() -> int:
     loop:
         if k2 >= i0:
             break
-        if load8(g_ccr_iface_seg, k2) != load8(ip, k2):
+        if cell_load_byte(g_ccr_iface_seg, k2) != cell_load_byte(ip, k2):
             print("ct.seg_determinism: iface buffer byte mismatch at ")
             println(int_str(k2))
             return 0
@@ -1507,15 +1507,15 @@ fn ts_ccr_run() -> int:
 // 复位三部分缓存。
 fn ts_ccr2_row_ok(b: string, p: int, i: int) -> int:
     eo := i * ESZ_IFACE_ENTRY
-    if buf_read_i32(b, p) != r64(g_iface_entries, eo + OFF_IE_AK):
+    if buf_read_i32(b, p) != cell_load(g_iface_entries, eo + OFF_IE_AK):
         return 0
-    if buf_read_i32(b, p + 4) != r64(g_iface_entries, eo + OFF_IE_TI):
+    if buf_read_i32(b, p + 4) != cell_load(g_iface_entries, eo + OFF_IE_TI):
         return 0
-    if buf_read_i32(b, p + 8) != r64(g_iface_entries, eo + OFF_IE_NAME):
+    if buf_read_i32(b, p + 8) != cell_load(g_iface_entries, eo + OFF_IE_NAME):
         return 0
-    if buf_read_i32(b, p + 12) != r64(g_iface_entries, eo + OFF_IE_LIT):
+    if buf_read_i32(b, p + 12) != cell_load(g_iface_entries, eo + OFF_IE_LIT):
         return 0
-    if buf_read_i64(b, p + 16) != r64(g_iface_entries, eo + OFF_IE_OPS):
+    if buf_read_i64(b, p + 16) != cell_load(g_iface_entries, eo + OFF_IE_OPS):
         return 0
     return 1
 
@@ -1546,9 +1546,9 @@ fn ts_ccr2_seg_walk_ok() -> int:
     loop:
         if si >= g_iface_shape_count:
             break
-        if buf_read_i32(b, p) != r64(g_iface_shape_names, si * 8):
+        if buf_read_i32(b, p) != cell_load(g_iface_shape_names, si * 8):
             return 0
-        if buf_read_i32(b, p + 4) != r64(g_iface_shape_terms, si * 8):
+        if buf_read_i32(b, p + 4) != cell_load(g_iface_shape_terms, si * 8):
             return 0
         p = p + 8
         si = si + 1
@@ -1561,12 +1561,12 @@ fn ts_ccr2_seg_walk_ok() -> int:
         if fi >= g_iface_count:
             break
         fo := fi * ESZ_IFACEINFO
-        mc := r64(g_ifaces, fo + OFF_IF_METHOD_COUNT)
-        if buf_read_i32(b, p) != r64(g_ifaces, fo + OFF_IF_NAME):
+        mc := cell_load(g_ifaces, fo + OFF_IF_METHOD_COUNT)
+        if buf_read_i32(b, p) != cell_load(g_ifaces, fo + OFF_IF_NAME):
             return 0
         if buf_read_i32(b, p + 4) != mc:
             return 0
-        if buf_read_i32(b, p + 8) != r64(g_ifaces, fo + OFF_IF_GENERIC_COUNT):
+        if buf_read_i32(b, p + 8) != cell_load(g_ifaces, fo + OFF_IF_GENERIC_COUNT):
             return 0
         p = p + 16
         mj : ., mut = 0
@@ -1574,20 +1574,20 @@ fn ts_ccr2_seg_walk_ok() -> int:
             if mj >= mc:
                 break
             mo := fo + OFF_IF_METHODS + mj * ESZ_IFMETHOD
-            if buf_read_i32(b, p) != r64(g_ifaces, mo + OFF_IFM_NAME):
+            if buf_read_i32(b, p) != cell_load(g_ifaces, mo + OFF_IFM_NAME):
                 return 0
-            if buf_read_i32(b, p + 4) != r64(g_ifaces, mo + OFF_IFM_PARAM_COUNT):
+            if buf_read_i32(b, p + 4) != cell_load(g_ifaces, mo + OFF_IFM_PARAM_COUNT):
                 return 0
-            if buf_read_i32(b, p + 8) != r64(g_ifaces, mo + OFF_IFM_SELF_MODE):
+            if buf_read_i32(b, p + 8) != cell_load(g_ifaces, mo + OFF_IFM_SELF_MODE):
                 return 0
-            if buf_read_i32(b, p + 12) != r64(g_ifaces, mo + OFF_IFM_RET_TERM):
+            if buf_read_i32(b, p + 12) != cell_load(g_ifaces, mo + OFF_IFM_RET_TERM):
                 return 0
             p = p + 16
             kq : ., mut = 0
             loop:
                 if kq >= MAX_IFACE_METHOD_PARAMS:
                     break
-                if buf_read_i32(b, p) != r64(g_ifaces, mo + OFF_IFM_PARAM_TERMS + kq * 8):
+                if buf_read_i32(b, p) != cell_load(g_ifaces, mo + OFF_IFM_PARAM_TERMS + kq * 8):
                     return 0
                 p = p + 4
                 kq = kq + 1
@@ -1595,7 +1595,7 @@ fn ts_ccr2_seg_walk_ok() -> int:
             loop:
                 if qq >= MAX_IFACE_METHOD_PARAMS:
                     break
-                if buf_read_i32(b, p) != r64(g_ifaces, mo + OFF_IFM_PARAM_TYPES + qq * 8):
+                if buf_read_i32(b, p) != cell_load(g_ifaces, mo + OFF_IFM_PARAM_TYPES + qq * 8):
                     return 0
                 p = p + 4
                 qq = qq + 1
@@ -1609,9 +1609,9 @@ fn ts_ccr2_seg_walk_ok() -> int:
     loop:
         if gi >= g_impl_for_count:
             break
-        if buf_read_i32(b, p) != r64(g_impl_for, gi * 16):
+        if buf_read_i32(b, p) != cell_load(g_impl_for, gi * 16):
             return 0
-        if buf_read_i32(b, p + 4) != r64(g_impl_for, gi * 16 + 8):
+        if buf_read_i32(b, p + 4) != cell_load(g_impl_for, gi * 16 + 8):
             return 0
         p = p + 8
         gi = gi + 1
@@ -1623,11 +1623,11 @@ fn ts_ccr2_seg_walk_ok() -> int:
     loop:
         if mi >= g_method_count:
             break
-        if buf_read_i32(b, p) != r64(g_methods, mi * 24):
+        if buf_read_i32(b, p) != cell_load(g_methods, mi * 24):
             return 0
-        if buf_read_i32(b, p + 4) != r64(g_methods, mi * 24 + 8):
+        if buf_read_i32(b, p + 4) != cell_load(g_methods, mi * 24 + 8):
             return 0
-        if buf_read_i32(b, p + 8) != r64(g_methods, mi * 24 + 16):
+        if buf_read_i32(b, p + 8) != cell_load(g_methods, mi * 24 + 16):
             return 0
         p = p + 12
         mi = mi + 1
@@ -1641,25 +1641,25 @@ fn ts_ccr2_sig_slots_ok() -> int:
     loop:
         if ii >= g_iface_count:
             break
-        mc := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
+        mc := cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
         mi : ., mut = 0
         loop:
             if mi >= mc:
                 break
             mo := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD
             // 返回槽 == 活算（签名的唯一来源 = sh_iface_sig_ret_term）
-            if r64(g_ifaces, mo + OFF_IFM_RET_TERM) != sh_iface_sig_ret_term(ii, mi):
+            if cell_load(g_ifaces, mo + OFF_IFM_RET_TERM) != sh_iface_sig_ret_term(ii, mi):
                 return 0
-            pc := r64(g_ifaces, mo + OFF_IFM_PARAM_COUNT)
+            pc := cell_load(g_ifaces, mo + OFF_IFM_PARAM_COUNT)
             pj : ., mut = 0
             loop:
                 if pj >= MAX_IFACE_METHOD_PARAMS:
                     break
                 if pj < pc:
-                    if r64(g_ifaces, mo + OFF_IFM_PARAM_TERMS + pj * 8) != sh_iface_sig_param_term(ii, mi, pj):
+                    if cell_load(g_ifaces, mo + OFF_IFM_PARAM_TERMS + pj * 8) != sh_iface_sig_param_term(ii, mi, pj):
                         return 0
                 else:
-                    if r64(g_ifaces, mo + OFF_IFM_PARAM_TERMS + pj * 8) != -1:
+                    if cell_load(g_ifaces, mo + OFF_IFM_PARAM_TERMS + pj * 8) != -1:
                         return 0
                     // 未用槽 = -1
                 pj = pj + 1
@@ -1788,13 +1788,13 @@ fn ts_ccr2_run() -> int:
     ts_ifc_add_method_n(ct2_ii, "a", 1, 1, -1, -1, -1, -1, ct2_int_n)      // fn a(self) -> int
     ts_ifc_add_method_n(ct2_ii, "b", 1, 0, ct2_n, -1, -1, -1, ct2_int_n)   // fn b(x: Ct2Named) -> int
     grow_impl_for(1)
-    w64(g_impl_for, 0, str_intern("Ct2Iface"))
-    w64(g_impl_for, 8, str_intern("Ct2Named"))
+    cell_store(g_impl_for, 0, str_intern("Ct2Iface"))
+    cell_store(g_impl_for, 8, str_intern("Ct2Named"))
     g_impl_for_count = 1
     grow_methods(1)
-    w64(g_methods, 0, str_intern("Ct2Named"))
-    w64(g_methods, 8, str_intern("b"))
-    w64(g_methods, 16, str_intern("Ct2Named.b"))
+    cell_store(g_methods, 0, str_intern("Ct2Named"))
+    cell_store(g_methods, 8, str_intern("b"))
+    cell_store(g_methods, 16, str_intern("Ct2Named.b"))
     g_method_count = 1
     prep := ccr_seg_prepare_save()
     fails = fails + ts_check("ct2.seg_prepare", prep, 0)
@@ -2433,8 +2433,8 @@ fn type_selftest_run() -> int:
     // g_gen_apply_data 的起始下标，每项 8 字节。
     grow_gen_apply_data(g_gen_apply_data_count + 2)
     tup_start := g_gen_apply_data_count
-    w64(g_gen_apply_data, tup_start * 8, TI_INT)
-    w64(g_gen_apply_data, (tup_start + 1) * 8, TI_STR)
+    cell_store(g_gen_apply_data, tup_start * 8, TI_INT)
+    cell_store(g_gen_apply_data, (tup_start + 1) * 8, TI_STR)
     g_gen_apply_data_count = g_gen_apply_data_count + 2
     t_tup := sh_term_of_ti(alloc_type(TYP_TUPLE, 2, tup_start))
     total = total + 1
@@ -2541,11 +2541,11 @@ fn type_selftest_run() -> int:
         (array_len_constraint_ok(f2_outer3, f2_outer3) == 1 && array_len_constraint_ok(f2_outer4, f2_outer3) == 0), true)
     grow_gen_apply_data(g_gen_apply_data_count + 4)
     f2_ga_s1 := g_gen_apply_data_count
-    w64(g_gen_apply_data, f2_ga_s1 * 8, 1)
-    w64(g_gen_apply_data, (f2_ga_s1 + 1) * 8, f2_arr3)
+    cell_store(g_gen_apply_data, f2_ga_s1 * 8, 1)
+    cell_store(g_gen_apply_data, (f2_ga_s1 + 1) * 8, f2_arr3)
     f2_ga_s2 := f2_ga_s1 + 2
-    w64(g_gen_apply_data, f2_ga_s2 * 8, 1)
-    w64(g_gen_apply_data, (f2_ga_s2 + 1) * 8, f2_arr4)
+    cell_store(g_gen_apply_data, f2_ga_s2 * 8, 1)
+    cell_store(g_gen_apply_data, (f2_ga_s2 + 1) * 8, f2_arr4)
     g_gen_apply_data_count = f2_ga_s2 + 2
     // 基类型记录裸分配：人造记录不登记到名字表，避免假键破坏 name->ti 映射。
     f2_base := alloc_type(TYP_NAMED, 1202, 0)
@@ -2561,11 +2561,11 @@ fn type_selftest_run() -> int:
         (array_len_constraint_ok(f2_pt3, f2_pt3) == 1 && array_len_constraint_ok(f2_pt4, f2_pt3) == 0), true)
     grow_gen_apply_data(g_gen_apply_data_count + 4)
     f2_tp_s1 := g_gen_apply_data_count
-    w64(g_gen_apply_data, f2_tp_s1 * 8, TI_INT)
-    w64(g_gen_apply_data, (f2_tp_s1 + 1) * 8, f2_arr3)
+    cell_store(g_gen_apply_data, f2_tp_s1 * 8, TI_INT)
+    cell_store(g_gen_apply_data, (f2_tp_s1 + 1) * 8, f2_arr3)
     f2_tp_s2 := f2_tp_s1 + 2
-    w64(g_gen_apply_data, f2_tp_s2 * 8, TI_INT)
-    w64(g_gen_apply_data, (f2_tp_s2 + 1) * 8, f2_arr4)
+    cell_store(g_gen_apply_data, f2_tp_s2 * 8, TI_INT)
+    cell_store(g_gen_apply_data, (f2_tp_s2 + 1) * 8, f2_arr4)
     g_gen_apply_data_count = f2_tp_s2 + 2
     f2_tup3 := alloc_type(TYP_TUPLE, 2, f2_tp_s1)
     f2_tup4 := alloc_type(TYP_TUPLE, 2, f2_tp_s2)
@@ -2815,22 +2815,22 @@ fn type_selftest_run() -> int:
     // 的情况，所以下面另加显式断言。
     // 1. TY 码表：9 个 TY_* 码和 1 个未映射码。
     t2_codes := alloc(10 * 8)
-    w64(t2_codes, 0, TY_INT)
-    w64(t2_codes, 8, TY_DEX)
-    w64(t2_codes, 16, TY_BOOL)
-    w64(t2_codes, 24, TY_STRING)
-    w64(t2_codes, 32, TY_UNIT)
-    w64(t2_codes, 40, TY_NEVER)
-    w64(t2_codes, 48, TY_CHAR)
-    w64(t2_codes, 56, TY_GENERIC_PARAM)
-    w64(t2_codes, 64, TY_DEX_S)
-    w64(t2_codes, 72, 999)
+    cell_store(t2_codes, 0, TY_INT)
+    cell_store(t2_codes, 8, TY_DEX)
+    cell_store(t2_codes, 16, TY_BOOL)
+    cell_store(t2_codes, 24, TY_STRING)
+    cell_store(t2_codes, 32, TY_UNIT)
+    cell_store(t2_codes, 40, TY_NEVER)
+    cell_store(t2_codes, 48, TY_CHAR)
+    cell_store(t2_codes, 56, TY_GENERIC_PARAM)
+    cell_store(t2_codes, 64, TY_DEX_S)
+    cell_store(t2_codes, 72, 999)
     t2_ty_bad : ., mut = 0
     t2_i : ., mut = 0
     loop:
         if t2_i >= 10:
             break
-        t2_code := r64(t2_codes, t2_i * 8)
+        t2_code := cell_load(t2_codes, t2_i * 8)
         if iface_by_ty_code(t2_code) != ts_t4_ak_expected(t2_code):
             t2_ty_bad = t2_ty_bad + 1
         t2_i = t2_i + 1
@@ -2851,7 +2851,7 @@ fn type_selftest_run() -> int:
     // 比较必须能区分两个已知不同的格子。
     total = total + 1
     fails = fails + ts_check_b("iface.scan_coverage",
-        (t2_i == 10 && r64(t2_codes, 56) == TY_GENERIC_PARAM && r64(t2_codes, 64) == TY_DEX_S &&
+        (t2_i == 10 && cell_load(t2_codes, 56) == TY_GENERIC_PARAM && cell_load(t2_codes, 64) == TY_DEX_S &&
             t2_j == g_type_count && t2_j >= 9), true)
     total = total + 1
     fails = fails + ts_check_b("iface.compare_is_live",
@@ -2928,25 +2928,25 @@ fn type_selftest_run() -> int:
     //    while 1 仍报 TC04。
     // 另设许可为 1 的格数哨兵，全 0 表会失败；再加条目数据一致性和端到端段。
     o4_aks := alloc(13 * 8)   // 13 类枚举（顺序 = 条目表声明序）
-    w64(o4_aks, 0, AK_INT)
-    w64(o4_aks, 8, AK_DEX)
-    w64(o4_aks, 16, AK_STRING)
-    w64(o4_aks, 24, AK_BOOL)
-    w64(o4_aks, 32, AK_UNIT)
-    w64(o4_aks, 40, AK_NEVER)
-    w64(o4_aks, 48, AK_CHAR)
-    w64(o4_aks, 56, AK_DYN)
-    w64(o4_aks, 64, AK_PRODUCT)
-    w64(o4_aks, 72, AK_SEQUENCE)
-    w64(o4_aks, 80, AK_REF)
-    w64(o4_aks, 88, AK_PTR)
-    w64(o4_aks, 96, AK_NAMED)
+    cell_store(o4_aks, 0, AK_INT)
+    cell_store(o4_aks, 8, AK_DEX)
+    cell_store(o4_aks, 16, AK_STRING)
+    cell_store(o4_aks, 24, AK_BOOL)
+    cell_store(o4_aks, 32, AK_UNIT)
+    cell_store(o4_aks, 40, AK_NEVER)
+    cell_store(o4_aks, 48, AK_CHAR)
+    cell_store(o4_aks, 56, AK_DYN)
+    cell_store(o4_aks, 64, AK_PRODUCT)
+    cell_store(o4_aks, 72, AK_SEQUENCE)
+    cell_store(o4_aks, 80, AK_REF)
+    cell_store(o4_aks, 88, AK_PTR)
+    cell_store(o4_aks, 96, AK_NAMED)
     o4_ops := alloc(5 * 8)    // 算术族 5 op（检查消费点：OP_ADD..OP_MOD）
-    w64(o4_ops, 0, OP_ADD)
-    w64(o4_ops, 8, OP_SUB)
-    w64(o4_ops, 16, OP_MUL)
-    w64(o4_ops, 24, OP_DIV)
-    w64(o4_ops, 32, OP_MOD)
+    cell_store(o4_ops, 0, OP_ADD)
+    cell_store(o4_ops, 8, OP_SUB)
+    cell_store(o4_ops, 16, OP_MUL)
+    cell_store(o4_ops, 24, OP_DIV)
+    cell_store(o4_ops, 32, OP_MOD)
     // 1 算术检查：逐 ak × 逐 op 对拍许可 ⟺ int|dex
     o4_arith_bad : ., mut = 0
     o4_arith_yes : ., mut = 0
@@ -2954,12 +2954,12 @@ fn type_selftest_run() -> int:
     loop:
         if o4_i >= 13:
             break
-        o4_ak := r64(o4_aks, o4_i * 8)
+        o4_ak := cell_load(o4_aks, o4_i * 8)
         o4_j : ., mut = 0
         loop:
             if o4_j >= 5:
                 break
-            o4_op := r64(o4_ops, o4_j * 8)
+            o4_op := cell_load(o4_ops, o4_j * 8)
             o4_want : ., mut = 0
             if o4_ak == AK_INT || o4_ak == AK_DEX:
                 o4_want = 1
@@ -2980,7 +2980,7 @@ fn type_selftest_run() -> int:
     loop:
         if o4_k >= 13:
             break
-        o4_ak2 := r64(o4_aks, o4_k * 8)
+        o4_ak2 := cell_load(o4_aks, o4_k * 8)
         o4_want2 : ., mut = 0
         if o4_ak2 == AK_INT || o4_ak2 == AK_BOOL:
             o4_want2 = 1
@@ -3003,7 +3003,7 @@ fn type_selftest_run() -> int:
     loop:
         if o4_m >= 13:
             break
-        o4_ak3 := r64(o4_aks, o4_m * 8)
+        o4_ak3 := cell_load(o4_aks, o4_m * 8)
         o4_want3 : ., mut = 0
         if o4_ak3 == AK_INT || o4_ak3 == AK_BOOL:
             o4_want3 = 1
@@ -3031,7 +3031,7 @@ fn type_selftest_run() -> int:
     loop:
         if o4_n >= 13:
             break
-        o4_ak4 := r64(o4_aks, o4_n * 8)
+        o4_ak4 := cell_load(o4_aks, o4_n * 8)
         o4_n2 : ., mut = 0
         loop:
             if o4_n2 >= 6:
@@ -3084,8 +3084,8 @@ fn type_selftest_run() -> int:
     loop:
         if o4_r >= g_iface_entry_count:
             break
-        o4_akr := r64(g_iface_entries, o4_r * ESZ_IFACE_ENTRY + OFF_IE_AK)
-        if iface_ops(o4_akr) != r64(g_iface_entries, o4_r * ESZ_IFACE_ENTRY + OFF_IE_OPS):
+        o4_akr := cell_load(g_iface_entries, o4_r * ESZ_IFACE_ENTRY + OFF_IE_AK)
+        if iface_ops(o4_akr) != cell_load(g_iface_entries, o4_r * ESZ_IFACE_ENTRY + OFF_IE_OPS):
             o4_row_bad = o4_row_bad + 1
         if iface_ops(o4_akr) == 0:
             if o4_akr == AK_NULL || o4_akr == AK_SUM || o4_akr == AK_FN:
@@ -3415,25 +3415,25 @@ fn type_selftest_run() -> int:
     unf_gp := str_intern("UnfTGparamU")
     def_sym(unf_gp, SYM_TYPE, alloc_type(TYP_GENERIC_PARAM, unf_gp, 0), -1)
     unf_box_sa := add_struct("UnfBoxU")
-    w64(g_structs, unf_box_sa * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT, 1)
-    w64(g_structs, unf_box_sa * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES, unf_gp)
+    cell_store(g_structs, unf_box_sa * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT, 1)
+    cell_store(g_structs, unf_box_sa * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES, unf_gp)
     si_set_field_name(unf_box_sa, 0, str_intern("val"))
     si_set_field_type(unf_box_sa, 0, 0)   // 裸码槽是 parser 对非基型的塌缩值（0 = TY_INT）；本层不读这个槽。
     si_set_field_type_node(unf_box_sa, 0,
         alloc_node(EXPR_IDENT, -1, -1, -1, unf_gp, 0, -1, 0, 0))
-    w64(g_structs, unf_box_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, 1)
+    cell_store(g_structs, unf_box_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, 1)
     unf_box_ti := alloc_named_type(str_intern("UnfBoxU"))
     // 应用记录 `UnfBoxU[int]` / `UnfBoxU[string]`（g_gen_apply_data: [count, arg]）
     grow_gen_apply_data(g_gen_apply_data_count + 2)
     unf_gas1 := g_gen_apply_data_count
-    w64(g_gen_apply_data, unf_gas1 * 8, 1)
-    w64(g_gen_apply_data, (unf_gas1 + 1) * 8, TI_INT)
+    cell_store(g_gen_apply_data, unf_gas1 * 8, 1)
+    cell_store(g_gen_apply_data, (unf_gas1 + 1) * 8, TI_INT)
     g_gen_apply_data_count = unf_gas1 + 2
     unf_ga_int := alloc_type(TYP_GENERIC_APPLY, unf_box_ti, unf_gas1)
     grow_gen_apply_data(g_gen_apply_data_count + 2)
     unf_gas2 := g_gen_apply_data_count
-    w64(g_gen_apply_data, unf_gas2 * 8, 1)
-    w64(g_gen_apply_data, (unf_gas2 + 1) * 8, TI_STR)
+    cell_store(g_gen_apply_data, unf_gas2 * 8, 1)
+    cell_store(g_gen_apply_data, (unf_gas2 + 1) * 8, TI_STR)
     g_gen_apply_data_count = unf_gas2 + 2
     unf_ga_str := alloc_type(TYP_GENERIC_APPLY, unf_box_ti, unf_gas2)
     unf_ta := sh_struct_term(unf_ga_int)
@@ -3456,7 +3456,7 @@ fn type_selftest_run() -> int:
     si_set_field_name(unf_p1_sa, 1, str_intern("b"))
     si_set_field_type(unf_p1_sa, 1, TY_STRING)
     si_set_field_type_node(unf_p1_sa, 1, alloc_node(0, 0, 0, 0, 0, TY_STRING, 0, 0, 0))
-    w64(g_structs, unf_p1_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, 2)
+    cell_store(g_structs, unf_p1_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, 2)
     unf_p1_ti := alloc_named_type(str_intern("UnfP1U"))
     unf_tp1 := sh_struct_term(unf_p1_ti)
     total = total + 1
@@ -3470,7 +3470,7 @@ fn type_selftest_run() -> int:
     si_set_field_name(unf_p2_sa, 0, str_intern("x"))
     si_set_field_type(unf_p2_sa, 0, 0)
     si_set_field_type_node(unf_p2_sa, 0, unf_arrn)
-    w64(g_structs, unf_p2_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, 1)
+    cell_store(g_structs, unf_p2_sa * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, 1)
     unf_p2_ti := alloc_named_type(str_intern("UnfP2U"))
     unf_tp2 := sh_struct_term(unf_p2_ti)
     total = total + 1
@@ -3506,7 +3506,7 @@ fn type_selftest_run() -> int:
     ei_set_variant_name(unf_col_ei, 0, str_intern("UnfRedU"))
     ei_set_variant_name(unf_col_ei, 1, str_intern("UnfGreenU"))
     ei_set_variant_name(unf_col_ei, 2, str_intern("UnfBlueU"))
-    w64(g_enums, unf_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 3)
+    cell_store(g_enums, unf_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 3)
     unf_col_ti := alloc_named_type(str_intern("UnfColorU"))
     unf_dom := sh_enum_domain_term(unf_col_ti)
     total = total + 1
@@ -3522,7 +3522,7 @@ fn type_selftest_run() -> int:
     // 变体身份包含枚举名。引擎只比较 a 和 c 两个槽，所以身份必须放进参数列表；不同枚举的同名变体不得判等价。
     unf_dup_ei := add_enum("UnfDupU")
     ei_set_variant_name(unf_dup_ei, 0, str_intern("UnfRedU"))
-    w64(g_enums, unf_dup_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 1)
+    cell_store(g_enums, unf_dup_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 1)
     unf_dup_ti := alloc_named_type(str_intern("UnfDupU"))
     unf_vdup := sh_variant_term(unf_dup_ti, str_intern("UnfRedU"))
     total = total + 1
@@ -3530,7 +3530,7 @@ fn type_selftest_run() -> int:
         (unf_vdup >= 0 && ty_sub(unf_vdup, unf_vr) != 1 && ty_sub(unf_vr, unf_vdup) != 1), true)
     // 空枚举的域是底部。
     unf_emp_ei := add_enum("UnfEmptyU")
-    w64(g_enums, unf_emp_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 0)
+    cell_store(g_enums, unf_emp_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 0)
     unf_emp_ti := alloc_named_type(str_intern("UnfEmptyU"))
     total = total + 1
     fails = fails + ts_check("unf.enum_empty_domain_bot", tt_tag(sh_enum_domain_term(unf_emp_ti)), TT_BOT)
@@ -3540,13 +3540,13 @@ fn type_selftest_run() -> int:
     // 非基型塌缩为 0，本层不读它；携带值不进入变体项，见 ty_shadow.cr
     // 展开段的说明。
     unf_opt_ei := add_enum("UnfOptU")
-    w64(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 1)
-    w64(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES, str_intern("UnfTOptU"))
+    cell_store(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 1)
+    cell_store(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES, str_intern("UnfTOptU"))
     ei_set_variant_name(unf_opt_ei, 0, str_intern("UnfNoneU"))
     ei_set_variant_name(unf_opt_ei, 1, str_intern("UnfSomeU"))
     ei_set_variant_type_count(unf_opt_ei, 1, 1)
     ei_set_variant_type(unf_opt_ei, 1, 0, TY_INT)   // 裸码槽（parser 事实；本层不读）
-    w64(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 2)
+    cell_store(g_enums, unf_opt_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 2)
     unf_opt_ti := alloc_named_type(str_intern("UnfOptU"))
     unf_odom := sh_enum_domain_term(unf_opt_ti)
     unf_onone := sh_variant_term(unf_opt_ti, str_intern("UnfNoneU"))
@@ -3640,11 +3640,11 @@ fn type_selftest_run() -> int:
         (array_len_constraint_ok(t1_out_sl, t1_out_arr) == 0 && array_len_constraint_ok(t1_out_arr, t1_out_sl) == 1), true)
     grow_gen_apply_data(g_gen_apply_data_count + 4)
     t1_tp_s1 := g_gen_apply_data_count
-    w64(g_gen_apply_data, t1_tp_s1 * 8, TI_INT)
-    w64(g_gen_apply_data, (t1_tp_s1 + 1) * 8, t1_sl)
+    cell_store(g_gen_apply_data, t1_tp_s1 * 8, TI_INT)
+    cell_store(g_gen_apply_data, (t1_tp_s1 + 1) * 8, t1_sl)
     t1_tp_s2 := t1_tp_s1 + 2
-    w64(g_gen_apply_data, t1_tp_s2 * 8, TI_INT)
-    w64(g_gen_apply_data, (t1_tp_s2 + 1) * 8, t1_arr3)
+    cell_store(g_gen_apply_data, t1_tp_s2 * 8, TI_INT)
+    cell_store(g_gen_apply_data, (t1_tp_s2 + 1) * 8, t1_arr3)
     g_gen_apply_data_count = t1_tp_s2 + 2
     t1_tup_sl := alloc_type(TYP_TUPLE, 2, t1_tp_s1)     // (int, [int])
     t1_tup_arr := alloc_type(TYP_TUPLE, 2, t1_tp_s2)    // (int, [int;3])
@@ -3653,11 +3653,11 @@ fn type_selftest_run() -> int:
         (array_len_constraint_ok(t1_tup_sl, t1_tup_arr) == 0 && array_len_constraint_ok(t1_tup_arr, t1_tup_sl) == 1), true)
     grow_gen_apply_data(g_gen_apply_data_count + 4)
     t1_ga_s1 := g_gen_apply_data_count
-    w64(g_gen_apply_data, t1_ga_s1 * 8, 1)
-    w64(g_gen_apply_data, (t1_ga_s1 + 1) * 8, t1_sl)
+    cell_store(g_gen_apply_data, t1_ga_s1 * 8, 1)
+    cell_store(g_gen_apply_data, (t1_ga_s1 + 1) * 8, t1_sl)
     t1_ga_s2 := t1_ga_s1 + 2
-    w64(g_gen_apply_data, t1_ga_s2 * 8, 1)
-    w64(g_gen_apply_data, (t1_ga_s2 + 1) * 8, t1_arr3)
+    cell_store(g_gen_apply_data, t1_ga_s2 * 8, 1)
+    cell_store(g_gen_apply_data, (t1_ga_s2 + 1) * 8, t1_arr3)
     g_gen_apply_data_count = t1_ga_s2 + 2
     t1_base := alloc_type(TYP_NAMED, 1203, 0)           // 人造基类型记录，裸分配，避免假键破坏 name->ti 映射。
     t1_ga_sl := alloc_type(TYP_GENERIC_APPLY, t1_base, t1_ga_s1)
@@ -3754,7 +3754,7 @@ fn type_selftest_run() -> int:
     ei_set_variant_name(t3_col_ei, 0, str_intern("T3Red"))
     ei_set_variant_name(t3_col_ei, 1, str_intern("T3Green"))
     ei_set_variant_name(t3_col_ei, 2, str_intern("T3Blue"))
-    w64(g_enums, t3_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 3)
+    cell_store(g_enums, t3_col_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 3)
     t3_col_ti := alloc_named_type(str_intern("T3Color"))
     t3_r := sh_match_variant_term(t3_col_ti, 0)
     t3_g := sh_match_variant_term(t3_col_ti, 1)
@@ -3802,7 +3802,7 @@ fn type_selftest_run() -> int:
     // 4. 单变体枚举：有臂返回 1，无臂返回 0，空序列的补集是全域。
     t3_only_ei := add_enum("T3Only")
     ei_set_variant_name(t3_only_ei, 0, str_intern("T3One"))
-    w64(g_enums, t3_only_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 1)
+    cell_store(g_enums, t3_only_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 1)
     t3_only_ti := alloc_named_type(str_intern("T3Only"))
     t3_one := sh_match_variant_term(t3_only_ti, 0)
     total = total + 1
@@ -3822,7 +3822,7 @@ fn type_selftest_run() -> int:
         sh_match_exhaustive(t3_col_ti, tt_cons(t3_r, tt_cons(t3_g, tt_cons(t3_b, tt_nil()))), 1), -1)
     // 6. 空枚举的域是底部，补集语义下空洞穷尽：没有值可漏，也没有反例。
     t3_emp_ei := add_enum("T3Empty")
-    w64(g_enums, t3_emp_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 0)
+    cell_store(g_enums, t3_emp_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 0)
     t3_emp_ti := alloc_named_type(str_intern("T3Empty"))
     total = total + 1
     fails = fails + ts_check_b("t3.empty_domain_vacuous",
@@ -3833,7 +3833,7 @@ fn type_selftest_run() -> int:
     ei_set_variant_name(t3_mix_ei, 1, str_intern("T3Some"))
     ei_set_variant_type_count(t3_mix_ei, 1, 1)
     ei_set_variant_type(t3_mix_ei, 1, 0, TY_INT)
-    w64(g_enums, t3_mix_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 2)
+    cell_store(g_enums, t3_mix_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 2)
     t3_mix_ti := alloc_named_type(str_intern("T3Mix"))
     t3_none := sh_match_variant_term(t3_mix_ti, 0)
     t3_some := sh_match_variant_term(t3_mix_ti, 1)
@@ -3871,18 +3871,18 @@ fn type_selftest_run() -> int:
             sh_match_first_missing(sh_match_bit(0), 3) == 1), true)
     // 10. 泛型应用记录 T3GOpt[int]：域可展开，全覆盖返回 1，变体身份与实参无关。
     t3_go_ei := add_enum("T3GOpt")
-    w64(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 1)
-    w64(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES, str_intern("T3GT"))
+    cell_store(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 1)
+    cell_store(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES, str_intern("T3GT"))
     ei_set_variant_name(t3_go_ei, 0, str_intern("T3GN"))
     ei_set_variant_name(t3_go_ei, 1, str_intern("T3GS"))
     ei_set_variant_type_count(t3_go_ei, 1, 1)
     ei_set_variant_type(t3_go_ei, 1, 0, 0)
-    w64(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 2)
+    cell_store(g_enums, t3_go_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 2)
     t3_go_ti := alloc_named_type(str_intern("T3GOpt"))
     grow_gen_apply_data(g_gen_apply_data_count + 2)
     t3_gas := g_gen_apply_data_count
-    w64(g_gen_apply_data, t3_gas * 8, 1)
-    w64(g_gen_apply_data, (t3_gas + 1) * 8, TI_INT)
+    cell_store(g_gen_apply_data, t3_gas * 8, 1)
+    cell_store(g_gen_apply_data, (t3_gas + 1) * 8, TI_INT)
     g_gen_apply_data_count = t3_gas + 2
     t3_go_ga := alloc_type(TYP_GENERIC_APPLY, t3_go_ti, t3_gas)
     t3_gn := sh_match_variant_term(t3_go_ga, 0)
@@ -3957,23 +3957,23 @@ fn type_selftest_run() -> int:
     t4_dj : ., mut = 0
     t4_k : ., mut = 0
     t4_aks := alloc(13 * 8)
-    w64(t4_aks, 0 * 8, AK_INT)
-    w64(t4_aks, 1 * 8, AK_DEX)
-    w64(t4_aks, 2 * 8, AK_STRING)
-    w64(t4_aks, 3 * 8, AK_BOOL)
-    w64(t4_aks, 4 * 8, AK_UNIT)
-    w64(t4_aks, 5 * 8, AK_NEVER)
-    w64(t4_aks, 6 * 8, AK_CHAR)
-    w64(t4_aks, 7 * 8, AK_DYN)
-    w64(t4_aks, 8 * 8, AK_PRODUCT)
-    w64(t4_aks, 9 * 8, AK_SUM)
-    w64(t4_aks, 10 * 8, AK_SEQUENCE)
-    w64(t4_aks, 11 * 8, AK_REF)
-    w64(t4_aks, 12 * 8, AK_PTR)
+    cell_store(t4_aks, 0 * 8, AK_INT)
+    cell_store(t4_aks, 1 * 8, AK_DEX)
+    cell_store(t4_aks, 2 * 8, AK_STRING)
+    cell_store(t4_aks, 3 * 8, AK_BOOL)
+    cell_store(t4_aks, 4 * 8, AK_UNIT)
+    cell_store(t4_aks, 5 * 8, AK_NEVER)
+    cell_store(t4_aks, 6 * 8, AK_CHAR)
+    cell_store(t4_aks, 7 * 8, AK_DYN)
+    cell_store(t4_aks, 8 * 8, AK_PRODUCT)
+    cell_store(t4_aks, 9 * 8, AK_SUM)
+    cell_store(t4_aks, 10 * 8, AK_SEQUENCE)
+    cell_store(t4_aks, 11 * 8, AK_REF)
+    cell_store(t4_aks, 12 * 8, AK_PTR)
     loop:
         if t4_k >= 13:
             break
-        ka := r64(t4_aks, t4_k * 8)
+        ka := cell_load(t4_aks, t4_k * 8)
         want : ., mut = 1
         if ka == AK_DYN:
             want = 0
@@ -4028,7 +4028,7 @@ fn type_selftest_run() -> int:
     ei_set_variant_type_count(t4_p_ei, 1, 1)
     ei_set_variant_type(t4_p_ei, 1, 0, TY_INT)
     ei_set_variant_type_node(t4_p_ei, 1, 0, alloc_node(0, 0, 0, 0, 0, TY_STRING, 0, 0, 0))
-    w64(g_enums, t4_p_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 2)
+    cell_store(g_enums, t4_p_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 2)
     t4_p_ti := alloc_named_type(str_intern("T4Payload"))
     total = total + 1
     fails = fails + ts_check_b("t4.payload_node_beats_bare_code",
@@ -4040,24 +4040,24 @@ fn type_selftest_run() -> int:
     // application takes the payload term from its argument. The int and string
     // instances must produce different terms.
     t4_g_ei := add_enum("T4GP")
-    w64(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 1)
-    w64(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES, str_intern("T4GT"))
+    cell_store(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 1)
+    cell_store(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES, str_intern("T4GT"))
     ei_set_variant_name(t4_g_ei, 0, str_intern("T4GS"))
     ei_set_variant_type_count(t4_g_ei, 0, 1)
     ei_set_variant_type(t4_g_ei, 0, 0, TY_INT)
     ei_set_variant_type_node(t4_g_ei, 0, 0, alloc_node(EXPR_IDENT, 0, 0, 0, str_intern("T4GT"), 0, 0, 0, 0))
-    w64(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 1)
+    cell_store(g_enums, t4_g_ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, 1)
     t4_g_ti := alloc_named_type(str_intern("T4GP"))
     grow_gen_apply_data(g_gen_apply_data_count + 2)
     t4_gs := g_gen_apply_data_count
-    w64(g_gen_apply_data, t4_gs * 8, 1)
-    w64(g_gen_apply_data, (t4_gs + 1) * 8, TI_INT)
+    cell_store(g_gen_apply_data, t4_gs * 8, 1)
+    cell_store(g_gen_apply_data, (t4_gs + 1) * 8, TI_INT)
     g_gen_apply_data_count = t4_gs + 2
     t4_g_ga := alloc_type(TYP_GENERIC_APPLY, t4_g_ti, t4_gs)
     grow_gen_apply_data(g_gen_apply_data_count + 2)
     t4_gs2 := g_gen_apply_data_count
-    w64(g_gen_apply_data, t4_gs2 * 8, 1)
-    w64(g_gen_apply_data, (t4_gs2 + 1) * 8, TI_STR)
+    cell_store(g_gen_apply_data, t4_gs2 * 8, 1)
+    cell_store(g_gen_apply_data, (t4_gs2 + 1) * 8, TI_STR)
     g_gen_apply_data_count = t4_gs2 + 2
     t4_g_ga2 := alloc_type(TYP_GENERIC_APPLY, t4_g_ti, t4_gs2)
     total = total + 1

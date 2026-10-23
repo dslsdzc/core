@@ -20,7 +20,7 @@ fn dump_buf_grow(needed: int):
         nc = nc * 2
     nb := alloc(nc)
     if g_dump_pos > 0:
-        _dyncpy(g_dump_buf, g_dump_pos, nb)
+        cell_copy(g_dump_buf, g_dump_pos, nb)
     g_dump_buf = nb
     g_dump_cap = nc
 
@@ -31,15 +31,15 @@ fn dump_buf_append(s: string):
     loop:
         if i >= sl:
             break
-        store8(g_dump_buf, g_dump_pos + i, load8(s, i))
+        cell_store_byte(g_dump_buf, g_dump_pos + i, cell_load_byte(s, i))
         i = i + 1
     g_dump_pos = g_dump_pos + sl
 
 fn dump_buf_finish() -> string:
     out := alloc(g_dump_pos + 1)
     if g_dump_pos > 0:
-        _dyncpy(g_dump_buf, g_dump_pos, out)
-    store8(out, g_dump_pos, 0)
+        cell_copy(g_dump_buf, g_dump_pos, out)
+    cell_store_byte(out, g_dump_pos, 0)
     return out
 
 fn ir_var_str(var_idx: int) -> string:
@@ -275,23 +275,23 @@ fn cir_text_dump() -> string:
     loop:
         if fi >= g_ir_func_count:
             break
-        name_ni := r64(g_ir_func_name_idx, fi * 8)
+        name_ni := cell_load(g_ir_func_name_idx, fi * 8)
         dump_buf_append("Function: ")
         dump_buf_append(istr_get(name_ni))
         dump_buf_append("\n")
-        start := r64(g_ir_func_instr_start, fi * 8)
-        count := r64(g_ir_func_instr_count, fi * 8)
+        start := cell_load(g_ir_func_instr_start, fi * 8)
+        count := cell_load(g_ir_func_instr_count, fi * 8)
         // Region list for this function (regions whose DFNode start falls in
         // this function's instruction range)
         ri : ., mut = 0
         loop:
             if ri >= g_sg_count:
                 break
-            rkind := r64(g_sgs, ri * ESZ_SG + OFF_SG_KIND)
-            rstart := r64(g_sgs, ri * ESZ_SG + OFF_SG_NSTART)
-            rend := r64(g_sgs, ri * ESZ_SG + OFF_SG_EXIT)
+            rkind := cell_load(g_sgs, ri * ESZ_SG + OFF_SG_KIND)
+            rstart := cell_load(g_sgs, ri * ESZ_SG + OFF_SG_NSTART)
+            rend := cell_load(g_sgs, ri * ESZ_SG + OFF_SG_EXIT)
             if rstart >= start && rstart < start + count:
-                rend := r64(g_sgs, ri * ESZ_SG + OFF_SG_EXIT)
+                rend := cell_load(g_sgs, ri * ESZ_SG + OFF_SG_EXIT)
                 if rend >= 0:
                     // skip unclosed (EXIT<0) regions
                     rname : ., mut = "?"
@@ -341,9 +341,9 @@ fn cir_text_dump() -> string:
     loop:
         if ei >= g_df_edge_count:
             break
-        if r64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_KIND) != 0:
-            e_from := r64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_FROM)
-            e_to := r64(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_TO)
+        if cell_load(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_KIND) != 0:
+            e_from := cell_load(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_FROM)
+            e_to := cell_load(g_df_edges, ei * ESZ_DFEDGE + OFF_DFE_TO)
             dump_buf_append("  state: n")
             dump_buf_append(int_str(e_from))
             dump_buf_append(" -> n")
@@ -377,12 +377,12 @@ fn df_tk_term_dump() -> string:
     loop:
         if n0 >= total:
             break
-        t0 := r64(g_df_nodes, n0 * ESZ_DFNODE + OFF_DF_TK)
+        t0 := cell_load(g_df_nodes, n0 * ESZ_DFNODE + OFF_DF_TK)
         if t0 >= 0:
             with_term = with_term + 1
         if t0 >= tt_count():
             bad_term = bad_term + 1
-        if r64(g_df_nodes, n0 * ESZ_DFNODE + OFF_DF_AUX) != 0:
+        if cell_load(g_df_nodes, n0 * ESZ_DFNODE + OFF_DF_AUX) != 0:
             auxn = auxn + 1
         n0 = n0 + 1
     dump_buf_append("[df-tk-terms] nodes=")
@@ -418,9 +418,9 @@ fn df_tk_term_dump() -> string:
     loop:
         if n >= total:
             break
-        op := r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE)
-        t := r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK)
-        ax := r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_AUX)
+        op := cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE)
+        t := cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK)
+        ax := cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_AUX)
         tk := sh_dfn_code_of_slots(t, ax)
         dump_buf_append(int_str(n))
         dump_buf_append("\t")

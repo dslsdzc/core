@@ -5,6 +5,7 @@ import cli
 import ast
 import ccr_schema
 import globals
+import bytes
 import dyn_arr
 import literal
 import big_lit
@@ -12,7 +13,13 @@ import lexer
 import parser
 import checker
 import mapping
+import x86_mapping
 import prelude
+import x86_frontend_abi
+import linux_frontend_abi
+import runtime_frontend_abi
+import target_abi
+import frontend_target
 import type_terms
 import type_engine
 // Interface registry: the entry table and iface_* query API. It is placed after

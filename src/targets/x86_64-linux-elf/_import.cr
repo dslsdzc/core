@@ -7,6 +7,7 @@ import toml
 import ast
 import ccr_schema
 import globals
+import bytes
 import dyn_arr
 import backend_schema
 import backend_globals

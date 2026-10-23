@@ -19,18 +19,18 @@ fn dec_mul_add(dec: string, dec_len: int, base: int, digit: int) -> string:
     loop:
         if i >= n:
             break
-        v := (load8(dec, i) - 48) * base + carry
-        store8(out, i, v % 10 + 48)
+        v := (cell_load_byte(dec, i) - 48) * base + carry
+        cell_store_byte(out, i, v % 10 + 48)
         carry = v / 10
         i = i + 1
     pos : ., mut = n
     loop:
         if carry == 0:
             break
-        store8(out, pos, carry % 10 + 48)
+        cell_store_byte(out, pos, carry % 10 + 48)
         carry = carry / 10
         pos = pos + 1
-    store8(out, pos, 0)
+    cell_store_byte(out, pos, 0)
     g_big_dec_len = pos
     return out
 
@@ -39,8 +39,8 @@ fn big_lit_decimal(s: string) -> string:
     sl := str_len(s)
     base : ., mut = 10
     start : ., mut = 0
-    if sl >= 2 && load8(s, 0) == 48:
-        pfx := load8(s, 1)
+    if sl >= 2 && cell_load_byte(s, 0) == 48:
+        pfx := cell_load_byte(s, 1)
         if pfx == 120 || pfx == 88:
             base = 16
             start = 2
@@ -51,13 +51,13 @@ fn big_lit_decimal(s: string) -> string:
             base = 2
             start = 2
     dec := alloc(2)
-    store8(dec, 0, 48)
+    cell_store_byte(dec, 0, 48)
     dec_len : ., mut = 1
     i : ., mut = start
     loop:
         if i >= sl:
             break
-        c := load8(s, i)
+        c := cell_load_byte(s, i)
         if c == 95:
             i = i + 1
             continue
@@ -77,20 +77,20 @@ fn big_lit_decimal(s: string) -> string:
     loop:
         if last <= 0:
             break
-        if load8(dec, last) != 48:
+        if cell_load_byte(dec, last) != 48:
             break
         last = last - 1
-    if last == 0 && load8(dec, 0) == 48:
+    if last == 0 && cell_load_byte(dec, 0) == 48:
         z := alloc(2)
-        store8(z, 0, 48)
+        cell_store_byte(z, 0, 48)
         return z
     out := alloc(last + 2)
     j : ., mut = 0
     loop:
         if last < 0:
             break
-        store8(out, j, load8(dec, last))
+        cell_store_byte(out, j, cell_load_byte(dec, last))
         last = last - 1
         j = j + 1
-    store8(out, j, 0)
+    cell_store_byte(out, j, 0)
     return out

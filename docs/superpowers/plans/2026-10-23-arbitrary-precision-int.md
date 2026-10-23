@@ -214,7 +214,7 @@ python3 tests/selfhost/test_bigint_literals.py
 - `src/arch/x86_64/frame.cr`
 - `src/arch/x86_64/regalloc.cr`
 - `src/arch/x86_64/corearch.cr`
-- `src/targets/x86_64-linux/main.cr`
+- `src/targets/x86_64-linux-elf/main.cr`
 - 新建 `tests/selfhost/test_bigint_arith.py`
 
 ### 步骤

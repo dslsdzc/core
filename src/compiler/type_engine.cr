@@ -54,7 +54,7 @@ fn grow_ty_lits(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 8)
-    _dyncpy(g_ty_lits, g_ty_lits_cap * 8, nb)
+    cell_copy(g_ty_lits, g_ty_lits_cap * 8, nb)
     g_ty_lits = nb
     g_ty_lits_cap = nc
 
@@ -64,11 +64,11 @@ fn ty_lits_reset():
 fn ty_lits_push(t: int):
     if g_ty_lits_count + 1 > g_ty_lits_cap:
         grow_ty_lits(g_ty_lits_count + 1)
-    w64(g_ty_lits, g_ty_lits_count * 8, t)
+    cell_store(g_ty_lits, g_ty_lits_count * 8, t)
     g_ty_lits_count = g_ty_lits_count + 1
 
 fn ty_lit_at(k: int) -> int:
-    return r64(g_ty_lits, k * 8)
+    return cell_load(g_ty_lits, k * 8)
 
 // Collect the literals of a product (an intersection sequence) or a single literal
 // into g_ty_lits.
@@ -167,12 +167,12 @@ fn lits_contradictory_buf(buf: string, n: int) -> int:
     loop:
         if i >= n:
             break
-        p := r64(buf, i * 8)
+        p := cell_load(buf, i * 8)
         j : ., mut = i + 1
         loop:
             if j >= n:
                 break
-            q := r64(buf, j * 8)
+            q := cell_load(buf, j * 8)
             if lit_empty_pair(p, q) == 1:
                 return 1
             j = j + 1
@@ -191,7 +191,7 @@ fn lits_copy(p: int) -> string:
     loop:
         if i >= n:
             break
-        w64(buf, i * 8, ty_lit_at(i))
+        cell_store(buf, i * 8, ty_lit_at(i))
         i = i + 1
     return buf
 
@@ -586,14 +586,14 @@ fn grow_ty_memo(needed: int):
     loop:
         if i >= nc:
             break
-        w64(nb, i * 16, -1)
+        cell_store(nb, i * 16, -1)
         i = i + 1
     nv := alloc(nc * 8)
     i2 : ., mut = 0
     loop:
         if i2 >= nc:
             break
-        w64(nv, i2 * 8, 0)
+        cell_store(nv, i2 * 8, 0)
         i2 = i2 + 1
     g_ty_memo_keys = nb
     g_ty_memo_vals = nv
@@ -615,8 +615,8 @@ fn ty_memo_rehash():
     loop:
         if i >= nc:
             break
-        w64(nb, i * 16, -1)
-        w64(nv, i * 8, 0)
+        cell_store(nb, i * 16, -1)
+        cell_store(nv, i * 8, 0)
         i = i + 1
     g_ty_memo_keys = nb
     g_ty_memo_vals = nv
@@ -626,13 +626,13 @@ fn ty_memo_rehash():
     loop:
         if j >= old_cap:
             break
-        k := r64(old_keys, j * 16)
+        k := cell_load(old_keys, j * 16)
         if k >= 0:
-            b2 := r64(old_keys, j * 16 + 8)
+            b2 := cell_load(old_keys, j * 16 + 8)
             s := ty_memo_slot_no_grow(k, b2)
-            w64(g_ty_memo_keys, s * 16, k)
-            w64(g_ty_memo_keys, s * 16 + 8, b2)
-            w64(g_ty_memo_vals, s * 8, r64(old_vals, j * 8))
+            cell_store(g_ty_memo_keys, s * 16, k)
+            cell_store(g_ty_memo_keys, s * 16 + 8, b2)
+            cell_store(g_ty_memo_vals, s * 8, cell_load(old_vals, j * 8))
             g_ty_memo_count = g_ty_memo_count + 1
         j = j + 1
 
@@ -642,10 +642,10 @@ fn ty_memo_slot_no_grow(a: int, b: int) -> int:
         h = 0 - h
     p : ., mut = h
     loop:
-        k := r64(g_ty_memo_keys, p * 16)
+        k := cell_load(g_ty_memo_keys, p * 16)
         if k < 0:
             return p
-        if k == a && r64(g_ty_memo_keys, p * 16 + 8) == b:
+        if k == a && cell_load(g_ty_memo_keys, p * 16 + 8) == b:
             return p
         p = p + 1
         if p >= g_ty_memo_cap:
@@ -665,17 +665,17 @@ fn ty_memo_slot(a: int, b: int) -> int:
     return ty_memo_slot_no_grow(a, b)
 
 fn ty_memo_state(slot: int) -> int:
-    if r64(g_ty_memo_keys, slot * 16) < 0:
+    if cell_load(g_ty_memo_keys, slot * 16) < 0:
         return -2
     // Empty slot (unused).
-    return r64(g_ty_memo_vals, slot * 8)
+    return cell_load(g_ty_memo_vals, slot * 8)
 
 fn ty_memo_set(slot: int, a: int, b: int, v: int):
-    if r64(g_ty_memo_keys, slot * 16) < 0:
-        w64(g_ty_memo_keys, slot * 16, a)
-        w64(g_ty_memo_keys, slot * 16 + 8, b)
+    if cell_load(g_ty_memo_keys, slot * 16) < 0:
+        cell_store(g_ty_memo_keys, slot * 16, a)
+        cell_store(g_ty_memo_keys, slot * 16 + 8, b)
         g_ty_memo_count = g_ty_memo_count + 1
-    w64(g_ty_memo_vals, slot * 8, v)
+    cell_store(g_ty_memo_vals, slot * 8, v)
 
 // Mu expansion by substitution.
 fn tt_subst_list(p: int, v: int, r: int) -> int:
@@ -773,13 +773,13 @@ fn sub_cover(p: int, q: int) -> int:
     loop:
         if qi >= qn:
             break
-        lq := r64(bufq, qi * 8)
+        lq := cell_load(bufq, qi * 8)
         covered : ., mut = 0
         pi : ., mut = 0
         loop:
             if pi >= pn:
                 break
-            lp := r64(bufp, pi * 8)
+            lp := cell_load(bufp, pi * 8)
             li := lit_implies(lp, lq)
             if li == 1:
                 covered = 1
@@ -813,8 +813,8 @@ fn ty_sub_core(a: int, b: int) -> int:
     if r == -1:
         // Do not cache -1 from budget exhaustion; a later call with a larger budget
         // would read a false -1. Clear the slot.
-        w64(g_ty_memo_keys, slot * 16, -1)
-        w64(g_ty_memo_vals, slot * 8, 0)
+        cell_store(g_ty_memo_keys, slot * 16, -1)
+        cell_store(g_ty_memo_vals, slot * 8, 0)
     else:
         ty_memo_set(slot, a, b, r)
     return r

@@ -102,11 +102,11 @@ fn iface_registry_init():
 
 // Write one entry row. All table writes go through this function.
 fn iface_put(e: int, ak: int, ti: int, name_ni: int, lit_code: int, ops: int):
-    w64(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_AK, ak)
-    w64(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_TI, ti)
-    w64(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_NAME, name_ni)
-    w64(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_LIT, lit_code)
-    w64(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_OPS, ops)
+    cell_store(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_AK, ak)
+    cell_store(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_TI, ti)
+    cell_store(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_NAME, name_ni)
+    cell_store(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_LIT, lit_code)
+    cell_store(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_OPS, ops)
 
 // Ensure the table exists. init_types builds it, but a query may run earlier in a
 // self-test or future call site; reading an empty table would walk out of bounds.
@@ -125,7 +125,7 @@ fn iface_entry(ak: int) -> int:
     loop:
         if i >= g_iface_entry_count:
             break
-        if r64(g_iface_entries, i * ESZ_IFACE_ENTRY + OFF_IE_AK) == ak:
+        if cell_load(g_iface_entries, i * ESZ_IFACE_ENTRY + OFF_IE_AK) == ak:
             return i
         i = i + 1
     return -1
@@ -135,7 +135,7 @@ fn iface_ops(ak: int) -> int:
     e := iface_entry(ak)
     if e < 0:
         return 0
-    return r64(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_OPS)
+    return cell_load(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_OPS)
 
 // Bit test. op already includes the UOP or IP bias. Out-of-range indices return 0;
 // they must not wrap, because the multiply-by-two construction would make a
@@ -170,7 +170,7 @@ fn iface_lit_entry(lit_kind: int) -> int:
     loop:
         if i >= g_iface_entry_count:
             break
-        if r64(g_iface_entries, i * ESZ_IFACE_ENTRY + OFF_IE_LIT) == lit_kind:
+        if cell_load(g_iface_entries, i * ESZ_IFACE_ENTRY + OFF_IE_LIT) == lit_kind:
             return i
         i = i + 1
     return -1
@@ -181,14 +181,14 @@ fn iface_lit_ti(lit_kind: int) -> int:
     e := iface_lit_entry(lit_kind)
     if e < 0:
         return -1
-    return r64(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_TI)
+    return cell_load(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_TI)
 
 // 字面量 AST kind -> AK_*（同上；交叉断言/引擎侧用）
 fn iface_lit_ak(lit_kind: int) -> int:
     e := iface_lit_entry(lit_kind)
     if e < 0:
         return -1
-    return r64(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_AK)
+    return cell_load(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_AK)
 
 // TY_* base type code to AK_* atom class. This is the single implementation.
 // TY_DEX_S maps to AK_DEX: the representation difference is not part of type
@@ -247,7 +247,7 @@ fn iface_ti_of(ak: int) -> int:
     e := iface_entry(ak)
     if e < 0:
         return -1
-    return r64(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_TI)
+    return cell_load(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_TI)
 
 // Atom class to registered name intern index (-1 if absent). This is a read-only
 // query; it never calls str_intern, so the judgment and query paths add no new
@@ -256,7 +256,7 @@ fn iface_name_of(ak: int) -> int:
     e := iface_entry(ak)
     if e < 0:
         return -1
-    return r64(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_NAME)
+    return cell_load(g_iface_entries, e * ESZ_IFACE_ENTRY + OFF_IE_NAME)
 
 // Cross-cutting shape entries for iface_satisfies axis A.
 // Each shape entry maps an interned name to a type term. Satisfaction is the
@@ -279,13 +279,13 @@ fn iface_shape_register(name_ni: int, term: int) -> int:
     loop:
         if i >= g_iface_shape_count:
             break
-        if r64(g_iface_shape_names, i * 8) == name_ni:
-            w64(g_iface_shape_terms, i * 8, term)   // 覆盖（幂等重注册）
+        if cell_load(g_iface_shape_names, i * 8) == name_ni:
+            cell_store(g_iface_shape_terms, i * 8, term)   // 覆盖（幂等重注册）
             return i
         i = i + 1
     iface_shape_grow(g_iface_shape_count + 1)
-    w64(g_iface_shape_names, g_iface_shape_count * 8, name_ni)
-    w64(g_iface_shape_terms, g_iface_shape_count * 8, term)
+    cell_store(g_iface_shape_names, g_iface_shape_count * 8, name_ni)
+    cell_store(g_iface_shape_terms, g_iface_shape_count * 8, term)
     g_iface_shape_count = g_iface_shape_count + 1
     return g_iface_shape_count - 1
 
@@ -297,8 +297,8 @@ fn iface_shape_lookup(name_ni: int) -> int:
     loop:
         if i >= g_iface_shape_count:
             return -1
-        if r64(g_iface_shape_names, i * 8) == name_ni:
-            return r64(g_iface_shape_terms, i * 8)
+        if cell_load(g_iface_shape_names, i * 8) == name_ni:
+            return cell_load(g_iface_shape_terms, i * 8)
         i = i + 1
     return -1
 

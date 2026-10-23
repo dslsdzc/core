@@ -67,7 +67,7 @@ fn ccr_iface_populate() -> int:
     loop:
         if ii >= g_iface_count:
             break
-        mc := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
+        mc := cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
         if mc < 0 || mc > MAX_IFACE_METHODS:
             print("error: IFACE segment: interface ")
             print(int_str(ii))
@@ -80,7 +80,7 @@ fn ccr_iface_populate() -> int:
             if mi >= mc:
                 break
             mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD
-            pc := r64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT)
+            pc := cell_load(g_ifaces, mbase + OFF_IFM_PARAM_COUNT)
             if pc < 0 || pc > MAX_IFACE_METHOD_PARAMS:
                 print("error: IFACE segment: method ")
                 print(int_str(mi))
@@ -98,12 +98,12 @@ fn ccr_iface_populate() -> int:
                 print(int_str(mi))
                 println(" return signature is not translatable to a type term (save refused)")
                 return -1
-            w64(g_ifaces, mbase + OFF_IFM_RET_TERM, rt)
+            cell_store(g_ifaces, mbase + OFF_IFM_RET_TERM, rt)
             pj : ., mut = 0
             loop:
                 if pj >= MAX_IFACE_METHOD_PARAMS:
                     break
-                w64(g_ifaces, mbase + OFF_IFM_PARAM_TERMS + pj * 8, -1)   // 未用槽 = -1
+                cell_store(g_ifaces, mbase + OFF_IFM_PARAM_TERMS + pj * 8, -1)   // 未用槽 = -1
                 pj = pj + 1
             pk : ., mut = 0
             loop:
@@ -119,7 +119,7 @@ fn ccr_iface_populate() -> int:
                     print_i(pk)
                     println(" signature is not translatable to a type term (save refused)")
                     return -1
-                w64(g_ifaces, mbase + OFF_IFM_PARAM_TERMS + pk * 8, pt)
+                cell_store(g_ifaces, mbase + OFF_IFM_PARAM_TERMS + pk * 8, pt)
                 pk = pk + 1
             mi = mi + 1
         ii = ii + 1
@@ -135,34 +135,34 @@ fn ccr_type_seg_build() -> int:
     need := 4 + rc * ESZ_TYPE_ROW + 4 + tc * ESZ_TYPE_TERM_DISK
     buf := alloc(need + 64)
     pos : ., mut = 0
-    w32(buf, pos, rc)
+    cell_store32(buf, pos, rc)
     pos = pos + 4
     i : ., mut = 0
     loop:
         if i >= rc:
             break
-        w64(buf, pos, r64(g_types, i * ESZ_TYPE_ROW + OFF_TR_KIND))
+        cell_store(buf, pos, cell_load(g_types, i * ESZ_TYPE_ROW + OFF_TR_KIND))
         pos = pos + 8
-        w64(buf, pos, r64(g_types, i * ESZ_TYPE_ROW + OFF_TR_DATA))
+        cell_store(buf, pos, cell_load(g_types, i * ESZ_TYPE_ROW + OFF_TR_DATA))
         pos = pos + 8
-        w64(buf, pos, r64(g_types, i * ESZ_TYPE_ROW + OFF_TR_EXTRA))
+        cell_store(buf, pos, cell_load(g_types, i * ESZ_TYPE_ROW + OFF_TR_EXTRA))
         pos = pos + 8
         i = i + 1
-    w32(buf, pos, tc)
+    cell_store32(buf, pos, tc)
     pos = pos + 4
     j : ., mut = 0
     loop:
         if j >= tc:
             break
-        w64(buf, pos, tt_tag(j))
+        cell_store(buf, pos, tt_tag(j))
         pos = pos + 8
-        w64(buf, pos, tt_a(j))
+        cell_store(buf, pos, tt_a(j))
         pos = pos + 8
-        w64(buf, pos, tt_b(j))
+        cell_store(buf, pos, tt_b(j))
         pos = pos + 8
-        w64(buf, pos, tt_c(j))
+        cell_store(buf, pos, tt_c(j))
         pos = pos + 8
-        w64(buf, pos, tt_d(j))
+        cell_store(buf, pos, tt_d(j))
         pos = pos + 8
         j = j + 1
     g_ccr_type_seg = buf
@@ -182,7 +182,7 @@ fn ccr_iface_seg_build() -> int:
     loop:
         if ii >= g_iface_count:
             break
-        mc := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
+        mc := cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
         need = need + 16 + mc * 80
         ii = ii + 1
     need = need + 4 + g_impl_for_count * 8
@@ -191,107 +191,107 @@ fn ccr_iface_seg_build() -> int:
     pos : ., mut = 0
     // Section 1: native entries. The count is the constant IFACE_ENTRY_COUNT, not
     // g_iface_entry_count, so writer and loader use the same value.
-    w32(buf, pos, IFACE_ENTRY_COUNT)
+    cell_store32(buf, pos, IFACE_ENTRY_COUNT)
     pos = pos + 4
     ei : ., mut = 0
     loop:
         if ei >= IFACE_ENTRY_COUNT:
             break
         eo := ei * ESZ_IFACE_ENTRY
-        buf_write_i32(buf, pos, r64(g_iface_entries, eo + OFF_IE_AK))
+        buf_write_i32(buf, pos, cell_load(g_iface_entries, eo + OFF_IE_AK))
         pos = pos + 4
-        buf_write_i32(buf, pos, r64(g_iface_entries, eo + OFF_IE_TI))
+        buf_write_i32(buf, pos, cell_load(g_iface_entries, eo + OFF_IE_TI))
         pos = pos + 4
-        buf_write_i32(buf, pos, r64(g_iface_entries, eo + OFF_IE_NAME))
+        buf_write_i32(buf, pos, cell_load(g_iface_entries, eo + OFF_IE_NAME))
         pos = pos + 4
-        buf_write_i32(buf, pos, r64(g_iface_entries, eo + OFF_IE_LIT))
+        buf_write_i32(buf, pos, cell_load(g_iface_entries, eo + OFF_IE_LIT))
         pos = pos + 4
-        buf_write_i64(buf, pos, r64(g_iface_entries, eo + OFF_IE_OPS))
+        buf_write_i64(buf, pos, cell_load(g_iface_entries, eo + OFF_IE_OPS))
         pos = pos + 8
         ei = ei + 1
     // Section 2: cross-cutting shapes {name_ni, term}.
-    w32(buf, pos, g_iface_shape_count)
+    cell_store32(buf, pos, g_iface_shape_count)
     pos = pos + 4
     si : ., mut = 0
     loop:
         if si >= g_iface_shape_count:
             break
-        buf_write_i32(buf, pos, r64(g_iface_shape_names, si * 8))
+        buf_write_i32(buf, pos, cell_load(g_iface_shape_names, si * 8))
         pos = pos + 4
-        buf_write_i32(buf, pos, r64(g_iface_shape_terms, si * 8))
+        buf_write_i32(buf, pos, cell_load(g_iface_shape_terms, si * 8))
         pos = pos + 4
         si = si + 1
     // Section 3: user interfaces, 16-byte header plus 80 bytes per method.
-    w32(buf, pos, g_iface_count)
+    cell_store32(buf, pos, g_iface_count)
     pos = pos + 4
     fi : ., mut = 0
     loop:
         if fi >= g_iface_count:
             break
         fo := fi * ESZ_IFACEINFO
-        buf_write_i32(buf, pos, r64(g_ifaces, fo + OFF_IF_NAME))
+        buf_write_i32(buf, pos, cell_load(g_ifaces, fo + OFF_IF_NAME))
         pos = pos + 4
-        buf_write_i32(buf, pos, r64(g_ifaces, fo + OFF_IF_METHOD_COUNT))
+        buf_write_i32(buf, pos, cell_load(g_ifaces, fo + OFF_IF_METHOD_COUNT))
         pos = pos + 4
-        buf_write_i32(buf, pos, r64(g_ifaces, fo + OFF_IF_GENERIC_COUNT))
+        buf_write_i32(buf, pos, cell_load(g_ifaces, fo + OFF_IF_GENERIC_COUNT))
         pos = pos + 4
         buf_write_i32(buf, pos, 0)
         pos = pos + 4   // pad for alignment
-        mc2 := r64(g_ifaces, fo + OFF_IF_METHOD_COUNT)
+        mc2 := cell_load(g_ifaces, fo + OFF_IF_METHOD_COUNT)
         mj : ., mut = 0
         loop:
             if mj >= mc2:
                 break
             mo := fo + OFF_IF_METHODS + mj * ESZ_IFMETHOD
-            buf_write_i32(buf, pos, r64(g_ifaces, mo + OFF_IFM_NAME))
+            buf_write_i32(buf, pos, cell_load(g_ifaces, mo + OFF_IFM_NAME))
             pos = pos + 4
-            buf_write_i32(buf, pos, r64(g_ifaces, mo + OFF_IFM_PARAM_COUNT))
+            buf_write_i32(buf, pos, cell_load(g_ifaces, mo + OFF_IFM_PARAM_COUNT))
             pos = pos + 4
-            buf_write_i32(buf, pos, r64(g_ifaces, mo + OFF_IFM_SELF_MODE))
+            buf_write_i32(buf, pos, cell_load(g_ifaces, mo + OFF_IFM_SELF_MODE))
             pos = pos + 4
-            buf_write_i32(buf, pos, r64(g_ifaces, mo + OFF_IFM_RET_TERM))
+            buf_write_i32(buf, pos, cell_load(g_ifaces, mo + OFF_IFM_RET_TERM))
             pos = pos + 4
             pk2 : ., mut = 0
             loop:
                 if pk2 >= MAX_IFACE_METHOD_PARAMS:
                     break
-                buf_write_i32(buf, pos, r64(g_ifaces, mo + OFF_IFM_PARAM_TERMS + pk2 * 8))
+                buf_write_i32(buf, pos, cell_load(g_ifaces, mo + OFF_IFM_PARAM_TERMS + pk2 * 8))
                 pos = pos + 4
                 pk2 = pk2 + 1
             pq : ., mut = 0
             loop:
                 if pq >= MAX_IFACE_METHOD_PARAMS:
                     break
-                buf_write_i32(buf, pos, r64(g_ifaces, mo + OFF_IFM_PARAM_TYPES + pq * 8))
+                buf_write_i32(buf, pos, cell_load(g_ifaces, mo + OFF_IFM_PARAM_TYPES + pq * 8))
                 pos = pos + 4
                 pq = pq + 1
             mj = mj + 1
         fi = fi + 1
     // Section 4: impl edges {trait_ni, type_ni}; declaration metadata only.
-    w32(buf, pos, g_impl_for_count)
+    cell_store32(buf, pos, g_impl_for_count)
     pos = pos + 4
     gi2 : ., mut = 0
     loop:
         if gi2 >= g_impl_for_count:
             break
-        buf_write_i32(buf, pos, r64(g_impl_for, gi2 * 16))
+        buf_write_i32(buf, pos, cell_load(g_impl_for, gi2 * 16))
         pos = pos + 4
-        buf_write_i32(buf, pos, r64(g_impl_for, gi2 * 16 + 8))
+        buf_write_i32(buf, pos, cell_load(g_impl_for, gi2 * 16 + 8))
         pos = pos + 4
         gi2 = gi2 + 1
     // Section 5: method table {type_ni, method_ni, mangled_ni}, the data behind
     // iface_find_method.
-    w32(buf, pos, g_method_count)
+    cell_store32(buf, pos, g_method_count)
     pos = pos + 4
     mi2 : ., mut = 0
     loop:
         if mi2 >= g_method_count:
             break
-        buf_write_i32(buf, pos, r64(g_methods, mi2 * 24))
+        buf_write_i32(buf, pos, cell_load(g_methods, mi2 * 24))
         pos = pos + 4
-        buf_write_i32(buf, pos, r64(g_methods, mi2 * 24 + 8))
+        buf_write_i32(buf, pos, cell_load(g_methods, mi2 * 24 + 8))
         pos = pos + 4
-        buf_write_i32(buf, pos, r64(g_methods, mi2 * 24 + 16))
+        buf_write_i32(buf, pos, cell_load(g_methods, mi2 * 24 + 16))
         pos = pos + 4
         mi2 = mi2 + 1
     g_ccr_iface_seg = buf
@@ -342,7 +342,7 @@ fn ccr_nod_item_populate() -> int:
         it : ., mut = -1
         if sh_tk_face_of_code(iri_op(ii), tk) == 0:
             it = sh_term_of_ti(tk)
-        w32(g_ccr_nod_item, ii * 4, it)
+        cell_store32(g_ccr_nod_item, ii * 4, it)
         ii = ii + 1
     return 0
 
@@ -377,13 +377,13 @@ fn ccr_iface_selftest_dump():
     loop:
         if ii >= g_iface_count:
             break
-        mc := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
+        mc := cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
         mi : ., mut = 0
         loop:
             if mi >= mc:
                 break
             mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD
-            pc := r64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT)
+            pc := cell_load(g_ifaces, mbase + OFF_IFM_PARAM_COUNT)
             print("ifacesig ")
             print_i(ii)
             print(" ")

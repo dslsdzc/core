@@ -1,68 +1,7 @@
 // === dyn_arr.cr ===
-// Byte helpers + ESZ/OFF constants + grow functions + string pool.
-
-// ============================================================
-// Byte helpers
-// ============================================================
-fn w8(buf: string, pos: int, val: int):
-    store8(buf, pos, val % 256)
-fn bu8(buf: string, pos: int) -> int:
-    return load8(buf, pos) % 256
-fn w32(buf: string, pos: int, val: int):
-    b0 : ., mut = val % 256
-    t1 : ., mut = val / 256
-    b1 : ., mut = t1 % 256
-    t2 : ., mut = t1 / 256
-    b2 : ., mut = t2 % 256
-    t3 : ., mut = t2 / 256
-    b3 : ., mut = t3 % 256
-    // Borrow chain for two's complement of negative val (no 4294967296 constant)
-    if b0 < 0:
-        b0 = b0 + 256
-        b1 = b1 - 1
-    if b1 < 0:
-        b1 = b1 + 256
-        b2 = b2 - 1
-    if b2 < 0:
-        b2 = b2 + 256
-        b3 = b3 - 1
-    if b3 < 0:
-        b3 = b3 + 256
-    store8(buf,pos,b0)
-    store8(buf,pos+1,b1)
-    store8(buf,pos+2,b2)
-    store8(buf,pos+3,b3)
-fn r32(buf: string, pos: int) -> int:
-    b0 := bu8(buf,pos)
-    b1 := bu8(buf,pos+1)
-    b2 := bu8(buf,pos+2)
-    b3 := bu8(buf,pos+3)
-    v := b0 + b1*256 + b2*65536
-    if b3 >= 128:
-        v = v + (b3 - 256) * 16777216
-    else:
-        v = v + b3 * 16777216
-    return v
-fn w64(buf: string, pos: int, val: int):
-    cur : ., mut = val
-    i : ., mut = 0
-    loop:
-        if i >= 8:
-            break
-        byte : ., mut = cur % 256
-        if byte < 0:
-            byte = byte + 256
-        store8(buf, pos + i, byte)
-        cur = (cur - byte) / 256
-        i = i + 1
-fn r64(buf: string, pos: int) -> int:
-    // The low dword is unsigned. Reading it through r32 double-subtracts
-    // 2^32 for negative values, e.g. -1 becomes -1 + (-1 * 2^32).
-    lo := bu8(buf,pos) + bu8(buf,pos+1)*256 + bu8(buf,pos+2)*65536 + bu8(buf,pos+3)*16777216
-    hi := r32(buf,pos+4)
-    hi_part := hi * 65536
-    hi_part = hi_part * 65536
-    return lo + hi_part
+// Compiler table constants + grow functions + string pool.
+// Byte helpers (w8/bu8/w32/r32/w64/r64/_dyncpy) live in src/kernel/bytes.cr;
+// they are the low-level cell layer, not frontend semantics.
 
 // ============================================================
 // Element sizes (bytes per element)
@@ -270,10 +209,10 @@ fn iface_shape_grow(needed: int):
     if nc < needed:
         nc = needed + 8
     nb := alloc(nc * 8)
-    _dyncpy(g_iface_shape_names, g_iface_shape_cap * 8, nb)
+    cell_copy(g_iface_shape_names, g_iface_shape_cap * 8, nb)
     g_iface_shape_names = nb
     nt := alloc(nc * 8)
-    _dyncpy(g_iface_shape_terms, g_iface_shape_cap * 8, nt)
+    cell_copy(g_iface_shape_terms, g_iface_shape_cap * 8, nt)
     g_iface_shape_terms = nt
     g_iface_shape_cap = nc
 
@@ -297,17 +236,6 @@ OFF_EV_TYPE_NODES : int = 144
 OFF_EV_SIZE : int = 272
 
 // ============================================================
-// Copy helper
-// ============================================================
-fn _dyncpy(src: string, nbytes: int, dst: string):
-    ci : ., mut = 0
-    loop:
-        if ci >= nbytes:
-            break
-        w8(dst, ci, bu8(src, ci))
-        ci = ci + 1
-
-// ============================================================
 // Grow helpers for all arrays
 // ============================================================
 // _grow is a placeholder. The language has no generics, and cap_name is passed by
@@ -325,7 +253,7 @@ fn grow_tokens(needed: int):
     if nc < needed:
         nc = needed + 128
     nb := alloc(nc * ESZ_TOKEN)
-    _dyncpy(g_tokens, g_tok_cap * ESZ_TOKEN, nb)
+    cell_copy(g_tokens, g_tok_cap * ESZ_TOKEN, nb)
     g_tokens = nb
     g_tok_cap = nc
 
@@ -338,7 +266,7 @@ fn grow_ast(needed: int):
     if nc < needed:
         nc = needed + 128
     nb := alloc(nc * ESZ_ASTNODE)
-    _dyncpy(g_ast, g_ast_cap * ESZ_ASTNODE, nb)
+    cell_copy(g_ast, g_ast_cap * ESZ_ASTNODE, nb)
     g_ast = nb
     g_ast_cap = nc
 
@@ -351,7 +279,7 @@ fn grow_syms(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * ESZ_SYMENTRY)
-    _dyncpy(g_syms, g_sym_cap * ESZ_SYMENTRY, nb)
+    cell_copy(g_syms, g_sym_cap * ESZ_SYMENTRY, nb)
     g_syms = nb
     g_sym_cap = nc
 
@@ -366,7 +294,7 @@ fn grow_types(needed: int):
     // Row size comes from ESZ_TYPE_ROW in globals.cr, shared with alloc_type and
     // TYPE-segment serialization.
     nb := alloc(nc * ESZ_TYPE_ROW)
-    _dyncpy(g_types, g_type_cap * ESZ_TYPE_ROW, nb)
+    cell_copy(g_types, g_type_cap * ESZ_TYPE_ROW, nb)
     g_types = nb
     g_type_cap = nc
 
@@ -379,7 +307,7 @@ fn grow_funcs(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * ESZ_FUNCINFO)
-    _dyncpy(g_funcs, g_func_cap * ESZ_FUNCINFO, nb)
+    cell_copy(g_funcs, g_func_cap * ESZ_FUNCINFO, nb)
     g_funcs = nb
     g_func_cap = nc
 
@@ -392,7 +320,7 @@ fn grow_structs(needed: int):
     if nc < needed:
         nc = needed + 32
     nb := alloc(nc * ESZ_STRUCTINFO)
-    _dyncpy(g_structs, g_struct_cap * ESZ_STRUCTINFO, nb)
+    cell_copy(g_structs, g_struct_cap * ESZ_STRUCTINFO, nb)
     g_structs = nb
     g_struct_cap = nc
 
@@ -405,7 +333,7 @@ fn grow_enums(needed: int):
     if nc < needed:
         nc = needed + 16
     nb := alloc(nc * ESZ_ENUMINFO)
-    _dyncpy(g_enums, g_enum_cap * ESZ_ENUMINFO, nb)
+    cell_copy(g_enums, g_enum_cap * ESZ_ENUMINFO, nb)
     g_enums = nb
     g_enum_cap = nc
 
@@ -418,7 +346,7 @@ fn grow_ifaces(needed: int):
     if nc < needed:
         nc = needed + 4
     nb := alloc(nc * ESZ_IFACEINFO)
-    _dyncpy(g_ifaces, g_iface_cap * ESZ_IFACEINFO, nb)
+    cell_copy(g_ifaces, g_iface_cap * ESZ_IFACEINFO, nb)
     g_ifaces = nb
     g_iface_cap = nc
 
@@ -431,7 +359,7 @@ fn grow_ir_vars(needed: int):
     if nc < needed:
         nc = needed + 128
     nb := alloc(nc * ESZ_IRVAR)
-    _dyncpy(g_ir_vars, g_ir_var_cap * ESZ_IRVAR, nb)
+    cell_copy(g_ir_vars, g_ir_var_cap * ESZ_IRVAR, nb)
     g_ir_vars = nb
     g_ir_var_cap = nc
 
@@ -444,7 +372,7 @@ fn grow_ir_instrs(needed: int):
     if nc < needed:
         nc = needed + 128
     nb := alloc(nc * ESZ_IRINSTR)
-    _dyncpy(g_ir_instrs, g_ir_instr_cap * ESZ_IRINSTR, nb)
+    cell_copy(g_ir_instrs, g_ir_instr_cap * ESZ_IRINSTR, nb)
     g_ir_instrs = nb
     g_ir_instr_cap = nc
 
@@ -457,7 +385,7 @@ fn grow_ir_locals(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 16)
-    _dyncpy(g_ir_locals, g_ir_local_cap * 16, nb)
+    cell_copy(g_ir_locals, g_ir_local_cap * 16, nb)
     g_ir_locals = nb
     g_ir_local_cap = nc
 
@@ -470,7 +398,7 @@ fn grow_ir_globals(needed: int):
     if nc < needed:
         nc = needed + 16
     nb := alloc(nc * 24)
-    _dyncpy(g_ir_globals, g_ir_global_cap * 24, nb)
+    cell_copy(g_ir_globals, g_ir_global_cap * 24, nb)
     g_ir_globals = nb
     g_ir_global_cap = nc
 
@@ -483,7 +411,7 @@ fn grow_ir_str_consts(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 8)
-    _dyncpy(g_ir_str_consts, g_ir_str_const_cap * 8, nb)
+    cell_copy(g_ir_str_consts, g_ir_str_const_cap * 8, nb)
     g_ir_str_consts = nb
     g_ir_str_const_cap = nc
 
@@ -496,7 +424,7 @@ fn grow_errors(needed: int):
     if nc < needed:
         nc = needed + 16
     nb := alloc(nc * 8)
-    _dyncpy(g_errors, g_err_cap * 8, nb)
+    cell_copy(g_errors, g_err_cap * 8, nb)
     g_errors = nb
     g_err_cap = nc
 
@@ -509,7 +437,7 @@ fn grow_block_stmts(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 8)
-    _dyncpy(g_block_stmts, g_block_stmt_cap * 8, nb)
+    cell_copy(g_block_stmts, g_block_stmt_cap * 8, nb)
     g_block_stmts = nb
     g_block_stmt_cap = nc
 
@@ -525,25 +453,25 @@ fn grow_ir_func_meta(needed: int):
         nc = needed + 64
     sz := nc * 8
     n1 := alloc(sz)
-    _dyncpy(g_ir_func_name_idx, g_ir_func_name_idx_cap*8, n1)
+    cell_copy(g_ir_func_name_idx, g_ir_func_name_idx_cap*8, n1)
     g_ir_func_name_idx = n1
     n2 := alloc(sz)
-    _dyncpy(g_ir_func_ret_type, g_ir_func_ret_type_cap*8, n2)
+    cell_copy(g_ir_func_ret_type, g_ir_func_ret_type_cap*8, n2)
     g_ir_func_ret_type = n2
     n3 := alloc(sz)
-    _dyncpy(g_ir_func_instr_start, g_ir_func_instr_start_cap*8, n3)
+    cell_copy(g_ir_func_instr_start, g_ir_func_instr_start_cap*8, n3)
     g_ir_func_instr_start = n3
     n4 := alloc(sz)
-    _dyncpy(g_ir_func_instr_count, g_ir_func_instr_count_cap*8, n4)
+    cell_copy(g_ir_func_instr_count, g_ir_func_instr_count_cap*8, n4)
     g_ir_func_instr_count = n4
     n5 := alloc(sz)
-    _dyncpy(g_ir_func_var_start, g_ir_func_var_start_cap*8, n5)
+    cell_copy(g_ir_func_var_start, g_ir_func_var_start_cap*8, n5)
     g_ir_func_var_start = n5
     n6 := alloc(sz)
-    _dyncpy(g_ir_func_var_count, g_ir_func_var_count_cap*8, n6)
+    cell_copy(g_ir_func_var_count, g_ir_func_var_count_cap*8, n6)
     g_ir_func_var_count = n6
     n7 := alloc(sz)
-    _dyncpy(g_ir_func_param_count, g_ir_func_param_count_cap*8, n7)
+    cell_copy(g_ir_func_param_count, g_ir_func_param_count_cap*8, n7)
     g_ir_func_param_count = n7
     g_ir_func_name_idx_cap=nc
     g_ir_func_ret_type_cap=nc
@@ -557,55 +485,55 @@ fn grow_ir_func_meta(needed: int):
 // Accessor helpers for AST node fields
 // ============================================================
 fn ast_kind(n: int) -> int:
-    return r64(g_ast, n * ESZ_ASTNODE + OFF_AS_KIND)
+    return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_KIND)
 fn ast_a(n: int) -> int:
-    return r64(g_ast, n * ESZ_ASTNODE + OFF_AS_A)
+    return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_A)
 fn ast_b(n: int) -> int:
-    return r64(g_ast, n * ESZ_ASTNODE + OFF_AS_B)
+    return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_B)
 fn ast_c(n: int) -> int:
-    return r64(g_ast, n * ESZ_ASTNODE + OFF_AS_C)
+    return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_C)
 fn ast_int_val(n: int) -> int:
-    return r64(g_ast, n * ESZ_ASTNODE + OFF_AS_INTVAL)
+    return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_INTVAL)
 fn ast_type_val(n: int) -> int:
-    return r64(g_ast, n * ESZ_ASTNODE + OFF_AS_TYPEVAL)
+    return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_TYPEVAL)
 fn ast_data(n: int) -> int:
-    return r64(g_ast, n * ESZ_ASTNODE + OFF_AS_DATA)
+    return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_DATA)
 fn ast_line(n: int) -> int:
-    return r64(g_ast, n * ESZ_ASTNODE + OFF_AS_LINE)
+    return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_LINE)
 fn ast_col(n: int) -> int:
-    return r64(g_ast, n * ESZ_ASTNODE + OFF_AS_COL)
+    return cell_load(g_ast, n * ESZ_ASTNODE + OFF_AS_COL)
 
 fn ast_set_kind(n: int, v: int):
-    w64(g_ast, n * ESZ_ASTNODE + OFF_AS_KIND, v)
+    cell_store(g_ast, n * ESZ_ASTNODE + OFF_AS_KIND, v)
 fn ast_set_a(n: int, v: int):
-    w64(g_ast, n * ESZ_ASTNODE + OFF_AS_A, v)
+    cell_store(g_ast, n * ESZ_ASTNODE + OFF_AS_A, v)
 fn ast_set_b(n: int, v: int):
-    w64(g_ast, n * ESZ_ASTNODE + OFF_AS_B, v)
+    cell_store(g_ast, n * ESZ_ASTNODE + OFF_AS_B, v)
 fn ast_set_c(n: int, v: int):
-    w64(g_ast, n * ESZ_ASTNODE + OFF_AS_C, v)
+    cell_store(g_ast, n * ESZ_ASTNODE + OFF_AS_C, v)
 fn ast_set_int_val(n: int, v: int):
-    w64(g_ast, n * ESZ_ASTNODE + OFF_AS_INTVAL, v)
+    cell_store(g_ast, n * ESZ_ASTNODE + OFF_AS_INTVAL, v)
 fn ast_set_type_val(n: int, v: int):
-    w64(g_ast, n * ESZ_ASTNODE + OFF_AS_TYPEVAL, v)
+    cell_store(g_ast, n * ESZ_ASTNODE + OFF_AS_TYPEVAL, v)
 fn ast_set_data(n: int, v: int):
-    w64(g_ast, n * ESZ_ASTNODE + OFF_AS_DATA, v)
+    cell_store(g_ast, n * ESZ_ASTNODE + OFF_AS_DATA, v)
 fn ast_set_line(n: int, v: int):
-    w64(g_ast, n * ESZ_ASTNODE + OFF_AS_LINE, v)
+    cell_store(g_ast, n * ESZ_ASTNODE + OFF_AS_LINE, v)
 fn ast_set_col(n: int, v: int):
-    w64(g_ast, n * ESZ_ASTNODE + OFF_AS_COL, v)
+    cell_store(g_ast, n * ESZ_ASTNODE + OFF_AS_COL, v)
 
 fn ast_alloc(kind: int, a: int, b: int, c: int, iv: int, tv: int, d: int, line: int, col: int) -> int:
     idx := g_ast_count
     grow_ast(idx + 1)
-    w64(g_ast, idx * ESZ_ASTNODE + OFF_AS_KIND, kind)
-    w64(g_ast, idx * ESZ_ASTNODE + OFF_AS_A, a)
-    w64(g_ast, idx * ESZ_ASTNODE + OFF_AS_B, b)
-    w64(g_ast, idx * ESZ_ASTNODE + OFF_AS_C, c)
-    w64(g_ast, idx * ESZ_ASTNODE + OFF_AS_INTVAL, iv)
-    w64(g_ast, idx * ESZ_ASTNODE + OFF_AS_TYPEVAL, tv)
-    w64(g_ast, idx * ESZ_ASTNODE + OFF_AS_DATA, d)
-    w64(g_ast, idx * ESZ_ASTNODE + OFF_AS_LINE, line)
-    w64(g_ast, idx * ESZ_ASTNODE + OFF_AS_COL, col)
+    cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_KIND, kind)
+    cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_A, a)
+    cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_B, b)
+    cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_C, c)
+    cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_INTVAL, iv)
+    cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_TYPEVAL, tv)
+    cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_DATA, d)
+    cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_LINE, line)
+    cell_store(g_ast, idx * ESZ_ASTNODE + OFF_AS_COL, col)
     g_ast_count = idx + 1
     return idx
 
@@ -617,67 +545,67 @@ fn ast_alloc(kind: int, a: int, b: int, c: int, iv: int, tv: int, d: int, line: 
 fn sym_name(n: int) -> int:
     if n < 0 || n >= g_sym_count:
         return -1
-    return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_NAME)
+    return cell_load(g_syms, n * ESZ_SYMENTRY + OFF_SY_NAME)
 fn sym_kind(n: int) -> int:
     if n < 0 || n >= g_sym_count:
         return -1
-    return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_KIND)
+    return cell_load(g_syms, n * ESZ_SYMENTRY + OFF_SY_KIND)
 fn sym_type(n: int) -> int:
     if n < 0 || n >= g_sym_count:
         return -1
-    return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_TYPE)
+    return cell_load(g_syms, n * ESZ_SYMENTRY + OFF_SY_TYPE)
 fn sym_node(n: int) -> int:
     if n < 0 || n >= g_sym_count:
         return -1
-    return r64(g_syms, n * ESZ_SYMENTRY + OFF_SY_NODE)
+    return cell_load(g_syms, n * ESZ_SYMENTRY + OFF_SY_NODE)
 fn sym_set_name(n: int, v: int):
-    w64(g_syms, n * ESZ_SYMENTRY + OFF_SY_NAME, v)
+    cell_store(g_syms, n * ESZ_SYMENTRY + OFF_SY_NAME, v)
 fn sym_set_kind(n: int, v: int):
-    w64(g_syms, n * ESZ_SYMENTRY + OFF_SY_KIND, v)
+    cell_store(g_syms, n * ESZ_SYMENTRY + OFF_SY_KIND, v)
 fn sym_set_type(n: int, v: int):
-    w64(g_syms, n * ESZ_SYMENTRY + OFF_SY_TYPE, v)
+    cell_store(g_syms, n * ESZ_SYMENTRY + OFF_SY_TYPE, v)
 fn sym_set_node(n: int, v: int):
-    w64(g_syms, n * ESZ_SYMENTRY + OFF_SY_NODE, v)
+    cell_store(g_syms, n * ESZ_SYMENTRY + OFF_SY_NODE, v)
 
 // IRVar helpers
 fn irv_name(n: int) -> int:
-    return r64(g_ir_vars, n * ESZ_IRVAR + OFF_IRV_NAME)
+    return cell_load(g_ir_vars, n * ESZ_IRVAR + OFF_IRV_NAME)
 fn irv_id(n: int) -> int:
-    return r64(g_ir_vars, n * ESZ_IRVAR + OFF_IRV_ID)
+    return cell_load(g_ir_vars, n * ESZ_IRVAR + OFF_IRV_ID)
 fn irv_type(n: int) -> int:
-    return r64(g_ir_vars, n * ESZ_IRVAR + OFF_IRV_TYPE)
+    return cell_load(g_ir_vars, n * ESZ_IRVAR + OFF_IRV_TYPE)
 fn irv_set_name(n: int, v: int):
-    w64(g_ir_vars, n * ESZ_IRVAR + OFF_IRV_NAME, v)
+    cell_store(g_ir_vars, n * ESZ_IRVAR + OFF_IRV_NAME, v)
 fn irv_set_id(n: int, v: int):
-    w64(g_ir_vars, n * ESZ_IRVAR + OFF_IRV_ID, v)
+    cell_store(g_ir_vars, n * ESZ_IRVAR + OFF_IRV_ID, v)
 fn irv_set_type(n: int, v: int):
-    w64(g_ir_vars, n * ESZ_IRVAR + OFF_IRV_TYPE, v)
+    cell_store(g_ir_vars, n * ESZ_IRVAR + OFF_IRV_TYPE, v)
 
 // IRInstr helpers
 fn iri_op(n: int) -> int:
-    return r64(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_OP)
+    return cell_load(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_OP)
 fn iri_dest(n: int) -> int:
-    return r64(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_DEST)
+    return cell_load(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_DEST)
 fn iri_s1(n: int) -> int:
-    return r64(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_S1)
+    return cell_load(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_S1)
 fn iri_s2(n: int) -> int:
-    return r64(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_S2)
+    return cell_load(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_S2)
 fn iri_s3(n: int) -> int:
-    return r64(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_S3)
+    return cell_load(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_S3)
 fn iri_tk(n: int) -> int:
-    return r64(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_TK)
+    return cell_load(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_TK)
 fn iri_set_op(n: int, v: int):
-    w64(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_OP, v)
+    cell_store(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_OP, v)
 fn iri_set_dest(n: int, v: int):
-    w64(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_DEST, v)
+    cell_store(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_DEST, v)
 fn iri_set_s1(n: int, v: int):
-    w64(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_S1, v)
+    cell_store(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_S1, v)
 fn iri_set_s2(n: int, v: int):
-    w64(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_S2, v)
+    cell_store(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_S2, v)
 fn iri_set_s3(n: int, v: int):
-    w64(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_S3, v)
+    cell_store(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_S3, v)
 fn iri_set_tk(n: int, v: int):
-    w64(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_TK, v)
+    cell_store(g_ir_instrs, n * ESZ_IRINSTR + OFF_IRI_TK, v)
 
 // Variable-name lookup. It lives here because regalloc.cr in corearch consumes it,
 // and the corearch build does not include ir_gen.cr.
@@ -689,53 +617,53 @@ fn get_ir_var_name(var_idx: int) -> string:
 
 // FuncInfo helpers
 fn fi_name(n: int) -> int:
-    return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_NAME)
+    return cell_load(g_funcs, n * ESZ_FUNCINFO + OFF_FI_NAME)
 fn fi_param_count(n: int) -> int:
-    return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_COUNT)
+    return cell_load(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_COUNT)
 fn fi_return_type(n: int) -> int:
-    return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_RETURN_TYPE)
+    return cell_load(g_funcs, n * ESZ_FUNCINFO + OFF_FI_RETURN_TYPE)
 fn fi_ast_node(n: int) -> int:
-    return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_AST_NODE)
+    return cell_load(g_funcs, n * ESZ_FUNCINFO + OFF_FI_AST_NODE)
 fn fi_generic_count(n: int) -> int:
-    return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_GENERIC_COUNT)
+    return cell_load(g_funcs, n * ESZ_FUNCINFO + OFF_FI_GENERIC_COUNT)
 fn fi_param_type(n: int, pi: int) -> int:
     if pi < 0 || pi >= MAX_FN_PARAMS:
         return 0
     // Out of range: read guard only; writes have the same guard plus parser P020.
-    return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_TYPES + pi * 8)
+    return cell_load(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_TYPES + pi * 8)
 fn fi_generic_name(n: int, gi: int) -> int:
-    return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gi * 8)
+    return cell_load(g_funcs, n * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gi * 8)
 fn fi_set_name(n: int, v: int):
-    w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_NAME, v)
+    cell_store(g_funcs, n * ESZ_FUNCINFO + OFF_FI_NAME, v)
 fn fi_set_param_count(n: int, v: int):
-    w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_COUNT, v)
+    cell_store(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_COUNT, v)
 fn fi_set_param_type(n: int, pi: int, v: int):
     if pi < 0 || pi >= MAX_FN_PARAMS:
         return
     // Slot guard. An out-of-range write would overwrite return_type, ast_node,
     // generic_*, and ispure.
-    w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_TYPES + pi*8, v)
+    cell_store(g_funcs, n * ESZ_FUNCINFO + OFF_FI_PARAM_TYPES + pi*8, v)
 fn fi_set_return_type(n: int, v: int):
-    w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_RETURN_TYPE, v)
+    cell_store(g_funcs, n * ESZ_FUNCINFO + OFF_FI_RETURN_TYPE, v)
 fn fi_set_ast_node(n: int, v: int):
-    w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_AST_NODE, v)
+    cell_store(g_funcs, n * ESZ_FUNCINFO + OFF_FI_AST_NODE, v)
 fn fi_set_generic_name(n: int, gi: int, v: int):
-    w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gi*8, v)
+    cell_store(g_funcs, n * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gi*8, v)
 fn fi_set_generic_count(n: int, v: int):
-    w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_GENERIC_COUNT, v)
+    cell_store(g_funcs, n * ESZ_FUNCINFO + OFF_FI_GENERIC_COUNT, v)
 
 fn fi_ispure(n: int) -> int:
-    return r64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_ISPURE)
+    return cell_load(g_funcs, n * ESZ_FUNCINFO + OFF_FI_ISPURE)
 fn fi_set_ispure(n: int, v: int):
-    w64(g_funcs, n * ESZ_FUNCINFO + OFF_FI_ISPURE, v)
+    cell_store(g_funcs, n * ESZ_FUNCINFO + OFF_FI_ISPURE, v)
 
 // StructInfo helpers
 fn si_name(n: int) -> int:
-    return r64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_NAME)
+    return cell_load(g_structs, n * ESZ_STRUCTINFO + OFF_SI_NAME)
 fn si_field_count(n: int) -> int:
-    return r64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT)
+    return cell_load(g_structs, n * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT)
 fn si_generic_count(n: int) -> int:
-    return r64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT)
+    return cell_load(g_structs, n * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT)
 // Struct field side tables. OFF_SI_FIELD_BASE is the starting row and
 // OFF_SI_FIELD_COUNT is the true count. Three flat tables are addressed by record
 // base + field index. si_commit_fields advances g_si_f_used, reserving the whole
@@ -749,19 +677,19 @@ fn grow_si_fields(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 8)
-    _dyncpy(g_si_f_names, g_si_f_cap * 8, nb)
+    cell_copy(g_si_f_names, g_si_f_cap * 8, nb)
     g_si_f_names = nb
     tb := alloc(nc * 8)
-    _dyncpy(g_si_f_types, g_si_f_cap * 8, tb)
+    cell_copy(g_si_f_types, g_si_f_cap * 8, tb)
     g_si_f_types = tb
     ob := alloc(nc * 8)
-    _dyncpy(g_si_f_nodes, g_si_f_cap * 8, ob)
+    cell_copy(g_si_f_nodes, g_si_f_cap * 8, ob)
     g_si_f_nodes = ob
     g_si_f_cap = nc
 fn si_field_base(n: int) -> int:
-    return r64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_FIELD_BASE)
+    return cell_load(g_structs, n * ESZ_STRUCTINFO + OFF_SI_FIELD_BASE)
 fn si_set_field_base(n: int, v: int):
-    w64(g_structs, n * ESZ_STRUCTINFO + OFF_SI_FIELD_BASE, v)
+    cell_store(g_structs, n * ESZ_STRUCTINFO + OFF_SI_FIELD_BASE, v)
 // Commit the field range, advancing the high-water mark to base + count. parser and
 // the ccr_io loader share this.
 fn si_commit_fields(n: int, fc: int):
@@ -787,29 +715,29 @@ fn si_field_name(n: int, fi: int) -> int:
     r := si_field_row(n, fi)
     if r < 0:
         return -1
-    return r64(g_si_f_names, r * 8)
+    return cell_load(g_si_f_names, r * 8)
 fn si_field_type(n: int, fi: int) -> int:
     r := si_field_row(n, fi)
     if r < 0:
         return -1
-    return r64(g_si_f_types, r * 8)
+    return cell_load(g_si_f_types, r * 8)
 fn si_field_type_node(n: int, fi: int) -> int:
     r := si_field_row(n, fi)
     if r < 0:
         return -1
-    return r64(g_si_f_nodes, r * 8)
+    return cell_load(g_si_f_nodes, r * 8)
 fn si_generic_name(n: int, gi: int) -> int:
-    return r64(g_structs, n*ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + gi*8)
+    return cell_load(g_structs, n*ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + gi*8)
 
 // EnumInfo helpers
 fn ei_name(n: int) -> int:
-    return r64(g_enums, n * ESZ_ENUMINFO + OFF_EI_NAME)
+    return cell_load(g_enums, n * ESZ_ENUMINFO + OFF_EI_NAME)
 fn ei_variant_count(n: int) -> int:
-    return r64(g_enums, n * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT)
+    return cell_load(g_enums, n * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT)
 fn ei_generic_count(n: int) -> int:
-    return r64(g_enums, n * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT)
+    return cell_load(g_enums, n * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT)
 fn ei_generic_name(n: int, gi: int) -> int:
-    return r64(g_enums, n*ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + gi*8)
+    return cell_load(g_enums, n*ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + gi*8)
 // Read guard: out-of-range reads return -1 for names, type codes, and type nodes,
 // and 0 for counts. They never read the neighboring record.
 // Enum variant side tables, the same shape as struct fields.
@@ -822,19 +750,19 @@ fn grow_ei_variants(needed: int):
     if nc < needed:
         nc = needed + 64
     a := alloc(nc * 8)
-    _dyncpy(g_ei_v_names, g_ei_v_cap * 8, a)
+    cell_copy(g_ei_v_names, g_ei_v_cap * 8, a)
     g_ei_v_names = a
     b := alloc(nc * 8)
-    _dyncpy(g_ei_v_tbase, g_ei_v_cap * 8, b)
+    cell_copy(g_ei_v_tbase, g_ei_v_cap * 8, b)
     g_ei_v_tbase = b
     c := alloc(nc * 8)
-    _dyncpy(g_ei_v_tcount, g_ei_v_cap * 8, c)
+    cell_copy(g_ei_v_tcount, g_ei_v_cap * 8, c)
     g_ei_v_tcount = c
     z : ., mut = g_ei_v_cap
     loop:
         if z >= nc:
             break
-        w64(b, z * 8, -1)
+        cell_store(b, z * 8, -1)
         z = z + 1
     // tbase 新槽 = -1 哨兵
     g_ei_v_cap = nc
@@ -847,16 +775,16 @@ fn grow_ei_vtypes(needed: int):
     if nc < needed:
         nc = needed + 64
     a := alloc(nc * 8)
-    _dyncpy(g_ei_vt_types, g_ei_vt_cap * 8, a)
+    cell_copy(g_ei_vt_types, g_ei_vt_cap * 8, a)
     g_ei_vt_types = a
     b := alloc(nc * 8)
-    _dyncpy(g_ei_vt_nodes, g_ei_vt_cap * 8, b)
+    cell_copy(g_ei_vt_nodes, g_ei_vt_cap * 8, b)
     g_ei_vt_nodes = b
     g_ei_vt_cap = nc
 fn ei_variant_base(n: int) -> int:
-    return r64(g_enums, n * ESZ_ENUMINFO + OFF_EI_VARIANTS)
+    return cell_load(g_enums, n * ESZ_ENUMINFO + OFF_EI_VARIANTS)
 fn ei_set_variant_base(n: int, v: int):
-    w64(g_enums, n * ESZ_ENUMINFO + OFF_EI_VARIANTS, v)
+    cell_store(g_enums, n * ESZ_ENUMINFO + OFF_EI_VARIANTS, v)
 fn ei_commit_variants(n: int, vc: int):
     b := ei_variant_base(n)
     if b < 0:
@@ -878,22 +806,22 @@ fn ei_variant_name(n: int, vi: int) -> int:
     r := ei_variant_row(n, vi)
     if r < 0:
         return -1
-    return r64(g_ei_v_names, r * 8)
+    return cell_load(g_ei_v_names, r * 8)
 fn ei_variant_type_count(n: int, vi: int) -> int:
     r := ei_variant_row(n, vi)
     if r < 0:
         return 0
-    return r64(g_ei_v_tcount, r * 8)
+    return cell_load(g_ei_v_tcount, r * 8)
 fn ei_variant_type(n: int, vi: int, ti: int) -> int:
     r := ei_variant_row(n, vi)
     if r < 0:
         return -1
-    if ti < 0 || ti >= r64(g_ei_v_tcount, r * 8):
+    if ti < 0 || ti >= cell_load(g_ei_v_tcount, r * 8):
         return -1
-    tb := r64(g_ei_v_tbase, r * 8)
+    tb := cell_load(g_ei_v_tbase, r * 8)
     if tb < 0:
         return -1
-    return r64(g_ei_vt_types, (tb + ti) * 8)
+    return cell_load(g_ei_vt_types, (tb + ti) * 8)
 // Type node of payload ti, or -1/0 when there is no information. The .ccr does not
 // store this column, so a loader read returns 0. Consumers must bound ti by
 // type_count and must not interpret 0 as node 0.
@@ -901,12 +829,12 @@ fn ei_variant_type_node(n: int, vi: int, ti: int) -> int:
     r := ei_variant_row(n, vi)
     if r < 0:
         return -1
-    if ti < 0 || ti >= r64(g_ei_v_tcount, r * 8):
+    if ti < 0 || ti >= cell_load(g_ei_v_tcount, r * 8):
         return -1
-    tb := r64(g_ei_v_tbase, r * 8)
+    tb := cell_load(g_ei_v_tbase, r * 8)
     if tb < 0:
         return -1
-    return r64(g_ei_vt_nodes, (tb + ti) * 8)
+    return cell_load(g_ei_vt_nodes, (tb + ti) * 8)
 
 // Guarded enum and struct accessors.
 // Field and variant storage now lives in side tables. The setters below are the
@@ -925,7 +853,7 @@ fn ei_set_variant_name(n: int, vi: int, v: int):
     grow_ei_variants(b + vi + 1)
     if b + vi + 1 > g_ei_v_used:
         g_ei_v_used = b + vi + 1
-    w64(g_ei_v_names, (b + vi) * 8, v)
+    cell_store(g_ei_v_names, (b + vi) * 8, v)
 // Payload bases are allocated lazily: the first payload write reserves from the high-water mark.
 
 fn ei_variant_tbase_ensure(n: int, vi: int) -> int:
@@ -934,10 +862,10 @@ fn ei_variant_tbase_ensure(n: int, vi: int) -> int:
         return -1
     grow_ei_variants(b + vi + 1)
     r := b + vi
-    tb := r64(g_ei_v_tbase, r * 8)
+    tb := cell_load(g_ei_v_tbase, r * 8)
     if tb < 0:
         tb = g_ei_vt_used
-        w64(g_ei_v_tbase, r * 8, tb)
+        cell_store(g_ei_v_tbase, r * 8, tb)
     return tb
 fn ei_set_variant_type(n: int, vi: int, ti: int, v: int):
     if vi < 0 || ti < 0:
@@ -946,7 +874,7 @@ fn ei_set_variant_type(n: int, vi: int, ti: int, v: int):
     if tb < 0:
         return
     grow_ei_vtypes(tb + ti + 1)
-    w64(g_ei_vt_types, (tb + ti) * 8, v)
+    cell_store(g_ei_vt_types, (tb + ti) * 8, v)
     if tb + ti + 1 > g_ei_vt_used:
         g_ei_vt_used = tb + ti + 1
 fn ei_set_variant_type_count(n: int, vi: int, v: int):
@@ -956,7 +884,7 @@ fn ei_set_variant_type_count(n: int, vi: int, v: int):
     if b < 0:
         return
     grow_ei_variants(b + vi + 1)
-    w64(g_ei_v_tcount, (b + vi) * 8, v)
+    cell_store(g_ei_v_tcount, (b + vi) * 8, v)
     if v > 0:
         tb := ei_variant_tbase_ensure(n, vi)   // 申报区间整体占位（未写槽亦不与他人重叠）
         if tb >= 0 && tb + v > g_ei_vt_used:
@@ -968,7 +896,7 @@ fn ei_set_variant_type_node(n: int, vi: int, ti: int, v: int):
     if tb < 0:
         return
     grow_ei_vtypes(tb + ti + 1)
-    w64(g_ei_vt_nodes, (tb + ti) * 8, v)
+    cell_store(g_ei_vt_nodes, (tb + ti) * 8, v)
     if tb + ti + 1 > g_ei_vt_used:
         g_ei_vt_used = tb + ti + 1
 fn si_set_field_name(n: int, fi: int, v: int):
@@ -980,7 +908,7 @@ fn si_set_field_name(n: int, fi: int, v: int):
     grow_si_fields(b + fi + 1)
     if b + fi + 1 > g_si_f_used:
         g_si_f_used = b + fi + 1
-    w64(g_si_f_names, (b + fi) * 8, v)
+    cell_store(g_si_f_names, (b + fi) * 8, v)
 fn si_set_field_type(n: int, fi: int, v: int):
     if fi < 0:
         return
@@ -990,7 +918,7 @@ fn si_set_field_type(n: int, fi: int, v: int):
     grow_si_fields(b + fi + 1)
     if b + fi + 1 > g_si_f_used:
         g_si_f_used = b + fi + 1
-    w64(g_si_f_types, (b + fi) * 8, v)
+    cell_store(g_si_f_types, (b + fi) * 8, v)
 fn si_set_field_type_node(n: int, fi: int, v: int):
     if fi < 0:
         return
@@ -1000,7 +928,7 @@ fn si_set_field_type_node(n: int, fi: int, v: int):
     grow_si_fields(b + fi + 1)
     if b + fi + 1 > g_si_f_used:
         g_si_f_used = b + fi + 1
-    w64(g_si_f_nodes, (b + fi) * 8, v)
+    cell_store(g_si_f_nodes, (b + fi) * 8, v)
 
 // ============================================================
 // String table helpers (dynamic byte buffer)
@@ -1014,7 +942,7 @@ fn grow_g_strs(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 8)
-    _dyncpy(g_strs, g_str_cap * 8, nb)
+    cell_copy(g_strs, g_str_cap * 8, nb)
     g_strs = nb
     g_str_cap = nc
 
@@ -1022,7 +950,7 @@ fn str_hash(s: string) -> int:
     h : ., mut = 5381
     i : ., mut = 0
     loop:
-        c := load8(s, i)
+        c := cell_load_byte(s, i)
         if c == 0:
             break
         h = h * 33 + c
@@ -1039,7 +967,7 @@ fn hash_bytes(data: string, len: int) -> int:
         if i >= len:
             break
         h = h * 16777619  // FNV prime
-        h = h + (load8(data, i) % 256)
+        h = h + (cell_load_byte(data, i) % 256)
         i = i + 1
     return h
 
@@ -1050,7 +978,7 @@ fn _grow_str_hash(ncap: int):
     loop:
         if i >= ncap:
             break
-        w64(nb, i * 8, -1)
+        cell_store(nb, i * 8, -1)
         i = i + 1
 
     // Rehash all strings already in g_strs into new table
@@ -1058,14 +986,14 @@ fn _grow_str_hash(ncap: int):
     loop:
         if si >= g_str_count:
             break
-        s := load_str_ptr(g_strs, si * 8)
+        s := cell_load_str(g_strs, si * 8)
         h := str_hash(s)
         pos := h % ncap
         if pos < 0:
             pos = -pos
         loop:
-            if r64(nb, pos * 8) < 0:
-                w64(nb, pos * 8, si)
+            if cell_load(nb, pos * 8) < 0:
+                cell_store(nb, pos * 8, si)
                 break
             pos = (pos + 1) % ncap
         si = si + 1
@@ -1084,17 +1012,17 @@ fn str_intern(s: string) -> int:
     if pos < 0:
         pos = -pos
     loop:
-        si := r64(g_str_hash, pos * 8)
+        si := cell_load(g_str_hash, pos * 8)
         if si < 0:
             break
         // Empty slot means not found.
-        if str_eq(load_str_ptr(g_strs, si * 8), s) != 0:
+        if str_eq(cell_load_str(g_strs, si * 8), s) != 0:
             return si
         pos = (pos + 1) % cap
 
     // Not found: insert
     grow_g_strs(g_str_count + 1)
-    store_str_ptr(g_strs, g_str_count * 8, s)
+    cell_store_str(g_strs, g_str_count * 8, s)
     g_str_count = g_str_count + 1
 
     // This is the only insertion path for interned strings, so every new string
@@ -1103,7 +1031,7 @@ fn str_intern(s: string) -> int:
         cir_rec_push(g_str_count - 1)
 
     // Insert into hash table (pos is the empty slot we found)
-    w64(g_str_hash, pos * 8, g_str_count - 1)
+    cell_store(g_str_hash, pos * 8, g_str_count - 1)
 
     // Auto-rehash if load > 70%
     if g_str_count * 10 > g_str_hash_cap * 7:
@@ -1119,16 +1047,16 @@ fn cir_rec_push(si: int):
         if nc < 64:
             nc = 64
         nb := alloc(nc * 8)
-        _dyncpy(g_cir_rec_ids, g_cir_rec_cap * 8, nb)
+        cell_copy(g_cir_rec_ids, g_cir_rec_cap * 8, nb)
         g_cir_rec_ids = nb
         g_cir_rec_cap = nc
-    w64(g_cir_rec_ids, g_cir_rec_count * 8, si)
+    cell_store(g_cir_rec_ids, g_cir_rec_count * 8, si)
     g_cir_rec_count = g_cir_rec_count + 1
 
 fn istr_get(idx: int) -> string:
     if idx < 0 || idx >= g_str_count:
         return ""
-    return load_str_ptr(g_strs, idx * 8)
+    return cell_load_str(g_strs, idx * 8)
 
 fn istr_len(idx: int) -> int:
     if idx < 0 || idx >= g_str_count:
@@ -1138,7 +1066,7 @@ fn istr_len(idx: int) -> int:
 fn str_load8(idx: int, ci: int) -> int:
     if idx < 0 || idx >= g_str_count:
         return 0
-    return load8(istr_get(idx), ci)
+    return cell_load_byte(istr_get(idx), ci)
 
 fn grow_line_file(needed: int):
     if needed < g_line_cap:
@@ -1149,7 +1077,7 @@ fn grow_line_file(needed: int):
     if nc < needed:
         nc = needed + 128
     nb := alloc(nc * 8)
-    _dyncpy(g_line_fileid, g_line_cap * 8, nb)
+    cell_copy(g_line_fileid, g_line_cap * 8, nb)
     g_line_fileid = nb
     g_line_cap = nc
 fn grow_segs(needed: int):
@@ -1162,10 +1090,10 @@ fn grow_segs(needed: int):
         nc = needed + 16
     sz := nc * 8
     n1 := alloc(sz)
-    _dyncpy(g_seg_starts, g_seg_cap * 8, n1)
+    cell_copy(g_seg_starts, g_seg_cap * 8, n1)
     g_seg_starts = n1
     n2 := alloc(sz)
-    _dyncpy(g_seg_fileids, g_seg_cap * 8, n2)
+    cell_copy(g_seg_fileids, g_seg_cap * 8, n2)
     g_seg_fileids = n2
     g_seg_cap = nc
 fn grow_gen_apply_data(needed: int):
@@ -1177,7 +1105,7 @@ fn grow_gen_apply_data(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 8)
-    _dyncpy(g_gen_apply_data, g_gen_apply_data_cap * 8, nb)
+    cell_copy(g_gen_apply_data, g_gen_apply_data_cap * 8, nb)
     g_gen_apply_data = nb
     g_gen_apply_data_cap = nc
 fn grow_df_nodes(needed: int):
@@ -1189,7 +1117,7 @@ fn grow_df_nodes(needed: int):
     if nc < needed:
         nc = needed + 128
     nb := alloc(nc * ESZ_DFNODE)
-    _dyncpy(g_df_nodes, g_df_node_cap * ESZ_DFNODE, nb)
+    cell_copy(g_df_nodes, g_df_node_cap * ESZ_DFNODE, nb)
     g_df_nodes = nb
     g_df_node_cap = nc
 fn grow_df_node_region(needed: int):
@@ -1201,7 +1129,7 @@ fn grow_df_node_region(needed: int):
     if nc < needed:
         nc = needed + 128
     nb := alloc(nc * 8)
-    _dyncpy(g_df_node_region, g_df_node_region_cap * 8, nb)
+    cell_copy(g_df_node_region, g_df_node_region_cap * 8, nb)
     g_df_node_region = nb
     g_df_node_region_cap = nc
 fn grow_df_edges(needed: int):
@@ -1213,7 +1141,7 @@ fn grow_df_edges(needed: int):
     if nc < needed:
         nc = needed + 128
     nb := alloc(nc * ESZ_DFEDGE)
-    _dyncpy(g_df_edges, g_df_edge_cap * ESZ_DFEDGE, nb)
+    cell_copy(g_df_edges, g_df_edge_cap * ESZ_DFEDGE, nb)
     g_df_edges = nb
     g_df_edge_cap = nc
 fn grow_df_arrays(needed: int):
@@ -1226,7 +1154,7 @@ fn grow_df_arrays(needed: int):
         nc = needed + 128
     sz := nc * 8
     n1 := alloc(sz)
-    _dyncpy(g_df_var_producer, g_df_cap * 8, n1)
+    cell_copy(g_df_var_producer, g_df_cap * 8, n1)
     // Initialize producer slots to -1. Newly allocated memory is not guaranteed to
     // be zeroed, and a zero would mean node 0, creating ghost edges 0->X and a
     // self-loop. The new range is filled explicitly; the copied range keeps its
@@ -1235,19 +1163,19 @@ fn grow_df_arrays(needed: int):
     loop:
         if zi >= nc:
             break
-        w64(n1, zi * 8, -1)
+        cell_store(n1, zi * 8, -1)
         zi = zi + 1
     g_df_var_producer = n1
     n2 := alloc(sz)
-    _dyncpy(g_df_func_node_start, g_df_cap * 8, n2)
+    cell_copy(g_df_func_node_start, g_df_cap * 8, n2)
     g_df_func_node_start = n2
     n3 := alloc(sz)
-    _dyncpy(g_df_func_node_count, g_df_cap * 8, n3)
+    cell_copy(g_df_func_node_count, g_df_cap * 8, n3)
     g_df_func_node_count = n3
     // Per-function edge starts grow with g_df_cap. df_begin_func overwrites the
     // slot for each function, and readers only access it afterwards.
     n4 := alloc(sz)
-    _dyncpy(g_df_func_edge_start, g_df_cap * 8, n4)
+    cell_copy(g_df_func_edge_start, g_df_cap * 8, n4)
     g_df_func_edge_start = n4
     g_df_cap = nc
 
@@ -1261,10 +1189,10 @@ fn grow_gen_map(needed: int):
         nc = needed + 8
     sz := nc * 8
     n1 := alloc(sz)
-    _dyncpy(g_gen_map_names, g_gen_map_cap*8, n1)
+    cell_copy(g_gen_map_names, g_gen_map_cap*8, n1)
     g_gen_map_names = n1
     n2 := alloc(sz)
-    _dyncpy(g_gen_map_types, g_gen_map_cap*8, n2)
+    cell_copy(g_gen_map_types, g_gen_map_cap*8, n2)
     g_gen_map_types = n2
     g_gen_map_cap = nc
 fn grow_borrow_vars(needed: int):
@@ -1277,13 +1205,13 @@ fn grow_borrow_vars(needed: int):
         nc = needed + 16
     sz := nc * 8
     n1 := alloc(sz)
-    _dyncpy(g_borrow_vars, g_borrow_cap*8, n1)
+    cell_copy(g_borrow_vars, g_borrow_cap*8, n1)
     g_borrow_vars = n1
     n2 := alloc(sz)
-    _dyncpy(g_borrow_refs, g_borrow_cap*8, n2)
+    cell_copy(g_borrow_refs, g_borrow_cap*8, n2)
     g_borrow_refs = n2
     n3 := alloc(sz)
-    _dyncpy(g_borrow_muts, g_borrow_cap*8, n3)
+    cell_copy(g_borrow_muts, g_borrow_cap*8, n3)
     g_borrow_muts = n3
     g_borrow_cap = nc
 fn grow_holder(needed: int):
@@ -1296,13 +1224,13 @@ fn grow_holder(needed: int):
         nc = needed + 16
     sz := nc * 8
     n1 := alloc(sz)
-    _dyncpy(g_holder_borrowers, g_holder_cap*8, n1)
+    cell_copy(g_holder_borrowers, g_holder_cap*8, n1)
     g_holder_borrowers = n1
     n2 := alloc(sz)
-    _dyncpy(g_holder_borrowed, g_holder_cap*8, n2)
+    cell_copy(g_holder_borrowed, g_holder_cap*8, n2)
     g_holder_borrowed = n2
     n3 := alloc(sz)
-    _dyncpy(g_holder_is_mut, g_holder_cap*8, n3)
+    cell_copy(g_holder_is_mut, g_holder_cap*8, n3)
     g_holder_is_mut = n3
     g_holder_cap = nc
 
@@ -1315,7 +1243,7 @@ fn grow_global_lets(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 8)
-    _dyncpy(g_global_lets, g_global_lets_cap * 8, nb)
+    cell_copy(g_global_lets, g_global_lets_cap * 8, nb)
     g_global_lets = nb
     g_global_lets_cap = nc
 fn grow_loop_stack(needed: int):
@@ -1327,7 +1255,7 @@ fn grow_loop_stack(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 24)
-    _dyncpy(g_loop_stack, g_loop_stack_cap * 24, nb)
+    cell_copy(g_loop_stack, g_loop_stack_cap * 24, nb)
     g_loop_stack = nb
     g_loop_stack_cap = nc
 fn grow_type_aliases(needed: int):
@@ -1339,7 +1267,7 @@ fn grow_type_aliases(needed: int):
     if nc < needed:
         nc = needed + 32
     nb := alloc(nc * 16)
-    _dyncpy(g_type_aliases, g_type_alias_cap * 16, nb)
+    cell_copy(g_type_aliases, g_type_alias_cap * 16, nb)
     g_type_aliases = nb
     g_type_alias_cap = nc
 fn grow_scope_bounds(needed: int):
@@ -1351,7 +1279,7 @@ fn grow_scope_bounds(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 8)
-    _dyncpy(g_scope_bounds, g_scope_bounds_cap * 8, nb)
+    cell_copy(g_scope_bounds, g_scope_bounds_cap * 8, nb)
     g_scope_bounds = nb
     g_scope_bounds_cap = nc
 fn grow_methods(needed: int):
@@ -1363,7 +1291,7 @@ fn grow_methods(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 24)
-    _dyncpy(g_methods, g_method_cap * 24, nb)
+    cell_copy(g_methods, g_method_cap * 24, nb)
     g_methods = nb
     g_method_cap = nc
 fn grow_borrow_markers(needed: int):
@@ -1375,7 +1303,7 @@ fn grow_borrow_markers(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 8)
-    _dyncpy(g_borrow_scope_markers, g_borrow_scope_markers_cap * 8, nb)
+    cell_copy(g_borrow_scope_markers, g_borrow_scope_markers_cap * 8, nb)
     g_borrow_scope_markers = nb
     g_borrow_scope_markers_cap = nc
 
@@ -1396,13 +1324,13 @@ fn grow_so_side(needed: int):
         nc = needed + 32
     sz := nc * 8
     n1 := alloc(sz)
-    _dyncpy(g_so_side_name, g_so_side_cap*8, n1)
+    cell_copy(g_so_side_name, g_so_side_cap*8, n1)
     g_so_side_name = n1
     n2 := alloc(sz)
-    _dyncpy(g_so_side_tags, g_so_side_cap*8, n2)
+    cell_copy(g_so_side_tags, g_so_side_cap*8, n2)
     g_so_side_tags = n2
     n3 := alloc(sz)
-    _dyncpy(g_so_side_type, g_so_side_cap*8, n3)
+    cell_copy(g_so_side_type, g_so_side_cap*8, n3)
     g_so_side_type = n3
     g_so_side_cap = nc
 
@@ -1417,25 +1345,25 @@ fn grow_spec_side(needed: int):
         nc = needed + 16
     sz := nc * 8
     n1 := alloc(sz)
-    _dyncpy(g_spec_fn, g_spec_cap*8, n1)
+    cell_copy(g_spec_fn, g_spec_cap*8, n1)
     g_spec_fn = n1
     n6 := alloc(sz)
-    _dyncpy(g_spec_fnode, g_spec_cap*8, n6)
+    cell_copy(g_spec_fnode, g_spec_cap*8, n6)
     g_spec_fnode = n6
     n7 := alloc(sz)
-    _dyncpy(g_spec_status, g_spec_cap*8, n7)
+    cell_copy(g_spec_status, g_spec_cap*8, n7)
     g_spec_status = n7
     n2 := alloc(sz)
-    _dyncpy(g_spec_kind, g_spec_cap*8, n2)
+    cell_copy(g_spec_kind, g_spec_cap*8, n2)
     g_spec_kind = n2
     n3 := alloc(sz)
-    _dyncpy(g_spec_expr, g_spec_cap*8, n3)
+    cell_copy(g_spec_expr, g_spec_cap*8, n3)
     g_spec_expr = n3
     n4 := alloc(sz)
-    _dyncpy(g_spec_line, g_spec_cap*8, n4)
+    cell_copy(g_spec_line, g_spec_cap*8, n4)
     g_spec_line = n4
     n5 := alloc(sz)
-    _dyncpy(g_spec_col, g_spec_cap*8, n5)
+    cell_copy(g_spec_col, g_spec_cap*8, n5)
     g_spec_col = n5
     g_spec_cap = nc
 
@@ -1443,56 +1371,56 @@ fn grow_spec_side(needed: int):
 fn spec_add(fn_ni: int, kind: int, expr: int, line: int, col: int):
     grow_spec_side(g_spec_count + 1)
     i := g_spec_count
-    w64(g_spec_fn, i * 8, fn_ni)
-    w64(g_spec_fnode, i * 8, -1)   // 由 parser 在 EXPR_FN 分配后回填（spec_set_fnode）
-    w64(g_spec_status, i * 8, SPEC_ST_YELLOW)
-    w64(g_spec_kind, i * 8, kind)
-    w64(g_spec_expr, i * 8, expr)
-    w64(g_spec_line, i * 8, line)
-    w64(g_spec_col, i * 8, col)
+    cell_store(g_spec_fn, i * 8, fn_ni)
+    cell_store(g_spec_fnode, i * 8, -1)   // 由 parser 在 EXPR_FN 分配后回填（spec_set_fnode）
+    cell_store(g_spec_status, i * 8, SPEC_ST_YELLOW)
+    cell_store(g_spec_kind, i * 8, kind)
+    cell_store(g_spec_expr, i * 8, expr)
+    cell_store(g_spec_line, i * 8, line)
+    cell_store(g_spec_col, i * 8, col)
     g_spec_count = i + 1
 
 // Guarded read accessors: out-of-range indexes return the sentinel and never read a neighboring record.
 fn spec_fn(i: int) -> int:
     if i < 0 || i >= g_spec_count:
         return -1
-    return r64(g_spec_fn, i * 8)
+    return cell_load(g_spec_fn, i * 8)
 fn spec_fnode(i: int) -> int:
     if i < 0 || i >= g_spec_count:
         return -1
-    return r64(g_spec_fnode, i * 8)
+    return cell_load(g_spec_fnode, i * 8)
 fn spec_status(i: int) -> int:
     if i < 0 || i >= g_spec_count:
         return -1
-    return r64(g_spec_status, i * 8)
+    return cell_load(g_spec_status, i * 8)
 // Status write: red is sticky. A later green must not erase a hard error.
 fn spec_set_status(i: int, st: int):
     if i < 0 || i >= g_spec_count:
         return
-    cur := r64(g_spec_status, i * 8)
+    cur := cell_load(g_spec_status, i * 8)
     if cur == SPEC_ST_RED:
         return
-    w64(g_spec_status, i * 8, st)
+    cell_store(g_spec_status, i * 8, st)
 fn spec_set_fnode(i: int, v: int):
     if i < 0 || i >= g_spec_count:
         return
-    w64(g_spec_fnode, i * 8, v)
+    cell_store(g_spec_fnode, i * 8, v)
 fn spec_kind(i: int) -> int:
     if i < 0 || i >= g_spec_count:
         return -1
-    return r64(g_spec_kind, i * 8)
+    return cell_load(g_spec_kind, i * 8)
 fn spec_expr(i: int) -> int:
     if i < 0 || i >= g_spec_count:
         return -1
-    return r64(g_spec_expr, i * 8)
+    return cell_load(g_spec_expr, i * 8)
 fn spec_line(i: int) -> int:
     if i < 0 || i >= g_spec_count:
         return -1
-    return r64(g_spec_line, i * 8)
+    return cell_load(g_spec_line, i * 8)
 fn spec_col(i: int) -> int:
     if i < 0 || i >= g_spec_count:
         return -1
-    return r64(g_spec_col, i * 8)
+    return cell_load(g_spec_col, i * 8)
 
 fn grow_pending(needed: int):
     if needed < g_pending_cap:
@@ -1503,10 +1431,10 @@ fn grow_pending(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 8)
-    _dyncpy(g_pending_pos, g_pending_cap * 8, nb)
+    cell_copy(g_pending_pos, g_pending_cap * 8, nb)
     g_pending_pos = nb
     nb2 := alloc(nc * 8)
-    _dyncpy(g_pending_label, g_pending_cap * 8, nb2)
+    cell_copy(g_pending_label, g_pending_cap * 8, nb2)
     g_pending_label = nb2
     g_pending_cap = nc
 fn grow_opt_meta(needed: int):
@@ -1518,7 +1446,7 @@ fn grow_opt_meta(needed: int):
     if nc < needed:
         nc = needed + 16
     nb := alloc(nc * OPT_META_STRIDE)
-    _dyncpy(g_opt_meta, g_opt_meta_count * OPT_META_STRIDE, nb)
+    cell_copy(g_opt_meta, g_opt_meta_count * OPT_META_STRIDE, nb)
     g_opt_meta = nb
     g_opt_meta_cap = nc
 fn grow_ir_local_scopes(needed: int):
@@ -1530,7 +1458,7 @@ fn grow_ir_local_scopes(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 8)
-    _dyncpy(g_ir_local_scopes, g_ir_local_scopes_cap * 8, nb)
+    cell_copy(g_ir_local_scopes, g_ir_local_scopes_cap * 8, nb)
     g_ir_local_scopes = nb
     g_ir_local_scopes_cap = nc
 
@@ -1543,10 +1471,10 @@ fn grow_ir_loop_stacks(needed: int):
     if nc < needed:
         nc = needed + 64
     n1 := alloc(nc * 8)
-    _dyncpy(g_ir_loop_header, g_ir_loop_stacks_cap * 8, n1)
+    cell_copy(g_ir_loop_header, g_ir_loop_stacks_cap * 8, n1)
     g_ir_loop_header = n1
     n2 := alloc(nc * 8)
-    _dyncpy(g_ir_loop_exit, g_ir_loop_stacks_cap * 8, n2)
+    cell_copy(g_ir_loop_exit, g_ir_loop_stacks_cap * 8, n2)
     g_ir_loop_exit = n2
     g_ir_loop_stacks_cap = nc
 
@@ -1559,7 +1487,7 @@ fn grow_label_poses(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 8)
-    _dyncpy(g_label_poses, g_label_cap * 8, nb)
+    cell_copy(g_label_poses, g_label_cap * 8, nb)
     g_label_poses = nb
     g_label_cap = nc
 
@@ -1577,7 +1505,7 @@ fn grow_diags(needed: int):
     if nc < needed:
         nc = needed + 16
     nb := alloc(nc * DIAG_REC_SIZE)
-    _dyncpy(g_diags, g_diag_cap * DIAG_REC_SIZE, nb)
+    cell_copy(g_diags, g_diag_cap * DIAG_REC_SIZE, nb)
     g_diags = nb
     g_diag_cap = nc
 
@@ -1591,7 +1519,7 @@ fn grow_files(needed: int):
     if nc < needed:
         nc = needed + 16
     nb := alloc(nc * 16)
-    _dyncpy(g_files, g_file_cap * 16, nb)
+    cell_copy(g_files, g_file_cap * 16, nb)
     g_files = nb
     g_file_cap = nc
 
@@ -1605,7 +1533,7 @@ fn grow_mods(needed: int):
     if nc < needed:
         nc = needed + 16
     nb := alloc(nc * 24)
-    _dyncpy(g_mods, g_mod_cap * 24, nb)
+    cell_copy(g_mods, g_mod_cap * 24, nb)
     g_mods = nb
     g_mod_cap = nc
 
@@ -1620,13 +1548,13 @@ fn grow_mod_funcs(needed: int):
         nc = needed + 64
     sz := nc * 8
     n1 := alloc(sz)
-    _dyncpy(g_mod_func_fileids, g_mod_func_cap * 8, n1)
+    cell_copy(g_mod_func_fileids, g_mod_func_cap * 8, n1)
     g_mod_func_fileids = n1
     n2 := alloc(sz)
-    _dyncpy(g_mod_func_names, g_mod_func_cap * 8, n2)
+    cell_copy(g_mod_func_names, g_mod_func_cap * 8, n2)
     g_mod_func_names = n2
     n3 := alloc(sz)
-    _dyncpy(g_mod_func_tis, g_mod_func_cap * 8, n3)
+    cell_copy(g_mod_func_tis, g_mod_func_cap * 8, n3)
     g_mod_func_tis = n3
     g_mod_func_cap = nc
 
@@ -1640,7 +1568,7 @@ fn grow_mod_paths(needed: int):
     if nc < needed:
         nc = needed + 32
     nb := alloc(nc * 8)
-    _dyncpy(g_mod_path_names, g_mod_path_cap * 8, nb)
+    cell_copy(g_mod_path_names, g_mod_path_cap * 8, nb)
     g_mod_path_names = nb
     g_mod_path_cap = nc
 
@@ -1654,7 +1582,7 @@ fn grow_impl_for(needed: int):
     if nc < needed:
         nc = needed + 8
     nb := alloc(nc * 16)
-    _dyncpy(g_impl_for, g_impl_for_cap * 16, nb)
+    cell_copy(g_impl_for, g_impl_for_cap * 16, nb)
     g_impl_for = nb
     g_impl_for_cap = nc
 
@@ -1668,7 +1596,7 @@ fn grow_gen_params(needed: int):
     if nc < needed:
         nc = needed + 16
     nb := alloc(nc * 8)
-    _dyncpy(g_gen_params, g_gen_param_cap * 8, nb)
+    cell_copy(g_gen_params, g_gen_param_cap * 8, nb)
     g_gen_params = nb
     g_gen_param_cap = nc
 
@@ -1682,7 +1610,7 @@ fn grow_gen_constr(needed: int):
     if nc < needed:
         nc = needed + 16
     nb := alloc(nc * 8)
-    _dyncpy(g_generic_constr, g_generic_constr_cap * 8, nb)
+    cell_copy(g_generic_constr, g_generic_constr_cap * 8, nb)
     g_generic_constr = nb
     g_generic_constr_cap = nc
 
@@ -1697,7 +1625,7 @@ fn grow_sgen_constr(needed: int):
     if nc < needed:
         nc = needed + 16
     nb := alloc(nc * 8)
-    _dyncpy(g_sgen_constr, g_sgen_constr_cap * 8, nb)
+    cell_copy(g_sgen_constr, g_sgen_constr_cap * 8, nb)
     g_sgen_constr = nb
     g_sgen_constr_cap = nc
 
@@ -1710,7 +1638,7 @@ fn grow_egen_constr(needed: int):
     if nc < needed:
         nc = needed + 16
     nb := alloc(nc * 8)
-    _dyncpy(g_egen_constr, g_egen_constr_cap * 8, nb)
+    cell_copy(g_egen_constr, g_egen_constr_cap * 8, nb)
     g_egen_constr = nb
     g_egen_constr_cap = nc
 
@@ -1724,7 +1652,7 @@ fn grow_gen_binds(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 8)
-    _dyncpy(g_gen_binds, g_gen_binds_cap * 8, nb)
+    cell_copy(g_gen_binds, g_gen_binds_cap * 8, nb)
     g_gen_binds = nb
     g_gen_binds_cap = nc
 
@@ -1737,7 +1665,7 @@ fn si_gen_constr(n: int, gi: int) -> int:
     idx := n * MAX_GENERICS + gi
     if idx >= g_sgen_constr_count:
         return -1
-    return r64(g_sgen_constr, idx * 8)
+    return cell_load(g_sgen_constr, idx * 8)
 
 fn ei_gen_constr(n: int, gi: int) -> int:
     if n < 0 || gi < 0 || gi >= MAX_GENERICS:
@@ -1745,7 +1673,7 @@ fn ei_gen_constr(n: int, gi: int) -> int:
     idx := n * MAX_GENERICS + gi
     if idx >= g_egen_constr_count:
         return -1
-    return r64(g_egen_constr, idx * 8)
+    return cell_load(g_egen_constr, idx * 8)
 
 fn grow_sg(n: int):
     if n < g_sg_cap:
@@ -1759,7 +1687,7 @@ fn grow_sg(n: int):
         nc = nc * 2
     nb := alloc(nc * ESZ_SG)
     if g_sg_cap > 0:
-        _dyncpy(g_sgs, g_sg_cap * ESZ_SG, nb)
+        cell_copy(g_sgs, g_sg_cap * ESZ_SG, nb)
     g_sgs = nb
     g_sg_cap = nc
 
@@ -1775,7 +1703,7 @@ fn grow_pts(n: int):
         nc = nc * 2
     nb := alloc(nc * 8)
     if g_pts_cap > 0:
-        _dyncpy(g_pts, g_pts_cap * 8, nb)
+        cell_copy(g_pts, g_pts_cap * 8, nb)
     g_pts = nb
     g_pts_cap = nc
 
@@ -1791,6 +1719,6 @@ fn grow_offsets(n: int):
         nc = nc * 2
     nb := alloc(nc * 8)
     if g_offsets_cap > 0:
-        _dyncpy(g_offsets, g_offsets_cap * 8, nb)
+        cell_copy(g_offsets, g_offsets_cap * 8, nb)
     g_offsets = nb
     g_offsets_cap = nc

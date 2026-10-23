@@ -178,10 +178,10 @@
 #   这是**固有代价**，不是回归——但按本文件两级纪律，**必须显式声明 + 同批重锁 + 旧值留痕**。
 
 canary_elf	pa	826d74cf7f099f9758e11a64d443695ff8360327a88e7eb5922ddfd617e0dce5	53430
-pa_ccr	pa.ccr	e581daf5a8e30f91745d3c0b6fb6ae6421422248507ec401a67228ae7c6c2355	96985
-pa_static_ccr	pa_st.bin.ccr	a7d2433b0c78428ed93e434ccd617f1308362d7bb268764712d2972e243485a1	97128
-gt_ccr	gt.ccr	21b1f39c96bd2242b963bb5a1726eb93b912739f77c31317da055d6b37d88103	143687
-gt_static_ccr	gt_st.bin.ccr	4949ff5437e1bc78a5e2f95e4fb05c07e20da0ed4bee35c58662f19bbdc60271	143830
+pa_ccr	pa.ccr	8b0575e0060df241a697b2e2d78e1a128eeff3515b8444f178cf127e03077f7f	96985
+pa_static_ccr	pa_st.bin.ccr	667ca1f65421cc11cdc8935e070d663e2b4fa1b692e26e80dad75ace776103dd	97128
+gt_ccr	gt.ccr	4df02acd1ea343601ae8a016cff093bf56d7a90f7b6b06c2811b1b3a3a2d3e41	143687
+gt_static_ccr	gt_st.bin.ccr	bacd9eddd956dce88df3de675a29d0857d832c5a843781707a2e84b3c864f8a1	143830
 # ⚠ **本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下
@@ -281,3 +281,14 @@ gt_static_ccr	gt_st.bin.ccr	4949ff5437e1bc78a5e2f95e4fb05c07e20da0ed4bee35c58662
 #   四条 `.ccr` **逐字节不变**（`.ccr` 由 `corec` 前端生成，不含后端全局）。
 #   D1 确定性闸门 5/5 PASS（重锁前置已绿）。
 #   旧值留痕（自本批起作废）：canary_elf `dfae9d845362856fe3609ecd23fcb2deaaa7eae1d2ca39b7a242695513e9bb09` 53430。
+
+# ── 【本批重锁 2026-10-23】前端机器边界清理（三轴 target + builtin/Mapping）──
+#   四条 `.ccr`：size 全不变，sha 全变；canary ELF 不变。
+#   归因 = 编译器侧全局登记顺序改变：`g_rt_builtin_*` 从 checker.cr 移到 prelude.cr，
+#   内建表按 arch/os/runtime 三轴重组；用户程序 .ccr 内嵌的编译器 intern/身份随之位移，
+#   机码与语义未变。D1 5/5 PASS，ELF canary 逐字节不变。
+#   旧值留痕（自本批起作废）：
+#     pa_ccr        e581daf5a8e30f91745d3c0b6fb6ae6421422248507ec401a67228ae7c6c2355 96985
+#     pa_static_ccr a7d2433b0c78428ed93e434ccd617f1308362d7bb268764712d2972e243485a1 97128
+#     gt_ccr        21b1f39c96bd2242b963bb5a1726eb93b912739f77c31317da055d6b37d88103 143687
+#     gt_static_ccr 4949ff5437e1bc78a5e2f95e4fb05c07e20da0ed4bee35c58662f19bbdc60271 143830

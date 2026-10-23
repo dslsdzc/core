@@ -79,7 +79,7 @@ fn is_ident_char(c: int) -> int:
 fn add_error(msg: string):
     mi := str_intern(msg)
     grow_errors(g_error_count + 1)
-    w64(g_errors, g_error_count * 8, mi)
+    cell_store(g_errors, g_error_count * 8, mi)
     g_error_count = g_error_count + 1
 
 fn cur_char() -> int:
@@ -90,22 +90,22 @@ fn cur_char() -> int:
     src_len := str_len(g_source)
     if g_pos >= src_len:
         return 0
-    return load8(g_source, g_pos)
+    return cell_load_byte(g_source, g_pos)
 
 fn peek() -> int:
     src_len := str_len(g_source)
     if g_pos + 1 >= src_len:
         return 0
-    return load8(g_source, g_pos + 1)
+    return cell_load_byte(g_source, g_pos + 1)
 
 fn cur_char_at(src: string, pos: int, max_len: int) -> int:
     if pos >= max_len:
         return 0
-    return load8(src, pos)
+    return cell_load_byte(src, pos)
 fn peek_at(src: string, pos: int, max_len: int) -> int:
     if pos + 1 >= max_len:
         return 0
-    return load8(src, pos + 1)
+    return cell_load_byte(src, pos + 1)
 
 fn lookup_keyword(s: string) -> int:
     if s == "fn":
@@ -202,8 +202,8 @@ fn str_int_literal(s: string) -> int:
     sl := str_len(s)
     base : ., mut = 10
     start : ., mut = 0
-    if sl >= 2 && load8(s, 0) == 48:
-        pfx := load8(s, 1)
+    if sl >= 2 && cell_load_byte(s, 0) == 48:
+        pfx := cell_load_byte(s, 1)
         if pfx == 120 || pfx == 88:
             base = 16
             start = 2
@@ -219,7 +219,7 @@ fn str_int_literal(s: string) -> int:
     loop:
         if i >= sl:
             break
-        c := load8(s, i)
+        c := cell_load_byte(s, i)
         if c == 95:
             i = i + 1
             continue
@@ -269,7 +269,7 @@ fn str_to_scaled(s: string) -> int:
     sl := str_len(s)
     i : ., mut = 0
     neg : int = 0
-    if i < sl && load8(s, i) == 45:
+    if i < sl && cell_load_byte(s, i) == 45:
         neg = 1
         i = i + 1
     ip : int = 0
@@ -280,7 +280,7 @@ fn str_to_scaled(s: string) -> int:
     loop:
         if i >= sl:
             break
-        c := load8(s, i)
+        c := cell_load_byte(s, i)
         if c == 46:
             sd = 1
             i = i + 1
@@ -318,43 +318,43 @@ fn str_to_scaled(s: string) -> int:
 fn add_tok(kind: int, lex: int, start_line: int, start_col: int):
     grow_tokens(g_token_count + 1)
     tp := g_token_count * ESZ_TOKEN
-    w64(g_tokens, tp + OFF_TK_KIND, kind)
-    w64(g_tokens, tp + OFF_TK_LEXEME, lex)
-    w64(g_tokens, tp + OFF_TK_INTVAL, 0)
-    w64(g_tokens, tp + OFF_TK_LINE, start_line)
-    w64(g_tokens, tp + OFF_TK_COL, start_col)
+    cell_store(g_tokens, tp + OFF_TK_KIND, kind)
+    cell_store(g_tokens, tp + OFF_TK_LEXEME, lex)
+    cell_store(g_tokens, tp + OFF_TK_INTVAL, 0)
+    cell_store(g_tokens, tp + OFF_TK_LINE, start_line)
+    cell_store(g_tokens, tp + OFF_TK_COL, start_col)
     g_token_count = g_token_count + 1
 
 fn add_tok_int(kind: int, ival: int, start_line: int, start_col: int):
     grow_tokens(g_token_count + 1)
     tp := g_token_count * ESZ_TOKEN
-    w64(g_tokens, tp + OFF_TK_KIND, kind)
-    w64(g_tokens, tp + OFF_TK_LEXEME, -1)
-    w64(g_tokens, tp + OFF_TK_INTVAL, ival)
-    w64(g_tokens, tp + OFF_TK_LINE, start_line)
-    w64(g_tokens, tp + OFF_TK_COL, start_col)
+    cell_store(g_tokens, tp + OFF_TK_KIND, kind)
+    cell_store(g_tokens, tp + OFF_TK_LEXEME, -1)
+    cell_store(g_tokens, tp + OFF_TK_INTVAL, ival)
+    cell_store(g_tokens, tp + OFF_TK_LINE, start_line)
+    cell_store(g_tokens, tp + OFF_TK_COL, start_col)
     g_token_count = g_token_count + 1
 
 fn add_tok_str(kind: int, s: string, start_line: int, start_col: int):
     grow_tokens(g_token_count + 1)
     tp := g_token_count * ESZ_TOKEN
-    w64(g_tokens, tp + OFF_TK_KIND, kind)
+    cell_store(g_tokens, tp + OFF_TK_KIND, kind)
     si := str_intern(s)
-    w64(g_tokens, tp + OFF_TK_LEXEME, si)
-    w64(g_tokens, tp + OFF_TK_INTVAL, 0)
-    w64(g_tokens, tp + OFF_TK_LINE, start_line)
-    w64(g_tokens, tp + OFF_TK_COL, start_col)
+    cell_store(g_tokens, tp + OFF_TK_LEXEME, si)
+    cell_store(g_tokens, tp + OFF_TK_INTVAL, 0)
+    cell_store(g_tokens, tp + OFF_TK_LINE, start_line)
+    cell_store(g_tokens, tp + OFF_TK_COL, start_col)
     g_token_count = g_token_count + 1
 
 // Token with both int_val and lexeme, used for dex literals: int_val is the scaled integer and lexeme is the source digits.
 fn add_tok_int_lex(kind: int, ival: int, lexeme_ni: int, start_line: int, start_col: int):
     grow_tokens(g_token_count + 1)
     tp := g_token_count * ESZ_TOKEN
-    w64(g_tokens, tp + OFF_TK_KIND, kind)
-    w64(g_tokens, tp + OFF_TK_LEXEME, lexeme_ni)
-    w64(g_tokens, tp + OFF_TK_INTVAL, ival)
-    w64(g_tokens, tp + OFF_TK_LINE, start_line)
-    w64(g_tokens, tp + OFF_TK_COL, start_col)
+    cell_store(g_tokens, tp + OFF_TK_KIND, kind)
+    cell_store(g_tokens, tp + OFF_TK_LEXEME, lexeme_ni)
+    cell_store(g_tokens, tp + OFF_TK_INTVAL, ival)
+    cell_store(g_tokens, tp + OFF_TK_LINE, start_line)
+    cell_store(g_tokens, tp + OFF_TK_COL, start_col)
     g_token_count = g_token_count + 1
 
 // Layout helpers. Anchor computation and the colon end-of-line check must share
@@ -418,7 +418,7 @@ fn colon_at_line_end(src: string, pos: int, max_len: int) -> int:
     return 0
 
 fn ind_top() -> int:
-    return r64(g_indent_stack, (g_indent_len - 1) * 8)
+    return cell_load(g_indent_stack, (g_indent_len - 1) * 8)
 
 fn ind_push(col: int):
     if g_indent_len >= g_indent_cap:
@@ -427,10 +427,10 @@ fn ind_push(col: int):
             ncap = 16
         nv := alloc(ncap * 8)
         if g_indent_cap > 0:
-            _dyncpy(g_indent_stack, g_indent_cap * 8, nv)
+            cell_copy(g_indent_stack, g_indent_cap * 8, nv)
         g_indent_stack = nv
         g_indent_cap = ncap
-    w64(g_indent_stack, g_indent_len * 8, col)
+    cell_store(g_indent_stack, g_indent_len * 8, col)
     g_indent_len = g_indent_len + 1
 
 // Emit NEWLINE and any INDENT/DEDENT when crossing a physical line outside
@@ -805,7 +805,7 @@ fn tokenize(_src: string, layout_bypass: int):
                         cflag = 0
                     ti := g_token_count
                     add_tok_str(T_INTERP, str_sub(_src, hs, hp - hs), start_line, start_col + 1 + (hs - sp))
-                    w64(g_tokens, ti * ESZ_TOKEN + OFF_TK_INTVAL, cflag)
+                    cell_store(g_tokens, ti * ESZ_TOKEN + OFF_TK_INTVAL, cflag)
                     _pos = hp
                     if cflag != 0:
                         _pos = _pos + 1
@@ -829,11 +829,11 @@ fn tokenize(_src: string, layout_bypass: int):
                 loop:
                     if ri >= g_token_count:
                         break
-                    iv : ., mut = r64(g_tokens, ri * ESZ_TOKEN + OFF_TK_INTVAL)
+                    iv : ., mut = cell_load(g_tokens, ri * ESZ_TOKEN + OFF_TK_INTVAL)
                     iv = iv + 1
                     if ri + 1 < g_token_count:
                         iv = iv + 2
-                    w64(g_tokens, ri * ESZ_TOKEN + OFF_TK_INTVAL, iv)
+                    cell_store(g_tokens, ri * ESZ_TOKEN + OFF_TK_INTVAL, iv)
                     ri = ri + 1
             _pos = skip_ws(_src, _pos, _slen)
             continue

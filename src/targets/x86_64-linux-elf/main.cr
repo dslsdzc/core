@@ -1,9 +1,9 @@
-// === targets/x86_64-linux/main.cr ===
+// === targets/x86_64-linux-elf/main.cr ===
 // Backend project entry: .ccr to ELF, assembly, or shared object.
 // Self-hosted counterpart of src/arch/x86_64/corearch.cr.
 //
-// This file is the live project-mode entry for the x86_64-linux target.
-// `corec build src/targets/x86_64-linux` starts at main, calls corearch_main,
+// This file is the live project-mode entry for the x86_64-linux-elf target.
+// `corec build src/targets/x86_64-linux-elf` starts at main, calls corearch_main,
 // loads the .ccr, and rebuilds the linear schedule. The backend bootstrap stages
 // all pass through this entry.
 // There are two live entries: the corearch concat entry in
