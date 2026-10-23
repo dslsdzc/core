@@ -3,6 +3,7 @@
 // The ELF pipeline is the only backend.
 import cli
 import ast
+import ccr_schema
 import globals
 import dyn_arr
 import lexer

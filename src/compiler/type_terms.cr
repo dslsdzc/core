@@ -22,19 +22,12 @@ TT_VAR : int = 8
 TT_NIL : int = 9
 TT_CONS : int = 10
 
-// 条目 = 48B，六字段各 8B（与 g_ir_entries 同风格：字节缓冲 + 偏移常量）
-ESZ_TYPE_TERM : int = 48
-OFF_TT_TAG : int = 0
-OFF_TT_A : int = 8
-OFF_TT_B : int = 16
-OFF_TT_C : int = 24
-OFF_TT_D : int = 32
-OFF_TT_HASH : int = 40
+// 条目布局常量（ESZ_TYPE_TERM、OFF_TT_*）在 ccr_schema.cr。条目为六字段各 8B
+// （与 g_ir_entries 同风格：字节缓冲 + 偏移常量）。
 
 // Disk term record in TYPE(7): 5 * i64 = 40B {tag, a, b, c, d}. The in-memory
 // hash slot is omitted because it is a pure function of the five fields; the
 // loader recomputes it with tt_hash5. Field width is 8B, matching memory.
-ESZ_TYPE_TERM_DISK : int = 40
 
 // ─── 访问器（i = 类型项行号；调用方保证 0 ≤ i < tt_count()）───
 fn tt_tag(i: int) -> int:

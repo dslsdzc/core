@@ -6,4 +6,5 @@ import checker
 import prelude
 import diag
 import module
+import ccr_schema
 import globals

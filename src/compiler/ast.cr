@@ -696,10 +696,3 @@ g_df_cap : int, mut
 // Usage count: how many consumers each IR variable has
 g_var_use_count : string, mut
 g_var_use_count_cap : int, mut
-
-
-// ── Optimization metadata keys (.ccr v3+ extensible section) ──
-OPT_KEY_REG_ASSIGN  : int = 0  // [var_idx:u32, reg_num:u8]...
-OPT_META_STRIDE     : int = 64 // header (8) + up to 5 register pairs
-OPT_KEY_STACK_SHARE : int = 1  // [var_idx:u32, mapped_to:u32]...
-OPT_KEY_CSE         : int = 2  // [op:u32, s1:u32, s2:u32, res:u32]...
