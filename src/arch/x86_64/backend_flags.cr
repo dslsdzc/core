@@ -23,7 +23,7 @@ fn register_backend_flags():
     cli_flag_bool_debug("inject-read-gap", "", "Debug hook: truncate last version interval")
     cli_flag_bool_debug("inject-coexist-oob", "", "Debug hook: probe entries_coexist out of bounds")
     cli_flag_bool_debug("dump-objects", "", "Debug: dump NOD/EDG objects")
-    cli_flag_bool_debug("dump-nod-items", "", "Debug: dump NOD type terms")
+    cli_flag_bool_debug("dump-nod-types", "", "Debug: dump NOD type_id/flags")
     cli_flag_bool_debug("dump-types", "", "Debug: dump TYPE segment")
     cli_flag_bool_debug("dump-ifaces", "", "Debug: dump IFACE segment")
 

@@ -23,7 +23,11 @@ pytest-discoverable (plain `test_*` functions, stdlib only).
 """
 
 import contextlib
+import os
 import re
+import struct
+import subprocess
+import tempfile
 from pathlib import Path
 
 from ccr_v10_model import (
@@ -344,6 +348,144 @@ def test_schema_has_no_target_layout_words():
 
     for word in ("mp_", "ABI", "align", "stride", "offset"):
         assert word not in text, f"ccr_schema.cr must not mention {word!r}"
+
+
+# ---------------------------------------------------------------------------
+# 12. end-to-end: corec writes v10, corearch rejects v9 and accepts v10
+# ---------------------------------------------------------------------------
+
+CORE_BASE = Path(__file__).resolve().parent.parent.parent
+COREC = CORE_BASE / "build" / "corec"
+COREARCH = CORE_BASE / "build" / "corearch"
+
+# Exercises the target-fact reconstruction paths: ALLOC_ARRAY, BOUNDS_CHECK,
+# DEREF, STORE_PTR, ADDR_INDEX.
+E2E_SOURCE = """fn main() -> int:
+    arr : ., mut = [10, 20, 30]
+    i := 1
+    arr[i] = 9
+    p := &arr[1]
+    *p = 11
+    return *p + arr[0] + arr[2]
+"""
+
+
+def _run(cmd, **kwargs):
+    return subprocess.run(
+        [str(part) for part in cmd],
+        capture_output=True,
+        text=True,
+        cwd=str(CORE_BASE),
+        timeout=180,
+        **kwargs,
+    )
+
+
+def _build_v10(tmp: Path):
+    src = tmp / "e2e.cr"
+    ccr = tmp / "e2e.ccr"
+    src.write_text(E2E_SOURCE, encoding="utf-8")
+    r = _run([COREC, "ccr", src, "-o", ccr])
+    assert r.returncode == 0, f"corec ccr failed: {r.stdout}\n{r.stderr}"
+    return ccr.read_bytes()
+
+
+def _nod_records(data):
+    body = segment(data, 5)
+    (count,) = struct.unpack_from("<I", body, 0)
+    assert len(body) == 4 + count * 40, f"NOD body {len(body)} != 4 + {count}*40"
+    out = []
+    for i in range(count):
+        out.append(struct.unpack_from("<Ii q iii III".replace(" ", ""), body, 4 + i * 40))
+    return out
+
+
+def test_v10_end_to_end():
+    """corec emits the v10 lattice container with canonical segment order."""
+    with tempfile.TemporaryDirectory() as td:
+        data = _build_v10(Path(td))
+
+    assert magic(data) == MAGIC
+    assert version(data) == VERSION == 0x000A0000
+    assert seg_count(data) == SEG_COUNT == 9
+    assert flags(data) & ~0x7 == 0
+    assert validate(data) is None
+
+    table = read_segment_table(data)
+    assert [tag for tag, _, _ in table] == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    assert table[0][1] == BODY_START == 124
+    expected = BODY_START
+    for tag, offset, size in table:
+        assert offset == expected, f"tag {tag}: offset {offset} != {expected}"
+        expected += size
+    assert expected == len(data)
+
+    # CASE is the empty table: 4B case_count = 0.
+    assert segment(data, 9) == struct.pack("<I", 0)
+
+    # ENT is 24B per record and carries no home field.
+    ent = segment(data, 6)
+    (ent_count,) = struct.unpack_from("<I", ent, 0)
+    assert len(ent) == 4 + ent_count * 24, f"ENT body {len(ent)} != 4 + n*24"
+    for i in range(ent_count):
+        var_id, ver, def_nod, live_start, live_end, ent_flags = struct.unpack_from(
+            "<iIiIII", ent, 4 + i * 24
+        )
+        assert ver >= 1
+        assert live_start < live_end
+        assert def_nod < 0 or def_nod == live_start
+        assert ent_flags <= 0x7
+
+    # NOD is 40B: op/dest/src1/src2/src3/type_id/flags/first_edge/edge_count.
+    recs = _nod_records(data)
+    assert recs
+    for (op, dest, s1, s2, s3, type_id, nod_flags, fe, ec) in recs:
+        assert -1 <= type_id
+        assert nod_flags <= 0x7
+        # No target facts in src2/src3 for the width/stride carriers.
+        if op == 8:  # IR_ALLOC_ARRAY
+            assert s2 == 0 and s3 == 0, f"ALLOC_ARRAY carries target facts: {s2},{s3}"
+        if op in (25, 26):  # IR_DEREF / IR_STORE_PTR
+            assert s3 == 0, "pointer op carries a byte extent in src3"
+            if nod_flags & 4:
+                base = s2 if op == 25 else dest
+                assert base >= 0, "runtime pointer bound has no base reference"
+        if op == 31:  # IR_ADDR_INDEX
+            assert s3 == 0, "ADDR_INDEX carries a scale in src3"
+
+
+def test_corearch_accepts_v10_and_rejects_v9():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_v10(tmp)
+        good = tmp / "good.ccr"
+        good.write_bytes(data)
+        out = tmp / "good.elf"
+        r = _run([COREARCH, good, "--elf", "--static", "-o", out])
+        assert r.returncode == 0, f"corearch rejected v10: {r.stdout}\n{r.stderr}"
+        assert out.exists()
+
+        # A structurally coherent v9 image (8 segments, version 589825) must be
+        # rejected outright, not read as a v10 file with missing segments.
+        tags = list(range(1, 9))
+        bodies = [struct.pack("<I", 0) for _ in tags]
+        table = bytearray()
+        offset = 16 + 8 * 12
+        for tag, body in zip(tags, bodies):
+            table += struct.pack("<III", tag, offset, len(body))
+            offset += len(body)
+        v9 = struct.pack("<IIII", MAGIC, 589825, 8, 0) + bytes(table) + b"".join(bodies)
+        v9_path = tmp / "v9.ccr"
+        v9_path.write_bytes(v9)
+        r = _run([COREARCH, v9_path, "--elf", "--static", "-o", tmp / "v9.elf"])
+        assert r.returncode != 0, "corearch accepted a v9 file"
+        assert "invalid" in (r.stdout + r.stderr)
+
+        # seg_count 8 on an otherwise v10 image is rejected too.
+        bad = tmp / "eight.ccr"
+        bad.write_bytes(patch_u32(data, 8, 8))
+        r = _run([COREARCH, bad, "--elf", "--static", "-o", tmp / "eight.elf"])
+        assert r.returncode != 0, "corearch accepted seg_count 8"
 
 
 # ---------------------------------------------------------------------------

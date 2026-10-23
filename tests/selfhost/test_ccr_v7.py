@@ -20,27 +20,26 @@ Task 3 吸收说明（v6 专属断言退役去向）：
     test_loader_rejects_root_span_beyond_nod_space /
     test_save_rejects_var_block_misalignment → test_v7_* 同名迁移。
 
-字节真相 = docs/superpowers/specs/2026-09-09-lattice-ir-v7-format.md
-（**R2 P4 Task 1 起版本 = 8**：v8 = v7 段表架构的加法扩展（D9/D10）——+TYPE(7)/
-IFACE(8) 两段（空壳，内容面归 Task 2/3）+ version 7→8；文件头/测试名保留「v7」
-字样，语义 = 「v7 段表架构」而非「version 7」）：
+字节真相 = docs/superpowers/specs/2026-10-23-lattice-ccr-v10-design.md
+（Task 4 起 = v10 lattice container；文件名保留「v7」= 段表架构代号）：
   [0]   magic u32 = 0x31524343 ("CCR1")
-  [4]   version u32 = 9
-  [8]   seg_count u32 = 8
-  [12]  reserved u32 = 0
-  [16]  段表 8 × 12B {tag u32, offset u32, size u32}（规范序 tag 1..8）
-  [112] 段体（tag 升序连续）：STR(1) / SYM(2) / NOD(3) / ENT(4) / REG(5) / EDG(6)
-        / TYPE(7) / IFACE(8)（后两段 Task 1 空壳 = 计数 u32 = 0，恰 4B）
-  STR/SYM/NOD/REG/EDG = v7 布局（Task 1）；ENT = 实记录（Task 2）——28B
+  [4]   version u32 = 0x000A0000
+  [8]   seg_count u32 = 9
+  [12]  flags u32（仅 bit 0..2；bit 0 现阶段兼作 raw-int 选择）
+  [16]  段表 9 × 12B {tag u32, offset u32, size u32}（规范序 tag 1..9）
+  [124] 段体（tag 升序连续）：STR(1) / TYPE(2) / IFACE(3) / SYM(4) / NOD(5)
+        / ENT(6) / REG(7) / EDG(8) / CASE(9，当前空表 = 4B case_count 0)
+  STR/SYM/NOD/REG/EDG = v7 布局；ENT = 24B
   {var_id i32, version u32, def_nod i32, live_start u32, live_end u32（半开 =
-  最后使用点 +1）, home i32（恒 -1）, flags u32}——corec 写侧按 v6 §4.1 规则
+   +1）, flags u32}（v10 无 home）——corec 写侧按 v6 §4.1 规则
   （regalloc compute_entries 镜像，Task 0 表二差异①/②实现语义）重建
-  NOD(3): nod_count + 40B × nod_count（32B 语义 + 邻接；+28 = 项索引，R2 P6 T3）
-          {op i32, dest i32, s1 i64, s2 i32, s3 i32, tk i32,
+  NOD(5): nod_count + 40B × nod_count（八个语义字段 + 邻接）
+          {op i32, dest i32, s1 i64, s2 i32, s3 i32, type_id i32, flags u32,
            first_edge u32, edge_count u32}
-  EDG(6): edg_count + 8B × edg_count {to_nod u32, kind u32}
-          节点出边按节点序连续成段（first_edge = 前缀累计——流式零索引重建）；
-          每条边 to_nod > 所属节点（数据/state 前向——DAG 拓扑不变量）。
+          type_id = TYPE row / -1；flags = 语义特性位；src2/src3 不携带目标事实。
+  EDG(8): edg_count + 8B × edg_count {to_nod u32, kind u32}
+           节点出边按节点序连续成段（first_edge = 前缀累计——流式零索引重建）；
+           每条边 to_nod > 所属节点（数据/state 前向——DAG 拓扑不变量）。
 
 幽灵边修复（Task 0 盘点注 A 裁决——播种修复）后的 EDG 内容语义：
   g_df_var_producer 槽对全部 var 下标恒 -1 播种（未定值 var——全局/参数/
@@ -84,14 +83,22 @@ COREC = os.path.join(BASE, 'build/corec')
 COREARCH = os.path.join(BASE, 'build/corearch')
 
 MAGIC = 0x31524343  # "CCR1"
-V7 = 589825  # R2 P6 Task 3：v9；BigInt 批：v9.1 = (9 << 16) | 1
-        # （「v7」= 段表架构代号；改名的引用面 40+ 处、收益为零）
-SEG_TAGS = [1, 2, 3, 4, 5, 6, 7, 8]  # STR SYM NOD ENT REG EDG TYPE IFACE
+V10 = 0x000A0000  # v10 lattice container
+SEG_TAGS = [1, 2, 3, 4, 5, 6, 7, 8, 9]  # STR TYPE IFACE SYM NOD ENT REG EDG CASE
+SEG_STR = 1
+SEG_TYPE = 2
+SEG_IFACE = 3
+SEG_SYM = 4
+SEG_NOD = 5
+SEG_ENT = 6
+SEG_REG = 7
+SEG_EDG = 8
+SEG_CASE = 9
 NOD_REC = 40
-ENT_REC = 28
+ENT_REC = 24
 REG_REC = 24
 EDG_REC = 8
-HEADER_TABLE = 16 + 8 * 12  # 112
+HEADER_TABLE = 16 + 9 * 12  # 124
 
 # 源程序 span 内（pure_add + main 两函数，节点 0..44）期望 EDG 内容——见
 # test_v7_edge_content_small_program 的派生说明。
@@ -131,9 +138,9 @@ class V7File:
         assert len(data) >= HEADER_TABLE, f"file too small for v7 header+table: {len(data)}"
         (magic, ver, seg_count, reserved) = struct.unpack_from('<4I', data, 0)
         assert magic == MAGIC, f"bad magic {magic:#x}"
-        assert ver == V7, f"expected version {V7}, got {ver}"
-        assert seg_count == 8, f"expected 8 segments, got {seg_count}"
-        assert reserved == 0, f"reserved != 0: {reserved}"
+        assert ver == V10, f"expected version {V10}, got {ver}"
+        assert seg_count == 9, f"expected 9 segments, got {seg_count}"
+        assert reserved <= 0x7, f"reserved/reserved-flag bits set: {reserved}"
         # Segment table: canonical order, contiguous layout
         self.segs = {}
         cur = HEADER_TABLE  # first body follows the whole table
@@ -154,7 +161,7 @@ class V7File:
     # --- segment record walkers (each body starts with its count) ---
 
     def str_table(self):
-        b = self.body(1)
+        b = self.body(SEG_STR)
         (n,) = struct.unpack_from('<I', b, 0)
         pos = 4
         strs = []
@@ -169,7 +176,7 @@ class V7File:
     def sym_parse(self):
         """SYM body: globals → funcs (embedded var-decl areas) → str_consts →
         structs → enums → opt_meta. Asserts end == body size. (v6 布局不变)"""
-        b = self.body(2)
+        b = self.body(SEG_SYM)
         pos = 0
 
         def u32():
@@ -229,12 +236,11 @@ class V7File:
                 'enum_count': en, 'opt_count': oc}
 
     def nod(self):
-        """NOD 40B: {op, dest, s1, s2, s3, tk, item, first_edge, edge_count} —
-        item = TYPE-segment file-space item index (+28 i32, -1 = none; R2 P6
-        Task 3). adjacency indices first_edge/edge_count (validated against EDG
-        by the walker / tests; loader rebuilds the linear stream from the 32B
-        semantic fields, emission input identical to v6)."""
-        b = self.body(3)
+        """NOD 40B: {op, dest, s1, s2, s3, type_id, flags, first_edge, edge_count}.
+        type_id is a TYPE row (-1 = none); flags is the semantic feature word.
+        src2/src3 carry no width/stride/byte extent in v10. Adjacency
+        first_edge/edge_count are validated against EDG."""
+        b = self.body(SEG_NOD)
         (n,) = struct.unpack_from('<I', b, 0)
         assert (len(b) - 4) % NOD_REC == 0, "NOD body size not a multiple of 40"
         assert n == (len(b) - 4) // NOD_REC, f"NOD count {n} != bytes/40"
@@ -244,27 +250,26 @@ class V7File:
             (op, dest) = struct.unpack_from('<Ii', b, pos)
             (s1,) = struct.unpack_from('<q', b, pos + 8)
             (s2, s3) = struct.unpack_from('<ii', b, pos + 16)
-            (tk,) = struct.unpack_from('<I', b, pos + 24)
-            _it = struct.unpack_from('<i', b, pos + 28)[0]   # 项索引（P6 T3；本解析器不透出）
+            (type_id, flags_) = struct.unpack_from('<iI', b, pos + 24)
             (fe, ec) = struct.unpack_from('<II', b, pos + 32)
-            out.append((op, dest, s1, s2, s3, tk, fe, ec))
+            out.append((op, dest, s1, s2, s3, type_id, flags_, fe, ec))
             pos += NOD_REC
         return out
 
     def ent(self):
-        b = self.body(4)
+        b = self.body(SEG_ENT)
         (n,) = struct.unpack_from('<I', b, 0)
-        assert (len(b) - 4) % ENT_REC == 0, "ENT body size not a multiple of 28"
-        assert n == (len(b) - 4) // ENT_REC, f"ENT count {n} != bytes/28"
+        assert (len(b) - 4) % ENT_REC == 0, "ENT body size not a multiple of 24"
+        assert n == (len(b) - 4) // ENT_REC, f"ENT count {n} != bytes/24"
         pos = 4
         out = []
         for _ in range(n):
-            out.append(struct.unpack_from('<iIiIIiI', b, pos))
+            out.append(struct.unpack_from('<iIiII I'.replace(' ', ''), b, pos))
             pos += ENT_REC
         return out
 
     def reg(self):
-        b = self.body(5)
+        b = self.body(SEG_REG)
         (n,) = struct.unpack_from('<I', b, 0)
         assert (len(b) - 4) % REG_REC == 0, "REG body size not a multiple of 24"
         assert n == (len(b) - 4) // REG_REC, f"REG count {n} != bytes/24"
@@ -283,7 +288,7 @@ class V7File:
           - Σ edge_count == edg_count；行走完 == 段体大小；
           - 每条边 to_nod > 所属节点（前向拓扑）；kind ∈ {0=数据, 1=state}。
         返回 edges: {node: [(to, kind), ...]}（文件序）。"""
-        b = self.body(6)
+        b = self.body(SEG_EDG)
         nod = self.nod()
         n = len(nod)
         (edg_cnt,) = struct.unpack_from('<I', b, 0)
@@ -294,7 +299,7 @@ class V7File:
         edges = {}
         run_off = 0
         for i in range(n):
-            (fe, ec) = nod[i][6:8]
+            (fe, ec) = nod[i][7:9]
             assert fe == run_off, \
                 f"node {i}: first_edge {fe} != cumulative offset {run_off}"
             assert run_off + ec <= edg_cnt, \
@@ -337,7 +342,7 @@ def parse_object_dump(out: str):
       `objects: <count>`
       `nod <i> op <o> dest <d> s1 <s> s2 <x> s3 <y> tk <t> fe <f> ec <c>`
       `edge <i> to <to> kind <k>`   (one per out-edge of node i, index order)
-    Returns (count, {i: (op, dest, s1, s2, s3, tk, fe, ec)}, {i: [(to, kind)]})."""
+    Returns (count, {i: (op, dest, s1, s2, s3, type_id, flags_, fe, ec)}, {i: [(to, kind)]})."""
     lines = out.splitlines()
     assert lines and lines[0].startswith('objects: '), \
         f"dump missing count header: {lines[:3]!r}"
@@ -424,7 +429,7 @@ def model_compute_entries(nod, funcs, gcount, regs):
             last = [-1] * vc
             for ii in range(ic):
                 inst = ist + ii
-                op, d, s1, s2, s3, tk, fe, ec = nod[inst]
+                op, d, s1, s2, s3, type_id, flags_, fe, ec = nod[inst]
                 for col in (d, s1, s2):
                     if vs <= col < vs + vc:
                         lv = col - vs
@@ -434,7 +439,7 @@ def model_compute_entries(nod, funcs, gcount, regs):
             prev = [-1] * vc  # open-version entry id per local var
             for ii in range(ic):
                 inst = ist + ii
-                op, d, s1, s2, s3, tk, fe, ec = nod[inst]
+                op, d, s1, s2, s3, type_id, flags_, fe, ec = nod[inst]
                 dv = -1
                 if op == IR_STORE:
                     if vs <= s1 < vs + vc:
@@ -454,23 +459,23 @@ def model_compute_entries(nod, funcs, gcount, regs):
                         # closure: overwrite LE of the still-open version
                         row = defs_out[pe]
                         defs_out[pe] = (row[0], row[1], row[2], row[3], pend,
-                                        row[5], row[6])
-                    defs_out.append((dv, 1, inst, inst, last_global, -1, 0))
+                                        row[5])
+                    defs_out.append((dv, 1, inst, inst, last_global, 0))
                     prev[lv] = len(defs_out) - 1
                     row_no += 1
             for lv2 in range(vc):
                 if prev[lv2] < 0 and first[lv2] >= 0 and last[lv2] >= 0:
                     defs_out.append((vs + lv2, 1, -1, ist + first[lv2],
-                                     ist + last[lv2], -1, 0))
+                                     ist + last[lv2], 0))
                     row_no += 1
         blocks.append((ent0, row_no - ent0))
     # version = 同 var 文件序组内 1-based 序数
     seen = {}
     rows = []
-    for (var_id, _, dn, ls, le, ho, fl) in defs_out:
+    for (var_id, _, dn, ls, le, fl) in defs_out:
         ord_ = seen.get(var_id, 0) + 1
         seen[var_id] = ord_
-        rows.append((var_id, ord_, dn, ls, le + 1, ho, fl))
+        rows.append((var_id, ord_, dn, ls, le + 1, fl))
     return rows, blocks
 
 
@@ -557,15 +562,14 @@ def test_v7_ent_hand_expected_small():
         assert len(ents) >= len(exp), \
             f"entries {len(ents)} < hand-expected {len(exp)}"
         for k, (fidx, erow) in enumerate(zip([0] * 2 + [1] * 10, exp)):
-            evar, ever, edef, els, ele, eho, efl = ents[k]
+            evar, ever, edef, els, ele, efl = ents[k]
             assert evar == var_of[(fidx, erow[0])], \
                 f"row {k}: var {evar} != decl-row {erow[0]} var " \
                 f"{var_of[(fidx, erow[0])]}"
             assert (ever, edef, els, ele) == erow[1:], \
                 f"row {k} {evar}: got ({ever},{edef},{els},{ele}) " \
                 f"expected {erow[1:]}"
-            assert eho == -1 and efl == 0, \
-                f"row {k}: home/flags ({eho},{efl}) != (-1,0)"
+            assert efl == 0, f"row {k}: flags {efl} != 0"
         # SYM func 记录：块界回填 = 文件行 0..1 / 2..11；param_ents 实回填
         # （identity 参数 n 的 def=-1 条目 = 文件行 1）
         f0, f1 = funcs[0], funcs[1]
@@ -648,7 +652,7 @@ def test_v7_ent_model_replay_pure_add():
                 f"!= model ({me},{ml})"
         # loader 语义不变量显式断言（与 load_ccr ENT 校验同面）
         instr_cnt = len(nod)
-        for k, (ev, evr, ed, els, ele, eho, efl) in enumerate(ents):
+        for k, (ev, evr, ed, els, ele, efl) in enumerate(ents):
             assert evr >= 1, f"row {k}: version {evr} < 1"
             assert 0 <= ev < len(sym['globals']) + sum(fn['var_count']
                                                        for fn in funcs), \
@@ -694,10 +698,10 @@ def test_v7_ent_hand_expected_pure_add_block():
             (vs0 + 0, 1, -1, 1, 2), (vs0 + 1, 1, -1, 1, 2),
         ]
         got = [(ev, ever, edef, els, ele) for (ev, ever, edef, els, ele,
-                                                eho, efl) in ents[:4]]
+                                                efl) in ents[:4]]
         assert got == exp, f"pure_add block:\n  got      {got}\n  expected {exp}"
-        for (ev, ever, edef, els, ele, eho, efl) in ents[:4]:
-            assert eho == -1 and efl == 0
+        for (ev, ever, edef, els, ele, efl) in ents[:4]:
+            assert efl == 0
         f0 = funcs[0]
         assert (f0['first_ent'], f0['last_ent']) == (0, 3), \
             f"pure_add range ({f0['first_ent']},{f0['last_ent']}) != (0,3)"
@@ -715,7 +719,7 @@ def test_v7_ent_hand_expected_pure_add_block():
         block = ents[main['first_ent']:main['last_ent'] + 1]
         assert len(block) >= 20, f"main block too small: {len(block)}"
         by_decl = {}
-        for (ev, ever, edef, els, ele, eho, efl) in block:
+        for (ev, ever, edef, els, ele, efl) in block:
             by_decl.setdefault(ev - mvs, []).append((ever, edef, els, ele))
         assert by_decl[9] == [(1, 20, 20, 22), (2, 22, 22, 35)], \
             f"main v versions {by_decl[9]}"
@@ -737,7 +741,7 @@ def _mutate_ent_field(data, rec_idx, field_off, value, fmt='<I'):
     v7 = V7File(bytes(data))
     ents = v7.ent()
     assert len(ents) > 0, "precondition: ENT must carry real records"
-    ent_off, _ = v7.segs[4]
+    ent_off, _ = v7.segs[SEG_ENT]
     at = ent_off + 4 + rec_idx * ENT_REC + field_off
     struct.pack_into(fmt, data, at, value)
     return ents
@@ -858,7 +862,7 @@ def test_v7_loader_rejects_sym_ent_block_mismatch():
         f0 = sym['funcs'][0]
         assert f0['first_ent'] >= 0, \
             f"precondition: func0 first_ent real, got {f0['first_ent']}"
-        sym_off, _ = v7.segs[2]
+        sym_off, _ = v7.segs[SEG_SYM]
         # SYM 体：global_count(4) + globals(16B×G) + func_count(4) + func0 头
         # 24B——first_ent = 头内 +16
         g = len(sym['globals'])
@@ -884,7 +888,7 @@ def test_v7_loader_rejects_sym_ent_block_mismatch():
 
 
 def test_v7_layout_and_walk():
-    """段表架构：magic/version=8/8 段规范序（EDG=tag 6 必落；TYPE=7/IFACE=8
+    """段表架构：magic/version=0x000A0000/9 段规范序（EDG=tag 8 必落；TYPE=2/IFACE=3
     空壳——R2 P4 Task 1）/offset 连续/NOD 40B（P6 T3 起）+ 邻接域/EDG 段完整走查 ==
     文件大小。"""
     src = ("fn add(a: int, b: int) -> int:\n    return a + b\nfn main() -> int:\n    s : ., mut = 0\n    for i in 0..4:\n        s = s + i\n    return s\n")
@@ -908,8 +912,8 @@ def test_v7_layout_and_walk():
         # Task 2: ENT 实记录（corec 产条目）——函数有 var 即有条目（参数/本地
         # 引用 + _arena 定值），本程序条目数 > 0；全行字段自洽
         assert len(e) > 0, f"ENT empty — Task 2: corec should write entries: {e}"
-        for (ev, evr, ed, els, ele, eho, efl) in e:
-            assert evr >= 1 and 0 <= ev and eho == -1 and efl == 0
+        for (ev, evr, ed, els, ele, efl) in e:
+            assert evr >= 1 and 0 <= ev and efl == 0
             assert els < ele and (ed < 0 or ed == els)
         edg = v7.edg()  # full EDG walk + forward/kind invariant checks
         # EDG 段必落且至少一条边（每函数 arena_new→arena_reset def-use 存在）
@@ -967,8 +971,17 @@ def test_v7_object_surface_recipe_readable():
             f"dumped nodes {len(nodes)} != file nodes {len(nod)}"
         for i, rec in enumerate(nod):
             assert i in nodes, f"node {i} missing from dump"
-            assert nodes[i] == rec, \
+            op, dest, s1, s2, s3, type_id, flags_, fe, ec = rec
+            # The dump's tk column is the reconstructed semantic code; the wire
+            # has type_id/flags instead. Compare the shared fields and require
+            # the diagnostic code to agree with the semantic type domain.
+            assert nodes[i][:5] == (op, dest, s1, s2, s3), \
                 f"node {i}: object surface {nodes[i]} != file record {rec}"
+            assert nodes[i][6:] == (fe, ec), \
+                f"node {i}: adjacency drift {nodes[i]} != {rec}"
+            if type_id >= 0:
+                assert nodes[i][5] == type_id, \
+                    f"node {i}: dump tk {nodes[i][5]} != type_id {type_id}"
         # 出边遍历 == 文件 EDG（空出边节点两侧都缺省）
         for i, row in file_edges.items():
             assert edges.get(i) == row, \
@@ -993,7 +1006,7 @@ def test_v7_object_surface_recipe_readable():
         ktext = open(kern_src, encoding='utf-8').read()
         assert 'fn nod_inputs(n: int):' in ktext, \
             "kernel nod_inputs recipe-query wrapper missing (dangling note reverted)"
-        drv_src = os.path.join(BASE, 'src/compiler/corearch.cr')
+        drv_src = os.path.join(BASE, 'src/arch/x86_64/corearch.cr')
         dtext = open(drv_src, encoding='utf-8').read()
         assert 'nod_inputs(ni)' in dtext, \
             "dump_object_surface must traverse edges via kernel nod_inputs"
@@ -1072,9 +1085,8 @@ def test_v7_edge_content_small_program():
 
 
 def test_v7_loader_rejects_version_ne_7():
-    """v9-only（R2 P6 Task 3 起合法版本 = 9）：version 改成 7/8/6/5（**旧 v7 六段
-    文件与 v8 文件整类拒收**——D10 的落点：不得静默当「TYPE/IFACE 缺席 = 空表」）或
-    任意非 9 → corearch 必须拒绝。"""
+    """v10-only: version 589825 (v9.1) and older v7/v8 values are rejected
+    outright (不得静默当「段缺席 = 空表」)."""
     src = "fn main() -> int:\n    return 42\n"
     ccr_path = os.path.join(BASE, 'build/test_v7_reject.ccr')
     try:
@@ -1083,7 +1095,7 @@ def test_v7_loader_rejects_version_ne_7():
         pass
     try:
         corec_ccr(src, ccr_path)
-        for bad_ver in (8, 7, 6, 5):
+        for bad_ver in (589825, 8, 7, 6, 5):
             data = bytearray(read_ccr(ccr_path))
             struct.pack_into('<I', data, 4, bad_ver)  # patch version
             bad_path = ccr_path + f'.v{bad_ver}'
@@ -1097,7 +1109,8 @@ def test_v7_loader_rejects_version_ne_7():
             assert 'invalid' in (r.stdout + r.stderr), \
                 f"expected invalid-.ccr error, got: {r.stdout!r} {r.stderr!r}"
     finally:
-        for p in (ccr_path, ccr_path + '.v7', ccr_path + '.v6', ccr_path + '.v5',
+        for p in (ccr_path, ccr_path + '.v9', ccr_path + '.v8', ccr_path + '.v7',
+                  ccr_path + '.v6', ccr_path + '.v5',
                   os.path.join(BASE, 'build/test_v7_reject.out')):
             try:
                 os.unlink(p)
@@ -1120,8 +1133,8 @@ def test_v7_loader_rejects_backward_edge():
         data = bytearray(read_ccr(ccr_path))
         v7 = V7File(bytes(data))
         nod = v7.nod()
-        assert nod[0][7] >= 1, f"node 0 has no out edges: {nod[0]}"
-        edg_off, _ = v7.segs[6]
+        assert nod[0][8] >= 1, f"node 0 has no out edges: {nod[0]}"
+        edg_off, _ = v7.segs[SEG_EDG]
         # node 0 的 EDG 记录 = edg_count(4B) 后第一条：to_nod 字段 = 前 4B
         struct.pack_into('<I', data, edg_off + 4, 0)  # to_nod := 0 → (0,0) 自环
         bad_path = ccr_path + '.loop'
@@ -1157,10 +1170,10 @@ def test_v7_loader_rejects_edg_count_mismatch():
         data = bytearray(read_ccr(ccr_path))
         v7 = V7File(bytes(data))
         nod = v7.nod()
-        assert nod[0][7] >= 1, f"node 0 has no out edges: {nod[0]}"
-        nod_off, _ = v7.segs[3]
+        assert nod[0][8] >= 1, f"node 0 has no out edges: {nod[0]}"
+        nod_off, _ = v7.segs[SEG_NOD]
         row0_ec = nod_off + 4 + 0 * NOD_REC + 36  # edge_count field (+36 in 40B row)
-        struct.pack_into('<I', data, row0_ec, nod[0][7] + 1)
+        struct.pack_into('<I', data, row0_ec, nod[0][8] + 1)
         bad_path = ccr_path + '.cnt'
         with open(bad_path, 'wb') as fh:
             fh.write(bytes(data))
@@ -1206,12 +1219,12 @@ def test_v7_roundtrip_elf():
             f"expected exit 15 (sum 0..5), got {run.returncode} stdout={run.stdout!r}"
         assert os.path.exists(ccr_path), "corec build did not save .ccr alongside output"
         data = read_ccr(ccr_path)
-        v7 = V7File(data)  # built artifact is v7: header/segments/NOD36/EDG walk
+        v7 = V7File(data)  # built artifact is v10: header/segments/NOD40/EDG walk
         ents = v7.ent()
         # Task 2: build 链中间产物携带实条目（corearch 已 load 校验 + 发射）
         assert len(ents) > 0, "built .ccr should carry real ENT records"
-        for (ev, evr, ed, els, ele, eho, efl) in ents:
-            assert evr >= 1 and eho == -1 and efl == 0
+        for (ev, evr, ed, els, ele, efl) in ents:
+            assert evr >= 1 and efl == 0
             assert els < ele and (ed < 0 or ed == els)
         assert sum(len(v) for v in v7.edg().values()) >= 2
         # direct corearch invocation on the same .ccr
@@ -1281,7 +1294,7 @@ def test_v7_ent_real_optmeta_absent():
                 pvar = vs + p
                 pid = -1
                 for i in range(start, start + pcnt):
-                    (ev, evr, ed, els, ele, eho, efl) = ents[i]
+                    (ev, evr, ed, els, ele, efl) = ents[i]
                     if ev == pvar and ed == -1:
                         pid = i
                 assert f['param_ents'][p] == pid, \
@@ -1383,7 +1396,7 @@ def test_v7_sym_reg_target_shape():
         for en in ents:
             assert 0 <= en[0] < total_vars, \
                 f"ENT var_id {en[0]} outside var namespace 0..{total_vars - 1}"
-        for (op, dest, s1, s2, s3, tk, fe, ec) in v7.nod():
+        for (op, dest, s1, s2, s3, type_id, flags_, fe, ec) in v7.nod():
             if dest >= 0:
                 assert dest < total_vars, f"NOD dest {dest} outside var namespace"
             assert fe >= 0 and ec >= 0  # 邻接域自洽（完整校验在 edg() 走查）
@@ -1449,7 +1462,7 @@ def test_v7_sym_func_shapes():
             pid = add['param_ents'][p]
             assert pid >= 0, \
                 f"add param_ents[{p}] == -1 (expected def=-1 entry id)"
-            (ev, evr, ed, els, ele, eho, efl) = ents[pid]
+            (ev, evr, ed, els, ele, efl) = ents[pid]
             assert ed == -1 and ev == g0 + p, \
                 f"add param_ents[{p}] -> row {pid} var {ev} (want {g0 + p})"
         assert funcs[1]['param_count'] == 0 and funcs[1]['param_ents'] == []
@@ -1500,7 +1513,7 @@ def test_v7_loader_rejects_root_span_beyond_nod_space():
         rid = roots[-1]
         assert regs[rid][3] == nod_cnt, \
             f"last root exit {regs[rid][3]} != nod_count {nod_cnt}: {regs[rid]}"
-        reg_off, _ = v7.segs[5]
+        reg_off, _ = v7.segs[SEG_REG]
         patch_at = reg_off + 4 + rid * REG_REC + 12  # exit_nod field (+12 in row)
         struct.pack_into('<i', data, patch_at, regs[rid][3] + 1)
         bad_path = ccr_path + '.oob'
@@ -1706,7 +1719,7 @@ def test_v7_loader_rejects_ent_def_ne_live_start():
         nod_cnt = len(v7.nod())
         ents = v7.ent()
         idx = _first_def_entry(ents)
-        (ev, evr, ed, els, ele, eho, efl) = ents[idx]
+        (ev, evr, ed, els, ele, efl) = ents[idx]
         assert els + 1 < nod_cnt, \
             f"precondition: els {els}+1 must stay in NOD space ({nod_cnt})"
         _mutate_ent_field(data, idx, 8, els + 1, '<i')  # def_nod := els+1
@@ -2066,9 +2079,9 @@ def test_v7_state_chain_per_function_independence():
         # EDG 记录全局序 = 节点序前缀累计；定位该边（f 行内位置）
         gidx = 0
         for i in range(f):
-            gidx += nod[i][7]
+            gidx += nod[i][8]
         gidx += edges[f].index((t, 1))
-        edg_off, _ = v7.segs[6]
+        edg_off, _ = v7.segs[SEG_EDG]
         struct.pack_into('<I', data, edg_off + 4 + gidx * EDG_REC, t_new)
         with open(bad_path, 'wb') as fh:
             fh.write(bytes(data))

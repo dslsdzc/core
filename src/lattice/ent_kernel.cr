@@ -1005,12 +1005,11 @@ OFF_NS_DEST : int = 4
 OFF_NS_S1 : int = 8
 OFF_NS_S2 : int = 16
 OFF_NS_S3 : int = 20
-OFF_NS_TK : int = 24
-// TYPE-segment file-space term index (i32; -1 = none). The on-disk record has it
-// at +28, so the adjacency fields follow at +32/+36. ccr_types.cr fills it while
-// saving; the loader reads it and checks range and consistency after parsing the
-// TYPE segment.
-OFF_NS_ITEM : int = 28
+// v10 NOD semantic fields. type_id is a TYPE row (-1 = none); flags is the
+// semantic feature word (CCR_NOD_FLAG_*). Neither carries a width, byte extent,
+// stride, or alignment. There is no disk `item` field in v10.
+OFF_NS_TYPE_ID : int = 24
+OFF_NS_FLAGS : int = 28
 
 g_v7_nod_sem : string, mut   // NOD semantic records, ESZ_NOD_SEM per node, filled by the loader
 g_v7_nod_meta : string, mut  // NOD adjacency records, ESZ_NOD_META per node
@@ -1029,25 +1028,30 @@ fn nod_s2(n: int) -> int:
     return buf_read_i32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_S2)
 fn nod_s3(n: int) -> int:
     return buf_read_i32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_S3)
-fn nod_tk(n: int) -> int:
-    return buf_read_u32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_TK)
-// Term-index accessor. It reads i32 so -1 stays -1. The code slot's -1 is
-// 0xFFFFFFFF on disk and has different semantics; do not mix the read types.
-fn nod_item(n: int) -> int:
-    return buf_read_i32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_ITEM)
-// Semantic type-id accessor (v10 NOD `type_id` side data). The buffer is filled
-// by ccr_types.cr:ccr_nod_type_populate during the corec save path; the v9 wire
-// still stores `item` at +28 and has no type_id field, so the read side leaves
-// this buffer empty until the v10 cutover. >= 0 is a TYPE row; -1 means none.
-// It reads i32 so -1 stays -1, but the sign convention differs from the code
-// slot's 0xFFFFFFFF, so do not mix the read types.
+// Semantic type-id accessor (v10 NOD `type_id`). >= 0 is a TYPE row; -1 means
+// none. It reads i32 so -1 stays -1.
 fn nod_type_id(n: int) -> int:
-    return buf_read_i32(g_ccr_nod_type, n * 4)
-// Semantic node flags companion word. Constant 0 in v9: no semantic node feature
-// is classified yet and the wire has no flags field. Task 4 fills this from
-// classified aux codes; callers must not read it as a width or byte offset.
+    return buf_read_i32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_TYPE_ID)
+// Semantic node feature flags (v10 NOD `flags`). Read as unsigned: the word is a
+// bitset of CCR_NOD_FLAG_* features, never a width or byte offset.
 fn nod_type_flags(n: int) -> int:
-    return 0
+    return buf_read_u32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_FLAGS)
+// Legacy derived-code view for diagnostics and for emit consumers that still
+// read a single code word. Bounds/spawn features come from flags. Target facts
+// (IR_DEREF/IR_STORE_PTR access width) are reconstructed by the instance, not
+// here, so this returns type_id (-1 when the node has no semantic type).
+fn nod_tk(n: int) -> int:
+    op := nod_op(n)
+    fl := nod_type_flags(n)
+    if op == IR_BOUNDS_CHECK:
+        if fl % 2 == 1:
+            return 1
+        return 0
+    if op == IR_SPAWN:
+        if (fl / 2) % 2 == 1:
+            return -1
+        return 0
+    return nod_type_id(n)
 fn nod_edge_first(n: int) -> int:
     return cell_load(g_v7_nod_meta, n * ESZ_NOD_META)
 fn nod_edge_count(n: int) -> int:

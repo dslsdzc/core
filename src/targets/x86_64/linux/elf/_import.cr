@@ -9,6 +9,10 @@ import ccr_schema
 import globals
 import bytes
 import dyn_arr
+// Target layout helpers: corearch reconstructs NOD access widths/strides from
+// these instead of reading target facts from .ccr.
+import mapping
+import x86_mapping
 import backend_schema
 import backend_globals
 import backend_arrays

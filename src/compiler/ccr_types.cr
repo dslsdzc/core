@@ -314,73 +314,84 @@ fn ccr_seg_prepare_save() -> int:
         return -1
     if ccr_iface_seg_build() != 0:
         return -1
-    // Fill NOD term indexes after ccr_type_populate, because that call rebuilds the
-    // term table and invalidates emit-time indexes. This runs after both segment
-    // bodies: it only queries the bridge cache, and all rows are already built, so
-    // it adds no terms and does not change segment bytes. Failure uses the same
-    // type-face gate.
-    if ccr_nod_item_populate() != 0:
+    // Derive the v10 NOD semantic type ids and feature flags from the same
+    // save-time type state, then copy them into the in-memory object record.
+    // Task 3's item side buffer is retired with the v10 disk field.
+    if ccr_nod_type_populate() != 0:
         return -1
-    // Derive the v10 NOD semantic type ids from the same save-time type state.
-    // This is side data for the v10 cutover: the v9 NOD wire keeps `item` at +28
-    // and does not gain a type_id field here.
-    return ccr_nod_type_populate()
-
-// Fill NOD term indexes. For each node in global instruction order, look up the
-// file-space term index from the stored derived code.
-// Face 0 (a type row whose term is reversible) uses sh_term_of_ti(tk); the loader
-// checks tt_atom_of_term(term) == tk. All other cases use -1. The tk slot still
-// preserves the code byte for byte.
-// Classification and term construction use only the existing bridge entry points.
-// This is a pure query and does not set the build-failure bit.
-// The index is rederived at save time because ccr_type_populate resets the term
-// layer and invalidates emit-time references.
-fn ccr_nod_item_populate() -> int:
-    n := g_ir_instr_count
-    g_ccr_nod_item = alloc((n + 8) * 4)
-    g_ccr_nod_item_count = n
-    ii : ., mut = 0
-    loop:
-        if ii >= n:
-            break
-        tk := iri_tk(ii)
-        it : ., mut = -1
-        if sh_tk_face_of_code(iri_op(ii), tk) == 0:
-            it = sh_term_of_ti(tk)
-        cell_store32(g_ccr_nod_item, ii * 4, it)
-        ii = ii + 1
+    populate_nod_objects()
     return 0
 
-// Fill NOD semantic type ids into the v10 side buffer. For each node in global
-// instruction order, apply the fixed rule:
+// Fill NOD semantic type ids and feature flags into the v10 side buffers. For
+// each node in global instruction order, apply the fixed rule:
 //   sh_tk_face_of_code(op, tk) == 0 -> type_id = tk   (tk is a TYPE row)
 //   otherwise                        -> type_id = -1
-// The companion flags word is constant 0 in this task; Task 4 classifies semantic
-// node features into it.
+// Flags carry semantic node features only:
+//   IR_BOUNDS_CHECK, tk != 0        -> DYNAMIC_LIMIT
+//   IR_SPAWN, tk < 0                -> DYNAMIC_SPAWN
+//   IR_DEREF/IR_STORE_PTR, s3 > 0   -> RUNTIME_PTR_BOUNDS
+// The width/stride/byte extent behind those facts is a target fact and is not
+// written; corearch reconstructs it from type_id and the target layout.
+// A legacy aux code outside this classification rejects the save instead of
+// silently dropping meaning. IR_STR_OF's TI_STR scratch code has no consumer
+// and no semantic feature, so it is explicitly classified as featureless.
 // This is a pure query/derivation: it does not mutate the type tables, the term
-// table, or g_tk_face_fail, and it does not change the v9 wire. The 40B NOD record
-// still carries `item` at +28 for diagnostics and for the current v9 loader.
+// table, or g_tk_face_fail.
 fn ccr_nod_type_populate() -> int:
     n := g_ir_instr_count
     g_ccr_nod_type = alloc((n + 8) * 4)
     g_ccr_nod_type_count = n
+    g_ccr_nod_flags = alloc((n + 8) * 4)
+    g_ccr_nod_flags_count = n
     ii : ., mut = 0
     loop:
         if ii >= n:
             break
+        op := iri_op(ii)
         tk := iri_tk(ii)
         tid : ., mut = -1
-        if sh_tk_face_of_code(iri_op(ii), tk) == 0:
+        fl : ., mut = 0
+        if sh_tk_face_of_code(op, tk) == 0:
             tid = tk
+        else if sh_tk_is_type_face(op) != 0:
+            // Composite row or out-of-range/untranslatable type code: no
+            // reversible TYPE row. Task 3 fixes type_id = -1 here.
+            tid = -1
+        else if op == IR_BOUNDS_CHECK:
+            if tk != 0:
+                fl = fl + CCR_NOD_FLAG_DYNAMIC_LIMIT
+        else if op == IR_SPAWN:
+            if tk < 0:
+                fl = fl + CCR_NOD_FLAG_DYNAMIC_SPAWN
+            else if tk != 0:
+                return -1
+        else if op == IR_DEREF || op == IR_STORE_PTR:
+            if iri_s3(ii) > 0:
+                fl = fl + CCR_NOD_FLAG_RUNTIME_PTR_BOUNDS
+        else if op == IR_HOTPATCH_ROUTE || op == IR_STR_OF:
+            // HOTPATCH_ROUTE carries tk == 0. IR_STR_OF's TI_STR scratch code is
+            // not read by any backend consumer; neither is a node feature.
+            fl = 0
+        else if op == IR_LOAD_INDEX || op == IR_LOAD_INDEX_VAR || op == IR_CONST_BIG || op == IR_PTR_OF:
+            // These ops pass a semantic type row as their legacy type_kind
+            // (INDEX element domain, CONST_BIG/PTR_OF int domain). Task 3 fixes
+            // type_id to reversible atom rows only and no backend consumer reads
+            // this code, so it is classified as intentionally not persisted.
+            // It is not a target fact and not an unclassifiable aux code.
+            fl = 0
+        else if tk != 0:
+            // Unclassified legacy aux code: refuse to save rather than invent a
+            // wire meaning for it.
+            return -1
         cell_store32(g_ccr_nod_type, ii * 4, tid)
+        cell_store32(g_ccr_nod_flags, ii * 4, fl)
         ii = ii + 1
     return 0
 
 // --dump-types test channel. The shared surface dump in ccr_io.cr uses the same
 // print path as corearch, so line formats match across processes. This corec-only
-// section adds the row-to-term mapping and the NOD semantic type-id side buffer
-// (v10 preparation; the v9 wire does not carry it); tests split on "rowterms:"
-// and "nodtypes:".
+// section adds the row-to-term mapping and the NOD semantic type-id/flags side
+// data; tests split on "rowterms:" and "nodtypes:".
 fn ccr_type_selftest_dump():
     ccr_type_surface_dump()
     print("rowterms: ")
@@ -395,9 +406,9 @@ fn ccr_type_selftest_dump():
         print(" ")
         println(int_str(sh_term_of_ti(i)))
         i = i + 1
-    // v10 NOD semantic type ids (v9 wire frozen): read the side buffer through the
-    // shared accessors so tests see exactly what nod_type_id returns. One
-    // deterministic line per node; flags is the constant 0 companion word.
+    // v10 NOD semantic type ids and feature flags. Read the in-memory object
+    // record through the shared accessors so tests see exactly what the writer
+    // emits. One deterministic line per node.
     print("nodtypes: ")
     print_i(g_ccr_nod_type_count)
     println("")

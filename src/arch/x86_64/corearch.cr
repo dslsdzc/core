@@ -250,26 +250,32 @@ fn dump_object_surface():
         nod_inputs(ni)   // print outgoing edge records through the kernel helper
         ni = ni + 1
 
-// --dump-nod-items: print each node's NOD term index, the term table entry, and its
-// atom row. The header gives the node count and how many nodes have a term. Each
-// body line gives {idx, atom}, so tests can assert atom == code when idx >= 0.
-// load_ccr already performs this consistency check as a hard gate; this channel is
-// its readable form. It returns before emission.
-fn dump_nod_items():
-    with_item : ., mut = 0
+// --dump-nod-types: print each node's semantic type_id and feature flags. The
+// disk has no term-index field in v10, so this channel exposes the actual wire
+// semantics. It returns before emission.
+fn dump_nod_types():
+    with_type : ., mut = 0
     ni : ., mut = 0
     loop:
         if ni >= g_v7_nod_count:
             break
-        if nod_item(ni) >= 0:
-            with_item = with_item + 1
+        if nod_type_id(ni) >= 0:
+            with_type = with_type + 1
         ni = ni + 1
-    print("[nod-items] nodes=")
+    print("[nod-types] nodes=")
     print_i(g_v7_nod_count)
-    print(" with_item=")
-    print_i(with_item)
-    print(" terms=")
-    print_i(tt_count())
+    print(" with_type=")
+    print_i(with_type)
+    print(" flags=")
+    fl : ., mut = 0
+    ni2 : ., mut = 0
+    loop:
+        if ni2 >= g_v7_nod_count:
+            break
+        if nod_type_flags(ni2) != 0:
+            fl = fl + 1
+        ni2 = ni2 + 1
+    print_i(fl)
     print(" rows=")
     print_i(g_type_count)
     println("")
@@ -277,20 +283,14 @@ fn dump_nod_items():
     loop:
         if nj >= g_v7_nod_count:
             break
-        itv := nod_item(nj)
-        at : ., mut = -1
-        if itv >= 0:
-            at = tt_atom_of_term(itv)
-        print("item ")
+        print("nodtype ")
         print_i(nj)
         print(" op ")
         print_i(nod_op(nj))
-        print(" code ")
-        print_i(nod_tk(nj))
-        print(" idx ")
-        print_i(itv)
-        print(" atom ")
-        print_i(at)
+        print(" tid ")
+        print_i(nod_type_id(nj))
+        print(" flags ")
+        print_i(nod_type_flags(nj))
         println("")
         nj = nj + 1
 
@@ -387,11 +387,11 @@ fn corearch_main() -> int:
         ccr_iface_surface_dump()
         return 0
 
-    // Hidden channel: print NOD term indexes and their atom rows. It runs after the
-    // TYPE segment is rebuilt and before build_linear_schedule, so it does not
-    // trigger emission. load_ccr already enforces consistency.
-    if cli_has("dump-nod-items") != 0:
-        dump_nod_items()
+    // Hidden channel: print NOD semantic type ids and feature flags. It runs after
+    // the TYPE segment is rebuilt and before build_linear_schedule, so it does not
+    // trigger emission.
+    if cli_has("dump-nod-types") != 0:
+        dump_nod_types()
         return 0
 
     // The loader produces semantic objects only. The instance rebuilds the linear

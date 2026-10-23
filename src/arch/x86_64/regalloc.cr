@@ -893,9 +893,80 @@ fn alloc_registers():
                 ai = ai + 1
         fi = fi + 1
 
+// ── v10 target-fact reconstruction ────────────────────────────────────────
+// The .ccr carries semantic facts only. Access widths, array strides, and
+// runtime allocation sizes are target facts; the instance rebuilds them from
+// type ids/variable types and the x86-64 layout (mapping.cr/x86_mapping.cr).
+// These helpers live here because both backend entries (the concat corearch
+// entry and the project-mode target entry) import regalloc.cr.
+fn corearch_ptr_pointee(var: int) -> int:
+    if var < 0:
+        return TI_INT
+    ti := irv_type(var)
+    if ti >= 0:
+        k := get_type_kind(ti)
+        if k == TYP_PTR || k == TYP_REF:
+            return get_type_data(ti)
+    return TI_INT
+
+// Access width for IR_DEREF/IR_STORE_PTR. Mirrors the front-end derivation
+// ptr_access_width: pointee value size, falling back to one target slot.
+fn corearch_nod_access_width(n: int) -> int:
+    w := mp_size(corearch_ptr_pointee(nod_s1(n)))
+    if w <= 0:
+        return mp_stride(TI_INT)
+    return w
+
+// Element stride for IR_ALLOC_ARRAY. IR values occupy one target slot.
+fn corearch_nod_alloc_stride() -> int:
+    return mp_stride(TI_INT)
+
+// Byte extent of the allocation a runtime pointer bound refers to. The base
+// variable is the destination of an ALLOC_ARRAY/ALLOC_STRUCT node, and that
+// node's semantic count/struct name plus the target layout determine the size.
+fn corearch_alloc_size_of_var(v: int) -> int:
+    if v < 0:
+        return 0
+    ni : ., mut = 0
+    loop:
+        if ni >= g_v7_nod_count:
+            break
+        if nod_dest(ni) == v:
+            aop := nod_op(ni)
+            if aop == IR_ALLOC_ARRAY:
+                return mp_extent(nod_s1(ni), TI_INT)
+            if aop == IR_ALLOC_STRUCT:
+                nm := nod_s3(ni)
+                si : ., mut = 0
+                loop:
+                    if si >= g_struct_count:
+                        break
+                    if si_name(si) == nm:
+                        return mp_extent(si_field_count(si), TI_INT)
+                    si = si + 1
+                return mp_stride(TI_INT)
+        ni = ni + 1
+    return 0
+
+// Runtime pointer bound size for IR_DEREF/IR_STORE_PTR. The semantic flag says
+// a runtime bound exists; the byte size is derived from the allocation node.
+fn corearch_nod_runtime_bound_size(n: int) -> int:
+    fl := nod_type_flags(n)
+    if (fl / CCR_NOD_FLAG_RUNTIME_PTR_BOUNDS) % 2 != 1:
+        return 0
+    op := nod_op(n)
+    base : ., mut = -1
+    if op == IR_DEREF:
+        base = nod_s2(n)
+    else if op == IR_STORE_PTR:
+        base = nod_dest(n)
+    if base < 0:
+        return 0
+    return corearch_alloc_size_of_var(base)
+
 // 语义对象模型：从 NOD 重建线性调度。
 // ccr_io.cr load_ccr 从内核对象缓冲顺序生成 48 字节线性流 g_ir_instrs。
-// nod_* 访问器读 g_v7_nod_sem 的 28 字节语义字段，nod_edge_first 和 nod_edge_count
+// nod_* 访问器读 g_v7_nod_sem 的 32 字节语义字段，nod_edge_first 和 nod_edge_count
 // 读邻接域。REG 展开和函数边界回填（root span 到 g_ir_func_instr_start 和
 // g_ir_func_instr_count）留在 loader。
 // 调用方是 corearch.cr 和组合根 src/targets/x86_64/linux/elf/main.cr；load_ccr 成功后、
@@ -906,11 +977,21 @@ fn build_linear_schedule():
     loop:
         if ni >= g_v7_nod_count:
             break
-        iri_set_op(ni, nod_op(ni))
+        op := nod_op(ni)
+        iri_set_op(ni, op)
         iri_set_dest(ni, nod_dest(ni))
         iri_set_s1(ni, nod_s1(ni))
         iri_set_s2(ni, nod_s2(ni))
         iri_set_s3(ni, nod_s3(ni))
         iri_set_tk(ni, nod_tk(ni))
+        // v10: the .ccr does not carry target facts. Reconstruct the access
+        // width for pointer dereferences and the element stride for allocations
+        // from the semantic type plus the x86-64 layout. The runtime-bound size
+        // for pointer stores/loads is derived from the allocation node.
+        if op == IR_ALLOC_ARRAY:
+            iri_set_s2(ni, corearch_nod_alloc_stride())
+        else if op == IR_DEREF || op == IR_STORE_PTR:
+            iri_set_tk(ni, corearch_nod_access_width(ni))
+            iri_set_s3(ni, corearch_nod_runtime_bound_size(ni))
         g_ir_instr_count = ni + 1
         ni = ni + 1

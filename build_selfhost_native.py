@@ -61,6 +61,11 @@ kernel_files = [
 # ① 架构轴 x86_64：寄存器分配 CAG + 指令编码 + 字节尺寸单源（sizes.cr）
 # + tagged BigInt 立即数/装箱辅助（int_rep.cr）与运行时 blob。
 arch_x86_64_files = [
+    # Target layout helpers. corearch reconstructs NOD access widths and array
+    # strides from these instead of reading target facts back from .ccr. They
+    # depend only on common_files (ast/dyn_arr type rows), not on the frontend.
+    'src/compiler/mapping.cr',
+    'src/arch/x86_64/x86_mapping.cr',
     'src/arch/x86_64/backend_schema.cr',
     'src/arch/x86_64/backend_globals.cr',
     'src/arch/x86_64/backend_arrays.cr',

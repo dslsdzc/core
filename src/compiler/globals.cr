@@ -48,24 +48,18 @@ g_ccr_type_seg_len : int, mut
 // buffer length.
 g_ccr_iface_seg : string, mut
 g_ccr_iface_seg_len : int, mut
-// NOD term-index buffer. Filling happens in ccr_types.cr; ccr_io.cr copies the
-// values into the +28 i32 slot of each node record.
-// Value semantics: -1 means no term (not a face-0 node, or a missing row in a warm
-// snapshot); >= 0 is the term DAG row for that node's atom row. The loader checks
-// consistency after parsing the TYPE segment and rejects an out-of-range value or
-// an atom_of mismatch.
-// This file is first in both builds, so these globals must stay here.
-g_ccr_nod_item : string, mut
-g_ccr_nod_item_count : int, mut
 // NOD semantic type-id side buffer (v10 NOD `type_id`). Filling happens in
-// ccr_types.cr:ccr_nod_type_populate during the save path; the v9 wire keeps the
-// 40B NOD record with `item` at +28 and does not carry this value.
+// ccr_types.cr:ccr_nod_type_populate during the save path; the wire writes the
+// 40B NOD record with `type_id` at +24 and `flags` at +28.
 // Value semantics: >= 0 is a TYPE row (face 0 = the row's item is reversible);
-// -1 means no type row. `nod_type_flags` is the companion semantic-flags word
-// (constant 0 until the v10 cutover classifies aux codes).
+// -1 means no type row. `g_ccr_nod_flags` is the companion semantic-flags word
+// (CCR_NOD_FLAG_*): dynamic bounds/spawn markers and the runtime-pointer-bound
+// marker. It never carries a width, byte extent, stride, or alignment.
 // This file is first in both builds, so these globals must stay here.
 g_ccr_nod_type : string, mut
 g_ccr_nod_type_count : int, mut
+g_ccr_nod_flags : string, mut
+g_ccr_nod_flags_count : int, mut
 g_ast : string, mut
 g_ast_count : int, mut
 g_ast_cap : int, mut

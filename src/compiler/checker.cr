@@ -266,20 +266,8 @@ fn init_types():
 // Runtime builtin declarations moved to the target prelude. The checker only
 // consumes g_rt_builtin_* through prelude_builtin_init and the shared table.
 
-fn get_type_kind(ti: int) -> int:
-    if ti >= 0 && ti < g_type_count:
-        return cell_load(g_types, ti * 24)
-    return -1
-
-fn get_type_data(ti: int) -> int:
-    if ti >= 0 && ti < g_type_count:
-        return cell_load(g_types, ti * 24 + 8)
-    return 0
-
-fn get_type_extra(ti: int) -> int:
-    if ti >= 0 && ti < g_type_count:
-        return cell_load(g_types, ti * 24 + 16)
-    return 0
+// Type-row readers live in dyn_arr.cr (shared with corearch so target layout
+// helpers can resolve rows without a checker layer).
 
 // ─── 常量档数组长度约束 ───
 // N 不参与类型身份，身份令牌序列只含元素项，因此数组长度在 type_equal 之外单独检查。

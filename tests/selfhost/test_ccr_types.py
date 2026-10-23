@@ -7,7 +7,7 @@
 impl 边 + 方法表 / corearch 读回 / 跨段引用域 / 扩列与命名化守门）。
 
 Task 1（机制面）：
-  ① 段表 = 8 段、tag 序 = 1..8、offset 连续、末段尾 == 文件大小；
+  ① 段表 = 9 段、tag 序 = 1..9、offset 连续、末段尾 == 文件大小；
   ② header: version = 9、seg_count = 8、reserved = 0；
   ③ TYPE(7)/IFACE(8) **皆为内容面**（R2 P4 Task 2/3 起——空壳期已退役）；
   ④ loader 负分支（byte mutation，逐个打；全部要求 corearch rc≠0 且**不得
@@ -79,11 +79,13 @@ COREC = os.path.join(BASE, 'build/corec')
 COREARCH = os.path.join(BASE, 'build/corearch')
 
 MAGIC = 0x31524343  # "CCR1"
-VER = 589825             # v9.1 = (9 << 16) | 1
-SEG_TAGS = [1, 2, 3, 4, 5, 6, 7, 8]  # STR SYM NOD ENT REG EDG TYPE IFACE
-HEADER_TABLE = 16 + 8 * 12  # 112
-TYPE_TAG = 7
-IFACE_TAG = 8
+VER = 0x000A0000         # v10 lattice container
+SEG_TAGS = [1, 2, 3, 4, 5, 6, 7, 8, 9]  # STR TYPE IFACE SYM NOD ENT REG EDG CASE
+HEADER_TABLE = 16 + 9 * 12  # 124
+TYPE_TAG = 2
+IFACE_TAG = 3
+ENT_TAG = 6
+NOD_TAG = 5
 ESZ_TYPE_ROW = 24    # 类型行表记录：{kind,data,extra} i64×3（D12）
 ESZ_TYPE_TERM = 40   # 项 DAG 记录：{tag,a,b,c,d} i64×5（哈希不落盘，加载侧重算）
 IFACE_NATIVE_N = 16  # R2 P4 Task 3 扩列硬值（13 → 16；见 ccr_io.cr 注）
@@ -108,7 +110,7 @@ V7_VER = 7
 
 
 class CcrFile:
-    """`.ccr` 全段解析（8 段规范序契约；违反 = AssertionError）。"""
+    """`.ccr` 全段解析（9 段规范序契约；违反 = AssertionError）。"""
 
     def __init__(self, data: bytes):
         self.d = data
@@ -117,8 +119,8 @@ class CcrFile:
         (magic, ver, seg_count, reserved) = struct.unpack_from('<4I', data, 0)
         assert magic == MAGIC, f"bad magic {magic:#x}"
         assert ver == VER, f"expected version {VER}, got {ver}"
-        assert seg_count == 8, f"expected 8 segments, got {seg_count}"
-        assert reserved == 0, f"reserved != 0: {reserved}"
+        assert seg_count == 9, f"expected 9 segments, got {seg_count}"
+        assert reserved <= 0x7, f"reserved flag bits set: {reserved}"
         self.segs = {}
         cur = HEADER_TABLE  # 段体紧随段表
         for i, tag in enumerate(SEG_TAGS):
@@ -225,9 +227,9 @@ def _shell_fixture(name: str):
     return src_path, ccr_path
 
 
-def test_p4t1_layout_eight_segments():
-    """① 段表 = 8 段规范序（tag 1..8）+ offset 连续 + 末段尾 == 文件大小；
-    header version = 8 / seg_count = 8 / reserved = 0。"""
+def test_p4t1_layout_nine_segments():
+    """① 段表 = 9 段规范序（tag 1..9）+ offset 连续 + 末段尾 == 文件大小；
+    header version = 0x000A0000 / seg_count = 9 / flags bits 0..2。"""
     src_path, ccr_path = _shell_fixture('layout')
     try:
         c = CcrFile(read_ccr(ccr_path))
@@ -288,7 +290,7 @@ def test_p4t1_loader_rejects_missing_type_iface():
     try:
         data = bytearray(read_ccr(ccr_path))
         c = CcrFile(bytes(data))
-        edg_off, _ = c.segs[6]
+        edg_off, _ = c.segs[8]
         struct.pack_into('<I', data, 8, 6)                      # seg_cnt := 6
         struct.pack_into('<I', data, 16 + 5 * 12 + 8,
                          len(data) - edg_off)                   # 末段扩到 EOF
@@ -310,7 +312,7 @@ def test_p4t1_loader_rejects_tag_mutations():
     src_path, ccr_path = _shell_fixture('tagmut')
     try:
         base = read_ccr(ccr_path)
-        for i, new_tag in ((6, 9), (6, 6), (7, 7)):
+        for i, new_tag in ((1, 10), (1, 1), (2, 4)):
             data = bytearray(base)
             struct.pack_into('<I', data, 16 + i * 12, new_tag)
             bad = ccr_path + f'.tag{i}_{new_tag}'
@@ -533,25 +535,34 @@ def type_seg(data: bytes) -> bytes:
     return CcrFile(data).body(TYPE_TAG)
 
 
-def _resize_type_tail(data: bytes, delta: int) -> bytes:
-    """TYPE 段体尾增(+)/删(-) |delta| 字节，并同步段表（TYPE size、IFACE offset）
-    ——产出「段表仍自洽、TYPE 内容被破坏」的文件（拒收必须归因于内容闸）。"""
+def _resize_seg_tail(data: bytes, table_index: int, delta: int) -> bytes:
+    """Resize segment body at table row `table_index` and shift every later
+    segment offset by delta, keeping the table contiguous. The body bytes are
+    inserted/removed at the segment tail so the file stays structurally valid
+    apart from the intended content corruption."""
     d = bytearray(data)
-    (t_off, t_size) = struct.unpack_from('<2I', d, 16 + 6 * 12 + 4)
-    struct.pack_into('<I', d, 16 + 6 * 12 + 8, t_size + delta)
-    (i_off,) = struct.unpack_from('<I', d, 16 + 7 * 12 + 4)
-    struct.pack_into('<I', d, 16 + 7 * 12 + 4, i_off + delta)
-    cut = t_off + t_size
+    (s_off, s_size) = struct.unpack_from('<2I', d, 16 + table_index * 12 + 4)
+    struct.pack_into('<I', d, 16 + table_index * 12 + 8, s_size + delta)
+    for row in range(table_index + 1, len(SEG_TAGS)):
+        (o,) = struct.unpack_from('<I', d, 16 + row * 12 + 4)
+        struct.pack_into('<I', d, 16 + row * 12 + 4, o + delta)
+    cut = s_off + s_size
     if delta > 0:
         return bytes(d[:cut]) + b'\x00' * delta + bytes(d[cut:])
     return bytes(d[:cut + delta]) + bytes(d[cut:])
+
+
+def _resize_type_tail(data: bytes, delta: int) -> bytes:
+    """TYPE 段体尾增(+)/删(-) |delta| 字节，并同步其后全部段 offset
+    ——产出「段表仍自洽、TYPE 内容被破坏」的文件（拒收必须归因于内容闸）。"""
+    return _resize_seg_tail(data, 1, delta)
 
 
 def sym_type_refs(data: bytes):
     """SYM 段里全部类型行引用（globals type + func var_decls type）——检查载体
     自洽（引用域必须 < TYPE 段行数；T2 用例 ⑮ 的根因量化用）。"""
     c = CcrFile(data)
-    off, size = c.segs[2]
+    off, size = c.segs[4]
     end = off + size
     p = off
     refs = []
@@ -768,7 +779,7 @@ def test_p4t2_loader_rejects_count_and_truncation():
         c = CcrFile(data)
         t_off, _t_size = c.segs[TYPE_TAG]
         tc_off = t_off + 4 + len(rows) * ESZ_TYPE_ROW
-        i_off, _i_size = c.segs[8]
+        i_off, _i_size = c.segs[IFACE_TAG]
         mutations = {}
         d = bytearray(data)
         struct.pack_into('<I', d, tc_off, len(terms) + 1)     # term_count +1
@@ -782,9 +793,9 @@ def test_p4t2_loader_rejects_count_and_truncation():
             # 段表仍自洽（前闸全过——拒绝必须归因于 TYPE 内容闸）
             assert CcrFile(mdata).segs[TYPE_TAG][0] == t_off
             if name in ('trunc', 'trail'):
-                assert CcrFile(mdata).segs[8][0] != i_off   # 重排后 offset 已移
+                assert CcrFile(mdata).segs[IFACE_TAG][0] != i_off   # 重排后 offset 已移
             else:
-                assert CcrFile(mdata).segs[8][0] == i_off
+                assert CcrFile(mdata).segs[IFACE_TAG][0] == i_off
             bad = ccr_path + '.' + name
             _write(bad, mdata)
             try:
@@ -1055,15 +1066,8 @@ def _t3_fixture(name: str):
 
 
 def _resize_iface_tail(data: bytes, delta: int) -> bytes:
-    """IFACE 段体尾增(+)/删(-) |delta| 字节（段表有尾随量可容纳时用——本段是末段，
-    增删会改变文件长度；调用方负责只做「可容纳」的破坏）。"""
-    d = bytearray(data)
-    (i_off, i_size) = struct.unpack_from('<2I', d, 16 + 7 * 12 + 4)
-    struct.pack_into('<I', d, 16 + 7 * 12 + 8, i_size + delta)
-    cut = i_off + i_size
-    if delta > 0:
-        return bytes(d[:cut]) + b'\x00' * delta + bytes(d[cut:])
-    return bytes(d[:cut + delta]) + bytes(d[cut:])
+    """IFACE 段体尾增(+)/删(-) |delta| 字节并同步后续段 offset（结构仍自洽）。"""
+    return _resize_seg_tail(data, 2, delta)
 
 
 def test_p4t3_iface_segment_layout():
@@ -1662,9 +1666,10 @@ def ccr_nod_rows(data: bytes):
 
 
 def ccr_nod_records(data: bytes):
-    """40B/条独立解析 → `[(op, tk, item), …]`（item = +28 i32；-1 = 无项）。
+    """40B/条独立解析 → `[(op, type_id, flags), …]`（type_id = TYPE row/-1，
+    flags = semantic feature bits）。v10 has no disk `item` field.
     硬断 = 步长恒等式（段体 = 4 + n×40）+ 邻接域前缀累计不变量。"""
-    b = CcrFile(data).body(3)
+    b = CcrFile(data).body(NOD_TAG)
     n = struct.unpack_from('<I', b, 0)[0]
     assert (len(b) - 4) % 40 == 0 and n == (len(b) - 4) // 40, \
         f"NOD body {len(b)}B not 4 + n*40 (n={n})"
@@ -1673,19 +1678,21 @@ def ccr_nod_records(data: bytes):
     for i in range(n):
         pos = 4 + i * 40
         (op,) = struct.unpack_from('<I', b, pos)
-        (tk,) = struct.unpack_from('<I', b, pos + 24)
-        (item,) = struct.unpack_from('<i', b, pos + 28)
+        (type_id,) = struct.unpack_from('<i', b, pos + 24)
+        (flags_,) = struct.unpack_from('<I', b, pos + 28)
         (fe, ec) = struct.unpack_from('<II', b, pos + 32)
         assert fe == run, f"node {i}: first_edge {fe} != cumulative {run}"
+        assert type_id >= -1, f"node {i}: type_id {type_id} < -1"
+        assert flags_ <= 0x7, f"node {i}: unknown flag bits {flags_:#x}"
         run += ec
-        out.append((op, tk, item))
+        out.append((op, type_id, flags_))
     return out
 
 
 def test_p4t4_ccr_nod_tk_equals_graph_tk():
-    """㉘ `.ccr` 面零改动：NOD **40B/条**（R2 P6 T3 起；`tk` 槽语义/字节不变）；且 NOD 的 (op, tk) 序列与 DF 节点的
-    (op, tk) 序列**逐位置相同**（1:1 同序）——即「tk 升格前后逐字节同」的
-    .ccr 侧证据（tk 只从 iri_tk 读出，升格只加了内存第 9 槽）。"""
+    """㉘ `.ccr` NOD **40B/条**：v10 carries `type_id`/`flags` instead of the
+    derived code. For a face-0 node (the `.cir` dump shows a live term) the wire
+    type_id equals the derived row; every non-face node carries -1."""
     src = tk_fixture('nod')
     ccr_path = os.path.join(BASE, 'build', 'test_p4t4_nod.ccr')
     dot = os.path.join(BASE, 'build', 'test_p4t4_nod.cir')
@@ -1696,8 +1703,14 @@ def test_p4t4_ccr_nod_tk_equals_graph_tk():
         assert len(nod) == len(rows), \
             f"NOD rows {len(nod)} != DF nodes {len(rows)}"
         for i, (nr, dr) in enumerate(zip(nod, rows)):
-            assert nr == (dr[1], dr[2]), \
-                f"node {i}: NOD (op,tk)={nr} != graph {(dr[1], dr[2])}"
+            op, type_id = nr
+            assert op == dr[1], f"node {i}: NOD op {op} != graph {dr[1]}"
+            if dr[3] >= 0:
+                assert type_id == dr[2], \
+                    f"node {i}: type_id {type_id} != face-0 row {dr[2]}"
+            else:
+                assert type_id == -1, \
+                    f"node {i}: non-face node carries type_id {type_id}"
     finally:
         _cleanup(src, ccr_path, dot)
 
@@ -1980,8 +1993,9 @@ def test_p5t2_cold_warm_composite_symmetry():
 
 
 def test_p5t2_ccr_nod_composite_parity():
-    """㊱ 复合行语料的 `.ccr` 面：NOD (op, tk) 与图 (op, tk) 逐位置相同——码没有被
-    项槽吞掉（派生码 ≡ 旧混用码的 .ccr 侧证据）。"""
+    """㊱ 复合行语料的 `.ccr` 面：v10 writes type_id = -1 for composite type
+    rows (Task 3 fixes semantic ids to reversible atom rows only). The row code
+    stays in the emit-time `.cir` surface, not in the wire."""
     src = tk_fixture('nodc', COMPOSITE_FIXTURE)
     ccr_path = os.path.join(BASE, 'build', 'test_p4t4_nodc.ccr')
     dot = os.path.join(BASE, 'build', 'test_p4t4_nodc.cir')
@@ -1990,10 +2004,15 @@ def test_p5t2_ccr_nod_composite_parity():
         corec_ccr(src, ccr_path)
         nod = ccr_nod_rows(read_ccr(ccr_path))
         assert len(nod) == len(rows), f"NOD rows {len(nod)} != DF nodes {len(rows)}"
+        comp = 0
         for i, (nr, dr) in enumerate(zip(nod, rows)):
-            assert nr == (dr[1], dr[2]), f"node {i}: NOD {nr} != graph {(dr[1], dr[2])}"
-        assert any(r[1] in MINT_OPS and r[8] > 0 for r in rows), \
-            "vacuous: no composite row in fixture"
+            op, type_id = nr
+            assert op == dr[1], f"node {i}: NOD op {op} != graph {dr[1]}"
+            if dr[1] in MINT_OPS and dr[8] > 0:
+                comp += 1
+                assert type_id == -1, \
+                    f"node {i}: composite row leaked into type_id {type_id}"
+        assert comp > 0, "vacuous: no composite row in fixture"
     finally:
         _cleanup(src, ccr_path, dot)
 
@@ -2058,55 +2077,55 @@ def test_p5t2_row_allocating_fn_not_snapshotted():
         shutil.rmtree(os.path.dirname(cache_dir), ignore_errors=True)
 
 
-# ═══════════ R2 P6 Task 3（β）：NOD 盘面项索引（+28 i32）+ 版本 9 ═══════════
-# 口径：`item` = **TYPE 段文件空间**项索引（-1 = 无项）；写侧 = corec 的
-# ccr_types.cr:ccr_nod_item_populate（保存期由盘上派生码经桥接层重派生），读侧 =
-# load_ccr 的 TYPE 段后**一致性硬校验**（域外/不一致 ⇒ 拒绝）+ corearch
-# `--dump-nod-items` 读回通道。`tk` 槽语义/字节不变（派生码，D22-①）。
+# ═══════════ v10 NOD semantic type_id/flags（Task 4）══════════
+# 口径：`type_id` = TYPE 段行索引（-1 = 无类型）；`flags` = 语义特性位
+# （CCR_NOD_FLAG_*）。写侧 = corec 的 ccr_types.cr:ccr_nod_type_populate；
+# 读侧 = load_ccr 的 TYPE 段后**type_id 域校验** + corearch `--dump-nod-types`
+# 读回通道。v10 盘面没有 `item`/旧 `tk` 槽。
 
-def _nod_items_dump(ccr_path: str):
-    """`corearch F.ccr --dump-nod-items` → (hdr, rows)。
-    行格式契约见 corearch.cr:dump_nod_items：
-      `[nod-items] nodes= with_item= terms= rows=`
-      `item <n> op <o> code <c> idx <i> atom <a>`
-    rows = [(node, op, code, idx, atom), …]。"""
-    r = subprocess.run([COREARCH, ccr_path, '--dump-nod-items'],
+def _nod_type_dump(ccr_path: str):
+    """`corearch F.ccr --dump-nod-types` → (hdr, rows).
+    行格式契约见 corearch.cr:dump_nod_types：
+      `[nod-types] nodes= <n> with_type= <n> flags= <n> rows= <n>`
+      `nodtype <n> op <o> tid <i> flags <f>`
+    rows = [(node, op, type_id, flags), …]。"""
+    r = subprocess.run([COREARCH, ccr_path, '--dump-nod-types'],
                        capture_output=True, text=True, cwd=BASE, timeout=120)
     assert r.returncode == 0, \
-        f"corearch --dump-nod-items rc={r.returncode}: {r.stdout!r} {r.stderr!r}"
+        f"corearch --dump-nod-types rc={r.returncode}: {r.stdout!r} {r.stderr!r}"
     hdr = None
     rows = []
     for ln in r.stdout.splitlines():
-        if ln.startswith('[nod-items]'):
-            m = re.match(r'\[nod-items\] nodes=(\d+) with_item=(\d+) '
-                         r'terms=(\d+) rows=(\d+)', ln)
-            assert m, f"malformed nod-items header: {ln!r}"
-            hdr = {'nodes': int(m.group(1)), 'with_item': int(m.group(2)),
-                   'terms': int(m.group(3)), 'rows': int(m.group(4))}
+        if ln.startswith('[nod-types]'):
+            m = re.match(r'\[nod-types\] nodes=(\d+) with_type=(\d+) '
+                         r'flags=(\d+) rows=(\d+)', ln)
+            assert m, f"malformed nod-types header: {ln!r}"
+            hdr = {'nodes': int(m.group(1)), 'with_type': int(m.group(2)),
+                   'flags': int(m.group(3)), 'rows': int(m.group(4))}
             continue
         p = ln.split()
-        if p and p[0] == 'item':
-            assert len(p) == 10 and p[2] == 'op' and p[4] == 'code' \
-                and p[6] == 'idx' and p[8] == 'atom', f"malformed item line: {ln!r}"
-            rows.append(tuple(int(p[k]) for k in (1, 3, 5, 7, 9)))
-    assert hdr is not None, "nod-items header missing"
+        if p and p[0] == 'nodtype':
+            assert len(p) == 8 and p[2] == 'op' and p[4] == 'tid' \
+                and p[6] == 'flags', f"malformed nodtype line: {ln!r}"
+            rows.append(tuple(int(p[k]) for k in (1, 3, 5, 7)))
+    assert hdr is not None, "nod-types header missing"
     assert len(rows) == hdr['nodes'], \
         f"rows {len(rows)} != header nodes {hdr['nodes']}"
     return hdr, rows
 
 
 def test_p6t3_version_gate_rejects_v8():
-    """㊳ 版本闸：v9 接受 / **v8 拒收**（D10 先例——旧格式整类拒收，不得静默）。
+    """㊳ 版本闸：v10 接受 / **v9.1 拒收**（旧格式整类拒收，不得静默）。
     非平凡性控制：未补丁版必须 rc=0 + 出产物（否则「拒绝」可能只是畸形字节的副产品）。"""
     src = tk_fixture('p6t3ver')
     ccr_path = os.path.join(BASE, 'build', 'test_p6t3_ver.ccr')
-    bad = ccr_path + '.v8'
+    bad = ccr_path + '.v9'
     out = os.path.join(BASE, 'build', 'test_p6t3_ver.out')
     try:
         corec_ccr(src, ccr_path)
-        arch_elf(ccr_path, out)                      # v9 正控（非平凡性）
+        arch_elf(ccr_path, out)                      # v10 正控（非平凡性）
         data = bytearray(read_ccr(ccr_path))
-        struct.pack_into('<I', data, 4, 8)           # version := 8
+        struct.pack_into('<I', data, 4, 589825)      # version := v9.1
         _write(bad, bytes(data))
         arch_elf(bad, out, must_fail=True)           # 拒收（不得静默当空表）
     finally:
@@ -2114,9 +2133,9 @@ def test_p6t3_version_gate_rejects_v8():
 
 
 def test_p6t3_nod_record_40b_field_order():
-    """㊴ NOD 记录 40B + 字段序（独立解析）：段体 = `4 + n×40`；`item` 落 **+28 i32**、
-    邻接域顺移 **+32/+36**（`fe` 前缀累计不变量在 `ccr_nod_records` 内硬断）；
-    且 (op/dest/s1/s2/s3/tk) 六列与 `--dump-objects` 的对象面逐节点同（跨通道）。"""
+    """㊴ NOD 记录 40B + 字段序（独立解析）：段体 = `4 + n×40`；type_id 落
+    **+24 i32**、flags 落 **+28 u32**、邻接域 **+32/+36**（`fe` 前缀累计不变量在
+    `ccr_nod_records` 内硬断）；op/dest/s1/s2/s3 与 `--dump-objects` 同（跨通道）。"""
     src = tk_fixture('p6t3rec')
     ccr_path = os.path.join(BASE, 'build', 'test_p6t3_rec.ccr')
     try:
@@ -2124,7 +2143,7 @@ def test_p6t3_nod_record_40b_field_order():
         data = read_ccr(ccr_path)
         recs = ccr_nod_records(data)                 # 内含 40B 步长 + fe 累计断言
         assert recs, "vacuous: no nodes parsed"
-        b = CcrFile(data).body(3)
+        b = CcrFile(data).body(NOD_TAG)
         n = struct.unpack_from('<I', b, 0)[0]
         assert len(b) == 4 + n * 40, f"NOD body {len(b)} != 4 + {n}*40"
         r = subprocess.run([COREARCH, ccr_path, '--dump-objects'],
@@ -2132,45 +2151,59 @@ def test_p6t3_nod_record_40b_field_order():
         assert r.returncode == 0, f"--dump-objects rc={r.returncode}"
         cnt, nodes, _ = parse_object_dump(r.stdout)
         assert cnt == len(recs)
-        for i, (op, tk, _item) in enumerate(recs):
+        for i, (op, type_id, flags_) in enumerate(recs):
             o = nodes[i]
-            assert (op, tk) == (o[0], o[5]), \
-                f"node {i}: NOD (op,tk)=({op},{tk}) != object surface ({o[0]},{o[5]})"
+            assert o[0] == op, f"node {i}: object op {o[0]} != NOD op {op}"
+            if type_id >= 0:
+                assert o[5] == type_id, \
+                    f"node {i}: object tk {o[5]} != type_id {type_id}"
+            if flags_ & 1:
+                assert o[5] == 1, f"node {i}: dynamic bound flag lost in dump"
+            if flags_ & 2:
+                assert o[5] == -1, f"node {i}: dynamic spawn flag lost in dump"
     finally:
         _cleanup(src, ccr_path)
 
 
-def test_p6t3_nod_items_roundtrip():
-    """㊵ **项索引落盘/读回对拍（本任务承重例）**：corearch 逐节点 `item → 项表取项 →
-    `tt_atom_of_term` → 原子行`，判据 = ① `mism == 0`（有项节点 atom ≡ 盘上码）·
-    ② `with_item > 0`（非空转）· ③ **非退化**：至少一节点 `idx != code`（项 DAG 序 ≠
-    行序——否则「回读通道其实是把码打印两遍」的假绿不可辨）。
-    写侧若误用 emit 期活表索引（而非保存期重派生），① 必红。"""
+def test_p6t3_nod_types_roundtrip():
+    """㊵ **type_id/flags 落盘/读回对拍（本任务承重例）**：corearch 的
+    `--dump-nod-types` 逐节点输出必须与独立解析的 NOD 段一致。
+    判据 = ① 逐节点 (op/type_id/flags) 相同 · ② `with_type > 0`（非空转）·
+    ③ `flags > 0`（至少一条语义特性被分类——否则 flags 分类是死路）。"""
+    total_with_type = 0
+    total_flagged = 0
     for src_name in ('nod', 'comp'):
         src = tk_fixture('p6t3rt_' + src_name,
                          TK_FIXTURE if src_name == 'nod' else COMPOSITE_FIXTURE)
         ccr_path = os.path.join(BASE, 'build', f'test_p6t3_rt_{src_name}.ccr')
         try:
             corec_ccr(src, ccr_path)
-            hdr, rows = _nod_items_dump(ccr_path)
-            assert hdr['with_item'] > 0, f"{src_name}: vacuous (no item-bearing node)"
-            mism = [r for r in rows if r[3] >= 0 and r[4] != r[2]]
-            assert not mism, f"{src_name}: {len(mism)} item/code mismatch, e.g. {mism[:3]}"
-            with_i = [r for r in rows if r[3] >= 0]
-            assert any(r[3] != r[2] for r in with_i), \
-                f"{src_name}: every idx == code — read-back may be degenerate"
-            for (n, op, code, idx, atom) in rows:
-                if idx >= 0:
-                    assert 0 <= idx < hdr['terms'], f"node {n}: idx {idx} out of term space"
-                    assert atom == code, f"node {n}: atom {atom} != code {code}"
+            hdr, rows = _nod_type_dump(ccr_path)
+            recs = ccr_nod_records(read_ccr(ccr_path))
+            assert len(rows) == len(recs), f"{src_name}: dump/wire node count drift"
+            with_type = 0
+            flagged = 0
+            for (n, op, tid, fl), (wop, wtid, wfl) in zip(rows, recs):
+                assert (op, tid, fl) == (wop, wtid, wfl), \
+                    f"{src_name} node {n}: dump {(op, tid, fl)} != wire {(wop, wtid, wfl)}"
+                if tid >= 0:
+                    with_type += 1
+                if fl != 0:
+                    flagged += 1
+            assert hdr['with_type'] == with_type
+            assert hdr['flags'] == flagged
+            assert with_type > 0, f"{src_name}: no node carries a semantic type"
+            total_with_type += with_type
+            total_flagged += flagged
         finally:
             _cleanup(src, ccr_path)
+    assert total_flagged > 0, "vacuous: no node carries a semantic flag in either corpus"
 
 
-def test_p6t3_items_match_memory_face():
-    """㊶ 两通道面一致：`(item ≥ 0) ⟺ (内存项槽 ≥ 0)` 逐节点 + 计数相等
-    （`--dump-tk-terms` 的 `term` 列 = emit 期分类结果；`item` = 保存期同判定的投影）。
-    同时锁 D22-①：**盘上 tk 列 ≡ 内存派生码列**（全节点，含辅码面/复合行）。"""
+def test_p6t3_types_match_memory_face():
+    """㊶ 两通道面一致：`(type_id ≥ 0) ⟺ (内存项槽 ≥ 0)` 逐节点 + 计数相等
+    （`--dump-tk-terms` 的 `term` 列 = emit 期分类结果；type_id = 同一判定的投影）。
+    同时锁 Task 3 规则：face-0 节点 type_id == derived row code。"""
     src = tk_fixture('p6t3face', COMPOSITE_FIXTURE)
     ccr_path = os.path.join(BASE, 'build', 'test_p6t3_face.ccr')
     dot = os.path.join(BASE, 'build', 'test_p6t3_face.cir')
@@ -2180,84 +2213,88 @@ def test_p6t3_items_match_memory_face():
         recs = ccr_nod_records(read_ccr(ccr_path))
         assert len(recs) == len(rows), f"nodes {len(recs)} != mem rows {len(rows)}"
         w_mem = sum(1 for r in rows if r[3] >= 0)
-        nhdr, nrows = _nod_items_dump(ccr_path)
-        assert nhdr['with_item'] == w_mem, \
-            f"with_item {nhdr['with_item']} != memory with_term {w_mem}"
-        for i, ((op, tk, item), r) in enumerate(zip(recs, rows)):
-            assert (op, tk) == (r[1], r[2]), \
-                f"node {i}: NOD (op,tk)=({op},{tk}) != memory derived ({r[1]},{r[2]})"
-            assert (item >= 0) == (r[3] >= 0), \
-                f"node {i}: item {item} vs memory term {r[3]} (face disagreement)"
+        nhdr, nrows = _nod_type_dump(ccr_path)
+        assert nhdr['with_type'] == w_mem, \
+            f"with_type {nhdr['with_type']} != memory with_term {w_mem}"
+        for i, ((op, type_id, flags_), r) in enumerate(zip(recs, rows)):
+            assert op == r[1], f"node {i}: NOD op {op} != memory op {r[1]}"
+            assert (type_id >= 0) == (r[3] >= 0), \
+                f"node {i}: type_id {type_id} vs memory term {r[3]} (face disagreement)"
+            if type_id >= 0:
+                assert type_id == r[2], \
+                    f"node {i}: type_id {type_id} != derived code {r[2]}"
     finally:
         _cleanup(src, ccr_path, dot)
 
 
 def test_p6t3_aux_face_and_composite_preserved():
-    """㊷ 辅码面 + 复合行保真：辅码面 op（`IR_BOUNDS_CHECK`/`IR_DEREF`/`IR_STORE_PTR`/
-    `IR_SPAWN`/`IR_HOTPATCH_ROUTE`）**必须无项**（`item == -1`）且码原值；复合行
-    （仓内语料 `ptr_ref_first.cr` 的 `IR_BINARY` 指针行）同（F2 裁决：不可逆行不建项）。
+    """㊷ 辅码面 + 复合行分类：辅码面 op（`IR_BOUNDS_CHECK`/`IR_DEREF`/
+    `IR_STORE_PTR`/`IR_SPAWN`/`IR_HOTPATCH_ROUTE`）**必须无 type_id**（-1）；
+    复合行（`ptr_ref_first.cr` 的 `IR_BINARY` 指针行）同。语义特性只进 flags：
+    BOUNDS_CHECK 的动态上限 = bit0，SPAWN 的动态标记 = bit1。
     非空转：三类形态在语料里都必须真出现。"""
     aux_ops = {IR_BOUNDS_CHECK, IR_DEREF, IR_STORE_PTR, IR_SPAWN, IR_HOTPATCH_ROUTE}
-    # 语料分工（各自覆盖不同形态；非空转 = 三类形态合计必须真出现）：
+    # 语料分工：
     #   ptr_ref_first.cr = 复合行（IR_BINARY 指针行）+ hotpatch route 辅码；
-    #   p_dex.cr = IR_STORE_PTR 宽度 + IR_BOUNDS_CHECK 旗标；
-    #   p_spawn.cr = IR_SPAWN 计数（**含负码** —— 盘上以 u32 位型承载）。
+    #   p_dex.cr = IR_STORE_PTR + IR_BOUNDS_CHECK 旗标；
+    #   p_spawn.cr = IR_SPAWN 动态标记。
     sources = [(os.path.join(BASE, 'tests', 'suite', 'ptr_ref_first.cr'), 'prf', 'comp'),
                (os.path.join(BASE, 'tests', 'probes', 'p_dex.cr'), 'dex', 'aux'),
-               (os.path.join(BASE, 'tests', 'probes', 'p_spawn.cr'), 'spawn', 'aux')]
+               (os.path.join(BASE, 'tests', 'probes', 'p_spawn.cr'), 'spawn', 'aux'),
+               (tk_fixture('p6t3aux_tk', TK_FIXTURE), 'tk', 'aux')]
     total_aux = 0
+    saw_bound = 0
+    saw_spawn = 0
     for src, tag, kind in sources:
         ccr_path = os.path.join(BASE, 'build', f'test_p6t3_aux_{tag}.ccr')
         try:
             corec_ccr(src, ccr_path)
             recs = ccr_nod_records(read_ccr(ccr_path))
-            total_aux += sum(1 for (op, _tk, _it) in recs if op in aux_ops)
+            aux = [r for r in recs if r[0] in aux_ops]
+            total_aux += len(aux)
             if kind == 'comp':
-                comp = [r for r in recs if r[0] == IR_BINARY and r[2] == -1 and r[1] >= 0]
+                comp = [r for r in recs if r[0] == IR_BINARY and r[1] == -1]
                 assert comp, f"{tag}: vacuous (no composite-row node)"
-            for (op, tk, item) in recs:
-                if op in aux_ops:
-                    assert item == -1, \
-                        f"{tag}: aux-face op {op} carries item {item} (must be -1)"
+            for (op, type_id, flags_) in aux:
+                assert type_id == -1, \
+                    f"{tag}: aux-face op {op} carries type_id {type_id} (must be -1)"
+                if op == IR_BOUNDS_CHECK and flags_ & 1:
+                    saw_bound += 1
+                if op == IR_SPAWN and flags_ & 2:
+                    saw_spawn += 1
+                assert flags_ <= 0x7
         finally:
             _cleanup(ccr_path)
+            if tag == 'tk':
+                _cleanup(src)
     assert total_aux > 0, "vacuous: no aux-face node in any source"
+    assert saw_bound > 0, "vacuous: no dynamic BOUNDS_CHECK flag in corpus"
+    assert saw_spawn > 0, "vacuous: no dynamic SPAWN flag in corpus"
 
 
-def _patch_item(data: bytes, node: int, value: int) -> bytes:
-    """把第 node 个 NOD 记录的 `item` 字段（+28）改写为 value。"""
+def _patch_type_id(data: bytes, node: int, value: int) -> bytes:
+    """把第 node 个 NOD 记录的 `type_id` 字段（+24）改写为 value。"""
     d = bytearray(data)
-    off, _ = CcrFile(bytes(d)).segs[3]
-    struct.pack_into('<i', d, off + 4 + node * 40 + 28, value)
+    off, _ = CcrFile(bytes(d)).segs[NOD_TAG]
+    struct.pack_into('<i', d, off + 4 + node * 40 + 24, value)
     return bytes(d)
 
 
-def test_p6t3_item_oob_rejected():
-    """㊸ 项索引**域外/不一致 ⇒ 拒绝**（三态纪律：不得猜、不得静默当「无项」）：
-    ① `item := tt_count()`（域外）· ② `item := -2`（负域外）· ③ `item := 指向非原子项的
-    索引`（域内但 `tt_atom_of_term` < 0）。三子例 corearch 必须 rc≠0 + 无产物。"""
+def test_p6t3_type_id_oob_rejected():
+    """㊸ type_id **域外 ⇒ 拒绝**（三态纪律：不得猜、不得静默当「无类型」）：
+    ① `type_id := rows`（域外）· ② `type_id := -2`（负域外）。
+    正控 = 未补丁版 rc=0。"""
     src = tk_fixture('p6t3oob')
     ccr_path = os.path.join(BASE, 'build', 'test_p6t3_oob.ccr')
     out = os.path.join(BASE, 'build', 'test_p6t3_oob.out')
     try:
         corec_ccr(src, ccr_path)
         data = read_ccr(ccr_path)
-        hdr, rows = _nod_items_dump(ccr_path)
-        with_i = [r for r in rows if r[3] >= 0]
-        assert with_i, "vacuous: no item-bearing node to patch"
-        n0 = with_i[0][0]
-        # ③ 找一个非原子项索引（tag != TT_ATOM 或 b < 0）——独立读 --dump-types
-        r = subprocess.run([COREARCH, ccr_path, '--dump-types'],
-                           capture_output=True, text=True, cwd=BASE, timeout=120)
-        assert r.returncode == 0, "--dump-types rc!=0"
-        _rows, terms, _probe, _rt = parse_type_dump(r.stdout)
-        nonatom = [i for i, t in enumerate(terms)
-                   if not (t[0] == TT_ATOM and t[2] >= 0)]
-        assert nonatom, "vacuous: no non-atom term in file"
-        cases = [('oob_count', hdr['terms']), ('neg2', -2), ('nonatom', nonatom[0])]
-        for tag, val in cases:
+        hdr, rows = _nod_type_dump(ccr_path)
+        assert hdr['rows'] > 0
+        for tag, val in (('oob_row', hdr['rows']), ('neg2', -2)):
             bad = f'{ccr_path}.{tag}'
-            _write(bad, _patch_item(data, n0, val))
+            _write(bad, _patch_type_id(data, 0, val))
             arch_elf(bad, out, must_fail=True)
             os.unlink(bad)
     finally:
@@ -2275,7 +2312,7 @@ def test_p6t3_nod_count_overflow_rejected():
         corec_ccr(src, ccr_path)
         arch_elf(ccr_path, out)
         data = bytearray(read_ccr(ccr_path))
-        off, size = CcrFile(bytes(data)).segs[3]
+        off, size = CcrFile(bytes(data)).segs[NOD_TAG]
         (n,) = struct.unpack_from('<I', data, off)
         struct.pack_into('<I', data, off, n + 1)
         _write(bad, bytes(data))
@@ -2287,7 +2324,7 @@ def test_p6t3_nod_count_overflow_rejected():
 def test_p6t3_d18_purity_static():
     """㊺ **D18 纯度静态断言**（硬约束：`ccr_io.cr` 在 corearch 清单内 ⇒ 不得引桥接层）：
     该文件**代码面**（非注释）零 `sh_`/`get_type_` 符号引用——项索引只能经
-    `g_ccr_nod_item` 缓冲搬运。注释行与字符串不算。"""
+    `g_ccr_nod_type`/`g_ccr_nod_flags` 缓冲搬运。注释行与字符串不算。"""
     path = os.path.join(BASE, 'src', 'compiler', 'ccr_io.cr')
     with open(path, encoding='utf-8') as fh:
         bad = []
@@ -2298,11 +2335,11 @@ def test_p6t3_d18_purity_static():
     assert not bad, f"ccr_io.cr references bridge-layer symbols in code: {bad[:3]}"
 
 
-# ═══════════ CCR v10 Task 3：NOD 语义 type_id（v9 wire 冻结）═══════════
+# ═══════════ CCR v10 Task 3/4：NOD 语义 type_id + flags ═══════════
 # 观察通道 = `corec ccr --dump-types` 末尾的 `nodtypes` 节（corec-only；只读、
 # 不产额外产物、无新 CLI flag）。语义 = `ccr_types.cr:ccr_nod_type_populate`
 # 的 side buffer：face 0（tk 是可逆 TYPE 行）⇒ type_id = tk；其余 ⇒ -1；
-# flags 恒 0（本任务不落 v9 wire，v10 cutover 才消费）。
+# flags 由 Task 4 的语义分类填充。
 # 期望值在 Python 侧按规则**独立复述**（MINT_OPS + rowterms + 项表读逆），
 # 不复用编译器判定表——防同源同错自洽假绿。
 
@@ -2348,9 +2385,9 @@ def expected_nod_type_id(op: int, tk: int, rows, terms, rowterms) -> int:
 
 
 def test_nod_type_id_is_type_row_or_minus_one():
-    """Task 3（v10 NOD 语义域，v9 wire 冻结）：`ccr_nod_type_populate` 的逐节点
-    type_id —— 类型面节点 `0 <= type_id < row_count` 且 `type_id == tk`；
-    非类型面节点 `type_id == -1`；`flags == 0`（本任务恒 0）。
+    """Task 4（v10 NOD 语义域）：`ccr_nod_type_populate` 的逐节点 type_id ——
+    类型面节点 `0 <= type_id < row_count` 且 `type_id == tk`；非类型面节点
+    `type_id == -1`。flags 只携带语义特性（0..7），且与 wire 逐节点一致。
     非空转：夹具必须同时出现类型面节点（const/binary/load…）与非类型面节点
     （deref/bounds/spawn…）。"""
     src = tk_fixture('p7tid', TK_FIXTURE)
@@ -2362,17 +2399,17 @@ def test_nod_type_id_is_type_row_or_minus_one():
         assert hdr == len(nrows) > 0, "vacuous: no node in nodtype dump"
         assert len(rowterms) == len(rows), \
             f"rowterm map {len(rowterms)} != rows {len(rows)}"
-        # 通道自洽：dump 的节点序 == 同一次 ccr 产物 NOD 段的 (op, tk) 序列
+        # 通道自洽：dump 的节点序 == 同一次 ccr 产物 NOD 段的 (op, type_id, flags)
         nod = ccr_nod_records(read_ccr(ccr_path))
         assert hdr == len(nod), f"nodtype count {hdr} != NOD records {len(nod)}"
-        for i, (n, op, tk, _tid, _flags) in enumerate(nrows):
-            assert (op, tk) == (nod[i][0], nod[i][1]), \
-                f"node {i}: dump (op,tk)=({op},{tk}) != wire {(nod[i][0], nod[i][1])}"
+        for i, (n, op, tk, tid, flags) in enumerate(nrows):
+            assert (op, tid, flags) == nod[i], \
+                f"node {i}: dump {(op, tid, flags)} != wire {nod[i]}"
         face = 0
         nonface = 0
         face_gt0 = 0
         for (n, op, tk, tid, flags) in nrows:
-            assert flags == 0, f"node {n}: flags {flags} != 0"
+            assert flags <= 0x7, f"node {n}: unknown flag bits {flags:#x}"
             exp = expected_nod_type_id(op, tk, rows, terms, rowterms)
             assert tid == exp, \
                 f"node {n}: type_id {tid} != expected {exp} (op={op} tk={tk})"
@@ -2393,24 +2430,23 @@ def test_nod_type_id_is_type_row_or_minus_one():
         _cleanup(src, ccr_path)
 
 
-def test_v9_ent_still_28b_with_home():
-    """Task 3 回归（v9 wire 冻结）：ENT 记录仍为 28B（var/version/def/
-    live_start/live_end/home/flags），`home` 仍由旧 loader 读回，合法 v9
-    文件仍能载入并发射 ELF。v10 的 24B 断言留在 Task 4。"""
-    src_path, ccr_path = _shell_fixture('t3ent')
-    out = os.path.join(BASE, 'build', 'test_p7t3_ent.out')
+def test_v10_ent_24b_without_home():
+    """Task 4 回归：ENT 记录 = 24B（var_id/version/def_nod/live_start/live_end/
+    flags），v10 文件不再有 home 字段。合法文件仍能载入并发射 ELF。"""
+    src_path, ccr_path = _shell_fixture('t4ent')
+    out = os.path.join(BASE, 'build', 'test_p7t4_ent.out')
     try:
         data = read_ccr(ccr_path)
-        c = CcrFile(data)        # 内含 version == VER(589825) + 8 段规范序断言
-        assert VER == 589825, "CCR_VERSION is no longer v9.1"
-        body = c.body(4)
+        c = CcrFile(data)        # 内含 version == 0x000A0000 + 9 段规范序断言
+        assert VER == 0x000A0000, "CCR_VERSION is not v10"
+        body = c.body(ENT_TAG)
         (cnt,) = struct.unpack_from('<I', body, 0)
         assert cnt > 0, "fixture produced no ENT records (vacuous)"
-        assert (len(body) - 4) % 28 == 0, \
-            f"ENT body {len(body)}B not 4 + n*28"
-        assert (len(body) - 4) // 28 == cnt, \
-            f"ENT count {cnt} != record slots {(len(body) - 4) // 28}"
-        # 旧 loader 读回 home：每条记录都打印 home 列（28B 记录的 +20 槽）
+        assert (len(body) - 4) % 24 == 0, \
+            f"ENT body {len(body)}B not 4 + n*24"
+        assert (len(body) - 4) // 24 == cnt, \
+            f"ENT count {cnt} != record slots {(len(body) - 4) // 24}"
+        # The loader's in-memory home slot is -1 because v10 carries no home.
         r = subprocess.run([COREARCH, ccr_path, '--dump-entries'],
                            capture_output=True, text=True, cwd=BASE, timeout=120)
         assert r.returncode == 0, \
@@ -2418,14 +2454,16 @@ def test_v9_ent_still_28b_with_home():
         homes = re.findall(r' home (-?\d+)', r.stdout)
         assert len(homes) == cnt, \
             f"{len(homes)} home values != {cnt} ENT records"
-        # 合法 v9 文件端到端仍可载入/发射
+        assert all(int(h) == -1 for h in homes), \
+            f"v10 loader surfaced a non-(-1) home: {set(homes)}"
+        # 合法 v10 文件端到端仍可载入/发射
         arch_elf(ccr_path, out)
     finally:
         _cleanup(src_path, ccr_path, out)
 
 
 if __name__ == '__main__':
-    tests = [test_p4t1_layout_eight_segments,
+    tests = [test_p4t1_layout_nine_segments,
              test_p4t1_loader_rejects_valid_v7_file,
              test_p4t1_loader_rejects_missing_type_iface,
              test_p4t1_loader_rejects_tag_mutations,
@@ -2468,14 +2506,14 @@ if __name__ == '__main__':
              test_p5t2_row_allocating_fn_not_snapshotted,
              test_p6t3_version_gate_rejects_v8,
              test_p6t3_nod_record_40b_field_order,
-             test_p6t3_nod_items_roundtrip,
-             test_p6t3_items_match_memory_face,
+             test_p6t3_nod_types_roundtrip,
+             test_p6t3_types_match_memory_face,
              test_p6t3_aux_face_and_composite_preserved,
-             test_p6t3_item_oob_rejected,
+             test_p6t3_type_id_oob_rejected,
              test_p6t3_nod_count_overflow_rejected,
              test_p6t3_d18_purity_static,
              test_nod_type_id_is_type_row_or_minus_one,
-             test_v9_ent_still_28b_with_home]
+             test_v10_ent_24b_without_home]
     failed = 0
     for t in tests:
         try:

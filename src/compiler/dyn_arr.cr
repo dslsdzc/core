@@ -298,6 +298,24 @@ fn grow_types(needed: int):
     g_types = nb
     g_type_cap = nc
 
+// Type-row readers. They live here (shared by corec and corearch) because the
+// target layout helpers in x86_mapping.cr consume them and corearch has no
+// checker layer. Out-of-range rows return the same sentinels as before.
+fn get_type_kind(ti: int) -> int:
+    if ti >= 0 && ti < g_type_count:
+        return cell_load(g_types, ti * ESZ_TYPE_ROW + OFF_TR_KIND)
+    return -1
+
+fn get_type_data(ti: int) -> int:
+    if ti >= 0 && ti < g_type_count:
+        return cell_load(g_types, ti * ESZ_TYPE_ROW + OFF_TR_DATA)
+    return 0
+
+fn get_type_extra(ti: int) -> int:
+    if ti >= 0 && ti < g_type_count:
+        return cell_load(g_types, ti * ESZ_TYPE_ROW + OFF_TR_EXTRA)
+    return 0
+
 fn grow_funcs(needed: int):
     if needed < g_func_cap:
         return
