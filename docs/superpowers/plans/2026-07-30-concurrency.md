@@ -119,42 +119,41 @@ import arena
 import sched
 
 // Goroutine lifecycle
-g_next_id : int, mut = 1;
+g_next_id : int, mut = 1
 
-fn g_new(entry_fn: int, arg: int, arg_type: int) -> int {
+fn g_new(entry_fn: int, arg: int, arg_type: int) -> int:
     // Allocate stack (16KB)
-    stack := alloc(16384);
-    stack_top := stack + 16384 - 8;
-    
-    // Create new arena for this goroutine
-    aid := arena_new();
-    
-    // Initialize fiber
-    sp := fiber_init(stack_top, entry_fn);
-    
-    // Allocate G struct
-    g := alloc(64);
-    // G layout: id(8), status(8), sp(8), stack_lo(8), arena_id(8), chan_wait(8), next(8)
-    id := g_next_id; g_next_id = g_next_id + 1;
-    w64(g, 0, id);           // id
-    w64(g, 8, 0);            // _Grunnable
-    w64(g, 16, sp);          // stack pointer
-    w64(g, 24, stack);       // stack_lo
-    w64(g, 32, aid);         // arena_id
-    w64(g, 40, -1);          // chan_wait = -1
-    w64(g, 48, -1);          // next = -1
-    
-    // Enqueue to scheduler
-    sched_enqueue(g);
-    
-    return g;
-}
+    stack := alloc(16384)
+    stack_top := stack + 16384 - 8
 
-fn g_free(g: int) {
+    // Create new arena for this goroutine
+    aid := arena_new()
+
+    // Initialize fiber
+    sp := fiber_init(stack_top, entry_fn)
+
+    // Allocate G struct
+    g := alloc(64)
+    // G layout: id(8), status(8), sp(8), stack_lo(8), arena_id(8), chan_wait(8), next(8)
+    id := g_next_id
+    g_next_id = g_next_id + 1
+    w64(g, 0, id)           // id
+    w64(g, 8, 0)            // _Grunnable
+    w64(g, 16, sp)          // stack pointer
+    w64(g, 24, stack)       // stack_lo
+    w64(g, 32, aid)         // arena_id
+    w64(g, 40, -1)          // chan_wait = -1
+    w64(g, 48, -1)          // next = -1
+
+    // Enqueue to scheduler
+    sched_enqueue(g)
+
+    return g
+
+fn g_free(g: int):
     // Reset arena
-    aid := r64(g, 32);
-    arena_reset(aid);
-}
+    aid := r64(g, 32)
+    arena_reset(aid)
 ```
 
 - [ ] **Step 2: Create sched.cr**
@@ -162,76 +161,67 @@ fn g_free(g: int) {
 ```core
 // M:N scheduler — M OS threads, N goroutines
 
-g_machines : string, mut;    // M array
-g_machine_count : int, mut;
+g_machines : string, mut    // M array
+g_machine_count : int, mut
 
-g_global_runq_head : int, mut = -1;  // global run queue
-g_global_runq_tail : int, mut = -1;
+g_global_runq_head : int, mut = -1  // global run queue
+g_global_runq_tail : int, mut = -1
 
-fn sched_init() {
+fn sched_init():
     // Initialize M workers (one per CPU)
     // For now: single-threaded (1 M, cooperative)
-    m := alloc(32);
-    w64(m, 0, 0);     // id = 0
-    w64(m, 8, -1);     // cur_g = none
-    w64(m, 16, -1);    // runq_head = empty
-    w64(m, 24, -1);    // runq_tail = empty
-    g_machine_count = 1;
-}
+    m := alloc(32)
+    w64(m, 0, 0)     // id = 0
+    w64(m, 8, -1)     // cur_g = none
+    w64(m, 16, -1)    // runq_head = empty
+    w64(m, 24, -1)    // runq_tail = empty
+    g_machine_count = 1
 
-fn sched_enqueue(g: int) {
+fn sched_enqueue(g: int):
     // Add to global run queue (simple for now)
-    if g_global_runq_head < 0 {
-        g_global_runq_head = g;
-        g_global_runq_tail = g;
-    } else {
-        w64(g_global_runq_tail, 48, g);  // next = g
-        g_global_runq_tail = g;
-    }
-}
+    if g_global_runq_head < 0:
+        g_global_runq_head = g
+        g_global_runq_tail = g
+    else:
+        w64(g_global_runq_tail, 48, g)  // next = g
+        g_global_runq_tail = g
 
-fn sched_dequeue() -> int {
-    g := g_global_runq_head;
-    if g >= 0 {
-        g_global_runq_head = r64(g, 48);  // g.next
-        if g_global_runq_head < 0 { g_global_runq_tail = -1; }
-        w64(g, 48, -1);  // clear next
-    }
-    return g;
-}
+fn sched_dequeue() -> int:
+    g := g_global_runq_head
+    if g >= 0:
+        g_global_runq_head = r64(g, 48)  // g.next
+        if g_global_runq_head < 0:
+            g_global_runq_tail = -1
+        w64(g, 48, -1)  // clear next
+    return g
 
-fn sched_yield() {
+fn sched_yield():
     // Current goroutine yields
-    m_idx := 0;  // single M
-    cur_g := r64(g_machines, m_idx * 32 + 8);
-    
-    // Re-enqueue current G
-    if cur_g >= 0 {
-        w64(cur_g, 8, 0);  // _Grunnable
-        sched_enqueue(cur_g);
-    }
-    
-    // Schedule next
-    sched_schedule();
-}
+    m_idx := 0  // single M
+    cur_g := r64(g_machines, m_idx * 32 + 8)
 
-fn sched_schedule() {
-    m_idx := 0;
-    next_g := sched_dequeue();
-    if next_g >= 0 {
-        old_g := r64(g_machines, m_idx * 32 + 8);
-        w64(g_machines, m_idx * 32 + 8, next_g);
-        w64(next_g, 8, 1);  // _Grunning
-        
-        if old_g >= 0 {
+    // Re-enqueue current G
+    if cur_g >= 0:
+        w64(cur_g, 8, 0)  // _Grunnable
+        sched_enqueue(cur_g)
+
+    // Schedule next
+    sched_schedule()
+
+fn sched_schedule():
+    m_idx := 0
+    next_g := sched_dequeue()
+    if next_g >= 0:
+        old_g := r64(g_machines, m_idx * 32 + 8)
+        w64(g_machines, m_idx * 32 + 8, next_g)
+        w64(next_g, 8, 1)  // _Grunning
+
+        if old_g >= 0:
             // Save old_g's sp, switch to next_g's sp
-            old_sp_addr := old_g + 16;  // &g.stack_ptr
-            next_sp := r64(next_g, 16);  // g.stack_ptr
-            fiber_switch(old_sp_addr, next_sp);
-        }
+            old_sp_addr := old_g + 16  // &g.stack_ptr
+            next_sp := r64(next_g, 16)  // g.stack_ptr
+            fiber_switch(old_sp_addr, next_sp)
         // else: first goroutine, just start it
-    }
-}
 ```
 
 - [ ] **Step 3: Create chan.cr**
@@ -239,82 +229,74 @@ fn sched_schedule() {
 ```core
 // Channel: typed FIFO, goroutine-safe
 
-fn chan_make(elemsize: int, cap: int) -> int {
-    ch := alloc(56);
-    buf := alloc(cap * elemsize);
-    w64(ch, 0, buf);        // buf
-    w64(ch, 8, cap);         // cap
-    w64(ch, 16, 0);          // len
-    w64(ch, 24, 0);          // head
-    w64(ch, 32, elemsize);   // elemsize
-    w64(ch, 40, -1);         // send_wait = empty
-    w64(ch, 48, -1);         // recv_wait = empty
-    w64(ch, 56, 0);          // closed = false
-    return ch;
-}
+fn chan_make(elemsize: int, cap: int) -> int:
+    ch := alloc(56)
+    buf := alloc(cap * elemsize)
+    w64(ch, 0, buf)        // buf
+    w64(ch, 8, cap)         // cap
+    w64(ch, 16, 0)          // len
+    w64(ch, 24, 0)          // head
+    w64(ch, 32, elemsize)   // elemsize
+    w64(ch, 40, -1)         // send_wait = empty
+    w64(ch, 48, -1)         // recv_wait = empty
+    w64(ch, 56, 0)          // closed = false
+    return ch
 
-fn chan_send(ch: int, val: int) {
+fn chan_send(ch: int, val: int):
     // Copy val into channel buffer
-    buf := r64(ch, 0);
-    cap := r64(ch, 8);
-    len := r64(ch, 16);
-    head := r64(ch, 24);
-    esize := r64(ch, 32);
-    
-    if len < cap {
+    buf := r64(ch, 0)
+    cap := r64(ch, 8)
+    len := r64(ch, 16)
+    head := r64(ch, 24)
+    esize := r64(ch, 32)
+
+    if len < cap:
         // Buffer has space
-        tail := (head + len) % cap;
-        w64(buf, tail * esize, val);
-        w64(ch, 16, len + 1);
-    } else {
+        tail := (head + len) % cap
+        w64(buf, tail * esize, val)
+        w64(ch, 16, len + 1)
+    else:
         // Buffer full: block current goroutine
         // For now: simple blocking wait (yield + retry)
         // In full implementation: add to send_wait list
-        loop {
-            sched_yield();
-            len := r64(ch, 16);
-            if len < cap { continue; }
-            tail := (head + len) % cap;
-            w64(buf, tail * esize, val);
-            w64(ch, 16, len + 1);
-            break;
-        }
-    }
-}
+        loop:
+            sched_yield()
+            len := r64(ch, 16)
+            if len < cap:
+                continue
+            tail := (head + len) % cap
+            w64(buf, tail * esize, val)
+            w64(ch, 16, len + 1)
+            break
 
-fn chan_recv(ch: int) -> int {
-    buf := r64(ch, 0);
-    cap := r64(ch, 8);
-    len := r64(ch, 16);
-    head := r64(ch, 24);
-    esize := r64(ch, 32);
-    
-    if len > 0 {
-        val := r64(buf, head * esize);
-        w64(ch, 24, (head + 1) % cap);
-        w64(ch, 16, len - 1);
-        return val;
-    }
-    
+fn chan_recv(ch: int) -> int:
+    buf := r64(ch, 0)
+    cap := r64(ch, 8)
+    len := r64(ch, 16)
+    head := r64(ch, 24)
+    esize := r64(ch, 32)
+
+    if len > 0:
+        val := r64(buf, head * esize)
+        w64(ch, 24, (head + 1) % cap)
+        w64(ch, 16, len - 1)
+        return val
+
     // Buffer empty: block (yield + retry)
-    loop {
-        sched_yield();
-        len := r64(ch, 16);
-        if len > 0 {
-            head := r64(ch, 24);
-            val := r64(buf, head * esize);
-            w64(ch, 24, (head + 1) % cap);
-            w64(ch, 16, len - 1);
-            return val;
-        }
-    }
-}
+    loop:
+        sched_yield()
+        len := r64(ch, 16)
+        if len > 0:
+            head := r64(ch, 24)
+            val := r64(buf, head * esize)
+            w64(ch, 24, (head + 1) % cap)
+            w64(ch, 16, len - 1)
+            return val
 
-fn chan_close(ch: int) {
-    w64(ch, 56, 1);  // closed = true
+fn chan_close(ch: int):
+    w64(ch, 56, 1)  // closed = true
     // Wake up all waiting senders/receivers
     // ... (for now, just mark closed)
-}
 ```
 
 - [ ] **Step 4: Verify compilation**
@@ -420,18 +402,19 @@ jj commit -m "feat: ELF backend IR_SPAWN/IR_YIELD encoding"
 ```core
 import io
 
-fn test_go_basic() -> int {
+fn test_go_basic() -> int:
     // Just verify go compiles
-    go 42;  // minimal go expression
-    return 0;
-}
+    go 42  // minimal go expression
+    return 0
 
-fn main() -> int {
-    r1 := test_go_basic();
-    if r1 != 0 { print("FAIL: "); println(int_str(r1)); return r1; }
-    println("ALL PASS");
-    return 0;
-}
+fn main() -> int:
+    r1 := test_go_basic()
+    if r1 != 0:
+        print("FAIL: ")
+        println(int_str(r1))
+        return r1
+    println("ALL PASS")
+    return 0
 ```
 
 - [ ] **Step 2: Write channel test**
@@ -439,21 +422,24 @@ fn main() -> int {
 ```core
 import io
 
-fn test_chan_basic() -> int {
-    ch := chan_make(8, 10);
-    if ch < 0 { return 1; }
-    chan_send(ch, 42);
-    val := chan_recv(ch);
-    if val != 42 { return 2; }
-    return 0;
-}
+fn test_chan_basic() -> int:
+    ch := chan_make(8, 10)
+    if ch < 0:
+        return 1
+    chan_send(ch, 42)
+    val := chan_recv(ch)
+    if val != 42:
+        return 2
+    return 0
 
-fn main() -> int {
-    r1 := test_chan_basic();
-    if r1 != 0 { print("FAIL: "); println(int_str(r1)); return r1; }
-    println("ALL PASS");
-    return 0;
-}
+fn main() -> int:
+    r1 := test_chan_basic()
+    if r1 != 0:
+        print("FAIL: ")
+        println(int_str(r1))
+        return r1
+    println("ALL PASS")
+    return 0
 ```
 
 - [ ] **Step 3: Verify**

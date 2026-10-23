@@ -198,158 +198,305 @@ def case_hard(name, source, needles):
 # ── 源形 ──────────────────────────────────────────────────────────────
 
 # 正向：固有 impl 形态（结构口径）——**双站点**（实例化点 `Box[S]` 注解 + 函数调用点 `f(s)`）
-POS_INHERENT = """interface Show { fn show(self) -> int; }
-struct S { a: int }
-impl S { fn show(self: S) -> int { return 5; } }
-struct Box[T: Show] { v: T }
-fn f[T: Show](a: T) -> int { return 0; }
-fn g(b: Box[S]) -> int { return b.v.a; }
-fn main() -> int { s := S { a = 7 }; z := f(s); return g(Box { v = s }); }
+POS_INHERENT = """interface Show:
+    fn show(self) -> int
+struct S:
+    a: int
+impl S:
+    fn show(self: S) -> int:
+        return 5
+struct Box[T: Show]:
+    v: T
+fn f[T: Show](a: T) -> int:
+    return 0
+fn g(b: Box[S]) -> int:
+    return b.v.a
+fn main() -> int:
+    s := S { a = 7 }
+    z := f(s)
+    return g(Box { v = s })
 """
 # 正向：`impl I for T` 形态（双站点）
-POS_IMPL_FOR = """interface Show { fn show(self) -> int; }
-struct S { a: int }
-impl Show for S { fn show(self: S) -> int { return 2; } }
-struct Box[T: Show] { v: T }
-fn f[T: Show](a: T) -> int { return 0; }
-fn main() -> int { s := S { a = 2 }; z := f(s); return s.a + z; }
+POS_IMPL_FOR = """interface Show:
+    fn show(self) -> int
+struct S:
+    a: int
+impl Show for S:
+    fn show(self: S) -> int:
+        return 2
+struct Box[T: Show]:
+    v: T
+fn f[T: Show](a: T) -> int:
+    return 0
+fn main() -> int:
+    s := S { a = 2 }
+    z := f(s)
+    return s.a + z
 """
 # 正向：命名参数类型 + 命名返回类型（签名类型项化的主要正控——旧态两侧皆码 0；双站点）
-POS_NAMED_SIG = """interface Conv { fn conv(self, x: S2) -> S3; }
-struct S2 { b: int }
-struct S3 { c: int }
-struct S { a: int }
-impl S { fn conv(self: S, x: S2) -> S3 { return S3 { c = x.b + 3 }; } }
-struct Box[T: Conv] { v: T }
-fn f[T: Conv](a: T) -> int { return 0; }
-fn g(b: Box[S]) -> int { return b.v.a; }
-fn main() -> int { s := S { a = 1 }; z := f(s); return g(Box { v = s }); }
+POS_NAMED_SIG = """interface Conv:
+    fn conv(self, x: S2) -> S3
+struct S2:
+    b: int
+struct S3:
+    c: int
+struct S:
+    a: int
+impl S:
+    fn conv(self: S, x: S2) -> S3:
+        return S3 { c = x.b + 3 }
+struct Box[T: Conv]:
+    v: T
+fn f[T: Conv](a: T) -> int:
+    return 0
+fn g(b: Box[S]) -> int:
+    return b.v.a
+fn main() -> int:
+    s := S { a = 1 }
+    z := f(s)
+    return g(Box { v = s })
 """
 # 正向：泛型应用实参（`Pair[int]` 两侧同型；双站点）
-POS_APPLY_SIG = """interface Take { fn take(self, x: Pair[int]) -> int; }
-struct Pair[T] { v: T }
-struct S { a: int }
-impl S { fn take(self: S, x: Pair[int]) -> int { return x.v; } }
-struct Box[T: Take] { v: T }
-fn f[T: Take](a: T) -> int { return 0; }
-fn g(b: Box[S]) -> int { return b.v.a; }
-fn main() -> int { s := S { a = 9 }; z := f(s); return g(Box { v = s }); }
+POS_APPLY_SIG = """interface Take:
+    fn take(self, x: Pair[int]) -> int
+struct Pair[T]:
+    v: T
+struct S:
+    a: int
+impl S:
+    fn take(self: S, x: Pair[int]) -> int:
+        return x.v
+struct Box[T: Take]:
+    v: T
+fn f[T: Take](a: T) -> int:
+    return 0
+fn g(b: Box[S]) -> int:
+    return b.v.a
+fn main() -> int:
+    s := S { a = 9 }
+    z := f(s)
+    return g(Box { v = s })
 """
 # 正向：`&self` 接收者（两侧同模式；双站点）
-POS_REF_SELF = """interface Show { fn show(&self) -> int; }
-struct S { a: int }
-impl S { fn show(&self) -> int { return 4; } }
-struct Box[T: Show] { v: T }
-fn f[T: Show](a: T) -> int { return 0; }
-fn g(b: Box[S]) -> int { return b.v.a; }
-fn main() -> int { s := S { a = 4 }; z := f(s); return g(Box { v = s }); }
+POS_REF_SELF = """interface Show:
+    fn show(&self) -> int
+struct S:
+    a: int
+impl S:
+    fn show(&self) -> int:
+        return 4
+struct Box[T: Show]:
+    v: T
+fn f[T: Show](a: T) -> int:
+    return 0
+fn g(b: Box[S]) -> int:
+    return b.v.a
+fn main() -> int:
+    s := S { a = 4 }
+    z := f(s)
+    return g(Box { v = s })
 """
 # 泛型体内方法调用（mangling 退役的主用例：旧态**运行 rc=139**）——固有形态
-POS_GENERIC_BODY_CALL = """interface Show { fn show(self) -> int; }
-struct S { a: int }
-impl S { fn show(self: S) -> int { return 7; } }
-fn f[T: Show](a: T) -> int { x := a.show(); return x; }
-fn main() -> int { s := S { a = 1 }; return f(s); }
+POS_GENERIC_BODY_CALL = """interface Show:
+    fn show(self) -> int
+struct S:
+    a: int
+impl S:
+    fn show(self: S) -> int:
+        return 7
+fn f[T: Show](a: T) -> int:
+    x := a.show()
+    return x
+fn main() -> int:
+    s := S { a = 1 }
+    return f(s)
 """
 # 泛型体内方法调用——`impl I for T` 形态
-POS_GENERIC_BODY_CALL_FOR = """interface Show { fn show(self) -> int; }
-struct S { a: int }
-impl Show for S { fn show(self: S) -> int { return 9; } }
-fn f[T: Show](a: T) -> int { x := a.show(); return x; }
-fn main() -> int { s := S { a = 1 }; return f(s); }
+POS_GENERIC_BODY_CALL_FOR = """interface Show:
+    fn show(self) -> int
+struct S:
+    a: int
+impl Show for S:
+    fn show(self: S) -> int:
+        return 9
+fn f[T: Show](a: T) -> int:
+    x := a.show()
+    return x
+fn main() -> int:
+    s := S { a = 1 }
+    return f(s)
 """
 # 固有方法不受影响（无接口参与）
-POS_INHERENT_ONLY = """struct S { a: int }
-impl S { fn get(self: S) -> int { return self.a; } fn add(self: S, x: int) -> int { return self.a + x; } }
-fn main() -> int { s := S { a = 6 }; return s.add(1); }
+POS_INHERENT_ONLY = """struct S:
+    a: int
+impl S:
+    fn get(self: S) -> int:
+        return self.a
+    fn add(self: S, x: int) -> int:
+        return self.a + x
+fn main() -> int:
+    s := S { a = 6 }
+    return s.add(1)
 """
 # 多接口隔离：S 满足 Show（另一接口 Name 未参与；双站点）
-POS_MULTI_IFACE = """interface Show { fn show(self) -> int; }
-interface Name { fn name(self) -> int; }
-struct S { a: int }
-impl S { fn show(self: S) -> int { return 1; } }
-impl S { fn name(self: S) -> int { return 2; } }
-struct Box[T: Show] { v: T }
-fn f[T: Show](a: T) -> int { return 0; }
-fn g(b: Box[S]) -> int { return b.v.a; }
-fn main() -> int { s := S { a = 3 }; z := f(s); return g(Box { v = s }); }
+POS_MULTI_IFACE = """interface Show:
+    fn show(self) -> int
+interface Name:
+    fn name(self) -> int
+struct S:
+    a: int
+impl S:
+    fn show(self: S) -> int:
+        return 1
+impl S:
+    fn name(self: S) -> int:
+        return 2
+struct Box[T: Show]:
+    v: T
+fn f[T: Show](a: T) -> int:
+    return 0
+fn g(b: Box[S]) -> int:
+    return b.v.a
+fn main() -> int:
+    s := S { a = 3 }
+    z := f(s)
+    return g(Box { v = s })
 """
 # 负：缺方法
-NEG_MISSING = """interface Show { fn show(self) -> int; }
-struct S { a: int }
-struct Box[T: Show] { v: T }
-fn g(b: Box[S]) -> int { return 0; }
-fn main() -> int { return 0; }
+NEG_MISSING = """interface Show:
+    fn show(self) -> int
+struct S:
+    a: int
+struct Box[T: Show]:
+    v: T
+fn g(b: Box[S]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
 # 负：参数计数
-NEG_ARITY = """interface Show { fn show(self) -> int; }
-struct S { a: int }
-impl S { fn show(self: S, x: int) -> int { return x; } }
-struct Box[T: Show] { v: T }
-fn g(b: Box[S]) -> int { return 0; }
-fn main() -> int { return 0; }
+NEG_ARITY = """interface Show:
+    fn show(self) -> int
+struct S:
+    a: int
+impl S:
+    fn show(self: S, x: int) -> int:
+        return x
+struct Box[T: Show]:
+    v: T
+fn g(b: Box[S]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
 # 负：**参数类型**不符（命名型——旧态裸码面不可见）
-NEG_NAMED_PARAM = """interface Show { fn m(self, x: S2) -> int; }
-struct S2 { b: int }
-struct S { a: int }
-impl S { fn m(self: S, x: int) -> int { return x; } }
-struct Box[T: Show] { v: T }
-fn g(b: Box[S]) -> int { return 0; }
-fn main() -> int { return 0; }
+NEG_NAMED_PARAM = """interface Show:
+    fn m(self, x: S2) -> int
+struct S2:
+    b: int
+struct S:
+    a: int
+impl S:
+    fn m(self: S, x: int) -> int:
+        return x
+struct Box[T: Show]:
+    v: T
+fn g(b: Box[S]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
 # 负：**返回类型**不符（命名型 vs 原生——旧态编码面判「满足」）
-NEG_NAMED_RET = """interface Show { fn m(self) -> S2; }
-struct S2 { b: int }
-struct S { a: int }
-impl S { fn m(self: S) -> int { return 1; } }
-struct Box[T: Show] { v: T }
-fn g(b: Box[S]) -> int { return 0; }
-fn main() -> int { return 0; }
+NEG_NAMED_RET = """interface Show:
+    fn m(self) -> S2
+struct S2:
+    b: int
+struct S:
+    a: int
+impl S:
+    fn m(self: S) -> int:
+        return 1
+struct Box[T: Show]:
+    v: T
+fn g(b: Box[S]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
 # 负：泛型应用实参不符（`Pair[string]` ← `Pair[int]`）
-NEG_APPLY_ARG = """interface Take { fn take(self, x: Pair[int]) -> int; }
-struct Pair[T] { v: T }
-struct S { a: int }
-impl S { fn take(self: S, x: Pair[string]) -> int { return 1; } }
-struct Box[T: Take] { v: T }
-fn g(b: Box[S]) -> int { return 0; }
-fn main() -> int { return 0; }
+NEG_APPLY_ARG = """interface Take:
+    fn take(self, x: Pair[int]) -> int
+struct Pair[T]:
+    v: T
+struct S:
+    a: int
+impl S:
+    fn take(self: S, x: Pair[string]) -> int:
+        return 1
+struct Box[T: Take]:
+    v: T
+fn g(b: Box[S]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
 # 负：接收者模式不符（iface `&self` vs impl `self`）
-NEG_RECV_MODE = """interface Show { fn show(&self) -> int; }
-struct S { a: int }
-impl S { fn show(self: S) -> int { return 1; } }
-struct Box[T: Show] { v: T }
-fn g(b: Box[S]) -> int { return 0; }
-fn main() -> int { return 0; }
+NEG_RECV_MODE = """interface Show:
+    fn show(&self) -> int
+struct S:
+    a: int
+impl S:
+    fn show(self: S) -> int:
+        return 1
+struct Box[T: Show]:
+    v: T
+fn g(b: Box[S]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
 # 负：两接口隔离（S 满足 Show、不满足 Name）
-NEG_SECOND_IFACE = """interface Show { fn show(self) -> int; }
-interface Name { fn name(self) -> int; }
-struct S { a: int }
-impl S { fn show(self: S) -> int { return 1; } }
-struct BoxB[T: Name] { v: T }
-fn g(b: BoxB[S]) -> int { return 0; }
-fn main() -> int { return 0; }
+NEG_SECOND_IFACE = """interface Show:
+    fn show(self) -> int
+interface Name:
+    fn name(self) -> int
+struct S:
+    a: int
+impl S:
+    fn show(self: S) -> int:
+        return 1
+struct BoxB[T: Name]:
+    v: T
+fn g(b: BoxB[S]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
 # 错误例：未定义接口（`impl I for T` 的声明侧校验）
-ERR_UNDEFINED_IFACE = """struct S { a: int }
-impl Nope for S { fn show(self: S) -> int { return 1; } }
-fn main() -> int { return 0; }
+ERR_UNDEFINED_IFACE = """struct S:
+    a: int
+impl Nope for S:
+    fn show(self: S) -> int:
+        return 1
+fn main() -> int:
+    return 0
 """
 # 登记面：非命名实参（原生）⇒ 不判 ⇒ 零诊断
-UNJUDGED_NATIVE = """interface Show { fn show(self) -> int; }
-struct Box[T: Show] { v: T }
-fn g(b: Box[int]) -> int { return 0; }
-fn main() -> int { return 0; }
+UNJUDGED_NATIVE = """interface Show:
+    fn show(self) -> int
+struct Box[T: Show]:
+    v: T
+fn g(b: Box[int]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
 # 上限钉子：17 方法（> MAX_IFACE_METHODS=16）⇒ 硬错
-LIMIT_METHODS = "interface Many {\n" + "\n".join(
-    f"    fn m{i}(self) -> int;" for i in range(17)) + "\n}\nfn main() -> int { return 0; }\n"
+LIMIT_METHODS = "interface Many:\n" + "\n".join(
+    f"    fn m{i}(self) -> int" for i in range(17)) + "\nfn main() -> int:\n    return 0\n"
 # 上限钉子：9 参数（> MAX_IFACE_METHOD_PARAMS=8）⇒ 硬错
-LIMIT_PARAMS = ("interface Wide { fn m(self, " + ", ".join(f"p{i}: int" for i in range(9)) +
-                ") -> int; }\nfn main() -> int { return 0; }\n")
+LIMIT_PARAMS = ("interface Wide:\n    fn m(self, " + ", ".join(f"p{i}: int" for i in range(9)) +
+                ") -> int\nfn main() -> int:\n    return 0\n")
 
 
 def main():

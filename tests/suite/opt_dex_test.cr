@@ -13,122 +13,171 @@
 //
 // 返回码约定：0 = 全过；非 0 = **首个失败面的编号**（便于定位；逐个面独立成函数）。
 
-g : dex?, mut = None;
+g : dex?, mut = none
 
-struct SOpt { f: dex? }
+struct SOpt:
+    f: dex?
 
-enum EOpt { V(dex?) }
+enum EOpt:
+    V(dex?)
 
-fn four_bare_bits() -> int {
-    d : dex, apx = 7.0;
-    x : dex? = d;
-    return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+fn four_bare_bits() -> int:
+    d : dex, apx = 7.0
+    x : dex? = d
+    return match x:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 
-fn four_bare_scaled() -> int {
-    e : dex = 7.0;
-    x : dex? = e;
-    return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+fn four_bare_scaled() -> int:
+    e : dex = 7.0
+    x : dex? = e
+    return match x:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 
-fn four_boxed_bits() -> int {
-    d : dex, apx = 7.0;
-    x : dex? = Some(d);
-    return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+fn four_boxed_bits() -> int:
+    d : dex, apx = 7.0
+    x : dex? = Some(d)
+    return match x:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 
-fn four_boxed_scaled() -> int {
-    e : dex = 7.0;
-    x : dex? = Some(e);
-    return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+fn four_boxed_scaled() -> int:
+    e : dex = 7.0
+    x : dex? = Some(e)
+    return match x:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 
-fn assign_bits() -> int {
-    d : dex, apx = 7.0;
-    x : dex?, mut = None;
-    x = d;
-    return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+fn assign_bits() -> int:
+    d : dex, apx = 7.0
+    x : dex?, mut = none
+    x = d
+    return match x:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 
-fn ptr_write_bits() -> int {
-    d : dex, apx = 7.0;
-    x : dex?, mut = None;
-    p := &x;
-    *p = d;
-    return match *p { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+fn ptr_write_bits() -> int:
+    d : dex, apx = 7.0
+    x : dex?, mut = none
+    p := &x
+    *p = d
+    return match *p:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 
-fn addr_taken_bits() -> int {
-    d : dex, apx = 7.0;
-    x : dex? = d;
-    p := &x;
-    return match *p { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+fn addr_taken_bits() -> int:
+    d : dex, apx = 7.0
+    x : dex? = d
+    p := &x
+    return match *p:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 
-fn ret_bits() -> int {
-    d : dex, apx = 7.0;
-    x : dex? = d;
-    y := x?;
-    return @raw_int(y) / 1000000;
-}
+fn ret_bits() -> int:
+    d : dex, apx = 7.0
+    x : dex? = d
+    y := x?
+    return @raw_int(y) / 1000000
 
-fn field_lit_bits() -> int {
-    d : dex, apx = 7.0;
-    s : ., mut = SOpt { f = d };
-    return match s.f { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+fn field_lit_bits() -> int:
+    d : dex, apx = 7.0
+    s : ., mut = SOpt { f = d }
+    return match s.f:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 
-fn field_assign_bits() -> int {
-    d : dex, apx = 7.0;
-    s : ., mut = SOpt { f = None };
-    s.f = d;
-    return match s.f { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+fn field_assign_bits() -> int:
+    d : dex, apx = 7.0
+    s : ., mut = SOpt { f = none }
+    s.f = d
+    return match s.f:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 
-fn global_bits() -> int {
-    d : dex, apx = 7.0;
-    g = d;
-    return match g { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+fn global_bits() -> int:
+    d : dex, apx = 7.0
+    g = d
+    return match g:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 
-fn enum_payload_bits() -> int {
-    d : dex, apx = 7.0;
-    e := V(d);
-    return match e {
-        V(x) => { return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } }; }
-    };
-}
+fn enum_payload_bits() -> int:
+    d : dex, apx = 7.0
+    e := V(d)
+    return match e:
+        V(x) =>:
+            return match x:
+                Some(v) =>:
+                    return @raw_int(v) / 1000000
+                none =>:
+                    return 0
 
-fn param_scaled_ctl() -> int {
-    e : dex = 7.0;
-    return take_opt(e);
-}
+fn param_scaled_ctl() -> int:
+    e : dex = 7.0
+    return take_opt(e)
 
-fn take_opt(x: dex?) -> int {
-    return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+fn take_opt(x: dex?) -> int:
+    return match x:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 
-fn nonopt_direct_bits() -> int {
-    d : dex, apx = 7.0;
-    return take_plain(d);
-}
+fn nonopt_direct_bits() -> int:
+    d : dex, apx = 7.0
+    return take_plain(d)
 
-fn take_plain(x: dex) -> int { return @raw_int(x) / 1000000; }
+fn take_plain(x: dex) -> int:
+    return @raw_int(x) / 1000000
 
-fn main() -> int {
-    if four_bare_bits() != 7 { return 1; }
-    if four_bare_scaled() != 7 { return 2; }
-    if four_boxed_bits() != 7 { return 3; }
-    if four_boxed_scaled() != 7 { return 4; }
-    if assign_bits() != 7 { return 5; }
-    if ptr_write_bits() != 7 { return 6; }
-    if addr_taken_bits() != 7 { return 7; }
-    if ret_bits() != 7 { return 8; }
-    if field_lit_bits() != 7 { return 9; }
-    if field_assign_bits() != 7 { return 10; }
-    if global_bits() != 7 { return 11; }
-    if enum_payload_bits() != 7 { return 12; }
-    if param_scaled_ctl() != 7 { return 13; }
-    if nonopt_direct_bits() != 7 { return 14; }
-    return 0;
-}
+fn main() -> int:
+    if four_bare_bits() != 7:
+        return 1
+    if four_bare_scaled() != 7:
+        return 2
+    if four_boxed_bits() != 7:
+        return 3
+    if four_boxed_scaled() != 7:
+        return 4
+    if assign_bits() != 7:
+        return 5
+    if ptr_write_bits() != 7:
+        return 6
+    if addr_taken_bits() != 7:
+        return 7
+    if ret_bits() != 7:
+        return 8
+    if field_lit_bits() != 7:
+        return 9
+    if field_assign_bits() != 7:
+        return 10
+    if global_bits() != 7:
+        return 11
+    if enum_payload_bits() != 7:
+        return 12
+    if param_scaled_ctl() != 7:
+        return 13
+    if nonopt_direct_bits() != 7:
+        return 14
+    return 0

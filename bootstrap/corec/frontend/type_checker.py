@@ -130,6 +130,17 @@ class TypeChecker:
             opt = EnumDecl(True, 'Option', ['T'],
                            [('Some', [PathType(['T'])]), ('None', [])])
             self._declare_enum(opt)
+            # v4 拼写面（`none`）**已接通**（2026-10-11，T5 收尾）：本注册原先**不可达**
+            # —— 裸 `none` 在表达式位被 `parser.parse_primary` 归到一个 `Ident('none')`，
+            # 而 `NameResolver` 内建表里没有该名 ⇒ 以 `Undefined name` 拦下（旧注释的实况）。
+            # 现改为在 parse_primary 的 `T_NONE` 格**归一到 canonical 变体**
+            # `EnumConstructor(['None'], [])` —— 与自源 `src/compiler/parser.cr` 的
+            # `T_NONE → EXPR_ENUM_CONSTRUCTOR(str_intern("None"))` **同语义**；
+            # 该节点由**本函数的 Option 注册**解（`symtab.lookup('None')` 命中），
+            # 且 `__variant` 标签 = `None` ⇒ desugar 的臂比较与 ir_gen 的 MakeEnum 都成立。
+            # ⇒ **不需要**另在内建表补一个 `none` 值名：`Ident('none')` 没有 `__variant`
+            #   字段，走那条路反而会打断 match 的 desugar 面。
+            # 语料影响 = 0：`src/**` 无代码面裸 `none`/`None`（全在注释/字符串里）。
         if not self.symtab.lookup('Result'):
             res = EnumDecl(True, 'Result', ['T', 'E'],
                            [('Ok', [PathType(['T'])]), ('Err', [PathType(['E'])])])
@@ -226,7 +237,7 @@ class TypeChecker:
             self.symtab.define(name, SymbolKind.PARAM, typ)
         if decl.body:
             inferred = self._infer_expr(decl.body)
-            if not self._type_equal(inferred, decl.return_type):
+            if not self._compat(inferred, decl.return_type):
                 # Relaxed check: try to unify unresolved generic params
                 if not self._unify_return_type(inferred, decl.return_type):
                     self.errors.append(f"Function {decl.name}: expected return type {decl.return_type}, got {inferred}")
@@ -455,7 +466,7 @@ class TypeChecker:
                 else_t = self._infer_expr(expr.else_branch)
                 self._pop_borrow_scope()
                 self.symtab.pop_scope()
-                if not self._type_equal(then_t, else_t):
+                if not self._compat(then_t, else_t):
                     self.errors.append(f"If branches have different types: {then_t} vs {else_t}")
                     return BaseType('never')
                 return then_t
@@ -498,15 +509,16 @@ class TypeChecker:
             if arm_types:
                 first = arm_types[0]
                 for t in arm_types[1:]:
-                    if not self._type_equal(first, t):
+                    if not self._compat(first, t):
                         self.errors.append("Match arms have different types")
                         return BaseType('never')
                 return first
             return BaseType('unit')
         elif isinstance(expr, ReturnStmt):
+            # v4 裁定：发散出口 ⇒ never（值仍须推断，否则返回值内的诊断整段消失）
             if expr.value:
-                return self._infer_expr(expr.value)
-            return BaseType('unit')
+                self._infer_expr(expr.value)
+            return BaseType('never')
         elif isinstance(expr, ExprStmt):
             self._infer_expr(expr.expr)  # check for side effects
             return BaseType('unit')
@@ -537,7 +549,7 @@ class TypeChecker:
                         self._record_borrow_holder(name, borrowed_name, expr.values[i].op == '&mut')
             return BaseType('unit')
         elif isinstance(expr, BreakStmt) or isinstance(expr, ContinueStmt):
-            return BaseType('unit')
+            return BaseType('never')   # v4 裁定：发散出口 ⇒ never（原 unit）
         elif isinstance(expr, Go):
             self._infer_expr(expr.expr)
             return BaseType('unit')
@@ -719,6 +731,19 @@ class TypeChecker:
             args = [self._substitute_type(a, mapping) for a in typ.args]
             return GenericApplyType(typ.path, args)
         return typ
+
+    def _is_never(self, t) -> bool:
+        return isinstance(t, BaseType) and t.name == 'never'
+
+    def _compat(self, t1, t2) -> bool:
+        """分支合一/返回位相容判定（v4 裁定 2026-10-11）：
+        两侧类型相同 **或** 任一侧为 `never` ⇒ 相容（`never` 作子类型）。
+        依据 = docs/core-language-syntax_v4.md §3.1：`never`（发散类型）是基本类型，
+        且以发散语句（return/break/continue）收尾的路径其类型即 `never`。
+        """
+        if self._is_never(t1) or self._is_never(t2):
+            return True
+        return self._type_equal(t1, t2)
 
     def _type_equal(self, t1, t2) -> bool:
         if t1 is None or t2 is None:

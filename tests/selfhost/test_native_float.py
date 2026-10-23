@@ -17,12 +17,12 @@ CASES = [
     (
         "i2f_big",
         """
-fn main() -> int {
-    y := 1099511627776;  // 2^40
-    z := 1.5 + y;
-    if z > 1000000000000.0 { return 1; }
-    return 0;
-}
+fn main() -> int:
+    y := 1099511627776  // 2^40
+    z := 1.5 + y
+    if z > 1000000000000.0:
+        return 1
+    return 0
 """,
         1,
     ),
@@ -30,30 +30,48 @@ fn main() -> int {
     (
         "float_normal_cmp",
         """
-fn main() -> int {
-    if 1.5 < 2.5 { } else { return 1; }
-    if 2.5 > 1.5 { } else { return 2; }
-    if 1.5 <= 1.5 { } else { return 3; }
-    if 2.5 >= 2.5 { } else { return 4; }
-    if 2.5 == 2.5 { } else { return 5; }
-    if 1.5 != 2.5 { } else { return 6; }
-    return 0;
-}
+fn main() -> int:
+    if 1.5 < 2.5:
+    else:
+        return 1
+    if 2.5 > 1.5:
+    else:
+        return 2
+    if 1.5 <= 1.5:
+    else:
+        return 3
+    if 2.5 >= 2.5:
+    else:
+        return 4
+    if 2.5 == 2.5:
+    else:
+        return 5
+    if 1.5 != 2.5:
+    else:
+        return 6
+    return 0
 """,
         0,
     ),
     (
         "float_arith",
         """
-fn main() -> int {
-    x := 1.5;
-    y := 2.5;
-    if x + y == 4.0 { } else { return 1; }
-    if x * y == 3.75 { } else { return 2; }
-    if y - x == 1.0 { } else { return 3; }
-    if y / x == 5.0 / 3.0 { } else { return 4; }
-    return 0;
-}
+fn main() -> int:
+    x := 1.5
+    y := 2.5
+    if x + y == 4.0:
+    else:
+        return 1
+    if x * y == 3.75:
+    else:
+        return 2
+    if y - x == 1.0:
+    else:
+        return 3
+    if y / x == 5.0 / 3.0:
+    else:
+        return 4
+    return 0
 """,
         0,
     ),

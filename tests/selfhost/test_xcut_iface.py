@@ -124,100 +124,89 @@ def case_reject(name, source, needles, soft):
 
 # ─── 正例（三路同证）：形状接管的三个结果分支 + range 产视图 ───
 ARR_INDEX = """
-fn main() -> int {
-    a := [10, 20, 30];
-    return a[1];
-}
+fn main() -> int:
+    a := [10, 20, 30]
+    return a[1]
 """
 
 SLICE_INDEX = """
-fn main() -> int {
-    a := [10, 20, 30];
-    s := a[0..3];
-    return s[2];
-}
+fn main() -> int:
+    a := [10, 20, 30]
+    s := a[0..3]
+    return s[2]
 """
 
 STR_INDEX = """
-fn main() -> int {
-    s := "AB";
-    return s[0];
-}
+fn main() -> int:
+    s := "AB"
+    return s[0]
 """
 
 RANGE_ARRAY_SLICE = """
-fn main() -> int {
-    a := [1, 2, 3, 4];
-    s := a[1..3];
-    return s[0];
-}
+fn main() -> int:
+    a := [1, 2, 3, 4]
+    s := a[1..3]
+    return s[0]
 """
 
 RANGE_FULL_ARRAY = """
-fn main() -> int {
-    a := [7, 8];
-    s := a[0..2];
-    return s[1];
-}
+fn main() -> int:
+    a := [7, 8]
+    s := a[0..2]
+    return s[1]
 """
 
 # ─── 负例（收紧面同址；行为保持：改动前后同拒同码）──
 INT_INDEX = """
-fn main() -> int {
-    x := 5;
-    return x[0];
-}
+fn main() -> int:
+    x := 5
+    return x[0]
 """
 
 BOOL_INDEX = """
-fn main() -> int {
-    b := true;
-    return b[0];
-}
+fn main() -> int:
+    b := true
+    return b[0]
 """
 
 PTR_INDEX = """
-fn main() -> int {
-    x := 7;
-    p := &x;
-    return p[0];
-}
+fn main() -> int:
+    x := 7
+    p := &x
+    return p[0]
 """
 
 STRUCT_INDEX = """
-struct S { a: int }
-fn main() -> int {
-    s := S{a: 1};
-    return s[0];
-}
+struct S:
+    a: int
+fn main() -> int:
+    s := S{a= 1}
+    return s[0]
 """
 
 # ─── 结果分支/表示面钉子（行为保持：既有诊断与 range 结果形态逐字不变）──
 OOB_LITERAL = """
-fn main() -> int {
-    a := [1, 2];
-    return a[5];
-}
+fn main() -> int:
+    a := [1, 2]
+    return a[5]
 """
 
 SLICE_BOUNDS = """
-fn main() -> int {
-    a := [1, 2, 3];
-    s := a[0..5];
-    return 0;
-}
+fn main() -> int:
+    a := [1, 2, 3]
+    s := a[0..5]
+    return 0
 """
 
 # range 的**切片**分支现状 = `TI_UNIT`（A.2 #15 登记：IP_INDEX_RANGE 未接线）⇒ 二次切片当下
 # 不可索引（TK01）。本钉即 range 分支固定性维度的咬合面：若丢掉固定性（切片 range 改产视图），
 # 本例转 rc=0 = 静默放宽 ⇒ 红。
 SLICE_RANGE_UNIT = """
-fn main() -> int {
-    a := [1, 2, 3, 4];
-    s := a[0..4];
-    t := s[0..2];
-    return t[0];
-}
+fn main() -> int:
+    a := [1, 2, 3, 4]
+    s := a[0..4]
+    t := s[0..2]
+    return t[0]
 """
 
 

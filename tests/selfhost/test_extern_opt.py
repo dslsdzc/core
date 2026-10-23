@@ -31,23 +31,23 @@ COREC = BASE / "build" / "corec"
 
 # (name, extern 声明行, 是否应拒)
 CASES = [
-    ("reject_optdex_param", "extern fn e_opt(x: dex?) -> int;", True),
-    ("reject_optint_param", "extern fn e_int(x: int?) -> int;", True),
-    ("reject_optdex_ret", "extern fn e_ret() -> dex?;", True),
-    ("reject_optint_ret", "extern fn e_iret() -> int?;", True),
-    ("reject_mixed_params", "extern fn e_mix(a: int, b: dex?) -> int;", True),
-    ("reject_optstr_param", "extern fn e_str(s: string?) -> int;", True),
-    ("accept_plain_dex", "extern fn f_ok(x: dex) -> dex;", False),
-    ("accept_plain_int", "extern fn putchar(c: int) -> int;", False),
-    ("accept_plain_never", "extern fn f_nv() -> never;", False),
-    ("accept_plain_char", "extern fn f_ch() -> char;", False),
+    ("reject_optdex_param", "extern fn e_opt(x: dex?) -> int\n", True),
+    ("reject_optint_param", "extern fn e_int(x: int?) -> int\n", True),
+    ("reject_optdex_ret", "extern fn e_ret() -> dex?\n", True),
+    ("reject_optint_ret", "extern fn e_iret() -> int?\n", True),
+    ("reject_mixed_params", "extern fn e_mix(a: int, b: dex?) -> int\n", True),
+    ("reject_optstr_param", "extern fn e_str(s: string?) -> int\n", True),
+    ("accept_plain_dex", "extern fn f_ok(x: dex) -> dex\n", False),
+    ("accept_plain_int", "extern fn putchar(c: int) -> int\n", False),
+    ("accept_plain_never", "extern fn f_nv() -> never\n", False),
+    ("accept_plain_char", "extern fn f_ch() -> char\n", False),
 ]
 
 
 def run_case(decl, should_reject):
     """check（rc + 诊断码 + 定位）→ build（rc + 产物）。返回 (ok, detail)。"""
     src = (f"// extopt-{uuid.uuid4()}\n{decl}\n"
-           "fn main() -> int { return 0; }\n")
+           "fn main() -> int:\n    return 0\n")
     with tempfile.NamedTemporaryFile("w", suffix=".cr", delete=False) as f:
         f.write(src)
         path = f.name

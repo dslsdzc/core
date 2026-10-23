@@ -129,20 +129,22 @@ def build_and_reject(source, tag):
                 os.unlink(p)
 
 
-MATCH_BODY = """    return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
+MATCH_BODY = """    return match x:
+        Some(v) => @raw_int(v) / 1000000
+        none => 0
 """
 
 # ── 四态对拍四条（仅源形式与是否 Some 不同；主判据的基元）──
 FOUR_STATE = {
-    "fs_bare_bits":    ("bits",   "    d : dex, apx = 7.0;\n    x : dex? = d;\n"),
-    "fs_bare_scaled":  ("scaled", "    e : dex = 7.0;\n    x : dex? = e;\n"),
-    "fs_boxed_bits":   ("bits",   "    d : dex, apx = 7.0;\n    x : dex? = Some(d);\n"),
-    "fs_boxed_scaled": ("scaled", "    e : dex = 7.0;\n    x : dex? = Some(e);\n"),
+    "fs_bare_bits":    ("bits",   "    d : dex, apx = 7.0\n    x : dex? = d\n"),
+    "fs_bare_scaled":  ("scaled", "    e : dex = 7.0\n    x : dex? = e\n"),
+    "fs_boxed_bits":   ("bits",   "    d : dex, apx = 7.0\n    x : dex? = Some(d)\n"),
+    "fs_boxed_scaled": ("scaled", "    e : dex = 7.0\n    x : dex? = Some(e)\n"),
 }
 
 
 def _four_state_src(setup):
-    return "fn main() -> int {\n" + setup + MATCH_BODY + "}\n"
+    return "fn main() -> int:\n" + setup + MATCH_BODY
 
 
 # ── 家族/钉子探针表：name, source, 期望 ELF rc, kind, 备注 ──
@@ -153,165 +155,203 @@ def _four_state_src(setup):
 CASES = [
     # ── 家族写点/边界面（修前 15 的九条 = 本批 RED 主体）──
     ("assign_bits", """
-fn main() -> int {
-    d : dex, apx = 7.0;
-    x : dex?, mut = None;
-    x = d;
-    return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+fn main() -> int:
+    d : dex, apx = 7.0
+    x : dex?, mut = none
+    x = d
+    return match x:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 """, 7, "bits", "赋值写点（修前 15）"),
     ("ptr_write_bits", """
-fn main() -> int {
-    d : dex, apx = 7.0;
-    x : dex?, mut = None;
-    p := &x;
-    *p = d;
-    return match *p { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+fn main() -> int:
+    d : dex, apx = 7.0
+    x : dex?, mut = none
+    p := &x
+    *p = d
+    return match *p:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 """, 7, "bits", "指针写（INV-2；修前 15）"),
     ("addr_read_bits", """
-fn main() -> int {
-    d : dex, apx = 7.0;
-    x : dex? = d;
-    p := &x;
-    return match *p { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+fn main() -> int:
+    d : dex, apx = 7.0
+    x : dex? = d
+    p := &x
+    return match *p:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 """, 7, "bits", "取址槽（INV-1 交点；`*p` 形态绕开软诊断 B04；修前 15）"),
     ("ret_bits", """
-fn f() -> dex? {
-    d : dex, apx = 7.0;
-    return d;
-}
-fn main() -> int {
-    x := f();
-    return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+fn f() -> dex?:
+    d : dex, apx = 7.0
+    return d
+fn main() -> int:
+    x := f()
+    return match x:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 """, 7, "bits", "返回面 `-> dex?`（修前 15）"),
     ("param_bits", """
-fn g(x: dex?) -> int {
-    return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
-fn main() -> int {
-    d : dex, apx = 7.0;
-    return g(d);
-}
+fn g(x: dex?) -> int:
+    return match x:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
+fn main() -> int:
+    d : dex, apx = 7.0
+    return g(d)
 """, 7, "bits", "形参面 `dex?` ← apx 实参（修前 ELF 0 / interp 15 = 双路径分歧）"),
     ("param_branch_bits", """
-fn g(x: dex?) -> int {
-    match x {
-        Some(v) => { return 100 + (@raw_int(v) % 100); }
-        None => { return 200; }
-    }
-    return 55;
-}
-fn main() -> int {
-    d : dex, apx = 7.0;
-    return g(d);
-}
+fn g(x: dex?) -> int:
+    match x:
+        Some(v) =>:
+            return 100 + (@raw_int(v) % 100)
+        none =>:
+            return 200
+    return 55
+fn main() -> int:
+    d : dex, apx = 7.0
+    return g(d)
 """, 100, "bits", "形参面·分支判别形（修前 ELF 101 / interp 172 = 分歧；100 = 100+0）"),
     ("field_lit_bits", """
-struct S { f: dex? }
-fn main() -> int {
-    d : dex, apx = 7.0;
-    s : ., mut = S { f = d };
-    return match s.f { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+struct S:
+    f: dex?
+fn main() -> int:
+    d : dex, apx = 7.0
+    s : ., mut = S { f = d }
+    return match s.f:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 """, 7, "bits", "结构体字面量字段（装箱序倒置面；修前 15）"),
     ("global_bits", """
-g : dex?, mut = None;
-fn main() -> int {
-    d : dex, apx = 7.0;
-    g = d;
-    return match g { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+g : dex?, mut = none
+fn main() -> int:
+    d : dex, apx = 7.0
+    g = d
+    return match g:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 """, 7, "bits", "全局槽（必须 `mut`，见头注 ①；修前 15）"),
     ("enum_payload_opt_bits", """
-enum E { V(dex?) }
-fn main() -> int {
-    d : dex, apx = 7.0;
-    e := V(d);
-    return match e { V(x) => { return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } }; } };
-}
+enum E:
+    V(dex?)
+fn main() -> int:
+    d : dex, apx = 7.0
+    e := V(d)
+    return match e:
+        V(x) =>:
+            return match x:
+                Some(v) =>:
+                    return @raw_int(v) / 1000000
+                none =>:
+                    return 0
 """, 7, "bits", "用户枚举的可选 dex 载荷（修前 15）"),
     # ── 已覆盖面/钉子（改法不得改坏）──
     ("field_assign_bits", """
-struct S { f: dex? }
-fn main() -> int {
-    d : dex, apx = 7.0;
-    s : ., mut = S { f = None };
-    s.f = d;
-    return match s.f { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+struct S:
+    f: dex?
+fn main() -> int:
+    d : dex, apx = 7.0
+    s : ., mut = S { f = none }
+    s.f = d
+    return match s.f:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 """, 7, "bits", "字段**赋值**面（`:1498` norm→box 的正确序 ⇒ 修前已绿；钉子）"),
     ("try_unpack_bits", """
-fn main() -> int {
-    d : dex, apx = 7.0;
-    x : dex? = d;
-    y := x?;
-    return @raw_int(y) / 1000000;
-}
+fn main() -> int:
+    d : dex, apx = 7.0
+    x : dex? = d
+    y := x?
+    return @raw_int(y) / 1000000
 """, 7, "bits", "`?` 解包（修前已绿：槽型=bits 自洽；钉住槽型声明化后仍绿）"),
     ("try_to_dex_bits", """
-fn main() -> int {
-    d : dex, apx = 7.0;
-    x : dex? = d;
-    y := x?;
-    z : dex = y;
-    return @raw_int(z) / 1000000;
-}
+fn main() -> int:
+    d : dex, apx = 7.0
+    x : dex? = d
+    y := x?
+    z : dex = y
+    return @raw_int(z) / 1000000
 """, 7, "bits", "`?` 解包再入 `dex` 槽（修前已绿；钉子）"),
     ("dexopt_apx_tag", """
-fn main() -> int {
-    x : dex?, apx = 7.0;
-    return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+fn main() -> int:
+    x : dex?, apx = 7.0
+    return match x:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 """, 0, "reject", "`dex?, apx`：**批 8 条目 5（裁定 (B)）后转硬错**（`error[P26]` + 零产物）。"
      "**旧值留痕（批 5–批 7）**：`check=0 · ELF=interp=7`（kind=`scaled`，标签被静默忽略 ⇒ 落精确世界，"
      "`TODO #2026-09-17-4` 登记面）——本批按计划条目 5 判据要件③「显式归因 + 同批重锁 + 旧值留痕」重锁。"),
     ("param_scaled", """
-fn g(x: dex?) -> int {
-    return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
-fn main() -> int {
-    e : dex = 7.0;
-    return g(e);
-}
+fn g(x: dex?) -> int:
+    return match x:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
+fn main() -> int:
+    e : dex = 7.0
+    return g(e)
 """, 7, "scaled", "形参面·对照（scaled 实参；修前已绿——分歧是 bits 实参特有）"),
     ("param_branch_scaled", """
-fn g(x: dex?) -> int {
-    match x {
-        Some(v) => { return 100 + (@raw_int(v) % 100); }
-        None => { return 200; }
-    }
-    return 55;
-}
-fn main() -> int {
-    e : dex = 7.0;
-    return g(e);
-}
+fn g(x: dex?) -> int:
+    match x:
+        Some(v) =>:
+            return 100 + (@raw_int(v) % 100)
+        none =>:
+            return 200
+    return 55
+fn main() -> int:
+    e : dex = 7.0
+    return g(e)
 """, 100, "scaled", "形参面·判别形对照（scaled 实参；修前已绿）"),
     ("ret_scaled", """
-fn f() -> dex? {
-    e : dex = 7.0;
-    return e;
-}
-fn main() -> int {
-    x := f();
-    return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+fn f() -> dex?:
+    e : dex = 7.0
+    return e
+fn main() -> int:
+    x := f()
+    return match x:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 """, 7, "scaled", "返回面·对照（scaled；修前已绿）"),
     ("param_some_bits", """
-fn g(x: dex?) -> int {
-    return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
-fn main() -> int {
-    d : dex, apx = 7.0;
-    return g(Some(d));
-}
+fn g(x: dex?) -> int:
+    return match x:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
+fn main() -> int:
+    d : dex, apx = 7.0
+    return g(Some(d))
 """, 7, "bits", "形参面 ← `Some(apx)`（修前 ELF 已绿：枚举构造点漏斗覆盖；钉子）"),
     ("nonopt_direct_bits", """
-fn g(x: dex) -> int { return @raw_int(x) / 1000000; }
-fn main() -> int { d : dex, apx = 7.0; return g(d); }
+fn g(x: dex) -> int:
+    return @raw_int(x) / 1000000
+fn main() -> int:
+    d : dex, apx = 7.0
+    return g(d)
 """, 7, "bits", "非可选 dex 直调（apx 批已覆盖面；非回归钉）"),
     # ── G2（读点定型）判别判据：**载荷参与 dex 运算**（match 型载荷读槽的形式若丢，
     #    `dex_scale_int` 会把已 scaled 的载荷再 ×S = 双倍缩放）。改前实测 ELF 193
@@ -319,18 +359,24 @@ fn main() -> int { d : dex, apx = 7.0; return g(d); }
     #    注：`?` 解包路径**不**具备判别力（其 dest 型 = `irv_type(inner)` = 槽型，本来自洽）
     #    ⇒ 本判据必须走 **match 载荷绑定**这一读点。
     ("g2_payload_dex_arith_scaled", """
-fn main() -> int {
-    e : dex = 7.0;
-    x : dex? = e;
-    return match x { Some(v) => { return @raw_int(v + 1.0) / 1000000; } None => { return 0; } };
-}
+fn main() -> int:
+    e : dex = 7.0
+    x : dex? = e
+    return match x:
+        Some(v) =>:
+            return @raw_int(v + 1.0) / 1000000
+        none =>:
+            return 0
 """, 8, "scaled", "G2 判别判据·精确源：match 载荷 + dex 算术（7.0 + 1.0 = 8；改前 193 = 双倍缩放）"),
     ("g2_payload_dex_arith_bits", """
-fn main() -> int {
-    d : dex, apx = 7.0;
-    x : dex? = d;
-    return match x { Some(v) => { return @raw_int(v + 1.0) / 1000000; } None => { return 0; } };
-}
+fn main() -> int:
+    d : dex, apx = 7.0
+    x : dex? = d
+    return match x:
+        Some(v) =>:
+            return @raw_int(v + 1.0) / 1000000
+        none =>:
+            return 0
 """, 8, "bits", "G2 判别判据·apx 源（写点归一 + 读点定型两段都得对才 = 8）"),
     # ── M1 tag 对改判的**行为钉**（维护者 2026-09-17 附加判据）──
     # 机理：`dex?` 槽型由 `TI_INT`（改前）→ `TI_DEX_S`（改后），而 M1 tag 闭包（`tag2l.cr:117/126/128/135/137`）
@@ -339,65 +385,82 @@ fn main() -> int {
     # 同一函数内**共置**「会走 M1 tag 编码的 int 链」（ADD/SUB 种子 + 拷贝元）与 `dex?` 值
     # （形参 + 局部），断言**两侧各自往返无损**。出现任何新行为差异 ⇒ 报 lead（不得用「分类变化」一句带过）。
     ("mw_tag_coexist_bits", """
-fn mw_coexist_bits(e: dex?) -> int {
-    a := 2000000000;
-    b := 2000000000;
-    c := a + b;
-    s := c;
-    x : dex? = e;
-    y := x?;
-    r := @raw_int(y) / 1000000;
-    if r != 7 { return 1; }
-    if s != 4000000000 { return 2; }
-    return 0;
-}
-fn main() -> int {
-    d : dex, apx = 7.0;
-    return mw_coexist_bits(d);
-}
+fn mw_coexist_bits(e: dex?) -> int:
+    a := 2000000000
+    b := 2000000000
+    c := a + b
+    s := c
+    x : dex? = e
+    y := x?
+    r := @raw_int(y) / 1000000
+    if r != 7:
+        return 1
+    if s != 4000000000:
+        return 2
+    return 0
+fn main() -> int:
+    d : dex, apx = 7.0
+    return mw_coexist_bits(d)
 """, 0, "bits", "M1 tag 对行为钉（bits 形）：int 多字链与 `dex?` 共置 ⇒ 两侧往返一致（0 全过 / 1 dex 侧坏 / 2 int 侧坏）"),
     ("mw_tag_coexist_scaled", """
-fn mw_coexist_scaled(e: dex?) -> int {
-    a := 2000000000;
-    b := 2000000000;
-    c := a + b;
-    s := c;
-    x : dex? = e;
-    y := x?;
-    r := @raw_int(y) / 1000000;
-    if r != 7 { return 1; }
-    if s != 4000000000 { return 2; }
-    return 0;
-}
-fn main() -> int {
-    e : dex = 7.0;
-    return mw_coexist_scaled(e);
-}
+fn mw_coexist_scaled(e: dex?) -> int:
+    a := 2000000000
+    b := 2000000000
+    c := a + b
+    s := c
+    x : dex? = e
+    y := x?
+    r := @raw_int(y) / 1000000
+    if r != 7:
+        return 1
+    if s != 4000000000:
+        return 2
+    return 0
+fn main() -> int:
+    e : dex = 7.0
+    return mw_coexist_scaled(e)
 """, 0, "scaled", "M1 tag 对行为钉·精确形对照（解释器腿可跑：ELF == interp == 0）"),
     # ── 非 dex 对照（零足迹面：不得被本批改动）──
     ("int_opt_lit", """
-fn g(x: int?) -> int {
-    return match x { Some(v) => { return v; } None => { return 0; } };
-}
-fn main() -> int { return g(7); }
+fn g(x: int?) -> int:
+    return match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
+fn main() -> int:
+    return g(7)
 """, 7, "int", "`int?` 字面量（对照：非 dex 面不受影响）"),
     ("int_opt_var", """
-fn g(x: int?) -> int {
-    return match x { Some(v) => { return v; } None => { return 0; } };
-}
-fn main() -> int { n := 7; return g(n); }
+fn g(x: int?) -> int:
+    return match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
+fn main() -> int:
+    n := 7
+    return g(n)
 """, 7, "int", "`int?` 变量实参（对照）"),
     ("int_opt_some", """
-fn g(x: int?) -> int {
-    return match x { Some(v) => { return v; } None => { return 0; } };
-}
-fn main() -> int { return g(Some(7)); }
+fn g(x: int?) -> int:
+    return match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
+fn main() -> int:
+    return g(Some(7))
 """, 7, "int", "`int?` ← `Some(7)`（对照）"),
     ("int_opt_none", """
-fn g(x: int?) -> int {
-    return match x { Some(v) => { return v; } None => { return 0; } };
-}
-fn main() -> int { return g(None); }
+fn g(x: int?) -> int:
+    return match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
+fn main() -> int:
+    return g(none)
 """, 0, "int", "`int?` ← `None`（对照；0 = None 分支）"),
 ]
 
@@ -407,11 +470,14 @@ for _n, (_k, _setup) in FOUR_STATE.items():
 
 # 编译期拒绝面（响亮，非静默）：`[dex?; N]` 字面量元素类型推断未接可选面
 REJECT_SRC = """
-fn main() -> int {
-    d : dex, apx = 7.0;
-    a : [dex?; 2] = [d, None];
-    return match a[0] { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-}
+fn main() -> int:
+    d : dex, apx = 7.0
+    a : [dex?; 2] = [d, none]
+    return match a[0]:
+        Some(v) =>:
+            return @raw_int(v) / 1000000
+        none =>:
+            return 0
 """
 
 

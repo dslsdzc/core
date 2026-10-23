@@ -186,6 +186,18 @@
 | — | `#2026-09-22-1` | 2026-09-22 | 批 8 裁定二 S4 · `b8-e1` 实测 | ⚠【**静默错值 · 本批修复**】`REF.f` 字段**自动解引用**误编译（**local 形态**）：`checker` 对 `TYP_REF` 对象解包后按结构体查字段（`checker.cr:3725`）⇒ **接受** `p.v`；而 `ir_gen` 的 `EXPR_FIELD` **不发解引用** ⇒ `IR_LOAD_FIELD` 把「地址」当聚合读 ⇒ **静默错值**（实测 `p := &s; p.v` 得 **8** 而非 42；`(*p).v` 得 **42** ⇒ 缺陷 = 缺那一条 `IR_DEREF`）。**裁定二的作用 = 把「响亮拒绝」换成「静默错值」**：`p := &s; p.v` 由 **pre 的 `check=1`** 变为 **post 的 accept + 静默 8**；**本批修回 42**（`ir_gen` 镜像 checker 的 REF 解包；**只对 REF**——实测 `p as *S` 后 `p.v` 仍 check=1）。**与 `#2026-09-22-2` 根因不同，不合并**（本条 = ir_gen 缺解包；那条 = 形参定型丢 REF）。 |
 | — | `#2026-09-22-2` | 2026-09-22 | 批 8 裁定二 S4 · `b8-e1` 实测 | ⚠【**预存缺陷 · 静默错值 · 本批修复**】`&S` / `&mut S` **形参形态**的 `r.v` 误编译：**根因 = REF 身份在 IR 形参定型处丢失**——`ir_gen.cr:3296` 取 `ast_type_val(pn)`，而 `&S` 节点（`EXPR_REFTYPE`）**`type_val = 0`** ⇒ 槽型退化成 `TI_INT`（`if param_type < 0` 护栏**拦不住 0**）⇒ `EXPR_FIELD` 看不到 REF ⇒ 静默错值（实测 `fn f(r: &S){r.v}` 得 **8** 而非 42；`--dump-params` 实证 `PARAM f p0 r slot=0 decl=0`，对照 `string` 参数 `slot=3` ✓）。**两代皆错**（pre/post 均 run=8）⇒ **存在早于裁定二、裁定二未触及形参面**。**修法有先例**：`ir_gen.cr:3305`（批 5 `dex?` 同形特判——某形态 `unpack_type` 返 0 ⇒ 槽型退化 ⇒ **按声明面节点另定槽型**），注释原文照引。**ABI 零影响（实测）**：`callseq.cr`/`frame.cr` 全部 **9 处**分类点皆为 `== TI_DEX ⇒ xmm 类，其余 ⇒ GP 类` 恒等式，而 **`TI_DEX = 1`**、**REF 行下标 ≥ 9** ⇒ **REF 天然落 GP** ⇒ 改槽型**不改 ABI 类**。**实现取「只查不建」**：checker 解析签名时已建过该 REF 行（实测类型表中存在 `kind 3`）⇒ 线性查找即可 ⇒ **零新增类型行**（⚠ `alloc_type` 是**裸分配器、不去重**，另分配会写进 TYPE 段）。**禁止事项**：在**无 ABI 判据**时凭「补一支特判」直接改槽型（会造出 `dex?` 那次的同形失配）。**与 `#2026-09-22-1` 互指，根因不同不合并**。 |
 | — | `#2026-09-24-1` | 2026-09-24 | v4 迁移差距分析 + 协调者实测 | 【**声明但不校验 / 有码但不 raise**】前端静默面清单（**5 处，均实测**）：① **`EC_TF_MISSING_RET`(TF02, `ast.cr:404`) 零 raise 点**（全仓 1 命中）⇒ 缺 return 由 TF01「Function return type mismatch」拦住，**消息不指真实原因**（实测四档：空体 / 以 unit 调用收尾 / `if` 无 `else` / `loop` 里 `break` 出走 ⇒ **全 `check` rc=1 报 TF01，`build` rc=1 + 零产物**）——**非健全性漏洞，是诊断不精确**；② **`pub` 零读点**（`parser.cr:840` 声明 + `:875` 赋值，无读取点）⇒ 写了不生效且**不报错**；③ **match 臂的 `=>` 不校验**（`parser.cr:1115` 裸 `advance_tok()`）⇒ 分隔符写什么都收；④ **struct 字面量字段分隔符盲跳**（`parser.cr:552-554`，第二个 `advance_tok()` 返回值丢弃）⇒ `=` 与 `:` 两形都收（**已由 v4 迁移 T0 规格覆盖（T5 修），本条目不另立修法**）；⑤ **类型位的 `.`/`auto` 全拒且消息错**（六档实测：形参 / 字段 / 枚举载荷 / 切片元素 / 返回位皆 rc=1，报 `expected type after '->'`，而那句是**返回型的模板**，形参位也报）。**本条目只登记，未修**（④ 除外，见上）。 |
+| — | `#2026-10-11-1` | 2026-10-11 | v4 迁移施工期 + 维护者口述 | 【**设计·未决**】v4 规约的战术「策略定义」语法（现形 `#tag`）待重设计——维护者裁定 `#` 族**只有使用面**（`#simp`/`#induct(x)` 都读作「在这里用一个战术」），而 `#tag` 是**唯一一个「用 `#` 声明新东西」的构造** ⇒ 范畴错误，**该删而非改名**；连带「策略体是竖排序列、而语义是**集合**」的形状说谎、以及可复用名被关在标签族里（不能 `import`/文档化/单测）。两个候选方向（维护者未拍）：**不留** = §10.8 整节删、复用只走库（`import std::proof::arithmetic` 后 `#arithmetic`，名字解析走 import 作用域）+ `spec fn`；**留** = 必须长成一个**非 `#`** 的声明形。**本条目只登记，未改 `docs/core-language-syntax_v4.md` §10.8**。 |
+| — | `#2026-10-12-7` | 2026-10-12 | v4 迁移 T7 施工期 | 【语料面 · 另案】`#check`/`#ensure` 的 **inline 过渡形余 15 档**未翻文档形（负例本体 + `t3_pos_ensure_*`）——**两形都收 ⇒ 不阻塞**；翻转会改负例语义，须与 `test_spec_grammar` 期望同批 |
+| — | `#2026-10-12-6` | 2026-10-12 | v4 迁移收尾 | 【判据面 · 登记不动】两处**v3 形载荷**：`tests/harness/test_lsp_builtin_table.py:195`（L4-④ 追加的假函数 `{ … ; }`）· `tests/harness/test_ir_ref_sites.py:90`（`emit(IR_REF, …);` 带 `;`）—— **形状陈旧但当前仍工作**（锚正则不涉 `;`/`}`），登记防后人误读为漏迁 |
+| — | `#2026-10-12-5` | 2026-10-12 | v4 迁移 T7 施工期 | 【**发布步骤 · 非缺陷**】`PINNED_REV` 与 **squash 合入**的耦合：T7 已把 `PINNED_REV` 从 `97f4394f` 换到 `25e70197`，但本仓 develop 走 **squash 合入** ⇒ `25e70197` **不进 develop 历史**，他人/换机重跑 `rebuild.sh` 必失败 ⇒ **合入那一步须同批重指 `PINNED_REV` + 重锁三 sha**（条件已写进 `rebuild.sh:22-25` / `REBUILD.md:44-46`） |
+| — | `#2026-10-12-4` | 2026-10-12 | v4 迁移 T6b 施工期 | 【设计缺口】`corec run <内联源>` 的**包裹壳**（`src/compiler/main.cr:356-391`，7 段内嵌源）按**行尾 `;`** 切 body/末表达式再包 `return` —— 壳的启发式本身是 **v3 形**；只改字面量会得「半 v4 壳」。**要真修得重设计 `run` 的内联包裹（换成 v4 的 layout 切分）**。注：`has_main != 0` 时该壳**不执行** ⇒ **不影响 `rebuild.sh` 冒烟** |
+| — | `#2026-10-12-3` | 2026-10-12 | v4 迁移 T5 施工期实名 | 【诊断面 · 系统性静默】**不带码的 `add_error` 只要同一次解析里还有任何带码诊断，就永远不打印**——`src/compiler/main.cr:133-137` 的**次序**：`if g_diag_count > 0: print_diagnostics(); return 1` **先命中** ⇒ 下一句 `if g_error_count > 0: print_parse_errors()` **永不到达**。**正控已证机制**（`struct S:` + `f int,` 唯一诊断不带码 ⇒ 输出**确实打印**）。与 `#2026-10-12-1`/`t2_neg_inbody` **同族：诊断报了、用户看不见** |
+| — | `#2026-10-12-2` | 2026-10-12 | v4 迁移 T5 nail3 施工期 | 【**既有约定 · 待裁**】`-> int` 却 `return` 一个 **`bool`** 表达式的站点：**检查闭包内 3 处**（`src/compiler/type_engine.cr::lit_implies` 421/426/428）+ **闭包外 8 处**（`src/kernel/{kernel_main,subtype}.cr` 的 `nf_sub_eq`/`nf_eq`/`kern_sub_nf`；⚠ `build_kernel.py` **只编译不 lint** ⇒ CI 本来就拦不住）= **11 处 / 3 档**。语义 = 本编译器「**`bool ⊆ int` 可隐式**」的既有约定 ⇒ **维护者待裁**：**认可** ⇒ 豁免转**长期项**且**应写进语言面**（`bool` 与 `int` 的关系），**而不是留在 checker 的一个 `if` 里**；**不认可** ⇒ 这 11 处**源该改**。当前代码**保持豁免，只限这一对**（注释已写明「放宽其它组合 = 把检查做成空壳」） |
+| — | `#2026-10-12-1` | 2026-10-12 | v4 迁移 T5/T6a 施工期实测 | 【**缺陷 · checker 面**】`nail4`：**同一节点存在第二推断来源**——`undef_x = 0` 的 LHS 的 `ti` **不是**错误哨兵（判别探针 `d1`/`d2` 实测 `tt = TI_INT`），而 `EXPR_IDENT` 的 `UNDEFINED → TI_ERROR` **未参与**赋值位那条链（同节点两处推断、各说各话）。已排除 4 项（负渲染 / `TI_DYN` 分支 / `compat` 规则缺失 / 源目颠倒），剩 **3 条候选未验**：`collect_decls` 预登记 → `ast_set_type_val` 回填 → `res_type_node` 族。★ **代价已量出**：**3 档 `tests/probes/` 负例探针被静默接受**（`n05_recursive` rc=1`{TS03}`→rc=0 · `n10_named_vs_int`/`n21_t_assign_int` rc=1`{TA01}`→rc=0；同文本跨三次二进制读数差证「必在二进制侧」），且 **`probes_run.sh` 不在任何 CI job 里**（全仓只在 `src/ci/run.sh:129` 的注释中被提及）⇒ **无自动门看着** |
+| — | `#2026-10-11-5` | 2026-10-11 | v4 迁移 T5 施工期实测 | 【**既有缺陷 · 运行期 SIGSEGV**（代 0 同病）】`enum E: V(int?)`（带可选载荷的枚举变体）**能编过但运行 rc=139**；代 0 编译器（`/tmp/v3ws`，revision `920b1cbb`）对 v3 形 `enum E { V(int?) }` **同样 139** ⇒ **非 v4 迁移引入**。★ **但会卡 T6**：`tests/suite/opt_dex_test.cr:20` 逐字 `enum EOpt { V(dex?) }`。（T5 侧另有 `struct SOpt { f: dex? }` / `g : dex?, mut = None` 等真实用法 ⇒ 该档是可选面的集中语料。） |
+| — | `#2026-10-11-4` | 2026-10-11 | v4 迁移 T5 施工期实测 | 【**能力面缺口**】bootstrap（Python 前端）**完全没有 `T?` 的语义面**：`grep -rn 'OptionalType' bootstrap/` ⇒ 只有 `parser.py:527`（构造）与 `syntax/ast.py:13`（类定义），**`type_checker.py` 零命中**。⇒ `T?` 现在**语法面已通**（T5 施工期把四族并入同一条尾部、`?` 唯一处理点，接受矩阵 10/10 与自源逐格一致），但**语义面全缺**：无 `T ⊆ T?` 注入、无 `none : T?` 的类型、无可选值 match 面 ⇒ 四格（标注位/形参位/字段位/枚举载荷位）**解析全过、check 全不过**。修法 = 把自源 R2 P3 Task 4 的可选表示机制（`TYP_NULL`/`TYP_OPTIONAL`/`g_optrep_on`/`IR_MAKE_ENUM`/match 两分支面）搬到 Python —— **一笔独立的批**。**当前不阻塞**：`tests/bootstrap/**` 的 `T?` 用量 = 0，`src/**` 代码面 = 0。 |
+| — | `#2026-10-11-3` | 2026-10-11 | v4 迁移 T5 施工期实测 | 【**未覆盖面 · 类型引擎**】`never ⊆ X` 在 `ty_sub` 里返回 **-1** ⇒ `error[ICE04] type judgment indeterminate: never vs named#21 (uncovered face)`（引擎 -1 ⇒ 硬错）。⇒ **组合层与引擎层对「`never` 作子类型」的认定不一致**：组合层（`type_compat_strict` / `_compat`）按 2026-10-11 裁定**收**（任一侧 never ⇒ 相容）；引擎层（`type_terms.cr`/`type_engine.cr` 的 `ty_sub`）**判不出**。当前 `src/**` 零命中（`check src/compiler` / `corec2==corec3` / T1-T2 探针 146 条三绿即证），但属**潜在缺口**——任何绕过组合函数直接问引擎的路径（如 `ti_subsumes` 的 OPTIONAL 注入面、`type_equal_engine` 的采样面）对 `never` 仍可能得 -1。**本批只在组合层兑现语义，未碰 `ty_sub`**（那一层属 R2 类型项引擎本体，有自己的语义与判据网，须单开一笔）。 |
+| — | `#2026-10-11-2` | 2026-10-11 | v4 迁移 T4 施工期实测 | 【**既有缺陷 · 发射面**】块值 `if` 取不到值——`bootstrap/corec/frontend/ir_gen.py` 的 `gen_if` **无条件 `return None`**（函数体 `cond = gen_expr(...)` → 两支 `gen_expr` → 建 merge 块 → `return None`，从不把分支值物化到槽位）⇒ `x := if c: 1 else: 2` 运行期得 `None`。**与 v4 迁移无关**：同一片段走改前 parser 同样得 `None`。旁证（可运行的表达式位 region 载体）：`t := unsafe:` + `7` + `return t` ⇒ 运行期 **7**（`gen_block` 尾值直通，`ir_gen.py:438-444`）。⇒ `docs/core-language-syntax_v4.md` §4.1 的 `total := if ready: …` 例子已降为**「设计态/未实现」**并注明根因；**未修**。 |
 
 ## 触发器约定（2026-09-18 立；存量扫描产出）
 
@@ -1234,10 +1246,16 @@
 - **现象（实测；批 5 终态构建 `build/corec`，只读分诊 12 探针之一）**：`g[T](t: T, x: T?)` 以 `T = dex` 实例化、实参为 **apx** 源时 ⇒ `check` rc=0 · `build` rc=0 · **ELF rc=142 / interp rc=15**（**期望 7/7**；`scaled` 实参对照 = **7/7**）⇒ **静默错值 + ELF≠interp（双路径分歧）**，与 `TODO #2026-09-16-29` 原始 RED（u11）**同严重级**；缺陷是 **apx 源特有**（与主族同形）。
 - **最小复现（<10 行，可直接入探针）**：
   ```core
-  fn g[T](t: T, x: T?) -> int {
-      return match x { Some(v) => { return @raw_int(v) / 1000000; } None => { return 0; } };
-  }
-  fn main() -> int { d : dex, apx = 7.0; return g(1, d); }   // 期望 7；实测 ELF 142 / interp 15
+  fn g[T](t: T, x: T?) -> int:
+      return match x:
+          Some(v) =>:
+              return @raw_int(v) / 1000000
+          none =>:
+              return 0
+  fn main() -> int:
+      d : dex, apx = 7.0
+      return g(1, d)
+  // 期望 7；实测 ELF 142 / interp 15
   ```
 - **机理（`file:line`，读码）**：**调用侧环按「泛型声明」取形参型、callee 槽按「实例」取型** ⇒ 说法不一致：
   - 调用侧：`ir_gen.cr:1965` `cfi := find_func(func_ni)` → `fi_ast_node`（= **泛型声明**节点）；转换门在 `:1985`（`dex_opt_type_node(ast_data(cpn))`）——而泛型声明的形参类型节点是 `T?`（inner = 泛型参数 `T` ⇒ 判据**假**）⇒ **实参不转换**（bits 原样传递）；
@@ -1257,8 +1275,18 @@
 - **现象（实测）**：`n : int? = 7; if n == Some(7) { return 1; }` ⇒ **ELF rc=0**（未命中）；`n : int? = None; if n == None { return 1; }` ⇒ **ELF rc=0**（**连 `None == None` 都不命中**）；`n : int? = Some(7); if n == Some(7) {…}` ⇒ **ELF 0**。⇒ **`==` 对可选值恒假**（ELF 与 interp 同判 ⇒ 非双路径分歧，是**一致地错**）。
 - **最小复现（两条，各 <5 行）**：
   ```core
-  fn main() -> int { n : int? = 7;    if n == Some(7) { return 1; } return 0; }   // 期望 1；实测 0
-  fn main() -> int { n : int? = None; if n == None    { return 1; } return 0; }   // 期望 1；实测 0
+  fn main() -> int:
+      n : int? = 7
+      if n == Some(7):
+          return 1
+      return 0
+  // 期望 1；实测 0
+  fn main() -> int:
+      n : int? = none
+      if n == none:
+          return 1
+      return 0
+  // 期望 1；实测 0
   ```
 - **机理**：**未定位**（本条目只登记，不做根因定位）。观测事实 = 可选值的 `==` 在「值与 `Some(...)`」「值与 `None`」两种形态下**均不成立**；未排除与可选表示（rep/装箱面）或 `EXPR_ENUM_CONSTRUCTOR` 比较路径相关——**勿据本条推断根因**。
 - **判定**：**S（通用静默）**；作用面 = **所有可选（`int?` / `dex?` / 任意 `T?`）**，且 `if x == None` 是最自然写法 ⇒ 危害面**大于** `dex?` 专属面（分诊结论：本条比 `#2026-09-17-5` 更严重）。
@@ -1271,8 +1299,11 @@
 - **现象（实测）**：`extern fn e_opt(x: dex?) -> int;` ⇒ **`check` rc=0（零诊断）**、`build` rc=0；运行期 **139**（未解析符号）；对照 `extern fn e_int(x: int?) -> int;` ⇒ **同形同判**（check=0 / ELF 139）⇒ **非 dex 特有**。
 - **最小复现（<5 行）**：
   ```core
-  extern fn e_opt(x: dex?) -> int;
-  fn main() -> int { d : dex, apx = 7.0; return e_opt(d); }   // check=0（应拒未拒）；运行期 139
+  extern fn e_opt(x: dex?) -> int
+  fn main() -> int:
+      d : dex, apx = 7.0
+      return e_opt(d)
+  // check=0（应拒未拒）；运行期 139
   ```
 - **机理**：**未定位**（只登记）。可确认面 = 「`extern` 声明的形参类型不做可适用性校验」（C ABI **无可选表示**）；`W4` 环对 extern 侧**显式不扩**（`ir_gen.cr:1985` 的 `cfn_ext == 0` 守卫）⇒ 即使要支持也无约定 —— 属**语义层面不应存在**的形态。
 - **判定**：**L（运行期响亮 139）**，但**编译期零诊断 = fail-closed 缺口**（「不诊断」本身是洞；建议收敛为编译期硬错）。
@@ -1674,8 +1705,13 @@
 - **最小复现（6 行、确定性、零依赖）**：
   ```core
   import io
-  struct Point { x: int, y: int }
-  fn main() -> int { f := @fields(Point); println(f); println(int_str(str_len(f))); return 0; }
+  struct Point:
+      x: int, y: int
+  fn main() -> int:
+      f := @fields(Point)
+      println(f)
+      println(int_str(str_len(f)))
+      return 0
   ```
   ```bash
   ./build/corec clean-cache
@@ -2125,10 +2161,20 @@
 **① 的实测四档**（`nice -n 19 ./build/corec check`；对照腿 = 正常带 `return` 的函数 rc=0）：
 
 ```core
-fn f(x: int) -> int {}                                // 空体
-fn f(x: int) -> int { g(x); }                         // 以 unit 调用收尾
-fn f(x: int) -> int { if x > 0 { return 1; } }        // if 无 else，分支缺 return
-fn f(x: int) -> int { loop { if x > 0 { break; } } }  // loop 里 break 出走
+fn f(x: int) -> int:
+// 空体
+fn f(x: int) -> int:
+    g(x)
+// 以 unit 调用收尾
+fn f(x: int) -> int:
+    if x > 0:
+        return 1
+// if 无 else，分支缺 return
+fn f(x: int) -> int:
+    loop:
+        if x > 0:
+            break
+// loop 里 break 出走
 ```
 
 四档皆 `check` rc=1，报的是 **TF01「Function return type mismatch」**；`build` rc=1 **+ 零产物**（门有效）。**注意报的不是 TF02** —— 那正是本条要登记的：TF02 有码、无人 raise。
@@ -2138,6 +2184,200 @@ fn f(x: int) -> int { loop { if x > 0 { break; } } }  // loop 里 break 出走
 **边界（防误读）**：① **不是健全性漏洞**（缺 return 确实被拒，产物确实为零），是**诊断不精确**。②③ 是「接受但不生效」类。**五处都不是「静默错值」**（那类是 `#2026-09-22-1/2`，根因不同，不合并）。
 
 **与既有条目的关系**：同族先例 = 实参面无校验（TF05/06 零 raise、TF07 raise = 3 处），判断口径同：**「有码但不 raise / 接受但不校验」是一类固定失效形态，逐处查 raise 点与读点，别只看码表**。
+
+### 2026-10-11-1. 【设计·未决】v4 规约的战术「策略定义」语法（现形 `#tag`）待重设计——`#` 族应**只有使用面**（维护者口述裁定；**本节只登记设计问题，未动文档**；取号基准 = 当天已有最大 N 无 ⇒ 1）
+
+> ✅ **已闭档（2026-10-12）**：维护者给出**更新后的 §十**并已逐字落盘到 `docs/core-language-syntax_v4.md`
+> （`#tag` **整节删除**；§10.6 明写「**Core 不引入用户可见的策略定义机制；战术库的扩展通过普通模块和导入完成**」；
+> 同时 **`spec fn` 也取消** —— 所有函数都是 `fn`，复用靠**函数契约 + `#apply`/`#rewrite`**）。
+> ⇒ 本节所记的三条毛病（`#` 既使用又定义 / 形状说谎 / 名字关在标签族里）**由「不引入该构造」一并消除**。
+> **以下原记录保留供追溯。**
+
+**维护者原话（2026-10-11）**：「这个标签我是打算做成战术的，应该就是使用」「标签是没问题但就是套来套去感觉很不对」「为什么必须要用包裹起来？」。
+
+**把这句话读成硬约束**：`#` 这个符号族里**只能有「使用」**，不能有「定义」；任何 `#xxx` 都必须读作「在这里用一个战术」。⇒ `#tag` **不是措辞问题，是范畴错误**——它是全族里**唯一**一个「用 `#` 声明新东西」的构造 ⇒ **该删，而非改名或换壳**。
+
+**`#tag` 现形（`docs/core-language-syntax_v4.md` §10.8）的三条结构性毛病**：
+
+| # | 毛病 | 说明 |
+|---|---|---|
+| ① | **`#` 同时当「使用」与「定义」** | `#simp` 是「向证明引擎提一个能力」，`#tag` 却是「在源码里声明一个新名字」。读者看到 `#` 无法从形式上判断是提示还是声明——**层级被压平**。 |
+| ② | **形状在说谎** | 文档说体是「**能力集合**，不是命令序列」，写法却是**竖排多行**——竖排是序列的形状。集合写成序列。 |
+| ③ | **名字被关在标签族里** | 一个可复用的策略本该像 `spec fn`/`struct` 那样能 `import`、能文档化、能单独引用；关在 `#tag` 里三样都做不到。 |
+
+**两个候选方向（维护者未拍）**：
+
+- **不留**（本节作者倾向）：§10.8 **整节删除**。复用只走两条**既有**通道——(a) **库**：`import std::proof::arithmetic` 之后 `#arithmetic` 可用，名字解析走 import 作用域（与 `math::add` 同族；§10.10 本来就已经写了「战术库含 strategy tags、第三方库用普通 Core 模块与包管理机制」）；(b) **命题复用**：`spec fn` + 证明结果缓存（§10.5）。理由：拿名字换来的信息量近乎为零，而文档自己把自动化排在第一位（「普通情况下不要求用户手写战术」）。
+- **留**：必须有一个**非 `#`** 的声明形来承载「用户自定义一档、起名、到处引用」——那时才需要讨论该叫什么词、体写成 region 还是别的。**`#` 侧一个字不动（纯使用）**。
+
+**这条卡住的面**：`docs/core-language-syntax_v4.md` §10.8 的措辞、`docs/maintainer/design/spec-design.md:203` 的旧形（`#tag sorted = { … }`，与 §10.8 已经不一致，属同一面的两个形）。
+
+### 2026-10-12-1. 【缺陷 · checker 面】`nail4`：同一节点存在**第二推断来源**（`undef_x = 0` 的 LHS ti 非错误哨兵）；★ 代价 = 3 档负例探针静默接受且无 CI 门（v4 迁移 T5/T6a 施工期实测；**维护者裁定挂起**）
+
+**怎么发现的**：v4 迁移的 `(c) TI_ERROR` 独立哨兵落地后，`ta1`（`undef_x = 0` ⇒ 期望 `{N01, TA01}`）**未回归**（只剩 `{N01}`），而两条探针读数**不能同时为真**。
+
+**判别探针（T5 自造，非猜）**：`d1` = `i := 1` + `undef_x = i` ⇒ 若 `tt` 是错误哨兵则报 TA01、若是 `int` 则不报。**实测不报** ⇒ `tt = TI_INT`；而 v3 探针打在 `EXPR_IDENT` 上打印 `UNDEFINED`（即该分支必 `return TI_ERROR(-2)`，且同一节点只打印一次）。
+⇒ **`undef_x` 的 ti 存在第二个来源**：`EXPR_IDENT` 的 `UNDEFINED → TI_ERROR` **没有参与**赋值位那条链。
+
+**已排除 4 项（逐条带手段）**：负数渲染错（`int_str(-2) == "-2"` 实测为真）· `if tt == TI_DYN` 提前分支（`TI_DYN=7 ≠ -2`）· `type_compat_strict` 里从未走到 ERROR 规则（`:471-476` 逐行在位）· 源目颠倒（`d2` 用 string RHS 报 TA01 ⇒ 方向没错，错的是 `tt` 的取值来源）。
+
+**剩 3 条候选（未逐条验完 ⇒ 按裁定不修）**：① `collect_decls`（`checker.cr:1450`）**预登记** LHS（写入口 `def_sym`/`sym_set_type`，`:854`）；② `infer_expr` 之外**按节点回填**（`ast_set_type_val`，`:4199/4291/4300`）；③ `res_type_node` 族（`:1008` 起，`:1254` 另有一处 `return TI_NEVER` 未核语义）。
+
+**★ 代价（本条目最该被读到的一段）**：该缺口使 **3 档 `tests/probes/` 负例探针被静默接受** ——
+`n05_recursive`（`{TS03}`→rc=0）· `n10_named_vs_int`（`{TA01}`→rc=0）· `n21_t_assign_int`（`{TA01}`→rc=0）。
+同文本跨三次二进制读数差（`1→1→0`）证「**必在二进制侧**」；且 **`probes_run.sh` 不在 `src/ci/run.sh` 的任何 job 里**（全仓只在 `:129` 的注释中被提及）⇒ **无自动门看着**。
+⇒ 挂起的代价**不是「少一条诊断」，是「三个负例静默失效 + 无自动门」**。
+
+**维护者裁定（2026-10-11）**：**挂起**（T5 已用尽一轮排查）。**禁止**为凑回归改判定面语义——**先能解释「为什么两条路径给出不同 ti」才谈修**。
+
+### 2026-10-12-2. 【既有约定 · 待裁】`-> int` 却 `return` `bool`：11 处 / 3 档；「`bool ⊆ int` 可隐式」是否为**语言面规则**（v4 迁移 T5 `nail3` 施工期暴露；**新判定面的第一批战果**）
+
+**怎么发现的**：`nail3`（逐 `return` 核对返回值 vs 声明返回型）**首轮就把 `check src/compiler` 打红**（rc=1 · 3×TF01），全在 `type_engine.cr` —— 形如 `fn lit_implies(...) -> int: return tt_tag(lq) == TT_TOP`。**改前被「`return ⇒ never` ⇒ 体类型恒相容」掩盖着，从来没人看见这层差异。**
+
+**站点清单（11 处 / 3 档，两口径差集有唯一解释）**：
+
+| 组 | 位置 | 处数 | 是否在 CI 检查闭包内 |
+|---|---|---|---|
+| A | `src/compiler/type_engine.cr::lit_implies`（421/426/428） | 3 | **在**（`check src/compiler` 直接可见，**现在靠豁免才绿**） |
+| B | `src/kernel/{kernel_main.cr:35,37,48,54,56,58,60 · subtype.cr:14}`（`nf_sub_eq`/`nf_eq`/`kern_sub_nf`） | 8 | **不在**——`build_kernel.py` **只编译、不 lint** ⇒ **即使不豁免，CI 也拦不住这批** |
+
+**扫描边界（如实）**：静态判据只看**语法可判**的 `bool`（比较/逻辑/取反/调用声明返回 `bool` 的函数）；推断型（`b := a==b` 后 `return b`）另做了二次扫描 ⇒ **候选 1 条经人工核为假阳**（两个同名不同变量）⇒ 该类**实测 0 处**。**多层传参 / 字段带回 / 匹配臂**再被 `return` 的路径**扫不到**（需真类型推断）⇒ **上表是下界**。
+
+**给维护者的两条可裁事实**：
+1. **语义上这是同一件事**：本编译器里 `bool` 就是 `0/1` 的 `int`（比较产 `bool`，`tt_a`/`kern_get` 一类产 `int`）⇒ 语料的既有约定 = 「**`bool ⊆ int` 可隐式**」。
+2. **两档性质不同**：A 组在检查闭包内（靠豁免才绿）；B 组**不在任何 CI 检查闭包内**。
+
+**待裁**：**认可**该约定 ⇒ **豁免转长期项**，且**应写进语言面**（`bool` 与 `int` 的关系），**而不是留在 checker 的一个 `if` 里**；**不认可** ⇒ 这 **11 处源该改**（显式 `as int`，或改写成 `if …: return 1` / `return 0`）。
+**现状**：代码**保持豁免，且只限 `bool↔int` 这一对**（注释已写明「放宽其它组合 = 把检查做成空壳」）。
+
+### 2026-10-12-3. 【诊断面 · 系统性静默】**不带码的 `add_error` 只要同批有带码诊断就永远不打印**（`main.cr:133-137` 的**次序**；v4 迁移 T5 施工期实名；**未修**）
+
+**机制（逐字）**：
+```core
+if g_diag_count > 0:      // ← 带码诊断（P25…）先命中
+    print_diagnostics()
+    return 1
+if g_error_count > 0:     // ← print_parse_errors() 永远走不到
+    print_parse_errors()
+    return 1
+```
+⇒ **不带码的 `add_error` 消息，只要同一次解析里还有任何带码诊断，就永远不打印。**
+
+**正控（机制自证）**：`struct S:` ⏎ `    f int,`（唯一诊断 = **不带码**的「expected ':' after struct field name」）⇒ 输出**确实打印** `error: expected ':' after struct field name` ✓；而**带码诊断一起出现时它就不见了**。
+
+**当初的触发面**：`flow` 分支那句 `add_error("expected 'fn' after flow")` **被记录下来但打印不出来**（`grep -c` = 0）——该分支已随 `flow` 文档形实现消失，**但同一缺陷面在别处仍在**。
+**同族**：`#2026-10-12-1`（`TA01`）· `t2_neg_inbody`（Region 头实现漏洞，已修）—— **母题 = 诊断报了、用户看不见**。
+
+### 2026-10-12-4. 【设计缺口】`corec run <内联源>` 的**包裹壳**按**行尾 `;`** 切分（`src/compiler/main.cr:356-391`，7 段内嵌源；v4 迁移 T6b 施工期实名；**未修**）
+
+**现象**：`g_source = imports + "fn main() -> int {\n" + body + "\n" + last_expr + ";\nreturn 0;\n}\n"` —— 壳按**行尾 `;`** 把内联源切成 `body` / 末表达式，再包 `return`（`main.cr:337-393`）。
+**⇒ 只把字面量改 v4 会得到「半 v4 壳」**：用户内联文本仍按 `;` 切。**要真修得重设计 `run` 的内联包裹（换成 v4 的 layout 切分）**。
+**不阻塞的证据**：`has_main != 0` 时该壳**根本不执行** ⇒ **`rebuild.sh` 的冒烟（rc=42）不受它影响**（T6b 实测）。
+
+### 2026-10-12-5. 【**发布步骤 · 非缺陷**】`PINNED_REV` 与 **squash 合入**的耦合（v4 迁移 T7 施工期实名）
+
+**现状**：T7 已把 `PINNED_REV` 从 `97f4394f`（2026-09-14，**v4 之前** ⇒ 只认 v3 形）换到 **`25e70197`**（v4 迁移 T6 收官），并重锁了三 sha（旧值留痕于 `rebuild.sh:18-27` / `REBUILD.md:53`）。
+**问题**：本仓 develop 走 **squash 合入**（见 `CLAUDE.md` 的 GitFlow 节）⇒ **`25e70197` 不进 develop 历史** ⇒ 他人/换机重跑 `bash tools/baseline/rebuild.sh <outdir>` **必失败**。
+**处置（已写进条件）**：**合入那一步须同批**：① 重指 `PINNED_REV` 到合入后 develop 上的提交；② **重锁三 sha 白名单**（`rebuild.sh:22-25` / `REBUILD.md:44-46` 已逐字写明该条件）。
+**判据**：合入后 `nice -n 19 bash tools/baseline/rebuild.sh <outdir>` 能重建出**与白名单逐条相同**的三 sha。
+
+### 2026-10-12-6. 【判据面 · 登记不动】两处**v3 形载荷**（形状陈旧但**当前仍工作**）
+
+| 位置 | 载荷 | 为什么当前仍工作 |
+|---|---|---|
+| `tests/harness/test_lsp_builtin_table.py:195` | L4-④ 追加的假函数为 v3 形（`{ … ; }`） | L1 只用 `^fn (…)(` **行首匹配** ⇒ 不涉 `}`/`;` ⇒ L4-④ PASS |
+| `tests/harness/test_ir_ref_sites.py:90` | 追加的 `emit(IR_REF, w, op_var, 0, 0, 0);` 带 `;` | 锚正则 `emit\(IR_REF,\s*(…)` **不涉 `;`** ⇒ 4/4 PASS |
+
+**登记理由（防后人误读）**：**形状陈旧 ≠ 漏迁**——这两处**当前工作**，改它没有收益（改坏了反而多一处风险）。**见到 v3 形不要一律当漏迁**：先问「它的判据用不用那个形状」。
+
+### 2026-10-12-7. 【语料面 · 另案】`#check`/`#ensure` 的 **inline 过渡形余 15 档**未翻文档形
+
+**现状**：T7 已把 **9 档**（`delta_d0_annot`/`delta_d9_annot`/`t2_pos_check`/`t2_pos_dup`/`t2_pos_multi`/`t3_pos_both`/`t3_pos_check_param`/`t4_xtalk`/`t4_yellow_only`）翻成**文档 §10.1 的 region 头形**；**余 15 档**仍是 inline（`t2_neg_*`/`t3_neg_*` 的**负例本体** + `t3_pos_ensure_result`/`t3_pos_ensure_true` 的 inline `#ensure`）。
+**为什么不顺手做**：**两形都收**（实现侧 inline 保留为兼容）⇒ **不阻塞**；且那些是**负例本体**，翻它会**改负例语义**，须与 `test_spec_grammar` 的期望**同批**改。
+**判据（若开做）**：逐档给「inline 形 / 文档形」两态的 **rc + 码集逐格相同** + `test_spec_grammar` 全绿。
+
+### 2026-10-11-5. 【既有缺陷 · 运行期 SIGSEGV】带可选载荷的枚举变体 `enum E: V(int?)` 运行 rc=139（**代 0 同病**；★ 会卡 T6；取号基准 = 4）
+
+**现象**：`enum E: V(int?)` **能编过（build rc=0）但运行 rc=139（SIGSEGV）**。
+
+**非 v4 迁移引入（对拍实证）**：
+```
+自源（v4 形 enum E: V(int?)）        build rc=0 → run rc=139
+代 0（v3 形 enum E { V(int?), N }）  build rc=0 → run rc=139   ← /tmp/v3ws 的 920b1cbb 编译器
+```
+⇒ 两代同病，属**既有缺陷**。
+
+**★ 但它会卡 T6**：`tests/suite/opt_dex_test.cr:20` 逐字 `enum EOpt { V(dex?) }`。该档同时含
+`g : dex?, mut = None`、`struct SOpt { f: dex? }` ⇒ 是**可选面的集中语料**，T6 迁移到它时必然撞上。
+
+**与 `#2026-10-11-4` 的关系**：那条是 **bootstrap（Python 前端）**缺 `T?` 语义；本条是**自源/代 0 编译器**在
+「可选载荷的枚举变体」上的**运行期**缺陷。两者**不同层**（前端 vs 后端/IR），不合并。
+
+### 2026-10-11-4. 【能力面缺口】bootstrap（Python 前端）完全没有 `T?` 的语义面（语法面已通、语义面全缺；取号基准 = 3）
+
+**怎么发现的**：v4 迁移 T5 施工期修「基本类型 `T?`」的**语法面**时（依据 = v4 文档 §3.2 原文 `value : int? = 5`），
+四格（标注位 / 形参位 / 字段位 / 枚举载荷位）**解析全过了，但 check 全不过**。
+
+**一命令可复现的根因**：
+```
+grep -rn "OptionalType" bootstrap/
+→ bootstrap/corec/frontend/parser.py:527   （构造）
+→ bootstrap/corec/syntax/ast.py:13         （类定义）
+→ type_checker.py：0 处                    ← 语义面全缺
+```
+
+**缺的三件**（对照自源已有的 R2 P3 Task 4）：
+1. **`T ⊆ T?` 注入**（`x : int? = 5` 现在报 `declared type OptionalType(int) but initialized with BaseType(int)`）；
+2. **`none : T?` 的类型**（现在报 `… initialized with PathType(['Option'])`）；
+3. **可选值的 match 面**（两分支判定）。
+
+**修法**：把自源的可选表示机制（`TYP_NULL`/`TYP_OPTIONAL`/`g_optrep_on`/`IR_MAKE_ENUM`/match 两分支面）
+搬到 Python 侧 —— **一笔独立的批**，不是「补几行」。
+
+**当前是否阻塞**：**否**。`tests/bootstrap/**` 的 `T?` 用量 = **0**（实测 grep 空）；`src/**` 的 Core 代码面 = **0**
+（57 条命中全在注释/字符串）。⇒ 属**能力面差距**，不影响本批任何判据。
+**为什么另案**：它与「v4 迁移」不是同一件事——迁移要的是**同语义**，而这条是**一整块尚未移植的能力**。
+
+### 2026-10-11-3. 【未覆盖面 · 类型引擎】`never ⊆ X` 在 `ty_sub` 返回 -1 ⇒ ICE04；组合层与引擎层对「`never` 作子类型」的认定不一致（v4 迁移 T5 施工期实名；本批只在组合层兑现；取号基准 = 2）
+
+**怎么发现的**：v4 迁移 T5 施工期，`src/compiler/main.cr` 的 `is_decl_stmt` 有 2 条 `error[TC02]`（内层 if 链 = 赋值支 unit vs `return` 支 int）。裁定的修法是**补 `never` 语义**——以发散语句（`return`/`break`/`continue`）收尾的路径其类型 = `never`，且 `never` 与任何类型相容。
+
+**修法的落点与它逼出的事实**：落点在**组合函数层**（`bootstrap/corec/frontend/type_checker.py` 的 `_compat`、`src/compiler/checker.cr` 的 `type_compat_strict`）—— 2 条 TC02 当即消解，语料一字未动。但**反向对照**（撤掉组合层那行相容）把引擎面照了出来：
+
+```
+error[ICE04]: type judgment indeterminate: never vs named#21 (uncovered face)
+ --> 0:0
+```
+
+即 **`ty_sub(never, named)` 返回 -1（未覆盖）**，触发 ICE04 硬错（引擎 -1 ⇒ 硬错，`main.cr` 硬名单）。
+
+**不一致的确切形状**：
+
+| 层 | 落点 | 对 `never ⊆ X` 的认定 |
+|---|---|---|
+| 组合函数层 | `type_compat_strict` / `_compat` | **收**（任一侧 `never` ⇒ 相容 = 1）——本批按裁定兑现 |
+| 类型项引擎本体 | `type_terms.cr` / `type_engine.cr` 的 `ty_sub` | **判不出**（返回 **-1**） |
+
+⇒ **正向面**：`never` 参与的一切**组合函数**判定（分支合一 / 返回位 / 赋值位 / 实参位…）已按裁定放行。
+**残留面**：任何**绕过组合函数、直接问引擎**的路径（如 `ti_subsumes` 的 OPTIONAL 注入面、`type_equal_engine` 的采样面）对 `never` 仍可能得 -1。
+
+**当前是否已踩到**：**否**。`src/**` 零命中——`./build/corec check src/compiler` **rc=0 零诊断**、`corec2 == corec3` IDENTICAL、T1/T2 探针 **146 条 ALL PASS** 三绿即证。⇒ 这是**潜在缺口，不是已覆盖面**。
+
+**落点建议（供将来开笔时点名）**：`ty_sub` 的 `AK_NEVER` 分支加「`never ⊆ X` 恒真」。
+**判据形状建议**：锚 `ICE04` 的措辞 + 一条正控（`fn f() -> int: if c: return 1 else: x = 1` 必 rc=0）+ 一条反向（撤该分支 ⇒ `ICE04` 必回；本条目已给可复现读数）。
+**为什么本批不碰**：`ty_sub` 属 **R2 类型项引擎本体**，有自己的语义与判据网；顺手改它会把「引擎判定面」与「迁移面」混成一笔。**维护者 2026-10-11 裁定：另案。**
+
+### 2026-10-11-2. 【既有缺陷 · 发射面】块值 `if` 取不到值——`gen_if` 无条件 `return None`（v4 迁移 T4 施工期实测；**既有缺陷，与迁移无关**；取号基准 = 1）
+
+**现象**：`x := if c: 1 else: 2`（多行 layout 形）**能解析、能过检**，但**运行期得 `None`**。
+
+**根因**：`bootstrap/corec/frontend/ir_gen.py` 的 `gen_if` **无条件 `return None`** —— 函数体为 `cond = gen_expr(...)` → 两支分别 `gen_expr` → 建 merge 块 → `return None`，**从不把分支值物化到任何槽位**。`gen_let` 收到 `val_ir = None` 后为该局部新开临时槽 ⇒ 声明得到空值。
+
+**与 v4 迁移无关（实证）**：同一片段走**改前 parser** 同样得 `None`。⇒ 既有缺陷，不是 T4 或位置语义修复引入的回归。
+
+**可运行的旁证（表达式位 region 的值通道是通的）**：`t := unsafe:` + `7` + `return t` ⇒ 运行期 **7**（`gen_block` 尾值直通，`ir_gen.py:438-444`）。即「region 作声明右值」这条通道本身没问题，缺的是 `if` 这一支的实现。
+
+**影响面**：`docs/core-language-syntax_v4.md` §4.1 原写的 `total := if ready: … else: …` 例子**已降为「设计态/未实现」**并注明根因。**未修**（修法在 `gen_if`，属发射面，超出 v4 迁移批量范围）。
 
 ### 2026-09-22-1. ⚠ **【静默错值】`REF.f` 字段自动解引用误编译（local 形态）**（批 8 裁定二 S4；**本批修复**；取号基准 = 当天已有最大 N 无 ⇒ 1）
 

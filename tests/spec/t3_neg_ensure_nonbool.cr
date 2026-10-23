@@ -1,2 +1,4 @@
-fn f(a: int) -> int #ensure(result) { return a; }
-fn main() -> int { return f(1); }
+fn f(a: int) -> int #ensure(result):
+    return a
+fn main() -> int:
+    return f(1)

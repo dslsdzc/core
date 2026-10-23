@@ -33,7 +33,7 @@
 Find the EXPR_ section (around `EXPR_AWAIT = 45`). Add after it:
 
 ```core
-EXPR_AT : int = 46;     // @builtin: a=name_ni, b=args_node, c=0, iv=0, tv=0, data=0
+EXPR_AT : int = 46     // @builtin: a=name_ni, b=args_node, c=0, iv=0, tv=0, data=0
 ```
 
 - [ ] **Step 2: Add IR opcode constants**
@@ -41,9 +41,9 @@ EXPR_AT : int = 46;     // @builtin: a=name_ni, b=args_node, c=0, iv=0, tv=0, da
 Find the IR opcode section (after `IR_ARENA_RESET = 33`). Add:
 
 ```core
-IR_INLINE            : int = 34;   // src1=fn_var — inline hint
-IR_NO_BOUNDS_CHECK   : int = 35;   // — skip bounds check for subsequent DEREFs
-IR_FAST              : int = 36;   // — allow precision-for-speed optimizations
+IR_INLINE            : int = 34   // src1=fn_var — inline hint
+IR_NO_BOUNDS_CHECK   : int = 35   // — skip bounds check for subsequent DEREFs
+IR_FAST              : int = 36   // — allow precision-for-speed optimizations
 ```
 
 - [ ] **Step 3: Commit**
@@ -216,100 +216,89 @@ jj commit src/compiler/type_checker.cr -m "feat: type check EXPR_AT — validate
 Find the main `fn gen_expr(node)` function. Add before the `return -1` at the end:
 
 ```core
-    if ast_kind(node) == EXPR_AT {
-        name_ni := ast_a(node);
-        name := istr_get(name_ni);
-        args := ast_b(node);
+    if ast_kind(node) == EXPR_AT:
+        name_ni := ast_a(node)
+        name := istr_get(name_ni)
+        args := ast_b(node)
 
-        // @sizeOf(T): emit IR_CONST with type size
-        if str_eq(name, "sizeOf") != 0 {
-            ti := type_of(ast_a(args));
-            sz := type_size(ti);
-            v := new_ir_var("_sizeof", TI_INT);
-            emit(IR_CONST, v, sz, 0, 0, TI_INT);
-            return v;
-        }
+            // @sizeOf(T): emit IR_CONST with type size
+        if str_eq(name, "sizeOf") != 0:
+            ti := type_of(ast_a(args))
+            sz := type_size(ti)
+            v := new_ir_var("_sizeof", TI_INT)
+            emit(IR_CONST, v, sz, 0, 0, TI_INT)
+            return v
 
-        // @alignOf(T): emit IR_CONST with type alignment
-        if str_eq(name, "alignOf") != 0 {
-            ti := type_of(ast_a(args));
-            al := type_align(ti);
-            v := new_ir_var("_alignof", TI_INT);
-            emit(IR_CONST, v, al, 0, 0, TI_INT);
-            return v;
-        }
+            // @alignOf(T): emit IR_CONST with type alignment
+        if str_eq(name, "alignOf") != 0:
+            ti := type_of(ast_a(args))
+            al := type_align(ti)
+            v := new_ir_var("_alignof", TI_INT)
+            emit(IR_CONST, v, al, 0, 0, TI_INT)
+            return v
 
-        // @fields(T): build string array of field names
-        if str_eq(name, "fields") != 0 {
-            ti := type_of(ast_a(args));
-            arr_ni := build_field_name_array(ti);  // build string array in string table
-            v := new_ir_var("_fields", TI_STR);
-            emit(IR_CONST, v, arr_ni, 0, 0, TI_STR);
-            return v;
-        }
+            // @fields(T): build string array of field names
+        if str_eq(name, "fields") != 0:
+            ti := type_of(ast_a(args))
+            arr_ni := build_field_name_array(ti)  // build string array in string table
+            v := new_ir_var("_fields", TI_STR)
+            emit(IR_CONST, v, arr_ni, 0, 0, TI_STR)
+            return v
 
-        // @hasField(T, name): check field existence
-        if str_eq(name, "hasField") != 0 {
-            ti := type_of(ast_a(args));
-            fn_node := ast_b(args);
-            fn_name := istr_get(ast_a(fn_node));  // field name expression
-            exists := ti_has_field(ti, fn_name);
-            v := new_ir_var("_hasf", TI_BOOL);
-            emit(IR_CONST, v, exists, 0, 0, TI_BOOL);
-            return v;
-        }
+            // @hasField(T, name): check field existence
+        if str_eq(name, "hasField") != 0:
+            ti := type_of(ast_a(args))
+            fn_node := ast_b(args)
+            fn_name := istr_get(ast_a(fn_node))  // field name expression
+            exists := ti_has_field(ti, fn_name)
+            v := new_ir_var("_hasf", TI_BOOL)
+            emit(IR_CONST, v, exists, 0, 0, TI_BOOL)
+            return v
 
-        // @field(T, name): get field offset
-        if str_eq(name, "field") != 0 {
-            ti := type_of(ast_a(args));
-            fn_node := ast_b(args);
-            fn_name := istr_get(ast_a(fn_node));
-            off := ti_field_offset(ti, fn_name);
-            v := new_ir_var("_fldoff", TI_INT);
-            emit(IR_CONST, v, off, 0, 0, TI_INT);
-            return v;
-        }
+            // @field(T, name): get field offset
+        if str_eq(name, "field") != 0:
+            ti := type_of(ast_a(args))
+            fn_node := ast_b(args)
+            fn_name := istr_get(ast_a(fn_node))
+            off := ti_field_offset(ti, fn_name)
+            v := new_ir_var("_fldoff", TI_INT)
+            emit(IR_CONST, v, off, 0, 0, TI_INT)
+            return v
 
-        // @typeInfo(T): build type info struct
-        if str_eq(name, "typeInfo") != 0 {
-            ti := type_of(ast_a(args));
-            info_ni := build_type_info(ti);  // store in compile-time table
-            v := new_ir_var("_tinfo", TI_INT);
-            emit(IR_CONST, v, info_ni, 0, 0, TI_INT);
-            return v;
-        }
+            // @typeInfo(T): build type info struct
+        if str_eq(name, "typeInfo") != 0:
+            ti := type_of(ast_a(args))
+            info_ni := build_type_info(ti)  // store in compile-time table
+            v := new_ir_var("_tinfo", TI_INT)
+            emit(IR_CONST, v, info_ni, 0, 0, TI_INT)
+            return v
 
-        // @comptime(expr): invoke interpreter
-        if str_eq(name, "comptime") != 0 {
-            inner := ast_a(args);
-            // Generate IR for inner expr and evaluate via interpreter
-            inner_var := gen_expr(inner);
-            // Note: IR_CONST vars can be read directly. For complex exprs,
-            // the interpreter would evaluate them. For now, just gen the inner expr.
-            return inner_var;
-        }
+            // @comptime(expr): invoke interpreter
+        if str_eq(name, "comptime") != 0:
+            inner := ast_a(args)
+                // Generate IR for inner expr and evaluate via interpreter
+            inner_var := gen_expr(inner)
+                // Note: IR_CONST vars can be read directly. For complex exprs,
+                // the interpreter would evaluate them. For now, just gen the inner expr.
+            return inner_var
 
-        // @inline(fn): emit IR_INLINE hint
-        if str_eq(name, "inline") != 0 {
-            fn_var := gen_expr(ast_a(args));
-            emit(IR_INLINE, -1, fn_var, 0, 0, 0);
-            return fn_var;
-        }
+            // @inline(fn): emit IR_INLINE hint
+        if str_eq(name, "inline") != 0:
+            fn_var := gen_expr(ast_a(args))
+            emit(IR_INLINE, -1, fn_var, 0, 0, 0)
+            return fn_var
 
-        // @no_bounds_check: emit annotation
-        if str_eq(name, "no_bounds_check") != 0 {
-            emit(IR_NO_BOUNDS_CHECK, -1, 0, 0, 0, 0);
-            return -1;
-        }
+            // @no_bounds_check: emit annotation
+        if str_eq(name, "no_bounds_check") != 0:
+            emit(IR_NO_BOUNDS_CHECK, -1, 0, 0, 0, 0)
+            return -1
 
-        // @fast: emit annotation
-        if str_eq(name, "fast") != 0 {
-            emit(IR_FAST, -1, 0, 0, 0, 0);
-            return -1;
-        }
+            // @fast: emit annotation
+        if str_eq(name, "fast") != 0:
+            emit(IR_FAST, -1, 0, 0, 0, 0)
+            return -1
 
-        return -1;
-    }
+        return -1
 ```
 
 - [ ] **Step 2: Add helper functions for type metadata**
@@ -318,39 +307,47 @@ At the top of the file or in a helper section, add:
 
 ```core
 // Type size lookup
-fn type_size(ti: int) -> int {
-    if ti == TI_INT { return 8; }
-    if ti == TI_FLOAT { return 8; }
-    if ti == TI_BOOL { return 1; }
-    if ti == TI_CHAR { return 4; }
-    if ti == TI_STR { return 8; }  // pointer
-    if ti == TI_UNIT { return 0; }
+fn type_size(ti: int) -> int:
+    if ti == TI_INT:
+        return 8
+    if ti == TI_FLOAT:
+        return 8
+    if ti == TI_BOOL:
+        return 1
+    if ti == TI_CHAR:
+        return 4
+    if ti == TI_STR:
+        return 8
+    // pointer
+    if ti == TI_UNIT:
+        return 0
     // Struct: sum field sizes
     // For now, return 8 as default
-    return 8;
-}
+    return 8
 
 // Type alignment lookup
-fn type_align(ti: int) -> int {
-    if ti == TI_INT { return 8; }
-    if ti == TI_FLOAT { return 8; }
-    if ti == TI_BOOL { return 1; }
-    if ti == TI_CHAR { return 4; }
-    if ti == TI_STR { return 8; }
-    return 8;
-}
+fn type_align(ti: int) -> int:
+    if ti == TI_INT:
+        return 8
+    if ti == TI_FLOAT:
+        return 8
+    if ti == TI_BOOL:
+        return 1
+    if ti == TI_CHAR:
+        return 4
+    if ti == TI_STR:
+        return 8
+    return 8
 
 // Check if type has a field
-fn ti_has_field(ti: int, name: string) -> int {
+fn ti_has_field(ti: int, name: string) -> int:
     // Search struct fields by name
     // For now, return 0 (false) — struct field lookup to be implemented
-    return 0;
-}
+    return 0
 
 // Get field offset
-fn ti_field_offset(ti: int, name: string) -> int {
-    return 0;  // placeholder
-}
+fn ti_field_offset(ti: int, name: string) -> int:
+    return 0  // placeholder
 ```
 
 - [ ] **Step 3: Verify IR gen**
@@ -465,63 +462,93 @@ jj commit src/arch/linux/ld/instr.cr src/arch/linux/ld/sizes.cr -m "feat: ELF ba
 ```core
 // @ builtins test suite
 
-fn test_sizeof_int() -> int {
-    sz := @sizeOf(int);
+fn test_sizeof_int() -> int:
+    sz := @sizeOf(int)
     // @sizeOf(int) should return 8 on x86-64
-    if sz != 8 { return 1; }
-    return 0;
-}
+    if sz != 8:
+        return 1
+    return 0
 
-fn test_sizeof_bool() -> int {
-    sz := @sizeOf(bool);
-    if sz != 1 { return 1; }
-    return 0;
-}
+fn test_sizeof_bool() -> int:
+    sz := @sizeOf(bool)
+    if sz != 1:
+        return 1
+    return 0
 
-fn test_alignof_int() -> int {
-    al := @alignOf(int);
-    if al != 8 { return 1; }
-    return 0;
-}
+fn test_alignof_int() -> int:
+    al := @alignOf(int)
+    if al != 8:
+        return 1
+    return 0
 
 // Struct type for field tests
-struct Point { x: int, y: int }
+struct Point:
+    x: int, y: int
 
-fn test_sizeof_struct() -> int {
-    sz := @sizeOf(Point);
-    if sz < 8 { return 1; }  // at least 2 ints
-    return 0;
-}
+fn test_sizeof_struct() -> int:
+    sz := @sizeOf(Point)
+    if sz < 8:
+        return 1
+    // at least 2 ints
+    return 0
 
-fn test_no_bounds_check() -> int {
-    @no_bounds_check;
-    return 0;  // just verifies it compiles
-}
+fn test_no_bounds_check() -> int:
+    @no_bounds_check
+    return 0  // just verifies it compiles
 
-fn test_inline_hint() -> int {
-    fn add(a: int, b: int) -> int { return a + b; }
-    result := @inline(add)(3, 4);
-    if result != 7 { return 1; }
-    return 0;
-}
+fn test_inline_hint() -> int:
+    fn add(a: int, b: int) -> int:
+        return a + b
+    result := @inline(add)(3, 4)
+    if result != 7:
+        return 1
+    return 0
 
-fn test_fields_basic() -> int {
-    flds := @fields(Point);
-    if str_len(flds) < 4 { return 1; }  // at least contains field names
-    return 0;
-}
+fn test_fields_basic() -> int:
+    flds := @fields(Point)
+    if str_len(flds) < 4:
+        return 1
+    // at least contains field names
+    return 0
 
-fn main() -> int {
-    r1 := test_sizeof_int();  if r1 != 0 { print("FAIL sizeof_int: "); println(int_str(r1)); return r1; }
-    r2 := test_sizeof_bool();  if r2 != 0 { print("FAIL sizeof_bool: "); println(int_str(r2)); return r2; }
-    r3 := test_alignof_int();  if r3 != 0 { print("FAIL alignof_int: "); println(int_str(r3)); return r3; }
-    r4 := test_sizeof_struct();  if r4 != 0 { print("FAIL sizeof_struct: "); println(int_str(r4)); return r4; }
-    r5 := test_no_bounds_check();  if r5 != 0 { print("FAIL no_bounds_check: "); println(int_str(r5)); return r5; }
-    r6 := test_inline_hint();  if r6 != 0 { print("FAIL inline: "); println(int_str(r6)); return r6; }
-    r7 := test_fields_basic();  if r7 != 0 { print("FAIL fields: "); println(int_str(r7)); return r7; }
-    println("ALL PASS");
-    return 0;
-}
+fn main() -> int:
+    r1 := test_sizeof_int()
+    if r1 != 0:
+        print("FAIL sizeof_int: ")
+        println(int_str(r1))
+        return r1
+    r2 := test_sizeof_bool()
+    if r2 != 0:
+        print("FAIL sizeof_bool: ")
+        println(int_str(r2))
+        return r2
+    r3 := test_alignof_int()
+    if r3 != 0:
+        print("FAIL alignof_int: ")
+        println(int_str(r3))
+        return r3
+    r4 := test_sizeof_struct()
+    if r4 != 0:
+        print("FAIL sizeof_struct: ")
+        println(int_str(r4))
+        return r4
+    r5 := test_no_bounds_check()
+    if r5 != 0:
+        print("FAIL no_bounds_check: ")
+        println(int_str(r5))
+        return r5
+    r6 := test_inline_hint()
+    if r6 != 0:
+        print("FAIL inline: ")
+        println(int_str(r6))
+        return r6
+    r7 := test_fields_basic()
+    if r7 != 0:
+        print("FAIL fields: ")
+        println(int_str(r7))
+        return r7
+    println("ALL PASS")
+    return 0
 ```
 
 - [ ] **Step 2: Type-check the test**

@@ -39,11 +39,10 @@ def main() -> int:
         )
         (project / "_import.cr").write_text("import helper\n", encoding="utf-8")
         (project / "helper.cr").write_text(
-            "fn imported_result() -> int { return 23; }\n", encoding="utf-8"
+            "fn imported_result() -> int:\n    return 23\n", encoding="utf-8"
         )
         (project / "main.cr").write_text(
-            "fn runtime_symbol_visible() -> string { return g_heap_ptr; }\n"
-            "fn main() -> int { return imported_result(); }\n",
+            "fn runtime_symbol_visible() -> string:\n    return g_heap_ptr\nfn main() -> int:\n    return imported_result()\n",
             encoding="utf-8",
         )
 
@@ -75,7 +74,7 @@ def main() -> int:
         )
 
         (project / "helper.cr").write_text(
-            "fn imported_result() -> int { return 25; }\n", encoding="utf-8"
+            "fn imported_result() -> int:\n    return 25\n", encoding="utf-8"
         )
         rebuilt = run_corec(["build", ".", "--static", "-O", "0"], project)
         if rebuilt.returncode != 0:
@@ -95,7 +94,7 @@ def main() -> int:
         unnamed = TEST_BUILD / "unnamed-directory"
         unnamed.mkdir()
         (unnamed / "main.cr").write_text(
-            "fn main() -> int { return 24; }\n", encoding="utf-8"
+            "fn main() -> int:\n    return 24\n", encoding="utf-8"
         )
         unnamed_result = run_corec(["build", ".", "--static", "-O", "0"], unnamed)
         unnamed_output = unnamed / "unnamed-directory"
@@ -117,7 +116,7 @@ def main() -> int:
         print("[PASS] an unnamed `.` project falls back to its directory name")
 
         (TEST_BUILD / "main.cr").write_text(
-            "fn main() -> int { return 99; }\n", encoding="utf-8"
+            "fn main() -> int:\n    return 99\n", encoding="utf-8"
         )
         missing = run_corec(["check", "missing-project"], TEST_BUILD)
         if missing.returncode == 0:

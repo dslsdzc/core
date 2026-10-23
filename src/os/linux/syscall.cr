@@ -39,16 +39,18 @@
 // ── syscall3(num, a, b, c) —— 三个非编号参数 ──
 // 转位（rax ← rdi, rdi ← rsi, rsi ← rdx, rdx ← rcx）后 0F 05；返回值 rax
 // 按 d 的类型回存（int 槽 / binary64 槽，见 e2_store_ret）。返回新 cp。
-fn sys_syscall3_stub(buf: string, pos: int, cp: int, d: int) -> int {
-    cp = cp + e2_mov(buf, pos+cp, 0, 7);
-    cp = cp + e2_mov(buf, pos+cp, 7, 6);
-    cp = cp + e2_mov(buf, pos+cp, 6, 2);
-    cp = cp + e2_mov(buf, pos+cp, 2, 1);
+fn sys_syscall3_stub(buf: string, pos: int, cp: int, d: int) -> int:
+    cp = cp + e2_mov(buf, pos+cp, 0, 7)
+    cp = cp + e2_mov(buf, pos+cp, 7, 6)
+    cp = cp + e2_mov(buf, pos+cp, 6, 2)
+    cp = cp + e2_mov(buf, pos+cp, 2, 1)
     // syscall: 2-byte 0x0F 0x05
-    e2_w8(buf, pos+cp, 15); e2_w8(buf, pos+cp+1, 5); cp = cp + 2;
-    if d >= 0 { cp = cp + e2_store_ret(buf, pos+cp, d); }
-    return cp;
-}
+    e2_w8(buf, pos+cp, 15)
+    e2_w8(buf, pos+cp+1, 5)
+    cp = cp + 2
+    if d >= 0:
+        cp = cp + e2_store_ret(buf, pos+cp, d)
+    return cp
 
 // ── syscall4(num, a, b, c, d) —— 第四个非编号参数经 r10 ──
 // syscall4(num, a, b, c, d)——第 4 参 d 经 r10 传递（x86-64 syscall
@@ -57,14 +59,16 @@ fn sys_syscall3_stub(buf: string, pos: int, cp: int, d: int) -> int {
 // rcx（ir_cnt=3）、第 5 参放 r8（ir_cnt=4），syscall 读 r10 = 残留
 // 垃圾 → 内核 EFAULT 或写错地址 → 退出码传播不可靠。
 // 返回新 cp。
-fn sys_syscall4_stub(buf: string, pos: int, cp: int, d: int) -> int {
-    cp = cp + e2_mov(buf, pos+cp, 0, 7);   // rax = rdi — syscall number
-    cp = cp + e2_mov(buf, pos+cp, 7, 6);   // rdi = rsi — arg1
-    cp = cp + e2_mov(buf, pos+cp, 6, 2);   // rsi = rdx — arg2
-    cp = cp + e2_mov(buf, pos+cp, 2, 1);   // rdx = rcx — arg3
-    cp = cp + e2_mov(buf, pos+cp, 10, 8);  // r10 = r8  — arg4
+fn sys_syscall4_stub(buf: string, pos: int, cp: int, d: int) -> int:
+    cp = cp + e2_mov(buf, pos+cp, 0, 7)   // rax = rdi — syscall number
+    cp = cp + e2_mov(buf, pos+cp, 7, 6)   // rdi = rsi — arg1
+    cp = cp + e2_mov(buf, pos+cp, 6, 2)   // rsi = rdx — arg2
+    cp = cp + e2_mov(buf, pos+cp, 2, 1)   // rdx = rcx — arg3
+    cp = cp + e2_mov(buf, pos+cp, 10, 8)  // r10 = r8  — arg4
     // syscall: 2-byte 0x0F 0x05
-    e2_w8(buf, pos+cp, 15); e2_w8(buf, pos+cp+1, 5); cp = cp + 2;
-    if d >= 0 { cp = cp + e2_store_ret(buf, pos+cp, d); }
-    return cp;
-}
+    e2_w8(buf, pos+cp, 15)
+    e2_w8(buf, pos+cp+1, 5)
+    cp = cp + 2
+    if d >= 0:
+        cp = cp + e2_store_ret(buf, pos+cp, d)
+    return cp

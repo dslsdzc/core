@@ -41,93 +41,98 @@ VALUE_CASES = [
     (
         "struct: 乱序字段按名字绑定（①主判据；修复前静默得 1122）",
         """
-struct P { a: int, b: int }
-fn main() -> int {
-    p := P{b: 11, a: 22};
-    return p.a * 100 + p.b;
-}
+struct P:
+    a: int, b: int
+fn main() -> int:
+    p := P{b= 11, a= 22}
+    return p.a * 100 + p.b
 """,
         2211,
     ),
     (
         "struct: 乱序 + 求值顺序 = 源序（副作用判据）",
         """
-g : int, mut = 0;
-fn nx() -> int { g = g + 1; return g; }
-struct P { a: int, b: int }
-fn main() -> int {
-    p := P{b: nx(), a: nx()};
-    return p.a * 100 + p.b;
-}
+g : int, mut = 0
+fn nx() -> int:
+    g = g + 1
+    return g
+struct P:
+    a: int, b: int
+fn main() -> int:
+    p := P{b= nx(), a= nx()}
+    return p.a * 100 + p.b
 """,
         201,
     ),
     (
         "struct: 三字段逆序（错位累积面）",
         """
-struct P { a: int, b: int, c: int }
-fn main() -> int {
-    p := P{c: 3, b: 2, a: 1};
-    return p.a * 100 + p.b * 10 + p.c;
-}
+struct P:
+    a: int, b: int, c: int
+fn main() -> int:
+    p := P{c= 3, b= 2, a= 1}
+    return p.a * 100 + p.b * 10 + p.c
 """,
         123,
     ),
     (
         "struct: 乱序 + 复合字段值（嵌套字面量）",
         """
-struct Q { u: int, v: int }
-struct P { a: int, b: Q }
-fn main() -> int {
-    p := P{b: Q{u: 2, v: 3}, a: 1};
-    return p.a * 100 + p.b.u * 10 + p.b.v;
-}
+struct Q:
+    u: int, v: int
+struct P:
+    a: int, b: Q
+fn main() -> int:
+    p := P{b= Q{u= 2, v= 3}, a= 1}
+    return p.a * 100 + p.b.u * 10 + p.b.v
 """,
         123,
     ),
     (
         "generic struct: 乱序字段 + 泛型参数绑定（Pair[T]）",
         """
-struct Pair[T] { left: T, right: T }
-fn main() -> int {
-    p := Pair { right = 2, left = 1 };
-    return p.left * 10 + p.right;
-}
+struct Pair[T]:
+    left: T, right: T
+fn main() -> int:
+    p := Pair { right = 2, left = 1 }
+    return p.left * 10 + p.right
 """,
         12,
     ),
     (
         "generic struct: 双参数、字段序 ≠ 参数序（实参须按参数声明序）",
         """
-struct Sw[A, B] { y: B, x: A }
-fn main() -> int {
-    s := Sw { x = 1, y = 2 };
-    return s.x * 10 + s.y;
-}
+struct Sw[A, B]:
+    y: B, x: A
+fn main() -> int:
+    s := Sw { x = 1, y = 2 }
+    return s.x * 10 + s.y
 """,
         12,
     ),
     (
         "generic fn body: 乱序字面量经 monomorph 克隆仍按名字绑定（名字随克隆保留）",
         """
-struct P { a: int, b: int }
-fn f[T](x: T) -> int {
-    p := P{b: 2, a: x};
-    return p.a * 10 + p.b;
-}
-fn main() -> int { return f(1); }
+struct P:
+    a: int, b: int
+fn f[T](x: T) -> int:
+    p := P{b= 2, a= x}
+    return p.a * 10 + p.b
+fn main() -> int:
+    return f(1)
 """,
         12,
     ),
     (
         "嵌套泛型应用字段类型 Box[Box[int]]（既存载荷写坏回归——修复前假拒）",
         """
-struct Box[T] { val: T }
-struct Holder { b: Box[Box[int]] }
-fn main() -> int {
-    h := Holder{b: Box{val: Box{val: 7}}};
-    return h.b.val.val;
-}
+struct Box[T]:
+    val: T
+struct Holder:
+    b: Box[Box[int]]
+fn main() -> int:
+    h := Holder{b= Box{val= Box{val= 7}}}
+    return h.b.val.val
 """,
         7,
     ),
@@ -139,76 +144,75 @@ CHECK_CASES = [
     (
         "① 未知字段 + 缺字段（TS02 + TS01）",
         """
-struct P { a: int, b: int }
-fn main() -> int {
-    p := P{c: 1, a: 2};
-    return 0;
-}
+struct P:
+    a: int, b: int
+fn main() -> int:
+    p := P{c= 1, a= 2}
+    return 0
 """,
         "TS02",
     ),
     (
         "① 重复字段（TS04）",
         """
-struct P { a: int, b: int }
-fn main() -> int {
-    p := P{a: 1, a: 2, b: 3};
-    return 0;
-}
+struct P:
+    a: int, b: int
+fn main() -> int:
+    p := P{a= 1, a= 2, b= 3}
+    return 0
 """,
         "TS04",
     ),
     (
         "① 缺字段（TS01）",
         """
-struct P { a: int, b: int }
-fn main() -> int {
-    p := P{a: 1};
-    return 0;
-}
+struct P:
+    a: int, b: int
+fn main() -> int:
+    p := P{a= 1}
+    return 0
 """,
         "TS01",
     ),
     (
         "② 字段类型与声明不符（TS03；b: int 收 string）",
         """
-struct P { a: int, b: int }
-fn main() -> int {
-    p := P{a: 1, b: "x"};
-    return 0;
-}
+struct P:
+    a: int, b: int
+fn main() -> int:
+    p := P{a= 1, b= "x"}
+    return 0
 """,
         "TS03",
     ),
     (
         "② 嵌套结构体字段错型（TS03；b: Q 收 int）",
         """
-struct Q { u: int, v: int }
-struct P { a: int, b: Q }
-fn main() -> int {
-    p := P{a: 1, b: 3};
-    return 0;
-}
+struct Q:
+    u: int, v: int
+struct P:
+    a: int, b: Q
+fn main() -> int:
+    p := P{a= 1, b= 3}
+    return 0
 """,
         "TS03",
     ),
     (
         "③ 数组元素异质（TK02）",
         """
-fn main() -> int {
-    a := [1, "x", 3];
-    return 0;
-}
+fn main() -> int:
+    a := [1, "x", 3]
+    return 0
 """,
         "TK02",
     ),
     (
         "③ 数组元素异质：嵌套 vs 扁平（TK02）",
         """
-fn main() -> int {
-    a := [[1, 2], 3];
-    return 0;
-}
+fn main() -> int:
+    a := [[1, 2], 3]
+    return 0
 """,
         "TK02",
     ),
@@ -216,52 +220,60 @@ fn main() -> int {
     (
         "正控：乱序但名/型/完整性全对 → 接受",
         """
-struct P { a: int, b: int }
-fn main() -> int {
-    p := P{b: 11, a: 22};
-    return p.a * 100 + p.b;
-}
+struct P:
+    a: int, b: int
+fn main() -> int:
+    p := P{b= 11, a= 22}
+    return p.a * 100 + p.b
 """,
         "ACCEPT",
     ),
     (
         "正控：泛型函数体内泛型参数值赋给确定类型字段（不得假拒）",
         """
-struct P { a: int, b: int }
-fn f[T](x: T) -> int {
-    p := P{a: 1, b: x};
-    return p.a * 100 + p.b;
-}
-fn main() -> int { return f(7); }
+struct P:
+    a: int, b: int
+fn f[T](x: T) -> int:
+    p := P{a= 1, b= x}
+    return p.a * 100 + p.b
+fn main() -> int:
+    return f(7)
 """,
         "ACCEPT",
     ),
     (
         "正控：同质数组 + 嵌套同形数组 → 接受",
         """
-fn main() -> int {
-    a := [1, 2, 3];
-    b := [[1, 2], [3, 4]];
-    return a[0] + b[1][1];
-}
+fn main() -> int:
+    a := [1, 2, 3]
+    b := [[1, 2], [3, 4]]
+    return a[0] + b[1][1]
 """,
         "ACCEPT",
     ),
     (
         "正控：嵌套泛型应用在**返回位**（既存载荷写坏回归——修复前假拒 TF01）",
         """
-struct Box[T] { val: T }
-fn mk() -> Box[Box[int]] { return Box{val: Box{val: 1}}; }
-fn main() -> int { b := mk(); return b.val.val; }
+struct Box[T]:
+    val: T
+fn mk() -> Box[Box[int]]:
+    return Box{val= Box{val= 1}}
+fn main() -> int:
+    b := mk()
+    return b.val.val
 """,
         "ACCEPT",
     ),
     (
         "负控：嵌套泛型应用**错型**仍拒（两趟修复不得引入假阴性——评审 Important #1 的反面）",
         """
-struct Box[T] { val: T }
-struct P { b: Box[Box[int]] }
-fn main() -> int { p := P{b: Box{val: Box{val: "s"}}}; return 0; }
+struct Box[T]:
+    val: T
+struct P:
+    b: Box[Box[int]]
+fn main() -> int:
+    p := P{b= Box{val= Box{val= "s"}}}
+    return 0
 """,
         "TS03",
     ),

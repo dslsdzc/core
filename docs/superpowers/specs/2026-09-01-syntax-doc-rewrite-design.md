@@ -1,4 +1,4 @@
-# 语法文档重写设计（language-syntax.md）
+# 语法文档重写设计（`language-syntax.md`）
 
 日期：2026-09-01
 状态：已批准（brainstorming 逐节确认）

@@ -116,142 +116,137 @@ def case_run(name, source, expect_rc):
 # ─── 正控：确定不能走完的体（修复前全报 TF01，修复后接受）───
 
 POS_LOOP_IF_RETURN = """
-fn f() -> int {
-    loop {
-        if 1 > 0 { return 5; }
-    }
-}
+fn f() -> int:
+    loop:
+        if 1 > 0:
+            return 5
 """
 
-POS_LOOP_BARE_RETURN = "fn f() -> int { loop { return 5; } }\n"
+POS_LOOP_BARE_RETURN = "fn f() -> int:\n    loop:\n        return 5\n"
 
 # 嵌套 loop：内层 break 归内层 ⇒ 外层无直系 break ⇒ 永不落空
-POS_NESTED_LOOP = "fn f() -> int { loop { loop { break; } } }\n"
+POS_NESTED_LOOP = "fn f() -> int:\n    loop:\n        loop:\n            break\n"
 
 # if-else 双 diverges（两支皆无 break 的 loop ⇒ 两支类型均 unit ⇒ 修复前 TF01）
 POS_IF_ELSE_DIVERGE = """
-fn f(c: int) -> int {
-    if c > 0 { loop { if c > 100 { return 1; } } }
-    else { loop { return 2; } }
-}
+fn f(c: int) -> int:
+    if c > 0:
+        loop:
+            if c > 100:
+                return 1
+    else:
+        loop:
+            return 2
 """
 
 # 语句包裹（`loop {...};` = EXPR_STMT(EXPR_LOOP)）
-POS_STMT_WRAPPED = "fn f() -> int { loop { return 5; }; }\n"
+POS_STMT_WRAPPED = "fn f() -> int:\n    loop:\n        return 5\n"
 
 # alloc 的模型一致声明（string）——与本组同族：真错面的「正确写法」
-POS_ALLOC_STRING = "fn f() -> string { b := alloc(8); return b; }\n"
+POS_ALLOC_STRING = "fn f() -> string:\n    b := alloc(8)\n    return b\n"
 
 # 遍历分支的牙（各自钉住 break 扫描的一个下钻面——删除对应分支即本档转红）：
 # · match 臂链（EXPR_ARM 链 ≠ 连续槽）：臂内无 break ⇒ 外 loop 不落空
 POS_MATCH_NO_BREAK = """
-fn f(x: int) -> int {
-    loop {
-        match x {
-            0 => { return 1; },
-            _ => { return 2; }
-        }
-    }
-}
+fn f(x: int) -> int:
+    loop:
+        match x:
+            0 =>:
+                return 1
+            ,
+            _ =>:
+                return 2
 """
 
 # · 连续 wrapper 段（EXPR_ARRAY）+ LET + 索引
 POS_ARRAY_NO_BREAK = """
-fn f() -> int {
-    loop {
-        a := [1, 2, 3];
-        if a[0] > 0 { return 1; }
-    }
-}
+fn f() -> int:
+    loop:
+        a := [1, 2, 3]
+        if a[0] > 0:
+            return 1
 """
 
 # · 调用链（EXPR_CALL）与赋值/比较
 POS_LOOP_WITH_CALL = """
-fn g(x: int) -> int { return x; }
-fn f() -> int {
-    loop {
-        if g(1) > 0 { return 5; }
-    }
-}
+fn g(x: int) -> int:
+    return x
+fn f() -> int:
+    loop:
+        if g(1) > 0:
+            return 5
 """
 
 # 登记边界（**本批显式登记，非静默**）：非落空体内 return 的**值类型**不核对——
 # checker 现模型无「逐 return 核对」面（站点 5 只看块末类型），本条只把「无 break 的
 # loop 收尾」从 TF01 误报中解放。修复前该形因「末语句类型 = unit」被**误拒**；修复后
 # 按新口径接受（loop 永不落空）。若未来引入逐 return 核对，本条期望随之改为拒。
-POS_BOUNDARY_NO_RETURN_VALUE_CHECK = "fn f() -> int { loop { return \"x\"; } }\n"
+POS_BOUNDARY_NO_RETURN_VALUE_CHECK = "fn f() -> int:\n    loop:\n        return \"x\"\n"
 
 # ─── R2 P6 Task 4a（E-11）：`-> never` 调用的返回型透传（TF01 面）───
 # 改前（RED 实测）：`return boom()` 的块类型 = 调用推断 = unit（声明注册域守卫
 #   checker.cr:1491 把 NEVER 钳成 unit）⇒ `body_ti != TI_NEVER` 成立（是 unit）⇒
 #   误发 TF01；改后：调用推断 = never ⇒ 返回位豁免（checker.cr:2234）⇒ 接受。
-NEVER_RETURN_SRC = ("fn boom() -> never { loop { } }\n"
-                    "fn f() -> int { return boom(); }\n"
-                    "fn main() -> int { return f(); }\n")
+NEVER_RETURN_SRC = ("fn boom() -> never:\n    loop:\nfn f() -> int:\n    return boom()\nfn main() -> int:\n    return f()\n")
 
 # 变量传播面（与 test_iface_ops 的重钉项 t6_S1_never_unit 同源）：`x` 绑定 = never
 # ⇒ `return x` 的块类型 = never ⇒ 返回位豁免（改前 = unit ⇒ 误发 TF01）。
-NEVER_PROPAGATE_SRC = ("fn boom() -> never { loop { } }\n"
-                       "fn main() -> int { x := boom(); return x; }\n")
+NEVER_PROPAGATE_SRC = ("fn boom() -> never:\n    loop:\nfn main() -> int:\n    x := boom()\n    return x\n")
 
 # 端到端（发射面回归）：分支不执行 ⇒ 运行 rc=42；改前 build rc=1（TA02 在硬名单 ⇒ 无产物）。
-RUN_NEVER_DEAD_BRANCH = ("fn boom() -> never { loop { } }\n"
-                         "fn main() -> int { if 1 > 2 { x : int = boom(); }\n"
-                         " return 42; }\n")
+RUN_NEVER_DEAD_BRANCH = ("fn boom() -> never:\n    loop:\nfn main() -> int:\n    if 1 > 2:\n        x : int = boom()\n    return 42\n")
 
 # ─── 负控：可落空的体（修复前报 TF01，修复后**必须仍拒**——静默接受洞的钉子）───
 
-NEG_FALLTHRU = "fn f() -> int { 1 + 1; }\n"
+NEG_FALLTHRU = "fn f() -> int:\n    1 + 1\n"
 
-NEG_LOOP_BREAK = "fn f() -> int { loop { if 1 > 0 { break; } } }\n"
+NEG_LOOP_BREAK = "fn f() -> int:\n    loop:\n        if 1 > 0:\n            break\n"
 
-NEG_IF_NO_ELSE = "fn f(c: int) -> int { if c > 0 { return 1; } }\n"
+NEG_IF_NO_ELSE = "fn f(c: int) -> int:\n    if c > 0:\n        return 1\n"
 
 # match 臂内 break：臂 = EXPR_ARM 链（非连续槽）——漏检即此处从「拒」变「接受」
 NEG_MATCH_BREAK = """
-fn f(x: int) -> int {
-    loop {
-        match x {
-            0 => { break; },
-            _ => { }
-        }
-    }
-}
+fn f(x: int) -> int:
+    loop:
+        match x:
+            0 =>:
+                break
+            ,
+            _ =>:
 """
 
 # 数组字面量（连续 wrapper 段）后 break——段扫描漏检即此处变「接受」
 NEG_ARRAY_BREAK = """
-fn f() -> int {
-    loop {
-        a := [1, 2, 3];
-        if a[0] > 0 { break; }
-    }
-}
+fn f() -> int:
+    loop:
+        a := [1, 2, 3]
+        if a[0] > 0:
+            break
 """
 
 # 嵌套 loop 之后仍有**直系** break ⇒ 可退出（截断只对「不下钻」，不得漏扫本层其余语句）
-NEG_NESTED_THEN_BREAK = "fn f() -> int { loop { loop { break; } break; } }\n"
+NEG_NESTED_THEN_BREAK = "fn f() -> int:\n    loop:\n        loop:\n            break\n        break\n"
 
 # while 保守面：不判 diverging（常量真条件不做分析）⇒ 落空 = 照旧 TF01。
 # 条件用 `c == true` 而非裸标识符：`while c {` 会被 parser 当**结构体字面量**
 # （parse_while_expr 缺 if 同款的 g_parse_no_struct_literal 守卫——既有面，本批不修，
 # 见报告 §登记）。
-NEG_WHILE = "fn f(c: bool) -> int { while c == true { break; } }\n"
+NEG_WHILE = "fn f(c: bool) -> int:\n    while c == true:\n        break\n"
 
 # 真错面：alloc → int 声明（类型洗白）——修复**不得**把这条一起「修掉」
-NEG_ALLOC_INT_WASH = "fn f() -> int { b := alloc(8); return b; }\n"
+NEG_ALLOC_INT_WASH = "fn f() -> int:\n    b := alloc(8)\n    return b\n"
 
 # ─── 端到端：接受面的语义不受影响 ───
 
 RUN_LOOP_NO_BREAK = """
-fn f() -> int {
-    i : ., mut = 0;
-    loop {
-        i = i + 1;
-        if i >= 3 { return i * 14; }
-    }
-}
-fn main() -> int { return f(); }
+fn f() -> int:
+    i : ., mut = 0
+    loop:
+        i = i + 1
+        if i >= 3:
+            return i * 14
+fn main() -> int:
+    return f()
 """
 
 

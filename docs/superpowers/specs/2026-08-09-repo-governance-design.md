@@ -5,7 +5,7 @@
 
 ## 1. 概述
 
-Core 的愿景是成为严肃系统语言（语义保鲜、内核路线、形式验证）——开发流程按**最终形态**立规，执行按**现状规模**宽松。治理模型参考 Rust/Linux：main 即 mainline，**任何人（含维护者）不得直推**，全部改动经 PR + 审查 + 合入门槛进入 main。
+Core 的愿景是成为严肃系统语言（语义保鲜、内核路线、形式验证）——开发流程按**最终形态**立规，执行按**现状规模**宽松。治理模型参考 Rust/Linux：`main` 即 mainline，**任何人（含维护者）不得直推**，全部改动经 PR + 审查 + 合入门槛进入 `main`。
 
 | 事实 | 值 |
 |---|---|
@@ -20,11 +20,11 @@ Core 的愿景是成为严肃系统语言（语义保鲜、内核路线、形式
 - **非对称**：唯一实际审查 = 你对 RhineIris PR 的单向把关；你的改动走 PR，合入经 **B 流程**（临时豁免，见 §3.3）
 - **愿景结构 + 现状执行**：规则按最终形态全立（将来贡献者增多规则自动生效）；执行上互审约定优先（**实测修正 2026-08-09**：GitHub 原生禁止作者批准自己的 PR——"自批兜底"不成立，维护者自有 PR 合入经 B 流程临时豁免，见 §3.3）
 - **机制限制（如实记录）**：GitHub 无原生"禁止以 main 为 base 创建 PR"开关——"PR 不能指向 main"由 **main 规则组合强制**（restrict pushes 仅 DslsDZC + required reviewers 仅 DslsDZC：指向 main 的 PR 无维护者批准无法合入）+ CONTRIBUTING 约定（PR 一律指向 develop）实现
-- **铁律机械执行**：CLAUDE.md 第 2 条（禁止 git、全面 jj）用 hook 硬拦截
+- **铁律机械执行**：`CLAUDE.md` 第 2 条（禁止 `git`、全面 `jj`）用 hook 硬拦截
 
-## 3. GitHub 侧：ruleset 最终清单（main / develop 两个 ruleset）
+## 3. GitHub 侧：ruleset 最终清单（`main` / `develop` 两个 ruleset）
 
-### 3.1 main ruleset（目标：main）——只有维护者能触碰
+### 3.1 `main` ruleset（目标：`main`）：维护者独占
 
 | # | 规则 | 配置 |
 |---|---|---|
@@ -36,7 +36,7 @@ Core 的愿景是成为严肃系统语言（语义保鲜、内核路线、形式
 | M6 | 管理员无绕过 | 规则对仓库管理员同样生效（关闭 admin bypass——否则 M1 形同虚设） |
 | M7 | Protected tags | `release/*` 标签禁强推、禁删除 |
 
-### 3.2 develop ruleset（目标：develop 集成分支）——日常开发入口
+### 3.2 `develop` ruleset（目标：`develop` 集成分支）：日常开发入口
 
 | # | 规则 | 配置 |
 |---|---|---|
@@ -54,18 +54,18 @@ Core 的愿景是成为严肃系统语言（语义保鲜、内核路线、形式
 
 ### 3.3 机制限制与过渡
 
-- **GitHub 无原生"禁止以 main 为 base 创建 PR"开关**：M4（required reviewers 仅 DslsDZC）使指向 main 的 PR 无法被非你合入——"PR 不能指向 main"以规则兜底 + CONTRIBUTING 约定（PR 一律指向 develop）实现
+- **GitHub 无原生"禁止以 main 为 base 创建 PR"开关**：`M4`（`required reviewers` 仅 DslsDZC）使指向 `main` 的 PR 无法由维护者以外者合入——"PR 不能指向 `main`"以规则兜底 + `CONTRIBUTING` 约定（PR 一律指向 `develop`）实现
 - **落地过渡**：两个 ruleset 先以 **evaluate（试运行）模式**启用，观察确认无干扰后转 active
 - **2026-08-09 落地偏差（免费计划限制，已实测）**：
   - `enforcement: evaluate` 仅 Enterprise 可用——免费计划已直接以 **active** 创建（无试运行期，规则即刻生效）
   - `merge_queue` 规则被 API 拒绝（"Invalid rule 'merge_queue'" 空原因）——**降级为手动合入**：审批 + CI 状态检查门槛保留（D1/D3/D8 的自动化串行部分由人工点击合入替代）
-  - pull_request 参数 schema 实测：5 个必填布尔（含 `require_code_owner_review`）、`allowed_merge_methods: ["squash"]` 强制 squash-only
+  - `pull_request` 参数 schema 实测：5 个必填布尔（含 `require_code_owner_review`）、`allowed_merge_methods: ["squash"]` 强制 squash-only
   - `required_status_checks` 参数数组字段名是 `required_status_checks`（非 `checks`）
   - **2026-08-09 实测（流程验证）**：
     - GitHub **原生禁止作者批准自己的 PR**（"Can not approve your own pull request"）——"自批兜底"前提不成立；管理员强制合并亦被 bypass_actors 空集拦截
     - **B 流程**（既定路径）：维护者自有 PR 合入 = 临时禁用对应 ruleset → squash 合并 → 恢复 active（PR #26 首次执行，2026-08-09）
     - RhineIris 的审批要计入 required approvals 需 write 权限（fork 贡献者审批不满足要求）——待决策是否授予 collaborator
-    - CI 工作流注册冻结持续（GitHub 侧，注册表含已删文件/缺新文件）——develop 的 required_status_checks 暂移除，注册自愈后回填
+    - CI 工作流注册冻结持续（GitHub 侧，注册表含已删文件/缺新文件）——`develop` 的 `required_status_checks` 暂移除，注册自愈后回填
   - M7（release/* 标签保护）与 D7（文件路径限制）未落地：脚本与已建 ruleset 均未含（免费计划可用但暂缓），列入后续项
 
 ## 4. GitHub 侧：落地方式
@@ -86,9 +86,9 @@ src/ci/scripts/run-build-from-ci.sh   ← GHA 入口
 src/ci/scripts/setup-environment.sh   ← 环境转储
 ```
 
-- 双层触发：`pull_request`（PR 快速层：check / bootstrap-tests / selfhost-tests）+ `merge_group`（完整层：suite / full-bootstrap）——PR 层 job 在 merge 下也运行（Rust 的 PR-jobs-auto-register 语义）
-- 砍掉：citool（静态矩阵内联）、全部 install-*.sh（Core 零工具链依赖）、docker/、artifacts
-- 已知风险（如实标记）：`full-bootstrap` 撞 corec2 tokenizer 死循环（TODO 自举阻塞项）+ 预存 bug 1（1GiB bump heap 峰值）——完整层按 TODO 逐个点亮；`opt-regress`（O0/O1 回归）留位
+- 双层触发：`pull_request`（PR 快速层：`check` / `bootstrap-tests` / `selfhost-tests`）+ `merge_group`（完整层：`suite` / `full-bootstrap`）——PR 层 job 在 merge 下也运行（Rust 的 PR-jobs-auto-register 语义）
+- 移除：`citool`（静态矩阵内联）、全部 `install-*.sh`（Core 零工具链依赖）、`docker/`、`artifacts`
+- 已知风险（如实标记）：`full-bootstrap` 触及 `corec2` tokenizer 死循环（TODO 自举阻塞项）+ 预存 bug 1（1GiB bump heap 峰值）——完整层按 TODO 逐个点亮；`opt-regress`（O0/O1 回归）留位
 - 本地验证：`CI_JOB_NAME=bootstrap-tests src/ci/run.sh` 端到端通过
 
 ## 6. 本地配置
@@ -101,7 +101,7 @@ src/ci/scripts/setup-environment.sh   ← 环境转储
 | settings.local.json 清理 | 移除 `Bash(git *)` 允许项 | 权限模型与 hook 一致 |
 | CLAUDE.md | 新增"版本控制流程"段（下述命令序列） | 文档与机制一致 |
 
-## 7. 新工作流（你）
+## 7. 新工作流（维护者）
 
 ```
 日常开发（feature → develop）：
@@ -121,15 +121,15 @@ gh pr create --base main --fill       # develop→main PR（required reviewers =
 
 ## 8. 验证清单（合入后端到端）
 
-- [ ] 直推 main 被拒（403）；推 feature 分支成功
-- [ ] 指向 main 的 PR（非你创建）无法被批准合入——required reviewers 仅 DslsDZC
-- [ ] develop→main 合并只有你执行成功
-- [ ] 你的 feature PR：B 流程（临时豁免）→ squash 合入 develop → 源分支自动删除
-- [ ] RhineIris fork PR：base=develop，完整流程，你审批后合入 develop
+- [ ] 直推 `main` 被拒（403）；推 `feature` 分支成功
+- [ ] 指向 `main` 的 PR（非维护者创建）无法被批准合入——`required reviewers` 仅 DslsDZC
+- [ ] `develop`→`main` 合并只有维护者执行成功
+- [ ] 维护者自有 `feature` PR：B 流程（临时豁免）→ squash 合入 `develop` → 源分支自动删除
+- [ ] RhineIris fork PR：`base=develop`，完整流程，维护者审批后合入 `develop`
 - [ ] 未签名提交的 PR 被拒（签名规则生效）；`jj log --no-graph -T 'signature'` 可见签名
-- [ ] 管理员账号直推 main 同样被拒（绕过已关闭）
+- [ ] 管理员账号直推 `main` 同样被拒（绕过已关闭）
 - [ ] `git` 命令被 hook 硬拦截；`jj` 一切正常
-- [ ] jj main protect 生效（rebase 移不动 main）
+- [ ] `jj` main protect 生效（rebase 移不动 `main`）
 - [ ] PR 层 CI 绿；完整层 job 状态如实标记
 
 ## 9. 社区协作基础设施（2026-08-09 补充）
@@ -158,8 +158,8 @@ gh pr create --base main --fill       # develop→main PR（required reviewers =
 ## 12. 当前状态
 
 -  CI 骨架：已实现（2026-08-09），本地验证通过，随首个 PR 上线
--  社区四件套：PR 模板 / CONTRIBUTING / SECURITY / CODE_OF_CONDUCT 已写（2026-08-09），随本 spec 首 PR 上线
+-  社区四件套：PR 模板 / `CONTRIBUTING` / `SECURITY` / `CODE_OF_CONDUCT` 已写（2026-08-09），随本 spec 首 PR 上线
 -  本地配置：jj protect / jj 签名（behavior=own）/ hook / settings 清理 / CLAUDE.md——全部落地（2026-08-09）
 -  `develop` 集成分支已创建并承载 PR #25
--  GitHub ruleset：**main-only-maintainer**（id 20601201）+ **develop-integration**（id 20601189）已创建并 active（2026-08-09）；gh TLS 间歇性故障期间以重试创建成功；squash-only（allowed_merge_methods=['squash']）已应用于双 ruleset；delete_branch_on_merge=True 已设
+-  GitHub ruleset：`main-only-maintainer`（id 20601201）+ `develop-integration`（id 20601189）已创建并 active（2026-08-09）；`gh` TLS 间歇性故障期间以重试创建成功；squash-only（`allowed_merge_methods=['squash']`）已应用于双 ruleset；`delete_branch_on_merge=True` 已设
 -  首个 PR（#25 → develop）与发布 PR（#26 → main，B 流程）已完成；治理全流程端到端验证

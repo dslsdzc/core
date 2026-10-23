@@ -70,42 +70,44 @@ def write_probe(text):
 
 
 A_DYN = """import fmt
-fn takes(s: string) -> int { return str_len(s); }
-fn main() -> int {
-    x : dyn = 42;
-    x = "hello";
-    takes(x);
-    return 0;
-}
+fn takes(s: string) -> int:
+    return str_len(s)
+fn main() -> int:
+    x : dyn = 42
+    x = "hello"
+    takes(x)
+    return 0
 """
 
 B_GENERIC = """import fmt
-fn pair[A, B](a: A, b: B) -> int {
-    if a != 1 { return 1; }
-    if str_len(b) < 1 { return 1; }
-    return 0;
-}
-fn main() -> int { return pair(1, "x") - 1; }
+fn pair[A, B](a: A, b: B) -> int:
+    if a != 1:
+        return 1
+    if str_len(b) < 1:
+        return 1
+    return 0
+fn main() -> int:
+    return pair(1, "x") - 1
 """
 
 # ③ 非真空锚：**已定义的 int 变量**（绝不用未定义名——见模块注释末的警告）
 C_REAL = """import fmt
-fn takes(s: string) -> int { return str_len(s); }
-fn main() -> int {
-    n : int = 7;
-    takes(n);
-    return 0;
-}
+fn takes(s: string) -> int:
+    return str_len(s)
+fn main() -> int:
+    n : int = 7
+    takes(n)
+    return 0
 """
 
 # ④ TI_NEVER：未定义名作实参（pre 记 1 行、post 应 0 行）
 D_UNDEF = """import fmt
-fn takes(s: string) -> int { return str_len(s); }
-fn main() -> int {
-    n := undef_fn();
-    takes(n);
-    return 0;
-}
+fn takes(s: string) -> int:
+    return str_len(s)
+fn main() -> int:
+    n := undef_fn()
+    takes(n)
+    return 0
 """
 
 

@@ -46,93 +46,166 @@ CASES = [
     # ── 腿 A：响亮面（139）──
     ("A1_module_call_as_arg", "crash", 0, """
 import fmt
-fn main() -> int { if !str_eq(fmt.int_str(7), "7") { return 3; } return 0; }
+fn main() -> int:
+    if !str_eq(fmt.int_str(7), "7"):
+        return 3
+    return 0
 """),
     ("A2_two_module_calls_as_args", "crash", 0, """
 import fmt
-fn main() -> int { if !str_eq(fmt.int_str(7), fmt.int_str(7)) { return 3; } return 0; }
+fn main() -> int:
+    if !str_eq(fmt.int_str(7), fmt.int_str(7)):
+        return 3
+    return 0
 """),
     ("A3_method_call_as_arg", "crash", 0, """
-struct S { f: int }
-impl S { fn m(self: S, x: int) -> int { return x + 1; } }
-fn m_eq(a: int, b: int) -> int { if a == b { return 1; } return 0; }
-fn main() -> int { s : ., mut = S { f = 0 }; if m_eq(s.m(6), 7) == 0 { return 3; } return 0; }
+struct S:
+    f: int
+impl S:
+    fn m(self: S, x: int) -> int:
+        return x + 1
+fn m_eq(a: int, b: int) -> int:
+    if a == b:
+        return 1
+    return 0
+fn main() -> int:
+    s : ., mut = S { f = 0 }
+    if m_eq(s.m(6), 7) == 0:
+        return 3
+    return 0
 """),
     ("A4_helper_one_module_call", "crash", 0, """
 import fmt
-fn one(a: string) -> int { if !str_eq(a, "7") { return 3; } return 0; }
-fn main() -> int { return one(fmt.int_str(7)); }
+fn one(a: string) -> int:
+    if !str_eq(a, "7"):
+        return 3
+    return 0
+fn main() -> int:
+    return one(fmt.int_str(7))
 """),
     ("A5_helper_method_result", "crash", 0, """
-struct P { v: int }
-impl P { fn get(self: P) -> int { return self.v; } }
-fn show(x: int) -> int { return x; }
-fn main() -> int { p : ., mut = P { v = 0 }; return show(p.get()); }
+struct P:
+    v: int
+impl P:
+    fn get(self: P) -> int:
+        return self.v
+fn show(x: int) -> int:
+    return x
+fn main() -> int:
+    p : ., mut = P { v = 0 }
+    return show(p.get())
 """),
     ("A6_three_arg_outer", "crash", 0, """
 import fmt
-fn str_neq_3(a: string, b: string, c: int) -> int { if !str_eq(a, b) { return 1; } return 0; }
-fn main() -> int { return str_neq_3(fmt.int_str(7), "7", 1); }
+fn str_neq_3(a: string, b: string, c: int) -> int:
+    if !str_eq(a, b):
+        return 1
+    return 0
+fn main() -> int:
+    return str_neq_3(fmt.int_str(7), "7", 1)
 """),
     ("A7_module_call_arg_in_let", "crash", 0, """
 import fmt
-fn main() -> int { b := str_eq(fmt.int_str(7), "7"); if !b { return 3; } return 0; }
+fn main() -> int:
+    b := str_eq(fmt.int_str(7), "7")
+    if !b:
+        return 3
+    return 0
 """),
     ("A8_module_call_arg_in_if", "crash", 0, """
 import fmt
-fn main() -> int { if !str_eq(fmt.int_str(7), "7") { return 3; } return 0; }
+fn main() -> int:
+    if !str_eq(fmt.int_str(7), "7"):
+        return 3
+    return 0
 """),
     # ── 腿 B：静默面（零诊断）──
     # 注意：B1 当前**同时**是 check 零诊断（静默面）**且**运行时 139 —— 静默指的正是「无诊断」这一层。
     ("B1_undefined_fn_in_arg_of_resolved_call", "silent", None, """
-fn g(x: int) -> int { return x; }
-fn main() -> int { return g(nosuchfn(1)); }
+fn g(x: int) -> int:
+    return x
+fn main() -> int:
+    return g(nosuchfn(1))
 """),
     # ── 对照（当前即绿）──
     ("C1_binding_form", "green", 0, """
 import fmt
-fn main() -> int { x := fmt.int_str(7); if !str_eq(x, "7") { return 3; } return 0; }
+fn main() -> int:
+    x := fmt.int_str(7)
+    if !str_eq(x, "7"):
+        return 3
+    return 0
 """),
     ("C2_binding_form_stmt", "green", 0, """
 import fmt
-fn main() -> int { x := fmt.int_str(7); return 0; }
+fn main() -> int:
+    x := fmt.int_str(7)
+    return 0
 """),
     ("C3_module_outer_single_arg", "green", 0, """
 import fmt
 import io
-fn main() -> int { println(fmt.int_str(7)); return 0; }
+fn main() -> int:
+    println(fmt.int_str(7))
+    return 0
 """),
     ("C4_direct_nested", "green", 0, """
 import fmt
-fn main() -> int { if !str_eq(int_str(7), "7") { return 3; } return 0; }
+fn main() -> int:
+    if !str_eq(int_str(7), "7"):
+        return 3
+    return 0
 """),
     ("C5_generic_nested", "green", 0, """
-fn idf[T](x: T) -> T { return x; }
-fn ieq(a: int, b: int) -> int { if a == b { return 1; } return 0; }
-fn main() -> int { if ieq(idf(7), 7) == 0 { return 3; } return 0; }
+fn idf[T](x: T) -> T:
+    return x
+fn ieq(a: int, b: int) -> int:
+    if a == b:
+        return 1
+    return 0
+fn main() -> int:
+    if ieq(idf(7), 7) == 0:
+        return 3
+    return 0
 """),
     ("C6_direct_in_if", "green", 0, """
 import fmt
-fn main() -> int { if !str_eq(int_str(7), "7") { return 3; } return 0; }
+fn main() -> int:
+    if !str_eq(int_str(7), "7"):
+        return 3
+    return 0
 """),
     ("C7_module_outer_infers_args", "silent_control", None, """
 import fmt
-fn main() -> int { x := fmt.int_str(nosuchfn(1)); return 0; }
+fn main() -> int:
+    x := fmt.int_str(nosuchfn(1))
+    return 0
 """),
     ("C8_position_independence_exact", "green", 7, """
-fn seven() -> int { return 7; }
-fn main() -> int { return seven(); }
+fn seven() -> int:
+    return 7
+fn main() -> int:
+    return seven()
 """),
     ("C9_method_outer_infers_args", "silent_control", None, """
-struct S { f: int }
-impl S { fn m2(self: S, x: int) -> int { return x; } }
-fn main() -> int { s : ., mut = S { f = 0 }; return s.m2(nosuchfn(1)); }
+struct S:
+    f: int
+impl S:
+    fn m2(self: S, x: int) -> int:
+        return x
+fn main() -> int:
+    s : ., mut = S { f = 0 }
+    return s.m2(nosuchfn(1))
 """),
     ("A9_local_helper_wrapping_io", "crash", 0, """
 import fmt
 import io
-fn main() -> int { log2(fmt.int_str(7)); return 0; }
-fn log2(s: string) -> int { println(s); return 0; }
+fn main() -> int:
+    log2(fmt.int_str(7))
+    return 0
+fn log2(s: string) -> int:
+    println(s)
+    return 0
 """),
 ]
 
@@ -177,22 +250,25 @@ def test_leg_e_range_go_iter_var():
     背景：本条 = **修实参推断顺带暴露的 checker `go` 绑定缺口**（`parser.cr:617` 只记名、
     `checker.cr:2981-3000` 原先不 bind）—— 这是本批**第二个**顺带修复的既有缺陷。"""
     e1 = """
-fn square(x: int) -> int { return x * x; }
-fn main() -> int {
-    arr := go i 0..3 square(i);
-    return arr[0] + arr[1] + arr[2];
-}
+fn square(x: int) -> int:
+    return x * x
+fn main() -> int:
+    arr := go i 0..3 square(i)
+    return arr[0] + arr[1] + arr[2]
 """
     e2 = """
-fn square(x: int) -> int { return x * x; }
-fn main() -> int {
-    arr := go i 0..3 square(i);
-    return i;
-}
+fn square(x: int) -> int:
+    return x * x
+fn main() -> int:
+    arr := go i 0..3 square(i)
+    return i
 """
     e3 = """
-fn square(x: int) -> int { return x * x; }
-fn main() -> int { ch := go square(21); return 0; }
+fn square(x: int) -> int:
+    return x * x
+fn main() -> int:
+    ch := go square(21)
+    return 0
 """
     bad = 0
     chk, codes, bld, elf = observe(e1)
@@ -235,15 +311,27 @@ def test_leg_d_generic_instance_key():
     不得是退化键（`idf[unit]`）—— **TODO #2026-09-16-33 的既有缺陷 = 本批附带修复**。
     与腿 B 同性质：**「修好了」的正据**（改前实参位必得 `idf[unit]`）。"""
     let_src = """
-struct P { v: int }
-fn idf[T](x: T) -> int { return 7; }
-fn main() -> int { p : ., mut = P { v = 1 }; r := idf(p); return r; }
+struct P:
+    v: int
+fn idf[T](x: T) -> int:
+    return 7
+fn main() -> int:
+    p : ., mut = P { v = 1 }
+    r := idf(p)
+    return r
 """
     arg_src = """
-struct P { v: int }
-fn idf[T](x: T) -> int { return 7; }
-fn ieq(a: int, b: int) -> int { if a == b { return 1; } return 0; }
-fn main() -> int { p : ., mut = P { v = 1 }; return ieq(idf(p), 7); }
+struct P:
+    v: int
+fn idf[T](x: T) -> int:
+    return 7
+fn ieq(a: int, b: int) -> int:
+    if a == b:
+        return 1
+    return 0
+fn main() -> int:
+    p : ., mut = P { v = 1 }
+    return ieq(idf(p), 7)
 """
     bad = 0
     for tag, src in (("LET 位", let_src), ("实参位", arg_src)):

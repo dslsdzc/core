@@ -108,15 +108,17 @@ def sum_src(n):
     ps = ", ".join(f"a{i}: int" for i in range(n))
     args = ", ".join(str(i + 1) for i in range(n))
     body = " + ".join(f"a{i}" for i in range(n))
-    return f"fn f({ps}) -> int {{\n    return {body};\n}}\nfn main() -> int {{ return f({args}); }}\n"
+    return (f"fn f({ps}) -> int:\n    return {body}\n"
+            f"fn main() -> int:\n    return f({args})\n")
 
 
 def per_arg_src(n):
     """逐形参值断言形（求和会掩盖错位/串位；任一错位返回该参数序号）。"""
     ps = ", ".join(f"a{i}: int" for i in range(n))
     args = ", ".join(str(i + 1) for i in range(n))
-    checks = "\n".join(f"    if a{i} != {i + 1} {{ return {i + 1}; }}" for i in range(n))
-    return f"fn f({ps}) -> int {{\n{checks}\n    return 0;\n}}\nfn main() -> int {{ return f({args}); }}\n"
+    checks = "\n".join(f"    if a{i} != {i + 1}:\n        return {i + 1}" for i in range(n))
+    return (f"fn f({ps}) -> int:\n{checks}\n    return 0\n"
+            f"fn main() -> int:\n    return f({args})\n")
 
 
 def main():

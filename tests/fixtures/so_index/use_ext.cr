@@ -7,7 +7,6 @@
 // 的判据对象——那条由 io.index 档下的 generics_test 承担（判据 J1/J2）。
 import io
 
-fn main() -> int {
-    print_int(42);
-    return 0;
-}
+fn main() -> int:
+    print_int(42)
+    return 0

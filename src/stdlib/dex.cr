@@ -36,36 +36,38 @@
 //   访问原始整数做打印（纯整数运算，无 dex 运算溢出约束）。
 
 // 定点 → 十进制字符串（去尾零）：3.14 → "3.14"、6.0 → "6"、0.1 → "0.1"
-fn dex_str(v: dex) -> string {
-    n : ., mut = @raw_int(v);    // 缩放整数原值
-    neg : int = 0;
-    if n < 0 { neg = 1; n = 0 - n; }
-    ip := n / 1000000;           // 整数部分（int 截断除法）
-    fp := n % 1000000;           // 小数部分（缩放）
-    s : ., mut = "";
-    if neg != 0 { s = "-"; }
-    s = s + int_str(ip);
-    if fp != 0 {
-        s = s + ".";
-        fs : ., mut = "";
-        d : ., mut = fp;
-        k : ., mut = 100000;
-        loop {
-            if k <= 0 { break; }
-            dg := d / k;
-            d = d - dg * k;
-            fs = fs + int_str(dg);
-            k = k / 10;
-        }
+fn dex_str(v: dex) -> string:
+    n : ., mut = @raw_int(v)    // 缩放整数原值
+    neg : int = 0
+    if n < 0:
+        neg = 1
+        n = 0 - n
+    ip := n / 1000000           // 整数部分（int 截断除法）
+    fp := n % 1000000           // 小数部分（缩放）
+    s : ., mut = ""
+    if neg != 0:
+        s = "-"
+    s = s + int_str(ip)
+    if fp != 0:
+        s = s + "."
+        fs : ., mut = ""
+        d : ., mut = fp
+        k : ., mut = 100000
+        loop:
+            if k <= 0:
+                break
+            dg := d / k
+            d = d - dg * k
+            fs = fs + int_str(dg)
+            k = k / 10
         // 去尾零
-        li : ., mut = str_len(fs) - 1;
-        loop {
-            if li < 0 { break; }
-            if load8(fs, li) != 48 { break; }
-            fs = str_sub(fs, 0, li);
-            li = li - 1;
-        }
-        s = s + fs;
-    }
-    return s;
-}
+        li : ., mut = str_len(fs) - 1
+        loop:
+            if li < 0:
+                break
+            if load8(fs, li) != 48:
+                break
+            fs = str_sub(fs, 0, li)
+            li = li - 1
+        s = s + fs
+    return s

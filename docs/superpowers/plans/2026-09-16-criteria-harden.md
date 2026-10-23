@@ -1,11 +1,16 @@
-# 判据网加固批（criteria-harden）：挂点扩容（+6 档）+ 六条弱判据改强
+# 判据网加固批（criteria-harden）：挂点扩容（+6 档）与六条弱判据改强
 
-**范围**：**只动判据/挂点**——`tests/`、`tests/harness/ci_hook_allowlist.txt`、`src/ci/run.sh`、`TODO.md`、文档。
-**零源码语义改动**（`jj diff` 实证：无 `src/compiler` / `src/arch` / `src/format` / `src/runtime` / `src/stdlib` / `src/targets` 命中）。
-**输入**：判据强度审计（`docs/superpowers/specs/2026-09-16-criteria-strength-audit.md` 表 B / §4）· `TODO.md` #84–#88/#90。
+**范围**：本批只改动判据与挂点，改动面为 `tests/`、`tests/harness/ci_hook_allowlist.txt`、`src/ci/run.sh`、`TODO.md` 与文档。
+
+**零源码语义改动**：该结论由 `jj diff` 实证，diff 输出中无 `src/compiler` / `src/arch` / `src/format` / `src/runtime` / `src/stdlib` / `src/targets` 命中。
+
+**输入**：判据强度审计（`docs/superpowers/specs/2026-09-16-criteria-strength-audit.md` 表 B / §4）与 `TODO.md` #84–#88/#90。
+
 **基点**：develop `f7798197`（工作区 `/home/DslsDZC/core-crit-ws`；bookmark `feature/criteria-harden`）。
 
-## 1. T1 挂点扩容（审计 §4 成本序；**时长 = 本机实测**，逐条与 `run.sh` 行注一致）
+## 1. T1 挂点扩容
+
+本节按审计 §4 的成本序排列。表中的时长列为本机实测值，逐条与 `run.sh` 的行注一致。
 
 | 档 | 时长实测 | 结果 | job | 依据 |
 |---|---|---|---|---|
@@ -17,12 +22,14 @@
 | **`test_backend_bootstrap.py`** | **22.5s** | PASS（stage0/1/2 + O2 元数据） | `selfhost-tests` | **高**：allowlist 自标「最高危」= **N06 唯一门**（rc=0 但日志带 `error[` 判红；曾致 P3a 33×N06 漏检）。审计只担心「构建面成本」，**实测 22.5s ⇒ 可挂** |
 | `test_criteria_mutations.py`（**本批新增**） | <1s | 22/22 | `bootstrap-tests` | 突变自证载体（§3） |
 
-- `tests/harness/ci_hook_allowlist.txt` 同步删除 6 条（纪律：删条目 = 已挂）+ 头注重算（`scope 66 / hooked 45 / 差集 21`）。
-- **未挂登记**：`test_mw_task1-6`（**标准换代**：零 diff 基线须在**改动前**编译器上产 ⇒ CI 参照物结构性不可得；机器化需「基线入仓」取裁或改约定）· `test_lsp`（进程级，未实测）· 其余历史缺口档（差集逐条带理由）。
-- **过程证据（覆盖判据的牙）**：先挂 `run.sh`、未删白名单条目时，`test_ci_hook_coverage.py` **当场转红**并逐条指名 5 个「已挂但白名单未删」；新增 harness 档未挂时同样转红。⇒ 该判据不是纸面机制（本仓曾因「自称已挂」吃 33×N06 漏检）。
+- `tests/harness/ci_hook_allowlist.txt` 同步删除 6 条，遵循的纪律为「删条目 = 已挂」；头注同步重算（`scope 66 / hooked 45 / 差集 21`）。
+- **未挂登记**：`test_mw_task1-6` 属标准换代（零 diff 基线须在**改动前**的编译器上产出，因此 CI 参照物在结构上不可得；机器化需「基线入仓」取裁或改约定）；`test_lsp` 属进程级，未实测；其余历史缺口档在差集中逐条附理由。
+- **过程证据（覆盖判据的牙）**：先挂 `run.sh`、未删白名单条目时，`test_ci_hook_coverage.py` 当场转红，并逐条指名 5 个「已挂但白名单未删」的条目；新增 harness 档未挂时同样转红。该表现说明该判据不是纸面机制（本仓曾因「自称已挂」吃 33×N06 漏检）。
 - **终态**：`[PASS] ci_hook_coverage: scope=66 hooked=45 unhooked(allowlisted)=21`（含内存内「摘挂点必红」自证）。
 
-## 2. T2 六条弱判据改强（**新断言形态**；每条含「反例自检 + 探针触发自检」注释）
+## 2. T2 六条弱判据改强
+
+六条判据均改换为新断言形态；每条含「反例自检 + 探针触发自检」注释。
 
 | # | 旧形态（弱因） | **新断言形态** |
 |---|---|---|
@@ -33,19 +40,24 @@
 | **#90** `test_mw_task2` E8 盲窗 | 遇 `0xE8` 字节即跳 5B | 判据侧**独立 x86-64 长度解码器**（fail-closed：未登记形态 ⇒ 判红）+ `region_equal_mask_calls` **指令边界锁步**（两侧边界序列逐条一致；非 call 全字节比；call 仅放行 4B rel32 且目标断言落在本 text 内） |
 | **#85** `test_mw_task2` 块体 | 2B 前缀锚 + 目标序 | `parse_slow_block` **逐指令模板**（除 alloc 位移/dest 槽偏移/回跳位移三字段外全字节固定）+ `tag 立即数 == 1` + 回跳落**真指令边界** + 块间**连续** + 各站点 alloc 目标**唯一** |
 
-**真跑证据（全部本机实测）**：`test_hit_table` 24/24 · `test_ccr_types` 49/49 · `test_cir_warm_path` 19/19 · `test_mw_task2` ALL PASS（z 用例零 diff 9/9、豁免面计数 1/1/2、t3 250 站点、新增 `t4_sub_overflow` 三档）；解码器与 `objdump --insn-width=16` 对拍 17 个真实 region（含 t3 3272 条指令）**逐指令边界一致**。
+**真跑证据（全部本机实测）**：`test_hit_table` 24/24；`test_ccr_types` 49/49；`test_cir_warm_path` 19/19；`test_mw_task2` ALL PASS，其中 z 用例零 diff 9/9、豁免面计数 1/1/2、t3 250 站点、新增 `t4_sub_overflow` 三档。解码器与 `objdump --insn-width=16` 对拍 17 个真实 region（含 t3 3272 条指令），逐指令边界一致。
 
-## 3. 突变自证（≥3 条要求 ⇒ 实交 **22/22**，已固化入仓）
+## 3. 突变自证
 
-`tests/harness/test_criteria_mutations.py`（纯 python、内存内、零副作用；挂 `bootstrap-tests`）：**19 突变体 + 3 正控**，每例判据 = **「旧形态骗得过（绿）∧ 新形态咬住（红）」**——
-M1 #84（角色换向/opcode 尾加 1B/rm_mode）· M2 #86（1 / 0xFE / 0xFFFFFFFF / `00` / 行尾随字段）· M3 #87（同尺寸改内容/中间漏条/暖态多一条）· M4 #88（多印未计数行/非 dump 处混入/同数量换行）· M5 #90（**改 `48 C7 45 E8 …` 的 imm32——0xE8 是数据字节，旧盲窗吞掉 ⇒ 旧绿新红**）· M6 #85（tag 1→0 / 插 `0x90` / `4C 89 10`→`18`）。
+本批的突变条目要求为 ≥3 条，实交 22/22 条，且已固化入仓。
 
-## 4. 本批抓到的两条**新假绿**（已追加进审计 spec §0bis，附判别法）
+`tests/harness/test_criteria_mutations.py`（纯 python、内存内、零副作用；挂 `bootstrap-tests`）含 19 突变体与 3 正控；每例的判据为「旧形态骗得过（绿）∧ 新形态咬住（红）」——M1 #84（角色换向/opcode 尾加 1B/rm_mode）· M2 #86（1 / 0xFE / 0xFFFFFFFF / `00` / 行尾随字段）· M3 #87（同尺寸改内容/中间漏条/暖态多一条）· M4 #88（多印未计数行/非 dump 处混入/同数量换行）· M5 #90（**改 `48 C7 45 E8 …` 的 imm32——0xE8 是数据字节，旧盲窗吞掉 ⇒ 旧绿新红**）· M6 #85（tag 1→0 / 插 `0x90` / `4C 89 10`→`18`）。
+
+## 4. 本批抓到的新假绿
+
+本批抓到两条新假绿，已追加进审计 spec §0bis，并附判别法。
 
 1. **`t4_sub_overflow`：判据内部 `sub` 分支从未被走到**——块体模板的 `is_sub` 分支断言（`not r11`）在原三例（全 add）下**从未执行** ⇒ 属 §0bis 第二类假绿（探针不触发）。判别法 = **逐分支覆盖检查**（判据每个条件分支问「哪条语料走到它」）。
-2. **解码器 fail-closed 当场抓到未登记 opcode `0x19`**（慢路径块首 `4D 19 DB` = `sbb r11,r11`）⇒ 「宁可红不静默」的现场实证；若当初写成「未知 ⇒ 跳过」则缺口静默留存。
+2. **解码器 fail-closed 当场抓到未登记 opcode `0x19`**（慢路径块首 `4D 19 DB` = `sbb r11,r11`）⇒ 这是「宁可红不静默」的现场实证；若当初写成「未知 ⇒ 跳过」，则该缺口会静默留存。
 
 ## 5. 全量判据（T3）
+
+下表逐项列出本批的全量判据与结果。
 
 | 判据 | 结果 |
 |---|---|
@@ -58,8 +70,8 @@ M1 #84（角色换向/opcode 尾加 1B/rm_mode）· M2 #86（1 / 0xFE / 0xFFFFFF
 | 挂点覆盖判据 | `[PASS] scope=66 hooked=45 unhooked(allowlisted)=21` |
 | 枚举（实读） | `tests/selfhost/test_*.py` **55** · `tests/bootstrap/*.py` **7** · `tests/harness/test_*.py` **4** · `tests/probes/*.cr` **29** · `tests/suite/*.cr` **33** |
 
-## 6. 未覆盖面 / 交接
+## 6. 未覆盖面与交接
 
 - `test_mw_task1-6` 仍**未挂**（标准换代，需取裁）；`#90` 的判据虽已改强，但该条判据仍靠手工跑（同因）。
-- 本批新增 `t4_sub_overflow` 为**行为覆盖用例**（不改源码语义）；`t3` 的 250 站点块体模板断言随语料规模线性增长（实测可接受）。
-- 判据侧解码器（`x86_insn_len`）为**判据专用**：发射器新增指令形态时它会**判红**（fail-closed），需按新形态登记——这是有意的维护点，勿改回「未知即跳过」。
+- 本批新增的 `t4_sub_overflow` 为**行为覆盖用例**（不改源码语义）；`t3` 的 250 站点块体模板断言随语料规模线性增长（实测可接受）。
+- 判据侧解码器（`x86_insn_len`）为**判据专用**：发射器新增指令形态时它会**判红**（fail-closed），需按新形态登记——这是有意的维护点，不得改回「未知即跳过」。

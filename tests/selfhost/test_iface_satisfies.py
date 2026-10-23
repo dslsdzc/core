@@ -157,130 +157,237 @@ def case_unjudged(name, source):
 # ── 源形 ──────────────────────────────────────────────────────────────
 
 # 方法在位（固有 impl 形态；P3a 既有语义 = 结构判定，非名义声明）
-IFACE_OK = """interface Show { fn show(self) -> int; }
-struct S { a: int }
-impl S { fn show(self: S) -> int { return 1; } }
-struct Box[T: Show] { v: T }
-fn g(b: Box[S]) -> int { return b.v.a; }
-fn main() -> int { return g(Box { v = S { a = 7 } }); }
+IFACE_OK = """interface Show:
+    fn show(self) -> int
+struct S:
+    a: int
+impl S:
+    fn show(self: S) -> int:
+        return 1
+struct Box[T: Show]:
+    v: T
+fn g(b: Box[S]) -> int:
+    return b.v.a
+fn main() -> int:
+    return g(Box { v = S { a = 7 } })
 """
 # 方法在位（`impl I for T` 形态）
-IFACE_IMPL_FOR_OK = """interface Show { fn show(self) -> int; }
-struct S { a: int }
-impl Show for S { fn show(self: S) -> int { return 2; } }
-struct Box[T: Show] { v: T }
-fn main() -> int { b := Box { v = S { a = 2 } }; return b.v.a; }
+IFACE_IMPL_FOR_OK = """interface Show:
+    fn show(self) -> int
+struct S:
+    a: int
+impl Show for S:
+    fn show(self: S) -> int:
+        return 2
+struct Box[T: Show]:
+    v: T
+fn main() -> int:
+    b := Box { v = S { a = 2 } }
+    return b.v.a
 """
 # 方法缺失（**本批新增判定**）
-IFACE_MISSING = """interface Show { fn show(self) -> int; }
-struct S { a: int }
-struct Box[T: Show] { v: T }
-fn g(b: Box[S]) -> int { return 0; }
-fn main() -> int { return 0; }
+IFACE_MISSING = """interface Show:
+    fn show(self) -> int
+struct S:
+    a: int
+struct Box[T: Show]:
+    v: T
+fn g(b: Box[S]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
 # 参数计数不符
-IFACE_CNT_MISMATCH = """interface Show { fn show(self) -> int; }
-struct S { a: int }
-impl S { fn show(self: S, x: int) -> int { return x; } }
-struct Box[T: Show] { v: T }
-fn g(b: Box[S]) -> int { return 0; }
-fn main() -> int { return 0; }
+IFACE_CNT_MISMATCH = """interface Show:
+    fn show(self) -> int
+struct S:
+    a: int
+impl S:
+    fn show(self: S, x: int) -> int:
+        return x
+struct Box[T: Show]:
+    v: T
+fn g(b: Box[S]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
 # 返回码不符（iface `-> int` 码 0 vs impl `-> string` 码 3）
-IFACE_RET_MISMATCH = """interface Show { fn show(self) -> int; }
-struct S { a: int }
-impl S { fn show(self: S) -> string { return "x"; } }
-struct Box[T: Show] { v: T }
-fn g(b: Box[S]) -> int { return 0; }
-fn main() -> int { return 0; }
+IFACE_RET_MISMATCH = """interface Show:
+    fn show(self) -> int
+struct S:
+    a: int
+impl S:
+    fn show(self: S) -> string:
+        return "x"
+struct Box[T: Show]:
+    v: T
+fn g(b: Box[S]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
 # 同一违反走**函数调用点**（既有路径；措辞应与实例化点同）
-IFACE_FUNC_RET_MISMATCH = """interface Show { fn show(self) -> int; }
-struct S { a: int }
-impl S { fn show(self: S) -> string { return "x"; } }
-fn f[T: Show](a: T) -> int { return 0; }
-fn main() -> int { s := S { a = 1 }; return f(s); }
+IFACE_FUNC_RET_MISMATCH = """interface Show:
+    fn show(self) -> int
+struct S:
+    a: int
+impl S:
+    fn show(self: S) -> string:
+        return "x"
+fn f[T: Show](a: T) -> int:
+    return 0
+fn main() -> int:
+    s := S { a = 1 }
+    return f(s)
 """
 # 枚举实例化点（方法缺失）
-IFACE_ENUM_MISSING = """interface Show { fn show(self) -> int; }
-struct S { a: int }
-enum EBox[T: Show] { V(T), N }
-fn g(b: EBox[S]) -> int { return 0; }
-fn main() -> int { return 0; }
+IFACE_ENUM_MISSING = """interface Show:
+    fn show(self) -> int
+struct S:
+    a: int
+enum EBox[T: Show]:
+    V(T), N
+fn g(b: EBox[S]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
 # 多方法接口：实现一半
-IFACE_PARTIAL = """interface Pair2 { fn first(self) -> int; fn second(self) -> int; }
-struct S { a: int }
-impl S { fn first(self: S) -> int { return 1; } }
-struct Box[T: Pair2] { v: T }
-fn g(b: Box[S]) -> int { return 0; }
-fn main() -> int { return 0; }
+IFACE_PARTIAL = """interface Pair2:
+    fn first(self) -> int
+    fn second(self) -> int
+struct S:
+    a: int
+impl S:
+    fn first(self: S) -> int:
+        return 1
+struct Box[T: Pair2]:
+    v: T
+fn g(b: Box[S]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
 # 两接口隔离：S 满足 Show、不满足 Name
-IFACE_TWO_A = """interface Name { fn name(self) -> int; }
-struct S { a: int }
-impl S { fn name(self: S) -> int { return 1; } }
-struct BoxA[T: Name] { v: T }
-fn g(b: BoxA[S]) -> int { return 0; }
-fn main() -> int { return 0; }
+IFACE_TWO_A = """interface Name:
+    fn name(self) -> int
+struct S:
+    a: int
+impl S:
+    fn name(self: S) -> int:
+        return 1
+struct BoxA[T: Name]:
+    v: T
+fn g(b: BoxA[S]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
-IFACE_TWO_B = """interface Show { fn show(self) -> int; }
-interface Name { fn name(self) -> int; }
-struct S { a: int }
-impl S { fn show(self: S) -> int { return 1; } }
-struct BoxB[T: Name] { v: T }
-fn g(b: BoxB[S]) -> int { return 0; }
-fn main() -> int { return 0; }
+IFACE_TWO_B = """interface Show:
+    fn show(self) -> int
+interface Name:
+    fn name(self) -> int
+struct S:
+    a: int
+impl S:
+    fn show(self: S) -> int:
+        return 1
+struct BoxB[T: Name]:
+    v: T
+fn g(b: BoxB[S]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
 # 泛型形参实参（未实例化）⇒ 不判
-IFACE_GP_ARG = """interface Show { fn show(self) -> int; }
-struct Box[T: Show] { v: T }
-fn f[U: Show](b: Box[U]) -> int { return 0; }
-fn main() -> int { return 0; }
+IFACE_GP_ARG = """interface Show:
+    fn show(self) -> int
+struct Box[T: Show]:
+    v: T
+fn f[U: Show](b: Box[U]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
 # 原生实参 ⇒ 不判（接口方法表只对命名行可查）
-IFACE_NATIVE_ARG = """interface Show { fn show(self) -> int; }
-struct Box[T: Show] { v: T }
-fn g(b: Box[int]) -> int { return 0; }
-fn main() -> int { return 0; }
+IFACE_NATIVE_ARG = """interface Show:
+    fn show(self) -> int
+struct Box[T: Show]:
+    v: T
+fn g(b: Box[int]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
 # 签名类型项化的直接可观测面（Task 6 Step 1/3）：命名的返回型 vs int 返回 ⇒ **拒绝**
 # （旧态编码面判「满足」= 静默通过；台账见文件头注）
-IFACE_NAMED_RET = """interface Show { fn show(self) -> S2; }
-struct S2 { b: int }
-struct S { a: int }
-impl S { fn show(self: S) -> int { return 1; } }
-struct Box[T: Show] { v: T }
-fn g(b: Box[S]) -> int { return 0; }
-fn main() -> int { return 0; }
+IFACE_NAMED_RET = """interface Show:
+    fn show(self) -> S2
+struct S2:
+    b: int
+struct S:
+    a: int
+impl S:
+    fn show(self: S) -> int:
+        return 1
+struct Box[T: Show]:
+    v: T
+fn g(b: Box[S]) -> int:
+    return 0
+fn main() -> int:
+    return 0
 """
 # 函数调用点：满足 ⇒ 既有路径放行（正控；P3a 既有语义保持）
-IFACE_FUNC_OK = """interface Show { fn show(self) -> int; }
-struct S { a: int }
-impl S { fn show(self: S) -> int { return 3; } }
-fn f[T: Show](a: T) -> int { return 1; }
-fn main() -> int { s := S { a = 1 }; return f(s); }
+IFACE_FUNC_OK = """interface Show:
+    fn show(self) -> int
+struct S:
+    a: int
+impl S:
+    fn show(self: S) -> int:
+        return 3
+fn f[T: Show](a: T) -> int:
+    return 1
+fn main() -> int:
+    s := S { a = 1 }
+    return f(s)
 """
 # 函数调用点：违反 ⇒ 既有措辞（**逐字不动**的钉）
-IFACE_FUNC_MISSING = """interface Show { fn show(self) -> int; }
-struct S { a: int }
-fn f[T: Show](a: T) -> int { return 0; }
-fn main() -> int { s := S { a = 1 }; return f(s); }
+IFACE_FUNC_MISSING = """interface Show:
+    fn show(self) -> int
+struct S:
+    a: int
+fn f[T: Show](a: T) -> int:
+    return 0
+fn main() -> int:
+    s := S { a = 1 }
+    return f(s)
 """
 # 空接口（零方法）⇒ 空洞满足（命名行）
-IFACE_EMPTY = """interface Empty { }
-struct S { a: int }
-struct Box[T: Empty] { v: T }
-fn g(b: Box[S]) -> int { return b.v.a; }
-fn main() -> int { return g(Box { v = S { a = 5 } }); }
+IFACE_EMPTY = """interface Empty:
+struct S:
+    a: int
+struct Box[T: Empty]:
+    v: T
+fn g(b: Box[S]) -> int:
+    return b.v.a
+fn main() -> int:
+    return g(Box { v = S { a = 5 } })
 """
 # `&self` 接收者形态（计数面）
-IFACE_REF_SELF = """interface Show { fn show(&self) -> int; }
-struct S { a: int }
-impl S { fn show(&self) -> int { return 1; } }
-struct Box[T: Show] { v: T }
-fn g(b: Box[S]) -> int { return b.v.a; }
-fn main() -> int { return g(Box { v = S { a = 4 } }); }
+IFACE_REF_SELF = """interface Show:
+    fn show(&self) -> int
+struct S:
+    a: int
+impl S:
+    fn show(&self) -> int:
+        return 1
+struct Box[T: Show]:
+    v: T
+fn g(b: Box[S]) -> int:
+    return b.v.a
+fn main() -> int:
+    return g(Box { v = S { a = 4 } })
 """
 
 

@@ -1,6 +1,6 @@
 # Core @ 内建原语
 
-> 定位:受众 = 开发者;状态 = active(12 个内建已实现,2026-07-28 完整落地;语义契约见 docs/maintainer/design/ir-op-semantics.md §2.8/§4)。
+> 定位：受众 = 开发者；状态 = active（12 个内建已实现，2026-07-28 完整落地；语义契约见 `docs/maintainer/design/ir-op-semantics.md` §2.8/§4）。
 
 `@` 是编译器提供的能力入口，不通过标准库实现。分三类：
 
@@ -26,12 +26,10 @@
 示例——无运行时反射的序列化：
 
 ```core
-fn serialize(buf: &[u8], obj: any) {
-    for name in @fields(typeof(obj)) {
-        val := @field(typeof(obj), name).get(obj);
-        write_field(buf, name, val);
-    }
-}
+fn serialize(buf: &[u8], obj: any):
+    for name in @fields(typeof(obj)):
+        val := @field(typeof(obj), name).get(obj)
+        write_field(buf, name, val)
 // 编译期展开，不涉及运行时反射调用
 ```
 

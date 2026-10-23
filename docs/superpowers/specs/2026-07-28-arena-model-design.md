@@ -2,7 +2,7 @@
 
 ## 概述
 
-Core 语言基于 Arena 的内存管理方案。本设计将现有的 1GB 全局 bump allocator 升级为多 Arena 池，每个子图（函数/loop/for/unsafe）关联独立 Arena，分配自动从当前 Arena 的 bump pointer 分配，子图退出时整体重置游标。
+Core 语言基于 Arena 的内存管理方案。本设计将现有的 1GB 全局 bump allocator 升级为多 Arena 池，每个子图（函数 / `loop` / `for` / `unsafe`）关联独立 Arena，分配自动从当前 Arena 的 bump pointer 分配，子图退出时整体重置游标。
 
 ### 核心原则
 
@@ -25,7 +25,7 @@ BSS 段布局（新增字段用 + 标记）：
   heap_end
 ```
 
-> **设计决策**：arena metadata 数组（`cursors`、`sizes`、`parents`）作为 Core 全局变量动态分配（`g_arena_cursors = alloc(N * 8)`），不使用 BSS 静态数组。原因是固定上限（MAX_ARENAS）会在深层嵌套或大量并发子图时导致运行时错误——metadata 需要像 `g_df_nodes` 一样可扩容。性能代价：`emit_alloc_body` 多一次间接访存（加载指针值），在分配热路径上可接受。
+> **设计决策**：arena metadata 数组（`cursors`、`sizes`、`parents`）作为 Core 全局变量动态分配（`g_arena_cursors = alloc(N * 8)`），不使用 BSS 静态数组。原因是固定上限（`MAX_ARENAS`）会在深层嵌套或大量并发子图时导致运行时错误——metadata 需要像 `g_df_nodes` 一样可扩容。性能代价：`emit_alloc_body` 多一次间接访存（加载指针值），在分配热路径上可接受。
 
 ### Arena slot 模型
 
@@ -67,13 +67,15 @@ alloc(size):
 
 嵌套示例：
 ```
-fn main() {                    // arena_new() → ai=0, g_current_arena=0
-    x := alloc(32);            // 从 arena 0 分配
-    loop {                     // arena_new() → ai=1, g_current_arena=1, parent=0
-        y := alloc(64);        // 从 arena 1 分配
-    }                          // arena_reset(1) → g_current_arena=0, cursor[1]=0
-    z := alloc(16);            // 从 arena 0 分配
-}                              // arena_reset(0) → g_current_arena=-1, cursor[0]=0
+fn main():
+    // arena_new() → ai=0, g_current_arena=0
+    x := alloc(32)            // 从 arena 0 分配
+    loop:
+        // arena_new() → ai=1, g_current_arena=1, parent=0
+        y := alloc(64)        // 从 arena 1 分配
+    // arena_reset(1) → g_current_arena=0, cursor[1]=0
+    z := alloc(16)            // 从 arena 0 分配
+// arena_reset(0) → g_current_arena=-1, cursor[0]=0
 ```
 
 ## 组件设计
@@ -82,54 +84,50 @@ fn main() {                    // arena_new() → ai=0, g_current_arena=0
 
 ```core
 // === 全局变量 ===
-g_current_arena : int, mut = -1;
+g_current_arena : int, mut = -1
 
 // Arena metadata arrays (allocated in arena_init, accessed by emit_alloc_body)
-g_arena_cursors : string, mut;     // int[] — element = cursor offset
-g_arena_sizes   : string, mut;     // int[] — element = chunk max size
-g_arena_parents : string, mut;     // int[] — element = parent arena ID
+g_arena_cursors : string, mut     // int[] — element = cursor offset
+g_arena_sizes   : string, mut     // int[] — element = chunk max size
+g_arena_parents : string, mut     // int[] — element = parent arena ID
 
-g_arena_pool_data : string, mut;   // pool base pointer (from alloc)
-g_arena_max_size : int, mut;
-g_arena_free_list : int, mut = -1;
-g_arena_count : int, mut = 0;
-g_arena_cap   : int, mut = 0;    // metadata 数组容量
+g_arena_pool_data : string, mut   // pool base pointer (from alloc)
+g_arena_max_size : int, mut
+g_arena_free_list : int, mut = -1
+g_arena_count : int, mut = 0
+g_arena_cap   : int, mut = 0    // metadata 数组容量
 
 // === API ===
-fn arena_init(pool_size: int, arena_size: int) {
+fn arena_init(pool_size: int, arena_size: int):
     // 从全局 bump heap 分配 pool 数据区。
     // 此时 g_current_arena = -1，alloc() 走全局 bump 路径
-    g_arena_pool_data = alloc(pool_size);
-    g_arena_max_size = arena_size;
-    g_arena_free_list = -1;
-    g_arena_count = 0;
-    g_arena_cap = 0;
-}
+    g_arena_pool_data = alloc(pool_size)
+    g_arena_max_size = arena_size
+    g_arena_free_list = -1
+    g_arena_count = 0
+    g_arena_cap = 0
 
-fn arena_new() -> int {
+fn arena_new() -> int:
     // 从 free list 取，或创建新 slot
     // 设置 parent = g_current_arena
     // 设置 g_current_arena = new_id
     // cursor = 0
     // 返回 new_id
-}
 
-fn arena_reset(ai: int) {
+fn arena_reset(ai: int):
     // cursor = 0
     // g_current_arena = parent
     // 推入 free list
-}
 
-fn arena_avail(ai: int) -> int {
+fn arena_avail(ai: int) -> int:
     // 返回剩余可用字节数
-}
 ```
 
 `arena_alloc` 不需要作为独立的 Core 函数——现有 `alloc()` 已经 arena-aware。
 
 ### 2. 运行时（`src/runtime/rt.s`）— BSS 扩展
 
-BSS 段新增 emit_alloc_body 热路径直接访问的字段：
+BSS 段新增 `emit_alloc_body` 热路径直接访问的字段：
 
 ```asm
 .section .bss
@@ -166,8 +164,8 @@ heap_end:
 ### 4. 编译器 — 新增 IR 指令（`src/compiler/ast.cr`）
 
 ```core
-IR_ARENA_NEW   : int = 30;   // arena_new dest, src1(size_estimate)
-IR_ARENA_RESET : int = 31;   // arena_reset src1
+IR_ARENA_NEW   : int = 30   // arena_new dest, src1(size_estimate)
+IR_ARENA_RESET : int = 31   // arena_reset src1
 ```
 
 `IR_ARENA_NEW` 的 `src1` 是编译器预估的 arena 大小（编译期常量或 0=默认）。后端的 `arena_new_impl` 用此值选取合适 chunk 大小或触发链式扩容。
@@ -183,7 +181,7 @@ IR_ARENA_RESET : int = 31;   // arena_reset src1
 | SG_FLOW | `sg_push(SG_FLOW)` 之前（编译器插桩点预留） | `sg_pop()` 之后 |
 | SG_GO | `sg_push(SG_GO)` 之前（编译器插桩点预留） | `sg_pop()` 之后 |
 
-> `SG_FLOW` 和 `SG_GO` 的 arena 插桩点已预留。当前编译器未实现 `go`/`flow` 原语，但 arena 层已准备好——`sg_push(SG_FLOW)` 时自动 `arena_new()` 创建独立 arena，`sg_pop()` 时自动 `arena_reset()` 回收。flow/go 的结果跨 arena 拷贝机制在对应原语实现时加入即可。
+> `SG_FLOW` 和 `SG_GO` 的 arena 插桩点已预留。当前编译器未实现 `go`/`flow` 原语，但 arena 层已准备好——`sg_push(SG_FLOW)` 时自动 `arena_new()` 创建独立 arena，`sg_pop()` 时自动 `arena_reset()` 回收。`flow`/`go` 的结果跨 arena 拷贝机制在对应原语实现时加入即可。
 
 每次 `arena_new` 创建一个新的 IR 变量 `_arena_N` 存储 arena ID。
 
@@ -193,9 +191,9 @@ IR_ARENA_RESET : int = 31;   // arena_reset src1
 
 `IR_ARENA_RESET` → emit 调用 `arena_reset`
 
-**实现选择**：arena_new/arena_reset 作为外部函数（通过 `ctx_add_plt("arena_new", ...)` 机制）还是内联 emit？
+**实现选择**：`arena_new`/`arena_reset` 存在两种实现路径——作为外部函数（通过 `ctx_add_plt("arena_new", ...)` 机制）或内联 emit，需在两者之间取舍。
 
-选择**外部函数**方式：与现有 `alloc` 类似，`arena_new`/`arena_reset` 实现为 `emit_alloc_body` 附近的代码片段，通过 call+relocation 跳转。这使得 Core stdlib 可以定义 API，后端提供实现。
+本设计选择**外部函数**方式：与现有 `alloc` 类似，`arena_new`/`arena_reset` 实现为 `emit_alloc_body` 附近的代码片段，通过 call+relocation 跳转。这使得 Core stdlib 可以定义 API，后端提供实现。
 
 ### 5. 其他文件修改
 
@@ -210,7 +208,7 @@ IR_ARENA_RESET : int = 31;   // arena_reset src1
 
 ### 6. 编译期 Arena 大小预计算
 
-memory-model.md 要求编译器为每个子图计算最大内存需求，作为 `arena_new` 的 size 参数。实现在 `ir_gen.cr` 中。
+`memory-model.md` 要求编译器为每个子图计算最大内存需求，作为 `arena_new` 的 size 参数。实现在 `ir_gen.cr` 中。
 
 **算法**：在 IR gen 阶段，为每个子图维护一个累计 `alloc_total`：
 
@@ -222,39 +220,37 @@ memory-model.md 要求编译器为每个子图计算最大内存需求，作为 
 6. 子图结束时（`sg_pop` 前），累计值为 `estimated_size`
 7. 如果 `estimated_size == 0`（全动态，无可推大小），使用默认值（如 64KB）
 
-实现位置：在 `emit()` 函数入口处检查 opcode，若是 ALLOC 系列则累加一个子图级计数器。
+实现位置：在 `emit()` 函数入口处检查 opcode，若属于 `ALLOC` 系列则累加一个子图级计数器。
 
 ```core
 // ir_gen.cr 新增
-g_sg_alloc_total : string, mut;  // per-subgraph allocation total
-g_sg_alloc_cap   : int, mut;
+g_sg_alloc_total : string, mut  // per-subgraph allocation total
+g_sg_alloc_cap   : int, mut
 
-fn sg_alloc_push(kind: int) {
-    grow_sg_alloc(g_sg_count + 1);
-    w64(g_sg_alloc_total, g_sg_count * 8, 0);
-    sg_push(kind);
-}
+fn sg_alloc_push(kind: int):
+    grow_sg_alloc(g_sg_count + 1)
+    w64(g_sg_alloc_total, g_sg_count * 8, 0)
+    sg_push(kind)
 
-fn sg_alloc_pop() {
-    total := r64(g_sg_alloc_total, (g_sg_count - 1) * 8);
-    if total == 0 { total = 65536; }  // default 64KB for dynamic-only
-    emit(IR_ARENA_NEW, arena_var, total, 0, 0, 0);
-    sg_pop();
-}
+fn sg_alloc_pop():
+    total := r64(g_sg_alloc_total, (g_sg_count - 1) * 8)
+    if total == 0:
+        total = 65536
+    // default 64KB for dynamic-only
+    emit(IR_ARENA_NEW, arena_var, total, 0, 0, 0)
+    sg_pop()
 
-fn track_alloc_size(size: int) {
-    if g_sg_count > 0 {
-        old := r64(g_sg_alloc_total, (g_sg_count - 1) * 8);
-        w64(g_sg_alloc_total, (g_sg_count - 1) * 8, old + size);
-    }
-}
+fn track_alloc_size(size: int):
+    if g_sg_count > 0:
+        old := r64(g_sg_alloc_total, (g_sg_count - 1) * 8)
+        w64(g_sg_alloc_total, (g_sg_count - 1) * 8, old + size)
 ```
 
 `track_alloc_size` 在每个 `emit(IR_ALLOC_X, ...)` 处调用。
 
-## IR_ALLOC 指令无变化
+## `IR_ALLOC` 指令的零改动
 
-关键设计决定：**IR_ALLOC、IR_ALLOC_STRUCT、IR_ALLOC_ARRAY 指令本身不需要修改**。它们都 emit `call alloc`，而 `alloc()` 函数本身已经是 arena-aware。这使得编译器改动最小化。
+关键设计决定：**`IR_ALLOC`、`IR_ALLOC_STRUCT`、`IR_ALLOC_ARRAY` 指令本身不需要修改**。它们都 emit `call alloc`，而 `alloc()` 函数本身已经是 arena-aware。这使得编译器改动最小化。
 
 ## 错误处理
 
@@ -266,7 +262,7 @@ fn track_alloc_size(size: int) {
 
 ### 链式扩容（Chunk Overflow）
 
-当 `arena_alloc` 在当前 chunk 中空间不足时，不是返回 0，而是：
+当 `arena_alloc` 在当前 chunk 中空间不足时，处理路径不是返回 0，而是执行以下步骤：
 
 1. 通过全局 alloc（此时 `g_current_arena` 暂存为 -1）分配一个新 chunk
 2. 新 chunk 挂在当前 arena 的链表末尾
@@ -291,7 +287,7 @@ reset 时只回收第一个 chunk 的 cursor（O(1) 重置），overflow chunks 
 
 ## 不包含的功能
 
-以下功能属于 memory-model.md 设计但依赖其他未实现的原语，不在本次实现中：
+以下功能属于 `memory-model.md` 设计但依赖其他未实现的原语，不在本次实现中：
 
 - **Flow/Go 并发 arena**：编译器的 `go`/`flow` 原语尚未实现。待这些原语就绪后，每个 `go`/`flow` 调用在 `sg_push(SG_FLOW/GO)` 处自然获得独立 arena
 - **敏感数据清零选项**：部署配置控制的 optional 行为，不影响 Arena 模型核心语义

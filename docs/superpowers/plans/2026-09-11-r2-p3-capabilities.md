@@ -1,70 +1,84 @@
-# R2 P3（能力落地）实施计划：定长退役 + 序列接口/长度约束 + 穷尽性/联合/可选 + 泛型约束 + impl 契约
+# R2 P3（能力落地）实施计划：定长退役、序列接口与长度约束、穷尽性/联合/可选、泛型约束、impl 契约
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把 P0/P1/P2a 建成的「类型项层 + 语义包含引擎 + 判定接线」从**判定替换**推进到**能力落地**——五项目标能力（定长退役、序列接口/长度约束、穷尽性/联合/可选、泛型约束、impl 契约）各自在引擎/桥接/checker 三层接通，每项带正负控、边界例与不变量双锁定。
+**Goal:** 本计划把 P0/P1/P2a 建成的「类型项层 + 语义包含引擎 + 判定接线」从**判定替换**推进到**能力落地**。五项目标能力（定长退役、序列接口/长度约束、穷尽性/联合/可选、泛型约束、impl 契约）各自在引擎层、桥接层与 checker 层接通，每项能力均配正负控、边界例与不变量双锁定。
 
-**Architecture:** 三条主线：① **引擎展开层**（Task 0：named/struct/enum/generic-apply → 结构项；**仅**服务满足判定与域查询，等价判定保持原子名义）——它是穷尽性/联合/可选/泛型约束/impl 四项的共同前提，也是 P2a 登记的「P5 引擎命名展开」前移；② **不依赖 P2b 的能力**（Task 1 定长/变型、Task 3 穷尽性、Task 4 联合/可选、Task 5 的非接口半边）= **P3a**；③ **依赖 P2b 注册表的接口面**（Task 2 横切接口、Task 6 impl 契约、Task 5 的 `T: I` 满足半边）= **P3b**（P2b 计划落地后接，接口契约见下节）。
+**Architecture:** 本计划分三条主线。
+① **引擎展开层**：Task 0 把 named/struct/enum/generic-apply 展开为结构项。该层**仅**服务满足判定与域查询，等价判定保持原子名义。它既是穷尽性、联合/可选、泛型约束、impl 四项能力的共同前提，也是 P2a 登记的「P5 引擎命名展开」的前移。
+② **不依赖 P2b 的能力** = **P3a**，含 Task 1（定长/变型）、Task 3（穷尽性）、Task 4（联合/可选），以及 Task 5 的非接口半边。
+③ **依赖 P2b 注册表的接口面** = **P3b**，含 Task 2（横切接口）、Task 6（impl 契约），以及 Task 5 的 `T: I` 满足半边。该线在 P2b 计划落地后接入，接口契约见下节。
 
-**Tech Stack:** Core 自举栈。`src/compiler/type_terms.cr`（类型项 DAG）· `type_engine.cr`（三态判定）· `ty_shadow.cr`（ti→term 桥接 + 10 站点 + 计数）· `checker.cr`（判定点/公理区/泛型/接口）· `monomorph.cr`（实例化）· `ir_gen.cr`（表示层读 N 的两处）。判据通道：`corec selftest-types`、`--type-shadow`、`tests/selfhost/test_type_engine.py`。
+**Tech Stack:** Core 自举栈。涉及文件与各自职责如下。
+- `src/compiler/type_terms.cr`：类型项 DAG。
+- `src/compiler/type_engine.cr`：三态判定。
+- `src/compiler/ty_shadow.cr`：ti→term 桥接、10 站点与计数。
+- `src/compiler/checker.cr`：判定点、公理区、泛型与接口。
+- `src/compiler/monomorph.cr`：实例化。
+- `src/compiler/ir_gen.cr`：表示层读 N 的两处。
+判据通道 = `corec selftest-types`、`--type-shadow` 与 `tests/selfhost/test_type_engine.py`。
 
-**Spec:** `docs/superpowers/specs/2026-09-10-type-interface-unification-design.md` §5（能力落点：§5.1 定长/序列/长度约束、§5.2 泛型、§5.3 impl、§5.4 穷尽性/联合/可选）+ §1/§2（语义基座/双轴注册表）+ §9 P3 行；方向定案 `docs/superpowers/specs/2026-08-30-type-system-direction-design.md` 条目 8；定长裁决 `docs/superpowers/specs/2026-09-10-language-surface-narrowing-design.md` §1 + TODO.md `fixed-array-retire`（TODO.md:446）。**前置状态（已实测，非本计划目标）**：P0 引擎 + **95 例**（`selftest-types` 95/95）；P1 影子（开/关两态产物逐字节同）；P2a 判定替换（`type_equal` → `ty_equiv`）+ 语料对拍归零。
+**Spec:** 本计划的规约来源如下。
+- `docs/superpowers/specs/2026-09-10-type-interface-unification-design.md` §5 给出能力落点：§5.1 定长/序列/长度约束、§5.2 泛型、§5.3 impl、§5.4 穷尽性/联合/可选；该文档的 §1/§2 给出语义基座与双轴注册表；§9 的 P3 行给出阶段划分。
+- `docs/superpowers/specs/2026-08-30-type-system-direction-design.md` 条目 8 为方向定案。
+- `docs/superpowers/specs/2026-09-10-language-surface-narrowing-design.md` §1 与 `TODO.md` 的 `fixed-array-retire` 条目（TODO.md:446）为定长裁决。
+**前置状态（已实测，非本计划目标）**：P0 引擎已落地并含 **95 例**（`selftest-types` 95/95）；P1 影子层已落地（开/关两态产物逐字节相同）；P2a 已完成判定替换（`type_equal` → `ty_equiv`），语料对拍归零。
 
 ## Global Constraints
 
-- **jj only（禁 git 含只读/复合）**；**提交路径限定**；所有命令 `nice -n 19`；判据前 `clean-cache`、cwd = 仓库根（比较任何 `.ccr`/缓存态产物前必须 clean-cache——TODO #2026-09-10-1 末条/#26）。
-- **ELF canary 本计划全任务预期不变**：`clean-cache` → `build tests/suite/ptr_arith.cr --static -o /tmp/…` → sha256 `95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475`（即 `/tmp/r1t4_base_bin`）。**任一任务 ELF 变 → 停下上报**（类型层改动泄进发射面）。⚠ canary 语料（`tests/suite/ptr_arith.cr`：一个数组字面量 + 取址/解引用，**无切片/联合/match**）对类型层改动**不敏感**——它是「发射面零泄漏」证据，**不得**当新语义正确性证据；新语义一律由**行为探针**承担（各任务判据步单列）。
-- **`.ccr` 预期与实测**：Task 0/1/2/3 预期不变（类型表行序不动）；**Task 4（退役内建 Option 注册）/ Task 5（实例键类型项化）预期会变**（命名行编号 / SYM 中 mangled 实例名）→ **允许但必须实测报告**；判据按 TODO #2026-09-11-9 = **结构性断言**（`tests/selfhost/test_ccr_v7.py` 全绿）+ 语义零变化 + 自举稳定（`corec2/corec3` `cmp` IDENTICAL + N06=0 + 冒烟 42），不以「与旧版逐字节同」为准。ELF 同时变 → 停下上报。
-- **三态纪律（P0/P1/P2a 继承）**：引擎 -1（预算耗尽/未覆盖面）**不得**当 0/1 用；判定路径回落（`type_equal_legacy`）必须计数（`g_replace_unknown`/`g_replace_bridge`）并单列。新引擎查询自带预算前后隔离（照 `type_equal_engine`，checker.cr:500-502）。
-- **影子对拍门（每任务复跑）**（**R2 P5 Task 5 起作废**：影子通道已整体下线 ⇒ 改由 **冻结基线同源对拍 + 行为探针 + 突变控制** 承担，见 `TODO.md` #48 与 findings §15；本行余下语义——「零差异 ≠ 面收敛」与站点覆盖范围——**继续有效**，只是证据载体从对拍换为行为探针）：基线 = 71 候选 / **67 有效文件 / 26,989 判定全 agree / `old_stricter=0` / `old_looser=0` / `unknown=0` / `replace_*=0`**（findings §11）。**必须与站点覆盖同报**（站点 1/2/4/6 语料零命中、3 仅 2 次）——「零差异」≠「面收敛」；新能力面（match/切片/泛型约束/impl）语料零命中 ⇒ 由定向探针承担。
-- **收紧处置（spec §0 裁决 6）**：新判定若「旧接受 → 新拒绝」，逐条记录（文件/用例/旧判定/新判定/处置）；涉及自举源码先跑全语料清单再改；**语义争议停下上报**。
-- **新硬错误先报告后开门**：任何把新检查升为 rc=1 门的步骤（穷尽性、长度方向、可选面）必须先在**全语料**（`src/compiler/_import.cr` 自指 + `tests/suite` + `tests/selfhost` 内联源 + `src/stdlib` + `examples`）report-only 跑一遍，清单审查后再入 `run_frontend` 硬错误名单（main.cr:146-158；照 #29 先例）。语料排除项见 TODO #2026-09-11-6（`src/compiler/elf.cr` 陈旧 2 parse error；`tests/suite/test_control_flow.cr`/`test_generics.cr` 0 字节）。
-- **不得回退既有收纳**：TS01-04/TK02 硬错误门（#29）、F2 常量档拒绝语义与「N 不回身份」（#19/#24）、F5 槽位契约（#25/#28）、效应/纯度判据（#26/#27）本计划一律不动；冲突 → 停下上报。
-- 本语言无三元运算符；取模须非负；键比较不得依赖 i64 回绕；noclobber（`>|`）；自测用例**只增不减**（`test_type_engine.py:MIN_CASES=32` 为下限，逐任务下限见各任务判据）。
+- **版本控制限定为 jj**（禁用 git，含只读与复合调用）；**提交路径限定**；所有命令一律加 `nice -n 19`；判据执行前先 `clean-cache`，cwd 固定为仓库根。比较任何 `.ccr` 或缓存态产物之前必须 clean-cache（TODO #2026-09-10-1 末条/#26）。
+- **ELF canary 在本计划全任务预期不变**：命令序列为 `clean-cache` → `build tests/suite/ptr_arith.cr --static -o /tmp/…` → sha256 `95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475`（即 `/tmp/r1t4_base_bin`）。任一任务出现 ELF 变化**即停下上报**，其含义为类型层改动泄进发射面。⚠ canary 语料（`tests/suite/ptr_arith.cr`：一个数组字面量加取址/解引用，**无切片/联合/match**）对类型层改动**不敏感**。它是「发射面零泄漏」的证据，**不得**当作新语义正确性的证据；新语义一律由**行为探针**承担（各任务判据步单列）。
+- **`.ccr` 的预期与实测分档**：Task 0/1/2/3 预期不变（类型表行序不动）；**Task 4（退役内建 Option 注册）与 Task 5（实例键类型项化）预期会变**（命名行编号或 SYM 中 mangled 实例名），**允许变化但必须实测报告**。判据按 TODO #2026-09-11-9 = **结构性断言**（`tests/selfhost/test_ccr_v7.py` 全绿）加语义零变化加自举稳定（`corec2/corec3` `cmp` IDENTICAL + N06=0 + 冒烟 42），不以「与旧版逐字节同」为准。ELF 同时变化**即停下上报**。
+- **三态纪律（继承 P0/P1/P2a）**：引擎返回 -1（预算耗尽或未覆盖面）时**不得**当 0/1 使用；判定路径的回落（`type_equal_legacy`）必须计数（`g_replace_unknown`/`g_replace_bridge`）并单列。新引擎查询自带预算前后隔离（照 `type_equal_engine`，checker.cr:500-502）。
+- **影子对拍门（每任务复跑）**（**R2 P5 Task 5 起作废**：影子通道已整体下线，改由**冻结基线同源对拍 + 行为探针 + 突变控制**承担，见 `TODO.md` #48 与 findings §15；本行余下语义——「零差异 ≠ 面收敛」与站点覆盖范围——**继续有效**，只是证据载体从对拍换为行为探针）：基线 = 71 候选，其中 **67 有效文件、26,989 判定全 agree、`old_stricter=0`、`old_looser=0`、`unknown=0`、`replace_*=0`**（findings §11）。该结果**必须与站点覆盖同报**（站点 1/2/4/6 语料零命中、3 仅 2 次），因为「零差异」不等于「面收敛」；新能力面（match/切片/泛型约束/impl）语料零命中，其正确性由定向探针承担。
+- **收紧处置（spec §0 裁决 6）**：新判定若出现「旧接受 → 新拒绝」，须逐条记录（文件、用例、旧判定、新判定、处置）。涉及自举源码时先跑全语料清单再改；**语义争议停下上报**。
+- **新硬错误先报告后开门**：任何把新检查升为 rc=1 门的步骤（穷尽性、长度方向、可选面）必须先在**全语料**上以 report-only 跑一遍，清单审查后再入 `run_frontend` 硬错误名单（main.cr:146-158；照 #29 先例）。全语料 = `src/compiler/_import.cr` 自指、`tests/suite`、`tests/selfhost` 内联源、`src/stdlib` 与 `examples`。语料排除项见 TODO #2026-09-11-6（`src/compiler/elf.cr` 陈旧 2 parse error；`tests/suite/test_control_flow.cr`/`test_generics.cr` 0 字节）。
+- **不得回退既有收纳**：TS01-04/TK02 硬错误门（#29）、F2 常量档拒绝语义与「N 不回身份」（#19/#24）、F5 槽位契约（#25/#28）、效应/纯度判据（#26/#27）在本计划中一律不动；出现冲突**即停下上报**。
+- 本语言无三元运算符；取模须非负；键比较不得依赖 i64 回绕；重定向使用 noclobber（`>|`）。自测用例**只增不减**（`test_type_engine.py:MIN_CASES=32` 为下限，逐任务下限见各任务判据）。
 
-## 侦查底座（2026-09-11 实读 + 定向实测，file:line = 当前工作树）
+## 侦查底座（2026-09-11 实读与定向实测，file:line 均为当前工作树）
 
-**引擎/桥接（能力落点现状）**
-- 三态 API：`ty_sub`/`ty_equiv`/`ty_disjoint`/`ty_inhabited`/`tt_witness`/`ty_exhaustive`（type_engine.cr:390/405/479/414/448/471）；`tt_norm`（type_terms.cr:326）；预算 `ty_budget_reset`（type_engine.cr:301）。
-- P0 显式未覆盖面（type_engine.cr:10-13）：① 参数化原子**仅同形判等**（变型 = P3）；② `AK_NAMED` **不展开**；③ 空递归保守 -1。变型现状证据 = 同类参数不同形 → `-1`（type_engine.cr:175-182）+ `tt_list_same` 结构相等（:187-193）。
-- 桥接（ty_shadow.cr:194-246）：`TYP_ARRAY`/`TYP_SLICE` **同归** `AK_SEQUENCE(elem)`（:217-220，固定性与 N 均不入项）；`TYP_REF` 的 mut 标记**不入参数链**（:224-227，注记自认「引擎无只读/可写区分 = P3 条目化面」）；`TYP_NAMED`/`TYP_GENERIC_PARAM`/`TYP_GENERIC_APPLY` → `AK_NAMED`（:230-231）；`TYP_TUPLE` → `AK_PRODUCT`（:178-191）。桥接缓存随 `init_types()` 失效（:98-102）。
+**引擎与桥接（能力落点现状）**
+- 三态 API：`ty_sub`、`ty_equiv`、`ty_disjoint`、`ty_inhabited`、`tt_witness`、`ty_exhaustive`（type_engine.cr:390/405/479/414/448/471）；`tt_norm`（type_terms.cr:326）；预算重置为 `ty_budget_reset`（type_engine.cr:301）。
+- P0 显式未覆盖面（type_engine.cr:10-13）：① 参数化原子**仅同形判等**（变型 = P3）；② `AK_NAMED` **不展开**；③ 空递归保守 -1。变型现状的证据 = 同类参数不同形返回 `-1`（type_engine.cr:175-182），加 `tt_list_same` 的结构相等（:187-193）。
+- 桥接现状（ty_shadow.cr:194-246）：`TYP_ARRAY` 与 `TYP_SLICE` **同归** `AK_SEQUENCE(elem)`（:217-220，固定性与 N 均不入项）；`TYP_REF` 的 mut 标记**不入参数链**（:224-227，注记自认「引擎无只读/可写区分 = P3 条目化面」）；`TYP_NAMED`、`TYP_GENERIC_PARAM` 与 `TYP_GENERIC_APPLY` 归 `AK_NAMED`（:230-231）；`TYP_TUPLE` 归 `AK_PRODUCT`（:178-191）。桥接缓存随 `init_types()` 失效（:98-102）。
 
-**判定点/长度约束（P2a 现状）**
-- `type_equal_engine`（checker.cr:492-508）+ 包装（:515-523）；`type_equal_legacy`（:419-477，对照物 + 回落，P5 删）；10 站点表（ty_shadow.cr:252-269）。
-- `array_len_constraint_ok`（checker.cr:346-386）= **常量档**、下钻 6 位（数组/指针/引用/切片/元组字段/泛型实参）；**异 kind → 返回 1（无约束）**；`type_compat_strict`（:394-398）= 身份 ∧ 长度；判定点 10 处（:1088/1455/1468/1483/1732/1927/2320/2654/2780/2845）。
-- **实测（2026-09-11，探针 `/tmp/r2p3_probe/`，cwd=探针目录，`build/corec` = 20:39 构建）**：
-  - pA `fn g() -> [int;3] { b:[int;4]=[1,2,3,4]; return b[0..2]; }` → **rc=0、零诊断**（切片值当 `[int;3]` 用 = **静默放宽**；读码：legacy 数组分支要求两侧同为 `TYP_ARRAY`（:432-434），跨 kind 判 false ⇒ 此为 P2a 替换后的**现行语义洞**。P2a 前为 `error[TF01]`——此「前值」为读码结论，**未实测**）。
-  - pB `fn h() -> [int] { c:[int;3]=[1,2,3]; return c; }` → rc=0（符合 spec §5.1 `[T;N] <: [T]`）。
-  - pC 异长（`[int;4]` 在返回位给 `[int;3]`）→ rc=1 `error[TF01]: Array length constraint not satisfied`（常量档拒绝仍在）。
-  - pD `fn f(x: int?) -> int` + `v := Some(3)`（无用户 `enum Option`）→ rc=1 `error[N01]: Undefined enum constructor 'Some'`。
+**判定点与长度约束（P2a 现状）**
+- `type_equal_engine`（checker.cr:492-508）与其包装（:515-523）；`type_equal_legacy`（:419-477，兼作对照物与回落实现，P5 删除）；10 站点表在 ty_shadow.cr:252-269。
+- `array_len_constraint_ok`（checker.cr:346-386）= **常量档**，下钻 6 位（数组、指针、引用、切片、元组字段、泛型实参）；**异 kind 时返回 1（无约束）**。`type_compat_strict`（:394-398）= 身份 ∧ 长度。判定点共 10 处（:1088/1455/1468/1483/1732/1927/2320/2654/2780/2845）。
+- **实测（2026-09-11，探针目录 `/tmp/r2p3_probe/`，cwd = 探针目录，`build/corec` = 20:39 构建）**：
+  - pA `fn g() -> [int;3] { b:[int;4]=[1,2,3,4]; return b[0..2]; }` → **rc=0、零诊断**。切片值当 `[int;3]` 用构成**静默放宽**。读码结论：legacy 数组分支要求两侧同为 `TYP_ARRAY`（:432-434），跨 kind 判 false，因此这是 P2a 替换后的**现行语义洞**。P2a 前为 `error[TF01]`；该「前值」为读码结论，**未实测**。
+  - pB `fn h() -> [int] { c:[int;3]=[1,2,3]; return c; }` → rc=0（符合 spec §5.1 的 `[T;N] <: [T]`）。
+  - pC 异长（返回位以 `[int;4]` 给 `[int;3]`）→ rc=1 `error[TF01]: Array length constraint not satisfied`（常量档拒绝仍在）。
+  - pD `fn f(x: int?) -> int` 配合 `v := Some(3)`（无用户 `enum Option`）→ rc=1 `error[N01]: Undefined enum constructor 'Some'`。
 
-**定长退役「未办面」枚举（读码逐条，非猜）**
-1. **array/slice 判等过度合并**：桥接同译 `AK_SEQUENCE(elem)`（ty_shadow.cr:217-220）+ `array_len_constraint_ok` 异 kind 返回 1（checker.cr:349）⇒ 方向不设防（实测 pA）。
-2. **变型规则缺位**：参数链不携带「固定长/视图」「只读/可写」维度（ty_shadow.cr:220/225-227）⇒ `[T;N] <: [T]`、`[T;N] ≢ [T]`、`&T` vs `&mut T` 均无法表达。
-3. **长度档位**：常量档已有（:346-386）；**符号档/动态档未实现**（:343-344 自注「P3 面」）。本次裁定：动态档 = 既有运行期检查（`g_ir_slice_lens` 侧表 + `IR_BOUNDS_CHECK`，R1 已落、TODO F11 划销）+ checker 字面量界检查（:2586-2602）；**符号档 = VC 义务，本计划不实现，显式登记**。
-4. **N 读取面边界**：`get_type_extra(TYP_ARRAY)` 仍被读 5 处——常量档（:351）、F11 字面量切片界（:2589）、F2 字面量索引界（:2609）、表示层 `ir_gen.cr:120-131 arr_len_lit_of` / `:476-483 type_size`（+`type_align`）。退役后的**不变式** = 「N 只许被常量档检查与表示层读，身份/子类型路径零 N」——Task 1 为它加守门用例。
-5. 自举源码 10 处 `[T; N]` 零改造（R1 裁决）——Task 1 判据复验。
+**定长退役「未办面」枚举（逐条读码所得，非推测）**
+1. **array/slice 判等过度合并**：桥接把两者同译为 `AK_SEQUENCE(elem)`（ty_shadow.cr:217-220），且 `array_len_constraint_ok` 在异 kind 时返回 1（checker.cr:349），因此方向不设防（实测 pA）。
+2. **变型规则缺位**：参数链不携带「固定长/视图」与「只读/可写」维度（ty_shadow.cr:220/225-227），因此 `[T;N] <: [T]`、`[T;N] ≢ [T]` 与 `&T` vs `&mut T` 均无法表达。
+3. **长度档位**：常量档已有（:346-386）；**符号档与动态档均未实现**（:343-344 自注「P3 面」）。本次裁定：动态档 = 既有运行期检查（`g_ir_slice_lens` 侧表与 `IR_BOUNDS_CHECK`，R1 已落、TODO F11 划销）加 checker 字面量界检查（:2586-2602）；**符号档 = VC 义务，本计划不实现，显式登记**。
+4. **N 读取面边界**：`get_type_extra(TYP_ARRAY)` 仍被读 5 处，分别为常量档（:351）、F11 字面量切片界（:2589）、F2 字面量索引界（:2609），以及表示层 `ir_gen.cr:120-131 arr_len_lit_of` 与 `:476-483 type_size`（连同 `type_align`）。退役后的**不变式** = 「N 只许被常量档检查与表示层读，身份/子类型路径零 N」；Task 1 为它加守门用例。
+5. 自举源码的 10 处 `[T; N]` 零改造（R1 裁决），由 Task 1 判据复验。
 
 **穷尽性/联合/可选（现状）**
-- match **零检查**：`EC_TM_*` 仅定义（ast.cr:443-451），`checker.cr` 零 raise；`EXPR_MATCH` 只推臂体（:2407-2451），模式绑定变量**恒 `TI_INT`**（:2431/:2439）；臂类型一致性、模式 vs scrutinee、穷尽性、冗余臂全无。模式形态（parser.cr:1020-1040）：通配 / 字面量（int/string/char/bool）/ 绑定 ident / 枚举 / struct 模式。
-- enum：变体构造器注册为「返回枚举 named 类型的函数」（checker.cr:977-993）；`EXPR_ENUM_CONSTRUCTOR` 只解析名字（:2489-2507，载荷类型不校验）；表访问器 dyn_arr.cr:393-399；`MAX_ENUM_VARIANTS=16`（ast.cr:117）。
-- 可选：`T?` 降级为 `Option[T]`（parser.cr:139-143）；`Option` 仅在用户未声明时被注册为**一个 named 类型**（checker.cr:962-975）；`Some`/`None` 走 `EXPR_ENUM_CONSTRUCTOR`（parser.cr:418-431）⇒ 无用户 `enum Option` 时 `Some(3)` 报 N01（实测 pD）；`EXPR_TRY` 按**基名字符串** `"Option"`/`"Result"` 解包（checker.cr:2871-2888）。
-- 语料：`src/compiler/**` 与 `tests/suite/**` **零 `match` 表达式**、零 `enum` 声明（全仓 grep 仅注记命中）⇒ 穷尽性收紧的**自举风险 ≈ 0**；enum/match 仅出现在 `tests/selfhost/test_interp_float.py:34-35`、`test_interp_parity.py:54-74`、`test_native_memory.py:68`、`test_lsp.py:137-145` 内联 fixture（均为全变体覆盖的 3 变体枚举）。
+- match **零检查**：`EC_TM_*` 仅有定义（ast.cr:443-451），`checker.cr` 零 raise；`EXPR_MATCH` 只推臂体（:2407-2451），模式绑定变量**恒为 `TI_INT`**（:2431/:2439）；臂类型一致性、模式 vs scrutinee、穷尽性与冗余臂四项全无。模式形态（parser.cr:1020-1040）包含通配、字面量（int/string/char/bool）、绑定 ident、枚举与 struct 模式。
+- enum：变体构造器注册为「返回枚举 named 类型的函数」（checker.cr:977-993）；`EXPR_ENUM_CONSTRUCTOR` 只解析名字（:2489-2507，载荷类型不校验）；表访问器在 dyn_arr.cr:393-399；`MAX_ENUM_VARIANTS=16`（ast.cr:117）。
+- 可选：`T?` 降级为 `Option[T]`（parser.cr:139-143）；`Option` 仅在用户未声明时被注册为**一个 named 类型**（checker.cr:962-975）；`Some` 与 `None` 走 `EXPR_ENUM_CONSTRUCTOR`（parser.cr:418-431），因此无用户 `enum Option` 时 `Some(3)` 报 N01（实测 pD）；`EXPR_TRY` 按**基名字符串** `"Option"`/`"Result"` 解包（checker.cr:2871-2888）。
+- 语料：`src/compiler/**` 与 `tests/suite/**` **零 `match` 表达式**、零 `enum` 声明（全仓 grep 仅注记命中），因此穷尽性收紧的**自举风险 ≈ 0**；enum/match 仅出现在 `tests/selfhost/test_interp_float.py:34-35`、`test_interp_parity.py:54-74`、`test_native_memory.py:68` 与 `test_lsp.py:137-145` 的内联 fixture，且均为全变体覆盖的 3 变体枚举。
 
 **泛型约束（现状）**
-- 约束语法仅**函数**泛型有：`parse_generics_into` 收 `T: I`（parser.cr:1184-1188）→ `save_func_gen_constrs`（:1210-1222，索引 `fi * MAX_GENERICS + gi`）；**结构/枚举/接口泛型把约束写进 dummy 缓冲后丢弃**（parser.cr:1533/:1575/:1628）⇒ `struct S[T: I]` 静默无约束。
-- 调用点检查 = 名字拼接 + `check_iface`（checker.cr:1562-1598 → :1588）；泛型体内经约束的方法调用同样走名拼接（:2103-2144）。
-- monomorph：实例键 = **逗号分隔类型名字符串**，由 `ir_gen` 从**调用实参**的 `irv_type` 生成（ir_gen.cr:1497-1513），**非原生类型一律兜底 `"int"`**（:1511；读码 ⇒ 不同类型实参可折叠到同一实例，**未实测**）；去重 `istr_eq`（monomorph.cr:443-456）；替换 = 名字文本替换（:64-89）；`MAX_GENERICS=4`（ast.cr:115）。
+- 约束语法仅**函数**泛型具有：`parse_generics_into` 收 `T: I`（parser.cr:1184-1188），转入 `save_func_gen_constrs`（:1210-1222，索引为 `fi * MAX_GENERICS + gi`）；**结构/枚举/接口泛型把约束写进 dummy 缓冲后丢弃**（parser.cr:1533/:1575/:1628），因此 `struct S[T: I]` 静默无约束。
+- 调用点检查 = 名字拼接加 `check_iface`（checker.cr:1562-1598 → :1588）；泛型体内经约束的方法调用同样走名拼接（:2103-2144）。
+- monomorph：实例键 = **逗号分隔类型名字符串**，由 `ir_gen` 从**调用实参**的 `irv_type` 生成（ir_gen.cr:1497-1513），**非原生类型一律兜底 `"int"`**（:1511；读码结论 ⇒ 不同类型实参可折叠到同一实例，**未实测**）。去重用 `istr_eq`（monomorph.cr:443-456）；替换用名字文本替换（:64-89）；`MAX_GENERICS=4`（ast.cr:115）。
 
 **impl/interface（现状）**
-- 表：`g_ifaces` 1432B/条（16 方法 × 88B、方法参数 ≤8；dyn_arr.cr:143-149）；签名存**裸 `TY_*`**（parser.cr:1671/1685 `unpack_type`）⇒ 签名**无法表达命名/泛型类型**。`g_impl_for` 16B 存两名字 ni（parser.cr:1763-1767）。
-- 判定：`find_iface`（checker.cr:844-852）/`type_has_method`（:873-879，名字拼接 `Type.method`）/`check_iface`（:881-904）/`check_impl_for`（:1746-1807，param/ret 裸 TY 比较）。
-- **ir_gen 零消费、.ccr 零序列化**（spec §11 已核）；覆盖 = `tests/selfhost/test_impl.py` 5 check + 2 native 例，**全为固有方法**（`impl Vec { … }`），`interface`/`impl I for T` 零命中（实读）。
+- 表：`g_ifaces` 为 1432B/条（16 方法 × 88B、方法参数 ≤8；dyn_arr.cr:143-149）；签名存**裸 `TY_*`**（parser.cr:1671/1685 的 `unpack_type`），因此签名**无法表达命名/泛型类型**。`g_impl_for` 16B，存两个名字 ni（parser.cr:1763-1767）。
+- 判定：`find_iface`（checker.cr:844-852）、`type_has_method`（:873-879，名字拼接 `Type.method`）、`check_iface`（:881-904）与 `check_impl_for`（:1746-1807，param/ret 按裸 TY 比较）。
+- **ir_gen 零消费、.ccr 零序列化**（spec §11 已核）；覆盖 = `tests/selfhost/test_impl.py` 的 5 个 check 例加 2 个 native 例，**全为固有方法**（`impl Vec { … }`），`interface`/`impl I for T` 零命中（实读）。
 
 **产物面（判据依据）**
-- ELF 无符号表（`src/format/elf/elf.cr` 全文件 `symtab` 零命中）⇒ 函数名/mangled 名**不入 ELF**；`.ccr` 函数记录含 `name_idx`、NOD/var 含类型行号（ccr_io.cr:39-47/129-130）⇒ 命名行编号或实例名变化 → `.ccr` 字节变（允许、须报告）。
+- ELF 无符号表（`src/format/elf/elf.cr` 全文件 `symtab` 零命中），因此函数名与 mangled 名**不入 ELF**。`.ccr` 函数记录含 `name_idx`，NOD/var 含类型行号（ccr_io.cr:39-47/129-130），因此命名行编号或实例名变化会导致 `.ccr` 字节变化（允许，须报告）。
 
-## 与 P2b 的交接面（阻塞 / 非阻塞）
+## 与 P2b 的交接面（阻塞项与非阻塞项）
 
 | P3 项 | 阻塞于 P2b？ | 说明 |
 |---|---|---|
@@ -75,13 +89,19 @@
 | 序列接口 / 横切接口 | **是** | 横切轴条目（`sequence<⊤>`、只读/可写两形状）属注册表；P3 增量 = 形状条目内容 + 消费点（索引/切片/迭代）接线 |
 | impl 契约（用户轴） | **是** | 条目升级（形状项引用 + 满足关系）+ `g_ifaces` 布局 + mangling 退役归 P2b；P3 增量 = 签名类型项化 + 覆盖集 |
 
-**交接契约（要求 P2b 落点提供；若落地形态与此不符 → 停下上报后重定 Task 2/6）**：① `iface_satisfies(t_ti: int, iface_ni: int) -> int`（三态 1/0/-1，不得静默当 0）；② 本质条目留可扩展字段——`操作许可`（P2b 落）与**变型规则**（P3 落；引擎侧表可先在 Task 1 落，条目字段后续挂引用）；③ `res_type_node` 单一化后 `TYP_ARRAY`/`TYP_SLICE`/`TYP_NAMED` 构造语义不得变化（Task 0/1 依赖）。
+**交接契约（要求 P2b 落点提供；若落地形态与此不符，则停下上报后重定 Task 2/6）**：
+① `iface_satisfies(t_ti: int, iface_ni: int) -> int`，三态取值 1/0/-1，不得静默当 0。
+② 本质条目留可扩展字段——`操作许可`（P2b 落）与**变型规则**（P3 落；引擎侧表可先在 Task 1 落，条目字段后续挂引用）。
+③ `res_type_node` 单一化后，`TYP_ARRAY`/`TYP_SLICE`/`TYP_NAMED` 的构造语义不得变化（Task 0/1 依赖）。
 
-> **P2b 已落地（2026-09-11，提交链 `7f520dce`→`30545da7`）——本条契约按 P2b 实际交付面重定，实施前必读附录 A；⚠ 其后的 ① 已被 P3b Task 0 关闭（2026-09-12，见附录 B.1 首注）**：① **`iface_satisfies` 未交付**（P2b 范围明标「零调用者，P3 落地 impl 语义时才有对象」，见附录 A.3-①）⇒ Task 2/6 与 Task 5 的 `T: I` 满足半边**开工前先补条目 + 满足判定**；② 条目表已落 5 字段 `{ak, ti_row, name_ni, lit_code, ops}`（40B/条，无变型规则字段；`name_ni` 现为 `-1`——.ccr STR 段硬判据，见 A.3-②）⇒ 变型规则无处挂，Task 1 按「引擎侧表先行」约定落地（本计划原文已备此路）；③ 已满足：`res_type_node`/`res_call_type` 经单表 `ty_code_to_ti`，`TYP_ARRAY`/`TYP_SLICE`/`TYP_NAMED` 三构造语义零变化（P2b 全判据 = 零行为变化）。
+> **P2b 已落地（2026-09-11，提交链 `7f520dce`→`30545da7`）——本条契约按 P2b 实际交付面重定，实施前必读附录 A。⚠ 上述第 ① 项已被 P3b Task 0 关闭（2026-09-12，见附录 B.1 首注）**：
+> ① **`iface_satisfies` 未交付**（P2b 范围明标「零调用者，P3 落地 impl 语义时才有对象」，见附录 A.3-①），因此 Task 2/6 与 Task 5 的 `T: I` 满足半边**开工前先补条目与满足判定**。
+> ② 条目表已落 5 字段 `{ak, ti_row, name_ni, lit_code, ops}`（40B/条，无变型规则字段；`name_ni` 现为 `-1`——.ccr STR 段硬判据，见 A.3-②），因此变型规则无处挂，Task 1 按「引擎侧表先行」约定落地（本计划原文已备此路）。
+> ③ 已满足：`res_type_node`/`res_call_type` 经单表 `ty_code_to_ti`，`TYP_ARRAY`/`TYP_SLICE`/`TYP_NAMED` 三构造语义零变化（P2b 全判据 = 零行为变化）。
 
 ---
 
-## Task 0（P3a，前置）：引擎展开层——named/struct/enum/generic-apply → 结构项
+## Task 0（P3a，前置）：引擎展开层（named/struct/enum/generic-apply → 结构项）
 
 **Files:** Modify `src/compiler/ty_shadow.cr`（新增展开查询，**不改**既有分支语义）· `src/compiler/checker.cr`（暴露 名字→struct/enum 行 查询）· `src/compiler/type_engine.cr`（满足判定入口占位）· `src/compiler/type_selftest.cr`
 
@@ -93,11 +113,12 @@ fn sh_enum_domain_term(ti: int) -> int     // enum named → AK_SUM 变体项之
 fn sh_variant_term(ti: int, name_ni: int) -> int  // 变体名 → 变体项（穷尽性模式项用）
 fn sh_iface_shape_term(iface_ni: int) -> int      // 接口 → 形状项（方法集 product of fn；P2b 条目就绪前返回 -1）
 ```
-**语义边界（实施须遵守）**：展开**只服务** ① 满足判定 `T <: 形状` ② 穷尽性域/模式项。**等价/包含判定（`type_equal` 路径）保持原子名义，不展开**——否则同形不同名类型被判等价 = 语义漂移，且推翻 P2a 对拍归零基线。一层深度不足 → 按引擎既有规则 -1 上抛。
+**语义边界（实施须遵守）**：展开**只服务** ① 满足判定 `T <: 形状` 与 ② 穷尽性域/模式项。**等价/包含判定（`type_equal` 路径）保持原子名义，不展开**，否则同形不同名类型会被判等价，构成语义漂移，并推翻 P2a 的对拍归零基线。一层深度不足时，按引擎既有规则 -1 上抛。
 
-- [ ] **Step 1: 用例（红）6 例**（`type_selftest.cr`）：struct → product 字段序；enum → sum 变体数；`Box[int]` 域展开含实参代入；**名义不漂移**（两个同形不同名 struct：`ty_equiv` 仍 **-1**、`type_equal` 仍 false）；行号越界 → -1；展开缓存命中计数。**为何 6 例**：四个正向形态 + 一条名义不变量双锁定 + 一条缺口上抛。
-- [ ] **Step 2: 实现 + 缓存**（照 `sh_map_*` 先例：装填守卫 / 重建重放 / 回写重探；`find_struct`/`find_enum`/`find_iface`（checker.cr:824-852）为名字入口）。
-- [ ] **Step 3: 判据**：`selftest-types` **95 → ≥101**；影子对拍复跑（**预期零变化**——展开未接入 `type_equal` 路径；`unknown`/`replace_*` 若变 → 逐条归因登记）；ELF canary IDENTICAL（clean-cache）；`test_compile`/`test_purity`/`test_ccr_v7` 绿。
+- [ ] **Step 1: 用例（红）6 例**（`type_selftest.cr`）：struct → product 字段序；enum → sum 变体数；`Box[int]` 域展开含实参代入；**名义不漂移**（两个同形不同名 struct：`ty_equiv` 仍 **-1**、`type_equal` 仍 false）；行号越界 → -1；展开缓存命中计数。
+  **为何 6 例**：四个正向形态，加一条名义不变量双锁定，加一条缺口上抛。
+- [ ] **Step 2: 实现 + 缓存**（照 `sh_map_*` 先例：装填守卫、重建重放、回写重探；名字入口为 `find_struct`/`find_enum`/`find_iface`（checker.cr:824-852））。
+- [ ] **Step 3: 判据**：`selftest-types` 由 **95 增至 ≥101**；影子对拍复跑（**预期零变化**，因为展开未接入 `type_equal` 路径；`unknown`/`replace_*` 若变则逐条归因登记）；ELF canary IDENTICAL（clean-cache）；`test_compile`/`test_purity`/`test_ccr_v7` 绿。
 - [ ] **Step 4: 提交**：`feat: R2 P3 Task 0——引擎展开层（struct→product / enum→sum / generic-apply 代入；仅满足判定与域查询用，等价判定保持原子名义）`
 
 ## Task 1（P3a）：定长退役收尾——array/slice 方向 + 变型 + 长度档位
@@ -112,10 +133,11 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 ```
 **语义（spec §5.1）**：`[T;N] <: [T]`（更强长度约束 = 子类型）；`[T] ⊄ [T;N]`（除非证 len==N）；只读序列视图**协变**、可写视图**不变**；`&T`/`&mut T` 进参数链（mut 标记成为判定维度，替代 ty_shadow.cr:224-227 的「不入链」）。
 
-- [ ] **Step 1: 用例（红）8 例**：方向 4（`[int;3] <: [int]` = 1 / `[int] <: [int;3]` = 0 / `[int;3]` vs `[int;4]`：等价判 1（N 不入身份）+ 常量档拒 0 / slice vs slice 同元素 = 1）；变型 2（只读协变通过、可写不变拒绝）；**N 读取面守门 1**（身份路径零 N：`type_equal` 对异长同结构仍 true，且 `array_len_constraint_ok` 是唯一拒绝来源）；**动态档登记 1**（切片运行期长度不可证 ⇒ 视图→固定拒绝，不给 -1 当 0）。**为何 8 例**：每条方向/变型规则正负控成对 + N 边界双锁定 + 三态纪律。
+- [ ] **Step 1: 用例（红）8 例**：方向 4 例（`[int;3] <: [int]` = 1；`[int] <: [int;3]` = 0；`[int;3]` vs `[int;4]` 的等价判 1（N 不入身份）加常量档拒 0；slice vs slice 同元素 = 1）；变型 2 例（只读协变通过、可写不变拒绝）；**N 读取面守门 1 例**（身份路径零 N：`type_equal` 对异长同结构仍 true，且 `array_len_constraint_ok` 是唯一拒绝来源）；**动态档登记 1 例**（切片运行期长度不可证 ⇒ 视图→固定拒绝，不给 -1 当 0）。
+  **为何 8 例**：每条方向/变型规则的正负控成对，加 N 边界双锁定，加三态纪律。
 - [ ] **Step 2: 实现**（变型表首版仅含 `AK_SEQUENCE`/`AK_REF`/`AK_PTR` 三构造子，其余默认不变；`tt_list_same` 改为按 `ty_variance_of` 递归，**不得**改变同形时的既有结果——同形判定仍是 1）。
-- [ ] **Step 3: 行为探针（本任务主判据）**：pA 必须由 rc=0 翻为 **rc=1 + 专属措辞**（收紧清单第 1 条）；pB/pC 语义保持（pB rc=0、pC rc=1 TF01）；新增 pE（`&mut T` 形参接 `&T` 实参拒绝 / 反向拒绝）；嵌套位沿用 f2.* 探针形态（`[[int;3];2]`、`G<[int;3]>`、`*[int;3]`、`(int,[int;3])`）。
-- [ ] **Step 4: 判据**：`selftest-types` 101 → **≥109**；影子对拍复跑（预期零差异——N 面影子已失明，**不得**以对拍充当 N 面证据，findings §11）；全语料 report-only（收紧面清单）→ 自举源码 10 处 `[T;N]` 复验零改造；ELF canary IDENTICAL；全回归 + 自举链。
+- [ ] **Step 3: 行为探针（本任务主判据）**：pA 必须由 rc=0 翻为 **rc=1 + 专属措辞**（收紧清单第 1 条）；pB/pC 语义保持（pB rc=0、pC rc=1 TF01）；新增 pE（`&mut T` 形参接 `&T` 实参拒绝，反向亦拒绝）；嵌套位沿用 f2.* 探针形态（`[[int;3];2]`、`G<[int;3]>`、`*[int;3]`、`(int,[int;3])`）。
+- [ ] **Step 4: 判据**：`selftest-types` 由 101 增至 **≥109**；影子对拍复跑（预期零差异——N 面影子已失明，**不得**以对拍充当 N 面证据，findings §11）；全语料 report-only（收紧面清单）→ 自举源码 10 处 `[T;N]` 复验零改造；ELF canary IDENTICAL；全回归加自举链。
 - [ ] **Step 5: 提交**：`feat: R2 P3 Task 1——定长退役收尾（array<:slice 方向规则 + 只读协变/可写不变变型表 + N 读取面守门；修 slice→数组 静默放宽）`
 
 ## Task 2（P3b，P2b 后置）：横切接口——序列/可索引/可迭代/product 形状判定接线
@@ -124,10 +146,14 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 
 **依赖**：P2b 注册表的 `iface_satisfies` 与横切轴条目（交接契约 ①）。若 P2b 只落本质轴操作许可（lead 描述的窄版本），本任务 Step 1 先补横切轴条目再接线，并在报告登记范围扩大。
 
-- [x] **Step 1: 形状条目细化（spec §2.2 的「待细化」）**：`序列接口` ⟺ `sequence<⊤>`；**只读/可写两形状**（只读 = 协变、可写 = 不变，与 Task 1 变型表同源）；`可索引`/`可迭代`/`product` 三条目首版（形状项 = 对应 AK 的 ⊤ 实例化）。——**已交付（2026-09-12）**：六条形状项 = `iface_registry.cr` 横切形状段（`sh_shape_seq` / `sh_shape_seq_ro` / `sh_shape_seq_rw` / `sh_shape_indexable` / `sh_shape_iterable` / `sh_shape_product`）。**两处按实测重定**：① 「`sequence<⊤>`」按 Task 0 §1.3 勘误落 **`⊤ₖ` 类别形**（不变槽遇 ⊤ 落 -1）；② 只读形状 = 序列本体 ∪ **只读视图**（`&[⊤ₖ(SEQ)]`，协变槽判定）——「只读 = 协变」在**视图面**兑现，可写形状 = 本体面 + 拒绝只读视图，可写**视图**形状不可表达（-1，登记）。**名字面**：生产路径不注册（注册名 = 驻留 ni，初始化路径 `str_intern` 会动 `.ccr` STR 段 = A.3-② 硬约束）⇒ 消费者走无名字入口 `iface_satisfies_term`；命名消费语法待裁决。
-- [x] **Step 2: 用例（红）6 例**：数组/切片满足序列接口（正）；int 不满足（负）；只读形状接受数组与切片、可写形状拒绝只读视图；`可索引` 对字符串（TI_STR 索引已支持，checker.cr:2619-2633）正控；接口形状项不可展开 → -1（不得当 0）。——**已交付**：15 例（`x2.*`，两路咬合：形状判定 + 两条**全类型行枚举**等价；含非同一比较断言防快路径冒充判定、零 `str_intern` 守门、注册/复位泄漏守门）。
-- [x] **Step 3: 消费点接线**：索引（checker.cr:2581-2636）/切片（:2586-2602）的 `get_type_kind` 直比改为「形状满足 + 元素项取出」；**行为保持**（既有接受/拒绝集合不变，仅来源换位——如出现差异按收紧清单登记）。——**已交付**：索引兜底门 → 可索引形状（-1 回落许可表）；range 分支 → 序列形状 ∧ 固定性位（取自序列项 b 槽，`sh_seq_fixed_len_of_ti`）。结果三分支原地保留（A.2 #16-18）。**差异 = 0**（收紧/放宽皆 0；12 例老/新两二进制逐例同 + 全语料 check 面零差异）。
-- [x] **Step 4: 判据**：`selftest-types` ≥109 → **≥115**；影子对拍复跑（站点 8/5/7 主流量：**判定数应不变**，agree 全绿）；行为探针：数组/切片/字符串索引全部正例 + 负例（`int` 索引拒绝）；ELF canary IDENTICAL；全回归。——**已交付（按 P3a/P3b-T0 后基线重定阈值）**：`selftest-types` 304 → **319/319**；影子对拍全计数 0（判定数变化逐条归因 = 新源码行自身站点）；新套件 12 例挂 `run.sh`；ELF canary `95084e7b…d475` + `.ccr` 逐字节同；全回归 + 自举链 + 突变控制。
+- [x] **Step 1: 形状条目细化（spec §2.2 的「待细化」）**：`序列接口` ⟺ `sequence<⊤>`；**只读/可写两形状**（只读 = 协变、可写 = 不变，与 Task 1 变型表同源）；`可索引`/`可迭代`/`product` 三条目首版（形状项 = 对应 AK 的 ⊤ 实例化）。
+  ——**已交付（2026-09-12）**：六条形状项 = `iface_registry.cr` 横切形状段（`sh_shape_seq` / `sh_shape_seq_ro` / `sh_shape_seq_rw` / `sh_shape_indexable` / `sh_shape_iterable` / `sh_shape_product`）。**两处按实测重定**：① 「`sequence<⊤>`」按 Task 0 §1.3 勘误落 **`⊤ₖ` 类别形**（不变槽遇 ⊤ 落 -1）；② 只读形状 = 序列本体 ∪ **只读视图**（`&[⊤ₖ(SEQ)]`，协变槽判定）——「只读 = 协变」在**视图面**兑现；可写形状 = 本体面 + 拒绝只读视图，可写**视图**形状不可表达（-1，登记）。**名字面**：生产路径不注册（注册名 = 驻留 ni，初始化路径 `str_intern` 会动 `.ccr` STR 段 = A.3-② 硬约束），因此消费者走无名字入口 `iface_satisfies_term`；命名消费语法待裁决。
+- [x] **Step 2: 用例（红）6 例**：数组/切片满足序列接口（正）；int 不满足（负）；只读形状接受数组与切片、可写形状拒绝只读视图；`可索引` 对字符串成立（TI_STR 索引已支持，checker.cr:2619-2633）为正控；接口形状项不可展开时返回 -1（不得当 0）。
+  ——**已交付**：15 例（`x2.*`），两路咬合——形状判定，加两条**全类型行枚举**等价；含非同一比较断言（防快路径冒充判定）、零 `str_intern` 守门与注册/复位泄漏守门。
+- [x] **Step 3: 消费点接线**：索引（checker.cr:2581-2636）与切片（:2586-2602）的 `get_type_kind` 直比改为「形状满足 + 元素项取出」；**行为保持**（既有接受/拒绝集合不变，仅来源换位——如出现差异按收紧清单登记）。
+  ——**已交付**：索引兜底门 → 可索引形状（-1 回落许可表）；range 分支 → 序列形状 ∧ 固定性位（取自序列项 b 槽，`sh_seq_fixed_len_of_ti`）。结果三分支原地保留（A.2 #16-18）。**差异 = 0**（收紧与放宽皆 0；12 例老/新两二进制逐例同，加全语料 check 面零差异）。
+- [x] **Step 4: 判据**：`selftest-types` 由 ≥109 增至 **≥115**；影子对拍复跑（站点 8/5/7 主流量：**判定数应不变**，agree 全绿）；行为探针：数组/切片/字符串索引全部正例加负例（`int` 索引拒绝）；ELF canary IDENTICAL；全回归。
+  ——**已交付（按 P3a/P3b-T0 后基线重定阈值）**：`selftest-types` 由 304 增至 **319/319**；影子对拍全计数 0（判定数变化逐条归因 = 新源码行自身站点）；新套件 12 例挂 `run.sh`；ELF canary `95084e7b…d475` 加 `.ccr` 逐字节同；全回归加自举链加突变控制。
 - [x] **Step 5: 提交**：`feat: R2 P3 Task 2——横切接口接线（序列/可索引/可迭代/product 形状满足判定取代 TYP_* 直比；只读协变/可写不变两形状）`
 
 ## Task 3（P3a）：穷尽性真判定——match 补集空性 + 反例值
@@ -137,32 +163,37 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 **语义（spec §5.4）**：穷尽性 = 补集空性 ⇒ `ty_exhaustive(domain, patterns)`；反例给**具体值**（未被覆盖的变体名）。**域限定**：仅枚举 scrutinee 判穷尽（域 = 变体集）；int/string/bool/char 字面量模式与通配的域不判穷尽（**显式登记**：非枚举域不判，不得假装穷尽或假装不穷尽）；`-1`（未知）**不得**升为「不穷尽」硬错误。
 
 - [ ] **Step 1: 模式项收集**：臂模式 → 项（枚举模式 = `sh_variant_term`；绑定 ident = 通配但**不绑定值域**；通配 = ⊤）；scrutinee 类型 → 域项（`sh_enum_domain_term`，Task 0）。
-- [ ] **Step 2: 用例（红）8 例**（引擎层，`type_selftest.cr`）：全变体覆盖 = 1 / 缺一变体 = 0 + witness = 该变体 / 通配吸收 = 1 / 单变体枚举 = 1（无臂 = 0）/ 域不可展开（`AK_NAMED` 不展开）= -1（不得当 0）/ 空枚举域 = 0（无值可覆盖，登记语义）/ 重复臂 → 补集已空（`EC_TM_REDUNDANT` 同源判据）/ payload 变体与 tag 变体混合。**「非枚举域不判穷尽」是 checker 侧登记项**（不调引擎），验证在 Step 4 行为集，不占引擎用例。
-- [ ] **Step 3: 硬错误门（report-only 先行）**：`EC_TM_EXHAUST`（9003）入 `run_frontend` 硬名单前，全语料 report-only；清单若空 → 开门（main.cr:146-158 追加一行）。**冗余臂（9004）同期评估**（同族判据，可同批）。
-- [ ] **Step 4: 行为覆盖集**：新增 `tests/selfhost/test_match_exhaust.py`（≥8 例：穷尽过 / 缺臂拒 + 码 + **无产物** / 通配过 / 嵌套枚举 / payload 变体 / 空枚举边界 / 非枚举域不报穷尽 / 泛型枚举实例），挂钩 `src/ci/run.sh` selfhost-tests。
-- [ ] **Step 5: 判据**：`selftest-types` ≥115 → **≥123**；镜像回归：`test_interp_float.py`（3 变体全列）、`test_interp_parity.py`、`test_native_memory.py` 全绿（**这些是唯一既有 match 语料**）；ELF canary IDENTICAL；全回归 + 自举链。
+- [ ] **Step 2: 用例（红）8 例**（引擎层，`type_selftest.cr`）：全变体覆盖 = 1；缺一变体 = 0 且 witness = 该变体；通配吸收 = 1；单变体枚举 = 1（无臂 = 0）；域不可展开（`AK_NAMED` 不展开）= -1（不得当 0）；空枚举域 = 0（无值可覆盖，登记语义）；重复臂 → 补集已空（`EC_TM_REDUNDANT` 同源判据）；payload 变体与 tag 变体混合。
+  **「非枚举域不判穷尽」是 checker 侧登记项**（不调引擎），验证在 Step 4 行为集，不占引擎用例。
+- [ ] **Step 3: 硬错误门（report-only 先行）**：`EC_TM_EXHAUST`（9003）入 `run_frontend` 硬名单前，先跑全语料 report-only；清单若空 → 开门（main.cr:146-158 追加一行）。**冗余臂（9004）同期评估**（同族判据，可同批）。
+- [ ] **Step 4: 行为覆盖集**：新增 `tests/selfhost/test_match_exhaust.py`（≥8 例：穷尽过；缺臂拒加码加**无产物**；通配过；嵌套枚举；payload 变体；空枚举边界；非枚举域不报穷尽；泛型枚举实例），挂钩 `src/ci/run.sh` 的 selfhost-tests。
+- [ ] **Step 5: 判据**：`selftest-types` 由 ≥115 增至 **≥123**；镜像回归：`test_interp_float.py`（3 变体全列）、`test_interp_parity.py`、`test_native_memory.py` 全绿（**这些是唯一既有 match 语料**）；ELF canary IDENTICAL；全回归加自举链。
 - [ ] **Step 6: 提交**：`feat: R2 P3 Task 3——match 穷尽性真判定（补集空性 + 具体变体反例；仅枚举域，非枚举显式登记）+ TM03 硬门 + 覆盖集`
 
 ## Task 4（P3a）：联合/可选——enum = sum 项、`T?` = T ∪ null、退役内建 Option 注册
 
 **Files:** Modify `src/compiler/checker.cr`（:962-975 退役；`EXPR_TRY` :2871-2888 去名字依赖）· `src/compiler/parser.cr`（`T?` 目标形态）· `src/compiler/ty_shadow.cr`（null 项）· `src/compiler/type_selftest.cr` · New `tests/selfhost/test_optional.py`
 
-**决策点（实施前须定，语义争议 → 停下上报，spec 裁决 6）**：`null` 的类型承载。spec §5.4 写「`T?` = `T ∪ null`」，但 §1.2 原生八员**无 `null`**。候选：**(a) 新增原生原子 `AK_NULL`（原生九员，值域单点）**——推荐（`None` 值、`T ∪ null` 直接成立、与 AK_UNIT 不相交）；(b) `null` 归 `AK_UNIT`（值域混淆，不推荐）；(c) 仅保留枚举形态（= 不做此项，与 spec 相悖）。**裁定前不实施本任务 Step 2+**。
+**决策点（实施前须定；语义争议时停下上报，spec 裁决 6）**：`null` 的类型承载。spec §5.4 写「`T?` = `T ∪ null`」，但 §1.2 的原生八员中**无 `null`**。候选方案如下。
+- **(a) 新增原生原子 `AK_NULL`（原生九员，值域单点）**——推荐：`None` 值可用、`T ∪ null` 直接成立、与 AK_UNIT 不相交。
+- **(b) `null` 归 `AK_UNIT`**（值域混淆，不推荐）。
+- **(c) 仅保留枚举形态**（= 不做此项，与 spec 相悖）。
+**裁定前不实施本任务 Step 2+**。
 
-- [ ] **Step 1: 用例（红）6 例**：`T?` 的项 = `T ∪ null`（`ty_equiv`）/ `None` 满足 `T?`（子类型）/ `Some(1)` 满足 `int?` / `null` 与 `int` 不相交（`ty_disjoint`）/ 联合在 match 域上的穷尽性（`T?` 两分支：有值 + None）/ 退役后 `Option` 名字不再被 bultin 注册（行数对照）。
+- [ ] **Step 1: 用例（红）6 例**：`T?` 的项 = `T ∪ null`（`ty_equiv`）；`None` 满足 `T?`（子类型）；`Some(1)` 满足 `int?`；`null` 与 `int` 不相交（`ty_disjoint`）；联合在 match 域上的穷尽性（`T?` 两分支：有值加 None）；退役后 `Option` 名字不再被 bultin 注册（行数对照）。
 - [ ] **Step 2: 实现**：`Some`/`None` 在无用户 `enum Option` 时仍可解析（parser.cr:418-431 的名字路径接 `T?` 的联合项）；`EXPR_TRY` 改按**类型项结构**（`AK_SUM`/联合含 null）解包，废掉基名字符串 `"Option"`/`"Result"`（checker.cr:2879 的 `base_name ==` 判断）。
-- [ ] **Step 3: 判据**：`selftest-types` ≥123 → **≥129**；`.ccr` **预期变**（退役一个命名行 → 行号位移）→ 实测报告 + `test_ccr_v7` 结构性断言全绿 + 冷缓存对比；ELF canary IDENTICAL（若变 → 停下上报）；`test_optional.py` ≥8 例（含解释器/ELF 双路径 rc）；全回归。
+- [ ] **Step 3: 判据**：`selftest-types` 由 ≥123 增至 **≥129**；`.ccr` **预期变**（退役一个命名行 → 行号位移）→ 实测报告，加 `test_ccr_v7` 结构性断言全绿，加冷缓存对比；ELF canary IDENTICAL（若变**即停下上报**）；`test_optional.py` ≥8 例（含解释器/ELF 双路径 rc）；全回归。
 - [ ] **Step 4: 提交**：`feat: R2 P3 Task 4——可选 = 联合（T? = T ∪ null；退役内建 Option 注册与 EXPR_TRY 名字解包）`
 
 ## Task 5（P3a 主 + P3b 半）：泛型约束——保留/实例化判定/monomorph 类型项化
 
 **Files:** Modify `src/compiler/parser.cr`（:1533/:1575 结构/枚举泛型约束不再丢）· `src/compiler/checker.cr`（声明处约束登记 + `ty_sub(实参, 约束)` 实例化判定）· `src/compiler/monomorph.cr` + `src/compiler/ir_gen.cr:1497-1513`（实例键类型项化）· `src/compiler/type_selftest.cr`
 
-- [ ] **Step 1: F4 同族复核（TODO #2026-09-11-4）**：`infer_gen_call` 的形参链导航（`ast_data(pn)`）在后续形参上取到 `gparam(T)` 而非声明类型——本任务先修此（否则实例化判定拿不到正确的实参类型）；用例正/负控各一。
+- [ ] **Step 1: F4 同族复核（TODO #2026-09-11-4）**：`infer_gen_call` 的形参链导航（`ast_data(pn)`）在后续形参上取到 `gparam(T)` 而非声明类型。本任务先修此（否则实例化判定拿不到正确的实参类型）；用例正/负控各一。
 - [ ] **Step 2: 结构/枚举泛型约束落地**：`parse_generics_into` 的约束不再写 dummy（parser.cr:1533/1575），登记到结构/枚举侧表（照 `g_generic_constr` 先例，索引空间分家）；声明处检查 = 实例化点（`Box[T: I]` 的 `Box[P]`）。
 - [ ] **Step 3: 实例化判定引擎化**：`T: I` 检查 = `ty_sub(实参项, 约束项)`（约束为**类型项**；本质轴形状用引擎、用户接口形状待 P2b 的 `iface_satisfies` ⇒ **本步本质轴部分 P3a 可做，用户接口部分 P3b**）；失败给**非空反例**（`tt_witness`），诊断含反例值；`-1` 不得当 0。
 - [ ] **Step 4: monomorph 类型项化**：实例键由「调用实参名串（非原生 → `"int"` 兜底）」改为「**类型项结构哈希**（含命名/泛型应用实参真身份）」；`gen_build_subst` 名字替换升级为类型项替换（或按项哈希生成规范名）。**产物面**：实例 mangled 名若变 → SYM/`.ccr` 变（允许、实测报告；ELF 无 symtab ⇒ 预期不变）；去重正确性探针：两个**不同结构体类型**实参调用同一泛型函数 → 必须是两个实例（今天可能折叠——**未实测**，本步实测并登记）。
-- [ ] **Step 5: 判据**：`selftest-types` ≥129 → **≥137**；`MAX_GENERICS=4`（ast.cr:115）解除或显式登记（二选一，记录理由）；行为探针：约束满足/违反（含反例文本）/结构泛型约束/双类型实参实例分离；影子对拍复跑 + 全回归 + ELF canary IDENTICAL + `.ccr` 实测报告 + 自举链。
+- [ ] **Step 5: 判据**：`selftest-types` 由 ≥129 增至 **≥137**；`MAX_GENERICS=4`（ast.cr:115）解除或显式登记（二选一，记录理由）；行为探针：约束满足/违反（含反例文本）/结构泛型约束/双类型实参实例分离；影子对拍复跑，加全回归，加 ELF canary IDENTICAL，加 `.ccr` 实测报告，加自举链。
 - [ ] **Step 6: 提交**：`feat: R2 P3 Task 5——泛型约束（结构/枚举约束不再丢 + 实例化 ty_sub 判定 + 反例；monomorph 实例键类型项化）+ F4 形参链修复`
 
 ## Task 6（P3b，P2b 后置）：impl 契约——签名类型项化 + 满足判定接引擎 + mangling 退役 + 覆盖集
@@ -172,15 +203,17 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 **依赖**：P2b 注册表（条目 + 满足关系 + `iface_satisfies`）。**mangling 废弃**（spec §2.3/§5.3，无兼容窗口 = 裁决 5）。
 
 - [x] **Step 1: 签名类型项化**：`interface I { fn m(a: T) -> U; }` 的 T/U 从裸 `TY_*` 改为类型节点解析（`res_type_node`）——**现状只能写基类型**（parser.cr:1671/1685）；方法上限 16 / 参数上限 8（dyn_arr.cr:143-149）**解除或显式登记**。——**已交付（2026-09-12）**：方法条目新增类型**节点**槽（`OFF_IFM_PARAM_NODES` / `OFF_IFM_RET_NODE` / `OFF_IFM_SELF_MODE`；`ESZ_IFMETHOD` 88→168、`ESZ_IFACEINFO` 1432→2712——**不入 `.ccr` 序列化**，实测逐字节同）+ parser 写点；**裸码槽保留**（S6 站点返回型映射值域 = 映射层编码，P2b Task 6 已锁定）；参数裸码槽自本批起**零读者**（登记）。**上限显式登记保留**（`MAX_IFACE_METHODS=16` / `MAX_IFACE_METHOD_PARAMS=8` 单源常量；超限 = **硬错 rc=1** 非静默截断，新套件两例固定；解除面 = 方法表迁侧表，按 B.4-7 约定「先加护栏、再评估解除」）。
-- [x] **Step 2: 覆盖集（spec §5.3 要求新建）**：`test_impl_iface.py` ≥10 例——正向（满足）/ 反向（缺方法、参数数不符、参数类型不符、返回类型不符）/ 多接口 / 与泛型约束交互（`fn f[T: I]`）/ 错误例（未定义接口）/ 固有方法不受影响（`test_impl.py` 7 例保持绿）。——**已交付**：**20 例**（正向 **双站点**同证（实例化点注解 + 函数调用点）7 + 泛型体内方法调用运行面 2 + 反向签名五面 7 + 错误例 1 + 登记面 1 + 上限硬错 2）。**双站点是硬要求**（Task 0 M4 教训实测）：只走实例化点的正例在突变下不咬合（本轮一度空转，已修）。解释器面登记：泛型体内方法调用 `corec run` 解析不支持（旧二进制同 rc=1）⇒ 该 2 例走 check + ELF。
-- [x] **Step 3: 满足判定接引擎**：`check_iface`/`check_impl_for` 改走 `iface_satisfies`（形状项包含判定）；方法解析（`type_has_method` 名字拼接，checker.cr:873-879）改「类型项 + 条目」查表；泛型约束的方法调用路径（:2103-2144）同步。——**已交付（按实测重定两处）**：① 形状项 `sh_iface_shape_term` = 方法集（product of fn，b 槽 = 方法名）**已建**；判定 = **逐成员包含**（方法名表查询 + 接收者模式显式比较 + 签名 fn 项经引擎结构比较原语 `tt_list_same`）。**整形状 `ty_sub` 路由不可用**（实测两条：引擎对 AK_NAMED 不展开 ⇒ 命名行实参恒 -1；product 比较是结构相等非子集包含 ⇒ 带额外方法的实现方误拒）——登记为未覆盖面。**逐成员签名比较不得用 `ty_sub`**：引擎把不变槽的「确定不同」上抛 **-1** ⇒ 签名不符退化「不判」= 静默通过面复活（突变 M3b 实证 8 自测 + 3 行为例红）；签名项为规范形（N 不入项 / 泛型应用展开 / 命名行按名）⇒ `tt_list_same`（0/1 全域）即正确判据。② `check_iface` = 与 `iface_user_satisfies` **同一核心**（`iface_user_satisfies_ii`，同源由构造保证）；`check_impl_for` 逐参/返回比较**同改签名项**（诊断码/措辞保留）；泛型约束方法调用路径 → **实例化时查表解析**（`CALL_FLAG_IFACE_METHOD` + monomorph 克隆分支）——**旧态产物运行 rc=139**（合成 "T.m" 串 + 文本替换 ⇒ 调用目标悬空），本批修。
+- [x] **Step 2: 覆盖集（spec §5.3 要求新建）**：`test_impl_iface.py` ≥10 例——正向（满足）/ 反向（缺方法、参数数不符、参数类型不符、返回类型不符）/ 多接口 / 与泛型约束交互（`fn f[T: I]`）/ 错误例（未定义接口）/ 固有方法不受影响（`test_impl.py` 7 例保持绿）。
+  ——**已交付**：**20 例**（正向 **双站点**同证（实例化点注解 + 函数调用点）7 例；泛型体内方法调用运行面 2 例；反向签名五面 7 例；错误例 1 例；登记面 1 例；上限硬错 2 例）。**双站点是硬要求**（Task 0 M4 教训实测）：只走实例化点的正例在突变下不咬合（本轮一度空转，已修）。解释器面登记：泛型体内方法调用 `corec run` 解析不支持（旧二进制同 rc=1），因此该 2 例走 check 加 ELF。
+- [x] **Step 3: 满足判定接引擎**：`check_iface`/`check_impl_for` 改走 `iface_satisfies`（形状项包含判定）；方法解析（`type_has_method` 名字拼接，checker.cr:873-879）改「类型项 + 条目」查表；泛型约束的方法调用路径（:2103-2144）同步。
+  ——**已交付（按实测重定两处）**：① 形状项 `sh_iface_shape_term` = 方法集（product of fn，b 槽 = 方法名）**已建**；判定 = **逐成员包含**（方法名表查询 + 接收者模式显式比较 + 签名 fn 项经引擎结构比较原语 `tt_list_same`）。**整形状 `ty_sub` 路由不可用**（实测两条：引擎对 AK_NAMED 不展开 ⇒ 命名行实参恒 -1；product 比较是结构相等非子集包含 ⇒ 带额外方法的实现方误拒），登记为未覆盖面。**逐成员签名比较不得用 `ty_sub`**：引擎把不变槽的「确定不同」上抛 **-1** ⇒ 签名不符退化为「不判」= 静默通过面复活（突变 M3b 实证 8 自测加 3 行为例红）；签名项为规范形（N 不入项 / 泛型应用展开 / 命名行按名）⇒ `tt_list_same`（0/1 全域）即正确判据。② `check_iface` = 与 `iface_user_satisfies` **同一核心**（`iface_user_satisfies_ii`，同源由构造保证）；`check_impl_for` 逐参/返回比较**同改签名项**（诊断码/措辞保留）；泛型约束方法调用路径 → **实例化时查表解析**（`CALL_FLAG_IFACE_METHOD` + monomorph 克隆分支）——**旧态产物运行 rc=139**（合成 "T.m" 串 + 文本替换 ⇒ 调用目标悬空），本批修。
 - [x] **Step 4: 判据**：`selftest-types` ≥137 → **≥141**；`test_impl.py` 7/7 不回归 + 新套件全绿 + `src/ci/run.sh` 挂钩；影子对拍复跑；全回归；ELF canary IDENTICAL；`.ccr` 实测报告（接口目前零序列化 ⇒ 预期不变）。——**已交付（阈值按 P3a/P3b 后基线重定）**：`selftest-types` 319 → **333/333**（+14 `ifc.*`）；新套件 **20/20** 挂 `run.sh`；`test_impl` 7/7 + 六套件全绿（`test_iface_satisfies` 按清单改 1 例后 17/17）；ELF canary `95084e7b…d475` IDENTICAL + `.ccr` 逐字节同（88943B/130974B——接口零序列化 + 零新 `str_intern`）；影子 30628/30628（全计数 0，站点同报）；同源对拍 72 档零差异；五 CI job；更宽 selfhost 45/45 + `test_backend_bootstrap` rc=0；突变控制 4 条（M4 = 行为级独有牙，登记）。
 - [x] **Step 5: 提交**：`feat: R2 P3 Task 6——impl 契约（接口签名类型项化 + iface_satisfies 接引擎 + mangling 退役）+ 覆盖集`（提交见 §11 / 本批报告）
 
 ## Task 7：收官（回归 + 判据 + 收紧清单 + 文档）
 
 - [ ] **Step 1: 全量回归**（`src/ci/run.sh` selfhost + bootstrap 全档）
-- [ ] **Step 2: 零变化复验**：ELF canary IDENTICAL（clean-cache，开/关两态）+ `.ccr` 变更面实测报告（逐任务列）+ 影子对拍终态（差异/站点覆盖/回落计数同报）
+- [ ] **Step 2: 零变化复验**：ELF canary IDENTICAL（clean-cache，开/关两态）加 `.ccr` 变更面实测报告（逐任务列）加影子对拍终态（差异/站点覆盖/回落计数同报）
 - [ ] **Step 3: 自举链**：`corec2/corec3` `cmp` IDENTICAL + N06=0 + 冒烟 `run 'fn main()->int{return 42;}'` = 42
 - [ ] **Step 4: 收紧清单汇总**：本批「旧接受 → 新拒绝」逐条（预期 ≥1 条：pA 切片→数组；标「P2a 引入的静默放宽在本批关闭」）
 - [ ] **Step 5: 文档**：spec §9 P3 行标 ✅ + 未覆盖面更新（符号档登记）；TODO：`fixed-array-retire`（TODO.md:446）未办句划销、#19 的「P3 面遗留」收尾、#26 判据继承、新增登记（非枚举域不判穷尽 / 空递归保守 / MAX_* 上限处置）；findings 文档追加「P3 后复跑」节
@@ -195,7 +228,7 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 
 > P3b = Task 0（契约回补 `9aa1786c`）/ Task 2（横切接口 `44100ba4`）/ Task 6（impl 契约 `e838f18b`）三件；本 Task = 三份任务报告（`.superpowers/sdd/p3b-task{0,2,6}-report.md`）之上的**阶段收官**——全量回归 + 判据复验 + 清单统一 + P4 交接包（附录 C）。判据标准继承：**本轮实跑 vs 继承基线逐条标注**（收官报告 §1/§2）。
 
-- [x] **Step 1: 全量回归**——五 CI job（selfhost-tests / bootstrap-tests / suite / full-bootstrap / check）rc + 逐档计数；全枚举 selfhost 45 档 + bootstrap 7 档逐档 rc；`check` job rc=1 = **既有 red 划界**（恰 2 条 TF01 误报 `lits_copy`/`ty_memo_slot_no_grow`，非本批引入）。✅ 实测见收官报告 §1。【**2026-09-13 更新**：两条已修（TODO #2026-09-13-1）⇒ `check src/compiler` rc=0，该划界约定作废（行保留为当期实跑记录）。】
+- [x] **Step 1: 全量回归**——五 CI job（selfhost-tests / bootstrap-tests / suite / full-bootstrap / check）rc 加逐档计数；全枚举 selfhost 45 档 + bootstrap 7 档逐档 rc；`check` job rc=1 = **既有 red 划界**（恰 2 条 TF01 误报 `lits_copy`/`ty_memo_slot_no_grow`，非本批引入）。✅ 实测见收官报告 §1。【**2026-09-13 更新**：两条已修（TODO #2026-09-13-1）⇒ `check src/compiler` rc=0，该划界约定作废（行保留为当期实跑记录）。】
 - [x] **Step 2: 判据复验**——`clean-cache` → ELF canary `95084e7b…d475` IDENTICAL；`corec2/corec3` `cmp` IDENTICAL + N06=0 + 冒烟 42 + `corec3 --help` rc=1（既有约定）；`.ccr` 面（`ptr_arith`/`generics_test`）。✅ 实测见收官报告 §2。
 - [x] **Step 3: 统一清单**（P3b 三件聚合；下表 = 收紧 **10** / 放宽 **0** / 崩溃修复 **1**；全语料零命中，逐任务同源对拍零差异）
 - [x] **Step 4: P3 总状态 + 未开工清单**（见本节末）
@@ -237,29 +270,43 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 | T2 | check 面 `diff -r` **空**（rc 分布 33×0 / 39×1 两侧同） | 30400 / 30400；**旧×新同值** | 形状面零命中（行为保持批） |
 | T6 | check 面 `diff -r` **空**；shadow dump 空 | 30628 / 30628；**旧×新同值** | `interface`/`impl I for T`/`T: I` 生产用法零命中 |
 
-> 影子判定数逐任务增量（30128 → 30271 → 30400 → 30628）**均为新增源码自身的站点**（旧二进制跑同一新源得完全相同的数）——「零差异」≠「面收敛」的声明继承 P3a（B.3）；P3b 新能力面正确性由各任务的定向探针（T0 17 例 / T2 12 例 / T6 20 例）+ 用例表（+45 `isat.*`/`x2.*`/`ifc.*`）+ 突变控制（4+3+4 条）承担。
+> 影子判定数的逐任务增量（30128 → 30271 → 30400 → 30628）**均为新增源码自身的站点**（旧二进制跑同一新源得到完全相同的数）。「零差异」不等于「面收敛」的声明继承 P3a（B.3）；P3b 新能力面的正确性由各任务的定向探针（T0 17 例 / T2 12 例 / T6 20 例）、用例表（+45 `isat.*`/`x2.*`/`ifc.*`）与突变控制（4+3+4 条）承担。
 
 ### P3 阶段总状态（P3a + P3b）
 
-- **交付面**：五项目标能力**全部接通**——定长退役（T1）· 序列接口/长度约束（T2）· 穷尽性/联合/可选（T3/T4）· 泛型约束（T5 + T0b 的 `T: I` 半边）· impl 契约（T6）。`selftest-types` **95 → 333**；新套件 **6 个**（P3a 3 + P3b 3）= `test_match_exhaust` 16 · `test_optional` 12 · `test_generic_constr` 15 · `test_iface_satisfies` 17 · `test_xcut_iface` 12 · `test_impl_iface` 20（全挂 `run.sh`）。
-- **收紧/放宽总账**：P3a 收紧 **18** / 放宽 **8** / 诊断面新增 1（TM04 软）/ 实例名忠实化 6 / 挂死修复 2 端；P3b 收紧 **10** / 放宽 **0** / 崩溃修复 1 ⇒ **P3 合计：收紧 28 · 放宽 8 · 软诊断面 +1 · 挂死与崩溃修复 3 端**（全语料零命中；自举源码零改造）。
-- **判据面**：ELF canary `95084e7b…d475` **全阶段 IDENTICAL**（类型层改动零泄漏发射面）；`.ccr` 变更面 = T4 `ptr_arith` STR 段 −10B + T5 `generics_test` +370B（反折叠），P3b 三件**零变更**；自举链 `corec2/corec3` `cmp` IDENTICAL + N06=0 + 冒烟 42 全程稳定。
+- **交付面**：五项目标能力**全部接通**——定长退役（T1）、序列接口/长度约束（T2）、穷尽性/联合/可选（T3/T4）、泛型约束（T5 加 T0b 的 `T: I` 半边）、impl 契约（T6）。`selftest-types` 由 **95 增至 333**；新套件 **6 个**（P3a 3 个 + P3b 3 个）= `test_match_exhaust` 16、`test_optional` 12、`test_generic_constr` 15、`test_iface_satisfies` 17、`test_xcut_iface` 12、`test_impl_iface` 20（全部挂 `run.sh`）。
+- **收紧/放宽总账**：P3a 收紧 **18**、放宽 **8**、诊断面新增 1（TM04 软）、实例名忠实化 6、挂死修复 2 端；P3b 收紧 **10**、放宽 **0**、崩溃修复 1。⇒ **P3 合计：收紧 28、放宽 8、软诊断面 +1、挂死与崩溃修复 3 端**（全语料零命中；自举源码零改造）。
+- **判据面**：ELF canary `95084e7b…d475` **全阶段 IDENTICAL**（类型层改动零泄漏发射面）；`.ccr` 变更面 = T4 的 `ptr_arith` STR 段 −10B，加 T5 的 `generics_test` +370B（反折叠），P3b 三件**零变更**；自举链 `corec2/corec3` `cmp` IDENTICAL + N06=0 + 冒烟 42 全程稳定。
 
 **未开工 / 未实现清单（显式；P3 未覆盖面终态）**
 
-1. **iterable 面接线**：`EXPR_FOR` 现状**零类型检查**（`checker.cr:2810-2821`——`infer_expr(iter)` 返回值被丢弃、循环变量恒 `TI_INT`；T2 登记项④）⇒ 接线 = 新判定 + 可能的新硬门，须 report-only 专批。
-2. **形状命名消费语法**（`T: 可索引`）+ **`.ccr` STR 段增长裁决**（A.3-② 后续；两者同一裁决的两面，见附录 C.6-①）。
-3. **整形状 `ty_sub` 路由**（T6 实测不可用：引擎 `AK_NAMED` 不展开 ⇒ 命名行恒 -1；product 比较 = 结构相等非子集包含）⇒ 形状项作**签名载体**由逐成员判定消费（`tt_list_same`）。
-4. **上限族保留**：`MAX_GENERICS=4`（ast.cr:115）· `MAX_IFACE_METHODS=16` / `MAX_IFACE_METHOD_PARAMS=8`（dyn_arr.cr:162/167，硬错护栏已立 = 非静默截断）· `MAX_ENUM_VARIANTS`/`MAX_VARIANT_TYPES=16`（TODO #2026-09-12-2）——「先加护栏、再评估解除」。
-5. **TODO #2026-09-12-5 名义 vs 结构裁决**（用户轴约定；维护者裁——采纳会翻转 5+ 既有锁定，见 C.6-②）。
-6. **运行期可选表示统一**（B.7 一等条目：`Some` 臂双路径 SIGSEGV rc=139，check/build rc=0 零诊断）——P3b 未动；修法与 P4 的 TYPE 段同批裁（C.6-⑤）。
-7. **TODO #2026-09-11-14**（`EXPR_LET` 无任何兼容检查；实测 `x: [int;4] = [1,2,3]` / `y: int = x`（x 为 `int?`）rc=0）。
-8. **TODO #2026-09-12-2**（前端枚举表写入侧无护栏：≥17 变体越界写；check 静默 rc=0 / build rc=1 在读回闸）。
-9. **其余未覆盖面（登记，非漏放）**：可写视图形状不可表达（不变槽遇 ⊤ 落 -1）· 索引侧「须 int」位缺失（A.3-⑧）· dyn 与字段面未接线（A.2 #23/#28）· 符号档长度约束 = **VC 义务，不实现** · `Box[S]` 命名实参 vs 原生约束 = -1 不判（B.4-3）· 接口泛型形参 `interface I[T]` 被 parser 丢弃 · 变参签名不可表达 · `save_func_gen_constrs` 稀疏零初值（B.4-1，未触发）· bootstrap `&&`/`||` 不短路根因（B.4-12）· 空递归保守 -1 · 非枚举域不判穷尽 · 空枚举域 = 空洞穷尽 · `never` 语义裁决（B.4-2）· 性能面 `(ak → entry)` 快表无必要（实测）。
+1. **iterable 面接线**：`EXPR_FOR` 现状**零类型检查**（`checker.cr:2810-2821`——`infer_expr(iter)` 的返回值被丢弃，循环变量恒 `TI_INT`；T2 登记项④）。⇒ 接线 = 新判定加可能的新硬门，须 report-only 专批。
+2. **形状命名消费语法**（`T: 可索引`）与 **`.ccr` STR 段增长裁决**（A.3-② 后续；两者为同一裁决的两面，见附录 C.6-①）。
+3. **整形状 `ty_sub` 路由**（T6 实测不可用：引擎 `AK_NAMED` 不展开 ⇒ 命名行恒 -1；product 比较 = 结构相等非子集包含）。⇒ 形状项作为**签名载体**，由逐成员判定消费（`tt_list_same`）。
+4. **上限族保留**：`MAX_GENERICS=4`（ast.cr:115）、`MAX_IFACE_METHODS=16` 与 `MAX_IFACE_METHOD_PARAMS=8`（dyn_arr.cr:162/167，硬错护栏已立 = 非静默截断）、`MAX_ENUM_VARIANTS`/`MAX_VARIANT_TYPES=16`（TODO #2026-09-12-2）——统一口径为「先加护栏、再评估解除」。
+5. **TODO #2026-09-12-5 名义 vs 结构裁决**（用户轴约定，由维护者裁定；采纳会翻转 5+ 既有锁定，见 C.6-②）。
+6. **运行期可选表示统一**（B.7 一等条目：`Some` 臂双路径 SIGSEGV rc=139，而 check/build rc=0 零诊断）——P3b 未动；修法与 P4 的 TYPE 段同批裁定（C.6-⑤）。
+7. **TODO #2026-09-11-14**（`EXPR_LET` 无任何兼容检查；实测 `x: [int;4] = [1,2,3]` 与 `y: int = x`（x 为 `int?`）均 rc=0）。
+8. **TODO #2026-09-12-2**（前端枚举表写入侧无护栏：≥17 变体越界写；check 静默 rc=0，build 在读回闸处 rc=1）。
+9. **其余未覆盖面（登记，非漏放）**：逐条如下。
+   - 可写视图形状不可表达（不变槽遇 ⊤ 落 -1）。
+   - 索引侧「须 int」位缺失（A.3-⑧）。
+   - dyn 与字段面未接线（A.2 #23/#28）。
+   - 符号档长度约束 = **VC 义务，不实现**。
+   - `Box[S]` 命名实参 vs 原生约束 = -1 不判（B.4-3）。
+   - 接口泛型形参 `interface I[T]` 被 parser 丢弃。
+   - 变参签名不可表达。
+   - `save_func_gen_constrs` 稀疏零初值（B.4-1，未触发）。
+   - bootstrap `&&`/`||` 不短路根因（B.4-12）。
+   - 空递归保守 -1。
+   - 非枚举域不判穷尽。
+   - 空枚举域 = 空洞穷尽。
+   - `never` 语义裁决（B.4-2）。
+   - 性能面 `(ak → entry)` 快表无必要（实测）。
 
 ## 实施状态总表（2026-09-12，P3b 收官更新）
 
-> **P3a = Task 0/1/3/4/5 已交付**（提交链 `61d3a8b4`→`ef61f002`→`e9818d62`→`c8c7731b`→`9c0a83ec` + 收官提交）；**P3b = Task 0/2/6 已交付**（提交链 `9aa1786c`→`44100ba4`→`e838f18b` + Task 7b 收官提交）⇒ **P3 全阶段（P3a + P3b）收官**。P3b 开工期阻塞/接线/登记面 = **附录 B**；P4 开工必读 = **附录 C**（载体交接包）。
+> **P3a = Task 0/1/3/4/5 已交付**（提交链 `61d3a8b4`→`ef61f002`→`e9818d62`→`c8c7731b`→`9c0a83ec` 加收官提交）；**P3b = Task 0/2/6 已交付**（提交链 `9aa1786c`→`44100ba4`→`e838f18b` 加 Task 7b 收官提交）。⇒ **P3 全阶段（P3a + P3b）收官**。P3b 开工期的阻塞/接线/登记面 = **附录 B**；P4 开工必读 = **附录 C**（载体交接包）。
 
 | 任务 | 状态 | 提交 | 判据要点 | 报告 |
 |---|---|---|---|---|
@@ -276,19 +323,24 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 
 ## 自检记录
 
-- **spec 覆盖**：§5.1 定长/序列/长度约束 → Task 0/1/2；§5.2 泛型 → Task 5；§5.3 impl → Task 6；§5.4 穷尽性/联合/可选 → Task 3/4；§9 P3 行五项目标能力逐项有落点；`TODO.md:446` fixed-array-retire 的「未办 = 类型身份退役本身」由 Task 1 收尾（枚举了 5 条读码事实，非猜）。
-- **占位符扫描**：无 TBD；两处**决策点显式登记**（Task 4 的 `null` 原子承载、Task 5 的 MAX_GENERICS 解除或登记）——均为"实施前须定"，非「稍后填」。
-- **命名一致性**：`sh_struct_term`/`sh_enum_domain_term`/`sh_variant_term`/`sh_iface_shape_term`/`ty_variance_of`/`sh_seq_term`/`iface_satisfies` 在任务间一致；`iface_satisfies` 为 P2b 交接契约名。
-- **数字约定**：95 = 实测（`grep -c "fails = fails + ts_check("` = 95）；26,989/67 文件 = findings §11 实测；pA-pD 四探针 = 本计划实测（2026-09-11）；其余「≥N 例」为计划下限（可增不可减）。
-- **风险面**：① **展开层裁定**（Task 0 的「仅满足判定展开、等价不展开」边界）——裁错 → 判定全面漂移 + 推翻 P2a 基线（缓解：影子对拍逐任务归零 + 名义不变量用例）；② **pA 类静默放宽**（已实测在库：切片→数组）——本批收紧即修，须走收紧清单 + report-only；③ 穷尽性硬错误影响用户 rc（缓解：语料零 match + report-only 先行）；④ monomorph 实例键变更（`.ccr`/SYM 变化 + 折叠缺陷修复可能改变既有实例数——实测报告）；⑤ **P2b 依赖项阻塞**（Task 2/6 + Task 5 半）——分批交付（P3a 先行、P3b 待 P2b）。
+- **spec 覆盖**：§5.1 定长/序列/长度约束 → Task 0/1/2；§5.2 泛型 → Task 5；§5.3 impl → Task 6；§5.4 穷尽性/联合/可选 → Task 3/4；§9 P3 行的五项目标能力逐项有落点。`TODO.md:446` 的 fixed-array-retire「未办 = 类型身份退役本身」由 Task 1 收尾（枚举了 5 条读码事实，非推测）。
+- **占位符扫描**：无 TBD；两处**决策点显式登记**（Task 4 的 `null` 原子承载、Task 5 的 MAX_GENERICS 解除或登记）——两者均为「实施前须定」，非「稍后填」。
+- **命名一致性**：`sh_struct_term`、`sh_enum_domain_term`、`sh_variant_term`、`sh_iface_shape_term`、`ty_variance_of`、`sh_seq_term` 与 `iface_satisfies` 在任务间一致；其中 `iface_satisfies` 为 P2b 交接契约名。
+- **数字约定**：95 = 实测（`grep -c "fails = fails + ts_check("` = 95）；26,989 与 67 文件 = findings §11 实测；pA-pD 四探针 = 本计划实测（2026-09-11）；其余「≥N 例」为计划下限（可增不可减）。
+- **风险面**：本计划的风险项与缓解措施如下。
+  - ① **展开层裁定**（Task 0 的「仅满足判定展开、等价不展开」边界）：裁错会导致判定全面漂移并推翻 P2a 基线；缓解 = 影子对拍逐任务归零加名义不变量用例。
+  - ② **pA 类静默放宽**（已实测在库：切片→数组）：本批收紧即修，须走收紧清单加 report-only。
+  - ③ 穷尽性硬错误影响用户 rc；缓解 = 语料零 match 加 report-only 先行。
+  - ④ monomorph 实例键变更：`.ccr`/SYM 随之变化，且折叠缺陷修复可能改变既有实例数，须实测报告。
+  - ⑤ **P2b 依赖项阻塞**（Task 2/6 加 Task 5 半）：分批交付（P3a 先行、P3b 待 P2b）。
 
 ---
 
 ## 附录 A：R2 P2b 交接包（2026-09-11 收官实测；P3 实施前必读）
 
-**来源**：R2 P2b Task 1~6 报告（`.superpowers/sdd/p2b-task{1..6}-report.md`）+ 收官复验（提交链 `7f520dce`→`31143cd0`→`6d2790cd`→`a99ee825`→`7145eea5`→`30545da7` + 本附录所在收官提交）。P2b 的硬约定 = **保语义接线（零行为变化）**：同源双编译器对拍逐任务空（旧二进制 × 新源 == 新二进制 × 新源：21 档语料 + 自源 + 影子 + `.ccr` 四面）。⇒ 本附录的每一条「不接线」= **在该约定下不可能接线**，理由均为实测（探针/突变/全行枚举），不是判断。
+**来源**：R2 P2b 的 Task 1~6 报告（`.superpowers/sdd/p2b-task{1..6}-report.md`）加收官复验（提交链 `7f520dce`→`31143cd0`→`6d2790cd`→`a99ee825`→`7145eea5`→`30545da7`，加本附录所在的收官提交）。P2b 的硬约定 = **保语义接线（零行为变化）**，即同源双编译器对拍逐任务为空（旧二进制 × 新源 == 新二进制 × 新源，覆盖 21 档语料、自源、影子与 `.ccr` 四面）。⇒ 本附录的每一条「不接线」都意味着**在该约定下不可能接线**，其理由均为实测所得（探针、突变、全行枚举），不是判断。
 
-**行号约定**：本附录行号 = P2b 末提交 `30545da7` 实测（`checker.cr` 3422 行）；括注「←T4/T5 报告号」= 该任务报告的**接线前**行号（两报告间有 +10~+21 增行位移，勿混；定位请按内容）。
+**行号约定**：本附录的行号取自 P2b 末提交 `30545da7` 的实测（`checker.cr` 3422 行）；括注「←T4/T5 报告号」表示该任务报告的**接线前**行号（两份报告之间存在 +10~+21 的增行位移，不可混用；定位请按内容）。
 
 ### A.1 P2b 实际接线面（P3 的「已就位」清单）
 
@@ -304,7 +356,7 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 
 ### A.2 未接线站点清单（31 条 = T4 的 14 + T5 的 17）
 
-> 「不接线」的三种实测理由分类：**结果规则**（该分支同时决定结果类型，非许可判定）、**无拒绝路径**（现状恒真，换成门 = 空转）、**谓词非类级位**（类级位表达不了逐行/逐名判定）。
+> 「不接线」的实测理由分三类：**结果规则**（该分支同时决定结果类型，非许可判定）、**无拒绝路径**（现状恒真，换成门等于空转）、**谓词非类级位**（类级位表达不了逐行/逐名判定）。
 
 #### A.2.1 二元 / 一元 / 条件面（T4：18 站点 − 4 接线 = 14）
 
@@ -349,30 +401,30 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 
 ### A.3 P3 裁决点登记（实施前须定 / 须先补）
 
-① **`iface_satisfies` 未交付**：P2b 范围明标「零调用者，P3 落地 impl 语义时才有对象」（spec §2.5）。⇒ 本计划 Task 2/6 与 Task 5 的 `T: I` 半边**开工前先补条目 + 满足判定**（三态 1/0/-1，不得静默当 0）；已就位底座 = `iface_of_term`（类型项 → AK，单原子/-1）、`iface_kind_of`（行 → AK）、条目表 13 类。
-② **`name_ni` 列 = `-1`**（T1 登记偏差）：`.ccr` 的 STR 段 = 编译期 `g_strs` **全量**（`ccr_io.cr:537`）⇒ 在 `iface_registry_init`（`init_types` 尾部、每编译一次）里 `str_intern("product")` 之类会把 13 个新串追加进 `g_strs` ⇒ `.ccr` 逐字节变（控制组实测：未用标识符 `zzz_probe_unused_ident` 确实进 STR 段）。⇒ **首个消费者（P3 诊断/显示）落地时裁决**「是否接受 .ccr STR 段增长」；此前在本表初始化路径加 `str_intern` = 打破 P2b 硬判据。
-③ **`TY_DEX_S`（码 8）不入 `ty_code_to_ti`**（T6 §6.1）：两处基型分支现状对码 8 落 `TI_UNIT`；入表 = 若该码可达即行为变化（selftest `t6.R_dex_s_unit`/`t6.C_dex_s_unit` 把现状锁定红）⇒ 需 8 个站点各加排除，净收益负。实测：`TY_DEX_S` 仅现于 `init_types` 位置公理（`checker.cr:253`）+ 定义 + 注释；parser 只产 7 个类型名码。
-④ **`never` 单元格：调用位点 = unit，类型位点 = never**（T6 §5，插桩实测**可达**）：`res_call_type` 侧显式保留 `|| tv == TY_NEVER`（`checker.cr:1394-1398`）；`fn g[T](a: T) -> never` 的调用结果按 unit 参与检查（`@raw_int` → TF07 实测；32 档语料 + 自源命中 0 次——真实源码无 `never` 类型位）⇒ **语义裁决**（never 形参/返回在调用位点应如何参与），P2b 按 spec §4 裁决 6 停下上报、未顺手改。
-⑤ **「全许可列」= 11 个 op 位 × 13 类 = 143 格**（比较 6 + `NEG`/`NOT`/`REF`/`DEREF` + `AS`）：现状**无拒绝路径**（T4/T5 探针 32+44 例零拒绝）⇒ 表位已置 1、无门可换（本批不接线）。每位收紧建议见 findings §12。⚠ 任务简报记「20 个全许可列站点」——**本报告无法复现该计数**：实测约定 = 11 位（比较 6 / 一元 4 / 转换 1）、未接线站点合计 **31**（A.2 逐条）。
-⑥ **字段面 / 转换面：无任何拒绝路径**：`EXPR_FIELD` 全形 rc=0 零诊断（落空 `return TI_UNIT`，`checker.cr:2613`）、`EXPR_AS` 除 PTR 结果规则外恒等透传（`checker.cr:2953`）⇒ `IP_FIELD`/`IP_AS` 现为**恒真门**；P3 加诊断后才是可推翻判定（A.2 #23/#25）。
+① **`iface_satisfies` 未交付**：P2b 范围明标「零调用者，P3 落地 impl 语义时才有对象」（spec §2.5）。⇒ 本计划 Task 2/6 与 Task 5 的 `T: I` 半边**开工前先补条目与满足判定**（三态 1/0/-1，不得静默当 0）；已就位的底座 = `iface_of_term`（类型项 → AK，单原子或 -1）、`iface_kind_of`（行 → AK）、条目表 13 类。
+② **`name_ni` 列 = `-1`**（T1 登记偏差）：`.ccr` 的 STR 段等于编译期 `g_strs` 的**全量**（`ccr_io.cr:537`）。⇒ 在 `iface_registry_init`（`init_types` 尾部，每编译一次）里调用 `str_intern("product")` 之类的写法会把 13 个新串追加进 `g_strs`，导致 `.ccr` 逐字节变化（控制组实测：未用标识符 `zzz_probe_unused_ident` 确实进 STR 段）。⇒ **首个消费者（P3 诊断/显示）落地时再裁决**「是否接受 .ccr STR 段增长」；此前在本表初始化路径加 `str_intern` = 打破 P2b 硬判据。
+③ **`TY_DEX_S`（码 8）不入 `ty_code_to_ti`**（T6 §6.1）：两处基型分支现状对码 8 落 `TI_UNIT`；入表意味着若该码可达即产生行为变化（selftest `t6.R_dex_s_unit`/`t6.C_dex_s_unit` 把现状锁定红），且需 8 个站点各加排除，净收益为负。实测：`TY_DEX_S` 仅现于 `init_types` 位置公理（`checker.cr:253`）、定义与注释；parser 只产 7 个类型名码。
+④ **`never` 单元格：调用位点 = unit，类型位点 = never**（T6 §5，插桩实测**可达**）：`res_call_type` 侧显式保留 `|| tv == TY_NEVER`（`checker.cr:1394-1398`）；`fn g[T](a: T) -> never` 的调用结果按 unit 参与检查（`@raw_int` → TF07 实测；32 档语料加自源命中 0 次——真实源码无 `never` 类型位）。⇒ 此项属**语义裁决**（never 形参/返回在调用位点应如何参与），P2b 按 spec §4 裁决 6 停下上报，未顺手改。
+⑤ **「全许可列」= 11 个 op 位 × 13 类 = 143 格**（比较 6 位，加 `NEG`/`NOT`/`REF`/`DEREF`，加 `AS`）：现状**无拒绝路径**（T4/T5 探针 32+44 例零拒绝），因此表位已置 1、无门可换（本批不接线）。每位收紧建议见 findings §12。⚠ 任务简报记「20 个全许可列站点」——**本报告无法复现该计数**：实测约定 = 11 位（比较 6、一元 4、转换 1），未接线站点合计 **31**（A.2 逐条）。
+⑥ **字段面 / 转换面：无任何拒绝路径**：`EXPR_FIELD` 全形 rc=0 零诊断（落空 `return TI_UNIT`，`checker.cr:2613`）；`EXPR_AS` 除 PTR 结果规则外恒等透传（`checker.cr:2953`）。⇒ `IP_FIELD`/`IP_AS` 现为**恒真门**，P3 加诊断后才是可推翻判定（A.2 #23/#25）。
 ⑦ **dyn 面：谓词非类级位**（A.2 #28/#29）；另有 **dyn 位图 64 上限**（`union_bitmaps` 与 `validate_dyn_method` 的 `ti >= 64` 钳位；spec §3.3 已登记）。
-⑧ **索引侧「须 int」位缺失**：`idx_ti`（`checker.cr:2618`）推断后**无消费者** ⇒ `a[true]` rc=0。`IP_INDEX` 是**容器侧**位（ANY 语义），不能兼职索引侧（须 ALL 语义的「indexee」位）⇒ 新位 + 新门属 P3 设计面。
-⑨ **枚举域无条目**：注册表 13 类**无 `AK_SUM`/`AK_FN`**（checker 侧 enum 类型行 = `TYP_NAMED`；`iface_kind_of` 对全部 NAMED 行回 `AK_NAMED`）⇒ 本计划 Task 3/4（穷尽性/联合）经 `sh_enum_domain_term` 走桥接展开，**不要**在注册表查「sum 原子」；若要在条目层表达 sum，须先扩 `iface_kind_of` 的命名行分派（需要行→声明的查询，即 Task 0 Step 2 的 `find_enum`）。
-⑩ **性能面（如实登记）**：单次判定 = `iface_kind_of` + `iface_entry`（13 条线性扫）+ 位构造循环；三处登记（T3/T4/T5 报告）均判「无编译耗时回归证据」。P3 若把判定面扩到热路径（索引/迭代/字段），先看编译耗时再考虑 `(ak → entry)` 快表。
+⑧ **索引侧「须 int」位缺失**：`idx_ti`（`checker.cr:2618`）推断后**无消费者**，因此 `a[true]` rc=0。`IP_INDEX` 是**容器侧**位（ANY 语义），不能兼职索引侧（须 ALL 语义的「indexee」位）。⇒ 新位加新门属 P3 设计面。
+⑨ **枚举域无条目**：注册表 13 类中**无 `AK_SUM`/`AK_FN`**（checker 侧 enum 类型行 = `TYP_NAMED`；`iface_kind_of` 对全部 NAMED 行回 `AK_NAMED`）。⇒ 本计划 Task 3/4（穷尽性/联合）经 `sh_enum_domain_term` 走桥接展开，**不要**在注册表查「sum 原子」；若要在条目层表达 sum，须先扩 `iface_kind_of` 的命名行分派（需要行到声明的查询，即 Task 0 Step 2 的 `find_enum`）。
+⑩ **性能面（如实登记）**：单次判定 = `iface_kind_of` 加 `iface_entry`（13 条线性扫）加位构造循环；三处登记（T3/T4/T5 报告）均判「无编译耗时回归证据」。P3 若把判定面扩到热路径（索引/迭代/字段），须先看编译耗时再考虑 `(ak → entry)` 快表。
 
 ### A.4 表 / 注册表结构事实（P3 扩展前必知）
 
-- **条目布局** 40B/条 × 5 字段 `{ak, ti_row, name_ni, lit_code, ops}`（`iface_registry.cr:44-48`）；`ti_row` 仅 8 原生有值，**结构/命名类 = -1 = 类级**（类级/行级不得混同——selftest 有专例）；`lit_code` = AST 字面量 kind 的字典；`ops` = 许可位集。
-- **位下标**：`OP_*` 直用（1..19）、`UOP_*` **+20 偏置**、`IP_INDEX=25`/`IP_INDEX_RANGE=26`/`IP_FIELD=27`/`IP_METHOD=28`/`IP_AS=29`/`IP_COND=30`/`IP_COND_BOOL=31`。常量在 **`globals.cr:254-271`**（**必须在 globals.cr**：变量/常量跨文件按声明序可见，`checker.cr` 在 `iface_registry.cr` 之前；函数不受限）。`iface_bit` = 乘 2 循环（本语言无移位）；`iface_permits(op<0 || op>62)` → 0（不回绕；≥63 会把 i64 推负 = 全位命中）。
-- **三态纪律**：`iface_ops(未知/-1)` = 0、`iface_kind_of(负/越界)` = -1、`iface_lit_ti(非字面量 kind)` = -1；`iface_of_term` 仅 `TT_ATOM`/`TT_TOP_K` 回 AK，其余 -1。
-- **初始化**：挂 `init_types()` 尾部（`checker.cr:257` 区）——幂等 + **不缓存行号**（长驻 corelsp 每请求 `init_types`）⇒ P3 新字段照此；**不得**在初始化路径 `str_intern`（见 A.3-②）。
+- **条目布局**：40B/条 × 5 字段 `{ak, ti_row, name_ni, lit_code, ops}`（`iface_registry.cr:44-48`）；`ti_row` 仅 8 个原生条目有值，**结构/命名类 = -1 = 类级**（类级与行级不得混同——selftest 有专例）；`lit_code` = AST 字面量 kind 的字典；`ops` = 许可位集。
+- **位下标**：`OP_*` 直接使用（1..19），`UOP_*` 加 **+20 偏置**，`IP_INDEX=25`、`IP_INDEX_RANGE=26`、`IP_FIELD=27`、`IP_METHOD=28`、`IP_AS=29`、`IP_COND=30`、`IP_COND_BOOL=31`。常量位于 **`globals.cr:254-271`**（**必须在 globals.cr**：变量与常量跨文件按声明序可见，而 `checker.cr` 在 `iface_registry.cr` 之前；函数不受此限）。`iface_bit` 用乘 2 循环实现（本语言无移位）；`iface_permits(op<0 || op>62)` → 0（不回绕；≥63 会把 i64 推负，导致全位命中）。
+- **三态纪律**：`iface_ops(未知/-1)` = 0、`iface_kind_of(负/越界)` = -1、`iface_lit_ti(非字面量 kind)` = -1；`iface_of_term` 仅对 `TT_ATOM`/`TT_TOP_K` 回 AK，其余 -1。
+- **初始化**：挂在 `init_types()` 尾部（`checker.cr:257` 区），要求幂等且**不缓存行号**（长驻 corelsp 每请求执行 `init_types`）；P3 新字段照此办理，且**不得**在初始化路径 `str_intern`（见 A.3-②）。
 - **桥接单源化**：`sh_base_ak`/`sh_native_ak` 委托 `iface_by_ty_code`（唯一实现；`ty_shadow.cr:72-89`）；`sh_native_ak` **保留** `get_type_kind != TYP_BASE → -1` 门（`sh_native_ak(TI_DYN) == -1`——DYN 行经 `sh_term_of_ti` 的另一分支；**不得**直接换成 `iface_kind_of`）；`sh_*_ak_legacy` 为对拍对照物（P5 删，TODO #2026-09-11-8-④）。
-- **单表 `ty_code_to_ti`**（`iface_registry.cr:259-270`）：8 码逐项 + 域外 -1；**码 7 格 = 现状数值撞车原样保留**（`TY_GENERIC_PARAM=7` 与 `TI_DYN=7`；`parser.cr:98` 对 `dyn` 正产码 7 ⇒ 可达、N08 判据依赖）——归 P4/P5 命名空间分家，**P3 不得改**。
-- **语义分派守卫**（P1 血泪：AK/TI 下标不 1:1）：AK↔TI 一律按语义逐项写死（`AK_STRING↔TI_STR`、`AK_BOOL↔TI_BOOL` 错位书写）；守卫用例 `iface.dispatch_no_index_shortcut`——**任何新映射不得按数值直传**。
+- **单表 `ty_code_to_ti`**（`iface_registry.cr:259-270`）：8 码逐项，域外 -1；**码 7 格 = 现状数值撞车，原样保留**（`TY_GENERIC_PARAM=7` 与 `TI_DYN=7`；`parser.cr:98` 对 `dyn` 正产码 7 ⇒ 可达，且 N08 判据依赖此事实）——归 P4/P5 命名空间分家，**P3 不得改**。
+- **语义分派守卫**（P1 的教训：AK/TI 下标不 1:1）：AK↔TI 一律按语义逐项写死（`AK_STRING↔TI_STR`、`AK_BOOL↔TI_BOOL` 属错位书写）；守卫用例 `iface.dispatch_no_index_shortcut`——**任何新映射不得按数值直传**。
 
 ### A.5 事实表指针
 
-侦查 §2 九条现状宽松面 → 表中格 → 现状诊断 → P3 收紧建议：**findings 文档 §12「P2b 后：公理区事实表」**（本附录所在提交同批新增）；P3 各任务的「旧接受 → 新拒绝」登记表照其约定逐条填。
+侦查 §2 的九条现状宽松面按「表中格 → 现状诊断 → P3 收紧建议」的链条记录于 **findings 文档 §12「P2b 后：公理区事实表」**（与本附录所在提交同批新增）；P3 各任务的「旧接受 → 新拒绝」登记表照其约定逐条填写。
 
 ---
 
@@ -514,14 +566,14 @@ fn array_len_constraint_ok(a: int, b: int) -> int  // 签名不变；补方向�
 **复现（最小 8 行）**：
 
 ```
-fn main() -> int {
-    x : int? = 5;
-    match x {
-        Some(v) => { return v; }
-        None => { return 0; }
-    }
-    return 0;
-}
+fn main() -> int:
+    x : int? = 5
+    match x:
+        Some(v) =>:
+            return v
+        none =>:
+            return 0
+    return 0
 ```
 
 **实测 rc（P3a 收官二进制 `./build/corec`，2026-09-12；cwd = 仓库根——`/tmp` cwd 会触发 import 解析假失败，勿用）**：

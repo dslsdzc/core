@@ -57,22 +57,24 @@ BOUND_SEC = 5.0
 PROC_TIMEOUT = 30
 
 # 嵌套 fn 的最小件（TODO #2026-09-10-12 原文形态）
-NESTED_MIN = """fn outer() -> int {
-    fn inner(a: int) -> int { return a + 1; }
-    return inner(1);
-}
+NESTED_MIN = """fn outer() -> int:
+    fn inner(a: int) -> int:
+        return a + 1
+    return inner(1)
 
-fn main() -> int { return outer(); }
+fn main() -> int:
+    return outer()
 """
 
 # 同逻辑扁平对照（语言面内形态）：inner(1) = 2 ⇒ 退出码 2
-FLAT_CONTROL = """fn inner(a: int) -> int { return a + 1; }
+FLAT_CONTROL = """fn inner(a: int) -> int:
+    return a + 1
 
-fn outer() -> int {
-    return inner(1);
-}
+fn outer() -> int:
+    return inner(1)
 
-fn main() -> int { return outer(); }
+fn main() -> int:
+    return outer()
 """
 
 
@@ -181,46 +183,51 @@ def main() -> int:
     variants = [
         ("nested_inline_hint", """import io
 
-fn test_inline_hint() -> int {
-    fn add(a: int, b: int) -> int { return a + b; }
-    result := @inline(add)(3, 4);
-    if result != 7 { return 1; }
-    return 0;
-}
+fn test_inline_hint() -> int:
+    fn add(a: int, b: int) -> int:
+        return a + b
+    result := @inline(add)(3, 4)
+    if result != 7:
+        return 1
+    return 0
 
-fn main() -> int { return test_inline_hint(); }
+fn main() -> int:
+    return test_inline_hint()
 """, "add"),
-        ("nested_plain_call", """fn test() -> int {
-    fn add(a: int, b: int) -> int { return a + b; }
-    return add(3, 4);
-}
+        ("nested_plain_call", """fn test() -> int:
+    fn add(a: int, b: int) -> int:
+        return a + b
+    return add(3, 4)
 
-fn main() -> int { return test(); }
+fn main() -> int:
+    return test()
 """, "add"),
-        ("nested_pub_fn", """fn outer() -> int {
-    pub fn inner() -> int { return 1; }
-    return inner();
-}
+        ("nested_pub_fn", """fn outer() -> int:
+    pub fn inner() -> int:
+        return 1
+    return inner()
 
-fn main() -> int { return outer(); }
+fn main() -> int:
+    return outer()
 """, "inner"),
-        ("nested_double", """fn outer() -> int {
-    fn mid() -> int {
-        fn deep() -> int { return 1; }
-        return deep();
-    }
-    return mid();
-}
+        ("nested_double", """fn outer() -> int:
+    fn mid() -> int:
+        fn deep() -> int:
+            return 1
+        return deep()
+    return mid()
 
-fn main() -> int { return outer(); }
+fn main() -> int:
+    return outer()
 """, "mid"),
-        ("nested_then_stmt", """fn outer() -> int {
-    fn inner() -> int { return 1; }
-    x := 41;
-    return x + 1;
-}
+        ("nested_then_stmt", """fn outer() -> int:
+    fn inner() -> int:
+        return 1
+    x := 41
+    return x + 1
 
-fn main() -> int { return outer(); }
+fn main() -> int:
+    return outer()
 """, "inner"),
     ]
     for name, src, fn_name in variants:

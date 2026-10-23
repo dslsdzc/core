@@ -37,10 +37,10 @@ harness 与 kernel CLI（`kernel_main.cr`）必须跳过 `#` 行**（随机层�
 | `cases/corpus_manual.txt` | **25** | 案卷：经典难项（β 归约、Π 逆变/协变、宇宙累积、natrec、显式替换组合） |
 
 穷举层每项发射：`(ctx)` 下 infer + check(nat) + check(typ 0)；类型形态项（首构造子为
-pi/typ/nat）加 subtype ×2；前 50 项加 convert；再以 `(ctx (nat))`、`(ctx (typ 0))`
+`pi`/`typ`/`nat`）加 subtype ×2；前 50 项加 convert；再以 `(ctx (nat))`、`(ctx (typ 0))`
 上下文重复 infer/check。
 
-## 穷举层规模（--max-size）
+## 穷举层规模（`--max-size`）
 
 生成器默认 `--max-size 3`（穷举层 size ≤ 3，产物约 2.4 MB）。size-4 全量
 （221,520 项，产物约 141 MB）超过 GitHub 100MiB 单文件上传限制，须显式开启：
@@ -51,7 +51,7 @@ python3 tests/kernel/gen_corpus.py --max-size 4
 
 `--max-size` 只影响穷举层；随机层（种子 20260815）与案卷不随其变化。
 
-## 与 brief（.superpowers/sdd/task-4-brief.md）的差异
+## 与 brief（`.superpowers/sdd/task-4-brief.md`）的差异
 
 生成器按 brief Step 1-4 转写，运行后修正了下列实际问题（均不影响验收行数）：
 
@@ -69,12 +69,12 @@ python3 tests/kernel/gen_corpus.py --max-size 4
    表述对这 2 条不准确，此处更正；案卷条目本身不改（保持与已交付 harness 的兼容），
    恢复原性质需把 λ 体改为 `(typ 0)`/`(typ 1)`，留待后续任务。
 3. **穷举层无 natrec 项**：brief 的简化 natrec 方案（四子项均取 size-1 原子）最小总
-   size=5，默认 max_size=3（size-4 亦同）下过滤条件恒不命中——按 brief 注记，natrec
-   覆盖由随机层（`rand_exp` 的 K_NATREC 分支）+ 案卷第 16/17 条补齐。
+   size=5，默认 `max_size=3`（size-4 亦同）下过滤条件恒不命中——按 brief 注记，natrec
+   覆盖由随机层（`rand_exp` 的 `K_NATREC` 分支）+ 案卷第 16/17 条补齐。
 4. **跨层重复项**：穷举层按 brief 原算法逐层去重（去重域 = 单层），同文本项可出现在
-   多个 size 层（如 `(succ (nat))` 在 size 2/3 层）——默认 size-3 下为 **6 个文本重复
-   出现 6 次（跨层）**（size-4 全量为 348 个文本重复出现 354 次）——差分测试两侧处理
-   相同行，无影响，予以保留。
+   多个 size 层（如 `(succ (nat))` 在 size 2/3 层）——默认 size-3 下为 **6 个文本项
+   跨层重复出现 6 次**（size-4 全量为 348 个文本项重复出现 354 次）——差分测试两侧
+   处理相同行，无影响，故保留。
 5. 结构性调整：`gen_exps` 返回按层分组的 dict（扁平列表语义不变，便于逐层加 `#`
    注释）；不导入 brief 中未使用的 `itertools`。
 

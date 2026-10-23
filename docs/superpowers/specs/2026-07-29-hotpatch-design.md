@@ -11,12 +11,12 @@ Core 编译器的滚动更新（hotpatch）机制。通过 `@hotpatch` 注解支
 - **同名函数多版本共存**：`@hotpatch(ver=N)` 标记的函数允许同名，签名必须一致
 - **编译期路由节点**：调用点 emit `IR_HOTPATCH_ROUTE`，运行时根据配置选择版本
 - **运行时配置**：`.hotpatch.toml` 配置文件，SIGHUP 信号重读
-- **排水安全**：in_flight 计数追踪进行中请求，drain 完成后回收旧版本
+- **排水安全**：`in_flight` 计数追踪进行中请求，drain 完成后回收旧版本
 
 ## IR 指令
 
 ```core
-IR_HOTPATCH_ROUTE : int = 39;  // dest=result_var, s1=fn_name_ni, s2=first_arg, s3=arg_count
+IR_HOTPATCH_ROUTE : int = 39  // dest=result_var, s1=fn_name_ni, s2=first_arg, s3=arg_count
 ```
 
 `IR_HOTPATCH_ROUTE` 在调用点替代 `IR_CALL`。后端将其编译为：
@@ -32,8 +32,10 @@ IR_HOTPATCH_ROUTE : int = 39;  // dest=result_var, s1=fn_name_ni, s2=first_arg, 
 **新增关键字**：`@hotpatch` 作为 `@` 内建原语扩展。
 
 ```core
-@hotpatch(ver=1) fn handle(x: dyn) -> dyn { body1 }
-@hotpatch(ver=2) fn handle(x: dyn) -> dyn { body2 }
+@hotpatch(ver=1) fn handle(x: dyn) -> dyn:
+    body1
+@hotpatch(ver=2) fn handle(x: dyn) -> dyn:
+    body2
 ```
 
 解析器：
@@ -69,7 +71,7 @@ g_hp_config  : string, mut;  // 序列化配置表
 g_hp_inflight : string, mut;  // in_flight 计数数组
 ```
 
-### 配置格式（.hotpatch.toml）
+### 配置格式（`.hotpatch.toml`）
 
 ```toml
 [hotpatch.handle]

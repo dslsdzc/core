@@ -28,22 +28,29 @@ BASE = Path(__file__).resolve().parents[2]
 COREC = BASE / "build" / "corec"
 
 REJECTS = [
-    ("optdex_apx", "x : dex?, apx = None;", "可选 dex（无表示路径）"),
-    ("inferred_dot_apx", "x : ., apx = 1.0;", "推断形（`.`）——errata 记载：declared_ti 落 TI_UNIT，apx 槽压根不建立"),
-    ("auto_apx", "x : auto, apx = 1.0;", "auto（推断）"),
-    ("string_apx", 'x : string, apx = "s";', "string 声明"),
-    ("bool_apx", "x : bool, apx = true;", "bool 声明"),
+    ("optdex_apx", "x : dex?, apx = none\n", "可选 dex（无表示路径）"),
+    ("inferred_dot_apx", "x : ., apx = 1.0\n", "推断形（`.`）——errata 记载：declared_ti 落 TI_UNIT，apx 槽压根不建立"),
+    ("auto_apx", "x : auto, apx = 1.0\n", "auto（推断）"),
+    ("string_apx", 'x : string, apx = "s"\n', "string 声明"),
+    ("bool_apx", "x : bool, apx = true\n", "bool 声明"),
 ]
 
 ACCEPTS = [
-    ("dex_apx", "x : dex, apx = 7.0;", 0, "白名单：表示路径（合法形，逐字节不变面）"),
-    ("int_apx", "x : int, apx = 42;", 0, "白名单：既有契约的纯注解（test_apx_tag 钉）"),
+    ("dex_apx", "x : dex, apx = 7.0\n", 0, "白名单：表示路径（合法形，逐字节不变面）"),
+    ("int_apx", "x : int, apx = 42\n", 0, "白名单：既有契约的纯注解（test_apx_tag 钉）"),
 ]
+
+
+def _indent_body(b: str) -> str:
+    """声明片段（自带换行）⇒ v4 函数体 region：逐行 +4 空格。"""
+    if not b.endswith("\n"):
+        b += "\n"
+    return "".join(("    " + ln) if ln.strip() else ln for ln in b.splitlines(keepends=True))
 
 
 def run_case(name, decl, expect_reject):
     src = (f"// apxscope-{uuid.uuid4()}\n"
-           f"fn main() -> int {{ {decl} return 0; }}\n")
+           f"fn main() -> int:\n{_indent_body(decl)}    return 0\n")
     with tempfile.NamedTemporaryFile("w", suffix=".cr", delete=False) as f:
         f.write(src)
         path = f.name

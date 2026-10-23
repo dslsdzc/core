@@ -1,7 +1,7 @@
 # 规约语法判据语料（批 6：正式规约语法 `#check` / `#ensure`）
 
 **性质**：**是**编译单元（由 `tests/selfhost/test_spec_grammar.py` 逐档驱动：`build --static`，
-负例断言 rc=1 + 诊断码 + **零产物**）。**不进**腿①（`tools/baseline/parity_run.sh`，74→75 档）与
+负例断言 rc=1 + 诊断码 + **零产物**）。**不进**腿①（`tools/baseline/parity_run.sh`，76 档）与
 腿②（`tests/probes/`，29 档）两套语料——那两套是**既有行为回归网**，其**计数不变**本身就是
 「本批对旧面零扰动」的最强证据（维护者 2026-09-17 确认）。
 

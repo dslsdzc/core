@@ -207,8 +207,7 @@ def _rebuild_v7(data: bytes) -> bytes:
 
 
 def _prog_src() -> str:
-    return ("fn add(a: int, b: int) -> int { return a + b; }\n"
-            "fn main() -> int { return add(40, 2); }\n")
+    return ("fn add(a: int, b: int) -> int:\n    return a + b\nfn main() -> int:\n    return add(40, 2)\n")
 
 
 def _shell_fixture(name: str):
@@ -1038,11 +1037,7 @@ def iface_seg(data: bytes) -> bytes:
 
 # 夹具源：2 接口（self 接收者 + &self + 带参方法）+ 1 结构 + impl 块
 # （g_impl_for 边 + g_methods 方法表 + 接口方法签名项——五小节全非空）
-_T3_SRC = ("interface Show { fn show(self) -> int; }\n"
-           "interface Pair2 { fn first(&self) -> int; fn second(self, x: int) -> int; }\n"
-           "struct S { a: int }\n"
-           "impl Show for S { fn show(self: S) -> int { return 2; } }\n"
-           "fn main() -> int { s := S { a = 2 }; return s.a; }\n")
+_T3_SRC = ("interface Show:\n    fn show(self) -> int\ninterface Pair2:\n    fn first(&self) -> int\n    fn second(self, x: int) -> int\nstruct S:\n    a: int\nimpl Show for S:\n    fn show(self: S) -> int:\n        return 2\nfn main() -> int:\n    s := S { a = 2 }\n    return s.a\n")
 
 
 def _t3_fixture(name: str):
@@ -1428,25 +1423,27 @@ AUX_OPS = {IR_DEREF, IR_STORE_PTR, IR_SPAWN, IR_BOUNDS_CHECK, IR_HOTPATCH_ROUTE}
 # 复合行夹具（F2 面）：BINARY 的操作数行是指针行（AK_PTR 项：b = -1 ⇒ 不可逆）——
 # 该节点的项槽必须为 -1、辅码槽 = 原行号，派生码 ≡ 行号（单槽化前该槽的值）。
 COMPOSITE_FIXTURE = """// R2 P5 Task 2 composite-row probe
-fn add1(p: *int) -> int { return *p + 1; }
-fn main() -> int {
-    arr := [10, 20, 30];
-    p := &arr[1];
-    q := p + 1;
-    if *q != 30 { return 1; }
-    return add1(p);
-}
+fn add1(p: *int) -> int:
+    return *p + 1
+fn main() -> int:
+    arr := [10, 20, 30]
+    p := &arr[1]
+    q := p + 1
+    if *q != 30:
+        return 1
+    return add1(p)
 """
 
 # #2026-09-15-5 T2：**可缓存**夹具（无 ir_gen 期类型行分配 ⇒ `main` 有条目）——㊲ 重钉用
 # （复合行的可达性见 ㊲ 注：复合 mint 行的唯一来源 = ir_gen 分配行 ⇒ 见证下不落盘）。
 PLAIN_FIXTURE = """// R2 P5 Task 2 disk-code probe (T2 重钉：可缓存形态)
-fn add(a: int, b: int) -> int { return a + b; }
-fn main() -> int {
-    x := add(1, 2);
-    if x != 3 { return 1; }
-    return 0;
-}
+fn add(a: int, b: int) -> int:
+    return a + b
+fn main() -> int:
+    x := add(1, 2)
+    if x != 3:
+        return 1
+    return 0
 """
 
 # 探针源（内联夹具；覆盖清单内 4 个类型行 + 三个陷阱形态）：
@@ -1454,26 +1451,30 @@ fn main() -> int {
 #   IR_BOUNDS_CHECK 的 tk=0/1（旗标；1 数值恰是 TI_DEX 行）、
 #   IR_CALL 的 tk ∈ {int,bool,str,unit}（合法行但后端不按 ti 分派）。
 TK_FIXTURE = """// R2 P4 Task 4 tk-slot probe
-fn main() -> int {
-    arr := [10, 20, 30, 40, 50];
-    p := &arr[2];
-    if *p != 30 { return 1; }
-    q : ., mut = 42;
-    qp := &q;
-    *qp = 99;
-    s := "hi";
-    b := true;
-    d := 1.5;
-    x := 40 + 2;
-    if b { x = x + 1; }
-    lo : ., mut = 1;
-    hi : ., mut = 3;
-    sl := arr[lo..hi];
-    if sl[0] != 20 { return 2; }
-    if x > d { return 3; }
-    if s != "hi" { return 4; }
-    return x;
-}
+fn main() -> int:
+    arr := [10, 20, 30, 40, 50]
+    p := &arr[2]
+    if *p != 30:
+        return 1
+    q : ., mut = 42
+    qp := &q
+    *qp = 99
+    s := "hi"
+    b := true
+    d := 1.5
+    x := 40 + 2
+    if b:
+        x = x + 1
+    lo : ., mut = 1
+    hi : ., mut = 3
+    sl := arr[lo..hi]
+    if sl[0] != 20:
+        return 2
+    if x > d:
+        return 3
+    if s != "hi":
+        return 4
+    return x
 """
 
 

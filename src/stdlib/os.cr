@@ -5,104 +5,110 @@
 // 用于构造 execve argv 数组的结构体
 // 内存布局：4 个连续的 8 字节值（指针数组）
 // d=0 作为 NULL 终止符
-struct Argv4 { a: string, b: string, c: string, d: int }
+struct Argv4:
+    a: string, b: string, c: string, d: int
 
 // get_cwd() - return the process working directory.
-fn get_cwd() -> string {
-    buf := alloc(4096);
-    n := syscall3(79, buf, 4096, 0);
-    if n <= 1 { return ""; }
-    return str_sub(buf, 0, n - 1);
-}
+fn get_cwd() -> string:
+    buf := alloc(4096)
+    n := syscall3(79, buf, 4096, 0)
+    if n <= 1:
+        return ""
+    return str_sub(buf, 0, n - 1)
 
 // get_exe_path() - resolve the running executable even when argv[0] came from PATH.
-fn get_exe_path() -> string {
-    buf := alloc(4096);
-    n := syscall3(89, "/proc/self/exe", buf, 4095);
-    if n <= 0 { return ""; }
-    return str_sub(buf, 0, n);
-}
+fn get_exe_path() -> string:
+    buf := alloc(4096)
+    n := syscall3(89, "/proc/self/exe", buf, 4095)
+    if n <= 0:
+        return ""
+    return str_sub(buf, 0, n)
 
 // system(cmd) — 执行 shell 命令
 // 功能：fork() → 子进程 execve("/bin/sh", ["/bin/sh", "-c", cmd], environ)
 //       父进程 wait4() 等待子进程结束，返回退出状态码
 // 返回：子进程的退出码（0-255），失败返回 -1
-fn system(cmd: string) -> int {
+fn system(cmd: string) -> int:
     // fork()
-    pid := syscall3(57, 0, 0, 0);
-    if pid < 0 { return -1; }
-    if pid > 0 {
+    pid := syscall3(57, 0, 0, 0)
+    if pid < 0:
+        return -1
+    if pid > 0:
         // 父进程：等待子进程结束
-        status_buf := alloc(16);
+        status_buf := alloc(16)
         // I-2：wait4 有 4 个非编号参数（pid, &status, options, rusage）——
         // syscall3 只有 3 个非编号参数通道，第 4 参（rusage）经通用装载器落 rcx
         // 被 syscall 指令破坏 → r10 残留垃圾 → 内核 EFAULT → 退出码传播不可靠
         // （corec build 对编译错误仍返回 0）。syscall4 把第 4 参经 r10 传递。
-        syscall4(61, pid, status_buf, 0, 0);  // wait4(pid, &status, options=0, rusage=NULL)
+        syscall4(61, pid, status_buf, 0, 0)  // wait4(pid, &status, options=0, rusage=NULL)
         // Linux wait status stores a normal exit code in bits 8..15.
-        return load8(status_buf, 1) % 256;
-    }
+        return load8(status_buf, 1) % 256
     // 子进程：执行命令
     // Build argv explicitly so execve receives a raw pointer array.
-    argv := alloc(32);
-    store_str_ptr(argv, 0, "/bin/sh");
-    store_str_ptr(argv, 8, "-c");
-    store_str_ptr(argv, 16, cmd);
-    zi : ., mut = 0;
-    loop {
-        if zi >= 8 { break; }
-        store8(argv, 24 + zi, 0);
-        zi = zi + 1;
-    }
-    syscall3(59, "/bin/sh", argv, 0);  // execve — 成功则不返回
-    syscall3(60, 127, 0, 0);  // execve 失败时 _exit(127)
-    return -1;
-}
+    argv := alloc(32)
+    store_str_ptr(argv, 0, "/bin/sh")
+    store_str_ptr(argv, 8, "-c")
+    store_str_ptr(argv, 16, cmd)
+    zi : ., mut = 0
+    loop:
+        if zi >= 8:
+            break
+        store8(argv, 24 + zi, 0)
+        zi = zi + 1
+    syscall3(59, "/bin/sh", argv, 0)  // execve — 成功则不返回
+    syscall3(60, 127, 0, 0)  // execve 失败时 _exit(127)
+    return -1
 
 // get_env(name) — 读取环境变量
 // 从 /proc/self/environ 中读取指定环境变量的值
 // 返回：变量值字符串，未找到返回 ""
-fn get_env(name: string) -> string {
-    env := read_file("/proc/self/environ");
-    if str_len(env) == 0 { return ""; }
-    elen := str_len(env);
-    i : ., mut = 0;
-    loop {
-        if i >= elen { break; }
-        eq_pos : ., mut = -1;
-        j : ., mut = i;
-        loop {
-            if j >= elen { break; }
-            c := load8(env, j);
-            if c == 61 { eq_pos = j; break; }  // '='
-            if c == 0 { break; }  // null 分隔符
-            j = j + 1;
-        }
-        if eq_pos >= 0 {
-            key_len := eq_pos - i;
-            nlen := str_len(name);
-            if key_len == nlen {
-                is_match : ., mut = 1;
-                ki : ., mut = 0;
-                loop {
-                    if ki >= key_len { break; }
-                    if load8(env, i + ki) != load8(name, ki) { is_match = 0; break; }
-                    ki = ki + 1;
-                }
-                if is_match != 0 {
-                    val_start := eq_pos + 1;
-                    val_end : ., mut = val_start;
-                    loop {
-                        if val_end >= elen { break; }
-                        if load8(env, val_end) == 0 { break; }
-                        val_end = val_end + 1;
-                    }
-                    return str_sub(env, val_start, val_end - val_start);
-                }
-            }
-        }
-        while i < elen && load8(env, i) != 0 { i = i + 1; }
-        i = i + 1;
-    }
-    return "";
-}
+fn get_env(name: string) -> string:
+    env := read_file("/proc/self/environ")
+    if str_len(env) == 0:
+        return ""
+    elen := str_len(env)
+    i : ., mut = 0
+    loop:
+        if i >= elen:
+            break
+        eq_pos : ., mut = -1
+        j : ., mut = i
+        loop:
+            if j >= elen:
+                break
+            c := load8(env, j)
+            if c == 61:
+                eq_pos = j
+                break
+            // '='
+            if c == 0:
+                break
+            // null 分隔符
+            j = j + 1
+        if eq_pos >= 0:
+            key_len := eq_pos - i
+            nlen := str_len(name)
+            if key_len == nlen:
+                is_match : ., mut = 1
+                ki : ., mut = 0
+                loop:
+                    if ki >= key_len:
+                        break
+                    if load8(env, i + ki) != load8(name, ki):
+                        is_match = 0
+                        break
+                    ki = ki + 1
+                if is_match != 0:
+                    val_start := eq_pos + 1
+                    val_end : ., mut = val_start
+                    loop:
+                        if val_end >= elen:
+                            break
+                        if load8(env, val_end) == 0:
+                            break
+                        val_end = val_end + 1
+                    return str_sub(env, val_start, val_end - val_start)
+        while i < elen && load8(env, i) != 0:
+            i = i + 1
+        i = i + 1
+    return ""

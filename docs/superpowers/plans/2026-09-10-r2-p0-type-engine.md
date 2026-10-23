@@ -1,35 +1,47 @@
 # R2 P0（建层）实施计划：类型项表 + 语义包含引擎 + 判定用例表
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **受众**：执行本计划的 agentic worker。**必需子技能**：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项实施。进度以复选框（`- [ ]`）跟踪。
 
-**Goal:** 为 R2 建「类型项层 + 语义包含引擎」的地基：集合语义的类型项 DAG 表、NNF/DNF 规范化、包含/等价/不相交/可空/反例判定 API（三态 + 预算守卫）、数据驱动判定用例表与 `corec selftest-types` 自测通道——**checker 零改动、产物零变化**。
+**目标**：为 R2 建立「类型项层 + 语义包含引擎」的地基，内容包括集合语义的类型项 DAG 表、NNF/DNF 规范化、包含/等价/不相交/可空/反例判定 API（三态 + 预算守卫）、数据驱动判定用例表，以及 `corec selftest-types` 自测通道（**checker 零改动、产物零变化**）。
 
-**Architecture:** 三个新文件分工：`type_terms.cr`（类型项表 + 构造/去重 + 规范化）、`type_engine.cr`（判定 API + 原子互斥公理 + μ memo + 预算守卫）、`type_selftest.cr`（用例表 + 自测驱动）。引擎自带原子类 id（`AK_*`）与 `g_types` 行解耦，natives 用 1:1 映射，结构/命名原子挂 `g_types` 行（`-1` = 类级）。**不改 checker / ir_gen / 后端 / 解释器**——P0 不改判据行为，只建能力。
+**架构**：本计划新增三个文件，其分工如下：
 
-**Tech Stack:** Core 自举栈（self-hosted 编译器 `src/compiler/`）；扁平字节缓冲表（`string` + `w64/r64` + `grow_*` + `ESZ_*/OFF_*` 常量，先例 `g_types`/`g_ifaces`）；CLI 通道（`cli_cmd` + `corec_main` 分派）；Python 测试包装（`tests/selfhost/test_*.py` 风格，subprocess 调 `./build/corec`）。
+- `type_terms.cr` 负责类型项表、构造与去重，以及规范化。
+- `type_engine.cr` 负责判定 API、原子互斥公理、μ memo 与预算守卫。
+- `type_selftest.cr` 负责用例表与自测驱动。
 
-**Spec:** `docs/superpowers/specs/2026-09-10-type-interface-unification-design.md`（§0 裁决 / §1 语义基座 / §3 类型项层与引擎 / §4 步 1 建层 / §9 P0）。
+引擎自带原子类 id（`AK_*`），与 `g_types` 行解耦；natives 采用 1:1 映射；结构原子与命名原子挂 `g_types` 行（`-1` 表示类级）。**不改 checker / ir_gen / 后端 / 解释器**：P0 不改判据行为，只建能力。
 
-## Global Constraints
+**技术栈**：本计划涉及四个技术面，列举如下：
 
-- **jj only**：版本控制一律 `jj`（git 被 hook 机械拦截）；**提交必须路径限定**（多 agent 共用工作副本）：
+- Core 自举栈，即 self-hosted 编译器 `src/compiler/`。
+- 扁平字节缓冲表，由 `string` 加 `w64/r64` 与 `grow_*` 构成，常量族为 `ESZ_*/OFF_*`；先例为 `g_types` 与 `g_ifaces`。
+- CLI 通道，由 `cli_cmd` 加 `corec_main` 分派。
+- Python 测试包装，沿用 `tests/selfhost/test_*.py` 风格，经 subprocess 调用 `./build/corec`。
+
+**设计 spec**：`docs/superpowers/specs/2026-09-10-type-interface-unification-design.md`（§0 裁决、§1 语义基座、§3 类型项层与引擎、§4 步 1 建层、§9 P0）。
+
+## 全局约束
+
+- **仅用 `jj`**：版本控制一律使用 `jj`，`git` 由 hook 机械拦截。
+- **提交必须路径限定**（多 agent 共用工作副本）：
   `jj commit <本次改动的精确文件...> -m '<中文，前缀 feat:/docs:/test:>'`
-- **CPU 限速**：所有编译/测试命令必须 `nice -n 19` 前缀（铁律 #6）。
-- **文件永久不允许还原**；不得绕过/变通；根因修复。
-- **P0 零行为改动**：`checker.cr` / `ir_gen.cr` / `interp.cr` / 后端与内核文件**一行不动**；现有程序的编译产物 **byte-identical**（判据见 Task 5）。
-- **diff 校验规范式样**（本机 `jj diff` 默认 color-words 无 `+` 前缀，`grep '^+'` 恒真空通过；grep 实为 ugrep）：
+- **CPU 限速**：所有编译与测试命令必须加 `nice -n 19` 前缀（铁律 #6）。
+- **文件永久不允许还原**。不得绕过问题，不得变通，一律做根因修复。
+- **P0 零行为改动**：`checker.cr`、`ir_gen.cr`、`interp.cr` 与后端、内核文件**一行不动**；现有程序的编译产物必须 **byte-identical**（判据见 Task 5）。
+- **diff 校验规范式样**：本机 `jj diff` 默认使用 color-words，输出无 `+` 前缀，因此 `grep '^+'` 恒真空通过；本机 `grep` 实为 ugrep。式样如下：
   ```bash
   jj diff --git <paths...> | grep '^[+]' | grep -v -e '^[+][+][+]'      # 逐行核新增
   jj diff --git <paths...> | grep -c '^[-]'                             # 期望 0（除计划性替换）
   ```
-- 环境陷阱：noclobber（`>` 覆盖已存在文件失败 → 用 `>|` 或先删）；变量展开不分词。
-- **新文件必须注册三处**（否则构建静默缺件）：
-  1. `src/compiler/_import.cr`（project-mode 解析链）
-  2. `build_selfhost_native.py` 的 **corec 清单**（`corec_files`，顺序 = 行为定义面：置于 `src/compiler/checker.cr` 之后、`ir_gen.cr` 之前）
-  3. `tests/selfhost/test_compile.py` 的 `concat_sources()` 清单（同位置）
-  （`corelsp` / `corearch` 清单 P0 **不加**：引擎尚无消费者。）
-- **判据铁律**：`corec selftest-types` 全 PASS + 末行计数断言 + 无 `FAIL` 行；全回归绿；自举 `corec2/corec3` `cmp` IDENTICAL + N06=0。
-- **附加验证纪律（Task 1 实证教训，2026-09-10）**：白盒/压力验证**必须限时**——禁止 `sleep` 式长等待（用短超时或直接看日志）；同一缺陷最多迭代 **2 轮**（≥3 轮说明假设错了，改为最小化失败用例 + BLOCKED 上报）；**计划代码不是免检的**（本次 `h - (h/cap)*cap` 负哈希取模越界即为计划缺陷，由压力测试抓出）。
+- 环境陷阱：noclobber 下用 `>` 覆盖已存在文件会失败，须改用 `>|` 或先删；变量展开不分词。
+- **新文件必须注册三处**，否则构建静默缺件：
+  1. `src/compiler/_import.cr`，即 project-mode 解析链。
+  2. `build_selfhost_native.py` 的 **corec 清单**（`corec_files`）。其顺序即行为定义面：置于 `src/compiler/checker.cr` 之后、`ir_gen.cr` 之前。
+  3. `tests/selfhost/test_compile.py` 的 `concat_sources()` 清单，位置同上。
+  （`corelsp` 与 `corearch` 清单 P0 **不加**：引擎尚无消费者。）
+- **判据铁律**：`corec selftest-types` 全 PASS，末行有计数断言，且无 `FAIL` 行；全回归绿；自举 `corec2/corec3` 的 `cmp` 结果为 IDENTICAL，且 N06=0。
+- **附加验证纪律（Task 1 实证教训，2026-09-10）**：白盒与压力验证**必须限时**，禁止 `sleep` 式长等待，改用短超时或直接看日志。同一缺陷最多迭代 **2 轮**；达到 3 轮以上说明假设错了，须改为最小化失败用例并作 BLOCKED 上报。**计划代码不是免检的**：本次 `h - (h/cap)*cap` 的负哈希取模越界即为计划缺陷，由压力测试发现。
 
 ---
 
@@ -52,14 +64,14 @@
 
 ## Task 1: 类型项表 + 构造 API + 自测通道骨架
 
-**Files:**
-- Create: `src/compiler/type_terms.cr`
-- Create: `src/compiler/type_selftest.cr`
-- Modify: `src/compiler/globals.cr`（表全局声明）、`src/compiler/main.cr`（CLI）、`src/compiler/_import.cr`、`build_selfhost_native.py`、`tests/selfhost/test_compile.py`
-  （**不含 `dyn_arr.cr`**——扩容函数放 `type_terms.cr` 自持，理由见「文件结构」表注）
-- Create: `tests/selfhost/test_type_engine.py`
+**涉及文件：**
+- 新建 `src/compiler/type_terms.cr`
+- 新建 `src/compiler/type_selftest.cr`
+- 修改 `src/compiler/globals.cr`（表全局声明）、`src/compiler/main.cr`（CLI）、`src/compiler/_import.cr`、`build_selfhost_native.py`、`tests/selfhost/test_compile.py`
+  （**不含 `dyn_arr.cr`**：扩容函数放在 `type_terms.cr` 自持，理由见「文件结构」表注）
+- 新建 `tests/selfhost/test_type_engine.py`
 
-**Interfaces（本任务产出，后续任务依赖，签名不可改）：**
+**接口（本任务产出，后续任务依赖，签名不可改）：**
 
 ```
 // —— 标签常量（type_terms.cr）——
@@ -144,11 +156,11 @@ if __name__ == "__main__":
 ```bash
 nice -n 19 python3 tests/selfhost/test_type_engine.py
 ```
-Expected: FAIL —— `selftest-types` 未注册（`corec` 打印未知子命令/无 `N/M ... passed` 行）。
+预期：FAIL，因为 `selftest-types` 未注册（`corec` 打印未知子命令，或无 `N/M ... passed` 行）。
 
 - [ ] **Step 3: 表全局声明（`src/compiler/globals.cr`）**
 
-追加（与既有表声明同风格）：
+追加内容与既有表声明同风格：
 
 ```core
 // R2 P0 类型项引擎：类型项 DAG 表 + 结构哈希索引 + 判定 memo + 预算守卫
@@ -164,43 +176,52 @@ g_ty_uncovered : int, mut;         // 未覆盖面命中位（如 AK_NAMED 具�
 
 - [ ] **Step 4: 扩容函数（**落在 `src/compiler/type_terms.cr`，不放 `dyn_arr.cr`**）**
 
-> **位置修正（Task 1 实测 D5）**：照 `grow_types` 先例放 `dyn_arr.cr` 会让 **corearch 解析期硬失败**（`Undefined name: ESZ_TYPE_TERM / tt_reindex`）——`dyn_arr.cr` 是双 concat 共享面。引擎自持扩容与常量（Step 5 代码块内），共享面零改动。
+> **位置修正（Task 1 实测 D5）**：若照 `grow_types` 先例放进 `dyn_arr.cr`，会让 **corearch 解析期硬失败**（`Undefined name: ESZ_TYPE_TERM / tt_reindex`），因为 `dyn_arr.cr` 是双 concat 共享面。引擎自持扩容与常量，代码见 Step 5 代码块；共享面零改动。
 
-追加（照 `grow_types` 先例）：
+追加内容照 `grow_types` 先例：
 
 ```core
-fn grow_type_terms(needed: int) {
-    if needed < g_type_term_cap { return; }
-    nc : ., mut = g_type_term_cap * 2;
-    if nc < 256 { nc = 256; }
-    if nc < needed { nc = needed + 64; }
-    nb := alloc(nc * ESZ_TYPE_TERM);
-    _dyncpy(g_type_terms, g_type_term_cap * ESZ_TYPE_TERM, nb);
-    g_type_terms = nb;
-    g_type_term_cap = nc;
-}
+fn grow_type_terms(needed: int):
+    if needed < g_type_term_cap:
+        return
+    nc : ., mut = g_type_term_cap * 2
+    if nc < 256:
+        nc = 256
+    if nc < needed:
+        nc = needed + 64
+    nb := alloc(nc * ESZ_TYPE_TERM)
+    _dyncpy(g_type_terms, g_type_term_cap * ESZ_TYPE_TERM, nb)
+    g_type_terms = nb
+    g_type_term_cap = nc
 
-fn grow_tt_index(needed: int) {
+fn grow_tt_index(needed: int):
     // 开放寻址索引：容量取 2 的幂、≥ 2×项数（重建式扩容，见 type_terms.cr 的 tt_reindex）
-    if needed < g_tt_index_cap { return; }
-    nc : ., mut = 1024;
-    loop { if nc >= needed { break; } nc = nc * 2; }
-    nb := alloc(nc * 8);
-    i : ., mut = 0;
-    loop { if i >= nc { break; } w64(nb, i * 8, -1); i = i + 1; }
-    g_tt_index = nb;
-    g_tt_index_cap = nc;
-    g_tt_index_count = 0;
-    tt_reindex();
-}
+    if needed < g_tt_index_cap:
+        return
+    nc : ., mut = 1024
+    loop:
+        if nc >= needed:
+            break
+        nc = nc * 2
+    nb := alloc(nc * 8)
+    i : ., mut = 0
+    loop:
+        if i >= nc:
+            break
+        w64(nb, i * 8, -1)
+        i = i + 1
+    g_tt_index = nb
+    g_tt_index_cap = nc
+    g_tt_index_count = 0
+    tt_reindex()
 ```
 
 - [ ] **Step 5: 类型项表 + 构造 API（`src/compiler/type_terms.cr`）**
 
 > **Task 1 落地确认的三条实现约定（Task 2/3/4 必须沿用，勿回退）**：
-> ① **键 = 五字段全比，哈希不入键**（哈希只负责槽位定位）——「存储哈希 == 重算哈希」只在 i64 回绕下成立，而 bootstrap 解释器为任意精度整数 ⇒ 该等式恒假、引擎静默退化为「只插不查」（Task 1 实证）。
-> ② **惰性 memo 用零初值 + ready 位**（`g_tt_top_ok`/`g_tt_nil_ok`）——全局 `= -1` 初值被 bootstrap 后端降级为 0（`bootstrap/corec/frontend/ir_gen.py:68-74`：`constant_value` 只对 `Literal` 赋值 → 其余 `.quad 0`；见 TODO #2026-09-10-10）。
-> ③ **本语言无位异或算子** → 哈希用 FNV-1 加法折叠（照 `dyn_arr.cr` 的 `hash_bytes` 家族），不用 FNV-1a 的 `^`。
+> ① **键 = 五字段全比，哈希不入键**，哈希只负责槽位定位。理由：「存储哈希 == 重算哈希」只在 i64 回绕下成立，而 bootstrap 解释器为任意精度整数，因此该等式恒假，引擎静默退化为「只插不查」（Task 1 实证）。
+> ② **惰性 memo 用零初值加 ready 位**（`g_tt_top_ok` 与 `g_tt_nil_ok`）。理由：全局 `= -1` 初值被 bootstrap 后端降级为 0（`bootstrap/corec/frontend/ir_gen.py:68-74` 中 `constant_value` 只对 `Literal` 赋值，其余写 `.quad 0`；见 TODO #2026-09-10-10）。
+> ③ **本语言无位异或算子**，因此哈希采用 FNV-1 加法折叠（照 `dyn_arr.cr` 的 `hash_bytes` 家族），不用 FNV-1a 的 `^`。
 
 ```core
 // R2 P0：类型项表（集合语义的类型项 DAG）
@@ -348,35 +369,45 @@ fn tt_atom(ak: int, ti: int, params: int) -> int { return tt_term(TT_ATOM, ak, t
 // 判据：corec selftest-types → 每例一行 PASS/FAIL，末行 "N/M type-engine cases passed"，rc=0 全过。
 // 说明：本文件只依赖 type_terms.cr / type_engine.cr 的公开 API（签名见计划 Task 1/Task 3）。
 
-fn ts_check(name: string, got: int, want: int) -> int {
-    if got == want {
-        print("PASS "); println(name);
-        return 0;
-    }
-    print("FAIL "); print(name);
-    print(": got "); print(int_str(got));
-    print(" want "); println(int_str(want));
-    return 1;
-}
+fn ts_check(name: string, got: int, want: int) -> int:
+    if got == want:
+        print("PASS ")
+        println(name)
+        return 0
+    print("FAIL ")
+    print(name)
+    print(": got ")
+    print(int_str(got))
+    print(" want ")
+    println(int_str(want))
+    return 1
 
-fn type_selftest_run() -> int {
-    fails : ., mut = 0;
-    total : ., mut = 0;
+fn type_selftest_run() -> int:
+    fails : ., mut = 0
+    total : ., mut = 0
 
     // --- P0 最小用例（Task 3/4 扩充为 spec §8 全类：子类型/等价/不相交/可空/反例/穷尽性/递归/参数化/预算）---
-    a_int := tt_atom(AK_INT, TI_INT, -1);
-    a_str := tt_atom(AK_STRING, TI_STR, -1);
+    a_int := tt_atom(AK_INT, TI_INT, -1)
+    a_str := tt_atom(AK_STRING, TI_STR, -1)
 
-    total = total + 1; fails = fails + ts_check("unit.bot_sub_int", ty_sub(tt_bot(), a_int), 1);
-    total = total + 1; fails = fails + ts_check("unit.int_sub_str",  ty_sub(a_int, a_str), 0);
-    total = total + 1; fails = fails + ts_check("unit.int_sub_int",  ty_sub(a_int, a_int), 1);
-    total = total + 1; fails = fails + ts_check("unit.dedup",       (tt_union(a_int, a_str) == tt_union(a_int, a_str)), 1);
-    total = total + 1; fails = fails + ts_check("unit.notnot",      (tt_not(tt_not(a_int)) == a_int), 1);
+    total = total + 1
+    fails = fails + ts_check("unit.bot_sub_int", ty_sub(tt_bot(), a_int), 1)
+    total = total + 1
+    fails = fails + ts_check("unit.int_sub_str",  ty_sub(a_int, a_str), 0)
+    total = total + 1
+    fails = fails + ts_check("unit.int_sub_int",  ty_sub(a_int, a_int), 1)
+    total = total + 1
+    fails = fails + ts_check("unit.dedup",       (tt_union(a_int, a_str) == tt_union(a_int, a_str)), 1)
+    total = total + 1
+    fails = fails + ts_check("unit.notnot",      (tt_not(tt_not(a_int)) == a_int), 1)
 
-    print(int_str(total - fails)); print("/"); print(int_str(total)); println(" type-engine cases passed");
-    if fails != 0 { return 1; }
-    return 0;
-}
+    print(int_str(total - fails))
+    print("/")
+    print(int_str(total))
+    println(" type-engine cases passed")
+    if fails != 0:
+        return 1
+    return 0
 ```
 
 - [ ] **Step 7: `type_engine.cr` 最小桩（供 Step 6 编译通过；Task 3 补全判定）**
@@ -384,28 +415,42 @@ fn type_selftest_run() -> int {
 ```core
 // R2 P0：类型项判定引擎（语义包含）。
 // 本文件在 Task 3 补全；Task 1 只放原子类常量 + ty_sub 桩（保证骨架可编译可跑）。
-AK_INT : int = 0;      AK_DEX : int = 1;     AK_STRING : int = 2;   AK_BOOL : int = 3;
-AK_UNIT : int = 4;     AK_NEVER : int = 5;   AK_CHAR : int = 6;     AK_DYN : int = 7;
-AK_PRODUCT : int = 8;  AK_SUM : int = 9;     AK_SEQUENCE : int = 10;
-AK_REF : int = 11;     AK_PTR : int = 12;    AK_FN : int = 13;      AK_NAMED : int = 14;
+AK_INT : int = 0
+AK_DEX : int = 1
+AK_STRING : int = 2
+AK_BOOL : int = 3
+AK_UNIT : int = 4
+AK_NEVER : int = 5
+AK_CHAR : int = 6
+AK_DYN : int = 7
+AK_PRODUCT : int = 8
+AK_SUM : int = 9
+AK_SEQUENCE : int = 10
+AK_REF : int = 11
+AK_PTR : int = 12
+AK_FN : int = 13
+AK_NAMED : int = 14
 
-fn ty_sub(a: int, b: int) -> int {   // 桩：Task 3 替换为真判定（三态 1/0/-1）
-    if a == b { return 1; }
-    if tt_tag(b) == TT_TOP { return 1; }
-    if tt_tag(a) == TT_BOT { return 1; }
-    return 0;
-}
+fn ty_sub(a: int, b: int) -> int:
+    // 桩：Task 3 替换为真判定（三态 1/0/-1）
+    if a == b:
+        return 1
+    if tt_tag(b) == TT_TOP:
+        return 1
+    if tt_tag(a) == TT_BOT:
+        return 1
+    return 0
 ```
 
 - [ ] **Step 8: CLI 注册（`src/compiler/main.cr`）**
 
-在 `corec_main()` 的子命令注册段（`cli_cmd("clean-cache", ...)` 之后）追加：
+在 `corec_main()` 的子命令注册段中追加，位置在 `cli_cmd("clean-cache", ...)` 之后：
 
 ```core
     cli_cmd("selftest-types", "Run type-engine self tests (R2 P0)");
 ```
 
-并在命令分派区（与 `cli_eq(cmd, "run")` 等同级）追加：
+并在命令分派区追加，位置与 `cli_eq(cmd, "run")` 等同级：
 
 ```core
     if cli_eq(cmd, "selftest-types") { return type_selftest_run(); }
@@ -413,9 +458,9 @@ fn ty_sub(a: int, b: int) -> int {   // 桩：Task 3 替换为真判定（三态
 
 - [ ] **Step 9: 清单注册（三处）**
 
-1. `src/compiler/_import.cr`：在 `import checker` 之后加 `import type_terms` / `import type_engine` / `import type_selftest`
-2. `build_selfhost_native.py`：`corec_files` 列表在 `'src/compiler/checker.cr',` 之后插入三行
-3. `tests/selfhost/test_compile.py`：`concat_sources()` 的 `files` 列表同样位置插入三行
+1. `src/compiler/_import.cr`：在 `import checker` 之后加入 `import type_terms`、`import type_engine`、`import type_selftest`。
+2. `build_selfhost_native.py`：在 `corec_files` 列表的 `'src/compiler/checker.cr',` 之后插入三行。
+3. `tests/selfhost/test_compile.py`：在 `concat_sources()` 的 `files` 列表的同样位置插入三行。
 
 - [ ] **Step 10: 重建 + 跑测试**
 
@@ -425,7 +470,7 @@ nice -n 19 ./build/corec selftest-types          # 期望 5/5 ... passed、rc=0
 nice -n 19 python3 tests/selfhost/test_type_engine.py   # 期望 PASS
 nice -n 19 ./build/corec run 'fn main()->int{return 42;}'   # 期望 rc=42（既有行为不动）
 ```
-Expected: 全绿。
+预期：全绿。
 
 - [ ] **Step 11: 提交（路径限定）**
 
@@ -435,19 +480,19 @@ jj commit src/compiler/type_terms.cr src/compiler/type_engine.cr src/compiler/ty
   build_selfhost_native.py tests/selfhost/test_compile.py tests/selfhost/test_type_engine.py \
   -m 'feat: R2 P0 Task 1——类型项表（DAG + 哈希去重）+ 构造 API + selftest-types 自测通道骨架（checker 零改动）'
 ```
-（**不含 `dyn_arr.cr`**——扩容自持于 `type_terms.cr`，见「文件结构」表注。）
+（**不含 `dyn_arr.cr`**：扩容自持于 `type_terms.cr`，见「文件结构」表注。）
 
 ---
 
 ## Task 2: NNF + DNF 规范化
 
-**Files:**
-- Modify: `src/compiler/type_terms.cr`
-- Modify: `src/compiler/type_selftest.cr`（加用例）
+**涉及文件：**
+- 修改 `src/compiler/type_terms.cr`
+- 修改 `src/compiler/type_selftest.cr`（加用例）
 
-**Interfaces:**
-- Consumes: Task 1 的构造 API
-- Produces:
+**接口：**
+- 消费：Task 1 的构造 API
+- 产出：
 ```
 fn tt_nnf(i: int) -> int          // 否定下推：¬(∪) → ∩(¬)、¬(∩) → ∪(¬)、¬¬ 消、¬ATOM/¬VAR/¬μ 保留为字面
 fn tt_norm(i: int) -> int         // 规范化到 DNF：UNION of INTER-of-literals（literals = ATOM/¬ATOM/VAR/¬VAR/TOP_K）
@@ -464,44 +509,57 @@ fn tt_is_dnf(i: int) -> int       // 自测辅助：检查项是否已是 DNF �
     total = total + 1; fails = fails + ts_check("norm.union_inter_dist",
         ty_equiv(tt_inter(tt_union(a_int, a_str), a_int), a_int), 1);
 ```
-（`tt_intersect_union_probe()` = 构造 `(int ∪ string) ∩ bool` 的探针函数，Task 2 一并加上——它测的是「∩ 分配到 ∪ 后 DNF 不丢项」。）
+（`tt_intersect_union_probe()` 是构造 `(int ∪ string) ∩ bool` 的探针函数，Task 2 一并加上；它测的是「∩ 分配到 ∪ 后 DNF 不丢项」。）
 
 - [ ] **Step 2: 运行确认「红」**
 
 ```bash
 nice -n 19 python3 build_selfhost_native.py && nice -n 19 ./build/corec selftest-types
 ```
-Expected: FAIL（`tt_norm`/`tt_is_dnf`/`tt_equiv` 未实现或桩返回 0）。
+预期：FAIL（`tt_norm`、`tt_is_dnf`、`tt_equiv` 未实现，或桩返回 0）。
 
 - [ ] **Step 3: 实现 NNF（`type_terms.cr`）**
 
 ```core
 // NNF：否定下推（De Morgan + 双重否定消除）；μ 体内照推
-fn tt_nnf(i: int) -> int {
-    t := tt_tag(i);
-    if t == TT_BOT { return tt_top(); }
-    if t == TT_TOP { return tt_bot(); }
-    if t == TT_NOT { return tt_nnf_neg(tt_a(i)); }
-    if t == TT_UNION { return tt_union(tt_nnf(tt_a(i)), tt_nnf(tt_b(i))); }
-    if t == TT_INTER { return tt_inter(tt_nnf(tt_a(i)), tt_nnf(tt_b(i))); }
-    if t == TT_MU { return tt_mu(tt_a(i), tt_nnf(tt_b(i))); }
-    if t == TT_CONS { return tt_cons(tt_nnf(tt_a(i)), tt_nnf(tt_b(i))); }
-    if t == TT_ATOM { return tt_atom(tt_a(i), tt_b(i), tt_nnf_list(tt_c(i))); }
-    return i;   // 字面：ATOM 参数已推 / VAR / NIL
-}
+fn tt_nnf(i: int) -> int:
+    t := tt_tag(i)
+    if t == TT_BOT:
+        return tt_top()
+    if t == TT_TOP:
+        return tt_bot()
+    if t == TT_NOT:
+        return tt_nnf_neg(tt_a(i))
+    if t == TT_UNION:
+        return tt_union(tt_nnf(tt_a(i)), tt_nnf(tt_b(i)))
+    if t == TT_INTER:
+        return tt_inter(tt_nnf(tt_a(i)), tt_nnf(tt_b(i)))
+    if t == TT_MU:
+        return tt_mu(tt_a(i), tt_nnf(tt_b(i)))
+    if t == TT_CONS:
+        return tt_cons(tt_nnf(tt_a(i)), tt_nnf(tt_b(i)))
+    if t == TT_ATOM:
+        return tt_atom(tt_a(i), tt_b(i), tt_nnf_list(tt_c(i)))
+    return i   // 字面：ATOM 参数已推 / VAR / NIL
 
-fn tt_nnf_neg(i: int) -> int {   // 计算 ¬i 的 NNF（负位置）
-    t := tt_tag(i);
-    if t == TT_BOT { return tt_top(); }
-    if t == TT_TOP { return tt_bot(); }
-    if t == TT_NOT { return tt_nnf(tt_a(i)); }
-    if t == TT_UNION { return tt_inter(tt_nnf_neg(tt_a(i)), tt_nnf_neg(tt_b(i))); }
-    if t == TT_INTER { return tt_union(tt_nnf_neg(tt_a(i)), tt_nnf_neg(tt_b(i))); }
-    if t == TT_MU { return tt_mu(tt_a(i), tt_nnf_neg(tt_b(i))); }
-    return tt_not(i);   // 字面取反：¬ATOM / ¬VAR
-}
+fn tt_nnf_neg(i: int) -> int:
+    // 计算 ¬i 的 NNF（负位置）
+    t := tt_tag(i)
+    if t == TT_BOT:
+        return tt_top()
+    if t == TT_TOP:
+        return tt_bot()
+    if t == TT_NOT:
+        return tt_nnf(tt_a(i))
+    if t == TT_UNION:
+        return tt_inter(tt_nnf_neg(tt_a(i)), tt_nnf_neg(tt_b(i)))
+    if t == TT_INTER:
+        return tt_union(tt_nnf_neg(tt_a(i)), tt_nnf_neg(tt_b(i)))
+    if t == TT_MU:
+        return tt_mu(tt_a(i), tt_nnf_neg(tt_b(i)))
+    return tt_not(i)   // 字面取反：¬ATOM / ¬VAR
 ```
-（`tt_nnf_list`：对 CONS 链逐元素 `tt_nnf`——新加的小工具函数。）
+（`tt_nnf_list` 是新增的小工具函数，对 CONS 链逐元素调用 `tt_nnf`。）
 
 - [ ] **Step 4: 实现 DNF（`type_terms.cr`）**
 
@@ -509,50 +567,50 @@ fn tt_nnf_neg(i: int) -> int {   // 计算 ¬i 的 NNF（负位置）
 // DNF：把 NNF 形态分配到「union of inter-of-literals」。
 // 入口先 tt_nnf；分配律在 INTER 节点上做（左右各自 DNF 后笛卡尔积）。
 // 简化：单元素 union/inter 不建节点；∩ 左/右为 union 时展开（分配律）；结果项去重靠 tt_term 的 DAG。
-fn tt_norm(i: int) -> int { return tt_dnf(tt_nnf(i)); }
+fn tt_norm(i: int) -> int:
+    return tt_dnf(tt_nnf(i))
 
-fn tt_dnf(i: int) -> int {
-    t := tt_tag(i);
-    if t == TT_UNION { return tt_union(tt_dnf(tt_a(i)), tt_dnf(tt_b(i))); }
-    if t == TT_INTER {
-        l := tt_dnf(tt_a(i)); r := tt_dnf(tt_b(i));
+fn tt_dnf(i: int) -> int:
+    t := tt_tag(i)
+    if t == TT_UNION:
+        return tt_union(tt_dnf(tt_a(i)), tt_dnf(tt_b(i)))
+    if t == TT_INTER:
+        l := tt_dnf(tt_a(i))
+        r := tt_dnf(tt_b(i))
         // 分配律**两支都展开**：(A∪B)∩C → (A∩C) ∪ (B∩C)
         // （本计划初稿只展开一支 = 静默丢项；P0 Task 2 自测 norm.distributed 实证 got INTER want UNION）
-        if tt_tag(l) == TT_UNION {
-            return tt_union(tt_dnf(tt_inter(tt_a(l), r)), tt_dnf(tt_inter(tt_b(l), r)));
-        }
-        if tt_tag(r) == TT_UNION {
-            return tt_union(tt_dnf(tt_inter(l, tt_a(r))), tt_dnf(tt_inter(l, tt_b(r))));
-        }
-        return tt_inter(l, r);   // 已规范化（∩-链扁平）
-    }
-    if t == TT_MU { return tt_mu(tt_a(i), tt_dnf(tt_b(i))); }
-    return i;   // 字面
-}
+        if tt_tag(l) == TT_UNION:
+            return tt_union(tt_dnf(tt_inter(tt_a(l), r)), tt_dnf(tt_inter(tt_b(l), r)))
+        if tt_tag(r) == TT_UNION:
+            return tt_union(tt_dnf(tt_inter(l, tt_a(r))), tt_dnf(tt_inter(l, tt_b(r))))
+        return tt_inter(l, r)   // 已规范化（∩-链扁平）
+    if t == TT_MU:
+        return tt_mu(tt_a(i), tt_dnf(tt_b(i)))
+    return i   // 字面
 
 // DNF 形态判定：UNION 的每个子项必须是「product 或 literal」（不得再嵌 UNION）；
 // INTER 链的叶子必须全是 literal；literal = ATOM / ¬ATOM / VAR / ¬VAR / TOP_K / ⊥
-fn tt_is_dnf(i: int) -> int {
-    t := tt_tag(i);
-    if t == TT_UNION {
-        if tt_is_dnf(tt_a(i)) == 0 { return 0; }
-        return tt_is_dnf(tt_b(i));
-    }
+fn tt_is_dnf(i: int) -> int:
+    t := tt_tag(i)
+    if t == TT_UNION:
+        if tt_is_dnf(tt_a(i)) == 0:
+            return 0
+        return tt_is_dnf(tt_b(i))
     // 非 UNION 位置：不许出现 UNION（上面已递归剥掉），检查 product/literal 形态
-    if t == TT_INTER { return tt_is_product_chain(i); }
-    return tt_is_literal(i);
-}
+    if t == TT_INTER:
+        return tt_is_product_chain(i)
+    return tt_is_literal(i)
 
-fn tt_is_product_chain(i: int) -> int {
-    if tt_tag(i) == TT_INTER {
-        if tt_tag(tt_a(i)) == TT_UNION || tt_tag(tt_b(i)) == TT_UNION { return 0; }
-        if tt_is_product_chain(tt_a(i)) == 0 { return 0; }
-        return tt_is_product_chain(tt_b(i));
-    }
-    return tt_is_literal(i);
-}
+fn tt_is_product_chain(i: int) -> int:
+    if tt_tag(i) == TT_INTER:
+        if tt_tag(tt_a(i)) == TT_UNION || tt_tag(tt_b(i)) == TT_UNION:
+            return 0
+        if tt_is_product_chain(tt_a(i)) == 0:
+            return 0
+        return tt_is_product_chain(tt_b(i))
+    return tt_is_literal(i)
 ```
-（`tt_is_literal` 已在 Task 3 Step 3 定义——**依赖顺序**：Task 2 落地时先补一个最小 `tt_is_literal`（语义同 Task 3 版本），Task 3 再替换为最终版；两版语义必须一致。）
+（`tt_is_literal` 已在 Task 3 Step 3 定义，**依赖顺序**如下：Task 2 落地时先补一个最小 `tt_is_literal`，其语义同 Task 3 版本；Task 3 再替换为最终版。两版语义必须一致。）
 
 - [ ] **Step 5: 跑测试确认变绿**
 
@@ -560,7 +618,7 @@ fn tt_is_product_chain(i: int) -> int {
 nice -n 19 python3 build_selfhost_native.py && nice -n 19 ./build/corec selftest-types
 nice -n 19 python3 tests/selfhost/test_type_engine.py
 ```
-Expected: 全部 PASS（计数行 ≥ 8）。
+预期：全部 PASS，计数行 ≥ 8。
 
 - [ ] **Step 6: 提交**
 
@@ -572,13 +630,13 @@ jj commit src/compiler/type_terms.cr src/compiler/type_selftest.cr -m 'feat: R2 
 
 ## Task 3: 判定引擎（三态 + 原子互斥 + μ memo + 预算守卫）
 
-**Files:**
-- Modify: `src/compiler/type_engine.cr`（替换 Task 1 的桩）
-- Modify: `src/compiler/type_selftest.cr`（加用例）
+**涉及文件：**
+- 修改 `src/compiler/type_engine.cr`（替换 Task 1 的桩）
+- 修改 `src/compiler/type_selftest.cr`（加用例）
 
-**Interfaces:**
-- Consumes: Task 1/2 的 API
-- Produces（**API 稳定，Task 4/后续 P 期依赖**）：
+**接口：**
+- 消费：Task 1/2 的 API
+- 产出（**API 稳定，Task 4/后续 P 期依赖**）：
 ```
 // 三态：1 = 成立；0 = 不成立；-1 = 预算耗尽/不可判定（禁止当 0 用）
 fn ty_sub(a: int, b: int) -> int
@@ -600,152 +658,190 @@ fn ak_disjoint(x: int, y: int) -> int
 
 ```core
     // 深递归探针：μX₀. product<μX₁. product<… int>>（深度 256）——判定展开会耗尽小预算
-    // （放在 type_selftest.cr 内，仅自测使用）
-    fn tt_mu_probe_deep() -> int {
-        acc : ., mut = tt_atom(AK_INT, TI_INT, -1);
-        d : ., mut = 0;
-        loop {
-            if d >= 256 { break; }
-            acc = tt_mu(0, tt_atom(AK_PRODUCT, -1, tt_cons(acc, tt_nil())));
-            d = d + 1;
-        }
-        return acc;
-    }
+        // （放在 type_selftest.cr 内，仅自测使用）
+    fn tt_mu_probe_deep() -> int:
+        acc : ., mut = tt_atom(AK_INT, TI_INT, -1)
+        d : ., mut = 0
+        loop:
+            if d >= 256:
+                break
+            acc = tt_mu(0, tt_atom(AK_PRODUCT, -1, tt_cons(acc, tt_nil())))
+            d = d + 1
+        return acc
 
-    // --- 判定（Task 3）---
-    u_is := tt_union(a_int, a_str);
-    total = total + 1; fails = fails + ts_check("sub.union_right", ty_sub(a_int, u_is), 1);
-    total = total + 1; fails = fails + ts_check("sub.union_left_neg", ty_sub(u_is, a_int), 0);
-    total = total + 1; fails = fails + ts_check("sub.inter", ty_sub(tt_inter(a_int, a_str), a_int), 1);
-    total = total + 1; fails = fails + ts_check("equiv.absorb", ty_equiv(tt_union(a_int, a_int), a_int), 1);
-    total = total + 1; fails = fails + ts_check("disjoint.atoms", ty_disjoint(a_int, a_str), 1);
-    total = total + 1; fails = fails + ts_check("disjoint.same", ty_disjoint(a_int, a_int), 0);
-    total = total + 1; fails = fails + ts_check("inh.atom", ty_inhabited(a_int), 1);
-    total = total + 1; fails = fails + ts_check("inh.contra", ty_inhabited(tt_inter(a_int, tt_not(a_int))), 0);
-    total = total + 1; fails = fails + ts_check("inh.mixed_atoms",
-        ty_inhabited(tt_inter(a_int, tt_atom(AK_SEQUENCE, -1, -1))), 0);
-    total = total + 1; fails = fails + ts_check("topk.sub", ty_sub(a_int, tt_top_k(AK_INT)), 1);
-    total = total + 1; fails = fails + ts_check("topk.neg", ty_sub(a_str, tt_top_k(AK_INT)), 0);
-    // 预算守卫（深递归爆炸项 + 极小预算 → 三态 -1，且不与"不成立"混淆）
-    ty_budget_reset(64);
-    total = total + 1; fails = fails + ts_check("budget.unknown", ty_sub(tt_mu_probe_deep(), a_int), -1);
-    total = total + 1; fails = fails + ts_check("budget.flag", ty_exhausted(), 1);
-    ty_budget_reset(200000);
+        // --- 判定（Task 3）---
+    u_is := tt_union(a_int, a_str)
+    total = total + 1
+    fails = fails + ts_check("sub.union_right", ty_sub(a_int, u_is), 1)
+    total = total + 1
+    fails = fails + ts_check("sub.union_left_neg", ty_sub(u_is, a_int), 0)
+    total = total + 1
+    fails = fails + ts_check("sub.inter", ty_sub(tt_inter(a_int, a_str), a_int), 1)
+    total = total + 1
+    fails = fails + ts_check("equiv.absorb", ty_equiv(tt_union(a_int, a_int), a_int), 1)
+    total = total + 1
+    fails = fails + ts_check("disjoint.atoms", ty_disjoint(a_int, a_str), 1)
+    total = total + 1
+    fails = fails + ts_check("disjoint.same", ty_disjoint(a_int, a_int), 0)
+    total = total + 1
+    fails = fails + ts_check("inh.atom", ty_inhabited(a_int), 1)
+    total = total + 1
+    fails = fails + ts_check("inh.contra", ty_inhabited(tt_inter(a_int, tt_not(a_int))), 0)
+    total = total + 1
+    fails = fails + ts_check("inh.mixed_atoms",
+        ty_inhabited(tt_inter(a_int, tt_atom(AK_SEQUENCE, -1, -1))), 0)
+    total = total + 1
+    fails = fails + ts_check("topk.sub", ty_sub(a_int, tt_top_k(AK_INT)), 1)
+    total = total + 1
+    fails = fails + ts_check("topk.neg", ty_sub(a_str, tt_top_k(AK_INT)), 0)
+        // 预算守卫（深递归爆炸项 + 极小预算 → 三态 -1，且不与"不成立"混淆）
+    ty_budget_reset(64)
+    total = total + 1
+    fails = fails + ts_check("budget.unknown", ty_sub(tt_mu_probe_deep(), a_int), -1)
+    total = total + 1
+    fails = fails + ts_check("budget.flag", ty_exhausted(), 1)
+    ty_budget_reset(200000)
 ```
 
-- [ ] **Step 2: 运行确认「红」**（桩返回 0，断言 1/-1 的用例必挂）
+- [ ] **Step 2: 运行确认「红」**（桩返回 0，断言 1 或 -1 的用例必然失败）
 
 - [ ] **Step 3: 实现互斥公理 + 逐字面覆盖（`type_engine.cr`）**
 
 ```core
 // 原子类互斥（P0 公理表）：不同原子类两两不相交；AK_DYN = ⊤（与所有类相交）。
 // 例外：AK_NAMED 的具体行可能展开为其它类——P0 不展开（登记为未覆盖面），按未知处理。
-fn ak_disjoint(x: int, y: int) -> int {
-    if x == y { return 0; }
-    if x == AK_DYN || y == AK_DYN { return 0; }
-    if x == AK_NEVER || y == AK_NEVER { return 1; }
-    return 1;
-}
+fn ak_disjoint(x: int, y: int) -> int:
+    if x == y:
+        return 0
+    if x == AK_DYN || y == AK_DYN:
+        return 0
+    if x == AK_NEVER || y == AK_NEVER:
+        return 1
+    return 1
 
-fn tt_is_literal(i: int) -> int {
-    t := tt_tag(i);
-    if t == TT_ATOM || t == TT_VAR || t == TT_TOP_K || t == TT_BOT { return 1; }
-    if t == TT_NOT {
-        it := tt_tag(tt_a(i));
-        if it == TT_ATOM || it == TT_VAR || it == TT_TOP_K { return 1; }
-    }
-    return 0;
-}
+fn tt_is_literal(i: int) -> int:
+    t := tt_tag(i)
+    if t == TT_ATOM || t == TT_VAR || t == TT_TOP_K || t == TT_BOT:
+        return 1
+    if t == TT_NOT:
+        it := tt_tag(tt_a(i))
+        if it == TT_ATOM || it == TT_VAR || it == TT_TOP_K:
+            return 1
+    return 0
 
 // 字面覆盖：literal p 是否蕴含 literal q（q 的语义包含 p 的）
-fn lit_covers(p: int, q: int) -> int {
-    if p == q { return 1; }
-    pt := tt_tag(p); qt := tt_tag(q);
+fn lit_covers(p: int, q: int) -> int:
+    if p == q:
+        return 1
+    pt := tt_tag(p)
+    qt := tt_tag(q)
     // ⊤ₖ 覆盖同类原子
-    if qt == TT_TOP_K {
-        if pt == TT_ATOM { return ty_ak_of(p) == tt_a(q); }
-        if pt == TT_TOP_K { return tt_a(p) == tt_a(q); }
-        return 0;
-    }
-    if pt == TT_NOT && qt != TT_NOT { return 0; }   // ¬A 不蕴含正字面（除 A=B 已排除）
-    return 0;   // 其余一律不覆盖（⊥ 早退由调用方 lits_contradictory 处理）
-}
+    if qt == TT_TOP_K:
+        if pt == TT_ATOM:
+            return ty_ak_of(p) == tt_a(q)
+        if pt == TT_TOP_K:
+            return tt_a(p) == tt_a(q)
+        return 0
+    if pt == TT_NOT && qt != TT_NOT:
+        return 0
+    // ¬A 不蕴含正字面（除 A=B 已排除）
+    return 0   // 其余一律不覆盖（⊥ 早退由调用方 lits_contradictory 处理）
 ```
-（`ty_ak_of(lit)`：ATOM → `tt_a(lit)`；`¬ATOM` → `tt_a(tt_a(lit))`。）
+（`ty_ak_of(lit)` 的规则：ATOM 取 `tt_a(lit)`；`¬ATOM` 取 `tt_a(tt_a(lit))`。）
 
 - [ ] **Step 4: 实现判定的 product 覆盖 + μ 展开 + memo + 预算（`type_engine.cr`）**
 
 ```core
 // 顶层入口：每次重置步数/耗尽位，规范化两侧，逐 product 覆盖判定
-fn ty_sub(a: int, b: int) -> int {
-    if a == b { return 1; }
-    nav := tt_norm(a); nbv := tt_norm(b);
-    if nav == nbv { return 1; }
-    if tt_tag(nbv) == TT_TOP { return 1; }
-    if tt_tag(nav) == TT_BOT { return 1; }
+fn ty_sub(a: int, b: int) -> int:
+    if a == b:
+        return 1
+    nav := tt_norm(a)
+    nbv := tt_norm(b)
+    if nav == nbv:
+        return 1
+    if tt_tag(nbv) == TT_TOP:
+        return 1
+    if tt_tag(nav) == TT_BOT:
+        return 1
     // A = ⋃ products；每个 product 必须被 B 的某个 product 覆盖
-    r := sub_union_covered(nav, nbv, 0);
-    if g_ty_exhausted != 0 { return -1; }
-    return r;
-}
+    r := sub_union_covered(nav, nbv, 0)
+    if g_ty_exhausted != 0:
+        return -1
+    return r
 
 // products 分解：DNF 形态下按 UNION 拆分，叶子 = product（∩-链）或字面
-fn prod_covered(p: int, b: int) -> int {
+fn prod_covered(p: int, b: int) -> int:
     // b 拆 union：任一 product 覆盖即可
-    if tt_tag(b) == TT_UNION { if prod_covered(p, tt_a(b)) == 1 { return 1; } return prod_covered(p, tt_b(b)); }
+    if tt_tag(b) == TT_UNION:
+        if prod_covered(p, tt_a(b)) == 1:
+            return 1
+        return prod_covered(p, tt_b(b))
     // p 与 b 均为 product/字面：收集双方字面集后做覆盖（b ⊆ p）
     //   —— p 是待检查的「更小集合」，b 是候选「更大集合」：需要 b 的每个字面被 p 的某字面蕴含
-    plits := lit_collect(p); blits := lit_collect(b);
-    bi : ., mut = 0;
-    loop {
-        if bi >= blits_count { break; }
-        bq := blits[bi];
+    plits := lit_collect(p)
+    blits := lit_collect(b)
+    bi : ., mut = 0
+    loop:
+        if bi >= blits_count:
+            break
+        bq := blits[bi]
         // ⊥ 早退：p 的字面集内部矛盾 → 空集，覆盖一切
-        if lits_contradictory(plits) != 0 { return 1; }
-        if !lit_set_covers(plits, bq) { return 0; }
-        bi = bi + 1;
-    }
-    return 1;
-}
+        if lits_contradictory(plits) != 0:
+            return 1
+        if !lit_set_covers(plits, bq):
+            return 0
+        bi = bi + 1
+    return 1
 ```
-（实现者按此语义实现：`lit_collect` 把 product 拆成字面数组（µ 展开点见下），`lit_set_covers` 用 `lit_covers` 扫描，`lits_contradictory` 检查 `ATOM(k1)` 与 `ATOM(k2)`（k1≠k2 且互斥）或 `X` 与 `¬X`。）
+（实现者按此语义实现：`lit_collect` 把 product 拆成字面数组，µ 展开点见下；`lit_set_covers` 用 `lit_covers` 扫描；`lits_contradictory` 检查 `ATOM(k1)` 与 `ATOM(k2)`（k1≠k2 且互斥），或检查 `X` 与 `¬X`。）
 
 ```core
 // μ 展开 + memo（假设-判定，最大不动点）：遇到 MU 单步展开，并在假设集中登记 (子项对)
 // 预算：每次 sub 调用 g_ty_steps += 1；超 g_ty_budget_max → g_ty_exhausted = 1，返回 -1
-fn sub_step(a: int, b: int) -> int {
-    g_ty_steps = g_ty_steps + 1;
-    if g_ty_steps > g_ty_budget_max { g_ty_exhausted = 1; return -1; }
-    mk := ty_memo_find(a, b);
-    if mk >= 0 { return r64(g_ty_memo_vals, mk * 8); }
+fn sub_step(a: int, b: int) -> int:
+    g_ty_steps = g_ty_steps + 1
+    if g_ty_steps > g_ty_budget_max:
+        g_ty_exhausted = 1
+        return -1
+    mk := ty_memo_find(a, b)
+    if mk >= 0:
+        return r64(g_ty_memo_vals, mk * 8)
     ...   // 1) a 为 MU → 展开（tt_subst(a 的 var, a 的 body)）后递归
           // 2) b 为 MU → 展开后递归
           // 3) 结果写 memo（三态值）
-    return r;
-}
+    return r
 ```
 
 - [ ] **Step 5: 实现 `ty_equiv` / `ty_disjoint` / `ty_inhabited` / 预算重置**
 
 ```core
-fn ty_equiv(a: int, b: int) -> int {
-    x := ty_sub(a, b); if x != 1 { return x; }
-    y := ty_sub(b, a); if y != 1 { return y; }
-    return 1;
-}
-fn ty_disjoint(a: int, b: int) -> int {
-    x := ty_inhabited(tt_inter(a, b));
-    if x == -1 { return -1; }   // 三态传播：未知不得降级为 0
-    if x == 0 { return 1; }
-    return 0;
-}
-fn ty_inhabited(a: int) -> int {
-    n := tt_norm(a);
+fn ty_equiv(a: int, b: int) -> int:
+    x := ty_sub(a, b)
+    if x != 1:
+        return x
+    y := ty_sub(b, a)
+    if y != 1:
+        return y
+    return 1
+fn ty_disjoint(a: int, b: int) -> int:
+    x := ty_inhabited(tt_inter(a, b))
+    if x == -1:
+        return -1
+    // 三态传播：未知不得降级为 0
+    if x == 0:
+        return 1
+    return 0
+fn ty_inhabited(a: int) -> int:
+    n := tt_norm(a)
     // DNF 下：存在一个 product，其字面集不矛盾且所有原子类两两相容
-    return prod_inhabited_any(n);
-}
-fn ty_budget_reset(limit: int) { g_ty_steps = 0; g_ty_budget_max = limit; g_ty_exhausted = 0; }
-fn ty_exhausted() -> int { return g_ty_exhausted; }
+    return prod_inhabited_any(n)
+fn ty_budget_reset(limit: int):
+    g_ty_steps = 0
+    g_ty_budget_max = limit
+    g_ty_exhausted = 0
+fn ty_exhausted() -> int:
+    return g_ty_exhausted
 ```
 （`prod_inhabited_any`：UNION 拆分 + 每个 product 做 `lits_contradictory` 检查；`AK_NAMED` 具体行 P0 不展开——**登记为未覆盖面**，遇到即 `g_ty_exhausted` 语义之外的 `unknown`：返回 -1 并置一个 `g_ty_uncovered` 位，自测里不出现。）
 
@@ -817,30 +913,32 @@ fn ty_exhaustive(domain: int, patterns: int) -> int   // patterns = CONS 链；1
 
 ```core
 // 反例 = A\B 的规范化项；不可满足（= ⊥）→ -1（无遗漏/无反例值）
-fn tt_witness(a: int, b: int) -> int {
-    r := tt_norm(tt_inter(a, tt_not(b)));
-    if ty_inhabited(r) != 1 { return -1; }
-    if tt_tag(r) == TT_BOT { return -1; }
-    return r;
-}
+fn tt_witness(a: int, b: int) -> int:
+    r := tt_norm(tt_inter(a, tt_not(b)))
+    if ty_inhabited(r) != 1:
+        return -1
+    if tt_tag(r) == TT_BOT:
+        return -1
+    return r
 
 // 穷尽性：¬(⋃patterns) ∩ domain 可满足 → 有遗漏；witness = 遗漏的具体类型项
-fn ty_exhaust_witness(domain: int, patterns: int) -> int {
-    acc : ., mut = tt_bot();
-    p : ., mut = patterns;
-    loop {
-        if tt_tag(p) != TT_CONS { break; }
-        acc = tt_union(acc, tt_a(p));
-        p = tt_b(p);
-    }
-    return tt_witness(domain, acc);   // domain \ ⋃patterns
-}
-fn ty_exhaustive(domain: int, patterns: int) -> int {
-    w := ty_exhaust_witness(domain, patterns);
-    if g_ty_exhausted != 0 { return -1; }
-    if w < 0 { return 1; }   // 补集空 = 穷尽
-    return 0;
-}
+fn ty_exhaust_witness(domain: int, patterns: int) -> int:
+    acc : ., mut = tt_bot()
+    p : ., mut = patterns
+    loop:
+        if tt_tag(p) != TT_CONS:
+            break
+        acc = tt_union(acc, tt_a(p))
+        p = tt_b(p)
+    return tt_witness(domain, acc)   // domain \ ⋃patterns
+fn ty_exhaustive(domain: int, patterns: int) -> int:
+    w := ty_exhaust_witness(domain, patterns)
+    if g_ty_exhausted != 0:
+        return -1
+    if w < 0:
+        return 1
+    // 补集空 = 穷尽
+    return 0
 ```
 
 - [ ] **Step 4: 跑测试（用例表到 spec §8 全类）**

@@ -2,27 +2,61 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 兑现**维护者已裁「要改」的方向 = fail-closed**：把编译器语义收敛到「**报出错误 ⇒ `rc=1` 且不产生产物**」，消灭「诊断照打、二进制照出」的静默错产物类。机制 = 把 `src/compiler/main.cr` 的**硬名单闸反转为「默认全阻断 + 已知命中面豁免登记表」**（现行正向名单 ⇒ 默认 `hard = 1`，豁免表 = 白名单：码 + 语料位点 + 理由 + 生效范围）。**全批纪律：新面 report-only 先行、命中清单审查后才开门；命中面过大 ⇒ 转独立批（停条件）。**
+**Goal:** 兑现**维护者已裁「要改」的方向 = fail-closed**。本批把编译器语义收敛到「**报出错误 ⇒ `rc=1` 且不产生产物**」，消灭「诊断照打、二进制照出」的静默错产物类。机制 = 把 `src/compiler/main.cr` 的**硬名单闸反转为「默认全阻断 + 已知命中面豁免登记表」**：现行名单为正向名单，反转后**默认 `hard = 1`**；豁免表充当白名单，条目 = 码 + 语料位点 + 理由 + 生效范围。**全批纪律：新面 report-only 先行、命中清单审查后才开门；命中面过大 ⇒ 转独立批（停条件）。**
 
-**Architecture:** 六条主线：① **前置侦查 + 冻结基线重建 + 锚点实核**（T0，源码零改动）；② **全语料 report-only 基线（核心产物）**（T1：用**现有二进制**在 build 面语料上采全量命中清单——现有 `check` 面已是 fail-closed 闸，是天然仪器，**零源码改动**即可产出清单）；③ **分诊表定稿 + 裁决门取裁**（T2，零代码）；④ **闸门机制实现 + report-only 开关**（T3：反转 + 豁免表 + 隐藏旗标 + 采集器）；⑤ **命中面处置**（T4：逐条归因——修根因 / 修语料 / 登记豁免）；⑥ **开门 + 零产物语义 + 回归收官**（T5/T6）。
+**Architecture:** 本批共六条主线。
 
-**Tech Stack / 锚点（本实例实读，行号 = 当前工作树）：** 闸门三处 + 一处已收紧面——① **语法面闸**：`src/compiler/main.cr:134`（`parse_all()` 后 `g_diag_count > 0 ⇒ print_diagnostics(); return 1`）+ `:135`（`g_error_count > 0 ⇒ print_parse_errors(); return 1`）；② **类型面闸（本批的对象）**：`main.cr:146-179`（`if g_diag_count > 0 { 硬名单扫描 }`；**6 条语句行** `:152`/`:153`/`:154`/`:160`/`:166`/`:174` 覆盖 **11 个码常量**；`if hard != 0 { return 1; }` 在 **`:178`**）；③ **安全检查面闸（已 fail-closed）**：`main.cr:594-603`（`base_diags` 快照 → `ptr_analysis_all()` / `region_check_all()` / `provenance_verify_all()` → `g_diag_count > base_diags ⇒ return 1`，**无码过滤 = 任意诊断阻断**）；④ **`check` 面闸（已 fail-closed）**：`main.cr:443-451`（`if g_diag_count > 0 { return 1; }`）。
-其余落点：`main.cr:399-402`（`run` 走同一 `run_frontend` 闸）· `:431-438`（`--static` 前置 `rt.cr`）· `:440-441`（`fe_rc` 唯一入口）· `:473`（`make_cir_cache_dir`）· `:565-591`（`cir`，**不过**安全检查面）· `:620-662`（`ccr`）· `:665-703`（`build`：`:671` `.ccr` 路径 / `:674-679` `save_ccr` / `:682-702` 拼 `corearch` 命令行并 `system()` / `:702` `return exit_code`）· `diag.cr:122-150`（`print_diagnostics`，码面 = `cat = ec/1000` + `num = ec%1000`，`diag.cr:86-104` 前缀表 + `:106-110` 补零）· `checker.cr:820-828`（`check_error` 唯一写入器，记录 40B = `globals.cr:182` `DIAG_REC_SIZE`）· `checker.cr:490-495`（`diag_type_incompatible` 组合判定）· `globals.cr:463-500`（`reset_frontend_state` 清 `g_diag_count`；`check_all` 自身亦在 `checker.cr:3805` 清零）· `src/ci/run.sh:31-33`（check job）/`:36-54`（suite job：`:44` `*_mini*.cr` SKIP、`:46` 空文件 SKIP）/`:119-130`（full-bootstrap）· `tools/baseline/parity_run.sh:30`（`CORPUS_TOTAL=72`）/`:32-40`（逐档 `clean-cache` + `check`）/`:68-71`（计数硬断言）· `tools/baseline/probes_run.sh`（`PROBE_TOTAL=29`）。
+- ① **前置侦查 + 冻结基线重建 + 锚点实核**（T0，源码零改动）。
+- ② **全语料 report-only 基线（核心产物）**（T1：用**现有二进制**在 build 面语料上采全量命中清单；现有 `check` 面已是 fail-closed 闸，是天然仪器，**零源码改动**即可产出清单）。
+- ③ **分诊表定稿 + 裁决门取裁**（T2，零代码）。
+- ④ **闸门机制实现 + report-only 开关**（T3：反转 + 豁免表 + 隐藏旗标 + 采集器）。
+- ⑤ **命中面处置**（T4：逐条归因——修根因 / 修语料 / 登记豁免）。
+- ⑥ **开门 + 零产物语义 + 回归收官**（T5/T6）。
 
-**Spec / 依据：** ① **维护者 2026-09-14 裁定「要改、方向 = fail-closed」**（本批成立的前提；裁定文本经协调者转述，**无独立文件载体 —— 须 T0 向维护者核一句原文并落报告**）；② **P6 裁决门 裁-P6-2 的 (b)(c) 两问**（`docs/superpowers/plans/2026-09-14-r2-p6-tail.md:58`：**(b)** 非硬名单诊断是否收紧到 `build` 面；**(c)** 新硬错入闸判据是否成文化为「判定继续 ⇒ 产出静默错产物」）——**本批 = 该两问的最强形式，未取裁前的方向性背书不成立**；③ **P5 已落政策**：P-A（ICE04 硬错，`plans/2026-09-13-r2-p5-cleanup.md` + `main.cr:161-166` 注）、TA02（TODO #2026-09-11-14 + `main.cr:167-174` 注）——**本批不得回退这两条**；④ **`docs/error-codes.md`**（码族/消息模板/统计）；⑤ **E-14 的活证据**（P6 T0 报告 §6-5：`tests/suite/ptr_arith.cr` `check` rc=1（B04 `12:8`）而 `build --static` rc=0 且产出 canary ELF）。
+**Tech Stack / 锚点（本实例实读，行号 = 当前工作树）：** 闸门共三处，另有一处为已收紧面。
+
+- ① **语法面闸**：`src/compiler/main.cr:134`（`parse_all()` 后 `g_diag_count > 0 ⇒ print_diagnostics(); return 1`）+ `:135`（`g_error_count > 0 ⇒ print_parse_errors(); return 1`）。
+- ② **类型面闸（本批的对象）**：`main.cr:146-179`（`if g_diag_count > 0 { 硬名单扫描 }`）。其中 **6 条语句行** `:152`/`:153`/`:154`/`:160`/`:166`/`:174` 覆盖 **11 个码常量**；`if hard != 0 { return 1; }` 在 **`:178`**。
+- ③ **安全检查面闸（已 fail-closed）**：`main.cr:594-603`（`base_diags` 快照 → `ptr_analysis_all()` / `region_check_all()` / `provenance_verify_all()` → `g_diag_count > base_diags ⇒ return 1`，**无码过滤 = 任意诊断阻断**）。
+- ④ **`check` 面闸（已 fail-closed）**：`main.cr:443-451`（`if g_diag_count > 0 { return 1; }`）。
+
+其余落点逐条如下。
+
+- `main.cr:399-402`：`run` 走同一 `run_frontend` 闸。
+- `main.cr:431-438`：`--static` 前置 `rt.cr`。
+- `main.cr:440-441`：`fe_rc` 唯一入口。
+- `main.cr:473`：`make_cir_cache_dir`。
+- `main.cr:565-591`：`cir`，**不过**安全检查面。
+- `main.cr:620-662`：`ccr`。
+- `main.cr:665-703`：`build`——`:671` 为 `.ccr` 路径，`:674-679` 为 `save_ccr`，`:682-702` 拼 `corearch` 命令行并调用 `system()`，`:702` 为 `return exit_code`。
+- `diag.cr:122-150`：`print_diagnostics`，码面 = `cat = ec/1000` + `num = ec%1000`；`diag.cr:86-104` 为前缀表，`:106-110` 为补零。
+- `checker.cr:820-828`：`check_error` 唯一写入器，记录 40B = `globals.cr:182` `DIAG_REC_SIZE`。
+- `checker.cr:490-495`：`diag_type_incompatible` 组合判定。
+- `globals.cr:463-500`：`reset_frontend_state` 清 `g_diag_count`；`check_all` 自身亦在 `checker.cr:3805` 清零。
+- `src/ci/run.sh:31-33`：check job；`:36-54`：suite job（`:44` 为 `*_mini*.cr` SKIP、`:46` 为空文件 SKIP）；`:119-130`：full-bootstrap。
+- `tools/baseline/parity_run.sh:30`：`CORPUS_TOTAL=72`；`:32-40`：逐档 `clean-cache` + `check`；`:68-71`：计数硬断言。
+- `tools/baseline/probes_run.sh`：`PROBE_TOTAL=29`。
+
+**Spec / 依据：**
+
+- ① **维护者 2026-09-14 裁定「要改、方向 = fail-closed」**，本批成立的前提即此。该裁定文本经协调者转述，**无独立文件载体 —— 须 T0 向维护者核一句原文并落报告**。
+- ② **P6 裁决门 裁-P6-2 的 (b)(c) 两问**（`docs/superpowers/plans/2026-09-14-r2-p6-tail.md:58`）：**(b)** 非硬名单诊断是否收紧到 `build` 面；**(c)** 新硬错入闸判据是否成文化为「判定继续 ⇒ 产出静默错产物」。**本批 = 该两问的最强形式，未取裁前的方向性背书不成立**。
+- ③ **P5 已落政策**：P-A（ICE04 硬错，`plans/2026-09-13-r2-p5-cleanup.md` + `main.cr:161-166` 注）、TA02（TODO #2026-09-11-14 + `main.cr:167-174` 注）。**本批不得回退这两条**。
+- ④ **`docs/error-codes.md`**（码族 / 消息模板 / 统计）。
+- ⑤ **E-14 的活证据**（P6 T0 报告 §6-5：`tests/suite/ptr_arith.cr` 的 `check` rc=1（B04 `12:8`），而 `build --static` rc=0 且产出 canary ELF）。
 
 ---
 
 ## 前置状态（**本计划未跑任何构建/测试**；下列全部为实读源码/文档或既有报告记录值，出处逐条标注）
 
 - **工作树 = `/tmp/p7wt`，基线 = P6 终态提交 `97f4394f`**（协调者给定）。**本实例 `jj` 命令零执行**（纪律：统一由协调者提交）；`ps` 实查无并发编译进程的步骤留给实施任务。
-- **诊断通道实读 = 5 条**（全仓 `check_error(` / `g_diags` 写入点 grep 实证）：
-  1. **词法/语法消息通道**：`lexer.cr:39-43` `add_error()`（`g_errors` = 驻留串下标）+ `parser.cr` 同族 `add_error` —— **20 个调用点**（`lexer.cr` 10：`:147/:226/:233/:236/:238/:240/:246/:436/:454/:456`；`parser.cr` 10：`:468/:591/:704/:1472/:1474/:1477/:1479/:1482/:1531/:1580`）。无码，打印形 `error: <msg>`（`diag.cr:154-162`）。**已 fail-closed**（`main.cr:135`）。
-  2. **语法诊断码通道**：`parser.cr` 直接写 `g_diags`（15 处写入 / **8 个码**）：`EC_P_EXPECTED`（`:121`/`:130`）、`EC_P_FIELD_SYNTAX`（`:1828`）、`EC_P_PARAM_TYPE`（`:1847`）、`EC_TA_UNKNOWN_TAG`（`:829`）、`EC_P_NESTED_FN`（`:927`）、`EC_P_TOO_MANY_PARAMS`（`:1453`）、`EC_P_STRUCT_LIMIT`（`:1647`）、`EC_P_ENUM_LIMIT`（`:1723`/`:1728`）。**已 fail-closed**（`main.cr:134`）。
-  3. **类型诊断码通道（`check_all` 内，**本批反转对象**）**：`checker.cr` 的 `check_error` 调用面 = **55 处 / 32 个码**（清单见「表 1」）。`check` 面已 fail-closed（`main.cr:448`）；**`build` 面只拦 11 码**（`main.cr:152-174`）⇒ **本批的唯一缺口面**。
-  4. **安全检查面通道（build/ccr 专属）**：`region_check.cr:83`/`:134`（`EC_B_LIFETIME`/B11）、`provenance_verify.cr:68`（`EC_TU_DEREF`/TU03）、`:91`/`:99`/`:126`（`EC_TK_INDEX`/TK01 复用）。**已 fail-closed**（`main.cr:600`，任意新诊断阻断）——**注意：`check` 面不跑该面（`main.cr:451` 提前返回）⇒ 该面是「check rc=0 / build rc=1」的**反向不一致**存在性证据**（与 `ptr_arith` 的正向不一致成对；本实例未构造具体语料，**须 T1 实测登记**）。
-  5. **非 `g_diags` 的 `error:` 打印通道**：`main.cr`（`:32`/`:94`/`:421`/`:434`/`:640`/`:675`/`:679`、写入失败 `:650-652`/`corearch.cr:510`/`:586`/`:596`）、`corearch.cr`（装载/链接失败全分支）、`interp.cr:408`/`:413`/`:738`/`:743`。**已 fail-closed**（各自 `return 1`）。
-- **码面实读统计**：`ast.cr` 定义码 ≈ **146**（`docs/error-codes.md:275-287` 统计表自述「总计 ~146」）；**可达码（有 raise 点）= 42**（本实例用 `check_error(EC_*` / `diag_type_incompatible(…, EC_*` / `DIAG_REC_SIZE, EC_*` 三形态全仓 grep 去重实得 43 项，其中 `EC_SIZE` 为 `DIAG_REC_SIZE` 的子串假命中，扣 1）⇒ **其余 ≈104 个码「定义零 raise」（本批不动，登记）**。**码名两式约定**（照 P6 T0 表 D-6）：常量名 `EC_P_ENUM_LIMIT=1022`（`ast.cr:372`）而**用户面实印 `error[P22]`**（`diag.cr:132-136` 的 `num = ec%1000 = 22`）——**本计划一律「常量名（用户面码）」双写**。
+- **诊断通道实读 = 5 条**（全仓 `check_error(` / `g_diags` 写入点 grep 实证）。逐条如下。
+  1. **词法/语法消息通道**：`lexer.cr:39-43` 的 `add_error()`（`g_errors` = 驻留串下标），加 `parser.cr` 的同族 `add_error`。该通道共 **20 个调用点**（`lexer.cr` 10 处，即 `:147`/`:226`/`:233`/`:236`/`:238`/`:240`/`:246`/`:436`/`:454`/`:456`；`parser.cr` 10 处，即 `:468`/`:591`/`:704`/`:1472`/`:1474`/`:1477`/`:1479`/`:1482`/`:1531`/`:1580`）。该通道无码，打印形为 `error: <msg>`（`diag.cr:154-162`）。**已 fail-closed**（`main.cr:135`）。
+  2. **语法诊断码通道**：`parser.cr` 直接写 `g_diags`，共 15 处写入 / **8 个码**：`EC_P_EXPECTED`（`:121`/`:130`）、`EC_P_FIELD_SYNTAX`（`:1828`）、`EC_P_PARAM_TYPE`（`:1847`）、`EC_TA_UNKNOWN_TAG`（`:829`）、`EC_P_NESTED_FN`（`:927`）、`EC_P_TOO_MANY_PARAMS`（`:1453`）、`EC_P_STRUCT_LIMIT`（`:1647`）、`EC_P_ENUM_LIMIT`（`:1723`/`:1728`）。**已 fail-closed**（`main.cr:134`）。
+  3. **类型诊断码通道（`check_all` 内，本批反转对象）**：`checker.cr` 的 `check_error` 调用面 = **55 处 / 32 个码**（清单见「表 1」）。`check` 面已 fail-closed（`main.cr:448`）；**`build` 面只拦 11 码**（`main.cr:152-174`）⇒ **本批的唯一缺口面**。
+  4. **安全检查面通道（build/ccr 专属）**：`region_check.cr:83`/`:134`（`EC_B_LIFETIME`/B11）、`provenance_verify.cr:68`（`EC_TU_DEREF`/TU03）、`:91`/`:99`/`:126`（`EC_TK_INDEX`/TK01 复用）。**已 fail-closed**（`main.cr:600`，任意新诊断阻断）。**注意：`check` 面不跑该面（`main.cr:451` 提前返回）⇒ 该面是「check rc=0 / build rc=1」的反向不一致存在性证据**（与 `ptr_arith` 的正向不一致成对；本实例未构造具体语料，**须 T1 实测登记**）。
+  5. **非 `g_diags` 的 `error:` 打印通道**：`main.cr`（`:32`/`:94`/`:421`/`:434`/`:640`/`:675`/`:679`，写入失败为 `:650-652`/`corearch.cr:510`/`:586`/`:596`）、`corearch.cr`（装载/链接失败全分支）、`interp.cr:408`/`:413`/`:738`/`:743`。**已 fail-closed**（各自 `return 1`）。
+- **码面实读统计**：`ast.cr` 定义码 ≈ **146**（`docs/error-codes.md:275-287` 统计表自述「总计 ~146」）；**可达码（有 raise 点）= 42**（本实例用 `check_error(EC_*` / `diag_type_incompatible(…, EC_*` / `DIAG_REC_SIZE, EC_*` 三形态全仓 grep 去重实得 43 项，其中 `EC_SIZE` 为 `DIAG_REC_SIZE` 的子串假命中，扣 1）⇒ **其余 ≈104 个码「定义零 raise」，本批不动，登记**。**码名两式约定**（照 P6 T0 表 D-6）：常量名写作 `EC_P_ENUM_LIMIT=1022`（`ast.cr:372`），而**用户面实印 `error[P22]`**（`diag.cr:132-136` 的 `num = ec%1000 = 22`）——**本计划一律「常量名（用户面码）」双写**。
 - **现行 11 码硬名单**（`main.cr:152-174` 逐行实读）：`EC_R_OOB`（R002）· `EC_TK_SLICE_BOUNDS`（TK05）· `EC_TK_SLICE_LEN`（TK06）· `EC_TS_MISSING_FIELD`/`EC_TS_UNKNOWN_FIELD`/`EC_TS_FIELD_TYPE`/`EC_TS_FIELD_DUP`（TS01-04）· `EC_TK_ELEM_TYPE`（TK02）· `EC_TM_EXHAUST`（TM03）· `EC_ICE_TY_INDET`（ICE04）· `EC_TA_DECL`（TA02）。
 - **已知非硬名单诊断**（`ast.cr:487-489` 定义、`main.cr` 名单外）：`EC_TG_ARG_COUNT`（TG01，**零 raise**）· `EC_TG_BOUND`（TG02，raise 于 `checker.cr:1227`/`:1233`/`:2059`）· 族内其余（N/TF/TB/TC/TM/TK/B 面）。
 - **`check` 面不产生产物**（实读：`main.cr:444-451` 在 `:467` `optrep_begin()`/`:473` `make_cir_cache_dir()` 之前返回）⇒ 「零产物」的缺口**只在 `build`/`ccr`/`cir` 面**。
@@ -41,7 +75,7 @@
 | `selftest-types` / `selftest-purity` | — | — | — | 自测通道，不读源文件 | 无 | **不改** |
 | LSP（`src/lsp/lsp.cr`） | — | — | — | 编辑器诊断推送（不产生产物） | 无 | **不改**（登记：非产物面，fail-closed 不适用） |
 
-**判定面定义（本批语义）**：**error = 阻断**（`rc=1` + 零产物）；本仓**现行无 warning 通道**（全仓无 `warning[` 打印面；`TM04`（`EC_TM_REDUNDANT`）在 `main.cr:159` 注中记为「软面登记（同 Rust unreachable-pattern 的警告约定）」但**打印仍是 `error[TM04]`**）⇒ **本批要么把软面码降级为真 warning，要么登记为豁免**（见裁-FC-2）。
+**判定面定义（本批语义）**：**error = 阻断**（`rc=1` + 零产物）；本仓**现行无 warning 通道**（全仓无 `warning[` 打印面）。`TM04`（`EC_TM_REDUNDANT`）在 `main.cr:159` 注中记为「软面登记（同 Rust unreachable-pattern 的警告约定）」，**但打印仍是 `error[TM04]`** ⇒ **本批要么把软面码降级为真 warning，要么登记为豁免**（见裁-FC-2）。
 
 ---
 
@@ -86,7 +120,7 @@
 
 **表 1 计数：① 必须阻断 = 25 码**（TA01/TA02/TF08/TF09/TF10/TB01/TC01/TC02/TC04/TM03/TK01/TK02/TK05/TK06/R002/N008/N009/TG02/B001/B002/ICE04/TS01/TS02/TS03/TS04）**② 必须豁免 = 7 码**（TF01 · TF07 · TM04 · N001 · N006 · N011 · B004）**③ 本批不动 = 表 0 的七行作用域外命令 + ≈104 个「定义零 raise」码 + 5 条通道里已 fail-closed 的 4 条**。
 
-**表 1-补：已 fail-closed 的 10 个可达码（本批不改，清点收编）**：`EC_P_EXPECTED`/`EC_P_FIELD_SYNTAX`/`EC_P_PARAM_TYPE`/`EC_P_NESTED_FN`/`EC_P_TOO_MANY_PARAMS`/`EC_P_STRUCT_LIMIT`/`EC_P_ENUM_LIMIT`/`EC_TA_UNKNOWN_TAG`（语法面 8，`main.cr:134`）· `EC_B_LIFETIME`（B11，`region_check.cr:83`/`:134`）· `EC_TU_DEREF`（TU03，`provenance_verify.cr:68`）（安全检查面 2，`main.cr:600`）。⇒ **可达码 42 = 25 + 7 + 10。**
+**表 1-补：已 fail-closed 的 10 个可达码（本批不改，清点收编）**：`EC_P_EXPECTED`/`EC_P_FIELD_SYNTAX`/`EC_P_PARAM_TYPE`/`EC_P_NESTED_FN`/`EC_P_TOO_MANY_PARAMS`/`EC_P_STRUCT_LIMIT`/`EC_P_ENUM_LIMIT`/`EC_TA_UNKNOWN_TAG`（语法面 8 个，落 `main.cr:134`）· `EC_B_LIFETIME`（B11，`region_check.cr:83`/`:134`）· `EC_TU_DEREF`（TU03，`provenance_verify.cr:68`）（安全检查面 2 个，落 `main.cr:600`）。⇒ **可达码 42 = 25 + 7 + 10。**
 
 ---
 
@@ -104,7 +138,7 @@
 | 探针语料 | `tests/probes/*.cr` 29 档 | `check` | **17×0 / 12×1**（12 档为**故意的负例**） | **零变化**（check 面不改 ⇒ 两态对拍仍为零差异） | `tests/probes/README.md:58` |
 | `examples/*.cr` | 4 档 | `check` | 2 档解析错（既有） | 零变化（check 面） | P6 T0 §3.1 |
 
-**转红面预估方法（**硬要求，T1 落地**）**：① **不靠猜**：T1 用**现有二进制**对「build 面语料全集」逐档跑 `build`（`-o /tmp/fc1/out/<tag>`，**保留产物供二次比对**），采集 `rc` + 日志中全部 `error[XX]` 行的（码, `file:line`）二元组 ⇒ 产出 `hits.tsv`；② **逐档归因表**：每档给「码 → 归因（真错 / 假阳性 / 语境缺失 / 政策软面）→ 处置（修根因 / 修语料 / 登记豁免）」；③ **分批开门办法**：批次 1 = 全反转 + 豁免表覆盖 T1 全清单（**先保 CI 绿**）；批次 2..n = 逐条撤销豁免（每条以「根因已修 / 语料已正」为撤除判据），**只减不增**。
+**转红面预估方法（硬要求，T1 落地）**：① **不靠猜**——T1 用**现有二进制**对「build 面语料全集」逐档跑 `build`（`-o /tmp/fc1/out/<tag>`，**保留产物供二次比对**），采集 `rc` 与日志中全部 `error[XX]` 行的（码, `file:line`）二元组 ⇒ 产出 `hits.tsv`。② **逐档归因表**——每档给出「码 → 归因（真错 / 假阳性 / 语境缺失 / 政策软面）→ 处置（修根因 / 修语料 / 登记豁免）」。③ **分批开门办法**——批次 1 = 全反转 + 豁免表覆盖 T1 全清单（**先保 CI 绿**）；批次 2..n = 逐条撤销豁免（每条以「根因已修 / 语料已正」为撤除判据），**只减不增**。
 
 ---
 
@@ -141,16 +175,16 @@
 
 ## Global Constraints（照 P6 简版）
 
-- **jj only（禁 git 含只读/复合）**；**提交路径限定**（多 agent 在场：一律 `jj commit -m … <paths>`）；所有命令 `nice -n 19`；一构建一编译**串行**（每段前 `ps` 实查）；cwd = 仓库根（`/tmp` cwd 触发 import 解析假失败）。
-- **基线纪律**：每任务开工先取**同任务起点**基线（binary sha + 语料 rc 表 + 探针 rc 表），**不得沿用上一任务的计数**。冻结基线 = 由 `tools/baseline/rebuild.sh`（配方 `tools/baseline/REBUILD.md`；pinned revision + 三 sha 白名单）重建；**P6 终态的白名单值须 T0 实核后落表**（P6 期的白名单 = P4 收官 `9bcb7083` 产物，**不是**本批基线 ⇒ 本批须以 P6 终态 revision 重建并**新锁白名单**）。
-- **ELF canary（硬闸，全批）**：`clean-cache` → `build tests/suite/ptr_arith.cr --static` → sha256 `95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475`（28822B）。**本批的 canary 语义有变体**：T5 开门后若 B04 豁免生效，canary 应**逐字节同**（豁免 = 不阻断，发射面零变化）；**若 canary 不可产 ⇒ 立即停下**（= 裁-FC-3 未取裁或取 (i)/(iii) 的信号）。
-- **发射面声明（本批必须显式声明）**：**本批声明发射面零变更**（闸门 = 前端 rc 语义；不触 `ir_gen`/`lower_to_ccr`/`emit`）。任何 canary/`--dump-objects`/`.ccr` 逐字节差异 ⇒ 停下（越界信号）。
-- **`.ccr` 记录值引用约定（D28 继承）**：一律带**命令形式**（`corec ccr F -o O` vs `corec build F -o O --static`，差恒 143B）+ **缓存态**（冷/热；非可选程序冷≠热为**预存**豁免）；比较任何 `.ccr`/缓存态产物前 `clean-cache`。
-- **判据标准按 TODO #2026-09-11-9**：不采用「与旧版逐字节同」当语义证据；结构性断言 + 语义零变化 + 自举稳定为本仓主判据；「≥N 例」= 下限（可增不可减）；**自测用例只增不减**（重新锁定/改名允许，删除须给死亡证据）。
-- **三态纪律（不得稀释）**：引擎 -1 不得当 0/1 用；载入失败/段缺失/行不可译/项不可建 ⇒ **拒绝**。**新硬错先 report-only**：本批新增的任何 rc=1 门（含闸门反转本身）必须先在**全语料**（72 档 + `tests/selfhost` **内联源** + `src/stdlib` + `examples` + `src/compiler` 自指 + **58 套件全枚举**）report-only 跑一遍，清单审查后才开门。
-- **清单三面同核（B.6，硬性）**：任何清单/段表改动必须三面同核——`build_selfhost_native.py`（`corec_files`/`corearch_files`/`corelsp_files`）↔ `src/targets/x86_64-linux/_import.cr` ↔ `src/compiler/_import.cr`；每任务回归面**必含** `tests/selfhost/test_backend_bootstrap.py`（rc=0 + 构建日志 `error[` = 0）。本批新增的 runner/语料（`tools/baseline/*`、`tests/probes/*`）**不进**任何编译清单。
-- **不得回退既有收纳**：TS01-04/TK02 硬门（#29）、TM03/TG02 门（#31/#33）、F2 常量档拒绝语义与「N 不回身份」、F5 槽位契约（#25/#28）、效应/纯度判据（#26/#27）、`iface_satisfies` 轴序 A>C>B、P4 全批、P5 全批（ICE04/TA02/影子下线）、P6 全批（β/¬ 面/never/文档）——**一律不动**；冲突 → 停下上报。
-- **本语言无三元运算符**；取模须非负；键比较不得依赖 i64 回绕；noclobber（`>|`）；**不写 `buf == 0` 形态的空判**（string-int 混比在 bootstrap 侧编成 `str_eq` ⇒ 自崩）；bootstrap 构建的 corec 对 **`&&`/`||` 两侧无条件求值** ⇒ **不得写 `guard && 表读`**（`p6-task4-report.md` §3 先例：须嵌套 `if`）。
+- **版本控制与提交**：一律使用 `jj`，**禁 git（含只读调用与复合调用）**。**提交路径限定**（多 agent 在场时，一律以 `jj commit -m … <paths>` 形式提交）。所有命令以 `nice -n 19` 运行。构建与编译**串行**执行，每段之前以 `ps` 实查。cwd 恒为仓库根（`/tmp` 作为 cwd 会触发 import 解析假失败）。
+- **基线纪律**：每个任务开工前先取**同任务起点**基线（binary sha + 语料 rc 表 + 探针 rc 表），**不得沿用上一任务的计数**。冻结基线由 `tools/baseline/rebuild.sh` 重建，配方见 `tools/baseline/REBUILD.md`，内容为 pinned revision + 三 sha 白名单。**P6 终态的白名单值须由 T0 实核后落表**：P6 期的白名单 = P4 收官 `9bcb7083` 的产物，**不是**本批基线 ⇒ 本批须以 P6 终态 revision 重建并**新锁白名单**。
+- **ELF canary（硬闸，全批）**：命令序列 = `clean-cache` → `build tests/suite/ptr_arith.cr --static`，判据值 = sha256 `95084e7bc68d6550d21d3d96fa3afd89c67a5d89edce5656a3d2e74fc923d475`（28822B）。**本批的 canary 语义有变体**：T5 开门后若 B04 豁免生效，canary 应**逐字节同**（豁免 = 不阻断，发射面零变化）。**若 canary 不可产 ⇒ 立即停下**，该信号等价于裁-FC-3 未取裁或取 (i)/(iii)。
+- **发射面声明（本批必须显式声明）**：**本批声明发射面零变更**（闸门 = 前端 rc 语义，不触 `ir_gen`/`lower_to_ccr`/`emit`）。任何 canary/`--dump-objects`/`.ccr` 逐字节差异 ⇒ 停下（越界信号）。
+- **`.ccr` 记录值引用约定（D28 继承）**：引用记录值一律带**命令形式**（`corec ccr F -o O` vs `corec build F -o O --static`，差恒 143B），并带**缓存态**（冷/热；非可选程序的冷态不等于热态属**预存**豁免）。比较任何 `.ccr`/缓存态产物之前先执行 `clean-cache`。
+- **判据标准按 TODO #2026-09-11-9**：不采用「与旧版逐字节同」当语义证据；本仓主判据 = 结构性断言 + 语义零变化 + 自举稳定。「≥N 例」表示下限（可增不可减）；**自测用例只增不减**（重新锁定/改名允许，删除须给死亡证据）。
+- **三态纪律（不得稀释）**：引擎 -1 不得当 0/1 用；载入失败/段缺失/行不可译/项不可建 ⇒ **拒绝**。**新硬错先 report-only**：本批新增的任何 rc=1 门（含闸门反转本身）必须先在**全语料**上 report-only 跑一遍，清单审查后才开门；全语料 = 72 档 + `tests/selfhost` **内联源** + `src/stdlib` + `examples` + `src/compiler` 自指 + **58 套件全枚举**。
+- **清单三面同核（B.6，硬性）**：任何清单/段表改动必须三面同核，即 `build_selfhost_native.py`（`corec_files`/`corearch_files`/`corelsp_files`）↔ `src/targets/x86_64-linux/_import.cr` ↔ `src/compiler/_import.cr`。每任务回归面**必含** `tests/selfhost/test_backend_bootstrap.py`（判据 = rc=0 + 构建日志 `error[` = 0）。本批新增的 runner/语料（`tools/baseline/*`、`tests/probes/*`）**不进**任何编译清单。
+- **不得回退既有收纳**：TS01-04/TK02 硬门（#29）、TM03/TG02 门（#31/#33）、F2 常量档拒绝语义与「N 不回身份」、F5 槽位契约（#25/#28）、效应/纯度判据（#26/#27）、`iface_satisfies` 轴序 A>C>B、P4 全批、P5 全批（ICE04/TA02/影子下线）、P6 全批（β/¬ 面/never/文档）——**一律不动**；冲突时停下上报。
+- **语言面约束**：本语言无三元运算符；取模须非负；键比较不得依赖 i64 回绕；启用 noclobber（`>|`）；**不写 `buf == 0` 形态的空判**（string-int 混比在 bootstrap 侧编成 `str_eq` ⇒ 自崩）。bootstrap 构建的 corec 对 **`&&`/`||` 两侧无条件求值** ⇒ **不得写 `guard && 表读`**（先例见 `p6-task4-report.md` §3：须嵌套 `if`）。
 - **多 agent 纪律**：不并发构建；提交路径限定；实施时逐任务串行；突变控制一律在**仓库外实拷贝**（`tests/` 必须**实拷贝**而非软链）。
 
 ---
@@ -178,11 +212,12 @@
 **Files:** 无源码改动。产物 = 报告 `.superpowers/sdd/fc-task0-report.md`（工作区，不入提交）+ 重建的冻结基线 `/tmp/fc0/base/{corec,corearch,corelsp}` + 清点原始输出（`/tmp/fc0/`）。
 
 **Interfaces（产物四表，数字一律实测；未实测标「待实测」）：**
-- **表 A：冻结基线重建**——`tools/baseline/rebuild.sh`（或等价手跑配方：`jj workspace add --revision 97f4394f` → `nice -n 19 python3 build_selfhost_native.py`）→ 三 sha **新锁白名单**（写入本任务产出的 `REBUILD.md` 换代记录）；构建 ×2 取确定性；冒烟 42。
-- **表 B：本批起点判据基线**——起点基线值表 1–11 项**逐条复跑**（五 CI job / 全枚举 / `check src/compiler` / `selftest-types` / 构建确定性 ×2 / 自举链 / canary / `.ccr` 四条 / `--dump-objects` / `.cir` DOT）。
-- **表 C：语料清点（**本批的新增面**）**——① 72 档逐档清单 + rc；② **build 面语料全集**：`tests/suite` 实 build 档（`run.sh:36-54` 语义实跑逐档计数）、`src/compiler/main.cr --static -O 0`、canary 档、`.ccr` 两档、`tests/selfhost/*.py` 内 `build` 调用逐处清点（含内联源去重）、`examples/*.cr`；③ 探针 29 档。
-- **表 D：锚点实核**——本计划「Tech Stack」「表 0/1/2」的每个 `file:line` 逐条实读复核（**行号漂移以本轮实读为准**，漂移逐条写进文档）。
-- **表 E：裁定原文核录**——向维护者核一句「fail-closed 方向已裁」的原文/出处（来源 = 协调者转述）；**无原文 ⇒ 本批章程不成立 ⇒ 停**。
+
+- **表 A：冻结基线重建**。做法 = `tools/baseline/rebuild.sh`（或等价手跑配方：`jj workspace add --revision 97f4394f` → `nice -n 19 python3 build_selfhost_native.py`），产出三 sha 的**新锁白名单**（写入本任务产出的 `REBUILD.md` 换代记录）。同时做构建 ×2 取确定性，并做冒烟 42。
+- **表 B：本批起点判据基线**。起点基线值表 1–11 项**逐条复跑**（五 CI job / 全枚举 / `check src/compiler` / `selftest-types` / 构建确定性 ×2 / 自举链 / canary / `.ccr` 四条 / `--dump-objects` / `.cir` DOT）。
+- **表 C：语料清点（本批的新增面）**。含三项：① 72 档逐档清单 + rc；② **build 面语料全集**——`tests/suite` 实 build 档（`run.sh:36-54` 语义实跑逐档计数）、`src/compiler/main.cr --static -O 0`、canary 档、`.ccr` 两档、`tests/selfhost/*.py` 内 `build` 调用逐处清点（含内联源去重）、`examples/*.cr`；③ 探针 29 档。
+- **表 D：锚点实核**。本计划「Tech Stack」「表 0/1/2」的每个 `file:line` 逐条实读复核（**行号漂移以本轮实读为准**，漂移逐条写进文档）。
+- **表 E：裁定原文核录**。向维护者核一句「fail-closed 方向已裁」的原文/出处（来源 = 协调者转述）；**无原文 ⇒ 本批章程不成立 ⇒ 停**。
 
 - [ ] **Step 1: 基线重建**。判据：三 sha 与**新白名单**逐条同 + 冒烟 42 + 构建确定性 ×2（日志逐字节同）。**不符 ⇒ 停下上报**。
 - [ ] **Step 2: 起点判据**（表 B；cwd = 仓库根、逐段 `ps` 实查无并发、比较前 `clean-cache`）。
@@ -229,7 +264,7 @@ tools/baseline/build_gate_run.sh <corec二进制> <outdir>
 
 **Files:** Modify 本计划（把 T1 实测值回填表 1/表 2 + 落「豁免表草案」节）· 报告 `.superpowers/sdd/fc-task2-report.md`。
 
-**Interfaces（豁免表草案的**逐条字段**，本任务定稿后交维护者）：**
+**Interfaces（豁免表草案的逐条字段，本任务定稿后交维护者）：**
 ```
 { code,            // 码常量（如 EC_B_USE_WHILE_BORROWED）
   scope,           // build | check | both（裁-FC-1）
@@ -335,21 +370,21 @@ tools/baseline/build_gate_run.sh <corec二进制> <outdir>
 
 ## 未决项与登记（**不猜**）
 
-- **U-1（维护者裁定原文）**：本批的章程前提 = 「要改、方向 = fail-closed」，来源 = 协调者转述，**无独立文件载体** ⇒ T0 表 E 核录；**无原文则本批停在 T2**。
-- **U-2（`测试面 `check` rc 分布 vs `build` 面）**：72 档 runner 只跑 `check`（`parity_run.sh:36`），**build 面无既有 runner** ⇒ T1 必须新建（`build_gate_run.sh`）；「命中面」的完整定义**在本批首次建立**。
-- **U-3（安全检查面的反向不一致）**：`region_check`/`provenance_verify` 只在 build/ccr 面跑 ⇒ 存在「check rc=0 / build rc=1」档（本实例**未构造具体语料**）⇒ T1 实测登记（不得当已知事实引用）。
-- **U-4（TM04 的打印前缀）**：现行以 `error[TM04]` 打印但语义声明为软面（`main.cr:159`）⇒ 「报错即拒」与「软面」字面冲突 ⇒ 裁-FC-2(d)。
-- **U-5（≈104 个「定义零 raise」码）**：`ast.cr` 定义 ≈146 / 可达 42 ⇒ 其余为**死码面**（本批不删、不改、登记；删除属独立决定，照 `tools/module_to_ccr.py` 的「只标废弃不删」先例）。
+- **U-1（维护者裁定原文）**：本批的章程前提 = 「要改、方向 = fail-closed」，来源 = 协调者转述，**无独立文件载体** ⇒ 由 T0 表 E 核录；**无原文则本批停在 T2**。
+- **U-2（测试面 `check` rc 分布 vs `build` 面）**：72 档 runner 只跑 `check`（`parity_run.sh:36`），**build 面无既有 runner** ⇒ T1 必须新建（`build_gate_run.sh`）；「命中面」的完整定义**在本批首次建立**。
+- **U-3（安全检查面的反向不一致）**：`region_check`/`provenance_verify` 只在 build/ccr 面跑 ⇒ 存在「check rc=0 / build rc=1」档（本实例**未构造具体语料**）⇒ 由 T1 实测登记（不得当已知事实引用）。
+- **U-4（TM04 的打印前缀）**：现行以 `error[TM04]` 打印但语义声明为软面（`main.cr:159`）⇒ 「报错即拒」与「软面」字面冲突 ⇒ 交裁-FC-2(d) 处置。
+- **U-5（≈104 个「定义零 raise」码）**：`ast.cr` 定义 ≈146、可达 42 ⇒ 其余为**死码面**（本批不删、不改、登记；删除属独立决定，照 `tools/module_to_ccr.py` 的「只标废弃不删」先例）。
 - **U-6（LSP 面）**：`src/lsp/lsp.cr` 消费 `g_diag_count` 但**不产生产物** ⇒ fail-closed 不适用（表 0 登记）。
-- **登记维持（不做，理由写死）**：`EXPR_FOR` 元素类型恒 int（E-6/裁-P6-4）· `.csr`/TagNode（验证切片轮）· 容量批（E-2/E-3/E-4）· `string == int` 混比（裁-P6-3）· `--verify-named-dedup` 保留（裁-P6-2(e)）——**本批一律不动**。
+- **登记维持（不做，理由写死）**：`EXPR_FOR` 元素类型恒 int（E-6/裁-P6-4）· `.csr`/TagNode（验证切片轮）· 容量批（E-2/E-3/E-4）· `string == int` 混比（裁-P6-3）· `--verify-named-dedup` 保留（裁-P6-2(e)）。以上各项**本批一律不动**。
 
 ---
 
 ## 自检记录
 
-- **本计划的自我限制（诚实登记）**：**本计划未跑任何构建/测试/`jj` 命令**；所有「现状值」= 实读源码/文档或既有报告记录值（出处逐条标注）；需实测的数字（基线重建 sha、build 面命中清单、套件面命中档数、转红面逐 job 计数）一律留给 T0/T1 的实测步。
-- **判定面清点的诚实性**：「42 可达码」= 全仓 grep 三形态（`check_error(EC_*` / `diag_type_incompatible(…, EC_*` / `DIAG_REC_SIZE, EC_*`）去重实得 43 减 1 个假命中（`EC_SIZE` 为 `DIAG_REC_SIZE` 子串）；**未**用「源码注释/文档统计」冒充实测（`docs/error-codes.md` 的 ~146 为文档自述值，已标出处）。分诊的 7 条豁免**全部带命中证据或政策出处**；其余 25 条阻断**全部按「判定继续 ⇒ 静默错产物 / 不可信」判据成文**（裁-P6-2(c) 约定），未用一个「大概/应该」。
-- **根因 vs 止血**：闸门反转直达根因（**默认允许**是缺口本身，不是名单不全）；豁免表被明确设计为**临时面**（每条带 `exit`）+ 只减不增 + 每次开新面重跑 report-only（防退化成语义黑洞）。
+- **本计划的自我限制（诚实登记）**：**本计划未跑任何构建/测试/`jj` 命令**。所有「现状值」= 实读源码/文档或既有报告记录值（出处逐条标注）。需实测的数字（基线重建 sha、build 面命中清单、套件面命中档数、转红面逐 job 计数）一律留给 T0/T1 的实测步。
+- **判定面清点的诚实性**：「42 可达码」的得出方式 = 全仓 grep 三形态（`check_error(EC_*` / `diag_type_incompatible(…, EC_*` / `DIAG_REC_SIZE, EC_*`）去重实得 43，再减 1 个假命中（`EC_SIZE` 为 `DIAG_REC_SIZE` 子串）；**未**用「源码注释/文档统计」冒充实测（`docs/error-codes.md` 的 ~146 为文档自述值，已标出处）。分诊的 7 条豁免**全部带命中证据或政策出处**；其余 25 条阻断**全部按「判定继续 ⇒ 静默错产物 / 不可信」判据成文**（裁-P6-2(c) 约定），未用一个「大概/应该」。
+- **根因 vs 止血**：闸门反转直达根因（**默认允许**是缺口本身，不是名单不全）。豁免表被明确设计为**临时面**（每条带 `exit`），配合只减不增与每次开新面重跑 report-only，防止其退化成语义黑洞。
 - **与既有裁决的一致性复核**：不回退 TM03/TG02（#31/#33）、TS01-04/TK02（#29）、ICE04（P-A）、TA02（#32）、F2/R002（先例即入闸依据）；TM04 的「软面」裁定经裁-FC-2(d) 显式处置（**不得**由实施者私自改判）。
 - **占位符扫描**：无 TBD；「须 T1 实测」逐处给出测量命令或产物格式；六条裁决门**逐条点名问句**，未用「推荐」冒充裁定。
 - **本批最大风险（一句话）**：**一次反转会让 CI `suite` job 至少 7 档（TF01×5/TF07×1/B04×1）与 ELF canary 载体同时转红——而 canary 载体 `ptr_arith.cr` 自身就是 check rc=1 档 ⇒ 不先取裁-FC-3，本批无法开门。**

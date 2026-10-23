@@ -108,7 +108,7 @@ def main() -> int:
             return 1
         print("[PASS] stage1, stage2, and stage3 are byte-identical")
 
-        smoke_src.write_text("fn main() -> int { return 7; }\n", encoding="utf-8")
+        smoke_src.write_text("fn main() -> int:\n    return 7\n", encoding="utf-8")
         if not run_checked(
             [COREC, "build", smoke_src, "-o", smoke0, "--static", "-O", "0"],
             "stage0 builds smoke CCR",
