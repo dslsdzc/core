@@ -25,6 +25,18 @@
 
 文件序只是生产者选择的合法拓扑调度。它不是唯一执行顺序，不是语义主干。消费方可以按边约束重新调度。
 
+```mermaid
+flowchart LR
+  CIR[".cir 关系空间"] --> CCR[".ccr 存在空间"]
+  CIR -. "可选优化知识" .-> COI[".coi"]
+  CCR --> LOAD["流式加载 / 图重建"]
+  LOAD --> TARGET["target model / DataLayout"]
+  COI -. "候选" .-> TARGET
+  TARGET --> HIT["HIT 事件"]
+  HIT --> ENC["机器编码"]
+```
+
+
 ## 2. 硬约束
 
 1. `.ccr` 不包含目标机器事实：位宽、字节偏移、步长、对齐、字节序、寄存器、栈、ABI。
@@ -103,8 +115,9 @@ flags 不携带 target 身份、字宽、字节序或 ABI。一个 `SYSTEM` 程�
 
 v10 的 canonical file order 是为顺序读取设计的：
 
-```text
-STR -> TYPE -> IFACE -> SYM -> NOD -> ENT -> REG -> EDG -> CASE
+```mermaid
+flowchart LR
+  STR["STR"] --> TYPE["TYPE"] --> IFACE["IFACE"] --> SYM["SYM"] --> NOD["NOD"] --> ENT["ENT"] --> REG["REG"] --> EDG["EDG"] --> CASE["CASE"]
 ```
 
 依赖方向：
@@ -136,11 +149,12 @@ STR -> TYPE -> IFACE -> SYM -> NOD -> ENT -> REG -> EDG -> CASE
 
 标准分发单位是 `.ccrb`：
 
-```text
-.ccrb = Zstandard frame(deterministic tar)
-  manifest
-  program.ccr
-  coi/<target>.coi   (0..N，可选)
+```mermaid
+flowchart TD
+  BUNDLE[".ccrb zstd frame"] --> TAR["deterministic tar"]
+  TAR --> MANIFEST["manifest"]
+  TAR --> CCR["program.ccr raw"]
+  TAR --> COI["coi/target.coi（可选）"]
 ```
 
 - zstd 流式解压；tar 条目按固定顺序、固定元数据；
@@ -388,11 +402,16 @@ CASE 只表达 scrutinee 域到目标节点的关系。跳转表、比较指令�
 
 ## 13. 消费与编码
 
-```text
-corec:   HDFG / 关系图 -> 重建 ENT -> 拓扑投影 -> .ccr
-corearch: 加载 .ccr -> 重建图/存在格 -> target model -> HIT 事件 -> 编码
-interp:  加载 .ccr -> 使用自己的运行时值表示执行
-.coi:    可选优化知识 -> 候选 -> 后端独立验证
+```mermaid
+flowchart TD
+  HDFG["HDFG / 关系图"] --> ENT["重建 ENT"]
+  ENT --> CCR[".ccr 存在空间"]
+  CCR --> LOAD["corearch 加载 / 图重建"]
+  LOAD --> TARGET["target model / DataLayout"]
+  COI[".coi 可选"] -. "候选" .-> TARGET
+  TARGET --> HIT["HIT 事件"]
+  HIT --> ENC["机器编码"]
+  CCR --> INTERP["interp 执行"]
 ```
 
 HIT 最小核仍是编码层契约：
