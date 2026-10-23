@@ -33,6 +33,10 @@ fn get_reg_for_var(var_idx: int) -> int:
         mk := r32(g_opt_meta, mo)
         if mk == OPT_KEY_REG_ASSIGN:
             data_len := r32(g_opt_meta, mo + 4)
+            // Defensive record bound: in-memory records are OPT_META_STRIDE
+            // bytes. A corrupt length must not walk past the record.
+            if data_len > OPT_META_STRIDE - 8:
+                data_len = OPT_META_STRIDE - 8
             di : ., mut = 4  // skip count u32, pairs start at +4
             loop:
                 if di >= data_len:

@@ -88,7 +88,7 @@ def _decompress(bundle):
 
 def _compress(payload):
     r = subprocess.run(
-        [ZSTD, "-q", "-19", "--no-progress", "-T0", "-c"],
+        [ZSTD, "-q", "-19", "--no-progress", "-T1", "-c"],
         input=payload,
         capture_output=True,
         cwd=str(BASE),

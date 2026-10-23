@@ -958,6 +958,136 @@ def test_old_target_facts_in_src2_src3_rejected():
             assert "invalid" in (r.stdout + r.stderr), f"{name}: missing diagnostic"
 
 
+def _reject_mutated(data, tmp, name):
+    bad = tmp / f"{name}.ccr"
+    bad.write_bytes(data)
+    out = tmp / f"{name}.elf"
+    r = _run([COREARCH, bad, "--elf", "--static", "-o", out])
+    assert r.returncode != 0, f"{name}: mutated file accepted"
+    assert r.returncode > 0, f"{name}: corearch died by signal ({r.returncode})"
+    assert "invalid" in (r.stdout + r.stderr), f"{name}: missing loader diagnostic"
+    assert not out.exists(), f"{name}: emitted an ELF for a rejected file"
+
+
+def test_untrusted_nod_operands_rejected_not_emitted():
+    """Critical 2: the loader owns opcode/operand domains.
+
+    Each mutation must produce `load_ccr == -1` (rc 1, no SIGSEGV, no ELF):
+    a huge DEREF src1, an unknown opcode, a dangling branch/jump label, and a
+    CONST_BIG string index outside STR.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_v10(tmp)
+        off, _rec = _first_node_offset(data, 25)      # IR_DEREF
+        d = bytearray(data)
+        struct.pack_into("<q", d, off + 8, 2147483647)
+        _reject_mutated(bytes(d), tmp, "deref_huge_var")
+
+        # Unknown opcode in the first record.
+        d = bytearray(data)
+        first = _segment_offset(data, 5) + 4
+        struct.pack_into("<I", d, first, 200)
+        _reject_mutated(bytes(d), tmp, "unknown_opcode")
+
+        # Branch/jump target must name a LABEL node in the same graph.
+        branch_src = """fn main() -> int:
+    x := 1
+    if x == 1:
+        return 7
+    return 0
+"""
+        bdata = _build_v10(tmp, branch_src, "branch")
+        off, _rec = _first_node_offset(bdata, 20)     # IR_JUMP
+        d = bytearray(bdata)
+        struct.pack_into("<q", d, off + 8, 999999)
+        _reject_mutated(bytes(d), tmp, "jump_bad_label")
+
+        # CONST_BIG src1 is a STR index.
+        big_src = """fn main() -> int:
+    x := 100000000000000000000
+    return 0
+"""
+        cdata = _build_v10(tmp, big_src, "constbig")
+        off, _rec = _first_node_offset(cdata, 40)
+        d = bytearray(cdata)
+        struct.pack_into("<q", d, off + 8, 2147483647)
+        _reject_mutated(bytes(d), tmp, "constbig_bad_str")
+
+
+def test_reg_cycles_and_parent_bounds_rejected():
+    """Important 6: every REG record has a checked parent domain and no cycle."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_v10(tmp)
+        reg_off = _segment_offset(data, 7)
+        # First REG record is a function root: parent = -1. Self-parent it.
+        d = bytearray(data)
+        struct.pack_into("<i", d, reg_off + 4 + 4, 0)
+        _reject_mutated(bytes(d), tmp, "reg_self_parent")
+        # Parent outside [ -1, reg_count ).
+        d = bytearray(data)
+        (cnt,) = struct.unpack_from("<I", data, reg_off)
+        struct.pack_into("<i", d, reg_off + 4 + 4, cnt + 5)
+        _reject_mutated(bytes(d), tmp, "reg_parent_oob")
+        # enter/exit are NOD coordinates.
+        d = bytearray(data)
+        (nods,) = struct.unpack_from("<I", data, _segment_offset(data, 5))
+        struct.pack_into("<i", d, reg_off + 4 + 8, nods + 1)
+        _reject_mutated(bytes(d), tmp, "reg_enter_oob")
+
+
+def test_sym_cross_refs_rejected():
+    """Important 6: SYM names/types resolve against STR/TYPE."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_v10(tmp)
+        sym_off = _segment_offset(data, 4)
+        (gc,) = struct.unpack_from("<I", data, sym_off)
+        if gc > 0:
+            name_off = sym_off + 4
+        else:
+            # globals count + no globals + func count -> first function header.
+            name_off = sym_off + 8
+        d = bytearray(data)
+        struct.pack_into("<i", d, name_off, 2147483647)
+        _reject_mutated(bytes(d), tmp, "sym_name_oob")
+
+
+def test_sym_opt_meta_nonzero_rejected():
+    """Critical 1: v10 SYM carries only a zero opt_meta placeholder.
+
+    A wire-valid image that adds a REG_ASSIGN record (count=1 plus a payload)
+    must be rejected by load_ccr, never loaded into g_opt_meta. The positive
+    control in the same fixture proves the base image emits normally.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_v10(tmp)
+        table = read_segment_table(data)
+        _tag, sym_off, sym_size = table[3]                # SYM
+        d = bytearray(data)
+        struct.pack_into("<I", d, sym_off + sym_size - 4, 1)
+        # {key=REG_ASSIGN(0), len=4, data=count(1)} appended to SYM.
+        rec = struct.pack("<III", 0, 4, 1)
+        bad = _append_to_segment(bytes(d), 4, rec)
+        assert validate(bad) is None, "fixture must stay wire-valid"
+        _reject_mutated(bad, tmp, "opt_meta_regassign")
+
+
+def test_direct_runtime_abi_call_is_system():
+    """Important 9: the graph-level classifier recognizes runtime/OS ABI names
+    even when the call is written as an ordinary direct call."""
+    abi_src = """fn main() -> int:
+    return sched_call_0()
+"""
+    with tempfile.TemporaryDirectory() as td:
+        data = _build_v10(Path(td), abi_src, "abicall")
+    f = flags(data)
+    assert f & 2 != 0, f"direct runtime ABI call missing SYSTEM: {f:#x}"
+    assert f & 1 == 0, f"direct runtime ABI call also claims PORTABLE: {f:#x}"
+
+
 def test_ent_reserved_flags_and_trailing_rejected():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)

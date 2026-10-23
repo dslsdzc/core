@@ -415,12 +415,18 @@ def model_compute_entries(nod, funcs, gcount, regs):
     defs_out = []  # entries in creation order (def-point order per func)
     blocks = []
     row_no = 0  # global entry counter across funcs (== file order)
+    # Global existence rows precede function blocks: def=-1, whole-program
+    # window, global flag (ENTRY_FLAG_GLOBAL = 4).
+    for gv in range(gcount):
+        defs_out.append((gv, 1, -1, 0, len(nod) - 1, 4))
+        row_no += 1
     var_start = gcount
     for k, f in enumerate(funcs):
         root = regs[f['root_region']]
         ist, ex = root[2], root[3]
         ic = ex - ist
         vc = f['var_count']
+        pc = f['param_count']
         vs = var_start
         var_start += vc
         ent0 = row_no
@@ -460,13 +466,19 @@ def model_compute_entries(nod, funcs, gcount, regs):
                         row = defs_out[pe]
                         defs_out[pe] = (row[0], row[1], row[2], row[3], pend,
                                         row[5])
-                    defs_out.append((dv, 1, inst, inst, last_global, 0))
+                    pfl = 2 if lv < pc else 0
+                    defs_out.append((dv, 1, inst, inst, last_global, pfl))
                     prev[lv] = len(defs_out) - 1
                     row_no += 1
             for lv2 in range(vc):
+                pfl2 = 2 if lv2 < pc else 0
                 if prev[lv2] < 0 and first[lv2] >= 0 and last[lv2] >= 0:
                     defs_out.append((vs + lv2, 1, -1, ist + first[lv2],
-                                     ist + last[lv2], 0))
+                                     ist + last[lv2], pfl2))
+                    row_no += 1
+                elif prev[lv2] < 0 and lv2 < pc and ic > 0:
+                    # Unreferenced parameter: def=-1, function span.
+                    defs_out.append((vs + lv2, 1, -1, ist, ist + ic - 1, pfl2))
                     row_no += 1
         blocks.append((ent0, row_no - ent0))
     # version = 同 var 文件序组内 1-based 序数
@@ -557,34 +569,40 @@ def test_v7_ent_hand_expected_small():
             var_of[(0, di)] = vs0 + di
         for di in range(funcs[1]['var_count']):
             var_of[(1, di)] = vs1 + di
-        # 手算表只覆盖文件前两函数块（identity 2 + main 10 = 文件行 0..11——
-        # 函数块按函数序拼接，其余函数块在其后，本测试只断言前缀 12 行）
-        assert len(ents) >= len(exp), \
-            f"entries {len(ents)} < hand-expected {len(exp)}"
+        # 全局存在行在前（每个全局一条 def=-1/flag=global），函数块随后。
+        base = len(sym['globals'])
+        assert len(ents) >= base + len(exp), \
+            f"entries {len(ents)} < globals {base} + hand-expected {len(exp)}"
+        for gi in range(base):
+            ev, ever, edef, els, ele, efl = ents[gi]
+            assert (ev, edef, efl) == (gi, -1, 4), \
+                f"global row {gi}: {(ev, edef, efl)}"
+            assert els == 0 and ele > 0
         for k, (fidx, erow) in enumerate(zip([0] * 2 + [1] * 10, exp)):
-            evar, ever, edef, els, ele, efl = ents[k]
+            evar, ever, edef, els, ele, efl = ents[base + k]
             assert evar == var_of[(fidx, erow[0])], \
                 f"row {k}: var {evar} != decl-row {erow[0]} var " \
                 f"{var_of[(fidx, erow[0])]}"
             assert (ever, edef, els, ele) == erow[1:], \
                 f"row {k} {evar}: got ({ever},{edef},{els},{ele}) " \
                 f"expected {erow[1:]}"
-            assert efl == 0, f"row {k}: flags {efl} != 0"
-        # SYM func 记录：块界回填 = 文件行 0..1 / 2..11；param_ents 实回填
-        # （identity 参数 n 的 def=-1 条目 = 文件行 1）
+            want_fl = 2 if erow[0] < funcs[fidx]['param_count'] else 0
+            assert efl == want_fl, f"row {k}: flags {efl} != {want_fl}"
+        # SYM func 记录：块界回填 = 全局前缀后的 0..1 / 2..11（全局行偏移）；
+        # param_ents 实回填（identity 参数 n 的 def=-1 条目 = 前缀 + 1）
         f0, f1 = funcs[0], funcs[1]
-        assert (f0['first_ent'], f0['last_ent']) == (0, 1), \
+        assert (f0['first_ent'], f0['last_ent']) == (base, base + 1), \
             f"identity range {f0['first_ent']}..{f0['last_ent']}"
-        assert f0['param_ents'] == [1], \
-            f"identity param_ents {f0['param_ents']} != [1]"
-        assert (f1['first_ent'], f1['last_ent']) == (2, 11), \
+        assert f0['param_ents'] == [base + 1], \
+            f"identity param_ents {f0['param_ents']} != [{base + 1}]"
+        assert (f1['first_ent'], f1['last_ent']) == (base + 2, base + 11), \
             f"main range {f1['first_ent']}..{f1['last_ent']}"
         assert f1['param_count'] == 0
         # REG 根行（SG_FUNC）first/last 与 SYM func 记录双写一致
         regs = v7.reg()
         roots = [i for i, r in enumerate(regs) if r[0] == 0]
-        assert regs[roots[0]][4] == 0 and regs[roots[0]][5] == 1
-        assert regs[roots[1]][4] == 2 and regs[roots[1]][5] == 11
+        assert regs[roots[0]][4] == base and regs[roots[0]][5] == base + 1
+        assert regs[roots[1]][4] == base + 2 and regs[roots[1]][5] == base + 11
     finally:
         try:
             os.unlink(ccr_path)
@@ -693,20 +711,22 @@ def test_v7_ent_hand_expected_pure_add_block():
         assert strs[funcs[0]['name']] == 'pure_add'
         ents = v7.ent()
         vs0 = len(sym['globals'])
+        base = vs0  # one leading global existence row per global
         exp = [
             (vs0 + 2, 1, 0, 0, 4), (vs0 + 3, 1, 1, 1, 3),
             (vs0 + 0, 1, -1, 1, 2), (vs0 + 1, 1, -1, 1, 2),
         ]
         got = [(ev, ever, edef, els, ele) for (ev, ever, edef, els, ele,
-                                                efl) in ents[:4]]
+                                                efl) in ents[base:base + 4]]
         assert got == exp, f"pure_add block:\n  got      {got}\n  expected {exp}"
-        for (ev, ever, edef, els, ele, efl) in ents[:4]:
-            assert efl == 0
+        for (ev, ever, edef, els, ele, efl) in ents[base:base + 4]:
+            want_fl = 2 if (ev - vs0) < funcs[0]['param_count'] else 0
+            assert efl == want_fl, f"pure_add row flags {efl} != {want_fl}"
         f0 = funcs[0]
-        assert (f0['first_ent'], f0['last_ent']) == (0, 3), \
-            f"pure_add range ({f0['first_ent']},{f0['last_ent']}) != (0,3)"
-        assert f0['param_ents'] == [2, 3], \
-            f"pure_add param_ents {f0['param_ents']} != [2,3]"
+        assert (f0['first_ent'], f0['last_ent']) == (base, base + 3), \
+            f"pure_add range ({f0['first_ent']},{f0['last_ent']}) != ({base},{base+3})"
+        assert f0['param_ents'] == [base + 2, base + 3], \
+            f"pure_add param_ents {f0['param_ents']} != {[base+2, base+3]}"
         # main 内多定值 var 版本切分 spot-check（手算）：
         #   v(decl9): ALLOC@20 + STORE@22 + STORE_INDEX_VAR@24 读(carve-out)
         #     值读@26/@34 → 版本1 (20,22) 版本2 (22,35)
@@ -913,7 +933,7 @@ def test_v7_layout_and_walk():
         # 引用 + _arena 定值），本程序条目数 > 0；全行字段自洽
         assert len(e) > 0, f"ENT empty — Task 2: corec should write entries: {e}"
         for (ev, evr, ed, els, ele, efl) in e:
-            assert evr >= 1 and 0 <= ev and efl == 0
+            assert evr >= 1 and 0 <= ev and efl in (0, 2, 4)
             assert els < ele and (ed < 0 or ed == els)
         edg = v7.edg()  # full EDG walk + forward/kind invariant checks
         # EDG 段必落且至少一条边（每函数 arena_new→arena_reset def-use 存在）
@@ -1225,7 +1245,7 @@ def test_v7_roundtrip_elf():
         # Task 2: build 链中间产物携带实条目（corearch 已 load 校验 + 发射）
         assert len(ents) > 0, "built .ccr should carry real ENT records"
         for (ev, evr, ed, els, ele, efl) in ents:
-            assert evr >= 1 and efl == 0
+            assert evr >= 1 and efl in (0, 2, 4)
             assert els < ele and (ed < 0 or ed == els)
         assert sum(len(v) for v in v7.edg().values()) >= 2
         # direct corearch invocation on the same .ccr
@@ -1274,9 +1294,12 @@ def test_v7_ent_real_optmeta_absent():
         assert sym['opt_count'] == 0, f"opt_meta not empty: {sym['opt_count']}"
         funcs = sym['funcs']
         assert len(funcs) >= 2
-        # Python 侧块切分（loader 块对照同语义）：块序 = 函数序，块 = 连续段
-        vs = len(sym['globals'])
-        pos = 0
+        # Python 侧块切分（loader 块对照同语义）：全局前缀行在前，块序 = 函数序
+        base = len(sym['globals'])
+        vs = base
+        pos = base
+        assert all(ents[g][2] == -1 and ents[g][5] == 4 for g in range(base)), \
+            "global ENT prefix malformed"
         for f in funcs:
             win = range(vs, vs + f['var_count'])
             start = pos
@@ -1302,6 +1325,8 @@ def test_v7_ent_real_optmeta_absent():
                     f"func param_ents[{p}] {f['param_ents'][p]} != {pid}"
             vs += f['var_count']
         assert pos == len(ents), "block partition did not cover all entries"
+        assert all(ents[g][0] == g and ents[g][2] == -1 and ents[g][5] == 4
+                   for g in range(base)), "global prefix rows malformed"
         # REG 根行 first/last 与 SYM func 记录双写一致（实值）
         regs = v7.reg()
         roots = [(i, r) for i, r in enumerate(regs) if r[0] == 0]
@@ -1438,9 +1463,10 @@ def test_v7_sym_func_shapes():
         assert [strs[d['name']] for d in pdecls] == ['a', 'b']
         assert [d['type'] for d in pdecls] == [0, 0], "int param type != TI_INT"
         # 条目范围/param_ents 实回填——Python 侧块切分自洽（loader 块对照同
-        # 语义）：add = 文件首块（func0 起点 0，含 a/b 的 def=-1 条目）
-        vs = len(sym['globals'])
-        pos = 0
+        # 语义）：全局存在行是前导块，add = 其后的第一个函数块。
+        base = len(sym['globals'])
+        vs = base
+        pos = base
         block_of = []
         for f in funcs:
             win = range(vs, vs + f['var_count'])
@@ -1450,6 +1476,8 @@ def test_v7_sym_func_shapes():
             block_of.append((start, pos - start))
             vs += f['var_count']
         assert pos == len(ents), "block partition did not cover all entries"
+        assert all(ents[g][0] == g and ents[g][2] == -1 and ents[g][5] == 4
+                   for g in range(base)), "global prefix rows malformed"
         for k, f in enumerate(funcs):
             st, pcnt = block_of[k]
             fe = st if pcnt else -1
@@ -1598,12 +1626,13 @@ def test_v7_loader_rejects_ent_var_foreign_block():
         sym = v7.sym_parse()
         funcs = sym['funcs']
         ents = v7.ent()
-        assert funcs[0]['first_ent'] == 0, \
-            f"precondition: func0 first entry at 0, got {funcs[0]['first_ent']}"
+        f0e = funcs[0]['first_ent']
+        assert f0e >= len(sym['globals']), \
+            f"precondition: func0 first entry after global prefix, got {f0e}"
         vs1 = len(sym['globals']) + funcs[0]['var_count']  # func1 窗口起点
-        assert ents[0][0] < vs1, \
-            f"precondition: entry0 var {ents[0][0]} already outside func0 window"
-        _mutate_ent_field(data, 0, 0, vs1, '<i')  # var_id := func1 窗口起点
+        assert ents[f0e][0] < vs1, \
+            f"precondition: entry {f0e} var {ents[f0e][0]} already outside func0 window"
+        _mutate_ent_field(data, f0e, 0, vs1, '<i')  # var_id := func1 窗口起点
         bad_path = ccr_path + '.fblk'
         with open(bad_path, 'wb') as fh:
             fh.write(bytes(data))

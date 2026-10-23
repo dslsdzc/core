@@ -574,8 +574,14 @@ python3 tests/selfhost/test_opt_dex.py
 python3 tests/selfhost/test_bigint_arith.py
 python3 tests/selfhost/test_native_memory.py
 python3 tests/selfhost/test_interp_parity.py
+python3 tests/harness/test_ci_hook_coverage.py
 bash tools/baseline/canary_check.sh
 ```
+
+Final-review 修复批补充（2026-10-24）：v10 SYM `opt_meta` 恒为 0 计数、
+NOD opcode/operand 域由 loader 拒绝、非类型面 `type_id` 补齐语义域、ENT
+消费盘面条目（含全局/参数行）、SYM/REG 跨引用校验，均已由上述
+`test_ccr_v10_format.py` 的负向夹具覆盖。
 
 全部通过后，用三阶段自举确认：
 

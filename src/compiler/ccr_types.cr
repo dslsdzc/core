@@ -337,6 +337,113 @@ fn ccr_seg_prepare_save() -> int:
 // and no semantic feature, so it is explicitly classified as featureless.
 // This is a pure query/derivation: it does not mutate the type tables, the term
 // table, or g_tk_face_fail.
+// Semantic type row for a variable id (-1 when untyped/out of range).
+fn ccr_var_type_row(v: int) -> int:
+    if v < 0 || v >= g_ir_var_count:
+        return -1
+    t := irv_type(v)
+    if t < 0 || t >= g_type_count:
+        return -1
+    return t
+
+// Pointee/element row of a pointer/reference/array/slice row.
+fn ccr_inner_type_row(t: int) -> int:
+    if t < 0 || t >= g_type_count:
+        return -1
+    k := get_type_kind(t)
+    if k == TYP_PTR || k == TYP_REF || k == TYP_ARRAY || k == TYP_SLICE || k == TYP_OPTIONAL:
+        d := get_type_data(t)
+        if d >= 0 && d < g_type_count:
+            return d
+    return -1
+
+// Named/struct row matching a type-name string index.
+fn ccr_named_row_of_name(ni: int) -> int:
+    if ni < 0:
+        return -1
+    i : ., mut = 0
+    loop:
+        if i >= g_type_count:
+            break
+        if get_type_kind(i) == TYP_NAMED && get_type_data(i) == ni:
+            return i
+        i = i + 1
+    return -1
+
+// Per-op semantic domain for the v10 NOD type_id. Type-face ops keep the
+// existing reversible-row rule; the ops below carry a domain even though their
+// legacy type code was a target/aux fact. -1 means the domain is genuinely
+// unavailable (fail closed: corearch may then only fall back to the variable
+// table, never to a guessed machine width).
+fn ccr_nod_type_domain(ii: int, op: int, d: int, s1: int, s2: int, s3: int) -> int:
+    if op == IR_DEREF:
+        p := ccr_var_type_row(s1)
+        if p >= 0:
+            k := get_type_kind(p)
+            if k == TYP_PTR || k == TYP_REF:
+                pin := ccr_inner_type_row(p)
+                if pin >= 0:
+                    return pin
+        return ccr_var_type_row(d)
+    if op == IR_STORE_PTR:
+        return ccr_var_type_row(s2)
+    if op == IR_ALLOC_ARRAY:
+        t := ccr_var_type_row(d)
+        ein := ccr_inner_type_row(t)
+        if ein >= 0:
+            return ein
+        // Some literal/tuple allocations get their array row after the node.
+        // Fall back to the first value stored into this base.
+        j : ., mut = 0
+        loop:
+            if j >= g_ir_instr_count:
+                break
+            jop := iri_op(j)
+            if (jop == IR_STORE_INDEX || jop == IR_STORE_INDEX_VAR) && iri_s1(j) == d:
+                vt := ccr_var_type_row(iri_s2(j))
+                if vt >= 0:
+                    return vt
+            j = j + 1
+        return -1
+    if op == IR_ALLOC_STRUCT:
+        t := ccr_var_type_row(d)
+        if t >= 0:
+            k := get_type_kind(t)
+            if k == TYP_NAMED || k == TYP_GENERIC_APPLY:
+                return t
+        return ccr_named_row_of_name(s3)
+    if op == IR_LOAD:
+        return ccr_var_type_row(d)
+    if op == IR_STORE:
+        return ccr_var_type_row(s2)
+    if op == IR_ALLOC:
+        return ccr_var_type_row(d)
+    if op == IR_ADDR_INDEX:
+        t := ccr_var_type_row(d)
+        ain := ccr_inner_type_row(t)
+        if ain >= 0:
+            return ain
+        return t
+    if op == IR_LOAD_INDEX || op == IR_LOAD_INDEX_VAR:
+        return ccr_var_type_row(d)
+    if op == IR_STORE_INDEX:
+        return ccr_var_type_row(s2)
+    if op == IR_STORE_INDEX_VAR:
+        return ccr_var_type_row(d)
+    if op == IR_LOAD_FIELD:
+        return ccr_var_type_row(d)
+    if op == IR_STORE_FIELD:
+        return ccr_var_type_row(s2)
+    if op == IR_SLICE:
+        return ccr_var_type_row(d)
+    if op == IR_MAKE_ENUM:
+        return ccr_var_type_row(d)
+    if op == IR_LOAD_ENUM_TAG:
+        return ccr_var_type_row(d)
+    // Listed ops whose domain is genuinely unavailable from the current IR
+    // state. They remain -1 rather than guessing.
+    return -1
+
 fn ccr_nod_type_populate() -> int:
     n := g_ir_instr_count
     g_ccr_nod_type = alloc((n + 8) * 4)
@@ -353,10 +460,17 @@ fn ccr_nod_type_populate() -> int:
         fl : ., mut = 0
         if sh_tk_face_of_code(op, tk) == 0:
             tid = tk
-        else if sh_tk_is_type_face(op) != 0:
-            // Composite row or out-of-range/untranslatable type code: no
-            // reversible TYPE row. Task 3 fixes type_id = -1 here.
-            tid = -1
+        else:
+            // Non-face ops carry a semantic domain when the variable table can
+            // supply it (DEREF pointee, STORE value, ALLOC element/struct,
+            // field/index value domains). -1 stays "unavailable".
+            dt := ccr_nod_type_domain(ii, op, iri_dest(ii), iri_s1(ii), iri_s2(ii), iri_s3(ii))
+            if dt >= 0:
+                tid = dt
+        if sh_tk_is_type_face(op) != 0:
+            // Type-face nodes carry no semantic feature bits. A composite row
+            // stays -1 (not a reversible atom row).
+            fl = 0
         else if op == IR_BOUNDS_CHECK:
             if tk != 0:
                 fl = fl + CCR_NOD_FLAG_DYNAMIC_LIMIT

@@ -253,7 +253,7 @@ fn dump_alloc_strides():
             print(" elem ")
             print_i(elem)
             print(" stride ")
-            print_i(corearch_nod_alloc_stride(dv))
+            print_i(corearch_nod_alloc_stride(ni, dv))
             println("")
         ni = ni + 1
 

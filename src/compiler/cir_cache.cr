@@ -49,6 +49,10 @@
 //   semantics. A cache miss is a harmless rebuild. The compiler identity also
 //   invalidates all entries when the running binary changes, so source edits do
 //   not need a manual bump for body changes.
+//   The v10 `.ccr` wire migration (removing SYM opt_meta and adding semantic
+//   NOD type ids) does not change this snapshot layout or its derived-code
+//   contract. The stored records, journal, and trailer are unchanged, so no
+//   version bump is required for that migration; only `.ccr` bytes changed.
 //
 // Magic value:
 //   The magic is a negative 64-bit constant written as signed decimal. The

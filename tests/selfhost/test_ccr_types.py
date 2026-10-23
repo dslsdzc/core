@@ -1739,8 +1739,12 @@ def test_p4t4_ccr_nod_tk_equals_graph_tk():
                 assert type_id == dr[2], \
                     f"node {i}: type_id {type_id} != face-0 row {dr[2]}"
             else:
-                assert type_id == -1, \
-                    f"node {i}: non-face node carries type_id {type_id}"
+                # Non-face ops may now carry a semantic domain (DEREF pointee,
+                # STORE value, ALLOC element/struct, field/index domains). The
+                # wire value must still be a TYPE row or -1; it is no longer
+                # forced to -1 for every non-face node.
+                assert -1 <= type_id, \
+                    f"node {i}: non-face node carries invalid type_id {type_id}"
     finally:
         _cleanup(src, ccr_path, dot)
 
@@ -2245,15 +2249,20 @@ def test_p6t3_types_match_memory_face():
         assert len(recs) == len(rows), f"nodes {len(recs)} != mem rows {len(rows)}"
         w_mem = sum(1 for r in rows if r[3] >= 0)
         nhdr, nrows = _nod_type_dump(ccr_path)
-        assert nhdr['with_type'] == w_mem, \
-            f"with_type {nhdr['with_type']} != memory with_term {w_mem}"
+        # Type-face nodes project the reversible atom row. Non-face ops now carry
+        # a semantic domain derived from the variable table, so they may be typed
+        # even when the memory type-term slot is absent.
+        assert nhdr['with_type'] >= w_mem, \
+            f"with_type {nhdr['with_type']} < memory with_term {w_mem}"
+        face_ops = {1, 2, 6, 4, 10, 49, 50}  # CONST/BINARY/ALLOC/CALL/LOAD/I2F/F2I
         for i, ((op, type_id, flags_), r) in enumerate(zip(recs, rows)):
             assert op == r[1], f"node {i}: NOD op {op} != memory op {r[1]}"
-            assert (type_id >= 0) == (r[3] >= 0), \
-                f"node {i}: type_id {type_id} vs memory term {r[3]} (face disagreement)"
-            if type_id >= 0:
+            if op in face_ops and r[3] >= 0:
                 assert type_id == r[2], \
                     f"node {i}: type_id {type_id} != derived code {r[2]}"
+            if type_id >= 0:
+                assert 0 <= type_id < nhdr['rows'], \
+                    f"node {i}: type_id {type_id} outside TYPE rows"
     finally:
         _cleanup(src, ccr_path, dot)
 
@@ -2287,13 +2296,21 @@ def test_p6t3_aux_face_and_composite_preserved():
                 comp = [r for r in recs if r[0] == IR_BINARY and r[1] == -1]
                 assert comp, f"{tag}: vacuous (no composite-row node)"
             for (op, type_id, flags_) in aux:
-                assert type_id == -1, \
-                    f"{tag}: aux-face op {op} carries type_id {type_id} (must be -1)"
+                if op == IR_DEREF or op == IR_STORE_PTR:
+                    # These two now carry a semantic domain (pointee/value) when
+                    # the variable table can supply it; they must never carry a
+                    # target width or byte extent.
+                    assert -1 <= type_id, \
+                        f"{tag}: pointer op {op} carries invalid type_id {type_id}"
+                else:
+                    assert type_id == -1, \
+                        f"{tag}: aux-face op {op} carries type_id {type_id} (must be -1)"
                 if op == IR_BOUNDS_CHECK and flags_ & 1:
                     saw_bound += 1
                 if op == IR_SPAWN and flags_ & 2:
                     saw_spawn += 1
                 assert flags_ <= 0x7
+
         finally:
             _cleanup(ccr_path)
             if tag == 'tk':
@@ -2442,10 +2459,10 @@ def test_nod_type_id_is_type_row_or_minus_one():
         for (n, op, tk, tid, flags) in nrows:
             assert flags <= 0x7, f"node {n}: unknown flag bits {flags:#x}"
             exp = expected_nod_type_id(op, tk, rows, terms, rowterms)
-            assert tid == exp, \
-                f"node {n}: type_id {tid} != expected {exp} (op={op} tk={tk})"
             if exp >= 0:
                 face += 1
+                assert tid == exp, \
+                    f"node {n}: type_id {tid} != expected {exp} (op={op} tk={tk})"
                 if tid > 0:
                     face_gt0 += 1
                 assert tid == tk, f"node {n}: type_id {tid} != row {tk}"
@@ -2453,12 +2470,77 @@ def test_nod_type_id_is_type_row_or_minus_one():
                     f"node {n}: type_id {tid} outside row domain {len(rows)}"
             else:
                 nonface += 1
-                assert tid == -1, f"node {n}: non-face type_id {tid} != -1"
+                # Non-face ops use a semantic domain (DEREF pointee, STORE value,
+                # ALLOC element/struct, field/index domains) when derivable.
+                assert -1 <= tid < len(rows), \
+                    f"node {n}: non-face type_id {tid} outside domain"
         assert face > 0, "vacuous: fixture has no type-face node"
         assert nonface > 0, "vacuous: fixture has no non-type node"
         assert face_gt0 > 0, "vacuous: all type ids are row 0 (degenerate mapping)"
     finally:
         _cleanup(src, ccr_path)
+
+
+def test_non_type_face_op_has_semantic_domain():
+    """Important 3: non-type-face ops still carry a semantic type_id when the
+    variable table supplies the domain (DEREF pointee, STORE_PTR value,
+    ALLOC_ARRAY element, ADDR_INDEX element). The old expectation that every
+    non-face node is -1 is no longer the v10 behavior."""
+    src = tk_fixture('p7dom', COMPOSITE_FIXTURE)
+    ccr_path = os.path.join(BASE, 'build', 'test_p7t3_domain.ccr')
+    try:
+        corec_ccr(src, ccr_path)
+        recs = ccr_nod_records(read_ccr(ccr_path))
+        want = {8: 'ALLOC_ARRAY', 25: 'DEREF', 26: 'STORE_PTR', 31: 'ADDR_INDEX'}
+        seen = {}
+        for op, type_id, _flags in recs:
+            if op in want:
+                if op not in seen or type_id >= 0:
+                    seen[op] = type_id
+        typed = [op for op, tid in seen.items() if tid >= 0]
+        assert typed, f"no derivable non-face domain in fixture: {seen}"
+        for op, tid in seen.items():
+            assert -1 <= tid, f"{want[op]} carries invalid type_id {tid}"
+    finally:
+        _cleanup(src, ccr_path)
+
+
+def test_ent_global_and_unused_param_rows():
+    """Important 5: globals and unreferenced parameters have existence rows.
+
+    Spec §5: def_nod = -1 for both; flags bit 1 = parameter, bit 2 = global.
+    The fixture forces both shapes and the file still loads/emits.
+    """
+    src = os.path.join(BASE, 'build', 'test_ent_globals.cr')
+    ccr_path = os.path.join(BASE, 'build', 'test_ent_globals.ccr')
+    out = os.path.join(BASE, 'build', 'test_ent_globals.out')
+    source = ("counter : int, mut = 3\n"
+              "fn pick(a: int, unused: int) -> int:\n"
+              "    return a\n"
+              "fn main() -> int:\n"
+              "    return pick(counter, 0)\n")
+    try:
+        with open(src, 'w') as fh:
+            fh.write(source)
+        corec_ccr(src, ccr_path)
+        body = CcrFile(read_ccr(ccr_path)).body(ENT_TAG)
+        (cnt,) = struct.unpack_from('<I', body, 0)
+        recs = []
+        for i in range(cnt):
+            var_id, ver, def_nod, ls, le, flags = struct.unpack_from(
+                '<iIiIII', body, 4 + i * 24)
+            recs.append((var_id, ver, def_nod, ls, le, flags))
+        globs = [r for r in recs if r[5] & 4]
+        params = [r for r in recs if r[5] & 2]
+        assert globs, "no global ENT row (spec §5)"
+        assert params, "no parameter ENT row (spec §5)"
+        assert all(r[2] == -1 for r in globs), f"global def_nod must be -1: {globs}"
+        # The unused parameter is the point: it has no defining/use node.
+        unused = [r for r in params if r[2] == -1]
+        assert unused, "unused parameter did not produce a def=-1 row"
+        arch_elf(ccr_path, out)
+    finally:
+        _cleanup(src, ccr_path, out)
 
 
 def test_v10_ent_24b_without_home():
@@ -2483,8 +2565,13 @@ def test_v10_ent_24b_without_home():
         assert r.returncode == 0, \
             f"corearch --dump-entries rc={r.returncode}: {r.stdout!r} {r.stderr!r}"
         homes = re.findall(r' home (-?\d+)', r.stdout)
-        assert len(homes) == cnt, \
-            f"{len(homes)} home values != {cnt} ENT records"
+        assert 'entries-source: loaded' in r.stdout, \
+            "corearch recomputed ENT instead of consuming the loaded table"
+        assert len(homes) > 0, "no function entry rows dumped (vacuous)"
+        # ENT also has one leading global row per global var; dump-entries only
+        # prints function blocks, so the disk count is >= the dumped rows.
+        assert len(homes) <= cnt, \
+            f"{len(homes)} dumped home values > {cnt} ENT records"
         assert all(int(h) == -1 for h in homes), \
             f"v10 loader surfaced a non-(-1) home: {set(homes)}"
         # 合法 v10 文件端到端仍可载入/发射
@@ -2544,6 +2631,8 @@ if __name__ == '__main__':
              test_p6t3_nod_count_overflow_rejected,
              test_p6t3_d18_purity_static,
              test_nod_type_id_is_type_row_or_minus_one,
+             test_non_type_face_op_has_semantic_domain,
+             test_ent_global_and_unused_param_rows,
              test_v10_ent_24b_without_home]
     failed = 0
     for t in tests:

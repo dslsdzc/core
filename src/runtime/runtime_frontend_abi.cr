@@ -4,6 +4,10 @@
 // Allocation and scheduler/fiber entry points are runtime policy, not target
 // value layout. They stay on the runtime axis and are composed by the target
 // root; the checker only receives their return types.
+//
+// The same names are SYSTEM boundaries in the graph classifier
+// (ccr_io.cr:ccr_raw_abi_builtin). A direct call must mark the .ccr header
+// SYSTEM, so adding a name here requires adding it there too.
 
 fn runtime_frontend_builtin_register():
     prelude_builtin_add("alloc", TI_STR)

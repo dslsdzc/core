@@ -140,12 +140,20 @@ fn compute_live_ranges():
     // compute_entries with func_i == 0 resets the table, so this is idempotent.
     // It runs for --dump-entries and for O2 allocation, independent of the
     // optimization gate.
+    // When the v10 loader consumed a valid ENT segment, that table is the
+    // authority. Rebuilding would replace the file's existence/version facts with
+    // a mirror and make the loader's ENT validation vacuous, so keep it.
+    if g_ent_loaded != 0:
+        return
     ef : ., mut = 0
     loop:
         if ef >= g_ir_func_count:
             break
         compute_entries(ef)
         ef = ef + 1
+    // A program with no functions still has global existence rows.
+    if g_ir_func_count == 0:
+        compute_global_entries()
 
 // ------------------------------------------------------------------
 // Entry versioning: split each variable at its definition points
@@ -228,6 +236,28 @@ fn entry_count(func_i: int) -> int:
         return 0
     return cell_load(g_ir_func_entry_count, func_i * 8)
 
+// Global existence rows. Every global var is one entry with def_nod = -1,
+// live_start = 0 and live_end = g_ir_instr_count (the whole program). Globals are
+// the prefix 0..g_ir_global_count-1 of the var namespace, so the loader can
+// partition them as a leading block before the per-function blocks.
+fn compute_global_entries():
+    if g_ir_instr_count <= 0:
+        return
+    gi : ., mut = 0
+    loop:
+        if gi >= g_ir_global_count:
+            break
+        grow_entries(g_entry_count + 1)
+        eo := g_entry_count * ESZ_ENTRY
+        w32(g_ir_entries, eo + OFF_ENTRY_VAR, gi)
+        w32(g_ir_entries, eo + OFF_ENTRY_DEF, -1)
+        w32(g_ir_entries, eo + OFF_ENTRY_LS, 0)
+        w32(g_ir_entries, eo + OFF_ENTRY_LE, g_ir_instr_count - 1)
+        w32(g_ir_entries, eo + OFF_ENTRY_RUNTIME_HOME, -1)
+        w32(g_ir_entries, eo + OFF_ENTRY_FLAGS, ENTRY_FLAG_GLOBAL)
+        g_entry_count = g_entry_count + 1
+        gi = gi + 1
+
 fn compute_entries(func_i: int) -> int:
     if func_i == 0:
         g_entry_count = 0
@@ -235,12 +265,14 @@ fn compute_entries(func_i: int) -> int:
         // are reused by the new generation, so stale locations must be cleared.
         // The instance registers only after this generation is built.
         loc_registry_reset()
+        compute_global_entries()
     // The function window uses the same g_ir_func_instr_start/count values as
     // compute_live_ranges: NOD node coordinates, read through nod_*.
     ic := cell_load(g_ir_func_instr_count, func_i * 8)
     ist := cell_load(g_ir_func_instr_start, func_i * 8)
     vc := cell_load(g_ir_func_var_count, func_i * 8)
     vs := cell_load(g_ir_func_var_start, func_i * 8)
+    pc := cell_load(g_ir_func_param_count, func_i * 8)
     cnt : ., mut = 0
     if ic > 0 && vc > 0:
         // One open-entry slot per function-local variable, initialized to -1.
@@ -291,7 +323,10 @@ fn compute_entries(func_i: int) -> int:
                 w32(g_ir_entries, eo + OFF_ENTRY_LS, inst)
                 w32(g_ir_entries, eo + OFF_ENTRY_LE, last_global)
                 w32(g_ir_entries, eo + OFF_ENTRY_RUNTIME_HOME, -1)
-                w32(g_ir_entries, eo + OFF_ENTRY_FLAGS, 0)
+                efl0 : ., mut = 0
+                if lv < pc:
+                    efl0 = ENTRY_FLAG_PARAM
+                w32(g_ir_entries, eo + OFF_ENTRY_FLAGS, efl0)
                 cell_store(prev, lv * 8, g_entry_count)
                 g_entry_count = g_entry_count + 1
                 cnt = cnt + 1
@@ -305,6 +340,9 @@ fn compute_entries(func_i: int) -> int:
                 gv := vs + lv2
                 ff := live_first(func_i, gv)
                 ll := live_last(func_i, gv)
+                efl2 : ., mut = 0
+                if lv2 < pc:
+                    efl2 = ENTRY_FLAG_PARAM
                 if ff >= 0 && ll >= 0:
                     grow_entries(g_entry_count + 1)
                     eo := g_entry_count * ESZ_ENTRY
@@ -313,7 +351,21 @@ fn compute_entries(func_i: int) -> int:
                     w32(g_ir_entries, eo + OFF_ENTRY_LS, ist + ff)
                     w32(g_ir_entries, eo + OFF_ENTRY_LE, ist + ll)
                     w32(g_ir_entries, eo + OFF_ENTRY_RUNTIME_HOME, -1)
-                    w32(g_ir_entries, eo + OFF_ENTRY_FLAGS, 0)
+                    w32(g_ir_entries, eo + OFF_ENTRY_FLAGS, efl2)
+                    g_entry_count = g_entry_count + 1
+                    cnt = cnt + 1
+                else if lv2 < pc && ic > 0:
+                    // An unreferenced parameter still exists. Spec §5 gives it
+                    // def_nod = -1 and the param flag; the function node span is
+                    // its existence window.
+                    grow_entries(g_entry_count + 1)
+                    eo := g_entry_count * ESZ_ENTRY
+                    w32(g_ir_entries, eo + OFF_ENTRY_VAR, gv)
+                    w32(g_ir_entries, eo + OFF_ENTRY_DEF, -1)
+                    w32(g_ir_entries, eo + OFF_ENTRY_LS, ist)
+                    w32(g_ir_entries, eo + OFF_ENTRY_LE, ist + ic - 1)
+                    w32(g_ir_entries, eo + OFF_ENTRY_RUNTIME_HOME, -1)
+                    w32(g_ir_entries, eo + OFF_ENTRY_FLAGS, efl2)
                     g_entry_count = g_entry_count + 1
                     cnt = cnt + 1
             lv2 = lv2 + 1
@@ -398,6 +450,10 @@ fn ir_op_kind_name(op: int) -> string:
 // 1-based version within the variable group. kind is the definition opcode, or
 // "-" when def is -1.
 fn dump_entries_summary():
+    if g_ent_loaded != 0:
+        println("entries-source: loaded")
+    else:
+        println("entries-source: recomputed")
     fi : ., mut = 0
     loop:
         if fi >= g_ir_func_count:

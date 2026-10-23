@@ -27,8 +27,14 @@
 #     本批实测时长后判定可挂）→ `selfhost-tests`（时长 = 本批本机实测，逐条与 run.sh 行注一致）
 #   - 未挂项仍列下方（旧 `test_mw_task1-6` 已随 2-limb 路径删除）。
 
-# ─── tests/selfhost（11 条；未挂）───
+# ─── tests/selfhost（12 条；未挂）───
 tests/selfhost/test_apx_tag.py	未挂（历史缺口）：需 corec 端到端；挂点属构建面 ⇒ 与其它编译器型未挂档同批评估
+tests/selfhost/test_ccrb_bundle.py	未挂：需外部 zstd（CI 镜像未保证）；`.ccrb` 是分发包装层，核心 v10 raw `.ccr` 闸门已由 test_ccr_v10_format/stream 覆盖。接入条件 = CI 镜像声明 zstd 依赖
+tests/selfhost/test_bigint_arith.py	未挂（历史缺口）：BigInt 运行时端到端，需 corec+ELF；构建面成本高，独立批评估
+tests/selfhost/test_bigint_boundaries.py	未挂（历史缺口）：BigInt 边界语义，需 corec；与 arith 同族
+tests/selfhost/test_bigint_containers.py	未挂（历史缺口）：BigInt 容器载荷，需 corec+ELF
+tests/selfhost/test_bigint_interp.py	未挂（历史缺口）：BigInt 解释器路径，需 corec
+tests/selfhost/test_bigint_literals.py	未挂（历史缺口）：BigInt 字面量，需 corec
 tests/selfhost/test_dex_arith.py	未挂（历史缺口）：dex 定点语义；需 corec
 tests/selfhost/test_dex_type.py	未挂（历史缺口）：dex 类型核心；需 corec
 tests/selfhost/test_directory_build.py	未挂（历史缺口）：目录路径工程构建；需 corec+corearch
@@ -42,6 +48,8 @@ tests/selfhost/test_native_strings.py	未挂（历史缺口）：Native ELF 字�
 
 # ─── tests/bootstrap（4 条；未挂）───
 tests/bootstrap/test_apx_tag.py	未挂（历史缺口）：bootstrap 面 apx 标签（与 selfhost 同名档配对）
+tests/bootstrap/test_bigint_frontend.py	未挂（历史缺口）：BigInt 前端语义，需 bootstrap 管线
+tests/bootstrap/test_bigint_pipeline.py	未挂（历史缺口）：BigInt 管线端到端，需 bootstrap 管线
 tests/bootstrap/test_dex_arith.py	未挂（历史缺口）：bootstrap dex 精确运算
 tests/bootstrap/test_dex_type.py	未挂（历史缺口）：bootstrap dex 类型核心
 tests/bootstrap/test_modules.py	未挂（历史缺口）：bootstrap import alias 回归

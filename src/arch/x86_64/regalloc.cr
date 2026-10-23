@@ -912,10 +912,17 @@ fn corearch_ptr_pointee(var: int) -> int:
 // Access width for IR_DEREF/IR_STORE_PTR. Mirrors the front-end derivation
 // ptr_access_width: pointee value size, falling back to one target slot.
 fn corearch_nod_access_width(n: int) -> int:
-    w := mp_size(corearch_ptr_pointee(nod_s1(n)))
-    if w <= 0:
+    // Prefer the node's semantic type_id (the pointee domain). The variable row
+    // remains a fallback for nodes whose domain was unavailable at save time.
+    tid := nod_type_id(n)
+    if tid >= 0 && tid < g_type_count:
+        w := mp_size(tid)
+        if w > 0:
+            return w
+    w2 := mp_size(corearch_ptr_pointee(nod_s1(n)))
+    if w2 <= 0:
         return mp_stride(TI_INT)
-    return w
+    return w2
 
 // Element stride for IR_ALLOC_ARRAY, derived from the destination variable's
 // semantic array element type. An uninitialised array declaration
@@ -924,13 +931,19 @@ fn corearch_nod_access_width(n: int) -> int:
 // result arrays) have a scalar/unit row and no element type to read; for those
 // the explicit single-slot fallback applies. An unreadable type row also falls
 // back explicitly instead of assuming every element is an int slot.
-fn corearch_nod_alloc_stride(dest: int) -> int:
+fn corearch_nod_alloc_stride(n: int, dest: int) -> int:
+    // v10 type_id for ALLOC_ARRAY is the element domain. Use it first; the
+    // destination variable's array row is the fallback when the domain was not
+    // derivable at save time.
+    tid := nod_type_id(n)
+    if tid >= 0 && tid < g_type_count:
+        return mp_stride(tid)
     if dest < 0:
         return mp_stride(TI_INT)
     ti := irv_type(dest)
     if ti < 0 || ti >= g_type_count:
         return mp_stride(TI_INT)
-    if get_type_kind(ti) == TYP_ARRAY:
+    if get_type_kind(ti) == TYP_ARRAY || get_type_kind(ti) == TYP_SLICE:
         elem := get_type_data(ti)
         if elem >= 0 && elem < g_type_count:
             return mp_stride(elem)
@@ -950,7 +963,12 @@ fn corearch_alloc_size_of_var(v: int) -> int:
         if nod_dest(ni) == v:
             aop := nod_op(ni)
             if aop == IR_ALLOC_ARRAY:
-                return mp_extent(nod_s1(ni), TI_INT)
+                cnt := nod_s1(ni)
+                if cnt <= 0:
+                    return 0
+                // Element stride, not one int slot: bool/char/dex elements and
+                // natively sized fields make mp_extent(n, TI_INT) wrong.
+                return cnt * corearch_nod_alloc_stride(ni, v)
             if aop == IR_ALLOC_STRUCT:
                 nm := nod_s3(ni)
                 si : ., mut = 0
@@ -958,7 +976,21 @@ fn corearch_alloc_size_of_var(v: int) -> int:
                     if si >= g_struct_count:
                         break
                     if si_name(si) == nm:
-                        return mp_extent(si_field_count(si), TI_INT)
+                        fc := si_field_count(si)
+                        total : ., mut = 0
+                        fj : ., mut = 0
+                        loop:
+                            if fj >= fc:
+                                break
+                            ft := si_field_type(si, fj)
+                            st := mp_stride(ft)
+                            if st <= 0:
+                                st = mp_stride(TI_INT)
+                            total = total + st
+                            fj = fj + 1
+                        if total <= 0:
+                            return mp_stride(TI_INT)
+                        return total
                     si = si + 1
                 return mp_stride(TI_INT)
         ni = ni + 1
@@ -1011,7 +1043,7 @@ fn build_linear_schedule() -> int:
         // for pointer stores/loads is derived from the allocation node; a set
         // flag with no resolvable allocation is a malformed file (fail closed).
         if op == IR_ALLOC_ARRAY:
-            iri_set_s2(ni, corearch_nod_alloc_stride(nod_dest(ni)))
+            iri_set_s2(ni, corearch_nod_alloc_stride(ni, nod_dest(ni)))
         else if op == IR_DEREF || op == IR_STORE_PTR:
             iri_set_tk(ni, corearch_nod_access_width(ni))
             bsz := corearch_nod_runtime_bound_size(ni)

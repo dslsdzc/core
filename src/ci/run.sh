@@ -134,6 +134,8 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_type_engine.py   # 类型项引擎自测通道（selftest-types **417 例**——P5 收官 404 + R2 P6 Task 2 增 11（`ts_t2_neg_run`：¬ 面同类原子身份判据的邻域覆盖——同身份 / μ 字面 / ⊤ₖ 双向 / 跨枚举同名 / 同枚举异变体 / 令牌字面 / AK_NAMED / 空链与链元素域外 / 参数化面 / REF mut 标记面；三例 `t3.*_over_claim` 为**重钉**（0→1，不增减）；P0..P6 T2 一路漏挂）+ ccr v10 Task 5 复核 +1（`t4.tk_store_ptr_width8_rejected`：旧宽度码 8 在 IR_STORE_PTR 上仍归辅码面）
     python3 tests/selfhost/test_iface_ops.py     # R2 P2b Task 4/5/6：接口查表接线（算术/逻辑/条件三门 + 索引兜底门 + TY→TI 单表合一；正控/负控/登记面/站点域 76 例 + R2 P6 Task 4a 增 2（方法调用站点 never 透传 + 泛型方法登记钉）＝ 78 例）
     python3 tests/selfhost/test_purity.py          # 效应/纯度批判据（真纯度 13 例 + 链语义 4 例的自测通道驱动）
+    python3 tests/selfhost/test_ccr_v10_format.py  # v10 wire oracle + header/SYM/NOD negative fixtures（Task 1 + final-review Critical 1/2/6）
+    python3 tests/selfhost/test_ccr_v10_stream.py  # v10 canonical forward-only loader structure + truncation/order negative fixtures
     python3 tests/selfhost/test_ccr_v7.py          # 效应/纯度批 Task 3：.ccr 层三条边集语义断言（取代「与旧版逐字节同」）
     python3 tests/selfhost/test_ccr_types.py       # R2 P4 Task 1/2/3/4 + P5 Task 2：段机制（版本 8 + loader 三闸/必备集 + 旧 v7 拒收）8 例 + TYPE 内容面（行表/项 DAG 序列化 + 确定性装填 + corearch 读回对拍 + loader 负分支）10 例 + IFACE 内容面（五小节/条目扩列 16/形状命名化/签名项化/impl 边与方法表/corearch 读回/跨段引用域/确定性）10 例 + DFNode.TK 项槽（逐节点规则 + dex 语料 + NOD 36B/同序 + 冷/暖快照对称 + dump 零产物影响 + .cir 布局未变）6 例 = 34 例 + P5 T2 单槽化 6 例（复合行走辅码 + 互斥不变量 + F1 hotpatch 无面 + 复合行冷/暖对称 + 复合行 NOD 同序 + 快照盘面派生码保真）= 40 例 + R2 P6 Task 3 项索引 8 例（版本闸 v8 拒收 / NOD 40B 字段序 / 项索引落盘读回对拍（非退化）/ 两通道面一致 / 辅码面与复合行保真 / 项索引越界与不一致 ⇒ 拒绝 / 段界检 / D18 纯度静态）= 49 例（**+1 他批新增，本批机械核对同步**：实测 49/49）
     python3 tests/selfhost/test_impl.py

@@ -357,6 +357,11 @@ g_live_range_cap : int, mut
 g_ir_entries : string, mut
 g_entry_count : int, mut
 g_entry_cap : int, mut
+// 1 = the entry table came from the v10 ENT segment. compute_live_ranges keeps
+// those entries instead of rebuilding them, so allocation and diagnostics consume
+// the loaded existence lattice rather than a recomputed mirror. The corec save
+// path leaves this 0 and computes entries from the IR.
+g_ent_loaded : int, mut
 g_ir_func_entry_start : string, mut
 g_ir_func_entry_count : string, mut
 g_ir_func_entry_cap : int, mut

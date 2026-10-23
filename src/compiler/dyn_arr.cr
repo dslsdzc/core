@@ -128,7 +128,17 @@ OFF_ENTRY_LE    : int = 12   // 版本存在区间终点（全局指令序）
 // Runtime/instance-only allocator slot (-1 = unassigned). This is never
 // serialized into `.ccr`; v10 ENT has no home field.
 OFF_ENTRY_RUNTIME_HOME : int = 16
-OFF_ENTRY_FLAGS : int = 20   // 位 0 预留：无配方（条款 4b）
+OFF_ENTRY_FLAGS : int = 20   // 见 ENTRY_FLAG_*（v10 spec §5）
+// v10 ENT flags. Bits 4+ are reserved and rejected by the loader.
+//   bit 0 no generating method
+//   bit 1 parameter
+//   bit 2 global
+//   bit 3 removal candidate
+ENTRY_FLAG_NO_DEF : int = 1
+ENTRY_FLAG_PARAM : int = 2
+ENTRY_FLAG_GLOBAL : int = 4
+ENTRY_FLAG_REMOVABLE : int = 8
+ENTRY_FLAG_KNOWN_MASK : int = 15
 
 // Subgraph entry (48 bytes each)
 ESZ_SG   : int = 48
@@ -593,10 +603,19 @@ fn sym_set_node(n: int, v: int):
 
 // IRVar helpers
 fn irv_name(n: int) -> int:
+    if n < 0 || n >= g_ir_var_count:
+        return -1
     return cell_load(g_ir_vars, n * ESZ_IRVAR + OFF_IRV_NAME)
 fn irv_id(n: int) -> int:
+    if n < 0 || n >= g_ir_var_count:
+        return -1
     return cell_load(g_ir_vars, n * ESZ_IRVAR + OFF_IRV_ID)
 fn irv_type(n: int) -> int:
+    // Defensive bound: the loader rejects out-of-domain operands, but a few
+    // diagnostic/projection paths still call this with arbitrary ints. Returning
+    // -1 keeps them from reading outside the var table.
+    if n < 0 || n >= g_ir_var_count:
+        return -1
     return cell_load(g_ir_vars, n * ESZ_IRVAR + OFF_IRV_TYPE)
 fn irv_set_name(n: int, v: int):
     cell_store(g_ir_vars, n * ESZ_IRVAR + OFF_IRV_NAME, v)
