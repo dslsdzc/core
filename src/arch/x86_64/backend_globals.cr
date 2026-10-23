@@ -1,6 +1,10 @@
 // === backend_globals.cr ===
 // x86-64 backend state. Loaded only by corearch.
 
+// Interned names for the syscall builtins resolved by the backend.
+g_ni_syscall3 : int, mut
+g_ni_syscall4 : int, mut
+
 // Backend arrays (all dynamic byte buffers)
 g_x86_str_offs : string, mut
 g_x86_str_count : int, mut

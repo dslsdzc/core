@@ -326,6 +326,7 @@ def main():
         'src/compiler/parser.cr',
         'src/compiler/checker.cr',
         'src/compiler/mapping.cr',
+        'src/compiler/prelude.cr',
         # R2 P0 类型项引擎（建层）：类型项 DAG 表 + 构造去重 → 判定引擎（桩）→ 自测通道。
         # 置于 checker 之后（计划 Step 9 指定位置）；引擎尚无 checker 侧消费者，
         # 本批为纯增量（checker/ir_gen/后端零改动 = 产物零变化）。
@@ -428,6 +429,7 @@ def main():
         'src/compiler/lexer.cr',
         'src/compiler/parser.cr',
         'src/compiler/checker.cr',
+        'src/compiler/prelude.cr',
         # R2 P1：checker 的判定入口引用桥接层（sh_term_of_ti；影子挂点已随 P5 T5 下线）→
         # corelsp 也必须链接 引擎 + 桥接层（相对顺序与 corec 一致；corearch 无 checker 仍不含）。
         'src/compiler/type_terms.cr',

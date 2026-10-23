@@ -3,6 +3,7 @@
 import lexer
 import parser
 import checker
+import prelude
 import diag
 import module
 import globals

@@ -2610,16 +2610,11 @@ fn s1p_src_frag(line: int) -> string:
     return str_sub(g_source, start, end - start)
 
 // ─── S1P 台账三件：检查、单实参判定、枚举环，与 s1p_arg_ring 同一契约 ───
-// 检查（懒初始化 + `CORE_S1P`）：所有类型引擎调用都必须在检查后（默认位一步不执行 = 零足迹）。
+// 检查：进程启动时由 prelude_init 读取 `CORE_S1P`。所有类型引擎调用都必须在
+// 检查后（默认位一步不执行 = 零足迹）。
 fn s1p_gate() -> int:
     if g_s1p_seen == 0:
-        //  哨兵必须用零值（详情见 `s1p_arg_ring` 内注 + 未完成项）
-        g_s1p_seen = 1
-        ev2 := get_env("CORE_S1P")
-        if str_len(ev2) > 0 && ev2 == "1":
-            g_s1p_on = 1
-        else:
-            g_s1p_on = 0
+        prelude_init()
     return g_s1p_on
 
 // 单实参：跳过规则（2`None`->`T?` / 3字面量多态 / 形参型不可得 / 未推断出形），因此否则 `unify_types`
@@ -2767,16 +2762,7 @@ fn s1p_arg_ring(fi: int, first_arg: int, arg_count: int, param_skip: int, is_ext
         if pi2 >= pc:
             break
         if g_s1p_seen == 0:
-            // 懒初始化：`CORE_S1P=1` 才开（`os.cr` 的 `get_env` 在 corec/corelsp 两单元皆在）
-            // 哨兵必须用零值。globals.cr 里的 g_s1p_on : int, mut = -1 在 Python bootstrap
-            // 构建 corec 时，初值会丢失成 0（.quad 0），导致未初始化 = -1判据恒假，
-            // 懒初始化永不执行，开关恒关。该行为只影响 bootstrap 构建的 corec，self-hosted 正常。
-            g_s1p_seen = 1
-            ev2 := get_env("CORE_S1P")
-            if str_len(ev2) > 0 && ev2 == "1":
-                g_s1p_on = 1
-            else:
-                g_s1p_on = 0
+            prelude_init()
         //  整块纳入检查：仅把 print 纳入检查不够，本块里的类型引擎调用
         //  （`infer_expr`/`res_call_type`/`unify_types`）会向 TYPE(7) 段的项表里留项（memo）
         // 因此输出 `.ccr` 的段 7 变长（例如检查只覆盖 print 时 `opt_dex_test.cr` 的 `.ccr`
@@ -3153,13 +3139,10 @@ fn infer_expr(node: int) -> int:
         if ast_kind(func_node) == EXPR_AT:
             ast_set_b(func_node, first_arg)
             return infer_expr(func_node)
-        // Check builtins (syscall3/syscall4 — OS communication, no .cr body)
-        if func_ni >= 0:
-            s := istr_get(func_ni)
-            if s == "syscall3":
-                return TI_INT
-            if s == "syscall4":
-                return TI_INT
+        // Check prelude builtins (syscall3/syscall4 — OS communication, no .cr body)
+        prelude_ti := prelude_builtin_return_ti(func_ni)
+        if prelude_ti >= 0:
+            return prelude_ti
         // Check for SYM_SO_FN (.so extension registered)
         so_fn_fi : ., mut = -1
         if func_ni >= 0:
