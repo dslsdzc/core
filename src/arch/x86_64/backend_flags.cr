@@ -9,6 +9,7 @@ fn register_backend_flags():
     cli_flag("output", "o", "Output path")
     cli_flag("opt-level", "O", "Optimization level (0-3, default=0)")
     cli_flag_bool("big-int", "", "Arbitrary precision int semantics for user programs")
+    cli_flag_bool("raw-int", "", "Force raw machine-int semantics (compiler/self-host builds)")
     cli_flag("table", "", "HIT table file (load & emit mapped ops through it)")
     cli_flag_debug("hit-events-file", "", "Debug: inject text event stream file")
     cli_flag_bool("dump-events", "", "Dump lowered HIT event stream + const pool")
@@ -25,3 +26,13 @@ fn register_backend_flags():
     cli_flag_bool_debug("dump-nod-items", "", "Debug: dump NOD type terms")
     cli_flag_bool_debug("dump-types", "", "Debug: dump TYPE segment")
     cli_flag_bool_debug("dump-ifaces", "", "Debug: dump IFACE segment")
+
+// Select the int representation after the .ccr header has been read. Compiler
+// and self-host artifacts carry CCR_FLAG_RAW_INT; ordinary user programs get
+// tagged mathematical ints by default. --raw-int is an explicit build-chain
+// escape hatch.
+fn backend_select_int_mode():
+    if cli_has("raw-int") != 0 || g_ccr_raw_int != 0:
+        g_x86_big_enabled = 0
+    else:
+        g_x86_big_enabled = 1

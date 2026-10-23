@@ -85,6 +85,10 @@ fn emit_start(buf: string, pos: int) -> int:
         iv := r64(g_ir_globals, gi0 * 24 + 16)
         gvv0 := r64(g_ir_globals, gi0 * 24 + 8)
         if iv != 0 && gvv0 >= 0:
+            ivv : ., mut = iv
+            if g_x86_big_enabled != 0 && irv_type(gvv0) == TI_INT:
+                if ivv >= -4611686018427387904 && ivv <= 4611686018427387903:
+                    ivv = ivv * 2
             // lea r10, [rip+0], rip_patch for the global's BSS slot
             rip_pos_g := cp + 3
             cp = cp + e2_lr(buf, cp, 0)
@@ -92,18 +96,18 @@ fn emit_start(buf: string, pos: int) -> int:
             w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos_g)
             w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gvv0)
             g_x86_rip_patch_count = g_x86_rip_patch_count + 1
-            if iv >= -2147483647 - 1 && iv <= 2147483647:
+            if ivv >= -2147483647 - 1 && ivv <= 2147483647:
                 // mov qword [r10], imm32 (sign-extended), 49 C7 02 imm32
                 w8(buf, cp, 73)
                 w8(buf, cp+1, 199)
                 w8(buf, cp+2, 2)
-                e2_w32(buf, cp+3, iv)
+                e2_w32(buf, cp+3, ivv)
                 cp = cp + 7
             else:
                 // mov rax, imm64; mov [r10], rax
                 w8(buf, cp, 72)
                 w8(buf, cp+1, 184)
-                e2_w64(buf, cp+2, iv)
+                e2_w64(buf, cp+2, ivv)
                 cp = cp + 10
                 w8(buf, cp, 73)
                 w8(buf, cp+1, 137)

@@ -401,4 +401,10 @@ cmp /tmp/corec2 /tmp/corec3
 
 ## 任务 9 当前裁决
 
-`--big-int` 已完成任务 5-8 的用户程序语义，但默认切换仍阻塞：把 `corearch` 默认改成 tagged 会同时把编译器自身的索引/计数装箱，自举前端在解析阶段崩溃。编译器和自举链必须继续走 raw；默认切换需要显式的构建链模式分离（用户程序 tagged、编译器 project 构建 raw），并重新采集 canary。该决定落定前不要删除 raw 路径。
+已落地默认切换，但保留 raw 回退用于编译器自举：
+
+- 用户程序的 `.ccr` header reserved 字段为 0，`corearch` 默认按 tagged BigInt 发射。
+- 编译器/自举链的 `.ccr` header 写 `CCR_FLAG_RAW_INT`；`corearch` 自动按 raw 发射，也支持显式 `--raw-int`。
+- `.ccr` 版本为 v9.1 `(9 << 16) | 1`；`.cir` 缓存版本为 23。
+- 2-limb `tag2l` 仍作为 raw 编译器/回退路径保留，尚未删除；默认用户程序不经过它。
+- canary 已按 v9.1、默认 tagged ELF 和全局整数初始化重新锁定。

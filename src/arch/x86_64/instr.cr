@@ -964,6 +964,11 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         // 第二遍：栈参数（右到左压，第 7 个 int / 第 9 个 binary64 超限才压）
         stack_total := cs_stack_count(fa, ac)
         cp = cs_stack_args(buf, pos, cp, fa, ac)
+        // The allocator is emitted as a raw runtime body. Its one int argument
+        // is tagged in user programs; convert at this call boundary.
+        if g_x86_big_enabled != 0 && s3 >= 0 && str_eq(istr_get(s3), "alloc") != 0:
+            cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_to_word_checked"))
+            cp = cp + e2_mov(buf, pos+cp, 7, 0)
         // Match builtins by interned string index (integer compare, no str_eq)
         if s3 == g_ni_syscall3:
             if g_x86_big_enabled != 0:

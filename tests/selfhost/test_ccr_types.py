@@ -79,7 +79,7 @@ COREC = os.path.join(BASE, 'build/corec')
 COREARCH = os.path.join(BASE, 'build/corearch')
 
 MAGIC = 0x31524343  # "CCR1"
-VER = 9             # v9 = v7 段表架构的加法扩展（D10）——R2 P6 Task 3：NOD 记录 36→40B（+28 项索引）
+VER = 589825             # v9.1 = (9 << 16) | 1
 SEG_TAGS = [1, 2, 3, 4, 5, 6, 7, 8]  # STR SYM NOD ENT REG EDG TYPE IFACE
 HEADER_TABLE = 16 + 8 * 12  # 112
 TYPE_TAG = 7

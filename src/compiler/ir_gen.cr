@@ -2173,14 +2173,14 @@ fn gen_expr(node: int) -> int:
             if str_eq(name, "str_of") != 0 || str_eq(name, "ptr_of") != 0:
                 inner := gen_expr(ast_a(first_arg))
                 inner = force_if_thunk(inner)
-                // Keep the view as a zero-byte alias in raw mode.  In --big-int
-                // the backend converts this same slot between a raw address and
-                // a tagged mathematical int.
                 if str_eq(name, "ptr_of") != 0:
-                    emit(IR_PTR_OF, inner, inner, 0, 0, TI_INT)
+                    rv := new_ir_var("_ptr_of", TI_INT)
+                    emit(IR_PTR_OF, rv, inner, 0, 0, TI_INT)
+                    return rv
                 else:
-                    emit(IR_STR_OF, inner, inner, 0, 0, TI_STR)
-                return inner
+                    rv := new_ir_var("_str_of", TI_STR)
+                    emit(IR_STR_OF, rv, inner, 0, 0, TI_STR)
+                    return rv
 
             return -1
 
@@ -3542,12 +3542,22 @@ fn global_needs_runtime_init(name_idx: int) -> int:
             if vn < 0:
                 return 0
             vk := ast_kind(vn)
-            if vk == EXPR_INT || vk == EXPR_BOOL || vk == EXPR_DEX:
+            if vk == EXPR_INT:
+                iv0 := ast_int_val(vn)
+                if iv0 < -4611686018427387904 || iv0 > 4611686018427387903:
+                    return 1
+                return 0
+            if vk == EXPR_BOOL || vk == EXPR_DEX:
                 return 0
             if vk == EXPR_UNARY && ast_c(vn) == UOP_NEG:
                 inner := ast_a(vn)
                 ik := ast_kind(inner)
-                if ik == EXPR_INT || ik == EXPR_BOOL || ik == EXPR_DEX:
+                if ik == EXPR_INT:
+                    iv0 := 0 - ast_int_val(inner)
+                    if iv0 < -4611686018427387904 || iv0 > 4611686018427387903:
+                        return 1
+                    return 0
+                if ik == EXPR_BOOL || ik == EXPR_DEX:
                     return 0
             return 1
         i = i - 1
@@ -3660,6 +3670,7 @@ fn reg_one_global(name_idx: int):
         g_ir_global_count = g_ir_global_count + 1
 
 fn ir_gen_globals():
+    ccr_set_raw_mode_from_source()
     // The parser records only file-scope declarations in g_global_lets.
     // Do not scan every EXPR_LET here: that also includes function locals.
     i : ., mut = 0
@@ -4053,7 +4064,58 @@ fn find_or_create_mono_func(fi: int, call_node: int) -> int:
 
 // --- Main entry ---
 
+fn ccr_source_has_marker(marker: string) -> int:
+    sl := str_len(g_source)
+    ml := str_len(marker)
+    if ml <= 0 || sl < ml:
+        return 0
+    i : ., mut = 0
+    loop:
+        if i + ml > sl:
+            break
+        j : ., mut = 0
+        loop:
+            if j >= ml:
+                break
+            if load8(g_source, i + j) != load8(marker, j):
+                break
+            j = j + 1
+        if j >= ml:
+            return 1
+        i = i + 1
+    return 0
+
+fn ccr_source_dir_is_compiler() -> int:
+    d := g_source_dir
+    n := str_len(d)
+    if str_eq(d, "src/compiler") != 0:
+        return 1
+    if n >= 12 && str_eq(str_sub(d, n - 12, 12), "src/compiler") != 0:
+        return 1
+    if n >= 13 && load8(d, n - 1) == 47:
+        if str_eq(str_sub(d, n - 13, 12), "src/compiler") != 0:
+            return 1
+    return 0
+
+fn ccr_set_raw_mode_from_source():
+    // Compiler and backend sources keep raw machine integers. User programs use
+    // the tagged BigInt semantics by default. The .ccr header carries this flag
+    // to corearch so both sides agree before code generation.
+    g_ccr_emit_raw_int = 0
+    if ccr_source_has_marker("fn parse_expr") != 0:
+        g_ccr_emit_raw_int = 1
+    if ccr_source_has_marker("fn corearch_main") != 0:
+        g_ccr_emit_raw_int = 1
+    if ccr_source_has_marker("import cli") != 0:
+        // The CLI word-table layer intentionally stores raw string pointers via
+        // w64/r64 and views them back through @str_of. Legacy raw semantics are
+        // required for that table; user CLI programs are not arithmetic kernels.
+        g_ccr_emit_raw_int = 1
+    if ccr_source_dir_is_compiler() != 0:
+        g_ccr_emit_raw_int = 1
+
 fn ir_gen_all():
+    ccr_set_raw_mode_from_source()
     g_ir_var_count = 0
     g_ir_instr_count = 0
     g_ir_func_count = 0

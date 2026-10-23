@@ -177,11 +177,11 @@
 # **后来人注意**：**任何新增编译器侧全局**都会移动这张表（登记 ⇒ 启动期 intern ⇒ id 顺移）。
 #   这是**固有代价**，不是回归——但按本文件两级纪律，**必须显式声明 + 同批重锁 + 旧值留痕**。
 
-canary_elf	pa	f113727526bafbde95f40d3c4e3cee7dd1dd0a9486ddd5fe27e961e330bf4dde	28854
-pa_ccr	pa.ccr	d6ebe3d175dea7322b39e3ca51366d854b6cb2e4b6efb47a05b0ed4fc21c1b10	96985
-pa_static_ccr	pa_st.bin.ccr	041b6e3e83d915690324c5e453b49652207e9f919080e53d2ddec1060d595f62	97128
-gt_ccr	gt.ccr	edfd8e98d7b64fdb3a99e62bffc99954879432a48390bedbe98171348a49dd22	143687
-gt_static_ccr	gt_st.bin.ccr	bbfe47897c8fb97f9cc38ffbfe6043577604ef86595760db55cd7ac0781b0c97	143830
+canary_elf	pa	dfae9d845362856fe3609ecd23fcb2deaaa7eae1d2ca39b7a242695513e9bb09	53430
+pa_ccr	pa.ccr	e581daf5a8e30f91745d3c0b6fb6ae6421422248507ec401a67228ae7c6c2355	96985
+pa_static_ccr	pa_st.bin.ccr	a7d2433b0c78428ed93e434ccd617f1308362d7bb268764712d2972e243485a1	97128
+gt_ccr	gt.ccr	21b1f39c96bd2242b963bb5a1726eb93b912739f77c31317da055d6b37d88103	143687
+gt_static_ccr	gt_st.bin.ccr	4949ff5437e1bc78a5e2f95e4fb05c07e20da0ed4bee35c58662f19bbdc60271	143830
 # ⚠ **本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下
@@ -261,3 +261,13 @@ gt_static_ccr	gt_st.bin.ccr	bbfe47897c8fb97f9cc38ffbfe6043577604ef86595760db55cd
 # 对**同一采集目录**跑 `--verify-only` ⇒ **F3 必红**（sha + size 双向不符）。
 # ⇒ 「值表与本表不一致时闸门必红」成立（本闸门非恒绿；此即 J-T7-1 反向对照在本「零变化」
 #    结论下的等价形态——**没有重锁就没有「改回旧值」**，故以「植入旧值即红」代之）。
+
+# ── 【本批重锁 2026-10-23】BigInt v9.1 / 默认 tagged 用户程序 ──
+#   canary_elf: 28854B → 53430B。归因 = 用户程序默认嵌入 raw BigInt 运行时 blob，
+#     且 pa 的 int 运算走 tagged 快路径；程序行为仍 rc=0。
+#   四条 .ccr: size 不变，sha 变。归因 = version 9 → v9.1 (0x00090001)，且编译器
+#     raw 标志占用 reserved 字段；段体布局未变。旧值留痕（作废）：
+#       pa_ccr        d6ebe3d175dea7322b39e3ca51366d854b6cb2e4b6efb47a05b0ed4fc21c1b10
+#       pa_static_ccr 041b6e3e83d915690324c5e453b49652207e9f919080e53d2ddec1060d595f62
+#       gt_ccr        edfd8e98d7b64fdb3a99e62bffc99954879432a48390bedbe98171348a49dd22
+#       gt_static_ccr bbfe47897c8fb97f9cc38ffbfe6043577604ef86595760db55cd7ac0781b0c97

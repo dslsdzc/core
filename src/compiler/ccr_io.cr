@@ -109,11 +109,17 @@
 // No bitwise ops in Core; use arithmetic instead.
 
 CCR_MAGIC : int = 827474755  // "CCR1" (0x31524343)
-CCR_VERSION : int = 9        // v9 only. The loader rejects any other version;
-                             // there is no conversion path.
+// v9.1 = (9 << 16) | 1 = 0x00090001. The loader accepts only this value.
+CCR_VERSION : int = 589825
+CCR_FLAG_RAW_INT : int = 1   // header reserved field: compiler/self-host program
 CCR_SEG_COUNT : int = 8      // STR SYM NOD ENT REG EDG TYPE IFACE
 CCR_SEG_TYPE : int = 7       // TYPE 段 tag
 CCR_SEG_IFACE : int = 8      // IFACE 段 tag
+
+// Set by save_ccr from corec (compiler-source detection) and by load_ccr in the
+// backend. It selects the raw-int compiler path instead of user-program tagging.
+g_ccr_emit_raw_int : int, mut
+g_ccr_raw_int : int, mut
 
 // NOD record: 40 bytes.
 // {op i32, dest i32, s1 i64, src2 i32, src3 i32, tk i32, item i32,
@@ -541,8 +547,11 @@ fn save_ccr(path: string) -> int:
     pos = pos + 4
     buf_write_u32(buf, pos, CCR_SEG_COUNT)
     pos = pos + 4
-    buf_write_u32(buf, pos, 0)
-    pos = pos + 4  // reserved
+    rsv : ., mut = 0
+    if g_ccr_emit_raw_int != 0:
+        rsv = CCR_FLAG_RAW_INT
+    buf_write_u32(buf, pos, rsv)
+    pos = pos + 4  // reserved / raw-compiler flag
 
     // 段体大小（与 calc_ccr_size 同一来源逐段一致）
     s1 := ccr_str_seg_size()
@@ -1073,6 +1082,11 @@ fn load_ccr(data: string, fsize: int) -> int:
     pos = pos + 4
     rsv := buf_read_u32(data, pos)
     pos = pos + 4
+    if rsv != 0 && rsv != CCR_FLAG_RAW_INT:
+        return -1
+    g_ccr_raw_int = 0
+    if rsv == CCR_FLAG_RAW_INT:
+        g_ccr_raw_int = 1
     if seg_cnt > (fsize - 16) / 12:
         return -1
 

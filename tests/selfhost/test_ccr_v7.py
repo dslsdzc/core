@@ -84,7 +84,7 @@ COREC = os.path.join(BASE, 'build/corec')
 COREARCH = os.path.join(BASE, 'build/corearch')
 
 MAGIC = 0x31524343  # "CCR1"
-V7 = 9  # R2 P6 Task 3：v9（v7 段表架构的加法扩展，D10）——常量名/文件名从旧
+V7 = 589825  # R2 P6 Task 3：v9；BigInt 批：v9.1 = (9 << 16) | 1
         # （「v7」= 段表架构代号；改名的引用面 40+ 处、收益为零）
 SEG_TAGS = [1, 2, 3, 4, 5, 6, 7, 8]  # STR SYM NOD ENT REG EDG TYPE IFACE
 NOD_REC = 40

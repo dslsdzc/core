@@ -188,11 +188,23 @@ def emit_core(blob: bytes, funcs: dict[str, int], alloc_calls: list[int],
     lines.append(f"BIGINT_BLOB_DATA_OFF : int = {data_base}")
     lines.append(f"BIGINT_BLOB_DATA_LEN : int = {data_len}")
     lines.append("")
-    # Keep the literal on one line.  The Core lexer handles long string literals;
-    # it must be returned from a function, not stored in a global: the Python
-    # bootstrap emits global string initializers as raw quad words.
+    # Split the hex into short string literals and build the full text with
+    # runtime concatenation.  A single 34KB literal makes the self-hosted lexer
+    # append one character at a time and exhaust the compiler heap (O(n^2)).
     lines.append("fn bigint_blob_hex() -> string:")
-    lines.append("    return \"" + hex_literal(blob) + "\"")
+    hx = hex_literal(blob)
+    chunk = 256
+    first = True
+    for i in range(0, len(hx), chunk):
+        part = hx[i:i + chunk]
+        if first:
+            lines.append(f"    h : ., mut = \"{part}\"")
+            first = False
+        else:
+            lines.append(f"    h = h + \"{part}\"")
+    if first:
+        lines.append("    h : ., mut = \"\"")
+    lines.append("    return h")
     lines.append("")
     lines.append("fn bigint_blob_byte_from_hex(c: int) -> int:")
     lines.append("    if c >= 48 && c <= 57:")
