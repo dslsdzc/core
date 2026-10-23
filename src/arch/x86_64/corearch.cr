@@ -220,6 +220,43 @@ fn regalloc_debug_dispatch() -> int:
 // ent_kernel.cr. Each node prints its semantic fields, adjacency, and outgoing
 // edges. Edge traversal uses nod_inputs. The line format is parsed by
 // tests/selfhost/test_ccr_v7.py:parse_object_dump.
+// --dump-alloc-strides: expose the element-type-driven IR_ALLOC_ARRAY stride.
+// Read-only test channel. It runs after the TYPE segment is rebuilt, before
+// linear reconstruction, and returns without emitting.
+fn dump_alloc_strides():
+    print("alloc-strides: ")
+    print_i(g_v7_nod_count)
+    println("")
+    ni : ., mut = 0
+    loop:
+        if ni >= g_v7_nod_count:
+            break
+        if nod_op(ni) == IR_ALLOC_ARRAY:
+            dv := nod_dest(ni)
+            ti : ., mut = -1
+            if dv >= 0:
+                ti = irv_type(dv)
+            kind : ., mut = -1
+            elem : ., mut = -1
+            if ti >= 0 && ti < g_type_count:
+                kind = get_type_kind(ti)
+                if kind == TYP_ARRAY:
+                    elem = get_type_data(ti)
+            print("alloc ")
+            print_i(ni)
+            print(" dest ")
+            print_i(dv)
+            print(" ti ")
+            print_i(ti)
+            print(" kind ")
+            print_i(kind)
+            print(" elem ")
+            print_i(elem)
+            print(" stride ")
+            print_i(corearch_nod_alloc_stride(dv))
+            println("")
+        ni = ni + 1
+
 fn dump_object_surface():
     print("objects: ")
     print_i(g_v7_nod_count)
@@ -392,6 +429,12 @@ fn corearch_main() -> int:
     // trigger emission.
     if cli_has("dump-nod-types") != 0:
         dump_nod_types()
+        return 0
+
+    // Hidden channel: element type and reconstructed stride for each
+    // IR_ALLOC_ARRAY node. It returns before linear reconstruction.
+    if cli_has("dump-alloc-strides") != 0:
+        dump_alloc_strides()
         return 0
 
     // The loader produces semantic objects only. The instance rebuilds the linear

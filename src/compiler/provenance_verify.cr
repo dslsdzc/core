@@ -47,12 +47,17 @@ fn get_alloc_extent(alloc_seq: int) -> int:
 // contiguous element sequences, structs cover their fields, a slice view is a
 // (data, len) pair, and every scalar occupies one cell. This is the IR value
 // model, not a target byte size.
+// -1 = the type row is unavailable (negative or outside the loaded TYPE table,
+// e.g. a warm cache that does not carry it). Unknown must stay unknown so the
+// caller keeps the runtime bounds check instead of assuming one cell.
 fn pv_value_span(ti: int) -> int:
     if ti < 0 || ti >= g_type_count:
-        return 1
+        return -1
     k := get_type_kind(ti)
     if k == TYP_ARRAY:
         elem := pv_value_span(get_type_data(ti))
+        if elem < 0:
+            return -1
         cnt := get_type_extra(ti)
         if cnt <= 0:
             return 1
@@ -81,10 +86,13 @@ fn pv_value_span(ti: int) -> int:
 
 // Cell span of the value a dereference reads or writes, derived from the
 // pointer's pointee type. The frontend no longer stores an access width code.
+// -1 = unknown: the pointer variable has no usable type row (negative or
+// outside the loaded TYPE table) or its pointee row is unavailable. Callers
+// then fall back to the runtime bounds check (fail closed, never widen).
 fn pv_access_span(ptr_var: int) -> int:
     ti := irv_type(ptr_var)
-    if ti < 0:
-        return 1
+    if ti < 0 || ti >= g_type_count:
+        return -1
     k := get_type_kind(ti)
     if k == TYP_PTR || k == TYP_REF:
         return pv_value_span(get_type_data(ti))
@@ -124,7 +132,8 @@ fn provenance_verify_func(nstart: int, ncount: int):
                 ni = ni + 1
                 continue
 
-            // Access span in IR cells, from the pointee semantic type.
+            // Access span in IR cells, from the pointee semantic type. -1 means
+            // the type row is unavailable: keep the runtime bounds check.
             span := pv_access_span(s1)
 
             ptr_ti := irv_type(s1)
@@ -155,7 +164,7 @@ fn provenance_verify_func(nstart: int, ncount: int):
                     break
                 if (pts / mask) % 2 != 0:
                     alloc_extent := get_alloc_extent(bi)
-                    if alloc_extent >= 0 && off >= 0:
+                    if alloc_extent >= 0 && off >= 0 && span > 0:
                         if span > alloc_extent || off > alloc_extent - span:
                             check_error(EC_TK_INDEX,
                                 "pointer out of bounds: index " + int_str(off) +
@@ -164,7 +173,7 @@ fn provenance_verify_func(nstart: int, ncount: int):
                                 " (IR cells)",
                                 0, 0)
                     else if alloc_extent >= 0:
-                        if span > alloc_extent:
+                        if span > 0 && span > alloc_extent:
                             check_error(EC_TK_INDEX,
                                 "pointer access span " + int_str(span) +
                                 " exceeds allocation extent " + int_str(alloc_extent) +

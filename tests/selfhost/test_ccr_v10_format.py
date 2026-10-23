@@ -385,45 +385,165 @@ def test_frontend_has_no_layout_calls():
             assert name not in src, f"{path} still calls {name}"
 
 
-def test_layout_introspection_is_a_target_query():
-    """@sizeOf/@alignOf/@field ask the target descriptor; the compiler does not
-    evaluate layout itself. Their results are program constants, so the same
-    source keeps byte-identical v10 output."""
-    ir_gen = (REPO_ROOT / "src/compiler/ir_gen.cr").read_text(encoding="utf-8")
-    for name in (
-        "target_introspect_size(",
-        "target_introspect_align(",
-        "target_introspect_field_offset(",
-    ):
-        assert name in ir_gen, f"ir_gen must ask the target descriptor for {name}"
+def _defines_fn(text, name):
+    return f"fn {name}(" in text
 
+
+def test_layout_introspection_is_target_owned():
+    """@sizeOf/@alignOf/@field are answered by the target descriptor; the
+    compiler must not define its own layout evaluator. Their results are
+    program constants, so the same source keeps byte-identical v10 output."""
+    introspect = (
+        "target_introspect_size",
+        "target_introspect_align",
+        "target_introspect_field_offset",
+    )
     desc = (REPO_ROOT / "src/targets/x86_64/linux/elf/frontend_target.cr").read_text(
         encoding="utf-8"
     )
-    for name in (
-        "fn target_introspect_size(",
-        "fn target_introspect_align(",
-        "fn target_introspect_field_offset(",
+    for name in introspect:
+        assert _defines_fn(desc, name), f"target descriptor missing fn {name}"
+
+    ir_gen = (REPO_ROOT / "src/compiler/ir_gen.cr").read_text(encoding="utf-8")
+    for name in introspect:
+        assert not _defines_fn(ir_gen, name), f"ir_gen must not define fn {name}"
+
+
+def _fn_body(text, name):
+    """Return the source of a top-level function up to the next top-level line."""
+    marker = f"fn {name}("
+    start = text.index(marker)
+    lines = text[start:].splitlines()
+    body = [lines[0]]
+    for line in lines[1:]:
+        if line and not line[0].isspace():
+            break
+        body.append(line)
+    return "\n".join(body)
+
+
+INTERP_LAYOUT_BRANCHES = {
+    "// IR_ALLOC_ARRAY": "interp_ptr_stride()",
+    "// IR_ALLOC_STRUCT": "interp_field_stride()",
+    "// IR_ADDR_INDEX": "interp_ptr_stride()",
+    "// IR_SLICE": "interp_ptr_stride()",
+    "// IR_LOAD_FIELD": "interp_field_stride()",
+    "// IR_STORE_FIELD": "interp_field_stride()",
+    "// IR_LOAD_INDEX:": "interp_ptr_stride()",
+    "// IR_LOAD_INDEX_VAR:": "interp_ptr_stride()",
+    "// IR_STORE_INDEX:": "interp_ptr_stride()",
+    "// IR_STORE_INDEX_VAR:": "interp_ptr_stride()",
+    "// IR_MAKE_ENUM": "interp_field_stride()",
+}
+
+# Slot-cell access is the interpreter's own 8-byte value model
+# (`cell_load(g_ir_vals, var * 8)`), not target layout. Strip those before
+# forbidding hardcoded scales in a layout branch.
+INTERP_SLOT_CELL_MUL = re.compile(
+    r"\b(?:g_ir_vals|g_label_poses|g_interp_stack|g_ir_func_var_start|"
+    r"g_ir_func_var_count|g_ir_func_node_start|g_ir_func_node_count|"
+    r"g_ir_func_name_idx|g_loop_region_enter|g_loop_region_exit)"
+    r"\s*,\s*[^)\n]*\*\s*8"
+)
+
+# A hardcoded scale is a multiply/add by 8 or an assignment of 8, but `== 8`,
+# `>= 8`, `<= 8`, `!= 8` are comparisons, not layout constants.
+INTERP_HARDCODED_SCALE = re.compile(
+    r"(?:(?<![=!<>+\-*/])\*\s*8\b)|(?:(?<![=!<>+\-*/])\+\s*8\b)|(?:(?<![=!<>])=\s*8\b)"
+)
+
+
+def _line_indent(line):
+    return len(line) - len(line.lstrip())
+
+def _op_guard(lines, marker_index):
+    """The `if op...` guard that owns the marker: either directly below the
+    marker comment, or the nearest enclosing guard above it."""
+    base = _line_indent(lines[marker_index])
+    j = marker_index + 1
+    while j < len(lines) and (
+        not lines[j].strip() or lines[j].lstrip().startswith("//")
     ):
-        assert name in desc, f"target descriptor missing {name}"
+        j += 1
+    if (
+        j < len(lines)
+        and _line_indent(lines[j]) == base
+        and lines[j].lstrip().startswith("if ")
+    ):
+        return j
+    k = marker_index - 1
+    while k >= 0:
+        line = lines[k]
+        if line.strip() and _line_indent(line) < base and line.lstrip().startswith("if "):
+            return k
+        k -= 1
+    return None
+
+
+def _branch_blocks(text, marker):
+    """The whole `if op...` branch that contains `marker` (both interpreter paths)."""
+    lines = text.splitlines()
+    blocks = []
+    for i, line in enumerate(lines):
+        if marker not in line:
+            continue
+        g = _op_guard(lines, i)
+        if g is None:
+            continue
+        guard_indent = _line_indent(lines[g])
+        block = [lines[g]]
+        k = g + 1
+        while k < len(lines):
+            cur = lines[k]
+            if cur.strip():
+                ind = _line_indent(cur)
+                stripped = cur.lstrip()
+                if ind < guard_indent:
+                    break
+                if ind == guard_indent and (
+                    stripped.startswith("if ")
+                    or stripped.startswith("// IR_")
+                    or stripped.startswith("fn ")
+                ):
+                    break
+            block.append(cur)
+            k += 1
+        blocks.append("\n".join(block))
+    return blocks
 
 
 def test_interp_has_no_direct_layout_calls():
-    """`corec run` executes IR without a projection pass, so it asks a
-    target-owned hook for the element scale. It must not reach into the
-    compiler mapping interface or inline the x86 scale itself."""
+    """`corec run` executes IR without a projection pass, so every layout branch
+    asks a target-owned hook. The check walks the actual ADDR_INDEX / SLICE /
+    ALLOC_ARRAY / field / index / enum branches, not just names in the file: a
+    reintroduced `* 8` (or `= 8` / `+ 8`) fails even if it is spelled inline."""
     src = (REPO_ROOT / "src/compiler/interp.cr").read_text(encoding="utf-8")
-    for name in ("mp_offset", "mp_stride"):
+    for name in ("mp_offset", "mp_stride", "mp_extent", "mp_field_offset"):
         assert name not in src, f"src/compiler/interp.cr still calls {name}"
 
-    hook_path = REPO_ROOT / "src/arch/x86_64/x86_mapping.cr"
-    hook = hook_path.read_text(encoding="utf-8")
-    assert "fn interp_ptr_offset(" in hook, "missing target-owned interp offset hook"
-    assert "fn interp_ptr_stride(" in hook, "missing target-owned interp stride hook"
-    # The hook is a target-owned delegation, never a hardcoded x86 scale.
-    hook_body = hook.split("fn interp_ptr_offset(", 1)[1]
-    assert "mp_offset(" in hook_body, "interp layout hook must delegate to the target"
-    assert "* 8" not in hook_body, "interp layout hook hardcodes the x86 scale"
+    seen = 0
+    for marker, hook in INTERP_LAYOUT_BRANCHES.items():
+        blocks = _branch_blocks(src, marker)
+        assert blocks, f"interp branch marker not found: {marker}"
+        for block in blocks:
+            seen += 1
+            assert hook in block, f"{marker} must use {hook}"
+            cleaned = INTERP_SLOT_CELL_MUL.sub("", block)
+            found = INTERP_HARDCODED_SCALE.search(cleaned)
+            assert found is None, (
+                f"{marker} still hardcodes the x86 layout ({found.group(0)!r}):\n{block}"
+            )
+    assert seen >= 20, f"expected both interpreter paths, found {seen} branches"
+
+    hooks = (REPO_ROOT / "src/arch/x86_64/x86_mapping.cr").read_text(encoding="utf-8")
+    for fname, delegates in (
+        ("interp_ptr_offset", "mp_offset("),
+        ("interp_ptr_stride", "mp_stride("),
+        ("interp_field_stride", "mp_stride("),
+    ):
+        body = _fn_body(hooks, fname)
+        assert delegates in body, f"{fname} must delegate to the target mapping"
+        assert "* 8" not in body, f"{fname} hardcodes the x86 scale"
 
 
 # ---------------------------------------------------------------------------
@@ -528,6 +648,67 @@ def test_v10_end_to_end():
                 assert base >= 0, "runtime pointer bound has no base reference"
         if op == 31:  # IR_ADDR_INDEX
             assert s3 == 0, "ADDR_INDEX carries a scale in src3"
+
+
+ALLOC_STRIDE_SOURCE = """fn main() -> int:
+    a : [bool; 2]
+    a[0] = true
+    a[1] = false
+    if a[0]:
+        return 7
+    return 1
+"""
+
+
+def test_alloc_stride_is_element_type_driven():
+    """The wire carries no stride. corearch rebuilds it from the destination
+    variable's semantic array element type, not from an int-slot assumption.
+
+    TYP_ARRAY == 2 and TI_BOOL == 2 in ast.cr; they are asserted explicitly so
+    the test fails loudly if either constant drifts.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_v10(tmp, ALLOC_STRIDE_SOURCE, "allocstride")
+        recs = [r for r in _nod_records(data) if r[0] == 8]
+        assert recs, "no IR_ALLOC_ARRAY node in the probe"
+        for rec in recs:
+            assert rec[3] == 0 and rec[4] == 0, "ALLOC_ARRAY carries a stride on the wire"
+
+        ccr = tmp / "allocstride.ccr"
+        ccr.write_bytes(data)
+        r = _run([COREARCH, ccr, "--dump-alloc-strides"])
+        assert r.returncode == 0, r.stdout + r.stderr
+        rows = [ln for ln in r.stdout.splitlines() if ln.startswith("alloc ")]
+        assert rows, f"no alloc-stride rows:\n{r.stdout}"
+        row = rows[0].split()
+        pairs = dict(zip(row[2::2], row[3::2]))
+        assert int(pairs["kind"]) == 2, f"dest type is not TYP_ARRAY: {pairs}"
+        assert int(pairs["elem"]) == 2, f"element row is not TI_BOOL: {pairs}"
+        assert int(pairs["stride"]) == 8, f"unexpected reconstructed stride: {pairs}"
+
+        out = tmp / "allocstride.elf"
+        r = _run([COREARCH, ccr, "--elf", "--static", "-o", out])
+        assert r.returncode == 0, r.stdout + r.stderr
+        run = subprocess.run([str(out)], capture_output=True, text=True, timeout=10)
+        assert run.returncode == 7, (
+            f"bool-array probe returned {run.returncode}, stdout={run.stdout!r}"
+        )
+
+
+def test_provenance_unknown_type_span_fails_closed():
+    """A warm cache may miss the type row a pointer variable refers to. The pass
+    must treat that as unknown (span -1) and keep the runtime bounds check, never
+    silently assume a one-cell access."""
+    src = (REPO_ROOT / "src/compiler/provenance_verify.cr").read_text(encoding="utf-8")
+    for fname in ("pv_value_span", "pv_access_span"):
+        body = _fn_body(src, fname)
+        assert "ti < 0" in body and "ti >= g_type_count" in body, f"{fname} lacks range guard"
+        assert "return -1" in body, f"{fname} does not fail closed"
+
+    verify = _fn_body(src, "provenance_verify_func")
+    assert "span > 0" in verify, "static proof must require a known span"
+    assert "runtime_targets = runtime_targets + 1" in verify, "runtime fallback was removed"
 
 
 def test_corearch_accepts_v10_and_rejects_v9():

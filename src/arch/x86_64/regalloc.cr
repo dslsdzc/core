@@ -917,8 +917,24 @@ fn corearch_nod_access_width(n: int) -> int:
         return mp_stride(TI_INT)
     return w
 
-// Element stride for IR_ALLOC_ARRAY. IR values occupy one target slot.
-fn corearch_nod_alloc_stride() -> int:
+// Element stride for IR_ALLOC_ARRAY, derived from the destination variable's
+// semantic array element type. An uninitialised array declaration
+// (`a : [T; N]`) stores a TYP_ARRAY row in the variable table, so the element
+// row drives the stride. Compiler-internal buffers (the go-collect array, range
+// result arrays) have a scalar/unit row and no element type to read; for those
+// the explicit single-slot fallback applies. An unreadable type row also falls
+// back explicitly instead of assuming every element is an int slot.
+fn corearch_nod_alloc_stride(dest: int) -> int:
+    if dest < 0:
+        return mp_stride(TI_INT)
+    ti := irv_type(dest)
+    if ti < 0 || ti >= g_type_count:
+        return mp_stride(TI_INT)
+    if get_type_kind(ti) == TYP_ARRAY:
+        elem := get_type_data(ti)
+        if elem >= 0 && elem < g_type_count:
+            return mp_stride(elem)
+    // No semantic array element type: one IR value occupies one target slot.
     return mp_stride(TI_INT)
 
 // Byte extent of the allocation a runtime pointer bound refers to. The base
@@ -995,7 +1011,7 @@ fn build_linear_schedule() -> int:
         // for pointer stores/loads is derived from the allocation node; a set
         // flag with no resolvable allocation is a malformed file (fail closed).
         if op == IR_ALLOC_ARRAY:
-            iri_set_s2(ni, corearch_nod_alloc_stride())
+            iri_set_s2(ni, corearch_nod_alloc_stride(nod_dest(ni)))
         else if op == IR_DEREF || op == IR_STORE_PTR:
             iri_set_tk(ni, corearch_nod_access_width(ni))
             bsz := corearch_nod_runtime_bound_size(ni)

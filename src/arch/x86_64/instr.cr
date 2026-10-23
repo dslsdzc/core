@@ -1428,7 +1428,14 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
 
     if op == IR_ALLOC_ARRAY:
         do2 := g2_slot(d)
-        sz := s1 * 8
+        // s2 is the element stride reconstructed by build_linear_schedule from
+        // the destination variable's array element type. A missing value is a
+        // schedule bug: fall back explicitly to one target slot, never an
+        // inlined x86 constant.
+        st := s2
+        if st <= 0:
+            st = mp_stride(TI_INT)
+        sz := s1 * st
         if sz > 0:
             cp = cp + e2_movabs_rdi(buf, pos+cp, sz)
             grow_alloc_patch(g_x86_alloc_patch_count + 1)
@@ -1439,8 +1446,9 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             cp = cp + 5  // call placeholder
             cp = cp + e2_st(buf, pos+cp, 0, do2)
         else if s1 > 0:
-            // s1*8 在 64 位内溢出为负（s1 > 2^61），不报错也不发射；
-            // 按 OOM 处理（alloc(-1) -> null），后续访问由 null 陷阱捕获。
+            // The byte size overflowed to a negative 64-bit value (s1 * stride
+            // > 2^63 - 1). Do not reject: allocate(-1) returns null and later
+            // accesses hit the null trap.
             cp = cp + e2_movabs_rdi(buf, pos+cp, -1)
             grow_alloc_patch(g_x86_alloc_patch_count + 1)
             cell_store(g_x86_alloc_patch_pos, g_x86_alloc_patch_count * 8, pos + cp)

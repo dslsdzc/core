@@ -3,7 +3,10 @@
 //
 // The three axes are explicit. The frontend asks this file for import roots,
 // the backend command, and runtime source locations; it does not embed target
-// directory names or backend flags itself.
+// directory names or backend flags itself. The layout-introspection functions
+// below answer @sizeOf/@alignOf/@field; they are the only place where source
+// code reaches a target layout value, and they never feed an IR width, stride,
+// or byte extent.
 
 fn target_name() -> string:
     return "x86_64/linux/elf"

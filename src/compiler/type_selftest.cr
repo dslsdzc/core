@@ -2230,11 +2230,15 @@ fn type_selftest_run() -> int:
     total = total + 1
     fails = fails + ts_check_b("t4.tk_bounds_flag1_rejected",
         (sh_tk_term_of_code(IR_BOUNDS_CHECK, 1) == -1 && sh_term_of_ti(1) >= 0), true)
-    // 反例 2：IR_DEREF 的 tk 是访问宽度（8 字节），数值 8 同时是
-    // TI_DEX_S 记录。
+    // 反例 2：IR_DEREF / IR_STORE_PTR 的旧辅码是访问宽度（8 字节），数值 8
+    // 同时是 TI_DEX_S 记录。前端 v10 Task 5 起不再发射该宽度；此处保留分类器
+    // 钉子：旧宽度码若被重引入，仍必须落辅码面（term = -1），不得当成类型行。
     total = total + 1
     fails = fails + ts_check_b("t4.tk_deref_width8_rejected",
         (sh_tk_term_of_code(IR_DEREF, 8) == -1 && sh_term_of_ti(TI_DEX_S) >= 0), true)
+    total = total + 1
+    fails = fails + ts_check_b("t4.tk_store_ptr_width8_rejected",
+        (sh_tk_term_of_code(IR_STORE_PTR, 8) == -1 && sh_term_of_ti(TI_DEX_S) >= 0), true)
     // 反例 3：记录合法（0 = TI_INT），但 op 不属于任何类型或辅码类别。
     // 不能因为 tk 恰好合法就放行。
     total = total + 1

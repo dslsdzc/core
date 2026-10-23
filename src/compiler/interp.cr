@@ -453,12 +453,14 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
         // must implement them too, or an aggregate global read inside a callee
         // would return 0 while the main path works.
         if op2 == 8 && d2 >= 0:
-            // IR_ALLOC_ARRAY
+            // IR_ALLOC_ARRAY. The element stride is a target fact; the wire no
+            // longer carries it, so an absent s2 asks the target hook. The
+            // trailing slot reserves the same target-sized header word.
             cnt2 := t1
             esz2 := t2
             if esz2 <= 0:
-                esz2 = 8
-            need3 := cnt2 * esz2 + 8
+                esz2 = interp_ptr_stride()
+            need3 := cnt2 * esz2 + interp_ptr_stride()
             bp2 := alloc(need3)
             vi3 : ., mut = 0
             loop:
@@ -475,7 +477,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
                 cell_store(g_ir_vals, d2 * 8, str_load8(av2, t3))
             else:
                 unsafe:
-                    cell_store(g_ir_vals, d2 * 8, cell_load(@str_of(av2), t3 * 8))
+                    cell_store(g_ir_vals, d2 * 8, cell_load(@str_of(av2), t3 * interp_ptr_stride()))
         if op2 == 14 && t1 >= 0 && t2 >= 0:
             // IR_STORE_INDEX: t1=arr_var, t2=val_var
             av2 := cell_load(g_ir_vals, t1 * 8)
@@ -483,7 +485,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
                 cell_store_byte(istr_get(av2), t3, cell_load(g_ir_vals, t2 * 8))
             else:
                 unsafe:
-                    cell_store(@str_of(av2), t3 * 8, cell_load(g_ir_vals, t2 * 8))
+                    cell_store(@str_of(av2), t3 * interp_ptr_stride(), cell_load(g_ir_vals, t2 * 8))
         if op2 == 15 && d2 >= 0 && t1 >= 0 && t2 >= 0:
             // IR_LOAD_INDEX_VAR: t1=arr_var, t2=idx_var
             av2 := cell_load(g_ir_vals, t1 * 8)
@@ -492,7 +494,7 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
                 cell_store(g_ir_vals, d2 * 8, str_load8(av2, ix2))
             else:
                 unsafe:
-                    cell_store(g_ir_vals, d2 * 8, cell_load(@str_of(av2), ix2 * 8))
+                    cell_store(g_ir_vals, d2 * 8, cell_load(@str_of(av2), ix2 * interp_ptr_stride()))
         if op2 == 16 && d2 >= 0 && t1 >= 0 && t2 >= 0:
             // IR_STORE_INDEX_VAR: d2=val_var, t1=arr_var, t2=idx_var
             av2 := cell_load(g_ir_vals, t1 * 8)
@@ -501,16 +503,17 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
                 cell_store_byte(istr_get(av2), ix2, cell_load(g_ir_vals, d2 * 8))
             else:
                 unsafe:
-                    cell_store(@str_of(av2), ix2 * 8, cell_load(g_ir_vals, d2 * 8))
+                    cell_store(@str_of(av2), ix2 * interp_ptr_stride(), cell_load(g_ir_vals, d2 * 8))
         if op2 == 31 && d2 >= 0 && t1 >= 0 && t2 >= 0:
-            // IR_ADDR_INDEX: &arr[i]
-            cell_store(g_ir_vals, d2 * 8, cell_load(g_ir_vals, t1 * 8) + ir_interp_word(cell_load(g_ir_vals, t2 * 8)) * 8)
+            // IR_ADDR_INDEX: &arr[i]. The element scale is a target fact.
+            cell_store(g_ir_vals, d2 * 8, cell_load(g_ir_vals, t1 * 8) + ir_interp_word(cell_load(g_ir_vals, t2 * 8)) * interp_ptr_stride())
         if op2 == 11 && d2 >= 0 && t1 >= 0:
-            // IR_LOAD_FIELD: t1=struct_var, t3=field_idx
+            // IR_LOAD_FIELD: t1=struct_var, t3=field_idx. Field offsets use the
+            // target field stride, not an inlined x86 constant.
             pf2 := cell_load(g_ir_vals, t1 * 8)
             if pf2 != 0:
                 unsafe:
-                    cell_store(g_ir_vals, d2 * 8, cell_load(@str_of(pf2), t3 * 8))
+                    cell_store(g_ir_vals, d2 * 8, cell_load(@str_of(pf2), t3 * interp_field_stride()))
             else:
                 cell_store(g_ir_vals, d2 * 8, cell_load(g_ir_vals, t1 * 8))
         if op2 == 12 && t1 >= 0 && t2 >= 0:
@@ -518,16 +521,17 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
             pf2 := cell_load(g_ir_vals, t1 * 8)
             if pf2 != 0:
                 unsafe:
-                    cell_store(@str_of(pf2), t3 * 8, cell_load(g_ir_vals, t2 * 8))
+                    cell_store(@str_of(pf2), t3 * interp_field_stride(), cell_load(g_ir_vals, t2 * 8))
             else:
                 cell_store(g_ir_vals, t1 * 8, cell_load(g_ir_vals, t2 * 8))
         if op2 == 7 && d2 >= 0:
-            // IR_ALLOC_STRUCT
+            // IR_ALLOC_STRUCT. Fields are target-stride spaced; the trailing
+            // word is the enum/tag header slot.
             si2 := find_struct(t3)
             fc2 : ., mut = 0
             if si2 >= 0:
                 fc2 = si_field_count(si2)
-            need3 := fc2 * 8 + 8
+            need3 := fc2 * interp_field_stride() + interp_ptr_stride()
             bp2 := alloc(need3)
             vi3 : ., mut = 0
             loop:
@@ -545,12 +549,12 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
             if d2 >= 0 && t1 >= 0:
                 cell_store(g_ir_vals, d2 * 8, cell_load(g_ir_vals, t1 * 8))
         // The following opcode families mirror the main loop.
-        // IR_MAKE_ENUM: allocate 8 + 8*s2 bytes and store s1 (the variant-name
-        // index) in the first word. This matches the ELF layout [tag][payload];
-        // IR_STORE_FIELD writes the payload.
+        // IR_MAKE_ENUM: allocate one tag slot plus s2 payload fields and store s1
+        // (the variant-name index) in the first word. This matches the ELF layout
+        // [tag][payload]; IR_STORE_FIELD writes the payload.
         if op2 == 17:
             if d2 >= 0:
-                need3 := 8 + t2 * 8
+                need3 := interp_ptr_stride() + t2 * interp_field_stride()
                 bp2 := alloc(need3)
                 vi3 : ., mut = 0
                 loop:
@@ -576,10 +580,11 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
         if op2 == 25:
             if d2 >= 0 && t1 >= 0:
                 cell_store(g_ir_vals, d2 * 8, ir_interp_deref_read(cell_load(g_ir_vals, t1 * 8)))
-        // IR_SLICE: d = arr + low*8, matching the ELF encoding.
+        // IR_SLICE: d = arr + low elements, matching the ELF encoding. The
+        // element scale comes from the target hook.
         if op2 == 24:
             if d2 >= 0 && t1 >= 0 && t2 >= 0:
-                cell_store(g_ir_vals, d2 * 8, cell_load(g_ir_vals, t1 * 8) + ir_interp_word(cell_load(g_ir_vals, t2 * 8)) * 8)
+                cell_store(g_ir_vals, d2 * 8, cell_load(g_ir_vals, t1 * 8) + ir_interp_word(cell_load(g_ir_vals, t2 * 8)) * interp_ptr_stride())
         // IR_BOUNDS_CHECK: s1 is the index variable and s2 the limit. A dynamic
         // limit uses ti = 1. An index below 0 or at least the limit aborts with -1.
         if op2 == 30 && t2 >= 0:
@@ -838,13 +843,14 @@ fn ir_interpret() -> int:
                 cell_store(g_ir_vals, d * 8, 0)
         // IR_ALLOC
         if op == 7:
-            // IR_ALLOC_STRUCT
+            // IR_ALLOC_STRUCT. Fields use the target field stride; the trailing
+            // word is the tag/header slot.
             if d >= 0:
                 si := find_struct(s3)
                 fc : ., mut = 0
                 if si >= 0:
                     fc = si_field_count(si)
-                need2 := fc * 8 + 8
+                need2 := fc * interp_field_stride() + interp_ptr_stride()
                 bp := alloc(need2)
                 vi2 : ., mut = 0
                 loop:
@@ -855,13 +861,14 @@ fn ir_interpret() -> int:
                 unsafe:
                     cell_store(g_ir_vals, d * 8, @ptr_of(bp))
         if op == 8:
-            // IR_ALLOC_ARRAY
+            // IR_ALLOC_ARRAY. s2 is zero on the wire; the element scale is
+            // asked from the target hook.
             if d >= 0:
                 cnt := s1
                 esz := s2
                 if esz <= 0:
-                    esz = 8
-                need2 := cnt * esz + 8
+                    esz = interp_ptr_stride()
+                need2 := cnt * esz + interp_ptr_stride()
                 bp := alloc(need2)
                 vi2 : ., mut = 0
                 loop:
@@ -888,7 +895,7 @@ fn ir_interpret() -> int:
                 ptr := cell_load(g_ir_vals, s1 * 8)
                 if ptr != 0:
                     unsafe:
-                        cell_store(g_ir_vals, d * 8, cell_load(@str_of(ptr), s3 * 8))
+                        cell_store(g_ir_vals, d * 8, cell_load(@str_of(ptr), s3 * interp_field_stride()))
                 else:
                     cell_store(g_ir_vals, d * 8, cell_load(g_ir_vals, s1 * 8))
         if op == 12:
@@ -897,7 +904,7 @@ fn ir_interpret() -> int:
                 ptr := cell_load(g_ir_vals, s1 * 8)
                 if ptr != 0:
                     unsafe:
-                        cell_store(@str_of(ptr), s3 * 8, cell_load(g_ir_vals, s2 * 8))
+                        cell_store(@str_of(ptr), s3 * interp_field_stride(), cell_load(g_ir_vals, s2 * 8))
                 else:
                     cell_store(g_ir_vals, s1 * 8, cell_load(g_ir_vals, s2 * 8))
         if op == 13:
@@ -908,7 +915,7 @@ fn ir_interpret() -> int:
                     cell_store(g_ir_vals, d * 8, str_load8(arr_value, s3))
                 else:
                     unsafe:
-                        cell_store(g_ir_vals, d * 8, cell_load(@str_of(arr_value), s3 * 8))
+                        cell_store(g_ir_vals, d * 8, cell_load(@str_of(arr_value), s3 * interp_ptr_stride()))
         if op == 14:
             // IR_STORE_INDEX: s1=arr_var, s2=val_var, s3=literal_idx
             if s1 >= 0 && s2 >= 0:
@@ -917,7 +924,7 @@ fn ir_interpret() -> int:
                     cell_store_byte(istr_get(arr_value), s3, cell_load(g_ir_vals, s2 * 8))
                 else:
                     unsafe:
-                        cell_store(@str_of(arr_value), s3 * 8, cell_load(g_ir_vals, s2 * 8))
+                        cell_store(@str_of(arr_value), s3 * interp_ptr_stride(), cell_load(g_ir_vals, s2 * 8))
         if op == 15:
             // IR_LOAD_INDEX_VAR: s1=arr_var, s2=idx_var
             if d >= 0 && s1 >= 0 && s2 >= 0:
@@ -927,7 +934,7 @@ fn ir_interpret() -> int:
                     cell_store(g_ir_vals, d * 8, str_load8(arr_value, idx))
                 else:
                     unsafe:
-                        cell_store(g_ir_vals, d * 8, cell_load(@str_of(arr_value), idx * 8))
+                        cell_store(g_ir_vals, d * 8, cell_load(@str_of(arr_value), idx * interp_ptr_stride()))
         if op == 16:
             // IR_STORE_INDEX_VAR: d=val_var, s1=arr_var, s2=idx_var
             if d >= 0 && s1 >= 0 && s2 >= 0:
@@ -937,13 +944,13 @@ fn ir_interpret() -> int:
                     cell_store_byte(istr_get(arr_value), idx, cell_load(g_ir_vals, d * 8))
                 else:
                     unsafe:
-                        cell_store(@str_of(arr_value), idx * 8, cell_load(g_ir_vals, d * 8))
-        // IR_MAKE_ENUM: allocate 8 + 8*s2 bytes and store s1 (the variant-name
-        // index) in the first word. This matches the ELF layout [tag][payload];
-        // IR_STORE_FIELD writes the payload.
+                        cell_store(@str_of(arr_value), idx * interp_ptr_stride(), cell_load(g_ir_vals, d * 8))
+        // IR_MAKE_ENUM: allocate one tag slot plus s2 payload fields and store s1
+        // (the variant-name index) in the first word. This matches the ELF layout
+        // [tag][payload]; IR_STORE_FIELD writes the payload.
         if op == 17:
             if d >= 0:
-                need2 := 8 + s2 * 8
+                need2 := interp_ptr_stride() + s2 * interp_field_stride()
                 bp := alloc(need2)
                 vi2 : ., mut = 0
                 loop:
@@ -970,10 +977,11 @@ fn ir_interpret() -> int:
             if d >= 0 && s1 >= 0:
                 cell_store(g_ir_vals, d * 8, ir_interp_deref_read(cell_load(g_ir_vals, s1 * 8)))
 
-        // IR_SLICE: d = arr + low*8, matching the ELF encoding.
+        // IR_SLICE: d = arr + low elements, matching the ELF encoding. The
+        // element scale is a target fact.
         if op == 24:
             if d >= 0 && s1 >= 0 && s2 >= 0:
-                cell_store(g_ir_vals, d * 8, cell_load(g_ir_vals, s1 * 8) + ir_interp_word(cell_load(g_ir_vals, s2 * 8)) * 8)
+                cell_store(g_ir_vals, d * 8, cell_load(g_ir_vals, s1 * 8) + ir_interp_word(cell_load(g_ir_vals, s2 * 8)) * interp_ptr_stride())
 
         // IR_BOUNDS_CHECK: s1 is the index variable and s2 the limit. An index
         // below 0 or at least the limit aborts with -1.
@@ -1035,10 +1043,10 @@ fn ir_interpret() -> int:
             if s1 >= 0 && s2 >= 0:
                 ir_interp_deref_write(cell_load(g_ir_vals, s1 * 8), cell_load(g_ir_vals, s2 * 8))
 
-        // IR_ADDR_INDEX: d = slot s1 + 8 * slot s2 for &arr[i].
+        // IR_ADDR_INDEX: d = slot s1 + stride * slot s2 for &arr[i].
         if op == 31:
             if d >= 0 && s1 >= 0 && s2 >= 0:
-                cell_store(g_ir_vals, d * 8, cell_load(g_ir_vals, s1 * 8) + ir_interp_word(cell_load(g_ir_vals, s2 * 8)) * 8)
+                cell_store(g_ir_vals, d * 8, cell_load(g_ir_vals, s1 * 8) + ir_interp_word(cell_load(g_ir_vals, s2 * 8)) * interp_ptr_stride())
         // IR_ARENA_NEW and IR_ARENA_RESET: the slot model has no scoped arena, so
         // these are approximations.
         if op == 32:

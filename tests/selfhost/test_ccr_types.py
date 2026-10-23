@@ -1570,7 +1570,8 @@ def test_p4t4_tk_slot_rule_per_node():
       · 辅码面 ⇒ term == -1 ∧ aux == 原码——**含数值陷阱**：BOUNDS_CHECK 的旗标 1
         （数值上恰是合法类型行 TI_DEX，只能靠分类表挡住）；
       · IR_DEREF/IR_STORE_PTR 不再携带访问宽度（Task 5：宽度由 corearch 从
-        pointee 语义类型 + target 重建）⇒ 其 tk == 0 ∧ aux == 0；
+        pointee 语义类型 + target 重建）⇒ **每一个** DEREF/STORE_PTR 的 tk == 0
+        ∧ aux == 0（重引入任何宽度码立即转红）；
       · 其余 op ⇒ term == -1 ∧ aux == 原码；
       · **派生码不变量（逐节点）**：term ≥ 0 ⇒ tk == b；aux ≠ 0 ⇒ tk == aux；否则 tk == 0。
     正控逐行类型面：int/bool/str/dex_s 四个类型行的 AK_* 与行号 b 槽。"""
@@ -1587,7 +1588,8 @@ def test_p4t4_tk_slot_rule_per_node():
         assert hdr['aux_nonzero'] > 0, "vacuous: no node carries an aux code"
 
         saw = {'const_rows': set(), 'binary_rows': set()}
-        traps = {'deref_no_width': 0, 'store_no_width': 0, 'bounds_flag1': 0, 'bounds_flag0': 0,
+        traps = {'deref_nodes': 0, 'store_nodes': 0, 'deref_with_width': 0,
+                 'store_with_width': 0, 'bounds_flag1': 0, 'bounds_flag0': 0,
                  'call_row': 0, 'spawn_dyn': 0}
         for (n, op, tk, term, tag, a, b, c, aux) in rows:
             # ── 派生码不变量（D22-①，逐节点）──
@@ -1617,10 +1619,14 @@ def test_p4t4_tk_slot_rule_per_node():
                 assert term == -1, \
                     f"node {n}: non-mint op {op} got term {term}"
                 assert aux == tk, f"node {n}: non-mint op {op} aux {aux} != code {tk}"
-                if op == IR_DEREF and tk == 0:
-                    traps['deref_no_width'] += 1
-                if op == IR_STORE_PTR and tk == 0:
-                    traps['store_no_width'] += 1
+                if op == IR_DEREF:
+                    traps['deref_nodes'] += 1
+                    if tk != 0:
+                        traps['deref_with_width'] += 1
+                if op == IR_STORE_PTR:
+                    traps['store_nodes'] += 1
+                    if tk != 0:
+                        traps['store_with_width'] += 1
                 if op == IR_BOUNDS_CHECK and tk == 1:
                     traps['bounds_flag1'] += 1
                 if op == IR_BOUNDS_CHECK and tk == 0:
@@ -1636,12 +1642,34 @@ def test_p4t4_tk_slot_rule_per_node():
         assert (8, AK_DEX) in saw['const_rows'], \
             f"dex_s row (8) not mapped to AK_DEX: {saw['const_rows']}"
         assert saw['binary_rows'], "no binary node carries a term"
-        # 陷阱非空：BOUNDS_CHECK 旗标 1/0 与「指针 op 无可宽度」必须逐条在夹具里
-        # 出现过（否则用例空转）。IR_CALL 已入类型行面（P5 T2）⇒ 不再计入陷阱。
-        assert traps['deref_no_width'] >= 1 and traps['store_no_width'] >= 1, traps
+        # 陷阱非空（BOUNDS_CHECK 旗标 1/0）+ 指针 op **必须出现且不得携带任何宽度码**：
+        # Task 5 起 IR_DEREF/IR_STORE_PTR 的 tk 恒 0（宽度由 corearch 从 pointee
+        # 语义类型重建）。此处不是「存在一个无宽度样例」而是「每一个都不许有宽度」，
+        # 重新引入宽度码（8/4/1…）立刻转红。IR_CALL 已入类型行面（P5 T2）⇒ 不计陷阱。
+        assert traps['deref_nodes'] >= 1 and traps['store_nodes'] >= 1, traps
+        assert traps['deref_with_width'] == 0, traps
+        assert traps['store_with_width'] == 0, traps
         assert traps['bounds_flag1'] >= 1 and traps['bounds_flag0'] >= 1, traps
     finally:
         _cleanup(src)
+
+
+def test_deref_store_width_code_is_aux_face():
+    """分类器单元检查（Task 5 复核）：旧访问宽度码 8 在 IR_DEREF / IR_STORE_PTR
+    上必须归**辅码面**（term = -1），不得因数值 8 恰是 TI_DEX_S 行而被当成类型。
+
+    前端已不再发射宽度（见 test_p4t4_tk_slot_rule_per_node 的「每个节点 tk == 0」）；
+    本用例钉住分类规则本身，防止未来重引入宽度码时被静默当作类型行。
+    `corec selftest-types` 的 t4 反例即该规则的执行面。
+    """
+    r = subprocess.run([COREC, 'selftest-types'], capture_output=True, text=True,
+                       cwd=BASE, timeout=180)
+    out = r.stdout + r.stderr
+    assert r.returncode == 0, f"selftest-types rc={r.returncode}:\n{out[-2000:]}"
+    for case in ('t4.tk_deref_width8_rejected',
+                 't4.tk_store_ptr_width8_rejected'):
+        assert f"PASS {case}" in out, \
+            f"classifier case {case} missing or failed:\n{out[-2000:]}"
 
 
 def test_p4t4_tk_slot_dex_binary_corpus():

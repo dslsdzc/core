@@ -387,13 +387,15 @@ fn sh_term_of_ti(ti: int) -> int:
 //     IR_LOAD_ENUM_TAG has two call sites that pass literal 0, so it keeps no
 //     type information.
 //   · 辅码（face 1，tk 语义 = 非类型码 -> 原码进辅码槽）：IR_BOUNDS_CHECK（0/1
-//     动态上限旗标，instr.cr:1340 `ti != 0`）/ IR_DEREF / IR_STORE_PTR（访问宽度码
-//     8/4/2/1，instr.cr 的 e2_ptr_bounds_check）/ IR_SPAWN（spawn_count；-1 = 动态）/
-//     IR_HOTPATCH_ROUTE with explicit 0.
+//     动态上限旗标，instr.cr:1340 `ti != 0`）/ IR_DEREF / IR_STORE_PTR（旧访问宽度
+//     码 8/4/2/1；v10 Task 5 起前端不再发射，宽度由 corearch 从 pointee 语义类型
+//     重建——分类规则保留：重引入的宽度码仍必须落辅码面）/ IR_SPAWN（spawn_count；
+//     -1 = 动态）/ IR_HOTPATCH_ROUTE with explicit 0.
 //   · 无类型信息（face 2，tk 语义 = 无）：其余全部 op。
-// Numeric coincidence: flag 1 equals the TI_DEX row and width 8 equals the
-// TI_DEX_S row. Classification must be per opcode; guessing by row number would
-// assign a dex item to a pointer dereference.
+// Numeric coincidence: flag 1 equals the TI_DEX row and the legacy width code 8
+// equals the TI_DEX_S row. The frontend no longer emits that width, but the
+// classifier must keep blocking the collision: classification is per opcode and
+// guessing by row number would assign a dex item to a pointer dereference.
 //
 // 原子行 vs 复合行：类型信息只接受项可逆的行
 // atom_of(term) == ti 当且仅当 term 是 TT_ATOM 且 b 槽就是 ti。指针、引用、

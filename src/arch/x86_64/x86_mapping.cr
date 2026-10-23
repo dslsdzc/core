@@ -116,3 +116,7 @@ fn interp_ptr_offset(index: int) -> int:
 // Element stride used when turning a pointer difference back into a count.
 fn interp_ptr_stride() -> int:
     return mp_stride(TI_INT)
+
+// Field/payload stride for struct fields and enum payload slots.
+fn interp_field_stride() -> int:
+    return mp_stride(TI_INT)
