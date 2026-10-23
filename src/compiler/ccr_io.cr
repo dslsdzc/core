@@ -2000,6 +2000,8 @@ fn load_ccr(data: string, fsize: int) -> int:
     // g_ir_instr_count 本段不再触碰（重建段原写点全清）。
     if !ccr_has_bytes(pos, 4, seg_end5):
         return -1
+    // instr_cnt consumers: ENT (live_end domain), REG (root span upper bound),
+    // EDG (to_nod domain). It stays a local until those segments are consumed.
     instr_cnt := buf_read_u32(data, pos)
     pos = pos + 4
     if instr_cnt > (seg_end5 - seg_off5) / CCR_V10_NOD_DISK:
@@ -2247,7 +2249,7 @@ fn load_ccr(data: string, fsize: int) -> int:
     // consumed before REG. Only rex >= ren was checked per record, not the upper
     // bound. An out-of-range span would make ELF emission read outside the NOD
     // space. For each function, check instr_start + count <= instr_cnt and reject
-    // negative values. This is the last reject point before payload consumption.
+    // negative values. EDG and CASE are still consumed after this gate.
     rfi : ., mut = 0
     loop:
         if rfi >= func_cnt:
