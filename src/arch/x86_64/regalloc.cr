@@ -950,6 +950,8 @@ fn corearch_alloc_size_of_var(v: int) -> int:
 
 // Runtime pointer bound size for IR_DEREF/IR_STORE_PTR. The semantic flag says
 // a runtime bound exists; the byte size is derived from the allocation node.
+// -1 means "flag set but base/size unresolvable" — fail closed, never fall back
+// to a null-check-only emission.
 fn corearch_nod_runtime_bound_size(n: int) -> int:
     fl := nod_type_flags(n)
     if (fl / CCR_NOD_FLAG_RUNTIME_PTR_BOUNDS) % 2 != 1:
@@ -961,8 +963,11 @@ fn corearch_nod_runtime_bound_size(n: int) -> int:
     else if op == IR_STORE_PTR:
         base = nod_dest(n)
     if base < 0:
-        return 0
-    return corearch_alloc_size_of_var(base)
+        return -1
+    sz := corearch_alloc_size_of_var(base)
+    if sz <= 0:
+        return -1
+    return sz
 
 // 语义对象模型：从 NOD 重建线性调度。
 // ccr_io.cr load_ccr 从内核对象缓冲顺序生成 48 字节线性流 g_ir_instrs。
@@ -971,7 +976,7 @@ fn corearch_nod_runtime_bound_size(n: int) -> int:
 // g_ir_func_instr_count）留在 loader。
 // 调用方是 corearch.cr 和组合根 src/targets/x86_64/linux/elf/main.cr；load_ccr 成功后、
 // 分派和发射前调用一次。
-fn build_linear_schedule():
+fn build_linear_schedule() -> int:
     grow_ir_instrs(g_v7_nod_count)
     ni : ., mut = 0
     loop:
@@ -987,11 +992,16 @@ fn build_linear_schedule():
         // v10: the .ccr does not carry target facts. Reconstruct the access
         // width for pointer dereferences and the element stride for allocations
         // from the semantic type plus the x86-64 layout. The runtime-bound size
-        // for pointer stores/loads is derived from the allocation node.
+        // for pointer stores/loads is derived from the allocation node; a set
+        // flag with no resolvable allocation is a malformed file (fail closed).
         if op == IR_ALLOC_ARRAY:
             iri_set_s2(ni, corearch_nod_alloc_stride())
         else if op == IR_DEREF || op == IR_STORE_PTR:
             iri_set_tk(ni, corearch_nod_access_width(ni))
-            iri_set_s3(ni, corearch_nod_runtime_bound_size(ni))
+            bsz := corearch_nod_runtime_bound_size(ni)
+            if bsz < 0:
+                return -1
+            iri_set_s3(ni, bsz)
         g_ir_instr_count = ni + 1
         ni = ni + 1
+    return 0

@@ -27,12 +27,11 @@ fn register_backend_flags():
     cli_flag_bool_debug("dump-types", "", "Debug: dump TYPE segment")
     cli_flag_bool_debug("dump-ifaces", "", "Debug: dump IFACE segment")
 
-// Select the int representation after the .ccr header has been read. Compiler
-// and self-host artifacts carry CCR_FLAG_RAW_INT; ordinary user programs get
-// tagged mathematical ints by default. --raw-int is an explicit build-chain
-// escape hatch.
+// Select the int representation. The .ccr header carries no raw-int bit (only
+// program flags); the frontend passes --raw-int explicitly for compiler and
+// self-host artifacts. Ordinary user programs use tagged mathematical ints.
 fn backend_select_int_mode():
-    if cli_has("raw-int") != 0 || g_ccr_raw_int != 0:
+    if cli_has("raw-int") != 0:
         g_x86_big_enabled = 0
     else:
         g_x86_big_enabled = 1

@@ -128,7 +128,9 @@ fn corearch_main() -> int:
     // The loader produces semantic objects only. Rebuild the linear instruction
     // stream before elf_gen; this entry is one of the consumers of
     // build_linear_schedule.
-    build_linear_schedule()
+    if build_linear_schedule() != 0:
+        println("error: invalid .ccr file")
+        return 1
 
     emit_so := cli_has("shared")
     link_val := cli_get("link")

@@ -92,13 +92,13 @@ def main() -> int:
             print("[FAIL] stage1 backend or CCR was not created")
             return 1
         if not run_checked(
-            [stage1, stage1_ccr, "--static", "-o", stage2],
+            [stage1, stage1_ccr, "--static", "--raw-int", "-o", stage2],
             "stage1 emits corearch stage2",
             env,
         ):
             return 1
         if not run_checked(
-            [stage2, stage1_ccr, "--static", "-o", stage3],
+            [stage2, stage1_ccr, "--static", "--raw-int", "-o", stage3],
             "stage2 emits corearch stage3",
             env,
         ):

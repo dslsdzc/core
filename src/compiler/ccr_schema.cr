@@ -39,6 +39,17 @@ CCR_V10_REG_DISK : int = 24
 CCR_V10_EDG_DISK : int = 8
 CCR_V10_CASE_DISK : int = 24
 
+// v10 header flags (spec §3.1). They describe program properties only; no bit
+// carries raw-int, external-binary-interface, or target identity.
+//   bit 0 PORTABLE   no raw/FFI/external-binary boundary
+//   bit 1 SYSTEM     contains a system boundary node (or raw-int build mode)
+//   bit 2 CONCURRENT contains concurrency/execution-policy nodes
+//   bit 3+ reserved, must be zero
+CCR_FLAG_PORTABLE : int = 1
+CCR_FLAG_SYSTEM : int = 2
+CCR_FLAG_CONCURRENT : int = 4
+CCR_FLAG_KNOWN_MASK : int = 7
+
 // v10 NOD semantic flags. These are node features, not target facts: no bit
 // carries a machine extent or physical location. corearch reconstructs those
 // from the semantic type and the active target layout.

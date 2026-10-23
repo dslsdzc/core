@@ -679,6 +679,10 @@ fn corec_main() -> int:
     println("generate ELF...")
     // The target owns the backend name, ELF flag, link mode, and output flag.
     cmd2 : ., mut = target_backend_command(ccr_path, out_path, cli_has("static"), g_opt_level)
+    // Raw-int is a build-chain decision, not a wire flag: pass it explicitly so
+    // compiler/self-host artifacts keep raw machine ints.
+    if g_ccr_emit_raw_int != 0:
+        cmd2 = cmd2 + " --raw-int"
     self_path := get_arg(0)
     sl2 := str_len(self_path)
     if sl2 > 0:

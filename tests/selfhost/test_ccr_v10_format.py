@@ -381,10 +381,10 @@ def _run(cmd, **kwargs):
     )
 
 
-def _build_v10(tmp: Path):
-    src = tmp / "e2e.cr"
-    ccr = tmp / "e2e.ccr"
-    src.write_text(E2E_SOURCE, encoding="utf-8")
+def _build_v10(tmp: Path, source: str = E2E_SOURCE, name: str = "e2e"):
+    src = tmp / f"{name}.cr"
+    ccr = tmp / f"{name}.ccr"
+    src.write_text(source, encoding="utf-8")
     r = _run([COREC, "ccr", src, "-o", ccr])
     assert r.returncode == 0, f"corec ccr failed: {r.stdout}\n{r.stderr}"
     return ccr.read_bytes()
@@ -486,6 +486,145 @@ def test_corearch_accepts_v10_and_rejects_v9():
         bad.write_bytes(patch_u32(data, 8, 8))
         r = _run([COREARCH, bad, "--elf", "--static", "-o", tmp / "eight.elf"])
         assert r.returncode != 0, "corearch accepted seg_count 8"
+
+
+def _append_to_segment(data, tag, extra):
+    table = read_segment_table(data)
+    idx = tag - 1
+    _tag, off, size = table[idx]
+    d = bytearray(data)
+    d[off + size:off + size] = extra
+    out = bytes(d)
+    out = patch_segment_entry(out, idx, size=size + len(extra))
+    for j in range(idx + 1, SEG_COUNT):
+        old_offset = table[j][1]
+        out = patch_segment_entry(out, j, offset=old_offset + len(extra))
+    return out
+
+
+def _segment_offset(data, tag):
+    for t, off, _size in read_segment_table(data):
+        if t == tag:
+            return off
+    raise AssertionError(f"tag {tag} missing")
+
+
+PORTABLE_SOURCE = """fn main() -> int:
+    return 42
+"""
+
+SYSTEM_SOURCE = """extern fn putchar(c: int) -> int
+fn main() -> int:
+    return putchar(65)
+"""
+
+RUNTIME_BOUND_SOURCE = """fn main() -> int:
+    a := [1, 2, 3, 4]
+    i := 2
+    p := &a[i]
+    return *p
+"""
+
+
+def test_header_flags_portable_user_program():
+    with tempfile.TemporaryDirectory() as td:
+        data = _build_v10(Path(td), PORTABLE_SOURCE, "portable")
+    f = flags(data)
+    assert f & ~0x7 == 0, f"reserved header bits set: {f:#x}"
+    assert f & 2 == 0, f"portable user program marked SYSTEM: {f:#x}"
+    assert f in (0, 1), f"unexpected portable flags {f:#x}"
+
+
+def test_header_flags_system_artifact():
+    with tempfile.TemporaryDirectory() as td:
+        data = _build_v10(Path(td), SYSTEM_SOURCE, "system")
+    f = flags(data)
+    assert f & 2 != 0, f"extern/ABI program missing SYSTEM: {f:#x}"
+    assert f & 1 == 0, f"SYSTEM program also claims PORTABLE: {f:#x}"
+
+
+def test_portable_system_flags_rejected():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_v10(tmp, PORTABLE_SOURCE, "flagbad")
+        bad = tmp / "flagbad.ccr"
+        bad.write_bytes(patch_u32(data, 12, 1 | 2))
+        r = _run([COREARCH, bad, "--elf", "--static", "-o", tmp / "flagbad.elf"])
+        assert r.returncode != 0, "PORTABLE+SYSTEM header accepted"
+        assert "invalid" in (r.stdout + r.stderr)
+
+
+def _first_node_offset(data, opcode, predicate=None):
+    body = segment(data, 5)
+    (count,) = struct.unpack_from("<I", body, 0)
+    off = _segment_offset(data, 5) + 4
+    for i in range(count):
+        rec = struct.unpack_from("<Ii q iiiIII".replace(" ", ""), body, 4 + i * 40)
+        if rec[0] == opcode and (predicate is None or predicate(rec)):
+            return off + i * 40, rec
+    raise AssertionError(f"no node with op {opcode}")
+
+
+def test_old_target_facts_in_src2_src3_rejected():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_v10(tmp)
+        cases = []
+        off, _rec = _first_node_offset(data, 8)                 # ALLOC_ARRAY
+        cases.append(("alloc_src2", off + 16, 8))
+        cases.append(("alloc_src3", off + 20, 8))
+        off, _rec = _first_node_offset(data, 31)                # ADDR_INDEX
+        cases.append(("addr_scale", off + 20, 3))
+        off, _rec = _first_node_offset(data, 25)                # DEREF
+        cases.append(("deref_width", off + 20, 8))
+        off, _rec = _first_node_offset(data, 26)                # STORE_PTR
+        cases.append(("store_width", off + 20, 8))
+        for name, field_off, value in cases:
+            d = bytearray(data)
+            struct.pack_into("<i", d, field_off, value)
+            bad = tmp / f"{name}.ccr"
+            bad.write_bytes(bytes(d))
+            r = _run([COREARCH, bad, "--elf", "--static", "-o", tmp / f"{name}.elf"])
+            assert r.returncode != 0, f"{name}: old target fact accepted"
+            assert "invalid" in (r.stdout + r.stderr), f"{name}: missing diagnostic"
+
+
+def test_ent_reserved_flags_and_trailing_rejected():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_v10(tmp)
+        ent_off = _segment_offset(data, 6)
+        bad_flags = bytearray(data)
+        struct.pack_into("<I", bad_flags, ent_off + 4 + 20, 0x10)  # first record flags
+        p1 = tmp / "entflags.ccr"
+        p1.write_bytes(bytes(bad_flags))
+        r = _run([COREARCH, p1, "--elf", "--static", "-o", tmp / "entflags.elf"])
+        assert r.returncode != 0, "ENT reserved flag bit accepted"
+
+        p2 = tmp / "enttrail.ccr"
+        p2.write_bytes(_append_to_segment(data, 6, b"\x00"))
+        r = _run([COREARCH, p2, "--elf", "--static", "-o", tmp / "enttrail.elf"])
+        assert r.returncode != 0, "ENT trailing byte accepted"
+
+
+def test_runtime_bound_unresolvable_rejected():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_v10(tmp, RUNTIME_BOUND_SOURCE, "rtbound")
+
+        def has_flag(rec):
+            return rec[6] & 4 != 0
+
+        rec_off, rec = _first_node_offset(data, 25, has_flag)
+        assert rec[0] == 25
+        # Break the base reference so no ALLOC_ARRAY/ALLOC_STRUCT defines it.
+        d = bytearray(data)
+        struct.pack_into("<i", d, rec_off + 16, 999999)
+        bad = tmp / "rtbound.ccr"
+        bad.write_bytes(bytes(d))
+        r = _run([COREARCH, bad, "--elf", "--static", "-o", tmp / "rtbound.elf"])
+        assert r.returncode != 0, "unresolvable runtime bound emitted a null-only check"
+        assert "invalid" in (r.stdout + r.stderr)
 
 
 # ---------------------------------------------------------------------------

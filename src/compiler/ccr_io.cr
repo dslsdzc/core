@@ -110,20 +110,11 @@
 // No bitwise ops in Core; use arithmetic instead.
 
 CCR_MAGIC : int = 827474755  // "CCR1" (0x31524343)
-// v10 = 0x000A0000. The loader accepts only this value; v9 (589825) is rejected.
-CCR_VERSION : int = 655360       // CCR_V10_VERSION (0x000A0000)
-// Header bit 0 currently also carries the raw-int compiler/self-host selection.
-// It is the v10 PORTABLE bit position; Task 8 removes the legacy overload.
-CCR_FLAG_RAW_INT : int = 1
-CCR_FLAG_KNOWN_MASK : int = 7   // PORTABLE | SYSTEM | CONCURRENT
-CCR_SEG_COUNT : int = 9          // CCR_V10_SEG_COUNT: STR TYPE IFACE SYM NOD ENT REG EDG CASE
-CCR_SEG_TYPE : int = 2           // CCR_V10_SEG_TYPE
-CCR_SEG_IFACE : int = 3          // CCR_V10_SEG_IFACE
 
-// Set by save_ccr from corec (compiler-source detection) and by load_ccr in the
-// backend. It selects the raw-int compiler path instead of user-program tagging.
+// Set by save_ccr from corec (compiler-source detection) and used to compute
+// the SYSTEM header bit and to pass --raw-int to the backend. It is not a wire
+// field and does not select int mode by itself.
 g_ccr_emit_raw_int : int, mut
-g_ccr_raw_int : int, mut
 
 // NOD record: 40 bytes.
 // {op i32, dest i32, s1 i64, src2 i32, src3 i32, type_id i32, flags u32,
@@ -132,20 +123,17 @@ g_ccr_raw_int : int, mut
 // (CCR_NOD_FLAG_*). Widths, strides, and byte extents are target facts and are
 // reconstructed by corearch, never stored here. first_edge and edge_count locate
 // this node's outgoing edges in EDG. The in-memory object record keeps the same
-// eight semantic fields without the adjacency pair.
-ESZ_NOD_DISK : int = 40    // CCR_V10_NOD_DISK
+// eight semantic fields without the adjacency pair. CCR_V10_NOD_DISK = 40.
 
 // EDG record: 8 bytes, {to_nod u32, kind u32}. The source node is implicit:
 // node i's outgoing edges are the contiguous range
 // [first_edge, first_edge + edge_count).
-ESZ_EDGE_DISK : int = 8
 
 // REG record: 24 bytes, {kind i32, parent i32, enter_nod u32, exit_nod u32,
 // first_ent i32, last_ent i32}. nstart and ncount are not stored; the loader
 // derives nstart = enter and ncount = exit - enter.
 // The in-memory SG entry is ESZ_SG (48 bytes, u64 fields), which is not the wire
-// format. Use ESZ_SG_DISK for .ccr size math.
-ESZ_SG_DISK : int = 24
+// format. Use CCR_V10_REG_DISK for .ccr size math.
 
 // SYM 落盘记录尺寸：
 //   global records: 16B {name u32, type u32, init_val i64}.
@@ -160,7 +148,7 @@ ESZ_VARDECL_DISK : int = 8
 // live_end/flags; version + 半开 live_end 由内存 24B 表转换，见文件头注释).
 // The in-memory entry table is ESZ_ENTRY (24 bytes, no version field，the
 // per-var ordinal is derivable from group order); disk record != memory record.
-ESZ_ENTRY_DISK : int = 24   // CCR_V10_ENT_DISK
+// CCR_V10_ENT_DISK = 24.
 
 fn bw_byte(val: int, shift: int) -> int:
     if shift == 0:
@@ -340,20 +328,98 @@ fn ccr_sym_seg_size() -> int:
     return sz
 
 fn ccr_nod_seg_size() -> int:
-    return 4 + g_ir_instr_count * ESZ_NOD_DISK
+    return 4 + g_ir_instr_count * CCR_V10_NOD_DISK
 
 fn ccr_edg_seg_size(edge_total: int) -> int:
-    return 4 + edge_total * ESZ_EDGE_DISK
+    return 4 + edge_total * CCR_V10_EDG_DISK
 
 fn ccr_ent_seg_size() -> int:
-    return 4 + g_entry_count * ESZ_ENTRY_DISK
+    return 4 + g_entry_count * CCR_V10_ENT_DISK
 
 fn ccr_reg_seg_size() -> int:
-    return 4 + g_sg_count * ESZ_SG_DISK
+    return 4 + g_sg_count * CCR_V10_REG_DISK
 
 fn ccr_case_seg_size() -> int:
     // CASE is an empty table until match lowering writes it: 4B case_count = 0.
     return 4
+
+// ── Header flag classification (spec §3.1) ──────────────────────────────
+// SYSTEM boundary ops: runtime/FFI/ABI surfaces. ARENA_NEW only counts when the
+// scope actually allocates (s1 == 0 means "no arena", per instr.cr); the
+// matching ARENA_RESET is then a no-op and need not be counted separately.
+// CONCURRENT ops: execution-policy nodes.
+fn ccr_op_is_system(op: int, arena_count: int) -> int:
+    if op == IR_ARENA_NEW:
+        if arena_count > 0:
+            return 1
+        return 0
+    if op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT || op == IR_HOTPATCH_ROUTE || op == IR_FNADDR || op == IR_CALL_EXTERN || op == IR_INLINE || op == IR_PTR_OF || op == IR_STR_OF:
+        return 1
+    return 0
+
+fn ccr_op_is_concurrent(op: int) -> int:
+    if op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT:
+        return 1
+    return 0
+
+// v10 src3 is an id/op/index/symbol for these ops. Every other op must carry 0
+// in src3: a nonzero value would be a legacy width/scale/byte-extent target
+// fact. ALLOC_ARRAY/ADDR_INDEX/DEREF/STORE_PTR are handled explicitly because
+// their old src2/src3 facts are the migration's critical cases.
+fn ccr_nod_src3_semantic(op: int) -> int:
+    if op == IR_UNARY || op == IR_BINARY || op == IR_CALL || op == IR_ALLOC_STRUCT || op == IR_LOAD_FIELD || op == IR_STORE_FIELD || op == IR_STORE_INDEX || op == IR_BRANCH || op == IR_SLICE || op == IR_SPAWN || op == IR_HOTPATCH_ROUTE || op == IR_CALL_EXTERN || op == IR_LOAD_INDEX:
+        return 1
+    return 0
+
+fn ccr_compute_header_flags() -> int:
+    hsys : ., mut = 0
+    hconc : ., mut = 0
+    if g_ccr_emit_raw_int != 0:
+        hsys = 1
+    ii : ., mut = 0
+    loop:
+        if ii >= g_ir_instr_count:
+            break
+        if ccr_op_is_system(iri_op(ii), iri_s1(ii)) != 0:
+            hsys = 1
+        if ccr_op_is_concurrent(iri_op(ii)) != 0:
+            hconc = 1
+        ii = ii + 1
+    flags : ., mut = 0
+    if hsys == 0:
+        flags = flags + CCR_FLAG_PORTABLE
+    else:
+        flags = flags + CCR_FLAG_SYSTEM
+    if hconc != 0:
+        flags = flags + CCR_FLAG_CONCURRENT
+    return flags
+
+// Post-NOD validation: the header must not claim PORTABLE while the graph has a
+// SYSTEM boundary, and CONCURRENT must match the graph both ways. SYSTEM without
+// a boundary node is allowed because raw-int build mode also sets SYSTEM.
+fn ccr_validate_header_flags(rsv: int) -> int:
+    hsys := (rsv / CCR_FLAG_SYSTEM) % 2
+    hconc := (rsv / CCR_FLAG_CONCURRENT) % 2
+    nsys : ., mut = 0
+    nconc : ., mut = 0
+    ii : ., mut = 0
+    loop:
+        if ii >= g_v7_nod_count:
+            break
+        if ccr_op_is_system(nod_op(ii), nod_s1(ii)) != 0:
+            nsys = 1
+        if ccr_op_is_concurrent(nod_op(ii)) != 0:
+            nconc = 1
+        ii = ii + 1
+    if nsys != 0 && hsys == 0:
+        return -1
+    if nconc != 0 && hconc == 0:
+        return -1
+    if hconc != 0 && nconc == 0:
+        return -1
+    if hconc != 0 && hsys == 0:
+        return -1
+    return 0
 
 // TYPE(2) segment size is the prepared buffer length. The content is built by
 // corec-only ccr_types.cr. ccr_io.cr is shared with corearch and must not refer
@@ -373,7 +439,7 @@ fn ccr_iface_seg_size() -> int:
 // edge_total = EDG 记录总数（save_ccr 先行收集，见 ccr_collect_edges）。
 
 fn calc_ccr_size(edge_total: int) -> int:
-    sz : ., mut = 16 + CCR_SEG_COUNT * 12
+    sz : ., mut = 16 + CCR_V10_SEG_COUNT * 12
     sz = sz + ccr_str_seg_size()
     sz = sz + ccr_type_seg_size()
     sz = sz + ccr_iface_seg_size()
@@ -553,15 +619,15 @@ fn save_ccr(path: string) -> int:
     // Header（16B）
     buf_write_u32(buf, pos, CCR_MAGIC)
     pos = pos + 4
-    buf_write_u32(buf, pos, CCR_VERSION)
+    buf_write_u32(buf, pos, CCR_V10_VERSION)
     pos = pos + 4
-    buf_write_u32(buf, pos, CCR_SEG_COUNT)
+    buf_write_u32(buf, pos, CCR_V10_SEG_COUNT)
     pos = pos + 4
-    rsv : ., mut = 0
-    if g_ccr_emit_raw_int != 0:
-        rsv = CCR_FLAG_RAW_INT
-    buf_write_u32(buf, pos, rsv)
-    pos = pos + 4  // reserved / raw-compiler flag
+    // Header flags describe the program, not the integer representation.
+    // Raw-int build mode is a SYSTEM property and is passed to corearch via
+    // --raw-int, never through this word.
+    buf_write_u32(buf, pos, ccr_compute_header_flags())
+    pos = pos + 4
 
     // 段体大小（与 calc_ccr_size 同一来源逐段一致；canonical order）
     s_str := ccr_str_seg_size()
@@ -575,7 +641,7 @@ fn save_ccr(path: string) -> int:
     s_case := ccr_case_seg_size()
 
     // Seg table（9 × 12B；offset = 前段尾，从段表后起；规范序 tag 1..9）
-    o_str : ., mut = 16 + CCR_SEG_COUNT * 12
+    o_str : ., mut = 16 + CCR_V10_SEG_COUNT * 12
     o_type : ., mut = o_str + s_str
     o_iface : ., mut = o_type + s_type
     o_sym : ., mut = o_iface + s_iface
@@ -589,11 +655,11 @@ fn save_ccr(path: string) -> int:
     buf_write_u32(buf, pos + 4, o_str)
     buf_write_u32(buf, pos + 8, s_str)
     pos = pos + 12
-    buf_write_u32(buf, pos, CCR_SEG_TYPE)
+    buf_write_u32(buf, pos, CCR_V10_SEG_TYPE)
     buf_write_u32(buf, pos + 4, o_type)
     buf_write_u32(buf, pos + 8, s_type)
     pos = pos + 12
-    buf_write_u32(buf, pos, CCR_SEG_IFACE)
+    buf_write_u32(buf, pos, CCR_V10_SEG_IFACE)
     buf_write_u32(buf, pos + 4, o_iface)
     buf_write_u32(buf, pos + 8, s_iface)
     pos = pos + 12
@@ -1113,7 +1179,7 @@ fn load_ccr(data: string, fsize: int) -> int:
     // Version: v10 only, with no compatibility or conversion path.
     ver := buf_read_u32(data, pos)
     pos = pos + 4
-    if ver != CCR_VERSION:
+    if ver != CCR_V10_VERSION:
         return -1
 
     // Seg count + header flags
@@ -1121,15 +1187,18 @@ fn load_ccr(data: string, fsize: int) -> int:
     pos = pos + 4
     rsv := buf_read_u32(data, pos)
     pos = pos + 4
-    if seg_cnt != CCR_SEG_COUNT:
+    if seg_cnt != CCR_V10_SEG_COUNT:
         return -1
     // Only PORTABLE/SYSTEM/CONCURRENT (bits 0..2) are defined; reserved bits
-    // must be zero. Bit 0 also selects legacy raw-int mode until Task 8.
+    // must be zero. PORTABLE excludes SYSTEM; CONCURRENT implies SYSTEM.
     if rsv > CCR_FLAG_KNOWN_MASK:
         return -1
-    g_ccr_raw_int = 0
-    if rsv % 2 == 1:
-        g_ccr_raw_int = 1
+    if (rsv % 2 == 1) && ((rsv / CCR_FLAG_SYSTEM) % 2 == 1):
+        return -1
+    if (rsv % 2 == 1) && ((rsv / CCR_FLAG_CONCURRENT) % 2 == 1):
+        return -1
+    if ((rsv / CCR_FLAG_CONCURRENT) % 2 == 1) && ((rsv / CCR_FLAG_SYSTEM) % 2 == 0):
+        return -1
     if seg_cnt > (fsize - 16) / 12:
         return -1
 
@@ -1176,7 +1245,7 @@ fn load_ccr(data: string, fsize: int) -> int:
         pos = pos + 4
         ssz := buf_read_u32(data, pos)
         pos = pos + 4
-        if tg < 1 || tg > CCR_SEG_COUNT:
+        if tg < 1 || tg > CCR_V10_SEG_COUNT:
             return -1
         if tg != ri + 1:
             return -1
@@ -1606,7 +1675,7 @@ fn load_ccr(data: string, fsize: int) -> int:
         return -1
     sg_n := buf_read_u32(data, pos)
     pos = pos + 4
-    if sg_n > (seg_end7 - seg_off7) / ESZ_SG_DISK:
+    if sg_n > (seg_end7 - seg_off7) / CCR_V10_REG_DISK:
         return -1
     sg_i : ., mut = 0
     rfcnt : ., mut = 0  // 已见 SG_FUNC 根记录数（记录顺序 = 函数序 1:1）
@@ -1689,7 +1758,7 @@ fn load_ccr(data: string, fsize: int) -> int:
         return -1
     instr_cnt := buf_read_u32(data, pos)
     pos = pos + 4
-    if instr_cnt > (seg_end5 - seg_off5) / ESZ_NOD_DISK:
+    if instr_cnt > (seg_end5 - seg_off5) / CCR_V10_NOD_DISK:
         return -1
     g_v7_nod_sem = alloc((instr_cnt + 8) * ESZ_NOD_SEM)
     g_v7_nod_meta = alloc((instr_cnt + 8) * ESZ_NOD_META)
@@ -1697,7 +1766,7 @@ fn load_ccr(data: string, fsize: int) -> int:
     loop:
         if ii >= instr_cnt:
             break
-        if !ccr_has_bytes(pos, ESZ_NOD_DISK, seg_end5):
+        if !ccr_has_bytes(pos, CCR_V10_NOD_DISK, seg_end5):
             return -1
         opcode := buf_read_u32(data, pos)
         pos = pos + 4
@@ -1713,6 +1782,20 @@ fn load_ccr(data: string, fsize: int) -> int:
         pos = pos + 4  // type_id（TYPE row；-1 = 无）
         fl2 := buf_read_u32(data, pos)
         pos = pos + 4  // flags（语义特性；非目标事实）
+        // src2/src3 may not carry v9 target facts. The writer normalizes them;
+        // the loader rejects old/foreign files instead of silently accepting.
+        if opcode == IR_ALLOC_ARRAY:
+            if s2 != 0 || s3 != 0:
+                return -1
+        else if opcode == IR_ADDR_INDEX:
+            if s3 != 0:
+                return -1
+        else if opcode == IR_DEREF || opcode == IR_STORE_PTR:
+            if s3 != 0:
+                return -1
+        else if ccr_nod_src3_semantic(opcode) == 0:
+            if s3 != 0:
+                return -1
         nfe := buf_read_u32(data, pos)
         pos = pos + 4  // first_edge（邻接索引）
         nec := buf_read_u32(data, pos)
@@ -1734,6 +1817,11 @@ fn load_ccr(data: string, fsize: int) -> int:
         cell_store(g_v7_nod_meta, ii * ESZ_NOD_META + 8, nec)
         ii = ii + 1
     g_v7_nod_count = instr_cnt
+
+    // Header SYSTEM/CONCURRENT bits must agree with the graph. This needs NOD
+    // only, so it runs here (before ENT/EDG/TYPE consumption).
+    if ccr_validate_header_flags(rsv) != 0:
+        return -1
 
     // REG root span upper-bound check. Function instruction bounds (root_region
     // span) are filled when REG is parsed, but instr_cnt is only known at NOD. At
@@ -1761,14 +1849,14 @@ fn load_ccr(data: string, fsize: int) -> int:
             return -1
         ent_cnt := buf_read_u32(data, pos)
         pos = pos + 4
-        if ent_cnt > (seg_end6 - seg_off6) / ESZ_ENTRY_DISK:
+        if ent_cnt > (seg_end6 - seg_off6) / CCR_V10_ENT_DISK:
             return -1
         grow_entries(ent_cnt)
         eii : ., mut = 0
         loop:
             if eii >= ent_cnt:
                 break
-            if !ccr_has_bytes(pos, ESZ_ENTRY_DISK, seg_end6):
+            if !ccr_has_bytes(pos, CCR_V10_ENT_DISK, seg_end6):
                 return -1
             ev := buf_read_i32(data, pos)
             pos = pos + 4   // var_id
@@ -1785,6 +1873,9 @@ fn load_ccr(data: string, fsize: int) -> int:
             // Semantic validation: reject out-of-range values.
             if evr < 1:
                 return -1
+            if efl > 0xF:
+                return -1
+            // ENT flags bits 4+ are reserved.
             if ev < 0 || ev >= g_ir_var_count:
                 return -1
             // var 命名空间 = SYM 行重建总量
@@ -1806,6 +1897,9 @@ fn load_ccr(data: string, fsize: int) -> int:
             cell_store32(g_ir_entries, mo2 + OFF_ENTRY_FLAGS, efl)
             g_entry_count = eii + 1
             eii = eii + 1
+        // The record walk must consume the ENT body exactly (no trailing bytes).
+        if pos != seg_end6:
+            return -1
         // 函数条目段界重建：条目按函数升序成块落盘（compute_entries func_i 升序），
         // 每函数一段 [start, count)，块判定 = var 槽 in 该函数 var 区间（var 槽
         // 全属唯一函数，段序与函数序一致）。重建结果与 SYM func 记录
@@ -1857,7 +1951,7 @@ fn load_ccr(data: string, fsize: int) -> int:
         return -1
     edg_cnt := buf_read_u32(data, pos)
     pos = pos + 4
-    if edg_cnt > (seg_end8 - seg_off8) / ESZ_EDGE_DISK:
+    if edg_cnt > (seg_end8 - seg_off8) / CCR_V10_EDG_DISK:
         return -1
     v7_buf : string, mut = ""
     if edg_cnt > 0:
@@ -1884,7 +1978,7 @@ fn load_ccr(data: string, fsize: int) -> int:
         loop:
             if rec >= nec:
                 break
-            if !ccr_has_bytes(pos, ESZ_EDGE_DISK, seg_end8):
+            if !ccr_has_bytes(pos, CCR_V10_EDG_DISK, seg_end8):
                 return -1
             eto := buf_read_u32(data, pos)
             pos = pos + 4

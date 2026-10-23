@@ -178,10 +178,10 @@
 #   这是**固有代价**，不是回归——但按本文件两级纪律，**必须显式声明 + 同批重锁 + 旧值留痕**。
 
 canary_elf	pa	826d74cf7f099f9758e11a64d443695ff8360327a88e7eb5922ddfd617e0dce5	53430
-pa_ccr	pa.ccr	f5fa7faa9e5fdf28db03dbd78e03e275e416cab06c222d4870a07aa12f98a77f	93710
-pa_static_ccr	pa_st.bin.ccr	df9621c9a9bb45b27b777fb0b4d743602077b65775b1e11ae57b54c98bb4ba2c	93853
-gt_ccr	gt.ccr	e7f06f04fcecf4fc767e2499566d9e59be6503fd5933f74808ca6783c8bf7308	138672
-gt_static_ccr	gt_st.bin.ccr	48d40ccb4f3bfdb7d412e669636ada6fac5a0ea2df95537ccb9749436c59e42b	138815
+pa_ccr	pa.ccr	1115f352656d6e53f388d48088616703e2c9df13c8233b9471bdd047aa16b367	93710
+pa_static_ccr	pa_st.bin.ccr	5f1b90d4be268c350e0ae34b4d805732573d5a115f53a51df08d0ab4e2192630	93853
+gt_ccr	gt.ccr	a1b3d07dc98772351edcdbf5798887e679caa9d452444ef6ad76c86ea2ff05ff	138672
+gt_static_ccr	gt_st.bin.ccr	bd7d2fc42282a3ca3905a567c8c6d577390262ec269002f96da2f59a8a40301c	138815
 # ⚠ **本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下
@@ -315,3 +315,15 @@ gt_static_ccr	gt_st.bin.ccr	48d40ccb4f3bfdb7d412e669636ada6fac5a0ea2df95537ccb97
 #     pa_static_ccr e1e7a1c1aeb8c883bb88b21be907f9fb0b1fd2c28185997adca84caf4d17bf33 97141
 #     gt_ccr        93ed0dc5cb33964df5857ba21738f6880700a5248098c3f043087e1369b26f23 143700
 #     gt_static_ccr a9e5343389de547a0ab9a9dde33b030877c44e5505deee24eb683715b700c88f 143843
+
+# ── 【本批重锁 2026-10-24】Task 4 review fix：header flags 语义更正 ──
+#   四条 `.ccr` size 不变、sha 全变；canary ELF 逐字节不变（826d74cf…）。
+#   归因 = 头部 flags 从「bit0 = raw-int」改为 spec §3.1 的程序特性：
+#   PORTABLE(1)/SYSTEM(2)/CONCURRENT(4)，raw-int 改为 corec 显式向 corearch
+#   传 `--raw-int`。用户语料 flags = PORTABLE(1)，旧值为 raw bit(1) 的
+#   偶然同值但语义不同（编译器 artifact 现在为 SYSTEM）。D1 5/5 PASS。
+#   旧值留痕（自本批起作废）：
+#     pa_ccr        f5fa7faa9e5fdf28db03dbd78e03e275e416cab06c222d4870a07aa12f98a77f 93710
+#     pa_static_ccr df9621c9a9bb45b27b777fb0b4d743602077b65775b1e11ae57b54c98bb4ba2c 93853
+#     gt_ccr        e7f06f04fcecf4fc767e2499566d9e59be6503fd5933f74808ca6783c8bf7308 138672
+#     gt_static_ccr 48d40ccb4f3bfdb7d412e669636ada6fac5a0ea2df95537ccb9749436c59e42b 138815

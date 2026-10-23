@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""R2 P4 Task 1/2/3：`.ccr` TYPE=7 / IFACE=8 段（机制面 + TYPE/IFACE 内容面）断言套件。
+"""R2 P4 Task 1/2/3 + v10 cutover：`.ccr` TYPE=2 / IFACE=3 段（机制面 + 内容面）断言套件。
 
 本套件 = **机制面**（Task 1：段表/版本/loader 三闸）+ **TYPE 内容面**（Task 2：
 行表 + 项 DAG 序列化 / D13 确定性装填 / corearch 读回重建 / 判定原语跨进程同值）
@@ -8,15 +8,15 @@ impl 边 + 方法表 / corearch 读回 / 跨段引用域 / 扩列与命名化守
 
 Task 1（机制面）：
   ① 段表 = 9 段、tag 序 = 1..9、offset 连续、末段尾 == 文件大小；
-  ② header: version = 9、seg_count = 8、reserved = 0；
-  ③ TYPE(7)/IFACE(8) **皆为内容面**（R2 P4 Task 2/3 起——空壳期已退役）；
+  ② header: version = 0x000A0000、seg_count = 9、flags bits 0..2；
+  ③ TYPE(2)/IFACE(3) **皆为内容面**（R2 P4 Task 2/3 起——空壳期已退役）；
   ④ loader 负分支（byte mutation，逐个打；全部要求 corearch rc≠0 且**不得
      静默当空表**——三态纪律 C.5-3）：
-       · version := 7/8 → 拒（D10：旧 v7/v8 文件在版本闸整类拒收）；
+       · version := 7/8/589825 → 拒（v10 版本闸整类拒收）；
        · **结构性合法的 v7（6 段）文件整体重建** → 拒（D10 的正面证据：
          非「字节破烂」被拒，而是合法旧文件被版本闸拒）；
        · seg_cnt := 6（末段 size 扩到 EOF——前闸全过）→ 拒（D11 必备集）；
-       · 段 tag ∉ 1..8（tag := 9）/ 重复 tag（7 → 6）→ 拒（闸界 + 规范序）；
+       · 段 tag ∉ 1..9（tag := 10）/ 重复 tag（2 → 1）→ 拒（闸界 + 规范序）；
        · 段体截断（文件 −1B）→ 拒（越界）。
   ⑤ 端到端：corec build --static + corearch --elf 双路径 rc=0 + 产物 rc=42
      + 产物 .ccr 的 TYPE/IFACE 段非空（内容面入真实构建路径）；

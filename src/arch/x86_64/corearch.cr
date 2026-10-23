@@ -398,7 +398,9 @@ fn corearch_main() -> int:
     // g_ir_instrs stream with build_linear_schedule after a successful load and
     // before dispatch or emission. ELF emission and the allocation dumps all read
     // the linear stream.
-    build_linear_schedule()
+    if build_linear_schedule() != 0:
+        println("error: invalid .ccr file")
+        return 1
 
     // Hidden channel: dump the object image after linear reconstruction and before
     // emission. It returns without entering the O2 or emission paths.
