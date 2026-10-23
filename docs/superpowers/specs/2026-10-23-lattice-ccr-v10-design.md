@@ -38,17 +38,35 @@
 
 ## 3. 文件结构
 
+`.ccr` 是 little-endian wire format。下面字段只描述 **wire 角色**；宽度是文件格式契约，不是语言类型、不是目标字宽。
+
+Wire 角色表：
+
+```text
+角色      宽度   编码
+count     4B     无符号
+kind      4B     无符号
+opcode    4B     无符号
+flags     4B     无符号
+offset    4B     无符号
+size      4B     无符号
+version   4B     无符号
+id        4B     有符号，-1 保留为无值/无效
+imm       8B     有符号
+word      8B     有符号
+```
+
 ```text
 Header 16B
-  magic      u32 = 0x31524343   // "CCR1"
-  version    u32 = 0x000A0000   // 10.0
-  seg_count  u32 = 9
-  flags      u32                // 仅程序特性，见 3.1
+  magic      4B = 0x31524343   // "CCR1"
+  version    version = 0x000A0000
+  seg_count  count = 9
+  flags      flags              // 仅程序特性，见 3.1
 
 Segment table 9 × 12B
-  tag     u32
-  offset  u32   相对文件头
-  size    u32
+  tag     kind
+  offset  offset   相对文件头
+  size    size
 
 Segments
   1 STR
@@ -84,17 +102,17 @@ flags 不携带 target 身份、字宽、字节序或 ABI。一个 `SYSTEM` 程�
 ## 4. NOD：图事件
 
 ```text
-nod_count u32
+nod_count count
 nod_count × 40B
-  op          u32
-  dest        i32
-  src1        i64
-  src2        i32
-  src3        i32
-  type_id     u32
-  flags       u32
-  first_edge  u32
-  edge_count  u32
+  op          opcode
+  dest        id
+  src1        imm
+  src2        id
+  src3        id
+  type_id     id
+  flags       flags
+  first_edge  count
+  edge_count  count
 ```
 
 规则：
@@ -184,14 +202,14 @@ STR_OF       dest, src1=地址, type_id=字符串域
 ## 5. ENT：存在主干
 
 ```text
-ent_count u32
+ent_count count
 ent_count × 24B
-  var_id     i32
-  version    u32
-  def_nod    i32
-  live_start u32
-  live_end   u32
-  flags      u32
+  var_id     id
+  version    version
+  def_nod    id
+  live_start count
+  live_end   count
+  flags      flags
 ```
 
 - `var_id` 是变量/条目身份；同一变量的不同版本各占一条。
@@ -214,14 +232,14 @@ ent_count × 24B
 ## 6. REG：区域
 
 ```text
-reg_count u32
+reg_count count
 reg_count × 24B
-  kind       i32   // func/loop/if/flow/unsafe 等语义种类
-  parent     i32
-  enter_nod  u32
-  exit_nod   u32
-  first_ent  u32
-  last_ent   u32
+  kind       kind   // func/loop/if/flow/unsafe 等语义种类
+  parent     id
+  enter_nod  count
+  exit_nod   count
+  first_ent  count
+  last_ent   count
 ```
 
 区域坐标是 NOD id；`first_ent/last_ent` 是 ENT 半开索引。区域表达图绑定、存在范围和共存约束，不表达栈帧、字节范围或寄存器。
@@ -229,10 +247,10 @@ reg_count × 24B
 ## 7. EDG：边
 
 ```text
-edg_count u32
+edg_count count
 edg_count × 8B
-  to_nod  u32
-  kind    u32
+  to_nod  count
+  kind    kind
 ```
 
 - `kind 0`：数据边，def-use 值流。
@@ -252,8 +270,8 @@ edg_count × 8B
 ### 8.1 STR：字符串表
 
 ```text
-str_count u32
-str_count × {len u32, data[len]}
+str_count count
+str_count × {len count, data[len]}
 ```
 
 字符串只保存源码标识、符号名和规范化字面量；不保存目标内存布局或指针宽度。
@@ -271,11 +289,11 @@ SYM 保存函数、全局、结构体、枚举和外部符号。函数保存参�
 TYPE 保留现有两小节结构，但语义改为“域约束”，不存机器布局：
 
 ```text
-row_count u32
-row_count × 24B {kind, data, extra}
+row_count count
+row_count × 24B {kind word, data word, extra word}
 
-term_count u32
-term_count × 40B {tag, a, b, c, d}
+term_count count
+term_count × 40B {tag kind, a word, b word, c word, d word}
 ```
 
 - 不存 size、align、offset、stride、endian。
@@ -298,13 +316,13 @@ term_count × 40B {tag, a, b, c, d}
 ## 11. CASE：match 关系
 
 ```text
-case_count u32
+case_count count
 case_count × 24B
-  value_i64   i64
-  kind        u32   // 值/枚举/字符串/默认等语义种类
-  str_index   i32
-  target_nod  i32
-  flags       u32
+  value       imm
+  kind        kind   // 值/枚举/字符串/默认等语义种类
+  str_index   id
+  target_nod  id
+  flags       flags
 ```
 
 CASE 只表达 scrutinee 域到目标节点的关系。跳转表、比较指令、二分形态和 case 排序属于 corearch 投影，不进入 `.ccr`。
