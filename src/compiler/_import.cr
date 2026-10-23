@@ -44,6 +44,7 @@ import project
 import os
 import fmt
 import io
+import bigint
 import interp
 import dump
 import monomorph
