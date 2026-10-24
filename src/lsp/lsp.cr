@@ -173,7 +173,9 @@ fn lsp_check_file(path: string, src: string):
     g_source = src
     g_source_dir = dirname(path)
     reset_frontend_state()
-    tokenize(g_source, 0)
+    sm_reset()
+    source_file := sm_add_virtual(path, src)
+    tokenize(source_file, 0)
     res_imports()
     // res_imports registers the main file with an empty path. Store the real path
     // for the file-id to URI mapping. The record layout is {file_id at 0, path at

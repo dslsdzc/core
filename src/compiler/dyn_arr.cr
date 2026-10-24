@@ -6,7 +6,7 @@
 // ============================================================
 // Element sizes (bytes per element)
 // ============================================================
-ESZ_TOKEN    : int = 40     // kind,lexeme,int_val,line,col = 5×8
+ESZ_TOKEN    : int = 64     // kind,lexeme,int_val,line,col,file,lo,hi = 8×8
 ESZ_ASTNODE  : int = 72    // kind,a,b,c,int_val,type_val,data,line,col = 9×8
 ESZ_SYMENTRY : int = 32    // name_idx,kind,type_idx,node_idx = 4×8
 ESZ_IRVAR    : int = 24    // name_idx,id,type_kind = 3×8
@@ -21,6 +21,9 @@ OFF_TK_LEXEME : int = 8
 OFF_TK_INTVAL : int = 16
 OFF_TK_LINE : int = 24
 OFF_TK_COL : int = 32
+OFF_TK_FILE : int = 40
+OFF_TK_LO : int = 48
+OFF_TK_HI : int = 56
 
 // ASTNode field offsets
 OFF_AS_KIND : int = 0

@@ -780,14 +780,35 @@ fn find_so_fn(name_idx: int) -> int:
 g_cur_fn_ret_ti : int, mut
 g_cur_fn_ret_checked : int, mut
 
-fn check_error(code: int, msg: string, line: int, col: int):
+// Store one diagnostic. file/lo/hi come from SourceManager; sm_file < 0 means
+// the site has no attributable source file and rendering falls back to line/col.
+fn check_error_span(code: int, msg: string, line: int, col: int, file: int, lo: int, hi: int):
     grow_diags(g_diag_count + 1)
     cell_store(g_diags, g_diag_count * DIAG_REC_SIZE, code)
     cell_store_str(g_diags, g_diag_count * DIAG_REC_SIZE + 8, msg)
     cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 16, line)
     cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 24, col)
     cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 32, diag_fileid_for_line(line))
+    cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 40, file)
+    cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 48, lo)
+    cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 56, hi)
     g_diag_count = g_diag_count + 1
+
+// Bridge for existing call sites: (line, col) indexes the source most recently
+// handed to tokenize(), so its start offset is available through the line table.
+// A later slice threads token spans directly into this function.
+fn check_error(code: int, msg: string, line: int, col: int):
+    file : ., mut = -1
+    lo : ., mut = 0
+    hi : ., mut = 0
+    if line > 0 && g_source_file >= 0:
+        c : ., mut = col
+        if c < 1:
+            c = 1
+        file = g_source_file
+        lo = sm_line_start(file, line) + c - 1
+        hi = lo + 1
+    check_error_span(code, msg, line, col, file, lo, hi)
 
 // --- Borrow checking ---
 
@@ -1006,6 +1027,32 @@ fn find_enum(name_idx: int) -> int:
         if ei_name(i) == name_idx:
             return i
         i = i + 1
+    return -1
+
+// Infer the interface constraint for an unconstrained generic parameter from a
+// method call. Returns the interface name index when exactly one interface
+// declares the method; -1 when none or multiple (ambiguous).
+fn infer_iface_for_method(method_ni: int) -> int:
+    found : ., mut = -1
+    hits : ., mut = 0
+    ii : ., mut = 0
+    loop:
+        if ii >= g_iface_count:
+            break
+        mc := cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
+        mi : ., mut = 0
+        loop:
+            if mi >= mc:
+                break
+            mb := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD
+            if cell_load(g_ifaces, mb + OFF_IFM_NAME) == method_ni:
+                found = cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_NAME)
+                hits = hits + 1
+                break
+            mi = mi + 1
+        ii = ii + 1
+    if hits == 1:
+        return found
     return -1
 
 fn find_iface(name_ni: int) -> int:
@@ -3386,9 +3433,21 @@ fn infer_expr(node: int) -> int:
                     gname_idx2 := cell_load(g_funcs, g_checker_current_fi * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gci2 * 8)
                     if gname_idx2 == gen_ni:
                         constr_idx2 := g_checker_current_fi * MAX_GENERICS + gci2
+                        iface_ni2 : ., mut = -1
                         if constr_idx2 < g_generic_constr_count:
-                            iface_ni2 := cell_load(g_generic_constr, constr_idx2 * 8)
+                            iface_ni2 = cell_load(g_generic_constr, constr_idx2 * 8)
+                        // V4 automatic constraint inference: an unconstrained
+                        // parameter calling `a.m()` adopts the unique interface
+                        // that declares `m`. Ambiguous matches stay unresolved
+                        // and fail through the normal return-type check.
+                        if iface_ni2 < 0:
+                            iface_ni2 = infer_iface_for_method(method_ni)
                             if iface_ni2 >= 0:
+                                grow_gen_constr(constr_idx2 + 1)
+                                cell_store(g_generic_constr, constr_idx2 * 8, iface_ni2)
+                                if constr_idx2 + 1 > g_generic_constr_count:
+                                    g_generic_constr_count = constr_idx2 + 1
+                        if iface_ni2 >= 0:
                                 ii2 := find_iface(iface_ni2)
                                 if ii2 >= 0:
                                     imc2 := cell_load(g_ifaces, ii2 * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
@@ -3737,10 +3796,14 @@ fn infer_expr(node: int) -> int:
         var_ni := ast_a(node)
         iter := ast_b(node)
         body := ast_c(node)
-        infer_expr(iter)
+        iter_ti := infer_expr(iter)
+        elem_ti : ., mut = TI_INT
+        k_iter := get_type_kind(iter_ti)
+        if k_iter == TYP_ARRAY || k_iter == TYP_SLICE:
+            elem_ti = get_type_data(iter_ti)
         push_scope()
         push_borrow_scope()
-        def_sym(var_ni, SYM_LOCAL, TI_INT, -1)
+        def_sym(var_ni, SYM_LOCAL, elem_ti, -1)
         infer_expr(body)
         pop_borrow_scope()
         pop_scope()

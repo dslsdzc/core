@@ -6,6 +6,7 @@ g_is_project_mode : int, mut
 g_ccr_out_path : string, mut
 g_cir_out_path : string, mut
 g_binary_out_path : string, mut
+g_source_combined : int, mut   // 1 = g_source is a project/static concatenation
 
 fn is_cr_file(path: string) -> int:
     slen := str_len(path)
@@ -80,10 +81,12 @@ fn detect_imports(src: string) -> int:
 fn read_source_or_project(src_path: string) -> int:
     sl := str_len(src_path)
     g_is_project_mode = 0
+    g_source_combined = 0
     if sl >= 4:
         ext := str_sub(src_path, sl - 3, 3)
         if str_eq(ext, ".cr") == 0:
             g_is_project_mode = 1
+            g_source_combined = 1
     else:
         g_is_project_mode = 1
 
@@ -122,10 +125,15 @@ fn read_static_runtime_source() -> string:
 
 // Run the shared frontend pipeline: tokenize, resolve, parse, and check.
 // Returns 0 on success, 1 on error.
-fn run_frontend() -> int:
+fn run_frontend(source_name: string) -> int:
     g_error_count = 0  // 会话起点清词法/语法错误（tokenize 多轮累积，见 lexer.cr）
+    sm_reset()
+    attributed_name := source_name
+    if g_source_combined != 0:
+        attributed_name = "<combined>"
+    source_file := sm_add_file(attributed_name, g_source)
     println("[1/5] tokenize...")
-    tokenize(g_source, 0)
+    tokenize(source_file, 0)
     println("[2/5] resolve imports...")
     res_imports()
     println("[3/5] parse...")
@@ -287,6 +295,7 @@ fn corec_main() -> int:
             println("usage: corec run '<code>'")
             return 1
         g_source = cli_arg(0)
+        g_source_combined = 0
         g_source_dir = dirname(cli_arg(0))
 
         // Check if source already has 'fn main'
@@ -393,7 +402,7 @@ fn corec_main() -> int:
                     else:
                         g_source = imports + "fn main() -> int {\nreturn " + g_source + ";\n}\n"
 
-        run_rc := run_frontend()
+        run_rc := run_frontend("<inline>")
         if run_rc != 0:
             return 1
         ir_diag_base_run := g_diag_count
@@ -443,8 +452,9 @@ fn corec_main() -> int:
             println("error: cannot locate src/runtime/rt.cr")
             return 1
         g_source = rt_src + "\n" + g_source
+        g_source_combined = 1
 
-    fe_rc := run_frontend()
+    fe_rc := run_frontend(src_path)
     if fe_rc != 0:
         return 1
 
@@ -769,7 +779,10 @@ fn corec_main() -> int:
 // Full compilation: source -> assembly (used by tests and programmatic API)
 fn compile_source(source: string) -> string:
     g_source = source
-    tokenize(g_source, 0)
+    g_source_combined = 0
+    sm_reset()
+    source_file := sm_add_virtual("<compile_source>", source)
+    tokenize(source_file, 0)
     res_imports()
     parse_all()
     check_all()

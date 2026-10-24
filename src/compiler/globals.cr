@@ -392,7 +392,9 @@ g_ir_func_entry_count : string, mut
 g_ir_func_entry_cap : int, mut
 
 // Module system arrays (dynamic byte buffers)
-DIAG_REC_SIZE : int = 40   // g_diags 记录字节数：[ec(8) msg(8) line(8) col(8) file_id(8)]
+DIAG_REC_SIZE : int = 64   // g_diags 记录字节数：[ec(8) msg(8) line(8) col(8) module_fid(8) sm_file(8) sm_lo(8) sm_hi(8)]
+// 前 40 字节为历史布局，LSP 仍按这些偏移读取。sm_file/lo/hi 是 SourceManager
+// 的归属与范围；sm_file < 0 表示该诊断没有可归属的源文件，渲染时回退到 line/col。
 // Scope labels for the diagnostic exemption table. The hard-decision loop in main.cr
 // calls diag_gate_exempt(ec, scope); the table itself is in diag.cr. run_frontend
 // uses GATE_SCOPE_BUILD only. The check path uses its own count > 0 rule and does

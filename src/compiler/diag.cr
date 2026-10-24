@@ -40,10 +40,9 @@ fn source_line_count() -> int:
         i = i + 1
     return count
 
-fn print_source_line(line: int, col: int, annotation: string):
+fn print_source_text(line: int, col: int, ltxt: string, annotation: string):
     if line <= 0:
         return
-    ltxt := read_source_line(line)
     if str_len(ltxt) == 0:
         return
     ln_str := int_str(line)
@@ -82,6 +81,13 @@ fn print_source_line(line: int, col: int, annotation: string):
             cutoff = 48
         print(str_sub(annotation, 0, cutoff))
     println("")
+
+// Legacy entry: render a line from the global g_source. Used only when a
+// diagnostic has no SourceManager span.
+fn print_source_line(line: int, col: int, annotation: string):
+    if line <= 0:
+        return
+    print_source_text(line, col, read_source_line(line), annotation)
 
 fn error_cat_prefix(cat: int) -> string:
     return match cat:
@@ -130,6 +136,18 @@ fn print_diagnostics():
         msg := cell_load_str(g_diags, di * DIAG_REC_SIZE + 8)
         ln := cell_load(g_diags, di * DIAG_REC_SIZE + 16)
         cl := cell_load(g_diags, di * DIAG_REC_SIZE + 24)
+        smf := cell_load(g_diags, di * DIAG_REC_SIZE + 40)
+        slo := cell_load(g_diags, di * DIAG_REC_SIZE + 48)
+        pln : ., mut = ln
+        pcl : ., mut = cl
+        pltext : ., mut = ""
+        attributed : ., mut = 0
+        if smf >= 0 && smf < sm_file_count():
+            pln = sm_location_line(smf, slo)
+            pcl = sm_location_col(smf, slo)
+            pltext = sm_line_text(smf, pln)
+            if str_len(pltext) > 0:
+                attributed = 1
         cat : ., mut = ec / 1000
         num : ., mut = ec % 1000
         print("error[")
@@ -138,10 +156,13 @@ fn print_diagnostics():
         print("]: ")
         println(msg)
         print(" --> ")
-        print(int_str(ln))
+        print(int_str(pln))
         print(":")
-        println(int_str(cl))
-        if ln > 0 && ln <= source_lines:
+        println(int_str(pcl))
+        if attributed != 0:
+            println("   |")
+            print_source_text(pln, pcl, pltext, msg)
+        else if ln > 0 && ln <= source_lines:
             println("   |")
             print_source_line(ln, cl, msg)
         println("")

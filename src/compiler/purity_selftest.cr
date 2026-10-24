@@ -42,7 +42,9 @@ fn ps_compile(src: string) -> int:
     g_source = src
     g_error_count = 0
     g_source_dir = ""
-    tokenize(g_source, 0)
+    sm_reset()
+    source_file := sm_add_virtual("<purity_selftest>", src)
+    tokenize(source_file, 0)
     res_imports()
     parse_all()
     if g_error_count > 0:

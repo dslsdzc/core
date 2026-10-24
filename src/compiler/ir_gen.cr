@@ -1220,6 +1220,28 @@ fn get_variant_name_idx(qualified_ni: int) -> int:
 // Resolve a type expression node to a TI_* type index.
 // Handles type nodes (ast_kind==0 from parse_type) and EXPR_IDENT
 // (basic type names not in the symbol table).
+// Find an existing sequence type row, or allocate one. Used at parameter
+// binding for `[T; N]`/`[T]` nodes: the declaration must not collapse to int,
+// otherwise a `for x in xs` loop cannot recover its length.
+fn find_or_alloc_seq_type(kind: int, elem: int, size: int) -> int:
+    i : ., mut = 0
+    loop:
+        if i >= g_type_count:
+            break
+        if get_type_kind(i) == kind && get_type_data(i) == elem && get_type_extra(i) == size:
+            return i
+        i = i + 1
+    return alloc_type(kind, elem, size)
+
+fn seq_type_of_node(node: int) -> int:
+    if node < 0 || ast_kind(node) != EXPR_ARRAY:
+        return -1
+    elem := ti_from_type_expr(ast_a(node))
+    sz := ast_int_val(node)
+    if sz > 0:
+        return find_or_alloc_seq_type(TYP_ARRAY, elem, sz)
+    return find_or_alloc_seq_type(TYP_SLICE, elem, 0)
+
 fn ti_from_type_expr(node: int) -> int:
     if node < 0:
         return TI_UNIT
@@ -2792,23 +2814,87 @@ fn gen_expr(node: int) -> int:
         body := ast_c(node)
         start_var := -1
         end_var := -1
+        is_seq : ., mut = 0
+        seq_elem_ti : ., mut = TI_INT
+        seq_elem_tk : ., mut = 0
+        seq_iter_var : ., mut = -1
         if ast_kind(iter) == EXPR_RANGE:
             start_var = gen_expr(ast_a(iter))
             start_var = force_if_thunk(start_var)
             end_var = gen_expr(ast_b(iter))
             end_var = force_if_thunk(end_var)
         else:
-            // Non-range iterable: evaluate and use 0..iter
-            s := new_ir_var("start", TI_INT)
-            emit(IR_CONST, s, 0, 0, 0, TI_INT)
-            start_var = s
-            end_var = gen_expr(iter)
-            end_var = force_if_thunk(end_var)
-        // Create loop variable, init to start
+            iv := gen_expr(iter)
+            iv = force_if_thunk(iv)
+            iti := irv_type(iv)
+            ik := get_type_kind(iti)
+            // Slice values keep TI_INT as their IR type (the slice header is a
+            // pointer); their length lives in the side table. Use that record
+            // when deciding whether this is a sequence loop.
+            sl0 := slice_len_get(iv)
+            slv0 : ., mut = -1
+            if sl0 < 0:
+                slv0 = slice_len_var_get(iv)
+            if ik == TYP_ARRAY || ik == TYP_SLICE || iti == TI_STR:
+                // Sequence iteration: index 0..len, bind the loop name to the
+                // loaded element. The old fallback used the sequence value as
+                // the integer upper bound, which is an infinite loop.
+                is_seq = 1
+                seq_iter_var = iv
+                if iti == TI_STR:
+                    seq_elem_ti = TI_CHAR
+                    seq_elem_tk = TI_CHAR
+                    end_var = new_ir_var("for_len", TI_INT)
+                    emit(IR_CALL, end_var, iv, 1, str_intern("str_len"), TI_INT)
+                else:
+                    seq_elem_ti = get_type_data(iti)
+                    seq_elem_tk = agg_elem_read_form(iv)
+                    if ik == TYP_ARRAY:
+                        end_var = new_ir_var("for_len", TI_INT)
+                        emit(IR_CONST, end_var, get_type_extra(iti), 0, 0, TI_INT)
+                    else:
+                        sl := slice_len_get(iv)
+                        if sl >= 0:
+                            end_var = new_ir_var("for_len", TI_INT)
+                            emit(IR_CONST, end_var, sl, 0, 0, TI_INT)
+                        else:
+                            end_var = slice_len_var_get(iv)
+                            if end_var < 0:
+                                check_error(EC_TK_FOR_ITER,
+                                    "cannot determine slice length for iteration",
+                                    ast_line(iter), ast_col(iter))
+                                return -1
+                s := new_ir_var("start", TI_INT)
+                emit(IR_CONST, s, 0, 0, 0, TI_INT)
+                start_var = s
+            else if sl0 >= 0 || slv0 >= 0:
+                // Slice value with a recorded length but an elided IR type.
+                is_seq = 1
+                seq_iter_var = iv
+                et := elem_ti_of(iv)
+                if et >= 0:
+                    seq_elem_ti = et
+                seq_elem_tk = agg_elem_read_form(iv)
+                if sl0 >= 0:
+                    end_var = new_ir_var("for_len", TI_INT)
+                    emit(IR_CONST, end_var, sl0, 0, 0, TI_INT)
+                else:
+                    end_var = slv0
+                s := new_ir_var("start", TI_INT)
+                emit(IR_CONST, s, 0, 0, 0, TI_INT)
+                start_var = s
+            else:
+                // Non-range integer iterable: evaluate and use 0..iter
+                s := new_ir_var("start", TI_INT)
+                emit(IR_CONST, s, 0, 0, 0, TI_INT)
+                start_var = s
+                end_var = iv
+        // Create loop variable, init to start. The source name is bound inside
+        // the body: an integer loop binds the index, a sequence loop binds the
+        // loaded element.
         ivar := new_ir_var("for_i", TI_INT)
         emit(IR_ALLOC, ivar, 0, 0, 0, TI_INT)
         emit(IR_STORE, -1, ivar, start_var, 0, 0)
-        bind_local(var_ni, ivar)
         header_lbl := new_label()
         body_lbl := new_label()
         exit_lbl := new_label()
@@ -2832,6 +2918,15 @@ fn gen_expr(node: int) -> int:
         // otherwise the loop variable never advances and the loop spins.
         post_lbl := new_label()
         push_loop_labels(post_lbl, exit_lbl)
+        if is_seq != 0:
+            elem_var_ti : ., mut = seq_elem_ti
+            if seq_elem_tk == TI_DEX_S || seq_elem_tk == TI_CHAR:
+                elem_var_ti = seq_elem_tk
+            elem_var := new_ir_var("for_elem", elem_var_ti)
+            emit(IR_LOAD_INDEX_VAR, elem_var, seq_iter_var, ivar, 0, seq_elem_tk)
+            bind_local(var_ni, elem_var)
+        else:
+            bind_local(var_ni, ivar)
         gen_expr(body)
         pop_loop_labels()
         pop_ir_scope()
@@ -3928,6 +4023,13 @@ fn ir_gen_func(fi: int):
                     param_type = ri
                     break
                 ri = ri + 1
+        // Array/slice parameters carry a sequence type. Without this, the
+        // declaration value collapses to 0 (int), and sequence consumers such
+        // as `for x in xs` lose the length and element type.
+        ptn_seq := ast_data(pn)
+        seq_ti := seq_type_of_node(ptn_seq)
+        if seq_ti >= 0:
+            param_type = seq_ti
         pvar := new_ir_var(pname, param_type)
         // Bind param name
         bind_local(pname_idx, pvar)

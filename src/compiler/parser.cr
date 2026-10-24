@@ -26,6 +26,12 @@ fn tok_ln(p: int) -> int:
     return cell_load(g_tokens, p * ESZ_TOKEN + OFF_TK_LINE)
 fn tok_cl(p: int) -> int:
     return cell_load(g_tokens, p * ESZ_TOKEN + OFF_TK_COL)
+fn tok_file(p: int) -> int:
+    return cell_load(g_tokens, p * ESZ_TOKEN + OFF_TK_FILE)
+fn tok_lo(p: int) -> int:
+    return cell_load(g_tokens, p * ESZ_TOKEN + OFF_TK_LO)
+fn tok_hi(p: int) -> int:
+    return cell_load(g_tokens, p * ESZ_TOKEN + OFF_TK_HI)
 
 fn advance_tok() -> int:
     t := cur_tok()
@@ -226,22 +232,10 @@ fn parse_type() -> int:
             else:
                 res = alloc_node(EXPR_IDENT, 0, 0, 0, ni, 0, 0, line, col)
     else if tok_k(t) == T_LBRACE:
-        grow_diags(g_diag_count + 1)
-        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE, EC_P_EXPECTED)
-        cell_store_str(g_diags, g_diag_count * DIAG_REC_SIZE + 8, "expected type after '->', got '{' — missing return type?")
-        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 16, line)
-        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 24, col)
-        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 32, diag_fileid_for_line(line))
-        g_diag_count = g_diag_count + 1
+        check_error(EC_P_EXPECTED, "expected type after '->', got '{' — missing return type?", line, col)
         res = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, line, col)
     else:
-        grow_diags(g_diag_count + 1)
-        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE, EC_P_EXPECTED)
-        cell_store_str(g_diags, g_diag_count * DIAG_REC_SIZE + 8, "expected type after '->'")
-        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 16, line)
-        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 24, col)
-        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 32, diag_fileid_for_line(line))
-        g_diag_count = g_diag_count + 1
+        check_error(EC_P_EXPECTED, "expected type after '->'", line, col)
         res = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, line, col)
     // `T?` produces EXPR_OPTIONAL with the inner type node in slot a.
     // This shape does not depend on a registered Option name. It also represents
@@ -554,7 +548,9 @@ fn interp_parse_holes():
                 // Nested interpolation reenters recursively. The bypass is an
                 // explicit argument so the call site shows the rule.
                 g_layout_bypass = 1
-                tokenize(txt, g_layout_bypass)
+                outer_file := g_source_file
+                tokenize_source(txt, g_layout_bypass)
+                g_source_file = outer_file
                 g_layout_bypass = 0
                 g_token_pos = 0
                 ast_set_a(i, parse_expr())
@@ -1059,13 +1055,7 @@ fn parse_new_var_decl() -> int:
                             is_mut = 1
                     else:
                         // 未知标签：TA08（已知标签 = mut/pub/apx + 插件注册标签）
-                        grow_diags(g_diag_count + 1)
-                        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE, EC_TA_UNKNOWN_TAG)
-                        cell_store_str(g_diags, g_diag_count * DIAG_REC_SIZE + 8, "unknown declaration tag '" + tag + "'")
-                        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 16, tok_ln(tag_t))
-                        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 24, tok_cl(tag_t))
-                        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 32, diag_fileid_for_line(tok_ln(tag_t)))
-                        g_diag_count = g_diag_count + 1
+                        check_error(EC_TA_UNKNOWN_TAG, "unknown declaration tag '" + tag + "'", tok_ln(tag_t), tok_cl(tag_t))
                 if !check(T_COMMA):
                     break
                 advance_tok()
@@ -1719,8 +1709,9 @@ fn parse_generics_into(names: string, constrs: string) -> int:
             if gc >= MAX_GENERICS:
                 break
             gt := advance_tok()
-            unsafe:
-                cell_store(names, gc * 8, @ptr_of(tok_lx(gt)))
+            // Store the interned name index. The buffer never escapes this file;
+            // keeping raw lexeme pointers here forced every consumer back into unsafe.
+            cell_store(names, gc * 8, str_intern(tok_lx(gt)))
             // Check for constraint: T: Interface
             cell_store(constrs, gc * 8, -1)
             if check(T_COLON_DECL):
@@ -1741,10 +1732,7 @@ fn save_func_generics(fi: int, names: string, count: int):
     loop:
         if gi >= count:
             break
-        name_str := unsafe:
-            @str_of(cell_load(names, gi * 8))
-        ni := str_intern(name_str)
-        fi_set_generic_name(fi, gi, ni)
+        fi_set_generic_name(fi, gi, cell_load(names, gi * 8))
         gi = gi + 1
 
 fn save_func_gen_constrs(fi: int, constrs: string, count: int):
@@ -1950,8 +1938,28 @@ fn parse_body(fn_name: string, fn_ni: int, fn_line: int, fn_col: int, hotpatch_v
                 continue
             pt := advance_tok()
             pn := str_intern(tok_lx(pt))
-            advance_tok()
-            pty := parse_type()
+            pty : ., mut = -1
+            if check(T_COLON_DECL):
+                advance_tok()
+                if check(T_DOT) || check(T_AUTO):
+                    advance_tok()
+                else:
+                    pty = parse_type()
+            // V4: an omitted type or `.`/auto makes the parameter an implicit
+            // type variable. The existing monomorph engine consumes it because
+            // it is registered in the function's generic list before add_func.
+            if pty < 0:
+                if gc >= MAX_GENERICS:
+                    check_error(EC_P_GENERIC_LIST,
+                        "too many inferred type parameters (max " + int_str(MAX_GENERICS) + ")",
+                        tok_ln(pt), tok_cl(pt))
+                    pty = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, tok_ln(pt), tok_cl(pt))
+                else:
+                    ini := str_intern("__infer" + int_str(gc))
+                    cell_store(gnames, gc * 8, ini)
+                    cell_store(gconstrs, gc * 8, -1)
+                    gc = gc + 1
+                    pty = alloc_node(EXPR_IDENT, 0, 0, 0, ini, 0, 0, tok_ln(pt), tok_cl(pt))
             if pf < 0:
                 pf = g_ast_count
             alloc_node(EXPR_PARAM, pn, 0, 0, 0, unpack_type(pty), pty, tok_ln(pt), tok_cl(pt))
@@ -2299,8 +2307,7 @@ fn parse_declaration():
                 loop:
                     if sgi >= sg_count:
                         break
-                    unsafe:
-                        cell_store(g_structs, si * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + sgi * 8, str_intern(@str_of(cell_load(sg_names, sgi * 8))))
+                    cell_store(g_structs, si * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + sgi * 8, cell_load(sg_names, sgi * 8))
                     sgi = sgi + 1
                 // Register struct generic constraints in the struct side table.
                 // The old code wrote them to a dummy buffer and dropped them, so
@@ -2325,7 +2332,29 @@ fn parse_declaration():
                     advance_tok()
                 else:
                     add_error("expected ':' after struct field name")
-                fty := parse_type()
+                fty : ., mut = -1
+                if check(T_DOT) || check(T_AUTO):
+                    advance_tok()
+                else:
+                    fty = parse_type()
+                // V4: a `.` field is an implicit struct type parameter. It is
+                // appended to the struct's generic list so construction sites and
+                // field substitution reuse the existing generic-struct path.
+                if fty < 0:
+                    if sg_count >= MAX_GENERICS:
+                        check_error(EC_P_GENERIC_LIST,
+                            "too many inferred type parameters (max " + int_str(MAX_GENERICS) + ")",
+                            tok_ln(ft), tok_cl(ft))
+                        fty = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, tok_ln(ft), tok_cl(ft))
+                    else:
+                        ini := str_intern("__infer" + int_str(sg_count))
+                        cell_store(sg_names, sg_count * 8, ini)
+                        cell_store(sg_constrs, sg_count * 8, -1)
+                        cell_store(g_structs, si * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + sg_count * 8, ini)
+                        sg_count = sg_count + 1
+                        cell_store(g_structs, si * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT, sg_count)
+                        save_struct_gen_constrs(si, sg_constrs, sg_count)
+                        fty = alloc_node(EXPR_IDENT, 0, 0, 0, ini, 0, 0, tok_ln(ft), tok_cl(ft))
                 si_set_field_type(si, fc, unpack_type(fty))
                 si_set_field_type_node(si, fc, fty)
                 fc = fc + 1
@@ -2361,8 +2390,7 @@ fn parse_declaration():
                 loop:
                     if egi >= eg_count:
                         break
-                    unsafe:
-                        cell_store(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + egi * 8, str_intern(@str_of(cell_load(eg_names, egi * 8))))
+                    cell_store(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + egi * 8, cell_load(eg_names, egi * 8))
                     egi = egi + 1
                 // Enum generic constraints are registered the same way as struct
                 // constraints.
@@ -2528,13 +2556,7 @@ fn parse_declaration():
                 // not a silent truncation. A side-table migration is described in the
                 // dyn_arr.cr constant comment.
                 if method_count >= MAX_IFACE_METHODS:
-                    grow_diags(g_diag_count + 1)
-                    cell_store(g_diags, g_diag_count * DIAG_REC_SIZE, EC_P_FIELD_SYNTAX)
-                    cell_store_str(g_diags, g_diag_count * DIAG_REC_SIZE + 8, "interface '" + iface_name + "' exceeds max 16 methods")
-                    cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 16, tok_ln(t))
-                    cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 24, tok_cl(t))
-                    cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 32, diag_fileid_for_line(tok_ln(t)))
-                    g_diag_count = g_diag_count + 1
+                    check_error(EC_P_FIELD_SYNTAX, "interface '" + iface_name + "' exceeds max 16 methods", tok_ln(t), tok_cl(t))
                 else:
                     mbase := iface_base + OFF_IF_METHODS + method_count * ESZ_IFMETHOD
                     cell_store(g_ifaces, mbase + OFF_IFM_NAME, method_ni)
@@ -2550,13 +2572,7 @@ fn parse_declaration():
                         cell_store(g_ifaces, mbase + OFF_IFM_PARAM_NODES + pj * 8, cell_load(param_nodes, pj * 8))
                         pj = pj + 1
                     if pc > 8:
-                        grow_diags(g_diag_count + 1)
-                        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE, EC_P_PARAM_TYPE)
-                        cell_store_str(g_diags, g_diag_count * DIAG_REC_SIZE + 8, "method '" + istr_get(method_ni) + "' in interface exceeds max 8 params")
-                        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 16, tok_ln(t))
-                        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 24, tok_cl(t))
-                        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 32, diag_fileid_for_line(tok_ln(t)))
-                        g_diag_count = g_diag_count + 1
+                        check_error(EC_P_PARAM_TYPE, "method '" + istr_get(method_ni) + "' in interface exceeds max 8 params", tok_ln(t), tok_cl(t))
                 method_count = method_count + 1
             else:
                 advance_tok()
