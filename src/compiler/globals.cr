@@ -60,19 +60,30 @@ g_ccr_nod_type : string, mut
 g_ccr_nod_type_count : int, mut
 g_ccr_nod_flags : string, mut
 g_ccr_nod_flags_count : int, mut
+// Semantic v10 CASE model. Rows are 24B records with the same field layout as
+// the wire (value, kind, str index, target, flags), but `target` is the IR body
+// *label number* rather than a NOD id. ir_gen fills this model; ccr_lower is
+// the only step that turns it into g_ccr_case (the wire table), and the CIR
+// cache persists this model rather than the derived wire. This file is first in
+// both builds, so these globals must stay here.
+g_lat_case : string, mut
+g_lat_case_count : int, mut
+// Capacity of g_lat_case in 24B rows. Compiler-private and never serialized.
+g_lat_case_cap : int, mut
 // In-memory CASE table for v10 segment tag 9. Rows are 24B records with the
 // layout named by CCR_CASE_* (value, kind, str index, target NOD, flags).
-// corec fills this table when it lowers a match; the empty program keeps count
-// zero and the wire writes a bare 4B zero count. The loader rebuilds the same
-// rows from disk. This file is first in both builds, so it must stay here.
+// This is a derived buffer: ccr_lower builds it from g_lat_case, and ccr_io /
+// interp read it as wire. The empty program keeps count zero and the wire
+// writes a bare 4B zero count. The loader rebuilds the same rows from disk.
+// This file is first in both builds, so it must stay here.
 g_ccr_case : string, mut
 g_ccr_case_count : int, mut
-// Capacity of g_ccr_case in 24B rows. corec appends rows while lowering a
-// match; the capacity is compiler-private and never serialized.
+// Capacity of g_ccr_case in 24B rows. ccr_lower appends rows while deriving the
+// wire; the capacity is compiler-private and never serialized.
 g_ccr_case_cap : int, mut
 // Set by ir_gen when the current function lowered a match to IR_MATCH. The
-// v24 .cir snapshot carries the CASE range, so this is a diagnostic flag, not a
-// cache-save gate.
+// .cir snapshot carries the semantic CASE range, so this is a diagnostic flag,
+// not a cache-save gate.
 g_cir_has_match : int, mut
 g_ast : string, mut
 g_ast_count : int, mut

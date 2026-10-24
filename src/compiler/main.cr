@@ -238,6 +238,7 @@ fn corec_main() -> int:
     cli_flag_bool_debug("dump-types", "", "Debug: dump TYPE segment")
     cli_flag_bool_debug("dump-ifaces", "", "Debug: dump IFACE segment")
     cli_flag_bool_debug("dump-tk-terms", "", "Debug: dump per-DFNode type terms")
+    cli_flag_bool_debug("dump-case-model", "", "Debug: report semantic CASE model vs derived wire counts")
     // The old type-shadow CLI channels were removed; the judgment path has no
     // switch and always goes through the engine.
     cli_flag_bool_debug("verify-named-dedup", "", "Debug: verify type side-table consistency")
@@ -393,6 +394,9 @@ fn corec_main() -> int:
         if g_diag_count > ir_diag_base_run:
             print_diagnostics()
             return 1
+        // The interpreter consumes the wire CASE table. Derive it from the
+        // semantic model exactly as the .ccr path does before executing.
+        lower_to_ccr()
         return ir_interpret()
 
     // === clean-cache: delete incremental compilation cache ===
@@ -455,6 +459,10 @@ fn corec_main() -> int:
     g_ir_str_const_count = 0
     g_ir_source_hash = 0
     g_ir_source_hash_ready = 0
+    g_lat_case = ""
+    g_lat_case_count = 0
+    g_lat_case_cap = 0
+    // Wire CASE is derived by ccr_lower; clear both to avoid stale rows.
     g_ccr_case = ""
     g_ccr_case_count = 0
     g_ccr_case_cap = 0
@@ -594,6 +602,14 @@ fn corec_main() -> int:
     // on it.
     df_state_finalize()
 
+    // Hidden contract channel: report the semantic CASE model and the derived
+    // wire count before lowering. Normal builds print nothing.
+    if cli_has("dump-case-model") != 0:
+        print("case_model_before ")
+        print(int_str(g_lat_case_count))
+        print(" ")
+        println(int_str(g_ccr_case_count))
+
     // === cir: output dataflow graph ===
     if cli_eq(cmd, "cir"):
         // Register allocation checks and entry dumps live in corearch now.
@@ -634,6 +650,11 @@ fn corec_main() -> int:
         pass_cse()
     println("lower to ccr...")
     lower_to_ccr()
+    if cli_has("dump-case-model") != 0:
+        print("case_model_after ")
+        print(int_str(g_lat_case_count))
+        print(" ")
+        println(int_str(g_ccr_case_count))
     print("lower done: ")
     print(int_str(g_ir_func_count))
     print(" funcs, ")

@@ -1910,7 +1910,7 @@ def test_p4t4_cir_snapshot_layout_unbumped():
         total_nodes = 0
         for f in entries:
             ver, nodes, ok = cir_entry_nodes(os.path.join(cache_dir, f))
-            assert ver == 24, f"{f}: CIR_CACHE_VER {ver} != 24（2026-10-24 v10 MATCH CASE 持久化：指令段后新增 CASE 小节 ⇒ 布局改变；前代 23 = 2026-10-23 **BigInt IR 批**；22 = 插值展开批、21 = 串域批、20 = 缓存膨胀批、19 = 批 5（opt-dex）、18 = TODO #2026-09-16-16 批 2）"
+            assert ver == 25, f"{f}: CIR_CACHE_VER {ver} != 25（2026-10-24 v10 MATCH CASE 语义模型持久化：CASE 小节存 target label 而非派生 wire target；前代 24 = MATCH CASE 持久化、23 = 2026-10-23 **BigInt IR 批**；22 = 插值展开批、21 = 串域批、20 = 缓存膨胀批、19 = 批 5（opt-dex）、18 = TODO #2026-09-16-16 批 2）"
             assert ok, f"{f}: node section (64B stride) runs past EOF"
             total_nodes += len(nodes)
         assert total_nodes > 0, "vacuous: no nodes parsed from snapshots"
@@ -2073,7 +2073,7 @@ def test_p5t2_snapshot_disk_code_preserved():
         disk = []
         for f in sorted(os.listdir(cache_dir)):
             ver, nodes, ok = cir_entry_nodes(os.path.join(cache_dir, f))
-            assert ver == 24 and ok, f"{f}: version/stride drifted（期望 24 = 2026-10-24 v10 MATCH CASE 持久化（指令段后新增 CASE 小节，节点 stride 仍 64B / 头偏移不变）；前代 23 = BigInt IR 批；22 = 插值展开批；21 = 串域批；20 = 缓存膨胀批；19 = 批 5（opt-dex）；18 = TODO #2026-09-16-16 批 2）"
+            assert ver == 25 and ok, f"{f}: version/stride drifted（期望 25 = 2026-10-24 v10 MATCH CASE 语义模型持久化（CASE 小节存 target label，节点 stride 仍 64B / 头偏移不变）；前代 24 = MATCH CASE 持久化；23 = BigInt IR 批；22 = 插值展开批；21 = 串域批；20 = 缓存膨胀批；19 = 批 5（opt-dex）；18 = TODO #2026-09-16-16 批 2）"
             disk += [(nd[0], nd[5]) for nd in nodes]
         assert disk, "vacuous: no nodes parsed from snapshots"
         mint = set((r[1], r[2]) for r in rows if r[1] in MINT_OPS and r[2] > 0)

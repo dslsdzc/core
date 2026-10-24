@@ -227,7 +227,7 @@ def _assert_soft_diagnostic(tmp, source, name, needles):
 # so the tests can prove the MATCH CASE section round-trips, and can tamper with
 # exactly that section.
 
-CIR_VERSION = 24
+CIR_VERSION = 25
 CIR_CASE_ROW = 24
 
 
@@ -257,7 +257,7 @@ def _entry_stamp(path):
 
 
 def _cir_snapshot(data):
-    """Parse a v24 snapshot. Returns section offsets and CASE rows."""
+    """Parse a v25 snapshot. Returns section offsets and CASE model rows."""
     if len(data) < 56:
         raise AssertionError(f"snapshot too short: {len(data)}B")
     magic, ver, cid, fp, sig, name_len = struct.unpack_from("<qqqqqq", data, 0)
@@ -293,7 +293,7 @@ def _cir_snapshot(data):
         rows_off = off
         rows = []
         for _row in range(count):
-            value, kind, str_index, target_rel, case_flags = struct.unpack_from(
+            value, kind, str_index, target_label, case_flags = struct.unpack_from(
                 "<qiiiI", data, off
             )
             rows.append(
@@ -302,7 +302,7 @@ def _cir_snapshot(data):
                     "value": value,
                     "kind": kind,
                     "str_index": str_index,
-                    "target_rel": target_rel,
+                    "target_label": target_label,
                     "flags": case_flags,
                 }
             )
@@ -2618,16 +2618,28 @@ SHIFT_MAIN = """fn main() -> int:
 """
 
 
+def _snapshot_labels(snap, data):
+    """Label numbers carried by this snapshot's IR_LABEL nodes."""
+    labels = set()
+    for i in range(snap["node_count"]):
+        off = snap["node_p"] + i * 64
+        if struct.unpack_from("<q", data, off)[0] == IR_LABEL:
+            labels.add(struct.unpack_from("<q", data, off + 16)[0])
+    return labels
+
+
 def _assert_snapshot_case_section(snap, data, counts):
-    """Validate one snapshot's CASE section and its target labels."""
+    """Validate one snapshot's semantic CASE model and its target labels."""
     assert snap["match_count"] == len(counts), snap["match_count"]
+    labels = _snapshot_labels(snap, data)
     for match, count in zip(snap["matches"], counts):
         assert match["count"] == count, (match["count"], count)
         for row in match["rows"]:
-            rel = row["target_rel"]
-            assert 0 <= rel < snap["node_count"], (rel, snap["node_count"])
-            op = struct.unpack_from("<q", data, snap["node_p"] + rel * 64)[0]
-            assert op == IR_LABEL, f"CASE target rel {rel} is op {op}, expected IR_LABEL"
+            label = row["target_label"]
+            assert label >= 0, f"CASE model target label {label} is unresolved"
+            assert label in labels, (
+                f"CASE model target label {label} is not an IR_LABEL in this function"
+            )
 
 
 def _snapshot_match_nod(data, snap, ordinal=0):
@@ -2704,6 +2716,55 @@ def _assert_match_cold_warm(tmp, source, base, expected, fns):
     return snaps
 
 
+def test_case_model_is_semantic_before_lower():
+    """ir_gen fills only the semantic model; ccr_lower derives the wire table.
+
+    The hidden channel reports both counts around lower_to_ccr. Before lowering
+    the wire table must be empty while the model has rows; afterwards the wire
+    count must be non-zero and every MATCH range must index that wire table.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        _clean_cache(tmp)
+        src = _write_source(tmp, MATCH_INT_SOURCE, "case_model_contract")
+        ccr = tmp / "case_model_contract.ccr"
+        r = _run(
+            [COREC, "ccr", src, "-o", ccr, "--dump-case-model"],
+            cwd=tmp,
+        )
+        assert r.returncode == 0, f"corec ccr failed: {r.stdout}\n{r.stderr}"
+        before = {}
+        after = {}
+        for line in r.stdout.splitlines():
+            parts = line.split()
+            if len(parts) != 3:
+                continue
+            if parts[0] == "case_model_before":
+                before = {"model": int(parts[1]), "wire": int(parts[2])}
+            elif parts[0] == "case_model_after":
+                after = {"model": int(parts[1]), "wire": int(parts[2])}
+        assert before, f"missing case_model_before: {r.stdout!r}"
+        assert after, f"missing case_model_after: {r.stdout!r}"
+        assert before["model"] > 0, before
+        assert before["wire"] == 0, before
+        assert after["model"] == before["model"], (before, after)
+        assert after["wire"] > 0, after
+
+        data = ccr.read_bytes()
+        validate(data)
+        nodes = _nod_records(data)
+        matches = [rec for rec in nodes if rec[0] == IR_MATCH]
+        assert matches, "expected at least one IR_MATCH"
+        for rec in matches:
+            start, count = rec[3], rec[4]
+            assert count > 0, rec
+            assert 0 <= start < after["wire"], (start, after)
+            assert start + count <= after["wire"], (start, count, after)
+        rows = _parse_case(segment(data, CASE_TAG))
+        assert len(rows) == after["wire"], (len(rows), after)
+        _assert_targets_are_labels(data, rows)
+
+
 def test_cir_cache_restores_match_cases_cold_warm():
     """MATCH functions are saved, hit on the warm path, and rebuild byte-identically."""
     with tempfile.TemporaryDirectory() as td:
@@ -2758,14 +2819,14 @@ def test_cir_cache_nested_match_case_order():
 
 
 def test_cir_cache_warm_restore_remaps_shifted_case_targets():
-    """A hit with a shifted node/instruction baseline rebases CASE targets.
+    """A hit with a shifted node/instruction baseline rebuilds CASE labels.
 
     The fingerprints hash the whole source, so a normal warm build cannot shift
     a cached function's baseline. This fixture constructs the shift explicitly:
     the pad function gains one node (no variables), and the cached pick_b/main
-    v1 snapshots are re-labelled with their v2 fingerprints. The loader must
-    therefore rebase every CASE target from the writer's node_start to the
-    current node base (the baseline shifts by one).
+    v1 snapshots are re-labelled with their v2 fingerprints. The model stores
+    body label numbers, which are unchanged by the shift; ccr_lower must resolve
+    them to the new NOD ids so the warm wire matches the cold wire.
     """
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
@@ -2854,9 +2915,9 @@ def test_cir_cache_tampered_case_section_is_a_miss():
         tampered = []
         # 1. Truncated inside the CASE rows (the trailer is gone).
         tampered.append(("truncated", clean[: first_row + 8]))
-        # 2. Invalid target: one past the function's NOD range.
+        # 2. Invalid target label: no IR_LABEL node in this function carries it.
         bad_target = bytearray(clean)
-        struct.pack_into("<i", bad_target, first_row + 16, snap["node_count"] + 1)
+        struct.pack_into("<i", bad_target, first_row + 16, 0x7FFFFF00)
         tampered.append(("bad_target", bytes(bad_target)))
         # 3. Wrong per-MATCH case count (snapshot disagrees with instruction s3).
         bad_count = bytearray(clean)

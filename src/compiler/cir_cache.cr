@@ -18,8 +18,12 @@
 //   instructions: count, then 48-byte records {op, dest, s1, s2, s3, tk}
 //   match cases: match count, then per IR_MATCH in instruction order:
 //          {case_count, then case_count x 24-byte records
-//           value i64, kind u32, str i32, target_rel i32, flags u32}
-//          target_rel = target_nod - node_start, or -1 for a negative target
+//           value i64, kind u32, str i32, target_label i32, flags u32}
+//          This is the semantic model, not the derived wire: target_label is
+//          the IR body label number, or -1 when the target is unresolved.
+//          The MATCH s2/s3 stored in nodes/instructions are model start/count;
+//          the loader rewrites s2 to the reader's model start and ccr_lower
+//          derives the wire CASE table afterwards.
 //   string constants: count, then {length, bytes}
 //   intern journal: base count, record count, then {length, bytes}
 //   trailer: var_start, node_start
@@ -58,8 +62,8 @@
 //   contract. The stored records, journal, and trailer are unchanged, so no
 //   version bump is required for that migration; only `.ccr` bytes changed.
 //   v24 adds the per-function MATCH CASE section after the instruction range.
-//   The layout changed, so entries written before v24 are invalid even though
-//   the rest of the snapshot is unchanged.
+//   v25 changes that section from derived wire rows (target NOD id) to the
+//   semantic model (target body label), so v24 entries are invalid.
 //
 // Magic value:
 //   The magic is a negative 64-bit constant written as signed decimal. The
@@ -67,7 +71,7 @@
 //   writer and reader use the same constant, so the cache remains self-consistent.
 //   The limitation is recorded in the project backlog.
 CIR_CACHE_MAGIC : int = -4485090715960753727
-CIR_CACHE_VER   : int = 24
+CIR_CACHE_VER   : int = 25
 
 g_cir_write_buf : string, mut
 g_cir_write_pos : int, mut
@@ -218,9 +222,10 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
     instr_count := cell_load(g_ir_func_instr_count, ir_fi * 8)
 
     // Validate and size the MATCH CASE section before touching the file. Every
-    // IR_MATCH owns a contiguous range of g_ccr_case rows; nested matches append
-    // after their enclosing range, which is also instruction order. A mismatch
-    // would produce a snapshot the loader must reject, so refuse to write it.
+    // IR_MATCH owns a contiguous range of semantic model rows (g_lat_case);
+    // nested matches append after their enclosing range, which is also
+    // instruction order. A mismatch would produce a snapshot the loader must
+    // reject, so refuse to write it.
     match_count : ., mut = 0
     match_size : ., mut = 8
     expected_case : ., mut = -1
@@ -234,7 +239,7 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
             ms_n := iri_s3(ms_inst)
             if ms_start < 0 || ms_n < 0:
                 return -1
-            if ms_start + ms_n > g_ccr_case_count:
+            if ms_start + ms_n > g_lat_case_count:
                 return -1
             if expected_case >= 0 && ms_start != expected_case:
                 return -1
@@ -407,15 +412,14 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
                 if cj >= cs_n:
                     break
                 cbase := (cs_start + cj) * 24
-                cir_store_cell(fd, cell_load(g_ccr_case, cbase + CCR_CASE_VALUE))
-                cir_store_cell32(fd, cell_load32(g_ccr_case, cbase + CCR_CASE_KIND))
-                cir_store_cell32(fd, cell_load_i32(g_ccr_case, cbase + CCR_CASE_STR))
-                ctgt := cell_load_i32(g_ccr_case, cbase + CCR_CASE_TARGET)
-                crel : ., mut = -1
-                if ctgt >= 0:
-                    crel = ctgt - node_start
-                cir_store_cell32(fd, crel)
-                cir_store_cell32(fd, cell_load32(g_ccr_case, cbase + CCR_CASE_FLAGS))
+                cir_store_cell(fd, cell_load(g_lat_case, cbase + CCR_CASE_VALUE))
+                cir_store_cell32(fd, cell_load32(g_lat_case, cbase + CCR_CASE_KIND))
+                cir_store_cell32(fd, cell_load_i32(g_lat_case, cbase + CCR_CASE_STR))
+                // Persist the semantic target label, not a node-relative wire
+                // target. Labels are restored verbatim, so no baseline rebase
+                // is needed on load.
+                cir_store_cell32(fd, cell_load_i32(g_lat_case, cbase + CCR_CASE_TARGET))
+                cir_store_cell32(fd, cell_load32(g_lat_case, cbase + CCR_CASE_FLAGS))
                 cj = cj + 1
         cs_i = cs_i + 1
 
@@ -654,9 +658,10 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
             p_match_count = p_match_count + 1
         p_mi = p_mi + 1
 
-    // MATCH CASE section: match count, then per MATCH {case_count, rows}. A row
-    // stores target_rel = target_nod - node_start. Validate every row against
-    // this function's NOD range before any global is written.
+    // MATCH CASE section: match count, then per MATCH {case_count, rows}. This
+    // is the semantic model: a row stores target_label = the IR body label
+    // number. Validate every target against this function's IR_LABEL nodes
+    // before any global is written.
     case_p := p
     if p + 8 > dlen:
         return -1
@@ -712,11 +717,26 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
                 return -1
             if p_flags != 0:
                 return -1
-            p_tr := cell_load_i32(data, p + 16)
-            if p_tr < 0 || p_tr >= p_node_count:
+            p_tl := cell_load_i32(data, p + 16)
+            if p_tl < -1:
                 return -1
-            if cell_load(data, node_p + 8 + p_tr * 64) != IR_LABEL:
-                return -1
+            // A non-negative model target must name an IR_LABEL node in this
+            // function. -1 is preserved for an unresolved target and will be
+            // rejected by ccr_lower's wire validation instead of restoring a
+            // bogus label.
+            if p_tl >= 0:
+                p_lf : ., mut = 0
+                p_ln : ., mut = 0
+                loop:
+                    if p_ln >= p_node_count:
+                        break
+                    p_loff := node_p + 8 + p_ln * 64
+                    if cell_load(data, p_loff) == IR_LABEL && cell_load(data, p_loff + 16) == p_tl:
+                        p_lf = 1
+                        break
+                    p_ln = p_ln + 1
+                if p_lf == 0:
+                    return -1
             p = p + 24
             p_rj = p_rj + 1
         p_mi = p_mi + 1
@@ -1054,13 +1074,14 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         ii = ii + 1
     g_ir_instr_count = base_instr + instr_count
 
-    // Restore this function's MATCH CASE ranges. The section is in the same order
-    // as the restored instruction stream, so pair each group with the next
-    // IR_MATCH and append at the current global CASE count. Stored targets are
-    // relative to the writer's node_start; rebase them to the restored nodes and
-    // rewrite s2 to the new range start. s3 is the stored count and is unchanged.
-    // The pre-scan already validated counts, ordering, target labels, and row
-    // domains, so this phase cannot fail halfway.
+    // Restore this function's semantic MATCH CASE ranges. The section is in the
+    // same order as the restored instruction stream, so pair each group with the
+    // next IR_MATCH and append at the current global model count. Targets are
+    // already body label numbers and labels are restored verbatim, so only the
+    // model start is rebased. s3 (the count) is unchanged. This restores the
+    // model, not the wire; ccr_lower derives g_ccr_case afterwards. The pre-scan
+    // already validated counts, ordering, target labels, and row domains, so
+    // this phase cannot fail halfway.
     restored_matches := cell_load(data, pos)
     pos = pos + 8
     rm_i : ., mut = 0
@@ -1076,10 +1097,10 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
             rm_scan = rm_scan + 1
         rm_count := cell_load(data, pos)
         pos = pos + 8
-        rm_case_start := g_ccr_case_count
+        rm_case_start := g_lat_case_count
         iri_set_s2(rm_scan, rm_case_start)
         // lower_to_ccr rebuilds instructions from NOD, so the mirror must get the
-        // same rebased start. Node/instr local indexes are 1:1 (checked above).
+        // same model start. Node/instr local indexes are 1:1 (checked above).
         rm_nod := base_node + (rm_scan - base_instr)
         cell_store(g_df_nodes, rm_nod * ESZ_DFNODE + OFF_DF_S2, rm_case_start)
         rm_j : ., mut = 0
@@ -1089,13 +1110,10 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
             rm_value := cell_load(data, pos)
             rm_kind := cell_load32(data, pos + 8)
             rm_str := cell_load_i32(data, pos + 12)
-            rm_rel := cell_load_i32(data, pos + 16)
+            rm_label := cell_load_i32(data, pos + 16)
             rm_flags := cell_load32(data, pos + 20)
             pos = pos + 24
-            rm_target : ., mut = -1
-            if rm_rel >= 0:
-                rm_target = base_node + rm_rel
-            ccr_case_append(rm_value, rm_kind, rm_str, rm_target, rm_flags)
+            lat_case_append(rm_value, rm_kind, rm_str, rm_label, rm_flags)
             rm_j = rm_j + 1
         rm_scan = rm_scan + 1
         rm_i = rm_i + 1

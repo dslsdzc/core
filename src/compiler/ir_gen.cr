@@ -827,39 +827,42 @@ fn new_label() -> int:
     g_next_label = g_next_label + 1
     return lbl
 
-// ── v10 CASE table helpers ───────────────────────────────────────────────
-// The CASE table is a flat 24B-row buffer. A match reserves its rows before
-// emitting arm bodies so nested matches append after the outer range; the
-// targets (NOD ids of IR_LABEL nodes) are filled after each body label exists.
-fn grow_ccr_case(needed: int):
-    if needed < g_ccr_case_cap:
+// ── v10 semantic CASE model helpers ──────────────────────────────────────
+// The model is a flat 24B-row buffer with the same layout as the wire CASE
+// table, except `target` is the IR body label number (not a NOD id). A match
+// reserves its rows before emitting arm bodies so nested matches append after
+// the outer range; each target label is recorded once its body label exists.
+// ccr_lower resolves labels to NOD ids and builds the wire table; ir_gen never
+// writes g_ccr_case.
+fn grow_lat_case(needed: int):
+    if needed < g_lat_case_cap:
         return
-    nc : ., mut = g_ccr_case_cap * 2
+    nc : ., mut = g_lat_case_cap * 2
     if nc < 16:
         nc = 16
     if nc < needed:
         nc = needed + 16
     nb := alloc(nc * CCR_V10_CASE_DISK)
-    cell_copy(g_ccr_case, g_ccr_case_cap * CCR_V10_CASE_DISK, nb)
-    g_ccr_case = nb
-    g_ccr_case_cap = nc
+    cell_copy(g_lat_case, g_lat_case_cap * CCR_V10_CASE_DISK, nb)
+    g_lat_case = nb
+    g_lat_case_cap = nc
 
-fn ccr_case_append(value: int, kind: int, str_index: int, target: int, flags: int) -> int:
-    idx := g_ccr_case_count
-    grow_ccr_case(idx + 1)
+fn lat_case_append(value: int, kind: int, str_index: int, target_label: int, flags: int) -> int:
+    idx := g_lat_case_count
+    grow_lat_case(idx + 1)
     base := idx * CCR_V10_CASE_DISK
-    cell_store(g_ccr_case, base + CCR_CASE_VALUE, value)
-    cell_store32(g_ccr_case, base + CCR_CASE_KIND, kind)
-    cell_store32(g_ccr_case, base + CCR_CASE_STR, str_index)
-    cell_store32(g_ccr_case, base + CCR_CASE_TARGET, target)
-    cell_store32(g_ccr_case, base + CCR_CASE_FLAGS, flags)
-    g_ccr_case_count = idx + 1
+    cell_store(g_lat_case, base + CCR_CASE_VALUE, value)
+    cell_store32(g_lat_case, base + CCR_CASE_KIND, kind)
+    cell_store32(g_lat_case, base + CCR_CASE_STR, str_index)
+    cell_store32(g_lat_case, base + CCR_CASE_TARGET, target_label)
+    cell_store32(g_lat_case, base + CCR_CASE_FLAGS, flags)
+    g_lat_case_count = idx + 1
     return idx
 
-fn ccr_case_set_target(idx: int, target: int):
-    if idx < 0 || idx >= g_ccr_case_count:
+fn lat_case_set_target(idx: int, label: int):
+    if idx < 0 || idx >= g_lat_case_count:
         return
-    cell_store32(g_ccr_case, idx * CCR_V10_CASE_DISK + CCR_CASE_TARGET, target)
+    cell_store32(g_lat_case, idx * CCR_V10_CASE_DISK + CCR_CASE_TARGET, label)
 
 fn bind_local(name_idx: int, var_idx: int):
     grow_ir_locals(g_ir_local_count + 1)
@@ -3003,20 +3006,20 @@ fn gen_expr(node: int) -> int:
                 an0 = ast_c(an0)
         case_base : ., mut = -1
         if match_mode != 0:
-            case_base = g_ccr_case_count
+            case_base = g_lat_case_count
             // type_kind 0: MATCH is not a type-face op. The NOD semantic
             // type_id is filled by ccr_nod_type_domain from the scrutinee var,
             // so the wire records the scrutinee domain instead of an invented
             // result domain.
             emit(IR_MATCH, -1, match_val, case_base, unique_n, 0)
             g_cir_has_match = 1
-            // Reserve the whole range before emitting bodies: nested matches in
-            // an arm must append after this range, not splice into it.
+            // Reserve the whole model range before emitting bodies: nested
+            // matches in an arm must append after this range, not splice into it.
             cj0 : ., mut = 0
             loop:
                 if cj0 >= unique_n:
                     break
-                ccr_case_append(cell_load(vals, cj0 * 16 + 8), cell_load(vals, cj0 * 16), -1, -1, 0)
+                lat_case_append(cell_load(vals, cj0 * 16 + 8), cell_load(vals, cj0 * 16), -1, -1, 0)
                 cj0 = cj0 + 1
         an : ., mut = first_arm
         arm_idx : ., mut = 0
@@ -3279,14 +3282,13 @@ fn gen_expr(node: int) -> int:
                     if has_next == 1:
                         fall_lbl = new_label()
                     emit(IR_JUMP, -1, fall_lbl, 0, 0, 0)
-            body_nod : ., mut = -1
-            if match_mode != 0:
-                body_nod = g_ir_instr_count
             emit(IR_LABEL, -1, body_lbl, 0, 0, 0)
             if match_mode != 0:
                 ci_arm := cell_load(cis, arm_idx * 8)
                 if ci_arm >= 0:
-                    ccr_case_set_target(case_base + ci_arm, body_nod)
+                    // The semantic model stores the body label number. ccr_lower
+                    // resolves it to the NOD id when it derives the wire table.
+                    lat_case_set_target(case_base + ci_arm, body_lbl)
             push_ir_scope()
             if pat_kind == EXPR_STRUCTPAT:
                 gen_structpat_binds(arm_pat, match_val)
@@ -4706,6 +4708,11 @@ fn ir_gen_all():
     g_next_label = 1
     g_ir_loop_depth = 0
     g_ir_str_const_count = 0
+    g_lat_case = ""
+    g_lat_case_count = 0
+    g_lat_case_cap = 0
+    // The wire table is derived by ccr_lower; reset it too so a second IR run
+    // in one process cannot inherit stale rows.
     g_ccr_case = ""
     g_ccr_case_count = 0
     g_ccr_case_cap = 0
