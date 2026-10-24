@@ -2630,6 +2630,47 @@ def _assert_snapshot_case_section(snap, data, counts):
             assert op == IR_LABEL, f"CASE target rel {rel} is op {op}, expected IR_LABEL"
 
 
+def _snapshot_match_nod(data, snap, ordinal=0):
+    """Return (local index, record offset, s2, s3) for a MATCH NOD record."""
+    seen = 0
+    for i in range(snap["node_count"]):
+        off = snap["node_p"] + i * 64
+        if struct.unpack_from("<q", data, off)[0] == IR_MATCH:
+            if seen == ordinal:
+                s2, s3 = struct.unpack_from("<qq", data, off + 24)
+                return i, off, s2, s3
+            seen += 1
+    raise AssertionError(f"no MATCH NOD ordinal {ordinal}")
+
+
+def _snapshot_match_instr(data, snap, ordinal=0):
+    """Return (local index, record offset, s2, s3) for a MATCH instruction."""
+    seen = 0
+    for i in range(snap["instr_count"]):
+        off = snap["instr_p"] + i * 48
+        if struct.unpack_from("<q", data, off)[0] == IR_MATCH:
+            if seen == ordinal:
+                s2, s3 = struct.unpack_from("<qq", data, off + 24)
+                return i, off, s2, s3
+            seen += 1
+    raise AssertionError(f"no MATCH instruction ordinal {ordinal}")
+
+
+def _assert_tampered_rebuild(tmp, src, entry, data, tag, base_elf, base_ccr,
+                             counts=(5,), expected=42):
+    """Write a corrupt snapshot; the next build must miss, rebuild, and match baseline."""
+    entry.write_bytes(data)
+    stamp = _entry_stamp(entry)
+    time.sleep(0.02)
+    out_elf, out_ccr = _build_source(tmp, src, f"tampered_{tag}", tmp)
+    assert out_elf.read_bytes() == base_elf, f"{tag}: partial/incorrect ELF"
+    assert out_ccr.read_bytes() == base_ccr, f"{tag}: partial .ccr"
+    assert _entry_stamp(entry) != stamp, f"{tag}: cache was not rebuilt"
+    fixed = _cir_snapshot(entry.read_bytes())
+    _assert_snapshot_case_section(fixed, entry.read_bytes(), list(counts))
+    assert _run_elf(out_elf) == expected, tag
+
+
 def _assert_match_cold_warm(tmp, source, base, expected, fns):
     """Cold and warm static builds must match exactly and every entry must hit.
 
@@ -2834,6 +2875,91 @@ def test_cir_cache_tampered_case_section_is_a_miss():
             fixed = _cir_snapshot(entry.read_bytes())
             _assert_snapshot_case_section(fixed, entry.read_bytes(), [5])
             assert _run_elf(out_elf) == 42, text
+
+
+def _nod_tamper_fixture(tmp):
+    _clean_cache(tmp)
+    src = _write_source(tmp, MATCH_INT_SOURCE, "match_nod_tamper")
+    base_elf, base_ccr = _build_source(tmp, src, "baseline", tmp)
+    entry = _cache_entry(tmp, "pick")
+    clean = entry.read_bytes()
+    snap = _cir_snapshot(clean)
+    _index, nod_off, nod_s2, nod_s3 = _snapshot_match_nod(clean, snap)
+    _instr_index, instr_off, instr_s2, instr_s3 = _snapshot_match_instr(clean, snap)
+    assert (nod_s2, nod_s3) == (instr_s2, instr_s3) == (0, 5)
+    return src, entry, clean, nod_off, base_elf.read_bytes(), base_ccr.read_bytes()
+
+
+def test_cir_cache_tampered_nod_match_s2_is_a_miss():
+    """A NOD s2 that disagrees with the MATCH instruction must be a miss.
+
+    lower_to_ccr rebuilds from NOD, so accepting the tampered mirror would change
+    the warm CASE start and the emitted ELF.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        src, entry, clean, nod_off, base_elf, base_ccr = _nod_tamper_fixture(tmp)
+        data = bytearray(clean)
+        struct.pack_into("<q", data, nod_off + 24, 1)
+        _assert_tampered_rebuild(
+            tmp, src, entry, bytes(data), "nod_s2", base_elf, base_ccr
+        )
+
+
+def test_cir_cache_tampered_nod_match_s3_is_a_miss():
+    """A NOD s3 that disagrees with the instruction/case count must be a miss."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        src, entry, clean, nod_off, base_elf, base_ccr = _nod_tamper_fixture(tmp)
+        data = bytearray(clean)
+        struct.pack_into("<q", data, nod_off + 32, 4)   # clean count is 5
+        _assert_tampered_rebuild(
+            tmp, src, entry, bytes(data), "nod_s3", base_elf, base_ccr
+        )
+
+
+def test_cir_cache_rebases_stale_case_start_with_nod_rewrite():
+    """A cached MATCH after another cached MATCH is rebased to the reader's table.
+
+    The seeded pick_b snapshot carries a stale writer-side s2 (0) while pick_a
+    already restored three rows. The loader must ignore the stale start, rewrite
+    both the instruction and the NOD mirror to 3, and still hit. Without the NOD
+    rewrite, lower_to_ccr would emit CASE range (0,4) instead of (3,4).
+    """
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        _clean_cache(tmp)
+        src = _write_source(tmp, MATCH_TWO_FUNCS_SOURCE, "match_case_rebase")
+        base_elf, base_ccr = _build_source(tmp, src, "baseline", tmp)
+        base_elf_bytes = base_elf.read_bytes()
+        base_ccr_bytes = base_ccr.read_bytes()
+
+        entry = _cache_entry(tmp, "pick_b")
+        clean = entry.read_bytes()
+        snap = _cir_snapshot(clean)
+        _ni, nod_off, nod_s2, nod_s3 = _snapshot_match_nod(clean, snap)
+        _ii, instr_off, instr_s2, instr_s3 = _snapshot_match_instr(clean, snap)
+        assert nod_s2 == instr_s2 == 3, (nod_s2, instr_s2)
+        assert nod_s3 == instr_s3 == 4, (nod_s3, instr_s3)
+
+        data = bytearray(clean)
+        struct.pack_into("<q", data, nod_off + 24, 0)
+        struct.pack_into("<q", data, instr_off + 24, 0)
+        entry.write_bytes(bytes(data))
+        stamp = _entry_stamp(entry)
+        time.sleep(0.02)
+        warm_elf, warm_ccr = _build_source(tmp, src, "warm", tmp)
+        assert _entry_stamp(entry) == stamp, "stale-s2 snapshot did not hit"
+        assert warm_elf.read_bytes() == base_elf_bytes, "warm ELF differs from cold"
+        assert warm_ccr.read_bytes() == base_ccr_bytes, "warm .ccr differs from cold"
+        assert _run_elf(warm_elf) == 42
+
+        nodes = _nod_records(warm_ccr.read_bytes())
+        match_nodes = [i for i, rec in enumerate(nodes) if rec[0] == IR_MATCH]
+        assert len(match_nodes) == 2, match_nodes
+        assert nodes[match_nodes[0]][3] == 0, nodes[match_nodes[0]]
+        assert nodes[match_nodes[1]][3] == 3, nodes[match_nodes[1]]
+        assert nodes[match_nodes[1]][4] == 4, nodes[match_nodes[1]]
 
 
 

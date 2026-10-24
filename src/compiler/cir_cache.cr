@@ -638,6 +638,11 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
     p = p + 8 + p_instr_count * 48
     if p > dlen:
         return -1
+    // emit() creates one NOD and one instruction per operation, so the local
+    // index is the same in both sections. The MATCH NOD mirror is validated below
+    // through this mapping; require the counts to agree before relying on it.
+    if p_node_count != p_instr_count:
+        return -1
     // Count IR_MATCH instructions. The CASE section stores one group per MATCH
     // in instruction order, so this count must match the section header exactly.
     p_match_count : ., mut = 0
@@ -653,6 +658,8 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
     // stores target_rel = target_nod - node_start. Validate every row against
     // this function's NOD range before any global is written.
     case_p := p
+    if p + 8 > dlen:
+        return -1
     p_case_matches := cell_load(data, p)
     p = p + 8
     if p_case_matches != p_match_count:
@@ -673,9 +680,21 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         p_inst := instr_p + 8 + p_mi * 48
         p_ms := cell_load(data, p_inst + 24)
         p_mn := cell_load(data, p_inst + 32)
+        if p + 8 > dlen:
+            return -1
         p_cn := cell_load(data, p)
         p = p + 8
         if p_cn != p_mn || p_cn < 0 || p_ms < 0:
+            return -1
+        // The cached MATCH NOD is lowered into the .ccr, so its s2/s3 must
+        // mirror the instruction exactly. A tampered NOD would otherwise hit and
+        // change the warm CASE range after lower_to_ccr rebuilds from NOD.
+        p_nod := node_p + 8 + p_mi * 64
+        if cell_load(data, p_nod) != IR_MATCH:
+            return -1
+        if cell_load(data, p_nod + 24) != p_ms:
+            return -1
+        if cell_load(data, p_nod + 32) != p_mn:
             return -1
         // Matches in one function own contiguous ranges in increasing order.
         if p_expected_case >= 0 && p_ms != p_expected_case:
@@ -711,6 +730,8 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         p_mi = p_mi + 1
 
     str_p := p
+    if p + 8 > dlen:
+        return -1
     p_str_count := cell_load(data, p)
     p = p + 8
     p_si : ., mut = 0
@@ -1057,6 +1078,10 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         pos = pos + 8
         rm_case_start := g_ccr_case_count
         iri_set_s2(rm_scan, rm_case_start)
+        // lower_to_ccr rebuilds instructions from NOD, so the mirror must get the
+        // same rebased start. Node/instr local indexes are 1:1 (checked above).
+        rm_nod := base_node + (rm_scan - base_instr)
+        cell_store(g_df_nodes, rm_nod * ESZ_DFNODE + OFF_DF_S2, rm_case_start)
         rm_j : ., mut = 0
         loop:
             if rm_j >= rm_count:
