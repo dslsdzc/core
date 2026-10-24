@@ -266,8 +266,8 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
         own_edge_count = 0
     total_size = total_size + 8 + own_edge_count * 24
     total_size = total_size + 8 + instr_count * 48
-    // Per-function MATCH CASE section. Always present, even when empty, so the
-    // reader can parse every v24 snapshot with one layout.
+    // Per-function MATCH CASE model section. Always present, even when empty,
+    // so the reader can parse every v25 snapshot with one layout.
     total_size = total_size + match_size
     total_size = total_size + 8
     size_si : ., mut = 0

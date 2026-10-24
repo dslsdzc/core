@@ -219,13 +219,13 @@ def _assert_soft_diagnostic(tmp, source, name, needles):
 
 
 # ---------------------------------------------------------------------------
-# .cir snapshot fixtures (v24 layout)
+# .cir snapshot fixtures (v25 layout)
 # ---------------------------------------------------------------------------
 #
 # The cache lives under <cwd>/.core/cache/cir and is keyed by source path and
-# function name. These helpers parse the v24 per-function snapshot independently
-# so the tests can prove the MATCH CASE section round-trips, and can tamper with
-# exactly that section.
+# function name. These helpers parse the v25 per-function snapshot independently
+# so the tests can prove the semantic MATCH CASE model round-trips, and can
+# tamper with exactly that section.
 
 CIR_VERSION = 25
 CIR_CASE_ROW = 24
@@ -2716,12 +2716,28 @@ def _assert_match_cold_warm(tmp, source, base, expected, fns):
     return snaps
 
 
+def _case_model_counts(stdout):
+    """Parse the hidden --dump-case-model lines into (before, after) dicts."""
+    before = {}
+    after = {}
+    for line in stdout.splitlines():
+        parts = line.split()
+        if len(parts) != 3:
+            continue
+        if parts[0] == "case_model_before":
+            before = {"model": int(parts[1]), "wire": int(parts[2])}
+        elif parts[0] == "case_model_after":
+            after = {"model": int(parts[1]), "wire": int(parts[2])}
+    return before, after
+
+
 def test_case_model_is_semantic_before_lower():
     """ir_gen fills only the semantic model; ccr_lower derives the wire table.
 
     The hidden channel reports both counts around lower_to_ccr. Before lowering
     the wire table must be empty while the model has rows; afterwards the wire
-    count must be non-zero and every MATCH range must index that wire table.
+    count must equal the model count and every MATCH range must index that wire
+    table. The warm run proves a restored model is also not pre-expanded to wire.
     """
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -2733,22 +2749,13 @@ def test_case_model_is_semantic_before_lower():
             cwd=tmp,
         )
         assert r.returncode == 0, f"corec ccr failed: {r.stdout}\n{r.stderr}"
-        before = {}
-        after = {}
-        for line in r.stdout.splitlines():
-            parts = line.split()
-            if len(parts) != 3:
-                continue
-            if parts[0] == "case_model_before":
-                before = {"model": int(parts[1]), "wire": int(parts[2])}
-            elif parts[0] == "case_model_after":
-                after = {"model": int(parts[1]), "wire": int(parts[2])}
+        before, after = _case_model_counts(r.stdout)
         assert before, f"missing case_model_before: {r.stdout!r}"
         assert after, f"missing case_model_after: {r.stdout!r}"
         assert before["model"] > 0, before
         assert before["wire"] == 0, before
         assert after["model"] == before["model"], (before, after)
-        assert after["wire"] > 0, after
+        assert after["wire"] == before["model"], (before, after)
 
         data = ccr.read_bytes()
         validate(data)
@@ -2763,6 +2770,30 @@ def test_case_model_is_semantic_before_lower():
         rows = _parse_case(segment(data, CASE_TAG))
         assert len(rows) == after["wire"], (len(rows), after)
         _assert_targets_are_labels(data, rows)
+
+        # Warm run: the cache restores the semantic model, not the wire. The
+        # entries must hit, the pre-lower wire count must stay zero, and the
+        # derived .ccr must be byte-identical.
+        entries = [_cache_entry(tmp, fn) for fn in ("pick", "main")]
+        stamps = [_entry_stamp(entry) for entry in entries]
+        warm_ccr = tmp / "case_model_contract_warm.ccr"
+        time.sleep(0.02)
+        rw = _run(
+            [COREC, "ccr", src, "-o", warm_ccr, "--dump-case-model"],
+            cwd=tmp,
+        )
+        assert rw.returncode == 0, f"warm corec ccr failed: {rw.stdout}\n{rw.stderr}"
+        warm_before, warm_after = _case_model_counts(rw.stdout)
+        assert warm_before, f"missing warm case_model_before: {rw.stdout!r}"
+        assert warm_after, f"missing warm case_model_after: {rw.stdout!r}"
+        for entry, stamp in zip(entries, stamps):
+            assert _entry_stamp(entry) == stamp, (
+                f"{entry.name}: warm run did not hit the cache"
+            )
+        assert warm_before["model"] == before["model"], (before, warm_before)
+        assert warm_before["wire"] == 0, warm_before
+        assert warm_after["wire"] == warm_before["model"], (warm_before, warm_after)
+        assert warm_ccr.read_bytes() == ccr.read_bytes(), "cold/warm .ccr differ"
 
 
 def test_cir_cache_restores_match_cases_cold_warm():

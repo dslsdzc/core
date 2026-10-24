@@ -581,8 +581,9 @@ fn corec_main() -> int:
             df_end_func(ir_func_idx)
 
             // Save only when generation did not change snapshot-uncarried shared state.
-            // MATCH CASE ranges are part of the snapshot (v24), so a MATCH function
-            // is saved like any other. g_cir_has_match remains diagnostic only.
+            // MATCH CASE model rows are part of the snapshot (v25), so a MATCH
+            // function is saved like any other. g_cir_has_match remains
+            // diagnostic only.
             if cache_enabled != 0:
                 if g_type_count == tc0:
                     save_cir_cache(cache_path, fi, ir_func_idx)
