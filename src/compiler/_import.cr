@@ -7,6 +7,7 @@ import ccr_schema
 import globals
 import bytes
 import dyn_arr
+import source
 import literal
 import big_lit
 import lexer

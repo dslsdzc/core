@@ -234,6 +234,7 @@ fn corec_main() -> int:
     cli_cmd("clean-cache", "Delete incremental compilation cache")
     cli_cmd("selftest-types", "Run type-engine self tests (R2 P0)")
     cli_cmd("selftest-purity", "Run effect-purity self tests (Task 1)")
+    cli_cmd("selftest-source", "Run SourceManager self tests")
     cli_flag("output", "o", "Output path")
     cli_flag_bool("static", "", "Static linking (embed runtime)")
     cli_flag("opt-level", "O", "Optimization level (0,1,2,3; default=1). O1 CSE runs in corec; O2 register allocation runs in corearch")
@@ -419,6 +420,10 @@ fn corec_main() -> int:
     // === selftest-purity: effect-purity self tests with inline source and full frontend/IR ===
     if cli_eq(cmd, "selftest-purity"):
         return purity_selftest_run()
+
+    // === selftest-source: SourceManager self tests; no source file, no artifact ===
+    if cli_eq(cmd, "selftest-source"):
+        return sm_selftest()
 
     // === File-based subcommands: build | check | cir | ccr ===
     if cli_arg_count() < 1:
