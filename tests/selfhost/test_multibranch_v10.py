@@ -1106,6 +1106,105 @@ fn main() -> int:
     return 42
 """
 
+# Concrete generic instances reached through locals, field access, call results,
+# and a shadowed parameter. The checker resolves the actual scrutinee type; the
+# monomorph defensiveness must not fall back to the generic struct declaration.
+MATCH_STRUCT_GENERIC_ACTUALS_SOURCE = """struct Point:
+    x: int
+
+struct Pair[T]:
+    a: T
+
+struct Holder:
+    p: Pair[Point]
+
+fn make() -> Pair[Point]:
+    return Pair { a = Point { x = 7 } }
+
+fn via_local[U](u: U) -> int:
+    p := Pair { a = Point { x = 7 } }
+    return match p:
+        Pair { a = v } => v.x,
+        _ => 0
+
+fn via_field[U](u: U, h: Holder) -> int:
+    return match h.p:
+        Pair { a = v } => v.x,
+        _ => 0
+
+fn via_call[U](u: U) -> int:
+    return match make():
+        Pair { a = v } => v.x,
+        _ => 0
+
+fn shadowed[U](p: U) -> int:
+    p := Pair { a = Point { x = 7 } }
+    return match p:
+        Pair { a = v } => v.x,
+        _ => 0
+
+fn main() -> int:
+    h := Holder { p = Pair { a = Point { x = 7 } } }
+    if via_local(1) != 7:
+        return 1
+    if via_field(1, h) != 7:
+        return 2
+    if via_call(1) != 7:
+        return 3
+    if shadowed(99) != 7:
+        return 4
+    return 42
+"""
+
+# Optional generic field: R[string] makes s: T? bind as string?. A literal cannot
+# match an optional slot. The nested optional match is a valid operation on the
+# bound value and runs through the interpreter (the pre-existing ELF layout for
+# optional string struct fields is outside this pattern task).
+MATCH_STRUCT_OPTIONAL_BIND_SOURCE = """struct R[T]:
+    s: T?
+
+fn show(r: R[string]) -> int:
+    return match r:
+        R { s = v } =>:
+            return match v:
+                Some(x) =>:
+                    if x == "hi":
+                        return 42
+                    return 1
+                none =>:
+                    return 2
+        _ => 3
+
+fn main() -> int:
+    r := R { s = Some("hi") }
+    return show(r)
+"""
+
+MATCH_STRUCT_OPTIONAL_LITERAL_SOURCE = """struct R[T]:
+    s: T?
+
+fn pick(r: R[string]) -> int:
+    return match r:
+        R { s = "hi" } => 1,
+        _ => 0
+
+fn main() -> int:
+    r := R { s = Some("hi") }
+    return pick(r)
+"""
+
+MATCH_STRUCT_OPTIONAL_UNRESOLVED_SOURCE = """struct R[T]:
+    s: T?
+
+fn pick[U](r: R[U]) -> int:
+    return match r:
+        R { s = v } => 1,
+        _ => 0
+
+fn main() -> int:
+    return pick(1)
+"""
+
 MATCH_STRUCT_CONCRETE_MISMATCH_SOURCE = """struct Point:
     x: int
     y: int
@@ -1808,6 +1907,38 @@ def test_struct_pattern_concrete_generic_instance():
         )
 
 
+def test_struct_pattern_generic_actuals_through_locals_fields_calls():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(
+            tmp, MATCH_STRUCT_GENERIC_ACTUALS_SOURCE, "match_struct_generic_actuals"
+        )
+        assert _match_nodes(data) == [], "struct patterns must not become MATCH"
+        _assert_program(
+            tmp,
+            MATCH_STRUCT_GENERIC_ACTUALS_SOURCE,
+            42,
+            opts=(0, 2),
+            name="match_struct_generic_actuals",
+        )
+
+
+def test_struct_pattern_optional_generic_field_binds_option():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(
+            tmp, MATCH_STRUCT_OPTIONAL_BIND_SOURCE, "match_struct_optional_bind"
+        )
+        assert _match_nodes(data) == [], "struct patterns must not become MATCH"
+        # Interpreter path: the bound ident must be string?, so the nested optional
+        # match type-checks and returns the contained string.
+        run = _run([COREC, "run", MATCH_STRUCT_OPTIONAL_BIND_SOURCE], cwd=BASE)
+        assert run.returncode == 42, (
+            f"optional ident binding failed: rc={run.returncode}: "
+            f"{run.stdout}\n{run.stderr}"
+        )
+
+
 def test_struct_pattern_errors_are_hard():
     cases = [
         (
@@ -1839,6 +1970,16 @@ def test_struct_pattern_errors_are_hard():
             "struct_concrete_mismatch",
             MATCH_STRUCT_CONCRETE_MISMATCH_SOURCE,
             ["error[TS03]", "does not match scrutinee type"],
+        ),
+        (
+            "struct_optional_literal",
+            MATCH_STRUCT_OPTIONAL_LITERAL_SOURCE,
+            ["error[TS03]", "has an optional type"],
+        ),
+        (
+            "struct_optional_unresolved",
+            MATCH_STRUCT_OPTIONAL_UNRESOLVED_SOURCE,
+            ["error[TS03]", "requires a concrete struct type"],
         ),
     ]
     with tempfile.TemporaryDirectory() as td:

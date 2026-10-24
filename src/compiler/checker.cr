@@ -1640,45 +1640,98 @@ fn struct_field_index_by_name(si: int, name_ni: int) -> int:
         j = j + 1
     return -1
 
-// Resolve a struct field type for a pattern scrutinee. Direct generic parameters
-// are substituted from a concrete `TYP_GENERIC_APPLY` scrutinee (same rule as
-// EXPR_FIELD); nested generic forms keep the parameter row and are rejected by the
-// caller unless the subpattern is `_`.
-fn structpat_field_ti(si: int, jdi: int, scrut_ti: int) -> int:
-    if si < 0 || jdi < 0:
-        return -1
-    ftn := si_field_type_node(si, jdi)
-    if ftn >= 0 && ast_kind(ftn) == EXPR_IDENT:
-        ft_name := ast_int_val(ftn)
-        if is_struct_generic(si, ft_name) && get_type_kind(scrut_ti) == TYP_GENERIC_APPLY:
+// Recursively replace struct generic-parameter rows with the concrete arguments
+// supplied by a TYP_GENERIC_APPLY scrutinee. Unknown/absent arguments stay as
+// TYP_GENERIC_PARAM so the caller can reject/fail closed.
+fn structpat_subst_ti(si: int, ti: int, scrut_ti: int) -> int:
+    k := get_type_kind(ti)
+    if k < 0:
+        return ti
+    if k == TYP_GENERIC_PARAM:
+        pni := get_type_data(ti)
+        if get_type_kind(scrut_ti) == TYP_GENERIC_APPLY:
             ga_start := get_type_extra(scrut_ti)
             ga_count := cell_load(g_gen_apply_data, ga_start * 8)
             gpi : ., mut = 0
             loop:
                 if gpi >= si_generic_count(si):
                     break
-                if si_generic_name(si, gpi) == ft_name:
+                if si_generic_name(si, gpi) == pni:
                     if gpi < ga_count:
                         return cell_load(g_gen_apply_data, (ga_start + 1 + gpi) * 8)
                     break
                 gpi = gpi + 1
-    return res_type_node(ftn)
+        return ti
+    if k == TYP_ARRAY:
+        return alloc_type(TYP_ARRAY, structpat_subst_ti(si, get_type_data(ti), scrut_ti), get_type_extra(ti))
+    if k == TYP_SLICE:
+        return alloc_type(TYP_SLICE, structpat_subst_ti(si, get_type_data(ti), scrut_ti), 0)
+    if k == TYP_PTR:
+        return alloc_type(TYP_PTR, structpat_subst_ti(si, get_type_data(ti), scrut_ti), get_type_extra(ti))
+    if k == TYP_REF:
+        return alloc_type(TYP_REF, structpat_subst_ti(si, get_type_data(ti), scrut_ti), get_type_extra(ti))
+    if k == TYP_OPTIONAL:
+        return alloc_type(TYP_OPTIONAL, structpat_subst_ti(si, get_type_data(ti), scrut_ti), 0)
+    if k == TYP_TUPLE:
+        cnt := get_type_data(ti)
+        st := get_type_extra(ti)
+        subs : string, mut
+        if cnt > 0:
+            subs = alloc(cnt * 8)
+            i : ., mut = 0
+            loop:
+                if i >= cnt:
+                    break
+                cell_store(subs, i * 8, structpat_subst_ti(si, cell_load(g_gen_apply_data, (st + i) * 8), scrut_ti))
+                i = i + 1
+        ns := g_gen_apply_data_count
+        grow_gen_apply_data(ns + cnt)
+        i2 : ., mut = 0
+        loop:
+            if i2 >= cnt:
+                break
+            cell_store(g_gen_apply_data, (ns + i2) * 8, cell_load(subs, i2 * 8))
+            i2 = i2 + 1
+        g_gen_apply_data_count = ns + cnt
+        return alloc_type(TYP_TUPLE, cnt, ns)
+    if k == TYP_GENERIC_APPLY:
+        st2 := get_type_extra(ti)
+        cnt2 := cell_load(g_gen_apply_data, st2 * 8)
+        subs2 : string, mut
+        if cnt2 > 0:
+            subs2 = alloc(cnt2 * 8)
+            i3 : ., mut = 0
+            loop:
+                if i3 >= cnt2:
+                    break
+                cell_store(subs2, i3 * 8, structpat_subst_ti(si, cell_load(g_gen_apply_data, (st2 + 1 + i3) * 8), scrut_ti))
+                i3 = i3 + 1
+        ns2 := g_gen_apply_data_count
+        grow_gen_apply_data(ns2 + 1 + cnt2)
+        cell_store(g_gen_apply_data, ns2 * 8, cnt2)
+        i4 : ., mut = 0
+        loop:
+            if i4 >= cnt2:
+                break
+            cell_store(g_gen_apply_data, (ns2 + 1 + i4) * 8, cell_load(subs2, i4 * 8))
+            i4 = i4 + 1
+        g_gen_apply_data_count = ns2 + 1 + cnt2
+        return alloc_type(TYP_GENERIC_APPLY, get_type_data(ti), ns2)
+    return ti
 
-// A struct row whose field declarations still mention a generic parameter cannot
-// be used by a struct pattern unless the scrutinee supplies concrete arguments.
-// Used by monomorph as a defensive check.
-fn struct_has_generic_field(si: int) -> int:
-    if si < 0:
-        return 1
-    j : ., mut = 0
-    loop:
-        if j >= si_field_count(si):
-            return 0
-        ft := res_type_node(si_field_type_node(si, j))
-        if ti_has_generic_param(ft) != 0:
-            return 1
-        j = j + 1
-    return 0
+// Resolve a struct field type for a pattern scrutinee. Concrete fields are
+// returned unchanged; generic fields are substituted structurally (including
+// optional, array, tuple, and nested generic applications). The caller rejects
+// any remaining generic row for non-`_` subpatterns.
+fn structpat_field_ti(si: int, jdi: int, scrut_ti: int) -> int:
+    if si < 0 || jdi < 0:
+        return -1
+    ft := res_type_node(si_field_type_node(si, jdi))
+    if ft < 0:
+        return -1
+    if ti_has_generic_param(ft) == 0:
+        return ft
+    return structpat_subst_ti(si, ft, scrut_ti)
 
 // ─── Struct match pattern（Task 5b1）───
 // EXPR_STRUCTPAT layout: a = struct name ni, b = first wrapper, c = field count.
@@ -1765,6 +1818,11 @@ fn check_struct_pattern(pat: int, scrut_ti: int) -> int:
             k := ast_kind(sub)
             if k == EXPR_IDENT || k == EXPR_WILDCARD || k == EXPR_INT || k == EXPR_BOOL || k == EXPR_CHAR || k == EXPR_STRING:
                 ft := structpat_field_ti(si, jdi, scrut_ti)
+                if ft >= 0:
+                    // Cache the checker-resolved (already substituted) field type
+                    // on the wrapper for IR gen and monomorph clones. +1 keeps 0
+                    // as the "absent" sentinel because TI_INT itself is 0.
+                    ast_set_data(w, ft + 1)
                 if ti_has_generic_param(ft) != 0:
                     if k == EXPR_IDENT:
                         check_error(EC_TS_FIELD_TYPE,
@@ -1779,14 +1837,21 @@ fn check_struct_pattern(pat: int, scrut_ti: int) -> int:
                             ast_line(sub), ast_col(sub))
                         bad = 1
                 else if k != EXPR_IDENT && k != EXPR_WILDCARD:
-                    st := infer_expr(sub)
-                    verdict := type_compat_strict(st, ft)
-                    if verdict != 1:
-                        diag_type_incompatible(verdict, EC_TS_FIELD_TYPE,
+                    if get_type_kind(ft) == TYP_OPTIONAL:
+                        check_error(EC_TS_FIELD_TYPE,
                             "Field '" + istr_get(fni) + "' in struct pattern " + istr_get(name_ni) +
-                            ": expected " + type_display(ft) + ", got " + type_display(st),
+                            " has an optional type; use a wildcard or binding arm",
                             ast_line(sub), ast_col(sub))
                         bad = 1
+                    else:
+                        st := infer_expr(sub)
+                        verdict := type_compat_strict(st, ft)
+                        if verdict != 1:
+                            diag_type_incompatible(verdict, EC_TS_FIELD_TYPE,
+                                "Field '" + istr_get(fni) + "' in struct pattern " + istr_get(name_ni) +
+                                ": expected " + type_display(ft) + ", got " + type_display(st),
+                                ast_line(sub), ast_col(sub))
+                            bad = 1
             else:
                 check_error(EC_TM_NESTED,
                     "Nested match patterns are not supported yet",
@@ -1835,6 +1900,8 @@ fn ti_has_generic_param(ti: int) -> int:
     if k == TYP_GENERIC_PARAM:
         return 1
     if k == TYP_ARRAY || k == TYP_PTR || k == TYP_REF || k == TYP_SLICE:
+        return ti_has_generic_param(get_type_data(ti))
+    if k == TYP_OPTIONAL:
         return ti_has_generic_param(get_type_data(ti))
     if k == TYP_TUPLE:
         cnt := get_type_data(ti)

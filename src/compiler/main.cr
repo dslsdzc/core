@@ -388,7 +388,11 @@ fn corec_main() -> int:
         run_rc := run_frontend()
         if run_rc != 0:
             return 1
+        ir_diag_base_run := g_diag_count
         ir_gen_all()
+        if g_diag_count > ir_diag_base_run:
+            print_diagnostics()
+            return 1
         return ir_interpret()
 
     // === clean-cache: delete incremental compilation cache ===

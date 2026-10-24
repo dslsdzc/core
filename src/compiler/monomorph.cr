@@ -31,24 +31,12 @@ g_gen_dedup_new : string, mut
 g_gen_dedup_count : int, mut
 g_gen_dedup_cap : int, mut
 
-// Defensive struct-pattern validation for instances. The checker rejects struct
-// patterns on unresolved generic scrutinees / generic field types, so a valid
-// source never sets these. If a pattern still survives with an unresolved shape,
-// the clone marks it fail-closed (no field loads) and the instance records a
-// diagnostic.
-g_gen_structpat_count : int, mut
+// Defensive struct-pattern validation for instances. The checker resolves field
+// types on each wrapper (wrapper.data = ti+1); if one still contains an
+// unresolved generic parameter after substitution, the clone fails closed.
 g_gen_structpat_bad : int, mut
 g_gen_structpat_bad_line : int, mut
 g_gen_structpat_bad_col : int, mut
-
-// Concrete parameter-type environment for the instance currently being cloned.
-// Built lazily only when a struct pattern is present, so generic programs without
-// struct patterns keep their previous type-table / .ccr bytes unchanged.
-g_gen_clone_param_names : string, mut
-g_gen_clone_param_tis : string, mut
-g_gen_clone_param_count : int, mut
-g_gen_clone_param_ready : int, mut
-g_gen_clone_orig_fn : int, mut
 
 // ============================================================
 // Grow helpers
@@ -543,120 +531,6 @@ fn gen_dedup_add(old_node: int, new_node: int):
     g_gen_dedup_count = g_gen_dedup_count + 1
 
 // ============================================================
-// Build the current instance's parameter-type environment. Called lazily only
-// when a struct pattern needs scrutinee resolution.
-fn gen_build_clone_param_env():
-    fn_node := g_gen_clone_orig_fn
-    if fn_node < 0:
-        return
-    pc0 := ast_c(fn_node)
-    g_gen_clone_param_count = 0
-    g_gen_clone_param_names = alloc((pc0 + 1) * 8)
-    g_gen_clone_param_tis = alloc((pc0 + 1) * 8)
-    opn0 := ast_b(fn_node)
-    pi0 : ., mut = 0
-    loop:
-        if pi0 >= pc0:
-            break
-        if opn0 < 0:
-            break
-        if ast_kind(opn0) == EXPR_PARAM:
-            nd0 := ast_data(opn0)
-            pti0 : ., mut = TI_INT
-            if nd0 >= 0:
-                pti0 = res_type_node(nd0)
-            cell_store(g_gen_clone_param_names, g_gen_clone_param_count * 8, ast_a(opn0))
-            cell_store(g_gen_clone_param_tis, g_gen_clone_param_count * 8, pti0)
-            g_gen_clone_param_count = g_gen_clone_param_count + 1
-            pi0 = pi0 + 1
-        opn0 = opn0 + 1
-    g_gen_clone_param_ready = 1
-
-// Concrete type of a parameter in the instance currently being cloned (-1 if the
-// name is not a parameter).
-fn gen_clone_param_ti(name_ni: int) -> int:
-    if g_gen_clone_param_ready == 0:
-        return -1
-    i : ., mut = 0
-    loop:
-        if i >= g_gen_clone_param_count:
-            return -1
-        if cell_load(g_gen_clone_param_names, i * 8) == name_ni:
-            return cell_load(g_gen_clone_param_tis, i * 8)
-        i = i + 1
-    return -1
-
-fn gen_mark_structpat_bad(pat: int):
-    if g_gen_structpat_bad == 0:
-        g_gen_structpat_bad = 1
-        g_gen_structpat_bad_line = ast_line(pat)
-        g_gen_structpat_bad_col = ast_col(pat)
-
-// Validate struct patterns in a match before cloning its arms. The checker
-// already rejects unresolved generic scrutinees; this is the post-substitution
-// defense required for instances. `scrut_expr` is the original (pre-clone) match
-// expression so it can resolve a parameter ident through the concrete instance
-// environment.
-fn gen_validate_match_structpats(scrut_expr: int, first_arm: int):
-    // Fast path: generic programs without struct patterns must not allocate type
-    // rows or otherwise perturb the type table during monomorphization.
-    has_structpat : ., mut = 0
-    scan := first_arm
-    loop:
-        if scan < 0:
-            break
-        sp := ast_a(scan)
-        if sp >= 0 && ast_kind(sp) == EXPR_STRUCTPAT:
-            has_structpat = 1
-            break
-        scan = ast_c(scan)
-    if has_structpat == 0:
-        return
-    if g_gen_clone_param_ready == 0:
-        gen_build_clone_param_env()
-    sti : ., mut = -1
-    if scrut_expr >= 0 && ast_kind(scrut_expr) == EXPR_IDENT:
-        sti = gen_clone_param_ti(ast_int_val(scrut_expr))
-        if sti >= 0:
-            sti = gen_subst_ti(sti)
-    an := first_arm
-    loop:
-        if an < 0:
-            break
-        pat := ast_a(an)
-        if pat >= 0 && ast_kind(pat) == EXPR_STRUCTPAT:
-            si := find_struct_by_name(ast_a(pat))
-            if si < 0:
-                gen_mark_structpat_bad(pat)
-            else if sti >= 0:
-                if ti_has_generic_param(sti) != 0:
-                    gen_mark_structpat_bad(pat)
-                else:
-                    c := ast_c(pat)
-                    w0 := ast_b(pat)
-                    i : ., mut = 0
-                    loop:
-                        if i >= c:
-                            break
-                        w := w0 + i
-                        if w >= 0:
-                            jdi := struct_field_index_by_name(si, ast_b(w))
-                            sub := ast_a(w)
-                            ft := structpat_field_ti(si, jdi, sti)
-                            if ti_has_generic_param(ft) != 0:
-                                // `_` performs no comparison or binding, so a
-                                // still-generic field type is safe there.
-                                if sub < 0 || ast_kind(sub) != EXPR_WILDCARD:
-                                    gen_mark_structpat_bad(pat)
-                        i = i + 1
-            else:
-                // Scrutinee is not a parameter ident (local, call result, ...).
-                // Its instantiated field types cannot be recovered here; be
-                // conservative and reject struct patterns on generic structs.
-                if struct_has_generic_field(si) != 0:
-                    gen_mark_structpat_bad(pat)
-        an = ast_c(an)
-
 // Deep AST clone with generic param substitution
 // ============================================================
 
@@ -1091,7 +965,6 @@ fn gen_clone_tree(node: int) -> int:
 
     // ── EXPR_MATCH: a=expr(YES), b=first_arm(YES), c=arm_count(NOT) ──
     if k == EXPR_MATCH:
-        gen_validate_match_structpats(a, b)
         a2 := gen_clone_tree(a)
         b2 := gen_clone_tree(b)
         n := ast_alloc(k, a2, b2, c, iv, tv, d, ln, cl)
@@ -1124,51 +997,53 @@ fn gen_clone_tree(node: int) -> int:
     // wrapper.a = subpattern node, wrapper.b = field name index (same contract as
     // struct literal wrappers). Preserve the name so a clone still binds by name.
     if k == EXPR_STRUCTPAT:
-        g_gen_structpat_count = g_gen_structpat_count + 1
-        psi := find_struct_by_name(a)
         pbad : ., mut = 0
-        if psi < 0 || g_gen_structpat_bad != 0:
-            pbad = 1
-            if g_gen_structpat_bad == 0:
-                g_gen_structpat_bad = 1
-                g_gen_structpat_bad_line = ln
-                g_gen_structpat_bad_col = cl
         if b >= 0 && c > 0:
             nvs : string, mut = alloc(c * 8)
             nns : string, mut = alloc(c * 8)
+            nds : string, mut = alloc(c * 8)
             i : ., mut = 0
             loop:
                 if i >= c:
                     break
                 vn : ., mut = -1
+                nn : ., mut = -1
+                nd : ., mut = 0
                 if b + i >= 0:
                     vn = ast_a(b + i)
-                cell_store(nvs, i * 8, gen_clone_tree(vn))
-                nn : ., mut = -1
-                if b + i >= 0:
                     nn = ast_b(b + i)
+                    nd = ast_data(b + i)   // checker-resolved field type + 1
+                if nd > 0:
+                    ft := nd - 1
+                    sk : ., mut = -1
+                    if vn >= 0:
+                        sk = ast_kind(vn)
+                    // `_` neither compares nor binds, so a still-generic field is
+                    // safe there. ident/literal subpatterns would load/bind it.
+                    if ti_has_generic_param(ft) != 0 && sk != EXPR_WILDCARD:
+                        pbad = 1
+                        if g_gen_structpat_bad == 0:
+                            g_gen_structpat_bad = 1
+                            g_gen_structpat_bad_line = ln
+                            g_gen_structpat_bad_col = cl
+                cell_store(nvs, i * 8, gen_clone_tree(vn))
                 cell_store(nns, i * 8, nn)
+                cell_store(nds, i * 8, nd)
                 i = i + 1
             new_first := g_ast_count
             i = 0
             loop:
                 if i >= c:
                     break
-                ast_alloc(EXPR_NONE, cell_load(nvs, i * 8), cell_load(nns, i * 8), 0, 0, 0, 0, ln, cl)
+                ast_alloc(EXPR_NONE, cell_load(nvs, i * 8), cell_load(nns, i * 8), 0, 0, 0, cell_load(nds, i * 8), ln, cl)
                 i = i + 1
             if pbad != 0:
                 // Fail closed: b = -1 makes ir_gen reject the pattern without
-                // emitting any field load, even if the diagnostic gate is bypassed.
+                // emitting any field load.
                 n := ast_alloc(k, a, -1, c, iv, tv, d, ln, cl)
                 gen_dedup_add(node, n)
                 return n
             n := ast_alloc(k, a, new_first, c, iv, tv, d, ln, cl)
-            gen_dedup_add(node, n)
-            return n
-        if pbad != 0:
-            // No real wrapper to fail on; synthesize an impossible wrapper so the
-            // IR path takes the fall edge instead of matching unconditionally.
-            n := ast_alloc(k, a, -1, 1, iv, tv, d, ln, cl)
             gen_dedup_add(node, n)
             return n
         n := ast_alloc(k, a, b, c, iv, tv, d, ln, cl)
@@ -1253,21 +1128,18 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
     gen_build_subst(func_ni, type_args)
     gen_build_subst_tis(func_ni, bstart)
 
-    // 2. Clone the original function AST. The parameter-type environment for
-    // struct-pattern validation is built lazily (only when a struct pattern is
-    // present), so programs without struct patterns keep their previous
-    // type-table and .ccr bytes.
+    // 2. Clone the original function AST
     orig_fn_node := fi_ast_node(func_ni)
-    g_gen_clone_param_count = 0
-    g_gen_clone_param_ready = 0
-    g_gen_clone_orig_fn = orig_fn_node
     g_gen_dedup_count = 0
     g_gen_dedup_cap = 0
-    g_gen_structpat_count = 0
     g_gen_structpat_bad = 0
     g_gen_structpat_bad_line = 0
     g_gen_structpat_bad_col = 0
     new_fn_node := gen_clone_tree(orig_fn_node)
+    if g_gen_structpat_bad != 0:
+        check_error(EC_TS_FIELD_TYPE,
+            "Struct pattern field has an unresolved generic type",
+            g_gen_structpat_bad_line, g_gen_structpat_bad_col)
 
     // Concretize the instance parameter chain. The EXPR_FN clone branch copies b/c
     // (first parameter and count), so the instance would share the declaration's
@@ -1305,36 +1177,6 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
             opn = opn + 1
         if first_np >= 0:
             ast_set_b(new_fn_node, first_np)
-
-    // Defensive revalidation after substitution. The checker already rejects
-    // struct patterns on unresolved generic scrutinees, so this only fires if a
-    // path bypassed it. Any remaining generic parameter on an instance parameter
-    // makes every struct pattern in the body unsafe: record a hard diagnostic and
-    // let the cloned patterns' fail-closed shape (b = -1) prevent field loads.
-    if g_gen_structpat_count > 0:
-        opn2 := ast_b(new_fn_node)
-        pc2 := ast_c(new_fn_node)
-        pi2 : ., mut = 0
-        loop:
-            if pi2 >= pc2:
-                break
-            if opn2 < 0:
-                break
-            if ast_kind(opn2) == EXPR_PARAM:
-                nd := ast_data(opn2)
-                if nd >= 0:
-                    pti := res_type_node(nd)
-                    if ti_has_generic_param(pti) != 0:
-                        g_gen_structpat_bad = 1
-                        if g_gen_structpat_bad_line == 0:
-                            g_gen_structpat_bad_line = ast_line(opn2)
-                            g_gen_structpat_bad_col = ast_col(opn2)
-                pi2 = pi2 + 1
-            opn2 = opn2 + 1
-        if g_gen_structpat_bad != 0:
-            check_error(EC_TS_FIELD_TYPE,
-                "Struct pattern on an unresolved generic type is not supported; use a wildcard or binding arm",
-                g_gen_structpat_bad_line, g_gen_structpat_bad_col)
 
     // Compute mangled name: "orig_name[type_args]" for unique identification
     orig_name := istr_get(fi_name(func_ni))

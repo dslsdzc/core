@@ -892,8 +892,12 @@ fn find_global(name_idx: int) -> int:
 // bool/char keep their declared form so literal comparisons use the same
 // representation as the existing bool/char arms, and other fields use the exact
 // integer slot form (TI_INT).
-fn structpat_field_load_ti(si: int, jdi: int, scrut_ti: int) -> int:
-    ft := structpat_field_ti(si, jdi, scrut_ti)
+// Field load form for struct-pattern tests/bindings. `ft` is the checker-resolved
+// field type stored on the wrapper (+1). String patterns must keep TI_STR so
+// str_eq compares contents, bool/char keep their declared form so literal
+// comparisons use the same representation as the existing arms, and other fields
+// use the exact integer slot form (TI_INT). Optional fields are raw slots.
+fn structpat_field_load_ti_from(ft: int) -> int:
     if ft == TI_STR:
         return TI_STR
     if ft == TI_DEX:
@@ -955,9 +959,9 @@ fn gen_structpat_field_test(sub: int, fv: int, fall: int) -> int:
     return 1
 
 // Bind ident subpatterns for a struct pattern in the arm scope. Each binding
-// reads its field again and gets the declared field type. Literal and `_`
-// subpatterns bind nothing.
-fn gen_structpat_binds(pat: int, match_val: int, scrut_ti: int):
+// reads its field again and gets the checker-resolved field type stored on the
+// wrapper. Literal and `_` subpatterns bind nothing.
+fn gen_structpat_binds(pat: int, match_val: int):
     if pat < 0 || match_val < 0:
         return
     si := find_struct_by_name(ast_a(pat))
@@ -977,10 +981,19 @@ fn gen_structpat_binds(pat: int, match_val: int, scrut_ti: int):
                 if str_eq(istr_get(nn), "_") == 0:
                     jdi := struct_field_index_by_name(si, ast_b(w))
                     if jdi >= 0:
-                        fv := new_ir_var("fld", TI_INT)
-                        irv_set_type(fv, structpat_field_load_ti(si, jdi, scrut_ti))
-                        emit(IR_LOAD_FIELD, fv, match_val, 0, jdi, 0)
-                        bind_local(nn, fv)
+                        fd := ast_data(w)
+                        ft : ., mut = struct_row_field_ti(si, jdi)
+                        if fd > 0:
+                            ft = fd - 1
+                        // A still-generic field cannot be bound soundly; the
+                        // pattern was fail-closed before the body.
+                        if ti_has_generic_param(ft) == 0:
+                            fv := new_ir_var("fld", TI_INT)
+                            irv_set_type(fv, structpat_field_load_ti_from(ft))
+                            if get_type_kind(ft) == TYP_OPTIONAL && g_optrep_on != 0:
+                                irv_set_decl_ti(fv, ft)
+                            emit(IR_LOAD_FIELD, fv, match_val, 0, jdi, 0)
+                            bind_local(nn, fv)
         i = i + 1
 
 // Return the literal initializer AST node for an immutable module-level
@@ -3083,7 +3096,6 @@ fn gen_expr(node: int) -> int:
                 si := find_struct_by_name(ast_a(arm_pat))
                 sc := ast_c(arm_pat)
                 w0 := ast_b(arm_pat)
-                scrut_ti := irv_type(match_val)
                 can_match : ., mut = 1
                 if si < 0 || w0 < 0:
                     can_match = 0
@@ -3108,9 +3120,21 @@ fn gen_expr(node: int) -> int:
                     if sub >= 0:
                         sk := ast_kind(sub)
                         if sk != EXPR_IDENT && sk != EXPR_WILDCARD:
+                            fd := ast_data(w)
+                            ft : ., mut = struct_row_field_ti(si, jdi)
+                            if fd > 0:
+                                ft = fd - 1
+                            if ti_has_generic_param(ft) != 0:
+                                // The checker should have rejected this before
+                                // codegen. Never emit a field load with an
+                                // unresolved type: fail closed.
+                                check_error(EC_TS_FIELD_TYPE,
+                                    "Struct pattern field has an unresolved generic type",
+                                    ast_line(sub), ast_col(sub))
+                                can_match = 0
+                                break
                             fv := new_ir_var("fld", TI_INT)
-                            ft := structpat_field_load_ti(si, jdi, scrut_ti)
-                            irv_set_type(fv, ft)
+                            irv_set_type(fv, structpat_field_load_ti_from(ft))
                             emit(IR_LOAD_FIELD, fv, match_val, 0, jdi, 0)
                             if gen_structpat_field_test(sub, fv, fall_lbl) < 0:
                                 can_match = 0
@@ -3182,7 +3206,7 @@ fn gen_expr(node: int) -> int:
                     ccr_case_set_target(case_base + ci_arm, body_nod)
             push_ir_scope()
             if pat_kind == EXPR_STRUCTPAT:
-                gen_structpat_binds(arm_pat, match_val, irv_type(match_val))
+                gen_structpat_binds(arm_pat, match_val)
             if pat_kind == EXPR_ENUMPAT:
                 sub_count := ast_c(arm_pat)
                 fi : ., mut = 0
