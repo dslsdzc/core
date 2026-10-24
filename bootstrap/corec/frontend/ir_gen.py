@@ -68,11 +68,22 @@ class IRGen:
         for i, name in enumerate(decl.names):
             var_ir = IRVar(name, VarKind.GLOBAL, typ)
             # Store constant value directly on the IRVar for interpreter initialization
-            if i < len(decl.values) and isinstance(decl.values[i], Literal):
-                v = decl.values[i].value
-                if decl.values[i].kind == 'dex':
-                    v = Dex(int(v))  # 全局 dex 常量：定点缩放整数
-                var_ir.constant_value = v
+            if i < len(decl.values):
+                val = decl.values[i]
+                if isinstance(val, Literal):
+                    v = val.value
+                    if val.kind == 'dex':
+                        v = Dex(int(v))  # 全局 dex 常量：定点缩放整数
+                    var_ir.constant_value = v
+                elif (isinstance(val, UnaryOp) and val.op == '-'
+                      and isinstance(val.operand, Literal)):
+                    # `-1` 解析为 UnaryOp(Literal)；全局初值也必须保留符号，
+                    # 不能因为不是裸 Literal 就降级为 0。
+                    lit = val.operand
+                    v = -lit.value
+                    if lit.kind == 'dex':
+                        v = Dex(int(v))
+                    var_ir.constant_value = v
             sym = self.symtab.lookup(name)
             if sym:
                 sym.ir_var = var_ir
@@ -488,16 +499,25 @@ class IRGen:
         else: self.add_instr(BranchInstr(cond, then_block.name, merge.name))
         self.current_func.blocks.append(then_block)
         self.current_block = then_block
-        self.gen_expr(ifexpr.then_branch)
+        then_val = self.gen_expr(ifexpr.then_branch)
+        result = None
+        if then_val is not None and ifexpr.else_branch is not None:
+            # 表达式位置：把两支的值写进同一个临时变量，merge 块返回它。
+            result = self.new_temp("if_val")
+            if isinstance(then_val.type, BaseType):
+                result.type = then_val.type
+            self.add_instr(StoreInstr(result, then_val))
         if not self.current_block.terminated(): self.add_instr(JumpInstr(merge.name))
         if else_block:
             self.current_func.blocks.append(else_block)
             self.current_block = else_block
-            self.gen_expr(ifexpr.else_branch)
+            else_val = self.gen_expr(ifexpr.else_branch)
+            if result is not None and else_val is not None:
+                self.add_instr(StoreInstr(result, else_val))
             if not self.current_block.terminated(): self.add_instr(JumpInstr(merge.name))
         self.current_func.blocks.append(merge)
         self.current_block = merge
-        return None
+        return result
 
     def gen_loop(self, loop):
         header = self.new_block("loop_header")
