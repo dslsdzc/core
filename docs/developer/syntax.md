@@ -31,9 +31,10 @@ fn mut return if else loop while for break continue
 true false struct enum extern impl match import pub
 go await unsafe flow yield interface type mod as
 auto fileid self in none unit never dyn
-catch fail spec
+catch spec
 ```
 
+- `Ok` / `Err` 是函数状态标记，保留，不作为普通标识符。
 - `self` 用于方法接收者（`self` / `&self` / `&mut self`）。
 - `Self` 是接口/实现上下文中的类型名。
 - `@comptime` 等 `@` 形式属于内建原语，不作为普通关键字处理。
@@ -535,39 +536,50 @@ n := @sizeOf(Point)
 
 ## 六、错误与恢复
 
-错误不通过 `Result<T, E>`、`Ok(...)`、`Err(...)` 或后缀 `?` 表达。可失败计算具有独立错误边；未处理错误自动向调用方传播。
+错误通过函数状态 `Ok` / `Err` 表示，不使用 `Result<T, E>`、泛型 `Ok(...)` / `Err(...)` 包装，也不使用错误传播 `?`。
+
+- 正常返回：`return value`，等价于 `Ok value`。
+- 错误返回：`return Err error`。
+- `Ok` / `Err` 是函数状态，不是独立的 `Result` 类型。
+- 错误值是普通值：枚举变体、字符串、结构体等；没有统一 `Error` 基类。
+- 错误集合由编译器自动推断，不需要在签名中列出错误类型。
 
 ### 6.1 产生错误
 
 ```core
+enum ConfigError:
+ | FileNotFound
+ | ParseError
+
 fn parse(text: string) -> Config:
     if text == "":
-        fail "empty input"
+        return Err ParseError
 
     return parse_impl(text)
 ```
 
-`fail expr` 产生错误值。错误值不要求继承统一的 `Error` / `Exception` 基类。
+- `return value` 是 `Ok` 状态。
+- `return Err error` 是错误状态。
+- `Err` 不要求统一错误类型。
+- 顶层声明默认公开，不使用 `pub enum`。
 
 ### 6.2 `catch` 后置子句
 
-`catch:` 位于被处理语句的下一行，与该语句处于同一 layout 层级：
+`catch:` 位于被处理的可失败表达式或语句下一行，并与该语句处于同一 layout 层级：
 
 ```core
-fn load_config(path: string) -> Config:
-    text := read_file(path)
-    catch:
-     | FileNotFound => fail "config not found"
-
-    cfg := parse_config(text)
-    catch:
-     | ParseError => fail "invalid config"
-
-    validate_config(cfg)
-    return cfg
+cfg := parse_config(text)
+catch:
+ | ParseError => default_config()
+ | e => return Err e
 ```
 
-`catch` 绑定到紧邻其前的可失败表达式或语句。
+- `catch` 只处理紧邻表达式的错误范围。
+- 成功值直接通过，不需要 `Ok` 分支。
+- catch 模式匹配错误值，不匹配 `Err` 包装。
+- 未匹配错误继续传播。
+- handler 中的 `return Err e` 重抛。
+- `catch` 不处理前面或后面语句的错误。
 
 恢复分支可以产生替代值：
 
@@ -577,7 +589,7 @@ catch:
  | ParseError => default_config()
 ```
 
-未匹配的错误继续自动传播：
+未匹配错误继续传播：
 
 ```core
 cfg := load(path)
@@ -585,18 +597,65 @@ catch:
  | FileNotFound => default_config()
 ```
 
-如果 `load(path)` 还可能产生其他错误，它们不会由该 `catch` 处理。
+如果 `load(path)` 还可能产生其他错误，它们不会被该 `catch` 处理。
 
-`_` 可以匹配任意错误；标识符模式可以绑定错误值：
+`_` 匹配任意错误；标识符模式绑定错误值：
 
 ```core
 value := operation()
 catch:
  | KnownError => recover()
- | e          => log_and_fail(e)
+ | e => return Err e
 ```
 
-Core 不提供 `try` 关键字，也不提供错误传播用的 `?`。
+### 6.3 错误值
+
+错误值由普通声明定义：
+
+```core
+enum ConfigError:
+ | FileNotFound
+ | ParseError
+```
+
+或使用字符串：
+
+```core
+return Err "file not found"
+
+catch:
+ | "file not found" => default_config()
+ | _ => return Err "unknown"
+```
+
+规则：
+
+- 枚举错误可检查覆盖性。
+- 字符串/开放错误必须有 catch-all。
+- 错误值不自动转成其他类型。
+- 错误集合自动推断：
+  - `return Err e` 加入 `type(e)`；
+  - 调用加入被调函数的错误集合；
+  - `catch` 移除已匹配错误；
+  - 未匹配错误留在函数摘要中。
+
+### 6.4 未处理错误
+
+- 函数未处理的错误进入函数错误摘要。
+- 公共 API 的错误摘要可查询。
+- `main` 未处理错误：运行期 abort，错误值可观察。
+- 不允许“声明无错误但实际返回 Err”。
+
+### 6.5 禁止形式
+
+- 不提供 `fail`。
+- 不提供 `try`。
+- 不提供 `fallback`。
+- 不提供错误传播 `?`。
+- 不提供 `Result<T, E>`、`Ok(...)`、`Err(...)` 泛型包装。
+- 不要求用户列错误类型清单。
+
+`?` 只用于可选类型 `T?`，不用于错误传播。
 
 ---
 
@@ -700,7 +759,7 @@ unsafe:
 目标语法：
 
 ```text
-FunctionDecl = ['pub'] 'fn' IDENT
+FunctionDecl = 'fn' IDENT
                '(' [ParamList] ')'
                ['->' Type]
                ':' Layout
