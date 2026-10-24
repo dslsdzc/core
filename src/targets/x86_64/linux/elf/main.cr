@@ -153,7 +153,7 @@ fn corearch_main() -> int:
         g_elf_buf = alloc(16777216)
         sz := elf_gen(g_elf_buf)
         w16(g_elf_buf, 16, 3)
-        fd := syscall3(2, out_path, 577, 493)
+        fd := syscall3(2, out_path, 577, linux_mode_rw())
         if fd < 0:
             print("error: cannot write ")
             println(out_path)
@@ -224,7 +224,7 @@ fn corearch_main() -> int:
                 ctx_set_user_code(cd, cs)
                 sz = ctx_emit_static(g_elf_buf, out_path)
             else:
-                fd := syscall3(2, out_path, 577, 493)  // 0755: ELF output must be executable
+                fd := syscall3(2, out_path, 577, linux_mode_exec())  // 0755: executable ELF output
                 if fd < 0:
                     print("error: cannot write ")
                     println(out_path)
@@ -246,7 +246,7 @@ fn corearch_main() -> int:
             return 1
     else:
         sz := elf_gen(g_elf_buf)
-        fd := syscall3(2, out_path, 577, 493)  // 0755: ELF output must be executable
+        fd := syscall3(2, out_path, 577, linux_mode_exec())  // 0755: executable ELF output
         if fd < 0:
             print("error: cannot write ")
             println(out_path)

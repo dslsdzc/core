@@ -95,6 +95,7 @@ format_elf_files = [
 # + rax 回存；内置体名索引扫描段留 elf.cr 原位）；跨轴消费 x86_64/instr.cr
 # 编码原语（e2_mov/e2_w8/e2_store_ret）。
 os_linux_files = [
+    'src/os/linux/file_mode.cr',
     'src/os/linux/entry.cr',
     'src/os/linux/callseq.cr',
     'src/os/linux/syscall.cr',

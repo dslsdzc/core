@@ -42,6 +42,8 @@ import frame
 import resolve
 import elf
 import ld
+// Linux output file modes: linux_mode_exec and linux_mode_rw.
+import file_mode
 // Linux entry sequence: emit_start and emit_start_size.
 import entry
 // SysV AMD64 call sequences: cs_args_dispatch, cs_stack_args, cs_stack_cleanup,
