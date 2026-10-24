@@ -108,88 +108,50 @@ fn peek_at(src: string, pos: int, max_len: int) -> int:
     return cell_load_byte(src, pos + 1)
 
 fn lookup_keyword(s: string) -> int:
-    if s == "fn":
-        return T_FN
-    if s == "mut":
-        return T_MUT
-    if s == "return":
-        return T_RETURN
-    if s == "if":
-        return T_IF
-    if s == "else":
-        return T_ELSE
-    if s == "loop":
-        return T_LOOP
-    if s == "while":
-        return T_WHILE
-    if s == "for":
-        return T_FOR
-    if s == "break":
-        return T_BREAK
-    if s == "continue":
-        return T_CONTINUE
-    if s == "true":
-        return T_TRUE
-    if s == "false":
-        return T_FALSE
-    if s == "struct":
-        return T_STRUCT
-    if s == "enum":
-        return T_ENUM
-    if s == "extern":
-        return T_EXTERN
-    if s == "impl":
-        return T_IMPL
-    if s == "match":
-        return T_MATCH
-    if s == "import":
-        return T_IMPORT
-    if s == "pub":
-        return T_PUB
-    if s == "go":
-        return T_GO
-    if s == "await":
-        return T_AWAIT
-    if s == "unsafe":
-        return T_UNSAFE
-    if s == "flow":
-        return T_FLOW
-    if s == "yield":
-        return T_YIELD
-    if s == "interface":
-        return T_INTERFACE
-    if s == "type":
-        return T_TYPE
-    if s == "mod":
-        return T_MOD
-    if s == "as":
-        return T_AS
-    if s == "auto":
-        return T_AUTO
-    if s == "fileid":
-        return T_FILEID
     // None, Some, and move are no longer keywords. Some(x) still parses as an enum
     // constructor through the uppercase identifier rule. catch, dyn, fail, never,
     // none, and spec are keywords.
-    if s == "self":
-        return T_SELF
-    if s == "in":
-        return T_IN
-    if s == "unit":
-        return T_UNIT
-    if s == "none":
-        return T_NONE
-    if s == "never":
-        return T_NEVER
-    if s == "dyn":
-        return T_DYN
-    if s == "catch":
-        return T_CATCH
-    if s == "fail":
-        return T_FAIL
-    if s == "spec":
-        return T_SPEC
-    return T_IDENT
+    return match s:
+        "fn" => T_FN
+        "mut" => T_MUT
+        "return" => T_RETURN
+        "if" => T_IF
+        "else" => T_ELSE
+        "loop" => T_LOOP
+        "while" => T_WHILE
+        "for" => T_FOR
+        "break" => T_BREAK
+        "continue" => T_CONTINUE
+        "true" => T_TRUE
+        "false" => T_FALSE
+        "struct" => T_STRUCT
+        "enum" => T_ENUM
+        "extern" => T_EXTERN
+        "impl" => T_IMPL
+        "match" => T_MATCH
+        "import" => T_IMPORT
+        "pub" => T_PUB
+        "go" => T_GO
+        "await" => T_AWAIT
+        "unsafe" => T_UNSAFE
+        "flow" => T_FLOW
+        "yield" => T_YIELD
+        "interface" => T_INTERFACE
+        "type" => T_TYPE
+        "mod" => T_MOD
+        "as" => T_AS
+        "auto" => T_AUTO
+        "fileid" => T_FILEID
+        "self" => T_SELF
+        "in" => T_IN
+        "unit" => T_UNIT
+        "none" => T_NONE
+        "never" => T_NEVER
+        "dyn" => T_DYN
+        "catch" => T_CATCH
+        "fail" => T_FAIL
+        "spec" => T_SPEC
+        _ => T_IDENT
 
 // Parse an integer literal. Supports digit separators and 0x/0o/0b prefixes;
 // malformed literals are lexer errors.

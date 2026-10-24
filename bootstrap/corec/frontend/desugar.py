@@ -1,3 +1,5 @@
+from typing import List
+
 from corec.syntax.ast import *
 from corec.ir.symbol_table import SymbolTable
 
@@ -83,25 +85,31 @@ class MatchDesugarer:
             if isinstance(arm.pattern, Wildcard):
                 else_expr = self._arm_to_block(arm, result_name)
                 continue
-            elif isinstance(arm.pattern, EnumPattern):
-                variant = arm.pattern.path[-1]
-                cond = BinaryOp(
-                    FieldAccess(Ident(match_val_name), '__variant'),
-                    '==',
-                    Literal(variant, 'string')
-                )
-                then_block = self._arm_to_block(arm, result_name, match_val_name)
-                if else_expr is None:
-                    else_expr = then_block
-                else:
-                    else_expr = If(cond, then_block, else_expr)
+            bindings = []
+            cond = self._pattern_cond(arm.pattern, Ident(match_val_name), bindings)
+            then_block = self._arm_to_block(arm, result_name, bindings)
+            if else_expr is None:
+                else_expr = then_block
             else:
-                raise NotImplementedError(f"Unsupported pattern {type(arm.pattern)}")
+                else_expr = If(cond, then_block, else_expr)
 
         if else_expr is None:
             else_expr = Block(stmts=[], expr=Literal(0, 'int'))
 
-        let_result = LetStmt(names=[result_name], values=[Literal(0, 'int')])
+        # 结果变量的零值按第一个表达式 arm 的类型选取。旧实现固定 int 0，
+        # 使返回 string 的 match 在 check 期类型不匹配。
+        init = Literal(0, 'int')
+        for arm in match.arms:
+            if isinstance(arm.body, Literal):
+                if arm.body.kind == 'string':
+                    init = Literal("", 'string')
+                elif arm.body.kind == 'bool':
+                    init = Literal(False, 'bool')
+                elif arm.body.kind == 'dex':
+                    init = Literal(0, 'dex')
+                break
+
+        let_result = LetStmt(names=[result_name], values=[init])
         # 关键：最终用 return 语句返回结果变量
         return_stmt = ReturnStmt(Ident(result_name))
         return Block(
@@ -114,15 +122,51 @@ class MatchDesugarer:
             expr=None  # 不再依赖尾表达式
         )
 
-    def _arm_to_block(self, arm: MatchArm, result_name: str, enum_var_name: str = None) -> Block:
-        bindings = []
-        if isinstance(arm.pattern, EnumPattern) and arm.pattern.args:
-            for idx, subpat in enumerate(arm.pattern.args):
-                if isinstance(subpat, IdentPattern):
-                    field_expr = FieldAccess(Ident(enum_var_name), f'_field_{idx}')
-                    bindings.append(LetStmt(names=[subpat.name], values=[field_expr]))
-                elif isinstance(subpat, Wildcard):
-                    pass
+    def _pattern_cond(self, pattern: Pattern, value_expr: Expr, bindings: List[Stmt]) -> Expr:
+        """把模式翻译成条件表达式，并收集变量绑定。
+        Stage 0 只需要 if-else 形状，不做稠密/稀疏优化。
+        """
+        if isinstance(pattern, Wildcard):
+            return Literal(True, 'bool')
+        if isinstance(pattern, IdentPattern):
+            bindings.append(LetStmt(names=[pattern.name], values=[value_expr]))
+            return Literal(True, 'bool')
+        if isinstance(pattern, LiteralPattern):
+            lit = pattern.lit
+            return BinaryOp(value_expr, '==', Literal(lit.value, lit.kind))
+        if isinstance(pattern, EnumPattern):
+            variant = pattern.path[-1]
+            cond = BinaryOp(
+                FieldAccess(value_expr, '__variant'),
+                '==',
+                Literal(variant, 'string'),
+            )
+            if pattern.args:
+                for idx, subpat in enumerate(pattern.args):
+                    sub_cond = self._pattern_cond(
+                        subpat, FieldAccess(value_expr, f'_field_{idx}'), bindings
+                    )
+                    cond = BinaryOp(cond, '&&', sub_cond)
+            return cond
+        if isinstance(pattern, TuplePattern):
+            cond = Literal(True, 'bool')
+            for idx, subpat in enumerate(pattern.patterns):
+                sub_cond = self._pattern_cond(
+                    subpat, FieldAccess(value_expr, f'_field_{idx}'), bindings
+                )
+                cond = BinaryOp(cond, '&&', sub_cond)
+            return cond
+        if isinstance(pattern, StructPattern):
+            cond = Literal(True, 'bool')
+            for fname, subpat in pattern.fields:
+                sub_cond = self._pattern_cond(
+                    subpat, FieldAccess(value_expr, fname), bindings
+                )
+                cond = BinaryOp(cond, '&&', sub_cond)
+            return cond
+        raise NotImplementedError(f"Unsupported pattern {type(pattern)}")
+
+    def _arm_to_block(self, arm: MatchArm, result_name: str, bindings=None) -> Block:
         body_expr = arm.body
         assign_stmt = ExprStmt(BinaryOp(Ident(result_name), '=', body_expr))
-        return Block(stmts=bindings + [assign_stmt], expr=None)
+        return Block(stmts=(bindings or []) + [assign_stmt], expr=None)

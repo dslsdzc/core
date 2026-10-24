@@ -529,6 +529,7 @@ g_offsets_cap : int, mut
 g_pa_alloc_count : int, mut
 g_pa_alloc_nodes : string, mut
 g_pa_alloc_nodes_cap : int, mut
+g_node_unsafe : string, mut
 
 // Type-term engine: DAG table, structural hash index, judgment memo, and budget
 // state. Each term is 48 bytes: {tag, a, b, c, d, hash}; see type_terms.cr.

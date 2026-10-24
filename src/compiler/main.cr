@@ -219,6 +219,11 @@ fn default_out_path(src_path: string, ext: string) -> string:
 
 // The old shadow-comparison finish hook and its CLI channels were removed.
 
+fn timing_mark(name: string):
+    if cli_has("timing") != 0:
+        print("[timing] ")
+        println(name)
+
 fn corec_main() -> int:
     cli_init("corec", "Core compiler frontend")
     cli_cmd("build", "Compile .cr or directory to ELF binary")
@@ -246,6 +251,7 @@ fn corec_main() -> int:
     cli_flag_bool_debug("diag-gate-report", "", "Debug: report fail-closed gate verdicts")
     cli_flag_bool_debug("dump-vcs", "", "Debug: dump spec VC list")
     cli_flag_bool_debug("dump-params", "", "Debug: dump parameter slot types")
+    cli_flag_bool_debug("timing", "", "Debug: print pass timing markers")
 
     if cli_parse() != 0:
         return 1
@@ -598,10 +604,13 @@ fn corec_main() -> int:
         print_diagnostics()
         return 1
 
+    timing_mark("ir_gen")
+
     // Finalize purity and the state chain after IR generation and before any chain
     // consumer. True purity needs the whole program, and chain construction depends
     // on it.
     df_state_finalize()
+    timing_mark("state_finalize")
 
     // Hidden contract channel: report the semantic CASE model and the derived
     // wire count before lowering. Normal builds print nothing.
@@ -638,8 +647,11 @@ fn corec_main() -> int:
     // === Pointer analysis + safety passes (always run, even at opt_level 0) ===
     base_diags := g_diag_count
     ptr_analysis_all()
+    timing_mark("ptr_analysis")
     region_check_all()
+    timing_mark("region_check")
     provenance_verify_all()
+    timing_mark("provenance_verify")
     // Compile-time out-of-bounds findings are hard errors and stop the build.
     if g_diag_count > base_diags:
         print_diagnostics()
@@ -649,8 +661,10 @@ fn corec_main() -> int:
     // in corearch after loading the .ccr; corec keeps only semantic CSE.
     if g_opt_level >= 1:
         pass_cse()
+    timing_mark("cse")
     println("lower to ccr...")
     lower_to_ccr()
+    timing_mark("lower_ccr")
     if cli_has("dump-case-model") != 0:
         print("case_model_after ")
         print(int_str(g_lat_case_count))
@@ -692,6 +706,7 @@ fn corec_main() -> int:
             print("error: could not write ")
             println(out)
             return 1
+        timing_mark("save_ccr")
         print(" -> ")
         print(out)
         print(" (")
@@ -717,6 +732,7 @@ fn corec_main() -> int:
     if r != 0:
         println("error: could not write .ccr")
         return 1
+    timing_mark("save_ccr")
     println("generate ELF...")
     // The target owns the backend name, ELF flag, link mode, and output flag.
     cmd2 : ., mut = target_backend_command(ccr_path, out_path, cli_has("static"), g_opt_level)

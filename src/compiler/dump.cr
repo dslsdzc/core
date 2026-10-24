@@ -51,59 +51,36 @@ fn ir_var_str(var_idx: int) -> string:
     return int_str(var_idx)
 
 fn type_kind_name(tk: int) -> string:
-    if tk == 0:
-        return "int"
-    if tk == 1:
-        return "dex"
-    if tk == 2:
-        return "bool"
-    if tk == 3:
-        return "str"
-    if tk == 4:
-        return "unit"
-    if tk == 5:
-        return "never"
-    if tk == 6:
-        return "char"
-    if tk == 8:
-        return "dex"
-    // TI_DEX_S: fixed-point exact form.
-    return "?"
+    return match tk:
+        0 => "int"
+        1 => "dex"
+        2 => "bool"
+        3 => "str"
+        4 => "unit"
+        5 => "never"
+        6 => "char"
+        8 => "dex"   // TI_DEX_S: fixed-point exact form.
+        _ => "?"
 
 fn binop_name(op: int) -> string:
-    if op == 1:
-        return "+"
-    if op == 2:
-        return "-"
-    if op == 3:
-        return "*"
-    if op == 4:
-        return "/"
-    if op == 5:
-        return "%"
-    if op == 6:
-        return "=="
-    if op == 7:
-        return "!="
-    if op == 8:
-        return "<"
-    if op == 9:
-        return ">"
-    if op == 10:
-        return "<="
-    if op == 11:
-        return ">="
-    if op == 12:
-        return "&&"
-    if op == 13:
-        return "||"
-    if op == 17:
-        return "+ (ptr)"
-    if op == 18:
-        return "- (ptr)"
-    if op == 19:
-        return "- (diff)"
-    return "?"
+    return match op:
+        1 => "+"
+        2 => "-"
+        3 => "*"
+        4 => "/"
+        5 => "%"
+        6 => "=="
+        7 => "!="
+        8 => "<"
+        9 => ">"
+        10 => "<="
+        11 => ">="
+        12 => "&&"
+        13 => "||"
+        17 => "+ (ptr)"
+        18 => "- (ptr)"
+        19 => "- (diff)"
+        _ => "?"
 
 fn ir_instr_str(instr_idx: int) -> string:
     opname := df_opcode_name(iri_op(instr_idx), iri_s3(instr_idx))
