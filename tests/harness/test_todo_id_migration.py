@@ -7,7 +7,8 @@
 
 判据（逐条 = 该批的验收条件）：
   J1 **无残留**：全仓不存在「旧形态」`TODO #<数字>`（数字后**不接** `-MM-DD-`）。
-     排除面 = 映射表本身 + `（原 #NN）` 留痕注记 + 计划文档（其正文举例含旧号）。
+     排除面 = 映射表本身 + `（原 #NN）` 留痕注记 + 计划文档 + 历史实施档案
+     （`docs/superpowers/implementation/`，其正文按当时编号原文冻结）。
   J2 **无悬空**：每处 `#YYYY-MM-DD-N` 引用都能在 `TODO.md` 找到对应标题（双向：标题集合
      ⊇ 被引集合）；另**报告**「零引用标题」清单（非失败——无人引用 ≠ 悬空）。
   J3 **映射完备**：`TODO.md` 迁移对照表覆盖 `#1..#101` 每个号（`#66` 为空号须显式注记），
@@ -132,6 +133,11 @@ def check_j1(verbose=True):
     for path in repo_files():
         rel = os.path.relpath(path, BASE)
         if rel == os.path.relpath(PLAN, BASE):
+            continue
+        # Historical implementation archives are frozen records of already-closed
+        # batches; they legitimately quote the old numbering. Same policy as the
+        # plan document (see the module docstring's exclusion face).
+        if rel.startswith("docs/superpowers/implementation/") or rel.startswith("docs/archive/"):
             continue
         txt = read(path)
         if not txt:

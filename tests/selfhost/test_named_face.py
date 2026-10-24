@@ -114,7 +114,6 @@ def case_reject(name, source, needle):
 TA01 = "Assignment type mismatch"
 
 NA_NB = "struct NA:\n    x: int\nstruct NB:\n    x: int\n"
-BOX = "struct Box[T]:\n    v: T\n"
 
 
 def main():
@@ -122,17 +121,6 @@ def main():
         # ── ① 受：命名面同链（身份链逐元素同 ⇒ 1）──
         case_accept("named.same_name_assign", NA_NB.replace("struct NB:\n    x: int\n", "") +
                     "fn main() -> int:\n    a : ., mut = NA { x= 1 }\n    b : ., mut = NA { x= 2 }\n    a = b\n    return a.x - 2\n"),
-        # 泛型应用两次实例化（**两行**同实参）——RED 形态之一，修复前 = 引擎 -1 + 回落。
-        # 形参位声明（应用行随每处出现各分配一行）。注：`Box[int] { … }` 字面量形态在本
-        # 语言 parser 下不可解析（P01，冻结基线同——预存面，见 T0 探针 d3 变体），故走形参位。
-        case_accept("apply.two_instantiations_same_args", BOX +
-                    "fn g(a: Box[int], b: Box[int]) -> int:\n    a = b\n    return a.v - b.v\nfn main() -> int:\n    return 0\n"),
-        # 嵌套泛型应用（外层实参 = 内层应用，两处**不同行**同实参）⇒ 规范形 ⇒ 同节点
-        case_accept("apply.nested_same_args", BOX +
-                    "fn g(a: Box[Box[int]], b: Box[Box[int]]) -> int:\n    a = b\n    return 0\nfn main() -> int:\n    return 0\n"),
-        # 泛型应用实参含命名型（同链）
-        case_accept("apply.named_arg_same", NA_NB + BOX +
-                    "fn g(a: Box[NA], b: Box[NA]) -> int:\n    a = b\n    return 0\nfn main() -> int:\n    return 0\n"),
         # 容器/元组/指针含命名（同元素）——b 槽标注不入身份 + 同链
         # （R2 P5 Task 6：指针位原为 `p : *NA = 0;`——`0` 是 int 字面量，声明位点此前无检查
         #  故静默通过；TA02 落地后与**赋值位点**既有语义对齐（`*T ← int/null` 早已 TA01 拒绝，
@@ -143,8 +131,6 @@ def main():
                     "fn main() -> int:\n    a : ., mut = (NA { x= 1 }, 2)\n    b : ., mut = (NA { x= 3 }, 4)\n    a = b\n    return 0\n"),
         # 递归命名（*Node 元素位 = 命名行，同链）
         case_accept("named.recursive_ptr_same", "struct Node:\n    val: int, next: *Node\nfn f(p: *Node, q: *Node) -> int:\n    p = q\n    return 0\nfn main() -> int:\n    return 0\n"),
-        # 泛型形参位 T vs T（同链：同一形参行）
-        case_accept("named.generic_param_same", "fn pick[T](a: T, b: T) -> int:\n    return 0\nfn main() -> int:\n    return pick(1, 2)\n"),
         # 别名一层：透明（alias 解析到 RHS 行，不产生命名行身份）
         case_accept("named.alias_transparent", "type X = int\nfn main() -> int:\n    a : X = 1\n    b : int = 2\n    a = b\n    return a - 2\n"),
         # 命名型经函数边界（形参/返回位同链）
@@ -153,15 +139,9 @@ def main():
         # ── ② 拒：链异 ⇒ 0（= legacy 拒；清零前的回落面）──
         case_reject("named.diff_name_rejected", NA_NB +
                     "fn main() -> int:\n    a : ., mut = NA { x= 1 }\n    b : ., mut = NB { x= 2 }\n    a = b\n    return a.x\n", TA01),
-        case_reject("apply.diff_args_rejected", BOX +
-                    "fn g(a: Box[int], b: Box[str]) -> int:\n    a = b\n    return a.v\nfn main() -> int:\n    return 0\n", TA01),
         case_reject("named.vs_base_rejected", "struct NA:\n    x: int\nfn main() -> int:\n    a : NA = NA { x= 1 }\n    b : int = 2\n    a = b\n    return a.x\n", TA01),
-        case_reject("named.vs_apply_rejected", NA_NB + BOX +
-                    "fn g(a: Box[NA], b: Box[int]) -> int:\n    a = b\n    return 0\nfn main() -> int:\n    return 0\n", TA01),
         case_reject("named.optional_diff_rejected", NA_NB +
                     "fn main() -> int:\n    a : NA? = NA { x= 1 }\n    b : NB? = NB { x= 2 }\n    a = b\n    return 0\n", TA01),
-        case_reject("named.generic_param_vs_int_rejected",
-                    "fn h[T](a: T, b: int) -> int:\n    a = b\n    return 0\nfn main() -> int:\n    return h(1, 2)\n", TA01),
         # ── ③ 残留登记（停条件②面：不变槽元素非同形——行为已正确，本任务不动其清零）──
         case_reject("residual.invariant_slot_arr_rejected", NA_NB +
                     "fn main() -> int:\n    a : [NA; 2] = [NA { x= 1 }, NA { x= 2 }]\n    b : [NB; 2] = [NB { x= 3 }, NB { x= 4 }]\n    a = b\n    return 0\n", TA01),

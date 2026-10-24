@@ -348,6 +348,19 @@ fn grow_funcs(needed: int):
     g_funcs = nb
     g_func_cap = nc
 
+fn grow_func_ret(needed: int):
+    if needed < g_func_ret_cap:
+        return
+    nc : ., mut = g_func_ret_cap * 2
+    if nc < 64:
+        nc = 64
+    if nc < needed:
+        nc = needed + 64
+    nb := alloc(nc * 8)
+    cell_copy(g_func_ret_ti, g_func_ret_cap * 8, nb)
+    g_func_ret_ti = nb
+    g_func_ret_cap = nc
+
 fn grow_structs(needed: int):
     if needed < g_struct_cap:
         return

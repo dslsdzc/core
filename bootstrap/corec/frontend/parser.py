@@ -587,6 +587,15 @@ class Parser:
         # `never`/`dyn` 是**关键字令牌**（上方 base_types 那格看不到它们）⇒ 同链并列一格。
         # 自源对 `never?`/`dyn?` 与 `int?` 同判（实测 `fn f(a: never?) -> int` ⇒ rc=0）
         # ⇒ 本侧必须同收，否则留残余分歧。
+        # v4 relational type expression `typeof(expr)`: the bootstrap does not
+        # model relational types; consume the expression and return None so the
+        # let/param checker infers from the initializer (same behavior as `auto`).
+        if self.check(TokenType.IDENT) and self.cur().lexeme == 'typeof':
+            self.advance()
+            self.expect(TokenType.LPAREN)
+            self.parse_expr()
+            self.expect(TokenType.RPAREN)
+            return None
         if self.check(TokenType.NEVER):
             self.advance()
             typ = BaseType('never')
@@ -1276,6 +1285,10 @@ class Parser:
             self._consume_newlines()
             if self.check(TokenType.DEDENT) or self.check(TokenType.EOF):
                 break
+            # v4 target form allows a leading `|` on each enum variant
+            # (`enum Mode:\n | Server`). Match arms already accept it.
+            if self.check(TokenType.PIPE):
+                self.advance()
             # `None` ⇒ `none` 是关键字 ⇒ 变体名仍收 NONE（保留今日「以 None 为变体名」的接受面）；
             # `Some` 已退休成 IDENT ⇒ 走 expect(IDENT)。
             if self.check(TokenType.NONE):

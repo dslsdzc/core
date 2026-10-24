@@ -227,6 +227,14 @@ class IRGen:
         if sym and sym.ir_var: return sym.ir_var
         for p in self.current_func.params:
             if p.name == ident.name: return p
+        # Bare nullary enum variant (`mode := Server`): synthesize the same
+        # MAKE_ENUM instruction as `Server()`.
+        for _ename, variants in self.enum_variants.items():
+            for vname, types in variants:
+                if vname == ident.name and not types:
+                    v = self.new_temp()
+                    self.add_instr(MakeEnumInstr(vname, [], v))
+                    return v
         raise RuntimeError(f"Undefined: {ident.name}")
 
     def gen_binary(self, binop):

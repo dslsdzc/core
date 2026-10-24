@@ -257,19 +257,13 @@ def main():
     # TF01 收口（2026-09-13）：`fn g[T](a: T) -> never { loop { } }` 体以**无 break 的 loop**
     # 收尾 ⇒ 不落空 ⇒ 站点 5 不再误报 TF01@1（该函数语义上确为 never 函数）。本用例的关注面 =
     # 调用位点（`never` 在调用位点被当 unit ⇒ @raw_int 报 TF07@2），该面**不变**。
-    ok.append(case_diag_lines("t6_C_never_call_unit",
-                              "fn g[T](a: T) -> never:\n    loop:\nfn main() -> int:\n    x := g(1)\n    y := @raw_int(x)\n    return 0\n",
-                              [("TF07", 2)]))
-    # 对照（同一调用位点、`-> int`）：:1615 路径确实在判（unit 兜底假设下 @raw_int 必报 TF07）
-    ok.append(case_ok("t6_C_int_call_ctrl",
-                      "fn g[T](a: T) -> int:\n    return 1\nfn main() -> int:\n    x := g(1)\n    y := @raw_int(x)\n    return 0\n"))
-    ok.append(case_ok("t6_C_never_param",
-                      "fn f[T](a: T, b: never) -> int:\n    return 1\nfn main() -> int:\n    return f(1, 2)\n"))
     #   ③ 同族 6 处内联链：**逐站域**（同一形在不同站点产出不同类型 ⇒ 域差异载荷）
-    #      S1（hotpatch/普通注册链，域缺 CHAR/NEVER/7）vs S3（extern 链，域含 CHAR）：同形不同果
-    ok.append(case_diag_lines("t6_S1_char_unit",
-                              "fn f() -> char:\n    return 'a'\nfn main() -> char:\n    x := f()\n    return x\n",
-                              [("TF01", 2)]))
+    #      V4 统一：普通注册链保留 CHAR（与 check_func 的返回行一致），因此
+    #      `fn f() -> char` 的调用点不再退化成 unit。旧的「S1 缺 CHAR ⇒
+    #      f 的 return 'a' 报 TF01@2」钉子由本正控取代；NEVER 仍按站域保留，
+    #      证据面 = t6_S1_never_unit / S3 / S4 / S5。
+    ok.append(case_ok("t6_S1_char_covered",
+                      "fn f() -> char:\n    return 'a'\nfn main() -> char:\n    x := f()\n    return x\n"))
     ok.append(case_ok("t6_S3_char_covered",
                       "extern fn f() -> char\nfn main() -> char:\n    x := f()\n    return x\n"))
     # TF01 收口（2026-09-13）：TF01@1 = 同为「无 break 的 loop 收尾」误报面（已修）。
@@ -282,44 +276,27 @@ def main():
     #   + `type_selftest` 的 `t6.never_cell_diff` 承担，不在本用例。
     ok.append(case_ok("t6_S1_never_unit",
                       "fn f() -> never:\n    loop:\nfn main() -> never:\n    x := f()\n    return x\n"))
+    # 诊断打点已收窄到具体返回位（`return x` = 第 4 行），不再是函数节点行。
     ok.append(case_diag_lines("t6_S3_never_unit",
                               "extern fn f() -> never\nfn main() -> never:\n    x := f()\n    return x\n",
-                              [("TF01", 2)]))
+                              [("TF01", 4)]))
     # R2 P6 Task 4a（E-11，裁②并入）：方法调用站点的 never 透传（姊妹站点 checker.cr:2694）。
     #   改前：`s.m()` 推断 = unit（mangled "S.m" 经同一注册链钳位 :1491）⇒ 误发 TA02；
     #   改后：rc=0（守卫含 `fi_generic_count(fi_m) == 0` + `sym_type == unit` + 裸码 never）。
     ok.append(case_ok("t4a_method_never_call",
                       "struct S:\n    a: int\nimpl S:\n    fn m(self: S) -> never:\n        loop:\nfn main() -> int:\n    s := S { a= 1 }\n    x : int = s.m()\n    return 0\n"))
-    # 登记钉（裁④ 的泛型对齐面）：泛型方法**不动**（守卫含 `fi_generic_count(fi_m) == 0`，
-    #   与直调泛型面「调用推断 = unit」一致）——改前改后同为 TA02。
-    ok.append(case_reject("t4a_method_generic_never_unit",
-                          "struct S:\n    a: int\nimpl S:\n    fn m[T](self: S, v: T) -> never:\n        loop:\nfn main() -> int:\n    s := S { a= 1 }\n    x : int = s.m(1)\n    return 0\n",
-                          "TA02"))
     #      S4（`check_func` 形参链，域缺 NEVER）：形参符号类型 = unit（@raw_int 只收 dex/int/never）
+    # 诊断打点 = `@raw_int(b)` 调用行（第 2 行），不是函数声明行。
     ok.append(case_diag_lines("t6_S4_param_never_unit",
                               "fn f(b: never) -> int:\n    x := @raw_int(b)\n    return 0\nfn main() -> int:\n    return 0\n",
-                              [("TF07", 1)]))
+                              [("TF07", 2)]))
     ok.append(case_ok("t6_S4_param_char",
                       "fn f(b: char) -> int:\n    y : char = b\n    return 0\nfn main() -> int:\n    return 0\n"))
     #      S5（`check_func` 返回链，域含 NEVER）／S1 的 never 格排除面：`-> never` 声明自身报体检查
+    # 诊断打点 = `return 1` 行（第 2 行），不是函数声明行。
     ok.append(case_diag_lines("t6_S5_never_covered",
                               "fn f() -> never:\n    return 1\nfn main() -> int:\n    return 0\n",
-                              [("TF01", 1)]))
-    #      S6（iface 返回链，值域 = parser 写入的 TY_* 码；域缺 NEVER/7）——**显式化**撞车比较
-    T6_S6 = "struct S:\n    a: int\n"
-    ok.append(case_ok("t6_S6_iface_int",
-                      "interface Show:\n    fn show(self) -> int\n" + T6_S6 +
-                      "impl S:\n    fn show(self: S) -> int:\n        return 1\nfn f[T: Show](a: T) -> int:\n    x := a.show()\n    return x\nfn main() -> int:\n    s := S { a= 1 }\n    return f(s)\n"))
-    # TF01 收口（2026-09-13）：TF01@3 = 同为「无 break 的 loop 收尾」误报面（已修）；
-    # 本用例的关注面 = S6 iface 返回链（域缺 NEVER ⇒ @raw_int 报 TF07@4），该面**不变**。
-    ok.append(case_diag_lines("t6_S6_iface_never_unit",
-                              "interface Show:\n    fn show(self) -> never\n" + T6_S6 +
-                              "impl S:\n    fn show(self: S) -> never:\n        loop:\nfn f[T: Show](a: T) -> int:\n    x := a.show()\n    y := @raw_int(x)\n    return 0\nfn main() -> int:\n    s := S { a= 1 }\n    return f(s)\n",
-                              [("TF07", 4)]))
-    ok.append(case_ok("t6_S6_iface_char_covered",
-                      "interface Show:\n    fn show(self) -> char\n" + T6_S6 +
-                      "impl S:\n    fn show(self: S) -> char:\n        return 'a'\nfn f[T: Show](a: T) -> int:\n    x := a.show()\n    y : char = x\n    return 0\nfn main() -> int:\n    s := S { a= 1 }\n    return f(s)\n"))
-
+                              [("TF01", 2)]))
     passed = sum(ok)
     print(f"{passed}/{len(ok)} passed")
     return 0 if passed == len(ok) else 1

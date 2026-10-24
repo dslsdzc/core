@@ -62,14 +62,27 @@ def main():
             fails.append(name)
             print(f"[FAIL] check_clean_{name}: rc={r.returncode} TF01={bad}")
     # ── ②③ 5 档语料：build + run（行为不变）──────────────────────────────
+    # 调度器/通道是 SYSTEM raw-word 子系统：G/通道结构里指针与整数共用 int 槽，
+    # language-level tagged int 不适用于该 ABI。行为判据固定用 --raw-int 编译
+    # （check 腿仍走普通前端）。
+    corearch = BASE / "build" / "corearch"
     for name in CORPORA:
         rel = f"tests/suite/{name}.cr"
         out = str(BASE / "build" / f"_chanhandle_{name}_{uuid.uuid4().hex[:6]}")
+        ccr = out + ".ccr"
         try:
-            b = run_corec(["build", rel, "--static", "-o", out])
+            c = run_corec(["ccr", rel, "-o", ccr])
+            if c.returncode != 0 or not os.path.exists(ccr):
+                fails.append(name)
+                print(f"[FAIL] build_{name}: ccr rc={c.returncode}")
+                continue
+            b = subprocess.run(
+                [str(corearch), "--raw-int", "--elf", ccr, "-o", out],
+                cwd=BASE, capture_output=True, text=True, timeout=300,
+            )
             if b.returncode != 0 or not os.path.exists(out):
                 fails.append(name)
-                print(f"[FAIL] build_{name}: rc={b.returncode}")
+                print(f"[FAIL] build_{name}: corearch rc={b.returncode}")
                 continue
             rc = subprocess.run([out], cwd=BASE, capture_output=True, timeout=180).returncode
             if rc == 0:

@@ -59,20 +59,20 @@ def many_fn_src(node_delta: bool = False, extra_var: bool = False) -> str:
     out = ["// cache-narrow fixture (tests/selfhost/test_cir_cache_narrow.py)"]
     for i in range(N_BIG):
         body = []
-        body.append(f"    x0 := a + {i};")
+        body.append(f"    x0 := a + {i}")
         for j in range(STMTS):
             if i == 0 and j == 5 and extra_var:
                 body.append("    xv := x0 + 7\n")
             nxt = "xv" if (i == 0 and extra_var and j >= 5) else f"x{j}"
             if i == 0 and j == 3 and node_delta:
                 # 同一 dest（x4）、只多一个参与 `a` 的二元节点（不可被常量折叠掉）
-                body.append(f"    x{j + 1} := {nxt} * 2 + {j % 7} + a;")
+                body.append(f"    x{j + 1} := {nxt} * 2 + {j % 7} + a")
             else:
-                body.append(f"    x{j + 1} := {nxt} * 2 + {j % 7};")
-        body.append(f"    return x{STMTS};")
-        out.append(f"fn f{i}(a: int) -> int {{")
+                body.append(f"    x{j + 1} := {nxt} * 2 + {j % 7}")
+        body.append(f"    return x{STMTS}")
+        out.append(f"fn f{i}(a: int) -> int:")
         out.extend(body)
-        out.append("}")
+        out.append("")
     # 极小函数：自身节点/边极少（P1 的被测面）
     out.append("fn tiny(a: int) -> int:\n    return a + 1\n")
     out.append("fn main() -> int:\n    return tiny(41)\n")

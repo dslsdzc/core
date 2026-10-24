@@ -359,6 +359,15 @@ fn array_len_constraint_sym(ti_a: int, ti_b: int) -> int:
 fn ti_error() -> int:
     return 0 - 2
 
+// Whether the function currently being checked is a generic template. The
+// type-engine selftest calls infer_expr directly (g_func_count may be 0), so the
+// raw g_checker_current_fi index must be bounds-checked before fi_generic_count.
+fn cur_fn_is_generic() -> int:
+    fi := g_checker_current_fi
+    if fi < 0 || fi >= g_func_count:
+        return 0
+    return fi_generic_count(fi)
+
 fn type_compat_strict(ti_a: int, ti_b: int) -> int:
     // never 是发散类型，与任何类型相容。以 return、break、continue、fail 收尾的路径，
     // 其类型为 never。分支合一处的 unit 对 never、int 对 never 必须放行，否则
@@ -368,12 +377,14 @@ fn type_compat_strict(ti_a: int, ti_b: int) -> int:
     //   源侧是 ti_error() 时放行，避免错误值级联出第二条诊断。例如 x : int = nosuchname
     //   只报 N01，不再叠加 TA02。
     //   目标侧是 ti_error() 时不放行，目标类型取不到就是真差异，例如 undef_x = 0 仍报 TA01。
-    //   任一侧是 TI_NEVER 时放行。
+    //   源侧是 TI_NEVER 时放行：never 是底部类型，发散路径可以流入任何槽。
+    //   目标侧是 TI_NEVER 时不放行：没有任何值能流入 never。`-> never` 的
+    //   `return 1` 必须报 TF01，`never` 形参也不能接收普通值。
     if ti_a == ti_error():
         return 1
     if ti_b == ti_error():
         return 0
-    if ti_a == TI_NEVER || ti_b == TI_NEVER:
+    if ti_a == TI_NEVER:
         return 1
     if !type_equal(ti_a, ti_b):
         // 可选目标注入：T? = T ∪ null。裸 T 值和 None 值可以流入 T? 的槽，覆盖返回位、
@@ -1055,6 +1066,34 @@ fn infer_iface_for_method(method_ni: int) -> int:
         return found
     return -1
 
+// Ambiguous method name: choose the unique interface whose method return type
+// matches the enclosing function's declared/inferred return type. This is the
+// V4 disambiguation rule when several interfaces declare the same method name.
+fn infer_iface_for_method_ret(method_ni: int, want_ti: int) -> int:
+    found : ., mut = -1
+    hits : ., mut = 0
+    ii : ., mut = 0
+    loop:
+        if ii >= g_iface_count:
+            break
+        mc := cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
+        mi : ., mut = 0
+        loop:
+            if mi >= mc:
+                break
+            mb := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD
+            if cell_load(g_ifaces, mb + OFF_IFM_NAME) == method_ni:
+                rti := ty_code_to_ti(cell_load(g_ifaces, mb + OFF_IFM_RET_TI))
+                if rti >= 0 && rti == want_ti:
+                    found = cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_NAME)
+                    hits = hits + 1
+                break
+            mi = mi + 1
+        ii = ii + 1
+    if hits == 1:
+        return found
+    return -1
+
 fn find_iface(name_ni: int) -> int:
     i : ., mut = 0
     loop:
@@ -1503,8 +1542,13 @@ fn collect_decls():
                 //  （无 CHAR/NEVER/7，因此三者与域外码一律保留 `rt_ti` 初值 TI_UNIT，域差异逐站保留，
                 //  不得按表 + 尾回落一刀切：站点域差异是携带值的。例如 fn f() -> char 的
                 //  非泛型符号类型是 unit，extern 站点同形是 char。
+                // CHAR is a first-class scalar row: keep it so the symbol type
+                // agrees with check_func's return row and with `-> char` bodies.
+                // NEVER stays clamped here; the direct-call path re-reads the raw
+                // code for `fn` declarations (E-11) and extern never remains unit
+                // by design (pinned by test_iface_ops t6_S3).
                 rt_mapped := ty_code_to_ti(rt)
-                if rt_mapped >= 0 && rt_mapped != TI_CHAR && rt_mapped != TI_NEVER && rt_mapped != TI_DYN:
+                if rt_mapped >= 0 && rt_mapped != TI_NEVER && rt_mapped != TI_DYN:
                     rt_ti = rt_mapped
         if hotpatch_ver > 0:
             // @hotpatch function: register with mangled name fn_name.vN
@@ -1528,7 +1572,7 @@ fn collect_decls():
                     else:
                         // 同上一处（本站点 = hotpatch 首版返回，域与上一处逐字相同）
                         first_mapped := ty_code_to_ti(first_rt)
-                        if first_mapped >= 0 && first_mapped != TI_CHAR && first_mapped != TI_NEVER && first_mapped != TI_DYN:
+                        if first_mapped >= 0 && first_mapped != TI_NEVER && first_mapped != TI_DYN:
                             first_rt_ti = first_mapped
 
                     // 本站两侧皆声明（无源/目标之分），因此长度约束走对称核（= 现状语义）
@@ -2497,10 +2541,32 @@ fn infer_gen_call(fi: int, call_node: int, first_arg: int, arg_count: int) -> in
                         tv_b = cell_load(g_gen_map_types, hmi_b * 8)
                         break
                     hmi_b = hmi_b + 1
+                // `__ret` is a synthesized output parameter, not an argument.
+                // Fill it from the inferred return row (substituted with the
+                // current argument bindings) so the bind block stays concrete;
+                // otherwise IR generics fall back to `int`.
+                if tv_b < 0:
+                    pname_str := istr_get(pname_b)
+                    if str_len(pname_str) >= 5:
+                        if str_sub(pname_str, 0, 5) == "__ret":
+                            rr : ., mut = -2
+                            if fi >= 0 && fi < g_func_ret_count:
+                                rr = cell_load(g_func_ret_ti, fi * 8)
+                            if rr == -2:
+                                rr = ty_code_to_ti(fi_return_type(fi))
+                            if rr >= 0:
+                                tv_b = substitute_return_type(rr)
                 cell_store(g_gen_binds, (bstart + 1 + gi_b) * 8, tv_b)
                 gi_b = gi_b + 1
             g_gen_binds_count = bstart + 1 + gc_b
             ast_set_int_val(call_node, bstart + 1)
+
+    // Inferred return: the checker stored the body-derived row. Substitute the
+    // current call's generic bindings before the explicit return-node path.
+    if fi >= 0 && fi < g_func_ret_count:
+        rt_row := cell_load(g_func_ret_ti, fi * 8)
+        if rt_row != -2:
+            return substitute_return_type(rt_row)
 
     // Substitute return type
     if g_gen_map_count > 0 && ret_type_node >= 0:
@@ -2627,6 +2693,14 @@ fn check_func(fi: int):
             ret_ti_mapped := ty_code_to_ti(return_type)
             if ret_ti_mapped >= 0 && ret_ti_mapped != TI_DYN:
                 ret_ti = ret_ti_mapped
+        // The parser synthesizes `__ret` when `->` is omitted. Record that this
+        // function needs body-derived return inference.
+        ret_inferred : ., mut = 0
+        if get_type_kind(ret_ti) == TYP_GENERIC_PARAM:
+            rn := istr_get(get_type_data(ret_ti))
+            if str_len(rn) >= 5:
+                if str_sub(rn, 0, 5) == "__ret":
+                    ret_inferred = 1
         // nail3：先算 ret_ti / flow 检查，再推体， 逐 `return` 核对需要这两个值在手。
         //  次序改动是安全的：`res_type_node`/`ty_code_to_ti`/`scan_for_yield` 都只看
         //  声明与 AST，不依赖 `infer_expr(body)` 的结果。
@@ -2637,9 +2711,17 @@ fn check_func(fi: int):
         saved_ret_ok := g_cur_fn_ret_checked
         g_cur_fn_ret_ti = ret_ti
         g_cur_fn_ret_checked = 0
-        if is_flow_fn == 0 && get_type_kind(ret_ti) != TYP_GENERIC_PARAM:
+        if is_flow_fn == 0 && get_type_kind(ret_ti) != TYP_GENERIC_PARAM && fi_generic_count(fi) == 0:
             g_cur_fn_ret_checked = 1
+        g_infer_ret_active = ret_inferred
+        g_infer_ret_ti = -2
         body_ti := infer_expr(body)
+        if ret_inferred != 0:
+            iti := g_infer_ret_ti
+            if iti == -2:
+                iti = body_ti
+            cell_store(g_func_ret_ti, fi * 8, iti)
+        g_infer_ret_active = 0
         g_cur_fn_ret_ti = saved_ret_ti
         g_cur_fn_ret_checked = saved_ret_ok
         compat := type_compat_strict(body_ti, ret_ti)
@@ -2647,9 +2729,11 @@ fn check_func(fi: int):
         // 无 break 的 loop 收尾），因此块类型 = 末语句类型推出的 unit 不是缺返回值的证据，
         // 等价于 never 格（与下行既有 TI_NEVER 豁免同路）。
         if compat != 1 && body_ti != TI_NEVER && stmt_cannot_fall_through(body) == 0:
-            // Skip check if return type is generic param (can't verify at declaration)
-            // Skip check for flow functions (yield instead of return)
-            if !is_flow_fn && get_type_kind(ret_ti) != TYP_GENERIC_PARAM:
+            // Generic templates defer body/return compatibility to the
+            // monomorphized instance, where parameter types are concrete. The
+            // instance is revalidated by check_func in gen_create_instance.
+            // Skip check for flow functions (yield instead of return).
+            if !is_flow_fn && get_type_kind(ret_ti) != TYP_GENERIC_PARAM && fi_generic_count(fi) == 0:
                 diag_type_incompatible(compat, EC_TF_RETURN, "Function return type mismatch", ast_line(fn_node), ast_col(fn_node))
     // 规约标注，在 pop_scope 之前（形参仍在作用域内，`#check(a > 0)` 才能定型）
     spec_check_func(fn_node, return_type)
@@ -3007,6 +3091,10 @@ fn s1p_arg_one(arg_n: int, pi2: int, pti: int, ati: int, is_ext: int, call_ni: i
     //   都让同一批输入不再报），因此判据必须能区分空间写错与规则缺一条：见
     //   `tests/selfhost/test_s1p_sentinel_skips.py` 的逐条突变自证（本刀强制要求）。
     if ati == TI_NEVER:
+        skip = 1
+    // 错误哨兵（未定义名、上游类型错误）：未知 ≠ 异型。不跳过会让一条
+    // N01/N06 再叠一条 9917 台账行，且该行不携带任何可判定的类型信息。
+    if ati == ti_error():
         skip = 1
     // 类型不可得，因此未知 ≠ 异型
     if ati == TI_DYN:
@@ -3386,6 +3474,8 @@ fn infer_expr(node: int) -> int:
                 //  `param_skip = 0`：参数列表无 self（模块函数是普通 fn）。
                 fi_mod := find_func(func_ni)
                 s1p_arg_ring(fi_mod, first_arg, arg_count, 0, 0)
+                if fi_mod >= 0 && fi_generic_count(fi_mod) > 0:
+                    return infer_gen_call(fi_mod, node, first_arg, arg_count)
                 if mod_found_mfi >= 0:
                     return cell_load(g_mod_func_tis, mod_found_mfi * 8)
                 return TI_UNIT
@@ -3424,8 +3514,21 @@ fn infer_expr(node: int) -> int:
                     mi = mi + 1
             // Generic param method call resolution
             if func_ni < 0 && get_type_kind(lookup_ti) == TYP_GENERIC_PARAM:
+                // Auto-constraint inference is sound only when the receiver is
+                // the generic parameter itself (`a.show()`). A field projection
+                // (`e.payload.show()`) has a different type that is unknown at
+                // template time; defer it to the monomorphized instance check.
+                direct_recv : ., mut = 0
+                if ast_kind(node) == EXPR_CALL:
+                    callee := ast_a(node)
+                    if ast_kind(callee) == EXPR_FIELD:
+                        recv := ast_a(callee)
+                        if ast_kind(recv) == EXPR_IDENT:
+                            direct_recv = 1
+                if direct_recv == 0:
+                    return TI_UNIT
                 gen_ni := get_type_data(lookup_ti)
-                gc2 := fi_generic_count(g_checker_current_fi)
+                gc2 := cur_fn_is_generic()
                 gci2 : ., mut = 0
                 loop:
                     if gci2 >= gc2:
@@ -3442,6 +3545,8 @@ fn infer_expr(node: int) -> int:
                         // and fail through the normal return-type check.
                         if iface_ni2 < 0:
                             iface_ni2 = infer_iface_for_method(method_ni)
+                            if iface_ni2 < 0 && g_cur_fn_ret_ti >= 0:
+                                iface_ni2 = infer_iface_for_method_ret(method_ni, g_cur_fn_ret_ti)
                             if iface_ni2 >= 0:
                                 grow_gen_constr(constr_idx2 + 1)
                                 cell_store(g_generic_constr, constr_idx2 * 8, iface_ni2)
@@ -3505,6 +3610,8 @@ fn infer_expr(node: int) -> int:
                     // 一一对应，元数口径为 arg_count + 1 == pc。
                     s1p_arg_ring(fi_m, first_arg, arg_count, 1, 0)
                     if fi_m >= 0:
+                        if fi_generic_count(fi_m) > 0:
+                            return infer_gen_call(fi_m, node, first_arg, arg_count)
                         if fi_generic_count(fi_m) == 0:
                             if sym_type(si) == TI_UNIT:
                                 if fi_return_type(fi_m) == TY_NEVER:
@@ -3645,8 +3752,9 @@ fn infer_expr(node: int) -> int:
         // Accept int as truthy/falsy in conditions (not just strict bool)
         // 查表使用 ONE 检查，单操作数。IP_COND 格是 {int, bool}，dex 被拒，例如 if 1.5 报 TC01。
         // 不得与 while 的 IP_COND_BOOL 合并：那条只收 bool，合并会收紧 if 或放宽 while。
-        if iface_permits(iface_kind_of(cond_ti), IP_COND) == 0:
-            check_error(EC_TC_IF_COND, "If condition must be bool or int", ast_line(node), ast_col(node))
+        if cur_fn_is_generic() == 0:
+            if iface_permits(iface_kind_of(cond_ti), IP_COND) == 0:
+                check_error(EC_TC_IF_COND, "If condition must be bool or int", ast_line(node), ast_col(node))
         // --- Dyn type set merge: save pre-if state ---
         pre_dyn_count : ., mut = g_dyn_type_set_count
         pre_dyn_save : string, mut = ""
@@ -3812,10 +3920,12 @@ fn infer_expr(node: int) -> int:
     if ast_kind(node) == EXPR_RANGE:
         st := infer_expr(ast_a(node))
         et := infer_expr(ast_b(node))
-        if st != TI_INT:
-            check_error(EC_TB_ADD, "Range start must be int", ast_line(node), ast_col(node))
-        if et != TI_INT:
-            check_error(EC_TB_ADD, "Range end must be int", ast_line(node), ast_col(node))
+        // Generic templates defer range operand typing to the instance.
+        if cur_fn_is_generic() == 0:
+            if st != TI_INT:
+                check_error(EC_TB_ADD, "Range start must be int", ast_line(node), ast_col(node))
+            if et != TI_INT:
+                check_error(EC_TB_ADD, "Range end must be int", ast_line(node), ast_col(node))
         return TI_INT
 
     if ast_kind(node) == EXPR_MATCH:
@@ -4029,6 +4139,8 @@ fn infer_expr(node: int) -> int:
         // 否则 return foo() 里的未定义名和类型错误诊断会消失；推断结果不参与本节点类型。
         if ast_a(node) >= 0:
             vt := infer_expr(ast_a(node))
+            if g_infer_ret_active != 0 && g_infer_ret_ti == -2:
+                g_infer_ret_ti = vt
             // nail3：逐 `return` 核对返回值 vs 当前函数的声明返回型（新通道，见全局注释）。
             // 码 = TF01（`EC_TF_RETURN`，与体检查同码，措辞区分成因）。
             // 三个假红风险：
@@ -4119,6 +4231,17 @@ fn infer_expr(node: int) -> int:
         actual_ti : ., mut = obj_ti
         if actual_ti >= 0 && actual_ti < g_type_count && get_type_kind(actual_ti) == TYP_REF:
             actual_ti = get_type_data(actual_ti)
+        // V4 `.len` on sequences. Named structs with a real `len` field fall
+        // through to the normal field lookup; the builtin only claims
+        // array/slice/string and unresolved generic receivers.
+        fnm := istr_get(field_ni)
+        if str_eq(fnm, "len") != 0:
+            klen := get_type_kind(actual_ti)
+            if actual_ti == TI_STR || klen == TYP_ARRAY || klen == TYP_SLICE || klen == TYP_GENERIC_PARAM:
+                ast_set_data(node, -1)
+                ast_set_type_val(node, 0)
+                ast_set_c(node, -1)
+                return TI_INT
         // Handle generic apply: unwrap to base named type for struct lookup
         if actual_ti >= 0 && actual_ti < g_type_count && get_type_kind(actual_ti) == TYP_GENERIC_APPLY:
             actual_ti = get_type_data(actual_ti)
@@ -4166,7 +4289,13 @@ fn infer_expr(node: int) -> int:
                 data_start := get_type_extra(actual_ti)
                 if ast_data(node) != idx:
                     ast_set_data(node, idx)
-                return cell_load(g_gen_apply_data, (data_start + idx) * 8)
+                elem_ti := cell_load(g_gen_apply_data, (data_start + idx) * 8)
+                // Numeric tuple indices reuse ast_c to carry the element type
+                // row to ir_gen. Tuple elements are stored in exact form, so a
+                // dex element must be read as TI_DEX_S: reading it as TI_INT
+                // would make the tagged-int path untag a raw scaled word.
+                ast_set_c(node, elem_ti)
+                return elem_ti
         return TI_UNIT
 
     if ast_kind(node) == EXPR_INDEX:
@@ -4227,6 +4356,13 @@ fn infer_expr(node: int) -> int:
         // 相等，由 selftest x2.indexable_matches_ops 和 idx.gate_deny_covers_fallback 检查。
         // 形状返回 -1 表示不可判，例如不可译行；此时不折算成 0 或 1，而是回落既有许可表，
         // 结论与改动前逐条记录相同。
+        // A generic parameter's sequence shape is only known after
+        // instantiation. The template body must not emit TK01 here: the
+        // monomorphized instance carries the real array/slice type. Keep the
+        // existing int fallback so int-element templates type-check; non-int
+        // element bodies are resolved on the specialized AST.
+        if get_type_kind(arr_ti) == TYP_GENERIC_PARAM:
+            return TI_INT
         idx_ok := iface_satisfies_term(arr_ti, sh_shape_indexable())
         if idx_ok == -1:
             idx_ok = iface_permits(iface_kind_of(arr_ti), IP_INDEX)
@@ -4247,10 +4383,13 @@ fn infer_expr(node: int) -> int:
                 if target_si >= 0:
                     dyn_set_type(target_si, vt)
         else:
-            // 参序归一：赋值 = 目标(tt) ← 值(vt)，因此源 = vt，目标 = tt
-            compat := type_compat_strict(vt, tt)
-            if compat != 1:
-                diag_type_incompatible(compat, EC_TA_ASSIGN, "Assignment type mismatch", ast_line(node), ast_col(node))
+            // Generic templates defer assignment compatibility to the
+            // monomorphized instance, where element/field types are concrete.
+            if cur_fn_is_generic() == 0:
+                // 参序归一：赋值 = 目标(tt) ← 值(vt)，因此源 = vt，目标 = tt
+                compat := type_compat_strict(vt, tt)
+                if compat != 1:
+                    diag_type_incompatible(compat, EC_TA_ASSIGN, "Assignment type mismatch", ast_line(node), ast_col(node))
         return vt
 
     if ast_kind(node) == EXPR_STRUCT:
@@ -4640,6 +4779,21 @@ fn infer_expr(node: int) -> int:
         // @hotpatch — function annotation, not an expression
         if str_eq(name, "hotpatch") != 0:
             return TI_UNIT
+
+        // SYSTEM raw pointer add: both args are mathematical ints; the result is
+        // a raw address word. Used by the scheduler to advance G pointers that
+        // are stored in int slots.
+        if str_eq(name, "ptr_add") != 0:
+            if args < 0:
+                check_error(EC_N_UNDEFINED, "@ptr_add requires 2 arguments", ast_line(node), ast_col(node))
+                return ti_error()
+            a2 := ast_b(args)
+            if a2 < 0:
+                check_error(EC_N_UNDEFINED, "@ptr_add requires 2 arguments", ast_line(node), ast_col(node))
+                return ti_error()
+            infer_expr(ast_a(args))
+            infer_expr(ast_a(a2))
+            return TI_INT
 
         // ── 2(a) 视图内建：同一个 64 位字的两种看法（零转换、零拷贝、零运行期动作）──
         //  `@ptr_of(s: string) -> int` · `@str_of(p: int) -> string`

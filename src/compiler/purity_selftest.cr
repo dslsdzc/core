@@ -216,13 +216,15 @@ fn purity_selftest_run() -> int:
     src = src + "fn call_effect():\n    effect()\n"
     src = src + "extern fn ext_probe(x: int) -> int\n"
     src = src + "fn call_extern(x: int) -> int:\n    return ext_probe(x)\n"
-    src = src + "fn call_builtin(x: int) -> int:\n    return cell_load64(x)\n"
+    src = src + "fn call_builtin(x: int) -> int:\n    return load64(x)\n"
     src = src + "fn self_rec(n: int) -> int:\n    if n <= 0:\n        return 0\n    return self_rec(n - 1)\n"
     src = src + "fn mut_rec_a(n: int) -> int:\n    if n <= 0:\n        return 0\n    return mut_rec_b(n - 1)\n"
     src = src + "fn mut_rec_b(n: int) -> int:\n    if n <= 0:\n        return 0\n    return mut_rec_a(n - 1)\n"
-    src = src + "fn id[T](x: T) -> T:\n    return x\n"
+    // Inferred parameter type: calling these with int creates the `id[int]` /
+    // `gid[int]` monomorph instances the purity fixed-point checks below use.
+    src = src + "fn id(x) -> int:\n    return x\n"
     src = src + "fn use_id(x: int) -> int:\n    return id(x)\n"
-    src = src + "fn gid[T](x: T) -> T:\n    gst : ., mut = 0\n    gst = 1\n    return x\n"
+    src = src + "fn gid(x) -> int:\n    gst : ., mut = 0\n    gst = 1\n    return x\n"
     src = src + "fn use_gid(x: int) -> int:\n    return gid(x)\n"
     // State dependency cases: an effectful call between stores, a pure call with
     // the same shape, and a loop.

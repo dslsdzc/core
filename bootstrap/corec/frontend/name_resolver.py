@@ -72,6 +72,16 @@ class NameResolver:
 
     def _declare_type(self, decl):
         self.symtab.define(decl.name, SymbolKind.TYPE, decl=decl)
+        # Bare enum variants are values (`mode := Server`), so they need a
+        # symbol in the resolver as well as the type checker.
+        if isinstance(decl, EnumDecl):
+            for vname, types in decl.variants:
+                if self.symtab.lookup(vname, recursive=False) is None:
+                    param_specs = [(None, t) for t in types]
+                    self.symtab.define(
+                        vname, SymbolKind.FUNCTION, PathType([decl.name]),
+                        FunctionDecl(False, vname, [], param_specs,
+                                     PathType([decl.name]), None))
 
     def _declare_let(self, decl: LetDecl):
         for name in decl.names:

@@ -99,7 +99,7 @@ fn main() -> int:
 def many_funcs_probe(n: int) -> str:
     parts = ["// warm-path probe: %d 函数" % n]
     for i in range(n):
-        parts.append("fn f%d(x: int) -> int { return x + %d; }" % (i, i))
+        parts.append("fn f%d(x: int) -> int:\n    return x + %d" % (i, i))
     parts.append("fn main() -> int:\n    return f0(0) + f1(1) + f2(2)\n")
     return "\n".join(parts) + "\n"
 

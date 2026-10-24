@@ -976,19 +976,11 @@ def main():
         # 正：通配臂吸收 ⇒ 穷尽（零诊断）
         case_dual("optional_match_wildcard",
                   "fn main() -> int:\n    x: int? = none\n    return match x:\n        _ => 9,\n", 9),
-        # 负：退役内建 Option 注册——`Option` 不再是语言内建类型名。
-        # 旧行为：collect_decls 自动注册命名行 ⇒ `Option[int]` 零诊断通过；新行为：该名未声明
-        # ⇒ `Undefined type in generic application`（EC_N_GENERIC_TYPE，**软诊断**：rc 面
-        # build 仍 0——故判据走 `check` 的 rc=1 + 措辞）。用户自声明 `enum Option` 时按普通
-        # 枚举解析（Task 3 的 p20 语义保持，见 test_match_exhaust.py）。
+        # 负：退役内建 Option 注册——`Option` 不再是语言内建类型名，且 V4 不再有
+        # `Option[int]` 类型应用语法；parser 直接拒绝该形态。
         case_reject("builtin_option_name_retired",
                     "fn f(x: Option[int]) -> int:\n    return 0\nfn main() -> int:\n    return f(0)\n",
-                    ["Undefined type in generic application"], cmd="check"),
-        # 登记：载荷类型节点列入库（每槽有节点 = bad=0）+ 裸码列丢失真实类型的信息量
-        # （`V(S)` 命名类型载荷与 `Some(T)` 泛型形参载荷在裸码列都塌缩为 0 = TY_INT）
-        case_evp("payload_type_nodes_recorded",
-                 "struct S:\n    a: int\nenum E:\n    V(S), W(int)\nenum Opt[T]:\n    N, Some(T)\nfn main() -> int:\n    return 0\n",
-                 ["[enum-payload-verify]", "slots=3", "collapses=2", "bad=0"]),
+                    ["unexpected top-level token 'int'"], cmd="check"),
 
         # ── R2 P4 Task 5：解包侧判表示（B.7 四形态；修复前多个形态双路径 139）──
         # 裸值 + Some 臂（B.7 最小复现）：裸值即载荷 ⇒ 5

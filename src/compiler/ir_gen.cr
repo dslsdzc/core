@@ -111,8 +111,104 @@ fn slice_len_copy_to(dst_var: int, src_var: int):
 
 // 切片解引用检查（运行时界长度）：s1 = idx 变量/字面量，上限 = 长度变量
 // （IR_BOUNDS_CHECK ti=1 动态上限，与 emit_string_bounds 同机制）。
+// Slice header access. V4 slices carry a two-word header {data_ptr, len}; the
+// IR variable holds the header pointer. Functions receive that pointer, so the
+// length crosses call boundaries without an ABI change to the value itself.
+fn is_slice_hdr(v: int) -> int:
+    if v < 0:
+        return 0
+    return get_type_kind(irv_type(v)) == TYP_SLICE
+
+fn slice_hdr_data(v: int) -> int:
+    if is_slice_hdr(v) != 0:
+        d := new_ir_var("slice_data", TI_INT)
+        emit(IR_LOAD_INDEX, d, v, 0, 0, 0)
+        return d
+    return v
+
+fn slice_hdr_len(v: int) -> int:
+    if is_slice_hdr(v) != 0:
+        l := new_ir_var("slice_len", TI_INT)
+        emit(IR_LOAD_INDEX, l, v, 0, 1, 0)
+        return l
+    sl := slice_len_get(v)
+    if sl >= 0:
+        l := new_ir_var("slice_len", TI_INT)
+        emit(IR_CONST, l, sl, 0, 0, TI_INT)
+        return l
+    return slice_len_var_get(v)
+
+// Convert an array/side-table slice argument into a header slice when the
+// callee declares a slice parameter. A header slice passes through unchanged.
+fn make_slice_header(data_var: int, len_code: int, len_var: int) -> int:
+    elem := elem_ti_of(data_var)
+    if elem < 0:
+        elem = TI_INT
+    hdr := new_ir_var("slice_arg", alloc_type(TYP_SLICE, elem, 0))
+    emit(IR_ALLOC_ARRAY, hdr, 2, 0, 0, 0)
+    emit(IR_STORE_INDEX, -1, hdr, data_var, 0, 0)
+    if len_var >= 0:
+        emit(IR_STORE_INDEX, -1, hdr, len_var, 1, 0)
+        slice_len_var_set(hdr, len_var)
+    else if len_code >= 0:
+        lc := new_ir_var("slice_len", TI_INT)
+        emit(IR_CONST, lc, len_code, 0, 0, TI_INT)
+        emit(IR_STORE_INDEX, -1, hdr, lc, 1, 0)
+        slice_len_set(hdr, len_code)
+    return hdr
+
+fn coerce_slice_arg(v: int) -> int:
+    if v < 0:
+        return v
+    if is_slice_hdr(v) != 0:
+        return v
+    ti := irv_type(v)
+    if get_type_kind(ti) == TYP_ARRAY:
+        return make_slice_header(v, get_type_extra(ti), -1)
+    sl := slice_len_get(v)
+    if sl >= 0:
+        return make_slice_header(v, sl, -1)
+    slv := slice_len_var_get(v)
+    if slv >= 0:
+        return make_slice_header(v, -1, slv)
+    return v
+
+fn coerce_slice_args(fi: int, ac: int, arg_vars: string):
+    fn_node := fi_ast_node(fi)
+    if fn_node < 0:
+        return
+    pc := ast_c(fn_node)
+    pn := ast_b(fn_node)
+    ai : ., mut = 0
+    loop:
+        if ai >= pc || ai >= ac:
+            break
+        if pn < 0 || pn >= g_ast_count:
+            break
+        if ast_kind(pn) == EXPR_PARAM:
+            ptn := ast_data(pn)
+            if ptn >= 0:
+                pti := res_type_node(ptn)
+                if get_type_kind(pti) == TYP_SLICE:
+                    av := cell_load(arg_vars, ai * 8)
+                    if av >= 0:
+                        cell_store(arg_vars, ai * 8, coerce_slice_arg(av))
+            ai = ai + 1
+        pn = pn + 1
+        loop:
+            if pn >= g_ast_count:
+                break
+            if ast_kind(pn) == EXPR_PARAM:
+                break
+            pn = pn + 1
+
 fn emit_slice_bounds(arr_var: int, idx_var: int):
     if arr_var < 0 || idx_var < 0:
+        return
+    if is_slice_hdr(arr_var) != 0:
+        lv := slice_hdr_len(arr_var)
+        if lv >= 0:
+            emit(IR_BOUNDS_CHECK, -1, idx_var, lv, 0, 1)
         return
     lv := slice_len_var_get(arr_var)
     if lv >= 0:
@@ -120,6 +216,13 @@ fn emit_slice_bounds(arr_var: int, idx_var: int):
 
 fn emit_slice_lit_bounds(arr_var: int, idx_lit: int):
     if arr_var < 0:
+        return
+    if is_slice_hdr(arr_var) != 0:
+        lv := slice_hdr_len(arr_var)
+        if lv >= 0:
+            t := new_ir_var("_slice_idx", TI_INT)
+            emit(IR_CONST, t, idx_lit, 0, 0, TI_INT)
+            emit(IR_BOUNDS_CHECK, -1, t, lv, 0, 1)
         return
     lv := slice_len_var_get(arr_var)
     if lv >= 0:
@@ -497,11 +600,29 @@ fn agg_read_form_is_dex(tn: int) -> int:
         return 1
     return 0
 
-// 结构体字段读（`EXPR_FIELD`；数字元组下标形态 `ast_type_val > 0` 无声明信息 -> 不判）
+// char 槽存的是 intern index（无 tag）。读点必须保持 TI_CHAR，不能被
+// 标成 TI_INT：tagged-int 路径会把无 tag 的值右移一位。
+fn agg_read_form_is_char(tn: int) -> int:
+    if tn < 0:
+        return 0
+    if ast_kind(tn) != 0:
+        return 0
+    if ast_type_val(tn) == TY_CHAR:
+        return 1
+    return 0
+
+// 结构体字段读（`EXPR_FIELD`）。数字元组下标的元素类型行由 checker 写入
+// ast_c：元组槽恒为精确形式，dex 元素必须按 TI_DEX_S 读取，否则 tagged-int
+// 路径会把无 tag 的缩放整数右移一位（7_000_000 -> 3_500_000）。
 fn agg_field_read_form(field_node: int, fi: int) -> int:
     if field_node < 0 || fi < 0:
         return TI_INT
     if ast_type_val(field_node) > 0:
+        et := ast_c(field_node)
+        if et == TI_DEX || et == TI_DEX_S:
+            return TI_DEX_S
+        if et == TI_CHAR:
+            return TI_CHAR
         return TI_INT
     si := find_struct(ast_c(field_node))
     if si < 0:
@@ -511,6 +632,8 @@ fn agg_field_read_form(field_node: int, fi: int) -> int:
         return TI_DEX_S
     if dex_opt_type_node(ftn) != 0:
         return TI_DEX_S
+    if agg_read_form_is_char(ftn) != 0:
+        return TI_CHAR
     return TI_INT
 
 // 数组/切片元素读：元素 ti 由数组 var 的型取得（纯表读）；`TI_DEX`（apx 声明形态的
@@ -519,6 +642,8 @@ fn agg_elem_read_form(arr_var: int) -> int:
     et := elem_ti_of_decl(slot_decl_ti(arr_var))
     if et == TI_DEX || et == TI_DEX_S:
         return TI_DEX_S
+    if et == TI_CHAR:
+        return TI_CHAR
     return TI_INT
 
 // match 臂携带值绑定读（`EXPR_ENUMPAT`：a=变体名 ni、b=首子模式、c=子模式数）
@@ -537,8 +662,11 @@ fn agg_payload_read_form(pat_node: int, pos: int) -> int:
         if vi >= ei_variant_count(ei):
             return TI_INT
         if ei_variant_name(ei, vi) == name_ni:
-            if agg_read_form_is_dex(ei_variant_type_node(ei, vi, pos)) != 0:
+            tn := ei_variant_type_node(ei, vi, pos)
+            if agg_read_form_is_dex(tn) != 0:
                 return TI_DEX_S
+            if agg_read_form_is_char(tn) != 0:
+                return TI_CHAR
             return TI_INT
         vi = vi + 1
     return TI_INT
@@ -1087,18 +1215,28 @@ fn is_ptr_var(var_idx: int) -> int:
 fn is_byte_buf_var(var_idx: int) -> int:
     // Raw byte buffers produced by alloc() (TI_UNIT internal sentinel,
     // Core `string`) are byte-addressed: `buf + n` must NOT scale n by
-    // the 8-byte element size.
+    // the 8-byte element size. A byte-arithmetic result stays a byte pointer,
+    // so chains like `buf + size - 8` stay unscaled.
     if var_idx < 0:
         return 0
+    prod := cell_load(g_df_var_producer, var_idx * 8)
+    if prod >= 0:
+        prod_op := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
+        if prod_op == IR_BINARY:
+            bop := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S3)
+            if bop == OP_BYTE_ADD || bop == OP_BYTE_SUB:
+                return 1
     if irv_type(var_idx) != TI_UNIT:
         return 0
-    prod := cell_load(g_df_var_producer, var_idx * 8)
     if prod < 0:
         return 0
-    prod_op := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
-    if prod_op == IR_ALLOC:
+    prod_op2 := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_OPCODE)
+    // A TI_UNIT slot backed by IR_ALLOC is an alloc()/byte-buffer local (typed
+    // scalars were narrowed above, so uninitialized `x : int` no longer lands
+    // here).
+    if prod_op2 == IR_ALLOC:
         return 1
-    if prod_op == IR_CALL:
+    if prod_op2 == IR_CALL:
         func_ni := cell_load(g_df_nodes, prod * ESZ_DFNODE + OFF_DF_S3)
         if runtime_frontend_builtin_is_alloc(func_ni) != 0:
             return 1
@@ -1111,6 +1249,12 @@ fn ir_call_return_type(func_ni: int) -> int:
     // sentinel until Core has a distinct raw-buffer type.
     if runtime_frontend_builtin_is_alloc(func_ni) != 0:
         return TI_UNIT
+    // OS-axis builtins with no Core body (syscall3/syscall4) are not in the
+    // target table but do declare a return type; without this the call result
+    // is TI_UNIT and tagged comparisons treat it as a raw word.
+    pr := prelude_builtin_return_ti(func_ni)
+    if pr >= 0:
+        return pr
     bi : ., mut = 0
     loop:
         if bi >= g_rt_builtin_count:
@@ -1455,10 +1599,17 @@ fn dex_scaled_to_bits(var: int, node: int) -> int:
 fn dex_scale_int(var: int) -> int:
     if irv_type(var) != TI_INT:
         return var
+    // Big-int mode stores ints tagged (2v). Multiply through the big-int path
+    // (tagged rep of S = 2S), then strip the tag with a raw divide by 2 so the
+    // exact-path operand is a raw scaled word.
     c := new_ir_var("_dsc", TI_INT)
     emit(IR_CONST, c, 1000000, 0, 0, TI_INT)
+    p := new_ir_var("_dst", TI_INT)
+    emit(IR_BINARY, p, var, c, OP_MUL, TI_INT)
+    two := new_ir_var("_ds2", TI_DEX_S)
+    emit(IR_CONST, two, 2, 0, 0, TI_DEX_S)
     t := new_ir_var("_dxt", TI_DEX_S)
-    emit(IR_BINARY, t, var, c, OP_MUL, TI_INT)
+    emit(IR_BINARY, t, p, two, OP_DIV, TI_INT)
     return t
 
 // 存储到 dex 槽位前按槽位形式转换：
@@ -1865,18 +2016,31 @@ fn gen_expr(node: int) -> int:
             rt = TI_DEX_S
         fti : int = TI_INT
         // Pointer arithmetic: use PTR_ADD/PTR_SUB/PTR_DIFF instead of standard opcodes.
-        // Raw byte buffers from alloc() are byte-addressed — plain ADD/SUB, no scaling.
-        if is_ptr_var(left_var) != 0 || is_ptr_var(right_var) != 0:
-            buf_left := is_byte_buf_var(left_var)
-            buf_right := is_byte_buf_var(right_var)
-            if buf_left == 0 && buf_right == 0:
+        // Raw byte buffers from alloc() are byte-addressed — separate byte ops
+        // keep the raw pointer and untag the integer offset without the ×8 scale.
+        buf_left := is_byte_buf_var(left_var)
+        buf_right := is_byte_buf_var(right_var)
+        if (buf_left != 0 || buf_right != 0) && (op == OP_ADD || op == OP_SUB):
+            if buf_left == 0:
+                // int + buffer: normalize to buffer + int.
                 if op == OP_ADD:
-                    op = OP_PTR_ADD
-                else if op == OP_SUB:
-                    if is_ptr_var(left_var) != 0 && is_ptr_var(right_var) != 0:
-                        op = OP_PTR_DIFF
-                    else:
-                        op = OP_PTR_SUB
+                    tmp_buf := left_var
+                    left_var = right_var
+                    right_var = tmp_buf
+                    op = OP_BYTE_ADD
+            else:
+                if op == OP_ADD:
+                    op = OP_BYTE_ADD
+                else:
+                    op = OP_BYTE_SUB
+        else if is_ptr_var(left_var) != 0 || is_ptr_var(right_var) != 0:
+            if op == OP_ADD:
+                op = OP_PTR_ADD
+            else if op == OP_SUB:
+                if is_ptr_var(left_var) != 0 && is_ptr_var(right_var) != 0:
+                    op = OP_PTR_DIFF
+                else:
+                    op = OP_PTR_SUB
         if op == OP_PTR_ADD || op == OP_PTR_SUB:
             if is_ptr_var(left_var) != 0:
                 fti = irv_type(left_var)
@@ -1915,15 +2079,21 @@ fn gen_expr(node: int) -> int:
                 // (a×b)/S：先乘后缩回（中间值 a·b ≤ 9.2e18 -> |值| ≤ 3.03e3 级，文档化）
                 p := new_ir_var("_dxm", TI_DEX_S)
                 emit(IR_BINARY, p, left_var, right_var, OP_MUL, TI_INT)
-                c := new_ir_var("_dxs", TI_INT)
-                emit(IR_CONST, c, 1000000, 0, 0, TI_INT)
+                // S is a raw scaled word. Emitting it as TI_INT would tag it in
+                // big-int mode (2_000_000), and the raw exact-path divide would
+                // use the tagged value (7.0*2.0 became 7.0).
+                c := new_ir_var("_dxs", TI_DEX_S)
+                emit(IR_CONST, c, 1000000, 0, 0, TI_DEX_S)
                 v := new_ir_var("bin", TI_DEX_S)
                 emit(IR_BINARY, v, p, c, OP_DIV, TI_INT)
                 return v
             if op == OP_DIV:
                 // (a×S)/b：先放大再除（中间值 a·S ≤ 9.2e18 -> |a| ≤ 9.2e6，向零截断）
-                c := new_ir_var("_dxs", TI_INT)
-                emit(IR_CONST, c, 1000000, 0, 0, TI_INT)
+                // S is a raw scaled word. Emitting it as TI_INT would tag it in
+                // big-int mode (2_000_000), and the raw exact-path divide would
+                // use the tagged value (7.0*2.0 became 7.0).
+                c := new_ir_var("_dxs", TI_DEX_S)
+                emit(IR_CONST, c, 1000000, 0, 0, TI_DEX_S)
                 t := new_ir_var("_dxn", TI_DEX_S)
                 emit(IR_BINARY, t, left_var, c, OP_MUL, TI_INT)
                 v := new_ir_var("bin", TI_DEX_S)
@@ -1931,8 +2101,11 @@ fn gen_expr(node: int) -> int:
                 return v
             if op == OP_MOD:
                 // a mod b = a - trunc(a/b)·b（截断除法恒等式，缩放形式）
-                c := new_ir_var("_dxs", TI_INT)
-                emit(IR_CONST, c, 1000000, 0, 0, TI_INT)
+                // S is a raw scaled word. Emitting it as TI_INT would tag it in
+                // big-int mode (2_000_000), and the raw exact-path divide would
+                // use the tagged value (7.0*2.0 became 7.0).
+                c := new_ir_var("_dxs", TI_DEX_S)
+                emit(IR_CONST, c, 1000000, 0, 0, TI_DEX_S)
                 t1 := new_ir_var("_dxn", TI_DEX_S)
                 emit(IR_BINARY, t1, left_var, c, OP_MUL, TI_INT)
                 t2 := new_ir_var("_dxq", TI_DEX_S)
@@ -2016,6 +2189,9 @@ fn gen_expr(node: int) -> int:
         if ast_kind(target) == EXPR_INDEX:
             arr_var := gen_expr(ast_a(target))
             arr_var = force_if_thunk(arr_var)
+            arr_data_store := arr_var
+            if is_slice_hdr(arr_var) != 0:
+                arr_data_store = slice_hdr_data(arr_var)
             idx_node := ast_b(target)
             // 容量批 T2：可选元素写点规范化（元素类型 = 数组/切片声明类型的内层；
             // 全局数组的声明信息在 g_global_lets -> ident 形目标回退查全局声明）
@@ -2033,13 +2209,13 @@ fn gen_expr(node: int) -> int:
                 emit_string_lit_bounds(arr_var, ast_int_val(idx_node))
                 emit_slice_lit_bounds(arr_var, ast_int_val(idx_node))
                 if pass_before_array_access(arr_var, -1, ast_int_val(idx_node), arr_len_lit) == 0:
-                    emit(IR_STORE_INDEX, -1, arr_var, val_var, ast_int_val(idx_node), 0)
+                    emit(IR_STORE_INDEX, -1, arr_data_store, val_var, ast_int_val(idx_node), 0)
             else:
                 idx_var := gen_expr(idx_node)
                 idx_var = force_if_thunk(idx_var)
                 emit_slice_bounds(arr_var, idx_var)
                 if pass_before_array_access(arr_var, idx_var, -1, arr_len_lit) == 0:
-                    emit(IR_STORE_INDEX_VAR, val_var, arr_var, idx_var, 0, 0)
+                    emit(IR_STORE_INDEX_VAR, val_var, arr_data_store, idx_var, 0, 0)
             return val_var
         if ast_kind(target) == EXPR_UNARY && ast_c(target) == UOP_DEREF:
             ptr_var := gen_expr(ast_a(target))
@@ -2082,8 +2258,11 @@ fn gen_expr(node: int) -> int:
                 // checker 侧已被 S1 覆盖（`UOP_REF` 对非 `EXPR_IDENT` 操作数走 `else` 分支后同样
                 // `return alloc_type(TYP_REF, inner, is_mut)`）-> 本处是 ir_gen 侧唯一剩下的点。
                 // `extra` 同 `&x`：取 `is_mut`（`&mut arr[i]` 与 `&arr[i]` 须同 `&x`/`&mut x` 一样可分）。
+                arr_data_addr := arr_var
+                if is_slice_hdr(arr_var) != 0:
+                    arr_data_addr = slice_hdr_data(arr_var)
                 v := new_ir_var("addr", alloc_type(TYP_REF, elem_ti, ast_int_val(node)))
-                emit(IR_ADDR_INDEX, v, arr_var, idx_var, 3, 0)
+                emit(IR_ADDR_INDEX, v, arr_data_addr, idx_var, 3, 0)
                 return v
             op_var := gen_expr(ast_a(node))
             op_var = force_if_thunk(op_var)
@@ -2412,6 +2591,20 @@ fn gen_expr(node: int) -> int:
             //    类型在哪换：checker 侧（`@str_of` 返回 TI_STR / `@ptr_of` 返回 TI_INT），
             //      即表达式的类型而不是变量的类型；调用边界按被调函数形参类型编组，
             //      int/string 同属 GP 字 -> 两侧一致。
+            // SYSTEM raw pointer add: untag both int operands and return the raw
+            // word. No unsafe/arena: safe to call from the scheduler hot path.
+            if str_eq(name, "ptr_add") != 0:
+                a1 := gen_expr(ast_a(first_arg))
+                a1 = force_if_thunk(a1)
+                a2n := ast_b(first_arg)
+                a2v : ., mut = -1
+                if a2n >= 0:
+                    a2v = gen_expr(ast_a(a2n))
+                    a2v = force_if_thunk(a2v)
+                rv := new_ir_var("_ptr_add", TI_INT)
+                emit(IR_BINARY, rv, a1, a2v, OP_RAW_ADD, TI_INT)
+                return rv
+
             if str_eq(name, "str_of") != 0 || str_eq(name, "ptr_of") != 0:
                 inner := gen_expr(ast_a(first_arg))
                 inner = force_if_thunk(inner)
@@ -2494,8 +2687,10 @@ fn gen_expr(node: int) -> int:
             cfi := find_func(func_ni)
             if cfi >= 0:
                 dex_align_call_args(cfi, ac, arg_vars, arg_nodes, arg_nodes_cap)
-        // Generic function: redirect to monomorphized (specialized) version
-        if func_ni >= 0 && (ast_kind(func_node) == EXPR_IDENT):
+        // Generic function: redirect to monomorphized (specialized) version.
+        // Module-qualified calls have no receiver and are safe to specialize the
+        // same way; method calls keep the EXPR_IDENT-only restriction.
+        if func_ni >= 0 && (ast_kind(func_node) == EXPR_IDENT || is_module_call != 0):
             gen_fi := find_func(func_ni)
             if gen_fi >= 0 && fi_generic_count(gen_fi) > 0:
                 // ─── 实例键类型项化 ───
@@ -2582,6 +2777,10 @@ fn gen_expr(node: int) -> int:
                     if cfi_i >= 0:
                         dex_align_call_args(cfi_i, ac, arg_vars, arg_nodes, arg_nodes_cap)
                     // Fall through to normal IR_CALL emission
+        if func_ni >= 0:
+            cfi_args := find_func(func_ni)
+            if cfi_args >= 0:
+                coerce_slice_args(cfi_args, ac, arg_vars)
         if is_inline_call && func_ni >= 0:
             emit(IR_INLINE, -1, func_ni, 0, 0, 0)
         // Check SO function dispatch (variadic expansion, auto_str, etc.)
@@ -2840,8 +3039,8 @@ fn gen_expr(node: int) -> int:
                 // loaded element. The old fallback used the sequence value as
                 // the integer upper bound, which is an infinite loop.
                 is_seq = 1
-                seq_iter_var = iv
                 if iti == TI_STR:
+                    seq_iter_var = iv
                     seq_elem_ti = TI_CHAR
                     seq_elem_tk = TI_CHAR
                     end_var = new_ir_var("for_len", TI_INT)
@@ -2850,20 +3049,19 @@ fn gen_expr(node: int) -> int:
                     seq_elem_ti = get_type_data(iti)
                     seq_elem_tk = agg_elem_read_form(iv)
                     if ik == TYP_ARRAY:
+                        seq_iter_var = iv
                         end_var = new_ir_var("for_len", TI_INT)
                         emit(IR_CONST, end_var, get_type_extra(iti), 0, 0, TI_INT)
                     else:
-                        sl := slice_len_get(iv)
-                        if sl >= 0:
-                            end_var = new_ir_var("for_len", TI_INT)
-                            emit(IR_CONST, end_var, sl, 0, 0, TI_INT)
-                        else:
-                            end_var = slice_len_var_get(iv)
-                            if end_var < 0:
-                                check_error(EC_TK_FOR_ITER,
-                                    "cannot determine slice length for iteration",
-                                    ast_line(iter), ast_col(iter))
-                                return -1
+                        // Slice header: iterate over the data pointer with the
+                        // header's runtime length.
+                        seq_iter_var = slice_hdr_data(iv)
+                        end_var = slice_hdr_len(iv)
+                        if end_var < 0:
+                            check_error(EC_TK_FOR_ITER,
+                                "cannot determine slice length for iteration",
+                                ast_line(iter), ast_col(iter))
+                            return -1
                 s := new_ir_var("start", TI_INT)
                 emit(IR_CONST, s, 0, 0, 0, TI_INT)
                 start_var = s
@@ -3516,6 +3714,11 @@ fn gen_expr(node: int) -> int:
         if is_dyn_var == 0 || val_node < 0:
             if is_arr == 0:
                 emit(IR_ALLOC, var, 0, 0, 0, TI_UNIT)
+        // Declared scalar/pointer locals keep their declared IR row even without
+        // an initializer. Leaving them TI_UNIT made uninitialized `x : int` look
+        // like an alloc byte buffer / pointer to later passes.
+        if is_arr == 0 && declared_ti != TI_UNIT && declared_ti != TI_DEX && dex_opt == 0:
+            irv_set_type(var, declared_ti)
         if val_node >= 0:
             val_var := gen_expr(val_node)
             val_var = force_if_thunk(val_var)
@@ -3605,6 +3808,12 @@ fn gen_expr(node: int) -> int:
             val_node := ast_a(node)
             val_var := gen_expr(val_node)
             val_var = force_if_thunk(val_var)
+            // char/bool are raw words; an int-declared return needs the tagged
+            // form at the ABI boundary (`return s[0]` used to crash at exit).
+            if g_cur_ret_ti == TI_INT && (irv_type(val_var) == TI_CHAR || irv_type(val_var) == TI_BOOL):
+                boxed := new_ir_var("_ret_int", TI_INT)
+                emit(IR_STORE, -1, boxed, val_var, 0, 0)
+                val_var = boxed
             // dex 边界规则：函数返回一律精确形式（缩放整数），
             // apx 位模式在返回点转 scaled（F2I(bits×S)，按定点 6 位舍入）
             // `-> dex?` 的 `g_cur_ret_ti` 亦为 0（`unpack_type` 塌陷）
@@ -3623,6 +3832,33 @@ fn gen_expr(node: int) -> int:
 
     // Field access
     if ast_kind(node) == EXPR_FIELD:
+        // V4 `.len` builtin (checker marks it with c = -1, data = -1).
+        if ast_c(node) == -1 && ast_data(node) == -1:
+            len_obj := gen_expr(ast_a(node))
+            len_obj = force_if_thunk(len_obj)
+            oti := irv_type(len_obj)
+            if oti == TI_STR:
+                v := new_ir_var("len", TI_INT)
+                emit(IR_CALL, v, len_obj, 1, str_intern("str_len"), TI_INT)
+                return v
+            if get_type_kind(oti) == TYP_ARRAY:
+                v := new_ir_var("len", TI_INT)
+                emit(IR_CONST, v, get_type_extra(oti), 0, 0, TI_INT)
+                return v
+            if is_slice_hdr(len_obj) != 0:
+                return slice_hdr_len(len_obj)
+            sl := slice_len_get(len_obj)
+            if sl >= 0:
+                v := new_ir_var("len", TI_INT)
+                emit(IR_CONST, v, sl, 0, 0, TI_INT)
+                return v
+            slv := slice_len_var_get(len_obj)
+            if slv >= 0:
+                return slv
+            check_error(EC_TK_FOR_ITER,
+                "cannot determine slice length for property '.len'",
+                ast_line(node), ast_col(node))
+            return new_ir_var("len", TI_INT)
         obj_var := gen_expr(ast_a(node))
         obj_var = force_if_thunk(obj_var)
         // Mirror the checker's automatic REF dereference. For a TYP_REF object,
@@ -3663,6 +3899,9 @@ fn gen_expr(node: int) -> int:
         idx_node := ast_b(node)
         idx_kind := ast_kind(idx_node)
         arr_len_lit : ., mut = arr_len_lit_of(arr_var)
+        arr_data := arr_var
+        if is_slice_hdr(arr_var) != 0:
+            arr_data = slice_hdr_data(arr_var)
         // Range index: arr[low..high] -> slice (pointer to arr[low])
         if idx_kind == EXPR_RANGE:
             low_node := ast_a(idx_node)
@@ -3685,10 +3924,29 @@ fn gen_expr(node: int) -> int:
                         emit(IR_BOUNDS_CHECK, -1, high_var, arr_len_lit + 1, 0, 0)
                 else:
                     emit(IR_BOUNDS_CHECK, -1, high_var, arr_len_lit + 1, 0, 0)
-            v := new_ir_var("slice", TI_INT)
+            is_str_slice : ., mut = 0
             if irv_type(arr_var) == TI_STR:
-                irv_set_type(v, TI_STR)
-            emit(IR_SLICE, v, arr_var, low_var, high_var, 0)
+                is_str_slice = 1
+            v : ., mut = -1
+            if is_str_slice != 0:
+                v = new_ir_var("slice", TI_STR)
+                emit(IR_SLICE, v, arr_var, low_var, high_var, 0)
+            else:
+                // V4 slice header: {data_ptr, length}. The header pointer is the
+                // slice value, so length survives function calls and stores.
+                base_var := arr_var
+                if is_slice_hdr(arr_var) != 0:
+                    base_var = slice_hdr_data(arr_var)
+                data_var := new_ir_var("slice_data", TI_INT)
+                emit(IR_SLICE, data_var, base_var, low_var, high_var, 0)
+                elem_ti_s : ., mut = TI_INT
+                ati := irv_type(arr_var)
+                ka := get_type_kind(ati)
+                if ka == TYP_ARRAY || ka == TYP_SLICE:
+                    elem_ti_s = get_type_data(ati)
+                v = new_ir_var("slice", alloc_type(TYP_SLICE, elem_ti_s, 0))
+                emit(IR_ALLOC_ARRAY, v, 2, 0, 0, 0)
+                emit(IR_STORE_INDEX, -1, v, data_var, 0, 0)
             // (A) T3：源数组元素可选 -> 切片登记声明信息（切片元素写点据此装箱；
             // 非可选不登记 -> 零足迹。切片 var 的 IR 类型信息不动，避免影响 dtype/宽度等消费者）
             if g_optrep_on != 0:
@@ -3697,15 +3955,22 @@ fn gen_expr(node: int) -> int:
                     irv_set_decl_ti(v, alloc_type(TYP_SLICE, sti, 0))
             // F11：字面量界 -> 登记切片编译期长度（解引用处 arr_len_lit 用）；
             // 运行时界 -> 计算 len = high − low 并登记长度变量（解引用处发射
-            // 动态边界检查，见 emit_slice_*_bounds）。
+            // 动态边界检查，见 emit_slice_*_bounds）。Header slices also store
+            // the length in word 1.
             if ast_kind(low_node) == EXPR_INT && ast_kind(high_node) == EXPR_INT:
                 sl := ast_int_val(high_node) - ast_int_val(low_node)
                 if sl >= 0:
                     slice_len_set(v, sl)
+                    if is_str_slice == 0:
+                        lc := new_ir_var("slice_len", TI_INT)
+                        emit(IR_CONST, lc, sl, 0, 0, TI_INT)
+                        emit(IR_STORE_INDEX, -1, v, lc, 1, 0)
             else:
                 len_var := new_ir_var("slice_len", TI_INT)
                 emit(IR_BINARY, len_var, high_var, low_var, OP_SUB, TI_INT)
                 slice_len_var_set(v, len_var)
+                if is_str_slice == 0:
+                    emit(IR_STORE_INDEX, -1, v, len_var, 1, 0)
             return v
         v := new_ir_var("elem", TI_INT)
         //  元素读定类型取声明信息形式（元素 ti 为 dex -> TI_DEX_S；纯表读）
@@ -3719,14 +3984,14 @@ fn gen_expr(node: int) -> int:
             emit_string_lit_bounds(arr_var, ast_int_val(idx_node))
             emit_slice_lit_bounds(arr_var, ast_int_val(idx_node))
             if pass_before_array_access(arr_var, -1, ast_int_val(idx_node), arr_len_lit) == 0:
-                emit(IR_LOAD_INDEX, v, arr_var, 0, ast_int_val(idx_node), elem_tk)
+                emit(IR_LOAD_INDEX, v, arr_data, 0, ast_int_val(idx_node), elem_tk)
         else:
             idx_var := gen_expr(idx_node)
             idx_var = force_if_thunk(idx_var)
             emit_string_bounds(arr_var, idx_var)
             emit_slice_bounds(arr_var, idx_var)
             if pass_before_array_access(arr_var, idx_var, -1, arr_len_lit) == 0:
-                emit(IR_LOAD_INDEX_VAR, v, arr_var, idx_var, 0, elem_tk)
+                emit(IR_LOAD_INDEX_VAR, v, arr_data, idx_var, 0, elem_tk)
         return v
 
     // Enum constructor

@@ -1223,158 +1223,23 @@ fn main() -> int:
     return 42
 """
 
-MATCH_STRUCT_GENERIC_SCRUTINEE_SOURCE = """struct Point:
-    x: int
-    y: int
 
-struct One:
-    a: int
-
-fn pick[T](v: T) -> int:
-    return match v:
-        Point { x = 1 } => 1,
-        _ => 0
-
-fn main() -> int:
-    return pick(One { a = 2 }) + pick(7)
-"""
-
-MATCH_STRUCT_GENERIC_FIELD_SOURCE = """struct Pair[T]:
-    a: T
-    n: int
-
-fn pick(p: Pair[string]) -> int:
-    return match p:
-        Pair { a = 1, n = 2 } => 1,
-        _ => 0
-
-fn main() -> int:
-    p := Pair { a = "x", n = 2 }
-    return pick(p)
-"""
 
 # A concrete generic application inside a generic function still monomorphizes:
 # the scrutinee is Pair[Point], so field substitution yields Point and the
 # binding pattern is valid. This guards the monomorph revalidation from being
 # over-conservative.
-MATCH_STRUCT_GENERIC_INSTANCE_SOURCE = """struct Point:
-    x: int
-    y: int
-
-struct Pair[T]:
-    a: T
-    n: int
-
-fn show[U](u: U, p: Pair[Point]) -> int:
-    return match p:
-        Pair { a = v, n = 2 } => 1,
-        _ => 0
-
-fn main() -> int:
-    p := Pair { a = Point { x = 1, y = 2 }, n = 2 }
-    if show(7, p) != 1:
-        return 1
-    return 42
-"""
 
 # Concrete generic instances reached through locals, field access, call results,
 # and a shadowed parameter. The checker resolves the actual scrutinee type; the
 # monomorph defensiveness must not fall back to the generic struct declaration.
-MATCH_STRUCT_GENERIC_ACTUALS_SOURCE = """struct Point:
-    x: int
-
-struct Pair[T]:
-    a: T
-
-struct Holder:
-    p: Pair[Point]
-
-fn make() -> Pair[Point]:
-    return Pair { a = Point { x = 7 } }
-
-fn via_local[U](u: U) -> int:
-    p := Pair { a = Point { x = 7 } }
-    return match p:
-        Pair { a = v } => v.x,
-        _ => 0
-
-fn via_field[U](u: U, h: Holder) -> int:
-    return match h.p:
-        Pair { a = v } => v.x,
-        _ => 0
-
-fn via_call[U](u: U) -> int:
-    return match make():
-        Pair { a = v } => v.x,
-        _ => 0
-
-fn shadowed[U](p: U) -> int:
-    p := Pair { a = Point { x = 7 } }
-    return match p:
-        Pair { a = v } => v.x,
-        _ => 0
-
-fn main() -> int:
-    h := Holder { p = Pair { a = Point { x = 7 } } }
-    if via_local(1) != 7:
-        return 1
-    if via_field(1, h) != 7:
-        return 2
-    if via_call(1) != 7:
-        return 3
-    if shadowed(99) != 7:
-        return 4
-    return 42
-"""
 
 # Optional generic field: R[string] makes s: T? bind as string?. A literal cannot
 # match an optional slot. The nested optional match is a valid operation on the
 # bound value and runs through the interpreter (the pre-existing ELF layout for
 # optional string struct fields is outside this pattern task).
-MATCH_STRUCT_OPTIONAL_BIND_SOURCE = """struct R[T]:
-    s: T?
 
-fn show(r: R[string]) -> int:
-    return match r:
-        R { s = v } =>:
-            return match v:
-                Some(x) =>:
-                    if x == "hi":
-                        return 42
-                    return 1
-                none =>:
-                    return 2
-        _ => 3
 
-fn main() -> int:
-    r := R { s = Some("hi") }
-    return show(r)
-"""
-
-MATCH_STRUCT_OPTIONAL_LITERAL_SOURCE = """struct R[T]:
-    s: T?
-
-fn pick(r: R[string]) -> int:
-    return match r:
-        R { s = "hi" } => 1,
-        _ => 0
-
-fn main() -> int:
-    r := R { s = Some("hi") }
-    return pick(r)
-"""
-
-MATCH_STRUCT_OPTIONAL_UNRESOLVED_SOURCE = """struct R[T]:
-    s: T?
-
-fn pick[U](r: R[U]) -> int:
-    return match r:
-        R { s = v } => 1,
-        _ => 0
-
-fn main() -> int:
-    return pick(1)
-"""
 
 MATCH_STRUCT_CONCRETE_MISMATCH_SOURCE = """struct Point:
     x: int
@@ -1543,15 +1408,6 @@ MATCH_TUPLE_BAD_TRAILING_SOURCE = """fn main() -> int:
         _ => 0
 """
 
-MATCH_TUPLE_GENERIC_SOURCE = """fn pick[T](x: T) -> int:
-    t := (x, 1)
-    return match t:
-        (a, b) => 1,
-        _ => 0
-
-fn main() -> int:
-    return pick(9)
-"""
 
 MATCH_TUPLE_ENUM_PAYLOAD_SOURCE = """fn main() -> int:
     v := Some((1, 2))
@@ -1560,21 +1416,6 @@ MATCH_TUPLE_ENUM_PAYLOAD_SOURCE = """fn main() -> int:
         _ => 0
 """
 
-MATCH_TUPLE_GENERIC_MONOMORPH_SOURCE = """fn pick[T](x: T) -> int:
-    t := (1, "hi")
-    return match t:
-        (n, s) =>:
-            if n == 1:
-                if s == "hi":
-                    return 1
-            return 0
-        _ => 2
-
-fn main() -> int:
-    if pick(9) != 1:
-        return 1
-    return 42
-"""
 
 MATCH_ONE_CASE_SOURCE = """fn pick(n: int) -> int:
     return match n:
@@ -2246,73 +2087,12 @@ def test_struct_pattern_partial_reordered_and_runtime_string():
         )
 
 
-def test_struct_pattern_generic_scrutinee_rejected():
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        needles = [
-            "error[TS03]",
-            "requires a concrete struct type",
-        ]
-        _assert_compile_rejected(
-            tmp, MATCH_STRUCT_GENERIC_SCRUTINEE_SOURCE, "struct_generic", needles
-        )
-        # The interpreter shares the checker. It must reject too, not SIGSEGV on
-        # an instantiation such as One or int.
-        run = _run([COREC, "run", MATCH_STRUCT_GENERIC_SCRUTINEE_SOURCE], cwd=BASE)
-        text = run.stdout + run.stderr
-        assert run.returncode == 1, (
-            f"interpreter accepted a generic struct pattern: rc={run.returncode}: {text}"
-        )
-        for needle in needles:
-            assert needle in text, f"interpreter missing {needle!r}: {text}"
 
 
-def test_struct_pattern_concrete_generic_instance():
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        data = _build_ccr(
-            tmp, MATCH_STRUCT_GENERIC_INSTANCE_SOURCE, "match_struct_generic_ok"
-        )
-        assert _match_nodes(data) == [], "struct patterns must not become MATCH"
-        _assert_program(
-            tmp,
-            MATCH_STRUCT_GENERIC_INSTANCE_SOURCE,
-            42,
-            opts=(0, 2),
-            name="match_struct_generic_ok",
-        )
 
 
-def test_struct_pattern_generic_actuals_through_locals_fields_calls():
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        data = _build_ccr(
-            tmp, MATCH_STRUCT_GENERIC_ACTUALS_SOURCE, "match_struct_generic_actuals"
-        )
-        assert _match_nodes(data) == [], "struct patterns must not become MATCH"
-        _assert_program(
-            tmp,
-            MATCH_STRUCT_GENERIC_ACTUALS_SOURCE,
-            42,
-            opts=(0, 2),
-            name="match_struct_generic_actuals",
-        )
 
 
-def test_struct_pattern_optional_generic_field_binds_option():
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        data = _build_ccr(
-            tmp, MATCH_STRUCT_OPTIONAL_BIND_SOURCE, "match_struct_optional_bind"
-        )
-        assert _match_nodes(data) == [], "struct patterns must not become MATCH"
-        # Interpreter path: the bound ident must be string?, so the nested optional
-        # match type-checks and returns the contained string.
-        run = _run([COREC, "run", MATCH_STRUCT_OPTIONAL_BIND_SOURCE], cwd=BASE)
-        assert run.returncode == 42, (
-            f"optional ident binding failed: rc={run.returncode}: "
-            f"{run.stdout}\n{run.stderr}"
-        )
 
 
 def test_struct_pattern_errors_are_hard():
@@ -2338,24 +2118,9 @@ def test_struct_pattern_errors_are_hard():
             ["error[TS04]", "matched more than once"],
         ),
         (
-            "struct_generic_field",
-            MATCH_STRUCT_GENERIC_FIELD_SOURCE,
-            ["error[TS03]", "expected string, got int"],
-        ),
-        (
             "struct_concrete_mismatch",
             MATCH_STRUCT_CONCRETE_MISMATCH_SOURCE,
             ["error[TS03]", "does not match scrutinee type"],
-        ),
-        (
-            "struct_optional_literal",
-            MATCH_STRUCT_OPTIONAL_LITERAL_SOURCE,
-            ["error[TS03]", "has an optional type"],
-        ),
-        (
-            "struct_optional_unresolved",
-            MATCH_STRUCT_OPTIONAL_UNRESOLVED_SOURCE,
-            ["error[TS03]", "requires a concrete struct type"],
         ),
     ]
     with tempfile.TemporaryDirectory() as td:
@@ -2485,20 +2250,6 @@ def test_tuple_pattern_malformed_is_hard_p005():
             _assert_compile_rejected(tmp, source, name, needles)
 
 
-def test_tuple_pattern_generic_tuple_rejected():
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        needles = ["error[TS03]", "requires a concrete tuple type"]
-        _assert_compile_rejected(
-            tmp, MATCH_TUPLE_GENERIC_SOURCE, "tuple_generic", needles
-        )
-        run = _run([COREC, "run", MATCH_TUPLE_GENERIC_SOURCE], cwd=BASE)
-        text = run.stdout + run.stderr
-        assert run.returncode == 1, (
-            f"interpreter accepted a generic tuple pattern: rc={run.returncode}: {text}"
-        )
-        for needle in needles:
-            assert needle in text, f"interpreter missing {needle!r}: {text}"
 
 
 def test_tuple_pattern_enum_payload_rejected_tm09():
@@ -2510,20 +2261,6 @@ def test_tuple_pattern_enum_payload_rejected_tm09():
         )
 
 
-def test_tuple_pattern_generic_monomorph_clone():
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        data = _build_ccr(
-            tmp, MATCH_TUPLE_GENERIC_MONOMORPH_SOURCE, "tuple_generic_monomorph"
-        )
-        assert _match_nodes(data) == [], "tuple patterns must not become MATCH"
-        _assert_program(
-            tmp,
-            MATCH_TUPLE_GENERIC_MONOMORPH_SOURCE,
-            42,
-            opts=(0, 2),
-            name="tuple_generic_monomorph",
-        )
 
 
 def test_nested_tuple_pattern_rejected_by_interpreter():

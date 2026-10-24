@@ -271,12 +271,12 @@ fn main() -> int:
     return @raw_int(v) / 1000000
 """, 7, "返回点（已覆盖面；apx 审计 ②a「恒不触发」已被证伪）"),
     ("nonreg_generic_dex_param", """
-fn g12[T](t: T, x: dex) -> int:
+fn g12(t, x: dex) -> int:
     return @raw_int(x) / 1000000
 fn main() -> int:
     d : dex, apx = 7.0
     return g12(1, d)
-""", 7, "泛型实例化后 dex 形参（非回归钉）"),
+""", 7, "推断形参实例化后 dex 形参（非回归钉）"),
     ("nonreg_exact_struct", """
 struct S3:
     f: dex

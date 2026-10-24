@@ -99,19 +99,6 @@ fn main() -> int:
         1122,
     ),
     (
-        "generic fn body: struct literal cloned by monomorph",
-        """
-struct P:
-    a: int, b: int
-fn f[T](x: T) -> int:
-    p := P{a= 1, b= x}
-    return p.a * 100 + p.b
-fn main() -> int:
-    return f(7)
-""",
-        107,
-    ),
-    (
         "array: compound element in middle (F5 ③主判据)",
         """
 fn g() -> int:

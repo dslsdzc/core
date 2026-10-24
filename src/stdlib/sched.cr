@@ -93,6 +93,9 @@ fn sched_dequeue(m_idx: int) -> int:
 fn sched_get_curg() -> int:
     return g_get_curg()
 
+// G pointers live in int slots as mathematical ints; @ptr_add untags both
+// operands and returns the raw address word for cell memory / fiber_switch.
+
 fn sched_yield():
     // Current goroutine yields
     cur_g := sched_get_curg()
@@ -126,7 +129,7 @@ fn sched_schedule():
 
         if old_g >= 0:
             // Save old_g's sp, switch to next_g's sp
-            old_sp_addr := old_g + 16  // &g.stack_ptr
+            old_sp_addr := @ptr_add(old_g, 16)  // &g.stack_ptr
             next_sp := cell_load(next_g, 16)  // g.stack_ptr
             fiber_switch(old_sp_addr, next_sp)
         // else: first goroutine, just start it
@@ -147,7 +150,7 @@ fn sched_worker_run(m_idx: int):
             cell_store(next_g, 8, 1)  // _Grunning
 
             if old_g >= 0:
-                old_sp_addr := old_g + 16
+                old_sp_addr := @ptr_add(old_g, 16)
                 next_sp := cell_load(next_g, 16)
                 fiber_switch(old_sp_addr, next_sp)
             // else: first goroutine on this M, start it

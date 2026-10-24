@@ -61,7 +61,8 @@ fn main() -> int:
         "borrow released after block scope exit",
         """
 fn main() -> int:
-    x := 42:
+    x := 42
+    if x > 0:
         r := &x
     y := x
     return y

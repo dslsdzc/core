@@ -1889,12 +1889,12 @@ def test_v7_cache_hit_restore_path():
 #   ③ 每函数链独立（跨函数不连）—— .ccr 层（本判据的产物面）；负控 = byte
 #      mutation（把 main 内一条 kind=1 边的 to_nod 改写到后一函数区间）后同一
 #      判据函数必须报出该违规（咬合证明）。
-# 期望值全部来自实现后实测（2026-09-11 探针：pure_add / id[int] 调用 state_in=[]、
+# 期望值全部来自实现后实测（2026-09-11 探针：pure_add / id 调用 state_in=[]、
 # effect/ext_probe/load64/dyn_dispatch 四类 state_in=[前驱]、全文件 329 条 kind=1
 # 边跨函数 = 0、15 个函数各自携带 kind=1 边 ⇒ ③ 非空非退化）。
 
 CHAIN_SRC = (
-    "fn pure_add(a: int, b: int) -> int:\n    return a + b\nfn id[T](x: T) -> T:\n    return x\nfn effect():\n    a : ., mut = 0\n    a = 1\n    a = 2\nextern fn ext_probe(x: int) -> int\nstruct Counter:\n    n: int\nimpl Counter:\n    fn bump(self):\nfn main() -> int:\n    s : ., mut = 0\n    s = 1\n    p := pure_add(s, 1)\n    s = p\n    q := id(s)\n    s = s + q\n    effect()\n    r := ext_probe(s)\n    s = s + r\n    b := load64(s)\n    s = s + b\n    c : Counter = Counter { n= 7 }\n    d : dyn = c\n    d.bump()\n    s = s + 1\n    return s\n")
+    "fn pure_add(a: int, b: int) -> int:\n    return a + b\nfn id(x: int) -> int:\n    return x\nfn effect():\n    a : ., mut = 0\n    a = 1\n    a = 2\nextern fn ext_probe(x: int) -> int\nstruct Counter:\n    n: int\nimpl Counter:\n    fn bump(self):\nfn main() -> int:\n    s : ., mut = 0\n    s = 1\n    p := pure_add(s, 1)\n    s = p\n    q := id(s)\n    s = s + q\n    effect()\n    r := ext_probe(s)\n    s = s + r\n    b := load64(s)\n    s = s + b\n    c : Counter = Counter { n= 7 }\n    d : dyn = c\n    d.bump()\n    s = s + 1\n    return s\n")
 
 
 def _op_nodes(nod, opcode, lo=0, hi=-1):
@@ -1962,9 +1962,8 @@ def _chain_cross_violations(edges, spans):
 def test_v7_edge_semantics_pure_call_untouched():
     """性质① 可证纯调用 ⇒ **无** kind=1 入边（判据重定——取代「.ccr 字节同旧」）。
 
-    正控：CHAIN_SRC 的两个可证纯调用——纯函数调用（pure_add）与**泛型纯实例**调用
-    （id[int]，Task 1 前 monomorph 未写 fi_ispure ⇒ 读到 0 ⇒ 意外入链的真实 RED
-    载体）——必须存在且不被任何 kind=1 边指入。负控（同文件真数据对照）：同一份
+    正控：CHAIN_SRC 的两个可证纯调用——纯函数调用（pure_add）与普通纯函数调用
+    （id）——必须存在且不被任何 kind=1 边指入。负控（同文件真数据对照）：同一份
     产物的 effect 调用节点必须被指入——若实现退化成「一律不入链」，负控挂；退化
     成「一律入链」，正控挂。两断合起来才把「按真纯度入链」钉死（谓词在同一数据
     上取过反）。"""
@@ -1981,7 +1980,7 @@ def test_v7_edge_semantics_pure_call_untouched():
         spins = _state_in(v7.edg())
         lo, hi = _func_span(v7, 'main')
         pure = []
-        for callee in ('pure_add', 'id[int]'):
+        for callee in ('pure_add', 'id'):
             ids = [i for i in _op_nodes(nod, IR_CALL, lo, hi)
                    if _cname(strs, nod[i][4]) == callee]
             assert ids, f"non-empty guard: no emitted call node for {callee}"

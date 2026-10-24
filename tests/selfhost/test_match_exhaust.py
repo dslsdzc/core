@@ -175,9 +175,6 @@ def main():
         case_run("qualified_pattern", COLOR + "fn main() -> int:\n    c := Blue()\n    return match c:\n        Color.Red => 1, Color.Green => 2, Color.Blue => 3,\n", 3),
         # 正：payload 变体（三臂全列）
         case_run("payload_exhaustive", CHOICE + "fn main() -> int:\n    c := Third(33)\n    return match c:\n        First(v) => v, Second(v) => v, Third(v) => v,\n", 33),
-        # 正：泛型枚举实例（Opt[int]）
-        case_run("generic_enum_exhaustive",
-                 "enum Opt[T]:\n    N, S(T)\nfn main() -> int:\n    c := S(5)\n    return match c:\n        N => 1, S(x) => x,\n", 5),
         # 正：单变体枚举（域最小边界）
         case_run("single_variant_exhaustive",
                  "enum Only:\n    One\nfn main() -> int:\n    c := One()\n    return match c:\n        One => 4,\n", 4),

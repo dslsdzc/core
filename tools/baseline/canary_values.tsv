@@ -191,11 +191,33 @@
 #     gt_ccr        a1b3d07dc98772351edcdbf5798887e679caa9d452444ef6ad76c86ea2ff05ff 138672
 #     gt_static_ccr bd7d2fc42282a3ca3905a567c8c6d577390262ec269002f96da2f59a8a40301c 138815
 
+# ── 【本批重锁 2026-10-25】V4 语法迁移（显式泛型删除 + 推断/字节指针运算）──
+#   D1 5/5 PASS（canary_check.sh 实跑：5 条各自再构建一次逐字节相同）。
+#   归因：
+#     · gt 两条 −12082 / −12114B = `tests/suite/generics_test.cr` 从 V3 显式泛型
+#       （`fn f[T]`/`struct S[T]`）迁到 V4 推断形参；旧语料的大批 monomorph
+#       实例消失，`generics_test.cr` 的 `.ccr` 因此显著缩短。
+#     · pa 两条 +42 / +14B = 新增 byte-buffer 指针运算 IR（`OP_BYTE_ADD`/
+#       `OP_BYTE_SUB`/`OP_RAW_ADD`）、元组/char/dex 读形式行与 `@ptr_add`
+#       内建带来的固定类型/intern 增量；canary ELF 逐字节不变（393739b4…）。
+#   旧值留痕（自本批起作废；canary_elf 未变）：
+#     pa_ccr        60f7fd6da218e332003c50a0aafa8455442984c8d52a0d7db57ed1dae7d31c3e 94382
+#     pa_static_ccr e5ae096f7b04f6f1122e5d36aaa789d800d86913fa4ccfa5a60e9a0963be429d 94621
+#     gt_ccr        1fe6b8f14baeb0822b85ecf55763737ec2ce593f3aa34de14176cf5e39e28424 139344
+#     gt_static_ccr f8cc44b139541b5672762336e692ef64e31b3fd6e2b5b08afc26843478b342a0 139583
 canary_elf	pa	393739b4c8e1ecbeb28adaa70aaf4441561fee5b3638eec31030324a2b6711f7	53430
-pa_ccr	pa.ccr	60f7fd6da218e332003c50a0aafa8455442984c8d52a0d7db57ed1dae7d31c3e	94382
-pa_static_ccr	pa_st.bin.ccr	e5ae096f7b04f6f1122e5d36aaa789d800d86913fa4ccfa5a60e9a0963be429d	94621
-gt_ccr	gt.ccr	1fe6b8f14baeb0822b85ecf55763737ec2ce593f3aa34de14176cf5e39e28424	139344
-gt_static_ccr	gt_st.bin.ccr	f8cc44b139541b5672762336e692ef64e31b3fd6e2b5b08afc26843478b342a0	139583
+pa_ccr	pa.ccr	ea7a68182daf623c36cccd75a52c9218f9ee47ef3cfba4d77075e29789415da3	94424
+pa_static_ccr	pa_st.bin.ccr	14c582249b9ae5c06adf31b5b8ff89b01610ea42aeca9f0f36b8cfdcd33713bb	94635
+# ── 【本批重锁·续 2026-10-25】OS-axis builtin 返回型 ──
+#   `ir_call_return_type` 现对无 Core body 的 OS 轴内建咨询
+#   `prelude_builtin_return_ti`（syscall3/syscall4 ⇒ TI_INT）。此前调用结果落
+#   TI_UNIT，tagged 比较把它当裸字（`read_file`/`system` 的 fd 判断失真）。
+#   `generics_test.cr` import io ⇒ 其 `.ccr` 的 TYPE/ENT 行变化 ⇒ 两条 gt sha 变，
+#   **尺寸不变**。D1 5/5 PASS。旧值留痕：
+#     gt_ccr        54c08b8124916e2ad0981823ba61332dc39037de7dbfe27cb4feb67e18b763b9 127262
+#     gt_static_ccr 9c0664ea03e410c2afeb375111586f362b8177678d2843ae106adf576ddd386c 127469
+gt_ccr	gt.ccr	6087a2b72c88acc78e2f433c1318970cc353a07966ab40b54ff9d7e0283508a8	127262
+gt_static_ccr	gt_st.bin.ccr	b082fe1055a84241711d816e73c188ed6934e01810bb265ca075eb4486f036da	127469
 # ⚠ **本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下

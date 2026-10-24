@@ -285,6 +285,16 @@ OP_SHR : int = 16  // strength reduction: x >> n
 OP_PTR_ADD  : int = 17  // p + n (p: *T, n: int), scaled by sizeof(T)
 OP_PTR_SUB  : int = 18  // p - n
 OP_PTR_DIFF : int = 19  // p - q, result is an element count
+// Byte-buffer arithmetic (`alloc` buffer + n). Raw byte addressing: no element
+// scaling and the int offset is untagged before the add. Kept separate from
+// OP_PTR_ADD because the backend cannot tell an alloc buffer from an aggregate
+// pointer by IR type alone (both use the TI_UNIT sentinel).
+OP_BYTE_ADD : int = 20
+OP_BYTE_SUB : int = 21
+// Raw pointer add: both operands are mathematical ints; untag both and return
+// the raw word. Backs the SYSTEM-level `@ptr_add(p, n)` builtin used by the
+// scheduler for pointer-shaped G fields.
+OP_RAW_ADD : int = 22
 
 // Unary operator codes
 UOP_NEG : int = 1

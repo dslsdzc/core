@@ -325,6 +325,18 @@ g_holder_cap : int, mut
 g_gen_map_names : string, mut
 g_gen_map_types : string, mut
 g_gen_map_count : int, mut
+// Per-function inferred return row (-2 = explicit/not inferred, >= 0 = type row).
+// The parser synthesizes a `__ret` generic parameter when `->` is omitted; the
+// checker stores the body-derived row here and call inference substitutes it.
+g_func_ret_ti : string, mut
+g_func_ret_count : int, mut
+g_func_ret_cap : int, mut
+g_infer_ret_active : int, mut
+g_infer_ret_ti : int, mut
+// Globally unique suffix for synthesized `__inferN` / `__retN` names. Function
+// and struct parameters share g_gen_map, so per-declaration numbering collides
+// during nested inference (e.g. a generic struct literal inside a generic call).
+g_infer_name_seq : int, mut
 g_gen_map_cap : int, mut
 g_dyn_type_sets : string, mut
 g_dyn_type_set_count : int, mut
@@ -770,6 +782,7 @@ fn reset_frontend_state():
     g_holder_count = 0
     g_borrow_scope_depth = 0
     g_gen_map_count = 0
+    g_infer_name_seq = 0
     g_dyn_type_set_count = 0
     g_mod_func_count = 0
     g_mod_path_count = 0

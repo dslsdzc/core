@@ -130,10 +130,9 @@ fn main() -> int:
         6,
     ))
 
-    # Slice parameters carry no run-time length. Reject instead of treating the
-    # slice value as an integer bound (which would spin forever).
-    ok.append(_build_rejected(
-        "slice_param_rejected",
+    # Slice parameters carry the header length across calls.
+    ok.append(_build_and_run(
+        "slice_param",
         """fn sum(xs) -> int:
     total := 0
     for x in xs:
@@ -145,7 +144,7 @@ fn main() -> int:
     s := xs[0..2]
     return sum(s)
 """,
-        "error[TK07]",
+        3,
     ))
 
     passed = sum(1 for x in ok if x)
