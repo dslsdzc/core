@@ -191,6 +191,32 @@ def _assert_load_rejected(data, tmp, name):
     assert "invalid .ccr file" in out, f"{name}: missing loader diagnostic: {out}"
 
 
+def _assert_compile_rejected(tmp, source, name, needles):
+    src = tmp / f"{name}.cr"
+    src.write_text(source, encoding="utf-8")
+    out = tmp / f"{name}.elf"
+    r = _run([COREC, "build", src, "-o", out, "--static"])
+    text = r.stdout + r.stderr
+    assert r.returncode == 1, f"{name}: expected rc=1, got {r.returncode}: {text}"
+    for needle in needles:
+        assert needle in text, f"{name}: missing {needle!r}: {text}"
+    assert not out.exists(), f"{name}: rejected build still produced {out}"
+    return text
+
+
+def _assert_soft_diagnostic(tmp, source, name, needles):
+    src = tmp / f"{name}.cr"
+    src.write_text(source, encoding="utf-8")
+    out = tmp / f"{name}.elf"
+    r = _run([COREC, "build", src, "-o", out, "--static"])
+    text = r.stdout + r.stderr
+    assert r.returncode == 0, f"{name}: expected rc=0, got {r.returncode}: {text}"
+    for needle in needles:
+        assert needle in text, f"{name}: missing {needle!r}: {text}"
+    assert out.exists(), f"{name}: soft diagnostic produced no artifact"
+    return text
+
+
 # ---------------------------------------------------------------------------
 # 1. CASE record layout, 24B offsets, order, deterministic bytes
 # ---------------------------------------------------------------------------
@@ -559,10 +585,14 @@ fn main() -> int:
     return 42
 """
 
+# The checker requires a wildcard/binding arm for literal matches. These two
+# sources keep one so they compile; the no-DEFAULT backend shape is produced by
+# _drop_match_default on the resulting .ccr image.
 MATCH_NO_DEFAULT_SOURCE = """fn pick(n: int) -> int:
     return match n:
         1 => 11,
-        2 => 22
+        2 => 22,
+        _ => 5
 
 fn main() -> int:
     return pick(99)
@@ -571,7 +601,8 @@ fn main() -> int:
 MATCH_NO_DEFAULT_HIT_SOURCE = """fn pick(n: int) -> int:
     return match n:
         1 => 11,
-        2 => 22
+        2 => 22,
+        _ => 0
 
 fn main() -> int:
     return pick(1) + pick(2)
@@ -606,6 +637,159 @@ fn main() -> int:
     return pickid(7)
 """
 
+# Task 5a: string, char, and ident patterns use the sequential path. None of
+# them may become a CASE row (strings are not integers; char/binding rows would
+# change evaluation order).
+MATCH_STRING_SOURCE = """fn pick(s: string) -> int:
+    return match s:
+        "a" => 1,
+        "b" => 2,
+        _ => 3
+
+fn main() -> int:
+    if pick("a") != 1:
+        return 10
+    if pick("b") != 2:
+        return 11
+    if pick("zzz") != 3:
+        return 12
+    return 42
+"""
+
+MATCH_CHAR_SOURCE = """fn code_a() -> int:
+    return 'A' as int
+
+fn pick(c: char) -> int:
+    return match c:
+        'A' => 1,
+        'B' => 2,
+        _ => 3
+
+fn main() -> int:
+    a := code_a()
+    if a == 0:
+        return 9
+    c := a as char
+    if pick(c) != 1:
+        return 10
+    if pick('B') != 2:
+        return 11
+    if pick('C') != 3:
+        return 12
+    return 42
+"""
+
+MATCH_IDENT_BIND_SOURCE = """fn inc(n: int) -> int:
+    return match n:
+        x => x + 1
+
+fn pick(s: string) -> string:
+    return match s:
+        x => x
+
+fn main() -> int:
+    if inc(7) != 8:
+        return 1
+    if pick("hi") != "hi":
+        return 2
+    v := match 5:
+        1 => 10,
+        rest => rest
+    if v != 5:
+        return 3
+    return 42
+"""
+
+MATCH_STRING_NO_DEFAULT_SOURCE = """fn pick(s: string) -> int:
+    return match s:
+        "a" => 1,
+        "b" => 2
+
+fn main() -> int:
+    return pick("a")
+"""
+
+MATCH_CHAR_NO_DEFAULT_SOURCE = """fn pick(c: char) -> int:
+    return match c:
+        'A' => 1,
+        'B' => 2
+
+fn main() -> int:
+    return pick('A')
+"""
+
+MATCH_INT_NO_DEFAULT_SOURCE = """fn pick(n: int) -> int:
+    return match n:
+        1 => 1,
+        2 => 2
+
+fn main() -> int:
+    return pick(1)
+"""
+
+MATCH_BOOL_NO_DEFAULT_SOURCE = """fn pick(b: bool) -> int:
+    return match b:
+        true => 1,
+        false => 2
+
+fn main() -> int:
+    return pick(true)
+"""
+
+MATCH_WILDCARD_ORDER_SOURCE = """fn pick(n: int) -> int:
+    return match n:
+        _ => 1,
+        2 => 2
+
+fn main() -> int:
+    return pick(2)
+"""
+
+MATCH_IDENT_ORDER_SOURCE = """fn pick(n: int) -> int:
+    return match n:
+        x => 1,
+        2 => 2
+
+fn main() -> int:
+    return pick(2)
+"""
+
+MATCH_DUPLICATE_STRING_CHAR_SOURCE = """fn picks(s: string) -> int:
+    return match s:
+        "a" => 1,
+        "a" => 2,
+        _ => 3
+
+fn pickc(c: char) -> int:
+    return match c:
+        'A' => 1,
+        'A' => 2,
+        _ => 3
+
+fn main() -> int:
+    return picks("a") + pickc('A')
+"""
+
+MATCH_INTERP_PATTERN_SOURCE = """fn pick(x: int) -> int:
+    s := "a"
+    return match s:
+        "a${x}" => 1,
+        _ => 2
+
+fn main() -> int:
+    return pick(1)
+"""
+
+MATCH_NESTED_LITERAL_SOURCE = """enum E:
+    A(int), B
+
+fn main() -> int:
+    e := A(1)
+    return match e:
+        A(1) => 1,
+        _ => 2
+"""
+
 MATCH_ONE_CASE_SOURCE = """fn pick(n: int) -> int:
     return match n:
         7 => 1,
@@ -633,15 +817,22 @@ def _match_values(ways, base, step):
     return [base + i * step for i in range(ways)]
 
 
-def _match_source(values, with_default=True):
+def _match_source(values, with_default=True, checker_default=False):
     """Build an exhaustive checker: every probe must return its arm or the
     default. `main` returns 42 only when all probes pass, so one build per -O
-    covers every hit plus out-of-range misses on both sides."""
+    covers every hit plus out-of-range misses on both sides.
+
+    `checker_default` emits a wildcard arm only to satisfy the checker's literal
+    exhaustiveness rule; callers strip the DEFAULT CASE row afterwards when they
+    need a no-DEFAULT backend image.
+    """
     lines = ["fn pick(n: int) -> int:", "    return match n:"]
     for i, value in enumerate(values):
         lines.append(f"        {value} => {i + 1},")
     if with_default:
         lines.append("        _ => 99")
+    elif checker_default:
+        lines.append("        _ => 0")
     lines += ["", "fn main() -> int:"]
     # Probe every arm so every tree node is exercised, plus both out-of-range
     # misses when a DEFAULT exists.
@@ -770,6 +961,43 @@ def _single_match(data):
     matches = _match_nodes(data)
     assert len(matches) == 1, f"expected exactly one MATCH, got {matches}"
     return _nod_records(data)[matches[0]]
+
+
+def _drop_match_default(data, name="nodefault"):
+    """Remove the DEFAULT row from the single MATCH range.
+
+    The checker now rejects a literal match without a wildcard/binding arm, but
+    the backend still needs a no-DEFAULT MATCH image to exercise the trap edge.
+    Build the same program with a wildcard and strip the DEFAULT row at the .ccr
+    layer. Only single-MATCH fixtures are handled; later ranges would need their
+    case_start adjusted.
+    """
+    nodes = _nod_records(data)
+    matches = [i for i, rec in enumerate(nodes) if rec[0] == IR_MATCH]
+    assert len(matches) == 1, f"{name}: expected one MATCH, got {matches}"
+    match_idx = matches[0]
+    rec = nodes[match_idx]
+    start, count = rec[3], rec[4]
+    rows = _parse_case(segment(data, CASE_TAG))
+    default_idx = None
+    for j in range(start, start + count):
+        if rows[j]["kind"] == KIND_DEFAULT:
+            default_idx = j
+            break
+    assert default_idx is not None, f"{name}: MATCH has no DEFAULT row"
+    records = [
+        (row["value"], row["kind"], row["str_index"], row["target_nod"], row["flags"])
+        for row in rows
+    ]
+    del records[default_idx]
+    out = bytearray(_replace_case(data, _pack_case(records)))
+    nod_off = next(
+        offset for tag, offset, _size in read_segment_table(data) if tag == NOD_TAG
+    )
+    struct.pack_into("<i", out, nod_off + 4 + match_idx * 40 + 20, count - 1)
+    result = bytes(out)
+    validate(result)
+    return result
 
 
 def _assert_targets_are_labels(data, rows):
@@ -946,7 +1174,8 @@ def test_mixed_kind_case_range_rejected_by_loader():
 def test_no_default_match_traps_on_miss():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        data = _build_ccr(tmp, MATCH_NO_DEFAULT_SOURCE, "match_nodefault")
+        checked = _build_ccr(tmp, MATCH_NO_DEFAULT_SOURCE, "match_nodefault_checked")
+        data = _drop_match_default(checked, "match_nodefault")
         rec = _single_match(data)
         rows = _parse_case(segment(data, CASE_TAG))
         assert rec[1] == -1
@@ -955,19 +1184,10 @@ def test_no_default_match_traps_on_miss():
         assert [row["kind"] for row in rows] == [KIND_VALUE, KIND_VALUE]
         _assert_targets_are_labels(data, rows)
 
-        interp = _run([COREC, "run", MATCH_NO_DEFAULT_SOURCE], cwd=BASE)
-        assert interp.returncode != 0, (
-            "a MATCH miss with no DEFAULT must abort the interpreter"
-        )
-        assert interp.returncode not in (11, 22), (
-            f"interp fell into an arm: rc={interp.returncode}"
-        )
-
-        src = tmp / "match_nodefault.cr"
-        src.write_text(MATCH_NO_DEFAULT_SOURCE, encoding="utf-8")
-        elf = tmp / "match_nodefault.elf"
-        built = _run([COREC, "build", src, "-o", elf, "--static", "-O", "2"])
-        assert built.returncode == 0, built.stdout + built.stderr
+        # The checker now rejects a source-level no-DEFAULT literal match, so the
+        # no-DEFAULT image is reached by stripping the wildcard row. A miss must
+        # still trap (SIGILL) on both optimization levels.
+        elf, _elf_data = _build_corearch_elf(tmp, data, "match_nodefault", opt=2)
         run = subprocess.run(
             [str(elf)], capture_output=True, text=True, timeout=30, cwd=str(BASE)
         )
@@ -979,14 +1199,15 @@ def test_no_default_match_traps_on_miss():
 def test_no_default_match_dispatches_hits():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        data = _build_ccr(tmp, MATCH_NO_DEFAULT_HIT_SOURCE, "match_nodefault_hit")
+        checked = _build_ccr(
+            tmp, MATCH_NO_DEFAULT_HIT_SOURCE, "match_nodefault_hit_checked"
+        )
+        data = _drop_match_default(checked, "match_nodefault_hit")
         rec = _single_match(data)
         rows = _parse_case(segment(data, CASE_TAG))
         assert rec[4] == 2
         assert KIND_DEFAULT not in [row["kind"] for row in rows]
-        _assert_program(
-            tmp, MATCH_NO_DEFAULT_HIT_SOURCE, 33, name="match_nodefault_hit"
-        )
+        assert _run_corearch_elf(tmp, data, "match_nodefault_hit", opt=2) == 33
 
 
 def test_enum_match_raw_int_mode():
@@ -1025,6 +1246,103 @@ def test_ident_fallback_executes_old_path():
             MATCH_IDENT_FALLBACK_SOURCE,
             42,
             name="match_ident_fallback",
+        )
+
+
+def test_string_match_uses_sequential_path():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_STRING_SOURCE, "match_string")
+        assert _match_nodes(data) == [], "string patterns must not become CASE rows"
+        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+        _assert_program(
+            tmp, MATCH_STRING_SOURCE, 42, opts=(0, 2), name="match_string"
+        )
+
+
+def test_char_match_uses_interned_char_value():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_CHAR_SOURCE, "match_char")
+        assert _match_nodes(data) == [], "char patterns must not become CASE rows"
+        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+        # The program itself compares the char match against `'A' as int`, i.e.
+        # the current intern-index value, not a Unicode codepoint.
+        _assert_program(tmp, MATCH_CHAR_SOURCE, 42, opts=(0, 2), name="match_char")
+
+
+def test_ident_pattern_binds_scrutinee():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_IDENT_BIND_SOURCE, "match_ident_bind")
+        assert _match_nodes(data) == [], "binding arms must not become CASE rows"
+        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+        _assert_program(
+            tmp, MATCH_IDENT_BIND_SOURCE, 42, opts=(0, 2), name="match_ident_bind"
+        )
+
+
+def test_literal_match_requires_wildcard():
+    cases = [
+        ("string", MATCH_STRING_NO_DEFAULT_SOURCE),
+        ("char", MATCH_CHAR_NO_DEFAULT_SOURCE),
+        ("int", MATCH_INT_NO_DEFAULT_SOURCE),
+        ("bool", MATCH_BOOL_NO_DEFAULT_SOURCE),
+    ]
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        for name, source in cases:
+            _assert_compile_rejected(
+                tmp,
+                source,
+                f"exhaust_{name}",
+                ["error[TM03]", "Non-exhaustive match", "add a wildcard or binding arm"],
+            )
+
+
+def test_wildcard_and_ident_must_be_last():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        needles = ["error[TM05]", "must be the last arm"]
+        _assert_compile_rejected(
+            tmp, MATCH_WILDCARD_ORDER_SOURCE, "order_wildcard", needles
+        )
+        _assert_compile_rejected(
+            tmp, MATCH_IDENT_ORDER_SOURCE, "order_ident", needles
+        )
+
+
+def test_duplicate_literal_patterns_are_redundant():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        text = _assert_soft_diagnostic(
+            tmp,
+            MATCH_DUPLICATE_STRING_CHAR_SOURCE,
+            "duplicate_literals",
+            ["error[TM04]", "Redundant match arm"],
+        )
+        assert text.count("error[TM04]") >= 2, text
+
+
+def test_interpolated_string_pattern_rejected():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        _assert_compile_rejected(
+            tmp,
+            MATCH_INTERP_PATTERN_SOURCE,
+            "interp_pattern",
+            ["error[TM09]", "String interpolation is not supported"],
+        )
+
+
+def test_nested_literal_pattern_rejected():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        _assert_compile_rejected(
+            tmp,
+            MATCH_NESTED_LITERAL_SOURCE,
+            "nested_literal",
+            ["error[TM09]", "Nested match patterns are not supported"],
         )
 
 
@@ -1369,10 +1687,11 @@ def test_dense_enum_tagged_and_raw_int_table():
 
 def test_no_default_dense_match_stays_binary_and_traps():
     values = list(range(16))
-    hit_source = _match_source(values, with_default=False)
+    hit_source = _match_source(values, with_default=False, checker_default=True)
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        data = _build_ccr(tmp, hit_source, "match_dense_nodefault")
+        checked = _build_ccr(tmp, hit_source, "match_dense_nodefault_checked")
+        data = _drop_match_default(checked, "match_dense_nodefault")
         rec = _single_match(data)
         assert rec[4] == 16, rec[4]
         plans, binary_emits, table_emits = _match_plan_full(
@@ -1384,16 +1703,20 @@ def test_no_default_dense_match_stays_binary_and_traps():
         assert plans[0]["strategy"] == "binary", plans
         assert binary_emits == 1, binary_emits
         assert table_emits == 0, table_emits
-        _assert_program(
-            tmp, hit_source, 42, opts=(0, 2, 3), name="match_dense_nodefault"
-        )
+        for opt in (0, 2, 3):
+            assert _run_corearch_elf(
+                tmp, data, f"match_dense_nodefault_O{opt}", opt
+            ) == 42
 
         miss_lines = ["fn pick(n: int) -> int:", "    return match n:"]
         for i, value in enumerate(values):
             miss_lines.append(f"        {value} => {i + 1},")
-        miss_lines += ["", "fn main() -> int:", "    return pick(99)"]
+        miss_lines += ["        _ => 0", "", "fn main() -> int:", "    return pick(99)"]
         miss_source = "\n".join(miss_lines) + "\n"
-        miss_data = _build_ccr(tmp, miss_source, "match_dense_nodefault_miss")
+        miss_checked = _build_ccr(
+            tmp, miss_source, "match_dense_nodefault_miss_checked"
+        )
+        miss_data = _drop_match_default(miss_checked, "match_dense_nodefault_miss")
         miss_plans, miss_binary, miss_tables = _match_plan_full(
             _ccr_file(tmp, miss_data, "match_dense_nodefault_miss_plan")
         )
@@ -1636,10 +1959,11 @@ def test_enum_match_uses_binary_plan():
 
 def test_sparse_no_default_binary_match_traps_on_miss():
     values = _match_values(16, SPARSE_BASE, SPARSE_STEP)
-    hit_source = _match_source(values, with_default=False)
+    hit_source = _match_source(values, with_default=False, checker_default=True)
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        data = _build_ccr(tmp, hit_source, "match_sparse_nodefault")
+        checked = _build_ccr(tmp, hit_source, "match_sparse_nodefault_checked")
+        data = _drop_match_default(checked, "match_sparse_nodefault")
         rec = _single_match(data)
         assert rec[4] == 16, rec[4]
         plans, binary_emits = _match_plan(
@@ -1648,39 +1972,42 @@ def test_sparse_no_default_binary_match_traps_on_miss():
         assert plans[0]["nondefault"] == 16, plans
         assert plans[0]["strategy"] == "binary", plans
         assert binary_emits == 1, f"binary emitter ran {binary_emits} times"
-        _assert_program(
-            tmp,
-            hit_source,
-            42,
-            opts=(0, 2, 3),
-            name="match_sparse_nodefault_hit",
-        )
+        for opt in (0, 2, 3):
+            assert _run_corearch_elf(
+                tmp, data, f"match_sparse_nodefault_hit_O{opt}", opt
+            ) == 42
 
         # The generated checker only probes arm hits; build a single-miss main
-        # so the binary tree's miss edge must reach ud2.
+        # (with a checker-satisfying wildcard) so the stripped binary tree's miss
+        # edge must reach ud2.
         miss_lines = ["fn pick(n: int) -> int:", "    return match n:"]
         for i, value in enumerate(values):
             miss_lines.append(f"        {value} => {i + 1},")
         miss_lines += [
+            "        _ => 0",
             "",
             "fn main() -> int:",
             f"    return pick({values[-1] + 7})",
         ]
         miss_source = "\n".join(miss_lines) + "\n"
-        src = tmp / "match_sparse_nodefault_miss.cr"
-        src.write_text(miss_source, encoding="utf-8")
-        miss_data = _build_ccr(tmp, miss_source, "match_sparse_nodefault_miss")
+        miss_checked = _build_ccr(
+            tmp, miss_source, "match_sparse_nodefault_miss_checked"
+        )
+        miss_data = _drop_match_default(
+            miss_checked, "match_sparse_nodefault_miss"
+        )
         plans, binary_emits = _match_plan(
             _ccr_file(tmp, miss_data, "match_sparse_nodefault_miss_plan")
         )
         assert plans[0]["strategy"] == "binary", plans
         assert binary_emits == 1, f"binary emitter ran {binary_emits} times"
         for opt in (0, 2, 3):
-            elf = tmp / f"match_sparse_nodefault_miss_O{opt}.elf"
-            built = _run(
-                [COREC, "build", src, "-o", elf, "--static", "-O", str(opt)]
+            elf, _elf_data = _build_corearch_elf(
+                tmp,
+                miss_data,
+                f"match_sparse_nodefault_miss_O{opt}",
+                opt=opt,
             )
-            assert built.returncode == 0, built.stdout + built.stderr
             run = subprocess.run(
                 [str(elf)], capture_output=True, text=True, timeout=30, cwd=str(BASE)
             )

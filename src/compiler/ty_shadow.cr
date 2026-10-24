@@ -1216,6 +1216,30 @@ fn sh_match_pat_kind(pat_node: int) -> int:
         return 2
     return 0                               // 字面量 / struct 模式 / EXPR_NONE -> 不可映射（登记）
 
+// 字面量模式种类（int/bool/string/char），-1 = 非字面量模式。
+// 这些模式在 checker 侧可逐值比较，但域是无限的（bool 除外），因此没有
+// `_`/绑定臂时一律按不穷尽处理；枚举域仍走类型引擎。
+fn sh_match_lit_kind(pat_node: int) -> int:
+    if pat_node < 0:
+        return -1
+    k := ast_kind(pat_node)
+    if k == EXPR_INT || k == EXPR_BOOL || k == EXPR_STRING || k == EXPR_CHAR:
+        return k
+    return -1
+
+// 同一字面量（kind + value）是否已在前面的臂出现（首个匹配语义）。
+fn sh_match_lit_seen(first_arm: int, cur_arm: int, kind: int, value: int) -> int:
+    an := first_arm
+    loop:
+        if an < 0 || an == cur_arm:
+            break
+        p := ast_a(an)
+        if p >= 0:
+            if ast_kind(p) == kind && ast_int_val(p) == value:
+                return 1
+        an = ast_c(an)
+    return 0
+
 // 变体模式 -> 本枚举变体下标（-1 = 不属本枚举 / 名字不可解析 / scrutinee 不可展开）。
 // 名字有两种形态（parser.cr parse_pattern 的产物）：裸变体名 Red，或限定名
 // Color.Red（parser 用 name + "." + variant 拼接）。限定名取最后一个点之后的段

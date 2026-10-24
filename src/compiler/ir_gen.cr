@@ -2890,12 +2890,43 @@ fn gen_expr(node: int) -> int:
             is_wildcard := 0
             if pat_kind == EXPR_WILDCARD:
                 is_wildcard = 1
+            // A binding ident is irrefutable: `x` (or `_` if the lexer ever routes
+            // it here) matches every value and binds the scrutinee. `_` is a
+            // wildcard; every other name is a binding arm.
+            is_ident_bind := 0
+            ident_ni : ., mut = -1
+            if pat_kind == EXPR_IDENT:
+                ident_ni = ast_int_val(arm_pat)
+                if str_eq(istr_get(ident_ni), "_") != 0:
+                    is_wildcard = 1
+                else:
+                    is_ident_bind = 1
+            // Nested refutable sub-patterns (string/char/int/... inside an enum
+            // payload) are Task 5b. Do not silently treat the outer variant as an
+            // unconditional match: route the arm to the fall edge instead.
+            nested_bad : ., mut = 0
+            if pat_kind == EXPR_ENUMPAT:
+                en_sub_count := ast_c(arm_pat)
+                en_i : ., mut = 0
+                en_p := ast_b(arm_pat)
+                loop:
+                    if en_i >= en_sub_count:
+                        break
+                    if en_p >= 0:
+                        en_k := ast_kind(en_p)
+                        if en_k != EXPR_IDENT && en_k != EXPR_WILDCARD:
+                            nested_bad = 1
+                            break
+                    en_p = en_p + 1
+                    en_i = en_i + 1
             if match_mode != 0:
                 // MATCH owns the dispatch: suppress the sequential compare chain
                 // and the payload-binding reads (sub-patterns already forced the
                 // fallback path).
                 pat_kind = -2
                 is_wildcard = 0
+                is_ident_bind = 0
+                nested_bad = 0
             // 可选表示位：臂条件与臂体绑定共用（声明在臂作用域）
             rep_v : ., mut = -1
             body_lbl := new_label()
@@ -2903,55 +2934,60 @@ fn gen_expr(node: int) -> int:
             has_next := 0
             if ast_c(an) >= 0:
                 has_next = 1
-            if is_wildcard == 1:
+            if is_wildcard == 1 || is_ident_bind == 1:
                 emit(IR_JUMP, -1, body_lbl, 0, 0, 0)
             else if pat_kind == EXPR_ENUMPAT:
-                variant_ni := get_variant_name_idx(ast_a(arm_pat))
-                // 解包侧判表示，scrutinee 配表示位（可选槽）时按位分派：
-                //   裸值（0）-> 值即携带值：Some 模式命中臂体（不读 tag，裸值非对象，
-                //   读 tag 即 SIGSEGV = 原红态）；None 模式不命中（裸值非 null）。
-                //   装箱（≠0）-> 既有 tag 分派（逐字不变）。
-                // 无表示位（非可选槽 / 未覆盖情形）-> 既有路径逐字不变（装箱假定）。
-                if g_optrep_on != 0 && match_val >= 0:
-                    rep_v = irv_rep(match_val)
-                if rep_v < 0:
-                    tag_var := new_ir_var("tag", TI_INT)
-                    emit(IR_LOAD_ENUM_TAG, tag_var, match_val, 0, 0, 0)
-                    vtag := new_ir_var("vtag", TI_INT)
-                    emit(IR_CONST, vtag, variant_ni, 0, 0, TI_INT)
-                    cmp_var := new_ir_var("cmp", TI_INT)
-                    emit(IR_BINARY, cmp_var, tag_var, vtag, OP_EQ, 0)
+                if nested_bad != 0:
                     if has_next == 1:
                         fall_lbl = new_label()
-                    emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
+                    emit(IR_JUMP, -1, fall_lbl, 0, 0, 0)
                 else:
-                    is_some_pat : ., mut = 0
-                    if str_eq(istr_get(variant_ni), "Some") != 0:
-                        is_some_pat = 1
-                    tag_lbl := new_label()
-                    if has_next == 1:
-                        fall_lbl = new_label()
-                    zb := new_ir_var("_rz", TI_INT)
-                    emit(IR_CONST, zb, 0, 0, 0, TI_INT)
-                    isb := new_ir_var("rep_isbare", TI_INT)
-                    if is_some_pat != 0:
-                        emit(IR_BINARY, isb, rep_v, zb, OP_EQ, 0)
+                    variant_ni := get_variant_name_idx(ast_a(arm_pat))
+                    // 解包侧判表示，scrutinee 配表示位（可选槽）时按位分派：
+                    //   裸值（0）-> 值即携带值：Some 模式命中臂体（不读 tag，裸值非对象，
+                    //   读 tag 即 SIGSEGV = 原红态）；None 模式不命中（裸值非 null）。
+                    //   装箱（≠0）-> 既有 tag 分派（逐字不变）。
+                    // 无表示位（非可选槽 / 未覆盖情形）-> 既有路径逐字不变（装箱假定）。
+                    if g_optrep_on != 0 && match_val >= 0:
+                        rep_v = irv_rep(match_val)
+                    if rep_v < 0:
+                        tag_var := new_ir_var("tag", TI_INT)
+                        emit(IR_LOAD_ENUM_TAG, tag_var, match_val, 0, 0, 0)
+                        vtag := new_ir_var("vtag", TI_INT)
+                        emit(IR_CONST, vtag, variant_ni, 0, 0, TI_INT)
+                        cmp_var := new_ir_var("cmp", TI_INT)
+                        emit(IR_BINARY, cmp_var, tag_var, vtag, OP_EQ, 0)
+                        if has_next == 1:
+                            fall_lbl = new_label()
+                        emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
                     else:
-                        emit(IR_BINARY, isb, rep_v, zb, OP_NE, 0)
-                    // Some：裸 -> 直接命中；装箱 -> 落 tag 比对。None：裸 -> 不命中（落 fall）；
-                    // 装箱 -> 落 tag 比对。
-                    if is_some_pat != 0:
-                        emit(IR_BRANCH, -1, isb, body_lbl, tag_lbl, 0)
-                    else:
-                        emit(IR_BRANCH, -1, isb, tag_lbl, fall_lbl, 0)
-                    emit(IR_LABEL, -1, tag_lbl, 0, 0, 0)
-                    tag_var := new_ir_var("tag", TI_INT)
-                    emit(IR_LOAD_ENUM_TAG, tag_var, match_val, 0, 0, 0)
-                    vtag := new_ir_var("vtag", TI_INT)
-                    emit(IR_CONST, vtag, variant_ni, 0, 0, TI_INT)
-                    cmp_var := new_ir_var("cmp", TI_INT)
-                    emit(IR_BINARY, cmp_var, tag_var, vtag, OP_EQ, 0)
-                    emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
+                        is_some_pat : ., mut = 0
+                        if str_eq(istr_get(variant_ni), "Some") != 0:
+                            is_some_pat = 1
+                        tag_lbl := new_label()
+                        if has_next == 1:
+                            fall_lbl = new_label()
+                        zb := new_ir_var("_rz", TI_INT)
+                        emit(IR_CONST, zb, 0, 0, 0, TI_INT)
+                        isb := new_ir_var("rep_isbare", TI_INT)
+                        if is_some_pat != 0:
+                            emit(IR_BINARY, isb, rep_v, zb, OP_EQ, 0)
+                        else:
+                            emit(IR_BINARY, isb, rep_v, zb, OP_NE, 0)
+                        // Some：裸 -> 直接命中；装箱 -> 落 tag 比对。None：裸 -> 不命中（落 fall）；
+                        // 装箱 -> 落 tag 比对。
+                        if is_some_pat != 0:
+                            emit(IR_BRANCH, -1, isb, body_lbl, tag_lbl, 0)
+                        else:
+                            emit(IR_BRANCH, -1, isb, tag_lbl, fall_lbl, 0)
+                        emit(IR_LABEL, -1, tag_lbl, 0, 0, 0)
+                        tag_var := new_ir_var("tag", TI_INT)
+                        emit(IR_LOAD_ENUM_TAG, tag_var, match_val, 0, 0, 0)
+                        vtag := new_ir_var("vtag", TI_INT)
+                        emit(IR_CONST, vtag, variant_ni, 0, 0, TI_INT)
+                        cmp_var := new_ir_var("cmp", TI_INT)
+                        emit(IR_BINARY, cmp_var, tag_var, vtag, OP_EQ, 0)
+                        emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
             else if pat_kind == EXPR_INT:
                 pat_val := new_ir_var("pval", TI_INT)
                 emit(IR_CONST, pat_val, ast_int_val(arm_pat), 0, 0, TI_INT)
@@ -2971,6 +3007,39 @@ fn gen_expr(node: int) -> int:
                 if has_next == 1:
                     fall_lbl = new_label()
                 emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
+            else if pat_kind == EXPR_CHAR:
+                // char 运行期值 = 字符驻留串索引；模式存同一索引（ast_int_val）。
+                // 直接比较当前值，不改 char 语义（不是 Unicode 码点）。
+                pat_val := new_ir_var("pval", TI_CHAR)
+                track_str(ast_int_val(arm_pat))
+                emit(IR_CONST, pat_val, ast_int_val(arm_pat), 0, 0, TI_CHAR)
+                cmp_var := new_ir_var("cmp", TI_INT)
+                emit(IR_BINARY, cmp_var, match_val, pat_val, OP_EQ, 0)
+                if has_next == 1:
+                    fall_lbl = new_label()
+                emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
+            else if pat_kind == EXPR_STRING:
+                // String patterns do not enter CASE: compare through str_eq and
+                // branch on the boolean result (the sequential path).
+                pat_val := new_ir_var("spat", TI_STR)
+                track_str(ast_int_val(arm_pat))
+                emit(IR_CONST, pat_val, ast_int_val(arm_pat), 0, 0, TI_STR)
+                eq0 := new_ir_var("_seq0", TI_STR)
+                eq1 := new_ir_var("_seq1", TI_STR)
+                emit(IR_STORE, -1, eq0, match_val, 0, 0)
+                emit(IR_STORE, -1, eq1, pat_val, 0, 0)
+                cmp_var := new_ir_var("cmp", TI_BOOL)
+                emit(IR_CALL, cmp_var, eq0, 2, str_intern("str_eq"), TI_BOOL)
+                if has_next == 1:
+                    fall_lbl = new_label()
+                emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
+            else:
+                // Unsupported pattern kind (struct/tuple/interpolated string/bigint).
+                // Preserve refutability: never fall through to the body.
+                if match_mode == 0:
+                    if has_next == 1:
+                        fall_lbl = new_label()
+                    emit(IR_JUMP, -1, fall_lbl, 0, 0, 0)
             body_nod : ., mut = -1
             if match_mode != 0:
                 body_nod = g_ir_instr_count
@@ -3030,6 +3099,9 @@ fn gen_expr(node: int) -> int:
                     if spn >= 0 && ast_kind(spn) == EXPR_IDENT:
                         bind_local(ast_int_val(spn), fv)
                     fi = fi + 1
+            if is_ident_bind == 1:
+                // Irrefutable binding arm: the name is the scrutinee itself.
+                bind_local(ident_ni, match_val)
             body_val := gen_expr(arm_body)
             body_val = force_if_thunk(body_val)
             if body_val >= 0:
@@ -3039,7 +3111,7 @@ fn gen_expr(node: int) -> int:
                     emit_rep_set(mrep_var, rep_enc_of_expr(arm_body, body_val))
             pop_ir_scope()
             emit(IR_JUMP, -1, merge_lbl, 0, 0, 0)
-            if match_mode == 0 && is_wildcard == 0 && has_next == 1:
+            if match_mode == 0 && is_wildcard == 0 && is_ident_bind == 0 && has_next == 1:
                 emit(IR_LABEL, -1, fall_lbl, 0, 0, 0)
             an = ast_c(an)
             arm_idx = arm_idx + 1

@@ -3392,6 +3392,8 @@ fn infer_expr(node: int) -> int:
         mc_save := mc_begin()     // 覆盖位图入栈，容量无界
         m_unmappable : ., mut = 0
         m_wild : ., mut = 0      // 通配/绑定已见（冗余臂判据用；非穷尽性判据本体）
+        m_literal : ., mut = 0   // 任一 int/bool/string/char 字面量臂已见（无限域 -> 需 irrefutable 臂）
+        m_order_rep : ., mut = 0 // 通配/绑定后仍有臂（TM05 只报一次）
         m_dup : ., mut = -1      // 首个冗余臂模式节点（-1 = 无）
         loop:
             if an < 0:
@@ -3400,6 +3402,12 @@ fn infer_expr(node: int) -> int:
             arm_body := ast_b(an)  // EXPR_ARM: b = body
             if arm_pat >= 0:
                 pk := sh_match_pat_kind(arm_pat)
+                // 通配/绑定模式吞掉后续所有臂：后续臂不可达，报 TM05。
+                if m_wild != 0 && m_order_rep == 0:
+                    check_error(EC_TM_WILDCARD_ORDER,
+                        "Wildcard or binding pattern must be the last arm",
+                        ast_line(arm_pat), ast_col(arm_pat))
+                    m_order_rep = 1
                 if pk == 1:
                     if m_wild != 0:
                         if m_dup < 0:
@@ -3407,6 +3415,27 @@ fn infer_expr(node: int) -> int:
                     m_wild = 1
                     m_pats = tt_cons(tt_top(), m_pats)
                 else if pk == 2:
+                    // 嵌套子模式只在 Task 5b 完整支持；ident/`_` 之外的模式
+                    // （字面量、嵌套枚举、struct…）现在不得静默当成“变体匹配”。
+                    sub_count := ast_c(arm_pat)
+                    spi : ., mut = 0
+                    spn := ast_b(arm_pat)
+                    bad_nested : ., mut = 0
+                    loop:
+                        if spi >= sub_count:
+                            break
+                        if spn >= 0:
+                            sk := ast_kind(spn)
+                            if sk != EXPR_IDENT && sk != EXPR_WILDCARD:
+                                check_error(EC_TM_NESTED,
+                                    "Nested match patterns are not supported yet",
+                                    ast_line(spn), ast_col(spn))
+                                bad_nested = 1
+                                break
+                        spn = spn + 1
+                        spi = spi + 1
+                    if bad_nested != 0:
+                        m_unmappable = 1
                     vi := sh_match_pat_variant(match_ti, arm_pat)
                     vt : ., mut = -1
                     if vi >= 0:
@@ -3434,7 +3463,21 @@ fn infer_expr(node: int) -> int:
                         mc_add(ci)
                         m_pats = tt_cons(vt, m_pats)
                 else:
-                    m_unmappable = 1          // 字面量/struct 模式，因此不判（登记）
+                    lit_k := sh_match_lit_kind(arm_pat)
+                    if lit_k >= 0:
+                        m_literal = 1
+                        if sh_match_lit_seen(first_arm, an, lit_k, ast_int_val(arm_pat)) != 0:
+                            if m_dup < 0:
+                                m_dup = arm_pat
+                    else:
+                        // 插值字符串 pattern 不是字面量：parser 产出 EXPR_BINARY/
+                        // EXPR_INTERP_HOLE。它既不能按值比较，也不得当成“任意串匹配”。
+                        ak0 := ast_kind(arm_pat)
+                        if ak0 == EXPR_BINARY || ak0 == EXPR_INTERP_HOLE:
+                            check_error(EC_TM_NESTED,
+                                "String interpolation is not supported in a match pattern; use a literal",
+                                ast_line(arm_pat), ast_col(arm_pat))
+                        m_unmappable = 1      // struct / 插值 / EXPR_BIGINT 等，不判穷尽
             // Bind pattern variables in new scope
             push_scope()
             if arm_pat >= 0:
@@ -3453,7 +3496,9 @@ fn infer_expr(node: int) -> int:
                             spn = spn + 1
                         spi = spi + 1
                 if ast_kind(arm_pat) == EXPR_IDENT:
-                    def_sym(ast_int_val(arm_pat), SYM_LOCAL, TI_INT, -1)
+                    // 绑定臂的值就是 scrutinee：类型取 scrutinee 类型（旧实现
+                    // 一律 TI_INT，字符串/char/bool  scrutinee 会错型）。
+                    def_sym(ast_int_val(arm_pat), SYM_LOCAL, match_ti, -1)
             push_borrow_scope()
             arm_ti := infer_expr(arm_body)
             pop_borrow_scope()
@@ -3466,12 +3511,24 @@ fn infer_expr(node: int) -> int:
         // 判定结果：0 = 不穷尽（诊断 + 具体反例变体名）；1 = 穷尽；-1 = 不判（非枚举域/不可映射
         // 模式/引擎未知），零诊断（判定约定：未知不得当不穷尽，也不得当穷尽）。
         ty_budget_reset(200000)
-        m_verdict := sh_match_exhaustive(match_ti, m_pats, m_unmappable)
+        m_verdict : ., mut = -1
+        if m_unmappable == 0 && m_literal != 0:
+            // 字面量域（int/string/char）无限；bool 也按设计要求显式列出 `_`/绑定臂。
+            // 没有 irrefutable 臂 -> 不穷尽，不再静默放行。
+            if m_wild != 0:
+                m_verdict = 1
+            else:
+                m_verdict = 0
+        else:
+            m_verdict = sh_match_exhaustive(match_ti, m_pats, m_unmappable)
         ty_budget_reset(200000)
         if m_verdict == 0:
             mi : ., mut = -1
             msg := "Non-exhaustive match"
-            if get_type_kind(match_ti) == TYP_OPTIONAL:
+            if m_literal != 0:
+                // 字面量域没有具体变体可命名；保持与枚举反例同一诊断码。
+                msg = msg + ": add a wildcard or binding arm"
+            else if get_type_kind(match_ti) == TYP_OPTIONAL:
                 // `T?` 两分支反例命名：0 = 有值（Some）/ 1 = null（None）
                 mi = mc_first_missing(2)
                 if mi == 0:
