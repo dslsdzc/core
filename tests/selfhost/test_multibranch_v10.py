@@ -1328,6 +1328,83 @@ MATCH_TUPLE_WILDCARD_ORDER_SOURCE = """fn main() -> int:
         (1, 2) => 1
 """
 
+MATCH_TUPLE_GROUPING_SOURCE = """fn main() -> int:
+    n := 7
+    r := match n:
+        (a) => a
+    if r != 7:
+        return 1
+    return 42
+"""
+
+MATCH_TUPLE_BAD_LEADING_COMMA_SOURCE = """fn main() -> int:
+    n := 1
+    return match n:
+        (,) => 1,
+        _ => 0
+"""
+
+MATCH_TUPLE_BAD_PLUS_SOURCE = """fn main() -> int:
+    n := 1
+    return match n:
+        (+) => 1,
+        _ => 0
+"""
+
+MATCH_TUPLE_BAD_DOUBLE_COMMA_SOURCE = """fn main() -> int:
+    t := (1, 2)
+    return match t:
+        (a, ,) => 1,
+        _ => 0
+"""
+
+MATCH_TUPLE_BAD_EMPTY_SOURCE = """fn main() -> int:
+    n := 1
+    return match n:
+        () => 1,
+        _ => 0
+"""
+
+MATCH_TUPLE_BAD_TRAILING_SOURCE = """fn main() -> int:
+    n := 1
+    return match n:
+        (a,) => 1,
+        _ => 0
+"""
+
+MATCH_TUPLE_GENERIC_SOURCE = """fn pick[T](x: T) -> int:
+    t := (x, 1)
+    return match t:
+        (a, b) => 1,
+        _ => 0
+
+fn main() -> int:
+    return pick(9)
+"""
+
+MATCH_TUPLE_ENUM_PAYLOAD_SOURCE = """fn main() -> int:
+    v := Some((1, 2))
+    return match v:
+        Some((a, b)) => 1,
+        _ => 0
+"""
+
+MATCH_TUPLE_GENERIC_MONOMORPH_SOURCE = """fn pick[T](x: T) -> int:
+    t := (1, "hi")
+    return match t:
+        (n, s) =>:
+            if n == 1:
+                if s == "hi":
+                    return 1
+            return 0
+        _ => 2
+
+fn main() -> int:
+    if pick(9) != 1:
+        return 1
+    return 42
+"""
+
 MATCH_ONE_CASE_SOURCE = """fn pick(n: int) -> int:
     return match n:
         7 => 1,
@@ -2184,6 +2261,78 @@ def test_tuple_pattern_exhaustiveness_and_order():
             MATCH_TUPLE_WILDCARD_ORDER_SOURCE,
             "tuple_wildcard_order",
             ["error[TM05]", "must be the last arm"],
+        )
+
+
+def test_tuple_pattern_parenthesized_binding_is_transparent():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_TUPLE_GROUPING_SOURCE, "match_tuple_group")
+        assert _match_nodes(data) == [], "grouped binding must not become MATCH"
+        _assert_program(
+            tmp,
+            MATCH_TUPLE_GROUPING_SOURCE,
+            42,
+            opts=(0, 2),
+            name="match_tuple_group",
+        )
+
+
+def test_tuple_pattern_malformed_is_hard_p005():
+    cases = [
+        ("tuple_leading_comma", MATCH_TUPLE_BAD_LEADING_COMMA_SOURCE),
+        ("tuple_plus", MATCH_TUPLE_BAD_PLUS_SOURCE),
+        ("tuple_double_comma", MATCH_TUPLE_BAD_DOUBLE_COMMA_SOURCE),
+        ("tuple_empty", MATCH_TUPLE_BAD_EMPTY_SOURCE),
+        ("tuple_trailing", MATCH_TUPLE_BAD_TRAILING_SOURCE),
+    ]
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        for name, source in cases:
+            needles = ["error[P05]"]
+            if name in ("tuple_leading_comma", "tuple_plus", "tuple_double_comma"):
+                needles.append("Unexpected token in pattern")
+            _assert_compile_rejected(tmp, source, name, needles)
+
+
+def test_tuple_pattern_generic_tuple_rejected():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        needles = ["error[TS03]", "requires a concrete tuple type"]
+        _assert_compile_rejected(
+            tmp, MATCH_TUPLE_GENERIC_SOURCE, "tuple_generic", needles
+        )
+        run = _run([COREC, "run", MATCH_TUPLE_GENERIC_SOURCE], cwd=BASE)
+        text = run.stdout + run.stderr
+        assert run.returncode == 1, (
+            f"interpreter accepted a generic tuple pattern: rc={run.returncode}: {text}"
+        )
+        for needle in needles:
+            assert needle in text, f"interpreter missing {needle!r}: {text}"
+
+
+def test_tuple_pattern_enum_payload_rejected_tm09():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        needles = ["error[TM09]", "Nested match patterns are not supported"]
+        _assert_compile_rejected(
+            tmp, MATCH_TUPLE_ENUM_PAYLOAD_SOURCE, "tuple_enum_payload", needles
+        )
+
+
+def test_tuple_pattern_generic_monomorph_clone():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(
+            tmp, MATCH_TUPLE_GENERIC_MONOMORPH_SOURCE, "tuple_generic_monomorph"
+        )
+        assert _match_nodes(data) == [], "tuple patterns must not become MATCH"
+        _assert_program(
+            tmp,
+            MATCH_TUPLE_GENERIC_MONOMORPH_SOURCE,
+            42,
+            opts=(0, 2),
+            name="tuple_generic_monomorph",
         )
 
 
