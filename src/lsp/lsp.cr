@@ -83,8 +83,8 @@ fn lsp_json_escape_str(s: string) -> string:
 
 // One diagnostic as a JSON object. Convert 1-based positions to 0-based and use severity 1.
 fn lsp_diag_json(di: int) -> string:
-    ln := r64(g_diags, di * DIAG_REC_SIZE + 16)
-    cl := r64(g_diags, di * DIAG_REC_SIZE + 24)
+    ln := cell_load(g_diags, di * DIAG_REC_SIZE + 16)
+    cl := cell_load(g_diags, di * DIAG_REC_SIZE + 24)
     msg := load_str_ptr(g_diags, di * DIAG_REC_SIZE + 8)
     line0 : ., mut = ln - 1
     if line0 < 0:
@@ -115,7 +115,7 @@ fn lsp_send_file_diags(uri: string, fni: int):
     loop:
         if i >= g_diag_count:
             break
-        if r64(g_diags, i * DIAG_REC_SIZE + 32) == fni:
+        if cell_load(g_diags, i * DIAG_REC_SIZE + 32) == fni:
             if first == 0:
                 out = out + ","
             out = out + lsp_diag_json(i)
@@ -128,7 +128,7 @@ fn lsp_send_file_diags(uri: string, fni: int):
 fn lsp_publish_diags():
     main_fni : ., mut = -1
     if g_file_count > 0:
-        main_fni = r64(g_files, 0)
+        main_fni = cell_load(g_files, 0)
     main_uri : string, mut = "file://"
     if g_file_count > 0:
         mp := load_str_ptr(g_files, 8)
@@ -140,14 +140,14 @@ fn lsp_publish_diags():
     loop:
         if i >= g_diag_count:
             break
-        fni := r64(g_diags, i * DIAG_REC_SIZE + 32)
+        fni := cell_load(g_diags, i * DIAG_REC_SIZE + 32)
         if fni != main_fni && fni >= 0:
             uri : string, mut = "file://"
             fi : ., mut = 0
             loop:
                 if fi >= g_file_count:
                     break
-                if r64(g_files, fi * 16) == fni:
+                if cell_load(g_files, fi * 16) == fni:
                     fp := load_str_ptr(g_files, fi * 16 + 8)
                     if str_len(fp) > 0:
                         uri = "file://" + fp
@@ -159,7 +159,7 @@ fn lsp_publish_diags():
                 loop:
                     if j >= i:
                         break
-                    if r64(g_diags, j * DIAG_REC_SIZE + 32) == fni:
+                    if cell_load(g_diags, j * DIAG_REC_SIZE + 32) == fni:
                         already = 1
                         break
                     j = j + 1

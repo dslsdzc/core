@@ -1,48 +1,27 @@
 // === frame.cr ===
-// x86-64 function frame: size calculation, prologue, epilogue, and the blocks
-// appended at the function tail.
+// x86-64 function frame: size calculation, prologue, and epilogue.
 //
 // Frame size has one source: pf_frame_size(vc). Phase 2 dry-run and the Phase 3
 // sub rsp immediate both call it. pf_frame_overhead(ss) is only for the dry-run
 // byte count and must agree with the actual emission from pf_prologue and
 // pf_epilogue. Encoding sizes come from sizes.cr.
 //
-// Tag area: tag bytes live below the slot area at -(vc*8 + 1 + k). The formula
-// and recognition rules are in tag2l.cr mw_setup_tags. This file reads them
-// through g2_tag_off. With zero tags, the frame layout is byte-identical to the
-// layout without a tag area.
-//
 // pf_prologue saves callee-saved registers, sets rbp, reserves the frame, stores
-// parameters, clears tags on parameter rows, and loads register-allocated
-// parameters. pf_epilogue patches returns, fills the sub rsp immediate, emits the
-// epilogue, and appends the jo slow-path blocks and 2L operand blocks.
+// parameters, and loads register-allocated parameters. pf_epilogue patches
+// returns, fills the sub rsp immediate, and emits the epilogue.
 //
 // buf is the byte buffer, pos is the absolute buffer position, and cp is the
 // number of bytes already emitted. Returns the new cp.
 //
-// Depends on instr.cr for encoding primitives, tag2l.cr for the tail blocks,
-// sizes.cr for byte sizes, and the shared x86 globals.
-
-// Tag table read. tag2l.cr mw_setup_tags fills the table per function.
-fn g2_tag_off(v: int) -> int:
-    // var v（当前函数内）的 tag 字节偏移（相对 rbp，恒负）；-1 = 非 tagged。
-    // 仅当前函数内有效（表由 mw_setup_tags 按函数填充）。
-    if v < 0:
-        return -1
-    lv := v - g_current_func_var_start
-    if lv < 0:
-        return -1
-    if str_len(g_x86_mw_tag_off) <= lv * 8:
-        return -1
-    return r64(g_x86_mw_tag_off, lv * 8)
+// Depends on instr.cr for encoding primitives, sizes.cr for byte sizes, and the
+// shared x86 globals.
 
 // Total frame bytes, shared by Phase 2 dry-run and Phase 3.
 fn pf_frame_size(vc: int) -> int:
-    // Frame bytes = vc*8 for var slots + g_x86_mw_tag_count tag bytes, padded
-    // to 16-byte alignment. With opt >= 1 (6 pushes) the frame is 8 mod 16;
-    // with opt < 1 (1 push) it is 0 mod 16. With zero tags the result is
-    // byte-identical to the frame without a tag area.
-    sz : ., mut = vc * 8 + g_x86_mw_tag_count
+    // Frame bytes = vc*8 for var slots, padded to 16-byte alignment. With
+    // opt >= 1 (6 pushes) the frame is 8 mod 16; with opt < 1 (1 push) it is
+    // 0 mod 16.
+    sz : ., mut = vc * 8
     r := sz % 16
     if g_opt_level >= 1:
         if r != 8:
@@ -201,27 +180,6 @@ fn pf_prologue(vs: int, pc: int, ss: int, buf: string, pos: int) -> int:
                 w8(buf, cp+2, 77)
                 w8(buf, cp+3, po2)
                 cp = cp + 4
-        // Tag hygiene for tagged parameter rows: clear the tag in the prologue.
-        // A parameter can be read before its first definition in the function,
-        // and the tag closure can include parameter rows (for example the B'
-        // copy p = p + k). Without this clear, a consumer can read the tag from
-        // a previous call or garbage. Parameters are saved to a forced stack slot
-        // po2, and the tag byte is in the same frame.
-        if pty == TI_INT:
-            ptg := g2_tag_off(vs + pi)
-            if ptg != -1:
-                if ptg >= -128 && ptg <= 127:
-                    w8(buf, cp, 198)
-                    w8(buf, cp+1, 69)
-                    w8(buf, cp+2, ptg)
-                    w8(buf, cp+3, 0)
-                    cp = cp + 4
-                else:
-                    w8(buf, cp, 198)
-                    w8(buf, cp+1, 133)
-                    e2_w32(buf, cp+2, ptg)
-                    w8(buf, cp+6, 0)
-                    cp = cp + 7
         pi = pi + 1
 
     // Load register-allocated parameters from stack to callee-saved regs
@@ -244,11 +202,10 @@ fn pf_prologue(vs: int, pc: int, ss: int, buf: string, pos: int) -> int:
     return cp
 
 
-// Phase 3 epilogue and function-tail blocks.
+// Phase 3 epilogue.
 // Patch returns to the epilogue start, fill the sub rsp immediate with the actual
 // frame size, emit the epilogue (add rsp, reverse callee-saved pops, pop rbp,
-// ret), then append the jo slow-path blocks and 2L operand blocks. Each site gets
-// its own block in the cold tail. Returns the new cp.
+// ret). Returns the new cp.
 // ss is the frame size used by the prologue.
 fn pf_epilogue(ss: int, buf: string, pos: int) -> int:
     cp : ., mut = pos
@@ -261,7 +218,7 @@ fn pf_epilogue(ss: int, buf: string, pos: int) -> int:
     loop:
         if rpi >= g_x86_ret_patch_count:
             break
-        jmp_pos := r64(g_x86_ret_patch_pos, rpi * 8)
+        jmp_pos := cell_load(g_x86_ret_patch_pos, rpi * 8)
         rel := epi_pos - (jmp_pos + 5)
         w32(buf, jmp_pos + 1, rel)
         rpi = rpi + 1
@@ -312,51 +269,4 @@ fn pf_epilogue(ss: int, buf: string, pos: int) -> int:
         cp = cp + 1  // pop rbp
     w8(buf, cp, 195)
     cp = cp + 1  // ret
-
-    // Function-tail slow-path blocks for tagged add/sub.
-    // Each jo site gets its own block. The block emits the 128-bit correction
-    // (e2_mw_slow_block), allocates 16 bytes, writes the 2-limb object, stores
-    // the pointer in the value slot, sets tag = 1, and jumps back after the
-    // fast-path store. jo records are emitted in site order. Functions without
-    // jo sites emit no bytes.
-    if g_x86_mw_jo_count > 0:
-        mw_ji : ., mut = 0
-        loop:
-            if mw_ji >= g_x86_mw_jo_count:
-                break
-            jo_pos := r64(g_x86_mw_jo_pos, mw_ji * 8)
-            jo_d := r64(g_x86_mw_jo_dest, mw_ji * 8)
-            jo_sub := r64(g_x86_mw_jo_is_sub, mw_ji * 8)
-            jo_res := r64(g_x86_mw_jo_resume, mw_ji * 8)
-            mw_blk := cp
-            w32(buf, jo_pos + 2, mw_blk - (jo_pos + 6))
-            cp = cp + e2_mw_slow_block(buf, cp, jo_d, jo_sub, jo_res)
-            mw_ji = mw_ji + 1
-        g_x86_mw_jo_count = 0
-    // Function-tail 2L operand blocks, after the jo blocks.
-    // Each consumer site gets its own block (e2_mw_opnd_block). The fast-path tag
-    // check reaches it with jne rel32. The block does 128-bit arithmetic or
-    // comparison and a common result store. Its shape is specialized statically
-    // by whether operand rows are tagged. Blocks that allocate use the same alloc
-    // patch table as the function body. No consumer sites means no bytes.
-    if g_x86_mw_oc_count > 0:
-        mw_oi : ., mut = 0
-        loop:
-            if mw_oi >= g_x86_mw_oc_count:
-                break
-            oc_p1 := r64(g_x86_mw_oc_pos1, mw_oi * 8)
-            oc_p2 := r64(g_x86_mw_oc_pos2, mw_oi * 8)
-            oc_s1 := r64(g_x86_mw_oc_s1, mw_oi * 8)
-            oc_s2 := r64(g_x86_mw_oc_s2, mw_oi * 8)
-            oc_d := r64(g_x86_mw_oc_dest, mw_oi * 8)
-            oc_op := r64(g_x86_mw_oc_op, mw_oi * 8)
-            oc_res := r64(g_x86_mw_oc_resume, mw_oi * 8)
-            oc_blk := cp
-            if oc_p1 >= 0:
-                w32(buf, oc_p1 + 2, oc_blk - (oc_p1 + 6))
-            if oc_p2 >= 0:
-                w32(buf, oc_p2 + 2, oc_blk - (oc_p2 + 6))
-            cp = cp + e2_mw_opnd_block(buf, cp, oc_s1, oc_s2, oc_d, oc_op, oc_res)
-            mw_oi = mw_oi + 1
-        g_x86_mw_oc_count = 0
     return cp

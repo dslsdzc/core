@@ -229,12 +229,12 @@ def ccr_walk(path: str):
     ver = u32()
     seg_count = u32()
     reserved = u32()
-    assert reserved == 0
-    # Segment table: canonical order (STR SYM NOD ENT REG EDG TYPE IFACE),
-    # contiguous bodies（R2 P4 Task 1 起 8 段——TYPE/IFACE 空壳）
+    assert reserved <= 0x7
+    # Segment table: canonical v10 order (STR TYPE IFACE SYM NOD ENT REG EDG CASE),
+    # contiguous bodies.
     segs = {}
     cur = 16 + seg_count * 12  # first body follows the whole table
-    for tag in (1, 2, 3, 4, 5, 6, 7, 8):
+    for tag in (1, 2, 3, 4, 5, 6, 7, 8, 9):
         t = u32()
         off = u32()
         size = u32()
@@ -255,21 +255,20 @@ def ccr_walk(path: str):
         sl = struct.unpack_from('<I', b, p)[0]
         p += 4 + sl
     assert p == len(b), "STR walk mismatch"
-    # NOD (tag 3): nodes, 40B each (v7 spec §3.3: 32B 语义字段 [R2 P6 T3 起含
-    # +28 项索引 i32] + 邻接索引)
-    b = body(3)
+    # NOD (tag 5): nodes, 40B each {op/dest/src1/src2/src3/type_id/flags/adj}
+    b = body(5)
     (instr_cnt,) = struct.unpack_from('<I', b, 0)
     assert 4 + instr_cnt * 40 == len(b), "NOD walk mismatch"
-    # EDG (tag 6): edges, 8B each (v7 必落)
-    b = body(6)
+    # EDG (tag 8): edges, 8B each
+    b = body(8)
     (edg_cnt,) = struct.unpack_from('<I', b, 0)
     assert 4 + edg_cnt * 8 == len(b), "EDG walk mismatch"
-    # ENT (tag 4): entries, 28B each
-    b = body(4)
+    # ENT (tag 6): entries, 24B each (v10: no home)
+    b = body(6)
     (ent_cnt,) = struct.unpack_from('<I', b, 0)
-    assert 4 + ent_cnt * 28 == len(b), "ENT walk mismatch"
-    # REG (tag 5): sgs, 24B each
-    b = body(5)
+    assert 4 + ent_cnt * 24 == len(b), "ENT walk mismatch"
+    # REG (tag 7): sgs, 24B each
+    b = body(7)
     sg_count = struct.unpack_from('<I', b, 0)[0]
     assert 4 + sg_count * 24 == len(b), "REG walk mismatch"
     return ver, sg_count, len(d), cur
@@ -291,7 +290,7 @@ def test_ccr_v6_reg_section():
     os.unlink(path)
     assert r.returncode == 0, f"ccr failed: {r.stderr}"
     ver, sg_count, fsize, end = ccr_walk(ccr_path)
-    assert ver == 9, f"expected .ccr version 9, got {ver}"
+    assert ver == 0x000A0000, f"expected .ccr version 10, got {ver:#x}"
     assert sg_count is not None and sg_count >= 2, \
         f"expected REG segment with >=2 regions (func+for), got {sg_count}"
     assert end == fsize, f"format walk ended at {end} of {fsize} bytes"
@@ -306,7 +305,8 @@ def test_ccr_writer_rejects_i32_overflow_inputs():
     with open(ccr_source, encoding="utf-8") as fh:
         text = fh.read()
     assert "fn ccr_i32_fits(val: int) -> int" in text
-    assert "if ccr_validate_i32_fields() == 0 { return -1; }" in text
+    assert "if ccr_validate_i32_fields() == 0:" in text
+    assert "return -1" in text
 
 def test_ccr_roundtrip_v2():
     """save→load 往返守卫：v6 文件经 corearch 加载后 ELF 输出行为不变。

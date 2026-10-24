@@ -68,8 +68,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     e2_w32(buf, pos+cp+3, 0)
     cp = cp + 7
     grow_rip_patch(g_x86_rip_patch_count + 1)
-    w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos_ca)
-    w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_current_arena)
+    cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos_ca)
+    cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_current_arena)
     g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     // mov r10, [r10]: 4D 8B 12 (modrm 0x12: reg=010+R -> r10, rm=010+B -> [r10];
     // old 0x10 had rm=100 which consumed a SIB byte and desynced the stream)
@@ -96,8 +96,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     rip_pos3 := pos + cp + 3
     cp = cp + e2_lrb(buf, pos + cp, 0)
     grow_rip_patch(g_x86_rip_patch_count + 1)
-    w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos3)
-    w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_arena_pool_data)
+    cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos3)
+    cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_arena_pool_data)
     g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     // mov r11, [r11]: 4D 8B 1B
     w8(buf, pos+cp, 77)
@@ -112,8 +112,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     e2_w32(buf, pos+cp+3, 0)
     cp = cp + 7
     grow_rip_patch(g_x86_rip_patch_count + 1)
-    w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos4)
-    w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_arena_max_size)
+    cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos4)
+    cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_arena_max_size)
     g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     // mov rax, [rax]: 48 8B 00 (load g_arena_max_size value)
     w8(buf, pos+cp, 72)
@@ -142,8 +142,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     e2_w32(buf, pos+cp+3, 0)
     cp = cp + 7
     grow_rip_patch(g_x86_rip_patch_count + 1)
-    w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos1)
-    w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_arena_cursors)
+    cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos1)
+    cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_arena_cursors)
     g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     // mov rdx, [rdx]: 48 8B 12
     w8(buf, pos+cp, 72)
@@ -164,8 +164,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     e2_w32(buf, pos+cp+3, 0)
     cp = cp + 7
     grow_rip_patch(g_x86_rip_patch_count + 1)
-    w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos2)
-    w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_arena_sizes)
+    cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos2)
+    cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_arena_sizes)
     g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     // mov rsi, [rsi]: 48 8B 36
     w8(buf, pos+cp, 72)
@@ -292,8 +292,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     e2_w32(buf, pos+cp+3, 0)
     cp = cp + 7
     grow_rip_patch(g_x86_rip_patch_count + 1)
-    w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos5)
-    w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_current_arena)
+    cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos5)
+    cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_current_arena)
     g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     // mov qword [r8], -1: 49 C7 00 FF FF FF FF (set g_current_arena = -1;
     // REX.W+B: a 32-bit store would leave the slot = 0x00000000ffffffff,
@@ -315,8 +315,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     e2_w32(buf, pos+cp+3, 0)
     cp = cp + 7
     grow_rip_patch(g_x86_rip_patch_count + 1)
-    w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos_sizes)
-    w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_arena_sizes)
+    cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos_sizes)
+    cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_arena_sizes)
     g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     // mov rsi, [rsi]: 48 8B 36 (deref to get sizes array pointer)
     w8(buf, pos+cp, 72)
@@ -374,8 +374,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
         e2_w32(buf, pos+cp+3, 0)
         cp = cp + 7
         grow_rip_patch(g_x86_rip_patch_count + 1)
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_hp0)
-        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_ptr)
+        cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_hp0)
+        cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_ptr)
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     else:
         rel0 := bss_va - (fva + cp + 7)
@@ -411,8 +411,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
         e2_w32(buf, pos+cp+3, 0)
         cp = cp + 7
         grow_rip_patch(g_x86_rip_patch_count + 1)
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_hp_s1)
-        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_ptr)
+        cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_hp_s1)
+        cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_ptr)
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     else:
         rel2 := bss_va - (fva + cp + 7)
@@ -447,8 +447,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
         e2_w32(buf, pos+cp+3, 0)
         cp = cp + 7
         grow_rip_patch(g_x86_rip_patch_count + 1)
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_he)
-        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_end)
+        cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_he)
+        cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_end)
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     else:
         heap_end_va : ., mut = bss_va + 8
@@ -481,8 +481,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
         e2_w32(buf, pos+cp+3, 0)
         cp = cp + 7
         grow_rip_patch(g_x86_rip_patch_count + 1)
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_hp_rl)
-        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_ptr)
+        cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_hp_rl)
+        cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_ptr)
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     else:
         rel_hr := bss_va - (fva + cp + 7)
@@ -510,8 +510,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
         e2_w32(buf, pos+cp+3, 0)
         cp = cp + 7
         grow_rip_patch(g_x86_rip_patch_count + 1)
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_hp_s2)
-        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_ptr)
+        cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_hp_s2)
+        cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_ptr)
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     else:
         rel3 := bss_va - (fva + cp + 7)
@@ -575,8 +575,8 @@ fn emit_alloc_body(buf: string, pos: int, bss_va: int, globals_size: int) -> int
     e2_w32(buf, pos+cp+3, 0)
     cp = cp + 7
     grow_rip_patch(g_x86_rip_patch_count + 1)
-    w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos6)
-    w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_current_arena)
+    cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_pos6)
+    cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_current_arena)
     g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     // mov [r8], r10d: 45 89 10 (restore arena index: r8 = g_current_arena addr)
     // objdump 验证：45 89 10 = mov %r10d,(%r8) ✓；44 89 00 = mov %r8d,(%rax) ✗
@@ -640,8 +640,8 @@ fn emit_alloc_body_simple(buf: string, pos: int, bss_va: int, globals_size: int)
         e2_w32(buf, pos+cp+3, 0)
         cp = cp + 7
         grow_rip_patch(g_x86_rip_patch_count + 1)
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_hp_l)
-        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_ptr)
+        cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_hp_l)
+        cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_ptr)
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     else:
         rel0 := bss_va - (fva + cp + 7)
@@ -676,8 +676,8 @@ fn emit_alloc_body_simple(buf: string, pos: int, bss_va: int, globals_size: int)
         e2_w32(buf, pos+cp+3, 0)
         cp = cp + 7
         grow_rip_patch(g_x86_rip_patch_count + 1)
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_hp_s1)
-        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_ptr)
+        cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_hp_s1)
+        cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_ptr)
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     else:
         rel2 := bss_va - (fva + cp + 7)
@@ -704,8 +704,8 @@ fn emit_alloc_body_simple(buf: string, pos: int, bss_va: int, globals_size: int)
         e2_w32(buf, pos+cp+3, 0)
         cp = cp + 7
         grow_rip_patch(g_x86_rip_patch_count + 1)
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_hp_s2)
-        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_ptr)
+        cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_hp_s2)
+        cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_ptr)
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     else:
         rel3 := bss_va - (fva + cp + 7)
@@ -822,8 +822,8 @@ fn emit_heap_expand(buf: string, pos: int, bss_va: int) -> int:
         e2_w32(buf, pos+cp+3, 0)
         cp = cp + 7
         grow_rip_patch(g_x86_rip_patch_count + 1)
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_hp_ex)
-        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_ptr)
+        cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_hp_ex)
+        cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_ptr)
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     else:
         rel_hp_s := bss_va - (fva + cp + 7)
@@ -847,8 +847,8 @@ fn emit_heap_expand(buf: string, pos: int, bss_va: int) -> int:
         e2_w32(buf, pos+cp+3, 0)
         cp = cp + 7
         grow_rip_patch(g_x86_rip_patch_count + 1)
-        w64(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_he_ex)
-        w64(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_end)
+        cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, rip_he_ex)
+        cell_store(g_x86_rip_patch_globals, g_x86_rip_patch_count * 8, gv_heap_end)
         g_x86_rip_patch_count = g_x86_rip_patch_count + 1
     else:
         rel_hp_e := (bss_va + 8) - (fva + cp + 7)
@@ -1073,8 +1073,8 @@ fn emit_goroutine_stubs(buf: string, pos: int) -> int:
     //   ret (fiber dead if no work)
     call_pos0 := pos + cp
     grow_call_patch(g_x86_call_patch_count + 1)
-    w64(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos0)
-    w64(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("g_get_curg"))
+    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos0)
+    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("g_get_curg"))
     g_x86_call_patch_count = g_x86_call_patch_count + 1
     e2_w8(buf, pos+cp, 232)
     e2_w32(buf, pos+cp+1, 0)
@@ -1096,8 +1096,8 @@ fn emit_goroutine_stubs(buf: string, pos: int) -> int:
     cp = cp + 1  // push rax
     call_pos1 := pos + cp
     grow_call_patch(g_x86_call_patch_count + 1)
-    w64(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos1)
-    w64(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("g_get_curg"))
+    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos1)
+    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("g_get_curg"))
     g_x86_call_patch_count = g_x86_call_patch_count + 1
     e2_w8(buf, pos+cp, 232)
     e2_w32(buf, pos+cp+1, 0)
@@ -1111,8 +1111,8 @@ fn emit_goroutine_stubs(buf: string, pos: int) -> int:
     cp = cp + 1  // pop rsi
     call_pos2 := pos + cp
     grow_call_patch(g_x86_call_patch_count + 1)
-    w64(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos2)
-    w64(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("chan_send"))
+    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos2)
+    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("chan_send"))
     g_x86_call_patch_count = g_x86_call_patch_count + 1
     e2_w8(buf, pos+cp, 232)
     e2_w32(buf, pos+cp+1, 0)
@@ -1120,8 +1120,8 @@ fn emit_goroutine_stubs(buf: string, pos: int) -> int:
     // exit: call g_get_curg; mov rdi, rax; call g_free; call sched_schedule; ret
     call_pos3 := pos + cp
     grow_call_patch(g_x86_call_patch_count + 1)
-    w64(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos3)
-    w64(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("g_get_curg"))
+    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos3)
+    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("g_get_curg"))
     g_x86_call_patch_count = g_x86_call_patch_count + 1
     e2_w8(buf, pos+cp, 232)
     e2_w32(buf, pos+cp+1, 0)
@@ -1132,16 +1132,16 @@ fn emit_goroutine_stubs(buf: string, pos: int) -> int:
     cp = cp + 3  // mov rdi, rax
     call_pos4 := pos + cp
     grow_call_patch(g_x86_call_patch_count + 1)
-    w64(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos4)
-    w64(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("g_free"))
+    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos4)
+    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("g_free"))
     g_x86_call_patch_count = g_x86_call_patch_count + 1
     e2_w8(buf, pos+cp, 232)
     e2_w32(buf, pos+cp+1, 0)
     cp = cp + 5  // call g_free
     call_pos5 := pos + cp
     grow_call_patch(g_x86_call_patch_count + 1)
-    w64(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos5)
-    w64(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("sched_schedule"))
+    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos5)
+    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("sched_schedule"))
     g_x86_call_patch_count = g_x86_call_patch_count + 1
     e2_w8(buf, pos+cp, 232)
     e2_w32(buf, pos+cp+1, 0)
@@ -1174,8 +1174,8 @@ fn emit_m_start_workers(buf: string, pos: int) -> int:
     cp = cp + 1  // pop rdi
     call_pos_we := pos + cp
     grow_call_patch(g_x86_call_patch_count + 1)
-    w64(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos_we)
-    w64(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("sched_worker_run"))
+    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos_we)
+    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("sched_worker_run"))
     g_x86_call_patch_count = g_x86_call_patch_count + 1
     e2_w8(buf, pos+cp, 232)
     e2_w32(buf, pos+cp+1, 0)
@@ -1239,8 +1239,8 @@ fn emit_m_start_workers(buf: string, pos: int) -> int:
     cp = cp + 4
     call_pos_al := pos + cp
     grow_call_patch(g_x86_call_patch_count + 1)
-    w64(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos_al)
-    w64(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("alloc"))
+    cell_store(g_x86_call_patch_pos, g_x86_call_patch_count * 8, call_pos_al)
+    cell_store(g_x86_call_patch_name, g_x86_call_patch_count * 8, str_intern("alloc"))
     g_x86_call_patch_count = g_x86_call_patch_count + 1
     e2_w8(buf, pos+cp, 232)
     e2_w32(buf, pos+cp+1, 0)
@@ -1357,8 +1357,8 @@ fn emit_m_start_workers(buf: string, pos: int) -> int:
 
 fn sched_reg_one(name: string, offset: int, cp: int):
     grow_func_offsets(g_x86_func_off_count * 2 + 2)
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern(name))
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, cp - 176)
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern(name))
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, cp - 176)
     g_x86_func_off_count = g_x86_func_off_count + 1
 
 fn w16(buf: string, off: int, val: int):
@@ -1413,12 +1413,12 @@ fn write_phdr(buf: string, idx: int, p_type: int, p_flags: int,
     base : ., mut = EHDR_SIZE + idx * PHDR_SIZE
     w32(buf, base + P_TYPE, p_type)
     w32(buf, base + P_FLAGS, p_flags)
-    w64(buf, base + P_OFFSET, p_offset)
-    w64(buf, base + P_VADDR, p_vaddr)
-    w64(buf, base + P_PADDR, p_paddr)
-    w64(buf, base + P_FILESZ, p_filesz)
-    w64(buf, base + P_MEMSZ, p_memsz)
-    w64(buf, base + P_ALIGN, p_align)
+    cell_store(buf, base + P_OFFSET, p_offset)
+    cell_store(buf, base + P_VADDR, p_vaddr)
+    cell_store(buf, base + P_PADDR, p_paddr)
+    cell_store(buf, base + P_FILESZ, p_filesz)
+    cell_store(buf, base + P_MEMSZ, p_memsz)
+    cell_store(buf, base + P_ALIGN, p_align)
 
 // ── ELF header writer (x86-64) ──
 fn elf2_hdr(buf: string, code_end: int, total_sz: int):
@@ -1441,8 +1441,8 @@ fn elf2_hdr(buf: string, code_end: int, total_sz: int):
     w16(buf, E_TYPE, 2)    // ET_EXEC
     w16(buf, E_MACH, 62)   // EM_X86_64
     w32(buf, E_VERSION, 1) // EV_CURRENT
-    w64(buf, E_ENTRY, 0x400000 + EHDR_SIZE + 2 * PHDR_SIZE)  // entry = text_base + 176
-    w64(buf, E_PHOFF, EHDR_SIZE)              // phdrs start right after ehdr
+    cell_store(buf, E_ENTRY, 0x400000 + EHDR_SIZE + 2 * PHDR_SIZE)  // entry = text_base + 176
+    cell_store(buf, E_PHOFF, EHDR_SIZE)              // phdrs start right after ehdr
     w16(buf, E_EHSIZE, EHDR_SIZE)             // sizeof(Elf64_Ehdr) = 64
     w16(buf, E_PHENTSIZE, PHDR_SIZE)          // sizeof(Elf64_Phdr) = 56
     w16(buf, E_PHNUM, 2)                      // 2 program headers
@@ -1490,15 +1490,16 @@ g_alloc_gl_jmp_pos : int, mut = -1  // Part 1 jl .Lglobal displacement position 
 
 // ── Main ELF generation ──
 fn elf_gen(buf: string) -> int:
+    g_x86_big_exit_call_pos = -1
     // Mark global variables for RIP-relative addressing
     gi := 0
     loop:
         if gi >= g_ir_global_count:
             break
-        gv := r64(g_ir_globals, gi * 24 + 8)
+        gv := cell_load(g_ir_globals, gi * 24 + 8)
         if gv >= 0:
             grow_is_global(gv + 1)
-            w64(g_x86_is_global, gv * 8, 1)
+            cell_store(g_x86_is_global, gv * 8, 1)
         gi = gi + 1
     grow_is_global(g_ir_var_count)
 
@@ -1518,9 +1519,9 @@ fn elf_gen(buf: string) -> int:
     g_ni_load_str_ptr = -1
     g_ni_store_str_ptr = -1
     g_ni_get_arg = -1
-    g_ni_w64 = -1
+    g_ni_cell_store = -1
     g_ni_dyncpy = -1
-    g_ni_r64 = -1
+    g_ni_cell_load = -1
     g_ni_goroutine_wrapper_addr = -1
     ni_i : ., mut = 0
     loop:
@@ -1537,16 +1538,16 @@ fn elf_gen(buf: string) -> int:
             g_ni_store8 = ni_i
         if str_eq(ns, "load64") != 0:
             g_ni_load64 = ni_i
-        if str_eq(ns, "r64") != 0:
-            g_ni_r64 = ni_i
+        if str_eq(ns, "cell_load") != 0:
+            g_ni_cell_load = ni_i
         if str_eq(ns, "load_str_ptr") != 0:
             g_ni_load_str_ptr = ni_i
         if str_eq(ns, "store_str_ptr") != 0:
             g_ni_store_str_ptr = ni_i
         if str_eq(ns, "get_arg") != 0:
             g_ni_get_arg = ni_i
-        if str_eq(ns, "w64") != 0:
-            g_ni_w64 = ni_i
+        if str_eq(ns, "cell_store") != 0:
+            g_ni_cell_store = ni_i
         if str_eq(ns, "_dyncpy") != 0:
             g_ni_dyncpy = ni_i
         if str_eq(ns, "goroutine_wrapper_addr") != 0:
@@ -1558,7 +1559,7 @@ fn elf_gen(buf: string) -> int:
     print(" load8=")
     print(int_str(g_ni_load8))
     print(" w64=")
-    print(int_str(g_ni_w64))
+    print(int_str(g_ni_cell_store))
     print(" dyncpy=")
     println(int_str(g_ni_dyncpy))
 
@@ -1575,7 +1576,7 @@ fn elf_gen(buf: string) -> int:
     loop:
         if si >= g_ir_str_const_count:
             break
-        g2_str_off(r64(g_ir_str_consts, si * 8))
+        g2_str_off(cell_load(g_ir_str_consts, si * 8))
         si = si + 1
 
     // Find g_rt_argc/g_rt_argv_ptr via name_idx (no str_eq loop)
@@ -1602,29 +1603,29 @@ fn elf_gen(buf: string) -> int:
     loop:
         if gvsi >= g_ir_global_count:
             break
-        ni := r64(g_ir_globals, gvsi * 24)
+        ni := cell_load(g_ir_globals, gvsi * 24)
         if ni == argc_ni:
-            gv_argc = r64(g_ir_globals, gvsi * 24 + 8)
+            gv_argc = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == argv_ni:
-            gv_argv = r64(g_ir_globals, gvsi * 24 + 8)
+            gv_argv = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cur_ni:
-            gv_current_arena = r64(g_ir_globals, gvsi * 24 + 8)
+            gv_current_arena = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cur_ni2:
-            gv_arena_cursors = r64(g_ir_globals, gvsi * 24 + 8)
+            gv_arena_cursors = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cur_ni3:
-            gv_arena_sizes = r64(g_ir_globals, gvsi * 24 + 8)
+            gv_arena_sizes = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cur_ni4:
-            gv_arena_pool_data = r64(g_ir_globals, gvsi * 24 + 8)
+            gv_arena_pool_data = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cur_ni5:
-            gv_arena_max_size = r64(g_ir_globals, gvsi * 24 + 8)
+            gv_arena_max_size = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cur_ni6:
-            gv_heap_ptr = r64(g_ir_globals, gvsi * 24 + 8)
+            gv_heap_ptr = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cur_ni7:
-            gv_heap_end = r64(g_ir_globals, gvsi * 24 + 8)
+            gv_heap_end = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cur_ni8:
-            gv_hp_config = r64(g_ir_globals, gvsi * 24 + 8)
+            gv_hp_config = cell_load(g_ir_globals, gvsi * 24 + 8)
         if ni == cur_ni9:
-            gv_hp_inflight = r64(g_ir_globals, gvsi * 24 + 8)
+            gv_hp_inflight = cell_load(g_ir_globals, gvsi * 24 + 8)
         gvsi = gvsi + 1
 
     // Phase 2: compute sizes for all functions
@@ -1636,8 +1637,8 @@ fn elf_gen(buf: string) -> int:
     loop:
         if sfi >= g_ir_func_count:
             break
-        ist2 := r64(g_ir_func_instr_start, sfi * 8)
-        ic2 := r64(g_ir_func_instr_count, sfi * 8)
+        ist2 := cell_load(g_ir_func_instr_start, sfi * 8)
+        ic2 := cell_load(g_ir_func_instr_count, sfi * 8)
         // Count label indices for g_label_poses allocation
         cur_labels : ., mut = 0
         ii2 : ., mut = 0
@@ -1664,7 +1665,7 @@ fn elf_gen(buf: string) -> int:
         if cur_labels > max_labels:
             max_labels = cur_labels
         grow_func_code_sz(sfi + 1)
-        w64(g_x86_func_code_sz, sfi * 8, ic2 * 5)
+        cell_store(g_x86_func_code_sz, sfi * 8, ic2 * 5)
         sfi = sfi + 1
     g_label_count = max_labels
 
@@ -1679,25 +1680,17 @@ fn elf_gen(buf: string) -> int:
             print(int_str(fi))
             print("/")
             println(int_str(g_ir_func_count))
-        ni := r64(g_ir_func_name_idx, fi * 8)
+        ni := cell_load(g_ir_func_name_idx, fi * 8)
         grow_func_offsets(g_x86_func_off_count * 2 + 2)
-        w64(g_x86_func_offsets, g_x86_func_off_count * 16, ni)
-        w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
+        cell_store(g_x86_func_offsets, g_x86_func_off_count * 16, ni)
+        cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
         g_x86_func_off_count = g_x86_func_off_count + 1
 
-        vc2 := r64(g_ir_func_var_count, fi * 8)
-        vs2 := r64(g_ir_func_var_start, fi * 8)
-        pc2 := r64(g_ir_func_param_count, fi * 8)
+        vc2 := cell_load(g_ir_func_var_count, fi * 8)
+        vs2 := cell_load(g_ir_func_var_start, fi * 8)
+        pc2 := cell_load(g_ir_func_param_count, fi * 8)
 
-        // Identify potential multiword vars and include the tag area in the
-        // frame size. With zero tags, pf_frame_size matches the layout without a
-        // tag area.
-        //
-        // Identify potential multiword vars and include the tag area in the frame
-        // size. With zero tags, pf_frame_size matches the layout without a tag
-        // area.
-        mw_setup_tags(fi, vs2, vc2)
-        fsz := r64(g_x86_func_code_sz, fi * 8)
+        fsz := cell_load(g_x86_func_code_sz, fi * 8)
         // Frame size comes from frame.cr. SysV requires 16-byte alignment: after
         // a call rsp is 8 mod 16. With opt >= 1 there are 6 pushes (rbx, r12-r15,
         // rbp), so the frame size must be 8 mod 16. With opt < 1 there is 1 push
@@ -1736,52 +1729,52 @@ fn elf_gen(buf: string) -> int:
     if alloc_ni < 0:
         alloc_ni = str_intern("alloc")
     grow_func_offsets(g_x86_func_off_count * 2 + 2)
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16, alloc_ni)
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16, alloc_ni)
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
     g_x86_func_off_count = g_x86_func_off_count + 1
     total_code = total_code + 330  // arena-aware dual-path alloc body (~323 bytes with OOM check + zero-init + chain-expand + current-arena check)
     // heap_expand
     grow_func_offsets(g_x86_func_off_count * 2 + 2)
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("heap_expand"))
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("heap_expand"))
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
     g_x86_func_off_count = g_x86_func_off_count + 1
     total_code = total_code + 86  // heap_expand with allocator-state save/restore
     // sched_call trampolines (0..4)
     grow_func_offsets(g_x86_func_off_count * 2 + 2)
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("sched_call_0"))
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("sched_call_0"))
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
     g_x86_func_off_count = g_x86_func_off_count + 1
     total_code = total_code + sched_tramp_sz(0)
     grow_func_offsets(g_x86_func_off_count * 2 + 2)
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("sched_call_1"))
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("sched_call_1"))
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
     g_x86_func_off_count = g_x86_func_off_count + 1
     total_code = total_code + sched_tramp_sz(1)
     grow_func_offsets(g_x86_func_off_count * 2 + 2)
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("sched_call_2"))
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("sched_call_2"))
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
     g_x86_func_off_count = g_x86_func_off_count + 1
     total_code = total_code + sched_tramp_sz(2)
     grow_func_offsets(g_x86_func_off_count * 2 + 2)
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("sched_call_3"))
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("sched_call_3"))
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
     g_x86_func_off_count = g_x86_func_off_count + 1
     total_code = total_code + sched_tramp_sz(3)
     grow_func_offsets(g_x86_func_off_count * 2 + 2)
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("sched_call_4"))
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("sched_call_4"))
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
     g_x86_func_off_count = g_x86_func_off_count + 1
     total_code = total_code + sched_tramp_sz(4)
     if g_x86_emit_rt_stubs != 0:
         // g_set_curg / g_get_curg bridges (11 bytes each): pure-static self-containment
         grow_func_offsets(g_x86_func_off_count * 2 + 2)
-        w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("g_set_curg"))
-        w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
+        cell_store(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("g_set_curg"))
+        cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
         g_x86_func_off_count = g_x86_func_off_count + 1
         total_code = total_code + 11
         grow_func_offsets(g_x86_func_off_count * 2 + 2)
-        w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("g_get_curg"))
-        w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
+        cell_store(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("g_get_curg"))
+        cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, total_code)
         g_x86_func_off_count = g_x86_func_off_count + 1
         total_code = total_code + 11
 
@@ -1814,23 +1807,23 @@ fn elf_gen(buf: string) -> int:
             print(int_str(fi))
             print("/")
             println(int_str(g_ir_func_count))
-        ni := r64(g_ir_func_name_idx, fi * 8)
+        ni := cell_load(g_ir_func_name_idx, fi * 8)
         grow_func_cp(fi + 1)
-        w64(g_x86_func_cp, fi * 8, cp)
+        cell_store(g_x86_func_cp, fi * 8, cp)
         // Override with actual position for backward calls
         fi3 := 0
         loop:
             if fi3 >= g_x86_func_off_count:
                 break
-            if str_eq(istr_get(r64(g_x86_func_offsets, fi3*16)), istr_get(ni)) != 0:
-                w64(g_x86_func_offsets, fi3*16+8, cp - 176)
+            if str_eq(istr_get(cell_load(g_x86_func_offsets, fi3*16)), istr_get(ni)) != 0:
+                cell_store(g_x86_func_offsets, fi3*16+8, cp - 176)
                 break
             fi3 = fi3 + 1
-        ist := r64(g_ir_func_instr_start, fi * 8)
-        ic := r64(g_ir_func_instr_count, fi * 8)
-        vc := r64(g_ir_func_var_count, fi * 8)
-        vs := r64(g_ir_func_var_start, fi * 8)
-        pc := r64(g_ir_func_param_count, fi * 8)
+        ist := cell_load(g_ir_func_instr_start, fi * 8)
+        ic := cell_load(g_ir_func_instr_count, fi * 8)
+        vc := cell_load(g_ir_func_var_count, fi * 8)
+        vs := cell_load(g_ir_func_var_start, fi * 8)
+        pc := cell_load(g_ir_func_param_count, fi * 8)
 
         g2_init()
         g_current_func_var_start = vs
@@ -1840,12 +1833,8 @@ fn elf_gen(buf: string) -> int:
                 break
             g2_slot(vs + vi)
             vi = vi + 1
-        // Identify potential multiword vars and build the tag byte offset table
-        // (g2_tag_off). The frame size is pf_frame_size(vc), including the tag
-        // area, with the same 16-byte alignment as the Phase 2 dry-run. With zero
-        // tags, the layout is unchanged.
-        // SysV 16-byte alignment, the same rule as the dry-run.
-        mw_setup_tags(fi, vs, vc)
+        // Frame size uses the shared pf_frame_size; SysV 16-byte alignment is
+        // the same rule as the Phase 2 dry-run.
         g_x86_emit_stack_size = pf_frame_size(vc)
 
         // Init label state for single-pass backpatching (-1 = not yet seen)
@@ -1854,7 +1843,7 @@ fn elf_gen(buf: string) -> int:
             if li2 >= g_label_count:
                 break
             grow_label_poses(li2 + 1)
-            w64(g_label_poses, li2*8, -1)
+            cell_store(g_label_poses, li2*8, -1)
             li2 = li2 + 1
         g_pending_count = 0
 
@@ -1874,36 +1863,17 @@ fn elf_gen(buf: string) -> int:
             if ii >= ic:
                 break
             inst_idx := ist + ii
-            // HIT table mode: mapped ops go through emit_instr_tabled. A return
-            // of -1 (unmapped, unsupported shape, or no table) falls back to
-            // emit_instr. Tagged int add/sub needs an overflow jump (jo), which
-            // the event lowering does not model, so the whole instruction takes
-            // the fallback path.
-            jo_before := g_x86_mw_jo_count
-            oc_before := g_x86_mw_oc_count
             sz : ., mut = -1
-            if hit_table_active() != 0 && mw_int_arith_jo_needed(inst_idx) == 0:
+            if hit_table_active() != 0:
                 sz = emit_instr_tabled(inst_idx, buf, cp)
             if sz < 0:
                 sz = emit_instr(inst_idx, buf, cp)
-            // If this instruction emitted a jo (at most one site per instruction,
-            // add/sub), its resume point is the instruction tail after the fast
-            // path e2_st (absolute position cp + sz). The slow-path block jumps
-            // back here; it skips the fast store and stores dest itself.
-            if g_x86_mw_jo_count > jo_before:
-                w64(g_x86_mw_jo_resume, (g_x86_mw_jo_count - 1) * 8, cp + sz)
-            // If this instruction created a 2L operand site (at most one per
-            // instruction), its block resume point is also the instruction tail,
-            // after the tag clear. The 2L block writes its own tag.
-            if g_x86_mw_oc_count > oc_before:
-                w64(g_x86_mw_oc_resume, (g_x86_mw_oc_count - 1) * 8, cp + sz)
             cp = cp + sz
             ii = ii + 1
 
-        // Epilogue and function-tail blocks (frame.cr pf_epilogue). Patch
-        // returns, fill the sub rsp immediate with save_ss, emit the epilogue
-        // (add rsp, reverse callee-saved pops with opt >= 1, pop rbp, ret), then
-        // append the jo slow-path blocks and 2L operand blocks in the cold tail.
+        // Epilogue (frame.cr pf_epilogue). Patch returns, fill the sub rsp
+        // immediate with save_ss, emit the epilogue (add rsp, reverse
+        // callee-saved pops with opt >= 1, pop rbp, ret).
         cp = pf_epilogue(save_ss, buf, cp)
         fi = fi + 1
 
@@ -1923,12 +1893,12 @@ fn elf_gen(buf: string) -> int:
         loop:
             if hri >= hri2:
                 break
-            rk := r64(g_hit_rel, hri * 24)
-            rp := r64(g_hit_rel, hri * 24 + 8)
-            rt := r64(g_hit_rel, hri * 24 + 16)
+            rk := cell_load(g_hit_rel, hri * 24)
+            rp := cell_load(g_hit_rel, hri * 24 + 8)
+            rt := cell_load(g_hit_rel, hri * 24 + 16)
             if rk == 0:
                 if rt >= 0 && rt < g_hit_ev_pos_count:
-                    tp := r64(g_hit_ev_pos, rt * 8)
+                    tp := cell_load(g_hit_ev_pos, rt * 8)
                     w32(buf, rp, tp - (rp + 4))
                 else:
                     print("  MISSING event position for rel target ordinal ")
@@ -1961,7 +1931,7 @@ fn elf_gen(buf: string) -> int:
     loop:
         if gsi >= g_ir_global_count:
             break
-        gvv := r64(g_ir_globals, gsi * 24 + 8)
+        gvv := cell_load(g_ir_globals, gsi * 24 + 8)
         if gvv >= 0 && gvv > max_gv:
             max_gv = gvv
         gsi = gsi + 1
@@ -1985,8 +1955,8 @@ fn elf_gen(buf: string) -> int:
     loop:
         if hefi >= g_x86_func_off_count:
             break
-        if str_eq(istr_get(r64(g_x86_func_offsets, hefi*16)), "heap_expand") != 0:
-            w64(g_x86_func_offsets, hefi*16+8, heap_expand_start - 176)
+        if str_eq(istr_get(cell_load(g_x86_func_offsets, hefi*16)), "heap_expand") != 0:
+            cell_store(g_x86_func_offsets, hefi*16+8, heap_expand_start - 176)
             break
         hefi = hefi + 1
 
@@ -1995,8 +1965,8 @@ fn elf_gen(buf: string) -> int:
     loop:
         if afi2 >= g_x86_func_off_count:
             break
-        if str_eq(istr_get(r64(g_x86_func_offsets, afi2*16)), istr_get(alloc_ni)) != 0:
-            w64(g_x86_func_offsets, afi2*16+8, alloc_start - 176)
+        if str_eq(istr_get(cell_load(g_x86_func_offsets, afi2*16)), istr_get(alloc_ni)) != 0:
+            cell_store(g_x86_func_offsets, afi2*16+8, alloc_start - 176)
             break
         afi2 = afi2 + 1
 
@@ -2008,7 +1978,7 @@ fn elf_gen(buf: string) -> int:
     loop:
         if api >= g_x86_alloc_patch_count:
             break
-        call_pos := r64(g_x86_alloc_patch_pos, api * 8)
+        call_pos := cell_load(g_x86_alloc_patch_pos, api * 8)
         rel := (176 + alloc_code_off) - (call_pos + 5)
         w32(buf, call_pos + 1, rel)
         api = api + 1
@@ -2018,15 +1988,15 @@ fn elf_gen(buf: string) -> int:
     // These are only used when the functions aren't compiled from user code.
     // If the user imports arena, the compiled versions in g_ir_func_name_idx take priority.
     grow_func_offsets(g_x86_func_off_count * 2 + 2)
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("arena_new"))
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, cp - 176)
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("arena_new"))
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, cp - 176)
     g_x86_func_off_count = g_x86_func_off_count + 1
     w8(buf, cp, 195)
     cp = cp + 1  // ret
 
     grow_func_offsets(g_x86_func_off_count * 2 + 2)
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("arena_reset"))
-    w64(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, cp - 176)
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16, str_intern("arena_reset"))
+    cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8, cp - 176)
     g_x86_func_off_count = g_x86_func_off_count + 1
     w8(buf, cp, 195)
     cp = cp + 1  // ret
@@ -2053,11 +2023,11 @@ fn elf_gen(buf: string) -> int:
         loop:
             if gsi2 >= g_x86_func_off_count:
                 break
-            nm2 := istr_get(r64(g_x86_func_offsets, gsi2*16))
+            nm2 := istr_get(cell_load(g_x86_func_offsets, gsi2*16))
             if str_eq(nm2, "g_set_curg") != 0:
-                w64(g_x86_func_offsets, gsi2*16+8, g_curg_stub_start - 176)
+                cell_store(g_x86_func_offsets, gsi2*16+8, g_curg_stub_start - 176)
             if str_eq(nm2, "g_get_curg") != 0:
-                w64(g_x86_func_offsets, gsi2*16+8, g_curg_stub_start - 176 + 11)
+                cell_store(g_x86_func_offsets, gsi2*16+8, g_curg_stub_start - 176 + 11)
             gsi2 = gsi2 + 1
 
     // ── Goroutine runtime stubs (fiber_init / fiber_switch / goroutine_entry_wrapper) ──
@@ -2076,6 +2046,69 @@ fn elf_gen(buf: string) -> int:
         sched_reg_one("m_start_workers", 0, cp + 15)
         cp = cp + emit_m_start_workers(buf, cp)
 
+    // ── BigInt runtime blob (--big-int) ──
+    // The generated blob is raw-core machine code plus its data.  It is placed
+    // in the code segment; --big-int marks that segment writable so the runtime's
+    // g_bi_error/g_bi_rem slots work.  All intra-blob relocations were resolved
+    // by tools/gen_bigint_blob.py; the only external calls are the four alloc
+    // sites, which are patched to the allocator emitted above.
+    if g_x86_big_enabled != 0:
+        blob := bigint_blob_bytes()
+        blob_start := cp
+        g_x86_big_blob_start = blob_start
+        bi : ., mut = 0
+        loop:
+            if bi >= BIGINT_BLOB_SIZE:
+                break
+            store8(buf, blob_start + bi, load8(blob, bi))
+            bi = bi + 1
+        cp = cp + BIGINT_BLOB_SIZE
+
+        // Register every bi_* entry so IR_CALL placeholders and the arithmetic
+        // cold paths resolve through the normal func_offsets fallback.
+        sci : ., mut = 0
+        loop:
+            if sci >= bigint_blob_symbol_count():
+                break
+            sym_name := bigint_blob_symbol_name(sci)
+            sym_off := bigint_blob_symbol(sym_name)
+            if sym_off >= 0:
+                grow_func_offsets(g_x86_func_off_count * 2 + 2)
+                cell_store(g_x86_func_offsets, g_x86_func_off_count * 16,
+                    str_intern(sym_name))
+                cell_store(g_x86_func_offsets, g_x86_func_off_count * 16 + 8,
+                    blob_start + sym_off - 176)
+                g_x86_func_off_count = g_x86_func_off_count + 1
+            sci = sci + 1
+
+        aci : ., mut = 0
+        loop:
+            if aci >= bigint_blob_alloc_count():
+                break
+            aoff := bigint_blob_alloc_off(aci)
+            call_pos := blob_start + aoff
+            // gen_bigint_blob records the relocation offset, i.e. the first byte
+            // of the call's rel32 immediate.  The call opcode is at call_pos-1.
+            w32(buf, call_pos, alloc_start - (call_pos + 4))
+            aci = aci + 1
+
+        // _start's exit conversion call was emitted before the function list
+        // reset the general call-patch table.  Resolve it explicitly now that the
+        // blob's bi_to_word_checked entry is registered.
+        if g_x86_big_exit_call_pos >= 0:
+            exi : ., mut = 0
+            loop:
+                if exi >= g_x86_func_off_count:
+                    break
+                if str_eq(istr_get(cell_load(g_x86_func_offsets, exi * 16)),
+                    "bi_to_word_checked") != 0:
+                    ex_off := cell_load(g_x86_func_offsets, exi * 16 + 8)
+                    ex_target := 176 + ex_off
+                    w32(buf, g_x86_big_exit_call_pos + 1,
+                        ex_target - (g_x86_big_exit_call_pos + 5))
+                    break
+                exi = exi + 1
+
     // ── Patch forward calls using actual cp positions ──
     // Phase 3 stored cp at start of each function in g_x86_func_cp
     // Must run after ALL code emitted (incl alloc + sched_call) so func_offsets are final
@@ -2083,15 +2116,15 @@ fn elf_gen(buf: string) -> int:
     loop:
         if cpi >= g_x86_call_patch_count:
             break
-        call_pos := r64(g_x86_call_patch_pos, cpi * 8)
-        fn_ni := r64(g_x86_call_patch_name, cpi * 8)
+        call_pos := cell_load(g_x86_call_patch_pos, cpi * 8)
+        fn_ni := cell_load(g_x86_call_patch_name, cpi * 8)
         cfi2 : ., mut = 0
         loop:
             if cfi2 >= g_ir_func_count:
                 break
-            name_at := r64(g_ir_func_name_idx, cfi2 * 8)
+            name_at := cell_load(g_ir_func_name_idx, cfi2 * 8)
             if str_eq(istr_get(name_at), istr_get(fn_ni)) != 0:
-                func_cp := r64(g_x86_func_cp, cfi2 * 8)
+                func_cp := cell_load(g_x86_func_cp, cfi2 * 8)
                 if func_cp > 0:
                     rel := func_cp - (call_pos + 5)
                     w32(buf, call_pos + 1, rel)
@@ -2103,8 +2136,8 @@ fn elf_gen(buf: string) -> int:
             loop:
                 if bfi2 >= g_x86_func_off_count:
                     break
-                if str_eq(istr_get(r64(g_x86_func_offsets, bfi2*16)), istr_get(fn_ni)) != 0:
-                    func_off := r64(g_x86_func_offsets, bfi2*16+8)
+                if str_eq(istr_get(cell_load(g_x86_func_offsets, bfi2*16)), istr_get(fn_ni)) != 0:
+                    func_off := cell_load(g_x86_func_offsets, bfi2*16+8)
                     // Safety check: target must be within emitted code
                     target_pos := 176 + func_off
                     if target_pos > 0 && target_pos < cp:
@@ -2123,16 +2156,16 @@ fn elf_gen(buf: string) -> int:
     loop:
         if fpi >= g_x86_fnaddr_patch_count:
             break
-        fp_pos := r64(g_x86_fnaddr_patch_pos, fpi * 8)
-        fn_ni := r64(g_x86_fnaddr_patch_name, fpi * 8)
+        fp_pos := cell_load(g_x86_fnaddr_patch_pos, fpi * 8)
+        fn_ni := cell_load(g_x86_fnaddr_patch_name, fpi * 8)
         fn_va : ., mut = 0
         fcfi : ., mut = 0
         loop:
             if fcfi >= g_ir_func_count:
                 break
-            name_at := r64(g_ir_func_name_idx, fcfi * 8)
+            name_at := cell_load(g_ir_func_name_idx, fcfi * 8)
             if str_eq(istr_get(name_at), istr_get(fn_ni)) != 0:
-                func_cp := r64(g_x86_func_cp, fcfi * 8)
+                func_cp := cell_load(g_x86_func_cp, fcfi * 8)
                 if func_cp > 0:
                     fn_va = TEXT_BASE + func_cp
                 break
@@ -2143,15 +2176,15 @@ fn elf_gen(buf: string) -> int:
             loop:
                 if bfi3 >= g_x86_func_off_count:
                     break
-                if str_eq(istr_get(r64(g_x86_func_offsets, bfi3*16)), istr_get(fn_ni)) != 0:
-                    func_off := r64(g_x86_func_offsets, bfi3*16+8)
+                if str_eq(istr_get(cell_load(g_x86_func_offsets, bfi3*16)), istr_get(fn_ni)) != 0:
+                    func_off := cell_load(g_x86_func_offsets, bfi3*16+8)
                     target_pos := 176 + func_off
                     if target_pos > 0 && target_pos < cp:
                         fn_va = TEXT_BASE + target_pos
                     break
                 bfi3 = bfi3 + 1
         if fn_va > 0:
-            w64(buf, fp_pos + 2, fn_va)
+            cell_store(buf, fp_pos + 2, fn_va)
         // imm64 placeholder starts after the 49 BB opcode
         fpi = fpi + 1
     g_x86_fnaddr_patch_count = 0
@@ -2173,8 +2206,8 @@ fn elf_gen(buf: string) -> int:
     loop:
         if rri >= g_x86_rodataref_count:
             break
-        lea_pos := r64(g_x86_rodataref_pos, rri * 8)
-        ro_off := r64(g_x86_rodataref_ro, rri * 8)
+        lea_pos := cell_load(g_x86_rodataref_pos, rri * 8)
+        ro_off := cell_load(g_x86_rodataref_ro, rri * 8)
         rel := g_x86_rodata_base + ro_off - (lea_pos + 7)
         w32(buf, lea_pos + 3, rel)
         rri = rri + 1
@@ -2185,10 +2218,10 @@ fn elf_gen(buf: string) -> int:
     loop:
         if si >= g_x86_str_count:
             break
-        s := istr_get(r64(g_x86_str_offs, si * 8))
+        s := istr_get(cell_load(g_x86_str_offs, si * 8))
         sl := str_len(s)
         // Write 8-byte length header (sl + null) so str_len via load64(s,-8) works
-        w64(buf, cp, sl + 1)
+        cell_store(buf, cp, sl + 1)
         cp = cp + 8
         ci := 0
         loop:
@@ -2213,8 +2246,8 @@ fn elf_gen(buf: string) -> int:
     loop:
         if hpr >= g_hit_pool_patch_count:
             break
-        pp := r64(g_hit_pool_patch, hpr * 16)
-        pk := r64(g_hit_pool_patch, hpr * 16 + 8)
+        pp := cell_load(g_hit_pool_patch, hpr * 16)
+        pk := cell_load(g_hit_pool_patch, hpr * 16 + 8)
         rel := cp + pk * 8 - (pp + 7)
         w32(buf, pp + 3, rel)
         hpr = hpr + 1
@@ -2223,7 +2256,7 @@ fn elf_gen(buf: string) -> int:
     loop:
         if hpk >= g_hit_pool_count:
             break
-        w64(buf, cp + hpk * 8, r64(g_hit_pool, hpk * 8))
+        cell_store(buf, cp + hpk * 8, cell_load(g_hit_pool, hpk * 8))
         hpk = hpk + 1
     cp = cp + g_hit_pool_count * 8
 
@@ -2257,10 +2290,10 @@ fn elf_gen(buf: string) -> int:
     loop:
         if gi2 >= g_ir_global_count:
             break
-        gv2 := r64(g_ir_globals, gi2 * 24 + 8)
+        gv2 := cell_load(g_ir_globals, gi2 * 24 + 8)
         if gv2 >= 0:
             grow_global_off(gv2 + 1)
-            w64(g_x86_global_off, gv2 * 8, goff)
+            cell_store(g_x86_global_off, gv2 * 8, goff)
             goff = goff + 8
         gi2 = gi2 + 1
 
@@ -2269,8 +2302,8 @@ fn elf_gen(buf: string) -> int:
     loop:
         if rpi2 >= g_x86_rip_patch_count:
             break
-        ppos := r64(g_x86_rip_patch_pos, rpi2 * 8)
-        gvi := r64(g_x86_rip_patch_globals, rpi2 * 8)
+        ppos := cell_load(g_x86_rip_patch_pos, rpi2 * 8)
+        gvi := cell_load(g_x86_rip_patch_globals, rpi2 * 8)
         // Verify: buffer at ppos-3 should contain LEA prefix (0x4C or 0x4D for REX.WR/WRB)
         lea_check := bu8(buf, ppos - 3)
         if lea_check != 72 && lea_check != 73 && lea_check != 76 && lea_check != 77 && lea_check != 74 && lea_check != 78 && lea_check != 79 && lea_check != 75:
@@ -2284,7 +2317,7 @@ fn elf_gen(buf: string) -> int:
             println(int_str(lea_check))
         if gvi >= 0:
             lea_end_va := TEXT_BASE + ppos + 4
-            off := r64(g_x86_global_off, gvi * 8)
+            off := cell_load(g_x86_global_off, gvi * 8)
             target_va := bss_va + 16 + off
             rel := target_va - lea_end_va
             w32(buf, ppos, rel)
@@ -2315,8 +2348,8 @@ fn elf_gen(buf: string) -> int:
     loop:
         if bfi3 >= g_x86_func_off_count:
             break
-        if str_eq(istr_get(r64(g_x86_func_offsets, bfi3*16)), "main") != 0:
-            mo = r64(g_x86_func_offsets, bfi3*16+8)
+        if str_eq(istr_get(cell_load(g_x86_func_offsets, bfi3*16)), "main") != 0:
+            mo = cell_load(g_x86_func_offsets, bfi3*16+8)
             break
         bfi3 = bfi3 + 1
     // Debug: find ALL entries named "main"
@@ -2324,9 +2357,9 @@ fn elf_gen(buf: string) -> int:
     loop:
         if bfi4 >= g_x86_func_off_count:
             break
-        nm := istr_get(r64(g_x86_func_offsets, bfi4*16))
+        nm := istr_get(cell_load(g_x86_func_offsets, bfi4*16))
         if str_eq(nm, "main") != 0:
-            off := r64(g_x86_func_offsets, bfi4*16+8)
+            off := cell_load(g_x86_func_offsets, bfi4*16+8)
             print("  main at [")
             print(int_str(bfi4))
             print("] off=")
@@ -2379,12 +2412,17 @@ fn elf_gen(buf: string) -> int:
     total_sz := cp
     // Use actual total_sz as code_end so code segment covers all emitted content
     elf2_hdr(buf, total_sz, total_sz)
+    if g_x86_big_enabled != 0:
+        // The BigInt blob carries a few writable runtime words in the code
+        // segment.  Mark that PT_LOAD RWX instead of adding another segment;
+        // user code itself remains the only executable content.
+        w32(buf, EHDR_SIZE + 4, 7)
     // Override entry point to bss_init (which zeroes heap then jumps to _start)
-    w64(buf, E_ENTRY, TEXT_BASE + bss_init_cp)
+    cell_store(buf, E_ENTRY, TEXT_BASE + bss_init_cp)
     // Patch data segment VA to match bss_va (page after code+rodata)
     data_phdr_base := EHDR_SIZE + PHDR_SIZE
-    w64(buf, data_phdr_base + P_OFFSET, bss_va - TEXT_BASE)
-    w64(buf, data_phdr_base + P_VADDR, bss_va)
-    w64(buf, data_phdr_base + P_PADDR, bss_va)
+    cell_store(buf, data_phdr_base + P_OFFSET, bss_va - TEXT_BASE)
+    cell_store(buf, data_phdr_base + P_VADDR, bss_va)
+    cell_store(buf, data_phdr_base + P_PADDR, bss_va)
     g_asm_code_size = total_sz
     return total_sz

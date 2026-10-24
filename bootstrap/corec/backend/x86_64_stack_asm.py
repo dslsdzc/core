@@ -17,14 +17,35 @@ from corec.syntax.ast import ArrayType, BaseType, PathType
 
 
 class X86_64StackAsmGen:
-    def __init__(self, module: Module):
+    def __init__(self, module: Module, bigint_mode: bool = False, runtime_only: bool = False):
         self.module = module
+        self.bigint_mode = bigint_mode
+        self.runtime_only = runtime_only
         self.lines = []
         self.str_labels = []      # [(label_id, string_value)]
         self.str_map = {}         # string_value -> label_id
+        self.big_labels = []      # [(label_id, int_value)]
+        self.big_map = {}         # int_value -> label_id
+        self._uid = 0
         # Per-function state
         self.var_offsets = {}     # var_id -> stack offset (negative from rbp)
         self.stack_size = 0
+
+    def _next_uid(self) -> int:
+        self._uid += 1
+        return self._uid
+
+    def _is_int_var(self, var: IRVar) -> bool:
+        return isinstance(var.type, BaseType) and var.type.name == 'int'
+
+    def _big_label(self, value: int) -> str:
+        if value in self.big_map:
+            return f".LBIG{self.big_map[value]}"
+        idx = len(self.big_labels)
+        self.big_labels.append((idx, value))
+        self.big_map[value] = idx
+        return f".LBIG{idx}"
+
 
     def _elem_size(self, typ) -> int:
         """Compute the element size (in bytes) for an array element type."""
@@ -140,6 +161,32 @@ class X86_64StackAsmGen:
             self.emit(f"    lea r10, .LC{lid}[rip]")
             self._clobber_cache()
             self.emit(f"    mov {ref}, r10")
+        elif instr.type == 'raw_int':
+            raw = int(instr.value)
+            if raw >= -(2**31) and raw < 2**31:
+                self.emit(f"    mov qword ptr {ref}, {raw}")
+            else:
+                self.emit(f"    mov r10, {raw}")
+                self._clobber_cache()
+                self.emit(f"    mov {ref}, r10")
+        elif self.bigint_mode and (instr.type == 'int' or instr.type is None):
+            iv = int(instr.value)
+            imm_min = -(2**62)
+            imm_max = 2**62 - 1
+            if iv >= imm_min and iv <= imm_max:
+                raw = iv * 2
+                if raw >= -(2**31) and raw < 2**31:
+                    self.emit(f"    mov qword ptr {ref}, {raw}")
+                else:
+                    self.emit(f"    mov r10, {raw}")
+                    self._clobber_cache()
+                    self.emit(f"    mov {ref}, r10")
+            else:
+                lbl = self._big_label(iv)
+                self.emit(f"    lea r10, {lbl}[rip]")
+                self.emit("    add r10, 1")
+                self._clobber_cache()
+                self.emit(f"    mov {ref}, r10")
         else:
             val = instr.value
             if isinstance(val, float):
@@ -157,7 +204,112 @@ class X86_64StackAsmGen:
         self.emit(asm)
         self._clobber_r10()
 
+    def _gen_int_binary(self, instr: BinaryInstr):
+        """Tagged integer fast path with BigInt fallback."""
+        op = instr.op
+        uid = self._next_uid()
+        big = f".Lint_big_{uid}"
+        done = f".Lint_done_{uid}"
+        self.load_to_r10(instr.left)
+        self.load_to_r11(instr.right)
+        self.emit("    test r10, 1")
+        self.emit(f"    jnz {big}")
+        self.emit("    test r11, 1")
+        self.emit(f"    jnz {big}")
+        self.emit("    sar r10, 1")
+        self.emit("    sar r11, 1")
+        imm_min = -(2**62)
+        imm_max = 2**62 - 1
+        if op in ('+', '-', '*'):
+            if op == '+':
+                self.emit("    add r10, r11")
+            elif op == '-':
+                self.emit("    sub r10, r11")
+            else:
+                self.emit("    imul r10, r11")
+            self.emit(f"    jo {big}")
+            self.emit(f"    mov r11, {imm_min}")
+            self.emit("    cmp r10, r11")
+            self.emit(f"    jl {big}")
+            self.emit(f"    mov r11, {imm_max}")
+            self.emit("    cmp r10, r11")
+            self.emit(f"    jg {big}")
+            self.emit("    add r10, r10")
+            self.store_from_r10(instr.dest)
+            self.emit(f"    jmp {done}")
+        elif op in ('/', '%'):
+            self.emit("    test r11, r11")
+            self.emit(f"    jz {big}")
+            self.emit(f"    mov rax, {imm_min}")
+            self.emit("    cmp r10, rax")
+            self.emit(f"    jne .Lint_div_ok_{uid}")
+            self.emit("    cmp r11, -1")
+            self.emit(f"    je {big}")
+            self.emit(f".Lint_div_ok_{uid}:")
+            self.emit("    mov rax, r10")
+            self.emit("    cqo")
+            self.emit("    idiv r11")
+            if op == '/':
+                self.emit("    mov r10, rax")
+            else:
+                self.emit("    mov r10, rdx")
+            self.emit("    add r10, r10")
+            self.store_from_r10(instr.dest)
+            self.emit(f"    jmp {done}")
+        else:
+            cmp_op = {
+                '==': 'sete', '!=': 'setne', '<': 'setl', '>': 'setg',
+                '<=': 'setle', '>=': 'setge',
+            }[op]
+            self.emit("    cmp r10, r11")
+            self.emit(f"    {cmp_op} al")
+            self.emit("    movzx r10, al")
+            self.store_from_r10(instr.dest)
+            self.emit(f"    jmp {done}")
+        self.emit(f"{big}:")
+        self.emit(f"    mov rdi, {self._ref(instr.left)}")
+        self.emit(f"    mov rsi, {self._ref(instr.right)}")
+        if op in ('==', '!=', '<', '>', '<=', '>='):
+            self.emit("    call bi_cmp")
+            self._clobber_regs()
+            self.emit("    sar rax, 1")
+            self.emit("    cmp rax, 0")
+            cmp_op = {
+                '==': 'sete', '!=': 'setne', '<': 'setl', '>': 'setg',
+                '<=': 'setle', '>=': 'setge',
+            }[op]
+            self.emit(f"    {cmp_op} al")
+            self.emit("    movzx r10, al")
+        else:
+            fn = {'+': 'bi_add', '-': 'bi_sub', '*': 'bi_mul', '/': 'bi_div', '%': 'bi_mod'}[op]
+            self.emit(f"    call {fn}")
+            self._clobber_regs()
+            self.emit("    mov r10, rax")
+        self.store_from_r10(instr.dest)
+        self.emit(f"{done}:")
+
     def gen_binary(self, instr: BinaryInstr):
+        if self.bigint_mode and instr.op in ('raw_add', 'raw_sub', 'raw_and', 'tag_word', 'untag_word'):
+            self.load_to_r10(instr.left)
+            if instr.op in ('raw_add', 'raw_sub', 'raw_and'):
+                self.load_to_r11(instr.right)
+            if instr.op == 'raw_add':
+                self.emit("    add r10, r11")
+            elif instr.op == 'raw_sub':
+                self.emit("    sub r10, r11")
+            elif instr.op == 'raw_and':
+                self.emit("    and r10, r11")
+            elif instr.op == 'tag_word':
+                self.emit("    add r10, r10")
+            else:
+                self.emit("    sar r10, 1")
+            self.store_from_r10(instr.dest)
+            return
+        if (self.bigint_mode and
+                instr.op in ('+', '-', '*', '/', '%', '==', '!=', '<', '>', '<=', '>=') and
+                self._is_int_var(instr.left) and self._is_int_var(instr.right)):
+            self._gen_int_binary(instr)
+            return
         self.load_to_r10(instr.left)
         self.load_to_r11(instr.right)
         op = instr.op
@@ -165,6 +317,8 @@ class X86_64StackAsmGen:
             if op in ('==', '!='):
                 self.emit(f"    mov rdi, r10"); self.emit(f"    mov rsi, r11")
                 self.emit("    call str_eq"); self._clobber_regs()
+                if self.bigint_mode:
+                    self.emit("    sar rax, 1")
                 if op == '==': self.emit(f"    mov {self._ref(instr.dest)}, rax")
                 else:
                     self.emit("    cmp rax, 1")
@@ -173,6 +327,8 @@ class X86_64StackAsmGen:
             else:
                 self.emit(f"    mov rdi, r10"); self.emit(f"    mov rsi, r11")
                 self.emit("    call str_cmp"); self._clobber_regs()
+                if self.bigint_mode:
+                    self.emit("    sar rax, 1")
                 self.emit("    cmp rax, 0")
                 asm = {"<":"    setl al\n    movzx r10, al",">":"    setg al\n    movzx r10, al","<=":"    setle al\n    movzx r10, al",">=":"    setge al\n    movzx r10, al"}
                 if op in asm: self._alu_clobber(asm[op])
@@ -212,7 +368,34 @@ class X86_64StackAsmGen:
     def gen_unary(self, instr: UnaryInstr):
         self.load_to_r10(instr.operand)
         if instr.op == '-':
-            self._alu_clobber("    neg r10")
+            if self.bigint_mode and self._is_int_var(instr.operand):
+                uid = self._next_uid()
+                big = f".Lneg_big_{uid}"
+                done = f".Lneg_done_{uid}"
+                self.emit("    test r10, 1")
+                self.emit(f"    jnz {big}")
+                self.emit("    sar r10, 1")
+                imm_min = -(2**62)
+                imm_max = 2**62 - 1
+                self.emit(f"    mov r11, {imm_min}")
+                self.emit("    cmp r10, r11")
+                self.emit(f"    je {big}")
+                self.emit("    neg r10")
+                self.emit(f"    mov r11, {imm_max}")
+                self.emit("    cmp r10, r11")
+                self.emit(f"    jg {big}")
+                self.emit("    add r10, r10")
+                self.store_from_r10(instr.dest)
+                self.emit(f"    jmp {done}")
+                self.emit(f"{big}:")
+                self.emit(f"    mov rdi, {self._ref(instr.operand)}")
+                self.emit("    call bi_neg")
+                self._clobber_regs()
+                self.emit("    mov r10, rax")
+                self.store_from_r10(instr.dest)
+                self.emit(f"{done}:")
+            else:
+                self._alu_clobber("    neg r10")
         elif instr.op == 'not' or instr.op == '!':
             self.emit("    cmp r10, 0")
             self._alu_clobber("    sete al\n    movzx r10, al")
@@ -230,35 +413,104 @@ class X86_64StackAsmGen:
         for i in reversed(range(6, len(instr.args))):
             self.emit(f"    push {self._ref(instr.args[i])}")
         # ── Inline hot helper functions (avoids call overhead for millions of calls) ──
+        if instr.func == 'get_arg':
+            if self.bigint_mode:
+                self.emit("    sar rdi, 1")
+            self.emit("    call get_arg")
+            self._clobber_regs()
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+            if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
+            return
+        if instr.func == 'str_len':
+            self.emit("    mov rax, [rdi - 8]")
+            self.emit("    sub rax, 1")
+            if self.bigint_mode:
+                self.emit("    add rax, rax")
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+            if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
+            return
+        if instr.func == 'alloc':
+            if self.bigint_mode:
+                self.emit("    sar rdi, 1")
+            self.emit("    call alloc")
+            self._clobber_regs()
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+            if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
+            return
+        if instr.func == 'load64':
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
+            self.emit("    mov rax, [rdi + rsi]")
+            if self.bigint_mode:
+                self.emit("    add rax, rax")
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+            if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
+            return
+        if instr.func == 'load_str_ptr':
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
+            self.emit("    mov rax, [rdi + rsi]")
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+            if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
+            return
+        if instr.func == 'store_str_ptr':
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
+            self.emit("    mov [rdi + rsi], rdx")
+            if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
+            return
         if instr.func == 'r64':
             # r64(buf, pos) → read 8 bytes
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
             self.emit("    mov rax, [rdi + rsi]")
+            if self.bigint_mode:
+                self.emit("    add rax, rax")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
             if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
         elif instr.func == 'w64':
             # w64(buf, pos, val) → write 8 bytes
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
+                self.emit("    sar rdx, 1")
             self.emit("    mov [rdi + rsi], rdx")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
         elif instr.func == 'r32':
             # r32(buf, pos) → read 4 bytes (zero-extended)
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
             self.emit("    mov eax, [rdi + rsi]")
+            if self.bigint_mode:
+                self.emit("    add rax, rax")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
             if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
         elif instr.func == 'w32':
             # w32(buf, pos, val) → write 4 bytes
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
+                self.emit("    sar rdx, 1")
             self.emit("    mov [rdi + rsi], edx")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
         elif instr.func == 'bu8':
             # bu8(buf, pos) → read 1 byte (zero-extended)
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
             self.emit("    movzx eax, BYTE PTR [rdi + rsi]")
+            if self.bigint_mode:
+                self.emit("    add rax, rax")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
             if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
         elif instr.func == 'w8':
             # w8(buf, pos, val) → write 1 byte
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
+                self.emit("    sar rdx, 1")
             self.emit("    mov BYTE PTR [rdi + rsi], dl")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
         elif instr.func == '_dyncpy':
             # _dyncpy(src, nbytes, dst) → memcpy via rep movsb
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
             self.emit("    mov rcx, rsi")    # rcx = byte count
             self.emit("    mov rsi, rdi")    # rsi = source
             self.emit("    mov rdi, rdx")    # rdi = dest
@@ -268,31 +520,50 @@ class X86_64StackAsmGen:
         elif instr.func == 'syscall3':
             # Inline syscall: after arg setup rdi=nr, rsi=arg1, rdx=arg2, rcx=arg3
             # Need: rax=nr, rdi=arg1, rsi=arg2, rdx=arg3
+            if self.bigint_mode:
+                for reg, arg in zip(['rdi', 'rsi', 'rdx', 'rcx'], instr.args[:4]):
+                    if self._is_int_var(arg):
+                        self.emit(f"    sar {reg}, 1")
             self.emit("    mov rax, rdi")
             self.emit("    mov rdi, rsi")
             self.emit("    mov rsi, rdx")
             self.emit("    mov rdx, rcx")
             self.emit("    syscall")
+            if self.bigint_mode:
+                self.emit("    add rax, rax")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
             if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
         elif instr.func == 'syscall4':
             # syscall4(num, a, b, c, d): rdi=nr, rsi=a, rdx=b, rcx=c, r8=d
             # Need: rax=nr, rdi=a, rsi=b, rdx=c, r10=d (x86-64: 4th syscall arg in r10)
+            if self.bigint_mode:
+                for reg, arg in zip(['rdi', 'rsi', 'rdx', 'rcx', 'r8'], instr.args[:5]):
+                    if self._is_int_var(arg):
+                        self.emit(f"    sar {reg}, 1")
             self.emit("    mov rax, rdi")
             self.emit("    mov rdi, rsi")
             self.emit("    mov rsi, rdx")
             self.emit("    mov rdx, rcx")
             self.emit("    mov r10, r8")
             self.emit("    syscall")
+            if self.bigint_mode:
+                self.emit("    add rax, rax")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
             if instr.dest: self.emit(f"    mov {self._ref(instr.dest)}, rax")
         elif instr.func == 'load8':
             # load8(string_ptr, idx) → byte at ptr+idx (zero-extended)
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
             self.emit("    movzx rax, BYTE PTR [rdi + rsi]")
+            if self.bigint_mode:
+                self.emit("    add rax, rax")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
             if instr.dest: self.emit(f"    mov qword ptr {self._ref(instr.dest)}, rax")
         elif instr.func == 'store8':
             # store8(string_ptr, idx, val) → store low byte of val at ptr+idx
+            if self.bigint_mode:
+                self.emit("    sar rsi, 1")
+                self.emit("    sar rdx, 1")
             self.emit("    mov BYTE PTR [rdi + rsi], dl")
             if stack_args > 0: self.emit(f"    add rsp, {stack_args * 8}")
             if instr.dest: self.emit(f"    mov qword ptr {self._ref(instr.dest)}, 0")
@@ -356,6 +627,8 @@ class X86_64StackAsmGen:
         self.load_to_r10(instr.array)
         if self._is_string_var(instr.array):
             self.emit(f"    movzx r11, byte ptr [r10 + {instr.index}]")
+            if self.bigint_mode:
+                self.emit("    add r11, r11")
         else:
             self.emit(f"    mov r11, [r10 + {instr.index * 8}]")
         self.emit(f"    mov {self._ref(instr.dest)}, r11")
@@ -364,6 +637,8 @@ class X86_64StackAsmGen:
         self.load_to_r10(instr.array)
         self.emit(f"    mov r11, {self._ref(instr.value)}")
         if self._is_string_var(instr.array):
+            if self.bigint_mode:
+                self.emit("    sar r11, 1")
             self.emit(f"    mov [r10 + {instr.index}], r11b")
         else:
             self.emit(f"    mov [r10 + {instr.index * 8}], r11")
@@ -371,8 +646,12 @@ class X86_64StackAsmGen:
     def gen_load_index_var(self, instr: LoadIndexVarInstr):
         self.load_to_r10(instr.array)
         self.emit(f"    mov r11, {self._ref(instr.index_var)}")
+        if self.bigint_mode:
+            self.emit("    sar r11, 1")
         if self._is_string_var(instr.array):
             self.emit("    movzx r12, byte ptr [r10 + r11]")
+            if self.bigint_mode:
+                self.emit("    add r12, r12")
         else:
             self.emit("    mov r12, [r10 + r11 * 8]")
         self.emit(f"    mov {self._ref(instr.dest)}, r12")
@@ -380,8 +659,12 @@ class X86_64StackAsmGen:
     def gen_store_index_var(self, instr: StoreIndexVarInstr):
         self.load_to_r10(instr.array)
         self.emit(f"    mov r11, {self._ref(instr.index_var)}")
+        if self.bigint_mode:
+            self.emit("    sar r11, 1")
         self.emit(f"    mov r12, {self._ref(instr.value)}")
         if self._is_string_var(instr.array):
+            if self.bigint_mode:
+                self.emit("    sar r12, 1")
             self.emit("    mov [r10 + r11], r12b")
         else:
             self.emit("    mov [r10 + r11 * 8], r12")
@@ -573,6 +856,8 @@ class X86_64StackAsmGen:
         self.lines = []
         self.str_labels = []
         self.str_map = {}
+        self.big_labels = []
+        self.big_map = {}
 
         self.emit(".intel_syntax noprefix")
         self.emit(".text")
@@ -607,6 +892,24 @@ class X86_64StackAsmGen:
                 self.emit(f".LC{lid}: .asciz \"{escaped}\"")
                 self.emit(".balign 8")
 
+        if self.big_labels:
+            self.emit(".section .rodata")
+            self.emit(".balign 8")
+            base = 2**30
+            for lid, value in self.big_labels:
+                sign = 0 if value == 0 else (1 if value > 0 else -1)
+                mag = abs(value)
+                digits = []
+                while mag:
+                    digits.append(mag % base)
+                    mag //= base
+                self.emit(f".LBIG{lid}:")
+                self.emit(f"    .quad {sign}")
+                self.emit(f"    .quad {len(digits)}")
+                for d in digits:
+                    self.emit(f"    .quad {d}")
+                self.emit(".balign 8")
+
         # Global variables in .data section
         # Collect unique global IRVars from the module
         global_vars: dict[str, IRVar] = {}
@@ -623,6 +926,13 @@ class X86_64StackAsmGen:
                 self.emit(f".globl {lbl}")
                 cv = getattr(g, 'constant_value', None)
                 if cv is not None:
+                    if (self.bigint_mode and isinstance(g.type, BaseType)
+                            and g.type.name == 'int'):
+                        iv = int(cv)
+                        imm_min = -(2**62)
+                        imm_max = 2**62 - 1
+                        if iv >= imm_min and iv <= imm_max:
+                            cv = iv * 2
                     self.emit(f"{lbl}: .quad {cv}")
                 else:
                     self.emit(f"{lbl}: .quad 0")
@@ -630,6 +940,8 @@ class X86_64StackAsmGen:
         # Global initialization function — allocate heap memory for global arrays
         # (g_tokens, g_ir_vars, etc.) so they're not NULL when code accesses them.
         # Always emitted because rt.s's _start unconditionally calls _init_globals.
+        if self.runtime_only:
+            return "\n".join(self.lines)
         global_arrays = [g for g in self.module.globals
                          if g.kind == VarKind.GLOBAL and isinstance(g.type, ArrayType) and g.type.size]
         self.emit()

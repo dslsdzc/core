@@ -121,6 +121,19 @@ class TypeChecker:
                 self.errors.append(f"@{expr.name} expects a {want} expression, got {at}")
                 return BaseType('never')
             return result
+        if expr.name in ('raw_add', 'raw_sub', 'raw_and'):
+            if self.unsafe_depth == 0:
+                self.errors.append(f"@{expr.name} must appear inside an `unsafe` block")
+                return BaseType('never')
+            if len(expr.args) != 2:
+                self.errors.append(f"@{expr.name} expects exactly 2 arguments")
+                return BaseType('never')
+            for arg in expr.args:
+                at = self._infer_expr(arg)
+                if self._type_name(at) != 'int':
+                    self.errors.append(f"@{expr.name} expects int arguments, got {at}")
+                    return BaseType('never')
+            return BaseType('int')
         self.errors.append(f"unknown @ builtin: {expr.name}")
         return BaseType('never')
 
@@ -571,7 +584,7 @@ class TypeChecker:
     def _infer_call(self, call: Call) -> Type:
         # Handle runtime functions (defined in rt.s, no decl node)
         rt_funcs = {'alloc', 'get_arg', 'syscall3', 'syscall4', 'fiber_init', 'fiber_switch',
-                    'load8', 'store8',
+                    'load8', 'store8', 'r64', 'w64', 'str_len',
                     'load_str_ptr', 'store_str_ptr',
                     'g_set_curg', 'g_get_curg', 'm_start_workers'}
         if isinstance(call.func, Ident) and call.func.name in rt_funcs:

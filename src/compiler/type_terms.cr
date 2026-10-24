@@ -22,31 +22,24 @@ TT_VAR : int = 8
 TT_NIL : int = 9
 TT_CONS : int = 10
 
-// 条目 = 48B，六字段各 8B（与 g_ir_entries 同风格：字节缓冲 + 偏移常量）
-ESZ_TYPE_TERM : int = 48
-OFF_TT_TAG : int = 0
-OFF_TT_A : int = 8
-OFF_TT_B : int = 16
-OFF_TT_C : int = 24
-OFF_TT_D : int = 32
-OFF_TT_HASH : int = 40
+// 条目布局常量（ESZ_TYPE_TERM、OFF_TT_*）在 ccr_schema.cr。条目为六字段各 8B
+// （与 g_ir_entries 同风格：字节缓冲 + 偏移常量）。
 
 // Disk term record in TYPE(7): 5 * i64 = 40B {tag, a, b, c, d}. The in-memory
 // hash slot is omitted because it is a pure function of the five fields; the
 // loader recomputes it with tt_hash5. Field width is 8B, matching memory.
-ESZ_TYPE_TERM_DISK : int = 40
 
 // ─── 访问器（i = 类型项行号；调用方保证 0 ≤ i < tt_count()）───
 fn tt_tag(i: int) -> int:
-    return r64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_TAG)
+    return cell_load(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_TAG)
 fn tt_a(i: int) -> int:
-    return r64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_A)
+    return cell_load(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_A)
 fn tt_b(i: int) -> int:
-    return r64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_B)
+    return cell_load(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_B)
 fn tt_c(i: int) -> int:
-    return r64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_C)
+    return cell_load(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_C)
 fn tt_d(i: int) -> int:
-    return r64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_D)
+    return cell_load(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_D)
 fn tt_count() -> int:
     return g_type_term_count
 
@@ -115,7 +108,7 @@ fn grow_type_terms(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * ESZ_TYPE_TERM)
-    _dyncpy(g_type_terms, g_type_term_cap * ESZ_TYPE_TERM, nb)
+    cell_copy(g_type_terms, g_type_term_cap * ESZ_TYPE_TERM, nb)
     g_type_terms = nb
     g_type_term_cap = nc
 
@@ -139,7 +132,7 @@ fn grow_tt_index(needed: int):
     loop:
         if i >= nc:
             break
-        w64(nb, i * 8, -1)
+        cell_store(nb, i * 8, -1)
         i = i + 1
     g_tt_index = nb
     g_tt_index_cap = nc
@@ -152,16 +145,16 @@ fn tt_reindex():
     loop:
         if i >= g_type_term_count:
             break
-        h := r64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_HASH)
+        h := cell_load(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_HASH)
         cap := g_tt_index_cap
         p : ., mut = tt_mod(h, cap)
         loop:
-            if r64(g_tt_index, p * 8) < 0:
+            if cell_load(g_tt_index, p * 8) < 0:
                 break
             p = p + 1
             if p >= cap:
                 p = 0
-        w64(g_tt_index, p * 8, i)
+        cell_store(g_tt_index, p * 8, i)
         g_tt_index_count = g_tt_index_count + 1
         i = i + 1
 
@@ -224,7 +217,7 @@ fn tt_term(tag: int, a: int, b: int, c: int, d: int) -> int:
         cap := g_tt_index_cap
         p : ., mut = tt_mod(h, cap)
         loop:
-            idx := r64(g_tt_index, p * 8)
+            idx := cell_load(g_tt_index, p * 8)
             if idx < 0:
                 break
             // Key comparison uses all five fields. The stored hash is not part of
@@ -241,14 +234,14 @@ fn tt_term(tag: int, a: int, b: int, c: int, d: int) -> int:
         // 未命中：追加新项，写入本轮探测到的空槽（轮内索引未被改动）
         grow_type_terms(g_type_term_count + 1)
         i := g_type_term_count
-        w64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_TAG, tag)
-        w64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_A, a)
-        w64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_B, b)
-        w64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_C, c)
-        w64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_D, d)
-        w64(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_HASH, h)
+        cell_store(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_TAG, tag)
+        cell_store(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_A, a)
+        cell_store(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_B, b)
+        cell_store(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_C, c)
+        cell_store(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_D, d)
+        cell_store(g_type_terms, i * ESZ_TYPE_TERM + OFF_TT_HASH, h)
         g_type_term_count = i + 1
-        w64(g_tt_index, p * 8, i)
+        cell_store(g_tt_index, p * 8, i)
         g_tt_index_count = g_tt_index_count + 1
         ret = i
         break

@@ -70,11 +70,11 @@ fn kern_new(k: int) -> int:
     if g_kernel_count * 5 + 5 > KERNEL_SLOTS:
         return -1
     i := g_kernel_count * 5
-    w64(g_kernel_nodes, i * 8, k)
-    w64(g_kernel_nodes, (i + 1) * 8, 0)
-    w64(g_kernel_nodes, (i + 2) * 8, 0)
-    w64(g_kernel_nodes, (i + 3) * 8, 0)
-    w64(g_kernel_nodes, (i + 4) * 8, 0)
+    cell_store(g_kernel_nodes, i * 8, k)
+    cell_store(g_kernel_nodes, (i + 1) * 8, 0)
+    cell_store(g_kernel_nodes, (i + 2) * 8, 0)
+    cell_store(g_kernel_nodes, (i + 3) * 8, 0)
+    cell_store(g_kernel_nodes, (i + 4) * 8, 0)
     g_kernel_count = g_kernel_count + 1
     return i
 
@@ -82,12 +82,12 @@ fn kern_set(n: int, slot: int, v: int):
     if n < 0:
         return
     // Return early for a failed allocation; writing would overwrite node 0.
-    w64(g_kernel_nodes, (n + slot) * 8, v)
+    cell_store(g_kernel_nodes, (n + slot) * 8, v)
 
 fn kern_get(n: int, slot: int) -> int:
     if n < 0:
         return -1
-    return r64(g_kernel_nodes, (n + slot) * 8)
+    return cell_load(g_kernel_nodes, (n + slot) * 8)
 
 // Parse state.
 g_kernel_parse_pos : int, mut = 0

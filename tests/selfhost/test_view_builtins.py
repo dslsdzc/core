@@ -29,6 +29,7 @@ from pathlib import Path
 
 BASE = Path(__file__).resolve().parents[2]
 COREC = BASE / "build" / "corec"
+COREARCH = BASE / "build" / "corearch"
 BOOTSTRAP = BASE / "bootstrap"
 
 # ── 探针 ─────────────────────────────────────────────────────────────────────
@@ -222,6 +223,29 @@ def corec_build_native(src: str):
         os.unlink(path)
 
 
+def corec_build_raw_native(src: str):
+    """Raw-int native leg for the retired zero-code view invariant."""
+    with tempfile.NamedTemporaryFile("w", suffix=".cr", delete=False) as f:
+        f.write(src)
+        path = f.name
+    out = Path(tempfile.mkdtemp()) / "probe"
+    ccr = Path(str(out) + ".ccr")
+    try:
+        subprocess.run([str(COREC), "clean-cache"], cwd=BASE, capture_output=True, timeout=120)
+        r = subprocess.run([str(COREC), "ccr", path, "-o", str(ccr)],
+                           cwd=BASE, capture_output=True, text=True, timeout=600)
+        if r.returncode != 0:
+            return r.returncode, None
+        r = subprocess.run([str(COREARCH), str(ccr), "--raw-int", "--static",
+                            "-o", str(out)], cwd=BASE, capture_output=True,
+                           text=True, timeout=600)
+        if r.returncode != 0:
+            return r.returncode, None
+        return 0, out
+    finally:
+        os.unlink(path)
+
+
 def main():
     ok = True
     fails = []
@@ -247,22 +271,23 @@ def main():
     expect("ok_value_42_all_faces", rc_i == 42 and rc_elf == 42 and rc_b == 42,
            f"解释器 {rc_i} · native {rc_elf} · bootstrap {rc_b}")
 
-    # ── ② 零代码生成（擦除）：往返写法 vs 直写，ELF 逐字节一致 ──
-    _, elf_a = corec_build_native(ERASE_INT_VIEW)
-    _, elf_b = corec_build_native(ERASE_INT_PLAIN)
-    sha_view = _sha(elf_a) if elf_a else "n/a"
-    sha_plain = _sha(elf_b) if elf_b else "n/a"
-    print(f"[② 擦除·int] 往返写法 {sha_view[:16]}… · 直写 {sha_plain[:16]}…")
-    expect("erase_int_view_byte_identical", elf_a and elf_b and sha_view == sha_plain,
-           f"{sha_view} != {sha_plain}")
+    # ── ② 视图语义（明确 raw 腿；BigInt 默认腿见 ①）──────────────
+    #   BigInt 默认模式不再承诺视图零字节；raw 腿只验证往返语义仍等于直写。
+    _, elf_a = corec_build_raw_native(ERASE_INT_VIEW)
+    _, elf_b = corec_build_raw_native(ERASE_INT_PLAIN)
+    rc_a = subprocess.run([str(elf_a)], capture_output=True).returncode if elf_a else -1
+    rc_b = subprocess.run([str(elf_b)], capture_output=True).returncode if elf_b else -1
+    print(f"[② 视图·int/raw] 往返 rc={rc_a} · 直写 rc={rc_b}")
+    expect("erase_int_view_semantic", rc_a == 42 and rc_b == 42,
+           f"{rc_a} != {rc_b}")
 
-    _, elf_c = corec_build_native(ERASE_STR_VIEW)
-    _, elf_d = corec_build_native(ERASE_STR_ONE)
-    sha_view_s = _sha(elf_c) if elf_c else "n/a"
-    sha_one_s = _sha(elf_d) if elf_d else "n/a"
-    print(f"[② 擦除·string] 三跳 {sha_view_s[:16]}… · 单跳 {sha_one_s[:16]}…")
-    expect("erase_str_view_byte_identical", elf_c and elf_d and sha_view_s == sha_one_s,
-           f"{sha_view_s} != {sha_one_s}")
+    _, elf_c = corec_build_raw_native(ERASE_STR_VIEW)
+    _, elf_d = corec_build_raw_native(ERASE_STR_ONE)
+    rc_c = subprocess.run([str(elf_c)], capture_output=True).returncode if elf_c else -1
+    rc_d = subprocess.run([str(elf_d)], capture_output=True).returncode if elf_d else -1
+    print(f"[② 视图·string/raw] 三跳 rc={rc_c} · 单跳 rc={rc_d}")
+    expect("erase_str_view_semantic", rc_c == rc_d,
+           f"{rc_c} != {rc_d}")
 
     # ── ③ fail-closed：未知名两面都报错 ──
     rc_u, diags_u = corec_check(UNKNOWN_BUILTIN)

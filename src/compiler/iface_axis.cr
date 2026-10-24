@@ -107,9 +107,9 @@ fn iface_find_method(type_ni: int, method_ni: int) -> int:
     loop:
         if i >= g_method_count:
             return -1
-        if r64(g_methods, i * 24) == type_ni:
-            if r64(g_methods, i * 24 + 8) == method_ni:
-                return r64(g_methods, i * 24 + 16)
+        if cell_load(g_methods, i * 24) == type_ni:
+            if cell_load(g_methods, i * 24 + 8) == method_ni:
+                return cell_load(g_methods, i * 24 + 16)
         i = i + 1
     return -1
 
@@ -145,10 +145,10 @@ fn iface_user_satisfies(t_ti: int, iface_ni: int) -> int:
 fn iface_user_satisfies_ii(tname_ni: int, ii: int) -> int:
     if tname_ni < 0 || ii < 0:
         return -1
-    mc := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
+    mc := cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
     if mc < 0 || mc > MAX_IFACE_METHODS:
         return -1
-    shp := sh_iface_shape_term(r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_NAME))
+    shp := sh_iface_shape_term(cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_NAME))
     if shp < 0:
         return -1
     mi : ., mut = 0
@@ -156,7 +156,7 @@ fn iface_user_satisfies_ii(tname_ni: int, ii: int) -> int:
         if mi >= mc:
             return 1
         mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD
-        m_ni := r64(g_ifaces, mbase + OFF_IFM_NAME)
+        m_ni := cell_load(g_ifaces, mbase + OFF_IFM_NAME)
         f_ni := iface_find_method(tname_ni, m_ni)
         if f_ni < 0:
             return 0

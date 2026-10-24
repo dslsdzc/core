@@ -32,58 +32,58 @@ fn chan_make(elemsize: int, cap: int) -> string:
     _chan_ensure_init()
     ch := alloc(64)
     buf := alloc(cap * elemsize)
-    w64(ch, 0, buf)        // buf
-    w64(ch, 8, cap)         // cap
-    w64(ch, 16, 0)          // len
-    w64(ch, 24, 0)          // head
-    w64(ch, 32, elemsize)   // elemsize
-    w64(ch, 40, -1)         // send_wait = empty
-    w64(ch, 48, -1)         // recv_wait = empty
-    w64(ch, 56, 0)          // closed = false
+    cell_store(ch, 0, buf)        // buf
+    cell_store(ch, 8, cap)         // cap
+    cell_store(ch, 16, 0)          // len
+    cell_store(ch, 24, 0)          // head
+    cell_store(ch, 32, elemsize)   // elemsize
+    cell_store(ch, 40, -1)         // send_wait = empty
+    cell_store(ch, 48, -1)         // recv_wait = empty
+    cell_store(ch, 56, 0)          // closed = false
     return ch
 
 fn chan_send(ch: string, val: int):
     _chan_ensure_init()
-    buf := r64(ch, 0)
-    cap := r64(ch, 8)
-    len := r64(ch, 16)
-    head := r64(ch, 24)
-    esize := r64(ch, 32)
+    buf := cell_load(ch, 0)
+    cap := cell_load(ch, 8)
+    len := cell_load(ch, 16)
+    head := cell_load(ch, 24)
+    esize := cell_load(ch, 32)
 
     // Check for waiting receivers first (direct handoff)
-    recv_wait := r64(ch, 48)
+    recv_wait := cell_load(ch, 48)
     if recv_wait >= 0:
         // Direct handoff: copy value to the waiting receiver's temp_val
-        nxt := r64(recv_wait, 48)          // save next before overwriting
-        w64(recv_wait, 72, val)             // store value in receiver's temp_val
-        w64(recv_wait, 8, 0)               // set to _Grunnable
+        nxt := cell_load(recv_wait, 48)          // save next before overwriting
+        cell_store(recv_wait, 72, val)             // store value in receiver's temp_val
+        cell_store(recv_wait, 8, 0)               // set to _Grunnable
         sched_enqueue(recv_wait)
-        w64(ch, 48, nxt)                   // remove from recv_wait list
+        cell_store(ch, 48, nxt)                   // remove from recv_wait list
         return
 
     if len < cap:
         // Buffer has space
         tail := (head + len) % cap
-        w64(buf, tail * esize, val)
-        w64(ch, 16, len + 1)
+        cell_store(buf, tail * esize, val)
+        cell_store(ch, 16, len + 1)
         return
 
     // Buffer full: block on send_wait list
     g := sched_get_curg()
     if g >= 0:
-        w64(g, 72, val)         // store value for later delivery (temp_val)
-        w64(g, 8, 2)            // _Gwaiting
-        w64(g, 48, -1)          // next = -1
+        cell_store(g, 72, val)         // store value for later delivery (temp_val)
+        cell_store(g, 8, 2)            // _Gwaiting
+        cell_store(g, 48, -1)          // next = -1
 
         // Add to channel's send_wait list
-        sw := r64(ch, 40)
+        sw := cell_load(ch, 40)
         if sw < 0:
-            w64(ch, 40, g)
+            cell_store(ch, 40, g)
         else:
             loop:
-                nxt := r64(sw, 48)
+                nxt := cell_load(sw, 48)
                 if nxt < 0:
-                    w64(sw, 48, g)
+                    cell_store(sw, 48, g)
                     break
                 sw = nxt
 
@@ -92,29 +92,29 @@ fn chan_send(ch: string, val: int):
 
 fn chan_recv(ch: string) -> int:
     _chan_ensure_init()
-    buf := r64(ch, 0)
-    cap := r64(ch, 8)
-    len := r64(ch, 16)
-    head := r64(ch, 24)
-    esize := r64(ch, 32)
-    closed := r64(ch, 56)
+    buf := cell_load(ch, 0)
+    cap := cell_load(ch, 8)
+    len := cell_load(ch, 16)
+    head := cell_load(ch, 24)
+    esize := cell_load(ch, 32)
+    closed := cell_load(ch, 56)
 
     // Check for waiting senders first (direct handoff)
-    send_wait := r64(ch, 40)
+    send_wait := cell_load(ch, 40)
     if send_wait >= 0:
         // Direct handoff: take value from the waiting sender's temp_val
-        val := r64(send_wait, 72)           // read sender's stored value
-        nxt := r64(send_wait, 48)
-        w64(send_wait, 8, 0)               // set to _Grunnable
+        val := cell_load(send_wait, 72)           // read sender's stored value
+        nxt := cell_load(send_wait, 48)
+        cell_store(send_wait, 8, 0)               // set to _Grunnable
         sched_enqueue(send_wait)
-        w64(ch, 40, nxt)                   // remove from send_wait list
+        cell_store(ch, 40, nxt)                   // remove from send_wait list
         return val
 
     if len > 0:
         // Buffer has data
-        val := r64(buf, head * esize)
-        w64(ch, 24, (head + 1) % cap)
-        w64(ch, 16, len - 1)
+        val := cell_load(buf, head * esize)
+        cell_store(ch, 24, (head + 1) % cap)
+        cell_store(ch, 16, len - 1)
         return val
 
     if closed != 0:
@@ -123,48 +123,48 @@ fn chan_recv(ch: string) -> int:
     // Buffer empty: block on recv_wait list
     g := sched_get_curg()
     if g >= 0:
-        w64(g, 8, 2)            // _Gwaiting
-        w64(g, 48, -1)          // next = -1
+        cell_store(g, 8, 2)            // _Gwaiting
+        cell_store(g, 48, -1)          // next = -1
 
-        rw := r64(ch, 48)
+        rw := cell_load(ch, 48)
         if rw < 0:
-            w64(ch, 48, g)
+            cell_store(ch, 48, g)
         else:
             loop:
-                nxt := r64(rw, 48)
+                nxt := cell_load(rw, 48)
                 if nxt < 0:
-                    w64(rw, 48, g)
+                    cell_store(rw, 48, g)
                     break
                 rw = nxt
 
     sched_yield()
 
     // After wakeup, value should be in this G's temp_val (delivered by sender)
-    val := r64(g, 72)
+    val := cell_load(g, 72)
     return val
 
 fn chan_close(ch: string):
     _chan_ensure_init()
-    w64(ch, 56, 1)  // closed = true
+    cell_store(ch, 56, 1)  // closed = true
 
     // Wake up all waiting senders
-    sw := r64(ch, 40)
+    sw := cell_load(ch, 40)
     loop:
         if sw < 0:
             break
-        nxt := r64(sw, 48)
-        w64(sw, 8, 0)         // _Grunnable
+        nxt := cell_load(sw, 48)
+        cell_store(sw, 8, 0)         // _Grunnable
         sched_enqueue(sw)
         sw = nxt
-    w64(ch, 40, -1)  // clear send_wait
+    cell_store(ch, 40, -1)  // clear send_wait
 
     // Wake up all waiting receivers
-    rw := r64(ch, 48)
+    rw := cell_load(ch, 48)
     loop:
         if rw < 0:
             break
-        nxt := r64(rw, 48)
-        w64(rw, 8, 0)         // _Grunnable
+        nxt := cell_load(rw, 48)
+        cell_store(rw, 8, 0)         // _Grunnable
         sched_enqueue(rw)
         rw = nxt
-    w64(ch, 48, -1)  // clear recv_wait
+    cell_store(ch, 48, -1)  // clear recv_wait

@@ -388,7 +388,7 @@ from corec.syntax.tokens import TokenType
 
 def check_integer_literals():
     tokens = Lexer('0x1f 0o17 0b1010').tokenize()
-    values = [int(t.lexeme) for t in tokens[:-1]]
+    values = [int(t.lexeme) for t in tokens if t.type == TokenType.INT_LIT]
     if values != [31, 15, 10]:
         print(f'[FAIL] integer literal forms: got {values}')
         return False

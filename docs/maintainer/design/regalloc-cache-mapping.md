@@ -2,7 +2,7 @@
 
 寄存器分配是缓存语义在编码层的一个映射实例。缓存语义的规则以 `docs/academic/cache-semantics.md` 为准；层定义见 `docs/maintainer/design/materialization-space.md`；存在区间的表示见 `docs/maintainer/design/existence-structure.md`。
 
-设计决策记录见 `docs/superpowers/specs/2026-08-27-regalloc-cache-mapping-design.md`。分配器的逻辑契约见 `src/compiler/regalloc-consistency.cr` 的 v6 分支。
+设计决策记录见 `docs/superpowers/specs/2026-08-27-regalloc-cache-mapping-design.md`。分配器的逻辑契约见 `docs/maintainer/design/regalloc-consistency.md` 的 v6 分支。
 
 ## 术语
 
@@ -91,7 +91,7 @@ recipe 无法判定         => 不可移除（失败关闭）
 判定有两个应用位置：
 
 1. 规约契约：`.cr` 内联规约，走 `spec-design` 体系的翻译桥和 CIC 内核，健全性由内核保证。旧格式已经废弃，见 `adr/adr-0001`。
-2. 编译器自检：分配器的逻辑契约在 `src/compiler/regalloc-consistency.cr` 的 v6 分支，运行自检在 `opt.cr` 一侧。
+2. 编译器自检：分配器的逻辑契约在 `docs/maintainer/design/regalloc-consistency.md` 的 v6 分支，运行自检在 `opt.cr` 一侧。
 
 ## 分配器：上下文贪心
 
@@ -132,7 +132,7 @@ recipe 无法判定         => 不可移除（失败关闭）
 | 分支 | `alloc_registers` 现状 | 契约和自检 |
 |---|---|---|
 | develop（基线） | 朴素线性扫描：first/last 区间，5 个 callee-saved 寄存器，没有溢写；负编码寄存器，由 g2_slot 机械翻译 | 无 |
-| lattice-ir-v6（推进中） | CAG 重写，修复 rc=0 的根因，加入真实寄存器分配和 watchdog 验证 | `regalloc-consistency.cr` 记录机制、`opt.cr` 映射和三层正确性定位；verify 运行自检 |
+| lattice-ir-v6（推进中） | CAG 重写，修复 rc=0 的根因，加入真实寄存器分配和 watchdog 验证 | `docs/maintainer/design/regalloc-consistency.md` 记录机制、`opt.cr` 映射和三层正确性定位；verify 运行自检 |
 
 设计与代码的对应：
 
@@ -159,4 +159,4 @@ recipe 无法判定         => 不可移除（失败关闭）
 - RegionCheck 和存在区间实现：`docs/maintainer/design/pointer-model.md`
 - 规约体系：`docs/maintainer/design/spec-design.md`
 - 执行标注空间：`docs/maintainer/design/execution-annotation-space.md`
-- 契约文档：`src/compiler/regalloc-consistency.cr` 的 v6 分支
+- 契约文档：`docs/maintainer/design/regalloc-consistency.md` 的 v6 分支

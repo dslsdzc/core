@@ -67,7 +67,7 @@ fn ccr_iface_populate() -> int:
     loop:
         if ii >= g_iface_count:
             break
-        mc := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
+        mc := cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
         if mc < 0 || mc > MAX_IFACE_METHODS:
             print("error: IFACE segment: interface ")
             print(int_str(ii))
@@ -80,7 +80,7 @@ fn ccr_iface_populate() -> int:
             if mi >= mc:
                 break
             mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD
-            pc := r64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT)
+            pc := cell_load(g_ifaces, mbase + OFF_IFM_PARAM_COUNT)
             if pc < 0 || pc > MAX_IFACE_METHOD_PARAMS:
                 print("error: IFACE segment: method ")
                 print(int_str(mi))
@@ -98,12 +98,12 @@ fn ccr_iface_populate() -> int:
                 print(int_str(mi))
                 println(" return signature is not translatable to a type term (save refused)")
                 return -1
-            w64(g_ifaces, mbase + OFF_IFM_RET_TERM, rt)
+            cell_store(g_ifaces, mbase + OFF_IFM_RET_TERM, rt)
             pj : ., mut = 0
             loop:
                 if pj >= MAX_IFACE_METHOD_PARAMS:
                     break
-                w64(g_ifaces, mbase + OFF_IFM_PARAM_TERMS + pj * 8, -1)   // 未用槽 = -1
+                cell_store(g_ifaces, mbase + OFF_IFM_PARAM_TERMS + pj * 8, -1)   // 未用槽 = -1
                 pj = pj + 1
             pk : ., mut = 0
             loop:
@@ -119,7 +119,7 @@ fn ccr_iface_populate() -> int:
                     print_i(pk)
                     println(" signature is not translatable to a type term (save refused)")
                     return -1
-                w64(g_ifaces, mbase + OFF_IFM_PARAM_TERMS + pk * 8, pt)
+                cell_store(g_ifaces, mbase + OFF_IFM_PARAM_TERMS + pk * 8, pt)
                 pk = pk + 1
             mi = mi + 1
         ii = ii + 1
@@ -135,34 +135,34 @@ fn ccr_type_seg_build() -> int:
     need := 4 + rc * ESZ_TYPE_ROW + 4 + tc * ESZ_TYPE_TERM_DISK
     buf := alloc(need + 64)
     pos : ., mut = 0
-    w32(buf, pos, rc)
+    cell_store32(buf, pos, rc)
     pos = pos + 4
     i : ., mut = 0
     loop:
         if i >= rc:
             break
-        w64(buf, pos, r64(g_types, i * ESZ_TYPE_ROW + OFF_TR_KIND))
+        cell_store(buf, pos, cell_load(g_types, i * ESZ_TYPE_ROW + OFF_TR_KIND))
         pos = pos + 8
-        w64(buf, pos, r64(g_types, i * ESZ_TYPE_ROW + OFF_TR_DATA))
+        cell_store(buf, pos, cell_load(g_types, i * ESZ_TYPE_ROW + OFF_TR_DATA))
         pos = pos + 8
-        w64(buf, pos, r64(g_types, i * ESZ_TYPE_ROW + OFF_TR_EXTRA))
+        cell_store(buf, pos, cell_load(g_types, i * ESZ_TYPE_ROW + OFF_TR_EXTRA))
         pos = pos + 8
         i = i + 1
-    w32(buf, pos, tc)
+    cell_store32(buf, pos, tc)
     pos = pos + 4
     j : ., mut = 0
     loop:
         if j >= tc:
             break
-        w64(buf, pos, tt_tag(j))
+        cell_store(buf, pos, tt_tag(j))
         pos = pos + 8
-        w64(buf, pos, tt_a(j))
+        cell_store(buf, pos, tt_a(j))
         pos = pos + 8
-        w64(buf, pos, tt_b(j))
+        cell_store(buf, pos, tt_b(j))
         pos = pos + 8
-        w64(buf, pos, tt_c(j))
+        cell_store(buf, pos, tt_c(j))
         pos = pos + 8
-        w64(buf, pos, tt_d(j))
+        cell_store(buf, pos, tt_d(j))
         pos = pos + 8
         j = j + 1
     g_ccr_type_seg = buf
@@ -182,7 +182,7 @@ fn ccr_iface_seg_build() -> int:
     loop:
         if ii >= g_iface_count:
             break
-        mc := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
+        mc := cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
         need = need + 16 + mc * 80
         ii = ii + 1
     need = need + 4 + g_impl_for_count * 8
@@ -191,107 +191,107 @@ fn ccr_iface_seg_build() -> int:
     pos : ., mut = 0
     // Section 1: native entries. The count is the constant IFACE_ENTRY_COUNT, not
     // g_iface_entry_count, so writer and loader use the same value.
-    w32(buf, pos, IFACE_ENTRY_COUNT)
+    cell_store32(buf, pos, IFACE_ENTRY_COUNT)
     pos = pos + 4
     ei : ., mut = 0
     loop:
         if ei >= IFACE_ENTRY_COUNT:
             break
         eo := ei * ESZ_IFACE_ENTRY
-        buf_write_i32(buf, pos, r64(g_iface_entries, eo + OFF_IE_AK))
+        buf_write_i32(buf, pos, cell_load(g_iface_entries, eo + OFF_IE_AK))
         pos = pos + 4
-        buf_write_i32(buf, pos, r64(g_iface_entries, eo + OFF_IE_TI))
+        buf_write_i32(buf, pos, cell_load(g_iface_entries, eo + OFF_IE_TI))
         pos = pos + 4
-        buf_write_i32(buf, pos, r64(g_iface_entries, eo + OFF_IE_NAME))
+        buf_write_i32(buf, pos, cell_load(g_iface_entries, eo + OFF_IE_NAME))
         pos = pos + 4
-        buf_write_i32(buf, pos, r64(g_iface_entries, eo + OFF_IE_LIT))
+        buf_write_i32(buf, pos, cell_load(g_iface_entries, eo + OFF_IE_LIT))
         pos = pos + 4
-        buf_write_i64(buf, pos, r64(g_iface_entries, eo + OFF_IE_OPS))
+        buf_write_i64(buf, pos, cell_load(g_iface_entries, eo + OFF_IE_OPS))
         pos = pos + 8
         ei = ei + 1
     // Section 2: cross-cutting shapes {name_ni, term}.
-    w32(buf, pos, g_iface_shape_count)
+    cell_store32(buf, pos, g_iface_shape_count)
     pos = pos + 4
     si : ., mut = 0
     loop:
         if si >= g_iface_shape_count:
             break
-        buf_write_i32(buf, pos, r64(g_iface_shape_names, si * 8))
+        buf_write_i32(buf, pos, cell_load(g_iface_shape_names, si * 8))
         pos = pos + 4
-        buf_write_i32(buf, pos, r64(g_iface_shape_terms, si * 8))
+        buf_write_i32(buf, pos, cell_load(g_iface_shape_terms, si * 8))
         pos = pos + 4
         si = si + 1
     // Section 3: user interfaces, 16-byte header plus 80 bytes per method.
-    w32(buf, pos, g_iface_count)
+    cell_store32(buf, pos, g_iface_count)
     pos = pos + 4
     fi : ., mut = 0
     loop:
         if fi >= g_iface_count:
             break
         fo := fi * ESZ_IFACEINFO
-        buf_write_i32(buf, pos, r64(g_ifaces, fo + OFF_IF_NAME))
+        buf_write_i32(buf, pos, cell_load(g_ifaces, fo + OFF_IF_NAME))
         pos = pos + 4
-        buf_write_i32(buf, pos, r64(g_ifaces, fo + OFF_IF_METHOD_COUNT))
+        buf_write_i32(buf, pos, cell_load(g_ifaces, fo + OFF_IF_METHOD_COUNT))
         pos = pos + 4
-        buf_write_i32(buf, pos, r64(g_ifaces, fo + OFF_IF_GENERIC_COUNT))
+        buf_write_i32(buf, pos, cell_load(g_ifaces, fo + OFF_IF_GENERIC_COUNT))
         pos = pos + 4
         buf_write_i32(buf, pos, 0)
         pos = pos + 4   // pad for alignment
-        mc2 := r64(g_ifaces, fo + OFF_IF_METHOD_COUNT)
+        mc2 := cell_load(g_ifaces, fo + OFF_IF_METHOD_COUNT)
         mj : ., mut = 0
         loop:
             if mj >= mc2:
                 break
             mo := fo + OFF_IF_METHODS + mj * ESZ_IFMETHOD
-            buf_write_i32(buf, pos, r64(g_ifaces, mo + OFF_IFM_NAME))
+            buf_write_i32(buf, pos, cell_load(g_ifaces, mo + OFF_IFM_NAME))
             pos = pos + 4
-            buf_write_i32(buf, pos, r64(g_ifaces, mo + OFF_IFM_PARAM_COUNT))
+            buf_write_i32(buf, pos, cell_load(g_ifaces, mo + OFF_IFM_PARAM_COUNT))
             pos = pos + 4
-            buf_write_i32(buf, pos, r64(g_ifaces, mo + OFF_IFM_SELF_MODE))
+            buf_write_i32(buf, pos, cell_load(g_ifaces, mo + OFF_IFM_SELF_MODE))
             pos = pos + 4
-            buf_write_i32(buf, pos, r64(g_ifaces, mo + OFF_IFM_RET_TERM))
+            buf_write_i32(buf, pos, cell_load(g_ifaces, mo + OFF_IFM_RET_TERM))
             pos = pos + 4
             pk2 : ., mut = 0
             loop:
                 if pk2 >= MAX_IFACE_METHOD_PARAMS:
                     break
-                buf_write_i32(buf, pos, r64(g_ifaces, mo + OFF_IFM_PARAM_TERMS + pk2 * 8))
+                buf_write_i32(buf, pos, cell_load(g_ifaces, mo + OFF_IFM_PARAM_TERMS + pk2 * 8))
                 pos = pos + 4
                 pk2 = pk2 + 1
             pq : ., mut = 0
             loop:
                 if pq >= MAX_IFACE_METHOD_PARAMS:
                     break
-                buf_write_i32(buf, pos, r64(g_ifaces, mo + OFF_IFM_PARAM_TYPES + pq * 8))
+                buf_write_i32(buf, pos, cell_load(g_ifaces, mo + OFF_IFM_PARAM_TYPES + pq * 8))
                 pos = pos + 4
                 pq = pq + 1
             mj = mj + 1
         fi = fi + 1
     // Section 4: impl edges {trait_ni, type_ni}; declaration metadata only.
-    w32(buf, pos, g_impl_for_count)
+    cell_store32(buf, pos, g_impl_for_count)
     pos = pos + 4
     gi2 : ., mut = 0
     loop:
         if gi2 >= g_impl_for_count:
             break
-        buf_write_i32(buf, pos, r64(g_impl_for, gi2 * 16))
+        buf_write_i32(buf, pos, cell_load(g_impl_for, gi2 * 16))
         pos = pos + 4
-        buf_write_i32(buf, pos, r64(g_impl_for, gi2 * 16 + 8))
+        buf_write_i32(buf, pos, cell_load(g_impl_for, gi2 * 16 + 8))
         pos = pos + 4
         gi2 = gi2 + 1
     // Section 5: method table {type_ni, method_ni, mangled_ni}, the data behind
     // iface_find_method.
-    w32(buf, pos, g_method_count)
+    cell_store32(buf, pos, g_method_count)
     pos = pos + 4
     mi2 : ., mut = 0
     loop:
         if mi2 >= g_method_count:
             break
-        buf_write_i32(buf, pos, r64(g_methods, mi2 * 24))
+        buf_write_i32(buf, pos, cell_load(g_methods, mi2 * 24))
         pos = pos + 4
-        buf_write_i32(buf, pos, r64(g_methods, mi2 * 24 + 8))
+        buf_write_i32(buf, pos, cell_load(g_methods, mi2 * 24 + 8))
         pos = pos + 4
-        buf_write_i32(buf, pos, r64(g_methods, mi2 * 24 + 16))
+        buf_write_i32(buf, pos, cell_load(g_methods, mi2 * 24 + 16))
         pos = pos + 4
         mi2 = mi2 + 1
     g_ccr_iface_seg = buf
@@ -314,41 +314,198 @@ fn ccr_seg_prepare_save() -> int:
         return -1
     if ccr_iface_seg_build() != 0:
         return -1
-    // Fill NOD term indexes after ccr_type_populate, because that call rebuilds the
-    // term table and invalidates emit-time indexes. This runs after both segment
-    // bodies: it only queries the bridge cache, and all rows are already built, so
-    // it adds no terms and does not change segment bytes. Failure uses the same
-    // type-face gate.
-    return ccr_nod_item_populate()
+    // Derive the v10 NOD semantic type ids and feature flags from the same
+    // save-time type state, then copy them into the in-memory object record.
+    // Task 3's item side buffer is retired with the v10 disk field.
+    if ccr_nod_type_populate() != 0:
+        return -1
+    populate_nod_objects()
+    return 0
 
-// Fill NOD term indexes. For each node in global instruction order, look up the
-// file-space term index from the stored derived code.
-// Face 0 (a type row whose term is reversible) uses sh_term_of_ti(tk); the loader
-// checks tt_atom_of_term(term) == tk. All other cases use -1. The tk slot still
-// preserves the code byte for byte.
-// Classification and term construction use only the existing bridge entry points.
-// This is a pure query and does not set the build-failure bit.
-// The index is rederived at save time because ccr_type_populate resets the term
-// layer and invalidates emit-time references.
-fn ccr_nod_item_populate() -> int:
+// Fill NOD semantic type ids and feature flags into the v10 side buffers. For
+// each node in global instruction order, apply the fixed rule:
+//   sh_tk_face_of_code(op, tk) == 0 -> type_id = tk   (tk is a TYPE row)
+//   otherwise                        -> type_id = -1
+// Flags carry semantic node features only:
+//   IR_BOUNDS_CHECK, tk != 0        -> DYNAMIC_LIMIT
+//   IR_SPAWN, tk < 0                -> DYNAMIC_SPAWN
+//   IR_DEREF/IR_STORE_PTR, s3 > 0   -> RUNTIME_PTR_BOUNDS
+// The width/stride/byte extent behind those facts is a target fact and is not
+// written; corearch reconstructs it from type_id and the target layout.
+// A legacy aux code outside this classification rejects the save instead of
+// silently dropping meaning. IR_STR_OF's TI_STR scratch code has no consumer
+// and no semantic feature, so it is explicitly classified as featureless.
+// This is a pure query/derivation: it does not mutate the type tables, the term
+// table, or g_tk_face_fail.
+// Semantic type row for a variable id (-1 when untyped/out of range).
+fn ccr_var_type_row(v: int) -> int:
+    if v < 0 || v >= g_ir_var_count:
+        return -1
+    t := irv_type(v)
+    if t < 0 || t >= g_type_count:
+        return -1
+    return t
+
+// Pointee/element row of a pointer/reference/array/slice row.
+fn ccr_inner_type_row(t: int) -> int:
+    if t < 0 || t >= g_type_count:
+        return -1
+    k := get_type_kind(t)
+    if k == TYP_PTR || k == TYP_REF || k == TYP_ARRAY || k == TYP_SLICE || k == TYP_OPTIONAL:
+        d := get_type_data(t)
+        if d >= 0 && d < g_type_count:
+            return d
+    return -1
+
+// Named/struct row matching a type-name string index.
+fn ccr_named_row_of_name(ni: int) -> int:
+    if ni < 0:
+        return -1
+    i : ., mut = 0
+    loop:
+        if i >= g_type_count:
+            break
+        if get_type_kind(i) == TYP_NAMED && get_type_data(i) == ni:
+            return i
+        i = i + 1
+    return -1
+
+// Per-op semantic domain for the v10 NOD type_id. Type-face ops keep the
+// existing reversible-row rule; the ops below carry a domain even though their
+// legacy type code was a target/aux fact. -1 means the domain is genuinely
+// unavailable (fail closed: corearch may then only fall back to the variable
+// table, never to a guessed machine width).
+fn ccr_nod_type_domain(ii: int, op: int, d: int, s1: int, s2: int, s3: int) -> int:
+    if op == IR_DEREF:
+        p := ccr_var_type_row(s1)
+        if p >= 0:
+            k := get_type_kind(p)
+            if k == TYP_PTR || k == TYP_REF:
+                pin := ccr_inner_type_row(p)
+                if pin >= 0:
+                    return pin
+        return ccr_var_type_row(d)
+    if op == IR_STORE_PTR:
+        return ccr_var_type_row(s2)
+    if op == IR_ALLOC_ARRAY:
+        t := ccr_var_type_row(d)
+        ein := ccr_inner_type_row(t)
+        if ein >= 0:
+            return ein
+        // Some literal/tuple allocations get their array row after the node.
+        // Fall back to the first value stored into this base.
+        j : ., mut = 0
+        loop:
+            if j >= g_ir_instr_count:
+                break
+            jop := iri_op(j)
+            if (jop == IR_STORE_INDEX || jop == IR_STORE_INDEX_VAR) && iri_s1(j) == d:
+                vt := ccr_var_type_row(iri_s2(j))
+                if vt >= 0:
+                    return vt
+            j = j + 1
+        return -1
+    if op == IR_ALLOC_STRUCT:
+        t := ccr_var_type_row(d)
+        if t >= 0:
+            k := get_type_kind(t)
+            if k == TYP_NAMED || k == TYP_GENERIC_APPLY:
+                return t
+        return ccr_named_row_of_name(s3)
+    if op == IR_LOAD:
+        return ccr_var_type_row(d)
+    if op == IR_STORE:
+        return ccr_var_type_row(s2)
+    if op == IR_ALLOC:
+        return ccr_var_type_row(d)
+    if op == IR_ADDR_INDEX:
+        t := ccr_var_type_row(d)
+        ain := ccr_inner_type_row(t)
+        if ain >= 0:
+            return ain
+        return t
+    if op == IR_LOAD_INDEX || op == IR_LOAD_INDEX_VAR:
+        return ccr_var_type_row(d)
+    if op == IR_STORE_INDEX:
+        return ccr_var_type_row(s2)
+    if op == IR_STORE_INDEX_VAR:
+        return ccr_var_type_row(d)
+    if op == IR_LOAD_FIELD:
+        return ccr_var_type_row(d)
+    if op == IR_STORE_FIELD:
+        return ccr_var_type_row(s2)
+    if op == IR_SLICE:
+        return ccr_var_type_row(d)
+    if op == IR_MAKE_ENUM:
+        return ccr_var_type_row(d)
+    if op == IR_LOAD_ENUM_TAG:
+        return ccr_var_type_row(d)
+    // Listed ops whose domain is genuinely unavailable from the current IR
+    // state. They remain -1 rather than guessing.
+    return -1
+
+fn ccr_nod_type_populate() -> int:
     n := g_ir_instr_count
-    g_ccr_nod_item = alloc((n + 8) * 4)
-    g_ccr_nod_item_count = n
+    g_ccr_nod_type = alloc((n + 8) * 4)
+    g_ccr_nod_type_count = n
+    g_ccr_nod_flags = alloc((n + 8) * 4)
+    g_ccr_nod_flags_count = n
     ii : ., mut = 0
     loop:
         if ii >= n:
             break
+        op := iri_op(ii)
         tk := iri_tk(ii)
-        it : ., mut = -1
-        if sh_tk_face_of_code(iri_op(ii), tk) == 0:
-            it = sh_term_of_ti(tk)
-        w32(g_ccr_nod_item, ii * 4, it)
+        tid : ., mut = -1
+        fl : ., mut = 0
+        if sh_tk_face_of_code(op, tk) == 0:
+            tid = tk
+        else:
+            // Non-face ops carry a semantic domain when the variable table can
+            // supply it (DEREF pointee, STORE value, ALLOC element/struct,
+            // field/index value domains). -1 stays "unavailable".
+            dt := ccr_nod_type_domain(ii, op, iri_dest(ii), iri_s1(ii), iri_s2(ii), iri_s3(ii))
+            if dt >= 0:
+                tid = dt
+        if sh_tk_is_type_face(op) != 0:
+            // Type-face nodes carry no semantic feature bits. A composite row
+            // stays -1 (not a reversible atom row).
+            fl = 0
+        else if op == IR_BOUNDS_CHECK:
+            if tk != 0:
+                fl = fl + CCR_NOD_FLAG_DYNAMIC_LIMIT
+        else if op == IR_SPAWN:
+            if tk < 0:
+                fl = fl + CCR_NOD_FLAG_DYNAMIC_SPAWN
+            else if tk != 0:
+                return -1
+        else if op == IR_DEREF || op == IR_STORE_PTR:
+            if iri_s3(ii) > 0:
+                fl = fl + CCR_NOD_FLAG_RUNTIME_PTR_BOUNDS
+        else if op == IR_HOTPATCH_ROUTE || op == IR_STR_OF:
+            // HOTPATCH_ROUTE carries tk == 0. IR_STR_OF's TI_STR scratch code is
+            // not read by any backend consumer; neither is a node feature.
+            fl = 0
+        else if op == IR_LOAD_INDEX || op == IR_LOAD_INDEX_VAR || op == IR_CONST_BIG || op == IR_PTR_OF:
+            // These ops pass a semantic type row as their legacy type_kind
+            // (INDEX element domain, CONST_BIG/PTR_OF int domain). Task 3 fixes
+            // type_id to reversible atom rows only and no backend consumer reads
+            // this code, so it is classified as intentionally not persisted.
+            // It is not a target fact and not an unclassifiable aux code.
+            fl = 0
+        else if tk != 0:
+            // Unclassified legacy aux code: refuse to save rather than invent a
+            // wire meaning for it.
+            return -1
+        cell_store32(g_ccr_nod_type, ii * 4, tid)
+        cell_store32(g_ccr_nod_flags, ii * 4, fl)
         ii = ii + 1
     return 0
 
 // --dump-types test channel. The shared surface dump in ccr_io.cr uses the same
 // print path as corearch, so line formats match across processes. This corec-only
-// section adds the row-to-term mapping; tests split on "rowterms:".
+// section adds the row-to-term mapping and the NOD semantic type-id/flags side
+// data; tests split on "rowterms:" and "nodtypes:".
 fn ccr_type_selftest_dump():
     ccr_type_surface_dump()
     print("rowterms: ")
@@ -363,6 +520,28 @@ fn ccr_type_selftest_dump():
         print(" ")
         println(int_str(sh_term_of_ti(i)))
         i = i + 1
+    // v10 NOD semantic type ids and feature flags. Read the in-memory object
+    // record through the shared accessors so tests see exactly what the writer
+    // emits. One deterministic line per node.
+    print("nodtypes: ")
+    print_i(g_ccr_nod_type_count)
+    println("")
+    ni : ., mut = 0
+    loop:
+        if ni >= g_ccr_nod_type_count:
+            break
+        print("nodtype ")
+        print_i(ni)
+        print(" op ")
+        print_i(iri_op(ni))
+        print(" tk ")
+        print_i(iri_tk(ni))
+        print(" tid ")
+        print_i(nod_type_id(ni))
+        print(" flags ")
+        print_i(nod_type_flags(ni))
+        println("")
+        ni = ni + 1
 
 // --dump-ifaces test channel. The shared surface dump uses the same print path as
 // corearch. This corec-only section recomputes signature terms after the segment
@@ -377,13 +556,13 @@ fn ccr_iface_selftest_dump():
     loop:
         if ii >= g_iface_count:
             break
-        mc := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
+        mc := cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
         mi : ., mut = 0
         loop:
             if mi >= mc:
                 break
             mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD
-            pc := r64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT)
+            pc := cell_load(g_ifaces, mbase + OFF_IFM_PARAM_COUNT)
             print("ifacesig ")
             print_i(ii)
             print(" ")

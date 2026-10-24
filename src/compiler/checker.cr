@@ -16,9 +16,9 @@
 fn alloc_type(kind: int, data: int, extra: int) -> int:
     idx := g_type_count
     grow_types(idx + 1)
-    w64(g_types, idx * ESZ_TYPE_ROW + OFF_TR_KIND, kind)
-    w64(g_types, idx * ESZ_TYPE_ROW + OFF_TR_DATA, data)
-    w64(g_types, idx * ESZ_TYPE_ROW + OFF_TR_EXTRA, extra)
+    cell_store(g_types, idx * ESZ_TYPE_ROW + OFF_TR_KIND, kind)
+    cell_store(g_types, idx * ESZ_TYPE_ROW + OFF_TR_DATA, data)
+    cell_store(g_types, idx * ESZ_TYPE_ROW + OFF_TR_EXTRA, extra)
     g_type_count = idx + 1
     return idx
 
@@ -46,7 +46,7 @@ fn named_dedup_init():
         loop:
             if i >= nc:
                 break
-            w64(nb, i * 16, -1)
+            cell_store(nb, i * 16, -1)
             i = i + 1
         g_named_dedup = nb
         g_named_dedup_cap = nc
@@ -70,7 +70,7 @@ fn named_dedup_probe(name_idx: int) -> int:
     p : ., mut = tt_mod(name_idx, cap)
     slot : ., mut = -1
     loop:
-        k := r64(g_named_dedup, p * 16)
+        k := cell_load(g_named_dedup, p * 16)
         if k < 0:
             slot = p
             break
@@ -94,7 +94,7 @@ fn named_dedup_rehash():
     loop:
         if i >= nc:
             break
-        w64(nb, i * 16, -1)
+        cell_store(nb, i * 16, -1)
         i = i + 1
     g_named_dedup = nb
     g_named_dedup_cap = nc
@@ -103,11 +103,11 @@ fn named_dedup_rehash():
     loop:
         if j >= old_cap:
             break
-        k := r64(old, j * 16)
+        k := cell_load(old, j * 16)
         if k >= 0:
             s := named_dedup_probe(k)
-            w64(g_named_dedup, s * 16, k)
-            w64(g_named_dedup, s * 16 + 8, r64(old, j * 16 + 8))
+            cell_store(g_named_dedup, s * 16, k)
+            cell_store(g_named_dedup, s * 16 + 8, cell_load(old, j * 16 + 8))
             g_named_dedup_count = g_named_dedup_count + 1
         j = j + 1
 
@@ -128,17 +128,17 @@ fn alloc_named_type(name_idx: int) -> int:
     if name_idx < 0:
         return alloc_type(TYP_NAMED, name_idx, 0)
     slot := named_dedup_slot(name_idx)
-    if r64(g_named_dedup, slot * 16) == name_idx:
-        return r64(g_named_dedup, slot * 16 + 8)
+    if cell_load(g_named_dedup, slot * 16) == name_idx:
+        return cell_load(g_named_dedup, slot * 16 + 8)
     ti := alloc_type(TYP_NAMED, name_idx, 0)
     // 回写前重探（见文件头注3）
     slot2 := named_dedup_slot(name_idx)
-    if r64(g_named_dedup, slot2 * 16) == name_idx:
+    if cell_load(g_named_dedup, slot2 * 16) == name_idx:
         // 防御（当前不可达）：既有登记优先 -> 本次刚分配的行成为未引用行（不写侧表、不计数）。
         // 反例写法（无条件写 slot2）会覆盖活跃条目 = 丢登记。
-        return r64(g_named_dedup, slot2 * 16 + 8)
-    w64(g_named_dedup, slot2 * 16, name_idx)
-    w64(g_named_dedup, slot2 * 16 + 8, ti)
+        return cell_load(g_named_dedup, slot2 * 16 + 8)
+    cell_store(g_named_dedup, slot2 * 16, name_idx)
+    cell_store(g_named_dedup, slot2 * 16 + 8, ti)
     g_named_dedup_count = g_named_dedup_count + 1
     return ti
 
@@ -177,9 +177,9 @@ fn named_dedup_verify() -> int:
             named_rows = named_rows + 1
             ni := get_type_data(ti)
             slot := named_dedup_slot(ni)
-            if r64(g_named_dedup, slot * 16) != ni:
+            if cell_load(g_named_dedup, slot * 16) != ni:
                 bad = bad + 1
-            else if r64(g_named_dedup, slot * 16 + 8) != ti:
+            else if cell_load(g_named_dedup, slot * 16 + 8) != ti:
                 bad = bad + 1
         ti = ti + 1
     // 2. 侧表到类型表，并检查唯一性
@@ -187,9 +187,9 @@ fn named_dedup_verify() -> int:
     loop:
         if e >= g_named_dedup_cap:
             break
-        ni2 := r64(g_named_dedup, e * 16)
+        ni2 := cell_load(g_named_dedup, e * 16)
         if ni2 >= 0:
-            ti2 := r64(g_named_dedup, e * 16 + 8)
+            ti2 := cell_load(g_named_dedup, e * 16 + 8)
             if get_type_kind(ti2) != TYP_NAMED:
                 bad = bad + 1
             else if get_type_data(ti2) != ni2:
@@ -211,9 +211,9 @@ fn named_dedup_verify() -> int:
                 if get_type_kind(sti) == TYP_NAMED:
                     ident_checked = ident_checked + 1
                     slot3 := named_dedup_slot(ni3)
-                    if r64(g_named_dedup, slot3 * 16) != ni3:
+                    if cell_load(g_named_dedup, slot3 * 16) != ni3:
                         bad = bad + 1
-                    else if r64(g_named_dedup, slot3 * 16 + 8) != res_type_node(ai):
+                    else if cell_load(g_named_dedup, slot3 * 16 + 8) != res_type_node(ai):
                         bad = bad + 1
         ai = ai + 1
     print("[named-dedup] named_rows=")
@@ -263,69 +263,11 @@ fn init_types():
     // 段内容 = 表本体（生产编译下恰 6 条）。详细边界见 iface_shape_builtin_init 注。
     iface_shape_builtin_init()
 
-// ── Runtime builtin declarations (no .cr body, implemented in rt.s) ──
-g_rt_builtin_count : int, mut
-g_rt_builtin_names : string, mut
-g_rt_builtin_ret_types : string, mut
+// Runtime builtin declarations moved to the target prelude. The checker only
+// consumes g_rt_builtin_* through prelude_builtin_init and the shared table.
 
-fn init_builtins():
-    g_rt_builtin_count = 0
-    g_rt_builtin_names = alloc(8 * 8)
-    g_rt_builtin_ret_types = alloc(8 * 8)
-
-    bi_add("load8", TI_INT)
-    bi_add("store8", TI_INT)
-    bi_add("load64", TI_INT)
-    bi_add("r64", TI_INT)
-    bi_add("alloc", TI_STR)
-    bi_add("get_arg", TI_STR)
-    bi_add("w32", TI_UNIT)
-    bi_add("w64", TI_UNIT)
-    bi_add("_dyncpy", TI_UNIT)
-    bi_add("load_str_ptr", TI_STR)
-    bi_add("store_str_ptr", TI_INT)
-    bi_add("sched_call_0", TI_INT)
-    bi_add("sched_call_1", TI_INT)
-    bi_add("sched_call_2", TI_INT)
-    bi_add("sched_call_3", TI_INT)
-    bi_add("sched_call_4", TI_INT)
-    bi_add("fiber_switch", TI_INT)
-    bi_add("fiber_init", TI_INT)
-    bi_add("sched_go", TI_INT)
-    bi_add("m_start_workers", TI_UNIT)
-    bi_add("g_set_curg", TI_UNIT)
-    bi_add("g_get_curg", TI_INT)
-
-fn bi_add(name: string, ret_ti: int):
-    ni := str_intern(name)
-    if g_rt_builtin_count * 8 + 8 > str_len(g_rt_builtin_names):
-        nc := g_rt_builtin_count * 2 + 16
-        nb := alloc(nc * 8)
-        _dyncpy(g_rt_builtin_names, g_rt_builtin_count * 8, nb)
-        g_rt_builtin_names = nb
-    if g_rt_builtin_count * 8 + 8 > str_len(g_rt_builtin_ret_types):
-        nc := g_rt_builtin_count * 2 + 16
-        nb := alloc(nc * 8)
-        _dyncpy(g_rt_builtin_ret_types, g_rt_builtin_count * 8, nb)
-        g_rt_builtin_ret_types = nb
-    w64(g_rt_builtin_names, g_rt_builtin_count * 8, ni)
-    w64(g_rt_builtin_ret_types, g_rt_builtin_count * 8, ret_ti)
-    g_rt_builtin_count = g_rt_builtin_count + 1
-
-fn get_type_kind(ti: int) -> int:
-    if ti >= 0 && ti < g_type_count:
-        return r64(g_types, ti * 24)
-    return -1
-
-fn get_type_data(ti: int) -> int:
-    if ti >= 0 && ti < g_type_count:
-        return r64(g_types, ti * 24 + 8)
-    return 0
-
-fn get_type_extra(ti: int) -> int:
-    if ti >= 0 && ti < g_type_count:
-        return r64(g_types, ti * 24 + 16)
-    return 0
+// Type-row readers live in dyn_arr.cr (shared with corearch so target layout
+// helpers can resolve rows without a checker layer).
 
 // ─── 常量档数组长度约束 ───
 // N 不参与类型身份，身份令牌序列只含元素项，因此数组长度在 type_equal 之外单独检查。
@@ -372,7 +314,7 @@ fn array_len_walk(ti_a: int, ti_b: int, dir: int) -> int:
         loop:
             if fi >= fc:
                 break
-            if array_len_walk(r64(g_gen_apply_data, (fs1 + fi) * 8), r64(g_gen_apply_data, (fs2 + fi) * 8), dir) == 0:
+            if array_len_walk(cell_load(g_gen_apply_data, (fs1 + fi) * 8), cell_load(g_gen_apply_data, (fs2 + fi) * 8), dir) == 0:
                 return 0
             fi = fi + 1
         return 1
@@ -382,8 +324,8 @@ fn array_len_walk(ti_a: int, ti_b: int, dir: int) -> int:
         // 基型不同：身份判定负责
         as1 := get_type_extra(ti_a)
         as2 := get_type_extra(ti_b)
-        ac1 := r64(g_gen_apply_data, as1 * 8)
-        ac2 := r64(g_gen_apply_data, as2 * 8)
+        ac1 := cell_load(g_gen_apply_data, as1 * 8)
+        ac2 := cell_load(g_gen_apply_data, as2 * 8)
         if ac1 != ac2:
             return 1
         // 实参数不同：身份判定负责
@@ -391,7 +333,7 @@ fn array_len_walk(ti_a: int, ti_b: int, dir: int) -> int:
         loop:
             if ai >= ac1:
                 break
-            if array_len_walk(r64(g_gen_apply_data, (as1 + 1 + ai) * 8), r64(g_gen_apply_data, (as2 + 1 + ai) * 8), dir) == 0:
+            if array_len_walk(cell_load(g_gen_apply_data, (as1 + 1 + ai) * 8), cell_load(g_gen_apply_data, (as2 + 1 + ai) * 8), dir) == 0:
                 return 0
             ai = ai + 1
         return 1
@@ -575,7 +517,7 @@ fn scan_for_yield(node: int) -> int:
         loop:
             if i >= sc:
                 break
-            sn := r64(g_block_stmts, (ss + i) * 8)
+            sn := cell_load(g_block_stmts, (ss + i) * 8)
             if scan_for_yield(sn) != 0:
                 return 1
             i = i + 1
@@ -617,7 +559,7 @@ fn loop_body_has_break(node: int) -> int:
         loop:
             if i >= sc:
                 break
-            if loop_body_has_break(r64(g_block_stmts, (ss + i) * 8)) != 0:
+            if loop_body_has_break(cell_load(g_block_stmts, (ss + i) * 8)) != 0:
                 return 1
             i = i + 1
         return 0
@@ -705,7 +647,7 @@ fn stmt_cannot_fall_through(node: int) -> int:
         loop:
             if i >= sc:
                 break
-            if stmt_cannot_fall_through(r64(g_block_stmts, (ss + i) * 8)) != 0:
+            if stmt_cannot_fall_through(cell_load(g_block_stmts, (ss + i) * 8)) != 0:
                 return 1
             i = i + 1
         return 0
@@ -746,7 +688,7 @@ fn stmt_diverges(node: int) -> int:
         loop:
             if i >= sc:
                 break
-            if stmt_diverges(r64(g_block_stmts, (ss + i) * 8)) != 0:
+            if stmt_diverges(cell_load(g_block_stmts, (ss + i) * 8)) != 0:
                 return 1
             i = i + 1
         return 0
@@ -761,13 +703,13 @@ struct SymEntry:
 
 fn push_scope():
     grow_scope_bounds(g_scope_depth + 1)
-    w64(g_scope_bounds, g_scope_depth * 8, g_sym_count)
+    cell_store(g_scope_bounds, g_scope_depth * 8, g_sym_count)
     g_scope_depth = g_scope_depth + 1
 
 fn pop_scope():
     if g_scope_depth > 0:
         g_scope_depth = g_scope_depth - 1
-        g_sym_count = r64(g_scope_bounds, g_scope_depth * 8)
+        g_sym_count = cell_load(g_scope_bounds, g_scope_depth * 8)
 
 fn def_sym(name_idx: int, kind: int, type_idx: int, node_idx: int):
     grow_syms(g_sym_count + 1)
@@ -840,11 +782,11 @@ g_cur_fn_ret_checked : int, mut
 
 fn check_error(code: int, msg: string, line: int, col: int):
     grow_diags(g_diag_count + 1)
-    w64(g_diags, g_diag_count * DIAG_REC_SIZE, code)
-    store_str_ptr(g_diags, g_diag_count * DIAG_REC_SIZE + 8, msg)
-    w64(g_diags, g_diag_count * DIAG_REC_SIZE + 16, line)
-    w64(g_diags, g_diag_count * DIAG_REC_SIZE + 24, col)
-    w64(g_diags, g_diag_count * DIAG_REC_SIZE + 32, diag_fileid_for_line(line))
+    cell_store(g_diags, g_diag_count * DIAG_REC_SIZE, code)
+    cell_store_str(g_diags, g_diag_count * DIAG_REC_SIZE + 8, msg)
+    cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 16, line)
+    cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 24, col)
+    cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 32, diag_fileid_for_line(line))
     g_diag_count = g_diag_count + 1
 
 // --- Borrow checking ---
@@ -855,7 +797,7 @@ fn find_borrow_entry(var_ni: int) -> int:
     loop:
         if i >= g_borrow_count:
             return -1
-        if r64(g_borrow_vars, i * 8) == var_ni:
+        if cell_load(g_borrow_vars, i * 8) == var_ni:
             return i
         i = i + 1
     return -1
@@ -865,67 +807,67 @@ fn check_borrow(var_ni: int, is_mut: int) -> bool:
     if bi >= 0:
         if is_mut != 0:
             // &mut x: fail if any borrow exists
-            if r64(g_borrow_refs, bi * 8) > 0 || r64(g_borrow_muts, bi * 8) != 0:
+            if cell_load(g_borrow_refs, bi * 8) > 0 || cell_load(g_borrow_muts, bi * 8) != 0:
                 return false
-            w64(g_borrow_muts, bi * 8, 1)
+            cell_store(g_borrow_muts, bi * 8, 1)
             return true
         else:
             // &x: fail if mutable borrow exists
-            if r64(g_borrow_muts, bi * 8) != 0:
+            if cell_load(g_borrow_muts, bi * 8) != 0:
                 return false
-            w64(g_borrow_refs, bi * 8, r64(g_borrow_refs, bi * 8) + 1)
+            cell_store(g_borrow_refs, bi * 8, cell_load(g_borrow_refs, bi * 8) + 1)
             return true
     // First borrow of this variable
     grow_borrow_vars(g_borrow_count + 1)
-    w64(g_borrow_vars, g_borrow_count * 8, var_ni)
-    w64(g_borrow_refs, g_borrow_count * 8, 0)
-    w64(g_borrow_muts, g_borrow_count * 8, 0)
+    cell_store(g_borrow_vars, g_borrow_count * 8, var_ni)
+    cell_store(g_borrow_refs, g_borrow_count * 8, 0)
+    cell_store(g_borrow_muts, g_borrow_count * 8, 0)
     if is_mut != 0:
-        w64(g_borrow_muts, g_borrow_count * 8, 1)
+        cell_store(g_borrow_muts, g_borrow_count * 8, 1)
     else:
-        w64(g_borrow_refs, g_borrow_count * 8, 1)
+        cell_store(g_borrow_refs, g_borrow_count * 8, 1)
     g_borrow_count = g_borrow_count + 1
     return true
 
 fn check_use(var_ni: int) -> bool:
     bi := find_borrow_entry(var_ni)
     if bi >= 0:
-        if r64(g_borrow_refs, bi * 8) > 0 || r64(g_borrow_muts, bi * 8) != 0:
+        if cell_load(g_borrow_refs, bi * 8) > 0 || cell_load(g_borrow_muts, bi * 8) != 0:
             return false
     return true
 
 fn push_borrow_scope():
     grow_borrow_markers(g_borrow_scope_depth + 1)
-    w64(g_borrow_scope_markers, g_borrow_scope_depth * 8, g_holder_count)
+    cell_store(g_borrow_scope_markers, g_borrow_scope_depth * 8, g_holder_count)
     g_borrow_scope_depth = g_borrow_scope_depth + 1
 
 fn pop_borrow_scope():
     if g_borrow_scope_depth > 0:
         g_borrow_scope_depth = g_borrow_scope_depth - 1
-        marker := r64(g_borrow_scope_markers, g_borrow_scope_depth * 8)
+        marker := cell_load(g_borrow_scope_markers, g_borrow_scope_depth * 8)
         // Release all borrows held from marker to end
         loop:
             if g_holder_count <= marker:
                 break
             g_holder_count = g_holder_count - 1
-            borrowed_ni := r64(g_holder_borrowed, g_holder_count * 8)
-            is_mut := r64(g_holder_is_mut, g_holder_count * 8)
+            borrowed_ni := cell_load(g_holder_borrowed, g_holder_count * 8)
+            is_mut := cell_load(g_holder_is_mut, g_holder_count * 8)
             bi := find_borrow_entry(borrowed_ni)
             if bi >= 0:
                 if is_mut != 0:
-                    w64(g_borrow_muts, bi * 8, 0)
+                    cell_store(g_borrow_muts, bi * 8, 0)
                 else:
-                    if r64(g_borrow_refs, bi * 8) > 0:
-                        w64(g_borrow_refs, bi * 8, r64(g_borrow_refs, bi * 8) - 1)
+                    if cell_load(g_borrow_refs, bi * 8) > 0:
+                        cell_store(g_borrow_refs, bi * 8, cell_load(g_borrow_refs, bi * 8) - 1)
                 // Clean up entry if no more borrows
-                if r64(g_borrow_refs, bi * 8) == 0 && r64(g_borrow_muts, bi * 8) == 0:
+                if cell_load(g_borrow_refs, bi * 8) == 0 && cell_load(g_borrow_muts, bi * 8) == 0:
                     si : ., mut = bi
                     loop:
                         if si + 1 >= g_borrow_count:
                             break
-                        w64(g_borrow_vars, si * 8, r64(g_borrow_vars, (si + 1) * 8))
-                        w64(g_borrow_refs, si * 8, r64(g_borrow_refs, (si + 1) * 8))
-                        w64(g_borrow_muts, si * 8, r64(g_borrow_muts, (si + 1) * 8))
+                        cell_store(g_borrow_vars, si * 8, cell_load(g_borrow_vars, (si + 1) * 8))
+                        cell_store(g_borrow_refs, si * 8, cell_load(g_borrow_refs, (si + 1) * 8))
+                        cell_store(g_borrow_muts, si * 8, cell_load(g_borrow_muts, (si + 1) * 8))
                         si = si + 1
                     g_borrow_count = g_borrow_count - 1
 
@@ -937,9 +879,9 @@ fn pop_unsafe_scope():
 
 fn record_borrow_holder(borrower_ni: int, borrowed_ni: int, is_mut: int):
     grow_holder(g_holder_count + 1)
-    w64(g_holder_borrowers, g_holder_count * 8, borrower_ni)
-    w64(g_holder_borrowed, g_holder_count * 8, borrowed_ni)
-    w64(g_holder_is_mut, g_holder_count * 8, is_mut)
+    cell_store(g_holder_borrowers, g_holder_count * 8, borrower_ni)
+    cell_store(g_holder_borrowed, g_holder_count * 8, borrowed_ni)
+    cell_store(g_holder_is_mut, g_holder_count * 8, is_mut)
     g_holder_count = g_holder_count + 1
 
 fn borrow_var_name(node: int) -> int:
@@ -1026,7 +968,7 @@ fn res_type_node(node: int) -> int:
             loop:
                 if ai >= arg_count:
                     break
-                w64(args, ai * 8, res_type_node(an))
+                cell_store(args, ai * 8, res_type_node(an))
                 ai = ai + 1
                 an = an + 1
         // 实例化点的结构/枚举泛型约束检查（`Box[T: I]` 的 `Box[P]`）。
@@ -1035,12 +977,12 @@ fn res_type_node(node: int) -> int:
         // Store args in g_gen_apply_data: [count, arg1, arg2, ...]
         data_start := g_gen_apply_data_count
         grow_gen_apply_data(data_start + 1 + arg_count)
-        w64(g_gen_apply_data, data_start * 8, arg_count)
+        cell_store(g_gen_apply_data, data_start * 8, arg_count)
         ai2 : ., mut = 0
         loop:
             if ai2 >= arg_count:
                 break
-            w64(g_gen_apply_data, (data_start + 1 + ai2) * 8, r64(args, ai2 * 8))
+            cell_store(g_gen_apply_data, (data_start + 1 + ai2) * 8, cell_load(args, ai2 * 8))
             ai2 = ai2 + 1
         g_gen_apply_data_count = data_start + 1 + arg_count
         return alloc_type(TYP_GENERIC_APPLY, base_ti, data_start)
@@ -1071,7 +1013,7 @@ fn find_iface(name_ni: int) -> int:
     loop:
         if i >= g_iface_count:
             return -1
-        if r64(g_ifaces, i * ESZ_IFACEINFO + OFF_IF_NAME) == name_ni:
+        if cell_load(g_ifaces, i * ESZ_IFACEINFO + OFF_IF_NAME) == name_ni:
             return i
         i = i + 1
     return -1
@@ -1267,7 +1209,7 @@ fn gen_constr_seen_init():
     loop:
         if i >= nc:
             break
-        w64(nb, i * 16, -1)
+        cell_store(nb, i * 16, -1)
         i = i + 1
     g_constr_seen = nb
     g_constr_seen_cap = nc
@@ -1282,7 +1224,7 @@ fn gen_constr_seen_probe(k: int) -> int:
     p : ., mut = tt_mod(k, cap)
     ret : ., mut = -1
     loop:
-        kk := r64(g_constr_seen, p * 16)
+        kk := cell_load(g_constr_seen, p * 16)
         if kk < 0:
             ret = p
             break
@@ -1303,7 +1245,7 @@ fn gen_constr_seen_rehash():
     loop:
         if i >= nc:
             break
-        w64(nb, i * 16, -1)
+        cell_store(nb, i * 16, -1)
         i = i + 1
     g_constr_seen = nb
     g_constr_seen_cap = nc
@@ -1312,11 +1254,11 @@ fn gen_constr_seen_rehash():
     loop:
         if j >= old_cap:
             break
-        kk := r64(old, j * 16)
+        kk := cell_load(old, j * 16)
         if kk >= 0:
             s := gen_constr_seen_probe(kk)
-            w64(g_constr_seen, s * 16, kk)
-            w64(g_constr_seen, s * 16 + 8, 1)
+            cell_store(g_constr_seen, s * 16, kk)
+            cell_store(g_constr_seen, s * 16 + 8, 1)
             g_constr_seen_count = g_constr_seen_count + 1
         j = j + 1
 
@@ -1327,10 +1269,10 @@ fn gen_constr_seen_add(k: int) -> int:
     if (g_constr_seen_count + 1) * 2 >= g_constr_seen_cap:
         gen_constr_seen_rehash()
     s := gen_constr_seen_probe(k)
-    if r64(g_constr_seen, s * 16) == k:
+    if cell_load(g_constr_seen, s * 16) == k:
         return 0
-    w64(g_constr_seen, s * 16, k)
-    w64(g_constr_seen, s * 16 + 8, 1)
+    cell_store(g_constr_seen, s * 16, k)
+    cell_store(g_constr_seen, s * 16 + 8, 1)
     g_constr_seen_count = g_constr_seen_count + 1
     return 1
 
@@ -1359,7 +1301,7 @@ fn gen_inst_constr_check(app_node: int, sa: int, ea: int, args: string, arg_coun
         else:
             c_ni = ei_gen_constr(ea, i)
         if c_ni >= 0:
-            arg_ti := r64(args, i * 8)
+            arg_ti := cell_load(args, i * 8)
             if arg_ti >= 0:
                 if gen_inst_constr_satisfied(c_ni, arg_ti) == 0:
                     if gen_constr_seen_add(app_node * MAX_GENERICS + i) != 0:
@@ -1406,8 +1348,8 @@ fn collect_decls():
                 gname_ni := si_generic_name(i, gj)
                 g_ti := alloc_type(TYP_GENERIC_PARAM, gname_ni, 0)
                 grow_gen_params(g_gen_param_count + 2)
-                w64(g_gen_params, g_gen_param_count * 8, gname_ni)
-                w64(g_gen_params, (g_gen_param_count + 1) * 8, g_ti)
+                cell_store(g_gen_params, g_gen_param_count * 8, gname_ni)
+                cell_store(g_gen_params, (g_gen_param_count + 1) * 8, g_ti)
                 g_gen_param_count = g_gen_param_count + 2
                 def_sym(gname_ni, SYM_TYPE, g_ti, -1)
                 gj = gj + 1
@@ -1417,7 +1359,7 @@ fn collect_decls():
     loop:
         if i >= g_iface_count:
             break
-        name_idx := r64(g_ifaces, i * ESZ_IFACEINFO + OFF_IF_NAME)
+        name_idx := cell_load(g_ifaces, i * ESZ_IFACEINFO + OFF_IF_NAME)
         type_idx := alloc_named_type(name_idx)
         def_sym(name_idx, SYM_TYPE, type_idx, -1)
         i = i + 1
@@ -1461,8 +1403,8 @@ fn collect_decls():
                 gname_ni := ei_generic_name(i, gj)
                 g_ti := alloc_type(TYP_GENERIC_PARAM, gname_ni, 0)
                 grow_gen_params(g_gen_param_count + 2)
-                w64(g_gen_params, g_gen_param_count * 8, gname_ni)
-                w64(g_gen_params, (g_gen_param_count + 1) * 8, g_ti)
+                cell_store(g_gen_params, g_gen_param_count * 8, gname_ni)
+                cell_store(g_gen_params, (g_gen_param_count + 1) * 8, g_ti)
                 g_gen_param_count = g_gen_param_count + 2
                 def_sym(gname_ni, SYM_TYPE, g_ti, -1)
                 gj = gj + 1
@@ -1473,8 +1415,8 @@ fn collect_decls():
     loop:
         if i >= g_type_alias_count:
             break
-        name_idx := r64(g_type_aliases, i * 16)
-        type_node := r64(g_type_aliases, i * 16 + 8)
+        name_idx := cell_load(g_type_aliases, i * 16)
+        type_node := cell_load(g_type_aliases, i * 16 + 8)
         ti := res_type_node(type_node)
         def_sym(name_idx, SYM_TYPE, ti, -1)
         i = i + 1
@@ -1500,8 +1442,8 @@ fn collect_decls():
                 gname_ni := fi_generic_name(i, gj)
                 g_ti := alloc_type(TYP_GENERIC_PARAM, gname_ni, 0)
                 grow_gen_params(g_gen_param_count + 2)
-                w64(g_gen_params, g_gen_param_count * 8, gname_ni)
-                w64(g_gen_params, (g_gen_param_count + 1) * 8, g_ti)
+                cell_store(g_gen_params, g_gen_param_count * 8, gname_ni)
+                cell_store(g_gen_params, (g_gen_param_count + 1) * 8, g_ti)
                 g_gen_param_count = g_gen_param_count + 2
                 def_sym(gname_ni, SYM_TYPE, g_ti, -1)
                 gj = gj + 1
@@ -1609,7 +1551,7 @@ fn collect_decls():
     loop:
         if i >= g_global_let_count:
             break
-        node := r64(g_global_lets, i * 8)
+        node := cell_load(g_global_lets, i * 8)
         name_idx := ast_a(node)  // EXPR_LET: a = name idx
         type_node := ast_b(node)  // EXPR_LET: b = type node (-1 if none)
         ti := TI_UNIT
@@ -1622,8 +1564,8 @@ fn collect_decls():
     loop:
         if mi >= g_mod_count:
             break
-        alias_ni := r64(g_mods, mi * 24)
-        fileid_ni := r64(g_mods, mi * 24 + 8)
+        alias_ni := cell_load(g_mods, mi * 24)
+        fileid_ni := cell_load(g_mods, mi * 24 + 8)
         def_sym(alias_ni, SYM_MODULE, fileid_ni, -1)
         mi = mi + 1
     // Register mod path declarations (mod foo::bar;)
@@ -1631,13 +1573,13 @@ fn collect_decls():
     loop:
         if pi >= g_mod_path_count:
             break
-        mpn := r64(g_mod_path_names, pi * 8)
+        mpn := cell_load(g_mod_path_names, pi * 8)
         def_sym(mpn, SYM_MODULE, mpn, -1)
         pi = pi + 1
     // Build module function lookup table for qualified access (e.g., mymath.add)
     main_fni : ., mut = 0
     if g_file_count > 0:
-        main_fni = r64(g_files, 0)
+        main_fni = cell_load(g_files, 0)
     g_mod_func_count = 0
     g_mod_func_cap = 0
     fi : ., mut = 0
@@ -1647,14 +1589,14 @@ fn collect_decls():
         fn_node := fi_ast_node(fi)
         fn_line := ast_line(fn_node)
         if fn_line > 0 && fn_line <= g_line_count:
-            fileid_ni := r64(g_line_fileid, (fn_line - 1) * 8)
+            fileid_ni := cell_load(g_line_fileid, (fn_line - 1) * 8)
             if fileid_ni != main_fni && fileid_ni != 0 && g_line_count > 0:
                 grow_mod_funcs(g_mod_func_count + 1)
-                w64(g_mod_func_fileids, g_mod_func_count * 8, fileid_ni)
-                w64(g_mod_func_names, g_mod_func_count * 8, fi_name(fi))
+                cell_store(g_mod_func_fileids, g_mod_func_count * 8, fileid_ni)
+                cell_store(g_mod_func_names, g_mod_func_count * 8, fi_name(fi))
                 fn_si := find_sym(fi_name(fi))
                 if fn_si >= 0:
-                    w64(g_mod_func_tis, g_mod_func_count * 8, sym_type(fn_si))
+                    cell_store(g_mod_func_tis, g_mod_func_count * 8, sym_type(fn_si))
                 g_mod_func_count = g_mod_func_count + 1
         fi = fi + 1
 
@@ -1667,7 +1609,7 @@ fn is_func_generic(fi: int, name_idx: int) -> bool:
     loop:
         if gi >= fi_generic_count(fi):
             return false
-        if r64(g_funcs, fi * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gi * 8) == name_idx:
+        if cell_load(g_funcs, fi * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gi * 8) == name_idx:
             return true
         gi = gi + 1
     return false
@@ -1718,18 +1660,18 @@ fn ti_has_generic_param(ti: int) -> int:
         loop:
             if i >= cnt:
                 break
-            if ti_has_generic_param(r64(g_gen_apply_data, (st + i) * 8)) != 0:
+            if ti_has_generic_param(cell_load(g_gen_apply_data, (st + i) * 8)) != 0:
                 return 1
             i = i + 1
         return 0
     if k == TYP_GENERIC_APPLY:
         st := get_type_extra(ti)
-        cnt := r64(g_gen_apply_data, st * 8)
+        cnt := cell_load(g_gen_apply_data, st * 8)
         i : ., mut = 0
         loop:
             if i >= cnt:
                 break
-            if ti_has_generic_param(r64(g_gen_apply_data, (st + 1 + i) * 8)) != 0:
+            if ti_has_generic_param(cell_load(g_gen_apply_data, (st + 1 + i) * 8)) != 0:
                 return 1
             i = i + 1
         return 0
@@ -1781,14 +1723,14 @@ fn type_display(ti: int) -> string:
         s = type_display(base)
         s = s + "["
         start := get_type_extra(ti)
-        cnt := r64(g_gen_apply_data, start * 8)
+        cnt := cell_load(g_gen_apply_data, start * 8)
         i : ., mut = 0
         loop:
             if i >= cnt:
                 break
             if i > 0:
                 s = s + ", "
-            s = s + type_display(r64(g_gen_apply_data, (start + 1 + i) * 8))
+            s = s + type_display(cell_load(g_gen_apply_data, (start + 1 + i) * 8))
             i = i + 1
         s = s + "]"
         return s
@@ -1874,7 +1816,7 @@ fn res_call_type(node: int, func_fi: int) -> int:
             loop:
                 if ai >= ac:
                     break
-                w64(args, ai * 8, res_call_type(an, func_fi))
+                cell_store(args, ai * 8, res_call_type(an, func_fi))
                 ai = ai + 1
                 an = an + 1
         // 调用位点的实例化检查（与 res_type_node 同源；本节的存在理由
@@ -1882,12 +1824,12 @@ fn res_call_type(node: int, func_fi: int) -> int:
         gen_inst_constr_check(node, find_struct(name_idx), find_enum(name_idx), args, ac)
         ds := g_gen_apply_data_count
         grow_gen_apply_data(ds + 1 + ac)
-        w64(g_gen_apply_data, ds * 8, ac)
+        cell_store(g_gen_apply_data, ds * 8, ac)
         ai2 : ., mut = 0
         loop:
             if ai2 >= ac:
                 break
-            w64(g_gen_apply_data, (ds + 1 + ai2) * 8, r64(args, ai2 * 8))
+            cell_store(g_gen_apply_data, (ds + 1 + ai2) * 8, cell_load(args, ai2 * 8))
             ai2 = ai2 + 1
         g_gen_apply_data_count = ds + 1 + ac
         return alloc_type(TYP_GENERIC_APPLY, base_ti, ds)
@@ -1932,13 +1874,13 @@ fn unify_types(pattern: int, concrete: int) -> bool:
         loop:
             if mi >= g_gen_map_count:
                 break
-            if r64(g_gen_map_names, mi * 8) == name_idx:
+            if cell_load(g_gen_map_names, mi * 8) == name_idx:
                 // 参序归一：源 = concrete（实参），目标 = 已绑定项
-                return type_compat_strict(concrete, r64(g_gen_map_types, mi * 8)) == 1
+                return type_compat_strict(concrete, cell_load(g_gen_map_types, mi * 8)) == 1
             mi = mi + 1
         grow_gen_map(g_gen_map_count + 1)
-        w64(g_gen_map_names, g_gen_map_count * 8, name_idx)
-        w64(g_gen_map_types, g_gen_map_count * 8, concrete)
+        cell_store(g_gen_map_names, g_gen_map_count * 8, name_idx)
+        cell_store(g_gen_map_types, g_gen_map_count * 8, concrete)
         g_gen_map_count = g_gen_map_count + 1
         return true
         return false
@@ -1948,15 +1890,15 @@ fn unify_types(pattern: int, concrete: int) -> bool:
             return false
         ps := get_type_extra(pattern)
         cs := get_type_extra(concrete)
-        pc := r64(g_gen_apply_data, ps * 8)
-        cc := r64(g_gen_apply_data, cs * 8)
+        pc := cell_load(g_gen_apply_data, ps * 8)
+        cc := cell_load(g_gen_apply_data, cs * 8)
         if pc != cc:
             return false
         ai : ., mut = 0
         loop:
             if ai >= pc:
                 break
-            if !unify_types(r64(g_gen_apply_data, (ps + 1 + ai) * 8), r64(g_gen_apply_data, (cs + 1 + ai) * 8)):
+            if !unify_types(cell_load(g_gen_apply_data, (ps + 1 + ai) * 8), cell_load(g_gen_apply_data, (cs + 1 + ai) * 8)):
                 return false
             ai = ai + 1
         return true
@@ -1974,14 +1916,14 @@ fn substitute_return_type(ti: int) -> int:
         loop:
             if mi >= g_gen_map_count:
                 break
-            if r64(g_gen_map_names, mi * 8) == name_idx:
-                return r64(g_gen_map_types, mi * 8)
+            if cell_load(g_gen_map_names, mi * 8) == name_idx:
+                return cell_load(g_gen_map_types, mi * 8)
             mi = mi + 1
         return ti
     if k == TYP_GENERIC_APPLY:
         base := get_type_data(ti)
         start := get_type_extra(ti)
-        count := r64(g_gen_apply_data, start * 8)
+        count := cell_load(g_gen_apply_data, start * 8)
         // 两趟（同 res_type_node：递归代换会追加嵌套应用携带值，因此先算进暂存再认领块）
         subs : string, mut
         if count > 0:
@@ -1990,16 +1932,16 @@ fn substitute_return_type(ti: int) -> int:
             loop:
                 if ai >= count:
                     break
-                w64(subs, ai * 8, substitute_return_type(r64(g_gen_apply_data, (start + 1 + ai) * 8)))
+                cell_store(subs, ai * 8, substitute_return_type(cell_load(g_gen_apply_data, (start + 1 + ai) * 8)))
                 ai = ai + 1
         new_start := g_gen_apply_data_count
         grow_gen_apply_data(new_start + 1 + count)
-        w64(g_gen_apply_data, new_start * 8, count)
+        cell_store(g_gen_apply_data, new_start * 8, count)
         ai2 : ., mut = 0
         loop:
             if ai2 >= count:
                 break
-            w64(g_gen_apply_data, (new_start + 1 + ai2) * 8, r64(subs, ai2 * 8))
+            cell_store(g_gen_apply_data, (new_start + 1 + ai2) * 8, cell_load(subs, ai2 * 8))
             ai2 = ai2 + 1
         g_gen_apply_data_count = new_start + 1 + count
         return alloc_type(TYP_GENERIC_APPLY, base, new_start)
@@ -2076,7 +2018,7 @@ fn infer_gen_call(fi: int, call_node: int, first_arg: int, arg_count: int) -> in
                 break
             constr_idx := fi * MAX_GENERICS + gci
             if constr_idx < g_generic_constr_count:
-                iface_ni := r64(g_generic_constr, constr_idx * 8)
+                iface_ni := cell_load(g_generic_constr, constr_idx * 8)
                 if iface_ni >= 0:
                     pname_ni := fi_generic_name(fi, gci)
                     concrete_ti : ., mut = -1
@@ -2084,8 +2026,8 @@ fn infer_gen_call(fi: int, call_node: int, first_arg: int, arg_count: int) -> in
                     loop:
                         if hmi >= g_gen_map_count:
                             break
-                        if r64(g_gen_map_names, hmi * 8) == pname_ni:
-                            concrete_ti = r64(g_gen_map_types, hmi * 8)
+                        if cell_load(g_gen_map_names, hmi * 8) == pname_ni:
+                            concrete_ti = cell_load(g_gen_map_types, hmi * 8)
                             break
                         hmi = hmi + 1
                     if concrete_ti >= 0:
@@ -2116,7 +2058,7 @@ fn infer_gen_call(fi: int, call_node: int, first_arg: int, arg_count: int) -> in
         if gc_b > 0:
             bstart := g_gen_binds_count
             grow_gen_binds(bstart + 1 + gc_b)
-            w64(g_gen_binds, bstart * 8, gc_b)
+            cell_store(g_gen_binds, bstart * 8, gc_b)
             gi_b : ., mut = 0
             loop:
                 if gi_b >= gc_b:
@@ -2127,11 +2069,11 @@ fn infer_gen_call(fi: int, call_node: int, first_arg: int, arg_count: int) -> in
                 loop:
                     if hmi_b >= g_gen_map_count:
                         break
-                    if r64(g_gen_map_names, hmi_b * 8) == pname_b:
-                        tv_b = r64(g_gen_map_types, hmi_b * 8)
+                    if cell_load(g_gen_map_names, hmi_b * 8) == pname_b:
+                        tv_b = cell_load(g_gen_map_types, hmi_b * 8)
                         break
                     hmi_b = hmi_b + 1
-                w64(g_gen_binds, (bstart + 1 + gi_b) * 8, tv_b)
+                cell_store(g_gen_binds, (bstart + 1 + gi_b) * 8, tv_b)
                 gi_b = gi_b + 1
             g_gen_binds_count = bstart + 1 + gc_b
             ast_set_int_val(call_node, bstart + 1)
@@ -2176,7 +2118,7 @@ fn check_func(fi: int):
         loop:
             if gi >= fi_generic_count(fi):
                 break
-            gname_idx := r64(g_funcs, fi * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gi * 8)
+            gname_idx := cell_load(g_funcs, fi * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gi * 8)
             g_ti := alloc_type(TYP_GENERIC_PARAM, gname_idx, 0)
             def_sym(gname_idx, SYM_TYPE, g_ti, -1)
             gi = gi + 1
@@ -2218,7 +2160,7 @@ fn check_func(fi: int):
             loop:
                 if di >= fn_len:
                     break
-                if load8(fn_name, di) == 46:
+                if cell_load_byte(fn_name, di) == 46:
                     dot_pos = di
                     break
                 // '.' = 46
@@ -2370,8 +2312,8 @@ fn check_impl_for():
     loop:
         if pi >= g_impl_for_count:
             break
-        iface_ni := r64(g_impl_for, pi * 16)
-        type_ni := r64(g_impl_for, pi * 16 + 8)
+        iface_ni := cell_load(g_impl_for, pi * 16)
+        type_ni := cell_load(g_impl_for, pi * 16 + 8)
         // Find interface by name
         ii := find_iface(iface_ni)
         if ii < 0:
@@ -2379,14 +2321,14 @@ fn check_impl_for():
             check_error(EC_N_UNDEFINED, "Undefined interface '" + iface_name + "'", 0, 0)
             pi = pi + 1
             continue
-        method_count := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
+        method_count := cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
         mi : ., mut = 0
         loop:
             if mi >= method_count:
                 break
             mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD
-            method_ni := r64(g_ifaces, mbase + OFF_IFM_NAME)
-            method_pc := r64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT)
+            method_ni := cell_load(g_ifaces, mbase + OFF_IFM_NAME)
+            method_pc := cell_load(g_ifaces, mbase + OFF_IFM_PARAM_COUNT)
             method_name := istr_get(method_ni)
             iface_name2 := istr_get(iface_ni)
 
@@ -2454,13 +2396,13 @@ fn grow_dyn_type_sets(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 8)
-    _dyncpy(g_dyn_type_sets, g_dyn_type_set_cap * 8, nb)
+    cell_copy(g_dyn_type_sets, g_dyn_type_set_cap * 8, nb)
     g_dyn_type_sets = nb
     g_dyn_type_set_cap = nc
 
 fn dyn_set_type(var_idx: int, ti: int):
     grow_dyn_type_sets(var_idx + 1)
-    old_bits := r64(g_dyn_type_sets, var_idx * 8)
+    old_bits := cell_load(g_dyn_type_sets, var_idx * 8)
     bit : ., mut = 1
     if ti >= 0 && ti < 64:
         bit = 1
@@ -2470,14 +2412,14 @@ fn dyn_set_type(var_idx: int, ti: int):
                 break
             bit = bit * 2
             shl = shl - 1
-    w64(g_dyn_type_sets, var_idx * 8, old_bits + bit)
+    cell_store(g_dyn_type_sets, var_idx * 8, old_bits + bit)
     if var_idx >= g_dyn_type_set_count:
         g_dyn_type_set_count = var_idx + 1
 
 fn dyn_has_type(var_idx: int, ti: int) -> int:
     if var_idx < 0 || var_idx >= g_dyn_type_set_count:
         return 0
-    set := r64(g_dyn_type_sets, var_idx * 8)
+    set := cell_load(g_dyn_type_sets, var_idx * 8)
     bit : ., mut = 1
     if ti >= 0 && ti < 64:
         bit = 1
@@ -2512,7 +2454,7 @@ fn union_bitmaps(a: int, b: int) -> int:
 fn validate_dyn_method(si: int, method_ni: int, line: int, col: int):
     if si < 0 || si >= g_dyn_type_set_count:
         return
-    set := r64(g_dyn_type_sets, si * 8)
+    set := cell_load(g_dyn_type_sets, si * 8)
     if set == 0:
         return
     ti : ., mut = 0
@@ -2592,7 +2534,7 @@ fn s1p_src_frag(line: int) -> string:
     loop:
         if p >= g_source_len:
             break
-        c := load8(g_source, p)
+        c := cell_load_byte(g_source, p)
         if ln == line && start < 0:
             start = p
         if start >= 0 && c == 10:
@@ -2610,16 +2552,11 @@ fn s1p_src_frag(line: int) -> string:
     return str_sub(g_source, start, end - start)
 
 // ─── S1P 台账三件：检查、单实参判定、枚举环，与 s1p_arg_ring 同一契约 ───
-// 检查（懒初始化 + `CORE_S1P`）：所有类型引擎调用都必须在检查后（默认位一步不执行 = 零足迹）。
+// 检查：进程启动时由 prelude_init 读取 `CORE_S1P`。所有类型引擎调用都必须在
+// 检查后（默认位一步不执行 = 零足迹）。
 fn s1p_gate() -> int:
     if g_s1p_seen == 0:
-        //  哨兵必须用零值（详情见 `s1p_arg_ring` 内注 + 未完成项）
-        g_s1p_seen = 1
-        ev2 := get_env("CORE_S1P")
-        if str_len(ev2) > 0 && ev2 == "1":
-            g_s1p_on = 1
-        else:
-            g_s1p_on = 0
+        prelude_init()
     return g_s1p_on
 
 // 单实参：跳过规则（2`None`->`T?` / 3字面量多态 / 形参型不可得 / 未推断出形），因此否则 `unify_types`
@@ -2767,16 +2704,7 @@ fn s1p_arg_ring(fi: int, first_arg: int, arg_count: int, param_skip: int, is_ext
         if pi2 >= pc:
             break
         if g_s1p_seen == 0:
-            // 懒初始化：`CORE_S1P=1` 才开（`os.cr` 的 `get_env` 在 corec/corelsp 两单元皆在）
-            // 哨兵必须用零值。globals.cr 里的 g_s1p_on : int, mut = -1 在 Python bootstrap
-            // 构建 corec 时，初值会丢失成 0（.quad 0），导致未初始化 = -1判据恒假，
-            // 懒初始化永不执行，开关恒关。该行为只影响 bootstrap 构建的 corec，self-hosted 正常。
-            g_s1p_seen = 1
-            ev2 := get_env("CORE_S1P")
-            if str_len(ev2) > 0 && ev2 == "1":
-                g_s1p_on = 1
-            else:
-                g_s1p_on = 0
+            prelude_init()
         //  整块纳入检查：仅把 print 纳入检查不够，本块里的类型引擎调用
         //  （`infer_expr`/`res_call_type`/`unify_types`）会向 TYPE(7) 段的项表里留项（memo）
         // 因此输出 `.ccr` 的段 7 变长（例如检查只覆盖 print 时 `opt_dex_test.cr` 的 `.ccr`
@@ -2813,6 +2741,8 @@ fn infer_expr(node: int) -> int:
     // 不得重排、不得合并成先取 kind 再查的循环（那会改短路路径）。
     if ast_kind(node) == EXPR_INT:
         return iface_lit_ti(EXPR_INT)
+    if ast_kind(node) == EXPR_BIGINT:
+        return TI_INT
     if ast_kind(node) == EXPR_NONE && ast_a(node) >= 0 && ast_a(node) != node:
         return infer_expr(ast_a(node))
     if ast_kind(node) == EXPR_DEX:
@@ -3008,8 +2938,8 @@ fn infer_expr(node: int) -> int:
                     loop:
                         if mfi >= g_mod_func_count:
                             break
-                        if r64(g_mod_func_fileids, mfi * 8) == fileid_ni && r64(g_mod_func_names, mfi * 8) == method_ni:
-                            func_ni = r64(g_mod_func_names, mfi * 8)
+                        if cell_load(g_mod_func_fileids, mfi * 8) == fileid_ni && cell_load(g_mod_func_names, mfi * 8) == method_ni:
+                            func_ni = cell_load(g_mod_func_names, mfi * 8)
                             ast_set_data(node, func_ni)
                             call_flags := ast_type_val(node)
                             if call_flags == CALL_FLAG_INLINE:
@@ -3033,7 +2963,7 @@ fn infer_expr(node: int) -> int:
                 fi_mod := find_func(func_ni)
                 s1p_arg_ring(fi_mod, first_arg, arg_count, 0, 0)
                 if mod_found_mfi >= 0:
-                    return r64(g_mod_func_tis, mod_found_mfi * 8)
+                    return cell_load(g_mod_func_tis, mod_found_mfi * 8)
                 return TI_UNIT
 
             obj_ti := infer_expr(obj)
@@ -3063,8 +2993,8 @@ fn infer_expr(node: int) -> int:
                 loop:
                     if mi >= g_method_count:
                         break
-                    if r64(g_methods, mi * 24) == struct_ni && r64(g_methods, mi * 24 + 8) == method_ni:
-                        func_ni = r64(g_methods, mi * 24 + 16)
+                    if cell_load(g_methods, mi * 24) == struct_ni && cell_load(g_methods, mi * 24 + 8) == method_ni:
+                        func_ni = cell_load(g_methods, mi * 24 + 16)
                         ast_set_data(node, func_ni)
                         break
                     mi = mi + 1
@@ -3076,28 +3006,28 @@ fn infer_expr(node: int) -> int:
                 loop:
                     if gci2 >= gc2:
                         break
-                    gname_idx2 := r64(g_funcs, g_checker_current_fi * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gci2 * 8)
+                    gname_idx2 := cell_load(g_funcs, g_checker_current_fi * ESZ_FUNCINFO + OFF_FI_GENERIC_NAMES + gci2 * 8)
                     if gname_idx2 == gen_ni:
                         constr_idx2 := g_checker_current_fi * MAX_GENERICS + gci2
                         if constr_idx2 < g_generic_constr_count:
-                            iface_ni2 := r64(g_generic_constr, constr_idx2 * 8)
+                            iface_ni2 := cell_load(g_generic_constr, constr_idx2 * 8)
                             if iface_ni2 >= 0:
                                 ii2 := find_iface(iface_ni2)
                                 if ii2 >= 0:
-                                    imc2 := r64(g_ifaces, ii2 * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
+                                    imc2 := cell_load(g_ifaces, ii2 * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
                                     imi2 : ., mut = 0
                                     loop:
                                         if imi2 >= imc2:
                                             break
                                         imbase2 := ii2 * ESZ_IFACEINFO + OFF_IF_METHODS + imi2 * ESZ_IFMETHOD
-                                        if r64(g_ifaces, imbase2 + OFF_IFM_NAME) == method_ni:
+                                        if cell_load(g_ifaces, imbase2 + OFF_IFM_NAME) == method_ni:
                                             // 调用点记录泛型形参名 ni 和标记位，实例化时由
                                             // monomorph 按具体类型查方法表，解析为真实函数名。
                                             // 不再合成 "T.m" 字符串；名字拼接和克隆期文本替换会让
                                             // 实例体内的调用目标悬空。
                                             ast_set_data(node, gen_ni)
                                             ast_set_type_val(node, CALL_FLAG_IFACE_METHOD)
-                                            iface_ret2 := r64(g_ifaces, imbase2 + OFF_IFM_RET_TI)
+                                            iface_ret2 := cell_load(g_ifaces, imbase2 + OFF_IFM_RET_TI)
                                             // 值经单表 `ty_code_to_ti`；本站点值域 = parser 写入的
                                             //  `unpack_type(返回型节点)`（parser.cr:1701，即 TY_* 码）；域 = {INT..CHAR}
                                             //  （缺 NEVER/7，因此落尾 TI_UNIT）。显式化：现状 6 行用的是 `iface_ret2 == TY_*`
@@ -3153,13 +3083,10 @@ fn infer_expr(node: int) -> int:
         if ast_kind(func_node) == EXPR_AT:
             ast_set_b(func_node, first_arg)
             return infer_expr(func_node)
-        // Check builtins (syscall3/syscall4 — OS communication, no .cr body)
-        if func_ni >= 0:
-            s := istr_get(func_ni)
-            if s == "syscall3":
-                return TI_INT
-            if s == "syscall4":
-                return TI_INT
+        // Check prelude builtins (syscall3/syscall4 — OS communication, no .cr body)
+        prelude_ti := prelude_builtin_return_ti(func_ni)
+        if prelude_ti >= 0:
+            return prelude_ti
         // Check for SYM_SO_FN (.so extension registered)
         so_fn_fi : ., mut = -1
         if func_ni >= 0:
@@ -3245,9 +3172,9 @@ fn infer_expr(node: int) -> int:
             loop:
                 if bi >= g_rt_builtin_count:
                     break
-                if r64(g_rt_builtin_names, bi * 8) == func_ni:
+                if cell_load(g_rt_builtin_names, bi * 8) == func_ni:
                     infer_call_args(first_arg)   // 未完成项：实参必须被推断（本 return 路径原先跳过）
-                    return r64(g_rt_builtin_ret_types, bi * 8)
+                    return cell_load(g_rt_builtin_ret_types, bi * 8)
                 bi = bi + 1
             // Not found in symbol table or builtins — report error
             name := istr_get(func_ni)
@@ -3266,7 +3193,7 @@ fn infer_expr(node: int) -> int:
         loop:
             if i >= stmt_count:
                 break
-            sn := r64(g_block_stmts, (stmt_start + i) * 8)
+            sn := cell_load(g_block_stmts, (stmt_start + i) * 8)
             res = infer_expr(sn)
             i = i + 1
         // Track the last-statement type for debugging
@@ -3289,7 +3216,7 @@ fn infer_expr(node: int) -> int:
         pre_dyn_save : string, mut = ""
         if pre_dyn_count > 0:
             pre_dyn_save = alloc(pre_dyn_count * 8)
-            _dyncpy(g_dyn_type_sets, pre_dyn_count * 8, pre_dyn_save)
+            cell_copy(g_dyn_type_sets, pre_dyn_count * 8, pre_dyn_save)
         // --- Process then branch ---
         push_borrow_scope()
         then_ti := infer_expr(then_node)
@@ -3299,16 +3226,16 @@ fn infer_expr(node: int) -> int:
         then_dyn_save : string, mut = ""
         if then_dyn_count > 0:
             then_dyn_save = alloc(then_dyn_count * 8)
-            _dyncpy(g_dyn_type_sets, then_dyn_count * 8, then_dyn_save)
+            cell_copy(g_dyn_type_sets, then_dyn_count * 8, then_dyn_save)
         // --- Restore pre-if state (zero stale entries beyond pre_dyn_count) ---
         g_dyn_type_set_count = pre_dyn_count
         if pre_dyn_count > 0:
-            _dyncpy(pre_dyn_save, pre_dyn_count * 8, g_dyn_type_sets)
+            cell_copy(pre_dyn_save, pre_dyn_count * 8, g_dyn_type_sets)
         iz : ., mut = pre_dyn_count
         loop:
             if iz >= then_dyn_count:
                 break
-            w64(g_dyn_type_sets, iz * 8, 0)
+            cell_store(g_dyn_type_sets, iz * 8, 0)
             iz = iz + 1
         // --- Process else branch (if any) ---
         if else_node >= 0:
@@ -3327,12 +3254,12 @@ fn infer_expr(node: int) -> int:
                     break
                 then_bits : ., mut = 0
                 if mi < then_dyn_count:
-                    then_bits = r64(then_dyn_save, mi * 8)
+                    then_bits = cell_load(then_dyn_save, mi * 8)
                 else_bits : ., mut = 0
                 if mi < g_dyn_type_set_count:
-                    else_bits = r64(g_dyn_type_sets, mi * 8)
+                    else_bits = cell_load(g_dyn_type_sets, mi * 8)
                 merged := union_bitmaps(then_bits, else_bits)
-                w64(g_dyn_type_sets, mi * 8, merged)
+                cell_store(g_dyn_type_sets, mi * 8, merged)
                 mi = mi + 1
             g_dyn_type_set_count = merge_count
             // 参序归一：合并结果类型 = then_ti（下方 return then_ti），因此源 = else 侧，
@@ -3585,7 +3512,7 @@ fn infer_expr(node: int) -> int:
             def_sym(var_ni, SYM_LOCAL, ti, -1)
             if ti == TI_DYN && val_node >= 0:
                 grow_dyn_type_sets(g_sym_count)
-                w64(g_dyn_type_sets, (g_sym_count - 1) * 8, 0)
+                cell_store(g_dyn_type_sets, (g_sym_count - 1) * 8, 0)
                 dyn_set_type(g_sym_count - 1, val_ti)
         return TI_UNIT
 
@@ -3658,7 +3585,7 @@ fn infer_expr(node: int) -> int:
                     if an2 >= 0:
                         ev = infer_expr(ast_a(an2))
                         an2 = ast_b(an2)
-                    w64(tis, ai * 8, ev)
+                    cell_store(tis, ai * 8, ev)
                     ai = ai + 1
                 ds := g_gen_apply_data_count
                 grow_gen_apply_data(ds + arg_count)
@@ -3666,7 +3593,7 @@ fn infer_expr(node: int) -> int:
                 loop:
                     if ai >= arg_count:
                         break
-                    w64(g_gen_apply_data, (ds + ai) * 8, r64(tis, ai * 8))
+                    cell_store(g_gen_apply_data, (ds + ai) * 8, cell_load(tis, ai * 8))
                     ai = ai + 1
                 g_gen_apply_data_count = ds + arg_count
                 at = alloc_type(TYP_TUPLE, arg_count, ds)
@@ -3707,7 +3634,7 @@ fn infer_expr(node: int) -> int:
                                 if is_struct_generic(si, ft_name_idx) && get_type_kind(obj_ti) == TYP_GENERIC_APPLY:
                                     base_ti := get_type_data(obj_ti)
                                     ga_start := get_type_extra(obj_ti)
-                                    ga_count := r64(g_gen_apply_data, ga_start * 8)
+                                    ga_count := cell_load(g_gen_apply_data, ga_start * 8)
                                         // Find which generic param index
                                     gpi : ., mut = 0
                                     loop:
@@ -3716,7 +3643,7 @@ fn infer_expr(node: int) -> int:
                                         if si_generic_name(si, gpi) == ft_name_idx:
                                                 // Use the corresponding arg from the generic apply
                                             if gpi < ga_count:
-                                                return r64(g_gen_apply_data, (ga_start + 1 + gpi) * 8)
+                                                return cell_load(g_gen_apply_data, (ga_start + 1 + gpi) * 8)
                                             break
                                         gpi = gpi + 1
                             return res_type_node(ft_node)
@@ -3731,7 +3658,7 @@ fn infer_expr(node: int) -> int:
                 data_start := get_type_extra(actual_ti)
                 if ast_data(node) != idx:
                     ast_set_data(node, idx)
-                return r64(g_gen_apply_data, (data_start + idx) * 8)
+                return cell_load(g_gen_apply_data, (data_start + idx) * 8)
         return TI_UNIT
 
     if ast_kind(node) == EXPR_INDEX:
@@ -3847,7 +3774,7 @@ fn infer_expr(node: int) -> int:
         loop:
             if i >= c:
                 break
-            w64(didx, i * 8, i)
+            cell_store(didx, i * 8, i)
             i = i + 1
         if si >= 0 && (named != 0 || c == 0):
             // ── 名字 -> 声明下标：未知字段 / 重复字段 / 缺字段 ──
@@ -3857,7 +3784,7 @@ fn infer_expr(node: int) -> int:
             loop:
                 if j >= fc:
                     break
-                w64(used, j * 8, 0)
+                cell_store(used, j * 8, 0)
                 j = j + 1
             if named != 0:
                 i = 0
@@ -3869,16 +3796,16 @@ fn infer_expr(node: int) -> int:
                     if jdi < 0:
                         check_error(EC_TS_UNKNOWN_FIELD, "Unknown field '" + istr_get(nn) + "' in struct literal " + istr_get(name_ni), ast_line(w0 + i), ast_col(w0 + i))
                     else:
-                        if r64(used, jdi * 8) != 0:
+                        if cell_load(used, jdi * 8) != 0:
                             check_error(EC_TS_FIELD_DUP, "Field '" + istr_get(nn) + "' initialized more than once", ast_line(w0 + i), ast_col(w0 + i))
-                        w64(used, jdi * 8, 1)
-                        w64(didx, i * 8, jdi)
+                        cell_store(used, jdi * 8, 1)
+                        cell_store(didx, i * 8, jdi)
                     i = i + 1
             j = 0
             loop:
                 if j >= fc:
                     break
-                if r64(used, j * 8) == 0:
+                if cell_load(used, j * 8) == 0:
                     // 只报第一个缺字段（同一程序员错误不刷屏）
                     check_error(EC_TS_MISSING_FIELD, "Missing field '" + istr_get(si_field_name(si, j)) + "' in struct literal " + istr_get(name_ni), ast_line(node), ast_col(node))
                     break
@@ -3891,7 +3818,7 @@ fn infer_expr(node: int) -> int:
             if i >= c:
                 break
             if w0 >= 0:
-                w64(vts, i * 8, infer_expr(w0 + i))
+                cell_store(vts, i * 8, infer_expr(w0 + i))
             i = i + 1
         if si >= 0:
             gc := si_generic_count(si)
@@ -3903,27 +3830,27 @@ fn infer_expr(node: int) -> int:
                 loop:
                     if i >= c:
                         break
-                    jdi := r64(didx, i * 8)
+                    jdi := cell_load(didx, i * 8)
                     if jdi >= 0 && jdi < si_field_count(si):
                         dtn := si_field_type_node(si, jdi)
                         if dtn >= 0 && ast_kind(dtn) == EXPR_IDENT && is_struct_generic(si, ast_int_val(dtn)):
                             pt := alloc_type(TYP_GENERIC_PARAM, ast_int_val(dtn), 0)
-                            if !unify_types(pt, r64(vts, i * 8)):
-                                check_error(EC_TS_FIELD_TYPE, "Field '" + istr_get(si_field_name(si, jdi)) + "': expected " + istr_get(ast_int_val(dtn)) + ", got " + type_display(r64(vts, i * 8)), ast_line(w0 + i), ast_col(w0 + i))
+                            if !unify_types(pt, cell_load(vts, i * 8)):
+                                check_error(EC_TS_FIELD_TYPE, "Field '" + istr_get(si_field_name(si, jdi)) + "': expected " + istr_get(ast_int_val(dtn)) + ", got " + type_display(cell_load(vts, i * 8)), ast_line(w0 + i), ast_col(w0 + i))
                     i = i + 1
             // ── 非参数声明类型：值类型 vs 声明类型比对（两侧任一含未实例化泛型参数 -> 跳过）──
             i = 0
             loop:
                 if i >= c:
                     break
-                jdi := r64(didx, i * 8)
+                jdi := cell_load(didx, i * 8)
                 if jdi >= 0 && jdi < si_field_count(si):
                     dtn := si_field_type_node(si, jdi)
                     is_param : ., mut = 0
                     if dtn >= 0 && ast_kind(dtn) == EXPR_IDENT && is_struct_generic(si, ast_int_val(dtn)):
                         is_param = 1
                     if is_param == 0 && type_node_mentions_struct_param(si, dtn) == 0:
-                        vt := r64(vts, i * 8)
+                        vt := cell_load(vts, i * 8)
                         if ti_has_generic_param(vt) == 0:
                             dt := res_type_node(dtn)
                             if ti_has_generic_param(dt) == 0:
@@ -3950,15 +3877,15 @@ fn infer_expr(node: int) -> int:
                     loop:
                         if mi >= g_gen_map_count:
                             break
-                        if r64(g_gen_map_names, mi * 8) == pni:
-                            bind = r64(g_gen_map_types, mi * 8)
+                        if cell_load(g_gen_map_names, mi * 8) == pni:
+                            bind = cell_load(g_gen_map_types, mi * 8)
                             break
                         mi = mi + 1
                     if bind >= 0:
-                        w64(g_gen_apply_data, (ds + 1 + found) * 8, bind)
+                        cell_store(g_gen_apply_data, (ds + 1 + found) * 8, bind)
                         found = found + 1
                     g = g + 1
-                w64(g_gen_apply_data, ds * 8, found)
+                cell_store(g_gen_apply_data, ds * 8, found)
                 g_gen_apply_data_count = ds + 1 + found
                 return alloc_type(TYP_GENERIC_APPLY, base_ti, ds)
             return alloc_named_type(name_ni)
@@ -4058,7 +3985,7 @@ fn infer_expr(node: int) -> int:
             wn : ., mut = -1
             if elem_idx >= 0:
                 wn = ast_a(elem_idx + e)
-            w64(tis, e * 8, infer_expr(wn))
+            cell_store(tis, e * 8, infer_expr(wn))
             e = e + 1
         data_start := g_gen_apply_data_count
         grow_gen_apply_data(data_start + ec)
@@ -4066,7 +3993,7 @@ fn infer_expr(node: int) -> int:
         loop:
             if e >= ec:
                 break
-            w64(g_gen_apply_data, (data_start + e) * 8, r64(tis, e * 8))
+            cell_store(g_gen_apply_data, (data_start + e) * 8, cell_load(tis, e * 8))
             e = e + 1
         g_gen_apply_data_count = data_start + ec
         return alloc_type(TYP_TUPLE, ec, data_start)
@@ -4256,7 +4183,7 @@ fn check_all():
 
     // First pass: collect declarations
     collect_decls()
-    init_builtins()
+    prelude_builtin_init()
 
     // SYM_SO_FN is materialized by the side-table fallback in find_gsym and
     // find_so_fn on first reference, which naturally happens after the reset.
@@ -4267,8 +4194,8 @@ fn check_all():
     loop:
         if ri2 >= g_rt_builtin_count:
             break
-        ni2 := r64(g_rt_builtin_names, ri2 * 8)
-        ti2 := r64(g_rt_builtin_ret_types, ri2 * 8)
+        ni2 := cell_load(g_rt_builtin_names, ri2 * 8)
+        ti2 := cell_load(g_rt_builtin_ret_types, ri2 * 8)
         if find_gsym(ni2) < 0:
             // skip if already defined by user
             si2 := g_sym_count
@@ -4293,7 +4220,7 @@ fn check_all():
     loop:
         if i >= g_global_let_count:
             break
-        check_global_let(r64(g_global_lets, i * 8))
+        check_global_let(cell_load(g_global_lets, i * 8))
         i = i + 1
 
     // Check impl-for relationships
@@ -4519,7 +4446,7 @@ fn df_func_of_node(pos: int) -> int:
     loop:
         if irf >= g_ir_func_count:
             break
-        if r64(g_df_func_node_start, irf * 8) <= pos:
+        if cell_load(g_df_func_node_start, irf * 8) <= pos:
             best = irf
         irf = irf + 1
     return best
@@ -4542,14 +4469,14 @@ fn compute_all_purity():
     loop:
         if z >= fcount:
             break
-        w64(local, z * 8, 0)
-        w64(pure, z * 8, 0)
+        cell_store(local, z * 8, 0)
+        cell_store(pure, z * 8, 0)
         z = z + 1
     z = 0
     loop:
         if z >= g_ir_instr_count:
             break
-        w64(callee, z * 8, -1)
+        cell_store(callee, z * 8, -1)
         z = z + 1
 
     // ── 1) 逐 IR 函数扫体：局部效应位 + 调用边解析 ──
@@ -4561,38 +4488,38 @@ fn compute_all_purity():
         map_ok : ., mut = 1
         if sfi < 0:
             map_ok = 0
-        else if r64(g_ir_func_name_idx, irf * 8) != fi_name(sfi):
+        else if cell_load(g_ir_func_name_idx, irf * 8) != fi_name(sfi):
             map_ok = 0
         else if ast_kind(fi_ast_node(sfi)) == EXPR_EXTERN:
             map_ok = 0
         if map_ok == 0:
             // 映射漂移/extern 声明体（无可生成的体）：保守判不纯
             if sfi >= 0:
-                w64(local, sfi * 8, 1)
+                cell_store(local, sfi * 8, 1)
             irf = irf + 1
             continue
-        istart := r64(g_ir_func_instr_start, irf * 8)
-        icnt := r64(g_ir_func_instr_count, irf * 8)
+        istart := cell_load(g_ir_func_instr_start, irf * 8)
+        icnt := cell_load(g_ir_func_instr_count, irf * 8)
         ii := istart
         loop:
             if ii >= istart + icnt:
                 break
             op := iri_op(ii)
             if purity_op_effect(op) != 0:
-                w64(local, sfi * 8, 1)
+                cell_store(local, sfi * 8, 1)
             if op == IR_CALL:
                 cf := find_func(iri_s3(ii))
                 if cf < 0:
-                    w64(local, sfi * 8, 1)
+                    cell_store(local, sfi * 8, 1)
                 // 不可解析（runtime builtin），因此不纯
                 else:
-                    w64(callee, ii * 8, cf)
+                    cell_store(callee, ii * 8, cf)
             if op == IR_INLINE:
                 cf2 := find_func(iri_s1(ii))
                 if cf2 < 0:
-                    w64(local, sfi * 8, 1)
+                    cell_store(local, sfi * 8, 1)
                 else:
-                    w64(callee, ii * 8, cf2)
+                    cell_store(callee, ii * 8, cf2)
             ii = ii + 1
         irf = irf + 1
 
@@ -4602,12 +4529,12 @@ fn compute_all_purity():
     loop:
         if si >= g_sg_count:
             break
-        if r64(g_sgs, si * ESZ_SG + OFF_SG_KIND) == SG_UNSAFE:
-            uf := df_func_of_node(r64(g_sgs, si * ESZ_SG + OFF_SG_NSTART))
+        if cell_load(g_sgs, si * ESZ_SG + OFF_SG_KIND) == SG_UNSAFE:
+            uf := df_func_of_node(cell_load(g_sgs, si * ESZ_SG + OFF_SG_NSTART))
             if uf >= 0:
                 usf := src_func_of_ir(uf)
                 if usf >= 0:
-                    w64(local, usf * 8, 1)
+                    cell_store(local, usf * 8, 1)
         si = si + 1
 
     // ── 3) 不动点：全不纯起点升纯（保守单调，语义见头注 4）──
@@ -4622,23 +4549,23 @@ fn compute_all_purity():
                 break
             sf := src_func_of_ir(irf)
             if sf >= 0:
-                if r64(local, sf * 8) == 0:
-                    if r64(pure, sf * 8) == 0:
-                        ist2 := r64(g_ir_func_instr_start, irf * 8)
-                        ic2 := r64(g_ir_func_instr_count, irf * 8)
+                if cell_load(local, sf * 8) == 0:
+                    if cell_load(pure, sf * 8) == 0:
+                        ist2 := cell_load(g_ir_func_instr_start, irf * 8)
+                        ic2 := cell_load(g_ir_func_instr_count, irf * 8)
                         allpure : ., mut = 1
                         ii2 := ist2
                         loop:
                             if ii2 >= ist2 + ic2:
                                 break
-                            c := r64(callee, ii2 * 8)
+                            c := cell_load(callee, ii2 * 8)
                             if c >= 0:
-                                if r64(pure, c * 8) == 0:
+                                if cell_load(pure, c * 8) == 0:
                                     allpure = 0
                                     break
                             ii2 = ii2 + 1
                         if allpure != 0:
-                            w64(pure, sf * 8, 1)
+                            cell_store(pure, sf * 8, 1)
                             changed = 1
             irf = irf + 1
 
@@ -4654,17 +4581,17 @@ fn compute_all_purity():
             loop:
                 if gi >= g_purity_inst_count:
                     break
-                if r64(g_purity_inst, gi * 24) == fi:
+                if cell_load(g_purity_inst, gi * 24) == fi:
                     ninst = ninst + 1
-                    nf := r64(g_purity_inst, gi * 24 + 16)
+                    nf := cell_load(g_purity_inst, gi * 24 + 16)
                     if nf >= 0 && nf < fcount:
-                        if r64(pure, nf * 8) == 0:
+                        if cell_load(pure, nf * 8) == 0:
                             allp = 0
                     else:
                         allp = 0
                 gi = gi + 1
             if ninst > 0 && allp != 0:
-                w64(pure, fi * 8, 1)
+                cell_store(pure, fi * 8, 1)
         fi = fi + 1
 
     // ── 5) 写回 ──
@@ -4672,7 +4599,7 @@ fn compute_all_purity():
     loop:
         if fi >= fcount:
             break
-        fi_set_ispure(fi, r64(pure, fi * 8))
+        fi_set_ispure(fi, cell_load(pure, fi * 8))
         fi = fi + 1
 
 // 自测辅助：按名查纯度（-1 = 无此函数，与 0/1 区分，防查不到被当不纯）。

@@ -1,13 +1,13 @@
-// === targets/x86_64-linux/main.cr ===
+// === targets/x86_64/linux/elf/main.cr ===
 // Backend project entry: .ccr to ELF, assembly, or shared object.
-// Self-hosted counterpart of src/compiler/corearch.cr.
+// Self-hosted counterpart of src/arch/x86_64/corearch.cr.
 //
-// This file is the live project-mode entry for the x86_64-linux target.
-// `corec build src/targets/x86_64-linux` starts at main, calls corearch_main,
+// This file is the live project-mode entry for the x86_64/linux/elf target.
+// `corec build src/targets/x86_64/linux/elf` starts at main, calls corearch_main,
 // loads the .ccr, and rebuilds the linear schedule. The backend bootstrap stages
 // all pass through this entry.
 // There are two live entries: the corearch concat entry in
-// src/compiler/corearch.cr and this project-mode entry. Both register backend
+// src/arch/x86_64/corearch.cr and this project-mode entry. Both register backend
 // flags and both call build_linear_schedule after loading. This entry emits ELF
 // only and rejects table and debug channels with a message pointing to the concat
 // entry.
@@ -62,7 +62,9 @@ fn backend_has_extended_flags() -> int:
         return 1
     if cli_has("dump-objects") != 0:
         return 1
-    if cli_has("dump-nod-items") != 0:
+    if cli_has("dump-nod-types") != 0:
+        return 1
+    if cli_has("dump-alloc-strides") != 0:
         return 1
     if cli_has("dump-types") != 0:
         return 1
@@ -122,12 +124,15 @@ fn corearch_main() -> int:
     if r != 0:
         println("error: invalid .ccr file")
         return 1
+    backend_select_int_mode()
     init_backend_arrays()
 
     // The loader produces semantic objects only. Rebuild the linear instruction
     // stream before elf_gen; this entry is one of the consumers of
     // build_linear_schedule.
-    build_linear_schedule()
+    if build_linear_schedule() != 0:
+        println("error: invalid .ccr file")
+        return 1
 
     emit_so := cli_has("shared")
     link_val := cli_get("link")
@@ -204,7 +209,7 @@ fn corearch_main() -> int:
         loop:
             if rpi >= g_x86_rip_patch_count:
                 break
-            ppos := r64(g_x86_rip_patch_pos, rpi * 8)
+            ppos := cell_load(g_x86_rip_patch_pos, rpi * 8)
             if ppos >= 176 && ppos - 176 + 4 <= cs:
                 w32(cd, ppos - 176, 0)
                 w8(cd, ppos + 4 - 176, 144)
@@ -229,7 +234,7 @@ fn corearch_main() -> int:
             loop:
                 if ri >= g_x86_ext_rel_count:
                     break
-                fn_name := istr_get(r64(g_x86_ext_rel_name, ri * 8))
+                fn_name := istr_get(cell_load(g_x86_ext_rel_name, ri * 8))
                 ctx_add_plt(fn_name, 0)
                 ri = ri + 1
             ctx_set_user_code(cd, cs)

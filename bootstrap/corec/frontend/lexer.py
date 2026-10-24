@@ -221,8 +221,6 @@ class Lexer:
         # 不一致处理——两编译器差异 = 各自投影形状差异，非语义分歧。
         if is_prefixed:
             val = int(n[2:], base)
-            if val > 9223372036854775807:
-                self.error("integer literal overflow")
             return Token(TokenType.INT_LIT, str(val), start_line, start_col)
         if is_float:
             return Token(TokenType.FLOAT_LIT, n, start_line, start_col)

@@ -220,6 +220,43 @@ fn regalloc_debug_dispatch() -> int:
 // ent_kernel.cr. Each node prints its semantic fields, adjacency, and outgoing
 // edges. Edge traversal uses nod_inputs. The line format is parsed by
 // tests/selfhost/test_ccr_v7.py:parse_object_dump.
+// --dump-alloc-strides: expose the element-type-driven IR_ALLOC_ARRAY stride.
+// Read-only test channel. It runs after the TYPE segment is rebuilt, before
+// linear reconstruction, and returns without emitting.
+fn dump_alloc_strides():
+    print("alloc-strides: ")
+    print_i(g_v7_nod_count)
+    println("")
+    ni : ., mut = 0
+    loop:
+        if ni >= g_v7_nod_count:
+            break
+        if nod_op(ni) == IR_ALLOC_ARRAY:
+            dv := nod_dest(ni)
+            ti : ., mut = -1
+            if dv >= 0:
+                ti = irv_type(dv)
+            kind : ., mut = -1
+            elem : ., mut = -1
+            if ti >= 0 && ti < g_type_count:
+                kind = get_type_kind(ti)
+                if kind == TYP_ARRAY:
+                    elem = get_type_data(ti)
+            print("alloc ")
+            print_i(ni)
+            print(" dest ")
+            print_i(dv)
+            print(" ti ")
+            print_i(ti)
+            print(" kind ")
+            print_i(kind)
+            print(" elem ")
+            print_i(elem)
+            print(" stride ")
+            print_i(corearch_nod_alloc_stride(ni, dv))
+            println("")
+        ni = ni + 1
+
 fn dump_object_surface():
     print("objects: ")
     print_i(g_v7_nod_count)
@@ -250,26 +287,32 @@ fn dump_object_surface():
         nod_inputs(ni)   // print outgoing edge records through the kernel helper
         ni = ni + 1
 
-// --dump-nod-items: print each node's NOD term index, the term table entry, and its
-// atom row. The header gives the node count and how many nodes have a term. Each
-// body line gives {idx, atom}, so tests can assert atom == code when idx >= 0.
-// load_ccr already performs this consistency check as a hard gate; this channel is
-// its readable form. It returns before emission.
-fn dump_nod_items():
-    with_item : ., mut = 0
+// --dump-nod-types: print each node's semantic type_id and feature flags. The
+// disk has no term-index field in v10, so this channel exposes the actual wire
+// semantics. It returns before emission.
+fn dump_nod_types():
+    with_type : ., mut = 0
     ni : ., mut = 0
     loop:
         if ni >= g_v7_nod_count:
             break
-        if nod_item(ni) >= 0:
-            with_item = with_item + 1
+        if nod_type_id(ni) >= 0:
+            with_type = with_type + 1
         ni = ni + 1
-    print("[nod-items] nodes=")
+    print("[nod-types] nodes=")
     print_i(g_v7_nod_count)
-    print(" with_item=")
-    print_i(with_item)
-    print(" terms=")
-    print_i(tt_count())
+    print(" with_type=")
+    print_i(with_type)
+    print(" flags=")
+    fl : ., mut = 0
+    ni2 : ., mut = 0
+    loop:
+        if ni2 >= g_v7_nod_count:
+            break
+        if nod_type_flags(ni2) != 0:
+            fl = fl + 1
+        ni2 = ni2 + 1
+    print_i(fl)
     print(" rows=")
     print_i(g_type_count)
     println("")
@@ -277,20 +320,14 @@ fn dump_nod_items():
     loop:
         if nj >= g_v7_nod_count:
             break
-        itv := nod_item(nj)
-        at : ., mut = -1
-        if itv >= 0:
-            at = tt_atom_of_term(itv)
-        print("item ")
+        print("nodtype ")
         print_i(nj)
         print(" op ")
         print_i(nod_op(nj))
-        print(" code ")
-        print_i(nod_tk(nj))
-        print(" idx ")
-        print_i(itv)
-        print(" atom ")
-        print_i(at)
+        print(" tid ")
+        print_i(nod_type_id(nj))
+        print(" flags ")
+        print_i(nod_type_flags(nj))
         println("")
         nj = nj + 1
 
@@ -372,6 +409,7 @@ fn corearch_main() -> int:
     if r != 0:
         println("error: invalid .ccr file")
         return 1
+    backend_select_int_mode()
     init_backend_arrays()
 
     // Hidden channel: dump the TYPE segment after load. It uses the same print path
@@ -386,18 +424,26 @@ fn corearch_main() -> int:
         ccr_iface_surface_dump()
         return 0
 
-    // Hidden channel: print NOD term indexes and their atom rows. It runs after the
-    // TYPE segment is rebuilt and before build_linear_schedule, so it does not
-    // trigger emission. load_ccr already enforces consistency.
-    if cli_has("dump-nod-items") != 0:
-        dump_nod_items()
+    // Hidden channel: print NOD semantic type ids and feature flags. It runs after
+    // the TYPE segment is rebuilt and before build_linear_schedule, so it does not
+    // trigger emission.
+    if cli_has("dump-nod-types") != 0:
+        dump_nod_types()
+        return 0
+
+    // Hidden channel: element type and reconstructed stride for each
+    // IR_ALLOC_ARRAY node. It returns before linear reconstruction.
+    if cli_has("dump-alloc-strides") != 0:
+        dump_alloc_strides()
         return 0
 
     // The loader produces semantic objects only. The instance rebuilds the linear
     // g_ir_instrs stream with build_linear_schedule after a successful load and
     // before dispatch or emission. ELF emission and the allocation dumps all read
     // the linear stream.
-    build_linear_schedule()
+    if build_linear_schedule() != 0:
+        println("error: invalid .ccr file")
+        return 1
 
     // Hidden channel: dump the object image after linear reconstruction and before
     // emission. It returns without entering the O2 or emission paths.
@@ -483,7 +529,7 @@ fn corearch_main() -> int:
                     if hpi >= g_hit_pool_count:
                         break
                     print(" ")
-                    print_i(r64(g_hit_pool, hpi * 8))
+                    print_i(cell_load(g_hit_pool, hpi * 8))
                     hpi = hpi + 1
                 println("")
 
@@ -568,7 +614,7 @@ fn corearch_main() -> int:
         loop:
             if rpi >= g_x86_rip_patch_count:
                 break
-            ppos := r64(g_x86_rip_patch_pos, rpi * 8)
+            ppos := cell_load(g_x86_rip_patch_pos, rpi * 8)
             if ppos >= 176 && ppos - 176 + 4 <= cs:
                 w32(cd, ppos - 176, 0)
                 w8(cd, ppos + 4 - 176, 144)
@@ -593,7 +639,7 @@ fn corearch_main() -> int:
                     loop:
                         if ri2 >= g_x86_ext_rel_count:
                             break
-                        println("  " + istr_get(r64(g_x86_ext_rel_name, ri2 * 8)))
+                        println("  " + istr_get(cell_load(g_x86_ext_rel_name, ri2 * 8)))
                         ri2 = ri2 + 1
                     return 1
                 // Pure static: write directly; the frontend prepends rt.cr. ELF output
@@ -611,7 +657,7 @@ fn corearch_main() -> int:
             loop:
                 if ri >= g_x86_ext_rel_count:
                     break
-                fn_name := istr_get(r64(g_x86_ext_rel_name, ri * 8))
+                fn_name := istr_get(cell_load(g_x86_ext_rel_name, ri * 8))
                 ctx_add_plt(fn_name, 0)
                 ri = ri + 1
             ctx_set_user_code(cd, cs)

@@ -96,7 +96,7 @@ fn ast_optimize_body(body: int):
         loop:
             if i >= sc:
                 break
-            sn := r64(g_block_stmts, (ss + i) * 8)
+            sn := cell_load(g_block_stmts, (ss + i) * 8)
             ast_optimize_body(sn)
             i = i + 1
         return
@@ -265,8 +265,8 @@ fn pass_cse():
     loop:
         if fi >= g_ir_func_count:
             break
-        ic := r64(g_ir_func_instr_count, fi * 8)
-        ist := r64(g_ir_func_instr_start, fi * 8)
+        ic := cell_load(g_ir_func_instr_count, fi * 8)
+        ist := cell_load(g_ir_func_instr_start, fi * 8)
         if ic <= 0:
             fi = fi + 1
             continue
@@ -352,26 +352,26 @@ fn pass_cse():
                     if sj >= seen_count:
                         break
                     so := sj * 32
-                    if r64(seen, so) == op && r64(seen, so+8) == s1 && r64(seen, so+16) == s2:
+                    if cell_load(seen, so) == op && cell_load(seen, so+8) == s1 && cell_load(seen, so+16) == s2:
                         found = sj
                         break
                     sj = sj + 1
                 if found >= 0:
                     // Duplicate: map d to the canonical destination and replace
                     // this instruction with a no-op.
-                    canonical := r64(seen, found * 32 + 24)
-                    w64(replace_map, replace_count * 8, d)
-                    w64(replace_map, replace_count * 8 + 8, canonical)
+                    canonical := cell_load(seen, found * 32 + 24)
+                    cell_store(replace_map, replace_count * 8, d)
+                    cell_store(replace_map, replace_count * 8 + 8, canonical)
                     replace_count = replace_count + 1
                     // Replace the instruction with a no-op.
                     iri_set_op(inst, IR_NOP)
                 else:
                     // New expression: record it.
                     so := seen_count * 32
-                    w64(seen, so, op)
-                    w64(seen, so+8, s1)
-                    w64(seen, so+16, s2)
-                    w64(seen, so+24, d)
+                    cell_store(seen, so, op)
+                    cell_store(seen, so+8, s1)
+                    cell_store(seen, so+16, s2)
+                    cell_store(seen, so+24, d)
                     seen_count = seen_count + 1
 
             // Apply replacements to the operands of every instruction.
@@ -380,8 +380,8 @@ fn pass_cse():
                 loop:
                     if rj >= replace_count:
                         break
-                    old_v := r64(replace_map, rj * 8)
-                    new_v := r64(replace_map, rj * 8 + 8)
+                    old_v := cell_load(replace_map, rj * 8)
+                    new_v := cell_load(replace_map, rj * 8 + 8)
                     if iri_s1(inst) == old_v:
                         iri_set_s1(inst, new_v)
                     if iri_s2(inst) == old_v:

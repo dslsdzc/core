@@ -11,7 +11,7 @@ BUILD = BASE / "build"
 COREC = BUILD / "corec"
 COREARCH = BUILD / "corearch"
 # 组合根（三轴组合的 target triple 命名）——project-mode 入口 = 该目录 main.cr
-BACKEND_SOURCE = BASE / "src" / "targets" / "x86_64-linux"
+BACKEND_SOURCE = BASE / "src" / "targets" / "x86_64" / "linux" / "elf"
 
 
 def run_checked(args: list[str], label: str, env: dict[str, str]) -> bool:
@@ -92,13 +92,13 @@ def main() -> int:
             print("[FAIL] stage1 backend or CCR was not created")
             return 1
         if not run_checked(
-            [stage1, stage1_ccr, "--static", "-o", stage2],
+            [stage1, stage1_ccr, "--static", "--raw-int", "-o", stage2],
             "stage1 emits corearch stage2",
             env,
         ):
             return 1
         if not run_checked(
-            [stage2, stage1_ccr, "--static", "-o", stage3],
+            [stage2, stage1_ccr, "--static", "--raw-int", "-o", stage3],
             "stage2 emits corearch stage3",
             env,
         ):

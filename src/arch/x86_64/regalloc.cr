@@ -29,10 +29,10 @@ fn inject_coexist_oob() -> int:
 // assuming function 0 is the tested main.
 //
 // Home-group conflict: pick two coexisting entries for different vars, remove
-// both vars from register residency, then set both home slots to 7. The
-// verifier reports a home-group violation (rule 1). Vars without a home entry
-// have home = -1 and do not participate in the sweep, so there are no side
-// effects.
+// both vars from register residency, then set both runtime/instance home slots
+// to 7. This slot is never serialized into `.ccr`. The verifier reports a
+// home-group violation (rule 1). Vars without a home entry have runtime_home =
+// -1 and do not participate in the sweep, so there are no side effects.
 fn try_inject_home_conflict(func_i: int) -> int:
     es := entry_start(func_i)
     ec := entry_count(func_i)
@@ -56,8 +56,8 @@ fn try_inject_home_conflict(func_i: int) -> int:
             if v1 != v2 && entries_coexist(func_i, e1, e2) != 0:
                 meta_remove_var(v1)
                 meta_remove_var(v2)
-                w32(g_ir_entries, e1 * ESZ_ENTRY + OFF_ENTRY_HOME, 7)
-                w32(g_ir_entries, e2 * ESZ_ENTRY + OFF_ENTRY_HOME, 7)
+                w32(g_ir_entries, e1 * ESZ_ENTRY + OFF_ENTRY_RUNTIME_HOME, 7)
+                w32(g_ir_entries, e2 * ESZ_ENTRY + OFF_ENTRY_RUNTIME_HOME, 7)
                 return 1
             e2i = e2i + 1
         e1i = e1i + 1
@@ -173,7 +173,7 @@ fn meta_remove_var(var_idx: int):
                             loop:
                                 if kk >= OPT_META_STRIDE / 8:
                                     break
-                                w64(g_opt_meta, mj * OPT_META_STRIDE + kk * 8, r64(g_opt_meta, so + kk * 8))
+                                cell_store(g_opt_meta, mj * OPT_META_STRIDE + kk * 8, cell_load(g_opt_meta, so + kk * 8))
                                 kk = kk + 1
                             mj = mj + 1
                         g_opt_meta_count = g_opt_meta_count - 1
@@ -276,8 +276,8 @@ fn inject_reg_conflict() -> int:
 // Otherwise force register 3 and first remove coexisting allocated vars to avoid
 // a rule 1 side effect. Removed vars have no location and do not enter the sweep.
 fn try_inject_read_gap(func_i: int) -> int:
-    vc := r64(g_ir_func_var_count, func_i * 8)
-    vs := r64(g_ir_func_var_start, func_i * 8)
+    vc := cell_load(g_ir_func_var_count, func_i * 8)
+    vs := cell_load(g_ir_func_var_start, func_i * 8)
     es := entry_start(func_i)
     ec := entry_count(func_i)
     lv : ., mut = 0
@@ -403,8 +403,8 @@ fn label_pos_of(id: int, lab_id: string, lab_ps: string, n: int) -> int:
     loop:
         if i >= n:
             break
-        if r64(lab_id, i * 8) == id:
-            return r64(lab_ps, i * 8)
+        if cell_load(lab_id, i * 8) == id:
+            return cell_load(lab_ps, i * 8)
         i = i + 1
     return -1
 
@@ -416,20 +416,20 @@ fn alloc_registers():
     MAX_REGS : int = 5
     // callee-saved 物理寄存器（rbx, r12-r15；x86 枚举号，e2_mov/e2_ld REX 编码）
     reg_phys : string, mut = alloc(5 * 8)
-    w64(reg_phys, 0, 3)
-    w64(reg_phys, 8, 12)
-    w64(reg_phys, 16, 13)
-    w64(reg_phys, 24, 14)
-    w64(reg_phys, 32, 15)
+    cell_store(reg_phys, 0, 3)
+    cell_store(reg_phys, 8, 12)
+    cell_store(reg_phys, 16, 13)
+    cell_store(reg_phys, 24, 14)
+    cell_store(reg_phys, 32, 15)
     fi : ., mut = 0
     loop:
         if fi >= g_ir_func_count:
             break
-        ic := r64(g_ir_func_instr_count, fi * 8)
-        ist := r64(g_ir_func_instr_start, fi * 8)
-        vc := r64(g_ir_func_var_count, fi * 8)
-        vs := r64(g_ir_func_var_start, fi * 8)
-        pc := r64(g_ir_func_param_count, fi * 8)
+        ic := cell_load(g_ir_func_instr_count, fi * 8)
+        ist := cell_load(g_ir_func_instr_start, fi * 8)
+        vc := cell_load(g_ir_func_var_count, fi * 8)
+        vs := cell_load(g_ir_func_var_start, fi * 8)
+        pc := cell_load(g_ir_func_param_count, fi * 8)
         if vc <= 0 || ic <= 0:
             fi = fi + 1
             continue
@@ -444,11 +444,11 @@ fn alloc_registers():
         loop:
             if iz >= vc:
                 break
-            w64(haz_const, iz * 8, 0)
-            w64(haz_ref, iz * 8, 0)
-            w64(haz_i2f, iz * 8, 0)
-            w64(haz_dyn, iz * 8, 0)
-            w64(haz_dex, iz * 8, 0)
+            cell_store(haz_const, iz * 8, 0)
+            cell_store(haz_ref, iz * 8, 0)
+            cell_store(haz_i2f, iz * 8, 0)
+            cell_store(haz_dyn, iz * 8, 0)
+            cell_store(haz_dex, iz * 8, 0)
             iz = iz + 1
         ii : ., mut = 0
         loop:
@@ -462,26 +462,26 @@ fn alloc_registers():
             if d >= vs && d < vs + vc:
                 dl := d - vs
                 if op == IR_CONST:
-                    w64(haz_const, dl * 8, 1)
+                    cell_store(haz_const, dl * 8, 1)
                 if op == IR_DYN_PACK || op == IR_DYN_TAG || op == IR_DYN_VAL || op == IR_DYN_DISPATCH:
-                    w64(haz_dyn, dl * 8, 1)
+                    cell_store(haz_dyn, dl * 8, 1)
             if op == IR_REF && s1 >= vs && s1 < vs + vc:
-                w64(haz_ref, (s1 - vs) * 8, 1)
+                cell_store(haz_ref, (s1 - vs) * 8, 1)
             if op == IR_I2F && s1 >= vs && s1 < vs + vc:
-                w64(haz_i2f, (s1 - vs) * 8, 1)
+                cell_store(haz_i2f, (s1 - vs) * 8, 1)
             if op == IR_DYN_PACK || op == IR_DYN_TAG || op == IR_DYN_VAL || op == IR_DYN_DISPATCH:
                 if s1 >= vs && s1 < vs + vc:
-                    w64(haz_dyn, (s1 - vs) * 8, 1)
+                    cell_store(haz_dyn, (s1 - vs) * 8, 1)
                 if s2 >= vs && s2 < vs + vc:
-                    w64(haz_dyn, (s2 - vs) * 8, 1)
+                    cell_store(haz_dyn, (s2 - vs) * 8, 1)
             tk := iri_tk(inst)
             if tk == TI_DEX || tk == TI_DEX_S:
                 if d >= vs && d < vs + vc:
-                    w64(haz_dex, (d - vs) * 8, 1)
+                    cell_store(haz_dex, (d - vs) * 8, 1)
                 if s1 >= vs && s1 < vs + vc:
-                    w64(haz_dex, (s1 - vs) * 8, 1)
+                    cell_store(haz_dex, (s1 - vs) * 8, 1)
                 if s2 >= vs && s2 < vs + vc:
-                    w64(haz_dex, (s2 - vs) * 8, 1)
+                    cell_store(haz_dex, (s2 - vs) * 8, 1)
             ii = ii + 1
 
         // ── 阶段 2：回边探测 + 携带值标记（region 生命周期上下文）──
@@ -502,8 +502,8 @@ fn alloc_registers():
             if ii >= ic:
                 break
             if iri_op(ist + ii) == IR_LABEL && iri_s1(ist + ii) >= 0:
-                w64(lab_id, li * 8, iri_s1(ist + ii))
-                w64(lab_ps, li * 8, ii)
+                cell_store(lab_id, li * 8, iri_s1(ist + ii))
+                cell_store(lab_ps, li * 8, ii)
                 li = li + 1
             ii = ii + 1
         // 回边 span 收集（16B {label_pos, branch_pos}；上限 = 指令数）
@@ -519,21 +519,21 @@ fn alloc_registers():
             if op == IR_JUMP:
                 tp := label_pos_of(iri_s1(inst), lab_id, lab_ps, ln)
                 if tp >= 0 && tp < ii:
-                    w64(bt, bn * 16, tp)
-                    w64(bt, bn * 16 + 8, ii)
+                    cell_store(bt, bn * 16, tp)
+                    cell_store(bt, bn * 16 + 8, ii)
                     bn = bn + 1
                     has_loop = 1
             else if op == IR_BRANCH:
                 tp := label_pos_of(iri_s2(inst), lab_id, lab_ps, ln)
                 if tp >= 0 && tp < ii:
-                    w64(bt, bn * 16, tp)
-                    w64(bt, bn * 16 + 8, ii)
+                    cell_store(bt, bn * 16, tp)
+                    cell_store(bt, bn * 16 + 8, ii)
                     bn = bn + 1
                     has_loop = 1
                 tp = label_pos_of(iri_s3(inst), lab_id, lab_ps, ln)
                 if tp >= 0 && tp < ii:
-                    w64(bt, bn * 16, tp)
-                    w64(bt, bn * 16 + 8, ii)
+                    cell_store(bt, bn * 16, tp)
+                    cell_store(bt, bn * 16 + 8, ii)
                     bn = bn + 1
                     has_loop = 1
             ii = ii + 1
@@ -542,7 +542,7 @@ fn alloc_registers():
         loop:
             if iz >= vc:
                 break
-            w64(car, iz * 8, 0)
+            cell_store(car, iz * 8, 0)
             iz = iz + 1
         if has_loop != 0:
             // 扫描 span 内的指令。var 的首个引用是读时，值跨回边存活，标记为携带。
@@ -557,14 +557,14 @@ fn alloc_registers():
             loop:
                 if bi >= bn:
                     break
-                t0 := r64(bt, bi * 16)
-                b0 := r64(bt, bi * 16 + 8)
+                t0 := cell_load(bt, bi * 16)
+                b0 := cell_load(bt, bi * 16 + 8)
                 iz = 0
                 loop:
                     if iz >= vc:
                         break
-                    w64(st, iz * 8, 0)
-                    w64(st_def, iz * 8, -1)
+                    cell_store(st, iz * 8, 0)
+                    cell_store(st_def, iz * 8, -1)
                     iz = iz + 1
                 pp : ., mut = t0
                 loop:
@@ -577,34 +577,34 @@ fn alloc_registers():
                     s2 := iri_s2(inst)
                     if d >= vs && d < vs + vc:
                         lvd := d - vs
-                        if r64(st, lvd * 8) == 0:
+                        if cell_load(st, lvd * 8) == 0:
                             // dest 定值同指令自读（s1/s2 == d）：读先于写，该读
                             // 可能取上一轮值，按读首引用（携带）处理
                             if s1 == d || s2 == d:
-                                w64(st, lvd * 8, 2)
-                                w64(car, lvd * 8, 1)
+                                cell_store(st, lvd * 8, 2)
+                                cell_store(car, lvd * 8, 1)
                             else:
-                                w64(st, lvd * 8, 1)
-                                w64(st_def, lvd * 8, pp)
+                                cell_store(st, lvd * 8, 1)
+                                cell_store(st_def, lvd * 8, pp)
                     if op == IR_STORE && s1 >= vs && s1 < vs + vc:
                         lvs := s1 - vs
-                        if r64(st, lvs * 8) == 0:
+                        if cell_load(st, lvs * 8) == 0:
                             if s2 == s1:
-                                w64(st, lvs * 8, 2)
-                                w64(car, lvs * 8, 1)
+                                cell_store(st, lvs * 8, 2)
+                                cell_store(car, lvs * 8, 1)
                             else:
-                                w64(st, lvs * 8, 1)
-                                w64(st_def, lvs * 8, pp)
+                                cell_store(st, lvs * 8, 1)
+                                cell_store(st_def, lvs * 8, pp)
                     if s1 >= vs && s1 < vs + vc && op != IR_STORE:
                         lv1 := s1 - vs
-                        if r64(st, lv1 * 8) == 0:
-                            w64(st, lv1 * 8, 2)
-                            w64(car, lv1 * 8, 1)
+                        if cell_load(st, lv1 * 8) == 0:
+                            cell_store(st, lv1 * 8, 2)
+                            cell_store(car, lv1 * 8, 1)
                     if s2 >= vs && s2 < vs + vc:
                         lv2 := s2 - vs
-                        if r64(st, lv2 * 8) == 0:
-                            w64(st, lv2 * 8, 2)
-                            w64(car, lv2 * 8, 1)
+                        if cell_load(st, lv2 * 8) == 0:
+                            cell_store(st, lv2 * 8, 2)
+                            cell_store(car, lv2 * 8, 1)
                     pp = pp + 1
                 // 条件定值差分标记：BRANCH 的前向目标 t 在 (pp, b0] 时，位置 (pp, t)
                 // 可被跳过且循环仍继续。区间 [pp+1, t-1] 加 1，终点 t 减 1；前缀累计
@@ -622,7 +622,7 @@ fn alloc_registers():
                 loop:
                     if zz >= spn:
                         break
-                    w64(skp, zz * 8, 0)
+                    cell_store(skp, zz * 8, 0)
                     zz = zz + 1
                 pp = t0
                 loop:
@@ -632,16 +632,16 @@ fn alloc_registers():
                         t2 := label_pos_of(iri_s2(ist + pp), lab_id, lab_ps, ln)
                         t3 := label_pos_of(iri_s3(ist + pp), lab_id, lab_ps, ln)
                         if t2 > pp && t2 <= b0:
-                            w64(skp, (pp + 1 - t0) * 8, r64(skp, (pp + 1 - t0) * 8) + 1)
-                            w64(skp, (t2 - t0) * 8, r64(skp, (t2 - t0) * 8) - 1)
+                            cell_store(skp, (pp + 1 - t0) * 8, cell_load(skp, (pp + 1 - t0) * 8) + 1)
+                            cell_store(skp, (t2 - t0) * 8, cell_load(skp, (t2 - t0) * 8) - 1)
                         if t3 > pp && t3 <= b0:
-                            w64(skp, (pp + 1 - t0) * 8, r64(skp, (pp + 1 - t0) * 8) + 1)
-                            w64(skp, (t3 - t0) * 8, r64(skp, (t3 - t0) * 8) - 1)
+                            cell_store(skp, (pp + 1 - t0) * 8, cell_load(skp, (pp + 1 - t0) * 8) + 1)
+                            cell_store(skp, (t3 - t0) * 8, cell_load(skp, (t3 - t0) * 8) - 1)
                     else if iri_op(ist + pp) == IR_JUMP:
                         t1 := label_pos_of(iri_s1(ist + pp), lab_id, lab_ps, ln)
                         if t1 > pp && t1 <= b0:
-                            w64(skp, (pp + 1 - t0) * 8, r64(skp, (pp + 1 - t0) * 8) + 1)
-                            w64(skp, (t1 - t0) * 8, r64(skp, (t1 - t0) * 8) - 1)
+                            cell_store(skp, (pp + 1 - t0) * 8, cell_load(skp, (pp + 1 - t0) * 8) + 1)
+                            cell_store(skp, (t1 - t0) * 8, cell_load(skp, (t1 - t0) * 8) - 1)
                     pp = pp + 1
                 // 前缀累计：skp[p−t0] > 0 ⟺ 位置 p 可被某条件分支跳过
                 acc : ., mut = 0
@@ -649,11 +649,11 @@ fn alloc_registers():
                 loop:
                     if pp > b0:
                         break
-                    acc = acc + r64(skp, (pp - t0) * 8)
+                    acc = acc + cell_load(skp, (pp - t0) * 8)
                     if acc != 0:
-                        w64(skp, (pp - t0) * 8, 1)
+                        cell_store(skp, (pp - t0) * 8, 1)
                     else:
-                        w64(skp, (pp - t0) * 8, 0)
+                        cell_store(skp, (pp - t0) * 8, 0)
                     pp = pp + 1
                 // state 1 表示首引用是定值。若定值点可被跳过，则是条件定值，每轮
                 // 未必刷新，旧值跨回边存活，标记为携带，窗口扩至整函数。
@@ -661,10 +661,10 @@ fn alloc_registers():
                 loop:
                     if iz >= vc:
                         break
-                    if r64(st, iz * 8) == 1:
-                        dd := r64(st_def, iz * 8)
-                        if dd >= t0 && r64(skp, (dd - t0) * 8) != 0:
-                            w64(car, iz * 8, 1)
+                    if cell_load(st, iz * 8) == 1:
+                        dd := cell_load(st_def, iz * 8)
+                        if dd >= t0 && cell_load(skp, (dd - t0) * 8) != 0:
+                            cell_store(car, iz * 8, 1)
                     iz = iz + 1
                 bi = bi + 1
 
@@ -681,15 +681,15 @@ fn alloc_registers():
         loop:
             if lv >= vc:
                 break
-            w64(var_reg, lv * 8, -1)
-            w64(var_end, lv * 8, 0)
-            w64(var_asg, lv * 8, -1)
+            cell_store(var_reg, lv * 8, -1)
+            cell_store(var_end, lv * 8, 0)
+            cell_store(var_asg, lv * 8, -1)
             lv = lv + 1
         lv = 0
         loop:
             if lv >= MAX_REGS:
                 break
-            w64(reg_occ, lv * 8, -1)
+            cell_store(reg_occ, lv * 8, -1)
             lv = lv + 1
         cc : ., mut = 0
         lv = 0
@@ -707,7 +707,7 @@ fn alloc_registers():
             if ty == TI_DEX || ty == TI_DEX_S || ty == TI_DYN || ty == TI_UNIT:
                 lv = lv + 1
                 continue
-            if r64(haz_const, lv * 8) != 0 || r64(haz_ref, lv * 8) != 0 || r64(haz_i2f, lv * 8) != 0 || r64(haz_dyn, lv * 8) != 0 || r64(haz_dex, lv * 8) != 0:
+            if cell_load(haz_const, lv * 8) != 0 || cell_load(haz_ref, lv * 8) != 0 || cell_load(haz_i2f, lv * 8) != 0 || cell_load(haz_dyn, lv * 8) != 0 || cell_load(haz_dex, lv * 8) != 0:
                 lv = lv + 1
                 continue
             st : ., mut = f
@@ -715,13 +715,13 @@ fn alloc_registers():
             if lv < pc:
                 st = 0
             // 参数入口装载，窗口自函数头
-            if r64(car, lv * 8) != 0:
+            if cell_load(car, lv * 8) != 0:
                 st = 0
                 en = ic - 1
             // 携带值，扩至整函数
-            w64(cand_st, cc * 8, st)
-            w64(cand_en, cc * 8, en)
-            w64(cand_lv, cc * 8, lv)
+            cell_store(cand_st, cc * 8, st)
+            cell_store(cand_en, cc * 8, en)
+            cell_store(cand_lv, cc * 8, lv)
             cc = cc + 1
             lv = lv + 1
         // 候选按 (start, lv) 稳定升序（插入排序；起点 = 指令位置，C ≤ vc 小集）
@@ -729,25 +729,25 @@ fn alloc_registers():
         loop:
             if ci2 >= cc:
                 break
-            ks := r64(cand_st, ci2 * 8)
-            kl := r64(cand_lv, ci2 * 8)
-            ke := r64(cand_en, ci2 * 8)
+            ks := cell_load(cand_st, ci2 * 8)
+            kl := cell_load(cand_lv, ci2 * 8)
+            ke := cell_load(cand_en, ci2 * 8)
             jj : ., mut = ci2
             loop:
                 if jj <= 0:
                     break
                 pj := jj - 1
-                ps := r64(cand_st, pj * 8)
-                pl := r64(cand_lv, pj * 8)
+                ps := cell_load(cand_st, pj * 8)
+                pl := cell_load(cand_lv, pj * 8)
                 if ps < ks || (ps == ks && pl < kl):
                     break
-                w64(cand_st, jj * 8, ps)
-                w64(cand_en, jj * 8, r64(cand_en, pj * 8))
-                w64(cand_lv, jj * 8, pl)
+                cell_store(cand_st, jj * 8, ps)
+                cell_store(cand_en, jj * 8, cell_load(cand_en, pj * 8))
+                cell_store(cand_lv, jj * 8, pl)
                 jj = jj - 1
-            w64(cand_st, jj * 8, ks)
-            w64(cand_en, jj * 8, ke)
-            w64(cand_lv, jj * 8, kl)
+            cell_store(cand_st, jj * 8, ks)
+            cell_store(cand_en, jj * 8, ke)
+            cell_store(cand_lv, jj * 8, kl)
             ci2 = ci2 + 1
 
         // ── 阶段 4：位置扫描 First Fit（同位置先 free 后分配）──
@@ -763,10 +763,10 @@ fn alloc_registers():
             loop:
                 if lv2 >= vc:
                     break
-                rr := r64(var_reg, lv2 * 8)
-                if rr >= 0 && r64(var_end, lv2 * 8) < p:
-                    w64(var_reg, lv2 * 8, -1)
-                    w64(reg_occ, rr * 8, -1)
+                rr := cell_load(var_reg, lv2 * 8)
+                if rr >= 0 && cell_load(var_end, lv2 * 8) < p:
+                    cell_store(var_reg, lv2 * 8, -1)
+                    cell_store(reg_occ, rr * 8, -1)
                 lv2 = lv2 + 1
             // 分配起点等于 p 的候选。窗口终点为 p-1 的 var 已先释放，可以复用同一
             // 寄存器；终点恰为 p 的 var 仍活跃于 p，不能释放。同指令的共存条目不得
@@ -774,25 +774,25 @@ fn alloc_registers():
             loop:
                 if ci >= cc:
                     break
-                if r64(cand_st, ci * 8) != p:
+                if cell_load(cand_st, ci * 8) != p:
                     break
-                lvv := r64(cand_lv, ci * 8)
-                eend := r64(cand_en, ci * 8)
+                lvv := cell_load(cand_lv, ci * 8)
+                eend := cell_load(cand_en, ci * 8)
                 ci = ci + 1
                 rj : ., mut = 0
                 tk : ., mut = -1
                 loop:
                     if rj >= MAX_REGS:
                         break
-                    if r64(reg_occ, rj * 8) < 0:
+                    if cell_load(reg_occ, rj * 8) < 0:
                         tk = rj
                         break
                     rj = rj + 1
                 if tk >= 0:
-                    w64(var_reg, lvv * 8, tk)
-                    w64(var_end, lvv * 8, eend)
-                    w64(reg_occ, tk * 8, lvv)
-                    w64(var_asg, lvv * 8, r64(reg_phys, tk * 8))
+                    cell_store(var_reg, lvv * 8, tk)
+                    cell_store(var_end, lvv * 8, eend)
+                    cell_store(reg_occ, tk * 8, lvv)
+                    cell_store(var_asg, lvv * 8, cell_load(reg_phys, tk * 8))
             p = p + 1
 
         // ── 阶段 5：终分配写 g_opt_meta ──
@@ -805,7 +805,7 @@ fn alloc_registers():
         loop:
             if lv >= vc:
                 break
-            if r64(var_asg, lv * 8) >= 0:
+            if cell_load(var_asg, lv * 8) >= 0:
                 rc = rc + 1
             lv = lv + 1
         if rc > 0:
@@ -816,8 +816,8 @@ fn alloc_registers():
             loop:
                 if lv >= vc:
                     break
-                if r64(var_asg, lv * 8) >= 0:
-                    w64(asg_lv, ai * 8, lv)
+                if cell_load(var_asg, lv * 8) >= 0:
+                    cell_store(asg_lv, ai * 8, lv)
                     ai = ai + 1
                 lv = lv + 1
             pb : ., mut = 0
@@ -851,9 +851,9 @@ fn alloc_registers():
                 loop:
                     if pi >= n_in:
                         break
-                    lvp := r64(asg_lv, (pb + pi) * 8)
+                    lvp := cell_load(asg_lv, (pb + pi) * 8)
                     vw := vs + lvp
-                    rn := r64(var_asg, lvp * 8)
+                    rn := cell_load(var_asg, lvp * 8)
                     store8(g_opt_meta, eo+di, vw%256)
                     store8(g_opt_meta, eo+di+1, (vw/256)%256)
                     store8(g_opt_meta, eo+di+2, (vw/65536)%256)
@@ -879,9 +879,9 @@ fn alloc_registers():
             loop:
                 if ai >= rc:
                     break
-                lvp := r64(asg_lv, ai * 8)
+                lvp := cell_load(asg_lv, ai * 8)
                 vw := vs + lvp
-                rn := r64(var_asg, lvp * 8)
+                rn := cell_load(var_asg, lvp * 8)
                 ej : ., mut = 0
                 loop:
                     if ej >= ec:
@@ -893,24 +893,163 @@ fn alloc_registers():
                 ai = ai + 1
         fi = fi + 1
 
+// ── v10 target-fact reconstruction ────────────────────────────────────────
+// The .ccr carries semantic facts only. Access widths, array strides, and
+// runtime allocation sizes are target facts; the instance rebuilds them from
+// type ids/variable types and the x86-64 layout (mapping.cr/x86_mapping.cr).
+// These helpers live here because both backend entries (the concat corearch
+// entry and the project-mode target entry) import regalloc.cr.
+fn corearch_ptr_pointee(var: int) -> int:
+    if var < 0:
+        return TI_INT
+    ti := irv_type(var)
+    if ti >= 0:
+        k := get_type_kind(ti)
+        if k == TYP_PTR || k == TYP_REF:
+            return get_type_data(ti)
+    return TI_INT
+
+// Access width for IR_DEREF/IR_STORE_PTR. Mirrors the front-end derivation
+// ptr_access_width: pointee value size, falling back to one target slot.
+fn corearch_nod_access_width(n: int) -> int:
+    // Prefer the node's semantic type_id (the pointee domain). The variable row
+    // remains a fallback for nodes whose domain was unavailable at save time.
+    tid := nod_type_id(n)
+    if tid >= 0 && tid < g_type_count:
+        w := mp_size(tid)
+        if w > 0:
+            return w
+    w2 := mp_size(corearch_ptr_pointee(nod_s1(n)))
+    if w2 <= 0:
+        return mp_stride(TI_INT)
+    return w2
+
+// Element stride for IR_ALLOC_ARRAY, derived from the destination variable's
+// semantic array element type. An uninitialised array declaration
+// (`a : [T; N]`) stores a TYP_ARRAY row in the variable table, so the element
+// row drives the stride. Compiler-internal buffers (the go-collect array, range
+// result arrays) have a scalar/unit row and no element type to read; for those
+// the explicit single-slot fallback applies. An unreadable type row also falls
+// back explicitly instead of assuming every element is an int slot.
+fn corearch_nod_alloc_stride(n: int, dest: int) -> int:
+    // v10 type_id for ALLOC_ARRAY is the element domain. Use it first; the
+    // destination variable's array row is the fallback when the domain was not
+    // derivable at save time.
+    tid := nod_type_id(n)
+    if tid >= 0 && tid < g_type_count:
+        return mp_stride(tid)
+    if dest < 0:
+        return mp_stride(TI_INT)
+    ti := irv_type(dest)
+    if ti < 0 || ti >= g_type_count:
+        return mp_stride(TI_INT)
+    if get_type_kind(ti) == TYP_ARRAY || get_type_kind(ti) == TYP_SLICE:
+        elem := get_type_data(ti)
+        if elem >= 0 && elem < g_type_count:
+            return mp_stride(elem)
+    // No semantic array element type: one IR value occupies one target slot.
+    return mp_stride(TI_INT)
+
+// Byte extent of the allocation a runtime pointer bound refers to. The base
+// variable is the destination of an ALLOC_ARRAY/ALLOC_STRUCT node, and that
+// node's semantic count/struct name plus the target layout determine the size.
+fn corearch_alloc_size_of_var(v: int) -> int:
+    if v < 0:
+        return 0
+    ni : ., mut = 0
+    loop:
+        if ni >= g_v7_nod_count:
+            break
+        if nod_dest(ni) == v:
+            aop := nod_op(ni)
+            if aop == IR_ALLOC_ARRAY:
+                cnt := nod_s1(ni)
+                if cnt <= 0:
+                    return 0
+                // Element stride, not one int slot: bool/char/dex elements and
+                // natively sized fields make mp_extent(n, TI_INT) wrong.
+                return cnt * corearch_nod_alloc_stride(ni, v)
+            if aop == IR_ALLOC_STRUCT:
+                nm := nod_s3(ni)
+                si : ., mut = 0
+                loop:
+                    if si >= g_struct_count:
+                        break
+                    if si_name(si) == nm:
+                        fc := si_field_count(si)
+                        total : ., mut = 0
+                        fj : ., mut = 0
+                        loop:
+                            if fj >= fc:
+                                break
+                            ft := si_field_type(si, fj)
+                            st := mp_stride(ft)
+                            if st <= 0:
+                                st = mp_stride(TI_INT)
+                            total = total + st
+                            fj = fj + 1
+                        if total <= 0:
+                            return mp_stride(TI_INT)
+                        return total
+                    si = si + 1
+                return mp_stride(TI_INT)
+        ni = ni + 1
+    return 0
+
+// Runtime pointer bound size for IR_DEREF/IR_STORE_PTR. The semantic flag says
+// a runtime bound exists; the byte size is derived from the allocation node.
+// -1 means "flag set but base/size unresolvable" — fail closed, never fall back
+// to a null-check-only emission.
+fn corearch_nod_runtime_bound_size(n: int) -> int:
+    fl := nod_type_flags(n)
+    if (fl / CCR_NOD_FLAG_RUNTIME_PTR_BOUNDS) % 2 != 1:
+        return 0
+    op := nod_op(n)
+    base : ., mut = -1
+    if op == IR_DEREF:
+        base = nod_s2(n)
+    else if op == IR_STORE_PTR:
+        base = nod_dest(n)
+    if base < 0:
+        return -1
+    sz := corearch_alloc_size_of_var(base)
+    if sz <= 0:
+        return -1
+    return sz
+
 // 语义对象模型：从 NOD 重建线性调度。
 // ccr_io.cr load_ccr 从内核对象缓冲顺序生成 48 字节线性流 g_ir_instrs。
-// nod_* 访问器读 g_v7_nod_sem 的 28 字节语义字段，nod_edge_first 和 nod_edge_count
+// nod_* 访问器读 g_v7_nod_sem 的 32 字节语义字段，nod_edge_first 和 nod_edge_count
 // 读邻接域。REG 展开和函数边界回填（root span 到 g_ir_func_instr_start 和
 // g_ir_func_instr_count）留在 loader。
-// 调用方是 corearch.cr 和组合根 src/targets/x86_64-linux/main.cr；load_ccr 成功后、
+// 调用方是 corearch.cr 和组合根 src/targets/x86_64/linux/elf/main.cr；load_ccr 成功后、
 // 分派和发射前调用一次。
-fn build_linear_schedule():
+fn build_linear_schedule() -> int:
     grow_ir_instrs(g_v7_nod_count)
     ni : ., mut = 0
     loop:
         if ni >= g_v7_nod_count:
             break
-        iri_set_op(ni, nod_op(ni))
+        op := nod_op(ni)
+        iri_set_op(ni, op)
         iri_set_dest(ni, nod_dest(ni))
         iri_set_s1(ni, nod_s1(ni))
         iri_set_s2(ni, nod_s2(ni))
         iri_set_s3(ni, nod_s3(ni))
         iri_set_tk(ni, nod_tk(ni))
+        // v10: the .ccr does not carry target facts. Reconstruct the access
+        // width for pointer dereferences and the element stride for allocations
+        // from the semantic type plus the x86-64 layout. The runtime-bound size
+        // for pointer stores/loads is derived from the allocation node; a set
+        // flag with no resolvable allocation is a malformed file (fail closed).
+        if op == IR_ALLOC_ARRAY:
+            iri_set_s2(ni, corearch_nod_alloc_stride(ni, nod_dest(ni)))
+        else if op == IR_DEREF || op == IR_STORE_PTR:
+            iri_set_tk(ni, corearch_nod_access_width(ni))
+            bsz := corearch_nod_runtime_bound_size(ni)
+            if bsz < 0:
+                return -1
+            iri_set_s3(ni, bsz)
         g_ir_instr_count = ni + 1
         ni = ni + 1
+    return 0

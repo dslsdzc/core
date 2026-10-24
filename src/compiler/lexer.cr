@@ -79,7 +79,7 @@ fn is_ident_char(c: int) -> int:
 fn add_error(msg: string):
     mi := str_intern(msg)
     grow_errors(g_error_count + 1)
-    w64(g_errors, g_error_count * 8, mi)
+    cell_store(g_errors, g_error_count * 8, mi)
     g_error_count = g_error_count + 1
 
 fn cur_char() -> int:
@@ -90,22 +90,22 @@ fn cur_char() -> int:
     src_len := str_len(g_source)
     if g_pos >= src_len:
         return 0
-    return load8(g_source, g_pos)
+    return cell_load_byte(g_source, g_pos)
 
 fn peek() -> int:
     src_len := str_len(g_source)
     if g_pos + 1 >= src_len:
         return 0
-    return load8(g_source, g_pos + 1)
+    return cell_load_byte(g_source, g_pos + 1)
 
 fn cur_char_at(src: string, pos: int, max_len: int) -> int:
     if pos >= max_len:
         return 0
-    return load8(src, pos)
+    return cell_load_byte(src, pos)
 fn peek_at(src: string, pos: int, max_len: int) -> int:
     if pos + 1 >= max_len:
         return 0
-    return load8(src, pos + 1)
+    return cell_load_byte(src, pos + 1)
 
 fn lookup_keyword(s: string) -> int:
     if s == "fn":
@@ -191,142 +191,19 @@ fn lookup_keyword(s: string) -> int:
         return T_SPEC
     return T_IDENT
 
-// 2^k（纯整数，k >= 0）
-fn pow2i(k: int) -> int:
-    v : int = 1
-    i : ., mut = 0
-    loop:
-        if i >= k:
-            break
-        v = v * 2
-        i = i + 1
-    return v
-
-// Convert a decimal string to IEEE 754 binary64 bits using integer arithmetic
-// (at most 18 significant digits). The value is ip + fp/den: find the integer
-// bit width, long-divide the fraction to 64 bits, then take a 53-bit significand.
-// The result truncates rather than rounds, within about 2 ulp for 18 digits.
-fn str_to_f64_bits(s: string) -> int:
-    sl := str_len(s)
-    i : ., mut = 0
-    neg : int = 0
-    if i < sl && load8(s, i) == 45:
-        neg = 1
-        i = i + 1
-    ip : int = 0
-    fp : int = 0
-    den : int = 1
-    sd : int = 0
-    ip_digits : ., mut = 0
-    fp_digits : ., mut = 0
-    too_wide : ., mut = 0
-    loop:
-        if i >= sl:
-            break
-        c := load8(s, i)
-        if c == 46:
-            sd = 1
-            i = i + 1
-            continue
-        if c < 48 || c > 57:
-            break
-        if sd != 0:
-            fp_digits = fp_digits + 1
-            if fp_digits <= 18:
-                fp = fp * 10 + (c - 48)
-                den = den * 10
-        else:
-            ip_digits = ip_digits + 1
-            if ip_digits <= 19:
-                digit_ip := c - 48
-                if ip > 922337203685477580 || (ip == 922337203685477580 && digit_ip > 7 + neg):
-                    too_wide = 1
-                else:
-                    ip = ip * 10 + digit_ip
-            else:
-                too_wide = 1
-        i = i + 1
-    if too_wide != 0:
-        add_error("decimal literal integer part is too wide")
-        return 0
-    if ip == 0 && fp == 0:
-        if neg != 0:
-            return (-9223372036854775807 - 1)
-        return 0
-    // 小数 64 位（长除：r=fp，每轮 r×2 vs den）
-    frac64 : int = 0
-    r : ., mut = fp
-    bits : ., mut = 0
-    loop:
-        if bits >= 64:
-            break
-        if r >= 4611686018427387904:
-            r = r / 2
-            den = den / 2
-        r = r * 2
-        frac64 = frac64 * 2
-        if r >= den:
-            r = r - den
-            frac64 = frac64 + 1
-        bits = bits + 1
-    // 整数部分位宽
-    bi : ., mut = 0
-    t2 : ., mut = ip
-    loop:
-        if t2 == 0:
-            break
-        t2 = t2 / 2
-        bi = bi + 1
-    mant : int = 0
-    exp : int = 0
-    if bi > 0:
-        sh := 53 - bi
-        if sh >= 0:
-            mant = (ip * pow2i(sh)) + (frac64 / pow2i(64 - sh))
-        else:
-            // Avoid pow2i of a negative value for integer parts wider than
-            // the binary64 significand.
-            mant = ip / pow2i(0 - sh)
-        exp = 1023 + (bi - 1)
-    else:
-        // 纯小数：frac64 的最高位
-        bf : ., mut = 0
-        t2 = frac64
-        loop:
-            if t2 == 0:
-                break
-            t2 = t2 / 2
-            bf = bf + 1
-        if bf == 0:
-            if neg != 0:
-                return (-9223372036854775807 - 1)
-            return 0
-        sh := 53 - bf
-        if sh >= 0:
-            mant = frac64 * pow2i(sh)
-        else:
-            mant = frac64 / pow2i(-sh)
-        exp = 1023 + (bf - 65)
-    // Assemble; mant is truncated to 52 bits without rounding.
-    bits64 : int = 0
-    if exp > 0 && exp < 2047:
-        bits64 = (mant % 4503599627370496) + exp * 4503599627370496
-    if neg != 0:
-        bits64 = bits64 + (-9223372036854775807 - 1)
-    return bits64
-
 // Parse an integer literal. Supports digit separators and 0x/0o/0b prefixes;
 // malformed literals are lexer errors.
 // Language int is an unbounded mathematical integer. The overflow guard reports an
-// encoding limit: the compiler represents values as a 64-bit machine word, and a
-// larger value has no carrier there. It is not a semantic overflow. Wider
+// encoding limit of the current token payload: a decimal value wider than 64 bits
+// has no carrier in this interface. It is not a semantic overflow. Wider
 // representations are future work.
 fn str_int_literal(s: string) -> int:
+    g_int_big = 0
     sl := str_len(s)
     base : ., mut = 10
     start : ., mut = 0
-    if sl >= 2 && load8(s, 0) == 48:
-        pfx := load8(s, 1)
+    if sl >= 2 && cell_load_byte(s, 0) == 48:
+        pfx := cell_load_byte(s, 1)
         if pfx == 120 || pfx == 88:
             base = 16
             start = 2
@@ -342,7 +219,7 @@ fn str_int_literal(s: string) -> int:
     loop:
         if i >= sl:
             break
-        c := load8(s, i)
+        c := cell_load_byte(s, i)
         if c == 95:
             i = i + 1
             continue
@@ -361,19 +238,19 @@ fn str_int_literal(s: string) -> int:
         // i64min. Use i64max/base, with the decimal digit boundary handled below.
         if base == 10:
             if value > 922337203685477580 || (value == 922337203685477580 && d > 7):
-                add_error("integer literal overflow")
+                g_int_big = 1
                 return 0
         else if base == 16:
             if value > 576460752303423487:
-                add_error("integer literal overflow")
+                g_int_big = 1
                 return 0
         else if base == 8:
             if value > 1152921504606846975:
-                add_error("integer literal overflow")
+                g_int_big = 1
                 return 0
         else:
             if value > 4611686018427387903:
-                add_error("integer literal overflow")
+                g_int_big = 1
                 return 0
         value = value * base + d
         digits = digits + 1
@@ -392,7 +269,7 @@ fn str_to_scaled(s: string) -> int:
     sl := str_len(s)
     i : ., mut = 0
     neg : int = 0
-    if i < sl && load8(s, i) == 45:
+    if i < sl && cell_load_byte(s, i) == 45:
         neg = 1
         i = i + 1
     ip : int = 0
@@ -403,7 +280,7 @@ fn str_to_scaled(s: string) -> int:
     loop:
         if i >= sl:
             break
-        c := load8(s, i)
+        c := cell_load_byte(s, i)
         if c == 46:
             sd = 1
             i = i + 1
@@ -441,43 +318,43 @@ fn str_to_scaled(s: string) -> int:
 fn add_tok(kind: int, lex: int, start_line: int, start_col: int):
     grow_tokens(g_token_count + 1)
     tp := g_token_count * ESZ_TOKEN
-    w64(g_tokens, tp + OFF_TK_KIND, kind)
-    w64(g_tokens, tp + OFF_TK_LEXEME, lex)
-    w64(g_tokens, tp + OFF_TK_INTVAL, 0)
-    w64(g_tokens, tp + OFF_TK_LINE, start_line)
-    w64(g_tokens, tp + OFF_TK_COL, start_col)
+    cell_store(g_tokens, tp + OFF_TK_KIND, kind)
+    cell_store(g_tokens, tp + OFF_TK_LEXEME, lex)
+    cell_store(g_tokens, tp + OFF_TK_INTVAL, 0)
+    cell_store(g_tokens, tp + OFF_TK_LINE, start_line)
+    cell_store(g_tokens, tp + OFF_TK_COL, start_col)
     g_token_count = g_token_count + 1
 
 fn add_tok_int(kind: int, ival: int, start_line: int, start_col: int):
     grow_tokens(g_token_count + 1)
     tp := g_token_count * ESZ_TOKEN
-    w64(g_tokens, tp + OFF_TK_KIND, kind)
-    w64(g_tokens, tp + OFF_TK_LEXEME, -1)
-    w64(g_tokens, tp + OFF_TK_INTVAL, ival)
-    w64(g_tokens, tp + OFF_TK_LINE, start_line)
-    w64(g_tokens, tp + OFF_TK_COL, start_col)
+    cell_store(g_tokens, tp + OFF_TK_KIND, kind)
+    cell_store(g_tokens, tp + OFF_TK_LEXEME, -1)
+    cell_store(g_tokens, tp + OFF_TK_INTVAL, ival)
+    cell_store(g_tokens, tp + OFF_TK_LINE, start_line)
+    cell_store(g_tokens, tp + OFF_TK_COL, start_col)
     g_token_count = g_token_count + 1
 
 fn add_tok_str(kind: int, s: string, start_line: int, start_col: int):
     grow_tokens(g_token_count + 1)
     tp := g_token_count * ESZ_TOKEN
-    w64(g_tokens, tp + OFF_TK_KIND, kind)
+    cell_store(g_tokens, tp + OFF_TK_KIND, kind)
     si := str_intern(s)
-    w64(g_tokens, tp + OFF_TK_LEXEME, si)
-    w64(g_tokens, tp + OFF_TK_INTVAL, 0)
-    w64(g_tokens, tp + OFF_TK_LINE, start_line)
-    w64(g_tokens, tp + OFF_TK_COL, start_col)
+    cell_store(g_tokens, tp + OFF_TK_LEXEME, si)
+    cell_store(g_tokens, tp + OFF_TK_INTVAL, 0)
+    cell_store(g_tokens, tp + OFF_TK_LINE, start_line)
+    cell_store(g_tokens, tp + OFF_TK_COL, start_col)
     g_token_count = g_token_count + 1
 
 // Token with both int_val and lexeme, used for dex literals: int_val is the scaled integer and lexeme is the source digits.
 fn add_tok_int_lex(kind: int, ival: int, lexeme_ni: int, start_line: int, start_col: int):
     grow_tokens(g_token_count + 1)
     tp := g_token_count * ESZ_TOKEN
-    w64(g_tokens, tp + OFF_TK_KIND, kind)
-    w64(g_tokens, tp + OFF_TK_LEXEME, lexeme_ni)
-    w64(g_tokens, tp + OFF_TK_INTVAL, ival)
-    w64(g_tokens, tp + OFF_TK_LINE, start_line)
-    w64(g_tokens, tp + OFF_TK_COL, start_col)
+    cell_store(g_tokens, tp + OFF_TK_KIND, kind)
+    cell_store(g_tokens, tp + OFF_TK_LEXEME, lexeme_ni)
+    cell_store(g_tokens, tp + OFF_TK_INTVAL, ival)
+    cell_store(g_tokens, tp + OFF_TK_LINE, start_line)
+    cell_store(g_tokens, tp + OFF_TK_COL, start_col)
     g_token_count = g_token_count + 1
 
 // Layout helpers. Anchor computation and the colon end-of-line check must share
@@ -541,7 +418,7 @@ fn colon_at_line_end(src: string, pos: int, max_len: int) -> int:
     return 0
 
 fn ind_top() -> int:
-    return r64(g_indent_stack, (g_indent_len - 1) * 8)
+    return cell_load(g_indent_stack, (g_indent_len - 1) * 8)
 
 fn ind_push(col: int):
     if g_indent_len >= g_indent_cap:
@@ -550,10 +427,10 @@ fn ind_push(col: int):
             ncap = 16
         nv := alloc(ncap * 8)
         if g_indent_cap > 0:
-            _dyncpy(g_indent_stack, g_indent_cap * 8, nv)
+            cell_copy(g_indent_stack, g_indent_cap * 8, nv)
         g_indent_stack = nv
         g_indent_cap = ncap
-    w64(g_indent_stack, g_indent_len * 8, col)
+    cell_store(g_indent_stack, g_indent_len * 8, col)
     g_indent_len = g_indent_len + 1
 
 // Emit NEWLINE and any INDENT/DEDENT when crossing a physical line outside
@@ -792,7 +669,11 @@ fn tokenize(_src: string, layout_bypass: int):
             if has_dot != 0:
                 add_tok_int_lex(T_DEX, str_to_scaled(num_str), str_intern(num_str), start_line, start_col)
             else:
-                add_tok_int(T_INT, str_int_literal(num_str), start_line, start_col)
+                iv := str_int_literal(num_str)
+                if g_int_big != 0:
+                    add_tok_str(T_BIGINT, big_lit_decimal(num_str), start_line, start_col)
+                else:
+                    add_tok_int(T_INT, iv, start_line, start_col)
             _pos = skip_ws(_src, _pos, _slen)
             continue
 
@@ -924,7 +805,7 @@ fn tokenize(_src: string, layout_bypass: int):
                         cflag = 0
                     ti := g_token_count
                     add_tok_str(T_INTERP, str_sub(_src, hs, hp - hs), start_line, start_col + 1 + (hs - sp))
-                    w64(g_tokens, ti * ESZ_TOKEN + OFF_TK_INTVAL, cflag)
+                    cell_store(g_tokens, ti * ESZ_TOKEN + OFF_TK_INTVAL, cflag)
                     _pos = hp
                     if cflag != 0:
                         _pos = _pos + 1
@@ -948,11 +829,11 @@ fn tokenize(_src: string, layout_bypass: int):
                 loop:
                     if ri >= g_token_count:
                         break
-                    iv : ., mut = r64(g_tokens, ri * ESZ_TOKEN + OFF_TK_INTVAL)
+                    iv : ., mut = cell_load(g_tokens, ri * ESZ_TOKEN + OFF_TK_INTVAL)
                     iv = iv + 1
                     if ri + 1 < g_token_count:
                         iv = iv + 2
-                    w64(g_tokens, ri * ESZ_TOKEN + OFF_TK_INTVAL, iv)
+                    cell_store(g_tokens, ri * ESZ_TOKEN + OFF_TK_INTVAL, iv)
                     ri = ri + 1
             _pos = skip_ws(_src, _pos, _slen)
             continue

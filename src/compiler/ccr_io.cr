@@ -1,16 +1,20 @@
 // === ccr_io.cr ===
 // .ccr binary serialization, the interface between corec and corearch.
 //
-// Version 9 only. The loader checks version == 9 and rejects earlier versions;
-// there is no conversion path. The format has 8 segments in canonical order:
-// STR, SYM, NOD, ENT, REG, EDG, TYPE, IFACE (tags 1..8).
+// Version 10 only. The loader checks version == CCR_V10_VERSION (0x000A0000)
+// and rejects the historical v9 wire id and every other version; there is no
+// conversion path. v9 bytes survive only as negative fixtures in the test suite.
+// The format has 9 segments in canonical order:
+// STR, TYPE, IFACE, SYM, NOD, ENT, REG, EDG, CASE (tags 1..9).
 //
-// Header 16B: magic "CCR1", version 9, segment count 8, reserved 0.
-// Segment table: 8 entries of {tag u32, offset u32, size u32}. Tags are in
+// Header 16B: magic "CCR1", version 0x000A0000, segment count 9, flags.
+// Segment table: 9 entries of {tag u32, offset u32, size u32}. Tags are in
 // canonical order, offsets are contiguous and start at the end of the table.
+// The loader consumes the bodies in this same order with a forward-only cursor;
+// it uses the table entries only to validate bounds and contiguity.
 //
 // STR(1): [count][{len, data}].
-// SYM(2):
+// SYM(4):
 //   globals: [count][{name u32, type u32, init_val i64}] 16B each.
 //   functions: [count][{name u32, param_count u32, ret_type u32,
 //     root_region i32, first_ent i32, last_ent i32} 24B
@@ -23,14 +27,15 @@
 //     variants[variant_count]{name u32, type_count u32,
 //     types[type_count] u32}}].
 //   opt metadata: [count][{key u32, len u32, data len bytes}].
-// NOD(3): [count][40B {op i32, dest i32, src1 i64, src2 i32, src3 i32,
-//   tk i32, item i32, first_edge u32, edge_count u32}].
-// EDG(6): [count][8B {to_nod u32, kind u32}].
-// ENT(4): [count][28B {var_id i32, version u32, def_nod i32, live_start u32,
-//   live_end u32, home i32, flags u32}].
-// REG(5): [count][24B {kind u32, parent i32, enter_nod u32, exit_nod u32,
+// NOD(5): [count][40B {op i32, dest i32, src1 i64, src2 i32, src3 i32,
+//   type_id i32, flags u32, first_edge u32, edge_count u32}].
+//   src2/src3 never carry width, byte offset, stride, or alignment.
+// EDG(8): [count][8B {to_nod u32, kind u32}].
+// ENT(6): [count][24B {var_id i32, version u32, def_nod i32, live_start u32,
+//   live_end u32, flags u32}]. home is not part of v10.
+// REG(7): [count][24B {kind u32, parent i32, enter_nod u32, exit_nod u32,
 //   first_ent i32, last_ent i32}].
-// TYPE(7): type rows and the type-term DAG.
+// TYPE(2): type rows and the type-term DAG.
 //   Layout: [row_count u32]
 //           [row_count * 24B {kind i64, data i64, extra i64}]
 //           [term_count u32]
@@ -64,9 +69,8 @@
 //     - The segment must end exactly at its table boundary. A mismatch rejects the
 //       file.
 //
-//   NOD.item is an index into this term table. After TYPE loads, the loader checks
-//   every NOD item: item = -1 needs no term, and item >= 0 must satisfy
-//   tt_atom_of_term(item) == the on-disk tk code. A mismatch rejects the file.
+//   NOD.type_id is a TYPE row (-1 = none). The v10 loader checks every NOD
+//   type_id after TYPE loads: it must be -1 or an existing row.
 //
 //   TYPE is required. An empty, truncated, or non-translatable TYPE segment rejects
 //   the whole file; it is never treated as an empty table. Content is built by
@@ -74,7 +78,7 @@
 //   judgment history. Hashes are omitted because they are a pure function of the
 //   five fields.
 //
-// IFACE(8): five sections, each prefixed by a u32 count.
+// IFACE(3): five sections, each prefixed by a u32 count.
 //   1. Native entries:
 //      [count = IFACE_ENTRY_COUNT][24B {ak i32, ti_row i32, name_ni i32,
 //       lit_code i32, ops i64}].
@@ -93,8 +97,8 @@
 // - Node ids are file order. Edges are stored per node in a contiguous range;
 //   every to_nod is greater than the owning node.
 // - ENT is the verification and semantic source. version is the 1-based
-//   definition ordinal within a var group; live_end is half-open. home is -1
-//   and flags is 0 in files produced by the current writer.
+//   definition ordinal within a var group; live_end is half-open. flags is 0 in
+//   files produced by the current writer, and v10 has no home field.
 // - REG is required; function instruction ranges derive from the SG_FUNC root
 //   region span. ENT may be absent, treated as an empty table.
 // - TYPE and IFACE are required. The loader rejects missing segments rather
@@ -109,32 +113,30 @@
 // No bitwise ops in Core; use arithmetic instead.
 
 CCR_MAGIC : int = 827474755  // "CCR1" (0x31524343)
-CCR_VERSION : int = 9        // v9 only. The loader rejects any other version;
-                             // there is no conversion path.
-CCR_SEG_COUNT : int = 8      // STR SYM NOD ENT REG EDG TYPE IFACE
-CCR_SEG_TYPE : int = 7       // TYPE 段 tag
-CCR_SEG_IFACE : int = 8      // IFACE 段 tag
+
+// Set by save_ccr from corec (compiler-source detection) and used to compute
+// the SYSTEM header bit and to pass --raw-int to the backend. It is not a wire
+// field and does not select int mode by itself.
+g_ccr_emit_raw_int : int, mut
 
 // NOD record: 40 bytes.
-// {op i32, dest i32, s1 i64, src2 i32, src3 i32, tk i32, item i32,
+// {op i32, dest i32, s1 i64, src2 i32, src3 i32, type_id i32, flags u32,
 //  first_edge u32, edge_count u32}.
-// tk is the derived type code. item is an index into the TYPE segment term space
-// (-1 means none). first_edge and edge_count locate this node's outgoing edges
-// in EDG. The in-memory object record is the first 32 bytes (ESZ_NOD_SEM)
-// without the adjacency fields.
-ESZ_NOD_DISK : int = 40
+// type_id is a TYPE row (-1 = none); flags is the semantic-node feature word
+// (CCR_NOD_FLAG_*). Widths, strides, and byte extents are target facts and are
+// reconstructed by corearch, never stored here. first_edge and edge_count locate
+// this node's outgoing edges in EDG. The in-memory object record keeps the same
+// eight semantic fields without the adjacency pair. CCR_V10_NOD_DISK = 40.
 
 // EDG record: 8 bytes, {to_nod u32, kind u32}. The source node is implicit:
 // node i's outgoing edges are the contiguous range
 // [first_edge, first_edge + edge_count).
-ESZ_EDGE_DISK : int = 8
 
 // REG record: 24 bytes, {kind i32, parent i32, enter_nod u32, exit_nod u32,
 // first_ent i32, last_ent i32}. nstart and ncount are not stored; the loader
 // derives nstart = enter and ncount = exit - enter.
 // The in-memory SG entry is ESZ_SG (48 bytes, u64 fields), which is not the wire
-// format. Use ESZ_SG_DISK for .ccr size math.
-ESZ_SG_DISK : int = 24
+// format. Use CCR_V10_REG_DISK for .ccr size math.
 
 // SYM 落盘记录尺寸：
 //   global records: 16B {name u32, type u32, init_val i64}.
@@ -145,11 +147,11 @@ ESZ_GLOBAL_DISK : int = 16
 ESZ_FUNC_HEAD_DISK : int = 24
 ESZ_VARDECL_DISK : int = 8
 
-// On-disk ENT record: 7 × 4B = 28 bytes (var_id/version/def_nod/live_start/
-// live_end/home/flags; version + 半开 live_end 由内存 24B 表转换，见文件头注释).
+// On-disk ENT record: 6 × 4B = 24 bytes (var_id/version/def_nod/live_start/
+// live_end/flags; version + 半开 live_end 由内存 24B 表转换，见文件头注释).
 // The in-memory entry table is ESZ_ENTRY (24 bytes, no version field，the
 // per-var ordinal is derivable from group order); disk record != memory record.
-ESZ_ENTRY_DISK : int = 28
+// CCR_V10_ENT_DISK = 24.
 
 fn bw_byte(val: int, shift: int) -> int:
     if shift == 0:
@@ -163,26 +165,26 @@ fn bw_byte(val: int, shift: int) -> int:
     return 0
 
 fn buf_write_u32(buf: string, pos: int, val: int):
-    w32(buf, pos, val)
+    cell_store32(buf, pos, val)
 
 fn buf_write_i32(buf: string, pos: int, val: int):
-    w32(buf, pos, val)
+    cell_store32(buf, pos, val)
 
 fn buf_write_i64(buf: string, pos: int, val: int):
-    w64(buf, pos, val)
+    cell_store(buf, pos, val)
 
 fn buf_read_u32(buf: string, pos: int) -> int:
-    b0 := load8(buf, pos)
-    b1 := load8(buf, pos + 1)
-    b2 := load8(buf, pos + 2)
-    b3 := load8(buf, pos + 3)
+    b0 := cell_load_byte(buf, pos)
+    b1 := cell_load_byte(buf, pos + 1)
+    b2 := cell_load_byte(buf, pos + 2)
+    b3 := cell_load_byte(buf, pos + 3)
     return b0 + b1 * 256 + b2 * 65536 + b3 * 16777216
 
 fn buf_read_i32(buf: string, pos: int) -> int:
-    b0 := load8(buf, pos)
-    b1 := load8(buf, pos + 1)
-    b2 := load8(buf, pos + 2)
-    b3 := load8(buf, pos + 3)
+    b0 := cell_load_byte(buf, pos)
+    b1 := cell_load_byte(buf, pos + 1)
+    b2 := cell_load_byte(buf, pos + 2)
+    b3 := cell_load_byte(buf, pos + 3)
     val := b0 + b1 * 256 + b2 * 65536
     if b3 >= 128:
         return val + (b3 - 256) * 16777216
@@ -192,15 +194,15 @@ fn buf_read_i64(buf: string, pos: int) -> int:
     // Little-endian signed 64-bit. The low dword must be read UNSIGNED:
     // reading it signed (buf_read_i32) would double-subtract for negatives
     // (e.g. -7 = lo -7 + hi -1 -> -7 + -2^32, not -7).
-    b0 := load8(buf, pos)
-    b1 := load8(buf, pos + 1)
-    b2 := load8(buf, pos + 2)
-    b3 := load8(buf, pos + 3)
+    b0 := cell_load_byte(buf, pos)
+    b1 := cell_load_byte(buf, pos + 1)
+    b2 := cell_load_byte(buf, pos + 2)
+    b3 := cell_load_byte(buf, pos + 3)
     lo := b0 + b1 * 256 + b2 * 65536 + b3 * 16777216
-    h0 := load8(buf, pos + 4)
-    h1 := load8(buf, pos + 5)
-    h2 := load8(buf, pos + 6)
-    h3 := load8(buf, pos + 7)
+    h0 := cell_load_byte(buf, pos + 4)
+    h1 := cell_load_byte(buf, pos + 5)
+    h2 := cell_load_byte(buf, pos + 6)
+    h3 := cell_load_byte(buf, pos + 7)
     hi : ., mut = h0 + h1 * 256 + h2 * 65536
     if h3 >= 128:
         hi = hi + (h3 - 256) * 16777216
@@ -242,7 +244,7 @@ fn ccr_validate_i32_fields() -> int:
         if si >= g_sg_count:
             break
         f := si * ESZ_SG
-        if ccr_i32_fits(r64(g_sgs, f + OFF_SG_KIND)) == 0 || ccr_i32_fits(r64(g_sgs, f + OFF_SG_ENTER)) == 0 || ccr_i32_fits(r64(g_sgs, f + OFF_SG_EXIT)) == 0 || ccr_i32_fits(r64(g_sgs, f + OFF_SG_PARENT)) == 0:
+        if ccr_i32_fits(cell_load(g_sgs, f + OFF_SG_KIND)) == 0 || ccr_i32_fits(cell_load(g_sgs, f + OFF_SG_ENTER)) == 0 || ccr_i32_fits(cell_load(g_sgs, f + OFF_SG_EXIT)) == 0 || ccr_i32_fits(cell_load(g_sgs, f + OFF_SG_PARENT)) == 0:
             return 0
         si = si + 1
     return 1
@@ -258,14 +260,14 @@ fn ccr_func_root_sg(func_i: int) -> int:
     loop:
         if si >= g_sg_count:
             break
-        if r64(g_sgs, si * ESZ_SG + OFF_SG_KIND) == SG_FUNC:
+        if cell_load(g_sgs, si * ESZ_SG + OFF_SG_KIND) == SG_FUNC:
             if k == func_i:
                 return si
             k = k + 1
         si = si + 1
     return -1
 
-// Segment size calculation. Header plus segment table = 16 + 12*8 = 112 bytes.
+// Segment size calculation. Header plus segment table = 16 + 12*9 = 124 bytes.
 // Each segment carries a u32 count. The writer and size calculation must agree;
 // the final segment end must equal the file size.
 
@@ -289,8 +291,8 @@ fn ccr_sym_seg_size() -> int:
     loop:
         if fi >= g_ir_func_count:
             break
-        pc := r64(g_ir_func_param_count, fi * 8)
-        vc := r64(g_ir_func_var_count, fi * 8)
+        pc := cell_load(g_ir_func_param_count, fi * 8)
+        vc := cell_load(g_ir_func_var_count, fi * 8)
         sz = sz + ESZ_FUNC_HEAD_DISK + pc * 4 + 4 + vc * ESZ_VARDECL_DISK
         fi = fi + 1
     sz = sz + 4 + g_ir_str_const_count * 4     // str_const_count + str_consts
@@ -318,55 +320,364 @@ fn ccr_sym_seg_size() -> int:
             sz = sz + 8 + tc * 4  // variant name + tc + types
             vi = vi + 1
         ei = ei + 1
-    // opt_meta: opt_count + {key, len, data}
+    // opt_meta: a single zero count. v10 does not carry register/stack/CSE
+    // candidates in `.ccr`; they are instance-side optimization data. The 4B
+    // zero-count placeholder keeps the SYM section boundaries stable for readers
+    // and size tests, and the loader rejects any nonzero count.
     sz = sz + 4
-    mi : ., mut = 0
-    loop:
-        if mi >= g_opt_meta_count:
-            break
-        sz = sz + 8 + r32(g_opt_meta, mi * OPT_META_STRIDE + 4)
-        mi = mi + 1
     return sz
 
 fn ccr_nod_seg_size() -> int:
-    return 4 + g_ir_instr_count * ESZ_NOD_DISK
+    return 4 + g_ir_instr_count * CCR_V10_NOD_DISK
 
 fn ccr_edg_seg_size(edge_total: int) -> int:
-    return 4 + edge_total * ESZ_EDGE_DISK
+    return 4 + edge_total * CCR_V10_EDG_DISK
 
 fn ccr_ent_seg_size() -> int:
-    return 4 + g_entry_count * ESZ_ENTRY_DISK
+    return 4 + g_entry_count * CCR_V10_ENT_DISK
 
 fn ccr_reg_seg_size() -> int:
-    return 4 + g_sg_count * ESZ_SG_DISK
+    return 4 + g_sg_count * CCR_V10_REG_DISK
 
-// TYPE(7) segment size is the prepared buffer length. The content is built by
+fn ccr_case_seg_size() -> int:
+    // CASE is an empty table until match lowering writes it: 4B case_count = 0.
+    return 4
+
+// ── Header flag classification (spec §3.1) ──────────────────────────────
+// SYSTEM boundary ops: runtime/FFI/ABI surfaces. ARENA_NEW only counts when the
+// scope actually allocates (s1 == 0 means "no arena", per instr.cr); the
+// matching ARENA_RESET is then a no-op and need not be counted separately.
+// CONCURRENT ops: execution-policy nodes.
+fn ccr_op_is_system(op: int, arena_count: int) -> int:
+    if op == IR_ARENA_NEW:
+        if arena_count > 0:
+            return 1
+        return 0
+    if op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT || op == IR_HOTPATCH_ROUTE || op == IR_FNADDR || op == IR_CALL_EXTERN || op == IR_INLINE || op == IR_PTR_OF || op == IR_STR_OF:
+        return 1
+    return 0
+
+// Raw byte/runtime ABI builtins retained for the stdlib scheduler/arena and
+// the compiler runtime. A direct IR_CALL to one of these is a SYSTEM boundary:
+// the graph calls are the authority, not the g_ccr_emit_raw_int source bit.
+// IR_CALL stores the callee string index in src3; ordinary arguments live in
+// the argument chain rooted at s1 and must never be inspected here.
+fn ccr_raw_abi_builtin(name: string) -> int:
+    // Raw memory/string-header runtime ABI.
+    if name == "cell_store" || name == "cell_load" || name == "load8" || name == "store8" || name == "load64" || name == "w32" || name == "load_str_ptr" || name == "store_str_ptr" || name == "_dyncpy":
+        return 1
+    // Runtime/OS execution ABI. These names are registered by the frontend ABI
+    // axes (runtime_frontend_abi.cr / linux_frontend_abi.cr) and the target
+    // composition root. A direct IR_CALL is a SYSTEM boundary even when the call
+    // is written as ordinary source.
+    if name == "sched_call_0" || name == "sched_call_1" || name == "sched_call_2" || name == "sched_call_3" || name == "sched_call_4":
+        return 1
+    if name == "fiber_switch" || name == "fiber_init" || name == "sched_go" || name == "m_start_workers" || name == "g_set_curg" || name == "g_get_curg":
+        return 1
+    if name == "get_arg" || name == "syscall3" || name == "syscall4":
+        return 1
+    return 0
+
+fn ccr_raw_abi_call(sym: int) -> int:
+    if sym < 0:
+        return 0
+    return ccr_raw_abi_builtin(istr_get(sym))
+
+fn ccr_op_is_concurrent(op: int) -> int:
+    if op == IR_SPAWN || op == IR_YIELD || op == IR_AWAIT:
+        return 1
+    return 0
+
+// v10 opcode table. The IR opcode values are assigned densely 0..53 in ast.cr;
+// anything outside that table is not a v10 operation. Rejecting unknown opcodes
+// before emission also prevents emit_instr from silently falling through as a
+// zero-byte instruction.
+fn ccr_op_is_known(op: int) -> int:
+    if op >= IR_NOP && op <= IR_STR_OF:
+        return 1
+    return 0
+
+// Operand domain helpers. -1 is the reserved "none" id; every other id must be
+// inside the domain reconstructed from the earlier segments.
+fn ccr_nod_var_ok(v: int) -> int:
+    if v >= -1 && v < g_ir_var_count:
+        return 1
+    return 0
+
+fn ccr_nod_str_ok(v: int) -> int:
+    if v >= 0 && v < g_str_count:
+        return 1
+    return 0
+
+fn ccr_nod_type_ok(v: int) -> int:
+    if v >= -1 && v < g_type_count:
+        return 1
+    return 0
+
+// Argument chain: s1 is the first var of a contiguous run of `count` argument
+// vars (ir_gen packs non-contiguous calls). Zero args carries -1.
+fn ccr_nod_args_ok(first: int, count: int) -> int:
+    if count < 0:
+        return 0
+    if count == 0:
+        if first == -1 || (first >= 0 && first < g_ir_var_count):
+            return 1
+        return 0
+    if first < 0 || first + count > g_ir_var_count:
+        return 0
+    return 1
+
+fn ccr_label_known(ids: string, n: int, needle: int) -> int:
+    if needle < 0:
+        return 0
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        if cell_load(ids, i * 8) == needle:
+            return 1
+        i = i + 1
+    return 0
+
+// Validate NOD operand domains after the whole NOD segment is loaded. The
+// loader is the primary rejection point; irv_type/g2_slot guards are a second
+// line only. Labels are graph ids, so pass 1 collects the LABEL definitions and
+// pass 2 resolves BRANCH/JUMP targets against them.
+fn ccr_validate_nod_operands() -> int:
+    n := g_v7_nod_count
+    ids := alloc((n + 1) * 8)
+    ln : ., mut = 0
+    i : ., mut = 0
+    loop:
+        if i >= n:
+            break
+        if nod_op(i) == IR_LABEL:
+            if nod_s1(i) < 0:
+                return -1
+            cell_store(ids, ln * 8, nod_s1(i))
+            ln = ln + 1
+        i = i + 1
+    i = 0
+    loop:
+        if i >= n:
+            break
+        op := nod_op(i)
+        d := nod_dest(i)
+        s1 := nod_s1(i)
+        s2 := nod_s2(i)
+        s3 := nod_s3(i)
+        tid := nod_type_id(i)
+        if tid < -1 || tid >= g_type_count:
+            return -1
+        if op == IR_NOP || op == IR_APPROX || op == IR_FAST || op == IR_NO_BOUNDS_CHECK || op == IR_UNROLL:
+            i = i + 1
+            continue
+        if op == IR_CONST:
+            if ccr_nod_var_ok(d) == 0:
+                return -1
+            if tid == TI_STR && ccr_nod_str_ok(s1) == 0:
+                return -1
+        else if op == IR_CONST_BIG:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_str_ok(s1) == 0:
+                return -1
+        else if op == IR_BINARY:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_var_ok(s1) == 0 || ccr_nod_var_ok(s2) == 0:
+                return -1
+        else if op == IR_UNARY:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_var_ok(s1) == 0:
+                return -1
+        else if op == IR_CALL:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_str_ok(s3) == 0 || ccr_nod_args_ok(s1, s2) == 0:
+                return -1
+        else if op == IR_RETURN:
+            if ccr_nod_var_ok(s1) == 0:
+                return -1
+        else if op == IR_ALLOC || op == IR_ALLOC_ARRAY:
+            if ccr_nod_var_ok(d) == 0:
+                return -1
+        else if op == IR_ALLOC_STRUCT:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_str_ok(s3) == 0:
+                return -1
+        else if op == IR_STORE:
+            if ccr_nod_var_ok(s1) == 0 || ccr_nod_var_ok(s2) == 0:
+                return -1
+        else if op == IR_LOAD || op == IR_LOAD_FIELD || op == IR_LOAD_ENUM_TAG:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_var_ok(s1) == 0:
+                return -1
+        else if op == IR_STORE_FIELD:
+            if ccr_nod_var_ok(s1) == 0 || ccr_nod_var_ok(s2) == 0:
+                return -1
+        else if op == IR_LOAD_INDEX:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_var_ok(s1) == 0:
+                return -1
+        else if op == IR_STORE_INDEX:
+            if ccr_nod_var_ok(s1) == 0 || ccr_nod_var_ok(s2) == 0:
+                return -1
+        else if op == IR_LOAD_INDEX_VAR || op == IR_STORE_INDEX_VAR:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_var_ok(s1) == 0 || ccr_nod_var_ok(s2) == 0:
+                return -1
+        else if op == IR_MAKE_ENUM:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_str_ok(s1) == 0 || s2 < 0:
+                return -1
+        else if op == IR_REF:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_var_ok(s1) == 0:
+                return -1
+        else if op == IR_BRANCH:
+            if ccr_nod_var_ok(s1) == 0:
+                return -1
+            if ccr_label_known(ids, ln, s2) == 0 || ccr_label_known(ids, ln, s3) == 0:
+                return -1
+        else if op == IR_JUMP || op == IR_LABEL:
+            if ccr_label_known(ids, ln, s1) == 0:
+                return -1
+        else if op == IR_PHI:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_var_ok(s1) == 0 || ccr_nod_var_ok(s2) == 0:
+                return -1
+        else if op == IR_SLICE:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_var_ok(s1) == 0 || ccr_nod_var_ok(s2) == 0 || ccr_nod_var_ok(s3) == 0:
+                return -1
+        else if op == IR_DEREF:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_var_ok(s1) == 0 || ccr_nod_var_ok(s2) == 0:
+                return -1
+        else if op == IR_STORE_PTR:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_var_ok(s1) == 0 || ccr_nod_var_ok(s2) == 0:
+                return -1
+        else if op == IR_ADDR_INDEX:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_var_ok(s1) == 0 || ccr_nod_var_ok(s2) == 0:
+                return -1
+        else if op == IR_SPAWN:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_str_ok(s3) == 0 || ccr_nod_args_ok(s1, s2) == 0:
+                return -1
+        else if op == IR_YIELD:
+            if ccr_nod_var_ok(s1) == 0:
+                return -1
+        else if op == IR_AWAIT:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_var_ok(s1) == 0:
+                return -1
+        else if op == IR_BOUNDS_CHECK:
+            if ccr_nod_var_ok(s1) == 0:
+                return -1
+        else if op == IR_ARENA_NEW:
+            if ccr_nod_var_ok(d) == 0:
+                return -1
+        else if op == IR_ARENA_RESET:
+            if ccr_nod_var_ok(s1) == 0:
+                return -1
+        else if op == IR_INLINE:
+            if ccr_nod_var_ok(s1) == 0 && ccr_nod_str_ok(s1) == 0:
+                return -1
+        else if op == IR_SECTION:
+            if ccr_nod_str_ok(s1) == 0:
+                return -1
+        else if op == IR_HOTPATCH_ROUTE || op == IR_CALL_EXTERN:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_str_ok(s1) == 0 || ccr_nod_args_ok(s2, s3) == 0:
+                return -1
+        else if op == IR_FNADDR:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_str_ok(s1) == 0:
+                return -1
+        else if op == IR_DYN_TAG || op == IR_DYN_VAL || op == IR_LAZY_THUNK || op == IR_LAZY_FORCE || op == IR_I2F || op == IR_F2I || op == IR_PTR_OF || op == IR_STR_OF:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_var_ok(s1) == 0:
+                return -1
+        else if op == IR_DYN_PACK:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_var_ok(s1) == 0:
+                return -1
+        else if op == IR_DYN_DISPATCH:
+            if ccr_nod_var_ok(d) == 0 || ccr_nod_var_ok(s1) == 0 || ccr_nod_str_ok(s2) == 0:
+                return -1
+        i = i + 1
+    return 0
+
+// v10 src3 is an id/op/index/symbol for these ops. Every other op must carry 0
+// in src3: a nonzero value would be a legacy width/scale/byte-extent target
+// fact. ALLOC_ARRAY/ADDR_INDEX/DEREF/STORE_PTR are handled explicitly because
+// their old src2/src3 facts are the migration's critical cases.
+fn ccr_nod_src3_semantic(op: int) -> int:
+    if op == IR_UNARY || op == IR_BINARY || op == IR_CALL || op == IR_ALLOC_STRUCT || op == IR_LOAD_FIELD || op == IR_STORE_FIELD || op == IR_STORE_INDEX || op == IR_BRANCH || op == IR_SLICE || op == IR_SPAWN || op == IR_HOTPATCH_ROUTE || op == IR_CALL_EXTERN || op == IR_LOAD_INDEX:
+        return 1
+    return 0
+
+fn ccr_compute_header_flags() -> int:
+    hsys : ., mut = 0
+    hconc : ., mut = 0
+    if g_ccr_emit_raw_int != 0:
+        hsys = 1
+    ii : ., mut = 0
+    loop:
+        if ii >= g_ir_instr_count:
+            break
+        if ccr_op_is_system(iri_op(ii), iri_s1(ii)) != 0:
+            hsys = 1
+        if iri_op(ii) == IR_CALL && ccr_raw_abi_call(iri_s3(ii)) != 0:
+            hsys = 1
+        if ccr_op_is_concurrent(iri_op(ii)) != 0:
+            hconc = 1
+        ii = ii + 1
+    flags : ., mut = 0
+    if hsys == 0:
+        flags = flags + CCR_FLAG_PORTABLE
+    else:
+        flags = flags + CCR_FLAG_SYSTEM
+    if hconc != 0:
+        flags = flags + CCR_FLAG_CONCURRENT
+    return flags
+
+// Post-NOD validation: the header must not claim PORTABLE while the graph has a
+// SYSTEM boundary, and CONCURRENT must match the graph both ways. SYSTEM without
+// a boundary node is allowed because raw-int build mode also sets SYSTEM.
+fn ccr_validate_header_flags(rsv: int) -> int:
+    hsys := (rsv / CCR_FLAG_SYSTEM) % 2
+    hconc := (rsv / CCR_FLAG_CONCURRENT) % 2
+    nsys : ., mut = 0
+    nconc : ., mut = 0
+    ii : ., mut = 0
+    loop:
+        if ii >= g_v7_nod_count:
+            break
+        if ccr_op_is_system(nod_op(ii), nod_s1(ii)) != 0:
+            nsys = 1
+        if nod_op(ii) == IR_CALL && ccr_raw_abi_call(nod_s3(ii)) != 0:
+            nsys = 1
+        if ccr_op_is_concurrent(nod_op(ii)) != 0:
+            nconc = 1
+        ii = ii + 1
+    if nsys != 0 && hsys == 0:
+        return -1
+    if nconc != 0 && hconc == 0:
+        return -1
+    if hconc != 0 && nconc == 0:
+        return -1
+    if hconc != 0 && hsys == 0:
+        return -1
+    return 0
+
+// TYPE(2) segment size is the prepared buffer length. The content is built by
 // corec-only ccr_types.cr. ccr_io.cr is shared with corearch and must not refer
 // to frontend symbols. The buffer includes row_count, so segment size equals
 // buffer length.
 fn ccr_type_seg_size() -> int:
     return g_ccr_type_seg_len
 
-// IFACE(8) segment size is the prepared buffer length. The five sub-sections are
+// IFACE(3) segment size is the prepared buffer length. The five sub-sections are
 // built by corec-only ccr_iface_populate and ccr_iface_seg_build in ccr_types.cr.
 // This file, which corearch also links, only copies and parses the segment. The
 // buffer includes native_count, so segment size equals buffer length.
 fn ccr_iface_seg_size() -> int:
     return g_ccr_iface_seg_len
 
-// Size calculation: 16B header + 8*12B segment table + segment bodies.
+// Size calculation: 16B header + 9*12B segment table + segment bodies.
 // edge_total = EDG 记录总数（save_ccr 先行收集，见 ccr_collect_edges）。
 
 fn calc_ccr_size(edge_total: int) -> int:
-    sz : ., mut = 16 + CCR_SEG_COUNT * 12
+    sz : ., mut = 16 + CCR_V10_SEG_COUNT * 12
     sz = sz + ccr_str_seg_size()
+    sz = sz + ccr_type_seg_size()
+    sz = sz + ccr_iface_seg_size()
     sz = sz + ccr_sym_seg_size()
     sz = sz + ccr_nod_seg_size()
     sz = sz + ccr_ent_seg_size()
     sz = sz + ccr_reg_seg_size()
     sz = sz + ccr_edg_seg_size(edge_total)
-    sz = sz + ccr_type_seg_size()
-    sz = sz + ccr_iface_seg_size()
+    sz = sz + ccr_case_seg_size()
     return sz
 
 // EDG collection on the write side.
@@ -382,26 +693,26 @@ fn ccr_collect_edges(edge_counts: string, edge_offs: string) -> int:
     loop:
         if ni >= g_ir_instr_count:
             break
-        w64(edge_offs, ni * 8, total)
+        cell_store(edge_offs, ni * 8, total)
         cnt : ., mut = 0
-        eid : ., mut = r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_FIRST_EDGE)
+        eid : ., mut = cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_FIRST_EDGE)
         loop:
             if eid < 0:
                 break
             if eid >= g_df_edge_count:
                 return -1
             // Edge record out of range; reject a corrupted cache restore.
-            if r64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_FROM) != ni:
+            if cell_load(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_FROM) != ni:
                 return -1
-            eto := r64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_TO)
+            eto := cell_load(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_TO)
             if eto <= ni:
                 return -1
             // Rule: to_nod must be greater than the source node.
-            if r64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_KIND) > 1:
+            if cell_load(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_KIND) > 1:
                 return -1
             cnt = cnt + 1
-            eid = r64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_NEXT)
-        w64(edge_counts, ni * 8, cnt)
+            eid = cell_load(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_NEXT)
+        cell_store(edge_counts, ni * 8, cnt)
         total = total + cnt
         ni = ni + 1
     return total
@@ -412,16 +723,16 @@ fn ccr_fill_edge_buf(buf: string, edge_offs: string):
     loop:
         if ni >= g_ir_instr_count:
             break
-        slot : ., mut = r64(edge_offs, ni * 8)
-        eid : ., mut = r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_FIRST_EDGE)
+        slot : ., mut = cell_load(edge_offs, ni * 8)
+        eid : ., mut = cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_FIRST_EDGE)
         loop:
             if eid < 0:
                 break
-            eto := r64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_TO)
-            ekind := r64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_KIND)
-            w64(buf, slot * 8, eto + ekind * 4294967296)
+            eto := cell_load(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_TO)
+            ekind := cell_load(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_KIND)
+            cell_store(buf, slot * 8, eto + ekind * 4294967296)
             slot = slot + 1
-            eid = r64(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_NEXT)
+            eid = cell_load(g_df_edges, eid * ESZ_DFEDGE + OFF_DFE_NEXT)
         ni = ni + 1
 
 // EDG load buffer. After validation, keep the flat edge records for the object
@@ -441,8 +752,6 @@ fn ccr_ent_ls(e: int) -> int:
     return buf_read_i32(g_ir_entries, e * ESZ_ENTRY + OFF_ENTRY_LS)
 fn ccr_ent_le(e: int) -> int:
     return buf_read_i32(g_ir_entries, e * ESZ_ENTRY + OFF_ENTRY_LE)
-fn ccr_ent_home(e: int) -> int:
-    return buf_read_i32(g_ir_entries, e * ESZ_ENTRY + OFF_ENTRY_HOME)
 fn ccr_ent_flags(e: int) -> int:
     return buf_read_i32(g_ir_entries, e * ESZ_ENTRY + OFF_ENTRY_FLAGS)
 
@@ -468,11 +777,12 @@ fn ccr_param_entry_id(var_id: int, es: int, ec: int) -> int:
 
 // Write-side object mirror. corec does not load through the loader, and the
 // kernel compute functions read NOD objects through nod_*. Before compute, copy
-// g_ir_instrs into g_v7_nod_sem (28B semantic fields: op, dest, s1, s2, s3, tk,
-// item). Values come from the same g_ir_instrs that save_ccr writes, after
-// ccr_validate_i32_fields. The loader builds the same mirror from the file, so
-// both processes call compute_entries on identical inputs and produce the same
-// ENT data.
+// g_ir_instrs into g_v7_nod_sem (32B semantic fields: op, dest, s1, s2, s3,
+// type_id, flags). Values come from the same g_ir_instrs that save_ccr writes,
+// after ccr_validate_i32_fields. The loader builds the same mirror from the file,
+// so both processes call compute_entries on identical inputs and produce the same
+// ENT data. type_id/flags come from the ccr_types.cr side buffers, which Task 3
+// derives from the same save-time type state.
 fn populate_nod_objects():
     g_v7_nod_sem = alloc((g_ir_instr_count + 8) * ESZ_NOD_SEM)
     g_v7_nod_count = g_ir_instr_count
@@ -480,20 +790,19 @@ fn populate_nod_objects():
     loop:
         if ii >= g_ir_instr_count:
             break
-        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_OP, iri_op(ii))
-        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_DEST, iri_dest(ii))
-        w64(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S1, iri_s1(ii))
-        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S2, iri_s2(ii))
-        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S3, iri_s3(ii))
-        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_TK, iri_tk(ii))
-        // 项索引（TYPE 段文件空间；-1 = 无项）。缓冲由 corec-only
-        // 的 ccr_types.cr:ccr_nod_item_populate 装填（：本文件在 corearch 清单内，
-        // 此处不得引桥接层符号），本函数纯搬运；缓冲短于节点数（不经
-        // ccr_seg_prepare_save 的诊断路径），因此落 -1（报错路径由 load 侧一致性校验承担）。
-        it0 : ., mut = -1
-        if ii < g_ccr_nod_item_count:
-            it0 = buf_read_i32(g_ccr_nod_item, ii * 4)
-        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_ITEM, it0)
+        cell_store32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_OP, iri_op(ii))
+        cell_store32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_DEST, iri_dest(ii))
+        cell_store(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S1, iri_s1(ii))
+        cell_store32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S2, iri_s2(ii))
+        cell_store32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S3, iri_s3(ii))
+        tid0 : ., mut = -1
+        if ii < g_ccr_nod_type_count:
+            tid0 = buf_read_i32(g_ccr_nod_type, ii * 4)
+        fl0 : ., mut = 0
+        if ii < g_ccr_nod_flags_count:
+            fl0 = buf_read_u32(g_ccr_nod_flags, ii * 4)
+        cell_store32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_TYPE_ID, tid0)
+        cell_store32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_FLAGS, fl0)
         ii = ii + 1
 
 // --- Save（写侧与 calc 侧一致；段表规范序、段体连续）---
@@ -537,64 +846,73 @@ fn save_ccr(path: string) -> int:
     // Header（16B）
     buf_write_u32(buf, pos, CCR_MAGIC)
     pos = pos + 4
-    buf_write_u32(buf, pos, CCR_VERSION)
+    buf_write_u32(buf, pos, CCR_V10_VERSION)
     pos = pos + 4
-    buf_write_u32(buf, pos, CCR_SEG_COUNT)
+    buf_write_u32(buf, pos, CCR_V10_SEG_COUNT)
     pos = pos + 4
-    buf_write_u32(buf, pos, 0)
-    pos = pos + 4  // reserved
+    // Header flags describe the program, not the integer representation.
+    // Raw-int build mode is a SYSTEM property and is passed to corearch via
+    // --raw-int, never through this word.
+    buf_write_u32(buf, pos, ccr_compute_header_flags())
+    pos = pos + 4
 
-    // 段体大小（与 calc_ccr_size 同一来源逐段一致）
-    s1 := ccr_str_seg_size()
-    s2 := ccr_sym_seg_size()
-    s3 := ccr_nod_seg_size()
-    s4 := ccr_ent_seg_size()
-    s5 := ccr_reg_seg_size()
-    s6 := ccr_edg_seg_size(edge_total)
-    s7 := ccr_type_seg_size()    // 内容（缓冲长度）
-    s8 := ccr_iface_seg_size()   // 内容（缓冲长度）
+    // 段体大小（与 calc_ccr_size 同一来源逐段一致；canonical order）
+    s_str := ccr_str_seg_size()
+    s_type := ccr_type_seg_size()      // 内容（缓冲长度）
+    s_iface := ccr_iface_seg_size()    // 内容（缓冲长度）
+    s_sym := ccr_sym_seg_size()
+    s_nod := ccr_nod_seg_size()
+    s_ent := ccr_ent_seg_size()
+    s_reg := ccr_reg_seg_size()
+    s_edg := ccr_edg_seg_size(edge_total)
+    s_case := ccr_case_seg_size()
 
-    // Seg table（8 × 12B；offset = 前段尾，从段表后起；规范序 tag 1..8）
-    o1 : ., mut = 16 + CCR_SEG_COUNT * 12
-    o2 : ., mut = o1 + s1
-    o3 : ., mut = o2 + s2
-    o4 : ., mut = o3 + s3
-    o5 : ., mut = o4 + s4
-    o6 : ., mut = o5 + s5
-    o7 : ., mut = o6 + s6
-    o8 : ., mut = o7 + s7
+    // Seg table（9 × 12B；offset = 前段尾，从段表后起；规范序 tag 1..9）
+    o_str : ., mut = 16 + CCR_V10_SEG_COUNT * 12
+    o_type : ., mut = o_str + s_str
+    o_iface : ., mut = o_type + s_type
+    o_sym : ., mut = o_iface + s_iface
+    o_nod : ., mut = o_sym + s_sym
+    o_ent : ., mut = o_nod + s_nod
+    o_reg : ., mut = o_ent + s_ent
+    o_edg : ., mut = o_reg + s_reg
+    o_case : ., mut = o_edg + s_edg
 
-    buf_write_u32(buf, pos, 1)
-    buf_write_u32(buf, pos + 4, o1)
-    buf_write_u32(buf, pos + 8, s1)
+    buf_write_u32(buf, pos, CCR_V10_SEG_STR)
+    buf_write_u32(buf, pos + 4, o_str)
+    buf_write_u32(buf, pos + 8, s_str)
     pos = pos + 12
-    buf_write_u32(buf, pos, 2)
-    buf_write_u32(buf, pos + 4, o2)
-    buf_write_u32(buf, pos + 8, s2)
+    buf_write_u32(buf, pos, CCR_V10_SEG_TYPE)
+    buf_write_u32(buf, pos + 4, o_type)
+    buf_write_u32(buf, pos + 8, s_type)
     pos = pos + 12
-    buf_write_u32(buf, pos, 3)
-    buf_write_u32(buf, pos + 4, o3)
-    buf_write_u32(buf, pos + 8, s3)
+    buf_write_u32(buf, pos, CCR_V10_SEG_IFACE)
+    buf_write_u32(buf, pos + 4, o_iface)
+    buf_write_u32(buf, pos + 8, s_iface)
     pos = pos + 12
-    buf_write_u32(buf, pos, 4)
-    buf_write_u32(buf, pos + 4, o4)
-    buf_write_u32(buf, pos + 8, s4)
+    buf_write_u32(buf, pos, CCR_V10_SEG_SYM)
+    buf_write_u32(buf, pos + 4, o_sym)
+    buf_write_u32(buf, pos + 8, s_sym)
     pos = pos + 12
-    buf_write_u32(buf, pos, 5)
-    buf_write_u32(buf, pos + 4, o5)
-    buf_write_u32(buf, pos + 8, s5)
+    buf_write_u32(buf, pos, CCR_V10_SEG_NOD)
+    buf_write_u32(buf, pos + 4, o_nod)
+    buf_write_u32(buf, pos + 8, s_nod)
     pos = pos + 12
-    buf_write_u32(buf, pos, 6)
-    buf_write_u32(buf, pos + 4, o6)
-    buf_write_u32(buf, pos + 8, s6)
+    buf_write_u32(buf, pos, CCR_V10_SEG_ENT)
+    buf_write_u32(buf, pos + 4, o_ent)
+    buf_write_u32(buf, pos + 8, s_ent)
     pos = pos + 12
-    buf_write_u32(buf, pos, CCR_SEG_TYPE)
-    buf_write_u32(buf, pos + 4, o7)
-    buf_write_u32(buf, pos + 8, s7)
+    buf_write_u32(buf, pos, CCR_V10_SEG_REG)
+    buf_write_u32(buf, pos + 4, o_reg)
+    buf_write_u32(buf, pos + 8, s_reg)
     pos = pos + 12
-    buf_write_u32(buf, pos, CCR_SEG_IFACE)
-    buf_write_u32(buf, pos + 4, o8)
-    buf_write_u32(buf, pos + 8, s8)
+    buf_write_u32(buf, pos, CCR_V10_SEG_EDG)
+    buf_write_u32(buf, pos + 4, o_edg)
+    buf_write_u32(buf, pos + 8, s_edg)
+    pos = pos + 12
+    buf_write_u32(buf, pos, CCR_V10_SEG_CASE)
+    buf_write_u32(buf, pos + 4, o_case)
+    buf_write_u32(buf, pos + 8, s_case)
     pos = pos + 12
 
     // === STR: strings ===
@@ -611,10 +929,41 @@ fn save_ccr(path: string) -> int:
         loop:
             if ci >= sl:
                 break
-            store8(buf, pos, str_load8(si, ci))
+            cell_store_byte(buf, pos, str_load8(si, ci))
             pos = pos + 1
             ci = ci + 1
         si = si + 1
+
+    // === TYPE(2): copy the prepared segment buffer. Content is built by
+    // corec-only ccr_types.cr ccr_type_prepare_save; this file only copies it.
+    // 缓冲含首字段 row_count，因此大小 == ccr_type_seg_size()（同一来源）。空缓冲 =
+    // 未装填（调用点漏调 prepare），因此拒绝落盘：不得产出两小节缺席的
+    // 半成品文件（判定约定；记录表恒含原生 9 行，空缓冲只可能是程序错误）。
+    if g_ccr_type_seg_len <= 0:
+        return -1
+    ct : ., mut = 0
+    loop:
+        if ct >= g_ccr_type_seg_len:
+            break
+        cell_store_byte(buf, pos, cell_load_byte(g_ccr_type_seg, ct))
+        pos = pos + 1
+        ct = ct + 1
+
+    // === IFACE(3): copy the prepared segment buffer. Content is built by
+    // corec-only ccr_iface_populate and ccr_iface_seg_build in ccr_types.cr;
+    // this file only copies it.
+    // 缓冲含首字段 native_count，因此大小 == ccr_iface_seg_size()（同一来源）。空缓冲 =
+    // 未装填（调用点漏调 prepare），因此拒绝落盘（不得产出五小节缺席的半成品；
+    // 条目表恒 16 行，因此空缓冲只可能是程序错误，判定约定）。
+    if g_ccr_iface_seg_len <= 0:
+        return -1
+    ict : ., mut = 0
+    loop:
+        if ict >= g_ccr_iface_seg_len:
+            break
+        cell_store_byte(buf, pos, cell_load_byte(g_ccr_iface_seg, ict))
+        pos = pos + 1
+        ict = ict + 1
 
     // === SYM: globals（16B each: name u32, type u32, init_val i64）===
     // The global record stores type, not var_idx: var_idx always equals the row
@@ -628,13 +977,13 @@ fn save_ccr(path: string) -> int:
     loop:
         if gi >= g_ir_global_count:
             break
-        if r64(g_ir_globals, gi * 24 + 8) != gi:
+        if cell_load(g_ir_globals, gi * 24 + 8) != gi:
             return -1
-        buf_write_u32(buf, pos, r64(g_ir_globals, gi * 24))
+        buf_write_u32(buf, pos, cell_load(g_ir_globals, gi * 24))
         pos = pos + 4     // name
         buf_write_u32(buf, pos, irv_type(gi))
         pos = pos + 4                   // type
-        buf_write_i64(buf, pos, r64(g_ir_globals, gi * 24 + 16))
+        buf_write_i64(buf, pos, cell_load(g_ir_globals, gi * 24 + 16))
         pos = pos + 8 // init_val
         gi = gi + 1
 
@@ -659,30 +1008,30 @@ fn save_ccr(path: string) -> int:
         froot := ccr_func_root_sg(fi)
         if froot < 0:
             return -1
-        vc := r64(g_ir_func_var_count, fi * 8)
-        vs := r64(g_ir_func_var_start, fi * 8)
+        vc := cell_load(g_ir_func_var_count, fi * 8)
+        vs := cell_load(g_ir_func_var_start, fi * 8)
         if vs != vcursor:
             return -1
         // 声明区起点 != 前缀累计 -> 记录顺序错位
         vcursor = vcursor + vc
-        pc := r64(g_ir_func_param_count, fi * 8)
+        pc := cell_load(g_ir_func_param_count, fi * 8)
         if pc > vc:
             return -1
         // 条目块界实回填（内核 compute_live_ranges 已先行），函数条目
         // 块 = ENT 文件序连续段 [es, es+ec)（SYM func 与 REG 根记录同源双写；
         // loader 块对照消费：pcnt==0 ↔ -1、ffe == 块首、fle == 块末）
-        es := r64(g_ir_func_entry_start, fi * 8)
-        ec := r64(g_ir_func_entry_count, fi * 8)
+        es := cell_load(g_ir_func_entry_start, fi * 8)
+        ec := cell_load(g_ir_func_entry_count, fi * 8)
         fe2 : ., mut = -1
         le2 : ., mut = -1
         if ec > 0:
             fe2 = es
             le2 = es + ec - 1
-        buf_write_u32(buf, pos, r64(g_ir_func_name_idx, fi * 8))
+        buf_write_u32(buf, pos, cell_load(g_ir_func_name_idx, fi * 8))
         pos = pos + 4
         buf_write_u32(buf, pos, pc)
         pos = pos + 4
-        buf_write_u32(buf, pos, r64(g_ir_func_ret_type, fi * 8))
+        buf_write_u32(buf, pos, cell_load(g_ir_func_ret_type, fi * 8))
         pos = pos + 4
         buf_write_i32(buf, pos, froot)
         pos = pos + 4
@@ -727,7 +1076,7 @@ fn save_ccr(path: string) -> int:
     loop:
         if sci >= g_ir_str_const_count:
             break
-        buf_write_u32(buf, pos, r64(g_ir_str_consts, sci * 8))
+        buf_write_u32(buf, pos, cell_load(g_ir_str_consts, sci * 8))
         pos = pos + 4
         sci = sci + 1
 
@@ -786,39 +1135,27 @@ fn save_ccr(path: string) -> int:
         ei2 = ei2 + 1
 
     // === SYM: opt_meta ===
-    buf_write_u32(buf, pos, g_opt_meta_count)
+    // v10 never serializes g_opt_meta. The field is a fixed zero count so the
+    // SYM body remains byte-stable; nonzero counts are rejected on load. Register
+    // assignments are an instance-side optimization result, not a program fact.
+    buf_write_u32(buf, pos, 0)
     pos = pos + 4
-    mi : ., mut = 0
-    loop:
-        if mi >= g_opt_meta_count:
-            break
-        mo := mi * OPT_META_STRIDE
-        mk := r32(g_opt_meta, mo)       // key (u8 padded to u64)
-        md_len := r32(g_opt_meta, mo + 4) // data length
-        buf_write_u32(buf, pos, mk)
-        pos = pos + 4
-        buf_write_u32(buf, pos, md_len)
-        pos = pos + 4
-        di : ., mut = 0
-        loop:
-            if di >= md_len:
-                break
-            store8(buf, pos, load8(g_opt_meta, mo + 8 + di))
-            pos = pos + 1
-            di = di + 1
-        mi = mi + 1
 
     // === NOD: instructions ===
     // 40B each. NOD id is file order and equals global instruction order. Each
-    // record has the 32B semantic fields plus first_edge and edge_count for the
-    // adjacency range. EDG is written from edge_buf after the NOD body.
+    // record has the eight semantic fields plus first_edge and edge_count for the
+    // adjacency range. src2/src3 never carry a width, stride, or byte extent:
+    // IR_ALLOC_ARRAY's stride and IR_ADDR_INDEX's scale are target facts, and
+    // IR_DEREF/IR_STORE_PTR store only the runtime-base reference. EDG is written
+    // from edge_buf after the NOD body.
     buf_write_u32(buf, pos, g_ir_instr_count)
     pos = pos + 4
     ii : ., mut = 0
     loop:
         if ii >= g_ir_instr_count:
             break
-        buf_write_u32(buf, pos, iri_op(ii))
+        nop := iri_op(ii)
+        buf_write_u32(buf, pos, nop)
         pos = pos + 4
         buf_write_i32(buf, pos, iri_dest(ii))
         pos = pos + 4
@@ -826,26 +1163,41 @@ fn save_ccr(path: string) -> int:
         // not truncated to 32 bits.
         buf_write_i64(buf, pos, iri_s1(ii))
         pos = pos + 8
-        buf_write_i32(buf, pos, iri_s2(ii))
+        ns2 : ., mut = iri_s2(ii)
+        ns3 : ., mut = iri_s3(ii)
+        if nop == IR_ALLOC_ARRAY:
+            // element stride is a target fact; corearch reconstructs it
+            ns2 = 0
+            ns3 = 0
+        else if nop == IR_ADDR_INDEX:
+            // SIB scale exponent is a target fact; the instance fixes it
+            ns3 = 0
+        else if nop == IR_DEREF || nop == IR_STORE_PTR:
+            // allocation byte size is a target fact; the semantic flag records
+            // that a runtime bound exists and corearch recomputes the size
+            ns3 = 0
+        buf_write_i32(buf, pos, ns2)
         pos = pos + 4
-        buf_write_i32(buf, pos, iri_s3(ii))
+        buf_write_i32(buf, pos, ns3)
         pos = pos + 4
-        buf_write_u32(buf, pos, iri_tk(ii))
+        // type_id: TYPE row (-1 = none). flags: semantic node features only.
+        tid1 : ., mut = -1
+        if ii < g_ccr_nod_type_count:
+            tid1 = buf_read_i32(g_ccr_nod_type, ii * 4)
+        buf_write_i32(buf, pos, tid1)
         pos = pos + 4
-        // 项索引（i32；-1 = 无项），与内存镜像同源
-        // （g_ccr_nod_item，corec-only 侧装填；本文件纯搬运）。
-        it1 : ., mut = -1
-        if ii < g_ccr_nod_item_count:
-            it1 = buf_read_i32(g_ccr_nod_item, ii * 4)
-        buf_write_i32(buf, pos, it1)
+        fl1 : ., mut = 0
+        if ii < g_ccr_nod_flags_count:
+            fl1 = buf_read_u32(g_ccr_nod_flags, ii * 4)
+        buf_write_u32(buf, pos, fl1)
         pos = pos + 4
-        buf_write_u32(buf, pos, r64(edge_offs, ii * 8))
+        buf_write_u32(buf, pos, cell_load(edge_offs, ii * 8))
         pos = pos + 4   // first_edge
-        buf_write_u32(buf, pos, r64(edge_counts, ii * 8))
+        buf_write_u32(buf, pos, cell_load(edge_counts, ii * 8))
         pos = pos + 4 // edge_count
         ii = ii + 1
 
-    // === ENT: entries（28B each；内存闭区间 -> 盘上：version 组内序数、live_end+1 半开）===
+    // === ENT: entries（24B each；内存闭区间 -> 盘上：version 组内序数、live_end+1 半开）===
     // 版本序数：每 var 一张计数槽（var 全局槽 id 唯一属一个函数，组内序 = 全局序）
     buf_write_u32(buf, pos, g_entry_count)
     pos = pos + 4
@@ -854,7 +1206,7 @@ fn save_ccr(path: string) -> int:
     loop:
         if vz >= g_ir_var_count + 8:
             break
-        w64(vcnt, vz * 8, 0)
+        cell_store(vcnt, vz * 8, 0)
         vz = vz + 1
     ej : ., mut = 0
     loop:
@@ -864,10 +1216,9 @@ fn save_ccr(path: string) -> int:
         ed := ccr_ent_def(ej)
         els := ccr_ent_ls(ej)
         ele := ccr_ent_le(ej)
-        eho := ccr_ent_home(ej)
         efl := ccr_ent_flags(ej)
-        ord := r64(vcnt, ev * 8) + 1
-        w64(vcnt, ev * 8, ord)
+        ord := cell_load(vcnt, ev * 8) + 1
+        cell_store(vcnt, ev * 8, ord)
         buf_write_i32(buf, pos, ev)
         pos = pos + 4      // var_id
         buf_write_u32(buf, pos, ord)
@@ -878,10 +1229,8 @@ fn save_ccr(path: string) -> int:
         pos = pos + 4     // live_start（含定值）
         buf_write_u32(buf, pos, ele + 1)
         pos = pos + 4 // live_end（半开 = 内存闭区间 +1）
-        buf_write_i32(buf, pos, eho)
-        pos = pos + 4     // home（-1 = 未分配）
         buf_write_u32(buf, pos, efl)
-        pos = pos + 4     // flags
+        pos = pos + 4     // flags（ENT 记录到此结束；home 不在 v10 盘面）
         ej = ej + 1
 
     // === REG: regions ===
@@ -900,10 +1249,10 @@ fn save_ccr(path: string) -> int:
         if si2 >= g_sg_count:
             break
         f := si2 * ESZ_SG
-        sk2 := r64(g_sgs, f + OFF_SG_KIND)
-        sen := r64(g_sgs, f + OFF_SG_ENTER)
-        sex := r64(g_sgs, f + OFF_SG_EXIT)
-        spa := r64(g_sgs, f + OFF_SG_PARENT)
+        sk2 := cell_load(g_sgs, f + OFF_SG_KIND)
+        sen := cell_load(g_sgs, f + OFF_SG_ENTER)
+        sex := cell_load(g_sgs, f + OFF_SG_EXIT)
+        spa := cell_load(g_sgs, f + OFF_SG_PARENT)
         if sex < sen:
             return -1
         // 未闭合 -> ncount 不可派生
@@ -919,8 +1268,8 @@ fn save_ccr(path: string) -> int:
         // 一段；无 = -1）。头注释 3.5 语义：区间 = def_nod 归属，非全块。
         fe2 : ., mut = -1
         le2 : ., mut = -1
-        bes := r64(g_ir_func_entry_start, rfunc * 8)
-        bec := r64(g_ir_func_entry_count, rfunc * 8)
+        bes := cell_load(g_ir_func_entry_start, rfunc * 8)
+        bec := cell_load(g_ir_func_entry_count, rfunc * 8)
         if sk2 == SG_FUNC:
             if bec > 0:
                 fe2 = bes
@@ -940,8 +1289,8 @@ fn save_ccr(path: string) -> int:
         if sk2 == SG_FUNC:
             // 根 region span = 函数指令范围（REG = 文件里函数边界的唯一真源，
             // 与 func 表一致性校验，失配 = 内部状态漂移）
-            is2 := r64(g_ir_func_instr_start, rfunc * 8)
-            ic2 := r64(g_ir_func_instr_count, rfunc * 8)
+            is2 := cell_load(g_ir_func_instr_start, rfunc * 8)
+            ic2 := cell_load(g_ir_func_instr_count, rfunc * 8)
             if sen != is2 || sex != is2 + ic2:
                 return -1
         buf_write_i32(buf, pos, sk2)
@@ -969,43 +1318,23 @@ fn save_ccr(path: string) -> int:
     loop:
         if ei3 >= edge_total:
             break
-        ev := r64(edge_buf, ei3 * 8)
+        ev := cell_load(edge_buf, ei3 * 8)
         buf_write_u32(buf, pos, ev % 4294967296)
         pos = pos + 4   // to_nod
         buf_write_u32(buf, pos, ev / 4294967296)
         pos = pos + 4   // kind
         ei3 = ei3 + 1
 
-    // === TYPE(7): copy the prepared segment buffer. Content is built by
-    // corec-only ccr_types.cr ccr_type_prepare_save; this file only copies it.
-    // 缓冲含首字段 row_count，因此大小 == ccr_type_seg_size()（同一来源）。空缓冲 =
-    // 未装填（调用点漏调 prepare），因此拒绝落盘：不得产出两小节缺席的
-    // 半成品文件（判定约定；记录表恒含原生 9 行，空缓冲只可能是程序错误）。
-    if g_ccr_type_seg_len <= 0:
-        return -1
-    ct : ., mut = 0
-    loop:
-        if ct >= g_ccr_type_seg_len:
-            break
-        store8(buf, pos, load8(g_ccr_type_seg, ct))
-        pos = pos + 1
-        ct = ct + 1
+    // === CASE: empty table for now (4B case_count = 0). CASE is last because it
+    // may reference every NOD target once match lowering fills it in.
+    buf_write_u32(buf, pos, 0)
+    pos = pos + 4
 
-    // === IFACE(8): copy the prepared segment buffer. Content is built by
-    // corec-only ccr_iface_populate and ccr_iface_seg_build in ccr_types.cr;
-    // this file only copies it.
-    // 缓冲含首字段 native_count，因此大小 == ccr_iface_seg_size()（同一来源）。空缓冲 =
-    // 未装填（调用点漏调 prepare），因此拒绝落盘（不得产出五小节缺席的半成品；
-    // 条目表恒 16 行，因此空缓冲只可能是程序错误，判定约定）。
-    if g_ccr_iface_seg_len <= 0:
+    // The size calculator and the writer are two independent walks. A mismatch
+    // means a section changed without updating calc_ccr_size; refuse to write a
+    // truncated or over-long image.
+    if pos != tsz:
         return -1
-    ict : ., mut = 0
-    loop:
-        if ict >= g_ccr_iface_seg_len:
-            break
-        store8(buf, pos, load8(g_ccr_iface_seg, ict))
-        pos = pos + 1
-        ict = ict + 1
 
     // Use syscall directly (write_file uses str_len which stops at null)
     fd := syscall3(2, path, 577, 420)  // open(O_WRONLY|O_CREAT|O_TRUNC, 0644)
@@ -1027,25 +1356,31 @@ fn save_ccr(path: string) -> int:
 fn inject_var_shift() -> int:
     if g_ir_func_count < 1:
         return 1
-    vs := r64(g_ir_func_var_start, 0)
+    vs := cell_load(g_ir_func_var_start, 0)
     if vs < 1:
         return 1
     // 无 globals 行可借位 -> 注入前置不满足
-    w64(g_ir_func_var_start, 0, vs - 1)
+    cell_store(g_ir_func_var_start, 0, vs - 1)
     return 0
 
-// Load: v9 only. Validate the header and canonical segment table, reject
-// out-of-range segments, and reject any version other than 9. The table has 8
-// segments in canonical order. TYPE and IFACE are required.
+// Load: v10 only. Validate the header and canonical segment table, reject
+// out-of-range segments, and reject every version other than 0x000A0000 (the
+// historical v9 wire id is rejected outright). The table has 9 segments in
+// canonical order. All nine are required; ENT may carry an empty record table
+// but its 4B count is present.
 // Loader output is semantic objects plus guards. The linear NOD-to-g_ir_instrs
 // rebuild is outside this file: build_linear_schedule in regalloc.cr is called by
-// corearch.cr or src/targets/x86_64-linux/main.cr after a successful load.
-// Parse order: STR -> SYM (globals and funcs rebuild the var namespace) -> REG
-// (derive nstart/ncount and function instruction bounds) -> NOD (40B; 28B
-// semantic fields into g_v7_nod_sem, adjacency into g_v7_nod_meta) -> ENT (28B
-// to the in-memory 24B table; drop version and convert half-open live_end back to
-// closed) -> EDG (contiguous ranges and topology checks into g_v7_edges) ->
-// TYPE/IFACE (rebuild type rows and terms, and interface tables).
+// corearch.cr or src/targets/x86_64/linux/elf/main.cr after a successful load.
+// Parse order (canonical file order, forward-only cursor):
+// STR -> TYPE (rebuild type rows/terms and the term index) -> IFACE (rebuild the
+// interface tables from STR indices and TYPE/term domains) -> SYM (globals and
+// funcs rebuild the var namespace; fn_meta stays local for ENT/REG) -> NOD (40B;
+// eight semantic fields into g_v7_nod_sem, adjacency into g_v7_nod_meta) -> ENT
+// (24B to the in-memory table; version dropped, half-open live_end closed) -> REG
+// (derive nstart/ncount and function instruction bounds) -> EDG (contiguous
+// ranges and topology checks into g_v7_edges) -> CASE.
+// The segment table validates boundaries and contiguity only. Every body is
+// consumed from the running cursor; there is no seek back to a table offset.
 // Guards use only NOD counts, adjacency, and REG-derived bounds; the loader does
 // not depend on the linear stream.
 
@@ -1062,21 +1397,38 @@ fn load_ccr(data: string, fsize: int) -> int:
     if magic != CCR_MAGIC:
         return -1
 
-    // Version: v9 only, with no compatibility or conversion path.
+    // Version: v10 only, with no compatibility or conversion path.
     ver := buf_read_u32(data, pos)
     pos = pos + 4
-    if ver != CCR_VERSION:
+    if ver != CCR_V10_VERSION:
         return -1
 
-    // Seg count + reserved
+    // Seg count + header flags
     seg_cnt := buf_read_u32(data, pos)
     pos = pos + 4
     rsv := buf_read_u32(data, pos)
     pos = pos + 4
+    if seg_cnt != CCR_V10_SEG_COUNT:
+        return -1
+    // Only PORTABLE/SYSTEM/CONCURRENT (bits 0..2) are defined; reserved bits
+    // must be zero. PORTABLE excludes SYSTEM; CONCURRENT implies SYSTEM.
+    if rsv > CCR_FLAG_KNOWN_MASK:
+        return -1
+    // Exactly one of PORTABLE/SYSTEM must be set. A zero header would leave the
+    // program's system-boundary status undefined, so it is rejected rather than
+    // documented as an implicit mode.
+    if (rsv % 4) != CCR_FLAG_PORTABLE && (rsv % 4) != CCR_FLAG_SYSTEM:
+        return -1
+    if (rsv % 2 == 1) && ((rsv / CCR_FLAG_SYSTEM) % 2 == 1):
+        return -1
+    if (rsv % 2 == 1) && ((rsv / CCR_FLAG_CONCURRENT) % 2 == 1):
+        return -1
+    if ((rsv / CCR_FLAG_CONCURRENT) % 2 == 1) && ((rsv / CCR_FLAG_SYSTEM) % 2 == 0):
+        return -1
     if seg_cnt > (fsize - 16) / 12:
         return -1
 
-    // Segment table: canonical layout. tag must equal the row number (1..8),
+    // Segment table: canonical layout. tag must equal the row number (1..9),
     // offset must equal the previous segment end, and segments must stay in
     // bounds. The loader rejects any non-canonical layout.
     seg_off1 : ., mut = 0
@@ -1087,6 +1439,7 @@ fn load_ccr(data: string, fsize: int) -> int:
     seg_off6 : ., mut = 0
     seg_off7 : ., mut = 0
     seg_off8 : ., mut = 0
+    seg_off9 : ., mut = 0
     seg_end1 : ., mut = 0
     seg_end2 : ., mut = 0
     seg_end3 : ., mut = 0
@@ -1095,6 +1448,7 @@ fn load_ccr(data: string, fsize: int) -> int:
     seg_end6 : ., mut = 0
     seg_end7 : ., mut = 0
     seg_end8 : ., mut = 0
+    seg_end9 : ., mut = 0
     have1 : ., mut = 0
     have2 : ., mut = 0
     have3 : ., mut = 0
@@ -1103,6 +1457,7 @@ fn load_ccr(data: string, fsize: int) -> int:
     have6 : ., mut = 0
     have7 : ., mut = 0
     have8 : ., mut = 0
+    have9 : ., mut = 0
     cursor : ., mut = 16 + seg_cnt * 12
     ri : ., mut = 0
     loop:
@@ -1116,7 +1471,7 @@ fn load_ccr(data: string, fsize: int) -> int:
         pos = pos + 4
         ssz := buf_read_u32(data, pos)
         pos = pos + 4
-        if tg < 1 || tg > CCR_SEG_COUNT:
+        if tg < 1 || tg > CCR_V10_SEG_COUNT:
             return -1
         if tg != ri + 1:
             return -1
@@ -1164,32 +1519,36 @@ fn load_ccr(data: string, fsize: int) -> int:
             seg_off6 = soff
             seg_end6 = soff + ssz
             have6 = 1
-        if tg == CCR_SEG_TYPE:
+        if tg == 7:
             if have7 != 0:
                 return -1
             seg_off7 = soff
             seg_end7 = soff + ssz
             have7 = 1
-        if tg == CCR_SEG_IFACE:
+        if tg == 8:
             if have8 != 0:
                 return -1
             seg_off8 = soff
             seg_end8 = soff + ssz
             have8 = 1
+        if tg == 9:
+            if have9 != 0:
+                return -1
+            seg_off9 = soff
+            seg_end9 = soff + ssz
+            have9 = 1
         cursor = soff + ssz
         ri = ri + 1
 
-    // STR, SYM, NOD, REG, EDG, TYPE, and IFACE are required. REG is the only
-    // source for function instruction bounds. ENT may be absent and is treated as
-    // an empty table. TYPE and IFACE are required so there are not two .ccr
-    // variants in the wild.
-    if have1 == 0 || have2 == 0 || have3 == 0 || have5 == 0 || have6 == 0:
+    // All nine segments are required in v10. TYPE/IFACE are content segments;
+    // ENT/REG/EDG/CASE are structural. There is no "absent = empty" variant.
+    if have1 == 0 || have2 == 0 || have3 == 0 || have4 == 0 || have5 == 0:
         return -1
-    if have7 == 0 || have8 == 0:
+    if have6 == 0 || have7 == 0 || have8 == 0 || have9 == 0:
         return -1
-    if have4 == 0:
-        seg_off4 = 0
-        seg_end4 = 0
+    if cursor != fsize:
+        return -1
+    // 无尾随字节（最后一段尾 == 文件大小）
 
     // 状态重置（corearch 单次加载；保持可重入）
     g_str_count = 0
@@ -1202,6 +1561,7 @@ fn load_ccr(data: string, fsize: int) -> int:
     g_sg_count = 0
     g_ir_global_count = 0
     g_opt_meta_count = 0
+    g_ent_loaded = 0
     g_entry_count = 0
     g_v7_edge_count = 0
     g_v7_nod_count = 0   // NOD 对象缓冲计数（NOD 段载入后置位）
@@ -1218,8 +1578,10 @@ fn load_ccr(data: string, fsize: int) -> int:
     g_impl_for_count = 0
     g_method_count = 0
 
+    // The table walk consumed exactly 16 + seg_cnt*12 bytes, so `pos` is
+    // already at the first body (tag STR). Every block below continues from this
+    // running cursor; the segment table only supplies boundary ends.
     // === STR: strings ===
-    pos = seg_off1
     if !ccr_has_bytes(pos, 4, seg_end1):
         return -1
     str_cnt := buf_read_u32(data, pos)
@@ -1240,612 +1602,22 @@ fn load_ccr(data: string, fsize: int) -> int:
         loop:
             if ci >= sl:
                 break
-            store8(s, ci, load8(data, pos))
+            cell_store_byte(s, ci, cell_load_byte(data, pos))
             pos = pos + 1
             ci = ci + 1
-        store8(s, sl, 0)
+        cell_store_byte(s, sl, 0)
         str_intern(s)
         si = si + 1
+    if pos != seg_end1:
+        return -1
 
-    // === SYM: globals（16B each: name u32, type u32, init_val i64）===
-    // var 命名空间重建（流式）：全局行 = 记录序 0..G-1（行名/型随本记录携带，
-    // var rows are the same source); id = row order. Function declaration areas
-    // follow in row order.
-    pos = seg_off2
-    if !ccr_has_bytes(pos, 4, seg_end2):
-        return -1
-    gc := buf_read_u32(data, pos)
-    pos = pos + 4
-    if gc > (seg_end2 - seg_off2) / ESZ_GLOBAL_DISK:
-        return -1
-    grow_ir_globals(gc)
-    gi : ., mut = 0
-    loop:
-        if gi >= gc:
-            break
-        if !ccr_has_bytes(pos, ESZ_GLOBAL_DISK, seg_end2):
-            return -1
-        gname_ni := buf_read_u32(data, pos)
-        pos = pos + 4
-        gtype := buf_read_u32(data, pos)
-        pos = pos + 4
-        ginit_val := buf_read_i64(data, pos)
-        pos = pos + 8
-        grow_ir_vars(g_ir_var_count + 1)
-        gvar := g_ir_var_count
-        irv_set_name(gvar, gname_ni)
-        irv_set_id(gvar, gvar)
-        irv_set_type(gvar, gtype)
-        g_ir_var_count = gvar + 1
-        w64(g_ir_globals, gi * 24, gname_ni)
-        w64(g_ir_globals, gi * 24 + 8, gvar)
-        w64(g_ir_globals, gi * 24 + 16, ginit_val)
-        g_ir_global_count = gi + 1
-        gi = gi + 1
-
-    // === SYM: funcs（24B 头 + param_ents + var 声明区）===
-    // 头字段 = spec 3.2：name/param_count/ret_type/root_region（REG 记录 id）/
-    // first_ent/last_ent（本函数条目文件范围）。instr/var 范围不落盘：instr =
-    // root_region span（REG 段解析后回填），var_start = 声明区记录顺序游标。
-    if !ccr_has_bytes(pos, 4, seg_end2):
-        return -1
-    func_cnt := buf_read_u32(data, pos)
-    pos = pos + 4
-    if func_cnt > (seg_end2 - pos) / ESZ_FUNC_HEAD_DISK:
-        return -1
-    grow_ir_func_meta(func_cnt)
-    // func 记录临时元数据（REG 段回填/ENT 块界校验用）：{root i64, first i64, last i64}
-    fn_meta := alloc((func_cnt + 8) * 24)
-    fi : ., mut = 0
-    loop:
-        if fi >= func_cnt:
-            break
-        if !ccr_has_bytes(pos, ESZ_FUNC_HEAD_DISK, seg_end2):
-            return -1
-        fname := buf_read_u32(data, pos)
-        pos = pos + 4
-        fpc := buf_read_u32(data, pos)
-        pos = pos + 4
-        fret := buf_read_u32(data, pos)
-        pos = pos + 4
-        froot := buf_read_i32(data, pos)
-        pos = pos + 4
-        ffe := buf_read_i32(data, pos)
-        pos = pos + 4
-        fle := buf_read_i32(data, pos)
-        pos = pos + 4
-        if froot < 0:
-            return -1
-        // 每函数必有根 region（df_begin_func）
-        if ffe < -1 || fle < -1 || (ffe == -1) != (fle == -1):
-            return -1
-        w64(g_ir_func_name_idx, fi * 8, fname)
-        w64(g_ir_func_param_count, fi * 8, fpc)
-        w64(g_ir_func_ret_type, fi * 8, fret)
-        w64(fn_meta, fi * 24, froot)
-        w64(fn_meta, fi * 24 + 8, ffe)
-        w64(fn_meta, fi * 24 + 16, fle)
-        // param_ents（i32 each；内存无消费者，只做越界拒绝）
-        pj : ., mut = 0
-        loop:
-            if pj >= fpc:
-                break
-            if !ccr_has_bytes(pos, 4, seg_end2):
-                return -1
-            pid := buf_read_i32(data, pos)
-            pos = pos + 4
-            if pid < -1:
-                return -1
-            pj = pj + 1
-        // var 声明区（记录顺序 = 创建序，前 param_count 个 = 参数）
-        if !ccr_has_bytes(pos, 4, seg_end2):
-            return -1
-        fvc := buf_read_u32(data, pos)
-        pos = pos + 4
-        if fpc > fvc:
-            return -1
-        if fvc > (seg_end2 - pos) / ESZ_VARDECL_DISK:
-            return -1
-        fvs2 := g_ir_var_count
-        w64(g_ir_func_var_start, fi * 8, fvs2)
-        dj : ., mut = 0
-        loop:
-            if dj >= fvc:
-                break
-            if !ccr_has_bytes(pos, ESZ_VARDECL_DISK, seg_end2):
-                return -1
-            dname := buf_read_u32(data, pos)
-            pos = pos + 4
-            dtype := buf_read_u32(data, pos)
-            pos = pos + 4
-            grow_ir_vars(g_ir_var_count + 1)
-            drow := g_ir_var_count
-            irv_set_name(drow, dname)
-            irv_set_id(drow, drow)
-            irv_set_type(drow, dtype)
-            g_ir_var_count = drow + 1
-            dj = dj + 1
-        if g_ir_var_count - fvs2 != fvc:
-            return -1
-        w64(g_ir_func_var_count, fi * 8, fvc)
-        g_ir_func_count = fi + 1
-        fi = fi + 1
-
-    // === SYM: string constants（4B each）===
-    if !ccr_has_bytes(pos, 4, seg_end2):
-        return -1
-    str_const_cnt := buf_read_u32(data, pos)
-    pos = pos + 4
-    if str_const_cnt > (seg_end2 - seg_off2) / 4:
-        return -1
-    grow_ir_str_consts(str_const_cnt)
-    sci : ., mut = 0
-    loop:
-        if sci >= str_const_cnt:
-            break
-        if !ccr_has_bytes(pos, 4, seg_end2):
-            return -1
-        scv := buf_read_u32(data, pos)
-        pos = pos + 4
-        w64(g_ir_str_consts, sci * 8, scv)
-        g_ir_str_const_count = sci + 1
-        sci = sci + 1
-
-    // === SYM: structs ===
-    if !ccr_has_bytes(pos, 4, seg_end2):
-        return -1
-    struct_cnt := buf_read_u32(data, pos)
-    pos = pos + 4
-    if struct_cnt > (seg_end2 - seg_off2) / 8:
-        return -1
-    grow_structs(struct_cnt)
-    g_struct_count = struct_cnt
-    sti : ., mut = 0
-    loop:
-        if sti >= struct_cnt:
-            break
-        if !ccr_has_bytes(pos, 8, seg_end2):
-            return -1
-        sname_ni := buf_read_u32(data, pos)
-        pos = pos + 4
-        fc := buf_read_u32(data, pos)
-        pos = pos + 4
-        // 字段数无硬上限（侧表承载），因此旧 MAX_STRUCT_FIELDS
-        // 读回检查与 16 槽清零循环一并删除；段界核算保留（fc 越段，因此拒绝，判定约定）。
-        if fc > (seg_end2 - pos) / 8:
-            return -1
-        w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_NAME, sname_ni)
-        w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, fc)
-        si_set_field_base(sti, g_si_f_used)
-        // Zero generic slots
-        w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT, 0)
-        zgi : ., mut = 0
-        loop:
-            if zgi >= 4:
-                break
-            w64(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + zgi * 8, 0)
-            zgi = zgi + 1
-        // Write field data（侧表；磁盘布局逐字段变长，格式不变）
-        fi2 : ., mut = 0
-        loop:
-            if fi2 >= fc:
-                break
-            fn_ni := buf_read_u32(data, pos)
-            pos = pos + 4
-            ft := buf_read_u32(data, pos)
-            pos = pos + 4
-            si_set_field_name(sti, fi2, fn_ni)
-            si_set_field_type(sti, fi2, ft)
-            fi2 = fi2 + 1
-        si_commit_fields(sti, fc)
-        sti = sti + 1
-
-    // === SYM: enums ===
-    if !ccr_has_bytes(pos, 4, seg_end2):
-        return -1
-    enum_cnt := buf_read_u32(data, pos)
-    pos = pos + 4
-    if enum_cnt > (seg_end2 - seg_off2) / 8:
-        return -1
-    grow_enums(enum_cnt)
-    g_enum_count = enum_cnt
-    ei : ., mut = 0
-    loop:
-        if ei >= enum_cnt:
-            break
-        if !ccr_has_bytes(pos, 8, seg_end2):
-            return -1
-        ename_ni := buf_read_u32(data, pos)
-        pos = pos + 4
-        vc := buf_read_u32(data, pos)
-        pos = pos + 4
-        // 变体/携带值数无硬上限（侧表），因此两处旧检查与 16 槽清零
-        // 循环删除；段界核算保留（判定约定）
-        if vc > (seg_end2 - pos) / 8:
-            return -1
-        w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_NAME, ename_ni)
-        w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, vc)
-        ei_set_variant_base(ei, g_ei_v_used)
-        w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 0)
-        zgi2 : ., mut = 0
-        loop:
-            if zgi2 >= 4:
-                break
-            w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + zgi2 * 8, 0)
-            zgi2 = zgi2 + 1
-        // Write variant data
-        vi3 : ., mut = 0
-        loop:
-            if vi3 >= vc:
-                break
-            vni := buf_read_u32(data, pos)
-            pos = pos + 4
-            tc := buf_read_u32(data, pos)
-            pos = pos + 4
-            if tc > (seg_end2 - pos) / 4:
-                return -1
-            ei_set_variant_name(ei, vi3, vni)
-            ei_set_variant_type_count(ei, vi3, tc)
-            tf : ., mut = 0
-            loop:
-                if tf >= tc:
-                    break
-                tval := buf_read_u32(data, pos)
-                pos = pos + 4
-                ei_set_variant_type(ei, vi3, tf, tval)
-                tf = tf + 1
-            vi3 = vi3 + 1
-        ei = ei + 1
-
-    // === SYM: opt_meta ===
-    if !ccr_has_bytes(pos, 4, seg_end2):
-        return -1
-    mc := buf_read_u32(data, pos)
-    pos = pos + 4
-    mi : ., mut = 0
-    loop:
-        if mi >= mc:
-            break
-        if !ccr_has_bytes(pos, 8, seg_end2):
-            return -1
-        mk := buf_read_u32(data, pos)
-        pos = pos + 4
-        md_len := buf_read_u32(data, pos)
-        pos = pos + 4
-        if md_len > OPT_META_STRIDE - 8 || !ccr_has_bytes(pos, md_len, seg_end2):
-            return -1
-        // Allocate and store entry
-        grow_opt_meta(mi + 1)
-        mo := mi * OPT_META_STRIDE
-        w32(g_opt_meta, mo, mk)
-        w32(g_opt_meta, mo + 4, md_len)
-        di : ., mut = 0
-        loop:
-            if di >= md_len:
-                break
-            store8(g_opt_meta, mo + 8 + di, load8(data, pos))
-            pos = pos + 1
-            di = di + 1
-        g_opt_meta_count = mi + 1
-        mi = mi + 1
-
-    // === REG: region（24B each，spec 3.5 字段序 {kind, parent, enter_nod,
-    // exit_nod, first_ent, last_ent}）===
-    // nstart and ncount are not stored; the loader derives nstart = enter and
-    // ncount = exit - enter. A record with exit < enter is unclosed and has no
-    // valid representation, so the file is rejected.
-    // first/last 校验：SG_FUNC 根记录（记录顺序第 k 个 = 函数 k）的区内条目范围必须
-    // 与 SYM func 记录 first/last 一致（同信息双写，失配 = 格式不一致）。
-    // 函数指令边界重建：func root_region（SYM）-> REG span = [enter, exit)。
-    pos = seg_off5
-    if !ccr_has_bytes(pos, 4, seg_end5):
-        return -1
-    sg_n := buf_read_u32(data, pos)
-    pos = pos + 4
-    if sg_n > (seg_end5 - seg_off5) / ESZ_SG_DISK:
-        return -1
-    sg_i : ., mut = 0
-    rfcnt : ., mut = 0  // 已见 SG_FUNC 根记录数（记录顺序 = 函数序 1:1）
-    loop:
-        if sg_i >= sg_n:
-            break
-        grow_sg(sg_i + 1)
-        f := sg_i * ESZ_SG
-        rk := buf_read_i32(data, pos)
-        pos = pos + 4
-        rp := buf_read_i32(data, pos)
-        pos = pos + 4
-        ren := buf_read_i32(data, pos)
-        pos = pos + 4
-        rex := buf_read_i32(data, pos)
-        pos = pos + 4
-        rfe := buf_read_i32(data, pos)
-        pos = pos + 4
-        rle := buf_read_i32(data, pos)
-        pos = pos + 4
-        if rex < ren:
-            return -1
-        // 未闭合 -> ncount 不可派生
-        if rfe < -1 || rle < -1 || (rfe == -1) != (rle == -1):
-            return -1
-        w64(g_sgs, f + OFF_SG_KIND, rk)
-        w64(g_sgs, f + OFF_SG_ENTER, ren)
-        w64(g_sgs, f + OFF_SG_EXIT, rex)
-        w64(g_sgs, f + OFF_SG_PARENT, rp)
-        w64(g_sgs, f + OFF_SG_NSTART, ren)
-        w64(g_sgs, f + OFF_SG_NCOUNT, rex - ren)
-        if rk == SG_FUNC:
-            if rfcnt >= func_cnt:
-                return -1
-            // 根记录多于函数记录
-            if rfe != r64(fn_meta, rfcnt * 24 + 8) || rle != r64(fn_meta, rfcnt * 24 + 16):
-                return -1  // REG 根记录条目范围 != SYM func 记录
-            rfcnt = rfcnt + 1
-        sg_i = sg_i + 1
-    if rfcnt != func_cnt:
-        return -1
-    // 根记录少于函数记录（每函数必有根）
-    g_sg_count = sg_n
-
-    // 函数指令边界回填：instr_start = root_region enter, instr_count = exit − enter
-    // The root region span is the function node range and is the single source for
-    // function instruction bounds.
-    bfi : ., mut = 0
-    loop:
-        if bfi >= func_cnt:
-            break
-        rid := r64(fn_meta, bfi * 24)
-        if rid < 0 || rid >= sg_n:
-            return -1
-        fr := rid * ESZ_SG
-        if r64(g_sgs, fr + OFF_SG_KIND) != SG_FUNC:
-            return -1
-        ren := r64(g_sgs, fr + OFF_SG_ENTER)
-        rex := r64(g_sgs, fr + OFF_SG_EXIT)
-        if rex < ren:
-            return -1
-        w64(g_ir_func_instr_start, bfi * 8, ren)
-        w64(g_ir_func_instr_count, bfi * 8, rex - ren)
-        bfi = bfi + 1
-
-    // === NOD: instructions（36B each）===
-    // loader 产出 = 对象载入 + 检查，28B
-    // Semantic fields go to the kernel object buffer g_v7_nod_sem (the in-memory
-    // record mirrors the disk record without adjacency, with the same offsets).
-    // Adjacency first_edge/edge_count go to g_v7_nod_meta.
-    // （EDG 段校验 + 对象数据 nod_edge_first/count 消费）。NOD->g_ir_instrs
-    // 线性重建段已移出本函数（调度重建 = 实例事务 build_linear_schedule，
-    // regalloc.cr，load 返回后、发射/分派前由入口调用）；g_ir_instrs/
-    // g_ir_instr_count 本段不再触碰（重建段原写点全清）。
-    pos = seg_off3
-    if !ccr_has_bytes(pos, 4, seg_end3):
-        return -1
-    instr_cnt := buf_read_u32(data, pos)
-    pos = pos + 4
-    if instr_cnt > (seg_end3 - seg_off3) / ESZ_NOD_DISK:
-        return -1
-    g_v7_nod_sem = alloc((instr_cnt + 8) * ESZ_NOD_SEM)
-    g_v7_nod_meta = alloc((instr_cnt + 8) * ESZ_NOD_META)
-    ii : ., mut = 0
-    loop:
-        if ii >= instr_cnt:
-            break
-        if !ccr_has_bytes(pos, ESZ_NOD_DISK, seg_end3):
-            return -1
-        opcode := buf_read_u32(data, pos)
-        pos = pos + 4
-        dest := buf_read_i32(data, pos)
-        pos = pos + 4
-        s1 := buf_read_i64(data, pos)
-        pos = pos + 8   // 修复 14：s1 64 位
-        s2 := buf_read_i32(data, pos)
-        pos = pos + 4
-        s3 := buf_read_i32(data, pos)
-        pos = pos + 4
-        tk := buf_read_u32(data, pos)
-        pos = pos + 4
-        it2 := buf_read_i32(data, pos)
-        pos = pos + 4  // 项索引（i32；-1 = 无项）
-        nfe := buf_read_u32(data, pos)
-        pos = pos + 4  // first_edge（邻接索引）
-        nec := buf_read_u32(data, pos)
-        pos = pos + 4  // edge_count
-        // 对象缓冲写（语义字段 = 盘字节镜像，w32/w64 低 32/64 位存储，存取
-        // 经 nod_* 访问器 buf_read_* 符号扩展，数值与原重建段消费完全一致）
-        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_OP, opcode)
-        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_DEST, dest)
-        w64(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S1, s1)
-        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S2, s2)
-        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S3, s3)
-        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_TK, tk)
-        w32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_ITEM, it2)   // 项索引（-1 = 无）
-        w64(g_v7_nod_meta, ii * ESZ_NOD_META, nfe)
-        w64(g_v7_nod_meta, ii * ESZ_NOD_META + 8, nec)
-        ii = ii + 1
-    g_v7_nod_count = instr_cnt
-
-    // REG root span upper-bound check. Function instruction bounds (root_region
-    // span) are filled when REG is parsed, but instr_cnt is only known at NOD. At
-    // that point only rex >= ren was checked, not the upper bound. An out-of-range
-    // span would make ELF emission read outside the NOD space. For each function,
-    // check instr_start + count <= instr_cnt and reject negative values. This is
-    // the last reject point before payload consumption.
-    rfi : ., mut = 0
-    loop:
-        if rfi >= func_cnt:
-            break
-        ris := r64(g_ir_func_instr_start, rfi * 8)
-        ric := r64(g_ir_func_instr_count, rfi * 8)
-        if ris < 0 || ric < 0 || ris + ric > instr_cnt:
-            return -1
-        rfi = rfi + 1
-
-    // === ENT: entries（28B each -> 内存 24B 表）===
-    // 盘上半开 live_end -> 内存闭区间 −1；version 字段不入内存（组内序可推）。
-    if have4 != 0:
-        pos = seg_off4
-        if !ccr_has_bytes(pos, 4, seg_end4):
-            return -1
-        ent_cnt := buf_read_u32(data, pos)
-        pos = pos + 4
-        if ent_cnt > (seg_end4 - seg_off4) / ESZ_ENTRY_DISK:
-            return -1
-        grow_entries(ent_cnt)
-        eii : ., mut = 0
-        loop:
-            if eii >= ent_cnt:
-                break
-            if !ccr_has_bytes(pos, ESZ_ENTRY_DISK, seg_end4):
-                return -1
-            ev := buf_read_i32(data, pos)
-            pos = pos + 4   // var_id
-            evr := buf_read_u32(data, pos)
-            pos = pos + 4  // version（盘上仅校验用）
-            ed := buf_read_i32(data, pos)
-            pos = pos + 4   // def_nod
-            els := buf_read_u32(data, pos)
-            pos = pos + 4  // live_start（含定值）
-            ele := buf_read_u32(data, pos)
-            pos = pos + 4  // live_end（半开）
-            eho := buf_read_i32(data, pos)
-            pos = pos + 4  // home
-            efl := buf_read_u32(data, pos)
-            pos = pos + 4  // flags
-            // Semantic validation: reject out-of-range values.
-            if evr < 1:
-                return -1
-            if ev < 0 || ev >= g_ir_var_count:
-                return -1
-            // var 命名空间 = SYM 行重建总量
-            if els >= ele || ele > instr_cnt:
-                return -1
-            if ed >= 0:
-                if ed >= instr_cnt:
-                    return -1
-                if ed != els:
-                    return -1
-                // 定值条目 live_start == def
-            // 内存闭区间表
-            mo2 := eii * ESZ_ENTRY
-            w32(g_ir_entries, mo2 + OFF_ENTRY_VAR, ev)
-            w32(g_ir_entries, mo2 + OFF_ENTRY_DEF, ed)
-            w32(g_ir_entries, mo2 + OFF_ENTRY_LS, els)
-            w32(g_ir_entries, mo2 + OFF_ENTRY_LE, ele - 1)
-            w32(g_ir_entries, mo2 + OFF_ENTRY_HOME, eho)
-            w32(g_ir_entries, mo2 + OFF_ENTRY_FLAGS, efl)
-            g_entry_count = eii + 1
-            eii = eii + 1
-        // 函数条目段界重建：条目按函数升序成块落盘（compute_entries func_i 升序），
-        // 每函数一段 [start, count)，块判定 = var 槽 in 该函数 var 区间（var 槽
-        // 全属唯一函数，段序与函数序一致）。重建结果与 SYM func 记录
-        // first_ent/last_ent 逐函数对照（同信息双写，失配 = 格式不一致）。
-        grow_func_entry_meta(func_cnt)
-        pf : ., mut = 0
-        pe : ., mut = 0
-        loop:
-            if pf >= func_cnt:
-                break
-            fvs := r64(g_ir_func_var_start, pf * 8)
-            fvc := r64(g_ir_func_var_count, pf * 8)
-            pstart := pe
-            w64(g_ir_func_entry_start, pf * 8, pe)
-            loop:
-                if pe >= g_entry_count:
-                    break
-                pv := buf_read_i32(g_ir_entries, pe * ESZ_ENTRY + OFF_ENTRY_VAR)
-                if fvc <= 0 || pv < fvs || pv >= fvs + fvc:
-                    break
-                pe = pe + 1
-            pcnt := pe - pstart
-            w64(g_ir_func_entry_count, pf * 8, pcnt)
-            ffe := r64(fn_meta, pf * 24 + 8)
-            fle := r64(fn_meta, pf * 24 + 16)
-            if pcnt == 0:
-                if ffe != -1 || fle != -1:
-                    return -1
-            else:
-                if ffe != pstart || fle != pstart + pcnt - 1:
-                    return -1
-            pf = pf + 1
-        if pe != g_entry_count:
-            return -1
-
-    // === EDG: edges（v7 必落；8B each {to_nod u32, kind u32}，所属节点 =
-    // 邻接隐含：节点 i 出边连续段 [first_edge, first_edge+edge_count)，first_edge
-    // = 前缀累计（spec 3.3 邻接约定）。校验（spec 4 + 检查强度保持）：
-    //   1 连续段与 NOD 邻接域逐节点对照（first_edge == 前缀累计；段界不出 EDG）
-    //   2 Σ edge_count == edg_count（规则 3；行走完 == 段体大小）
-    //   3 每条边 to_nod < instr_cnt（NOD 引用界内）+ to_nod > 所属节点
-    //      （规则 1 拓扑不变量，数据/state 边前向；自环/后向 = 文件损坏拒绝）
-    //   4 kind <= 1（0=数据、1=state；2+ 预留 = 未知边类拒绝）
-    // 校验通过后边表入 g_v7_edges 缓冲（文件序连续段，图语义消费通道/调试）。
-    // branch/jump 目标 = 操作数引用非边（v7 4 边界声明），NOD 操作数不参与
-    // 本段校验。
-    pos = seg_off6
-    if !ccr_has_bytes(pos, 4, seg_end6):
-        return -1
-    edg_cnt := buf_read_u32(data, pos)
-    pos = pos + 4
-    if edg_cnt > (seg_end6 - seg_off6) / ESZ_EDGE_DISK:
-        return -1
-    v7_buf : string, mut = ""
-    if edg_cnt > 0:
-        v7_buf = alloc(edg_cnt * 8)
-    g_v7_edges = v7_buf
-    g_v7_edge_count = edg_cnt
-    ei4 : ., mut = 0
-    run_off : ., mut = 0
-    loop:
-        if ei4 >= instr_cnt:
-            break
-        // 邻接域读内核对象缓冲 g_v7_nod_meta（原 nod_edge_meta loader 局部，
-        // 对象 = 内核持有物，EDG 检查
-        // 与对象数据 nod_edge_first/count 同源；检查逻辑零改动）
-        nfe := r64(g_v7_nod_meta, ei4 * ESZ_NOD_META)
-        nec := r64(g_v7_nod_meta, ei4 * ESZ_NOD_META + 8)
-        if nfe != run_off:
-            return -1
-        // 1 前缀累计失配（段错位/伪造）
-        if run_off + nec > edg_cnt:
-            return -1
-        // 1 节点段越出 EDG 空间
-        rec : ., mut = 0
-        loop:
-            if rec >= nec:
-                break
-            if !ccr_has_bytes(pos, ESZ_EDGE_DISK, seg_end6):
-                return -1
-            eto := buf_read_u32(data, pos)
-            pos = pos + 4
-            ekind := buf_read_u32(data, pos)
-            pos = pos + 4
-            if ekind > 1:
-                return -1
-            // 4 未知边类
-            if eto >= instr_cnt:
-                return -1
-            // 3 to 出 NOD 空间
-            if eto <= ei4:
-                return -1
-            // 3 后向/自环（拓扑不变量）
-            w64(v7_buf, (run_off + rec) * 8, eto + ekind * 4294967296)
-            rec = rec + 1
-        run_off = run_off + nec
-        ei4 = ei4 + 1
-    if run_off != edg_cnt:
-        return -1
-    // 2 Σ edge_count == edg_count
-    if pos != seg_end6:
-        return -1
-    // 2 行走完 == 段体大小
-
-    // === TYPE(7)：类型信息===
+    // === TYPE(2)：类型信息===
     //  字节：row_count -> 记录表（24B/条）-> term_count -> 项 DAG（40B/条；哈希
     // 不落盘、本处 tt_hash5 重算）。重建 = g_types 行 + g_type_terms 项 +
     // g_tt_index 索引重放（grow_tt_index -> tt_reindex）。
     // 逐条校验（违规 = 拒绝，不得当作空表或截断表，判定约定 C.5-3）：
     //   1 计数/长度自洽（计数 × 记录尺寸 <= 段余量）；2 段体恰两小节（行走完
-    //   == seg_end7，无尾随字节）；3 tag in 0..10（TT_*）+ a..d >= -1；4 子项引用
+    //   == seg_end2，无尾随字节）；3 tag in 0..10（TT_*）+ a..d >= -1；4 子项引用
     //   -1 或 < 自身行号（拓扑无环；标注槽按 tag 分派跳过，字段表见
     //   ccr_type_term_ref_ok，ATOM 的 b = 自类型表记录编号可达数千，不得误拒）。
     // 复位：记录表/项层（含引擎预算/memo/lits，见 tt_layer_reset 注记）全部作废
@@ -1854,40 +1626,39 @@ fn load_ccr(data: string, fsize: int) -> int:
     // 未来判定原语），本处不做语义解释。
     g_type_count = 0
     tt_layer_reset()
-    pos = seg_off7
-    if !ccr_has_bytes(pos, 4, seg_end7):
+    if !ccr_has_bytes(pos, 4, seg_end2):
         return -1
     trow_cnt := buf_read_u32(data, pos)
     pos = pos + 4
-    if trow_cnt > (seg_end7 - pos) / ESZ_TYPE_ROW:
+    if trow_cnt > (seg_end2 - pos) / ESZ_TYPE_ROW:
         return -1
     grow_types(trow_cnt)
     trow : ., mut = 0
     loop:
         if trow >= trow_cnt:
             break
-        if !ccr_has_bytes(pos, ESZ_TYPE_ROW, seg_end7):
+        if !ccr_has_bytes(pos, ESZ_TYPE_ROW, seg_end2):
             return -1
-        w64(g_types, trow * ESZ_TYPE_ROW + OFF_TR_KIND, buf_read_i64(data, pos))
+        cell_store(g_types, trow * ESZ_TYPE_ROW + OFF_TR_KIND, buf_read_i64(data, pos))
         pos = pos + 8
-        w64(g_types, trow * ESZ_TYPE_ROW + OFF_TR_DATA, buf_read_i64(data, pos))
+        cell_store(g_types, trow * ESZ_TYPE_ROW + OFF_TR_DATA, buf_read_i64(data, pos))
         pos = pos + 8
-        w64(g_types, trow * ESZ_TYPE_ROW + OFF_TR_EXTRA, buf_read_i64(data, pos))
+        cell_store(g_types, trow * ESZ_TYPE_ROW + OFF_TR_EXTRA, buf_read_i64(data, pos))
         pos = pos + 8
         trow = trow + 1
     g_type_count = trow_cnt
-    if !ccr_has_bytes(pos, 4, seg_end7):
+    if !ccr_has_bytes(pos, 4, seg_end2):
         return -1
     tterm_cnt := buf_read_u32(data, pos)
     pos = pos + 4
-    if tterm_cnt > (seg_end7 - pos) / ESZ_TYPE_TERM_DISK:
+    if tterm_cnt > (seg_end2 - pos) / ESZ_TYPE_TERM_DISK:
         return -1
     grow_type_terms(tterm_cnt + 1)
     tj : ., mut = 0
     loop:
         if tj >= tterm_cnt:
             break
-        if !ccr_has_bytes(pos, ESZ_TYPE_TERM_DISK, seg_end7):
+        if !ccr_has_bytes(pos, ESZ_TYPE_TERM_DISK, seg_end2):
             return -1
         ttag := buf_read_i64(data, pos)
         pos = pos + 8
@@ -1905,41 +1676,40 @@ fn load_ccr(data: string, fsize: int) -> int:
             return -1
         if ccr_type_term_ref_ok(ttag, ta, tb, tc2, td, tj) == 0:
             return -1
-        w64(g_type_terms, tj * ESZ_TYPE_TERM + OFF_TT_TAG, ttag)
-        w64(g_type_terms, tj * ESZ_TYPE_TERM + OFF_TT_A, ta)
-        w64(g_type_terms, tj * ESZ_TYPE_TERM + OFF_TT_B, tb)
-        w64(g_type_terms, tj * ESZ_TYPE_TERM + OFF_TT_C, tc2)
-        w64(g_type_terms, tj * ESZ_TYPE_TERM + OFF_TT_D, td)
-        w64(g_type_terms, tj * ESZ_TYPE_TERM + OFF_TT_HASH, tt_hash5(ttag, ta, tb, tc2, td))
+        cell_store(g_type_terms, tj * ESZ_TYPE_TERM + OFF_TT_TAG, ttag)
+        cell_store(g_type_terms, tj * ESZ_TYPE_TERM + OFF_TT_A, ta)
+        cell_store(g_type_terms, tj * ESZ_TYPE_TERM + OFF_TT_B, tb)
+        cell_store(g_type_terms, tj * ESZ_TYPE_TERM + OFF_TT_C, tc2)
+        cell_store(g_type_terms, tj * ESZ_TYPE_TERM + OFF_TT_D, td)
+        cell_store(g_type_terms, tj * ESZ_TYPE_TERM + OFF_TT_HASH, tt_hash5(ttag, ta, tb, tc2, td))
         g_type_term_count = tj + 1
         tj = tj + 1
-    if pos != seg_end7:
+    if pos != seg_end2:
         return -1
     // 段体恰两小节（无尾随字节）
     grow_tt_index(g_type_term_count + 1)        // 索引重建（cap 已清零 -> 必走重建）
 
-    // === IFACE(8)：接口数据===
+    // === IFACE(3)：接口数据===
     // 重建 = g_iface_entries（条目表；并置 g_iface_registry_ok = 1，段 = corearch
     // 侧真源，防常量表覆盖段内容）+ g_iface_shape_names/terms + g_ifaces
     // （ESZ_IFACEINFO 布局；corearch 侧无 AST，因此节点槽恒 -1、项槽 = 段值）
     // + g_impl_for + g_methods。
     // 逐条校验（违规 = 拒绝；判定约定 C.5-3，不得当作空表或截断表）：
-    //   1 五小节计数/长度自洽（计数 × 记录尺寸 <= 段余量）+ 行走完 == seg_end8（无尾随）；
+    //   1 五小节计数/长度自洽（计数 × 记录尺寸 <= 段余量）+ 行走完 == seg_end3（无尾随）；
     //   2 native_count == IFACE_ENTRY_COUNT（表内容 = 常量表，计数漂移 = 损坏）；
     //   3 跨段引用域：name_ni/type_ni/method_ni/mangled_ni in [0, g_str_count)（STR
     //      段先于本段解析）；ti_row in {-1} ∪ [0, g_type_count)；term in {-1} ∪ [0, tt_count())
-    //      （TYPE(7) 段先于本段解析，因此两域已建立）；
+    //      （TYPE(2) 段先于本段解析，因此两域已建立）；
     //   4 结构域：ak in 0..AK_NULL、method_count <= MAX_IFACE_METHODS、
     //      param_count <= MAX_IFACE_METHOD_PARAMS、self_mode in 0..3。
     // IFACE 段 = 纯信息（不参与 ELF 发射）；本段解析失败 = 整体拒绝（load_ccr -1）。
-    pos = seg_off8
-    if !ccr_has_bytes(pos, 4, seg_end8):
+    if !ccr_has_bytes(pos, 4, seg_end3):
         return -1
     ifc_nat := buf_read_u32(data, pos)
     pos = pos + 4
     if ifc_nat != IFACE_ENTRY_COUNT:
         return -1
-    if !ccr_has_bytes(pos, ifc_nat * 24, seg_end8):
+    if !ccr_has_bytes(pos, ifc_nat * 24, seg_end3):
         return -1
     g_iface_entries = alloc(ifc_nat * ESZ_IFACE_ENTRY)
     ifr : ., mut = 0
@@ -1968,21 +1738,21 @@ fn load_ccr(data: string, fsize: int) -> int:
         if flit < -1:
             return -1
         fo2 := ifr * ESZ_IFACE_ENTRY
-        w64(g_iface_entries, fo2 + OFF_IE_AK, fak)
-        w64(g_iface_entries, fo2 + OFF_IE_TI, fti)
-        w64(g_iface_entries, fo2 + OFF_IE_NAME, fname)
-        w64(g_iface_entries, fo2 + OFF_IE_LIT, flit)
-        w64(g_iface_entries, fo2 + OFF_IE_OPS, fops)
+        cell_store(g_iface_entries, fo2 + OFF_IE_AK, fak)
+        cell_store(g_iface_entries, fo2 + OFF_IE_TI, fti)
+        cell_store(g_iface_entries, fo2 + OFF_IE_NAME, fname)
+        cell_store(g_iface_entries, fo2 + OFF_IE_LIT, flit)
+        cell_store(g_iface_entries, fo2 + OFF_IE_OPS, fops)
         ifr = ifr + 1
     g_iface_entry_count = ifc_nat
     g_iface_registry_ok = 1
 
     // 2 横切形状（名 ni + 形状项）
-    if !ccr_has_bytes(pos, 4, seg_end8):
+    if !ccr_has_bytes(pos, 4, seg_end3):
         return -1
     ifc_shn := buf_read_u32(data, pos)
     pos = pos + 4
-    if ifc_shn > (seg_end8 - pos) / 8:
+    if ifc_shn > (seg_end3 - pos) / 8:
         return -1
     iface_shape_grow(ifc_shn)
     ifs : ., mut = 0
@@ -1998,24 +1768,24 @@ fn load_ccr(data: string, fsize: int) -> int:
         if sterm < 0 || sterm >= tt_count():
             return -1
         // 项引用域（跨段）
-        w64(g_iface_shape_names, ifs * 8, sname)
-        w64(g_iface_shape_terms, ifs * 8, sterm)
+        cell_store(g_iface_shape_names, ifs * 8, sname)
+        cell_store(g_iface_shape_terms, ifs * 8, sterm)
         ifs = ifs + 1
     g_iface_shape_count = ifc_shn
 
     // 3 用户接口（头 16B + 方法 80B × method_count）
-    if !ccr_has_bytes(pos, 4, seg_end8):
+    if !ccr_has_bytes(pos, 4, seg_end3):
         return -1
     ifc_usn := buf_read_u32(data, pos)
     pos = pos + 4
-    if ifc_usn > (seg_end8 - pos) / 16:
+    if ifc_usn > (seg_end3 - pos) / 16:
         return -1
     grow_ifaces(ifc_usn)
     ifu : ., mut = 0
     loop:
         if ifu >= ifc_usn:
             break
-        if !ccr_has_bytes(pos, 16, seg_end8):
+        if !ccr_has_bytes(pos, 16, seg_end3):
             return -1
         uname := buf_read_i32(data, pos)
         pos = pos + 4
@@ -2030,7 +1800,7 @@ fn load_ccr(data: string, fsize: int) -> int:
             return -1
         if ugc < 0:
             return -1
-        if !ccr_has_bytes(pos, umc * 80, seg_end8):
+        if !ccr_has_bytes(pos, umc * 80, seg_end3):
             return -1
         ub := ifu * ESZ_IFACEINFO
         // 先清零整条记录（防上轮残留；节点槽/项槽的初值 = -1 由下方逐槽写）
@@ -2038,11 +1808,11 @@ fn load_ccr(data: string, fsize: int) -> int:
         loop:
             if uz >= ESZ_IFACEINFO:
                 break
-            w8(g_ifaces, ub + uz, 0)
+            cell_store8(g_ifaces, ub + uz, 0)
             uz = uz + 1
-        w64(g_ifaces, ub + OFF_IF_NAME, uname)
-        w64(g_ifaces, ub + OFF_IF_METHOD_COUNT, umc)
-        w64(g_ifaces, ub + OFF_IF_GENERIC_COUNT, ugc)
+        cell_store(g_ifaces, ub + OFF_IF_NAME, uname)
+        cell_store(g_ifaces, ub + OFF_IF_METHOD_COUNT, umc)
+        cell_store(g_ifaces, ub + OFF_IF_GENERIC_COUNT, ugc)
         ium : ., mut = 0
         loop:
             if ium >= umc:
@@ -2065,11 +1835,11 @@ fn load_ccr(data: string, fsize: int) -> int:
             if mrt < -1 || mrt >= tt_count():
                 return -1
             // 项引用域（跨段）
-            w64(g_ifaces, mb + OFF_IFM_NAME, mname)
-            w64(g_ifaces, mb + OFF_IFM_PARAM_COUNT, mpc)
-            w64(g_ifaces, mb + OFF_IFM_SELF_MODE, msm)
-            w64(g_ifaces, mb + OFF_IFM_RET_TERM, mrt)
-            w64(g_ifaces, mb + OFF_IFM_RET_NODE, -1)    // corearch 无 AST，因此节点槽恒 -1
+            cell_store(g_ifaces, mb + OFF_IFM_NAME, mname)
+            cell_store(g_ifaces, mb + OFF_IFM_PARAM_COUNT, mpc)
+            cell_store(g_ifaces, mb + OFF_IFM_SELF_MODE, msm)
+            cell_store(g_ifaces, mb + OFF_IFM_RET_TERM, mrt)
+            cell_store(g_ifaces, mb + OFF_IFM_RET_NODE, -1)    // corearch 无 AST，因此节点槽恒 -1
             mq : ., mut = 0
             loop:
                 if mq >= MAX_IFACE_METHOD_PARAMS:
@@ -2079,8 +1849,8 @@ fn load_ccr(data: string, fsize: int) -> int:
                 if mt < -1 || mt >= tt_count():
                     return -1
                 // 项引用域（跨段）
-                w64(g_ifaces, mb + OFF_IFM_PARAM_TERMS + mq * 8, mt)
-                w64(g_ifaces, mb + OFF_IFM_PARAM_NODES + mq * 8, -1)     // 节点槽恒 -1
+                cell_store(g_ifaces, mb + OFF_IFM_PARAM_TERMS + mq * 8, mt)
+                cell_store(g_ifaces, mb + OFF_IFM_PARAM_NODES + mq * 8, -1)     // 节点槽恒 -1
                 mq = mq + 1
             mp : ., mut = 0
             loop:
@@ -2090,18 +1860,18 @@ fn load_ccr(data: string, fsize: int) -> int:
                 pos = pos + 4            // 裸码（信息）
                 if mc2 < -1:
                     return -1
-                w64(g_ifaces, mb + OFF_IFM_PARAM_TYPES + mp * 8, mc2)
+                cell_store(g_ifaces, mb + OFF_IFM_PARAM_TYPES + mp * 8, mc2)
                 mp = mp + 1
             ium = ium + 1
         ifu = ifu + 1
     g_iface_count = ifc_usn
 
     // 4 impl 边（g_impl_for：{trait_ni, type_ni}，声明元数据）
-    if !ccr_has_bytes(pos, 4, seg_end8):
+    if !ccr_has_bytes(pos, 4, seg_end3):
         return -1
     ifc_imp := buf_read_u32(data, pos)
     pos = pos + 4
-    if ifc_imp > (seg_end8 - pos) / 8:
+    if ifc_imp > (seg_end3 - pos) / 8:
         return -1
     grow_impl_for(ifc_imp)
     ifi : ., mut = 0
@@ -2116,17 +1886,17 @@ fn load_ccr(data: string, fsize: int) -> int:
             return -1
         if ity < 0 || ity >= g_str_count:
             return -1
-        w64(g_impl_for, ifi * 16, itr)
-        w64(g_impl_for, ifi * 16 + 8, ity)
+        cell_store(g_impl_for, ifi * 16, itr)
+        cell_store(g_impl_for, ifi * 16 + 8, ity)
         ifi = ifi + 1
     g_impl_for_count = ifc_imp
 
     // 5 方法表（g_methods：{type_ni, method_ni, mangled_ni}，iface_find_method 数据源）
-    if !ccr_has_bytes(pos, 4, seg_end8):
+    if !ccr_has_bytes(pos, 4, seg_end3):
         return -1
     ifc_met := buf_read_u32(data, pos)
     pos = pos + 4
-    if ifc_met > (seg_end8 - pos) / 12:
+    if ifc_met > (seg_end3 - pos) / 12:
         return -1
     grow_methods(ifc_met)
     ifm : ., mut = 0
@@ -2145,37 +1915,738 @@ fn load_ccr(data: string, fsize: int) -> int:
             return -1
         if mmg < 0 || mmg >= g_str_count:
             return -1
-        w64(g_methods, ifm * 24, mtn)
-        w64(g_methods, ifm * 24 + 8, mmn)
-        w64(g_methods, ifm * 24 + 16, mmg)
+        cell_store(g_methods, ifm * 24, mtn)
+        cell_store(g_methods, ifm * 24 + 8, mmn)
+        cell_store(g_methods, ifm * 24 + 16, mmg)
         ifm = ifm + 1
     g_method_count = ifc_met
 
-    if pos != seg_end8:
+    if pos != seg_end3:
         return -1
     // 五小节行走完 == 段体（无尾随字节）
 
-    // === NOD item index consistency check ===
-    // This check runs after TYPE/IFACE because it needs the term table. The NOD
-    // segment (canonical order 3) is parsed before TYPE (7), so the check cannot
-    // run there.
-    // Reject item < -1, item >= tt_count, and item >= 0 when
-    // tt_atom_of_term(item) differs from the on-disk code. item = -1 needs no
-    // check: composite rows, aux-face rows, and warm rows without a face carry
-    // their code in tk. Valid files always pass because both values come from the
-    // same ccr_types.cr ccr_nod_item_populate derivation.
+    // === SYM: globals（16B each: name u32, type u32, init_val i64）===
+    // var 命名空间重建（流式）：全局行 = 记录序 0..G-1（行名/型随本记录携带，
+    // var rows are the same source); id = row order. Function declaration areas
+    // follow in row order.
+    if !ccr_has_bytes(pos, 4, seg_end4):
+        return -1
+    gc := buf_read_u32(data, pos)
+    pos = pos + 4
+    if gc > (seg_end4 - seg_off4) / ESZ_GLOBAL_DISK:
+        return -1
+    grow_ir_globals(gc)
+    gi : ., mut = 0
+    loop:
+        if gi >= gc:
+            break
+        if !ccr_has_bytes(pos, ESZ_GLOBAL_DISK, seg_end4):
+            return -1
+        gname_ni := buf_read_i32(data, pos)
+        pos = pos + 4
+        gtype := buf_read_i32(data, pos)
+        pos = pos + 4
+        ginit_val := buf_read_i64(data, pos)
+        pos = pos + 8
+        // Cross-segment domains: name -> STR, type -> TYPE (-1 allowed).
+        if gname_ni < 0 || gname_ni >= g_str_count:
+            return -1
+        if ccr_nod_type_ok(gtype) == 0:
+            return -1
+        grow_ir_vars(g_ir_var_count + 1)
+        gvar := g_ir_var_count
+        irv_set_name(gvar, gname_ni)
+        irv_set_id(gvar, gvar)
+        irv_set_type(gvar, gtype)
+        g_ir_var_count = gvar + 1
+        cell_store(g_ir_globals, gi * 24, gname_ni)
+        cell_store(g_ir_globals, gi * 24 + 8, gvar)
+        cell_store(g_ir_globals, gi * 24 + 16, ginit_val)
+        g_ir_global_count = gi + 1
+        gi = gi + 1
+
+    // === SYM: funcs（24B 头 + param_ents + var 声明区）===
+    // 头字段 = spec 3.2：name/param_count/ret_type/root_region（REG 记录 id）/
+    // first_ent/last_ent（本函数条目文件范围）。instr/var 范围不落盘：instr =
+    // root_region span（REG 段解析后回填），var_start = 声明区记录顺序游标。
+    if !ccr_has_bytes(pos, 4, seg_end4):
+        return -1
+    func_cnt := buf_read_u32(data, pos)
+    pos = pos + 4
+    if func_cnt > (seg_end4 - pos) / ESZ_FUNC_HEAD_DISK:
+        return -1
+    grow_ir_func_meta(func_cnt)
+    // func 记录临时元数据（REG 段回填/ENT 块界校验用）：{root i64, first i64, last i64}
+    fn_meta := alloc((func_cnt + 8) * 24)
+    fi : ., mut = 0
+    loop:
+        if fi >= func_cnt:
+            break
+        if !ccr_has_bytes(pos, ESZ_FUNC_HEAD_DISK, seg_end4):
+            return -1
+        fname := buf_read_i32(data, pos)
+        pos = pos + 4
+        fpc := buf_read_u32(data, pos)
+        pos = pos + 4
+        fret := buf_read_i32(data, pos)
+        pos = pos + 4
+        froot := buf_read_i32(data, pos)
+        pos = pos + 4
+        ffe := buf_read_i32(data, pos)
+        pos = pos + 4
+        fle := buf_read_i32(data, pos)
+        pos = pos + 4
+        if fname < 0 || fname >= g_str_count:
+            return -1
+        if ccr_nod_type_ok(fret) == 0:
+            return -1
+        if froot < 0:
+            return -1
+        // 每函数必有根 region（df_begin_func）
+        if ffe < -1 || fle < -1 || (ffe == -1) != (fle == -1):
+            return -1
+        cell_store(g_ir_func_name_idx, fi * 8, fname)
+        cell_store(g_ir_func_param_count, fi * 8, fpc)
+        cell_store(g_ir_func_ret_type, fi * 8, fret)
+        cell_store(fn_meta, fi * 24, froot)
+        cell_store(fn_meta, fi * 24 + 8, ffe)
+        cell_store(fn_meta, fi * 24 + 16, fle)
+        // param_ents（i32 each；内存无消费者，只做越界拒绝）
+        pj : ., mut = 0
+        loop:
+            if pj >= fpc:
+                break
+            if !ccr_has_bytes(pos, 4, seg_end4):
+                return -1
+            pid := buf_read_i32(data, pos)
+            pos = pos + 4
+            if pid < -1:
+                return -1
+            pj = pj + 1
+        // var 声明区（记录顺序 = 创建序，前 param_count 个 = 参数）
+        if !ccr_has_bytes(pos, 4, seg_end4):
+            return -1
+        fvc := buf_read_u32(data, pos)
+        pos = pos + 4
+        if fpc > fvc:
+            return -1
+        if fvc > (seg_end4 - pos) / ESZ_VARDECL_DISK:
+            return -1
+        fvs2 := g_ir_var_count
+        cell_store(g_ir_func_var_start, fi * 8, fvs2)
+        dj : ., mut = 0
+        loop:
+            if dj >= fvc:
+                break
+            if !ccr_has_bytes(pos, ESZ_VARDECL_DISK, seg_end4):
+                return -1
+            dname := buf_read_i32(data, pos)
+            pos = pos + 4
+            dtype := buf_read_i32(data, pos)
+            pos = pos + 4
+            if dname < 0 || dname >= g_str_count:
+                return -1
+            if ccr_nod_type_ok(dtype) == 0:
+                return -1
+            grow_ir_vars(g_ir_var_count + 1)
+            drow := g_ir_var_count
+            irv_set_name(drow, dname)
+            irv_set_id(drow, drow)
+            irv_set_type(drow, dtype)
+            g_ir_var_count = drow + 1
+            dj = dj + 1
+        if g_ir_var_count - fvs2 != fvc:
+            return -1
+        cell_store(g_ir_func_var_count, fi * 8, fvc)
+        g_ir_func_count = fi + 1
+        fi = fi + 1
+
+    // === SYM: string constants（4B each）===
+    if !ccr_has_bytes(pos, 4, seg_end4):
+        return -1
+    str_const_cnt := buf_read_u32(data, pos)
+    pos = pos + 4
+    if str_const_cnt > (seg_end4 - seg_off4) / 4:
+        return -1
+    grow_ir_str_consts(str_const_cnt)
+    sci : ., mut = 0
+    loop:
+        if sci >= str_const_cnt:
+            break
+        if !ccr_has_bytes(pos, 4, seg_end4):
+            return -1
+        scv := buf_read_i32(data, pos)
+        pos = pos + 4
+        if scv < 0 || scv >= g_str_count:
+            return -1
+        cell_store(g_ir_str_consts, sci * 8, scv)
+        g_ir_str_const_count = sci + 1
+        sci = sci + 1
+
+    // === SYM: structs ===
+    if !ccr_has_bytes(pos, 4, seg_end4):
+        return -1
+    struct_cnt := buf_read_u32(data, pos)
+    pos = pos + 4
+    if struct_cnt > (seg_end4 - seg_off4) / 8:
+        return -1
+    grow_structs(struct_cnt)
+    g_struct_count = struct_cnt
+    sti : ., mut = 0
+    loop:
+        if sti >= struct_cnt:
+            break
+        if !ccr_has_bytes(pos, 8, seg_end4):
+            return -1
+        sname_ni := buf_read_i32(data, pos)
+        pos = pos + 4
+        fc := buf_read_u32(data, pos)
+        pos = pos + 4
+        if sname_ni < 0 || sname_ni >= g_str_count:
+            return -1
+        // 字段数无硬上限（侧表承载），因此旧 MAX_STRUCT_FIELDS
+        // 读回检查与 16 槽清零循环一并删除；段界核算保留（fc 越段，因此拒绝，判定约定）。
+        if fc > (seg_end4 - pos) / 8:
+            return -1
+        cell_store(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_NAME, sname_ni)
+        cell_store(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, fc)
+        si_set_field_base(sti, g_si_f_used)
+        // Zero generic slots
+        cell_store(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT, 0)
+        zgi : ., mut = 0
+        loop:
+            if zgi >= 4:
+                break
+            cell_store(g_structs, sti * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + zgi * 8, 0)
+            zgi = zgi + 1
+        // Write field data（侧表；磁盘布局逐字段变长，格式不变）
+        fi2 : ., mut = 0
+        loop:
+            if fi2 >= fc:
+                break
+            fn_ni := buf_read_i32(data, pos)
+            pos = pos + 4
+            ft := buf_read_i32(data, pos)
+            pos = pos + 4
+            if fn_ni < 0 || fn_ni >= g_str_count:
+                return -1
+            if ccr_nod_type_ok(ft) == 0:
+                return -1
+            si_set_field_name(sti, fi2, fn_ni)
+            si_set_field_type(sti, fi2, ft)
+            fi2 = fi2 + 1
+        si_commit_fields(sti, fc)
+        sti = sti + 1
+
+    // === SYM: enums ===
+    if !ccr_has_bytes(pos, 4, seg_end4):
+        return -1
+    enum_cnt := buf_read_u32(data, pos)
+    pos = pos + 4
+    if enum_cnt > (seg_end4 - seg_off4) / 8:
+        return -1
+    grow_enums(enum_cnt)
+    g_enum_count = enum_cnt
+    ei : ., mut = 0
+    loop:
+        if ei >= enum_cnt:
+            break
+        if !ccr_has_bytes(pos, 8, seg_end4):
+            return -1
+        ename_ni := buf_read_i32(data, pos)
+        pos = pos + 4
+        vc := buf_read_u32(data, pos)
+        pos = pos + 4
+        if ename_ni < 0 || ename_ni >= g_str_count:
+            return -1
+        // 变体/携带值数无硬上限（侧表），因此两处旧检查与 16 槽清零
+        // 循环删除；段界核算保留（判定约定）
+        if vc > (seg_end4 - pos) / 8:
+            return -1
+        cell_store(g_enums, ei * ESZ_ENUMINFO + OFF_EI_NAME, ename_ni)
+        cell_store(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, vc)
+        ei_set_variant_base(ei, g_ei_v_used)
+        cell_store(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, 0)
+        zgi2 : ., mut = 0
+        loop:
+            if zgi2 >= 4:
+                break
+            cell_store(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + zgi2 * 8, 0)
+            zgi2 = zgi2 + 1
+        // Write variant data
+        vi3 : ., mut = 0
+        loop:
+            if vi3 >= vc:
+                break
+            vni := buf_read_i32(data, pos)
+            pos = pos + 4
+            tc := buf_read_u32(data, pos)
+            pos = pos + 4
+            if vni < 0 || vni >= g_str_count:
+                return -1
+            if tc > (seg_end4 - pos) / 4:
+                return -1
+            ei_set_variant_name(ei, vi3, vni)
+            ei_set_variant_type_count(ei, vi3, tc)
+            tf : ., mut = 0
+            loop:
+                if tf >= tc:
+                    break
+                tval := buf_read_i32(data, pos)
+                pos = pos + 4
+                if ccr_nod_type_ok(tval) == 0:
+                    return -1
+                ei_set_variant_type(ei, vi3, tf, tval)
+                tf = tf + 1
+            vi3 = vi3 + 1
+        ei = ei + 1
+
+    // === SYM: opt_meta ===
+    // v10 has no optimization metadata channel. Only the zero-count placeholder
+    // is legal; any nonzero count (or payload) is a target/instance fact smuggled
+    // into the program carrier and must be rejected. g_opt_meta stays empty and is
+    // populated in memory only by the instance allocator.
+    if !ccr_has_bytes(pos, 4, seg_end4):
+        return -1
+    mc := buf_read_u32(data, pos)
+    pos = pos + 4
+    if mc != 0:
+        return -1
+    if pos != seg_end4:
+        return -1
+
+    // === NOD: instructions（40B each）===
+    // loader 产出 = 对象载入 + 检查，32B
+    // Semantic fields go to the kernel object buffer g_v7_nod_sem (the in-memory
+    // record mirrors the disk record without adjacency, with the same offsets).
+    // type_id is a TYPE row (-1 = none); flags is the semantic feature word.
+    // src2/src3 are opaque auxiliary ids: the producer never writes a width,
+    // stride, or byte extent there. Adjacency first_edge/edge_count go to
+    // g_v7_nod_meta.
+    // （EDG 段校验 + 对象数据 nod_edge_first/count 消费）。NOD->g_ir_instrs
+    // 线性重建段已移出本函数（调度重建 = 实例事务 build_linear_schedule，
+    // regalloc.cr，load 返回后、发射/分派前由入口调用）；g_ir_instrs/
+    // g_ir_instr_count 本段不再触碰（重建段原写点全清）。
+    if !ccr_has_bytes(pos, 4, seg_end5):
+        return -1
+    // instr_cnt consumers: ENT (live_end domain), REG (root span upper bound),
+    // EDG (to_nod domain). It stays a local until those segments are consumed.
+    instr_cnt := buf_read_u32(data, pos)
+    pos = pos + 4
+    if instr_cnt > (seg_end5 - seg_off5) / CCR_V10_NOD_DISK:
+        return -1
+    g_v7_nod_sem = alloc((instr_cnt + 8) * ESZ_NOD_SEM)
+    g_v7_nod_meta = alloc((instr_cnt + 8) * ESZ_NOD_META)
+    ii : ., mut = 0
+    loop:
+        if ii >= instr_cnt:
+            break
+        if !ccr_has_bytes(pos, CCR_V10_NOD_DISK, seg_end5):
+            return -1
+        opcode := buf_read_u32(data, pos)
+        pos = pos + 4
+        // v10 opcode table gate. Unknown or out-of-range opcodes are rejected
+        // before any operand is interpreted; emit_instr has no generic fallthrough.
+        if ccr_op_is_known(opcode) == 0:
+            return -1
+        dest := buf_read_i32(data, pos)
+        pos = pos + 4
+        s1 := buf_read_i64(data, pos)
+        pos = pos + 8   // 修复 14：s1 64 位
+        s2 := buf_read_i32(data, pos)
+        pos = pos + 4
+        s3 := buf_read_i32(data, pos)
+        pos = pos + 4
+        tid2 := buf_read_i32(data, pos)
+        pos = pos + 4  // type_id（TYPE row；-1 = 无）
+        fl2 := buf_read_u32(data, pos)
+        pos = pos + 4  // flags（语义特性；非目标事实）
+        // src2/src3 may not carry legacy v9 target facts. The writer normalizes
+        // them; the loader rejects old/foreign files instead of silently accepting.
+        if opcode == IR_ALLOC_ARRAY:
+            if s2 != 0 || s3 != 0:
+                return -1
+        else if opcode == IR_ADDR_INDEX:
+            if s3 != 0:
+                return -1
+        else if opcode == IR_DEREF || opcode == IR_STORE_PTR:
+            if s3 != 0:
+                return -1
+        else if ccr_nod_src3_semantic(opcode) == 0:
+            if s3 != 0:
+                return -1
+        nfe := buf_read_u32(data, pos)
+        pos = pos + 4  // first_edge（邻接索引）
+        nec := buf_read_u32(data, pos)
+        pos = pos + 4  // edge_count
+        // Reserved flag bits must be zero. A future feature bit needs a reader,
+        // so rejecting here keeps old loaders from silently ignoring meaning.
+        if fl2 > CCR_NOD_FLAG_KNOWN_MASK:
+            return -1
+        // 对象缓冲写（语义字段 = 盘字节镜像，由 cell_store/cell_store32 存储，
+        // 存取经 nod_* 访问器 buf_read_* 符号扩展，数值与原重建段消费完全一致）
+        cell_store32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_OP, opcode)
+        cell_store32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_DEST, dest)
+        cell_store(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S1, s1)
+        cell_store32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S2, s2)
+        cell_store32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_S3, s3)
+        cell_store32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_TYPE_ID, tid2)
+        cell_store32(g_v7_nod_sem, ii * ESZ_NOD_SEM + OFF_NS_FLAGS, fl2)
+        cell_store(g_v7_nod_meta, ii * ESZ_NOD_META, nfe)
+        cell_store(g_v7_nod_meta, ii * ESZ_NOD_META + 8, nec)
+        ii = ii + 1
+    g_v7_nod_count = instr_cnt
+    if pos != seg_end5:
+        return -1
+    // Operand domains (vars, labels, strings, symbols) are graph facts that the
+    // NOD segment must prove before any projection runs. This is the primary
+    // rejection point; emitter-side guards are defensive only.
+    if ccr_validate_nod_operands() != 0:
+        return -1
+
+    // Header SYSTEM/CONCURRENT bits must agree with the graph. This needs NOD
+    // only, so it runs here (TYPE is already rebuilt; ENT/REG/EDG are not).
+    if ccr_validate_header_flags(rsv) != 0:
+        return -1
+
+    // === ENT: entries（24B each -> 内存 24B 表）===
+    // 盘上半开 live_end -> 内存闭区间 −1；version 字段不入内存（组内序可推）。
+    // v10 has no home field. OFF_ENTRY_RUNTIME_HOME is an instance-side
+    // allocator slot only: the loader initializes it to -1 and never consumes a
+    // disk byte for it.
+    if have6 != 0:
+        if !ccr_has_bytes(pos, 4, seg_end6):
+            return -1
+        ent_cnt := buf_read_u32(data, pos)
+        pos = pos + 4
+        if ent_cnt > (seg_end6 - seg_off6) / CCR_V10_ENT_DISK:
+            return -1
+        grow_entries(ent_cnt)
+        eii : ., mut = 0
+        loop:
+            if eii >= ent_cnt:
+                break
+            if !ccr_has_bytes(pos, CCR_V10_ENT_DISK, seg_end6):
+                return -1
+            ev := buf_read_i32(data, pos)
+            pos = pos + 4   // var_id
+            evr := buf_read_u32(data, pos)
+            pos = pos + 4  // version（盘上仅校验用）
+            ed := buf_read_i32(data, pos)
+            pos = pos + 4   // def_nod
+            els := buf_read_u32(data, pos)
+            pos = pos + 4  // live_start（含定值）
+            ele := buf_read_u32(data, pos)
+            pos = pos + 4  // live_end（半开）
+            efl := buf_read_u32(data, pos)
+            pos = pos + 4  // flags
+            // Semantic validation: reject out-of-range values.
+            if evr < 1:
+                return -1
+            if efl > 0xF:
+                return -1
+            // ENT flags bits 4+ are reserved.
+            if ev < 0 || ev >= g_ir_var_count:
+                return -1
+            // var 命名空间 = SYM 行重建总量
+            if els >= ele || ele > instr_cnt:
+                return -1
+            if ed >= 0:
+                if ed >= instr_cnt:
+                    return -1
+                if ed != els:
+                    return -1
+                // 定值条目 live_start == def
+            // 内存闭区间表
+            mo2 := eii * ESZ_ENTRY
+            cell_store32(g_ir_entries, mo2 + OFF_ENTRY_VAR, ev)
+            cell_store32(g_ir_entries, mo2 + OFF_ENTRY_DEF, ed)
+            cell_store32(g_ir_entries, mo2 + OFF_ENTRY_LS, els)
+            cell_store32(g_ir_entries, mo2 + OFF_ENTRY_LE, ele - 1)
+            cell_store32(g_ir_entries, mo2 + OFF_ENTRY_RUNTIME_HOME, -1)
+            cell_store32(g_ir_entries, mo2 + OFF_ENTRY_FLAGS, efl)
+            g_entry_count = eii + 1
+            eii = eii + 1
+        // The record walk must consume the ENT body exactly (no trailing bytes).
+        if pos != seg_end6:
+            return -1
+        // 函数条目段界重建：条目按函数升序成块落盘（compute_entries func_i 升序），
+        // 每函数一段 [start, count)，块判定 = var 槽 in 该函数 var 区间（var 槽
+        // 全属唯一函数，段序与函数序一致）。重建结果与 SYM func 记录
+        // first_ent/last_ent 逐函数对照（同信息双写，失配 = 格式不一致）。
+        grow_func_entry_meta(func_cnt)
+        // Global existence rows form a leading block: one row per global var, in
+        // namespace order, with the global flag and def_nod = -1. Function blocks
+        // start after this prefix.
+        pe : ., mut = 0
+        gg : ., mut = 0
+        loop:
+            if pe >= g_entry_count:
+                break
+            pgv := buf_read_i32(g_ir_entries, pe * ESZ_ENTRY + OFF_ENTRY_VAR)
+            if pgv >= g_ir_global_count:
+                break
+            if pgv != gg:
+                return -1
+            if ccr_ent_flags(pe) != ENTRY_FLAG_GLOBAL:
+                return -1
+            if ccr_ent_def(pe) != -1:
+                return -1
+            gg = gg + 1
+            pe = pe + 1
+        if gg != g_ir_global_count:
+            return -1
+        pf : ., mut = 0
+        loop:
+            if pf >= func_cnt:
+                break
+            fvs := cell_load(g_ir_func_var_start, pf * 8)
+            fvc := cell_load(g_ir_func_var_count, pf * 8)
+            pstart := pe
+            cell_store(g_ir_func_entry_start, pf * 8, pe)
+            loop:
+                if pe >= g_entry_count:
+                    break
+                pv := buf_read_i32(g_ir_entries, pe * ESZ_ENTRY + OFF_ENTRY_VAR)
+                if fvc <= 0 || pv < fvs || pv >= fvs + fvc:
+                    break
+                pe = pe + 1
+            pcnt := pe - pstart
+            cell_store(g_ir_func_entry_count, pf * 8, pcnt)
+            ffe := cell_load(fn_meta, pf * 24 + 8)
+            fle := cell_load(fn_meta, pf * 24 + 16)
+            if pcnt == 0:
+                if ffe != -1 || fle != -1:
+                    return -1
+            else:
+                if ffe != pstart || fle != pstart + pcnt - 1:
+                    return -1
+            pf = pf + 1
+        if pe != g_entry_count:
+            return -1
+        // ENT is now the loaded existence table. compute_live_ranges must not
+        // rebuild it from the NOD mirror; the file is the authority.
+        g_ent_loaded = 1
+
+    // === REG: region（24B each，spec 3.5 字段序 {kind, parent, enter_nod,
+    // exit_nod, first_ent, last_ent}）===
+    // nstart and ncount are not stored; the loader derives nstart = enter and
+    // ncount = exit - enter. A record with exit < enter is unclosed and has no
+    // valid representation, so the file is rejected.
+    // first/last 校验：SG_FUNC 根记录（记录顺序第 k 个 = 函数 k）的区内条目范围必须
+    // 与 SYM func 记录 first/last 一致（同信息双写，失配 = 格式不一致）。
+    // 函数指令边界重建：func root_region（SYM）-> REG span = [enter, exit)。
+    if !ccr_has_bytes(pos, 4, seg_end7):
+        return -1
+    sg_n := buf_read_u32(data, pos)
+    pos = pos + 4
+    if sg_n > (seg_end7 - seg_off7) / CCR_V10_REG_DISK:
+        return -1
+    sg_i : ., mut = 0
+    rfcnt : ., mut = 0  // 已见 SG_FUNC 根记录数（记录顺序 = 函数序 1:1）
+    loop:
+        if sg_i >= sg_n:
+            break
+        grow_sg(sg_i + 1)
+        f := sg_i * ESZ_SG
+        rk := buf_read_i32(data, pos)
+        pos = pos + 4
+        rp := buf_read_i32(data, pos)
+        pos = pos + 4
+        ren := buf_read_i32(data, pos)
+        pos = pos + 4
+        rex := buf_read_i32(data, pos)
+        pos = pos + 4
+        rfe := buf_read_i32(data, pos)
+        pos = pos + 4
+        rle := buf_read_i32(data, pos)
+        pos = pos + 4
+        if rex < ren:
+            return -1
+        // Region coordinates are NOD ids; the half-open span must stay inside the
+        // NOD space.
+        if ren < 0 || rex > instr_cnt:
+            return -1
+        // Parent is a REG record id, or -1 for a root. Self-parents and cycles
+        // are rejected in the second pass below.
+        if rp < -1 || rp >= sg_n:
+            return -1
+        if rp == sg_i:
+            return -1
+        // 未闭合 -> ncount 不可派生
+        if rfe < -1 || rle < -1 || (rfe == -1) != (rle == -1):
+            return -1
+        if rfe != -1:
+            if rfe >= g_entry_count || rle >= g_entry_count:
+                return -1
+            if rle < rfe:
+                return -1
+        cell_store(g_sgs, f + OFF_SG_KIND, rk)
+        cell_store(g_sgs, f + OFF_SG_ENTER, ren)
+        cell_store(g_sgs, f + OFF_SG_EXIT, rex)
+        cell_store(g_sgs, f + OFF_SG_PARENT, rp)
+        cell_store(g_sgs, f + OFF_SG_NSTART, ren)
+        cell_store(g_sgs, f + OFF_SG_NCOUNT, rex - ren)
+        if rk == SG_FUNC:
+            if rfcnt >= func_cnt:
+                return -1
+            // 根记录多于函数记录
+            if rfe != cell_load(fn_meta, rfcnt * 24 + 8) || rle != cell_load(fn_meta, rfcnt * 24 + 16):
+                return -1  // REG 根记录条目范围 != SYM func 记录
+            rfcnt = rfcnt + 1
+        sg_i = sg_i + 1
+    if rfcnt != func_cnt:
+        return -1
+    // 根记录少于函数记录（每函数必有根）
+    // Parent-chain acyclicity. Each chain has at most sg_n distinct records, so a
+    // walk longer than sg_n proves a cycle. Bounds were checked per record.
+    cci : ., mut = 0
+    loop:
+        if cci >= sg_n:
+            break
+        cp2 : ., mut = cell_load(g_sgs, cci * ESZ_SG + OFF_SG_PARENT)
+        steps : ., mut = 0
+        loop:
+            if cp2 < 0:
+                break
+            steps = steps + 1
+            if steps > sg_n:
+                return -1
+            cp2 = cell_load(g_sgs, cp2 * ESZ_SG + OFF_SG_PARENT)
+        cci = cci + 1
+    g_sg_count = sg_n
+
+    // 函数指令边界回填：instr_start = root_region enter, instr_count = exit − enter
+    // The root region span is the function node range and is the single source for
+    // function instruction bounds.
+    bfi : ., mut = 0
+    loop:
+        if bfi >= func_cnt:
+            break
+        rid := cell_load(fn_meta, bfi * 24)
+        if rid < 0 || rid >= sg_n:
+            return -1
+        fr := rid * ESZ_SG
+        if cell_load(g_sgs, fr + OFF_SG_KIND) != SG_FUNC:
+            return -1
+        ren := cell_load(g_sgs, fr + OFF_SG_ENTER)
+        rex := cell_load(g_sgs, fr + OFF_SG_EXIT)
+        if rex < ren:
+            return -1
+        cell_store(g_ir_func_instr_start, bfi * 8, ren)
+        cell_store(g_ir_func_instr_count, bfi * 8, rex - ren)
+        bfi = bfi + 1
+
+    // REG root span upper-bound check. Function instruction bounds (root_region
+    // span) are backfilled above, and instr_cnt is already known because NOD is
+    // consumed before REG. Only rex >= ren was checked per record, not the upper
+    // bound. An out-of-range span would make ELF emission read outside the NOD
+    // space. For each function, check instr_start + count <= instr_cnt and reject
+    // negative values. EDG and CASE are still consumed after this gate.
+    rfi : ., mut = 0
+    loop:
+        if rfi >= func_cnt:
+            break
+        ris := cell_load(g_ir_func_instr_start, rfi * 8)
+        ric := cell_load(g_ir_func_instr_count, rfi * 8)
+        if ris < 0 || ric < 0 || ris + ric > instr_cnt:
+            return -1
+        rfi = rfi + 1
+    if pos != seg_end7:
+        return -1
+
+    // === EDG: edges（v7 必落；8B each {to_nod u32, kind u32}，所属节点 =
+    // 邻接隐含：节点 i 出边连续段 [first_edge, first_edge+edge_count)，first_edge
+    // = 前缀累计（spec 3.3 邻接约定）。校验（spec 4 + 检查强度保持）：
+    //   1 连续段与 NOD 邻接域逐节点对照（first_edge == 前缀累计；段界不出 EDG）
+    //   2 Σ edge_count == edg_count（规则 3；行走完 == 段体大小）
+    //   3 每条边 to_nod < instr_cnt（NOD 引用界内）+ to_nod > 所属节点
+    //      （规则 1 拓扑不变量，数据/state 边前向；自环/后向 = 文件损坏拒绝）
+    //   4 kind <= 1（0=数据、1=state；2+ 预留 = 未知边类拒绝）
+    // 校验通过后边表入 g_v7_edges 缓冲（文件序连续段，图语义消费通道/调试）。
+    // branch/jump 目标 = 操作数引用非边（v7 4 边界声明），NOD 操作数不参与
+    // 本段校验。
+    if !ccr_has_bytes(pos, 4, seg_end8):
+        return -1
+    edg_cnt := buf_read_u32(data, pos)
+    pos = pos + 4
+    if edg_cnt > (seg_end8 - seg_off8) / CCR_V10_EDG_DISK:
+        return -1
+    v7_buf : string, mut = ""
+    if edg_cnt > 0:
+        v7_buf = alloc(edg_cnt * 8)
+    g_v7_edges = v7_buf
+    g_v7_edge_count = edg_cnt
+    ei4 : ., mut = 0
+    run_off : ., mut = 0
+    loop:
+        if ei4 >= instr_cnt:
+            break
+        // 邻接域读内核对象缓冲 g_v7_nod_meta（原 nod_edge_meta loader 局部，
+        // 对象 = 内核持有物，EDG 检查
+        // 与对象数据 nod_edge_first/count 同源；检查逻辑零改动）
+        nfe := cell_load(g_v7_nod_meta, ei4 * ESZ_NOD_META)
+        nec := cell_load(g_v7_nod_meta, ei4 * ESZ_NOD_META + 8)
+        if nfe != run_off:
+            return -1
+        // 1 前缀累计失配（段错位/伪造）
+        if run_off + nec > edg_cnt:
+            return -1
+        // 1 节点段越出 EDG 空间
+        rec : ., mut = 0
+        loop:
+            if rec >= nec:
+                break
+            if !ccr_has_bytes(pos, CCR_V10_EDG_DISK, seg_end8):
+                return -1
+            eto := buf_read_u32(data, pos)
+            pos = pos + 4
+            ekind := buf_read_u32(data, pos)
+            pos = pos + 4
+            if ekind > 1:
+                return -1
+            // 4 未知边类
+            if eto >= instr_cnt:
+                return -1
+            // 3 to 出 NOD 空间
+            if eto <= ei4:
+                return -1
+            // 3 后向/自环（拓扑不变量）
+            cell_store(v7_buf, (run_off + rec) * 8, eto + ekind * 4294967296)
+            rec = rec + 1
+        run_off = run_off + nec
+        ei4 = ei4 + 1
+    if run_off != edg_cnt:
+        return -1
+    // 2 Σ edge_count == edg_count
+    if pos != seg_end8:
+        return -1
+    // 2 行走完 == 段体大小
+
+    // === CASE: empty table for now ===
+    // The loader requires case_count == 0 until match lowering writes CASE. Any
+    // other count is an unknown shape, so reject instead of treating it as empty.
+    if !ccr_has_bytes(pos, 4, seg_end9):
+        return -1
+    case_cnt := buf_read_u32(data, pos)
+    pos = pos + 4
+    if case_cnt != 0:
+        return -1
+    if pos != seg_end9:
+        return -1
+
+    // === NOD type_id domain check ===
+    // TYPE is consumed before NOD, so the row domain is already rebuilt. The
+    // check stays at the end as one summary gate over g_v7_nod_sem. type_id is
+    // -1 or a TYPE row; anything else is an unknown type domain and rejects the
+    // file.
     ni : ., mut = 0
     loop:
         if ni >= g_v7_nod_count:
             break
-        itv := nod_item(ni)
-        if itv < -1:
+        tidv := nod_type_id(ni)
+        if tidv < -1 || tidv >= g_type_count:
             return -1
-        if itv >= 0:
-            if itv >= tt_count():
-                return -1
-            if tt_atom_of_term(itv) != nod_tk(ni):
-                return -1
         ni = ni + 1
 
     return 0
@@ -2231,11 +2702,11 @@ fn ccr_type_surface_dump():
         print("row ")
         print_i(i)
         print(" kind ")
-        print_i(r64(g_types, i * ESZ_TYPE_ROW + OFF_TR_KIND))
+        print_i(cell_load(g_types, i * ESZ_TYPE_ROW + OFF_TR_KIND))
         print(" data ")
-        print_i(r64(g_types, i * ESZ_TYPE_ROW + OFF_TR_DATA))
+        print_i(cell_load(g_types, i * ESZ_TYPE_ROW + OFF_TR_DATA))
         print(" extra ")
-        print_i(r64(g_types, i * ESZ_TYPE_ROW + OFF_TR_EXTRA))
+        print_i(cell_load(g_types, i * ESZ_TYPE_ROW + OFF_TR_EXTRA))
         println("")
         i = i + 1
     print("terms: ")
@@ -2291,15 +2762,15 @@ fn ccr_iface_surface_dump():
         print("native ")
         print_i(ei2)
         print(" ak ")
-        print_i(r64(g_iface_entries, eo2 + OFF_IE_AK))
+        print_i(cell_load(g_iface_entries, eo2 + OFF_IE_AK))
         print(" ti ")
-        print_i(r64(g_iface_entries, eo2 + OFF_IE_TI))
+        print_i(cell_load(g_iface_entries, eo2 + OFF_IE_TI))
         print(" name ")
-        print_i(r64(g_iface_entries, eo2 + OFF_IE_NAME))
+        print_i(cell_load(g_iface_entries, eo2 + OFF_IE_NAME))
         print(" lit ")
-        print_i(r64(g_iface_entries, eo2 + OFF_IE_LIT))
+        print_i(cell_load(g_iface_entries, eo2 + OFF_IE_LIT))
         print(" ops ")
-        print_i(r64(g_iface_entries, eo2 + OFF_IE_OPS))
+        print_i(cell_load(g_iface_entries, eo2 + OFF_IE_OPS))
         println("")
         ei2 = ei2 + 1
     print("ifaceshapes: ")
@@ -2312,9 +2783,9 @@ fn ccr_iface_surface_dump():
         print("shape ")
         print_i(sh2)
         print(" name ")
-        print_i(r64(g_iface_shape_names, sh2 * 8))
+        print_i(cell_load(g_iface_shape_names, sh2 * 8))
         print(" term ")
-        print_i(r64(g_iface_shape_terms, sh2 * 8))
+        print_i(cell_load(g_iface_shape_terms, sh2 * 8))
         println("")
         sh2 = sh2 + 1
     print("ifaceuser: ")
@@ -2325,34 +2796,34 @@ fn ccr_iface_surface_dump():
         if iu2 >= g_iface_count:
             break
         bo := iu2 * ESZ_IFACEINFO
-        mc3 := r64(g_ifaces, bo + OFF_IF_METHOD_COUNT)
+        mc3 := cell_load(g_ifaces, bo + OFF_IF_METHOD_COUNT)
         print("iface ")
         print_i(iu2)
         print(" name ")
-        print_i(r64(g_ifaces, bo + OFF_IF_NAME))
+        print_i(cell_load(g_ifaces, bo + OFF_IF_NAME))
         print(" methods ")
         print_i(mc3)
         print(" generics ")
-        print_i(r64(g_ifaces, bo + OFF_IF_GENERIC_COUNT))
+        print_i(cell_load(g_ifaces, bo + OFF_IF_GENERIC_COUNT))
         println("")
         mj2 : ., mut = 0
         loop:
             if mj2 >= mc3:
                 break
             mbo := bo + OFF_IF_METHODS + mj2 * ESZ_IFMETHOD
-            mpc := r64(g_ifaces, mbo + OFF_IFM_PARAM_COUNT)
+            mpc := cell_load(g_ifaces, mbo + OFF_IFM_PARAM_COUNT)
             print("method ")
             print_i(iu2)
             print(" ")
             print_i(mj2)
             print(" name ")
-            print_i(r64(g_ifaces, mbo + OFF_IFM_NAME))
+            print_i(cell_load(g_ifaces, mbo + OFF_IFM_NAME))
             print(" params ")
             print_i(mpc)
             print(" self ")
-            print_i(r64(g_ifaces, mbo + OFF_IFM_SELF_MODE))
+            print_i(cell_load(g_ifaces, mbo + OFF_IFM_SELF_MODE))
             print(" ret ")
-            print_i(r64(g_ifaces, mbo + OFF_IFM_RET_TERM))
+            print_i(cell_load(g_ifaces, mbo + OFF_IFM_RET_TERM))
             println("")
             mq2 : ., mut = 0
             loop:
@@ -2365,9 +2836,9 @@ fn ccr_iface_surface_dump():
                 print(" ")
                 print_i(mq2)
                 print(" code ")
-                print_i(r64(g_ifaces, mbo + OFF_IFM_PARAM_TYPES + mq2 * 8))
+                print_i(cell_load(g_ifaces, mbo + OFF_IFM_PARAM_TYPES + mq2 * 8))
                 print(" term ")
-                print_i(r64(g_ifaces, mbo + OFF_IFM_PARAM_TERMS + mq2 * 8))
+                print_i(cell_load(g_ifaces, mbo + OFF_IFM_PARAM_TERMS + mq2 * 8))
                 println("")
                 mq2 = mq2 + 1
             mj2 = mj2 + 1
@@ -2382,9 +2853,9 @@ fn ccr_iface_surface_dump():
         print("impl ")
         print_i(ip2)
         print(" trait ")
-        print_i(r64(g_impl_for, ip2 * 16))
+        print_i(cell_load(g_impl_for, ip2 * 16))
         print(" type ")
-        print_i(r64(g_impl_for, ip2 * 16 + 8))
+        print_i(cell_load(g_impl_for, ip2 * 16 + 8))
         println("")
         ip2 = ip2 + 1
     print("ifacemethods: ")
@@ -2397,11 +2868,11 @@ fn ccr_iface_surface_dump():
         print("gmethod ")
         print_i(im2)
         print(" type ")
-        print_i(r64(g_methods, im2 * 24))
+        print_i(cell_load(g_methods, im2 * 24))
         print(" method ")
-        print_i(r64(g_methods, im2 * 24 + 8))
+        print_i(cell_load(g_methods, im2 * 24 + 8))
         print(" mangled ")
-        print_i(r64(g_methods, im2 * 24 + 16))
+        print_i(cell_load(g_methods, im2 * 24 + 16))
         println("")
         im2 = im2 + 1
     // 跨段引用域检查：逐接口/方法/有效形参的项槽
@@ -2419,15 +2890,15 @@ fn ccr_iface_surface_dump():
         if ipc >= g_iface_count:
             break
         boc := ipc * ESZ_IFACEINFO
-        mcc := r64(g_ifaces, boc + OFF_IF_METHOD_COUNT)
+        mcc := cell_load(g_ifaces, boc + OFF_IF_METHOD_COUNT)
         mic : ., mut = 0
         loop:
             if mic >= mcc:
                 break
             mbc := boc + OFF_IF_METHODS + mic * ESZ_IFMETHOD
-            pcc := r64(g_ifaces, mbc + OFF_IFM_PARAM_COUNT)
+            pcc := cell_load(g_ifaces, mbc + OFF_IFM_PARAM_COUNT)
             slots = slots + 1
-            rtc := r64(g_ifaces, mbc + OFF_IFM_RET_TERM)
+            rtc := cell_load(g_ifaces, mbc + OFF_IFM_RET_TERM)
             if rtc == -1:
                 unbuilt = unbuilt + 1
             if rtc >= 0:
@@ -2445,7 +2916,7 @@ fn ccr_iface_surface_dump():
                 if pqc >= pcc:
                     break
                 slots = slots + 1
-                ptc := r64(g_ifaces, mbc + OFF_IFM_PARAM_TERMS + pqc * 8)
+                ptc := cell_load(g_ifaces, mbc + OFF_IFM_PARAM_TERMS + pqc * 8)
                 if ptc == -1:
                     unbuilt = unbuilt + 1
                 if ptc >= 0:

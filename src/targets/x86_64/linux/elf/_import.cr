@@ -5,8 +5,17 @@ import fmt
 import io
 import toml
 import ast
+import ccr_schema
 import globals
+import bytes
 import dyn_arr
+// Target layout helpers: corearch reconstructs NOD access widths/strides from
+// these instead of reading target facts from .ccr.
+import mapping
+import x86_mapping
+import backend_schema
+import backend_globals
+import backend_arrays
 import hit
 // HIT lowering layer. instr.cr's table encoder consumes the event stream and pool
 // patch records defined here.
@@ -25,12 +34,10 @@ import ent_kernel
 // build_linear_schedule in regalloc.cr.
 import regalloc
 import sizes
+import int_rep
+import bigint_blob
 import instr
-// Architecture tag-table owner: mw_setup_tags and the mw encoders used by elf.cr.
-// tag2l and frame.cr reference each other; pf_epilogue calls e2_mw_*, and tag2l
-// reads the table through g2_tag_off.
-import tag2l
-// Function frame layout: pf_frame_size, pf_prologue, pf_epilogue, and g2_tag_off.
+// Function frame layout: pf_frame_size, pf_prologue, pf_epilogue.
 import frame
 import resolve
 import elf

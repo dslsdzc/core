@@ -49,6 +49,10 @@
 //   semantics. A cache miss is a harmless rebuild. The compiler identity also
 //   invalidates all entries when the running binary changes, so source edits do
 //   not need a manual bump for body changes.
+//   The v10 `.ccr` wire migration (removing SYM opt_meta and adding semantic
+//   NOD type ids) does not change this snapshot layout or its derived-code
+//   contract. The stored records, journal, and trailer are unchanged, so no
+//   version bump is required for that migration; only `.ccr` bytes changed.
 //
 // Magic value:
 //   The magic is a negative 64-bit constant written as signed decimal. The
@@ -56,7 +60,7 @@
 //   writer and reader use the same constant, so the cache remains self-consistent.
 //   The limitation is recorded in the project backlog.
 CIR_CACHE_MAGIC : int = -4485090715960753727
-CIR_CACHE_VER   : int = 22
+CIR_CACHE_VER   : int = 23
 
 g_cir_write_buf : string, mut
 g_cir_write_pos : int, mut
@@ -124,12 +128,12 @@ fn cir_hash_running_binary() -> int:
         loop:
             if i + 8 > n:
                 break
-            h = h * 1099511628211 + load64(buf, i)
+            h = h * 1099511628211 + cell_load64(buf, i)
             i = i + 8
         loop:
             if i >= n:
                 break
-            h = h * 1099511628211 + load8(buf, i)
+            h = h * 1099511628211 + cell_load_byte(buf, i)
             i = i + 1
         total = total + n
     r1 := syscall3(3, fd, 0, 0)  // close(fd)
@@ -146,8 +150,8 @@ fn cir_cache_sg_count(node_start: int, node_count: int) -> int:
     loop:
         if si >= g_sg_count:
             break
-        kind := r64(g_sgs, si * ESZ_SG + OFF_SG_KIND)
-        nstart := r64(g_sgs, si * ESZ_SG + OFF_SG_NSTART)
+        kind := cell_load(g_sgs, si * ESZ_SG + OFF_SG_KIND)
+        nstart := cell_load(g_sgs, si * ESZ_SG + OFF_SG_NSTART)
         if kind != SG_FUNC && nstart >= node_start && nstart < node_start + node_count:
             count = count + 1
         si = si + 1
@@ -156,11 +160,11 @@ fn cir_cache_sg_count(node_start: int, node_count: int) -> int:
 // Encode a region parent as an index within the serialized nested-region
 // list. -1 denotes the function SG recreated by df_begin_func.
 fn cir_cache_sg_parent(sg_idx: int, node_start: int, node_count: int) -> int:
-    parent := r64(g_sgs, sg_idx * ESZ_SG + OFF_SG_PARENT)
+    parent := cell_load(g_sgs, sg_idx * ESZ_SG + OFF_SG_PARENT)
     if parent < 0:
         return -1
-    parent_kind := r64(g_sgs, parent * ESZ_SG + OFF_SG_KIND)
-    parent_start := r64(g_sgs, parent * ESZ_SG + OFF_SG_NSTART)
+    parent_kind := cell_load(g_sgs, parent * ESZ_SG + OFF_SG_KIND)
+    parent_start := cell_load(g_sgs, parent * ESZ_SG + OFF_SG_NSTART)
     if parent_kind == SG_FUNC && parent_start == node_start:
         return -1
 
@@ -169,8 +173,8 @@ fn cir_cache_sg_parent(sg_idx: int, node_start: int, node_count: int) -> int:
     loop:
         if si >= sg_idx:
             break
-        kind := r64(g_sgs, si * ESZ_SG + OFF_SG_KIND)
-        nstart := r64(g_sgs, si * ESZ_SG + OFF_SG_NSTART)
+        kind := cell_load(g_sgs, si * ESZ_SG + OFF_SG_KIND)
+        nstart := cell_load(g_sgs, si * ESZ_SG + OFF_SG_NSTART)
         if kind != SG_FUNC && nstart >= node_start && nstart < node_start + node_count:
             if si == parent:
                 return local
@@ -199,16 +203,16 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
     fn_node := fi_ast_node(source_fi)
     fp := func_fingerprint(fn_node)
     sig := sig_fingerprint(fn_node)
-    name_ni := r64(g_ir_func_name_idx, ir_fi * 8)
+    name_ni := cell_load(g_ir_func_name_idx, ir_fi * 8)
     name := istr_get(name_ni)
     name_len := str_len(name)
 
-    var_start := r64(g_ir_func_var_start, ir_fi * 8)
-    var_count := r64(g_ir_func_var_count, ir_fi * 8)
-    node_start := r64(g_df_func_node_start, ir_fi * 8)
-    node_count := r64(g_df_func_node_count, ir_fi * 8)
-    instr_start := r64(g_ir_func_instr_start, ir_fi * 8)
-    instr_count := r64(g_ir_func_instr_count, ir_fi * 8)
+    var_start := cell_load(g_ir_func_var_start, ir_fi * 8)
+    var_count := cell_load(g_ir_func_var_count, ir_fi * 8)
+    node_start := cell_load(g_df_func_node_start, ir_fi * 8)
+    node_count := cell_load(g_df_func_node_count, ir_fi * 8)
+    instr_start := cell_load(g_ir_func_instr_start, ir_fi * 8)
+    instr_count := cell_load(g_ir_func_instr_count, ir_fi * 8)
 
     // Serialize in memory and issue one write. The previous per-field writes
     // made a full self-host build perform millions of syscalls on its cache.
@@ -222,7 +226,7 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
     // Each record is 24 bytes: {rel_from, rel_to, kind}, with signed offsets
     // relative to node_start. The next pointers are not stored; the loader
     // rebuilds them through df_add_edge_kind in the cold-path insertion order.
-    edge_start := r64(g_df_func_edge_start, ir_fi * 8)
+    edge_start := cell_load(g_df_func_edge_start, ir_fi * 8)
     own_edge_count : ., mut = g_df_edge_count - edge_start
     if own_edge_count < 0:
         own_edge_count = 0
@@ -233,7 +237,7 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
     loop:
         if size_si >= g_ir_str_const_count:
             break
-        size_ni := r64(g_ir_str_consts, size_si * 8)
+        size_ni := cell_load(g_ir_str_consts, size_si * 8)
         total_size = total_size + 8 + str_len(istr_get(size_ni))
         size_si = size_si + 1
     // v13: nested SG records (kind/enter/exit/parent/nstart/ncount).
@@ -245,7 +249,7 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
     loop:
         if size_ri >= g_cir_rec_count:
             break
-        total_size = total_size + 8 + str_len(istr_get(r64(g_cir_rec_ids, size_ri * 8)))
+        total_size = total_size + 8 + str_len(istr_get(cell_load(g_cir_rec_ids, size_ri * 8)))
         size_ri = size_ri + 1
     // Trailer: {var_start, node_start}. Both are validated before restore.
     total_size = total_size + 16
@@ -260,45 +264,45 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
     g_cir_write_pos = 0
 
     // Write header
-    w64_cir(fd, CIR_CACHE_MAGIC)
-    w64_cir(fd, CIR_CACHE_VER)
-    w64_cir(fd, cid)  // v17: 编译器身份（重建即失效）
-    w64_cir(fd, fp)
-    w64_cir(fd, sig)
-    w64_cir(fd, name_len)
+    cir_store_cell(fd, CIR_CACHE_MAGIC)
+    cir_store_cell(fd, CIR_CACHE_VER)
+    cir_store_cell(fd, cid)  // v17: 编译器身份（重建即失效）
+    cir_store_cell(fd, fp)
+    cir_store_cell(fd, sig)
+    cir_store_cell(fd, name_len)
     write_fd(fd, name, name_len)
 
     // Determine var range for this function
-    w64_cir(fd, var_count)
+    cir_store_cell(fd, var_count)
     vi : ., mut = 0
     loop:
         if vi >= var_count:
             break
         v_idx := var_start + vi
-        w64_cir(fd, irv_name(v_idx))
-        w64_cir(fd, irv_id(v_idx))
-        w64_cir(fd, irv_type(v_idx))
+        cir_store_cell(fd, irv_name(v_idx))
+        cir_store_cell(fd, irv_id(v_idx))
+        cir_store_cell(fd, irv_type(v_idx))
         vi = vi + 1
 
     // Write function's node range
-    w64_cir(fd, node_count)
+    cir_store_cell(fd, node_count)
     ni2 : ., mut = 0
     loop:
         if ni2 >= node_count:
             break
         n := node_start + ni2
-        w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE))
-        w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_DEST))
-        w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S1))
-        w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S2))
-        w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S3))
+        cir_store_cell(fd, cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE))
+        cir_store_cell(fd, cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_DEST))
+        cir_store_cell(fd, cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S1))
+        cir_store_cell(fd, cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S2))
+        cir_store_cell(fd, cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S3))
         // Store the derived code only. The term-reference slot is a process-local
         // type-term index and cannot cross processes or resets. The auxiliary code
         // is derived from the same pair and is not stored either.
-        w64_cir(fd, sh_dfn_code_of_slots(r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK),
-                r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_AUX)))
-        w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_FIRST_EDGE))
-        w64_cir(fd, r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_EDGE_COUNT))
+        cir_store_cell(fd, sh_dfn_code_of_slots(cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK),
+                cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_AUX)))
+        cir_store_cell(fd, cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_FIRST_EDGE))
+        cir_store_cell(fd, cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_EDGE_COUNT))
         // The term and auxiliary slots are pure functions of the opcode and derived
         // code. The loader rederives them at the same point in the node sequence as
         // the cold path, keeping term indexes aligned.
@@ -306,65 +310,65 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
 
     // Persist nested SG metadata with offsets relative to this function's
     // node range. Parent indices are local to this serialized section.
-    w64_cir(fd, sg_count)
+    cir_store_cell(fd, sg_count)
     sg_i : ., mut = 0
     loop:
         if sg_i >= g_sg_count:
             break
-        kind := r64(g_sgs, sg_i * ESZ_SG + OFF_SG_KIND)
-        nstart := r64(g_sgs, sg_i * ESZ_SG + OFF_SG_NSTART)
+        kind := cell_load(g_sgs, sg_i * ESZ_SG + OFF_SG_KIND)
+        nstart := cell_load(g_sgs, sg_i * ESZ_SG + OFF_SG_NSTART)
         if kind != SG_FUNC && nstart >= node_start && nstart < node_start + node_count:
-            w64_cir(fd, kind)
-            w64_cir(fd, r64(g_sgs, sg_i * ESZ_SG + OFF_SG_ENTER) - node_start)
-            w64_cir(fd, r64(g_sgs, sg_i * ESZ_SG + OFF_SG_EXIT) - node_start)
-            w64_cir(fd, cir_cache_sg_parent(sg_i, node_start, node_count))
-            w64_cir(fd, nstart - node_start)
-            w64_cir(fd, r64(g_sgs, sg_i * ESZ_SG + OFF_SG_NCOUNT))
+            cir_store_cell(fd, kind)
+            cir_store_cell(fd, cell_load(g_sgs, sg_i * ESZ_SG + OFF_SG_ENTER) - node_start)
+            cir_store_cell(fd, cell_load(g_sgs, sg_i * ESZ_SG + OFF_SG_EXIT) - node_start)
+            cir_store_cell(fd, cir_cache_sg_parent(sg_i, node_start, node_count))
+            cir_store_cell(fd, nstart - node_start)
+            cir_store_cell(fd, cell_load(g_sgs, sg_i * ESZ_SG + OFF_SG_NCOUNT))
         sg_i = sg_i + 1
 
     // Write only this function's edges. Endpoints are signed offsets relative to
     // node_start; the next pointers are rebuilt during load.
-    w64_cir(fd, own_edge_count)
+    cir_store_cell(fd, own_edge_count)
     ei : ., mut = 0
     loop:
         if ei >= own_edge_count:
             break
         e := edge_start + ei
-        w64_cir(fd, r64(g_df_edges, e * ESZ_DFEDGE + OFF_DFE_FROM) - node_start)
-        w64_cir(fd, r64(g_df_edges, e * ESZ_DFEDGE + OFF_DFE_TO) - node_start)
-        w64_cir(fd, r64(g_df_edges, e * ESZ_DFEDGE + OFF_DFE_KIND))
+        cir_store_cell(fd, cell_load(g_df_edges, e * ESZ_DFEDGE + OFF_DFE_FROM) - node_start)
+        cir_store_cell(fd, cell_load(g_df_edges, e * ESZ_DFEDGE + OFF_DFE_TO) - node_start)
+        cir_store_cell(fd, cell_load(g_df_edges, e * ESZ_DFEDGE + OFF_DFE_KIND))
         ei = ei + 1
 
     // Write function's instruction range
-    w64_cir(fd, instr_count)
+    cir_store_cell(fd, instr_count)
     ii : ., mut = 0
     loop:
         if ii >= instr_count:
             break
         inst := instr_start + ii
-        w64_cir(fd, iri_op(inst))
-        w64_cir(fd, iri_dest(inst))
-        w64_cir(fd, iri_s1(inst))
-        w64_cir(fd, iri_s2(inst))
-        w64_cir(fd, iri_s3(inst))
-        w64_cir(fd, iri_tk(inst))
+        cir_store_cell(fd, iri_op(inst))
+        cir_store_cell(fd, iri_dest(inst))
+        cir_store_cell(fd, iri_s1(inst))
+        cir_store_cell(fd, iri_s2(inst))
+        cir_store_cell(fd, iri_s3(inst))
+        cir_store_cell(fd, iri_tk(inst))
         ii = ii + 1
 
     // Write string constants used by this function
-    w64_cir(fd, g_ir_str_const_count)
+    cir_store_cell(fd, g_ir_str_const_count)
     si : ., mut = 0
     loop:
         if si >= g_ir_str_const_count:
             break
-        ni3 := r64(g_ir_str_consts, si * 8)
+        ni3 := cell_load(g_ir_str_consts, si * 8)
         s := istr_get(ni3)
         sl := str_len(s)
-        w64_cir(fd, sl)
+        cir_store_cell(fd, sl)
         vi = 0
         loop:
             if vi >= sl:
                 break
-            w8_cir(fd, load8(s, vi))
+            cir_store_byte(fd, cell_load_byte(s, vi))
             vi = vi + 1
         si = si + 1
 
@@ -373,28 +377,28 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
     // The first field is the writer's g_str_count at the start of the generation
     // window. The reader requires the same count before replay; a mismatch means
     // the two sides diverged earlier, so the snapshot is rejected.
-    w64_cir(fd, g_cir_rec_base)
-    w64_cir(fd, g_cir_rec_count)
+    cir_store_cell(fd, g_cir_rec_base)
+    cir_store_cell(fd, g_cir_rec_count)
     ri : ., mut = 0
     loop:
         if ri >= g_cir_rec_count:
             break
-        rs := istr_get(r64(g_cir_rec_ids, ri * 8))
+        rs := istr_get(cell_load(g_cir_rec_ids, ri * 8))
         rl := str_len(rs)
-        w64_cir(fd, rl)
+        cir_store_cell(fd, rl)
         rj : ., mut = 0
         loop:
             if rj >= rl:
                 break
-            w8_cir(fd, load8(rs, rj))
+            cir_store_byte(fd, cell_load_byte(rs, rj))
             rj = rj + 1
         ri = ri + 1
 
     // Trailer: {var_start, node_start}. The var baseline is always validated. The
     // node baseline is required only when the snapshot contains an out-of-range
     // relative endpoint.
-    w64_cir(fd, var_start)
-    w64_cir(fd, node_start)
+    cir_store_cell(fd, var_start)
+    cir_store_cell(fd, node_start)
 
     written := syscall3(1, fd, g_cir_write_buf, g_cir_write_pos)
     syscall3(3, fd, 0, 0)
@@ -403,12 +407,12 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
     return 0
 
 // Write helpers for the in-memory cache serializer.
-fn w64_cir(fd: int, val: int):
-    w64(g_cir_write_buf, g_cir_write_pos, val)
+fn cir_store_cell(fd: int, val: int):
+    cell_store(g_cir_write_buf, g_cir_write_pos, val)
     g_cir_write_pos = g_cir_write_pos + 8
 
-fn w8_cir(fd: int, val: int):
-    store8(g_cir_write_buf, g_cir_write_pos, val)
+fn cir_store_byte(fd: int, val: int):
+    cell_store_byte(g_cir_write_buf, g_cir_write_pos, val)
     g_cir_write_pos = g_cir_write_pos + 1
 
 fn write_fd(fd: int, data: string, len: int):
@@ -416,7 +420,7 @@ fn write_fd(fd: int, data: string, len: int):
     loop:
         if write_pos >= len:
             break
-        store8(g_cir_write_buf, g_cir_write_pos, load8(data, write_pos))
+        cell_store_byte(g_cir_write_buf, g_cir_write_pos, cell_load_byte(data, write_pos))
         g_cir_write_pos = g_cir_write_pos + 1
         write_pos = write_pos + 1
 
@@ -468,7 +472,7 @@ fn cir_read_snapshot(path: string) -> int:
     // NULL-8. The read EFAULT result is the safer guard.
     if nread != fsize:
         return -1
-    w64(g_cir_read_buf, -8, fsize + 1)  // 长度头 = fsize（str_len 口径同 read_file）
+    cell_store(g_cir_read_buf, -8, fsize + 1)  // 长度头 = fsize（str_len 口径同 read_file）
     return fsize
 
 // Load a .cir cache file and restore DFG state.
@@ -486,11 +490,11 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
     pos : ., mut = 0
 
     // Validate header
-    magic := r64(data, pos)
+    magic := cell_load(data, pos)
     pos = pos + 8
     if magic != CIR_CACHE_MAGIC:
         return -1
-    ver := r64(data, pos)
+    ver := cell_load(data, pos)
     pos = pos + 8
     if ver != CIR_CACHE_VER:
         return -1
@@ -500,14 +504,14 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
     // target source. Reject it here. Identity 0 is also rejected; save does not
     // write such entries.
     cid := cir_compiler_identity()
-    entry_cid := r64(data, pos)
+    entry_cid := cell_load(data, pos)
     pos = pos + 8
     if cid == 0 || entry_cid != cid:
         return -1
 
-    fp := r64(data, pos)
+    fp := cell_load(data, pos)
     pos = pos + 8
-    sig := r64(data, pos)
+    sig := cell_load(data, pos)
     pos = pos + 8
 
     // Verify fingerprints against current AST.
@@ -521,7 +525,7 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         return -1
 
     // Verify function identity (name)
-    name_len := r64(data, pos)
+    name_len := cell_load(data, pos)
     pos = pos + 8
     // Skip name string (we already know which function we tried to load)
     pos = pos + name_len
@@ -539,53 +543,53 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
     // crash or a partial restore.
     p : ., mut = pos
     var_p := p
-    p_var_count := r64(data, p)
+    p_var_count := cell_load(data, p)
     p = p + 8 + p_var_count * 24
     if p > dlen:
         return -1
     node_p := p
-    p_node_count := r64(data, p)
+    p_node_count := cell_load(data, p)
     p = p + 8 + p_node_count * 64
     if p > dlen:
         return -1
     sg_p := p
-    p_sg_count := r64(data, p)
+    p_sg_count := cell_load(data, p)
     p = p + 8 + p_sg_count * 48
     if p > dlen:
         return -1
     edge_p := p
-    p_edge_count := r64(data, p)
+    p_edge_count := cell_load(data, p)
     p = p + 8 + p_edge_count * 24
     if p > dlen:
         return -1
     instr_p := p
-    p_instr_count := r64(data, p)
+    p_instr_count := cell_load(data, p)
     p = p + 8 + p_instr_count * 48
     if p > dlen:
         return -1
     str_p := p
-    p_str_count := r64(data, p)
+    p_str_count := cell_load(data, p)
     p = p + 8
     p_si : ., mut = 0
     loop:
         if p_si >= p_str_count:
             break
-        sl_p := r64(data, p)
+        sl_p := cell_load(data, p)
         p = p + 8 + sl_p
         if p > dlen:
             return -1
         p_si = p_si + 1
     // Intern journal section during the read-only scan: {base count, record count, records}.
     j_p := p
-    p_j_base := r64(data, p)
+    p_j_base := cell_load(data, p)
     p = p + 8
-    p_j_count := r64(data, p)
+    p_j_count := cell_load(data, p)
     p = p + 8
     p_ji : ., mut = 0
     loop:
         if p_ji >= p_j_count:
             break
-        jl_p := r64(data, p)
+        jl_p := cell_load(data, p)
         p = p + 8 + jl_p
         if p > dlen:
             return -1
@@ -596,8 +600,8 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
     // returns a miss.
     if p + 16 > dlen:
         return -1
-    var_start_w := r64(data, p)
-    node_start_w := r64(data, p + 8)
+    var_start_w := cell_load(data, p)
+    node_start_w := cell_load(data, p + 8)
     // The var range is the only mirror domain that cannot be remapped cheaply:
     // var indexes appear in node dest/s1..s3 and instruction s1..s3. Always
     // validate it. A mismatch means the reader and writer are in different states,
@@ -617,8 +621,8 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         if ei_v >= p_edge_count:
             break
         eo_v := edge_p + 8 + ei_v * 24
-        rf_v := r64(data, eo_v)
-        rt_v := r64(data, eo_v + 8)
+        rf_v := cell_load(data, eo_v)
+        rt_v := cell_load(data, eo_v + 8)
         if rf_v >= p_node_count:
             return -1
         // An endpoint at or past node_count is invalid.
@@ -646,22 +650,22 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         loop:
             if tz >= p_node_count:
                 break
-            w64(tally, tz * 8, 0)
+            cell_store(tally, tz * 8, 0)
             tz = tz + 1
         ei_t : ., mut = 0
         loop:
             if ei_t >= p_edge_count:
                 break
-            rf_t := r64(data, edge_p + 8 + ei_t * 24)
+            rf_t := cell_load(data, edge_p + 8 + ei_t * 24)
             if rf_t >= 0:
-                w64(tally, rf_t * 8, r64(tally, rf_t * 8) + 1)
+                cell_store(tally, rf_t * 8, cell_load(tally, rf_t * 8) + 1)
             ei_t = ei_t + 1
         nj : ., mut = 0
         loop:
             if nj >= p_node_count:
                 break
-            ec_disk := r64(data, node_p + 8 + nj * 64 + 56)
-            if ec_disk != r64(tally, nj * 8):
+            ec_disk := cell_load(data, node_p + 8 + nj * 64 + 56)
+            if ec_disk != cell_load(tally, nj * 8):
                 return -1
             nj = nj + 1
 
@@ -681,7 +685,7 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         loop:
             if ji >= p_j_count:
                 break
-            jl2 := r64(data, jp)
+            jl2 := cell_load(data, jp)
             jp = jp + 8
             js := str_sub(data, jp, jl2)
             jp = jp + jl2
@@ -689,17 +693,17 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
             ji = ji + 1
 
     // Restore vars
-    var_count := r64(data, pos)
+    var_count := cell_load(data, pos)
     pos = pos + 8
     vi : ., mut = 0
     loop:
         if vi >= var_count:
             break
-        name_ni := r64(data, pos)
+        name_ni := cell_load(data, pos)
         pos = pos + 8
-        v_id := r64(data, pos)
+        v_id := cell_load(data, pos)
         pos = pos + 8
-        v_type := r64(data, pos)
+        v_type := cell_load(data, pos)
         pos = pos + 8
         // Ensure var array is large enough
         if v_id >= g_ir_var_count:
@@ -711,7 +715,7 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         vi = vi + 1
 
     // Restore nodes
-    node_count := r64(data, pos)
+    node_count := cell_load(data, pos)
     pos = pos + 8
     base_node := g_df_node_count
     grow_df_nodes(g_df_node_count + node_count)
@@ -726,16 +730,16 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         if ni >= node_count:
             break
         n := base_node + ni
-        w64(g_df_node_region, n * 8, g_cur_sg)
-        w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE, r64(data, pos))
+        cell_store(g_df_node_region, n * 8, g_cur_sg)
+        cell_store(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE, cell_load(data, pos))
         pos = pos + 8
-        w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_DEST, r64(data, pos))
+        cell_store(g_df_nodes, n * ESZ_DFNODE + OFF_DF_DEST, cell_load(data, pos))
         pos = pos + 8
-        w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S1, r64(data, pos))
+        cell_store(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S1, cell_load(data, pos))
         pos = pos + 8
-        w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S2, r64(data, pos))
+        cell_store(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S2, cell_load(data, pos))
         pos = pos + 8
-        w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S3, r64(data, pos))
+        cell_store(g_df_nodes, n * ESZ_DFNODE + OFF_DF_S3, cell_load(data, pos))
         pos = pos + 8
         // The snapshot stores one tk field, the derived code. Both slots are
         // rederived from it at the same point in the node sequence as the cold
@@ -743,35 +747,35 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         // grows in the same order and cold and warm runs get the same term
         // indexes. Term references are not read from disk because they are
         // process-local indexes.
-        tk_disk := r64(data, pos)
+        tk_disk := cell_load(data, pos)
         pos = pos + 8
         // The load variant does not set the build-failure bit. A stored code may
         // fall outside the warm process's smaller type table; a cache hit must not
         // turn that into a compile failure. See sh_tk_split_load in ty_shadow.cr.
-        sh_tk_split_load(r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE), tk_disk)
-        w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK, g_sh_slot_term)
-        w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_AUX, g_sh_slot_aux)
+        sh_tk_split_load(cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_OPCODE), tk_disk)
+        cell_store(g_df_nodes, n * ESZ_DFNODE + OFF_DF_TK, g_sh_slot_term)
+        cell_store(g_df_nodes, n * ESZ_DFNODE + OFF_DF_AUX, g_sh_slot_aux)
         // The stored first_edge and edge_count are not trusted because edge indexes
         // shift with the new node baseline. Zero both and let df_add_edge_kind
         // rebuild them. The stored values were already checked by the per-node
         // witness during the pre-scan.
-        w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_FIRST_EDGE, -1)
-        w64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_EDGE_COUNT, 0)
+        cell_store(g_df_nodes, n * ESZ_DFNODE + OFF_DF_FIRST_EDGE, -1)
+        cell_store(g_df_nodes, n * ESZ_DFNODE + OFF_DF_EDGE_COUNT, 0)
         pos = pos + 16   // 跳过盘上两字段
         // Record the producer for variables defined by this node. grow_df_arrays
         // fills new slots with -1, so a variable with no producer in the snapshot
         // stays -1. Only overwrite variables that the snapshot actually defines.
         // The old zero-filled slots read as node 0 and kept ghost edges.
-        dest := r64(g_df_nodes, n * ESZ_DFNODE + OFF_DF_DEST)
+        dest := cell_load(g_df_nodes, n * ESZ_DFNODE + OFF_DF_DEST)
         if dest >= 0:
             grow_df_arrays(dest + 1)
-            w64(g_df_var_producer, dest * 8, n)
+            cell_store(g_df_var_producer, dest * 8, n)
         ni = ni + 1
     g_df_node_count = base_node + node_count
 
     // Restore nested SG metadata (v13). The current function SG was opened by
     // df_begin_func; cached parent=-1 refers to that SG.
-    sg_count := r64(data, pos)
+    sg_count := cell_load(data, pos)
     pos = pos + 8
     sg_base := g_sg_count
     sg_i : ., mut = 0
@@ -780,28 +784,28 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
             break
         new_sg := g_sg_count
         grow_sg(new_sg + 1)
-        kind := r64(data, pos)
+        kind := cell_load(data, pos)
         pos = pos + 8
-        enter_rel := r64(data, pos)
+        enter_rel := cell_load(data, pos)
         pos = pos + 8
-        exit_rel := r64(data, pos)
+        exit_rel := cell_load(data, pos)
         pos = pos + 8
-        parent_rel := r64(data, pos)
+        parent_rel := cell_load(data, pos)
         pos = pos + 8
-        nstart_rel := r64(data, pos)
+        nstart_rel := cell_load(data, pos)
         pos = pos + 8
-        ncount := r64(data, pos)
+        ncount := cell_load(data, pos)
         pos = pos + 8
         parent := g_cur_sg
         if parent_rel >= 0:
             parent = sg_base + parent_rel
         f := new_sg * ESZ_SG
-        w64(g_sgs, f + OFF_SG_KIND, kind)
-        w64(g_sgs, f + OFF_SG_ENTER, base_node + enter_rel)
-        w64(g_sgs, f + OFF_SG_EXIT, base_node + exit_rel)
-        w64(g_sgs, f + OFF_SG_PARENT, parent)
-        w64(g_sgs, f + OFF_SG_NSTART, base_node + nstart_rel)
-        w64(g_sgs, f + OFF_SG_NCOUNT, ncount)
+        cell_store(g_sgs, f + OFF_SG_KIND, kind)
+        cell_store(g_sgs, f + OFF_SG_ENTER, base_node + enter_rel)
+        cell_store(g_sgs, f + OFF_SG_EXIT, base_node + exit_rel)
+        cell_store(g_sgs, f + OFF_SG_PARENT, parent)
+        cell_store(g_sgs, f + OFF_SG_NSTART, base_node + nstart_rel)
+        cell_store(g_sgs, f + OFF_SG_NCOUNT, ncount)
         g_sg_count = new_sg + 1
 
         // Later (inner) records overwrite the enclosing region mapping.
@@ -810,7 +814,7 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         loop:
             if rn >= rend:
                 break
-            w64(g_df_node_region, rn * 8, new_sg)
+            cell_store(g_df_node_region, rn * 8, new_sg)
             rn = rn + 1
         sg_i = sg_i + 1
 
@@ -819,17 +823,17 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
     // and insertion order as the cold path, so each node's list and edge_count match
     // the writer. Relative endpoints remain correct when a partial rebuild shifts
     // the node baseline.
-    own_edge_count := r64(data, pos)
+    own_edge_count := cell_load(data, pos)
     pos = pos + 8
     ei : ., mut = 0
     loop:
         if ei >= own_edge_count:
             break
-        rel_from := r64(data, pos)
+        rel_from := cell_load(data, pos)
         pos = pos + 8
-        rel_to := r64(data, pos)
+        rel_to := cell_load(data, pos)
         pos = pos + 8
-        e_kind := r64(data, pos)
+        e_kind := cell_load(data, pos)
         pos = pos + 8
         // Signed mapping: a negative endpoint points to an earlier function or a
         // global node. Bounds and the baseline witness were checked in the pre-scan.
@@ -837,7 +841,7 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         ei = ei + 1
 
     // Restore instructions
-    instr_count := r64(data, pos)
+    instr_count := cell_load(data, pos)
     pos = pos + 8
     base_instr := g_ir_instr_count
     grow_ir_instrs(g_ir_instr_count + instr_count)
@@ -846,29 +850,29 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         if ii >= instr_count:
             break
         inst := base_instr + ii
-        iri_set_op(inst, r64(data, pos))
+        iri_set_op(inst, cell_load(data, pos))
         pos = pos + 8
-        iri_set_dest(inst, r64(data, pos))
+        iri_set_dest(inst, cell_load(data, pos))
         pos = pos + 8
-        iri_set_s1(inst, r64(data, pos))
+        iri_set_s1(inst, cell_load(data, pos))
         pos = pos + 8
-        iri_set_s2(inst, r64(data, pos))
+        iri_set_s2(inst, cell_load(data, pos))
         pos = pos + 8
-        iri_set_s3(inst, r64(data, pos))
+        iri_set_s3(inst, cell_load(data, pos))
         pos = pos + 8
-        iri_set_tk(inst, r64(data, pos))
+        iri_set_tk(inst, cell_load(data, pos))
         pos = pos + 8
         ii = ii + 1
     g_ir_instr_count = base_instr + instr_count
 
     // Restore string constants (used by nodes/instrs)
-    str_count := r64(data, pos)
+    str_count := cell_load(data, pos)
     pos = pos + 8
     si : ., mut = 0
     loop:
         if si >= str_count:
             break
-        sl := r64(data, pos)
+        sl := cell_load(data, pos)
         pos = pos + 8
         s := str_sub(data, pos, sl)
         pos = pos + sl

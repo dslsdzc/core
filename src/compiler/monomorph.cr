@@ -43,7 +43,7 @@ fn grow_gen_instances(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 24)
-    _dyncpy(g_gen_instances, g_gen_instance_cap * 24, nb)
+    cell_copy(g_gen_instances, g_gen_instance_cap * 24, nb)
     g_gen_instances = nb
     g_gen_instance_cap = nc
 
@@ -59,7 +59,7 @@ fn grow_purity_inst(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc * 24)
-    _dyncpy(g_purity_inst, g_purity_inst_cap * 24, nb)
+    cell_copy(g_purity_inst, g_purity_inst_cap * 24, nb)
     g_purity_inst = nb
     g_purity_inst_cap = nc
 
@@ -73,10 +73,10 @@ fn grow_gen_subst(needed: int):
         nc = needed + 16
     sz := nc * 8
     n1 := alloc(sz)
-    _dyncpy(g_gen_subst_old, g_gen_subst_cap * 8, n1)
+    cell_copy(g_gen_subst_old, g_gen_subst_cap * 8, n1)
     g_gen_subst_old = n1
     n2 := alloc(sz)
-    _dyncpy(g_gen_subst_new, g_gen_subst_cap * 8, n2)
+    cell_copy(g_gen_subst_new, g_gen_subst_cap * 8, n2)
     g_gen_subst_new = n2
     g_gen_subst_cap = nc
 
@@ -90,10 +90,10 @@ fn grow_gen_dedup(needed: int):
         nc = needed + 64
     sz := nc * 8
     n1 := alloc(sz)
-    _dyncpy(g_gen_dedup_old, g_gen_dedup_cap * 8, n1)
+    cell_copy(g_gen_dedup_old, g_gen_dedup_cap * 8, n1)
     g_gen_dedup_old = n1
     n2 := alloc(sz)
-    _dyncpy(g_gen_dedup_new, g_gen_dedup_cap * 8, n2)
+    cell_copy(g_gen_dedup_new, g_gen_dedup_cap * 8, n2)
     g_gen_dedup_new = n2
     g_gen_dedup_cap = nc
 
@@ -107,7 +107,7 @@ fn grow_gen_subst_tis(needed: int):
     if nc < needed:
         nc = needed + 16
     nb := alloc(nc * 8)
-    _dyncpy(g_gen_subst_tis, g_gen_subst_tis_cap * 8, nb)
+    cell_copy(g_gen_subst_tis, g_gen_subst_tis_cap * 8, nb)
     g_gen_subst_tis = nb
     g_gen_subst_tis_cap = nc
 
@@ -128,23 +128,23 @@ fn gen_build_subst(func_ni: int, type_args: string):
     loop:
         if gi >= gc:
             break
-        if load8(type_args, pos) == 0:
+        if cell_load_byte(type_args, pos) == 0:
             break
         start := pos
         loop:
-            c := load8(type_args, pos)
+            c := cell_load_byte(type_args, pos)
             if c == 0 || c == 44:
                 break
             // null or comma
             pos = pos + 1
         type_name := str_sub(type_args, start, pos - start)
-        if load8(type_args, pos) == 44:
+        if cell_load_byte(type_args, pos) == 44:
             pos = pos + 1
         gen_param_ni := fi_generic_name(func_ni, gi)
         concrete_ni := str_intern(type_name)
         grow_gen_subst(g_gen_subst_count + 1)
-        w64(g_gen_subst_old, g_gen_subst_count * 8, gen_param_ni)
-        w64(g_gen_subst_new, g_gen_subst_count * 8, concrete_ni)
+        cell_store(g_gen_subst_old, g_gen_subst_count * 8, gen_param_ni)
+        cell_store(g_gen_subst_new, g_gen_subst_count * 8, concrete_ni)
         g_gen_subst_count = g_gen_subst_count + 1
         gi = gi + 1
 
@@ -162,7 +162,7 @@ fn gen_build_subst_tis(func_ni: int, bstart: int) -> int:
         return 0
     if bstart >= g_gen_binds_count:
         return 0
-    cnt := r64(g_gen_binds, bstart * 8)
+    cnt := cell_load(g_gen_binds, bstart * 8)
     if cnt != gc:
         return 0
     // The block length must equal the parameter count; otherwise reject it.
@@ -173,14 +173,14 @@ fn gen_build_subst_tis(func_ni: int, bstart: int) -> int:
     loop:
         if i >= gc:
             break
-        t := r64(g_gen_binds, (bstart + 1 + i) * 8)
+        t := cell_load(g_gen_binds, (bstart + 1 + i) * 8)
         if t < 0:
             return 0
         // An unbound entry discards the whole block; no partial substitution.
         if inst_ti_concrete(t) == 0:
             return 0
         // A remaining generic-parameter row also discards the whole block.
-        w64(g_gen_subst_tis, i * 8, t)
+        cell_store(g_gen_subst_tis, i * 8, t)
         g_gen_subst_tis_count = i + 1
         i = i + 1
     return g_gen_subst_tis_count
@@ -192,8 +192,8 @@ fn gen_lookup_subst(name_ni: int) -> int:
     loop:
         if mi >= g_gen_subst_count:
             break
-        if r64(g_gen_subst_old, mi * 8) == name_ni:
-            return r64(g_gen_subst_new, mi * 8)
+        if cell_load(g_gen_subst_old, mi * 8) == name_ni:
+            return cell_load(g_gen_subst_new, mi * 8)
         mi = mi + 1
     return -1
 
@@ -266,14 +266,14 @@ fn inst_key_of_ti(ti: int) -> string:
             s = istr_get(get_type_data(base))
         s = s + "["
         start := get_type_extra(ti)
-        cnt := r64(g_gen_apply_data, start * 8)
+        cnt := cell_load(g_gen_apply_data, start * 8)
         i : ., mut = 0
         loop:
             if i >= cnt:
                 break
             if i > 0:
                 s = s + "|"
-            s = s + inst_key_of_ti(r64(g_gen_apply_data, (start + 1 + i) * 8))
+            s = s + inst_key_of_ti(cell_load(g_gen_apply_data, (start + 1 + i) * 8))
             i = i + 1
         return s + "]"
     if k == TYP_ARRAY:
@@ -302,7 +302,7 @@ fn inst_key_of_ti(ti: int) -> string:
                 break
             if i2 > 0:
                 s = s + "|"
-            s = s + inst_key_of_ti(r64(g_gen_apply_data, (start2 + i2) * 8))
+            s = s + inst_key_of_ti(cell_load(g_gen_apply_data, (start2 + i2) * 8))
             i2 = i2 + 1
         return s + ")"
     return "#" + int_str(ti)   // unknown kind: fall back to the row number
@@ -346,7 +346,7 @@ fn inst_type_node_of_ti(ti: int) -> int:
         if get_type_kind(base) != TYP_NAMED:
             return -1
         start := get_type_extra(ti)
-        cnt := r64(g_gen_apply_data, start * 8)
+        cnt := cell_load(g_gen_apply_data, start * 8)
         if cnt <= 0:
             return -1
         first_an : ., mut = -1
@@ -354,7 +354,7 @@ fn inst_type_node_of_ti(ti: int) -> int:
         loop:
             if i >= cnt:
                 break
-            at := r64(g_gen_apply_data, (start + 1 + i) * 8)
+            at := cell_load(g_gen_apply_data, (start + 1 + i) * 8)
             ak := get_type_kind(at)
             // Argument roots must be consecutive: accept only native, named, and generic-parameter rows.
             if ak != TYP_BASE && ak != TYP_NAMED && ak != TYP_GENERIC_PARAM:
@@ -373,8 +373,8 @@ fn gen_lookup_subst_ti(name_ni: int) -> int:
     loop:
         if mi >= g_gen_subst_tis_count:
             break
-        if r64(g_gen_subst_old, mi * 8) == name_ni:
-            return r64(g_gen_subst_tis, mi * 8)
+        if cell_load(g_gen_subst_old, mi * 8) == name_ni:
+            return cell_load(g_gen_subst_tis, mi * 8)
         mi = mi + 1
     return -1
 
@@ -400,7 +400,7 @@ fn gen_subst_ti(ti: int) -> int:
         return alloc_type(TYP_OPTIONAL, gen_subst_ti(get_type_data(ti)), 0)
     if k == TYP_GENERIC_APPLY:
         start := get_type_extra(ti)
-        cnt := r64(g_gen_apply_data, start * 8)
+        cnt := cell_load(g_gen_apply_data, start * 8)
         // Two passes: substituting a child can append to g_gen_apply_data.
         subs : string, mut
         if cnt > 0:
@@ -409,16 +409,16 @@ fn gen_subst_ti(ti: int) -> int:
             loop:
                 if i >= cnt:
                     break
-                w64(subs, i * 8, gen_subst_ti(r64(g_gen_apply_data, (start + 1 + i) * 8)))
+                cell_store(subs, i * 8, gen_subst_ti(cell_load(g_gen_apply_data, (start + 1 + i) * 8)))
                 i = i + 1
         ns := g_gen_apply_data_count
         grow_gen_apply_data(ns + 1 + cnt)
-        w64(g_gen_apply_data, ns * 8, cnt)
+        cell_store(g_gen_apply_data, ns * 8, cnt)
         i2 : ., mut = 0
         loop:
             if i2 >= cnt:
                 break
-            w64(g_gen_apply_data, (ns + 1 + i2) * 8, r64(subs, i2 * 8))
+            cell_store(g_gen_apply_data, (ns + 1 + i2) * 8, cell_load(subs, i2 * 8))
             i2 = i2 + 1
         g_gen_apply_data_count = ns + 1 + cnt
         return alloc_type(TYP_GENERIC_APPLY, get_type_data(ti), ns)
@@ -439,12 +439,12 @@ fn inst_ti_concrete(ti: int) -> int:
         return inst_ti_concrete(get_type_data(ti))
     if k == TYP_GENERIC_APPLY:
         start := get_type_extra(ti)
-        cnt := r64(g_gen_apply_data, start * 8)
+        cnt := cell_load(g_gen_apply_data, start * 8)
         i : ., mut = 0
         loop:
             if i >= cnt:
                 return 1
-            if inst_ti_concrete(r64(g_gen_apply_data, (start + 1 + i) * 8)) == 0:
+            if inst_ti_concrete(cell_load(g_gen_apply_data, (start + 1 + i) * 8)) == 0:
                 return 0
             i = i + 1
         return 1
@@ -455,7 +455,7 @@ fn inst_ti_concrete(ti: int) -> int:
         loop:
             if i2 >= cnt2:
                 return 1
-            if inst_ti_concrete(r64(g_gen_apply_data, (start2 + i2) * 8)) == 0:
+            if inst_ti_concrete(cell_load(g_gen_apply_data, (start2 + i2) * 8)) == 0:
                 return 0
             i2 = i2 + 1
         return 1
@@ -473,7 +473,7 @@ fn gen_remap_binds(iv: int) -> int:
     start := iv - 1
     if start >= g_gen_binds_count:
         return 0
-    cnt := r64(g_gen_binds, start * 8)
+    cnt := cell_load(g_gen_binds, start * 8)
     if cnt <= 0:
         return 0
     if start + 1 + cnt > g_gen_binds_count:
@@ -486,19 +486,19 @@ fn gen_remap_binds(iv: int) -> int:
     loop:
         if i >= cnt:
             break
-        t := gen_subst_ti(r64(g_gen_binds, (start + 1 + i) * 8))
+        t := gen_subst_ti(cell_load(g_gen_binds, (start + 1 + i) * 8))
         if inst_ti_concrete(t) == 0:
             return 0
-        w64(subs, i * 8, t)
+        cell_store(subs, i * 8, t)
         i = i + 1
     ns := g_gen_binds_count
     grow_gen_binds(ns + 1 + cnt)
-    w64(g_gen_binds, ns * 8, cnt)
+    cell_store(g_gen_binds, ns * 8, cnt)
     i2 : ., mut = 0
     loop:
         if i2 >= cnt:
             break
-        w64(g_gen_binds, (ns + 1 + i2) * 8, r64(subs, i2 * 8))
+        cell_store(g_gen_binds, (ns + 1 + i2) * 8, cell_load(subs, i2 * 8))
         i2 = i2 + 1
     g_gen_binds_count = ns + 1 + cnt
     return ns + 1
@@ -512,15 +512,15 @@ fn gen_dedup_find(old_node: int) -> int:
     loop:
         if mi >= g_gen_dedup_count:
             break
-        if r64(g_gen_dedup_old, mi * 8) == old_node:
-            return r64(g_gen_dedup_new, mi * 8)
+        if cell_load(g_gen_dedup_old, mi * 8) == old_node:
+            return cell_load(g_gen_dedup_new, mi * 8)
         mi = mi + 1
     return -1
 
 fn gen_dedup_add(old_node: int, new_node: int):
     grow_gen_dedup(g_gen_dedup_count + 1)
-    w64(g_gen_dedup_old, g_gen_dedup_count * 8, old_node)
-    w64(g_gen_dedup_new, g_gen_dedup_count * 8, new_node)
+    cell_store(g_gen_dedup_old, g_gen_dedup_count * 8, old_node)
+    cell_store(g_gen_dedup_new, g_gen_dedup_count * 8, new_node)
     g_gen_dedup_count = g_gen_dedup_count + 1
 
 // ============================================================
@@ -540,9 +540,9 @@ fn gen_clone_block(start: int, count: int) -> int:
     loop:
         if i >= count:
             break
-        old_stmt := r64(g_block_stmts, (start + i) * 8)
+        old_stmt := cell_load(g_block_stmts, (start + i) * 8)
         new_stmt := gen_clone_tree(old_stmt)
-        w64(g_block_stmts, (new_start + i) * 8, new_stmt)
+        cell_store(g_block_stmts, (new_start + i) * 8, new_stmt)
         i = i + 1
     return new_start
 
@@ -870,15 +870,15 @@ fn gen_clone_tree(node: int) -> int:
                 vn : ., mut = -1
                 if b + i >= 0:
                     vn = ast_a(b + i)
-                w64(nvs, i * 8, gen_clone_tree(vn))
-                w64(nms, i * 8, ast_b(b + i))
+                cell_store(nvs, i * 8, gen_clone_tree(vn))
+                cell_store(nms, i * 8, ast_b(b + i))
                 i = i + 1
             new_first := g_ast_count
             i = 0
             loop:
                 if i >= c:
                     break
-                ast_alloc(EXPR_NONE, r64(nvs, i * 8), r64(nms, i * 8), 0, 0, 0, 0, ln, cl)
+                ast_alloc(EXPR_NONE, cell_load(nvs, i * 8), cell_load(nms, i * 8), 0, 0, 0, 0, ln, cl)
                 i = i + 1
             n := ast_alloc(k, a, new_first, c, iv, tv, d, ln, cl)
             gen_dedup_add(node, n)
@@ -900,14 +900,14 @@ fn gen_clone_tree(node: int) -> int:
                 vn : ., mut = -1
                 if a + i >= 0:
                     vn = ast_a(a + i)
-                w64(nvs, i * 8, gen_clone_tree(vn))
+                cell_store(nvs, i * 8, gen_clone_tree(vn))
                 i = i + 1
             new_first := g_ast_count
             i = 0
             loop:
                 if i >= b:
                     break
-                ast_alloc(EXPR_NONE, r64(nvs, i * 8), 0, 0, 0, 0, 0, ln, cl)
+                ast_alloc(EXPR_NONE, cell_load(nvs, i * 8), 0, 0, 0, 0, 0, ln, cl)
                 i = i + 1
             n := ast_alloc(k, new_first, b, c, iv, tv, d, ln, cl)
             gen_dedup_add(node, n)
@@ -929,14 +929,14 @@ fn gen_clone_tree(node: int) -> int:
                 vn : ., mut = -1
                 if a + i >= 0:
                     vn = ast_a(a + i)
-                w64(nvs, i * 8, gen_clone_tree(vn))
+                cell_store(nvs, i * 8, gen_clone_tree(vn))
                 i = i + 1
             new_first := g_ast_count
             i = 0
             loop:
                 if i >= b:
                     break
-                ast_alloc(EXPR_NONE, r64(nvs, i * 8), 0, 0, 0, 0, 0, ln, cl)
+                ast_alloc(EXPR_NONE, cell_load(nvs, i * 8), 0, 0, 0, 0, 0, ln, cl)
                 i = i + 1
             n := ast_alloc(k, new_first, b, c, iv, tv, d, ln, cl)
             gen_dedup_add(node, n)
@@ -998,14 +998,14 @@ fn gen_clone_tree(node: int) -> int:
                 vn : ., mut = -1
                 if b + i >= 0:
                     vn = ast_a(b + i)
-                w64(nvs, i * 8, gen_clone_tree(vn))
+                cell_store(nvs, i * 8, gen_clone_tree(vn))
                 i = i + 1
             new_first := g_ast_count
             i = 0
             loop:
                 if i >= c:
                     break
-                ast_alloc(EXPR_NONE, r64(nvs, i * 8), 0, 0, 0, 0, 0, ln, cl)
+                ast_alloc(EXPR_NONE, cell_load(nvs, i * 8), 0, 0, 0, 0, 0, ln, cl)
                 i = i + 1
             n := ast_alloc(k, a, new_first, c, iv, tv, d, ln, cl)
             gen_dedup_add(node, n)
@@ -1052,10 +1052,10 @@ fn gen_find_cached(func_ni: int, type_args: string) -> int:
     loop:
         if i >= g_gen_instance_count:
             break
-        if r64(g_gen_instances, i * 24) == func_ni:
-            cached_args_ni := r64(g_gen_instances, i * 24 + 8)
+        if cell_load(g_gen_instances, i * 24) == func_ni:
+            cached_args_ni := cell_load(g_gen_instances, i * 24 + 8)
             if istr_eq(cached_args_ni, type_args) != 0:
-                return r64(g_gen_instances, i * 24 + 16)
+                return cell_load(g_gen_instances, i * 24 + 16)
         i = i + 1
     return -1
 
@@ -1173,9 +1173,9 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
     // 4. Cache the new function
     type_args_ni := str_intern(type_args)
     grow_gen_instances(g_gen_instance_count + 1)
-    w64(g_gen_instances, g_gen_instance_count * 24, func_ni)
-    w64(g_gen_instances, g_gen_instance_count * 24 + 8, type_args_ni)
-    w64(g_gen_instances, g_gen_instance_count * 24 + 16, new_fi)
+    cell_store(g_gen_instances, g_gen_instance_count * 24, func_ni)
+    cell_store(g_gen_instances, g_gen_instance_count * 24 + 8, type_args_ni)
+    cell_store(g_gen_instances, g_gen_instance_count * 24 + 16, new_fi)
     g_gen_instance_count = g_gen_instance_count + 1
 
     // Record the instance-to-source mapping for purity. Do not copy
@@ -1184,9 +1184,9 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
     // computed in df_state_finalize; the source purity is the conjunction of its
     // instances, filled by compute_all_purity.
     grow_purity_inst(g_purity_inst_count + 1)
-    w64(g_purity_inst, g_purity_inst_count * 24, func_ni)
-    w64(g_purity_inst, g_purity_inst_count * 24 + 8, type_args_ni)
-    w64(g_purity_inst, g_purity_inst_count * 24 + 16, new_fi)
+    cell_store(g_purity_inst, g_purity_inst_count * 24, func_ni)
+    cell_store(g_purity_inst, g_purity_inst_count * 24 + 8, type_args_ni)
+    cell_store(g_purity_inst, g_purity_inst_count * 24 + 16, new_fi)
     g_purity_inst_count = g_purity_inst_count + 1
 
     // 5. Return new function index

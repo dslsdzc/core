@@ -77,6 +77,46 @@ fn main() -> int:
         0,
     ),
     (
+        "array_pointer_deref_store",
+        """
+fn main() -> int:
+    arr : ., mut = [10, 20, 30]
+    p := &arr[1]
+    *p = 41
+    x : ., mut = 7
+    q := &x
+    *q = 8
+    return *p + x + arr[0] + arr[2]
+""",
+        89,
+        1,
+    ),
+    (
+        "pointer_runtime_bound",
+        """
+fn main() -> int:
+    a := [1, 2, 3, 4]
+    i := 2
+    p := &a[i]
+    return *p
+""",
+        3,
+        0,
+    ),
+    (
+        "pointer_runtime_bound_store",
+        """
+fn main() -> int:
+    a := [1, 2, 3, 4]
+    i := 2
+    p := &a[i]
+    *p = 9
+    return a[2]
+""",
+        9,
+        0,
+    ),
+    (
         "aggregate_o1",
         """
 struct Pair:

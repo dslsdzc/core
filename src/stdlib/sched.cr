@@ -27,10 +27,10 @@ fn sched_init():
     // Initialize M workers (one per CPU)
     // For now: single-threaded (1 M, cooperative)
     m := alloc(32)
-    w64(m, 0, 0)     // id = 0
-    w64(m, 8, -1)     // cur_g = none
-    w64(m, 16, -1)    // runq_head = empty
-    w64(m, 24, -1)    // runq_tail = empty
+    cell_store(m, 0, 0)     // id = 0
+    cell_store(m, 8, -1)     // cur_g = none
+    cell_store(m, 16, -1)    // runq_head = empty
+    cell_store(m, 24, -1)    // runq_tail = empty
     g_machines = m
     g_machine_count = 1
     g_current_m_idx = 0
@@ -39,17 +39,17 @@ fn sched_init():
     // Its stack_ptr is filled in by fiber_switch the first time it yields
     // (fiber_switch saves the current RSP into [G+16]).
     main_g := alloc(80)
-    w64(main_g, 0, 0)     // id = 0
-    w64(main_g, 8, 1)     // _Grunning
-    w64(main_g, 16, 0)    // stack_ptr (filled on first yield)
-    w64(main_g, 24, 0)    // stack_lo (thread stack — no arena)
-    w64(main_g, 32, -1)   // arena_id = none
-    w64(main_g, 40, -1)   // result_ch = none (never dispatched by a wrapper)
-    w64(main_g, 48, -1)   // next = -1
-    w64(main_g, 56, 0)    // saved_fn = 0 (never dispatched by a wrapper)
-    w64(main_g, 64, 0)    // saved_arg = 0
-    w64(main_g, 72, 0)    // temp_val = 0
-    w64(m, 8, main_g)     // M[0].cur_g = main_g
+    cell_store(main_g, 0, 0)     // id = 0
+    cell_store(main_g, 8, 1)     // _Grunning
+    cell_store(main_g, 16, 0)    // stack_ptr (filled on first yield)
+    cell_store(main_g, 24, 0)    // stack_lo (thread stack — no arena)
+    cell_store(main_g, 32, -1)   // arena_id = none
+    cell_store(main_g, 40, -1)   // result_ch = none (never dispatched by a wrapper)
+    cell_store(main_g, 48, -1)   // next = -1
+    cell_store(main_g, 56, 0)    // saved_fn = 0 (never dispatched by a wrapper)
+    cell_store(main_g, 64, 0)    // saved_arg = 0
+    cell_store(main_g, 72, 0)    // temp_val = 0
+    cell_store(m, 8, main_g)     // M[0].cur_g = main_g
     g_set_curg(main_g)
     g_sched_inited = 1
 
@@ -67,27 +67,27 @@ fn sched_enqueue(g: string):
     if m_idx < 0:
         m_idx = 0
     m := g_machines + m_idx * 32
-    head := r64(m, 16)
+    head := cell_load(m, 16)
     if head < 0:
-        w64(m, 16, g)      // runq_head = g
-        w64(m, 24, g)      // runq_tail = g
+        cell_store(m, 16, g)      // runq_head = g
+        cell_store(m, 24, g)      // runq_tail = g
     else:
-        tail := r64(m, 24)
-        w64(tail, 48, g)   // tail.next = g
-        w64(m, 24, g)      // runq_tail = g
-    w64(g, 48, -1)
+        tail := cell_load(m, 24)
+        cell_store(tail, 48, g)   // tail.next = g
+        cell_store(m, 24, g)      // runq_tail = g
+    cell_store(g, 48, -1)
 
 fn sched_dequeue(m_idx: int) -> int:
     if m_idx < 0:
         m_idx = 0
     m := g_machines + m_idx * 32
-    head := r64(m, 16)
+    head := cell_load(m, 16)
     if head < 0:
         return -1
-    w64(m, 16, r64(head, 48))
-    if r64(m, 16) < 0:
-        w64(m, 24, -1)
-    w64(head, 48, -1)
+    cell_store(m, 16, cell_load(head, 48))
+    if cell_load(m, 16) < 0:
+        cell_store(m, 24, -1)
+    cell_store(head, 48, -1)
     return head
 
 fn sched_get_curg() -> int:
@@ -102,10 +102,10 @@ fn sched_yield():
     // sender/receiver handoff wakes them — re-enqueueing would double-schedule.
     // Dead (_Gdead) Gs must never be re-enqueued (goroutine exit path).
     if cur_g >= 0:
-        st := r64(cur_g, 8)
+        st := cell_load(cur_g, 8)
         if st != 2 && st != 3:
             // not _Gwaiting, not _Gdead
-            w64(cur_g, 8, 0)  // _Grunnable
+            cell_store(cur_g, 8, 0)  // _Grunnable
             sched_enqueue(cur_g)
 
     // Schedule next
@@ -119,15 +119,15 @@ fn sched_schedule():
     m_idx := sched_current_m_idx()
     next_g := sched_dequeue(m_idx)
     if next_g >= 0:
-        old_g := r64(g_machines, m_idx * 32 + 8)
-        w64(g_machines, m_idx * 32 + 8, next_g)
+        old_g := cell_load(g_machines, m_idx * 32 + 8)
+        cell_store(g_machines, m_idx * 32 + 8, next_g)
         g_set_curg(next_g)
-        w64(next_g, 8, 1)  // _Grunning
+        cell_store(next_g, 8, 1)  // _Grunning
 
         if old_g >= 0:
             // Save old_g's sp, switch to next_g's sp
             old_sp_addr := old_g + 16  // &g.stack_ptr
-            next_sp := r64(next_g, 16)  // g.stack_ptr
+            next_sp := cell_load(next_g, 16)  // g.stack_ptr
             fiber_switch(old_sp_addr, next_sp)
         // else: first goroutine, just start it
 
@@ -135,20 +135,20 @@ fn sched_schedule():
 // Each worker dequeues and runs goroutines from ITS OWN M's local queue.
 fn sched_worker_run(m_idx: int):
     // Store this worker's index in its M struct
-    w64(g_machines, m_idx * 32, m_idx)  // m.id = m_idx
+    cell_store(g_machines, m_idx * 32, m_idx)  // m.id = m_idx
     g_current_m_idx = m_idx
 
     loop:
         next_g := sched_dequeue(m_idx)
         if next_g >= 0:
-            old_g := r64(g_machines, m_idx * 32 + 8)
-            w64(g_machines, m_idx * 32 + 8, next_g)
+            old_g := cell_load(g_machines, m_idx * 32 + 8)
+            cell_store(g_machines, m_idx * 32 + 8, next_g)
             g_set_curg(next_g)
-            w64(next_g, 8, 1)  // _Grunning
+            cell_store(next_g, 8, 1)  // _Grunning
 
             if old_g >= 0:
                 old_sp_addr := old_g + 16
-                next_sp := r64(next_g, 16)
+                next_sp := cell_load(next_g, 16)
                 fiber_switch(old_sp_addr, next_sp)
             // else: first goroutine on this M, start it
         // If no work, yield to OS
@@ -166,7 +166,7 @@ fn sched_go(fn_ptr: int, arg: int) -> string:
     g := g_new(fn_ptr, arg, 0)
 
     // Store result channel in G struct (offset 40)
-    w64(g, 40, ch)
+    cell_store(g, 40, ch)
 
     // Enqueue goroutine to the scheduler
     sched_enqueue(g)
@@ -183,10 +183,10 @@ fn sched_spawn_workers(n: int):
     loop:
         if mi >= n:
             break
-        w64(total_ms, mi * 32, mi)          // m.id
-        w64(total_ms, mi * 32 + 8, -1)      // m.cur_g = none
-        w64(total_ms, mi * 32 + 16, -1)     // runq_head
-        w64(total_ms, mi * 32 + 24, -1)     // runq_tail
+        cell_store(total_ms, mi * 32, mi)          // m.id
+        cell_store(total_ms, mi * 32 + 8, -1)      // m.cur_g = none
+        cell_store(total_ms, mi * 32 + 16, -1)     // runq_head
+        cell_store(total_ms, mi * 32 + 24, -1)     // runq_tail
         mi = mi + 1
     g_machines = total_ms
     g_machine_count = n

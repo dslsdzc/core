@@ -15,16 +15,14 @@
      · v21（2026-09-18 串域批）前口径 = 「暖 = 冷**前缀**」且被当预存允许；该预存被证为缺陷本体
        ⇒ 前缀样本由正控改列为**坏实现**，正控改为「冷 = 暖逐条相同」
   M4 `--dump-tk-terms` 剔除面白名单 → #2026-09-16-26 / B5（test_ccr_types.dump_strip_face_problems）
-  M5 零 diff 腿指令边界锁步     → #2026-09-16-28 / B1（test_mw_task2.region_equal_mask_calls）
-  M6 慢路径块体逐指令模板       → #2026-09-16-23 / B6（test_mw_task2.parse_slow_block）
 
 口径：全部为**内存内**突变（不改仓库任何文件、不写盘、零副作用）——突变体 =
-真实载体（真实 TOML 表文本 / 真实 ELF 区字节 / 真实 dump 文本 / 真实块字节）
-的**最小坏实现**式改写；M5/M6 的字节取自本仓真实产物（来源逐条注明）。
+真实载体（真实 TOML 表文本 / 真实 ELF 区字节 / 真实 dump 文本）
+的**最小坏实现**式改写。
 
 判据自身失败即 rc=1（CI 挂 bootstrap-tests；见 src/ci/run.sh）。
 
-**批 8 追加（2026-09-18 复核 Important）**：M1–M6 为**纯内存**突变；批 8 的四条突变是「改编译器源码 ⇒
+**批 8 追加（2026-09-18 复核 Important）**：M1–M4 为**纯内存**突变；批 8 的四条突变是「改编译器源码 ⇒
 重建 ⇒ 探针读数反向」形态，无法内存复刻 ⇒ 此处接机检其可机械验证的两半（**锚点仍唯一命中** + **期望值
 与判据常数一致**，见 `main()` 的 M7–M10 段）；**真跑腿**（重建 + 探针）以 `COREC_MUT_SELF=1` 开启。
 """
@@ -42,7 +40,6 @@ sys.path.insert(0, str(BASE / "tests" / "selfhost"))
 import test_hit_table as HT          # noqa: E402
 import test_ccr_types as CT          # noqa: E402
 import test_cir_warm_path as CW      # noqa: E402
-import test_mw_task2 as MW           # noqa: E402
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -89,77 +86,9 @@ def old_strip_compare_ok(out_flag: str, out_plain: str) -> bool:
     return stripped == "\n".join(out_plain.splitlines())
 
 
-def old_region_equal_mask_calls(a: bytes, b: bytes):
-    """#2026-09-16-28 旧形态：遇 0xE8 字节即跳 5B（含**非指令首**的 0xE8 ⇒ 其后 4B 盲窗）。"""
-    if len(a) != len(b):
-        return False
-    i = 0
-    while i < len(a):
-        if a[i] != b[i]:
-            return False
-        if a[i] == 0xE8:
-            i = i + 5
-            continue
-        i = i + 1
-    return True
-
-
-def old_block_prefix_ok(text: bytes, targets) -> bool:
-    """#2026-09-16-23 旧形态：只校验 2B 前缀 `4D 19` + 目标序。"""
-    return all(text[t:t + 2] == MW.BLK_PREFIX for t in targets)
-
-
 # ══════════════════════════════════════════════════════════════════════
 # 突变体（内存内）
 # ══════════════════════════════════════════════════════════════════════
-
-# z2_copy @O0 的 main 区真实字节（本批自 build/mw_task2_scratch/z2_copy_o0 实读；
-# 与 tests/selfhost/test_mw_task2.py 的 find_main_region 同源）。其中
-# `48 C7 45 E8 40 E2 01 00` = `mov qword [rbp-0x18], 123456`——**disp8 = 0xE8 是
-# 数据字节、不是指令首**，其后 4B（imm32 `40 E2 01 00`）正是旧判据的盲窗。
-Z2_REGION_HEX = (
-    "554889e54883ec3048c7c0ffffffff488945f848c745e840e20100"
-    "4c8b55e84c8955f04c8b55f04c8955e04c8b55e04c8955d848c745d064000000"
-    "488b45d0e913000000488b7df84885ff7c05e816640000e9000000004883c4305dc3")
-
-# t1_add @O0 慢路径块真实字节（build/mw_task2_scratch/t1_add_o0，块首 = jo 目标）：
-# `4D 19 DB | 41 52 41 53 | BF 10 00 00 00 | E8 .. | 41 5B 41 5A | 4C 89 10 |
-#  4C 89 58 08 | 48 89 45 C8 | C6 45 C6 01 | E9 ..`
-T1_BLOCK_HEX = ("4d19db41524153bf10000000e8a1620000415b415a4c89104c895808"
-                "488945c8c645c601e99effffff")
-
-
-def mut_flip_z2_frame_imm(region: bytes) -> bytes:
-    """坏实现：改 z2_copy 帧常数 imm32 的一个字节（落在 0xE8 数据字节后的盲窗内）。"""
-    out = bytearray(region)
-    k = region.find(bytes.fromhex("48c745e840e20100"))
-    assert k > 0, "突变体定位失败（真实字节模式未命中）"
-    out[k + 5] = 0xFF          # imm32 第 2 字节 0xE2 → 0xFF（值 123456 → 巨大值）
-    return bytes(out)
-
-
-def mut_block_tag_imm_zero(block: bytes) -> bytes:
-    """坏实现：慢路径块 tag 置位立即数 1 → 0（tag 不变量破坏）。"""
-    k = block.find(bytes.fromhex("c645c601"))
-    assert k > 0, "突变体定位失败"
-    out = bytearray(block)
-    out[k + 3] = 0
-    return bytes(out)
-
-
-def mut_block_insert_nop(block: bytes) -> bytes:
-    """坏实现：块首 2B 前缀后插一个 0x90（前缀仍在、顺序不变——旧判据绿）。"""
-    return block[:2] + b"\x90" + block[2:]
-
-
-def mut_block_dest_reg_swap(block: bytes) -> bytes:
-    """坏实现：`4C 89 10`（mov [rax], r10）→ `4C 89 18`（mov [rax], r11）。"""
-    k = block.find(bytes.fromhex("4c8910"))
-    assert k > 0, "突变体定位失败"
-    out = bytearray(block)
-    out[k + 2] = 0x18
-    return bytes(out)
-
 
 def mut_self_item2():
     """M7 **真跑腿**（`COREC_MUT_SELF=1`；默认关）：在 /tmp 副本上把条目 2 的分派块**失效化** ⇒ 重建
@@ -332,54 +261,6 @@ def main() -> int:
     cases.append(("M4/#2026-09-16-26 剔除面：数据行序数错（同数量换行——序数断言维度）",
                   old_strip_compare_ok(reorder, plain),
                   CT.dump_strip_face_problems(reorder, plain)[0]))
-
-    # ── M5（#2026-09-16-28/B1）零 diff 腿指令边界锁步：1 个坏实现 + 1 个合法差异正控 ──
-    # 缓冲区 = 真实区字节 + 尾部补零到 40000B：被测函数签名的 `text_*` 是**整个
-    # text 段**（call 目标 = 段内绝对偏移，真实调用目标在区内之外）⇒ 合成载体
-    # 必须留出目标可达空间，否则命中的是「目标越界」那条独立断言而非本突变面。
-    reg = bytes.fromhex(Z2_REGION_HEX)
-    span = (0, len(reg))
-    t_reg = reg.ljust(40000, b"\x00")
-    bad = mut_flip_z2_frame_imm(t_reg)
-    ok_bad, why_bad, _n = MW.region_equal_mask_calls(t_reg, span, bad, span)
-    cases.append(("M5/#2026-09-16-28 零 diff：改 0xE8 数据字节后的帧常数 imm32（旧盲窗）",
-                  old_region_equal_mask_calls(reg, bad[:len(reg)]),
-                  [] if ok_bad else [why_bad]))
-    # 合法差异正控：真 call rel32 位移不同 ⇒ 必须**仍绿**（不得误伤豁免面）。
-    # 真 call 站点 = 解码出的 `is_call` 指令首（**不是** `find(b"\xe8")`——那个
-    # 恰好会命中 disp8 数据字节，正是本判据要区分的两件事）。
-    call_off = next(off for off, _ln, is_call in MW.x86_walk(reg) if is_call)
-    legal = bytearray(t_reg)
-    legal[call_off + 1] = (legal[call_off + 1] + 7) % 256   # 只动真 call 的 rel32 首字节
-    ok_pos, why_pos, ncalls = MW.region_equal_mask_calls(t_reg, span,
-                                                         bytes(legal), span)
-    cases.append(("M5/#2026-09-16-28 正控：真 call rel32 位移变化（合法）仍绿",
-                  ok_pos, [] if ok_pos else [why_pos],
-                  {"expect_strong_clean": True}))
-    print(f"       （M5 正控：真 call 站点 @{call_off}，豁免面计数 = {ncalls}"
-          f"（>0 = 探针触发非空转））")
-
-    # ── M6（#2026-09-16-23/B6）慢路径块体模板：3 个坏实现 + 1 个正控 ───────────────
-    blk = bytes.fromhex(T1_BLOCK_HEX)
-    text = b"\x00" * 16 + blk + b"\x00" * 16
-    try:
-        end, alloc_t, resume_t = MW.parse_slow_block(text, 16, is_sub=False)
-        print(f"       （M6 正控：真实块解析 OK end={end} alloc={alloc_t} "
-              f"resume={resume_t}）")
-    except AssertionError as e:
-        cases.append(("M6/#2026-09-16-23 正控：真实块体可解析", True, [f"正控自身失败: {e}"]))
-    for label, mut in [
-            ("tag 立即数 1→0", mut_block_tag_imm_zero(blk)),
-            ("块首插 0x90", mut_block_insert_nop(blk)),
-            ("mov [rax],r10 → r11", mut_block_dest_reg_swap(blk))]:
-        mtext = b"\x00" * 16 + mut + b"\x00" * 16
-        try:
-            MW.parse_slow_block(mtext, 16, is_sub=False)
-            probs = []
-        except AssertionError as e:
-            probs = [str(e)]
-        cases.append((f"M6/#2026-09-16-23 块体模板：{label}",
-                      old_block_prefix_ok(mtext, [16]), probs))
 
     # ── M7–M10（批 8，2026-09-18 复核 Important ②③）：四条批级突变的**锚点与期望一致性** ──
     # 四条突变都是「改编译器源码 ⇒ 重建 ⇒ 探针读数反向」的形态 ⇒ **无法**用本档纯内存体例复刻；

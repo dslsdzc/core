@@ -177,11 +177,25 @@
 # **后来人注意**：**任何新增编译器侧全局**都会移动这张表（登记 ⇒ 启动期 intern ⇒ id 顺移）。
 #   这是**固有代价**，不是回归——但按本文件两级纪律，**必须显式声明 + 同批重锁 + 旧值留痕**。
 
-canary_elf	pa	f113727526bafbde95f40d3c4e3cee7dd1dd0a9486ddd5fe27e961e330bf4dde	28854
-pa_ccr	pa.ccr	d6ebe3d175dea7322b39e3ca51366d854b6cb2e4b6efb47a05b0ed4fc21c1b10	96985
-pa_static_ccr	pa_st.bin.ccr	041b6e3e83d915690324c5e453b49652207e9f919080e53d2ddec1060d595f62	97128
-gt_ccr	gt.ccr	edfd8e98d7b64fdb3a99e62bffc99954879432a48390bedbe98171348a49dd22	143687
-gt_static_ccr	gt_st.bin.ccr	bbfe47897c8fb97f9cc38ffbfe6043577604ef86595760db55cd7ac0781b0c97	143830
+# ── 【本批重锁 2026-10-24】Task 8 review fix：raw ABI 调用成为图级 SYSTEM 边界 ──
+#   四条 `.ccr`：size 全不变，sha 全变；canary ELF 逐字节不变（826d74cf…）。
+#   归因 = `ccr_compute_header_flags` 现在识别 IR_CALL 到保留的 raw ABI 内建
+#   （cell_store/cell_load/load8/store8/load64/w32/load_str_ptr/store_str_ptr/
+#   _dyncpy）⇒ 注入的 stdlib/runtime 函数使每个程序图都含 raw 调用 ⇒ header
+#   flags 从 PORTABLE(1) 变为 SYSTEM(2)。逐字节对照旧编译器产物：四条 `.ccr`
+#   **唯一差异 = 偏移 12 的 header flags 字节 `01 → 02`**，其余字节与尺寸全同；
+#   ELF canary 不变。D1 5/5 PASS。
+#   旧值留痕（自本批起作废）：
+#     pa_ccr        1115f352656d6e53f388d48088616703e2c9df13c8233b9471bdd047aa16b367 93710
+#     pa_static_ccr 5f1b90d4be268c350e0ae34b4d805732573d5a115f53a51df08d0ab4e2192630 93853
+#     gt_ccr        a1b3d07dc98772351edcdbf5798887e679caa9d452444ef6ad76c86ea2ff05ff 138672
+#     gt_static_ccr bd7d2fc42282a3ca3905a567c8c6d577390262ec269002f96da2f59a8a40301c 138815
+
+canary_elf	pa	826d74cf7f099f9758e11a64d443695ff8360327a88e7eb5922ddfd617e0dce5	53430
+pa_ccr	pa.ccr	60f7fd6da218e332003c50a0aafa8455442984c8d52a0d7db57ed1dae7d31c3e	94382
+pa_static_ccr	pa_st.bin.ccr	e5ae096f7b04f6f1122e5d36aaa789d800d86913fa4ccfa5a60e9a0963be429d	94621
+gt_ccr	gt.ccr	1fe6b8f14baeb0822b85ecf55763737ec2ce593f3aa34de14176cf5e39e28424	139344
+gt_static_ccr	gt_st.bin.ccr	f8cc44b139541b5672762336e692ef64e31b3fd6e2b5b08afc26843478b342a0	139583
 # ⚠ **本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下
@@ -261,3 +275,82 @@ gt_static_ccr	gt_st.bin.ccr	bbfe47897c8fb97f9cc38ffbfe6043577604ef86595760db55cd
 # 对**同一采集目录**跑 `--verify-only` ⇒ **F3 必红**（sha + size 双向不符）。
 # ⇒ 「值表与本表不一致时闸门必红」成立（本闸门非恒绿；此即 J-T7-1 反向对照在本「零变化」
 #    结论下的等价形态——**没有重锁就没有「改回旧值」**，故以「植入旧值即红」代之）。
+
+# ── 【本批重锁 2026-10-23】BigInt v9.1 / 默认 tagged 用户程序 ──
+#   canary_elf: 28854B → 53430B。归因 = 用户程序默认嵌入 raw BigInt 运行时 blob，
+#     且 pa 的 int 运算走 tagged 快路径；程序行为仍 rc=0。
+#   四条 .ccr: size 不变，sha 变。归因 = version 9 → v9.1 (0x00090001)，且编译器
+#     raw 标志占用 reserved 字段；段体布局未变。旧值留痕（作废）：
+#       pa_ccr        d6ebe3d175dea7322b39e3ca51366d854b6cb2e4b6efb47a05b0ed4fc21c1b10
+#       pa_static_ccr 041b6e3e83d915690324c5e453b49652207e9f919080e53d2ddec1060d595f62
+#       gt_ccr        edfd8e98d7b64fdb3a99e62bffc99954879432a48390bedbe98171348a49dd22
+#       gt_static_ccr bbfe47897c8fb97f9cc38ffbfe6043577604ef86595760db55cd7ac0781b0c97
+
+# ── 【本批重锁 2026-10-23】删除旧 2-limb/tag 路径（任务 9 收尾）──
+#   canary_elf: `dfae9d84…` → `826d74cf…`，size 不变（53430B）。
+#   归因（**编译器全局位移，非发射面回归**）：删除 `tag2l.cr` 及 18 个
+#   `g_x86_mw_*` 编译期全局（tag_off/cap/count、jo_pos/cap/count/dest/is_sub/resume、
+#   oc_pos1/pos2/cap/count/s1/s2/dest/op/resume）⇒ `corearch` 启动期登记集缩小
+#   ⇒ 被编译程序内嵌 intern id 顺移；机码语义未变，`pa` 运行仍 rc=0。
+#   四条 `.ccr` **逐字节不变**（`.ccr` 由 `corec` 前端生成，不含后端全局）。
+#   D1 确定性闸门 5/5 PASS（重锁前置已绿）。
+#   旧值留痕（自本批起作废）：canary_elf `dfae9d845362856fe3609ecd23fcb2deaaa7eae1d2ca39b7a242695513e9bb09` 53430。
+
+# ── 【本批重锁 2026-10-23】前端机器边界清理（三轴 target + builtin/Mapping）──
+#   四条 `.ccr`：size 全不变，sha 全变；canary ELF 不变。
+#   归因 = 编译器侧全局登记顺序改变：`g_rt_builtin_*` 从 checker.cr 移到 prelude.cr，
+#   内建表按 arch/os/runtime 三轴重组；用户程序 .ccr 内嵌的编译器 intern/身份随之位移，
+#   机码与语义未变。D1 5/5 PASS，ELF canary 逐字节不变。
+#   旧值留痕（自本批起作废）：
+#     pa_ccr        e581daf5a8e30f91745d3c0b6fb6ae6421422248507ec401a67228ae7c6c2355 96985
+#     pa_static_ccr a7d2433b0c78428ed93e434ccd617f1308362d7bb268764712d2972e243485a1 97128
+#     gt_ccr        21b1f39c96bd2242b963bb5a1726eb93b912739f77c31317da055d6b37d88103 143687
+#     gt_static_ccr 4949ff5437e1bc78a5e2f95e4fb05c07e20da0ed4bee35c58662f19bbdc60271 143830
+
+# ── 【本批重锁 2026-10-23】raw 内建改名 cell_store/cell_load ──
+#   四条 `.ccr` 各 +13B，sha 全变；ELF canary 不变。
+#   归因 = 编译器侧字符串表新增 `cell_store`/`cell_load` 并移除 `w64`/`r64`；
+#   用户程序语义和发射面未变。D1 5/5 PASS。
+#   旧值留痕（自本批起作废）：
+#     pa_ccr        8b0575e0060df241a697b2e2d78e1a128eeff3515b8444f178cf127e03077f7f 96985
+#     pa_static_ccr 667ca1f65421cc11cdc8935e070d663e2b4fa1b692e26e80dad75ace776103dd 97128
+#     gt_ccr        4df02acd1ea343601ae8a016cff093bf56d7a90f7b6b06c2811b1b3a3a2d3e41 143687
+#     gt_static_ccr bacd9eddd956dce88df3de675a29d0857d832c5a843781707a2e84b3c864f8a1 143830
+
+# ── 【本批重锁 2026-10-24】ccr v10 cutover（Task 4）──
+#   四条 `.ccr` 全变：header version 589825 → 0x000A0000、seg_count 8 → 9、
+#   段表 112B → 124B、段序改为 STR TYPE IFACE SYM NOD ENT REG EDG CASE、
+#   ENT 28B → 24B（去掉 home）、NOD 40B 的 tk/item 两槽改为 type_id/flags
+#   （src2/src3 不再携带访问宽度/步长/分配字节数，目标事实由 corearch 用
+#   type_id + x86-64 DataLayout 重建）、新增 4B 空 CASE 表。
+#   归因 = 容器与记录布局换代，非发射面回归：canary ELF 逐字节不变
+#   （826d74cf…），D1 5/5 PASS。旧值留痕（自本批起作废）：
+#     pa_ccr        6ef24784e9cf043f38141c1f6bcf809d4ac5b89fd71cb74a34ff771b7a13aacb 96998
+#     pa_static_ccr e1e7a1c1aeb8c883bb88b21be907f9fb0b1fd2c28185997adca84caf4d17bf33 97141
+#     gt_ccr        93ed0dc5cb33964df5857ba21738f6880700a5248098c3f043087e1369b26f23 143700
+#     gt_static_ccr a9e5343389de547a0ab9a9dde33b030877c44e5505deee24eb683715b700c88f 143843
+
+# ── 【本批重锁 2026-10-24】Task 4 review fix：header flags 语义更正 ──
+#   四条 `.ccr` size 不变、sha 全变；canary ELF 逐字节不变（826d74cf…）。
+#   归因 = 头部 flags 从「bit0 = raw-int」改为 spec §3.1 的程序特性：
+#   PORTABLE(1)/SYSTEM(2)/CONCURRENT(4)，raw-int 改为 corec 显式向 corearch
+#   传 `--raw-int`。用户语料 flags = PORTABLE(1)，旧值为 raw bit(1) 的
+#   偶然同值但语义不同（编译器 artifact 现在为 SYSTEM）。D1 5/5 PASS。
+#   旧值留痕（自本批起作废）：
+#     pa_ccr        f5fa7faa9e5fdf28db03dbd78e03e275e416cab06c222d4870a07aa12f98a77f 93710
+#     pa_static_ccr df9621c9a9bb45b27b777fb0b4d743602077b65775b1e11ae57b54c98bb4ba2c 93853
+#     gt_ccr        e7f06f04fcecf4fc767e2499566d9e59be6503fd5933f74808ca6783c8bf7308 138672
+#     gt_static_ccr 48d40ccb4f3bfdb7d412e669636ada6fac5a0ea2df95537ccb9749436c59e42b 138815
+
+
+# ── 【本批重锁 2026-10-24】final review fix：ENT 全局/参数存在行 + NOD type_id ──
+#   四条 `.ccr` size 增加（pa +672B = 28×24，gt +768B = 32×24）；sha 全变。
+#   归因 = spec §5 的实现补齐：每个全局 var 新增一条前导 ENT 行
+#   （def_nod=-1、flags bit2 GLOBAL），未引用参数新增 def=-1 参数行
+#   （flags bit1 PARAM）；同时 NOD type_id 对 DEREF/STORE_PTR/ALLOC*/FIELD/
+#   INDEX 等非类型面节点补语义域（不改记录宽度）。canary ELF 逐字节不变
+#   （826d74cf…），D1 5/5 PASS。旧值留痕（自本批起作废）：
+#     pa_ccr         f45a52584e647fa093e7b7d785aabfcd2d6a1ba520c2a560eaf0e0901a13cd2f 93710
+#     pa_static_ccr  d218b5218a9b05b32b3a9211ec3f6769084dd17b1bdf73012d56788b0631e388 93853
+#     gt_ccr         6f449f88f25291599e91b956f6f5951882453886747aa7873ecaf7235d765f65 138672
+#     gt_static_ccr  95001eea331f8c3bad0b26ce33116b21a08b0231066267cbe476e51f4cf00288 138815

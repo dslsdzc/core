@@ -1,0 +1,4 @@
+name = "corearch"
+arch = "x86_64"
+system = "linux"
+container = "elf"

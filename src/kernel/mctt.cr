@@ -95,14 +95,14 @@ fn ctx_extend(a : int):
         loop:
             if i >= g_ctx_len:
                 break
-            w64(nb , i * 8 , r64(g_ctx_buf , i * 8))
+            cell_store(nb , i * 8 , cell_load(g_ctx_buf , i * 8))
             i = i + 1
         g_ctx_buf = nb
         g_ctx_cap = nc
-    w64(g_ctx_buf , g_ctx_len * 8 , a)
+    cell_store(g_ctx_buf , g_ctx_len * 8 , a)
     g_ctx_len = g_ctx_len + 1
 
 fn ctx_get(x : int) -> int:
     if x < 0 || x >= g_ctx_len:
         return -1
-    return r64(g_ctx_buf , (g_ctx_len - 1 -x) * 8)
+    return cell_load(g_ctx_buf , (g_ctx_len - 1 -x) * 8)

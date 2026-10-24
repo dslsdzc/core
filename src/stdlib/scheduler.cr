@@ -76,21 +76,21 @@ fn runq_push(fi: int):
         loop:
             if ci >= g_runq_count:
                 break
-            w64(nb, ci * 8, r64(g_runq, pos * 8))
+            cell_store(nb, ci * 8, cell_load(g_runq, pos * 8))
             pos = (pos + 1) % g_runq_cap
             ci = ci + 1
         g_runq = nb
         g_runq_head = 0
         g_runq_tail = g_runq_count
         g_runq_cap = nc
-    w64(g_runq, g_runq_tail * 8, fi)
+    cell_store(g_runq, g_runq_tail * 8, fi)
     g_runq_tail = (g_runq_tail + 1) % g_runq_cap
     g_runq_count = g_runq_count + 1
 
 fn runq_pop() -> int:
     if g_runq_count <= 0:
         return -1
-    fi := r64(g_runq, g_runq_head * 8)
+    fi := cell_load(g_runq, g_runq_head * 8)
     g_runq_head = (g_runq_head + 1) % g_runq_cap
     g_runq_count = g_runq_count - 1
     return fi
@@ -100,10 +100,10 @@ fn fiber_spawn(fn_idx: int) -> int:
     loop:
         if i >= g_fiber_count:
             break
-        if r64(g_fibers, i * 32 + 16) == FIBER_FREE:
-            w64(g_fibers, i * 32, fn_idx)
-            w64(g_fibers, i * 32 + 8, arena.arena_new())
-            w64(g_fibers, i * 32 + 16, FIBER_RUNNABLE)
+        if cell_load(g_fibers, i * 32 + 16) == FIBER_FREE:
+            cell_store(g_fibers, i * 32, fn_idx)
+            cell_store(g_fibers, i * 32 + 8, arena.arena_new())
+            cell_store(g_fibers, i * 32 + 16, FIBER_RUNNABLE)
             runq_push(i)
             return i
         i = i + 1
@@ -116,10 +116,10 @@ fn fiber_spawn(fn_idx: int) -> int:
     fi := g_fiber_count
     g_fiber_count = g_fiber_count + 1
     off := fi * 32
-    w64(g_fibers, off, fn_idx)
-    w64(g_fibers, off + 8, arena.arena_new())
-    w64(g_fibers, off + 16, FIBER_RUNNABLE)
-    w64(g_fibers, off + 24, 0)
+    cell_store(g_fibers, off, fn_idx)
+    cell_store(g_fibers, off + 8, arena.arena_new())
+    cell_store(g_fibers, off + 16, FIBER_RUNNABLE)
+    cell_store(g_fibers, off + 24, 0)
     runq_push(fi)
     return fi
 
@@ -127,33 +127,33 @@ fn fiber_yield():
     if g_cur_fiber < 0:
         return
     off := g_cur_fiber * 32
-    if r64(g_fibers, off + 16) == FIBER_RUNNABLE:
+    if cell_load(g_fibers, off + 16) == FIBER_RUNNABLE:
         runq_push(g_cur_fiber)
 
 fn fiber_wait(target: int):
     if g_cur_fiber < 0:
         return
     off := g_cur_fiber * 32
-    w64(g_fibers, off + 16, FIBER_WAITING)
-    w64(g_fibers, off + 24, target)
+    cell_store(g_fibers, off + 16, FIBER_WAITING)
+    cell_store(g_fibers, off + 24, target)
 
 fn fiber_wake(fi: int):
     if fi < 0:
         return
     off := fi * 32
-    if r64(g_fibers, off + 16) == FIBER_WAITING:
-        w64(g_fibers, off + 16, FIBER_RUNNABLE)
-        w64(g_fibers, off + 24, 0)
+    if cell_load(g_fibers, off + 16) == FIBER_WAITING:
+        cell_store(g_fibers, off + 16, FIBER_RUNNABLE)
+        cell_store(g_fibers, off + 24, 0)
         runq_push(fi)
 
 fn fiber_done(fi: int):
     if fi < 0 || fi >= g_fiber_count:
         return
     off := fi * 32
-    ai := r64(g_fibers, off + 8)
+    ai := cell_load(g_fibers, off + 8)
     if ai >= 0:
         arena.arena_reset(ai)
-    w64(g_fibers, off + 16, FIBER_DONE)
+    cell_store(g_fibers, off + 16, FIBER_DONE)
 
 fn sched_run():
     loop:
@@ -162,7 +162,7 @@ fn sched_run():
             break
         g_cur_fiber = fi
         off := fi * 32
-        if r64(g_fibers, off + 16) != FIBER_RUNNABLE:
+        if cell_load(g_fibers, off + 16) != FIBER_RUNNABLE:
             continue
         // Placeholder: fibers complete immediately in interpreter mode.
         // Native backend (corearch) will call the actual function pointer

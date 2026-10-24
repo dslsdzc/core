@@ -25,10 +25,16 @@
 #     · `test_region_cfg.py`（0.9s）· `test_live_ranges.py`（1.4s）
 #     · `test_backend_bootstrap.py`（**22.5s**；allowlist 原自标「最高危」= N06 唯一门，
 #     本批实测时长后判定可挂）→ `selfhost-tests`（时长 = 本批本机实测，逐条与 run.sh 行注一致）
-#   - 未挂项仍列下方；`test_mw_task1-6`（口径换代，本批只登记结论）见对应条目说明。
+#   - 未挂项仍列下方（旧 `test_mw_task1-6` 已随 2-limb 路径删除）。
 
-# ─── tests/selfhost（18 条；未挂）───
+# ─── tests/selfhost（12 条；未挂）───
 tests/selfhost/test_apx_tag.py	未挂（历史缺口）：需 corec 端到端；挂点属构建面 ⇒ 与其它编译器型未挂档同批评估
+tests/selfhost/test_ccrb_bundle.py	未挂：需外部 zstd（CI 镜像未保证）；`.ccrb` 是分发包装层，核心 v10 raw `.ccr` 闸门已由 test_ccr_v10_format/stream 覆盖。接入条件 = CI 镜像声明 zstd 依赖
+tests/selfhost/test_bigint_arith.py	未挂（历史缺口）：BigInt 运行时端到端，需 corec+ELF；构建面成本高，独立批评估
+tests/selfhost/test_bigint_boundaries.py	未挂（历史缺口）：BigInt 边界语义，需 corec；与 arith 同族
+tests/selfhost/test_bigint_containers.py	未挂（历史缺口）：BigInt 容器载荷，需 corec+ELF
+tests/selfhost/test_bigint_interp.py	未挂（历史缺口）：BigInt 解释器路径，需 corec
+tests/selfhost/test_bigint_literals.py	未挂（历史缺口）：BigInt 字面量，需 corec
 tests/selfhost/test_dex_arith.py	未挂（历史缺口）：dex 定点语义；需 corec
 tests/selfhost/test_dex_type.py	未挂（历史缺口）：dex 类型核心；需 corec
 tests/selfhost/test_directory_build.py	未挂（历史缺口）：目录路径工程构建；需 corec+corearch
@@ -36,18 +42,14 @@ tests/selfhost/test_global_init.py	未挂（历史缺口）：全局初始化语
 tests/selfhost/test_interp_float.py	未挂（历史缺口）：解释器 dex/enum/dyn/pointer；需 corec
 tests/selfhost/test_lexer_parity.py	未挂（历史缺口）：词法对照（两编译器均拒 `_`/宽度后缀）；需 corec
 tests/selfhost/test_lsp.py	未挂（**TODO #2026-09-11-13 点名**）：corelsp 八组集成；进程级 ⇒ 挂点须实测时长
-tests/selfhost/test_mw_task1.py	未挂（历史缺口）：int 多字 M1 边界套件族；需 corec
-tests/selfhost/test_mw_task2.py	未挂（同族）。**现状（判据载体化批 2026-09-16 实核）**：其零 diff 断言（`:284-303`）原先「基线不在就 [SKIP]」而基线在 build/（不入库）+ run.sh 从不传 --snapshot ⇒ **判据可整体静默消失**（新克隆/CI 恒 SKIP 且 rc=0）。本批已改为**默认 fail-closed**（缺基线 ⇒ FAIL；仅显式 --allow-skip/--skip-zdiff 才降级）。**为何仍未挂 CI**：零 diff 腿的基线必须在**改动前**编译器上产（--snapshot），CI 每次都是改动后的树 ⇒ 该腿的**参照物结构性不可得**，挂上去只会恒 FAIL 或被迫 --allow-skip（= 挂了等于没挂）。若要机器化，需把基线**入仓**（二进制不入库纪律冲突，须先取裁）或改为「结构断言 + 语义零变化」口径（TODO #2026-09-11-9 口径）⇒ **成本 = 中高，且属口径换代不是挂点扩容**。
-tests/selfhost/test_mw_task3.py	未挂（同族）
-tests/selfhost/test_mw_task4.py	未挂（同族）
-tests/selfhost/test_mw_task5.py	未挂（同族）
-tests/selfhost/test_mw_task6.py	未挂（同族）
 tests/selfhost/test_native_float.py	未挂（历史缺口）：Native ELF dex 运算
 tests/selfhost/test_native_memory.py	未挂（历史缺口）：Native ELF 聚合寻址
 tests/selfhost/test_native_strings.py	未挂（历史缺口）：Native ELF 字符串头
 
 # ─── tests/bootstrap（4 条；未挂）───
 tests/bootstrap/test_apx_tag.py	未挂（历史缺口）：bootstrap 面 apx 标签（与 selfhost 同名档配对）
+tests/bootstrap/test_bigint_frontend.py	未挂（历史缺口）：BigInt 前端语义，需 bootstrap 管线
+tests/bootstrap/test_bigint_pipeline.py	未挂（历史缺口）：BigInt 管线端到端，需 bootstrap 管线
 tests/bootstrap/test_dex_arith.py	未挂（历史缺口）：bootstrap dex 精确运算
 tests/bootstrap/test_dex_type.py	未挂（历史缺口）：bootstrap dex 类型核心
 tests/bootstrap/test_modules.py	未挂（历史缺口）：bootstrap import alias 回归

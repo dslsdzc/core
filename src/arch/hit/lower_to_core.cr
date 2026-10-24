@@ -34,7 +34,7 @@
 //
 // This file is part of two builds: the corearch concat list, after common and
 // before the kernel and architecture files, and the project-mode unit
-// src/targets/x86_64-linux/_import.cr. The import lines also let standalone
+// src/targets/x86_64/linux/elf/_import.cr. The import lines also let standalone
 // `corec check` and project mode resolve symbols; concat builds strip them.
 
 import io
@@ -167,14 +167,14 @@ fn hit_rel_add(kind: int, pos: int, target: int):
     hit_grow_rel(g_hit_rel_count + 1)
     slot : ., mut = g_hit_rel_count
     g_hit_rel_count = slot + 1
-    w64(g_hit_rel, slot * 24, kind)
-    w64(g_hit_rel, slot * 24 + 8, pos)
-    w64(g_hit_rel, slot * 24 + 16, target)
+    cell_store(g_hit_rel, slot * 24, kind)
+    cell_store(g_hit_rel, slot * 24 + 8, pos)
+    cell_store(g_hit_rel, slot * 24 + 16, target)
 
 // Record the emission byte position of an event ordinal before its bytes are written.
 fn hit_ev_pos_set(ord: int, pos: int):
     hit_grow_ev_pos(ord + 1)
-    w64(g_hit_ev_pos, ord * 8, pos)
+    cell_store(g_hit_ev_pos, ord * 8, pos)
     if ord + 1 > g_hit_ev_pos_count:
         g_hit_ev_pos_count = ord + 1
 
@@ -284,7 +284,7 @@ fn hit_pool_intern(v: int) -> int:
     loop:
         if k >= g_hit_pool_count:
             break
-        if r64(g_hit_pool, k * 8) == v:
+        if cell_load(g_hit_pool, k * 8) == v:
             return k
         k = k + 1
     hit_grow_pool(g_hit_pool_count + 1)
@@ -296,15 +296,15 @@ fn hit_pool_intern(v: int) -> int:
 fn hit_pool_total() -> int:
     return g_hit_pool_count
 fn hit_pool_val(k: int) -> int:
-    return r64(g_hit_pool, k * 8)
+    return cell_load(g_hit_pool, k * 8)
 
 // Record a pool reference at a byte position. elf.cr patches it after rodata is final.
 fn hit_pool_patch_add(pos: int, k: int):
     hit_grow_pool_patch(g_hit_pool_patch_count + 1)
     slot : ., mut = g_hit_pool_patch_count
     g_hit_pool_patch_count = slot + 1
-    w64(g_hit_pool_patch, slot * 16, pos)
-    w64(g_hit_pool_patch, slot * 16 + 8, k)
+    cell_store(g_hit_pool_patch, slot * 16, pos)
+    cell_store(g_hit_pool_patch, slot * 16 + 8, k)
 
 // ------------------------------------------------------------------
 // Lowering rules: straight-line IR to event stream
@@ -398,15 +398,15 @@ fn hit_lower_program() -> int:
     loop:
         if fi >= g_ir_func_count:
             break
-        if str_eq(istr_get(r64(g_ir_func_name_idx, fi * 8)), "main") != 0:
+        if str_eq(istr_get(cell_load(g_ir_func_name_idx, fi * 8)), "main") != 0:
             entry = fi
             break
         fi = fi + 1
     if entry < 0:
         return 0
     // No main means there is nothing to lower; use the normal path.
-    ist := r64(g_ir_func_instr_start, entry * 8)
-    ic := r64(g_ir_func_instr_count, entry * 8)
+    ist := cell_load(g_ir_func_instr_start, entry * 8)
+    ic := cell_load(g_ir_func_instr_count, entry * 8)
     ii : ., mut = 0
     loop:
         if ii >= ic:
@@ -703,7 +703,7 @@ fn hit_inject_events(path: string) -> int:
     loop:
         if fi >= g_ir_func_count:
             break
-        if str_eq(istr_get(r64(g_ir_func_name_idx, fi * 8)), "main") != 0:
+        if str_eq(istr_get(cell_load(g_ir_func_name_idx, fi * 8)), "main") != 0:
             entry = fi
             break
         fi = fi + 1
@@ -717,8 +717,8 @@ fn hit_inject_events(path: string) -> int:
             break
         hit_ev_map_set(mi, 0, 0)
         mi = mi + 1
-    ist := r64(g_ir_func_instr_start, entry * 8)
-    ic := r64(g_ir_func_instr_count, entry * 8)
+    ist := cell_load(g_ir_func_instr_start, entry * 8)
+    ic := cell_load(g_ir_func_instr_count, entry * 8)
     cur : ., mut = 0   // next unattached line
     ii : ., mut = 0
     loop:

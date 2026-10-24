@@ -16,7 +16,7 @@ fn grow_open_docs(needed: int):
     if ncap < needed:
         ncap = needed + 8
     nb := alloc(ncap * 24)
-    _dyncpy(g_open_docs, g_open_doc_cap * 24, nb)
+    cell_copy(g_open_docs, g_open_doc_cap * 24, nb)
     g_open_docs = nb
     g_open_doc_cap = ncap
 
@@ -25,15 +25,15 @@ fn module_open_doc_set(path: string, src: string):
     loop:
         if i >= g_open_doc_count:
             break
-        if str_eq(load_str_ptr(g_open_docs, i * 24), path) != 0:
-            store_str_ptr(g_open_docs, i * 24 + 8, src)
-            w64(g_open_docs, i * 24 + 16, str_len(src))
+        if str_eq(cell_load_str(g_open_docs, i * 24), path) != 0:
+            cell_store_str(g_open_docs, i * 24 + 8, src)
+            cell_store(g_open_docs, i * 24 + 16, str_len(src))
             return
         i = i + 1
     grow_open_docs(g_open_doc_count + 1)
-    store_str_ptr(g_open_docs, g_open_doc_count * 24, path)
-    store_str_ptr(g_open_docs, g_open_doc_count * 24 + 8, src)
-    w64(g_open_docs, g_open_doc_count * 24 + 16, str_len(src))
+    cell_store_str(g_open_docs, g_open_doc_count * 24, path)
+    cell_store_str(g_open_docs, g_open_doc_count * 24 + 8, src)
+    cell_store(g_open_docs, g_open_doc_count * 24 + 16, str_len(src))
     g_open_doc_count = g_open_doc_count + 1
 
 fn module_open_doc_remove(path: string):
@@ -41,14 +41,14 @@ fn module_open_doc_remove(path: string):
     loop:
         if i >= g_open_doc_count:
             break
-        if str_eq(load_str_ptr(g_open_docs, i * 24), path) != 0:
+        if str_eq(cell_load_str(g_open_docs, i * 24), path) != 0:
             j : ., mut = i + 1
             loop:
                 if j >= g_open_doc_count:
                     break
-                store_str_ptr(g_open_docs, (j - 1) * 24, load_str_ptr(g_open_docs, j * 24))
-                store_str_ptr(g_open_docs, (j - 1) * 24 + 8, load_str_ptr(g_open_docs, j * 24 + 8))
-                w64(g_open_docs, (j - 1) * 24 + 16, r64(g_open_docs, j * 24 + 16))
+                cell_store_str(g_open_docs, (j - 1) * 24, cell_load_str(g_open_docs, j * 24))
+                cell_store_str(g_open_docs, (j - 1) * 24 + 8, cell_load_str(g_open_docs, j * 24 + 8))
+                cell_store(g_open_docs, (j - 1) * 24 + 16, cell_load(g_open_docs, j * 24 + 16))
                 j = j + 1
             g_open_doc_count = g_open_doc_count - 1
             return
@@ -60,8 +60,8 @@ fn module_get_source(path: string) -> string:
     loop:
         if i >= g_open_doc_count:
             break
-        if str_eq(load_str_ptr(g_open_docs, i * 24), path) != 0:
-            return load_str_ptr(g_open_docs, i * 24 + 8)
+        if str_eq(cell_load_str(g_open_docs, i * 24), path) != 0:
+            return cell_load_str(g_open_docs, i * 24 + 8)
         i = i + 1
     return read_file(path)
 
@@ -84,19 +84,19 @@ fn get_fileid(s: string) -> string:
         if i + 6 >= slen:
             return ""
         // Inline "fileid" check — int-based, no str_sub/str_eq
-        if load8(s, i) == 102 && load8(s, i+1) == 105 && load8(s, i+2) == 108 && load8(s, i+3) == 101 && load8(s, i+4) == 105 && load8(s, i+5) == 100:
+        if cell_load_byte(s, i) == 102 && cell_load_byte(s, i+1) == 105 && cell_load_byte(s, i+2) == 108 && cell_load_byte(s, i+3) == 101 && cell_load_byte(s, i+4) == 105 && cell_load_byte(s, i+5) == 100:
             j : ., mut = i + 6
             loop:
                 if j >= slen:
                     return ""
-                if load8(s, j) == 34:
+                if cell_load_byte(s, j) == 34:
                     // '"'
                     start := j + 1
                     k : ., mut = start
                     loop:
                         if k >= slen:
                             return ""
-                        if load8(s, k) == 34:
+                        if cell_load_byte(s, k) == 34:
                             // '"'
                             return str_sub(s, start, k - start)
                         k = k + 1
@@ -179,12 +179,12 @@ fn reg_fileid(fileid_str: string, path: string) -> int:
     loop:
         if fi >= g_file_count:
             break
-        if r64(g_files, fi * 16) == fni:
+        if cell_load(g_files, fi * 16) == fni:
             return fni
         fi = fi + 1
     grow_files(g_file_count + 1)
-    w64(g_files, g_file_count * 16, fni)
-    store_str_ptr(g_files, g_file_count * 16 + 8, path)
+    cell_store(g_files, g_file_count * 16, fni)
+    cell_store_str(g_files, g_file_count * 16 + 8, path)
     g_file_count = g_file_count + 1
     return fni
 
@@ -194,7 +194,7 @@ fn build_line_fileid():
     slen := str_len(g_source)
     seg_idx : ., mut = 0
     grow_line_file(g_line_count + 1)
-    w64(g_line_fileid, g_line_count * 8, r64(g_seg_fileids, 0))
+    cell_store(g_line_fileid, g_line_count * 8, cell_load(g_seg_fileids, 0))
     g_line_count = g_line_count + 1
     pos : ., mut = 0
     loop:
@@ -204,12 +204,12 @@ fn build_line_fileid():
             next_start := 0
             next_fileid := -1
             if seg_idx + 1 < g_seg_count:
-                next_start = r64(g_seg_starts, (seg_idx + 1) * 8)
-                next_fileid = r64(g_seg_fileids, (seg_idx + 1) * 8)
+                next_start = cell_load(g_seg_starts, (seg_idx + 1) * 8)
+                next_fileid = cell_load(g_seg_fileids, (seg_idx + 1) * 8)
             if next_fileid >= 0 && pos + 1 >= next_start:
                 seg_idx = seg_idx + 1
             grow_line_file(g_line_count + 1)
-            w64(g_line_fileid, g_line_count * 8, r64(g_seg_fileids, seg_idx * 8))
+            cell_store(g_line_fileid, g_line_count * 8, cell_load(g_seg_fileids, seg_idx * 8))
             g_line_count = g_line_count + 1
         pos = pos + 1
 
@@ -230,7 +230,7 @@ fn reg_so_funcs(index_content: string, so_name: string):
         loop:
             if line_end >= sl:
                 break
-            c := load8(index_content, line_end)
+            c := cell_load_byte(index_content, line_end)
             if c == 10:
                 break
             // \n
@@ -241,7 +241,7 @@ fn reg_so_funcs(index_content: string, so_name: string):
         // Skip empty lines and comments
         if str_len(line) == 0:
             continue
-        c0 := load8(line, 0)
+        c0 := cell_load_byte(line, 0)
         if c0 == 35 || c0 == 10 || c0 == 13:
             continue
         // #, \n, \r
@@ -252,7 +252,7 @@ fn reg_so_funcs(index_content: string, so_name: string):
         loop:
             if ci >= str_len(line):
                 break
-            if load8(line, ci) == 58:
+            if cell_load_byte(line, ci) == 58:
                 colon_pos = ci
                 break
             // :
@@ -276,7 +276,7 @@ fn reg_so_funcs(index_content: string, so_name: string):
         loop:
             if ai + 2 > rl:
                 break
-            if load8(rest, ai) == 45 && ai + 1 < rl && load8(rest, ai+1) == 62:
+            if cell_load_byte(rest, ai) == 45 && ai + 1 < rl && cell_load_byte(rest, ai+1) == 62:
                 // ->
                 arrow_pos = ai
                 break
@@ -293,7 +293,7 @@ fn reg_so_funcs(index_content: string, so_name: string):
             loop:
                 if rci >= str_len(ret_str):
                     break
-                if load8(ret_str, rci) == 44:
+                if cell_load_byte(ret_str, rci) == 44:
                     ret_comma = rci
                     break
                 rci = rci + 1
@@ -308,7 +308,7 @@ fn reg_so_funcs(index_content: string, so_name: string):
                 loop:
                     if tri >= str_len(ret_type):
                         break
-                    tc := load8(ret_type, tri)
+                    tc := cell_load_byte(ret_type, tri)
                     if tc != 32:
                         trim_rt = trim_rt + get_char(ret_type, tri)
                     tri = tri + 1
@@ -324,19 +324,19 @@ fn reg_so_funcs(index_content: string, so_name: string):
             if pi >= pl:
                 break
             // Skip whitespace
-            while pi < pl && load8(params_str, pi) == 32:
+            while pi < pl && cell_load_byte(params_str, pi) == 32:
                 pi = pi + 1
             if pi >= pl:
                 break
             // Find comma or end
             item_end : ., mut = pi
-            while item_end < pl && load8(params_str, item_end) != 44:
+            while item_end < pl && cell_load_byte(params_str, item_end) != 44:
                 item_end = item_end + 1
             item := str_sub(params_str, pi, item_end - pi)
             // Trim whitespace
-            while str_len(item) > 0 && load8(item, 0) == 32:
+            while str_len(item) > 0 && cell_load_byte(item, 0) == 32:
                 item = str_sub(item, 1, str_len(item)-1)
-            while str_len(item) > 0 && load8(item, str_len(item)-1) == 32:
+            while str_len(item) > 0 && cell_load_byte(item, str_len(item)-1) == 32:
                 item = str_sub(item, 0, str_len(item)-1)
 
             if str_len(item) > 0:
@@ -357,17 +357,17 @@ fn reg_so_funcs(index_content: string, so_name: string):
         loop:
             if ti >= tl:
                 break
-            while ti < tl && load8(tags_str, ti) == 32:
+            while ti < tl && cell_load_byte(tags_str, ti) == 32:
                 ti = ti + 1
             if ti >= tl:
                 break
             item_end2 : ., mut = ti
-            while item_end2 < tl && load8(tags_str, item_end2) != 44:
+            while item_end2 < tl && cell_load_byte(tags_str, item_end2) != 44:
                 item_end2 = item_end2 + 1
             item2 := str_sub(tags_str, ti, item_end2 - ti)
-            while str_len(item2) > 0 && load8(item2, 0) == 32:
+            while str_len(item2) > 0 && cell_load_byte(item2, 0) == 32:
                 item2 = str_sub(item2, 1, str_len(item2)-1)
-            while str_len(item2) > 0 && load8(item2, str_len(item2)-1) == 32:
+            while str_len(item2) > 0 && cell_load_byte(item2, str_len(item2)-1) == 32:
                 item2 = str_sub(item2, 0, str_len(item2)-1)
             if item2 == "variadic":
                 tag_flags = tag_flags + TAG_VARIADIC
@@ -384,12 +384,12 @@ fn reg_so_funcs(index_content: string, so_name: string):
                 break
             // Skip to next param (comma-separated)
             pn_start : ., mut = pti
-            while pti < str_len(param_types) && load8(param_types, pti) != 44:
+            while pti < str_len(param_types) && cell_load_byte(param_types, pti) != 44:
                 pti = pti + 1
             pname := str_sub(param_types, pn_start, pti - pn_start)
-            while str_len(pname) > 0 && load8(pname, 0) == 32:
+            while str_len(pname) > 0 && cell_load_byte(pname, 0) == 32:
                 pname = str_sub(pname, 1, str_len(pname)-1)
-            while str_len(pname) > 0 && load8(pname, str_len(pname)-1) == 32:
+            while str_len(pname) > 0 && cell_load_byte(pname, str_len(pname)-1) == 32:
                 pname = str_sub(pname, 0, str_len(pname)-1)
             if str_len(pname) > 0 && param_count < 8:
                 // Encode type: int=0, string=1, unit=2, dex=3（binary64 跨 C 边界 = apx 授权）, bool=4, other=5
@@ -407,7 +407,7 @@ fn reg_so_funcs(index_content: string, so_name: string):
                 // Decimal encoding: packed positionally
                 param_type_bits = param_type_bits * 100 + ptype_code
                 param_count = param_count + 1
-            if pti < str_len(param_types) && load8(param_types, pti) == 44:
+            if pti < str_len(param_types) && cell_load_byte(param_types, pti) == 44:
                 pti = pti + 1
 
         // Encode return type
@@ -434,9 +434,9 @@ fn reg_so_funcs(index_content: string, so_name: string):
         // dynamically, so no fixed 128-entry buffer is needed.
         ssi : ., mut = g_so_side_count
         grow_so_side(ssi + 1)
-        store_str_ptr(g_so_side_name, ssi * 8, func_name)
-        w64(g_so_side_tags, ssi * 8, tag_flags)
-        w64(g_so_side_type, ssi * 8, type_encoding)
+        cell_store_str(g_so_side_name, ssi * 8, func_name)
+        cell_store(g_so_side_tags, ssi * 8, tag_flags)
+        cell_store(g_so_side_type, ssi * 8, type_encoding)
         g_so_side_count = ssi + 1
 
 // Look up a side-table entry by name and return its index, or -1. Names are
@@ -447,7 +447,7 @@ fn find_so_side(name_idx: int) -> int:
     loop:
         if i >= g_so_side_count:
             return -1
-        if str_eq(istr_get(name_idx), load_str_ptr(g_so_side_name, i * 8)) != 0:
+        if str_eq(istr_get(name_idx), cell_load_str(g_so_side_name, i * 8)) != 0:
             return i
         i = i + 1
     return -1
@@ -457,13 +457,13 @@ fn find_so_side(name_idx: int) -> int:
 // otherwise an index file in the user's home directory could override a
 // declaration in user source.
 fn so_materialize(side_i: int) -> int:
-    fni := str_intern(load_str_ptr(g_so_side_name, side_i * 8))
+    fni := str_intern(cell_load_str(g_so_side_name, side_i * 8))
     si := g_sym_count
     grow_syms(si + 1)
     sym_set_name(si, fni)
     sym_set_kind(si, SYM_SO_FN)
-    sym_set_type(si, r64(g_so_side_tags, side_i * 8))
-    sym_set_node(si, r64(g_so_side_type, side_i * 8))
+    sym_set_type(si, cell_load(g_so_side_tags, side_i * 8))
+    sym_set_node(si, cell_load(g_so_side_type, side_i * 8))
     g_sym_count = si + 1
     return si
 
@@ -509,8 +509,8 @@ fn res_imports():
 
     // First segment: main source
     grow_segs(g_seg_count + 1)
-    w64(g_seg_starts, g_seg_count * 8, 0)
-    w64(g_seg_fileids, g_seg_count * 8, main_fni)
+    cell_store(g_seg_starts, g_seg_count * 8, 0)
+    cell_store(g_seg_fileids, g_seg_count * 8, main_fni)
     g_seg_count = g_seg_count + 1
 
     total_accumulated : ., mut = 0
@@ -526,34 +526,34 @@ fn res_imports():
         loop:
             if i >= g_token_count:
                 break
-            tk := r64(g_tokens, i * ESZ_TOKEN + OFF_TK_KIND)
+            tk := cell_load(g_tokens, i * ESZ_TOKEN + OFF_TK_KIND)
 
             if tk == T_IMPORT:
                 pos : ., mut = i + 1
                 is_project : ., mut = false
                 project_name : ., mut = ""
-                if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_AT:
+                if pos < g_token_count && cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_AT:
                     is_project = true
                     pos = pos + 1
-                    if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT:
-                        project_name = istr_get(r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME))
+                    if pos < g_token_count && cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT:
+                        project_name = istr_get(cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME))
                         pos = pos + 1
                 import_fileid : ., mut = ""
-                if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT:
-                    import_fileid = istr_get(r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME))
+                if pos < g_token_count && cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT:
+                    import_fileid = istr_get(cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME))
                     pos = pos + 1
                     // Handle :: segments: backend::x86_64 -> backend::x86_64
                     loop:
-                        if pos + 1 < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_PATHSEP && r64(g_tokens, (pos + 1) * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT:
-                            import_fileid = import_fileid + "::" + istr_get(r64(g_tokens, (pos + 1) * ESZ_TOKEN + OFF_TK_LEXEME))
+                        if pos + 1 < g_token_count && cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_PATHSEP && cell_load(g_tokens, (pos + 1) * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT:
+                            import_fileid = import_fileid + "::" + istr_get(cell_load(g_tokens, (pos + 1) * ESZ_TOKEN + OFF_TK_LEXEME))
                             pos = pos + 2
                         else:
                             break
                 alias_str : ., mut = ""
-                if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_COLON_DECL:
+                if pos < g_token_count && cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_COLON_DECL:
                     pos = pos + 1
-                    if pos < g_token_count && r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT:
-                        alias_str = istr_get(r64(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME))
+                    if pos < g_token_count && cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_KIND) == T_IDENT:
+                        alias_str = istr_get(cell_load(g_tokens, pos * ESZ_TOKEN + OFF_TK_LEXEME))
                         pos = pos + 1
                 path : ., mut = ""
                 content : ., mut = ""
@@ -584,7 +584,7 @@ fn res_imports():
                         loop:
                             if pi >= str_len(fs_path):
                                 break
-                            if load8(fs_path, pi) == 58 && pi + 1 < str_len(fs_path) && load8(fs_path, pi+1) == 58:
+                            if cell_load_byte(fs_path, pi) == 58 && pi + 1 < str_len(fs_path) && cell_load_byte(fs_path, pi+1) == 58:
                                 fs_path = str_sub(fs_path, 0, pi) + "/" + str_sub(fs_path, pi+2, str_len(fs_path)-pi-2)
                             pi = pi + 1
                         // Try .so extension index: $HOME/.core/lib/<name>/index
@@ -598,58 +598,26 @@ fn res_imports():
                         // the bootstrap-built corec evaluates both sides of &&.
                         home_dir : ., mut = get_env("HOME")
                         if str_len(home_dir) > 0:
-                            so_idx_path : ., mut = home_dir + "/.core/lib/" + fs_path + "/index"
+                            so_idx_path : ., mut = target_so_index_path(home_dir, fs_path)
                             so_idx := read_file(so_idx_path)
                             if str_len(so_idx) > 0:
                                 reg_so_funcs(so_idx, fs_path)
-                        // Always load .cr for runtime implementation
-                        // （module_get_source：打开文档优先，未打开读盘）
+                        // Search the target's import roots. The target owns the
+                        // directory order and the three-axis namespace; module.cr
+                        // only asks for root i and appends the import path.
                         path = g_source_dir + fs_path + ".cr"
                         content = module_get_source(path)
-                        if str_len(content) == 0:
-                            path = "src/stdlib/" + fs_path + ".cr"
-                            content = module_get_source(path)
-                        if str_len(content) == 0:
-                            path = "src/runtime/" + fs_path + ".cr"
-                            content = module_get_source(path)
-                        // Architecture, format, and OS directories. These are the only
-                        // path for cross-axis imports. They come before src/compiler so
-                        // an instance-specific file wins over the generic file. The
-                        // existing names do not overlap: these directories contain
-                        // instr, sizes, regalloc, elf, resolve, and ld, none of which
-                        // exist in the earlier search directories.
-                        if str_len(content) == 0:
-                            path = "src/format/elf/" + fs_path + ".cr"
-                            content = module_get_source(path)
-                        if str_len(content) == 0:
-                            path = "src/arch/x86_64/" + fs_path + ".cr"
-                            content = module_get_source(path)
-                        if str_len(content) == 0:
-                            path = "src/os/linux/" + fs_path + ".cr"
-                            content = module_get_source(path)
-                        if str_len(content) == 0:
-                            path = "src/compiler/" + fs_path + ".cr"
-                            content = module_get_source(path)
-                        if str_len(content) == 0:
-                            path = "src/arch/hit/" + fs_path + ".cr"
-                            content = module_get_source(path)
-                        // ent_kernel.cr is the semantic kernel under src/lattice. It was
-                        // moved out of the old instance directory when the x86
-                        // instance was split into the architecture, format, and OS
-                        // axes. Both corec and corearch import it: the corec writer
-                        // calls compute_live_ranges and grow_entries, and backend
-                        // units reach it through this path.
-                        if str_len(content) == 0:
-                            path = "src/lattice/" + fs_path + ".cr"
-                            content = module_get_source(path)
-                        // Combination root named by the target triple. Project mode
-                        // reads main.cr and _import.cr directly from this directory.
-                        // It comes after compiler and lattice because main.cr here is
-                        // not an import target and must not shadow the existing main
-                        // or entry imports.
-                        if str_len(content) == 0:
-                            path = "src/targets/x86_64-linux/" + fs_path + ".cr"
-                            content = module_get_source(path)
+                        ri : ., mut = 0
+                        loop:
+                            if str_len(content) > 0:
+                                break
+                            if ri >= target_import_root_count():
+                                break
+                            root := target_import_root(ri)
+                            if str_len(root) > 0:
+                                path = root + fs_path + ".cr"
+                                content = module_get_source(path)
+                            ri = ri + 1
                         if str_len(content) == 0:
                             path = fs_path + ".cr"
                             content = module_get_source(path)
@@ -669,7 +637,7 @@ fn res_imports():
                     loop:
                         if mi >= g_mod_count:
                             break
-                        if r64(g_mods, mi * 24 + 8) == loaded_fni:
+                        if cell_load(g_mods, mi * 24 + 8) == loaded_fni:
                             already_loaded = 1
                             break
                         mi = mi + 1
@@ -682,8 +650,8 @@ fn res_imports():
                     any_new = 1
                     seg_byte := main_len + total_accumulated + pass_bytes + 1
                     grow_segs(g_seg_count + 1)
-                    w64(g_seg_starts, g_seg_count * 8, seg_byte)
-                    w64(g_seg_fileids, g_seg_count * 8, loaded_fni)
+                    cell_store(g_seg_starts, g_seg_count * 8, seg_byte)
+                    cell_store(g_seg_fileids, g_seg_count * 8, loaded_fni)
                     g_seg_count = g_seg_count + 1
                     pass_bytes = pass_bytes + 1 + content_len
                     alias_ni : ., mut = -1
@@ -692,9 +660,9 @@ fn res_imports():
                     else:
                         alias_ni = loaded_fni
                     grow_mods(g_mod_count + 1)
-                    w64(g_mods, g_mod_count * 24, alias_ni)
-                    w64(g_mods, g_mod_count * 24 + 8, loaded_fni)
-                    store_str_ptr(g_mods, g_mod_count * 24 + 16, path)
+                    cell_store(g_mods, g_mod_count * 24, alias_ni)
+                    cell_store(g_mods, g_mod_count * 24 + 8, loaded_fni)
+                    cell_store_str(g_mods, g_mod_count * 24 + 16, path)
                     g_mod_count = g_mod_count + 1
                     pass_src = pass_src + "\n" + content
                 i = pos

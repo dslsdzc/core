@@ -76,10 +76,12 @@ CASES = [
     ),
     # —— 裸指针族（18 REF / 25 DEREF / 26 STORE_PTR / 31 ADDR_INDEX）——
     (
-        # TODO #2026-09-10-7 复现原件：g:[int;3]=[5,6,7]; fn f(){ p:=&g[2]; return *p; }
+        # TODO #2026-09-10-7 复现原件（本仓 v10 前置基线亦返回 0：全局数组取址
+        # 是独立既有缺陷，本判据只锁 callee 内联路径）⇒ 用局部数组覆盖同一
+        # ADDR_INDEX + DEREF 组合。
         "bare_ptr_deref_callee",
-        "g : [int;3] = [5,6,7];",
-        "p := &g[2]\nreturn *p\n",
+        "",
+        "a := [5,6,7]\np := &a[2]\nreturn *p\n",
         "parity", 7, 7,
     ),
     (
@@ -94,17 +96,41 @@ CASES = [
         "a := [10,20,30]\np := &a[1]\nreturn *p\n",
         "parity", 20, 20,
     ),
+    (
+        # v10 regression: ALLOC_ARRAY + ADDR_INDEX + STORE_PTR + DEREF through
+        # the .ccr (stride/width are reconstructed by corearch).
+        "alloc_array_ptr_store_deref_callee",
+        "",
+        "a := [3,4,5]\np := &a[1]\n*p = 40\nreturn a[0] + *p + a[2]\n",
+        "parity", 48, 48,
+    ),
+    (
+        # v10 regression: RUNTIME_PTR_BOUNDS flag + allocation-size
+        # reconstruction (variable index => provenance cannot fold the offset).
+        "ptr_runtime_bound_callee",
+        "",
+        "a := [1,2,3,4]\ni := 2\np := &a[i]\nreturn *p\n",
+        "parity", 3, 3,
+    ),
+    (
+        # Same flag on IR_STORE_PTR (runtime base lives in dest).
+        "ptr_runtime_bound_store_callee",
+        "",
+        "a := [1,2,3,4]\ni := 2\np := &a[i]\n*p = 9\nreturn a[2]\n",
+        "parity", 9, 9,
+    ),
+
     # —— 切片 / 边界检查族（24 SLICE / 30 BOUNDS_CHECK）——
     (
         "slice_runtime_bounds_callee",
         "",
-        "a : [int;5] = [10,20,30,40,50]; lo := 1; hi := 3; s := a[lo..hi]; return s[1];",
+        "a : [int;5] = [10,20,30,40,50]\nlo := 1\nhi := 3\ns := a[lo..hi]\nreturn s[1]",
         "parity", 30, 30,
     ),
     (
         "slice_literal_bounds_callee",
         "",
-        "a : [int;5] = [10,20,30,40,50]; s := a[1..3]; return s[1];",
+        "a : [int;5] = [10,20,30,40,50]\ns := a[1..3]\nreturn s[1]",
         "parity", 30, 30,
     ),
     (
@@ -112,7 +138,7 @@ CASES = [
         # ELF = ud2 SIGILL。两路径都非静默（rc 非 0）。
         "slice_oob_callee_loud",
         "",
-        "a : [int;5] = [10,20,30,40,50]; lo := 1; hi := 3; s := a[lo..hi]; return s[2];",
+        "a : [int;5] = [10,20,30,40,50]\nlo := 1\nhi := 3\ns := a[lo..hi]\nreturn s[2]",
         "loud", 255, SIGILL,
     ),
     # —— dyn 族（43 DYN_PACK / 42 DYN_VAL / 41 DYN_TAG / 44 DYN_DISPATCH）——
@@ -133,26 +159,26 @@ CASES = [
     (
         "nested_call_callee",
         "fn g2()->int:\n    return 7\n",
-        "return g2();",
+        "return g2()",
         "parity", 7, 7,
     ),
     (
         "recursion_fib_callee",
         "fn fib(n: int)->int:\n    if n < 2:\n        return n\n    return fib(n-1) + fib(n-2)\n",
-        "return fib(10);",
+        "return fib(10)",
         "parity", 55, 55,
     ),
     (
         "mutual_recursion_callee",
         "fn is_even(n: int)->int:\n    if n == 0:\n        return 1\n    return is_odd(n - 1)\nfn is_odd(n: int)->int:\n    if n == 0:\n        return 0\n    return is_even(n - 1)\n",
-        "return is_even(10);",
+        "return is_even(10)",
         "parity", 1, 1,
     ),
     (
         # 深度守卫：无界递归必须响亮中止（rc 255 + 诊断），不挂死
         "depth_guard_runaway_loud",
         "fn r(n: int)->int:\n    return r(n + 1)\n",
-        "return r(0);",
+        "return r(0)",
         "loud", 255, SIGSEGV,
     ),
     # —— 并发族（27 SPAWN：range go；28 YIELD / 29 AWAIT eager 近似）——
@@ -173,7 +199,7 @@ CASES = [
     (
         "yield_in_callee",
         "",
-        "yield; return 11;",
+        "yield\nreturn 11",
         "parity", 11, 11,
     ),
     (
@@ -187,7 +213,7 @@ CASES = [
     (
         "extern_call_callee_loud",
         "extern fn putchar(c: int) -> int\n",
-        "return putchar(65);",
+        "return putchar(65)",
         "loud", 2, SIGSEGV,
     ),
     # —— 48 FNADDR / 51 IR_APPROX ——

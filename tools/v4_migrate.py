@@ -38,7 +38,7 @@ import v4_migrate_v3lex as V3  # noqa: E402  （vendored v3 扫描器）
 # 「七目录面 74 档」会漏掉四棵同样进编译单元的子树 —— `src/lattice`(1) ·
 # `src/lsp`(7) · `src/kernel`(9) · `src/scheduler`(1)；逐目录 = compiler 38 ·
 # stdlib 19 · kernel 9 · lsp 7 · arch/x86_64 5 · os/linux 3 · format/elf 3 ·
-# targets/x86_64-linux 2 · runtime 2 · arch/hit 2 · scheduler 1 · lattice 1）。
+# targets/x86_64/linux/elf 2 · runtime 2 · arch/hit 2 · scheduler 1 · lattice 1）。
 # `tests/`·`docs/`·`examples/`·`tools/`·`legacy_asm_backend/` 下的 `.cr` 属 T6，**不动**。
 SRC_ROOT = 'src'
 

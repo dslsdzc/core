@@ -4,8 +4,9 @@ from corec.ir.base import VarKind
 from corec.ir.symbol_table import SymbolTable, SymbolKind
 
 class IRGen:
-    def __init__(self, symtab=None):
+    def __init__(self, symtab=None, bigint_mode: bool = False):
         self.temp_counter = 0
+        self.bigint_mode = bigint_mode
         self.mod = Module("main")
         self.current_func = None
         self.current_block = None
@@ -150,8 +151,27 @@ class IRGen:
             # 2(a) 视图内建 = **直通**（零代码生成）：`@ptr_of(s)` / `@str_of(p)` 不改变那个 64 位字，
             # 只改变它在本语言里的看法 ⇒ 直接返回内层表达式的值本身（不发射指令、不建临时变量）。
             # 未知名到此不该出现（type_checker 已 fail-closed；此面兜底为 0 以免静默崩溃）。
+            if expr.name in ('raw_add', 'raw_sub', 'raw_and'):
+                args = []
+                for arg in expr.args:
+                    if isinstance(arg, Literal) and arg.kind == 'int':
+                        v = self.new_temp()
+                        self.add_instr(ConstInstr(int(arg.value), 'raw_int', v))
+                        args.append(v)
+                    else:
+                        args.append(self.gen_expr(arg))
+                dest = self.new_temp()
+                self.add_instr(BinaryInstr(expr.name, args[0], args[1], dest))
+                return dest
             if expr.name in ('ptr_of', 'str_of') and expr.args:
-                return self.gen_expr(expr.args[0])
+                v = self.gen_expr(expr.args[0])
+                if self.bigint_mode:
+                    dest = self.new_temp()
+                    dest.type = BaseType('int') if expr.name == 'ptr_of' else BaseType('string')
+                    op = 'tag_word' if expr.name == 'ptr_of' else 'untag_word'
+                    self.add_instr(BinaryInstr(op, v, v, dest))
+                    return dest
+                return v
             v = self.new_temp()
             self.add_instr(ConstInstr(0, 'int', v))
             return v
@@ -186,6 +206,7 @@ class IRGen:
         if lit.kind == 'int': val = int(val)
         elif lit.kind == 'dex': val = Dex(int(val))  # 定点缩放整数（精确语义，Task 4）
         v = self.new_temp()
+        v.type = BaseType(lit.kind)
         self.add_instr(ConstInstr(val, lit.kind, v))
         return v
 
@@ -244,6 +265,10 @@ class IRGen:
             right_is_str = isinstance(right.type, BaseType) and right.type.name == 'string'
             if left_is_str or right_is_str:
                 dest.type = BaseType('string')
+        if dest.type is None:
+            if (isinstance(left.type, BaseType) and left.type.name == 'int' and
+                    isinstance(right.type, BaseType) and right.type.name == 'int'):
+                dest.type = BaseType('int')
         self.add_instr(BinaryInstr(binop.op, left, right, dest))
         return dest
 
@@ -265,8 +290,16 @@ class IRGen:
             return dest
         op = self.gen_expr(unop.operand)
         dest = self.new_temp()
+        if isinstance(op.type, BaseType):
+            dest.type = op.type
         self.add_instr(UnaryInstr(unop.op, op, dest))
         return dest
+
+    def _call_result_type(self, name):
+        sym = self.symtab.lookup(name)
+        if sym and sym.type:
+            return sym.type
+        return None
 
     def gen_call(self, call):
         if isinstance(call.func, FieldAccess):
@@ -276,6 +309,7 @@ class IRGen:
             if module_fn is not None:
                 args = [self.gen_expr(a) for a in call.args]
                 dest = self.new_temp()
+                dest.type = module_fn.return_type
                 self.add_instr(CallInstr(module_fn.name, args, dest))
                 return dest
             obj_expr = call.func.object
@@ -304,12 +338,14 @@ class IRGen:
             obj = self.gen_expr(obj_expr)
             args = [obj] + [self.gen_expr(a) for a in call.args]
             dest = self.new_temp()
+            dest.type = self._call_result_type(full)
             self.add_instr(CallInstr(full, args, dest))
             return dest
         else:
             func_name = self._get_func_name(call.func)
             args = [self.gen_expr(a) for a in call.args]
             dest = self.new_temp()
+            dest.type = self._call_result_type(func_name)
             self.add_instr(CallInstr(func_name, args, dest))
             return dest
 
@@ -686,7 +722,12 @@ class IRGen:
                 if typ is None:
                     typ = BaseType('int')
             else:
-                typ = BaseType('unit')
+                if val_ir is not None and isinstance(val_ir.type, BaseType):
+                    typ = val_ir.type
+                else:
+                    typ = BaseType('unit')
+        if typ is None and val_ir is not None and isinstance(val_ir.type, BaseType):
+            typ = val_ir.type
         if typ is None:
             typ = BaseType('unit')
         var_ir = IRVar(name, VarKind.LOCAL, typ)

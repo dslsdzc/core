@@ -58,19 +58,19 @@ fn live_range_slot(func_i: int, var_i: int) -> int:
     loop:
         if fi >= func_i:
             break
-        off = off + r64(g_ir_func_var_count, fi * 8)
+        off = off + cell_load(g_ir_func_var_count, fi * 8)
         fi = fi + 1
-    return (off + (var_i - r64(g_ir_func_var_start, func_i * 8))) * 16
+    return (off + (var_i - cell_load(g_ir_func_var_start, func_i * 8))) * 16
 
 fn live_first(func_i: int, var_i: int) -> int:
     if func_i < 0 || var_i < 0:
         return -1
-    return r64(g_ir_live_ranges, live_range_slot(func_i, var_i))
+    return cell_load(g_ir_live_ranges, live_range_slot(func_i, var_i))
 
 fn live_last(func_i: int, var_i: int) -> int:
     if func_i < 0 || var_i < 0:
         return -1
-    return r64(g_ir_live_ranges, live_range_slot(func_i, var_i) + 8)
+    return cell_load(g_ir_live_ranges, live_range_slot(func_i, var_i) + 8)
 
 // Build g_ir_live_ranges. Scan each function's nodes through nod_*. If dest, s1,
 // or s2 falls in [vs, vs+vc), extend [first_ref, last_ref]: first sight sets
@@ -81,7 +81,7 @@ fn compute_live_ranges():
     loop:
         if fi >= g_ir_func_count:
             break
-        total = total + r64(g_ir_func_var_count, fi * 8)
+        total = total + cell_load(g_ir_func_var_count, fi * 8)
         fi = fi + 1
     grow_live_ranges(total)
     g_live_range_count = total
@@ -90,8 +90,8 @@ fn compute_live_ranges():
     loop:
         if zi >= total:
             break
-        w64(g_ir_live_ranges, zi * 16, -1)
-        w64(g_ir_live_ranges, zi * 16 + 8, -1)
+        cell_store(g_ir_live_ranges, zi * 16, -1)
+        cell_store(g_ir_live_ranges, zi * 16 + 8, -1)
         zi = zi + 1
     // Scan each function's node window. The segment offset is the running prefix,
     // matching live_range_slot. g_ir_func_instr_start/count hold NOD node
@@ -102,10 +102,10 @@ fn compute_live_ranges():
     loop:
         if fi >= g_ir_func_count:
             break
-        ic := r64(g_ir_func_instr_count, fi * 8)
-        ist := r64(g_ir_func_instr_start, fi * 8)
-        vc := r64(g_ir_func_var_count, fi * 8)
-        vs := r64(g_ir_func_var_start, fi * 8)
+        ic := cell_load(g_ir_func_instr_count, fi * 8)
+        ist := cell_load(g_ir_func_instr_start, fi * 8)
+        vc := cell_load(g_ir_func_var_count, fi * 8)
+        vs := cell_load(g_ir_func_var_start, fi * 8)
         if vc > 0:
             ii : ., mut = 0
             loop:
@@ -118,21 +118,21 @@ fn compute_live_ranges():
                 if d >= vs && d < vs + vc:
                     lv := d - vs
                     st := (seg + lv) * 16
-                    if r64(g_ir_live_ranges, st) < 0:
-                        w64(g_ir_live_ranges, st, ii)
-                    w64(g_ir_live_ranges, st + 8, ii)
+                    if cell_load(g_ir_live_ranges, st) < 0:
+                        cell_store(g_ir_live_ranges, st, ii)
+                    cell_store(g_ir_live_ranges, st + 8, ii)
                 if s1 >= vs && s1 < vs + vc:
                     lv := s1 - vs
                     st := (seg + lv) * 16
-                    if r64(g_ir_live_ranges, st) < 0:
-                        w64(g_ir_live_ranges, st, ii)
-                    w64(g_ir_live_ranges, st + 8, ii)
+                    if cell_load(g_ir_live_ranges, st) < 0:
+                        cell_store(g_ir_live_ranges, st, ii)
+                    cell_store(g_ir_live_ranges, st + 8, ii)
                 if s2 >= vs && s2 < vs + vc:
                     lv := s2 - vs
                     st := (seg + lv) * 16
-                    if r64(g_ir_live_ranges, st) < 0:
-                        w64(g_ir_live_ranges, st, ii)
-                    w64(g_ir_live_ranges, st + 8, ii)
+                    if cell_load(g_ir_live_ranges, st) < 0:
+                        cell_store(g_ir_live_ranges, st, ii)
+                    cell_store(g_ir_live_ranges, st + 8, ii)
                 ii = ii + 1
         seg = seg + vc
         fi = fi + 1
@@ -140,12 +140,20 @@ fn compute_live_ranges():
     // compute_entries with func_i == 0 resets the table, so this is idempotent.
     // It runs for --dump-entries and for O2 allocation, independent of the
     // optimization gate.
+    // When the v10 loader consumed a valid ENT segment, that table is the
+    // authority. Rebuilding would replace the file's existence/version facts with
+    // a mirror and make the loader's ENT validation vacuous, so keep it.
+    if g_ent_loaded != 0:
+        return
     ef : ., mut = 0
     loop:
         if ef >= g_ir_func_count:
             break
         compute_entries(ef)
         ef = ef + 1
+    // A program with no functions still has global existence rows.
+    if g_ir_func_count == 0:
+        compute_global_entries()
 
 // ------------------------------------------------------------------
 // Entry versioning: split each variable at its definition points
@@ -212,8 +220,8 @@ fn ent_live_start(e: int) -> int:
     return buf_read_i32(g_ir_entries, ent_off(e) + OFF_ENTRY_LS)
 fn ent_live_end(e: int) -> int:
     return buf_read_i32(g_ir_entries, ent_off(e) + OFF_ENTRY_LE)
-fn ent_home(e: int) -> int:
-    return buf_read_i32(g_ir_entries, ent_off(e) + OFF_ENTRY_HOME)
+fn ent_runtime_home(e: int) -> int:
+    return buf_read_i32(g_ir_entries, ent_off(e) + OFF_ENTRY_RUNTIME_HOME)
 fn ent_flags(e: int) -> int:
     return buf_read_i32(g_ir_entries, ent_off(e) + OFF_ENTRY_FLAGS)
 
@@ -221,12 +229,34 @@ fn ent_flags(e: int) -> int:
 fn entry_start(func_i: int) -> int:
     if func_i < 0 || func_i >= g_ir_func_count:
         return 0
-    return r64(g_ir_func_entry_start, func_i * 8)
+    return cell_load(g_ir_func_entry_start, func_i * 8)
 
 fn entry_count(func_i: int) -> int:
     if func_i < 0 || func_i >= g_ir_func_count:
         return 0
-    return r64(g_ir_func_entry_count, func_i * 8)
+    return cell_load(g_ir_func_entry_count, func_i * 8)
+
+// Global existence rows. Every global var is one entry with def_nod = -1,
+// live_start = 0 and live_end = g_ir_instr_count (the whole program). Globals are
+// the prefix 0..g_ir_global_count-1 of the var namespace, so the loader can
+// partition them as a leading block before the per-function blocks.
+fn compute_global_entries():
+    if g_ir_instr_count <= 0:
+        return
+    gi : ., mut = 0
+    loop:
+        if gi >= g_ir_global_count:
+            break
+        grow_entries(g_entry_count + 1)
+        eo := g_entry_count * ESZ_ENTRY
+        w32(g_ir_entries, eo + OFF_ENTRY_VAR, gi)
+        w32(g_ir_entries, eo + OFF_ENTRY_DEF, -1)
+        w32(g_ir_entries, eo + OFF_ENTRY_LS, 0)
+        w32(g_ir_entries, eo + OFF_ENTRY_LE, g_ir_instr_count - 1)
+        w32(g_ir_entries, eo + OFF_ENTRY_RUNTIME_HOME, -1)
+        w32(g_ir_entries, eo + OFF_ENTRY_FLAGS, ENTRY_FLAG_GLOBAL)
+        g_entry_count = g_entry_count + 1
+        gi = gi + 1
 
 fn compute_entries(func_i: int) -> int:
     if func_i == 0:
@@ -235,12 +265,14 @@ fn compute_entries(func_i: int) -> int:
         // are reused by the new generation, so stale locations must be cleared.
         // The instance registers only after this generation is built.
         loc_registry_reset()
+        compute_global_entries()
     // The function window uses the same g_ir_func_instr_start/count values as
     // compute_live_ranges: NOD node coordinates, read through nod_*.
-    ic := r64(g_ir_func_instr_count, func_i * 8)
-    ist := r64(g_ir_func_instr_start, func_i * 8)
-    vc := r64(g_ir_func_var_count, func_i * 8)
-    vs := r64(g_ir_func_var_start, func_i * 8)
+    ic := cell_load(g_ir_func_instr_count, func_i * 8)
+    ist := cell_load(g_ir_func_instr_start, func_i * 8)
+    vc := cell_load(g_ir_func_var_count, func_i * 8)
+    vs := cell_load(g_ir_func_var_start, func_i * 8)
+    pc := cell_load(g_ir_func_param_count, func_i * 8)
     cnt : ., mut = 0
     if ic > 0 && vc > 0:
         // One open-entry slot per function-local variable, initialized to -1.
@@ -250,7 +282,7 @@ fn compute_entries(func_i: int) -> int:
         loop:
             if pz >= vc:
                 break
-            w64(prev, pz * 8, -1)
+            cell_store(prev, pz * 8, -1)
             pz = pz + 1
         // Single scan for definitions: IR_STORE uses s1 as the target; every other
         // definition uses dest >= 0. STORE_INDEX_VAR, STORE_PTR, and DYN_DISPATCH
@@ -277,7 +309,7 @@ fn compute_entries(func_i: int) -> int:
                 if ll >= 0:
                     last_global = ist + ll
                 // Close the previous version at min(def-1, last_ref).
-                pe := r64(prev, lv * 8)
+                pe := cell_load(prev, lv * 8)
                 if pe >= 0:
                     pend : ., mut = inst - 1
                     if last_global >= 0 && last_global < pend:
@@ -290,9 +322,12 @@ fn compute_entries(func_i: int) -> int:
                 w32(g_ir_entries, eo + OFF_ENTRY_DEF, inst)
                 w32(g_ir_entries, eo + OFF_ENTRY_LS, inst)
                 w32(g_ir_entries, eo + OFF_ENTRY_LE, last_global)
-                w32(g_ir_entries, eo + OFF_ENTRY_HOME, -1)
-                w32(g_ir_entries, eo + OFF_ENTRY_FLAGS, 0)
-                w64(prev, lv * 8, g_entry_count)
+                w32(g_ir_entries, eo + OFF_ENTRY_RUNTIME_HOME, -1)
+                efl0 : ., mut = 0
+                if lv < pc:
+                    efl0 = ENTRY_FLAG_PARAM
+                w32(g_ir_entries, eo + OFF_ENTRY_FLAGS, efl0)
+                cell_store(prev, lv * 8, g_entry_count)
                 g_entry_count = g_entry_count + 1
                 cnt = cnt + 1
             ii = ii + 1
@@ -301,10 +336,13 @@ fn compute_entries(func_i: int) -> int:
         loop:
             if lv2 >= vc:
                 break
-            if r64(prev, lv2 * 8) < 0:
+            if cell_load(prev, lv2 * 8) < 0:
                 gv := vs + lv2
                 ff := live_first(func_i, gv)
                 ll := live_last(func_i, gv)
+                efl2 : ., mut = 0
+                if lv2 < pc:
+                    efl2 = ENTRY_FLAG_PARAM
                 if ff >= 0 && ll >= 0:
                     grow_entries(g_entry_count + 1)
                     eo := g_entry_count * ESZ_ENTRY
@@ -312,14 +350,28 @@ fn compute_entries(func_i: int) -> int:
                     w32(g_ir_entries, eo + OFF_ENTRY_DEF, -1)
                     w32(g_ir_entries, eo + OFF_ENTRY_LS, ist + ff)
                     w32(g_ir_entries, eo + OFF_ENTRY_LE, ist + ll)
-                    w32(g_ir_entries, eo + OFF_ENTRY_HOME, -1)
-                    w32(g_ir_entries, eo + OFF_ENTRY_FLAGS, 0)
+                    w32(g_ir_entries, eo + OFF_ENTRY_RUNTIME_HOME, -1)
+                    w32(g_ir_entries, eo + OFF_ENTRY_FLAGS, efl2)
+                    g_entry_count = g_entry_count + 1
+                    cnt = cnt + 1
+                else if lv2 < pc && ic > 0:
+                    // An unreferenced parameter still exists. Spec §5 gives it
+                    // def_nod = -1 and the param flag; the function node span is
+                    // its existence window.
+                    grow_entries(g_entry_count + 1)
+                    eo := g_entry_count * ESZ_ENTRY
+                    w32(g_ir_entries, eo + OFF_ENTRY_VAR, gv)
+                    w32(g_ir_entries, eo + OFF_ENTRY_DEF, -1)
+                    w32(g_ir_entries, eo + OFF_ENTRY_LS, ist)
+                    w32(g_ir_entries, eo + OFF_ENTRY_LE, ist + ic - 1)
+                    w32(g_ir_entries, eo + OFF_ENTRY_RUNTIME_HOME, -1)
+                    w32(g_ir_entries, eo + OFF_ENTRY_FLAGS, efl2)
                     g_entry_count = g_entry_count + 1
                     cnt = cnt + 1
             lv2 = lv2 + 1
     grow_func_entry_meta(func_i + 1)
-    w64(g_ir_func_entry_start, func_i * 8, g_entry_count - cnt)
-    w64(g_ir_func_entry_count, func_i * 8, cnt)
+    cell_store(g_ir_func_entry_start, func_i * 8, g_entry_count - cnt)
+    cell_store(g_ir_func_entry_count, func_i * 8, cnt)
     return cnt
 
 // Name of a definition opcode for the --dump-entries kind= field. The list covers
@@ -398,6 +450,10 @@ fn ir_op_kind_name(op: int) -> string:
 // 1-based version within the variable group. kind is the definition opcode, or
 // "-" when def is -1.
 fn dump_entries_summary():
+    if g_ent_loaded != 0:
+        println("entries-source: loaded")
+    else:
+        println("entries-source: recomputed")
     fi : ., mut = 0
     loop:
         if fi >= g_ir_func_count:
@@ -407,7 +463,7 @@ fn dump_entries_summary():
         print("== entries func ")
         print(int_str(fi))
         print(" (")
-        print(istr_get(r64(g_ir_func_name_idx, fi * 8)))
+        print(istr_get(cell_load(g_ir_func_name_idx, fi * 8)))
         print("): ")
         println(int_str(ec))
         ei : ., mut = 0
@@ -448,7 +504,7 @@ fn dump_entries_summary():
             print("..")
             print(int_str(ent_live_end(e)))
             print(" home ")
-            print(int_str(ent_home(e)))
+            print(int_str(ent_runtime_home(e)))
             print(" flags ")
             println(int_str(ent_flags(e)))
             ei = ei + 1
@@ -506,9 +562,10 @@ fn coexist_version_conflicts(func_i: int) -> int:
         ei = ei + 1
     return conflicts
 
-// Count conflicts among entries with the same home slot. home = -1 is ignored.
-// This is a simple pairwise check; when home assignment is enabled, replace it
-// with a per-group sweep instead of reusing this function.
+// Count conflicts among entries with the same runtime/instance home slot.
+// runtime_home = -1 is ignored. This is a simple pairwise check; when home
+// assignment is enabled, replace it with a per-group sweep instead of reusing
+// this function. This slot never enters `.ccr`.
 fn coexist_home_conflicts(func_i: int) -> int:
     es := entry_start(func_i)
     ec := entry_count(func_i)
@@ -518,22 +575,22 @@ fn coexist_home_conflicts(func_i: int) -> int:
         if ei >= ec:
             break
         e1 := es + ei
-        h1 := ent_home(e1)
+        h1 := ent_runtime_home(e1)
         if h1 >= 0:
             ej : ., mut = ei + 1
             loop:
                 if ej >= ec:
                     break
                 e2 := es + ej
-                if ent_home(e2) == h1:
+                if ent_runtime_home(e2) == h1:
                     if entries_coexist(func_i, e1, e2) != 0:
                         conflicts = conflicts + 1
                 ej = ej + 1
         ei = ei + 1
     return conflicts
 
-// --dump-coexist output: per function, version conflicts (expected 0) and home
-// conflicts (expected 0 while home is unassigned).
+// --dump-coexist output: per function, version conflicts (expected 0) and
+// runtime/instance home conflicts (expected 0 while runtime_home is unassigned).
 fn dump_coexist_summary():
     fi : ., mut = 0
     loop:
@@ -542,7 +599,7 @@ fn dump_coexist_summary():
         print("== coexist func ")
         print(int_str(fi))
         print(" (")
-        print(istr_get(r64(g_ir_func_name_idx, fi * 8)))
+        print(istr_get(cell_load(g_ir_func_name_idx, fi * 8)))
         print("):")
         print(" ver_conf ")
         print(int_str(coexist_version_conflicts(fi)))
@@ -620,8 +677,8 @@ fn meta_reg_for_var(var_idx: int) -> int:
     loop:
         if fi >= g_ir_func_count:
             break
-        vs := r64(g_ir_func_var_start, fi * 8)
-        vc := r64(g_ir_func_var_count, fi * 8)
+        vs := cell_load(g_ir_func_var_start, fi * 8)
+        vc := cell_load(g_ir_func_var_count, fi * 8)
         if var_idx >= vs && var_idx < vs + vc:
             es := entry_start(fi)
             ec := entry_count(fi)
@@ -641,14 +698,14 @@ fn meta_reg_for_var(var_idx: int) -> int:
 
 // Compare two 16-byte records for sorting by (loc, live_start).
 fn rl_rec_lt(buf: string, a: int, b: int) -> int:
-    la := r64(buf, a * 16)
-    lb := r64(buf, b * 16)
+    la := cell_load(buf, a * 16)
+    lb := cell_load(buf, b * 16)
     if la != lb:
         if la < lb:
             return 1
         return 0
-    ea := r64(buf, a * 16 + 8)
-    eb := r64(buf, b * 16 + 8)
+    ea := cell_load(buf, a * 16 + 8)
+    eb := cell_load(buf, b * 16 + 8)
     if ent_live_start(ea) < ent_live_start(eb):
         return 1
     return 0
@@ -680,26 +737,26 @@ fn rl_merge_sort(buf: string, n: int):
                 if i >= mid || j >= right:
                     break
                 if rl_rec_lt(buf, i, j) != 0:
-                    w64(tmp, k * 16, r64(buf, i * 16))
-                    w64(tmp, k * 16 + 8, r64(buf, i * 16 + 8))
+                    cell_store(tmp, k * 16, cell_load(buf, i * 16))
+                    cell_store(tmp, k * 16 + 8, cell_load(buf, i * 16 + 8))
                     i = i + 1
                 else:
-                    w64(tmp, k * 16, r64(buf, j * 16))
-                    w64(tmp, k * 16 + 8, r64(buf, j * 16 + 8))
+                    cell_store(tmp, k * 16, cell_load(buf, j * 16))
+                    cell_store(tmp, k * 16 + 8, cell_load(buf, j * 16 + 8))
                     j = j + 1
                 k = k + 1
             loop:
                 if i >= mid:
                     break
-                w64(tmp, k * 16, r64(buf, i * 16))
-                w64(tmp, k * 16 + 8, r64(buf, i * 16 + 8))
+                cell_store(tmp, k * 16, cell_load(buf, i * 16))
+                cell_store(tmp, k * 16 + 8, cell_load(buf, i * 16 + 8))
                 i = i + 1
                 k = k + 1
             loop:
                 if j >= right:
                     break
-                w64(tmp, k * 16, r64(buf, j * 16))
-                w64(tmp, k * 16 + 8, r64(buf, j * 16 + 8))
+                cell_store(tmp, k * 16, cell_load(buf, j * 16))
+                cell_store(tmp, k * 16 + 8, cell_load(buf, j * 16 + 8))
                 j = j + 1
                 k = k + 1
             left = right
@@ -707,14 +764,15 @@ fn rl_merge_sort(buf: string, n: int):
         loop:
             if zi >= n:
                 break
-            w64(buf, zi * 16, r64(tmp, zi * 16))
-            w64(buf, zi * 16 + 8, r64(tmp, zi * 16 + 8))
+            cell_store(buf, zi * 16, cell_load(tmp, zi * 16))
+            cell_store(buf, zi * 16 + 8, cell_load(tmp, zi * 16 + 8))
             zi = zi + 1
         width = width * 2
 
 // Print an opaque location. The kernel does not classify values as registers or
-// home slots; that belongs to the instance. Rule 1 has two passes, the registry
-// pass and the home-field pass, but they print the same report format.
+// runtime/instance home slots; that belongs to the instance. Rule 1 has two
+// passes, the registry pass and the runtime-home pass, but they print the same
+// report format.
 fn rl_print_loc(loc: int):
     print("loc ")
     print(int_str(loc))
@@ -723,7 +781,7 @@ fn rl_func_name(fi: int):
     print("func ")
     print(int_str(fi))
     print(" (")
-    print(istr_get(r64(g_ir_func_name_idx, fi * 8)))
+    print(istr_get(cell_load(g_ir_func_name_idx, fi * 8)))
     print(")")
 
 // Rule 1 violation report. Printing is capped by RPT_MAX; the count is not
@@ -768,7 +826,7 @@ fn rl_rule1_sweep(func_i: int, rec: string, cnt: int, cap_base: int) -> int:
         loop:
             if run_end >= cnt:
                 break
-            if r64(rec, run_end * 16) != r64(rec, run_start * 16):
+            if cell_load(rec, run_end * 16) != cell_load(rec, run_start * 16):
                 break
             run_end = run_end + 1
         maxj : ., mut = -1
@@ -776,14 +834,14 @@ fn rl_rule1_sweep(func_i: int, rec: string, cnt: int, cap_base: int) -> int:
         loop:
             if zi >= run_end:
                 break
-            e := r64(rec, zi * 16 + 8)
+            e := cell_load(rec, zi * 16 + 8)
             if maxj >= 0:
-                mej := r64(rec, maxj * 16 + 8)
+                mej := cell_load(rec, maxj * 16 + 8)
                 if ent_live_end(mej) >= ent_live_start(e):
                     if cap_base + viol < RPT_MAX:
-                        rl_report_rule1(func_i, r64(rec, zi * 16), mej, e)
+                        rl_report_rule1(func_i, cell_load(rec, zi * 16), mej, e)
                     viol = viol + 1
-            if maxj < 0 || ent_live_end(e) > ent_live_end(r64(rec, maxj * 16 + 8)):
+            if maxj < 0 || ent_live_end(e) > ent_live_end(cell_load(rec, maxj * 16 + 8)):
                 maxj = zi
             zi = zi + 1
         run_start = run_end
@@ -845,14 +903,14 @@ fn rl_rule2_func(func_i: int, vs: int, vc: int, nst: int, nc: int, es: int, ec: 
                 break
             e := es + ei
             if ent_var(e) == gv && ent_def(e) >= 0:
-                w64(vers, vj * 8, e)
+                cell_store(vers, vj * 8, e)
                 vj = vj + 1
             ei = ei + 1
         // Scan reads in ascending node order through nod_op/nod_s1/nod_s2. The
         // version cursor advances monotonically. ent_def and ent_live_end store
         // global node coordinates, so comparisons must use inst, not the local ii.
         cursor : ., mut = 0
-        first_def := r64(vers, 0 * 8)
+        first_def := cell_load(vers, 0 * 8)
         ii : ., mut = 0
         loop:
             if ii >= nc:
@@ -871,11 +929,11 @@ fn rl_rule2_func(func_i: int, vs: int, vc: int, nst: int, nc: int, es: int, ec: 
                 loop:
                     if cursor + 1 >= m:
                         break
-                    nx := r64(vers, (cursor + 1) * 8)
+                    nx := cell_load(vers, (cursor + 1) * 8)
                     if ent_def(nx) > inst:
                         break
                     cursor = cursor + 1
-                cv := r64(vers, cursor * 8)
+                cv := cell_load(vers, cursor * 8)
                 if ent_live_end(cv) < inst:
                     if violations < RPT_MAX:
                         rl_report_rule2(func_i, gv, inst)
@@ -896,17 +954,18 @@ fn verify_regalloc_consistency(func_i: int) -> int:
         return 0
     // The node window comes from g_ir_func_instr_start/count and is passed to
     // rl_rule2_func as nst/nc. Node fields are read through nod_*.
-    ic := r64(g_ir_func_instr_count, func_i * 8)
-    ist := r64(g_ir_func_instr_start, func_i * 8)
-    vc := r64(g_ir_func_var_count, func_i * 8)
-    vs := r64(g_ir_func_var_start, func_i * 8)
+    ic := cell_load(g_ir_func_instr_count, func_i * 8)
+    ist := cell_load(g_ir_func_instr_start, func_i * 8)
+    vc := cell_load(g_ir_func_var_count, func_i * 8)
+    vs := cell_load(g_ir_func_var_start, func_i * 8)
 
     // Rule 1 has two passes:
     //   1. Registry pass: entries with kern_loc_of(e) >= 0 grouped by location.
-    //   2. Home pass: entries with ent_home >= 0 grouped by home value, skipping
-    //      -1.
+    //   2. Runtime-home pass: entries with ent_runtime_home >= 0 grouped by the
+    //      instance-side slot value, skipping -1.
     // The registry pass runs first. Entries already registered are excluded from
-    // the home pass; an entry with both is not produced by the current paths.
+    // the runtime-home pass; an entry with both is not produced by the current
+    // paths.
     reg_cnt : ., mut = 0
     home_cnt : ., mut = 0
     ei : ., mut = 0
@@ -917,7 +976,7 @@ fn verify_regalloc_consistency(func_i: int) -> int:
         if ent_live_start(e) >= 0 && ent_live_end(e) >= 0:
             if kern_loc_of(e) >= 0:
                 reg_cnt = reg_cnt + 1
-            else if ent_home(e) >= 0:
+            else if ent_runtime_home(e) >= 0:
                 home_cnt = home_cnt + 1
         ei = ei + 1
     rule1_viol : ., mut = 0
@@ -933,13 +992,13 @@ fn verify_regalloc_consistency(func_i: int) -> int:
             if ent_live_start(e) >= 0 && ent_live_end(e) >= 0:
                 loc := kern_loc_of(e)
                 if loc >= 0:
-                    w64(rec, ci * 16, loc)
-                    w64(rec, ci * 16 + 8, e)
+                    cell_store(rec, ci * 16, loc)
+                    cell_store(rec, ci * 16 + 8, e)
                     ci = ci + 1
             ei = ei + 1
         rule1_viol = rl_rule1_sweep(func_i, rec, reg_cnt, 0)
-    // Home pass. cap_base carries the number already printed so RPT_MAX applies
-    // across both passes.
+    // Runtime-home pass. cap_base carries the number already printed so RPT_MAX
+    // applies across both passes.
     if home_cnt > 1:
         rec : string, mut = alloc(home_cnt * 16)
         ci : ., mut = 0
@@ -949,10 +1008,10 @@ fn verify_regalloc_consistency(func_i: int) -> int:
                 break
             e := es + ei
             if ent_live_start(e) >= 0 && ent_live_end(e) >= 0:
-                h := ent_home(e)
+                h := ent_runtime_home(e)
                 if h >= 0:
-                    w64(rec, ci * 16, h)
-                    w64(rec, ci * 16 + 8, e)
+                    cell_store(rec, ci * 16, h)
+                    cell_store(rec, ci * 16 + 8, e)
                     ci = ci + 1
             ei = ei + 1
         rule1_viol = rule1_viol + rl_rule1_sweep(func_i, rec, home_cnt, rule1_viol)
@@ -1005,12 +1064,11 @@ OFF_NS_DEST : int = 4
 OFF_NS_S1 : int = 8
 OFF_NS_S2 : int = 16
 OFF_NS_S3 : int = 20
-OFF_NS_TK : int = 24
-// TYPE-segment file-space term index (i32; -1 = none). The on-disk record has it
-// at +28, so the adjacency fields follow at +32/+36. ccr_types.cr fills it while
-// saving; the loader reads it and checks range and consistency after parsing the
-// TYPE segment.
-OFF_NS_ITEM : int = 28
+// v10 NOD semantic fields. type_id is a TYPE row (-1 = none); flags is the
+// semantic feature word (CCR_NOD_FLAG_*). Neither carries a width, byte extent,
+// stride, or alignment. There is no disk `item` field in v10.
+OFF_NS_TYPE_ID : int = 24
+OFF_NS_FLAGS : int = 28
 
 g_v7_nod_sem : string, mut   // NOD semantic records, ESZ_NOD_SEM per node, filled by the loader
 g_v7_nod_meta : string, mut  // NOD adjacency records, ESZ_NOD_META per node
@@ -1029,16 +1087,34 @@ fn nod_s2(n: int) -> int:
     return buf_read_i32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_S2)
 fn nod_s3(n: int) -> int:
     return buf_read_i32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_S3)
+// Semantic type-id accessor (v10 NOD `type_id`). >= 0 is a TYPE row; -1 means
+// none. It reads i32 so -1 stays -1.
+fn nod_type_id(n: int) -> int:
+    return buf_read_i32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_TYPE_ID)
+// Semantic node feature flags (v10 NOD `flags`). Read as unsigned: the word is a
+// bitset of CCR_NOD_FLAG_* features, never a width or byte offset.
+fn nod_type_flags(n: int) -> int:
+    return buf_read_u32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_FLAGS)
+// Legacy derived-code view for diagnostics and for emit consumers that still
+// read a single code word. Bounds/spawn features come from flags. Target facts
+// (IR_DEREF/IR_STORE_PTR access width) are reconstructed by the instance, not
+// here, so this returns type_id (-1 when the node has no semantic type).
 fn nod_tk(n: int) -> int:
-    return buf_read_u32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_TK)
-// Term-index accessor. It reads i32 so -1 stays -1. The code slot's -1 is
-// 0xFFFFFFFF on disk and has different semantics; do not mix the read types.
-fn nod_item(n: int) -> int:
-    return buf_read_i32(g_v7_nod_sem, n * ESZ_NOD_SEM + OFF_NS_ITEM)
+    op := nod_op(n)
+    fl := nod_type_flags(n)
+    if op == IR_BOUNDS_CHECK:
+        if fl % 2 == 1:
+            return 1
+        return 0
+    if op == IR_SPAWN:
+        if (fl / 2) % 2 == 1:
+            return -1
+        return 0
+    return nod_type_id(n)
 fn nod_edge_first(n: int) -> int:
-    return r64(g_v7_nod_meta, n * ESZ_NOD_META)
+    return cell_load(g_v7_nod_meta, n * ESZ_NOD_META)
 fn nod_edge_count(n: int) -> int:
-    return r64(g_v7_nod_meta, n * ESZ_NOD_META + 8)
+    return cell_load(g_v7_nod_meta, n * ESZ_NOD_META + 8)
 
 // Edge accessors. e is a global edge index in [0, g_v7_edge_count). Each 8-byte
 // record packs to_nod in the low 32 bits and kind in the high 32 bits.

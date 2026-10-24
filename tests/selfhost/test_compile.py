@@ -20,6 +20,12 @@ def concat_sources():
         'src/compiler/ast.cr', 'src/compiler/globals.cr',
         'src/compiler/dyn_arr.cr', 'src/compiler/lexer.cr', 'src/compiler/parser.cr',
         'src/compiler/checker.cr',
+        # 目标描述 + 目标布局（Task 5：前端去布局）。与 build_selfhost_native.py 的
+        # corec 清单同源：frontend_target.cr 的 @sizeOf/@alignOf/@field 应答经
+        # mapping.cr + x86_mapping.cr 落地；interp 的指针标度钩子亦在此。
+        'src/compiler/mapping.cr',
+        'src/arch/x86_64/x86_mapping.cr',
+        'src/targets/x86_64/linux/elf/frontend_target.cr',
         # R2 P0 类型项引擎（建层，与 build_selfhost_native.py 的 corec 清单同位）：
         # 前端单元新增三文件的源码闭包条目。
         'src/compiler/type_terms.cr', 'src/compiler/type_engine.cr',

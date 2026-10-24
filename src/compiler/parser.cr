@@ -17,15 +17,15 @@ fn alloc_node(kind: int, a: int, b: int, c: int, iv: int, tv: int, d: int, line:
 fn cur_tok() -> int:
     return g_token_pos
 fn tok_k(p: int) -> int:
-    return r64(g_tokens, p * ESZ_TOKEN + OFF_TK_KIND)
+    return cell_load(g_tokens, p * ESZ_TOKEN + OFF_TK_KIND)
 fn tok_lx(p: int) -> string:
-    return istr_get(r64(g_tokens, p * ESZ_TOKEN + OFF_TK_LEXEME))
+    return istr_get(cell_load(g_tokens, p * ESZ_TOKEN + OFF_TK_LEXEME))
 fn tok_iv(p: int) -> int:
-    return r64(g_tokens, p * ESZ_TOKEN + OFF_TK_INTVAL)
+    return cell_load(g_tokens, p * ESZ_TOKEN + OFF_TK_INTVAL)
 fn tok_ln(p: int) -> int:
-    return r64(g_tokens, p * ESZ_TOKEN + OFF_TK_LINE)
+    return cell_load(g_tokens, p * ESZ_TOKEN + OFF_TK_LINE)
 fn tok_cl(p: int) -> int:
-    return r64(g_tokens, p * ESZ_TOKEN + OFF_TK_COL)
+    return cell_load(g_tokens, p * ESZ_TOKEN + OFF_TK_COL)
 
 fn advance_tok() -> int:
     t := cur_tok()
@@ -227,20 +227,20 @@ fn parse_type() -> int:
                 res = alloc_node(EXPR_IDENT, 0, 0, 0, ni, 0, 0, line, col)
     else if tok_k(t) == T_LBRACE:
         grow_diags(g_diag_count + 1)
-        w64(g_diags, g_diag_count * DIAG_REC_SIZE, EC_P_EXPECTED)
-        store_str_ptr(g_diags, g_diag_count * DIAG_REC_SIZE + 8, "expected type after '->', got '{' — missing return type?")
-        w64(g_diags, g_diag_count * DIAG_REC_SIZE + 16, line)
-        w64(g_diags, g_diag_count * DIAG_REC_SIZE + 24, col)
-        w64(g_diags, g_diag_count * DIAG_REC_SIZE + 32, diag_fileid_for_line(line))
+        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE, EC_P_EXPECTED)
+        cell_store_str(g_diags, g_diag_count * DIAG_REC_SIZE + 8, "expected type after '->', got '{' — missing return type?")
+        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 16, line)
+        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 24, col)
+        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 32, diag_fileid_for_line(line))
         g_diag_count = g_diag_count + 1
         res = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, line, col)
     else:
         grow_diags(g_diag_count + 1)
-        w64(g_diags, g_diag_count * DIAG_REC_SIZE, EC_P_EXPECTED)
-        store_str_ptr(g_diags, g_diag_count * DIAG_REC_SIZE + 8, "expected type after '->'")
-        w64(g_diags, g_diag_count * DIAG_REC_SIZE + 16, line)
-        w64(g_diags, g_diag_count * DIAG_REC_SIZE + 24, col)
-        w64(g_diags, g_diag_count * DIAG_REC_SIZE + 32, diag_fileid_for_line(line))
+        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE, EC_P_EXPECTED)
+        cell_store_str(g_diags, g_diag_count * DIAG_REC_SIZE + 8, "expected type after '->'")
+        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 16, line)
+        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 24, col)
+        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 32, diag_fileid_for_line(line))
         g_diag_count = g_diag_count + 1
         res = alloc_node(0, 0, 0, 0, 0, TY_UNIT, 0, line, col)
     // `T?` produces EXPR_OPTIONAL with the inner type node in slot a.
@@ -571,13 +571,17 @@ fn parse_primary() -> int:
     if tok_k(t) == T_INT:
         advance_tok()
         return alloc_node(EXPR_INT, 0, 0, 0, tok_iv(t), TY_INT, 0, tok_ln(t), tok_cl(t))
+    if tok_k(t) == T_BIGINT:
+        advance_tok()
+        tl := cell_load(g_tokens, t * ESZ_TOKEN + OFF_TK_LEXEME)
+        return alloc_node(EXPR_BIGINT, tl, 0, 0, 0, TY_INT, 0, tok_ln(t), tok_cl(t))
     if tok_k(t) == T_DEX:
         advance_tok()
         // Node fields: a = binary64 bit pattern, restored from the numeric text in
         // the token lexeme; int_val = fixed-point scaled integer (the exact default
         // path). Width suffixes were removed, so the data slot is always 0.
         bits : int = 0
-        tl := r64(g_tokens, t * ESZ_TOKEN + OFF_TK_LEXEME)   // 词素串下标（-1 = 无）
+        tl := cell_load(g_tokens, t * ESZ_TOKEN + OFF_TK_LEXEME)   // 词素串下标（-1 = 无）
         if tl >= 0:
             bits = str_to_f64_bits(istr_get(tl))
         return alloc_node(EXPR_DEX, bits, 0, 0, tok_iv(t), TY_DEX, 0, tok_ln(t), tok_cl(t))
@@ -648,15 +652,15 @@ fn parse_primary() -> int:
                 if fc >= cap:
                     ncap := cap * 2
                     nv := alloc(ncap * 8)
-                    _dyncpy(vals, cap * 8, nv)
+                    cell_copy(vals, cap * 8, nv)
                     vals = nv
                     nn := alloc(ncap * 8)
-                    _dyncpy(names, cap * 8, nn)
+                    cell_copy(names, cap * 8, nn)
                     names = nn
                     cap = ncap
                 g_want_value = 1                 // 字段值 = 表达式位
-                w64(vals, fc * 8, parse_expr())  // 字段值（子树自占若干槽）
-                w64(names, fc * 8, fni)          // field name index (name binding)
+                cell_store(vals, fc * 8, parse_expr())  // 字段值（子树自占若干槽）
+                cell_store(names, fc * 8, fni)          // field name index (name binding)
                 fc = fc + 1
                 if check(T_COMMA):
                     advance_tok()
@@ -666,13 +670,13 @@ fn parse_primary() -> int:
             loop:
                 if fi2 >= fc:
                     break
-                vn := r64(vals, fi2 * 8)
+                vn := cell_load(vals, fi2 * 8)
                 ln : ., mut = tok_ln(t)
                 cl : ., mut = tok_cl(t)
                 if vn >= 0:
                     ln = ast_line(vn)
                     cl = ast_col(vn)
-                wl := ast_alloc(EXPR_NONE, vn, r64(names, fi2 * 8), 0, 0, 0, 0, ln, cl)
+                wl := ast_alloc(EXPR_NONE, vn, cell_load(names, fi2 * 8), 0, 0, 0, 0, ln, cl)
                 if fi2 == 0:
                     ff = wl
                 fi2 = fi2 + 1
@@ -690,18 +694,18 @@ fn parse_primary() -> int:
             // values first, then build the contiguous wrappers.
             cap : ., mut = 8
             vals : string, mut = alloc(cap * 8)
-            w64(vals, 0, e)
+            cell_store(vals, 0, e)
             ec : ., mut = 1
             loop:
                 advance_tok()  // consume comma
                 if ec >= cap:
                     ncap := cap * 2
                     nv := alloc(ncap * 8)
-                    _dyncpy(vals, cap * 8, nv)
+                    cell_copy(vals, cap * 8, nv)
                     vals = nv
                     cap = ncap
                 g_want_value = 1                 // 元组元素 = 表达式位
-                w64(vals, ec * 8, parse_expr())  // 元素值（子树自占若干槽）
+                cell_store(vals, ec * 8, parse_expr())  // 元素值（子树自占若干槽）
                 ec = ec + 1
                 if !check(T_COMMA):
                     break
@@ -711,7 +715,7 @@ fn parse_primary() -> int:
             loop:
                 if ei >= ec:
                     break
-                vn := r64(vals, ei * 8)
+                vn := cell_load(vals, ei * 8)
                 ln : ., mut = tok_ln(t)
                 cl : ., mut = tok_cl(t)
                 if vn >= 0:
@@ -801,7 +805,7 @@ fn parse_primary() -> int:
         ec : ., mut = 0
         if !check(T_RBRACKET):
             g_want_value = 1            // 数组元素 = 表达式位
-            w64(vals, 0, parse_expr())  // 元素值（子树自占若干槽）
+            cell_store(vals, 0, parse_expr())  // 元素值（子树自占若干槽）
             ec = 1
             if check(T_SEMI):
                 // Repeat array [value; count]: parse the value once, then append
@@ -811,14 +815,14 @@ fn parse_primary() -> int:
                 cnt : ., mut = tok_iv(ct)
                 if cnt > cap:
                     nv := alloc(cnt * 8)
-                    _dyncpy(vals, cap * 8, nv)
+                    cell_copy(vals, cap * 8, nv)
                     vals = nv
                     cap = cnt
                 ri : ., mut = 1
                 loop:
                     if ri >= cnt:
                         break
-                    w64(vals, ri * 8, r64(vals, 0))
+                    cell_store(vals, ri * 8, cell_load(vals, 0))
                     ri = ri + 1
                 ec = cnt
             else:
@@ -829,11 +833,11 @@ fn parse_primary() -> int:
                     if ec >= cap:
                         ncap := cap * 2
                         nv := alloc(ncap * 8)
-                        _dyncpy(vals, cap * 8, nv)
+                        cell_copy(vals, cap * 8, nv)
                         vals = nv
                         cap = ncap
                     g_want_value = 1                 // 数组元素 = 表达式位
-                    w64(vals, ec * 8, parse_expr())  // 元素值（子树自占若干槽）
+                    cell_store(vals, ec * 8, parse_expr())  // 元素值（子树自占若干槽）
                     ec = ec + 1
         advance_tok()
         ef : ., mut = -1
@@ -841,7 +845,7 @@ fn parse_primary() -> int:
         loop:
             if ei2 >= ec:
                 break
-            vn := r64(vals, ei2 * 8)
+            vn := cell_load(vals, ei2 * 8)
             ln : ., mut = tok_ln(t)
             cl : ., mut = tok_cl(t)
             if vn >= 0:
@@ -869,10 +873,10 @@ fn block_push(n: int):
             ncap = 16
         nv := alloc(ncap * 8)
         if g_pb_cap > 0:
-            _dyncpy(g_pb_stmts, g_pb_cap * 8, nv)
+            cell_copy(g_pb_stmts, g_pb_cap * 8, nv)
         g_pb_stmts = nv
         g_pb_cap = ncap
-    w64(g_pb_stmts, g_pb_count * 8, n)
+    cell_store(g_pb_stmts, g_pb_count * 8, n)
     g_pb_count = g_pb_count + 1
 
 // Common entry for all regions: head and body.
@@ -943,7 +947,7 @@ fn parse_block_items(head: int) -> int:
         if i >= g_pb_count:
             break
         grow_block_stmts(g_block_stmt_count + 1)
-        w64(g_block_stmts, g_block_stmt_count * 8, r64(g_pb_stmts, i * 8))
+        cell_store(g_block_stmts, g_block_stmt_count * 8, cell_load(g_pb_stmts, i * 8))
         g_block_stmt_count = g_block_stmt_count + 1
         i = i + 1
     return alloc_node(EXPR_BLOCK, si, g_pb_count, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
@@ -984,7 +988,7 @@ fn parse_new_var_decl() -> int:
     // Parse name list
     nt := advance_tok()
     unsafe:
-        w64(names, nc * 8, @ptr_of(tok_lx(nt)))
+        cell_store(names, nc * 8, @ptr_of(tok_lx(nt)))
     // 2(a)：串字入裸字表
     nc = nc + 1
     // Batch: a, b : type = ...
@@ -995,7 +999,7 @@ fn parse_new_var_decl() -> int:
             advance_tok() // ,
             nt2 := advance_tok()
             unsafe:
-                w64(names, nc * 8, @ptr_of(tok_lx(nt2)))
+                cell_store(names, nc * 8, @ptr_of(tok_lx(nt2)))
             nc = nc + 1
 
     typ : ., mut = -1
@@ -1012,14 +1016,14 @@ fn parse_new_var_decl() -> int:
     if check(T_COLON_EQ):
         advance_tok()
         g_want_value = 1   // 声明右值 = 表达式位
-        w64(values, vc * 8, parse_expr())
+        cell_store(values, vc * 8, parse_expr())
         vc = vc + 1
         loop:
             if !check(T_COMMA):
                 break
             advance_tok()
             g_want_value = 1
-            w64(values, vc * 8, parse_expr())
+            cell_store(values, vc * 8, parse_expr())
             vc = vc + 1
     else:
         // consume ':'
@@ -1051,35 +1055,35 @@ fn parse_new_var_decl() -> int:
                     tni := str_intern(tag)
                     ei := find_plugin_entry(g_plugin_tags, g_plugin_tag_count, tni, -1)
                     if ei >= 0:
-                        pd := r64(g_plugin_tags, ei*24+16)
+                        pd := cell_load(g_plugin_tags, ei*24+16)
                         if pd != 0:
                             is_mut = 1
                     else:
                         // 未知标签：TA08（已知标签 = mut/pub/apx + 插件注册标签）
                         grow_diags(g_diag_count + 1)
-                        w64(g_diags, g_diag_count * DIAG_REC_SIZE, EC_TA_UNKNOWN_TAG)
-                        store_str_ptr(g_diags, g_diag_count * DIAG_REC_SIZE + 8, "unknown declaration tag '" + tag + "'")
-                        w64(g_diags, g_diag_count * DIAG_REC_SIZE + 16, tok_ln(tag_t))
-                        w64(g_diags, g_diag_count * DIAG_REC_SIZE + 24, tok_cl(tag_t))
-                        w64(g_diags, g_diag_count * DIAG_REC_SIZE + 32, diag_fileid_for_line(tok_ln(tag_t)))
+                        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE, EC_TA_UNKNOWN_TAG)
+                        cell_store_str(g_diags, g_diag_count * DIAG_REC_SIZE + 8, "unknown declaration tag '" + tag + "'")
+                        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 16, tok_ln(tag_t))
+                        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 24, tok_cl(tag_t))
+                        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 32, diag_fileid_for_line(tok_ln(tag_t)))
                         g_diag_count = g_diag_count + 1
                 if !check(T_COMMA):
                     break
                 advance_tok()
 
         // Parse values
-        w64(values, 0 * 8, -1)
+        cell_store(values, 0 * 8, -1)
         if check(T_EQ):
             advance_tok()
             g_want_value = 1   // 声明右值 = 表达式位
-            w64(values, vc * 8, parse_expr())
+            cell_store(values, vc * 8, parse_expr())
             vc = vc + 1
             loop:
                 if !check(T_COMMA):
                     break
                 advance_tok()
                 g_want_value = 1
-                w64(values, vc * 8, parse_expr())
+                cell_store(values, vc * 8, parse_expr())
                 vc = vc + 1
 
     // A trailing semicolon is optional; end_decl finishes the statement at a line
@@ -1092,9 +1096,9 @@ fn parse_new_var_decl() -> int:
         if i >= nc:
             break
         name_str := unsafe:
-            @str_of(r64(names, i * 8))
+            @str_of(cell_load(names, i * 8))
         ni := str_intern(name_str)   // 2(a)：裸字读出按串用
-        nv := r64(values, i * 8)
+        nv := cell_load(values, i * 8)
         // `apx` is valid only on an explicit `dex` or `int` declaration. Other
         // forms have no representation path and would carry the tag without the
         // approximation semantics. Reject them with P26 and produce no output.
@@ -1119,7 +1123,7 @@ fn parse_new_var_decl() -> int:
                 g_extra_lets = alloc(128)
                 g_extra_lets_cap = 16
             if g_extra_let_count < g_extra_lets_cap:
-                w64(g_extra_lets, g_extra_let_count * 8, node)
+                cell_store(g_extra_lets, g_extra_let_count * 8, node)
                 g_extra_let_count = g_extra_let_count + 1
         i = i + 1
 
@@ -1235,7 +1239,7 @@ fn parse_stmt() -> int:
     // Drain batch extras from previous call
     if g_extra_let_count > 0:
         g_extra_let_count = g_extra_let_count - 1
-        return r64(g_extra_lets, g_extra_let_count * 8)
+        return cell_load(g_extra_lets, g_extra_let_count * 8)
 
     t := cur_tok()
     // Nested fn and flow declarations are not statements. Function declarations are
@@ -1416,6 +1420,10 @@ fn parse_pattern() -> int:
     if tok_k(t) == T_INT:
         advance_tok()
         return alloc_node(EXPR_INT, 0, 0, 0, tok_iv(t), TY_INT, 0, tok_ln(t), tok_cl(t))
+    if tok_k(t) == T_BIGINT:
+        advance_tok()
+        tl := cell_load(g_tokens, t * ESZ_TOKEN + OFF_TK_LEXEME)
+        return alloc_node(EXPR_BIGINT, tl, 0, 0, 0, TY_INT, 0, tok_ln(t), tok_cl(t))
     if tok_k(t) == T_STRING || tok_k(t) == T_INTERP:
         return parse_interp_run()
     if tok_k(t) == T_CHAR:
@@ -1501,10 +1509,10 @@ fn parse_pattern() -> int:
                 if fc >= cap:
                     ncap := cap * 2
                     nv := alloc(ncap * 8)
-                    _dyncpy(vals, cap * 8, nv)
+                    cell_copy(vals, cap * 8, nv)
                     vals = nv
                     cap = ncap
-                w64(vals, fc * 8, parse_pattern())
+                cell_store(vals, fc * 8, parse_pattern())
                 fc = fc + 1
                 if check(T_COMMA):
                     advance_tok()
@@ -1514,7 +1522,7 @@ fn parse_pattern() -> int:
             loop:
                 if fi2 >= fc:
                     break
-                vn := r64(vals, fi2 * 8)
+                vn := cell_load(vals, fi2 * 8)
                 ln : ., mut = tok_ln(t)
                 cl : ., mut = tok_cl(t)
                 if vn >= 0:
@@ -1565,7 +1573,7 @@ fn parse_generics_into(names: string, constrs: string) -> int:
     loop:
         if ci >= 4:
             break
-        w64(constrs, ci * 8, -1)
+        cell_store(constrs, ci * 8, -1)
         ci = ci + 1
     open_tok : ., mut = 0
     close_tok : ., mut = 0
@@ -1585,13 +1593,13 @@ fn parse_generics_into(names: string, constrs: string) -> int:
                 break
             gt := advance_tok()
             unsafe:
-                w64(names, gc * 8, @ptr_of(tok_lx(gt)))
+                cell_store(names, gc * 8, @ptr_of(tok_lx(gt)))
             // Check for constraint: T: Interface
-            w64(constrs, gc * 8, -1)
+            cell_store(constrs, gc * 8, -1)
             if check(T_COLON_DECL):
                 advance_tok()
                 ct := advance_tok()
-                w64(constrs, gc * 8, str_intern(tok_lx(ct)))
+                cell_store(constrs, gc * 8, str_intern(tok_lx(ct)))
             gc = gc + 1
             if !check(T_COMMA):
                 break
@@ -1607,7 +1615,7 @@ fn save_func_generics(fi: int, names: string, count: int):
         if gi >= count:
             break
         name_str := unsafe:
-            @str_of(r64(names, gi * 8))
+            @str_of(cell_load(names, gi * 8))
         ni := str_intern(name_str)
         fi_set_generic_name(fi, gi, ni)
         gi = gi + 1
@@ -1617,10 +1625,10 @@ fn save_func_gen_constrs(fi: int, constrs: string, count: int):
     loop:
         if gi >= count:
             break
-        if r64(constrs, gi * 8) >= 0:
+        if cell_load(constrs, gi * 8) >= 0:
             idx := fi * MAX_GENERICS + gi
             grow_gen_constr(idx + 1)
-            w64(g_generic_constr, idx * 8, r64(constrs, gi * 8))
+            cell_store(g_generic_constr, idx * 8, cell_load(constrs, gi * 8))
             if idx + 1 > g_generic_constr_count:
                 g_generic_constr_count = idx + 1
         gi = gi + 1
@@ -1640,7 +1648,7 @@ fn save_struct_gen_constrs(si: int, constrs: string, count: int):
     loop:
         if zi >= MAX_GENERICS:
             break
-        w64(g_sgen_constr, (si * MAX_GENERICS + zi) * 8, -1)
+        cell_store(g_sgen_constr, (si * MAX_GENERICS + zi) * 8, -1)
         zi = zi + 1
     gi : ., mut = 0
     loop:
@@ -1648,8 +1656,8 @@ fn save_struct_gen_constrs(si: int, constrs: string, count: int):
             break
         if gi >= MAX_GENERICS:
             break
-        if r64(constrs, gi * 8) >= 0:
-            w64(g_sgen_constr, (si * MAX_GENERICS + gi) * 8, r64(constrs, gi * 8))
+        if cell_load(constrs, gi * 8) >= 0:
+            cell_store(g_sgen_constr, (si * MAX_GENERICS + gi) * 8, cell_load(constrs, gi * 8))
         gi = gi + 1
 
 fn save_enum_gen_constrs(ei: int, constrs: string, count: int):
@@ -1660,7 +1668,7 @@ fn save_enum_gen_constrs(ei: int, constrs: string, count: int):
     loop:
         if zi >= MAX_GENERICS:
             break
-        w64(g_egen_constr, (ei * MAX_GENERICS + zi) * 8, -1)
+        cell_store(g_egen_constr, (ei * MAX_GENERICS + zi) * 8, -1)
         zi = zi + 1
     gi : ., mut = 0
     loop:
@@ -1668,8 +1676,8 @@ fn save_enum_gen_constrs(ei: int, constrs: string, count: int):
             break
         if gi >= MAX_GENERICS:
             break
-        if r64(constrs, gi * 8) >= 0:
-            w64(g_egen_constr, (ei * MAX_GENERICS + gi) * 8, r64(constrs, gi * 8))
+        if cell_load(constrs, gi * 8) >= 0:
+            cell_store(g_egen_constr, (ei * MAX_GENERICS + gi) * 8, cell_load(constrs, gi * 8))
         gi = gi + 1
 
 fn add_func(name: string, pc: int, rt: int, an: int) -> int:
@@ -1693,9 +1701,9 @@ fn add_struct(name: string) -> int:
     loop:
         if zi >= ESZ_STRUCTINFO:
             break
-        w8(g_structs, base + zi, 0)
+        cell_store8(g_structs, base + zi, 0)
         zi = zi + 1
-    w64(g_structs, base + OFF_SI_NAME, ni)
+    cell_store(g_structs, base + OFF_SI_NAME, ni)
     // Field storage starts at the side table high-water mark. Writes use base +
     // index; si_commit_fields commits the range at the end of the body.
     si_set_field_base(idx, g_si_f_used)
@@ -1712,9 +1720,9 @@ fn add_enum(name: string) -> int:
     loop:
         if zi >= ESZ_ENUMINFO:
             break
-        w8(g_enums, base + zi, 0)
+        cell_store8(g_enums, base + zi, 0)
         zi = zi + 1
-    w64(g_enums, base + OFF_EI_NAME, ni)
+    cell_store(g_enums, base + OFF_EI_NAME, ni)
     // Variant storage starts at the side table high-water mark. Writes use base +
     // index; ei_commit_variants commits the range at the end of the body.
     ei_set_variant_base(idx, g_ei_v_used)
@@ -2159,13 +2167,13 @@ fn parse_declaration():
         si := add_struct(name)
         if si >= 0:
             if sg_count > 0:
-                w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT, sg_count)
+                cell_store(g_structs, si * ESZ_STRUCTINFO + OFF_SI_GENERIC_COUNT, sg_count)
                 sgi : ., mut = 0
                 loop:
                     if sgi >= sg_count:
                         break
                     unsafe:
-                        w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + sgi * 8, str_intern(@str_of(r64(sg_names, sgi * 8))))
+                        cell_store(g_structs, si * ESZ_STRUCTINFO + OFF_SI_GENERIC_NAMES + sgi * 8, str_intern(@str_of(cell_load(sg_names, sgi * 8))))
                     sgi = sgi + 1
                 // Register struct generic constraints in the struct side table.
                 // The old code wrote them to a dummy buffer and dropped them, so
@@ -2196,7 +2204,7 @@ fn parse_declaration():
                 fc = fc + 1
                 if check(T_COMMA):
                     advance_tok()
-            w64(g_structs, si * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, fc)
+            cell_store(g_structs, si * ESZ_STRUCTINFO + OFF_SI_FIELD_COUNT, fc)
             si_commit_fields(si, fc)   // 提交字段区（高水位 = base + fc）
         if has_items != 0:
             close_region()
@@ -2221,13 +2229,13 @@ fn parse_declaration():
         ei := add_enum(name)
         if ei >= 0:
             if eg_count > 0:
-                w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, eg_count)
+                cell_store(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_COUNT, eg_count)
                 egi : ., mut = 0
                 loop:
                     if egi >= eg_count:
                         break
                     unsafe:
-                        w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + egi * 8, str_intern(@str_of(r64(eg_names, egi * 8))))
+                        cell_store(g_enums, ei * ESZ_ENUMINFO + OFF_EI_GENERIC_NAMES + egi * 8, str_intern(@str_of(cell_load(eg_names, egi * 8))))
                     egi = egi + 1
                 // Enum generic constraints are registered the same way as struct
                 // constraints.
@@ -2267,7 +2275,7 @@ fn parse_declaration():
                 vc = vc + 1
                 if check(T_COMMA):
                     advance_tok()
-            w64(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, vc)
+            cell_store(g_enums, ei * ESZ_ENUMINFO + OFF_EI_VARIANT_COUNT, vc)
             ei_commit_variants(ei, vc)   // 提交变体区（高水位 = base + vc）
         if has_items != 0:
             close_region()
@@ -2298,10 +2306,10 @@ fn parse_declaration():
         loop:
             if zi >= ESZ_IFACEINFO:
                 break
-            w8(g_ifaces, iface_base + zi, 0)
+            cell_store8(g_ifaces, iface_base + zi, 0)
             zi = zi + 1
-        w64(g_ifaces, iface_base + OFF_IF_NAME, iface_ni)
-        w64(g_ifaces, iface_base + OFF_IF_GENERIC_COUNT, ig_count)
+        cell_store(g_ifaces, iface_base + OFF_IF_NAME, iface_ni)
+        cell_store(g_ifaces, iface_base + OFF_IF_GENERIC_COUNT, ig_count)
         method_count : ., mut = 0
 
         loop:
@@ -2326,7 +2334,7 @@ fn parse_declaration():
                 loop:
                     if pi2 >= 8:
                         break
-                    w64(param_tis, pi2 * 8, TY_UNIT)
+                    cell_store(param_tis, pi2 * 8, TY_UNIT)
                     pi2 = pi2 + 1
                 // Signature type-node slots are written next to the raw code slots,
                 // as struct and enum fields are. The self receiver slot has no node;
@@ -2339,7 +2347,7 @@ fn parse_declaration():
                 loop:
                     if pni2 >= 8:
                         break
-                    w64(param_nodes, pni2 * 8, -1)
+                    cell_store(param_nodes, pni2 * 8, -1)
                     pni2 = pni2 + 1
                 self_mode : ., mut = 0
                 if !check(T_RPAREN):
@@ -2357,7 +2365,7 @@ fn parse_declaration():
                                 // &mut self
                             nt2 := advance_tok() // self
                             if pc < 8:
-                                w64(param_tis, pc * 8, 0)
+                                cell_store(param_tis, pc * 8, 0)
                             // match function's default for &self
                             if pc == 0:
                                 self_mode = self_mode_t
@@ -2368,8 +2376,8 @@ fn parse_declaration():
                             advance_tok() // :
                             ptype := parse_type()
                             if pc < 8:
-                                w64(param_tis, pc * 8, unpack_type(ptype))
-                                w64(param_nodes, pc * 8, ptype)
+                                cell_store(param_tis, pc * 8, unpack_type(ptype))
+                                cell_store(param_nodes, pc * 8, ptype)
                             pc = pc + 1
                         if !check(T_COMMA):
                             break
@@ -2394,38 +2402,38 @@ fn parse_declaration():
                 // dyn_arr.cr constant comment.
                 if method_count >= MAX_IFACE_METHODS:
                     grow_diags(g_diag_count + 1)
-                    w64(g_diags, g_diag_count * DIAG_REC_SIZE, EC_P_FIELD_SYNTAX)
-                    store_str_ptr(g_diags, g_diag_count * DIAG_REC_SIZE + 8, "interface '" + iface_name + "' exceeds max 16 methods")
-                    w64(g_diags, g_diag_count * DIAG_REC_SIZE + 16, tok_ln(t))
-                    w64(g_diags, g_diag_count * DIAG_REC_SIZE + 24, tok_cl(t))
-                    w64(g_diags, g_diag_count * DIAG_REC_SIZE + 32, diag_fileid_for_line(tok_ln(t)))
+                    cell_store(g_diags, g_diag_count * DIAG_REC_SIZE, EC_P_FIELD_SYNTAX)
+                    cell_store_str(g_diags, g_diag_count * DIAG_REC_SIZE + 8, "interface '" + iface_name + "' exceeds max 16 methods")
+                    cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 16, tok_ln(t))
+                    cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 24, tok_cl(t))
+                    cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 32, diag_fileid_for_line(tok_ln(t)))
                     g_diag_count = g_diag_count + 1
                 else:
                     mbase := iface_base + OFF_IF_METHODS + method_count * ESZ_IFMETHOD
-                    w64(g_ifaces, mbase + OFF_IFM_NAME, method_ni)
-                    w64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT, pc)
-                    w64(g_ifaces, mbase + OFF_IFM_RET_TI, ret_ti)
-                    w64(g_ifaces, mbase + OFF_IFM_RET_NODE, ret_node)
-                    w64(g_ifaces, mbase + OFF_IFM_SELF_MODE, self_mode)
+                    cell_store(g_ifaces, mbase + OFF_IFM_NAME, method_ni)
+                    cell_store(g_ifaces, mbase + OFF_IFM_PARAM_COUNT, pc)
+                    cell_store(g_ifaces, mbase + OFF_IFM_RET_TI, ret_ti)
+                    cell_store(g_ifaces, mbase + OFF_IFM_RET_NODE, ret_node)
+                    cell_store(g_ifaces, mbase + OFF_IFM_SELF_MODE, self_mode)
                     pj : ., mut = 0
                     loop:
                         if pj >= 8 || pj >= pc:
                             break
-                        w64(g_ifaces, mbase + OFF_IFM_PARAM_TYPES + pj * 8, r64(param_tis, pj * 8))
-                        w64(g_ifaces, mbase + OFF_IFM_PARAM_NODES + pj * 8, r64(param_nodes, pj * 8))
+                        cell_store(g_ifaces, mbase + OFF_IFM_PARAM_TYPES + pj * 8, cell_load(param_tis, pj * 8))
+                        cell_store(g_ifaces, mbase + OFF_IFM_PARAM_NODES + pj * 8, cell_load(param_nodes, pj * 8))
                         pj = pj + 1
                     if pc > 8:
                         grow_diags(g_diag_count + 1)
-                        w64(g_diags, g_diag_count * DIAG_REC_SIZE, EC_P_PARAM_TYPE)
-                        store_str_ptr(g_diags, g_diag_count * DIAG_REC_SIZE + 8, "method '" + istr_get(method_ni) + "' in interface exceeds max 8 params")
-                        w64(g_diags, g_diag_count * DIAG_REC_SIZE + 16, tok_ln(t))
-                        w64(g_diags, g_diag_count * DIAG_REC_SIZE + 24, tok_cl(t))
-                        w64(g_diags, g_diag_count * DIAG_REC_SIZE + 32, diag_fileid_for_line(tok_ln(t)))
+                        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE, EC_P_PARAM_TYPE)
+                        cell_store_str(g_diags, g_diag_count * DIAG_REC_SIZE + 8, "method '" + istr_get(method_ni) + "' in interface exceeds max 8 params")
+                        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 16, tok_ln(t))
+                        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 24, tok_cl(t))
+                        cell_store(g_diags, g_diag_count * DIAG_REC_SIZE + 32, diag_fileid_for_line(tok_ln(t)))
                         g_diag_count = g_diag_count + 1
                 method_count = method_count + 1
             else:
                 advance_tok()
-        w64(g_ifaces, iface_base + OFF_IF_METHOD_COUNT, method_count)
+        cell_store(g_ifaces, iface_base + OFF_IF_METHOD_COUNT, method_count)
         g_iface_count = g_iface_count + 1
         if has_items != 0:
             close_region()
@@ -2463,9 +2471,9 @@ fn parse_declaration():
                 parse_body(mangled, mangled_ni, tok_ln(ft), tok_cl(ft), 0)
                 // Register in method lookup table
                 grow_methods(g_method_count + 1)
-                w64(g_methods, g_method_count * 24, type_ni)
-                w64(g_methods, g_method_count * 24 + 8, method_ni)
-                w64(g_methods, g_method_count * 24 + 16, mangled_ni)
+                cell_store(g_methods, g_method_count * 24, type_ni)
+                cell_store(g_methods, g_method_count * 24 + 8, method_ni)
+                cell_store(g_methods, g_method_count * 24 + 16, mangled_ni)
                 g_method_count = g_method_count + 1
             else:
                 advance_tok()
@@ -2474,8 +2482,8 @@ fn parse_declaration():
         // Store impl-for relationship after processing all methods
         if trait_ni >= 0:
             grow_impl_for(g_impl_for_count + 1)
-            w64(g_impl_for, g_impl_for_count * 16, trait_ni)
-            w64(g_impl_for, g_impl_for_count * 16 + 8, type_ni)
+            cell_store(g_impl_for, g_impl_for_count * 16, trait_ni)
+            cell_store(g_impl_for, g_impl_for_count * 16 + 8, type_ni)
             g_impl_for_count = g_impl_for_count + 1
         return
 
@@ -2491,8 +2499,8 @@ fn parse_declaration():
         type_node := parse_type()
         end_decl()
         grow_type_aliases(g_type_alias_count + 1)
-        w64(g_type_aliases, g_type_alias_count * 16, name_idx)
-        w64(g_type_aliases, g_type_alias_count * 16 + 8, type_node)
+        cell_store(g_type_aliases, g_type_alias_count * 16, name_idx)
+        cell_store(g_type_aliases, g_type_alias_count * 16 + 8, type_node)
         g_type_alias_count = g_type_alias_count + 1
         return
 
@@ -2512,7 +2520,7 @@ fn parse_declaration():
         mod_ni := str_intern(path_name)
         // Store mod path for checker registration
         grow_mod_paths(g_mod_path_count + 1)
-        w64(g_mod_path_names, g_mod_path_count * 8, mod_ni)
+        cell_store(g_mod_path_names, g_mod_path_count * 8, mod_ni)
         g_mod_path_count = g_mod_path_count + 1
         // `mod path` ends at a line boundary. `mod path:` with a region skips the
         // whole region body.
@@ -2545,7 +2553,7 @@ fn parse_declaration():
     if check(T_IDENT) && is_new_var_decl():
         node := parse_new_var_decl()
         grow_global_lets(g_global_let_count + 1)
-        w64(g_global_lets, g_global_let_count * 8, node)
+        cell_store(g_global_lets, g_global_let_count * 8, node)
         g_global_let_count = g_global_let_count + 1
         // Drain batch extras to globals
         _drained : ., mut = 0
@@ -2554,7 +2562,7 @@ fn parse_declaration():
                 break
             g_extra_let_count = g_extra_let_count - 1
             grow_global_lets(g_global_let_count + 1)
-            w64(g_global_lets, g_global_let_count * 8, r64(g_extra_lets, g_extra_let_count * 8))
+            cell_store(g_global_lets, g_global_let_count * 8, cell_load(g_extra_lets, g_extra_let_count * 8))
             g_global_let_count = g_global_let_count + 1
             _drained = _drained + 1
         end_decl()   // v4：全局声明以行边界收尾（原可选 `;` 退场）

@@ -48,15 +48,18 @@ g_ccr_type_seg_len : int, mut
 // buffer length.
 g_ccr_iface_seg : string, mut
 g_ccr_iface_seg_len : int, mut
-// NOD term-index buffer. Filling happens in ccr_types.cr; ccr_io.cr copies the
-// values into the +28 i32 slot of each node record.
-// Value semantics: -1 means no term (not a face-0 node, or a missing row in a warm
-// snapshot); >= 0 is the term DAG row for that node's atom row. The loader checks
-// consistency after parsing the TYPE segment and rejects an out-of-range value or
-// an atom_of mismatch.
+// NOD semantic type-id side buffer (v10 NOD `type_id`). Filling happens in
+// ccr_types.cr:ccr_nod_type_populate during the save path; the wire writes the
+// 40B NOD record with `type_id` at +24 and `flags` at +28.
+// Value semantics: >= 0 is a TYPE row (face 0 = the row's item is reversible);
+// -1 means no type row. `g_ccr_nod_flags` is the companion semantic-flags word
+// (CCR_NOD_FLAG_*): dynamic bounds/spawn markers and the runtime-pointer-bound
+// marker. It never carries a width, byte extent, stride, or alignment.
 // This file is first in both builds, so these globals must stay here.
-g_ccr_nod_item : string, mut
-g_ccr_nod_item_count : int, mut
+g_ccr_nod_type : string, mut
+g_ccr_nod_type_count : int, mut
+g_ccr_nod_flags : string, mut
+g_ccr_nod_flags_count : int, mut
 g_ast : string, mut
 g_ast_count : int, mut
 g_ast_cap : int, mut
@@ -276,6 +279,7 @@ g_checker_current_fi : int, mut
 // change the .ccr STR segment, so it must stay off by default to keep output
 // byte-identical.
 g_s1p_on : int, mut        // S1′ 打点开关：0 = 关（默认行为）· 1 = 开（`CORE_S1P=1`）
+g_int_big : int, mut       // set by str_int_literal when the literal does not fit a machine word
 g_s1p_seen : int, mut      // 0 = environment variable not read yet. The sentinel must be
                             // zero: non-literal global initializers are stored as 0 by the
                             // Python bootstrap build, so `= -1` cannot be relied on.
@@ -300,9 +304,6 @@ g_gen_map_cap : int, mut
 g_dyn_type_sets : string, mut
 g_dyn_type_set_count : int, mut
 g_dyn_type_set_cap : int, mut
-g_stack_map : string, mut  // IR var index to shared stack slot var (-1 = own slot), set by allocator
-g_home_dir : string, mut           // cached HOME dir for SO index lookup
-g_home_dir_ok : int, mut           // 1 = g_home_dir initialized
 
 g_ir_func_name_idx : string, mut
 g_ir_func_name_idx_cap : int, mut
@@ -346,7 +347,8 @@ g_live_range_cap : int, mut
 //   live_start(8) / live_end(12) i32: version live range as a closed interval in
 //                 global instruction order, [def_j, min(def_{j+1}-1, last_ref)].
 //                 Without a defining entry, [first_ref, last_ref].
-//   home(16)      i32: slot assigned by the allocator, or -1 if unassigned.
+//   runtime_home(16) i32: allocator/instance slot, or -1 if unassigned. Never
+//                 serialized into `.ccr`; v10 ENT has no home field.
 //   flags(20)     u32: 0; bit 0 is reserved.
 // Each function has one segment, appended in func_i order. Segment bounds are in
 // g_ir_func_entry_start and g_ir_func_entry_count (8 bytes each).
@@ -355,6 +357,11 @@ g_live_range_cap : int, mut
 g_ir_entries : string, mut
 g_entry_count : int, mut
 g_entry_cap : int, mut
+// 1 = the entry table came from the v10 ENT segment. compute_live_ranges keeps
+// those entries instead of rebuilding them, so allocation and diagnostics consume
+// the loaded existence lattice rather than a recomputed mirror. The corec save
+// path leaves this 0 and computes entries from the IR.
+g_ent_loaded : int, mut
 g_ir_func_entry_start : string, mut
 g_ir_func_entry_count : string, mut
 g_ir_func_entry_cap : int, mut
@@ -413,17 +420,15 @@ g_loop_region_exit : string, mut
 g_loop_region_count : int, mut
 g_loop_region_cap : int, mut
 // Pre-computed interned string indices for builtin function name matching
-g_ni_syscall3 : int, mut
-g_ni_syscall4 : int, mut
 g_ni_load8 : int, mut
 g_ni_store8 : int, mut
 g_ni_load64 : int, mut
 g_ni_load_str_ptr : int, mut
 g_ni_store_str_ptr : int, mut
 g_ni_get_arg : int, mut
-g_ni_w64 : int, mut
+g_ni_cell_store : int, mut
 g_ni_dyncpy : int, mut
-g_ni_r64 : int, mut
+g_ni_cell_load : int, mut
 g_ni_goroutine_wrapper_addr : int, mut
 // Single-pass backpatching: pending forward jumps
 g_pending_pos : string, mut        // rel32 buffer positions to patch
@@ -431,15 +436,6 @@ g_pending_label : string, mut      // target label indices
 g_pending_count : int, mut
 g_pending_cap : int, mut
 g_next_label : int, mut
-
-// Backend arrays (all dynamic byte buffers)
-g_x86_str_offs : string, mut
-g_x86_str_count : int, mut
-g_x86_str_cap : int, mut
-g_x86_ext_rel_pos : string, mut
-g_x86_ext_rel_name : string, mut
-g_x86_ext_rel_count : int, mut
-g_x86_ext_rel_cap : int, mut
 
 // .so extension index side tables. Parsed entries land here first, not directly in
 // the string or symbol table. Only names referenced by the program are materialized
@@ -469,105 +465,7 @@ g_spec_status : string, mut            // 0 = yellow (unproved, default), 1 = gr
                                         // 2 = red (hard error). Red is sticky and is not overwritten by green.
 g_spec_count : int, mut
 g_spec_cap : int, mut
-g_x86_rip_patch_pos : string, mut
-g_x86_rip_patch_globals : string, mut
-g_x86_rip_patch_count : int, mut
-g_x86_rip_patch_cap : int, mut
-g_x86_vars : string, mut
-g_x86_var_count : int, mut
-g_x86_var_cap : int, mut
-g_x86_stack_size : int, mut
-g_x86_func_idx : int, mut
-g_x86_is_enum : string, mut
-g_x86_is_enum_count : int, mut
-g_x86_is_enum_cap : int, mut
-g_x86_rodataref_pos : string, mut
-g_x86_rodataref_ro : string, mut
-g_x86_func_cp : string, mut
-g_x86_func_cp_cap : int, mut
-g_x86_func_code_sz : string, mut
-g_x86_func_code_sz_cap : int, mut
-g_x86_rodataref_count : int, mut
-g_x86_rodataref_cap : int, mut
-g_x86_is_global : string, mut
-g_x86_global_cnt : int, mut
-g_x86_global_cap : int, mut
-g_x86_global_off : string, mut
-g_x86_global_off_cnt : int, mut
-g_x86_global_off_cap : int, mut
-g_x86_func_offsets : string, mut
-g_x86_func_offsets_cap : int, mut
-g_x86_func_off_count : int, mut
-g_x86_emit_vars : string, mut
-g_x86_emit_vars_cap : int, mut
-g_x86_emit_var_count : int, mut
-g_x86_emit_stack_size : int, mut
-// Tag area for potentially multiword int variables, appended to the stack frame.
-// g_x86_mw_tag_off maps a function-local variable to its tag byte offset: an i64
-// array indexed by v - var_start, with negative rbp-relative offsets; -1 means not
-// tagged. g_x86_mw_tag_count is the number of tagged variables in the current
-// function, one tag byte each. See the multiword backend design documents.
-g_x86_mw_tag_off : string, mut
-g_x86_mw_tag_off_cap : int, mut
-g_x86_mw_tag_count : int, mut
-// Overflow-jump sites for tagged int add and sub fast paths. emit_instr records each
-// jo site. At the end of the function, frame.cr emits the 2-limb slow block and
-// patches the recorded sites.
-// Four parallel i64 arrays share one capacity and grow together. Index is site
-// order, which is instruction order; one instruction has at most one site:
-//   g_x86_mw_jo_pos: absolute jo position; rel32 is at pos+2 and jo is 6 bytes.
-//   g_x86_mw_jo_dest: destination var index for the fast-path store. The slot form
-//     is computed at block emission, so register-allocated forms need no extra
-//     record.
-//   g_x86_mw_jo_is_sub: 1 for sub. The high-limb correction differs: for add it is
-//     CF ? -1 : 0; for sub it is CF ? 0 : -1. See e2_mw_slow_block in tag2l.cr.
-//   g_x86_mw_jo_resume: absolute instruction after the fast-path store, where the
-//     slow block jumps back. elf.cr fills it once the instruction is emitted.
-g_x86_mw_jo_pos : string, mut
-g_x86_mw_jo_cap : int, mut
-g_x86_mw_jo_count : int, mut
-g_x86_mw_jo_dest : string, mut
-g_x86_mw_jo_is_sub : string, mut
-g_x86_mw_jo_resume : string, mut
-// Tag-check sites for consumers of tagged operands. Add, sub, and comparison fast
-// paths first emit a tag check (test byte + jne rel32; tag=1 means a 2-limb
-// operand). The jne target is the function's 2-limb block, whose position is known
-// only at the end, so it is patched like the jo sites.
-// Eight parallel i64 arrays share one capacity; index is site order, which is
-// instruction order:
-//   g_x86_mw_oc_pos1/pos2: absolute positions of the first and second check jne,
-//     or -1 when absent (operand untagged, or s1 == s2).
-//   g_x86_mw_oc_s1/s2/dest: operand rows and destination; slot forms are computed
-//     at block emission.
-//   g_x86_mw_oc_op: OP_ADD/OP_SUB select the arithmetic block; OP_EQ..OP_GE select
-//     the comparison block.
-//   g_x86_mw_oc_resume: instruction end, where the block jumps back.
-// See e2_mw_opnd_block in tag2l.cr.
-g_x86_mw_oc_pos1 : string, mut
-g_x86_mw_oc_pos2 : string, mut
-g_x86_mw_oc_cap : int, mut
-g_x86_mw_oc_count : int, mut
-g_x86_mw_oc_s1 : string, mut
-g_x86_mw_oc_s2 : string, mut
-g_x86_mw_oc_dest : string, mut
-g_x86_mw_oc_op : string, mut
-g_x86_mw_oc_resume : string, mut
-g_x86_ret_patch_pos : string, mut
-g_x86_ret_patch_cap : int, mut
-g_x86_ret_patch_count : int, mut
-g_x86_call_patch_pos : string, mut
-g_x86_call_patch_name : string, mut
-g_x86_call_patch_count : int, mut
-g_x86_call_patch_cap : int, mut
-g_x86_fnaddr_patch_pos : string, mut
-g_x86_fnaddr_patch_name : string, mut
-g_x86_fnaddr_patch_count : int, mut
-g_x86_fnaddr_patch_cap : int, mut
-g_x86_sub_rsp_pos : int, mut
-g_x86_alloc_patch_pos : string, mut
-g_x86_alloc_patch_cap : int, mut
-g_x86_alloc_patch_count : int, mut
-g_x86_emit_rt_stubs : int, mut         // 1 = pure-static: backend emits g_set_curg/g_get_curg stubs
+
 // Optimization levels and metadata (extensible key-value store)
 g_opt_level : int, mut     // 0=none, 1=regalloc, 2=stackshare, 3=cse
 g_opt_meta : string, mut   // metadata buffer for .ccr v3+
@@ -744,7 +642,7 @@ fn grow_plugin_tags(needed: int):
     if ncap < needed:
         ncap = needed + 8
     nb := alloc(ncap * 24)
-    _dyncpy(g_plugin_tags, g_plugin_tag_cap * 24, nb)
+    cell_copy(g_plugin_tags, g_plugin_tag_cap * 24, nb)
     g_plugin_tags = nb
     g_plugin_tag_cap = ncap
 
@@ -757,7 +655,7 @@ fn grow_plugin_rtypes(needed: int):
     if ncap < needed:
         ncap = needed + 8
     nb := alloc(ncap * 24)
-    _dyncpy(g_plugin_rtypes, g_plugin_rtype_cap * 24, nb)
+    cell_copy(g_plugin_rtypes, g_plugin_rtype_cap * 24, nb)
     g_plugin_rtypes = nb
     g_plugin_rtype_cap = ncap
 
@@ -769,9 +667,9 @@ fn find_plugin_entry(table: string, count: int, name_ni: int, ns_ni: int) -> int
     loop:
         if i >= count:
             break
-        if r64(table, i*24+8) == name_ni && r64(table, i*24) == ns_ni:
+        if cell_load(table, i*24+8) == name_ni && cell_load(table, i*24) == ns_ni:
             return i
-        if r64(table, i*24+8) == name_ni && ns_ni < 0 && r64(table, i*24) < 0:
+        if cell_load(table, i*24+8) == name_ni && ns_ni < 0 && cell_load(table, i*24) < 0:
             return i
         i = i + 1
     return -1
@@ -784,9 +682,9 @@ fn register_plugin_tag(ns_ni: int, name_ni: int, data: int) -> int:
     if ns_ni >= 0 && find_plugin_entry(g_plugin_tags, g_plugin_tag_count, name_ni, -1) >= 0:
         return -3
     grow_plugin_tags(g_plugin_tag_count + 1)
-    w64(g_plugin_tags, g_plugin_tag_count*24, ns_ni)
-    w64(g_plugin_tags, g_plugin_tag_count*24+8, name_ni)
-    w64(g_plugin_tags, g_plugin_tag_count*24+16, data)
+    cell_store(g_plugin_tags, g_plugin_tag_count*24, ns_ni)
+    cell_store(g_plugin_tags, g_plugin_tag_count*24+8, name_ni)
+    cell_store(g_plugin_tags, g_plugin_tag_count*24+16, data)
     g_plugin_tag_count = g_plugin_tag_count + 1
     return 0
 
@@ -796,9 +694,9 @@ fn register_plugin_rtype(ns_ni: int, name_ni: int, data: int) -> int:
     if ns_ni >= 0 && find_plugin_entry(g_plugin_rtypes, g_plugin_rtype_count, name_ni, -1) >= 0:
         return -3
     grow_plugin_rtypes(g_plugin_rtype_count + 1)
-    w64(g_plugin_rtypes, g_plugin_rtype_count*24, ns_ni)
-    w64(g_plugin_rtypes, g_plugin_rtype_count*24+8, name_ni)
-    w64(g_plugin_rtypes, g_plugin_rtype_count*24+16, data)
+    cell_store(g_plugin_rtypes, g_plugin_rtype_count*24, ns_ni)
+    cell_store(g_plugin_rtypes, g_plugin_rtype_count*24+8, name_ni)
+    cell_store(g_plugin_rtypes, g_plugin_rtype_count*24+16, data)
     g_plugin_rtype_count = g_plugin_rtype_count + 1
     return 0
 

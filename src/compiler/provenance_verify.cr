@@ -1,25 +1,34 @@
 // === provenance_verify.cr ===
-// ProvenanceVerify pass — checks DEREF offset against allocation size.
-// Runs after PointerAnalysis (ptr_analysis.cr) and RegionCheck (region_check.cr).
-// Detects out-of-bounds pointer accesses at compile time.
+// ProvenanceVerify pass — checks the DEREF/STORE_PTR element interval against
+// the allocation extent. Runs after PointerAnalysis (ptr_analysis.cr) and
+// RegionCheck (region_check.cr). Detects out-of-bounds pointer accesses at
+// compile time.
+//
+// Units are IR cells (element indices), never target bytes. PointerAnalysis
+// stores element offsets and this pass derives the allocation extent from the
+// ALLOC node's semantic count. corearch computes the matching byte extent from
+// the same node plus the target layout, so this decision is target-independent.
 
-fn get_alloc_size(alloc_seq: int) -> int:
+// Semantic extent of an allocation in IR cells.
+// -1 = unknown; leave the check to run time. Never approximate unknown as 0.
+fn get_alloc_extent(alloc_seq: int) -> int:
     // alloc_seq is a pts allocation bit, not a DF node index. Map it through
     // g_pa_alloc_nodes before reading the allocation node.
     if alloc_seq < 0 || alloc_seq >= g_pa_alloc_count:
         return -1
-    an := r64(g_pa_alloc_nodes, alloc_seq * 8)
-    op := r64(g_df_nodes, an * ESZ_DFNODE + OFF_DF_OPCODE)
-    s1 := r64(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S1)
-    s3 := r64(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S3)
+    an := cell_load(g_pa_alloc_nodes, alloc_seq * 8)
+    op := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_OPCODE)
+    s1 := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S1)
+    s3 := cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_S3)
 
     // IR_ALLOC marks a scalar variable slot, not a heap allocation, so it has no
-    // allocation size.
+    // allocation extent.
     if op == IR_ALLOC_ARRAY:
-        return s1 * 8
-    // count * 8; elements are always 8 bytes in IR_ALLOC_ARRAY.
+        // s1 is the semantic element count; one element occupies one IR cell.
+        return s1
     if op == IR_ALLOC_STRUCT:
-        // Match IR_ALLOC_STRUCT: field count times 8.
+        // Field count is the struct's cell extent. An unknown struct name falls
+        // back to a single cell, matching the scalar placeholder in the IR.
         fi : int = -1
         si2 : ., mut = 0
         loop:
@@ -30,25 +39,80 @@ fn get_alloc_size(alloc_seq: int) -> int:
                 break
             si2 = si2 + 1
         if fi >= 0:
-            return si_field_count(fi) * 8
-        return 8
+            return si_field_count(fi)
+        return 1
     return -1  // unknown; leave the check to run time
+
+// Semantic cell span of one value of type `ti`. Arrays and tuples are
+// contiguous element sequences, structs cover their fields, a slice view is a
+// (data, len) pair, and every scalar occupies one cell. This is the IR value
+// model, not a target byte size.
+// -1 = the type row is unavailable (negative or outside the loaded TYPE table,
+// e.g. a warm cache that does not carry it). Unknown must stay unknown so the
+// caller keeps the runtime bounds check instead of assuming one cell.
+fn pv_value_span(ti: int) -> int:
+    if ti < 0 || ti >= g_type_count:
+        return -1
+    k := get_type_kind(ti)
+    if k == TYP_ARRAY:
+        elem := pv_value_span(get_type_data(ti))
+        if elem < 0:
+            return -1
+        cnt := get_type_extra(ti)
+        if cnt <= 0:
+            return 1
+        return elem * cnt
+    if k == TYP_NAMED:
+        name_ni := get_type_data(ti)
+        si : ., mut = 0
+        loop:
+            if si >= g_struct_count:
+                break
+            if si_name(si) == name_ni:
+                fc := si_field_count(si)
+                if fc > 0:
+                    return fc
+                return 1
+            si = si + 1
+        return 1
+    if k == TYP_TUPLE:
+        n := get_type_data(ti)
+        if n > 0:
+            return n
+        return 1
+    if k == TYP_SLICE:
+        return 2
+    return 1
+
+// Cell span of the value a dereference reads or writes, derived from the
+// pointer's pointee type. The frontend no longer stores an access width code.
+// -1 = unknown: the pointer variable has no usable type row (negative or
+// outside the loaded TYPE table) or its pointee row is unavailable. Callers
+// then fall back to the runtime bounds check (fail closed, never widen).
+fn pv_access_span(ptr_var: int) -> int:
+    ti := irv_type(ptr_var)
+    if ti < 0 || ti >= g_type_count:
+        return -1
+    k := get_type_kind(ti)
+    if k == TYP_PTR || k == TYP_REF:
+        return pv_value_span(get_type_data(ti))
+    return 1
 
 fn get_alloc_var(alloc_seq: int) -> int:
     if alloc_seq < 0 || alloc_seq >= g_pa_alloc_count:
         return -1
-    an := r64(g_pa_alloc_nodes, alloc_seq * 8)
-    return r64(g_df_nodes, an * ESZ_DFNODE + OFF_DF_DEST)
+    an := cell_load(g_pa_alloc_nodes, alloc_seq * 8)
+    return cell_load(g_df_nodes, an * ESZ_DFNODE + OFF_DF_DEST)
 
 fn pv_is_in_unsafe(node_seq: int) -> int:
     si : ., mut = 0
     loop:
         if si >= g_sg_count:
             break
-        kind := r64(g_sgs, si * ESZ_SG + OFF_SG_KIND)
+        kind := cell_load(g_sgs, si * ESZ_SG + OFF_SG_KIND)
         if kind == SG_UNSAFE:
-            nstart := r64(g_sgs, si * ESZ_SG + OFF_SG_NSTART)
-            ncount := r64(g_sgs, si * ESZ_SG + OFF_SG_NCOUNT)
+            nstart := cell_load(g_sgs, si * ESZ_SG + OFF_SG_NSTART)
+            ncount := cell_load(g_sgs, si * ESZ_SG + OFF_SG_NCOUNT)
             if node_seq >= nstart && node_seq < nstart + ncount:
                 return 1
         si = si + 1
@@ -59,18 +123,18 @@ fn provenance_verify_func(nstart: int, ncount: int):
     loop:
         if ni >= nstart + ncount:
             break
-        op := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
-        s1 := r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
-        // Read the access width in bytes from OFF_DF_AUX. Before the single-slot
-        // change it lived in the shared tk slot. Reading slot 40 would treat a
-        // type-term index as a width.
-        width : ., mut = r64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_AUX)
+        op := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_OPCODE)
+        s1 := cell_load(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S1)
 
         if (op == IR_DEREF || op == IR_STORE_PTR) && s1 >= 0:
             // Skip checks in unsafe blocks
             if pv_is_in_unsafe(ni) != 0:
                 ni = ni + 1
                 continue
+
+            // Access span in IR cells, from the pointee semantic type. -1 means
+            // the type row is unavailable: keep the runtime bounds check.
+            span := pv_access_span(s1)
 
             ptr_ti := irv_type(s1)
             // This check applies only to TYP_PTR values with a non-zero extra field,
@@ -86,11 +150,8 @@ fn provenance_verify_func(nstart: int, ncount: int):
                 ni = ni + 1
                 continue
 
-            if width <= 0:
-                width = 8
-
-            pts := r64(g_pts, s1 * 8)
-            off := r64(g_offsets, s1 * 8)
+            pts := cell_load(g_pts, s1 * 8)
+            off := cell_load(g_offsets, s1 * 8)
             runtime_targets : ., mut = 0
             runtime_size : ., mut = 0
             runtime_base : ., mut = -1
@@ -102,23 +163,25 @@ fn provenance_verify_func(nstart: int, ncount: int):
                 if bi >= 64:
                     break
                 if (pts / mask) % 2 != 0:
-                    alloc_size := get_alloc_size(bi)
-                    if alloc_size >= 0 && off >= 0:
-                        if width > alloc_size || off > alloc_size - width:
+                    alloc_extent := get_alloc_extent(bi)
+                    if alloc_extent >= 0 && off >= 0 && span > 0:
+                        if span > alloc_extent || off > alloc_extent - span:
                             check_error(EC_TK_INDEX,
-                                "pointer out of bounds: offset " + int_str(off) +
-                                " + width " + int_str(width) +
-                                " > size " + int_str(alloc_size),
+                                "pointer out of bounds: index " + int_str(off) +
+                                " + span " + int_str(span) +
+                                " > extent " + int_str(alloc_extent) +
+                                " (IR cells)",
                                 0, 0)
-                    else if alloc_size >= 0:
-                        if width > alloc_size:
+                    else if alloc_extent >= 0:
+                        if span > 0 && span > alloc_extent:
                             check_error(EC_TK_INDEX,
-                                "pointer access width " + int_str(width) +
-                                " exceeds allocation size " + int_str(alloc_size),
+                                "pointer access span " + int_str(span) +
+                                " exceeds allocation extent " + int_str(alloc_extent) +
+                                " (IR cells)",
                                 0, 0)
                         else:
                             runtime_targets = runtime_targets + 1
-                            runtime_size = alloc_size
+                            runtime_size = alloc_extent
                             runtime_base = get_alloc_var(bi)
                         // Unknown allocation information leaves s2 and s3 unset. The
                         // encoder keeps a null trap for s3 = 0.
@@ -126,14 +189,25 @@ fn provenance_verify_func(nstart: int, ncount: int):
                 mask = mask * 2
                 bi = bi + 1
 
-            if off < 0 && runtime_targets == 1 && runtime_base >= 0:
-                w64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3, runtime_size)
+            // A constant offset plus a known span can be proven statically. A
+            // dynamic offset (off < 0) or an unknown span (span <= 0: missing or
+            // out-of-range type row, e.g. a warm cache without it) cannot. Both
+            // must keep the runtime bound, otherwise the backend would emit only
+            // a null check and the access would be fail-open. `span` is never 0
+            // from pv_value_span/pv_access_span; treating 0 as unknown is
+            // intentionally conservative.
+            needs_runtime : ., mut = 0
+            if off < 0 || span <= 0:
+                needs_runtime = 1
+
+            if needs_runtime != 0 && runtime_targets == 1 && runtime_base >= 0:
+                cell_store(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S3, runtime_size)
                 if op == IR_DEREF:
-                    w64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2, runtime_base)
+                    cell_store(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_S2, runtime_base)
                 else:
                     // IR_STORE_PTR has no result, so dest carries the runtime base.
-                    w64(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST, runtime_base)
-            else if off < 0 && runtime_targets > 1:
+                    cell_store(g_df_nodes, ni * ESZ_DFNODE + OFF_DF_DEST, runtime_base)
+            else if needs_runtime != 0 && runtime_targets > 1:
                 check_error(EC_TK_INDEX,
                     "runtime pointer bounds check has multiple allocation targets",
                     0, 0)
@@ -145,7 +219,7 @@ fn provenance_verify_all():
     loop:
         if fi >= g_ir_func_count:
             break
-        nstart := r64(g_df_func_node_start, fi * 8)
-        ncount := r64(g_df_func_node_count, fi * 8)
+        nstart := cell_load(g_df_func_node_start, fi * 8)
+        ncount := cell_load(g_df_func_node_count, fi * 8)
         provenance_verify_func(nstart, ncount)
         fi = fi + 1

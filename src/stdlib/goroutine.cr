@@ -12,6 +12,10 @@ fn goroutine_wrapper_addr() -> int:
 // Goroutine ID counter
 g_next_id : int, mut = 1
 
+// Fiber stack size for one G. This is an execution policy constant, not a
+// frontend type-layout rule.
+G_STACK_SIZE : int = 16384
+
 // G struct layout (80 bytes):
 //   0: id
 //   8: status (0=runnable, 1=running, 2=waiting, 3=dead)
@@ -31,9 +35,9 @@ fn g_new(entry_fn: int, arg: int, arg_type: int) -> string:
     // alloc() routes to g_current_arena when it is >= 0 — arena_new() sets it.
     aid := arena_new()
 
-    // Allocate stack (16KB) — from the G's arena
-    stack := alloc(16384)
-    stack_top := stack + 16384 - 8
+    // Allocate stack (G_STACK_SIZE) — from the G's arena
+    stack := alloc(G_STACK_SIZE)
+    stack_top := stack + G_STACK_SIZE - 8
 
     // Initialize fiber. The entry is ALWAYS goroutine_entry_wrapper
     // (rt.s / emitted by the ELF backend): it reads saved_fn/saved_arg
@@ -47,22 +51,22 @@ fn g_new(entry_fn: int, arg: int, arg_type: int) -> string:
     g := alloc(80)
     id := g_next_id
     g_next_id = g_next_id + 1
-    w64(g, 0, id)           // id
-    w64(g, 8, 0)            // _Grunnable
-    w64(g, 16, sp)          // stack pointer
-    w64(g, 24, stack)       // stack_lo
-    w64(g, 32, aid)         // arena_id
-    w64(g, 40, 0)           // result_ch = 0 (default)
-    w64(g, 48, -1)          // next = -1
-    w64(g, 56, entry_fn)    // saved_fn = entry function ptr
-    w64(g, 64, arg)         // saved_arg
-    w64(g, 72, 0)           // temp_val = 0
+    cell_store(g, 0, id)           // id
+    cell_store(g, 8, 0)            // _Grunnable
+    cell_store(g, 16, sp)          // stack pointer
+    cell_store(g, 24, stack)       // stack_lo
+    cell_store(g, 32, aid)         // arena_id
+    cell_store(g, 40, 0)           // result_ch = 0 (default)
+    cell_store(g, 48, -1)          // next = -1
+    cell_store(g, 56, entry_fn)    // saved_fn = entry function ptr
+    cell_store(g, 64, arg)         // saved_arg
+    cell_store(g, 72, 0)           // temp_val = 0
 
     return g
 
 fn g_free(g: string):
     // Reset arena (reclaims the fiber stack + G struct, which live in it)
-    aid := r64(g, 32)
+    aid := cell_load(g, 32)
     arena_reset(aid)
     // Mark G dead so it is never re-enqueued (status 3 = _Gdead)
-    w64(g, 8, 3)
+    cell_store(g, 8, 3)

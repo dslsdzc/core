@@ -101,6 +101,7 @@ T_EXTERN : int = 100  // extern "C" / foreign function declaration
 // has a function named check and a CLI subcommand named check.
 T_HASH : int = 101
 T_INTERP : int = 102  // interpolation hole token; lexeme is the hole text, iv carries part and closure flags
+T_BIGINT : int = 113  // arbitrary precision integer token; lexeme is canonical decimal text
 
 // Layout tokens and the two colon meanings.
 // T_NEWLINE is emitted at the end of a logical line that contains a token. Blank
@@ -255,6 +256,7 @@ EXPR_OPTIONAL : int = 49  // a=inner type node (T? 类型位置)
 // a typed conversion call. data is the interned hole text; line and col locate the
 // hole for diagnostics.
 EXPR_INTERP_HOLE : int = 50  // data=hole text ni（解析期）；checker 改写后本 kind 不再存在
+EXPR_BIGINT : int = 51       // a=canonical decimal string ni; type TY_INT
 
 // Field representation in struct literal: two consecutive AST nodes
 // (name_idx, value_idx, line=line, col=col)
@@ -614,15 +616,16 @@ IR_LABEL : int = 21
 IR_PHI : int = 22
 IR_LOAD_ENUM_TAG : int = 23
 IR_SLICE : int = 24   // dest=slice_var, s1=arr_var, s2=low_var, src3=high_var; create slice ptr from range
-IR_DEREF : int = 25   // dest=loaded_val, s1=ptr, s2=runtime_base, s3=alloc_size, type_kind=width
-IR_STORE_PTR : int = 26 // dest=runtime_base, s1=ptr, s2=value, s3=alloc_size, type_kind=width
-IR_ADDR_INDEX : int = 31 // dest=addr, s1=arr_var, s2=index_var, s3=scale; compute &arr[index] without loading
+IR_DEREF : int = 25   // dest=loaded_val, s1=ptr, s2=runtime_base, s3=runtime-bound marker; access width is target-owned
+IR_STORE_PTR : int = 26 // dest=runtime_base, s1=ptr, s2=value, s3=runtime-bound marker; access width is target-owned
+IR_ADDR_INDEX : int = 31 // dest=addr, s1=arr_var, s2=index_var, s3=scale (target-owned, zero on the wire); compute &arr[index] without loading
 IR_SPAWN : int = 27     // dest=result_var, s1=first_arg, s2=arg_count, s3=fn_name_ni, type_kind=spawn_count (-1=dynamic)
 IR_YIELD : int = 28     // s1=value_var; emit value from flow to consumer channel
 IR_AWAIT : int = 29     // dest=value_var, s1=future_var; block until future ready, get value
 IR_BOUNDS_CHECK : int = 30 // s1=index, s2=max_len/len_var, type_kind=1 for dynamic max
 IR_ARENA_NEW   : int = 32   // dest=arena_var, src1=size_estimate
-IR_ARENA_RESET : int = 33   // src1=arena_id (dest=-1)
+IR_ARENA_RESET : int = 33   // src1=arena_id
+IR_CONST_BIG : int = 40     // dest=value, s1=canonical decimal string index, tk=TI_INT (dest=-1)
 IR_INLINE            : int = 34   // src1=fn_var; inline hint
 IR_NO_BOUNDS_CHECK   : int = 35   //skip bounds check for subsequent DEREFs
 IR_FAST              : int = 36   //allow precision-for-speed optimizations
@@ -640,6 +643,8 @@ IR_FNADDR : int = 48  // dest=addr_var, s1=fn_name_ni; load function address (mo
 IR_I2F : int = 49  // dest=dex_var(bits), s1=int_var; int  to  binary64（cvtsi2sd，apx 快路径）
 IR_F2I : int = 50  // dest=int_var, s1=dex_var(bits); binary64  to  int（cvttsd2si 截断，apx 快路径）
 IR_APPROX : int = 51  //无操作数注解：apx 变量声明处（语义许可，后端可忽略，interp 跳过）
+IR_PTR_OF : int = 52  // dest=same int var, s1=same string var; view/convert address to mathematical int
+IR_STR_OF : int = 53  // dest=same string var, s1=same int var; view/convert mathematical int to raw address
 
 // Resolution flag for BRANCH/JUMP (stored in type_kind field after label resolution)
 IR_RESOLVED : int = 1
@@ -696,10 +701,3 @@ g_df_cap : int, mut
 // Usage count: how many consumers each IR variable has
 g_var_use_count : string, mut
 g_var_use_count_cap : int, mut
-
-
-// ── Optimization metadata keys (.ccr v3+ extensible section) ──
-OPT_KEY_REG_ASSIGN  : int = 0  // [var_idx:u32, reg_num:u8]...
-OPT_META_STRIDE     : int = 64 // header (8) + up to 5 register pairs
-OPT_KEY_STACK_SHARE : int = 1  // [var_idx:u32, mapped_to:u32]...
-OPT_KEY_CSE         : int = 2  // [op:u32, s1:u32, s2:u32, res:u32]...

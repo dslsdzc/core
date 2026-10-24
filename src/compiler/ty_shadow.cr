@@ -93,7 +93,7 @@ fn sh_map_cap_init():
         loop:
             if i >= nc:
                 break
-            w64(nb, i * 16, -1)
+            cell_store(nb, i * 16, -1)
             i = i + 1
         g_term_map = nb
         g_term_map_cap = nc
@@ -109,7 +109,7 @@ fn sh_map_find_nogrow(ti: int) -> int:
     p : ., mut = tt_mod(ti, cap)
     ret : ., mut = -1
     loop:
-        k := r64(g_term_map, p * 16)
+        k := cell_load(g_term_map, p * 16)
         if k < 0:
             ret = p
             break
@@ -141,7 +141,7 @@ fn sh_map_rehash():
     loop:
         if i >= nc:
             break
-        w64(nb, i * 16, -1)
+        cell_store(nb, i * 16, -1)
         i = i + 1
     g_term_map = nb
     g_term_map_cap = nc
@@ -150,11 +150,11 @@ fn sh_map_rehash():
     loop:
         if j >= old_cap:
             break
-        k := r64(old, j * 16)
+        k := cell_load(old, j * 16)
         if k >= 0:
             s := sh_map_find_nogrow(k)
-            w64(g_term_map, s * 16, k)
-            w64(g_term_map, s * 16 + 8, r64(old, j * 16 + 8))
+            cell_store(g_term_map, s * 16, k)
+            cell_store(g_term_map, s * 16 + 8, cell_load(old, j * 16 + 8))
             g_term_map_entries = g_term_map_entries + 1
         j = j + 1
 
@@ -162,7 +162,7 @@ fn sh_map_rehash():
 // The layout is read from checker's TUPLE branch and field access:
 //   data = field count; extra = start index of field type rows in
 //   g_gen_apply_data, 8 bytes per element. Field i is
-//   r64(g_gen_apply_data, (extra + i) * 8). There is no g_tuple_* table.
+//   cell_load(g_gen_apply_data, (extra + i) * 8). There is no g_tuple_* table.
 // CONS 列表逆序构造（i 自末尾向前 cons）：DAG 项不可变，正向追加需改写已建项，
 // 不可行；逆序构造的结果顺序仍 = 声明顺序。
 // ─── 序列项 / ref mut 标记（桥接的两个新构造点）───
@@ -210,7 +210,7 @@ fn sh_tuple_to_product(ti: int) -> int:
     loop:
         if i < 0:
             break
-        et := sh_term_of_ti(r64(g_gen_apply_data, (start + i) * 8))
+        et := sh_term_of_ti(cell_load(g_gen_apply_data, (start + i) * 8))
         if et < 0:
             return -1
         // 任一字段无法翻译 -> 整项无法翻译（不缓存）
@@ -256,7 +256,7 @@ fn sh_named_identity_term(ti: int) -> int:
 // 1 = 签名数据递归 sh_sig_term_of_ti）。
 fn sh_apply_args_chain(ti: int, variant: int) -> int:
     start := get_type_extra(ti)
-    cnt := r64(g_gen_apply_data, start * 8)
+    cnt := cell_load(g_gen_apply_data, start * 8)
     if cnt < 0:
         return -1
     tail : ., mut = tt_nil()
@@ -264,7 +264,7 @@ fn sh_apply_args_chain(ti: int, variant: int) -> int:
     loop:
         if j < 0:
             break
-        ai := r64(g_gen_apply_data, (start + 1 + j) * 8)
+        ai := cell_load(g_gen_apply_data, (start + 1 + j) * 8)
         at : ., mut = -1
         if variant == 0:
             at = sh_term_of_ti(ai)
@@ -301,8 +301,8 @@ fn sh_term_of_ti(ti: int) -> int:
     if nak >= 0:
         return tt_atom(nak, ti, -1)
     slot := sh_map_find(ti)
-    if r64(g_term_map, slot * 16) == ti:
-        return r64(g_term_map, slot * 16 + 8)
+    if cell_load(g_term_map, slot * 16) == ti:
+        return cell_load(g_term_map, slot * 16 + 8)
     // 未命中：按 kind 翻译（递归子项）
     term : ., mut = -1
     k1 := get_type_kind(ti)
@@ -366,10 +366,10 @@ fn sh_term_of_ti(ti: int) -> int:
         return -1
     // 写回前重探（递归翻译期间可能已扩容，见文件头注记2）
     slot2 := sh_map_find(ti)
-    if r64(g_term_map, slot2 * 16) == ti:
-        return r64(g_term_map, slot2 * 16 + 8)   // 后备：递归期间同 ti 已入表
-    w64(g_term_map, slot2 * 16, ti)
-    w64(g_term_map, slot2 * 16 + 8, term)
+    if cell_load(g_term_map, slot2 * 16) == ti:
+        return cell_load(g_term_map, slot2 * 16 + 8)   // 后备：递归期间同 ti 已入表
+    cell_store(g_term_map, slot2 * 16, ti)
+    cell_store(g_term_map, slot2 * 16 + 8, term)
     g_term_map_entries = g_term_map_entries + 1
     return term
 
@@ -387,13 +387,15 @@ fn sh_term_of_ti(ti: int) -> int:
 //     IR_LOAD_ENUM_TAG has two call sites that pass literal 0, so it keeps no
 //     type information.
 //   · 辅码（face 1，tk 语义 = 非类型码 -> 原码进辅码槽）：IR_BOUNDS_CHECK（0/1
-//     动态上限旗标，instr.cr:1340 `ti != 0`）/ IR_DEREF / IR_STORE_PTR（访问宽度码
-//     8/4/2/1，instr.cr 的 e2_ptr_bounds_check）/ IR_SPAWN（spawn_count；-1 = 动态）/
-//     IR_HOTPATCH_ROUTE with explicit 0.
+//     动态上限旗标，instr.cr:1340 `ti != 0`）/ IR_DEREF / IR_STORE_PTR（旧访问宽度
+//     码 8/4/2/1；v10 Task 5 起前端不再发射，宽度由 corearch 从 pointee 语义类型
+//     重建——分类规则保留：重引入的宽度码仍必须落辅码面）/ IR_SPAWN（spawn_count；
+//     -1 = 动态）/ IR_HOTPATCH_ROUTE with explicit 0.
 //   · 无类型信息（face 2，tk 语义 = 无）：其余全部 op。
-// Numeric coincidence: flag 1 equals the TI_DEX row and width 8 equals the
-// TI_DEX_S row. Classification must be per opcode; guessing by row number would
-// assign a dex item to a pointer dereference.
+// Numeric coincidence: flag 1 equals the TI_DEX row and the legacy width code 8
+// equals the TI_DEX_S row. The frontend no longer emits that width, but the
+// classifier must keep blocking the collision: classification is per opcode and
+// guessing by row number would assign a dex item to a pointer dereference.
 //
 // 原子行 vs 复合行：类型信息只接受项可逆的行
 // atom_of(term) == ti 当且仅当 term 是 TT_ATOM 且 b 槽就是 ti。指针、引用、
@@ -481,7 +483,7 @@ fn sh_tk_split_impl(opcode: int, tk: int, count_fail: int):
             if sh_tk_is_type_face(opcode) != 0 && sh_tk_row_state(tk) == 0:
                 g_tk_face_fail = g_tk_face_fail + 1
 
-// 槽 -> 派生码（唯一派生点；dataflow.cr 的 lower_to_ccr / ir_gen.cr 的 emit /
+// 槽 -> 派生码（唯一派生点；ccr_lower.cr 的 lower_to_ccr / ir_gen.cr 的 emit /
 // cir_cache.cr 的装载侧共用）：辅码 ≠ 0 -> 辅码；无项 -> 0；否则 `atom_of(项)`
 // （不可逆 -> -1：显式、响亮，绝不近似成 0/1）。
 fn sh_dfn_code_of_slots(tk_term: int, tk_aux: int) -> int:
@@ -669,7 +671,7 @@ fn sh_unf_cap_init():
         loop:
             if i >= nc:
                 break
-            w64(nb, i * 16, -1)
+            cell_store(nb, i * 16, -1)
             i = i + 1
         g_unf_map = nb
         g_unf_map_cap = nc
@@ -682,7 +684,7 @@ fn sh_unf_find_nogrow(ti: int) -> int:
     p : ., mut = tt_mod(ti, cap)
     ret : ., mut = -1
     loop:
-        k := r64(g_unf_map, p * 16)
+        k := cell_load(g_unf_map, p * 16)
         if k < 0:
             ret = p
             break
@@ -713,7 +715,7 @@ fn sh_unf_rehash():
     loop:
         if i >= nc:
             break
-        w64(nb, i * 16, -1)
+        cell_store(nb, i * 16, -1)
         i = i + 1
     g_unf_map = nb
     g_unf_map_cap = nc
@@ -722,11 +724,11 @@ fn sh_unf_rehash():
     loop:
         if j >= old_cap:
             break
-        k := r64(old, j * 16)
+        k := cell_load(old, j * 16)
         if k >= 0:
             s := sh_unf_find_nogrow(k)
-            w64(g_unf_map, s * 16, k)
-            w64(g_unf_map, s * 16 + 8, r64(old, j * 16 + 8))
+            cell_store(g_unf_map, s * 16, k)
+            cell_store(g_unf_map, s * 16 + 8, cell_load(old, j * 16 + 8))
             g_unf_entries = g_unf_entries + 1
         j = j + 1
 
@@ -765,14 +767,14 @@ fn sh_struct_field_term(sa: int, fi: int, ga: int) -> int:
         if is_struct_generic(sa, fni):
             if ga >= 0 && get_type_kind(ga) == TYP_GENERIC_APPLY:
                 gstart := get_type_extra(ga)
-                gcnt := r64(g_gen_apply_data, gstart * 8)
+                gcnt := cell_load(g_gen_apply_data, gstart * 8)
                 gpi : ., mut = 0
                 loop:
                     if gpi >= si_generic_count(sa):
                         break
                     if si_generic_name(sa, gpi) == fni:
                         if gpi < gcnt:
-                            return sh_term_of_ti(r64(g_gen_apply_data, (gstart + 1 + gpi) * 8))
+                            return sh_term_of_ti(cell_load(g_gen_apply_data, (gstart + 1 + gpi) * 8))
                         break   // 实参缺位 -> 落空到名义项（下方 res_type_node），不得取越界槽
                     gpi = gpi + 1
     fti := res_type_node(fnode)
@@ -792,9 +794,9 @@ fn sh_struct_term(ti: int) -> int:
     if sa < 0:
         return -1
     slot := sh_unf_find(ti)
-    if r64(g_unf_map, slot * 16) == ti:
+    if cell_load(g_unf_map, slot * 16) == ti:
         g_unf_hits = g_unf_hits + 1
-        return r64(g_unf_map, slot * 16 + 8)
+        return cell_load(g_unf_map, slot * 16 + 8)
     ga : ., mut = -1
     if get_type_kind(ti) == TYP_GENERIC_APPLY:
         ga = ti
@@ -817,11 +819,11 @@ fn sh_struct_term(ti: int) -> int:
     term := tt_atom(AK_PRODUCT, ti, tail)
     // 写回前重探（字段解析期间可能已扩容，照 sh_term_of_ti 注记2同款）
     slot2 := sh_unf_find(ti)
-    if r64(g_unf_map, slot2 * 16) == ti:
+    if cell_load(g_unf_map, slot2 * 16) == ti:
         g_unf_hits = g_unf_hits + 1
-        return r64(g_unf_map, slot2 * 16 + 8)
-    w64(g_unf_map, slot2 * 16, ti)
-    w64(g_unf_map, slot2 * 16 + 8, term)
+        return cell_load(g_unf_map, slot2 * 16 + 8)
+    cell_store(g_unf_map, slot2 * 16, ti)
+    cell_store(g_unf_map, slot2 * 16 + 8, term)
     g_unf_entries = g_unf_entries + 1
     return term
 
@@ -854,9 +856,9 @@ fn sh_enum_domain_term(ti: int) -> int:
     if ea < 0:
         return -1
     slot := sh_unf_find(ti)
-    if r64(g_unf_map, slot * 16) == ti:
+    if cell_load(g_unf_map, slot * 16) == ti:
         g_unf_hits = g_unf_hits + 1
-        return r64(g_unf_map, slot * 16 + 8)
+        return cell_load(g_unf_map, slot * 16 + 8)
     acc : ., mut = tt_bot()
     i : ., mut = 0
     loop:
@@ -870,11 +872,11 @@ fn sh_enum_domain_term(ti: int) -> int:
         acc = tt_union(acc, v)
         i = i + 1
     slot2 := sh_unf_find(ti)
-    if r64(g_unf_map, slot2 * 16) == ti:
+    if cell_load(g_unf_map, slot2 * 16) == ti:
         g_unf_hits = g_unf_hits + 1
-        return r64(g_unf_map, slot2 * 16 + 8)
-    w64(g_unf_map, slot2 * 16, ti)
-    w64(g_unf_map, slot2 * 16 + 8, acc)
+        return cell_load(g_unf_map, slot2 * 16 + 8)
+    cell_store(g_unf_map, slot2 * 16, ti)
+    cell_store(g_unf_map, slot2 * 16 + 8, acc)
     g_unf_entries = g_unf_entries + 1
     return acc
 
@@ -947,7 +949,7 @@ fn sh_sig_term_of_ti(ti: int) -> int:
         loop:
             if i < 0:
                 break
-            et := sh_sig_term_of_ti(r64(g_gen_apply_data, (start + i) * 8))
+            et := sh_sig_term_of_ti(cell_load(g_gen_apply_data, (start + i) * 8))
             if et < 0:
                 return -1
             tail = tt_cons(et, tail)
@@ -979,23 +981,23 @@ fn sh_iface_sig_param_term(ii: int, mi: int, idx: int) -> int:
     if idx >= MAX_IFACE_METHOD_PARAMS:
         return -1
     mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD
-    if r64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT) <= idx:
+    if cell_load(g_ifaces, mbase + OFF_IFM_PARAM_COUNT) <= idx:
         return -1
-    smode := r64(g_ifaces, mbase + OFF_IFM_SELF_MODE)
+    smode := cell_load(g_ifaces, mbase + OFF_IFM_SELF_MODE)
     if idx == 0 && smode != 0:
         return sh_sig_term_of_ti(TI_UNIT)
-    return sh_sig_term_of_node(r64(g_ifaces, mbase + OFF_IFM_PARAM_NODES + idx * 8))
+    return sh_sig_term_of_node(cell_load(g_ifaces, mbase + OFF_IFM_PARAM_NODES + idx * 8))
 
 fn sh_iface_sig_ret_term(ii: int, mi: int) -> int:
     if ii < 0 || mi < 0:
         return -1
     mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD
-    return sh_sig_term_of_node(r64(g_ifaces, mbase + OFF_IFM_RET_NODE))
+    return sh_sig_term_of_node(cell_load(g_ifaces, mbase + OFF_IFM_RET_NODE))
 
 fn sh_iface_self_mode(ii: int, mi: int) -> int:
     if ii < 0 || mi < 0:
         return -1
-    return r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD + OFF_IFM_SELF_MODE)
+    return cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHODS + mi * ESZ_IFMETHOD + OFF_IFM_SELF_MODE)
 
 // impl 侧（函数行）签名的参数项（idx 自 0 起；从 AST 参数列表前扫解析，形参节点不连续，
 // 每参的类型节点插在其后，照 ir_gen/checker 同款扫描约定）。接收者槽同占位约定。
@@ -1108,7 +1110,7 @@ fn sh_iface_shape_term(iface_ni: int) -> int:
     ii := find_iface(iface_ni)
     if ii < 0:
         return -1
-    mc := r64(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
+    mc := cell_load(g_ifaces, ii * ESZ_IFACEINFO + OFF_IF_METHOD_COUNT)
     if mc < 0:
         return -1
     if mc > MAX_IFACE_METHODS:
@@ -1119,8 +1121,8 @@ fn sh_iface_shape_term(iface_ni: int) -> int:
         if i < 0:
             break
         mbase := ii * ESZ_IFACEINFO + OFF_IF_METHODS + i * ESZ_IFMETHOD
-        m_ni := r64(g_ifaces, mbase + OFF_IFM_NAME)
-        pc := r64(g_ifaces, mbase + OFF_IFM_PARAM_COUNT)
+        m_ni := cell_load(g_ifaces, mbase + OFF_IFM_NAME)
+        pc := cell_load(g_ifaces, mbase + OFF_IFM_PARAM_COUNT)
         if pc < 0 || pc > MAX_IFACE_METHOD_PARAMS:
             return -1
         rt2 := sh_iface_sig_ret_term(ii, i)
@@ -1278,12 +1280,12 @@ fn grow_cov_bits(needed: int):
     if nc < needed:
         nc = needed + 64
     nb := alloc(nc)
-    _dyncpy(g_cov_bits, g_cov_cap, nb)
+    cell_copy(g_cov_bits, g_cov_cap, nb)
     z : ., mut = g_cov_cap
     loop:
         if z >= nc:
             break
-        store8(nb, z, 0)
+        cell_store_byte(nb, z, 0)
         z = z + 1
     g_cov_bits = nb
     g_cov_cap = nc
@@ -1296,7 +1298,7 @@ fn mc_add(vi: int):
     grow_cov_bits(vi / 8 + 1)
     if vi + 1 > g_cov_len:
         g_cov_len = vi + 1
-    b := bu8(g_cov_bits, vi / 8)
+    b := cell_load8(g_cov_bits, vi / 8)
     pw : ., mut = 1
     k : ., mut = vi % 8
     loop:
@@ -1305,7 +1307,7 @@ fn mc_add(vi: int):
         pw = pw * 2
         k = k - 1
     if (b / pw) % 2 == 0:
-        store8(g_cov_bits, vi / 8, b + pw)
+        cell_store_byte(g_cov_bits, vi / 8, b + pw)
 fn mc_has(vi: int) -> int:
     if vi < 0:
         return 0
@@ -1313,7 +1315,7 @@ fn mc_has(vi: int) -> int:
         return 0
     if vi / 8 >= g_cov_cap:
         return 0
-    b := bu8(g_cov_bits, vi / 8)
+    b := cell_load8(g_cov_bits, vi / 8)
     pw : ., mut = 1
     k : ., mut = vi % 8
     loop:
@@ -1339,7 +1341,7 @@ fn mc_end(saved: int):
         if i >= g_cov_len:
             break
         if i / 8 < g_cov_cap:
-            store8(g_cov_bits, i / 8, 0)
+            cell_store_byte(g_cov_bits, i / 8, 0)
         i = i + 1
     g_cov_len = saved
 
@@ -1454,9 +1456,9 @@ fn sh_variant_payload_at(ea: int, vi: int, i: int, ga: int) -> int:
                 // 泛型形参：泛型应用行的对应实参（缺位 -> 落空到名义，照 sh_struct_field_term）
                 if ga >= 0 && get_type_kind(ga) == TYP_GENERIC_APPLY:
                     gstart2 := get_type_extra(ga)
-                    gcnt2 := r64(g_gen_apply_data, gstart2 * 8)
+                    gcnt2 := cell_load(g_gen_apply_data, gstart2 * 8)
                     if gi2 < gcnt2:
-                        return sh_term_of_ti(r64(g_gen_apply_data, (gstart2 + 1 + gi2) * 8))
+                        return sh_term_of_ti(cell_load(g_gen_apply_data, (gstart2 + 1 + gi2) * 8))
                 break
             gi2 = gi2 + 1
     pti := res_type_node(pn)

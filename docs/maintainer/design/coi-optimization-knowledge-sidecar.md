@@ -10,6 +10,12 @@
 
 设计状态：定稿，尚未实现。`g_opt_meta` 的现状核对、格式展开、检查细节和待定事项见实现记录 `docs/superpowers/implementation/2026-09-23-coi-revision-audit.md`。
 
+## 分发边界：`.ccrb`
+
+`.ccrb` 是外部分发包装，不是新的程序格式。它由一个 zstd 帧包裹确定性 tar，固定包含 `manifest` 和 `program.ccr`，可选携带 `coi/<target>.coi`。打包和解包由 `tools/ccrb.py` 完成；`corearch` 只读取解包后的 raw `.ccr`，不实现 zstd，也不读取 `.ccrb`。
+
+在这个包装层里，`.coi` 只是可选、不透明、可删除的旁挂 payload。本文件不定义 `.coi` 记录的内容；完整 `.coi` 语义仍属于独立计划 `docs/superpowers/plans/2026-09-23-coi-implementation.md`。删除 `.coi` 条目不改变 `program.ccr` 的字节。
+
 ## 核心规则
 
 删除全部 `.coi` 文件，程序仍然正确、仍然可读。删除只允许增加编译成本或降低优化质量。
