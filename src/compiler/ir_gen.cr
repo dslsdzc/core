@@ -887,6 +887,102 @@ fn find_global(name_idx: int) -> int:
         i = i - 1
     return -1
 
+// Field load form for struct-pattern tests/bindings. Aggregate reads lose the
+// declared type; string patterns must keep TI_STR so str_eq compares contents,
+// bool/char keep their declared form so literal comparisons use the same
+// representation as the existing bool/char arms, and other fields use the exact
+// integer slot form (TI_INT).
+fn structpat_field_load_ti(si: int, jdi: int) -> int:
+    ft := struct_row_field_ti(si, jdi)
+    if ft == TI_STR:
+        return TI_STR
+    if ft == TI_DEX:
+        return TI_DEX_S
+    if ft == TI_BOOL:
+        return TI_BOOL
+    if ft == TI_CHAR:
+        return TI_CHAR
+    return TI_INT
+
+// ─── Struct match pattern lowering（Task 5b1）───
+// Emit the comparison for one field subpattern. `fall` is taken when the
+// comparison fails. Returns 1 when a test was emitted, 0 for ident/wildcard
+// (no test), and -1 for an unsupported nested subpattern (caller must fail
+// closed instead of jumping to the body).
+fn gen_structpat_field_test(sub: int, fv: int, fall: int) -> int:
+    if sub < 0:
+        return 0
+    k := ast_kind(sub)
+    if k == EXPR_IDENT || k == EXPR_WILDCARD:
+        return 0
+    ok_lbl := new_label()
+    cmp_var : ., mut = -1
+    if k == EXPR_INT:
+        pat_val := new_ir_var("pval", TI_INT)
+        emit(IR_CONST, pat_val, ast_int_val(sub), 0, 0, TI_INT)
+        cmp_var = new_ir_var("cmp", TI_INT)
+        emit(IR_BINARY, cmp_var, fv, pat_val, OP_EQ, 0)
+    else if k == EXPR_BOOL:
+        pat_val := new_ir_var("pval", TI_BOOL)
+        pat_bool : ., mut = 0
+        if ast_int_val(sub) != 0:
+            pat_bool = 1
+        emit(IR_CONST, pat_val, pat_bool, 0, 0, TI_BOOL)
+        cmp_var = new_ir_var("cmp", TI_INT)
+        emit(IR_BINARY, cmp_var, fv, pat_val, OP_EQ, 0)
+    else if k == EXPR_CHAR:
+        // char runtime value = interned string index; the pattern stores the same
+        // index in ast_int_val (same contract as the existing char arm).
+        pat_val := new_ir_var("pval", TI_CHAR)
+        track_str(ast_int_val(sub))
+        emit(IR_CONST, pat_val, ast_int_val(sub), 0, 0, TI_CHAR)
+        cmp_var = new_ir_var("cmp", TI_INT)
+        emit(IR_BINARY, cmp_var, fv, pat_val, OP_EQ, 0)
+    else if k == EXPR_STRING:
+        pat_val := new_ir_var("spat", TI_STR)
+        track_str(ast_int_val(sub))
+        emit(IR_CONST, pat_val, ast_int_val(sub), 0, 0, TI_STR)
+        eq0 := new_ir_var("_seq0", TI_STR)
+        eq1 := new_ir_var("_seq1", TI_STR)
+        emit(IR_STORE, -1, eq0, fv, 0, 0)
+        emit(IR_STORE, -1, eq1, pat_val, 0, 0)
+        cmp_var = new_ir_var("cmp", TI_BOOL)
+        emit(IR_CALL, cmp_var, eq0, 2, str_intern("str_eq"), TI_BOOL)
+    else:
+        return -1
+    emit(IR_BRANCH, -1, cmp_var, ok_lbl, fall, 0)
+    emit(IR_LABEL, -1, ok_lbl, 0, 0, 0)
+    return 1
+
+// Bind ident subpatterns for a struct pattern in the arm scope. Each binding
+// reads its field again and gets the declared field type. Literal and `_`
+// subpatterns bind nothing.
+fn gen_structpat_binds(pat: int, match_val: int):
+    if pat < 0 || match_val < 0:
+        return
+    si := find_struct_by_name(ast_a(pat))
+    c := ast_c(pat)
+    w0 := ast_b(pat)
+    if si < 0 || w0 < 0:
+        return
+    i : ., mut = 0
+    loop:
+        if i >= c:
+            break
+        w := w0 + i
+        if w >= 0:
+            sub := ast_a(w)
+            if sub >= 0 && ast_kind(sub) == EXPR_IDENT:
+                nn := ast_int_val(sub)
+                if str_eq(istr_get(nn), "_") == 0:
+                    jdi := struct_field_index_by_name(si, ast_b(w))
+                    if jdi >= 0:
+                        fv := new_ir_var("fld", TI_INT)
+                        irv_set_type(fv, structpat_field_load_ti(si, jdi))
+                        emit(IR_LOAD_FIELD, fv, match_val, 0, jdi, 0)
+                        bind_local(nn, fv)
+        i = i + 1
+
 // Return the literal initializer AST node for an immutable module-level
 // constant.  The ELF backend has no data initializers, so leaving these as
 // BSS globals turns values such as T_FN and ESZ_TOKEN into zero at runtime.
@@ -2979,6 +3075,50 @@ fn gen_expr(node: int) -> int:
                         cmp_var := new_ir_var("cmp", TI_INT)
                         emit(IR_BINARY, cmp_var, tag_var, vtag, OP_EQ, 0)
                         emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
+            else if pat_kind == EXPR_STRUCTPAT:
+                // Struct pattern: sequential field tests. The lowerer never
+                // classifies struct patterns as MATCH, so this is the only path.
+                // A missing struct/field or an unsupported nested subpattern
+                // fails closed: jump to the fall edge, never to the body.
+                si := find_struct_by_name(ast_a(arm_pat))
+                sc := ast_c(arm_pat)
+                w0 := ast_b(arm_pat)
+                can_match : ., mut = 1
+                if si < 0 || w0 < 0:
+                    can_match = 0
+                if has_next == 1:
+                    fall_lbl = new_label()
+                si_i : ., mut = 0
+                loop:
+                    if si_i >= sc:
+                        break
+                    w := w0 + si_i
+                    sub : ., mut = -1
+                    fni : ., mut = -1
+                    if w >= 0:
+                        sub = ast_a(w)
+                        fni = ast_b(w)
+                    jdi : ., mut = -1
+                    if si >= 0:
+                        jdi = struct_field_index_by_name(si, fni)
+                    if jdi < 0:
+                        can_match = 0
+                        break
+                    if sub >= 0:
+                        sk := ast_kind(sub)
+                        if sk != EXPR_IDENT && sk != EXPR_WILDCARD:
+                            fv := new_ir_var("fld", TI_INT)
+                            ft := structpat_field_load_ti(si, jdi)
+                            irv_set_type(fv, ft)
+                            emit(IR_LOAD_FIELD, fv, match_val, 0, jdi, 0)
+                            if gen_structpat_field_test(sub, fv, fall_lbl) < 0:
+                                can_match = 0
+                                break
+                    si_i = si_i + 1
+                if can_match != 0:
+                    emit(IR_JUMP, -1, body_lbl, 0, 0, 0)
+                else:
+                    emit(IR_JUMP, -1, fall_lbl, 0, 0, 0)
             else if pat_kind == EXPR_INT:
                 pat_val := new_ir_var("pval", TI_INT)
                 emit(IR_CONST, pat_val, ast_int_val(arm_pat), 0, 0, TI_INT)
@@ -3040,6 +3180,8 @@ fn gen_expr(node: int) -> int:
                 if ci_arm >= 0:
                     ccr_case_set_target(case_base + ci_arm, body_nod)
             push_ir_scope()
+            if pat_kind == EXPR_STRUCTPAT:
+                gen_structpat_binds(arm_pat, match_val)
             if pat_kind == EXPR_ENUMPAT:
                 sub_count := ast_c(arm_pat)
                 fi : ., mut = 0

@@ -987,10 +987,12 @@ fn gen_clone_tree(node: int) -> int:
         return n
 
     // EXPR_STRUCTPAT: a = name, b = first wrapper (consecutive), c = field count.
-    // wrapper.a = subpattern node.
+    // wrapper.a = subpattern node, wrapper.b = field name index (same contract as
+    // struct literal wrappers). Preserve the name so a clone still binds by name.
     if k == EXPR_STRUCTPAT:
         if b >= 0 && c > 0:
             nvs : string, mut = alloc(c * 8)
+            nns : string, mut = alloc(c * 8)
             i : ., mut = 0
             loop:
                 if i >= c:
@@ -999,13 +1001,17 @@ fn gen_clone_tree(node: int) -> int:
                 if b + i >= 0:
                     vn = ast_a(b + i)
                 cell_store(nvs, i * 8, gen_clone_tree(vn))
+                nn : ., mut = -1
+                if b + i >= 0:
+                    nn = ast_b(b + i)
+                cell_store(nns, i * 8, nn)
                 i = i + 1
             new_first := g_ast_count
             i = 0
             loop:
                 if i >= c:
                     break
-                ast_alloc(EXPR_NONE, cell_load(nvs, i * 8), 0, 0, 0, 0, 0, ln, cl)
+                ast_alloc(EXPR_NONE, cell_load(nvs, i * 8), cell_load(nns, i * 8), 0, 0, 0, 0, ln, cl)
                 i = i + 1
             n := ast_alloc(k, a, new_first, c, iv, tv, d, ln, cl)
             gen_dedup_add(node, n)

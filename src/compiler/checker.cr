@@ -1640,6 +1640,124 @@ fn struct_field_index_by_name(si: int, name_ni: int) -> int:
         j = j + 1
     return -1
 
+// ─── Struct match pattern（Task 5b1）───
+// EXPR_STRUCTPAT layout: a = struct name ni, b = first wrapper, c = field count.
+// wrapper.a = subpattern, wrapper.b = field name ni. Validate the pattern against
+// the struct row: unknown type/field, duplicate field, and literal field type
+// mismatches are hard diagnostics. Nested struct/enum/tuple subpatterns are
+// rejected with TM09 rather than silently treated as irrefutable. Returns
+// 0 when the pattern is usable, 1 when a diagnostic was reported.
+fn check_struct_pattern(pat: int, scrut_ti: int) -> int:
+    if pat < 0:
+        return 1
+    name_ni := ast_a(pat)
+    si := find_struct_by_name(name_ni)
+    if si < 0:
+        check_error(EC_N_UNDEFINED,
+            "Unknown struct type '" + istr_get(name_ni) + "' in struct pattern",
+            ast_line(pat), ast_col(pat))
+        return 1
+    // The scrutinee must be this struct whenever its shape is statically known.
+    sk := get_type_kind(scrut_ti)
+    if sk == TYP_NAMED || sk == TYP_GENERIC_APPLY:
+        sni := decl_name_of_ti(scrut_ti)
+        if sni >= 0 && sni != name_ni:
+            check_error(EC_TS_FIELD_TYPE,
+                "Struct pattern '" + istr_get(name_ni) + "' does not match scrutinee type '" + istr_get(sni) + "'",
+                ast_line(pat), ast_col(pat))
+            return 1
+    else if sk != TYP_GENERIC_PARAM:
+        check_error(EC_TS_FIELD_TYPE,
+            "Struct pattern '" + istr_get(name_ni) + "' requires a struct scrutinee",
+            ast_line(pat), ast_col(pat))
+        return 1
+    c := ast_c(pat)
+    w0 := ast_b(pat)
+    if c > 0 && w0 < 0:
+        return 1
+    fc := si_field_count(si)
+    used : string, mut = alloc((fc + 1) * 8)
+    j : ., mut = 0
+    loop:
+        if j >= fc:
+            break
+        cell_store(used, j * 8, 0)
+        j = j + 1
+    bad : ., mut = 0
+    i : ., mut = 0
+    loop:
+        if i >= c:
+            return bad
+        w := w0 + i
+        sub : ., mut = -1
+        fni : ., mut = -1
+        if w >= 0:
+            sub = ast_a(w)
+            fni = ast_b(w)
+        jdi := struct_field_index_by_name(si, fni)
+        if jdi < 0:
+            check_error(EC_TS_UNKNOWN_FIELD,
+                "Unknown field '" + istr_get(fni) + "' in struct pattern " + istr_get(name_ni),
+                ast_line(w), ast_col(w))
+            bad = 1
+            i = i + 1
+            continue
+        if cell_load(used, jdi * 8) != 0:
+            check_error(EC_TS_FIELD_DUP,
+                "Field '" + istr_get(fni) + "' matched more than once in struct pattern " + istr_get(name_ni),
+                ast_line(w), ast_col(w))
+            bad = 1
+        cell_store(used, jdi * 8, 1)
+        if sub >= 0:
+            k := ast_kind(sub)
+            if k != EXPR_IDENT && k != EXPR_WILDCARD:
+                if k == EXPR_INT || k == EXPR_BOOL || k == EXPR_CHAR || k == EXPR_STRING:
+                    ft := res_type_node(si_field_type_node(si, jdi))
+                    st := infer_expr(sub)
+                    if ft >= 0 && ti_has_generic_param(ft) == 0:
+                        verdict := type_compat_strict(st, ft)
+                        if verdict != 1:
+                            diag_type_incompatible(verdict, EC_TS_FIELD_TYPE,
+                                "Field '" + istr_get(fni) + "' in struct pattern " + istr_get(name_ni) +
+                                ": expected " + type_display(ft) + ", got " + type_display(st),
+                                ast_line(sub), ast_col(sub))
+                            bad = 1
+                else:
+                    check_error(EC_TM_NESTED,
+                        "Nested match patterns are not supported yet",
+                        ast_line(sub), ast_col(sub))
+                    bad = 1
+        i = i + 1
+    return bad
+
+// Bind the ident subpatterns of a validated struct pattern. Each binding gets
+// the declared type of its field. `_` and literal subpatterns bind nothing.
+fn bind_struct_pattern_idents(pat: int):
+    if pat < 0:
+        return
+    name_ni := ast_a(pat)
+    si := find_struct_by_name(name_ni)
+    c := ast_c(pat)
+    w0 := ast_b(pat)
+    if si < 0 || (c > 0 && w0 < 0):
+        return
+    i : ., mut = 0
+    loop:
+        if i >= c:
+            break
+        w := w0 + i
+        if w >= 0:
+            sub := ast_a(w)
+            if sub >= 0 && ast_kind(sub) == EXPR_IDENT:
+                nn := ast_int_val(sub)
+                if str_eq(istr_get(nn), "_") == 0:
+                    jdi := struct_field_index_by_name(si, ast_b(w))
+                    ft : ., mut = TI_INT
+                    if jdi >= 0:
+                        ft = res_type_node(si_field_type_node(si, jdi))
+                    def_sym(nn, SYM_LOCAL, ft, -1)
+        i = i + 1
+
 // 类型里是否仍含未实例化的泛型参数（TYP_GENERIC_PARAM，可嵌套在数组 / 指针 / 引用 /
 // 切片 / 元组 / 泛型应用内）。字面量的字段类型 vs 声明元素同质性判定在任一侧
 // 含未实例化参数时跳过，参数未实例化时比较不成立，强行比较会假拒（泛型函数体
@@ -3451,6 +3569,13 @@ fn infer_expr(node: int) -> int:
                                 m_dup = arm_pat
                         mc_add(ci)
                         m_pats = tt_cons(vt, m_pats)
+                else if ast_kind(arm_pat) == EXPR_STRUCTPAT:
+                    // Struct patterns are refutable: like literals, they need an
+                    // irrefutable arm. Field syntax/type errors are diagnosed by
+                    // check_struct_pattern; TM09 covers nested subpatterns.
+                    m_literal = 1
+                    if check_struct_pattern(arm_pat, match_ti) != 0:
+                        m_unmappable = 1
                 else:
                     lit_k := sh_match_lit_kind(arm_pat)
                     if lit_k >= 0:
@@ -3484,6 +3609,10 @@ fn infer_expr(node: int) -> int:
                                 def_sym(ast_int_val(spn), SYM_LOCAL, TI_INT, -1)
                             spn = spn + 1
                         spi = spi + 1
+                if ast_kind(arm_pat) == EXPR_STRUCTPAT:
+                    // Struct pattern field bindings: each ident subpattern gets the
+                    // declared field type (Task 5b1).
+                    bind_struct_pattern_idents(arm_pat)
                 if ast_kind(arm_pat) == EXPR_IDENT:
                     // 绑定臂的值就是 scrutinee：类型取 scrutinee 类型（旧实现
                     // 一律 TI_INT，字符串/char/bool  scrutinee 会错型）。
@@ -3994,6 +4123,8 @@ fn infer_expr(node: int) -> int:
             return get_type_data(inner_ti)
         return inner_ti
     if ast_kind(node) == EXPR_STRUCTPAT:
+        // Patterns are not value expressions. Match-arm validation/binding lives
+        // in the EXPR_MATCH branch (check_struct_pattern / bind_struct_pattern_idents).
         return TI_UNIT
     if ast_kind(node) == EXPR_AS:
         // expr as Type — type cast

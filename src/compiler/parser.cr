@@ -1487,12 +1487,14 @@ fn parse_pattern() -> int:
         if check(T_LBRACE):
             // Struct pattern: Name { field = pat, ... }
             // EXPR_STRUCTPAT layout: a = name index, b = first wrapper, c = field
-            // count. Wrappers are contiguous; wrapper.a points to the subpattern.
+            // count. Wrappers are contiguous; wrapper.a points to the subpattern and
+            // wrapper.b is the field name index (same contract as struct literals).
             // Composite subpatterns occupy several nodes, so parse all subpatterns
             // first, then build the wrappers.
             advance_tok()
             cap : ., mut = 8
             vals : string, mut = alloc(cap * 8)
+            names : string, mut = alloc(cap * 8)
             fc : ., mut = 0
             loop:
                 if check(T_RBRACE) || check(T_EOF):
@@ -1511,8 +1513,12 @@ fn parse_pattern() -> int:
                     nv := alloc(ncap * 8)
                     cell_copy(vals, cap * 8, nv)
                     vals = nv
+                    nn := alloc(ncap * 8)
+                    cell_copy(names, cap * 8, nn)
+                    names = nn
                     cap = ncap
                 cell_store(vals, fc * 8, parse_pattern())
+                cell_store(names, fc * 8, fni)
                 fc = fc + 1
                 if check(T_COMMA):
                     advance_tok()
@@ -1528,7 +1534,7 @@ fn parse_pattern() -> int:
                 if vn >= 0:
                     ln = ast_line(vn)
                     cl = ast_col(vn)
-                wl := ast_alloc(EXPR_NONE, vn, 0, 0, 0, 0, 0, ln, cl)
+                wl := ast_alloc(EXPR_NONE, vn, cell_load(names, fi2 * 8), 0, 0, 0, 0, ln, cl)
                 if fi2 == 0:
                     ff = wl
                 fi2 = fi2 + 1

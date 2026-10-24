@@ -243,7 +243,7 @@ EXPR_AT : int = 46             // @builtin: a=name_ni, b=args_node, c=0, iv=0, t
 // Desugared constructs
 EXPR_TRY : int = 33      // a=expr being tried (? operator)
 EXPR_UNSAFE : int = 34   // a=block body
-EXPR_STRUCTPAT : int = 35 // struct pattern: a=name ni, b=first wrapper（连续；wrapper kind=EXPR_NONE 且 a=子模式节点）, c=field count
+EXPR_STRUCTPAT : int = 35 // struct pattern: a=name ni, b=first wrapper（连续；wrapper kind=EXPR_NONE，a=子模式节点，b=字段名 ni）, c=field count
 EXPR_AS : int = 36        // a=expr, b=type node (cast: expr as Type)
 EXPR_PTRTYPE : int = 47  // a=inner_type (for *T in type position)
 EXPR_EXTERN : int = 48  // a=name_ni, b=first_param, c=param_count, data=ffi_lang_ni

@@ -865,6 +865,152 @@ fn main() -> int:
     return 42
 """
 
+# Task 5b1: struct patterns. Field names are bound by name (the pattern below
+# reverses the declaration order in the second arm), ident subpatterns bind the
+# field value, and a miss must fall to the wildcard instead of the first arm.
+MATCH_STRUCT_SOURCE = """struct Point:
+    x: int
+    y: int
+
+fn pick(p: Point) -> int:
+    return match p:
+        Point { x = 1, y = yv } => yv,
+        Point { y = 9, x = xv } => xv,
+        _ => 0
+
+fn main() -> int:
+    if pick(Point { x = 1, y = 7 }) != 7:
+        return 1
+    if pick(Point { x = 4, y = 9 }) != 4:
+        return 2
+    if pick(Point { x = 2, y = 3 }) != 0:
+        return 3
+    return 42
+"""
+
+# Scalar field kinds: bool/char/string/int literals all compare through the
+# sequential path (strings via str_eq, not a CASE row).
+MATCH_STRUCT_SCALARS_SOURCE = """struct Rec:
+    flag: bool
+    ch: char
+    name: string
+    n: int
+
+fn pick(r: Rec) -> int:
+    return match r:
+        Rec { n = 3, name = "hi", ch = 'A', flag = true } => 1,
+        Rec { flag = false, ch = 'B', name = "yo", n = 4 } => 2,
+        _ => 3
+
+fn main() -> int:
+    if pick(Rec { flag = true, ch = 'A', name = "hi", n = 3 }) != 1:
+        return 1
+    if pick(Rec { flag = false, ch = 'B', name = "yo", n = 4 }) != 2:
+        return 2
+    if pick(Rec { flag = true, ch = 'B', name = "hi", n = 3 }) != 3:
+        return 3
+    if pick(Rec { flag = true, ch = 'A', name = "no", n = 3 }) != 3:
+        return 4
+    return 42
+"""
+
+# An irrefutable binding arm may close a struct match.
+MATCH_STRUCT_IDENT_LAST_SOURCE = """struct Point:
+    x: int
+    y: int
+
+fn pick(p: Point) -> int:
+    return match p:
+        Point { x = 1, y = 2 } => 1,
+        rest => 2
+
+fn main() -> int:
+    if pick(Point { x = 1, y = 2 }) != 1:
+        return 1
+    if pick(Point { x = 0, y = 0 }) != 2:
+        return 2
+    return 42
+"""
+
+MATCH_STRUCT_UNKNOWN_TYPE_SOURCE = """struct Point:
+    x: int
+    y: int
+
+fn main() -> int:
+    p := Point { x = 1, y = 2 }
+    return match p:
+        Nope { x = 1 } => 1,
+        _ => 0
+"""
+
+MATCH_STRUCT_UNKNOWN_FIELD_SOURCE = """struct Point:
+    x: int
+    y: int
+
+fn main() -> int:
+    p := Point { x = 1, y = 2 }
+    return match p:
+        Point { z = 1 } => 1,
+        _ => 0
+"""
+
+MATCH_STRUCT_WRONG_FIELD_TYPE_SOURCE = """struct Point:
+    x: int
+    y: int
+
+fn main() -> int:
+    p := Point { x = 1, y = 2 }
+    return match p:
+        Point { x = true } => 1,
+        _ => 0
+"""
+
+MATCH_STRUCT_DUP_FIELD_SOURCE = """struct Point:
+    x: int
+    y: int
+
+fn main() -> int:
+    p := Point { x = 1, y = 2 }
+    return match p:
+        Point { x = 1, x = 2 } => 1,
+        _ => 0
+"""
+
+MATCH_STRUCT_NESTED_SOURCE = """struct Point:
+    x: int
+    y: int
+
+struct Outer:
+    p: Point
+
+fn main() -> int:
+    o := Outer { p = Point { x = 1, y = 2 } }
+    return match o:
+        Outer { p = Point { x = 1 } } => 1,
+        _ => 0
+"""
+
+MATCH_STRUCT_NO_WILDCARD_SOURCE = """struct Point:
+    x: int
+    y: int
+
+fn main() -> int:
+    p := Point { x = 1, y = 2 }
+    return match p:
+        Point { x = 1 } => 1
+"""
+
+MATCH_STRUCT_WILDCARD_ORDER_SOURCE = """struct Point:
+    x: int
+    y: int
+
+fn main() -> int:
+    p := Point { x = 1, y = 2 }
+    return match p:
+        _ => 0,
+        Point { x = 1 } => 1
+"""
+
 MATCH_ONE_CASE_SOURCE = """fn pick(n: int) -> int:
     return match n:
         7 => 1,
@@ -1458,6 +1604,108 @@ def test_multi_payload_ident_bindings_work():
             42,
             opts=(0, 2),
             name="multi_payload_bind",
+        )
+
+
+def test_struct_pattern_binds_fields_and_is_refutable():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_STRUCT_SOURCE, "match_struct")
+        assert _match_nodes(data) == [], "struct patterns must not become MATCH"
+        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+        _assert_program(
+            tmp, MATCH_STRUCT_SOURCE, 42, opts=(0, 2), name="match_struct"
+        )
+
+
+def test_struct_pattern_scalar_field_kinds():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_STRUCT_SCALARS_SOURCE, "match_struct_scalars")
+        assert _match_nodes(data) == [], "struct patterns must not become MATCH"
+        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+        _assert_program(
+            tmp,
+            MATCH_STRUCT_SCALARS_SOURCE,
+            42,
+            opts=(0, 2),
+            name="match_struct_scalars",
+        )
+
+
+def test_struct_pattern_ident_last_is_exhaustive():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_STRUCT_IDENT_LAST_SOURCE, "match_struct_ident")
+        assert _match_nodes(data) == [], "struct patterns must not become MATCH"
+        _assert_program(
+            tmp,
+            MATCH_STRUCT_IDENT_LAST_SOURCE,
+            42,
+            opts=(0, 2),
+            name="match_struct_ident",
+        )
+
+
+def test_struct_pattern_errors_are_hard():
+    cases = [
+        (
+            "struct_unknown_type",
+            MATCH_STRUCT_UNKNOWN_TYPE_SOURCE,
+            ["error[N01]", "Unknown struct type"],
+        ),
+        (
+            "struct_unknown_field",
+            MATCH_STRUCT_UNKNOWN_FIELD_SOURCE,
+            ["error[TS02]", "Unknown field 'z'"],
+        ),
+        (
+            "struct_wrong_field_type",
+            MATCH_STRUCT_WRONG_FIELD_TYPE_SOURCE,
+            ["error[TS03]", "expected int, got bool"],
+        ),
+        (
+            "struct_dup_field",
+            MATCH_STRUCT_DUP_FIELD_SOURCE,
+            ["error[TS04]", "matched more than once"],
+        ),
+    ]
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        for name, source, needles in cases:
+            _assert_compile_rejected(tmp, source, name, needles)
+
+
+def test_nested_struct_pattern_rejected():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        needles = ["error[TM09]", "Nested match patterns are not supported"]
+        _assert_compile_rejected(
+            tmp, MATCH_STRUCT_NESTED_SOURCE, "struct_nested", needles
+        )
+        run = _run([COREC, "run", MATCH_STRUCT_NESTED_SOURCE], cwd=BASE)
+        text = run.stdout + run.stderr
+        assert run.returncode == 1, (
+            f"interpreter accepted a nested struct pattern: rc={run.returncode}: {text}"
+        )
+        for needle in needles:
+            assert needle in text, f"interpreter missing {needle!r}: {text}"
+
+
+def test_struct_pattern_exhaustiveness_and_order():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        _assert_compile_rejected(
+            tmp,
+            MATCH_STRUCT_NO_WILDCARD_SOURCE,
+            "struct_no_wildcard",
+            ["error[TM03]", "Non-exhaustive match", "add a wildcard or binding arm"],
+        )
+        _assert_compile_rejected(
+            tmp,
+            MATCH_STRUCT_WILDCARD_ORDER_SOURCE,
+            "struct_wildcard_order",
+            ["error[TM05]", "must be the last arm"],
         )
 
 
