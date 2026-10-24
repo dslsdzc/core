@@ -238,6 +238,7 @@ fn corec_main() -> int:
     cli_flag_bool_debug("dump-types", "", "Debug: dump TYPE segment")
     cli_flag_bool_debug("dump-ifaces", "", "Debug: dump IFACE segment")
     cli_flag_bool_debug("dump-tk-terms", "", "Debug: dump per-DFNode type terms")
+    cli_flag_bool_debug("dump-case-model", "", "Debug: report semantic CASE model vs derived wire counts")
     // The old type-shadow CLI channels were removed; the judgment path has no
     // switch and always goes through the engine.
     cli_flag_bool_debug("verify-named-dedup", "", "Debug: verify type side-table consistency")
@@ -388,7 +389,14 @@ fn corec_main() -> int:
         run_rc := run_frontend()
         if run_rc != 0:
             return 1
+        ir_diag_base_run := g_diag_count
         ir_gen_all()
+        if g_diag_count > ir_diag_base_run:
+            print_diagnostics()
+            return 1
+        // The interpreter consumes the wire CASE table. Derive it from the
+        // semantic model exactly as the .ccr path does before executing.
+        lower_to_ccr()
         return ir_interpret()
 
     // === clean-cache: delete incremental compilation cache ===
@@ -451,6 +459,14 @@ fn corec_main() -> int:
     g_ir_str_const_count = 0
     g_ir_source_hash = 0
     g_ir_source_hash_ready = 0
+    g_lat_case = ""
+    g_lat_case_count = 0
+    g_lat_case_cap = 0
+    // Wire CASE is derived by ccr_lower; clear both to avoid stale rows.
+    g_ccr_case = ""
+    g_ccr_case_count = 0
+    g_ccr_case_cap = 0
+    g_cir_has_match = 0
     init_df()
     // This path does not use ir_gen_all, so initialize optional representation
     // state here, before ir_gen_globals, because the hidden channels depend on
@@ -483,6 +499,7 @@ fn corec_main() -> int:
         g_cir_skip_journal = 1
 
     // Generate IR for each function, checking cache first
+    ir_diag_base := g_diag_count
     fi : ., mut = 0
     loop:
         if fi >= g_func_count:
@@ -564,16 +581,35 @@ fn corec_main() -> int:
             df_end_func(ir_func_idx)
 
             // Save only when generation did not change snapshot-uncarried shared state.
+            // MATCH CASE model rows are part of the snapshot (v25), so a MATCH
+            // function is saved like any other. g_cir_has_match remains
+            // diagnostic only.
             if cache_enabled != 0:
                 if g_type_count == tc0:
                     save_cir_cache(cache_path, fi, ir_func_idx)
 
         fi = fi + 1
 
+    // IR generation may add diagnostics (for example, monomorph instance
+    // revalidation). Previously they were only printed by the later
+    // pointer-analysis gate, which takes its base afterwards and therefore could
+    // not see them. Fail closed on any new IR-generation diagnostic.
+    if g_diag_count > ir_diag_base:
+        print_diagnostics()
+        return 1
+
     // Finalize purity and the state chain after IR generation and before any chain
     // consumer. True purity needs the whole program, and chain construction depends
     // on it.
     df_state_finalize()
+
+    // Hidden contract channel: report the semantic CASE model and the derived
+    // wire count before lowering. Normal builds print nothing.
+    if cli_has("dump-case-model") != 0:
+        print("case_model_before ")
+        print(int_str(g_lat_case_count))
+        print(" ")
+        println(int_str(g_ccr_case_count))
 
     // === cir: output dataflow graph ===
     if cli_eq(cmd, "cir"):
@@ -615,6 +651,11 @@ fn corec_main() -> int:
         pass_cse()
     println("lower to ccr...")
     lower_to_ccr()
+    if cli_has("dump-case-model") != 0:
+        print("case_model_after ")
+        print(int_str(g_lat_case_count))
+        print(" ")
+        println(int_str(g_ccr_case_count))
     print("lower done: ")
     print(int_str(g_ir_func_count))
     print(" funcs, ")

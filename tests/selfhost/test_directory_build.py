@@ -61,8 +61,15 @@ def main() -> int:
             print(result.stderr)
             return 1
 
+        exec_bits = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
         output_mode = output.stat().st_mode
-        output.chmod(output_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        if not output_mode & exec_bits:
+            print(
+                f"[FAIL] directory output has no execute bit: mode {output_mode:o}"
+            )
+            print(result.stdout)
+            print(result.stderr)
+            return 1
         run_result = subprocess.run([str(output)], cwd=project, timeout=30)
         if run_result.returncode != 23:
             print(f"[FAIL] directory output returned {run_result.returncode}, expected 23")
@@ -72,6 +79,48 @@ def main() -> int:
         print(
             "[PASS] `corec build .` resolves _import.cr and emits a working ELF"
         )
+
+        # Shared outputs (.so) are data, not executables: Linux mode 0644.
+        shared_ccr = project / "shared.ccr"
+        shared_compile = run_corec(
+            ["ccr", ".", "--static", "-o", str(shared_ccr), "--opt-level", "0"],
+            project,
+        )
+        if shared_compile.returncode != 0 or not shared_ccr.exists():
+            print(f"[FAIL] shared ccr build exited {shared_compile.returncode}")
+            print(shared_compile.stdout)
+            print(shared_compile.stderr)
+            return 1
+        shared_output = project / "libdirectory_build_smoke.so"
+        shared_result = subprocess.run(
+            [
+                "nice",
+                "-n",
+                "19",
+                str(COREARCH),
+                str(shared_ccr),
+                "--elf",
+                "--shared",
+                "-o",
+                str(shared_output),
+            ],
+            cwd=project,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        if shared_result.returncode != 0 or not shared_output.exists():
+            print(f"[FAIL] --shared build exited {shared_result.returncode}")
+            print(shared_result.stdout)
+            print(shared_result.stderr)
+            return 1
+        shared_mode = shared_output.stat().st_mode & 0o777
+        if shared_mode != 0o644:
+            print(
+                f"[FAIL] --shared output mode is {shared_mode:o}, expected 644"
+            )
+            return 1
+        print("[PASS] --shared output is mode 0644, not executable")
 
         (project / "helper.cr").write_text(
             "fn imported_result() -> int:\n    return 25\n", encoding="utf-8"
@@ -103,9 +152,14 @@ def main() -> int:
             print(unnamed_result.stdout)
             print(unnamed_result.stderr)
             return 1
-        unnamed_output.chmod(
-            unnamed_output.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-        )
+        if not unnamed_output.stat().st_mode & exec_bits:
+            print(
+                "[FAIL] unnamed directory output has no execute bit: mode "
+                f"{unnamed_output.stat().st_mode:o}"
+            )
+            print(unnamed_result.stdout)
+            print(unnamed_result.stderr)
+            return 1
         unnamed_run = subprocess.run([str(unnamed_output)], cwd=unnamed, timeout=30)
         if unnamed_run.returncode != 24:
             print(

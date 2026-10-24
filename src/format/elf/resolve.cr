@@ -51,7 +51,23 @@ fn res_labels():
         g_label_count = 0
         off : ., mut = 0
         ii : ., mut = 0
-        scratch := alloc(64)
+        // The encoder writes at pos=0 while measuring, and backward-label
+        // patches write into the same scratch. A sparse MATCH emits a fixed
+        // 30-byte block per value row, so size the scratch from the largest
+        // MATCH range in this function. The 512-byte floor covers every other
+        // single instruction.
+        scratch_sz : ., mut = 512
+        ii = 0
+        loop:
+            if ii >= ic:
+                break
+            if iri_op(ist + ii) == IR_MATCH:
+                cand := iri_s3(ist + ii) * 32 + 64
+                if cand > scratch_sz:
+                    scratch_sz = cand
+            ii = ii + 1
+        scratch := alloc(scratch_sz)
+        ii = 0
         loop:
             if ii >= ic:
                 break

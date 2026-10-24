@@ -574,6 +574,431 @@ fn e2_st_var(buf: string, pos: int, reg: int, var_idx: int) -> int:
 fn e2_rslot(r: int) -> int:
     return E2_REG_SLOT_BASE + r
 
+// ── v10 sparse MATCH: balanced binary search ──────────────────────────────
+//
+// A CASE range with more than two non-default rows is dispatched through a
+// balanced binary decision tree instead of the linear cmp/je chain. Nodes are
+// laid out in pre-order and every internal node is a fixed 30-byte block:
+//
+//   movabs r11, imm64   (10)
+//   cmp    r10, r11      (3)
+//   je     hit           (6)
+//   jl     lower         (6)
+//   jmp    upper         (5)
+//
+// Fixed-size nodes make child positions pure arithmetic, so internal edges are
+// patched directly. Case hits and the DEFAULT miss still go through the
+// g_pending_* label backpatch table; no new address surface is introduced.
+// Jump-table/rodata lowering is deliberately deferred.
+
+E2_MATCH_NODE_SZ : int = 30
+
+fn e2_match_nondefault_count(s2: int, s3: int) -> int:
+    n : ., mut = 0
+    i : ., mut = 0
+    loop:
+        if i >= s3:
+            break
+        kind := cell_load32(g_ccr_case, (s2 + i) * CCR_V10_CASE_DISK + CCR_CASE_KIND)
+        if kind != CCR_CASE_KIND_DEFAULT:
+            n = n + 1
+        i = i + 1
+    return n
+
+// The single strategy predicate. The emitter and the --dump-match-plan channel
+// both call this, so the observable plan cannot drift from the emitted code.
+fn e2_match_use_binary(s2: int, s3: int) -> int:
+    if e2_match_nondefault_count(s2, s3) > 2:
+        return 1
+    return 0
+
+fn e2_match_idx_less(s2: int, a: int, b: int) -> int:
+    // Compare by value, then by original CASE-relative index. The index
+    // tie-break makes the order total, so duplicate values deterministically
+    // keep the first (lowest-index) case.
+    va := cell_load(g_ccr_case, (s2 + a) * CCR_V10_CASE_DISK + CCR_CASE_VALUE)
+    vb := cell_load(g_ccr_case, (s2 + b) * CCR_V10_CASE_DISK + CCR_CASE_VALUE)
+    if va < vb:
+        return 1
+    if va > vb:
+        return 0
+    if a < b:
+        return 1
+    return 0
+
+// Collect the non-default rows into idx, sort them with an in-place shell sort,
+// and drop duplicate values (first case wins). Returns the unique count.
+fn e2_match_sort_cases(s2: int, s3: int, idx: string) -> int:
+    n : ., mut = 0
+    i : ., mut = 0
+    loop:
+        if i >= s3:
+            break
+        kind := cell_load32(g_ccr_case, (s2 + i) * CCR_V10_CASE_DISK + CCR_CASE_KIND)
+        if kind != CCR_CASE_KIND_DEFAULT:
+            cell_store(idx, n * 8, i)
+            n = n + 1
+        i = i + 1
+
+    gap : ., mut = n / 2
+    loop:
+        if gap <= 0:
+            break
+        i = gap
+        loop:
+            if i >= n:
+                break
+            tmp := cell_load(idx, i * 8)
+            j : ., mut = i
+            loop:
+                if j < gap:
+                    break
+                prev := cell_load(idx, (j - gap) * 8)
+                if e2_match_idx_less(s2, tmp, prev) == 0:
+                    break
+                cell_store(idx, j * 8, prev)
+                j = j - gap
+            cell_store(idx, j * 8, tmp)
+            i = i + 1
+        gap = gap / 2
+
+    uniq : ., mut = 0
+    i = 0
+    loop:
+        if i >= n:
+            break
+        ci := cell_load(idx, i * 8)
+        keep : ., mut = 1
+        if uniq > 0:
+            prev_i := cell_load(idx, (uniq - 1) * 8)
+            if cell_load(g_ccr_case, (s2 + ci) * CCR_V10_CASE_DISK + CCR_CASE_VALUE) == cell_load(g_ccr_case, (s2 + prev_i) * CCR_V10_CASE_DISK + CCR_CASE_VALUE):
+                keep = 0
+        if keep != 0:
+            cell_store(idx, uniq * 8, ci)
+            uniq = uniq + 1
+        i = i + 1
+    return uniq
+
+fn e2_match_case_label(ctarget: int) -> int:
+    if ctarget >= 0 && ctarget < g_ir_instr_count:
+        if iri_op(ctarget) == IR_LABEL:
+            return iri_s1(ctarget)
+    return -1
+
+fn e2_match_patch_jcc(buf: string, jmp_pos: int, label_no: int):
+    if label_no < 0:
+        return
+    if cell_load(g_label_poses, label_no * 8) >= 0:
+        e2_big_patch_jcc(buf, jmp_pos, cell_load(g_label_poses, label_no * 8))
+    else:
+        grow_pending(g_pending_count + 1)
+        cell_store(g_pending_pos, g_pending_count * 8, jmp_pos + 2)
+        cell_store(g_pending_label, g_pending_count * 8, label_no)
+        g_pending_count = g_pending_count + 1
+
+fn e2_match_patch_jmp(buf: string, jmp_pos: int, label_no: int):
+    if label_no < 0:
+        return
+    if cell_load(g_label_poses, label_no * 8) >= 0:
+        e2_big_patch_jmp(buf, jmp_pos, cell_load(g_label_poses, label_no * 8))
+    else:
+        grow_pending(g_pending_count + 1)
+        cell_store(g_pending_pos, g_pending_count * 8, jmp_pos + 1)
+        cell_store(g_pending_label, g_pending_count * 8, label_no)
+        g_pending_count = g_pending_count + 1
+
+// A miss edge goes to DEFAULT when one exists, otherwise to the ud2 trap.
+fn e2_match_patch_miss(buf: string, jmp_pos: int, is_jcc: int, default_lbl: int, trap_pos: int):
+    if default_lbl >= 0:
+        if is_jcc != 0:
+            e2_match_patch_jcc(buf, jmp_pos, default_lbl)
+        else:
+            e2_match_patch_jmp(buf, jmp_pos, default_lbl)
+    else:
+        if is_jcc != 0:
+            e2_big_patch_jcc(buf, jmp_pos, trap_pos)
+        else:
+            e2_big_patch_jmp(buf, jmp_pos, trap_pos)
+
+// Emit the balanced tree. p is the absolute start of the tree, s2 the CASE
+// start, idx the sorted CASE-relative indices, n the unique value count.
+fn e2_emit_match_binary(buf: string, p: int, s2: int, idx: string, n: int, default_lbl: int, tagged: int) -> int:
+    g_match_bin_emits = g_match_bin_emits + 1
+    tree_base := p
+    trap_pos := tree_base + n * E2_MATCH_NODE_SZ
+    k : ., mut = 0
+    loop:
+        if k >= n:
+            break
+        // Locate pre-order node k. The pre-order rank arithmetic mirrors the
+        // recursive layout: left child = rank+1, right child = rank+1+left_size.
+        lo : ., mut = 0
+        hi : ., mut = n
+        rank : ., mut = 0
+        mid : ., mut = -1
+        loop:
+            if mid >= 0:
+                break
+            m := lo + (hi - lo) / 2
+            if k == rank:
+                mid = m
+                break
+            left_n := m - lo
+            if k < rank + 1 + left_n:
+                hi = m
+                rank = rank + 1
+            else:
+                lo = m + 1
+                rank = rank + 1 + left_n
+
+        q := tree_base + k * E2_MATCH_NODE_SZ
+        ci := cell_load(idx, mid * 8)
+        cbase := (s2 + ci) * CCR_V10_CASE_DISK
+        cval := cell_load(g_ccr_case, cbase + CCR_CASE_VALUE)
+        imm : ., mut = cval
+        if tagged != 0:
+            imm = cval * 2
+        w : ., mut = q
+        w = w + e2_big_mov_imm64(buf, w, 11, imm)
+        w = w + e2_alu(buf, w, 57)              // cmp r10, r11
+        je_pos := w
+        w = w + e2_big_jcc(buf, w, 4)           // je hit
+        jl_pos := w
+        w = w + e2_big_jcc(buf, w, 12)          // jl lower
+        jmp_pos := w
+        w = w + e2_big_jmp(buf, w)              // jmp upper
+
+        // Hit: the case's own arm label, via the standard pending backpatch.
+        hit_lbl := e2_match_case_label(cell_load_i32(g_ccr_case, cbase + CCR_CASE_TARGET))
+        e2_match_patch_jcc(buf, je_pos, hit_lbl)
+
+        // Lower edge: the left subtree's root is the next pre-order node.
+        left_n2 := mid - lo
+        if left_n2 > 0:
+            e2_big_patch_jcc(buf, jl_pos, tree_base + (k + 1) * E2_MATCH_NODE_SZ)
+        else:
+            e2_match_patch_miss(buf, jl_pos, 1, default_lbl, trap_pos)
+
+        // Upper edge: skip the whole left subtree.
+        if mid + 1 < hi:
+            e2_big_patch_jmp(buf, jmp_pos, tree_base + (k + 1 + left_n2) * E2_MATCH_NODE_SZ)
+        else:
+            e2_match_patch_miss(buf, jmp_pos, 0, default_lbl, trap_pos)
+        k = k + 1
+
+    if default_lbl < 0:
+        // No DEFAULT: a miss is a trap. The linear path has the same ud2 shape.
+        e2_w8(buf, trap_pos, 15)
+        e2_w8(buf, trap_pos + 1, 11)
+        return n * E2_MATCH_NODE_SZ + 2
+    return n * E2_MATCH_NODE_SZ
+
+// ── v10 dense MATCH: rodata jump table ────────────────────────────────────
+//
+// A dense integer range lowers to a rodata table of signed 32-bit offsets
+// relative to the table base:
+//
+//   bounds check (min/max miss -> DEFAULT)
+//   index = (scrutinee - min) >> (tagged ? 1 : 0)
+//   lea  r11, [rip+table]
+//   movsxd rax, dword [r11+r10*4]
+//   add  rax, r11
+//   jmp  rax
+//
+// The table is written during the rodata phase, after strings and before the
+// HIT pool. Every slot is present for [min,max]; holes point at DEFAULT.
+// Tables are only selected when there are >=8 unique values, the range is at
+// most twice as wide as the value count, and a DEFAULT arm exists. Everything
+// else keeps the linear/binary behavior above.
+
+g_match_dense_min_unique : int = 8
+
+fn e2_match_default_label(s2: int, s3: int) -> int:
+    ci : ., mut = 0
+    loop:
+        if ci >= s3:
+            break
+        cbase := (s2 + ci) * CCR_V10_CASE_DISK
+        if cell_load32(g_ccr_case, cbase + CCR_CASE_KIND) == CCR_CASE_KIND_DEFAULT:
+            lbl := e2_match_case_label(cell_load_i32(g_ccr_case, cbase + CCR_CASE_TARGET))
+            if lbl >= 0:
+                return lbl
+        ci = ci + 1
+    return -1
+
+fn e2_match_case_value(s2: int, ci: int) -> int:
+    return cell_load(g_ccr_case, (s2 + ci) * CCR_V10_CASE_DISK + CCR_CASE_VALUE)
+
+// Return the table width (max-min+1) when the dense predicate holds, else 0.
+// This is the single predicate shared by the plan channel, the emitter, and the
+// rodata table writer. All target labels must resolve: the table stores absolute
+// positions, so a missing label would desync code and data.
+fn e2_match_table_span(s2: int, s3: int) -> int:
+    if s3 <= 0:
+        return 0
+    if e2_match_default_label(s2, s3) < 0:
+        return 0
+    idx := alloc((s3 + 1) * 8)
+    n := e2_match_sort_cases(s2, s3, idx)
+    if n < g_match_dense_min_unique:
+        return 0
+    vi : ., mut = 0
+    loop:
+        if vi >= n:
+            break
+        vci := cell_load(idx, vi * 8)
+        vt := cell_load_i32(g_ccr_case, (s2 + vci) * CCR_V10_CASE_DISK + CCR_CASE_TARGET)
+        if e2_match_case_label(vt) < 0:
+            return 0
+        vi = vi + 1
+    first := cell_load(idx, 0)
+    last := cell_load(idx, (n - 1) * 8)
+    span := e2_match_case_value(s2, last) - e2_match_case_value(s2, first) + 1
+    if span <= 0:
+        return 0
+    if span > n * 2:
+        return 0
+    return span
+
+fn e2_label_abs_pos(lbl: int) -> int:
+    if lbl < 0:
+        return -1
+    if lbl >= g_label_abs_cap:
+        return -1
+    return cell_load(g_label_abs, lbl * 8)
+
+// Emit the dense dispatch. span comes from e2_match_table_span; the caller has
+// already loaded r10 (and tagged it for enum/tagged-int) exactly as the other
+// MATCH paths do.
+fn e2_emit_match_table(buf: string, p: int, s2: int, s3: int, span: int, tagged: int) -> int:
+    g_match_table_emits = g_match_table_emits + 1
+    idx := alloc((s3 + 1) * 8)
+    n := e2_match_sort_cases(s2, s3, idx)
+    first := cell_load(idx, 0)
+    last := cell_load(idx, (n - 1) * 8)
+    minv := e2_match_case_value(s2, first)
+    maxv := e2_match_case_value(s2, last)
+    default_lbl := e2_match_default_label(s2, s3)
+    min_imm : ., mut = minv
+    max_imm : ., mut = maxv
+    if tagged != 0:
+        min_imm = minv * 2
+        max_imm = maxv * 2
+
+    w : ., mut = p
+    w = w + e2_big_mov_imm64(buf, w, 11, min_imm)
+    w = w + e2_alu(buf, w, 57)              // cmp r10, r11
+    lo_pos := w
+    w = w + e2_big_jcc(buf, w, 12)          // jl default
+    w = w + e2_big_mov_imm64(buf, w, 11, max_imm)
+    w = w + e2_alu(buf, w, 57)              // cmp r10, r11
+    hi_pos := w
+    w = w + e2_big_jcc(buf, w, 15)          // jg default
+    w = w + e2_big_mov_imm64(buf, w, 11, min_imm)
+    w = w + e2_alu(buf, w, 41)              // sub r10, r11
+    if tagged != 0:
+        w = w + e2_big_untag_reg(buf, w, 10) // sar r10, 1
+
+    // Table lives after the strings, whose final size is not known during code
+    // emission (Phase 3 may still intern BigInt decimal strings). Record the LEA
+    // displacement position with this table's ordinal; the rodata writer patches
+    // it once the table has an actual address.
+    table_id := g_match_table_cursor
+    grow_match_table_ref(g_match_table_ref_count + 1)
+    cell_store(g_match_table_ref_pos, g_match_table_ref_count * 8, w)
+    cell_store(g_match_table_ref_id, g_match_table_ref_count * 8, table_id)
+    g_match_table_ref_count = g_match_table_ref_count + 1
+    w = w + e2_lrb(buf, w, 0)               // lea r11, [rip+table]
+
+    // movsxd rax, dword [r11+r10*4]
+    w = w + emit_rex(buf, w, 1, 0, 1, 1)
+    e2_w8(buf, w, 99)
+    w = w + 1
+    w = w + emit_modrm(buf, w, 0, 0, 4)
+    w = w + emit_sib(buf, w, 2, 2, 3)
+    // add rax, r11
+    w = w + emit_rex(buf, w, 1, 1, 0, 0)
+    e2_w8(buf, w, 1)
+    w = w + 1
+    w = w + emit_modrm(buf, w, 3, 3, 0)
+    // jmp rax
+    e2_w8(buf, w, 255)
+    w = w + 1
+    w = w + emit_modrm(buf, w, 3, 4, 0)
+
+    // A table is only chosen with a DEFAULT arm, so both miss edges land there.
+    e2_match_patch_miss(buf, lo_pos, 1, default_lbl, w)
+    e2_match_patch_miss(buf, hi_pos, 1, default_lbl, w)
+    g_match_table_cursor = table_id + 1
+    return w - p
+
+// Write dense tables into rodata at ro_tables_start (absolute buffer position,
+// immediately after the strings). Rescans functions/instrs in emission order,
+// uses the same e2_match_table_span predicate, and patches each table's recorded
+// LEA with the actual address. Returns the table bytes written. The LEA patch is
+// deferred because Phase 3 may intern BigInt decimal strings after code emission,
+// so no in-rodata offset is stable at e2_emit_match_table time.
+fn e2_match_write_tables(buf: string, ro_tables_start: int) -> int:
+    g_match_table_ro_cursor = 0
+    table_bytes : ., mut = 0
+    fi : ., mut = 0
+    loop:
+        if fi >= g_ir_func_count:
+            break
+        ist := cell_load(g_ir_func_instr_start, fi * 8)
+        ic := cell_load(g_ir_func_instr_count, fi * 8)
+        ii : ., mut = 0
+        loop:
+            if ii >= ic:
+                break
+            inst := ist + ii
+            if iri_op(inst) == IR_MATCH:
+                s2 := iri_s2(inst)
+                s3 := iri_s3(inst)
+                span := e2_match_table_span(s2, s3)
+                if span > 0:
+                    idx := alloc((s3 + 1) * 8)
+                    n := e2_match_sort_cases(s2, s3, idx)
+                    first := cell_load(idx, 0)
+                    minv := e2_match_case_value(s2, first)
+                    default_lbl := e2_match_default_label(s2, s3)
+                    table_id := g_match_table_ro_cursor
+                    table_abs := ro_tables_start + table_bytes
+                    def_abs := e2_label_abs_pos(default_lbl)
+                    if def_abs < 0:
+                        def_abs = table_abs
+                    vi : ., mut = 0
+                    k : ., mut = 0
+                    loop:
+                        if k >= span:
+                            break
+                        v := minv + k
+                        target_abs : ., mut = def_abs
+                        if vi < n:
+                            vci := cell_load(idx, vi * 8)
+                            if e2_match_case_value(s2, vci) == v:
+                                vt := cell_load_i32(g_ccr_case, (s2 + vci) * CCR_V10_CASE_DISK + CCR_CASE_TARGET)
+                                ta := e2_label_abs_pos(e2_match_case_label(vt))
+                                if ta >= 0:
+                                    target_abs = ta
+                                vi = vi + 1
+                        w32(buf, table_abs + k * 4, target_abs - table_abs)
+                        k = k + 1
+                    // Patch every LEA that refers to this table ordinal.
+                    ri : ., mut = 0
+                    loop:
+                        if ri >= g_match_table_ref_count:
+                            break
+                        if cell_load(g_match_table_ref_id, ri * 8) == table_id:
+                            ref_pos := cell_load(g_match_table_ref_pos, ri * 8)
+                            w32(buf, ref_pos + 3, table_abs - (ref_pos + 7))
+                        ri = ri + 1
+                    g_match_table_ro_cursor = table_id + 1
+                    table_bytes = table_bytes + span * 4
+            ii = ii + 1
+        fi = fi + 1
+    return table_bytes
+
 fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
     op := iri_op(instr_idx)
     d := iri_dest(instr_idx)
@@ -1734,6 +2159,11 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         if li >= 0:
             grow_label_poses(li + 1)
             cell_store(g_label_poses, li * 8, pos)
+            // Global map: label numbers are process-global and the rodata table
+            // writer runs after all functions, when g_label_poses only holds the
+            // last function's labels.
+            grow_label_abs(li + 1)
+            cell_store(g_label_abs, li * 8, pos)
             if li + 1 > g_label_count:
                 g_label_count = li + 1
             // Patch all pending forward jumps targeting this label
@@ -1747,6 +2177,147 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                     cell_store(g_pending_label, pi * 8, -1)
                 pi = pi + 1
         return 0
+
+    if op == IR_MATCH:
+        // v10 multi-way dispatch. s1 = scrutinee var, s2 = CASE start,
+        // s3 = CASE count. Every target is a NOD id whose node is IR_LABEL; the
+        // label number drives backpatching. <=2 value rows keep the linear
+        // cmp/je chain; larger sparse ranges use the balanced tree above.
+        ti_s := irv_type(s1)
+        cp = cp + e2_load_var(buf, pos+cp, 10, s1)
+
+        // Enum CASE rows compare the tag word, not the pointer. A match cannot
+        // mix enum and value patterns under the type checker, so the first
+        // non-default row selects the scrutinee form.
+        first_kind : ., mut = -1
+        fk : ., mut = 0
+        loop:
+            if fk >= s3:
+                break
+            fk_kind := cell_load32(g_ccr_case, (s2 + fk) * CCR_V10_CASE_DISK + CCR_CASE_KIND)
+            if fk_kind != CCR_CASE_KIND_DEFAULT:
+                first_kind = fk_kind
+                break
+            fk = fk + 1
+        if first_kind == CCR_CASE_KIND_ENUM:
+            // mov r10, [r10 + 0]: the enum tag word.
+            cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 10/8)
+            e2_w8(buf, pos+cp, 139)
+            cp = cp + 1
+            cp = cp + emit_modrm(buf, pos+cp, 2, 10%8, 10%8)
+            cp = cp + e2_w32(buf, pos+cp, 0)
+            if g_x86_big_enabled != 0:
+                cp = cp + e2_big_tag_reg(buf, pos+cp, 10)
+
+        // Pre-scan: locate DEFAULT. It emits nothing, so the linear emission
+        // sequence below stays byte-identical for <=2 value rows.
+        default_lbl : ., mut = -1
+        ci : ., mut = 0
+        loop:
+            if ci >= s3:
+                break
+            cbase := (s2 + ci) * CCR_V10_CASE_DISK
+            ckind := cell_load32(g_ccr_case, cbase + CCR_CASE_KIND)
+            if ckind == CCR_CASE_KIND_DEFAULT:
+                ctarget := cell_load_i32(g_ccr_case, cbase + CCR_CASE_TARGET)
+                if ctarget >= 0 && ctarget < g_ir_instr_count:
+                    if iri_op(ctarget) == IR_LABEL:
+                        default_lbl = iri_s1(ctarget)
+            ci = ci + 1
+
+        // Dense dispatch: >=8 unique values in a range at most twice as wide
+        // as the value count, with a DEFAULT arm, use a rodata jump table.
+        // Sparse (>2 rows, not dense) keeps the balanced binary search tree.
+        // Both predicates are shared with --dump-match-plan.
+        table_span := e2_match_table_span(s2, s3)
+        if table_span > 0:
+            tab_tagged : ., mut = 0
+            if g_x86_big_enabled != 0:
+                if first_kind == CCR_CASE_KIND_ENUM || ti_s == TI_INT:
+                    tab_tagged = 1
+            cp = cp + e2_emit_match_table(buf, pos+cp, s2, s3, table_span, tab_tagged)
+            return cp
+
+        if e2_match_use_binary(s2, s3) != 0:
+            idx := alloc((s3 + 1) * 8)
+            uniq := e2_match_sort_cases(s2, s3, idx)
+            labels_ok : ., mut = 1
+            vi : ., mut = 0
+            loop:
+                if vi >= uniq:
+                    break
+                vci := cell_load(idx, vi * 8)
+                vtarget := cell_load_i32(g_ccr_case, (s2 + vci) * CCR_V10_CASE_DISK + CCR_CASE_TARGET)
+                if e2_match_case_label(vtarget) < 0:
+                    labels_ok = 0
+                vi = vi + 1
+            if labels_ok != 0:
+                bin_tagged : ., mut = 0
+                if g_x86_big_enabled != 0:
+                    if first_kind == CCR_CASE_KIND_ENUM || ti_s == TI_INT:
+                        bin_tagged = 1
+                cp = cp + e2_emit_match_binary(buf, pos+cp, s2, idx, uniq, default_lbl, bin_tagged)
+                return cp
+
+        ci = 0
+        loop:
+            if ci >= s3:
+                break
+            cbase := (s2 + ci) * CCR_V10_CASE_DISK
+            ckind := cell_load32(g_ccr_case, cbase + CCR_CASE_KIND)
+            ctarget := cell_load_i32(g_ccr_case, cbase + CCR_CASE_TARGET)
+            if ckind == CCR_CASE_KIND_DEFAULT:
+                if ctarget >= 0 && ctarget < g_ir_instr_count:
+                    if iri_op(ctarget) == IR_LABEL:
+                        default_lbl = iri_s1(ctarget)
+            else:
+                lbl_no : ., mut = -1
+                if ctarget >= 0 && ctarget < g_ir_instr_count:
+                    if iri_op(ctarget) == IR_LABEL:
+                        lbl_no = iri_s1(ctarget)
+                if lbl_no >= 0:
+                    cval := cell_load(g_ccr_case, cbase + CCR_CASE_VALUE)
+                    // Tagged int form: enum tags are ints in user code, and an
+                    // int scrutinee slot is tagged. In raw-int mode neither is,
+                    // so the enum tag must stay raw too.
+                    tagged : ., mut = 0
+                    if g_x86_big_enabled != 0:
+                        if ckind == CCR_CASE_KIND_ENUM || ti_s == TI_INT:
+                            tagged = 1
+                    imm := cval
+                    if tagged != 0:
+                        imm = cval * 2
+                    cp = cp + e2_big_mov_imm64(buf, pos+cp, 11, imm)
+                    cp = cp + e2_alu(buf, pos+cp, 57)  // cmp r10, r11
+                    jp := pos + cp
+                    cp = cp + e2_big_jcc(buf, pos+cp, 4)  // je rel32
+                    if cell_load(g_label_poses, lbl_no * 8) >= 0:
+                        e2_big_patch_jcc(buf, jp, cell_load(g_label_poses, lbl_no * 8))
+                    else:
+                        grow_pending(g_pending_count + 1)
+                        cell_store(g_pending_pos, g_pending_count*8, jp + 2)
+                        cell_store(g_pending_label, g_pending_count*8, lbl_no)
+                        g_pending_count = g_pending_count + 1
+            ci = ci + 1
+
+        // No value hit -> default. A range without DEFAULT is a trap: the
+        // design forbids falling through into the first arm body.
+        if default_lbl >= 0:
+            jmp_pos := pos + cp
+            cp = cp + e2_jmp(buf, pos+cp, 0)
+            if cell_load(g_label_poses, default_lbl * 8) >= 0:
+                target := cell_load(g_label_poses, default_lbl * 8)
+                e2_w32(buf, jmp_pos + 1, target - (jmp_pos + 5))
+            else:
+                grow_pending(g_pending_count + 1)
+                cell_store(g_pending_pos, g_pending_count*8, jmp_pos + 1)
+                cell_store(g_pending_label, g_pending_count*8, default_lbl)
+                g_pending_count = g_pending_count + 1
+        else:
+            e2_w8(buf, pos+cp, 15)
+            e2_w8(buf, pos+cp+1, 11)  // ud2: invalid opcode trap
+            cp = cp + 2
+        return cp
 
     if op == IR_LOAD_ENUM_TAG && d >= 0:
         do2 := g2_slot(d)

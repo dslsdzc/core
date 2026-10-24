@@ -670,7 +670,7 @@ fn ctx_emit_dyn(buf: string, path: string) -> int:
     total := cell_load(g_ch_vaddr, (g_ch_count - 1) * 8) + cell_load(g_ch_size, (g_ch_count - 1) * 8) - g_text_base
     println(int_str(total))
     emit(buf, total, 0)
-    fd := syscall3(2, path, 577, 493)  // 0755: ELF output must be executable
+    fd := syscall3(2, path, 577, linux_mode_exec())  // 0755: executable ELF output
     if fd < 0:
         return -1
     nw := syscall3(1, fd, buf, total)
@@ -685,7 +685,7 @@ fn ctx_emit_so(buf: string, path: string) -> int:
     layout()
     total := cell_load(g_ch_vaddr, (g_ch_count - 1) * 8) + cell_load(g_ch_size, (g_ch_count - 1) * 8) - g_text_base
     emit(buf, total, 1)
-    fd := syscall3(2, path, 577, 493)  // 0755: ELF output must be executable
+    fd := syscall3(2, path, 577, linux_mode_rw())  // 0644: shared object, not executable
     if fd < 0:
         return -1
     nw := syscall3(1, fd, buf, total)
@@ -898,7 +898,7 @@ fn ctx_emit_static(buf: string, path: string) -> int:
     bss_page := 0x400000 + ((total + 4095) / 4096) * 4096 + 4096
     write_phdr(buf, 1, 1, 6, 0, bss_page, bss_page, 0, 1073741824, 4096)
 
-    fd := syscall3(2, path, 577, 493)  // 0755: ELF output must be executable
+    fd := syscall3(2, path, 577, linux_mode_exec())  // 0755: executable ELF output
     if fd < 0:
         return -1
     nw := syscall3(1, fd, buf, total)

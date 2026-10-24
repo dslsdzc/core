@@ -1894,8 +1894,8 @@ def test_p4t4_dump_flag_zero_artifact_effect():
 
 
 def test_p4t4_cir_snapshot_layout_unbumped():
-    """㉛ `.cir` 快照**布局**未变（**P4 当时**未 bump 的证据面；**17 → 18 由 TODO #2026-09-16-16 批 2 换代**——
-    旧值 17 / 新值 18 / 归因 = 聚合读结果槽型改声明面形式（旧快照与新语义不等价）/ 出处 = 计划 §12.4·§13）：
+    """㉛ `.cir` 快照**布局**未变（**P4 当时**未 bump 的证据面；**17 → 18 由 TODO #2026-09-16-16 批 2 换代**，
+    后续 v23/v24 因语义/布局换代——v24 在指令段后新增 MATCH CASE 小节——旧值 17 / 新值 24 / 归因 = 聚合读结果槽型改声明面形式（旧快照与新语义不等价）/ 出处 = 计划 §12.4·§13）：
     条目版本位 == 当前版本；
     节点小节 = 8B 计数 + n×64B（8 字段）——即「项槽不落盘、装载侧重派生」的格式
     事实；>0 节点保证非空转。"""
@@ -1910,7 +1910,7 @@ def test_p4t4_cir_snapshot_layout_unbumped():
         total_nodes = 0
         for f in entries:
             ver, nodes, ok = cir_entry_nodes(os.path.join(cache_dir, f))
-            assert ver == 23, f"{f}: CIR_CACHE_VER {ver} != 23（2026-10-23 **BigInt IR 批** v23：新增 IR_CONST_BIG/IR_PTR_OF/IR_STR_OF；旧条目会复活旧整数语义 ⇒ 旧缓存必须失效；前代 22 = 2026-09-18 插值展开批、21 = 串域批、20 = 缓存膨胀批、19 = 批 5（opt-dex）、18 = TODO #2026-09-16-16 批 2)"
+            assert ver == 25, f"{f}: CIR_CACHE_VER {ver} != 25（2026-10-24 v10 MATCH CASE 语义模型持久化：CASE 小节存 target label 而非派生 wire target；前代 24 = MATCH CASE 持久化、23 = 2026-10-23 **BigInt IR 批**；22 = 插值展开批、21 = 串域批、20 = 缓存膨胀批、19 = 批 5（opt-dex）、18 = TODO #2026-09-16-16 批 2）"
             assert ok, f"{f}: node section (64B stride) runs past EOF"
             total_nodes += len(nodes)
         assert total_nodes > 0, "vacuous: no nodes parsed from snapshots"
@@ -2073,7 +2073,7 @@ def test_p5t2_snapshot_disk_code_preserved():
         disk = []
         for f in sorted(os.listdir(cache_dir)):
             ver, nodes, ok = cir_entry_nodes(os.path.join(cache_dir, f))
-            assert ver == 23 and ok, f"{f}: version/stride drifted（期望 23 = 2026-10-23 **BigInt IR 批**（IR_CONST_BIG/IR_PTR_OF/IR_STR_OF；前代 22 = 插值展开批；节点 stride 仍 64B / 头偏移不变（裁-4 + 尾部 trailer）；前代 21 = 串域批、20 = 缓存膨胀批、19 = 批 5（opt-dex）、18 = TODO #2026-09-16-16 批 2）"
+            assert ver == 25 and ok, f"{f}: version/stride drifted（期望 25 = 2026-10-24 v10 MATCH CASE 语义模型持久化（CASE 小节存 target label，节点 stride 仍 64B / 头偏移不变）；前代 24 = MATCH CASE 持久化；23 = BigInt IR 批；22 = 插值展开批；21 = 串域批；20 = 缓存膨胀批；19 = 批 5（opt-dex）；18 = TODO #2026-09-16-16 批 2）"
             disk += [(nd[0], nd[5]) for nd in nodes]
         assert disk, "vacuous: no nodes parsed from snapshots"
         mint = set((r[1], r[2]) for r in rows if r[1] in MINT_OPS and r[2] > 0)

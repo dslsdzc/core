@@ -31,6 +31,13 @@ g_gen_dedup_new : string, mut
 g_gen_dedup_count : int, mut
 g_gen_dedup_cap : int, mut
 
+// Defensive struct-pattern validation for instances. The checker resolves field
+// types on each wrapper (wrapper.data = ti+1); if one still contains an
+// unresolved generic parameter after substitution, the clone fails closed.
+g_gen_structpat_bad : int, mut
+g_gen_structpat_bad_line : int, mut
+g_gen_structpat_bad_col : int, mut
+
 // ============================================================
 // Grow helpers
 // ============================================================
@@ -987,27 +994,94 @@ fn gen_clone_tree(node: int) -> int:
         return n
 
     // EXPR_STRUCTPAT: a = name, b = first wrapper (consecutive), c = field count.
-    // wrapper.a = subpattern node.
+    // wrapper.a = subpattern node, wrapper.b = field name index (same contract as
+    // struct literal wrappers). Preserve the name so a clone still binds by name.
     if k == EXPR_STRUCTPAT:
+        pbad : ., mut = 0
         if b >= 0 && c > 0:
             nvs : string, mut = alloc(c * 8)
+            nns : string, mut = alloc(c * 8)
+            nds : string, mut = alloc(c * 8)
             i : ., mut = 0
             loop:
                 if i >= c:
                     break
                 vn : ., mut = -1
+                nn : ., mut = -1
+                nd : ., mut = 0
                 if b + i >= 0:
                     vn = ast_a(b + i)
+                    nn = ast_b(b + i)
+                    nd = ast_data(b + i)   // checker-resolved field type + 1
+                if nd > 0:
+                    ft := nd - 1
+                    sk : ., mut = -1
+                    if vn >= 0:
+                        sk = ast_kind(vn)
+                    // `_` neither compares nor binds, so a still-generic field is
+                    // safe there. ident/literal subpatterns would load/bind it.
+                    if ti_has_generic_param(ft) != 0 && sk != EXPR_WILDCARD:
+                        pbad = 1
+                        if g_gen_structpat_bad == 0:
+                            g_gen_structpat_bad = 1
+                            g_gen_structpat_bad_line = ln
+                            g_gen_structpat_bad_col = cl
                 cell_store(nvs, i * 8, gen_clone_tree(vn))
+                cell_store(nns, i * 8, nn)
+                cell_store(nds, i * 8, nd)
                 i = i + 1
             new_first := g_ast_count
             i = 0
             loop:
                 if i >= c:
                     break
-                ast_alloc(EXPR_NONE, cell_load(nvs, i * 8), 0, 0, 0, 0, 0, ln, cl)
+                ast_alloc(EXPR_NONE, cell_load(nvs, i * 8), cell_load(nns, i * 8), 0, 0, 0, cell_load(nds, i * 8), ln, cl)
                 i = i + 1
+            if pbad != 0:
+                // Fail closed: b = -1 makes ir_gen reject the pattern without
+                // emitting any field load.
+                n := ast_alloc(k, a, -1, c, iv, tv, d, ln, cl)
+                gen_dedup_add(node, n)
+                return n
             n := ast_alloc(k, a, new_first, c, iv, tv, d, ln, cl)
+            gen_dedup_add(node, n)
+            return n
+        n := ast_alloc(k, a, b, c, iv, tv, d, ln, cl)
+        gen_dedup_add(node, n)
+        return n
+
+    // EXPR_TUPLEPAT: a = first wrapper (consecutive), b = element count.
+    // wrapper.a = subpattern node, wrapper.b = element index, wrapper.d =
+    // checker-resolved element type + 1. Preserve both halves of the wrapper so a
+    // clone still compares/binds the same positions with the same type.
+    if k == EXPR_TUPLEPAT:
+        if a >= 0 && b > 0:
+            nvs : string, mut = alloc(b * 8)
+            nns : string, mut = alloc(b * 8)
+            nds : string, mut = alloc(b * 8)
+            i : ., mut = 0
+            loop:
+                if i >= b:
+                    break
+                vn : ., mut = -1
+                nn : ., mut = -1
+                nd : ., mut = 0
+                if a + i >= 0:
+                    vn = ast_a(a + i)
+                    nn = ast_b(a + i)
+                    nd = ast_data(a + i)
+                cell_store(nvs, i * 8, gen_clone_tree(vn))
+                cell_store(nns, i * 8, nn)
+                cell_store(nds, i * 8, nd)
+                i = i + 1
+            new_first := g_ast_count
+            i = 0
+            loop:
+                if i >= b:
+                    break
+                ast_alloc(EXPR_NONE, cell_load(nvs, i * 8), cell_load(nns, i * 8), 0, 0, 0, cell_load(nds, i * 8), ln, cl)
+                i = i + 1
+            n := ast_alloc(k, new_first, b, c, iv, tv, d, ln, cl)
             gen_dedup_add(node, n)
             return n
         n := ast_alloc(k, a, b, c, iv, tv, d, ln, cl)
@@ -1096,7 +1170,14 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
     orig_fn_node := fi_ast_node(func_ni)
     g_gen_dedup_count = 0
     g_gen_dedup_cap = 0
+    g_gen_structpat_bad = 0
+    g_gen_structpat_bad_line = 0
+    g_gen_structpat_bad_col = 0
     new_fn_node := gen_clone_tree(orig_fn_node)
+    if g_gen_structpat_bad != 0:
+        check_error(EC_TS_FIELD_TYPE,
+            "Struct pattern field has an unresolved generic type",
+            g_gen_structpat_bad_line, g_gen_structpat_bad_col)
 
     // Concretize the instance parameter chain. The EXPR_FN clone branch copies b/c
     // (first parameter and count), so the instance would share the declaration's

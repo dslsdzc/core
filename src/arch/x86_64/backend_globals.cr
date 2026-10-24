@@ -66,6 +66,26 @@ g_x86_alloc_patch_pos : string, mut
 g_x86_alloc_patch_cap : int, mut
 g_x86_alloc_patch_count : int, mut
 g_x86_emit_rt_stubs : int, mut         // 1 = pure-static: backend emits g_set_curg/g_get_curg stubs
+// Count of IR_MATCH nodes that actually entered e2_emit_match_binary. This is a
+// verification counter, not a strategy predicate: a scratch-only emitter pass in
+// --dump-match-plan and the real Phase 3 emission both increment it.
+g_match_bin_emits : int, mut
+// Dense jump-table state. g_match_table_cursor is the table ordinal during code
+// emission; each emitted LEA is recorded with that ordinal and patched only when
+// the rodata writer has the final table address. This cannot use a
+// g2_rodata_sz()-based offset: Phase 3 can still intern BigInt decimal strings.
+g_match_table_emits : int, mut
+g_match_table_cursor : int, mut
+g_match_table_ro_cursor : int, mut
+g_match_table_ref_pos : string, mut
+g_match_table_ref_id : string, mut
+g_match_table_ref_count : int, mut
+g_match_table_ref_cap : int, mut
+// Label number -> absolute code-buffer position. g_label_poses is per-function
+// and overwritten; case targets are global label numbers, so the rodata phase
+// needs this global map to resolve table entries.
+g_label_abs : string, mut
+g_label_abs_cap : int, mut
 // --big-int: user int slots hold tagged values (immediate v*2 or BigInt pointer+1).
 // The compiler itself and the BigInt runtime blob stay raw.  See int_rep.cr.
 g_x86_big_enabled : int, mut

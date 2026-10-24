@@ -7,7 +7,8 @@
       / payload 变体 / 泛型枚举实例 / 单变体枚举 / 枚举形参位
   负：缺臂 ⇒ rc=1 + `error[TM03]` + 反例含具体缺失**变体名** + **无产物**（绝不静默 rc=0——
       修复前实测：缺臂产物照出，未匹配值静默得 0）；无臂 ⇒ 同上；`check` 子命令同拒
-  登记：非枚举域不判穷尽（int 匹配 rc=0）；不可映射模式（枚举匹配里混字面量臂）不判穷尽 rc=0
+  字面量域：int/string/char 无 `_`/绑定臂 ⇒ rc=1 + `error[TM03]` + 无产物（Task 5a）；
+      枚举匹配里混字面量臂同样按字面量域判（不再静默放行）
   软面：重复臂 ⇒ `error[TM04]` **非硬门**（rc=0 + 产物照出）——诊断面登记，非 rc 面收紧
 
 背景（Task 3 前实测，本套件即其回归）：`EC_TM_*`（9001-9009）此前仅定义零 raise，match
@@ -195,12 +196,14 @@ def main():
         case_run_reject("run_path_rejected",
                         COLOR + "fn main() -> int:\n    c := Blue()\n    return match c:\n        Red => 1, Green => 2,\n",
                         ["error[TM03]", "missing variant 'Blue'"]),
-        # 登记：非枚举域不判穷尽（int 字面量匹配 ⇒ 零诊断，rc=0）
-        case_run("non_enum_domain_not_judged",
-                 "fn main() -> int:\n    n := 3\n    return match n:\n        1 => 10, 2 => 20,\n", 0),
-        # 登记：不可映射模式（枚举匹配混字面量臂）不判穷尽（-1 = 不判，不得当「不穷尽」）
-        case_run("unmappable_pattern_not_judged",
-                 "enum Color2:\n    Red2, Green2, Blue2\nfn main() -> int:\n    c := Blue2()\n    return match c:\n        Red2 => 1, 5 => 2,\n", 0),
+        # 字面量域（Task 5a）：int 无通配/绑定臂 ⇒ rc=1 + TM03 + 无产物
+        case_reject("literal_domain_requires_wildcard",
+                    "fn main() -> int:\n    n := 3\n    return match n:\n        1 => 10, 2 => 20,\n",
+                    ["error[TM03]", "Non-exhaustive match", "add a wildcard or binding arm"]),
+        # 枚举混字面量臂：字面量仍是 refutable，无通配/绑定臂 ⇒ 同拒
+        case_reject("mixed_literal_enum_requires_wildcard",
+                    "enum Color2:\n    Red2, Green2, Blue2\nfn main() -> int:\n    c := Blue2()\n    return match c:\n        Red2 => 1, 5 => 2,\n",
+                    ["error[TM03]", "Non-exhaustive match"]),
         # 软面：重复臂 ⇒ TM04 非硬门（rc=0 + 产物照出）
         case_soft("redundant_arm_soft",
                   COLOR + "fn main() -> int:\n    c := Red()\n    return match c:\n        Red => 1, Red => 2, Green => 3, Blue => 4,\n",

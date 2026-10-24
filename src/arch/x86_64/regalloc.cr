@@ -580,7 +580,8 @@ fn alloc_registers():
                         if cell_load(st, lvd * 8) == 0:
                             // dest 定值同指令自读（s1/s2 == d）：读先于写，该读
                             // 可能取上一轮值，按读首引用（携带）处理
-                            if s1 == d || s2 == d:
+                            // MATCH 的 s2 是 CASE 起始下标，不是变量。
+                            if s1 == d || (op != IR_MATCH && s2 == d):
                                 cell_store(st, lvd * 8, 2)
                                 cell_store(car, lvd * 8, 1)
                             else:
@@ -637,6 +638,28 @@ fn alloc_registers():
                         if t3 > pp && t3 <= b0:
                             cell_store(skp, (pp + 1 - t0) * 8, cell_load(skp, (pp + 1 - t0) * 8) + 1)
                             cell_store(skp, (t3 - t0) * 8, cell_load(skp, (t3 - t0) * 8) - 1)
+                    else if iri_op(ist + pp) == IR_MATCH:
+                        // Every CASE target is a conditional successor. Mark
+                        // each forward arm entry as skippable, exactly like a
+                        // BRANCH target. Over-marking only lowers register
+                        // pressure, so duplicate targets are harmless.
+                        mc := iri_s3(ist + pp)
+                        ms := iri_s2(ist + pp)
+                        mj : ., mut = 0
+                        loop:
+                            if mj >= mc:
+                                break
+                            mtgt := cell_load_i32(g_ccr_case, (ms + mj) * CCR_V10_CASE_DISK + CCR_CASE_TARGET)
+                            mlab : ., mut = -1
+                            if mtgt >= 0 && mtgt < g_ir_instr_count:
+                                if iri_op(mtgt) == IR_LABEL:
+                                    mlab = iri_s1(mtgt)
+                            if mlab >= 0:
+                                mt := label_pos_of(mlab, lab_id, lab_ps, ln)
+                                if mt > pp && mt <= b0:
+                                    cell_store(skp, (pp + 1 - t0) * 8, cell_load(skp, (pp + 1 - t0) * 8) + 1)
+                                    cell_store(skp, (mt - t0) * 8, cell_load(skp, (mt - t0) * 8) - 1)
+                            mj = mj + 1
                     else if iri_op(ist + pp) == IR_JUMP:
                         t1 := label_pos_of(iri_s1(ist + pp), lab_id, lab_ps, ln)
                         if t1 > pp && t1 <= b0:

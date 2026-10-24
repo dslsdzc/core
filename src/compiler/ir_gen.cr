@@ -827,6 +827,43 @@ fn new_label() -> int:
     g_next_label = g_next_label + 1
     return lbl
 
+// ── v10 semantic CASE model helpers ──────────────────────────────────────
+// The model is a flat 24B-row buffer with the same layout as the wire CASE
+// table, except `target` is the IR body label number (not a NOD id). A match
+// reserves its rows before emitting arm bodies so nested matches append after
+// the outer range; each target label is recorded once its body label exists.
+// ccr_lower resolves labels to NOD ids and builds the wire table; ir_gen never
+// writes g_ccr_case.
+fn grow_lat_case(needed: int):
+    if needed < g_lat_case_cap:
+        return
+    nc : ., mut = g_lat_case_cap * 2
+    if nc < 16:
+        nc = 16
+    if nc < needed:
+        nc = needed + 16
+    nb := alloc(nc * CCR_V10_CASE_DISK)
+    cell_copy(g_lat_case, g_lat_case_cap * CCR_V10_CASE_DISK, nb)
+    g_lat_case = nb
+    g_lat_case_cap = nc
+
+fn lat_case_append(value: int, kind: int, str_index: int, target_label: int, flags: int) -> int:
+    idx := g_lat_case_count
+    grow_lat_case(idx + 1)
+    base := idx * CCR_V10_CASE_DISK
+    cell_store(g_lat_case, base + CCR_CASE_VALUE, value)
+    cell_store32(g_lat_case, base + CCR_CASE_KIND, kind)
+    cell_store32(g_lat_case, base + CCR_CASE_STR, str_index)
+    cell_store32(g_lat_case, base + CCR_CASE_TARGET, target_label)
+    cell_store32(g_lat_case, base + CCR_CASE_FLAGS, flags)
+    g_lat_case_count = idx + 1
+    return idx
+
+fn lat_case_set_target(idx: int, label: int):
+    if idx < 0 || idx >= g_lat_case_count:
+        return
+    cell_store32(g_lat_case, idx * CCR_V10_CASE_DISK + CCR_CASE_TARGET, label)
+
 fn bind_local(name_idx: int, var_idx: int):
     grow_ir_locals(g_ir_local_count + 1)
     cell_store(g_ir_locals, g_ir_local_count  * 16, name_idx)
@@ -852,6 +889,147 @@ fn find_global(name_idx: int) -> int:
             return cell_load(g_ir_globals, i * 24 + 8)
         i = i - 1
     return -1
+
+// Field load form for struct-pattern tests/bindings. Aggregate reads lose the
+// declared type; string patterns must keep TI_STR so str_eq compares contents,
+// bool/char keep their declared form so literal comparisons use the same
+// representation as the existing bool/char arms, and other fields use the exact
+// integer slot form (TI_INT).
+// Field load form for struct-pattern tests/bindings. `ft` is the checker-resolved
+// field type stored on the wrapper (+1). String patterns must keep TI_STR so
+// str_eq compares contents, bool/char keep their declared form so literal
+// comparisons use the same representation as the existing arms, and other fields
+// use the exact integer slot form (TI_INT). Optional fields are raw slots.
+fn structpat_field_load_ti_from(ft: int) -> int:
+    if ft == TI_STR:
+        return TI_STR
+    if ft == TI_DEX:
+        return TI_DEX_S
+    if ft == TI_BOOL:
+        return TI_BOOL
+    if ft == TI_CHAR:
+        return TI_CHAR
+    return TI_INT
+
+// ─── Struct match pattern lowering（Task 5b1）───
+// Emit the comparison for one field subpattern. `fall` is taken when the
+// comparison fails. Returns 1 when a test was emitted, 0 for ident/wildcard
+// (no test), and -1 for an unsupported nested subpattern (caller must fail
+// closed instead of jumping to the body).
+fn gen_structpat_field_test(sub: int, fv: int, fall: int) -> int:
+    if sub < 0:
+        return 0
+    k := ast_kind(sub)
+    if k == EXPR_IDENT || k == EXPR_WILDCARD:
+        return 0
+    ok_lbl := new_label()
+    cmp_var : ., mut = -1
+    if k == EXPR_INT:
+        pat_val := new_ir_var("pval", TI_INT)
+        emit(IR_CONST, pat_val, ast_int_val(sub), 0, 0, TI_INT)
+        cmp_var = new_ir_var("cmp", TI_INT)
+        emit(IR_BINARY, cmp_var, fv, pat_val, OP_EQ, 0)
+    else if k == EXPR_BOOL:
+        pat_val := new_ir_var("pval", TI_BOOL)
+        pat_bool : ., mut = 0
+        if ast_int_val(sub) != 0:
+            pat_bool = 1
+        emit(IR_CONST, pat_val, pat_bool, 0, 0, TI_BOOL)
+        cmp_var = new_ir_var("cmp", TI_INT)
+        emit(IR_BINARY, cmp_var, fv, pat_val, OP_EQ, 0)
+    else if k == EXPR_CHAR:
+        // char runtime value = interned string index; the pattern stores the same
+        // index in ast_int_val (same contract as the existing char arm).
+        pat_val := new_ir_var("pval", TI_CHAR)
+        track_str(ast_int_val(sub))
+        emit(IR_CONST, pat_val, ast_int_val(sub), 0, 0, TI_CHAR)
+        cmp_var = new_ir_var("cmp", TI_INT)
+        emit(IR_BINARY, cmp_var, fv, pat_val, OP_EQ, 0)
+    else if k == EXPR_STRING:
+        pat_val := new_ir_var("spat", TI_STR)
+        track_str(ast_int_val(sub))
+        emit(IR_CONST, pat_val, ast_int_val(sub), 0, 0, TI_STR)
+        eq0 := new_ir_var("_seq0", TI_STR)
+        eq1 := new_ir_var("_seq1", TI_STR)
+        emit(IR_STORE, -1, eq0, fv, 0, 0)
+        emit(IR_STORE, -1, eq1, pat_val, 0, 0)
+        cmp_var = new_ir_var("cmp", TI_BOOL)
+        emit(IR_CALL, cmp_var, eq0, 2, str_intern("str_eq"), TI_BOOL)
+    else:
+        return -1
+    emit(IR_BRANCH, -1, cmp_var, ok_lbl, fall, 0)
+    emit(IR_LABEL, -1, ok_lbl, 0, 0, 0)
+    return 1
+
+// Bind ident subpatterns for a struct pattern in the arm scope. Each binding
+// reads its field again and gets the checker-resolved field type stored on the
+// wrapper. Literal and `_` subpatterns bind nothing.
+fn gen_structpat_binds(pat: int, match_val: int):
+    if pat < 0 || match_val < 0:
+        return
+    si := find_struct_by_name(ast_a(pat))
+    c := ast_c(pat)
+    w0 := ast_b(pat)
+    if si < 0 || w0 < 0:
+        return
+    i : ., mut = 0
+    loop:
+        if i >= c:
+            break
+        w := w0 + i
+        if w >= 0:
+            sub := ast_a(w)
+            if sub >= 0 && ast_kind(sub) == EXPR_IDENT:
+                nn := ast_int_val(sub)
+                if str_eq(istr_get(nn), "_") == 0:
+                    jdi := struct_field_index_by_name(si, ast_b(w))
+                    if jdi >= 0:
+                        fd := ast_data(w)
+                        ft : ., mut = struct_row_field_ti(si, jdi)
+                        if fd > 0:
+                            ft = fd - 1
+                        // A still-generic field cannot be bound soundly; the
+                        // pattern was fail-closed before the body.
+                        if ti_has_generic_param(ft) == 0:
+                            fv := new_ir_var("fld", TI_INT)
+                            irv_set_type(fv, structpat_field_load_ti_from(ft))
+                            if get_type_kind(ft) == TYP_OPTIONAL && g_optrep_on != 0:
+                                irv_set_decl_ti(fv, ft)
+                            emit(IR_LOAD_FIELD, fv, match_val, 0, jdi, 0)
+                            bind_local(nn, fv)
+        i = i + 1
+
+// Bind ident subpatterns for a tuple pattern in the arm scope. Each binding reads
+// its element again and gets the checker-resolved element type stored on the
+// wrapper. Literal and `_` subpatterns bind nothing.
+fn gen_tuplepat_binds(pat: int, match_val: int):
+    if pat < 0 || match_val < 0:
+        return
+    c := ast_b(pat)
+    w0 := ast_a(pat)
+    if w0 < 0:
+        return
+    i : ., mut = 0
+    loop:
+        if i >= c:
+            break
+        w := w0 + i
+        if w >= 0:
+            sub := ast_a(w)
+            if sub >= 0 && ast_kind(sub) == EXPR_IDENT:
+                nn := ast_int_val(sub)
+                if str_eq(istr_get(nn), "_") == 0:
+                    fd := ast_data(w)
+                    ft : ., mut = TI_INT
+                    if fd > 0:
+                        ft = fd - 1
+                    fv := new_ir_var("fld", TI_INT)
+                    irv_set_type(fv, structpat_field_load_ti_from(ft))
+                    if get_type_kind(ft) == TYP_OPTIONAL && g_optrep_on != 0:
+                        irv_set_decl_ti(fv, ft)
+                    emit(IR_LOAD_FIELD, fv, match_val, 0, ast_b(w), 0)
+                    bind_local(nn, fv)
+        i = i + 1
 
 // Return the literal initializer AST node for an immutable module-level
 // constant.  The ELF backend has no data initializers, so leaving these as
@@ -2694,7 +2872,157 @@ fn gen_expr(node: int) -> int:
             emit(IR_CONST, mrep_var, 1, 0, 0, TI_INT)
             irv_set_rep(result_var, mrep_var)
         merge_lbl := new_label()
+        // ── Supported-pattern pre-scan ───────────────────────────────────
+        // One IR_MATCH requires every arm to be encodable in the CASE table:
+        // int/bool literals, enum variants without sub-patterns, and one last
+        // wildcard. Anything else keeps the sequential lowering unchanged.
+        arm_total : ., mut = 0
+        an0 := first_arm
+        loop:
+            if an0 < 0:
+                break
+            arm_total = arm_total + 1
+            an0 = ast_c(an0)
+        match_mode : ., mut = 1
+        if first_arm < 0:
+            match_mode = 0
+        // 可选表示位分派（Some/None 的裸/装箱两态）保留既有逐臂路径。
+        if g_optrep_on != 0 && match_val >= 0:
+            if irv_rep(match_val) >= 0:
+                match_mode = 0
+        // Pass A: classify support without resolving enum variant names. This
+        // keeps an unsupported match's string-interning order byte-identical to
+        // the old sequential lowering.
+        wild_total : ., mut = 0
+        saw_int : ., mut = 0
+        saw_bool : ., mut = 0
+        saw_enum : ., mut = 0
+        an0 = first_arm
+        loop:
+            if an0 < 0:
+                break
+            ap0 := ast_a(an0)
+            k0 : ., mut = -1
+            if ap0 >= 0:
+                k0 = ast_kind(ap0)
+            if k0 == EXPR_INT:
+                saw_int = 1
+                iv0 := ast_int_val(ap0)
+                // The backend tags small integers as value<<1. Values outside
+                // the 62-bit immediate window need the big-int path, which this
+                // task does not encode in CASE.
+                if iv0 > 4611686018427387903 || iv0 < -4611686018427387903:
+                    match_mode = 0
+            else if k0 == EXPR_BOOL:
+                saw_bool = 1
+            else if k0 == EXPR_ENUMPAT:
+                saw_enum = 1
+                if ast_c(ap0) != 0:
+                    // Payload binding/guard patterns are Task 4/5.
+                    match_mode = 0
+            else if k0 == EXPR_IDENT && str_eq(istr_get(ast_int_val(ap0)), "_") != 0:
+                // The lexer classifies a bare `_` as an identifier because `_`
+                // is a valid identifier character; the parser's EXPR_WILDCARD
+                // branch is therefore unreachable for the common form.
+                wild_total = wild_total + 1
+                if ast_c(an0) >= 0:
+                    // A wildcard shadows every later arm; keep the old path so
+                    // the CASE order cannot change which body wins.
+                    match_mode = 0
+            else if k0 == EXPR_WILDCARD:
+                wild_total = wild_total + 1
+                if ast_c(an0) >= 0:
+                    match_mode = 0
+            else:
+                match_mode = 0
+            an0 = ast_c(an0)
+        if match_val < 0:
+            match_mode = 0
+        if saw_int != 0 && irv_type(match_val) != TI_INT:
+            // The backend compares tagged int slots; a different scrutinee form
+            // (dex, char, struct) needs its own lowering.
+            match_mode = 0
+        if saw_bool != 0 && irv_type(match_val) != TI_BOOL:
+            match_mode = 0
+        if saw_enum != 0 && (saw_int != 0 || saw_bool != 0):
+            // The backend picks one scrutinee form per MATCH range (enum tag vs
+            // value slot). Mixed rows would dispatch differently in the
+            // interpreter, so keep the sequential path instead.
+            match_mode = 0
+        if wild_total > 1:
+            match_mode = 0
+
+        // Pass B: only for supported matches. Resolve enum tags and dedupe by
+        // (kind, value), keeping the first arm.
+        vals := alloc((arm_total + 1) * 16)   // unique cases: kind@0, value@8
+        cis := alloc((arm_total + 1) * 8)     // arm -> unique-case index, -1 = duplicate
+        unique_n : ., mut = 0
+        arm_scan : ., mut = 0
+        if match_mode != 0:
+            an0 = first_arm
+            loop:
+                if an0 < 0:
+                    break
+                ap0 := ast_a(an0)
+                k0 := ast_kind(ap0)
+                kind0 : ., mut = -1
+                value0 : ., mut = 0
+                if k0 == EXPR_INT:
+                    kind0 = CCR_CASE_KIND_VALUE
+                    value0 = ast_int_val(ap0)
+                else if k0 == EXPR_BOOL:
+                    bv0 : ., mut = 0
+                    if ast_int_val(ap0) != 0:
+                        bv0 = 1
+                    kind0 = CCR_CASE_KIND_VALUE
+                    value0 = bv0
+                else if k0 == EXPR_ENUMPAT:
+                    kind0 = CCR_CASE_KIND_ENUM
+                    value0 = get_variant_name_idx(ast_a(ap0))
+                    if value0 < 0:
+                        match_mode = 0
+                else:
+                    kind0 = CCR_CASE_KIND_DEFAULT
+                    value0 = 0
+                ci0 : ., mut = -1
+                if match_mode != 0:
+                    j0 : ., mut = 0
+                    dup0 : ., mut = 0
+                    loop:
+                        if j0 >= unique_n:
+                            break
+                        if cell_load(vals, j0 * 16) == kind0:
+                            if cell_load(vals, j0 * 16 + 8) == value0:
+                                dup0 = 1
+                                break
+                        j0 = j0 + 1
+                    if dup0 == 0:
+                        cell_store(vals, unique_n * 16, kind0)
+                        cell_store(vals, unique_n * 16 + 8, value0)
+                        ci0 = unique_n
+                        unique_n = unique_n + 1
+                cell_store(cis, arm_scan * 8, ci0)
+                arm_scan = arm_scan + 1
+                an0 = ast_c(an0)
+        case_base : ., mut = -1
+        if match_mode != 0:
+            case_base = g_lat_case_count
+            // type_kind 0: MATCH is not a type-face op. The NOD semantic
+            // type_id is filled by ccr_nod_type_domain from the scrutinee var,
+            // so the wire records the scrutinee domain instead of an invented
+            // result domain.
+            emit(IR_MATCH, -1, match_val, case_base, unique_n, 0)
+            g_cir_has_match = 1
+            // Reserve the whole model range before emitting bodies: nested
+            // matches in an arm must append after this range, not splice into it.
+            cj0 : ., mut = 0
+            loop:
+                if cj0 >= unique_n:
+                    break
+                lat_case_append(cell_load(vals, cj0 * 16 + 8), cell_load(vals, cj0 * 16), -1, -1, 0)
+                cj0 = cj0 + 1
         an : ., mut = first_arm
+        arm_idx : ., mut = 0
         loop:
             if an < 0:
                 break
@@ -2706,6 +3034,34 @@ fn gen_expr(node: int) -> int:
             is_wildcard := 0
             if pat_kind == EXPR_WILDCARD:
                 is_wildcard = 1
+            // A binding ident is irrefutable: `x` (or `_` if the lexer ever routes
+            // it here) matches every value and binds the scrutinee. `_` is a
+            // wildcard; every other name is a binding arm.
+            is_ident_bind := 0
+            ident_ni : ., mut = -1
+            if pat_kind == EXPR_IDENT:
+                ident_ni = ast_int_val(arm_pat)
+                if str_eq(istr_get(ident_ni), "_") != 0:
+                    is_wildcard = 1
+                else:
+                    is_ident_bind = 1
+            // Nested refutable sub-patterns (string/char/int/... inside an enum
+            // payload) are Task 5b. Do not silently treat the outer variant as an
+            // unconditional match: route the arm to the fall edge instead. The
+            // scan must cover the full payload subtree: composite sub-patterns
+            // are not contiguous from ast_b (e.g. A(x, X(y))).
+            nested_bad : ., mut = 0
+            if pat_kind == EXPR_ENUMPAT:
+                if sh_match_payload_bad(arm_pat) >= 0:
+                    nested_bad = 1
+            if match_mode != 0:
+                // MATCH owns the dispatch: suppress the sequential compare chain
+                // and the payload-binding reads (sub-patterns already forced the
+                // fallback path).
+                pat_kind = -2
+                is_wildcard = 0
+                is_ident_bind = 0
+                nested_bad = 0
             // 可选表示位：臂条件与臂体绑定共用（声明在臂作用域）
             rep_v : ., mut = -1
             body_lbl := new_label()
@@ -2713,55 +3069,167 @@ fn gen_expr(node: int) -> int:
             has_next := 0
             if ast_c(an) >= 0:
                 has_next = 1
-            if is_wildcard == 1:
+            if is_wildcard == 1 || is_ident_bind == 1:
                 emit(IR_JUMP, -1, body_lbl, 0, 0, 0)
             else if pat_kind == EXPR_ENUMPAT:
-                variant_ni := get_variant_name_idx(ast_a(arm_pat))
-                // 解包侧判表示，scrutinee 配表示位（可选槽）时按位分派：
-                //   裸值（0）-> 值即携带值：Some 模式命中臂体（不读 tag，裸值非对象，
-                //   读 tag 即 SIGSEGV = 原红态）；None 模式不命中（裸值非 null）。
-                //   装箱（≠0）-> 既有 tag 分派（逐字不变）。
-                // 无表示位（非可选槽 / 未覆盖情形）-> 既有路径逐字不变（装箱假定）。
-                if g_optrep_on != 0 && match_val >= 0:
-                    rep_v = irv_rep(match_val)
-                if rep_v < 0:
-                    tag_var := new_ir_var("tag", TI_INT)
-                    emit(IR_LOAD_ENUM_TAG, tag_var, match_val, 0, 0, 0)
-                    vtag := new_ir_var("vtag", TI_INT)
-                    emit(IR_CONST, vtag, variant_ni, 0, 0, TI_INT)
-                    cmp_var := new_ir_var("cmp", TI_INT)
-                    emit(IR_BINARY, cmp_var, tag_var, vtag, OP_EQ, 0)
+                if nested_bad != 0:
                     if has_next == 1:
                         fall_lbl = new_label()
-                    emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
+                    emit(IR_JUMP, -1, fall_lbl, 0, 0, 0)
                 else:
-                    is_some_pat : ., mut = 0
-                    if str_eq(istr_get(variant_ni), "Some") != 0:
-                        is_some_pat = 1
-                    tag_lbl := new_label()
-                    if has_next == 1:
-                        fall_lbl = new_label()
-                    zb := new_ir_var("_rz", TI_INT)
-                    emit(IR_CONST, zb, 0, 0, 0, TI_INT)
-                    isb := new_ir_var("rep_isbare", TI_INT)
-                    if is_some_pat != 0:
-                        emit(IR_BINARY, isb, rep_v, zb, OP_EQ, 0)
+                    variant_ni := get_variant_name_idx(ast_a(arm_pat))
+                    // 解包侧判表示，scrutinee 配表示位（可选槽）时按位分派：
+                    //   裸值（0）-> 值即携带值：Some 模式命中臂体（不读 tag，裸值非对象，
+                    //   读 tag 即 SIGSEGV = 原红态）；None 模式不命中（裸值非 null）。
+                    //   装箱（≠0）-> 既有 tag 分派（逐字不变）。
+                    // 无表示位（非可选槽 / 未覆盖情形）-> 既有路径逐字不变（装箱假定）。
+                    if g_optrep_on != 0 && match_val >= 0:
+                        rep_v = irv_rep(match_val)
+                    if rep_v < 0:
+                        tag_var := new_ir_var("tag", TI_INT)
+                        emit(IR_LOAD_ENUM_TAG, tag_var, match_val, 0, 0, 0)
+                        vtag := new_ir_var("vtag", TI_INT)
+                        emit(IR_CONST, vtag, variant_ni, 0, 0, TI_INT)
+                        cmp_var := new_ir_var("cmp", TI_INT)
+                        emit(IR_BINARY, cmp_var, tag_var, vtag, OP_EQ, 0)
+                        if has_next == 1:
+                            fall_lbl = new_label()
+                        emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
                     else:
-                        emit(IR_BINARY, isb, rep_v, zb, OP_NE, 0)
-                    // Some：裸 -> 直接命中；装箱 -> 落 tag 比对。None：裸 -> 不命中（落 fall）；
-                    // 装箱 -> 落 tag 比对。
-                    if is_some_pat != 0:
-                        emit(IR_BRANCH, -1, isb, body_lbl, tag_lbl, 0)
-                    else:
-                        emit(IR_BRANCH, -1, isb, tag_lbl, fall_lbl, 0)
-                    emit(IR_LABEL, -1, tag_lbl, 0, 0, 0)
-                    tag_var := new_ir_var("tag", TI_INT)
-                    emit(IR_LOAD_ENUM_TAG, tag_var, match_val, 0, 0, 0)
-                    vtag := new_ir_var("vtag", TI_INT)
-                    emit(IR_CONST, vtag, variant_ni, 0, 0, TI_INT)
-                    cmp_var := new_ir_var("cmp", TI_INT)
-                    emit(IR_BINARY, cmp_var, tag_var, vtag, OP_EQ, 0)
-                    emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
+                        is_some_pat : ., mut = 0
+                        if str_eq(istr_get(variant_ni), "Some") != 0:
+                            is_some_pat = 1
+                        tag_lbl := new_label()
+                        if has_next == 1:
+                            fall_lbl = new_label()
+                        zb := new_ir_var("_rz", TI_INT)
+                        emit(IR_CONST, zb, 0, 0, 0, TI_INT)
+                        isb := new_ir_var("rep_isbare", TI_INT)
+                        if is_some_pat != 0:
+                            emit(IR_BINARY, isb, rep_v, zb, OP_EQ, 0)
+                        else:
+                            emit(IR_BINARY, isb, rep_v, zb, OP_NE, 0)
+                        // Some：裸 -> 直接命中；装箱 -> 落 tag 比对。None：裸 -> 不命中（落 fall）；
+                        // 装箱 -> 落 tag 比对。
+                        if is_some_pat != 0:
+                            emit(IR_BRANCH, -1, isb, body_lbl, tag_lbl, 0)
+                        else:
+                            emit(IR_BRANCH, -1, isb, tag_lbl, fall_lbl, 0)
+                        emit(IR_LABEL, -1, tag_lbl, 0, 0, 0)
+                        tag_var := new_ir_var("tag", TI_INT)
+                        emit(IR_LOAD_ENUM_TAG, tag_var, match_val, 0, 0, 0)
+                        vtag := new_ir_var("vtag", TI_INT)
+                        emit(IR_CONST, vtag, variant_ni, 0, 0, TI_INT)
+                        cmp_var := new_ir_var("cmp", TI_INT)
+                        emit(IR_BINARY, cmp_var, tag_var, vtag, OP_EQ, 0)
+                        emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
+            else if pat_kind == EXPR_STRUCTPAT:
+                // Struct pattern: sequential field tests. The lowerer never
+                // classifies struct patterns as MATCH, so this is the only path.
+                // A missing struct/field or an unsupported nested subpattern
+                // fails closed: jump to the fall edge, never to the body.
+                si := find_struct_by_name(ast_a(arm_pat))
+                sc := ast_c(arm_pat)
+                w0 := ast_b(arm_pat)
+                can_match : ., mut = 1
+                if si < 0 || w0 < 0:
+                    can_match = 0
+                if has_next == 1:
+                    fall_lbl = new_label()
+                si_i : ., mut = 0
+                loop:
+                    if si_i >= sc:
+                        break
+                    w := w0 + si_i
+                    sub : ., mut = -1
+                    fni : ., mut = -1
+                    if w >= 0:
+                        sub = ast_a(w)
+                        fni = ast_b(w)
+                    jdi : ., mut = -1
+                    if si >= 0:
+                        jdi = struct_field_index_by_name(si, fni)
+                    if jdi < 0:
+                        can_match = 0
+                        break
+                    if sub >= 0:
+                        sk := ast_kind(sub)
+                        if sk != EXPR_IDENT && sk != EXPR_WILDCARD:
+                            fd := ast_data(w)
+                            ft : ., mut = struct_row_field_ti(si, jdi)
+                            if fd > 0:
+                                ft = fd - 1
+                            if ti_has_generic_param(ft) != 0:
+                                // The checker should have rejected this before
+                                // codegen. Never emit a field load with an
+                                // unresolved type: fail closed.
+                                check_error(EC_TS_FIELD_TYPE,
+                                    "Struct pattern field has an unresolved generic type",
+                                    ast_line(sub), ast_col(sub))
+                                can_match = 0
+                                break
+                            fv := new_ir_var("fld", TI_INT)
+                            irv_set_type(fv, structpat_field_load_ti_from(ft))
+                            emit(IR_LOAD_FIELD, fv, match_val, 0, jdi, 0)
+                            if gen_structpat_field_test(sub, fv, fall_lbl) < 0:
+                                can_match = 0
+                                break
+                    si_i = si_i + 1
+                if can_match != 0:
+                    emit(IR_JUMP, -1, body_lbl, 0, 0, 0)
+                else:
+                    emit(IR_JUMP, -1, fall_lbl, 0, 0, 0)
+            else if pat_kind == EXPR_TUPLEPAT:
+                // Tuple pattern: sequential element tests. The checker has already
+                // validated the scrutinee arity and cached each element type on the
+                // wrapper. A missing wrapper/type or an unsupported subpattern fails
+                // closed: jump to the fall edge, never to the body.
+                tc := ast_b(arm_pat)
+                tw0 := ast_a(arm_pat)
+                can_match : ., mut = 1
+                if tw0 < 0 || tc <= 0:
+                    can_match = 0
+                if has_next == 1:
+                    fall_lbl = new_label()
+                ti_i : ., mut = 0
+                loop:
+                    if ti_i >= tc:
+                        break
+                    w := tw0 + ti_i
+                    sub : ., mut = -1
+                    idx : ., mut = -1
+                    fd : ., mut = 0
+                    if w >= 0:
+                        sub = ast_a(w)
+                        idx = ast_b(w)
+                        fd = ast_data(w)
+                    if w < 0 || idx != ti_i || fd <= 0:
+                        can_match = 0
+                        break
+                    sk : ., mut = -1
+                    if sub >= 0:
+                        sk = ast_kind(sub)
+                    if sk == EXPR_IDENT || sk == EXPR_WILDCARD:
+                        ti_i = ti_i + 1
+                        continue
+                    if sk != EXPR_INT && sk != EXPR_BOOL && sk != EXPR_CHAR && sk != EXPR_STRING:
+                        can_match = 0
+                        break
+                    ft := fd - 1
+                    if ti_has_generic_param(ft) != 0:
+                        can_match = 0
+                        break
+                    fv := new_ir_var("fld", TI_INT)
+                    irv_set_type(fv, structpat_field_load_ti_from(ft))
+                    emit(IR_LOAD_FIELD, fv, match_val, 0, idx, 0)
+                    if gen_structpat_field_test(sub, fv, fall_lbl) < 0:
+                        can_match = 0
+                        break
+                    ti_i = ti_i + 1
+                if can_match != 0:
+                    emit(IR_JUMP, -1, body_lbl, 0, 0, 0)
+                else:
+                    emit(IR_JUMP, -1, fall_lbl, 0, 0, 0)
             else if pat_kind == EXPR_INT:
                 pat_val := new_ir_var("pval", TI_INT)
                 emit(IR_CONST, pat_val, ast_int_val(arm_pat), 0, 0, TI_INT)
@@ -2781,8 +3249,51 @@ fn gen_expr(node: int) -> int:
                 if has_next == 1:
                     fall_lbl = new_label()
                 emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
+            else if pat_kind == EXPR_CHAR:
+                // char 运行期值 = 字符驻留串索引；模式存同一索引（ast_int_val）。
+                // 直接比较当前值，不改 char 语义（不是 Unicode 码点）。
+                pat_val := new_ir_var("pval", TI_CHAR)
+                track_str(ast_int_val(arm_pat))
+                emit(IR_CONST, pat_val, ast_int_val(arm_pat), 0, 0, TI_CHAR)
+                cmp_var := new_ir_var("cmp", TI_INT)
+                emit(IR_BINARY, cmp_var, match_val, pat_val, OP_EQ, 0)
+                if has_next == 1:
+                    fall_lbl = new_label()
+                emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
+            else if pat_kind == EXPR_STRING:
+                // String patterns do not enter CASE: compare through str_eq and
+                // branch on the boolean result (the sequential path).
+                pat_val := new_ir_var("spat", TI_STR)
+                track_str(ast_int_val(arm_pat))
+                emit(IR_CONST, pat_val, ast_int_val(arm_pat), 0, 0, TI_STR)
+                eq0 := new_ir_var("_seq0", TI_STR)
+                eq1 := new_ir_var("_seq1", TI_STR)
+                emit(IR_STORE, -1, eq0, match_val, 0, 0)
+                emit(IR_STORE, -1, eq1, pat_val, 0, 0)
+                cmp_var := new_ir_var("cmp", TI_BOOL)
+                emit(IR_CALL, cmp_var, eq0, 2, str_intern("str_eq"), TI_BOOL)
+                if has_next == 1:
+                    fall_lbl = new_label()
+                emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
+            else:
+                // Unsupported pattern kind (struct/tuple/interpolated string/bigint).
+                // Preserve refutability: never fall through to the body.
+                if match_mode == 0:
+                    if has_next == 1:
+                        fall_lbl = new_label()
+                    emit(IR_JUMP, -1, fall_lbl, 0, 0, 0)
             emit(IR_LABEL, -1, body_lbl, 0, 0, 0)
+            if match_mode != 0:
+                ci_arm := cell_load(cis, arm_idx * 8)
+                if ci_arm >= 0:
+                    // The semantic model stores the body label number. ccr_lower
+                    // resolves it to the NOD id when it derives the wire table.
+                    lat_case_set_target(case_base + ci_arm, body_lbl)
             push_ir_scope()
+            if pat_kind == EXPR_STRUCTPAT:
+                gen_structpat_binds(arm_pat, match_val)
+            if pat_kind == EXPR_TUPLEPAT:
+                gen_tuplepat_binds(arm_pat, match_val)
             if pat_kind == EXPR_ENUMPAT:
                 sub_count := ast_c(arm_pat)
                 fi : ., mut = 0
@@ -2833,6 +3344,9 @@ fn gen_expr(node: int) -> int:
                     if spn >= 0 && ast_kind(spn) == EXPR_IDENT:
                         bind_local(ast_int_val(spn), fv)
                     fi = fi + 1
+            if is_ident_bind == 1:
+                // Irrefutable binding arm: the name is the scrutinee itself.
+                bind_local(ident_ni, match_val)
             body_val := gen_expr(arm_body)
             body_val = force_if_thunk(body_val)
             if body_val >= 0:
@@ -2842,10 +3356,10 @@ fn gen_expr(node: int) -> int:
                     emit_rep_set(mrep_var, rep_enc_of_expr(arm_body, body_val))
             pop_ir_scope()
             emit(IR_JUMP, -1, merge_lbl, 0, 0, 0)
-            if is_wildcard == 0:
-                if has_next == 1:
-                    emit(IR_LABEL, -1, fall_lbl, 0, 0, 0)
+            if match_mode == 0 && is_wildcard == 0 && is_ident_bind == 0 && has_next == 1:
+                emit(IR_LABEL, -1, fall_lbl, 0, 0, 0)
             an = ast_c(an)
+            arm_idx = arm_idx + 1
         emit(IR_LABEL, -1, merge_lbl, 0, 0, 0)
         return result_var
 
@@ -3314,6 +3828,8 @@ fn gen_expr(node: int) -> int:
         return inner
     if ast_kind(node) == EXPR_STRUCTPAT:
         return -1
+    if ast_kind(node) == EXPR_TUPLEPAT:
+        return -1
     if ast_kind(node) == EXPR_STMT:
         gen_expr(ast_a(node))
         return -1
@@ -3353,6 +3869,7 @@ fn ir_gen_func(fi: int):
     // Skip generic functions — they will be monomorphized at call sites
     if fi_generic_count(fi) > 0:
         return
+    g_cir_has_match = 0
     fn_node := fi_ast_node(fi)
     name_idx := ast_a(fn_node)
     first_param := ast_b(fn_node)
@@ -4191,6 +4708,15 @@ fn ir_gen_all():
     g_next_label = 1
     g_ir_loop_depth = 0
     g_ir_str_const_count = 0
+    g_lat_case = ""
+    g_lat_case_count = 0
+    g_lat_case_cap = 0
+    // The wire table is derived by ccr_lower; reset it too so a second IR run
+    // in one process cannot inherit stale rows.
+    g_ccr_case = ""
+    g_ccr_case_count = 0
+    g_ccr_case_cap = 0
+    g_cir_has_match = 0
     // 可选表示方式：侧表复位 + 启用扫描（先于全局注册，隐藏信道的 var 记录顺序依赖）
     optrep_begin()
 

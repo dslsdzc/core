@@ -1412,6 +1412,27 @@ fn parse_match_expr() -> int:
     g_want_value = want
     return alloc_node(EXPR_MATCH, expr, af, ac, 0, 0, 0, tok_ln(t), tok_cl(t))
 
+// Skip the remainder of a malformed tuple pattern through its matching ')'.
+// The caller has already emitted P005; recovery only prevents cascading
+// diagnostics from the tokens the malformed element left behind.
+fn tuplepat_recover():
+    depth : ., mut = 0
+    loop:
+        k := tok_k(cur_tok())
+        if k == T_EOF:
+            break
+        if k == T_LPAREN:
+            depth = depth + 1
+            advance_tok()
+            continue
+        if k == T_RPAREN:
+            advance_tok()
+            if depth == 0:
+                break
+            depth = depth - 1
+            continue
+        advance_tok()
+
 fn parse_pattern() -> int:
     t := cur_tok()
     if tok_k(t) == T_UNDERSCORE:
@@ -1424,6 +1445,107 @@ fn parse_pattern() -> int:
         advance_tok()
         tl := cell_load(g_tokens, t * ESZ_TOKEN + OFF_TK_LEXEME)
         return alloc_node(EXPR_BIGINT, tl, 0, 0, 0, TY_INT, 0, tok_ln(t), tok_cl(t))
+    if tok_k(t) == T_LPAREN:
+        // Tuple pattern: (pat, pat, ...). EXPR_TUPLEPAT layout: a = first wrapper
+        // (consecutive), b = element count. wrapper.a = subpattern, wrapper.b =
+        // element index (0-based). The contract is the same as EXPR_STRUCTPAT,
+        // except the second wrapper slot is positional instead of a field name.
+        // Composite subpatterns occupy several nodes, so parse all subpatterns
+        // first, then build contiguous wrappers. `(pat)` is grouping, exactly like
+        // a parenthesized expression. Empty `()`, leading commas, and trailing
+        // commas are hard parser diagnostics. An element that parse_pattern could
+        // not parse (its fallback returns 0) is diagnosed here and never stored:
+        // a node 0 must not reach the checker or IR as a pattern.
+        advance_tok()
+        if check(T_RPAREN):
+            check_error(EC_P_PATTERN,
+                "Empty tuple pattern is not supported; use '_'",
+                tok_ln(cur_tok()), tok_cl(cur_tok()))
+            advance_tok()
+            return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+        if check(T_COMMA):
+            check_error(EC_P_PATTERN, "Unexpected token in pattern",
+                tok_ln(cur_tok()), tok_cl(cur_tok()))
+            tuplepat_recover()
+            return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+        cap : ., mut = 8
+        vals : string, mut = alloc(cap * 8)
+        et := cur_tok()
+        e0 := parse_pattern()
+        if e0 <= 0:
+            check_error(EC_P_PATTERN, "Unexpected token in pattern",
+                tok_ln(et), tok_cl(et))
+            tuplepat_recover()
+            return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+        cell_store(vals, 0, e0)
+        pc : ., mut = 1
+        loop:
+            if check(T_COMMA):
+                advance_tok()  // consume comma
+                if check(T_RPAREN):
+                    check_error(EC_P_PATTERN,
+                        "Trailing comma is not supported in a tuple pattern",
+                        tok_ln(cur_tok()), tok_cl(cur_tok()))
+                    advance_tok()
+                    return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+                if check(T_COMMA):
+                    check_error(EC_P_PATTERN, "Unexpected token in pattern",
+                        tok_ln(cur_tok()), tok_cl(cur_tok()))
+                    tuplepat_recover()
+                    return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+                if check(T_EOF):
+                    check_error(EC_P_BRACKET,
+                        "Missing closing ')' in tuple pattern",
+                        tok_ln(cur_tok()), tok_cl(cur_tok()))
+                    return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+                et2 := cur_tok()
+                en := parse_pattern()
+                if en <= 0:
+                    check_error(EC_P_PATTERN, "Unexpected token in pattern",
+                        tok_ln(et2), tok_cl(et2))
+                    tuplepat_recover()
+                    return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+                if pc >= cap:
+                    ncap := cap * 2
+                    nv := alloc(ncap * 8)
+                    cell_copy(vals, cap * 8, nv)
+                    vals = nv
+                    cap = ncap
+                cell_store(vals, pc * 8, en)
+                pc = pc + 1
+                continue
+            if check(T_RPAREN):
+                advance_tok()
+                break
+            if check(T_EOF):
+                check_error(EC_P_BRACKET,
+                    "Missing closing ')' in tuple pattern",
+                    tok_ln(cur_tok()), tok_cl(cur_tok()))
+                return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+            // Missing separator between elements.
+            check_error(EC_P_PATTERN, "Unexpected token in pattern",
+                tok_ln(cur_tok()), tok_cl(cur_tok()))
+            tuplepat_recover()
+            return alloc_node(EXPR_WILDCARD, 0, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+        if pc == 1:
+            // Parenthesized pattern: transparent grouping, same as `(expr)`.
+            return cell_load(vals, 0)
+        pf : ., mut = -1
+        pi : ., mut = 0
+        loop:
+            if pi >= pc:
+                break
+            vn := cell_load(vals, pi * 8)
+            ln : ., mut = tok_ln(t)
+            cl : ., mut = tok_cl(t)
+            if vn >= 0:
+                ln = ast_line(vn)
+                cl = ast_col(vn)
+            wl := ast_alloc(EXPR_NONE, vn, pi, 0, 0, 0, 0, ln, cl)
+            if pi == 0:
+                pf = wl
+            pi = pi + 1
+        return alloc_node(EXPR_TUPLEPAT, pf, pc, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
     if tok_k(t) == T_STRING || tok_k(t) == T_INTERP:
         return parse_interp_run()
     if tok_k(t) == T_CHAR:
@@ -1487,12 +1609,14 @@ fn parse_pattern() -> int:
         if check(T_LBRACE):
             // Struct pattern: Name { field = pat, ... }
             // EXPR_STRUCTPAT layout: a = name index, b = first wrapper, c = field
-            // count. Wrappers are contiguous; wrapper.a points to the subpattern.
+            // count. Wrappers are contiguous; wrapper.a points to the subpattern and
+            // wrapper.b is the field name index (same contract as struct literals).
             // Composite subpatterns occupy several nodes, so parse all subpatterns
             // first, then build the wrappers.
             advance_tok()
             cap : ., mut = 8
             vals : string, mut = alloc(cap * 8)
+            names : string, mut = alloc(cap * 8)
             fc : ., mut = 0
             loop:
                 if check(T_RBRACE) || check(T_EOF):
@@ -1511,8 +1635,12 @@ fn parse_pattern() -> int:
                     nv := alloc(ncap * 8)
                     cell_copy(vals, cap * 8, nv)
                     vals = nv
+                    nn := alloc(ncap * 8)
+                    cell_copy(names, cap * 8, nn)
+                    names = nn
                     cap = ncap
                 cell_store(vals, fc * 8, parse_pattern())
+                cell_store(names, fc * 8, fni)
                 fc = fc + 1
                 if check(T_COMMA):
                     advance_tok()
@@ -1528,7 +1656,7 @@ fn parse_pattern() -> int:
                 if vn >= 0:
                     ln = ast_line(vn)
                     cl = ast_col(vn)
-                wl := ast_alloc(EXPR_NONE, vn, 0, 0, 0, 0, 0, ln, cl)
+                wl := ast_alloc(EXPR_NONE, vn, cell_load(names, fi2 * 8), 0, 0, 0, 0, ln, cl)
                 if fi2 == 0:
                     ff = wl
                 fi2 = fi2 + 1

@@ -339,6 +339,11 @@ fn df_connect_srcs(node_id: int, opcode: int, s1: int, s2: int, s3: int, tk_aux:
     if opcode == IR_BRANCH:
         df_use_var(node_id, s1)  // condition var (labels s2, s3 are not vars)
         return
+    if opcode == IR_MATCH:
+        // The scrutinee is the only variable read; case targets are labels in
+        // the CASE table, not node operands.
+        df_use_var(node_id, s1)
+        return
     if opcode == IR_BOUNDS_CHECK:
         df_use_var(node_id, s1)
         // 单槽化：旗标已从混用 tk 槽移入辅码槽 -> 读 tk_aux（值域不变：
@@ -597,6 +602,8 @@ fn df_opcode_name(opcode: int, s3: int) -> string:
         return "ref"
     if opcode == IR_BRANCH:
         return "branch"
+    if opcode == IR_MATCH:
+        return "match"
     if opcode == IR_JUMP:
         return "jump"
     if opcode == IR_LABEL:

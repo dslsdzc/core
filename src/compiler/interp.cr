@@ -159,6 +159,26 @@ fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int):
             cell_store(g_ir_vals, d * 8, lv % rv)
         return
 
+    if ti == TI_BOOL || irv_type(s1) == TI_BOOL || irv_type(s2) == TI_BOOL:
+        // Bool slots are raw 0/1, not big-int tagged. ELF's emit_big_binary is
+        // gated on both operands being TI_INT, so the interpreter must also
+        // compare these raw instead of calling bi_cmp. `ti` is the result code:
+        // a bool-returning comparison can still take int operands (for example
+        // the optional-equality `eqi != _cz`).
+        if s3 == 6:
+            cell_store(g_ir_vals, d * 8, lv == rv)
+        else if s3 == 7:
+            cell_store(g_ir_vals, d * 8, lv != rv)
+        else if s3 == 8:
+            cell_store(g_ir_vals, d * 8, lv < rv)
+        else if s3 == 9:
+            cell_store(g_ir_vals, d * 8, lv > rv)
+        else if s3 == 10:
+            cell_store(g_ir_vals, d * 8, lv <= rv)
+        else if s3 == 11:
+            cell_store(g_ir_vals, d * 8, lv >= rv)
+        return
+
     if s3 == 1:
         cell_store(g_ir_vals, d * 8, bi_add(lv, rv))
     else if s3 == 2:
@@ -312,6 +332,46 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
                     cell_store(g_ir_vals, d * 8, rval)
             break
         cfi = cfi + 1
+
+// v10 MATCH dispatch. Returns the NOD id of the selected CASE target, or -1
+// when the table has no default and no value matched. The runtime forms follow
+// the existing IR ops: enum scrutinees are pointers whose tag word is the
+// variant-name index; int scrutinees are tagged when big-int mode is on; bool
+// scrutinees stay raw.
+fn interp_match_target(scrutinee: int, scrutinee_ti: int, case_start: int, case_count: int) -> int:
+    if scrutinee < 0 || case_start < 0 || case_count < 0:
+        return -1
+    cv := cell_load(g_ir_vals, scrutinee * 8)
+    default_t : ., mut = -1
+    ci : ., mut = 0
+    loop:
+        if ci >= case_count:
+            break
+        base := (case_start + ci) * CCR_V10_CASE_DISK
+        kind := cell_load32(g_ccr_case, base + CCR_CASE_KIND)
+        val := cell_load(g_ccr_case, base + CCR_CASE_VALUE)
+        target := cell_load_i32(g_ccr_case, base + CCR_CASE_TARGET)
+        if kind == CCR_CASE_KIND_DEFAULT:
+            default_t = target
+        else if kind == CCR_CASE_KIND_ENUM:
+            tag : ., mut = 0
+            if cv != 0:
+                unsafe:
+                    tag = cell_load(@str_of(cv), 0)
+            if g_interp_big != 0:
+                if ir_interp_tag(tag) == ir_interp_tag(val):
+                    return target
+            else:
+                if tag == val:
+                    return target
+        else:
+            rv := val
+            if g_interp_big != 0 && scrutinee_ti == TI_INT:
+                rv = ir_interp_tag(val)
+            if cv == rv:
+                return target
+        ci = ci + 1
+    return default_t
 
 // Inline execution of a callee graph. Both the main loop and nested callees use
 // this function. It builds the label table, copies arguments, executes f_count
@@ -669,6 +729,20 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
         if op2 == 20:
             if t1 >= 0 && t1 < g_label_count:
                 ip2 = cell_load(g_label_poses, t1 * 8)
+        // v10 IR_MATCH: dispatch on the scrutinee and jump to the CASE target.
+        // The callee loop increments ip2 at the bottom, so point one before the
+        // target NOD (the target is itself a LABEL node). A miss with no
+        // DEFAULT and an out-of-span target both trap.
+        if op2 == 54:
+            mt2 := interp_match_target(t1, irv_type(t1), t2, t3)
+            if mt2 < 0:
+                g_interp_abort = -1
+                ip2 = f_count
+            else if mt2 >= f_start && mt2 < f_start + f_count:
+                ip2 = mt2 - f_start - 1
+            else:
+                g_interp_abort = -1
+                ip2 = f_count
         ip2 = ip2 + 1
     // Restore label state
     g_label_count = old_lc
@@ -1127,6 +1201,19 @@ fn ir_interpret() -> int:
                 continue
             else:
                 break
+        // v10 IR_MATCH: the CASE table selects a LABEL node and control jumps
+        // directly there. ip is function-relative; target is a global NOD id.
+        // A miss with no DEFAULT and an out-of-span target both trap.
+        if op == 54:
+            mt := interp_match_target(s1, irv_type(s1), s2, s3)
+            if mt < 0:
+                g_interp_abort = -1
+                return -1
+            if mt < node_start || mt >= node_start + node_count:
+                g_interp_abort = -1
+                return -1
+            ip = mt - node_start
+            continue
         // IR_LABEL: no operation.
 
         // IR_AWAIT

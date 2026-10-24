@@ -601,7 +601,7 @@ fn loop_body_has_break(node: int) -> int:
     if k == EXPR_STRUCT || k == EXPR_STRUCTPAT || k == EXPR_ENUMPAT || k == EXPR_GENERIC_APPLY:
         // 连续子节点段：首 b、个数 c（wrapper.a = 值/子模式，经 EXPR_NONE 分支承接）
         return seg_has_break(ast_b(node), ast_c(node))
-    if k == EXPR_ARRAY || k == EXPR_TUPLE:
+    if k == EXPR_ARRAY || k == EXPR_TUPLE || k == EXPR_TUPLEPAT:
         return seg_has_break(ast_a(node), ast_b(node))
     if k == EXPR_NONE:
         // wrapper（a = 值节点）或基类型节点（a = 0）：照 monomorph 的判据
@@ -1640,6 +1640,381 @@ fn struct_field_index_by_name(si: int, name_ni: int) -> int:
         j = j + 1
     return -1
 
+// Recursively replace struct generic-parameter rows with the concrete arguments
+// supplied by a TYP_GENERIC_APPLY scrutinee. Unknown/absent arguments stay as
+// TYP_GENERIC_PARAM so the caller can reject/fail closed.
+fn structpat_subst_ti(si: int, ti: int, scrut_ti: int) -> int:
+    k := get_type_kind(ti)
+    if k < 0:
+        return ti
+    if k == TYP_GENERIC_PARAM:
+        pni := get_type_data(ti)
+        if get_type_kind(scrut_ti) == TYP_GENERIC_APPLY:
+            ga_start := get_type_extra(scrut_ti)
+            ga_count := cell_load(g_gen_apply_data, ga_start * 8)
+            gpi : ., mut = 0
+            loop:
+                if gpi >= si_generic_count(si):
+                    break
+                if si_generic_name(si, gpi) == pni:
+                    if gpi < ga_count:
+                        return cell_load(g_gen_apply_data, (ga_start + 1 + gpi) * 8)
+                    break
+                gpi = gpi + 1
+        return ti
+    if k == TYP_ARRAY:
+        return alloc_type(TYP_ARRAY, structpat_subst_ti(si, get_type_data(ti), scrut_ti), get_type_extra(ti))
+    if k == TYP_SLICE:
+        return alloc_type(TYP_SLICE, structpat_subst_ti(si, get_type_data(ti), scrut_ti), 0)
+    if k == TYP_PTR:
+        return alloc_type(TYP_PTR, structpat_subst_ti(si, get_type_data(ti), scrut_ti), get_type_extra(ti))
+    if k == TYP_REF:
+        return alloc_type(TYP_REF, structpat_subst_ti(si, get_type_data(ti), scrut_ti), get_type_extra(ti))
+    if k == TYP_OPTIONAL:
+        return alloc_type(TYP_OPTIONAL, structpat_subst_ti(si, get_type_data(ti), scrut_ti), 0)
+    if k == TYP_TUPLE:
+        cnt := get_type_data(ti)
+        st := get_type_extra(ti)
+        subs : string, mut
+        if cnt > 0:
+            subs = alloc(cnt * 8)
+            i : ., mut = 0
+            loop:
+                if i >= cnt:
+                    break
+                cell_store(subs, i * 8, structpat_subst_ti(si, cell_load(g_gen_apply_data, (st + i) * 8), scrut_ti))
+                i = i + 1
+        ns := g_gen_apply_data_count
+        grow_gen_apply_data(ns + cnt)
+        i2 : ., mut = 0
+        loop:
+            if i2 >= cnt:
+                break
+            cell_store(g_gen_apply_data, (ns + i2) * 8, cell_load(subs, i2 * 8))
+            i2 = i2 + 1
+        g_gen_apply_data_count = ns + cnt
+        return alloc_type(TYP_TUPLE, cnt, ns)
+    if k == TYP_GENERIC_APPLY:
+        st2 := get_type_extra(ti)
+        cnt2 := cell_load(g_gen_apply_data, st2 * 8)
+        subs2 : string, mut
+        if cnt2 > 0:
+            subs2 = alloc(cnt2 * 8)
+            i3 : ., mut = 0
+            loop:
+                if i3 >= cnt2:
+                    break
+                cell_store(subs2, i3 * 8, structpat_subst_ti(si, cell_load(g_gen_apply_data, (st2 + 1 + i3) * 8), scrut_ti))
+                i3 = i3 + 1
+        ns2 := g_gen_apply_data_count
+        grow_gen_apply_data(ns2 + 1 + cnt2)
+        cell_store(g_gen_apply_data, ns2 * 8, cnt2)
+        i4 : ., mut = 0
+        loop:
+            if i4 >= cnt2:
+                break
+            cell_store(g_gen_apply_data, (ns2 + 1 + i4) * 8, cell_load(subs2, i4 * 8))
+            i4 = i4 + 1
+        g_gen_apply_data_count = ns2 + 1 + cnt2
+        return alloc_type(TYP_GENERIC_APPLY, get_type_data(ti), ns2)
+    return ti
+
+// Resolve a struct field type for a pattern scrutinee. Concrete fields are
+// returned unchanged; generic fields are substituted structurally (including
+// optional, array, tuple, and nested generic applications). The caller rejects
+// any remaining generic row for non-`_` subpatterns.
+fn structpat_field_ti(si: int, jdi: int, scrut_ti: int) -> int:
+    if si < 0 || jdi < 0:
+        return -1
+    ft := res_type_node(si_field_type_node(si, jdi))
+    if ft < 0:
+        return -1
+    if ti_has_generic_param(ft) == 0:
+        return ft
+    return structpat_subst_ti(si, ft, scrut_ti)
+
+// ─── Struct match pattern（Task 5b1）───
+// EXPR_STRUCTPAT layout: a = struct name ni, b = first wrapper, c = field count.
+// wrapper.a = subpattern, wrapper.b = field name ni. Validate the pattern against
+// the struct row: unknown type/field, duplicate field, and literal field type
+// mismatches are hard diagnostics. Nested struct/enum/tuple subpatterns are
+// rejected with TM09 rather than silently treated as irrefutable. Returns
+// 0 when the pattern is usable, 1 when a diagnostic was reported.
+fn check_struct_pattern(pat: int, scrut_ti: int) -> int:
+    if pat < 0:
+        return 1
+    name_ni := ast_a(pat)
+    si := find_struct_by_name(name_ni)
+    if si < 0:
+        check_error(EC_N_UNDEFINED,
+            "Unknown struct type '" + istr_get(name_ni) + "' in struct pattern",
+            ast_line(pat), ast_col(pat))
+        return 1
+    // A struct pattern needs a concrete scrutinee shape. An unresolved generic
+    // parameter could later instantiate to a different struct (or a non-struct),
+    // and monomorphization would then emit field loads against the wrong object.
+    // Reject it here; callers must use a concrete struct type or `_`/binding.
+    if ti_has_generic_param(scrut_ti) != 0:
+        check_error(EC_TS_FIELD_TYPE,
+            "Struct pattern '" + istr_get(name_ni) + "' requires a concrete struct type; use a wildcard or binding arm",
+            ast_line(pat), ast_col(pat))
+        return 1
+    // Generic field types cannot be validated/bound soundly unless the scrutinee
+    // supplies concrete generic arguments. The per-field loop below substitutes
+    // direct generic parameters from the scrutinee and rejects remaining generic
+    // forms (except `_`, which performs no comparison or binding).
+    // The scrutinee must be this struct whenever its shape is statically known.
+    sk := get_type_kind(scrut_ti)
+    if sk == TYP_NAMED || sk == TYP_GENERIC_APPLY:
+        sni := decl_name_of_ti(scrut_ti)
+        if sni >= 0 && sni != name_ni:
+            check_error(EC_TS_FIELD_TYPE,
+                "Struct pattern '" + istr_get(name_ni) + "' does not match scrutinee type '" + istr_get(sni) + "'",
+                ast_line(pat), ast_col(pat))
+            return 1
+    else if sk != TYP_GENERIC_PARAM:
+        check_error(EC_TS_FIELD_TYPE,
+            "Struct pattern '" + istr_get(name_ni) + "' requires a struct scrutinee",
+            ast_line(pat), ast_col(pat))
+        return 1
+    c := ast_c(pat)
+    w0 := ast_b(pat)
+    if c > 0 && w0 < 0:
+        return 1
+    fc := si_field_count(si)
+    used : string, mut = alloc((fc + 1) * 8)
+    j : ., mut = 0
+    loop:
+        if j >= fc:
+            break
+        cell_store(used, j * 8, 0)
+        j = j + 1
+    bad : ., mut = 0
+    i : ., mut = 0
+    loop:
+        if i >= c:
+            return bad
+        w := w0 + i
+        sub : ., mut = -1
+        fni : ., mut = -1
+        if w >= 0:
+            sub = ast_a(w)
+            fni = ast_b(w)
+        jdi := struct_field_index_by_name(si, fni)
+        if jdi < 0:
+            check_error(EC_TS_UNKNOWN_FIELD,
+                "Unknown field '" + istr_get(fni) + "' in struct pattern " + istr_get(name_ni),
+                ast_line(w), ast_col(w))
+            bad = 1
+            i = i + 1
+            continue
+        if cell_load(used, jdi * 8) != 0:
+            check_error(EC_TS_FIELD_DUP,
+                "Field '" + istr_get(fni) + "' matched more than once in struct pattern " + istr_get(name_ni),
+                ast_line(w), ast_col(w))
+            bad = 1
+        cell_store(used, jdi * 8, 1)
+        if sub >= 0:
+            k := ast_kind(sub)
+            if k == EXPR_IDENT || k == EXPR_WILDCARD || k == EXPR_INT || k == EXPR_BOOL || k == EXPR_CHAR || k == EXPR_STRING:
+                ft := structpat_field_ti(si, jdi, scrut_ti)
+                if ft >= 0:
+                    // Cache the checker-resolved (already substituted) field type
+                    // on the wrapper for IR gen and monomorph clones. +1 keeps 0
+                    // as the "absent" sentinel because TI_INT itself is 0.
+                    ast_set_data(w, ft + 1)
+                if ti_has_generic_param(ft) != 0:
+                    if k == EXPR_IDENT:
+                        check_error(EC_TS_FIELD_TYPE,
+                            "Field '" + istr_get(fni) + "' in struct pattern " + istr_get(name_ni) +
+                            " has an unresolved generic type; use a wildcard",
+                            ast_line(sub), ast_col(sub))
+                        bad = 1
+                    else if k != EXPR_WILDCARD:
+                        check_error(EC_TS_FIELD_TYPE,
+                            "Field '" + istr_get(fni) + "' in struct pattern " + istr_get(name_ni) +
+                            " has an unresolved generic type; literal patterns are not supported",
+                            ast_line(sub), ast_col(sub))
+                        bad = 1
+                else if k != EXPR_IDENT && k != EXPR_WILDCARD:
+                    if get_type_kind(ft) == TYP_OPTIONAL:
+                        check_error(EC_TS_FIELD_TYPE,
+                            "Field '" + istr_get(fni) + "' in struct pattern " + istr_get(name_ni) +
+                            " has an optional type; use a wildcard or binding arm",
+                            ast_line(sub), ast_col(sub))
+                        bad = 1
+                    else:
+                        st := infer_expr(sub)
+                        verdict := type_compat_strict(st, ft)
+                        if verdict != 1:
+                            diag_type_incompatible(verdict, EC_TS_FIELD_TYPE,
+                                "Field '" + istr_get(fni) + "' in struct pattern " + istr_get(name_ni) +
+                                ": expected " + type_display(ft) + ", got " + type_display(st),
+                                ast_line(sub), ast_col(sub))
+                            bad = 1
+            else:
+                check_error(EC_TM_NESTED,
+                    "Nested match patterns are not supported yet",
+                    ast_line(sub), ast_col(sub))
+                bad = 1
+        i = i + 1
+    return bad
+
+// Bind the ident subpatterns of a validated struct pattern. Each binding gets
+// the declared type of its field. `_` and literal subpatterns bind nothing.
+fn bind_struct_pattern_idents(pat: int, scrut_ti: int):
+    if pat < 0:
+        return
+    name_ni := ast_a(pat)
+    si := find_struct_by_name(name_ni)
+    c := ast_c(pat)
+    w0 := ast_b(pat)
+    if si < 0 || (c > 0 && w0 < 0):
+        return
+    i : ., mut = 0
+    loop:
+        if i >= c:
+            break
+        w := w0 + i
+        if w >= 0:
+            sub := ast_a(w)
+            if sub >= 0 && ast_kind(sub) == EXPR_IDENT:
+                nn := ast_int_val(sub)
+                if str_eq(istr_get(nn), "_") == 0:
+                    jdi := struct_field_index_by_name(si, ast_b(w))
+                    ft : ., mut = TI_INT
+                    if jdi >= 0:
+                        ft = structpat_field_ti(si, jdi, scrut_ti)
+                    def_sym(nn, SYM_LOCAL, ft, -1)
+        i = i + 1
+
+// ─── Tuple match pattern（Task 5b2）───
+// EXPR_TUPLEPAT layout: a = first wrapper, b = element count. wrapper.a =
+// subpattern, wrapper.b = element index (0-based). The scrutinee must be a
+// concrete TYP_TUPLE with the same arity. Each element is validated against the
+// actual tuple element type (g_gen_apply_data at extra+i): scalar literals are
+// compared strictly, ident/wildcard bind, and nested composite patterns are
+// rejected with TM09 rather than silently treated as irrefutable. Returns 0 when
+// the pattern is usable, 1 when a diagnostic was reported.
+fn check_tuple_pattern(pat: int, scrut_ti: int) -> int:
+    if pat < 0:
+        return 1
+    c := ast_b(pat)
+    w0 := ast_a(pat)
+    if c <= 0 || w0 < 0:
+        check_error(EC_P_PATTERN, "Malformed tuple pattern",
+            ast_line(pat), ast_col(pat))
+        return 1
+    if get_type_kind(scrut_ti) != TYP_TUPLE:
+        check_error(EC_TS_FIELD_TYPE,
+            "Tuple pattern requires a tuple scrutinee",
+            ast_line(pat), ast_col(pat))
+        return 1
+    arity := get_type_data(scrut_ti)
+    if c != arity:
+        check_error(EC_TA_TUPLE_ARITY,
+            "Tuple pattern has " + int_str(c) + " elements, but the scrutinee has " + int_str(arity),
+            ast_line(pat), ast_col(pat))
+        return 1
+    // A generic element has no concrete load form at codegen time. Keep the same
+    // conservative rule as struct patterns: require a fully concrete tuple.
+    if ti_has_generic_param(scrut_ti) != 0:
+        check_error(EC_TS_FIELD_TYPE,
+            "Tuple pattern requires a concrete tuple type; use a wildcard or binding arm",
+            ast_line(pat), ast_col(pat))
+        return 1
+    start := get_type_extra(scrut_ti)
+    bad : ., mut = 0
+    i : ., mut = 0
+    loop:
+        if i >= c:
+            return bad
+        w := w0 + i
+        sub : ., mut = -1
+        idx : ., mut = -1
+        if w >= 0:
+            sub = ast_a(w)
+            idx = ast_b(w)
+        if w < 0 || idx != i:
+            check_error(EC_P_PATTERN, "Malformed tuple pattern element index",
+                ast_line(pat), ast_col(pat))
+            bad = 1
+            i = i + 1
+            continue
+        ft : ., mut = -1
+        if start >= 0:
+            ft = cell_load(g_gen_apply_data, (start + i) * 8)
+        if ft >= 0:
+            // Cache the element type on the wrapper for IR lowering and monomorph
+            // clones. +1 keeps 0 as the "absent" sentinel because TI_INT is 0.
+            ast_set_data(w, ft + 1)
+        if sub < 0:
+            bad = 1
+            i = i + 1
+            continue
+        k := ast_kind(sub)
+        if k == EXPR_IDENT || k == EXPR_WILDCARD:
+            i = i + 1
+            continue
+        if k == EXPR_INT || k == EXPR_BOOL || k == EXPR_CHAR || k == EXPR_STRING:
+            if ft < 0:
+                check_error(EC_TS_FIELD_TYPE,
+                    "Tuple pattern element " + int_str(i) + " has no resolvable type",
+                    ast_line(sub), ast_col(sub))
+                bad = 1
+            else if ti_has_generic_param(ft) != 0:
+                check_error(EC_TS_FIELD_TYPE,
+                    "Tuple pattern element " + int_str(i) + " has an unresolved generic type; literal patterns are not supported",
+                    ast_line(sub), ast_col(sub))
+                bad = 1
+            else if get_type_kind(ft) == TYP_OPTIONAL:
+                check_error(EC_TS_FIELD_TYPE,
+                    "Tuple pattern element " + int_str(i) + " has an optional type; use a wildcard or binding arm",
+                    ast_line(sub), ast_col(sub))
+                bad = 1
+            else:
+                st := infer_expr(sub)
+                verdict := type_compat_strict(st, ft)
+                if verdict != 1:
+                    diag_type_incompatible(verdict, EC_TS_FIELD_TYPE,
+                        "Tuple pattern element " + int_str(i) + ": expected " + type_display(ft) + ", got " + type_display(st),
+                        ast_line(sub), ast_col(sub))
+                    bad = 1
+        else:
+            check_error(EC_TM_NESTED,
+                "Nested match patterns are not supported yet",
+                ast_line(sub), ast_col(sub))
+            bad = 1
+        i = i + 1
+    return bad
+
+// Bind the ident subpatterns of a validated tuple pattern. Each binding gets the
+// actual tuple element type. `_` and literal subpatterns bind nothing.
+fn bind_tuple_pattern_idents(pat: int, scrut_ti: int):
+    if pat < 0 || get_type_kind(scrut_ti) != TYP_TUPLE:
+        return
+    c := ast_b(pat)
+    w0 := ast_a(pat)
+    arity := get_type_data(scrut_ti)
+    start := get_type_extra(scrut_ti)
+    if w0 < 0:
+        return
+    i : ., mut = 0
+    loop:
+        if i >= c:
+            break
+        w := w0 + i
+        if w >= 0:
+            sub := ast_a(w)
+            if sub >= 0 && ast_kind(sub) == EXPR_IDENT:
+                nn := ast_int_val(sub)
+                if str_eq(istr_get(nn), "_") == 0:
+                    et : ., mut = TI_INT
+                    if start >= 0 && i < arity:
+                        et = cell_load(g_gen_apply_data, (start + i) * 8)
+                    def_sym(nn, SYM_LOCAL, et, -1)
+        i = i + 1
+
 // 类型里是否仍含未实例化的泛型参数（TYP_GENERIC_PARAM，可嵌套在数组 / 指针 / 引用 /
 // 切片 / 元组 / 泛型应用内）。字面量的字段类型 vs 声明元素同质性判定在任一侧
 // 含未实例化参数时跳过，参数未实例化时比较不成立，强行比较会假拒（泛型函数体
@@ -1652,6 +2027,8 @@ fn ti_has_generic_param(ti: int) -> int:
     if k == TYP_GENERIC_PARAM:
         return 1
     if k == TYP_ARRAY || k == TYP_PTR || k == TYP_REF || k == TYP_SLICE:
+        return ti_has_generic_param(get_type_data(ti))
+    if k == TYP_OPTIONAL:
         return ti_has_generic_param(get_type_data(ti))
     if k == TYP_TUPLE:
         cnt := get_type_data(ti)
@@ -3392,6 +3769,8 @@ fn infer_expr(node: int) -> int:
         mc_save := mc_begin()     // 覆盖位图入栈，容量无界
         m_unmappable : ., mut = 0
         m_wild : ., mut = 0      // 通配/绑定已见（冗余臂判据用；非穷尽性判据本体）
+        m_literal : ., mut = 0   // 任一 int/bool/string/char 字面量臂已见（无限域 -> 需 irrefutable 臂）
+        m_order_rep : ., mut = 0 // 通配/绑定后仍有臂（TM05 只报一次）
         m_dup : ., mut = -1      // 首个冗余臂模式节点（-1 = 无）
         loop:
             if an < 0:
@@ -3400,6 +3779,12 @@ fn infer_expr(node: int) -> int:
             arm_body := ast_b(an)  // EXPR_ARM: b = body
             if arm_pat >= 0:
                 pk := sh_match_pat_kind(arm_pat)
+                // 通配/绑定模式吞掉后续所有臂：后续臂不可达，报 TM05。
+                if m_wild != 0 && m_order_rep == 0:
+                    check_error(EC_TM_WILDCARD_ORDER,
+                        "Wildcard or binding pattern must be the last arm",
+                        ast_line(arm_pat), ast_col(arm_pat))
+                    m_order_rep = 1
                 if pk == 1:
                     if m_wild != 0:
                         if m_dup < 0:
@@ -3407,6 +3792,16 @@ fn infer_expr(node: int) -> int:
                     m_wild = 1
                     m_pats = tt_cons(tt_top(), m_pats)
                 else if pk == 2:
+                    // 嵌套子模式只在 Task 5b 完整支持；ident/`_` 之外的模式
+                    // （字面量、嵌套枚举、struct…）现在不得静默当成“变体匹配”。
+                    // 子模式节点不一定连续（parser 先分配复合子模式的后代），
+                    // 因此扫描整个 payload 子树区间，而不是 ast_b + i。
+                    bad_nested := sh_match_payload_bad(arm_pat)
+                    if bad_nested >= 0:
+                        check_error(EC_TM_NESTED,
+                            "Nested match patterns are not supported yet",
+                            ast_line(bad_nested), ast_col(bad_nested))
+                        m_unmappable = 1
                     vi := sh_match_pat_variant(match_ti, arm_pat)
                     vt : ., mut = -1
                     if vi >= 0:
@@ -3433,8 +3828,36 @@ fn infer_expr(node: int) -> int:
                                 m_dup = arm_pat
                         mc_add(ci)
                         m_pats = tt_cons(vt, m_pats)
+                else if ast_kind(arm_pat) == EXPR_STRUCTPAT:
+                    // Struct patterns are refutable: like literals, they need an
+                    // irrefutable arm. Field syntax/type errors are diagnosed by
+                    // check_struct_pattern; TM09 covers nested subpatterns.
+                    m_literal = 1
+                    if check_struct_pattern(arm_pat, match_ti) != 0:
+                        m_unmappable = 1
+                else if ast_kind(arm_pat) == EXPR_TUPLEPAT:
+                    // Tuple patterns are refutable as well: arity/scrutinee/type
+                    // errors are diagnosed by check_tuple_pattern, nested composites
+                    // as TM09. An irrefutable arm is still required.
+                    m_literal = 1
+                    if check_tuple_pattern(arm_pat, match_ti) != 0:
+                        m_unmappable = 1
                 else:
-                    m_unmappable = 1          // 字面量/struct 模式，因此不判（登记）
+                    lit_k := sh_match_lit_kind(arm_pat)
+                    if lit_k >= 0:
+                        m_literal = 1
+                        if sh_match_lit_seen(first_arm, an, lit_k, ast_int_val(arm_pat)) != 0:
+                            if m_dup < 0:
+                                m_dup = arm_pat
+                    else:
+                        // 插值字符串 pattern 不是字面量：parser 产出 EXPR_BINARY/
+                        // EXPR_INTERP_HOLE。它既不能按值比较，也不得当成“任意串匹配”。
+                        ak0 := ast_kind(arm_pat)
+                        if ak0 == EXPR_BINARY || ak0 == EXPR_INTERP_HOLE:
+                            check_error(EC_TM_NESTED,
+                                "String interpolation is not supported in a match pattern; use a literal",
+                                ast_line(arm_pat), ast_col(arm_pat))
+                        m_unmappable = 1      // struct / 插值 / EXPR_BIGINT 等，不判穷尽
             // Bind pattern variables in new scope
             push_scope()
             if arm_pat >= 0:
@@ -3452,8 +3875,18 @@ fn infer_expr(node: int) -> int:
                                 def_sym(ast_int_val(spn), SYM_LOCAL, TI_INT, -1)
                             spn = spn + 1
                         spi = spi + 1
+                if ast_kind(arm_pat) == EXPR_STRUCTPAT:
+                    // Struct pattern field bindings: each ident subpattern gets the
+                    // declared field type (Task 5b1).
+                    bind_struct_pattern_idents(arm_pat, match_ti)
+                if ast_kind(arm_pat) == EXPR_TUPLEPAT:
+                    // Tuple pattern element bindings: each ident subpattern gets the
+                    // actual tuple element type (Task 5b2).
+                    bind_tuple_pattern_idents(arm_pat, match_ti)
                 if ast_kind(arm_pat) == EXPR_IDENT:
-                    def_sym(ast_int_val(arm_pat), SYM_LOCAL, TI_INT, -1)
+                    // 绑定臂的值就是 scrutinee：类型取 scrutinee 类型（旧实现
+                    // 一律 TI_INT，字符串/char/bool  scrutinee 会错型）。
+                    def_sym(ast_int_val(arm_pat), SYM_LOCAL, match_ti, -1)
             push_borrow_scope()
             arm_ti := infer_expr(arm_body)
             pop_borrow_scope()
@@ -3466,12 +3899,24 @@ fn infer_expr(node: int) -> int:
         // 判定结果：0 = 不穷尽（诊断 + 具体反例变体名）；1 = 穷尽；-1 = 不判（非枚举域/不可映射
         // 模式/引擎未知），零诊断（判定约定：未知不得当不穷尽，也不得当穷尽）。
         ty_budget_reset(200000)
-        m_verdict := sh_match_exhaustive(match_ti, m_pats, m_unmappable)
+        m_verdict : ., mut = -1
+        if m_unmappable == 0 && m_literal != 0:
+            // 字面量域（int/string/char）无限；bool 也按设计要求显式列出 `_`/绑定臂。
+            // 没有 irrefutable 臂 -> 不穷尽，不再静默放行。
+            if m_wild != 0:
+                m_verdict = 1
+            else:
+                m_verdict = 0
+        else:
+            m_verdict = sh_match_exhaustive(match_ti, m_pats, m_unmappable)
         ty_budget_reset(200000)
         if m_verdict == 0:
             mi : ., mut = -1
             msg := "Non-exhaustive match"
-            if get_type_kind(match_ti) == TYP_OPTIONAL:
+            if m_literal != 0:
+                // 字面量域没有具体变体可命名；保持与枚举反例同一诊断码。
+                msg = msg + ": add a wildcard or binding arm"
+            else if get_type_kind(match_ti) == TYP_OPTIONAL:
                 // `T?` 两分支反例命名：0 = 有值（Some）/ 1 = null（None）
                 mi = mc_first_missing(2)
                 if mi == 0:
@@ -3948,6 +4393,13 @@ fn infer_expr(node: int) -> int:
             return get_type_data(inner_ti)
         return inner_ti
     if ast_kind(node) == EXPR_STRUCTPAT:
+        // Patterns are not value expressions. Match-arm validation/binding lives
+        // in the EXPR_MATCH branch (check_struct_pattern / bind_struct_pattern_idents).
+        return TI_UNIT
+    if ast_kind(node) == EXPR_TUPLEPAT:
+        // Tuple patterns are not value expressions either. Match-arm
+        // validation/binding lives in EXPR_MATCH (check_tuple_pattern /
+        // bind_tuple_pattern_idents).
         return TI_UNIT
     if ast_kind(node) == EXPR_AS:
         // expr as Type — type cast
