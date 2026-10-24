@@ -1011,6 +1011,115 @@ fn main() -> int:
         Point { x = 1 } => 1
 """
 
+# Runtime-constructed string field: the pattern must compare contents via str_eq,
+# not intern indices/pointers. Also exercises partial, reordered fields and a
+# non-int ident binding (string).
+MATCH_STRUCT_MISC_SOURCE = """struct Point:
+    x: int
+    y: int
+
+struct R:
+    name: string
+
+fn pickp(p: Point) -> int:
+    return match p:
+        Point { y = 9, x = 5 } => 1,
+        Point { x = 2 } => 2,
+        _ => 0
+
+fn pickname(r: R) -> string:
+    return match r:
+        R { name = n } => n,
+        _ => ""
+
+fn pickmatch(r: R) -> int:
+    return match r:
+        R { name = "hi" } => 1,
+        _ => 0
+
+fn main() -> int:
+    if pickp(Point { x = 5, y = 9 }) != 1:
+        return 1
+    if pickp(Point { x = 2, y = 3 }) != 2:
+        return 2
+    if pickp(Point { x = 3, y = 3 }) != 0:
+        return 3
+    r := R { name = concat("h", "i") }
+    if pickname(r) != "hi":
+        return 4
+    if pickmatch(r) != 1:
+        return 5
+    return 42
+"""
+
+MATCH_STRUCT_GENERIC_SCRUTINEE_SOURCE = """struct Point:
+    x: int
+    y: int
+
+struct One:
+    a: int
+
+fn pick[T](v: T) -> int:
+    return match v:
+        Point { x = 1 } => 1,
+        _ => 0
+
+fn main() -> int:
+    return pick(One { a = 2 }) + pick(7)
+"""
+
+MATCH_STRUCT_GENERIC_FIELD_SOURCE = """struct Pair[T]:
+    a: T
+    n: int
+
+fn pick(p: Pair[string]) -> int:
+    return match p:
+        Pair { a = 1, n = 2 } => 1,
+        _ => 0
+
+fn main() -> int:
+    p := Pair { a = "x", n = 2 }
+    return pick(p)
+"""
+
+# A concrete generic application inside a generic function still monomorphizes:
+# the scrutinee is Pair[Point], so field substitution yields Point and the
+# binding pattern is valid. This guards the monomorph revalidation from being
+# over-conservative.
+MATCH_STRUCT_GENERIC_INSTANCE_SOURCE = """struct Point:
+    x: int
+    y: int
+
+struct Pair[T]:
+    a: T
+    n: int
+
+fn show[U](u: U, p: Pair[Point]) -> int:
+    return match p:
+        Pair { a = v, n = 2 } => 1,
+        _ => 0
+
+fn main() -> int:
+    p := Pair { a = Point { x = 1, y = 2 }, n = 2 }
+    if show(7, p) != 1:
+        return 1
+    return 42
+"""
+
+MATCH_STRUCT_CONCRETE_MISMATCH_SOURCE = """struct Point:
+    x: int
+    y: int
+
+struct Other:
+    a: int
+
+fn main() -> int:
+    o := Other { a = 1 }
+    return match o:
+        Point { x = 1 } => 1,
+        _ => 0
+"""
+
 MATCH_ONE_CASE_SOURCE = """fn pick(n: int) -> int:
     return match n:
         7 => 1,
@@ -1647,6 +1756,58 @@ def test_struct_pattern_ident_last_is_exhaustive():
         )
 
 
+def test_struct_pattern_partial_reordered_and_runtime_string():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_STRUCT_MISC_SOURCE, "match_struct_misc")
+        assert _match_nodes(data) == [], "struct patterns must not become MATCH"
+        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+        _assert_program(
+            tmp,
+            MATCH_STRUCT_MISC_SOURCE,
+            42,
+            opts=(0, 2),
+            name="match_struct_misc",
+        )
+
+
+def test_struct_pattern_generic_scrutinee_rejected():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        needles = [
+            "error[TS03]",
+            "requires a concrete struct type",
+        ]
+        _assert_compile_rejected(
+            tmp, MATCH_STRUCT_GENERIC_SCRUTINEE_SOURCE, "struct_generic", needles
+        )
+        # The interpreter shares the checker. It must reject too, not SIGSEGV on
+        # an instantiation such as One or int.
+        run = _run([COREC, "run", MATCH_STRUCT_GENERIC_SCRUTINEE_SOURCE], cwd=BASE)
+        text = run.stdout + run.stderr
+        assert run.returncode == 1, (
+            f"interpreter accepted a generic struct pattern: rc={run.returncode}: {text}"
+        )
+        for needle in needles:
+            assert needle in text, f"interpreter missing {needle!r}: {text}"
+
+
+def test_struct_pattern_concrete_generic_instance():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(
+            tmp, MATCH_STRUCT_GENERIC_INSTANCE_SOURCE, "match_struct_generic_ok"
+        )
+        assert _match_nodes(data) == [], "struct patterns must not become MATCH"
+        _assert_program(
+            tmp,
+            MATCH_STRUCT_GENERIC_INSTANCE_SOURCE,
+            42,
+            opts=(0, 2),
+            name="match_struct_generic_ok",
+        )
+
+
 def test_struct_pattern_errors_are_hard():
     cases = [
         (
@@ -1668,6 +1829,16 @@ def test_struct_pattern_errors_are_hard():
             "struct_dup_field",
             MATCH_STRUCT_DUP_FIELD_SOURCE,
             ["error[TS04]", "matched more than once"],
+        ),
+        (
+            "struct_generic_field",
+            MATCH_STRUCT_GENERIC_FIELD_SOURCE,
+            ["error[TS03]", "expected string, got int"],
+        ),
+        (
+            "struct_concrete_mismatch",
+            MATCH_STRUCT_CONCRETE_MISMATCH_SOURCE,
+            ["error[TS03]", "does not match scrutinee type"],
         ),
     ]
     with tempfile.TemporaryDirectory() as td:

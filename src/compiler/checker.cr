@@ -1640,6 +1640,46 @@ fn struct_field_index_by_name(si: int, name_ni: int) -> int:
         j = j + 1
     return -1
 
+// Resolve a struct field type for a pattern scrutinee. Direct generic parameters
+// are substituted from a concrete `TYP_GENERIC_APPLY` scrutinee (same rule as
+// EXPR_FIELD); nested generic forms keep the parameter row and are rejected by the
+// caller unless the subpattern is `_`.
+fn structpat_field_ti(si: int, jdi: int, scrut_ti: int) -> int:
+    if si < 0 || jdi < 0:
+        return -1
+    ftn := si_field_type_node(si, jdi)
+    if ftn >= 0 && ast_kind(ftn) == EXPR_IDENT:
+        ft_name := ast_int_val(ftn)
+        if is_struct_generic(si, ft_name) && get_type_kind(scrut_ti) == TYP_GENERIC_APPLY:
+            ga_start := get_type_extra(scrut_ti)
+            ga_count := cell_load(g_gen_apply_data, ga_start * 8)
+            gpi : ., mut = 0
+            loop:
+                if gpi >= si_generic_count(si):
+                    break
+                if si_generic_name(si, gpi) == ft_name:
+                    if gpi < ga_count:
+                        return cell_load(g_gen_apply_data, (ga_start + 1 + gpi) * 8)
+                    break
+                gpi = gpi + 1
+    return res_type_node(ftn)
+
+// A struct row whose field declarations still mention a generic parameter cannot
+// be used by a struct pattern unless the scrutinee supplies concrete arguments.
+// Used by monomorph as a defensive check.
+fn struct_has_generic_field(si: int) -> int:
+    if si < 0:
+        return 1
+    j : ., mut = 0
+    loop:
+        if j >= si_field_count(si):
+            return 0
+        ft := res_type_node(si_field_type_node(si, j))
+        if ti_has_generic_param(ft) != 0:
+            return 1
+        j = j + 1
+    return 0
+
 // ─── Struct match pattern（Task 5b1）───
 // EXPR_STRUCTPAT layout: a = struct name ni, b = first wrapper, c = field count.
 // wrapper.a = subpattern, wrapper.b = field name ni. Validate the pattern against
@@ -1657,6 +1697,19 @@ fn check_struct_pattern(pat: int, scrut_ti: int) -> int:
             "Unknown struct type '" + istr_get(name_ni) + "' in struct pattern",
             ast_line(pat), ast_col(pat))
         return 1
+    // A struct pattern needs a concrete scrutinee shape. An unresolved generic
+    // parameter could later instantiate to a different struct (or a non-struct),
+    // and monomorphization would then emit field loads against the wrong object.
+    // Reject it here; callers must use a concrete struct type or `_`/binding.
+    if ti_has_generic_param(scrut_ti) != 0:
+        check_error(EC_TS_FIELD_TYPE,
+            "Struct pattern '" + istr_get(name_ni) + "' requires a concrete struct type; use a wildcard or binding arm",
+            ast_line(pat), ast_col(pat))
+        return 1
+    // Generic field types cannot be validated/bound soundly unless the scrutinee
+    // supplies concrete generic arguments. The per-field loop below substitutes
+    // direct generic parameters from the scrutinee and rejects remaining generic
+    // forms (except `_`, which performs no comparison or binding).
     // The scrutinee must be this struct whenever its shape is statically known.
     sk := get_type_kind(scrut_ti)
     if sk == TYP_NAMED || sk == TYP_GENERIC_APPLY:
@@ -1710,29 +1763,41 @@ fn check_struct_pattern(pat: int, scrut_ti: int) -> int:
         cell_store(used, jdi * 8, 1)
         if sub >= 0:
             k := ast_kind(sub)
-            if k != EXPR_IDENT && k != EXPR_WILDCARD:
-                if k == EXPR_INT || k == EXPR_BOOL || k == EXPR_CHAR || k == EXPR_STRING:
-                    ft := res_type_node(si_field_type_node(si, jdi))
+            if k == EXPR_IDENT || k == EXPR_WILDCARD || k == EXPR_INT || k == EXPR_BOOL || k == EXPR_CHAR || k == EXPR_STRING:
+                ft := structpat_field_ti(si, jdi, scrut_ti)
+                if ti_has_generic_param(ft) != 0:
+                    if k == EXPR_IDENT:
+                        check_error(EC_TS_FIELD_TYPE,
+                            "Field '" + istr_get(fni) + "' in struct pattern " + istr_get(name_ni) +
+                            " has an unresolved generic type; use a wildcard",
+                            ast_line(sub), ast_col(sub))
+                        bad = 1
+                    else if k != EXPR_WILDCARD:
+                        check_error(EC_TS_FIELD_TYPE,
+                            "Field '" + istr_get(fni) + "' in struct pattern " + istr_get(name_ni) +
+                            " has an unresolved generic type; literal patterns are not supported",
+                            ast_line(sub), ast_col(sub))
+                        bad = 1
+                else if k != EXPR_IDENT && k != EXPR_WILDCARD:
                     st := infer_expr(sub)
-                    if ft >= 0 && ti_has_generic_param(ft) == 0:
-                        verdict := type_compat_strict(st, ft)
-                        if verdict != 1:
-                            diag_type_incompatible(verdict, EC_TS_FIELD_TYPE,
-                                "Field '" + istr_get(fni) + "' in struct pattern " + istr_get(name_ni) +
-                                ": expected " + type_display(ft) + ", got " + type_display(st),
-                                ast_line(sub), ast_col(sub))
-                            bad = 1
-                else:
-                    check_error(EC_TM_NESTED,
-                        "Nested match patterns are not supported yet",
-                        ast_line(sub), ast_col(sub))
-                    bad = 1
+                    verdict := type_compat_strict(st, ft)
+                    if verdict != 1:
+                        diag_type_incompatible(verdict, EC_TS_FIELD_TYPE,
+                            "Field '" + istr_get(fni) + "' in struct pattern " + istr_get(name_ni) +
+                            ": expected " + type_display(ft) + ", got " + type_display(st),
+                            ast_line(sub), ast_col(sub))
+                        bad = 1
+            else:
+                check_error(EC_TM_NESTED,
+                    "Nested match patterns are not supported yet",
+                    ast_line(sub), ast_col(sub))
+                bad = 1
         i = i + 1
     return bad
 
 // Bind the ident subpatterns of a validated struct pattern. Each binding gets
 // the declared type of its field. `_` and literal subpatterns bind nothing.
-fn bind_struct_pattern_idents(pat: int):
+fn bind_struct_pattern_idents(pat: int, scrut_ti: int):
     if pat < 0:
         return
     name_ni := ast_a(pat)
@@ -1754,7 +1819,7 @@ fn bind_struct_pattern_idents(pat: int):
                     jdi := struct_field_index_by_name(si, ast_b(w))
                     ft : ., mut = TI_INT
                     if jdi >= 0:
-                        ft = res_type_node(si_field_type_node(si, jdi))
+                        ft = structpat_field_ti(si, jdi, scrut_ti)
                     def_sym(nn, SYM_LOCAL, ft, -1)
         i = i + 1
 
@@ -3612,7 +3677,7 @@ fn infer_expr(node: int) -> int:
                 if ast_kind(arm_pat) == EXPR_STRUCTPAT:
                     // Struct pattern field bindings: each ident subpattern gets the
                     // declared field type (Task 5b1).
-                    bind_struct_pattern_idents(arm_pat)
+                    bind_struct_pattern_idents(arm_pat, match_ti)
                 if ast_kind(arm_pat) == EXPR_IDENT:
                     // 绑定臂的值就是 scrutinee：类型取 scrutinee 类型（旧实现
                     // 一律 TI_INT，字符串/char/bool  scrutinee 会错型）。

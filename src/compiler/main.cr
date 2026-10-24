@@ -487,6 +487,7 @@ fn corec_main() -> int:
         g_cir_skip_journal = 1
 
     // Generate IR for each function, checking cache first
+    ir_diag_base := g_diag_count
     fi : ., mut = 0
     loop:
         if fi >= g_func_count:
@@ -575,6 +576,14 @@ fn corec_main() -> int:
                     save_cir_cache(cache_path, fi, ir_func_idx)
 
         fi = fi + 1
+
+    // IR generation may add diagnostics (for example, monomorph instance
+    // revalidation). Previously they were only printed by the later
+    // pointer-analysis gate, which takes its base afterwards and therefore could
+    // not see them. Fail closed on any new IR-generation diagnostic.
+    if g_diag_count > ir_diag_base:
+        print_diagnostics()
+        return 1
 
     // Finalize purity and the state chain after IR generation and before any chain
     // consumer. True purity needs the whole program, and chain construction depends

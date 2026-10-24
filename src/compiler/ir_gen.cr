@@ -892,8 +892,8 @@ fn find_global(name_idx: int) -> int:
 // bool/char keep their declared form so literal comparisons use the same
 // representation as the existing bool/char arms, and other fields use the exact
 // integer slot form (TI_INT).
-fn structpat_field_load_ti(si: int, jdi: int) -> int:
-    ft := struct_row_field_ti(si, jdi)
+fn structpat_field_load_ti(si: int, jdi: int, scrut_ti: int) -> int:
+    ft := structpat_field_ti(si, jdi, scrut_ti)
     if ft == TI_STR:
         return TI_STR
     if ft == TI_DEX:
@@ -957,7 +957,7 @@ fn gen_structpat_field_test(sub: int, fv: int, fall: int) -> int:
 // Bind ident subpatterns for a struct pattern in the arm scope. Each binding
 // reads its field again and gets the declared field type. Literal and `_`
 // subpatterns bind nothing.
-fn gen_structpat_binds(pat: int, match_val: int):
+fn gen_structpat_binds(pat: int, match_val: int, scrut_ti: int):
     if pat < 0 || match_val < 0:
         return
     si := find_struct_by_name(ast_a(pat))
@@ -978,7 +978,7 @@ fn gen_structpat_binds(pat: int, match_val: int):
                     jdi := struct_field_index_by_name(si, ast_b(w))
                     if jdi >= 0:
                         fv := new_ir_var("fld", TI_INT)
-                        irv_set_type(fv, structpat_field_load_ti(si, jdi))
+                        irv_set_type(fv, structpat_field_load_ti(si, jdi, scrut_ti))
                         emit(IR_LOAD_FIELD, fv, match_val, 0, jdi, 0)
                         bind_local(nn, fv)
         i = i + 1
@@ -3083,6 +3083,7 @@ fn gen_expr(node: int) -> int:
                 si := find_struct_by_name(ast_a(arm_pat))
                 sc := ast_c(arm_pat)
                 w0 := ast_b(arm_pat)
+                scrut_ti := irv_type(match_val)
                 can_match : ., mut = 1
                 if si < 0 || w0 < 0:
                     can_match = 0
@@ -3108,7 +3109,7 @@ fn gen_expr(node: int) -> int:
                         sk := ast_kind(sub)
                         if sk != EXPR_IDENT && sk != EXPR_WILDCARD:
                             fv := new_ir_var("fld", TI_INT)
-                            ft := structpat_field_load_ti(si, jdi)
+                            ft := structpat_field_load_ti(si, jdi, scrut_ti)
                             irv_set_type(fv, ft)
                             emit(IR_LOAD_FIELD, fv, match_val, 0, jdi, 0)
                             if gen_structpat_field_test(sub, fv, fall_lbl) < 0:
@@ -3181,7 +3182,7 @@ fn gen_expr(node: int) -> int:
                     ccr_case_set_target(case_base + ci_arm, body_nod)
             push_ir_scope()
             if pat_kind == EXPR_STRUCTPAT:
-                gen_structpat_binds(arm_pat, match_val)
+                gen_structpat_binds(arm_pat, match_val, irv_type(match_val))
             if pat_kind == EXPR_ENUMPAT:
                 sub_count := ast_c(arm_pat)
                 fi : ., mut = 0
