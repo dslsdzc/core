@@ -122,10 +122,8 @@ class TokenType(Enum):
 #   去（bootstrap − v4，7）：`None` `Self` `Some` `ensures` `move` `requires` `result`
 #   加（v4 − bootstrap，6）：`catch` `dyn` `fail` `never` `none` `spec`
 # ⚠ 本表必须与自源 `src/compiler/lexer.cr` 的 `lookup_keyword` **逐元素相同**
-#   （判据 J-T1-2）。自源侧 36 → 39 属 **T5**，本步（T1/T2）只改本侧
-#   ⇒ **现阶段两侧预期仍不一致**，差集 = 本侧独有 6（`catch` `dyn` `fail` `never` `none` `spec`）
-#   ＋ 自源独有 3（`None` `Some` `move`）；T5 落地后应双双为空。
-#   **不得把这条预期红说成绿** —— 实报走 `python3 tools/v4_frontend_probe.py keywords`。
+#   （判据 J-T1-2）。2026-10-24 实测两侧均为 39，差集为空；
+#   实报走 `python3 tools/v4_frontend_probe.py keywords`。
 # 计数：40 − 7 + 6 = 39。
 KEYWORDS = {
     "fn": TokenType.FN,

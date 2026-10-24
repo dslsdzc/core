@@ -255,7 +255,6 @@ src/compiler/     （共 38 个 .cr；2026-09-16 文档审计修订：原清单�
 ├── interp.cr       IR 解释器（用于 `run` 命令）（corec）
 ├── ir_gen.cr       AST 到 IR 指令生成（corec）
 ├── lexer.cr        词法分析器（使用整数访问字符，不做字符串分配）（corec+corelsp）
-├── linker.cr       空文件（0 字节、零引用；2026-09-16 审计登记，建议清理或填实）
 ├── main.cr         CLI 和管线编排（corec 二进制）（corec）
 ├── module.cr       import 解析、文件 ID 管理（corec+corelsp）
 ├── monomorph.cr    泛型单态化：实例缓存和 AST 特化（corec）

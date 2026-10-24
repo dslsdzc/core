@@ -3771,8 +3771,6 @@ fn gen_expr(node: int) -> int:
         return -1
     if ast_kind(node) == EXPR_ENUMPAT:
         return -1
-    if ast_kind(node) == EXPR_MOVE:
-        return gen_expr(ast_a(node))
     if ast_kind(node) == EXPR_UNSAFE:
         sg_alloc_push(SG_UNSAFE)
         arena_var := new_ir_var("_arena", TI_INT)
@@ -4564,7 +4562,7 @@ fn ast_patch_node(node: int, subst_from: string, subst_to: string):
                     ast_patch_node(vn6, subst_from, subst_to)
                 an6 = an6 + 1
             ai6 = ai6 + 1
-    else if k == EXPR_FIELD || k == EXPR_INDEX || k == EXPR_UNARY || k == EXPR_RETURN || k == EXPR_TRY || k == EXPR_MOVE:
+    else if k == EXPR_FIELD || k == EXPR_INDEX || k == EXPR_UNARY || k == EXPR_RETURN || k == EXPR_TRY:
         if ast_a(node) >= 0:
             ast_patch_node(ast_a(node), subst_from, subst_to)
 

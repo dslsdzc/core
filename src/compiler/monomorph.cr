@@ -681,11 +681,6 @@ fn gen_clone_tree(node: int) -> int:
         n := ast_alloc(k, a2, b, c, iv, tv, d, ln, cl)
         gen_dedup_add(node, n)
         return n
-    if k == EXPR_MOVE:
-        a2 := gen_clone_tree(a)
-        n := ast_alloc(k, a2, b, c, iv, tv, d, ln, cl)
-        gen_dedup_add(node, n)
-        return n
     if k == EXPR_UNSAFE:
         a2 := gen_clone_tree(a)
         n := ast_alloc(k, a2, b, c, iv, tv, d, ln, cl)

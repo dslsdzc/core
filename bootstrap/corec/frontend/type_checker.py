@@ -751,7 +751,7 @@ class TypeChecker:
     def _compat(self, t1, t2) -> bool:
         """分支合一/返回位相容判定（v4 裁定 2026-10-11）：
         两侧类型相同 **或** 任一侧为 `never` ⇒ 相容（`never` 作子类型）。
-        依据 = docs/core-language-syntax_v4.md §3.1：`never`（发散类型）是基本类型，
+        依据 = docs/developer/syntax.md §3.1：`never`（发散类型）是基本类型，
         且以发散语句（return/break/continue）收尾的路径其类型即 `never`。
         """
         if self._is_never(t1) or self._is_never(t2):

@@ -376,9 +376,8 @@ fn parse_unary() -> int:
         advance_tok()
         op := parse_unary()
         return alloc_node(EXPR_UNARY, op, 0, UOP_NOT, 0, 0, 0, tok_ln(t), tok_cl(t))
-    // `move` is no longer a keyword. The lexer does not emit T_MOVE, so this parser
-    // has no EXPR_MOVE branch. `move x` parses as an ordinary identifier and then
-    // fails with a diagnostic.
+    // `move` is an ordinary identifier. `move x` fails name resolution. The
+    // keyword and its AST node were removed on 2026-10-24.
     if tok_k(t) == T_STAR:
         advance_tok()
         op := parse_unary()

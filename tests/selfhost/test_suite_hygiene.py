@@ -14,9 +14,9 @@
   H4 **skip 面静态钉**：解析 `run_suite()` 的 `case` 块 ⇒ 跳过模式**必须是全路径锚定**
      （含 `*/` 前缀；2026-09-18 本批实测坑：写成裸文件名 `at_test_mini4.cr` 不匹配 `tests/suite/…`
      ⇒ 负例漏进正例循环 ⇒ `set -e` 下整腿中止）；且跳过集合 == {`at_test_mini4.cr`,`at_test_mini6.cr`}。
-  H5 **0 字节档集合钉**：`tests/suite` 里 0 字节的 `.cr` 必须**恰好**是
-     {`test_control_flow.cr`, `test_generics.cr`}（`run_suite` 以 `[ ! -s ]` 跳过；新增空档 ⇒ 红，
-     防「空文件静默混入正例循环又被跳过」）。该两档的**处置（删/写）待裁**，见 TODO #2026-09-18-8。
+  H5 **0 字节档集合钉**：`tests/suite` 里不得出现 0 字节的 `.cr`（`run_suite` 以 `[ ! -s ]` 跳过；
+     新增空档 ⇒ 红，防「空文件静默混入正例循环又被跳过」）。2026-10-24 删除原两档空 fixture
+     （`test_control_flow.cr`、`test_generics.cr`），见 TODO #2026-09-18-8。
 
 挂点：`selfhost-tests`（`build_selfhost` 之后 ⇒ `build/corec` 必在）。
 """
@@ -35,7 +35,7 @@ RUN_SH = os.path.join(BASE, "src", "ci", "run.sh")
 POS = ("at_test_mini.cr", "at_test_mini9.cr")          # H1：本批修好的正例
 NEG = ("at_test_mini4.cr", "at_test_mini6.cr")        # H2：负例（P21）
 CONTROL = "at_test.cr"                                # H3：正控
-EMPTY = {"test_control_flow.cr", "test_generics.cr"}  # H5：0 字节档（待裁，见 TODO）
+EMPTY = set()  # H5：空档必须为空集（2026-10-24 删除原两档）
 
 
 def _env():
@@ -150,7 +150,7 @@ def h5_empty_set():
     empties = {n for n in os.listdir(SUITE)
                if n.endswith(".cr") and os.path.getsize(os.path.join(SUITE, n)) == 0}
     if empties != EMPTY:
-        return [f"H5 红：0 字节档集合 = {sorted(empties)}（应恰为 {sorted(EMPTY)}；"
+        return [f"H5 红：0 字节档集合 = {sorted(empties)}（应为空；"
                 f"新增空档须同批处置并更新本判据 + TODO #2026-09-18-8）"]
     return []
 
@@ -176,7 +176,7 @@ def main():
     print(f"[PASS] H2 两档负例 check rc≠0 + error[P21] + 零产物（{', '.join(NEG)}）")
     print(f"[PASS] H3 正控 {CONTROL} rc=0 且无 P21（断言有辨别力）")
     print("[PASS] H4 run_suite 跳过集合 = 两档负例 且模式全路径锚定")
-    print(f"[PASS] H5 0 字节档集合 == {sorted(EMPTY)}（待裁，见 TODO #2026-09-18-8）")
+    print("[PASS] H5 0 字节档集合为空（2026-10-24 起）")
     print(f"5/5 通过（H1–H5）")
     return 0
 

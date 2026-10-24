@@ -160,6 +160,7 @@ case "$CI_JOB_NAME" in
     # H4 run_suite 跳过集合 == 两档负例且模式**全路径锚定** · H5 0 字节档集合钉；**逐档 clean-cache**
     # （理由 = TODO #2026-09-18-9 的暖态重放缺陷 ⇒ 否则结论依赖上一轮缓存状态）。
     python3 tests/selfhost/test_suite_hygiene.py
+    python3 tests/selfhost/test_move_keyword_removed.py  # TODO #2026-09-17-18：move 关键字退役（M1/M2 负控 + M3 名字域 + M4 静态清点）
     python3 tests/selfhost/test_interp_parity.py  # TODO #2026-09-10-7 解释器 callee 内联 ≡ 主循环 ≡ ELF
     python3 tests/selfhost/test_cache_identity.py # TODO #2026-09-10-1 cir 缓存编译器身份（跨重建失效）
     python3 tests/selfhost/test_cir_warm_path.py  # R2 P5 Task 1：.cir 暖态 SIGSEGV 根因修复回归——冷/暖 rc 双 0 + ELF 逐字节同 + .ccr 段级契约（STR 冷≠暖为预存口径）+ 暖态真命中（条目 size/mtime 不变）+ 变体（多串/0 串/大串/多函数）+ 可选面零条目 + **累计装载复现例**（400 条目补零至 3MB ⇒ Σ=1.2GB > 1GB 堆，暖态 rc=0 + 峰值 RSS < 512MB；修复前 rc=139 红态实测）= 19 例（COREC_WARM_SELF=1 另开 2 例自源语料，~3 分钟）

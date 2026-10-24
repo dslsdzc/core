@@ -608,7 +608,7 @@ fn loop_body_has_break(node: int) -> int:
         if ast_a(node) >= 0 && ast_a(node) != node:
             return loop_body_has_break(ast_a(node))
         return 0
-    if k == EXPR_STMT || k == EXPR_UNSAFE || k == EXPR_RETURN || k == EXPR_YIELD || k == EXPR_AWAIT || k == EXPR_MOVE || k == EXPR_TRY || k == EXPR_UNARY || k == EXPR_FIELD || k == EXPR_OPTIONAL || k == EXPR_REFTYPE || k == EXPR_PTRTYPE:
+    if k == EXPR_STMT || k == EXPR_UNSAFE || k == EXPR_RETURN || k == EXPR_YIELD || k == EXPR_AWAIT || k == EXPR_TRY || k == EXPR_UNARY || k == EXPR_FIELD || k == EXPR_OPTIONAL || k == EXPR_REFTYPE || k == EXPR_PTRTYPE:
         return loop_body_has_break(ast_a(node))
     if k == EXPR_INT || k == EXPR_DEX || k == EXPR_BOOL || k == EXPR_STRING || k == EXPR_IDENT || k == EXPR_CHAR || k == EXPR_WILDCARD || k == EXPR_CONTINUE:
         return 0
@@ -4373,8 +4373,6 @@ fn infer_expr(node: int) -> int:
         return TI_NEVER   // 同上
     if ast_kind(node) == EXPR_WILDCARD:
         return TI_UNIT
-    if ast_kind(node) == EXPR_MOVE:
-        return infer_expr(ast_a(node))
     if ast_kind(node) == EXPR_UNSAFE:
         push_unsafe_scope()
         ret := infer_expr(ast_a(node))

@@ -232,14 +232,6 @@ TF01 已从豁免表移除。原因是 `alloc: () -> string` 模型与三处 han
 | B010 | `Reference to local `{name}` escapes the function` | `fn f() -> &int { x := 42; return &x; }` |
 | B011 | `Borrowed value does not live long enough` | 引用比原对象存在时间更长 |
 
-### Move
-
-| 码 | 消息模板 | 场景 |
-|----|---------|------|
-| B020 | `Use of moved value `{name}`` | `move y = x; print(x);` |
-| B021 | `Cannot move `{name}` — was already moved` | `move a = x; move b = x;` |
-| B022 | `Cannot move `{name}` while borrowed` | `r := &x; move y = x;` |
-
 ## R0xx：运行时检查
 
 | 码 | 检查点 | 消息模板 |

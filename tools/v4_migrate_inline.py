@@ -232,7 +232,7 @@ def struct_colon_to_eq(src):
 
 
 def none_rename(src):
-    """v4 关键字拼写：`None` ⇒ `none`（`docs/core-language-syntax_v4.md:38` 关键字表含
+    """v4 关键字拼写：`None` ⇒ `none`（`docs/developer/syntax.md` 关键字表含
     `none`、无 `None`；实测 `x : int? = None` ⇒ `error[N01] Undefined name 'None'`）。
 
     主路径由 `v4_migrate._t6_extra_ops` 的 E5 负责；此处的副本只服务**短路路径**

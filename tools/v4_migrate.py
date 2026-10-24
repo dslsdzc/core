@@ -4,7 +4,7 @@
 出处（规格）：
   - docs/superpowers/plans/2026-09-24-v4-syntax-migration.md §六（T4）与 §二（判据纪律）
   - docs/maintainer/design/v4-layout-spec.md（T0 布局规格：空行/注释行/行尾注释的 anchor 规则）
-  - docs/core-language-syntax_v4.md（目标语法）
+  - docs/developer/syntax.md（目标语法）
 
 用途：把 v3 写法（`{}` 块 + `;` 分隔）**机械改写成** v4 写法（`:` 结尾 + layout 缩进 + 换行分隔）。
 形状只有两类（计划 §6.1）：`{}` → `:` + 缩进、`;` → 换行。**不做任何语义改动**。
@@ -308,7 +308,7 @@ def _t6_extra_ops(toks, brace_kind, brace_match, src, filename, recs, unresolved
                 recs.setdefault('struct_lit_eq', []).append('%s:%d' % (filename, tk.line))
 
     # ── E5：`None` → `none`（v4 关键字拼写；**本批唯一的非形状改写**）──
-    # 依据：v4 关键字表（docs/core-language-syntax_v4.md:38）含 `none`，无 `None`；
+    # 依据：v4 关键字表（docs/developer/syntax.md）含 `none`，无 `None`；
     # 实测 `z : int? = None` ⇒ `error[N01] Undefined name 'None'`，`= none` ⇒ rc=0。
     # T4 工具头注 R3 明写「`none` ↔ `None` 的关键字化不参与本变换」——那是因为 `src/**`
     # **零处**使用（实核：`grep -n '\bNone\b' src/**/*.cr` 只命中注释），T4 面从不需要它。

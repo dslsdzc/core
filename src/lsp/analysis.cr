@@ -807,11 +807,6 @@ fn analysis_kw_items(prefix: string) -> string:
             out = out + ","
         out = out + analysis_citem("fileid", 14)
         first = 0
-    if analysis_has_prefix("move", prefix) != 0:
-        if first == 0:
-            out = out + ","
-        out = out + analysis_citem("move", 14)
-        first = 0
     if analysis_has_prefix("in", prefix) != 0:
         if first == 0:
             out = out + ","
