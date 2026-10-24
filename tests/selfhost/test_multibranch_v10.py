@@ -25,6 +25,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -215,6 +216,175 @@ def _assert_soft_diagnostic(tmp, source, name, needles):
         assert needle in text, f"{name}: missing {needle!r}: {text}"
     assert out.exists(), f"{name}: soft diagnostic produced no artifact"
     return text
+
+
+# ---------------------------------------------------------------------------
+# .cir snapshot fixtures (v24 layout)
+# ---------------------------------------------------------------------------
+#
+# The cache lives under <cwd>/.core/cache/cir and is keyed by source path and
+# function name. These helpers parse the v24 per-function snapshot independently
+# so the tests can prove the MATCH CASE section round-trips, and can tamper with
+# exactly that section.
+
+CIR_VERSION = 24
+CIR_CASE_ROW = 24
+
+
+def _cache_dir(tmp):
+    return tmp / ".core" / "cache" / "cir"
+
+
+def _clean_cache(tmp):
+    import shutil
+
+    shutil.rmtree(_cache_dir(tmp), ignore_errors=True)
+
+
+def _cache_entry(tmp, fn):
+    entries = [
+        p
+        for p in sorted(_cache_dir(tmp).glob("*.cir"))
+        if p.name.endswith(f"::{fn}.cir")
+    ]
+    assert len(entries) == 1, f"{fn}: expected one cache entry, got {entries}"
+    return entries[0]
+
+
+def _entry_stamp(path):
+    st = path.stat()
+    return (st.st_size, st.st_mtime_ns)
+
+
+def _cir_snapshot(data):
+    """Parse a v24 snapshot. Returns section offsets and CASE rows."""
+    if len(data) < 56:
+        raise AssertionError(f"snapshot too short: {len(data)}B")
+    magic, ver, cid, fp, sig, name_len = struct.unpack_from("<qqqqqq", data, 0)
+    assert ver == CIR_VERSION, f"snapshot version {ver} != {CIR_VERSION}"
+    off = 48
+    name = data[off : off + name_len]
+    off += name_len
+
+    def take_count(record_size):
+        nonlocal off
+        count_at = off
+        count = struct.unpack_from("<q", data, off)[0]
+        off += 8
+        body = off
+        off += count * record_size
+        assert off <= len(data), "snapshot section overruns file"
+        return count_at, count, body
+
+    var_count_at, var_count, var_p = take_count(24)
+    node_count_at, node_count, node_p = take_count(64)
+    sg_count_at, sg_count, sg_p = take_count(48)
+    edge_count_at, edge_count, edge_p = take_count(24)
+    instr_count_at, instr_count, instr_p = take_count(48)
+
+    case_p = off
+    match_count = struct.unpack_from("<q", data, off)[0]
+    off += 8
+    matches = []
+    for _ in range(match_count):
+        count_off = off
+        count = struct.unpack_from("<q", data, off)[0]
+        off += 8
+        rows_off = off
+        rows = []
+        for _row in range(count):
+            value, kind, str_index, target_rel, case_flags = struct.unpack_from(
+                "<qiiiI", data, off
+            )
+            rows.append(
+                {
+                    "offset": off,
+                    "value": value,
+                    "kind": kind,
+                    "str_index": str_index,
+                    "target_rel": target_rel,
+                    "flags": case_flags,
+                }
+            )
+            off += CIR_CASE_ROW
+        matches.append({"count_offset": count_off, "rows_offset": rows_off,
+                        "count": count, "rows": rows})
+    assert off <= len(data), "MATCH CASE section overruns file"
+
+    str_count_at = off
+    str_count = struct.unpack_from("<q", data, off)[0]
+    off += 8
+    str_p = off
+    for _ in range(str_count):
+        slen = struct.unpack_from("<q", data, off)[0]
+        off += 8 + slen
+        assert off <= len(data), "string section overruns file"
+
+    journal_p = off
+    base = struct.unpack_from("<q", data, off)[0]
+    jcount = struct.unpack_from("<q", data, off + 8)[0]
+    off += 16
+    for _ in range(jcount):
+        jlen = struct.unpack_from("<q", data, off)[0]
+        off += 8 + jlen
+        assert off <= len(data), "journal section overruns file"
+    trailer_p = off
+    var_start, node_start = struct.unpack_from("<qq", data, off)
+    return {
+        "version": ver,
+        "fp": fp,
+        "sig": sig,
+        "name": name.decode("utf-8", "replace"),
+        "fp_offset": 24,
+        "var_count_at": var_count_at,
+        "var_count": var_count,
+        "node_count_at": node_count_at,
+        "node_count": node_count,
+        "node_p": node_p,
+        "sg_count": sg_count,
+        "edge_count": edge_count,
+        "instr_count_at": instr_count_at,
+        "instr_count": instr_count,
+        "instr_p": instr_p,
+        "case_p": case_p,
+        "match_count": match_count,
+        "matches": matches,
+        "str_p": str_p,
+        "journal_p": journal_p,
+        "trailer_p": trailer_p,
+        "var_start": var_start,
+        "node_start": node_start,
+    }
+
+
+def _write_source(tmp, source, name):
+    src = tmp / f"{name}.cr"
+    src.write_text(source, encoding="utf-8")
+    return src
+
+
+def _build_source(tmp, src, out_name, cwd):
+    """Build a static ELF + .ccr from an existing source path."""
+    elf = tmp / f"{out_name}.elf"
+    r = _run([COREC, "build", src, "-o", elf, "--static"], cwd=cwd)
+    assert r.returncode == 0, f"{out_name}: build failed: {r.stdout}\n{r.stderr}"
+    ccr = Path(str(elf) + ".ccr")
+    assert ccr.exists(), f"{out_name}: build produced no .ccr"
+    return elf, ccr
+
+
+def _build_static(tmp, source, name, cwd):
+    """Write source under tmp and build a static ELF + .ccr. Returns (src, elf, ccr)."""
+    src = _write_source(tmp, source, name)
+    elf, ccr = _build_source(tmp, src, name, cwd)
+    return src, elf, ccr
+
+
+def _run_elf(elf):
+    run = subprocess.run(
+        [str(elf)], capture_output=True, text=True, timeout=30, cwd=str(BASE)
+    )
+    return run.returncode
 
 
 # ---------------------------------------------------------------------------
@@ -2393,16 +2563,278 @@ def test_case_ranges_are_disjoint_across_functions():
         _assert_program(tmp, MATCH_TWO_FUNCS_SOURCE, 42)
 
 
-def test_cir_cache_does_not_restore_match_without_cases():
-    """A warm build must rebuild a MATCH function, not reuse a case-less .cir."""
+MATCH_NESTED_CASE_SOURCE = """fn pick(n: int, m: int) -> int:
+    return match n:
+        1 => match m:
+            10 => 100,
+            _ => 101,
+        2 => 2,
+        _ => 3
+
+fn main() -> int:
+    if pick(1, 10) != 100:
+        return 1
+    if pick(1, 7) != 101:
+        return 2
+    if pick(2, 0) != 2:
+        return 3
+    if pick(9, 0) != 3:
+        return 4
+    return 42
+"""
+
+# Same function body on both sides; only the earlier pad function changes. The
+# extra `x = x` adds one node but no variable, so pick_b's var baseline is
+# unchanged while its node/instruction baseline shifts by one.
+SHIFT_PAD_V1 = """fn pad(b: bool) -> int:
+    x := 1
+    x = x
+    if b:
+        return 1
+    return 0
+"""
+
+SHIFT_PAD_V2 = """fn pad(b: bool) -> int:
+    x := 1
+    x = x
+    x = x
+    if b:
+        return 1
+    return 0
+"""
+
+SHIFT_PICK = """fn pick_b(n: int) -> int:
+    return match n:
+        7 => 70,
+        8 => 80,
+        9 => 90,
+        _ => 99
+"""
+
+SHIFT_MAIN = """fn main() -> int:
+    if pick_b(9) != 90:
+        return 2
+    return 42
+"""
+
+
+def _assert_snapshot_case_section(snap, data, counts):
+    """Validate one snapshot's CASE section and its target labels."""
+    assert snap["match_count"] == len(counts), snap["match_count"]
+    for match, count in zip(snap["matches"], counts):
+        assert match["count"] == count, (match["count"], count)
+        for row in match["rows"]:
+            rel = row["target_rel"]
+            assert 0 <= rel < snap["node_count"], (rel, snap["node_count"])
+            op = struct.unpack_from("<q", data, snap["node_p"] + rel * 64)[0]
+            assert op == IR_LABEL, f"CASE target rel {rel} is op {op}, expected IR_LABEL"
+
+
+def _assert_match_cold_warm(tmp, source, base, expected, fns):
+    """Cold and warm static builds must match exactly and every entry must hit.
+
+    `fns` maps function name -> expected per-MATCH case counts.
+    """
+    _clean_cache(tmp)
+    src = _write_source(tmp, source, base)
+    cold_elf, cold_ccr = _build_source(tmp, src, "cold", tmp)
+    entries = {fn: _cache_entry(tmp, fn) for fn in fns}
+    before = {fn: entry.read_bytes() for fn, entry in entries.items()}
+    stamps = {fn: _entry_stamp(entry) for fn, entry in entries.items()}
+    snaps = {}
+    for fn, counts in fns.items():
+        snaps[fn] = _cir_snapshot(before[fn])
+        assert snaps[fn]["name"] == fn, (snaps[fn]["name"], fn)
+        _assert_snapshot_case_section(snaps[fn], before[fn], counts)
+    case_rows = _parse_case(segment(cold_ccr.read_bytes(), CASE_TAG))
+    assert len(case_rows) == sum(sum(c) for c in fns.values()), len(case_rows)
+    _assert_targets_are_labels(cold_ccr.read_bytes(), case_rows)
+
+    time.sleep(0.02)
+    warm_elf, warm_ccr = _build_source(tmp, src, "warm", tmp)
+    for fn in fns:
+        assert _entry_stamp(entries[fn]) == stamps[fn], (
+            f"{fn}: warm build did not hit the cache"
+        )
+        assert entries[fn].read_bytes() == before[fn], f"{fn}: hit rewrote the entry"
+    assert cold_elf.read_bytes() == warm_elf.read_bytes(), "cold/warm ELF differ"
+    assert cold_ccr.read_bytes() == warm_ccr.read_bytes(), "cold/warm .ccr differ"
+    assert _run_elf(warm_elf) == expected, "warm ELF returned the wrong status"
+    return snaps
+
+
+def test_cir_cache_restores_match_cases_cold_warm():
+    """MATCH functions are saved, hit on the warm path, and rebuild byte-identically."""
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        first = _build_ccr(tmp, MATCH_INT_SOURCE, "warm", cwd=tmp)
-        second = _build_ccr(tmp, MATCH_INT_SOURCE, "warm", cwd=tmp)
-        assert segment(first, CASE_TAG) == segment(second, CASE_TAG)
-        rows = _parse_case(segment(second, CASE_TAG))
+        snaps = _assert_match_cold_warm(
+            tmp, MATCH_INT_SOURCE, "match_cache", 42, {"pick": [5]}
+        )
+        # The old rejection path would never save this entry at all.
+        assert snaps["pick"]["instr_count"] > 0
+
+
+def test_cir_cache_two_match_functions_disjoint_ranges():
+    """Two cached MATCH functions keep disjoint CASE ranges after restore."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        snaps = _assert_match_cold_warm(
+            tmp,
+            MATCH_TWO_FUNCS_SOURCE,
+            "match_two_cache",
+            42,
+            {"pick_a": [3], "pick_b": [4]},
+        )
+        rows = _parse_case(segment(Path(str(tmp / "warm.elf") + ".ccr").read_bytes(), CASE_TAG))
+        assert len(rows) == 7, rows
+        nodes = _nod_records(Path(str(tmp / "warm.elf") + ".ccr").read_bytes())
+        match_nodes = [i for i, rec in enumerate(nodes) if rec[0] == IR_MATCH]
+        assert len(match_nodes) == 2, match_nodes
+        ranges = sorted(
+            (nodes[m][3], nodes[m][3] + nodes[m][4]) for m in match_nodes
+        )
+        assert ranges[0] == (0, 3), ranges
+        assert ranges[1] == (3, 7), ranges
+        assert snaps["pick_a"]["match_count"] == 1
+        assert snaps["pick_b"]["match_count"] == 1
+
+
+def test_cir_cache_nested_match_case_order():
+    """Nested matches append their range after the enclosing one on both paths."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        snaps = _assert_match_cold_warm(
+            tmp,
+            MATCH_NESTED_CASE_SOURCE,
+            "match_nested_cache",
+            42,
+            {"pick": [3, 2]},
+        )
+        nested = snaps["pick"]["matches"]
+        assert [m["count"] for m in nested] == [3, 2]
+        rows = _parse_case(segment(Path(str(tmp / "warm.elf") + ".ccr").read_bytes(), CASE_TAG))
         assert len(rows) == 5, rows
-        assert _single_match(second)[4] == 5
+
+
+def test_cir_cache_warm_restore_remaps_shifted_case_targets():
+    """A hit with a shifted node/instruction baseline rebases CASE targets.
+
+    The fingerprints hash the whole source, so a normal warm build cannot shift
+    a cached function's baseline. This fixture constructs the shift explicitly:
+    the pad function gains one node (no variables), and the cached pick_b/main
+    v1 snapshots are re-labelled with their v2 fingerprints. The loader must
+    therefore rebase every CASE target from the writer's node_start to the
+    current node base (the baseline shifts by one).
+    """
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+
+        # Baseline: normal cold v2 build in its own directory.
+        base_dir = root / "base"
+        base_dir.mkdir()
+        v2_source = SHIFT_PAD_V2 + "\n" + SHIFT_PICK + "\n" + SHIFT_MAIN
+        base_src = _write_source(base_dir, v2_source, "shift")
+        base_elf, base_ccr = _build_source(base_dir, base_src, "baseline", base_dir)
+        base_pick = _cache_entry(base_dir, "pick_b")
+        base_snap = _cir_snapshot(base_pick.read_bytes())
+        base_main = _cache_entry(base_dir, "main")
+        base_main_snap = _cir_snapshot(base_main.read_bytes())
+
+        # v1: smaller pad, snapshot pick_b at node_start 15.
+        work = root / "work"
+        work.mkdir()
+        v1_source = SHIFT_PAD_V1 + "\n" + SHIFT_PICK + "\n" + SHIFT_MAIN
+        work_src = _write_source(work, v1_source, "shift")
+        _build_source(work, work_src, "v1", work)
+        v1_pick = _cache_entry(work, "pick_b")
+        v1_bytes = bytearray(v1_pick.read_bytes())
+        v1_snap = _cir_snapshot(bytes(v1_bytes))
+        assert v1_snap["node_start"] + 1 == base_snap["node_start"], (
+            v1_snap["node_start"],
+            base_snap["node_start"],
+        )
+        assert v1_snap["var_start"] == base_snap["var_start"], (
+            v1_snap["var_start"],
+            base_snap["var_start"],
+        )
+        v1_main = _cache_entry(work, "main")
+        v1_main_bytes = bytearray(v1_main.read_bytes())
+        v1_main_snap = _cir_snapshot(bytes(v1_main_bytes))
+        assert v1_main_snap["node_start"] + 1 == base_main_snap["node_start"]
+        assert v1_main_snap["var_start"] == base_main_snap["var_start"]
+
+        # Rewrite v2's source and seed pick_b/main with the shifted v1 snapshots
+        # plus the v2 fingerprints. pad misses and is regenerated. Keeping main a
+        # hit isolates the CASE remap from the separate cache-hit label-counter
+        # issue (a regenerated function after a label-using hit starts at 1).
+        work_src.write_text(v2_source, encoding="utf-8")
+        for entry, old_snap, new_snap in (
+            (v1_pick, v1_snap, base_snap),
+            (v1_main, v1_main_snap, base_main_snap),
+        ):
+            data = bytearray(entry.read_bytes())
+            struct.pack_into("<q", data, old_snap["fp_offset"], new_snap["fp"])
+            struct.pack_into("<q", data, old_snap["fp_offset"] + 8, new_snap["sig"])
+            entry.write_bytes(bytes(data))
+        stamps = {p.name: _entry_stamp(p) for p in (v1_pick, v1_main)}
+        time.sleep(0.02)
+        warm_elf, warm_ccr = _build_source(work, work_src, "warm", work)
+        for entry in (v1_pick, v1_main):
+            assert _entry_stamp(entry) == stamps[entry.name], (
+                f"{entry.name}: shifted snapshot did not hit"
+            )
+        assert warm_elf.read_bytes() == base_elf.read_bytes(), (
+            "shifted warm ELF differs from cold"
+        )
+        assert warm_ccr.read_bytes() == base_ccr.read_bytes(), (
+            "shifted warm .ccr differs from cold"
+        )
+        assert _run_elf(warm_elf) == 42
+        _assert_targets_are_labels(
+            warm_ccr.read_bytes(), _parse_case(segment(warm_ccr.read_bytes(), CASE_TAG))
+        )
+
+
+def test_cir_cache_tampered_case_section_is_a_miss():
+    """Truncated/corrupt CASE payloads rebuild instead of restoring partially."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        _clean_cache(tmp)
+        src = _write_source(tmp, MATCH_INT_SOURCE, "match_tamper")
+        base_elf, base_ccr = _build_source(tmp, src, "baseline", tmp)
+        base_bytes = base_elf.read_bytes()
+        base_ccr_bytes = base_ccr.read_bytes()
+        entry = _cache_entry(tmp, "pick")
+        clean = entry.read_bytes()
+        snap = _cir_snapshot(clean)
+        assert snap["match_count"] == 1 and snap["matches"][0]["count"] == 5
+        first_row = snap["matches"][0]["rows"][0]["offset"]
+
+        tampered = []
+        # 1. Truncated inside the CASE rows (the trailer is gone).
+        tampered.append(("truncated", clean[: first_row + 8]))
+        # 2. Invalid target: one past the function's NOD range.
+        bad_target = bytearray(clean)
+        struct.pack_into("<i", bad_target, first_row + 16, snap["node_count"] + 1)
+        tampered.append(("bad_target", bytes(bad_target)))
+        # 3. Wrong per-MATCH case count (snapshot disagrees with instruction s3).
+        bad_count = bytearray(clean)
+        struct.pack_into("<q", bad_count, snap["matches"][0]["count_offset"], 6)
+        tampered.append(("wrong_count", bytes(bad_count)))
+
+        for name, data in tampered:
+            entry.write_bytes(data)
+            stamp = _entry_stamp(entry)
+            time.sleep(0.02)
+            out_elf, out_ccr = _build_source(tmp, src, f"tampered_{name}", tmp)
+            text = f"{name}"
+            assert out_elf.read_bytes() == base_bytes, f"{text}: partial/incorrect ELF"
+            assert out_ccr.read_bytes() == base_ccr_bytes, f"{text}: partial .ccr"
+            assert _entry_stamp(entry) != stamp, f"{text}: cache was not rebuilt"
+            fixed = _cir_snapshot(entry.read_bytes())
+            _assert_snapshot_case_section(fixed, entry.read_bytes(), [5])
+            assert _run_elf(out_elf) == 42, text
+
 
 
 # ---------------------------------------------------------------------------

@@ -71,8 +71,8 @@ g_ccr_case_count : int, mut
 // match; the capacity is compiler-private and never serialized.
 g_ccr_case_cap : int, mut
 // Set by ir_gen when the current function lowered a match to IR_MATCH. The
-// per-function .cir snapshot does not carry the CASE range, so a function with
-// this flag is rebuilt and not saved in this task.
+// v24 .cir snapshot carries the CASE range, so this is a diagnostic flag, not a
+// cache-save gate.
 g_cir_has_match : int, mut
 g_ast : string, mut
 g_ast_count : int, mut

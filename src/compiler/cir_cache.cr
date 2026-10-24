@@ -16,6 +16,10 @@
 //          {kind, enter_rel, exit_rel, parent_rel, nstart_rel, ncount}
 //   edges: count, then 24-byte records {rel_from, rel_to, kind}
 //   instructions: count, then 48-byte records {op, dest, s1, s2, s3, tk}
+//   match cases: match count, then per IR_MATCH in instruction order:
+//          {case_count, then case_count x 24-byte records
+//           value i64, kind u32, str i32, target_rel i32, flags u32}
+//          target_rel = target_nod - node_start, or -1 for a negative target
 //   string constants: count, then {length, bytes}
 //   intern journal: base count, record count, then {length, bytes}
 //   trailer: var_start, node_start
@@ -53,6 +57,9 @@
 //   NOD type ids) does not change this snapshot layout or its derived-code
 //   contract. The stored records, journal, and trailer are unchanged, so no
 //   version bump is required for that migration; only `.ccr` bytes changed.
+//   v24 adds the per-function MATCH CASE section after the instruction range.
+//   The layout changed, so entries written before v24 are invalid even though
+//   the rest of the snapshot is unchanged.
 //
 // Magic value:
 //   The magic is a negative 64-bit constant written as signed decimal. The
@@ -60,7 +67,7 @@
 //   writer and reader use the same constant, so the cache remains self-consistent.
 //   The limitation is recorded in the project backlog.
 CIR_CACHE_MAGIC : int = -4485090715960753727
-CIR_CACHE_VER   : int = 23
+CIR_CACHE_VER   : int = 24
 
 g_cir_write_buf : string, mut
 g_cir_write_pos : int, mut
@@ -195,10 +202,6 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
     if cid == 0:
         return -1
 
-    fd := syscall3(2, path, 577, 420)  // O_WRONLY|O_CREAT|O_TRUNC, 0644
-    if fd < 0:
-        return -1
-
     // Compute fingerprint
     fn_node := fi_ast_node(source_fi)
     fp := func_fingerprint(fn_node)
@@ -213,6 +216,32 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
     node_count := cell_load(g_df_func_node_count, ir_fi * 8)
     instr_start := cell_load(g_ir_func_instr_start, ir_fi * 8)
     instr_count := cell_load(g_ir_func_instr_count, ir_fi * 8)
+
+    // Validate and size the MATCH CASE section before touching the file. Every
+    // IR_MATCH owns a contiguous range of g_ccr_case rows; nested matches append
+    // after their enclosing range, which is also instruction order. A mismatch
+    // would produce a snapshot the loader must reject, so refuse to write it.
+    match_count : ., mut = 0
+    match_size : ., mut = 8
+    expected_case : ., mut = -1
+    ms_i : ., mut = 0
+    loop:
+        if ms_i >= instr_count:
+            break
+        ms_inst := instr_start + ms_i
+        if iri_op(ms_inst) == IR_MATCH:
+            ms_start := iri_s2(ms_inst)
+            ms_n := iri_s3(ms_inst)
+            if ms_start < 0 || ms_n < 0:
+                return -1
+            if ms_start + ms_n > g_ccr_case_count:
+                return -1
+            if expected_case >= 0 && ms_start != expected_case:
+                return -1
+            expected_case = ms_start + ms_n
+            match_count = match_count + 1
+            match_size = match_size + 8 + ms_n * 24
+        ms_i = ms_i + 1
 
     // Serialize in memory and issue one write. The previous per-field writes
     // made a full self-host build perform millions of syscalls on its cache.
@@ -232,6 +261,9 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
         own_edge_count = 0
     total_size = total_size + 8 + own_edge_count * 24
     total_size = total_size + 8 + instr_count * 48
+    // Per-function MATCH CASE section. Always present, even when empty, so the
+    // reader can parse every v24 snapshot with one layout.
+    total_size = total_size + match_size
     total_size = total_size + 8
     size_si : ., mut = 0
     loop:
@@ -262,6 +294,10 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
         g_cir_write_buf = alloc(new_cap)
         g_cir_write_cap = new_cap
     g_cir_write_pos = 0
+
+    fd := syscall3(2, path, 577, 420)  // O_WRONLY|O_CREAT|O_TRUNC, 0644
+    if fd < 0:
+        return -1
 
     // Write header
     cir_store_cell(fd, CIR_CACHE_MAGIC)
@@ -354,6 +390,35 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
         cir_store_cell(fd, iri_tk(inst))
         ii = ii + 1
 
+    // Write the MATCH CASE section. Matches are stored in instruction order so
+    // the loader can pair each group with its IR_MATCH without storing an index.
+    cir_store_cell(fd, match_count)
+    cs_i : ., mut = 0
+    loop:
+        if cs_i >= instr_count:
+            break
+        cs_inst := instr_start + cs_i
+        if iri_op(cs_inst) == IR_MATCH:
+            cs_start := iri_s2(cs_inst)
+            cs_n := iri_s3(cs_inst)
+            cir_store_cell(fd, cs_n)
+            cj : ., mut = 0
+            loop:
+                if cj >= cs_n:
+                    break
+                cbase := (cs_start + cj) * 24
+                cir_store_cell(fd, cell_load(g_ccr_case, cbase + CCR_CASE_VALUE))
+                cir_store_cell32(fd, cell_load32(g_ccr_case, cbase + CCR_CASE_KIND))
+                cir_store_cell32(fd, cell_load_i32(g_ccr_case, cbase + CCR_CASE_STR))
+                ctgt := cell_load_i32(g_ccr_case, cbase + CCR_CASE_TARGET)
+                crel : ., mut = -1
+                if ctgt >= 0:
+                    crel = ctgt - node_start
+                cir_store_cell32(fd, crel)
+                cir_store_cell32(fd, cell_load32(g_ccr_case, cbase + CCR_CASE_FLAGS))
+                cj = cj + 1
+        cs_i = cs_i + 1
+
     // Write string constants used by this function
     cir_store_cell(fd, g_ir_str_const_count)
     si : ., mut = 0
@@ -410,6 +475,12 @@ fn save_cir_cache(path: string, source_fi: int, ir_fi: int) -> int:
 fn cir_store_cell(fd: int, val: int):
     cell_store(g_cir_write_buf, g_cir_write_pos, val)
     g_cir_write_pos = g_cir_write_pos + 8
+
+// CASE records pack 32-bit fields after the 64-bit value. Keep them at their
+// wire widths; widening them to 8 bytes would break the shared 24B row.
+fn cir_store_cell32(fd: int, val: int):
+    cell_store32(g_cir_write_buf, g_cir_write_pos, val)
+    g_cir_write_pos = g_cir_write_pos + 4
 
 fn cir_store_byte(fd: int, val: int):
     cell_store_byte(g_cir_write_buf, g_cir_write_pos, val)
@@ -567,16 +638,78 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
     p = p + 8 + p_instr_count * 48
     if p > dlen:
         return -1
-    // A snapshot stores instructions but not the CASE table. A function with
-    // IR_MATCH cannot be restored without its CASE range, so treat it as a miss
-    // and rebuild. (Task 5 may persist the range instead.)
+    // Count IR_MATCH instructions. The CASE section stores one group per MATCH
+    // in instruction order, so this count must match the section header exactly.
+    p_match_count : ., mut = 0
     p_mi : ., mut = 0
+    loop:
+        if p_mi >= p_instr_count:
+            break
+        if cell_load(data, instr_p + 8 + p_mi * 48) == IR_MATCH:
+            p_match_count = p_match_count + 1
+        p_mi = p_mi + 1
+
+    // MATCH CASE section: match count, then per MATCH {case_count, rows}. A row
+    // stores target_rel = target_nod - node_start. Validate every row against
+    // this function's NOD range before any global is written.
+    case_p := p
+    p_case_matches := cell_load(data, p)
+    p = p + 8
+    if p_case_matches != p_match_count:
+        return -1
+    p_ci : ., mut = 0
+    p_mi = 0
+    p_expected_case : ., mut = -1
+    loop:
+        if p_ci >= p_case_matches:
+            break
+        // Pair this group with the next IR_MATCH in instruction order.
+        loop:
+            if p_mi >= p_instr_count:
+                return -1
+            if cell_load(data, instr_p + 8 + p_mi * 48) == IR_MATCH:
+                break
+            p_mi = p_mi + 1
+        p_inst := instr_p + 8 + p_mi * 48
+        p_ms := cell_load(data, p_inst + 24)
+        p_mn := cell_load(data, p_inst + 32)
+        p_cn := cell_load(data, p)
+        p = p + 8
+        if p_cn != p_mn || p_cn < 0 || p_ms < 0:
+            return -1
+        // Matches in one function own contiguous ranges in increasing order.
+        if p_expected_case >= 0 && p_ms != p_expected_case:
+            return -1
+        p_expected_case = p_ms + p_cn
+        if p_cn > (dlen - p) / 24:
+            return -1
+        p_rj : ., mut = 0
+        loop:
+            if p_rj >= p_cn:
+                break
+            p_kind := cell_load32(data, p + 8)
+            p_flags := cell_load32(data, p + 20)
+            if p_kind < CCR_CASE_KIND_VALUE || p_kind > CCR_CASE_KIND_DEFAULT:
+                return -1
+            if p_flags != 0:
+                return -1
+            p_tr := cell_load_i32(data, p + 16)
+            if p_tr < 0 || p_tr >= p_node_count:
+                return -1
+            if cell_load(data, node_p + 8 + p_tr * 64) != IR_LABEL:
+                return -1
+            p = p + 24
+            p_rj = p_rj + 1
+        p_mi = p_mi + 1
+        p_ci = p_ci + 1
+    // No unmatched IR_MATCH may remain after the stored groups.
     loop:
         if p_mi >= p_instr_count:
             break
         if cell_load(data, instr_p + 8 + p_mi * 48) == IR_MATCH:
             return -1
         p_mi = p_mi + 1
+
     str_p := p
     p_str_count := cell_load(data, p)
     p = p + 8
@@ -701,6 +834,31 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
             jp = jp + jl2
             str_intern(js)
             ji = ji + 1
+
+    // CASE str indexes are intern ids, so they are meaningful only after the
+    // journal replay above. Range-check them before the destructive array restore;
+    // do not call istr_get here because a malformed id must stay a cache miss.
+    if p_case_matches > 0:
+        csp : ., mut = case_p + 8
+        csi : ., mut = 0
+        loop:
+            if csi >= p_case_matches:
+                break
+            csn := cell_load(data, csp)
+            csp = csp + 8
+            csr : ., mut = 0
+            loop:
+                if csr >= csn:
+                    break
+                csidx := cell_load_i32(data, csp + 12)
+                cskind := cell_load32(data, csp + 8)
+                if csidx < -1 || csidx >= g_str_count:
+                    return -1
+                if cskind == CCR_CASE_KIND_STRING && csidx < 0:
+                    return -1
+                csp = csp + 24
+                csr = csr + 1
+            csi = csi + 1
 
     // Restore vars
     var_count := cell_load(data, pos)
@@ -874,6 +1032,48 @@ fn load_cir_cache(path: string, func_idx: int) -> int:
         pos = pos + 8
         ii = ii + 1
     g_ir_instr_count = base_instr + instr_count
+
+    // Restore this function's MATCH CASE ranges. The section is in the same order
+    // as the restored instruction stream, so pair each group with the next
+    // IR_MATCH and append at the current global CASE count. Stored targets are
+    // relative to the writer's node_start; rebase them to the restored nodes and
+    // rewrite s2 to the new range start. s3 is the stored count and is unchanged.
+    // The pre-scan already validated counts, ordering, target labels, and row
+    // domains, so this phase cannot fail halfway.
+    restored_matches := cell_load(data, pos)
+    pos = pos + 8
+    rm_i : ., mut = 0
+    rm_scan : ., mut = base_instr
+    loop:
+        if rm_i >= restored_matches:
+            break
+        loop:
+            if rm_scan >= g_ir_instr_count:
+                return -1
+            if iri_op(rm_scan) == IR_MATCH:
+                break
+            rm_scan = rm_scan + 1
+        rm_count := cell_load(data, pos)
+        pos = pos + 8
+        rm_case_start := g_ccr_case_count
+        iri_set_s2(rm_scan, rm_case_start)
+        rm_j : ., mut = 0
+        loop:
+            if rm_j >= rm_count:
+                break
+            rm_value := cell_load(data, pos)
+            rm_kind := cell_load32(data, pos + 8)
+            rm_str := cell_load_i32(data, pos + 12)
+            rm_rel := cell_load_i32(data, pos + 16)
+            rm_flags := cell_load32(data, pos + 20)
+            pos = pos + 24
+            rm_target : ., mut = -1
+            if rm_rel >= 0:
+                rm_target = base_node + rm_rel
+            ccr_case_append(rm_value, rm_kind, rm_str, rm_target, rm_flags)
+            rm_j = rm_j + 1
+        rm_scan = rm_scan + 1
+        rm_i = rm_i + 1
 
     // Restore string constants (used by nodes/instrs)
     str_count := cell_load(data, pos)

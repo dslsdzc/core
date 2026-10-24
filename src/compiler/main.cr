@@ -573,9 +573,9 @@ fn corec_main() -> int:
             df_end_func(ir_func_idx)
 
             // Save only when generation did not change snapshot-uncarried shared state.
-            // A MATCH function's CASE range is not in the snapshot, so saving it
-            // would let a warm build restore a MATCH with no dispatch table.
-            if cache_enabled != 0 && g_cir_has_match == 0:
+            // MATCH CASE ranges are part of the snapshot (v24), so a MATCH function
+            // is saved like any other. g_cir_has_match remains diagnostic only.
+            if cache_enabled != 0:
                 if g_type_count == tc0:
                     save_cir_cache(cache_path, fi, ir_func_idx)
 
