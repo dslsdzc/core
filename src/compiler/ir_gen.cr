@@ -2903,22 +2903,13 @@ fn gen_expr(node: int) -> int:
                     is_ident_bind = 1
             // Nested refutable sub-patterns (string/char/int/... inside an enum
             // payload) are Task 5b. Do not silently treat the outer variant as an
-            // unconditional match: route the arm to the fall edge instead.
+            // unconditional match: route the arm to the fall edge instead. The
+            // scan must cover the full payload subtree: composite sub-patterns
+            // are not contiguous from ast_b (e.g. A(x, X(y))).
             nested_bad : ., mut = 0
             if pat_kind == EXPR_ENUMPAT:
-                en_sub_count := ast_c(arm_pat)
-                en_i : ., mut = 0
-                en_p := ast_b(arm_pat)
-                loop:
-                    if en_i >= en_sub_count:
-                        break
-                    if en_p >= 0:
-                        en_k := ast_kind(en_p)
-                        if en_k != EXPR_IDENT && en_k != EXPR_WILDCARD:
-                            nested_bad = 1
-                            break
-                    en_p = en_p + 1
-                    en_i = en_i + 1
+                if sh_match_payload_bad(arm_pat) >= 0:
+                    nested_bad = 1
             if match_mode != 0:
                 // MATCH owns the dispatch: suppress the sequential compare chain
                 // and the payload-binding reads (sub-patterns already forced the

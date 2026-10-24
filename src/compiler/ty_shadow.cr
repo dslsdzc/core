@@ -1240,6 +1240,57 @@ fn sh_match_lit_seen(first_arm: int, cur_arm: int, kind: int, value: int) -> int
         an = ast_c(an)
     return 0
 
+// 模式子树的最小节点下标。parser 先分配子模式节点、最后分配外层模式节点；
+// 复合子模式（X(y)）的根下标高于自己的后代，因此 ast_b 不是子树起点，必须递归到
+// 第一个子模式（parser.cr parse_pattern 的分配序：子先父后）。
+fn sh_match_pat_subtree_start(p: int) -> int:
+    if p < 0:
+        return -1
+    k := ast_kind(p)
+    if k == EXPR_ENUMPAT:
+        if ast_c(p) > 0:
+            c := ast_b(p)
+            if c >= 0 && c < p:
+                s := sh_match_pat_subtree_start(c)
+                if s >= 0 && s < p:
+                    return s
+    else if k == EXPR_STRUCTPAT:
+        if ast_c(p) > 0:
+            w := ast_b(p)
+            if w >= 0 && w < p:
+                c := ast_a(w)
+                if c >= 0 && c < p:
+                    s := sh_match_pat_subtree_start(c)
+                    if s >= 0 && s < p:
+                        return s
+    return p
+
+// Enum payload 内的首个 refutable 节点（-1 = 全部为 ident/wildcard）。
+// 扫描区间 = [首个子模式子树起点, pat_node)。parser 在分配外层节点前连续分配
+// 完整 payload 子树，因此该区间覆盖所有子模式，包括“复合子模式不在首位”的
+// A(x, X(y)) —— 只按 ast_b + i 会漏掉后面的复合子模式。
+fn sh_match_payload_bad(pat_node: int) -> int:
+    if pat_node < 0:
+        return -1
+    count := ast_c(pat_node)
+    if count <= 0:
+        return -1
+    first := ast_b(pat_node)
+    if first < 0 || first >= pat_node:
+        return pat_node
+    start := sh_match_pat_subtree_start(first)
+    if start < 0 || start >= pat_node:
+        return pat_node
+    i := start
+    loop:
+        if i >= pat_node:
+            return -1
+        k := ast_kind(i)
+        if k != EXPR_IDENT && k != EXPR_WILDCARD:
+            return i
+        i = i + 1
+    return -1
+
 // 变体模式 -> 本枚举变体下标（-1 = 不属本枚举 / 名字不可解析 / scrutinee 不可展开）。
 // 名字有两种形态（parser.cr parse_pattern 的产物）：裸变体名 Red，或限定名
 // Color.Red（parser 用 name + "." + variant 拼接）。限定名取最后一个点之后的段

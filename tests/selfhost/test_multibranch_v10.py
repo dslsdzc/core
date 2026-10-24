@@ -790,6 +790,81 @@ fn main() -> int:
         _ => 2
 """
 
+# Composite sub-patterns are allocated before the outer EXPR_ENUMPAT node, so
+# they are not contiguous from ast_b. These fixtures pin both orders and a
+# deeper nesting; all must be rejected rather than matched as a bare variant.
+MATCH_NESTED_SECOND_BYPASS_SOURCE = """enum Inner:
+    X(int), Y(int)
+
+enum Outer:
+    A(Inner, Inner), B
+
+fn main() -> int:
+    o := A(X(1), X(2))
+    return match o:
+        A(x, X(y)) => 1,
+        _ => 2
+"""
+
+MATCH_NESTED_FIRST_BYPASS_SOURCE = """enum Inner:
+    X(int), Y(int)
+
+enum Outer:
+    A(Inner, Inner), B
+
+fn main() -> int:
+    o := A(X(1), X(2))
+    return match o:
+        A(X(y), x) => 1,
+        _ => 2
+"""
+
+MATCH_NESTED_DEEP_BYPASS_SOURCE = """enum L3:
+    Z(int)
+
+enum L2:
+    Y(L3)
+
+enum L1:
+    X(L2)
+
+enum Outer:
+    A(L1), B
+
+fn f(o: Outer) -> int:
+    return match o:
+        A(X(Y(z))) => 1,
+        _ => 2
+
+fn main() -> int:
+    return f(B())
+"""
+
+MATCH_MULTI_PAYLOAD_BIND_SOURCE = """enum Pair:
+    A(int, int), B
+
+fn sum(p: Pair) -> int:
+    return match p:
+        A(x, y) => x + y,
+        B => 0
+
+fn second(p: Pair) -> int:
+    return match p:
+        A(_, x) => x,
+        B => 0
+
+fn main() -> int:
+    if sum(A(3, 4)) != 7:
+        return 1
+    if sum(B()) != 0:
+        return 2
+    if second(A(9, 8)) != 8:
+        return 3
+    if second(B()) != 0:
+        return 4
+    return 42
+"""
+
 MATCH_ONE_CASE_SOURCE = """fn pick(n: int) -> int:
     return match n:
         7 => 1,
@@ -1343,6 +1418,46 @@ def test_nested_literal_pattern_rejected():
             MATCH_NESTED_LITERAL_SOURCE,
             "nested_literal",
             ["error[TM09]", "Nested match patterns are not supported"],
+        )
+
+
+def test_nested_composite_payload_bypass_is_rejected():
+    cases = [
+        ("nested_second", MATCH_NESTED_SECOND_BYPASS_SOURCE),
+        ("nested_first", MATCH_NESTED_FIRST_BYPASS_SOURCE),
+        ("nested_deep", MATCH_NESTED_DEEP_BYPASS_SOURCE),
+    ]
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        needles = ["error[TM09]", "Nested match patterns are not supported"]
+        for name, source in cases:
+            _assert_compile_rejected(tmp, source, name, needles)
+            # `run` shares the same checker; the interpreter must reject the
+            # pattern too, not silently return one of the divergent values.
+            run = _run([COREC, "run", source], cwd=BASE)
+            text = run.stdout + run.stderr
+            assert run.returncode == 1, (
+                f"{name}: interpreter accepted a nested payload pattern: "
+                f"rc={run.returncode}: {text}"
+            )
+            for needle in needles:
+                assert needle in text, f"{name}: interpreter missing {needle!r}: {text}"
+
+
+def test_multi_payload_ident_bindings_work():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(
+            tmp, MATCH_MULTI_PAYLOAD_BIND_SOURCE, "multi_payload_bind"
+        )
+        assert _match_nodes(data) == [], "payload binding keeps the sequential path"
+        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+        _assert_program(
+            tmp,
+            MATCH_MULTI_PAYLOAD_BIND_SOURCE,
+            42,
+            opts=(0, 2),
+            name="multi_payload_bind",
         )
 
 

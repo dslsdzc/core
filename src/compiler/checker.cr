@@ -3417,24 +3417,13 @@ fn infer_expr(node: int) -> int:
                 else if pk == 2:
                     // 嵌套子模式只在 Task 5b 完整支持；ident/`_` 之外的模式
                     // （字面量、嵌套枚举、struct…）现在不得静默当成“变体匹配”。
-                    sub_count := ast_c(arm_pat)
-                    spi : ., mut = 0
-                    spn := ast_b(arm_pat)
-                    bad_nested : ., mut = 0
-                    loop:
-                        if spi >= sub_count:
-                            break
-                        if spn >= 0:
-                            sk := ast_kind(spn)
-                            if sk != EXPR_IDENT && sk != EXPR_WILDCARD:
-                                check_error(EC_TM_NESTED,
-                                    "Nested match patterns are not supported yet",
-                                    ast_line(spn), ast_col(spn))
-                                bad_nested = 1
-                                break
-                        spn = spn + 1
-                        spi = spi + 1
-                    if bad_nested != 0:
+                    // 子模式节点不一定连续（parser 先分配复合子模式的后代），
+                    // 因此扫描整个 payload 子树区间，而不是 ast_b + i。
+                    bad_nested := sh_match_payload_bad(arm_pat)
+                    if bad_nested >= 0:
+                        check_error(EC_TM_NESTED,
+                            "Nested match patterns are not supported yet",
+                            ast_line(bad_nested), ast_col(bad_nested))
                         m_unmappable = 1
                     vi := sh_match_pat_variant(match_ti, arm_pat)
                     vt : ., mut = -1
