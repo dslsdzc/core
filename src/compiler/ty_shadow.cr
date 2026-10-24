@@ -1214,7 +1214,7 @@ fn sh_match_pat_kind(pat_node: int) -> int:
     // 绑定 = 通配（值域不绑；与 ir_gen 的按值比较臂不同层）
     if k == EXPR_ENUMPAT:
         return 2
-    return 0                               // 字面量 / struct 模式 / EXPR_NONE -> 不可映射（登记）
+    return 0                               // 字面量 / struct 模式 / tuple 模式 / EXPR_NONE -> 不可映射（登记）
 
 // 字面量模式种类（int/bool/string/char），-1 = 非字面量模式。
 // 这些模式在 checker 侧可逐值比较，但域是无限的（bool 除外），因此没有
@@ -1257,6 +1257,17 @@ fn sh_match_pat_subtree_start(p: int) -> int:
     else if k == EXPR_STRUCTPAT:
         if ast_c(p) > 0:
             w := ast_b(p)
+            if w >= 0 && w < p:
+                c := ast_a(w)
+                if c >= 0 && c < p:
+                    s := sh_match_pat_subtree_start(c)
+                    if s >= 0 && s < p:
+                        return s
+    else if k == EXPR_TUPLEPAT:
+        // Tuple patterns use the array/tuple wrapper contract: a=first wrapper,
+        // b=element count, wrapper.a=subpattern.
+        if ast_b(p) > 0:
+            w := ast_a(p)
             if w >= 0 && w < p:
                 c := ast_a(w)
                 if c >= 0 && c < p:

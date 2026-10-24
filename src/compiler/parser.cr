@@ -1424,6 +1424,63 @@ fn parse_pattern() -> int:
         advance_tok()
         tl := cell_load(g_tokens, t * ESZ_TOKEN + OFF_TK_LEXEME)
         return alloc_node(EXPR_BIGINT, tl, 0, 0, 0, TY_INT, 0, tok_ln(t), tok_cl(t))
+    if tok_k(t) == T_LPAREN:
+        // Tuple pattern: (pat, pat, ...). EXPR_TUPLEPAT layout: a = first wrapper
+        // (consecutive), b = element count. wrapper.a = subpattern, wrapper.b =
+        // element index (0-based). The contract is the same as EXPR_STRUCTPAT,
+        // except the second wrapper slot is positional instead of a field name.
+        // Composite subpatterns occupy several nodes, so parse all subpatterns
+        // first, then build contiguous wrappers. `(pat)` is grouping, exactly like
+        // a parenthesized expression. Empty `()` and trailing commas are rejected
+        // with a parser diagnostic instead of being silently accepted.
+        advance_tok()
+        if check(T_RPAREN):
+            check_error(EC_P_PATTERN,
+                "Empty tuple pattern is not supported; use '_'",
+                tok_ln(cur_tok()), tok_cl(cur_tok()))
+            advance_tok()
+            return alloc_node(EXPR_TUPLEPAT, -1, 0, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
+        cap : ., mut = 8
+        vals : string, mut = alloc(cap * 8)
+        cell_store(vals, 0, parse_pattern())
+        pc : ., mut = 1
+        loop:
+            if !check(T_COMMA):
+                break
+            advance_tok()  // consume comma
+            if check(T_RPAREN):
+                check_error(EC_P_PATTERN,
+                    "Trailing comma is not supported in a tuple pattern",
+                    tok_ln(cur_tok()), tok_cl(cur_tok()))
+                break
+            if pc >= cap:
+                ncap := cap * 2
+                nv := alloc(ncap * 8)
+                cell_copy(vals, cap * 8, nv)
+                vals = nv
+                cap = ncap
+            cell_store(vals, pc * 8, parse_pattern())
+            pc = pc + 1
+        advance_tok()  // consume )
+        if pc == 1:
+            // Parenthesized pattern: transparent grouping, same as `(expr)`.
+            return cell_load(vals, 0)
+        pf : ., mut = -1
+        pi : ., mut = 0
+        loop:
+            if pi >= pc:
+                break
+            vn := cell_load(vals, pi * 8)
+            ln : ., mut = tok_ln(t)
+            cl : ., mut = tok_cl(t)
+            if vn >= 0:
+                ln = ast_line(vn)
+                cl = ast_col(vn)
+            wl := ast_alloc(EXPR_NONE, vn, pi, 0, 0, 0, 0, ln, cl)
+            if pi == 0:
+                pf = wl
+            pi = pi + 1
+        return alloc_node(EXPR_TUPLEPAT, pf, pc, 0, 0, 0, 0, tok_ln(t), tok_cl(t))
     if tok_k(t) == T_STRING || tok_k(t) == T_INTERP:
         return parse_interp_run()
     if tok_k(t) == T_CHAR:

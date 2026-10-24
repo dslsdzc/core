@@ -1219,6 +1219,115 @@ fn main() -> int:
         _ => 0
 """
 
+# Task 5b2: tuple patterns. Positional wrappers bind elements and test scalar
+# literals; `_` skips an element. The literal string is built at runtime inside
+# main so the comparison must use str_eq (content), not intern indices.
+MATCH_TUPLE_SOURCE = """fn bind(n: int, s: string) -> int:
+    t := (n, s)
+    return match t:
+        (x, y) =>:
+            if x == 1:
+                if y == "hi":
+                    return 1
+            return 2
+        _ => 3
+
+fn lit(n: int, s: string) -> int:
+    t := (n, s)
+    return match t:
+        (1, "hi") => 1,
+        (2, "yo") => 2,
+        _ => 0
+
+fn part(n: int, s: string) -> int:
+    t := (n, s)
+    return match t:
+        (a, _) => a,
+        _ => 9
+
+fn mixed(flag: bool, ch: char, n: int) -> int:
+    t := (flag, ch, n)
+    return match t:
+        (true, 'A', 7) => 1,
+        (false, 'B', 8) => 2,
+        _ => 0
+
+fn ident_last(n: int) -> int:
+    t := (n, n + 1)
+    return match t:
+        (1, 2) => 1,
+        rest =>:
+            if (rest . 0) == n:
+                return 2
+            return 3
+
+fn main() -> int:
+    if bind(1, "hi") != 1:
+        return 1
+    if bind(2, "hi") != 2:
+        return 2
+    if lit(1, concat("h", "i")) != 1:
+        return 3
+    if lit(2, "yo") != 2:
+        return 4
+    if lit(1, "yo") != 0:
+        return 5
+    if part(7, "x") != 7:
+        return 6
+    if mixed(true, 'A', 7) != 1:
+        return 7
+    if mixed(false, 'B', 8) != 2:
+        return 8
+    if mixed(false, 'A', 7) != 0:
+        return 9
+    if ident_last(5) != 2:
+        return 10
+    if ident_last(1) != 1:
+        return 11
+    return 42
+"""
+
+MATCH_TUPLE_ARITY_SOURCE = """fn main() -> int:
+    t := (1, 2)
+    return match t:
+        (a, b, c) => 1,
+        _ => 0
+"""
+
+MATCH_TUPLE_NONTUPLE_SOURCE = """fn main() -> int:
+    n := 1
+    return match n:
+        (a, b) => 1,
+        _ => 0
+"""
+
+MATCH_TUPLE_WRONG_TYPE_SOURCE = """fn main() -> int:
+    t := (1, 2)
+    return match t:
+        (a, "s") => 1,
+        _ => 0
+"""
+
+MATCH_TUPLE_NESTED_SOURCE = """fn main() -> int:
+    t := ((1, 2), 3)
+    return match t:
+        ((a, b), c) => 1,
+        _ => 0
+"""
+
+MATCH_TUPLE_NO_WILDCARD_SOURCE = """fn main() -> int:
+    t := (1, 2)
+    return match t:
+        (1, 2) => 1
+"""
+
+MATCH_TUPLE_WILDCARD_ORDER_SOURCE = """fn main() -> int:
+    t := (1, 2)
+    return match t:
+        _ => 0,
+        (1, 2) => 1
+"""
+
 MATCH_ONE_CASE_SOURCE = """fn pick(n: int) -> int:
     return match n:
         7 => 1,
@@ -2019,6 +2128,79 @@ def test_struct_pattern_exhaustiveness_and_order():
             "struct_wildcard_order",
             ["error[TM05]", "must be the last arm"],
         )
+
+
+def test_tuple_pattern_binds_literals_and_partial():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, MATCH_TUPLE_SOURCE, "match_tuple")
+        assert _match_nodes(data) == [], "tuple patterns must not become MATCH"
+        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+        _assert_program(
+            tmp, MATCH_TUPLE_SOURCE, 42, opts=(0, 2), name="match_tuple"
+        )
+
+
+def test_tuple_pattern_errors_are_hard():
+    cases = [
+        (
+            "tuple_arity",
+            MATCH_TUPLE_ARITY_SOURCE,
+            ["error[TA07]", "has 3 elements", "scrutinee has 2"],
+        ),
+        (
+            "tuple_nontuple",
+            MATCH_TUPLE_NONTUPLE_SOURCE,
+            ["error[TS03]", "Tuple pattern requires a tuple scrutinee"],
+        ),
+        (
+            "tuple_wrong_type",
+            MATCH_TUPLE_WRONG_TYPE_SOURCE,
+            ["error[TS03]", "expected int, got string"],
+        ),
+        (
+            "tuple_nested",
+            MATCH_TUPLE_NESTED_SOURCE,
+            ["error[TM09]", "Nested match patterns are not supported"],
+        ),
+    ]
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        for name, source, needles in cases:
+            _assert_compile_rejected(tmp, source, name, needles)
+
+
+def test_tuple_pattern_exhaustiveness_and_order():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        _assert_compile_rejected(
+            tmp,
+            MATCH_TUPLE_NO_WILDCARD_SOURCE,
+            "tuple_no_wildcard",
+            ["error[TM03]", "Non-exhaustive match", "add a wildcard or binding arm"],
+        )
+        _assert_compile_rejected(
+            tmp,
+            MATCH_TUPLE_WILDCARD_ORDER_SOURCE,
+            "tuple_wildcard_order",
+            ["error[TM05]", "must be the last arm"],
+        )
+
+
+def test_nested_tuple_pattern_rejected_by_interpreter():
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        needles = ["error[TM09]", "Nested match patterns are not supported"]
+        _assert_compile_rejected(
+            tmp, MATCH_TUPLE_NESTED_SOURCE, "tuple_nested_interp", needles
+        )
+        run = _run([COREC, "run", MATCH_TUPLE_NESTED_SOURCE], cwd=BASE)
+        text = run.stdout + run.stderr
+        assert run.returncode == 1, (
+            f"interpreter accepted a nested tuple pattern: rc={run.returncode}: {text}"
+        )
+        for needle in needles:
+            assert needle in text, f"interpreter missing {needle!r}: {text}"
 
 
 def test_dump_objects_prints_match_cases():

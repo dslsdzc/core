@@ -996,6 +996,38 @@ fn gen_structpat_binds(pat: int, match_val: int):
                             bind_local(nn, fv)
         i = i + 1
 
+// Bind ident subpatterns for a tuple pattern in the arm scope. Each binding reads
+// its element again and gets the checker-resolved element type stored on the
+// wrapper. Literal and `_` subpatterns bind nothing.
+fn gen_tuplepat_binds(pat: int, match_val: int):
+    if pat < 0 || match_val < 0:
+        return
+    c := ast_b(pat)
+    w0 := ast_a(pat)
+    if w0 < 0:
+        return
+    i : ., mut = 0
+    loop:
+        if i >= c:
+            break
+        w := w0 + i
+        if w >= 0:
+            sub := ast_a(w)
+            if sub >= 0 && ast_kind(sub) == EXPR_IDENT:
+                nn := ast_int_val(sub)
+                if str_eq(istr_get(nn), "_") == 0:
+                    fd := ast_data(w)
+                    ft : ., mut = TI_INT
+                    if fd > 0:
+                        ft = fd - 1
+                    fv := new_ir_var("fld", TI_INT)
+                    irv_set_type(fv, structpat_field_load_ti_from(ft))
+                    if get_type_kind(ft) == TYP_OPTIONAL && g_optrep_on != 0:
+                        irv_set_decl_ti(fv, ft)
+                    emit(IR_LOAD_FIELD, fv, match_val, 0, ast_b(w), 0)
+                    bind_local(nn, fv)
+        i = i + 1
+
 // Return the literal initializer AST node for an immutable module-level
 // constant.  The ELF backend has no data initializers, so leaving these as
 // BSS globals turns values such as T_FN and ESZ_TOKEN into zero at runtime.
@@ -3144,6 +3176,57 @@ fn gen_expr(node: int) -> int:
                     emit(IR_JUMP, -1, body_lbl, 0, 0, 0)
                 else:
                     emit(IR_JUMP, -1, fall_lbl, 0, 0, 0)
+            else if pat_kind == EXPR_TUPLEPAT:
+                // Tuple pattern: sequential element tests. The checker has already
+                // validated the scrutinee arity and cached each element type on the
+                // wrapper. A missing wrapper/type or an unsupported subpattern fails
+                // closed: jump to the fall edge, never to the body.
+                tc := ast_b(arm_pat)
+                tw0 := ast_a(arm_pat)
+                can_match : ., mut = 1
+                if tw0 < 0 || tc <= 0:
+                    can_match = 0
+                if has_next == 1:
+                    fall_lbl = new_label()
+                ti_i : ., mut = 0
+                loop:
+                    if ti_i >= tc:
+                        break
+                    w := tw0 + ti_i
+                    sub : ., mut = -1
+                    idx : ., mut = -1
+                    fd : ., mut = 0
+                    if w >= 0:
+                        sub = ast_a(w)
+                        idx = ast_b(w)
+                        fd = ast_data(w)
+                    if w < 0 || idx != ti_i || fd <= 0:
+                        can_match = 0
+                        break
+                    sk : ., mut = -1
+                    if sub >= 0:
+                        sk = ast_kind(sub)
+                    if sk == EXPR_IDENT || sk == EXPR_WILDCARD:
+                        ti_i = ti_i + 1
+                        continue
+                    if sk != EXPR_INT && sk != EXPR_BOOL && sk != EXPR_CHAR && sk != EXPR_STRING:
+                        can_match = 0
+                        break
+                    ft := fd - 1
+                    if ti_has_generic_param(ft) != 0:
+                        can_match = 0
+                        break
+                    fv := new_ir_var("fld", TI_INT)
+                    irv_set_type(fv, structpat_field_load_ti_from(ft))
+                    emit(IR_LOAD_FIELD, fv, match_val, 0, idx, 0)
+                    if gen_structpat_field_test(sub, fv, fall_lbl) < 0:
+                        can_match = 0
+                        break
+                    ti_i = ti_i + 1
+                if can_match != 0:
+                    emit(IR_JUMP, -1, body_lbl, 0, 0, 0)
+                else:
+                    emit(IR_JUMP, -1, fall_lbl, 0, 0, 0)
             else if pat_kind == EXPR_INT:
                 pat_val := new_ir_var("pval", TI_INT)
                 emit(IR_CONST, pat_val, ast_int_val(arm_pat), 0, 0, TI_INT)
@@ -3207,6 +3290,8 @@ fn gen_expr(node: int) -> int:
             push_ir_scope()
             if pat_kind == EXPR_STRUCTPAT:
                 gen_structpat_binds(arm_pat, match_val)
+            if pat_kind == EXPR_TUPLEPAT:
+                gen_tuplepat_binds(arm_pat, match_val)
             if pat_kind == EXPR_ENUMPAT:
                 sub_count := ast_c(arm_pat)
                 fi : ., mut = 0
@@ -3740,6 +3825,8 @@ fn gen_expr(node: int) -> int:
                 return dest
         return inner
     if ast_kind(node) == EXPR_STRUCTPAT:
+        return -1
+    if ast_kind(node) == EXPR_TUPLEPAT:
         return -1
     if ast_kind(node) == EXPR_STMT:
         gen_expr(ast_a(node))

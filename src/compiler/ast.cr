@@ -257,6 +257,7 @@ EXPR_OPTIONAL : int = 49  // a=inner type node (T? 类型位置)
 // hole for diagnostics.
 EXPR_INTERP_HOLE : int = 50  // data=hole text ni（解析期）；checker 改写后本 kind 不再存在
 EXPR_BIGINT : int = 51       // a=canonical decimal string ni; type TY_INT
+EXPR_TUPLEPAT : int = 52     // tuple pattern: a=first wrapper（连续；wrapper kind=EXPR_NONE，a=子模式节点，b=元素下标）, b=element count
 
 // Field representation in struct literal: two consecutive AST nodes
 // (name_idx, value_idx, line=line, col=col)

@@ -1050,6 +1050,44 @@ fn gen_clone_tree(node: int) -> int:
         gen_dedup_add(node, n)
         return n
 
+    // EXPR_TUPLEPAT: a = first wrapper (consecutive), b = element count.
+    // wrapper.a = subpattern node, wrapper.b = element index, wrapper.d =
+    // checker-resolved element type + 1. Preserve both halves of the wrapper so a
+    // clone still compares/binds the same positions with the same type.
+    if k == EXPR_TUPLEPAT:
+        if a >= 0 && b > 0:
+            nvs : string, mut = alloc(b * 8)
+            nns : string, mut = alloc(b * 8)
+            nds : string, mut = alloc(b * 8)
+            i : ., mut = 0
+            loop:
+                if i >= b:
+                    break
+                vn : ., mut = -1
+                nn : ., mut = -1
+                nd : ., mut = 0
+                if a + i >= 0:
+                    vn = ast_a(a + i)
+                    nn = ast_b(a + i)
+                    nd = ast_data(a + i)
+                cell_store(nvs, i * 8, gen_clone_tree(vn))
+                cell_store(nns, i * 8, nn)
+                cell_store(nds, i * 8, nd)
+                i = i + 1
+            new_first := g_ast_count
+            i = 0
+            loop:
+                if i >= b:
+                    break
+                ast_alloc(EXPR_NONE, cell_load(nvs, i * 8), cell_load(nns, i * 8), 0, 0, 0, cell_load(nds, i * 8), ln, cl)
+                i = i + 1
+            n := ast_alloc(k, new_first, b, c, iv, tv, d, ln, cl)
+            gen_dedup_add(node, n)
+            return n
+        n := ast_alloc(k, a, b, c, iv, tv, d, ln, cl)
+        gen_dedup_add(node, n)
+        return n
+
     // ── EXPR_AT: a=name_ni(NOT), b=args_node(YES or -1) ──
     if k == EXPR_AT:
         b2 := gen_clone_tree(b)
