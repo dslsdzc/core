@@ -40,6 +40,8 @@ Core 侧只读来源：`src/compiler/ast.cr`（opcode 常量）、`src/compiler/
 
 `ast.cr` 定义 0 到 50（40 号空缺），加 `IR_APPROX = 51`，共 51 个 opcode。51 个全部已定义；`IR_APPROX` 没有发射点。`IR_RESOLVED` 是 BRANCH/JUMP 的标签解析标记，不是 opcode。
 
+> 注（2026-10-26）：`IR_MATCH`（54）已用于多路 `match` 与 `if`（见 §2.5）；本节的 0..51 计数是此前盘点，未含 52..54。
+
 | # | 名称 | 分组 | 发射方 | ELF 后端 | 解释器 | 本节 |
 |---|---|---|---|---|---|---|
 | 0 | `IR_NOP` | 控制流 | — | 有（空） | 有（空） | 2.5 |
@@ -194,7 +196,8 @@ load/store（对照 `Mem.load`/`Mem.store` Memory.v:L428/L531 + `valid_access` L
 - IR_NOP（0）：无状态变化。
 - IR_LABEL（21）：标签定义（`s1` = 标签号），无副作用。对照 `Plabel`（Asm.v:L946-947）。
 - IR_JUMP（20）：`goto L(s1)`。对照 `Pjmp_l`（Asm.v:L903-904）。interp 有回边特例（SG_LOOP/SG_FOR region 表驱动循环迭代，非标签表），Core 数据流 region 机制，无 CompCert 对照。
-- IR_BRANCH（19）：`if ρ(s1) ≠ 0 goto L(s2) else goto L(s3)`（true 在前）。对照 `Pjcc`（Asm.v:L909-914），CompCert 消费标志位（`eval_testcond`），Core 直接测试值（`test` + `je/jmp`）：语义等价，形态不同（D：Core 无标志寄存器状态，比较直接产值）。
+- IR_BRANCH（19）：`if ρ(s1) ≠ 0 goto L(s2) else goto L(s3)`（true 在前）。对照 `Pjcc`（Asm.v:L909-914），CompCert 消费标志位（`eval_testcond`），Core 直接测试值（`test` + `je/jmp`）：语义等价，形态不同（D：Core 无标志寄存器状态，比较直接产值）。`if` 现走 `IR_MATCH`；本 opcode 只承载 `while`/`for`/逻辑短路/边界检查等内部条件分支。
+- IR_MATCH（54）：按 CASE 表分派 `ρ(s1)`；`s2` = CASE 起始索引，`s3` = 行数。`if` 编码为 `VALUE(0)` + `DEFAULT`（true 走 fallthrough），多路 `match` 由 `ir_gen` 生成；后端按行数/值分布选择线性、二分或跳转表。CASE 行语义见 v10 `.ccr` 规范 §11。
 - IR_PHI（22）：`d :=` 按到达前驱边选择的值（SSA φ），当前无发射方/无后端/无解释器实现（保留给未来 SSA 形态）。CompCert RTL 无 φ（非 SSA 需求）。D：保留项。
 - IR_RETURN（5）：返回 `ρ(s1)`（`TI_FLOAT`，XMM0；int，RAX）；`main` 的返回 = 进程退出码。对照 `Pret` + `final_state`（Asm.v:L934-935, L1144-1148）。
 - IR_CALL（4）：`d := f(args)`，`s1` = 首参变量、`s2` = 参数个数、`s3` = 函数名 ni。使用 SysV AMD64 调用约定（int 参数在 rdi、rsi、rdx、rcx、r8、r9 和栈上；float/apx 参数在 xmm0 到 xmm7）。对照 `Pcall_s`（Asm.v:L930-931）、`extcall_arguments`（L1071-1091）和 16 字节栈帧对齐（CompCert `frame_env_aligned`）。内建函数（syscall3、load8、store8、r64、w64 等）在 ELF 中直接展开，解释器对 syscall 族返回 0。
