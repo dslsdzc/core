@@ -163,6 +163,14 @@ CASES = [
         "parity", 7, 7,
     ),
     (
+        # Interpreter builtin dispatch must not call the AOT-compiled str_eq:
+        # that path crashed on interned strings. Both equal and unequal legs.
+        "str_eq_direct_callee",
+        "",
+        'return str_eq("a", "a") + str_eq("a", "b")',
+        "parity", 1, 1,
+    ),
+    (
         "recursion_fib_callee",
         "fn fib(n: int)->int:\n    if n < 2:\n        return n\n    return fib(n-1) + fib(n-2)\n",
         "return fib(10)",
