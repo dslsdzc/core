@@ -996,11 +996,6 @@ fn lat_case_set_target(idx: int, label: int):
 // true target is the next label the backend emits test/jne without falling
 // through into an explicit jump.
 fn emit_cond_match(cond_var: int, false_lbl: int, true_lbl: int):
-    if cli_has("legacy-if") != 0:
-        // Fixture-only mode: keep the pre-unification binary branch so synthetic
-        // CASE images retain their original shape.
-        emit(IR_BRANCH, -1, cond_var, true_lbl, false_lbl, 0)
-        return
     case_base := g_lat_case_count
     lat_case_append(0, CCR_CASE_KIND_VALUE, -1, false_lbl, 0)
     lat_case_append(0, CCR_CASE_KIND_DEFAULT, -1, true_lbl, 0)
@@ -2938,21 +2933,13 @@ fn gen_expr(node: int) -> int:
         then_lbl := new_label()
         else_lbl := new_label()
         merge_lbl := new_label()
-        if cli_has("legacy-if") != 0:
-            // Debug-only path for synthetic CASE fixtures: keep the old binary
-            // branch so their hand-built CASE images keep their original shape.
-            if else_node >= 0:
-                emit(IR_BRANCH, -1, cond_var, then_lbl, else_lbl, 0)
-            else:
-                emit(IR_BRANCH, -1, cond_var, then_lbl, merge_lbl, 0)
-        else:
-            // v10 unified decision node: false is CASE 0, true falls through to
-            // then. This keeps the then-first block layout used by IR_BRANCH and
-            // avoids an extra jump in the backend's two-way-zero path.
-            false_lbl : ., mut = merge_lbl
-            if else_node >= 0:
-                false_lbl = else_lbl
-            emit_cond_match(cond_var, false_lbl, then_lbl)
+        // v10 unified decision node: false is CASE 0, true falls through to
+        // then. This keeps the then-first block layout and avoids an extra jump
+        // in the backend's two-way-zero path.
+        false_lbl : ., mut = merge_lbl
+        if else_node >= 0:
+            false_lbl = else_lbl
+        emit_cond_match(cond_var, false_lbl, then_lbl)
         result_var : ., mut = -1
         result_rep : ., mut = -1
         emit(IR_LABEL, -1, then_lbl, 0, 0, 0)

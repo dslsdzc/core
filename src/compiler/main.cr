@@ -260,7 +260,6 @@ fn corec_main() -> int:
     cli_flag_bool_debug("diag-gate-report", "", "Debug: report fail-closed gate verdicts")
     cli_flag_bool_debug("dump-vcs", "", "Debug: dump spec VC list")
     cli_flag_bool_debug("dump-params", "", "Debug: dump parameter slot types")
-    cli_flag_bool_debug("legacy-if", "", "Debug hook: keep if on IR_BRANCH (synthetic fixtures)")
     cli_flag_bool_debug("timing", "", "Debug: print pass timing markers")
 
     if cli_parse() != 0:
@@ -514,10 +513,6 @@ fn corec_main() -> int:
     // does not carry. A cache hit would unpack through the boxed path and diverge
     // from a cold build, so optional programs disable the cache.
     if g_optrep_on != 0:
-        cache_enabled = 0
-    // The debug legacy-if mode changes generated IR without changing the cache
-    // key, so a warm default entry would silently override the flag.
-    if cli_has("legacy-if") != 0:
         cache_enabled = 0
     // Hidden mutation hook: skip intern-journal replay on load to reproduce the
     // original defect. Real builds never set it.

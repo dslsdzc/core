@@ -613,9 +613,7 @@ def _build_v10(tmp: Path, source: str = E2E_SOURCE, name: str = "e2e"):
     src = tmp / f"{name}.cr"
     ccr = tmp / f"{name}.ccr"
     src.write_text(source, encoding="utf-8")
-    # This suite pins the container shape, not the if lowering. Keep the
-    # prelude's ifs on IR_BRANCH so the empty-CASE assertions stay meaningful.
-    r = _run([COREC, "ccr", src, "-o", ccr, "--legacy-if"])
+    r = _run([COREC, "ccr", src, "-o", ccr])
     assert r.returncode == 0, f"corec ccr failed: {r.stdout}\n{r.stderr}"
     return ccr.read_bytes()
 
@@ -650,8 +648,11 @@ def test_v10_end_to_end():
         expected += size
     assert expected == len(data)
 
-    # CASE is the empty table: 4B case_count = 0.
-    assert segment(data, 9) == struct.pack("<I", 0)
+    # CASE: 4B count followed by 24B rows. The prelude's condition branches
+    # make the table nonempty even for a source with no explicit match.
+    case = segment(data, 9)
+    (case_count,) = struct.unpack_from("<I", case, 0)
+    assert len(case) == 4 + case_count * 24, (len(case), case_count)
 
     # ENT is 24B per record and carries no home field.
     ent = segment(data, 6)
