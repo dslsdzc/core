@@ -771,7 +771,7 @@ fn box_for_slot_flag(val_node: int, val_var: int, is_opt: int) -> int:
     emit(IR_CONST, zb, 0, 0, 0, TI_INT)
     isb := new_ir_var("box_isbare", TI_INT)
     emit(IR_BINARY, isb, enc, zb, OP_EQ, 0)
-    emit(IR_BRANCH, -1, isb, bare_lbl, keep_lbl, 0)
+    emit_cond_match(isb, keep_lbl, bare_lbl)
     emit(IR_LABEL, -1, bare_lbl, 0, 0, 0)
     boxv := emit_box_some(val_var)
     emit(IR_STORE, -1, dest, boxv, 0, 0)
@@ -882,7 +882,7 @@ fn opt_cmp_extract_boxed(var: int, out_absent: int, out_val: int, zero: int):
     none_lbl := new_label()
     some_lbl := new_label()
     xend_lbl := new_label()
-    emit(IR_BRANCH, -1, isnone, none_lbl, some_lbl, 0)
+    emit_cond_match(isnone, some_lbl, none_lbl)
     emit(IR_LABEL, -1, none_lbl, 0, 0, 0)
     one := new_ir_var("_o1", TI_INT)
     emit(IR_CONST, one, 1, 0, 0, TI_INT)
@@ -917,7 +917,7 @@ fn opt_cmp_norm(node: int, var: int, out_absent: int, out_val: int):
         nend_lbl := new_label()
         isb := new_ir_var("rep_isbare", TI_INT)
         emit(IR_BINARY, isb, enc, zero, OP_EQ, 0)
-        emit(IR_BRANCH, -1, isb, bare_lbl, boxed_lbl, 0)
+        emit_cond_match(isb, boxed_lbl, bare_lbl)
         emit(IR_LABEL, -1, bare_lbl, 0, 0, 0)
         emit(IR_STORE, -1, out_absent, zero, 0, 0)
         if var >= 0:
@@ -991,6 +991,21 @@ fn lat_case_set_target(idx: int, label: int):
     if idx < 0 || idx >= g_lat_case_count:
         return
     cell_store32(g_lat_case, idx * CCR_V10_CASE_DISK + CCR_CASE_TARGET, label)
+
+// One nonzero-test decision node: false is CASE 0, true is DEFAULT. When the
+// true target is the next label the backend emits test/jne without falling
+// through into an explicit jump.
+fn emit_cond_match(cond_var: int, false_lbl: int, true_lbl: int):
+    if cli_has("legacy-if") != 0:
+        // Fixture-only mode: keep the pre-unification binary branch so synthetic
+        // CASE images retain their original shape.
+        emit(IR_BRANCH, -1, cond_var, true_lbl, false_lbl, 0)
+        return
+    case_base := g_lat_case_count
+    lat_case_append(0, CCR_CASE_KIND_VALUE, -1, false_lbl, 0)
+    lat_case_append(0, CCR_CASE_KIND_DEFAULT, -1, true_lbl, 0)
+    emit(IR_MATCH, -1, cond_var, case_base, 2, 0)
+    g_cir_has_match = 1
 
 fn bind_local(name_idx: int, var_idx: int):
     grow_ir_locals(g_ir_local_count + 1)
@@ -1085,7 +1100,7 @@ fn gen_structpat_field_test(sub: int, fv: int, fall: int) -> int:
         emit(IR_CALL, cmp_var, eq0, 2, str_intern("str_eq"), TI_BOOL)
     else:
         return -1
-    emit(IR_BRANCH, -1, cmp_var, ok_lbl, fall, 0)
+    emit_cond_match(cmp_var, fall, ok_lbl)
     emit(IR_LABEL, -1, ok_lbl, 0, 0, 0)
     return 1
 
@@ -1563,7 +1578,7 @@ fn dex_bits_to_scaled(var: int) -> int:
     neg_lbl := new_label()
     merge_lbl := new_label()
     mrg := new_ir_var("_dxmrg", TI_DEX)
-    emit(IR_BRANCH, -1, negc, neg_lbl, pos_lbl, 0)
+    emit_cond_match(negc, pos_lbl, neg_lbl)
     emit(IR_LABEL, -1, pos_lbl, 0, 0, 0)
     rp := new_ir_var("_dxrp", TI_DEX)
     emit(IR_BINARY, rp, m, half, OP_ADD, TI_DEX)  // m ≥ 0：+0.5
@@ -1887,9 +1902,9 @@ fn gen_expr(node: int) -> int:
             merge_lbl := new_label()
             logic_result := new_ir_var("logic", TI_BOOL)
             if op == OP_AND:
-                emit(IR_BRANCH, -1, left_var, right_lbl, short_lbl, 0)
+                emit_cond_match(left_var, short_lbl, right_lbl)
             else:
-                emit(IR_BRANCH, -1, left_var, short_lbl, right_lbl, 0)
+                emit_cond_match(left_var, right_lbl, short_lbl)
 
             emit(IR_LABEL, -1, short_lbl, 0, 0, 0)
             short_value := new_ir_var("logic_short", TI_BOOL)
@@ -2937,11 +2952,7 @@ fn gen_expr(node: int) -> int:
             false_lbl : ., mut = merge_lbl
             if else_node >= 0:
                 false_lbl = else_lbl
-            case_base := g_lat_case_count
-            lat_case_append(0, CCR_CASE_KIND_VALUE, -1, false_lbl, 0)
-            lat_case_append(0, CCR_CASE_KIND_DEFAULT, -1, then_lbl, 0)
-            emit(IR_MATCH, -1, cond_var, case_base, 2, 0)
-            g_cir_has_match = 1
+            emit_cond_match(cond_var, false_lbl, then_lbl)
         result_var : ., mut = -1
         result_rep : ., mut = -1
         emit(IR_LABEL, -1, then_lbl, 0, 0, 0)
@@ -3028,7 +3039,7 @@ fn gen_expr(node: int) -> int:
         emit(IR_LABEL, -1, header_lbl, 0, 0, 0)
         cond_var := gen_expr(cond)
         cond_var = force_if_thunk(cond_var)
-        emit(IR_BRANCH, -1, cond_var, body_lbl, exit_lbl, 0)
+        emit_cond_match(cond_var, exit_lbl, body_lbl)
         emit(IR_LABEL, -1, body_lbl, 0, 0, 0)
         emit(IR_ARENA_NEW, arena_var, 0, 0, 0, 0)
         arena_instr := g_ir_instr_count - 1
@@ -3149,7 +3160,7 @@ fn gen_expr(node: int) -> int:
         emit(IR_LABEL, -1, header_lbl, 0, 0, 0)
         cond_var := new_ir_var("for_cond", TI_INT)
         emit(IR_BINARY, cond_var, ivar, end_var, OP_LT, 0)
-        emit(IR_BRANCH, -1, cond_var, body_lbl, exit_lbl, 0)
+        emit_cond_match(cond_var, exit_lbl, body_lbl)
         // Body
         emit(IR_LABEL, -1, body_lbl, 0, 0, 0)
         emit(IR_ARENA_NEW, arena_var, 0, 0, 0, 0)
@@ -3430,7 +3441,7 @@ fn gen_expr(node: int) -> int:
                         emit(IR_BINARY, cmp_var, tag_var, vtag, OP_EQ, 0)
                         if has_next == 1:
                             fall_lbl = new_label()
-                        emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
+                        emit_cond_match(cmp_var, fall_lbl, body_lbl)
                     else:
                         is_some_pat : ., mut = 0
                         if str_eq(istr_get(variant_ni), "Some") != 0:
@@ -3448,9 +3459,9 @@ fn gen_expr(node: int) -> int:
                         // Some：裸 -> 直接命中；装箱 -> 落 tag 比对。None：裸 -> 不命中（落 fall）；
                         // 装箱 -> 落 tag 比对。
                         if is_some_pat != 0:
-                            emit(IR_BRANCH, -1, isb, body_lbl, tag_lbl, 0)
+                            emit_cond_match(isb, tag_lbl, body_lbl)
                         else:
-                            emit(IR_BRANCH, -1, isb, tag_lbl, fall_lbl, 0)
+                            emit_cond_match(isb, fall_lbl, tag_lbl)
                         emit(IR_LABEL, -1, tag_lbl, 0, 0, 0)
                         tag_var := new_ir_var("tag", TI_INT)
                         emit(IR_LOAD_ENUM_TAG, tag_var, match_val, 0, 0, 0)
@@ -3458,7 +3469,7 @@ fn gen_expr(node: int) -> int:
                         emit(IR_CONST, vtag, variant_ni, 0, 0, TI_INT)
                         cmp_var := new_ir_var("cmp", TI_INT)
                         emit(IR_BINARY, cmp_var, tag_var, vtag, OP_EQ, 0)
-                        emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
+                        emit_cond_match(cmp_var, fall_lbl, body_lbl)
             else if pat_kind == EXPR_STRUCTPAT:
                 // Struct pattern: sequential field tests. The lowerer never
                 // classifies struct patterns as MATCH, so this is the only path.
@@ -3573,7 +3584,7 @@ fn gen_expr(node: int) -> int:
                 emit(IR_BINARY, cmp_var, match_val, pat_val, OP_EQ, 0)
                 if has_next == 1:
                     fall_lbl = new_label()
-                emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
+                emit_cond_match(cmp_var, fall_lbl, body_lbl)
             else if pat_kind == EXPR_BOOL:
                 pat_val := new_ir_var("pval", TI_INT)
                 pat_bool : ., mut = 0
@@ -3584,7 +3595,7 @@ fn gen_expr(node: int) -> int:
                 emit(IR_BINARY, cmp_var, match_val, pat_val, OP_EQ, 0)
                 if has_next == 1:
                     fall_lbl = new_label()
-                emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
+                emit_cond_match(cmp_var, fall_lbl, body_lbl)
             else if pat_kind == EXPR_CHAR:
                 // char 运行期值 = 字符驻留串索引；模式存同一索引（ast_int_val）。
                 // 直接比较当前值，不改 char 语义（不是 Unicode 码点）。
@@ -3595,7 +3606,7 @@ fn gen_expr(node: int) -> int:
                 emit(IR_BINARY, cmp_var, match_val, pat_val, OP_EQ, 0)
                 if has_next == 1:
                     fall_lbl = new_label()
-                emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
+                emit_cond_match(cmp_var, fall_lbl, body_lbl)
             else if pat_kind == EXPR_STRING:
                 // String patterns do not enter CASE: compare through str_eq and
                 // branch on the boolean result (the sequential path).
@@ -3610,7 +3621,7 @@ fn gen_expr(node: int) -> int:
                 emit(IR_CALL, cmp_var, eq0, 2, str_intern("str_eq"), TI_BOOL)
                 if has_next == 1:
                     fall_lbl = new_label()
-                emit(IR_BRANCH, -1, cmp_var, body_lbl, fall_lbl, 0)
+                emit_cond_match(cmp_var, fall_lbl, body_lbl)
             else:
                 // Unsupported pattern kind (struct/tuple/interpolated string/bigint).
                 // Preserve refutability: never fall through to the body.
@@ -3669,7 +3680,7 @@ fn gen_expr(node: int) -> int:
                         emit(IR_CONST, zb2, 0, 0, 0, TI_INT)
                         ib2 := new_ir_var("rep_isbare", TI_INT)
                         emit(IR_BINARY, ib2, rep_v, zb2, OP_EQ, 0)
-                        emit(IR_BRANCH, -1, ib2, bare_lbl, boxed_lbl, 0)
+                        emit_cond_match(ib2, boxed_lbl, bare_lbl)
                         emit(IR_LABEL, -1, bare_lbl, 0, 0, 0)
                         emit(IR_STORE, -1, fv, match_val, 0, 0)
                         emit(IR_JUMP, -1, end_lbl, 0, 0, 0)
@@ -4218,7 +4229,7 @@ fn gen_expr(node: int) -> int:
                 emit(IR_CONST, zb, 0, 0, 0, TI_INT)
                 ib := new_ir_var("rep_isbare", TI_INT)
                 emit(IR_BINARY, ib, rv, zb, OP_EQ, 0)
-                emit(IR_BRANCH, -1, ib, bl, xl, 0)
+                emit_cond_match(ib, xl, bl)
                 emit(IR_LABEL, -1, bl, 0, 0, 0)
                 emit(IR_STORE, -1, dest, inner, 0, 0)
                 emit(IR_JUMP, -1, xend, 0, 0, 0)
@@ -4380,7 +4391,7 @@ fn ir_gen_func(fi: int):
                     emit(IR_BINARY, isb, prv, zb, OP_EQ, 0)
                     bare_lbl := new_label()
                     end_lbl := new_label()
-                    emit(IR_BRANCH, -1, isb, bare_lbl, end_lbl, 0)
+                    emit_cond_match(isb, end_lbl, bare_lbl)
                     emit(IR_LABEL, -1, bare_lbl, 0, 0, 0)
                     boxed := emit_box_some(pvar)
                     emit(IR_STORE, -1, pvar, boxed, 0, 0)

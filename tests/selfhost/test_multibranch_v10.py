@@ -1982,8 +1982,8 @@ IF_MATCH_FIXTURES = [
     return n
 """,
         1,
-        1,
-        None,
+        2,
+        0,
     ),
     (
         "if_region",
@@ -1996,8 +1996,8 @@ IF_MATCH_FIXTURES = [
     return n
 """,
         1,
-        1,
-        None,
+        2,
+        0,
     ),
     (
         "if_logic",
@@ -2008,8 +2008,8 @@ IF_MATCH_FIXTURES = [
     return 0
 """,
         42,
-        1,
-        None,
+        2,
+        0,
     ),
 ]
 
@@ -2043,6 +2043,90 @@ def test_if_lowers_to_match_cases():
                     f"{name}: expected {branches_expected} IR_BRANCH nodes, "
                     f"got {len(branches)}"
                 )
+            plan_path = _ccr_file(tmp, data, f"{name}_plan")
+            plans, binary_emits, table_emits = _match_plan_full(
+                plan_path, only_nodes=set(matches)
+            )
+            assert len(plans) == len(matches), (name, plans)
+            assert all(plan["strategy"] == "two-way-zero" for plan in plans), (
+                name,
+                plans,
+            )
+            assert binary_emits == 0 and table_emits == 0, (
+                name,
+                binary_emits,
+                table_emits,
+            )
+            _assert_program(tmp, source, expected, opts=(0, 2), name=name,
+                            legacy_if=False)
+
+
+COND_BRANCH_FIXTURES = [
+    (
+        "while_match",
+        """fn main() -> int:
+    n : ., mut = 0
+    while n < 3:
+        n = n + 1
+    return n
+""",
+        3,
+    ),
+    (
+        "for_match",
+        """fn main() -> int:
+    n : ., mut = 0
+    for i in 0..3:
+        n = n + 1
+    return n
+""",
+        3,
+    ),
+    (
+        "and_match",
+        """fn main() -> int:
+    a := true
+    b := false
+    if a && b:
+        return 1
+    return 42
+""",
+        42,
+    ),
+    (
+        "or_match",
+        """fn main() -> int:
+    a := false
+    b := true
+    if a || b:
+        return 42
+    return 0
+""",
+        42,
+    ),
+]
+
+
+def test_all_condition_branches_use_match_cases():
+    """while/for/&&/|| are the same VALUE(0)+DEFAULT decision node as if."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        for name, source, expected in COND_BRANCH_FIXTURES:
+            data = _build_ccr(tmp, source, name, legacy_if=False)
+            assert _branch_nodes(data) == [], (
+                f"{name}: conditional branch still emits IR_BRANCH"
+            )
+            nodes = _nod_records(data)
+            matches = _match_nodes(data)
+            assert matches, f"{name}: no MATCH nodes"
+            for match_idx in matches:
+                part = _match_rows(data, nodes[match_idx])
+                assert [row["kind"] for row in part] == [KIND_VALUE, KIND_DEFAULT], (
+                    name,
+                    [row["kind"] for row in part],
+                )
+                assert part[0]["value"] == 0, (name, part[0]["value"])
+                _assert_targets_are_labels(data, part)
             plan_path = _ccr_file(tmp, data, f"{name}_plan")
             plans, binary_emits, table_emits = _match_plan_full(
                 plan_path, only_nodes=set(matches)
