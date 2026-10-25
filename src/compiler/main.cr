@@ -260,6 +260,7 @@ fn corec_main() -> int:
     cli_flag_bool_debug("diag-gate-report", "", "Debug: report fail-closed gate verdicts")
     cli_flag_bool_debug("dump-vcs", "", "Debug: dump spec VC list")
     cli_flag_bool_debug("dump-params", "", "Debug: dump parameter slot types")
+    cli_flag_bool_debug("legacy-if", "", "Debug hook: keep if on IR_BRANCH (synthetic fixtures)")
     cli_flag_bool_debug("timing", "", "Debug: print pass timing markers")
 
     if cli_parse() != 0:

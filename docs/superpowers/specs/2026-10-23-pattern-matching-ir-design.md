@@ -2,8 +2,9 @@
 
 > **v10 实现说明（2026-10-24）**：现行 `.ccr` 是 v10，不是本文写作时的 v9.1。
 > 多路分支在 v10 中使用 `IR_MATCH`（opcode 54）+ CASE 24B 记录
-> `{value, kind, str_index, target_nod, flags}`；`IR_BRANCH` 继续承载二元
-> `if`/`while`。本文的 v9.1 版本/段表/16B CASE 段落是历史设计，已被
+> `{value, kind, str_index, target_nod, flags}`；`if` 也已走同一节点
+> （`VALUE(0)` + `DEFAULT`，true 走 fallthrough），`IR_BRANCH` 仅承载
+> `while`/`for`/逻辑短路/边界检查等内部条件分支。本文的 v9.1 版本/段表/16B CASE 段落是历史设计，已被
 > `docs/superpowers/specs/2026-10-23-lattice-ccr-v10-design.md` §11 取代。
 > 已实现范围：int/bool/enum/string/char/struct/tuple/ident 模式、二分与密集
 > 跳转表、CIR CASE 区间持久化。下文保留历史决策与推导。

@@ -2920,10 +2920,25 @@ fn gen_expr(node: int) -> int:
         then_lbl := new_label()
         else_lbl := new_label()
         merge_lbl := new_label()
-        if else_node >= 0:
-            emit(IR_BRANCH, -1, cond_var, then_lbl, else_lbl, 0)
+        if cli_has("legacy-if") != 0:
+            // Debug-only path for synthetic CASE fixtures: keep the old binary
+            // branch so their hand-built CASE images keep their original shape.
+            if else_node >= 0:
+                emit(IR_BRANCH, -1, cond_var, then_lbl, else_lbl, 0)
+            else:
+                emit(IR_BRANCH, -1, cond_var, then_lbl, merge_lbl, 0)
         else:
-            emit(IR_BRANCH, -1, cond_var, then_lbl, merge_lbl, 0)
+            // v10 unified decision node: false is CASE 0, true falls through to
+            // then. This keeps the then-first block layout used by IR_BRANCH and
+            // avoids an extra jump in the backend's two-way-zero path.
+            false_lbl : ., mut = merge_lbl
+            if else_node >= 0:
+                false_lbl = else_lbl
+            case_base := g_lat_case_count
+            lat_case_append(0, CCR_CASE_KIND_VALUE, -1, false_lbl, 0)
+            lat_case_append(0, CCR_CASE_KIND_DEFAULT, -1, then_lbl, 0)
+            emit(IR_MATCH, -1, cond_var, case_base, 2, 0)
+            g_cir_has_match = 1
         emit(IR_LABEL, -1, then_lbl, 0, 0, 0)
         gen_expr(then_node)
         emit(IR_JUMP, -1, merge_lbl, 0, 0, 0)
