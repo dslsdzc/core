@@ -2013,6 +2013,20 @@ def test_if_lowers_to_match_cases():
                     f"{name}: expected {branches_expected} IR_BRANCH nodes, "
                     f"got {len(branches)}"
                 )
+            plan_path = _ccr_file(tmp, data, f"{name}_plan")
+            plans, binary_emits, table_emits = _match_plan_full(
+                plan_path, only_nodes=set(matches)
+            )
+            assert len(plans) == len(matches), (name, plans)
+            assert all(plan["strategy"] == "two-way-zero" for plan in plans), (
+                name,
+                plans,
+            )
+            assert binary_emits == 0 and table_emits == 0, (
+                name,
+                binary_emits,
+                table_emits,
+            )
             _assert_program(tmp, source, expected, opts=(0, 2), name=name,
                             legacy_if=False)
 

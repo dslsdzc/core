@@ -386,7 +386,9 @@ fn dump_match_plan():
             print(" nondefault ")
             print_i(e2_match_nondefault_count(ms, mc))
             print(" strategy ")
-            if e2_match_table_span(ms, mc) > 0:
+            if e2_match_two_way_zero(ni, ms, mc) != 0:
+                print("two-way-zero")
+            else if e2_match_table_span(ms, mc) > 0:
                 print("table")
             else if e2_match_use_binary(ms, mc) != 0:
                 print("binary")
