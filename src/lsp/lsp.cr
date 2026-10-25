@@ -83,13 +83,24 @@ fn lsp_json_escape_str(s: string) -> string:
 
 // One diagnostic as a JSON object. Convert 1-based positions to 0-based and use severity 1.
 fn lsp_diag_json(di: int) -> string:
-    ln := cell_load(g_diags, di * DIAG_REC_SIZE + 16)
-    cl := cell_load(g_diags, di * DIAG_REC_SIZE + 24)
+    ln : ., mut = cell_load(g_diags, di * DIAG_REC_SIZE + 16)
+    cl : ., mut = cell_load(g_diags, di * DIAG_REC_SIZE + 24)
+    smf := cell_load(g_diags, di * DIAG_REC_SIZE + 40)
+    slo := cell_load(g_diags, di * DIAG_REC_SIZE + 48)
     msg := load_str_ptr(g_diags, di * DIAG_REC_SIZE + 8)
-    // Diagnostics carry concatenated line coordinates. Convert them back to the
-    // owning file so imported files do not report lines past their own EOF.
-    off := analysis_line_offset(ln)
-    line0 : ., mut = ln - 1 - off
+    // Diagnostics carry a file-local span when one is available. For line-only
+    // diagnostics, convert the flat SourceManager line back to the owning file.
+    if smf >= 0:
+        ln = sm_location_line(smf, slo)
+        cl = sm_location_col(smf, slo)
+    else:
+        fni := cell_load(g_diags, di * DIAG_REC_SIZE + 32)
+        sm : ., mut = file_sm_id(fni)
+        if sm < 0:
+            sm = sm_for_line(ln)
+        if sm >= 0:
+            ln = ln - sm_file_line_base(sm)
+    line0 : ., mut = ln - 1
     if line0 < 0:
         line0 = 0
     col0 : ., mut = cl - 1

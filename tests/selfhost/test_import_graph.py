@@ -9,6 +9,7 @@ Oracle:
   * nested imports are discovered without concatenating source text.
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -107,6 +108,93 @@ def cache_invalidation(tmp):
     return True
 
 
+def lsp_import_positions(tmp):
+    root = Path(tmp) / "lsp"
+    root.mkdir()
+    write(root / "lib.cr", "struct Point:\n    x: int\n\nfn bad() -> int:\n    return \"s\"\n\nfn answer() -> int:\n    return 42\n")
+    write(root / "main.cr", "import lib\nfn main() -> int:\n    p := Point { x = 2 }\n    return answer() + p.x + bad()\n")
+    main = root / "main.cr"
+
+    proc = subprocess.Popen(
+        [str(BASE / "build" / "corelsp")],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+
+    def send(msg):
+        body = json.dumps(msg).encode()
+        proc.stdin.write(f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+        proc.stdin.flush()
+
+    def read():
+        headers = {}
+        while True:
+            line = proc.stdout.readline()
+            if line in (b"\r\n", b"\n"):
+                break
+            if not line:
+                return None
+            k, _, v = line.decode().partition(":")
+            headers[k.strip().lower()] = v.strip()
+        return json.loads(proc.stdout.read(int(headers["content-length"])))
+
+    uri = "file://" + str(main)
+    try:
+        send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+        read()
+        send({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {"textDocument": {"uri": uri, "version": 1, "text": main.read_text()}},
+        })
+        main_diag = read()
+        lib_diag = read()
+        if lib_diag is None or lib_diag.get("method") != "textDocument/publishDiagnostics":
+            print(f"[FAIL] lsp_import_positions: no diagnostics frame: {lib_diag}")
+            return False
+        uri_out = lib_diag["params"]["uri"]
+        diags = lib_diag["params"]["diagnostics"]
+        if not uri_out.endswith("/lib.cr") or not diags:
+            print(f"[FAIL] lsp_import_positions: wrong file or empty: {lib_diag}")
+            return False
+        line0 = diags[0]["range"]["start"]["line"]
+        if line0 != 4:
+            print(f"[FAIL] lsp_import_positions: local line {line0} != 4\n{lib_diag}")
+            return False
+        send({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "textDocument/definition",
+            "params": {"textDocument": {"uri": uri}, "position": {"line": 3, "character": 13}},
+        })
+        definition = read()
+        result = definition.get("result") if definition else None
+        if result is None or not result["uri"].endswith("/lib.cr") or result["range"]["start"]["line"] != 6:
+            print(f"[FAIL] lsp_import_positions: function definition {result}")
+            return False
+        send({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "textDocument/definition",
+            "params": {"textDocument": {"uri": uri}, "position": {"line": 2, "character": 10}},
+        })
+        struct_def = read()
+        struct_result = struct_def.get("result") if struct_def else None
+        if struct_result is None or not struct_result["uri"].endswith("/lib.cr") or struct_result["range"]["start"]["line"] != 0:
+            print(f"[FAIL] lsp_import_positions: struct definition {struct_result}")
+            return False
+        print("[PASS] lsp_import_positions: local diagnostic line + imported fn/struct definition")
+        return True
+    finally:
+        try:
+            send({"jsonrpc": "2.0", "id": 9, "method": "shutdown"})
+            proc.stdin.close()
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+
+
 def main():
     ok = []
     with tempfile.TemporaryDirectory(prefix="core_import_") as tmp:
@@ -160,6 +248,7 @@ def main():
             want_text=("ghost",),
         ))
         ok.append(cache_invalidation(tmp))
+        ok.append(lsp_import_positions(tmp))
     print("import graph: %d/%d" % (sum(1 for x in ok if x), len(ok)))
     return 0 if all(ok) else 1
 

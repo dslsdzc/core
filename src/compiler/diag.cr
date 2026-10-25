@@ -5,50 +5,15 @@
 // ─── helpers ────────────────────────────────────────────────────
 
 fn read_source_line(line: int) -> string:
-    // Prefer the SourceManager row for the flat line. Legacy callers with no
-    // file mapping fall back to the main-file scan below.
+    // Every parsed line belongs to a SourceManager file. Manifest lines have no
+    // fileid and resolve through the line-range fallback.
     sm : ., mut = file_sm_id(diag_fileid_for_line(line))
     if sm < 0:
         sm = sm_for_line(line)
-    if sm >= 0:
-        local := line - sm_file_line_base(sm)
-        txt := sm_line_text(sm, local)
-        if str_len(txt) > 0:
-            return txt
-    slen := str_len(g_source)
-    cur : ., mut = 1
-    start : ., mut = 0
-    i : ., mut = 0
-    loop:
-        if i >= slen:
-            break
-        if cur == line:
-            j : ., mut = i
-            loop:
-                if j >= slen:
-                    break
-                c := get_char(g_source, j)
-                if c == "\n":
-                    break
-                j = j + 1
-            return str_sub(g_source, i, j - i)
-        if cell_load_byte(g_source, i) == 10:
-            cur = cur + 1
-            start = i + 1
-        i = i + 1
-    return ""
-
-fn source_line_count() -> int:
-    count : ., mut = 1
-    i : ., mut = 0
-    slen := str_len(g_source)
-    loop:
-        if i >= slen:
-            break
-        if cell_load_byte(g_source, i) == 10:
-            count = count + 1
-        i = i + 1
-    return count
+    if sm < 0:
+        return ""
+    local := line - sm_file_line_base(sm)
+    return sm_line_text(sm, local)
 
 fn print_source_text(line: int, col: int, ltxt: string, annotation: string):
     if line <= 0:
@@ -92,8 +57,8 @@ fn print_source_text(line: int, col: int, ltxt: string, annotation: string):
         print(str_sub(annotation, 0, cutoff))
     println("")
 
-// Legacy entry: render a line from the global g_source. Used only when a
-// diagnostic has no SourceManager span.
+// Render a line through the SourceManager line map. Used when a diagnostic has
+// no source span.
 fn print_source_line(line: int, col: int, annotation: string):
     if line <= 0:
         return
@@ -137,7 +102,6 @@ fn diag_fileid_for_line(line: int) -> int:
 fn print_diagnostics():
     if g_diag_count == 0:
         return
-    source_lines := source_line_count()
     di : ., mut = 0
     loop:
         if di >= g_diag_count:

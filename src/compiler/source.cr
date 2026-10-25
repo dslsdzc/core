@@ -42,6 +42,7 @@ fn sm_reset():
     g_sm_file_count = 0
     g_sm_line_count = 0
     g_sm_file_lib_count = 0
+    g_prelude_sm = -1
 
 fn grow_sm_files(needed: int):
     if needed <= g_sm_file_cap:

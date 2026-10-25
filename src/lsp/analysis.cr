@@ -1,7 +1,7 @@
 // === analysis.cr ===
 // Hover and go-to-definition for the LSP: position to token to symbol lookup.
 // Queries read the snapshot from the last successful check (g_tokens, g_funcs,
-// g_structs, g_enums, g_ast, g_types, g_files, segment tables, and g_source).
+// g_structs, g_enums, g_ast, g_types, g_files, and the main source text).
 // They do not run a check or modify frontend state.
 //
 // Coordinates: entry line and col are LSP 0-based. Tokens, AST nodes, and line
@@ -10,12 +10,13 @@
 // Declaration lookup:
 // - functions: fi_ast_node gives the EXPR_FN node's line and col.
 // - structs and enums: the parser does not create declaration AST nodes, so scan
-//   g_tokens for T_STRUCT or T_ENUM followed by the matching identifier.
+//   the main token stream and then imported token streams for T_STRUCT or T_ENUM
+//   followed by the matching identifier.
 // - locals: g_syms is popped after check_all, so scan g_ast for the nearest
 //   EXPR_LET, EXPR_PARAM, or EXPR_FOR with the same name before the query.
 //
 // Cross-file: declaration line to g_line_fileid to the g_files path. Subtract the
-// segment's line offset to get the target file's own coordinates.
+// owning SourceManager line base to get the target file's own coordinates.
 //
 // String building uses literal-initialized accumulators. Do not name a variable
 // match: it is reserved in the bootstrap parser and crashes.
@@ -466,6 +467,43 @@ fn analysis_hover(line: int, col: int) -> string:
 
 // Definition.
 
+// Result of a cross-file declaration scan. The token stream is restored to the
+// main file before the caller reads these fields.
+g_decl_line : int, mut
+g_decl_col : int, mut
+
+fn analysis_restore_main_tokens():
+    g_source = sm_file_text(g_main_sm)
+    g_source_len = str_len(g_source)
+    g_source_file = g_main_sm
+    g_line_base = sm_file_line_base(g_main_sm)
+    tokenize(g_main_sm, 0)
+
+// Find a struct/enum declaration in the main file or any imported file.
+// Struct and enum declarations have no AST node, so this scans token streams.
+fn analysis_decl_any(kw: int, name_ni: int) -> int:
+    d := analysis_decl_tok(kw, name_ni)
+    if d >= 0:
+        g_decl_line = cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE)
+        g_decl_col = cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_COL)
+        return 1
+    i : ., mut = 0
+    loop:
+        if i >= g_import_count:
+            break
+        sm := cell_load(g_import_sm, i * 8)
+        if sm != g_main_sm:
+            tokenize(sm, 0)
+            d2 := analysis_decl_tok(kw, name_ni)
+            if d2 >= 0:
+                g_decl_line = cell_load(g_tokens, d2 * ESZ_TOKEN + OFF_TK_LINE)
+                g_decl_col = cell_load(g_tokens, d2 * ESZ_TOKEN + OFF_TK_COL)
+                analysis_restore_main_tokens()
+                return 1
+        i = i + 1
+    analysis_restore_main_tokens()
+    return 0
+
 // Scan g_tokens for T_STRUCT or T_ENUM followed by the matching identifier.
 // Returns the name token index, or -1. Struct and enum declarations have no AST
 // node; see the file header.
@@ -566,18 +604,14 @@ fn analysis_definition(line: int, col: int) -> string:
         if fn_node >= 0:
             return analysis_def_json(ast_line(fn_node), ast_col(fn_node))
         return ""
-    // 结构体 / 枚举（令牌反查声明）
+    // 结构体 / 枚举（令牌反查声明；主文件找不到时扫描导入文件）
     if analysis_type_visible(name_ni) != 0:
         if find_struct_by_name(name_ni) >= 0:
-            d := analysis_decl_tok(T_STRUCT, name_ni)
-            if d >= 0:
-                return analysis_def_json(cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE),
-                    cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_COL))
+            if analysis_decl_any(T_STRUCT, name_ni) != 0:
+                return analysis_def_json(g_decl_line, g_decl_col)
         if find_enum(name_ni) >= 0:
-            d := analysis_decl_tok(T_ENUM, name_ni)
-            if d >= 0:
-                return analysis_def_json(cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_LINE),
-                    cell_load(g_tokens, d * ESZ_TOKEN + OFF_TK_COL))
+            if analysis_decl_any(T_ENUM, name_ni) != 0:
+                return analysis_def_json(g_decl_line, g_decl_col)
     return ""
 
 // Completion: position to prefix, then filter candidates and emit JSON.

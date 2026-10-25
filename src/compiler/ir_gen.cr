@@ -6459,6 +6459,8 @@ fn text_has_marker(text: string, marker: string) -> int:
 fn ccr_source_has_marker(marker: string) -> int:
     // Scan every file in the import graph, not just the main file. A marker in
     // an imported compiler file still selects the compiler-specific lowering.
+    if g_prelude_sm >= 0 && text_has_marker(sm_file_text(g_prelude_sm), marker) != 0:
+        return 1
     i : ., mut = 0
     loop:
         if i >= g_import_count:
@@ -6563,6 +6565,16 @@ fn func_fingerprint(func_node: int) -> int:
         source_hash : ., mut = 2166136261
         // Hash every graph file in parse order. Hashing only the main file
         // would let an edit in an imported file reuse a stale cache entry.
+        if g_prelude_sm >= 0:
+            ptxt := sm_file_text(g_prelude_sm)
+            pp : ., mut = 0
+            plen := str_len(ptxt)
+            loop:
+                if pp >= plen:
+                    break
+                source_hash = source_hash * 16777619 + cell_load_byte(ptxt, pp)
+                pp = pp + 1
+            source_hash = source_hash * 16777619 + 10
         gi : ., mut = 0
         loop:
             if gi >= g_import_count:

@@ -446,6 +446,12 @@ g_import_cap : int, mut
 g_main_sm : int, mut
 g_main_fni : int, mut
 g_source_path : string, mut
+// Static builds parse rt.cr before the main file. The prelude is a real
+// SourceManager file but has no fileid and is not an import module.
+g_prelude_src : string, mut
+g_prelude_path : string, mut
+g_prelude_sm : int, mut
+g_prelude_pending : int, mut
 // 1 = parse_all is continuing an already-reset multi-file parse.
 g_parse_multi_keep : int, mut
 g_file_count : int, mut

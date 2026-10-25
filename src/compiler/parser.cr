@@ -2874,6 +2874,12 @@ fn parse_all():
 
 fn parse_all_files():
     g_parse_multi_keep = 0
+    // Static runtime declarations precede main, as they did when rt.cr was
+    // prepended to the source text.
+    if g_prelude_sm >= 0:
+        tokenize(g_prelude_sm, 0)
+        parse_all()
+        g_parse_multi_keep = 1
     i : ., mut = 0
     loop:
         if i >= g_import_count:

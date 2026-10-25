@@ -131,6 +131,13 @@ fn run_frontend(source_name: string) -> int:
     if str_len(attributed_name) == 0:
         attributed_name = "<source>"
     source_file := sm_add_file(attributed_name, g_source)
+    // Static builds keep rt.cr as its own file. Consume the pending prelude
+    // text here so a later compile in the same process cannot reuse it.
+    if g_prelude_pending != 0:
+        g_prelude_sm = sm_add_file(g_prelude_path, g_prelude_src)
+        g_prelude_src = ""
+        g_prelude_path = ""
+        g_prelude_pending = 0
     println("[1/5] tokenize...")
     tokenize(source_file, 0)
     println("[2/5] resolve imports...")
@@ -454,7 +461,9 @@ fn corec_main() -> int:
         if str_len(rt_src) == 0:
             println("error: cannot locate src/runtime/rt.cr")
             return 1
-        g_source = rt_src + "\n" + g_source
+        g_prelude_src = rt_src
+        g_prelude_path = target_static_runtime_source()
+        g_prelude_pending = 1
 
     fe_rc := run_frontend(src_path)
     if fe_rc != 0:

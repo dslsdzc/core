@@ -48,10 +48,13 @@ deleted in the same change as the per-file parse path; there was no
       `reg_fileid_sm` / `file_sm_id` read and write the new column.
 - [x] Build `g_line_fileid` from SourceManager ranges in `build_line_fileid`.
 - [x] Store SourceManager paths as raw strings, not interned names.
-- [x] `read_source_line` resolves the global line to its owning file.
+- [x] `read_source_line` resolves the global line to its owning file. The old
+      main-text fallback is deleted.
 - [x] `check_error`/`diag_type_incompatible` resolve the owning file before
       computing a span; diagnostics print `path:local_line:col`.
 - [x] `print_diagnostics` prints no path only for the main file.
+- [x] S1P source fragments resolve through SourceManager instead of scanning
+      `g_source`.
 
 ### Task 2: Import graph discovery
 
@@ -69,8 +72,8 @@ deleted in the same change as the per-file parse path; there was no
       target roots, and `.so` index registration.
 - [x] `import_add` deduplicates by fileid, registers SourceManager + `g_files` +
       `g_mods`, and appends to the parse list.
-- [x] `res_imports` seeds main, scans manifests, scans main, then BFS-scans the
-      growing import list.
+- [x] `res_imports` seeds main, scans manifests, scans the static prelude
+      (when present), scans main, then BFS-scans the growing import list.
 
 ### Task 3: Per-file parse
 
@@ -86,18 +89,25 @@ deleted in the same change as the per-file parse path; there was no
 - [x] Remove the `<combined>` attribution and the `g_source_combined` flag.
 - [x] Delete the segment tables (`g_seg_*`, `grow_segs`) that only served the
       concatenated line map.
+- [x] `--static` registers `rt.cr` as a prelude SourceManager file instead of
+      prepending its text. The prelude parses before main, has no fileid, and
+      does not shift user line numbers.
 
 ### Task 4: Cache and source consumers
 
 **Files:** `src/compiler/ir_gen.cr`, `src/lsp/analysis.cr`,
 `src/lsp/lsp.cr`
 
-- [x] `ccr_source_has_marker` scans every graph file.
-- [x] `func_fingerprint` hashes every graph file in parse order.
+- [x] `ccr_source_has_marker` scans the prelude and every graph file.
+- [x] `func_fingerprint` hashes the prelude and every graph file in parse order.
 - [x] LSP re-tokenizes the main file after parsing.
 - [x] LSP path lookup uses 24-byte `g_files` records.
 - [x] `analysis_line_offset` returns the SourceManager line base.
 - [x] Definition JSON resolves the owning file and file-local line/column.
+- [x] Function definition uses the AST node line; struct and enum definition
+      scan the import graph and restore the main token stream.
+- [x] LSP diagnostic ranges use the source span when present and subtract the
+      owning file's line base for line-only diagnostics.
 - [x] Semantic tokens operate on the restored main token stream.
 
 ### Task 5: Regression coverage and verification
@@ -111,6 +121,10 @@ deleted in the same change as the per-file parse path; there was no
 - [x] Two files failing on line 2 each keep their own path.
 - [x] `_import.cr` declarations are invisible to the program.
 - [x] Editing only `lib.cr` changes the rebuilt binary from 42 to 7.
+- [x] LSP reports an imported diagnostic on its file-local line and resolves
+      imported function and struct definitions.
+- [x] `--static` user diagnostics keep the user file's local line; imported
+      files keep their own path.
 - [x] Mount `test_import_graph.py` in `selfhost-tests`.
 - [x] Re-lock canary values after attribution (see
       `tools/baseline/canary_values.tsv`).
@@ -124,7 +138,7 @@ deleted in the same change as the per-file parse path; there was no
 | `./build/corec selftest-source` | 16/16 |
 | `./build/corec selftest-types` | 417/417 |
 | `./build/corec selftest-purity` | 26/26 |
-| `python3 tests/selfhost/test_import_graph.py` | 6/6 |
+| `python3 tests/selfhost/test_import_graph.py` | 7/7 |
 | `python3 tests/selfhost/test_compile.py` | pass |
 | `python3 tests/selfhost/test_multibranch_v10.py` | 70/70 |
 | `python3 tests/selfhost/test_cir_warm_path.py` | 19/19 |
@@ -132,3 +146,18 @@ deleted in the same change as the per-file parse path; there was no
 | V4 suite (`inference`, `for_sequence`, `auto_constraint`, `no_generic_syntax`, `return_inference`, `field_inference`, `generic_enum`, `len`, `ambiguous_constraint`) | all green |
 | `python3 tests/selfhost/test_collections_v4.py` | rc=42 |
 | `test_cir_cache_warm_restore_remaps_shifted_case_targets` | passes; `.ccr` is path-independent |
+| `CI_JOB_NAME=selfhost-tests src/ci/run.sh` | rc=0, canary 5/5 |
+| `CI_JOB_NAME=suite src/ci/run.sh` | rc=0, ALL PASS |
+| `CI_JOB_NAME=full-bootstrap src/ci/run.sh` | rc=0, corec2 == corec3 |
+
+## Remaining Boundary
+
+SourceManager now owns every parsed file, including the static runtime and
+manifests. Two limits are intentional:
+
+- AST nodes store `(line, col)`, not a file id or span. File ownership is
+  recovered from the global line table. Adding a file column would change the
+  in-memory AST layout and every accessor.
+- LSP analysis runs on the open document's token stream. Imported declarations
+  are resolved through the import graph, but interactive analysis is not a
+  multi-file token session.

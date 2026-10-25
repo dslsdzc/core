@@ -48,29 +48,34 @@ spaces; `file_sm_id(fni)` maps back. Main file is always SourceManager id 0.
    fileid: they never enter the parse list and must not add a compiler-internal
    identifier to the program string table. Line-only diagnostics resolve their
    text through `sm_for_line`.
-3. Scan the main file's `T_IMPORT` tokens for edges.
-4. BFS: for each queued file, tokenize it and scan its `T_IMPORT` tokens with the
+3. In a static build, scan the prelude (`rt.cr`) before the main file. The
+   prelude is a SourceManager file with no fileid; it is not an import module.
+4. Scan the main file's `T_IMPORT` tokens for edges.
+5. BFS: for each queued file, tokenize it and scan its `T_IMPORT` tokens with the
    same resolution rules as before (project imports, aliases, `::` paths,
    target import roots, `$HOME/.core/lib` indexes). Resolve each edge to text +
    path + fileid, deduplicate by fileid, append to the worklist and to `g_mods`
    (the module row stores alias, fileid, and path).
-5. Build the flat line table from SourceManager line bases and restore `g_source`
+6. Build the flat line table from SourceManager line bases and restore `g_source`
    to the main file text.
 
-The parse order is main first, then imports in discovery order (manifest edges,
-main edges, BFS waves). This preserves the old declaration order.
+The parse order is prelude (static only), main, then imports in discovery order
+(manifest edges, main edges, BFS waves). This preserves the old declaration
+order.
 
 ### Parsing
 
 `parse_all()` keeps its reset block behind `g_parse_multi_keep`: the first call
 resets declaration tables, later calls only reset the token cursor and
-`g_want_value`. `parse_all_files()` walks `g_import_sm`:
+`g_want_value`. `parse_all_files()` parses the prelude (static only), then walks
+`g_import_sm`:
 
 1. `tokenize(sm_id, 0)` (sets `g_source_file`, `g_source`, line base).
 2. `parse_all()`.
 
-AST node lines are global. AST nodes keep their existing layout (no file
-column), so there is no AST or `.ccr` schema change.
+AST node lines are global. AST nodes keep their existing layout (line and column,
+no file column), so there is no AST or `.ccr` schema change. File ownership is
+recovered from the global line table, not stored in every AST node.
 
 ### Diagnostics and source text
 
@@ -78,13 +83,14 @@ column), so there is no AST or `.ccr` schema change.
 - Line-only diagnostics resolve through `g_line_fileid`, which is built from
   SourceManager line bases instead of scanning concatenated text.
 - `read_source_line(line)` resolves `(fileid, local_line)` and reads that file's
-  own text. The old `g_source` scan remains only as a fallback for unattributed
-  lines.
-- `g_source` remains the main file text for legacy sites (S1P fragment,
-  `ccr_source_dir_is_compiler`).
-- `ccr_source_has_marker` scans every graph file.
-- The CIR cache source hash is FNV over every graph file in parse order. Hashing
-  only the main file would let an imported-file edit reuse a stale cache entry.
+  own text. There is no main-text fallback: unregistered lines return empty.
+- The S1P measurement fragment resolves the owning file through SourceManager
+  instead of scanning `g_source`.
+- `g_source` remains the main file text for the lexer and for LSP snapshots.
+- `ccr_source_has_marker` scans the prelude and every graph file.
+- The CIR cache source hash is FNV over the prelude and every graph file in parse
+  order. Hashing only the main file would let an imported-file edit reuse a stale
+  cache entry.
 
 ### LSP
 
@@ -92,12 +98,27 @@ column), so there is no AST or `.ccr` schema change.
 completion, and semantic tokens operate on the open document rather than the
 last parsed import. Definition JSON resolves the declaration's owning file via
 `g_line_fileid`/`file_sm_id` and emits file-local line/column. Function
-definition uses the AST node line, which works for imported declarations.
+definition uses the AST node line. Struct and enum definition scan token streams
+across the import graph, then restore the main stream. Diagnostic ranges use the
+diagnostic's source span when present; line-only diagnostics subtract the owning
+file's line base.
+
+## Static runtime
+
+`--static` used to prepend `rt.cr` to the main source text. It is now registered
+as SourceManager file 1, parsed before main, and never given a fileid. Main stays
+SourceManager file 0 and `g_files[0]`. User diagnostics therefore keep their own
+file-local lines instead of being offset by the runtime.
+
+## Project mode
+
+A directory build reads `main.cr` and resolves its imports. It does not
+concatenate every file in the directory.
 
 ## Non-goals
 
 - Module namespaces, visibility, or separate compilation.
 - Incremental per-file cache entries.
-- Per-file identity for project mode (directory builds still pass one
-  concatenated source string as the main file) and for the static runtime prefix.
+- An AST file/Span column. AST nodes remain `(line, col)` and rely on the global
+  SourceManager line table for file ownership.
 - Concurrency/ownership/transfer planning.

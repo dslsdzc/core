@@ -2391,7 +2391,7 @@ fn collect_decls():
         fn_line := ast_line(fn_node)
         if fn_line > 0 && fn_line <= g_line_count:
             fileid_ni := cell_load(g_line_fileid, (fn_line - 1) * 8)
-            if fileid_ni != main_fni && fileid_ni != 0 && g_line_count > 0:
+            if fileid_ni >= 0 && fileid_ni != main_fni && fileid_ni != 0 && g_line_count > 0:
                 grow_mod_funcs(g_mod_func_count + 1)
                 cell_store(g_mod_func_fileids, g_mod_func_count * 8, fileid_ni)
                 cell_store(g_mod_func_names, g_mod_func_count * 8, fi_name(fi))
@@ -3992,34 +3992,20 @@ fn interp_bool_node(node: int, inner: int) -> int:
     ast_set_type_val(node, TY_STRING)
     return TI_STR
 
-// S1P 测量辅助（只在 CORE_S1P=1 路径被调用）：从 `g_source` 取第 line 行的前 48 字符。
-// 目的 = 把合并流坐标映射回源文本（跨文件定位：本仓的 S1P 打点原本只有合并流行号，
-// 反推文件归属两种假设均对不上）。只用于测量：默认位不被调用，因此产物零足迹不受影响；
-// `str_sub` 走 alloc（不 intern），因此不向 STR 段写入额外数据。
+// S1P 测量辅助（只在 CORE_S1P=1 路径被调用）：取全局行 line 所属文件的前 48 字符。
+// 目的 = 把 S1P 的流行号映射回真实源文本。只用于测量：默认位不被调用，因此产物
+// 零足迹不受影响；`sm_line_text` 走 alloc（不 intern），不向 STR 段写入额外数据。
 fn s1p_src_frag(line: int) -> string:
-    p : ., mut = 0
-    ln : ., mut = 1
-    start : ., mut = -1
-    end : ., mut = -1
-    loop:
-        if p >= g_source_len:
-            break
-        c := cell_load_byte(g_source, p)
-        if ln == line && start < 0:
-            start = p
-        if start >= 0 && c == 10:
-            end = p
-            break
-        if c == 10:
-            ln = ln + 1
-        p = p + 1
-    if start < 0:
+    sm : ., mut = file_sm_id(diag_fileid_for_line(line))
+    if sm < 0:
+        sm = sm_for_line(line)
+    if sm < 0:
         return ""
-    if end < 0:
-        end = p
-    if end - start > 48:
-        end = start + 48
-    return str_sub(g_source, start, end - start)
+    local := line - sm_file_line_base(sm)
+    txt := sm_line_text(sm, local)
+    if str_len(txt) > 48:
+        return str_sub(txt, 0, 48)
+    return txt
 
 // ─── S1P 台账三件：检查、单实参判定、枚举环，与 s1p_arg_ring 同一契约 ───
 // 检查：进程启动时由 prelude_init 读取 `CORE_S1P`。所有类型引擎调用都必须在

@@ -210,7 +210,7 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_v4_len.py            # V4 `.len`：数组/字符串/切片/数组形参/slice header 形参/运行期长度/数组实参 coercion；7 例
     python3 tests/selfhost/test_v4_ambiguous_constraint.py # V4 同名接口方法：按返回型消歧；正例/错返回型拒绝；2 例
     python3 tests/selfhost/test_collections_v4.py    # collections.cr V4 迁移：推断形参 + `.len` + 序列迭代；rc=42
-    python3 tests/selfhost/test_import_graph.py      # import 图：每文件独立 SourceManager 身份（两文件/嵌套/真实文件+局部行诊断/同 line 双文件/清单不产声明/缓存失效）；6 例
+    python3 tests/selfhost/test_import_graph.py      # import 图：每文件独立 SourceManager 身份（两文件/嵌套/真实文件+局部行诊断/同 line 双文件/清单不产声明/缓存失效/静态构建+LSP 定义跳转）；7 例
     python3 tests/selfhost/test_diag_gate.py      # FC 批 T2：fail-closed 闸门（默认阻断 + 豁免登记表 **8 条**——TF01 于批 8 A₂ 撤条）——正控 8（表内 5 个 build 面码仍放行 + scope=check 3 条 check rc=1 不变）+ **TF01 撤条对：根因正控（chan_test check rc=0 无 TF01 + build 干净）+ 负控（真 TF01 ⇒ rc=1 + 零产物，即「撤条 ≠ 放行」）** + 负控 6（语法面 P21 / 类型面 TA02·R02·TM03·TK05 / 安全检查面 TU03：仍阻断 + **零产物**）+ 零产物 3（前端失败无半成品 / corearch 失败删本次 .ccr [stub 仿真] / 旧哨兵原样仍在）＝ **19 例**
     # ─── 批 8 A₂（条目 6）：并发 handle 类型模型对齐 —— **自门内 e2e 判据**（2026-09-18）───
     # **11 例** = 5 档并发语料 × （check 干净且**无 TF01** + build+run rc=0）+ 1 形态自证（`chan_make→string`

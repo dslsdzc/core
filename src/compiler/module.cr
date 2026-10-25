@@ -688,7 +688,12 @@ fn res_imports():
     if str_len(sic) > 0:
         import_scan_text("src/stdlib/_import.cr", sic)
 
-    // Main file edges first after the manifests, then the recursive BFS.
+    // The static runtime is a real file but not an import module. Scan its
+    // edges before the main file, matching the old prepended order.
+    if g_prelude_sm >= 0:
+        tokenize(g_prelude_sm, 0)
+        import_scan_tokens()
+    // Main file edges next, then the recursive BFS.
     tokenize(g_main_sm, 0)
     import_scan_tokens()
     idx : ., mut = 1
