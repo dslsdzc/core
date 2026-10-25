@@ -150,8 +150,8 @@ fn lsp_publish_diags():
             loop:
                 if fi >= g_file_count:
                     break
-                if cell_load(g_files, fi * 16) == fni:
-                    fp := load_str_ptr(g_files, fi * 16 + 8)
+                if cell_load(g_files, fi * 24) == fni:
+                    fp := load_str_ptr(g_files, fi * 24 + 8)
                     if str_len(fp) > 0:
                         uri = "file://" + fp
                     break
@@ -178,6 +178,7 @@ fn lsp_check_file(path: string, src: string):
     g_source_dir = dirname(path)
     reset_frontend_state()
     sm_reset()
+    g_source_path = path
     source_file := sm_add_virtual(path, src)
     tokenize(source_file, 0)
     res_imports()
@@ -186,7 +187,11 @@ fn lsp_check_file(path: string, src: string):
     // 8}; analysis reads the path at offset 8.
     if g_file_count > 0:
         store_str_ptr(g_files, 8, path)
-    parse_all()
+    parse_all_files()
+    // Restore the open document's token stream. Position analysis (hover,
+    // definition, semantic tokens) works on the file the user is editing, not
+    // on whichever import happened to be parsed last.
+    tokenize(g_main_sm, 0)
     if g_diag_count > 0:
         // Parse diagnostics can leave the AST incomplete, so skip check_all.
         lsp_publish_diags()

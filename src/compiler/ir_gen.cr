@@ -5889,11 +5889,17 @@ fn global_seg_index(node: int) -> int:
     fid := cell_load(g_line_fileid, (line - 1) * 8)
     if fid < 0:
         return 0
+    // Import order replaces the retired byte segments: the main file is 0,
+    // imported files follow in load order. global_seg_index feeds the reverse
+    // module order in inject_global_inits.
+    sm := file_sm_id(fid)
+    if sm < 0:
+        return 0
     si : ., mut = 1
     loop:
-        if si >= g_seg_count:
+        if si >= g_import_count:
             return 0
-        if cell_load(g_seg_fileids, si * 8) == fid:
+        if cell_load(g_import_sm, si * 8) == sm:
             return si
         si = si + 1
     return 0
@@ -6429,8 +6435,8 @@ fn find_or_create_mono_func(fi: int, call_node: int) -> int:
 
 // --- Main entry ---
 
-fn ccr_source_has_marker(marker: string) -> int:
-    sl := str_len(g_source)
+fn text_has_marker(text: string, marker: string) -> int:
+    sl := str_len(text)
     ml := str_len(marker)
     if ml <= 0 || sl < ml:
         return 0
@@ -6442,13 +6448,26 @@ fn ccr_source_has_marker(marker: string) -> int:
         loop:
             if j >= ml:
                 break
-            if cell_load_byte(g_source, i + j) != cell_load_byte(marker, j):
+            if cell_load_byte(text, i + j) != cell_load_byte(marker, j):
                 break
             j = j + 1
         if j >= ml:
             return 1
         i = i + 1
     return 0
+
+fn ccr_source_has_marker(marker: string) -> int:
+    // Scan every file in the import graph, not just the main file. A marker in
+    // an imported compiler file still selects the compiler-specific lowering.
+    i : ., mut = 0
+    loop:
+        if i >= g_import_count:
+            break
+        sm := cell_load(g_import_sm, i * 8)
+        if text_has_marker(sm_file_text(sm), marker) != 0:
+            return 1
+        i = i + 1
+    return text_has_marker(g_source, marker)
 
 fn ccr_source_dir_is_compiler() -> int:
     d := g_source_dir
@@ -6542,13 +6561,31 @@ fn func_fingerprint(func_node: int) -> int:
     // hash AST node kind chain from the body
     if g_ir_source_hash_ready == 0:
         source_hash : ., mut = 2166136261
-        source_pos : ., mut = 0
-        source_len := str_len(g_source)
+        // Hash every graph file in parse order. Hashing only the main file
+        // would let an edit in an imported file reuse a stale cache entry.
+        gi : ., mut = 0
         loop:
-            if source_pos >= source_len:
+            if gi >= g_import_count:
                 break
-            source_hash = source_hash * 16777619 + cell_load_byte(g_source, source_pos)
-            source_pos = source_pos + 1
+            gsm := cell_load(g_import_sm, gi * 8)
+            gtxt := sm_file_text(gsm)
+            source_pos : ., mut = 0
+            source_len := str_len(gtxt)
+            loop:
+                if source_pos >= source_len:
+                    break
+                source_hash = source_hash * 16777619 + cell_load_byte(gtxt, source_pos)
+                source_pos = source_pos + 1
+            source_hash = source_hash * 16777619 + 10
+            gi = gi + 1
+        if g_import_count == 0:
+            source_pos : ., mut = 0
+            source_len := str_len(g_source)
+            loop:
+                if source_pos >= source_len:
+                    break
+                source_hash = source_hash * 16777619 + cell_load_byte(g_source, source_pos)
+                source_pos = source_pos + 1
         g_ir_source_hash = source_hash
         g_ir_source_hash_ready = 1
     h : ., mut = g_ir_source_hash

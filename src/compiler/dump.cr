@@ -211,11 +211,12 @@ fn cmd_ir(src_path: string) -> int:
     g_source_dir = dirname(src_path)
     g_error_count = 0  // reset before a new tokenize pass; lexical errors accumulate across passes
     sm_reset()
+    g_source_path = src_path
     source_file := sm_add_file(src_path, g_source)
     tokenize(source_file, 0)
     g_str_count = 0
     res_imports()
-    parse_all()
+    parse_all_files()
     check_all()
     if g_diag_count > 0:
         print_diagnostics()

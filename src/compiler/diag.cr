@@ -5,6 +5,16 @@
 // ─── helpers ────────────────────────────────────────────────────
 
 fn read_source_line(line: int) -> string:
+    // Prefer the SourceManager row for the flat line. Legacy callers with no
+    // file mapping fall back to the main-file scan below.
+    sm : ., mut = file_sm_id(diag_fileid_for_line(line))
+    if sm < 0:
+        sm = sm_for_line(line)
+    if sm >= 0:
+        local := line - sm_file_line_base(sm)
+        txt := sm_line_text(sm, local)
+        if str_len(txt) > 0:
+            return txt
     slen := str_len(g_source)
     cur : ., mut = 1
     start : ., mut = 0
@@ -142,12 +152,28 @@ fn print_diagnostics():
         pcl : ., mut = cl
         pltext : ., mut = ""
         attributed : ., mut = 0
+        path_txt : ., mut = ""
         if smf >= 0 && smf < sm_file_count():
             pln = sm_location_line(smf, slo)
             pcl = sm_location_col(smf, slo)
             pltext = sm_line_text(smf, pln)
+            if smf != g_main_sm:
+                path_txt = sm_file_path(smf)
             if str_len(pltext) > 0:
                 attributed = 1
+        else:
+            fni := diag_fileid_for_line(ln)
+            sm : ., mut = file_sm_id(fni)
+            if sm < 0:
+                sm = sm_for_line(ln)
+            if sm >= 0:
+                pln = ln - sm_file_line_base(sm)
+                pcl = cl
+                pltext = sm_line_text(sm, pln)
+                if sm != g_main_sm:
+                    path_txt = sm_file_path(sm)
+                if str_len(pltext) > 0:
+                    attributed = 1
         cat : ., mut = ec / 1000
         num : ., mut = ec % 1000
         print("error[")
@@ -156,13 +182,16 @@ fn print_diagnostics():
         print("]: ")
         println(msg)
         print(" --> ")
+        if str_len(path_txt) > 0:
+            print(path_txt)
+            print(":")
         print(int_str(pln))
         print(":")
         println(int_str(pcl))
         if attributed != 0:
             println("   |")
             print_source_text(pln, pcl, pltext, msg)
-        else if ln > 0 && ln <= source_lines:
+        else if ln > 0:
             println("   |")
             print_source_line(ln, cl, msg)
         println("")

@@ -1215,22 +1215,6 @@ fn grow_line_file(needed: int):
     cell_copy(g_line_lib, g_line_cap * 8, nb2)
     g_line_lib = nb2
     g_line_cap = nc
-fn grow_segs(needed: int):
-    if needed < g_seg_cap:
-        return
-    nc : ., mut = g_seg_cap * 2
-    if nc < 16:
-        nc = 16
-    if nc < needed:
-        nc = needed + 16
-    sz := nc * 8
-    n1 := alloc(sz)
-    cell_copy(g_seg_starts, g_seg_cap * 8, n1)
-    g_seg_starts = n1
-    n2 := alloc(sz)
-    cell_copy(g_seg_fileids, g_seg_cap * 8, n2)
-    g_seg_fileids = n2
-    g_seg_cap = nc
 fn grow_gen_apply_data(needed: int):
     if needed < g_gen_apply_data_cap:
         return
@@ -1660,7 +1644,7 @@ fn grow_diags(needed: int):
     g_diags = nb
     g_diag_cap = nc
 
-// FileEntry: fileid_ni(8) + path(8) = 16 bytes
+// FileEntry: fileid_ni(8) + path(8) + SourceManager id(8) = 24 bytes
 fn grow_files(needed: int):
     if needed < g_file_cap:
         return
@@ -1669,10 +1653,23 @@ fn grow_files(needed: int):
         nc = 16
     if nc < needed:
         nc = needed + 16
-    nb := alloc(nc * 16)
-    cell_copy(g_files, g_file_cap * 16, nb)
+    nb := alloc(nc * 24)
+    cell_copy(g_files, g_file_cap * 24, nb)
     g_files = nb
     g_file_cap = nc
+
+fn grow_import_sms(needed: int):
+    if needed < g_import_cap:
+        return
+    nc : ., mut = g_import_cap * 2
+    if nc < 16:
+        nc = 16
+    if nc < needed:
+        nc = needed + 16
+    nb := alloc(nc * 8)
+    cell_copy(g_import_sm, g_import_cap * 8, nb)
+    g_import_sm = nb
+    g_import_cap = nc
 
 // ModEntry: alias_ni(8) + fileid_ni(8) + path(8) = 24 bytes
 fn grow_mods(needed: int):

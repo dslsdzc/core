@@ -1,12 +1,14 @@
 // === source.cr ===
 // SourceManager: file identity, spans, line tables, and virtual files.
 //
-// This is the first rewrite slice. It is standalone: no existing path uses it
-// yet. A later slice makes tokenize() take (SourceManager, FileId) and gives
-// every token a Span.
+// tokenize() takes a SourceManager FileId, so every file keeps a file-local
+// line/column space and tokens carry a Span. res_imports registers one file per
+// import; no concatenated source is tokenized.
 //
 // File record (40 bytes):
-//   path_ni, text, length, line_base, line_count
+//   path_ptr, text, length, line_base, line_count
+// Paths are raw heap strings, not interned names: file paths are diagnostics
+// metadata, and interning them would leak host paths into the IR string table.
 // Line starts are flattened across files. A file's line table is the range
 // [line_base, line_base + line_count). Offsets are file-local, never the
 // concatenated source offset.
@@ -78,7 +80,6 @@ fn grow_sm_lines(needed: int):
 fn sm_add_file(path: string, text: string) -> int:
     id := g_sm_file_count
     grow_sm_files(id + 1)
-    path_ni := str_intern(path)
     base := g_sm_line_count
     grow_sm_lines(base + 1)
     cell_store(g_sm_line_starts, base * 8, 0)
@@ -96,7 +97,7 @@ fn sm_add_file(path: string, text: string) -> int:
         i = i + 1
 
     off := id * ESZ_SM_FILE
-    cell_store(g_sm_files, off + OFF_SMF_PATH, path_ni)
+    cell_store_str(g_sm_files, off + OFF_SMF_PATH, path)
     cell_store_str(g_sm_files, off + OFF_SMF_TEXT, text)
     cell_store(g_sm_files, off + OFF_SMF_LEN, tlen)
     cell_store(g_sm_files, off + OFF_SMF_LINE_BASE, base)
@@ -125,7 +126,7 @@ fn sm_file_lib(id: int) -> int:
 fn sm_file_path(id: int) -> string:
     if id < 0 || id >= g_sm_file_count:
         return ""
-    return istr_get(cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_PATH))
+    return cell_load_str(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_PATH)
 
 fn sm_file_len(id: int) -> int:
     if id < 0 || id >= g_sm_file_count:
@@ -136,6 +137,27 @@ fn sm_file_line_count(id: int) -> int:
     if id < 0 || id >= g_sm_file_count:
         return 0
     return cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_LINE_COUNT)
+
+fn sm_file_line_base(id: int) -> int:
+    if id < 0 || id >= g_sm_file_count:
+        return 0
+    return cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_LINE_BASE)
+
+// Owning file for a 1-based global line. Used when the line table has no
+// fileid, notably for manifest lines that are scanned but never parsed.
+fn sm_for_line(line: int) -> int:
+    if line < 1:
+        return -1
+    id : ., mut = 0
+    loop:
+        if id >= g_sm_file_count:
+            break
+        base := cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_LINE_BASE)
+        cnt := cell_load(g_sm_files, id * ESZ_SM_FILE + OFF_SMF_LINE_COUNT)
+        if line > base && line <= base + cnt:
+            return id
+        id = id + 1
+    return -1
 
 fn sm_line_start(id: int, line: int) -> int:
     if id < 0 || id >= g_sm_file_count:

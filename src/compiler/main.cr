@@ -6,7 +6,6 @@ g_is_project_mode : int, mut
 g_ccr_out_path : string, mut
 g_cir_out_path : string, mut
 g_binary_out_path : string, mut
-g_source_combined : int, mut   // 1 = g_source is a project/static concatenation
 
 fn is_cr_file(path: string) -> int:
     slen := str_len(path)
@@ -81,12 +80,10 @@ fn detect_imports(src: string) -> int:
 fn read_source_or_project(src_path: string) -> int:
     sl := str_len(src_path)
     g_is_project_mode = 0
-    g_source_combined = 0
     if sl >= 4:
         ext := str_sub(src_path, sl - 3, 3)
         if str_eq(ext, ".cr") == 0:
             g_is_project_mode = 1
-            g_source_combined = 1
     else:
         g_is_project_mode = 1
 
@@ -129,16 +126,17 @@ fn run_frontend(source_name: string) -> int:
     g_error_count = 0  // 会话起点清词法/语法错误（tokenize 多轮累积，见 lexer.cr）
     g_source_name = source_name
     sm_reset()
+    g_source_path = source_name
     attributed_name : ., mut = source_name
-    if g_source_combined != 0:
-        attributed_name = "<combined>"
+    if str_len(attributed_name) == 0:
+        attributed_name = "<source>"
     source_file := sm_add_file(attributed_name, g_source)
     println("[1/5] tokenize...")
     tokenize(source_file, 0)
     println("[2/5] resolve imports...")
     res_imports()
     println("[3/5] parse...")
-    parse_all()
+    parse_all_files()
     if g_diag_count > 0:
         print_diagnostics()
         return 1
@@ -297,7 +295,6 @@ fn corec_main() -> int:
             println("usage: corec run '<code>'")
             return 1
         g_source = cli_arg(0)
-        g_source_combined = 0
         g_source_dir = dirname(cli_arg(0))
 
         // Check if source already has 'fn main'
@@ -458,7 +455,6 @@ fn corec_main() -> int:
             println("error: cannot locate src/runtime/rt.cr")
             return 1
         g_source = rt_src + "\n" + g_source
-        g_source_combined = 1
 
     fe_rc := run_frontend(src_path)
     if fe_rc != 0:
@@ -784,12 +780,12 @@ fn corec_main() -> int:
 // Full compilation: source -> assembly (used by tests and programmatic API)
 fn compile_source(source: string) -> string:
     g_source = source
-    g_source_combined = 0
     sm_reset()
+    g_source_path = "<compile_source>"
     source_file := sm_add_virtual("<compile_source>", source)
     tokenize(source_file, 0)
     res_imports()
-    parse_all()
+    parse_all_files()
     check_all()
     if g_diag_count > 0:
         err_msg : ., mut = "check errors:"

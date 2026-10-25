@@ -932,13 +932,19 @@ fn check_error(code: int, msg: string, line: int, col: int):
     file : ., mut = -1
     lo : ., mut = 0
     hi : ., mut = 0
-    if line > 0 && g_source_file >= 0:
+    if line > 0:
         c : ., mut = col
         if c < 1:
             c = 1
-        file = g_source_file
-        lo = sm_line_start(file, line) + c - 1
-        hi = lo + 1
+        // The line is in the flat SourceManager line space. Resolve it to the
+        // owning file instead of the most recently tokenized file: checker
+        // diagnostics run after all files have been parsed.
+        sm := file_sm_id(diag_fileid_for_line(line))
+        if sm >= 0:
+            local_line := line - sm_file_line_base(sm)
+            file = sm
+            lo = sm_line_start(sm, local_line) + c - 1
+            hi = lo + 1
     check_error_span(code, msg, line, col, file, lo, hi)
 
 // --- Borrow checking ---

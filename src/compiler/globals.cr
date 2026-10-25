@@ -438,6 +438,16 @@ g_diags : string, mut
 g_diag_count : int, mut
 g_diag_cap : int, mut
 g_files : string, mut
+// Import graph: SourceManager ids in parse order (main first, then imports in
+// discovery order). Manifests are scanned for edges only and never enter here.
+g_import_sm : string, mut
+g_import_count : int, mut
+g_import_cap : int, mut
+g_main_sm : int, mut
+g_main_fni : int, mut
+g_source_path : string, mut
+// 1 = parse_all is continuing an already-reset multi-file parse.
+g_parse_multi_keep : int, mut
 g_file_count : int, mut
 g_file_cap : int, mut
 g_mods : string, mut
@@ -815,7 +825,6 @@ fn reset_frontend_state():
     // reused, so stale mappings must be cleared.
     g_purity_inst_count = 0
     g_df_state_finalized = 0   // state chain is rebuilt once per compilation
-    g_seg_count = 0
     g_line_count = 0
     g_unsafe_depth = 0
     g_alloc_pts_cap = 0

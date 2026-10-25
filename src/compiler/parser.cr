@@ -2769,7 +2769,7 @@ fn parse_declaration():
             tok_ln(cur_tok()), tok_cl(cur_tok()))
         advance_tok()
 
-fn parse_all():
+fn parse_reset():
     g_infer_name_seq = 0
     g_ast_count = 0
     g_token_pos = 0
@@ -2801,6 +2801,12 @@ fn parse_all():
     g_gen_param_count = 0
     g_gen_param_cap = 0
 
+    g_want_value = 0
+
+fn parse_all():
+    if g_parse_multi_keep == 0:
+        parse_reset()
+    g_token_pos = 0
     g_want_value = 0
     ci : ., mut = 0
     loop:
@@ -2865,3 +2871,20 @@ fn parse_all():
     // Parse interpolation hole expressions after the token stream is no longer
     // needed. Re-tokenizing is safe here; see interp_parse_holes.
     interp_parse_holes()
+
+fn parse_all_files():
+    g_parse_multi_keep = 0
+    i : ., mut = 0
+    loop:
+        if i >= g_import_count:
+            break
+        sm := cell_load(g_import_sm, i * 8)
+        tokenize(sm, 0)
+        parse_all()
+        g_parse_multi_keep = 1
+        i = i + 1
+    g_parse_multi_keep = 0
+    g_source = sm_file_text(g_main_sm)
+    g_source_len = str_len(g_source)
+    g_source_file = g_main_sm
+    g_line_base = sm_file_line_base(g_main_sm)

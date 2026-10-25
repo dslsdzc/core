@@ -473,10 +473,10 @@ fn file_path_by_fni(fni: int) -> string:
     loop:
         if i >= g_file_count:
             return ""
-        if cell_load(g_files, i * 16) == fni:
-            if cell_load(g_files, i * 16 + 8) == 0:
+        if cell_load(g_files, i * 24) == fni:
+            if cell_load(g_files, i * 24 + 8) == 0:
                 return ""
-            return cell_load_str(g_files, i * 16 + 8)
+            return cell_load_str(g_files, i * 24 + 8)
         i = i + 1
     return ""
 

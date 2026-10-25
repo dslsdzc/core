@@ -187,56 +187,65 @@ fn analysis_line_start(line: int) -> int:
     return sl
 
 // Decode one UTF-8 sequence from g_source. Invalid bytes occupy one unit.
-fn analysis_utf8_next(pos: int, sl: int) -> int:
+fn analysis_utf8_next_in(text: string, pos: int, sl: int) -> int:
     if pos < 0 || pos >= sl:
         return 1
-    b0 := load8(g_source, pos)
+    b0 := load8(text, pos)
     if b0 < 128:
         return 1
     if b0 < 224 && pos + 1 < sl:
-        b1 := load8(g_source, pos + 1)
+        b1 := load8(text, pos + 1)
         if b1 >= 128 && b1 < 192:
             return 2
     if b0 < 240 && pos + 2 < sl:
-        b1 := load8(g_source, pos + 1)
-        b2 := load8(g_source, pos + 2)
+        b1 := load8(text, pos + 1)
+        b2 := load8(text, pos + 2)
         if b1 >= 128 && b1 < 192 && b2 >= 128 && b2 < 192:
             return 3
     if b0 >= 240 && b0 < 248 && pos + 3 < sl:
-        b1 := load8(g_source, pos + 1)
-        b2 := load8(g_source, pos + 2)
-        b3 := load8(g_source, pos + 3)
+        b1 := load8(text, pos + 1)
+        b2 := load8(text, pos + 2)
+        b3 := load8(text, pos + 3)
         if b1 >= 128 && b1 < 192 && b2 >= 128 && b2 < 192 && b3 >= 128 && b3 < 192:
             return 4
     return 1
 
-fn analysis_utf8_cp(pos: int, adv: int) -> int:
-    b0 := load8(g_source, pos)
+fn analysis_utf8_next(pos: int, sl: int) -> int:
+    return analysis_utf8_next_in(g_source, pos, sl)
+
+fn analysis_utf8_cp_in(text: string, pos: int, adv: int) -> int:
+    b0 := load8(text, pos)
     if adv == 1:
         return b0
     if adv == 2:
-        return (b0 - 192) * 64 + load8(g_source, pos + 1) - 128
+        return (b0 - 192) * 64 + load8(text, pos + 1) - 128
     if adv == 3:
-        return (b0 - 224) * 4096 + (load8(g_source, pos + 1) - 128) * 64 + load8(g_source, pos + 2) - 128
-    return (b0 - 240) * 262144 + (load8(g_source, pos + 1) - 128) * 4096 + (load8(g_source, pos + 2) - 128) * 64 + load8(g_source, pos + 3) - 128
+        return (b0 - 224) * 4096 + (load8(text, pos + 1) - 128) * 64 + load8(text, pos + 2) - 128
+    return (b0 - 240) * 262144 + (load8(text, pos + 1) - 128) * 4096 + (load8(text, pos + 2) - 128) * 64 + load8(text, pos + 3) - 128
 
-fn analysis_utf16_units(start: int, end: int) -> int:
-    sl := str_len(g_source)
+fn analysis_utf8_cp(pos: int, adv: int) -> int:
+    return analysis_utf8_cp_in(g_source, pos, adv)
+
+fn analysis_utf16_units_in(text: string, start: int, end: int) -> int:
+    sl := str_len(text)
     p : ., mut = start
     units : ., mut = 0
     loop:
         if p >= end || p >= sl:
             break
-        adv : ., mut = analysis_utf8_next(p, sl)
+        adv : ., mut = analysis_utf8_next_in(text, p, sl)
         if p + adv > end:
             adv = 1
-        cp := analysis_utf8_cp(p, adv)
+        cp := analysis_utf8_cp_in(text, p, adv)
         if cp >= 65536:
             units = units + 2
         else:
             units = units + 1
         p = p + adv
     return units
+
+fn analysis_utf16_units(start: int, end: int) -> int:
+    return analysis_utf16_units_in(g_source, start, end)
 
 fn analysis_source_byte(pos: int, sl: int) -> int:
     if pos < 0 || pos >= sl:
@@ -481,47 +490,46 @@ fn analysis_path_for_line(ln1: int) -> string:
     loop:
         if i >= g_file_count:
             break
-        if cell_load(g_files, i * 16) == fid:
-            p : ., mut = load_str_ptr(g_files, i * 16 + 8)
+        if cell_load(g_files, i * 24) == fid:
+            p := load_str_ptr(g_files, i * 24 + 8)
+
             if str_len(p) > 0:
                 return p
         i = i + 1
     return ""
 
-// 1-based line to its segment line offset, converting concatenated coordinates back to the target file.
+// 1-based line to the owning file's line offset in the flat line space.
+// The main file has offset 0; imported files start after the files registered
+// before them.
 fn analysis_line_offset(ln1: int) -> int:
     fid : ., mut = -1
     if ln1 >= 1 && ln1 - 1 < g_line_count:
         fid = cell_load(g_line_fileid, (ln1 - 1) * 8)
     if fid < 0:
         return 0
-    i : ., mut = 1
-    loop:
-        if i >= g_seg_count:
-            break
-        if cell_load(g_seg_fileids, i * 8) == fid:
-            limit := cell_load(g_seg_starts, i * 8)
-            off_lines : ., mut = 0
-            pos : ., mut = 0
-            loop:
-                if pos >= limit:
-                    break
-                if load8(g_source, pos) == 10:
-                    off_lines = off_lines + 1
-                pos = pos + 1
-            return off_lines
-        i = i + 1
-    return 0   // 主文件（段 0）：偏移 0
+    sm := file_sm_id(fid)
+    if sm < 0:
+        return 0
+    return sm_file_line_base(sm)
 
 // Declaration position in 1-based concatenated coordinates to Location JSON.
 // Convert line and column to 0-based and subtract the segment offset. Escape the
 // URI with lsp_json_escape_str.
 fn analysis_def_json(ln1: int, cl1: int) -> string:
-    off := analysis_line_offset(ln1)
-    line0 : ., mut = ln1 - 1 - off
-    line_start := analysis_line_start(ln1 - 1)
+    fid := -1
+    if ln1 >= 1 && ln1 - 1 < g_line_count:
+        fid = cell_load(g_line_fileid, (ln1 - 1) * 8)
+    sm := file_sm_id(fid)
+    txt : string, mut = g_source
+    local_ln : ., mut = ln1
+    line_start : ., mut = analysis_line_start(ln1 - 1)
+    if sm >= 0:
+        txt = sm_file_text(sm)
+        local_ln = ln1 - sm_file_line_base(sm)
+        line_start = sm_line_start(sm, local_ln)
+    line0 : ., mut = local_ln - 1
     decl_pos := line_start + cl1 - 1
-    col0 := analysis_utf16_units(line_start, decl_pos)
+    col0 := analysis_utf16_units_in(txt, line_start, decl_pos)
     uri : string, mut = "file://"
     uri = uri + analysis_path_for_line(ln1)
     out : string, mut = "{\"uri\":"
@@ -533,8 +541,8 @@ fn analysis_def_json(ln1: int, cl1: int) -> string:
     out = out + "},\"end\":{\"line\":"
     out = out + int_str(line0)
     out = out + ",\"character\":"
-    adv := analysis_utf8_next(decl_pos, str_len(g_source))
-    out = out + int_str(analysis_utf16_units(line_start, decl_pos + adv))
+    adv := analysis_utf8_next_in(txt, decl_pos, str_len(txt))
+    out = out + int_str(analysis_utf16_units_in(txt, line_start, decl_pos + adv))
     out = out + "}}}"
     return out
 
@@ -551,13 +559,12 @@ fn analysis_definition(line: int, col: int) -> string:
     vd := analysis_var_decl(name_ni, line, col)
     if vd >= 0:
         return analysis_def_json(ast_line(vd), ast_col(vd))
-    // 函数
+    // 函数：AST 节点携带全局行号，导入文件里的声明也能定位。
     fi := find_func(name_ni)
     if fi >= 0:
-        dfn := analysis_decl_tok(T_FN, name_ni)
-        if dfn >= 0:
-            return analysis_def_json(cell_load(g_tokens, dfn * ESZ_TOKEN + OFF_TK_LINE),
-                cell_load(g_tokens, dfn * ESZ_TOKEN + OFF_TK_COL))
+        fn_node := fi_ast_node(fi)
+        if fn_node >= 0:
+            return analysis_def_json(ast_line(fn_node), ast_col(fn_node))
         return ""
     // 结构体 / 枚举（令牌反查声明）
     if analysis_type_visible(name_ni) != 0:
@@ -1393,10 +1400,9 @@ fn analysis_semantic_tokens() -> string:
         cell_store(offs, i * 8, pos)
         i = i + 1
     // Pass 2: differential encoding relative to the previous token; the first is
-    // relative to (0, 0), and modifiers are always 0. Emit only main-file tokens.
+    // relative to (0, 0), and modifiers are always 0. lsp_check_file restores the
+    // main file's token stream before analysis, so every token here is main-file.
     main_limit : ., mut = sl
-    if g_seg_count > 1:
-        main_limit = cell_load(g_seg_starts, 8)
     out : string, mut = "{\"data\":["
     prev_line : ., mut = 0
     prev_col : ., mut = 0

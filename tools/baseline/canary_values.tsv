@@ -206,8 +206,8 @@
 #     gt_ccr        1fe6b8f14baeb0822b85ecf55763737ec2ce593f3aa34de14176cf5e39e28424 139344
 #     gt_static_ccr f8cc44b139541b5672762336e692ef64e31b3fd6e2b5b08afc26843478b342a0 139583
 canary_elf	pa	4e79ced2f997998974cd6c6ac4ea3921b2111545091a8e5854abda97ffab2b58	49334
-pa_ccr	pa.ccr	35218fe764b6504119fdd7cf9fa88db0f7546b38debb17306799e4dd9225874f	97551
-pa_static_ccr	pa_st.bin.ccr	ae5d5fa25933ab03c37ddcaeed62f73023f874094e4ff591aa71318ee4ebc675	97745
+pa_ccr	pa.ccr	271d0c1b4491e9a39d9635503ed36c4220964a650b003602fe434f5c9d35be1d	97509
+pa_static_ccr	pa_st.bin.ccr	7e2055bda89381e6663fcee0b419b4351b5c34a71200b4c2b379ee45bd57a391	97731
 # ── 【本批重锁 2026-10-26】if 表达式 + 全条件分支 -> IR_MATCH + CASE ──
 #   `if` 条件 bool-only；`if`/`while`/`for`/`&&`/`||` 与内部条件分支全部走统一
 #   决策节点 `IR_MATCH`（`VALUE(0)` + `DEFAULT`），后端二元快路径发射
@@ -227,8 +227,8 @@ pa_static_ccr	pa_st.bin.ccr	ae5d5fa25933ab03c37ddcaeed62f73023f874094e4ff591aa71
 #   **尺寸不变**。D1 5/5 PASS。旧值留痕：
 #     gt_ccr        54c08b8124916e2ad0981823ba61332dc39037de7dbfe27cb4feb67e18b763b9 127262
 #     gt_static_ccr 9c0664ea03e410c2afeb375111586f362b8177678d2843ae106adf576ddd386c 127469
-gt_ccr	gt.ccr	acf233916287ee3e1abf1db8db779dbc908753c481e08a36f99fb8446805545f	131109
-gt_static_ccr	gt_st.bin.ccr	f3a7138b913fdc90a76bafc646d9df1217d5840f81a4e3e4e60348088069d668	131299
+gt_ccr	gt.ccr	96cc9e755456f538f71adbe66080308d12b054092bb43f3984260a51dc56167a	131023
+gt_static_ccr	gt_st.bin.ccr	3e5047f04060871c9a0cd705aee3e30a9920fce8b324fef2f257219d43609d46	131285
 # ⚠ **本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下
@@ -425,3 +425,68 @@ gt_static_ccr	gt_st.bin.ccr	f3a7138b913fdc90a76bafc646d9df1217d5840f81a4e3e4e603
 #   canary_elf    bb1eba8143ee772439f405349ac61f24aeb856c60f7c5d52bea7d9739bf1944b 53430
 #   pa_static_ccr 5d55b8b85999512a23c04ff31c0a690e6c99a43f071dbac30eb43ec793a0aa6e 97762
 #   gt_static_ccr 51cd6f0c7e191fa3967cb6ea63cb85d610ae865be3bb4a3cc7bb5023ea9c979d 131316
+
+# ── 【本批重锁 2026-10-25】import graph：每文件独立 SourceManager 身份 ──
+#   （本条在 2026-10-27 合并 develop 后作废待重测；保留归因，值为当时测量。
+#    合并后的实际值由本轮结束后重新采集写入。）
+#   D1 5/5 PASS（canary_check.sh 实跑；5 条各自二次构建逐字节相同）。
+#   **canary ELF 逐字节不变**（`393739b4…` 53430B）⇒ 发射面零足迹。
+#   四条 `.ccr` 变化（**内容形状 + 编译器身份位移，不是回归**）：
+#     pa_ccr        −42B（94424 → 94382）
+#     pa_static_ccr −14B（94635 → 94621）
+#     gt_ccr        −86B（127262 → 127176）
+#     gt_static_ccr −14B（127469 → 127455）
+#   归因（逐段实测，旧/新编译器各自冷态构建对照）：
+#     ① **STR 不再驻留 `<combined>` 与主源路径**。`res_imports` 过去把主源注册成
+#        `<combined>` 虚拟文件，并让主源路径进入 intern 表；现在主文件使用真实路径
+#        且路径以裸字符串存储（`SourceManager` 不 intern 路径），`<combined>` 虚拟
+#        文件整个删除。非 static 两条少 主源路径(24/28B + 4B 长度) + `<combined>`
+#        (10B + 4B) = 42/46B；static 两条只少 `<combined>` 的 14B（static 的旧 STR
+#        本就不含主源路径）。
+#     ② **manifest 不再获得 fileid**。`_import.cr` 只在 SourceManager 中占行号，用于
+#        行号诊断回退（`sm_for_line`）；它不进入 `g_files`、不 intern 任何
+#        `"<manifest>:…"` 串。否则每个用户程序都会多一条编译器内部标识。
+#     ③ **gt_ccr 的额外 −40B = TYPE 段少一条类型项**。旧/新 `--dump-types` 对照：
+#        函数数与指令数完全一致（28 funcs / 1753 instrs），TYPE 项 25 → 24；差异来自
+#        命名类型行的 `data` 是 intern 名字索引（`Box`/`SBox`：5/8 → 4/7，编译器
+#        自身标识集变化引起的 id 顺移），由此一个原子项 `(7,4,5)` 被去重。IFACE/SYM/
+#        NOD 的尺寸不变、仅 id 顺移。**不是类型语义变化**。
+#     ④ **路径无关性**：`test_cir_cache_warm_restore_remaps_shifted_case_targets`
+#        在两套临时目录构建同一源，`.ccr` 逐字节相同；这是路径不再进入 intern 表的
+#        直接证据。
+#   **取数环境声明**：本机冷态实测（cwd = 仓库根、逐档 `clean-cache`、不传 `-O`、
+#   `HOME` 归一化到采集目录内空 `home/`、`CORE_SAFE=1`，与 `canary_check.sh` 口径
+#   逐条一致）；同源旧编译器（`qyntvyq`）对照值 = 上表旧值，逐字节复现。
+#   旧值留痕（自本批起作废）：
+#     pa_ccr        ea7a68182daf623c36cccd75a52c9218f9ee47ef3cfba4d77075e29789415da3 94424
+#     pa_static_ccr 14c582249b9ae5c06adf31b5b8ff89b01610ea42aeca9f0f36b8cfdcd33713bb 94635
+#     gt_ccr        6087a2b72c88acc78e2f433c1318970cc353a07966ab40b54ff9d7e0283508a8 127262
+#     gt_static_ccr b082fe1055a84241711d816e73c188ed6934e01810bb265ca075eb4486f036da 127469
+
+# ── 【本批重锁 2026-10-27】import graph 合并进 develop ──
+# **性质 = 内容面收缩，发射面零足迹**。D1 5/5 PASS（canary_check.sh 实跑，
+# 5 条各自二次构建逐字节相同）。canary ELF 逐字节不变（`4e79ced2…` 49334B）。
+# 四条 `.ccr` 变化（相对 2026-10-27 pub 批的值）：
+#   pa_ccr        −42B（97551 → 97509）
+#   pa_static_ccr −14B（97745 → 97731）
+#   gt_ccr        −86B（131109 → 131023）
+#   gt_static_ccr −14B（131299 → 131285）
+# 归因（与 2026-10-25 import graph 分支逐字节同 delta，故沿用其分段结论）：
+#   ① STR 不再驻留 `<combined>` 与主源路径：`res_imports` 不再把主源拼成
+#      `<combined>` 虚拟文件，路径以裸字符串存进 SourceManager、不 intern。
+#      非 static 两条 = 主源路径 + `<combined>` = 42/46B；static 两条只少
+#      `<combined>` 的 14B。gt 额外 −40B = TYPE 段少一条被去重的原子项。
+#   ② manifest 不再获得 fileid：`_import.cr` 只占行号，不进 `g_files`、不
+#      intern `"<manifest>:…"`。
+#   ③ 路径无关性由 `test_import_graph.py` 与 cir cache 用例覆盖。
+# 合并期语义修复（非发射面策略，逐条在 diff 里可见）：
+#   · develop 的库可见性特征重新接回新导入器：`lib_export_reset()`、
+#     每导入边 `lib_can_import` 方向判定、entry-file 环检测。
+#   · 行表 `g_line_lib` 由 `sm_file_lib(sm)` 填充（SourceManager 已按文件存库 id）。
+#   · `ir_gen.global_seg_index` 从退役的 `g_seg_*` 改查 `g_import_sm` 装载序。
+#   · `file_path_by_fni` 的 `g_files` 步长 16 → 24（导入图加了 sm_id 列）。
+# 旧值留痕（自本批起作废）：
+#   pa_ccr        35218fe764b6504119fdd7cf9fa88db0f7546b38debb17306799e4dd9225874f 97551
+#   pa_static_ccr ae5d5fa25933ab03c37ddcaeed62f73023f874094e4ff591aa71318ee4ebc675 97745
+#   gt_ccr        acf233916287ee3e1abf1db8db779dbc908753c481e08a36f99fb8446805545f 131109
+#   gt_static_ccr f3a7138b913fdc90a76bafc646d9df1217d5840f81a4e3e4e60348088069d668 131299

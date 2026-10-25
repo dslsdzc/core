@@ -587,10 +587,6 @@ g_gen_apply_data_count : int, mut
 g_gen_apply_data_cap : int, mut
 
 // Module system globals
-g_seg_starts : string, mut
-g_seg_fileids : string, mut
-g_seg_count : int, mut
-g_seg_cap : int, mut
 g_line_fileid : string, mut
 g_line_lib : string, mut
 g_line_count : int, mut

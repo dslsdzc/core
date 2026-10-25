@@ -43,10 +43,11 @@ fn ps_compile(src: string) -> int:
     g_error_count = 0
     g_source_dir = ""
     sm_reset()
+    g_source_path = "<purity_selftest>"
     source_file := sm_add_virtual("<purity_selftest>", src)
     tokenize(source_file, 0)
     res_imports()
-    parse_all()
+    parse_all_files()
     if g_error_count > 0:
         print_parse_errors()
         return 1
