@@ -63,7 +63,7 @@ Core 侧只读来源：`src/compiler/ast.cr`（opcode 常量）、`src/compiler/
 | 16 | `IR_STORE_INDEX_VAR` | 内存 | `ir_gen` | 有 | 有 | 2.4 |
 | 17 | `IR_MAKE_ENUM` | 枚举 | `ir_gen` | 有 | 有（近似） | 2.6 |
 | 18 | `IR_REF` | 地址 | `ir_gen` | 有 | 有（近似） | 2.4 |
-| 19 | `IR_BRANCH` | 控制流 | `ir_gen` | 有 | 有 | 2.5 |
+| 19 | `IR_BRANCH`（退役，19 保留） | 控制流 | 无 | 无（加载器拒绝） | 无 | 2.5 |
 | 20 | `IR_JUMP` | 控制流 | `ir_gen` | 有 | 有 | 2.5 |
 | 21 | `IR_LABEL` | 控制流 | `ir_gen` | 有 | 有 | 2.5 |
 | 22 | `IR_PHI` | 控制流 | 无（保留） | 无 | 无 | 2.5 |
@@ -196,7 +196,7 @@ load/store（对照 `Mem.load`/`Mem.store` Memory.v:L428/L531 + `valid_access` L
 - IR_NOP（0）：无状态变化。
 - IR_LABEL（21）：标签定义（`s1` = 标签号），无副作用。对照 `Plabel`（Asm.v:L946-947）。
 - IR_JUMP（20）：`goto L(s1)`。对照 `Pjmp_l`（Asm.v:L903-904）。interp 有回边特例（SG_LOOP/SG_FOR region 表驱动循环迭代，非标签表），Core 数据流 region 机制，无 CompCert 对照。
-- IR_BRANCH（19）：`if ρ(s1) ≠ 0 goto L(s2) else goto L(s3)`（true 在前）。对照 `Pjcc`（Asm.v:L909-914），CompCert 消费标志位（`eval_testcond`），Core 直接测试值（`test` + `je/jmp`）：语义等价，形态不同（D：Core 无标志寄存器状态，比较直接产值）。`ir_gen` 默认不再发射本 opcode；它仅为历史 `.ccr`/合成 fixture 兼容保留。
+- IR_BRANCH（19，已退役）：原语义为 `if ρ(s1) ≠ 0 goto L(s2) else goto L(s3)`。`ir_gen` 不再发射；19 号槽保留，v10 加载器把它当作非 v10 opcode 拒绝。条件分支一律使用 `IR_MATCH`。对照 `Pjcc`（Asm.v:L909-914）的历史记录保留在此。
 - IR_MATCH（54）：按 CASE 表分派 `ρ(s1)`；`s2` = CASE 起始索引，`s3` = 行数。`if`/`while`/`for`/`&&`/`||` 及内部条件分派编码为 `VALUE(0)` + `DEFAULT`（true 走 fallthrough），多路 `match` 由 `ir_gen` 生成；`if` 作为表达式时分支值汇入一个结果槽。后端按行数/值分布选择线性、二分或跳转表；单 `VALUE(0)` + 紧邻 `DEFAULT` 走 test/je/jne 快路径。CASE 行语义见 v10 `.ccr` 规范 §11。
 - IR_PHI（22）：`d :=` 按到达前驱边选择的值（SSA φ），当前无发射方/无后端/无解释器实现（保留给未来 SSA 形态）。CompCert RTL 无 φ（非 SSA 需求）。D：保留项。
 - IR_RETURN（5）：返回 `ρ(s1)`（`TI_FLOAT`，XMM0；int，RAX）；`main` 的返回 = 进程退出码。对照 `Pret` + `final_state`（Asm.v:L934-935, L1144-1148）。
@@ -264,7 +264,7 @@ load/store（对照 `Mem.load`/`Mem.store` Memory.v:L428/L531 + `valid_access` L
 | D8 | IR_YIELD/AWAIT/SPAWN/DYN_*/HOTPATCH/LAZY/FAST 等 | CompCert 无并发/动态类型/热补丁/惰性，无对照部分不强行映射 |
 | D9 | 移位量 ≥ 64：硬件掩码（mod 64）vs CompCert `Vundef` | Core 跟随硬件（机器语义），CompCert 保守未定义；OP_SHL/SHR 当前无发射方 |
 | D10 | dex/apx 精确-授权二分 | 范式通用性原则：默认精确（数学语义），近似需显式授权（apx 标签） |
-| D11 | 逻辑 `&&`/`||` 在 IR 层分支化短路（ir_gen L588-612 用 IR_BRANCH 实现短路），IR_BINARY 的布尔 op（s3=12/13）无发射方 | 与 CompCert 前端分支化做法不同，结果相同；IR_BINARY s3=12/13 为死路径 |
+| D11 | 逻辑 `&&`/`||` 在 IR 层分支化短路（现用 IR_MATCH），IR_BINARY 的布尔 op（s3=12/13）无发射方 | 与 CompCert 前端分支化做法不同，结果相同；IR_BINARY s3=12/13 为死路径 |
 
 ### 已知限制
 

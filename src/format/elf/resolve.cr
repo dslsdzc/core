@@ -3,16 +3,15 @@
 //
 // Uses emit_instr() (the real encoder) for sizing — no duplicate size logic.
 // A reusable scratch buffer avoids per-instruction allocation.
-// Records label positions, then patches IR_BRANCH and IR_JUMP with
-// resolved byte offsets directly into src2/src3/src1.
+// Records label positions, then patches IR_JUMP with resolved byte offsets
+// directly into src1.
 //
 // After resolution:
-//   IR_BRANCH: src2 = true_offset, src3 = false_offset, type_kind = IR_RESOLVED
 //   IR_JUMP:   src1 = offset, type_kind = IR_RESOLVED
 //   IR_LABEL:  opcode becomes IR_NOP
 //
-// The backend's emit_instr() can then write branch instructions using
-// the pre-computed offsets, no label table lookup needed.
+// The backend's emit_instr() can then write jumps using the pre-computed
+// offsets, no label table lookup needed.
 
 fn res_labels():
     print("    res_labels: ")
@@ -86,19 +85,12 @@ fn res_labels():
         grow_func_code_sz(fi + 1)
         cell_store(g_x86_func_code_sz, fi * 8, off)
 
-        // ── Pass 2: patch BRANCH/JUMP with resolved offsets ──
+        // ── Pass 2: patch JUMP with resolved offsets ──
         ii = 0
         loop:
             if ii >= ic:
                 break
             inst_idx := ist + ii
-            if iri_op(inst_idx) == IR_BRANCH:
-                true_off := cell_load(g_label_poses, iri_s2(inst_idx) * 8)
-                false_off := cell_load(g_label_poses, iri_s3(inst_idx) * 8)
-                iri_set_op(inst_idx, IR_BRANCH)
-                iri_set_s2(inst_idx, true_off)
-                iri_set_s3(inst_idx, false_off)
-                iri_set_tk(inst_idx, IR_RESOLVED)
             if iri_op(inst_idx) == IR_JUMP:
                 tgt_off := cell_load(g_label_poses, iri_s1(inst_idx) * 8)
                 iri_set_op(inst_idx, IR_JUMP)

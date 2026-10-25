@@ -336,9 +336,6 @@ fn df_connect_srcs(node_id: int, opcode: int, s1: int, s2: int, s3: int, tk_aux:
         df_use_var(node_id, s2)  // array var
         df_use_var(node_id, s3)  // index var
         return
-    if opcode == IR_BRANCH:
-        df_use_var(node_id, s1)  // condition var (labels s2, s3 are not vars)
-        return
     if opcode == IR_MATCH:
         // The scrutinee is the only variable read; case targets are labels in
         // the CASE table, not node operands.
@@ -600,8 +597,6 @@ fn df_opcode_name(opcode: int, s3: int) -> string:
         return "make_enum"
     if opcode == IR_REF:
         return "ref"
-    if opcode == IR_BRANCH:
-        return "branch"
     if opcode == IR_MATCH:
         return "match"
     if opcode == IR_JUMP:

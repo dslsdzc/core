@@ -616,7 +616,7 @@ IR_LOAD_INDEX_VAR : int = 15
 IR_STORE_INDEX_VAR : int = 16
 IR_MAKE_ENUM : int = 17
 IR_REF : int = 18
-IR_BRANCH : int = 19
+// 19 reserved: retired IR_BRANCH (loader rejects it; all conditions use IR_MATCH)
 IR_JUMP : int = 20
 IR_LABEL : int = 21
 IR_PHI : int = 22

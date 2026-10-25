@@ -1650,13 +1650,6 @@ fn elf_gen(buf: string) -> int:
                 lx := iri_s1(ist2 + ii2)
                 if lx >= 0 && lx + 1 > cur_labels:
                     cur_labels = lx + 1
-            if op == IR_BRANCH:
-                lx := iri_s2(ist2 + ii2)
-                if lx + 1 > cur_labels:
-                    cur_labels = lx + 1
-                ly := iri_s3(ist2 + ii2)
-                if ly + 1 > cur_labels:
-                    cur_labels = ly + 1
             if op == IR_JUMP:
                 lz := iri_s1(ist2 + ii2)
                 if lz + 1 > cur_labels:

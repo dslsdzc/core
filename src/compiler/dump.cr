@@ -167,9 +167,6 @@ fn ir_instr_str(instr_idx: int) -> string:
     if iri_op(instr_idx) == IR_STORE_PTR:
         s = s + ir_var_str(iri_s1(instr_idx)) + " := " + ir_var_str(iri_s2(instr_idx))
         return s
-    if iri_op(instr_idx) == IR_BRANCH:
-        s = s + "if " + ir_var_str(iri_s1(instr_idx)) + " goto label" + int_str(iri_s2(instr_idx)) + " else label" + int_str(iri_s3(instr_idx))
-        return s
     if iri_op(instr_idx) == IR_MATCH:
         // CASE rows live in the global table; print the range so the cir dump
         // and --dump-objects agree on which rows belong to this node.

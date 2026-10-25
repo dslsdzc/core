@@ -466,6 +466,10 @@ fn ccr_op_is_concurrent(op: int) -> int:
 // before emission also prevents emit_instr from silently falling through as a
 // zero-byte instruction.
 fn ccr_op_is_known(op: int) -> int:
+    // 19 is the retired IR_BRANCH slot. It is not a v10 operation anymore;
+    // keeping it reserved (rather than renumbering) preserves all later IDs.
+    if op == 19:
+        return 0
     if op >= IR_NOP && op <= IR_MATCH:
         return 1
     return 0
@@ -595,11 +599,6 @@ fn ccr_validate_nod_operands() -> int:
         else if op == IR_REF:
             if ccr_nod_var_ok(d) == 0 || ccr_nod_var_ok(s1) == 0:
                 return -1
-        else if op == IR_BRANCH:
-            if ccr_nod_var_ok(s1) == 0:
-                return -1
-            if ccr_label_known(ids, ln, s2) == 0 || ccr_label_known(ids, ln, s3) == 0:
-                return -1
         else if op == IR_MATCH:
             // Minimal v10 MATCH shape: a real scrutinee var plus a non-negative
             // CASE range. -1 is the reserved "none" id and is not a scrutinee.
@@ -674,7 +673,7 @@ fn ccr_validate_nod_operands() -> int:
 // fact. ALLOC_ARRAY/ADDR_INDEX/DEREF/STORE_PTR are handled explicitly because
 // their old src2/src3 facts are the migration's critical cases.
 fn ccr_nod_src3_semantic(op: int) -> int:
-    if op == IR_UNARY || op == IR_BINARY || op == IR_CALL || op == IR_ALLOC_STRUCT || op == IR_LOAD_FIELD || op == IR_STORE_FIELD || op == IR_STORE_INDEX || op == IR_BRANCH || op == IR_MATCH || op == IR_SLICE || op == IR_SPAWN || op == IR_HOTPATCH_ROUTE || op == IR_CALL_EXTERN || op == IR_LOAD_INDEX:
+    if op == IR_UNARY || op == IR_BINARY || op == IR_CALL || op == IR_ALLOC_STRUCT || op == IR_LOAD_FIELD || op == IR_STORE_FIELD || op == IR_STORE_INDEX || op == IR_MATCH || op == IR_SLICE || op == IR_SPAWN || op == IR_HOTPATCH_ROUTE || op == IR_CALL_EXTERN || op == IR_LOAD_INDEX:
         return 1
     return 0
 

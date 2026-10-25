@@ -523,19 +523,6 @@ fn alloc_registers():
                     cell_store(bt, bn * 16 + 8, ii)
                     bn = bn + 1
                     has_loop = 1
-            else if op == IR_BRANCH:
-                tp := label_pos_of(iri_s2(inst), lab_id, lab_ps, ln)
-                if tp >= 0 && tp < ii:
-                    cell_store(bt, bn * 16, tp)
-                    cell_store(bt, bn * 16 + 8, ii)
-                    bn = bn + 1
-                    has_loop = 1
-                tp = label_pos_of(iri_s3(inst), lab_id, lab_ps, ln)
-                if tp >= 0 && tp < ii:
-                    cell_store(bt, bn * 16, tp)
-                    cell_store(bt, bn * 16 + 8, ii)
-                    bn = bn + 1
-                    has_loop = 1
             ii = ii + 1
         car : string, mut = alloc(vc * 8)
         iz = 0
@@ -607,14 +594,14 @@ fn alloc_registers():
                             cell_store(st, lv2 * 8, 2)
                             cell_store(car, lv2 * 8, 1)
                     pp = pp + 1
-                // 条件定值差分标记：BRANCH 的前向目标 t 在 (pp, b0] 时，位置 (pp, t)
+                // 条件定值差分标记：MATCH 的前向目标 t 在 (pp, b0] 时，位置 (pp, t)
                 // 可被跳过且循环仍继续。区间 [pp+1, t-1] 加 1，终点 t 减 1；前缀累计
                 // 大于 0 表示该位置落在可跳过区域内。回跳和外跳目标不计，它们不构成
                 // 跳过仍继续循环。
                 //
                 // if-else 布局中，else 体 B 会被 then 尾的无条件 JUMP 结构性跳过。
-                // B 内的定值位于 BRANCH 的 else 目标标号处，区间 [pp+1, t-1] 不含终点 t。
-                // 只扫 IR_BRANCH 会漏掉 IR_JUMP，把 B 内定值误判为每轮必执行，造成同
+                // B 内的定值位于 MATCH 的 else 目标标号处，区间 [pp+1, t-1] 不含终点 t。
+                // 只扫 IR_MATCH 会漏掉 IR_JUMP，把 B 内定值误判为每轮必执行，造成同
                 // 寄存器值被破坏。因此对 span 内前向 IR_JUMP 也生成 [pp+1, t-1] 差分。
                 // continue 的前向形态同理；回跳的 continue 和 break 外跳目标不计。
                 // over-mark 只降低利用率，方向安全。
@@ -629,16 +616,7 @@ fn alloc_registers():
                 loop:
                     if pp > b0:
                         break
-                    if iri_op(ist + pp) == IR_BRANCH:
-                        t2 := label_pos_of(iri_s2(ist + pp), lab_id, lab_ps, ln)
-                        t3 := label_pos_of(iri_s3(ist + pp), lab_id, lab_ps, ln)
-                        if t2 > pp && t2 <= b0:
-                            cell_store(skp, (pp + 1 - t0) * 8, cell_load(skp, (pp + 1 - t0) * 8) + 1)
-                            cell_store(skp, (t2 - t0) * 8, cell_load(skp, (t2 - t0) * 8) - 1)
-                        if t3 > pp && t3 <= b0:
-                            cell_store(skp, (pp + 1 - t0) * 8, cell_load(skp, (pp + 1 - t0) * 8) + 1)
-                            cell_store(skp, (t3 - t0) * 8, cell_load(skp, (t3 - t0) * 8) - 1)
-                    else if iri_op(ist + pp) == IR_MATCH:
+                    if iri_op(ist + pp) == IR_MATCH:
                         // Every CASE target is a conditional successor. Mark
                         // each forward arm entry as skippable, exactly like a
                         // BRANCH target. Over-marking only lowers register
