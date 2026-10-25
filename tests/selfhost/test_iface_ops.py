@@ -130,6 +130,8 @@ def main():
     ok.append(case_ok("pos_logic_int", "fn main() -> int:\n    b := 1 && true\n    return 0\n"))
     ok.append(case_ok("pos_logic_bool", "fn main() -> int:\n    b := true && false\n    return 0\n"))
     ok.append(case_ok("pos_cond_if_bool", "fn main() -> int:\n    if true:\n        return 1\n    return 0\n"))
+    ok.append(case_ok("pos_cond_if_not_str_eq",
+                      'fn main() -> int:\n    if !str_eq("a", "b"):\n        return 1\n    return 0\n'))
     ok.append(case_ok("pos_cond_while_bool",
                       "fn main() -> int:\n    n : ., mut = 0\n    while n < 3:\n        n = n + 1\n    return n\n"))
     ok.append(case_ok("pos_range_int", "fn main() -> int:\n    b := 1..3\n    return 0\n"))

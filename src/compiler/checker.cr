@@ -3392,8 +3392,11 @@ fn infer_expr(node: int) -> int:
 
     if ast_kind(node) == EXPR_UNARY:
         op := ast_c(node)
-        if op == UOP_NEG || op == UOP_NOT:
+        if op == UOP_NEG:
             return infer_expr(ast_a(node))
+        if op == UOP_NOT:
+            infer_expr(ast_a(node))
+            return TI_BOOL
         if op == UOP_REF:
             operand := ast_a(node)
             is_mut := ast_int_val(node)

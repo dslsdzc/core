@@ -2310,7 +2310,10 @@ fn gen_expr(node: int) -> int:
         op_var := gen_expr(ast_a(node))
         op_var = force_if_thunk(op_var)
         vt : ., mut = TI_INT
-        if op == UOP_NEG:
+        if op == UOP_NOT:
+            // Logical not yields a bool, independent of the operand type.
+            vt = TI_BOOL
+        else if op == UOP_NEG:
             // 一元负保持数值操作数类型：dex 精确（TI_DEX_S）-> 缩放整数取负 ✓；
             // dex apx（TI_DEX）-> 整型取负（binary64 符号位翻转未实现，既有 apx
             // 限制，dex 定点文档；apx 负值请用 0 - x 表达）
