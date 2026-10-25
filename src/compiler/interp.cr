@@ -266,6 +266,32 @@ fn ir_interp_str_sub(a: int, start: int, len: int) -> int:
 // slot, s2 the argument count, and s3 the interned function name. Builtins mirror
 // the previous main-loop branches. User functions run inline through
 // ir_interp_run_fn; nested calls use the same depth check.
+// Interpreter-side string equality over intern indexes. It must not call the
+// AOT-compiled `str_eq`: in the interpreter's flat frame model that call crashed
+// on interned strings. istr_len/str_load8 are the interpreter's own primitives.
+fn ir_interp_str_eq_idx(a: int, b: int) -> int:
+    la := istr_len(a)
+    lb := istr_len(b)
+    if la != lb:
+        return 0
+    i : ., mut = 0
+    loop:
+        if i >= la:
+            return 1
+        if str_load8(a, i) != str_load8(b, i):
+            return 0
+        i = i + 1
+    return 1
+
+// Compare an interned call name by index, not via the AOT str_eq function:
+// the latter crashed when the interpreter compared equal interned strings.
+fn ir_interp_name_is(fn_ni: int, name: string) -> int:
+    if fn_ni < 0:
+        return 0
+    if fn_ni == str_intern(name):
+        return 1
+    return 0
+
 fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
     fn_ni := s3
     fn_name := istr_get(fn_ni)
@@ -276,36 +302,38 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
            // TAG_AUTO_STR: print_i and println_i are no-ops; syscall3 returns 0.
 
     // syscall3 and syscall4 return 0 in the interpreter.
-    if str_eq(fn_name, "syscall3") != 0 || str_eq(fn_name, "syscall4") != 0:
+    if ir_interp_name_is(fn_ni, "syscall3") != 0 || ir_interp_name_is(fn_ni, "syscall4") != 0:
         if d >= 0:
             cell_store(g_ir_vals, d * 8, 0)
-    if str_eq(fn_name, "str_len") != 0:
+    if ir_interp_name_is(fn_ni, "str_len") != 0:
         if d >= 0 && s2 >= 1:
             cell_store(g_ir_vals, d * 8, ir_interp_tag(istr_len(cell_load(g_ir_vals, s1 * 8))))
-    if str_eq(fn_name, "str_eq") != 0:
+    if ir_interp_name_is(fn_ni, "str_eq") != 0:
         if d >= 0 && s2 >= 2:
-            left_s := istr_get(cell_load(g_ir_vals, s1 * 8))
-            right_s := istr_get(cell_load(g_ir_vals, (s1 + 1) * 8))
-            cell_store(g_ir_vals, d * 8, str_eq(left_s, right_s))
-    if str_eq(fn_name, "concat") != 0:
+            // The result is an int: tag it under BigInt mode like every other
+            // interpreter-int production.
+            cell_store(g_ir_vals, d * 8, ir_interp_tag(ir_interp_str_eq_idx(
+                cell_load(g_ir_vals, s1 * 8),
+                cell_load(g_ir_vals, (s1 + 1) * 8))))
+    if ir_interp_name_is(fn_ni, "concat") != 0:
         if d >= 0 && s2 >= 2:
             cell_store(g_ir_vals, d * 8, ir_interp_str_concat(
                     cell_load(g_ir_vals, s1 * 8), cell_load(g_ir_vals, (s1 + 1) * 8)))
-    if str_eq(fn_name, "int_str") != 0:
+    if ir_interp_name_is(fn_ni, "int_str") != 0:
         if d >= 0 && s2 >= 1:
             if g_interp_big != 0:
                 cell_store(g_ir_vals, d * 8, str_intern(bi_to_dec(cell_load(g_ir_vals, s1 * 8))))
             else:
                 cell_store(g_ir_vals, d * 8, str_intern(int_str(cell_load(g_ir_vals, s1 * 8))))
-    if str_eq(fn_name, "chr") != 0:
+    if ir_interp_name_is(fn_ni, "chr") != 0:
         if d >= 0 && s2 >= 1:
             cell_store(g_ir_vals, d * 8, str_intern(chr(ir_interp_word(cell_load(g_ir_vals, s1 * 8)))))
-    if str_eq(fn_name, "get_char") != 0:
+    if ir_interp_name_is(fn_ni, "get_char") != 0:
         if d >= 0 && s2 >= 2:
             cell_store(g_ir_vals, d * 8, ir_interp_str_char(
                 cell_load(g_ir_vals, s1 * 8),
                 ir_interp_word(cell_load(g_ir_vals, (s1 + 1) * 8))))
-    if str_eq(fn_name, "str_sub") != 0:
+    if ir_interp_name_is(fn_ni, "str_sub") != 0:
         if d >= 0 && s2 >= 3:
             cell_store(g_ir_vals, d * 8, ir_interp_str_sub(
                 cell_load(g_ir_vals, s1 * 8),
@@ -349,7 +377,7 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
         if d >= 0:
             cell_store(g_ir_vals, d * 8, 0)
     // String builtins are handled; do not fall through to the user-function lookup.
-    if str_eq(fn_name, "str_len") != 0 || str_eq(fn_name, "str_eq") != 0 || str_eq(fn_name, "concat") != 0 || str_eq(fn_name, "int_str") != 0 || str_eq(fn_name, "chr") != 0 || str_eq(fn_name, "get_char") != 0 || str_eq(fn_name, "str_sub") != 0:
+    if ir_interp_name_is(fn_ni, "str_len") != 0 || ir_interp_name_is(fn_ni, "str_eq") != 0 || ir_interp_name_is(fn_ni, "concat") != 0 || ir_interp_name_is(fn_ni, "int_str") != 0 || ir_interp_name_is(fn_ni, "chr") != 0 || ir_interp_name_is(fn_ni, "get_char") != 0 || ir_interp_name_is(fn_ni, "str_sub") != 0:
         return
     // 用户函数内联执行（单层 / 嵌套递归）
     if d < 0:
