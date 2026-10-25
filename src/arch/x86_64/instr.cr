@@ -2264,37 +2264,6 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         cp = cp + emit_modrm(buf, pos+cp, 0, 11%8, 10%8)
         return cp
 
-    if op == IR_BRANCH:
-        cp = cp + e2_load_var(buf, pos+cp, 10, s1)
-        // test r10, r10
-        cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 10/8)
-        e2_w8(buf, pos+cp, 133)
-        cp = cp + 1
-        cp = cp + emit_modrm(buf, pos+cp, 3, 10%8, 10%8)
-        // je -> false_label (s3), jmp -> true_label (s2)
-        // Single-pass backpatching: known labels emit immediately, unknown record pending
-        je_rel_pos := pos+cp + 2
-        cp = cp + e2_je(buf, pos+cp, 0)
-        if s3 >= 0 && cell_load(g_label_poses, s3 * 8) >= 0:
-            target := cell_load(g_label_poses, s3 * 8)
-            e2_w32(buf, je_rel_pos, target - (je_rel_pos + 4))
-        else if s3 >= 0:
-            grow_pending(g_pending_count + 1)
-            cell_store(g_pending_pos, g_pending_count*8, je_rel_pos)
-            cell_store(g_pending_label, g_pending_count*8, s3)
-            g_pending_count = g_pending_count + 1
-        jmp_rel_pos := pos+cp + 1
-        cp = cp + e2_jmp(buf, pos+cp, 0)
-        if s2 >= 0 && cell_load(g_label_poses, s2 * 8) >= 0:
-            target := cell_load(g_label_poses, s2 * 8)
-            e2_w32(buf, jmp_rel_pos, target - (jmp_rel_pos + 4))
-        else if s2 >= 0:
-            grow_pending(g_pending_count + 1)
-            cell_store(g_pending_pos, g_pending_count*8, jmp_rel_pos)
-            cell_store(g_pending_label, g_pending_count*8, s2)
-            g_pending_count = g_pending_count + 1
-        return cp
-
     if op == IR_JUMP:
         jmp_rel_pos := pos+cp + 1
         cp = cp + e2_jmp(buf, pos+cp, 0)

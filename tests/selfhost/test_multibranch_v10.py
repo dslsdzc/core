@@ -45,7 +45,6 @@ BASE = Path(__file__).resolve().parent.parent.parent
 COREC = BASE / "build" / "corec"
 COREARCH = BASE / "build" / "corearch"
 
-IR_BRANCH = 19
 IR_LABEL = 21
 IR_MATCH = 54
 
@@ -436,6 +435,22 @@ def test_case_segment_24b_layout_and_order():
     assert _pack_case(records) == body
     assert encode(_split(out), flags=flags(out)) == out
     assert encode(_split(out), flags=flags(out)) == encode(_split(out), flags=flags(out))
+
+
+def test_retired_branch_opcode_rejected():
+    """Opcode 19 is retired; a .ccr carrying it must be rejected."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        data = _build_ccr(tmp, BRANCH_SOURCE, "retired_branch")
+        nodes = _nod_records(data)
+        match_idx = _match_nodes(data)[0]
+        labels = [nodes[i][2] for i in _label_nodes(data)]
+        d = bytearray(data)
+        off = _nod_segment_offset(data) + 4 + match_idx * 40
+        struct.pack_into("<I", d, off, 19)
+        struct.pack_into("<i", d, off + 16, labels[0])
+        struct.pack_into("<i", d, off + 20, labels[1])
+        _assert_load_rejected(bytes(d), tmp, "retired_branch")
 
 
 def test_case_segment_is_last_after_edg():
@@ -1714,11 +1729,6 @@ def _match_nodes(data):
     return _user_op_nodes(data, IR_MATCH)
 
 
-def _branch_nodes(data):
-    """IR_BRANCH nodes in fixture-defined functions, excluding the prelude."""
-    return _user_op_nodes(data, IR_BRANCH)
-
-
 def _is_if_match(data, match_idx):
     """An if lowers to exactly VALUE(0) followed by DEFAULT."""
     nodes = _nod_records(data)
@@ -2030,11 +2040,11 @@ CONDITION_MATCH_FIXTURES = [
 def test_condition_branches_lower_to_match_cases():
     """Every condition branch is one VALUE(0) row plus a DEFAULT row.
 
-    The fixtures cover if, for, and logical conditions; none keeps IR_BRANCH.
+    The fixtures cover if, for, and logical conditions; all lower to IR_MATCH.
     """
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        for name, source, expected, expected_matches, branches_expected in CONDITION_MATCH_FIXTURES:
+        for name, source, expected, expected_matches, _branches_expected in CONDITION_MATCH_FIXTURES:
             data = _build_ccr(tmp, source, name)
             nodes = _nod_records(data)
             matches = _match_nodes(data)
@@ -2056,12 +2066,6 @@ def test_condition_branches_lower_to_match_cases():
                     f"{name}: false case value {part[0]['value']}, expected 0"
                 )
                 _assert_targets_are_labels(data, part)
-            if branches_expected is not None:
-                branches = _branch_nodes(data)
-                assert len(branches) == branches_expected, (
-                    f"{name}: expected {branches_expected} IR_BRANCH nodes, "
-                    f"got {len(branches)}"
-                )
             plan_path = _ccr_file(tmp, data, f"{name}_plan")
             plans, _binary_emits, _table_emits = _match_plan_full(
                 plan_path, only_nodes=set(matches)
@@ -2126,9 +2130,6 @@ def test_all_condition_branches_use_match_cases():
         tmp = Path(td)
         for name, source, expected in COND_BRANCH_FIXTURES:
             data = _build_ccr(tmp, source, name)
-            assert _branch_nodes(data) == [], (
-                f"{name}: conditional branch still emits IR_BRANCH"
-            )
             nodes = _nod_records(data)
             matches = _match_nodes(data)
             assert matches, f"{name}: no MATCH nodes"

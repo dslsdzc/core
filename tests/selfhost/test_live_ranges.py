@@ -447,7 +447,7 @@ def check_regalloc_else_def_carry() -> tuple:
     同族机制残留于 else 臂：if-else 发射布局
       BRANCH c, L_then, L_else; L_then: A; JUMP L_merge; L_else: B; JUMP L_merge;
     中 else 体 B（`x = 7`）被 then 尾的无条件 JUMP 结构性跳过——阶段 2 差分标记
-    只扫 IR_BRANCH 的 forward 目标（B 正落在 BRANCH 自身 else 目标的标号处、
+    只扫 IR_MATCH 的 forward 目标（B 正落在 MATCH 自身 else 目标的标号处、
     区间 [pp+1, t−1] 不含终点 t），漏 IR_JUMP → B 内定值 x 判「每轮必执行、
     不携带」→ 阶段 4 文字窗口终点归还 x 寄存器 → 循环尾临时同寄存器 → 回边前
     污染 → 下轮读 x 错值（p_else1/p_while 应 22 实得 20；pre-CAG O2 正确）。
