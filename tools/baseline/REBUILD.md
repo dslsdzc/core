@@ -3,10 +3,11 @@
 ## 定义
 
 固定基线是判定面回归检查分支 1（固定基线同源对拍）使用的 pre-批编译器二进制。
-用它编译当前源，与用当前二进制编译当前源的结果逐档比较（76 档 `check` 的 rc 和日志；档数按实际枚举读取：
-`tests/suite/*.cr` 36 + `src/compiler/{main,_import}.cr` 2 + 后端/内核单元 15 + `src/stdlib/*.cr` 19 +
-`examples/*.cr` 4 = 76，与 `parity_run.sh` 的 `CORPUS_TOTAL=76` 硬性断言一致；2026-09-17 批 6 T6 实测 t1=35，
-2026-09-18 批 8 2(a)（#132）加入 `tests/suite/cli_view_test.cr` 后 t1=36；本行与 runner 同批同步（2026-09-24））。
+用它编译当前源，与用当前二进制编译当前源的结果逐档比较（85 档 `check` 的 rc 和日志；档数按实际枚举读取：
+`tests/suite/*.cr` 34 + `src/compiler/{main,_import}.cr` 2 + 后端/内核单元 26 + `src/stdlib/*.cr` 19 +
+`examples/*.cr` 4 = 85，与 `parity_run.sh` 的 `CORPUS_TOTAL=85` 硬性断言一致。
+2026-09-24 的口径为 76 档（t1=36、t3=15）。v4 迁移删除了 2 档空 fixture，并把架构轴、OS 轴、
+target 轴的文件纳入 t3，所以 2026-10-25 起改为 85 档；本行与 runner 同批同步。）
 差异即该批对判定面的行为变更（预期内为收紧或放宽，须逐条列入清单；预期外为回归）。
 
 二进制不入库（维护者裁定，2026-09-13）。入库的是方法和 sha 允许清单：
@@ -32,18 +33,16 @@ bash tools/baseline/rebuild.sh /tmp/p6-baseline      # 产物：/tmp/p6-baseline
 
 | 二进制 | sha256 | 源修订 |
 |---|---|---|
-| `corec` | `701a319f52696e9b098eac03b0e85ecbd6514e8d2ad05c9c30f662f62e402cdc` | `25e70197`（v4 语法迁移 T6 完成 / T7 起点） |
-| `corearch` | `bd6b1c6af5e64d20eca120e3188f05d02ee4a6f6de510516b19d47861f522e30` | 同上 |
-| `corelsp` | `2c1da86fc5c0044fb059d8d759a20a6167be18645eea43101948594949703661` | 同上 |
+| `corec` | `4234b7a6254ad3b7a890268c462dbe3dbd269a991f0deaa12832e154dbe26265` | `7eb9669d`（v4 迁移 #183 合入 develop） |
+| `corearch` | `3786eb4a8a500158d22a0193b9174c2f4228b5c8d379a4d992ef920b28a9c421` | 同上 |
+| `corelsp` | `845ac0485f2fede878f18bdbacb49e9c24b62ddf4c3180e2b5d411e60467c0eb` | 同上 |
 
-> `PINNED_REV` = `25e70197`（v4 迁移 T6 完成），是首个可读 v4 形式的基线。与历次换代不同，
-> 本代的换代依据是硬约束而非批次节奏：`97f4394f` 是 v4 之前的修订，其 corec 只接受 v3 形式，
-> 而本脚本第 71 行起的快速验证已改为 v4 形式（T6b），所以旧 rev 下该步必然失败（已知窗口状态）。
-> 换代自证（2026-10-11，T7 实际运行）：重新运行本方法后，三个 sha 与上表相同，快速验证返回 42，
-> 三个 sha 与当前工作树自建二进制（`build/corec|corearch|corelsp`）逐字节相同（即输出路径无关性的直接证据）。
-> 注意启用条件（见 `rebuild.sh:17` 同批注）：源修订须在仓库内可达。若本批经 develop
-> squash 合入，`25e70197` 不进入 develop 历史，换人或换机重建会失败；此时须把 `PINNED_REV`
-> 重指到 develop 上包含 v4 工作的提交，并在同一批重新固定三个 sha（旧值保留记录 = 本表 + `rebuild.sh` 注）。
+> `PINNED_REV` = `7eb9669d`（v4 迁移 #183 合入 develop 的提交），是首个 develop 历史内可达的
+> v4 基线。2026-10-11 曾固定到 `25e70197`，但那枚提交只存在于本地 jj 提交图；#183 以 squash
+> 合入 develop 后，换人或换机无法检出该修订。2026-10-25 T7 收尾把 `PINNED_REV` 重指到
+> `7eb9669d`，并同批重锁三个 sha。
+> 换代自证（2026-10-25 实际运行）：从 `7eb9669d` 重建，三个 sha 与上表相同；快速验证返回 42；
+> `parity_run.sh` 实测 85 档，rc 分布 `49×0 / 36×1`。旧代 `25e70197` 的完整三 sha 保留在历史表。
 
 ## 允许清单历史（旧值不删，换代纪律 2；本表 = 历次换代清单）
 
@@ -51,7 +50,8 @@ bash tools/baseline/rebuild.sh /tmp/p6-baseline      # 产物：/tmp/p6-baseline
 |---|---|---|---|---|---|
 | 初代 | `9bcb7083`（R2 P4 完成 / P4 Task 7） | `5d2b15ad746018619b01143cce400e6f3489ae72a962e12283a7afd3dcdb41e7` | `493dc490dfaed7774b46b74ccf1cfeca9fe5f61620e34229afb8991b1628a2a7` | `18b94bd955fa204accf0753095a28f6499871566254d846333a7496c99109d49` | P5 批的 pre-侧（P6 T0 1.4 节：与本方法产物逐字节 IDENTICAL ×3，允许清单自洽） |
 | 2 代 | `97f4394f`（R2 P6 终态） | `ae01de75…`（全值见本行原值注） | `228f82e9…` | `90eb19c6…` | 容量批 CAP 的 pre-侧；换代依据 = 换代纪律 1（下一批以本批完成为 pre-侧）；自证见 `cap-task1-report.md`。2026-10-11（T7）换代后降为历史代。旧全值保留记录：corec `ae01de7534ea8428e3e062fccbc5fef5d45abfc5d3dafb90b3c85e08f354cce2` · corearch `228f82e948cfaf8170ada982d80f1ebddfd3847e71cdf04ca4b42d9226373d2e` · corelsp `90eb19c6d3bd4e3234b4328d8b8f3284cca6d1644d3959bb83f07b7e71473032` |
-| 3 代（现行） | `25e70197`（v4 迁移 T6 完成） | `701a319f…`（全值见上表） | `bd6b1c6a…`（全值见上表） | `2c1da86f…`（全值见上表） | v4 基线：首个可读 v4 形式的 pre-侧；换代依据 = v4 可读性硬约束（见“现行代”注）。自证（2026-10-11 实际运行）= 重建三个 sha 与上表相同 + 快速验证 42 + 与工作树自建二进制逐字节相同 |
+| 3 代 | `25e70197`（v4 迁移 T6 完成） | `701a319f52696e9b098eac03b0e85ecbd6514e8d2ad05c9c30f662f62e402cdc` | `bd6b1c6af5e64d20eca120e3188f05d02ee4a6f6de510516b19d47861f522e30` | `2c1da86fc5c0044fb059d8d759a20a6167be18645eea43101948594949703661` | v4 基线：首个可读 v4 形式的 pre-侧；换代依据 = v4 可读性硬约束（见“现行代”注）。自证（2026-10-11 实际运行）= 重建三个 sha 与上表相同 + 快速验证 42 + 与工作树自建二进制逐字节相同。2026-10-25 降为历史代（该修订不在 develop 历史内） |
+| 4 代（现行） | `7eb9669d`（v4 迁移 #183 合入 develop） | `4234b7a6…`（全值见上表） | `3786eb4a…`（全值见上表） | `845ac048…`（全值见上表） | v4 计划 T7 收尾：`25e70197` 不进入 develop 历史（#183 为 squash 合入），把 `PINNED_REV` 重指到 develop 可达的 v4 提交，并同批重锁三个 sha。自证（2026-10-25）= 三个 sha 与上表相同 + 快速验证 42 + parity 85 档（`49×0 / 36×1`） |
 
 ## 用法
 
@@ -150,6 +150,10 @@ bash tools/baseline/warm_run.sh ./build/corec /tmp/warm_now   # 定点层（语�
   码集对拍才能判断是否回归；本条不作回归声明（本批 rc 等价口径 = 代 0 逐档码集，见 v4 计划二.2 节 B1/B2）。
   因此本文档其他位置出现的“75 档”同属 76 档之前的实测值（定点层的“既有 75/29 语料”`+125s（75 档 ×2 次 ccr）`），
   不得当作当前语料数；`src/ci/run.sh` 里那处同款引用已于 2026-09-24 一并补正。
+  〔2026-10-25 T7 重采·85 档〕用新固定基线（`7eb9669d` 自建，`corec` sha `4234b7a6…`）重划，
+  得到 PASS，85 档，rc 分布 `49×0 / 36×1`（分层 rc=1：t1 4、t2 1、t3 20、t4 9、t5 2）。
+  t1 的 4 档 = `apx_conversion_test`、`at_test_mini4`、`at_test_mini6`、`ptr_arith`。
+  旧 76 档值 `43×0 / 33×1` 保留为前一语料口径。
   空 fixture ×2（`tests/suite/{test_control_flow,test_generics}.cr`，2026-10-24 已删除；本行计数是删除前实测）、
   P21 嵌套 fn ×3、examples 解析错 ×2、库单元单独 check ×25、TF01 并发族 ×5、TF07 ×1、B04 ×2，划界见
   `p6-task0-report.md` 3.1 节（运行之前先读，不要把既有失败当成回归）。

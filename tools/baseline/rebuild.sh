@@ -26,12 +26,19 @@ set -euo pipefail
 # 含 v4 工作的提交**并同批重锁三 sha（**留痕**：本条即旧值出处）。
 # 旧代三 sha（97f4394f = v3 末代）：corec `ae01de75…` · corearch `228f82e9…` · corelsp `90eb19c6…`
 #   （全值见 `REBUILD.md` 历史表）。
-PINNED_REV="25e70197"          # v4 迁移 T6 收官 / T7 起点（**首枚可读 v4 形的基线**）
+#
+# 换代（2026-10-25，v4 迁移 T7 收尾）：PINNED_REV 25e70197 → **7eb9669d**。
+# **依据**（v4 计划 T7 的启用条件）：v4 迁移批 #183 已以 squash 方式合入 develop，
+# `7eb9669d`（`qyntvyq`）在 develop 历史内可达；旧的 `25e70197` 只是本地 jj 提交，
+# 不进入 develop 历史，换人或换机重建会失败。新修订可读 v4 形，冒烟步通过。
+# 旧代三 sha（25e70197）：corec `701a319f…` · corearch `bd6b1c6a…` · corelsp `2c1da86f…`
+#   （全值见 `REBUILD.md` 历史表）。
+PINNED_REV="7eb9669d"          # v4 迁移 #183 合入 develop 的提交（首枚 develop 可达的 v4 基线）
 WS_NAME="p6-baseline-build"    # 临时 workspace 名（收工 forget）
 
-WHITELIST_COREC="701a319f52696e9b098eac03b0e85ecbd6514e8d2ad05c9c30f662f62e402cdc"
-WHITELIST_COREARCH="bd6b1c6af5e64d20eca120e3188f05d02ee4a6f6de510516b19d47861f522e30"
-WHITELIST_CORELSP="2c1da86fc5c0044fb059d8d759a20a6167be18645eea43101948594949703661"
+WHITELIST_COREC="4234b7a6254ad3b7a890268c462dbe3dbd269a991f0deaa12832e154dbe26265"
+WHITELIST_COREARCH="3786eb4a8a500158d22a0193b9174c2f4228b5c8d379a4d992ef920b28a9c421"
+WHITELIST_CORELSP="845ac0485f2fede878f18bdbacb49e9c24b62ddf4c3180e2b5d411e60467c0eb"
 
 usage() { echo "usage: bash tools/baseline/rebuild.sh <outdir>" >&2; exit 2; }
 [ $# -eq 1 ] || usage

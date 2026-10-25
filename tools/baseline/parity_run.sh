@@ -29,11 +29,12 @@ cd "$REPO_ROOT" || exit 1
 mkdir -p "$OUT/logs"
 CC="nice -n 19 $CCBIN"
 
-CORPUS_TOTAL=76   # = t1 **36** + t2 2 + t3 15 + t4 19 + t5 4（**2026-09-17 批 6 T6 实测逐层枚举**，
-                  #   非沿用旧账：R2 P6 T0 表 C 记 t1=32，其后 global_seam(+1)/apx(+1)/批 5 opt_dex(+1) 三次 +1 ⇒ 35；
-                  #   **2026-09-18 批8 2(a)（#132）+1 = `cli_view_test.cr` ⇒ 36**——该次**未同步本行**，
-                  #   本计数自 2026-09-18 起与实数失配（76≠75），第一腿 `exit 1` 硬失败至 2026-09-24 本批同步。
-                  #   ⇒ 与 `ls tests/suite/*.cr | wc -l` 一致；**档数变化必须同批改本行与本注释**，否则 runner 硬失败。）
+CORPUS_TOTAL=85   # = t1 **34** + t2 2 + t3 **26** + t4 19 + t5 4（**2026-10-25 实测逐层枚举**，
+                  #   非沿用旧账：2026-09-24 记 76 = t1 36 + t2 2 + t3 15 + t4 19 + t5 4；
+                  #   v4 迁移后 t1 删除 2 档空 fixture（`test_control_flow`/`test_generics`）⇒ 34；
+                  #   t3 从 15 增至 26 = ccr_io 1 + format/elf 3 + os/linux 5 + arch/x86_64 12 +
+                  #   lattice 1 + targets/x86_64/linux/elf 4。**档数变化必须同批改本行与本注释**，
+                  #   否则 runner 硬失败。与 `ls` 逐层计数一致。）
 
 run_one() {   # $1 tier tag, $2 file
   local tag="$1" f="$2" base
