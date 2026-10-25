@@ -595,9 +595,8 @@ g_iface_registry_ok : int, mut
 //   UOP_* 1..4 are offset by IP_UOP_BIAS: UOP_NEG=21, UOP_NOT=22, UOP_REF=23,
 //   UOP_DEREF=24.
 //   New families start at 25: IP_INDEX=25, IP_INDEX_RANGE=26, IP_FIELD=27,
-//   IP_METHOD=28, IP_AS=29, IP_COND=30, IP_COND_BOOL=31. IP_COND accepts int or
-//   bool; IP_COND_BOOL accepts bool only. The two rules are intentionally
-//   separate: merging them would either tighten if or loosen while.
+//   IP_METHOD=28, IP_AS=29, IP_COND=30. IP_COND accepts bool only and gates
+//   both if and while conditions.
 // These constants must be declared here because checker.cr is earlier in the
 // concatenated build and cannot reference constants from a later file. Functions
 // may be forward-referenced.
@@ -608,7 +607,6 @@ IP_FIELD : int = 27
 IP_METHOD : int = 28
 IP_AS : int = 29
 IP_COND : int = 30
-IP_COND_BOOL : int = 31
 
 // Bridge cache from checker type row to type term. Each entry is 16 bytes
 // {ti, term}. ty_shadow.cr owns probing, load-factor checks, and rehash replay.

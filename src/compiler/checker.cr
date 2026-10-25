@@ -3392,8 +3392,11 @@ fn infer_expr(node: int) -> int:
 
     if ast_kind(node) == EXPR_UNARY:
         op := ast_c(node)
-        if op == UOP_NEG || op == UOP_NOT:
+        if op == UOP_NEG:
             return infer_expr(ast_a(node))
+        if op == UOP_NOT:
+            infer_expr(ast_a(node))
+            return TI_BOOL
         if op == UOP_REF:
             operand := ast_a(node)
             is_mut := ast_int_val(node)
@@ -3749,12 +3752,11 @@ fn infer_expr(node: int) -> int:
         then_node := ast_b(node)
         else_node := ast_c(node)
         cond_ti := infer_expr(cond)
-        // Accept int as truthy/falsy in conditions (not just strict bool)
-        // 查表使用 ONE 检查，单操作数。IP_COND 格是 {int, bool}，dex 被拒，例如 if 1.5 报 TC01。
-        // 不得与 while 的 IP_COND_BOOL 合并：那条只收 bool，合并会收紧 if 或放宽 while。
+        // if and while share the same bool-only condition gate.
+        // 查表使用 ONE 检查，单操作数。IP_COND 格只含 bool；int/dex 等被拒，例如 if 1 报 TC01。
         if cur_fn_is_generic() == 0:
             if iface_permits(iface_kind_of(cond_ti), IP_COND) == 0:
-                check_error(EC_TC_IF_COND, "If condition must be bool or int", ast_line(node), ast_col(node))
+                check_error(EC_TC_IF_COND, "If condition must be bool", ast_line(node), ast_col(node))
         // --- Dyn type set merge: save pre-if state ---
         pre_dyn_count : ., mut = g_dyn_type_set_count
         pre_dyn_save : string, mut = ""
@@ -3891,9 +3893,8 @@ fn infer_expr(node: int) -> int:
         cond := ast_a(node)
         body := ast_b(node)
         cond_ti := infer_expr(cond)
-        // 查表（检查条件 = ONE）。转录依据 = 本处改动前的 `cond_ti != TI_BOOL`；
-        // IP_COND_BOOL 格只含 bool，例如 while 1 报 TC04。
-        if iface_permits(iface_kind_of(cond_ti), IP_COND_BOOL) == 0:
+        // 查表（检查条件 = ONE）。IP_COND 格只含 bool，例如 while 1 报 TC04。
+        if iface_permits(iface_kind_of(cond_ti), IP_COND) == 0:
             check_error(EC_TC_WHILE_COND, "While condition must be bool", ast_line(node), ast_col(node))
         push_borrow_scope()
         infer_expr(body)

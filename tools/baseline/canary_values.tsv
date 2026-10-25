@@ -205,9 +205,20 @@
 #     pa_static_ccr e5ae096f7b04f6f1122e5d36aaa789d800d86913fa4ccfa5a60e9a0963be429d 94621
 #     gt_ccr        1fe6b8f14baeb0822b85ecf55763737ec2ce593f3aa34de14176cf5e39e28424 139344
 #     gt_static_ccr f8cc44b139541b5672762336e692ef64e31b3fd6e2b5b08afc26843478b342a0 139583
-canary_elf	pa	393739b4c8e1ecbeb28adaa70aaf4441561fee5b3638eec31030324a2b6711f7	53430
-pa_ccr	pa.ccr	ea7a68182daf623c36cccd75a52c9218f9ee47ef3cfba4d77075e29789415da3	94424
-pa_static_ccr	pa_st.bin.ccr	14c582249b9ae5c06adf31b5b8ff89b01610ea42aeca9f0f36b8cfdcd33713bb	94635
+canary_elf	pa	bb1eba8143ee772439f405349ac61f24aeb856c60f7c5d52bea7d9739bf1944b	53430
+pa_ccr	pa.ccr	1d369ae0816f67595191721364826e7ac070b70e8c01ec8abf376ee4ebd20f32	97544
+pa_static_ccr	pa_st.bin.ccr	3cd0b1ae3b597d22bd17c48f269c0fd7a7c3142a02406d3bab7ce5501ec3ecf3	97755
+# ── 【本批重锁 2026-10-26】if 表达式 + 全条件分支 -> IR_MATCH + CASE ──
+#   `if` 条件 bool-only；`if`/`while`/`for`/`&&`/`||` 与内部条件分支全部走统一
+#   决策节点 `IR_MATCH`（`VALUE(0)` + `DEFAULT`），后端二元快路径发射
+#   test/je 或 test/jne；`if` 作为表达式现在返回分支值。`--legacy-if` 已移除。
+#   D1 5/5 PASS。pa ELF 尺寸不变（53430）而 sha 变；四条 `.ccr` 因 CASE 行增加
+#   而增大。旧值留痕：
+#     canary_elf    f4a4c4a9a64af0a6ebcc2213ecc0c171c0be79d84124bdf5dfe08e9d4812042b 53430
+#     pa_ccr        af70c769af0b8c7de15eb1c885748c2f069628b0eac838139b7ea9ad1a0d4371 97112
+#     pa_static_ccr 9988279dae1efbe914a8c85c5b1ca90a209a70faee71b7e413d81e37ac21d915 97323
+#     gt_ccr        c7899a773cd3d8647093f23d230b877bf366eddfc182758ddce37615d5906bb0 130670
+#     gt_static_ccr 5d9729e4056b1dba93a1fe898913f56a397a6a62d95010c3feac33d4be70e0b1 130877
 # ── 【本批重锁·续 2026-10-25】OS-axis builtin 返回型 ──
 #   `ir_call_return_type` 现对无 Core body 的 OS 轴内建咨询
 #   `prelude_builtin_return_ti`（syscall3/syscall4 ⇒ TI_INT）。此前调用结果落
@@ -216,8 +227,8 @@ pa_static_ccr	pa_st.bin.ccr	14c582249b9ae5c06adf31b5b8ff89b01610ea42aeca9f0f36b8
 #   **尺寸不变**。D1 5/5 PASS。旧值留痕：
 #     gt_ccr        54c08b8124916e2ad0981823ba61332dc39037de7dbfe27cb4feb67e18b763b9 127262
 #     gt_static_ccr 9c0664ea03e410c2afeb375111586f362b8177678d2843ae106adf576ddd386c 127469
-gt_ccr	gt.ccr	6087a2b72c88acc78e2f433c1318970cc353a07966ab40b54ff9d7e0283508a8	127262
-gt_static_ccr	gt_st.bin.ccr	b082fe1055a84241711d816e73c188ed6934e01810bb265ca075eb4486f036da	127469
+gt_ccr	gt.ccr	eaa2ee1cdf6a1bb128bf5f4cc0903d8ea688d14f68cd47c75dacdd3cfb03f74b	131102
+gt_static_ccr	gt_st.bin.ccr	e13b36c3d24e1a8ffe1c1c5d86262e3a1c85132fda4ce87684846b072b8a4273	131309
 # ⚠ **本组为最终值（全部编译器源码改动落定后重测）**：重锁分量有两个，**都不是发射面泄漏**——
 #   ① **内容面**：`fmt.cr` 新增 `bool_str` ⇒ 凡 `import fmt` 的程序多一个函数体（ELF/`.ccr` 同增）；
 #   ② **编译器身份位移**（#123 同机制）：编译器源码任何改动都会改变**其自身 intern 序** ⇒ 同语义下

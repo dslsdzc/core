@@ -648,8 +648,11 @@ def test_v10_end_to_end():
         expected += size
     assert expected == len(data)
 
-    # CASE is the empty table: 4B case_count = 0.
-    assert segment(data, 9) == struct.pack("<I", 0)
+    # CASE: 4B count followed by 24B rows. The prelude's condition branches
+    # make the table nonempty even for a source with no explicit match.
+    case = segment(data, 9)
+    (case_count,) = struct.unpack_from("<I", case, 0)
+    assert len(case) == 4 + case_count * 24, (len(case), case_count)
 
     # ENT is 24B per record and carries no home field.
     ent = segment(data, 6)

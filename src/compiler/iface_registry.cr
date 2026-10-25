@@ -63,19 +63,18 @@ fn iface_registry_init():
     o_cmp := iface_bit(OP_EQ) + iface_bit(OP_NE) + iface_bit(OP_LT) + iface_bit(OP_GT) + iface_bit(OP_LE) + iface_bit(OP_GE)
     o_un := iface_bit(IP_UOP_BIAS + UOP_NEG) + iface_bit(IP_UOP_BIAS + UOP_NOT) + iface_bit(IP_UOP_BIAS + UOP_REF) + iface_bit(IP_UOP_BIAS + UOP_DEREF)
     o_base := o_cmp + o_un + iface_bit(IP_AS)
-    // if accepts int or bool; while accepts bool only.
+    // if and while both accept bool only.
     o_cond := iface_bit(IP_COND)
-    o_cond_b := iface_bit(IP_COND_BOOL)
     // 8 primitive atoms. ti_row uses TI_* constants; bool and string are written
     // by semantic mapping, not by index order.
-    // INT: arithmetic, logic, if condition. No while condition.
-    iface_put(0, AK_INT, TI_INT, str_intern("int"), EXPR_INT, o_base + o_arith + o_logic + o_cond)
+    // INT: arithmetic and logic. No condition.
+    iface_put(0, AK_INT, TI_INT, str_intern("int"), EXPR_INT, o_base + o_arith + o_logic)
     // DEX: arithmetic only. No logic or condition.
     iface_put(1, AK_DEX, TI_DEX, str_intern("dex"), EXPR_DEX, o_base + o_arith)
     // STRING: no arithmetic, logic, or condition. Index is permitted.
     iface_put(2, AK_STRING, TI_STR, str_intern("string"), EXPR_STRING, o_base + iface_bit(IP_INDEX))
-    // BOOL: logic and both conditions.
-    iface_put(3, AK_BOOL, TI_BOOL, str_intern("bool"), EXPR_BOOL, o_base + o_logic + o_cond + o_cond_b)
+    // BOOL: logic and the condition gate.
+    iface_put(3, AK_BOOL, TI_BOOL, str_intern("bool"), EXPR_BOOL, o_base + o_logic + o_cond)
     iface_put(4, AK_UNIT, TI_UNIT, str_intern("unit"), -1, o_base)
     iface_put(5, AK_NEVER, TI_NEVER, str_intern("never"), -1, o_base)
     iface_put(6, AK_CHAR, TI_CHAR, str_intern("char"), EXPR_CHAR, o_base)

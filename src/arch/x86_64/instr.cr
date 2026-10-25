@@ -274,6 +274,13 @@ fn e2_je(b: string, p: int, rel: int) -> int:
     e2_w32(b, p+2, rel)
     return 6
 
+fn e2_jne(b: string, p: int, rel: int) -> int:
+    // jne rel32 near — 2-byte opcode 0x0F 0x85
+    e2_w8(b, p, 15)
+    e2_w8(b, p+1, 133)
+    e2_w32(b, p+2, rel)
+    return 6
+
 fn e2_jae(b: string, p: int, rel: int) -> int:
     // jae rel32 near — 2-byte opcode 0x0F 0x83
     e2_w8(b, p, 15)
@@ -604,6 +611,60 @@ fn e2_match_nondefault_count(s2: int, s3: int) -> int:
             n = n + 1
         i = i + 1
     return n
+
+// Two-way if shape: VALUE(0) plus DEFAULT, with the default target as the
+// label immediately after MATCH. The backend can emit test/je and fall through
+// to the true arm, matching IR_BRANCH without an extra jump.
+fn e2_match_two_way_zero(instr_idx: int, s2: int, s3: int) -> int:
+    if s3 != 2:
+        return 0
+    value_idx : ., mut = -1
+    value : ., mut = 0
+    value_lbl : ., mut = -1
+    default_lbl : ., mut = -1
+    i : ., mut = 0
+    loop:
+        if i >= s3:
+            break
+        cbase := (s2 + i) * CCR_V10_CASE_DISK
+        kind := cell_load32(g_ccr_case, cbase + CCR_CASE_KIND)
+        if kind == CCR_CASE_KIND_DEFAULT:
+            ctd := cell_load_i32(g_ccr_case, cbase + CCR_CASE_TARGET)
+            if ctd < 0 || ctd >= g_ir_instr_count:
+                return 0
+            if iri_op(ctd) != IR_LABEL:
+                return 0
+            default_lbl = iri_s1(ctd)
+        else if kind == CCR_CASE_KIND_VALUE:
+            if value_idx >= 0:
+                return 0
+            value_idx = i
+            value = cell_load(g_ccr_case, cbase + CCR_CASE_VALUE)
+            ctv := cell_load_i32(g_ccr_case, cbase + CCR_CASE_TARGET)
+            if ctv < 0 || ctv >= g_ir_instr_count:
+                return 0
+            if iri_op(ctv) != IR_LABEL:
+                return 0
+            value_lbl = e2_match_case_label(ctv)
+            if value_lbl < 0:
+                return 0
+        else:
+            return 0
+        i = i + 1
+    if value_idx < 0 || default_lbl < 0 || value_lbl < 0:
+        return 0
+    if value != 0:
+        return 0
+    if instr_idx + 1 >= g_ir_instr_count:
+        return 0
+    if iri_op(instr_idx + 1) != IR_LABEL:
+        return 0
+    next_lbl := iri_s1(instr_idx + 1)
+    if next_lbl == default_lbl:
+        return 1
+    if next_lbl == value_lbl:
+        return 2
+    return 0
 
 // The single strategy predicate. The emitter and the --dump-match-plan channel
 // both call this, so the observable plan cannot drift from the emitted code.
@@ -2316,6 +2377,44 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                     if iri_op(ctarget) == IR_LABEL:
                         default_lbl = iri_s1(ctarget)
             ci = ci + 1
+
+        if first_kind == CCR_CASE_KIND_VALUE:
+            two_mode := e2_match_two_way_zero(instr_idx, s2, s3)
+            if two_mode != 0:
+                value_lbl : ., mut = -1
+                vi : ., mut = 0
+                loop:
+                    if vi >= s3:
+                        break
+                    vbase := (s2 + vi) * CCR_V10_CASE_DISK
+                    if cell_load32(g_ccr_case, vbase + CCR_CASE_KIND) == CCR_CASE_KIND_VALUE:
+                        value_lbl = e2_match_case_label(
+                            cell_load_i32(g_ccr_case, vbase + CCR_CASE_TARGET))
+                        break
+                    vi = vi + 1
+                if value_lbl >= 0 && default_lbl >= 0:
+                    jump_lbl : ., mut = value_lbl
+                    if two_mode == 2:
+                        jump_lbl = default_lbl
+                    // test r10, r10
+                    cp = cp + emit_rex(buf, pos+cp, 1, 10/8, 0, 10/8)
+                    e2_w8(buf, pos+cp, 133)
+                    cp = cp + 1
+                    cp = cp + emit_modrm(buf, pos+cp, 3, 10%8, 10%8)
+                    je_rel_pos := pos+cp + 2
+                    if two_mode == 1:
+                        cp = cp + e2_je(buf, pos+cp, 0)
+                    else:
+                        cp = cp + e2_jne(buf, pos+cp, 0)
+                    if cell_load(g_label_poses, jump_lbl * 8) >= 0:
+                        target := cell_load(g_label_poses, jump_lbl * 8)
+                        e2_w32(buf, je_rel_pos, target - (je_rel_pos + 4))
+                    else:
+                        grow_pending(g_pending_count + 1)
+                        cell_store(g_pending_pos, g_pending_count*8, je_rel_pos)
+                        cell_store(g_pending_label, g_pending_count*8, jump_lbl)
+                        g_pending_count = g_pending_count + 1
+                    return cp
 
         // Dense dispatch: >=8 unique values in a range at most twice as wide
         // as the value count, with a DEFAULT arm, use a rodata jump table.

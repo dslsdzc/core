@@ -222,12 +222,12 @@ fn buf_read_i64(buf: string, pos: int) -> int:
 // Check a byte range without forming an overflowing end position. CCR counts
 // come from the file, so every variable-length section must use this helper
 // before reading or growing an array from its count.
-fn ccr_has_bytes(pos: int, need: int, fsize: int) -> int:
+fn ccr_has_bytes(pos: int, need: int, fsize: int) -> bool:
     if pos < 0 || need < 0 || pos > fsize:
-        return 0
+        return false
     if need > fsize - pos:
-        return 0
-    return 1
+        return false
+    return true
 
 fn ccr_i32_fits(val: int) -> int:
     if val < -2147483648 || val > 2147483647:

@@ -45,6 +45,7 @@ BASE = Path(__file__).resolve().parent.parent.parent
 COREC = BASE / "build" / "corec"
 COREARCH = BASE / "build" / "corearch"
 
+IR_BRANCH = 19
 IR_LABEL = 21
 IR_MATCH = 54
 
@@ -475,7 +476,7 @@ def test_ir_match_opcode_is_known_to_loader():
             (2, KIND_VALUE, -1, labels[1], 0),
             (0, KIND_DEFAULT, -1, labels[2], 0),
         ]
-        with_match = _replace_case(data, _pack_case(records))
+        with_match = _replace_case(_strip_matches(data), _pack_case(records))
         d = bytearray(with_match)
         struct.pack_into("<I", d, nod_off + 4, IR_MATCH)       # op
         struct.pack_into("<i", d, nod_off + 4 + 16, 0)         # s2 = case start
@@ -512,33 +513,21 @@ def test_ir_match_opcode_is_known_to_loader():
 
 
 def test_nonempty_case_loads_and_program_still_runs():
+    """A real nonempty MATCH image loads and runs; synthetic load coverage is above."""
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        data = _build_ccr(tmp)
-        labels = _label_nodes(data)
-        assert len(labels) >= 3
-
-        records = [
-            (7, KIND_VALUE, -1, labels[0], 0),
-            (2, KIND_ENUM, -1, labels[1], 0),
-            (0, KIND_STRING, 0, labels[2], 0),
-            (0, KIND_DEFAULT, -1, labels[0], 0),
-        ]
-        out = _replace_case(data, _pack_case(records))
-
-        # Container and loader: CASE is consumed, not rejected as an unknown
-        # shape.
-        _assert_loads(out, tmp, "nonempty_case")
+        data = _build_ccr(tmp, MATCH_INT_SOURCE, "nonempty_case")
+        _assert_loads(data, tmp, "nonempty_case")
 
         ccr = tmp / "nonempty_case.elf.ccr"
-        ccr.write_bytes(out)
+        ccr.write_bytes(data)
         elf = tmp / "nonempty_case.elf"
         r = _run([COREARCH, ccr, "--elf", "--static", "-o", elf])
         assert r.returncode == 0, r.stdout + r.stderr
         assert elf.exists()
         run = subprocess.run([str(elf)], capture_output=True, text=True, timeout=10)
-        assert run.returncode == EXPECTED_EXIT, (
-            f"case probe returned {run.returncode}, expected {EXPECTED_EXIT}"
+        assert run.returncode == 42, (
+            f"case probe returned {run.returncode}, expected 42"
         )
 
 
@@ -546,7 +535,6 @@ def test_empty_case_stays_empty_and_loads():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp)
-    assert segment(data, CASE_TAG) == struct.pack("<I", 0)
     with tempfile.TemporaryDirectory() as td:
         _assert_loads(data, Path(td), "empty_case")
 
@@ -559,7 +547,7 @@ def test_empty_case_stays_empty_and_loads():
 def test_malformed_case_records_rejected():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        data = _build_ccr(tmp)
+        data = _strip_matches(_build_ccr(tmp))
         labels = _label_nodes(data)
         nod_count = len(_nod_records(data))
         non_label = next(i for i in range(nod_count) if i not in set(labels))
@@ -611,7 +599,7 @@ def test_duplicate_value_cases_are_allowed_by_the_reader():
     """v10 stores order; dedupe/priority is corec's job (plan Task 2)."""
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        data = _build_ccr(tmp)
+        data = _strip_matches(_build_ccr(tmp))
         label = _label_nodes(data)[0]
         out = _replace_case(
             data,
@@ -1483,12 +1471,19 @@ def _dense_source(ways):
     return _match_source(_match_values(ways, 0, 1))
 
 
-def _match_plan_full(ccr_path):
+def _match_plan_full(ccr_path, only_nodes=None):
     """Run the read-only plan channel.
 
     Returns (one row per IR_MATCH, binary_emits, table_emits). Table emits is the
     verification channel for the dense jump-table path, mirroring binary_emits.
+    By default if-derived two-case MATCH rows are filtered out; pass
+    ``only_nodes`` to inspect them.
     """
+    if only_nodes is None:
+        try:
+            only_nodes = set(_pattern_match_nodes(Path(ccr_path).read_bytes()))
+        except (OSError, ValueError, AssertionError):
+            only_nodes = None
     r = _run([COREARCH, ccr_path, "--dump-match-plan"])
     assert r.returncode == 0, f"corearch --dump-match-plan failed: {r.stdout}\n{r.stderr}"
     plans = []
@@ -1498,9 +1493,12 @@ def _match_plan_full(ccr_path):
         if line.startswith("match "):
             parts = line.split()
             assert len(parts) == 8, line
+            nod = int(parts[1])
+            if only_nodes is not None and nod not in only_nodes:
+                continue
             plans.append(
                 {
-                    "nod": int(parts[1]),
+                    "nod": nod,
                     "cases": int(parts[3]),
                     "nondefault": int(parts[5]),
                     "strategy": parts[7],
@@ -1599,51 +1597,225 @@ def _table_region(data, span):
     return lea, table, entries
 
 
+STR_TAG = 1
+SYM_TAG = 4
+REG_TAG = 7
+
+
+def _str_table(data):
+    body = segment(data, STR_TAG)
+    (count,) = struct.unpack_from("<I", body, 0)
+    pos = 4
+    out = []
+    for _ in range(count):
+        (slen,) = struct.unpack_from("<I", body, pos)
+        pos += 4
+        out.append(body[pos:pos + slen].decode("utf-8", "replace"))
+        pos += slen
+    return out
+
+
+def _sym_funcs(data):
+    body = segment(data, SYM_TAG)
+    pos = 0
+
+    def u32():
+        nonlocal pos
+        value = struct.unpack_from("<I", body, pos)[0]
+        pos += 4
+        return value
+
+    global_count = u32()
+    pos += global_count * 16
+    func_count = u32()
+    funcs = []
+    for _ in range(func_count):
+        name, param_count, _ret, root = struct.unpack_from("<IIii", body, pos)
+        pos += 24
+        pos += param_count * 4
+        var_count = u32()
+        pos += var_count * 8
+        funcs.append({"name": name, "root_region": root})
+    return funcs
+
+
+def _reg_records(data):
+    body = segment(data, REG_TAG)
+    (count,) = struct.unpack_from("<I", body, 0)
+    assert len(body) == 4 + count * 24, f"REG body {len(body)} != 4 + {count}*24"
+    return [
+        struct.unpack_from("<Iiiiii", body, 4 + i * 24)
+        for i in range(count)
+    ]
+
+
+def _function_ranges(data):
+    """Return [(name, enter_nod, exit_nod)] using SYM funcs and their REG roots."""
+    names = _str_table(data)
+    funcs = _sym_funcs(data)
+    regs = _reg_records(data)
+    out = []
+    for func in funcs:
+        root = func["root_region"]
+        if root < 0 or root >= len(regs):
+            continue
+        _kind, _parent, enter, exit, _fe, _le = regs[root]
+        out.append((names[func["name"]], enter, exit))
+    return out
+
+
+_STDLIB_FUNCS = None
+
+
+def _stdlib_func_names():
+    """Function names declared by the automatic prelude; their MATCH nodes are
+    not the fixture's subject once every `if` lowers to MATCH."""
+    global _STDLIB_FUNCS
+    if _STDLIB_FUNCS is not None:
+        return _STDLIB_FUNCS
+    import re
+    names = set()
+    paths = list((BASE / "src" / "stdlib").glob("*.cr"))
+    paths += list((BASE / "src" / "runtime").glob("*.cr"))
+    prelude = BASE / "src" / "compiler" / "prelude.cr"
+    if prelude.exists():
+        paths.append(prelude)
+    for path in paths:
+        for name in re.findall(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)", path.read_text(encoding="utf-8")):
+            names.add(name)
+    _STDLIB_FUNCS = names
+    return names
+
+
+def _user_op_nodes(data, opcode):
+    """Nodes with `opcode` in fixture-defined functions, excluding the prelude."""
+    nodes = _nod_records(data)
+    ranges = _function_ranges(data)
+    if not ranges:
+        return [i for i, rec in enumerate(nodes) if rec[0] == opcode]
+    stdlib = _stdlib_func_names()
+    out = []
+    for i, rec in enumerate(nodes):
+        if rec[0] != opcode:
+            continue
+        for name, enter, exit in ranges:
+            if enter <= i < exit:
+                if name not in stdlib:
+                    out.append(i)
+                break
+    return out
+
+
 def _match_nodes(data):
-    return [i for i, rec in enumerate(_nod_records(data)) if rec[0] == IR_MATCH]
+    """MATCH nodes in fixture-defined functions, including if-derived ones."""
+    return _user_op_nodes(data, IR_MATCH)
+
+
+def _branch_nodes(data):
+    """IR_BRANCH nodes in fixture-defined functions, excluding the prelude."""
+    return _user_op_nodes(data, IR_BRANCH)
+
+
+def _is_if_match(data, match_idx):
+    """An if lowers to exactly VALUE(0) followed by DEFAULT."""
+    nodes = _nod_records(data)
+    start, count = nodes[match_idx][3], nodes[match_idx][4]
+    if count != 2:
+        return False
+    rows = _match_rows(data, nodes[match_idx])
+    return (
+        rows[0]["kind"] == KIND_VALUE
+        and rows[0]["value"] == 0
+        and rows[1]["kind"] == KIND_DEFAULT
+    )
+
+
+def _pattern_match_nodes(data):
+    """Explicit match expressions; excludes if-derived two-case MATCH nodes."""
+    return [i for i in _match_nodes(data) if not _is_if_match(data, i)]
+
+
+def _match_rows(data, rec):
+    """CASE rows for one MATCH record, sliced from the global wire table."""
+    rows = _parse_case(segment(data, CASE_TAG))
+    start, count = rec[3], rec[4]
+    return rows[start:start + count]
 
 
 def _single_match(data):
-    matches = _match_nodes(data)
+    matches = _pattern_match_nodes(data)
     assert len(matches) == 1, f"expected exactly one MATCH, got {matches}"
     return _nod_records(data)[matches[0]]
 
 
-def _drop_match_default(data, name="nodefault"):
-    """Remove the DEFAULT row from the single MATCH range.
+def _nod_segment_offset(data):
+    return next(
+        offset for tag, offset, _size in read_segment_table(data) if tag == NOD_TAG
+    )
 
-    The checker now rejects a literal match without a wildcard/binding arm, but
-    the backend still needs a no-DEFAULT MATCH image to exercise the trap edge.
-    Build the same program with a wildcard and strip the DEFAULT row at the .ccr
-    layer. Only single-MATCH fixtures are handled; later ranges would need their
-    case_start adjusted.
-    """
+
+def _replace_match_range(data, match_idx, records):
+    """Replace one MATCH range and shift every later MATCH case_start."""
     nodes = _nod_records(data)
-    matches = [i for i, rec in enumerate(nodes) if rec[0] == IR_MATCH]
+    old_start, old_count = 0, 0
+    if 0 <= match_idx < len(nodes) and nodes[match_idx][0] == IR_MATCH:
+        old_start, old_count = nodes[match_idx][3], nodes[match_idx][4]
+    rows = [
+        (row["value"], row["kind"], row["str_index"], row["target_nod"], row["flags"])
+        for row in _parse_case(segment(data, CASE_TAG))
+    ]
+    new_rows = rows[:old_start] + list(records) + rows[old_start + old_count:]
+    out = bytearray(_replace_case(data, _pack_case(new_rows)))
+    delta = len(records) - old_count
+    nod_off = _nod_segment_offset(data)
+    for i in range(len(nodes)):
+        off = nod_off + 4 + i * 40
+        if struct.unpack_from("<I", out, off)[0] != IR_MATCH:
+            continue
+        s2 = struct.unpack_from("<i", out, off + 16)[0]
+        if i == match_idx:
+            struct.pack_into("<i", out, off + 16, old_start)
+            struct.pack_into("<i", out, off + 20, len(records))
+        elif s2 >= old_start + old_count:
+            struct.pack_into("<i", out, off + 16, s2 + delta)
+    result = bytes(out)
+    validate(result)
+    return result
+
+
+def _strip_matches(data, keep=-1):
+    """Turn every MATCH except `keep` into IR_NOP for load-only CASE fixtures."""
+    nodes = _nod_records(data)
+    out = bytearray(data)
+    nod_off = _nod_segment_offset(data)
+    for i, rec in enumerate(nodes):
+        if rec[0] == IR_MATCH and i != keep:
+            off = nod_off + 4 + i * 40
+            struct.pack_into("<I", out, off, 0)
+            struct.pack_into("<i", out, off + 16, 0)
+            struct.pack_into("<i", out, off + 20, 0)
+    return bytes(out)
+
+
+def _drop_match_default(data, name="nodefault"):
+    """Remove the DEFAULT row from the single explicit-match range."""
+    nodes = _nod_records(data)
+    matches = _pattern_match_nodes(data)
     assert len(matches) == 1, f"{name}: expected one MATCH, got {matches}"
     match_idx = matches[0]
-    rec = nodes[match_idx]
-    start, count = rec[3], rec[4]
-    rows = _parse_case(segment(data, CASE_TAG))
-    default_idx = None
-    for j in range(start, start + count):
-        if rows[j]["kind"] == KIND_DEFAULT:
-            default_idx = j
+    rows = _match_rows(data, nodes[match_idx])
+    default_pos = None
+    for j, row in enumerate(rows):
+        if row["kind"] == KIND_DEFAULT:
+            default_pos = j
             break
-    assert default_idx is not None, f"{name}: MATCH has no DEFAULT row"
+    assert default_pos is not None, f"{name}: MATCH has no DEFAULT row"
     records = [
         (row["value"], row["kind"], row["str_index"], row["target_nod"], row["flags"])
         for row in rows
     ]
-    del records[default_idx]
-    out = bytearray(_replace_case(data, _pack_case(records)))
-    nod_off = next(
-        offset for tag, offset, _size in read_segment_table(data) if tag == NOD_TAG
-    )
-    struct.pack_into("<i", out, nod_off + 4 + match_idx * 40 + 20, count - 1)
-    result = bytes(out)
-    validate(result)
-    return result
+    del records[default_pos]
+    return _replace_match_range(data, match_idx, records)
 
 
 def _assert_targets_are_labels(data, rows):
@@ -1668,7 +1840,8 @@ def _assert_program(tmp, source, expected, opts=(0, 2), name="match_program"):
     for opt in opts:
         elf = tmp / f"{name}_O{opt}.elf"
         built = _run(
-            [COREC, "build", src, "-o", elf, "--static", "-O", str(opt)], cwd=BASE
+            [COREC, "build", src, "-o", elf, "--static", "-O", str(opt)],
+            cwd=BASE,
         )
         assert built.returncode == 0, (
             f"corec build -O {opt} failed: {built.stdout}\n{built.stderr}"
@@ -1688,7 +1861,7 @@ def test_int_match_is_one_match_with_default_case():
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_INT_SOURCE, "match_int")
         rec = _single_match(data)
-        rows = _parse_case(segment(data, CASE_TAG))
+        rows = _match_rows(data, rec)
 
         assert rec[1] == -1, f"MATCH dest is {rec[1]}, expected -1"
         assert rec[2] >= 0, f"MATCH scrutinee is {rec[2]}, expected a var"
@@ -1717,7 +1890,7 @@ def test_bool_match_is_one_match_with_value_cases():
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_BOOL_SOURCE, "match_bool")
         rec = _single_match(data)
-        rows = _parse_case(segment(data, CASE_TAG))
+        rows = _match_rows(data, rec)
 
         assert rec[1] == -1
         assert rec[2] >= 0
@@ -1733,12 +1906,259 @@ def test_bool_match_is_one_match_with_value_cases():
         _assert_program(tmp, MATCH_BOOL_SOURCE, 42)
 
 
+IF_MATCH_FIXTURES = [
+    (
+        "if_chain",
+        """fn main() -> int:
+    x := 2
+    if x == 1:
+        return 10
+    else if x == 2:
+        return 20
+    else:
+        return 30
+""",
+        20,
+        2,
+        0,
+    ),
+    (
+        "if_nested",
+        """fn main() -> int:
+    x := 2
+    y := 0
+    if x > 0:
+        if x == 2:
+            y = 20
+        else:
+            y = 10
+    else:
+        y = 30
+    return y
+""",
+        20,
+        2,
+        0,
+    ),
+    (
+        "if_expr_int",
+        """fn main() -> int:
+    x := if true:
+        1
+    else:
+        2
+    if x == 1:
+        return 42
+    return 0
+""",
+        42,
+        2,
+        0,
+    ),
+    (
+        "if_expr_str",
+        """fn main() -> int:
+    s := if true:
+        "a"
+    else:
+        "b"
+    if str_len(s) == 1:
+        return 42
+    return 0
+""",
+        42,
+        2,
+        0,
+    ),
+    (
+        "if_bool_var",
+        """fn main() -> int:
+    b := true
+    if b:
+        return 42
+    return 0
+""",
+        42,
+        1,
+        0,
+    ),
+    (
+        "if_loop",
+        """fn main() -> int:
+    n : ., mut = 0
+    for i in 0..5:
+        if i == 3:
+            n = n + 1
+    return n
+""",
+        1,
+        2,
+        0,
+    ),
+    (
+        "if_region",
+        """fn main() -> int:
+    n : ., mut = 0
+    for i in 0..3:
+        if i == 1:
+            xs := [1, 2, 3]
+            n = n + xs[0]
+    return n
+""",
+        1,
+        2,
+        0,
+    ),
+    (
+        "if_logic",
+        """fn main() -> int:
+    x := 1
+    if x == 1 && true:
+        return 42
+    return 0
+""",
+        42,
+        2,
+        0,
+    ),
+]
+
+
+def test_if_lowers_to_match_cases():
+    """Every if is one VALUE(0) row plus a DEFAULT row; no if keeps IR_BRANCH."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        for name, source, expected, if_count, branches_expected in IF_MATCH_FIXTURES:
+            data = _build_ccr(tmp, source, name)
+            nodes = _nod_records(data)
+            matches = _match_nodes(data)
+            assert len(matches) == if_count, (
+                f"{name}: expected {if_count} if MATCH nodes, got {matches}"
+            )
+            rows = _parse_case(segment(data, CASE_TAG))
+            for match_idx in matches:
+                start, count = nodes[match_idx][3], nodes[match_idx][4]
+                assert count == 2, f"{name}: if MATCH case count {count}, expected 2"
+                part = rows[start:start + count]
+                assert [row["kind"] for row in part] == [KIND_VALUE, KIND_DEFAULT], (
+                    f"{name}: if CASE kinds {[row['kind'] for row in part]}"
+                )
+                assert part[0]["value"] == 0, (
+                    f"{name}: false case value {part[0]['value']}, expected 0"
+                )
+                _assert_targets_are_labels(data, part)
+            if branches_expected is not None:
+                branches = _branch_nodes(data)
+                assert len(branches) == branches_expected, (
+                    f"{name}: expected {branches_expected} IR_BRANCH nodes, "
+                    f"got {len(branches)}"
+                )
+            plan_path = _ccr_file(tmp, data, f"{name}_plan")
+            plans, binary_emits, table_emits = _match_plan_full(
+                plan_path, only_nodes=set(matches)
+            )
+            assert len(plans) == len(matches), (name, plans)
+            assert all(plan["strategy"] == "two-way-zero" for plan in plans), (
+                name,
+                plans,
+            )
+            assert binary_emits == 0 and table_emits == 0, (
+                name,
+                binary_emits,
+                table_emits,
+            )
+            _assert_program(tmp, source, expected, opts=(0, 2), name=name)
+
+
+COND_BRANCH_FIXTURES = [
+    (
+        "while_match",
+        """fn main() -> int:
+    n : ., mut = 0
+    while n < 3:
+        n = n + 1
+    return n
+""",
+        3,
+    ),
+    (
+        "for_match",
+        """fn main() -> int:
+    n : ., mut = 0
+    for i in 0..3:
+        n = n + 1
+    return n
+""",
+        3,
+    ),
+    (
+        "and_match",
+        """fn main() -> int:
+    a := true
+    b := false
+    if a && b:
+        return 1
+    return 42
+""",
+        42,
+    ),
+    (
+        "or_match",
+        """fn main() -> int:
+    a := false
+    b := true
+    if a || b:
+        return 42
+    return 0
+""",
+        42,
+    ),
+]
+
+
+def test_all_condition_branches_use_match_cases():
+    """while/for/&&/|| are the same VALUE(0)+DEFAULT decision node as if."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        for name, source, expected in COND_BRANCH_FIXTURES:
+            data = _build_ccr(tmp, source, name)
+            assert _branch_nodes(data) == [], (
+                f"{name}: conditional branch still emits IR_BRANCH"
+            )
+            nodes = _nod_records(data)
+            matches = _match_nodes(data)
+            assert matches, f"{name}: no MATCH nodes"
+            for match_idx in matches:
+                part = _match_rows(data, nodes[match_idx])
+                assert [row["kind"] for row in part] == [KIND_VALUE, KIND_DEFAULT], (
+                    name,
+                    [row["kind"] for row in part],
+                )
+                assert part[0]["value"] == 0, (name, part[0]["value"])
+                _assert_targets_are_labels(data, part)
+            plan_path = _ccr_file(tmp, data, f"{name}_plan")
+            plans, binary_emits, table_emits = _match_plan_full(
+                plan_path, only_nodes=set(matches)
+            )
+            assert len(plans) == len(matches), (name, plans)
+            assert all(plan["strategy"] == "two-way-zero" for plan in plans), (
+                name,
+                plans,
+            )
+            assert binary_emits == 0 and table_emits == 0, (
+                name,
+                binary_emits,
+                table_emits,
+            )
+            _assert_program(tmp, source, expected, opts=(0, 2), name=name)
+
+
 def test_enum_match_is_one_match_with_enum_cases():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_ENUM_SOURCE, "match_enum")
         rec = _single_match(data)
-        rows = _parse_case(segment(data, CASE_TAG))
+        rows = _match_rows(data, rec)
 
         assert rec[1] == -1
         assert rec[2] >= 0
@@ -1778,20 +2198,18 @@ def test_unsupported_patterns_keep_sequential_lowering():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_UNSUPPORTED_SOURCE, "match_unsupported")
-        assert _match_nodes(data) == [], (
+        assert _pattern_match_nodes(data) == [], (
             "string/ident-binding/struct patterns must not become MATCH"
         )
-        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
 
 
 def test_mixed_enum_and_value_arms_fall_back():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_MIXED_SOURCE, "match_mixed")
-        assert _match_nodes(data) == [], (
+        assert _pattern_match_nodes(data) == [], (
             "a match mixing enum variants and value literals must keep the old path"
         )
-        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
         _assert_program(tmp, MATCH_MIXED_SOURCE, 42, name="match_mixed")
 
 
@@ -1823,7 +2241,7 @@ def test_no_default_match_traps_on_miss():
         checked = _build_ccr(tmp, MATCH_NO_DEFAULT_SOURCE, "match_nodefault_checked")
         data = _drop_match_default(checked, "match_nodefault")
         rec = _single_match(data)
-        rows = _parse_case(segment(data, CASE_TAG))
+        rows = _match_rows(data, rec)
         assert rec[1] == -1
         assert rec[2] >= 0
         assert rec[4] == 2
@@ -1850,7 +2268,7 @@ def test_no_default_match_dispatches_hits():
         )
         data = _drop_match_default(checked, "match_nodefault_hit")
         rec = _single_match(data)
-        rows = _parse_case(segment(data, CASE_TAG))
+        rows = _match_rows(data, rec)
         assert rec[4] == 2
         assert KIND_DEFAULT not in [row["kind"] for row in rows]
         assert _run_corearch_elf(tmp, data, "match_nodefault_hit", opt=2) == 33
@@ -1860,7 +2278,7 @@ def test_enum_match_raw_int_mode():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_ENUM_SOURCE, "match_enum_raw")
-        assert len(_match_nodes(data)) == 1
+        assert len(_pattern_match_nodes(data)) == 1
         assert _run_raw_elf(tmp, data, "match_enum_raw") == 42
 
 
@@ -1869,7 +2287,7 @@ def test_loop_match_all_opt_levels():
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_LOOP_SOURCE, "match_loop")
         rec = _single_match(data)
-        rows = _parse_case(segment(data, CASE_TAG))
+        rows = _match_rows(data, rec)
         assert rec[4] == 3
         assert [row["kind"] for row in rows] == [
             KIND_VALUE,
@@ -1885,8 +2303,7 @@ def test_ident_fallback_executes_old_path():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_IDENT_FALLBACK_SOURCE, "match_ident_fallback")
-        assert _match_nodes(data) == []
-        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+        assert _pattern_match_nodes(data) == []
         _assert_program(
             tmp,
             MATCH_IDENT_FALLBACK_SOURCE,
@@ -1899,8 +2316,7 @@ def test_string_match_uses_sequential_path():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_STRING_SOURCE, "match_string")
-        assert _match_nodes(data) == [], "string patterns must not become CASE rows"
-        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+        assert _pattern_match_nodes(data) == [], "string patterns must not become CASE rows"
         _assert_program(
             tmp, MATCH_STRING_SOURCE, 42, opts=(0, 2), name="match_string"
         )
@@ -1910,8 +2326,7 @@ def test_char_match_uses_interned_char_value():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_CHAR_SOURCE, "match_char")
-        assert _match_nodes(data) == [], "char patterns must not become CASE rows"
-        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+        assert _pattern_match_nodes(data) == [], "char patterns must not become CASE rows"
         # The program itself compares the char match against `'A' as int`, i.e.
         # the current intern-index value, not a Unicode codepoint.
         _assert_program(tmp, MATCH_CHAR_SOURCE, 42, opts=(0, 2), name="match_char")
@@ -1921,8 +2336,7 @@ def test_ident_pattern_binds_scrutinee():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_IDENT_BIND_SOURCE, "match_ident_bind")
-        assert _match_nodes(data) == [], "binding arms must not become CASE rows"
-        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+        assert _pattern_match_nodes(data) == [], "binding arms must not become CASE rows"
         _assert_program(
             tmp, MATCH_IDENT_BIND_SOURCE, 42, opts=(0, 2), name="match_ident_bind"
         )
@@ -2021,8 +2435,7 @@ def test_multi_payload_ident_bindings_work():
         data = _build_ccr(
             tmp, MATCH_MULTI_PAYLOAD_BIND_SOURCE, "multi_payload_bind"
         )
-        assert _match_nodes(data) == [], "payload binding keeps the sequential path"
-        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+        assert _pattern_match_nodes(data) == [], "payload binding keeps the sequential path"
         _assert_program(
             tmp,
             MATCH_MULTI_PAYLOAD_BIND_SOURCE,
@@ -2036,8 +2449,7 @@ def test_struct_pattern_binds_fields_and_is_refutable():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_STRUCT_SOURCE, "match_struct")
-        assert _match_nodes(data) == [], "struct patterns must not become MATCH"
-        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+        assert _pattern_match_nodes(data) == [], "struct patterns must not become MATCH"
         _assert_program(
             tmp, MATCH_STRUCT_SOURCE, 42, opts=(0, 2), name="match_struct"
         )
@@ -2047,8 +2459,7 @@ def test_struct_pattern_scalar_field_kinds():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_STRUCT_SCALARS_SOURCE, "match_struct_scalars")
-        assert _match_nodes(data) == [], "struct patterns must not become MATCH"
-        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+        assert _pattern_match_nodes(data) == [], "struct patterns must not become MATCH"
         _assert_program(
             tmp,
             MATCH_STRUCT_SCALARS_SOURCE,
@@ -2062,7 +2473,7 @@ def test_struct_pattern_ident_last_is_exhaustive():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_STRUCT_IDENT_LAST_SOURCE, "match_struct_ident")
-        assert _match_nodes(data) == [], "struct patterns must not become MATCH"
+        assert _pattern_match_nodes(data) == [], "struct patterns must not become MATCH"
         _assert_program(
             tmp,
             MATCH_STRUCT_IDENT_LAST_SOURCE,
@@ -2076,8 +2487,7 @@ def test_struct_pattern_partial_reordered_and_runtime_string():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_STRUCT_MISC_SOURCE, "match_struct_misc")
-        assert _match_nodes(data) == [], "struct patterns must not become MATCH"
-        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+        assert _pattern_match_nodes(data) == [], "struct patterns must not become MATCH"
         _assert_program(
             tmp,
             MATCH_STRUCT_MISC_SOURCE,
@@ -2166,8 +2576,7 @@ def test_tuple_pattern_binds_literals_and_partial():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_TUPLE_SOURCE, "match_tuple")
-        assert _match_nodes(data) == [], "tuple patterns must not become MATCH"
-        assert segment(data, CASE_TAG) == struct.pack("<I", 0)
+        assert _pattern_match_nodes(data) == [], "tuple patterns must not become MATCH"
         _assert_program(
             tmp, MATCH_TUPLE_SOURCE, 42, opts=(0, 2), name="match_tuple"
         )
@@ -2223,7 +2632,7 @@ def test_tuple_pattern_parenthesized_binding_is_transparent():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_TUPLE_GROUPING_SOURCE, "match_tuple_group")
-        assert _match_nodes(data) == [], "grouped binding must not become MATCH"
+        assert _pattern_match_nodes(data) == [], "grouped binding must not become MATCH"
         _assert_program(
             tmp,
             MATCH_TUPLE_GROUPING_SOURCE,
@@ -2288,35 +2697,42 @@ def test_dump_objects_prints_match_cases():
         r = _run([COREARCH, ccr, "--dump-objects"])
         assert r.returncode == 0, r.stdout + r.stderr
         lines = r.stdout.splitlines()
+        nodes = _nod_records(data)
+        pattern_match = _pattern_match_nodes(data)
+        assert len(pattern_match) == 1, pattern_match
         match_lines = [
-            line for line in lines if line.startswith("nod ") and " op 54 " in line
+            line for line in lines
+            if line.startswith(f"nod {pattern_match[0]} ") and " op 54 " in line
         ]
         assert len(match_lines) == 1, match_lines
+        start, count = nodes[pattern_match[0]][3], nodes[pattern_match[0]][4]
         assert " s2 0 " in match_lines[0], match_lines[0]
         assert " s3 5 " in match_lines[0], match_lines[0]
         cases = [line for line in lines if line.startswith("case ")]
-        assert len(cases) == 5, cases
-        assert " value 10 " in cases[0], cases[0]
-        assert " kind 0 " in cases[0], cases[0]
-        assert " kind 3 " in cases[4], cases[4]
-        target = int(cases[0].split("target ")[1].split()[0])
-        assert _nod_records(data)[target][0] == IR_LABEL
+        part = cases[start:start + count]
+        assert len(part) == 5, part
+        assert " value 10 " in part[0], part[0]
+        assert " kind 0 " in part[0], part[0]
+        assert " kind 3 " in part[4], part[4]
+        target = int(part[0].split("target ")[1].split()[0])
+        assert nodes[target][0] == IR_LABEL
 
 
 def test_case_ranges_are_disjoint_across_functions():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp, MATCH_TWO_FUNCS_SOURCE, "match_two")
-        matches = _match_nodes(data)
+        matches = _pattern_match_nodes(data)
         assert len(matches) == 2, f"expected two MATCH nodes, got {matches}"
         nodes = _nod_records(data)
-        rows = _parse_case(segment(data, CASE_TAG))
         ranges = sorted((nodes[m][3], nodes[m][3] + nodes[m][4]) for m in matches)
+        total = sum(nodes[m][4] for m in matches)
         assert ranges[0][0] == 0, ranges
         assert ranges[0][1] == ranges[1][0], ranges
-        assert ranges[-1][1] == len(rows), (ranges, len(rows))
-        assert len(rows) == 3 + 4, rows
-        _assert_targets_are_labels(data, rows)
+        assert ranges[-1][1] == total, (ranges, total)
+        assert total == 3 + 4, total
+        for match_idx in matches:
+            _assert_targets_are_labels(data, _match_rows(data, nodes[match_idx]))
         _assert_program(tmp, MATCH_TWO_FUNCS_SOURCE, 42)
 
 
@@ -2440,10 +2856,12 @@ def _assert_tampered_rebuild(tmp, src, entry, data, tag, base_elf, base_ccr,
     assert _run_elf(out_elf) == expected, tag
 
 
-def _assert_match_cold_warm(tmp, source, base, expected, fns):
+def _assert_match_cold_warm(tmp, source, base, expected, fns,
+                            include_if=False):
     """Cold and warm static builds must match exactly and every entry must hit.
 
-    `fns` maps function name -> expected per-MATCH case counts.
+    `fns` maps function name -> expected per-MATCH case counts. With
+    `include_if`, if-derived MATCHes are part of the expected count.
     """
     _clean_cache(tmp)
     src = _write_source(tmp, source, base)
@@ -2456,9 +2874,14 @@ def _assert_match_cold_warm(tmp, source, base, expected, fns):
         snaps[fn] = _cir_snapshot(before[fn])
         assert snaps[fn]["name"] == fn, (snaps[fn]["name"], fn)
         _assert_snapshot_case_section(snaps[fn], before[fn], counts)
-    case_rows = _parse_case(segment(cold_ccr.read_bytes(), CASE_TAG))
-    assert len(case_rows) == sum(sum(c) for c in fns.values()), len(case_rows)
-    _assert_targets_are_labels(cold_ccr.read_bytes(), case_rows)
+    cold_data = cold_ccr.read_bytes()
+    cold_nodes = _nod_records(cold_data)
+    pattern_nodes = _match_nodes(cold_data) if include_if else _pattern_match_nodes(cold_data)
+    assert sum(cold_nodes[m][4] for m in pattern_nodes) == sum(
+        sum(c) for c in fns.values()
+    )
+    for match_idx in pattern_nodes:
+        _assert_targets_are_labels(cold_data, _match_rows(cold_data, cold_nodes[match_idx]))
 
     time.sleep(0.02)
     warm_elf, warm_ccr = _build_source(tmp, src, "warm", tmp)
@@ -2564,6 +2987,30 @@ def test_cir_cache_restores_match_cases_cold_warm():
         assert snaps["pick"]["instr_count"] > 0
 
 
+def test_cir_cache_restores_if_cases_cold_warm():
+    """If-derived CASE ranges survive the warm CIR cache and stay MATCH."""
+    source = """fn main() -> int:
+    x := 2
+    if x == 1:
+        return 10
+    if x == 2:
+        return 20
+    return 30
+"""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        snaps = _assert_match_cold_warm(
+            tmp,
+            source,
+            "if_cache",
+            20,
+            {"main": [2, 2]},
+            include_if=True,
+        )
+        assert snaps["main"]["instr_count"] > 0
+        assert snaps["main"]["match_count"] == 2
+
+
 def test_cir_cache_two_match_functions_disjoint_ranges():
     """Two cached MATCH functions keep disjoint CASE ranges after restore."""
     with tempfile.TemporaryDirectory() as td:
@@ -2575,10 +3022,9 @@ def test_cir_cache_two_match_functions_disjoint_ranges():
             42,
             {"pick_a": [3], "pick_b": [4]},
         )
-        rows = _parse_case(segment(Path(str(tmp / "warm.elf") + ".ccr").read_bytes(), CASE_TAG))
-        assert len(rows) == 7, rows
-        nodes = _nod_records(Path(str(tmp / "warm.elf") + ".ccr").read_bytes())
-        match_nodes = [i for i, rec in enumerate(nodes) if rec[0] == IR_MATCH]
+        warm_data = Path(str(tmp / "warm.elf") + ".ccr").read_bytes()
+        nodes = _nod_records(warm_data)
+        match_nodes = _pattern_match_nodes(warm_data)
         assert len(match_nodes) == 2, match_nodes
         ranges = sorted(
             (nodes[m][3], nodes[m][3] + nodes[m][4]) for m in match_nodes
@@ -2602,8 +3048,12 @@ def test_cir_cache_nested_match_case_order():
         )
         nested = snaps["pick"]["matches"]
         assert [m["count"] for m in nested] == [3, 2]
-        rows = _parse_case(segment(Path(str(tmp / "warm.elf") + ".ccr").read_bytes(), CASE_TAG))
-        assert len(rows) == 5, rows
+        warm_data = Path(str(tmp / "warm.elf") + ".ccr").read_bytes()
+        warm_nodes = _nod_records(warm_data)
+        assert [
+            len(_match_rows(warm_data, warm_nodes[i]))
+            for i in _pattern_match_nodes(warm_data)
+        ] == [3, 2]
 
 
 def test_cir_cache_warm_restore_remaps_shifted_case_targets():
@@ -2803,8 +3253,9 @@ def test_cir_cache_rebases_stale_case_start_with_nod_rewrite():
         assert warm_ccr.read_bytes() == base_ccr_bytes, "warm .ccr differs from cold"
         assert _run_elf(warm_elf) == 42
 
-        nodes = _nod_records(warm_ccr.read_bytes())
-        match_nodes = [i for i, rec in enumerate(nodes) if rec[0] == IR_MATCH]
+        warm_data = warm_ccr.read_bytes()
+        nodes = _nod_records(warm_data)
+        match_nodes = _pattern_match_nodes(warm_data)
         assert len(match_nodes) == 2, match_nodes
         assert nodes[match_nodes[0]][3] == 0, nodes[match_nodes[0]]
         assert nodes[match_nodes[1]][3] == 3, nodes[match_nodes[1]]
@@ -2937,7 +3388,7 @@ def test_two_dense_tables_resolve_global_labels():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp, source, "match_two_dense")
-        assert len(_match_nodes(data)) == 2
+        assert len(_pattern_match_nodes(data)) == 2
         plans, binary_emits, table_emits = _match_plan_full(
             _ccr_file(tmp, data, "match_two_dense_plan")
         )
@@ -3024,7 +3475,9 @@ def test_dense_negative_values_raw_int_table():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp, source, "match_negative")
-        rows = _parse_case(segment(data, CASE_TAG))
+        nodes = _nod_records(data)
+        match_idx = _pattern_match_nodes(data)[0]
+        rows = _match_rows(data, nodes[match_idx])
         shifted = [
             (
                 row["value"] - 16,
@@ -3035,7 +3488,7 @@ def test_dense_negative_values_raw_int_table():
             )
             for row in rows
         ]
-        neg = _replace_case(data, _pack_case(shifted))
+        neg = _replace_match_range(data, match_idx, shifted)
         plans, binary_emits, table_emits = _match_plan_full(
             _ccr_file(tmp, neg, "match_negative_plan")
         )
