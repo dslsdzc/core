@@ -189,8 +189,9 @@ CASES = [
         "parity", 5, 5,
     ),
     (
-        # 19 BRANCH / 20 JUMP / 21 LABEL：callee 内的回边（主循环用 region 表、
-        # callee 路径只用 label_poses——两条机制各走各的，必须同值）
+        # 54 MATCH / 20 JUMP / 21 LABEL：callee 内的回边（主循环用 region 表、
+        # callee 路径只用 label_poses——两条机制各走各的，必须同值；
+        # 条件分支已统一为 IR_MATCH）
         "loop_in_callee",
         "",
         "s : ., mut = 0\nfor i := 0..5:\n    s = s + i\nreturn s\n",
@@ -267,7 +268,7 @@ EXPECT_OPS = {
     "mutual_recursion_callee": {"call"},
     "depth_guard_runaway_loud": {"call"},
     "range_go_spawn_callee": {"spawn"},
-    "loop_in_callee": {"jump", "branch"},
+    "loop_in_callee": {"jump", "match"},
     "yield_in_callee": {"yield"},
     "await_in_callee": {"await"},
     "extern_call_callee_loud": {"call_extern"},
