@@ -376,6 +376,11 @@ fn f(x: int?) -> int:
 fn main() -> int:
     return f(g())
 """
+DIRECT_BOXED_TRY = """fn main() -> int:
+    o : int? = Some(1)
+    x := o?
+    return x + 41
+"""
 # 混合返回（同函数两条 return 两种表示；表示位运行期分派 ⇒ 两条路径各自正确）
 MIXED_RET_BARE = """fn g(c: int) -> int?:
     if c > 0:
@@ -1006,6 +1011,7 @@ def main():
         case_dual("bare_param_try", BARE_PARAM_TRY, 3),
         # `?` 解包装箱值：修复前 ELF/解释器**各错各的**（指针 vs 内部地址 = 双路径分歧）
         case_dual("boxed_param_try", BOXED_PARAM_TRY, 7),
+        case_dual("direct_boxed_try", DIRECT_BOXED_TRY, 42),
         # 混合返回：同函数两条 return 两种表示
         case_dual("mixed_return_bare_taken", MIXED_RET_BARE, 5),
         case_dual("mixed_return_boxed_taken", MIXED_RET_BOXED, 4),

@@ -2231,6 +2231,18 @@ fn main() -> int:
         42,
     ),
     (
+        "if_optional_some_result",
+        """fn main() -> int:
+    o : int? = if true:
+        Some(1)
+    else:
+        Some(2)
+    x := o?
+    return x + 41
+""",
+        42,
+    ),
+    (
         "if_return_result",
         """fn main() -> int:
     return if true:

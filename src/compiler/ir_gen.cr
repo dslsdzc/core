@@ -3809,7 +3809,11 @@ fn gen_expr(node: int) -> int:
              // 否则 `x : dex? = Some(...)`（值 = 箱对象 TI_INT）会把槽型改回 TI_INT，
              // 令裸携带值 = scaled这一规范在下游再次丢失。
             if declared_ti != TI_DEX && dex_opt == 0:
-                irv_set_type(var, irv_type(val_var))
+                // An explicit T? declaration keeps its optional type: the
+                // initializer's enum/Some type must not replace the slot type,
+                // or `?` would treat the boxed payload as an enum pointer.
+                if get_type_kind(declared_ti) != TYP_OPTIONAL:
+                    irv_set_type(var, irv_type(val_var))
             // F11：切片长度沿 LET 初始化传播（s := arr[0..2] -> s 带长度 2；
             // 运行时界 slice 同步长度变量，slice_len_copy_to）
             slice_len_copy_to(var, val_var)
@@ -4218,7 +4222,11 @@ fn gen_expr(node: int) -> int:
         if g_optrep_on != 0 && inner >= 0:
             rv := irv_rep(inner)
             if rv >= 0:
-                dest := new_ir_var("tryv", irv_type(inner))
+                iti := irv_type(inner)
+                pti := iti
+                if iti >= 0 && get_type_kind(iti) == TYP_OPTIONAL:
+                    pti = get_type_data(iti)
+                dest := new_ir_var("tryv", pti)
                 bl := new_label()
                 xl := new_label()
                 xend := new_label()
