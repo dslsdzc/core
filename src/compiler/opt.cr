@@ -11,12 +11,12 @@
 // AST constant folding: EXPR_BINARY with two int literals becomes EXPR_INT.
 // ------------------------------------------------------------------
 
-fn ast_is_const_int(node: int) -> int:
+fn ast_is_const_int(node: int) -> bool:
     if node < 0:
-        return 0
+        return false
     if ast_kind(node) == EXPR_INT:
-        return 1
-    return 0
+        return true
+    return false
 
 fn ast_const_val(node: int) -> int:
     return ast_int_val(node)

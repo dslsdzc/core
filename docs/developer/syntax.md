@@ -672,6 +672,8 @@ else:
     println("zero")
 ```
 
+`if` 与 `while` 的条件都必须是 `bool`；`int`、`dex` 等不再隐式转换为真值。
+
 ### 7.2 循环
 
 ```core

@@ -2928,7 +2928,7 @@ fn type_selftest_run() -> int:
     //    所以 *T + *T 和 "a" - "b" 仍报 error[TB01]。
     // 2. OP_AND/OP_OR 许可当且仅当 ak 是 int 或 bool。dex 被拒绝，
     //    1.5 && true 仍报 TC01。
-    // 3. IP_COND 许可当且仅当 ak 是 int 或 bool；IP_COND_BOOL 只允许 bool。
+    // 3. IP_COND 只允许 bool；if 与 while 共用同一条规则。
     //    while 1 仍报 TC04。
     // 另设许可为 1 的格数哨兵，全 0 表会失败；再加条目数据一致性和端到端段。
     o4_aks := alloc(13 * 8)   // 13 类枚举（顺序 = 条目表声明序）
@@ -2999,34 +2999,26 @@ fn type_selftest_run() -> int:
     fails = fails + ts_check("ops.logic_gate_eq_legacy", o4_logic_bad, 0)
     total = total + 1
     fails = fails + ts_check("ops.logic_permit_count", o4_logic_yes, 2)  // int + bool
-    // 3 条件族：IP_COND = {int, bool}；IP_COND_BOOL = {bool}（两条规则现状不同，不得合并）
+    // 3 条件族：IP_COND = {bool}；if 与 while 共用同一条规则。
     o4_cond_bad : ., mut = 0
     o4_cond_yes : ., mut = 0
-    o4_condb_yes : ., mut = 0
     o4_m : ., mut = 0
     loop:
         if o4_m >= 13:
             break
         o4_ak3 := cell_load(o4_aks, o4_m * 8)
         o4_want3 : ., mut = 0
-        if o4_ak3 == AK_INT || o4_ak3 == AK_BOOL:
-            o4_want3 = 1
-        o4_want4 : ., mut = 0
         if o4_ak3 == AK_BOOL:
-            o4_want4 = 1
+            o4_want3 = 1
         if iface_permits(o4_ak3, IP_COND) != o4_want3:
-            o4_cond_bad = o4_cond_bad + 1
-        if iface_permits(o4_ak3, IP_COND_BOOL) != o4_want4:
             o4_cond_bad = o4_cond_bad + 1
         if iface_permits(o4_ak3, IP_COND) == 1:
             o4_cond_yes = o4_cond_yes + 1
-        if iface_permits(o4_ak3, IP_COND_BOOL) == 1:
-            o4_condb_yes = o4_condb_yes + 1
         o4_m = o4_m + 1
     total = total + 1
     fails = fails + ts_check("ops.cond_gate_eq_legacy", o4_cond_bad, 0)
     total = total + 1
-    fails = fails + ts_check("ops.cond_permit_count", o4_cond_yes * 10 + o4_condb_yes, 21)  // 2 与 1
+    fails = fails + ts_check("ops.cond_permit_count", o4_cond_yes, 1)
     // 4. 比较、一元和 AS 操作目前全部许可，没有拒绝路径。这里只登记为
     // 待接线项，逐格检查 13 类 × 11 op = 143 格。
     o4_all_bad : ., mut = 0

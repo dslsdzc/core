@@ -6,8 +6,7 @@ Task 4 接线点（三层门形状，改动前原文逐字等价）：
     && rt != TI_INT && rt != TI_DEX`）——表的 ADD..MOD 格**只含 int/dex**；
   · 逻辑门 `checker.cr:1969`（ALL：每侧都须许可；改动前 = `(lt≠bool ∧ lt≠int) ∨ (rt≠bool ∧ rt≠int)`）
     ——表的 AND/OR 格恰 {int, bool}（**dex 不在内**）；
-  · 条件门 `checker.cr:2274`（ONE / IP_COND = bool|int）与 `checker.cr:2385`（ONE / IP_COND_BOOL
-    = **仅 bool**）——两条规则现状不同，不得合并。
+  · 条件门 `checker.cr`（ONE / IP_COND）：`if` 与 `while` 都只收 **bool**。
 
 Task 5 接线点（`t5_*` 段；**唯一** = 索引面兜底拒绝 → `IP_INDEX` 查表）：门体即原
 `EC_TK_INDEX` 调用（码/文案/位置逐字不变），可达集 = 数组/切片/串三个**结果分支**之后的落空集，
@@ -130,7 +129,6 @@ def main():
                       "fn main() -> int:\n    t := (1, 2)\n    a := t . 0\n    return a\n"))
     ok.append(case_ok("pos_logic_int", "fn main() -> int:\n    b := 1 && true\n    return 0\n"))
     ok.append(case_ok("pos_logic_bool", "fn main() -> int:\n    b := true && false\n    return 0\n"))
-    ok.append(case_ok("pos_cond_if_int", "fn main() -> int:\n    if 1:\n        return 1\n    return 0\n"))
     ok.append(case_ok("pos_cond_if_bool", "fn main() -> int:\n    if true:\n        return 1\n    return 0\n"))
     ok.append(case_ok("pos_cond_while_bool",
                       "fn main() -> int:\n    n : ., mut = 0\n    while n < 3:\n        n = n + 1\n    return n\n"))
@@ -158,7 +156,11 @@ def main():
                           "fn main() -> int:\n    if [1,2,3]:\n        return 1\n    return 0\n", "TC01"))
     ok.append(case_reject("neg_cond_if_dex",
                           "fn main() -> int:\n    if 1.5:\n        return 1\n    return 0\n", "TC01"))
-    # `while` 与 `if` 现状**不同**（IP_COND_BOOL 只收 bool）：int 在 if 收、在 while 拒
+    ok.append(case_reject("neg_cond_if_int",
+                          "fn main() -> int:\n    if 1:\n        return 1\n    return 0\n", "TC01"))
+    ok.append(case_reject("neg_cond_if_int_var",
+                          "fn main() -> int:\n    x := 1\n    if x:\n        return 1\n    return 0\n", "TC01"))
+    # `if` 与 `while` 现在同一条 bool-only 规则；while 仍用 TC04。
     ok.append(case_reject("neg_cond_while_int",
                           "fn main() -> int:\n    while 1:\n    return 0\n", "TC04"))
     ok.append(case_reject("neg_cond_while_dex",

@@ -306,8 +306,8 @@ fn cli_parse() -> int:
 fn cli_cmd_name() -> string:
     return g_cli_matched_cmd
 
-fn cli_eq(cmd: string, expected: string) -> int:
-    return str_eq(cmd, expected)
+fn cli_eq(cmd: string, expected: string) -> bool:
+    return str_eq(cmd, expected) != 0
 
 fn cli_get(name: string) -> string:
     fi := _cli_find_flag(name)
