@@ -23,7 +23,9 @@ test_ci_hook_coverage / test_criteria_mutations 的体例与位置）。**刻意
     一类」恒绿）。
   A 正控：同一份语料抽两次 ⇒ compare 必 PASS（下限按本仓数法当场算：冻结读数 × 0.9）。
   B **反向（本档的核心）**：9 类受保护面**各打一个突变** ⇒ 逐类必须「真红」
-    （rc=1 且首行「受保护面有差异」）。
+    （rc=1 且首行「受保护面有差异」）。本批 `docs/developer` 语料没有 TODO 编号
+    （`#YYYY-MM-DD-N`），`TODOID` 改走**注入式突变**：往临时副本追加一个编号，
+    验证「新增受保护面条目」同样被抓；这比跳过该类更强，也不降低 9 类下限。
   B2 散文自检：改一处**纯散文** ⇒ 该档切片必须**不变** ⇒ 门不误伤散文编辑
     （这正是工具的用途：散文自由、非散文钉死）。没有这一层，「门永不误伤」与
     「门根本没在工作」读数一样。
@@ -83,6 +85,12 @@ MIN_CATEGORIES = 9
 # 覆盖率类别：B 层逐类打突变、逐类必须真红。少一类 ⇒ FAIL（防「某类其实抓不住」静默）。
 COVERED = ("ANCHOR", "FENCE_LINE", "FENCE_OPEN", "INLINE", "LINKTARGET",
            "NUM", "TODOID", "TROW", "URL")
+
+# 本批语料零命中、但 B 层仍可验证的类别：在临时副本里**注入**该类条目，证明
+# 「新增受保护面」也被抓住。仍计入 MIN_CATEGORIES（不靠降低下限放行）。
+INJECTABLE = {
+    "TODOID": "docs/developer 语料无 TODO 编号；B 层注入 #YYYY-MM-DD-N 后必红",
+}
 
 # 工具里存在、但**不由 B 层打突变**的类别——每条**必须带理由**。E 层拿本表做双向对账：
 # 工具新增一类而两表皆无 ⇒ 必红（防「覆盖为零」：判据不会红、只会悄悄腐烂，**读数完全一样**）。
@@ -272,10 +280,13 @@ def main():
         if nfiles < MIN_FILES:
             fails.append("语料档数 %d < 下限 %d（抽空）" % (nfiles, MIN_FILES))
         cats = Counter(i[0] for i in items)
-        missing = [c for c in COVERED if cats.get(c, 0) < 1]
+        missing = [c for c in COVERED
+                   if cats.get(c, 0) < 1 and c not in INJECTABLE]
         if missing:
             fails.append("这些受保护类在语料里零命中 ⇒ B 层无法覆盖: %s" % missing)
-        if len([c for c in COVERED if cats.get(c, 0) >= 1]) < MIN_CATEGORIES:
+        coverable = [c for c in COVERED
+                     if cats.get(c, 0) >= 1 or c in INJECTABLE]
+        if len(coverable) < MIN_CATEGORIES:
             fails.append("可覆盖类别 < %d" % MIN_CATEGORIES)
 
         fl, pff = floors(per, total)
@@ -327,6 +338,7 @@ def main():
             # 选档：优先条目多的档（更可能含可定位的该类条目）
             order = sorted(per, key=lambda f: -per[f])
             done = None
+            injected = False
             for path in order:
                 text = open(os.path.join(mut, path), encoding="utf-8").read()
                 v, loc = pick([i for i in items if i[1] == path], cat, text)
@@ -339,6 +351,14 @@ def main():
                 open(os.path.join(mut, path), "w", encoding="utf-8").write(new)
                 done = (path, v)
                 break
+            if not done and cat in INJECTABLE:
+                # 语料零命中：注入一个该类条目（zero → one），验证新增受保护面同样必红。
+                # 放在档尾纯文本行；编号本身必然顺带命中 NUM，不影响「diff 含该类」判定。
+                path = order[0]
+                with open(os.path.join(mut, path), "a", encoding="utf-8") as fh:
+                    fh.write("\n\nTODO: #2026-10-25-1\n")
+                done = (path, "#2026-10-25-1")
+                injected = True
             if not done:
                 fails.append("[B %s] 无法构造干净突变（判定① 未过）⇒ 该类未被覆盖" % cat)
                 continue
@@ -374,8 +394,12 @@ def main():
             head = c.stdout.strip().split("\n")[0] if c.stdout.strip() else ""
             # 判定③：首行必须是「受保护面有差异」——rc=1 但错因是档清单/非空转闸 = 假红
             if c.returncode == 1 and head.startswith("FAIL  受保护面有差异"):
-                print("[B %-11s] 真红 OK  %s（%s: %s→%s）"
-                      % (cat, head, os.path.basename(path), v[:28], mutate_value(cat, v)[:28]))
+                if injected:
+                    how = "注入 %s" % v[:28]
+                else:
+                    how = "%s→%s" % (v[:28], mutate_value(cat, v)[:28])
+                print("[B %-11s] 真红 OK  %s（%s: %s）"
+                      % (cat, head, os.path.basename(path), how))
             elif c.returncode == 1:
                 fails.append("[B %s] rc=1 但**错因不是受保护面**（假红）: %s" % (cat, head))
             else:
