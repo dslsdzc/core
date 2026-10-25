@@ -11,7 +11,7 @@ TopLevelDecl = FunctionDecl | FlowDecl | StructDecl | EnumDecl | InterfaceDecl |
 (*** 函数 ***)
 (* v4：函数体 = 签名后 `:` + layout region；规约标注（批 6）位于 region 开头，
    产生式统一用 Annotation（见下方「规约标注」节），不再另立 VerificationAnnotation。 *)
-FunctionDecl = [ 'pub' ] 'fn' IDENT '(' [ ParamList ] ')' [ '->' Type ] ':'
+FunctionDecl = 'fn' IDENT '(' [ ParamList ] ')' [ '->' Type ] ':'
                FunctionLayout ;
 
 FunctionLayout = { Annotation } { Statement } ;
@@ -102,26 +102,34 @@ UnsafeExpr = 'unsafe' ':' Layout ;
 (* Layout is established by ':' plus relative indentation. The first child
    establishes the sibling anchor; a shallower column closes the region. *)
 Layout = { Statement } ;
-Statement = Expr | LetStmt | ReturnStmt | YieldStmt | BreakStmt | ContinueStmt ;
+Statement = CatchStmt | Expr | LetStmt | ReturnStmt | YieldStmt | BreakStmt | ContinueStmt ;
+
+(* 错误恢复：catch 绑定紧邻其前的可失败表达式/语句，下一行同 layout 层级。
+   handler arm 复用 match 的 Pattern 语法。 *)
+CatchStmt = (Expr | LetStmt | ReturnStmt | YieldStmt | BreakStmt | ContinueStmt)
+            'catch' ':' CatchLayout ;
+CatchLayout = { CatchArm } ;
+CatchArm = '|' Pattern '=>' ( Expr | Layout ) ;
 
 LetStmt = IDENT [ ':' ( Type | 'auto' | '.' ) [ ',' Tag { ',' Tag } ] ] ( ':=' | '=' ) Expr ;
 
 (* 变量标签：mut 可变 / pub 公开 / apx 近似授权（后端变换许可，与 mut/pub 同族——
    数值类型设计 2026-08-16） *)
 Tag = 'mut' | 'pub' | 'apx' ;
-ReturnStmt = 'return' [ Expr ] ;
+(* Ok/Err 是函数状态标记。Ok 可省略：return e 等价于 return Ok e。 *)
+ReturnStmt = 'return' [ ('Ok' Expr) | ('Err' Expr) | Expr ] ;
 YieldStmt = 'yield' Expr ;
 BreakStmt = 'break' ;
 ContinueStmt = 'continue' ;
 
 (*** 复合类型声明 ***)
-StructDecl = [ 'pub' ] 'struct' IDENT ':' { FieldDecl } ;
+StructDecl = 'struct' IDENT ':' { FieldDecl } ;
 FieldDecl = IDENT ':' Type ;
 
-EnumDecl = [ 'pub' ] 'enum' IDENT ':' { '|' Variant } ;
+EnumDecl = 'enum' IDENT ':' { '|' Variant } ;
 Variant = IDENT [ '(' Type { ',' Type } ')' ] ;
 
-InterfaceDecl = [ 'pub' ] 'interface' IDENT ':' { InterfaceMethod } ;
+InterfaceDecl = 'interface' IDENT ':' { InterfaceMethod } ;
 InterfaceMethod = 'fn' IDENT '(' [ ParamList ] ')' '->' Type ;
 
 ImplDecl = 'impl' Path [ 'for' Path ] ':' { FunctionDecl } ;
