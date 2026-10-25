@@ -13,19 +13,39 @@
 // - Call: results are conservatively left empty; function summaries are not
 //   implemented.
 
-fn pa_in_unsafe(node_seq: int) -> int:
+// Precompute SG_UNSAFE coverage once per compile. The old per-node query scanned
+// every region for every node and every fixed-point iteration.
+fn pa_prepare_unsafe():
+    if g_df_node_count <= 0:
+        g_node_unsafe = ""
+        return
+    g_node_unsafe = alloc((g_df_node_count + 1) * 8)
+    ni : ., mut = 0
+    loop:
+        if ni >= g_df_node_count:
+            break
+        cell_store(g_node_unsafe, ni * 8, 0)
+        ni = ni + 1
     si : ., mut = 0
     loop:
         if si >= g_sg_count:
             break
-        kind := cell_load(g_sgs, si * ESZ_SG + OFF_SG_KIND)
-        if kind == SG_UNSAFE:
-            nstart := cell_load(g_sgs, si * ESZ_SG + OFF_SG_NSTART)
-            ncount := cell_load(g_sgs, si * ESZ_SG + OFF_SG_NCOUNT)
-            if node_seq >= nstart && node_seq < nstart + ncount:
-                return 1
+        if cell_load(g_sgs, si * ESZ_SG + OFF_SG_KIND) == SG_UNSAFE:
+            ns := cell_load(g_sgs, si * ESZ_SG + OFF_SG_NSTART)
+            nc := cell_load(g_sgs, si * ESZ_SG + OFF_SG_NCOUNT)
+            ni2 : ., mut = ns
+            loop:
+                if ni2 >= ns + nc:
+                    break
+                if ni2 >= 0 && ni2 < g_df_node_count:
+                    cell_store(g_node_unsafe, ni2 * 8, 1)
+                ni2 = ni2 + 1
         si = si + 1
-    return 0
+
+fn pa_in_unsafe(node_seq: int) -> int:
+    if node_seq < 0 || node_seq >= g_df_node_count:
+        return 0
+    return cell_load(g_node_unsafe, node_seq * 8)
 
 // Allocation content tracking for the Andersen store and load rules.
 // g_alloc_pts[alloc_id] is the set of values stored into the allocation through
@@ -361,6 +381,7 @@ fn ptr_analysis_func(nstart: int, ncount: int, vstart: int, vcount: int):
             ni = ni + 1
 
 fn ptr_analysis_all():
+    pa_prepare_unsafe()
     fi : ., mut = 0
     loop:
         if fi >= g_ir_func_count:

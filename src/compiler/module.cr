@@ -498,7 +498,9 @@ fn res_imports():
 
     if str_len(import_core_acc) > 0:
         g_source = import_core_acc + "\n" + g_source
-        tokenize(g_source, 0)
+        sm_reset()
+        combined_file := sm_add_virtual("<combined>", g_source)
+        tokenize(combined_file, 0)
 
     // Determine main file's fileid
     main_fileid_str : ., mut = get_fileid(g_source)
@@ -674,7 +676,9 @@ fn res_imports():
 
         if str_len(pass_src) > 0:
             g_source = g_source + pass_src
-            tokenize(g_source, 0)
+            sm_reset()
+            combined_file := sm_add_virtual("<combined>", g_source)
+            tokenize(combined_file, 0)
             total_accumulated = total_accumulated + pass_bytes
 
     // Strip _import.cr preamble to prevent re-parsing import tokens as code.
@@ -683,6 +687,8 @@ fn res_imports():
     if str_len(import_core_acc) > 0:
         skip := str_len(import_core_acc) + 1  // +1 for the "\n" separator
         g_source = str_sub(g_source, skip, str_len(g_source) - skip)
-        tokenize(g_source, 0)
+        sm_reset()
+        combined_file := sm_add_virtual("<combined>", g_source)
+        tokenize(combined_file, 0)
 
     build_line_fileid()

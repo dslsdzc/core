@@ -70,8 +70,14 @@ _EV14_BYTES = {1: [0x4D, 0x29], 2: [0x4D, 0x21], 3: [0x4C, 0x8B], 4: [0x4C, 0x89
 
 
 def run_bin(binary, args):
+    # HIT 表是 raw-word 降层（事件 sub/nand/load/store + 8 字节池）。用户程序默认
+    # tagged big-int 表示，池常量与事件结果不会自动 tag/unbox；本套件固定用
+    # `--raw-int` 让旧路径与表路径处于同一表示域，判据只测表映射本身。
+    cmd = [str(binary)]
+    if binary == COREARCH and "--raw-int" not in args:
+        cmd.append("--raw-int")
     return subprocess.run(
-        [str(binary)] + args,
+        cmd + args,
         cwd=BASE,
         capture_output=True,
         text=True,

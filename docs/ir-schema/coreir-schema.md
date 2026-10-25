@@ -294,7 +294,7 @@ v7-only：load 校验 `version == 9`。没有 v6 或 v8 兼容转换；`.ccr` �
 
 ## 七、文本 `.cir` 转储格式
 
-自托管编译器的 `cmd_cir()` 生成人类可读的 `.cir` 文本转储，扩展为显示规约约束：
+自托管编译器的 `corec cir` 命令通过 `cir_text_dump()` 生成人类可读的文本转储，扩展为显示规约约束：
 
 ```
 Function: sort

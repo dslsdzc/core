@@ -3,6 +3,7 @@
 
 // Global compiler state
 g_source : string, mut
+g_source_file : int, mut    // current SourceManager FileId (-1 = none)
 g_source_len : int, mut     // cached str_len(g_source), set in tokenize()
 g_pos : int, mut
 g_line : int, mut
@@ -108,88 +109,50 @@ fn peek_at(src: string, pos: int, max_len: int) -> int:
     return cell_load_byte(src, pos + 1)
 
 fn lookup_keyword(s: string) -> int:
-    if s == "fn":
-        return T_FN
-    if s == "mut":
-        return T_MUT
-    if s == "return":
-        return T_RETURN
-    if s == "if":
-        return T_IF
-    if s == "else":
-        return T_ELSE
-    if s == "loop":
-        return T_LOOP
-    if s == "while":
-        return T_WHILE
-    if s == "for":
-        return T_FOR
-    if s == "break":
-        return T_BREAK
-    if s == "continue":
-        return T_CONTINUE
-    if s == "true":
-        return T_TRUE
-    if s == "false":
-        return T_FALSE
-    if s == "struct":
-        return T_STRUCT
-    if s == "enum":
-        return T_ENUM
-    if s == "extern":
-        return T_EXTERN
-    if s == "impl":
-        return T_IMPL
-    if s == "match":
-        return T_MATCH
-    if s == "import":
-        return T_IMPORT
-    if s == "pub":
-        return T_PUB
-    if s == "go":
-        return T_GO
-    if s == "await":
-        return T_AWAIT
-    if s == "unsafe":
-        return T_UNSAFE
-    if s == "flow":
-        return T_FLOW
-    if s == "yield":
-        return T_YIELD
-    if s == "interface":
-        return T_INTERFACE
-    if s == "type":
-        return T_TYPE
-    if s == "mod":
-        return T_MOD
-    if s == "as":
-        return T_AS
-    if s == "auto":
-        return T_AUTO
-    if s == "fileid":
-        return T_FILEID
     // None, Some, and move are no longer keywords. Some(x) still parses as an enum
     // constructor through the uppercase identifier rule. catch, dyn, fail, never,
     // none, and spec are keywords.
-    if s == "self":
-        return T_SELF
-    if s == "in":
-        return T_IN
-    if s == "unit":
-        return T_UNIT
-    if s == "none":
-        return T_NONE
-    if s == "never":
-        return T_NEVER
-    if s == "dyn":
-        return T_DYN
-    if s == "catch":
-        return T_CATCH
-    if s == "fail":
-        return T_FAIL
-    if s == "spec":
-        return T_SPEC
-    return T_IDENT
+    return match s:
+        "fn" => T_FN
+        "mut" => T_MUT
+        "return" => T_RETURN
+        "if" => T_IF
+        "else" => T_ELSE
+        "loop" => T_LOOP
+        "while" => T_WHILE
+        "for" => T_FOR
+        "break" => T_BREAK
+        "continue" => T_CONTINUE
+        "true" => T_TRUE
+        "false" => T_FALSE
+        "struct" => T_STRUCT
+        "enum" => T_ENUM
+        "extern" => T_EXTERN
+        "impl" => T_IMPL
+        "match" => T_MATCH
+        "import" => T_IMPORT
+        "pub" => T_PUB
+        "go" => T_GO
+        "await" => T_AWAIT
+        "unsafe" => T_UNSAFE
+        "flow" => T_FLOW
+        "yield" => T_YIELD
+        "interface" => T_INTERFACE
+        "type" => T_TYPE
+        "mod" => T_MOD
+        "as" => T_AS
+        "auto" => T_AUTO
+        "fileid" => T_FILEID
+        "self" => T_SELF
+        "in" => T_IN
+        "unit" => T_UNIT
+        "none" => T_NONE
+        "never" => T_NEVER
+        "dyn" => T_DYN
+        "catch" => T_CATCH
+        "fail" => T_FAIL
+        "spec" => T_SPEC
+        _ => T_IDENT
 
 // Parse an integer literal. Supports digit separators and 0x/0o/0b prefixes;
 // malformed literals are lexer errors.
@@ -315,14 +278,30 @@ fn str_to_scaled(s: string) -> int:
         return 0 - v
     return v
 
+fn token_start_offset(start_line: int, start_col: int) -> int:
+    if g_source_file < 0:
+        return 0
+    return sm_line_start(g_source_file, start_line) + start_col - 1
+
+fn write_tok_span(tp: int, lo: int, tlen: int):
+    cell_store(g_tokens, tp + OFF_TK_FILE, g_source_file)
+    cell_store(g_tokens, tp + OFF_TK_LO, lo)
+    cell_store(g_tokens, tp + OFF_TK_HI, lo + tlen)
+
 fn add_tok(kind: int, lex: int, start_line: int, start_col: int):
     grow_tokens(g_token_count + 1)
     tp := g_token_count * ESZ_TOKEN
+    tlen : ., mut = 1
+    if lex >= 0:
+        tlen = str_len(istr_get(lex))
+        if tlen < 1:
+            tlen = 1
     cell_store(g_tokens, tp + OFF_TK_KIND, kind)
     cell_store(g_tokens, tp + OFF_TK_LEXEME, lex)
     cell_store(g_tokens, tp + OFF_TK_INTVAL, 0)
     cell_store(g_tokens, tp + OFF_TK_LINE, start_line)
     cell_store(g_tokens, tp + OFF_TK_COL, start_col)
+    write_tok_span(tp, token_start_offset(start_line, start_col), tlen)
     g_token_count = g_token_count + 1
 
 fn add_tok_int(kind: int, ival: int, start_line: int, start_col: int):
@@ -333,28 +312,37 @@ fn add_tok_int(kind: int, ival: int, start_line: int, start_col: int):
     cell_store(g_tokens, tp + OFF_TK_INTVAL, ival)
     cell_store(g_tokens, tp + OFF_TK_LINE, start_line)
     cell_store(g_tokens, tp + OFF_TK_COL, start_col)
+    write_tok_span(tp, token_start_offset(start_line, start_col), 1)
     g_token_count = g_token_count + 1
 
 fn add_tok_str(kind: int, s: string, start_line: int, start_col: int):
     grow_tokens(g_token_count + 1)
     tp := g_token_count * ESZ_TOKEN
+    tlen := str_len(s)
+    if tlen < 1:
+        tlen = 1
     cell_store(g_tokens, tp + OFF_TK_KIND, kind)
     si := str_intern(s)
     cell_store(g_tokens, tp + OFF_TK_LEXEME, si)
     cell_store(g_tokens, tp + OFF_TK_INTVAL, 0)
     cell_store(g_tokens, tp + OFF_TK_LINE, start_line)
     cell_store(g_tokens, tp + OFF_TK_COL, start_col)
+    write_tok_span(tp, token_start_offset(start_line, start_col), tlen)
     g_token_count = g_token_count + 1
 
 // Token with both int_val and lexeme, used for dex literals: int_val is the scaled integer and lexeme is the source digits.
 fn add_tok_int_lex(kind: int, ival: int, lexeme_ni: int, start_line: int, start_col: int):
     grow_tokens(g_token_count + 1)
     tp := g_token_count * ESZ_TOKEN
+    tlen := str_len(istr_get(lexeme_ni))
+    if tlen < 1:
+        tlen = 1
     cell_store(g_tokens, tp + OFF_TK_KIND, kind)
     cell_store(g_tokens, tp + OFF_TK_LEXEME, lexeme_ni)
     cell_store(g_tokens, tp + OFF_TK_INTVAL, ival)
     cell_store(g_tokens, tp + OFF_TK_LINE, start_line)
     cell_store(g_tokens, tp + OFF_TK_COL, start_col)
+    write_tok_span(tp, token_start_offset(start_line, start_col), tlen)
     g_token_count = g_token_count + 1
 
 // Layout helpers. Anchor computation and the colon end-of-line check must share
@@ -508,7 +496,18 @@ fn skip_ws(src: string, pos: int, max_len: int) -> int:
 // explicit parameter so the bypass is visible at each call site.
 // A call site must pass 1 exactly when its token stream is not consumed by
 // parse_all or parse_expr: dumps, rescans, self tests, LSP analysis, or reentry.
-fn tokenize(_src: string, layout_bypass: int):
+fn tokenize(file_id: int, layout_bypass: int):
+    g_source = sm_file_text(file_id)
+    g_source_file = file_id
+    tokenize_impl(g_source, layout_bypass)
+
+// Source-only entry for rescans that do not carry a FileId. Spans are marked
+// unattributed (-1) rather than inheriting the previous file.
+fn tokenize_source(_src: string, layout_bypass: int):
+    g_source_file = -1
+    tokenize_impl(_src, layout_bypass)
+
+fn tokenize_impl(_src: string, layout_bypass: int):
     g_layout_bypass = layout_bypass
     g_token_count = 0
     // Do not clear g_error_count. res_imports tokenizes twice while joining

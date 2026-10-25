@@ -37,8 +37,9 @@ LET 继承 / 泛型键名串）。
 `ci_hook_allowlist.txt` 条目**已删** + 本头注已转正（判据 = `test_ci_hook_coverage.py` PASS）。
 
 **修后实测（T3）**：R1/R2/R3/R5 **elf=7 全绿**（改前全 1）· 腿 B 四条见证**全绿** · 腿 C 钉子在位。
-**R4（元组）不在此列**：见下方 `KNOWN_GAP` —— 按**裁-AGG-3**「元组无声明面 ⇒ 登记，不纳入本批」，
-本套件对它**只观测、不计入判据**（[GAP] 行），后续批修复时须把它移进 `CASES`。
+**R4（元组）已转正**：checker 现在把元组元素类型行写入 `ast_c`，ir_gen 的数字下标
+读取对 dex 元素返回 `TI_DEX_S`（旧 read form 恒为 `TI_INT`，tagged-int 路径把缩放
+整数右移一位）。原 `KNOWN_GAP` 观测点已移进 `CASES`。
 
 **探针纪律**（照 apx 批 §0bis/§0ter）：涉全局必须 `mut`；apx 探针**一律显式形**
 （`d : dex, apx = 7.0`——类型位写 `.` 会让 apx 槽压根不建立 ⇒ 假绿）。
@@ -158,18 +159,14 @@ CASES = [
     ("R2_match_payload", 7, R2, "red"),
     ("R3_local_arr_elem", 7, R3, "red"),
     ("R5_write_apx_slot", 7, R5, "red"),
+    ("R4_tuple_elem", 7, R4, "red"),
     ("R7_core_arg_nail", 7, R7, "nail"),
     ("N1_apx_batch_green_nail", 7, N1, "nail"),
 ]
 
-# **已知未覆盖面（裁-AGG-3：登记，不在本批）**——元组数字下标（`t . 0`）。
-# 元组**无声明面**（`ir_gen.cr` 的 EXPR_TUPLE 分支给元组 var 定型 `TI_INT`，不携带元素 ti；
-# `agg_field_read_form` 对 `ast_type_val > 0` 的数字下标形态显式返回 `TI_INT`）⇒ 本批的
-# 「声明面形式」通道取不到它 ⇒ **期望值不变**（仍是错值）。**本组只观测、不计入判据**：
-# 它在此是为了「不静默」——后续批要修时，这里的观测值就是起点（并且届时须把它移进 CASES）。
-KNOWN_GAP = [
-    ("R4_tuple_elem", 7, R4, "gap"),
-]
+# 原已知未覆盖面（元组数字下标）已修复并移入 CASES；保留空表是因为下面的
+# 观测循环仍按「gap 只观测、不计判据」的形态存在，后续新增 gap 直接登记即可。
+KNOWN_GAP = []
 
 
 def _workdir(src):

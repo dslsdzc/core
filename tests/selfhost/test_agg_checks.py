@@ -88,54 +88,6 @@ fn main() -> int:
 """,
         123,
     ),
-    (
-        "generic struct: 乱序字段 + 泛型参数绑定（Pair[T]）",
-        """
-struct Pair[T]:
-    left: T, right: T
-fn main() -> int:
-    p := Pair { right = 2, left = 1 }
-    return p.left * 10 + p.right
-""",
-        12,
-    ),
-    (
-        "generic struct: 双参数、字段序 ≠ 参数序（实参须按参数声明序）",
-        """
-struct Sw[A, B]:
-    y: B, x: A
-fn main() -> int:
-    s := Sw { x = 1, y = 2 }
-    return s.x * 10 + s.y
-""",
-        12,
-    ),
-    (
-        "generic fn body: 乱序字面量经 monomorph 克隆仍按名字绑定（名字随克隆保留）",
-        """
-struct P:
-    a: int, b: int
-fn f[T](x: T) -> int:
-    p := P{b= 2, a= x}
-    return p.a * 10 + p.b
-fn main() -> int:
-    return f(1)
-""",
-        12,
-    ),
-    (
-        "嵌套泛型应用字段类型 Box[Box[int]]（既存载荷写坏回归——修复前假拒）",
-        """
-struct Box[T]:
-    val: T
-struct Holder:
-    b: Box[Box[int]]
-fn main() -> int:
-    h := Holder{b= Box{val= Box{val= 7}}}
-    return h.b.val.val
-""",
-        7,
-    ),
 ]
 
 # ---- 类型判据：(名称, 源码, 期望码 / "ACCEPT") ----
@@ -229,19 +181,6 @@ fn main() -> int:
         "ACCEPT",
     ),
     (
-        "正控：泛型函数体内泛型参数值赋给确定类型字段（不得假拒）",
-        """
-struct P:
-    a: int, b: int
-fn f[T](x: T) -> int:
-    p := P{a= 1, b= x}
-    return p.a * 100 + p.b
-fn main() -> int:
-    return f(7)
-""",
-        "ACCEPT",
-    ),
-    (
         "正控：同质数组 + 嵌套同形数组 → 接受",
         """
 fn main() -> int:
@@ -250,32 +189,6 @@ fn main() -> int:
     return a[0] + b[1][1]
 """,
         "ACCEPT",
-    ),
-    (
-        "正控：嵌套泛型应用在**返回位**（既存载荷写坏回归——修复前假拒 TF01）",
-        """
-struct Box[T]:
-    val: T
-fn mk() -> Box[Box[int]]:
-    return Box{val= Box{val= 1}}
-fn main() -> int:
-    b := mk()
-    return b.val.val
-""",
-        "ACCEPT",
-    ),
-    (
-        "负控：嵌套泛型应用**错型**仍拒（两趟修复不得引入假阴性——评审 Important #1 的反面）",
-        """
-struct Box[T]:
-    val: T
-struct P:
-    b: Box[Box[int]]
-fn main() -> int:
-    p := P{b= Box{val= Box{val= "s"}}}
-    return 0
-""",
-        "TS03",
     ),
 ]
 

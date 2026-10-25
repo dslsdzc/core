@@ -156,7 +156,9 @@ build_ok("tk01", tk01, ("TK01",))
 build_ok("b04", "tests/suite/ptr_arith.cr")
 
 # ── 正控 7-9：scope=check 三条 check 面不变（rc=1） ─────────────────────
-for nm, f in (("n01", "src/stdlib/collections.cr"), ("n06", "src/stdlib/trace.cr"),
+# collections.cr 已在 V4 迁移中修好（不再含 N01），因此 N01 用显式探针。
+_n01_probe = write("scope_n01", "fn main() -> int:\n    return nosuchname\n")
+for nm, f in (("n01", str(_n01_probe)), ("n06", "src/stdlib/trace.cr"),
               ("n11", "src/stdlib/fmt.cr")):
     clean()
     r = cc(["check", f])

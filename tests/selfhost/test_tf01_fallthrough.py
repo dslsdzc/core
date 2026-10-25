@@ -179,9 +179,9 @@ fn f() -> int:
 
 # 登记边界（**本批显式登记，非静默**）：非落空体内 return 的**值类型**不核对——
 # checker 现模型无「逐 return 核对」面（站点 5 只看块末类型），本条只把「无 break 的
-# loop 收尾」从 TF01 误报中解放。修复前该形因「末语句类型 = unit」被**误拒**；修复后
-# 按新口径接受（loop 永不落空）。若未来引入逐 return 核对，本条期望随之改为拒。
-POS_BOUNDARY_NO_RETURN_VALUE_CHECK = "fn f() -> int:\n    loop:\n        return \"x\"\n"
+# loop 收尾」从 TF01 误报中解放。**逐 return 核对已落地**（nail3），因此按本条原注的
+# 约定改判为拒绝：string 值返 `-> int` 是真实不匹配，不再豁免。
+BOUNDARY_RETURN_VALUE_CHECKED = "fn f() -> int:\n    loop:\n        return \"x\"\n"
 
 # ─── R2 P6 Task 4a（E-11）：`-> never` 调用的返回型透传（TF01 面）───
 # 改前（RED 实测）：`return boom()` 的块类型 = 调用推断 = unit（声明注册域守卫
@@ -261,7 +261,10 @@ def main():
         case_accept("pos_match_no_break", POS_MATCH_NO_BREAK),
         case_accept("pos_array_no_break", POS_ARRAY_NO_BREAK),
         case_accept("pos_loop_with_call", POS_LOOP_WITH_CALL),
-        case_accept("pos_boundary_no_return_value_check", POS_BOUNDARY_NO_RETURN_VALUE_CHECK),
+        # 本条原为「登记边界：非落空体内 return 的值类型不核对」。逐 return 核对
+        # 已落地（nail3），按原注释的约定改判为拒绝：`loop { return "x" }` 的
+        # return 值 string 对 `-> int` 是真实不匹配。
+        case_reject("neg_boundary_return_value_checked", BOUNDARY_RETURN_VALUE_CHECKED),
         case_accept("pos_never_call_return", NEVER_RETURN_SRC),
         case_accept("pos_never_call_propagates", NEVER_PROPAGATE_SRC),
         case_run("run_never_call_dead_branch", RUN_NEVER_DEAD_BRANCH, 42),

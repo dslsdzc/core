@@ -150,7 +150,7 @@ bash tools/baseline/warm_run.sh ./build/corec /tmp/warm_now   # 定点层（语�
   码集对拍才能判断是否回归；本条不作回归声明（本批 rc 等价口径 = 代 0 逐档码集，见 v4 计划二.2 节 B1/B2）。
   因此本文档其他位置出现的“75 档”同属 76 档之前的实测值（定点层的“既有 75/29 语料”`+125s（75 档 ×2 次 ccr）`），
   不得当作当前语料数；`src/ci/run.sh` 里那处同款引用已于 2026-09-24 一并补正。
-  空 fixture ×2（`tests/suite/{test_control_flow,test_generics}.cr`，日志 = `error: cannot read`）、
+  空 fixture ×2（`tests/suite/{test_control_flow,test_generics}.cr`，2026-10-24 已删除；本行计数是删除前实测）、
   P21 嵌套 fn ×3、examples 解析错 ×2、库单元单独 check ×25、TF01 并发族 ×5、TF07 ×1、B04 ×2，划界见
   `p6-task0-report.md` 3.1 节（运行之前先读，不要把既有失败当成回归）。
 - `examples/` 不在任何 CI job 的覆盖面内（`suite` job 只运行 `tests/suite`），但本对拍面包含它

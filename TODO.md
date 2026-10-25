@@ -510,8 +510,8 @@
 - 报告：`docs/archive/sdd/p3-task{0,1,3,4,5,7}-report.md`（六份）。
 
 ### 2026-09-11-6. 仓库卫生：suite 空 fixture ×2 + 未使用文件扫描噪声（2026-09-11 R2 P1 Task 3 语料扫描发现） （原 #22）
-- `tests/suite/test_control_flow.cr` / `test_generics.cr` = 0 字节空文件：`corec` 对它们报 `error: cannot read`（勘误：Task 2 报告曾记为“预期失败 fixture”，实为空文件）。修复方向 = 补内容或删名（删需用户许可，铁律 #3）。
-- `src/compiler/elf.cr`：`check` 扫描 rc=0 但 2 个 parse error、decisions=0：陈旧遗留文件（未使用文件本体的登记见 #2026-09-10-3；本条补充语料卫生事实：批量 check 脚本须排除它，否则 parse error 混入语料日志）。`src/compiler/linker.cr` 为 0 字节空文件（同类：批扫时排除或删除）。
+- `tests/suite/test_control_flow.cr` / `test_generics.cr` = 0 字节空文件：`corec` 对它们报 `error: cannot read`（勘误：Task 2 报告曾记为“预期失败 fixture”，实为空文件）。修复方向 = 补内容或删名（删需用户许可，铁律 #3）。2026-10-24：两档空文件已删除，`test_suite_hygiene.py` 的 H5 改为断言空集。
+- `src/compiler/elf.cr`：`check` 扫描 rc=0 但 2 个 parse error、decisions=0：陈旧遗留文件（未使用文件本体的登记见 #2026-09-10-3；本条补充语料卫生事实：批量 check 脚本须排除它，否则 parse error 混入语料日志）。`src/compiler/linker.cr` 为 0 字节空文件（2026-10-24 已删除；批扫时不再需要排除）。
 - 实证：findings 第8节 末“其他已登记项”；语料日志 `/tmp/r2p1t3/all_tiers2.txt`。
 
 ### 2026-09-11-7. ~~harness 缺口：`.claude/hooks/block-git.py` 只拦“以 git 开头”→ 复合/管道命令可绕过~~（2026-09-11 登记）：已完成： 2026-09-16 修复 （原 #23）
@@ -1300,7 +1300,7 @@
 - 机理：未定位（本条目只登记，不做根因定位）。观测事实 = 可选值的 `==` 在“值与 `Some(...)`”“值与 `None`”两种形态下均不成立；未排除与可选表示（rep/装箱面）或 `EXPR_ENUM_CONSTRUCTOR` 比较路径相关：勿据本条推断根因。
 - 判定：S（通用不报错）；作用面 = 所有可选（`int?` / `dex?` / 任意 `T?`），且 `if x == None` 是最自然写法 ⇒ 危害面大于 `dex?` 专属面（分诊结论：本条比 `#2026-09-17-5` 更严重）。
 - 验收要求（修复时）：1 `Some(x) == Some(x)` 必须真；2 `None == None` 必须真；3 `Some(x) == None` 必须假；4 非可选面 `==` 语义与产物零变化（canary/`.ccr` IDENTICAL）；5 标签形（`int?`）与 dex 形（`dex?`）同判。
-- 状态：登记，未修（非 dex 引入 ⇒ 归通用面收尾）。
+- 状态：已消解（2026-10-24 实测）：两个最小复现均返回 1（`n == Some(7)`、`n == none`）。验收第 4、5 条（非可选面零变化、标签形与 dex 形同判）未单独复测。
 - 关联：批 5 报告 第10节 分诊“附带发现 1”。
 
 ### 2026-09-17-7. （fail-closed 缺口）`extern` 形参不校验可选（`extern fn e(x: T?)`）：编译期零诊断 ⇒ 运行期 139
@@ -1317,7 +1317,7 @@
 - 机理：未定位（只登记）。可确认面 = “`extern` 声明的形参类型不做可适用性校验”（C ABI 无可选表示）；`W4` 环对 extern 侧显式不扩（`ir_gen.cr:1985` 的 `cfn_ext == 0` 守卫）⇒ 即使要支持也无约定 ： 属语义层面不应存在的形态。
 - 判定：L（运行期响亮 139），但编译期零诊断 = fail-closed 缺口（“不诊断”本身是洞；建议收敛为编译期硬错）。
 - 验收要求（修复时）：1 `extern` 声明含可选形参 ⇒ `check` rc=1 + 专属诊断 + 零产物；2 非可选 `extern` 行为逐字节不变；3 `dex?` 与 `int?` 同一拒收路径（同判）。
-- 状态：登记，未修；不做根因定位。
+- 状态：已消解（2026-10-24 实测）：`extern fn e(x: int?)` 与 `extern fn e(x: dex?)` 均报 `error[P24]`，check rc=1。非可选 extern 未单独做逐字节基线比对。
 - 关联：批 5 报告 第10节 分诊“附带发现 2”· `TODO #2026-09-16-14`（软诊断族）邻域。
 
 
@@ -1390,7 +1390,7 @@
 - 本批关系（批 6）：`#ensure` 的名字域把 `result` 当绑定名（裁-S8）：corec 侧它是 IDENT ⇒ 无冲突；bootstrap 侧它是关键字 ⇒ 本批的“接受并跳过”用平衡括号跳过（不解析表达式）已规避（实测两侧同语料均 rc=0 且 bootstrap 侧 asm 逐字节同）。
 - 检查（修复时）：两侧关键字表逐条相等（机械检查 = 从两处抽集合做差集为空），或 bootstrap 侧显式登记“退役残留、故意保留”。
 - 关联：`tests/selfhost/test_lexer_parity.py`（既有“两前端同判”检查的同族面）· `docs/maintainer/adr/adr-0001-corespec-crasm-retired.md` · `docs/superpowers/plans/2026-09-17-spec-grammar.md` 第3.2.1节（裁-S7）。
-- 状态：登记，未修（本批边界外；`syntax.md`/`tokens.ebnf` 侧未核，修复时一并核）。
+- 状态：已消解（2026-10-24）：bootstrap `KEYWORDS` 表已无 `requires`/`ensures`/`result`；`python3 tools/v4_frontend_probe.py keywords` 实测两侧 39/39、差集为空。同族扩面（标签适用性，见下）仍未修。
 - 同族扩面（2026-09-18 · 批 8 条目 5 (B) 附注；纠 lead 先前“(B) 下无需登记”之判断）：标签适用性也是两前端分歧面：
   `bootstrap/corec/frontend/parser.py` 的标签允许清单只查标签名（`mut`/`pub`/`apx`）、无适用性校验，而 self-hosted 侧批 8 起
   按允许清单（仅显式 `dex` + 显式 `int`）拒 `dex?` / `.` / `auto` / `string` / `bool` + `apx`（`error[P26]`，`parser.cr` 实施点）
@@ -1419,7 +1419,7 @@
   （检查项1 语料含 `src/compiler/dump.cr` ⇒ 对拍可判）。
 - 关联：`#2026-09-10-3`（`elf.cr` 未使用文件；勿重复建：本条只登记 `cmd_cir`）·
   `CLAUDE.md` 的 `linker.cr`（空文件）注 · 批 6 计划 第14节。
-- 状态：登记，未修（批 6 T4 顺带实核；本批不动）。
+- 状态：已完成（2026-10-24）：`cmd_cir` 已删除；`cir_text_dump` 保留给 `main.cr` 的 `cir` 命令使用。
 - 自消解：若 `cmd_cir` 被删除（或调用面被恢复），本条随删除/恢复消解。
 ### 2026-09-17-13. 注： （检查·假红）`parity_run.sh` 有缓存状态广度段在 `PARITY DONE` 之后仍同步跑 20+ 分钟且持续重写 `.core/cache/cir` ⇒ 同工作区跑测试 = 读到冻结基线的旧版本条目 = 假红（2026-09-17 at-rename 批实测登记）
 
@@ -1508,7 +1508,7 @@
   - ⇒ 写与不写 `move` 完全等价（观察不到任何差别）。
 - 裁定：维护者 2026-09-17（经 team-lead 转达；落点 = 并发模型规格 第16节 G8）：删掉 `move` 关键字。理由：新模型的 MOVE 是编译器内部 transfer 计划（零用户标注），留一个零语义关键字与“源语言不新增 ownership 语法”相抵。
 - 验收要求（实施时）：1 上列 6 处消费者 + 关键字表 + grammar 产生式（含 `Primary` 引用；`grammar/tokens.ebnf` 若有 `T_MOVE` 条目须同步）逐条清点删净；2 负控（关键）：删除后 `move x` 必须是语法错误（rc≠0 + 诊断），且 `move := 1` 这类“此前非法、删关键字后变合法”的形态必须显式用例固定：删关键字 = 该拼写进入普通名字域，可能把语法错误变成不报错接受（本仓最忌类）；3 语料清点：`tests/` 与 `src/` 中 `move` 的使用面若存在须同批改；4 检查范围：`check src/compiler` rc=0 + 全枚举 + ELF canary 逐字节不变（语料无使用面时应当逐字节不变）。
-- 状态：登记，未修（独立小批；2026-09-17 只读规划轮登记）。
+- 状态：已完成（2026-10-24）：`T_MOVE`、`EXPR_MOVE`、六处消费者、`grammar/tokens.ebnf` 的 `'move'`、LSP 补全项和 B020-B022 错误码均已删除。负控见 `tests/selfhost/test_move_keyword_removed.py`。
 - 关联：`docs/superpowers/specs/2026-09-17-concurrency-model-design.md` 第13节 I2 / 第16节 G8。
 
 ### 2026-09-17-19. 注：注： （不报错·安全网失效）`ptr_analysis` 全程序 alloc 追踪上限 64（第 65 个起不报错不追踪）+ 计数器从不复位（2026-09-17 并发模型规格 G3 裁定：先裁“pts 表示升级”；本条为必立的不报错缺陷）
@@ -1578,7 +1578,7 @@
 - 机理：`checker.cr` 对 `EXPR_EXTERN` 声明整段早退（形参/体检查跳过）；批 8 条目 3 的 `P24` 只堵“签名含 `?`”这一支，未覆盖本面（且条目 3 验收要求2要求非可选 extern 逐字节不变 ⇒ 不得顺手改其行为）。
 - 同族：= `TODO #2026-09-16-1`（F3：`unify_types` 返回值被丢弃 ⇒ 调用位点实参类型不匹配无诊断）在 extern 侧的实例。批 8 的 (1) 面（S1 report-only → S3 升硬错）覆盖 Core 函数调用点；extern 侧是否纳入须在 (1) S1 清单中单列。
 - 验收要求：1 `check` rc=1 + 定位 + `build` rc=1 且 `-o` 与 `<out>.ccr` 均不存在（零产物断言必须落在 build 面）；2 C ABI 可表示形态（`dex`/`int`/`string`/`void` …）逐字节不变；3 与 (1)/F3 收尾合并时同批核对、不得分叉。
-- 状态：登记，未修（批 8 Q2 实测产出）。
+- 状态：登记，未修（批 8 Q2 实测产出）。2026-10-24 实测：普通 Core 函数 `f("s")` 同样 check=0，说明缺口在通用调用点而不是 extern 专属；单独修 extern 会造出两套语义，应与 `#2026-09-16-1`（F3）同批处理。
 
 ### 2026-09-18-6. 注： （不报错）模块限定泛型调用不进重定向块 ⇒ 实例不被具体化（`ir_gen.cr` 调用形态门只认 `EXPR_IDENT`）（批 8 三形态实测登记）
 
@@ -1595,11 +1595,11 @@
 ### 2026-09-18-7. （语料状态·预存）`tests/suite` 检查 6 档异常（5 构建失败 + 1 运行 rc=1），其中 2 档是 0 字节文件（批 8 实测登记：只登记不修）
 
 - 实测读数（`for f in tests/suite/*.cr` 逐档 build+run）：29 档 rc=0；BUILDFAIL 5（`at_test_mini` · `at_test_mini4` · `at_test_mini6` · `test_control_flow` · `test_generics`）；RUNFAIL 1（`at_test_mini9` rc=1）。
-- 单独点名：`test_control_flow.cr` 与 `test_generics.cr` 是 0 字节文件：要么是占位、要么是事故，两种处置完全不同（占位 ⇒ 删除或补模拟；事故 ⇒ 追溯丢失源并还原）。判断前不得删除。
+- 单独点名：`test_control_flow.cr` 与 `test_generics.cr` 是 0 字节文件：要么是占位、要么是事故，两种处置完全不同（占位 ⇒ 删除或补模拟；事故 ⇒ 追溯丢失源并还原）。判断前不得删除。2026-10-24：按占位处理，两档已删除；H5 改为断言空集。
 - 预存性：前态二进制（`/tmp/corec2`）与本链逐档一致 ⇒ 非本批引入。
 - 与 `#2026-09-18-4` 的因果链：该条检查属 `suite` job、不在 PR 门内 ⇒ 这类状态无人看见（`-4` 讲“为什么没人看见”，本条讲“看见了也没人管”：互为因果、对象不同，故不合并）。
 - 触发器（若纳入 PR 门）：一旦把 `suite` 纳入 PR 门，会立刻多出 6 档红 ⇒ 纳入前必须先清这 6 档，否则一次改动会带来无法归因的红。
-- 状态：登记，未修（批 8 实测产出；零源码改动）。
+- 状态：部分完成（2026-10-24：两档空 fixture 已删除；其余 4 档仍登记）。
 
 ### 2026-09-18-8. （语料卫生·登记）`at_test_mini*` 族 = 调试残料，建议整族收敛；并更正“tests/suite 6 档异常”约定（2026-09-18 suite 清障批产出）
 
@@ -1831,6 +1831,7 @@
 - 为何不能只当小事：它是检查自身的失效源：本次若不做“必命中探针”，扫面会把“打点没装”读成“真干净”并收工（同族先例：假阳/突变打空/有缓存状态错值）。
 - 验收要求（实施时）：三形最小探针（`= -1` / `= 42` / `= 0 - 1`）· `.s` 面 `.quad` 直读断值 · 修法方向 = bootstrap 的初值判定从 `Literal` 扩到常量折叠可判定形（`UnaryOp('-')`/`BinaryOp`）；回归面 = `corec`/`corearch` 构建链 + `corec2`/`corec3` 逐字节 + canary。
 - 本批处置：不修 bootstrap（属另一条链）；受影响的写法已在本批改为零值标记值（`g_s1p_seen`，`#122`）。实测 `globals.cr` 现无其它非 Literal 全局初值（全表只此一处）⇒ 无既存损伤，纯属未来雷区 + 检查失效源。
+- 状态：已修复（2026-10-24）：`gen_let_decl` 的初值判定扩到 `UnaryOp('-', Literal)`；探针 `g : int = -1` 经 bootstrap 得到 -1。`= 42` 和 `0 - 1` 形态未单独复测。
 
 ### 2026-09-18-17. 注： （自源编码约束）bootstrap 解析器不支持 `as` 转换（批 8 S2 实测；与 `-15` 同族）
 
@@ -1979,7 +1980,7 @@
 - 性质：`*T` 形参在调用点的类型解析落空 ⇒ 退化为 unit = 纯漏分支（非设计）。
 - 注： 仪器限定（必读，避免后人重蹈）：`*T` 形参的 `p_ti` 是垃圾值（unit） ⇒ 凡用 `*T` 形参做的清单读数，都不可作 type 推理。
 - 附（行号 face 局部性）：不同 face 的行号不可跨比：同一探针 `check` 面清单给 `p=11 / a=10`，而 `ccr --dump-types` 的行表是 `9/10/11`；两面行号空间不同，不可互推。
-- 处置：只登记，不修（`checker.cr` / `res_call_type` 属地归 `b8-e1`）。
+- 处置：已淘汰（2026-10-24）。`res_call_type` 仍无 `EXPR_PTRTYPE` 分支，但 `*T` 形参在该函数里只剩 S1P report-only 读数（`CORE_S1P=1`），默认编译路径不受影响；S1P 面按 `#2026-09-19-3` 的仪器限定处理。泛型返回型 `*T` 的潜在面未实测；若 S1P 复活或该形态进入语料，需重开。
 
 - 〔2026-09-19 · `b8-e1` 追加（只增不删）〕源码分支逐条（`checker.cr::res_call_type`，函数头现址 `:1879`）：`:1881`（`node < 0` ⇒ `TI_UNIT`）· `ast_kind == 0`（标量）⇒ `ty_code_to_ti`（`TY_NEVER` 折 `TI_UNIT`，显式保留、会报错合一）· `EXPR_IDENT` · `EXPR_GENERIC_APPLY` · `EXPR_REFTYPE` ⇒ `alloc_type(TYP_REF, inner, mf)` · `EXPR_OPTIONAL` ⇒ `alloc_type(TYP_OPTIONAL, inner, 0)` ⇒ fallthrough `:1948 return TI_UNIT`。无 `EXPR_PTRTYPE`。
 - 〔同上追加〕与 `#2026-09-19-1` 不同面（勿合并）：那条是 kind 语义问题（`&x` 产出 `*int` vs `&T` 是 `TYP_REF`），本条是纯漏分支（同一 `TYP_PTR` 也该被解析出来）。⇒ 分开登记、分开处置。
@@ -2322,6 +2323,8 @@ if g_error_count > 0:     // ← print_parse_errors() 永远走不到
 与 `#2026-10-11-4` 的关系：那条是 bootstrap（Python 前端）缺 `T?` 语义；本条是自源/代 0 编译器在
 “可选载荷的枚举变体”上的运行期缺陷。两者不同层（前端 vs 后端/IR），不合并。
 
+2026-10-24 根因候选（读码，未实测）：`ir_gen.cr::enum_payload_ti` 用变体名走 `find_gsym`，但枚举变体不是全局符号 ⇒ 返回 -1 ⇒ `box_for_optional_slot` 视作非可选槽，携带值不装箱；读取侧按 `int?` 解包时把裸 int 当指针。`EXPR_ENUM_CONSTRUCTOR` 的 AST 只存变体名、首实参和个数（`parser.cr:446`），没有枚举类型身份。修法需要改 AST 携带枚举类型，或遍历枚举找变体（同名歧义待定），属表示缺口，等专门批。
+
 ### 2026-10-11-4. （能力面缺口）bootstrap（Python 前端）完全没有 `T?` 的语义面（语法面已通、语义面全缺；取号基准 = 3）
 
 怎么发现的：v4 迁移 T5 施工期修“基本类型 `T?`”的语法面时（依据 = v4 文档 第3.2节 原文 `value : int? = 5`），
@@ -2387,6 +2390,8 @@ error[ICE04]: type judgment indeterminate: never vs named#21 (uncovered face)
 可运行的旁证（表达式位 region 的值通道是通的）：`t := unsafe:` + `7` + `return t` ⇒ 运行期 7（`gen_block` 尾值直通，`ir_gen.py:438-444`）。即“region 作声明右值”这条通道本身没问题，缺的是 `if` 这一支的实现。
 
 影响面：`docs/developer/syntax.md` 第4.1节 原写的 `total := if ready: … else: …` 例子已降为“设计态/未实现”并注明根因。未修（修法在 `gen_if`，属发射面，超出 v4 迁移批量范围）。
+
+状态：已修复（2026-10-24）：`gen_if` 在两支都有值且存在 `else` 时把分支值写入同一个临时变量，merge 后返回它；探针 `x := if c: … else: …` 经 bootstrap 得到 1。
 
 ### 2026-09-22-1. 注： （不报错错值）`REF.f` 字段自动解引用误编译（local 形态）（批 8 裁定二 S4；本批修复；取号基准 = 当天已有最大 N 无 ⇒ 1）
 

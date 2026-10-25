@@ -61,7 +61,18 @@ run_suite() {
     # 该缺陷本体另立条目（见 TODO 当日段「`.cir` 暖态重放静默错值」），**不在本批修**。
     ./build/corec clean-cache >/dev/null 2>&1
     echo "suite: $f"
-    ./build/corec build "$f" -o /tmp/core_suite_bin --static
+    case "$f" in
+      # Scheduler/channel corpora are the SYSTEM raw-word ABI (G/channel cells
+      # mix pointers and ints in int slots). Compile them raw; ordinary user
+      # programs keep tagged big-int semantics.
+      */chan_test.cr|*/conc_test.cr|*/go_*.cr)
+        ./build/corec ccr "$f" -o /tmp/core_suite_bin.ccr
+        ./build/corearch --raw-int --elf /tmp/core_suite_bin.ccr -o /tmp/core_suite_bin
+        ;;
+      *)
+        ./build/corec build "$f" -o /tmp/core_suite_bin --static
+        ;;
+    esac
     chmod +x /tmp/core_suite_bin
     /tmp/core_suite_bin
   done
@@ -76,7 +87,6 @@ case "$CI_JOB_NAME" in
   bootstrap-tests)
     python3 tests/bootstrap/test_pipeline.py
     python3 tests/bootstrap/test_borrow.py
-    python3 tests/bootstrap/test_generics.py
     # TODO #2026-09-11-7：铁律 #2 机械执行钩子的加固判据（BLOCK 19 + ALLOW 11；纯 python，无需编译器）
     python3 tests/harness/test_block_git.py
     # R2 P7 非构建小批（CI 挂点审计 #2026-09-10-5）：**挂点覆盖率机械判据**——枚举
@@ -144,8 +154,6 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_pointer_safety.py
     python3 tests/selfhost/test_region_escape.py  # TODO #2026-09-20-1：RegionCheck 三条逃逸检查的真触发判据。**两向钉子**——正钉 P1 循环内分配+紧邻解引用（修前 rc=0 静默通过，根因 = 半开区间 [NSTART, EXIT) 被当成闭区间，`ni > EXIT` 漏掉紧邻格）· P2 隔句同形 · P3 返回逃逸=**B10**（修前误用 B11）· P4 存储逃逸（修前判定值被整行丢弃 ⇒ 检查从不触发）· P5 if 内分配按父链归到外层循环 · P6 重赋值清除的负控；反向对照必须 rc=0：if 型（修前误报 rc=1，R2 附 build+run 反证「内存没释放」）· 函数级返回型 · 重赋值型（修前误报 rc=1）· 循环内使用型 · 非指针面 · 存活指针 · 无堆分配。**面 = `ccr`/`build`**（`check` 面在 IR 生成前早退，region_check 根本不跑 ⇒ 旧 test_region_cfg 那条「逃逸」断言靠 `or 'error'` 兜底，不是钉子）= 14 例
     python3 tests/selfhost/test_params_limit.py   # TODO #2026-09-10-4 形参上限/≥18 形参静默误编译回归
-    python3 tests/selfhost/test_generic_param_erasure.py # (乙) 泛型实例形参擦除（2026-09-18）：A1 形参链具体化 + A2a 第二遍。C1/C2 值判据（bits 三
-    python3 tests/selfhost/test_topt_pattern.py   # 批 8（甲）批 1 刀 1：`unify_types` 的 `T?` 模式规则（2026-09-18）。**两向钉子**：C1 五例合法调用 `[S1-ARG]` 归零（改前各 1，防「一律报」）；C2 `g(1,d)` 真错仍恰 1 条（防「一律不报」）；C3 实例键/转换机械腿（`g[dex]`/`g2[dex]`/`call g2[dex](_dxsc)`）；C5 槽型直读（slot=8）；C4 非泛型面零足迹对照。**突变自证**：删回 `T?` 分支重建 ⇒ C1 五例必红（`COREC_BIN=` 通道）态 255 / scaled 两腿严格）· C3 槽型直读（--dump-params：T 形态 slot=8 decl=1 / T? 形态 slot=8 decl=0）· C4 调用点机械判据（call g1[dex](_dxsc)）· C5 幂等（bits 恰 2、scaled 恰 0 条 dest=_dxsc）· C6 --dump-params rc 中性/零产物 · C7 check 零诊断。**语料零覆盖声明**：全语料无「泛型 × dex」实例 ⇒ 表示面只能由本套件探针触达（见计划 §11）
     python3 tests/selfhost/test_at_rename.py      # `@no_bounds_check` → `@NoBoundsCheck` 更名（维护者 2026-09-17）：旧名**响亮失败**（build/check/run 三面 rc=1 + 定位 + 零产物，绝不静默）+ 新名两形态等价 + 两条入仓语料运行 + `.cir` 显示名（括号形态有行/语句形态零 IR = F4 语义保持）+ 分派点四处同步守门 + IR 常量 35 钉 = 14 例
     python3 tests/selfhost/test_global_seams.py   # 全局行 operand seam（2026-09-16 批）：B1/B2/B4/B5 全局 vs 局部同形对拍（mut 全局 + 期望值）+ B6(b) 发射字节级（静态无 .so 无运行期腿）+ B7 非回归；配套 suite 语料 tests/suite/global_seam_test.cr
     python3 tests/selfhost/test_tuple_slots.py
@@ -160,6 +168,7 @@ case "$CI_JOB_NAME" in
     # H4 run_suite 跳过集合 == 两档负例且模式**全路径锚定** · H5 0 字节档集合钉；**逐档 clean-cache**
     # （理由 = TODO #2026-09-18-9 的暖态重放缺陷 ⇒ 否则结论依赖上一轮缓存状态）。
     python3 tests/selfhost/test_suite_hygiene.py
+    python3 tests/selfhost/test_move_keyword_removed.py  # TODO #2026-09-17-18：move 关键字退役（M1/M2 负控 + M3 名字域 + M4 静态清点）
     python3 tests/selfhost/test_interp_parity.py  # TODO #2026-09-10-7 解释器 callee 内联 ≡ 主循环 ≡ ELF
     python3 tests/selfhost/test_cache_identity.py # TODO #2026-09-10-1 cir 缓存编译器身份（跨重建失效）
     python3 tests/selfhost/test_cir_warm_path.py  # R2 P5 Task 1：.cir 暖态 SIGSEGV 根因修复回归——冷/暖 rc 双 0 + ELF 逐字节同 + .ccr 段级契约（STR 冷≠暖为预存口径）+ 暖态真命中（条目 size/mtime 不变）+ 变体（多串/0 串/大串/多函数）+ 可选面零条目 + **累计装载复现例**（400 条目补零至 3MB ⇒ Σ=1.2GB > 1GB 堆，暖态 rc=0 + 峰值 RSS < 512MB；修复前 rc=139 红态实测）= 19 例（COREC_WARM_SELF=1 另开 2 例自源语料，~3 分钟）
@@ -169,14 +178,21 @@ case "$CI_JOB_NAME" in
     python3 tests/selfhost/test_match_exhaust.py  # R2 P3 Task 3：match 穷尽性（补集空性 + 具体变体反例；TM03 硬门 + TM04 软面）
     python3 tests/selfhost/test_tf01_fallthrough.py # TF01 收口：函数体落空分析（无 break 的 loop 收尾不再误报）+ lits_copy 返回型（真·类型洗白）；正控/负控/端到端 19 例 + R2 P6 Task 4a 增 3（never 调用返回位/传播位 + 死分支端到端）＝ 22 例
     python3 tests/selfhost/test_optional.py       # R2 P3 Task 4：联合/可选（T? = T ∪ null；Some/None 解析 + ? 结构解包 + Option 名退役 + 载荷类型节点列）12 例 + R2 P4 Task 5：解包侧判表示（裁决 5）——B.7「裸值 + Some 臂」双路径 SIGSEGV 闭合 + 表示位运行期分派（写点置位/条件写/两形态改写）+ 返回/形参信道 + `?` 解包装箱值双路径分歧闭合 + 未覆盖面登记 = 34 例 + **容量批 T2（裁-CAP-1 (a) 存储边界规范化）**：聚合面（结构体字段/数组·切片元素/元组元素/枚举载荷/全局槽）写点装箱——A 类 8 写点逐点用例（字段赋值/字面量 · 数组字面量下标/动态下标/字面量元素 · 全局赋值/**初值** · match 结果条件写 · 枚举载荷 · 元组元素）+ 负控 + 原未覆盖面 4 例**重钉**（-11 → 精确值；死亡证据 = 本批能力变更）= 48 例 + **(A) 批 T2（裁-REP-1 (iii) 表示位随存储走）**：取址槽恒装箱——四形态（局部/数组元素/全局/形参）经指针写 × {裸, 装箱, None, 条件写} + `c1/c2/c3` 转正（c3 自证式断言不钉历史数值）+ REP-2 边界探针 + REP-3 登记钉 + 非可选负控 ×2 = 66 例 + **(A) 批 T3（裁-T3-1）**：**推断（无标注）可选数组/切片**的元素写点（修复前 7 形态 139/139）——字面量/切片/继承三来源登记后逐形态正确 + 对照 4（标注动态下标/切片形参/装箱写/只读）+ 切片套切片 + 非可选推断数组负控 = **80 例**
-    python3 tests/selfhost/test_generic_constr.py # R2 P3 Task 5：泛型约束（结构/枚举约束保留 + 实例化点 ty_sub 判定 + 反例文本；用户接口面 P3b Task 0 起真判定；F4 形参链；实例键类型项化）
-    python3 tests/selfhost/test_iface_satisfies.py # R2 P3b Task 0：iface_satisfies 契约（轴分派/三态/与 check_iface 同源；实例化点 T: I 判定 + 登记面 17 例）
     python3 tests/selfhost/test_xcut_iface.py     # R2 P3b Task 2：横切接口接线（索引兜底门 → 可索引形状 / range 分支 → 序列形状 + 固定性位；行为保持 12 例：三路同证正例 + TK01 软诊断负例 + F2/F11 硬错误钉子）
-    python3 tests/selfhost/test_impl_iface.py     # R2 P3b Task 6：impl 契约覆盖集（签名类型项化 + 形状项逐成员判定 + mangling 退役 + 上限钉子；20 例：正向三路/两路同证 + 反向签名五面 + 错误例 + 登记面 + 硬错误）
     python3 tests/selfhost/test_enum_limit.py     # R2 P4 Task 6（TODO #2026-09-12-2）旧态 13 例（16 边界 + 17 定位硬错 P022/P023）→ **容量批 T3 重钉为 15 例**（**本批机械核对同步：实测 18/18**，他批 +3）：字段/变体/载荷**上限解除**（侧表）⇒ 16/17/40/64/70 一律编译+运行值正确（旧 17-拒绝面转正，死亡证据 = 本批能力变更）· 跨记录完整性（宽记录 + 邻记录）· 覆盖位无界（≥63 变体穷尽性正确）· 真错仍拒（TM03 缺臂 / TM04 冗余臂）
     python3 tests/selfhost/test_named_face.py     # R2 P5 Task 3：命名面判定化（身份链：同链 1 / 链异 0 / 域外 -1）行为覆盖集——受 10 例（命名互赋 / 泛型应用两实例化 / 嵌套应用 / 实参含命名 / 容器元组 / 递归 *Node / 形参 T / 别名透明 / 函数边界）+ 拒 8 例（异名同形 / 异实参应用 / 命名 vs 原生 / 命名 vs 应用 / 可选异名 / T 赋 int / 不变槽残留 ×2）；**不依赖影子通道**（影子通道已于 P5 T5 下线 ⇒ 本套件 = 下线后的判定面行为网主力）；18 例
     python3 tests/selfhost/test_named_dedup.py    # R2 P2a Task 3（C-4）：侧表 ↔ res_type_node 管线内断言（`--verify-named-dedup`；**非影子通道**——判据 = 真实流水线上三组一致性，影子期亦无耦合）
     python3 tests/selfhost/test_let_check.py      # R2 P5 Task 6（TODO #2026-09-11-14）：`EXPR_LET` 站点值/注解兼容判定——TA02 定位硬错（值非兼容 + 数组长度档）+ 无产物 + 前端拒绝（不进入 lower/写 .ccr/ELF）+ 全局声明面（check_global_let 同款）+ 批量/丢弃名 + 级联抑制（TI_NEVER 错误标记只发原诊断）+ 正控（无注解/auto/dyn/泛型 T 与 [T;N]/可选注入/无初值）；23 例〔**注释陈旧自纠**：T4a 前实读 = 24（23 为 P5 期旧值，差 1 未同步）〕+ R2 P6 Task 4a 增 5（never 调用声明位 / near-miss 负控 / 强负控调用返回型不符仍拒 / 语句位宽面 / 赋值位登记钉）＝ **29 例**
+    python3 tests/selfhost/test_v4_inference.py   # V4 类型位推断：无类型形参（数组/切片在调用点绑定）+ `.` 字段（同一 struct 接 int/string）；3 例
+    python3 tests/selfhost/test_v4_for_sequence.py # V4 序列迭代：数组/切片/推断形参/slice header 形参的 `for x in xs`；4 例
+    python3 tests/selfhost/test_v4_auto_constraint.py # V4 自动约束推断：`fn f(a): a.show()` 从方法名反推接口约束；调用未实现接口 -> TG02；顺序无关；3 例
+    python3 tests/selfhost/test_v4_no_generic_syntax.py # V3 显式泛型语法删除：`fn f[T]` / `struct S[T]` / `Box[int]` / `interface I[T]` 均拒绝；数组/切片/下标保留；5 例
+    python3 tests/selfhost/test_v4_return_inference.py # V4 返回推断：`fn identity(x): return x` / 索引返回 / 无参返回；4 例
+    python3 tests/selfhost/test_v4_field_inference.py # V4 字段投影：模板宽松 + monomorph 实例重查；正例/缺方法/错 struct；3 例
+    python3 tests/selfhost/test_v4_generic_enum.py   # V4 泛型 enum：payload `.`，int/string 两实例；2 例
+    python3 tests/selfhost/test_v4_len.py            # V4 `.len`：数组/字符串/切片/数组形参/slice header 形参/运行期长度/数组实参 coercion；7 例
+    python3 tests/selfhost/test_v4_ambiguous_constraint.py # V4 同名接口方法：按返回型消歧；正例/错返回型拒绝；2 例
+    python3 tests/selfhost/test_collections_v4.py    # collections.cr V4 迁移：推断形参 + `.len` + 序列迭代；rc=42
     python3 tests/selfhost/test_diag_gate.py      # FC 批 T2：fail-closed 闸门（默认阻断 + 豁免登记表 **8 条**——TF01 于批 8 A₂ 撤条）——正控 8（表内 5 个 build 面码仍放行 + scope=check 3 条 check rc=1 不变）+ **TF01 撤条对：根因正控（chan_test check rc=0 无 TF01 + build 干净）+ 负控（真 TF01 ⇒ rc=1 + 零产物，即「撤条 ≠ 放行」）** + 负控 6（语法面 P21 / 类型面 TA02·R02·TM03·TK05 / 安全检查面 TU03：仍阻断 + **零产物**）+ 零产物 3（前端失败无半成品 / corearch 失败删本次 .ccr [stub 仿真] / 旧哨兵原样仍在）＝ **19 例**
     # ─── 批 8 A₂（条目 6）：并发 handle 类型模型对齐 —— **自门内 e2e 判据**（2026-09-18）───
     # **11 例** = 5 档并发语料 × （check 干净且**无 TF01** + build+run rc=0）+ 1 形态自证（`chan_make→string`

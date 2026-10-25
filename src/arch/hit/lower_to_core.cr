@@ -42,6 +42,8 @@ import fmt
 import ast
 import globals
 import dyn_arr
+import ccr_schema
+import bytes
 import hit
 
 // ------------------------------------------------------------------

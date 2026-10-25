@@ -16,7 +16,7 @@ KEYWORD =
     'fn' | 'mut' | 'return' | 'if' | 'else' | 'loop' | 'while' | 'for' | 'break' | 'continue' |
     'true' | 'false' | 'struct' | 'enum' | 'extern' | 'impl' | 'match' | 'import' | 'pub' |
     'go' | 'await' | 'unsafe' | 'flow' | 'yield' | 'interface' | 'type' | 'mod' | 'as' |
-    'auto' | 'fileid' | 'move' | 'in' | 'None' | 'Some' | 'unit' ;
+    'auto' | 'fileid' | 'in' | 'None' | 'Some' | 'unit' ;
 
 (* 字面量 *)
 (* 数字字面量不支持 '_' 分隔符、不支持任何宽度后缀（2026-09-10 语言面收窄 §2 用户裁决：

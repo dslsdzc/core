@@ -807,11 +807,6 @@ fn analysis_kw_items(prefix: string) -> string:
             out = out + ","
         out = out + analysis_citem("fileid", 14)
         first = 0
-    if analysis_has_prefix("move", prefix) != 0:
-        if first == 0:
-            out = out + ","
-        out = out + analysis_citem("move", 14)
-        first = 0
     if analysis_has_prefix("in", prefix) != 0:
         if first == 0:
             out = out + ","
@@ -926,6 +921,10 @@ fn analysis_at_items(prefix: string) -> string:
             out = out + ","
         out = out + analysis_citem("ptr_of", 3)
         first = 0
+    if analysis_has_prefix("ptr_add", prefix) != 0:
+        if str_len(out) > 0:
+            out = out + ","
+        out = out + analysis_citem("ptr_add", 3)
     if analysis_has_prefix("str_of", prefix) != 0:
         if first == 0:
             out = out + ","

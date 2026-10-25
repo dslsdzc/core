@@ -156,18 +156,6 @@ fn main() -> int:
         return 3
     return 0
 """),
-    ("C5_generic_nested", "green", 0, """
-fn idf[T](x: T) -> T:
-    return x
-fn ieq(a: int, b: int) -> int:
-    if a == b:
-        return 1
-    return 0
-fn main() -> int:
-    if ieq(idf(7), 7) == 0:
-        return 3
-    return 0
-"""),
     ("C6_direct_in_if", "green", 0, """
 import fmt
 fn main() -> int:
@@ -306,46 +294,6 @@ def cir_of(src):
         os.unlink(path)
 
 
-def test_leg_d_generic_instance_key():
-    """腿 D（裁-ARG-8 H4）：同一泛型调用在**实参位**必须得**精确键**（`idf[P]`），
-    不得是退化键（`idf[unit]`）—— **TODO #2026-09-16-33 的既有缺陷 = 本批附带修复**。
-    与腿 B 同性质：**「修好了」的正据**（改前实参位必得 `idf[unit]`）。"""
-    let_src = """
-struct P:
-    v: int
-fn idf[T](x: T) -> int:
-    return 7
-fn main() -> int:
-    p : ., mut = P { v = 1 }
-    r := idf(p)
-    return r
-"""
-    arg_src = """
-struct P:
-    v: int
-fn idf[T](x: T) -> int:
-    return 7
-fn ieq(a: int, b: int) -> int:
-    if a == b:
-        return 1
-    return 0
-fn main() -> int:
-    p : ., mut = P { v = 1 }
-    return ieq(idf(p), 7)
-"""
-    bad = 0
-    for tag, src in (("LET 位", let_src), ("实参位", arg_src)):
-        txt = cir_of(src)
-        precise = "idf[P]" in txt
-        degraded = "idf[unit]" in txt
-        if precise and not degraded:
-            print(f"[PASS] 腿 D · {tag}: 精确键 idf[P] 在场 · 退化键不在场")
-        else:
-            print(f"[FAIL] 腿 D · {tag}: 精确键在场={precise} 退化键在场={degraded}")
-            bad += 1
-    return bad
-
-
 def main():
     report = "--report" in sys.argv
     fails = []
@@ -369,9 +317,6 @@ def main():
             fails.append(name)
         print(f"[{tag}] {name:<42} 观测: check={chk} codes={sorted(codes)} build={bld} elf={elf}"
               f"  | 期望({expect})")
-    nd = test_leg_d_generic_instance_key()
-    if nd:
-        fails.append(f"leg_d_generic_instance_key x{nd}")
     ne = test_leg_e_range_go_iter_var()
     if ne:
         fails.append(f"leg_e_range_go_iter_var x{ne}")
@@ -384,7 +329,7 @@ def main():
         for f in fails:
             print("   ", f)
         return 1
-    print(f"[PASS] 实参推断缺失套件全绿（{len(CASES)} 例 + 腿 D + 腿 E）")
+    print(f"[PASS] 实参推断缺失套件全绿（{len(CASES)} 例 + 腿 E）")
     return 0
 
 

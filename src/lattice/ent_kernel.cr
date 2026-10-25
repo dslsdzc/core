@@ -238,11 +238,11 @@ fn entry_count(func_i: int) -> int:
     return cell_load(g_ir_func_entry_count, func_i * 8)
 
 // Global existence rows. Every global var is one entry with def_nod = -1,
-// live_start = 0 and live_end = g_ir_instr_count (the whole program). Globals are
-// the prefix 0..g_ir_global_count-1 of the var namespace, so the loader can
+// live_start = 0 and live_end = g_df_node_count - 1 (the whole program). Globals
+// are the prefix 0..g_ir_global_count-1 of the var namespace, so the loader can
 // partition them as a leading block before the per-function blocks.
 fn compute_global_entries():
-    if g_ir_instr_count <= 0:
+    if g_df_node_count <= 0:
         return
     gi : ., mut = 0
     loop:
@@ -253,7 +253,7 @@ fn compute_global_entries():
         w32(g_ir_entries, eo + OFF_ENTRY_VAR, gi)
         w32(g_ir_entries, eo + OFF_ENTRY_DEF, -1)
         w32(g_ir_entries, eo + OFF_ENTRY_LS, 0)
-        w32(g_ir_entries, eo + OFF_ENTRY_LE, g_ir_instr_count - 1)
+        w32(g_ir_entries, eo + OFF_ENTRY_LE, g_df_node_count - 1)
         w32(g_ir_entries, eo + OFF_ENTRY_RUNTIME_HOME, -1)
         w32(g_ir_entries, eo + OFF_ENTRY_FLAGS, ENTRY_FLAG_GLOBAL)
         g_entry_count = g_entry_count + 1

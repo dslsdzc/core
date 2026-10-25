@@ -37,7 +37,7 @@ class Parser:
         self.tokens = tokens
         self.pos = 0
         self.const_values = {}
-        # `want_value` = **位置语义**标志（v4 权威依据 `docs/core-language-syntax_v4.md`
+        # `want_value` = **位置语义**标志（v4 权威依据 `docs/developer/syntax.md`
         # §7.4「函数没有 implicit tail return」+ §4.1「region 作声明右值取尾值」）。
         #
         # 起因：v4 无 `;` ⇒ v3 里 `x = 1;` 的 ExprStmt 形态消失，语句末的裸表达式会被
@@ -381,7 +381,7 @@ class Parser:
             self.expect(TokenType.FN)
         elif self.check(TokenType.FN):
             # v4 文档形（2026-10-11 裁：文档是目标语法 ⇒ 改实现）：
-            # `docs/core-language-syntax_v4.md:1232` `flow counter(start: int) -> int:`、
+            # `docs/developer/syntax.md` `flow counter(start: int) -> int:`、
             # `:1406` `flow encode(input: Frame) -> Packet:` —— **无 `fn`**。
             # 本侧原先**只**认文档形；此处补收旧形 `flow fn name(...)` 为**兼容**
             # （语料 `src/compiler/purity_selftest.cr:231` 用它；文档不写它、不为它新增用例）。
@@ -575,7 +575,7 @@ class Parser:
         # `&Self` 会变成 `PathType(['Self'])`，而 type_checker 的 `_is_generic_type`
         # 把「单元素 PathType」当泛型形参 ⇒ 静默错判（不是报错）。
         base_types = {'int','dex','bool','string','char','unit','never','Self'}
-        # ⚠ 基本类型**不早退**（2026-10-11 修；出处 = docs/core-language-syntax_v4.md §3.2
+        # ⚠ 基本类型**不早退**（2026-10-11 修；出处 = docs/developer/syntax.md §3.2
         #   的两行原文 `parent : User? = none` / `value : int? = 5`）。
         #   修前：本格直接 `return BaseType(...)`，而 `?` 的处理在函数**尾部**、只管 `PathType`
         #   ⇒ `int?` 落到「expected end of line, got '?'」（`Foo?` 却正常）——基本类型与路径类型
@@ -587,6 +587,15 @@ class Parser:
         # `never`/`dyn` 是**关键字令牌**（上方 base_types 那格看不到它们）⇒ 同链并列一格。
         # 自源对 `never?`/`dyn?` 与 `int?` 同判（实测 `fn f(a: never?) -> int` ⇒ rc=0）
         # ⇒ 本侧必须同收，否则留残余分歧。
+        # v4 relational type expression `typeof(expr)`: the bootstrap does not
+        # model relational types; consume the expression and return None so the
+        # let/param checker infers from the initializer (same behavior as `auto`).
+        if self.check(TokenType.IDENT) and self.cur().lexeme == 'typeof':
+            self.advance()
+            self.expect(TokenType.LPAREN)
+            self.parse_expr()
+            self.expect(TokenType.RPAREN)
+            return None
         if self.check(TokenType.NEVER):
             self.advance()
             typ = BaseType('never')
@@ -781,7 +790,7 @@ class Parser:
                 return Ident(f"@{first}.{file_id}::{symbol}")
             return Builtin(first, [])
         if self.check(TokenType.NONE):
-            # v4（docs/core-language-syntax_v4.md §1.4/§59）：`none` 是 `T?` 的**无值形态**关键字，
+            # v4（docs/developer/syntax.md §1.4/§59）：`none` 是 `T?` 的**无值形态**关键字，
             # canonical 变体名 = `None`。归一到 canonical 名（与自源 `parser.cr` 的
             # `T_NONE` → `EXPR_ENUM_CONSTRUCTOR(str_intern("None"))` **同语义**）；零载荷。
             # ⚠ 拼写面归一必须在此**单点**完成：`None`（旧大写）已退役为普通标识符，两者不同判。
@@ -1276,6 +1285,10 @@ class Parser:
             self._consume_newlines()
             if self.check(TokenType.DEDENT) or self.check(TokenType.EOF):
                 break
+            # v4 target form allows a leading `|` on each enum variant
+            # (`enum Mode:\n | Server`). Match arms already accept it.
+            if self.check(TokenType.PIPE):
+                self.advance()
             # `None` ⇒ `none` 是关键字 ⇒ 变体名仍收 NONE（保留今日「以 None 为变体名」的接受面）；
             # `Some` 已退休成 IDENT ⇒ 走 expect(IDENT)。
             if self.check(TokenType.NONE):

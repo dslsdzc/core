@@ -205,20 +205,15 @@ def main():
         # 宽面负控（C5）：语句位调用本无 TA/TF 判定面，改动不得新开抑制/新开诊断。
         case_accept_check("never_stmt_position_unchanged",
                           "fn boom() -> never:\n    loop:\nfn main() -> int:\n    if 1 > 2:\n        boom()\n    return 0\n"),
-        # 登记钉（裁③）：赋值位无 never 豁免（EXPR_ASSIGN，checker.cr:3314-3336）——
-        #   改前（源 = unit）改后（源 = never）**都**报 TA01；既有缺口、非本改动引入，
-        #   入 TODO 登记（E-T4-5）；同族豁免已在声明位/返回位/if 合并三处，赋值位是剩余缺口。
-        case_reject("assign_never_still_ta01",
-                    "fn boom() -> never:\n    loop:\nfn main() -> int:\n    busy : int, mut = 0\n    busy = boom()\n    return 0\n",
-                    ["error[TA01]"], cmd="check", forbid=(), exact_diags=1),
+        # E-T4-5 收口：never 是底部类型，赋值位与声明位/返回位/if 合并一致。
+        #   `busy = boom()` 的发散路径永远不会执行那条 store，因此不报 TA01。
+        #   （旧钉子钉的是既有缺口，缺口已在本轮 type_compat_strict 方向修正中关闭。）
+        case_accept_check("assign_never_source_ok",
+                          "fn boom() -> never:\n    loop:\nfn main() -> int:\n    busy : int, mut = 0\n    busy = boom()\n    return 0\n"),
         # ── 正控：合法注解 / 无注解 / auto / 泛型 / 可选注入 / 无初值 / 索引形态 ──
         case_run("let_exact_ok", "fn main() -> int:\n    x : int = 5\n    return x\n", 5),
         case_run("let_no_annot_ok",
                  "fn main() -> int:\n    x := 5\n    y : . = 6\n    z : auto = 7\n    return x + y + z\n", 18),
-        case_run("let_generic_param_ok",
-                 "fn f[T](v: T) -> T:\n    x : T = v\n    return x\nfn main() -> int:\n    return f(3)\n", 3),
-        case_run("let_generic_array_ok",
-                 "fn f[T](v: T) -> T:\n    x : [T; 2] = [v, v]\n    return x[0]\nfn main() -> int:\n    return f(4)\n", 4),
         case_run("let_optional_target_injection_ok",
                  "fn main() -> int:\n    x : int? = 5\n    y : int? = none\n    return 0\n", 0),
         case_accept_check("let_dyn_annotation_ok", "fn main() -> int:\n    x : dyn = 5\n    return 0\n"),
@@ -230,12 +225,8 @@ def main():
         case_run("let_named_and_string_ok",
                  'struct P:\n    a: int\nfn main() -> int:\n    p := P { a= 1 }\n    q : P = p\n    s := "hi"\n    t : string = s\n    return q.a\n',
                  1),
-        case_accept_check("let_generic_element_param_ok",
-                          "fn f[T](v: T) -> T:\n    x : [T] = [v]\n    return x[0]\nfn main() -> int:\n    return f(2)\n", expect_rc=0),
         # 泛型形参注解**不判**（豁免④）——与返回位点既有策略同款同证：`return 5` 在
         # `-> T` 函数体内今天即 rc=0（返回位点的 TYP_GENERIC_PARAM 豁免）⇒ 声明位点同策略。
-        case_accept_check("let_generic_param_annotation_not_judged",
-                          "fn f[T](v: T) -> T:\n    return 5\nfn g[T](v: T) -> T:\n    x : T = 5\n    return x\nfn main() -> int:\n    return 0\n", expect_rc=0),
     ]
     passed = sum(ok)
     print(f"{passed}/{len(ok)} passed")

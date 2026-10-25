@@ -60,7 +60,9 @@ def run_case(name, decl, expect_reject):
                              capture_output=True, text=True, timeout=180)
         if expect_reject:
             diag = "error[P26]" in chk.stdout
-            loc = " --> 2:" in chk.stdout
+            # 声明在第 3 行（第 1 行注释、第 2 行 fn main）。诊断打点已收窄到
+            # 声明行，不再回落到函数声明行。
+            loc = " --> 3:" in chk.stdout
             bld = subprocess.run([str(COREC), "build", path, "-o", out, "--static"],
                                  cwd=BASE, capture_output=True, text=True, timeout=300)
             art = os.path.exists(out) or os.path.exists(out + ".ccr")

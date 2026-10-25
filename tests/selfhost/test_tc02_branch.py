@@ -69,8 +69,10 @@ CASES_OK = [
 CASES_DIAG = [
     ("tc02_then_return_kept",
      "fn main() -> int:\n    if 1 < 2:\n        return 1\n    else:\n    return 0\n", ["TC02"]),
+    # 绑定 if 的结果，让两支进入值位置；语句位置的裸尾表达式按 V4 规则
+    # 包成 EXPR_STMT（类型 unit），不会构成 int/string 的 TC02 面。
     ("tc02_true_mismatch_kept",
-     "fn main() -> int:\n    if 1 < 2:\n        1\n    else:\n        \"s\"\n    return 0\n", ["TC02"]),
+     "fn main() -> int:\n    x := if 1 < 2:\n        1\n    else:\n        \"s\"\n    return 0\n", ["TC02"]),
     ("tf01_still_reported",
      "fn f() -> int:\n    return \"s\"\nfn main() -> int:\n    return f()\n", ["TF01"]),
     ("ta02_still_reported",

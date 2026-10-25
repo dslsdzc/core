@@ -325,6 +325,18 @@ g_holder_cap : int, mut
 g_gen_map_names : string, mut
 g_gen_map_types : string, mut
 g_gen_map_count : int, mut
+// Per-function inferred return row (-2 = explicit/not inferred, >= 0 = type row).
+// The parser synthesizes a `__ret` generic parameter when `->` is omitted; the
+// checker stores the body-derived row here and call inference substitutes it.
+g_func_ret_ti : string, mut
+g_func_ret_count : int, mut
+g_func_ret_cap : int, mut
+g_infer_ret_active : int, mut
+g_infer_ret_ti : int, mut
+// Globally unique suffix for synthesized `__inferN` / `__retN` names. Function
+// and struct parameters share g_gen_map, so per-declaration numbering collides
+// during nested inference (e.g. a generic struct literal inside a generic call).
+g_infer_name_seq : int, mut
 g_gen_map_cap : int, mut
 g_dyn_type_sets : string, mut
 g_dyn_type_set_count : int, mut
@@ -392,7 +404,9 @@ g_ir_func_entry_count : string, mut
 g_ir_func_entry_cap : int, mut
 
 // Module system arrays (dynamic byte buffers)
-DIAG_REC_SIZE : int = 40   // g_diags 记录字节数：[ec(8) msg(8) line(8) col(8) file_id(8)]
+DIAG_REC_SIZE : int = 64   // g_diags 记录字节数：[ec(8) msg(8) line(8) col(8) module_fid(8) sm_file(8) sm_lo(8) sm_hi(8)]
+// 前 40 字节为历史布局，LSP 仍按这些偏移读取。sm_file/lo/hi 是 SourceManager
+// 的归属与范围；sm_file < 0 表示该诊断没有可归属的源文件，渲染时回退到 line/col。
 // Scope labels for the diagnostic exemption table. The hard-decision loop in main.cr
 // calls diag_gate_exempt(ec, scope); the table itself is in diag.cr. run_frontend
 // uses GATE_SCOPE_BUILD only. The check path uses its own count > 0 rule and does
@@ -529,6 +543,7 @@ g_offsets_cap : int, mut
 g_pa_alloc_count : int, mut
 g_pa_alloc_nodes : string, mut
 g_pa_alloc_nodes_cap : int, mut
+g_node_unsafe : string, mut
 
 // Type-term engine: DAG table, structural hash index, judgment memo, and budget
 // state. Each term is 48 bytes: {tag, a, b, c, d, hash}; see type_terms.cr.
@@ -767,6 +782,7 @@ fn reset_frontend_state():
     g_holder_count = 0
     g_borrow_scope_depth = 0
     g_gen_map_count = 0
+    g_infer_name_seq = 0
     g_dyn_type_set_count = 0
     g_mod_func_count = 0
     g_mod_path_count = 0

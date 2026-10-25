@@ -19,6 +19,15 @@ g_ir_vals : string, mut
 g_ir_vals_cap : int, mut
 g_interp_big : int, mut = 1
 
+// Bool -> int without a bool argument crossing an int boundary. The S1P
+// liveness ledger treats `bool` passed to an `int` parameter as a mismatch
+// (the liveness probe relies on that), so the interpreter's own comparisons
+// materialize 0/1 here.
+fn interp_b2i(x: bool) -> int:
+    if x:
+        return 1
+    return 0
+
 fn ir_interp_word(v: int) -> int:
     if g_interp_big != 0:
         return bi_to_word_checked(v)
@@ -67,27 +76,33 @@ fn ir_interp_binary_raw(d: int, s1: int, s2: int, s3: int):
     else if s3 == 5:
         cell_store(g_ir_vals, d * 8, lv % rv)
     else if s3 == 6:
-        cell_store(g_ir_vals, d * 8, lv == rv)
+        cell_store(g_ir_vals, d * 8, interp_b2i(lv == rv))
     else if s3 == 7:
-        cell_store(g_ir_vals, d * 8, lv != rv)
+        cell_store(g_ir_vals, d * 8, interp_b2i(lv != rv))
     else if s3 == 8:
-        cell_store(g_ir_vals, d * 8, lv < rv)
+        cell_store(g_ir_vals, d * 8, interp_b2i(lv < rv))
     else if s3 == 9:
-        cell_store(g_ir_vals, d * 8, lv > rv)
+        cell_store(g_ir_vals, d * 8, interp_b2i(lv > rv))
     else if s3 == 10:
-        cell_store(g_ir_vals, d * 8, lv <= rv)
+        cell_store(g_ir_vals, d * 8, interp_b2i(lv <= rv))
     else if s3 == 11:
-        cell_store(g_ir_vals, d * 8, lv >= rv)
+        cell_store(g_ir_vals, d * 8, interp_b2i(lv >= rv))
     else if s3 == 12:
-        cell_store(g_ir_vals, d * 8, lv != 0 && rv != 0)
+        cell_store(g_ir_vals, d * 8, interp_b2i(lv != 0 && rv != 0))
     else if s3 == 13:
-        cell_store(g_ir_vals, d * 8, lv != 0 || rv != 0)
+        cell_store(g_ir_vals, d * 8, interp_b2i(lv != 0 || rv != 0))
     else if s3 == 17:
         cell_store(g_ir_vals, d * 8, lv + interp_ptr_offset(rv))
     else if s3 == 18:
         cell_store(g_ir_vals, d * 8, lv - interp_ptr_offset(rv))
     else if s3 == 19:
         cell_store(g_ir_vals, d * 8, (lv - rv) / interp_ptr_stride())
+    else if s3 == 20:
+        cell_store(g_ir_vals, d * 8, lv + rv)
+    else if s3 == 21:
+        cell_store(g_ir_vals, d * 8, lv - rv)
+    else if s3 == 22:
+        cell_store(g_ir_vals, d * 8, lv + rv)
 
 // Shared IR_BINARY dispatch for the main loop and callee loops.
 // g_ir_vals int slots hold tagged mathematical integers. Char/bool/dex and
@@ -112,12 +127,24 @@ fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int):
         else:
             cell_store(g_ir_vals, d * 8, ir_interp_tag((lv - rv) / interp_ptr_stride()))
         return
+    if s3 == 20 || s3 == 21:
+        // Byte buffer arithmetic: untag the offset, no element scaling.
+        off := ir_interp_word(rv)
+        if s3 == 20:
+            cell_store(g_ir_vals, d * 8, lv + off)
+        else:
+            cell_store(g_ir_vals, d * 8, lv - off)
+        return
+    if s3 == 22:
+        // Raw pointer add: untag both operands, return the raw word.
+        cell_store(g_ir_vals, d * 8, ir_interp_word(lv) + ir_interp_word(rv))
+        return
     if s3 == 12 || s3 == 13:
         // Boolean and/or store raw 0/1.
         if s3 == 12:
-            cell_store(g_ir_vals, d * 8, lv != 0 && rv != 0)
+            cell_store(g_ir_vals, d * 8, interp_b2i(lv != 0 && rv != 0))
         else:
-            cell_store(g_ir_vals, d * 8, lv != 0 || rv != 0)
+            cell_store(g_ir_vals, d * 8, interp_b2i(lv != 0 || rv != 0))
         return
 
     lhs_char := irv_type(s1) == TI_CHAR
@@ -131,17 +158,17 @@ fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int):
         if !rhs_char && s2 >= 0:
             r = ir_interp_word(rv)
         if s3 == 6:
-            cell_store(g_ir_vals, d * 8, l == r)
+            cell_store(g_ir_vals, d * 8, interp_b2i(l == r))
         else if s3 == 7:
-            cell_store(g_ir_vals, d * 8, l != r)
+            cell_store(g_ir_vals, d * 8, interp_b2i(l != r))
         else if s3 == 8:
-            cell_store(g_ir_vals, d * 8, l < r)
+            cell_store(g_ir_vals, d * 8, interp_b2i(l < r))
         else if s3 == 9:
-            cell_store(g_ir_vals, d * 8, l > r)
+            cell_store(g_ir_vals, d * 8, interp_b2i(l > r))
         else if s3 == 10:
-            cell_store(g_ir_vals, d * 8, l <= r)
+            cell_store(g_ir_vals, d * 8, interp_b2i(l <= r))
         else if s3 == 11:
-            cell_store(g_ir_vals, d * 8, l >= r)
+            cell_store(g_ir_vals, d * 8, interp_b2i(l >= r))
         return
 
     if ti == TI_DEX || ti == TI_DEX_S:
@@ -166,17 +193,17 @@ fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int):
         // a bool-returning comparison can still take int operands (for example
         // the optional-equality `eqi != _cz`).
         if s3 == 6:
-            cell_store(g_ir_vals, d * 8, lv == rv)
+            cell_store(g_ir_vals, d * 8, interp_b2i(lv == rv))
         else if s3 == 7:
-            cell_store(g_ir_vals, d * 8, lv != rv)
+            cell_store(g_ir_vals, d * 8, interp_b2i(lv != rv))
         else if s3 == 8:
-            cell_store(g_ir_vals, d * 8, lv < rv)
+            cell_store(g_ir_vals, d * 8, interp_b2i(lv < rv))
         else if s3 == 9:
-            cell_store(g_ir_vals, d * 8, lv > rv)
+            cell_store(g_ir_vals, d * 8, interp_b2i(lv > rv))
         else if s3 == 10:
-            cell_store(g_ir_vals, d * 8, lv <= rv)
+            cell_store(g_ir_vals, d * 8, interp_b2i(lv <= rv))
         else if s3 == 11:
-            cell_store(g_ir_vals, d * 8, lv >= rv)
+            cell_store(g_ir_vals, d * 8, interp_b2i(lv >= rv))
         return
 
     if s3 == 1:
@@ -192,17 +219,17 @@ fn ir_interp_binary(d: int, s1: int, s2: int, s3: int, ti: int):
     else if s3 >= 6 && s3 <= 11:
         c := bi_cmp(lv, rv)
         if s3 == 6:
-            cell_store(g_ir_vals, d * 8, c == 0)
+            cell_store(g_ir_vals, d * 8, interp_b2i(c == 0))
         else if s3 == 7:
-            cell_store(g_ir_vals, d * 8, c != 0)
+            cell_store(g_ir_vals, d * 8, interp_b2i(c != 0))
         else if s3 == 8:
-            cell_store(g_ir_vals, d * 8, c < 0)
+            cell_store(g_ir_vals, d * 8, interp_b2i(c < 0))
         else if s3 == 9:
-            cell_store(g_ir_vals, d * 8, c > 0)
+            cell_store(g_ir_vals, d * 8, interp_b2i(c > 0))
         else if s3 == 10:
-            cell_store(g_ir_vals, d * 8, c <= 0)
+            cell_store(g_ir_vals, d * 8, interp_b2i(c <= 0))
         else:
-            cell_store(g_ir_vals, d * 8, c >= 0)
+            cell_store(g_ir_vals, d * 8, interp_b2i(c >= 0))
 
 // Pointer read and write.
 // A pointer in [0, g_ir_var_count) is a stack slot address produced by REF; read
@@ -288,8 +315,12 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
         if d >= 0 && s2 >= 2:
             b := cell_load(g_ir_vals, s1 * 8)
             p := ir_interp_word(cell_load(g_ir_vals, s1 + 1 * 8))
-            lo := cell_load_byte(b, p) + cell_load_byte(b, p+1)*256 + cell_load_byte(b, p+2)*65536 + cell_load_byte(b, p+3)*16777216
-            hi := cell_load_byte(b, p+4) + cell_load_byte(b, p+5)*256 + cell_load_byte(b, p+6)*65536 + cell_load_byte(b, p+7)*16777216
+            // `b` is a raw address word; the byte helpers take a string view.
+            bs : ., mut = ""
+            unsafe:
+                bs = @str_of(b)
+            lo := cell_load_byte(bs, p) + cell_load_byte(bs, p+1)*256 + cell_load_byte(bs, p+2)*65536 + cell_load_byte(bs, p+3)*16777216
+            hi := cell_load_byte(bs, p+4) + cell_load_byte(bs, p+5)*256 + cell_load_byte(bs, p+6)*65536 + cell_load_byte(bs, p+7)*16777216
             if hi < 0:
                 hi = hi + 4294967296
             cell_store(g_ir_vals, d * 8, ir_interp_tag(lo + hi * 4294967296))
@@ -298,19 +329,23 @@ fn ir_interp_call(d: int, s1: int, s2: int, s3: int):
             b := cell_load(g_ir_vals, s1 * 8)
             p := ir_interp_word(cell_load(g_ir_vals, s1 + 1 * 8))
             v := ir_interp_word(cell_load(g_ir_vals, s1 + 2 * 8))
+            // `b` is a raw address word; the byte helpers take a string view.
+            bs : ., mut = ""
+            unsafe:
+                bs = @str_of(b)
             lo : ., mut = v % 4294967296
             hi : ., mut = v / 4294967296
             if v < 0:
                 lo = v
                 hi = -1
-            cell_store_byte(b, p, lo%256)
-            cell_store_byte(b, p+1, (lo/256)%256)
-            cell_store_byte(b, p+2, (lo/65536)%256)
-            cell_store_byte(b, p+3, (lo/16777216)%256)
-            cell_store_byte(b, p+4, hi%256)
-            cell_store_byte(b, p+5, (hi/256)%256)
-            cell_store_byte(b, p+6, (hi/65536)%256)
-            cell_store_byte(b, p+7, (hi/16777216)%256)
+            cell_store_byte(bs, p, lo%256)
+            cell_store_byte(bs, p+1, (lo/256)%256)
+            cell_store_byte(bs, p+2, (lo/65536)%256)
+            cell_store_byte(bs, p+3, (lo/16777216)%256)
+            cell_store_byte(bs, p+4, hi%256)
+            cell_store_byte(bs, p+5, (hi/256)%256)
+            cell_store_byte(bs, p+6, (hi/65536)%256)
+            cell_store_byte(bs, p+7, (hi/16777216)%256)
         if d >= 0:
             cell_store(g_ir_vals, d * 8, 0)
     // String builtins are handled; do not fall through to the user-function lookup.
@@ -502,12 +537,19 @@ fn ir_interp_run_fn(cfi: int, arg_base: int, argc: int) -> int:
         // IR_STORE
         if op2 == 9 && t1 >= 0 && t2 >= 0:
             v2 := cell_load(g_ir_vals, t2 * 8)
-            if g_interp_big != 0 && irv_type(t1) == TI_INT && irv_type(t2) == TI_DEX_S:
+            if g_interp_big != 0 && irv_type(t1) == TI_INT && (irv_type(t2) == TI_DEX_S || irv_type(t2) == TI_CHAR || irv_type(t2) == TI_BOOL || get_type_kind(irv_type(t2)) == TYP_REF || get_type_kind(irv_type(t2)) == TYP_PTR):
                 v2 = ir_interp_tag(v2)
+            if g_interp_big != 0 && irv_type(t1) == TI_CHAR && irv_type(t2) == TI_INT:
+                v2 = ir_interp_word(v2)
             cell_store(g_ir_vals, t1 * 8, v2)
         // IR_LOAD
         if op2 == 10 && d2 >= 0 && t1 >= 0:
-            cell_store(g_ir_vals, d2 * 8, cell_load(g_ir_vals, t1 * 8))
+            v2 := cell_load(g_ir_vals, t1 * 8)
+            if g_interp_big != 0 && irv_type(d2) == TI_INT && (irv_type(t1) == TI_CHAR || irv_type(t1) == TI_BOOL || get_type_kind(irv_type(t1)) == TYP_REF || get_type_kind(irv_type(t1)) == TYP_PTR):
+                v2 = ir_interp_tag(v2)
+            if g_interp_big != 0 && irv_type(d2) == TI_CHAR && irv_type(t1) == TI_INT:
+                v2 = ir_interp_word(v2)
+            cell_store(g_ir_vals, d2 * 8, v2)
         // Aggregate operations: ALLOC_ARRAY, ALLOC_STRUCT, LOAD_INDEX,
         // STORE_INDEX, LOAD_FIELD, STORE_FIELD, and ADDR_INDEX. The callee path
         // must implement them too, or an aggregate global read inside a callee
@@ -814,6 +856,9 @@ fn ir_interpret() -> int:
         iv2 := cell_load(g_ir_globals, gi2 * 24 + 16)
         gv2 := cell_load(g_ir_globals, gi2 * 24 + 8)
         if iv2 != 0 && gv2 >= 0 && gv2 < need:
+            // Match the ELF entry: int globals hold tagged values in big-int mode.
+            if g_interp_big != 0 && irv_type(gv2) == TI_INT:
+                iv2 = ir_interp_tag(iv2)
             cell_store(g_ir_vals, gv2 * 8, iv2)
         gi2 = gi2 + 1
 
@@ -955,13 +1000,20 @@ fn ir_interpret() -> int:
         if op == 9:
             if s1 >= 0 && s2 >= 0:
                 v := cell_load(g_ir_vals, s2 * 8)
-                if g_interp_big != 0 && irv_type(s1) == TI_INT && irv_type(s2) == TI_DEX_S:
+                if g_interp_big != 0 && irv_type(s1) == TI_INT && (irv_type(s2) == TI_DEX_S || irv_type(s2) == TI_CHAR || irv_type(s2) == TI_BOOL || get_type_kind(irv_type(s2)) == TYP_REF || get_type_kind(irv_type(s2)) == TYP_PTR):
                     v = ir_interp_tag(v)
+                if g_interp_big != 0 && irv_type(s1) == TI_CHAR && irv_type(s2) == TI_INT:
+                    v = ir_interp_word(v)
                 cell_store(g_ir_vals, s1 * 8, v)
         // IR_LOAD
         if op == 10:
             if d >= 0:
-                cell_store(g_ir_vals, d * 8, cell_load(g_ir_vals, s1 * 8))
+                v := cell_load(g_ir_vals, s1 * 8)
+                if g_interp_big != 0 && irv_type(d) == TI_INT && (irv_type(s1) == TI_CHAR || irv_type(s1) == TI_BOOL || get_type_kind(irv_type(s1)) == TYP_REF || get_type_kind(irv_type(s1)) == TYP_PTR):
+                    v = ir_interp_tag(v)
+                if g_interp_big != 0 && irv_type(d) == TI_CHAR && irv_type(s1) == TI_INT:
+                    v = ir_interp_word(v)
+                cell_store(g_ir_vals, d * 8, v)
         // IR_LOAD
         if op == 11:
             // IR_LOAD_FIELD: s1=struct_var, s3=field_idx

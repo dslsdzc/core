@@ -6,7 +6,7 @@
 // ============================================================
 // Element sizes (bytes per element)
 // ============================================================
-ESZ_TOKEN    : int = 40     // kind,lexeme,int_val,line,col = 5×8
+ESZ_TOKEN    : int = 64     // kind,lexeme,int_val,line,col,file,lo,hi = 8×8
 ESZ_ASTNODE  : int = 72    // kind,a,b,c,int_val,type_val,data,line,col = 9×8
 ESZ_SYMENTRY : int = 32    // name_idx,kind,type_idx,node_idx = 4×8
 ESZ_IRVAR    : int = 24    // name_idx,id,type_kind = 3×8
@@ -21,6 +21,9 @@ OFF_TK_LEXEME : int = 8
 OFF_TK_INTVAL : int = 16
 OFF_TK_LINE : int = 24
 OFF_TK_COL : int = 32
+OFF_TK_FILE : int = 40
+OFF_TK_LO : int = 48
+OFF_TK_HI : int = 56
 
 // ASTNode field offsets
 OFF_AS_KIND : int = 0
@@ -344,6 +347,19 @@ fn grow_funcs(needed: int):
     cell_copy(g_funcs, g_func_cap * ESZ_FUNCINFO, nb)
     g_funcs = nb
     g_func_cap = nc
+
+fn grow_func_ret(needed: int):
+    if needed < g_func_ret_cap:
+        return
+    nc : ., mut = g_func_ret_cap * 2
+    if nc < 64:
+        nc = 64
+    if nc < needed:
+        nc = needed + 64
+    nb := alloc(nc * 8)
+    cell_copy(g_func_ret_ti, g_func_ret_cap * 8, nb)
+    g_func_ret_ti = nb
+    g_func_ret_cap = nc
 
 fn grow_structs(needed: int):
     if needed < g_struct_cap:

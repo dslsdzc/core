@@ -1,20 +1,17 @@
 // === collections.cr ===
 // Core standard library — basic collection operations.
 //
-// Usage:
-//   import collections
-//   collections.reverse(arr);
-//
-// Current limitations: operates on int arrays; no HashMap/HashSet yet.
+// V4 form: element, length and element type are inferred from the call site.
+// No `[T; N]` type positions; length comes from `.len`.
 
-fn swap(arr: [int; N], i: int, j: int):
+fn swap(arr, i, j):
     tmp := arr[i]
     arr[i] = arr[j]
     arr[j] = tmp
 
-fn reverse(arr: [int; N]):
+fn reverse(arr):
     i : ., mut = 0
-    j : ., mut = N - 1
+    j : ., mut = arr.len - 1
     loop:
         if i >= j:
             break
@@ -24,127 +21,85 @@ fn reverse(arr: [int; N]):
         i = i + 1
         j = j - 1
 
-fn contains(arr: [int; N], val: int) -> bool:
-    i : ., mut = 0
-    loop:
-        if i >= N:
-            break
-        if arr[i] == val:
+fn contains(arr, val) -> bool:
+    for x in arr:
+        if x == val:
             return true
-        i = i + 1
     return false
 
-fn index_of(arr: [int; N], val: int) -> int:
-    i : ., mut = 0
-    loop:
-        if i >= N:
-            break
+fn index_of(arr, val) -> int:
+    for i in 0..arr.len:
         if arr[i] == val:
             return i
-        i = i + 1
     return -1
 
-fn min_element(arr: [int; N]) -> int:
-    if N == 0:
+fn min_element(arr) -> int:
+    if arr.len == 0:
         return 0
     m : ., mut = arr[0]
-    i : ., mut = 1
-    loop:
-        if i >= N:
-            break
-        if arr[i] < m:
-            m = arr[i]
-        i = i + 1
+    for x in arr:
+        if x < m:
+            m = x
     return m
 
-fn max_element(arr: [int; N]) -> int:
-    if N == 0:
+fn max_element(arr) -> int:
+    if arr.len == 0:
         return 0
     m : ., mut = arr[0]
-    i : ., mut = 1
-    loop:
-        if i >= N:
-            break
-        if arr[i] > m:
-            m = arr[i]
-        i = i + 1
+    for x in arr:
+        if x > m:
+            m = x
     return m
 
-fn fill(arr: [int; N], val: int):
-    i : ., mut = 0
-    loop:
-        if i >= N:
-            break
+fn fill(arr, val):
+    for i in 0..arr.len:
         arr[i] = val
-        i = i + 1
 
-fn sum(arr: [int; N]) -> int:
+fn sum(arr) -> int:
     s : ., mut = 0
-    i : ., mut = 0
-    loop:
-        if i >= N:
-            break
-        s = s + arr[i]
-        i = i + 1
+    for x in arr:
+        s = s + x
     return s
 
-fn product(arr: [int; N]) -> int:
+fn product(arr) -> int:
     p : ., mut = 1
-    i : ., mut = 0
-    loop:
-        if i >= N:
-            break
-        p = p * arr[i]
-        i = i + 1
+    for x in arr:
+        p = p * x
     return p
 
-fn count(arr: [int; N], val: int) -> int:
+fn count(arr, val) -> int:
     c : ., mut = 0
-    i : ., mut = 0
-    loop:
-        if i >= N:
-            break
-        if arr[i] == val:
+    for x in arr:
+        if x == val:
             c = c + 1
-        i = i + 1
     return c
 
-fn find(arr: [int; N], val: int) -> int:
-    i : ., mut = 0
-    loop:
-        if i >= N:
-            break
+fn find(arr, val) -> int:
+    for i in 0..arr.len:
         if arr[i] == val:
             return i
-        i = i + 1
     return -1
 
-fn copy(src: [int; N], dst: [int; N]):
+fn copy(src, dst):
     i : ., mut = 0
     loop:
-        if i >= N:
+        if i >= src.len:
             break
         dst[i] = src[i]
         i = i + 1
 
-fn equals(a: [int; N], b: [int; M]) -> bool:
-    if N != M:
+fn equals(a, b) -> bool:
+    if a.len != b.len:
         return false
-    i : ., mut = 0
-    loop:
-        if i >= N:
-            break
+    for i in 0..a.len:
         if a[i] != b[i]:
             return false
-        i = i + 1
     return true
 
-fn slice_sum(arr: [int; N], start: int, end: int) -> int:
+fn slice_sum(arr, start, end) -> int:
     s : ., mut = 0
-    i : ., mut = start
-    loop:
-        if i >= end || i >= N:
+    for i in start..end:
+        if i >= arr.len:
             break
         s = s + arr[i]
-        i = i + 1
     return s

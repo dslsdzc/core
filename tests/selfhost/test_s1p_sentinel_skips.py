@@ -80,7 +80,7 @@ fn main() -> int:
 """
 
 B_GENERIC = """import fmt
-fn pair[A, B](a: A, b: B) -> int:
+fn pair(a, b) -> int:
     if a != 1:
         return 1
     if str_len(b) < 1:
@@ -160,10 +160,10 @@ def space_guard(src, strip=True):
     if strip:
         body = strip_comments(body)
 
-    has_dyn = re.search(r"if\s+ati\s*==\s*TI_DYN\s*\{", body) is not None
+    has_dyn = re.search(r"if\s+ati\s*==\s*TI_DYN\s*[:{]", body) is not None
     has_gen_kind = re.search(r"get_type_kind\(ati\)\s*==\s*TYP_GENERIC_PARAM", body) is not None
     has_prefix = re.search(r"ati\s*>\s*TI_DEX_S\s*&&\s*get_type_kind\(ati\)\s*==\s*TYP_GENERIC_PARAM", body) is not None
-    has_never = re.search(r"if\s+ati\s*==\s*TI_NEVER\s*\{", body) is not None
+    has_never = re.search(r"if\s+ati\s*==\s*TI_NEVER\s*[:{]", body) is not None
 
     # 错空间写法（本守卫要能抓到的形态）
     wrong_gen_space = re.search(r"ati\s*==\s*TYP_GENERIC_PARAM", body) is not None

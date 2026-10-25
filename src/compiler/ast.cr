@@ -23,7 +23,6 @@ T_IMPL : int = 18
 T_PUB : int = 19
 T_TRUE : int = 20
 T_FALSE : int = 21
-T_MOVE : int = 22
 T_SELF : int = 23
 T_LPAREN : int = 24
 T_RPAREN : int = 25
@@ -228,7 +227,6 @@ EXPR_STMT : int = 28   // a=inner expr; expression used as statement (with );), 
 EXPR_CHAR : int = 29   // int_val = codepoint
 EXPR_WHILE : int = 30  // a=cond, b=body
 EXPR_RANGE : int = 31  // a=start, b=end
-EXPR_MOVE : int = 32     // a=expr being moved
 EXPR_ENUM_CONSTRUCTOR : int = 37 // a=name idx, b=first arg, c=arg count
 EXPR_REFTYPE : int = 38   // a=inner type node, data=mut flag (for &T / &mut T in type position)
 EXPR_GENERIC_APPLY : int = 39 // a=base name idx, b=first arg type node, c=arg count
@@ -287,6 +285,16 @@ OP_SHR : int = 16  // strength reduction: x >> n
 OP_PTR_ADD  : int = 17  // p + n (p: *T, n: int), scaled by sizeof(T)
 OP_PTR_SUB  : int = 18  // p - n
 OP_PTR_DIFF : int = 19  // p - q, result is an element count
+// Byte-buffer arithmetic (`alloc` buffer + n). Raw byte addressing: no element
+// scaling and the int offset is untagged before the add. Kept separate from
+// OP_PTR_ADD because the backend cannot tell an alloc buffer from an aggregate
+// pointer by IR type alone (both use the TI_UNIT sentinel).
+OP_BYTE_ADD : int = 20
+OP_BYTE_SUB : int = 21
+// Raw pointer add: both operands are mathematical ints; untag both and return
+// the raw word. Backs the SYSTEM-level `@ptr_add(p, n)` builtin used by the
+// scheduler for pointer-shaped G fields.
+OP_RAW_ADD : int = 22
 
 // Unary operator codes
 UOP_NEG : int = 1
@@ -515,9 +523,6 @@ EC_B_BORROW_MUT2    : int = 13003 // B003  Two mutable borrows
 EC_B_USE_WHILE_BORROWED : int = 13004 // B004  Use while borrowed
 EC_B_ESCAPE         : int = 13010 // B010  Reference escapes function
 EC_B_LIFETIME       : int = 13011 // B011  Lifetime too short
-EC_B_MOVE_USE       : int = 13020 // B020  Use of moved value
-EC_B_MOVE_AGAIN     : int = 13021 // B021  Move of already-moved
-EC_B_MOVE_BORROWED  : int = 13022 // B022  Move while borrowed
 
 // R0xx; Runtime
 EC_R_DIV_ZERO     : int = 14001 // R001  Division by zero

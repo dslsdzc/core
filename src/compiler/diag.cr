@@ -40,10 +40,9 @@ fn source_line_count() -> int:
         i = i + 1
     return count
 
-fn print_source_line(line: int, col: int, annotation: string):
+fn print_source_text(line: int, col: int, ltxt: string, annotation: string):
     if line <= 0:
         return
-    ltxt := read_source_line(line)
     if str_len(ltxt) == 0:
         return
     ln_str := int_str(line)
@@ -83,43 +82,33 @@ fn print_source_line(line: int, col: int, annotation: string):
         print(str_sub(annotation, 0, cutoff))
     println("")
 
+// Legacy entry: render a line from the global g_source. Used only when a
+// diagnostic has no SourceManager span.
+fn print_source_line(line: int, col: int, annotation: string):
+    if line <= 0:
+        return
+    print_source_text(line, col, read_source_line(line), annotation)
+
 fn error_cat_prefix(cat: int) -> string:
-    if cat == 1:
-        return "P"
-    if cat == 2:
-        return "N"
-    if cat == 3:
-        return "I"
-    if cat == 4:
-        return "TA"
-    if cat == 5:
-        return "TF"
-    if cat == 6:
-        return "TB"
-    if cat == 7:
-        return "TU"
-    if cat == 8:
-        return "TC"
-    if cat == 9:
-        return "TM"
-    if cat == 10:
-        return "TK"
-    if cat == 11:
-        return "TS"
-    if cat == 12:
-        return "TG"
-    if cat == 13:
-        return "B"
-    if cat == 14:
-        return "R"
-    if cat == 15:
-        return "E"
-    if cat == 16:
-        return "ICE"
-    if cat == 17:
-        return "V"
-    // Category 17 covers specification syntax and validation.
-    return "E"
+    return match cat:
+        1 => "P"
+        2 => "N"
+        3 => "I"
+        4 => "TA"
+        5 => "TF"
+        6 => "TB"
+        7 => "TU"
+        8 => "TC"
+        9 => "TM"
+        10 => "TK"
+        11 => "TS"
+        12 => "TG"
+        13 => "B"
+        14 => "R"
+        15 => "E"
+        16 => "ICE"
+        17 => "V"   // 规约语法与校验
+        _ => "E"
 
 fn pad_diag_num(num: int) -> string:
     s := int_str(num)
@@ -147,6 +136,18 @@ fn print_diagnostics():
         msg := cell_load_str(g_diags, di * DIAG_REC_SIZE + 8)
         ln := cell_load(g_diags, di * DIAG_REC_SIZE + 16)
         cl := cell_load(g_diags, di * DIAG_REC_SIZE + 24)
+        smf := cell_load(g_diags, di * DIAG_REC_SIZE + 40)
+        slo := cell_load(g_diags, di * DIAG_REC_SIZE + 48)
+        pln : ., mut = ln
+        pcl : ., mut = cl
+        pltext : ., mut = ""
+        attributed : ., mut = 0
+        if smf >= 0 && smf < sm_file_count():
+            pln = sm_location_line(smf, slo)
+            pcl = sm_location_col(smf, slo)
+            pltext = sm_line_text(smf, pln)
+            if str_len(pltext) > 0:
+                attributed = 1
         cat : ., mut = ec / 1000
         num : ., mut = ec % 1000
         print("error[")
@@ -155,10 +156,13 @@ fn print_diagnostics():
         print("]: ")
         println(msg)
         print(" --> ")
-        print(int_str(ln))
+        print(int_str(pln))
         print(":")
-        println(int_str(cl))
-        if ln > 0 && ln <= source_lines:
+        println(int_str(pcl))
+        if attributed != 0:
+            println("   |")
+            print_source_text(pln, pcl, pltext, msg)
+        else if ln > 0 && ln <= source_lines:
             println("   |")
             print_source_line(ln, cl, msg)
         println("")

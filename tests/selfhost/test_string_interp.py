@@ -144,7 +144,9 @@ def main():
     ]
     # 泛型洞（真泛型上下文；洞型在实例化前不可得 ⇒ P028 + 未覆盖面）
     with tempfile.NamedTemporaryFile("w", suffix=".cr", delete=False) as fh:
-        fh.write(PRELUDE + 'fn h[T](x: T) -> string:\n    return "${x}"\nfn main() -> int:\n    return 0\n')
+        # V4 inferred parameter: the hole sees a generic parameter at template
+        # time and must fail closed with P28.
+        fh.write(PRELUDE + 'fn h(x) -> string:\n    return "${x}"\nfn main() -> int:\n    return 0\n')
         gpath = fh.name
     gout = str(BASE / "build" / f"_interp_{uuid.uuid4().hex[:8]}")
     try:

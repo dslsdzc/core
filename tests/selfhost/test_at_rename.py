@@ -259,7 +259,7 @@ def dispatch_sites_case():
         "src/compiler/ir_gen.cr": ['str_eq(name, "%s")' % NEW],
         "src/lsp/analysis.cr": ['analysis_has_prefix("%s", prefix)' % NEW,
                                 'analysis_citem("%s", 3)' % NEW],
-        "src/compiler/dataflow.cr": ['return "%s";' % NEW],
+        "src/compiler/dataflow.cr": ['return "%s"' % NEW],
     }
     for rel, needles in sites.items():
         text = _read(rel)

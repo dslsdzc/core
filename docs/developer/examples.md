@@ -28,7 +28,7 @@
 
 | 主题 | 文件 |
 |---|---|
-| 基础/控制流 | test_control_flow.cr、generics_test.cr |
+| 基础/控制流 | generics_test.cr |
 | 结构体/枚举 | at_test_struct.cr 等 at_test*.cr（@ 内建和结构体） |
 | 并发 | go_test.cr、chan_test.cr、conc_test.cr |
 | 动态类型 | dyn_test.cr、dex_test.cr |

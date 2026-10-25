@@ -6,6 +6,7 @@ g_is_project_mode : int, mut
 g_ccr_out_path : string, mut
 g_cir_out_path : string, mut
 g_binary_out_path : string, mut
+g_source_combined : int, mut   // 1 = g_source is a project/static concatenation
 
 fn is_cr_file(path: string) -> int:
     slen := str_len(path)
@@ -80,10 +81,12 @@ fn detect_imports(src: string) -> int:
 fn read_source_or_project(src_path: string) -> int:
     sl := str_len(src_path)
     g_is_project_mode = 0
+    g_source_combined = 0
     if sl >= 4:
         ext := str_sub(src_path, sl - 3, 3)
         if str_eq(ext, ".cr") == 0:
             g_is_project_mode = 1
+            g_source_combined = 1
     else:
         g_is_project_mode = 1
 
@@ -122,10 +125,15 @@ fn read_static_runtime_source() -> string:
 
 // Run the shared frontend pipeline: tokenize, resolve, parse, and check.
 // Returns 0 on success, 1 on error.
-fn run_frontend() -> int:
+fn run_frontend(source_name: string) -> int:
     g_error_count = 0  // 会话起点清词法/语法错误（tokenize 多轮累积，见 lexer.cr）
+    sm_reset()
+    attributed_name := source_name
+    if g_source_combined != 0:
+        attributed_name = "<combined>"
+    source_file := sm_add_file(attributed_name, g_source)
     println("[1/5] tokenize...")
-    tokenize(g_source, 0)
+    tokenize(source_file, 0)
     println("[2/5] resolve imports...")
     res_imports()
     println("[3/5] parse...")
@@ -219,6 +227,11 @@ fn default_out_path(src_path: string, ext: string) -> string:
 
 // The old shadow-comparison finish hook and its CLI channels were removed.
 
+fn timing_mark(name: string):
+    if cli_has("timing") != 0:
+        print("[timing] ")
+        println(name)
+
 fn corec_main() -> int:
     cli_init("corec", "Core compiler frontend")
     cli_cmd("build", "Compile .cr or directory to ELF binary")
@@ -229,6 +242,7 @@ fn corec_main() -> int:
     cli_cmd("clean-cache", "Delete incremental compilation cache")
     cli_cmd("selftest-types", "Run type-engine self tests (R2 P0)")
     cli_cmd("selftest-purity", "Run effect-purity self tests (Task 1)")
+    cli_cmd("selftest-source", "Run SourceManager self tests")
     cli_flag("output", "o", "Output path")
     cli_flag_bool("static", "", "Static linking (embed runtime)")
     cli_flag("opt-level", "O", "Optimization level (0,1,2,3; default=1). O1 CSE runs in corec; O2 register allocation runs in corearch")
@@ -246,6 +260,7 @@ fn corec_main() -> int:
     cli_flag_bool_debug("diag-gate-report", "", "Debug: report fail-closed gate verdicts")
     cli_flag_bool_debug("dump-vcs", "", "Debug: dump spec VC list")
     cli_flag_bool_debug("dump-params", "", "Debug: dump parameter slot types")
+    cli_flag_bool_debug("timing", "", "Debug: print pass timing markers")
 
     if cli_parse() != 0:
         return 1
@@ -280,6 +295,7 @@ fn corec_main() -> int:
             println("usage: corec run '<code>'")
             return 1
         g_source = cli_arg(0)
+        g_source_combined = 0
         g_source_dir = dirname(cli_arg(0))
 
         // Check if source already has 'fn main'
@@ -386,7 +402,7 @@ fn corec_main() -> int:
                     else:
                         g_source = imports + "fn main() -> int {\nreturn " + g_source + ";\n}\n"
 
-        run_rc := run_frontend()
+        run_rc := run_frontend("<inline>")
         if run_rc != 0:
             return 1
         ir_diag_base_run := g_diag_count
@@ -414,6 +430,10 @@ fn corec_main() -> int:
     if cli_eq(cmd, "selftest-purity"):
         return purity_selftest_run()
 
+    // === selftest-source: SourceManager self tests; no source file, no artifact ===
+    if cli_eq(cmd, "selftest-source"):
+        return sm_selftest()
+
     // === File-based subcommands: build | check | cir | ccr ===
     if cli_arg_count() < 1:
         print("error: ")
@@ -432,8 +452,9 @@ fn corec_main() -> int:
             println("error: cannot locate src/runtime/rt.cr")
             return 1
         g_source = rt_src + "\n" + g_source
+        g_source_combined = 1
 
-    fe_rc := run_frontend()
+    fe_rc := run_frontend(src_path)
     if fe_rc != 0:
         return 1
 
@@ -598,10 +619,13 @@ fn corec_main() -> int:
         print_diagnostics()
         return 1
 
+    timing_mark("ir_gen")
+
     // Finalize purity and the state chain after IR generation and before any chain
     // consumer. True purity needs the whole program, and chain construction depends
     // on it.
     df_state_finalize()
+    timing_mark("state_finalize")
 
     // Hidden contract channel: report the semantic CASE model and the derived
     // wire count before lowering. Normal builds print nothing.
@@ -638,8 +662,11 @@ fn corec_main() -> int:
     // === Pointer analysis + safety passes (always run, even at opt_level 0) ===
     base_diags := g_diag_count
     ptr_analysis_all()
+    timing_mark("ptr_analysis")
     region_check_all()
+    timing_mark("region_check")
     provenance_verify_all()
+    timing_mark("provenance_verify")
     // Compile-time out-of-bounds findings are hard errors and stop the build.
     if g_diag_count > base_diags:
         print_diagnostics()
@@ -649,8 +676,10 @@ fn corec_main() -> int:
     // in corearch after loading the .ccr; corec keeps only semantic CSE.
     if g_opt_level >= 1:
         pass_cse()
+    timing_mark("cse")
     println("lower to ccr...")
     lower_to_ccr()
+    timing_mark("lower_ccr")
     if cli_has("dump-case-model") != 0:
         print("case_model_after ")
         print(int_str(g_lat_case_count))
@@ -692,6 +721,7 @@ fn corec_main() -> int:
             print("error: could not write ")
             println(out)
             return 1
+        timing_mark("save_ccr")
         print(" -> ")
         print(out)
         print(" (")
@@ -717,6 +747,7 @@ fn corec_main() -> int:
     if r != 0:
         println("error: could not write .ccr")
         return 1
+    timing_mark("save_ccr")
     println("generate ELF...")
     // The target owns the backend name, ELF flag, link mode, and output flag.
     cmd2 : ., mut = target_backend_command(ccr_path, out_path, cli_has("static"), g_opt_level)
@@ -748,7 +779,10 @@ fn corec_main() -> int:
 // Full compilation: source -> assembly (used by tests and programmatic API)
 fn compile_source(source: string) -> string:
     g_source = source
-    tokenize(g_source, 0)
+    g_source_combined = 0
+    sm_reset()
+    source_file := sm_add_virtual("<compile_source>", source)
+    tokenize(source_file, 0)
     res_imports()
     parse_all()
     check_all()

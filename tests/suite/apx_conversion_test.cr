@@ -111,5 +111,5 @@ fn payload7(d: dex) -> int:
 fn direct7(x: dex) -> int:
     return @raw_int(x) / 1000000
 
-fn generic7[T](t: T, x: dex) -> int:
+fn generic7(t, x: dex) -> int:
     return @raw_int(x) / 1000000

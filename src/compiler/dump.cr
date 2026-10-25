@@ -51,59 +51,36 @@ fn ir_var_str(var_idx: int) -> string:
     return int_str(var_idx)
 
 fn type_kind_name(tk: int) -> string:
-    if tk == 0:
-        return "int"
-    if tk == 1:
-        return "dex"
-    if tk == 2:
-        return "bool"
-    if tk == 3:
-        return "str"
-    if tk == 4:
-        return "unit"
-    if tk == 5:
-        return "never"
-    if tk == 6:
-        return "char"
-    if tk == 8:
-        return "dex"
-    // TI_DEX_S: fixed-point exact form.
-    return "?"
+    return match tk:
+        0 => "int"
+        1 => "dex"
+        2 => "bool"
+        3 => "str"
+        4 => "unit"
+        5 => "never"
+        6 => "char"
+        8 => "dex"   // TI_DEX_S: fixed-point exact form.
+        _ => "?"
 
 fn binop_name(op: int) -> string:
-    if op == 1:
-        return "+"
-    if op == 2:
-        return "-"
-    if op == 3:
-        return "*"
-    if op == 4:
-        return "/"
-    if op == 5:
-        return "%"
-    if op == 6:
-        return "=="
-    if op == 7:
-        return "!="
-    if op == 8:
-        return "<"
-    if op == 9:
-        return ">"
-    if op == 10:
-        return "<="
-    if op == 11:
-        return ">="
-    if op == 12:
-        return "&&"
-    if op == 13:
-        return "||"
-    if op == 17:
-        return "+ (ptr)"
-    if op == 18:
-        return "- (ptr)"
-    if op == 19:
-        return "- (diff)"
-    return "?"
+    return match op:
+        1 => "+"
+        2 => "-"
+        3 => "*"
+        4 => "/"
+        5 => "%"
+        6 => "=="
+        7 => "!="
+        8 => "<"
+        9 => ">"
+        10 => "<="
+        11 => ">="
+        12 => "&&"
+        13 => "||"
+        17 => "+ (ptr)"
+        18 => "- (ptr)"
+        19 => "- (diff)"
+        _ => "?"
 
 fn ir_instr_str(instr_idx: int) -> string:
     opname := df_opcode_name(iri_op(instr_idx), iri_s3(instr_idx))
@@ -236,7 +213,9 @@ fn cmd_ir(src_path: string) -> int:
         return 1
     g_source_dir = dirname(src_path)
     g_error_count = 0  // reset before a new tokenize pass; lexical errors accumulate across passes
-    tokenize(g_source, 0)
+    sm_reset()
+    source_file := sm_add_file(src_path, g_source)
+    tokenize(source_file, 0)
     g_str_count = 0
     res_imports()
     parse_all()
@@ -272,8 +251,8 @@ fn cmd_ir(src_path: string) -> int:
     return 0
 
 // Text dump of the linear control-flow graph: a function header, its regions
-// (SG_IF, SG_LOOP, SG_FOR, SG_FLOW, SG_UNSAFE), and label blocks. Shared by
-// cmd_cir, which writes a file, and main.cr's cir command, which writes stdout.
+// (SG_IF, SG_LOOP, SG_FOR, SG_FLOW, SG_UNSAFE), and label blocks. Used by
+// main.cr's cir command, which writes stdout.
 fn cir_text_dump() -> string:
     dump_buf_reset()
     fi : ., mut = 0
@@ -450,51 +429,6 @@ fn df_tk_term_dump() -> string:
         dump_buf_append("\n")
         n = n + 1
     return dump_buf_finish()
-
-fn cmd_cir(src_path: string) -> int:
-    g_source = read_file(src_path)
-    if str_len(g_source) == 0:
-        print("error: cannot read ")
-        println(src_path)
-        return 1
-    g_source_dir = dirname(src_path)
-    g_error_count = 0  // 会话起点（tokenize 多轮累积词法错误，见 lexer.cr）
-    tokenize(g_source, 0)
-    g_str_count = 0
-    res_imports()
-    parse_all()
-    check_all()
-    if g_diag_count > 0:
-        print_diagnostics()
-        return 1
-    if g_error_count > 0:
-        print_parse_errors()
-        return 1
-    ir_gen_all()
-    lower_to_ccr()
-
-    ccr : ., mut = cir_text_dump()
-
-    ccr_path : ., mut = src_path
-    slen := str_len(src_path)
-    if slen > 3:
-        ext := str_sub(src_path, slen - 3, 3)
-        if str_eq(ext, ".cr") != 0:
-            ccr_path = str_sub(src_path, 0, slen - 3) + ".ccr"
-
-    written := write_file(ccr_path, ccr)
-    if written < 0:
-        print("error: could not write ")
-        println(ccr_path)
-        return 1
-    print(" -> ")
-    print(ccr_path)
-    print(" (")
-    print(int_str(g_ir_func_count))
-    print(" functions, ")
-    print(int_str(g_ir_instr_count))
-    println(" instrs)")
-    return 0
 
 // Text form of a specification expression for --dump-vcs. It is display-only and
 // does not participate in checking; spec_check_all and spec_check_func in

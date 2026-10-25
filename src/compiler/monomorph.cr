@@ -385,6 +385,29 @@ fn gen_lookup_subst_ti(name_ni: int) -> int:
         mi = mi + 1
     return -1
 
+// Raw TY_* code for FuncInfo.return_type. Composite rows have no raw code; the
+// inferred-return path currently covers base types (identity/array-element
+// returns). Composite returns fall back to unit and are handled by later slices.
+fn ret_code_of_ti(ti: int) -> int:
+    if ti == TI_INT:
+        return TY_INT
+    if ti == TI_STR:
+        return TY_STRING
+    if ti == TI_BOOL:
+        return TY_BOOL
+    if ti == TI_CHAR:
+        return TY_CHAR
+    if ti == TI_DEX || ti == TI_DEX_S:
+        return TY_DEX
+    if ti == TI_UNIT:
+        return TY_UNIT
+    if ti == TI_NEVER:
+        return TY_NEVER
+    k := get_type_kind(ti)
+    if k == TYP_OPTIONAL:
+        return ret_code_of_ti(get_type_data(ti))
+    return TY_UNIT
+
 // Type row after replacing generic-parameter rows for the current instance. Invalid rows stay unchanged; composite rows are rebuilt structurally.
 fn gen_subst_ti(ti: int) -> int:
     k := get_type_kind(ti)
@@ -677,11 +700,6 @@ fn gen_clone_tree(node: int) -> int:
         gen_dedup_add(node, n)
         return n
     if k == EXPR_AWAIT:
-        a2 := gen_clone_tree(a)
-        n := ast_alloc(k, a2, b, c, iv, tv, d, ln, cl)
-        gen_dedup_add(node, n)
-        return n
-    if k == EXPR_MOVE:
         a2 := gen_clone_tree(a)
         n := ast_alloc(k, a2, b, c, iv, tv, d, ln, cl)
         gen_dedup_add(node, n)
@@ -1165,6 +1183,12 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
     // and is filled when bstart is valid.
     gen_build_subst(func_ni, type_args)
     gen_build_subst_tis(func_ni, bstart)
+    // Inferred return: substitute the stored body-derived row for this instance.
+    inst_ret_code : ., mut = -1
+    if func_ni >= 0 && func_ni < g_func_ret_count:
+        rrow := cell_load(g_func_ret_ti, func_ni * 8)
+        if rrow != -2:
+            inst_ret_code = ret_code_of_ti(gen_subst_ti(rrow))
 
     // 2. Clone the original function AST
     orig_fn_node := fi_ast_node(func_ni)
@@ -1240,8 +1264,11 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
         fi_set_param_type(new_fi, pi, fi_param_type(func_ni, pi))
         pi = pi + 1
 
-    // Return type (set from original; will be re-checked)
-    fi_set_return_type(new_fi, fi_return_type(func_ni))
+    // Return type: inferred instances use the substituted body-derived code.
+    if inst_ret_code >= 0:
+        fi_set_return_type(new_fi, inst_ret_code)
+    else:
+        fi_set_return_type(new_fi, fi_return_type(func_ni))
 
     // AST node reference
     fi_set_ast_node(new_fi, new_fn_node)
@@ -1250,6 +1277,12 @@ fn gen_create_instance(func_ni: int, type_args: string, bstart: int) -> int:
     fi_set_generic_count(new_fi, 0)
 
     g_func_count = new_fi + 1
+
+    // Revalidate the specialized body against its concrete parameter types.
+    // Template checking is deliberately lenient for generic templates; this is
+    // the strict pass. Diagnostics raised here are caught by the IR-generation
+    // gate in main.cr and fail the build closed.
+    check_func(new_fi)
 
     // 4. Cache the new function
     type_args_ni := str_intern(type_args)

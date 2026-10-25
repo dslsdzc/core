@@ -1100,6 +1100,25 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             pz := emit_big_ptr_binary(buf, pos, d, s1, s2, s3)
             if pz > 0:
                 return pz
+        if g_x86_big_enabled != 0 && (s3 == OP_BYTE_ADD || s3 == OP_BYTE_SUB):
+            // Byte buffer + int: untag the offset, keep the pointer raw, no ×8.
+            cp = cp + e2_big_word_var(buf, pos+cp, 11, s2)
+            cp = cp + e2_load_var(buf, pos+cp, 10, s1)
+            if s3 == OP_BYTE_ADD:
+                cp = cp + e2_alu(buf, pos+cp, 1)
+            else:
+                cp = cp + e2_alu(buf, pos+cp, 41)
+            cp = cp + e2_st_var(buf, pos+cp, 10, d)
+            return cp
+        if g_x86_big_enabled != 0 && s3 == OP_RAW_ADD:
+            // Both operands are mathematical ints; untag both, return raw.
+            cp = cp + e2_big_word_var(buf, pos+cp, 11, s2)
+            cp = cp + e2_st(buf, pos+cp, 11, do2)
+            cp = cp + e2_big_word_var(buf, pos+cp, 10, s1)
+            cp = cp + e2_ld(buf, pos+cp, 11, do2)
+            cp = cp + e2_alu(buf, pos+cp, 1)
+            cp = cp + e2_st_var(buf, pos+cp, 10, d)
+            return cp
         if g_x86_big_enabled != 0 && s3 >= OP_EQ && s3 <= OP_GE && (irv_type(s1) == TI_CHAR || irv_type(s2) == TI_CHAR):
             return emit_big_char_cmp(buf, pos, d, s1, s2, s3)
         if g_x86_big_enabled != 0 && ti == TI_INT && irv_type(s1) == TI_INT && irv_type(s2) == TI_INT:
@@ -1228,6 +1247,15 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
             e2_w8(buf, pos+cp, 211)
             cp = cp + 1
             cp = cp + emit_modrm(buf, pos+cp, 3, 5, 10%8)
+        else if s3 == OP_BYTE_ADD:
+            // buffer + n: raw byte add (no element scaling).
+            cp = cp + e2_alu(buf, pos+cp, 1)
+        else if s3 == OP_BYTE_SUB:
+            // buffer - n: raw byte sub.
+            cp = cp + e2_alu(buf, pos+cp, 41)
+        else if s3 == OP_RAW_ADD:
+            // raw pointer add (both operands are already machine words).
+            cp = cp + e2_alu(buf, pos+cp, 1)
         else if s3 == OP_PTR_ADD:
             // p + n: scale n by element size (8), add to p
             // imul r11, 8, r11 — REX.WRB + 0x6B + ModRM(3, r11, r11) + imm8
@@ -1366,10 +1394,17 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                 cp = cp + e2_big_store_rsp(buf, pos+cp, 8, 6)
                 cp = cp + e2_big_store_rsp(buf, pos+cp, 16, 2)
                 cp = cp + e2_big_store_rsp(buf, pos+cp, 24, 1)
-                cp = cp + e2_big_convert_stack(buf, pos+cp, 0)
-                cp = cp + e2_big_convert_stack(buf, pos+cp, 8)
-                cp = cp + e2_big_convert_stack(buf, pos+cp, 16)
-                cp = cp + e2_big_convert_stack(buf, pos+cp, 24)
+                // Only tagged-int arguments need unboxing. String/pointer
+                // arguments are raw words; converting them would dereference
+                // an address as if it were a heap bigint.
+                if irv_type(fa) == TI_INT:
+                    cp = cp + e2_big_convert_stack(buf, pos+cp, 0)
+                if irv_type(fa + 1) == TI_INT:
+                    cp = cp + e2_big_convert_stack(buf, pos+cp, 8)
+                if irv_type(fa + 2) == TI_INT:
+                    cp = cp + e2_big_convert_stack(buf, pos+cp, 16)
+                if irv_type(fa + 3) == TI_INT:
+                    cp = cp + e2_big_convert_stack(buf, pos+cp, 24)
                 cp = cp + e2_big_load_rsp(buf, pos+cp, 0, 7)
                 cp = cp + e2_big_load_rsp(buf, pos+cp, 8, 6)
                 cp = cp + e2_big_load_rsp(buf, pos+cp, 16, 2)
@@ -1390,11 +1425,16 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                 cp = cp + e2_big_store_rsp(buf, pos+cp, 16, 2)
                 cp = cp + e2_big_store_rsp(buf, pos+cp, 24, 1)
                 cp = cp + e2_big_store_rsp(buf, pos+cp, 32, 8)
-                cp = cp + e2_big_convert_stack(buf, pos+cp, 0)
-                cp = cp + e2_big_convert_stack(buf, pos+cp, 8)
-                cp = cp + e2_big_convert_stack(buf, pos+cp, 16)
-                cp = cp + e2_big_convert_stack(buf, pos+cp, 24)
-                cp = cp + e2_big_convert_stack(buf, pos+cp, 32)
+                if irv_type(fa) == TI_INT:
+                    cp = cp + e2_big_convert_stack(buf, pos+cp, 0)
+                if irv_type(fa + 1) == TI_INT:
+                    cp = cp + e2_big_convert_stack(buf, pos+cp, 8)
+                if irv_type(fa + 2) == TI_INT:
+                    cp = cp + e2_big_convert_stack(buf, pos+cp, 16)
+                if irv_type(fa + 3) == TI_INT:
+                    cp = cp + e2_big_convert_stack(buf, pos+cp, 24)
+                if irv_type(fa + 4) == TI_INT:
+                    cp = cp + e2_big_convert_stack(buf, pos+cp, 32)
                 cp = cp + e2_big_load_rsp(buf, pos+cp, 0, 7)
                 cp = cp + e2_big_load_rsp(buf, pos+cp, 8, 6)
                 cp = cp + e2_big_load_rsp(buf, pos+cp, 16, 2)
@@ -1473,13 +1513,17 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         else if s3 == g_ni_store_str_ptr:
             // mov [rdi + rsi], rdx
             if g_x86_big_enabled != 0:
-                cp = cp + e2_big_sub_rsp(buf, pos+cp, 16)
+                // Untagging rsi calls the runtime, which may clobber rdx (the
+                // string pointer value). Save all three call arguments.
+                cp = cp + e2_big_sub_rsp(buf, pos+cp, 32)
                 cp = cp + e2_big_store_rsp(buf, pos+cp, 0, 7)
                 cp = cp + e2_big_store_rsp(buf, pos+cp, 8, 6)
+                cp = cp + e2_big_store_rsp(buf, pos+cp, 16, 2)
                 cp = cp + e2_big_convert_stack(buf, pos+cp, 8)
                 cp = cp + e2_big_load_rsp(buf, pos+cp, 0, 7)
                 cp = cp + e2_big_load_rsp(buf, pos+cp, 8, 6)
-                cp = cp + e2_big_add_rsp(buf, pos+cp, 16)
+                cp = cp + e2_big_load_rsp(buf, pos+cp, 16, 2)
+                cp = cp + e2_big_add_rsp(buf, pos+cp, 32)
             cp = cp + emit_rex(buf, pos+cp, 1, 0, 0, 0)
             e2_w8(buf, pos+cp, 137)
             cp = cp + 1
@@ -1941,6 +1985,16 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
 
     if op == IR_LOAD && d >= 0:
         do2 := g2_slot(d)
+        // char 槽存的是无 tag 的 intern index；写入 TI_INT 槽（例如
+        // `'A' as int` 或未显式标注的 int 变量）前必须装箱，否则进程边界的
+        // bi_to_word_checked 会把奇数当 bigint 指针解引用。
+        box_char := g_x86_big_enabled != 0 && irv_type(d) == TI_INT && irv_type(s1) == TI_CHAR
+        // Address -> int (`@raw_int(p)` / `p as int`): an address is a raw word,
+        // so it must be tagged before tagged-int arithmetic sees it.
+        box_addr := g_x86_big_enabled != 0 && irv_type(d) == TI_INT && (get_type_kind(irv_type(s1)) == TYP_REF || get_type_kind(irv_type(s1)) == TYP_PTR)
+        // 反向边界：int -> char（`a as char`）。char 槽存 intern index，必须
+        // 先把 tagged int 解成机器字，否则 char 比较两侧表示不同。
+        unbox_char := g_x86_big_enabled != 0 && irv_type(d) == TI_CHAR && irv_type(s1) == TI_INT
         if s1 >= 0:
             isg : ., mut = cell_load(g_x86_is_global, s1 * 8)
             if isg != 0:
@@ -1954,27 +2008,57 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                 e2_w8(buf, pos+cp, 139)
                 cp = cp + 1
                 cp = cp + emit_modrm(buf, pos+cp, 0, 10%8, 10%8)
+                if box_char != 0 || box_addr != 0:
+                    cp = cp + e2_mov(buf, pos+cp, 7, 10)
+                    cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_from_word"))
+                    cp = cp + e2_mov(buf, pos+cp, 10, 0)
+                if unbox_char != 0:
+                    cp = cp + e2_mov(buf, pos+cp, 7, 10)
+                    cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_to_word_checked"))
+                    cp = cp + e2_mov(buf, pos+cp, 10, 0)
                 cp = cp + e2_st(buf, pos+cp, 10, do2)
             else:
                 cp = cp + e2_load_var(buf, pos+cp, 10, s1)
+                if box_char != 0 || box_addr != 0:
+                    cp = cp + e2_mov(buf, pos+cp, 7, 10)
+                    cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_from_word"))
+                    cp = cp + e2_mov(buf, pos+cp, 10, 0)
+                if unbox_char != 0:
+                    cp = cp + e2_mov(buf, pos+cp, 7, 10)
+                    cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_to_word_checked"))
+                    cp = cp + e2_mov(buf, pos+cp, 10, 0)
                 cp = cp + e2_st(buf, pos+cp, 10, do2)
         else:
             cp = cp + e2_load_var(buf, pos+cp, 10, s1)
+            if box_char != 0 || box_addr != 0:
+                cp = cp + e2_mov(buf, pos+cp, 7, 10)
+                cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_from_word"))
+                cp = cp + e2_mov(buf, pos+cp, 10, 0)
+            if unbox_char != 0:
+                cp = cp + e2_mov(buf, pos+cp, 7, 10)
+                cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_to_word_checked"))
+                cp = cp + e2_mov(buf, pos+cp, 10, 0)
             cp = cp + e2_st(buf, pos+cp, 10, do2)
         return cp
 
     if op == IR_STORE:
         o1 := g2_slot(s1)
-        // @raw_int 的跨表示边界：dex 的 TI_DEX_S 槽是 raw 缩放整数，
-        // 写入 tagged int 槽前必须装箱；否则后续 int 运算会把它当成 tagged
-        // 立即数（例如 7_000_000 被读成 3_500_000）。
-        needs_big_box := g_x86_big_enabled != 0 && irv_type(s1) == TI_INT && irv_type(s2) == TI_DEX_S
+        // 跨表示边界：dex 的 TI_DEX_S 槽是 raw 缩放整数，char 槽是无 tag 的
+        // intern index。写入 tagged int 槽前都必须装箱；否则后续 int 运算会把它
+        // 当成 tagged 值（例如 7_000_000 被读成 3_500_000）。
+        needs_big_box := g_x86_big_enabled != 0 && irv_type(s1) == TI_INT && (irv_type(s2) == TI_DEX_S || irv_type(s2) == TI_CHAR || irv_type(s2) == TI_BOOL || get_type_kind(irv_type(s2)) == TYP_REF || get_type_kind(irv_type(s2)) == TYP_PTR)
+        // int -> char 槽：解 tag，写入 raw intern index。
+        needs_big_unbox := g_x86_big_enabled != 0 && irv_type(s1) == TI_CHAR && irv_type(s2) == TI_INT
         if s1 >= 0:
             if cell_load(g_x86_is_global, s1 * 8) != 0:
                 cp = cp + e2_load_var(buf, pos+cp, 10, s2)
                 if needs_big_box != 0:
                     cp = cp + e2_mov(buf, pos+cp, 7, 10)
                     cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_from_word"))
+                    cp = cp + e2_mov(buf, pos+cp, 10, 0)
+                if needs_big_unbox != 0:
+                    cp = cp + e2_mov(buf, pos+cp, 7, 10)
+                    cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_to_word_checked"))
                     cp = cp + e2_mov(buf, pos+cp, 10, 0)
                 grow_rip_patch(g_x86_rip_patch_count + 1)
                 cell_store(g_x86_rip_patch_pos, g_x86_rip_patch_count * 8, pos + cp + 3)
@@ -1992,12 +2076,20 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
                     cp = cp + e2_mov(buf, pos+cp, 7, 10)
                     cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_from_word"))
                     cp = cp + e2_mov(buf, pos+cp, 10, 0)
+                if needs_big_unbox != 0:
+                    cp = cp + e2_mov(buf, pos+cp, 7, 10)
+                    cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_to_word_checked"))
+                    cp = cp + e2_mov(buf, pos+cp, 10, 0)
                 cp = cp + e2_st(buf, pos+cp, 10, o1)
         else:
             cp = cp + e2_load_var(buf, pos+cp, 10, s2)
             if needs_big_box != 0:
                 cp = cp + e2_mov(buf, pos+cp, 7, 10)
                 cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_from_word"))
+                cp = cp + e2_mov(buf, pos+cp, 10, 0)
+            if needs_big_unbox != 0:
+                cp = cp + e2_mov(buf, pos+cp, 7, 10)
+                cp = cp + e2_big_call_name(buf, pos+cp, str_intern("bi_to_word_checked"))
                 cp = cp + e2_mov(buf, pos+cp, 10, 0)
             cp = cp + e2_st(buf, pos+cp, 10, o1)
         return cp
@@ -2485,8 +2577,18 @@ fn emit_instr(instr_idx: int, buf: string, pos: int) -> int:
         // global operand seam.  Convert the bound first: the runtime call may
         // clobber caller-saved r10.
         if g_x86_big_enabled != 0:
-            cp = cp + e2_big_word_var(buf, pos+cp, 11, s2)
-            cp = cp + e2_load_var(buf, pos+cp, 10, s1)
+            if e2_is_glob(s1) != 0:
+                // A global base load uses r11 as scratch, and the tagged-bound
+                // untag call may clobber r10. Park the base in the destination
+                // slot across the bound conversion (global slice base used to
+                // read zeros).
+                cp = cp + e2_load_var(buf, pos+cp, 10, s1)
+                cp = cp + e2_st(buf, pos+cp, 10, do2)
+                cp = cp + e2_big_word_var(buf, pos+cp, 11, s2)
+                cp = cp + e2_ld(buf, pos+cp, 10, do2)
+            else:
+                cp = cp + e2_big_word_var(buf, pos+cp, 11, s2)
+                cp = cp + e2_load_var(buf, pos+cp, 10, s1)
         else:
             cp = cp + e2_load_var(buf, pos+cp, 10, s1)
             cp = cp + e2_load_var(buf, pos+cp, 11, s2)

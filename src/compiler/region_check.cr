@@ -9,18 +9,9 @@ fn subgraph_containing(node_seq: int) -> int:
     return -1
 
 fn is_in_unsafe(node_seq: int) -> int:
-    si : ., mut = 0
-    loop:
-        if si >= g_sg_count:
-            break
-        kind := cell_load(g_sgs, si * ESZ_SG + OFF_SG_KIND)
-        if kind == SG_UNSAFE:
-            nstart := cell_load(g_sgs, si * ESZ_SG + OFF_SG_NSTART)
-            ncount := cell_load(g_sgs, si * ESZ_SG + OFF_SG_NCOUNT)
-            if node_seq >= nstart && node_seq < nstart + ncount:
-                return 1
-        si = si + 1
-    return 0
+    // Reuse the SG_UNSAFE map precomputed by PointerAnalysis. The old scan was
+    // O(regions) per node and dominated RegionCheck on large programs.
+    return pa_in_unsafe(node_seq)
 
 // Escape judgment shared by the three checks below.
 // An allocation is dead at node ni when it was allocated in a region whose exit
