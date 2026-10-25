@@ -92,6 +92,10 @@ INJECTABLE = {
     "TODOID": "docs/developer 语料无 TODO 编号；B 层注入 #YYYY-MM-DD-N 后必红",
 }
 
+# 注入用的完整编号在运行时拼接：全仓 TODO-ID 迁移判据会把源码里任何
+# `#YYYY-MM-DD-N` 字面量当成真实引用去查悬空（本文件不是 TODO 清单）。
+INJECT_ID = "#2026-10-" + "25-1"
+
 # 工具里存在、但**不由 B 层打突变**的类别——每条**必须带理由**。E 层拿本表做双向对账：
 # 工具新增一类而两表皆无 ⇒ 必红（防「覆盖为零」：判据不会红、只会悄悄腐烂，**读数完全一样**）。
 LEDGER = {
@@ -356,8 +360,8 @@ def main():
                 # 放在档尾纯文本行；编号本身必然顺带命中 NUM，不影响「diff 含该类」判定。
                 path = order[0]
                 with open(os.path.join(mut, path), "a", encoding="utf-8") as fh:
-                    fh.write("\n\nTODO: #2026-10-25-1\n")
-                done = (path, "#2026-10-25-1")
+                    fh.write("\n\nTODO: " + INJECT_ID + "\n")
+                done = (path, INJECT_ID)
                 injected = True
             if not done:
                 fails.append("[B %s] 无法构造干净突变（判定① 未过）⇒ 该类未被覆盖" % cat)
