@@ -992,9 +992,10 @@ fn lat_case_set_target(idx: int, label: int):
         return
     cell_store32(g_lat_case, idx * CCR_V10_CASE_DISK + CCR_CASE_TARGET, label)
 
-// One nonzero-test decision node: false is CASE 0, true is DEFAULT. When the
-// true target is the next label the backend emits test/jne without falling
-// through into an explicit jump.
+// One nonzero-test decision node: false is CASE 0, true is DEFAULT. If the true
+// target is next, the backend emits test/je to false and falls through to true;
+// if the false target is next, it emits test/jne to true and falls through to
+// false. Either way there is no explicit unconditional jump.
 fn emit_cond_match(cond_var: int, false_lbl: int, true_lbl: int):
     case_base := g_lat_case_count
     lat_case_append(0, CCR_CASE_KIND_VALUE, -1, false_lbl, 0)

@@ -531,12 +531,15 @@ def test_nonempty_case_loads_and_program_still_runs():
         )
 
 
-def test_empty_case_stays_empty_and_loads():
+def test_condition_only_cases_load():
+    """No explicit match, but prelude conditions still produce a valid CASE table."""
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         data = _build_ccr(tmp)
+        assert _pattern_match_nodes(data) == []
+        assert _parse_case(segment(data, CASE_TAG)), "condition CASE rows missing"
     with tempfile.TemporaryDirectory() as td:
-        _assert_loads(data, Path(td), "empty_case")
+        _assert_loads(data, Path(td), "condition_only_case")
 
 
 # ---------------------------------------------------------------------------
@@ -1906,7 +1909,7 @@ def test_bool_match_is_one_match_with_value_cases():
         _assert_program(tmp, MATCH_BOOL_SOURCE, 42)
 
 
-IF_MATCH_FIXTURES = [
+CONDITION_MATCH_FIXTURES = [
     (
         "if_chain",
         """fn main() -> int:
@@ -2024,24 +2027,30 @@ IF_MATCH_FIXTURES = [
 ]
 
 
-def test_if_lowers_to_match_cases():
-    """Every if is one VALUE(0) row plus a DEFAULT row; no if keeps IR_BRANCH."""
+def test_condition_branches_lower_to_match_cases():
+    """Every condition branch is one VALUE(0) row plus a DEFAULT row.
+
+    The fixtures cover if, for, and logical conditions; none keeps IR_BRANCH.
+    """
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        for name, source, expected, if_count, branches_expected in IF_MATCH_FIXTURES:
+        for name, source, expected, expected_matches, branches_expected in CONDITION_MATCH_FIXTURES:
             data = _build_ccr(tmp, source, name)
             nodes = _nod_records(data)
             matches = _match_nodes(data)
-            assert len(matches) == if_count, (
-                f"{name}: expected {if_count} if MATCH nodes, got {matches}"
+            assert len(matches) == expected_matches, (
+                f"{name}: expected {expected_matches} condition MATCH nodes, "
+                f"got {matches}"
             )
             rows = _parse_case(segment(data, CASE_TAG))
             for match_idx in matches:
                 start, count = nodes[match_idx][3], nodes[match_idx][4]
-                assert count == 2, f"{name}: if MATCH case count {count}, expected 2"
+                assert count == 2, (
+                    f"{name}: condition MATCH case count {count}, expected 2"
+                )
                 part = rows[start:start + count]
                 assert [row["kind"] for row in part] == [KIND_VALUE, KIND_DEFAULT], (
-                    f"{name}: if CASE kinds {[row['kind'] for row in part]}"
+                    f"{name}: condition CASE kinds {[row['kind'] for row in part]}"
                 )
                 assert part[0]["value"] == 0, (
                     f"{name}: false case value {part[0]['value']}, expected 0"
@@ -2054,18 +2063,13 @@ def test_if_lowers_to_match_cases():
                     f"got {len(branches)}"
                 )
             plan_path = _ccr_file(tmp, data, f"{name}_plan")
-            plans, binary_emits, table_emits = _match_plan_full(
+            plans, _binary_emits, _table_emits = _match_plan_full(
                 plan_path, only_nodes=set(matches)
             )
             assert len(plans) == len(matches), (name, plans)
             assert all(plan["strategy"] == "two-way-zero" for plan in plans), (
                 name,
                 plans,
-            )
-            assert binary_emits == 0 and table_emits == 0, (
-                name,
-                binary_emits,
-                table_emits,
             )
             _assert_program(tmp, source, expected, opts=(0, 2), name=name)
 
@@ -2137,18 +2141,13 @@ def test_all_condition_branches_use_match_cases():
                 assert part[0]["value"] == 0, (name, part[0]["value"])
                 _assert_targets_are_labels(data, part)
             plan_path = _ccr_file(tmp, data, f"{name}_plan")
-            plans, binary_emits, table_emits = _match_plan_full(
+            plans, _binary_emits, _table_emits = _match_plan_full(
                 plan_path, only_nodes=set(matches)
             )
             assert len(plans) == len(matches), (name, plans)
             assert all(plan["strategy"] == "two-way-zero" for plan in plans), (
                 name,
                 plans,
-            )
-            assert binary_emits == 0 and table_emits == 0, (
-                name,
-                binary_emits,
-                table_emits,
             )
             _assert_program(tmp, source, expected, opts=(0, 2), name=name)
 

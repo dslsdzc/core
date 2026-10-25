@@ -612,9 +612,10 @@ fn e2_match_nondefault_count(s2: int, s3: int) -> int:
         i = i + 1
     return n
 
-// Two-way if shape: VALUE(0) plus DEFAULT, with the default target as the
-// label immediately after MATCH. The backend can emit test/je and fall through
-// to the true arm, matching IR_BRANCH without an extra jump.
+// Two-way condition shape: VALUE(0) plus DEFAULT, with one target immediately
+// after MATCH. Returns 1 when the DEFAULT/true target is next (emit test/je to
+// the VALUE/false target), 2 when the VALUE/false target is next (emit test/jne
+// to the DEFAULT/true target), and 0 when neither direction is a fallthrough.
 fn e2_match_two_way_zero(instr_idx: int, s2: int, s3: int) -> int:
     if s3 != 2:
         return 0
